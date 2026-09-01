@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from redis.asyncio.client import PubSub
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -61,6 +62,32 @@ def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
         value = meta.get(field_name)
         if value is not None:
             setattr(run, field_name, value)
+
+
+# ── 群实时通道常量（2026-09-01-session-group-chat task-06，design §5.4）────────
+#
+# presence key TTL 60s + touch 间隔 45s（留 15s 余量）：``stream_session_logs``
+# 的群分支循环内按时间驱动 ``SET key "1" EX 60`` 续期；连接断开后 key 至多
+# 60s 自然过期（在线绿点熄灭，纯 ephemeral 不落库）。key 命名
+# ``group_presence:{group_id}:{user_id}`` 由 daemon/group/service.py 的
+# ``group_presence_key`` 单源构造（本模块只收拼好的 key，避免跨模块 import 环）。
+GROUP_PRESENCE_TTL_SEC = 60
+GROUP_PRESENCE_TOUCH_INTERVAL_SEC = 45.0
+
+
+async def _drain_typing_frames(pubsub: PubSub) -> AsyncGenerator[str, None]:
+    """非阻塞抽干群 typing 频道待发消息（task-06 §5.4 多路订阅合流）。
+
+    ``timeout=0`` 单次轮询：有 ``message`` 类型消息即产出默认 ``data`` 帧
+    （typing payload 内已带 ``event='typing'``，前端按 payload 字段分派，
+    与 log/turn_completed 同通道同帧式）；无消息立即返回（不阻塞主循环的
+    日志频道轮询）。
+    """
+    while True:
+        message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.0)
+        if not message or message.get("type") != "message":
+            return
+        yield f"data: {message['data']}\n\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1206,6 +1233,9 @@ class AgentService:
     async def stream_session_logs(
         self,
         agent_session_id: uuid.UUID,
+        *,
+        typing_channel: str | None = None,
+        presence_key: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Yield SSE events aggregating all AgentRuns of an AgentSession.
 
@@ -1221,15 +1251,34 @@ class AgentService:
         frontend can delineate turn boundaries. ``session_ended`` (published by
         ``DaemonService._publish_session_event`` in task-05) closes the
         connection; a single turn completing does NOT.
+
+        群实时通道扩展（2026-09-01-session-group-chat task-06，design §5.4）——
+        两可选参数默认 None，单聊调用点不传即**逐字节走原单订阅路径**：
+
+        * ``typing_channel``：额外双订阅群 typing 频道（``group_typing:{gid}``），
+          待发 typing 消息（payload 内已带 ``event='typing'``）以默认 ``data``
+          帧透传，与日志事件**合流进同一 SSE 流**（前端不加连接数）；
+        * ``presence_key``：群在线 presence key（``group_presence:{gid}:{uid}``），
+          循环内按时间驱动续期（间隔 > 45s，``SET EX 60``）——不挂在 keepalive
+          帧产出上（高流量时 keepalive 不产帧，touch 却必须照常续，否则活跃
+          观看者的 presence 会被 TTL 误回收）。touch 失败仅 warning 不断流。
+
+        取消 / 异常路径：finally 对**两个** pubsub 各自隔离清理（unsubscribe
+        吞异常 + aclose 必达，防 Redis 订阅连接泄漏——对照单订阅清理先例）。
         """
         redis = get_redis()
         pubsub = redis.pubsub()
+        typing_pubsub = redis.pubsub() if typing_channel is not None else None
         channel = f"agent_session:{agent_session_id}"
+        loop = asyncio.get_running_loop()
+        last_presence_touch: float | None = None
         try:
             # Flush proxy buffers immediately with an initial comment.
             yield ": connected\n\n"
 
             await pubsub.subscribe(channel)
+            if typing_pubsub is not None and typing_channel is not None:
+                await typing_pubsub.subscribe(typing_channel)
 
             # Race-condition guard: if the session ended while the client was
             # connecting, task-05's end_session may have already published
@@ -1243,6 +1292,21 @@ class AgentService:
                 return
 
             while True:
+                # presence 续期（task-06 §5.4）：时间驱动（首个循环立即 touch 一次
+                # ——连接建立即在线），此后每 > 45s 一次，TTL 60s 留 15s 余量。
+                if presence_key is not None and (
+                    last_presence_touch is None
+                    or loop.time() - last_presence_touch >= GROUP_PRESENCE_TOUCH_INTERVAL_SEC
+                ):
+                    try:
+                        await redis.set(presence_key, "1", ex=GROUP_PRESENCE_TTL_SEC)
+                        last_presence_touch = loop.time()
+                    except Exception:
+                        log.warning(
+                            "group_presence_touch_failed",
+                            presence_key=presence_key,
+                            exc_info=True,
+                        )
                 try:
                     message = await asyncio.wait_for(
                         pubsub.get_message(timeout=25),
@@ -1276,12 +1340,25 @@ class AgentService:
                     # Transparent passthrough: structured log / turn_completed
                     # events already carry run_id (task-05 / task-06 publish).
                     yield f"data: {data}\n\n"
+                    # 群多路订阅（task-06）：日志事件后抽干 typing 频道待发消息，
+                    # 合流进同一 SSE 流（高流量下 typing 不被日志饿死）。
+                    if typing_pubsub is not None:
+                        async for frame in _drain_typing_frames(typing_pubsub):
+                            yield frame
                 else:
-                    yield ": keepalive\n\n"
+                    emitted = False
+                    if typing_pubsub is not None:
+                        async for frame in _drain_typing_frames(typing_pubsub):
+                            yield frame
+                            emitted = True
+                    if not emitted:
+                        yield ": keepalive\n\n"
         except Exception:
             yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'
         finally:
-            # 同上：unsubscribe 异常隔离，aclose 必达（close 已废弃）。
+            # 同上：unsubscribe 异常隔离，aclose 必达（close 已废弃）。群路径的
+            # typing 订阅同样两步清理——两 pubsub 各自隔离，一个清理失败不阻断
+            # 另一个的释放（防连接泄漏，任务卡 constraints）。
             try:
                 await pubsub.unsubscribe(channel)
             except Exception:
@@ -1291,6 +1368,16 @@ class AgentService:
                     exc_info=True,
                 )
             await pubsub.aclose()
+            if typing_pubsub is not None and typing_channel is not None:
+                try:
+                    await typing_pubsub.unsubscribe(typing_channel)
+                except Exception:
+                    log.warning(
+                        "group_typing_unsubscribe_failed",
+                        channel=typing_channel,
+                        exc_info=True,
+                    )
+                await typing_pubsub.aclose()
 
     # ------------------------------------------------------------------
     # Stale run cleanup

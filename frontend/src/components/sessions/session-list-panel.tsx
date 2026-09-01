@@ -26,6 +26,14 @@
  *     （FR-05 / X-009 门控：仅 workspace scope 渲染，选中透传 change_id/ql_id
  *     服务端过滤，选项分组「变更」（活跃未归档）/「快速修复」（非占位））。
  *
+ * 群聊分区（task-07 / 2026-09-01-session-group-chat / FR-01）：滚动容器顶部
+ *   「群聊」分区（群行 = facepile 成员摘要 + 群名 + 群聊徽标 + 最后消息摘要，
+ *   对照原型 prototype-group-chat.html .sess-group-label/.sess-item）——独立
+ *   useQuery listGroupChats 供数（不掺单聊 agentSessions 数据源，design §5.3）；
+ *   onSelectGroup 传入才启用（全局/workspace scope 生效；change/quicklog/
+ *   runtime scope 语义偏离不挂——CC-08 同款排除理由）；选中群行高亮经
+ *   selectedGroupId（门户挂载群视图占位，面板本体归 task-08）。
+ *
  * 工作区树（全局/workspace 形态）结构：
  *   筛选区：
  *     - 标题搜索（回车应用，X-11 保留；树形态为纯视图过滤不进数据层）
@@ -87,6 +95,7 @@ import {
   Plus,
   Trash2,
   User,
+  Users,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -99,12 +108,15 @@ import { listWorkspaces } from "@/lib/workspaces";
 import {
   AGENT_SESSIONS_TREE_FETCH_LIMIT,
   listAgentSessions,
+  listGroupChats,
   type AgentSessionListResponse,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonMachineRead,
+  type GroupChatListItemRead,
   type PpmItemKind,
 } from "@/lib/daemon";
+import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
 import { listPersonalPlanTasks } from "@/lib/ppm/task";
 import { listProblems } from "@/lib/ppm/problem";
 import type { PageResp, PlanTask, ProblemList } from "@/lib/ppm/types";
@@ -314,6 +326,20 @@ export interface SessionListPanelProps {
    * 选中会话所在组展开）。
    */
   defaultExpandedWorkspaceId?: string;
+  /**
+   * task-07（2026-09-01-session-group-chat / FR-01）：当前选中群 id（群行
+   * 高亮，受控；选中群时门户右侧渲染群视图挂载点，见 sessions-portal）。
+   */
+  selectedGroupId?: string | null;
+  /**
+   * task-07：点击群行回调。**传入即启用群聊分区**（独立 useQuery
+   * listGroupChats 供数，不掺单聊 agentSessions 数据源——design §5.3：群列表
+   * 只能走 GET /api/daemon/group-chats，list_agent_sessions 按请求者过滤非群
+   * 主成员不可见）；未传（悬浮助手 runtime 抽屉等消费点）分区零渲染零请求。
+   */
+  onSelectGroup?: (_group: GroupChatListItemRead) => void;
+  /** task-07：分区头「＋」新建群聊回调（门户开三步建群向导）。 */
+  onNewGroup?: () => void;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -520,6 +546,9 @@ function WorkspaceTreeList({
   scope,
   onNewInGroup,
   defaultExpandedWorkspaceId,
+  selectedGroupId,
+  onSelectGroup,
+  onNewGroup,
 }: SessionListPanelProps) {
   // 两层筛选 tab（D-107）：纯视图过滤，不进数据层（机器/智能体值都是 tab id）。
   const [filterMachineId, setFilterMachineId] = useState("");
@@ -741,6 +770,34 @@ function WorkspaceTreeList({
     [sessionsQuery.data],
   );
   const totalFromServer = sessionsQuery.data?.total ?? 0;
+
+  // ── task-07（2026-09-01-session-group-chat / FR-01）：群聊分区 ──────────
+  // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——design §5.3 群列表
+  // 只走 GET /api/daemon/group-chats）；onSelectGroup 传入才启用（悬浮助手
+  // runtime 抽屉等消费点零渲染零请求），change/quicklog scope 语义是「围绕
+  // 某变更/快速修复的会话」不挂群分区（CC-08 GitStatusBar 同款排除理由），
+  // runtime scope 群行无 runtime 归属亦不挂——全局与 workspace scope 生效。
+  const groupSectionEnabled =
+    Boolean(onSelectGroup) &&
+    (scope == null || scope.kind === "workspace");
+  const groupChatsQuery = useQuery({
+    queryKey: [
+      "groupChats",
+      "list",
+      scope?.kind === "workspace" ? scope.workspaceId : null,
+    ],
+    queryFn: () => listGroupChats(),
+    enabled: groupSectionEnabled,
+    staleTime: 30_000,
+  });
+  /** scope 过滤：workspace scope 只看本工作区群（端点无过滤参，客户端筛）。 */
+  const groupChats = useMemo(() => {
+    const items = groupChatsQuery.data ?? [];
+    if (scope?.kind === "workspace") {
+      return items.filter((g) => g.workspace_id === scope.workspaceId);
+    }
+    return items;
+  }, [groupChatsQuery.data, scope]);
 
   // 分组：先按 workspace_id 分桶（不依赖名称解析——workspace scope 下端点已
   // 过滤，名称查询缺席/迟到时分组不落空）；workspace scope → 单组（名字解析
@@ -1282,27 +1339,46 @@ function WorkspaceTreeList({
         )}
       </div>
 
-      {/* 树区（分组结构 + 组内截断替代全局虚拟滚动，R-04） */}
-      {sessionsQuery.isError ? (
-        <div className="m-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          加载会话失败：{sessionsQuery.error?.message ?? "未知错误"}
-          <Button
-            size="small"
-            className="ml-2"
-            onClick={() => void sessionsQuery.refetch()}
-          >
-            重新加载
-          </Button>
-        </div>
-      ) : sessionsQuery.isLoading ? (
-        <div className="flex flex-1 items-center justify-center">
-          <Spin data-testid="sessions-loading" />
-        </div>
-      ) : (
-        <div
-          data-testid="session-tree"
-          className="min-h-0 flex-1 overflow-y-auto p-2"
-        >
+      {/* 树区（分组结构 + 组内截断替代全局虚拟滚动，R-04）。task-07 起滚动容器
+          顶部先渲染群聊分区（原型 .sess-group-label「群聊」+ 群行），单聊树形态
+          与行为零改动——仅把加载/错误分支收进同一滚动容器。 */}
+      <div
+        data-testid="session-tree"
+        className="min-h-0 flex-1 overflow-y-auto p-2"
+      >
+        {/* task-07：群聊分区（独立数据源，见 groupChatsQuery 注释）。 */}
+        {groupSectionEnabled && (
+          <GroupChatSection
+            groups={groupChats}
+            loading={groupChatsQuery.isLoading}
+            error={
+              groupChatsQuery.isError
+                ? (groupChatsQuery.error?.message ?? "未知错误")
+                : null
+            }
+            onRetry={() => void groupChatsQuery.refetch()}
+            selectedGroupId={selectedGroupId}
+            onSelect={onSelectGroup}
+            onNew={onNewGroup}
+          />
+        )}
+        {sessionsQuery.isError ? (
+          <div className="m-1 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+            加载会话失败：{sessionsQuery.error?.message ?? "未知错误"}
+            <Button
+              size="small"
+              className="ml-2"
+              onClick={() => void sessionsQuery.refetch()}
+            >
+              重新加载
+            </Button>
+          </div>
+        ) : sessionsQuery.isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Spin data-testid="sessions-loading" />
+          </div>
+        ) : (
+          <>
           {groups.map((group) => {
             const groupVisible = visibleByGroup.get(group.id) ?? [];
             const batchActive = batchGroupId === group.id;
@@ -1394,8 +1470,159 @@ function WorkspaceTreeList({
               仅显示最近 {sessions.length} 条（共 {totalFromServer} 条）
             </div>
           )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────── 群聊分区（task-07 / FR-01，原型 .sess-group-label + .sess-item 群行） ────────────────────── */
+
+/** 群聊分区 props（数据由 WorkspaceTreeList 注入，纯展示）。 */
+interface GroupChatSectionProps {
+  groups: GroupChatListItemRead[];
+  loading: boolean;
+  /** 查询失败信息（null = 正常）。 */
+  error: string | null;
+  onRetry: () => void;
+  selectedGroupId?: string | null;
+  onSelect?: (_group: GroupChatListItemRead) => void;
+  onNew?: () => void;
+}
+
+/**
+ * 列表顶部「群聊」分区：分区头（Users 图标 + 计数 + 「＋」新建）+ 群行
+ * （facepile 成员摘要 + 群名 + 群聊徽标 + 最后消息摘要）。与单聊树视觉分区
+ * （照 TOOL_REPORT_SECTION_KEY 分桶先例的收纳形态，原型 .sess-group-label
+ * 「群聊」/「单聊」两段式）；@全体 未读徽标位预留（task-03 群消息管线落地
+ * 后接入，本卡 DTO 尚无未读计数）。
+ */
+function GroupChatSection({
+  groups,
+  loading,
+  error,
+  onRetry,
+  selectedGroupId,
+  onSelect,
+  onNew,
+}: GroupChatSectionProps) {
+  return (
+    <section
+      data-testid="group-chat-section"
+      aria-label="群聊分区"
+      className="mb-2 border-b border-border pb-1.5"
+    >
+      <div className="flex items-center gap-1.5 px-1.5 pb-1 pt-0.5 text-[11px] font-semibold text-muted-foreground">
+        <Users aria-hidden className="h-3 w-3 shrink-0 text-brand-600" />
+        <span className="truncate">群聊</span>
+        <span className="shrink-0 font-normal text-muted-foreground/80">
+          {loading ? "加载中…" : `${groups.length} 个`}
+        </span>
+        <span className="flex-1" />
+        {onNew && (
+          <button
+            type="button"
+            aria-label="新建群聊"
+            title="新建群聊（三步向导：群信息 → 邀请用户 → 配置 Agent 成员）"
+            onClick={onNew}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary"
+          >
+            <Plus aria-hidden className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      {error ? (
+        <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-red-50 px-2 py-1.5 text-[11px] text-destructive">
+          加载群聊失败：{error}
+          <Button size="small" onClick={onRetry}>
+            重新加载
+          </Button>
         </div>
+      ) : groups.length === 0 ? (
+        !loading && (
+          <p className="px-2.5 py-1.5 text-[11px] text-muted-foreground">
+            暂无群聊——点「＋」发起一个多人多 Agent 协作群
+          </p>
+        )
+      ) : (
+        groups.map((g) => (
+          <GroupChatRow
+            key={g.id}
+            group={g}
+            selected={g.id === selectedGroupId}
+            onSelect={onSelect}
+          />
+        ))
       )}
+    </section>
+  );
+}
+
+/** 群行 props。 */
+interface GroupChatRowProps {
+  group: GroupChatListItemRead;
+  selected: boolean;
+  onSelect?: (_group: GroupChatListItemRead) => void;
+}
+
+/** 群行（原型 .sess-item 群形态）：facepile 头像堆叠 + 群名 + 群聊徽标 + 摘要。 */
+function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
+  const members = group.members ?? [];
+  const agentCount = members.filter((m) => m.member_type === "agent").length;
+  const userCount = members.length - agentCount;
+  // 最后消息摘要（task-03 群消息管线落库前为空——回退成员构成摘要）。
+  const preview =
+    group.last_message?.trim() ||
+    `${members.length} 名成员 · ${agentCount} 位 Agent · ${userCount} 位用户`;
+  const title = group.title?.trim() || "未命名群聊";
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={`群聊 ${title}`}
+      onClick={() => onSelect?.(group)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onSelect?.(group);
+      }}
+      data-testid="group-chat-row"
+      data-group-id={group.id}
+      className={cn(
+        "group mb-0.5 flex cursor-pointer items-center gap-2 rounded-lg border-l-[3px] px-2.5 py-1.5 transition-colors",
+        selected
+          ? "border-l-brand-600 bg-brand-100"
+          : "border-l-transparent hover:bg-muted/50",
+      )}
+    >
+      {/* 成员摘要前 3 头像堆叠（agent=brand / 用户=info 青，原型 .facepile） */}
+      <MemberFacepile members={members} max={3} />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1">
+          <span
+            className={cn(
+              "min-w-0 truncate text-[13px] font-medium",
+              selected ? "text-brand-700" : "text-foreground",
+            )}
+          >
+            {title}
+          </span>
+          <span
+            title="群聊：多用户 + 多 Agent 同会话协作"
+            className="inline-flex h-4 shrink-0 items-center rounded bg-info/10 px-1.5 text-[10px] font-semibold leading-none text-info"
+          >
+            群聊
+          </span>
+        </span>
+        <span
+          className="min-w-0 truncate text-[11px] leading-4 text-muted-foreground"
+          title={preview}
+        >
+          {preview}
+        </span>
+      </div>
+      {/* @全体/未读徽标位（预留：task-03 消息管线 + task-08 群视图接入） */}
+      <span aria-hidden className="shrink-0" data-badge-slot="mention" />
     </div>
   );
 }

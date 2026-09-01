@@ -131,7 +131,33 @@ async def _check_session_permission(
     是会话主人的身份，无工作区的 runtime 会话同样可传可列；非归属人回退按
     ``AgentSession.workspace_id`` 锚复核（workspace 会话的成员/平台管理员语义
     不变），锚 NULL 且非归属人 → 403。
+
+    2026-09-01-session-group-chat task-02 / design §5.3：群会话
+    （``session_kind='group'``）分支——群成员表命中（user 成员未移除）放行
+    （群主也是成员行，天然覆盖）；非成员回退**既有** workspace 锚复核路径
+    原样（群会话 workspace_id 即群工作区，workspace admin 语义保留）。其余
+    会话形态零改动。
     """
+    if agent_session.session_kind == "group":
+        from app.modules.daemon.group.service import (
+            get_active_user_membership,
+            get_group_chat_by_session,
+        )
+
+        group = await get_group_chat_by_session(session, agent_session.id)
+        if (
+            group is not None
+            and await get_active_user_membership(session, group_id=group.id, user_id=user.id)
+            is not None
+        ):
+            return
+        await _check_anchor_permission(
+            session,
+            user,
+            permission=permission,
+            anchor_workspace_id=agent_session.workspace_id,
+        )
+        return
     if user.id == agent_session.user_id:
         return
     await _check_anchor_permission(

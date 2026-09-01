@@ -20,10 +20,17 @@
  *
  * task-03 消费契约（本模块导出，均在 __tests__ 覆盖）：
  *   - buildSlashMentionItems / buildAtMentionItems——候选组装（/team 置顶）；
+ *   - buildMemberMentionItems——群成员 @ 候选组装（task-09：「@全体」置顶 +
+ *     Agent 在前 / 用户在后；回填 @昵称 纯文本，@路由在后端解析）；
  *   - filterMentionItems——过滤（组件渲染与 task-03 键盘数学共享同一纯函数，
  *     保证 activeIndex 在两侧指向同一条目）；
  *   - nextMentionIndex / handleMentionKeyDown——↑↓ 循环移动与 Enter/Tab/Esc
  *     拦截（命中即 preventDefault + stopPropagation，事件不外溢为发送/换行）。
+ *
+ * task-09（2026-09-01-session-group-chat / FR-15）：判别联合加 member kind
+ * （群成员 + @全体 常量）——过滤/分组/键盘全部复用既有单一源（filterMentionItems
+ * / handleMentionKeyDown 零改动），既有六 kind 行为零改动；member 候选经
+ * buildMemberMentionItems 组装，输入框挂载接线归 task-08 group-chat-panel。
  */
 
 import { useEffect, useMemo, useRef } from "react";
@@ -35,6 +42,7 @@ import type { PpmMentionScope } from "@/lib/session-mention-sources";
 import type { PlatformSkillSummary } from "@/lib/custom-skills";
 import type { ChangeSummary } from "@/lib/changes";
 import type { QuicklogEntryListItem } from "@/lib/quicklog";
+import type { GroupMemberRead } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 
 /* ───────────────── 条目类型与内置平台指令 ───────────────── */
@@ -64,6 +72,10 @@ export const TEAM_MENTION_COMMAND: SessionMentionCommand = {
  * task-06（2026-08-28-session-ppm-task-binding / FR-02）：扩展 PPM 任务/问题
  * 两类，entity 为 task-04 归一的 MentionPpmItem（kind/id/title/projectName/
  * subtitle），分组排在变更/快速修复之后。
+ * task-09（2026-09-01-session-group-chat / FR-15）：扩展 member（群成员 @ 补全，
+ * design §7 输入区）——数据源 = 群成员（agent + 用户）+ 「@全体」常量条目，
+ * 供 task-08 群聊输入框消费；回填 @昵称 纯文本（@路由在后端解析，前端不做
+ * 成员绑定字段），挂载接线归 task-08。
  */
 export type SessionMentionItem =
   | { kind: "command"; entity: SessionMentionCommand }
@@ -71,7 +83,28 @@ export type SessionMentionItem =
   | { kind: "change"; entity: ChangeSummary }
   | { kind: "quick"; entity: QuicklogEntryListItem }
   | { kind: "ppmTask"; entity: MentionPpmItem }
-  | { kind: "ppmProblem"; entity: MentionPpmItem };
+  | { kind: "ppmProblem"; entity: MentionPpmItem }
+  | { kind: "member"; entity: SessionMemberMentionEntity };
+
+/**
+ * 群成员 @ 补全条目（task-09 / FR-15）。displayName = 群内昵称 = @提及词
+ *（群内唯一，design §3.3）；memberKind 区分 agent / 用户 / 全体广播常量。
+ */
+export interface SessionMemberMentionEntity {
+  /** 群内昵称（@提及词；「全体」为广播常量）。 */
+  displayName: string;
+  /** 成员类别：agent=Agent 成员 / user=用户成员 / all=@全体 广播常量。 */
+  memberKind: "agent" | "user" | "all";
+  /** 成员 id（memberKind='all' 时为空串——常量条目无成员实体）。 */
+  memberId: string;
+}
+
+/** 「@全体」常量条目（buildMemberMentionItems 置顶；@全体 广播语义 design §4.1）。 */
+export const ALL_MEMBERS_MENTION: SessionMemberMentionEntity = {
+  displayName: "全体",
+  memberKind: "all",
+  memberId: "",
+};
 
 /** onSelect 参数：原始实体对象（联合 = 各条目 entity 的原样透传）。 */
 export type SessionMentionEntity = SessionMentionItem["entity"];
@@ -116,7 +149,41 @@ export function buildAtMentionItems(
   ];
 }
 
+/**
+ * 组装群成员 @ 联想候选（task-09 / FR-15，design §7 输入区）：「@全体」常量
+ * 置顶 + Agent 成员在前、用户成员在后（Agent 是 @ 触发主体）；已移除成员
+ * （removed_at 非空）过滤不进候选。任务卡 constraints：member 数据源仅群成员
+ * 与全体常量，与变更/快速修复/PPM 候选互斥（群聊输入框由 task-08 单独喂参，
+ * 不与 buildAtMentionItems 混拼）。
+ */
+export function buildMemberMentionItems(
+  members: GroupMemberRead[],
+): SessionMentionItem[] {
+  const active = members.filter((m) => m.removed_at == null);
+  const toEntity = (m: GroupMemberRead): SessionMemberMentionEntity => ({
+    displayName: m.display_name,
+    memberKind: m.member_type === "agent" ? "agent" : "user",
+    memberId: m.id,
+  });
+  return [
+    { kind: "member", entity: ALL_MEMBERS_MENTION },
+    ...active
+      .filter((m) => m.member_type === "agent")
+      .map((m) => ({ kind: "member", entity: toEntity(m) }) as SessionMentionItem),
+    ...active
+      .filter((m) => m.member_type !== "agent")
+      .map((m) => ({ kind: "member", entity: toEntity(m) }) as SessionMentionItem),
+  ];
+}
+
 /* ───────────────── 过滤（纯函数，组件与 task-03 共享口径） ───────────────── */
+
+/** 群成员条目类别标签（task-09：行内标注与次级过滤命中面共用）。 */
+function memberKindLabel(memberKind: SessionMemberMentionEntity["memberKind"]): string {
+  if (memberKind === "agent") return "Agent 成员";
+  if (memberKind === "user") return "用户成员";
+  return "广播";
+}
 
 /** 条目匹配字段：primary 参与前缀优先，secondary 仅参与包含匹配（次之）。 */
 function mentionMatchTexts(item: SessionMentionItem): {
@@ -151,6 +218,12 @@ function mentionMatchTexts(item: SessionMentionItem): {
       return {
         primary: [item.entity.title],
         secondary: [item.entity.projectName ?? "", item.entity.subtitle ?? ""],
+      };
+    case "member":
+      // 昵称前缀/包含命中（@提及词）；成员类别标签作次级包含命中面（task-09）。
+      return {
+        primary: [item.entity.displayName],
+        secondary: [memberKindLabel(item.entity.memberKind)],
       };
   }
 }
@@ -319,6 +392,7 @@ const GROUP_LABELS: Record<SessionMentionItem["kind"], string> = {
   quick: "快速修复（当前工作区）",
   ppmTask: "PPM 任务",
   ppmProblem: "PPM 问题",
+  member: "群成员",
 };
 
 /** PPM 分组标签后缀（状态口径 D-002@v1：默认进行中，可切全部）。 */
@@ -381,6 +455,23 @@ function mentionOptionTexts(item: SessionMentionItem): {
         tag: item.kind === "ppmTask" ? "任务" : "问题",
       };
     }
+    case "member":
+      // 主行 = 群内昵称（@提及词，回填即此纯文本）；次行 = 广播说明 / 类别标签
+      //（task-09：@全体 常量条目带广播说明，成员条目次行复用类别标签）；
+      // 行内标注区分 Agent / 用户 / 广播（对齐原型 .mp-kind）。
+      return {
+        primary: item.entity.displayName,
+        secondary:
+          item.entity.memberKind === "all"
+            ? "@全体 通知所有 Agent 成员"
+            : memberKindLabel(item.entity.memberKind),
+        tag:
+          item.entity.memberKind === "agent"
+            ? "Agent"
+            : item.entity.memberKind === "user"
+              ? "用户"
+              : "广播",
+      };
   }
 }
 
@@ -502,7 +593,7 @@ export function SessionMentionPopover({
     >
       <div
         role="listbox"
-        aria-label={trigger === "/" ? "技能与指令联想" : "变更、快速修复与 PPM 联想"}
+        aria-label={trigger === "/" ? "技能与指令联想" : "变更、快速修复、PPM 与群成员联想"}
         aria-activedescendant={activeId}
         className="max-h-[260px] overflow-y-auto"
       >

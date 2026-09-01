@@ -20,7 +20,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_27_fields() -> None:
+def test_agent_session_has_all_28_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -59,12 +59,15 @@ def test_agent_session_has_all_27_fields() -> None:
         "tree_depth",
         # ql-20260831-002-f683：会话级上下文窗口覆盖（前端上下文环分母可编辑）。
         "ctx_window_tokens",
+        # 2026-09-01-session-group-chat task-01（design §3.1）：会话形态列
+        # （chat 群 group 影子 group_member）。
+        "session_kind",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 27
+    assert len(AgentSession.model_fields) == 28
 
 
 def test_agent_session_defaults() -> None:

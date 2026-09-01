@@ -133,6 +133,10 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
       mocks.fetchSessionDialogHistory(...args),
     listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
     deleteAgentSession: vi.fn(),
+    // task-07（2026-09-01-session-group-chat）：SessionsPortal 群聊分区数据源
+    //（经真实组件 import；列表默认空集，防 react-query data undefined 债）。
+    listGroupChats: vi.fn(async () => []),
+    createGroupChat: vi.fn(),
     getSessionUsage: (...args: unknown[]) => mocks.getSessionUsage(...args),
     subscribeAgentSessionsEvents: (...args: unknown[]) =>
       mocks.subscribeAgentSessionsEvents(...args),

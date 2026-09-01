@@ -16,6 +16,9 @@ allowed_paths:
   - frontend/src/components/group-chat/
   - frontend/src/lib/daemon.ts
   - frontend/src/components/sessions/__tests__/
+  - frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+related_tests:
+  - 'frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx'
 provides:
   - contract: 群聊 API 客户端与群分区入口
     fields:

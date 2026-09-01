@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from collections import OrderedDict
@@ -28,7 +29,13 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentRunModelUsage, AgentSession
+from app.modules.agent.model import (
+    AgentGroupMember,
+    AgentRun,
+    AgentRunLog,
+    AgentRunModelUsage,
+    AgentSession,
+)
 from app.modules.agent.tool_kind import classify_tool_kind
 from app.modules.change.binding import bind_session_to_change, extract_spec_bindings
 from app.modules.change.dispatch import _run_gate_via_delegate
@@ -111,6 +118,96 @@ class _ToolUseRunLRU:
 _tool_use_run_lru = _ToolUseRunLRU()
 
 
+# ── task-05（2026-09-01-session-group-chat / design §5.2）：桥接投影 ─────────────
+# 群成员影子会话（AgentSession.session_kind='group_member'）的 agent 回复在落库
+# 影子 run 的同时，**同事务双写**一行「投影行」到群载体 run（新 PK；dedup_key
+# 复用原值；身份进 metadata_ 列）——刷新/重连回放走 get_agent_session_logs 按
+# agent_session_id=群会话 聚合天然覆盖；实时群频道事件（publish_submitted_messages
+# 群分支）log_id=投影行 id，实时与回放读库同 id，前端 seenLogIds 去重两端对齐。
+# 判定铁律：session_kind=='group_member' 精确命中——单聊（chat）/ worker 回流 /
+# quick-chat 会话零行为变化（constraints）。
+
+
+@dataclass(frozen=True)
+class _GroupBridgeContext:
+    """submit_messages 事务内解析出的群桥接上下文（落库时刻快照，publish 阶段不查库）。
+
+    - ``group_id``：群 id == 群会话 id（design §3.2 不变式；群频道
+      ``agent_session:{group_id}`` 与回放聚合共用该 id）；
+    - ``member_name``：身份按落库时刻快照（成员改名不回填历史投影行）；
+    - ``carrier_run_id``：触发本轮的群消息载体 run（投影行 run_id 指向；
+      从本 run 最近一条 user_input 日志 metadata_.source_carrier_run_id 解析，
+      task-03 注入时落、§4.4 链 id 透传同源）。
+    """
+
+    group_id: uuid.UUID
+    member_id: uuid.UUID
+    member_name: str
+    member_session_id: uuid.UUID
+    carrier_run_id: uuid.UUID
+
+
+async def resolve_group_member_identity(
+    db: AsyncSession, *, shadow_session_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID, str] | None:
+    """影子会话 → ``(group_id, member_id, member_name)``；非群影子返回 None。
+
+    kind 判定（'group_member' 精确）+ 成员表反向指针（§5.1：群↔影子唯一关联
+    通道）。submit_messages 的投影上下文解析与 close_interactive_run 的群
+    turn_completed 共用。
+    """
+    kind = (
+        await db.execute(
+            select(AgentSession.session_kind).where(AgentSession.id == shadow_session_id)
+        )
+    ).scalar_one_or_none()
+    if kind != "group_member":
+        return None
+    member = (
+        await db.execute(
+            select(AgentGroupMember).where(AgentGroupMember.shadow_session_id == shadow_session_id)
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        return None
+    return member.group_id, member.id, member.display_name
+
+
+# 群时间线投影过滤（design §5.2「投影范围」）：仅 assistant 文本回复——前端
+# classifySessionLog 的 reply 口径服务端复刻（session-log-assembler.ts），thinking /
+# tool_use / tool_result / stderr / 系统行 / 任务生命周期行 / override 令箭 / 技能
+# 装载行一律不投影（保持群聊干净）。partial 半截行照常投影（segment_id 语义
+# 保留），override 到达时按 (载体 run, segment_id) DELETE 撤回——与单聊同机制。
+_GROUP_SYSTEM_LINE_RE = re.compile(r"^\[(?:SYSTEM|RESULT)[^\]]*\]")
+_GROUP_TASK_LINE_RE = re.compile(r"^\[TASK_(?:STARTED|PROGRESS|NOTIFICATION)\b")
+_GROUP_OVERRIDE_LINE_RE = re.compile(r"^\[(?:ASSISTANT_OVERRIDE|THINKING_OVERRIDE)\]\s")
+_GROUP_SKILL_LINE_RE = re.compile(r"^\[ASSISTANT\]\s*Base directory for this skill:", re.IGNORECASE)
+
+
+def is_group_projectable_reply(channel: str | None, content: object) -> bool:
+    """日志行是否为可投影进群时间线的 assistant 文本段（reply 口径）。"""
+    if channel != "stdout":
+        # tool_call（工具 JSON 卡）/ stderr / user_input（注入 prompt）不投影。
+        return False
+    if not isinstance(content, str):
+        return False
+    text = content.strip()
+    if not text:
+        return False
+    if "AskUserQuestion" in text:
+        return False  # 审批卡片协议行（前端丢弃口径）
+    if text.startswith("[TOOL_RESULT] User answered"):
+        return False
+    if _GROUP_SYSTEM_LINE_RE.match(text) or _GROUP_TASK_LINE_RE.match(text):
+        return False
+    if _GROUP_OVERRIDE_LINE_RE.match(text):
+        return False  # 撤回令箭非正文（stale 信封另行发群频道）
+    if text.startswith(("[TOOL_USE]", "[TOOL_RESULT]", "[THINKING]")):
+        return False  # 工具回显 / thinking 不进群时间线
+    # 技能装载协议载荷（非用户答复）不投影；其余即 assistant 文本段（reply）。
+    return _GROUP_SKILL_LINE_RE.match(text) is None
+
+
 # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
 # Redis publish 从 RunSyncService.submit_messages 迁出到 router（DB session 已
 # commit、连接归还后再发），避免 Redis 卡死永久占用 DB 连接池 slot（线上
@@ -142,6 +239,16 @@ class PublishIntent:
     ctx_tokens: int | None
     agent_session_id: uuid.UUID | None
     timestamp_iso: str
+    # ── task-05（2026-09-01-session-group-chat / design §5.2）：群桥接投影标量 ──
+    # submit_messages 事务内快照（解析链见 _resolve_group_bridge_context），publish
+    # 阶段不查库。非群场景全 None——publish_submitted_messages 群分支零进入。
+    # 逐条投影行 id 挂在 published_logs[i]["projection_log_id"]（一次 submit 可含
+    # 多条投影）；此处标量为本次调用最后一条投影行 id（观测/契约快照）。
+    group_id: uuid.UUID | None = None
+    member_id: uuid.UUID | None = None
+    member_name: str | None = None
+    member_session_id: uuid.UUID | None = None
+    projection_log_id: str | None = None
 
 
 class SubmittedMessages(int):
@@ -292,6 +399,56 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
             lease_id=str(intent.lease_id),
             agent_run_id=str(intent.agent_run_id),
             agent_session_id=str(intent.agent_session_id),
+        )
+
+    # task-05（2026-09-01-session-group-chat / design §5.2 改动点①的 publish 半段）：
+    # 群频道发布——影子 run 的投影正文 + assistant override 撤回令箭额外 publish 到
+    # ``agent_session:{群id}``（payload 照 session channel log 事件形态 + 成员身份
+    # 三字段；**log_id=投影行 id**——实时事件与回放读库同 id，前端 seenLogIds 去重
+    # 天然兼容）。纯 Redis 不写库（双写只在 submit_messages 事务内）；独立
+    # try/except：Redis 抖动不拖垮前两路与已 commit 的日志行。群上下文隐含
+    # agent_session_id 非 None（影子 run 必挂影子会话），不受上方早退影响。
+    if intent.group_id is None:
+        return
+    try:
+        redis = get_redis()
+        group_channel = f"agent_session:{intent.group_id}"
+        pipe = redis.pipeline()
+        for log_payload in intent.published_logs:
+            projection_log_id = log_payload.get("projection_log_id")
+            content = log_payload.get("content")
+            is_stale = bool(log_payload.get("stale"))
+            # 非投影正文（thinking/tool/过程行）不进群时间线。唯一例外：assistant
+            # override 撤回令箭（群内撤回已投影的半截行）；thinking override 的
+            # partial 从未投影，群内无渲染可撤，不发。
+            if projection_log_id is None and not (
+                is_stale and isinstance(content, str) and content.startswith("[ASSISTANT_OVERRIDE]")
+            ):
+                continue
+            group_payload: dict = {
+                "event": "log",
+                "session_id": str(intent.group_id),
+                "run_id": str(intent.agent_run_id),
+                # 投影行 id（回放 get_agent_session_logs 同 id）；stale 令箭无行 → None。
+                "log_id": projection_log_id,
+                "channel": log_payload["channel"],
+                "content": log_payload["content"],
+                "timestamp": log_payload["timestamp"],
+                "segment_id": log_payload.get("segment_id"),
+                "stale": log_payload.get("stale"),
+                # 成员身份（design §6.2 envelope 扩展）——群 UI 据此分色/归属。
+                "member_id": str(intent.member_id),
+                "member_name": intent.member_name,
+                "member_session_id": str(intent.member_session_id),
+            }
+            pipe.publish(group_channel, json.dumps(group_payload, default=str))
+        await pipe.execute()
+    except Exception:
+        log.warning(
+            "daemon_messages_group_channel_publish_failed",
+            lease_id=str(intent.lease_id),
+            agent_run_id=str(intent.agent_run_id),
+            group_id=str(intent.group_id),
         )
 
 
@@ -452,6 +609,97 @@ class RunSyncService:
                 deleted=len(rows),
             )
         return len(rows)
+
+    async def _resolve_group_bridge_context(
+        self, agent_run: AgentRun | None
+    ) -> _GroupBridgeContext | None:
+        """解析影子 run 的群桥接上下文（design §5.2 改动点①，task-05）。
+
+        判定链：run → 影子会话（``session_kind=='group_member'`` 精确判定，单聊/
+        worker/quick-chat 零进入）→ 成员表反向指针（群/成员身份 + 快照昵称）→
+        本 run 最近一条 user_input 日志 ``metadata_.source_carrier_run_id``
+        （task-03 注入时落；排队派发 run 的链 metadata 透传在 task-04 接线）。
+        任一环缺失（含排队派发未透传）返回 None，本调用零投影——fail-open：
+        消息照常落影子 run，不因桥接缺环阻塞上报。
+        """
+        if agent_run is None or agent_run.agent_session_id is None:
+            return None
+        identity = await resolve_group_member_identity(
+            self._session, shadow_session_id=agent_run.agent_session_id
+        )
+        if identity is None:
+            return None
+        group_id, member_id, member_name = identity
+        turn_meta = (
+            (
+                await self._session.execute(
+                    select(AgentRunLog.metadata_)
+                    .where(
+                        AgentRunLog.run_id == agent_run.id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        carrier_raw = (
+            turn_meta.get("source_carrier_run_id") if isinstance(turn_meta, dict) else None
+        )
+        if not isinstance(carrier_raw, str) or not carrier_raw:
+            return None
+        try:
+            carrier_run_id = uuid.UUID(carrier_raw)
+        except ValueError:
+            log.warning(
+                "group_bridge_invalid_carrier_run_id",
+                agent_run_id=str(agent_run.id),
+                shadow_session_id=str(agent_run.agent_session_id),
+            )
+            return None
+        return _GroupBridgeContext(
+            group_id=group_id,
+            member_id=member_id,
+            member_name=member_name,
+            member_session_id=agent_run.agent_session_id,
+            carrier_run_id=carrier_run_id,
+        )
+
+    @staticmethod
+    def _build_group_projection_row(
+        ctx: _GroupBridgeContext,
+        *,
+        source_row: AgentRunLog,
+        dedup_key: str | None,
+    ) -> AgentRunLog:
+        """构造群时间线投影行（调用方 add 进同一事务；design §5.2 双写细则）。
+
+        - ``id=新 uuid``：原 log_id 已被影子行占用，复用必 PK 冲突（D-008 Grill P0）；
+        - ``run_id=载体 run``：回放走 get_agent_session_logs 按群会话聚合天然覆盖；
+        - ``dedup_key`` 复用原值——载体 run 与影子 run 不同 run，(run_id, dedup_key)
+          部分唯一索引不冲突；daemon 重试去重仍按影子 run 判定，投影不重复产生；
+        - ``segment_id`` 原值透传（partial 半截行语义保留，override 按此列 DELETE）；
+        - ``metadata_``：成员身份快照（member_name 按落库时刻，改名不回填）+
+          source_log_id（溯源影子行）+ projection 标记（群摘要/回放行源判别，
+          §4.2 ``channel='stdout' AND metadata IS NOT NULL`` 同口径）。
+        """
+        return AgentRunLog(
+            id=uuid.uuid4(),
+            run_id=ctx.carrier_run_id,
+            timestamp=source_row.timestamp,
+            channel="stdout",
+            content_redacted=source_row.content_redacted,
+            dedup_key=dedup_key,
+            segment_id=source_row.segment_id,
+            metadata_={
+                "member_id": str(ctx.member_id),
+                "member_name": ctx.member_name,
+                "source_log_id": str(source_row.id),
+                "projection": True,
+            },
+        )
 
     async def _resolve_dispatch_run_id(
         self,
@@ -664,6 +912,15 @@ class RunSyncService:
         # 跳过登记与归位（batch 无跨轮后台子代理场景，行为不变）。
         agent_run = await self._session.get(AgentRun, agent_run_id)
         attribution_session_id = agent_run.agent_session_id if agent_run is not None else None
+        # task-05（2026-09-01-session-group-chat / design §5.2）：群桥接投影上下文。
+        # session_kind=='group_member' 精确判定（单聊/worker/quick-chat 解析为 None
+        # 零进入）；解析失败 fail-open——消息照常落影子 run，不因桥接缺环阻塞上报。
+        group_bridge = await self._resolve_group_bridge_context(agent_run)
+        # 同调用内已 add 的投影 partial（override 信号/完整行到达时 expunge 回退，
+        # 对齐 flushed_partials 的影子行回退机制）；last_projection_log_id 为本次
+        # 调用最后一条投影行 id（PublishIntent 快照标量）。
+        flushed_projection_partials: dict[str, AgentRunLog] = {}
+        last_projection_log_id: str | None = None
         # 冷启动反查未命中集合（本次调用局部）：同一 parent_tool_use_id 的多行
         # 只查一次 DB；不做跨调用负缓存——派发行迟到时后续调用反查仍可成功
         # （design §5 P2.2），失败行保持当前 run_id 兜底。
@@ -711,6 +968,15 @@ class RunSyncService:
                 # segment_id DELETE 已 commit 的 partial（complete 行 segment_id=NULL 不受
                 # 影响），让 DB 只剩完整行。
                 await self._revoke_committed_partials(agent_run_id, segment_id)
+                # task-05：群桥接——同 segment 的投影 partial（载体 run）一并回退：
+                # 同调用内 pending 的 expunge 撤销；已 commit 的按 (载体 run, segment_id)
+                # DELETE。thinking partial 从未投影，此处多为 no-op（无条件调用保持两
+                # run 收敛逻辑同构，不依赖消息变体判定）。
+                if group_bridge is not None:
+                    stale_projection = flushed_projection_partials.pop(segment_id, None)
+                    if stale_projection is not None:
+                        self._session.expunge(stale_projection)
+                    await self._revoke_committed_partials(group_bridge.carrier_run_id, segment_id)
                 # task-02 / FR-02 / D-003：override 撤回令箭从「截断不发」改为「publish
                 # 到 SSE 但不落库」。前端收到 stale=True 信号后按 segmentId 精确撤回已渲染
                 # 的半截，消除实时流「半截+全文」重复。INSERT 与 publish 已解耦（本方法
@@ -772,6 +1038,14 @@ class RunSyncService:
                 # flushed_partials 查不到。按 segment_id DELETE 已 commit 的 partial，
                 # 让 DB 只剩完整行（消除 #35 累积重复）。对齐 thinking override 同款 DELETE。
                 await self._revoke_committed_partials(agent_run_id, segment_id)
+                # task-05：群桥接——载体 run 上已投影的同 segment partial 一并 DELETE
+                # （影子侧撤回 + 投影侧撤回同事务收敛；下方 stale 信封经
+                # publish_submitted_messages 群分支发群频道，前端撤回已渲染半截）。
+                if group_bridge is not None:
+                    stale_projection = flushed_projection_partials.pop(segment_id, None)
+                    if stale_projection is not None:
+                        self._session.expunge(stale_projection)
+                    await self._revoke_committed_partials(group_bridge.carrier_run_id, segment_id)
                 # task-02 / FR-02 / D-003：override 撤回令箭 publish 到 SSE 但不落库（对齐
                 # 上面 [THINKING_OVERRIDE] 分支的改法）。前端据 stale=True + segment_id
                 # 撤回已渲染的 assistant 半截。envelope 直接 append published_logs 跳
@@ -851,6 +1125,11 @@ class RunSyncService:
                 self._session.expunge(stale)
                 count -= 1
                 published_logs = [p for p in published_logs if p["log_id"] != str(stale.id)]
+                # task-05：同调用内已 add 的投影 partial 一并 expunge 回退（完整投影
+                # 行由下方 INSERT 路径重建，投影键随 published_logs 移除一起消失）。
+                stale_projection = flushed_projection_partials.pop(segment_id, None)
+                if stale_projection is not None:
+                    self._session.expunge(stale_projection)
 
             # task-12 去重判定 2：partial 到达时，若同 segment 已见完整行 / override
             # 信号（completed_segments 命中），直接跳过 INSERT + publish（late partial
@@ -1055,6 +1334,29 @@ class RunSyncService:
                 }
             )
 
+            # task-05（design §5.2 改动点①）：群桥接双写投影行——影子行落库后
+            # 同事务插投影行到群载体 run（仅本轮 run 自身的 assistant 文本段：
+            # effective_run_id!=agent_run_id 的后台子代理归位行属过程信息不投影；
+            # thinking/tool/stderr/系统行由 is_group_projectable_reply 过滤）。
+            # 投影行 id 挂到刚 append 的 published_logs 尾条——publish_submitted_
+            # messages 群分支据此发群频道事件（log_id=投影行 id）。
+            if (
+                group_bridge is not None
+                and effective_run_id == agent_run_id
+                and is_group_projectable_reply(channel, content)
+            ):
+                projection_row = self._build_group_projection_row(
+                    group_bridge,
+                    source_row=log_entry,
+                    dedup_key=dedup_key,
+                )
+                self._session.add(projection_row)
+                published_logs[-1]["projection_log_id"] = str(projection_row.id)
+                last_projection_log_id = str(projection_row.id)
+                if log_entry.segment_id:
+                    # partial 半截行：同调用内 override/完整行到达时 expunge 回退。
+                    flushed_projection_partials[log_entry.segment_id] = projection_row
+
             # 登记本 segment 的状态：
             # - partial 行：记入 flushed_partials，等完整行到达时回退。
             # - 完整行：加入 completed_segments，让本调用内后到的同 segment partial
@@ -1071,6 +1373,11 @@ class RunSyncService:
                 # 半截行复活成直播重复段（daemon override 信号生产环境未观测到
                 # 到达，本清理不依赖它）。对齐 override 分支同款 DELETE。
                 await self._revoke_committed_partials(agent_run_id, segment_id)
+                # task-05：群桥接——载体 run 上已 commit 的投影 partial 同步 DELETE
+                # （完整投影行刚由 INSERT 路径落库，segment_id=None 不受本 DELETE
+                # 误删；下方合成 stale 令箭经群分支发群频道撤回已渲染半截）。
+                if group_bridge is not None:
+                    await self._revoke_committed_partials(group_bridge.carrier_run_id, segment_id)
                 # quick-0e56260f（会话 0ef651b6）：backend 合成 override 撤回信号。
                 # 动机：直播期 partial 窗口经 Redis 发布是 best-effort，部分窗口
                 # 丢失后前端按到达顺序拼出「乱序胶水段」（非完整行前缀），全部
@@ -1311,6 +1618,15 @@ class RunSyncService:
                 ctx_tokens=publish_ctx_tokens,
                 agent_session_id=publish_session_id,
                 timestamp_iso=now.isoformat().replace("+00:00", "Z"),
+                # task-05：群桥接标量快照（事务内已解析的群上下文 + 最后投影行 id）。
+                # 非群场景 group_id=None → publish_submitted_messages 群分支零进入。
+                group_id=group_bridge.group_id if group_bridge is not None else None,
+                member_id=group_bridge.member_id if group_bridge is not None else None,
+                member_name=group_bridge.member_name if group_bridge is not None else None,
+                member_session_id=(
+                    group_bridge.member_session_id if group_bridge is not None else None
+                ),
+                projection_log_id=last_projection_log_id,
             ),
         )
 
@@ -1894,6 +2210,77 @@ class RunSyncService:
                 "timestamp": now.isoformat().replace("+00:00", "Z"),
             },
         )
+
+        # task-05（2026-09-01-session-group-chat / design §5.2 改动点②）：影子 run
+        # 收口 → 群频道 turn_completed。现 session 频道事件只有 run_id/session_id，
+        # 群 UI 无法判「哪个成员说完了」——本事件补 member_id/member_name/
+        # member_session_id（design §6.2 envelope 扩展），status/exit_code/词元字段
+        # 照原事件。session_id 用群会话 id（频道自身 id，对齐 group/service
+        # _publish_group_channel_event 惯例），影子会话 id 走 member_session_id。
+        # 非 group_member 会话（单聊/worker/quick-chat）解析为 None 零行为变化。
+        # ── 互@检测挂接点（design §4.4，task-04 接线，本卡不实现）──
+        # 本事件发布后，应对该 run 本轮的最终回复文本（载体 run 最新投影行 /
+        # AgentRun.output_redacted）执行与用户消息相同的 @解析（群开关
+        # agent_cross_mention + Redis 链护栏 group_chain:{载体run_id} 深度/去重/
+        # 限频），命中的其他 agent 成员走 §4.1-4.3 触发管线（注入 prompt 的
+        # 「当前消息」标注为来自 Agent 成员的协作请求）。
+        if agent_run.agent_session_id is not None:
+            group_identity = await resolve_group_member_identity(
+                self._session, shadow_session_id=agent_run.agent_session_id
+            )
+            if group_identity is not None:
+                group_id, group_member_id, group_member_name = group_identity
+                try:
+                    redis = get_redis()
+                    await redis.publish(
+                        f"agent_session:{group_id}",
+                        json.dumps(
+                            {
+                                "event": "turn_completed",
+                                "session_id": str(group_id),
+                                "run_id": str(agent_run.id),
+                                "status": agent_run.status,
+                                "exit_code": agent_run.exit_code,
+                                "input_tokens": agent_run.input_tokens,
+                                "output_tokens": agent_run.output_tokens,
+                                "timestamp": now.isoformat().replace("+00:00", "Z"),
+                                "member_id": str(group_member_id),
+                                "member_name": group_member_name,
+                                "member_session_id": str(agent_run.agent_session_id),
+                            },
+                            default=str,
+                        ),
+                    )
+                except Exception:
+                    log.warning(
+                        "group_turn_completed_redis_publish_failed",
+                        lease_id=str(lease_id),
+                        agent_run_id=str(agent_run.id),
+                        group_id=str(group_id),
+                    )
+                # task-04（design §4.4）：互@检测——编排与 Redis 护栏全在
+                # group/service.py，此处仅最小挂接（completed 轮；fail-open：
+                # 异常不阻断已 commit 的 run 终态收口与后续排队派发）。
+                if agent_run.status == "completed":
+                    try:
+                        from app.modules.daemon.group.service import (
+                            run_cross_mention_detection,
+                        )
+
+                        await run_cross_mention_detection(
+                            self._session,
+                            group_id=group_id,
+                            member_id=group_member_id,
+                            member_name=group_member_name,
+                            run=agent_run,
+                        )
+                    except Exception:
+                        log.warning(
+                            "group_cross_mention_detection_failed",
+                            agent_run_id=str(agent_run.id),
+                            group_id=str(group_id),
+                            exc_info=True,
+                        )
 
         log.info(
             "interactive_run_closed",

@@ -37,14 +37,16 @@ import {
 import {
   SessionMentionPopover,
   TEAM_MENTION_COMMAND,
+  ALL_MEMBERS_MENTION,
   buildSlashMentionItems,
   buildAtMentionItems,
+  buildMemberMentionItems,
   filterMentionItems,
   nextMentionIndex,
   handleMentionKeyDown,
   type SessionMentionItem,
 } from "../session-mention-popover";
-import type { MentionPpmItem } from "@/lib/session-mention";
+import { applyMentionPick, type MentionPpmItem } from "@/lib/session-mention";
 import type { PlatformSkillSummary } from "@/lib/custom-skills";
 import type { ChangeSummary } from "@/lib/changes";
 import type { QuicklogEntryListItem } from "@/lib/quicklog";
@@ -703,5 +705,157 @@ describe("SessionMentionPopover PPM 分组（task-06 / FR-02）", () => {
     expect(toggle.textContent).toBe("仅进行中");
     fireEvent.click(toggle);
     expect(onPpmScopeChange).toHaveBeenCalledWith("ongoing");
+  });
+});
+
+/* ───────── 10. task-09（2026-09-01-session-group-chat / FR-15）：member 群成员
+   @ 补全（buildMemberMentionItems / 过滤 / 分组 / 回填纯文本 / 键盘复用） ───────── */
+
+describe("SessionMentionPopover 群成员（task-09 / FR-15）", () => {
+  function groupMember(
+    overrides: Partial<
+      import("@/lib/daemon").GroupMemberRead
+    > = {},
+  ): import("@/lib/daemon").GroupMemberRead {
+    return {
+      id: "mem-x",
+      member_type: "user",
+      display_name: "某成员",
+      user_id: "u-x",
+      joined_at: "2026-09-01T00:00:00Z",
+      shadow_status: "none",
+      ...overrides,
+    };
+  }
+
+  const MEMBER_ENTITIES = [
+    groupMember({
+      id: "mem-1",
+      member_type: "agent",
+      display_name: "小码",
+      runtime_id: "rt-1",
+      provider: "claude",
+    }),
+    groupMember({
+      id: "mem-2",
+      member_type: "agent",
+      display_name: "小测",
+      runtime_id: "rt-2",
+      provider: "codex",
+    }),
+    groupMember({
+      id: "mem-3",
+      member_type: "user",
+      display_name: "林一",
+      user_id: "u-lin",
+    }),
+    // 已移除成员：不进候选。
+    groupMember({
+      id: "mem-4",
+      member_type: "user",
+      display_name: "已退出",
+      user_id: "u-gone",
+      removed_at: "2026-09-01T01:00:00Z",
+    }),
+  ];
+  const MEMBER_ITEMS = buildMemberMentionItems(MEMBER_ENTITIES);
+  /** member 候选昵称取值（ narrowing：本块候选全部为 member kind）。 */
+  const memberName = (i: SessionMentionItem): string =>
+    (i.entity as import("../session-mention-popover").SessionMemberMentionEntity)
+      .displayName;
+
+  it("buildMemberMentionItems：「@全体」置顶 + Agent 在前 / 用户在后；removed 过滤", () => {
+    expect(MEMBER_ITEMS).toHaveLength(4); // 全体 + 2 agent + 1 user（已退出滤除）
+    expect(MEMBER_ITEMS.map(memberName)).toEqual([
+      "全体",
+      "小码",
+      "小测",
+      "林一",
+    ]);
+    // @全体 常量条目形态（memberKind='all'，无成员实体）。
+    expect(ALL_MEMBERS_MENTION).toEqual({
+      displayName: "全体",
+      memberKind: "all",
+      memberId: "",
+    });
+    expect(MEMBER_ITEMS[0]!.entity).toBe(ALL_MEMBERS_MENTION);
+  });
+
+  it("分组渲染：单「群成员」分组标签 + 行内 Agent/用户/广播标注", () => {
+    setup({ trigger: "@", items: MEMBER_ITEMS });
+
+    expect(screen.getByText("群成员")).toBeInTheDocument();
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(4);
+    // @全体：主行昵称 + 广播说明次行 + 「广播」行内标注。
+    expect(within(options[0]!).getByText("全体")).toBeInTheDocument();
+    expect(
+      within(options[0]!).getByText("@全体 通知所有 Agent 成员"),
+    ).toBeInTheDocument();
+    expect(within(options[0]!).getByText("广播")).toBeInTheDocument();
+    // Agent 成员：Agent 标注；用户成员：用户标注。
+    expect(within(options[1]!).getByText("小码")).toBeInTheDocument();
+    expect(within(options[1]!).getByText("Agent")).toBeInTheDocument();
+    expect(within(options[3]!).getByText("林一")).toBeInTheDocument();
+    expect(within(options[3]!).getByText("用户")).toBeInTheDocument();
+  });
+
+  it("过滤：昵称前缀命中 + 「全体」命中 + 类别标签次级包含（大小写不敏感）", () => {
+    // 昵称前缀命中两位 Agent。
+    expect(filterMentionItems(MEMBER_ITEMS, "小").map(memberName)).toEqual([
+      "小码",
+      "小测",
+    ]);
+    // 「全体」命中广播常量条目。
+    expect(filterMentionItems(MEMBER_ITEMS, "全体").map(memberName)).toEqual([
+      "全体",
+    ]);
+    // 类别标签次级包含命中（"agent" 命中 Agent 成员，大小写不敏感）。
+    expect(filterMentionItems(MEMBER_ITEMS, "agent").map(memberName)).toEqual([
+      "小码",
+      "小测",
+    ]);
+    // 无命中空。
+    expect(filterMentionItems(MEMBER_ITEMS, "不存在的成员")).toEqual([]);
+  });
+
+  it("回填纯文本 @昵称：applyMentionPick 以 displayName 为插入键（无绑定字段）", () => {
+    const picked = applyMentionPick("问题 @小", { trigger: "@", query: "小", start: 3 }, "小码");
+    // 纯文本回填 @小码 + 尾随空格（下一次检测因空白归 null 自动关层）。
+    expect(picked.value).toBe("问题 @小码 ");
+    expect(picked.caret).toBe("问题 @小码 ".length);
+    // @全体 同口径。
+    const all = applyMentionPick("@", { trigger: "@", query: "", start: 0 }, "全体");
+    expect(all.value).toBe("@全体 ");
+  });
+
+  it("选中抛原始实体（Object.is 身份透传——键盘/鼠标复用单一源）", () => {
+    setup({ trigger: "@", items: MEMBER_ITEMS, activeIndex: 2 });
+    fireEvent.mouseDown(screen.getByTestId("mention-option-2"));
+
+    expect(HANDLERS.onSelect).toHaveBeenCalledTimes(1);
+    expect(HANDLERS.onSelect.mock.calls[0]![0]).toBe(
+      MEMBER_ITEMS[2]!.entity,
+    );
+  });
+
+  it("键盘数学复用 handleMentionKeyDown 单一源（member 候选 Enter 选中拦截）", () => {
+    const { handlers, result, input } = renderKeyHarness(MEMBER_ITEMS.length, 1);
+    const evt = pressKey(input, "Enter");
+
+    expect(result.handled).toBe(true);
+    expect(evt.defaultPrevented).toBe(true);
+    expect(handlers.onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("既有 kind 零回归：member 候选不混入 buildAtMentionItems 输出", () => {
+    // 变更/快速修复/PPM 组装口径不含 member（群成员候选由 buildMemberMentionItems
+    // 单独喂参——task-08 群聊输入框接线）。
+    expect(
+      buildAtMentionItems(CHANGES, QUICKS, PPM_TASKS, PPM_PROBLEMS).every(
+        (i) => i.kind !== "member",
+      ),
+    ).toBe(true);
+    expect(SLASH_ITEMS.every((i) => i.kind !== "member")).toBe(true);
   });
 });

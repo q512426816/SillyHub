@@ -493,6 +493,44 @@ class DaemonSessionNoCurrentRun(AppError):
     http_status = 409
 
 
+# ── 排队轮群链 metadata 透传（task-04，design §4.3/§4.4 补线）─────────────────
+# AgentSessionQueuedMessage 无 metadata 列——忙轮排队的群链信息（链 id
+# source_carrier_run_id / chain_depth）入队时拼进 prompt 头部标记行，派发侧
+# 解析剥离后写入新 run 的 user_input metadata_：排队派发轮与即时注入轮对
+# turn_completed 互@检测的链可见性一致（task-05 投影 fail-open 缺口闭合）。
+
+_GROUP_CHAIN_MARKER_RE = re.compile(
+    r"^\[GROUP_CHAIN carrier=([0-9a-fA-F-]{36}) depth=(\d+)\]", re.IGNORECASE
+)
+
+
+def _prepend_group_chain_marker(prompt: str, turn_metadata: dict | None) -> str:
+    """群链 metadata 拼进排队 prompt 头部标记行（非群链轮原样返回）。"""
+    if not isinstance(turn_metadata, dict):
+        return prompt
+    carrier = turn_metadata.get("source_carrier_run_id")
+    if not isinstance(carrier, str) or not carrier:
+        return prompt
+    depth = turn_metadata.get("chain_depth", 0)
+    try:
+        depth = int(depth)
+    except (TypeError, ValueError):
+        depth = 0
+    return f"[GROUP_CHAIN carrier={carrier} depth={depth}]\n{prompt}"
+
+
+def _split_group_chain_marker(prompt: str) -> tuple[str, dict | None]:
+    """剥离排队 prompt 头部群链标记行 → ``(剩余 prompt, 链 metadata | None)``。"""
+    match = _GROUP_CHAIN_MARKER_RE.match(prompt or "")
+    if match is None:
+        return prompt, None
+    metadata = {
+        "source_carrier_run_id": match.group(1),
+        "chain_depth": int(match.group(2)),
+    }
+    return prompt[match.end() :].lstrip("\r\n"), metadata
+
+
 class DaemonSessionInvariantViolation(AppError):
     code = "HTTP_409_DAEMON_SESSION_INVARIANT_VIOLATION"
     http_status = 409
@@ -937,6 +975,13 @@ class SessionService:
         UPDATE; SQLite ignores the hint but the query/ownership semantics
         still hold). Returns 404 for missing / cross-user sessions without
         leaking existence (mirrors ``_get_owned_runtime``).
+
+        2026-09-01-session-group-chat task-02 / design §5.3：群会话
+        （kind='group'）参与者制分支——首查未命中（非属主）时经
+        ``get_group_accessible_session`` 探测（群成员表命中 → workspace
+        admin；影子会话 kind='group_member' 仅属主/admin，内部链路）。chat
+        热路径首查单 SQL 逐字节不变；跨用户 chat 会话不额外加行锁（探测仅
+        对 group 形态补 FOR UPDATE 回捞），仍统一 404 不泄露存在性。
         """
         stmt = (
             select(AgentSession)
@@ -948,6 +993,16 @@ class SessionService:
         )
         session = (await self._session.execute(stmt)).scalar_one_or_none()
         if session is None:
+            from app.modules.daemon.group.service import get_group_accessible_session
+
+            group_session = await get_group_accessible_session(
+                self._session,
+                session_id=session_id,
+                user_id=user_id,
+                for_update=True,
+            )
+            if group_session is not None:
+                return group_session
             raise DaemonSessionNotFound(
                 f"AgentSession '{session_id}' not found.",
                 details={"session_id": str(session_id)},
@@ -3147,6 +3202,28 @@ class SessionService:
         session_id: uuid.UUID,
         *,
         prompt: str,
+        # 2026-09-01-session-group-chat task-03（design §4.3）：群聊影子会话注入
+        # 分支——服务身份路径补忙轮排队开关与群链路透传（缺省值保持既有行为
+        # 零回归）：
+        # - ``queue_when_busy``：影子忙轮时落 AgentSessionQueuedMessage（复用
+        #   _inject_into_session 排队分支：满 5 → 409、position 派发序、
+        #   queue_changed 事件、dispatch_next_queued_message 续派）；
+        # - ``queue_sender_user_id``：排队条目 sender（群聊=实际发送者；缺省=
+        #   会话属主——service 路径既有语义）；
+        # - ``turn_metadata``：写本轮 user_input 日志 metadata_ 列（群链路
+        #   source_group_id/source_member_id/source_carrier_run_id/chain_depth/
+        #   sender_user_id——task-04 互@检测读取）。
+        queue_when_busy: bool = False,
+        queue_sender_user_id: uuid.UUID | None = None,
+        turn_metadata: dict | None = None,
+        # task-04（2026-09-01-session-group-chat design §4.5 热切换）：配置切换
+        # 维度（str 形态 uuid；语义与用户路径 inject_session 同名参数一致——
+        # None=不动；空串="none" 清空；≠当前值构成切换轮）。群成员六要素热切换
+        # 经本入口以服务身份下发 SESSION_SWITCH_CONFIG：携带切换维度时空
+        # prompt 合法（静默切换轮：run 落终态 completed 无 LLM turn，daemon
+        # 当前轮结束边界 reload，下轮生效）。
+        agent_profile_id: str | None = None,
+        llm_provider_id: str | None = None,
     ) -> SessionDispatchResult:
         """Append a turn run to an active session as the **platform service** (D-006@v2).
 
@@ -3165,8 +3242,10 @@ class SessionService:
         """
         # 2026-08-27-background-subagent-progress task-07（FR-08 / D-004@v1）：
         # 与 inject_session 入口同口径——空 prompt（含全空白）→ SessionEmptyPrompt
-        # 422；service 身份路径无切换字段/附件，无豁免分支。
-        if not (prompt or "").strip():
+        # 422。task-04 例外：携带切换维度（热切换静默轮）时空 prompt 合法
+        # （_inject_into_session 的 config_switch 分支消费，等值+空 prompt 仍被
+        # 其内部守卫拒绝——调用方只在确有 diff 时传入）。
+        if not (prompt or "").strip() and agent_profile_id is None and llm_provider_id is None:
             raise SessionEmptyPrompt(
                 "消息内容不能为空",
                 details={"reason": "empty_prompt"},
@@ -3191,6 +3270,14 @@ class SessionService:
             prompt=prompt,
             # ql-20260817-003：service 身份代写轮——发送者记会话属主。
             run_sender_user_id=session.user_id,
+            # 2026-09-01-session-group-chat task-03：群聊影子注入透传（缺省零回归）。
+            queue_when_busy=queue_when_busy,
+            queue_sender_user_id=queue_sender_user_id,
+            turn_metadata=turn_metadata,
+            # task-04（design §4.5 热切换）：切换维度透传共享核心（缺省 None=
+            # 既有 service 路径零回归）。
+            agent_profile_id=agent_profile_id,
+            llm_provider_id=llm_provider_id,
         )
 
     async def _ensure_session_workspace_writable(self, session: AgentSession) -> None:
@@ -3240,6 +3327,16 @@ class SessionService:
         page_context: PageContextCreateBlock | None = None,
         # ql-20260825-011：忙轮入队开关（语义见 inject_session 同名参数）。
         queue_when_busy: bool = False,
+        # 2026-09-01-session-group-chat task-03（design §4.3）：排队条目 sender
+        # 覆盖——群聊影子会话排队时记**实际发送者**（run/计量仍归影子属主=群主，
+        # §9.2；条目 sender 供派发轮归属校验与审计）；缺省 None = 既有语义
+        # （run_sender_user_id or 会话属主）。
+        queue_sender_user_id: uuid.UUID | None = None,
+        # 2026-09-01-session-group-chat task-03（design §4.3/§4.4）：本轮
+        # user_input 日志 metadata_ 列负载（群链路 source_group_id/
+        # source_member_id/source_carrier_run_id/chain_depth/sender_user_id——
+        # task-04 turn_completed 互@检测读取）。缺省 None 不写（存量行 NULL）。
+        turn_metadata: dict | None = None,
     ) -> SessionDispatchResult:
         """Shared inject-turn core (used by :meth:`inject_session` +
         :meth:`inject_session_as_service`).
@@ -3378,8 +3475,13 @@ class SessionService:
                 ).scalar()
                 entry = AgentSessionQueuedMessage(
                     agent_session_id=session.id,
-                    sender_user_id=run_sender_user_id or session.user_id,
-                    prompt=prompt,
+                    # task-03（群聊影子排队）：sender 记实际发送者（覆盖优先），
+                    # 其余路径维持 run_sender_user_id or 会话属主既有语义。
+                    sender_user_id=(queue_sender_user_id or run_sender_user_id or session.user_id),
+                    # task-04（群链透传）：排队条目无 metadata 列——链 id/深度拼
+                    # 进 prompt 头部标记行，派发侧剥离还原（见
+                    # _split_group_chain_marker）。
+                    prompt=_prepend_group_chain_marker(prompt, turn_metadata),
                     attachment_ids=([str(a) for a in attachment_ids] if attachment_ids else None),
                     page_context=(
                         page_context.model_dump(mode="json", exclude_none=True)
@@ -3727,6 +3829,9 @@ class SessionService:
                     channel="user_input",
                     content_redacted=user_input_content[:5000],
                     timestamp=now,
+                    # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
+                    # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
+                    metadata_=dict(turn_metadata) if turn_metadata is not None else None,
                 )
             )
 
@@ -4710,16 +4815,21 @@ class SessionService:
                     attachment_ids = [uuid.UUID(str(a)) for a in entry.attachment_ids]
                 except (ValueError, AttributeError, TypeError):
                     attachment_ids = None
+            # task-04（群链透传）：剥离入队时拼进的链标记行——剩余 prompt 走
+            # 派发注入（daemon 看到的文本与即时注入轮一致），链 metadata 写入
+            # 新 run 的 user_input 日志（turn_completed 互@检测读取）。
+            dispatch_prompt, chain_metadata = _split_group_chain_marker(entry.prompt or "")
 
             try:
                 await self._inject_into_session(
                     session,
-                    prompt=entry.prompt,
+                    prompt=dispatch_prompt,
                     run_sender_user_id=entry.sender_user_id,
                     agent_profile_id=entry.agent_profile_id,
                     llm_provider_id=entry.llm_provider_id,
                     attachment_ids=attachment_ids,
                     page_context=page_context,
+                    turn_metadata=chain_metadata,
                 )
             except AppError as exc:
                 # 派发失败（daemon 离线 / 附件失效 / 配置失效等）：条目转 failed
@@ -5595,6 +5705,12 @@ class SessionService:
         # 2026-08-24：会话归档过滤（False=未归档，True=已归档，None=不过滤——
         # ql-20260831-015 三态，HTTP 层「全部状态」用；service 默认 False 零回归）。
         archived: bool | None = False,
+        # 2026-09-01-session-group-chat task-02 / design §5.3：会话形态过滤
+        # （照 archived 三态先例）——默认 'chat'（存量口径），群/影子会话不
+        # 泄漏进普通列表（群聊列表走新端点 GET /api/daemon/group-chats）；
+        # None=不过滤（admin debug 等显式覆盖）。存量行迁移后 server_default
+        # 'chat'，默认过滤对既有查询零行为变化。
+        session_kind: str | None = "chat",
     ) -> tuple[list[AgentSession], int]:
         """Owner-scoped list of AgentSession with stable paging.
 
@@ -5659,6 +5775,11 @@ class SessionService:
             base_filters.append(AgentSession.archived_at.isnot(None))
         elif archived is False:
             base_filters.append(AgentSession.archived_at.is_(None))
+        # 2026-09-01-session-group-chat task-02 / design §5.3：会话形态谓词
+        # （ix_agent_sessions_session_kind 查询键；默认 'chat' 存量口径——
+        # 群会话与 group_member 影子会话不进普通列表）。
+        if session_kind is not None:
+            base_filters.append(AgentSession.session_kind == session_kind)
         if status_filter is not None:
             base_filters.append(AgentSession.status == status_filter)
         if runtime_id is not None:
@@ -5750,6 +5871,10 @@ class SessionService:
         write here, so FOR UPDATE would only add contention). Returns the ORM
         row; the router serializes it via ``AgentSessionRead`` (same mapping
         the list endpoint uses).
+
+        2026-09-01-session-group-chat task-02 / design §5.3：群会话参与者制
+        分支——首查未命中（非属主）时探测群形态（成员表命中 → workspace
+        admin → 仍 404 不泄露存在性）；chat 热路径单 SQL 零改动。
         """
         stmt = select(AgentSession).where(
             AgentSession.id == session_id,
@@ -5758,6 +5883,15 @@ class SessionService:
         )
         session = (await self._session.execute(stmt)).scalar_one_or_none()
         if session is None:
+            from app.modules.daemon.group.service import get_group_accessible_session
+
+            group_session = await get_group_accessible_session(
+                self._session,
+                session_id=session_id,
+                user_id=user_id,
+            )
+            if group_session is not None and group_session.deleted_at is None:
+                return group_session
             raise DaemonSessionNotFound(
                 f"AgentSession '{session_id}' not found.",
                 details={"session_id": str(session_id)},
@@ -6369,6 +6503,9 @@ class SessionService:
         from sqlalchemy import func
 
         # Ownership check (resource hiding — same not-found for missing/cross-user).
+        # 2026-09-01-session-group-chat task-02 / design §5.3：群会话回放读
+        # （刷新/重连聚合）参与者制分支——首查未命中时探测群形态（成员表
+        # 命中 → workspace admin → 仍 404 不泄露存在性）；chat 零改动。
         owned = (
             await self._session.execute(
                 select(AgentSession.id).where(
@@ -6378,10 +6515,18 @@ class SessionService:
             )
         ).scalar_one_or_none()
         if owned is None:
-            raise DaemonSessionNotFound(
-                f"AgentSession '{session_id}' not found.",
-                details={"session_id": str(session_id)},
+            from app.modules.daemon.group.service import get_group_accessible_session
+
+            group_session = await get_group_accessible_session(
+                self._session,
+                session_id=session_id,
+                user_id=user_id,
             )
+            if group_session is None:
+                raise DaemonSessionNotFound(
+                    f"AgentSession '{session_id}' not found.",
+                    details={"session_id": str(session_id)},
+                )
 
         # Per-run earliest log timestamp (for cross-run ordering anchor).
         # 第四批 code-quality：原 min_ts_subq 对整张 agent_run_logs（系统最大表）

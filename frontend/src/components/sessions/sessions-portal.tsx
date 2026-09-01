@@ -45,6 +45,14 @@
  *   preContext { workspaceId, quickId, runtimeId }（X-13 双传语义 quicklog
  *   版，quickId 首句经 task-11 上送 quicklog_id 落自动绑定）。
  *
+ * 群聊分区（task-07 / 2026-09-01-session-group-chat / FR-01 / FR-04）：列表
+ *   顶部「群聊」分区（SessionListPanel 内独立 useQuery 供数）+ 分区头「＋」
+ *   开三步建群向导（CreateGroupWizard：群信息 → 邀请用户 → Agent 成员六要素）；
+ *   选中群行右侧渲染 GroupChatPanel（task-08 群聊面板接管原 task-07 占位挂载
+ *   点：平铺时间线 + SSE 消费 + @补全输入区 + 右列 task-09 成员面板；右侧分支
+ *   优先级：群视图 > 真会话 > 预会话 > 空门户，key={groupId} 重挂载）；
+ *   建群成功与 agent_sessions 变更信号均 invalidate ["groupChats"] 刷新群列表。
+ *
  * 状态机（FR-03 零残留）：
  *   - 组头＋ → 浮层开（当前选中态保持，取消零影响）；
  *   - onPick → preContext 置位 + 清 selectedSessionId（右侧三分支优先级：
@@ -79,6 +87,8 @@ import {
   SessionPanel,
   type SessionPreContext,
 } from "@/components/daemon/session-panel";
+import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
+import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
 import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
 import {
   SessionListPanel,
@@ -92,6 +102,8 @@ import {
   subscribeAgentSessionsEvents,
   type AgentSessionRead,
   type DaemonMachineRead,
+  type GroupChatListItemRead,
+  type GroupChatRead,
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
@@ -122,6 +134,15 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   //（null = 非工作区分组，D-105）。
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerWorkspaceId, setPickerWorkspaceId] = useState<string | null>(null);
+  // ── task-07（2026-09-01-session-group-chat / FR-01 / FR-04）：群聊分区接线 ──
+  // 建群向导开关（分区头「＋」触发）；选中群（右侧渲染挂载点占位，面板本体归
+  // task-08）——selectedGroup 保留选中群对象供挂载点渲染摘要（建群成功回填
+  // GroupChatRead 归一为列表项形态，列表 invalidate 重拉后覆盖）。
+  const [groupWizardOpen, setGroupWizardOpen] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<GroupChatListItemRead | null>(
+    null,
+  );
   const qc = useQueryClient();
 
   // task-01（D-004@v1）：?session= 深链——挂载时解析一次（urlRestoreDoneRef
@@ -218,6 +239,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       debounceLeadingTrailing(
         () => {
           void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+          // task-07：群列表随 agent_sessions 变更信号同步刷新（design §8
+          // group.member.added / group.ended 等群事件同样广播
+          // agent_sessions:changed——群分区与单聊列表共用同一信号通道）。
+          void qc.invalidateQueries({ queryKey: ["groupChats"] });
         },
         SESSION_LIST_REFRESH_DEBOUNCE_MS,
       ),
@@ -305,6 +330,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             : { workspaceId, runtimeId },
       );
       setSelectedSessionId(null);
+      // task-07：进预会话清群选中（右侧三分支优先级：群视图 > 真会话 > 预会话）。
+      setSelectedGroupId(null);
+      setSelectedGroup(null);
       // ql-20260824-001：清选中同步清 ?session=（刷新不恢复已离开的会话）。
       syncSessionParam(null);
     },
@@ -395,6 +423,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                   { workspaceId: scope.workspaceId, quickId: scope.qlId, runtimeId: runtime.id }
                 : { workspaceId, runtimeId: runtime.id },
           );
+          // task-07：直带链进预会话同样清群选中。
+          setSelectedGroupId(null);
+          setSelectedGroup(null);
           // ql-20260824-001：清选中同步清 ?session=（同 enterPreSession）。
           syncSessionParam(null);
           return;
@@ -424,11 +455,43 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     (resp: SessionCreateResponse) => {
       setPreContext(null);
       setSelectedSessionId(resp.session_id);
+      // task-07：预会话创建路径不携带群选中（防御性清空——右侧分支让位真会话）。
+      setSelectedGroupId(null);
+      setSelectedGroup(null);
       // ql-20260824-001：新会话选中落 URL（刷新保持）。
       syncSessionParam(resp.session_id);
       refreshSessionLists();
     },
     [refreshSessionLists, syncSessionParam],
+  );
+
+  /* ── task-07：群聊分区接线（FR-01 / FR-04） ──────────────────────────── */
+
+  /** 群行选中（task-07）：右侧渲染群视图挂载点（面板本体归 task-08），清
+   *  单聊选中/预会话态与 ?session=（右侧优先级：群视图 > 真会话 > 预会话）。 */
+  const handleSelectGroup = useCallback(
+    (group: GroupChatListItemRead) => {
+      setPreContext(null);
+      setSelectedSessionId(null);
+      setSelectedGroup(group);
+      setSelectedGroupId(group.id);
+      syncSessionParam(null);
+    },
+    [syncSessionParam],
+  );
+
+  /** 建群成功（向导 onCreated）：关向导 + 选中新群（挂载点就位；GroupChatRead
+   *  归一为列表项形态——后两个列表扩展字段占位，invalidate 重拉后覆盖）。 */
+  const handleGroupCreated = useCallback(
+    (group: GroupChatRead) => {
+      setGroupWizardOpen(false);
+      setPreContext(null);
+      setSelectedSessionId(null);
+      setSelectedGroupId(group.id);
+      setSelectedGroup({ ...group, online_member_ids: [], last_message: null });
+      syncSessionParam(null);
+    },
+    [syncSessionParam],
   );
 
   return (
@@ -462,10 +525,18 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             // 用户切走（task-06 / FR-03）：清预会话态不残留。
             setPreContext(null);
             setSelectedSessionId(s.id);
+            // task-07：切单聊清群选中（右侧分支让位真会话面板）。
+            setSelectedGroupId(null);
+            setSelectedGroup(null);
             // ql-20260824-001：选中落 URL（刷新保持当前会话）。
             syncSessionParam(s.id);
           }}
           onNewInGroup={handleNewInGroup}
+          /* task-07：群聊分区接线——选中群行/分区头「＋」开建群向导
+             （onSelectGroup 传入即启用分区，见 session-list-panel 注释）。 */
+          selectedGroupId={selectedGroupId}
+          onSelectGroup={handleSelectGroup}
+          onNewGroup={() => setGroupWizardOpen(true)}
           defaultExpandedWorkspaceId={
             scope?.kind === "workspace" ||
             scope?.kind === "change" ||
@@ -514,7 +585,18 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             return results.filter((r) => r.status === "rejected").length;
           }}
         />
-        {selectedSessionId ? (
+        {/* task-07（FR-01）：选中群 → 群聊面板（task-08 GroupChatPanel 接管原
+            GroupChatPanelMount：平铺时间线 + SSE 消费 + 输入区 + 右列成员面板；
+            key 重挂载契约照 SessionPanel——换群即清 SSE/时间线/typing 状态；
+            右侧优先级第一分支）。 */}
+        {selectedGroupId ? (
+          <GroupChatPanel
+            key={selectedGroupId}
+            groupId={selectedGroupId}
+            group={selectedGroup}
+            onSessionListRefresh={refreshSessionLists}
+          />
+        ) : selectedSessionId ? (
           <SessionPanel
             key={selectedSessionId}
             mode="page"
@@ -609,6 +691,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
         onCancel={() => setPickerOpen(false)}
         onPick={handlePickerPick}
       />
+      {/* task-07（FR-01/FR-04）：三步建群向导（分区头「＋」触发；成功
+          invalidate ["groupChats"] + 选中新群见 handleGroupCreated）。 */}
+      <CreateGroupWizard
+        open={groupWizardOpen}
+        defaultWorkspaceId={scopedPickerWorkspaceId()}
+        onCancel={() => setGroupWizardOpen(false)}
+        onCreated={handleGroupCreated}
+      />
     </PageContainer>
   );
 }
@@ -672,3 +762,4 @@ export function resolveDefaultMachineId(
   );
   return byHeartbeat[0]?.id ?? null;
 }
+

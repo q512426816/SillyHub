@@ -385,6 +385,12 @@ export function SessionInputBar({
           },
         };
         break;
+      case "member":
+        // task-09（2026-09-01-session-group-chat / FR-15）：群成员 @ 回填纯文本
+        // 昵称（「@全体」同口径）——@路由在后端解析，前端不做成员绑定槽位
+        //（task 卡 constraints），mentions 槽位零新增。
+        insertKey = item.entity.displayName.trim();
+        break;
     }
     const picked = applyMentionPick(value, detection, insertKey);
     onChange(picked.value);

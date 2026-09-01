@@ -379,6 +379,16 @@ from app.modules.daemon.grants.router import router as grants_router  # noqa: E4
 
 router.include_router(grants_router)
 
+# 2026-09-01-session-group-chat task-02：挂载群聊管理端点（群 CRUD/成员管理，
+# design §6.1）。仿 grants_router 先例在本 router 静态区 include（先于后文动态
+# 路由），复用 /daemon prefix 经 main.py 挂 /api 后落地 /api/daemon/group-chats
+# 系列（design §6.1 写的 /api/group-chats 属路径偏差——本变更不动 main.py，
+# 照 audit_router 先例记录于 group/router.py 模块注释）。群消息/typing 端点
+# 分属 task-03/06，此处不挂载。
+from app.modules.daemon.group.router import router as group_chat_router  # noqa: E402
+
+router.include_router(group_chat_router)
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 # 管理 UI 端点用 runtime:admin；daemon 自身的注册/心跳/lease 生命周期仍走 get_current_principal
 RuntimeAdminUser = Annotated[User, Depends(require_permission_any(Permission.RUNTIME_ADMIN))]
@@ -2511,6 +2521,9 @@ _SessionStatusQuery = Literal["pending", "active", "reconnecting", "ended", "fai
 # task-06 / FR-02：引擎胶囊 tab 过滤（与 create 的 InteractiveProviderLiteral 同域，
 # Literal 校验 → 未知值 422，与 status 处理一致）。
 _SessionProviderQuery = Literal["claude", "codex"]
+# 2026-09-01-session-group-chat task-02：会话形态过滤 Literal（未知值 422，与
+# status/provider 同口径）。
+_SessionKindQuery = Literal["chat", "group", "group_member"]
 
 
 @router.get(
@@ -2548,6 +2561,11 @@ async def list_sessions(
     # ql-20260831-015：HTTP 默认改 None=不过滤（全部，含已归档）——「全部状态」
     # 筛选语义即全部；service 层默认仍 False（内部调用零回归）。
     archived: bool | None = Query(default=None),
+    # 2026-09-01-session-group-chat task-02 / design §5.3：会话形态过滤——默认
+    # 'chat'（存量口径），群聊列表走新端点 GET /api/daemon/group-chats（按成员
+    # 表过滤），群/影子会话不泄漏进普通列表；显式传 'group'/'group_member'
+    # 可选覆盖（admin debug 等），None=不过滤（照 archived 三态先例）。
+    session_kind: _SessionKindQuery | None = Query(default="chat"),
 ) -> AgentSessionListResponse:
     """List the current user's AgentSessions (owner-scoped, stable paging).
 
@@ -2583,7 +2601,12 @@ async def list_sessions(
     from app.modules.agent.model import AgentRun, AgentRunLog
 
     svc = DaemonService(session)
-    items, total = await svc.list_agent_sessions(
+    # 2026-09-01-session-group-chat task-02：session_kind 直传 SessionService——
+    # facade（daemon/service.py）不在本任务 allowed_paths，签名暂未同步该参数；
+    # service 层参数带默认值 'chat'，facade 既有调用方零影响（模块卡「签名需
+    # 同步，缺省会 500」只针对无默认参数）。经 facade 已持有的 _sess 子服务
+    # 引用透传（permission_service `self._svc._session` 穿透访问同款先例）。
+    items, total = await svc._sess.list_agent_sessions(
         user.id,
         limit=limit,
         offset=offset,
@@ -2598,6 +2621,7 @@ async def list_sessions(
         ppm_item_kind=ppm_item_kind,
         ppm_item_id=ppm_item_id,
         archived=archived,
+        session_kind=session_kind,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
     # 2026-08-23-sessions-workspace-hub task-01 / FR-05 / D-108@v2：批量查
@@ -3244,7 +3268,15 @@ async def _stream_sessions_events(user_id: str) -> AsyncGenerator[str, None]:
                     payload = {}
                 # 单频道广播（D-005）：只下发属于当前用户的信号，其余静默跳过
                 # （跳过不产出帧，继续等下一条）。
-                if payload.get("user_id") == user_id:
+                # 2026-09-01-session-group-chat task-06（design §5.3 audience）：
+                # 命中条件扩为「user_id == 当前用户 或 当前用户 in
+                # audience_user_ids（群事件内嵌的全体用户成员 id）」——群事件
+                # 的 user_id 位是群主，成员经 audience 命中；单聊事件不带该
+                # 字段，行为零漂移。
+                audience_ids = payload.get("audience_user_ids")
+                if payload.get("user_id") == user_id or (
+                    isinstance(audience_ids, list) and user_id in audience_ids
+                ):
                     yield f"data: {raw}\n\n"
                     emitted = True
             if emitted:
@@ -3305,14 +3337,39 @@ async def stream_session_logs(
                 )
             )
         ).scalar_one_or_none()
+        if owned is None:
+            # 2026-09-01-session-group-chat task-02 / design §5.3：群会话 SSE
+            # （kind='group'）走参与者判定（成员表命中 → workspace admin），
+            # 影子会话（kind='group_member'）仅属主/admin（内部链路）。chat
+            # 首查未命中时本探测返回 None → 维持原 404（零改动）。
+            from app.modules.daemon.group.service import get_group_accessible_session
+
+            owned = await get_group_accessible_session(
+                session,
+                session_id=session_id,
+                user_id=user.id,
+            )
         if owned is not None:
             # 构造生成器对象（惰性求值，此处不执行其 body）；session 随
             # async with 结束立即归还，stream_session_logs 内部自建短 session。
             # task-07：外层包一层 _inject_run_error_events，在 failed turn 后追加
             # run_error 帧（透传 ModelError）；既有事件流不变。
+            # 2026-09-01-session-group-chat task-06（design §5.4）：群会话 SSE
+            # 生成器多路订阅——额外订阅 typing 频道（事件合流进同一 SSE 流）+
+            # presence key（循环内 touch 续期）。chat / 影子（group_member）
+            # 不传可选参数 → 单订阅原路径零改动。
+            stream_kwargs: dict[str, str] = {}
+            if owned.session_kind == "group":
+                from app.modules.daemon.group.service import (
+                    group_presence_key,
+                    group_typing_channel,
+                )
+
+                stream_kwargs["typing_channel"] = group_typing_channel(owned.id)
+                stream_kwargs["presence_key"] = group_presence_key(owned.id, user.id)
             gen = _inject_run_error_events(
                 session_id,
-                AgentService(session).stream_session_logs(session_id),
+                AgentService(session).stream_session_logs(session_id, **stream_kwargs),
             )
     if owned is None:
         raise DaemonSessionNotFound(

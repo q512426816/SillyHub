@@ -701,6 +701,10 @@ class DaemonPermissionService:
         """
         # Read-only ownership check (the lock is harmless for a GET and keeps
         # the helper self-contained; we commit immediately to release it).
+        # 2026-09-01-session-group-chat task-02 / design §5.3：群会话（kind='group'）
+        # 参与者制分支经 _get_owned_session_for_update 内部继承（成员表命中 →
+        # workspace admin → 404 不泄露存在性）；群/影子会话 manual_approval 恒
+        # 关（首期审批不进群，§9.1），本路径仅防漏兜底。
         await self._svc._get_owned_session_for_update(session_id, user_id)
         await self._svc._session.commit()
 
@@ -745,6 +749,8 @@ class DaemonPermissionService:
         Q&A 不再返回）。
         """
         # Read-only ownership check (same as list_pending_dialogs).
+        # 2026-09-01-session-group-chat task-02：群会话参与者制分支同经
+        # _get_owned_session_for_update 继承（见 list_pending_dialogs 注释）。
         await self._svc._get_owned_session_for_update(session_id, user_id)
         await self._svc._session.commit()
 
@@ -941,6 +947,9 @@ class DaemonPermissionService:
           5. send WS downlink (504 if runtime offline), publish permission_resolved SSE.
         """
         session_obj = await self._svc._get_owned_session_for_update(session_id, user_id)
+        # 2026-09-01-session-group-chat task-02 / design §5.3：群会话参与者制
+        # 分支同经 _get_owned_session_for_update 继承（见 list_pending_dialogs
+        # 注释）；群/影子会话 manual_approval 恒关，下方守卫天然兜底拒答。
         if (session_obj.status or "") not in ACTIVE_SESSION_STATUSES:
             raise DaemonSessionNotActive(
                 f"AgentSession '{session_id}' is not active (status={session_obj.status}).",

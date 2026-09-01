@@ -572,6 +572,15 @@ class AgentRunLog(BaseModel, table=True):
         default=None,
         sa_column=Column(Text, nullable=True),
     )
+    # 2026-09-01-session-group-chat task-01（design §3.4 / §5.2）：投影行身份
+    # JSON（DB 列名 ``metadata``——SQLAlchemy ``metadata`` 保留名，属性名用
+    # ``metadata_``，daemon/model.py 同款先例）。群聊桥接投影行双写时落
+    # ``{member_id, member_name, source_log_id}``，前端回放据此还原发言者；
+    # 存量行 NULL（单聊日志不写本列，零回归）。
+    metadata_: dict | None = Field(
+        default=None,
+        sa_column=Column("metadata", JSON, nullable=True),
+    )
 
 
 class AgentSession(BaseModel, table=True):
@@ -618,6 +627,10 @@ class AgentSession(BaseModel, table=True):
         # 索引——派发门 / 治理口径按深度过滤的查询键（迁移 20260826020000 同步建；
         # 对齐 ix_agent_runs_mission_id 补声明惯例，防 autogenerate 漂移）。
         Index("ix_agent_sessions_tree_depth", "tree_depth"),
+        # 2026-09-01-session-group-chat task-01（design §3.1）：会话形态索引——
+        # list_agent_sessions 的 session_kind 谓词过滤查询键（task-02 消费；
+        # 迁移 20260902010000 同步建，防 autogenerate 漂移）。
+        Index("ix_agent_sessions_session_kind", "session_kind"),
     )
 
     id: uuid.UUID = Field(
@@ -817,6 +830,20 @@ class AgentSession(BaseModel, table=True):
     tree_depth: int = Field(
         default=0,
         sa_column=Column(Integer, nullable=False, default=0, server_default=text("0")),
+    )
+    # ── 会话形态（2026-09-01-session-group-chat task-01，design §3.1）──
+    # 'chat'（默认，存量单聊零回归）| 'group'（群时间线会话）| 'group_member'
+    # （agent 成员影子会话——§5.1：影子 parent_session_id 刻意 NULL，群↔影子
+    # 关联只经成员表 shadow_session_id 反向指针）。server_default 'chat' 对齐
+    # origin 列写法，迁移 20260902010000 对存量行免回填即得 chat 语义
+    # （约束：存量行为零变更）；列表过滤走 ix_agent_sessions_session_kind。
+    session_kind: str = Field(
+        default="chat",
+        sa_column=Column(
+            String(16),
+            nullable=False,
+            server_default=text("'chat'"),
+        ),
     )
 
 
@@ -1094,6 +1121,253 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
         ),
     )
     updated_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+# ── 群聊（2026-09-01-session-group-chat task-01，design §3.2/§3.3）──
+# 群会话桥接架构（design §2）：agent_group_chats 行 = 群聚合根（session_id
+# UNIQUE 指向群时间线 AgentSession(kind='group')）；agent_group_members 行 =
+# 成员（用户成员 + agent 成员六要素）；群↔影子会话关联只经成员表
+# shadow_session_id 反向指针（§5.1 硬约束：影子会话不挂 parent_session_id）。
+
+
+class AgentGroupChat(BaseModel, table=True):
+    """群聊聚合根（design §3.2）——一行一个群，1:1 挂群时间线会话。
+
+    群会话（kind='group'）承载统一消息时间线（复用现有 SSE/日志/软删管线）；
+    本表只存群维度元数据与护栏参数（互@开关/深度/背景摘要窗口）。成员
+    见 ``AgentGroupMember``。
+    """
+
+    __tablename__ = "agent_group_chats"
+    __table_args__ = (
+        # 群时间线会话 1:1（design §3.2：session_id UNIQUE FK agent_sessions）。
+        UniqueConstraint("session_id", name="uq_agent_group_chats_session"),
+        # 权限锚工作区维度的群列表兜底查询（§5.3 workspace admin 分支）。
+        Index("ix_agent_group_chats_workspace", "workspace_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    # 群时间线会话（AgentSession.session_kind='group'）。会话硬删随删群
+    # （CASCADE）；既有会话管理是软删（deleted_at），不触发本 FK。
+    session_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # 权限锚：群挂在一个工作空间下（成员校验的 workspace admin 兜底分支，§5.3）。
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    title: str = Field(sa_column=Column(String(120), nullable=False))
+    # 群主（影子会话 user_id 同源，计量归属 design §9.2）。
+    created_by: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # agent 互@协作开关（design §4.4，默认开；关闭=严格 openclaw 模式，
+    # agent 回复中的 @ 为纯文本）。
+    agent_cross_mention: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, default=True),
+    )
+    # 协作链深度上限（§4.4 防环护栏 1，默认 2；达深度不再触发只作纯文本）。
+    cross_mention_depth: int = Field(
+        default=2,
+        sa_column=Column(Integer, nullable=False, default=2),
+    )
+    # 群背景摘要条数（§4.2，默认 20——触发成员时查群时间线最近 N 条）。
+    context_window: int = Field(
+        default=20,
+        sa_column=Column(Integer, nullable=False, default=20),
+    )
+    # 预留护栏参数等（§3.2 settings_json；首期空置）。
+    settings_json: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    # 解散群（group.ended）置位；软删（deleted_at）与之正交（对齐
+    # AgentSession.ended_at/deleted_at 语义）。
+    ended_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+class AgentGroupMember(BaseModel, table=True):
+    """群成员行（design §3.3）——用户成员与 agent 成员共用一张表。
+
+    - 用户成员：``member_type='user'`` + ``user_id``（NOT NULL 由 service 层
+      校验——DB 无法做条件 NOT NULL；防重复邀请由部分唯一索引兜底）；
+    - agent 成员：``member_type='agent'`` + 六要素（机器 runtime / 工作区
+      workspace / 引擎 provider / 模型 llm_provider / 智能体方案
+      agent_profile / 群内昵称 display_name——即 @提及词，群内全局唯一）；
+    - ``shadow_session_id``：该成员影子会话的反向指针（懒创建后回填，
+      design §3.3/§5.1）；``shadow_status`` 供成员面板绿点展示。
+    """
+
+    __tablename__ = "agent_group_members"
+    __table_args__ = (
+        # 群内昵称全局唯一（design §3.3：UNIQUE(group_id, display_name)，用户
+        # 与 agent 共用同一命名空间——@路由无歧义，用户与 agent 不可同名）。
+        # 前导列 group_id 兼充按群取成员的查询索引。
+        UniqueConstraint(
+            "group_id",
+            "display_name",
+            name="uq_agent_group_members_group_display_name",
+        ),
+        # user 成员防重复邀请（design §3.3：UNIQUE(group_id, user_id)）——
+        # agent 成员 user_id NULL 不参与唯一约束（部分唯一索引，
+        # uq_agent_missions_session_active 先例：postgresql_where 供 PG、
+        # sqlite_where 供测试侧 create_all，双方言同语义）。
+        Index(
+            "uq_agent_group_members_group_user",
+            "group_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("user_id IS NOT NULL"),
+            sqlite_where=text("user_id IS NOT NULL"),
+        ),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    # 群删除级联清成员（design §3.3：FK agent_group_chats CASCADE）。
+    group_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_group_chats.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    member_type: str = Field(sa_column=Column(String(8), nullable=False))
+    # 'user' | 'agent'
+    # 群内昵称 = @提及词（群内唯一，见 __table_args__ 约束；六要素之一）。
+    display_name: str = Field(sa_column=Column(String(40), nullable=False))
+    # 用户成员归属（member_type='user' 时由 service 层保证非 NULL；用户删
+    # 则成员行随删）。
+    user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    # ── agent 成员六要素（member_type='agent'；用户成员全 NULL）──
+    # ① 机器（pinned，§4.3 懒建走 grants 授权分支；对齐 AgentSession.runtime_id）。
+    runtime_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_runtimes.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    # ② 工作区（cwd 锚，可与群工作区不同——"一项目多工作区"分工；
+    # 对齐 AgentSession.workspace_id SET NULL 语义）。
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # ③ 引擎类型（claude/codex 等）。
+    provider: str | None = Field(
+        default=None,
+        sa_column=Column(String(20), nullable=True),
+    )
+    # ④ 模型（llm_providers；删则 SET NULL，成员配置保留，对齐
+    # AgentRun.llm_provider_id 先例）。
+    llm_provider_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("llm_providers.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # ⑤ 智能体方案（人格/技能/工具集，AgentProfile；删则 SET NULL）。
+    agent_profile_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_profiles.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # ⑥ 群内昵称 = 上方 display_name（六要素归并到同一列，不重复存）。
+    # 冗余快照（machine_name/agent_name/profile_name 等，供成员列表 chips
+    # 免 N+1，对齐 AgentSession.config_snapshot 先例）。
+    config_snapshot: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 影子会话反向指针（§3.3/§5.1：懒创建后回填；影子会话不挂
+    # parent_session_id，本列是群↔影子唯一关联通道；无 ondelete——会话软删
+    # 不硬删，同 agent_missions.session_id 先例）。
+    shadow_session_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id"),
+            nullable=True,
+        ),
+    )
+    # none/pending/active/failed（成员面板绿点，§7）。
+    shadow_status: str = Field(
+        default="none",
+        sa_column=Column(String(16), nullable=False, default="none"),
+    )
+    # 邀请人（nullable：群主建群初始成员可不记；用户删则 SET NULL）。
+    invited_by: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    joined_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    # removed_at 非空=已移除（成员生命周期软标记，design §3.3）。
+    removed_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )

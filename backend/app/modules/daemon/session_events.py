@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -28,21 +29,31 @@ async def publish_sessions_changed(
     event: SessionChangeEvent,
     session_id: uuid.UUID,
     user_id: uuid.UUID | None,
+    *,
+    audience_user_ids: Sequence[uuid.UUID] | None = None,
 ) -> None:
     """向 ``SESSIONS_CHANGED_CHANNEL`` 发布一条列表变更信号。
 
-    * ``user_id`` 为 None 直接跳过——无主数据不进任何用户的列表视图，广播无意义。
+    * ``user_id`` 为 None 且无 audience 直接跳过——无主数据不进任何用户的
+      列表视图，广播无意义。
+    * ``audience_user_ids``（2026-09-01-session-group-chat task-06，design §5.3）：
+      群会话事件的受众用户 id 列表**内嵌进 payload**（订阅侧免每事件查库）；
+      ``_stream_sessions_events`` 过滤为「payload.user_id 命中或当前用户在
+      audience_user_ids 中」。单聊调用点不传 → payload 不含该字段，存量行为
+      零漂移。
     * 任何异常（Redis 不可用 / publish 超时 / 序列化失败）只记 warning 不抛，
       保证调用方（创建 / 结束 / 删除等业务路径）不被信号基建拖挂。
     """
-    if user_id is None:
+    if user_id is None and not audience_user_ids:
         return
-    payload = {
+    payload: dict[str, object] = {
         "event": event,
         "session_id": str(session_id),
-        "user_id": str(user_id),
+        "user_id": str(user_id) if user_id is not None else None,
         "at": datetime.now(UTC).isoformat(),
     }
+    if audience_user_ids:
+        payload["audience_user_ids"] = [str(uid) for uid in audience_user_ids]
     try:
         redis = get_redis()
         await redis.publish(SESSIONS_CHANGED_CHANNEL, json.dumps(payload))

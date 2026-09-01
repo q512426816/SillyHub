@@ -1,0 +1,918 @@
+"""task-06（2026-09-01-session-group-chat）实时通道测试——typing/presence/audience。
+
+覆盖（design §5.4 / §5.3 / 任务卡 acceptance）：
+
+- typing 端点：POST /group-chats/{id}/typing → publish ``group_typing:{群id}``
+  payload 形态（event/member_name/member_kind='user'/typing/preview/ts）、
+  preview 400 字裁剪、typing=False 停止事件、非成员 404、**不落库**（群时间
+  线零新行——ephemeral 纪律）；
+- agent typing 自动事件：@触发命中（影子 run 开始，非排队）→ member_kind=
+  'agent' typing 事件；忙轮排队（run 未开始）不发；
+- presence：群 SSE 生成器循环 touch（``SET key "1" EX 60``）+ 间隔节流（首
+  轮立即 touch）；``get_online_member_ids`` 读 ``group_presence:{gid}:*``
+  keys（脏 key 容错 / Redis 故障降级空数组）；群列表/详情 ``online_member_ids``
+  接通（task-02 占位字段填充）；
+- audience：``_stream_sessions_events`` 过滤「user_id 命中 or in
+  audience_user_ids」（成员收 / 非成员不收）；群操作（建群/解散）publish
+  ``agent_sessions:changed`` payload 内嵌全部用户成员 id；
+- 多路订阅合流：``stream_session_logs(typing_channel=...)`` 双 pubsub 订阅
+  agent_session:{id} + group_typing:{id}，log 与 typing 事件同流合流、静默期
+  typing 事件顶掉 keepalive 帧；消费方断开（aclose）后**两个** pubsub 都
+  unsubscribe + aclose（防 Redis 订阅连接泄漏）；单聊调用点不传可选参数 →
+  仅创建一个 pubsub（单订阅路径零改动护栏）。
+
+夹具范式镜像 ``test_group_mention_pipeline.py`` / ``test_session_sse.py`` /
+``test_sessions_events_stream.py``（in-memory SQLite + httpx ASGI client +
+手签 JWT + fake redis/pubsub mock）；GLMConfig.from_env → None（知识库铁律：
+涉 LLM 路径不走出网）。
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import patch as mock_patch
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.agent.model import (
+    AgentGroupMember,
+    AgentRunLog,
+    AgentSession,
+)
+from app.modules.agent.service import (
+    GROUP_PRESENCE_TTL_SEC,
+    AgentService,
+)
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
+from app.modules.auth.permissions import Permission
+from app.modules.daemon.group.service import get_online_member_ids
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.router import _stream_sessions_events
+from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
+from app.modules.workspace.model import Workspace
+
+# ── Helpers（镜像 test_group_mention_pipeline.py 夹具范式）────────────────────
+
+
+async def _token_for(user: User) -> str:
+    """为用户行手签 JWT（get_current_principal Bearer 路径）。"""
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+
+    token, _ = create_access_token(
+        user_id=user.id,
+        email=user.email or "",
+        is_admin=bool(user.is_platform_admin),
+        settings=get_settings(),
+    )
+    return token
+
+
+async def _create_user_with_token(
+    db_session: AsyncSession, *, name: str, admin: bool = False
+) -> tuple[User, str]:
+    user = User(
+        id=uuid.uuid4(),
+        email=f"grp6-{name}-{uuid.uuid4()}@example.com",
+        password_hash="irrelevant",
+        display_name=name,
+        status="active",
+        is_platform_admin=admin,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user, await _token_for(user)
+
+
+def _headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _grant_workspace_role(
+    db_session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    permissions: list[Permission],
+) -> None:
+    role = Role(
+        id=uuid.uuid4(),
+        key=f"grp6-{uuid.uuid4().hex[:8]}",
+        name="grp6-test-role",
+        description="task-06 seed",
+        is_system=False,
+    )
+    db_session.add(role)
+    await db_session.flush()
+    for p in permissions:
+        db_session.add(RolePermission(role_id=role.id, permission=p))
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            role_id=role.id,
+            granted_by=None,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+
+async def _make_workspace(db_session: AsyncSession) -> Workspace:
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="grp6-ws",
+        slug=f"grp6-ws-{uuid.uuid4().hex[:8]}",
+        root_path="C:/tmp/grp6-ws",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+    return ws
+
+
+async def _seed_runtime(
+    db_session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    hostname: str = "grp6-host",
+) -> tuple[DaemonInstance, DaemonRuntime]:
+    instance = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname=hostname,
+        server_url="http://test.local",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    db_session.add(instance)
+    runtime = DaemonRuntime(
+        id=uuid.uuid4(),
+        daemon_instance_id=instance.id,
+        user_id=user_id,
+        name=hostname,
+        provider="claude",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    db_session.add(runtime)
+    await db_session.commit()
+    return instance, runtime
+
+
+async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> SimpleNamespace:
+    """每测试群聊环境：workspace + 群主（TASK_RUN_AGENT 角色）+ 在线机器。"""
+    ws = await _make_workspace(db_session)
+    owner, owner_token = await _create_user_with_token(db_session, name=owner_name)
+    await _grant_workspace_role(
+        db_session,
+        workspace_id=ws.id,
+        user_id=owner.id,
+        permissions=[Permission.TASK_RUN_AGENT],
+    )
+    instance, runtime = await _seed_runtime(db_session, owner.id)
+    return SimpleNamespace(
+        ws=ws, owner=owner, owner_token=owner_token, instance=instance, runtime=runtime
+    )
+
+
+async def _env_user(
+    db_session: AsyncSession, env: SimpleNamespace, *, name: str, admin: bool = False
+) -> tuple[User, str]:
+    user, token = await _create_user_with_token(db_session, name=name, admin=admin)
+    await _grant_workspace_role(
+        db_session,
+        workspace_id=env.ws.id,
+        user_id=user.id,
+        permissions=[Permission.TASK_RUN_AGENT],
+    )
+    return user, token
+
+
+async def _create_group(
+    client: AsyncClient,
+    owner_token: str,
+    *,
+    workspace_id: uuid.UUID,
+    title: str = "测试群",
+    user_members: list[dict] | None = None,
+    agent_members: list[dict] | None = None,
+) -> dict:
+    payload: dict = {"title": title, "workspace_id": str(workspace_id)}
+    if user_members:
+        payload["user_members"] = user_members
+    if agent_members:
+        payload["agent_members"] = agent_members
+    resp = await client.post("/api/daemon/group-chats", json=payload, headers=_headers(owner_token))
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _agent_config(runtime_id: uuid.UUID, name: str = "小码") -> dict:
+    return {"display_name": name, "runtime_id": str(runtime_id), "provider": "claude"}
+
+
+async def _send_typing(
+    client: AsyncClient,
+    token: str,
+    group_id: uuid.UUID | str,
+    *,
+    typing: bool = True,
+    preview: str | None = None,
+):
+    body: dict = {"typing": typing}
+    if preview is not None:
+        body["preview"] = preview
+    return await client.post(
+        f"/api/daemon/group-chats/{group_id}/typing", json=body, headers=_headers(token)
+    )
+
+
+async def _send_message(client: AsyncClient, token: str, group_id: uuid.UUID | str, content: str):
+    return await client.post(
+        f"/api/daemon/group-chats/{group_id}/messages",
+        json={"content": content},
+        headers=_headers(token),
+    )
+
+
+async def _agent_member_row(
+    db_session: AsyncSession, group_id: uuid.UUID, display_name: str = "小码"
+) -> AgentGroupMember:
+    rows = list(
+        (
+            await db_session.execute(
+                select(AgentGroupMember).where(AgentGroupMember.group_id == group_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    hits = [m for m in rows if m.member_type == "agent" and m.display_name == display_name]
+    assert hits, f"agent 成员「{display_name}」不存在"
+    return hits[0]
+
+
+async def _seed_shadow_with_active_run(
+    db_session: AsyncSession,
+    *,
+    member: AgentGroupMember,
+    owner_user_id: uuid.UUID,
+    runtime_id: uuid.UUID,
+    run_status: str = "running",
+) -> AgentSession:
+    """落一行 active 影子会话 + 指定状态 run（忙轮排队路径测试替身）。"""
+    from app.modules.agent.model import AgentRun
+    from app.modules.daemon.model import DaemonTaskLease
+
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime_id,
+        kind="interactive",
+        status="active",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    db_session.add(lease)
+    await db_session.flush()
+    shadow = AgentSession(
+        id=uuid.uuid4(),
+        user_id=owner_user_id,
+        runtime_id=runtime_id,
+        lease_id=lease.id,
+        provider="claude",
+        status="active",
+        turn_count=1,
+        created_at=datetime.now(UTC),
+        session_kind="group_member",
+    )
+    db_session.add(shadow)
+    await db_session.flush()
+    db_session.add(
+        AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status=run_status,
+            spec_strategy="interactive",
+            agent_session_id=shadow.id,
+            user_id=owner_user_id,
+        )
+    )
+    member.shadow_session_id = shadow.id
+    member.shadow_status = "active"
+    db_session.add(member)
+    await db_session.commit()
+    return shadow
+
+
+def _mock_hub(*, connected: bool = True) -> MagicMock:
+    """ws_hub 替身（test_session_create_config._mock_hub 先例）。"""
+    hub = MagicMock()
+    hub.is_connected.return_value = connected
+    hub.connected_runtime_ids = []
+    hub.connected_daemon_ids = []
+    hub.send_wakeup = AsyncMock(return_value=True)
+    hub.send_session_control = AsyncMock(return_value=connected)
+    return hub
+
+
+def _build_mock_pubsub(
+    messages: list[dict[str, Any] | None],
+    *,
+    drain_silence: bool = False,
+) -> MagicMock:
+    """假 pubsub：get_message 依序吐出 ``messages``，耗尽后永远返回 None。
+
+    ``None`` 条目建模静默（timeout 路径）；dict 条目为真实 Redis pub/sub
+    消息形态（``{"type": "message", "data": raw}``）。typing 频道的非阻塞
+    抽干轮询（``_drain_typing_frames``）共用同一 fake（kwargs 兼容两种调用
+    形态：``timeout=25`` / ``ignore_subscribe_messages=True, timeout=0.0``）。
+    """
+    state = {"remaining": list(messages)}
+
+    pubsub = MagicMock()
+    pubsub.subscribe = AsyncMock()
+    pubsub.unsubscribe = AsyncMock()
+    pubsub.aclose = AsyncMock()
+
+    async def fake_get_message(**kwargs: Any) -> dict[str, Any] | None:
+        if state["remaining"]:
+            return state["remaining"].pop(0)
+        return None  # 耗尽 → 永久静默（消费方 break + aclose 收尾）
+
+    pubsub.get_message = fake_get_message
+    return pubsub
+
+
+def _mock_redis_with_pubsubs(pubsubs: list[MagicMock]) -> MagicMock:
+    """假 redis：``pubsub()`` 依序吐出给定 pubsub（多路订阅测试数据源）。"""
+    redis = MagicMock()
+    redis.set = AsyncMock()
+    redis.pubsub = MagicMock(side_effect=list(pubsubs))
+    return redis
+
+
+async def _collect(gen: Any, limit: int) -> list[str]:
+    """驱动生成器收集前 ``limit`` 帧，然后显式 aclose（触发 finally 清理）。"""
+    collected: list[str] = []
+    async for ev in gen:
+        collected.append(ev)
+        if len(collected) >= limit:
+            break
+    await gen.aclose()
+    return collected
+
+
+def _typing_publishes(redis: AsyncMock | MagicMock, group_id: uuid.UUID) -> list[dict]:
+    """从 fake redis publish 调用记录中筛出 typing 频道事件 payload。"""
+    out = []
+    for call in redis.publish.call_args_list:
+        channel, raw = call.args[0], call.args[1]
+        if channel == f"group_typing:{group_id}":
+            out.append(json.loads(raw))
+    return out
+
+
+# ── 共用 mock 夹具 ───────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _glm_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """知识库铁律：GLM delegation 配置返 None（不走真实 LLM 网关）。"""
+    from app.modules.agent.delegation import GLMConfig
+
+    monkeypatch.setattr(GLMConfig, "from_env", classmethod(lambda cls: None))
+
+
+@pytest.fixture()
+def mocked_hub():
+    hub = _mock_hub()
+    with mock_patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
+        yield hub
+
+
+@pytest.fixture()
+def mocked_group_redis():
+    """群频道 publish 替身（group service 侧 get_redis）——typing/log 事件断言源。"""
+    redis = AsyncMock()
+    redis.publish = AsyncMock()
+    with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
+        yield redis
+
+
+@pytest.fixture()
+def mocked_sessions_events_redis():
+    """agent_sessions:changed publish 替身（session_events 模块侧）。"""
+    redis = AsyncMock()
+    redis.publish = AsyncMock()
+    with mock_patch("app.modules.daemon.session_events.get_redis", return_value=redis):
+        yield redis
+
+
+@pytest.fixture()
+def readiness_ok():
+    """session readiness 替身：inject 前 wait 立即返 True（免 8s 超时）。"""
+    stub = MagicMock()
+    stub.wait = AsyncMock(return_value=True)
+    with mock_patch("app.modules.daemon.session.service.get_session_readiness", return_value=stub):
+        yield stub
+
+
+@pytest.fixture()
+def instant_keepalive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """keepalive 间隔置 0——静默/跳过即触发（test_sessions_events_stream 先例）。"""
+    monkeypatch.setattr("app.modules.daemon.router.SESSIONS_EVENTS_KEEPALIVE_INTERVAL_SEC", 0.0)
+
+
+# ── typing 端点（design §5.4）────────────────────────────────────────────────
+
+
+class TestTypingEndpoint:
+    async def test_typing_publish_payload_shape_and_preview_truncation(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """payload 形态 + preview 400 字裁剪 + 不落时间线（ephemeral 纪律）。"""
+        env = await _make_env(db_session)
+        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        group_id = uuid.UUID(data["id"])
+
+        resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 500)
+        assert resp.status_code == 204, resp.text
+
+        events = _typing_publishes(mocked_group_redis, group_id)
+        assert len(events) == 1
+        payload = events[0]
+        assert payload["event"] == "typing"
+        assert payload["member_name"] == "群主"  # 建群者成员行昵称
+        assert payload["member_kind"] == "user"
+        assert payload["typing"] is True
+        assert payload["preview"] == "草" * 400  # 500 → 400 裁剪
+        assert payload["ts"]
+
+        # 不落库：typing 纯 ephemeral——库内零 AgentRunLog 行（无载体 run /
+        # 无投影 / 无任何时间线残留）。
+        all_logs = list((await db_session.execute(select(AgentRunLog))).scalars().all())
+        assert all_logs == []
+
+    async def test_typing_stop_event_without_preview(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """typing=False（发送后冲掉指示器）：preview 缺省 None。"""
+        env = await _make_env(db_session)
+        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        group_id = uuid.UUID(data["id"])
+
+        resp = await _send_typing(client, env.owner_token, group_id, typing=False)
+        assert resp.status_code == 204, resp.text
+
+        events = _typing_publishes(mocked_group_redis, group_id)
+        assert len(events) == 1
+        assert events[0]["typing"] is False
+        assert events[0]["preview"] is None
+
+    async def test_typing_non_member_404(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """非群成员 typing → 404 不泄露存在性（零 publish）。"""
+        env = await _make_env(db_session)
+        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        _outsider, outsider_token = await _env_user(db_session, env, name="圈外人")
+
+        resp = await _send_typing(client, outsider_token, data["id"])
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "HTTP_404_GROUP_CHAT_NOT_FOUND"
+        assert _typing_publishes(mocked_group_redis, uuid.UUID(data["id"])) == []
+
+
+# ── agent typing 自动事件（design §5.4：影子 run 开始）───────────────────────
+
+
+class TestAgentTypingAutoEvent:
+    async def test_mention_trigger_publishes_agent_typing(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_hub,
+        readiness_ok,
+        mocked_group_redis,
+    ) -> None:
+        """@命中（影子 run 开始，非排队）→ member_kind='agent' typing 事件。"""
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            workspace_id=env.ws.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+
+        resp = await _send_message(client, env.owner_token, group_id, "@小码 帮我看下")
+        assert resp.status_code == 200, resp.text
+        trigger = resp.json()["triggered"][0]
+        assert trigger["queued"] is False
+
+        events = _typing_publishes(mocked_group_redis, group_id)
+        assert len(events) == 1
+        payload = events[0]
+        assert payload["event"] == "typing"
+        assert payload["member_name"] == "小码"
+        assert payload["member_kind"] == "agent"
+        assert payload["typing"] is True
+        assert payload["preview"] is None  # 后端不产草稿
+
+    async def test_queued_trigger_does_not_publish_agent_typing(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """忙轮排队（run 未开始）不发 agent typing——typing 语义=正在生成。"""
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            workspace_id=env.ws.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
+        await _seed_shadow_with_active_run(
+            db_session,
+            member=member,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            run_status="running",
+        )
+
+        resp = await _send_message(client, env.owner_token, group_id, "@小码 追问")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["triggered"][0]["queued"] is True
+        assert _typing_publishes(mocked_group_redis, group_id) == []
+
+
+# ── presence（design §5.4：touch / TTL / 在线集读取）─────────────────────────
+
+
+class TestPresence:
+    async def test_stream_touches_presence_with_ttl(self, db_session: AsyncSession) -> None:
+        """群 SSE 生成器循环 touch：SET key "1" EX 60（首轮立即 touch）。"""
+        session_ps = _build_mock_pubsub([])
+        typing_ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        sid = uuid.uuid4()
+        presence_key = f"group_presence:{sid}:{uuid.uuid4()}"
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(
+            sid, typing_channel=f"group_typing:{sid}", presence_key=presence_key
+        )
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=3)
+
+        assert collected[0] == ": connected\n\n"
+        # touch 落 key + TTL 60（design §5.4）。
+        assert redis.set.await_count >= 1
+        first_call = redis.set.await_args_list[0]
+        assert first_call.args == (presence_key, "1")
+        assert first_call.kwargs == {"ex": GROUP_PRESENCE_TTL_SEC}
+        assert GROUP_PRESENCE_TTL_SEC == 60
+        # 双订阅照常建立（touch 不影响流主体）。
+        session_ps.subscribe.assert_called_once_with(f"agent_session:{sid}")
+        typing_ps.subscribe.assert_called_once_with(f"group_typing:{sid}")
+
+    async def test_presence_touch_throttled_by_interval(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """间隔节流：默认 45s 内不重复 touch；间隔置 0 后每轮都 touch。"""
+        monkeypatch.setattr("app.modules.agent.service.GROUP_PRESENCE_TOUCH_INTERVAL_SEC", 0.0)
+        session_ps = _build_mock_pubsub([])
+        typing_ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        sid = uuid.uuid4()
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(
+            sid, typing_channel=f"group_typing:{sid}", presence_key=f"group_presence:{sid}:u"
+        )
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            # 连续 3 轮循环（keepalive 帧 ×3）→ 间隔 0 下每轮都 touch。
+            await _collect(gen, limit=4)
+
+        assert redis.set.await_count >= 3
+        for call in redis.set.await_args_list:
+            assert call.kwargs == {"ex": GROUP_PRESENCE_TTL_SEC}
+
+    async def test_get_online_member_ids_parses_keys_and_tolerates_dirty(
+        self,
+    ) -> None:
+        """keys 前缀扫 → 用户 id 集；脏 key 跳过；Redis 故障降级空数组。"""
+        gid = uuid.uuid4()
+        u1, u2 = uuid.uuid4(), uuid.uuid4()
+        redis = AsyncMock()
+        redis.keys = AsyncMock(
+            return_value=[
+                f"group_presence:{gid}:{u1}",
+                f"group_presence:{gid}:{u2}",
+                f"group_presence:{gid}:garbage",  # 脏 key（截断/残留）
+                "group_presence:other:noise",
+            ]
+        )
+        with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
+            online = await get_online_member_ids(gid)
+        assert sorted(online, key=str) == sorted([u1, u2], key=str)
+
+        broken = AsyncMock()
+        broken.keys = AsyncMock(side_effect=ConnectionError("redis down"))
+        with mock_patch("app.modules.daemon.group.service.get_redis", return_value=broken):
+            assert await get_online_member_ids(gid) == []
+
+    async def test_list_and_detail_return_online_member_ids(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        """群列表/详情 online_member_ids 接通（task-02 占位字段填充）。"""
+        env = await _make_env(db_session)
+        member_user, _member_token = await _env_user(db_session, env, name="小英")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            workspace_id=env.ws.id,
+            user_members=[{"user_id": str(member_user.id), "display_name": "鲸落"}],
+        )
+        group_id = uuid.UUID(data["id"])
+
+        fake_redis = AsyncMock()
+        fake_redis.keys = AsyncMock(return_value=[f"group_presence:{group_id}:{env.owner.id}"])
+        with mock_patch("app.modules.daemon.group.service.get_redis", return_value=fake_redis):
+            resp = await client.get("/api/daemon/group-chats", headers=_headers(env.owner_token))
+            assert resp.status_code == 200
+            items = resp.json()
+            assert len(items) == 1
+            assert items[0]["online_member_ids"] == [str(env.owner.id)]
+
+            resp = await client.get(
+                f"/api/daemon/group-chats/{group_id}", headers=_headers(env.owner_token)
+            )
+            assert resp.status_code == 200
+            assert resp.json()["online_member_ids"] == [str(env.owner.id)]
+
+
+# ── audience 投影（design §5.3：过滤 + 群操作发布）───────────────────────────
+
+
+def _signal(
+    user_id: str,
+    event: str = "status_changed",
+    audience: list[str] | None = None,
+) -> str:
+    """构造与 publish_sessions_changed 同构的信号 JSON（含可选 audience）。"""
+    payload: dict[str, Any] = {
+        "event": event,
+        "session_id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "at": "2026-09-01T08:00:00+00:00",
+    }
+    if audience is not None:
+        payload["audience_user_ids"] = audience
+    return json.dumps(payload)
+
+
+class TestAudienceFilter:
+    async def test_audience_member_receives_group_event(self, instant_keepalive: None) -> None:
+        """成员收（audience 命中）/ 非成员不收（无 audience 的他人信号过滤）。"""
+        me = str(uuid.uuid4())
+        other = str(uuid.uuid4())
+        audience_raw = _signal(other, audience=[me])  # 群事件：user_id=群主，我在受众
+        foreign_raw = _signal(other)  # 他人普通信号（无 audience）→ 过滤
+        own_raw = _signal(me)  # 本人单聊信号 → 命中（存量行为零漂移）
+        pubsub = _build_mock_pubsub(
+            [
+                {"type": "message", "data": audience_raw},
+                {"type": "message", "data": foreign_raw},
+                {"type": "message", "data": own_raw},
+            ]
+        )
+        redis = MagicMock()
+        redis.pubsub.return_value = pubsub
+
+        gen = _stream_sessions_events(me)
+        with mock_patch("app.modules.daemon.router.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=5)
+
+        joined = "".join(collected)
+        assert collected[0] == ": connected\n\n"
+        assert f"data: {audience_raw}\n\n" in joined  # 成员收
+        assert f"data: {own_raw}\n\n" in joined  # user_id 命中（原路径）
+        assert f"data: {foreign_raw}\n\n" not in joined  # 非成员不收
+        pubsub.subscribe.assert_called_once_with(SESSIONS_CHANGED_CHANNEL)
+        pubsub.unsubscribe.assert_called_once_with(SESSIONS_CHANGED_CHANNEL)
+        pubsub.aclose.assert_called_once()
+
+    async def test_non_list_audience_payload_not_break_stream(
+        self, instant_keepalive: None
+    ) -> None:
+        """audience_user_ids 非 list（脏 payload）不炸流——防御 isinstance 分支。"""
+        me = str(uuid.uuid4())
+        dirty_raw = _signal(str(uuid.uuid4()), audience=None)
+        # 手工构造非 list audience（发布侧不会产生，防御订阅侧健壮性）。
+        dirty = json.loads(dirty_raw)
+        dirty["audience_user_ids"] = "not-a-list"
+        dirty_raw = json.dumps(dirty)
+        own_raw = _signal(me)
+        pubsub = _build_mock_pubsub(
+            [
+                {"type": "message", "data": dirty_raw},
+                {"type": "message", "data": own_raw},
+            ]
+        )
+        redis = MagicMock()
+        redis.pubsub.return_value = pubsub
+
+        gen = _stream_sessions_events(me)
+        with mock_patch("app.modules.daemon.router.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=4)
+
+        joined = "".join(collected)
+        assert f"data: {dirty_raw}\n\n" not in joined
+        assert f"data: {own_raw}\n\n" in joined
+        pubsub.aclose.assert_called_once()
+
+    async def test_group_create_publishes_audience(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_sessions_events_redis,
+    ) -> None:
+        """建群 → agent_sessions:changed payload 内嵌全部用户成员 id。"""
+        env = await _make_env(db_session)
+        invited, _invited_token = await _env_user(db_session, env, name="小英")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            workspace_id=env.ws.id,
+            user_members=[{"user_id": str(invited.id), "display_name": "鲸落"}],
+        )
+
+        publishes = [
+            (call.args[0], json.loads(call.args[1]))
+            for call in mocked_sessions_events_redis.publish.call_args_list
+        ]
+        signals = [p for p in publishes if p[0] == SESSIONS_CHANGED_CHANNEL]
+        assert signals, "建群未发布 agent_sessions:changed"
+        _channel, payload = signals[0]
+        assert payload["event"] == "created"
+        assert payload["session_id"] == data["session_id"]
+        assert payload["user_id"] == str(env.owner.id)  # 群主位
+        assert sorted(payload["audience_user_ids"]) == sorted([str(env.owner.id), str(invited.id)])
+
+    async def test_group_end_publishes_status_changed_with_audience(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_sessions_events_redis,
+    ) -> None:
+        """解散 → status_changed 信号全员受众（剩余用户成员 id）。"""
+        env = await _make_env(db_session)
+        invited, _invited_token = await _env_user(db_session, env, name="小英")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            workspace_id=env.ws.id,
+            user_members=[{"user_id": str(invited.id), "display_name": "鲸落"}],
+        )
+        mocked_sessions_events_redis.publish.reset_mock()
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/end", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 200, resp.text
+
+        publishes = [
+            json.loads(call.args[1])
+            for call in mocked_sessions_events_redis.publish.call_args_list
+            if call.args[0] == SESSIONS_CHANGED_CHANNEL
+        ]
+        assert publishes, "解散未发布 agent_sessions:changed"
+        payload = publishes[-1]
+        assert payload["event"] == "status_changed"
+        assert sorted(payload["audience_user_ids"]) == sorted([str(env.owner.id), str(invited.id)])
+
+
+# ── 多路订阅合流（design §5.4：双 pubsub + 释放）────────────────────────────
+
+
+class TestGroupStreamMultiSubscription:
+    async def test_log_and_typing_events_merged_and_dual_released(
+        self, db_session: AsyncSession
+    ) -> None:
+        """log（agent_session 频道）与 typing（group_typing 频道）同流合流；
+        断开后两个 pubsub 都 unsubscribe + aclose（防泄漏）。"""
+        sid = uuid.uuid4()
+        log_raw = json.dumps(
+            {
+                "event": "log",
+                "session_id": str(sid),
+                "run_id": str(uuid.uuid4()),
+                "log_id": str(uuid.uuid4()),
+                "channel": "user_input",
+                "content": "@小码 hi",
+                "timestamp": "2026-09-01T08:00:00Z",
+            }
+        )
+        typing_raw = json.dumps(
+            {
+                "event": "typing",
+                "member_name": "小码",
+                "member_kind": "agent",
+                "typing": True,
+                "preview": None,
+                "ts": "2026-09-01T08:00:01Z",
+            }
+        )
+        session_ps = _build_mock_pubsub([{"type": "message", "data": log_raw}])
+        typing_ps = _build_mock_pubsub([{"type": "message", "data": typing_raw}])
+        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(sid, typing_channel=f"group_typing:{sid}")
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=4)
+
+        assert collected[0] == ": connected\n\n"
+        # 合流顺序：日志帧后立刻抽干 typing 频道（同一 SSE 流）。
+        assert collected[1] == f"data: {log_raw}\n\n"
+        assert collected[2] == f"data: {typing_raw}\n\n"
+        # 双订阅建立 + 双释放（任务卡 constraints：防 Redis 连接泄漏）。
+        session_ps.subscribe.assert_called_once_with(f"agent_session:{sid}")
+        typing_ps.subscribe.assert_called_once_with(f"group_typing:{sid}")
+        session_ps.unsubscribe.assert_called_once_with(f"agent_session:{sid}")
+        session_ps.aclose.assert_called_once()
+        typing_ps.unsubscribe.assert_called_once_with(f"group_typing:{sid}")
+        typing_ps.aclose.assert_called_once()
+
+    async def test_typing_event_delivered_on_silence(self, db_session: AsyncSession) -> None:
+        """静默期（日志频道无消息）typing 事件照常下发，顶掉该轮 keepalive。"""
+        sid = uuid.uuid4()
+        typing_raw = json.dumps(
+            {
+                "event": "typing",
+                "member_name": "群主",
+                "member_kind": "user",
+                "typing": True,
+                "preview": "在打字…",
+                "ts": "2026-09-01T08:00:00Z",
+            }
+        )
+        session_ps = _build_mock_pubsub([])  # 日志频道永久静默
+        typing_ps = _build_mock_pubsub([{"type": "message", "data": typing_raw}])
+        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(sid, typing_channel=f"group_typing:{sid}")
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=2)
+
+        assert collected[0] == ": connected\n\n"
+        # typing 事件帧而非 keepalive（typing 频道有流量时不出空转注释帧）。
+        assert collected[1] == f"data: {typing_raw}\n\n"
+        typing_ps.aclose.assert_called_once()
+
+    async def test_single_chat_path_creates_single_pubsub(self, db_session: AsyncSession) -> None:
+        """单聊零改动护栏：不传可选参数 → 仅创建一个 pubsub（无 typing 订阅）。"""
+        sid = uuid.uuid4()
+        session_ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([session_ps])
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(sid)
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=2)
+
+        assert collected[0] == ": connected\n\n"
+        assert collected[1] == ": keepalive\n\n"
+        redis.pubsub.assert_called_once()
+        session_ps.subscribe.assert_called_once_with(f"agent_session:{sid}")
+        # presence 未启用 → 无 touch。
+        redis.set.assert_not_called()
+        session_ps.aclose.assert_called_once()

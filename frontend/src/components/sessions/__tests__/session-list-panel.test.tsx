@@ -81,6 +81,8 @@ const mocks = vi.hoisted(() => ({
   // v2 两 scope 端点保留 mock 仅为 D-003@v2 零调用断言（数据源走全局端点）。
   listWorkspaceAgentSessions: vi.fn(),
   listChangeSessions: vi.fn(),
+  // task-07（2026-09-01-session-group-chat）：群聊分区独立数据源。
+  listGroupChats: vi.fn(),
   machinesHook: vi.fn(),
   machinesRefetch: vi.fn(),
   listWorkspaces: vi.fn(),
@@ -95,11 +97,20 @@ const mocks = vi.hoisted(() => ({
 
 // 组件只消费 listAgentSessions + 树拉取上限常量（类型导入编译期擦除），
 // 局部 mock 不加载真实 daemon.ts；两 scope 端点 mock 供零调用断言。
+// task-07：listGroupChats（群分区数据源）+ createGroupChat/PROVIDER_META
+//（panel 经 create-group-wizard MemberFacepile 间接引入该模块的命名导出，
+// 不渲染向导本体，桩值不被调用）。
 vi.mock("@/lib/daemon", () => ({
   listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
   listWorkspaceAgentSessions: (...args: unknown[]) =>
     mocks.listWorkspaceAgentSessions(...args),
   listChangeSessions: (...args: unknown[]) => mocks.listChangeSessions(...args),
+  listGroupChats: (...args: unknown[]) => mocks.listGroupChats(...args),
+  createGroupChat: vi.fn(),
+  PROVIDER_META: {
+    claude: { label: "Claude Code", icon: "🟣", color: "" },
+    codex: { label: "Codex", icon: "🟢", color: "" },
+  },
   AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
 }));
 
@@ -139,6 +150,8 @@ const notifyMocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 vi.mock("@/lib/errors", () => ({
+  errMessage: (err: unknown) =>
+    err instanceof Error ? err.message : "操作失败",
   useNotify: () => notifyMocks,
 }));
 
@@ -396,6 +409,8 @@ beforeEach(() => {
   // D-003@v2：两 scope 端点仅剩零调用断言用途
   mocks.listWorkspaceAgentSessions.mockReset().mockResolvedValue([]);
   mocks.listChangeSessions.mockReset().mockResolvedValue([]);
+  // task-07：群分区默认成功空集（既有用例零渲染干扰）。
+  mocks.listGroupChats.mockReset().mockResolvedValue([]);
   mocks.listWorkspaces.mockReset();
   // task-10（X-009）：选项数据源默认成功空集（workspace scope 既有用例零干扰）。
   mocks.listChanges.mockReset().mockResolvedValue({ items: [], total: 0 });
@@ -2237,5 +2252,153 @@ describe("SessionListPanel 分身子会话折叠分组（P3）", () => {
     await screen.findByText("普通甲");
     expect(screen.queryByText(/分身 \d/)).toBeNull();
     expect(screen.queryByText("团队分身")).toBeNull();
+  });
+});
+
+// ── 11. 群聊分区（task-07 / 2026-09-01-session-group-chat / FR-01） ────────
+
+/** 群列表项固件（GroupChatListItemRead：members 摘要 + last_message）。 */
+function makeGroupListItem(
+  overrides: Partial<
+    import("@/lib/daemon").GroupChatListItemRead
+  > = {},
+): import("@/lib/daemon").GroupChatListItemRead {
+  return {
+    id: "g-1",
+    session_id: "s-g-1",
+    workspace_id: "ws-1",
+    title: "前端攻坚小分队",
+    created_by: "u-me",
+    agent_cross_mention: true,
+    cross_mention_depth: 2,
+    context_window: 20,
+    created_at: "2026-09-01T00:00:00Z",
+    ended_at: null,
+    deleted_at: null,
+    members: [
+      {
+        id: "mem-1",
+        member_type: "agent",
+        display_name: "小码",
+        runtime_id: "rt-1",
+        joined_at: "2026-09-01T00:00:00Z",
+        shadow_status: "none",
+      },
+      {
+        id: "mem-2",
+        member_type: "user",
+        display_name: "林一",
+        user_id: "u-lin",
+        joined_at: "2026-09-01T00:00:00Z",
+        shadow_status: "none",
+      },
+    ],
+    online_member_ids: [],
+    last_message: "小码：已定位到问题在 hooks 依赖数组…",
+    ...overrides,
+  };
+}
+
+describe("SessionListPanel 群聊分区（task-07）", () => {
+  it("群行渲染：facepile 成员摘要（agent=brand/用户=info）+ 群名 + 群聊徽标 + 最后消息摘要；点击回调 + 选中高亮", async () => {
+    const onSelectGroup = vi.fn();
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPanel(
+      <SessionListPanel onSelectGroup={onSelectGroup} selectedGroupId="g-1" />,
+    );
+    await waitFor(() => expect(mocks.listGroupChats).toHaveBeenCalledTimes(1));
+    // 独立数据源：群分区不掺单聊 agentSessions。
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+
+    const row = await screen.findByRole("button", {
+      name: "群聊 前端攻坚小分队",
+    });
+    expect(row).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("群聊分区")).toBeTruthy();
+    expect(screen.getByText("1 个")).toBeTruthy();
+    expect(row.textContent).toContain("小码：已定位到问题在 hooks 依赖数组…");
+    // facepile：成员昵称 title 提示（小码/林一）。
+    expect(row.querySelector('[title="小码"]')).toBeTruthy();
+    expect(row.querySelector('[title="林一"]')).toBeTruthy();
+    // @全体 徽标位预留（占位 slot 存在）。
+    expect(row.querySelector('[data-badge-slot="mention"]')).toBeTruthy();
+
+    fireEvent.click(row);
+    expect(onSelectGroup).toHaveBeenCalledTimes(1);
+    expect(onSelectGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "g-1",
+        title: "前端攻坚小分队",
+      }),
+    );
+  });
+
+  it("未传 onSelectGroup（悬浮助手 runtime 抽屉等消费点）→ 分区零渲染零请求", async () => {
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    expect(screen.queryByLabelText("群聊分区")).toBeNull();
+    expect(screen.queryByTestId("group-chat-row")).toBeNull();
+    expect(mocks.listGroupChats).not.toHaveBeenCalled();
+  });
+
+  it("workspace scope：群按 workspace_id 客户端过滤（他工作区群不渲染）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem(),
+      makeGroupListItem({
+        id: "g-2",
+        title: "别家的群",
+        workspace_id: "ws-other",
+      }),
+    ]);
+    renderPanel(
+      <SessionListPanel
+        scope={{ kind: "workspace", workspaceId: "ws-1" }}
+        onSelectGroup={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(mocks.listGroupChats).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByRole("button", { name: "群聊 前端攻坚小分队" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "群聊 别家的群" }),
+    ).toBeNull();
+  });
+
+  it("runtime scope：分区隐藏（群无 runtime 归属，语义偏离不挂）", async () => {
+    renderPanel(
+      <SessionListPanel
+        scope={{ kind: "runtime", runtimeId: "rt-1" }}
+        onSelectGroup={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    expect(screen.queryByLabelText("群聊分区")).toBeNull();
+    expect(mocks.listGroupChats).not.toHaveBeenCalled();
+  });
+
+  it("分区头「＋」→ onNewGroup 回调（门户开三步建群向导）", async () => {
+    const onNewGroup = vi.fn();
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPanel(
+      <SessionListPanel onSelectGroup={vi.fn()} onNewGroup={onNewGroup} />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "新建群聊" }),
+    );
+    expect(onNewGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("群列表查询失败 → 错误条 + 重新加载恢复", async () => {
+    mocks.listGroupChats
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue([makeGroupListItem()]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+    expect(await screen.findByText(/加载群聊失败：boom/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(
+      await screen.findByRole("button", { name: "群聊 前端攻坚小分队" }),
+    ).toBeTruthy();
   });
 });

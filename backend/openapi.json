@@ -10889,6 +10889,541 @@
         }
       }
     },
+    "/api/daemon/group-chats": {
+      "get": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "List Group Chats",
+        "description": "当前用户=群成员的群列表（含成员摘要 chips + 最后消息；design §6.1）。",
+        "operationId": "list_group_chats_api_daemon_group_chats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupChatListItemRead"
+                  },
+                  "type": "array",
+                  "title": "Response List Group Chats Api Daemon Group Chats Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Create Group Chat",
+        "description": "建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。",
+        "operationId": "create_group_chat_api_daemon_group_chats_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupChatCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupChatRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}": {
+      "get": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Get Group Chat",
+        "description": "群详情：成员完整列表（六要素 + shadow_status + 在线绿点；design §6.1）。",
+        "operationId": "get_group_chat_api_daemon_group_chats__group_id__get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupChatDetailRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Update Group Chat",
+        "description": "改群名/agent_cross_mention/context_window 等设置（群主或 admin）。",
+        "operationId": "update_group_chat_api_daemon_group_chats__group_id__patch",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupChatUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupChatRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/end": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "End Group Chat",
+        "description": "解散群：end 群会话 + 全部影子会话 + 影子队列清理（design §8 group.ended）。",
+        "operationId": "end_group_chat_api_daemon_group_chats__group_id__end_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupChatRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/members": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Add Group Member",
+        "description": "加成员（用户邀请 / agent 六要素配置；群主或 admin）。",
+        "operationId": "add_group_member_api_daemon_group_chats__group_id__members_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupMemberCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMemberRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/members/{member_id}": {
+      "patch": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Update Group Member",
+        "description": "改成员昵称 / agent 六要素（热切换执行在 task-04，本卡落库+同步快照）。",
+        "operationId": "update_group_member_api_daemon_group_chats__group_id__members__member_id__patch",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupMemberUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMemberRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Remove Group Member",
+        "description": "移除成员（用户 removed_at 置位；agent 额外 end 影子+队列清理）。",
+        "operationId": "remove_group_member_api_daemon_group_chats__group_id__members__member_id__delete",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/members/{member_id}/reset-memory": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Reset Group Member Memory",
+        "description": "重置 agent 成员记忆：end 影子置 pending，下次触发懒重建（幂等）。",
+        "operationId": "reset_group_member_memory_api_daemon_group_chats__group_id__members__member_id__reset_memory_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMemberRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/messages": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Send Group Message",
+        "description": "发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。\n\n未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员；触发\n成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1 权限表）。",
+        "operationId": "send_group_message_api_daemon_group_chats__group_id__messages_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupMessageSendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMessageSendRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/typing": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Send Group Typing",
+        "description": "typing 心跳：成员校验后直接 publish ``group_typing:{群id}``（§5.4）。\n\n节流由前端做（250ms 间隔）；**纯 ephemeral**——不落库、不进 AI 上下文、\n不进群背景摘要（Redis pub/sub 即发即忘）。任意用户成员可发（§6.1）。",
+        "operationId": "send_group_typing_api_daemon_group_chats__group_id__typing_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupTypingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/version": {
       "get": {
         "tags": [
@@ -13541,6 +14076,28 @@
                 }
               ],
               "title": "Archived"
+            }
+          },
+          {
+            "name": "session_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "chat",
+                    "group",
+                    "group_member"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "chat",
+              "title": "Session Kind"
             }
           }
         ],
@@ -31537,6 +32094,29 @@
               }
             ],
             "title": "Edit Patch"
+          },
+          "segment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
           }
         },
         "type": "object",
@@ -39290,6 +39870,926 @@
           "timestamp"
         ],
         "title": "GitOperationResponse"
+      },
+      "GroupChatCreate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "agent_cross_mention": {
+            "type": "boolean",
+            "title": "Agent Cross Mention",
+            "description": "agent 互@协作开关（默认开）",
+            "default": true
+          },
+          "cross_mention_depth": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Cross Mention Depth",
+            "description": "协作链深度上限（防环护栏）",
+            "default": 2
+          },
+          "context_window": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Context Window",
+            "description": "群背景摘要条数",
+            "default": 20
+          },
+          "user_members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberUserCreate"
+            },
+            "type": "array",
+            "title": "User Members"
+          },
+          "agent_members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberAgentConfig"
+            },
+            "type": "array",
+            "title": "Agent Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "workspace_id"
+        ],
+        "title": "GroupChatCreate",
+        "description": "``POST /api/group-chats`` 建群体（design §6.1）。\n\n初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建\n群时间线会话（AgentSession.session_kind='group'）。"
+      },
+      "GroupChatDetailRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "agent_cross_mention": {
+            "type": "boolean",
+            "title": "Agent Cross Mention"
+          },
+          "cross_mention_depth": {
+            "type": "integer",
+            "title": "Cross Mention Depth"
+          },
+          "context_window": {
+            "type": "integer",
+            "title": "Context Window"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberRead"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "online_member_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Online Member Ids",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "workspace_id",
+          "title",
+          "agent_cross_mention",
+          "cross_mention_depth",
+          "context_window",
+          "created_at"
+        ],
+        "title": "GroupChatDetailRead",
+        "description": "群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。\n\n``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照\n``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表\n项同源（``get_online_member_ids``）。"
+      },
+      "GroupChatListItemRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "agent_cross_mention": {
+            "type": "boolean",
+            "title": "Agent Cross Mention"
+          },
+          "cross_mention_depth": {
+            "type": "integer",
+            "title": "Cross Mention Depth"
+          },
+          "context_window": {
+            "type": "integer",
+            "title": "Context Window"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberRead"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "online_member_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Online Member Ids",
+            "default": []
+          },
+          "last_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "workspace_id",
+          "title",
+          "agent_cross_mention",
+          "cross_mention_depth",
+          "context_window",
+          "created_at"
+        ],
+        "title": "GroupChatListItemRead",
+        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。"
+      },
+      "GroupChatRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "agent_cross_mention": {
+            "type": "boolean",
+            "title": "Agent Cross Mention"
+          },
+          "cross_mention_depth": {
+            "type": "integer",
+            "title": "Cross Mention Depth"
+          },
+          "context_window": {
+            "type": "integer",
+            "title": "Context Window"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberRead"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "workspace_id",
+          "title",
+          "agent_cross_mention",
+          "cross_mention_depth",
+          "context_window",
+          "created_at"
+        ],
+        "title": "GroupChatRead",
+        "description": "群读体（``GET /api/group-chats`` / ``{id}``，design §6.1）。\n\n``members`` 由 service 层组装（AgentGroupMember 行序列化；群列表可裁剪为\n成员摘要 chips，task-02 决定裁剪口径）。"
+      },
+      "GroupChatUpdate": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "agent_cross_mention": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Cross Mention"
+          },
+          "cross_mention_depth": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cross Mention Depth"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          }
+        },
+        "type": "object",
+        "title": "GroupChatUpdate",
+        "description": "``PATCH /api/group-chats/{id}`` 改群体（design §6.1：群名/开关/护栏参数）。\n\nNone=不改（逐字段局部更新）。"
+      },
+      "GroupMemberAgentConfig": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Display Name",
+            "description": "群内昵称=@提及词，群内唯一"
+          },
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Runtime Id",
+            "description": "机器（daemon runtime，pinned 派发）"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id",
+            "description": "工作区（cwd 锚）；None=沿用群工作区"
+          },
+          "provider": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Provider",
+            "description": "引擎类型（claude/codex）"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id",
+            "description": "模型（LLM 供应商）"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id",
+            "description": "智能体方案（AgentProfile）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "runtime_id",
+          "provider"
+        ],
+        "title": "GroupMemberAgentConfig",
+        "description": "agent 成员六要素写体（建群 / 加成员 / 改配置共用，design §6.1）。\n\n``workspace_id=None`` 表示沿用群工作区（cwd 锚默认与群一致，可后续热切换\n为其它工作区实现\"一项目多工作区\"分工）；``provider`` 为引擎类型\n（claude/codex 等，派发 AgentSession.provider 同口径）。"
+      },
+      "GroupMemberCreate": {
+        "properties": {
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupMemberUserCreate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupMemberAgentConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "GroupMemberCreate",
+        "description": "``POST /api/group-chats/{id}/members`` 加成员体（二选一，design §6.1）。"
+      },
+      "GroupMemberRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "member_type": {
+            "type": "string",
+            "title": "Member Type"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "runtime_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "config_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Snapshot"
+          },
+          "invited_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invited By"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Joined At"
+          },
+          "removed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At"
+          },
+          "shadow_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Session Id"
+          },
+          "shadow_status": {
+            "type": "string",
+            "title": "Shadow Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "member_type",
+          "display_name",
+          "joined_at",
+          "shadow_status"
+        ],
+        "title": "GroupMemberRead",
+        "description": "成员读体（群详情/成员面板，design §6.1）。\n\nagent 成员六要素全量返回（用户成员对应列为 None）；``shadow_status``\n供面板绿点（none/pending/active/failed）。"
+      },
+      "GroupMemberTriggerRead": {
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Member Id"
+          },
+          "member_name": {
+            "type": "string",
+            "title": "Member Name"
+          },
+          "shadow_session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shadow Session Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_id",
+          "member_name",
+          "shadow_session_id"
+        ],
+        "title": "GroupMemberTriggerRead",
+        "description": "单成员触发结果（design §8 member.injected / member.mentioned）。"
+      },
+      "GroupMemberUpdate": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "runtime_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          }
+        },
+        "type": "object",
+        "title": "GroupMemberUpdate",
+        "description": "``PATCH /api/group-chats/{id}/members/{mid}`` 改成员体（design §6.1）。\n\nagent 成员六要素热切换（provider/llm_provider/agent_profile 下轮生效；\nruntime/workspace 切换重建影子会话重置记忆，design §4.5）与用户/agent 成员\n改昵称共用。None=不改。"
+      },
+      "GroupMemberUserCreate": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "群内昵称；None=沿用用户显示名（service 层解析并查重）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "GroupMemberUserCreate",
+        "description": "用户成员邀请写体（design §6.1 加用户成员）。"
+      },
+      "GroupMessageSendRead": {
+        "properties": {
+          "carrier_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Carrier Run Id"
+          },
+          "log_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Log Id"
+          },
+          "mentioned_member_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Mentioned Member Ids"
+          },
+          "mention_all": {
+            "type": "boolean",
+            "title": "Mention All",
+            "default": false
+          },
+          "triggered": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberTriggerRead"
+            },
+            "type": "array",
+            "title": "Triggered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "carrier_run_id",
+          "log_id"
+        ],
+        "title": "GroupMessageSendRead",
+        "description": "``POST /group-chats/{id}/messages`` 响应（design §8 group.message.sent）。"
+      },
+      "GroupMessageSendRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Content",
+            "description": "消息原文（含 @提及）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "GroupMessageSendRequest",
+        "description": "``POST /group-chats/{id}/messages`` 写体（design §4.1）。\n\nschema.py 不在本卡 allowed_paths——请求体随 router 落地（service 响应体在\ngroup/service.py，``GroupChatListItemRead`` 本文件先例）。"
+      },
+      "GroupTypingRequest": {
+        "properties": {
+          "typing": {
+            "type": "boolean",
+            "title": "Typing",
+            "default": true
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview"
+          }
+        },
+        "type": "object",
+        "title": "GroupTypingRequest",
+        "description": "``POST /group-chats/{id}/typing`` 写体（design §5.4 typing.ping）。\n\n前端 250ms 节流 + 本地 TTL 2.5s 自动过期；``preview`` 为输入框草稿预览\n（≤400 字，服务端 ``_typing_payload`` 再裁一道双保险）。``typing=False``\n表示停止输入（发送/清空草稿时冲掉指示器）。"
       },
       "HTTPValidationError": {
         "properties": {

@@ -180,6 +180,16 @@ class AgentRunLogEntry(BaseModel):
     # ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（真实文件行号 hunks），
     # 经 model_validate 自动透传，调用点不改。
     edit_patch: str | None = None
+    # 2026-07-30-daemon-heartbeat-dedup-fix task-14 / FR-02：流式 partial 半截行
+    # segment_id（complete 行 NULL）。此前只落库未进 DTO——回放读不到半截标记，
+    # 前端按完整行渲染；经 model_validate 自动透传，调用点不改。
+    segment_id: str | None = None
+    # 2026-09-01-session-group-chat 收口：身份 metadata（DB 列 ``metadata``，
+    # SQLAlchemy 保留名属性 ``metadata_``）经 validation_alias 直映（SessionListItem
+    # .failure_summary 同款先例）——群桥接投影行 ``{member_id, member_name,
+    # source_log_id, projection}`` 供前端刷新回放还原发言者，群链路 user_input 行
+    # 另有 source_group_id/sender_user_id 等审计键；存量单聊行 NULL 零影响。
+    metadata: dict | None = Field(default=None, validation_alias="metadata_")
     model_config = {"from_attributes": True}
 
 
@@ -310,3 +320,145 @@ class MissionStatusResponse(BaseModel):
     scope_workspaces: list[ScopeWorkspaceStatus] = []
     workers: list[WorkerListItem] = []  # 复用 _list_workers_core
     budget_usd: float | None = None
+
+
+# ── 群聊 DTO（2026-09-01-session-group-chat task-01，design §6.1/§3.2/§3.3）──
+# 数据流：producer/consumer=daemon 群聊子路由（task-02 建群/成员/消息端点）。
+# 本卡只定契约（模型 + DTO），端点挂载后经 pnpm gen:types 同步前端类型。
+# agent 成员六要素：机器(runtime_id)/工作区(workspace_id)/引擎类型(provider)/
+# 模型(llm_provider_id)/智能体方案(agent_profile_id)/群内昵称(display_name，
+# @提及词，群内全局唯一——用户与 agent 共用命名空间，design §3.3）。
+
+
+class GroupMemberAgentConfig(BaseModel):
+    """agent 成员六要素写体（建群 / 加成员 / 改配置共用，design §6.1）。
+
+    ``workspace_id=None`` 表示沿用群工作区（cwd 锚默认与群一致，可后续热切换
+    为其它工作区实现"一项目多工作区"分工）；``provider`` 为引擎类型
+    （claude/codex 等，派发 AgentSession.provider 同口径）。
+    """
+
+    display_name: str = Field(min_length=1, max_length=40, description="群内昵称=@提及词，群内唯一")
+    runtime_id: uuid.UUID = Field(description="机器（daemon runtime，pinned 派发）")
+    workspace_id: uuid.UUID | None = Field(
+        default=None, description="工作区（cwd 锚）；None=沿用群工作区"
+    )
+    provider: str = Field(min_length=1, max_length=20, description="引擎类型（claude/codex）")
+    llm_provider_id: uuid.UUID | None = Field(default=None, description="模型（LLM 供应商）")
+    agent_profile_id: uuid.UUID | None = Field(
+        default=None, description="智能体方案（AgentProfile）"
+    )
+
+
+class GroupMemberUserCreate(BaseModel):
+    """用户成员邀请写体（design §6.1 加用户成员）。"""
+
+    user_id: uuid.UUID
+    display_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=40,
+        description="群内昵称；None=沿用用户显示名（service 层解析并查重）",
+    )
+
+
+class GroupChatCreate(BaseModel):
+    """``POST /api/group-chats`` 建群体（design §6.1）。
+
+    初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建
+    群时间线会话（AgentSession.session_kind='group'）。
+    """
+
+    title: str = Field(min_length=1, max_length=120)
+    workspace_id: uuid.UUID
+    agent_cross_mention: bool = Field(default=True, description="agent 互@协作开关（默认开）")
+    cross_mention_depth: int = Field(
+        default=2, ge=1, le=8, description="协作链深度上限（防环护栏）"
+    )
+    context_window: int = Field(default=20, ge=1, le=100, description="群背景摘要条数")
+    user_members: list[GroupMemberUserCreate] = Field(default_factory=list)
+    agent_members: list[GroupMemberAgentConfig] = Field(default_factory=list)
+
+
+class GroupChatUpdate(BaseModel):
+    """``PATCH /api/group-chats/{id}`` 改群体（design §6.1：群名/开关/护栏参数）。
+
+    None=不改（逐字段局部更新）。
+    """
+
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    agent_cross_mention: bool | None = None
+    cross_mention_depth: int | None = Field(default=None, ge=1, le=8)
+    context_window: int | None = Field(default=None, ge=1, le=100)
+
+
+class GroupMemberCreate(BaseModel):
+    """``POST /api/group-chats/{id}/members`` 加成员体（二选一，design §6.1）。"""
+
+    user: GroupMemberUserCreate | None = None
+    agent: GroupMemberAgentConfig | None = None
+
+
+class GroupMemberUpdate(BaseModel):
+    """``PATCH /api/group-chats/{id}/members/{mid}`` 改成员体（design §6.1）。
+
+    agent 成员六要素热切换（provider/llm_provider/agent_profile 下轮生效；
+    runtime/workspace 切换重建影子会话重置记忆，design §4.5）与用户/agent 成员
+    改昵称共用。None=不改。
+    """
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=40)
+    runtime_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+    provider: str | None = Field(default=None, min_length=1, max_length=20)
+    llm_provider_id: uuid.UUID | None = None
+    agent_profile_id: uuid.UUID | None = None
+
+
+class GroupMemberRead(BaseModel):
+    """成员读体（群详情/成员面板，design §6.1）。
+
+    agent 成员六要素全量返回（用户成员对应列为 None）；``shadow_status``
+    供面板绿点（none/pending/active/failed）。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    member_type: str
+    display_name: str
+    user_id: uuid.UUID | None = None
+    runtime_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+    provider: str | None = None
+    llm_provider_id: uuid.UUID | None = None
+    agent_profile_id: uuid.UUID | None = None
+    config_snapshot: dict | None = None
+    invited_by: uuid.UUID | None = None
+    joined_at: datetime
+    removed_at: datetime | None = None
+    shadow_session_id: uuid.UUID | None = None
+    shadow_status: str
+
+
+class GroupChatRead(BaseModel):
+    """群读体（``GET /api/group-chats`` / ``{id}``，design §6.1）。
+
+    ``members`` 由 service 层组装（AgentGroupMember 行序列化；群列表可裁剪为
+    成员摘要 chips，task-02 决定裁剪口径）。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    session_id: uuid.UUID
+    workspace_id: uuid.UUID
+    title: str
+    created_by: uuid.UUID | None = None
+    agent_cross_mention: bool
+    cross_mention_depth: int
+    context_window: int
+    created_at: datetime
+    ended_at: datetime | None = None
+    deleted_at: datetime | None = None
+    members: list[GroupMemberRead] = Field(default_factory=list)
