@@ -88,6 +88,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
@@ -967,6 +968,31 @@ def _validate_display_name(name: str) -> str:
     return normalized
 
 
+def _ensure_display_name_available(
+    name: str,
+    *,
+    active_names: set[str],
+    removed_names: set[str],
+) -> None:
+    """昵称查重（P1 修复：查重口径对齐 DB 唯一约束的全量行语义）。
+
+    ``uq_agent_group_members_group_display_name`` 按 (group_id, display_name)
+    对**含已移除行**全量生效——只查 active 会让「移除「小码」后新建同名成员」
+    INSERT 直撞约束变 500。占用来源分文案：在群成员占用（老语义）与已移除
+    历史行占用（约束同样拦，但语义不同）。
+    """
+    if name in active_names:
+        raise GroupChatInvalid(
+            f"群内昵称「{name}」已被使用（用户与 agent 成员共用同一命名空间）。",
+            details={"display_name": name},
+        )
+    if name in removed_names:
+        raise GroupChatInvalid(
+            f"群内昵称「{name}」与已移除成员昵称冲突，请更换昵称后再试。",
+            details={"display_name": name},
+        )
+
+
 class GroupChatService:
     """群管理面业务逻辑（router 薄壳，全部逻辑与权限在此）。"""
 
@@ -1060,6 +1086,31 @@ class GroupChatService:
             .order_by(AgentGroupMember.joined_at, AgentGroupMember.id)
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def _member_name_occupancy(
+        self,
+        group_id: uuid.UUID,
+        *,
+        exclude_member_id: uuid.UUID | None = None,
+    ) -> tuple[set[str], set[str]]:
+        """昵称占用快照（active / removed 两组，P1 修复口径）。
+
+        唯一约束 ``uq_agent_group_members_group_display_name`` 全量含已移除行，
+        查重必须同口径（否则同名新增直撞约束 500）。``exclude_member_id``
+        排除改名成员/复活行自身——成员改回或沿用自己原昵称合法（UPDATE 不
+        撞自身行）。
+        """
+        rows = await self._list_members(group_id)
+        active_names: set[str] = set()
+        removed_names: set[str] = set()
+        for row in rows:
+            if exclude_member_id is not None and row.id == exclude_member_id:
+                continue
+            if row.removed_at is None:
+                active_names.add(row.display_name)
+            else:
+                removed_names.add(row.display_name)
+        return active_names, removed_names
 
     async def _get_member(self, group_id: uuid.UUID, member_id: uuid.UUID) -> AgentGroupMember:
         member = (
@@ -1163,6 +1214,20 @@ class GroupChatService:
         invited_ids = [m.user_id for m in payload.user_members]
         invited_users: dict[uuid.UUID, User] = {}
         if invited_ids:
+            # P1 修复：入参一致性前置 400——重复 user_id 落库会撞
+            # (group_id, user_id) 部分唯一索引；建群者下方自动落成员行，
+            # 邀请自己 = 同一 user_id 双 INSERT，同样撞索引变 500。
+            if user.id in invited_ids:
+                raise GroupChatInvalid(
+                    "建群者自动加入群聊，无需邀请自己。",
+                    details={"user_id": str(user.id)},
+                )
+            duplicate_ids = {str(uid) for uid, cnt in Counter(invited_ids).items() if cnt > 1}
+            if duplicate_ids:
+                raise GroupChatInvalid(
+                    "重复邀请同一用户，无法建群。",
+                    details={"duplicate_user_ids": sorted(duplicate_ids)},
+                )
             rows = (
                 (await self._session.execute(select(User).where(User.id.in_(invited_ids))))
                 .scalars()
@@ -1438,7 +1503,8 @@ class GroupChatService:
 
         收口链：全部有影子的成员 end 影子（既有 end_session 链 + 影子队列
         pending 行删除）→ 群会话置 ended（无 lease，直接 ORM 收口）→ 群行
-        ended_at + agent 成员 shadow_status='ended'。
+        ended_at + agent 成员 shadow_status='ended' → 群频道广播
+        ``session_ended``（群 SSE 只认该事件收流，P1 修复）。
         """
         group = await self._get_group(group_id)
         await self._require_group_member(group, user)
@@ -1471,6 +1537,19 @@ class GroupChatService:
         await self._session.commit()
         await self._session.refresh(group)
         members = await self._list_members(group.id)
+        # P1 修复（照 lease_service/sweep 的 session_ended 先例 + SSE 生成器
+        # 消费字段）：群会话终态落库后向群频道广播 session_ended——群 SSE
+        # 生成器只认该事件收流，不发则已连客户端永远 keepalive（前端解散
+        # 收口死路径 + presence 死群恒在线）。幂等早退路径不重发（首末已发）。
+        await _publish_group_channel_event(
+            group.session_id,
+            {
+                "event": "session_ended",
+                "session_id": str(group.session_id),
+                "status": "ended",
+                "reason": "group_ended",
+            },
+        )
         # task-06（§5.3 audience / §8 group.ended）：解散信号全员可见（列表把
         # 已解散群折叠/移出）。
         await self._publish_group_sessions_changed(group, "status_changed")
@@ -1503,7 +1582,6 @@ class GroupChatService:
         active_members = await self._list_active_member_rows(group.id)
         active_user_count = sum(1 for m in active_members if m.member_type == "user")
         active_agent_count = sum(1 for m in active_members if m.member_type == "agent")
-        taken_names = {m.display_name for m in active_members}
 
         now = datetime.now(UTC)
         if payload.user is not None:
@@ -1535,12 +1613,15 @@ class GroupChatService:
                     "该用户已是群成员，无法重复邀请。",
                     details={"user_id": str(target.id)},
                 )
+            # P1 修复：查重含已移除行（DB 唯一约束全量生效）；复活行自身
+            # 占位除外——被复活用户沿用/改回原昵称合法（UPDATE 不撞自身行）。
+            active_names, removed_names = await self._member_name_occupancy(
+                group.id, exclude_member_id=revived.id if revived is not None else None
+            )
             name = _validate_display_name(payload.user.display_name or _user_display_name(target))
-            if name in taken_names:
-                raise GroupChatInvalid(
-                    f"群内昵称「{name}」已被使用（用户与 agent 成员共用同一命名空间）。",
-                    details={"display_name": name},
-                )
+            _ensure_display_name_available(
+                name, active_names=active_names, removed_names=removed_names
+            )
             if revived is not None:
                 revived.removed_at = None
                 revived.display_name = name
@@ -1607,12 +1688,10 @@ class GroupChatService:
                     "agent 成员绑定的模型（LLM 供应商）不存在。",
                     details={"llm_provider_id": str(cfg.llm_provider_id)},
                 )
+        # P1 修复：同上——agent 成员昵称查重含已移除行（防撞全量唯一约束）。
+        active_names, removed_names = await self._member_name_occupancy(group.id)
         name = _validate_display_name(cfg.display_name)
-        if name in taken_names:
-            raise GroupChatInvalid(
-                f"群内昵称「{name}」已被使用（用户与 agent 成员共用同一命名空间）。",
-                details={"display_name": name},
-            )
+        _ensure_display_name_available(name, active_names=active_names, removed_names=removed_names)
         member = AgentGroupMember(
             group_id=group.id,
             member_type="agent",
@@ -1694,16 +1773,14 @@ class GroupChatService:
         if payload.display_name is not None:
             name = _validate_display_name(payload.display_name)
             if name != member.display_name:
-                taken = {
-                    m.display_name
-                    for m in await self._list_active_member_rows(group.id)
-                    if m.id != member.id
-                }
-                if name in taken:
-                    raise GroupChatInvalid(
-                        f"群内昵称「{name}」已被使用（用户与 agent 成员共用同一命名空间）。",
-                        details={"display_name": name},
-                    )
+                # P1 修复：查重含已移除行（DB 唯一约束全量生效，UPDATE 同样
+                # 撞约束）；排除改名成员自身行（其余 active/removed 行全算占用）。
+                active_names, removed_names = await self._member_name_occupancy(
+                    group.id, exclude_member_id=member.id
+                )
+                _ensure_display_name_available(
+                    name, active_names=active_names, removed_names=removed_names
+                )
                 member.display_name = name
 
         snapshot_dirty = False

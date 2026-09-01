@@ -4,7 +4,8 @@
 
 - typing 端点：POST /group-chats/{id}/typing → publish ``group_typing:{群id}``
   payload 形态（event/member_name/member_kind='user'/typing/preview/ts）、
-  preview 400 字裁剪、typing=False 停止事件、非成员 404、**不落库**（群时间
+  preview ≤400 字（DTO max_length 422 + 服务端 400 字裁剪双保险）、
+  typing=False 停止事件、非成员 404、**不落库**（群时间
   线零新行——ephemeral 纪律）；
 - agent typing 自动事件：@触发命中（影子 run 开始，非排队）→ member_kind=
   'agent' typing 事件；忙轮排队（run 未开始）不发；
@@ -439,19 +440,23 @@ def instant_keepalive(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestTypingEndpoint:
-    async def test_typing_publish_payload_shape_and_preview_truncation(
+    async def test_typing_publish_payload_shape_and_preview_limit(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
         mocked_group_redis,
     ) -> None:
-        """payload 形态 + preview 400 字裁剪 + 不落时间线（ephemeral 纪律）。"""
+        """payload 形态 + preview ≤400（DTO 口径）+ 不落时间线（ephemeral 纪律）。"""
         env = await _make_env(db_session)
         data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
         group_id = uuid.UUID(data["id"])
 
-        resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 500)
+        # 400 字（DTO 上限）原样透传；401+ → 422（DTO max_length 与服务端
+        # 裁剪口径一致，P2-6 修复：原来是 4000 进 400 裁，现提前拦）。
+        resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 400)
         assert resp.status_code == 204, resp.text
+        resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 401)
+        assert resp.status_code == 422, resp.text
 
         events = _typing_publishes(mocked_group_redis, group_id)
         assert len(events) == 1
@@ -460,7 +465,7 @@ class TestTypingEndpoint:
         assert payload["member_name"] == "群主"  # 建群者成员行昵称
         assert payload["member_kind"] == "user"
         assert payload["typing"] is True
-        assert payload["preview"] == "草" * 400  # 500 → 400 裁剪
+        assert payload["preview"] == "草" * 400  # 上限内原样透传
         assert payload["ts"]
 
         # 不落库：typing 纯 ephemeral——库内零 AgentRunLog 行（无载体 run /

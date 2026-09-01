@@ -14234,8 +14234,8 @@ export interface components {
          * @description ``POST /group-chats/{id}/typing`` 写体（design §5.4 typing.ping）。
          *
          *     前端 250ms 节流 + 本地 TTL 2.5s 自动过期；``preview`` 为输入框草稿预览
-         *     （≤400 字，服务端 ``_typing_payload`` 再裁一道双保险）。``typing=False``
-         *     表示停止输入（发送/清空草稿时冲掉指示器）。
+         *     （≤400 字——DTO 与服务端 ``_typing_payload`` 裁剪口径一致，服务端再裁
+         *     一道双保险）。``typing=False`` 表示停止输入（发送/清空草稿时冲掉指示器）。
          */
         GroupTypingRequest: {
             /**

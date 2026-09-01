@@ -18,6 +18,16 @@
 - 权限分支继承：daemon 会话详情/日志/SSE 端点对群会话走参与者判定；
   file_artifacts ``_check_session_permission`` 群分支。
 
+P1 修复回归（2026-09-01 群聊变更代码审查）：
+
+- 已移除成员昵称占用：唯一约束 ``uq_agent_group_members_group_display_name``
+  全量含已移除行——移除「小码」后同名新增 / 在群成员改名撞已移除行昵称
+  均 400（非 INSERT/UPDATE 撞约束 500）；
+- 建群入参一致性：重复 user_id（不同昵称绕过撞名检查）/ 邀请建群者本人
+  （建群者自动入群）→ 400（非撞 (group_id, user_id) 部分唯一索引 500）；
+- 解散群向群频道 ``agent_session:{群id}`` 广播 ``session_ended``（群 SSE
+  生成器只认该事件收流）。
+
 夹具范式镜像 ``test_sessions_list_filters.py`` / ``test_session_create_config.py``
 （in-memory SQLite + httpx ASGI client + 手签 JWT + workspace 角色播种——
 端点门 TASK_RUN_AGENT 需 workspace 角色，platform admin 短路免播）。
@@ -25,12 +35,14 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch as mock_patch
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -289,6 +301,24 @@ async def _list_queued(
     )
 
 
+@pytest.fixture()
+def mocked_group_redis():
+    """群频道 publish 替身（group service 侧 get_redis）——test_group_realtime 先例。"""
+    redis = AsyncMock()
+    redis.publish = AsyncMock()
+    with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
+        yield redis
+
+
+def _channel_publishes(redis: AsyncMock, session_id: uuid.UUID) -> list[dict]:
+    """从 fake redis publish 调用记录中筛出 ``agent_session:{id}`` 频道 payload。"""
+    out = []
+    for call in redis.publish.call_args_list:
+        if call.args[0] == f"agent_session:{session_id}":
+            out.append(json.loads(call.args[1]))
+    return out
+
+
 # ── 建群 ─────────────────────────────────────────────────────────────────────
 
 
@@ -418,6 +448,52 @@ class TestCreateGroupChat:
             headers=_headers(env.owner_token),
         )
         assert resp.status_code == 400, resp.text
+
+    async def test_create_group_duplicate_user_invite_400(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """P1 回归：同一 user_id 邀请两次（不同昵称，绕过撞名检查）→ 400 非 500。
+
+        直落库会撞 (group_id, user_id) 部分唯一索引 ``uq_agent_group_members_
+        group_user``——入参去重前置拦截。
+        """
+        env = await _make_env(db_session, owner_name="du-owner")
+        member_user, _ = await _env_user(db_session, env, name="du-member")
+        resp = await client.post(
+            "/api/daemon/group-chats",
+            json={
+                "title": "重复邀请群",
+                "workspace_id": str(env.ws.id),
+                "user_members": [
+                    {"user_id": str(member_user.id)},
+                    {"user_id": str(member_user.id), "display_name": "du-member-别名"},
+                ],
+            },
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 400, resp.text
+        assert "重复邀请同一用户" in resp.json()["message"]
+        assert resp.json()["details"]["duplicate_user_ids"] == [str(member_user.id)]
+
+    async def test_create_group_invite_owner_self_400(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """P1 回归：邀请建群者本人（不同昵称绕过撞名检查）→ 400 非 500。
+
+        建群者自动落成员行，再邀请 = 同一 user_id 双 INSERT 撞部分唯一索引。
+        """
+        env = await _make_env(db_session, owner_name="sf-owner")
+        resp = await client.post(
+            "/api/daemon/group-chats",
+            json={
+                "title": "自邀请群",
+                "workspace_id": str(env.ws.id),
+                "user_members": [{"user_id": str(env.owner.id), "display_name": "分身"}],
+            },
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 400, resp.text
+        assert "无需邀请自己" in resp.json()["message"]
 
 
 # ── 权限矩阵 ─────────────────────────────────────────────────────────────────
@@ -729,6 +805,66 @@ class TestGroupMemberCrud:
         )
         assert resp.status_code == 404
 
+    async def test_reuse_removed_member_name_400(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """P1 回归：昵称唯一约束全量含已移除行——同名新增/改名 400 非 500。
+
+        唯一约束 ``uq_agent_group_members_group_display_name`` 不带
+        removed_at 条件：移除「小码」后新建同名 agent 成员（INSERT）或在群
+        成员改名撞已移除行昵称（UPDATE）都直撞约束变 500——查重含已移除行
+        后两处均 400。
+        """
+        env = await _make_env(db_session, owner_name="rn-owner")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            workspace_id=env.ws.id,
+            agent_members=[_agent_config(env.runtime.id, name="小码")],
+        )
+        group_id = data["id"]
+        xiao_id = next(m["id"] for m in data["members"] if m["display_name"] == "小码")
+
+        resp = await client.delete(
+            f"/api/daemon/group-chats/{group_id}/members/{xiao_id}",
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 204, resp.text
+
+        # 移除后同名新增 agent 成员 → 400（撞含已移除行的全量唯一约束）。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{group_id}/members",
+            json={"agent": _agent_config(env.runtime.id, name="小码")},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 400, resp.text
+        assert "已移除成员昵称冲突" in resp.json()["message"]
+
+        # 在群成员改成已移除行昵称 → 同样 400（UPDATE 也撞约束）。
+        other, _ = await _env_user(db_session, env, name="rn-other")
+        resp = await client.post(
+            f"/api/daemon/group-chats/{group_id}/members",
+            json={"user": {"user_id": str(other.id)}},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 201, resp.text
+        other_member_id = resp.json()["id"]
+        resp = await client.patch(
+            f"/api/daemon/group-chats/{group_id}/members/{other_member_id}",
+            json={"display_name": "小码"},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 400, resp.text
+        assert "已移除成员昵称冲突" in resp.json()["message"]
+
+        # 对照：与已移除行不撞名的正常新增/改名不受影响。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{group_id}/members",
+            json={"agent": _agent_config(env.runtime.id, name="小码二号")},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 201, resp.text
+
 
 # ── reset-memory ─────────────────────────────────────────────────────────────
 
@@ -946,6 +1082,47 @@ class TestEndGroupChain:
         await db_session.reset()
         group_session2 = await db_session.get(AgentSession, group_id)
         assert group_session2 is not None and group_session2.status == "ended"
+
+    async def test_end_group_publishes_session_ended(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """P1 回归：解散群向群频道广播 session_ended（群 SSE 只认该事件收流）。
+
+        不发则已连的 ``/sessions/{id}/stream`` 永远 keepalive（前端解散收口
+        死路径 + presence 死群恒在线）；幂等重解散不重发。
+        """
+        env = await _make_env(db_session, owner_name="pe-owner")
+        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        session_id = uuid.UUID(data["session_id"])
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/end", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 200, resp.text
+
+        ended = [
+            e
+            for e in _channel_publishes(mocked_group_redis, session_id)
+            if e.get("event") == "session_ended"
+        ]
+        assert len(ended) == 1
+        assert ended[0]["session_id"] == str(session_id)
+        assert ended[0]["status"] == "ended"
+
+        # 幂等重解散 → 不重发（首末已发，SSE 已收口）。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/end", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 200
+        ended_again = [
+            e
+            for e in _channel_publishes(mocked_group_redis, session_id)
+            if e.get("event") == "session_ended"
+        ]
+        assert len(ended_again) == 1
 
     async def test_remove_agent_member_ends_shadow(
         self, client: AsyncClient, db_session: AsyncSession
