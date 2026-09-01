@@ -63,3 +63,10 @@
 锚点：sillyhub-daemon/src/autostart/windows.ts:registerViaPowerShell
 最近确认：b243c765
 理由：降级链——schtasks 优先（蓝图参数逐字保留，task-06 argv 断言不受影响）；access denied 时走 PowerShell Register-ScheduledTask（-EncodedCommand base64 防转义；语义对应 /SC ONLOGON→AtLogOn 本用户 Interactive、/RL LIMITED→RunLevel Limited、/F→-Force）。
+
+## D-001@v1 sillyspec 版本上报与远程升级的技术方案（machine-sillyspec-version）
+状态：implemented
+变更：2026-08-31-machine-sillyspec-version
+锚点：sillyhub-daemon/src/sillyspec-manager.ts
+最近确认：b690c91e
+理由：版本与升级状态随 register/heartbeat 心跳上报（仿 pending_update 模式）；手动升级走 WS 即时消息 daemon:sillyspec_update（仿 daemon:self_update，fire-and-forget）；自动定期升级由 daemon 本机定时器执行（默认 1h，忙时推迟）。三套环节均有既有先例，风险最低。
