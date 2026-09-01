@@ -10,16 +10,16 @@ change: 2026-09-01-session-group-chat
 
 ## 任务注册表（plan step 2 写回，execute 解析此清单）
 
-- [ ] task-01: 数据模型与迁移（session_kind + metadata 列 + 两新表 + alembic + DTO + gen:types）
-- [ ] task-02: 群管理服务与权限分支（group router/service CRUD + _require_group_member + 4 处集中校验改造）
-- [ ] task-03: 群消息与 @触发管线（载体 run + @解析 + 影子懒建 grants 授权 + 注入组装 + 忙轮排队）(depends_on: task-01,02)
-- [ ] task-04: 互@协作护栏与热切换（turn_completed 检测 + Redis 护栏 + 六要素 diff 分支）(depends_on: task-03,05)
-- [ ] task-05: 桥接投影（run_sync 双改动点：事务内双写投影行新 PK + 群频道事件 + turn_completed 成员身份）(depends_on: task-03)
-- [ ] task-06: 实时通道（SSE 多路订阅合流 + typing 端点/agent typing + presence + audience events）(depends_on: task-02)
-- [ ] task-07: 前端群列表与建群向导（SessionsPortal 群分区 + 向导 + API 客户端）(depends_on: task-01,02)
-- [ ] task-08: 前端群聊面板（group-chat-panel 平铺时间线 + SSE 消费 typing/resync）(depends_on: task-05,06,07)
-- [ ] task-09: 前端成员面板与 @补全（member-panel 热切换弹窗 + mention-popover member 扩展）(depends_on: task-02,07)
-- [ ] task-10: daemon 回归 + 真实 e2e 验证（stage 透传回归 + Docker 部署浏览器实测 AC-01~07）(depends_on: task-01..09)
+- [x] task-01: 数据模型与迁移（session_kind + metadata 列 + 两新表 + alembic + DTO + gen:types）
+- [x] task-02: 群管理服务与权限分支（group router/service CRUD + _require_group_member + 4 处集中校验改造）
+- [x] task-03: 群消息与 @触发管线（载体 run + @解析 + 影子懒建 grants 授权 + 注入组装 + 忙轮排队）(depends_on: task-01,02)
+- [x] task-04: 互@协作护栏与热切换（turn_completed 检测 + Redis 护栏 + 六要素 diff 分支）(depends_on: task-03,05)
+- [x] task-05: 桥接投影（run_sync 双改动点：事务内双写投影行新 PK + 群频道事件 + turn_completed 成员身份）(depends_on: task-03)
+- [x] task-06: 实时通道（SSE 多路订阅合流 + typing 端点/agent typing + presence + audience events）(depends_on: task-02)
+- [x] task-07: 前端群列表与建群向导（SessionsPortal 群分区 + 向导 + API 客户端）(depends_on: task-01,02)
+- [x] task-08: 前端群聊面板（group-chat-panel 平铺时间线 + SSE 消费 typing/resync）(depends_on: task-05,06,07)
+- [x] task-09: 前端成员面板与 @补全（member-panel 热切换弹窗 + mention-popover member 扩展）(depends_on: task-02,07)
+- [x] task-10: daemon 回归 + 真实 e2e 验证（stage 透传回归 + Docker 部署浏览器实测 AC-01~07）(depends_on: task-01..09)
 
 
 ## T1 数据模型与迁移（backend 基础）

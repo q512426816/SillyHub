@@ -215,26 +215,26 @@ agent_sessions + session_kind: String(16), server_default 'chat', NOT NULL
 ### 5.4 实时通道
 - **群消息 SSE**：复用 `agent_session:{group_id}` 频道与 `stream_session_logs`（校验换 §5.3）——多成员同时在线各自订阅，天然广播
 - **typing/presence 的投递通道**：群 SSE 生成器**多路订阅**——除 `agent_session:{group_id}` 外同时订阅 `group_typing:{group_id}`（Redis pub/sub 双订阅合流进同一 SSE 流，事件以 `event: typing` 区分），前端 streamSession 消费循环加 typing 分支（不建独立端点，连接数不翻倍）
-- **typing**：新 Redis pub/sub 频道 `group_typing:{group_id}` + `POST /api/group-chats/{id}/typing`（节流：前端 250ms 间隔、preview ≤400 字、TTL 2.5s 自动过期，仅广播 typing 状态+昵称+可选草稿预览；**不落库、不进 AI 上下文、不进群背景摘要**）。agent typing：影子 run 开始时后端自动发一条（"「小码」正在输入…"）
+- **typing**：新 Redis pub/sub 频道 `group_typing:{group_id}` + `POST /api/daemon/group-chats/{id}/typing`（节流：前端 250ms 间隔、preview ≤400 字、TTL 2.5s 自动过期，仅广播 typing 状态+昵称+可选草稿预览；**不落库、不进 AI 上下文、不进群背景摘要**）。agent typing：影子 run 开始时后端自动发一条（"「小码」正在输入…"）
 - **presence（在线绿点）**：Redis key `group_presence:{group_id}:{user_id}` TTL 60s；**续期挂在群 SSE 生成器循环**（每轮 keepalive 周期 >45s 时 touch）；读取经群列表/详情接口返回 `online_member_ids`（读 `group_presence:{group_id}:*` keys，前端随列表刷新轮询）
 
 ## 6. 接口与协议
 
-### 6.1 新端点（backend，均挂 daemon 域群聊子路由）
+### 6.1 新端点（backend，实际统一挂 daemon 域前缀 `/api/daemon/group-chats`——execute 落地偏差，不动 main.py 照 audit_router 先例）
 | 端点 | 说明 |
 |---|---|
-| POST /api/group-chats | 建群（title+workspace+初始成员+agent 成员六要素数组）；建群会话 |
-| GET /api/group-chats | 群列表（当前用户=群成员，含成员摘要/最后消息/未读计数） |
-| GET /api/group-chats/{id} | 群详情（成员列表含 agent 六要素+影子状态） |
-| PATCH /api/group-chats/{id} | 改群名/开关（agent_cross_mention/context_window/护栏参数） |
-| POST /api/group-chats/{id}/members | 加用户成员 / 配置 agent 成员（六要素） |
-| PATCH /api/group-chats/{id}/members/{mid} | 改 agent 成员六要素（触发 §4.5 热切换）/改昵称 |
-| POST /api/group-chats/{id}/members/{mid}/reset-memory | 重置记忆（结束影子会话置 pending，下次触发按现配置懒重建；群内系统提示确认语义） |
-| DELETE /api/group-chats/{id}/members/{mid} | 移除成员（agent 成员→end 影子会话） |
+| POST /api/daemon/group-chats | 建群（title+workspace+初始成员+agent 成员六要素数组）；建群会话 |
+| GET /api/daemon/group-chats | 群列表（当前用户=群成员，含成员摘要/最后消息/在线成员；**未读计数为后续增强**——需先定义已读位点存储，本变更不实现，前端仅预留徽标位） |
+| GET /api/daemon/group-chats/{id} | 群详情（成员列表含 agent 六要素+影子状态） |
+| PATCH /api/daemon/group-chats/{id} | 改群名/开关（agent_cross_mention/context_window/护栏参数） |
+| POST /api/daemon/group-chats/{id}/members | 加用户成员 / 配置 agent 成员（六要素） |
+| PATCH /api/daemon/group-chats/{id}/members/{mid} | 改 agent 成员六要素（触发 §4.5 热切换）/改昵称 |
+| POST /api/daemon/group-chats/{id}/members/{mid}/reset-memory | 重置记忆（结束影子会话置 pending，下次触发按现配置懒重建；群内系统提示确认语义） |
+| DELETE /api/daemon/group-chats/{id}/members/{mid} | 移除成员（agent 成员→end 影子会话） |
 | POST /api/daemon/sessions/{gid}/group-message | 发群消息（§4.1） |
 | GET /api/daemon/sessions/{gid}/stream | 群 SSE（复用现有端点，校验分支） |
-| POST /api/group-chats/{id}/typing | typing 心跳（§5.4） |
-| POST /api/group-chats/{id}/end | 解散群（end 群会话+全部影子会话） |
+| POST /api/daemon/group-chats/{id}/typing | typing 心跳（§5.4） |
+| POST /api/daemon/group-chats/{id}/end | 解散群（end 群会话+全部影子会话） |
 - 群主/成员权限：建群/加删成员/改群设置/解散=群主（+workspace admin）；发消息/typing=任意用户成员
 - DTO 变更后同变更内跑 `pnpm gen:types` 提交 `api-types.ts`+`openapi.json`（gen:types:check 不在 CI，纪律写进任务卡）
 
