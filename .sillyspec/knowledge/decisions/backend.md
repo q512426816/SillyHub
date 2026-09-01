@@ -56,3 +56,80 @@
 锚点：backend/app/modules/git_log/router.py
 最近确认：86d6c405
 理由：复用 git_log 模块与 host-fs 平名通道，daemon 加单方法 git_status、backend 加 GET /git-log/status、前端共享组件。
+
+## D-001@v1 : 群聊触发模式 = @提及 + 独立记忆
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/group/service.py`
+最近确认：9531f7228
+理由：@昵称触发对应 agent、@全体广播；每 agent 影子会话独立记忆；未被 @ 的消息仅进群背景摘要（最近 N 条含 agent 回复，身份标签+截断）。openclaw mention-gating 同构，防刷屏。
+
+## D-002@v1 : 群聊架构 = 影子会话桥接
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/run_sync/service.py`
+最近确认：9531f7228
+理由：群会话（kind='group'）统一时间线 + 每 agent 成员影子会话（kind='group_member'）独立记忆 + 事务内双写投影行桥接回群；复用 interactive lease/排队/SSE/热切换管线，单聊零改动。备选独立群聊域（2-3 倍工作量）与 mission 扩展（任务/聊天语义冲突）被否。
+
+## D-003@v1 : 群成员模型 = 显式邀请制
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/group/service.py`
+最近确认：9531f7228
+理由：建群拉 workspace 用户+配置 agent 成员；仅群成员可看可聊（两段式判定：成员命中→workspace admin 兜底→404 不泄露存在性）。
+
+## D-004@v1 : agent 成员六要素 + 群聊中随时热切换
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/group/service.py`
+最近确认：9531f7228
+理由：昵称（@提及词全局唯一）/机器/工作区/引擎/模型/方案（AgentProfile）；模型组切换 SESSION_SWITCH_CONFIG 下轮生效记忆延续；机器组切换影子重建重置记忆（确认提示）。
+
+## D-005@v1 : 协作模式 = openclaw 同构平等成员（人格即角色）
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/group/service.py`
+最近确认：9531f7228
+理由：无固定角色系统/派活工具/角色模板；agent 间关联靠群背景摘要被动互见+@全体广播+互@协作（开关默认开带护栏）。分工是人格/工具/工作区配置的自然涌现。
+
+## D-006@v1 : agent 互@协作群级开关默认开 + Redis 防环护栏
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/group/service.py`
+最近确认：9531f7228
+理由：agent 回复最终文本中的 @昵称 与用户 @ 同管线触发（注入标注来源成员）；护栏 Redis 双轨——group_chain Hash 去重+depth（TTL 30min，DB metadata 兜底）+group_rate 滑窗限频 6/分；不自我触发；关闭时 @ 为纯文本。
+
+## D-007@v1 : 影子会话不挂 parent_session_id（成员表反向指针）
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/group/service.py`
+最近确认：9531f7228
+理由：parent 恒 NULL、群↔影子经 agent_group_members.shadow_session_id 关联——规避 5 处以 parent 非空为 worker 唯一口径的链路（停机挂起/离线 sweep/自动恢复/自动重派/闸收口）误杀影子。
+
+## D-008@v1 : 桥接投影 = 事务内双写投影行（新 PK）+ 群频道事件携投影行 id
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/run_sync/service.py`
+最近确认：9531f7228
+理由：submit_messages 事务内插投影行（新 uuid PK 防撞影子行/dedup_key 复用/metadata 身份），群频道事件 log_id=投影行 id——实时与回放同 id 去重闭环；仅投影 assistant 文本；override 按载体 run+segment DELETE。复用原 log_id 会 PK 冲突（Grill P0 修正）。
+
+## D-009@v1 : 昵称全局唯一（用户与 agent 共用命名空间）
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/agent/model.py`
+最近确认：9531f7228
+理由：UNIQUE(group_id, display_name) 全量唯一（含已移除行——查重须全量口径否则撞约束 500，P1 修复 743e9e1c）；@路由无歧义。
+
+## D-011@v1 : 群时间线 = 平铺消息流全局 timestamp 排序
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`frontend/src/components/group-chat/group-chat-panel.tsx`
+最近确认：9531f7228
+理由：实时事件与回放读库统一按 log timestamp 全局排序、忽略 run 分组——get_agent_session_logs 的 run 锚分组会把迟到回复"吸回"触发消息组，与实时顺序失真。
+
+## D-012@v1 : 群聊首期取舍（审批/计量/排队快照/run 视图/typing）
+状态：implemented
+变更：2026-09-01-session-group-chat
+锚点：`backend/app/modules/daemon/group/service.py`
+最近确认：9531f7228
+理由：影子 manual_approval=False（审批不进群）；计量归群主（影子 user_id=群主）；排队消息按入队时刻摘要快照派发；群不消费 run 级视图；typing/presence 纯 ephemeral（Redis TTL，不落库不进上下文）；群不绑 change_id。
