@@ -452,6 +452,8 @@ modules:
       - AgentMission
       - AgentProfile
       - AgentRunLog
+      - AgentGroupChat  # 群聊两表（session_kind=group/group_member 影子，2026-09-01-session-group-chat）
+      - AgentGroupMember
       - AgentKillResponse  # 统一 kill 通道（daemon-kill-channel）
       - build_spec_bundle
       - agent_router
@@ -486,7 +488,7 @@ modules:
     doc: modules/daemon.md
     paths:
       - app/modules/daemon/**
-    tags: [daemon, runtime, heartbeat, lease, websocket, session, audit, change-write, 守护进程]
+    tags: [daemon, runtime, heartbeat, lease, websocket, session, audit, change-write, group-chat, 守护进程]
     aliases: [daemons]
     entrypoints:
       - /api/daemon  # register/heartbeat/runtimes/*（含 usage/page/self-update/allowed-roots）
@@ -494,6 +496,7 @@ modules:
       - /api/daemon/audit/batch  # audit 子域批量审计上行
       - /api/daemon/runtimes/{runtime_id}/pending-change-writes  # change_write 子域（claim/complete/progress）
       - /api/daemon/dist  # dist_router 版本分发（tags=daemon-distribution）
+      - /api/daemon/group-chats  # group 子域（群聊 CRUD/成员/消息 @路由/typing，paths 由 app/modules/daemon/** 覆盖，2026-09-01-session-group-chat）
     main_symbols:
       - DaemonService  # facade
       - DaemonLeaseService  # lease_service.py
@@ -509,6 +512,8 @@ modules:
       - PatchService  # daemon/patch/service.py
       - AuditService  # daemon/audit/service.py（audit-system-completion）
       - ws_hub  # ws_hub.py WS 连接枢纽
+      - GroupChatService  # daemon/group/service.py（@路由/影子懒建/互@护栏/typing+presence，2026-09-01-session-group-chat）
+      - group_router  # daemon/group/router.py（/api/daemon/group-chats 端点族）
       - daemon_router
     depends_on:
       - core

@@ -28,9 +28,9 @@ change: 2026-09-01-session-group-chat
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/agent.md` | 更新 agent 模块卡（session_kind/群表模型/placement grants 分支/file_artifacts 群分支） | pending |
-| `modules/daemon.md` | 更新 daemon 模块卡（group/ 新子域/群消息触发/桥接投影/SSE 多路订阅/audience） | pending |
-| `modules/frontend_components.md` | 更新前端组件模块卡（group-chat/ 三组件/portal 群分区/mention 扩展） | pending |
-| `modules/frontend_lib.md` | 更新前端 lib 模块卡（群聊 API 客户端/SSE typing 分支） | pending |
-| `modules/daemon.changelog.md` | 视 daemon TS 实际改动决定追加条目（预期无逻辑改动则 skipped） | pending |
-| `_module-map.yaml` | 更新映射（新增 daemon/group/ 路径与 frontend group-chat 组件路径） | pending |
+| `modules/agent.md` | 更新 agent 模块卡（session_kind/群表模型/placement grants 分支/file_artifacts 群分支） | done（2026-09-02） |
+| `modules/daemon.md` | 更新 daemon 模块卡（group/ 新子域/群消息触发/桥接投影/SSE 多路订阅/audience） | done（2026-09-02） |
+| `modules/frontend_components.md` | 更新前端组件模块卡（group-chat/ 三组件/portal 群分区/mention 扩展） | done（2026-09-02） |
+| `modules/frontend_lib.md` | 更新前端 lib 模块卡（群聊 API 客户端/SSE typing 分支） | done（2026-09-02） |
+| `modules/daemon.changelog.md` | 视 daemon TS 实际改动决定追加条目（预期无逻辑改动则 skipped） | skipped（daemon 源码零改动——verify-result：本变更 sillyhub-daemon 零 diff，主仓 3333 passed 为纯回归验证） |
+| `_module-map.yaml` | 更新映射（新增 daemon/group/ 路径与 frontend group-chat 组件路径） | done（2026-09-02；backend 侧 paths `app/modules/daemon/**` 通配已覆盖 group/，按映射格式补 entrypoint/main_symbols/tag；SillyHub 侧 frontend_components main_symbols 补 components/group-chat 条目） |

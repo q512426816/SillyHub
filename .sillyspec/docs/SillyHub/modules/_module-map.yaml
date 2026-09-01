@@ -749,6 +749,7 @@ modules:
       - components/daemon/turn-segment-views / turn-status-bar（段渲染族 + 轮级状态条）
       - components/sessions/subagent-catalog（子代理目录）
       - components/sessions/workspace-session-picker（新建会话工作区选择器，2026-08-19-sessions-workspace-selector）
+      - components/group-chat（群聊三组件 group-chat-panel/create-group-wizard/member-panel，2026-09-01-session-group-chat）
       - components/workspace-* / ppm-* / mcp-token-create-dialog / file-upload / file-viewer
       - components/permission-approval-card / error-boundary
     depends_on: [frontend_lib, frontend_stores]

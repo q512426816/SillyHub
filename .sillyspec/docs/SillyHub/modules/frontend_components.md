@@ -4,6 +4,7 @@ doc_type: module-card
 module_id: frontend_components
 author: qinyi
 created_at: 2026-08-18 01:45:00
+updated_at: 2026-09-02 12:00:00
 ---
 
 # 前端可复用组件层（frontend_components）
@@ -32,6 +33,20 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `new-session-form` — 新会话五选择器（工作区 / runtime / profile / 供应商 / 会话名；选中工作区提交体带 workspace_id 并显示项目目录运行提示条）
   - `session-config-bar` — 运行中切换档案/供应商（点选即切换）
   - `ctx-usage-bar` — 上下文用量前端累计
+- 群聊（group-chat/，2026-09-01-session-group-chat）：
+  - `group-chat-panel.tsx` — 群聊主视图：平铺消息流按 log timestamp 全局排序
+    （实时与回放顺序一致，**不消费单聊 run 分组 turn 模型**——多成员交错回复时 run
+    锚分组会把迟到回复吸回触发组）；用户/agent 气泡按 sender_member_name 与投影行
+    metadata.member_* 还原身份（落库时刻快照，改名不回填）；复用 session-log-assembler
+    分类原语 + turn-timeline 渲染单元；SSE 消费含 typing 分支与刷新回放
+  - `create-group-wizard.tsx` — 建群向导三步：群名→邀请用户→配置 agent 成员
+    （六要素表单可添加多个，不内置角色模板）
+  - `member-panel.tsx` — 成员面板：用户成员 presence 绿点/移除；agent 成员六要素
+    展示+热切换弹窗（引擎/模型/方案下轮生效；机器/工作区切换提示记忆重置）+重置记忆
+  - sessions portal 群聊分区（数据统一走 GET /api/daemon/group-chats 按成员过滤；
+    群视图>真会话>预会话优先级；建群与 agent_sessions 变更信号 invalidate
+    ["groupChats"]）；session-mention-popover 判别联合加 `{kind:'member'}`
+    （群成员+@全体，既有六 kind 零改动）
 - 变更域（changes/）：
   - `detail/` 子目录 — 变更详情展示组件族（文档矩阵 / Gate 面板 / 会话区等）
   - `detail/change-usage-card` — 变更/快速修复执行用量卡（2026-08-30-change-center-usage-stats）：useQuery 自取数（queryKey=域+组件+kind+workspaceId+refKey，对齐 change-sessions-card 先例无轮询），按 kind 分派 getChangeUsage/getQuicklogUsage；四态（loading 骨架/error「暂无用量数据」/无执行引导/正常）；摘要行十项（开始/结束/耗时/进行中 chip=started 有值 finished 缺/轮次/四维 token/请求次数/命中率=cache_read÷(cache_read+input) 分母 0→「—」）+ 分模型折叠明细（「未记录」兜底桶灰阶恒末位）+ kind 分叉口径注脚；token/时长格式化与命中率口径锚定 session-usage-bar 惯例

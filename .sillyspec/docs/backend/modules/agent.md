@@ -4,6 +4,7 @@ doc_type: module-card
 module_id: agent
 author: qinyi
 created_at: 2026-08-18 01:45:00
+updated_at: 2026-09-02 12:00:00
 ---
 
 # 智能体执行引擎（agent）
@@ -27,7 +28,8 @@ RunPlacementService 选 daemon 运行时 + lease，与 daemon 模块双向协作
   channel=tool_call/tool_kind=FileUpload/dedup_key=file-upload:{file_id}（IntegrityError
   重放防护）+ Redis 双通道 publish（submit_run_input 同款模式，失败 WARNING 降级））；
   `GET /api/agent/file-artifacts?session_id=|run_id=`（WORKSPACE_READ + 锚复核，
-  FileMetaResp 倒序）。daemon sillyhub-file MCP 的上传直连此端点。
+  FileMetaResp 倒序）。daemon sillyhub-file MCP 的上传直连此端点。群会话
+  （session_kind='group'）鉴权走群成员分支（成员表命中→workspace admin 兜底）。
 - run 面：`POST /{wid}/agent/runs`（创建）+ 子路由
   `GET /agent/runs/{run_id}`（详情）、`/kill`（统一 kill 通道）、`/input`、
   `/logs`、`/stream`（SSE）、`/resume`、`/approve`、`GET|POST /checkpoint`；
@@ -45,7 +47,11 @@ RunPlacementService 选 daemon 运行时 + lease，与 daemon 模块双向协作
   - `ExecutionCoordinatorService`（coordinator.py）：乐观锁 + 指纹校验 + token 校验。
   - `RunPlacementService`（placement.py）：选 daemon 后端，无在线抛
     `NoOnlineDaemonError`；含 borrow 解析（borrow_resolver.py，业务人员借用 daemon，
-    落 daemon_borrow_audit 审计）。
+    落 daemon_borrow_audit 审计）。pinned 钉定授权分支（2026-09-01-session-group-chat，
+    D-010）：群成员影子懒建消费 `prepare_interactive_dispatch(pinned_skip_owner_check=False)`
+    ——成员机器属主非群主时按属主命中或 workspace grant 放行（**不照抄** worker 的
+    `pinned_skip_owner_check=True` 豁免，群成员机器是群主任意选择的必须走授权校验）；
+    并加旗标误用守卫（该旗标只在钉定分支生效，skip_owner_check=True 恒不走授权分支）。
   - mission：`MissionService`（start_mission 等）/ `MissionControlService` /
     `MissionExecutionService` / `orchestrator.py`（schedule_loop 编排）；
     `orchestration_mode: team|external`——external 放行进 team_mission_entry 但跳过
@@ -65,6 +71,20 @@ RunPlacementService 选 daemon 运行时 + lease，与 daemon 模块双向协作
 - 模型：agent_runs（~45 字段：spec_strategy/provider/usage/gate_result/worktree_branch
   等）、agent_run_logs（tool_kind/subagent/dedup_key）、agent_sessions、agent_missions、
   agent_run_dependencies、agent_artifacts、daemon_borrow_audit。
+- 群聊数据模型（2026-09-01-session-group-chat）：`AgentSession.session_kind`
+  （String(16) server_default 'chat'——chat 存量零变更 / group 群会话 /
+  group_member 影子会话，索引 ix_agent_sessions_session_kind 供列表过滤）；
+  `AgentRunLog.metadata_`（DB 列名 metadata、属性名避让 SQLAlchemy 保留名，
+  JSON NULL）承载群聊桥接投影行身份 {member_id, member_name, source_log_id}；
+  两张群表——`AgentGroupChat`（session_id UNIQUE FK 群时间线会话 1:1、
+  workspace_id 权限锚、agent_cross_mention 默认 true / cross_mention_depth=2 /
+  context_window=20 / settings_json 预留）与 `AgentGroupMember`（member_type
+  user|agent；display_name=群内昵称即 @提及词，**UNIQUE(group_id, display_name)**
+  用户与 agent 共用命名空间群内全局唯一、UNIQUE(group_id, user_id) 防重复邀请；
+  agent 成员六要素 runtime_id/workspace_id/provider/llm_provider_id/
+  agent_profile_id + config_snapshot 冗余快照免 N+1；shadow_session_id 反向
+  指针 + shadow_status——影子**刻意不挂 parent_session_id**，群↔影子关联只经
+  此指针，规避 worker 子会话判定链误杀）。
 
 ## 关键逻辑
 ```

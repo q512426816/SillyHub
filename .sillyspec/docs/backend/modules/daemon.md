@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-08-23 10:10:26
+updated_at: 2026-09-02 12:00:00
 ---
 
 # 守护进程中枢（daemon）
@@ -61,6 +61,42 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   username 未回填的旧数据兜底 None 不阻断列表，前端 null 显「—」）；
   `SessionService` 含 `inject_session_as_service`（服务身份注入，跳过用户归属校验，
   供 change 审批联动）。
+- 群聊（group chat）子域（group/，2026-09-01-session-group-chat）：router+service
+  两文件，端点统一挂 `/api/daemon/group-chats`（照 audit_router 先例进 daemon 前缀）：
+  群 CRUD（POST 建/GET 列表含成员摘要 chips/GET 详情/PATCH 改名开关/POST end 解散）、
+  成员（POST 添加用户或 agent 成员/PATCH 六要素热切换/DELETE 移除/POST reset-memory）、
+  POST `/{id}/messages` 群消息 @路由、POST `/{id}/typing` 心跳。核心机制：
+  - @路由：`_parse_group_mentions`（全/半角 @ 昵称精确命中成员表 display_name，
+    @全体/@all 广播全部 agent 成员）；未@仅落时间线进群背景摘要（context_window
+    默认 20 条、单条 500 字/总长 6000 字，含 agent 回复）。
+  - 影子懒建三件套（照 worker `_dispatch_worker_core` 先例）：①直接 ORM 建行
+    AgentSession(kind='group_member', config.manual_approval=False)；②
+    prepare_interactive_dispatch(pinned_runtime_id=成员机器, stage='group_member')
+    走 grants 授权分支（pinned_skip_owner_check=False，见 agent 卡 placement）；
+    ③回填成员表 shadow_session_id/shadow_status。忙轮排队 AgentSessionQueuedMessage
+    按入队时刻摘要快照派发（不吃后续群进展）。
+  - 互@护栏（Redis 全 TTL 自清理）：`group_chain:{载体run_id}` 链去重集+深度
+    （cross_mention_depth 默认 2、TTL 30min）、`group_rate` 60s 滑窗限频 6 次/分钟、
+    不自我触发；链状态经 run metadata source_carrier_run_id/chain_depth 双轨可查。
+  - 热切换：provider/llm_provider/agent_profile 变更走 SESSION_SWITCH_CONFIG 下轮
+    边界生效；runtime/workspace 变更影子 end+pending 按新六要素懒重建（记忆重置）。
+  - typing/presence：`group_typing:{gid}` pub/sub（preview ≤400 字、TTL 2.5s，不落库
+    不进上下文，agent 触发时后端自动发一条）+ `group_presence:{gid}:{uid}` TTL 60s
+    （群 SSE 生成器循环续期）。
+  - 桥接投影（run_sync/service.py 两改动点）：①submit_messages **事务内双写投影行**
+    ——影子行落库后同事务插新 PK 投影行（run_id=群载体 run、dedup_key 复用、
+    metadata={member_id, member_name, source_log_id}），PublishIntent 增
+    group_id/member_id/member_name/member_session_id/projection_log_id，群频道事件
+    log_id 用投影行 id（实时与回放同 id，前端去重天然兼容）；②close_interactive_run
+    群影子收口发 turn_completed 带 member 身份，随后执行互@检测。仅投影 assistant
+    文本段，tool_call/thinking 不进群。
+  - 权限分支（参与者制，session/service.py 三处 `_get_owned_session_for_update`/
+    `get_agent_session`/`get_agent_session_logs` + permission_service.py 三处 + SSE
+    内联校验）：kind='group' 首查未命中经 `get_group_accessible_session` 探测
+    （群成员表命中→workspace admin→404 不泄露存在性）；群消息落载体 run
+    （status='completed' 纯载体）；`agent_sessions:changed` payload 增
+    audience_user_ids（群事件=全部用户成员）；群 SSE 多路订阅
+    （agent_session:{gid} + group_typing:{gid} 双 pubsub 合流，event: typing 区分）。
 - change-write 队列（change_write_router.py）：`GET /runtimes/{id}/pending-change-writes`、
   `POST /change-writes/{id}/claim`（daemon 认领，生成 claim_token）、
   `POST /change-writes/{id}/complete`（done/failed 回执）、

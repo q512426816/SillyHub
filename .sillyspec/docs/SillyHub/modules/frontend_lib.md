@@ -4,6 +4,7 @@ doc_type: module-card
 module_id: frontend_lib
 author: qinyi
 created_at: 2026-08-18 01:45:00
+updated_at: 2026-09-02 12:00:00
 ---
 
 # 前端 API 封装层（frontend_lib）
@@ -36,6 +37,13 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
 - 领域客户端（每后端域一文件，约 40 个）：
   - 工作区族：workspaces / workspace.ts / workspace-binding / workspace-members / workspace-skills-view / workspace-path / workspace-daemon-status / workspace-types / git-log（Git 日志三端点 fetch + queryKey 工厂 + useQuery hooks，2026-08-25-workspace-git-log；2026-08-26-workspace-git-status 增第四端点 status：`fetchGitLogStatus`/`useGitLogStatus` + status 系三生成类型（GitLogStatusResponse/DirtyItem/FetchItem），staleTime 60s 显式覆盖全局 15s——两页共享缓存只触发一次 daemon 远程 fetch，git-log 页刷新按钮 `["git-log", wid]` 前缀 invalidate 天然覆盖 status key）
   - 会话与运行：agent / daemon / runtime / changes / change-files / tasks / quicklog / approvals / audit / daemon-audit
+  - 群聊客户端（lib/daemon.ts 内，2026-09-01-session-group-chat）：11 个函数——
+    listGroupChats / getGroupChat / createGroupChat / updateGroupChat / endGroupChat /
+    addGroupMember / updateGroupMember / removeGroupMember / resetGroupMemberMemory /
+    sendGroupMessage / sendGroupTyping（typing 心跳上报，节流在前端）+
+    GroupChat*/GroupMember* 系生成类型 re-export；`streamGroupChat` 群流封装
+    （GroupChatStreamEnvelope 扩展 sender/member 身份字段、GroupChatTypingEvent、
+    GroupReplayLogEntry 回放行带 metadata 身份——平铺排序与身份还原的取数基座）
   - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / permission / agent-profiles / custom-skills
   - spec 域：scan-docs / scan-docs-tree / spec-workspaces / knowledge / incidents / releases / health / git-identities / file/ / auth(+auth/ 子目录) / ppm/*（含 format / types / kanban）/ api/llm-providers（拆分客户端首例）
 - 取数 hooks：
