@@ -229,6 +229,7 @@ agent_sessions + session_kind: String(16), server_default 'chat', NOT NULL
 | PATCH /api/group-chats/{id} | 改群名/开关（agent_cross_mention/context_window/护栏参数） |
 | POST /api/group-chats/{id}/members | 加用户成员 / 配置 agent 成员（六要素） |
 | PATCH /api/group-chats/{id}/members/{mid} | 改 agent 成员六要素（触发 §4.5 热切换）/改昵称 |
+| POST /api/group-chats/{id}/members/{mid}/reset-memory | 重置记忆（结束影子会话置 pending，下次触发按现配置懒重建；群内系统提示确认语义） |
 | DELETE /api/group-chats/{id}/members/{mid} | 移除成员（agent 成员→end 影子会话） |
 | POST /api/daemon/sessions/{gid}/group-message | 发群消息（§4.1） |
 | GET /api/daemon/sessions/{gid}/stream | 群 SSE（复用现有端点，校验分支） |
@@ -306,3 +307,51 @@ log / turn_completed 两类事件增可选字段：`sender_member_name`（用户
 - **互@护栏参数**（深度 2/频率 6/agent 成员上限 8/用户成员上限 50）为首版保守值，execute 后按实测调
 - **群 SSE 生成器多路订阅**：`agent_session:{gid}` + `group_typing:{gid}` 双 pubsub 合流，需注意生成器取消时两个订阅都释放（防 Redis 连接泄漏）——execute 时对照现有单订阅生成器的清理路径实现
 - ~~pinned 机器授权~~（已闭环，Design Grill C8 修正）：非群主机器走 grants 授权分支，不再照抄 worker skip_owner_check 豁免
+
+## 13. 文件变更清单
+
+> plan 对账基准（task allowed_paths 须覆盖下列每个源码文件；路径一律**仓库根相对**，与 task 卡 allowed_paths 同口径；执行中新发现的文件同步回写本清单）。
+
+### backend（Python）
+| 文件 | 变更 |
+|---|---|
+| `backend/app/modules/agent/model.py` | AgentSession.session_kind 列 + AgentRunLog.metadata 列 + AgentGroupChat/AgentGroupMember 模型 |
+| `backend/migrations/versions/<ts>_group_chat.py`（新） | 单文件迁移：一列两表 + metadata 列 |
+| `backend/app/modules/agent/schema.py` | 群聊 DTO（群/成员/六要素读写体） |
+| `backend/app/modules/daemon/group/router.py`（新） | 群 CRUD/成员/消息/typing 端点 |
+| `backend/app/modules/daemon/group/service.py`（新） | 群管理 + @解析/触发编排 + 影子懒建/注入/互@护栏 + typing/presence |
+| `backend/app/modules/daemon/session/service.py` | 权限分支（_get_owned_session_for_update/get_agent_session/list/logs）+ 群消息载体 run + 热切换分支 |
+| `backend/app/modules/daemon/run_sync/service.py` | 桥接投影两处（PublishIntent 扩展 + 事务内双写 + close_interactive_run 群 turn_completed） |
+| `backend/app/modules/daemon/router.py` | SSE stream 校验分支 + sessions events audience 过滤 + 群消息端点挂载 |
+| `backend/app/modules/daemon/session_events.py` | payload 增 audience_user_ids |
+| `backend/app/modules/daemon/permission_service.py` | 群会话成员分支（3 处） |
+| `backend/app/modules/agent/file_artifacts.py` | 群会话成员分支 |
+| `backend/app/modules/agent/placement.py` | pinned grants 授权分支参数（skip_owner_check=False 路径） |
+| `backend/app/modules/agent/tests/test_group_chat_models.py`（新） | §11 测试清单（模型/迁移） |
+| `backend/app/modules/daemon/tests/test_group_chat_management.py`（新） | §11 测试清单（群管理/权限） |
+| `backend/app/modules/daemon/tests/test_group_mention_pipeline.py`（新） | §11 测试清单（@管线/摘要/懒建/排队） |
+| `backend/app/modules/daemon/tests/test_group_cross_mention.py`（新） | §11 测试清单（互@护栏/热切换） |
+| `backend/app/modules/daemon/tests/test_group_bridge_projection.py`（新） | §11 测试清单（桥接投影） |
+| `backend/app/modules/daemon/tests/test_group_realtime.py`（新） | §11 测试清单（typing/presence/audience） |
+
+### frontend（TypeScript）
+| 文件 | 变更 |
+|---|---|
+| `frontend/src/components/group-chat/group-chat-panel.tsx`（新） | 群聊视图（平铺时间线/SSE 消费含 typing/resync） |
+| `frontend/src/components/group-chat/create-group-wizard.tsx`（新） | 建群向导 |
+| `frontend/src/components/group-chat/member-panel.tsx`（新） | 成员面板 + 热切换弹窗 |
+| `frontend/src/components/sessions/sessions-portal.tsx` | 群聊分区入口 |
+| `frontend/src/components/sessions/session-list-panel.tsx` | 群分桶 + 群行样式 |
+| `frontend/src/components/daemon/session-mention-popover.tsx` | member 判别联合扩展 |
+| `frontend/src/lib/daemon.ts` | 群聊 API 客户端 + typing 上报 + SSE typing 分支 |
+| `frontend/src/lib/api-types.ts`（gen 生成） | `pnpm gen:types` 重生成 |
+
+### daemon（Node）
+| 文件 | 变更 |
+|---|---|
+| `sillyhub-daemon/src/interactive/session-manager.ts` | 仅 stage='group_member' 标识透传回归验证（预期零/极小改动） |
+
+### 其他
+| 文件 | 变更 |
+|---|---|
+| `backend/openapi.json` | gen 产物提交 |
