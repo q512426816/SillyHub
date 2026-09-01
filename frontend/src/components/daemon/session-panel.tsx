@@ -2179,8 +2179,9 @@ function SessionPanelPage({
    * 所发原文相同的草稿）。ql-20260826-010：精确比对改 trim 比对——handleSend
    * 发送的是 input.trim()，粘贴多行文本带尾随换行时 prev !== prompt 永不清空，
    * 已发送消息残留在输入框并被草稿持久化放大（切换会话/刷新回显）。
-   * ql-20260826-013：再加 /team 前缀剥离比对——发送的是剥前缀的
-   * effectivePrompt，草稿仍带 "/team " 前缀（弹层确认回填），对上即清。
+   * ql-20260901-002：/team 轮发的是原始输入（与草稿同文），t === prompt 直接
+   * 对上；parseTeamCommand 比对保留兼容（旧版本发送剥前缀文本的语义残渣，
+   * 对上即清无副作用）。
    */
   const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
     setInput((prev) => {
@@ -2602,15 +2603,14 @@ function SessionPanelPage({
     // session 可附着，R2 先例）。
     // ql-20260825-001（D-7 对齐）：附件非空允许空 prompt（看图说话）；首句
     // 附件随 create 上送（此前被静默丢弃——回显缺失的根因）。
-    // ql-20260826-013：预会话无拦截回路，/team 前缀直接剥离随首句上送（裸
-    // /team 剥后无内容 → 不发）。
+    // ql-20260901-002：/team 前缀不再剥离——发原始输入（消息气泡/回放显示
+    // "/team 目标"，对齐 /sillyspec:quick 等技能指令的显示形态）；裸 /team
+    // 无可发内容不发送。派发层剥离归后端（service._strip_team_command_prefix）。
     if (!sessionId) {
-      const prePrompt = teamCmd !== null ? teamCmd : prompt;
-      if (!prePrompt && pendingAttachments.length === 0) return;
-      void handlePreSessionSend(
-        prePrompt,
-        pendingAttachments.map((a) => a.id),
-      );
+      // 裸 /team（无目标文本）无可发内容不发送；带附件可发（D-7 看图说话，
+      // 后端剥离后空文本+附件走附件豁免轮）。
+      if ((!prompt || teamCmd === "") && pendingAttachments.length === 0) return;
+      void handlePreSessionSend(prompt, pendingAttachments.map((a) => a.id));
       return;
     }
     // task-11（D-004 四路等价）：/team 前缀拦截——不直接发送，弹层确认后目标文本
@@ -2632,13 +2632,13 @@ function SessionPanelPage({
       setPendingMentions({});
       return;
     }
-    // ql-20260826-013：/team 是平台 UI 指令，永不作为 agent 消息原文——拦截弹层
-    // 外的放行路径（活跃 mission 主控轮直发 / 非拦截引擎）统一剥离前缀发送。
-    // 原文直达 Claude Code 会被当 slash command 报「Unknown command: /team」
-    //（会话 2eac7c91 实证，主控轮三连空转）；主控派发靠 mission briefing 服务端
-    // 注入，不依赖字面前缀。
-    const effectivePrompt = teamCmd !== null ? teamCmd : prompt;
-    if (!effectivePrompt && pendingAttachments.length === 0) return; // 裸 /team 无可发内容
+    // ql-20260901-002：/team 是平台 UI 指令，agent 永不接收其字面前缀——但
+    // 剥离收口到**后端派发层**（service._strip_team_command_prefix，create
+    // dispatch_prompt / inject SESSION_INJECT 组装点）：前端发原始输入，消息
+    // 气泡与历史回放显示 "/team 目标"（对齐 /sillyspec:quick 等技能指令的显示
+    // 形态，ql-20260826-013 前端剥离导致气泡丢前缀）。拦截弹层语义零改动；
+    // 裸 /team 无可发内容不发送（同预会话守卫）。
+    if ((!prompt || teamCmd === "") && pendingAttachments.length === 0) return;
     // design §3.3：仅终态（ended/failed）与离线禁发；running / reconnecting /
     // pending 不再拦截（忙轮入服务端排队，ql-20260825-011）。
     // task-10：suspended 挂起禁发（daemon 不在线，发也必失败；输入框本已禁用，
@@ -2653,10 +2653,10 @@ function SessionPanelPage({
     // ql-20260825-011：忙轮 → 服务端排队（无占位轮，后端 run 终态后派发）；
     // 空闲 → 占位轮直发。草稿与附件改为发送成功后清（onSendSettled）。
     if (running) {
-      void sendToServerQueue(effectivePrompt, attachmentIds);
+      void sendToServerQueue(prompt, attachmentIds);
       return;
     }
-    void sendFromQueue(effectivePrompt, attachmentIds);
+    void sendFromQueue(prompt, attachmentIds);
   }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
 
   const handleInterrupt = useCallback(async () => {
@@ -4083,8 +4083,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
    * ql-20260825-011：发送成功（直发建轮或入服务端队列）后收敛输入区——清草稿
    * 与附件 chips（失败路径原地保留可改后重发；不覆盖发送窗口期新输入的内容）。
    * ql-20260826-010：trim 比对（同 page 模式——prompt 是 input.trim()，尾随
-   * 空白不比对会导致已发送消息残留输入框）。ql-20260826-013：加 /team 前缀
-   * 剥离比对（同 page——发送剥前缀文本、草稿带前缀，对上即清）。
+   * 空白不比对会导致已发送消息残留输入框）。ql-20260901-002：/team 轮发原文
+   * （同 page），t === prompt 直接对上；parseTeamCommand 比对保留兼容旧语义。
    */
   const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
     setInput((prev) => {
@@ -4907,12 +4907,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
       return;
     }
 
-    // ql-20260826-013：/team 是平台 UI 指令不进 agent 消息——拦截弹层外的放行
-    // 路径（idle 首句 / 活跃 mission 直发 / 非拦截引擎）统一剥离前缀发送，防
-    // Claude Code 当 slash command 报「Unknown command: /team」（会话 2eac7c91
-    // 实证）；裸 /team 剥后无内容 → 不发。
-    const effectivePrompt = teamCmd !== null ? teamCmd : prompt;
-    if (!effectivePrompt && pendingAttachments.length === 0) return;
+    // ql-20260901-002：/team 前缀不再剥离——发原始输入（气泡/回放显示 "/team
+    // 目标"，对齐技能指令显示形态）；剥离收口到后端派发层（同 page 模式）。
+    // 裸 /team 无可发内容 → 不发（带附件可发，D-7 豁免）。
+    if ((!prompt || teamCmd === "") && pendingAttachments.length === 0) return;
 
     // 首 turn：createSession（绕过队列直发，R2）
     if (view.status === "idle") {
@@ -4932,7 +4930,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
           {
             runId: "__pending_create__",
             turn: null,
-            prompt: effectivePrompt,
+            prompt: prompt,
             output: "",
             status: "pending",
             seenLogIds: new Set(),
@@ -4950,7 +4948,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
       try {
         const resp = await createSession({
           provider: provider as InteractiveProvider,
-          prompt: effectivePrompt,
+          prompt: prompt,
           manual_approval: true,
           ask_user_only: true,
           ...(createChangeId ? { change_id: createChangeId } : {}),
@@ -5008,11 +5006,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
       attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });
     }
     if (view.currentRunId != null) {
-      await sendToServerQueue(effectivePrompt, attachmentIds);
+      await sendToServerQueue(prompt, attachmentIds);
       return;
     }
     try {
-      await submitFollowup(effectivePrompt, attachmentIds);
+      await submitFollowup(prompt, attachmentIds);
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
     }

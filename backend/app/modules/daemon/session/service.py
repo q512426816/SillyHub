@@ -149,6 +149,24 @@ _TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务�
 _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
 
 
+# ql-20260901-002：/team 平台 UI 指令前缀剥离（派发层）。前端改为发送原始
+# 输入（气泡/回放显示 "/team 目标"），agent 永不接收该字面前缀（Claude Code
+# 会当 slash command 报 Unknown command: /team，会话 2eac7c91 实证）——剥离
+# 收口到后端派发组装点（create dispatch_prompt / inject SESSION_INJECT），
+# 对齐前端 parseTeamCommand 的整条指令匹配语义（"/teams" 之类不误伤）。
+_TEAM_COMMAND_PREFIX_RE = re.compile(r"^/team(?:\s+|$)")
+
+
+def _strip_team_command_prefix(prompt: str) -> str:
+    """剥掉消息头部的 ``/team`` 平台指令前缀（无前缀原样返回）。
+
+    语义对齐前端 ``parseTeamCommand``：仅匹配整条指令（``/team`` 后必须跟
+    空白或结尾），非贪婪一次剥离；纯展示层（AgentRunLog user_input / 队列
+    条目）不调用本函数，保留用户原文。
+    """
+    return _TEAM_COMMAND_PREFIX_RE.sub("", prompt, count=1)
+
+
 def _merge_task_wakeup_prompt(old: str, new: str) -> str:
     """把新「[后台任务通知]」的任务行并入旧通知 prompt。
 
@@ -1691,7 +1709,9 @@ class SessionService:
                 assert mission_anchor_id is not None and mission_scope_ids is not None
                 mission = await OrchestratorService(self._session)._precreate_mission_flush(
                     workspace_id=mission_anchor_id,
-                    objective=team_mission.objective or prompt,
+                    # ql-20260901-002：objective 回落剥 /team 前缀（briefing 里
+                    # 的目标文本不带平台指令字面）。
+                    objective=team_mission.objective or _strip_team_command_prefix(prompt),
                     created_by=user_id,
                     change_id=change_id,
                     constraints=None,
@@ -1778,8 +1798,14 @@ class SessionService:
                 )
                 if part
             ]
+            # ql-20260901-002：派发文本剥 /team 前缀——前端发原始输入（展示层
+            # 保留 "/team 目标"），agent 永不接收平台指令字面；无前缀消息
+            # 剥离为 no-op，普通会话行为逐字节不变。
+            _dispatch_user_msg = _strip_team_command_prefix(prompt)
             dispatch_prompt = (
-                "\n\n---\n\n".join([*_prefix_parts, prompt]) if _prefix_parts else prompt
+                "\n\n---\n\n".join([*_prefix_parts, _dispatch_user_msg])
+                if _prefix_parts
+                else _dispatch_user_msg
             )
 
             placement = RunPlacementService(self._session)
@@ -3594,8 +3620,12 @@ class SessionService:
                 and active_mission.objective == SESSION_OBJECTIVE_PLACEHOLDER
                 and prompt.strip()
             ):
-                active_mission.objective = prompt
-                self._session.add(active_mission)
+                # ql-20260901-002：回填目标剥 /team 前缀（briefing 文本不带平台
+                # 指令字面）；裸 /team 剥后为空不回填，占位保留给下一条带文本轮。
+                _objective_text = _strip_team_command_prefix(prompt).strip()
+                if _objective_text:
+                    active_mission.objective = _objective_text
+                    self._session.add(active_mission)
             # ── 2026-08-24 task-08 / FR-01 / D-004@v1：主控首轮简报判定（inject 侧）──
             # task-06 组合入口（活跃 mission 查询 + 三条件判定 + 简报组装）：空
             # prompt 切换轮不注入不消耗、已消耗 orchestrator run 不再注、failed
@@ -3897,7 +3927,9 @@ class SessionService:
                         "sessionId": str(session.id),
                         "runId": str(run.id),
                         "claimToken": inject_claim_token,
-                        "prompt": prompt,
+                        # ql-20260901-002：切换轮带文本时同样剥 /team 前缀（切换
+                        # 轮 prompt 也直达 agent）。
+                        "prompt": _strip_team_command_prefix(prompt),
                         "profile": profile_payload,
                         "providerConfig": provider_config_payload,
                     },
@@ -3925,16 +3957,20 @@ class SessionService:
                         page_context.tab_key,
                     )
                 # 拼接顺序：页面前导（本轮实时）→ 团队简报（首主控轮一次性）→ 用户消息。
+                # ql-20260901-002：派发文本剥 /team 前缀（前端发原始输入，展示层
+                # 保留 "/team 目标"；agent 永不接收平台指令字面）。无前缀消息
+                # 剥离为 no-op，无 mission 普通会话逐字节不变。
+                _inject_user_msg = _strip_team_command_prefix(prompt)
                 parts = []
                 if page_preamble:
                     parts.append(page_preamble)
                 if first_turn_briefing:
                     parts.append(first_turn_briefing)
                 if parts:
-                    parts.append(prompt)
+                    parts.append(_inject_user_msg)
                     inject_prompt = "\n\n---\n\n".join(parts)
                 else:
-                    inject_prompt = prompt
+                    inject_prompt = _inject_user_msg
                 inject_payload = {
                     "session_id": str(session.id),
                     "lease_id": str(session.lease_id),

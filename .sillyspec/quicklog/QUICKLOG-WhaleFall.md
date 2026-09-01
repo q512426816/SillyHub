@@ -168,3 +168,19 @@
 根因：antd v6 confirm icon 槽的尺寸/间距样式期望 .anticon 包裹结构，裸 lucide svg 不命中——实测 ql-015 的 h-5 w-5 图标被压成 12x20、与标题 gap=0（用户反馈太小太贴）
 方案：session-list-panel.tsx 封 confirmIcon(Icon, colorCls) 模块级 helper：外包 span（h-6 w-6=24px 与 16px 标题视觉匹配 + shrink-0 防 flex 压缩 + mr-3=12px 间距），6 处 confirm 统一换用，图标种类与语义色不变
 结果：56 用例全过；tsc 零错误；Docker 重建生效，浏览器实测图标 24x24 不变形、与标题间距 12px，截图目视比例协调（AI 视觉评审通过）
+
+## ql-20260901-002-8e58 | 2026-09-01 10:49:58 | /team 指令消息气泡与回放显示前缀修复
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（_strip_team_command_prefix 派发层剥离：create dispatch_prompt/objective 回落、inject SESSION_INJECT/SWITCH payload/objective 占位回填）
+- frontend/src/components/daemon/session-panel.tsx（三处 handleSend 改发原始输入 + 裸 /team 守卫 + 注释更新）
+- backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py（新增 TestTeamCommandPrefixStrip 5 用例）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（codex 直发断言改原文）
+- frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx（放行直发断言改原文）
+- frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（首句 prompt 断言改带前缀原文）
+需求：/team 指令消息气泡与回放显示前缀修复（对齐 /sillyspec:quick 等技能指令的显示形态）
+根因：前端 handleSend 三处发送路径剥离 /team 前缀，后端 user_input 日志存剥后文本——展示层（气泡/回放）永远拿不到前缀，与 /sillyspec:quick 等技能指令显示形态不一致
+方案：前端三处发送路径改发原始输入（裸 /team 无内容守卫保留前端）；剥离收口到后端派发层 _strip_team_command_prefix（create dispatch_prompt/objective 回落、inject SESSION_INJECT/SWITCH payload/objective 占位回填；整条指令匹配 /teams 不误伤），user_input 日志/队列条目保留原文
+结果：后端 test_inject_first_turn_briefing 15/15 绿（新增 5 用例）+ruff/mypy 0；前端 4 套件 66/66 绿+tsc 0+eslint 0 errors；Docker 重建后浏览器实测气泡显示前缀、刷新回放保留、DB 验证 objective 剥后+日志原文、加载 1.65s 正常
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py, frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx, frontend/src/components/daemon/__tests__/session-panel-team.test.tsx, frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx

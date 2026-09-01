@@ -382,3 +382,115 @@ async def _seed_provider(session: AsyncSession, user_id: uuid.UUID):
     await session.commit()
     await session.refresh(row)
     return row
+
+
+# ── 5. ql-20260901-002：/team 前缀——展示层留原文、派发层剥离 ──────────────────
+
+
+class TestTeamCommandPrefixStrip:
+    """/team 平台 UI 指令前缀：前端发原始输入（气泡/回放显示 "/team 目标"），
+    agent 永不接收字面前缀——剥离收口在本层派发组装点。
+
+    - AgentRunLog(user_input) 与 mission objective 回填：保留原文/剥后文本语义；
+    - SESSION_INJECT payload（inject 与 create 首 turn）用户消息段：无 "/team"。
+    """
+
+    @pytest.mark.asyncio
+    async def test_inject_strips_prefix_in_payload_keeps_log(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """活跃 mission 轮 inject "/team 目标"：payload 用户消息段无前缀，
+        user_input 日志保留 "/team" 原文，objective 占位回填剥后文本。"""
+        from app.modules.agent.orchestrator import SESSION_OBJECTIVE_PLACEHOLDER
+
+        svc, uid, created = await _setup_injectable_session(db_session)
+        sid = created.agent_session.id
+        await _make_mission(db_session, session_id=sid, objective=SESSION_OBJECTIVE_PLACEHOLDER)
+
+        result = await svc.inject_session(sid, uid, prompt="/team 分析两个工作区")
+
+        payload = _inject_payload_for_run(mocked_hub, result.agent_run)
+        # 派发文本：简报在前（active mission 首主控轮）+ 用户消息段无 /team 前缀。
+        assert "团队任务简报" in payload["prompt"]
+        assert payload["prompt"].endswith("\n\n---\n\n分析两个工作区")
+        assert "/team" not in payload["prompt"]
+        # 展示层：user_input 日志保留用户原文（气泡/回放显示前缀）。
+        logs = await _user_input_logs(db_session, result.agent_run.id)
+        assert len(logs) == 1
+        assert logs[0].content_redacted == "/team 分析两个工作区"
+        # objective 占位回填：剥后文本（briefing 目标段不带平台指令字面）。
+        from sqlalchemy import select as _select
+
+        refreshed = (
+            await db_session.execute(_select(AgentMission).where(AgentMission.session_id == sid))
+        ).scalar_one()
+        assert refreshed.objective == "分析两个工作区"
+
+    @pytest.mark.asyncio
+    async def test_inject_no_mission_still_strips(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """无 mission 普通会话 inject "/team 目标"：服务端同样剥离（/team 是
+        平台 UI 指令永不透传 agent 的统一语义），日志仍留原文。"""
+        svc, uid, created = await _setup_injectable_session(db_session)
+        sid = created.agent_session.id
+
+        result = await svc.inject_session(sid, uid, prompt="/team 普通会话目标")
+
+        payload = _inject_payload_for_run(mocked_hub, result.agent_run)
+        assert payload["prompt"] == "普通会话目标"
+        logs = await _user_input_logs(db_session, result.agent_run.id)
+        assert logs[0].content_redacted == "/team 普通会话目标"
+
+    @pytest.mark.asyncio
+    async def test_inject_similar_commands_not_stripped(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """/teams 等非整条指令不误伤（正则要求 /team 后跟空白或结尾）。"""
+        svc, uid, created = await _setup_injectable_session(db_session)
+        sid = created.agent_session.id
+
+        result = await svc.inject_session(sid, uid, prompt="/teams 并不是指令")
+
+        payload = _inject_payload_for_run(mocked_hub, result.agent_run)
+        assert payload["prompt"] == "/teams 并不是指令"
+
+    @pytest.mark.asyncio
+    async def test_bare_team_prefix_keeps_placeholder_objective(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """裸 "/team"（剥后空文本）不回填空 objective——占位保留给下一条带
+        文本轮（API 直发防御；前端裸 /team 无内容不发送）。"""
+        from app.modules.agent.orchestrator import SESSION_OBJECTIVE_PLACEHOLDER
+
+        svc, uid, created = await _setup_injectable_session(db_session)
+        sid = created.agent_session.id
+        mission = await _make_mission(
+            db_session, session_id=sid, objective=SESSION_OBJECTIVE_PLACEHOLDER
+        )
+
+        result = await svc.inject_session(sid, uid, prompt="/team")
+
+        assert mission.objective == SESSION_OBJECTIVE_PLACEHOLDER
+        logs = await _user_input_logs(db_session, result.agent_run.id)
+        assert logs[0].content_redacted == "/team"
+
+    @pytest.mark.asyncio
+    async def test_create_strips_prefix_in_dispatch_keeps_log(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """create 首句 "/team 目标"：dispatch（SESSION_INJECT payload 的
+        dispatch_prompt）无前缀，user_input 日志保留原文。"""
+        svc, uid = DaemonService(db_session), None
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+
+        created = await svc.create_session(uid, provider="claude", prompt="/team 首句目标")
+
+        payload = _inject_payload_for_run(mocked_hub, created.agent_run)
+        # create 路径拼接用户前导（【当前用户信息】等）——只断言末段用户消息
+        # 剥前缀 + 全文无 /team 字面。
+        assert payload["prompt"].endswith("\n\n---\n\n首句目标")
+        assert "/team" not in payload["prompt"]
+        logs = await _user_input_logs(db_session, created.agent_run.id)
+        assert logs[0].content_redacted == "/team 首句目标"

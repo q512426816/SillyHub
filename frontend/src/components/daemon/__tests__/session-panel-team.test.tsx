@@ -366,13 +366,13 @@ describe("SessionPanel /team 指令拦截（dialog 模式）", () => {
     fireEvent.change(input2, { target: { value: `/team ${OBJECTIVE}` } });
     fireEvent.click(screen.getByTitle("发送"));
 
-    // 未拦截：ql-20260826-013 起 /team 前缀剥离后直达后端（忙轮服务端排队，
-    // ql-20260825-011；原文会被 Claude Code 当 slash command 报 Unknown command），
-    // 弹层不打开。
+    // 未拦截：ql-20260901-002 起发原始输入（"/team 目标" 原文直达后端——展示
+    // 层显示前缀；派发层由后端 service._strip_team_command_prefix 剥离，
+    // 非 Claude 引擎不拦截语义不变），弹层不打开。
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
     expect(sessionApi.injectSession).toHaveBeenCalledWith(
       "sess-codex",
-      OBJECTIVE,
+      `/team ${OBJECTIVE}`,
       undefined,
     );
     expect(screen.queryByText("派团队做这件事")).not.toBeInTheDocument();

@@ -279,7 +279,7 @@ describe("派团队确认回填 /team 前缀（ql-20260826-010）", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("活跃 mission 下发送回填的 /team 指令 → 剥离前缀直达 inject，弹层不重开（ql-20260826-013）", async () => {
+  it("活跃 mission 下发送回填的 /team 指令 → 原文直达 inject，弹层不重开（ql-20260901-002）", async () => {
     sessionApi.listSessionTeamMissions.mockResolvedValue([
       makeMission("m-run", "running"),
     ]);
@@ -290,14 +290,17 @@ describe("派团队确认回填 /team 前缀（ql-20260826-010）", () => {
     });
     fireEvent.click(screen.getByTitle("发送"));
 
-    // 放行直发，但 /team 前缀剥离（原文直达 Claude Code 会被当 slash command
-    // 报 Unknown command——会话 2eac7c91 实证）；弹层不重开。
+    // 放行直发，发原始输入（"/team 目标" 原文——气泡/回放显示前缀；前缀
+    // 剥离收口到后端派发层 service._strip_team_command_prefix）；弹层不重开。
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
-    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-ux", OBJECTIVE);
+    expect(sessionApi.injectSession).toHaveBeenCalledWith(
+      "sess-ux",
+      `/team ${OBJECTIVE}`,
+    );
     expect(
       screen.queryByText("派团队做这件事"),
     ).not.toBeInTheDocument();
-    // 草稿清空：带前缀草稿与剥离后发送文本比对命中。
+    // 草稿清空：发送原文与草稿同文直接比对命中。
     await waitFor(() => expect(input.value).toBe(""));
   });
 
