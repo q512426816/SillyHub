@@ -131,6 +131,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 
 ## 变更索引
 
+- ql-20260902-009-0d92 | 「加载更早消息」交互升级触顶自动加载：捕获阶段监听 TurnTimeline 滚动容器（scrollTop ≤ 48px 触发，shadow-session-viewer 同款模式）；同步 ref 锁防高频双拉；prepend 滚动锚按 scrollHeight 增量补回视口（正在读的内容不被顶走）；加载中顶部行内提示（session-load-earlier-hint）；到头（不满页）后触顶自挡零请求；稳定 callback ref 驱动主体挂载时重挂监听（骨架早退渲染先于主体，sessionId 单维依赖挂不上）
 - ql-20260902-008-3723 | 分身会话查看器「加载更早消息」点击无反应修复：handleLoadEarlier 的 run 级去重把与当前窗口同 run 的更早日志整 turn 丢弃——团队分身会话整段执行是单个长 run（跨游标恒同 run）＝100% 丢弃；改伪 runId 变体（`#e`+游标短码防多次翻页 key 撞）插入该 turn 之前，realRunId 保持原值（SSE 增量/孤儿 run 补建匹配零影响），before 游标保证内容不重叠
 - ql-20260831-016-6eb5 | confirm 图标槽结构修正（ql-015 迭代）：antd v6 confirm icon 槽对裸 lucide svg 的尺寸/间距样式不命中（实测压成 12x20 且与标题零间距）——封 confirmIcon(Icon, cls) helper 外包固定尺寸 span（h-6 w-6=24px shrink-0 防 flex 压缩 + mr-3=12px 间距），6 处 confirm 换用，实测 24x24 + 12px 间距
 - ql-20260831-015-c6fe | 确认弹窗图标功能语义化 + 「全部状态」含已归档（后端 archived 三态）：6 个 Modal.confirm 传 lucide 语义图标（删除=Trash2 destructive 红 / 归档=Archive / 取消归档=ArchiveRestore brand-600，h-5 w-5 适配 antd 32px icon 槽不变形）；后端 list_agent_sessions 与 facade archived: bool|None=False 三态、router Query(default=None)（HTTP 不传=全部含已归档），移动端默认视图与 use-daemon-machines 会话计数显式 archived=false 保持原语义；openapi+api-types 同步再生成。**quick 2026-09-01 风险审查修**：桌面树原「不传参即全部」改为非归档视图（默认+全部状态+各状态筛选）一律显式 archived=false——否则归档会话混入默认列表与状态筛选（与 ql-013 弹窗文案「归档后将从默认列表隐藏」矛盾、挤占 limit=500 取数名额），归档行只进「已归档会话」视图

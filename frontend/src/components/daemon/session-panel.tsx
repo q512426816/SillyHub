@@ -89,6 +89,7 @@ import {
   Plus,
   Puzzle,
   RefreshCw,
+  Loader2,
   Search,
   Square,
   TriangleAlert,
@@ -540,6 +541,9 @@ const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
  * 更早（< 页距 = 已到头，按钮隐藏）。
  */
 const HISTORY_PAGE_SIZE = 100;
+
+/** 触顶自动加载触发阈值（scrollTop 距顶 ≤ 该值即拉更早一页）。 */
+const LOAD_EARLIER_TRIGGER_PX = 48;
 
 /** quick 会话内搜索：结果行展示文本（user_input 原文 / stdout 剥前缀取回复段）。 */
 function searchResultText(log: AgentRunLogEntry): string {
@@ -1861,16 +1865,40 @@ function SessionPanelPage({
   // 装配层为 turn 形态（logsToTurns run 分组）——更老日志独立装配成 turns 后
   // 头部拼接；realRunId 已在当前 turns 的轮跳过（长 run 跨游标边界时防双条，
   // 该轮更早段丢弃属可接受降级，正常轮不跨游标）。resync/增量路径零改动。
+  // 触顶自动加载（quick 迭代）：原顶部按钮改滚动触发——滚动接线与 prepend
+  // 滚动锚的 DOM 组装在 sessionBody 处（isToolReportBody 之后），经 ref 间接
+  // 供本回调读取，避免块级声明顺序耦合。
+  const bodyWrapRef = useRef<HTMLDivElement | null>(null);
+  /** 主体挂载 state 镜像（稳定 callback ref 驱动，滚动监听重挂维度——内联箭头
+   *  ref 每渲染换身份致 detach/attach 循环 + Maximum update depth）。 */
+  const [bodyWrapMounted, setBodyWrapMounted] = useState(false);
+  const bodyWrapCallbackRef = useCallback((el: HTMLDivElement | null) => {
+    bodyWrapRef.current = el;
+    setBodyWrapMounted(Boolean(el));
+  }, []);
+  const scrollElQueryRef = useRef<() => HTMLElement | null>(() => null);
+  /** prepend 滚动锚：加载前 scrollHeight，加载后按增量补回视口位置。 */
+  const pendingAnchorRef = useRef<number | null>(null);
+  /** 同步加载锁（滚动事件高频，state 锁同 tick 内不生效）。 */
+  const historyLoadingRef = useRef(false);
+  /** 工具报告主体镜像（组件后段条件计算 + 早退渲染未初始化，effect 经 ref 读）。 */
+  const isToolReportBodyRef = useRef(false);
+  const handleLoadEarlierRef = useRef<() => Promise<void>>(async () => {});
   const handleLoadEarlier = useCallback(async () => {
-    if (!sessionId || historyLoading || !hasEarlier) return;
+    if (!sessionId || historyLoadingRef.current || !hasEarlier) return;
     const cursor = historyCursorRef.current;
     if (!cursor) return;
+    historyLoadingRef.current = true;
     setHistoryLoading(true);
     try {
       const older = await getAgentSessionLogs(sessionId, {
         before: cursor,
         limit: HISTORY_PAGE_SIZE,
       });
+      // 滚动锚：记录 prepend 前 scrollHeight，加载后按增量补回（正在读的
+      // 内容不被新段顶走，向上滚动自然续读更早）。
+      const scrollEl = scrollElQueryRef.current();
+      if (scrollEl) pendingAnchorRef.current = scrollEl.scrollHeight;
       historyCursorRef.current = older[0]?.timestamp ?? null;
       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
       const olderTurns = logsToTurns(older);
@@ -1894,11 +1922,59 @@ function SessionPanelPage({
         });
       }
     } catch {
-      /* 翻页失败静默（按钮可重试；不干扰实时流）。 */
+      /* 翻页失败静默（触顶自动重试；不干扰实时流）。 */
     } finally {
+      historyLoadingRef.current = false;
       setHistoryLoading(false);
     }
-  }, [sessionId, historyLoading, hasEarlier]);
+  }, [sessionId, hasEarlier]);
+  handleLoadEarlierRef.current = handleLoadEarlier;
+
+  // ── quick（2026-09-02 触顶自动加载）：滚动接线 + prepend 滚动锚 ──
+  // 捕获阶段监听 TurnTimeline 内部滚动容器（native scroll 不冒泡，capture
+  // 命中全部后代；jsdom fireEvent 派发亦走捕获相位）；触顶（scrollTop ≤
+  // LOAD_EARLIER_TRIGGER_PX）即触发加载更早一页——hasEarlier=false（到头）
+  // 后 handleLoadEarlier 内部自挡，触顶不再发起请求。对齐 shadow-session-viewer
+  // 同款模式。isToolReportBody（组件后段条件计算）经闭包读取——effect 体在
+  // 渲染完成后执行，块级声明已完成；deps 只含挂载维度不重挂。
+  const timelineScrollEl = useCallback(
+    () =>
+      bodyWrapRef.current?.querySelector<HTMLElement>(
+        '[data-testid="turn-timeline-scroll"]',
+      ) ?? null,
+    [],
+  );
+  useEffect(() => {
+    if (isToolReportBodyRef.current) return;
+    const wrap = bodyWrapRef.current;
+    if (!wrap) return;
+    const onScroll = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (!el || el.getAttribute("data-testid") !== "turn-timeline-scroll") return;
+      if (el.scrollTop <= LOAD_EARLIER_TRIGGER_PX) {
+        void handleLoadEarlierRef.current();
+      }
+    };
+    wrap.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () =>
+      wrap.removeEventListener(
+        "scroll",
+        onScroll,
+        { capture: true } as AddEventListenerOptions,
+      );
+    // 挂载维度：会话主体骨架（早退渲染）先于时间线出现——经 callback ref 的
+    // state 镜像驱动主体挂载/卸载时重挂监听（sessionId 变化亦重挂）。
+  }, [sessionId, bodyWrapMounted]);
+  // prepend 滚动锚：turnState 变化且有待补锚时，按 scrollHeight 增量补回
+  // 视口位置——正在读的内容不被新段顶走，向上滚动自然续读更早段。
+  useEffect(() => {
+    const anchor = pendingAnchorRef.current;
+    if (anchor == null) return;
+    const el = timelineScrollEl();
+    pendingAnchorRef.current = null;
+    if (!el) return;
+    el.scrollTop += el.scrollHeight - anchor;
+  }, [turnState, timelineScrollEl]);
 
   /** quick 会话内搜索：q 全量查询（limit=100），结果浮层展示。 */
   const handleSessionSearch = useCallback(async () => {
@@ -3388,22 +3464,25 @@ function SessionPanelPage({
 
   // task-14（design §5.4）：会话主体条件提升为变量——mobile 外包横向滚动容器
   // （PANEL_BODY_WRAP_CLS_MOBILE），desktop 原样直挂（DOM 结构/props 零变化）。
+  // 触顶自动加载接线（hooks 在 handleLoadEarlier 旁无条件区，见该处注释）：
+  // 渲染期把时间线滚动容器查询器与工具报告主体镜像注入 ref。
+  scrollElQueryRef.current = () => timelineScrollEl();
+  isToolReportBodyRef.current = isToolReportBody;
+
   const sessionBody = isToolReportBody ? (
     <AgentLogSessionBody sessionId={session.id} />
   ) : (
     <>
-      {/* quick（2026-09-02）：时间线顶部「加载更早消息」按钮（初始历史窗口化
-          limit=100 起步，翻页 prepend；满页才显示，到头自动隐藏）。 */}
-      {hasEarlier && (
-        <div className="flex shrink-0 justify-center py-1.5">
-          <Button
-            size="small"
-            data-testid="session-load-earlier"
-            loading={historyLoading}
-            onClick={() => void handleLoadEarlier()}
-          >
-            加载更早消息
-          </Button>
+      {/* quick（2026-09-02 触顶自动加载迭代）：原「加载更早消息」按钮改滚动
+          触发——时间线触顶（scrollTop ≤ 48px）自动拉更早一页 prepend；
+          hasEarlier=false（到头）后触顶不再发起请求。加载中顶部行内提示。 */}
+      {historyLoading && (
+        <div
+          className="flex shrink-0 items-center justify-center gap-1.5 py-1.5 text-xs text-neutral-500"
+          data-testid="session-load-earlier-hint"
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          正在加载更早消息…
         </div>
       )}
       <TurnTimeline
@@ -3818,9 +3897,17 @@ function SessionPanelPage({
             注入口保留复用）。
           - task-14：mobile 外包横向滚动容器（表格等横向内容不撑破竖屏视口）。 */}
       {mobile ? (
-        <div className={PANEL_BODY_WRAP_CLS_MOBILE}>{sessionBody}</div>
+        <div className={PANEL_BODY_WRAP_CLS_MOBILE}>
+          {/* contents 包裹保布局零变化（子元素仍直接参与外层 flex/scroll），
+              仅提供滚动监听挂载点（触顶自动加载）。 */}
+          <div ref={bodyWrapCallbackRef} className="contents">
+            {sessionBody}
+          </div>
+        </div>
       ) : (
-        sessionBody
+        <div ref={bodyWrapCallbackRef} className="contents">
+          {sessionBody}
+        </div>
       )}
 
       {/* task-11：会话团队任务块（TeamTaskBlock）——ql-20260826-010 起收编进头部

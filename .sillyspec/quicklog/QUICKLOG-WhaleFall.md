@@ -275,3 +275,14 @@
 根因：分身会话整段执行是单个长 run，handleLoadEarlier 的 run 级去重把与当前窗口同 run 的更早日志整 turn 丢弃（原作者注释视作可接受降级，但对分身单 run 会话是 100% 丢弃——按钮永远无反应，ee24ba15 分身 c479dbc6 用户实证）
 方案：同 run 跨游标不再丢弃——伪 runId 变体（#e+游标短码防多次翻页 key 相撞）插入该 turn 之前；realRunId 保持原值不动，SSE 增量归流与孤儿 run 补建的 realRunId 匹配零影响；before 游标保证与当前窗口日志内容不重叠
 结果：page.test 加载更早 4 用例（新增单 run 跨游标 1）+ 整文件 25/25 绿；tsc 0 错；待 Docker 重建 frontend 部署
+
+## ql-20260902-009-0d92 | 2026-09-02 16:36:08 | 会话面板「加载更早消息」改触顶自动加载——滚动到顶自动拉取+行内加载提示+到头不再触发
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（触顶监听+锚定+行内提示）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（scroll 触发用例改写）
+需求：会话面板「加载更早消息」改触顶自动加载——滚动到顶自动拉取+行内加载提示+到头不再触发
+根因：用户要求把按钮交互改为滚动加载（触顶触发、加载有提示、全部加载完成后触顶不再请求）
+方案：捕获阶段监听 TurnTimeline 滚动容器（scrollTop ≤ 48px 触发，对齐 shadow-session-viewer 模式）；同步 ref 锁防滚动事件高频双拉；prepend 滚动锚按 scrollHeight 增量补回视口（正在读的内容不被顶走）；加载中顶部行内提示（Loader2 旋转+正在加载更早消息）；hasEarlier=false 到头后 handleLoadEarlier 内部自挡；稳定 callback ref 驱动主体挂载时重挂监听（会话骨架早退渲染先于主体）
+结果：page.test 25/25（触顶用例改 scroll 触发+到头不重复请求断言）+ session-panel-ux-fixes 5/5 绿；tsc 0 错；待重建 frontend 部署

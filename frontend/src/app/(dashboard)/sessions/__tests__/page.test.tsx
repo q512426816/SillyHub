@@ -1353,7 +1353,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     };
   }
 
-  it("满页（100 条）→「加载更早消息」按钮出现；点击 before 游标拉更老 prepend；不满页按钮隐藏", async () => {
+  it("满页（100 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求", async () => {
     // 初始窗口满页：1 run 内 100 条（1 user_input + 99 stdout，turn DOM 轻）。
     const fullPage = [
       quickLog("q-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
@@ -1378,22 +1378,33 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     await selectDefaultSession();
     expect(await screen.findByText("当前窗口提问")).toBeTruthy();
 
-    // 满页 → 按钮出现；点击 → before=窗口最早 ts + limit=100。
-    const btn = await screen.findByTestId("session-load-earlier");
-    fireEvent.click(btn);
+    const beforeCallCount = () =>
+      mocks.getAgentSessionLogs.mock.calls.filter(
+        (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
+      ).length;
+
+    // 触顶（jsdom scrollTop=0 ≤ 48px）→ before=窗口最早 ts + limit=100；
+    // 同步加载提示出现。
+    const scroller = await screen.findByTestId("turn-timeline-scroll");
+    fireEvent.scroll(scroller);
+    expect(screen.getByTestId("session-load-earlier-hint")).toBeTruthy();
     await waitFor(() => {
       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
         before: "2026-08-15T08:00:00Z",
         limit: 100,
       });
     });
-    // prepend：更早轮出现在顶部，当前窗口内容保留。
+    // prepend：更早轮出现在顶部，当前窗口内容保留；加载完成后提示消失。
     expect(await screen.findByText("更早的提问")).toBeTruthy();
     expect(screen.getByText("当前窗口提问")).toBeTruthy();
-    // 第二页不满（2 < 100）→ 按钮隐藏（已到头）。
     await waitFor(() => {
-      expect(screen.queryByTestId("session-load-earlier")).toBeNull();
+      expect(screen.queryByTestId("session-load-earlier-hint")).toBeNull();
     });
+    // 第二页不满（2 < 100）→ 到头：再触顶不再发起 before 请求。
+    expect(beforeCallCount()).toBe(1);
+    fireEvent.scroll(scroller);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(beforeCallCount()).toBe(1);
   });
 
   it("单 run 跨游标（团队分身会话常态）→ 更早段同 run 不丢弃，伪 runId 轮块 prepend", async () => {
@@ -1423,7 +1434,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     await selectDefaultSession();
     expect(await screen.findByText("分身首句")).toBeTruthy();
 
-    fireEvent.click(await screen.findByTestId("session-load-earlier"));
+    fireEvent.scroll(await screen.findByTestId("turn-timeline-scroll"));
     await waitFor(() => {
       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
         before: "2026-08-15T08:00:00Z",
@@ -1435,7 +1446,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     expect(screen.getByText("分身首句")).toBeTruthy();
   });
 
-  it("不满页（<100 条）→ 无「加载更早消息」按钮（旧短会话零变化）", async () => {
+  it("不满页（<100 条）→ 无加载提示；触顶不发起 before 请求（旧短会话零变化）", async () => {
     mocks.getAgentSessionLogs.mockResolvedValue([
       quickLog("s-inj", "r-1", "user_input", "短会话提问", "2026-08-15T08:00:00Z"),
       quickLog("s-out", "r-1", "stdout", "答复。", "2026-08-15T08:00:05Z"),
@@ -1443,7 +1454,14 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     renderPage();
     await selectDefaultSession();
     expect(await screen.findByText("短会话提问")).toBeTruthy();
-    expect(screen.queryByTestId("session-load-earlier")).toBeNull();
+    expect(screen.queryByTestId("session-load-earlier-hint")).toBeNull();
+    // 触顶（内容不满一页恒在顶）→ 到头自挡，不发起 before 请求。
+    fireEvent.scroll(screen.getByTestId("turn-timeline-scroll"));
+    await new Promise((r) => setTimeout(r, 0));
+    const beforeCount = mocks.getAgentSessionLogs.mock.calls.filter(
+      (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
+    ).length;
+    expect(beforeCount).toBe(0);
   });
 
   it("会话内搜索：icon 展开输入 → 回车 q 查询（limit=100）→ 结果浮层 + <mark> 高亮；点条目关闭浮层", async () => {
