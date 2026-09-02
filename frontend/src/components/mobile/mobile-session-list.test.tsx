@@ -30,13 +30,15 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-// ── @/lib/daemon mock：保留 actual（常量/类型真实），仅替换五个 API ──────────
+// ── @/lib/daemon mock：保留 actual（常量/类型真实），仅替换 API ──────────────
 const daemonApi = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
   deleteAgentSession: vi.fn(),
   archiveAgentSession: vi.fn(),
   unarchiveAgentSession: vi.fn(),
+  // 群聊分区数据源（2026-09-02 quick，照桌面群分区同款 mock 手法）。
+  listGroupChats: vi.fn(),
 }));
 vi.mock("@/lib/daemon", async () => {
   const actual =
@@ -56,7 +58,9 @@ import {
   type AgentSessionListResponse,
   type AgentSessionRead,
   type DaemonMachineRead,
+  type GroupChatListItemRead,
 } from "@/lib/daemon";
+import { groupLastOpenKey } from "@/lib/group-unread";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -113,6 +117,52 @@ function makeResp(items: AgentSessionRead[]): AgentSessionListResponse {
   return { items, total: items.length } as unknown as AgentSessionListResponse;
 }
 
+/**
+ * 群列表项固件（2026-09-02 quick，形态对齐 session-list-panel.test
+ * makeGroupListItem：members 摘要 + last_message + last_mention）。
+ */
+function makeGroupListItem(
+  overrides: Partial<GroupChatListItemRead> = {},
+): GroupChatListItemRead {
+  return {
+    id: "g-1",
+    session_id: "s-g-1",
+    workspace_id: "ws-1",
+    title: "前端攻坚小分队",
+    created_by: "u-me",
+    agent_cross_mention: true,
+    cross_mention_depth: 2,
+    context_window: 20,
+    created_at: "2026-09-01T00:00:00Z",
+    ended_at: null,
+    deleted_at: null,
+    members: [
+      {
+        id: "mem-1",
+        member_type: "agent",
+        display_name: "小码",
+        runtime_id: "rt-1",
+        joined_at: "2026-09-01T00:00:00Z",
+        shadow_status: "none",
+        team_enabled: false,
+      },
+      {
+        id: "mem-2",
+        member_type: "user",
+        display_name: "林一",
+        user_id: "u-lin",
+        joined_at: "2026-09-01T00:00:00Z",
+        shadow_status: "none",
+        team_enabled: false,
+      },
+    ],
+    online_member_ids: [],
+    last_message: "小码：已定位到问题在 hooks 依赖数组…",
+    last_mention: null,
+    ...overrides,
+  } as unknown as GroupChatListItemRead;
+}
+
 /** 组件期望的 query key 形态（X-04 逐字：scope 槽位 + 参数对象槽位）。 */
 function sessionsPortalKey(workspaceId: string, archived: boolean) {
   return [
@@ -160,6 +210,25 @@ function renderList(workspaceId = "ws-1") {
   );
 }
 
+/** 带群回调渲染（群分区启用形态；渲染后手动传参不裁剪既有用例）。 */
+function renderListGroupCallbacks(
+  onOpenGroup: (g: GroupChatListItemRead) => void,
+  onNewGroup: () => void,
+  workspaceId = "ws-1",
+) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MobileSessionList
+        workspaceId={workspaceId}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onOpenGroup={onOpenGroup}
+        onNewGroup={onNewGroup}
+      />
+    </QueryClientProvider>,
+  );
+}
+
 beforeEach(() => {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -184,6 +253,9 @@ beforeEach(() => {
   daemonApi.deleteAgentSession.mockResolvedValue(undefined);
   daemonApi.archiveAgentSession.mockResolvedValue(undefined);
   daemonApi.unarchiveAgentSession.mockResolvedValue(undefined);
+  // 群分区默认空列表（@我已读记忆跨用例清零——红点判定依赖 localStorage）。
+  daemonApi.listGroupChats.mockResolvedValue([]);
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -488,5 +560,137 @@ describe("MobileSessionList 回调", () => {
 
     fireEvent.click(await screen.findByTestId("mobile-session-list-new"));
     expect(onNew).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ────────────── 群聊分区（2026-09-02 quick，照桌面 task-07 群分区契约） ────────────── */
+
+describe("MobileSessionList 群聊分区", () => {
+  it("群行渲染 + 独立数据源同 key 形态（groupChats/list/workspaceId 落缓存）+ workspace 客户端过滤", async () => {
+    const groups = [
+      makeGroupListItem(),
+      makeGroupListItem({ id: "g-2", title: "别家的群", workspace_id: "ws-other" }),
+    ];
+    daemonApi.listGroupChats.mockResolvedValue(groups);
+    renderListGroupCallbacks(vi.fn(), vi.fn());
+
+    // 群行渲染（本工作区群；他工作区群被客户端过滤）+ facepile + 摘要
+    const row = await screen.findByTestId("mobile-group-chat-row");
+    expect(row).toHaveAttribute("data-group-id", "g-1");
+    expect(row.textContent).toContain("前端攻坚小分队");
+    expect(row.textContent).toContain("小码：已定位到问题在 hooks 依赖数组…");
+    // facepile：成员昵称 title 提示（小码/林一，复用桌面导出）。
+    expect(row.querySelector('[title="小码"]')).toBeTruthy();
+    expect(row.querySelector('[title="林一"]')).toBeTruthy();
+    expect(screen.queryByText("别家的群")).not.toBeInTheDocument();
+    // 分区计数
+    expect(screen.getByLabelText("群聊分区").textContent).toContain("1 个");
+
+    // 数据落键：key 形态 = ["groupChats","list",workspaceId]（与桌面 workspace
+    // scope 群分区同 key 共享缓存；错键取不到即失败）。
+    await waitFor(() => {
+      expect(queryClient.getQueryData(["groupChats", "list", "ws-1"])).toBe(
+        groups,
+      );
+    });
+    // 独立数据源：群分区不掺单聊端点
+    expect(daemonApi.listGroupChats).toHaveBeenCalledTimes(1);
+    expect(daemonApi.listAgentSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("点击群行 → onOpenGroup(完整群列表项)；分区头「＋」→ onNewGroup", async () => {
+    const onOpenGroup = vi.fn();
+    const onNewGroup = vi.fn();
+    const group = makeGroupListItem();
+    daemonApi.listGroupChats.mockResolvedValue([group]);
+    renderListGroupCallbacks(onOpenGroup, onNewGroup);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "打开群聊 前端攻坚小分队" }),
+    );
+    expect(onOpenGroup).toHaveBeenCalledTimes(1);
+    expect(onOpenGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "g-1", title: "前端攻坚小分队" }),
+    );
+
+    fireEvent.click(screen.getByTestId("mobile-group-chat-new"));
+    expect(onNewGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("未传 onOpenGroup → 分区零渲染零请求（照桌面 onSelectGroup 门控）", async () => {
+    renderList();
+    await waitFor(() => {
+      expect(screen.getByTestId("mobile-session-list")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("mobile-group-chat-section")).not.toBeInTheDocument();
+    expect(daemonApi.listGroupChats).not.toHaveBeenCalled();
+  });
+
+  it("红点：last_mention 晚于本地已读 → 行首红点 + [有人@我] 前缀；已读/无提及 → 无红点", async () => {
+    daemonApi.listGroupChats.mockResolvedValue([
+      makeGroupListItem({
+        id: "g-unread",
+        title: "有人艾特我",
+        last_mention: {
+          ts: new Date(Date.now() - 5_000).toISOString(),
+          content: "在吗",
+          member_name: "小码",
+        },
+      }),
+      makeGroupListItem({
+        id: "g-read",
+        title: "早已读",
+        // 有提及但已打开过（已读记忆晚于提及）→ 无红点
+        last_mention: {
+          ts: "2026-09-01T00:00:00Z",
+          content: "旧提及",
+          member_name: "小码",
+        },
+      }),
+    ]);
+    // g-read 已读记忆晚于其 last_mention ts → 视为已读。
+    window.localStorage.setItem(
+      groupLastOpenKey("g-read"),
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    renderListGroupCallbacks(vi.fn(), vi.fn());
+
+    const rows = await screen.findAllByTestId("mobile-group-chat-row");
+    expect(rows).toHaveLength(2);
+    const unreadRow = rows.find((r) => r.dataset.groupId === "g-unread");
+    if (!unreadRow) throw new Error("未读群行缺失（g-unread）");
+    expect(unreadRow).toHaveAttribute("data-mention-unread", "true");
+    expect(unreadRow).toHaveAttribute("data-mention-unread", "true");
+    expect(
+      screen.getByTestId("mobile-group-mention-dot"),
+    ).toBeInTheDocument();
+    expect(unreadRow.textContent).toContain("[有人@我]");
+
+    const readRow = rows.find((r) => r.dataset.groupId === "g-read");
+    if (!readRow) throw new Error("已读群行缺失（g-read）");
+    expect(readRow).not.toHaveAttribute("data-mention-unread");
+    expect(readRow.textContent).not.toContain("[有人@我]");
+    // 只有一个红点（未读群）
+    expect(screen.getAllByTestId("mobile-group-mention-dot")).toHaveLength(1);
+  });
+
+  it("last_message 空 → 回退成员构成摘要；加载失败 → 错误提示", async () => {
+    daemonApi.listGroupChats.mockResolvedValue([
+      makeGroupListItem({ last_message: null }),
+    ]);
+    const { unmount } = renderListGroupCallbacks(vi.fn(), vi.fn());
+    const row = await screen.findByTestId("mobile-group-chat-row");
+    expect(row.textContent).toContain("2 名成员 · 1 位 Agent · 1 位用户");
+
+    // 错误分支：清缓存（staleTime 30s 内新鲜缓存不会重拉）+ 换 mock 拒绝 →
+    // 重渲染出错误提示、不出群行。
+    unmount();
+    queryClient.clear();
+    daemonApi.listGroupChats.mockRejectedValue(new Error("网络异常"));
+    renderListGroupCallbacks(vi.fn(), vi.fn());
+    expect(
+      await screen.findByTestId("mobile-group-chat-error"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("mobile-group-chat-row")).not.toBeInTheDocument();
   });
 });

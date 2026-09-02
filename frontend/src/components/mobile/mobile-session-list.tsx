@@ -33,6 +33,14 @@
  * - 点击卡片 onSelect(sessionId)（宿主 task-12 接路由跳转）；空态引导
  *   onNew（宿主接 PreSessionPicker bottomSheet，不在本组件）。
  *
+ * 群聊分区（群聊体验 quick 2026-09-02，照桌面 session-list-panel 群分区
+ * task-07 / FR-01 手法的移动轻量版）：列表顶部「群聊」分区——群行 = 红点
+ * （@我未读）+ facepile 成员头像堆叠 + 群名 + 最后消息摘要；数据独立
+ * useQuery ["groupChats","list",workspaceId]（与桌面 workspace scope 群分区
+ * 同 key 形态共享缓存，落在 ["groupChats"] 前缀下被 invalidate 全覆盖）调
+ * listGroupChats + 客户端 workspace 过滤；onOpenGroup 传入才启用（零渲染
+ * 零请求），分区头「＋」onNewGroup 上抛开建群向导（宿主接 CreateGroupWizard）。
+ *
  * 移动约束（design §5.5 / R-04）：触摸热区 ≥44px、正文 ≥14px、语义 token
  * （border/bg-card/text-foreground/primary 语义阶），无写死色值。
  */
@@ -40,9 +48,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Modal } from "antd";
-import { MoreVertical } from "lucide-react";
+import { MoreVertical, Plus, Users } from "lucide-react";
 
 import { formatRelativeTime } from "@/components/daemon/runtime-card-helpers";
+import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
 import { MobileActionMenu, type MobileAction } from "@/components/mobile/mobile-action-menu";
 import { ApiError } from "@/lib/api";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
@@ -51,12 +60,15 @@ import {
   archiveAgentSession,
   deleteAgentSession,
   listAgentSessions,
+  listGroupChats,
   unarchiveAgentSession,
   type AgentSessionListResponse,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonMachineRead,
+  type GroupChatListItemRead,
 } from "@/lib/daemon";
+import { isGroupMentionUnread, readGroupLastOpen } from "@/lib/group-unread";
 import { cn } from "@/lib/utils";
 
 /* ────────────── 纯辅助（组件外，便于单测推理；语义对齐 session-list-panel） ────────────── */
@@ -158,6 +170,15 @@ export interface MobileSessionListProps {
   onSelect: (sessionId: string) => void;
   /** 新建会话入口（宿主接 PreSessionPicker bottomSheet，task-12）。 */
   onNew: () => void;
+  /**
+   * 点击群行（群聊分区，2026-09-02 quick）：上抛完整群列表项（宿主切群聊
+   * 视图渲染 GroupChatPanel——group 快照免详情查询兜底直供，对齐桌面门户
+   * onSelectGroup 语义）。**传入即启用群聊分区**（独立 useQuery listGroupChats
+   * 供数，不掺单聊数据源）；未传分区零渲染零请求。
+   */
+  onOpenGroup?: (_group: GroupChatListItemRead) => void;
+  /** 群聊分区头「＋」新建群聊回调（宿主开 CreateGroupWizard 三步向导）。 */
+  onNewGroup?: () => void;
 }
 
 /** 状态 Tab 配置（顺序即渲染顺序，对齐原型 .list-tabs）。 */
@@ -171,6 +192,8 @@ export function MobileSessionList({
   workspaceId,
   onSelect,
   onNew,
+  onOpenGroup,
+  onNewGroup,
 }: MobileSessionListProps) {
   const [tab, setTab] = useState<MobileSessionTabKey>("all");
   const [menuSession, setMenuSession] = useState<AgentSessionRead | null>(null);
@@ -208,6 +231,28 @@ export function MobileSessionList({
   const sessions = useMemo(
     () => sessionsQuery.data?.items ?? [],
     [sessionsQuery.data],
+  );
+
+  // ── 群聊分区数据（2026-09-02 quick，照桌面 session-list-panel 群分区手法）──
+  // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——群列表只走
+  // GET /api/daemon/group-chats）；key 第三槽位 = workspaceId，与桌面 workspace
+  // scope 群分区（session-list-panel ["groupChats","list",workspaceId]）同 key
+  // 形态共享缓存，且落在 ["groupChats"] 前缀下被 invalidate 全覆盖。
+  // onOpenGroup 传入才启用（未传零渲染零请求，照桌面 onSelectGroup 门控）。
+  const groupSectionEnabled = onOpenGroup != null;
+  const groupChatsQuery = useQuery({
+    queryKey: ["groupChats", "list", workspaceId],
+    queryFn: () => listGroupChats(),
+    enabled: groupSectionEnabled,
+    staleTime: 30_000,
+  });
+  /** 客户端 workspace 过滤：只看本工作区群（端点无过滤参，照桌面同款筛）。 */
+  const groupChats = useMemo(
+    () =>
+      (groupChatsQuery.data ?? []).filter(
+        (g) => g.workspace_id === workspaceId,
+      ),
+    [groupChatsQuery.data, workspaceId],
   );
 
   // 机器分组数据源：与桌面树同源同参（session-list-panel.tsx:436）。
@@ -324,6 +369,55 @@ export function MobileSessionList({
       data-testid="mobile-session-list"
       className="flex flex-col gap-2 pb-4"
     >
+      {/* 群聊分区（2026-09-02 quick）：列表顶部轻量版——分区头（Users + 计数 +
+          「＋」建群，热区 ≥44px）+ 群行卡片（红点 + facepile + 群名 + 摘要），
+          独立于状态 Tab（群不受单聊状态筛选影响，照桌面分区恒展示形态）。 */}
+      {groupSectionEnabled && (
+        <section
+          data-testid="mobile-group-chat-section"
+          aria-label="群聊分区"
+          className="flex flex-col gap-1.5 border-b border-border pb-2"
+        >
+          <div className="flex items-center gap-2 px-1">
+            <Users aria-hidden className="h-4 w-4 shrink-0 text-brand-600" />
+            <span className="text-[13px] font-medium text-foreground">群聊</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {groupChatsQuery.isLoading
+                ? "加载中…"
+                : `${groupChats.length} 个`}
+            </span>
+            {onNewGroup && (
+              <button
+                type="button"
+                onClick={onNewGroup}
+                aria-label="新建群聊"
+                title="新建群聊（三步向导：群信息 → 邀请用户 → 配置 Agent 成员）"
+                data-testid="mobile-group-chat-new"
+                className="ml-auto inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-brand-300 bg-brand-100 text-brand-700 transition-colors active:bg-muted"
+              >
+                <Plus aria-hidden className="h-5 w-5" />
+              </button>
+            )}
+          </div>
+          {groupChatsQuery.isError ? (
+            <p
+              data-testid="mobile-group-chat-error"
+              className="px-1 py-1 text-xs text-destructive"
+            >
+              群聊加载失败：{groupChatsQuery.error.message}
+            </p>
+          ) : !groupChatsQuery.isLoading && groupChats.length === 0 ? (
+            <p className="px-1 py-1 text-xs text-muted-foreground">
+              暂无群聊——点「＋」发起一个多人多 Agent 协作群
+            </p>
+          ) : (
+            groupChats.map((g) => (
+              <MobileGroupChatRow key={g.id} group={g} onOpen={onOpenGroup} />
+            ))
+          )}
+        </section>
+      )}
+
       {/* 状态 Tab（pill 段控，对齐原型 .list-tabs；全部/进行中带计数） */}
       <div role="tablist" aria-label="会话状态筛选" className="flex gap-2">
         {SESSION_TABS.map((t) => {
@@ -465,5 +559,72 @@ export function MobileSessionList({
         title="会话操作"
       />
     </div>
+  );
+}
+
+/* ────────────── 群行卡片（2026-09-02 quick，桌面 GroupChatRow 移动轻量版） ────────────── */
+
+/** 群行 props。 */
+interface MobileGroupChatRowProps {
+  group: GroupChatListItemRead;
+  onOpen: (_group: GroupChatListItemRead) => void;
+}
+
+/**
+ * 群行卡片（单 button 触控卡，热区 ≥44px / 正文 ≥14px）：@我未读红点
+ * （destructive 语义阶，微信式；判定对齐桌面 GroupChatRow——last_mention
+ * 晚于本地已读记忆即未读，打开群 GroupChatPanel 内 markGroupOpened 落已读）
+ * + facepile 头像堆叠（agent=brand / 用户=info，复用桌面导出）+ 群名 +
+ * 最后消息摘要（空回退成员构成摘要）。
+ */
+function MobileGroupChatRow({ group, onOpen }: MobileGroupChatRowProps) {
+  const members = group.members ?? [];
+  const agentCount = members.filter((m) => m.member_type === "agent").length;
+  const userCount = members.length - agentCount;
+  // 最后消息摘要（空回退成员构成，口径对齐桌面 GroupChatRow preview）。
+  const preview =
+    group.last_message?.trim() ||
+    `${members.length} 名成员 · ${agentCount} 位 Agent · ${userCount} 位用户`;
+  const title = group.title?.trim() || "未命名群聊";
+  // @我未读判定（last_mention 索引签名 dict 运行时守卫，同桌面）。
+  const mentionUnread = isGroupMentionUnread(
+    group.last_mention ?? null,
+    readGroupLastOpen(group.id),
+  );
+  return (
+    <button
+      type="button"
+      data-testid="mobile-group-chat-row"
+      data-group-id={group.id}
+      data-mention-unread={mentionUnread ? "true" : undefined}
+      aria-label={`打开群聊 ${title}${mentionUnread ? "（有人@我）" : ""}`}
+      onClick={() => onOpen(group)}
+      className="flex min-h-[44px] w-full items-center gap-2.5 rounded-[var(--radius-lg)] border border-border bg-card p-3 text-left shadow-[var(--shadow-sm)] transition-colors active:bg-muted/50"
+    >
+      {/* @我未读行首红点（微信式；红点=destructive 语义阶）。 */}
+      {mentionUnread && (
+        <span
+          data-testid="mobile-group-mention-dot"
+          aria-hidden
+          className="h-2 w-2 shrink-0 rounded-full bg-destructive"
+        />
+      )}
+      {/* 成员摘要前 3 头像堆叠（agent=brand / 用户=info，复用桌面 facepile） */}
+      <MemberFacepile members={members} max={3} />
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="truncate text-[14px] font-medium text-foreground" title={title}>
+          {title}
+        </span>
+        <span
+          className={cn(
+            "truncate text-xs",
+            mentionUnread ? "text-brand-600" : "text-muted-foreground",
+          )}
+        >
+          {mentionUnread ? "[有人@我] " : ""}
+          {preview}
+        </span>
+      </span>
+    </button>
   );
 }

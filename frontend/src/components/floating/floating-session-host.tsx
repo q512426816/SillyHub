@@ -8,6 +8,12 @@
  * （另两个：SessionsPortal 三入口；先例 /runtimes 弹窗为 dialog 形态）。
  * 挂载于 (dashboard)/layout.tsx（AppShell 内），跨页面常驻。
  *
+ * 群聊接线（群聊体验 quick 2026-09-02，照桌面门户 task-07 手法）：左栏
+ * SessionListPanel 传 onSelectGroup 启用群分区（runtime 锁定 scope 面板自身
+ * 不挂）；选中群右侧渲染 GroupChatPanel（优先级 群 > 真会话 > 预会话 > 空态，
+ * key={groupId} 重挂载）；分区头「＋」开 CreateGroupWizard；刷新信号（面板
+ * onSessionListRefresh）invalidate 双前缀 ["agentSessions"]+["groupChats"]。
+ *
  * 三条硬约束（design §2/§6）：
  *   1. 互斥协议：pathname 命中门户三路由（/sessions、/workspaces/:id/sessions、
  *      /workspaces/:id/changes/:cid/sessions）→ 整体不渲染（卸载球+抽屉，防
@@ -32,11 +38,15 @@ import {
 } from "lucide-react";
 
 import { SessionPanel } from "@/components/daemon/session-panel";
+import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
+import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
 import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
 // FR-02/FR-03：抽屉左栏由紧凑列表换成 /sessions 同款工作区树。
 import { SessionListPanel } from "@/components/sessions/session-list-panel";
 import { resolveDefaultMachineId } from "@/components/sessions/sessions-portal";
 import {
+  type GroupChatListItemRead,
+  type GroupChatRead,
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { listProviders } from "@/lib/api/llm-providers";
@@ -110,6 +120,10 @@ function FloatingDrawerBody({
 
   const refreshLists = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+    // 群聊接线（2026-09-02 quick）：群列表随刷新信号同步失效（照门户
+    // debouncedInvalidateSessions 双前缀手法——agent_sessions 变更信号同样
+    // 广播群事件，群分区/群面板 presence 共用 ["groupChats"] 前缀）。
+    void qc.invalidateQueries({ queryKey: ["groupChats"] });
   }, [qc]);
 
   // 新会话：D-005 三级回退解析默认机器（默认 Claude），未命中弹两步浮层兜底。
@@ -280,6 +294,53 @@ function FloatingDrawerBody({
     [refreshLists, sessionId, selectSession],
   );
 
+  // ── 群聊接线（2026-09-02 quick，照门户 sessions-portal task-07 手法）──────
+  // 群选中为抽屉主体本地态（不进壳层 store——壳态契约仍是「单会话宿主」，群
+  // 视图随抽屉主体挂载生命周期：关闭且无会话时主体卸载即清，最小化保活保留）；
+  // 右侧分支优先级对齐门户：群视图 > 真会话 > 预会话 > 空态。
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<GroupChatListItemRead | null>(
+    null,
+  );
+  const [groupWizardOpen, setGroupWizardOpen] = useState(false);
+
+  /** 群行选中（左栏群分区 onSelectGroup）：清壳层会话/预会话态（右侧让位群
+   *  视图——预会话无 store 清理动作，直接 setState 落空，抽屉保持开）。 */
+  const handleSelectGroup = useCallback((group: GroupChatListItemRead) => {
+    const s = useFloatingSessionStore.getState();
+    if (s.sessionId) s.selectSession(null);
+    if (s.preContext) useFloatingSessionStore.setState({ preContext: null });
+    setSelectedGroup(group);
+    setSelectedGroupId(group.id);
+  }, []);
+
+  /** 建群成功（向导 onCreated，对齐门户 handleGroupCreated）：关向导 + 清壳层
+   *  会话态 + 选中新群（GroupChatRead 归一为列表项形态——列表扩展字段占位，
+   *  invalidate 重拉后覆盖）+ invalidate ["groupChats"] 刷新群分区。 */
+  const handleGroupCreated = useCallback(
+    (group: GroupChatRead) => {
+      setGroupWizardOpen(false);
+      const s = useFloatingSessionStore.getState();
+      if (s.sessionId) s.selectSession(null);
+      if (s.preContext) useFloatingSessionStore.setState({ preContext: null });
+      setSelectedGroupId(group.id);
+      setSelectedGroup({ ...group, online_member_ids: [], last_message: null });
+      void qc.invalidateQueries({ queryKey: ["groupChats"] });
+    },
+    [qc],
+  );
+
+  // 外部会话入口（页面一键唤起 requestNewSession / 预会话 onPick 等经 store
+  // 驱动的选中）接管右侧时清群选中——群视图优先级最高，不清会让位失败
+  //（外部新建落成后仍停留群视图）。用户在左栏点群行是本地路径（先清 store
+  // 再设群态），本 effect 对该次变化的条件已为假，不会误清。
+  useEffect(() => {
+    if (sessionId || preContext) {
+      setSelectedGroupId(null);
+      setSelectedGroup(null);
+    }
+  }, [sessionId, preContext]);
+
   // 页面入口一键唤起（task-07）：requestNewSession 挂起 → 机器数据就绪后
   // 自动解析默认机器进预会话（未命中弹两步浮层兜底，pageContext 已在壳态）。
   // task-07 Phase 5（FR-06 / D-004@v2）：PPM 项目页「发起团队」入口的
@@ -402,11 +463,25 @@ function FloatingDrawerBody({
             onDeleteSessions={handleDeleteSessions}
             onArchiveSessions={handleArchiveSessions}
             onUnarchiveSessions={handleUnarchiveSessions}
+            /* 群聊接线（2026-09-02 quick）：onSelectGroup 传入即启用左栏群分区
+               （runtime 锁定 scope 面板自身不挂分区）；分区头「＋」开建群向导。 */
+            selectedGroupId={selectedGroupId}
+            onSelectGroup={handleSelectGroup}
+            onNewGroup={() => setGroupWizardOpen(true)}
           />
         </div>
 
         <div className="min-h-0 min-w-0">
-          {sessionId ? (
+          {/* 群视图优先级第一分支（对齐门户：群 > 真会话 > 预会话 > 空态）；
+              key={groupId} 重挂载契约照 SessionPanel——换群即清 SSE/时间线/typing。 */}
+          {selectedGroupId ? (
+            <GroupChatPanel
+              key={selectedGroupId}
+              groupId={selectedGroupId}
+              group={selectedGroup}
+              onSessionListRefresh={refreshLists}
+            />
+          ) : sessionId ? (
             <SessionPanel
               key={sessionId}
               mode="page"
@@ -462,6 +537,15 @@ function FloatingDrawerBody({
           )}
         </div>
       </div>
+
+      {/* 三步建群向导（左栏群分区头「＋」触发；antd Modal portal 到 body，
+          点外收抽屉白名单已放行 .ant-modal 不误收；建群成功 invalidate
+          ["groupChats"] + 选中新群见 handleGroupCreated）。 */}
+      <CreateGroupWizard
+        open={groupWizardOpen}
+        onCancel={() => setGroupWizardOpen(false)}
+        onCreated={handleGroupCreated}
+      />
 
       {/* 机器兜底两步浮层（复用门户组件；fixed 全屏遮罩，v1 接受）。
           task-10：候选含共享机器（共享条目显示名带「共享 + 共享人」标注，

@@ -25,6 +25,12 @@
  *  - machines：useDaemonMachines({limit:100})（内部 15s 无条件轮询）；
  *  - providers：useQuery ["llmProviders","floating-session"] + listProviders
  *    （staleTime 30s，与悬浮宿主共享缓存零重复请求）。
+ *
+ * 群聊接线（群聊体验 quick 2026-09-02，照桌面 sessions-portal task-07 手法）：
+ *  - 列表群分区 onOpenGroup → 页内群聊视图（顶栏返回 + GroupChatPanel
+ *    key={groupId}，与预会话态互斥）；分区头「＋」→ CreateGroupWizard
+ *    （antd Modal 默认居中，移动端全宽可接受）；建群成功 invalidate
+ *    ["groupChats"] + 选中新群（GroupChatRead 归一为列表项形态）。
  */
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -38,9 +44,15 @@ import {
   SessionPanel,
   type SessionPreContext,
 } from "@/components/daemon/session-panel";
+import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
+import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
 import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
 import { listProviders, type LlmProviderRead } from "@/lib/api/llm-providers";
-import { type SessionCreateResponse } from "@/lib/daemon";
+import {
+  type GroupChatListItemRead,
+  type GroupChatRead,
+  type SessionCreateResponse,
+} from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 
 export default function MobileWorkspaceSessionsPage() {
@@ -69,9 +81,19 @@ export default function MobileWorkspaceSessionsPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [preContext, setPreContext] = useState<SessionPreContext | null>(null);
 
+  // ── 群聊视图态（2026-09-02 quick，照桌面 sessions-portal task-07 手法）：
+  //    selectedGroup 与 preContext/会话选中互斥（进群清预会话，反之亦然）；
+  //    建群向导开关由列表群分区头「＋」触发。
+  const [selectedGroup, setSelectedGroup] = useState<GroupChatListItemRead | null>(
+    null,
+  );
+  const [groupWizardOpen, setGroupWizardOpen] = useState(false);
+
   /** 浮层两步选完（对齐门户 handlePickerPick）：合成 preContext 切预会话态并关浮层。 */
   const handlePickerPick = (runtimeId: string) => {
     setPreContext({ workspaceId, runtimeId });
+    // 进预会话清群选中（视图互斥，右侧优先级对齐门户：群 > 真会话 > 预会话）。
+    setSelectedGroup(null);
     setPickerOpen(false);
   };
 
@@ -85,6 +107,69 @@ export default function MobileWorkspaceSessionsPage() {
     router.replace(`/m/workspaces/${workspaceId}/sessions/${resp.session_id}`);
     void qc.invalidateQueries({ queryKey: ["agentSessions"] });
   };
+
+  /* ── 群聊视图接线（2026-09-02 quick，对齐门户 handleSelectGroup /
+     handleGroupCreated / refreshSessionLists 语义） ──────────────────────── */
+
+  /** 列表刷新（GroupChatPanel onSessionListRefresh 通道）：群解散/成员变更后
+   *  同步失效单聊与群列表两前缀（照门户 debouncedInvalidateSessions 双失效）。 */
+  const refreshSessionLists = () => {
+    void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+    void qc.invalidateQueries({ queryKey: ["groupChats"] });
+  };
+
+  /** 群行点击（列表分区 onOpenGroup）：切群聊视图 + 清预会话态（互斥）。 */
+  const handleOpenGroup = (group: GroupChatListItemRead) => {
+    setPreContext(null);
+    setSelectedGroup(group);
+  };
+
+  /** 建群成功（向导 onCreated，对齐门户语义）：关向导 + 选中新群
+   *  （GroupChatRead 归一为列表项形态——列表扩展字段占位，invalidate 重拉后
+   *  覆盖）+ invalidate ["groupChats"] 刷新群分区。 */
+  const handleGroupCreated = (group: GroupChatRead) => {
+    setGroupWizardOpen(false);
+    setPreContext(null);
+    setSelectedGroup({ ...group, online_member_ids: [], last_message: null });
+    void qc.invalidateQueries({ queryKey: ["groupChats"] });
+  };
+
+  // ── 群聊视图（2026-09-02 quick）：整页切 GroupChatPanel（形态照预会话视图：
+  //    顶栏返回列表 + 面板 min-h-0 flex-1 贴底；面板本体 flex 布局天然缩宽，
+  //    移动端直接渲染——key=groupId 换群即清 SSE/时间线/typing 状态，照门户）。 ──
+  if (selectedGroup) {
+    return (
+      <div
+        data-testid="m-sessions-group-view"
+        className="flex h-full min-h-0 flex-col"
+      >
+        {/* 返回列表入口（照预会话视图同款顶栏；群名即视图标题） */}
+        <div className="sticky top-0 z-30 flex shrink-0 items-center gap-1 border-b border-border bg-card px-1 py-1 shadow-[var(--shadow-sm)]">
+          <button
+            type="button"
+            onClick={() => setSelectedGroup(null)}
+            aria-label="返回会话列表"
+            data-testid="m-sessions-group-back"
+            className="inline-flex min-h-[44px] items-center gap-1 rounded-md px-2 text-[14px] text-foreground transition-colors hover:bg-muted"
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden />
+            返回列表
+          </button>
+          <span className="min-w-0 truncate text-[14px] font-medium text-foreground">
+            {selectedGroup.title?.trim() || "未命名群聊"}
+          </span>
+        </div>
+        <div className="min-h-0 flex-1">
+          <GroupChatPanel
+            key={selectedGroup.id}
+            groupId={selectedGroup.id}
+            group={selectedGroup}
+            onSessionListRefresh={refreshSessionLists}
+          />
+        </div>
+      </div>
+    );
+  }
 
   // ── 预会话视图：整页切 SessionPanel（复用第四宿主形态），隐藏列表 ──────
   if (preContext) {
@@ -151,13 +236,16 @@ export default function MobileWorkspaceSessionsPage() {
         </div>
       )}
 
-      {/* 会话分组卡片列表（task-11 契约；onSelect 钻取真会话 / onNew 接新建） */}
+      {/* 会话分组卡片列表（task-11 契约；onSelect 钻取真会话 / onNew 接新建；
+          群分区 onOpenGroup 切页内群聊视图 / onNewGroup 开三步建群向导） */}
       <MobileSessionList
         workspaceId={workspaceId}
         onSelect={(sid) =>
           router.push(`/m/workspaces/${workspaceId}/sessions/${sid}`)
         }
         onNew={() => setPickerOpen(true)}
+        onOpenGroup={handleOpenGroup}
+        onNewGroup={() => setGroupWizardOpen(true)}
       />
 
       {/* ＋ 新建会话（原型 .fab：悬浮右下、底部 Tab 上方留白；触摸热区 ≥44px） */}
@@ -178,6 +266,14 @@ export default function MobileWorkspaceSessionsPage() {
         machines={machines}
         onCancel={() => setPickerOpen(false)}
         onPick={handlePickerPick}
+      />
+
+      {/* 三步建群向导（群聊分区头「＋」触发；antd Modal 默认居中，移动端全宽
+          可接受——建群成功 invalidate ["groupChats"] + 选中新群见 handleGroupCreated） */}
+      <CreateGroupWizard
+        open={groupWizardOpen}
+        onCancel={() => setGroupWizardOpen(false)}
+        onCreated={handleGroupCreated}
       />
     </div>
   );

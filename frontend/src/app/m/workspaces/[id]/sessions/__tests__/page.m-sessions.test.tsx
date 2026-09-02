@@ -61,6 +61,25 @@ vi.mock("@/components/mobile/mobile-session-list", () => ({
         >
           列表新建
         </button>
+        <button
+          type="button"
+          data-testid="stub-group-open"
+          onClick={() =>
+            (props.onOpenGroup as (g: unknown) => void)({
+              id: "g-1",
+              title: "前端攻坚小分队",
+            })
+          }
+        >
+          打开群聊
+        </button>
+        <button
+          type="button"
+          data-testid="stub-group-new"
+          onClick={() => (props.onNewGroup as () => void)()}
+        >
+          新建群聊
+        </button>
       </div>
     );
   },
@@ -115,6 +134,54 @@ vi.mock("@/components/daemon/session-panel", () => ({
           }
         >
           首句创建成功
+        </button>
+      </div>
+    );
+  },
+}));
+
+// ── 群聊面板 / 建群向导 stub（2026-09-02 quick 群聊接线；透出 props + 触发器）──
+const groupPanelStub = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
+vi.mock("@/components/group-chat/group-chat-panel", () => ({
+  GroupChatPanel: (props: Record<string, unknown>) => {
+    groupPanelStub.props = props;
+    return (
+      <div data-testid="group-chat-panel-stub">
+        <button
+          type="button"
+          data-testid="stub-group-refresh"
+          onClick={() =>
+            (props.onSessionListRefresh as (() => void) | undefined)?.()
+          }
+        >
+          面板刷新信号
+        </button>
+      </div>
+    );
+  },
+}));
+
+const wizardStub = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
+vi.mock("@/components/group-chat/create-group-wizard", () => ({
+  CreateGroupWizard: (props: Record<string, unknown>) => {
+    wizardStub.props = props;
+    return (
+      <div data-testid="create-group-wizard-stub" data-open={String(props.open)}>
+        <button
+          type="button"
+          data-testid="stub-wizard-created"
+          onClick={() =>
+            (props.onCreated as (g: unknown) => void)({
+              id: "g-new",
+              title: "新群",
+            })
+          }
+        >
+          建群成功
         </button>
       </div>
     );
@@ -219,6 +286,8 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
     listStub.props = null;
     pickerStub.props = null;
     panelStub.props = null;
+    groupPanelStub.props = null;
+    wizardStub.props = null;
   });
 
   afterEach(() => {
@@ -363,5 +432,105 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
     });
     // 清态：回列表视图（replace 后真实路由由 [sid] 页接管，此处断言页内态已清）
     expect(screen.getByTestId("mobile-session-list-stub")).toBeInTheDocument();
+  });
+
+  // ── 群聊接线（2026-09-02 quick，照桌面门户 task-07 语义） ──────────────────
+
+  it("群行 onOpenGroup → 整页群视图渲染 GroupChatPanel（key=groupId + group 快照透传），返回列表清态", () => {
+    renderPage();
+    // 列表透传群回调（分区启用形态）
+    expect(listStub.props?.onOpenGroup).toBeTypeOf("function");
+    expect(listStub.props?.onNewGroup).toBeTypeOf("function");
+
+    fireEvent.click(screen.getByTestId("stub-group-open"));
+    // 群视图接管：面板挂载、列表与浮层卸载
+    expect(screen.getByTestId("group-chat-panel-stub")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("mobile-session-list-stub"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pre-picker-stub")).not.toBeInTheDocument();
+    // 透传契约：groupId + 群快照（免详情查询兜底直供）+ 刷新信号通道
+    expect(groupPanelStub.props?.groupId).toBe("g-1");
+    expect(groupPanelStub.props?.group).toMatchObject({
+      id: "g-1",
+      title: "前端攻坚小分队",
+    });
+    expect(groupPanelStub.props?.onSessionListRefresh).toBeTypeOf("function");
+
+    // 返回列表：群视图卸载、列表恢复
+    fireEvent.click(screen.getByTestId("m-sessions-group-back"));
+    expect(
+      screen.queryByTestId("group-chat-panel-stub"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("mobile-session-list-stub")).toBeInTheDocument();
+  });
+
+  it("分区头「＋」onNewGroup → CreateGroupWizard 打开；建群成功 → 选中新群 + invalidate [groupChats] + 关向导", async () => {
+    renderPage();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    // 初始关闭
+    expect(wizardStub.props?.open).toBe(false);
+
+    fireEvent.click(screen.getByTestId("stub-group-new"));
+    expect(wizardStub.props?.open).toBe(true);
+
+    // 建群成功（GroupChatRead 形态）→ 归一为列表项形态选中新群；群视图整页
+    // 接管（早返回分支不含向导 → 向导随列表视图卸载即「关向导」）。
+    fireEvent.click(screen.getByTestId("stub-wizard-created"));
+    expect(
+      screen.queryByTestId("create-group-wizard-stub"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-chat-panel-stub")).toBeInTheDocument();
+    expect(groupPanelStub.props?.groupId).toBe("g-new");
+    expect(groupPanelStub.props?.group).toMatchObject({
+      id: "g-new",
+      online_member_ids: [],
+      last_message: null,
+    });
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["groupChats"],
+      });
+    });
+  });
+
+  it("GroupChatPanel onSessionListRefresh → invalidate [agentSessions]+[groupChats] 双前缀（门户同款）", async () => {
+    renderPage();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    fireEvent.click(screen.getByTestId("stub-group-open"));
+    fireEvent.click(screen.getByTestId("stub-group-refresh"));
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["agentSessions"],
+      });
+    });
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["groupChats"],
+      });
+    });
+  });
+
+  it("视图互斥：群视图下进预会话清群选中；群视图优先于预会话渲染", async () => {
+    renderPage();
+    // 先选群 → 群视图
+    fireEvent.click(screen.getByTestId("stub-group-open"));
+    expect(screen.getByTestId("group-chat-panel-stub")).toBeInTheDocument();
+    // 群视图下新建入口（FAB 属列表视图，此处从列表路径驱动互斥）：回列表 →
+    // FAB → 两步浮层选完 → 预会话视图接管且群态已清。
+    fireEvent.click(screen.getByTestId("m-sessions-group-back"));
+    fireEvent.click(screen.getByTestId("m-sessions-fab"));
+    fireEvent.click(screen.getByTestId("stub-picker-pick"));
+    expect(screen.getByTestId("session-panel-stub")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("group-chat-panel-stub"),
+    ).not.toBeInTheDocument();
+    // 返回列表后再开群 → 群视图接管且预会话态已清（handleOpenGroup 清 preContext）
+    fireEvent.click(screen.getByTestId("m-sessions-pre-back"));
+    fireEvent.click(screen.getByTestId("stub-group-open"));
+    expect(screen.getByTestId("group-chat-panel-stub")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("session-panel-stub"),
+    ).not.toBeInTheDocument();
   });
 });

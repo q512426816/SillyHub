@@ -105,6 +105,8 @@ vi.mock("@/components/sessions/pre-session-picker", () => ({
 }));
 
 // FR-02/FR-03：抽屉左栏换成 SessionListPanel，需 mock 避免真实数据查询。
+// 群聊接线（2026-09-02 quick）：透出 selectedGroupId / onSelectGroup /
+// onNewGroup 接线锚点 + 触发按钮（群行点击 / 分区头「＋」）。
 vi.mock("@/components/sessions/session-list-panel", () => ({
   SessionListPanel: (props: {
     selectedSessionId?: string | null;
@@ -115,22 +117,89 @@ vi.mock("@/components/sessions/session-list-panel", () => ({
     onDeleteSessions?: unknown;
     onArchiveSessions?: unknown;
     onUnarchiveSessions?: unknown;
+    selectedGroupId?: string | null;
+    onSelectGroup?: (g: { id: string; title?: string }) => void;
+    onNewGroup?: () => void;
   }) => (
     <div
       data-testid="mock-session-list-panel"
       data-scope-kind={props.scope?.kind ?? "global"}
       data-runtime-id={props.scope?.runtimeId ?? ""}
       data-selected={props.selectedSessionId ?? ""}
+      data-selected-group={props.selectedGroupId ?? ""}
       data-ops-wired={
         [props.onNewInGroup, props.onDeleteSessions, props.onArchiveSessions, props.onUnarchiveSessions]
           .every(Boolean)
           ? "true"
           : "false"
       }
+      data-group-wired={
+        [props.onSelectGroup, props.onNewGroup].every(Boolean) ? "true" : "false"
+      }
     >
       session-list-panel
+      <button
+        type="button"
+        data-testid="mock-select-group"
+        onClick={() =>
+          props.onSelectGroup?.({ id: "g-1", title: "前端攻坚小分队" })
+        }
+      >
+        select-group
+      </button>
+      <button
+        type="button"
+        data-testid="mock-new-group"
+        onClick={() => props.onNewGroup?.()}
+      >
+        new-group
+      </button>
     </div>
   ),
+}));
+
+// 群聊接线（2026-09-02 quick）：群面板 / 建群向导 mock（透出 props + 触发器）。
+vi.mock("@/components/group-chat/group-chat-panel", () => ({
+  GroupChatPanel: (props: {
+    groupId: string;
+    group?: { id?: string } | null;
+    onSessionListRefresh?: () => void;
+  }) => (
+    <div
+      data-testid="mock-group-chat-panel"
+      data-group-id={props.groupId}
+      data-has-group={props.group ? "true" : "false"}
+    >
+      group-panel
+      <button
+        type="button"
+        data-testid="mock-group-refresh"
+        onClick={() => props.onSessionListRefresh?.()}
+      >
+        group-refresh
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("@/components/group-chat/create-group-wizard", () => ({
+  CreateGroupWizard: (props: {
+    open: boolean;
+    onCancel: () => void;
+    onCreated: (g: { id: string; title?: string }) => void;
+  }) =>
+    props.open ? (
+      <div data-testid="mock-create-group-wizard">
+        wizard
+        <button
+          type="button"
+          data-testid="mock-wizard-created"
+          onClick={() => props.onCreated({ id: "g-new", title: "新群" })}
+        >
+          wizard-created
+        </button>
+      </div>
+    ) : null,
 }));
 
 vi.mock("@/components/sessions/sessions-portal", () => ({
@@ -761,5 +830,123 @@ describe("FloatingSessionHost / 宠物形象", () => {
     const mascot = await screen.findByTestId("floating-mascot");
     expect(mascot.dataset.pet).toBe("dog");
     expect(window.localStorage.getItem("sillyhub:floating-pet")).toBe("dog");
+  });
+});
+
+// ── 群聊接线（2026-09-02 quick，照桌面门户 task-07 语义） ──────────────────
+// 覆盖：左栏群分区回调接线（onSelectGroup/onNewGroup/selectedGroupId）→ 右侧
+// GroupChatPanel 接管（优先级 群 > 真会话 > 预会话 > 空态）；外部会话入口
+//（requestNewSession）接管时群视图让位；分区头「＋」→ 建群向导 → onCreated
+// 选中新群 + invalidate ["groupChats"]；群面板刷新信号双前缀失效。
+describe("FloatingSessionHost / 群聊接线", () => {
+  /** 本组专用渲染：暴露 QueryClient 供 invalidate 断言（wrap 不回传 qc）。 */
+  function renderHost() {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const utils = render(
+      <QueryClientProvider client={qc}>
+        <FloatingSessionHost />
+      </QueryClientProvider>,
+    );
+    return { invalidateSpy, ...utils };
+  }
+
+  beforeEach(() => {
+    resetStore();
+    pathnameRef.current = "/ppm/projects";
+  });
+
+  it("左栏群分区回调全接线（selectedGroupId/onSelectGroup/onNewGroup）", async () => {
+    renderHost();
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    const list = await screen.findByTestId("mock-session-list-panel");
+    expect(list.dataset.groupWired).toBe("true");
+    expect(list.dataset.selectedGroup).toBe("");
+  });
+
+  it("群行选中 → 右侧 GroupChatPanel 接管（key 语义 groupId + group 快照透传），壳层会话态清空", async () => {
+    renderHost();
+    act(() => {
+      // 先造一个壳层会话选中（验证群视图让位清态）。
+      useFloatingSessionStore.getState().selectSession("s-1");
+    });
+    await screen.findByTestId("mock-session-panel");
+
+    fireEvent.click(screen.getByTestId("mock-select-group"));
+    const groupPanel = await screen.findByTestId("mock-group-chat-panel");
+    expect(groupPanel).toBeInTheDocument();
+    expect(groupPanel.dataset.groupId).toBe("g-1");
+    expect(groupPanel.dataset.hasGroup).toBe("true");
+    // SessionPanel 区域被替换（群视图优先级第一分支）
+    expect(screen.queryByTestId("mock-session-panel")).not.toBeInTheDocument();
+    // 壳层会话态清空（selectSession(null)，右侧让位）
+    expect(useFloatingSessionStore.getState().sessionId).toBeNull();
+
+    // 左栏选中群回传（群行高亮受控）
+    const list = screen.getByTestId("mock-session-list-panel");
+    expect(list.dataset.selectedGroup).toBe("g-1");
+  });
+
+  it("外部会话入口（requestNewSession）接管时群视图让位（清群选中回预会话）", async () => {
+    renderHost();
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    fireEvent.click(screen.getByTestId("mock-select-group"));
+    await screen.findByTestId("mock-group-chat-panel");
+
+    // 页面入口一键唤起（默认机器解析进预会话）→ 群视图让位
+    act(() => {
+      useFloatingSessionStore.getState().requestNewSession(null);
+    });
+    await screen.findByTestId("mock-session-panel");
+    expect(screen.queryByTestId("mock-group-chat-panel")).not.toBeInTheDocument();
+    const list = screen.getByTestId("mock-session-list-panel");
+    expect(list.dataset.selectedGroup).toBe("");
+  });
+
+  it("分区头「＋」→ 建群向导打开；onCreated → 选中新群 + invalidate [groupChats] + 关向导", async () => {
+    const { invalidateSpy } = renderHost();
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    fireEvent.click(screen.getByTestId("mock-new-group"));
+    const wizard = await screen.findByTestId("mock-create-group-wizard");
+    expect(wizard).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("mock-wizard-created"));
+    expect(screen.queryByTestId("mock-create-group-wizard")).not.toBeInTheDocument();
+    // 归一为列表项形态选中新群（GroupChatPanel 接管）
+    const groupPanel = await screen.findByTestId("mock-group-chat-panel");
+    expect(groupPanel.dataset.groupId).toBe("g-new");
+    expect(groupPanel.dataset.hasGroup).toBe("true");
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["groupChats"],
+      });
+    });
+  });
+
+  it("群面板刷新信号 → invalidate [agentSessions]+[groupChats] 双前缀（门户同款）", async () => {
+    const { invalidateSpy } = renderHost();
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    fireEvent.click(screen.getByTestId("mock-select-group"));
+    fireEvent.click(await screen.findByTestId("mock-group-refresh"));
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["agentSessions"],
+      });
+    });
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["groupChats"],
+      });
+    });
   });
 });
