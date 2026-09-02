@@ -18,8 +18,9 @@
  *
  * 三步（antd Modal + 控件 / tailwind 布局，照 FRONTEND_PAGE_STYLE §0）：
  *   ① 群信息：群名称（必填 ≤120）+ PPM 项目（listSimpleProjects 全量候选 +
- *      搜索；选中后显示该项目关联工作区数提示；无关联工作区 → 禁下一步 +
- *      引导文案「请先在项目管理中关联工作区」）；
+ *      搜索；群聊体验对齐 quick：不显示关联工作区数提示——用户不感知「群
+ *      工作区」概念；无关联工作区 → 禁下一步 + 引导文案「请先在项目管理中
+ *      关联工作区」——agent 成员要选工作区，校验仍必要）；
  *   ② 邀请用户：项目人员多选（listProjectMembers({pm_project_id})，排除本人
  *      ——建群人自动成为群主且后端要求其为项目成员；上限 50）；每个被邀人
  *      可选上传群内头像（GroupMemberAvatarUpload 同管线，填
@@ -317,9 +318,13 @@ export function CreateGroupWizard({
     return null;
   }, [title]);
 
-  /** 项目关联工作区提示（null = 不渲染：未选项目/仍在加载）。 */
+  /**
+   * 项目关联工作区提示（群聊体验对齐 quick：去「群工作区」概念——成功态不再
+   * 显示关联数文案；仅加载中/失败/空集三类需要引导的态，null = 不渲染）。
+   * 空集仍禁下一步（agent 成员须在项目关联集内选工作区）。
+   */
   const workspaceHint = useMemo<{
-    kind: "ok" | "empty" | "loading";
+    kind: "empty" | "loading";
     text: string;
   } | null>(() => {
     if (projectId == null) return null;
@@ -332,13 +337,10 @@ export function CreateGroupWizard({
     if (projectWorkspaces.length === 0) {
       return {
         kind: "empty",
-        text: "该项目尚未关联工作区——请先在项目管理中关联工作区后再建群",
+        text: "该项目尚未关联工作区，请先在项目管理中关联",
       };
     }
-    return {
-      kind: "ok",
-      text: `已关联 ${projectWorkspaces.length} 个工作区（群工作区将自动取该项目首个关联工作区）`,
-    };
+    return null;
   }, [projectId, projectWorkspacesQ, projectWorkspaces.length]);
 
   /** 某张卡片的昵称错误（即时查重：与其它卡片的已填昵称比对）。 */
@@ -583,9 +585,8 @@ export function CreateGroupWizard({
             )}
           </div>
           <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
-            群聊归属 PPM 项目：群工作区取项目关联工作区，可邀请项目成员、
-            添加 Agent 成员协作——@昵称 唤起指定 Agent，@全体 通知所有 Agent；
-            未被 @ 的消息仅进群背景摘要。
+            群聊归属 PPM 项目：可邀请项目成员、添加 Agent 成员协作——@昵称 唤起
+            指定 Agent，@全体 通知所有 Agent；未被 @ 的消息仅进群背景摘要。
           </p>
         </div>
       )}

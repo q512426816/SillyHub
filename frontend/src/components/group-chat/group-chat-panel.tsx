@@ -36,6 +36,12 @@
  *     typing 上报（输入节流 250ms typing=true+preview ≤400 字，停顿 1s / 发送后
  *     typing=false）。
  *
+ * 群聊体验对齐 quick（2026-09-02）：气泡视觉 token 对照会话 TurnTimeline
+ * conversation 视图重做（用户 self 右侧 rounded-2xl rounded-br-md bg-primary /
+ * 他人与 agent 左侧 rounded-2xl rounded-tl-md border bg-card 卡片、28px 圆头像、
+ * typing 走 .sh-typing-dots）——只抄语义类不改 TurnTimeline；群特有元素
+ * （@提及高亮/成员分色头像/引擎标签）融合进会话风格。
+ *
  * 数据流关键点：
  *   - 回放身份还原：投影行 metadata.member_id/member_name（task-05 落库形态）
  *     ——2026-09-01-session-group-chat 收口：后端 /logs DTO 已暴露 metadata/
@@ -1005,13 +1011,13 @@ export function GroupChatPanel({
           </div>
         </header>
 
-        {/* 平铺时间线（原型 .timeline）。 */}
+        {/* 平铺时间线（原型 .timeline；容器内距对齐会话 TurnTimeline px-5 py-5）。 */}
         <div
           ref={timelineRef}
           data-testid="group-chat-timeline"
           role="log"
           aria-label="群消息时间线"
-          className="min-h-0 flex-1 overflow-y-auto px-5 py-3"
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
         >
           {entries.length === 0 && (
             <p
@@ -1073,16 +1079,17 @@ export function GroupChatPanel({
             <div
               key={ind.key}
               data-testid="group-typing-bubble"
-              className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1 text-[11px] text-muted-foreground"
+              className="inline-flex max-w-full items-center gap-2 rounded-2xl rounded-tl-md border border-border bg-card px-3.5 py-2 text-xs text-muted-foreground shadow-sm"
             >
               <span className="shrink-0 font-medium text-foreground">
                 {ind.name}
                 {ind.kind === "agent" ? "（Agent）" : ""}
               </span>
-              <span className="flex shrink-0 items-center gap-0.5" aria-hidden>
-                <i className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:0ms]" />
-                <i className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:150ms]" />
-                <i className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:300ms]" />
+              {/* 会话同款三点脉冲（.sh-typing-dots utility，task-13 会话 AI 观感）。 */}
+              <span aria-hidden className="sh-typing-dots shrink-0">
+                <span />
+                <span />
+                <span />
               </span>
               <span className="min-w-0 truncate">
                 {ind.kind === "agent"
@@ -1245,7 +1252,19 @@ export function GroupChatPanel({
 
 /* ────────────────────── 时间线行渲染 ────────────────────── */
 
-/** 单条时间线行（用户/agent 气泡 + 系统事件居中；原型 .msg / .sys-event）。 */
+/** 单条时间线行（用户/agent 气泡 + 系统事件居中；原型 .msg / .sys-event）。
+ *
+ * 群聊体验对齐 quick（2026-09-02）：视觉 token 对照会话 TurnTimeline conversation
+ * 视图抄语义类（不改 TurnTimeline 本身）——
+ *   - 用户消息（self 右）：rounded-2xl rounded-br-md bg-primary px-4 py-2.5
+ *     text-sm leading-6 text-primary-foreground shadow-sm（会话用户气泡同款，
+ *     时间在气泡左侧 + 发送者头像在右）；
+ *   - 用户消息（他人左）/ agent 回复：rounded-2xl rounded-tl-md border bg-card
+ *     px-4 py-2.5 text-sm leading-6 shadow-sm（会话助手卡片同款）；头像统一
+ *     28px 圆形（会话 h-7 w-7 rounded-full 惯例），成员分色/引擎标签/@提及
+ *     高亮等群特有元素融合进该风格；
+ *   - 系统事件居中灰字胶囊（会话相邻的 muted 语义）。
+ */
 function GroupTimelineRow({
   entry,
   memberNames,
@@ -1273,54 +1292,62 @@ function GroupTimelineRow({
 
   if (entry.kind === "user") {
     const chips = entry.attachments ? summaryToChips(entry.attachments) : [];
+    if (entry.isSelf) {
+      // 会话用户气泡同款（右）：[时间][气泡列][头像]。
+      return (
+        <div
+          data-testid="group-msg-user"
+          data-self="true"
+          data-sender={entry.senderName}
+          className="my-2.5 flex items-end justify-end gap-1.5"
+        >
+          <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
+            {formatTime(entry.timestamp)}
+          </span>
+          <div className="flex max-w-[82%] flex-col items-end gap-1">
+            {chips.length > 0 && <AttachmentChips attachments={chips} align="end" />}
+            {entry.content ? (
+              <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
+                {renderMentionHighlights(entry.content, memberNames, true)}
+              </div>
+            ) : null}
+          </div>
+          <GroupMemberAvatar
+            avatar={avatar}
+            name={entry.senderName}
+            size={28}
+            className="rounded-full"
+            fallbackClassName={cn(
+              "h-7 w-7 text-xs",
+              entry.isSelf ? "bg-brand-600" : "bg-muted-foreground/70",
+            )}
+          />
+        </div>
+      );
+    }
+    // 他人用户消息（左）：头像 + 成员名行 + 会话卡片样式气泡。
     return (
       <div
         data-testid="group-msg-user"
-        data-self={entry.isSelf ? "true" : undefined}
         data-sender={entry.senderName}
-        className={cn(
-          "my-2.5 flex max-w-[82%] gap-2.5",
-          entry.isSelf ? "ml-auto flex-row-reverse" : "",
-        )}
+        className="my-2.5 flex items-start gap-2.5"
       >
         <GroupMemberAvatar
           avatar={avatar}
           name={entry.senderName}
-          size={32}
-          className="rounded-[9px]"
-          fallbackClassName={cn(
-            "h-8 w-8 text-xs",
-            entry.isSelf ? "bg-brand-600" : "bg-muted-foreground/70",
-          )}
+          size={28}
+          className="mt-0.5 rounded-full"
+          fallbackClassName="h-7 w-7 bg-muted-foreground/70 text-xs"
         />
-        <div className="min-w-0">
-          <div
-            className={cn(
-              "mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground",
-              entry.isSelf ? "flex-row-reverse" : "",
-            )}
-          >
-            <span className="font-semibold text-foreground">
-              {entry.senderName}
-              {entry.isSelf ? "（我）" : ""}
-            </span>
-            <span>{formatTime(entry.timestamp)}</span>
+        <div className="min-w-0 max-w-[82%]">
+          <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="font-semibold text-foreground">{entry.senderName}</span>
+            <span className="text-[10.5px]">{formatTime(entry.timestamp)}</span>
           </div>
-          {/* FR-05 补遗：附件条（气泡下方，单聊 AttachmentChips 惯例——图片
-              缩略图/文件 chip 点击在线预览；self 右对齐、他人左对齐）。 */}
-          {chips.length > 0 && (
-            <AttachmentChips attachments={chips} align={entry.isSelf ? "end" : "start"} />
-          )}
+          {chips.length > 0 && <AttachmentChips attachments={chips} align="start" />}
           {entry.content ? (
-            <div
-              className={cn(
-                "whitespace-pre-wrap break-words rounded-xl border px-3 py-2 text-[13.5px] shadow-sm",
-                entry.isSelf
-                  ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card text-foreground",
-              )}
-            >
-              {renderMentionHighlights(entry.content, memberNames, entry.isSelf)}
+            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tl-md border border-border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+              {renderMentionHighlights(entry.content, memberNames, false)}
             </div>
           ) : null}
         </div>
@@ -1328,25 +1355,26 @@ function GroupTimelineRow({
     );
   }
 
-  // agent 投影行气泡：成员头像 + 昵称 + 引擎标签 + 流式光标（原型 .msg）。
+  // agent 回复卡片（左，会话助手卡片同款）：头像 + 成员名/引擎标签行 + 正文区
+  // （Markdown 渲染保留）+ 流式光标（原型 .msg）。
   return (
     <div
       data-testid="group-msg-agent"
       data-member-id={entry.memberId ?? undefined}
       data-member-name={entry.memberName ?? undefined}
-      className="my-2.5 flex max-w-[82%] gap-2.5"
+      className="my-2.5 flex items-start gap-2.5"
     >
       <GroupMemberAvatar
         avatar={avatar}
         name={entry.memberName ?? "Agent"}
-        size={32}
-        className="rounded-[9px]"
+        size={28}
+        className="mt-0.5 rounded-full"
         fallbackClassName={cn(
-          "h-8 w-8 text-xs",
+          "h-7 w-7 text-xs",
           agentAvatarColor(entry.memberId, entry.memberName),
         )}
       />
-      <div className="min-w-0">
+      <div className="min-w-0 max-w-[82%]">
         <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
           <span className="font-semibold text-foreground">
             {entry.memberName ?? "Agent 成员"}
@@ -1356,12 +1384,12 @@ function GroupTimelineRow({
               {providerLabel}
             </span>
           )}
-          <span>{formatTime(entry.timestamp)}</span>
+          <span className="text-[10.5px]">{formatTime(entry.timestamp)}</span>
         </div>
         {/* 群聊体验 quick（2026-09-02）：agent 回复走 MarkdownText（content 已经
             classifySessionLog 剥 [ASSISTANT] 等前缀；流式 partial 同容器容错渲染），
             @提及高亮仅在用户消息纯文本路径保留（md 气泡内 @ 自然显示，从简）。 */}
-        <div className="break-words rounded-xl rounded-bl-sm border border-border bg-card px-3 py-2 text-[13.5px] text-foreground shadow-sm">
+        <div className="break-words rounded-2xl rounded-tl-md border border-border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
           <MarkdownText content={entry.content} />
           {streaming && (
             <span

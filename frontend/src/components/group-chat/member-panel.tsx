@@ -24,7 +24,11 @@
  *   - 用户成员区：头像 + 昵称 + 在线绿点（online_member_ids 命中 user_id，
  *     presence 数据源）/ 离线灰点 + 群主标识 + 移除按钮（群主可见，confirm 后
  *     removeGroupMember）；
- *   - 分区头「+ 添加」「+ 邀请」入口按钮经 props 回调暴露（向导复用 task-07）。
+ *   - 分区头「+ 邀请用户」「+ 添加 Agent」入口（群聊体验对齐 quick 内建：
+ *     群主可见）——邀请 = 项目人员多选（listProjectMembers 排除已在群）逐个
+ *     POST members（user 体含 display_name 默认用户名）；添加 Agent = 单张
+ *     六要素表单（昵称/机器/工作区=项目关联/引擎/模型/方案/团队能力/头像——
+ *     照建群向导第三步单卡字段）POST members（agent 体）。
  *
  * 热切换弹窗（对照原型 switchModal）：引擎/模型/方案/机器/工作区五下拉（数据源
  * 同 task-07 向导：useDaemonMachines / listProviders / useMineAgentProfiles /
@@ -36,19 +40,24 @@
 
 import { useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Button, Modal, Select, Switch, Tooltip } from "antd";
+import { Button, Input, Modal, Select, Switch, Tooltip } from "antd";
 import { Plus, UserMinus } from "lucide-react";
 
 import { ShadowSessionViewer } from "@/components/group-chat/shadow-session-viewer";
+import { validateMemberDisplayName } from "@/components/group-chat/create-group-wizard";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
 import { errMessage, useNotify } from "@/lib/errors";
+import { listProjectMembers } from "@/lib/ppm/project";
+import { listProjectWorkspaces } from "@/lib/workspace";
 import {
+  addGroupMember,
   PROVIDER_META,
   removeGroupMember,
   resetGroupMemberMemory,
   updateGroupMember,
   type GroupChatRead,
+  type GroupMemberAgentConfig,
   type GroupMemberRead,
   type GroupMemberUpdate,
 } from "@/lib/daemon";
@@ -150,10 +159,6 @@ export interface MemberPanelProps {
   currentUserId: string | null;
   /** 操作成功后的刷新回调（消费方 invalidate 群列表 + 群详情）。 */
   onRefresh?: () => void;
-  /** 「+ 邀请」用户成员入口（向导复用 task-07；不传则不渲染入口）。 */
-  onInviteUser?: () => void;
-  /** 「+ 添加」agent 成员入口（同上）。 */
-  onAddAgent?: () => void;
   className?: string;
 }
 
@@ -162,12 +167,14 @@ export function MemberPanel({
   onlineMemberIds,
   currentUserId,
   onRefresh,
-  onInviteUser,
-  onAddAgent,
   className,
 }: MemberPanelProps) {
   const notify = useNotify();
   const [switching, setSwitching] = useState<GroupMemberRead | null>(null);
+  /* ── 群聊体验对齐 quick（2026-09-02）：邀请用户 / 添加 Agent 内建入口
+   *    （群主可见；原 onInviteUser/onAddAgent props 回调形态退役）。 ── */
+  const [inviting, setInviting] = useState(false);
+  const [addingAgent, setAddingAgent] = useState(false);
   /* ── 群聊体验 quick（2026-09-02）：影子会话查看器——agent 卡整卡点击打开
    *    （群主 + 普通成员都可看，后端已放行影子会话 logs 只读）。 ── */
   const [viewingShadow, setViewingShadow] = useState<GroupMemberRead | null>(null);
@@ -301,6 +308,44 @@ export function MemberPanel({
     },
   });
 
+  /* ── 群聊体验对齐 quick：邀请用户（项目人员多选 → 逐个 POST members user 体；
+   *    display_name 默认用户名——后端 GroupMemberUserCreate 同口径）。 ── */
+  const inviteMutation = useMutation({
+    mutationFn: async (items: { user_id: string; display_name: string }[]) => {
+      // 逐个串行：后端按 display_name 查重，避免并发落库竞态。
+      for (const item of items) {
+        await addGroupMember(group.id, {
+          user: { user_id: item.user_id, display_name: item.display_name },
+        });
+      }
+    },
+    onSuccess: (_res, items) => {
+      refreshAnd(
+        items.length > 1
+          ? `已邀请 ${items.length} 位用户入群`
+          : `已邀请「${items[0]?.display_name ?? "成员"}」入群`,
+      );
+      setInviting(false);
+    },
+    onError: (err) => {
+      // 后端 400 中文文案透传（如非项目成员/昵称重复）。
+      notify.error(errMessage(err, "邀请失败，请稍后重试"));
+    },
+  });
+
+  /* ── 群聊体验对齐 quick：添加 Agent（单张六要素表单 → POST members agent 体）。 ── */
+  const addAgentMutation = useMutation({
+    mutationFn: (config: GroupMemberAgentConfig) =>
+      addGroupMember(group.id, { agent: config }),
+    onSuccess: (member) => {
+      refreshAnd(`已添加 Agent 成员「${member.display_name}」`);
+      setAddingAgent(false);
+    },
+    onError: (err) => {
+      notify.error(errMessage(err, "添加 Agent 成员失败，请稍后重试"));
+    },
+  });
+
   /* ── 确认入口（antd Modal.confirm，不用 window.confirm） ── */
 
   /** 移除成员（agent → end 影子会话；design §8 group.member.removed）。 */
@@ -383,14 +428,14 @@ export function MemberPanel({
         <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
           Agent 成员（{agentMembers.length}）
         </p>
-        {onAddAgent && (
+        {isOwner && (
           <button
             type="button"
             data-testid="member-panel-add-agent"
-            onClick={onAddAgent}
+            onClick={() => setAddingAgent(true)}
             className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-brand-600 transition-colors hover:text-brand-700"
           >
-            <Plus aria-hidden className="h-3 w-3" /> 添加
+            <Plus aria-hidden className="h-3 w-3" /> 添加 Agent
           </button>
         )}
       </div>
@@ -555,14 +600,14 @@ export function MemberPanel({
         <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
           用户成员（{userMembers.length}）
         </p>
-        {onInviteUser && (
+        {isOwner && (
           <button
             type="button"
             data-testid="member-panel-invite-user"
-            onClick={onInviteUser}
+            onClick={() => setInviting(true)}
             className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-brand-600 transition-colors hover:text-brand-700"
           >
-            <Plus aria-hidden className="h-3 w-3" /> 邀请
+            <Plus aria-hidden className="h-3 w-3" /> 邀请用户
           </button>
         )}
       </div>
@@ -666,6 +711,33 @@ export function MemberPanel({
           onClose={() => setViewingShadow(null)}
           shadowSessionId={viewingShadow.shadow_session_id}
           memberName={viewingShadow.display_name}
+        />
+      )}
+
+      {/* 群聊体验对齐 quick：邀请用户 / 添加 Agent 内建对话框（条件挂载——
+          打开才拉项目人员 / 机器等数据源）。 */}
+      {inviting && (
+        <InviteUsersModal
+          group={group}
+          existingUserIds={
+            new Set(
+              activeMembers
+                .map((m) => m.user_id)
+                .filter((id): id is string => id != null),
+            )
+          }
+          submitting={inviteMutation.isPending}
+          onCancel={() => setInviting(false)}
+          onSubmit={(items) => inviteMutation.mutate(items)}
+        />
+      )}
+      {addingAgent && (
+        <AddAgentMemberModal
+          group={group}
+          existingNames={activeMembers.map((m) => m.display_name)}
+          submitting={addAgentMutation.isPending}
+          onCancel={() => setAddingAgent(false)}
+          onSubmit={(config) => addAgentMutation.mutate(config)}
         />
       )}
     </aside>
@@ -932,6 +1004,408 @@ function AgentConfigSwitchModal({
             需确认）。
           </p>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ────────────────────── 邀请用户对话框（群聊体验对齐 quick，2026-09-02） ────────────────────── */
+
+interface InviteUsersModalProps {
+  group: GroupChatRead;
+  /** 已在群用户 id 集（候选排除——含群主本人）。 */
+  existingUserIds: ReadonlySet<string>;
+  submitting: boolean;
+  onCancel: () => void;
+  /** 提交回调（选中项含解析后的默认昵称；调用方逐个 POST members）。 */
+  onSubmit: (_items: { user_id: string; display_name: string }[]) => void;
+}
+
+/** 项目人员昵称解析（GroupMemberUserCreate.display_name 默认值 = 用户名）。 */
+function projectMemberLabel(m: {
+  user_id: string;
+  user_name?: string | null;
+  username?: string | null;
+}): string {
+  return m.user_name?.trim() || m.username?.trim() || m.user_id.slice(0, 8);
+}
+
+/**
+ * 邀请用户对话框：项目人员多选（listProjectMembers——与建群向导第二步同数据
+ * 源，后端「邀人范围=项目成员」400 校验的同口径前端引导），排除已在群成员。
+ */
+function InviteUsersModal({
+  group,
+  existingUserIds,
+  submitting,
+  onCancel,
+  onSubmit,
+}: InviteUsersModalProps) {
+  const [selected, setSelected] = useState<string[]>([]);
+  // 条件挂载（面板 inviting 态）→ 打开才拉项目人员。
+  const membersQ = useQuery({
+    queryKey: ["ppmProjectMembers", "member-panel-invite", group.project_id],
+    queryFn: () => listProjectMembers({ pm_project_id: group.project_id! }),
+    enabled: group.project_id != null,
+    staleTime: 60_000,
+  });
+  const options = useMemo(
+    () =>
+      (membersQ.data ?? [])
+        .filter((m) => !existingUserIds.has(m.user_id))
+        .map((m) => ({
+          value: m.user_id,
+          label: projectMemberLabel(m),
+        })),
+    [membersQ.data, existingUserIds],
+  );
+
+  const handleSubmit = () => {
+    if (selected.length === 0 || submitting) return;
+    const byId = new Map(
+      (membersQ.data ?? []).map((m) => [m.user_id, m] as const),
+    );
+    onSubmit(
+      selected.map((uid) => ({
+        user_id: uid,
+        display_name: projectMemberLabel(byId.get(uid) ?? { user_id: uid }),
+      })),
+    );
+  };
+
+  return (
+    <Modal
+      open
+      title="邀请用户入群"
+      width={480}
+      onCancel={onCancel}
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button onClick={onCancel}>取消</Button>
+          <Button
+            type="primary"
+            loading={submitting}
+            disabled={selected.length === 0}
+            onClick={handleSubmit}
+          >
+            邀请（{selected.length}）
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        {group.project_id == null ? (
+          <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
+            该群未关联项目，无法获取可邀请的项目成员。
+          </p>
+        ) : (
+          <>
+            <Select
+              id="mp-invite-users"
+              aria-label="邀请用户"
+              className="w-full"
+              mode="multiple"
+              maxTagCount="responsive"
+              placeholder={
+                membersQ.isLoading ? "加载项目成员中…" : "搜索并选择要邀请的项目成员"
+              }
+              value={selected}
+              onChange={setSelected}
+              options={options}
+              loading={membersQ.isLoading}
+            />
+            <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
+              仅该群所属项目的成员可邀请（已在群成员不在候选中）；被邀请成员
+              即可查看并参与群聊。
+            </p>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ────────────────────── 添加 Agent 对话框（群聊体验对齐 quick，2026-09-02） ────────────────────── */
+
+interface AddAgentMemberModalProps {
+  group: GroupChatRead;
+  /** 在群昵称集（查重——validateMemberDisplayName others 入参）。 */
+  existingNames: string[];
+  submitting: boolean;
+  onCancel: () => void;
+  /** 提交回调（六要素 + 头像 + 团队能力已组装；调用方 POST members agent 体）。 */
+  onSubmit: (_config: GroupMemberAgentConfig) => void;
+}
+
+/**
+ * 添加 Agent 对话框：单张六要素表单——照建群向导第三步单卡字段（昵称/机器/
+ * 工作区=项目关联/引擎/模型/方案/团队能力/头像；向导卡片耦合向导状态抽不出
+ * 公共子组件，此处做轻量对话框表单，校验复用向导导出的
+ * validateMemberDisplayName 纯函数）。
+ */
+function AddAgentMemberModal({
+  group,
+  existingNames,
+  submitting,
+  onCancel,
+  onSubmit,
+}: AddAgentMemberModalProps) {
+  const [displayName, setDisplayName] = useState("");
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [runtimeId, setRuntimeId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [provider, setProvider] = useState("claude");
+  const [llmProviderId, setLlmProviderId] = useState("");
+  const [agentProfileId, setAgentProfileId] = useState("");
+  const [teamEnabled, setTeamEnabled] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
+  // 数据源同向导第三步：机器（useDaemonMachines 融合候选）/ 模型
+  // （listProviders）/ 方案（useMineAgentProfiles）/ 工作区=项目关联
+  // （listProjectWorkspaces——agent 工作区须在项目关联集内必选）。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+  const providersQ = useQuery({
+    queryKey: ["llmProviders", "member-panel-add-agent"],
+    queryFn: listProviders,
+    staleTime: 30_000,
+  });
+  const { profiles } = useMineAgentProfiles();
+  const projectWorkspacesQ = useQuery({
+    queryKey: ["projectWorkspaces", "member-panel-add-agent", group.project_id],
+    queryFn: () => listProjectWorkspaces(group.project_id!),
+    enabled: group.project_id != null,
+    staleTime: 60_000,
+  });
+
+  const runtimeOptions = useMemo(() => {
+    const groups: {
+      label: string;
+      options: { value: string; label: string; disabled?: boolean }[];
+    }[] = [];
+    for (const m of machineCandidates ?? []) {
+      const machineOnline = m.status === "online";
+      const runtimes = (m.runtimes ?? []).filter((r) =>
+        GROUP_SUPPORTED_PROVIDERS.has(r.provider ?? ""),
+      );
+      if (runtimes.length === 0) continue;
+      const alias = m.display_alias?.trim() || m.hostname;
+      groups.push({
+        label: machineOnline ? alias : `${alias}（离线）`,
+        options: runtimes.map((r) => ({
+          value: r.id,
+          label:
+            r.display_alias?.trim() ||
+            PROVIDER_META[r.provider ?? ""]?.label ||
+            r.id,
+          disabled: !machineOnline || r.status !== "online",
+        })),
+      });
+    }
+    return groups;
+  }, [machineCandidates]);
+
+  const workspaceOptions = useMemo(
+    () =>
+      (projectWorkspacesQ.data ?? []).map((w) => ({
+        value: w.workspace_id,
+        label: w.name,
+      })),
+    [projectWorkspacesQ.data],
+  );
+  const providerOptions = useMemo(
+    () => (providersQ.data ?? []).map((p) => ({ value: p.id, label: p.name })),
+    [providersQ.data],
+  );
+  const profileOptions = useMemo(
+    () => profiles.map((p) => ({ value: p.id, label: p.name })),
+    [profiles],
+  );
+
+  const nameError = validateMemberDisplayName(displayName, existingNames);
+  const runtimeMissing = runtimeId == null;
+  const workspaceMissing = workspaceId === "";
+  const valid = nameError === null && !runtimeMissing && !workspaceMissing;
+  const showErrors = submitAttempted;
+
+  const handleSubmit = () => {
+    if (!valid || submitting) return;
+    onSubmit({
+      display_name: displayName.trim(),
+      ...(avatar ? { avatar } : {}),
+      runtime_id: runtimeId!,
+      workspace_id: workspaceId || null,
+      provider,
+      llm_provider_id: llmProviderId || null,
+      agent_profile_id: agentProfileId || null,
+      team_enabled: provider === "claude" ? teamEnabled : false,
+    });
+  };
+
+  return (
+    <Modal
+      open
+      title="添加 Agent 成员"
+      width={560}
+      onCancel={onCancel}
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button onClick={onCancel}>取消</Button>
+          <Button
+            type="primary"
+            loading={submitting}
+            disabled={!valid}
+            title={valid ? undefined : "请完成昵称 / 机器 / 工作区必填项"}
+            onClick={() => {
+              setSubmitAttempted(true);
+              handleSubmit();
+            }}
+          >
+            添加
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="rounded-md bg-info/10 px-2.5 py-1.5 text-xs leading-5 text-info">
+          配置六要素：机器 / 工作区 / 引擎 / 模型 / 智能体方案 / 群昵称
+          （群内唯一，作为 @提及词）。
+        </p>
+        {/* 成员头像（可选，quick 群成员头像自定义） */}
+        <div className="flex items-center gap-2 border-b border-border pb-2.5">
+          <GroupMemberAvatarUpload
+            value={avatar}
+            name={displayName.trim() || "新 Agent"}
+            label="Agent 成员头像"
+            onChange={setAvatar}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              群昵称（@提及词）*
+            </span>
+            <Input
+              aria-label="Agent 成员群昵称"
+              placeholder="如：小码"
+              maxLength={40}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              status={nameError ? "error" : undefined}
+            />
+            {nameError && (
+              <span
+                data-testid="mp-add-agent-name-error"
+                className="text-[11px] leading-4 text-destructive"
+              >
+                {nameError}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">机器 *</span>
+            <Select
+              id="mp-add-agent-runtime"
+              aria-label="Agent 成员机器"
+              className="w-full"
+              placeholder="选择在线机器 / 智能体"
+              value={runtimeId ?? undefined}
+              onChange={setRuntimeId}
+              options={runtimeOptions}
+              status={showErrors && runtimeMissing ? "error" : undefined}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">工作区 *</span>
+            <Select
+              id="mp-add-agent-workspace"
+              aria-label="Agent 成员工作区"
+              className="w-full"
+              placeholder="项目关联工作区内选择"
+              value={workspaceId || undefined}
+              onChange={(v) => setWorkspaceId(v ?? "")}
+              options={workspaceOptions}
+              status={showErrors && workspaceMissing ? "error" : undefined}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">引擎</span>
+            <Select
+              id="mp-add-agent-engine"
+              aria-label="Agent 成员引擎"
+              className="w-full"
+              value={provider}
+              onChange={(v) => {
+                // 引擎切换重置模型（供应商仅 claude 语义）；团队能力仅 Claude。
+                setProvider(v);
+                setLlmProviderId("");
+                if (v !== "claude") setTeamEnabled(false);
+              }}
+              options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
+            />
+          </div>
+          <div className="col-span-2 flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              模型（LLM 供应商）
+            </span>
+            <Select
+              id="mp-add-agent-model"
+              aria-label="Agent 成员模型"
+              className="w-full"
+              placeholder="不指定（本机默认）"
+              allowClear
+              value={llmProviderId || undefined}
+              onChange={(v) => setLlmProviderId(v ?? "")}
+              disabled={provider !== "claude"}
+              options={[
+                { value: "", label: "不指定（本机默认）" },
+                ...providerOptions,
+              ]}
+            />
+            {provider !== "claude" && (
+              <span className="text-[11px] text-muted-foreground">
+                Codex 引擎使用其本机模型配置，无需选择供应商
+              </span>
+            )}
+          </div>
+          <div className="col-span-2 flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              智能体方案（人格 / 工具集 / 技能）
+            </span>
+            <Select
+              id="mp-add-agent-profile"
+              aria-label="Agent 成员智能体方案"
+              className="w-full"
+              placeholder="不指定，用默认"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              value={agentProfileId || undefined}
+              onChange={(v) => setAgentProfileId(v ?? "")}
+              options={[{ value: "", label: "不指定，用默认" }, ...profileOptions]}
+            />
+          </div>
+          {/* 团队能力开关：仅 Claude 引擎可开（向导第三步同口径）。 */}
+          <div className="col-span-2 flex items-center gap-2 border-t border-border pt-2">
+            <Tooltip
+              title={provider !== "claude" ? "团队能力仅支持 Claude 引擎" : undefined}
+            >
+              <Switch
+                size="small"
+                checked={teamEnabled}
+                disabled={provider !== "claude"}
+                onChange={setTeamEnabled}
+                aria-label="Agent 成员团队能力"
+                data-testid="mp-add-agent-team"
+              />
+            </Tooltip>
+            <span className="text-[11px] font-medium text-muted-foreground">
+              团队能力
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              可派分身并行干活（仅 Claude 引擎）
+            </span>
+          </div>
+        </div>
       </div>
     </Modal>
   );

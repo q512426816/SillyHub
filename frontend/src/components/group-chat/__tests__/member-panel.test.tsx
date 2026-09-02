@@ -19,7 +19,10 @@
  *   4. 重置记忆——Modal.confirm 确认后 resetGroupMemberMemory；
  *   5. 群主权限——非群主无「切换配置/重置记忆/移除」按钮；群主可移除非群主
  *      用户成员（confirm 后 DELETE），群主自身行无移除按钮；
- *   6. 邀请/添加入口回调（onInviteUser/onAddAgent props 暴露）；
+ *   6. 邀请用户 / 添加 Agent 内建入口（群聊体验对齐 quick）——群主可见按钮；
+ *      邀请对话框 = 项目人员多选（排除已在群）逐个 POST members（user 体含
+ *      display_name 默认用户名）；添加 Agent 对话框 = 六要素表单 POST members
+ *      （agent 体）；非群主无按钮；
  *   7. 团队能力开关（quick 群成员团队能力）——展示（claude 可切 / codex 禁用）；
  *      群主切换走「重建影子会话并重置独立记忆」Modal.confirm → PATCH
  *      team_enabled；取消不提交；非群主只读。
@@ -28,7 +31,9 @@
  *   - @/lib/api 仅覆写 apiFetch（真实 daemon.ts 群客户端消费 mock——断言路径
  *     /method/payload）；
  *   - 数据源 hook/查询（use-daemon-machines / llm-providers / agent-profiles /
- *     workspaces / errors.useNotify）逐一 mock；
+ *     workspaces / ppm/project（listProjectMembers——member-panel 校验器复用链上
+ *     的建群向导也 import 该模块）/ workspace（listProjectWorkspaces）/ errors.
+ *     useNotify）逐一 mock；
  *   - antd Select 经 id 锚定 + mousedown 打开；Modal.confirm spy 模拟确认
  *     （workspace-config-card.test 同款）。
  */
@@ -49,6 +54,7 @@ import { MemberPanel } from "@/components/group-chat/member-panel";
 import type { GroupChatRead, GroupMemberRead} from "@/lib/daemon";
 import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
 import type { Workspace } from "@/lib/workspaces";
+import type { ProjectMember } from "@/lib/ppm/types";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -58,6 +64,11 @@ const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
   listProviders: vi.fn(),
   profilesHook: vi.fn(),
+  // quick 邀请/添加 Agent：项目人员 + 项目关联工作区数据源。
+  listProjectMembers: vi.fn(),
+  listProjectWorkspaces: vi.fn(),
+  // 建群向导校验器复用链（member-panel import 向导模块）连带 import。
+  listSimpleProjects: vi.fn(),
   // quick 成员头像：上传管线 mock（fetchFileBlob 供头像渲染链路）。
   uploadFile: vi.fn(),
 }));
@@ -85,6 +96,16 @@ vi.mock("@/lib/agent-profiles", () => ({
 
 vi.mock("@/lib/workspaces", () => ({
   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+}));
+
+vi.mock("@/lib/ppm/project", () => ({
+  listProjectMembers: (...args: unknown[]) => mocks.listProjectMembers(...args),
+  listSimpleProjects: (...args: unknown[]) => mocks.listSimpleProjects(...args),
+}));
+
+vi.mock("@/lib/workspace", () => ({
+  listProjectWorkspaces: (...args: unknown[]) =>
+    mocks.listProjectWorkspaces(...args),
 }));
 
 vi.mock("@/lib/file/api", () => ({
@@ -207,6 +228,35 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
   } as Workspace;
 }
 
+/** 项目关联工作区（AddAgentMemberModal 工作区候选；lib/workspace WorkspaceBrief）。 */
+function makeProjectWorkspace() {
+  return { workspace_id: "ws-1", name: "主工作区" };
+}
+
+/** 项目人员（InviteUsersModal 候选；lib/ppm/types ProjectMember 形状裁剪）。 */
+function makeProjectMember(
+  userId: string,
+  userName: string,
+): ProjectMember {
+  return {
+    id: `pm-${userId}`,
+    pm_project_id: "pj-1",
+    user_id: userId,
+    user_name: userName,
+    username: null,
+    depart_id: null,
+    phone: null,
+    role_id: null,
+    role_name: null,
+    depart_name: null,
+    create_name: null,
+    created_by: null,
+    updated_by: null,
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+  };
+}
+
 function agentMember(
   overrides: Partial<GroupMemberRead> = {},
 ): GroupMemberRead {
@@ -263,6 +313,7 @@ function makeGroup(overrides: Partial<GroupChatRead> = {}): GroupChatRead {
     id: "g-1",
     session_id: "s-g-1",
     workspace_id: "ws-1",
+    project_id: "pj-1",
     title: "前端攻坚小分队",
     created_by: "u-me",
     agent_cross_mention: true,
@@ -351,6 +402,17 @@ beforeEach(() => {
     error: null,
     refetch: vi.fn(),
   });
+  // quick 邀请/添加 Agent 数据源：项目人员（含已在群 u-me/u-lin/u-chen + 候选
+  // 苏七/赵九）与项目关联工作区。
+  mocks.listProjectMembers.mockResolvedValue([
+    makeProjectMember("u-me", "我自己"),
+    makeProjectMember("u-lin", "林一"),
+    makeProjectMember("u-chen", "陈默"),
+    makeProjectMember("u-su", "苏七"),
+    makeProjectMember("u-zhao", "赵九"),
+  ]);
+  mocks.listProjectWorkspaces.mockResolvedValue([makeProjectWorkspace()]);
+  mocks.listSimpleProjects.mockResolvedValue([]);
   // 变更操作默认成功（返回成员摘要形态即可——面板只读 display_name）。
   mocks.apiFetch.mockResolvedValue(agentMember());
 });
@@ -639,34 +701,136 @@ describe("MemberPanel 群主权限（task-09 acceptance）", () => {
   });
 });
 
-// ── 6. 邀请/添加入口（props 回调暴露，向导复用归 task-07/08） ─────────────
+// ── 6. 邀请用户 / 添加 Agent 内建入口（群聊体验对齐 quick，2026-09-02）─────
 
-describe("MemberPanel 邀请/添加入口回调", () => {
-  it("「+ 添加」/「+ 邀请」触发 onAddAgent/onInviteUser；未传回调不渲染入口", () => {
-    const onAddAgent = vi.fn();
-    const onInviteUser = vi.fn();
-    const { rerender } = renderPanel(
-      <MemberPanel
-        group={makeGroup()}
-        currentUserId="u-me"
-        onAddAgent={onAddAgent}
-        onInviteUser={onInviteUser}
-      />,
+describe("MemberPanel 邀请用户对话框（quick 内建入口）", () => {
+  it("群主点「+ 邀请用户」→ 项目人员多选（排除已在群）→ 逐个 POST members（user 体 display_name 默认用户名）→ onRefresh", async () => {
+    const onRefresh = vi.fn();
+    renderPanel(
+      <MemberPanel group={makeGroup()} currentUserId="u-me" onRefresh={onRefresh} />,
+    );
+
+    fireEvent.click(screen.getByTestId("member-panel-invite-user"));
+    expect(await screen.findByText("邀请用户入群")).toBeTruthy();
+    // 候选排除已在群成员（u-me 群主 / u-lin 林一 / u-chen 陈默）。
+    await waitFor(() =>
+      expect(mocks.listProjectMembers).toHaveBeenCalledWith({
+        pm_project_id: "pj-1",
+      }),
+    );
+    openAntdSelect("mp-invite-users");
+    const optionTexts = [
+      ...document.querySelectorAll(".ant-select-item-option-content"),
+    ].map((el) => el.textContent?.trim());
+    expect(optionTexts).toContain("苏七");
+    expect(optionTexts).toContain("赵九");
+    expect(optionTexts).not.toContain("林一");
+    expect(optionTexts).not.toContain("陈默");
+    expect(optionTexts).not.toContain("我自己");
+
+    // 多选两位提交（苏七 + 赵九）→ 串行两个 POST（payload user 体含昵称）。
+    await chooseAntdOptionByText("mp-invite-users", "苏七");
+    await chooseAntdOptionByText("mp-invite-users", "赵九");
+    fireEvent.click(screen.getByRole("button", { name: "邀请（2）" }));
+
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(2));
+    expect(mocks.apiFetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/daemon/group-chats/g-1/members",
+      {
+        method: "POST",
+        json: { user: { user_id: "u-su", display_name: "苏七" } },
+      },
+    );
+    expect(mocks.apiFetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/daemon/group-chats/g-1/members",
+      {
+        method: "POST",
+        json: { user: { user_id: "u-zhao", display_name: "赵九" } },
+      },
+    );
+    // 成功后刷新 + 关闭对话框。
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByText("邀请用户入群")).toBeNull(),
+    );
+  });
+});
+
+describe("MemberPanel 添加 Agent 对话框（quick 内建入口，六要素表单）", () => {
+  it("群主点「+ 添加 Agent」→ 六要素提交 POST members（agent 体）→ onRefresh", async () => {
+    const onRefresh = vi.fn();
+    renderPanel(
+      <MemberPanel group={makeGroup()} currentUserId="u-me" onRefresh={onRefresh} />,
     );
 
     fireEvent.click(screen.getByTestId("member-panel-add-agent"));
-    expect(onAddAgent).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByTestId("member-panel-invite-user"));
-    expect(onInviteUser).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("添加 Agent 成员")).toBeTruthy();
 
-    // 未传回调 → 入口不渲染。
-    rerender(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemberPanel group={makeGroup()} currentUserId="u-me" />
-      </QueryClientProvider>,
+    // 未填必填项 → 添加按钮禁用。
+    const submit = screen.getByRole("button", { name: "添 加" });
+    expect(submit).toBeDisabled();
+
+    // 六要素：昵称 / 机器 / 工作区（项目关联）必选；引擎默认 Claude Code。
+    fireEvent.change(screen.getByLabelText("Agent 成员群昵称"), {
+      target: { value: "小新" },
+    });
+    await chooseAntdOptionByText("mp-add-agent-runtime", "Claude Code");
+    await chooseAntdOptionByText("mp-add-agent-workspace", "主工作区");
+    // 模型（llm 供应商）+ 方案可选填。
+    await chooseAntdOptionByText("mp-add-agent-model", "GLM 供应商");
+    await chooseAntdOptionByText("mp-add-agent-profile", "资深前端工程师");
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1/members",
+      {
+        method: "POST",
+        json: {
+          agent: {
+            display_name: "小新",
+            runtime_id: "rt-1",
+            workspace_id: "ws-1",
+            provider: "claude",
+            llm_provider_id: "lp-1",
+            agent_profile_id: "ap-1",
+            team_enabled: false,
+          },
+        },
+      },
     );
-    expect(screen.queryByTestId("member-panel-add-agent")).toBeNull();
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByText("添加 Agent 成员")).toBeNull(),
+    );
+  });
+
+  it("昵称与在群成员重复 → 即时校验错误 + 提交禁用（向导 validateMemberDisplayName 复用）", async () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+
+    fireEvent.click(screen.getByTestId("member-panel-add-agent"));
+    expect(await screen.findByText("添加 Agent 成员")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Agent 成员群昵称"), {
+      target: { value: "小码" },
+    });
+
+    expect(
+      (await screen.findByTestId("mp-add-agent-name-error")).textContent,
+    ).toContain("重复");
+    expect(screen.getByRole("button", { name: "添 加" })).toBeDisabled();
+  });
+});
+
+// ── 6b. 非群主入口权限 ────────────────────────────────────────────────────
+
+describe("MemberPanel 邀请/添加入口权限（quick）", () => {
+  it("非群主：无「+ 邀请用户」「+ 添加 Agent」按钮", () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-lin" />);
     expect(screen.queryByTestId("member-panel-invite-user")).toBeNull();
+    expect(screen.queryByTestId("member-panel-add-agent")).toBeNull();
   });
 });
 
@@ -862,7 +1026,8 @@ describe("MemberPanel 影子会话查看器（quick）", () => {
     expect(card.getAttribute("title")).toContain("影子会话时间线");
     fireEvent.click(within(card).getByText("小码"));
 
-    // Drawer 打开：标题 + 初始 limit=100 参数 + 时间线行。
+    // Drawer 打开：标题 + 初始 limit=100 参数 + 时间线行（会话体验对齐 quick：
+    // 装配后注入 prompt = 用户 turn 气泡原文）。
     expect(
       await screen.findByText("「小码」影子会话时间线"),
     ).toBeTruthy();
@@ -872,7 +1037,7 @@ describe("MemberPanel 影子会话查看器（quick）", () => {
         expect.anything(),
       );
     });
-    expect(await screen.findByTestId("shadow-log-inject")).toBeTruthy();
+    expect(await screen.findByText("@小码 看看这个")).toBeTruthy();
   });
 
   it("未建影子（shadow_session_id null）→ 无点击查看语义（title 无提示）", () => {

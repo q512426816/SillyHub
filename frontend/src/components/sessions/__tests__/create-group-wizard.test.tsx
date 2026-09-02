@@ -482,7 +482,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
     );
   });
 
-  it("步骤①：选中项目 → 显示关联工作区数提示；项目候选=全量项目（可搜索）", async () => {
+  it("步骤①：选中项目（有关联工作区）→ 不再显示工作区提示（群聊体验对齐 quick：用户不感知「群工作区」概念）；项目候选=全量项目（可搜索）", async () => {
     renderWizard(
       <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
     );
@@ -490,10 +490,14 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
       target: { value: "前端攻坚小分队" },
     });
     await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
-    expect(
-      await screen.findByTestId("cgw-workspace-hint"),
-    ).toHaveTextContent("已关联 2 个工作区");
-    expect(mocks.listProjectWorkspaces).toHaveBeenCalledWith("pj-1");
+    // 有关联工作区（2 个）→ 无提示行（成功态不再显示关联数文案）。
+    await waitFor(() =>
+      expect(mocks.listProjectWorkspaces).toHaveBeenCalledWith("pj-1"),
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId("cgw-workspace-hint")).toBeNull();
+      expect(screen.queryByText(/已关联/)).toBeNull();
+    });
     // 候选含第二个项目（全量候选 + 搜索由 antd showSearch 承载）。
     openAntdSelect("cgw-project");
     expect(
@@ -512,7 +516,9 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
     });
     await chooseAntdOptionByText("cgw-project", "裸项目");
     const hint = await screen.findByTestId("cgw-workspace-hint");
-    expect(hint).toHaveTextContent("请先在项目管理中关联工作区");
+    expect(hint).toHaveTextContent(
+      "该项目尚未关联工作区，请先在项目管理中关联",
+    );
     const next = screen.getByRole("button", { name: "下一步" });
     await waitFor(() => expect(next).toBeDisabled());
   });

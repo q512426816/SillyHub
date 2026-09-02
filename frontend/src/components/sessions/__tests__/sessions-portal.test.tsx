@@ -1829,11 +1829,13 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    // 关联工作区提示就位（下一步放行前提）。
+    // 关联工作区校验仍就位（下一步放行前提——群聊体验对齐 quick 后成功态不再
+    // 显示关联数提示，只等查询完成 + 下一步放行）。
     await waitFor(() =>
-      expect(screen.getByTestId("cgw-workspace-hint")).toHaveTextContent(
-        "已关联 1 个工作区",
-      ),
+      expect(mocks.listProjectWorkspaces).toHaveBeenCalledWith("pj-1"),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "下一步" })).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
 

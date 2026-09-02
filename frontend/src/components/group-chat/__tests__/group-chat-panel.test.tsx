@@ -23,7 +23,9 @@
  *      typing=false 显式收口；
  *   5. 输入区——@补全（member kind：过滤 + 键盘回填 @昵称）、Enter 发送
  *      sendGroupMessage 调用参数、typing 上报（节流首跳 typing=true + preview
- *      尾 400 字、发送后 typing=false）。
+ *      尾 400 字、发送后 typing=false）；
+ *   6. 气泡视觉 token（群聊体验对齐 quick）——self/agent/他人气泡语义类与会话
+ *      TurnTimeline conversation 视图一致 + typing 走 .sh-typing-dots。
  *
  * mock 策略（对齐 member-panel.test + daemon-session-stream-sync.test 惯例）：
  *   - @/lib/daemon importActual 部分覆写：群 CRUD/发送/typing 上报 mock 断言；
@@ -791,6 +793,83 @@ describe("GroupChatPanel 装配（真 streamGroupChat SSE 消费）", () => {
       { timeout: 4000 },
     );
   }, 10_000);
+});
+
+/* ── 2b. 气泡视觉 token（群聊体验对齐 quick：会话 TurnTimeline 同款） ────── */
+
+describe("GroupChatPanel 气泡视觉 token（会话 conversation 视图同款，quick）", () => {
+  it("用户 self 气泡：rounded-2xl rounded-br-md bg-primary；agent/他人卡片：rounded-2xl rounded-tl-md border bg-card + 成员名行", async () => {
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+
+    // self 用户消息（鲸落）：会话用户气泡同款（右对齐 + primary 实底 + 右下收角）。
+    const selfRow = document.querySelector<HTMLElement>(
+      "[data-testid='group-msg-user'][data-self='true']",
+    );
+    expect(selfRow).toBeTruthy();
+    const selfBubble = selfRow!.querySelector(
+      "[class*='rounded-br-md']",
+    ) as HTMLElement | null;
+    expect(selfBubble).toBeTruthy();
+    expect(selfBubble!.className).toContain("bg-primary");
+    expect(selfBubble!.className).toContain("rounded-2xl");
+
+    // 他人用户消息（林一）：左侧头像 + 成员名行 + 会话卡片样式（tl 收角 + border bg-card）。
+    const otherRow = document.querySelector<HTMLElement>(
+      "[data-testid='group-msg-user'][data-sender='林一']",
+    );
+    expect(otherRow).toBeTruthy();
+    const otherName = otherRow!.querySelector(
+      "span.font-semibold",
+    ) as HTMLElement | null;
+    expect(otherName?.textContent).toBe("林一");
+    const otherBubble = otherRow!.querySelector(
+      "[class*='rounded-tl-md']",
+    ) as HTMLElement | null;
+    expect(otherBubble).toBeTruthy();
+    expect(otherBubble!.className).toContain("border");
+    expect(otherBubble!.className).toContain("bg-card");
+
+    // agent 回复（小码）：成员名行 + 引擎标签位 + 卡片气泡（tl 收角 + border bg-card）。
+    const agentRow = document.querySelector<HTMLElement>(
+      "[data-testid='group-msg-agent'][data-member-name='小码']",
+    );
+    expect(agentRow).toBeTruthy();
+    const agentName = agentRow!.querySelector(
+      "span.font-semibold",
+    ) as HTMLElement | null;
+    expect(agentName?.textContent).toBe("小码");
+    const agentBubble = agentRow!.querySelector(
+      "[class*='rounded-tl-md']",
+    ) as HTMLElement | null;
+    expect(agentBubble).toBeTruthy();
+    expect(agentBubble!.className).toContain("bg-card");
+    // 头像统一 28px 圆形（会话 h-7 w-7 rounded-full 惯例）。
+    expect(agentRow!.querySelector("[class*='rounded-full']")).toBeTruthy();
+  });
+
+  it("typing 指示器气泡：会话卡片样式 + .sh-typing-dots 三点", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pushSseEvent({
+      event: "typing",
+      member_name: "林一",
+      member_kind: "user",
+      typing: true,
+      preview: "我这边复现了",
+      ts: "2026-09-01T06:06:00Z",
+    });
+    const bubble = await screen.findByTestId("group-typing-bubble");
+    expect(bubble.className).toContain("rounded-2xl");
+    expect(bubble.className).toContain("bg-card");
+    expect(bubble.querySelector(".sh-typing-dots")).toBeTruthy();
+  });
 });
 
 /* ── 3. 输入区：@补全 / 发送 / typing 上报 ─────────────────────────────── */
