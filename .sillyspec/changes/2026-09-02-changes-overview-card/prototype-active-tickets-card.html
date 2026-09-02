@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 活跃坑卡片（docs/sillyspec 状态化）</title>
+<style>
+  /* ── 双主题 token（对齐 frontend/src/styles/themes.ts：blue / ai-native）── */
+  :root, [data-theme="blue"] {
+    --background: #f8fafc; --card: #ffffff; --border: #e2e8f0;
+    --muted: #f1f5f9; --muted-foreground: #64748b; --foreground: #0f172a;
+    --brand-600: #0891b2; --brand-50: #ecfeff; --brand-700: #155e75;
+    --shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  [data-theme="ai-native"] {
+    --background: #18181b; --card: #27272a; --border: #3f3f46;
+    --muted: #2d2d33; --muted-foreground: #a1a1aa; --foreground: #fafafa;
+    --brand-600: #22d3ee; --brand-50: #164e63; --brand-700: #67e8f9;
+    --shadow: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--background); color: var(--foreground);
+    min-height: 100vh; padding: 32px; display: flex; flex-direction: column; gap: 16px; align-items: flex-start;
+  }
+  .theme-toggle {
+    position: fixed; top: 16px; right: 16px; padding: 6px 12px; font-size: 13px;
+    background: var(--card); color: var(--foreground); border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer;
+  }
+  .page-title { font-size: 14px; color: var(--muted-foreground); }
+  .page-title strong { color: var(--foreground); font-size: 18px; display: block; margin-bottom: 2px; }
+
+  /* ── SectionCard（对齐共享组件骨架）── */
+  .section-card {
+    width: min(680px, 100%); background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+  }
+  .card-title { font-size: 15px; font-weight: 600; }
+  .card-title .count {
+    margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--brand-700);
+    background: var(--brand-50); border-radius: 10px; padding: 1px 8px;
+  }
+  .card-sub { font-size: 12px; color: var(--muted-foreground); margin-top: 2px; }
+  .refresh-btn {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-foreground);
+    background: transparent; border: 1px solid var(--border); border-radius: 8px;
+    padding: 5px 10px; cursor: pointer;
+  }
+  .refresh-btn:hover { color: var(--brand-600); border-color: var(--brand-600); }
+
+  /* ── 工单列表项 ── */
+  .ticket { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .ticket:last-of-type { border-bottom: none; }
+  .ticket:hover { background: var(--muted); }
+  .badge { font-size: 12px; border-radius: 6px; padding: 2px 8px; white-space: nowrap; font-weight: 500; }
+  .badge.processing { color: #7c3aed; background: rgb(124 58 237 / 0.1); border: 1px solid rgb(124 58 237 / 0.35); }
+  .badge.default    { color: var(--muted-foreground); background: var(--muted); border: 1px solid var(--border); }
+  .badge.error      { color: #dc2626; background: rgb(220 38 38 / 0.1); border: 1px solid rgb(220 38 38 / 0.35); }
+  .badge.success    { color: #16a34a; background: rgb(22 163 74 / 0.1); border: 1px solid rgb(22 163 74 / 0.35); }
+  .ticket-main { flex: 1; min-width: 0; }
+  .ticket-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ticket-meta { font-size: 12px; color: var(--muted-foreground); margin-top: 3px; display: flex; gap: 8px; }
+  .tag { border-radius: 4px; padding: 0 6px; font-size: 11px; line-height: 20px; }
+  .tag.p0 { color: #dc2626; background: rgb(220 38 38 / 0.12); }
+  .tag.p1 { color: #d97706; background: rgb(217 119 6 / 0.12); }
+  .tag.p2 { color: var(--muted-foreground); background: var(--muted); }
+  .tag.owner { color: var(--brand-700); background: var(--brand-50); }
+  .new-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand-600); animation: pulse 1.6s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .card-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; font-size: 12px; color: var(--muted-foreground);
+    background: var(--muted); border-top: 1px solid var(--border);
+  }
+  /* ── @ 推送 toast 演示 ── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; background: var(--card); border: 1px solid var(--brand-600);
+    border-radius: 10px; padding: 12px 16px; font-size: 13px; box-shadow: var(--shadow);
+    display: none; max-width: 340px;
+  }
+  .toast .at { color: var(--brand-600); font-weight: 600; }
+  .demo-bar { display: flex; gap: 8px; }
+  .demo-btn { font-size: 12px; color: var(--muted-foreground); background: transparent; border: 1px dashed var(--border); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  .demo-btn:hover { color: var(--brand-600); border-color: var(--brand-600); }
+</style>
+</head>
+<body>
+  <button class="theme-toggle" onclick="toggleTheme()">🌙 主题：ai-native</button>
+  <div class="page-title">
+    <strong>工作台</strong>
+    概览 · 本页新增「活跃坑」SectionCard（组件级新增，页面骨架不变）
+  </div>
+
+  <div class="section-card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">活跃坑 <span class="count">2 进行中</span></div>
+        <div class="card-sub">docs/sillyspec 工单目录状态化 · 认领人变更自动 @ 提醒</div>
+      </div>
+      <button class="refresh-btn" onclick="refresh()">⟳ 刷新</button>
+    </div>
+
+    <div class="ticket">
+      <span class="new-dot" title="本轮新出现"></span>
+      <span class="badge processing">进行中</span>
+      <div class="ticket-main">
+        <div class="ticket-name">2026-09-02-agent-collab-improvements（跨 Agent 衔接改进总工单）</div>
+        <div class="ticket-meta">
+          <span class="tag owner">认领：sillyspecer × sillyhuber</span>
+          <span class="tag p0">P0×2 已交付</span>
+          <span>更新 09-02 17:06</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ticket">
+      <span class="badge default">待开工</span>
+      <div class="ticket-main">
+        <div class="ticket-name">2026-09-02-verify-known-failures-pass-line-false-positive</div>
+        <div class="ticket-meta">
+          <span class="tag owner">认领：sillyspecer</span>
+          <span class="tag p1">P1</span>
+          <span>创建 08-28</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ticket">
+      <span class="badge error">无法解析</span>
+      <div class="ticket-main">
+        <div class="ticket-name">legacy-no-frontmatter.md（无 frontmatter 旧文件 → 容错降级展示）</div>
+        <div class="ticket-meta">
+          <span class="tag owner">认领：—</span>
+          <span class="tag p2">P2</span>
+          <span>status=unknown</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-footer">
+      <span>已归档 finished/：10 张 ✅</span>
+      <span>最近扫描：17:32 · 每 60s 自动轮询 + 文件变更事件触发</span>
+    </div>
+  </div>
+
+  <div class="demo-bar">
+    <button class="demo-btn" onclick="showPush()">▶ 演示：新工单出现 → @ 认领人推送</button>
+  </div>
+
+  <div class="toast" id="toast">
+    <span class="at">@sillyhuber</span> 有新坑认领给你：<br>
+    「2026-09-02-daemon-reconnect-race」(P1)<br>
+    <span style="color:var(--muted-foreground);font-size:12px;">来自群聊提及机制 · 点击进入活跃坑卡片</span>
+  </div>
+
+<script>
+  function toggleTheme() {
+    const html = document.documentElement;
+    const next = html.dataset.theme === 'ai-native' ? 'blue' : 'ai-native';
+    html.dataset.theme = next;
+    document.querySelector('.theme-toggle').textContent = next === 'ai-native' ? '🌙 主题：ai-native' : '☀️ 主题：blue';
+  }
+  function refresh() {
+    const btn = event.target; btn.textContent = '⟳ 扫描中…';
+    setTimeout(() => { btn.textContent = '⟳ 刷新'; }, 600);
+  }
+  function showPush() {
+    const t = document.getElementById('toast');
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 3500);
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 B'·v2 · 活跃变更总览（真实 progress show --json 数据重绘）</title>
+<style>
+  /* ── 双主题 token（对齐 frontend/src/styles/themes.ts）── */
+  :root, [data-theme="blue"] {
+    --background:#f8fafc; --card:#ffffff; --border:#e2e8f0; --muted:#f1f5f9;
+    --muted-fg:#64748b; --fg:#0f172a; --brand-600:#0891b2; --brand-50:#ecfeff; --brand-700:#155e75;
+    --shadow:0 1px 2px 0 rgb(0 0 0/.05); --track:#e2e8f0; --done:#0891b2;
+  }
+  [data-theme="ai-native"] {
+    --background:#18181b; --card:#27272a; --border:#3f3f46; --muted:#2d2d33;
+    --muted-fg:#a1a1aa; --fg:#fafafa; --brand-600:#22d3ee; --brand-50:#164e63; --brand-700:#67e8f9;
+    --shadow:0 1px 2px 0 rgb(0 0 0/.4); --track:#3f3f46; --done:#22d3ee;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--background);color:var(--fg);min-height:100vh;padding:32px;display:flex;flex-direction:column;gap:16px;align-items:flex-start}
+  .theme-toggle{position:fixed;top:16px;right:16px;padding:6px 12px;font-size:13px;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:8px;cursor:pointer;z-index:9}
+  .page-title{font-size:14px;color:var(--muted-fg)}
+  .page-title strong{color:var(--fg);font-size:18px;display:block;margin-bottom:2px}
+
+  .section-card{width:min(880px,100%);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+  /* ── 卡头：workspace + envelope 健康条 ── */
+  .card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .ws-select{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}
+  .ws-select select{font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--muted);color:var(--fg)}
+  .health{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted-fg);flex-wrap:wrap}
+  .hp{display:flex;align-items:center;gap:4px;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .dot.g{background:#16a34a}.dot.r{background:#dc2626}.dot.y{background:#d97706}
+  .env{font-size:11px;font-family:ui-monospace,Consolas,monospace;color:var(--muted-fg);border:1px solid var(--border);border-radius:6px;padding:1px 7px}
+
+  /* ── 过滤 tab（按真实数据：全部18 / ghost17 / 冲突11）── */
+  .tabs{display:flex;gap:4px;padding:10px 16px 0}
+  .tab{font-size:13px;padding:5px 14px;border-radius:8px 8px 0 0;cursor:pointer;color:var(--muted-fg);border:1px solid transparent;border-bottom:none}
+  .tab.active{background:var(--muted);color:var(--brand-700);font-weight:600;border-color:var(--border)}
+  .tab .n{font-size:11px;opacity:.85;margin-left:3px}
+
+  /* ── 变更行 ── */
+  .change{padding:12px 16px;border-bottom:1px solid var(--border)}
+  .change:hover{background:var(--muted)}
+  .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .chg-name{font-size:13px;font-weight:600;font-family:ui-monospace,Consolas,monospace}
+  .badge{font-size:11px;border-radius:6px;padding:1px 8px;font-weight:500;white-space:nowrap}
+  .badge.quick{color:#7c3aed;background:rgb(124 58 237/.1);border:1px solid rgb(124 58 237/.35)}
+  .badge.stage{color:var(--brand-700);background:var(--brand-50);border:1px solid var(--brand-600)}
+  .badge.ghost{color:#dc2626;background:rgb(220 38 38/.1);border:1px solid rgb(220 38 38/.35)}
+  .row1 .sp{flex:1}
+  .steps{font-size:12px;color:var(--muted-fg);white-space:nowrap}
+  .row2{display:flex;align-items:center;gap:14px;margin-top:8px;flex-wrap:wrap}
+  /* 主管线 6 点：scan→brainstorm→plan→execute→verify→archive（quick/explore 为旁路徽标） */
+  .pipeline{display:flex;align-items:center}
+  .st{display:flex;flex-direction:column;align-items:center;gap:4px;width:56px}
+  .st i{width:10px;height:10px;border-radius:50%;border:2px solid var(--track);background:transparent;display:block}
+  .st.done i{background:var(--done);border-color:var(--done)}
+  .st.cur i{border-color:var(--brand-600);box-shadow:0 0 0 3px rgb(8 145 178/.25)}
+  .st span{font-size:10px;color:var(--muted-fg);white-space:nowrap;transform:scale(.92)}
+  .st.cur span{color:var(--brand-700);font-weight:600}
+  .ln{height:2px;background:var(--track);flex:1;min-width:10px;margin-bottom:14px}
+  .ln.done{background:var(--done)}
+  .pbar{flex:1;min-width:110px;max-width:220px;height:6px;border-radius:3px;background:var(--track);overflow:hidden}
+  .pbar b{display:block;height:100%;background:var(--done)}
+  .last-active{font-size:12px;color:var(--muted-fg);white-space:nowrap}
+  .hint{font-size:12px;color:var(--muted-fg);margin-top:6px}
+  .hint code{font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--muted);border:1px solid var(--border);border-radius:4px;padding:1px 6px}
+
+  /* ── ghost 折叠组（真实 17 个）── */
+  .ghost-collapsed{font-size:12px;color:var(--muted-fg);padding:8px 16px;border-bottom:1px solid var(--border);cursor:pointer}
+  .ghost-collapsed:hover{color:var(--brand-600)}
+  .ghost-collapsed b{color:#dc2626}
+
+  /* ── 冲突区（真实 11 条：spec-tree×2 + progress×9）── */
+  .conflict-zone{padding:12px 16px;background:var(--muted);border-top:1px solid var(--border)}
+  .cz-title{font-size:13px;font-weight:600;color:#dc2626;margin-bottom:8px}
+  .cz-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px}
+  .cz-item{font-size:12px;color:var(--muted-fg);display:flex;align-items:center;gap:6px;min-width:0}
+  .cz-item code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cz-type{font-size:10px;border-radius:4px;padding:0 5px;white-space:nowrap;line-height:17px}
+  .cz-type.spec{color:#7c3aed;background:rgb(124 58 237/.12)}
+  .cz-type.prog{color:#d97706;background:rgb(217 119 6/.12)}
+  .card-footer{display:flex;justify-content:space-between;padding:10px 16px;font-size:12px;color:var(--muted-fg);border-top:1px solid var(--border);flex-wrap:wrap;gap:6px}
+  .demo-note{width:min(880px,100%);font-size:12px;color:var(--muted-fg);line-height:1.7;border-left:3px solid var(--brand-600);padding-left:10px}
+  .demo-note code{font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--muted);border:1px solid var(--border);border-radius:4px;padding:0 5px}
+</style>
+</head>
+<body>
+  <button class="theme-toggle" onclick="toggleTheme()">🌙 主题：ai-native</button>
+  <div class="page-title">
+    <strong>工作台</strong>
+    B' v2 · 活跃变更总览 —— 数据源：<code>node …/sillyspec/bin/sillyspec.js progress show --json</code>（源码直连，真实 envelope 渲染）
+  </div>
+
+  <div class="section-card">
+    <div class="card-header">
+      <div class="ws-select">🗂 workspace:
+        <select><option>multi-agent-platform</option><option>（未来：任意接入的 sillyspec 仓，零配置出现）</option></select>
+      </div>
+      <div class="health">
+        <span class="hp"><span class="dot g"></span>1 真实活跃</span>
+        <span class="hp"><span class="dot r"></span>17 残留(ghost)</span>
+        <span class="hp"><span class="dot r"></span>11 未决冲突</span>
+        <span>· 更新于 12:51</span>
+        <span class="env">ok=true · warnings=28 · errors=0</span>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active">全部 <span class="n">18</span></div>
+      <div class="tab">需关注 <span class="n">28</span></div>
+    </div>
+
+    <!-- 真实活跃 change：本变更自身（brainstorm step 4/8）-->
+    <div class="change">
+      <div class="row1">
+        <span class="chg-name">2026-09-02-sillyhub-tickets-card</span>
+        <span class="badge stage">🧠 需求探索</span>
+        <span class="sp"></span>
+        <span class="steps">步骤 4/8</span>
+      </div>
+      <div class="row2">
+        <div class="pipeline">
+          <div class="st done"><i></i><span>scan</span></div><div class="ln done"></div>
+          <div class="st cur"><i></i><span>brainstorm</span></div><div class="ln"></div>
+          <div class="st"><i></i><span>plan</span></div><div class="ln"></div>
+          <div class="st"><i></i><span>execute</span></div><div class="ln"></div>
+          <div class="st"><i></i><span>verify</span></div><div class="ln"></div>
+          <div class="st"><i></i><span>archive</span></div>
+        </div>
+        <div class="pbar"><b style="width:50%"></b></div>
+        <span class="last-active">最近活跃 15 分钟前</span>
+      </div>
+    </div>
+
+    <!-- ghost 折叠组（真实 17 个，最新两个已展开样例）-->
+    <div class="ghost-collapsed" onclick="this.style.display='none';document.getElementById('ghosts').style.display='block'">
+      ▸ <b>残留记录 (ghost) 17 个</b> —— 目录已不存在 · 步骤长期停滞 · 建议清理 ▾ 展开查看
+    </div>
+    <div id="ghosts" style="display:none">
+      <div class="change">
+        <div class="row1">
+          <span class="chg-name">quick-fdd8219a</span>
+          <span class="badge quick">⚡ quick</span>
+          <span class="badge ghost">🔴 ghost</span>
+          <span class="badge stage">🔍 代码扫描</span>
+          <span class="sp"></span><span class="steps">0/3</span>
+        </div>
+        <div class="hint">最近活跃 2 分钟前（新产生的残留）· 建议 <code>sillyspec doctor --cleanup-ghosts --confirm</code></div>
+      </div>
+      <div class="change">
+        <div class="row1">
+          <span class="chg-name">quick-23f25e3b</span>
+          <span class="badge quick">⚡ quick</span>
+          <span class="badge ghost">🔴 ghost</span>
+          <span class="badge stage">🔍 代码扫描</span>
+          <span class="sp"></span><span class="steps">2/3</span>
+        </div>
+        <div class="hint">最近活跃 41 分钟前 · 快收尾时中断的残留</div>
+      </div>
+      <div class="change" style="color:var(--muted-fg);font-size:12px">… 其余 15 个同形态（quick-* · 🔍代码扫描 · 0~2/3 · 1h~12h 未活跃）</div>
+    </div>
+
+    <!-- 冲突区：真实 11 条（spec-tree×2 + progress×9）-->
+    <div class="conflict-zone">
+      <div class="cz-title">🔴 未决同步冲突 (11) —— spec 树 ×2 · 进度 ×9 → <code style="font-weight:400">sillyspec platform resolve</code></div>
+      <div class="cz-grid">
+        <div class="cz-item"><span class="cz-type spec">spec</span><code>quick-208442f6</code></div>
+        <div class="cz-item"><span class="cz-type spec">spec</span><code>quick-5228698a</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-20-workspace-nav-consolidate</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-20-workspace-subpages-style-unify</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-25-runtimes-entry-unified-floating</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-25-unified-floating-session</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-26-session-input-mention</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-28-session-ppm-task-binding</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-29-daemon-selfupdate-safety</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-29-usage-by-provider-model</code></div>
+        <div class="cz-item"><span class="cz-type prog">进度</span><code>2026-08-30-change-center-usage-stats</code></div>
+      </div>
+    </div>
+
+    <div class="card-footer">
+      <span>排序：last_active 倒序（默认）· active_changes=18</span>
+      <span>字段映射：stage_label / steps{completed,total} / stages{8} / ghost / pending_conflicts{change,type}</span>
+    </div>
+  </div>
+
+  <div class="demo-note">
+    本版全部数字为 <strong>2026-09-02 12:51 真实 envelope</strong>（源码直连获取）。三个值得注意的真实发现：① ghost 已从 15 涨到 <strong>17</strong>（quick-fdd8219a 两分钟前刚产生）——残留还在持续产生，这张卡有真实运维价值；② <strong>11 条未决同步冲突</strong>是人类可读总览没展示的（只在 --json envelope 里）——包括 9 个 08-20~08-30 正式 change 的进度冲突，面板化后一眼可见；③ schema 含 8 个 stage 键（scan/brainstorm/plan/execute/verify/archive/quick/explore），原型主线画 6 点、quick/explore 走旁路徽标（⚡quick 见 ghost 组），与数据无损兼容。
+  </div>
+
+<script>
+  function toggleTheme(){
+    const h=document.documentElement,n=h.dataset.theme==='ai-native'?'blue':'ai-native';
+    h.dataset.theme=n;
+    document.querySelector('.theme-toggle').textContent=n==='ai-native'?'🌙 主题：ai-native':'☀️ 主题：blue';
+  }
+</script>
+</body>
+</html>
