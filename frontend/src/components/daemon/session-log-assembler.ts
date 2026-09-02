@@ -1794,7 +1794,7 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
  * 否则 null（普通用户消息不误伤；仅同标题开头但无分隔的消息是用户自己
  * 输入的原文，不算前导）。
  */
-const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报"];
+const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报", "【群聊上下文】"];
 export function extractPreambleText(content: string): string | null {
   const trimmed = content.trim();
   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;

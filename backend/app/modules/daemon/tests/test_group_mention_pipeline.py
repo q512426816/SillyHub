@@ -836,8 +836,9 @@ class TestBuildGroupPrompt:
             sender_member_name="鲸落",
             content="@小码 帮我修复它",
         )
-        # 简报三要素（design §4.3 首句）。
-        assert prompt.startswith("你是群聊「测试群」中的 Agent 成员「小码」。")
+        # quick-6966fcee 注入分离展示：前导块带【群聊上下文】头（前端
+        # extractPreambleText 识别剥离，对话视图只显示真实消息）。
+        assert prompt.startswith("【群聊上下文】\n你是群聊「测试群」中的 Agent 成员「小码」。")
         assert "成员：群主(用户)、小英(用户)、小码(Agent)。" in prompt
         assert "仅当消息 @你 或 @全体 时回应" in prompt
         assert "你的发言会以「小码」身份出现在群里" in prompt
@@ -892,8 +893,13 @@ class TestBuildGroupPrompt:
         assert _GROUP_REPLY_MARKER_REQUIREMENT in prompt
         assert "[[GROUP]]" in prompt
         assert "[[/GROUP]]" in prompt
-        # 指示行在当前消息段之后（prompt 末尾）。
-        assert prompt.endswith(_GROUP_REPLY_MARKER_REQUIREMENT)
+        # quick-6966fcee 注入分离展示：指示行属前导块——在真实消息分隔符
+        # （
+        # quick-6966fcee 注入分离展示：指示行属前导块——在真实消息分隔符
+        # （\n\n---\n\n）之前、prompt 不再以它结尾。
+        sep = prompt.index("\n\n---\n\n")
+        assert prompt.rindex(_GROUP_REPLY_MARKER_REQUIREMENT) < sep
+        assert prompt.endswith("群主(用户): @小码 帮我修复它")
 
 
 # ── 消息入群：载体 run + 群频道事件 + 未 @ 不触发（design §4.1）────────────
@@ -1064,7 +1070,9 @@ class TestShadowLazyCreation:
         assert shadow.parent_session_id is None  # D-007：恒 NULL
         assert shadow.status == "active"
         assert shadow.title == "群「测试群」·小码"
-        assert shadow.config == {"manual_approval": False}
+        # quick-6966fcee：影子不再设 manual_approval=False（askuser 恢复——影子
+        # 会话已挂完整 SessionPanel，群主可作答 AskUserQuestion/权限请求）。
+        assert shadow.config is None
         assert shadow.runtime_id == env.runtime.id
         assert shadow.workspace_id == env.ws.id  # 成员工作区锚（建群缺省=群工作区）
         assert shadow.lease_id is not None
@@ -1112,6 +1120,8 @@ class TestShadowLazyCreation:
             "source_carrier_run_id": body["carrier_run_id"],
             "chain_depth": 0,
             "sender_user_id": str(env.owner.id),
+            # quick-6966fcee 注入分离展示：真实用户消息原文随 metadata 落库。
+            "user_message": "@小码 帮我修复它",
         }
 
         # SESSION_INJECT 控制指令落库（三段式：WS 失败也 pending）。

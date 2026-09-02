@@ -755,7 +755,11 @@ def _build_group_prompt(
             "大任务建议拆给分身干，你汇总结论回群。分身产出不会自动出现在群里，"
             "由你转述。"
         )
-    parts = [briefing]
+    # quick-6966fcee 注入分离展示：简报/群背景/回应要求合并为前导块（单聊
+    # dispatch_prompt 同款形态——【群聊上下文】头 + "\n\n---\n\n" 分隔出真实
+    # 用户消息），前端 extractPreambleText 剥离（对话视图只显示真实消息，
+    # 注入上下文进「进度」视图 preamble 段默认收起）。
+    parts = [f"【群聊上下文】\n{briefing}"]
     if context_lines:
         parts.append("[群聊记录 · 背景，仅供了解上下文]\n" + "\n".join(context_lines))
     sender_label = (
@@ -768,15 +772,16 @@ def _build_group_prompt(
         if source_member_name is not None
         else "[当前消息 · 需要你回应]"
     )
-    parts.append(current_header + "\n" + f"{sender_label}: {content}")
     if attachment_lines:
         parts.append(
             "[当前消息附件 · 用户随消息发送，可直接读取参考]\n" + "\n".join(attachment_lines)
         )
-    # quick 投影统一标记制（2026-09-02）：当前消息段后追加回应要求指示行——
-    # @轮仅 [[GROUP]] 标记段进群时间线（与直聊同款），告知 agent 标记用法。
+    # quick 投影统一标记制（2026-09-02）：回应要求指示行——@轮仅 [[GROUP]]
+    # 标记段进群时间线（与直聊同款），告知 agent 标记用法。
     parts.append(_GROUP_REPLY_MARKER_REQUIREMENT)
-    return "\n\n".join(parts)
+    # 真实用户消息主体置于前导分隔符之后（extractPreambleText 按首个
+    # "\n\n---\n\n" 切分——前导块在前，current_header+消息为干净主体）。
+    return "\n\n".join(parts) + "\n\n---\n\n" + current_header + "\n" + f"{sender_label}: {content}"
 
 
 def _attachment_summary_rows(rows: Sequence) -> list[dict[str, object]]:
@@ -2298,6 +2303,29 @@ class GroupChatService:
             "team_enabled": member.team_enabled,
         }
 
+        # quick-6966fcee 存量自愈：早期影子建行带 config.manual_approval=False
+        # （审批不进群旧设计）——影子已挂完整 SessionPanel 可作答，此处幂等
+        # 修正为 None（复用任何成员 PATCH 路径触达；不重建影子、记忆无损）。
+        if (
+            member.shadow_session_id is not None
+            and isinstance(
+                member_config := (await self._session.get(AgentSession, member.shadow_session_id)),
+                AgentSession,
+            )
+            and isinstance(member_config.config, dict)
+            and member_config.config.get("manual_approval") is False
+        ):
+            healed = dict(member_config.config)
+            healed.pop("manual_approval", None)
+            member_config.config = healed or None
+            self._session.add(member_config)
+            log.info(
+                "group_shadow_manual_approval_healed",
+                group_id=str(group_id),
+                member_id=str(member_id),
+                session_id=str(member.shadow_session_id),
+            )
+
         if payload.display_name is not None:
             name = _validate_display_name(payload.display_name)
             if name != member.display_name:
@@ -2896,6 +2924,8 @@ class GroupChatService:
             "source_carrier_run_id": str(carrier.id),
             "sender_user_id": str(user.id),
             "sender_member_name": sender_member_name,
+            # quick-6966fcee 注入分离展示（同群 @ 轮语义）。
+            "user_message": content,
         }
 
         # 忙轮中途注入同群消息（busy_strategy="inject"：直聊也应尽快可见；
@@ -3005,6 +3035,10 @@ class GroupChatService:
             "source_carrier_run_id": str(carrier_run_id),
             "chain_depth": chain_depth,
             "sender_user_id": str(sender_user_id),
+            # quick-6966fcee 注入分离展示：真实用户消息原文（不含成员简报/群
+            # 背景/回应要求等注入上下文）——影子会话与群时间线的用户气泡优先
+            # 显示本字段，完整注入文本折叠为「已注入上下文」可展开。
+            "user_message": content,
         }
         if source_member_name is not None:
             # 互@轮：来源是 Agent 成员（无 user 行）——记成员身份供审计/展示。
@@ -3172,7 +3206,10 @@ class GroupChatService:
             lease_id=None,  # 同上
             provider=provider,
             status="pending",  # 事务内随 lease 回填激活为 active
-            config={"manual_approval": False},  # §9.1：审批不进群（worker 先例）
+            # quick-6966fcee：不再设 manual_approval=False——影子会话已挂完整
+            # SessionPanel（群主可作答 AskUserQuestion/权限请求），放开后 agent
+            # 遇需拍板问题可正常弹对话框（此前 False 会把 ask 类工具调用拒掉，
+            # agent 卡住干等）。群 @ 触发轮的请求出现在影子面板，群主点开作答。
             turn_count=0,
             created_at=now,
             workspace_id=member.workspace_id,
