@@ -1407,6 +1407,78 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     expect(beforeCallCount()).toBe(1);
   });
 
+  it("内容不满视口（无滚动条）→ 自动续拉更早（无需滚动事件）；到头即停", async () => {
+    // jsdom 无布局：原型级打桩 scrollHeight(400) < clientHeight(600) 模拟
+    // 「初始内容矮于视口无滚动条」——scroll 事件永不触发，靠视口补拉链加载。
+    const shDesc = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight",
+    )!;
+    const chDesc = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientHeight",
+    )!;
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return 400;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return 600;
+      },
+    });
+    try {
+      const fullPage = [
+        quickLog("a-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+        ...Array.from({ length: 99 }, (_, i) =>
+          quickLog(
+            `a-out-${i}`,
+            "r-cur",
+            "stdout",
+            `窗口内输出 ${i}`,
+            "2026-08-15T08:00:00Z",
+          ),
+        ),
+      ];
+      const older = [
+        quickLog("a-old-inj", "r-old", "user_input", "更早的提问", "2026-08-15T07:00:00Z"),
+        quickLog("a-old-out", "r-old", "stdout", "更早的答复", "2026-08-15T07:00:30Z"),
+      ];
+      mocks.getAgentSessionLogs
+        .mockResolvedValueOnce(fullPage)
+        .mockResolvedValueOnce(older);
+      renderPage();
+      await selectDefaultSession();
+
+      // 无任何滚动事件：初始满页 + 不满视口 → 自动补拉 older 页并 prepend。
+      expect(await screen.findByText("更早的提问", {}, { timeout: 3000 })).toBeTruthy();
+      expect(screen.getByText("当前窗口提问")).toBeTruthy();
+      // older 不满页 → 到头：无第三次 before 请求。
+      await new Promise((r) => setTimeout(r, 50));
+      const beforeCount = mocks.getAgentSessionLogs.mock.calls.filter(
+        (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
+      ).length;
+      expect(beforeCount).toBe(1);
+    } finally {
+      // jsdom 原生无这两个布局属性（描述符 undefined）——按存在性恢复/删除。
+      if (shDesc) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", shDesc);
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+          .scrollHeight;
+      }
+      if (chDesc) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", chDesc);
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+          .clientHeight;
+      }
+    }
+  });
+
   it("单 run 跨游标（团队分身会话常态）→ 更早段同 run 不丢弃，伪 runId 轮块 prepend", async () => {
     // 分身会话整段执行是一个长 run：初始窗口与「加载更早」拉回的更早日志
     // 同 run——原 run 级去重会整段丢弃（按钮永远无反应），修复后伪 runId

@@ -286,3 +286,14 @@
 根因：用户要求把按钮交互改为滚动加载（触顶触发、加载有提示、全部加载完成后触顶不再请求）
 方案：捕获阶段监听 TurnTimeline 滚动容器（scrollTop ≤ 48px 触发，对齐 shadow-session-viewer 模式）；同步 ref 锁防滚动事件高频双拉；prepend 滚动锚按 scrollHeight 增量补回视口（正在读的内容不被顶走）；加载中顶部行内提示（Loader2 旋转+正在加载更早消息）；hasEarlier=false 到头后 handleLoadEarlier 内部自挡；稳定 callback ref 驱动主体挂载时重挂监听（会话骨架早退渲染先于主体）
 结果：page.test 25/25（触顶用例改 scroll 触发+到头不重复请求断言）+ session-panel-ux-fixes 5/5 绿；tsc 0 错；待重建 frontend 部署
+
+## ql-20260902-010-f493 | 2026-09-02 16:50:38 | 触顶自动加载补口——初始内容不满视口（无滚动条）时自动续拉直至撑出滚动条或翻到头
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（maybeAutoFill 视口补拉链+初始/翻页触发点+连拉上限）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（无滚动条自动续拉用例（原型级布局打桩））
+需求：触顶自动加载补口——初始内容不满视口（无滚动条）时自动续拉直至撑出滚动条或翻到头
+根因：初始 100 条日志装配出的对话高度可能不足一屏：容器无滚动条则 scroll 事件永不触发，触顶加载成了死路（用户实测分身会话初始展示未满屏无法继续加载）
+方案：maybeAutoFill 视口补拉：容器有布局高度且 scrollHeight ≤ clientHeight（不满一屏）且有更早历史时自动续拉一页；初始满页后 setTimeout 复查 + 每次翻页满页后链式复查（DOM 提交后）；连拉上限 10 防极端空渲染批量请求，换会话重置；jsdom 无布局（scrollHeight=0）不触发保既有用例零影响
+结果：page.test 26/26（新增无滚动条自动续拉用例——原型级打桩布局尺寸，断言无滚动事件即 prepend 且到头即停）绿；tsc 0 错；待重建 frontend 部署

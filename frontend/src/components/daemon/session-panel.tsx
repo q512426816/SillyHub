@@ -1525,6 +1525,8 @@ function SessionPanelPage({
     historyCursorRef.current = null;
     setHasEarlier(false);
     setHistoryLoading(false);
+    historyLoadingRef.current = false;
+    autoFillCountRef.current = 0;
     setSearchOpen(false);
     setSearchTerm("");
     setSearchResults(null);
@@ -1549,6 +1551,11 @@ function SessionPanelPage({
         // 翻页游标 = 窗口内最早行 ts；满页即可能还有更早（按钮可见）。
         historyCursorRef.current = logs[0]?.timestamp ?? null;
         setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
+        // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
+        // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。
+        if (logs.length >= HISTORY_PAGE_SIZE) {
+          setTimeout(() => maybeAutoFillRef.current(), 0);
+        }
         const restored = logsToTurns(logs);
         setTurnState((prev) => {
           // 预取窗口内用户抢先发送的占位轮（__pending_inject_*）不覆盖——
@@ -1881,6 +1888,8 @@ function SessionPanelPage({
   const pendingAnchorRef = useRef<number | null>(null);
   /** 同步加载锁（滚动事件高频，state 锁同 tick 内不生效）。 */
   const historyLoadingRef = useRef(false);
+  /** 视口补拉连拉计数（上限防极端空渲染批量请求；换会话重置）。 */
+  const autoFillCountRef = useRef(0);
   /** 工具报告主体镜像（组件后段条件计算 + 早退渲染未初始化，effect 经 ref 读）。 */
   const isToolReportBodyRef = useRef(false);
   const handleLoadEarlierRef = useRef<() => Promise<void>>(async () => {});
@@ -1890,6 +1899,7 @@ function SessionPanelPage({
     if (!cursor) return;
     historyLoadingRef.current = true;
     setHistoryLoading(true);
+    let chainedMore = false;
     try {
       const older = await getAgentSessionLogs(sessionId, {
         before: cursor,
@@ -1901,6 +1911,7 @@ function SessionPanelPage({
       if (scrollEl) pendingAnchorRef.current = scrollEl.scrollHeight;
       historyCursorRef.current = older[0]?.timestamp ?? null;
       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
+      chainedMore = older.length >= HISTORY_PAGE_SIZE;
       const olderTurns = logsToTurns(older);
       if (olderTurns.length > 0) {
         setTurnState((prev) => {
@@ -1926,9 +1937,31 @@ function SessionPanelPage({
     } finally {
       historyLoadingRef.current = false;
       setHistoryLoading(false);
+      // 视口补拉链：本次满页（可能还有更早）→ DOM 提交后复查是否仍不满
+      // 一屏（无滚动条 scroll 事件永不触发），不满即续拉（见 maybeAutoFill）。
+      if (chainedMore) {
+        chainedMore = false;
+        setTimeout(() => maybeAutoFillRef.current(), 0);
+      }
     }
   }, [sessionId, hasEarlier]);
   handleLoadEarlierRef.current = handleLoadEarlier;
+
+  /** 视口补拉（触顶补口）：内容不满视口且可能还有更早 → 自动续拉一页。
+   *  守卫：容器存在且有布局高度（jsdom 无布局 scrollHeight=0 不触发）、
+   *  连拉上限 AUTO_FILL_MAX（防整段历史全被空渲染吞掉的极端批量请求；
+   *  换会话重置）。撑出滚动条（scrollHeight > clientHeight）即停走正常触顶。 */
+  const AUTO_FILL_MAX = 10;
+  const maybeAutoFill = useCallback(() => {
+    const el = scrollElQueryRef.current();
+    if (!el || el.scrollHeight === 0) return;
+    if (el.scrollHeight > el.clientHeight) return;
+    if (autoFillCountRef.current >= AUTO_FILL_MAX) return;
+    autoFillCountRef.current += 1;
+    void handleLoadEarlierRef.current();
+  }, []);
+  const maybeAutoFillRef = useRef(maybeAutoFill);
+  maybeAutoFillRef.current = maybeAutoFill;
 
   // ── quick（2026-09-02 触顶自动加载）：滚动接线 + prepend 滚动锚 ──
   // 捕获阶段监听 TurnTimeline 内部滚动容器（native scroll 不冒泡，capture

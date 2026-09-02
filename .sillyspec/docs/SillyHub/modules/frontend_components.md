@@ -131,6 +131,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 
 ## 变更索引
 
+- ql-20260902-010-f493 | 触顶自动加载补口（视口补拉链）：初始 100 条日志装配的对话可能不足一屏——容器无滚动条 scroll 事件永不触发成死路；maybeAutoFill 在「容器有布局高度且 scrollHeight ≤ clientHeight 且有更早」时自动续拉一页（初始满页后 + 每次翻页满页后 setTimeout 复查 DOM 提交后状态），撑出滚动条即停走正常触顶；连拉上限 10 防极端空渲染批量请求，换会话重置；jsdom 无布局（scrollHeight=0）不触发保既有用例零影响
 - ql-20260902-009-0d92 | 「加载更早消息」交互升级触顶自动加载：捕获阶段监听 TurnTimeline 滚动容器（scrollTop ≤ 48px 触发，shadow-session-viewer 同款模式）；同步 ref 锁防高频双拉；prepend 滚动锚按 scrollHeight 增量补回视口（正在读的内容不被顶走）；加载中顶部行内提示（session-load-earlier-hint）；到头（不满页）后触顶自挡零请求；稳定 callback ref 驱动主体挂载时重挂监听（骨架早退渲染先于主体，sessionId 单维依赖挂不上）
 - ql-20260902-008-3723 | 分身会话查看器「加载更早消息」点击无反应修复：handleLoadEarlier 的 run 级去重把与当前窗口同 run 的更早日志整 turn 丢弃——团队分身会话整段执行是单个长 run（跨游标恒同 run）＝100% 丢弃；改伪 runId 变体（`#e`+游标短码防多次翻页 key 撞）插入该 turn 之前，realRunId 保持原值（SSE 增量/孤儿 run 补建匹配零影响），before 游标保证内容不重叠
 - ql-20260831-016-6eb5 | confirm 图标槽结构修正（ql-015 迭代）：antd v6 confirm icon 槽对裸 lucide svg 的尺寸/间距样式不命中（实测压成 12x20 且与标题零间距）——封 confirmIcon(Icon, cls) helper 外包固定尺寸 span（h-6 w-6=24px shrink-0 防 flex 压缩 + mr-3=12px 间距），6 处 confirm 换用，实测 24x24 + 12px 间距
