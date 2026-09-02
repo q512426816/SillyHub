@@ -86,9 +86,7 @@ def _make_delegate_mock(
     delegate.git_rev_parse = AsyncMock(return_value=rev_parse_commit)
     # ql-20260902-001：创建失败路径会 best-effort git_worktree_remove 收残
     # （删残缺 worktree + workers/<id> 分支），mock 补齐供断言。
-    delegate.git_worktree_remove = AsyncMock(
-        return_value={"ok": True, "branch_deleted": True}
-    )
+    delegate.git_worktree_remove = AsyncMock(return_value={"ok": True, "branch_deleted": True})
     delegate.git_worktree_add = AsyncMock(
         return_value={
             "ok": ok,

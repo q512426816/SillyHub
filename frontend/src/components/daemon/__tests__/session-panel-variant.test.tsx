@@ -273,9 +273,13 @@ describe("SessionPanel variant 回归锚（不传 variant 与 desktop 一致）"
     ).toBeInTheDocument();
     // 无 mobile ⋯ 菜单。
     expect(screen.queryByLabelText("更多操作")).not.toBeInTheDocument();
-    // 会话主体直挂面板根（无外包层——改前 DOM 结构）。
+    // 会话主体直挂面板根（无样式外包层）——ql-20260902-009 起主体外包一层
+    // display:contents 挂载点（触顶自动加载滚动监听，布局零变化），锚同步为
+    // 「挂载点布局透明 + 直挂面板根」。
     const scroll = panel.querySelector("[data-testid='turn-timeline-scroll']");
-    expect(scroll?.parentElement).toBe(panel);
+    const bodyWrap = scroll?.parentElement as HTMLElement;
+    expect(bodyWrap.className).toBe("contents");
+    expect(bodyWrap.parentElement).toBe(panel);
   });
 
   it("显式 variant='desktop'：与不传渲染一致（分发函数默认值归一）", async () => {
@@ -307,8 +311,12 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
     setupPage("mobile");
     const panel = (await screen.findByLabelText("会话面板")) as HTMLElement;
     const scroll = panel.querySelector("[data-testid='turn-timeline-scroll']");
-    // 外包层 = 滚动容器父级：携带 markdown 表格横向滚动 + 外层横向锁类。
-    const wrap = scroll?.parentElement as HTMLElement;
+    // ql-20260902-009：主体先包 display:contents 挂载点（触顶自动加载滚动
+    // 监听，布局零变化），横向外包层退为挂载点父级。
+    const bodyWrap = scroll?.parentElement as HTMLElement;
+    expect(bodyWrap.className).toBe("contents");
+    // 外包层 = 挂载点父级：携带 markdown 表格横向滚动 + 外层横向锁类。
+    const wrap = bodyWrap.parentElement as HTMLElement;
     expect(wrap).not.toBe(panel);
     expect(wrap.className).toContain("min-h-0 flex-1");
     expect(wrap.className).toContain(

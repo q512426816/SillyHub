@@ -536,9 +536,9 @@ class FinalizerService:
             return {"cleaned": [], "patch_artifact_id": patch_artifact_id}
 
         # 按 target_workspace_id 分组：NULL 回退 anchor，各组的 [(run_id, target_ws, wt_branch)] 列表
-        grouped: dict[
-            uuid.UUID, list[tuple[uuid.UUID, uuid.UUID | None, str | None]]
-        ] = defaultdict(list)
+        grouped: dict[uuid.UUID, list[tuple[uuid.UUID, uuid.UUID | None, str | None]]] = (
+            defaultdict(list)
+        )
         for run_id, target_ws, wt_branch in rows:
             effective_target = target_ws or anchor_workspace_id
             grouped[effective_target].append((run_id, target_ws, wt_branch))

@@ -589,16 +589,12 @@ class TestSeedSanity:
 
 
 class TestListArchiveTriState:
-    async def test_list_sessions_archived_tri_state(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_list_sessions_archived_tri_state(self, db_session: AsyncSession) -> None:
         """HTTP 层默认 None=不过滤（全部状态含已归档）；service 默认 False 零回归。"""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         s_active, _l, _r = await _make_session(db_session, uid=uid, runtime_id=rt.id)
-        s_archived, _l2, _r2 = await _make_session(
-            db_session, uid=uid, runtime_id=rt.id
-        )
+        s_archived, _l2, _r2 = await _make_session(db_session, uid=uid, runtime_id=rt.id)
         await DaemonService(db_session).archive_session(s_archived.id, uid)
 
         svc = DaemonService(db_session)

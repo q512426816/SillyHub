@@ -469,11 +469,7 @@ async def prepare_worker_worktree(
                         "mission_worker_worktree_cleanup_noop",
                         run_id=str(run.id),
                         sibling_path=sibling_path,
-                        error=(
-                            cleanup.get("error")
-                            if isinstance(cleanup, dict)
-                            else "bad_result"
-                        ),
+                        error=(cleanup.get("error") if isinstance(cleanup, dict) else "bad_result"),
                     )
             return WorkerWorktreeOutcome(
                 ok=False,
