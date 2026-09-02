@@ -1396,6 +1396,45 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     });
   });
 
+  it("单 run 跨游标（团队分身会话常态）→ 更早段同 run 不丢弃，伪 runId 轮块 prepend", async () => {
+    // 分身会话整段执行是一个长 run：初始窗口与「加载更早」拉回的更早日志
+    // 同 run——原 run 级去重会整段丢弃（按钮永远无反应），修复后伪 runId
+    // 变体插入该 turn 之前（before 游标保证内容不重叠）。
+    const fullPage = [
+      quickLog("w-inj", "r-long", "user_input", "分身首句", "2026-08-15T08:00:00Z"),
+      ...Array.from({ length: 99 }, (_, i) =>
+        quickLog(
+          `w-out-${i}`,
+          "r-long",
+          "stdout",
+          `窗口内输出 ${i}`,
+          "2026-08-15T08:00:00Z",
+        ),
+      ),
+    ];
+    const olderSameRun = [
+      quickLog("w-old-inj", "r-long", "user_input", "同 run 更早段提问", "2026-08-15T07:30:00Z"),
+      quickLog("w-old-out", "r-long", "stdout", "同 run 更早段输出", "2026-08-15T07:31:00Z"),
+    ];
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(olderSameRun);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("分身首句")).toBeTruthy();
+
+    fireEvent.click(await screen.findByTestId("session-load-earlier"));
+    await waitFor(() => {
+      expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
+        before: "2026-08-15T08:00:00Z",
+        limit: 100,
+      });
+    });
+    // 同 run 更早段不被丢弃：内容 prepend 到顶部。
+    expect(await screen.findByText("同 run 更早段提问")).toBeTruthy();
+    expect(screen.getByText("分身首句")).toBeTruthy();
+  });
+
   it("不满页（<100 条）→ 无「加载更早消息」按钮（旧短会话零变化）", async () => {
     mocks.getAgentSessionLogs.mockResolvedValue([
       quickLog("s-inj", "r-1", "user_input", "短会话提问", "2026-08-15T08:00:00Z"),

@@ -264,3 +264,14 @@
 根因：生产 ee24ba15 实证三层互等：孙 worker_done 唤醒只有「全树完成→通知根」无回叫直接父，中间层分身派完孙结束轮次后永不被唤醒不上报 done；_virtual_status 把首 run 成功+会话空闲+未上报映射 running；patrol 职责⑦只扫 ended/failed 终态，active 空闲僵尸不命中——三道防线全漏致 mission 永不收敛
 方案：三层修复：①mcp_tools._worker_done_core 嵌套逐级回叫——孙 done 时直接父为树内中间层且未 done 无活跃 turn 即注入父唤醒（mission_context.notify_parent_workers_done，幂等父×子粒度 Redis SETNX 6h 独立事务）；②patrol 职责⑦扩僵尸等待形态——active+未done+无活跃turn+首 run 终态且 finished_at 超宽限置 worker_force_ended_at；③_virtual_status 强收映射扩 idle 形态按 failed 终态放行 awaiting_input 超时收敛
 结果：worker_done+dead_worker 37 用例（新增 9）+相邻回归 258 全绿；ruff 0 错 mypy 113 文件 0 错；agent.md 关键逻辑同步；待 Docker 重建部署
+
+## ql-20260902-008-3723 | 2026-09-02 15:41:49 | 团队分身会话查看器「加载更早消息」点击无反应——单 run 跨游标整段丢弃修复
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（handleLoadEarlier 同 run 伪 runId 插入）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（单 run 跨游标新用例）
+需求：团队分身会话查看器「加载更早消息」点击无反应——单 run 跨游标整段丢弃修复
+根因：分身会话整段执行是单个长 run，handleLoadEarlier 的 run 级去重把与当前窗口同 run 的更早日志整 turn 丢弃（原作者注释视作可接受降级，但对分身单 run 会话是 100% 丢弃——按钮永远无反应，ee24ba15 分身 c479dbc6 用户实证）
+方案：同 run 跨游标不再丢弃——伪 runId 变体（#e+游标短码防多次翻页 key 相撞）插入该 turn 之前；realRunId 保持原值不动，SSE 增量归流与孤儿 run 补建的 realRunId 匹配零影响；before 游标保证与当前窗口日志内容不重叠
+结果：page.test 加载更早 4 用例（新增单 run 跨游标 1）+ 整文件 25/25 绿；tsc 0 错；待 Docker 重建 frontend 部署

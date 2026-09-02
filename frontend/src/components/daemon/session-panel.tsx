@@ -1879,10 +1879,18 @@ function SessionPanelPage({
           const knownRunIds = new Set(
             prev.turns.map((t) => t.realRunId ?? t.runId),
           );
-          const fresh = olderTurns.filter(
-            (t) => !knownRunIds.has(t.realRunId ?? t.runId),
+          // 同 run 跨游标（团队分身会话常态：整段执行是单个长 run）——更早段
+          // 不丢弃，改伪 runId 变体插入该 turn 之前（before 游标保证与当前窗口
+          // 日志不重叠；realRunId 保持原值，SSE 增量与孤儿 run 补建的
+          // realRunId 匹配不受影响）；游标短码参与后缀防多次翻页 key 相撞。
+          // 代价是同一 run 展示为多个轮块（时间序正确）。原整 turn 丢弃对
+          // 单 run 会话 = 永远丢弃，按钮点了没反应（ee24ba15 用户实证）。
+          const decorated = olderTurns.map((t) =>
+            knownRunIds.has(t.realRunId ?? t.runId)
+              ? { ...t, runId: `${t.runId}#e${cursor.slice(11, 19).replace(/:/g, "")}` }
+              : t,
           );
-          return fresh.length > 0 ? { ...prev, turns: [...fresh, ...prev.turns] } : prev;
+          return decorated.length > 0 ? { ...prev, turns: [...decorated, ...prev.turns] } : prev;
         });
       }
     } catch {
