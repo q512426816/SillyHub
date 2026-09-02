@@ -46,3 +46,13 @@
 方案：① test_grandchild_worker_done_keeps_mission_busy_when_worker_pending 断注入恰一次且目标是分身（worker.id）+ 唤醒文案标记 + 主控不在注入列表；② shadow 只读用例更名 test_member_shadow_readonly_detail_ok_inject_blocked，详情断 200（含 body id 校验），inject 写路径仍断 404（for_update 分支不放行，service.py:6802 已核实）
 结果：两测试文件 27/27 通过；ruff format --check + ruff check 两文件全过
 审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档
+
+## ql-20260903-002-cef1 | 2026-09-03 06:16:26 | 修复24h审计3高危3中危：worktree RPC超时跨层错配/孙分身重开工二波唤醒挡死/翻页伪runId撞React key/影子直聊隐私文案过诺/群时间线…
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/agent/mcp_tools.py, backend/app/modules/agent/mission_context.py, backend/app/modules/agent/tests/test_worker_subsession_done.py, backend/app/modules/daemon/group/service.py, backend/app/modules/daemon/host_fs/delegate.py, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx, frontend/src/components/group-chat/group-chat-panel.tsx
+需求：修复24h审计3高危3中危：worktree RPC超时跨层错配/孙分身重开工二波唤醒挡死/翻页伪runId撞React key/影子直聊隐私文案过诺/群时间线他人发言拽底/SSE增量写进更早块
+根因：①daemon侧git上限提到120s但后端RPC仍30s默认，30-120s检出窗口后端先放弃且掩盖真实报错+收残竞态；②嵌套回叫幂等键是常量1纯SETNX无波次语义，孙重开工第二波被挡6h只能等patrol强收（声称根治的死锁在受支持流程复发）且调用点未按docstring声明做is_new_signal门控；③logsToTurns每次调用伪id从1重编号，prepend只给同run轮加后缀，多run更早页与当前窗口撞key；④直聊头承诺只在会话内可见，但影子会话日志/详情对全体群成员放行（有测试锁定、群定位协作群），文案与行为冲突；⑤own-send判定未过滤isSelf，群时间线他人发言触发强制回底拽走上滚视口；⑥upsertTurn对realRunId首中数组头部prepend的更早段块，运行中长run翻页后流式输出写进历史块
+方案：①delegate._via_rpc_or_degrade补timeout透传，worktree add/merge/remove显式传_WORKTREE_RPC_TIMEOUT_SECONDS=150s（>daemon 120s）；②notify_parent_workers_done改F04同款时间戳波次（键值=本波done_at，SETNX失败新波严格大于才覆盖重投）+mcp_tools调用点hoist is_new_signal双消费方共用并传signal_at；③prepend每页伪runId全量加#e<全量数字游标>后缀（秒级短码改全量防同秒撞）；④直聊头如实表述不投影群时间线+群成员可查会话（保留测试断言短语）；⑤own-send判定补e.isSelf过滤+首帧分支播种own-send基线（修测试暴露的回放旧own消息误判）；⑥realRunId命中改从数组尾部反向取最末块，实时增量落当前尾部块
+结果：后端：test_worker_subsession_done 20 passed（含新增孙重开工二波再唤醒用例）、test_group_direct+test_dispatch_worker_caller_worktree 24、test_group_logs_pagination 14、test_subsession_recursion_dispatch 13，ruff check+format 0；前端：page.test 28（新增多run翻页不撞key+长run翻页SSE增量落末块两用例）、group-chat-panel 29（新增他人发言不拽底用例）、variant+turn-timeline-scroll+runtime-session-helpers 34，tsc 0、eslint 0错误；模块文档4处同步；另登记docs/sillyspec/2026-09-03-quicksync-conflict-granularity.md（spec-sync整树冲突粒度活坑）
+审计：⚖️ 归属切分：7 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/group/router.py, backend/app/modules/daemon/run_sync/service.py, backend/app/modules/daemon/tests/test_group_direct.py, backend/openapi.json, frontend/src/lib/api-types.ts, backend/app/modules/daemon/tests/test_group_p1.py, docs/sillyspec/2026-09-03-quicksync-conflict-granularity.md

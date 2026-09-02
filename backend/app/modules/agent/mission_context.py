@@ -450,6 +450,7 @@ async def notify_parent_workers_done(
     child_session_id: uuid.UUID,
     *,
     child_ok: bool,
+    signal_at: datetime | None = None,
 ) -> bool:
     """嵌套逐级回叫：子分身完成 → 向**直接父会话**注入唤醒通知。
 
@@ -459,10 +460,18 @@ async def notify_parent_workers_done(
     全树恒未完成 → 根收不到通知、patrol awaiting_input 超时被虚拟 running
     挡住，mission 永不收敛。
 
-    调用方（``_worker_done_core``）保证仅在「新完成信号 + 父为树内中间层 +
-    父无 worker_done + 父无活跃 turn」时调用本函数（父在轮内可自查
-    list_workers，不打扰）。本函数幂等（Redis SETNX 父×子粒度）、独立事务、
-    失败只记日志不抛出（漏叫由 patrol 职责⑦僵尸扫描兜底）。
+    调用方（``_worker_done_core``）保证仅在「新完成信号（``is_new_signal``）+
+    父为树内中间层 + 父无 worker_done + 父无活跃 turn」时调用本函数（父在轮内
+    可自查 list_workers，不打扰）。本函数幂等（Redis SETNX 父×子粒度）、独立
+    事务、失败只记日志不抛出（漏叫由 patrol 职责⑦僵尸扫描兜底）。
+
+    幂等采用 F04 同款**时间戳波次**语义（ql-20260903-002）：``signal_at`` 为
+    本波子分身 ``worker_done_at``，SETNX 抢占失败后「新波严格大于键内时间戳」
+    才覆盖重投——孙重开工（父追问后再干）是受支持的重复完成周期，新波 done_at
+    严格大于上一波 → 父可被再次唤醒；同波冗余调用不重投。缺省 ``signal_at``
+    （兜底触发）维持纯 SETNX「至多一次」。此前的常量值 "1" 纯 SETNX 会把第二
+    波挡死 6h——父只能等 patrol 30 分钟宽限后强收，孙重开工产出被丢弃
+    （ee24ba15 同型死锁在受支持流程里复发）。
 
     Returns:
         True = 本次注入已派发；False = 已回叫过 / 注入失败（AppError 视为
@@ -476,9 +485,26 @@ async def notify_parent_workers_done(
     key = _CHILD_WAKE_NOTIFY_KEY.format(
         parent_id=parent_session_id, child_session_id=child_session_id
     )
+    ts_value = _notify_ts_value(signal_at)
     try:
         redis = get_redis()
-        acquired = await redis.set(key, "1", nx=True, ex=_CHILD_WAKE_NOTIFY_TTL_SECONDS)
+        acquired = await redis.set(key, ts_value, nx=True, ex=_CHILD_WAKE_NOTIFY_TTL_SECONDS)
+        if not acquired and signal_at is not None:
+            # F04 同款新波比较：键内时间戳 < 本波 done_at（重开工周期的新 done
+            # 严格晚于上一波）才覆盖重投；同波并发相等不覆盖。redis-py 返回
+            # bytes，float() 不收 bytes 须先 decode。
+            current = await redis.get(key)
+            if current is None:
+                acquired = True
+            else:
+                current_text = current.decode() if isinstance(current, bytes) else str(current)
+                try:
+                    newer = float(ts_value) > float(current_text)
+                except ValueError:
+                    newer = False
+                if newer:
+                    await redis.set(key, ts_value, ex=_CHILD_WAKE_NOTIFY_TTL_SECONDS)
+                    acquired = True
     except Exception as exc:  # Redis 不可用：退化为「可能重复通知」，不阻断
         log.warning(
             "child_wake_notify_redis_failed",

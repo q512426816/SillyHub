@@ -77,6 +77,14 @@ _RPC_DEGRADED_EXC = (
     DaemonRpcConflict,
 )
 
+# worktree 三方法（add / merge / remove）的 RPC 传输预算（ql-20260903-002）。
+# daemon 侧 git 以 GIT_WORKTREE_TIMEOUT_MS=120s 为上限（host-fs-handler.ts，大
+# 仓库检出慢是 f30450945 修的实况）——后端预算必须**大于** daemon 预算，否则
+# 检出落在 30s（HOST_FS_RPC_TIMEOUT 默认）~120s 窗口时后端先放弃：真实 git
+# 报错被 "rpc unavailable" 降级掩盖，且立即收残与 daemon 侧仍在跑的 add 竞态
+# 留残缺副本。150s = 120s + 回包余量，保证 daemon 自己的超时/结果恒先到达。
+_WORKTREE_RPC_TIMEOUT_SECONDS = 150.0
+
 
 # ── Domain errors (N818 — event-style, mirrors DaemonOffline / PatchConflictError) ──
 
@@ -385,6 +393,9 @@ class HostFsDelegate:
                 "base_ref": base_ref,
             },
             degraded={"ok": False, "worktree_path": None, "error": "rpc unavailable"},
+            # ql-20260903-002：大仓库检出可达分钟级（daemon 侧 git 上限 120s），
+            # 走 30s 默认预算会在该窗口提前放弃并掩盖真实 git 报错。
+            timeout=_WORKTREE_RPC_TIMEOUT_SECONDS,
         )
 
     # ------------------------------------------------------------------
@@ -422,6 +433,8 @@ class HostFsDelegate:
                 "merged_files": [],
                 "error": "rpc unavailable",
             },
+            # ql-20260903-002：merge 与 worktree add 同预算（daemon 侧同 120s 上限）。
+            timeout=_WORKTREE_RPC_TIMEOUT_SECONDS,
         )
 
     # ------------------------------------------------------------------
@@ -457,6 +470,10 @@ class HostFsDelegate:
             workspace=workspace,
             args=args,
             degraded={"ok": False, "error": "rpc unavailable"},
+            # ql-20260903-002：收残 remove 也须等得起 daemon 侧 120s 上限——
+            # 30s 预算提前放弃会让半成品 worktree/分支无人回收（F:\WorkNew
+            # .worktrees 堆积同型）。
+            timeout=_WORKTREE_RPC_TIMEOUT_SECONDS,
         )
 
     # ------------------------------------------------------------------
@@ -804,6 +821,7 @@ class HostFsDelegate:
         workspace: Workspace,
         args: dict[str, Any],
         degraded: dict[str, Any],
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Forward a host_fs.* RPC and degrade to *degraded* on transport failure.
 
@@ -818,12 +836,18 @@ class HostFsDelegate:
         daemon) are NOT caught here: they signal a misconfiguration, not a
         transient transport fault, and task-01's tests assert they raise.
 
+        ``timeout``（ql-20260903-002）：可选 per-call 传输预算，透传
+        :meth:`_via_rpc`——worktree 三方法传 :data:`_WORKTREE_RPC_TIMEOUT_SECONDS`
+        （须大于 daemon 侧 120s git 上限），其余方法缺省 None 走 30s 默认。
+
         The warn message reuses the ql-009 failure-log channel: no new log sink,
         and ``agent_run.status=="failed"`` (set by complete_lease when the run
         itself fails) still drives the AgentRunLog stderr + Redis SSE fallback.
         """
         try:
-            return await self._via_rpc(method=method, workspace=workspace, args=args)
+            return await self._via_rpc(
+                method=method, workspace=workspace, args=args, timeout=timeout
+            )
         except _RPC_DEGRADED_EXC as exc:
             log.warning(
                 "host_fs_rpc_failed",

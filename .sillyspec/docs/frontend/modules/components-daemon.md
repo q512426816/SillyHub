@@ -99,6 +99,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   pending→default，色走 token 零手写）。滚动容器贴底跟随（ql-20260822-010）：
   onScroll 维护距底 <80px ref，仅贴底时随 turns 更新滚底（上滚读历史不被拉回），
   新增 pending 轮（用户刚发送）例外强制回底。
+  「加载更早」prepend 伪 runId 规则（ql-20260903-002）：logsToTurns 每次调用的
+  `__attach_history_N__` 从 1 重新编号，prepend 的每页 turn **全量**加 `#e<全量数字
+  游标>` 后缀防跨页撞 React key（多 run 会话更早页的不同 run 与当前窗口必撞）；
+  realRunId 保持原值——SSE 实时增量与孤儿 run 补建按 realRunId 匹配，upsertTurn
+  对 realRunId 命中取**最末**块（prepend 的同 run 更早段在数组头部，首中会把
+  流式输出写进历史块、当前尾部块停滞）。
 - `SessionInputBar`（`session-input-bar.tsx`）：输入区（发送=antd primary、📎=
   antd text，2026-08-22-session-panel-unify；chips 删除为原生 button）。
   ql-20260826-010：胶囊上缘高度拖拽手柄（mousedown+document mousemove 实时

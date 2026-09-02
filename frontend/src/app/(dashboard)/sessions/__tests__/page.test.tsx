@@ -1518,6 +1518,107 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     expect(screen.getByText("分身首句")).toBeTruthy();
   });
 
+  it("多 run 会话翻页：更早页的不同 run 伪 runId 加游标后缀，不与当前窗口撞 React key（ql-20260903-002）", async () => {
+    // logsToTurns 每次调用的伪 id __attach_history_N__ 都从 1 重新编号——此前
+    // 只给「realRunId 已在当前窗口」的轮加 #e 后缀，更早页的**不同 run**（多
+    // run 会话常态）保留原伪 id，与当前窗口 1..N 同名 → React 列表重复 key
+    // （行为未定义，触顶自动加载放大到多页）。修复后全量加后缀。
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const fullPage = [
+        quickLog("m-a-in", "r-a", "user_input", "当前窗口提问A", "2026-08-15T08:00:00Z"),
+        ...Array.from({ length: 49 }, (_, i) =>
+          quickLog(`m-a-out-${i}`, "r-a", "stdout", `窗口A输出 ${i}`, "2026-08-15T08:00:10Z"),
+        ),
+        quickLog("m-b-in", "r-b", "user_input", "当前窗口提问B", "2026-08-15T08:01:00Z"),
+        ...Array.from({ length: 49 }, (_, i) =>
+          quickLog(`m-b-out-${i}`, "r-b", "stdout", `窗口B输出 ${i}`, "2026-08-15T08:01:10Z"),
+        ),
+      ];
+      const older = [
+        quickLog("m-c-in", "r-c", "user_input", "更早提问C", "2026-08-15T07:00:00Z"),
+        quickLog("m-c-out", "r-c", "stdout", "更早输出C", "2026-08-15T07:00:30Z"),
+      ];
+      mocks.getAgentSessionLogs
+        .mockResolvedValueOnce(fullPage)
+        .mockResolvedValueOnce(older);
+      renderPage();
+      await selectDefaultSession();
+      expect(await screen.findByText("当前窗口提问A")).toBeTruthy();
+
+      fireEvent.scroll(await screen.findByTestId("turn-timeline-scroll"));
+      // 更早页 prepend：内容可见且当前窗口保留。
+      expect(await screen.findByText("更早提问C")).toBeTruthy();
+      expect(screen.getByText("当前窗口提问A")).toBeTruthy();
+      expect(screen.getByText("当前窗口提问B")).toBeTruthy();
+
+      // React 列表重复 key 在开发模式经 console.error 报警——修复后不出现。
+      const dupKeyErrors = errSpy.mock.calls.filter(
+        (args) => typeof args[0] === "string" && args[0].includes("same key"),
+      );
+      expect(dupKeyErrors).toHaveLength(0);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it("运行中长 run + 翻页：实时 SSE 增量落最末块（当前尾部），不写进 prepend 的更早段块（ql-20260903-002）", async () => {
+    // 单长 run 会话运行中用户上翻 → 更早段以 #e 变体 prepend 在数组头部。
+    // 修复前 upsertTurn 的 findIndex 首中头部装饰块（realRunId 同值），流式
+    // 输出被装配进历史块、当前尾部块停滞。修复后 realRunId 匹配取最末块。
+    const handlers: { onLog?: (_env: unknown) => void } = {};
+    mocks.streamSession.mockImplementation(
+      (_id: string, h: { onLog?: (_env: unknown) => void }) => {
+        handlers.onLog = h.onLog;
+        return { close: vi.fn(), getLastEventId: () => null };
+      },
+    );
+    const fullPage = [
+      quickLog("v-inj", "r-live", "user_input", "分身首句", "2026-08-15T08:00:00Z"),
+      ...Array.from({ length: 99 }, (_, i) =>
+        quickLog(`v-out-${i}`, "r-live", "stdout", `窗口内输出 ${i}`, "2026-08-15T08:00:10Z"),
+      ),
+    ];
+    const olderSameRun = [
+      quickLog("v-old-in", "r-live", "user_input", "同run更早段提问", "2026-08-15T07:30:00Z"),
+      quickLog("v-old-out", "r-live", "stdout", "同run更早段输出", "2026-08-15T07:31:00Z"),
+    ];
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(olderSameRun);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("分身首句")).toBeTruthy();
+
+    // 翻页 prepend 同 run 更早段。
+    fireEvent.scroll(await screen.findByTestId("turn-timeline-scroll"));
+    expect(await screen.findByText("同run更早段提问")).toBeTruthy();
+
+    // 实时 SSE log（该 run 仍在跑）→ 增量应落当前尾部块：文档序上位于
+    // 「同run更早段输出」与「分身首句」（尾部块 prompt）之后。
+    act(() =>
+      handlers.onLog?.({
+        event: "log",
+        session_id: "s-1",
+        run_id: "r-live",
+        turn: 9,
+        log_id: "v-live-1",
+        channel: "stdout",
+        content: "实时追加文本",
+        timestamp: "2026-08-15T08:05:00Z",
+      }),
+    );
+    const live = await screen.findByText(/实时追加文本/);
+    const earlierSeg = screen.getByText("同run更早段输出");
+    const tailPrompt = screen.getByText("分身首句");
+    expect(
+      earlierSeg.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      tailPrompt.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("不满页（<100 条）→ 无加载提示；触顶不发起 before 请求（旧短会话零变化）", async () => {
     mocks.getAgentSessionLogs.mockResolvedValue([
       quickLog("s-inj", "r-1", "user_input", "短会话提问", "2026-08-15T08:00:00Z"),

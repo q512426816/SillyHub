@@ -2248,45 +2248,47 @@ async def _worker_done_core(
 
     active_ids = await sessions_with_active_turns(session, [w.id for w in workers])
     all_done = all(is_worker_complete_from_active(w, active_ids) for w in workers)
+    # 本调用构成新完成信号的判定（false→true 迁移的完整覆盖）。ql-20260903-002
+    # hoist 到双消费方（主控通知 + 嵌套回叫）共用——嵌套回叫此前未按此门控，
+    # docstring 声称的「调用方保证仅新完成信号」并不成立（冗余 done 也会走到
+    # 回叫，仅靠 SETNX 单挡；Redis 故障降级 acquired=True 时会真实重复注入父）：
+    # - 首信号：old_done_at 为 None（多分身首波 = 最后完成分身恰好一次触发）；
+    # - 重开工周期：上一 done 置位后本会话出现更新的 run（追问轮），本轮
+    #   done 是对新 turn 的完成信号——时间戳比较支持重复完成周期再唤醒；
+    # - 冗余重复调用（无新 turn）不重复唤醒（防烧主控 token）。
+    is_new_signal = old_done_at is None
+    if not is_new_signal:
+        newer_stmt = (
+            select(AgentRun.id)
+            .where(AgentRun.agent_session_id == sid, AgentRun.created_at > old_done_at)
+            .limit(1)
+        )
+        is_new_signal = (await session.execute(newer_stmt)).first() is not None
     notified = False
-    if all_done and mission.session_id is not None:
-        # 本调用构成新完成信号的判定（false→true 迁移的完整覆盖）：
-        # - 首信号：old_done_at 为 None（多分身首波 = 最后完成分身恰好一次触发）；
-        # - 重开工周期：上一 done 置位后本会话出现更新的 run（追问轮），本轮
-        #   done 是对新 turn 的完成信号——时间戳比较支持重复完成周期再唤醒；
-        # - 冗余重复调用（无新 turn）不重复唤醒（防烧主控 token）。
-        is_new_signal = old_done_at is None
-        if not is_new_signal:
-            newer_stmt = (
-                select(AgentRun.id)
-                .where(AgentRun.agent_session_id == sid, AgentRun.created_at > old_done_at)
-                .limit(1)
-            )
-            is_new_signal = (await session.execute(newer_stmt)).first() is not None
-        if is_new_signal:
-            # 成败统计口径同 is_worker_complete 词表：会话终态 failed/ended =
-            # 失败，其余（done 且无活跃 turn，全完成判定已保证）= 成功。
-            from app.modules.agent.mission import _WORKER_SESSION_TERMINAL
-            from app.modules.agent.mission_context import notify_orchestrator_workers_done
+    if all_done and mission.session_id is not None and is_new_signal:
+        # 成败统计口径同 is_worker_complete 词表：会话终态 failed/ended =
+        # 失败，其余（done 且无活跃 turn，全完成判定已保证）= 成功。
+        from app.modules.agent.mission import _WORKER_SESSION_TERMINAL
+        from app.modules.agent.mission_context import notify_orchestrator_workers_done
 
-            failed = sum(1 for w in workers if w.status in _WORKER_SESSION_TERMINAL)
-            completed = len(workers) - failed
-            # F04（2026-08-26 审计）：signal_at = 本波全部已完成分身 done_at 的
-            # 最大值（含本调用刚置位的 now——workers 与 worker 是同一 identity
-            # map 对象，置位已可见）。notify 侧以「严格大于键内时间戳才覆盖重投」
-            # 实现同波幂等 + 新波再唤醒（替代旧的 DEL→SETNX 两步非原子，同波
-            # 双完成不再双注入主控）。
-            signal_at = max(
-                (w.worker_done_at for w in workers if w.worker_done_at is not None),
-                default=None,
-            )
-            notified = await notify_orchestrator_workers_done(
-                mission.id,
-                mission.session_id,
-                completed=completed,
-                failed=failed,
-                signal_at=signal_at,
-            )
+        failed = sum(1 for w in workers if w.status in _WORKER_SESSION_TERMINAL)
+        completed = len(workers) - failed
+        # F04（2026-08-26 审计）：signal_at = 本波全部已完成分身 done_at 的
+        # 最大值（含本调用刚置位的 now——workers 与 worker 是同一 identity
+        # map 对象，置位已可见）。notify 侧以「严格大于键内时间戳才覆盖重投」
+        # 实现同波幂等 + 新波再唤醒（替代旧的 DEL→SETNX 两步非原子，同波
+        # 双完成不再双注入主控）。
+        signal_at = max(
+            (w.worker_done_at for w in workers if w.worker_done_at is not None),
+            default=None,
+        )
+        notified = await notify_orchestrator_workers_done(
+            mission.id,
+            mission.session_id,
+            completed=completed,
+            failed=failed,
+            signal_at=signal_at,
+        )
 
     # ── 嵌套逐级回叫（孙完成 → 唤醒直接父，防三层互等死锁）──
     # 生产 ee24ba15 实证：中间层分身派完孙结束自己的轮次后，既有唤醒只有
@@ -2296,7 +2298,14 @@ async def _worker_done_core(
     # 无活跃 turn（父在轮内可自查 list_workers，不打扰）→ 注入唤醒通知
     # （幂等父×子粒度，独立事务，失败只记日志由 patrol 职责⑦兜底）。
     # 与 all_done 无关：孙完成即回叫，全树是否完成由父收尾后自行推进。
-    if worker.parent_session_id is not None and worker.parent_session_id != mission.session_id:
+    # ql-20260903-002：① 仅新完成信号回叫（同上 is_new_signal）；② signal_at
+    # 携带本波 done_at——notify 侧时间戳波次比较，孙重开工后的第二波 done
+    # 不再被上一波 SETNX 键挡死 6h（否则父等 patrol 强收、重开工产出丢弃）。
+    if (
+        is_new_signal
+        and worker.parent_session_id is not None
+        and worker.parent_session_id != mission.session_id
+    ):
         from app.modules.agent.mission import _WORKER_SESSION_TERMINAL
         from app.modules.agent.mission_context import notify_parent_workers_done
 
@@ -2306,6 +2315,7 @@ async def _worker_done_core(
                 parent.id,
                 worker.id,
                 child_ok=worker.status not in _WORKER_SESSION_TERMINAL,
+                signal_at=worker.worker_done_at,
             )
 
     return WorkerDoneResponse(

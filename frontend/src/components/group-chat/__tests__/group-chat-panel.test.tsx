@@ -750,6 +750,80 @@ describe("GroupChatPanel 装配（真 streamGroupChat SSE 消费）", () => {
     ).toHaveLength(1);
   });
 
+  it("上滚读历史时他人发言不拽底；自己发送仍强制回底（ql-20260903-002）", async () => {
+    // 群时间线所有成员的发言都是 kind:"user"（isSelf 只用于气泡左右侧）——
+    // 修复前 own-send 判定未过滤 isSelf，他人发言同样触发强制回底，把上滚
+    // 读历史的视口拽到底。jsdom Element.scrollTo 未实现（生产代码有 typeof
+    // 守卫），挂载期 effect 全部早退——stub 成 mock 后才进入真实分支。
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+
+    const el = screen.getByTestId("group-chat-timeline");
+    const scrollToMock = vi.fn();
+    Object.defineProperty(el, "scrollTo", {
+      value: scrollToMock,
+      configurable: true,
+    });
+    // 布局：scrollHeight=1000 / clientHeight=500 → scrollTop=0 时距底 500 > 80。
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 1000 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 500 });
+
+    // stub 后首个 entries 变化消费「首帧无条件回底」分支（挂载期被守卫早退）。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-20",
+      log_id: "l-20",
+      channel: "stdout",
+      content: "[ASSISTANT] 基线轮（消费首帧分支）",
+      timestamp: "2026-09-01T06:30:00Z",
+      member_id: "mem-1",
+      member_name: "小码",
+    });
+    await flushAsync();
+    expect(scrollToMock).toHaveBeenCalledTimes(1);
+    scrollToMock.mockClear();
+
+    // 用户上滚读历史（scrollTop=0 → nearBottomRef=false）。
+    el.scrollTop = 0;
+    await act(async () => {
+      fireEvent.scroll(el);
+    });
+
+    // 他人（林一）发新消息：不强制回底（修复点）。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-21",
+      log_id: "l-21",
+      channel: "user_input",
+      content: "别人的新消息（不应拽底）",
+      timestamp: "2026-09-01T07:00:00Z",
+      sender_member_name: "林一",
+      sender_user_id: "u-lin",
+    });
+    await flushAsync();
+    expect(screen.getByText("别人的新消息（不应拽底）")).toBeTruthy();
+    expect(scrollToMock).not.toHaveBeenCalled();
+
+    // 自己（u-me）发送新消息：强制回底。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-22",
+      log_id: "l-22",
+      channel: "user_input",
+      content: "我的新消息（应回底）",
+      timestamp: "2026-09-01T07:01:00Z",
+      sender_member_name: "鲸落",
+      sender_user_id: "u-me",
+    });
+    await flushAsync();
+    expect(scrollToMock).toHaveBeenCalledTimes(1);
+    expect(scrollToMock).toHaveBeenCalledWith(0, 1000);
+  });
+
   it("流式光标：partial 半截行点亮 → turn_completed（member_id）收口", async () => {
     harness.logsJson = [];
     renderPanel();

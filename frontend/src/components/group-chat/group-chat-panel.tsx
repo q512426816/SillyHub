@@ -993,9 +993,10 @@ export function GroupChatPanel({
 
   /* ── 时间线自动滚底（对齐 TurnTimeline ql-20260822-010 三要素）──
    * ① onScroll 维护「距底 < 80」ref（非每帧计算——上滚读历史不被流式拉回）；
-   * ② 仅贴底时跟随新内容滚底；③ 用户刚发送的消息（本轮 user_input 行）首次
-   * 出现 → 无条件强制回底（立即看到自己发出的消息，常规会话 isNewPendingTurn
-   * 同语义）；④ 选中文字（复制中）不自动滚底（ql-20260825-011 同款）；
+   * ② 仅贴底时跟随新内容滚底；③ 自己刚发送的消息（isSelf 的 user_input 行）
+   * 首次出现 → 无条件强制回底（立即看到自己发出的消息，常规会话 isNewPendingTurn
+   * 同语义；他人发言不触发——上滚读历史不被拽底，ql-20260903-002）；
+   * ④ 选中文字（复制中）不自动滚底（ql-20260825-011 同款）；
    * ⑤ 挂载/换群首帧无条件回底（常规会话同体验——打开即定位最新消息）。 */
   const timelineRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
@@ -1010,16 +1011,28 @@ export function GroupChatPanel({
   useEffect(() => {
     const el = timelineRef.current;
     if (!el || typeof el.scrollTo !== "function") return;
-    // 首帧（挂载/换群 key 重挂）：无条件定位底部。
+    // 首帧（挂载/换群 key 重挂）：无条件定位底部。同时播种 own-send 基线
+    // （ql-20260903-002）：首帧分支提前 return 不走下方判定，若 entries 已有
+    // 回放内容而基线仍为 null，首个 entries 变化（哪怕由他人消息触发）会把
+    // 回放里自己已有的旧消息误判为「刚发送」强制回底。
     if (!initialScrollDoneRef.current) {
       initialScrollDoneRef.current = true;
       nearBottomRef.current = true;
+      const firstOwn = [...entries]
+        .reverse()
+        .find((e) => e.kind === "user" && e.isSelf);
+      lastOwnSendTsRef.current = firstOwn?.timestamp ?? null;
       el.scrollTo(0, el.scrollHeight);
       return;
     }
-    // 用户刚发送（最新 user_input 行的 timestamp 变化）→ 强制回底。
-    const lastUser = [...entries].reverse().find((e) => e.kind === "user");
-    const lastUserTs = lastUser?.timestamp ?? null;
+    // 用户刚发送（**自己**最新 user_input 行的 timestamp 变化）→ 强制回底。
+    // ql-20260903-002：群时间线里所有成员的发言都是 kind:"user"（isSelf 只用于
+    // 气泡左右侧），不过滤 isSelf 时他人发言同样触发强制回底，把上滚读历史的
+    // 视口拽到底——②「上滚不被拉回」被③架空。
+    const lastOwnSend = [...entries]
+      .reverse()
+      .find((e) => e.kind === "user" && e.isSelf);
+    const lastUserTs = lastOwnSend?.timestamp ?? null;
     const isNewOwnSend = lastUserTs !== null && lastUserTs !== lastOwnSendTsRef.current;
     lastOwnSendTsRef.current = lastUserTs;
     // 选中文字（复制中）不滚底。

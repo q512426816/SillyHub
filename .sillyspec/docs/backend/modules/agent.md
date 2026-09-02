@@ -116,6 +116,10 @@ worker_done 嵌套逐级回叫(quick-33956fb8): 孙 done 时直接父是树内�
   (≠mission 根)且空闲未 done → notify_parent_workers_done 注入父唤醒
   (幂等父×子粒度 Redis SETNX 6h)——否则中间层分身派完孙结束轮次后永不被
   叫醒, 不收孙产出不上报自己的 done, 全树恒未完成死锁(生产 ee24ba15 实证)
+回叫幂等升级时间戳波次(ql-20260903-002): 键值=本波 done_at + SETNX 失败后
+  新波严格大于才覆盖重投(F04 同款), 调用点 hoist is_new_signal 门控(仅新
+  完成信号回叫)——此前常量 "1" 纯 SETNX 无波次语义, 孙重开工第二波被第一波
+  键挡死 6h, 父只能等 patrol 30min 强收、重开工产出丢弃(死锁在受支持流程复发)
 patrol 职责⑦②僵尸等待形态(回叫漏叫兜底): active+未done+无活跃turn+首run
   终态且 finished_at 超宽限 → 置 worker_force_ended_at; _virtual_status 强收
   映射同扩该 idle 形态按 failed 终态 → awaiting_input 超时收敛可触发

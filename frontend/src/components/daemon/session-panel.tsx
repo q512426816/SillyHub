@@ -1911,21 +1911,22 @@ function SessionPanelPage({
       const olderTurns = logsToTurns(older);
       if (olderTurns.length > 0) {
         setTurnState((prev) => {
-          const knownRunIds = new Set(
-            prev.turns.map((t) => t.realRunId ?? t.runId),
-          );
-          // 同 run 跨游标（团队分身会话常态：整段执行是单个长 run）——更早段
-          // 不丢弃，改伪 runId 变体插入该 turn 之前（before 游标保证与当前窗口
-          // 日志不重叠；realRunId 保持原值，SSE 增量与孤儿 run 补建的
-          // realRunId 匹配不受影响）；游标短码参与后缀防多次翻页 key 相撞。
-          // 代价是同一 run 展示为多个轮块（时间序正确）。原整 turn 丢弃对
-          // 单 run 会话 = 永远丢弃，按钮点了没反应（ee24ba15 用户实证）。
-          const decorated = olderTurns.map((t) =>
-            knownRunIds.has(t.realRunId ?? t.runId)
-              ? { ...t, runId: `${t.runId}#e${cursor.slice(11, 19).replace(/:/g, "")}` }
-              : t,
-          );
-          return decorated.length > 0 ? { ...prev, turns: [...decorated, ...prev.turns] } : prev;
+          // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
+          // 的 __attach_history_N__ 都从 1 重新编号——此前只给「realRunId 已在
+          // 当前窗口」的轮（同 run 跨游标）加后缀，多 run 会话更早页的**不同
+          // run** 保留原伪 id，与当前窗口 1..N 同名撞 React key（列表行为未
+          // 定义，触顶自动加载 + 连拉放大到多页）。后缀取全量数字游标（页首
+          // 日志时间戳，微秒精度）：before 链单调递减 → 跨页唯一（秒级短码在
+          // 同秒高吞吐日志下仍可能撞）。realRunId 保持原值——SSE 增量与孤儿
+          // run 补建按 realRunId 匹配不受影响（upsertTurn 实时增量取最末块）。
+          // 同一 run 跨页展示为多个轮块（时间序正确）；原整 turn 丢弃对单 run
+          // 会话 = 永远丢弃，按钮点了没反应（ee24ba15 用户实证）。
+          const pageKey = cursor.replace(/[^0-9]/g, "");
+          const decorated = olderTurns.map((t) => ({
+            ...t,
+            runId: `${t.runId}#e${pageKey}`,
+          }));
+          return { ...prev, turns: [...decorated, ...prev.turns] };
         });
       }
     } catch {
@@ -6049,9 +6050,21 @@ function upsertTurn(
   // ql-20260817-007：attach 历史 turn 的 key 是伪 id（__attach_history_N__），
   // 真实 id 在 realRunId——SSE 事件按两者匹配，命中即合并到既有 turn，
   // 否则同一 run 会渲染出第二个「正在思考…」空块（新建会话输入后复现）。
-  const idx = prev.turns.findIndex(
-    (t) => t.runId === runId || t.realRunId === runId,
-  );
+  // ql-20260903-002：realRunId 匹配须取**最末**块——「加载更早」prepend 的同
+  // run 更早段（#e 游标变体，realRunId 同值）排在数组头部，findIndex 首中会
+  // 把实时流式输出写进历史块（healToRunning 还会把已完成的更早块翻回
+  // running），当前尾部块停滞。精确 runId 命中优先（实时新建 turn），否则从
+  // 尾部反向找 realRunId——时间序上该 run 的最新块才是流式输出的归属。
+  let idx = prev.turns.findIndex((t) => t.runId === runId);
+  if (idx === -1) {
+    for (let i = prev.turns.length - 1; i >= 0; i -= 1) {
+      const candidate = prev.turns[i];
+      if (candidate?.realRunId === runId) {
+        idx = i;
+        break;
+      }
+    }
+  }
   let turns: SessionTurnView[];
   if (idx === -1) {
     // task-09：新建 turn 用装配器空产物初始化（segments/output/processItems/

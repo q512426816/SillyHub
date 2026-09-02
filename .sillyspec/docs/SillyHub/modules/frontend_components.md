@@ -38,7 +38,11 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
     （实时与回放顺序一致，**不消费单聊 run 分组 turn 模型**——多成员交错回复时 run
     锚分组会把迟到回复吸回触发组）；用户/agent 气泡按 sender_member_name 与投影行
     metadata.member_* 还原身份（落库时刻快照，改名不回填）；复用 session-log-assembler
-    分类原语 + turn-timeline 渲染单元；SSE 消费含 typing 分支与刷新回放
+    分类原语 + turn-timeline 渲染单元；SSE 消费含 typing 分支与刷新回放。
+    自动滚底五要素（02df074e4 + ql-20260903-002 修正）：onScroll 距底 <80px ref /
+    仅贴底跟随 / **自己**（isSelf）刚发送强制回底——群时间线所有成员发言都是
+    kind:"user"，不过滤 isSelf 时他人发言会把上滚读历史的视口拽底；首帧回底
+    同时播种 own-send 基线（回放里已有的自己消息不算「刚发送」）/ 选中文字不滚底
   - `create-group-wizard.tsx` — 建群向导三步：群名→邀请用户→配置 agent 成员
     （六要素表单可添加多个，不内置角色模板）
   - `member-panel.tsx` — 成员面板：用户成员 presence 绿点/移除；agent 成员六要素

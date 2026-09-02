@@ -829,6 +829,62 @@ class TestNestedChildWake:
         wakes = [sid for sid, _ in injected if sid == mid.id]
         assert wakes == [mid.id], "同一完成波次父只被回叫一次"
 
+    @pytest.mark.asyncio
+    async def test_grandchild_rework_second_wave_rewakes_parent(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """孙重开工后再 done（重复完成周期）→ 新波 done_at 严格大于键内时间戳 →
+        覆盖重投，父被二次回叫（ql-20260903-002）。
+
+        修复前嵌套回叫键是常量值 "1" 纯 SETNX 无波次语义：孙重开工第二波被
+        第一波的键挡死 6h → 父永不再被唤醒 → 全树恒未完成，父只能等 patrol
+        30 分钟宽限后强收、孙重开工产出被丢弃（ee24ba15 同型死锁在受支持的
+        追问重开工流程里复发）。修复对齐 F04：键值=本波 done_at 时间戳，新波
+        严格大于才覆盖重投；同波冗余（上一用例）仍恰好一次。
+        """
+        fake_redis, injected = notify_env
+        _root, mid, grand, _mission = await self._seed_nested(db_session)
+
+        # 第一波：孙完成 → 父唤醒 #1（SETNX 抢到，键值=本波 done_at 时间戳）
+        r1 = await client.post(
+            f"/api/sessions/{grand.id}/missions/worker_done",
+            json={"summary": "round 1 done"},
+            headers={**auth_headers, "X-Session-Id": str(grand.id)},
+        )
+        assert r1.status_code == 200, r1.text
+        assert [sid for sid, _ in injected if sid == mid.id] == [mid.id]
+        done_at_1 = datetime.fromisoformat(r1.json()["worker_done_at"])
+
+        # 父追问重开工：孙新轮 run（无 mission_id）先 running 后 completed
+        followup = await _add_run(db_session, status="running", agent_session_id=grand.id)
+        assert followup.mission_id is None
+        followup.status = "completed"
+        db_session.add(followup)
+        await db_session.commit()
+
+        # 第二波：重开工干完再 done → 新波时间戳覆盖键值 → 父唤醒 #2
+        r2 = await client.post(
+            f"/api/sessions/{grand.id}/missions/worker_done",
+            json={"summary": "round 2 done"},
+            headers={**auth_headers, "X-Session-Id": str(grand.id)},
+        )
+        assert r2.status_code == 200, r2.text
+        done_at_2 = datetime.fromisoformat(r2.json()["worker_done_at"])
+        assert done_at_2 > done_at_1, "worker_done_at 应刷新为更新的时间"
+
+        wakes = [sid for sid, _ in injected if sid == mid.id]
+        assert wakes == [mid.id, mid.id], "重开工新波必须再次唤醒父（死锁复发主修复）"
+
+        # Redis 操作序：两波各一次 SETNX 尝试，第二波 SETNX 失败后 GET 比较
+        # （新波更大）→ SET 覆盖重投；全程无 DEL。
+        key = f"mission:child_wake:{mid.id}:{grand.id}"
+        ops = fake_redis.ops
+        assert ops.count(("set_nx", key)) == 2
+        assert ops.count(("set_overwrite", key)) == 1
+        assert ("delete", key) not in ops
+        assert float(fake_redis.store[key]) > done_at_1.timestamp() - 1
+        assert ops.index(("set_overwrite", key)) > ops.index(("set_nx", key))
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

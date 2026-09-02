@@ -128,6 +128,7 @@ from app.modules.agent.schema import (
     GroupChatCreate,
     GroupChatRead,
     GroupChatUpdate,
+    GroupMemberAgentConfig,
     GroupMemberCreate,
     GroupMemberRead,
     GroupMemberUpdate,
@@ -197,9 +198,14 @@ _MID_TURN_NOTICE = (
 # 可见性语义 + [[GROUP]]...[[/GROUP]] 选择性转发标记用法（投影侧
 # run_sync.extract_group_broadcast_segments 按同款标记抽段，标记文本保留在
 # 影子会话原文、投影时剥离）。
+# ql-20260903-002：可见性承诺对齐实际行为——「只在会话内可见」言过其实：
+# 影子会话详情/日志对全体群成员开放（8dcc562f4 有测试锁定，群定位协作群、
+# 跨成员可见性是需求）。如实表述为「不出现在群时间线 + 群成员可查会话」，
+# 让 agent 据真实可见性把握表述分寸。
 _SHADOW_DIRECT_HEADER = (
     "[用户正在群聊「{group_title}」成员「{member_name}」的独立会话中与你单独对话——"
-    "此对话默认只在会话内可见，不会出现在群里。如果你判断本轮内容对群内其他成员有价值，"
+    "此对话不会出现在群里（不投影到群时间线），但群成员可以在你的会话时间线中"
+    "查看本对话内容，请据此把握表述分寸。如果你判断本轮内容对群内其他成员有价值，"
     "可在回复末尾用 [[GROUP]] 和 [[/GROUP]] 包裹要转发的段落，"
     "该段落会以你的群身份发到群里；无需转发则不要添加标记。]"
 )
@@ -231,6 +237,25 @@ GROUP_CHAIN_DEPTH_FIELD = "depth"
 # 互@每触发一次 HINCRBY；达上限不再触发——防 A↔B 快速死循环的第一道兜底，
 # 总跳数仍由 cross_mention_depth 与限频控制）。
 GROUP_CROSS_MEMBER_TRIGGER_LIMIT = 2
+
+# quick 群 P1 llm_provider 预检（2026-09-02）：agent 成员 ``llm_provider_id=None``
+# 的非阻断提示文案——None=走机器本机默认 LLM 出口（可能可用），建群/加成员
+# 不拦截，仅随响应 ``warnings`` 提示前端（向导/成员面板展示）。
+_LLM_PROVIDER_MISSING_WARNING = (
+    "成员「{member_name}」未指定模型，将使用机器本机默认 LLM 出口"
+    "（若不可用请先在成员配置中切换模型）"
+)
+
+
+def _build_llm_provider_warnings(
+    agent_members: Sequence[GroupMemberAgentConfig],
+) -> list[str]:
+    """agent 成员配置的模型缺失提示列表（llm_provider_id=None 逐成员一条）。"""
+    return [
+        _LLM_PROVIDER_MISSING_WARNING.format(member_name=cfg.display_name.strip())
+        for cfg in agent_members
+        if cfg.llm_provider_id is None
+    ]
 
 
 def group_chain_key(carrier_run_id: uuid.UUID) -> str:
@@ -279,6 +304,13 @@ class GroupChatInvalid(AppError):
 
     code = "HTTP_400_GROUP_CHAT_INVALID"
     http_status = 400
+
+
+class GroupMemberNoActiveRun(AppError):
+    """打断目标成员当前无运行中任务（quick 群 P1，409 状态冲突语义）。"""
+
+    code = "HTTP_409_GROUP_MEMBER_NO_ACTIVE_RUN"
+    http_status = 409
 
 
 # ── @解析（design §4.1，task-03）────────────────────────────────────────────
@@ -433,6 +465,26 @@ async def _publish_rate_limit_notice(group: AgentGroupChat, member_name: str) ->
             "session_id": str(group.session_id),
             "channel": "system",
             "content": f"「{member_name}」触发频率已达上限，请稍候再 @。",
+            "timestamp": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+async def _publish_member_interrupted_notice(
+    group: AgentGroupChat, *, member_name: str, interrupter_name: str
+) -> None:
+    """成员任务被打断的群内系统提示行（quick 群 P1 member.interrupted）。
+
+    形态照 ``_publish_rate_limit_notice`` 先例（``channel='system'`` ephemeral，
+    不落库——时间线正文只承载对话内容，打断信号走频道实时流 + 响应 DTO）。
+    """
+    await _publish_group_channel_event(
+        group.session_id,
+        {
+            "event": "log",
+            "session_id": str(group.session_id),
+            "channel": "system",
+            "content": f"{member_name} 的当前任务已被 {interrupter_name} 打断",
             "timestamp": datetime.now(UTC).isoformat(),
         },
     )
@@ -1159,6 +1211,35 @@ class GroupDirectMessageRead(BaseModel):
     carrier_run_id: uuid.UUID
 
 
+class GroupMemberInterruptRead(BaseModel):
+    """``POST /group-chats/{gid}/members/{mid}/interrupt`` 响应（quick 群 P1）。
+
+    ``run_id``：被打断的活跃 run（=响应前查到的影子活跃轮）；``interrupted_by_name``
+    为打断者群内昵称（admin 兜底放行时回落用户显示名）。
+    """
+
+    member_id: uuid.UUID
+    display_name: str
+    run_id: uuid.UUID | None = None
+    interrupted_by_name: str
+
+
+class GroupChatCreateRead(GroupChatRead):
+    """建群响应体（quick 群 P1 llm_provider 预检）。
+
+    ``warnings``：非阻断提示列表（agent 成员未指定模型走本机默认 LLM 出口）；
+    其余读取路径（列表/详情）不带本字段。
+    """
+
+    warnings: list[str] = Field(default_factory=list)
+
+
+class GroupMemberAddRead(GroupMemberRead):
+    """加成员响应体（quick 群 P1 llm_provider 预检）：``warnings`` 同建群体。"""
+
+    warnings: list[str] = Field(default_factory=list)
+
+
 # ── 跨模块共享的参与者判定 helper（session/file_artifacts/router 懒加载复用）──
 
 
@@ -1595,7 +1676,7 @@ class GroupChatService:
 
     # ── 建群 / 列表 / 详情 / 改设置 / 解散 ────────────────────────────────────
 
-    async def create_group(self, user: User, payload: GroupChatCreate) -> GroupChatRead:
+    async def create_group(self, user: User, payload: GroupChatCreate) -> GroupChatCreateRead:
         """建群（design §8 group.created）：群会话 + 群行 + 初始成员（单事务）。
 
         校验（全部前置，无半成品落库）：项目存在且有关联工作区（群 workspace
@@ -1606,6 +1687,8 @@ class GroupChatService:
 
         quick 群 PPM 项目化口径：``project_id`` 必填落群行；项目删除后存量群
         project_id 被 SET NULL，成员邀请范围回退 workspace 口径（add_member）。
+        quick 群 P1 llm_provider 预检：agent 成员未指定模型不阻断（本机默认
+        可能可用），随响应 ``warnings`` 提示。
         """
         from app.modules.agent.profile.model import AgentProfile
         from app.modules.llm_provider.model import LlmProvider
@@ -1907,7 +1990,13 @@ class GroupChatService:
         # task-06（§5.3 audience）：建群信号带全部用户成员 id（邀请者即时收到
         # 列表刷新——群会话不进其 /sessions 列表，刷新信号是唯一入口）。
         await self._publish_group_sessions_changed(group, "created")
-        return self._to_read(group, refreshed)
+        return GroupChatCreateRead.model_validate(
+            {
+                **self._to_read(group, refreshed).model_dump(mode="json"),
+                # quick 群 P1 llm_provider 预检：非阻断提示（不拦截建群）。
+                "warnings": _build_llm_provider_warnings(payload.agent_members),
+            }
+        )
 
     async def list_groups(self, user: User) -> list[GroupChatRead]:
         """当前用户=群成员（未移除用户成员行）的群列表（design §6.1）。
@@ -2071,8 +2160,12 @@ class GroupChatService:
         group_id: uuid.UUID,
         user: User,
         payload: GroupMemberCreate,
-    ) -> GroupMemberRead:
-        """加成员（群主/workspace admin）：用户邀请或 agent 成员六要素配置。"""
+    ) -> GroupMemberAddRead:
+        """加成员（群主/workspace admin）：用户邀请或 agent 成员六要素配置。
+
+        quick 群 P1 llm_provider 预检：agent 成员未指定模型不阻断，随响应
+        ``warnings`` 提示（同建群体）。
+        """
         from app.modules.agent.profile.model import AgentProfile
         from app.modules.llm_provider.model import LlmProvider
 
@@ -2146,7 +2239,7 @@ class GroupChatService:
                 await self._session.refresh(revived)
                 # task-06（§5.3 audience / §8 group.member.added）。
                 await self._publish_group_sessions_changed(group, "status_changed")
-                return GroupMemberRead.model_validate(revived)
+                return GroupMemberAddRead.model_validate(revived)
             member = AgentGroupMember(
                 group_id=group.id,
                 member_type="user",
@@ -2162,7 +2255,7 @@ class GroupChatService:
             # task-06（§5.3 audience / §8 group.member.added）：新成员即时进
             # 自己的刷新受众（否则要等下一次任意群事件才看到群）。
             await self._publish_group_sessions_changed(group, "status_changed")
-            return GroupMemberRead.model_validate(member)
+            return GroupMemberAddRead.model_validate(member)
 
         assert payload.agent is not None
         cfg = payload.agent
@@ -2243,7 +2336,10 @@ class GroupChatService:
         await self._session.refresh(member)
         # task-06（§5.3 audience）：agent 成员变更同样广播（成员 chips 刷新）。
         await self._publish_group_sessions_changed(group, "status_changed")
-        return GroupMemberRead.model_validate(member)
+        # quick 群 P1 llm_provider 预检：未指定模型非阻断提示（同建群体）。
+        added = GroupMemberAddRead.model_validate(member)
+        added.warnings = _build_llm_provider_warnings([cfg])
+        return added
 
     async def update_member(
         self,
@@ -2961,6 +3057,74 @@ class GroupChatService:
             queued=result.queued,
             mid_turn=result.mid_turn,
             carrier_run_id=carrier.id,
+        )
+
+    async def interrupt_member(
+        self,
+        group_id: uuid.UUID,
+        member_id: uuid.UUID,
+        user: User,
+    ) -> GroupMemberInterruptRead:
+        """群内打断成员当前运行任务（quick 群 P1，design §8 member.interrupted）。
+
+        失控 agent 人人可停——权限刻意宽于群主专属操作：**任意群成员**可打断
+        （``_require_group_member`` 即可，无 owner 门；群主/workspace admin 天然
+        含在成员判定内），这是打断功能的存在意义。
+
+        - 目标仅 agent 成员（用户成员无运行任务，400）；影子未建 / 无活跃
+          run → 409「该成员当前没有运行中的任务」；
+        - 打断执行**零改动复用**单聊 interrupt 服务路径
+          （``SessionService.interrupt_session``）——服务身份传群主 user_id
+          （影子属主恒为群主，§9.2；照 ``_end_member_shadow`` 传 owner 先例，
+          普通成员无需是影子会话属主）；run 状态不预置，daemon 侧打断结果
+          驱动收口（单聊 FR-04 语义原样）；
+        - 成功后群频道发 ``channel='system'`` 系统行（照限频提示
+          ``_publish_rate_limit_notice`` 先例，ephemeral 不落库）。
+        """
+        group = await self._get_group(group_id)
+        membership = await self._require_group_member(group, user)
+        if group.ended_at is not None:
+            raise GroupChatInvalid(
+                "群已解散，无法打断成员任务。",
+                details={"group_id": str(group.id)},
+            )
+        member = await self._get_member(group.id, member_id)
+        if member.member_type != "agent":
+            raise GroupChatInvalid(
+                "仅 agent 成员支持打断任务。",
+                details={"member_id": str(member.id)},
+            )
+        if member.shadow_session_id is None:
+            raise GroupMemberNoActiveRun(
+                "该成员当前没有运行中的任务。",
+                details={"group_id": str(group.id), "member_id": str(member.id)},
+            )
+        active_run = await self._get_shadow_active_run(member.shadow_session_id)
+        if active_run is None:
+            raise GroupMemberNoActiveRun(
+                "该成员当前没有运行中的任务。",
+                details={"group_id": str(group.id), "member_id": str(member.id)},
+            )
+
+        # 打断者昵称（admin 兜底放行无成员行 → 回落用户显示名，同 send_direct_message）。
+        interrupter_name = (
+            membership.display_name if membership is not None else _user_display_name(user)
+        )
+
+        # 单聊 interrupt 服务路径零改动（user_id=群主=影子属主，服务身份先例）。
+        result = await SessionService(self._session).interrupt_session(
+            member.shadow_session_id,
+            group.created_by,
+        )
+
+        await _publish_member_interrupted_notice(
+            group, member_name=member.display_name, interrupter_name=interrupter_name
+        )
+        return GroupMemberInterruptRead(
+            member_id=member.id,
+            display_name=member.display_name,
+            run_id=result.current_run_id or active_run.id,
+            interrupted_by_name=interrupter_name,
         )
 
     async def _trigger_group_member(
