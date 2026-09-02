@@ -1024,12 +1024,19 @@ export function GroupChatPanel({
       detection,
       entity.displayName,
     );
-    setDraft(value);
-    // 回填后光标复位到插入段之后（jsdom 无 rAF 时同步兜底）。
+    // quick-23f25e3b 连续选择：回填段后自动续一个 @ 触发字符——浮层保持打开
+    // （query="" 全量候选），可连续点选多名成员（IM @ 多选惯例）；Esc 放行后
+    // 键入空白自然关层，Backspace 删掉续 @ 也可退出。仅群聊输入区启用（单聊
+    // session-input-bar 语义不变）。
+    const continuous = `${value.slice(0, caret)}@${value.slice(caret)}`;
+    setDraft(continuous);
+    const nextCaret = caret + 1;
+    // 光标复位到续 @ 之后（jsdom 无 rAF 时同步兜底）——detectMention 以该
+    // 光标回看命中新 @，浮层经 [draft] 派生自动重开。
     const restore = () => {
       if (!input) return;
       input.focus();
-      input.setSelectionRange(caret, caret);
+      input.setSelectionRange(nextCaret, nextCaret);
     };
     if (typeof requestAnimationFrame === "function") {
       requestAnimationFrame(restore);

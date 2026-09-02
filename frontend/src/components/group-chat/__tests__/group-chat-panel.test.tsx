@@ -1128,11 +1128,12 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
       ).map((el) => el.textContent),
     ).toEqual(["全体", "小码", "小测", "鲸落", "林一"]);
 
-    // ↓ 移到「小码」+ Enter 选中 → 回填 "@小码 "（尾随空格关层）。
+    // ↓ 移到「小码」+ Enter 选中 → 回填 "@小码 " + 自动续 "@"（quick-23f25e3b
+    // 连续选择：浮层保持打开可继续点选下一名成员；Esc/空白/Backspace 退出）。
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => {
-      expect((input as HTMLTextAreaElement).value).toBe("@小码 ");
+      expect((input as HTMLTextAreaElement).value).toBe("@小码 @");
     });
   });
 
