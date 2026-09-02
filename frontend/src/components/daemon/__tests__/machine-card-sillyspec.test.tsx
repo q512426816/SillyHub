@@ -288,18 +288,19 @@ describe("MachineCard sillyspec 版本徽标三形态（task-07 / FR-01）", () 
 });
 
 describe("MachineCard「升级 sillyspec」按钮五态（task-07 / FR-02）", () => {
-  // ql-20260902-003：已最新（默认场景）→ 禁用换「已是最新」，免下发后 daemon
-  // 侧版本门静默 no-op 产生困惑；落后才是可点的升级入口。
-  it("已最新（默认 3.27.11 == latest）→ 禁用，文案「已是最新」，title 带版本，点击不触发", () => {
+  // ql-20260902-004：已最新**不置灰**——latest 是 daemon 周期探测的滞后值，
+  // 误锁入口不合理；已最新的真正版本门在 daemon 侧 requestManualUpgrade
+  // （点击时现探 npm no-op）。默认场景（3.27.11==latest）保持可点。
+  it("默认在线已安装（已最新）→ 可用，文案「升级 sillyspec」，点击触发 onUpgradeSillySpec", () => {
     const onUpgradeSillySpec = vi.fn();
+    const machine = makeMachine();
     renderCard(
-      <MachineCard {...defaultProps(makeMachine(), { onUpgradeSillySpec })} />,
+      <MachineCard {...defaultProps(machine, { onUpgradeSillySpec })} />,
     );
-    const btn = findNativeButtonByName(/已是最新/);
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute("title", "已是最新 3.27.11");
+    const btn = findNativeButtonByName(/升级 sillyspec/);
+    expect(btn).not.toBeDisabled();
     fireEvent.click(btn);
-    expect(onUpgradeSillySpec).not.toHaveBeenCalled();
+    expect(onUpgradeSillySpec).toHaveBeenCalledWith(machine);
   });
 
   it("落后（3.26.15 < 3.27.11）→ 可用，文案「升级 sillyspec」，点击触发 onUpgradeSillySpec", () => {
@@ -324,8 +325,8 @@ describe("MachineCard「升级 sillyspec」按钮五态（task-07 / FR-02）", (
         )}
       />,
     );
-    // ql-20260902-003：默认机器已最新，文案为「已是最新」（disabled 原因仍是离线，title 离线说明优先）。
-    const btn = findNativeButtonByName(/已是最新/);
+    // ql-20260902-004：已最新不换文案（保留「升级 sillyspec」，disabled 原因仍是离线）。
+    const btn = findNativeButtonByName(/升级 sillyspec/);
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute("title", "离线，无法升级；下次启动时会自动升级");
     fireEvent.click(btn);
@@ -444,14 +445,13 @@ describe("MachineCard「升级 sillyspec」按钮五态（task-07 / FR-02）", (
 
   it("已最新且空闲 → 按钮回 btnOutlineTiny 底色（不带 warning 高亮，原型①注）", () => {
     renderCard(<MachineCard {...defaultProps(makeMachine())} />);
-    // ql-20260902-003：已最新换文案「已是最新」（禁用态仍走底色样式）。
-    const btn = findNativeButtonByName(/已是最新/);
+    const btn = findNativeButtonByName(/升级 sillyspec/);
     expect(btn.className).not.toContain("warning");
   });
 
   it("onUpgradeSillySpec 缺省（可选 props）→ 按钮仍渲染，点击不崩", () => {
     renderCard(<MachineCard {...defaultProps(makeMachine())} />);
-    const btn = findNativeButtonByName(/已是最新/);
+    const btn = findNativeButtonByName(/升级 sillyspec/);
     expect(btn).toBeInTheDocument();
     expect(() => fireEvent.click(btn)).not.toThrow();
   });

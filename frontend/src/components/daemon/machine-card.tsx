@@ -197,27 +197,22 @@ export function MachineCard({
   // 失败后换「重试升级」（⑥）；落后 / 未安装 / 升级进行中 warning 高亮（原型
   // .btn.sp-up / .hot，已是最新回 btnOutlineTiny 底色——原型②注）。禁用窗口
   // 间隙的重复点击由 daemon 侧 in-flight 门去重，无害。
-  // ql-20260902-003：已是最新（已安装且不落后）也 disabled 换文案——daemon 侧
-  // 手动指令现也有版本前置门（no-op），前端先拦掉免产生「下发成功却无事发生」
-  // 的困惑；latest 未知不比较保持可点（宁宽勿断）。
-  const sillyspecUpToDate =
-    sillyspecVersion !== null &&
-    sillyspecLatest !== null &&
-    !sillyspecOutdated;
+  // ql-20260902-004：刻意**不**按已最新置灰——sillyspec_latest_version 是 daemon
+  // 周期探测上报的滞后值（探测间隔内 npm 发新版会误锁入口）；已是最新的真正
+  // 版本门在 daemon 侧 requestManualUpgrade（点击时现探 npm，已最新 no-op），
+  // 前端保持可点不拦截。
   const sillyspecRunningLike = sillyspecRunning || Boolean(upgradingSillySpec);
   const sillyspecBtnDisabled =
-    isOffline || sillyspecRunningLike || sillyspecDeferred || sillyspecUpToDate;
+    isOffline || sillyspecRunningLike || sillyspecDeferred;
   const sillyspecBtnLabel = sillyspecRunningLike
     ? "升级中…"
     : sillyspecDeferred
       ? "等待空闲"
       : sillyspecState === "failed"
         ? "重试升级"
-        : sillyspecUpToDate
-          ? "已是最新"
-          : sillyspecVersion === null
-            ? "安装 sillyspec"
-            : "升级 sillyspec";
+        : sillyspecVersion === null
+          ? "安装 sillyspec"
+          : "升级 sillyspec";
   const sillyspecBtnTitle = isOffline
     ? "离线，无法升级；下次启动时会自动升级"
     : sillyspecRunningLike
@@ -226,13 +221,11 @@ export function MachineCard({
         ? "等待空闲执行"
         : sillyspecState === "failed"
           ? "重新下发 sillyspec 升级指令"
-          : sillyspecUpToDate
-            ? `已是最新 ${sillyspecVersion}`
-            : sillyspecVersion === null
-              ? "远程安装最新版 sillyspec"
-              : sillyspecOutdated
-                ? `立即升级到 ${sillyspecLatest}`
-                : "下发 sillyspec 升级指令（升级到 npm 最新版）";
+          : sillyspecVersion === null
+            ? "远程安装最新版 sillyspec"
+            : sillyspecOutdated
+              ? `立即升级到 ${sillyspecLatest}`
+              : "下发 sillyspec 升级指令（升级到 npm 最新版）";
   const sillyspecBtnHot =
     sillyspecOutdated ||
     sillyspecVersion === null ||
@@ -457,8 +450,9 @@ export function MachineCard({
           {/* 升级 daemon 按钮（对齐 .btn-outline btn-tiny，offline disabled）。
               task-07 / FR-05：pending_update 期也 disabled——升级已由安全层接管
               （等待空闲自动执行），手动指令此时无意义，title 提示等待原因。
-              ql-20260902-002：已是最新（build_id == latest_build_id）也 disabled
-              + 换文案——daemon 侧同版本 no-op 静默，不拦会让用户误以为在升级。 */}
+              ql-20260902-004：已是最新（build_id == latest_build_id）也 disabled
+              ——daemon 侧同版本 no-op 静默，不拦会让用户误以为在升级。文案保持
+              「升级 daemon」不换（用户反馈：置灰态保留原文案，已是最新放 title）。 */}
           <button
             type="button"
             className={btnOutlineTiny}
@@ -482,7 +476,7 @@ export function MachineCard({
             }
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            {daemonUpToDate ? "已是最新" : "升级 daemon"}
+            升级 daemon
           </button>
 
           {/* 升级 sillyspec 按钮（task-07 / FR-02，原型①-⑧）。落后/未安装/升级

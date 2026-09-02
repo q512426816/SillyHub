@@ -250,9 +250,10 @@ describe("MachineCard（task-08 / FR-4）", () => {
     expect(onUpgrade).toHaveBeenCalledWith(machine);
   });
 
-  // ql-20260902-002：已是最新判定——build_id == latest_build_id 时按钮禁用换文案，
-  // 拦住 daemon 侧同版本静默 no-op（下发了却无任何进度反馈的误导路径）。
-  it("已是最新（build_id == latest_build_id）→ 升级按钮换「已是最新」+ disabled，点击不触发 onUpgrade，title 带版本", () => {
+  // ql-20260902-002/004：已是最新判定——build_id == latest_build_id 时按钮禁用
+  // 但**保留原文案**（用户反馈：置灰态不换字，已是最新放 title），拦住 daemon 侧
+  // 同版本静默 no-op（下发了却无任何进度反馈的误导路径）。
+  it("已是最新（build_id == latest_build_id）→ 升级按钮禁用但文案保持「升级 daemon」，title 带版本，点击不触发 onUpgrade", () => {
     const onUpgrade = vi.fn();
     const machine = makeMachine({ build_id: "f3045094-2026" });
     const latestVersion = {
@@ -265,7 +266,7 @@ describe("MachineCard（task-08 / FR-4）", () => {
     renderCard(
       <MachineCard {...defaultProps(machine, { onUpgrade, latestVersion })} />,
     );
-    const upToDateBtn = findNativeButtonByName(/已是最新/);
+    const upToDateBtn = findNativeButtonByName(/升级 daemon/);
     expect(upToDateBtn).toBeDisabled();
     expect(upToDateBtn).toHaveAttribute("title", "已是最新 f3045094-2026");
     fireEvent.click(upToDateBtn);

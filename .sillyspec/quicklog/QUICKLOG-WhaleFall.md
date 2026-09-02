@@ -236,3 +236,16 @@
 方案：daemon 新增 requestManualUpgrade 手动入口（版本门 no-op，探测失败/未安装放行，保 requestUpgrade 同步置位契约不内联），WS 接线换新入口；前端机器卡按钮增已是最新禁用态（六态）
 结果：daemon 44 passed（新增 3 用例）+ typecheck 0 错；前端 66 passed + tsc 0 错；模块文档同步 2 张；部署待重建 frontend 镜像 + daemon 经自更新升级
 审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/machine-card-sillyspec.test.tsx, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+
+## ql-20260902-004-0a10 | 2026-09-02 11:25:49 | 升级按钮置灰反馈修正：保留原文案+sillyspec 取消置灰
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/machine-card.tsx（daemon 按钮保留原文案 + sillyspec 回退已最新态）
+- frontend/src/components/daemon/__tests__/machine-card.test.tsx（已是最新用例改断言原文案+禁用+title）
+- frontend/src/components/daemon/__tests__/machine-card-sillyspec.test.tsx（默认场景回可点+三处定位回原文案）
+- .sillyspec/docs/frontend/modules/components-daemon.md（两条目回退/修正）
+需求：升级按钮置灰反馈修正：保留原文案+sillyspec 取消置灰
+根因：置灰换已是最新文案不符合用户预期；sillyspec latest 是周期探测的滞后值会误锁入口
+方案：daemon 按钮保留原文案禁用；sillyspec 按钮回退已最新态，版本门交 daemon 侧现探兜底
+结果：前端 66 passed + tsc 0 错；文档同步；部署待重建 frontend 镜像
