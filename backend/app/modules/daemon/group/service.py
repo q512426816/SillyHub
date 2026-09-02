@@ -27,11 +27,13 @@
   恒 NULL（D-007，§5.1 硬约束：影子挂 parent 会被 5 处 worker 判定链路误杀）；
 - 注入（§4.3）：首轮 = 成员简报 + 群背景摘要（§4.2）+ 当前消息，经 lease
   metadata prompt + SESSION_INJECT 控制指令下发（照 create_session 尾段）；
-  复用轮走 ``inject_session_as_service``（忙轮排队 queue_when_busy——排队
-  快照按入队时刻冻结，design §9.7）；run 挂群主 user_id（§9.2 计量归属），
-  群链路 metadata（source_group_id/source_member_id/source_carrier_run_id/
-  chain_depth/sender_user_id）写本轮 user_input 日志 ``metadata_`` 列（task-04
-  互@检测读取）。
+  复用轮走 ``inject_session_as_service``（quick 2026-09-02 忙轮策略翻转：
+  忙轮 ``busy_strategy="inject"`` 直接注入当前活跃轮 steering——run_id 沿用
+  活跃 run 不建新轮，prompt 头部包中途标注行，409 竞态降级回排队兜底；
+  排队快照仍按入队时刻冻结，design §9.7）；run 挂群主 user_id（§9.2 计量
+  归属），群链路 metadata（source_group_id/source_member_id/
+  source_carrier_run_id/chain_depth/sender_user_id）写本轮 user_input 日志
+  ``metadata_`` 列（task-04 互@检测读取）。
 
 权限模型（design §5.3，单聊 kind='chat' 零改动铁律）：
 
@@ -114,6 +116,7 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import (
+    ACTIVE_RUN_STATUSES,
     AgentGroupChat,
     AgentGroupMember,
     AgentRun,
@@ -134,7 +137,7 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
-from app.modules.daemon.session.service import SessionService
+from app.modules.daemon.session.service import DaemonSessionTurnConflict, SessionService
 from app.modules.daemon.session_events import SessionChangeEvent, publish_sessions_changed
 
 log = get_logger(__name__)
@@ -181,6 +184,13 @@ GROUP_CONTEXT_TOTAL_MAX_CHARS = 6000
 GROUP_LAST_MESSAGE_PREVIEW_CHARS = 60
 # 群列表「最近 @我」扫描行数（群聊体验 quick 2026-09-02：最近时间线内找最新 @）。
 GROUP_LAST_MENTION_SCAN_ROWS = 20
+# 忙轮中途注入标注行（quick 2026-09-02 群聊 steering）：复用轮查到活跃 run 时
+# 包在 _build_group_prompt 产物**头部**（外层包不动纯函数）——消息将以中途新
+# 指令形式注入当前正在执行的轮，提示 agent 优先阅读并调整工作方式。
+_MID_TURN_NOTICE = (
+    "【注意】以下是用户/成员在你任务执行中途发来的新消息，"
+    "请优先阅读并据此调整当前工作方式，无需中断任务除非明确要求。"
+)
 
 # ── 互@协作护栏常量（task-04，design §4.4——状态只存 Redis 带 TTL，不建表）──
 # 协作链 Hash TTL（30min：链跨多轮互@，超时自清理不留死键）。
@@ -980,6 +990,9 @@ class GroupMemberTriggerRead(BaseModel):
     shadow_session_id: uuid.UUID
     run_id: uuid.UUID | None = None  # 即时注入轮的 run；排队轮为 None
     queued: bool = False  # 忙轮排队（AgentSessionQueuedMessage）
+    # quick（2026-09-02 群聊忙轮注入）：忙轮中途注入成功（消息已注入当前
+    # 活跃轮 steering，run_id=该活跃 run）；queued=False 且 mid_turn=True。
+    mid_turn: bool = False
 
 
 class GroupMessageSendRead(BaseModel):
@@ -2616,9 +2629,11 @@ class GroupChatService:
     ) -> GroupMemberTriggerRead:
         """触发单个 agent 成员（design §4.1 步 6 / §8 member.injected）。
 
-        prompt 先组装（即时注入与忙轮排队共用同一文本——排队快照按入队时刻
-        冻结，design §9.7）；随后影子懒建（首次）或复用注入（忙轮排队由
-        ``inject_session_as_service`` 的 queue_when_busy 分支承接：满 5 → 409
+        prompt 先组装（即时注入与忙轮注入/排队共用同一文本——排队快照按入队
+        时刻冻结，design §9.7）；随后影子懒建（首次）或复用注入（quick
+        2026-09-02 忙轮策略翻转：查到活跃 run → prompt 头部包中途标注行 +
+        ``inject_session_as_service`` busy_strategy="inject" 直接注入当前
+        活跃轮；409 竞态降级回既有 ``queue_when_busy`` 排队分支，满 5 → 409
         DaemonSessionQueueFull）。
 
         ``sender_user_id``：触发方用户 id——用户 @ 路径=实际发送者，互@路径
@@ -2692,26 +2707,67 @@ class GroupChatService:
                 queued=False,
             )
 
-        # 复用轮：注入共享核心（run user_id=影子属主=群主，§9.2；忙轮 → 排队，
-        # entry.sender_user_id=实际发送者）。附件透传：attachment_ids + 归属
-        # 基准覆盖=发送者（影子属主是群主，附件上传者是发送者——按属主校验
-        # 会误拒；排队派发侧从链标记 sender_user_id 同口径推导）。
-        result = await SessionService(self._session).inject_session_as_service(
-            shadow.id,
-            prompt=prompt,
-            queue_when_busy=True,
-            queue_sender_user_id=sender_user_id,
-            turn_metadata=turn_metadata,
-            attachment_ids=[r.id for r in attachment_rows] if attachment_rows else None,
-            attachment_owner_user_id=sender_user_id if attachment_rows else None,
-        )
+        # quick（2026-09-02 群聊忙轮注入 steering）：复用轮忙轮策略翻转——
+        # 查活跃 run：命中 → prompt 头部插一行中途标注（在 _build_group_prompt
+        # 产物外层包，不动其纯函数），消息经 busy_strategy="inject" 直接注入
+        # 当前活跃轮（不再等轮终态派发排队条目——实测排队延迟=轮时长，用户
+        # 中途指令轮结束才被看到）；409 竞态（注入瞬间轮刚好终态）由调用点
+        # 捕获 DaemonSessionTurnConflict 降级回既有排队兜底。
+        active_run = await self._get_shadow_active_run(shadow.id)
+        inject_prompt = prompt
+        if active_run is not None:
+            inject_prompt = f"{_MID_TURN_NOTICE}\n{prompt}"
+
+        # 复用轮：注入共享核心（run user_id=影子属主=群主，§9.2；忙轮 → 中途
+        # 注入活跃 run，竞态 409 → 排队兜底，entry.sender_user_id=实际发送者）。
+        # 附件透传：attachment_ids + 归属基准覆盖=发送者（影子属主是群主，附件
+        # 上传者是发送者——按属主校验会误拒；排队派发侧从链标记 sender_user_id
+        # 同口径推导）。
+        try:
+            result = await SessionService(self._session).inject_session_as_service(
+                shadow.id,
+                prompt=inject_prompt,
+                busy_strategy="inject",
+                queue_when_busy=True,
+                queue_sender_user_id=sender_user_id,
+                turn_metadata=turn_metadata,
+                attachment_ids=[r.id for r in attachment_rows] if attachment_rows else None,
+                attachment_owner_user_id=sender_user_id if attachment_rows else None,
+            )
+        except DaemonSessionTurnConflict:
+            # 409 竞态兜底：注入瞬间轮刚好终态（或降级排队场景）→ 走既有落队
+            # 分支（满 5 → 409 DaemonSessionQueueFull），消息不丢。
+            result = await SessionService(self._session).inject_session_as_service(
+                shadow.id,
+                prompt=inject_prompt,
+                queue_when_busy=True,
+                queue_sender_user_id=sender_user_id,
+                turn_metadata=turn_metadata,
+                attachment_ids=[r.id for r in attachment_rows] if attachment_rows else None,
+                attachment_owner_user_id=sender_user_id if attachment_rows else None,
+            )
         return GroupMemberTriggerRead(
             member_id=member.id,
             member_name=member.display_name,
             shadow_session_id=shadow.id,
             run_id=result.agent_run.id if result.agent_run is not None else None,
             queued=result.queued,
+            mid_turn=result.mid_turn,
         )
+
+    async def _get_shadow_active_run(self, shadow_session_id: uuid.UUID) -> AgentRun | None:
+        """查影子会话当前活跃轮（quick 2026-09-02 忙轮注入判定）。
+
+        谓词与 SessionService._get_current_run 同源（ACTIVE_RUN_STATUSES 单一
+        词表 import，勿内联状态元组）；锁外查询仅作中途标注的判定基准——
+        真正的忙轮判定在 inject 行锁内（竞态最坏=标注有无与实际路径错位一行
+        文案，消息不丢）。
+        """
+        stmt = select(AgentRun).where(
+            AgentRun.agent_session_id == shadow_session_id,
+            AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
+        )
+        return (await self._session.execute(stmt)).scalars().first()
 
     async def _ensure_shadow_session(
         self,

@@ -40745,6 +40745,11 @@
             "type": "boolean",
             "title": "Queued",
             "default": false
+          },
+          "mid_turn": {
+            "type": "boolean",
+            "title": "Mid Turn",
+            "default": false
           }
         },
         "type": "object",

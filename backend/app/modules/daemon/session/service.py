@@ -705,6 +705,11 @@ class SessionDispatchResult:
     时 ``agent_run`` / ``queue_entry_id`` 二选一有值（入队成功 → 只有
     ``queue_entry_id``）。create_session / 空闲 inject 路径 ``queued`` 恒
     False，三字段语义与既有完全一致（零回归）。
+
+    quick（2026-09-02 群聊忙轮注入）：``mid_turn=True`` 表示消息经
+    busy_strategy="inject" 注入了**当前活跃轮**（steering）——``agent_run``
+    为该活跃 run（非新建，单会话单活跃 run 不变式保持），本轮 user_input
+    留痕日志挂同一 run。其余路径缺省 False。
     """
 
     agent_session: AgentSession
@@ -712,6 +717,7 @@ class SessionDispatchResult:
     lease_id: uuid.UUID | None = None
     queued: bool = False
     queue_entry_id: uuid.UUID | None = None
+    mid_turn: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -3216,6 +3222,15 @@ class SessionService:
         queue_when_busy: bool = False,
         queue_sender_user_id: uuid.UUID | None = None,
         turn_metadata: dict | None = None,
+        # quick（2026-09-02 群聊忙轮注入 steering）：忙轮策略新形态——
+        # ``"inject"``=忙轮跳过排队直接注入当前活跃轮（run_id 沿用活跃 run，
+        # 不建新 run，单会话单活跃 run 不变式保持；daemon 侧 running 时下发
+        # 注入是既有安全路径：最好=工具间隙 mid-turn 消费，最坏=SDK 轮边界
+        # 消费，均不劣于排队）；``"queue"``=既有排队；缺省 None=沿用
+        # queue_when_busy 旧形态（True≡"queue"，新参数优先）。空闲轮不受
+        # 影响（照常新建 run）。携带配置切换维度时本参数不生效（切换是轮
+        # 边界语义，回落排队/切换分支）。
+        busy_strategy: Literal["queue", "inject"] | None = None,
         # task-04（2026-09-01-session-group-chat design §4.5 热切换）：配置切换
         # 维度（str 形态 uuid；语义与用户路径 inject_session 同名参数一致——
         # None=不动；空串="none" 清空；≠当前值构成切换轮）。群成员六要素热切换
@@ -3287,6 +3302,8 @@ class SessionService:
             run_sender_user_id=session.user_id,
             # 2026-09-01-session-group-chat task-03：群聊影子注入透传（缺省零回归）。
             queue_when_busy=queue_when_busy,
+            # quick（2026-09-02 群聊忙轮注入）：忙轮策略透传（缺省 None 零回归）。
+            busy_strategy=busy_strategy,
             queue_sender_user_id=queue_sender_user_id,
             turn_metadata=turn_metadata,
             # task-04（design §4.5 热切换）：切换维度透传共享核心（缺省 None=
@@ -3349,6 +3366,10 @@ class SessionService:
         page_context: PageContextCreateBlock | None = None,
         # ql-20260825-011：忙轮入队开关（语义见 inject_session 同名参数）。
         queue_when_busy: bool = False,
+        # quick（2026-09-02 群聊忙轮注入 steering）：忙轮策略（语义见
+        # inject_session_as_service 同名参数——"inject"=中途注入活跃轮，
+        # "queue"≡queue_when_busy=True，None=沿用旧形态）。缺省 None 零回归。
+        busy_strategy: Literal["queue", "inject"] | None = None,
         # 2026-09-01-session-group-chat task-03（design §4.3）：排队条目 sender
         # 覆盖——群聊影子会话排队时记**实际发送者**（run/计量仍归影子属主=群主，
         # §9.2；条目 sender 供派发轮归属校验与审计）；缺省 None = 既有语义
@@ -3407,13 +3428,36 @@ class SessionService:
 
             current = await self._get_current_run(session.id)
             if current is not None:
+                # quick（2026-09-02 群聊忙轮注入 steering）：busy_strategy=
+                # "inject" 的调用方（群聊 @ 忙轮成员）跳过排队，直接把消息
+                # 注入当前活跃轮——不建新 run（run_id 沿用活跃 run，单会话单
+                # 活跃 run 不变式保持），本轮 user_input 留痕日志挂同一活跃
+                # run（turn_metadata 照传），SESSION_INJECT 沿三段式下发
+                # （daemon 侧 running 时注入是既有安全路径：工具间隙 mid-turn
+                # 消费=steering 目标，最坏轮边界消费=等同原排队时延）。仅普通
+                # 消息轮支持：携带配置切换维度（轮边界语义）不生效，回落下方
+                # 排队/切换分支。
+                if (
+                    busy_strategy == "inject"
+                    and agent_profile_id is None
+                    and llm_provider_id is None
+                    and model is None
+                ):
+                    return await self._inject_mid_turn_into_run(
+                        session,
+                        current_run=current,
+                        prompt=prompt,
+                        attachment_ids=attachment_ids,
+                        attachment_owner_user_id=attachment_owner_user_id,
+                        turn_metadata=turn_metadata,
+                    )
                 # ql-20260825-011（后端真实排队）：忙轮不再无条件 409——
                 # queue_when_busy=True 的调用方（前端会话 UI）改落排队表，
                 # run 终态后由 dispatch_next_queued_message 自动派发；默认
                 # False 保持既有 DaemonSessionTurnConflict 拒绝语义（service
                 # 身份路径 / 平台审批代写零回归）。入队仍在锁内判定，满员
                 # 检查与写行原子（并发双发不会超上限）。
-                if not queue_when_busy:
+                if not queue_when_busy and busy_strategy != "queue":
                     raise DaemonSessionTurnConflict(
                         f"Session '{session_id}' already has an active run '{current.id}'.",
                         details={
@@ -4164,6 +4208,159 @@ class SessionService:
             agent_session=session,
             agent_run=run,
             lease_id=session.lease_id,
+        )
+
+    async def _inject_mid_turn_into_run(
+        self,
+        session: AgentSession,
+        *,
+        current_run: AgentRun,
+        prompt: str,
+        attachment_ids: list[uuid.UUID] | None = None,
+        attachment_owner_user_id: uuid.UUID | None = None,
+        turn_metadata: dict | None = None,
+    ) -> SessionDispatchResult:
+        """忙轮中途注入（quick 2026-09-02 群聊 @ 忙轮成员 steering 语义）。
+
+        与 :meth:`_inject_into_session` 普通注入段的关键差异（调用方已持会话
+        行锁、status/lease/归档守卫已过，``current_run`` 为锁内查得的唯一
+        活跃 run）：
+
+        1. **不建新 run**——SESSION_INJECT payload 的 run_id 沿用活跃 run
+           （daemon 侧 inject() 无条件 push inputQueue + currentRunId 切换，
+           同 id 重写为幂等；单会话单活跃 run 不变式保持）；
+        2. 本轮 user_input 留痕日志挂**同一活跃 run**（现状每轮注入都落一行
+           user_input，沿用；turn_metadata 照传——群链路互@检测按最新一条
+           user_input metadata 读链上下文）；
+        3. 不触碰会话配置三列 / lease metadata / turn_count（配置切换是轮
+           边界语义，调用方走原排队分支，本方法不接切换维度）；
+        4. 推送失败不收敛活跃 run（它仍属当前正在执行的轮）——控制指令已
+           落库 pending 待 daemon 重连补拉（三段式），记日志即可。
+
+        派发不可达（runtime 解析失败）抛 DaemonRuntimeOffline（与普通轮同
+        口径，此时轮在跑而解析失败属契约异常）。不做 readiness 等待——活跃
+        run 在跑即证明 daemon 已建会话（create→inject 首轮竞态不存在）。
+        """
+        session_id = session.id
+        now = datetime.now(UTC)
+        # 派发路由先行解析（只读）——失败时零写入直接抛，不留半态。
+        runtime_id = session.runtime_id
+        daemon_id = (
+            await _resolve_daemon_id_for_runtime(self._session, runtime_id)
+            if runtime_id is not None
+            else None
+        )
+        if daemon_id is None or runtime_id is None:
+            raise DaemonRuntimeOffline(
+                "执行代理当前不在线，本轮消息未能发送。请确认 daemon 已运行后重试。",
+                details={
+                    "runtime_id": str(runtime_id),
+                    "session_id": str(session_id),
+                    "run_id": str(current_run.id),
+                },
+            )
+        try:
+            # 附件校验与组装与普通轮同管线（归属基准覆盖同传；校验失败整体
+            # 回滚零残留）。
+            validated_attachments: list = []
+            if attachment_ids:
+                validated_attachments = await self._validate_inject_attachment_rows(
+                    session_id=session_id,
+                    session_user_id=(
+                        attachment_owner_user_id
+                        if attachment_owner_user_id is not None
+                        else session.user_id
+                    ),
+                    session_provider=session.provider or "",
+                    attachment_ids=attachment_ids,
+                )
+            inject_attachments: list[dict] = []
+            if validated_attachments:
+                # draft→bound 回填（同事务前进迁移，与普通轮一致）。
+                for att_row in validated_attachments:
+                    if att_row.session_id is None:
+                        att_row.session_id = session.id
+                        self._session.add(att_row)
+                supports = await self._resolve_inject_gate(
+                    user_id=session.user_id,
+                    gate_provider_id_basis=session.llm_provider_id,
+                    agent_kind=session.provider or "",
+                )
+                inject_attachments = await self._assemble_inject_attachment_payload(
+                    validated_attachments, supports_multimodal=supports
+                )
+
+            # 本轮 user_input 留痕：挂活跃 run（附件标记行口径与普通轮一致）。
+            user_input_content = prompt
+            if validated_attachments:
+                from app.modules.session_attachment.service import (
+                    attachment_marker_line,
+                )
+
+                marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
+                user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
+            self._session.add(
+                AgentRunLog(
+                    run_id=current_run.id,
+                    channel="user_input",
+                    content_redacted=user_input_content[:5000],
+                    timestamp=now,
+                    metadata_=dict(turn_metadata) if turn_metadata is not None else None,
+                )
+            )
+            session.last_active_at = now
+            self._session.add(session)
+            await self._session.commit()
+            await self._session.refresh(session)
+        except AppError:
+            await self._session.rollback()
+            raise
+        except Exception:
+            await self._session.rollback()
+            raise
+
+        # SESSION_INJECT 三段式下发（claim_token 跨 turn 复用，与普通轮同源）。
+        lease_row = await self._session.get(DaemonTaskLease, session.lease_id)
+        lease_meta = dict((lease_row.metadata_ if lease_row else None) or {})
+        inject_claim_token = lease_meta.get("claim_token", "")
+        inject_payload = {
+            "session_id": str(session.id),
+            "lease_id": str(session.lease_id),
+            "run_id": str(current_run.id),
+            "prompt": _strip_team_command_prefix(prompt),
+            "claim_token": inject_claim_token,
+            "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+        }
+        if inject_attachments:
+            inject_payload["attachments"] = inject_attachments
+        _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
+            daemon_id=daemon_id,
+            runtime_id=runtime_id,
+            kind=KIND_SESSION_INJECT,
+            payload=inject_payload,
+        )
+        if not control_ok:
+            # 活跃 run 不收敛（区别于普通轮的 failed+504）：指令已落库 pending
+            # 待补拉，轮仍在跑；最坏补拉到达时轮已终态 → daemon 按会话态处理。
+            log.info(
+                "session_midturn_inject_pending_pull",
+                session_id=str(session_id),
+                run_id=str(current_run.id),
+            )
+        await self._publish_session_event(
+            session.id,
+            {
+                "event": "turn_injected",
+                "session_id": str(session.id),
+                "run_id": str(current_run.id),
+            },
+        )
+        return SessionDispatchResult(
+            agent_session=session,
+            agent_run=current_run,
+            lease_id=session.lease_id,
+            queued=False,
+            mid_turn=True,
         )
 
     async def _send_interrupt_control(

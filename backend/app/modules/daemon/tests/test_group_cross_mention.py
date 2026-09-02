@@ -603,7 +603,9 @@ async def _seed_detection_env(
 def _mock_session_service() -> tuple[MagicMock, AsyncMock]:
     """替身 SessionService：inject_session_as_service 记录调用并返回即时轮。"""
     inject_mock = AsyncMock(
-        return_value=SimpleNamespace(queued=False, agent_run=SimpleNamespace(id=uuid.uuid4()))
+        return_value=SimpleNamespace(
+            queued=False, mid_turn=False, agent_run=SimpleNamespace(id=uuid.uuid4())
+        )
     )
     service_cls = MagicMock()
     service_cls.return_value.inject_session_as_service = inject_mock
@@ -683,11 +685,14 @@ class TestCrossMentionOrchestration:
         # 他人投影行（@小三）不参与本成员检测——小三 未被触发。
         assert all(t.member_id != seeded.third_member.id for t in triggered)
         # 触发管线调用参数：prompt 标注协作请求 + 来源 Agent 身份；链沿用原载体。
+        # quick（2026-09-02 忙轮注入）：互@与用户 @ 同策略——busy_strategy=
+        # "inject"（忙轮直注活跃轮）+ queue_when_busy=True（409 竞态降级兜底）。
         inject_mock.assert_awaited_once()
         kwargs = inject_mock.await_args.kwargs
         prompt = kwargs["prompt"]
         assert "[当前消息 · 来自 Agent 成员的协作请求，需要你回应]" in prompt
         assert "小码(Agent): @小助 帮我复核下登录页白屏" in prompt
+        assert kwargs["busy_strategy"] == "inject"
         assert kwargs["queue_when_busy"] is True
         turn_metadata = kwargs["turn_metadata"]
         assert turn_metadata["source_carrier_run_id"] == str(seeded.carrier.id)
@@ -1250,7 +1255,25 @@ class TestQueuedChainPassthrough:
         await db_session.commit()
 
         # 忙轮发送 → 排队条目 prompt 头部带链标记行。
-        resp = await _send_message(client, env.owner_token, group_id, "@小码 排队的追问")
+        # quick（2026-09-02 忙轮注入）：忙轮默认走中途注入（不排队）——本用例
+        # 验证排队条目链标记/派发还原链路，用 409 竞态替身强制走降级排队分支
+        # （busy_strategy="inject" 抛 DaemonSessionTurnConflict → 既有落队）。
+        from app.modules.daemon.session.service import DaemonSessionTurnConflict
+
+        original_inject = SessionService.inject_session_as_service
+
+        async def conflict_on_inject_strategy(self, session_id, **kwargs):
+            if kwargs.get("busy_strategy") == "inject":
+                raise DaemonSessionTurnConflict(
+                    "Session run just went terminal (race).",
+                    details={"session_id": str(session_id)},
+                )
+            return await original_inject(self, session_id, **kwargs)
+
+        with mock_patch.object(
+            SessionService, "inject_session_as_service", conflict_on_inject_strategy
+        ):
+            resp = await _send_message(client, env.owner_token, group_id, "@小码 排队的追问")
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["triggered"][0]["queued"] is True

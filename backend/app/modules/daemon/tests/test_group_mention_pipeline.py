@@ -1125,7 +1125,7 @@ class TestShadowLazyCreation:
         mocked_hub,
         readiness_ok,
     ) -> None:
-        """幂等懒建：二次触发复用影子（首轮 run 尚 pending → 忙轮排队）。"""
+        """幂等懒建：二次触发复用影子（首轮 run 尚 pending → 忙轮中途注入）。"""
         env = await _make_env(db_session)
         data = await _create_group(
             client,
@@ -1139,14 +1139,18 @@ class TestShadowLazyCreation:
         assert resp1.status_code == 200, resp1.text
         trigger1 = resp1.json()["triggered"][0]
         assert trigger1["queued"] is False
+        assert trigger1["mid_turn"] is False
         shadow_id_1 = trigger1["shadow_session_id"]
 
-        # 首轮 run 无 daemon 收口恒 pending → 第二条 @ 命中忙轮排队（复用影子）。
+        # 首轮 run 无 daemon 收口恒 pending → 第二条 @ 命中忙轮中途注入
+        # （steering：沿用活跃 run，不排队不建新 run）。
         resp2 = await _send_message(client, env.owner_token, group_id, "@小码 第二条")
         assert resp2.status_code == 200, resp2.text
         trigger2 = resp2.json()["triggered"][0]
         assert trigger2["shadow_session_id"] == shadow_id_1  # 幂等复用
-        assert trigger2["queued"] is True
+        assert trigger2["queued"] is False
+        assert trigger2["mid_turn"] is True
+        assert trigger2["run_id"] == trigger1["run_id"]  # run_id 沿用活跃轮
 
         # 仍只有一个影子会话；群时间线上载体 run 恒为 2（每条消息一个）。
         shadows = await _shadow_sessions(db_session)
@@ -1163,11 +1167,8 @@ class TestShadowLazyCreation:
             .all()
         )
         assert len(carriers) == 2
-        # 排队条目挂影子会话、sender=发送者。
-        entries = await _list_queued(db_session, uuid.UUID(shadow_id_1))
-        assert len(entries) == 1
-        assert entries[0].sender_user_id == env.owner.id
-        assert "第二条" in entries[0].prompt
+        # 忙轮注入不落排队表。
+        assert await _list_queued(db_session, uuid.UUID(shadow_id_1)) == []
 
     async def test_reuse_inject_when_shadow_idle(
         self,
@@ -1357,16 +1358,130 @@ class TestShadowLazyCreation:
         assert await _shadow_sessions(db_session) == []
 
 
-# ── 忙轮排队（design §4.3：快照冻结 + 满员 409）──────────────────────────────
+# ── 忙轮中途注入（quick 2026-09-02 群聊 steering：不排队直注活跃轮）──────────
 
 
-class TestBusyQueue:
-    async def test_busy_shadow_queues_with_frozen_snapshot(
+class TestBusyMidTurnInject:
+    async def test_busy_mention_injects_mid_turn_without_queue(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_hub,
+        readiness_ok,
+    ) -> None:
+        """忙轮 @ → 跳过排队直接注入活跃轮：零排队行 + SESSION_INJECT run_id=
+        活跃 run + prompt 含中途标注 + triggered[].mid_turn=True。"""
+        from app.modules.daemon.control_commands import KIND_SESSION_INJECT
+        from app.modules.daemon.group.service import _MID_TURN_NOTICE
+        from app.modules.daemon.model import DaemonControlCommand
+
+        env = await _make_env(db_session)
+        sender, sender_token = await _env_user(db_session, env, name="小英")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            user_members=[{"user_id": str(sender.id)}],
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
+        shadow = await _seed_shadow_with_active_run(
+            db_session,
+            member=member,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+        )
+        busy_runs = list(
+            (
+                await db_session.execute(
+                    select(AgentRun).where(AgentRun.agent_session_id == shadow.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(busy_runs) == 1
+        busy_run_id = busy_runs[0].id
+
+        resp = await _send_message(client, sender_token, group_id, "@小码 中途改需求，不用过程回复")
+        assert resp.status_code == 200, resp.text
+        trigger = resp.json()["triggered"][0]
+        # 忙轮注入成功：queued=False + mid_turn=True + run_id=活跃 run。
+        assert trigger["queued"] is False
+        assert trigger["mid_turn"] is True
+        assert trigger["shadow_session_id"] == str(shadow.id)
+        assert trigger["run_id"] == str(busy_run_id)
+
+        # 不落排队表（零行）。
+        assert await _list_queued(db_session, shadow.id) == []
+        # 不建新 run（单会话单活跃 run 不变式保持）。
+        runs_after = list(
+            (
+                await db_session.execute(
+                    select(AgentRun).where(AgentRun.agent_session_id == shadow.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [r.id for r in runs_after] == [busy_run_id]
+
+        # SESSION_INJECT 已发：payload run_id=活跃 run、prompt 头部含中途标注。
+        commands = list(
+            (
+                await db_session.execute(
+                    select(DaemonControlCommand).where(
+                        DaemonControlCommand.runtime_id == env.runtime.id,
+                        DaemonControlCommand.kind == KIND_SESSION_INJECT,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert commands, "未下发 SESSION_INJECT"
+        payload = commands[0].payload
+        assert payload is not None
+        assert payload["session_id"] == str(shadow.id)
+        assert payload["run_id"] == str(busy_run_id)
+        assert payload["prompt"].startswith(_MID_TURN_NOTICE)
+        assert "中途改需求，不用过程回复" in payload["prompt"]
+
+        # 本轮 user_input 留痕挂同一活跃 run（群链路 metadata 照传）。
+        log_rows = list(
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == busy_run_id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(log_rows) == 1
+        assert log_rows[0].content_redacted.startswith(_MID_TURN_NOTICE)
+        assert "中途改需求，不用过程回复" in log_rows[0].content_redacted
+        assert log_rows[0].metadata_ is not None
+        assert log_rows[0].metadata_["source_group_id"] == str(group_id)
+        assert log_rows[0].metadata_["sender_user_id"] == str(sender.id)
+        assert log_rows[0].metadata_["chain_depth"] == 0
+
+    async def test_conflict_race_degrades_to_queue(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
     ) -> None:
-        """入队快照按入队时刻冻结：后续群进展（含新消息）不进已入队条目。"""
+        """409 竞态降级：inject 抛 DaemonSessionTurnConflict → 走既有落队分支
+        （排队兜底）+ queued=True；快照按入队时刻冻结。"""
+        from app.modules.daemon.group.service import _MID_TURN_NOTICE
+        from app.modules.daemon.session.service import (
+            DaemonSessionTurnConflict,
+            SessionService,
+        )
+
         env = await _make_env(db_session)
         sender, sender_token = await _env_user(db_session, env, name="小英")
         data = await _create_group(
@@ -1385,38 +1500,63 @@ class TestBusyQueue:
             runtime_id=env.runtime.id,
         )
 
-        resp = await _send_message(client, sender_token, group_id, "@小码 第一条追问")
-        assert resp.status_code == 200, resp.text
-        trigger = resp.json()["triggered"][0]
-        assert trigger["queued"] is True
-        assert trigger["shadow_session_id"] == str(shadow.id)
-        assert trigger["run_id"] is None
+        # 竞态替身：busy_strategy="inject" 首次调用抛 409（模拟注入瞬间轮刚好
+        # 终态），其余调用（降级排队 / 后续消息）走真实实现。
+        original = SessionService.inject_session_as_service
+        calls = {"inject_calls": 0}
 
-        entries = await _list_queued(db_session, shadow.id)
-        assert len(entries) == 1
-        entry = entries[0]
-        # sender_user_id=实际发送者（非群主/影子属主）。
-        assert entry.sender_user_id == sender.id
-        assert entry.status == "pending"
-        # prompt 为入队时刻完整拼装文本（简报 + 入队时刻摘要 + 当前消息）。
-        assert "你是群聊「测试群」中的 Agent 成员「小码」" in entry.prompt
-        assert "[当前消息 · 需要你回应]" in entry.prompt
-        assert "小英(用户): @小码 第一条追问" in entry.prompt
+        async def conflict_once(self, session_id, **kwargs):
+            if kwargs.get("busy_strategy") == "inject":
+                calls["inject_calls"] += 1
+                if calls["inject_calls"] == 1:
+                    raise DaemonSessionTurnConflict(
+                        "Session run just went terminal (race).",
+                        details={"session_id": str(session_id)},
+                    )
+            return await original(self, session_id, **kwargs)
 
-        # 入队后群里又发一条不相关消息（进时间线）——快照不含新进展。
-        resp = await _send_message(client, env.owner_token, group_id, "后来的进展不进快照")
-        assert resp.status_code == 200, resp.text
-        await db_session.reset()
-        entries_after = await _list_queued(db_session, shadow.id)
-        assert len(entries_after) == 1
-        assert "后来的进展不进快照" not in entries_after[0].prompt
-        assert "第一条追问" in entries_after[0].prompt
+        with mock_patch.object(SessionService, "inject_session_as_service", conflict_once):
+            resp = await _send_message(client, sender_token, group_id, "@小码 第一条追问")
+            assert resp.status_code == 200, resp.text
+            trigger = resp.json()["triggered"][0]
+            assert calls["inject_calls"] == 1
+            assert trigger["queued"] is True
+            assert trigger["mid_turn"] is False
+            assert trigger["run_id"] is None
+
+            entries = await _list_queued(db_session, shadow.id)
+            assert len(entries) == 1
+            entry = entries[0]
+            # sender_user_id=实际发送者（非群主/影子属主）。
+            assert entry.sender_user_id == sender.id
+            assert entry.status == "pending"
+            # prompt 为降级时刻完整拼装文本（链标记行在前——排队条目链透传，
+            # 其后即中途标注——忙轮判定在先）。
+            assert entry.prompt is not None
+            assert entry.prompt.startswith("[GROUP_CHAIN carrier=")
+            assert _MID_TURN_NOTICE in entry.prompt
+            assert "[当前消息 · 需要你回应]" in entry.prompt
+            assert "小英(用户): @小码 第一条追问" in entry.prompt
+
+            # 入队后群里又发一条不相关消息（忙轮注入成功不排队）——快照不含。
+            resp2 = await _send_message(client, env.owner_token, group_id, "后来的进展")
+            assert resp2.status_code == 200, resp2.text
+            entries_after = await _list_queued(db_session, shadow.id)
+            assert len(entries_after) == 1
+            assert "后来的进展" not in entries_after[0].prompt
+            assert "第一条追问" in entries_after[0].prompt
 
     async def test_queue_full_returns_409(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
     ) -> None:
+        """降级路径满 5 条 → 409 DaemonSessionQueueFull（排队兜底口径不变）。"""
+        from app.modules.daemon.session.service import (
+            DaemonSessionTurnConflict,
+            SessionService,
+        )
+
         env = await _make_env(db_session)
         data = await _create_group(
             client,
@@ -1434,9 +1574,20 @@ class TestBusyQueue:
         )
         await _seed_pending_queue(db_session, shadow.id, env.owner.id, 5)
 
-        resp = await _send_message(client, env.owner_token, group_id, "@小码 第六条")
-        assert resp.status_code == 409, resp.text
-        assert resp.json()["code"] == "HTTP_409_DAEMON_SESSION_QUEUE_FULL"
+        original = SessionService.inject_session_as_service
+
+        async def always_conflict(self, session_id, **kwargs):
+            if kwargs.get("busy_strategy") == "inject":
+                raise DaemonSessionTurnConflict(
+                    "Session run just went terminal (race).",
+                    details={"session_id": str(session_id)},
+                )
+            return await original(self, session_id, **kwargs)
+
+        with mock_patch.object(SessionService, "inject_session_as_service", always_conflict):
+            resp = await _send_message(client, env.owner_token, group_id, "@小码 第六条")
+            assert resp.status_code == 409, resp.text
+            assert resp.json()["code"] == "HTTP_409_DAEMON_SESSION_QUEUE_FULL"
         # 满员后不新增条目。
         assert len(await _list_queued(db_session, shadow.id)) == 5
 

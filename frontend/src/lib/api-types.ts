@@ -14200,6 +14200,11 @@ export interface components {
              * @default false
              */
             queued: boolean;
+            /**
+             * Mid Turn
+             * @default false
+             */
+            mid_turn: boolean;
         };
         /**
          * GroupMemberUpdate
