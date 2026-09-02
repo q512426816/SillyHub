@@ -2288,6 +2288,26 @@ async def _worker_done_core(
                 signal_at=signal_at,
             )
 
+    # ── 嵌套逐级回叫（孙完成 → 唤醒直接父，防三层互等死锁）──
+    # 生产 ee24ba15 实证：中间层分身派完孙结束自己的轮次后，既有唤醒只有
+    # 「全树完成 → 通知根」一条路，父永不被叫醒 → 不收孙产出、不上报自己的
+    # worker_done → 全树恒未完成、根收不到通知、mission 永不收敛。此处补
+    # 链路：调用会话（孙）的直接父是树内中间层（≠ mission 根）、未 done、
+    # 无活跃 turn（父在轮内可自查 list_workers，不打扰）→ 注入唤醒通知
+    # （幂等父×子粒度，独立事务，失败只记日志由 patrol 职责⑦兜底）。
+    # 与 all_done 无关：孙完成即回叫，全树是否完成由父收尾后自行推进。
+    if worker.parent_session_id is not None and worker.parent_session_id != mission.session_id:
+        from app.modules.agent.mission import _WORKER_SESSION_TERMINAL
+        from app.modules.agent.mission_context import notify_parent_workers_done
+
+        parent = next((w for w in workers if w.id == worker.parent_session_id), None)
+        if parent is not None and parent.worker_done_at is None and parent.id not in active_ids:
+            await notify_parent_workers_done(
+                parent.id,
+                worker.id,
+                child_ok=worker.status not in _WORKER_SESSION_TERMINAL,
+            )
+
     return WorkerDoneResponse(
         mission_id=mission.id,
         session_id=sid,

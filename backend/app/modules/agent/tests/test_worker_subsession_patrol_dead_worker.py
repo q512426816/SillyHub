@@ -594,5 +594,100 @@ class TestDeadWorkerScanMechanics:
         )
 
 
+class TestZombieWaitForceEndHit:
+    """职责⑦②僵尸等待形态（生产 ee24ba15 死锁补口）：会话 active + 未 done +
+    无活跃 turn + 首 run 已终态且 finished_at 超宽限 → 置标解除虚拟 running 卡死。"""
+
+    async def _seed_zombie(
+        self,
+        db: AsyncSession,
+        *,
+        first_run_status: str = "completed",
+        first_run_finished_at: datetime | None = None,
+    ) -> tuple[AgentSession, AgentSession, AgentMission]:
+        """根 + 僵尸分身（active 空闲未 done）+ 首 run（终态可控、时间可控）。"""
+        root, mission, user_id, rt = await _seed_tree(db)
+        worker = await _seed_worker(
+            db,
+            root,
+            owner_id=user_id,
+            runtime=rt,
+            session_status="active",
+        )
+        run = AgentRun(
+            mission_id=mission.id,
+            agent_session_id=worker.id,
+            agent_type="claude_code",
+            status=first_run_status,
+            role="worker",
+            objective="分身首 run",
+            finished_at=first_run_finished_at,
+        )
+        db.add(run)
+        await db.commit()
+        return root, worker, mission
+
+    async def test_zombie_wait_past_grace_marks(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """active 空闲 + 首 run completed + finished_at 超宽限（45min）→ 置标；
+        derive 不再 running（虚拟映射强收放行）。"""
+        _recording_ws_hub(monkeypatch)
+        _root, _worker, mission = await self._seed_zombie(
+            db_session, first_run_finished_at=datetime.now(UTC) - timedelta(minutes=45)
+        )
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["worker_force_ended"] == 1
+        await db_session.refresh(mission)
+        assert (mission.constraints or {}).get(WORKER_FORCE_ENDED_AT_KEY) is not None
+        assert (
+            await mission_derive_status(db_session, mission.id, workers_only=True) != "running"
+        ), "僵尸等待置标后不得再虚拟 running（死锁解除）"
+
+    async def test_zombie_wait_within_grace_not_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """首 run 刚终态（10min < 30min 宽限，嵌套回叫可能仍在途）→ 不标。"""
+        _recording_ws_hub(monkeypatch)
+        _root, _worker, mission = await self._seed_zombie(
+            db_session, first_run_finished_at=datetime.now(UTC) - timedelta(minutes=10)
+        )
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["worker_force_ended"] == 0
+        await db_session.refresh(mission)
+        assert (mission.constraints or {}).get(WORKER_FORCE_ENDED_AT_KEY) is None
+
+    async def test_zombie_wait_first_run_active_not_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """首 run 仍在跑（分身活跃 turn）→ 非僵尸，不标。"""
+        _recording_ws_hub(monkeypatch)
+        _root, _worker, _mission = await self._seed_zombie(
+            db_session, first_run_status="running", first_run_finished_at=None
+        )
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["worker_force_ended"] == 0
+
+    async def test_zombie_wait_no_first_run_not_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无首 run（派发链路异常形态）→ 宽限无时钟起点，不猜不标。"""
+        _recording_ws_hub(monkeypatch)
+        root, mission, user_id, rt = await _seed_tree(db_session)
+        await _seed_worker(db_session, root, owner_id=user_id, runtime=rt, session_status="active")
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["worker_force_ended"] == 0
+        await db_session.refresh(mission)
+        assert (mission.constraints or {}).get(WORKER_FORCE_ENDED_AT_KEY) is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

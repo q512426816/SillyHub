@@ -1083,11 +1083,17 @@ class MissionPatrolService:
         - 扫描对象：**活跃** mission（未收敛未取消，``ACTIVE_MISSION_LIMIT``
           limit + created_at 升序，对齐职责⑥惯例）经
           ``mission_worker_sessions_tree`` 全树枚举（含孙层）；
-        - 死分身判据（全格）：会话终态（ended/failed，词表单源
-          ``mission._WORKER_SESSION_TERMINAL``）+ 未 done（``worker_done_at``
-          空）+ 终态超宽限（``ended_at`` 起算 ≥ 宽限分钟数，见
-          ``_worker_force_end_grace_minutes``；``ended_at`` NULL 脏数据跳过
-          不猜——对齐判死链路断链语义，防误杀刚终态的会话）；
+        - 死分身判据（全格，两形态）：
+          ① 终态形态（原 F01）：会话终态（ended/failed，词表单源
+          ``mission._WORKER_SESSION_TERMINAL``）+ 未 done + ``ended_at`` 起算
+          超宽限（NULL 脏数据跳过不猜）；
+          ② 僵尸等待形态（ee24ba15 死锁补口）：会话 ``active`` + 未 done +
+          **无活跃 turn** + 首 run 已终态（completed/failed/killed）+ 首 run
+          ``finished_at`` 起算超宽限——嵌套分身派完孙结束轮次后等孙结果，
+          若逐级回叫（mcp_tools worker_done 唤醒链）漏叫/注入失败，该分身
+          永远 idle 不会被唤醒也不会 done，虚拟映射恒 running 卡死收敛；
+          置标后由 ``mission_derive_status`` 强收映射按 failed 终态放行
+          awaiting_input 超时收敛；
         - 动作：**只置标记不收口**——死分身会话已终态，无 end_session 收口
           需求（区别于职责⑥「先标记后收口」两步）。``_claim_constraints_marker``
           原子置位 ``constraints.worker_force_ended_at``（F05 同款 DB 侧合并；
@@ -1129,13 +1135,52 @@ class MissionPatrolService:
                 continue
 
             workers = await mission_worker_sessions_tree(self._session, mission_id)
+            # 僵尸等待形态②需要首 run（最早带 role 的 run）终态与 finished_at
+            # 作宽限时钟——与 mission_derive_status 的 first_run 构建同款
+            # （按 created_at 排序 setdefault；主控轮 agent_session_id=根会话
+            #  不在树内 workers，天然不干扰）。
+            from app.modules.agent.control import MissionControlService, sessions_with_active_turns
+
+            first_run_by_session: dict[uuid.UUID, AgentRun] = {}
+            for r in sorted(
+                await MissionControlService(self._session).worker_runs(mission_id),
+                key=lambda x: x.created_at.isoformat() if x.created_at else "",
+            ):
+                if r.agent_session_id is not None and r.role is not None:
+                    first_run_by_session.setdefault(r.agent_session_id, r)
+            active_worker_ids: set[uuid.UUID] = set()
+            active_candidates = [w.id for w in workers if w.status == "active"]
+            if active_candidates:
+                active_worker_ids = set(
+                    await sessions_with_active_turns(self._session, active_candidates)
+                )
+
+            def _is_dead(
+                w: object,
+                *,
+                active_ids: set[uuid.UUID],
+                first_runs: dict[uuid.UUID, AgentRun],
+            ) -> bool:
+                if getattr(w, "worker_done_at", None) is not None:
+                    return False
+                if w.status in _WORKER_SESSION_TERMINAL:
+                    # 形态① 终态：ended_at 起算（NULL 脏数据跳过不猜）。
+                    return w.ended_at is not None and now - _as_utc(w.ended_at) >= grace
+                if w.status == "active" and w.id not in active_ids:
+                    # 形态② 僵尸等待：首 run 终态 + finished_at 起算超宽限。
+                    first = first_runs.get(w.id)
+                    return (
+                        first is not None
+                        and first.status in _TERMINAL_RUN_STATUSES
+                        and first.finished_at is not None
+                        and now - _as_utc(first.finished_at) >= grace
+                    )
+                return False
+
             dead_worker_count = sum(
                 1
                 for w in workers
-                if w.status in _WORKER_SESSION_TERMINAL
-                and w.worker_done_at is None
-                and w.ended_at is not None
-                and now - _as_utc(w.ended_at) >= grace
+                if _is_dead(w, active_ids=active_worker_ids, first_runs=first_run_by_session)
             )
             if dead_worker_count == 0:
                 continue

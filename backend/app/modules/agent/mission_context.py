@@ -265,6 +265,12 @@ def build_worker_briefing(
 _WORKERS_DONE_NOTIFY_TTL_SECONDS = 6 * 3600
 _WORKERS_DONE_NOTIFY_KEY = "mission:workers_done_notified:{mission_id}"
 
+# 嵌套逐级回叫（孙完成 → 唤醒直接父）：幂等键粒度 = 父会话 × 完成分身——同一
+# 分身同一完成波次至多回叫一次（is_new_signal 已挡同波重复 done，键再兜并发）；
+# 不同子分身各自完成各叫一次（父逐个收结果）。TTL 对齐上方 6h。
+_CHILD_WAKE_NOTIFY_TTL_SECONDS = 6 * 3600
+_CHILD_WAKE_NOTIFY_KEY = "mission:child_wake:{parent_id}:{child_session_id}"
+
 
 async def workers_all_terminal_with_stats(
     db: AsyncSession,
@@ -435,5 +441,86 @@ async def notify_orchestrator_workers_done(
         session_id=str(session_id),
         completed=completed,
         failed=failed,
+    )
+    return True
+
+
+async def notify_parent_workers_done(
+    parent_session_id: uuid.UUID,
+    child_session_id: uuid.UUID,
+    *,
+    child_ok: bool,
+) -> bool:
+    """嵌套逐级回叫：子分身完成 → 向**直接父会话**注入唤醒通知。
+
+    背景（生产 ee24ba15 死锁实证）：孙层 worker_done 时既有唤醒只考虑
+    「全树完成 → 通知根会话」；中间层分身（派完孙结束自己的轮次、等孙结果）
+    永远不会被唤醒 → 它不会收孙产出、也不会上报自己的 worker_done →
+    全树恒未完成 → 根收不到通知、patrol awaiting_input 超时被虚拟 running
+    挡住，mission 永不收敛。
+
+    调用方（``_worker_done_core``）保证仅在「新完成信号 + 父为树内中间层 +
+    父无 worker_done + 父无活跃 turn」时调用本函数（父在轮内可自查
+    list_workers，不打扰）。本函数幂等（Redis SETNX 父×子粒度）、独立事务、
+    失败只记日志不抛出（漏叫由 patrol 职责⑦僵尸扫描兜底）。
+
+    Returns:
+        True = 本次注入已派发；False = 已回叫过 / 注入失败（AppError 视为
+        父自会处理，info 不算失败）。
+    """
+    from app.core.db import get_session_factory
+    from app.core.errors import AppError
+    from app.core.redis import get_redis
+    from app.modules.daemon.session.service import SessionService
+
+    key = _CHILD_WAKE_NOTIFY_KEY.format(
+        parent_id=parent_session_id, child_session_id=child_session_id
+    )
+    try:
+        redis = get_redis()
+        acquired = await redis.set(key, "1", nx=True, ex=_CHILD_WAKE_NOTIFY_TTL_SECONDS)
+    except Exception as exc:  # Redis 不可用：退化为「可能重复通知」，不阻断
+        log.warning(
+            "child_wake_notify_redis_failed",
+            parent_session_id=str(parent_session_id),
+            child_session_id=str(child_session_id),
+            error=str(exc),
+        )
+        acquired = True
+    if not acquired:
+        return False
+
+    outcome = "成功" if child_ok else "失败"
+    prompt = (
+        "【系统通知·子分身完成】你派出的子分身已完成（"
+        f"{outcome}）。这是平台在子分身完成时自动注入的通知轮（非用户消息）——"
+        "请用 list_workers 核对明细、get_worker_result 读取其产出；若你的全部"
+        "子分身都已完成，请收尾你的工作并调用 worker_done 上报你的完成。"
+    )
+    try:
+        async with get_session_factory()() as ndb:
+            await SessionService(ndb).inject_session_as_service(parent_session_id, prompt=prompt)
+    except AppError as exc:
+        # 父会话恰好刚起了新一轮（turn 冲突）等：父醒着，自会查到，不视为失败。
+        log.info(
+            "child_wake_notify_inject_skipped",
+            parent_session_id=str(parent_session_id),
+            child_session_id=str(child_session_id),
+            reason=str(exc),
+        )
+        return False
+    except Exception as exc:
+        log.warning(
+            "child_wake_notify_inject_failed",
+            parent_session_id=str(parent_session_id),
+            child_session_id=str(child_session_id),
+            error=str(exc),
+        )
+        return False
+    log.info(
+        "child_wake_notified",
+        parent_session_id=str(parent_session_id),
+        child_session_id=str(child_session_id),
+        child_ok=child_ok,
     )
     return True

@@ -23,7 +23,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun, AgentSession
@@ -72,16 +72,21 @@ async def _seed_tree(
 
 
 async def _add_worker(
-    db: AsyncSession, root: AgentSession, *, worker_done_at: datetime | None = None
+    db: AsyncSession,
+    root: AgentSession,
+    *,
+    worker_done_at: datetime | None = None,
+    parent: AgentSession | None = None,
 ) -> AgentSession:
-    """建分身子会话（parent 挂根，design §5.A 一层枚举）。"""
+    """建分身子会话（parent 缺省挂根；传 ``parent`` 建孙层——嵌套逐级回叫
+    用例形态，design §5.E 全树口径）。"""
     w = AgentSession(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         provider="claude",
         status="active",
         workspace_id=root.workspace_id,
-        parent_session_id=root.id,
+        parent_session_id=(parent.id if parent is not None else root.id),
         worker_done_at=worker_done_at,
     )
     db.add(w)
@@ -682,6 +687,147 @@ class TestSameWaveDoubleSignalRace:
         assert len(injected) == 2
         key = f"mission:workers_done_notified:{mission_id}"
         assert float(fake_redis.store[key]) == pytest.approx(wave2.timestamp(), abs=1e-3)
+
+
+class TestNestedChildWake:
+    """嵌套逐级回叫（生产 ee24ba15 死锁补口）：孙 worker_done → 唤醒直接父
+    （中间层分身）——父空闲未 done 时注入「子分身完成」通知，父在轮内/已
+    done/根直接子形态不注入；幂等父×子粒度（同波重复 done 不双注入）。"""
+
+    async def _seed_nested(
+        self, db_session: AsyncSession
+    ) -> tuple[AgentSession, AgentSession, AgentSession, AgentMission]:
+        """根 + 中间层分身（空闲未 done，首 run 已终态）+ 孙（首 run 已终态）。"""
+        _ws, root, mission = await _seed_tree(db_session)
+        mid = await _add_worker(db_session, root)
+        grand = await _add_worker(db_session, root, parent=mid)
+        await _add_run(
+            db_session,
+            status="completed",
+            agent_session_id=mid.id,
+            mission_id=mission.id,
+            role="impl",
+        )
+        await _add_run(
+            db_session,
+            status="completed",
+            agent_session_id=grand.id,
+            mission_id=mission.id,
+            role="impl",
+        )
+        return root, mid, grand, mission
+
+    @pytest.mark.asyncio
+    async def test_grandchild_done_wakes_idle_parent_not_root(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """孙完成：中间层父空闲未 done → 注入父唤醒；全树未完成（父未 done）
+        → 根不通知（orchestrator_notified False 且无 root 注入）。"""
+        _fake_redis, injected = notify_env
+        root, mid, grand, _mission = await self._seed_nested(db_session)
+
+        resp = await client.post(
+            f"/api/sessions/{grand.id}/missions/worker_done",
+            json={"summary": "孙产出"},
+            headers={**auth_headers, "X-Session-Id": str(grand.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["all_workers_done"] is False
+        assert resp.json()["orchestrator_notified"] is False
+
+        wakes = [(sid, p) for sid, p in injected if sid == mid.id]
+        assert len(wakes) == 1, "空闲中间层父必须被回叫（死锁主修复）"
+        assert "子分身完成" in wakes[0][1]
+        assert all(sid != root.id for sid, _ in injected), "全树未完成不得通知根"
+
+    @pytest.mark.asyncio
+    async def test_parent_with_active_turn_not_woken(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """父在轮内（有活跃 run）→ 不打扰（父可自查 list_workers）。"""
+        _fake_redis, injected = notify_env
+        _root, mid, grand, _mission = await self._seed_nested(db_session)
+        await _add_run(db_session, status="running", agent_session_id=mid.id)
+
+        resp = await client.post(
+            f"/api/sessions/{grand.id}/missions/worker_done",
+            json={"summary": "孙产出"},
+            headers={**auth_headers, "X-Session-Id": str(grand.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert injected == [], "父活跃 turn 不注入；全树未完成也不通知根"
+
+    @pytest.mark.asyncio
+    async def test_parent_already_done_wakes_root_instead(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """父已 done（孙补完即全树完成）→ 不回叫父、按既有链路通知根。"""
+        _fake_redis, injected = notify_env
+        root, mid, grand, _mission = await self._seed_nested(db_session)
+        await db_session.execute(
+            update(AgentSession)
+            .where(AgentSession.id == mid.id)
+            .values(worker_done_at=datetime.now(UTC))
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/sessions/{grand.id}/missions/worker_done",
+            json={"summary": "孙产出"},
+            headers={**auth_headers, "X-Session-Id": str(grand.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["all_workers_done"] is True
+        assert resp.json()["orchestrator_notified"] is True
+        assert injected and injected[0][0] == root.id
+        assert all(sid != mid.id for sid, _ in injected), "已 done 父不再回叫"
+
+    @pytest.mark.asyncio
+    async def test_direct_child_done_does_not_wake_root_as_parent(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """根的直接子完成：parent == mission.session_id → 走「通知根」既有链路，
+        不把根当「中间层父」重复注入。"""
+        _fake_redis, injected = notify_env
+        _ws, root, mission = await _seed_tree(db_session)
+        worker = await _add_worker(db_session, root)
+        await _add_run(
+            db_session,
+            status="completed",
+            agent_session_id=worker.id,
+            mission_id=mission.id,
+            role="impl",
+        )
+
+        resp = await client.post(
+            f"/api/sessions/{worker.id}/missions/worker_done",
+            json={"summary": "产出"},
+            headers={**auth_headers, "X-Session-Id": str(worker.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["orchestrator_notified"] is True
+        # 仅一次注入且目标是根（既有链路），无第二条「子分身完成」注入。
+        assert len(injected) == 1 and injected[0][0] == root.id
+        assert "团队任务" in injected[0][1]
+
+    @pytest.mark.asyncio
+    async def test_redundant_grandchild_done_wakes_parent_once(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """同波冗余 done（无新 turn）不重复回叫父（is_new_signal + SETNX 双挡）。"""
+        _fake_redis, injected = notify_env
+        _root, mid, grand, _mission = await self._seed_nested(db_session)
+
+        for _ in range(2):
+            resp = await client.post(
+                f"/api/sessions/{grand.id}/missions/worker_done",
+                json={"summary": "孙产出"},
+                headers={**auth_headers, "X-Session-Id": str(grand.id)},
+            )
+            assert resp.status_code == 200, resp.text
+
+        wakes = [sid for sid, _ in injected if sid == mid.id]
+        assert wakes == [mid.id], "同一完成波次父只被回叫一次"
 
 
 if __name__ == "__main__":

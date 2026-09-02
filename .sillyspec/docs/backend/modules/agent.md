@@ -111,6 +111,14 @@ finalizer cleanup: git_worktree_remove 传 branch=run.worktree_branch
 mission external 三重防御: ①入口跳过 orchestrator/lease spawn
   ②converge 检测 external 跳过 finalize/cleanup(不 merge/不清 worktree)
   ③路径A 不写 worktree_branch(误进 finalize 也无 branch 可 merge)
+
+worker_done 嵌套逐级回叫(quick-33956fb8): 孙 done 时直接父是树内中间层
+  (≠mission 根)且空闲未 done → notify_parent_workers_done 注入父唤醒
+  (幂等父×子粒度 Redis SETNX 6h)——否则中间层分身派完孙结束轮次后永不被
+  叫醒, 不收孙产出不上报自己的 done, 全树恒未完成死锁(生产 ee24ba15 实证)
+patrol 职责⑦②僵尸等待形态(回叫漏叫兜底): active+未done+无活跃turn+首run
+  终态且 finished_at 超宽限 → 置 worker_force_ended_at; _virtual_status 强收
+  映射同扩该 idle 形态按 failed 终态 → awaiting_input 超时收敛可触发
 ```
 
 ## 注意事项

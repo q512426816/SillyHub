@@ -249,3 +249,18 @@
 根因：置灰换已是最新文案不符合用户预期；sillyspec latest 是周期探测的滞后值会误锁入口
 方案：daemon 按钮保留原文案禁用；sillyspec 按钮回退已最新态，版本门交 daemon 侧现探兜底
 结果：前端 66 passed + tsc 0 错；文档同步；部署待重建 frontend 镜像
+
+## ql-20260902-007-1b07 | 2026-09-02 14:32:20 | 团队任务嵌套分身死锁根治——孙层完成逐级回叫父会话+僵尸等待态强收兜底
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/mcp_tools.py（_worker_done_core 嵌套逐级回叫段）
+- backend/app/modules/agent/mission_context.py（notify_parent_workers_done helper+幂等键）
+- backend/app/modules/agent/patrol.py（职责⑦②僵尸等待判据）
+- backend/app/modules/agent/mission.py（_virtual_status 强收映射扩 idle 形态）
+- backend/app/modules/agent/tests/test_worker_subsession_done.py（TestNestedChildWake 五用例）
+- backend/app/modules/agent/tests/test_worker_subsession_patrol_dead_worker.py（TestZombieWaitForceEndHit 四用例）
+需求：团队任务嵌套分身死锁根治——孙层完成逐级回叫父会话+僵尸等待态强收兜底
+根因：生产 ee24ba15 实证三层互等：孙 worker_done 唤醒只有「全树完成→通知根」无回叫直接父，中间层分身派完孙结束轮次后永不被唤醒不上报 done；_virtual_status 把首 run 成功+会话空闲+未上报映射 running；patrol 职责⑦只扫 ended/failed 终态，active 空闲僵尸不命中——三道防线全漏致 mission 永不收敛
+方案：三层修复：①mcp_tools._worker_done_core 嵌套逐级回叫——孙 done 时直接父为树内中间层且未 done 无活跃 turn 即注入父唤醒（mission_context.notify_parent_workers_done，幂等父×子粒度 Redis SETNX 6h 独立事务）；②patrol 职责⑦扩僵尸等待形态——active+未done+无活跃turn+首 run 终态且 finished_at 超宽限置 worker_force_ended_at；③_virtual_status 强收映射扩 idle 形态按 failed 终态放行 awaiting_input 超时收敛
+结果：worker_done+dead_worker 37 用例（新增 9）+相邻回归 258 全绿；ruff 0 错 mypy 113 文件 0 错；agent.md 关键逻辑同步；待 Docker 重建部署

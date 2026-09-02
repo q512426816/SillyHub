@@ -248,20 +248,26 @@ async def mission_derive_status(
     def _virtual_status(s: AgentSession) -> str:
         # 优先级：done 且无活跃 turn → completed > 强收标记（budget 或 worker
         # 任一，F01）下会话 ended 且未 done → failed（终态，可收敛 degraded）>
-        # 会话终态 failed → failed > 首 run 终态 failed/killed → failed
-        # （ql-20260828-013-a55b：树内 run 从 derive 输入剔除，run 已死的终态
-        # 信息原本完全丢失——run killed 后会话 ended 无强收标记、run failed
-        # 后会话未收敛 active，两种形态虚拟 run 都卡 running 致 mission 永不
-        # 收敛）> 其余（idle 未 done / 追问重开工中 / 无标记 ended 未 done）→
+        # 强收标记下 active + 无活跃 turn + 首 run 已终态（僵尸等待，ee24ba15
+        # 补口）→ failed > 会话终态 failed → failed > 首 run 终态 failed/killed
+        # → failed（ql-20260828-013-a55b：树内 run 从 derive 输入剔除，run 已
+        # 死的终态信息原本完全丢失——run killed 后会话 ended 无强收标记、run
+        # failed 后会话未收敛 active，两种形态虚拟 run 都卡 running 致 mission
+        # 永不收敛）> 其余（idle 未 done / 追问重开工中 / 无标记 ended 未 done）→
         # running。
         if s.worker_done_at is not None and s.id not in active_worker_ids:
             return "completed"
-        if (
-            (budget_force_ended or worker_force_ended)
-            and s.status == "ended"
-            and s.worker_done_at is None
-        ):
-            return "failed"
+        if (budget_force_ended or worker_force_ended) and s.worker_done_at is None:
+            if s.status == "ended":
+                return "failed"
+            # 僵尸等待形态（ee24ba15 死锁补口，patrol 职责⑦②置标后放行）：
+            # active + 无活跃 turn + 首 run 已终态（completed 也算——未上报
+            # done 即异常收尾）→ 强收标记下按 failed 终态，mission 不再恒
+            # running，awaiting_input 超时收敛可触发。
+            if s.status == "active" and s.id not in active_worker_ids:
+                first = first_run_status_by_session.get(s.id)
+                if first is not None:
+                    return "failed"
         if s.status == "failed":
             return "failed"
         if first_run_status_by_session.get(s.id) in ("failed", "killed"):
