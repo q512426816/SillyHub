@@ -3043,12 +3043,32 @@ export async function getSessionUsage(
  * 日志按 run_id 分组返回，run_id 完整保留以便前端区分 turn 边界（D-005@V1）。
  * F7（2026-08-25）：opts.signal 透传 apiFetch（AbortSignal）——仅 resync 重连路径
  * 传入超时信号（TCP 挂起防卡死），其余调用方缺省不设超时，行为不变。
+ *
+ * 群聊体验 quick（2026-09-02）新增可选查询参数（后端已就绪，语义见
+ * openapi get_session_logs 注释）：
+ *   - before：向上加载游标（只返回 timestamp 严格更早的日志，与 limit 组合取
+ *     「游标之前的最新 N 条」升序返回）；
+ *   - q：内容搜索（content ILIKE %q%，可与 after/before 组合）；
+ *   - limit：最新 N 条语义（按 timestamp desc 取 N 再反转升序；缺省=旧全量行为，
+ *     不传参数的既有调用方零影响）。
  */
 export async function getAgentSessionLogs(
   sessionId: string,
-  opts?: { after?: string; signal?: AbortSignal },
+  opts?: {
+    after?: string;
+    before?: string;
+    q?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<AgentRunLogEntry[]> {
-  const qs = opts?.after ? `?after=${encodeURIComponent(opts.after)}` : "";
+  const params = new URLSearchParams();
+  if (opts?.after) params.set("after", opts.after);
+  if (opts?.before) params.set("before", opts.before);
+  if (opts?.q) params.set("q", opts.q);
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const paramStr = params.toString();
+  const qs = paramStr ? `?${paramStr}` : "";
   return apiFetch<AgentRunLogEntry[]>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs${qs}`,
     { signal: opts?.signal },

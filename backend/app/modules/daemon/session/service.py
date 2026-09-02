@@ -6517,6 +6517,8 @@ class SessionService:
         *,
         limit: int = 5000,
         after: datetime | None = None,
+        before: datetime | None = None,
+        q: str | None = None,
     ) -> list[AgentRunLog]:
         """Return all AgentRunLog rows for an owned session, cross-run aggregate.
 
@@ -6525,6 +6527,17 @@ class SessionService:
         拉取，替代全量重放（5000 行 × 50KB 的重连代价）。submit_messages 同批
         日志共用同一 timestamp，纯 timestamp 游标在批次内边界会漏同批后到行，
         调用方应回退 1-2s 重叠窗口并按 log_id 去重（前端已具备该去重）。
+
+        群聊体验 quick（2026-09-02）分页/搜索扩展——三参可与 ``after`` 任意
+        组合：
+
+        - ``before``：向上加载游标——只返回 ``timestamp < before`` 的行（配合
+          ``limit`` 取「游标之前的最新 N 条」实现向上翻页）；
+        - ``q``：``content_redacted`` ILIKE %q% 内容过滤（会话内搜索，模式
+          拼接口径同 change/service 搜索先例）；
+        - ``limit``：**最新 N 条**语义——排序先 desc 取 N 再反转回升序返回
+          （无 ``before`` = 全量中最新 N；有 ``before`` = 游标之前最新 N）。
+          默认 5000 维持原全量行为（既有调用方与 gzip 逻辑零改动）。
 
         D-005@v1: aggregation key is ``AgentRun.agent_session_id`` (the 1:N FK
         to AgentSession), NEVER ``AgentRun.session_id`` (the claude resume id,
@@ -6544,6 +6557,9 @@ class SessionService:
         # 2026-09-01-session-group-chat task-02 / design §5.3：群会话回放读
         # （刷新/重连聚合）参与者制分支——首查未命中时探测群形态（成员表
         # 命中 → workspace admin → 仍 404 不泄露存在性）；chat 零改动。
+        # 群聊体验 quick（2026-09-02）：allow_shadow_member_read=True 额外放行
+        # 影子会话（kind='group_member'）所在群的普通用户成员读日志（成员独立
+        # 时间线视图）——仅本读路径开启，写路径（for_update）不受影响。
         owned = (
             await self._session.execute(
                 select(AgentSession.id).where(
@@ -6559,6 +6575,7 @@ class SessionService:
                 self._session,
                 session_id=session_id,
                 user_id=user_id,
+                allow_shadow_member_read=True,
             )
             if group_session is None:
                 raise DaemonSessionNotFound(
@@ -6601,6 +6618,12 @@ class SessionService:
         )
         if after is not None:
             stmt = stmt.where(AgentRunLog.timestamp > after)
+        # 群聊体验 quick（2026-09-02）：向上加载游标（timestamp < before）与
+        # 内容搜索（ILIKE %q%）。三过滤条件独立叠加，与 after 任意组合。
+        if before is not None:
+            stmt = stmt.where(AgentRunLog.timestamp < before)
+        if q:
+            stmt = stmt.where(AgentRunLog.content_redacted.ilike(f"%{q}%"))
         stmt = (
             stmt.order_by(
                 run_anchor.c.anchor_ts.desc(),

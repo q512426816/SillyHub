@@ -2286,6 +2286,7 @@ function makeGroupListItem(
         runtime_id: "rt-1",
         joined_at: "2026-09-01T00:00:00Z",
         shadow_status: "none",
+        team_enabled: false,
       },
       {
         id: "mem-2",
@@ -2294,6 +2295,7 @@ function makeGroupListItem(
         user_id: "u-lin",
         joined_at: "2026-09-01T00:00:00Z",
         shadow_status: "none",
+        team_enabled: false,
       },
     ],
     online_member_ids: [],
@@ -2403,6 +2405,80 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
     expect(
       await screen.findByRole("button", { name: "群聊 前端攻坚小分队" }),
     ).toBeTruthy();
+  });
+});
+
+// ── 11b. 群行「@我」未读提示（群聊体验 quick，2026-09-02）─────────────────
+
+describe("SessionListPanel 群行 @我未读提示（quick）", () => {
+  beforeEach(() => {
+    // 已读记忆隔离（group-unread key；跨用例残留会让未读用例误判已读）。
+    window.localStorage.removeItem("sillyhub-group-last-open-g-1");
+  });
+
+  it("last_mention 晚于已读记忆 → 行首红点 + [有人@我] 前缀；mention 摘要进 title", async () => {
+    // 从未打开过群（无已读记忆）→ 恒未读。
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem({
+        last_mention: {
+          content: "@鲸落 看下这个白屏",
+          ts: "2026-09-02T03:00:00Z",
+          member_name: "小码",
+        },
+      }),
+    ]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+
+    const row = await screen.findByTestId("group-chat-row");
+    expect(row.getAttribute("data-mention-unread")).toBe("true");
+    expect(
+      screen.getByTestId("group-mention-unread-dot"),
+    ).toBeTruthy();
+    expect(screen.getByTestId("group-mention-unread-badge").textContent).toBe(
+      "[有人@我]",
+    );
+    // aria-label 带未读语义（读屏可感知）。
+    expect(
+      screen.getByRole("button", { name: "群聊 前端攻坚小分队（有人@我）" }),
+    ).toBeTruthy();
+    // 摘要行 title 提及者 + 内容（微信式列表预览）。
+    expect(row.querySelector('[title="小码：@鲸落 看下这个白屏"]')).toBeTruthy();
+  });
+
+  it("已读（本地打开时间新于 mention）→ 无红点无前缀，摘要行原样", async () => {
+    window.localStorage.setItem(
+      "sillyhub-group-last-open-g-1",
+      "2026-09-02T04:00:00.000Z",
+    );
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem({
+        last_mention: {
+          content: "@鲸落 看下这个白屏",
+          ts: "2026-09-02T03:00:00Z",
+          member_name: "小码",
+        },
+      }),
+    ]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+
+    const row = await screen.findByTestId("group-chat-row");
+    expect(row.getAttribute("data-mention-unread")).toBeNull();
+    expect(screen.queryByTestId("group-mention-unread-dot")).toBeNull();
+    expect(screen.queryByTestId("group-mention-unread-badge")).toBeNull();
+    // aria-label 回到基础形态。
+    expect(
+      screen.getByRole("button", { name: "群聊 前端攻坚小分队" }),
+    ).toBeTruthy();
+  });
+
+  it("无 last_mention（后端 null）→ 零未读渲染（不误报）", async () => {
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem({ last_mention: null }),
+    ]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+    const row = await screen.findByTestId("group-chat-row");
+    expect(row.getAttribute("data-mention-unread")).toBeNull();
+    expect(screen.queryByTestId("group-mention-unread-dot")).toBeNull();
   });
 });
 

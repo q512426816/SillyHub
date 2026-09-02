@@ -15002,7 +15002,7 @@
           "daemon"
         ],
         "summary": "Get Session Logs",
-        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。",
+        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。\n\n群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数\n（语义见各 Query description）；缺省时调用形态与原端点逐字节等价\n（after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读\n放行普通群成员读 logs，见 get_group_accessible_session）。",
         "operationId": "get_session_logs_api_daemon_sessions__session_id__logs_get",
         "parameters": [
           {
@@ -15033,6 +15033,64 @@
               "title": "After"
             },
             "description": "增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp 严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应回退 1-2s 重叠窗口并按 log_id 去重"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回",
+              "title": "Before"
+            },
+            "description": "向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合",
+              "title": "Q"
+            },
+            "description": "内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为）",
+              "title": "Limit"
+            },
+            "description": "最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为）"
           }
         ],
         "responses": {
@@ -40172,6 +40230,20 @@
               }
             ],
             "title": "Last Message"
+          },
+          "last_mention": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Mention"
           }
         },
         "type": "object",
@@ -40186,7 +40258,7 @@
           "created_at"
         ],
         "title": "GroupChatListItemRead",
-        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。"
+        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。"
       },
       "GroupChatRead": {
         "properties": {
@@ -40426,6 +40498,12 @@
             ],
             "title": "Agent Profile Id",
             "description": "智能体方案（AgentProfile）"
+          },
+          "team_enabled": {
+            "type": "boolean",
+            "title": "Team Enabled",
+            "description": "团队能力（可派分身并行执行子任务；仅 Claude 引擎支持）",
+            "default": false
           }
         },
         "type": "object",
@@ -40560,6 +40638,11 @@
               }
             ],
             "title": "Agent Profile Id"
+          },
+          "team_enabled": {
+            "type": "boolean",
+            "title": "Team Enabled",
+            "default": false
           },
           "config_snapshot": {
             "anyOf": [
@@ -40761,6 +40844,17 @@
               }
             ],
             "title": "Agent Profile Id"
+          },
+          "team_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Enabled"
           }
         },
         "type": "object",

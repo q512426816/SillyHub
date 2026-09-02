@@ -804,3 +804,102 @@ describe("CreateGroupWizard 六要素校验（task-07 acceptance）", () => {
     );
   });
 });
+
+// ── 5. 团队能力开关（quick 群成员团队能力）─────────────────────────────────
+
+describe("CreateGroupWizard 团队能力开关（quick 群成员团队能力）", () => {
+  /**
+   * 在「当前可见」下拉里选指定文案选项——antd 关闭的下拉仍挂载在 DOM（隐藏），
+   * 全文找首个匹配会命中早前开过的下拉残留（如机器下拉的「Codex」），故按
+   * ``.ant-select-dropdown:not(.ant-select-dropdown-hidden)`` 作用域锚定。
+   */
+  async function chooseVisibleOption(selectId: string, optionText: string) {
+    openAntdSelect(selectId);
+    const option = await waitFor(() => {
+      const visible = [
+        ...document.querySelectorAll(
+          ".ant-select-dropdown:not(.ant-select-dropdown-hidden)",
+        ),
+      ];
+      const hit = visible
+        .flatMap((d) => [...d.querySelectorAll(".ant-select-item-option-content")])
+        .find((el) => el.textContent?.trim() === optionText);
+      if (!hit) throw new Error(`visible option "${optionText}" not found`);
+      return hit as HTMLElement;
+    });
+    const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+    fireEvent.mouseDown(optionRow);
+    fireEvent.click(optionRow);
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  /** 三步走到 ③ 并加一张卡（昵称/机器/工作区就绪，可提交）。 */
+  async function setupCard() {
+    renderWizard(
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "群" },
+    });
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /添加 Agent 成员/ }),
+    );
+    fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+      target: { value: "小码" },
+    });
+    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+  }
+
+  it("开启团队能力 → 提交 payload agent_members[].team_enabled=true", async () => {
+    await setupCard();
+
+    const teamSwitch = screen.getByLabelText("Agent 成员 1 团队能力");
+    expect(teamSwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(teamSwitch);
+    expect(teamSwitch.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    const json = mocks.apiFetch.mock.calls[0]![1]!.json as {
+      agent_members: { team_enabled: boolean }[];
+    };
+    expect(json.agent_members[0]!.team_enabled).toBe(true);
+  });
+
+  it("默认关 → payload team_enabled=false（生成版类型必填显式传）", async () => {
+    await setupCard();
+
+    fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    const json = mocks.apiFetch.mock.calls[0]![1]!.json as {
+      agent_members: { team_enabled: boolean }[];
+    };
+    expect(json.agent_members[0]!.team_enabled).toBe(false);
+  });
+
+  it("引擎切 Codex → 开关禁用 + 已开联动关闭（payload team_enabled=false）", async () => {
+    await setupCard();
+
+    // claude 下开启 → 切 Codex：开关禁用且联动回关。
+    const teamSwitch = screen.getByLabelText("Agent 成员 1 团队能力");
+    fireEvent.click(teamSwitch);
+    expect(teamSwitch.getAttribute("aria-checked")).toBe("true");
+    await chooseVisibleOption("cgw-engine-0", "Codex");
+    expect(teamSwitch).toBeDisabled();
+    expect(teamSwitch.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    const json = mocks.apiFetch.mock.calls[0]![1]!.json as {
+      agent_members: { team_enabled: boolean; provider: string }[];
+    };
+    expect(json.agent_members[0]!.provider).toBe("codex");
+    expect(json.agent_members[0]!.team_enabled).toBe(false);
+  });
+});

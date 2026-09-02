@@ -17,9 +17,10 @@
  * 结构（独立组件，由 task-08 群聊面板挂载；本卡在 sessions-portal
  * GroupChatPanelMount 占位内以右列形态先行渲染）：
  *   - Agent 成员区：六要素卡片（昵称/机器/工作区/引擎/模型/方案——config_snapshot
- *     JSON 自取键容错）+ shadow_status 徽标（active 在线 / pending 待建 /
- *     none 未建 / ended 已结束 / failed 异常）+「切换配置」热切换弹窗 +
- *     「重置记忆」+「移除」（群主可见）；
+ *     JSON 自取键容错）+ 团队能力开关（quick 群成员团队能力：PATCH team_enabled，
+ *     热切换走重建分支——确认弹窗照机器组惯例；仅 Claude 可开）+ shadow_status
+ *     徽标（active 在线 / pending 待建 / none 未建 / ended 已结束 / failed 异常）
+ *     +「切换配置」热切换弹窗 +「重置记忆」+「移除」（群主可见）；
  *   - 用户成员区：头像 + 昵称 + 在线绿点（online_member_ids 命中 user_id，
  *     presence 数据源）/ 离线灰点 + 群主标识 + 移除按钮（群主可见，confirm 后
  *     removeGroupMember）；
@@ -33,11 +34,12 @@
  * _require_group_owner），前端按钮按 isOwner 门控。
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Button, Modal, Select } from "antd";
+import { Button, Modal, Select, Switch, Tooltip } from "antd";
 import { Plus, UserMinus } from "lucide-react";
 
+import { ShadowSessionViewer } from "@/components/group-chat/shadow-session-viewer";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
 import { errMessage, useNotify } from "@/lib/errors";
@@ -166,6 +168,9 @@ export function MemberPanel({
 }: MemberPanelProps) {
   const notify = useNotify();
   const [switching, setSwitching] = useState<GroupMemberRead | null>(null);
+  /* ── 群聊体验 quick（2026-09-02）：影子会话查看器——agent 卡整卡点击打开
+   *    （群主 + 普通成员都可看，后端已放行影子会话 logs 只读）。 ── */
+  const [viewingShadow, setViewingShadow] = useState<GroupMemberRead | null>(null);
 
   // 工作区名解析（六要素「工作区」行展示 + 热切换弹窗选项共用）。
   const workspacesQ = useQuery({
@@ -264,6 +269,25 @@ export function MemberPanel({
     },
   });
 
+  /* ── quick 群成员团队能力：PATCH team_enabled（热切换归机器组重建分支——
+   *    stage 随 lease 建时定，须重建影子才能换工具注入，UI 照机器组切换
+   *    「重建重置记忆」确认惯例）。 ── */
+  const teamMutation = useMutation({
+    mutationFn: (vars: { memberId: string; teamEnabled: boolean }) =>
+      updateGroupMember(group.id, vars.memberId, {
+        team_enabled: vars.teamEnabled,
+      }),
+    onSuccess: (member) => {
+      refreshAnd(
+        `已${member.team_enabled ? "开启" : "关闭"}「${member.display_name}」的团队能力` +
+          "（影子会话将重建，独立记忆已重置）",
+      );
+    },
+    onError: (err) => {
+      notify.error(errMessage(err, "切换团队能力失败，请稍后重试"));
+    },
+  });
+
   /* ── quick 群成员头像自定义：换头像 / 恢复默认（PATCH members/{mid}
    *    avatar——后端 None=不改、空串=清除；上传管线同建群向导）。 ── */
   const avatarMutation = useMutation({
@@ -304,6 +328,36 @@ export function MemberPanel({
       cancelText: "取消",
       onOk: () => resetMemoryMutation.mutate(member.id),
     });
+  };
+
+  /**
+   * 切换团队能力（quick 群成员团队能力）：走后端机器组重建分支——弹
+   * 「将重建影子会话并重置独立记忆」确认（design §4.5 机器组切换同惯例）。
+   */
+  const confirmToggleTeam = (member: GroupMemberRead, next: boolean) => {
+    Modal.confirm({
+      title: `${next ? "开启" : "关闭"}「${member.display_name}」的团队能力？`,
+      content: next
+        ? "开启后该成员可派分身并行执行子任务。将重建其影子会话并重置独立记忆（历史群聊记录不受影响）。"
+        : "关闭后该成员不再可用分身协作。将重建其影子会话并重置独立记忆（历史群聊记录不受影响）。",
+      okText: "确认切换",
+      cancelText: "取消",
+      onOk: () =>
+        teamMutation.mutate({ memberId: member.id, teamEnabled: next }),
+    });
+  };
+
+  /** agent 卡整卡点击 → 打开影子会话查看器（内嵌按钮/开关不透传，防误开）。 */
+  const handleAgentCardClick = (member: GroupMemberRead) => (e: MouseEvent<HTMLDivElement>) => {
+    if (!member.shadow_session_id) return;
+    if (
+      (e.target as HTMLElement).closest(
+        "button, a, input, textarea, [role='switch'], [role='button'], label",
+      )
+    ) {
+      return;
+    }
+    setViewingShadow(member);
   };
 
   return (
@@ -347,11 +401,18 @@ export function MemberPanel({
       )}
       {agentMembers.map((member) => {
         const status = shadowStatusMeta(member.shadow_status);
+        // quick 影子会话查看器：有影子会话即可整卡点击查看时间线（title 提示）。
+        const shadowViewable = member.shadow_session_id != null;
         return (
           <div
             key={member.id}
             data-testid={`agent-member-card-${member.id}`}
-            className="mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm"
+            onClick={handleAgentCardClick(member)}
+            title={shadowViewable ? "点击查看该成员的影子会话时间线" : undefined}
+            className={cn(
+              "mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm",
+              shadowViewable && "cursor-pointer transition-colors hover:border-brand-300",
+            )}
           >
             {/* 卡片头：头像 + 昵称 + 影子状态徽标（原型 .ac-head；quick：
                 avatar 有值→图片，无值→首字回退） */}
@@ -408,6 +469,39 @@ export function MemberPanel({
                 {snapshotString(member, "profile_name") ?? "默认"}
               </dd>
             </dl>
+            {/* 团队能力（quick 群成员团队能力）：全员可见展示；群主可切换
+                （PATCH team_enabled → 机器组重建分支，确认弹窗）；仅 Claude
+                引擎可开（codex 禁用 + tooltip，与建群向导同口径） */}
+            <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
+              <Tooltip
+                title={
+                  (member.provider ?? "claude") !== "claude"
+                    ? "团队能力仅支持 Claude 引擎"
+                    : undefined
+                }
+              >
+                <Switch
+                  size="small"
+                  checked={member.team_enabled}
+                  disabled={
+                    !isOwner ||
+                    (member.provider ?? "claude") !== "claude" ||
+                    teamMutation.isPending
+                  }
+                  onChange={(checked) => confirmToggleTeam(member, checked)}
+                  aria-label={`切换 ${member.display_name} 团队能力`}
+                  data-testid={`team-switch-${member.id}`}
+                />
+              </Tooltip>
+              <span className="text-[11px] font-medium text-muted-foreground">
+                团队能力
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                {member.team_enabled
+                  ? "已开启 · 可派分身并行干活"
+                  : "未开启"}
+              </span>
+            </div>
             {/* 操作（群主可见——后端 update/reset 端点 owner 强校验；quick
                 头像：换头像上传件随行，onChange 直调 PATCH） */}
             {isOwner && (
@@ -561,6 +655,17 @@ export function MemberPanel({
           onSubmit={(payload) =>
             switchMutation.mutate({ memberId: switching.id, payload })
           }
+        />
+      )}
+
+      {/* quick 影子会话查看器（antd Drawer 全宽抽屉，Portal 挂 body——320px 右栏
+          内嵌不下长时间线，CLAUDE.md 侧栏内宽内容走浮层惯例）。 */}
+      {viewingShadow && viewingShadow.shadow_session_id && (
+        <ShadowSessionViewer
+          open
+          onClose={() => setViewingShadow(null)}
+          shadowSessionId={viewingShadow.shadow_session_id}
+          memberName={viewingShadow.display_name}
         />
       )}
     </aside>

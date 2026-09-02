@@ -438,6 +438,8 @@ def test_agent_group_chat_table_contract() -> None:
         "id",
         "session_id",
         "workspace_id",
+        # quick 群 PPM 项目化（20260902100000）：群挂 PPM 项目（存量行 NULL）。
+        "project_id",
         "title",
         "created_by",
         "agent_cross_mention",
@@ -486,12 +488,15 @@ def test_agent_group_member_table_contract() -> None:
         "group_id",
         "member_type",
         "display_name",
+        # quick 成员头像（20260902100000）：用户与 agent 成员共用。
+        "avatar",
         "user_id",
         "runtime_id",
         "workspace_id",
         "provider",
         "llm_provider_id",
         "agent_profile_id",
+        "team_enabled",
         "config_snapshot",
         "shadow_session_id",
         "shadow_status",
@@ -518,6 +523,7 @@ def test_agent_group_member_defaults() -> None:
     assert member.provider is None
     assert member.llm_provider_id is None
     assert member.agent_profile_id is None
+    assert member.team_enabled is False  # quick 群成员团队能力：默认关
     assert member.config_snapshot is None
     assert member.shadow_session_id is None
     assert member.invited_by is None

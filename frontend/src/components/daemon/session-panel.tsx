@@ -72,7 +72,7 @@
  *     错误提示；page 与 dialog 双模式同批接线。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
@@ -89,17 +89,19 @@ import {
   Plus,
   Puzzle,
   RefreshCw,
+  Search,
   Square,
   TriangleAlert,
   Users,
   Zap,
 } from "lucide-react";
-import { Badge, Button, Spin, Tag } from "antd";
+import { Badge, Button, Input, Spin, Tag } from "antd";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import {
   applyLogToSegments,
+  classifySessionLog,
   createEmptyAssembledTurn,
   extractPreambleText,
   finishTurn,
@@ -141,7 +143,7 @@ import {
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { ApiError } from "@/lib/api";
 import type { MainAgentConfig, WorkerPresetItem } from "@/lib/agent";
-import { useNotify } from "@/lib/errors";
+import { errMessage, useNotify } from "@/lib/errors";
 import { isActiveTeamMission } from "@/components/daemon/team-task-block";
 import { ActivityCatalog, type AgentTaskEntry } from "@/components/daemon/activity-catalog";
 import {
@@ -161,6 +163,7 @@ import type {
   BashChunkEvent,
   AgentTaskStatusEvent,
 } from "@/lib/daemon";
+import type { AgentRunLogEntry } from "@/lib/agent";
 import {
   type LlmProviderRead,
   type LlmProviderRoleMapping,
@@ -530,6 +533,42 @@ interface TurnState {
 }
 
 const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
+
+/**
+ * 群聊体验 quick（2026-09-02）：初始历史窗口条数（logs 端点 limit=最新 N 条
+ * 升序）。「加载更早消息」按钮同页距翻页（before 游标）。满页即视为可能还有
+ * 更早（< 页距 = 已到头，按钮隐藏）。
+ */
+const HISTORY_PAGE_SIZE = 100;
+
+/** quick 会话内搜索：结果行展示文本（user_input 原文 / stdout 剥前缀取回复段）。 */
+function searchResultText(log: AgentRunLogEntry): string {
+  const content = log.content_redacted ?? "";
+  if (log.channel === "user_input") return content;
+  const seg = classifySessionLog(content, log.channel, log.tool_kind);
+  return seg?.kind === "reply" ? seg.text : content;
+}
+
+/** quick 会话内搜索：结果行渠道标签。 */
+function searchResultLabel(log: AgentRunLogEntry): string {
+  if (log.channel === "user_input") return "用户";
+  if (log.channel === "stdout") return "回复";
+  return "日志";
+}
+
+/** quick 会话内搜索：命中高亮（简单 <mark>，首次出现、大小写不敏感）。 */
+function highlightSearchHit(text: string, term: string): ReactNode {
+  if (!term) return text;
+  const idx = text.toLowerCase().indexOf(term.toLowerCase());
+  if (idx < 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark data-testid="session-search-hit">{text.slice(idx, idx + term.length)}</mark>
+      {text.slice(idx + term.length)}
+    </>
+  );
+}
 
 /* ────────────────────── task-11（2026-08-22-team-session-unify）：会话内团队触发（page/dialog 共用） ────────────────────── */
 
@@ -1273,6 +1312,18 @@ function SessionPanelPage({
   // ── 实时 turn 状态机（对齐 interactive-session-panel 的 SSE 处理）───────
   const [turnState, setTurnState] = useState<TurnState>(INITIAL_TURN_STATE);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // ── 群聊体验 quick（2026-09-02）：历史窗口化 + 会话内搜索（克制最小改）──
+  // 初始历史改 limit=100 起步（HISTORY_PAGE_SIZE），时间线顶部「加载更早消息」
+  // 按钮 before 游标 prepend（resync after 增量不受影响——cursor 语义不变）。
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [hasEarlier, setHasEarlier] = useState(false);
+  const historyCursorRef = useRef<string | null>(null);
+  // 会话内搜索（头部搜索 icon → 输入回车 q 查询 → 结果浮层；点击条目即关闭，
+  // 不做跳转定位——最小可用）。
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<AgentRunLogEntry[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [pendingRequests, setPendingRequests] = useState<
     SessionPermissionRequest[]
   >([]);
@@ -1466,6 +1517,14 @@ function SessionPanelPage({
     currentRunIdRef.current = null;
     // task-03：随队列清空（hook 同按 sessionId 切换清队）一并丢弃附件元数据镜像。
     attachmentMetaRef.current.clear();
+    // quick 历史窗口化：换会话重置「加载更早」游标/翻页态 + 清搜索浮层状态。
+    historyCursorRef.current = null;
+    setHasEarlier(false);
+    setHistoryLoading(false);
+    setSearchOpen(false);
+    setSearchTerm("");
+    setSearchResults(null);
+    setSearching(false);
 
     // ql-20260827-018：历史预取改 await **先回灌再建流**——原并行时活跃会话
     // SSE 先到建 turn，回灌条件（prev.turns 空）不满足 → 历史被整体丢弃，
@@ -1476,9 +1535,16 @@ function SessionPanelPage({
       let streamCursor: string | undefined;
       let initialSync = false;
       try {
-        const logs = await getAgentSessionLogs(sessionId);
+        // quick：limit=100 起步（最新 100 条日志窗口）——resync 游标语义不变
+        //（after=maxLogTimestamp 仍只增量拉窗口之后），更早走「加载更早消息」。
+        const logs = await getAgentSessionLogs(sessionId, {
+          limit: HISTORY_PAGE_SIZE,
+        });
         if (cancelled) return;
         streamCursor = maxLogTimestamp(logs);
+        // 翻页游标 = 窗口内最早行 ts；满页即可能还有更早（按钮可见）。
+        historyCursorRef.current = logs[0]?.timestamp ?? null;
+        setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
         const restored = logsToTurns(logs);
         setTurnState((prev) => {
           // 预取窗口内用户抢先发送的占位轮（__pending_inject_*）不覆盖——
@@ -1790,6 +1856,63 @@ function SessionPanelPage({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  // ── quick（2026-09-02 群聊体验）：加载更早消息（before 游标 prepend）─────
+  // 装配层为 turn 形态（logsToTurns run 分组）——更老日志独立装配成 turns 后
+  // 头部拼接；realRunId 已在当前 turns 的轮跳过（长 run 跨游标边界时防双条，
+  // 该轮更早段丢弃属可接受降级，正常轮不跨游标）。resync/增量路径零改动。
+  const handleLoadEarlier = useCallback(async () => {
+    if (!sessionId || historyLoading || !hasEarlier) return;
+    const cursor = historyCursorRef.current;
+    if (!cursor) return;
+    setHistoryLoading(true);
+    try {
+      const older = await getAgentSessionLogs(sessionId, {
+        before: cursor,
+        limit: HISTORY_PAGE_SIZE,
+      });
+      historyCursorRef.current = older[0]?.timestamp ?? null;
+      setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
+      const olderTurns = logsToTurns(older);
+      if (olderTurns.length > 0) {
+        setTurnState((prev) => {
+          const knownRunIds = new Set(
+            prev.turns.map((t) => t.realRunId ?? t.runId),
+          );
+          const fresh = olderTurns.filter(
+            (t) => !knownRunIds.has(t.realRunId ?? t.runId),
+          );
+          return fresh.length > 0 ? { ...prev, turns: [...fresh, ...prev.turns] } : prev;
+        });
+      }
+    } catch {
+      /* 翻页失败静默（按钮可重试；不干扰实时流）。 */
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [sessionId, historyLoading, hasEarlier]);
+
+  /** quick 会话内搜索：q 全量查询（limit=100），结果浮层展示。 */
+  const handleSessionSearch = useCallback(async () => {
+    const q = searchTerm.trim();
+    if (!sessionId || !q || searching) return;
+    setSearching(true);
+    try {
+      const hits = await getAgentSessionLogs(sessionId, { q, limit: 100 });
+      setSearchResults(hits);
+    } catch (err) {
+      notify.error(errMessage(err, "搜索失败，请稍后重试"));
+    } finally {
+      setSearching(false);
+    }
+  }, [searchTerm, sessionId, searching, notify]);
+
+  /** quick 搜索浮层收起 + 清空（恢复关闭态；不回滚时间线——搜索只读不侵入）。 */
+  const resetSessionSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchTerm("");
+    setSearchResults(null);
+  }, []);
 
   // ── pending AskUser 对话 + 问答历史恢复（REST，SSE 只推实时增量）────────
   // task-03（R-01）：对齐 dialog 版守卫（:2129/:2157 先例）——预会话态不发起
@@ -3260,36 +3383,52 @@ function SessionPanelPage({
   const sessionBody = isToolReportBody ? (
     <AgentLogSessionBody sessionId={session.id} />
   ) : (
-    <TurnTimeline
-      turns={displayTurns}
-      viewMode={viewMode}
-      errorMsg={errorMsg}
-      sessionStatus={
-        ended
-          ? session.status === "failed"
-            ? "failed"
-            : "ended"
-          : restoring
-            ? "reconnecting"
-            : "active"
-      }
-      pendingRequests={pendingRequests}
-      dialogHistory={dialogHistory}
-      onDialogResolved={handleDialogResolved}
-      onResend={(prompt) => {
-        void handleResend(prompt);
-      }}
-      onSwitchProvider={() => {
-        if (typeof window !== "undefined") {
-          window.location.assign("/settings");
+    <>
+      {/* quick（2026-09-02）：时间线顶部「加载更早消息」按钮（初始历史窗口化
+          limit=100 起步，翻页 prepend；满页才显示，到头自动隐藏）。 */}
+      {hasEarlier && (
+        <div className="flex shrink-0 justify-center py-1.5">
+          <Button
+            size="small"
+            data-testid="session-load-earlier"
+            loading={historyLoading}
+            onClick={() => void handleLoadEarlier()}
+          >
+            加载更早消息
+          </Button>
+        </div>
+      )}
+      <TurnTimeline
+        turns={displayTurns}
+        viewMode={viewMode}
+        errorMsg={errorMsg}
+        sessionStatus={
+          ended
+            ? session.status === "failed"
+              ? "failed"
+              : "ended"
+            : restoring
+              ? "reconnecting"
+              : "active"
         }
-      }}
-      hasOnlineProvider={machineOnline}
-      emptyProviderLabel={
-        PROVIDER_META[session.provider]?.label ?? session.provider
-      }
-      streamFooter={<AgentLogCard sessionId={session.id} />}
-    />
+        pendingRequests={pendingRequests}
+        dialogHistory={dialogHistory}
+        onDialogResolved={handleDialogResolved}
+        onResend={(prompt) => {
+          void handleResend(prompt);
+        }}
+        onSwitchProvider={() => {
+          if (typeof window !== "undefined") {
+            window.location.assign("/settings");
+          }
+        }}
+        hasOnlineProvider={machineOnline}
+        emptyProviderLabel={
+          PROVIDER_META[session.provider]?.label ?? session.provider
+        }
+        streamFooter={<AgentLogCard sessionId={session.id} />}
+      />
+    </>
   );
 
   return (
@@ -3406,6 +3545,90 @@ function SessionPanelPage({
               ))}
             </div>
           )}
+          {/* quick（2026-09-02）：会话内搜索——icon 展开输入浮层，回车 q 查询
+              （limit=100）结果列表展示（点击条目关闭；清空/再点 icon 收起恢复）。 */}
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              aria-label="搜索会话记录"
+              aria-expanded={searchOpen}
+              title="搜索会话记录"
+              data-testid="session-search-toggle"
+              onClick={() => (searchOpen ? resetSessionSearch() : setSearchOpen(true))}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Search aria-hidden className="h-4 w-4" />
+            </button>
+            {searchOpen && (
+              <div
+                data-testid="session-search-popover"
+                className="absolute right-0 top-full z-30 mt-1 w-[380px] max-w-[min(380px,calc(100vw-2rem))] rounded-md border border-border bg-card p-2 shadow-lg"
+              >
+                <Input
+                  data-testid="session-search-input"
+                  aria-label="搜索会话记录"
+                  placeholder="输入关键词，回车搜索（最多 100 条）"
+                  size="small"
+                  autoFocus
+                  value={searchTerm}
+                  disabled={searching}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onPressEnter={() => void handleSessionSearch()}
+                />
+                {searching && (
+                  <div className="flex justify-center py-3">
+                    <Spin size="small" />
+                  </div>
+                )}
+                {!searching && searchResults && (
+                  <div
+                    data-testid="session-search-results"
+                    className="mt-1.5 max-h-80 overflow-y-auto"
+                  >
+                    <p className="px-1 pb-1 text-[11px] text-muted-foreground">
+                      {searchResults.length > 0
+                        ? `「${searchTerm.trim()}」命中 ${searchResults.length} 条${
+                            searchResults.length >= 100 ? "（仅前 100 条）" : ""
+                          }——点击条目关闭`
+                        : `未找到匹配「${searchTerm.trim()}」的记录`}
+                    </p>
+                    {searchResults.map((log) => {
+                      const text = searchResultText(log);
+                      return (
+                        <button
+                          key={log.id}
+                          type="button"
+                          data-testid="session-search-result-item"
+                          onClick={resetSessionSearch}
+                          className="block w-full rounded px-1.5 py-1.5 text-left transition-colors hover:bg-muted/60"
+                        >
+                          <span className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+                            <span className="shrink-0 rounded bg-muted px-1 py-px font-semibold">
+                              {searchResultLabel(log)}
+                            </span>
+                            <span className="shrink-0">
+                              {log.timestamp
+                                ? new Date(log.timestamp).toLocaleString("zh-CN", {
+                                    month: "2-digit",
+                                    day: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: false,
+                                  })
+                                : ""}
+                            </span>
+                          </span>
+                          <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-foreground">
+                            {highlightSearchHit(text, searchTerm.trim())}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <Button
             size="small"
             icon={<Ban className="h-3 w-3" />}

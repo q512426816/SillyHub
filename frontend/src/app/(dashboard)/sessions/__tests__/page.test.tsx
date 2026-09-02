@@ -577,7 +577,8 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
         expect.any(Object),
       );
     });
-    expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1");
+    // quick（2026-09-02 群聊体验）：初始历史改 limit=100 窗口（更早走「加载更早」）。
+    expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", { limit: 100 });
     expect(mocks.getAgentSession).toHaveBeenCalledWith("s-1");
   });
 
@@ -1037,7 +1038,10 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
     // 历史先回灌：detail 未到前面板显 Spin（!session 分支），但 logs 恢复在
     // mount effect 内已落 turnState（此刻 logsToTurns 全 completed）。
     await waitFor(() => {
-      expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1");
+      // quick：初始历史窗口化（limit=100，同 :580 适配）。
+      expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1", {
+        limit: 100,
+      });
     });
     await act(async () => {}); // flush 回灌 microtask 链（确保先于 detail 落地）
 
@@ -1323,5 +1327,121 @@ describe("机器筛选 tab 接入共享机器（quick 机器行修复）", () =>
     expect(
       await screen.findByRole("button", { name: /机器tab 共享的机器/ }),
     ).toBeTruthy();
+  });
+});
+
+// ── quick（2026-09-02 群聊体验）：单聊面板补能力——加载更早消息 + 会话内搜索 ──
+
+describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+  function quickLog(
+    id: string,
+    runId: string,
+    channel: string,
+    content: string,
+    timestamp: string,
+  ) {
+    return {
+      id,
+      run_id: runId,
+      timestamp,
+      channel,
+      content_redacted: content,
+      parent_tool_use_id: null,
+      subagent_type: null,
+      depth: null,
+      tool_kind: null,
+    };
+  }
+
+  it("满页（100 条）→「加载更早消息」按钮出现；点击 before 游标拉更老 prepend；不满页按钮隐藏", async () => {
+    // 初始窗口满页：1 run 内 100 条（1 user_input + 99 stdout，turn DOM 轻）。
+    const fullPage = [
+      quickLog("q-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+      ...Array.from({ length: 99 }, (_, i) =>
+        quickLog(
+          `q-out-${i}`,
+          "r-cur",
+          "stdout",
+          `窗口内输出 ${i}`,
+          "2026-08-15T08:00:00Z",
+        ),
+      ),
+    ];
+    const older = [
+      quickLog("q-old-inj", "r-old", "user_input", "更早的提问", "2026-08-15T07:00:00Z"),
+      quickLog("q-old-out", "r-old", "stdout", "更早的答复", "2026-08-15T07:00:30Z"),
+    ];
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(older);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+
+    // 满页 → 按钮出现；点击 → before=窗口最早 ts + limit=100。
+    const btn = await screen.findByTestId("session-load-earlier");
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
+        before: "2026-08-15T08:00:00Z",
+        limit: 100,
+      });
+    });
+    // prepend：更早轮出现在顶部，当前窗口内容保留。
+    expect(await screen.findByText("更早的提问")).toBeTruthy();
+    expect(screen.getByText("当前窗口提问")).toBeTruthy();
+    // 第二页不满（2 < 100）→ 按钮隐藏（已到头）。
+    await waitFor(() => {
+      expect(screen.queryByTestId("session-load-earlier")).toBeNull();
+    });
+  });
+
+  it("不满页（<100 条）→ 无「加载更早消息」按钮（旧短会话零变化）", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      quickLog("s-inj", "r-1", "user_input", "短会话提问", "2026-08-15T08:00:00Z"),
+      quickLog("s-out", "r-1", "stdout", "答复。", "2026-08-15T08:00:05Z"),
+    ]);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("短会话提问")).toBeTruthy();
+    expect(screen.queryByTestId("session-load-earlier")).toBeNull();
+  });
+
+  it("会话内搜索：icon 展开输入 → 回车 q 查询（limit=100）→ 结果浮层 + <mark> 高亮；点条目关闭浮层", async () => {
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce([
+        quickLog("i-1", "r-1", "user_input", "初始提问", "2026-08-15T08:00:00Z"),
+      ])
+      .mockResolvedValueOnce([
+        quickLog("h-1", "r-2", "user_input", "登录页白屏怎么复现", "2026-08-14T09:00:00Z"),
+      ]);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("初始提问")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("session-search-toggle"));
+    // toggle 按钮与输入框同 aria-label——经 placeholder 锚定输入框。
+    const input = screen.getByPlaceholderText(
+      "输入关键词，回车搜索（最多 100 条）",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "白屏" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
+        q: "白屏",
+        limit: 100,
+      });
+    });
+    // 结果浮层：命中计数 + 命中行（<mark> 拆分文本节点——按行内文断言）。
+    const results = await screen.findByTestId("session-search-results");
+    expect(results.textContent).toContain("命中 1 条");
+    expect(results.textContent).toContain("登录页白屏怎么复现");
+    expect(screen.getByTestId("session-search-hit").textContent).toBe("白屏");
+
+    // 点击条目 → 浮层关闭（时间线不动）。
+    fireEvent.click(screen.getByTestId("session-search-result-item"));
+    expect(screen.queryByTestId("session-search-popover")).toBeNull();
+    expect(screen.getByText("初始提问")).toBeTruthy();
   });
 });

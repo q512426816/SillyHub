@@ -127,6 +127,15 @@ vi.mock("@/lib/errors", () => ({
   useNotify: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
 }));
 
+// quick 群聊 Markdown 渲染：MarkdownText 是 next/dynamic ssr:false 组件，
+// jsdom 同步渲染 null（testing gotcha，agent-log-card.test 同款 mock 惯例）——
+// 替身为透传 content 的 div，断言以 data-testid="markdown-text" 锚定。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
 // quick 成员头像自定义：GroupMemberAvatar 经 fetchFileBlob 带 token 取 blob
 // 渲染——mock 供头像用例（无头像固件不触发该链路）。
 vi.mock("@/lib/file/api", () => ({
@@ -1047,8 +1056,7 @@ describe("群消息附件（FR-05 补遗）", () => {
 
 // ── 6. 成员头像渲染（quick 群成员头像自定义） ───────────────────────────────
 
-describe("GroupChatPanel 成员头像（quick）", () => {
-  it("avatar 有值 → antd Avatar 图片（blob objectURL）；无值 → 首字回退", async () => {
+describe("GroupChatPanel 成员头像（quick）", () => {  it("avatar 有值 → antd Avatar 图片（blob objectURL）；无值 → 首字回退", async () => {
     // 小码（agent）与鲸落（本人 user）带头像；林一（user）无头像。
     const detail = makeGroupDetail();
     const members = detail.members as Record<string, unknown>[];
@@ -1101,5 +1109,116 @@ describe("GroupChatPanel 成员头像（quick）", () => {
       otherBubble!.querySelector('[data-testid="group-member-avatar-initial"]'),
     ).toBeTruthy();
     expect(otherBubble!.querySelector("img")).toBeNull();
+  });
+});
+
+// ── 7. 群聊 Markdown 渲染 + @我已读记忆（群聊体验 quick，2026-09-02）────────
+
+describe("GroupChatPanel Markdown 渲染与已读记忆（quick）", () => {
+  beforeEach(() => {
+    // 已读记忆隔离（打开群写 now，跨用例残留属正常行为但断言须从零起步）。
+    window.localStorage.removeItem("sillyhub-group-last-open-g-1");
+  });
+
+  it("agent 回复气泡走 MarkdownText（**bold** 原文透传渲染）；用户消息保持纯文本 + @提及高亮", async () => {
+    harness.logsJson = [
+      {
+        id: "l-md-1",
+        run_id: "r-1",
+        timestamp: "2026-09-01T06:05:00Z",
+        channel: "user_input",
+        content_redacted: "@小码 用 **加粗** 说明下结论",
+        metadata: { sender_member_name: "鲸落", sender_user_id: "u-me" },
+      },
+      {
+        id: "l-md-2",
+        run_id: "r-1",
+        timestamp: "2026-09-01T06:06:00Z",
+        channel: "stdout",
+        content_redacted:
+          "[ASSISTANT] 结论：**hooks 依赖数组漏了 tenantId**\n\n- 列表项一\n- 列表项二",
+        metadata: { member_id: "mem-1", member_name: "小码" },
+      },
+    ];
+    renderPanel();
+    await waitForStreamWired();
+
+    // agent 气泡：MarkdownText 替身渲染（jsdom 下真组件 next/dynamic 同步
+    // null——gotcha；断言 **bold** 原文完整透传给 markdown 渲染层）。
+    const mdNodes = await waitFor(() => {
+      const nodes = screen.getAllByTestId("markdown-text");
+      expect(nodes.length).toBeGreaterThanOrEqual(1);
+      return nodes;
+    });
+    expect(mdNodes[0]!.textContent).toContain("**hooks 依赖数组漏了 tenantId**");
+    expect(mdNodes[0]!.textContent).toContain("- 列表项一");
+    // [ASSISTANT] 前缀已剥除（classifySessionLog）。
+    expect(mdNodes[0]!.textContent).not.toContain("[ASSISTANT]");
+
+    // 用户气泡：纯文本路径保留——@提及高亮命中，原文不进 markdown 层。
+    const userRow = document.querySelector<HTMLElement>(
+      "[data-testid='group-msg-user'][data-sender='鲸落']",
+    );
+    expect(userRow).toBeTruthy();
+    expect(userRow!.querySelectorAll("[data-testid='group-mention']").length).toBe(1);
+    expect(userRow!.querySelector("[data-testid='markdown-text']")).toBeNull();
+  });
+
+  it("流式 partial 也走 MarkdownText（不完整 md 容错同一容器）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-2",
+      log_id: "l-p-md",
+      channel: "stdout",
+      content: "[ASSISTANT] 生成中 **未闭合粗体",
+      timestamp: "2026-09-01T06:06:10Z",
+      segment_id: "main:seg-md",
+      member_id: "mem-1",
+      member_name: "小码",
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("markdown-text").textContent).toContain(
+        "生成中 **未闭合粗体",
+      );
+    });
+    // 流式光标仍在（Markdown 与光标共存）。
+    expect(screen.getByTestId("group-stream-cursor")).toBeTruthy();
+  });
+
+  it("打开群即写已读记忆（localStorage now）+ 实时 log 事件推进时间戳", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    // 挂载即写（group-unread key；可解析 ISO）。
+    const openedAt = await waitFor(() => {
+      const raw = window.localStorage.getItem("sillyhub-group-last-open-g-1");
+      expect(raw).toBeTruthy();
+      expect(!Number.isNaN(Date.parse(raw!))).toBe(true);
+      return raw!;
+    });
+
+    // 实时行到达 → 推进（时间戳 >= 打开时刻）。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-9",
+      log_id: "l-read-1",
+      channel: "user_input",
+      content: "推进已读",
+      timestamp: "2026-09-01T06:06:30Z",
+      sender_member_name: "林一",
+      sender_user_id: "u-lin",
+    });
+    await waitFor(() => {
+      const raw = window.localStorage.getItem("sillyhub-group-last-open-g-1");
+      expect(raw).toBeTruthy();
+      expect(Date.parse(raw!)).toBeGreaterThanOrEqual(Date.parse(openedAt));
+    });
   });
 });

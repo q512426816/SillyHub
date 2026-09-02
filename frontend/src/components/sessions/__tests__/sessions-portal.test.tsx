@@ -1715,6 +1715,7 @@ function makeGroupListItem(): GroupChatListItemRead {
         runtime_id: "rt-1",
         joined_at: "2026-09-01T00:00:00Z",
         shadow_status: "none",
+        team_enabled: false,
       },
       {
         id: "mem-2",
@@ -1723,6 +1724,7 @@ function makeGroupListItem(): GroupChatListItemRead {
         user_id: "u-lin",
         joined_at: "2026-09-01T00:00:00Z",
         shadow_status: "none",
+        team_enabled: false,
       },
     ],
     online_member_ids: [],

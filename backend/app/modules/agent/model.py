@@ -1344,6 +1344,15 @@ class AgentGroupMember(BaseModel, table=True):
             nullable=True,
         ),
     )
+    # 团队能力开关（quick 群成员团队能力）：开启后影子会话懒建 lease stage
+    # 用 'orchestrator'——daemon isMainAgentSession 谓词（cli.ts）命中即注入
+    # dispatch_worker 等 5 主控工具（仅 provider=claude 有效，建群/改配置时
+    # service 层校验 400）；stage 是 lease 建时定的，热切换该开关走机器组
+    # 重建分支（end 影子 + pending 重懒建）。用户成员行恒 false 不消费。
+    team_enabled: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False),
+    )
     # ⑥ 群内昵称 = 上方 display_name（六要素归并到同一列，不重复存）。
     # 冗余快照（machine_name/agent_name/profile_name 等，供成员列表 chips
     # 免 N+1，对齐 AgentSession.config_snapshot 先例）。

@@ -5618,6 +5618,11 @@ export interface paths {
          *     编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本
          *     压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与
          *     Content-Encoding，无需调用方改动。
+         *
+         *     群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数
+         *     （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
+         *     （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
+         *     放行普通群成员读 logs，见 get_group_accessible_session）。
          */
         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
         put?: never;
@@ -13937,6 +13942,10 @@ export interface components {
          *     ``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL
          *     60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通
          *     （``get_last_message_previews``：最新 user_input/投影行首 60 字）。
+         *
+         *     ``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要
+         *     （``get_last_mention_previews`` 扫描最近时间线，命中返回
+         *     ``{content(截 60 字), ts, member_name}``，无 @ 为 None）。
          */
         GroupChatListItemRead: {
             /**
@@ -13984,6 +13993,10 @@ export interface components {
             online_member_ids: string[];
             /** Last Message */
             last_message?: string | null;
+            /** Last Mention */
+            last_mention?: {
+                [key: string]: string;
+            } | null;
         };
         /**
          * GroupChatRead
@@ -14093,6 +14106,12 @@ export interface components {
              * @description 智能体方案（AgentProfile）
              */
             agent_profile_id?: string | null;
+            /**
+             * Team Enabled
+             * @description 团队能力（可派分身并行执行子任务；仅 Claude 引擎支持）
+             * @default false
+             */
+            team_enabled: boolean;
         };
         /**
          * GroupMemberCreate
@@ -14134,6 +14153,11 @@ export interface components {
             llm_provider_id?: string | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
+            /**
+             * Team Enabled
+             * @default false
+             */
+            team_enabled: boolean;
             /** Config Snapshot */
             config_snapshot?: {
                 [key: string]: unknown;
@@ -14203,6 +14227,8 @@ export interface components {
             llm_provider_id?: string | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
+            /** Team Enabled */
+            team_enabled?: boolean | null;
         };
         /**
          * GroupMemberUserCreate
@@ -32305,6 +32331,12 @@ export interface operations {
             query?: {
                 /** @description 增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp 严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应回退 1-2s 重叠窗口并按 log_id 去重 */
                 after?: string | null;
+                /** @description 向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回 */
+                before?: string | null;
+                /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合 */
+                q?: string | null;
+                /** @description 最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为） */
+                limit?: number | null;
             };
             header?: never;
             path: {

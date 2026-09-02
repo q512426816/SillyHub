@@ -19,7 +19,10 @@
  *   4. 重置记忆——Modal.confirm 确认后 resetGroupMemberMemory；
  *   5. 群主权限——非群主无「切换配置/重置记忆/移除」按钮；群主可移除非群主
  *      用户成员（confirm 后 DELETE），群主自身行无移除按钮；
- *   6. 邀请/添加入口回调（onInviteUser/onAddAgent props 暴露）。
+ *   6. 邀请/添加入口回调（onInviteUser/onAddAgent props 暴露）；
+ *   7. 团队能力开关（quick 群成员团队能力）——展示（claude 可切 / codex 禁用）；
+ *      群主切换走「重建影子会话并重置独立记忆」Modal.confirm → PATCH
+ *      team_enabled；取消不提交；非群主只读。
  *
  * mock 策略（对齐 sessions/__tests__/create-group-wizard.test.tsx 惯例）：
  *   - @/lib/api 仅覆写 apiFetch（真实 daemon.ts 群客户端消费 mock——断言路径
@@ -228,6 +231,7 @@ function agentMember(
     removed_at: null,
     shadow_session_id: null,
     shadow_status: "active",
+    team_enabled: false,
     ...overrides,
   };
 }
@@ -249,6 +253,7 @@ function userMember(overrides: Partial<GroupMemberRead> = {}): GroupMemberRead {
     removed_at: null,
     shadow_session_id: null,
     shadow_status: "none",
+    team_enabled: false,
     ...overrides,
   };
 }
@@ -752,5 +757,145 @@ describe("MemberPanel 成员头像（quick 群成员头像自定义）", () => {
     expect(
       within(ownerRow).queryByLabelText("用户成员 鲸落 头像上传"),
     ).toBeNull();
+  });
+});
+
+// ── 6. 团队能力开关（quick 群成员团队能力） ────────────────────────────────
+
+describe("MemberPanel 团队能力开关（quick 群成员团队能力）", () => {
+  it("展示：claude 成员开关可切换；codex 成员禁用（仅 Claude 引擎）", () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+
+    // 两张 agent 卡各有一份「团队能力」行——within 卡片作用域断言。
+    const claudeCard = screen.getByTestId("agent-member-card-mem-1");
+    const claudeSwitch = within(claudeCard).getByTestId(
+      "team-switch-mem-1",
+    ) as HTMLInputElement;
+    expect(claudeSwitch).not.toBeDisabled();
+    expect(claudeSwitch.getAttribute("aria-checked")).toBe("false");
+    expect(claudeCard.textContent).toContain("未开启");
+
+    // codex 成员（小测 mem-2）：开关禁用。
+    const codexCard = screen.getByTestId("agent-member-card-mem-2");
+    const codexSwitch = within(codexCard).getByTestId(
+      "team-switch-mem-2",
+    ) as HTMLInputElement;
+    expect(codexSwitch).toBeDisabled();
+  });
+
+  it("群主切换 → Modal.confirm「重建影子会话并重置独立记忆」确认 → PATCH team_enabled", async () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+    const confirmSpy = spyConfirmOk();
+
+    fireEvent.click(screen.getByTestId("team-switch-mem-1"));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("开启「小码」的团队能力"),
+        content: expect.stringContaining("重建其影子会话并重置独立记忆"),
+      }),
+    );
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1/members/mem-1",
+      { method: "PATCH", json: { team_enabled: true } },
+    );
+    confirmSpy.mockRestore();
+  });
+
+  it("确认弹窗点「取消」：不提交 PATCH", () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+    const confirmSpy = spyConfirmCancel();
+
+    fireEvent.click(screen.getByTestId("team-switch-mem-1"));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("非群主：开关禁用（只读展示）", () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-lin" />);
+    const sw = screen.getByTestId("team-switch-mem-1") as HTMLInputElement;
+    expect(sw).toBeDisabled();
+  });
+
+  it("已开启成员：开关 aria-checked=true + 文案「可派分身并行干活」", () => {
+    const group = makeGroup();
+    group.members = [agentMember({ team_enabled: true })];
+    renderPanel(<MemberPanel group={group} currentUserId="u-me" />);
+
+    const card = screen.getByTestId("agent-member-card-mem-1");
+    const sw = within(card).getByTestId(
+      "team-switch-mem-1",
+    ) as HTMLInputElement;
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(
+      within(card).getByText("已开启 · 可派分身并行干活"),
+    ).toBeTruthy();
+  });
+});
+
+// ── 8. 影子会话查看器入口（群聊体验 quick，2026-09-02）────────────────────
+
+describe("MemberPanel 影子会话查看器（quick）", () => {
+  it("agent 卡整卡点击（有影子会话）→ 打开 Drawer 时间线（普通成员也可看）", async () => {
+    const group = makeGroup();
+    group.members = [
+      agentMember({ shadow_session_id: "shadow-1", shadow_status: "active" }),
+    ];
+    // apiFetch 兜 logs 端点（getAgentSessionLogs 真实现消费 mock）。
+    mocks.apiFetch.mockResolvedValue([
+      {
+        id: "l-1",
+        run_id: "r-1",
+        timestamp: "2026-09-01T06:01:00Z",
+        channel: "user_input",
+        content_redacted: "@小码 看看这个",
+      },
+    ]);
+    // 普通成员（非群主）视角：currentUserId=u-lin。
+    renderPanel(<MemberPanel group={group} currentUserId="u-lin" />);
+
+    // 卡片本身可点（非按钮命中——点卡片标题文本区域）。
+    const card = screen.getByTestId("agent-member-card-mem-1");
+    expect(card.getAttribute("title")).toContain("影子会话时间线");
+    fireEvent.click(within(card).getByText("小码"));
+
+    // Drawer 打开：标题 + 初始 limit=100 参数 + 时间线行。
+    expect(
+      await screen.findByText("「小码」影子会话时间线"),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/daemon/sessions/shadow-1/logs?limit=100"),
+        expect.anything(),
+      );
+    });
+    expect(await screen.findByTestId("shadow-log-inject")).toBeTruthy();
+  });
+
+  it("未建影子（shadow_session_id null）→ 无点击查看语义（title 无提示）", () => {
+    const group = makeGroup();
+    group.members = [agentMember({ shadow_session_id: null })];
+    renderPanel(<MemberPanel group={group} currentUserId="u-me" />);
+    const card = screen.getByTestId("agent-member-card-mem-1");
+    expect(card.getAttribute("title")).toBeNull();
+  });
+
+  it("卡内按钮点击不透传开 Drawer（防误触）", () => {
+    const group = makeGroup();
+    group.members = [
+      agentMember({ shadow_session_id: "shadow-1", shadow_status: "active" }),
+    ];
+    renderPanel(<MemberPanel group={group} currentUserId="u-me" />);
+    // 点「切换配置」按钮 → 只开热切换弹窗，不开影子 Drawer。
+    fireEvent.click(
+      within(screen.getByTestId("agent-member-card-mem-1")).getByRole("button", {
+        name: "切换配置",
+      }),
+    );
+    expect(screen.getByText(/的 Agent 配置/)).toBeTruthy();
+    expect(screen.queryByText(/影子会话时间线/)).toBeNull();
   });
 });

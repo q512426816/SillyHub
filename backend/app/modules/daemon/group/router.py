@@ -37,6 +37,7 @@ from app.modules.auth.permissions import Permission
 from app.modules.daemon.group.service import (
     GroupChatService,
     GroupMessageSendRead,
+    get_last_mention_previews,
     get_last_message_previews,
     get_online_member_ids,
 )
@@ -57,10 +58,15 @@ class GroupChatListItemRead(GroupChatRead):
     ``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL
     60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通
     （``get_last_message_previews``：最新 user_input/投影行首 60 字）。
+
+    ``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要
+    （``get_last_mention_previews`` 扫描最近时间线，命中返回
+    ``{content(截 60 字), ts, member_name}``，无 @ 为 None）。
     """
 
     online_member_ids: list[uuid.UUID] = []
     last_message: str | None = None
+    last_mention: dict[str, str] | None = None
 
 
 class GroupChatDetailRead(GroupChatRead):
@@ -137,9 +143,14 @@ async def list_group_chats(
     reads = await svc.list_groups(user)
     # task-03：最后消息摘要接通（群 id==会话 id 不变式，§3.2）。
     previews = await get_last_message_previews(session, [r.id for r in reads])
+    # 群聊体验 quick（2026-09-02）：最近 @我 摘要（非成员群不会出现，双保险跳过）。
+    mentions = await get_last_mention_previews(
+        session, user_id=user.id, group_ids=[r.id for r in reads]
+    )
     items = [_to_list_item(r) for r in reads]
     for item in items:
         item.last_message = previews.get(item.id)
+        item.last_mention = mentions.get(item.id)
         # task-06（§5.4）：presence 在线集接通（Redis 不可用降级空数组）。
         item.online_member_ids = await get_online_member_ids(item.id)
     return items

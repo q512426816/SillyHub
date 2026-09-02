@@ -88,6 +88,12 @@ workspace 由项目关联工作区集推导（显式传入须在集内 / 未传�
 cwd 工作区同样须在项目关联集内。存量群（project_id NULL，含项目删除后
 SET NULL 的群）加成员回退 workspace 成员范围。成员 ``avatar``（文件中心
 URL）用户与 agent 成员共用，读写透传（None=不改）。
+
+quick 群成员团队能力（2026-09-02）：agent 成员 ``team_enabled`` 开关——开启
+后影子懒建 lease stage 用 'orchestrator'（命中 daemon isMainAgentSession 谓词
+→ 注入 dispatch_worker 等 5 主控工具，mission 懒建回填链天然兼容），成员简报
+追加团队能力段；仅 Claude 引擎可开（建群/加成员/PATCH 三处 400 门控）；热切
+换归机器组重建分支（stage 随 lease 建时定，复用轮改不掉）。
 """
 
 from __future__ import annotations
@@ -173,6 +179,8 @@ GROUP_CONTEXT_ENTRY_MAX_CHARS = 500
 GROUP_CONTEXT_TOTAL_MAX_CHARS = 6000
 # 群列表最后消息摘要长度（task-03 接通 task-02 占位字段）。
 GROUP_LAST_MESSAGE_PREVIEW_CHARS = 60
+# 群列表「最近 @我」扫描行数（群聊体验 quick 2026-09-02：最近时间线内找最新 @）。
+GROUP_LAST_MENTION_SCAN_ROWS = 20
 
 # ── 互@协作护栏常量（task-04，design §4.4——状态只存 Redis 带 TTL，不建表）──
 # 协作链 Hash TTL（30min：链跨多轮互@，超时自清理不留死键）。
@@ -681,6 +689,19 @@ def _build_group_prompt(
         "仅当消息 @你 或 @全体 时回应；回应简洁如聊天；"
         f"你的发言会以「{member.display_name}」身份出现在群里。"
     )
+    if member.team_enabled:
+        # 团队能力段（quick 群成员团队能力）：工具名与 daemon 主控注入一致
+        # （mcp-server.ts：dispatch_worker / list_workers / get_worker_result /
+        # converge_mission / report_progress），措辞对照 mission_context
+        # build_worker_briefing can_dispatch 段保持群聊口吻——大任务拆分身、
+        # 结论由成员本人汇总转述回群。
+        briefing += (
+            "团队能力：你可调用 dispatch_worker 派分身并行执行子任务（各分身有"
+            "独立工作区副本），list_workers 查看分身进度，get_worker_result 读取"
+            "分身产出，converge_mission 收敛合并结果，report_progress 上报进度；"
+            "大任务建议拆给分身干，你汇总结论回群。分身产出不会自动出现在群里，"
+            "由你转述。"
+        )
     parts = [briefing]
     if context_lines:
         parts.append("[群聊记录 · 背景，仅供了解上下文]\n" + "\n".join(context_lines))
@@ -864,6 +885,89 @@ async def get_last_message_previews(
     return previews
 
 
+async def get_last_mention_previews(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    group_ids: Sequence[uuid.UUID],
+) -> dict[uuid.UUID, dict[str, str] | None]:
+    """群列表「最近 @我」摘要（群聊体验 quick，2026-09-02）。
+
+    每群取时间线最近 ``GROUP_LAST_MENTION_SCAN_ROWS`` 条（行源同
+    ``get_last_message_previews``：user_input + 投影行，design §4.2），按
+    ``_parse_group_mentions`` 同口径（``_MENTION_TOKEN_RE`` 候选提取 +
+    ``_mention_match`` 边界匹配——``@小码，`` 命中、``@小码二号`` 不误命中
+    ``小码``）判定是否 @请求用户：匹配词 = 请求用户在该群成员表的
+    ``display_name``（非成员/已移除跳过，返回 None）。取最新命中一条，返回
+    ``{content(截 60 字), ts, member_name}``——member_name 为 @ 发起者身份
+    标签（用户行 = ``metadata_.sender_member_name``，投影行 =
+    ``metadata_.member_name``，缺失回退「成员」）。
+
+    N+1 取舍：逐群两查（请求者成员昵称 + 时间线扫描）——群列表规模 ≤50
+    （design §9.3 用户成员上限），与 ``get_last_message_previews`` 同取舍，
+    可接受。
+    """
+    from sqlalchemy import and_
+
+    previews: dict[uuid.UUID, dict[str, str] | None] = {}
+    for group_id in group_ids:
+        membership = await get_active_user_membership(db, group_id=group_id, user_id=user_id)
+        if membership is None:
+            previews[group_id] = None
+            continue
+        name = membership.display_name
+        rows = (
+            (
+                await db.execute(
+                    select(AgentRunLog)
+                    .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
+                    .where(
+                        AgentRun.agent_session_id == group_id,
+                        or_(
+                            AgentRunLog.channel == "user_input",
+                            and_(
+                                AgentRunLog.channel == "stdout",
+                                AgentRunLog.metadata_.is_not(None),
+                            ),
+                        ),
+                    )
+                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
+                    .limit(GROUP_LAST_MENTION_SCAN_ROWS)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        hit: AgentRunLog | None = None
+        for log_row in rows:
+            content = (log_row.content_redacted or "").strip()
+            # 同口径 @判定：只认请求用户自己的昵称（广播词/agent 昵称与「@我」无关）。
+            if content and any(
+                _mention_match(m.group(1), (name,)) for m in _MENTION_TOKEN_RE.finditer(content)
+            ):
+                hit = log_row
+                break
+        if hit is None:
+            previews[group_id] = None
+            continue
+        meta = hit.metadata_ or {}
+        member_name = (
+            meta.get("sender_member_name")
+            if hit.channel == "user_input"
+            else meta.get("member_name")
+        )
+        # ts 统一 UTC 感知格式（SQLite 方言往返丢 tz、PG 保留——归一后跨方言一致）。
+        hit_ts = hit.timestamp
+        if hit_ts.tzinfo is None:
+            hit_ts = hit_ts.replace(tzinfo=UTC)
+        previews[group_id] = {
+            "content": (hit.content_redacted or "").strip()[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
+            "ts": hit_ts.isoformat(),
+            "member_name": member_name or "成员",
+        }
+    return previews
+
+
 # ── 群消息 DTO（task-03；schema.py 不在本卡 allowed_paths，随服务落本模块——
 #    路由层自带轻量 DTO 与 task-02 GroupChatListItemRead 同先例）────────────
 
@@ -935,6 +1039,7 @@ async def get_group_accessible_session(
     session_id: uuid.UUID,
     user_id: uuid.UUID,
     for_update: bool = False,
+    allow_shadow_member_read: bool = False,
 ) -> AgentSession | None:
     """群会话（kind='group'）/ 影子会话（kind='group_member'）参与者判定。
 
@@ -949,7 +1054,15 @@ async def get_group_accessible_session(
       否则拒（调用方统一 404 不泄露存在性）。
     - ``group_member``（影子，§5.3「影子会话 API 不对外暴露——仅群桥接内部
       +admin debug」）：属主（群主，影子 user_id 同源）→ 放行；否则 workspace
-      admin → 放行；否则拒。用户成员**不**经本判定触达影子会话。
+      admin → 放行；否则拒。用户成员默认**不**经本判定触达影子会话。
+
+    ``allow_shadow_member_read``（群聊体验 quick，2026-09-02）：影子日志
+    **只读**放行开关——开启时影子分支额外放行「影子所属群的未移除用户成员」
+    （经 ``shadow_session_id`` 反查成员行定位群，再查请求者用户成员行命中），
+    供群成员独立时间线视图读 logs。仅读路径调用方显式开启
+    （``get_agent_session_logs``）；写路径（``for_update=True``，
+    ``_get_owned_session_for_update`` → inject/end 等）即使误传本开关也
+    **不放行**普通成员（下方 ``not for_update`` 双保险）。
     """
     kind = (
         await db.execute(select(AgentSession.session_kind).where(AgentSession.id == session_id))
@@ -988,6 +1101,15 @@ async def get_group_accessible_session(
     shadow_group = await db.get(AgentGroupChat, shadow_member.group_id)
     if shadow_group is None:
         return None
+    # 群聊体验 quick（2026-09-02）：影子日志只读放行——反查命中的群里，请求者
+    # 是未移除用户成员即放行（成员独立时间线视图读 logs）。仅 allow 开关 +
+    # 非 for_update（写路径）双条件下生效，见 docstring。
+    if (
+        allow_shadow_member_read
+        and not for_update
+        and await get_active_user_membership(db, group_id=shadow_group.id, user_id=user_id)
+    ):
+        return agent_session
     user = await db.get(User, user_id)
     if user is not None and await has_permission(
         db,
@@ -1440,7 +1562,9 @@ class GroupChatService:
                     details={"missing_runtime_ids": missing_rt},
                 )
 
-        # agent 成员 cwd 工作区（六要素②）须在项目关联工作区集内（quick 口径）。
+        # agent 成员 cwd 工作区（六要素②）须在项目关联工作区集内（quick 口径）；
+        # 团队能力引擎门控（quick 群成员团队能力）：daemon 主控 5 工具仅对
+        # provider=claude 注入（isMainAgentSession 谓词），非 Claude 开启 → 400。
         for cfg in payload.agent_members:
             if cfg.workspace_id is not None and cfg.workspace_id not in linked_ids:
                 raise GroupChatInvalid(
@@ -1448,6 +1572,14 @@ class GroupChatService:
                     details={
                         "workspace_id": str(cfg.workspace_id),
                         "project_id": str(project.id),
+                    },
+                )
+            if cfg.team_enabled and cfg.provider != "claude":
+                raise GroupChatInvalid(
+                    f"agent 成员「{cfg.display_name}」的团队能力仅支持 Claude 引擎。",
+                    details={
+                        "display_name": cfg.display_name,
+                        "provider": cfg.provider,
                     },
                 )
 
@@ -1586,6 +1718,7 @@ class GroupChatService:
                     provider=cfg.provider,
                     llm_provider_id=cfg.llm_provider_id,
                     agent_profile_id=cfg.agent_profile_id,
+                    team_enabled=cfg.team_enabled,  # quick 群成员团队能力
                     shadow_status="none",  # design §8 group.member.added
                     invited_by=user.id,
                     joined_at=now,
@@ -1869,9 +2002,15 @@ class GroupChatService:
                 details={"runtime_id": str(cfg.runtime_id)},
             )
         runtime, instance = rt_row[0], rt_row[1]
-        # agent 成员 cwd 工作区须在项目关联工作区集内（存量群回退原逻辑不校验）。
+        # agent 成员 cwd 工作区须在项目关联工作区集内（存量群回退原逻辑不校验）；
+        # 团队能力引擎门控（建群同口径）：仅 Claude 可开。
         if cfg.workspace_id is not None:
             await self._ensure_member_workspace_in_project(group, cfg.workspace_id)
+        if cfg.team_enabled and cfg.provider != "claude":
+            raise GroupChatInvalid(
+                f"agent 成员「{cfg.display_name}」的团队能力仅支持 Claude 引擎。",
+                details={"provider": cfg.provider},
+            )
         profile: AgentProfile | None = None
         if cfg.agent_profile_id is not None:
             profile = await self._session.get(AgentProfile, cfg.agent_profile_id)
@@ -1902,6 +2041,7 @@ class GroupChatService:
             provider=cfg.provider,
             llm_provider_id=cfg.llm_provider_id,
             agent_profile_id=cfg.agent_profile_id,
+            team_enabled=cfg.team_enabled,  # quick 群成员团队能力
             shadow_status="none",
             invited_by=user.id,
             joined_at=now,
@@ -1954,6 +2094,7 @@ class GroupChatService:
             or payload.provider is not None
             or payload.llm_provider_id is not None
             or payload.agent_profile_id is not None
+            or payload.team_enabled is not None
         ):
             raise GroupChatInvalid(
                 "用户成员不支持修改六要素配置（仅 agent 成员可配置）。",
@@ -1966,13 +2107,15 @@ class GroupChatService:
 
         # task-04（design §4.5）：六要素 diff 基线——变更前的三组维度值
         # （模型组 provider/llm_provider_id/agent_profile_id 走热切换；机器组
-        # runtime_id/workspace_id 走影子重建）。
+        # runtime_id/workspace_id 走影子重建；team_enabled 归机器组——stage 随
+        # lease 建时定，复用轮改不掉）。
         old_config = {
             "runtime_id": member.runtime_id,
             "workspace_id": member.workspace_id,
             "provider": member.provider,
             "llm_provider_id": member.llm_provider_id,
             "agent_profile_id": member.agent_profile_id,
+            "team_enabled": member.team_enabled,
         }
 
         if payload.display_name is not None:
@@ -2029,6 +2172,20 @@ class GroupChatService:
                     )
                 member.agent_profile_id = payload.agent_profile_id
                 snapshot_dirty = True
+            # 团队能力开关（quick 群成员团队能力）：None=不改。最终态引擎门控
+            # （daemon 主控 5 工具仅 provider=claude 注入，建群/加成员同口径；
+            # 覆盖「开 team + 同 PATCH 切 codex」与「已开 team 只切引擎」组合）。
+            if payload.team_enabled is not None and payload.team_enabled != member.team_enabled:
+                member.team_enabled = payload.team_enabled
+            if member.team_enabled and (member.provider or "claude") != "claude":
+                raise GroupChatInvalid(
+                    f"成员「{member.display_name}」的团队能力仅支持 Claude 引擎，"
+                    "请改用 Claude 引擎或先关闭团队能力。",
+                    details={
+                        "member_id": str(member.id),
+                        "provider": member.provider,
+                    },
+                )
             if snapshot_dirty:
                 member.config_snapshot = await _rebuild_config_snapshot(self._session, member)
 
@@ -2044,6 +2201,10 @@ class GroupChatService:
             machine_changed = (
                 old_config["runtime_id"] != member.runtime_id
                 or old_config["workspace_id"] != member.workspace_id
+                # 团队能力开关变更归机器组重建分支（quick 群成员团队能力）：
+                # stage 随 lease 建时定，复用轮改不掉——必须 end 影子 + pending
+                # 下次触发按新开关重懒建（UI 已有重建重置记忆确认语义）。
+                or old_config["team_enabled"] != member.team_enabled
             )
             model_changed = (
                 old_config["provider"] != member.provider
@@ -2573,7 +2734,9 @@ class GroupChatService:
            ``AgentSession.config`` 列，permission_service 按其门控；影子
            ``manual_approval=False``，§9.1 审批不进群）；
         2. ``prepare_interactive_dispatch``（flush-only）：pinned_runtime_id=
-           成员机器、cwd=成员工作区根、stage='group_member'；**机器授权走
+           成员机器、cwd=成员工作区根、stage='group_member'（``team_enabled``
+           成员用 'orchestrator'——daemon 主控谓词据此注入团队 5 工具，见下方
+           派发段注释）；**机器授权走
            grants 分支**（``skip_owner_check=False`` + ``workspace_id=群工作区``
            ——属主命中或 workspace grant 授权才放行；**不照抄 worker 的
            ``skip_owner_check=True``**，D-010：群成员机器是群主任意选择的，
@@ -2697,7 +2860,13 @@ class GroupChatService:
                 cwd=cwd,
                 pinned_runtime_id=member.runtime_id,
                 pinned_skip_owner_check=False,  # D-010：不照抄 worker 豁免
-                stage=GROUP_MEMBER_STAGE,
+                # 团队能力（quick 群成员团队能力）：开启时 stage='orchestrator'
+                # 命中 daemon isMainAgentSession 谓词（cli.ts：stage==''||
+                # 'orchestrator' 且 provider=claude）→ 注入 dispatch_worker 等
+                # 5 主控工具；配置侧（建群/加成员/PATCH）已校验仅 Claude 可开。
+                # stage 随 lease 建时定——热切换开关走 update_member 机器组
+                # 重建分支（复用轮改不掉 stage）。
+                stage="orchestrator" if member.team_enabled else GROUP_MEMBER_STAGE,
             )
         except NoOnlineDaemonError as exc:
             # 无授权/离线/掉线 → 400 fail-loud，事务回滚零残留（不建孤儿影子）。

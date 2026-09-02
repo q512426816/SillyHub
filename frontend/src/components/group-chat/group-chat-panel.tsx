@@ -67,8 +67,10 @@ import {
 } from "@/components/daemon/session-mention-popover";
 import { AttachmentChips } from "@/components/daemon/attachment-chips";
 import { classifySessionLog } from "@/components/daemon/session-log-assembler";
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { applyMentionPick, detectMention } from "@/lib/session-mention";
 import { errMessage, useNotify } from "@/lib/errors";
+import { markGroupOpened } from "@/lib/group-unread";
 import {
   removeSessionAttachment,
   uploadSessionAttachment,
@@ -582,6 +584,13 @@ export function GroupChatPanel({
     return () => clearInterval(timer);
   }, []);
 
+  /* ── 群聊体验 quick（2026-09-02）：打开群即视为已读——挂载时写「上次打开 =
+   *    now」本地记忆（列表行 @我红点据 this 抑制）。实时收到新 log 事件也推进
+   *    （在群内盯着时间线时到达的 @不构成未读）。 ── */
+  useEffect(() => {
+    markGroupOpened(groupId);
+  }, [groupId]);
+
   /* ── 回放 + SSE 订阅（sessionId 就位后一次性装配；key 重挂载清全部状态） ── */
   useEffect(() => {
     if (!sessionId) return;
@@ -612,6 +621,8 @@ export function GroupChatPanel({
         sessionId,
         {
           onLog: (env) => {
+            // 在群内实时收到行 → 推进已读记忆（打开群期间的 @不算未读）。
+            markGroupOpened(groupId);
             const result = parseGroupLiveLog(env, currentUserIdRef.current);
             if (result.type === "revoke") {
               setEntries((prev) =>
@@ -1347,8 +1358,11 @@ function GroupTimelineRow({
           )}
           <span>{formatTime(entry.timestamp)}</span>
         </div>
-        <div className="whitespace-pre-wrap break-words rounded-xl rounded-bl-sm border border-border bg-card px-3 py-2 text-[13.5px] text-foreground shadow-sm">
-          {renderMentionHighlights(entry.content, memberNames, false)}
+        {/* 群聊体验 quick（2026-09-02）：agent 回复走 MarkdownText（content 已经
+            classifySessionLog 剥 [ASSISTANT] 等前缀；流式 partial 同容器容错渲染），
+            @提及高亮仅在用户消息纯文本路径保留（md 气泡内 @ 自然显示，从简）。 */}
+        <div className="break-words rounded-xl rounded-bl-sm border border-border bg-card px-3 py-2 text-[13.5px] text-foreground shadow-sm">
+          <MarkdownText content={entry.content} />
           {streaming && (
             <span
               data-testid="group-stream-cursor"

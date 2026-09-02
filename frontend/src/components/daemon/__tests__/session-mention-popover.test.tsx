@@ -724,6 +724,7 @@ describe("SessionMentionPopover 群成员（task-09 / FR-15）", () => {
       user_id: "u-x",
       joined_at: "2026-09-01T00:00:00Z",
       shadow_status: "none",
+      team_enabled: false,
       ...overrides,
     };
   }

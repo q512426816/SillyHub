@@ -1006,8 +1006,20 @@ class DaemonService:
         user_id: uuid.UUID,
         *,
         after: datetime | None = None,
+        before: datetime | None = None,
+        q: str | None = None,
+        limit: int | None = None,
     ) -> list[AgentRunLog]:
-        return await self._sess.get_agent_session_logs(session_id, user_id, after=after)
+        # 群聊体验 quick（2026-09-02）：before/q/limit 透传（limit None=维持
+        # 服务层默认 5000 全量行为，见 SessionService.get_agent_session_logs）。
+        return await self._sess.get_agent_session_logs(
+            session_id,
+            user_id,
+            after=after,
+            before=before,
+            q=q,
+            **({"limit": limit} if limit is not None else {}),
+        )
 
     # ── Helpers ───────────────────────────────────────────────────────────
 

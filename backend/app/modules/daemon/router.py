@@ -3447,6 +3447,28 @@ async def get_session_logs(
             "回退 1-2s 重叠窗口并按 log_id 去重"
         ),
     ),
+    before: datetime | None = Query(
+        None,
+        description=(
+            "向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp "
+            "严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回"
+        ),
+    ),
+    q: str | None = Query(
+        None,
+        max_length=200,
+        description="内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合",
+    ),
+    limit: int | None = Query(
+        None,
+        ge=1,
+        le=1000,
+        description=(
+            "最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序"
+            "返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量"
+            "（服务层上限 5000，维持既有行为）"
+        ),
+    ),
 ) -> Response:
     """Return all logs of a session, aggregated across AgentRuns (D-005@v1).
 
@@ -3459,9 +3481,21 @@ async def get_session_logs(
     编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本
     压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与
     Content-Encoding，无需调用方改动。
+
+    群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数
+    （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
+    （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
+    放行普通群成员读 logs，见 get_group_accessible_session）。
     """
     svc = DaemonService(session)
-    logs = await svc.get_agent_session_logs(session_id, user.id, after=after)
+    logs = await svc.get_agent_session_logs(
+        session_id,
+        user.id,
+        after=after,
+        before=before,
+        q=(q.strip() or None) if q else None,
+        limit=limit,
+    )
     payload = [AgentRunLogEntry.model_validate(log) for log in logs]
     raw = json.dumps([item.model_dump(mode="json") for item in payload], ensure_ascii=False).encode(
         "utf-8"

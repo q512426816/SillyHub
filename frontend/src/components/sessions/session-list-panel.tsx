@@ -120,6 +120,7 @@ import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
 import { listPersonalPlanTasks } from "@/lib/ppm/task";
 import { listProblems } from "@/lib/ppm/problem";
 import type { PageResp, PlanTask, ProblemList } from "@/lib/ppm/types";
+import { isGroupMentionUnread, readGroupLastOpen } from "@/lib/group-unread";
 import { useSession } from "@/stores/session";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -1626,7 +1627,11 @@ interface GroupChatRowProps {
   onSelect?: (_group: GroupChatListItemRead) => void;
 }
 
-/** 群行（原型 .sess-item 群形态）：facepile 头像堆叠 + 群名 + 群聊徽标 + 摘要。 */
+/**
+ * 群行（原型 .sess-item 群形态）：facepile 头像堆叠 + 群名 + 群聊徽标 + 摘要。
+ * 群聊体验 quick（2026-09-02）：last_mention 晚于本地已读记忆（打开群即已读，
+ * group-unread）→ 行首红点 + 摘要行前缀「[有人@我]」（微信式 brand 色高亮）。
+ */
 function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
   const members = group.members ?? [];
   const agentCount = members.filter((m) => m.member_type === "agent").length;
@@ -1636,18 +1641,29 @@ function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
     group.last_message?.trim() ||
     `${members.length} 名成员 · ${agentCount} 位 Agent · ${userCount} 位用户`;
   const title = group.title?.trim() || "未命名群聊";
+  // @我未读判定（last_mention 生成类型为索引签名 dict，字段运行时守卫见
+  // isGroupMentionUnread；命中时 tooltip 带提及者与内容摘要）。
+  const lastMention = group.last_mention ?? null;
+  const mentionUnread = isGroupMentionUnread(
+    lastMention,
+    readGroupLastOpen(group.id),
+  );
+  const mentionTitle = mentionUnread && lastMention
+    ? `${lastMention.member_name ?? "成员"}：${lastMention.content ?? ""}`
+    : null;
   return (
     <div
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`群聊 ${title}`}
+      aria-label={`群聊 ${title}${mentionUnread ? "（有人@我）" : ""}`}
       onClick={() => onSelect?.(group)}
       onKeyDown={(e) => {
         if (e.key === "Enter") onSelect?.(group);
       }}
       data-testid="group-chat-row"
       data-group-id={group.id}
+      data-mention-unread={mentionUnread ? "true" : undefined}
       className={cn(
         "group mb-0.5 flex cursor-pointer items-center gap-2 rounded-lg border-l-[3px] px-2.5 py-1.5 transition-colors",
         selected
@@ -1655,6 +1671,14 @@ function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
           : "border-l-transparent hover:bg-muted/50",
       )}
     >
+      {/* @我未读行首红点（微信式；红点=destructive 语义阶）。 */}
+      {mentionUnread && (
+        <span
+          data-testid="group-mention-unread-dot"
+          aria-hidden
+          className="h-2 w-2 shrink-0 rounded-full bg-destructive"
+        />
+      )}
       {/* 成员摘要前 3 头像堆叠（agent=brand / 用户=info 青，原型 .facepile） */}
       <MemberFacepile members={members} max={3} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -1675,10 +1699,20 @@ function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
           </span>
         </span>
         <span
-          className="min-w-0 truncate text-[11px] leading-4 text-muted-foreground"
-          title={preview}
+          className="flex min-w-0 items-center gap-1"
+          title={mentionTitle ?? preview}
         >
-          {preview}
+          {mentionUnread && (
+            <span
+              data-testid="group-mention-unread-badge"
+              className="shrink-0 rounded bg-brand-100 px-1 text-[10px] font-semibold leading-4 text-brand-700"
+            >
+              [有人@我]
+            </span>
+          )}
+          <span className="min-w-0 truncate text-[11px] leading-4 text-muted-foreground">
+            {preview}
+          </span>
         </span>
       </div>
       {/* @全体/未读徽标位（预留：task-03 消息管线 + task-08 群视图接入） */}

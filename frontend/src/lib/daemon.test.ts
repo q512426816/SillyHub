@@ -266,6 +266,36 @@ describe("getAgentSessionLogs", () => {
     });
     await expect(getAgentSessionLogs("any")).rejects.toBeInstanceOf(ApiError);
   });
+
+  // 群聊体验 quick（2026-09-02）：before / q / limit 可选查询参数透传。
+  it("opts.before/q/limit 透传为 query 参数；缺省不产 query（旧全量行为不变）", async () => {
+    const h = mockFetch({ status: 200, body: [] });
+
+    await getAgentSessionLogs("s1", {
+      before: "2026-09-01T06:00:00Z",
+      q: "白屏",
+      limit: 100,
+    });
+    let url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions/s1/logs");
+    expect(url.searchParams.get("before")).toBe("2026-09-01T06:00:00Z");
+    expect(url.searchParams.get("q")).toBe("白屏");
+    expect(url.searchParams.get("limit")).toBe("100");
+    // 与既有 after 组合共存。
+    await getAgentSessionLogs("s1", {
+      after: "2026-09-01T05:00:00Z",
+      limit: 50,
+    });
+    url = new URL(h.lastUrl());
+    expect(url.searchParams.get("after")).toBe("2026-09-01T05:00:00Z");
+    expect(url.searchParams.get("limit")).toBe("50");
+    expect(url.searchParams.has("before")).toBe(false);
+
+    // 缺省：无任何 query（不带 ?）。
+    await getAgentSessionLogs("s1");
+    url = new URL(h.lastUrl());
+    expect(url.search).toBe("");
+  });
 });
 
 describe("deleteAgentSession", () => {

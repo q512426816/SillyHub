@@ -351,6 +351,10 @@ class GroupMemberAgentConfig(BaseModel):
     agent_profile_id: uuid.UUID | None = Field(
         default=None, description="智能体方案（AgentProfile）"
     )
+    team_enabled: bool = Field(
+        default=False,
+        description="团队能力（可派分身并行执行子任务；仅 Claude 引擎支持）",
+    )
 
 
 class GroupMemberUserCreate(BaseModel):
@@ -428,6 +432,9 @@ class GroupMemberUpdate(BaseModel):
     provider: str | None = Field(default=None, min_length=1, max_length=20)
     llm_provider_id: uuid.UUID | None = None
     agent_profile_id: uuid.UUID | None = None
+    # 团队能力开关（None=不改）；变更走机器组重建分支（stage 随 lease 建时定，
+    # 复用轮改不掉——end 影子 + pending 下次触发重懒建）。
+    team_enabled: bool | None = None
 
 
 class GroupMemberRead(BaseModel):
@@ -450,6 +457,8 @@ class GroupMemberRead(BaseModel):
     provider: str | None = None
     llm_provider_id: uuid.UUID | None = None
     agent_profile_id: uuid.UUID | None = None
+    # 团队能力开关（用户成员恒 false）。
+    team_enabled: bool = False
     config_snapshot: dict | None = None
     invited_by: uuid.UUID | None = None
     joined_at: datetime

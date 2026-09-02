@@ -29,8 +29,9 @@
  *      （**项目关联工作区必选**——群工作区由后端推导，不再有「沿用群工作区」）/
  *      引擎（claude/codex）/ 模型（llm_provider，codex 引擎无供应商切换语义
  *      ——照 session-config-bar providerLocked 先例禁用）/ 智能体方案
- *      （AgentProfile，缺省=用默认））；每张卡片可上传成员头像（填
- *      GroupMemberAgentConfig.avatar）。
+ *      （AgentProfile，缺省=用默认）/ 团队能力开关（quick 群成员团队能力：可派
+ *      分身并行干活，仅 Claude 引擎——codex 禁用+tooltip））；每张卡片可上传
+ *      成员头像（填 GroupMemberAgentConfig.avatar）。
  *
  * 提交调 createGroupChat（GroupChatCreate：project_id 必填、**不带
  * workspace_id**（后端推导）；agent_cross_mention 默认开 / cross_mention_depth
@@ -43,7 +44,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Input, Modal, Select } from "antd";
+import { Button, Input, Modal, Select, Switch, Tooltip } from "antd";
 import { Bot, Plus, Trash2 } from "lucide-react";
 
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
@@ -117,7 +118,7 @@ export function validateMemberDisplayName(
   return null;
 }
 
-/** agent 成员卡片编辑态（六要素 + 头像；id 为本地 key 供列表渲染）。 */
+/** agent 成员卡片编辑态（六要素 + 头像 + 团队能力开关；id 为本地 key 供列表渲染）。 */
 export interface AgentMemberCardState {
   id: string;
   displayName: string;
@@ -131,6 +132,8 @@ export interface AgentMemberCardState {
   llmProviderId: string;
   /** 空串 = 不指定（走默认档案兜底链）。 */
   agentProfileId: string;
+  /** 团队能力（可派分身并行干活；仅 Claude 引擎——开成员级主控 5 工具注入）。 */
+  teamEnabled: boolean;
 }
 
 /** 新建一张空白 agent 成员卡片（引擎默认 claude，对齐浮层第二步默认高亮）。 */
@@ -144,6 +147,7 @@ function newAgentCard(): AgentMemberCardState {
     provider: "claude",
     llmProviderId: "",
     agentProfileId: "",
+    teamEnabled: false,
   };
 }
 
@@ -413,6 +417,8 @@ export function CreateGroupWizard({
               provider: c.provider,
               llm_provider_id: c.llmProviderId || null,
               agent_profile_id: c.agentProfileId || null,
+              // 团队能力开关（quick 群成员团队能力；生成版类型必填显式传）。
+              team_enabled: c.teamEnabled,
             })),
           }
         : {}),
@@ -806,10 +812,13 @@ export function CreateGroupWizard({
                         value={card.provider}
                         onChange={(v) => {
                           // 引擎切换重置模型选择（供应商仅 claude 引擎语义，
-                          // session-config-bar providerLocked 同源）。
+                          // session-config-bar providerLocked 同源）；团队能力
+                          // 仅 Claude 引擎（daemon 主控 5 工具注入谓词）——切
+                          // codex 联动关闭，防 payload 撞后端 400 门控。
                           updateCard(card.id, {
                             provider: v,
                             llmProviderId: "",
+                            teamEnabled: v === "claude" ? card.teamEnabled : false,
                           });
                         }}
                         options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
@@ -862,6 +871,34 @@ export function CreateGroupWizard({
                           ...profileOptions,
                         ]}
                       />
+                    </div>
+                    {/* 团队能力开关（quick 群成员团队能力）：仅 Claude 引擎可开
+                        （daemon 主控 5 工具注入谓词；codex 禁用 + tooltip 提示） */}
+                    <div className="col-span-2 flex items-center gap-2 border-t border-border pt-2">
+                      <Tooltip
+                        title={
+                          card.provider !== "claude"
+                            ? "团队能力仅支持 Claude 引擎"
+                            : undefined
+                        }
+                      >
+                        <Switch
+                          size="small"
+                          checked={card.teamEnabled}
+                          disabled={card.provider !== "claude"}
+                          onChange={(checked) =>
+                            updateCard(card.id, { teamEnabled: checked })
+                          }
+                          aria-label={`Agent 成员 ${idx + 1} 团队能力`}
+                          data-testid={`cgw-team-switch-${idx}`}
+                        />
+                      </Tooltip>
+                      <span className="text-[11px] font-medium text-muted-foreground">
+                        团队能力
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        可派分身并行干活（仅 Claude 引擎）
+                      </span>
                     </div>
                   </div>
                 </div>
