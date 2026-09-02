@@ -156,7 +156,15 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     if (!deepSessionId) return;
     urlRestoreDoneRef.current = true;
     void getAgentSession(deepSessionId)
-      .then(() => setSelectedSessionId(deepSessionId))
+      .then((session) => {
+        // quick-fdd8219a：群会话深链分流——?session=<群id> 同样有效（群 id
+        // 即群会话 id，详情端点群成员可读），按 session_kind 分流群选中。
+        if (session.session_kind === "group") {
+          setSelectedGroupId(deepSessionId);
+        } else {
+          setSelectedSessionId(deepSessionId);
+        }
+      })
       .catch(() => {
         // 深链 session 不存在或无权访问：静默忽略，落空门户态（design §9，
         // 原落新建表单态——task-06 起表单分支已替换）。
@@ -475,7 +483,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setSelectedSessionId(null);
       setSelectedGroup(group);
       setSelectedGroupId(group.id);
-      syncSessionParam(null);
+      // quick-fdd8219a：群选中落 URL（?session=<群id>——刷新保持群视图，同
+      // 单聊 ql-20260824-001 语义；深链按 session_kind 分流回群选中）。
+      syncSessionParam(group.id);
     },
     [syncSessionParam],
   );
@@ -489,7 +499,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setSelectedSessionId(null);
       setSelectedGroupId(group.id);
       setSelectedGroup({ ...group, online_member_ids: [], last_message: null });
-      syncSessionParam(null);
+      // quick-fdd8219a：建群成功同样落 URL。
+      syncSessionParam(group.id);
     },
     [syncSessionParam],
   );

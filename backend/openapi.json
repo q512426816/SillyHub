@@ -32858,6 +32858,17 @@
             ],
             "title": "User Id"
           },
+          "session_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Kind"
+          },
           "workspace_id": {
             "anyOf": [
               {

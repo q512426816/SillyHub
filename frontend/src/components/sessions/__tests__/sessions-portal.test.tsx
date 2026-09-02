@@ -1771,8 +1771,18 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
     expect(screen.queryByLabelText("会话面板")).toBeNull();
     expect(screen.queryByLabelText("门户空态")).toBeNull();
     expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
-    // ?session= 清除（群选中态本卡不落 URL——task-08 群视图再议）。
-    mocks.searchParams = new URLSearchParams("session=s-1");
+    // quick-fdd8219a：群选中现在也落 ?session=<群id>（刷新保持群视图）——
+    // 先验证选中群写参，再走切走清除。
+    mocks.routerReplace.mockClear();
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(mocks.routerReplace).toHaveBeenCalledWith("/sessions?session=g-1", {
+        scroll: false,
+      }),
+    );
+    // quick-fdd8219a：再次点击同一群行 → 参数幂等（unchanged 跳过不重写；
+    // 切走清参由单聊选中路径覆盖——点会话行写自己的 session id）。
+    mocks.searchParams = new URLSearchParams("session=g-1");
     mocks.routerReplace.mockClear();
     // mock searchParams 是冻结快照——开/关两步浮层触发一次重渲染（同
     // nudgeRerender 先例），此后事件闭包才能读到新参数。
@@ -1784,11 +1794,8 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
       expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull(),
     );
     fireEvent.click(row);
-    await waitFor(() =>
-      expect(mocks.routerReplace).toHaveBeenCalledWith("/sessions", {
-        scroll: false,
-      }),
-    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mocks.routerReplace).not.toHaveBeenCalled();
   });
 
   it("分区头「＋」→ 三步向导建群成功 → createGroupChat 提交 + 新群挂载点选中 + 群列表 invalidate 重拉", async () => {

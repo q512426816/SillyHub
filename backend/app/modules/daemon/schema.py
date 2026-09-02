@@ -37,6 +37,10 @@ class AgentSessionRead(BaseModel):
     change_id: uuid.UUID | None
     # ql-20260817-003：会话属主（前端消息时间线据此判断「我」；列表本就 user 隔离）。
     user_id: uuid.UUID | None = None
+    # quick-fdd8219a：会话形态（chat/group/group_member）——?session= 深链按此
+    # 分流群选中（群 id 即群会话 id）；缺省 None 守护旧行（from_attributes
+    # 对 server_default 列恒有值，防御性保留）。
+    session_kind: str | None = None
     workspace_id: uuid.UUID | None
     # 2026-07-11-unify-runtime-session-dialog / FR-08: 首条 user_input 摘要前 30 字，
     # 由 router 层注入（非 ORM 字段）；FR-05 deleted_at 软删时间戳（ORM 直接映射）。

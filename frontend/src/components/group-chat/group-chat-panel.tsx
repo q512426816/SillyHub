@@ -68,7 +68,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Image as ImageIcon, Paperclip, RefreshCw, SendHorizontal, Users, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Paperclip, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
 
 import { MemberPanel } from "@/components/group-chat/member-panel";
 import { GroupMemberAvatar } from "@/components/group-chat/group-member-avatar";
@@ -82,6 +82,7 @@ import { AttachmentChips } from "@/components/daemon/attachment-chips";
 import { classifySessionLog } from "@/components/daemon/session-log-assembler";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { applyMentionPick, detectMention } from "@/lib/session-mention";
+import type { AgentRunLogEntry } from "@/lib/agent";
 import { errMessage, useNotify } from "@/lib/errors";
 import { markGroupOpened } from "@/lib/group-unread";
 import {
@@ -694,6 +695,52 @@ export function GroupChatPanel({
   /* ── typing 指示器（用户 TTL 2.5s 周期裁剪；agent 持续态豁免——止息信号移除，
    *    群聊运行态可见 quick 2026-09-02）+「正在回复」锚点标签表 ── */
   const [typingMap, setTypingMap] = useState<Record<string, GroupTypingIndicator>>({});
+  /* ── quick-fdd8219a 群内搜索（会话工具栏要素对齐；q 参数走 logs 端点） ── */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<AgentRunLogEntry[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const resetSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults(null);
+  }, []);
+  const runSearch = useCallback(async () => {
+    const q = searchQuery.trim();
+    if (!q || searching) return;
+    setSearching(true);
+    try {
+      const logs = await getAgentSessionLogs(groupId, { q, limit: 100 });
+      setSearchResults(logs);
+    } catch {
+      notify.error("搜索失败，请稍后重试");
+    } finally {
+      setSearching(false);
+    }
+  }, [groupId, searchQuery, searching, notify]);
+  /** 命中词 <mark> 高亮（大小写不敏感分段渲染；正则特殊字符转义后切分）。 */
+  const SearchHighlight = useCallback(
+    ({ text, term }: { text: string; term: string }) => {
+      if (!term) return <>{text}</>;
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+      return (
+        <>
+          {parts.map((part, i) =>
+            part.toLowerCase() === term.toLowerCase() ? (
+              <mark key={i} className="rounded bg-warning/30 px-0.5 text-foreground">
+                {part}
+              </mark>
+            ) : (
+              <span key={i}>{part}</span>
+            ),
+          )}
+        </>
+      );
+    },
+    [],
+  );
   /** 触发消息（log_id）→ 正在回复的 agent 成员集（@全体 同消息多标签）。 */
   const [replyingBy, setReplyingBy] = useState<Record<string, GroupReplyingMember[]>>({});
   /** 已收到的 agent 止息归属键（typing:false/turn_completed）——shadow_running
@@ -1285,7 +1332,93 @@ export function GroupChatPanel({
               </span>
             )}
           </div>
+          {/* quick-fdd8219a：会话工具栏要素对齐——#群id 短码复制（session-panel
+              :3458 惯例）+ 群内搜索（后端 logs q 参数，回车全量查 100 条命中，
+              <mark> 高亮，清除恢复；照 session-panel 搜索浮层形态）。 */}
+          <button
+            type="button"
+            aria-label="复制群聊 ID"
+            title={`点击复制群聊 ID：${groupId}`}
+            data-testid="group-chat-copy-id"
+            onClick={() => {
+              void navigator.clipboard
+                ?.writeText(groupId)
+                .then(() => notify.success("已复制群聊 ID"))
+                .catch(() => {
+                  /* 剪贴板不可用静默（http 环境） */
+                });
+            }}
+            className="flex-none rounded-md border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            #{groupId.slice(0, 8)}
+          </button>
+          <button
+            type="button"
+            aria-label="搜索群聊记录"
+            title="搜索群聊记录"
+            data-testid="group-chat-search-toggle"
+            onClick={() => (searchOpen ? resetSearch() : setSearchOpen(true))}
+            className="flex-none"
+          >
+            <Search aria-hidden className="h-4 w-4 text-muted-foreground transition-colors hover:text-foreground" />
+          </button>
         </header>
+        {/* 搜索输入行（打开时显示，回车执行 q 查询）。 */}
+        {searchOpen && (
+          <div className="flex-none border-b border-border px-4 py-2">
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void runSearch();
+                }
+                if (e.key === "Escape") resetSearch();
+              }}
+              placeholder="搜索群聊记录，回车查询"
+              aria-label="搜索群聊记录"
+              data-testid="group-chat-search-input"
+              className="w-full rounded-md border border-border bg-card px-3 py-1.5 text-[13px] text-foreground outline-none focus:border-brand-500"
+            />
+          </div>
+        )}
+        {searchResults !== null && (
+          <div
+            data-testid="group-chat-search-results"
+            className="max-h-64 flex-none overflow-y-auto border-b border-border bg-muted/30 px-5 py-3"
+          >
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                搜索结果 {searchResults.length} 条
+              </span>
+              <button
+                type="button"
+                onClick={resetSearch}
+                className="text-xs text-brand-600 hover:text-brand-700"
+              >
+                清除搜索
+              </button>
+            </div>
+            {searchResults.length === 0 && (
+              <p className="py-2 text-center text-xs text-muted-foreground">没有匹配的记录</p>
+            )}
+            {searchResults.map((l) => (
+              <div
+                key={l.id}
+                className="border-b border-border-weak py-1.5 text-[13px] last:border-none"
+              >
+                <span className="mr-1.5 text-[11px] text-muted-foreground">
+                  {String(
+                    l.metadata?.member_name ?? l.metadata?.sender_member_name ?? "记录",
+                  )}
+                </span>
+                <SearchHighlight text={l.content_redacted ?? ""} term={searchQuery.trim()} />
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 平铺时间线（原型 .timeline；容器内距对齐会话 TurnTimeline px-5 py-5）。 */}
         <div

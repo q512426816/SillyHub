@@ -10792,6 +10792,8 @@ export interface components {
             change_id: string | null;
             /** User Id */
             user_id?: string | null;
+            /** Session Kind */
+            session_kind?: string | null;
             /** Workspace Id */
             workspace_id: string | null;
             /** Title */

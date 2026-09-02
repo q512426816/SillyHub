@@ -82,6 +82,11 @@ export interface AgentRunLogEntry {
   // newStart 真实文件行号）。仅 Edit tool_result 行有值；旧数据 / 其他工具 →
   // null/undefined，进度视图 Edit 展开区回退 LCS 自算行号。
   edit_patch?: string | null;
+  // quick-fdd8219a：流式半截行标识 + 群聊身份/附件/链路 metadata（群投影行
+  // member_id/member_name、user_input sender/attachments 等；后端 DTO 已有，
+  // 手写版此前漏同步）。
+  segment_id?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface CreateAgentRunInput {
