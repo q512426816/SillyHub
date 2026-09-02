@@ -626,7 +626,14 @@ async def run_cross_mention_detection(
             continue
         triggered.append(trigger)
         if not trigger.queued:
-            await _publish_agent_typing_event(group.id, target.display_name)
+            # 运行态可见 quick（2026-09-02）：补 member_id；reply_to_log_id 不传
+            # ——互@触发源是 agent 投影行（非 user_input 行），无「正在响应的用户
+            # 消息」锚点（排队轮照旧不发 typing）。
+            await _publish_agent_typing_event(
+                group.id,
+                target.display_name,
+                member_id=str(target.id),
+            )
     return triggered
 
 
@@ -908,9 +915,19 @@ def _typing_payload(
     member_kind: str,
     typing: bool,
     preview: str | None,
+    member_id: str | None = None,
+    reply_to_log_id: str | None = None,
 ) -> dict[str, object]:
-    """typing 事件 payload 组装（design §5.4 / §8 typing.ping，单一形态）。"""
-    return {
+    """typing 事件 payload 组装（design §5.4 / §8 typing.ping，单一形态）。
+
+    ``member_id``（群聊运行态可见 quick，2026-09-02）：成员行 id——前端 typing
+    指示器按成员身份聚合/去重（agent 自动事件与终态止息恒携带）；用户手动
+    typing 心跳不携带（payload 形态与历史一致，前端按 member_kind 区分）。
+    ``reply_to_log_id``：触发消息的群时间线 ``user_input`` 行 id——即
+    「agent 正在响应哪句话」的回复锚点（前端可高亮对应消息气泡）；仅 None
+    缺省，两字段都按需附加（用户 typing 事件零形态漂移）。
+    """
+    payload: dict[str, object] = {
         "event": "typing",
         "member_name": member_name,
         "member_kind": member_kind,
@@ -918,17 +935,37 @@ def _typing_payload(
         "preview": preview[:GROUP_TYPING_PREVIEW_MAX_CHARS] if preview else None,
         "ts": datetime.now(UTC).isoformat(),
     }
+    if member_id is not None:
+        payload["member_id"] = member_id
+    if reply_to_log_id is not None:
+        payload["reply_to_log_id"] = reply_to_log_id
+    return payload
 
 
-async def _publish_agent_typing_event(group_id: uuid.UUID, member_name: str) -> None:
+async def _publish_agent_typing_event(
+    group_id: uuid.UUID,
+    member_name: str,
+    *,
+    member_id: str | None = None,
+    reply_to_log_id: str | None = None,
+) -> None:
     """agent 成员 typing 自动事件（「{member_name}」正在输入…，design §5.4）。
 
-    影子 run 开始路径（``send_group_message`` 触发编排尾部）调用——成员昵称
-    即面板/气泡展示名；preview 恒 None（后端不产草稿）。
+    影子 run 开始路径（``send_group_message`` 触发编排尾部 / 互@触发命中）调用
+    ——成员昵称即面板/气泡展示名；preview 恒 None（后端不产草稿）。
+    ``member_id``/``reply_to_log_id`` 见 ``_typing_payload``（触发消息行 id 即
+    回复锚点；互@路径触发源是 agent 投影行而非 user_input 行，锚点传 None）。
     """
     await _publish_group_typing_event(
         group_id,
-        _typing_payload(member_name=member_name, member_kind="agent", typing=True, preview=None),
+        _typing_payload(
+            member_name=member_name,
+            member_kind="agent",
+            typing=True,
+            preview=None,
+            member_id=member_id,
+            reply_to_log_id=reply_to_log_id,
+        ),
     )
 
 
@@ -1916,6 +1953,24 @@ class GroupChatService:
         members = await self._list_members(group.id)
         return self._to_read(group, members)
 
+    async def get_member_shadow_running(self, group_id: uuid.UUID) -> dict[uuid.UUID, bool]:
+        """群详情成员运行态兜底（群聊运行态可见 quick，2026-09-02）。
+
+        agent 成员查影子会话活跃 run（谓词同 ``_get_shadow_active_run``：
+        ACTIVE_RUN_STATUSES 单一词表）——True=该成员影子正在跑轮，是前端
+        typing 事件丢失/SSE 迟连时的兜底可见信号；影子未建/已终态/用户成员
+        恒 False。逐成员 LIMIT 1 查询（成员上限 50，可接受）。
+        """
+        rows = await self._list_active_member_rows(group_id)
+        running: dict[uuid.UUID, bool] = {}
+        for member in rows:
+            running[member.id] = (
+                member.member_type == "agent"
+                and member.shadow_session_id is not None
+                and await self._get_shadow_active_run(member.shadow_session_id) is not None
+            )
+        return running
+
     async def update_group(
         self,
         group_id: uuid.UUID,
@@ -2664,8 +2719,16 @@ class GroupChatService:
                 # task-06（design §5.4）：影子 run 开始（即时注入/懒建首轮，非
                 # 排队）→ 自动发一条 agent typing（「昵称」正在输入…）。排队轮
                 # run 尚未开始不发（typing 指示器语义=正在生成回复）。
+                # 运行态可见 quick（2026-09-02）：payload 补 member_id + 回复
+                # 锚点 reply_to_log_id=本轮触发消息的群时间线 user_input 行 id
+                # （载体 run 下的 log_row，前端据此高亮「正在响应哪句话」）。
                 if not trigger.queued:
-                    await _publish_agent_typing_event(group.id, member.display_name)
+                    await _publish_agent_typing_event(
+                        group.id,
+                        member.display_name,
+                        member_id=str(member.id),
+                        reply_to_log_id=str(log_row.id),
+                    )
         return GroupMessageSendRead(
             carrier_run_id=carrier.id,
             log_id=log_row.id,

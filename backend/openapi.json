@@ -10964,7 +10964,7 @@
           "daemon-group-chat"
         ],
         "summary": "Get Group Chat",
-        "description": "群详情：成员完整列表（六要素 + shadow_status + 在线绿点；design §6.1）。",
+        "description": "群详情：成员完整列表（六要素 + shadow_status + 在线绿点 + 运行态兜底）。",
         "operationId": "get_group_chat_api_daemon_group_chats__group_id__get",
         "parameters": [
           {
@@ -40154,7 +40154,7 @@
           },
           "members": {
             "items": {
-              "$ref": "#/components/schemas/GroupMemberRead"
+              "$ref": "#/components/schemas/GroupMemberDetailRead"
             },
             "type": "array",
             "title": "Members"
@@ -40181,7 +40181,7 @@
           "created_at"
         ],
         "title": "GroupChatDetailRead",
-        "description": "群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。\n\n``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照\n``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表\n项同源（``get_online_member_ids``）。"
+        "description": "群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。\n\n``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照\n``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表\n项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体\n（多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）。"
       },
       "GroupChatListItemRead": {
         "properties": {
@@ -40673,6 +40673,182 @@
         "type": "object",
         "title": "GroupMemberCreate",
         "description": "``POST /api/group-chats/{id}/members`` 加成员体（二选一，design §6.1）。"
+      },
+      "GroupMemberDetailRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "member_type": {
+            "type": "string",
+            "title": "Member Type"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "runtime_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "team_enabled": {
+            "type": "boolean",
+            "title": "Team Enabled",
+            "default": false
+          },
+          "config_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Snapshot"
+          },
+          "invited_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invited By"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Joined At"
+          },
+          "removed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At"
+          },
+          "shadow_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Session Id"
+          },
+          "shadow_status": {
+            "type": "string",
+            "title": "Shadow Status"
+          },
+          "shadow_running": {
+            "type": "boolean",
+            "title": "Shadow Running",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "member_type",
+          "display_name",
+          "joined_at",
+          "shadow_status"
+        ],
+        "title": "GroupMemberDetailRead",
+        "description": "群详情成员读体扩展（群聊运行态可见 quick，2026-09-02）。\n\n``shadow_running``：该 agent 成员影子会话当前有活跃 run（谓词同群侧\n``_get_shadow_active_run``）——typing 事件丢失/SSE 迟连时的运行态兜底\n信号；影子未建/已终态/用户成员恒 False。仅群详情端点填充（群列表不加，\n逐成员 LIMIT 1 查询只花在打开详情时）。"
       },
       "GroupMemberRead": {
         "properties": {

@@ -2408,6 +2408,35 @@ class RunSyncService:
                         agent_run_id=str(agent_run.id),
                         group_id=str(group_id),
                     )
+                # 群聊运行态可见 quick（2026-09-02）：终态 typing 止息——run 收口
+                # 即冲掉该成员的 typing 指示器（completed/failed/killed 全发：
+                # 无论成败，成员都不再「正在输入」；前端 TTL 过期之外的服务端
+                # 确定性信号）。延迟 import 同下方互@挂接先例（run_sync ↔ group
+                # 循环依赖）；_publish_group_typing_event 自吞 Redis 抖动，外层
+                # try 兜 import 级异常——失败仅 warning 不阻断已 commit 的收口。
+                try:
+                    from app.modules.daemon.group.service import (
+                        _publish_group_typing_event,
+                        _typing_payload,
+                    )
+
+                    await _publish_group_typing_event(
+                        group_id,
+                        _typing_payload(
+                            member_name=group_member_name,
+                            member_kind="agent",
+                            typing=False,
+                            preview=None,
+                            member_id=str(group_member_id),
+                        ),
+                    )
+                except Exception:
+                    log.warning(
+                        "group_typing_stop_publish_failed",
+                        lease_id=str(lease_id),
+                        agent_run_id=str(agent_run.id),
+                        group_id=str(group_id),
+                    )
                 # task-04（design §4.4）：互@检测——编排与 Redis 护栏全在
                 # group/service.py，此处仅最小挂接（completed 轮；fail-open：
                 # 异常不阻断已 commit 的 run 终态收口与后续排队派发）。

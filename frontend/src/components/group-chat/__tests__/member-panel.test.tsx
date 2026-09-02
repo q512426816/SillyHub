@@ -541,6 +541,33 @@ describe("MemberPanel 在线绿点判定（design §5.4）", () => {
   });
 });
 
+// ── 2b. 运行中徽标（群聊运行态可见 quick，2026-09-02） ────────────────────
+
+describe("MemberPanel 运行中徽标（群聊运行态可见 quick）", () => {
+  it("runningMemberIds 命中 → agent 卡「运行中」动态徽标；未命中成员不渲染", () => {
+    renderPanel(
+      <MemberPanel
+        group={makeGroup()}
+        currentUserId="u-me"
+        runningMemberIds={new Set(["mem-1"])}
+      />,
+    );
+
+    const card = screen.getByTestId("agent-member-card-mem-1");
+    const badge = within(card).getByTestId("member-running-badge-mem-1");
+    expect(badge.textContent).toContain("运行中");
+    // 徽标与 shadow_status 徽标并存（在线 + 运行中）。
+    expect(card.textContent).toContain("在线");
+    // 未运行 agent（小测 mem-2）与用户成员无徽标。
+    expect(screen.queryByTestId("member-running-badge-mem-2")).toBeNull();
+  });
+
+  it("缺省 runningMemberIds（无运行态数据源）→ 无徽标", () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+    expect(screen.queryByTestId("member-running-badge-mem-1")).toBeNull();
+  });
+});
+
 // ── 3. 热切换弹窗（design §4.5 + 原型 switchModal） ──────────────────────
 
 describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {

@@ -20,6 +20,8 @@
  *     JSON 自取键容错）+ 团队能力开关（quick 群成员团队能力：PATCH team_enabled，
  *     热切换走重建分支——确认弹窗照机器组惯例；仅 Claude 可开）+ shadow_status
  *     徽标（active 在线 / pending 待建 / none 未建 / ended 已结束 / failed 异常）
+ *     +「运行中」动态徽标（runningMemberIds 命中——群详情 shadow_running ∪
+ *     SSE agent typing live 态，群聊运行态可见 quick 2026-09-02）
  *     +「切换配置」热切换弹窗 +「重置记忆」+「移除」（群主可见）；
  *   - 用户成员区：头像 + 昵称 + 在线绿点（online_member_ids 命中 user_id，
  *     presence 数据源）/ 离线灰点 + 群主标识 + 移除按钮（群主可见，confirm 后
@@ -155,6 +157,12 @@ export interface MemberPanelProps {
    * 详情读体不含——由消费方（task-08 面板 / 列表快照）透传。
    */
   onlineMemberIds?: readonly string[];
+  /**
+   * 运行中 agent 成员 id 集（群聊运行态可见 quick，2026-09-02）：数据源 =
+   * 群详情 members[].shadow_running ∪ SSE agent typing live 态（由消费方
+   * group-chat-panel 计算透传）；命中 → agent 卡「运行中」动态徽标。
+   */
+  runningMemberIds?: ReadonlySet<string>;
   /** 当前用户 id（群主判定 = group.created_by；null = 未登录/未知，只读态）。 */
   currentUserId: string | null;
   /** 操作成功后的刷新回调（消费方 invalidate 群列表 + 群详情）。 */
@@ -165,6 +173,7 @@ export interface MemberPanelProps {
 export function MemberPanel({
   group,
   onlineMemberIds,
+  runningMemberIds,
   currentUserId,
   onRefresh,
   className,
@@ -447,6 +456,8 @@ export function MemberPanel({
       )}
       {agentMembers.map((member) => {
         const status = shadowStatusMeta(member.shadow_status);
+        // 运行中（群聊运行态可见 quick）：影子会话有活跃 run——brand 描边动态徽标。
+        const running = runningMemberIds?.has(member.id) ?? false;
         // quick 影子会话面板：有影子会话即可整卡点击打开（title 提示）。
         const shadowViewable = member.shadow_session_id != null;
         return (
@@ -474,6 +485,19 @@ export function MemberPanel({
                 <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">
                   <span className="truncate">{member.display_name}</span>
                   <StatusBadge kind={status.kind}>{status.label}</StatusBadge>
+                  {running && (
+                    <span
+                      data-testid={`member-running-badge-${member.id}`}
+                      title="影子会话有活跃 run（正在处理群消息）"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-300 bg-brand-50 px-1.5 py-px text-[10px] font-semibold text-brand-700 dark:border-brand-500/50 dark:bg-brand-500/10 dark:text-brand-300"
+                    >
+                      <span
+                        aria-hidden
+                        className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500"
+                      />
+                      运行中
+                    </span>
+                  )}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
                   @{member.display_name}（@提及词）

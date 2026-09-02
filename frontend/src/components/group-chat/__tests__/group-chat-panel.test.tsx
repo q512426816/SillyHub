@@ -49,10 +49,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import {
   GroupChatPanel,
+  GROUP_TYPING_TTL_MS,
+  agentTypingKeyCandidates,
   applyGroupTimelineEvent,
+  applyReplyingEvent,
+  applyTypingEvent,
   buildTimelineFromReplay,
   entryFromReplayLog,
+  pruneTypingIndicators,
+  removeReplyingMembers,
   sortGroupTimeline,
+  type GroupReplyingMember,
+  type GroupTypingIndicator,
 } from "@/components/group-chat/group-chat-panel";
 import type { GroupReplayLogEntry } from "@/lib/daemon";
 
@@ -245,6 +253,8 @@ function makeGroupDetail(): Record<string, unknown> {
         removed_at: null,
         shadow_session_id: null,
         shadow_status: "none",
+        // 群详情运行态兜底字段（群聊运行态可见 quick，2026-09-02）。
+        shadow_running: false,
       },
       {
         id: "mem-2",
@@ -261,6 +271,7 @@ function makeGroupDetail(): Record<string, unknown> {
         removed_at: null,
         shadow_session_id: null,
         shadow_status: "none",
+        shadow_running: false,
       },
       {
         id: "mem-3",
@@ -271,6 +282,7 @@ function makeGroupDetail(): Record<string, unknown> {
         joined_at: "2026-09-01T00:00:00Z",
         removed_at: null,
         shadow_status: "none",
+        shadow_running: false,
       },
       {
         id: "mem-4",
@@ -281,6 +293,7 @@ function makeGroupDetail(): Record<string, unknown> {
         joined_at: "2026-09-01T00:00:00Z",
         removed_at: null,
         shadow_status: "none",
+        shadow_running: false,
       },
     ],
     online_member_ids: [],
@@ -577,6 +590,104 @@ describe("平铺时间线纯函数（task-08 / D-011）", () => {
   });
 });
 
+/* ── 1b. typing/回复锚点纯函数（群聊运行态可见 quick，2026-09-02） ─────────── */
+
+describe("typing/回复锚点纯函数（群聊运行态可见 quick）", () => {
+  it("applyTypingEvent：agent 事件不设 TTL（expiresAt=null）——10s 裁剪仍在；用户事件 2.5s TTL 过期", () => {
+    const now = Date.parse("2026-09-02T06:00:00Z");
+    let map: Record<string, GroupTypingIndicator> = {};
+    map = applyTypingEvent(map, {
+      member_name: "小码",
+      member_id: "mem-1",
+      member_kind: "agent",
+      typing: true,
+      preview: null,
+    }, now);
+    map = applyTypingEvent(map, {
+      member_name: "林一",
+      member_kind: "user",
+      typing: true,
+      preview: "草稿",
+    }, now);
+    // 键空间：agent 按 member_id、用户按昵称。
+    expect(map["agent:mem-1"]!.expiresAt).toBeNull();
+    expect(map["user:林一"]!.expiresAt).toBe(now + GROUP_TYPING_TTL_MS);
+    // 越过 10s（远超 2.5s TTL）裁剪：agent 持续态豁免，用户过期回收。
+    const pruned = pruneTypingIndicators(map, now + 10_000);
+    expect(pruned["agent:mem-1"]).toBeTruthy();
+    expect(pruned["user:林一"]).toBeUndefined();
+    // 止息（typing:false 带 member_id）→ 移除。
+    const stopped = applyTypingEvent(pruned, {
+      member_name: "小码",
+      member_id: "mem-1",
+      member_kind: "agent",
+      typing: false,
+    }, now + 11_000);
+    expect(stopped["agent:mem-1"]).toBeUndefined();
+    // 老形态兼容（无 member_id）：昵称键，止息同键清理。
+    let legacy: Record<string, GroupTypingIndicator> = {};
+    legacy = applyTypingEvent(legacy, {
+      member_name: "小测",
+      member_kind: "agent",
+      typing: true,
+    }, now);
+    expect(legacy["agent:小测"]!.expiresAt).toBeNull();
+    legacy = applyTypingEvent(legacy, {
+      member_name: "小测",
+      member_kind: "agent",
+      typing: false,
+    }, now);
+    expect(legacy["agent:小测"]).toBeUndefined();
+  });
+
+  it("applyReplyingEvent：锚点 typing:true 挂对应消息（同消息多成员、重复事件去重）；止息按成员键全表移除；turn_completed 候选键收口", () => {
+    let map: Record<string, GroupReplyingMember[]> = {};
+    const start = (name: string, id: string, logId: string) => ({
+      member_name: name,
+      member_id: id,
+      member_kind: "agent",
+      typing: true,
+      reply_to_log_id: logId,
+    });
+    map = applyReplyingEvent(map, start("小码", "mem-1", "l-2"));
+    map = applyReplyingEvent(map, start("小测", "mem-2", "l-2"));
+    // 同成员重复 typing 心跳（去重，不双标签）。
+    map = applyReplyingEvent(map, start("小码", "mem-1", "l-2"));
+    expect(map["l-2"]!.map((r) => r.memberName)).toEqual(["小码", "小测"]);
+    // 无锚点 agent 事件（互@触发）不入表（走 typing 指示条）。
+    map = applyReplyingEvent(map, {
+      member_name: "小码",
+      member_id: "mem-1",
+      member_kind: "agent",
+      typing: true,
+      reply_to_log_id: null,
+    });
+    expect(map["l-2"]).toHaveLength(2);
+    // 用户事件恒不入表。
+    map = applyReplyingEvent(map, {
+      member_name: "林一",
+      member_kind: "user",
+      typing: true,
+      reply_to_log_id: "l-2",
+    });
+    expect(map["l-2"]).toHaveLength(2);
+    // 止息帧不带锚点 → 按成员键从所有消息移除。
+    map = applyReplyingEvent(map, {
+      member_name: "小测",
+      member_id: "mem-2",
+      member_kind: "agent",
+      typing: false,
+    });
+    expect(map["l-2"]!.map((r) => r.memberName)).toEqual(["小码"]);
+    // turn_completed 收口：agentTypingKeyCandidates（member_id+昵称双键）移除。
+    map = removeReplyingMembers(
+      map,
+      agentTypingKeyCandidates("mem-1", "小码"),
+    );
+    expect(map["l-2"]).toBeUndefined();
+  });
+});
+
 /* ── 2. 装配：回放 + 实时 SSE 消费 ─────────────────────────────────────── */
 
 describe("GroupChatPanel 装配（真 streamGroupChat SSE 消费）", () => {
@@ -744,7 +855,7 @@ describe("GroupChatPanel 装配（真 streamGroupChat SSE 消费）", () => {
     ).toHaveLength(1);
   }, 10_000);
 
-  it("typing 气泡：出现（昵称+预览）→ typing=false 显式消失；TTL 2.5s 过期自动消失", async () => {
+  it("typing 气泡：用户 TTL 2.5s 过期消失；agent 持续态不过期、止息移除（群聊运行态可见 quick）", async () => {
     harness.logsJson = [];
     renderPanel();
     await waitForStreamWired();
@@ -763,10 +874,11 @@ describe("GroupChatPanel 装配（真 streamGroupChat SSE 消费）", () => {
     expect(within(userBubble).getByText("林一")).toBeTruthy();
     expect(within(userBubble).getByText(/我这边复现了/)).toBeTruthy();
 
-    // agent typing（后端代发）：显示成员昵称 + 正在生成回复。
+    // agent typing（后端代发，带 member_id）：显示成员昵称 + 正在生成回复。
     await pushSseEvent({
       event: "typing",
       member_name: "小码",
+      member_id: "mem-1",
       member_kind: "agent",
       typing: true,
       preview: null,
@@ -774,25 +886,147 @@ describe("GroupChatPanel 装配（真 streamGroupChat SSE 消费）", () => {
     });
     expect(screen.getAllByTestId("group-typing-bubble")).toHaveLength(2);
 
-    // typing=false（发送/停顿收口）→ 指示器移除。
+    // 越过用户 TTL 2.5s（500ms 裁剪周期）：用户指示器过期消失；agent 持续态
+    // **不设 TTL**（止息信号才移除——run 可能跑数分钟，TTL 会错杀）恒在。
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3200));
+    });
+    const afterTtl = screen.getAllByTestId("group-typing-bubble");
+    expect(afterTtl).toHaveLength(1);
+    expect(afterTtl[0]!.textContent).toContain("小码");
+    expect(afterTtl[0]!.textContent).toContain("正在生成回复");
+
+    // agent 止息（run 终态 typing:false 带 member_id/member_name）→ 移除。
     await pushSseEvent({
       event: "typing",
-      member_name: "林一",
-      member_kind: "user",
+      member_name: "小码",
+      member_id: "mem-1",
+      member_kind: "agent",
       typing: false,
       preview: null,
+      ts: "2026-09-01T06:06:30Z",
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("group-typing-bubble")).toBeNull();
+    });
+  }, 12_000);
+
+  it("「正在回复」标签挂触发消息下方（reply_to_log_id 锚点）：@全体两成员两标签；止息/turn_completed 移除；锚定成员不重复占 typing 指示条", async () => {
+    harness.logsJson = makeReplayLogs(); // l-2 = 鲸落「@小码 帮我定位…」
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+
+    // 两个 agent 同时锚定 l-2（@全体场景：同一条消息多个成员响应）。
+    await pushSseEvent({
+      event: "typing",
+      member_name: "小码",
+      member_id: "mem-1",
+      member_kind: "agent",
+      typing: true,
+      preview: null,
+      reply_to_log_id: "l-2",
       ts: "2026-09-01T06:06:02Z",
     });
-    expect(screen.getAllByTestId("group-typing-bubble")).toHaveLength(1);
+    await pushSseEvent({
+      event: "typing",
+      member_name: "小测",
+      member_id: "mem-2",
+      member_kind: "agent",
+      typing: true,
+      preview: null,
+      reply_to_log_id: "l-2",
+      ts: "2026-09-01T06:06:03Z",
+    });
 
-    // TTL 2.5s 过期：无后续帧 → 剩余指示器自动消失（500ms 裁剪周期）。
-    await waitFor(
-      () => {
-        expect(screen.queryByTestId("group-typing-bubble")).toBeNull();
-      },
-      { timeout: 4000 },
+    const anchorRow = await waitFor(() => {
+      const row = document.querySelector<HTMLElement>(
+        "[data-testid='group-msg-user'][data-log-id='l-2']",
+      );
+      expect(row).toBeTruthy();
+      return row!;
+    });
+    await waitFor(() => {
+      expect(
+        within(anchorRow).getAllByTestId(/^replying-tag-/).map((el) =>
+          el.getAttribute("data-testid"),
+        ),
+      ).toEqual(["replying-tag-mem-1", "replying-tag-mem-2"]);
+    });
+    // 标签文案 + 三点动画（.sh-typing-dots 复用）。
+    const tag1 = within(anchorRow).getByTestId("replying-tag-mem-1");
+    expect(tag1.textContent).toContain("小码 正在回复…");
+    expect(tag1.querySelector(".sh-typing-dots")).toBeTruthy();
+    // 锚定成员的运行态已挂消息下方，typing 指示条不重复出现。
+    expect(screen.queryByTestId("group-typing-bubble")).toBeNull();
+
+    // 止息（typing:false，帧不带锚点）→ 该成员标签移除（另一成员保留）。
+    await pushSseEvent({
+      event: "typing",
+      member_name: "小码",
+      member_id: "mem-1",
+      member_kind: "agent",
+      typing: false,
+      preview: null,
+      ts: "2026-09-01T06:06:20Z",
+    });
+    await waitFor(() => {
+      expect(
+        within(anchorRow).getAllByTestId(/^replying-tag-/).map((el) =>
+          el.getAttribute("data-testid"),
+        ),
+      ).toEqual(["replying-tag-mem-2"]);
+    });
+
+    // turn_completed（member 身份）收口 → 标签移除（止息帧丢失的兜底路径）。
+    await pushSseEvent({
+      event: "turn_completed",
+      session_id: "s-g-1",
+      run_id: "shadow-run-2",
+      status: "completed",
+      exit_code: 0,
+      timestamp: "2026-09-01T06:06:40Z",
+      member_id: "mem-2",
+      member_name: "小测",
+      member_session_id: "shadow-2",
+    });
+    await waitFor(() => {
+      expect(within(anchorRow).queryAllByTestId(/^replying-tag-/)).toHaveLength(0);
+    });
+  });
+
+  it("详情 shadow_running 兜底：刷新回放即见运行态（typing 指示条 + 成员面板「运行中」徽标 + facepile 小绿点），不强挂消息", async () => {
+    const detail = makeGroupDetail();
+    const members = detail.members as Record<string, unknown>[];
+    (members.find((m) => m.id === "mem-1") as Record<string, unknown>).shadow_running =
+      true;
+    mocks.getGroupChat.mockResolvedValue(detail);
+    mocks.listGroupChats.mockResolvedValue([detail]);
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+
+    // typing 指示条：小码（Agent）正在生成回复…（bootstrap 形态，preview=null）。
+    const bubble = await screen.findByTestId("group-typing-bubble");
+    expect(bubble.textContent).toContain("小码");
+    expect(bubble.textContent).toContain("正在生成回复");
+    // 详情无锚点关联 → 不强挂消息下方（诚实降级）。
+    expect(screen.queryByTestId("replying-tags")).toBeNull();
+
+    // 成员面板「运行中」徽标（runningMemberIds 透传）+ facepile 小绿点。
+    await waitFor(() => {
+      expect(screen.getByTestId("member-running-badge-mem-1")).toBeTruthy();
+    });
+    expect(screen.getByTestId("member-running-badge-mem-1").textContent).toContain(
+      "运行中",
     );
-  }, 10_000);
+    expect(screen.getByTestId("facepile-running-dot-mem-1")).toBeTruthy();
+    // 未运行成员（小测/用户成员）无徽标无绿点。
+    expect(screen.queryByTestId("member-running-badge-mem-2")).toBeNull();
+    expect(screen.queryByTestId("facepile-running-dot-mem-2")).toBeNull();
+  });
 });
 
 /* ── 2b. 气泡视觉 token（群聊体验对齐 quick：会话 TurnTimeline 同款） ────── */

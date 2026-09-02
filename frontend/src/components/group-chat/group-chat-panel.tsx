@@ -30,7 +30,14 @@
  *     标签 + 流式光标，member_id 分色）；系统事件（群解散等）居中灰字；
  *     @提及文本高亮（正则同后端 _MENTION_TOKEN_RE 口径 [@＠]\S+ + 边界截断）；
  *   - typing 指示器（输入框上方气泡）：SSE typing 分支 member_name + 草稿
- *     preview，TTL 2.5s 过期自动消失（design §5.4；agent typing 显示成员昵称）；
+ *     preview，用户事件 TTL 2.5s 过期自动消失（design §5.4）；
+ *   - 群聊运行态可见（quick 2026-09-02）：agent typing（member_kind='agent'）
+ *     为持续态（不设 TTL——typing:false 止息 / turn_completed 移除）；带
+ *     reply_to_log_id 锚点的事件在触发消息（user_input 行）气泡下方渲染
+ *     「{member_name} 正在回复…」brand 描边小标签 + 三点动画（@全体 同消息
+ *     多标签横排），无锚点 agent typing（互@触发）落原 typing 指示条；群详情
+ *     members[].shadow_running 兜底灌入运行集（刷新回放/SSE 迟连场景，无锚点
+ *     不强挂消息——诚实降级）+ 成员面板「运行中」徽标 / facepile 小绿点；
  *   - 输入区：@补全（session-mention-popover member kind——输入 @ 触发
  *     buildMemberMentionItems(群成员)+过滤+键盘）；Enter 发送调群消息端点；
  *     typing 上报（输入节流 250ms typing=true+preview ≤400 字，停顿 1s / 发送后
@@ -458,41 +465,87 @@ function renderMentionHighlights(
 
 /* ────────────────────── typing 指示器 ────────────────────── */
 
-/** typing 指示器条目（TTL 2.5s 过期自动消失；key=成员昵称）。 */
+/**
+ * typing 指示器条目（群聊运行态可见 quick 2026-09-02 分化）：
+ *   - 用户事件：TTL 2.5s 过期自动消失（design §5.4 原口径）；
+ *   - agent 事件：**不设 TTL**（expiresAt=null 持续到止息信号——run 可能跑
+ *     数分钟，TTL 会把「正在生成」错杀）；typing:false / turn_completed 移除。
+ */
 export interface GroupTypingIndicator {
+  /** 成员归属键（agent:{member_id|昵称} / user:{昵称}）。 */
   key: string;
   name: string;
   /** user=用户成员 / agent=后端代发（「成员正在生成回复」）。 */
   kind: string;
   preview: string | null;
-  expiresAt: number;
+  /** null=不过期（agent 持续运行态）；数字=epoch ms（用户 TTL 到期）。 */
+  expiresAt: number | null;
+  /** agent 成员行 id（用户事件 null）——成员运行徽标/facepile 联动键。 */
+  memberId: string | null;
+  /** live=SSE 事件驱动 / bootstrap=群详情 shadow_running 兜底灌入。 */
+  source: "live" | "bootstrap";
 }
 
-/** typing 事件 → 指示器表（纯函数：typing=true upsert / false 移除 / 过期裁剪）。 */
+/**
+ * agent 归属键候选（member_id 优先、昵称兜底）：止息帧/turn_completed 按
+ * member_id 定位，但老事件可能只带昵称——移除时按候选集任一命中即清。
+ */
+export function agentTypingKeyCandidates(
+  memberId: string | null | undefined,
+  memberName: string | null | undefined,
+): string[] {
+  const keys: string[] = [];
+  if (memberId?.trim()) keys.push(`agent:${memberId.trim()}`);
+  const name = memberName?.trim();
+  if (name) keys.push(`agent:${name}`);
+  return keys;
+}
+
+/** typing 事件 → 指示器表（纯函数：typing=true upsert / false 移除）。 */
 export function applyTypingEvent(
   map: Record<string, GroupTypingIndicator>,
-  event: { member_name: string | null; member_kind?: string | null; typing: boolean; preview?: string | null },
+  event: {
+    member_name: string | null;
+    member_id?: string | null;
+    member_kind?: string | null;
+    typing: boolean;
+    preview?: string | null;
+  },
   now: number,
   ttlMs: number = GROUP_TYPING_TTL_MS,
 ): Record<string, GroupTypingIndicator> {
   const name = event.member_name?.trim();
   if (!name) return map;
+  const isAgent = event.member_kind === "agent";
+  const memberId = event.member_id?.trim() || null;
+  // 归属键：agent 按 member_id（缺省昵称兜底）；用户按昵称。
+  const key = isAgent
+    ? (agentTypingKeyCandidates(memberId, name)[0] ?? `agent:${name}`)
+    : `user:${name}`;
   const next = { ...map };
   if (!event.typing) {
-    delete next[name];
+    // 止息：按候选键全清（member_id 与昵称键并存的历史事件兼容）。
+    for (const k of isAgent
+      ? agentTypingKeyCandidates(memberId, name)
+      : [`user:${name}`]) {
+      delete next[k];
+    }
     return next;
   }
-  next[name] = {
-    key: name,
+  next[key] = {
+    key,
     name,
-    kind: event.member_kind ?? "user",
-    preview: event.preview?.trim() || null,
-    expiresAt: now + ttlMs,
+    kind: isAgent ? "agent" : "user",
+    preview: isAgent ? null : (event.preview?.trim() || null),
+    // agent 持续态不设 TTL（止息信号移除）；用户维持 2.5s TTL。
+    expiresAt: isAgent ? null : now + ttlMs,
+    memberId: isAgent ? memberId : null,
+    source: "live",
   };
   return next;
 }
 
-/** 裁剪过期指示器（渲染前调用；返回原引用当无过期，避免无谓重渲染）。 */
+/** 裁剪过期指示器（expiresAt=null 的 agent 持续态豁免；返回原引用当无过期）。 */
 export function pruneTypingIndicators(
   map: Record<string, GroupTypingIndicator>,
   now: number,
@@ -500,10 +553,69 @@ export function pruneTypingIndicators(
   let changed = false;
   const next: Record<string, GroupTypingIndicator> = {};
   for (const ind of Object.values(map)) {
-    if (ind.expiresAt > now) next[ind.key] = ind;
+    if (ind.expiresAt == null || ind.expiresAt > now) next[ind.key] = ind;
     else changed = true;
   }
   return changed ? next : map;
+}
+
+/* ────────────────────── 「正在回复」锚点标签（群聊运行态可见 quick） ────── */
+
+/** 触发消息下方「XX 正在回复…」标签条目（同一消息可多个 agent 响应——@全体）。 */
+export interface GroupReplyingMember {
+  /** 成员归属键（agent:{member_id|昵称}，与指示器同一键空间）。 */
+  key: string;
+  memberId: string | null;
+  memberName: string;
+}
+
+/**
+ * typing 事件 → 回复锚点标签表（纯函数）：
+ *   - agent typing:true 带 reply_to_log_id → 在该消息下追加标签（按成员键去重）；
+ *   - agent typing:false（止息帧不带锚点）→ 按成员键从**所有**消息移除；
+ *   - 用户事件 / 无锚点 agent 事件（互@触发）→ 不入本表（走 typing 指示条）。
+ */
+export function applyReplyingEvent(
+  map: Record<string, GroupReplyingMember[]>,
+  event: {
+    member_name: string | null;
+    member_id?: string | null;
+    member_kind?: string | null;
+    typing: boolean;
+    reply_to_log_id?: string | null;
+  },
+): Record<string, GroupReplyingMember[]> {
+  if (event.member_kind !== "agent") return map;
+  const name = event.member_name?.trim();
+  if (!name) return map;
+  const memberId = event.member_id?.trim() || null;
+  const keys = agentTypingKeyCandidates(memberId, name);
+  if (!event.typing) {
+    return removeReplyingMembers(map, keys);
+  }
+  const logId = event.reply_to_log_id?.trim();
+  if (!logId) return map;
+  const existing = map[logId] ?? [];
+  const key = keys[0] ?? `agent:${name}`;
+  if (existing.some((r) => r.key === key)) return map;
+  return { ...map, [logId]: [...existing, { key, memberId, memberName: name }] };
+}
+
+/** 按成员归属键候选从全部消息移除标签（turn_completed 收口复用；空列表键回收）。 */
+export function removeReplyingMembers(
+  map: Record<string, GroupReplyingMember[]>,
+  keys: string[],
+): Record<string, GroupReplyingMember[]> {
+  const keySet = new Set(keys);
+  let next: Record<string, GroupReplyingMember[]> | null = null;
+  for (const [logId, list] of Object.entries(map)) {
+    const filtered = list.filter((r) => !keySet.has(r.key));
+    if (filtered.length === list.length) continue;
+    next = next ?? { ...map };
+    if (filtered.length === 0) delete next[logId];
+    else next[logId] = filtered;
+  }
+  return next ?? map;
 }
 
 /* ────────────────────── 组件 ────────────────────── */
@@ -579,8 +691,14 @@ export function GroupChatPanel({
   );
   const streamConnRef = useRef<{ close: () => void; resync?: () => void } | null>(null);
 
-  /* ── typing 指示器（TTL 2.5s；周期裁剪驱动过期消失） ── */
+  /* ── typing 指示器（用户 TTL 2.5s 周期裁剪；agent 持续态豁免——止息信号移除，
+   *    群聊运行态可见 quick 2026-09-02）+「正在回复」锚点标签表 ── */
   const [typingMap, setTypingMap] = useState<Record<string, GroupTypingIndicator>>({});
+  /** 触发消息（log_id）→ 正在回复的 agent 成员集（@全体 同消息多标签）。 */
+  const [replyingBy, setReplyingBy] = useState<Record<string, GroupReplyingMember[]>>({});
+  /** 已收到的 agent 止息归属键（typing:false/turn_completed）——shadow_running
+   *    兜底灌入时跳过（详情快照可能早于止息信号，防「已停成员复活」）。 */
+  const stoppedAgentKeysRef = useRef<Set<string>>(new Set());
   const typingTick = useRef(0);
   useEffect(() => {
     const timer = setInterval(() => {
@@ -607,6 +725,9 @@ export function GroupChatPanel({
     seenIdsRef.current = new Set();
     lastLogTsRef.current = null;
     setStreamingKeys(new Set());
+    setTypingMap({});
+    setReplyingBy({});
+    stoppedAgentKeysRef.current = new Set();
 
     void (async () => {
       // 回放读库（刷新回放：user_input 行 + 投影行，统一排序平铺）。
@@ -667,9 +788,40 @@ export function GroupChatPanel({
                 return next;
               });
             }
+            // 运行态收口（群聊运行态可见 quick 2026-09-02）：同成员 agent typing
+            // 持续指示 + 回复锚点标签一并移除（止息 typing:false 丢失时的兜底）。
+            const stopKeys = agentTypingKeyCandidates(env.member_id, env.member_name);
+            if (stopKeys.length > 0) {
+              for (const k of stopKeys) stoppedAgentKeysRef.current.add(k);
+              setTypingMap((map) => {
+                let changed = false;
+                const next = { ...map };
+                for (const k of stopKeys) {
+                  if (next[k]) {
+                    delete next[k];
+                    changed = true;
+                  }
+                }
+                return changed ? next : map;
+              });
+              setReplyingBy((map) => removeReplyingMembers(map, stopKeys));
+            }
           },
           onTyping: (event) => {
-            setTypingMap((map) => applyTypingEvent(map, event, Date.now()));
+            const now = Date.now();
+            setTypingMap((map) => applyTypingEvent(map, event, now));
+            setReplyingBy((map) => applyReplyingEvent(map, event));
+            if (event.member_kind === "agent") {
+              const keys = agentTypingKeyCandidates(event.member_id, event.member_name);
+              if (event.typing) {
+                // 重新点亮：清止息记忆（shadow_running 兜底可重新灌入该成员）。
+                for (const k of keys) stoppedAgentKeysRef.current.delete(k);
+              } else {
+                for (const k of keys) stoppedAgentKeysRef.current.add(k);
+                // 止息 → 群详情 shadow_running 兜底刷新（成员运行徽标收口）。
+                void qc.invalidateQueries({ queryKey: ["groupChat", groupId] });
+              }
+            }
           },
           // queue_changed：群内不展示队列 UI（design §9.8）——影子队列事件透传
           // 备消费，本面板无渲染动作。
@@ -685,6 +837,26 @@ export function GroupChatPanel({
               // 重连恢复：清流式光标（群无 run 快照可合成收口，保守归零；
               // 仍在输出的成员下一条实时行会重新点亮）。
               setStreamingKeys(new Set());
+              // 运行态重对账（群聊运行态可见 quick 2026-09-02）：断连窗口可能
+              // 错过止息/turn_completed——agent 持续指示降级为 bootstrap 态，
+              // 交由群详情 shadow_running 对账（仍在跑→保留；已停→retire 回收
+              // + 回复锚点标签联动清除）；止息记忆作废（详情快照晚于一切断前
+              // 信号，新 run 不被旧止息压制）。
+              setTypingMap((map) => {
+                let changed = false;
+                const next: Record<string, GroupTypingIndicator> = {};
+                for (const ind of Object.values(map)) {
+                  if (ind.kind === "agent" && ind.source === "live") {
+                    next[ind.key] = { ...ind, source: "bootstrap" };
+                    changed = true;
+                  } else {
+                    next[ind.key] = ind;
+                  }
+                }
+                return changed ? next : map;
+              });
+              stoppedAgentKeysRef.current = new Set();
+              void qc.invalidateQueries({ queryKey: ["groupChat", groupId] });
             }
           },
         },
@@ -705,6 +877,63 @@ export function GroupChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
+  /* ── 运行态兜底（群聊运行态可见 quick 2026-09-02）：群详情 members[].
+   *    shadow_running → agent 运行集灌入 typingMap（持续态、preview=null、
+   *    source=bootstrap）——刷新回放/SSE 迟连时 typing 事件丢失的兜底。
+   *    详情无回复锚点关联，不强挂消息（诚实降级：成员侧徽标 + typing 指示条）；
+   *    live 指示器不被兜底覆盖，详情不再 running 的 bootstrap 指示器回收。
+   *    声明在 SSE 订阅 effect 之后：同一次提交里 sessionId 建连重置与兜底灌入
+   *    并发时，先重置后灌入（顺序反了会被重置清空）。 ── */
+  const bootstrapRunningKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!detail) return;
+    const fresh = new Set<string>();
+    for (const m of detail.members ?? []) {
+      if (m.member_type !== "agent" || !m.shadow_running) continue;
+      const candidates = agentTypingKeyCandidates(m.id, m.display_name);
+      const key = candidates[0];
+      if (!key) continue;
+      for (const k of candidates) fresh.add(k);
+      if (stoppedAgentKeysRef.current.has(key)) continue;
+      setTypingMap((map) =>
+        map[key]
+          ? map
+          : {
+              ...map,
+              [key]: {
+                key,
+                name: m.display_name,
+                kind: "agent",
+                preview: null,
+                expiresAt: null,
+                memberId: m.id,
+                source: "bootstrap",
+              },
+            },
+      );
+    }
+    const retired = [...bootstrapRunningKeysRef.current].filter(
+      (k) => !fresh.has(k),
+    );
+    if (retired.length > 0) {
+      setTypingMap((map) => {
+        let changed = false;
+        const next = { ...map };
+        for (const k of retired) {
+          if (next[k]?.source === "bootstrap") {
+            delete next[k];
+            changed = true;
+          }
+        }
+        return changed ? next : map;
+      });
+      // 详情判定已停的成员：回复锚点标签一并清除（重连对账路径——止息帧
+      // 可能错过，标签不能永久滞留）。
+      setReplyingBy((map) => removeReplyingMembers(map, retired));
+    }
+    bootstrapRunningKeysRef.current = fresh;
+  }, [detail]);
+
   /* ── 时间线自动滚底（新行到达且视口贴近底部时跟随）。 ── */
   const timelineRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -713,7 +942,7 @@ export function GroupChatPanel({
     const nearBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < 160;
     if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [entries, typingMap]);
+  }, [entries, typingMap, replyingBy]);
 
   /* ── 输入区：草稿 / @补全 / typing 上报 / 发送 / 附件（FR-05 补遗） ── */
   const [draft, setDraft] = useState("");
@@ -901,7 +1130,30 @@ export function GroupChatPanel({
   const facepile = members.slice(0, FACEPILE_MAX);
   const facepileMore = members.length - facepile.length;
 
-  const typingIndicators = Object.values(typingMap);
+  /* ── 运行态派生（群聊运行态可见 quick 2026-09-02） ── */
+  /** 有回复锚点标签的 agent 归属键（标签已挂触发消息下方，typing 指示条不重复）。 */
+  const anchoredAgentKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const list of Object.values(replyingBy)) {
+      for (const r of list) s.add(r.key);
+    }
+    return s;
+  }, [replyingBy]);
+  const typingIndicators = Object.values(typingMap).filter(
+    (ind) => ind.kind !== "agent" || !anchoredAgentKeys.has(ind.key),
+  );
+  /** agent 运行成员 id 集（详情 shadow_running ∪ SSE typing live 态——成员面板
+   *  「运行中」徽标 + facepile 小绿点共用数据源）。 */
+  const runningMemberIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of detail?.members ?? []) {
+      if (m.member_type === "agent" && m.shadow_running) ids.add(m.id);
+    }
+    for (const ind of Object.values(typingMap)) {
+      if (ind.kind === "agent" && ind.memberId) ids.add(ind.memberId);
+    }
+    return ids;
+  }, [detail, typingMap]);
 
   /** 每个流式归属键的最后一条 agent 行（光标只挂成员时间线尾巴）。 */
   const lastAgentIdByStreamKey = useMemo(() => {
@@ -982,26 +1234,43 @@ export function GroupChatPanel({
           </div>
           <div className="flex-1" />
           {/* facepile 头像堆叠（+N 溢出；avatar 有值→图片，无值 agent 分色/
-              用户 muted 首字，原型 .facepile）。 */}
+              用户 muted 首字，原型 .facepile；运行成员右下小绿点呼吸动画——
+              群聊运行态可见 quick 2026-09-02）。 */}
           <div
             className="flex flex-none items-center"
             title={`共 ${members.length} 名成员`}
           >
             {facepile.map((m) => (
-              <GroupMemberAvatar
+              <span
                 key={m.id}
-                avatar={m.avatar}
-                name={m.display_name}
-                size={28}
-                title={m.display_name}
-                className="rounded-full border-2 border-card first:ml-0 [&:not(:first-child)]:-ml-1.5"
-                fallbackClassName={cn(
-                  "h-7 w-7 text-[11px] font-semibold",
-                  m.member_type === "agent"
-                    ? agentAvatarColor(m.id, m.display_name)
-                    : "bg-muted-foreground/70",
+                className={cn(
+                  "relative flex-none rounded-full border-2 border-card first:ml-0 [&:not(:first-child)]:-ml-1.5",
+                  // 运行小绿点位于右下角，叠层时抬高防被右邻头像遮住。
+                  runningMemberIds.has(m.id) && "z-10",
                 )}
-              />
+              >
+                <GroupMemberAvatar
+                  avatar={m.avatar}
+                  name={m.display_name}
+                  size={28}
+                  title={m.display_name}
+                  className="rounded-full"
+                  fallbackClassName={cn(
+                    "h-7 w-7 text-[11px] font-semibold",
+                    m.member_type === "agent"
+                      ? agentAvatarColor(m.id, m.display_name)
+                      : "bg-muted-foreground/70",
+                  )}
+                />
+                {runningMemberIds.has(m.id) && (
+                  <span
+                    aria-hidden
+                    data-testid={`facepile-running-dot-${m.id}`}
+                    title={`${m.display_name} 运行中`}
+                    className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 animate-pulse rounded-full border-2 border-card bg-success"
+                  />
+                )}
+              </span>
             ))}
             {facepileMore > 0 && (
               <span className="-ml-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-card bg-muted text-[11px] font-semibold text-muted-foreground">
@@ -1034,6 +1303,7 @@ export function GroupChatPanel({
               key={entry.id}
               entry={entry}
               memberNames={memberNames}
+              replying={entry.kind === "user" ? (replyingBy[entry.id] ?? []) : []}
               providerLabel={
                 entry.kind === "agent"
                   ? entry.memberId
@@ -1226,6 +1496,7 @@ export function GroupChatPanel({
         <MemberPanel
           group={detail}
           onlineMemberIds={onlineMemberIds}
+          runningMemberIds={runningMemberIds}
           currentUserId={currentUserId}
           onRefresh={() => {
             void qc.invalidateQueries({ queryKey: ["groupChats"] });
@@ -1268,12 +1539,15 @@ export function GroupChatPanel({
 function GroupTimelineRow({
   entry,
   memberNames,
+  replying,
   providerLabel,
   avatar,
   streaming,
 }: {
   entry: GroupTimelineEntry;
   memberNames: readonly string[];
+  /** 触发消息下方「XX 正在回复…」标签集（仅 user 条目消费；群聊运行态可见 quick）。 */
+  replying: GroupReplyingMember[];
   providerLabel: string | null;
   /** 发送者头像 URL（群详情成员表解析；空 → 首字回退，quick 头像自定义）。 */
   avatar: string | null;
@@ -1299,6 +1573,7 @@ function GroupTimelineRow({
           data-testid="group-msg-user"
           data-self="true"
           data-sender={entry.senderName}
+          data-log-id={entry.id}
           className="my-2.5 flex items-end justify-end gap-1.5"
         >
           <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
@@ -1311,6 +1586,7 @@ function GroupTimelineRow({
                 {renderMentionHighlights(entry.content, memberNames, true)}
               </div>
             ) : null}
+            <ReplyingTags replying={replying} />
           </div>
           <GroupMemberAvatar
             avatar={avatar}
@@ -1330,6 +1606,7 @@ function GroupTimelineRow({
       <div
         data-testid="group-msg-user"
         data-sender={entry.senderName}
+        data-log-id={entry.id}
         className="my-2.5 flex items-start gap-2.5"
       >
         <GroupMemberAvatar
@@ -1350,6 +1627,7 @@ function GroupTimelineRow({
               {renderMentionHighlights(entry.content, memberNames, false)}
             </div>
           ) : null}
+          <ReplyingTags replying={replying} />
         </div>
       </div>
     );
@@ -1362,6 +1640,7 @@ function GroupTimelineRow({
       data-testid="group-msg-agent"
       data-member-id={entry.memberId ?? undefined}
       data-member-name={entry.memberName ?? undefined}
+      data-log-id={entry.id}
       className="my-2.5 flex items-start gap-2.5"
     >
       <GroupMemberAvatar
@@ -1400,6 +1679,38 @@ function GroupTimelineRow({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 「XX 正在回复…」标签行（群聊运行态可见 quick 2026-09-02，核心新需求）：
+ * 挂在触发消息（typing 事件 reply_to_log_id 锚定的 user_input 行）气泡下方，
+ * 「{member_name} 正在回复…」brand 语义阶描边小标签 + 三点动画（.sh-typing-dots
+ * 复用）；同一消息可多个 agent 响应（@全体）→ 横排多标签。
+ */
+function ReplyingTags({ replying }: { replying: GroupReplyingMember[] }) {
+  if (replying.length === 0) return null;
+  return (
+    <div
+      data-testid="replying-tags"
+      className="mt-1 flex flex-wrap items-center gap-1.5"
+    >
+      {replying.map((r) => (
+        <span
+          key={r.key}
+          data-testid={`replying-tag-${r.memberId ?? r.memberName}`}
+          className="inline-flex items-center gap-1.5 rounded-full border border-brand-300 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 dark:border-brand-500/50 dark:bg-brand-500/10 dark:text-brand-300"
+        >
+          {/* 会话同款三点脉冲（.sh-typing-dots utility 复用）。 */}
+          <span aria-hidden className="sh-typing-dots shrink-0">
+            <span />
+            <span />
+            <span />
+          </span>
+          {r.memberName} 正在回复…
+        </span>
+      ))}
     </div>
   );
 }

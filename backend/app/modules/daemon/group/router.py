@@ -70,15 +70,29 @@ class GroupChatListItemRead(GroupChatRead):
     last_mention: dict[str, str] | None = None
 
 
+class GroupMemberDetailRead(GroupMemberRead):
+    """群详情成员读体扩展（群聊运行态可见 quick，2026-09-02）。
+
+    ``shadow_running``：该 agent 成员影子会话当前有活跃 run（谓词同群侧
+    ``_get_shadow_active_run``）——typing 事件丢失/SSE 迟连时的运行态兜底
+    信号；影子未建/已终态/用户成员恒 False。仅群详情端点填充（群列表不加，
+    逐成员 LIMIT 1 查询只花在打开详情时）。
+    """
+
+    shadow_running: bool = False
+
+
 class GroupChatDetailRead(GroupChatRead):
     """群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。
 
     ``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照
     ``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表
-    项同源（``get_online_member_ids``）。
+    项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体
+    （多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）。
     """
 
     online_member_ids: list[uuid.UUID] = []
+    members: list[GroupMemberDetailRead] = Field(default_factory=list)
 
 
 class GroupMessageSendRequest(BaseModel):
@@ -180,11 +194,17 @@ async def get_group_chat(
     session: SessionDep,
     user: GroupChatUser,
 ) -> GroupChatDetailRead:
-    """群详情：成员完整列表（六要素 + shadow_status + 在线绿点；design §6.1）。"""
-    read = await GroupChatService(session).get_group(group_id, user)
+    """群详情：成员完整列表（六要素 + shadow_status + 在线绿点 + 运行态兜底）。"""
+    svc = GroupChatService(session)
+    read = await svc.get_group(group_id, user)
     detail = GroupChatDetailRead.model_validate(read.model_dump(mode="json"))
     # task-06（§5.4）：成员面板 presence 消费（与列表项同源）。
     detail.online_member_ids = await get_online_member_ids(group_id)
+    # 运行态兜底（2026-09-02 quick）：agent 成员影子活跃 run → shadow_running
+    # （typing 事件丢失/SSE 迟连时详情仍能标出谁在跑）。
+    shadow_running = await svc.get_member_shadow_running(group_id)
+    for member in detail.members:
+        member.shadow_running = shadow_running.get(member.id, False)
     return detail
 
 

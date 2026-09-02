@@ -2431,6 +2431,16 @@ export async function updateSessionCtxWindow(
 
 /** 群读体（GET /api/daemon/group-chats/{id}；api-types 生成版，禁止手写）。 */
 export type GroupChatRead = components["schemas"]["GroupChatRead"];
+/**
+ * 群详情读体（GET /api/daemon/group-chats/{id} 实际响应，api-types 生成版）：
+ * GroupChatRead + online_member_ids + 详情版成员（GroupMemberDetailRead，多
+ * ``shadow_running`` 运行态兜底字段，群聊运行态可见 quick 2026-09-02）。
+ */
+export type GroupChatDetailRead =
+  components["schemas"]["GroupChatDetailRead"];
+/** 群详情成员读体（GroupMemberRead + shadow_running 影子运行态兜底）。 */
+export type GroupMemberDetailRead =
+  components["schemas"]["GroupMemberDetailRead"];
 /** 群列表项（GroupChatRead + online_member_ids/last_message 摘要扩展）。 */
 export type GroupChatListItemRead =
   components["schemas"]["GroupChatListItemRead"];
@@ -2464,9 +2474,14 @@ export async function listGroupChats(): Promise<GroupChatListItemRead[]> {
   return apiFetch<GroupChatListItemRead[]>(GROUP_CHATS_BASE);
 }
 
-/** GET /api/daemon/group-chats/{id} — 群详情（成员完整列表含六要素）。 */
-export async function getGroupChat(groupId: string): Promise<GroupChatRead> {
-  return apiFetch<GroupChatRead>(
+/**
+ * GET /api/daemon/group-chats/{id} — 群详情（成员完整列表含六要素 + 详情版
+ * ``shadow_running`` 运行态兜底字段，群聊运行态可见 quick 2026-09-02）。
+ */
+export async function getGroupChat(
+  groupId: string,
+): Promise<GroupChatDetailRead> {
+  return apiFetch<GroupChatDetailRead>(
     `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}`,
   );
 }
@@ -2671,11 +2686,23 @@ export interface GroupChatStreamEnvelope extends SessionStreamEnvelope {
   member_kind?: string | null;
   typing?: boolean | null;
   preview?: string | null;
+  /**
+   * typing 帧（agent 事件）回复锚点（群聊运行态可见 quick，2026-09-02）：
+   * 触发消息的群时间线 user_input 行 id——「agent 正在响应哪句话」；互@路径
+   * 触发源是 agent 投影行，不带锚点；用户手动 typing 恒不带；止息帧不带。
+   */
+  reply_to_log_id?: string | null;
   /** FR-05 补遗：user_input 行附件摘要（无附件缺省 null/undefined 不渲染）。 */
   attachments?: GroupMessageAttachmentSummary[] | null;
 }
 
-/** typing 分支事件（design §5.4 typing.ping payload；ts 供调试观测，TTL 归前端）。 */
+/**
+ * typing 分支事件（design §5.4 typing.ping payload；ts 供调试观测，TTL 归前端）。
+ *
+ * ``member_id``/``reply_to_log_id``（群聊运行态可见 quick，2026-09-02）：仅
+ * agent 自动事件携带（止息帧带 member_id 不带锚点）；用户手动 typing 心跳
+ * 与历史形态一致（两者 null）——消费侧按 member_kind 区分。
+ */
 export interface GroupChatTypingEvent {
   member_name: string | null;
   /** user=用户成员 / agent=后端代发的「成员正在生成回复」。 */
@@ -2683,6 +2710,10 @@ export interface GroupChatTypingEvent {
   typing: boolean;
   preview: string | null;
   ts: string | null;
+  /** agent 事件：成员行 id（止息帧恒携带）；用户事件 null。 */
+  member_id: string | null;
+  /** agent 事件：触发消息的 user_input 行 id（回复锚点）；止息/用户事件 null。 */
+  reply_to_log_id: string | null;
 }
 
 /** 群流回调集（task-08 group-chat-panel 消费面）。 */
@@ -2827,6 +2858,12 @@ export function streamGroupChat(
         typing: envelope.typing !== false,
         preview: typeof envelope.preview === "string" ? envelope.preview : null,
         ts: typeof envelope.timestamp === "string" ? envelope.timestamp : null,
+        member_id:
+          typeof envelope.member_id === "string" ? envelope.member_id : null,
+        reply_to_log_id:
+          typeof envelope.reply_to_log_id === "string"
+            ? envelope.reply_to_log_id
+            : null,
       };
       handlers.onTyping?.(event);
       return;

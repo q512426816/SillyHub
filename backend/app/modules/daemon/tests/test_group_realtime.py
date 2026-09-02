@@ -9,6 +9,11 @@
   线零新行——ephemeral 纪律）；
 - agent typing 自动事件：@触发命中（影子 run 开始，非排队）→ member_kind=
   'agent' typing 事件；忙轮排队（run 未开始）不发；
+- 运行态可见 quick（2026-09-02）：触发路径 typing payload 带 member_id +
+  reply_to_log_id（触发消息行=回复锚点）；409 竞态排队兜底不发 typing；
+  close_interactive_run 群分支终态止息（completed/failed → typing=false 带
+  member 身份；非群 run 零止息）；群详情 members[] shadow_running 四态兜底
+  （活跃/无活跃 run/影子未建/用户成员），群列表端点不加；
 - presence：群 SSE 生成器循环 touch（``SET key "1" EX 60``）+ 间隔节流（首
   轮立即 touch）；``get_online_member_ids`` 读 ``group_presence:{gid}:*``
   keys（脏 key 容错 / Redis 故障降级空数组）；群列表/详情 ``online_member_ids``
@@ -57,7 +62,12 @@ from app.modules.auth.permissions import Permission
 from app.modules.daemon.group.service import get_online_member_ids
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.daemon.router import _stream_sessions_events
+from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
+from app.modules.daemon.tests.test_group_bridge_projection import (
+    _seed_group_bridge,
+    _seed_plain_session,
+)
 from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.workspace.model import PpmProjectWorkspace, Workspace
 
@@ -561,7 +571,12 @@ class TestAgentTypingAutoEvent:
         readiness_ok,
         mocked_group_redis,
     ) -> None:
-        """@命中（影子 run 开始，非排队）→ member_kind='agent' typing 事件。"""
+        """@命中（影子 run 开始，非排队）→ member_kind='agent' typing 事件。
+
+        运行态可见 quick（2026-09-02）：payload 补 member_id（成员行 id，前端
+        按成员聚合指示器）+ reply_to_log_id（触发消息的群时间线 user_input 行
+        id=发送响应 log_id——「正在响应哪句话」回复锚点）。
+        """
         env = await _make_env(db_session)
         data = await _create_group(
             client,
@@ -570,6 +585,7 @@ class TestAgentTypingAutoEvent:
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
 
         resp = await _send_message(client, env.owner_token, group_id, "@小码 帮我看下")
         assert resp.status_code == 200, resp.text
@@ -584,6 +600,223 @@ class TestAgentTypingAutoEvent:
         assert payload["member_kind"] == "agent"
         assert payload["typing"] is True
         assert payload["preview"] is None  # 后端不产草稿
+        assert payload["member_id"] == str(member.id)
+        # 回复锚点=本轮触发消息行（载体 run 下的群时间线 user_input 行）。
+        assert payload["reply_to_log_id"] == resp.json()["log_id"]
+
+    async def test_queued_fallback_trigger_does_not_publish_agent_typing(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """409 竞态排队兜底（queued=True，run 未开始）不发 agent typing——锁定
+        现状抑制语义（typing=正在生成；排队轮尚未开始，TTL 指示器不应亮起）。"""
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
+        await _seed_shadow_with_active_run(
+            db_session,
+            member=member,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            run_status="running",
+        )
+
+        from app.modules.daemon.session.service import (
+            DaemonSessionTurnConflict,
+            SessionService,
+        )
+
+        calls = {"n": 0}
+
+        async def fake_inject(*args: Any, **kwargs: Any) -> SimpleNamespace:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # 首调（busy_strategy="inject"）竞态 409 → 调用点降级排队。
+                raise DaemonSessionTurnConflict("轮竞态测试替身")
+            # 排队兜底轮：queued=True、无新 run。
+            return SimpleNamespace(agent_session=None, agent_run=None, queued=True, mid_turn=False)
+
+        with mock_patch.object(
+            SessionService, "inject_session_as_service", side_effect=fake_inject
+        ):
+            resp = await _send_message(client, env.owner_token, group_id, "@小码 排队追问")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["triggered"][0]["queued"] is True
+        assert _typing_publishes(mocked_group_redis, group_id) == []
+
+
+# ── 终态 typing 止息（群聊运行态可见 quick，2026-09-02）──────────────────────
+
+
+@pytest.fixture()
+def mocked_close_redis(mocked_group_redis: AsyncMock):
+    """close_interactive_run 全链路 redis 替身：run_sync + session 侧补丁复用
+    群侧同一实例（止息断言源=群侧 ``group_typing:{gid}`` publish 记录）。"""
+    with (
+        mock_patch(
+            "app.modules.daemon.run_sync.service.get_redis", return_value=mocked_group_redis
+        ),
+        mock_patch("app.modules.daemon.session.service.get_redis", return_value=mocked_group_redis),
+    ):
+        yield mocked_group_redis
+
+
+class TestTerminalTypingStop:
+    """close_interactive_run 群分支：turn_completed 后发 typing 止息冲掉指示器。"""
+
+    @staticmethod
+    async def _close_group_run(
+        db_session: AsyncSession, seed: SimpleNamespace, **close_kwargs: Any
+    ) -> None:
+        """推进影子 run 至非终态后按给定终态参数收口（close 幂等守卫前置）。"""
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [{"event_type": "text", "content": "[ASSISTANT] 回复", "channel": "stdout"}],
+        )
+        await svc.close_interactive_run(
+            seed.lease_id, seed.shadow_run_id, seed.claim_token, **close_kwargs
+        )
+
+    async def test_close_completed_publishes_typing_stop_with_member_identity(
+        self, db_session: AsyncSession, mocked_close_redis: AsyncMock
+    ) -> None:
+        """completed 群轮收口 → ``group_typing:{gid}`` 止息（typing=false）带
+        member_id/member_name/member_kind='agent'（前端确定性地冲掉指示器）。"""
+        seed = await _seed_group_bridge(db_session)
+        await self._close_group_run(
+            db_session, seed, status="success", is_error=False, input_tokens=10, output_tokens=5
+        )
+
+        events = _typing_publishes(mocked_close_redis, seed.group_session_id)
+        assert len(events) == 1, "终态止息应恰好一条（run 开始的 typing=true 不在本链路）"
+        stop = events[0]
+        assert stop["event"] == "typing"
+        assert stop["member_id"] == str(seed.member.id)
+        assert stop["member_name"] == "小码"
+        assert stop["member_kind"] == "agent"
+        assert stop["typing"] is False
+        assert stop["preview"] is None
+        assert stop["ts"]
+        assert "reply_to_log_id" not in stop  # 止息无回复锚点
+
+    async def test_close_failed_publishes_typing_stop(
+        self, db_session: AsyncSession, mocked_close_redis: AsyncMock
+    ) -> None:
+        """failed 群轮收口同样发止息——无论成败成员都不再「正在输入」。"""
+        seed = await _seed_group_bridge(db_session)
+        await self._close_group_run(
+            db_session, seed, status="error_during_execution", is_error=True
+        )
+
+        events = _typing_publishes(mocked_close_redis, seed.group_session_id)
+        assert len(events) == 1
+        assert events[0]["typing"] is False
+        assert events[0]["member_id"] == str(seed.member.id)
+        assert events[0]["member_kind"] == "agent"
+
+    async def test_close_plain_chat_zero_typing_stop(
+        self, db_session: AsyncSession, mocked_close_redis: AsyncMock
+    ) -> None:
+        """非群 run（普通单聊）收口：零群频道事件、零 typing 止息。"""
+        seed = await _seed_plain_session(db_session)
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.run_id,
+            [{"event_type": "text", "content": "[ASSISTANT] ok", "channel": "stdout"}],
+        )
+        await svc.close_interactive_run(
+            seed.lease_id, seed.run_id, seed.claim_token, status="success", is_error=False
+        )
+
+        channels = {call.args[0] for call in mocked_close_redis.publish.call_args_list}
+        # 单聊只有 run 频道 + 本会话频道两路（照 test_group_bridge_projection
+        # 同款断言）——零群频道、零 typing 止息。
+        assert channels == {
+            f"agent_run:{seed.run_id}",
+            f"agent_session:{seed.session_id}",
+        }
+
+
+# ── 群详情运行态兜底 shadow_running（2026-09-02 quick）───────────────────────
+
+
+class TestGroupDetailShadowRunning:
+    async def test_detail_members_shadow_running_four_states(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ) -> None:
+        """四态：活跃 run True / 影子已建无活跃 run False / 影子未建 False /
+        用户成员 False；群列表端点 members 不带该字段（不加约定）。"""
+        env = await _make_env(db_session)
+        invited, _invited_token = await _env_user(db_session, env, name="小英")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            user_members=[{"user_id": str(invited.id), "display_name": "鲸落"}],
+            agent_members=[
+                _agent_config(env.runtime.id, name="小码"),
+                _agent_config(env.runtime.id, name="二码"),
+                _agent_config(env.runtime.id, name="三码"),
+            ],
+        )
+        group_id = uuid.UUID(data["id"])
+
+        # 小码：影子 + 活跃 run（running）→ True。
+        xiaoma = await _agent_member_row(db_session, group_id, display_name="小码")
+        await _seed_shadow_with_active_run(
+            db_session,
+            member=xiaoma,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            run_status="running",
+        )
+        # 二码：影子已建但 run 已终态（completed）→ False。
+        erma = await _agent_member_row(db_session, group_id, display_name="二码")
+        await _seed_shadow_with_active_run(
+            db_session,
+            member=erma,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            run_status="completed",
+        )
+        # 三码：从未触发（影子未建）→ False；群主/小英（用户成员）→ False。
+
+        resp = await client.get(
+            f"/api/daemon/group-chats/{group_id}", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 200, resp.text
+        members = resp.json()["members"]
+        by_name = {m["display_name"]: m["shadow_running"] for m in members}
+        assert by_name["小码"] is True
+        assert by_name["二码"] is False
+        assert by_name["三码"] is False
+        assert by_name["鲸落"] is False
+        assert by_name["群主"] is False
+
+        # 群列表端点不加：members 仍为基线读体（无 shadow_running 字段）。
+        fake_redis = AsyncMock()
+        fake_redis.keys = AsyncMock(return_value=[])
+        with mock_patch("app.modules.daemon.group.service.get_redis", return_value=fake_redis):
+            resp = await client.get("/api/daemon/group-chats", headers=_headers(env.owner_token))
+        assert resp.status_code == 200
+        item = next(it for it in resp.json() if it["id"] == str(group_id))
+        for m in item["members"]:
+            assert "shadow_running" not in m
 
     async def test_queued_trigger_does_not_publish_agent_typing(
         self,

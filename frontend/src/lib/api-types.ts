@@ -3950,7 +3950,7 @@ export interface paths {
         };
         /**
          * Get Group Chat
-         * @description 群详情：成员完整列表（六要素 + shadow_status + 在线绿点；design §6.1）。
+         * @description 群详情：成员完整列表（六要素 + shadow_status + 在线绿点 + 运行态兜底）。
          */
         get: operations["get_group_chat_api_daemon_group_chats__group_id__get"];
         put?: never;
@@ -13912,7 +13912,8 @@ export interface components {
          *
          *     ``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照
          *     ``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表
-         *     项同源（``get_online_member_ids``）。
+         *     项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体
+         *     （多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）。
          */
         GroupChatDetailRead: {
             /**
@@ -13952,7 +13953,7 @@ export interface components {
             /** Deleted At */
             deleted_at?: string | null;
             /** Members */
-            members?: components["schemas"]["GroupMemberRead"][];
+            members?: components["schemas"]["GroupMemberDetailRead"][];
             /**
              * Online Member Ids
              * @default []
@@ -14199,6 +14200,67 @@ export interface components {
         GroupMemberCreate: {
             user?: components["schemas"]["GroupMemberUserCreate"] | null;
             agent?: components["schemas"]["GroupMemberAgentConfig"] | null;
+        };
+        /**
+         * GroupMemberDetailRead
+         * @description 群详情成员读体扩展（群聊运行态可见 quick，2026-09-02）。
+         *
+         *     ``shadow_running``：该 agent 成员影子会话当前有活跃 run（谓词同群侧
+         *     ``_get_shadow_active_run``）——typing 事件丢失/SSE 迟连时的运行态兜底
+         *     信号；影子未建/已终态/用户成员恒 False。仅群详情端点填充（群列表不加，
+         *     逐成员 LIMIT 1 查询只花在打开详情时）。
+         */
+        GroupMemberDetailRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Member Type */
+            member_type: string;
+            /** Display Name */
+            display_name: string;
+            /** Avatar */
+            avatar?: string | null;
+            /** User Id */
+            user_id?: string | null;
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /**
+             * Team Enabled
+             * @default false
+             */
+            team_enabled: boolean;
+            /** Config Snapshot */
+            config_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+            /** Invited By */
+            invited_by?: string | null;
+            /**
+             * Joined At
+             * Format: date-time
+             */
+            joined_at: string;
+            /** Removed At */
+            removed_at?: string | null;
+            /** Shadow Session Id */
+            shadow_session_id?: string | null;
+            /** Shadow Status */
+            shadow_status: string;
+            /**
+             * Shadow Running
+             * @default false
+             */
+            shadow_running: boolean;
         };
         /**
          * GroupMemberRead
