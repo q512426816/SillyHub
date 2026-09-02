@@ -5181,12 +5181,13 @@ export class Daemon {
       // Server → Daemon：用户在 Web 端机器卡点「升级 sillyspec」触发。
       // 2026-08-31-machine-sillyspec-version task-05（FR-05 / D-001@v1）：入口对齐
       // SELF_UPDATE 写法——fire-and-forget（payload {} 可选不消费，npm latest 由
-      // daemon 自行探测），void 调 manager.requestUpgrade('server_command')；
+      // daemon 自行探测），void 调 manager.requestManualUpgrade（ql-20260902-003：
+      // 手动指令先版本门——已最新 no-op 不白跑 npm，门内转 requestUpgrade('server_command')）；
       // 全路径内部 catch 收敛不 reject（in-flight 门/忙推迟语义由 manager 状态机
       // 承载，daemon.ts 不重复实现），升级状态经心跳 sillyspec_update 回传。
       case MSG.SILLYSPEC_UPDATE: {
         this._logger.info('sillyspec_update_received', {});
-        void this._sillyspecManager.requestUpgrade('server_command');
+        void this._sillyspecManager.requestManualUpgrade();
         break;
       }
       // Server → Daemon：清理本地缓存（specs 缓存 / Claude 会话日志 / 备份 / 日志）。

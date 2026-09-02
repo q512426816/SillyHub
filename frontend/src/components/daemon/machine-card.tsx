@@ -197,18 +197,27 @@ export function MachineCard({
   // 失败后换「重试升级」（⑥）；落后 / 未安装 / 升级进行中 warning 高亮（原型
   // .btn.sp-up / .hot，已是最新回 btnOutlineTiny 底色——原型②注）。禁用窗口
   // 间隙的重复点击由 daemon 侧 in-flight 门去重，无害。
+  // ql-20260902-003：已是最新（已安装且不落后）也 disabled 换文案——daemon 侧
+  // 手动指令现也有版本前置门（no-op），前端先拦掉免产生「下发成功却无事发生」
+  // 的困惑；latest 未知不比较保持可点（宁宽勿断）。
+  const sillyspecUpToDate =
+    sillyspecVersion !== null &&
+    sillyspecLatest !== null &&
+    !sillyspecOutdated;
   const sillyspecRunningLike = sillyspecRunning || Boolean(upgradingSillySpec);
   const sillyspecBtnDisabled =
-    isOffline || sillyspecRunningLike || sillyspecDeferred;
+    isOffline || sillyspecRunningLike || sillyspecDeferred || sillyspecUpToDate;
   const sillyspecBtnLabel = sillyspecRunningLike
     ? "升级中…"
     : sillyspecDeferred
       ? "等待空闲"
       : sillyspecState === "failed"
         ? "重试升级"
-        : sillyspecVersion === null
-          ? "安装 sillyspec"
-          : "升级 sillyspec";
+        : sillyspecUpToDate
+          ? "已是最新"
+          : sillyspecVersion === null
+            ? "安装 sillyspec"
+            : "升级 sillyspec";
   const sillyspecBtnTitle = isOffline
     ? "离线，无法升级；下次启动时会自动升级"
     : sillyspecRunningLike
@@ -217,11 +226,13 @@ export function MachineCard({
         ? "等待空闲执行"
         : sillyspecState === "failed"
           ? "重新下发 sillyspec 升级指令"
-          : sillyspecVersion === null
-            ? "远程安装最新版 sillyspec"
-            : sillyspecOutdated
-              ? `立即升级到 ${sillyspecLatest}`
-              : "下发 sillyspec 升级指令（升级到 npm 最新版）";
+          : sillyspecUpToDate
+            ? `已是最新 ${sillyspecVersion}`
+            : sillyspecVersion === null
+              ? "远程安装最新版 sillyspec"
+              : sillyspecOutdated
+                ? `立即升级到 ${sillyspecLatest}`
+                : "下发 sillyspec 升级指令（升级到 npm 最新版）";
   const sillyspecBtnHot =
     sillyspecOutdated ||
     sillyspecVersion === null ||

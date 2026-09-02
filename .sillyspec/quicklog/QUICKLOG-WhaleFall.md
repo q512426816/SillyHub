@@ -218,3 +218,21 @@
 根因：daemon 侧同版本自更新是静默 no-op（preflight 同版本直接返回不写状态），按钮未拦截导致已最新仍可点且 toast 提示已下发，产生有指令无进度的误导
 方案：machine-card 增 daemonUpToDate 判定（build_id 与 latestVersion.latest_build_id 均已知且相等），按钮禁用+换文案已是最新+title 带版本；任一侧未知不比较保持可点
 结果：vitest machine-card 15 passed（新增 2 用例）+ 相邻 3 文件 50 passed；tsc --noEmit 0 错；components-daemon.md 已同步；部署需重建 frontend 镜像
+
+## ql-20260902-003-b0a4 | 2026-09-02 10:56:57 | sillyspec 手动升级指令加版本前置比对
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/sillyspec-manager.ts（requestManualUpgrade 版本门手动入口）
+- sillyhub-daemon/src/daemon.ts（WS SILLYSPEC_UPDATE 接线换新入口）
+- sillyhub-daemon/tests/sillyspec-manager.test.ts（新增门三用例）
+- sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts（接线断言改新入口+mock 补方法）
+- frontend/src/components/daemon/machine-card.tsx（sillyspecUpToDate 按钮禁用态）
+- frontend/src/components/daemon/__tests__/machine-card-sillyspec.test.tsx（默认场景改已最新断言+落后可点+三处文案适配）
+- .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md（requestManualUpgrade 契约）
+- .sillyspec/docs/frontend/modules/components-daemon.md（按钮六态）
+需求：sillyspec 手动升级指令加版本前置比对，已最新不再白跑 npm
+根因：auto 定时路径有 isOutdated 门但 server_command 手动指令直入 requestUpgrade 无门，已最新时白跑 npm install -g 还滚动一轮 running→success 横幅；前端按钮也未按已最新禁用
+方案：daemon 新增 requestManualUpgrade 手动入口（版本门 no-op，探测失败/未安装放行，保 requestUpgrade 同步置位契约不内联），WS 接线换新入口；前端机器卡按钮增已是最新禁用态（六态）
+结果：daemon 44 passed（新增 3 用例）+ typecheck 0 错；前端 66 passed + tsc 0 错；模块文档同步 2 张；部署待重建 frontend 镜像 + daemon 经自更新升级
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/machine-card-sillyspec.test.tsx, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts

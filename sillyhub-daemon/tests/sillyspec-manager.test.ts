@@ -223,6 +223,30 @@ describe('task-04 requestUpgrade 升级执行与终态', () => {
     expect(h.events).toContain('sillyspec_upgrade_success');
   });
 
+  // ql-20260902-003：手动指令版本前置门（requestManualUpgrade）——已最新 no-op
+  // 不白跑 npm；探测失败 / 未安装不阻断（宁装勿漏）。
+  it('server_command 已最新（local == latest）→ no-op：install 不执行，无 update 状态，记 skipped_up_to_date', async () => {
+    const h = makeHarness({ local: '3.27.12', latest: '3.27.12' });
+    await h.manager.requestManualUpgrade();
+    expect(h.install).not.toHaveBeenCalled();
+    expect(h.manager.getSnapshot().update).toBeUndefined();
+    expect(h.events).toContain('sillyspec_upgrade_skipped_up_to_date');
+  });
+
+  it('server_command latest 不可达（null）→ 前置门放行照旧升级（网络失败不阻断）', async () => {
+    const h = makeHarness({ latest: null });
+    await h.manager.requestManualUpgrade();
+    expect(h.install).toHaveBeenCalledTimes(1);
+    expect(h.manager.getSnapshot().update?.state).toBe('success');
+  });
+
+  it('server_command 未安装（local=null）→ 前置门放行补装', async () => {
+    const h = makeHarness({ local: null });
+    await h.manager.requestManualUpgrade();
+    expect(h.install).toHaveBeenCalledTimes(1);
+    expect(h.manager.getSnapshot().update?.state).toBe('success');
+  });
+
   it('未探测过本机版本：from_version=null 仍可升级成功（未安装补装路径）', async () => {
     const h = makeHarness({ local: null });
     await h.manager.requestUpgrade('auto');

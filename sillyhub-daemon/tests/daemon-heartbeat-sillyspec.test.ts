@@ -106,6 +106,8 @@ function makeFakeManager(controls: FakeManagerControls) {
     probeLocal: vi.fn(async () => controls.probeLocalResult),
     probeLatest: vi.fn(async () => controls.probeLatestResult),
     requestUpgrade: vi.fn(async () => undefined),
+    // ql-20260902-003：WS 手动指令改走版本门前置入口。
+    requestManualUpgrade: vi.fn(async () => undefined),
     checkAndUpgrade: vi.fn(async () => undefined),
   };
 }
@@ -447,7 +449,7 @@ describe('task-05 WS SILLYSPEC_UPDATE 指令接线', () => {
     vi.restoreAllMocks();
   });
 
-  it('收到 daemon:sillyspec_update → requestUpgrade("server_command")，不抛不回执', async () => {
+  it('收到 daemon:sillyspec_update → requestManualUpgrade（版本门前置入口），不抛不回执', async () => {
     const h = makeHeartbeatHarness({
       snapshot: { version: null, latest_version: null },
       probeLocalResult: null,
@@ -460,8 +462,9 @@ describe('task-05 WS SILLYSPEC_UPDATE 指令接线', () => {
     )._handleWsMessage.bind(h.daemon);
     const msg: DaemonMessage = { type: MSG.SILLYSPEC_UPDATE, payload: {} };
     await expect(handleWsMessage(msg)).resolves.toBe(undefined);
-    expect(h.manager.requestUpgrade).toHaveBeenCalledTimes(1);
-    expect(h.manager.requestUpgrade).toHaveBeenCalledWith('server_command');
+    // ql-20260902-003：WS 入口改走 requestManualUpgrade（内含已最新 no-op 门，
+    // 门内转 requestUpgrade('server_command')——本测试 mock 直接断言新入口被调）。
+    expect(h.manager.requestManualUpgrade).toHaveBeenCalledTimes(1);
   });
 });
 

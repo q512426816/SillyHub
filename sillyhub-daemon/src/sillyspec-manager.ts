@@ -226,6 +226,32 @@ export class SillySpecManager {
   // ── 升级入口 ────────────────────────────────────────────────────────────────
 
   /**
+   * 手动指令入口（WS SILLYSPEC_UPDATE → daemon.ts 接线）：先版本门再
+   * :meth:`requestUpgrade`。
+   *
+   * ql-20260902-003：auto 路径经 :meth:`checkAndUpgrade` 已有 isOutdated 门
+   * （已最新 no-op），手动 server_command 原先直入 requestUpgrade 无门——已最新
+   * 时白跑一次 `npm install -g` 还滚动一轮 running→success 横幅。此处先探
+   * latest+local（probeLatest 有 10min 缓存），已安装且 !isOutdated → no-op
+   * （不写状态，横幅不动）；探测失败不阻断（网络不可达照旧升级，宁装勿漏）。
+   * 刻意不把门塞进 requestUpgrade——该方法依赖「running 同步置位先于首个
+   * await」契约（in-flight 门/测试同步断言），异步探测必须外置。
+   */
+  async requestManualUpgrade(): Promise<void> {
+    const latest = await this.probeLatest();
+    const local = await this.probeLocal();
+    if (latest !== null && local !== null && !isOutdated(local, latest)) {
+      this._log('debug', 'sillyspec_upgrade_skipped_up_to_date', {
+        trigger: 'server_command',
+        local,
+        latest,
+      });
+      return;
+    }
+    await this.requestUpgrade('server_command');
+  }
+
+  /**
    * 请求升级（WS 指令 server_command / 自动检查 auto 统一入口）。
    *
    * - in-flight 门：running/deferred 期间新请求仅记日志去重（CLEANUP 惯例）；
