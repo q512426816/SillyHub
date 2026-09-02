@@ -192,6 +192,22 @@ _MID_TURN_NOTICE = (
     "请优先阅读并据此调整当前工作方式，无需中断任务除非明确要求。"
 )
 
+# quick 影子直聊（2026-09-02）：直聊注入 prompt 头（写在用户 content 前）。
+# 不套 _build_group_prompt 群简报——直聊是影子会话内的独立对话，告知 agent
+# 可见性语义 + [[GROUP]]...[[/GROUP]] 选择性转发标记用法（投影侧
+# run_sync.extract_group_broadcast_segments 按同款标记抽段，标记文本保留在
+# 影子会话原文、投影时剥离）。
+_SHADOW_DIRECT_HEADER = (
+    "[用户正在群聊「{group_title}」成员「{member_name}」的独立会话中与你单独对话——"
+    "此对话默认只在会话内可见，不会出现在群里。如果你判断本轮内容对群内其他成员有价值，"
+    "可在回复末尾用 [[GROUP]] 和 [[/GROUP]] 包裹要转发的段落，"
+    "该段落会以你的群身份发到群里；无需转发则不要添加标记。]"
+)
+
+# quick 影子直聊（2026-09-02）：本轮 user_input metadata 的 source 标记——
+# run_sync 投影判定锚（命中 → 整轮不投影，仅 [[GROUP]] 段例外）。
+SHADOW_DIRECT_SOURCE = "shadow_direct"
+
 # ── 互@协作护栏常量（task-04，design §4.4——状态只存 Redis 带 TTL，不建表）──
 # 协作链 Hash TTL（30min：链跨多轮互@，超时自清理不留死键）。
 GROUP_CHAIN_TTL_SECONDS = 30 * 60
@@ -460,6 +476,11 @@ async def run_cross_mention_detection(
         .first()
     )
     if not isinstance(turn_meta, dict):
+        return []
+    # quick 影子直聊（2026-09-02）：直聊轮不参与互@协作——直聊内容默认不进群，
+    # [[GROUP]] 转发段虽落群时间线，但独立会话不应自动触发其他成员（保持直聊
+    # 私密 + 零自动化副作用）。
+    if turn_meta.get("source") == SHADOW_DIRECT_SOURCE:
         return []
     carrier_raw = turn_meta.get("source_carrier_run_id")
     if not isinstance(carrier_raw, str) or not carrier_raw:
@@ -1003,6 +1024,21 @@ class GroupMessageSendRead(BaseModel):
     mentioned_member_ids: list[uuid.UUID] = Field(default_factory=list)
     mention_all: bool = False
     triggered: list[GroupMemberTriggerRead] = Field(default_factory=list)
+
+
+class GroupDirectMessageRead(BaseModel):
+    """``POST /group-chats/{gid}/members/{mid}/direct-message`` 响应（影子直聊）。
+
+    ``run_id``：即时注入/忙轮中途注入的 run；排队轮为 None（``queued=True``）。
+    ``carrier_run_id``：直聊载体 run——群时间线上**零日志行**（直聊内容不进群），
+    仅 assistant 回复中的 ``[[GROUP]]`` 转发段投影行挂本 run（run_sync 桥接段）。
+    """
+
+    shadow_session_id: uuid.UUID
+    run_id: uuid.UUID | None = None
+    queued: bool = False
+    mid_turn: bool = False
+    carrier_run_id: uuid.UUID
 
 
 # ── 跨模块共享的参与者判定 helper（session/file_artifacts/router 懒加载复用）──
@@ -2610,6 +2646,153 @@ class GroupChatService:
         # 保留入参顺序（摘要行/注入 payload 按用户勾选顺序稳定）。
         by_id = {r.id: r for r in rows}
         return [by_id[i] for i in dict.fromkeys(attachment_ids) if i in by_id]
+
+    async def send_direct_message(
+        self,
+        group_id: uuid.UUID,
+        member_id: uuid.UUID,
+        user: User,
+        content: str,
+        attachment_ids: list[uuid.UUID] | None = None,
+    ) -> GroupDirectMessageRead:
+        """群主对成员影子会话直聊（quick 2026-09-02 影子直聊+选择性回群投影）。
+
+        语义：对影子会话的一次**纯会话注入**（非群消息）——不走群 @ 触发链：
+        零群频道 log 事件、零 @ 解析、零群背景简报（``_build_group_prompt``
+        不适用），直聊内容只落影子会话时间线；agent 回复中的 ``[[GROUP]]``
+        段经 run_sync 桥接投影层选择性发群（本方法只负责标记说明进 prompt）。
+
+        - 权限：``_require_group_member``（非成员 404 不泄露存在性）→
+          ``_require_group_owner``（成员可见但**写=群主/workspace admin**，
+          照 management 端点 owner 门）；
+        - 影子未建 → 400（先在群内 @ 成员触发懒建；直聊不承担建会话职责）；
+        - 载体 run：照群消息同款空载体（spec_strategy='group_carrier'）但
+          **零日志行**——群时间线/背景摘要对直聊轮零可见；轮 metadata
+          ``source="shadow_direct"`` + ``source_carrier_run_id``=本载体
+          （投影过滤判定锚 + [[GROUP]] 段投影行挂点）；
+        - 注入：复用 inject 通道同群消息忙轮策略——``busy_strategy="inject"``
+          中途注入活跃轮（直聊也应尽快可见），409 竞态降级排队兜底；
+        - 附件：同群消息口径（发送者归属 + Claude 引擎门控 + D-7 空内容豁免）。
+        """
+        group = await self._get_group(group_id)
+        membership = await self._require_group_member(group, user)
+        await self._require_group_owner(group, user)
+        if group.ended_at is not None:
+            raise GroupChatInvalid(
+                "群已解散，无法发送直聊消息。",
+                details={"group_id": str(group.id)},
+            )
+        member = await self._get_member(group.id, member_id)
+        if member.member_type != "agent":
+            raise GroupChatInvalid(
+                "仅 agent 成员支持独立会话直聊。",
+                details={"member_id": str(member.id)},
+            )
+        if not (content or "").strip() and not attachment_ids:
+            raise GroupChatInvalid("消息内容不能为空。", details={"reason": "empty_prompt"})
+        if member.shadow_session_id is None:
+            raise GroupChatInvalid(
+                f"成员「{member.display_name}」的独立会话尚未创建，"
+                "请先在群内 @ 该成员完成一次触发后再直聊。",
+                details={"member_id": str(member.id)},
+            )
+        shadow = await self._session.get(AgentSession, member.shadow_session_id)
+        if shadow is None or shadow.status in ("ended", "failed"):
+            raise GroupChatInvalid(
+                f"成员「{member.display_name}」的独立会话当前不可用，请先在群内重新 @ 该成员触发。",
+                details={"member_id": str(member.id)},
+            )
+
+        attachment_rows: list = []
+        if attachment_ids:
+            attachment_rows = await self._validate_group_attachments(user.id, attachment_ids)
+            # 引擎门控（同 _trigger_group_member 口径：仅 Claude 支持附件）。
+            if (member.provider or "claude") != "claude":
+                raise GroupChatInvalid(
+                    f"成员「{member.display_name}」的引擎不支持附件"
+                    "（仅 Claude 支持多模态与文件注入）。",
+                    details={"member_id": str(member.id), "provider": member.provider},
+                )
+
+        # admin 兜底放行无成员行——昵称回落用户显示名（同 send_group_message）。
+        sender_member_name = (
+            membership.display_name if membership is not None else _user_display_name(user)
+        )
+
+        # ── 直聊载体 run（空载体：不落 user_input 行——直聊内容不进群时间线；
+        #    [[GROUP]] 转发段投影行在 run_sync 桥接层挂本 run）。
+        now = datetime.now(UTC)
+        carrier = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider=GROUP_SESSION_PROVIDER,
+            status="completed",
+            started_at=now,
+            finished_at=now,
+            spec_strategy=GROUP_CARRIER_SPEC_STRATEGY,
+            agent_session_id=group.session_id,
+            user_id=user.id,  # 直聊发起者归属（回放身份回退源）
+        )
+        self._session.add(carrier)
+        await self._session.commit()
+
+        # prompt：直聊头（可见性语义 + [[GROUP]] 标记说明）+ 用户内容（+附件行）。
+        prompt = _SHADOW_DIRECT_HEADER.format(
+            group_title=group.title, member_name=member.display_name
+        )
+        if (content or "").strip():
+            prompt = f"{prompt}\n{content}"
+        if attachment_rows:
+            prompt += "\n\n[当前消息附件 · 用户随消息发送，可直接读取参考]\n" + "\n".join(
+                _attachment_prompt_lines(attachment_rows)
+            )
+
+        # 本轮 user_input metadata（投影过滤判定锚）：source="shadow_direct" +
+        # 直聊载体 run + 发送者。排队兜底轮经 _prepend_group_chain_marker 的
+        # source 段透传（session/service.py），派发后判定不回退成全投影。
+        turn_metadata: dict[str, object] = {
+            "source": SHADOW_DIRECT_SOURCE,
+            "source_group_id": str(group.id),
+            "source_member_id": str(member.id),
+            "source_carrier_run_id": str(carrier.id),
+            "sender_user_id": str(user.id),
+            "sender_member_name": sender_member_name,
+        }
+
+        # 忙轮中途注入同群消息（busy_strategy="inject"：直聊也应尽快可见；
+        # 409 竞态降级回排队，消息不丢）。
+        active_run = await self._get_shadow_active_run(shadow.id)
+        inject_prompt = prompt
+        if active_run is not None:
+            inject_prompt = f"{_MID_TURN_NOTICE}\n{prompt}"
+        try:
+            result = await SessionService(self._session).inject_session_as_service(
+                shadow.id,
+                prompt=inject_prompt,
+                busy_strategy="inject",
+                queue_when_busy=True,
+                queue_sender_user_id=user.id,
+                turn_metadata=turn_metadata,
+                attachment_ids=[r.id for r in attachment_rows] if attachment_rows else None,
+                attachment_owner_user_id=user.id if attachment_rows else None,
+            )
+        except DaemonSessionTurnConflict:
+            result = await SessionService(self._session).inject_session_as_service(
+                shadow.id,
+                prompt=inject_prompt,
+                queue_when_busy=True,
+                queue_sender_user_id=user.id,
+                turn_metadata=turn_metadata,
+                attachment_ids=[r.id for r in attachment_rows] if attachment_rows else None,
+                attachment_owner_user_id=user.id if attachment_rows else None,
+            )
+        return GroupDirectMessageRead(
+            shadow_session_id=shadow.id,
+            run_id=result.agent_run.id if result.agent_run is not None else None,
+            queued=result.queued,
+            mid_turn=result.mid_turn,
+            carrier_run_id=carrier.id,
+        )
 
     async def _trigger_group_member(
         self,

@@ -611,8 +611,10 @@ class TestAgentTypingAutoEvent:
 
         resp = await _send_message(client, env.owner_token, group_id, "@小码 追问")
         assert resp.status_code == 200, resp.text
-        assert resp.json()["triggered"][0]["queued"] is True
-        assert _typing_publishes(mocked_group_redis, group_id) == []
+        # ql quick-8170ca59 忙轮策略翻转：不再排队而是中途注入（mid_turn=True，
+        # run_id=活跃轮）——注入即开始生成，agent typing 照发。断言随之对齐。
+        assert resp.json()["triggered"][0]["mid_turn"] is True
+        assert _typing_publishes(mocked_group_redis, group_id) != []
 
 
 # ── presence（design §5.4：touch / TTL / 在线集读取）─────────────────────────

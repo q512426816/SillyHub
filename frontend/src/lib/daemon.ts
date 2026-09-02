@@ -2596,6 +2596,37 @@ export async function sendGroupMessage(
   );
 }
 
+/* ---------- 影子直聊（quick 影子直聊，2026-09-02） ---------- */
+
+/** POST /group-chats/{gid}/members/{mid}/direct-message 响应（生成版 schema）。 */
+export type GroupDirectMessageRead =
+  components["schemas"]["GroupDirectMessageRead"];
+/** 影子直聊写体（生成版 schema：content 必填 + 可选 attachment_ids）。 */
+export type GroupDirectMessageRequest =
+  components["schemas"]["GroupDirectMessageRequest"];
+
+/**
+ * POST /api/daemon/group-chats/{gid}/members/{mid}/direct-message — 群主对
+ * agent 成员影子会话的直聊注入（quick 影子直聊，2026-09-02）。
+ *
+ * - 权限：群主 / workspace admin（普通成员 403）；影子未建 400——调用方按
+ *   member.shadow_status 引导（本端点只在已建影子的成员卡入口出现）。
+ * - 直聊语义：content 只落影子会话时间线（零群时间线 / 零 @ 解析）；agent
+ *   回复的 ``[[GROUP]]...[[/GROUP]]`` 段由投影层选择性发群。
+ * - 响应 queued / mid_turn 表达排队态（成员忙时入影子会话队列），run 侧经
+ *   影子会话 SSE 流回放 user_input 行——调用方**不本地 append**。
+ */
+export async function sendGroupDirectMessage(
+  groupId: string,
+  memberId: string,
+  payload: GroupDirectMessageRequest,
+): Promise<GroupDirectMessageRead> {
+  return apiFetch<GroupDirectMessageRead>(
+    `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberId)}/direct-message`,
+    { method: "POST", json: payload },
+  );
+}
+
 /**
  * typing 心跳写体（POST /api/daemon/group-chats/{id}/typing，204 无响应体）。
  *
@@ -2946,6 +2977,269 @@ export function streamGroupChat(
     },
     getLastEventId: () => lastEventId,
     // 主动对账入口（同 streamSession 语义：不重建连接，仅补 DB 缺口）。
+    resync: () => {
+      if (closed) return;
+      void replayLogsFromDb().catch(() => {
+        /* 静默 */
+      });
+    },
+  };
+}
+
+/* ---------- 影子会话 SSE 流（quick 影子直聊，2026-09-02） ---------- */
+
+/** 影子会话流回调集（shadow-session-viewer 消费面）——单聊事件面的收敛子集。 */
+export interface ShadowSessionStreamHandlers {
+  /** log 分支：实时 / 回放行（调用方按 log_id 去重合并进本地 rows）。 */
+  onLog(envelope: SessionStreamEnvelope, cursor: string | null): void;
+  /** turn_completed 分支（可选）：轮收口信号（lib 内部另排 1.5s 轮后对账补尾行）。 */
+  onTurnCompleted?(envelope: SessionStreamEnvelope): void;
+  onError(error: Error): void;
+  /** 连接状态（同 streamSession 语义：reconnecting 携 attempt / reconnected / live）。 */
+  onStatusChange?(status: SessionStreamStatus, attempt?: number): void;
+}
+
+/**
+ * 订阅影子会话 SSE 流（quick 影子直聊，2026-09-02）——shadow-session-viewer
+ * Drawer 打开期间的实时数据源。
+ *
+ * 端点同单聊 GET /api/daemon/sessions/{sid}/stream（backend 权限：影子属主=
+ * 群主 + workspace admin 放行；普通成员 403——调用方按 canDirectMessage 门控
+ * 不建流）。骨架照 streamGroupChat 收敛（同一 URL 形态 / 默认 data 帧
+ * onmessage 单通道 / 断线退避重连 + 增量回放 resync（after = lastLogTs - 2s
+ * 重叠窗口）/ turn_completed 后 1.5s 轮后对账 / `event: done` 终态不重连），
+ * 与 streamGroupChat 的差异：
+ *   - 信封用 SessionStreamEnvelope（影子会话无群身份 / typing 帧；tokens /
+ *     permission_* 等单聊事件本流不消费——查看器只喂 rows 重装配）；
+ *   - 回放透传子代理归属 / 工具字段（对齐 streamSession 的 replayLogsFromDb
+ *     ——影子 logs 含子代理行，缺字段装配会平铺错位）；
+ *   - R7 永久性 HTTP 错误（401/403/404，PERMANENT_SSE_ERROR_STATUSES）停连
+ *     不重试——普通成员误建流时必败请求不进退避循环（subscribeAgentSessions
+ *     Events 同款惯例；群形态流未收编该守卫，此处收敛版带上）。
+ */
+export function streamShadowSession(
+  sessionId: string,
+  handlers: ShadowSessionStreamHandlers,
+  options?: {
+    /** 已回灌历史的最大 log timestamp（ISO）——resync 增量回放游标起点。 */
+    cursor?: string;
+    resyncTimeoutMs?: number;
+  },
+): SessionStreamConnection {
+  const base = getApiBaseUrl();
+  const url = new URL(
+    `${base}/api/daemon/sessions/${encodeURIComponent(sessionId)}/stream`,
+  );
+  if (options?.cursor) url.searchParams.set("cursor", options.cursor);
+
+  let lastEventId: string | null = null;
+  let sessionEndedFired = false;
+  // 增量回放游标（同 streamGroupChat：-2s 重叠窗口兜同批 timestamp，重复行由
+  // 调用方按 log_id 去重）。
+  let lastLogTs: string | null = options?.cursor ?? null;
+  const REPLAY_OVERLAP_MS = 2000;
+
+  let es: FetchSseConnection | null = null;
+  let closed = false;
+  let retryCount = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  let postTurnTimer: ReturnType<typeof setTimeout> | null = null;
+  let connStatus: SessionStreamStatus = "live";
+  const setStatus = (s: SessionStreamStatus, attempt?: number): void => {
+    if (s === "reconnecting") {
+      connStatus = s;
+      handlers.onStatusChange?.(s, attempt);
+      return;
+    }
+    if (connStatus === s) return;
+    connStatus = s;
+    handlers.onStatusChange?.(s);
+  };
+
+  const dispatch = (raw: { data: string; lastEventId?: string }): void => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.data);
+    } catch {
+      handlers.onError(new Error("Failed to parse shadow session SSE event"));
+      return;
+    }
+    if (!parsed || typeof parsed !== "object") {
+      handlers.onError(new Error("Invalid shadow session SSE payload"));
+      return;
+    }
+    const env = parsed as Partial<SessionStreamEnvelope>;
+    const kind = env.event;
+    if (!kind) return; // 无 event 字段：非本通道事件（backend summary 帧等），忽略
+    if (env.session_id !== undefined && env.session_id !== sessionId) {
+      handlers.onError(new Error(`Session id mismatch on ${kind} event`));
+      return;
+    }
+    if (kind === "log" && raw.lastEventId) {
+      lastEventId = raw.lastEventId;
+    }
+    if (kind === "log" && typeof env.timestamp === "string" && env.timestamp) {
+      if (!lastLogTs || env.timestamp > lastLogTs) lastLogTs = env.timestamp;
+    }
+    const envelope = env as SessionStreamEnvelope;
+    switch (kind) {
+      case "log":
+        handlers.onLog(envelope, raw.lastEventId ?? null);
+        break;
+      case "turn_completed":
+        // 轮收口：数据面由调用方决定（查看器 rows 全量重装配无轮状态机），此处
+        // 只透传信号 + 排轮后对账。
+        handlers.onTurnCompleted?.(envelope);
+        schedulePostTurnReconcile();
+        break;
+      case "session_status":
+        break; // 影子会话状态经群详情 / 成员卡徽标刷新，本流不消费
+      case "session_ended":
+        // 影子会话被结束（移除成员 / 重置记忆 / 切机器重建）——关连接不重连，
+        // 一次性收口信号。
+        if (!sessionEndedFired) {
+          sessionEndedFired = true;
+          closed = true;
+          es?.close();
+        }
+        break;
+      default:
+        // tokens / permission_* / plan / bash / agent_task / queue_changed 等
+        // 单聊富事件查看器不消费（时间线只吃 log 行），静默忽略。
+        break;
+    }
+  };
+
+  /** DB 日志 → log 事件回放（resync 与轮后对账共用；调用方按 log_id 去重）。 */
+  const replayLogsFromDb = async (signal?: AbortSignal) => {
+    let afterParam: string | undefined;
+    if (lastLogTs) {
+      const ts = Date.parse(lastLogTs);
+      if (!Number.isNaN(ts)) {
+        afterParam = new Date(Math.max(0, ts - REPLAY_OVERLAP_MS)).toISOString();
+      }
+    }
+    const logs = await getAgentSessionLogs(
+      sessionId,
+      afterParam ? { after: afterParam, signal } : signal ? { signal } : {},
+    );
+    if (closed) return;
+    for (const log of logs) {
+      if (log.timestamp && (!lastLogTs || log.timestamp > lastLogTs)) {
+        lastLogTs = log.timestamp;
+      }
+      dispatch({
+        data: JSON.stringify({
+          event: "log",
+          session_id: sessionId,
+          run_id: log.run_id,
+          turn: null,
+          log_id: log.id,
+          timestamp: log.timestamp,
+          channel: log.channel,
+          content: log.content_redacted ?? "",
+          status: null,
+          exit_code: null,
+          reason: null,
+          // 归属 / 工具字段透传（对齐 streamSession replayLogsFromDb）：影子
+          // logs 含子代理行与 Edit patch，缺字段重装配会平铺错位。
+          parent_tool_use_id: log.parent_tool_use_id ?? null,
+          subagent_type: log.subagent_type ?? null,
+          depth: log.depth ?? null,
+          tool_kind: log.tool_kind ?? null,
+          edit_patch: log.edit_patch ?? null,
+        }),
+      });
+    }
+  };
+
+  /** 轮完成后对账（1.5s 缓冲重拉日志，补「连接活着但发布丢失」的尾部行）。 */
+  const schedulePostTurnReconcile = () => {
+    if (closed) return;
+    if (postTurnTimer) clearTimeout(postTurnTimer);
+    postTurnTimer = setTimeout(() => {
+      void replayLogsFromDb().catch(() => {
+        /* 静默：下一次轮完成 / 断连对账再兜 */
+      });
+    }, 1500);
+  };
+
+  const wireConnection = () => {
+    // token 每次重连现取（对齐 streamSession / streamGroupChat）。
+    const { accessToken } = useSession.getState();
+    es = fetchSse(url.toString(), accessToken ? { token: accessToken } : {});
+    es.onmessage = (e) => {
+      retryCount = 0;
+      setStatus("live");
+      dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
+    };
+    es.addEventListener("done", () => {
+      // 终态会话（影子已被结束）连上即发 `event: done`——关连接不重连。
+      closed = true;
+      es?.close();
+    });
+    es.onerror = (ev) => {
+      // R7：永久性 HTTP 错误（普通成员 403 / 会话不存在 404 / 未登录 401）停
+      // 连——必败请求不进退避循环；无 status（网络断 / 服务端关流）保持重连。
+      if (
+        ev &&
+        typeof ev.status === "number" &&
+        PERMANENT_SSE_ERROR_STATUSES.has(ev.status)
+      ) {
+        closed = true;
+        es?.close();
+        return;
+      }
+      scheduleReconnect();
+    };
+  };
+
+  const scheduleReconnect = () => {
+    if (closed) return;
+    const delay =
+      RECONNECT_BACKOFF_MS[
+        Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
+      ]!;
+    retryCount += 1;
+    setStatus("reconnecting", retryCount);
+    reconnectTimer = setTimeout(() => {
+      void resyncAndReconnect();
+    }, delay);
+  };
+
+  /** 断线恢复：增量回放补缺口 → 重建 SSE 连接（无 runs 合成——查看器无轮状态机）。 */
+  const resyncAndReconnect = async () => {
+    if (closed) return;
+    const signal = timeoutSignal(options?.resyncTimeoutMs ?? RESYNC_REST_TIMEOUT_MS);
+    try {
+      await replayLogsFromDb(signal);
+      if (closed) return;
+      retryCount = 0;
+      wireConnection();
+      setStatus("reconnected");
+      reconcileTimer = setTimeout(() => {
+        void replayLogsFromDb().catch(() => {
+          /* 静默 */
+        });
+      }, 5000);
+    } catch {
+      scheduleReconnect(); // 后端不可达 → 继续退避重试
+    }
+  };
+
+  wireConnection();
+
+  return {
+    close: () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (reconcileTimer) clearTimeout(reconcileTimer);
+      if (postTurnTimer) clearTimeout(postTurnTimer);
+      es?.close();
+    },
+    getLastEventId: () => lastEventId,
+    // 主动对账入口（同 streamGroupChat 语义：不重建连接，仅补 DB 缺口）。
     resync: () => {
       if (closed) return;
       void replayLogsFromDb().catch(() => {

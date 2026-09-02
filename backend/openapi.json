@@ -11321,6 +11321,71 @@
         }
       }
     },
+    "/api/daemon/group-chats/{group_id}/members/{member_id}/direct-message": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Send Group Member Direct Message",
+        "description": "群主对成员影子会话直聊（quick 2026-09-02 影子直聊+选择性回群投影）。\n\n纯会话注入：零群时间线/零 @ 解析/零群频道事件——直聊内容只落影子会话；\nagent 回复中的 ``[[GROUP]]...[[/GROUP]]`` 段以成员群身份投影进群时间线\n（投影层过滤，标记说明随注入 prompt 下发）。写=群主/workspace admin\n（成员可见群但无直聊权）；影子未建 400（先群内 @ 触发懒建）。",
+        "operationId": "send_group_member_direct_message_api_daemon_group_chats__group_id__members__member_id__direct_message_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupDirectMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDirectMessageRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/group-chats/{group_id}/messages": {
       "post": {
         "tags": [
@@ -40424,6 +40489,73 @@
         "type": "object",
         "title": "GroupChatUpdate",
         "description": "``PATCH /api/group-chats/{id}`` 改群体（design §6.1：群名/开关/护栏参数）。\n\nNone=不改（逐字段局部更新）。"
+      },
+      "GroupDirectMessageRead": {
+        "properties": {
+          "shadow_session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shadow Session Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued",
+            "default": false
+          },
+          "mid_turn": {
+            "type": "boolean",
+            "title": "Mid Turn",
+            "default": false
+          },
+          "carrier_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Carrier Run Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "shadow_session_id",
+          "carrier_run_id"
+        ],
+        "title": "GroupDirectMessageRead",
+        "description": "``POST /group-chats/{gid}/members/{mid}/direct-message`` 响应（影子直聊）。\n\n``run_id``：即时注入/忙轮中途注入的 run；排队轮为 None（``queued=True``）。\n``carrier_run_id``：直聊载体 run——群时间线上**零日志行**（直聊内容不进群），\n仅 assistant 回复中的 ``[[GROUP]]`` 转发段投影行挂本 run（run_sync 桥接段）。"
+      },
+      "GroupDirectMessageRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Content",
+            "description": "直聊消息原文（只进影子会话时间线）",
+            "default": ""
+          },
+          "attachment_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Attachment Ids",
+            "description": "附件引用（SessionAttachment id）"
+          }
+        },
+        "type": "object",
+        "title": "GroupDirectMessageRequest",
+        "description": "``POST /group-chats/{gid}/members/{mid}/direct-message`` 写体（影子直聊）。\n\nquick 影子直聊（2026-09-02）：群主对成员影子会话的纯会话注入——不走群\n消息链（零群时间线/零 @ 解析），content 只落影子会话；agent 回复中的\n``[[GROUP]]...[[/GROUP]]`` 段由投影层选择性发群（标记说明进注入 prompt）。\n附件口径同 ``GroupMessageSendRequest``（D-7 豁免空 content）。"
       },
       "GroupMemberAgentConfig": {
         "properties": {

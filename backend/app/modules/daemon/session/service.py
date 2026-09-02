@@ -500,12 +500,19 @@ class DaemonSessionNoCurrentRun(AppError):
 # turn_completed 互@检测的链可见性一致（task-05 投影 fail-open 缺口闭合）。
 
 _GROUP_CHAIN_MARKER_RE = re.compile(
-    r"^\[GROUP_CHAIN carrier=([0-9a-fA-F-]{36}) depth=(\d+)\]", re.IGNORECASE
+    r"^\[GROUP_CHAIN carrier=([0-9a-fA-F-]{36}) depth=(\d+)(?: source=([A-Za-z0-9_]+))?\]",
+    re.IGNORECASE,
 )
 
 
 def _prepend_group_chain_marker(prompt: str, turn_metadata: dict | None) -> str:
-    """群链 metadata 拼进排队 prompt 头部标记行（非群链轮原样返回）。"""
+    """群链 metadata 拼进排队 prompt 头部标记行（非群链轮原样返回）。
+
+    quick 影子直聊（2026-09-02）：``turn_metadata.source`` 非空时追加
+    ``source=<token>`` 段（当前唯一取值 "shadow_direct"）——直聊轮排队兜底后
+    派发的新 run 仍带 source 标记，投影层判定不回退成全投影（否则直聊内容
+    经排队派发整轮泄进群时间线）。
+    """
     if not isinstance(turn_metadata, dict):
         return prompt
     carrier = turn_metadata.get("source_carrier_run_id")
@@ -516,18 +523,25 @@ def _prepend_group_chain_marker(prompt: str, turn_metadata: dict | None) -> str:
         depth = int(depth)
     except (TypeError, ValueError):
         depth = 0
-    return f"[GROUP_CHAIN carrier={carrier} depth={depth}]\n{prompt}"
+    source = turn_metadata.get("source")
+    source_part = f" source={source}" if isinstance(source, str) and source.isidentifier() else ""
+    return f"[GROUP_CHAIN carrier={carrier} depth={depth}{source_part}]\n{prompt}"
 
 
 def _split_group_chain_marker(prompt: str) -> tuple[str, dict | None]:
-    """剥离排队 prompt 头部群链标记行 → ``(剩余 prompt, 链 metadata | None)``。"""
+    """剥离排队 prompt 头部群链标记行 → ``(剩余 prompt, 链 metadata | None)``。
+
+    ``source=`` 段可选（老条目无该段 → metadata 不带 source 键，群 @ 轮零变化）。
+    """
     match = _GROUP_CHAIN_MARKER_RE.match(prompt or "")
     if match is None:
         return prompt, None
-    metadata = {
+    metadata: dict = {
         "source_carrier_run_id": match.group(1),
         "chain_depth": int(match.group(2)),
     }
+    if match.group(3):
+        metadata["source"] = match.group(3)
     return prompt[match.end() :].lstrip("\r\n"), metadata
 
 

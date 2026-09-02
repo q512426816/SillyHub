@@ -36,6 +36,7 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.group.service import (
     GroupChatService,
+    GroupDirectMessageRead,
     GroupMessageSendRead,
     get_last_mention_previews,
     get_last_message_previews,
@@ -111,6 +112,23 @@ class GroupTypingRequest(BaseModel):
 
     typing: bool = True
     preview: str | None = Field(default=None, max_length=400)
+
+
+class GroupDirectMessageRequest(BaseModel):
+    """``POST /group-chats/{gid}/members/{mid}/direct-message`` 写体（影子直聊）。
+
+    quick 影子直聊（2026-09-02）：群主对成员影子会话的纯会话注入——不走群
+    消息链（零群时间线/零 @ 解析），content 只落影子会话；agent 回复中的
+    ``[[GROUP]]...[[/GROUP]]`` 段由投影层选择性发群（标记说明进注入 prompt）。
+    附件口径同 ``GroupMessageSendRequest``（D-7 豁免空 content）。
+    """
+
+    content: str = Field(
+        default="", max_length=8000, description="直聊消息原文（只进影子会话时间线）"
+    )
+    attachment_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=10, description="附件引用（SessionAttachment id）"
+    )
 
 
 def _to_list_item(read: GroupChatRead) -> GroupChatListItemRead:
@@ -247,6 +265,33 @@ async def reset_group_member_memory(
 ) -> GroupMemberRead:
     """重置 agent 成员记忆：end 影子置 pending，下次触发懒重建（幂等）。"""
     return await GroupChatService(session).reset_member_memory(group_id, member_id, user)
+
+
+@router.post(
+    "/{group_id}/members/{member_id}/direct-message",
+    response_model=GroupDirectMessageRead,
+)
+async def send_group_member_direct_message(
+    group_id: uuid.UUID,
+    member_id: uuid.UUID,
+    payload: GroupDirectMessageRequest,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> GroupDirectMessageRead:
+    """群主对成员影子会话直聊（quick 2026-09-02 影子直聊+选择性回群投影）。
+
+    纯会话注入：零群时间线/零 @ 解析/零群频道事件——直聊内容只落影子会话；
+    agent 回复中的 ``[[GROUP]]...[[/GROUP]]`` 段以成员群身份投影进群时间线
+    （投影层过滤，标记说明随注入 prompt 下发）。写=群主/workspace admin
+    （成员可见群但无直聊权）；影子未建 400（先群内 @ 触发懒建）。
+    """
+    return await GroupChatService(session).send_direct_message(
+        group_id,
+        member_id,
+        user,
+        payload.content,
+        attachment_ids=payload.attachment_ids or None,
+    )
 
 
 # ── 群消息（task-03，design §4.1）────────────────────────────────────────────

@@ -3917,6 +3917,210 @@ export interface paths {
         patch: operations["patch_shared_agent_api_daemon_shared_agents__grant_id__patch"];
         trace?: never;
     };
+    "/api/daemon/group-chats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Group Chats
+         * @description 当前用户=群成员的群列表（含成员摘要 chips + 最后消息；design §6.1）。
+         */
+        get: operations["list_group_chats_api_daemon_group_chats_get"];
+        put?: never;
+        /**
+         * Create Group Chat
+         * @description 建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。
+         */
+        post: operations["create_group_chat_api_daemon_group_chats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Group Chat
+         * @description 群详情：成员完整列表（六要素 + shadow_status + 在线绿点；design §6.1）。
+         */
+        get: operations["get_group_chat_api_daemon_group_chats__group_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Group Chat
+         * @description 改群名/agent_cross_mention/context_window 等设置（群主或 admin）。
+         */
+        patch: operations["update_group_chat_api_daemon_group_chats__group_id__patch"];
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End Group Chat
+         * @description 解散群：end 群会话 + 全部影子会话 + 影子队列清理（design §8 group.ended）。
+         */
+        post: operations["end_group_chat_api_daemon_group_chats__group_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Group Member
+         * @description 加成员（用户邀请 / agent 六要素配置；群主或 admin）。
+         */
+        post: operations["add_group_member_api_daemon_group_chats__group_id__members_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/members/{member_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Group Member
+         * @description 移除成员（用户 removed_at 置位；agent 额外 end 影子+队列清理）。
+         */
+        delete: operations["remove_group_member_api_daemon_group_chats__group_id__members__member_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Group Member
+         * @description 改成员昵称 / agent 六要素（热切换执行在 task-04，本卡落库+同步快照）。
+         */
+        patch: operations["update_group_member_api_daemon_group_chats__group_id__members__member_id__patch"];
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/members/{member_id}/reset-memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Group Member Memory
+         * @description 重置 agent 成员记忆：end 影子置 pending，下次触发懒重建（幂等）。
+         */
+        post: operations["reset_group_member_memory_api_daemon_group_chats__group_id__members__member_id__reset_memory_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/members/{member_id}/direct-message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Group Member Direct Message
+         * @description 群主对成员影子会话直聊（quick 2026-09-02 影子直聊+选择性回群投影）。
+         *
+         *     纯会话注入：零群时间线/零 @ 解析/零群频道事件——直聊内容只落影子会话；
+         *     agent 回复中的 ``[[GROUP]]...[[/GROUP]]`` 段以成员群身份投影进群时间线
+         *     （投影层过滤，标记说明随注入 prompt 下发）。写=群主/workspace admin
+         *     （成员可见群但无直聊权）；影子未建 400（先群内 @ 触发懒建）。
+         */
+        post: operations["send_group_member_direct_message_api_daemon_group_chats__group_id__members__member_id__direct_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Group Message
+         * @description 发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。
+         *
+         *     未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员；触发
+         *     成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1）。附件随消息落
+         *     user_input metadata 摘要并在触发成员时随注入下发（FR-05 补遗）。
+         */
+        post: operations["send_group_message_api_daemon_group_chats__group_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/typing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Group Typing
+         * @description typing 心跳：成员校验后直接 publish ``group_typing:{群id}``（§5.4）。
+         *
+         *     节流由前端做（250ms 间隔）；**纯 ephemeral**——不落库、不进 AI 上下文、
+         *     不进群背景摘要（Redis pub/sub 即发即忘）。任意用户成员可发（§6.1）。
+         */
+        post: operations["send_group_typing_api_daemon_group_chats__group_id__typing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/version": {
         parameters: {
             query?: never;
@@ -4234,6 +4438,36 @@ export interface paths {
          *     保留。fire-and-forget 模式。
          */
         post: operations["trigger_machine_cleanup_api_daemon_machines__instance_id__cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/sillyspec-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Sillyspec Update
+         * @description 推送 sillyspec 升级指令到指定机器（admin，2026-08-31-machine-sillyspec-version FR-02）.
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+         *     ``daemon:sillyspec_update``（fire-and-forget，无回执，同 CLEANUP 语义）；
+         *     daemon 收到后调 sillyspec-manager 执行本机 npm 升级，状态机经心跳
+         *     sillyspec_update 字段回传（不走本消息）。先 ``_get_owned_instance`` 做归属
+         *     校验（越权/不存在 404），离线或 WS 发送失败 → 504 ``DaemonRuntimeOffline``
+         *     （与机器级 self-update/cleanup 同款文案与 details 结构）。
+         *
+         *     刻意不返回 ``latest_version``：npm latest 由 daemon 自行探测并经心跳
+         *     sillyspec_latest_version 上报，backend 不代查（design §接口定义）。
+         */
+        post: operations["trigger_machine_sillyspec_update_api_daemon_machines__instance_id__sillyspec_update_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5409,6 +5643,11 @@ export interface paths {
          *     编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本
          *     压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与
          *     Content-Encoding，无需调用方改动。
+         *
+         *     群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数
+         *     （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
+         *     （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
+         *     放行普通群成员读 logs，见 get_group_accessible_session）。
          */
         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
         put?: never;
@@ -10393,6 +10632,12 @@ export interface components {
             tool_kind?: string | null;
             /** Edit Patch */
             edit_patch?: string | null;
+            /** Segment Id */
+            segment_id?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {
@@ -12092,6 +12337,11 @@ export interface components {
             /** Started At */
             started_at?: string | null;
             pending_update?: components["schemas"]["DaemonHeartbeatPendingUpdate"] | null;
+            /** Sillyspec Version */
+            sillyspec_version?: string | null;
+            /** Sillyspec Latest Version */
+            sillyspec_latest_version?: string | null;
+            sillyspec_update?: components["schemas"]["DaemonHeartbeatSillySpecUpdate"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
         };
@@ -12133,6 +12383,30 @@ export interface components {
             runtime_id: string;
             /** Allowed Roots */
             allowed_roots: string[];
+        };
+        /**
+         * DaemonHeartbeatSillySpecUpdate
+         * @description 心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.
+         *
+         *     daemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值
+         *     ``running`` / ``deferred`` / ``success`` / ``failed``，trigger 取值
+         *     ``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖
+         *     ``since=now``（同 pending_update 先例），同内容重放保留原 since。
+         *     state/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422
+         *     （心跳是保活通道，宁宽勿断，DaemonHeartbeatPendingUpdate.reason 同决策）；
+         *     error 在服务层截断至 200 字符后落库。
+         */
+        DaemonHeartbeatSillySpecUpdate: {
+            /** State */
+            state?: string | null;
+            /** Trigger */
+            trigger?: string | null;
+            /** From Version */
+            from_version?: string | null;
+            /** To Version */
+            to_version?: string | null;
+            /** Error */
+            error?: string | null;
         };
         /**
          * DaemonInstanceProviderItem
@@ -12239,7 +12513,12 @@ export interface components {
         };
         /**
          * DaemonMachineReadWithPending
-         * @description DaemonMachineRead + 机器级 pending_update（GET /machines 透出用）。
+         * @description DaemonMachineRead + 机器级 pending_update + sillyspec 三字段（GET /machines 透出用）。
+         *
+         *     2026-08-31-machine-sillyspec-version task-03 / FR-05：sillyspec_version /
+         *     sillyspec_latest_version / sillyspec_update 三字段就近跟随 pending_update 走
+         *     router 内子类扩展（MachinePendingUpdateRead 现状就近原则，schema.py 基类保持
+         *     零改动——本组字段是同一读视图契约 MachineSillySpecView，拆两处放置会割裂）。
          */
         DaemonMachineReadWithPending: {
             /**
@@ -12278,6 +12557,11 @@ export interface components {
             /** Runtimes */
             runtimes?: components["schemas"]["DaemonRuntimeRead"][];
             pending_update?: components["schemas"]["MachinePendingUpdateRead"] | null;
+            /** Sillyspec Version */
+            sillyspec_version?: string | null;
+            /** Sillyspec Latest Version */
+            sillyspec_latest_version?: string | null;
+            sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
         };
         /**
          * DaemonMachineUpdate
@@ -12382,6 +12666,10 @@ export interface components {
             daemon_build_id?: string | null;
             /** Started At */
             started_at?: string | null;
+            /** Sillyspec Version */
+            sillyspec_version?: string | null;
+            /** Sillyspec Latest Version */
+            sillyspec_latest_version?: string | null;
             /** Allowed Roots */
             allowed_roots?: string[];
             /** Providers */
@@ -13570,6 +13858,551 @@ export interface components {
              */
             timestamp: string;
         };
+        /**
+         * GroupChatCreate
+         * @description ``POST /api/group-chats`` 建群体（design §6.1）。
+         *
+         *     初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建
+         *     群时间线会话（AgentSession.session_kind='group'）。
+         *
+         *     quick 群 PPM 项目化口径：``project_id`` 必填——群挂 PPM 项目，群工作区由
+         *     项目关联工作区集推导（``workspace_id`` 可选：显式传入时须在项目关联集内，
+         *     未传取首个关联工作区；项目无关联工作区 → 400）。邀请人员范围=项目成员。
+         */
+        GroupChatCreate: {
+            /** Title */
+            title: string;
+            /**
+             * Project Id
+             * Format: uuid
+             * @description PPM 项目（群归属；工作区由项目关联集推导）
+             */
+            project_id: string;
+            /**
+             * Workspace Id
+             * @description 工作区；None=自动取项目首个关联工作区（显式传入须在项目关联集内）
+             */
+            workspace_id?: string | null;
+            /**
+             * Agent Cross Mention
+             * @description agent 互@协作开关（默认开）
+             * @default true
+             */
+            agent_cross_mention: boolean;
+            /**
+             * Cross Mention Depth
+             * @description 协作链深度上限（防环护栏）
+             * @default 4
+             */
+            cross_mention_depth: number;
+            /**
+             * Context Window
+             * @description 群背景摘要条数
+             * @default 20
+             */
+            context_window: number;
+            /** User Members */
+            user_members?: components["schemas"]["GroupMemberUserCreate"][];
+            /** Agent Members */
+            agent_members?: components["schemas"]["GroupMemberAgentConfig"][];
+        };
+        /**
+         * GroupChatDetailRead
+         * @description 群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。
+         *
+         *     ``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照
+         *     ``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表
+         *     项同源（``get_online_member_ids``）。
+         */
+        GroupChatDetailRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Title */
+            title: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Agent Cross Mention */
+            agent_cross_mention: boolean;
+            /** Cross Mention Depth */
+            cross_mention_depth: number;
+            /** Context Window */
+            context_window: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Members */
+            members?: components["schemas"]["GroupMemberRead"][];
+            /**
+             * Online Member Ids
+             * @default []
+             */
+            online_member_ids: string[];
+        };
+        /**
+         * GroupChatListItemRead
+         * @description 群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。
+         *
+         *     ``online_member_ids``（task-06 接通，design §5.4）：读 Redis
+         *     ``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL
+         *     60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通
+         *     （``get_last_message_previews``：最新 user_input/投影行首 60 字）。
+         *
+         *     ``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要
+         *     （``get_last_mention_previews`` 扫描最近时间线，命中返回
+         *     ``{content(截 60 字), ts, member_name}``，无 @ 为 None）。
+         */
+        GroupChatListItemRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Title */
+            title: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Agent Cross Mention */
+            agent_cross_mention: boolean;
+            /** Cross Mention Depth */
+            cross_mention_depth: number;
+            /** Context Window */
+            context_window: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Members */
+            members?: components["schemas"]["GroupMemberRead"][];
+            /**
+             * Online Member Ids
+             * @default []
+             */
+            online_member_ids: string[];
+            /** Last Message */
+            last_message?: string | null;
+            /** Last Mention */
+            last_mention?: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * GroupChatRead
+         * @description 群读体（``GET /api/group-chats`` / ``{id}``，design §6.1）。
+         *
+         *     ``members`` 由 service 层组装（AgentGroupMember 行序列化；群列表可裁剪为
+         *     成员摘要 chips，task-02 决定裁剪口径）。
+         */
+        GroupChatRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Title */
+            title: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Agent Cross Mention */
+            agent_cross_mention: boolean;
+            /** Cross Mention Depth */
+            cross_mention_depth: number;
+            /** Context Window */
+            context_window: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Members */
+            members?: components["schemas"]["GroupMemberRead"][];
+        };
+        /**
+         * GroupChatUpdate
+         * @description ``PATCH /api/group-chats/{id}`` 改群体（design §6.1：群名/开关/护栏参数）。
+         *
+         *     None=不改（逐字段局部更新）。
+         */
+        GroupChatUpdate: {
+            /** Title */
+            title?: string | null;
+            /** Agent Cross Mention */
+            agent_cross_mention?: boolean | null;
+            /** Cross Mention Depth */
+            cross_mention_depth?: number | null;
+            /** Context Window */
+            context_window?: number | null;
+        };
+        /**
+         * GroupDirectMessageRead
+         * @description ``POST /group-chats/{gid}/members/{mid}/direct-message`` 响应（影子直聊）。
+         *
+         *     ``run_id``：即时注入/忙轮中途注入的 run；排队轮为 None（``queued=True``）。
+         *     ``carrier_run_id``：直聊载体 run——群时间线上**零日志行**（直聊内容不进群），
+         *     仅 assistant 回复中的 ``[[GROUP]]`` 转发段投影行挂本 run（run_sync 桥接段）。
+         */
+        GroupDirectMessageRead: {
+            /**
+             * Shadow Session Id
+             * Format: uuid
+             */
+            shadow_session_id: string;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Queued
+             * @default false
+             */
+            queued: boolean;
+            /**
+             * Mid Turn
+             * @default false
+             */
+            mid_turn: boolean;
+            /**
+             * Carrier Run Id
+             * Format: uuid
+             */
+            carrier_run_id: string;
+        };
+        /**
+         * GroupDirectMessageRequest
+         * @description ``POST /group-chats/{gid}/members/{mid}/direct-message`` 写体（影子直聊）。
+         *
+         *     quick 影子直聊（2026-09-02）：群主对成员影子会话的纯会话注入——不走群
+         *     消息链（零群时间线/零 @ 解析），content 只落影子会话；agent 回复中的
+         *     ``[[GROUP]]...[[/GROUP]]`` 段由投影层选择性发群（标记说明进注入 prompt）。
+         *     附件口径同 ``GroupMessageSendRequest``（D-7 豁免空 content）。
+         */
+        GroupDirectMessageRequest: {
+            /**
+             * Content
+             * @description 直聊消息原文（只进影子会话时间线）
+             * @default
+             */
+            content: string;
+            /**
+             * Attachment Ids
+             * @description 附件引用（SessionAttachment id）
+             */
+            attachment_ids?: string[];
+        };
+        /**
+         * GroupMemberAgentConfig
+         * @description agent 成员六要素写体（建群 / 加成员 / 改配置共用，design §6.1）。
+         *
+         *     ``workspace_id=None`` 表示沿用群工作区（cwd 锚默认与群一致，可后续热切换
+         *     为其它工作区实现"一项目多工作区"分工）；``provider`` 为引擎类型
+         *     （claude/codex 等，派发 AgentSession.provider 同口径）。
+         */
+        GroupMemberAgentConfig: {
+            /**
+             * Display Name
+             * @description 群内昵称=@提及词，群内唯一
+             */
+            display_name: string;
+            /**
+             * Avatar
+             * @description 群内头像 URL（文件中心上传产出）
+             */
+            avatar?: string | null;
+            /**
+             * Runtime Id
+             * Format: uuid
+             * @description 机器（daemon runtime，pinned 派发）
+             */
+            runtime_id: string;
+            /**
+             * Workspace Id
+             * @description 工作区（cwd 锚）；None=沿用群工作区
+             */
+            workspace_id?: string | null;
+            /**
+             * Provider
+             * @description 引擎类型（claude/codex）
+             */
+            provider: string;
+            /**
+             * Llm Provider Id
+             * @description 模型（LLM 供应商）
+             */
+            llm_provider_id?: string | null;
+            /**
+             * Agent Profile Id
+             * @description 智能体方案（AgentProfile）
+             */
+            agent_profile_id?: string | null;
+            /**
+             * Team Enabled
+             * @description 团队能力（可派分身并行执行子任务；仅 Claude 引擎支持）
+             * @default false
+             */
+            team_enabled: boolean;
+        };
+        /**
+         * GroupMemberCreate
+         * @description ``POST /api/group-chats/{id}/members`` 加成员体（二选一，design §6.1）。
+         */
+        GroupMemberCreate: {
+            user?: components["schemas"]["GroupMemberUserCreate"] | null;
+            agent?: components["schemas"]["GroupMemberAgentConfig"] | null;
+        };
+        /**
+         * GroupMemberRead
+         * @description 成员读体（群详情/成员面板，design §6.1）。
+         *
+         *     agent 成员六要素全量返回（用户成员对应列为 None）；``shadow_status``
+         *     供面板绿点（none/pending/active/failed）；``avatar`` 为群内头像 URL
+         *     （用户与 agent 成员共用，None=未自定义）。
+         */
+        GroupMemberRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Member Type */
+            member_type: string;
+            /** Display Name */
+            display_name: string;
+            /** Avatar */
+            avatar?: string | null;
+            /** User Id */
+            user_id?: string | null;
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /**
+             * Team Enabled
+             * @default false
+             */
+            team_enabled: boolean;
+            /** Config Snapshot */
+            config_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+            /** Invited By */
+            invited_by?: string | null;
+            /**
+             * Joined At
+             * Format: date-time
+             */
+            joined_at: string;
+            /** Removed At */
+            removed_at?: string | null;
+            /** Shadow Session Id */
+            shadow_session_id?: string | null;
+            /** Shadow Status */
+            shadow_status: string;
+        };
+        /**
+         * GroupMemberTriggerRead
+         * @description 单成员触发结果（design §8 member.injected / member.mentioned）。
+         */
+        GroupMemberTriggerRead: {
+            /**
+             * Member Id
+             * Format: uuid
+             */
+            member_id: string;
+            /** Member Name */
+            member_name: string;
+            /**
+             * Shadow Session Id
+             * Format: uuid
+             */
+            shadow_session_id: string;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Queued
+             * @default false
+             */
+            queued: boolean;
+            /**
+             * Mid Turn
+             * @default false
+             */
+            mid_turn: boolean;
+        };
+        /**
+         * GroupMemberUpdate
+         * @description ``PATCH /api/group-chats/{id}/members/{mid}`` 改成员体（design §6.1）。
+         *
+         *     agent 成员六要素热切换（provider/llm_provider/agent_profile 下轮生效；
+         *     runtime/workspace 切换重建影子会话重置记忆，design §4.5）与用户/agent 成员
+         *     改昵称共用。None=不改。
+         */
+        GroupMemberUpdate: {
+            /** Display Name */
+            display_name?: string | null;
+            /**
+             * Avatar
+             * @description 群内头像 URL；None=不改
+             */
+            avatar?: string | null;
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Team Enabled */
+            team_enabled?: boolean | null;
+        };
+        /**
+         * GroupMemberUserCreate
+         * @description 用户成员邀请写体（design §6.1 加用户成员）。
+         */
+        GroupMemberUserCreate: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /**
+             * Display Name
+             * @description 群内昵称；None=沿用用户显示名（service 层解析并查重）
+             */
+            display_name?: string | null;
+            /**
+             * Avatar
+             * @description 群内头像 URL（文件中心上传产出）
+             */
+            avatar?: string | null;
+        };
+        /**
+         * GroupMessageSendRead
+         * @description ``POST /group-chats/{id}/messages`` 响应（design §8 group.message.sent）。
+         */
+        GroupMessageSendRead: {
+            /**
+             * Carrier Run Id
+             * Format: uuid
+             */
+            carrier_run_id: string;
+            /**
+             * Log Id
+             * Format: uuid
+             */
+            log_id: string;
+            /** Mentioned Member Ids */
+            mentioned_member_ids?: string[];
+            /**
+             * Mention All
+             * @default false
+             */
+            mention_all: boolean;
+            /** Triggered */
+            triggered?: components["schemas"]["GroupMemberTriggerRead"][];
+        };
+        /**
+         * GroupMessageSendRequest
+         * @description ``POST /group-chats/{id}/messages`` 写体（design §4.1；FR-05 补遗扩附件）。
+         *
+         *     schema.py 不在本卡 allowed_paths——请求体随 router 落地（service 响应体在
+         *     group/service.py，``GroupChatListItemRead`` 本文件先例）。
+         *
+         *     附件口径照单聊 ``SessionInjectRequest``（2026-08-20-session-multimodal-
+         *     attachments）：``attachment_ids`` 为上传端点（POST /daemon/session-
+         *     attachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时
+         *     ``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
+         *     service，DTO 层总量兜底）。
+         */
+        GroupMessageSendRequest: {
+            /**
+             * Content
+             * @description 消息原文（含 @提及）；携带附件时可空
+             * @default
+             */
+            content: string;
+            /**
+             * Attachment Ids
+             * @description 附件引用（SessionAttachment id）
+             */
+            attachment_ids?: string[];
+        };
+        /**
+         * GroupTypingRequest
+         * @description ``POST /group-chats/{id}/typing`` 写体（design §5.4 typing.ping）。
+         *
+         *     前端 250ms 节流 + 本地 TTL 2.5s 自动过期；``preview`` 为输入框草稿预览
+         *     （≤400 字——DTO 与服务端 ``_typing_payload`` 裁剪口径一致，服务端再裁
+         *     一道双保险）。``typing=False`` 表示停止输入（发送/清空草稿时冲掉指示器）。
+         */
+        GroupTypingRequest: {
+            /**
+             * Typing
+             * @default true
+             */
+            typing: boolean;
+            /** Preview */
+            preview?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -14286,6 +15119,33 @@ export interface components {
              * Format: date-time
              */
             since: string;
+        };
+        /**
+         * MachineSillySpecUpdateRead
+         * @description 机器视图 sillyspec_update 嵌套（2026-08-31-machine-sillyspec-version FR-05）。
+         *
+         *     即 daemon_instances.sillyspec_update JSON 列原样透出（design §接口定义）：
+         *     daemon 侧 sillyspec-manager 状态机投影五字段（state 取值 running/deferred/
+         *     success/failed，trigger 取值 server_command/auto）+ backend 首落库时盖的
+         *     ``since``（同内容重放心跳保留原 since，MachinePendingUpdateRead 同款语义）。
+         *     NULL（无升级进行中 / 终态展示窗口已过）→ 机器视图字段为 null。
+         *
+         *     五上报字段全 nullable 对齐 daemon 上报形态：running/deferred 可无 to_version、
+         *     非 failed 无 error（success 必带 to_version 由 daemon 侧保证，后端不收紧）。
+         */
+        MachineSillySpecUpdateRead: {
+            /** State */
+            state?: string | null;
+            /** Trigger */
+            trigger?: string | null;
+            /** From Version */
+            from_version?: string | null;
+            /** To Version */
+            to_version?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Since */
+            since?: string | null;
         };
         /**
          * McpConfigUpdateRequest
@@ -29045,6 +29905,393 @@ export interface operations {
             };
         };
     };
+    list_group_chats_api_daemon_group_chats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupChatListItemRead"][];
+                };
+            };
+        };
+    };
+    create_group_chat_api_daemon_group_chats_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupChatCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupChatRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_group_chat_api_daemon_group_chats__group_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupChatDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_group_chat_api_daemon_group_chats__group_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupChatUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupChatRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    end_group_chat_api_daemon_group_chats__group_id__end_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupChatRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_group_member_api_daemon_group_chats__group_id__members_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupMemberCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupMemberRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_group_member_api_daemon_group_chats__group_id__members__member_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_group_member_api_daemon_group_chats__group_id__members__member_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupMemberUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupMemberRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_group_member_memory_api_daemon_group_chats__group_id__members__member_id__reset_memory_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupMemberRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_group_member_direct_message_api_daemon_group_chats__group_id__members__member_id__direct_message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupDirectMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupDirectMessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_group_message_api_daemon_group_chats__group_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupMessageSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupMessageSendRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_group_typing_api_daemon_group_chats__group_id__typing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupTypingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_daemon_version_api_daemon_version_get: {
         parameters: {
             query?: never;
@@ -29496,6 +30743,39 @@ export interface operations {
         };
     };
     trigger_machine_cleanup_api_daemon_machines__instance_id__cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_sillyspec_update_api_daemon_machines__instance_id__sillyspec_update_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -30543,7 +31823,8 @@ export interface operations {
                 ql_id?: string | null;
                 ppm_item_kind?: ("plan_task" | "problem") | null;
                 ppm_item_id?: string | null;
-                archived?: boolean;
+                archived?: boolean | null;
+                session_kind?: ("chat" | "group" | "group_member") | null;
             };
             header?: never;
             path?: never;
@@ -31170,6 +32451,12 @@ export interface operations {
             query?: {
                 /** @description 增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp 严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应回退 1-2s 重叠窗口并按 log_id 去重 */
                 after?: string | null;
+                /** @description 向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回 */
+                before?: string | null;
+                /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合 */
+                q?: string | null;
+                /** @description 最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为） */
+                limit?: number | null;
             };
             header?: never;
             path: {

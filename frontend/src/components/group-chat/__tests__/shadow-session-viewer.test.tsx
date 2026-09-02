@@ -1,5 +1,6 @@
 /**
- * ShadowSessionViewer 单测（群聊体验 quick，2026-09-02；同日会话体验对齐重做）。
+ * ShadowSessionViewer 单测（群聊体验 quick，2026-09-02；同日会话体验对齐重做 +
+ * 影子直聊 quick 升级可交互完整会话）。
  *
  * 覆盖：
  *  1. 装配 + 对话视图（TurnTimeline 消费）——影子 user_input = 用户 turn（注入
@@ -12,8 +13,22 @@
  *     清除搜索恢复初始浏览（数据层断言保留；高亮降级为 TurnTimeline 内文本）；
  *  5. 空态文案 / 加载失败 Result 重试。
  *
+ * 影子直聊 quick（2026-09-02）新增覆盖：
+ *  6. 头部 #影子id.slice(0,8) 短码 + 点击复制完整 id（clipboard stub 惯例）；
+ *  7. 输入区权限——群主（canDirectMessage）输入框 + 发送参数（sendGroupDirectMessage
+ *     (gid, mid, {content})，成功后清空且不重拉 logs = 不本地 append）；普通成员
+ *     只读提示（SHADOW_READONLY_HINT）且不调发送 / 不建 SSE 流；
+ *  8. SSE 实时流——群主打开即订阅 streamShadowSession(shadowSid)；onLog 新行
+ *     追加渲染、同 log_id 去重；Drawer 关闭断流（close）；普通成员不订阅；
+ *  9. 工具行渲染（三块对齐）——tool_call JSON = 权威工具段，stdout [TOOL_USE]
+ *     双发副本丢弃（进度视图工具名不翻倍）；
+ * 10. token 徽标（三块对齐）——[SYSTEM:thinking_tokens] 行（多条取末值）挂轮
+ *     ↓N 徽标，行本身不进正文；
+ * 11. [[GROUP]] 段标记——转发段加「将转发到群」小标签 + 剥协议标记。
+ *
  * mock 策略（skill-content-drawer.test 同款惯例）：
- *  - @/lib/daemon getAgentSessionLogs mock 断言调用参数；
+ *  - @/lib/daemon getAgentSessionLogs / streamShadowSession / sendGroupDirectMessage
+ *    mock 断言调用参数；
  *  - @/components/ui/markdown-text mock 纯 div（jsdom 下 next/dynamic ssr:false
  *    同步渲染 null 的已知 gotcha，断言以 data-testid 锚定——TurnTimeline 文本段
  *    渲染链路同样消费该组件）。
@@ -27,16 +42,24 @@ import {
   fireEvent,
   waitFor,
 } from "@testing-library/react";
+import { App as AntApp } from "antd";
 
 import {
   ShadowSessionViewer,
   SHADOW_PAGE_SIZE,
   sortShadowLogs,
+  parseShadowThinkingTokens,
+  markGroupForwardText,
+  mergeSnapshotWithLive,
+  GROUP_FORWARD_LABEL,
 } from "@/components/group-chat/shadow-session-viewer";
 import type { AgentRunLogEntry } from "@/lib/agent";
+import type { SessionStreamEnvelope } from "@/lib/daemon";
 
 const mocks = vi.hoisted(() => ({
   getAgentSessionLogs: vi.fn(),
+  streamShadowSession: vi.fn(),
+  sendGroupDirectMessage: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async (importOriginal) => {
@@ -44,6 +67,10 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
   return {
     ...actual,
     getAgentSessionLogs: (...args: unknown[]) => mocks.getAgentSessionLogs(...args),
+    streamShadowSession: (...args: unknown[]) =>
+      mocks.streamShadowSession(...args),
+    sendGroupDirectMessage: (...args: unknown[]) =>
+      mocks.sendGroupDirectMessage(...args),
   };
 });
 
@@ -84,19 +111,69 @@ function makePage(count: number, startMinutes = 0): AgentRunLogEntry[] {
   );
 }
 
-function renderViewer(shadowSessionId = "shadow-1", memberName = "小码") {
+/** SSE log 事件信封固件（streamShadowSession onLog 入参形状的最小子集）。 */
+function makeEnvelope(overrides: Partial<SessionStreamEnvelope> = {}): SessionStreamEnvelope {
+  seq += 1;
+  return {
+    event: "log",
+    session_id: "shadow-1",
+    run_id: "r-2",
+    turn: null,
+    log_id: `env-${seq}`,
+    timestamp: `2026-09-01T07:${String(10 + seq).padStart(2, "0")}:00Z`,
+    channel: "user_input",
+    content: null,
+    status: null,
+    exit_code: null,
+    reason: null,
+    ...overrides,
+  } as SessionStreamEnvelope;
+}
+
+function renderViewer(
+  opts: {
+    shadowSessionId?: string;
+    memberName?: string;
+    canDirectMessage?: boolean;
+    open?: boolean;
+    onClose?: () => void;
+  } = {},
+) {
+  const {
+    shadowSessionId = "shadow-1",
+    memberName = "小码",
+    canDirectMessage = false,
+    open = true,
+    onClose = vi.fn(),
+  } = opts;
+  // AntApp 包裹（platform-shared-agents-card.test 惯例）：useNotify 走真实
+  // App.useApp message（无 provider 时 message.* 为 undefined，notify 调用变
+  // unhandled rejection）。
   return render(
-    <ShadowSessionViewer
-      open
-      onClose={vi.fn()}
-      shadowSessionId={shadowSessionId}
-      memberName={memberName}
-    />,
+    <AntApp>
+      <ShadowSessionViewer
+        open={open}
+        onClose={onClose}
+        shadowSessionId={shadowSessionId}
+        memberName={memberName}
+        groupId="group-1"
+        memberId="mem-1"
+        canDirectMessage={canDirectMessage}
+      />
+    </AntApp>,
   );
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // SSE 流默认返回哑连接（close spy 由用例内覆盖断言；普通成员路径不建流）。
+  mocks.streamShadowSession.mockReturnValue({ close: vi.fn(), getLastEventId: () => null });
+  mocks.sendGroupDirectMessage.mockResolvedValue({
+    shadow_session_id: "shadow-1",
+    queued: false,
+    mid_turn: false,
+    carrier_run_id: "run-9",
+  });
 });
 
 afterEach(() => {
@@ -384,5 +461,294 @@ describe("ShadowSessionViewer 搜索", () => {
     expect(calls).toHaveLength(3);
     // 第 3 次是 q 搜索（无 before）——滚动未引入第 4 次调用。
     expect(calls[2]?.[1]).toMatchObject({ q: "翻页" });
+  });
+});
+
+/* ── 影子直聊 quick（2026-09-02）：头部 / 输入区 / SSE / 三块对齐 ───────── */
+
+describe("ShadowSessionViewer 头部 id 短码复制（session-panel 惯例对齐）", () => {
+  it("显示 #id.slice(0,8) 短码按钮；点击复制完整影子会话 id", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mocks.getAgentSessionLogs.mockResolvedValue([]);
+    renderViewer({ shadowSessionId: "shadow-1234567890abcdef" });
+
+    const btn = screen.getByTestId("shadow-session-id-copy");
+    expect(btn.textContent).toBe("#shadow-1");
+    expect(btn.getAttribute("title")).toContain("shadow-1234567890abcdef");
+
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("shadow-1234567890abcdef"),
+    );
+  });
+});
+
+describe("ShadowSessionViewer 输入区权限（群主可发 / 普通成员只读）", () => {
+  it("群主：输入框 + 发送 → sendGroupDirectMessage(gid, mid, {content})；成功清空且不重拉 logs（不本地 append）", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeLog({ id: "l-inj", channel: "user_input", content_redacted: "@小码 看看这个" }),
+    ]);
+    renderViewer({ canDirectMessage: true });
+
+    const input = await screen.findByLabelText("影子会话直聊输入");
+    fireEvent.change(input, { target: { value: "单独说下白屏的复现步骤" } });
+    fireEvent.click(screen.getByTestId("shadow-direct-send"));
+
+    await waitFor(() =>
+      expect(mocks.sendGroupDirectMessage).toHaveBeenCalledWith("group-1", "mem-1", {
+        content: "单独说下白屏的复现步骤",
+      }),
+    );
+    // 成功后草稿清空。
+    await waitFor(() =>
+      expect((screen.getByLabelText("影子会话直聊输入") as HTMLTextAreaElement).value).toBe(""),
+    );
+    // 本地不手动 append —— 不重拉回放（初始 1 次），行等 SSE 流回放。
+    expect(mocks.getAgentSessionLogs).toHaveBeenCalledTimes(1);
+  });
+
+  it("普通成员：只读提示（SHADOW_READONLY_HINT），无输入框 / 不调发送 / 不建 SSE 流", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeLog({ id: "l-inj", channel: "user_input", content_redacted: "@小码 看看这个" }),
+    ]);
+    renderViewer({ canDirectMessage: false });
+
+    expect(await screen.findByText("@小码 看看这个")).toBeTruthy();
+    expect(screen.getByTestId("shadow-direct-readonly").textContent).toBe(
+      "仅群主可在此会话中对话",
+    );
+    expect(screen.queryByLabelText("影子会话直聊输入")).toBeNull();
+    expect(mocks.sendGroupDirectMessage).not.toHaveBeenCalled();
+    expect(mocks.streamShadowSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("ShadowSessionViewer SSE 实时流（群主视角）", () => {
+  it("打开即订阅 streamShadowSession(shadowSid)；onLog 新行追加渲染、同 log_id 去重；关闭断流", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeLog({
+        id: "l-inj",
+        run_id: "r-1",
+        channel: "user_input",
+        content_redacted: "@小码 看看这个",
+      }),
+    ]);
+    const close = vi.fn();
+    mocks.streamShadowSession.mockReturnValue({ close, getLastEventId: () => null });
+    const onClose = vi.fn();
+    const { rerender } = renderViewer({ canDirectMessage: true, onClose });
+
+    await waitFor(() =>
+      expect(mocks.streamShadowSession).toHaveBeenCalledWith(
+        "shadow-1",
+        expect.objectContaining({
+          onLog: expect.any(Function),
+          onError: expect.any(Function),
+        }),
+      ),
+    );
+
+    // SSE 实时行（直聊 user_input）→ 追加为用户 turn 气泡。
+    const handlers = mocks.streamShadowSession.mock.calls[0]?.[1] as {
+      onLog: (env: SessionStreamEnvelope) => void;
+    };
+    const env = makeEnvelope({
+      log_id: "l-live-1",
+      run_id: "r-2",
+      channel: "user_input",
+      content: "群主的直聊消息",
+    });
+    handlers.onLog(env);
+    expect(await screen.findByText("群主的直聊消息")).toBeTruthy();
+
+    // 同 log_id 重放（断线 resync / 轮后对账）→ 去重不翻倍。
+    handlers.onLog(env);
+    await waitFor(() => {
+      expect(screen.getAllByText("群主的直聊消息")).toHaveLength(1);
+    });
+
+    // Drawer 关闭断流（open=false → effect cleanup 调 conn.close）。
+    rerender(
+      <ShadowSessionViewer
+        open={false}
+        onClose={onClose}
+        shadowSessionId="shadow-1"
+        memberName="小码"
+        groupId="group-1"
+        memberId="mem-1"
+        canDirectMessage
+      />,
+    );
+    await waitFor(() => expect(close).toHaveBeenCalled());
+  });
+});
+
+describe("ShadowSessionViewer 工具行渲染（三块对齐：tool_call JSON 权威 / [TOOL_USE] 双发去重）", () => {
+  it("进度视图：tool_call JSON 装配为工具段；stdout [TOOL_USE] 副本丢弃（工具名不翻倍）", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeLog({
+        id: "l-inj",
+        channel: "user_input",
+        content_redacted: "@小码 看看这个",
+      }),
+      makeLog({
+        id: "l-tool",
+        channel: "tool_call",
+        content_redacted:
+          '{"tool":"Bash","args":{"command":"pnpm build"},"tool_use_id":"t-1","success":true}',
+      }),
+      makeLog({
+        id: "l-tool-echo",
+        channel: "stdout",
+        content_redacted:
+          '[TOOL_USE] {"tool":"Bash","args":{"command":"pnpm build"},"tool_use_id":"t-1"}',
+      }),
+      makeLog({
+        id: "l-tool-res",
+        channel: "stdout",
+        content_redacted: "[TOOL_RESULT] 构建成功",
+      }),
+    ]);
+    renderViewer();
+    expect(await screen.findByText("@小码 看看这个")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "进度" }));
+    await waitFor(() => {
+      // [TOOL_USE] 文本副本经 classifySessionLog 丢弃——Bash 工具行恰一条。
+      expect(screen.getAllByText("Bash")).toHaveLength(1);
+    });
+  });
+});
+
+describe("ShadowSessionViewer token 徽标（三块对齐：thinking_tokens 行 → 轮 token）", () => {
+  it("每 run 取最后一条 [SYSTEM:thinking_tokens] 末值挂 ↓N 徽标；行本身不进正文", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeLog({
+        id: "l-inj",
+        channel: "user_input",
+        content_redacted: "@小码 看看这个",
+      }),
+      makeLog({
+        id: "l-tok-1",
+        channel: "stdout",
+        content_redacted: "[SYSTEM:thinking_tokens] 120",
+      }),
+      makeLog({
+        id: "l-out",
+        channel: "stdout",
+        content_redacted: "[ASSISTANT] 定位完成",
+      }),
+      makeLog({
+        id: "l-tok-2",
+        channel: "stdout",
+        content_redacted: "[SYSTEM:thinking_tokens] 502",
+      }),
+    ]);
+    renderViewer();
+    expect(await screen.findByText("@小码 看看这个")).toBeTruthy();
+
+    // 轮尾徽标：末值 502（TurnTimeline TurnStatusBadge 消费 turn.outputTokens）。
+    await waitFor(() => {
+      expect(screen.getByText(/↓502/)).toBeTruthy();
+    });
+    // [SYSTEM:thinking_tokens] 协议行不渲染为正文。
+    expect(screen.queryByText(/thinking_tokens/)).toBeNull();
+  });
+
+  it("无 thinking_tokens 行的轮不渲染 token 徽标", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeLog({
+        id: "l-inj",
+        channel: "user_input",
+        content_redacted: "@小码 看看这个",
+      }),
+      makeLog({
+        id: "l-out",
+        channel: "stdout",
+        content_redacted: "[ASSISTANT] 收到",
+      }),
+    ]);
+    renderViewer();
+    expect(await screen.findByText("@小码 看看这个")).toBeTruthy();
+    expect(screen.queryByText(/↓\d/)).toBeNull();
+  });
+});
+
+describe("ShadowSessionViewer [[GROUP]] 转发段标记", () => {
+  it("回复内 [[GROUP]]...[[/GROUP]] 段 → 「将转发到群」标签 + 剥协议标记；段外文本原样", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeLog({
+        id: "l-inj",
+        channel: "user_input",
+        content_redacted: "@小码 白屏修复了吗",
+      }),
+      makeLog({
+        id: "l-out",
+        channel: "stdout",
+        content_redacted:
+          "[ASSISTANT] [[GROUP]]\n已修复：白屏是构建产物缺失\n[[/GROUP]]\n细节我先在影子里核对",
+      }),
+    ]);
+    renderViewer();
+    await waitFor(() => {
+      const md = screen.getAllByTestId("markdown-text").map((n) => n.textContent).join("\n");
+      // 转发段：标签 + 原文（引用块前缀）+ 剥 [[GROUP]] 协议标记。
+      expect(md).toContain(GROUP_FORWARD_LABEL);
+      expect(md).toContain("已修复：白屏是构建产物缺失");
+      expect(md).not.toContain("[[GROUP]]");
+      // 段外文本原样保留。
+      expect(md).toContain("细节我先在影子里核对");
+    });
+  });
+});
+
+describe("影子直聊纯函数（parseShadowThinkingTokens / markGroupForwardText / mergeSnapshotWithLive）", () => {
+  it("parseShadowThinkingTokens：单值 / 多值取末值 / 千分位 / 非该行 → null", () => {
+    expect(parseShadowThinkingTokens("[SYSTEM:thinking_tokens] 502")).toBe(502);
+    expect(parseShadowThinkingTokens("[SYSTEM:thinking_tokens] 120 · 502")).toBe(502);
+    expect(parseShadowThinkingTokens("[SYSTEM:thinking_tokens] 1,234")).toBe(1234);
+    expect(parseShadowThinkingTokens("[ASSISTANT] 正文")).toBeNull();
+    expect(parseShadowThinkingTokens("[SYSTEM:thinking_tokens] abc")).toBeNull();
+    expect(parseShadowThinkingTokens("")).toBeNull();
+  });
+
+  it("markGroupForwardText：无标记原样返回；多行段逐行引用块前缀", () => {
+    expect(markGroupForwardText("普通回复")).toBe("普通回复");
+    const out = markGroupForwardText(
+      "[[GROUP]]\n第一行\n第二行\n[[/GROUP]]",
+    );
+    expect(out).toContain(GROUP_FORWARD_LABEL);
+    expect(out).toContain("> 第一行");
+    expect(out).toContain("> 第二行");
+    expect(out).not.toContain("[[GROUP]]");
+  });
+
+  it("mergeSnapshotWithLive：快照替换保留实时行（liveIds 命中且快照未含），按 id 去重 + 时间排序", () => {
+    const snap = makePage(1, 0); // 06:00
+    const live = makeLog({
+      id: "l-live",
+      run_id: "r-2",
+      timestamp: "2026-09-01T05:30:00Z", // 早于快照首行——排序插前
+      channel: "user_input",
+      content_redacted: "实时行",
+    });
+    const merged = mergeSnapshotWithLive(snap, [live], new Set(["l-live"]));
+    expect(merged.map((r) => r.id)).toEqual(["l-live", snap[0]!.id]);
+
+    // 快照已含同 id → 去重（实时行让位快照版本）。
+    const mergedDedup = mergeSnapshotWithLive(
+      [...snap, live],
+      [live],
+      new Set(["l-live"]),
+    );
+    expect(mergedDedup.filter((r) => r.id === "l-live")).toHaveLength(1);
+
+    // liveIds 未命中（非实时行，如搜索结果）→ 快照替换不含。
+    const mergedDrop = mergeSnapshotWithLive(snap, [live], new Set());
+    expect(mergedDrop.map((r) => r.id)).toEqual([snap[0]!.id]);
   });
 });

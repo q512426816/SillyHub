@@ -704,13 +704,17 @@ export function MemberPanel({
       )}
 
       {/* quick 影子会话查看器（antd Drawer 全宽抽屉，Portal 挂 body——320px 右栏
-          内嵌不下长时间线，CLAUDE.md 侧栏内宽内容走浮层惯例）。 */}
+          内嵌不下长时间线，CLAUDE.md 侧栏内宽内容走浮层惯例）。影子直聊 quick：
+          群主视角传 canDirectMessage（输入区 + SSE 订阅门控）。 */}
       {viewingShadow && viewingShadow.shadow_session_id && (
         <ShadowSessionViewer
           open
           onClose={() => setViewingShadow(null)}
           shadowSessionId={viewingShadow.shadow_session_id}
           memberName={viewingShadow.display_name}
+          groupId={group.id}
+          memberId={viewingShadow.id}
+          canDirectMessage={isOwner}
         />
       )}
 

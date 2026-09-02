@@ -4049,6 +4049,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/group-chats/{group_id}/members/{member_id}/direct-message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Group Member Direct Message
+         * @description 群主对成员影子会话直聊（quick 2026-09-02 影子直聊+选择性回群投影）。
+         *
+         *     纯会话注入：零群时间线/零 @ 解析/零群频道事件——直聊内容只落影子会话；
+         *     agent 回复中的 ``[[GROUP]]...[[/GROUP]]`` 段以成员群身份投影进群时间线
+         *     （投影层过滤，标记说明随注入 prompt 下发）。写=群主/workspace admin
+         *     （成员可见群但无直聊权）；影子未建 400（先群内 @ 触发懒建）。
+         */
+        post: operations["send_group_member_direct_message_api_daemon_group_chats__group_id__members__member_id__direct_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/group-chats/{group_id}/messages": {
         parameters: {
             query?: never;
@@ -14060,6 +14085,60 @@ export interface components {
             cross_mention_depth?: number | null;
             /** Context Window */
             context_window?: number | null;
+        };
+        /**
+         * GroupDirectMessageRead
+         * @description ``POST /group-chats/{gid}/members/{mid}/direct-message`` 响应（影子直聊）。
+         *
+         *     ``run_id``：即时注入/忙轮中途注入的 run；排队轮为 None（``queued=True``）。
+         *     ``carrier_run_id``：直聊载体 run——群时间线上**零日志行**（直聊内容不进群），
+         *     仅 assistant 回复中的 ``[[GROUP]]`` 转发段投影行挂本 run（run_sync 桥接段）。
+         */
+        GroupDirectMessageRead: {
+            /**
+             * Shadow Session Id
+             * Format: uuid
+             */
+            shadow_session_id: string;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Queued
+             * @default false
+             */
+            queued: boolean;
+            /**
+             * Mid Turn
+             * @default false
+             */
+            mid_turn: boolean;
+            /**
+             * Carrier Run Id
+             * Format: uuid
+             */
+            carrier_run_id: string;
+        };
+        /**
+         * GroupDirectMessageRequest
+         * @description ``POST /group-chats/{gid}/members/{mid}/direct-message`` 写体（影子直聊）。
+         *
+         *     quick 影子直聊（2026-09-02）：群主对成员影子会话的纯会话注入——不走群
+         *     消息链（零群时间线/零 @ 解析），content 只落影子会话；agent 回复中的
+         *     ``[[GROUP]]...[[/GROUP]]`` 段由投影层选择性发群（标记说明进注入 prompt）。
+         *     附件口径同 ``GroupMessageSendRequest``（D-7 豁免空 content）。
+         */
+        GroupDirectMessageRequest: {
+            /**
+             * Content
+             * @description 直聊消息原文（只进影子会话时间线）
+             * @default
+             */
+            content: string;
+            /**
+             * Attachment Ids
+             * @description 附件引用（SessionAttachment id）
+             */
+            attachment_ids?: string[];
         };
         /**
          * GroupMemberAgentConfig
@@ -30096,6 +30175,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupMemberRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_group_member_direct_message_api_daemon_group_chats__group_id__members__member_id__direct_message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupDirectMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupDirectMessageRead"];
                 };
             };
             /** @description Validation Error */

@@ -14,8 +14,8 @@ import re
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -137,7 +137,11 @@ class _GroupBridgeContext:
     - ``member_name``：身份按落库时刻快照（成员改名不回填历史投影行）；
     - ``carrier_run_id``：触发本轮的群消息载体 run（投影行 run_id 指向；
       从本 run 最近一条 user_input 日志 metadata_.source_carrier_run_id 解析，
-      task-03 注入时落、§4.4 链 id 透传同源）。
+      task-03 注入时落、§4.4 链 id 透传同源）；
+    - ``shadow_direct``（quick 2026-09-02 影子直聊）：本 run 最近 user_input
+      metadata.source=="shadow_direct" 命中——直聊轮整轮不投影（stdout 全部
+      跳过双写投影行+群频道事件），仅 assistant 回复中的 ``[[GROUP]]`` 标记段
+      例外（标记剥离只投内容，见 extract_group_broadcast_segments）。
     """
 
     group_id: uuid.UUID
@@ -145,6 +149,7 @@ class _GroupBridgeContext:
     member_name: str
     member_session_id: uuid.UUID
     carrier_run_id: uuid.UUID
+    shadow_direct: bool = False
 
 
 async def resolve_group_member_identity(
@@ -208,6 +213,21 @@ def is_group_projectable_reply(channel: str | None, content: object) -> bool:
     return _GROUP_SKILL_LINE_RE.match(text) is None
 
 
+# ── quick 影子直聊（2026-09-02）：[[GROUP]] 选择性转发标记 ────────────────────
+# 直聊轮（user_input metadata.source=="shadow_direct"）默认整轮不投影；agent
+# 按 prompt 头指引在回复中用 [[GROUP]]...[[/GROUP]] 包裹要转发的段落——投影层
+# 仅抽该段生成投影行（标记剥离只投内容；同轮多段各成一行、保序）。标记原文
+# 保留在影子会话 stdout 原文（会话内显示完整含标记）；未闭合标记不匹配（不
+# 转发半截）。标记词与 daemon/group/service.py _SHADOW_DIRECT_HEADER 中的
+# 说明逐字节一致（[[GROUP]] / [[/GROUP]]，大小写敏感）。
+_GROUP_BROADCAST_MARKER_RE = re.compile(r"\[\[GROUP\]\](.*?)\[\[/GROUP\]\]", re.DOTALL)
+
+
+def extract_group_broadcast_segments(text: str) -> list[str]:
+    """抽 assistant 文本中的 ``[[GROUP]]...[[/GROUP]]`` 转发段（保序、去空白）。"""
+    return [m.strip() for m in _GROUP_BROADCAST_MARKER_RE.findall(text) if m.strip()]
+
+
 # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
 # Redis publish 从 RunSyncService.submit_messages 迁出到 router（DB session 已
 # commit、连接归还后再发），避免 Redis 卡死永久占用 DB 连接池 slot（线上
@@ -249,6 +269,14 @@ class PublishIntent:
     member_name: str | None = None
     member_session_id: uuid.UUID | None = None
     projection_log_id: str | None = None
+    # ── quick 影子直聊（2026-09-02）：直聊轮投影模式 ──
+    # shadow_direct=True（本轮 user_input metadata.source=="shadow_direct"）时
+    # publish 群分支不走 published_logs 扫描（直聊 stdout 零投影、override 令箭
+    # 不发——partial 从未投影无渲染可撤），只发 group_projection_events 里的
+    # [[GROUP]] 转发段事件：每段一项（{"log_id": 投影行 id, "content": 段文本,
+    # "timestamp": iso}），与投影行一一对应。
+    shadow_direct: bool = False
+    group_projection_events: list[dict] = field(default_factory=list)
 
 
 class SubmittedMessages(int):
@@ -414,6 +442,29 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
         redis = get_redis()
         group_channel = f"agent_session:{intent.group_id}"
         pipe = redis.pipeline()
+        # quick 影子直聊（2026-09-02）：直聊轮只发 [[GROUP]] 转发段事件（每段一条
+        # log 事件、log_id=投影行 id、成员身份照常）；其余 stdout 零投影——partial/
+        # override 令箭不发（partial 从未投影、无渲染可撤）。
+        if intent.shadow_direct:
+            for seg_event in intent.group_projection_events:
+                direct_payload: dict = {
+                    "event": "log",
+                    "session_id": str(intent.group_id),
+                    "run_id": str(intent.agent_run_id),
+                    "log_id": seg_event["log_id"],
+                    "channel": "stdout",
+                    "content": seg_event["content"],
+                    "timestamp": seg_event["timestamp"],
+                    "segment_id": None,
+                    "stale": None,
+                    # 成员身份（design §6.2 envelope 扩展）——群 UI 据此分色/归属。
+                    "member_id": str(intent.member_id),
+                    "member_name": intent.member_name,
+                    "member_session_id": str(intent.member_session_id),
+                }
+                pipe.publish(group_channel, json.dumps(direct_payload, default=str))
+            await pipe.execute()
+            return
         for log_payload in intent.published_logs:
             projection_log_id = log_payload.get("projection_log_id")
             content = log_payload.get("content")
@@ -659,12 +710,18 @@ class RunSyncService:
                 shadow_session_id=str(agent_run.agent_session_id),
             )
             return None
+        # quick 影子直聊（2026-09-02）：source=="shadow_direct" 标记直聊轮——
+        # 整轮不投影，仅 [[GROUP]] 段例外（投影分支消费本标志）。
+        shadow_direct = (
+            turn_meta.get("source") == "shadow_direct" if isinstance(turn_meta, dict) else False
+        )
         return _GroupBridgeContext(
             group_id=group_id,
             member_id=member_id,
             member_name=member_name,
             member_session_id=agent_run.agent_session_id,
             carrier_run_id=carrier_run_id,
+            shadow_direct=shadow_direct,
         )
 
     @staticmethod
@@ -673,6 +730,8 @@ class RunSyncService:
         *,
         source_row: AgentRunLog,
         dedup_key: str | None,
+        content_override: str | None = None,
+        timestamp_override: datetime | None = None,
     ) -> AgentRunLog:
         """构造群时间线投影行（调用方 add 进同一事务；design §5.2 双写细则）。
 
@@ -683,14 +742,24 @@ class RunSyncService:
         - ``segment_id`` 原值透传（partial 半截行语义保留，override 按此列 DELETE）；
         - ``metadata_``：成员身份快照（member_name 按落库时刻，改名不回填）+
           source_log_id（溯源影子行）+ projection 标记（群摘要/回放行源判别，
-          §4.2 ``channel='stdout' AND metadata IS NOT NULL`` 同口径）。
+          §4.2 ``channel='stdout' AND metadata IS NOT NULL`` 同口径）；
+        - ``content_override``（quick 2026-09-02 影子直聊）：[[GROUP]] 转发段的
+          投影正文（标记剥离只投内容；影子行原文含标记不受影响）。携带时
+          ``dedup_key`` 必须传 None——同源多段共享 dedup_key 会撞载体 run 的
+          (run_id, dedup_key) 部分唯一索引；
+        - ``timestamp_override``：多段投影的保序微调（同源多段同 timestamp 下
+          时间线排序退化到随机 id——逐段 +1µs 保证段序稳定）。
         """
         return AgentRunLog(
             id=uuid.uuid4(),
             run_id=ctx.carrier_run_id,
-            timestamp=source_row.timestamp,
+            timestamp=timestamp_override
+            if timestamp_override is not None
+            else source_row.timestamp,
             channel="stdout",
-            content_redacted=source_row.content_redacted,
+            content_redacted=content_override
+            if content_override is not None
+            else source_row.content_redacted,
             dedup_key=dedup_key,
             segment_id=source_row.segment_id,
             metadata_={
@@ -921,6 +990,9 @@ class RunSyncService:
         # 调用最后一条投影行 id（PublishIntent 快照标量）。
         flushed_projection_partials: dict[str, AgentRunLog] = {}
         last_projection_log_id: str | None = None
+        # quick 影子直聊（2026-09-02）：[[GROUP]] 转发段的群频道事件（每段一项，
+        # 与投影行一一对应；timestamp 口径与 published_logs 同款 Z 后缀 ISO）。
+        group_projection_events: list[dict] = []
         # 冷启动反查未命中集合（本次调用局部）：同一 parent_tool_use_id 的多行
         # 只查一次 DB；不做跨调用负缓存——派发行迟到时后续调用反查仍可成功
         # （design §5 P2.2），失败行保持当前 run_id 兜底。
@@ -1345,17 +1417,46 @@ class RunSyncService:
                 and effective_run_id == agent_run_id
                 and is_group_projectable_reply(channel, content)
             ):
-                projection_row = self._build_group_projection_row(
-                    group_bridge,
-                    source_row=log_entry,
-                    dedup_key=dedup_key,
-                )
-                self._session.add(projection_row)
-                published_logs[-1]["projection_log_id"] = str(projection_row.id)
-                last_projection_log_id = str(projection_row.id)
-                if log_entry.segment_id:
-                    # partial 半截行：同调用内 override/完整行到达时 expunge 回退。
-                    flushed_projection_partials[log_entry.segment_id] = projection_row
+                if group_bridge.shadow_direct:
+                    # quick 影子直聊（2026-09-02）：整轮不投影——直聊内容只留影子
+                    # 会话；仅完整 assistant 文本中的 [[GROUP]] 段例外（每段一行
+                    # 投影、保序、标记剥离；dedup_key=None——同源多段共享会撞
+                    # 载体 run 的 (run_id, dedup_key) 部分唯一索引）。partial 半截
+                    # 行不解析：标记可能被流式截断，完整行到达时统一抽段，免半截
+                    # 投影+撤回抖动（直聊 partial 也因此从不投影，override 侧
+                    # _revoke_committed_partials 为 no-op）。
+                    if not log_entry.segment_id and isinstance(content, str):
+                        for seg_idx, seg_text in enumerate(
+                            extract_group_broadcast_segments(content)
+                        ):
+                            projection_row = self._build_group_projection_row(
+                                group_bridge,
+                                source_row=log_entry,
+                                dedup_key=None,
+                                content_override=seg_text,
+                                timestamp_override=now + timedelta(microseconds=seg_idx),
+                            )
+                            self._session.add(projection_row)
+                            group_projection_events.append(
+                                {
+                                    "log_id": str(projection_row.id),
+                                    "content": seg_text,
+                                    "timestamp": now.isoformat().replace("+00:00", "Z"),
+                                }
+                            )
+                            last_projection_log_id = str(projection_row.id)
+                else:
+                    projection_row = self._build_group_projection_row(
+                        group_bridge,
+                        source_row=log_entry,
+                        dedup_key=dedup_key,
+                    )
+                    self._session.add(projection_row)
+                    published_logs[-1]["projection_log_id"] = str(projection_row.id)
+                    last_projection_log_id = str(projection_row.id)
+                    if log_entry.segment_id:
+                        # partial 半截行：同调用内 override/完整行到达时 expunge 回退。
+                        flushed_projection_partials[log_entry.segment_id] = projection_row
 
             # 登记本 segment 的状态：
             # - partial 行：记入 flushed_partials，等完整行到达时回退。
@@ -1627,6 +1728,9 @@ class RunSyncService:
                     group_bridge.member_session_id if group_bridge is not None else None
                 ),
                 projection_log_id=last_projection_log_id,
+                # quick 影子直聊：直聊投影模式 + [[GROUP]] 段事件（群分支消费）。
+                shadow_direct=group_bridge.shadow_direct if group_bridge is not None else False,
+                group_projection_events=group_projection_events,
             ),
         )
 
