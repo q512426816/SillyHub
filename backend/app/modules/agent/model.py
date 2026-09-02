@@ -1187,8 +1187,8 @@ class AgentGroupChat(BaseModel, table=True):
     )
     # 协作链深度上限（§4.4 防环护栏 1，默认 2；达深度不再触发只作纯文本）。
     cross_mention_depth: int = Field(
-        default=2,
-        sa_column=Column(Integer, nullable=False, default=2),
+        default=4,
+        sa_column=Column(Integer, nullable=False, default=4),
     )
     # 群背景摘要条数（§4.2，默认 20——触发成员时查群时间线最近 N 条）。
     context_window: int = Field(

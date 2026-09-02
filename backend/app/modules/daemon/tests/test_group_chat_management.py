@@ -340,7 +340,7 @@ class TestCreateGroupChat:
         assert data["workspace_id"] == str(env.ws.id)
         assert data["created_by"] == str(env.owner.id)
         assert data["agent_cross_mention"] is True
-        assert data["cross_mention_depth"] == 2
+        assert data["cross_mention_depth"] == 4
         assert data["context_window"] == 20
         assert data["ended_at"] is None
         # 成员：建群者（自动成员行）+ 受邀用户 + agent 成员。

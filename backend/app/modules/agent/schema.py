@@ -373,7 +373,7 @@ class GroupChatCreate(BaseModel):
     workspace_id: uuid.UUID
     agent_cross_mention: bool = Field(default=True, description="agent 互@协作开关（默认开）")
     cross_mention_depth: int = Field(
-        default=2, ge=1, le=8, description="协作链深度上限（防环护栏）"
+        default=4, ge=1, le=8, description="协作链深度上限（防环护栏）"
     )
     context_window: int = Field(default=20, ge=1, le=100, description="群背景摘要条数")
     user_members: list[GroupMemberUserCreate] = Field(default_factory=list)

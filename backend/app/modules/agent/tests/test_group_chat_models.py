@@ -462,7 +462,7 @@ def test_agent_group_chat_defaults() -> None:
         created_by=uuid.uuid4(),
     )
     assert group.agent_cross_mention is True
-    assert group.cross_mention_depth == 2
+    assert group.cross_mention_depth == 4
     assert group.context_window == 20
     assert group.settings_json is None
     assert group.ended_at is None
@@ -621,7 +621,7 @@ async def test_orm_group_models_round_trip(db_session) -> None:
     fresh = await db_session.get(AgentGroupChat, group.id)
     assert fresh is not None
     assert fresh.agent_cross_mention is True
-    assert fresh.cross_mention_depth == 2
+    assert fresh.cross_mention_depth == 4
     assert fresh.context_window == 20
 
 

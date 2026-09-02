@@ -172,8 +172,12 @@ GROUP_CHAIN_TTL_SECONDS = 30 * 60
 # 限频滑动窗口（60s）与窗口内被触发上限（design §9.3 首版保守值 6）。
 GROUP_RATE_WINDOW_SECONDS = 60
 GROUP_RATE_LIMIT_PER_MINUTE = 6
-# 链 Hash 内深度计数字段名（其余 field=成员 id → 1，链内已触发成员去重集）。
+# 链 Hash 内深度计数字段名（其余 field=成员 id → 互@触发次数计数）。
 GROUP_CHAIN_DEPTH_FIELD = "depth"
+# 同链同成员互@触发上限（ql-20260902 讨论场景修复：直接触发占位计数 0 不占名额，
+# 互@每触发一次 HINCRBY；达上限不再触发——防 A↔B 快速死循环的第一道兜底，
+# 总跳数仍由 cross_mention_depth 与限频控制）。
+GROUP_CROSS_MEMBER_TRIGGER_LIMIT = 2
 
 
 def group_chain_key(carrier_run_id: uuid.UUID) -> str:
@@ -350,7 +354,10 @@ async def _register_chain_members(
         for member_id in member_ids:
             # redis-py 7.x stubs 对部分命令返回 Awaitable|T union（运行时恒为
             # coroutine），逐调用精确 ignore misc。
-            await redis.hsetnx(key, str(member_id), "1")  # type: ignore[misc]
+            # 直接触发仅占位计数 0（ql-20260902 讨论场景修复：用户 @ 的成员是
+            # "链内首批"，不占互@去重名额——否则"你们俩讨论下"这类同时 @ 多人
+            # 的消息会让后续互@全被去重、讨论一轮即断）。
+            await redis.hsetnx(key, str(member_id), "0")  # type: ignore[misc]
         await redis.expire(key, GROUP_CHAIN_TTL_SECONDS)
     except Exception:
         log.warning(
@@ -517,9 +524,18 @@ async def run_cross_mention_detection(
                 count=rate_count,
             )
             continue
-        # ── 护栏 2：同链同成员去重（HSETNX=0 即已触发过）─────────────────────
-        added = await redis.hsetnx(chain_key, str(target.id), "1")  # type: ignore[misc]
-        if not added:
+        # ── 护栏 2：同链同成员互@次数上限（HINCRBY 计数，超上限跳过）────────
+        # ql-20260902 讨论场景修复：直接触发占位 0 不占名额，互@每次 +1；
+        # 同一成员最多被互@触发 GROUP_CROSS_MEMBER_TRIGGER_LIMIT 次。
+        member_triggers = int(await redis.hincrby(chain_key, str(target.id), 1))  # type: ignore[misc]
+        if member_triggers > GROUP_CROSS_MEMBER_TRIGGER_LIMIT:
+            log.info(
+                "group_cross_mention_member_capped",
+                group_id=str(group.id),
+                carrier_run_id=str(carrier_run_id),
+                target_member_id=str(target.id),
+                triggers=member_triggers,
+            )
             continue
         # 深度 +1（本次互@跳数；DB 侧领先时先对齐再计数）并刷新链 TTL。
         if redis_depth < base_depth:

@@ -696,21 +696,45 @@ class TestCrossMentionOrchestration:
         assert triggered == []
         inject_mock.assert_not_called()
 
-    async def test_same_chain_member_dedup(
+    async def test_same_chain_member_trigger_cap(
         self,
         db_session: AsyncSession,
         fake_group_redis: _FakeRedis,
     ) -> None:
-        """同链同成员最多触发一次：目标已在去重集 → 跳过。"""
+        """同链同成员互@计数达上限（预置 2 次）→ 第 3 次跳过。
+
+        ql-20260902 讨论场景修复后的语义：去重不是"一次即止"，而是互@触发
+        计数上限 GROUP_CROSS_MEMBER_TRIGGER_LIMIT=2（防 A↔B 死循环兜底）。
+        """
         seeded = await _seed_detection_env(db_session)
-        await fake_group_redis.hsetnx(
-            group_chain_key(seeded.carrier.id), str(seeded.target_member.id), "1"
+        await fake_group_redis.hset(
+            group_chain_key(seeded.carrier.id), str(seeded.target_member.id), "2"
         )
         service_cls, inject_mock = _mock_session_service()
         with mock_patch("app.modules.daemon.group.service.SessionService", service_cls):
             triggered = await _run_detection(db_session, seeded)
         assert triggered == []
         inject_mock.assert_not_called()
+
+    async def test_direct_trigger_not_counted_for_cross_mention(
+        self,
+        db_session: AsyncSession,
+        fake_group_redis: _FakeRedis,
+    ) -> None:
+        """直接触发（占位 0）不占互@名额：用户 @ 双人讨论场景可继续互@转交。
+
+        silly大家庭 真实场景回归：用户消息同时 @A@B（直接触发登记计数 0），
+        A 的回复 @B 时 B 仍可被互@触发（计数 1 ≤ 上限）——讨论不被去重掐断。
+        """
+        seeded = await _seed_detection_env(db_session)
+        await fake_group_redis.hsetnx(
+            group_chain_key(seeded.carrier.id), str(seeded.target_member.id), "0"
+        )
+        service_cls, inject_mock = _mock_session_service()
+        with mock_patch("app.modules.daemon.group.service.SessionService", service_cls):
+            triggered = await _run_detection(db_session, seeded)
+        assert len(triggered) == 1, "直接触发占位 0 不应拦截互@触发"
+        inject_mock.assert_called_once()
 
     async def test_rate_limit_publishes_system_notice(
         self,
