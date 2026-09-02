@@ -75,13 +75,24 @@ class GroupChatDetailRead(GroupChatRead):
 
 
 class GroupMessageSendRequest(BaseModel):
-    """``POST /group-chats/{id}/messages`` 写体（design §4.1）。
+    """``POST /group-chats/{id}/messages`` 写体（design §4.1；FR-05 补遗扩附件）。
 
     schema.py 不在本卡 allowed_paths——请求体随 router 落地（service 响应体在
     group/service.py，``GroupChatListItemRead`` 本文件先例）。
+
+    附件口径照单聊 ``SessionInjectRequest``（2026-08-20-session-multimodal-
+    attachments）：``attachment_ids`` 为上传端点（POST /daemon/session-
+    attachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时
+    ``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
+    service，DTO 层总量兜底）。
     """
 
-    content: str = Field(min_length=1, max_length=8000, description="消息原文（含 @提及）")
+    content: str = Field(
+        default="", max_length=8000, description="消息原文（含 @提及）；携带附件时可空"
+    )
+    attachment_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=10, description="附件引用（SessionAttachment id）"
+    )
 
 
 class GroupTypingRequest(BaseModel):
@@ -240,9 +251,15 @@ async def send_group_message(
     """发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。
 
     未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员；触发
-    成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1 权限表）。
+    成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1）。附件随消息落
+    user_input metadata 摘要并在触发成员时随注入下发（FR-05 补遗）。
     """
-    return await GroupChatService(session).send_group_message(group_id, user, payload.content)
+    return await GroupChatService(session).send_group_message(
+        group_id,
+        user,
+        payload.content,
+        attachment_ids=payload.attachment_ids or None,
+    )
 
 
 # ── typing（task-06，design §5.4）────────────────────────────────────────────

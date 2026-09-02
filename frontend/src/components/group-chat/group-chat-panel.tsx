@@ -55,7 +55,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { SendHorizontal, Users } from "lucide-react";
+import { FileText, Image as ImageIcon, Paperclip, RefreshCw, SendHorizontal, Users, X } from "lucide-react";
 
 import { MemberPanel } from "@/components/group-chat/member-panel";
 import {
@@ -64,9 +64,15 @@ import {
   filterMentionItems,
   handleMentionKeyDown,
 } from "@/components/daemon/session-mention-popover";
+import { AttachmentChips } from "@/components/daemon/attachment-chips";
 import { classifySessionLog } from "@/components/daemon/session-log-assembler";
 import { applyMentionPick, detectMention } from "@/lib/session-mention";
 import { errMessage, useNotify } from "@/lib/errors";
+import {
+  removeSessionAttachment,
+  uploadSessionAttachment,
+  type AttachmentRead,
+} from "@/lib/api/session-attachments";
 import {
   PROVIDER_META,
   getAgentSessionLogs,
@@ -78,6 +84,7 @@ import {
   streamGroupChat,
   type GroupChatListItemRead,
   type GroupChatStreamEnvelope,
+  type GroupMessageAttachmentSummary,
   type GroupReplayLogEntry,
 } from "@/lib/daemon";
 import { useSession } from "@/stores/session";
@@ -133,6 +140,25 @@ function formatTime(ts: string): string {
   });
 }
 
+/** 附件大小展示（单聊 session-input-bar formatBytes 同口径）。 */
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}MB`;
+  return `${Math.max(1, Math.round(n / 1024))}KB`;
+}
+
+/** FR-05 补遗：附件摘要 → AttachmentChips 消费形态（kind 未知值按 file 降级）。 */
+function summaryToChips(items: GroupMessageAttachmentSummary[]): {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+}[] {
+  return items.map((a) => ({
+    id: a.file_id,
+    kind: a.kind === "image" ? "image" : "file",
+    name: a.name,
+  }));
+}
+
 /* ────────────────────── 平铺时间线纯数据模型（单测推理面） ────────────────────── */
 
 /**
@@ -151,6 +177,8 @@ export type GroupTimelineEntry =
       content: string;
       /** 当前用户消息（右对齐 self 气泡样式）。 */
       isSelf: boolean;
+      /** FR-05 补遗：随消息发送的附件摘要（metadata/log 事件 attachments；无附件 null）。 */
+      attachments: GroupMessageAttachmentSummary[] | null;
     }
   | {
       kind: "agent";
@@ -216,6 +244,8 @@ export function entryFromReplayLog(
       // 当前用户判定（sender_user_id 缺省的旧行恒非 self，右侧样式只属本人）。
       isSelf:
         currentUserId != null && senderUserId != null && senderUserId === currentUserId,
+      // FR-05 补遗：附件摘要（旧行/无附件缺省 null——附件条不渲染）。
+      attachments: meta?.attachments ?? null,
     };
   }
   if (log.channel !== "stdout") return null;
@@ -267,6 +297,8 @@ export function parseGroupLiveLog(
           currentUserId != null &&
           senderUserId != null &&
           senderUserId === currentUserId,
+        // FR-05 补遗：附件摘要（实时事件 payload；无附件缺省不渲染）。
+        attachments: env.attachments ?? null,
       },
     };
   }
@@ -665,10 +697,17 @@ export function GroupChatPanel({
     if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [entries, typingMap]);
 
-  /* ── 输入区：草稿 / @补全 / typing 上报 / 发送 ── */
+  /* ── 输入区：草稿 / @补全 / typing 上报 / 发送 / 附件（FR-05 补遗） ── */
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  /* 附件流（照单聊 session-input-bar task-12 管线）：📎 选文件即传（复用
+   * 上传端点产出 AttachmentRead）、chips 预览可删、发送随消息提交、成功后
+   * 仅清本地列表（附件已随载体绑定群会话，服务端不删）。 */
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const mentionItems = useMemo(() => buildMemberMentionItems(members), [members]);
   const mentionDetection = useMemo(
     () => detectMention(draft, inputRef.current?.selectionStart ?? draft.length),
@@ -752,28 +791,65 @@ export function GroupChatPanel({
     }
   }, [draft]);
 
+  /** 附件上传（单聊 handleFiles 同管线：逐文件上传，失败 toast 不中断其余）。 */
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadError(null);
+    for (const file of Array.from(files).slice(0, 10)) {
+      const kind = file.type.startsWith("image/") ? "image" : "file";
+      setUploading((n) => n + 1);
+      try {
+        const added = await uploadSessionAttachment(file, kind);
+        setPendingAttachments((prev) => [...prev, added]);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : "上传失败");
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  /** 移除待发附件（草稿行服务端同步删；发送后清理不走此处——行已绑定群会话）。 */
+  const handleRemoveAttachment = async (att: AttachmentRead) => {
+    setPendingAttachments((prev) => prev.filter((a) => a.id !== att.id));
+    try {
+      await removeSessionAttachment(att.id);
+    } catch {
+      /* 行已在本地移除；服务端残留由 48h 草稿清理兜底 */
+    }
+  };
+
   const handleSend = useCallback(async () => {
     const content = draft.trim();
-    if (!content || sending) return;
+    const attachmentIds = pendingAttachments.map((a) => a.id);
+    if ((!content && attachmentIds.length === 0) || sending) return;
     setSending(true);
     // 发送即收口 typing（停顿指示器 + 心跳）。
     stopTypingReport();
     typingLastSentRef.current = 0;
     void sendGroupTyping(groupId, { typing: false }).catch(() => {});
     try {
-      await sendGroupMessage(groupId, content);
+      await sendGroupMessage(
+        groupId,
+        content,
+        attachmentIds.length > 0 ? attachmentIds : undefined,
+      );
       setDraft("");
+      setPendingAttachments([]);
+      setUploadError(null);
       // 发送成功主动对账一次（未 @ 消息无成员轮次，SSE log 事件丢失时兜回显）。
       streamConnRef.current?.resync?.();
     } catch (err) {
       // 队列满（HTTP_409_DAEMON_SESSION_QUEUE_FULL）等业务错误：消息可能已落
-      // 时间线（design §4.1 失败语义）——提示原文，时间线以对账回显为准。
+      // 时间线（design §4.1 失败语义）——提示原文，时间线以对账回显为准；
+      // 附件与草稿保留供重发。
       notify.error(errMessage(err, "发送失败，请稍后重试"));
     } finally {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [draft, sending, groupId, notify, stopTypingReport]);
+  }, [draft, sending, groupId, pendingAttachments, notify, stopTypingReport]);
 
   const handleInputKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     // IME 组合期不劫持（联想浮层键盘契约前置守卫）。
@@ -992,6 +1068,57 @@ export function GroupChatPanel({
             />
           )}
           <div className="rounded-xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-primary focus-within:shadow-primary">
+            {/* 待发附件 chips（FR-05 补遗，单聊 session-input-bar 同形态）。 */}
+            {(pendingAttachments.length > 0 || uploading > 0 || uploadError) && (
+              <div className="space-y-1.5 px-3 pt-2.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {pendingAttachments.map((att) => (
+                    <span
+                      key={att.id}
+                      data-testid="group-pending-attachment-chip"
+                      className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
+                      title={`${att.name} · ${formatBytes(att.bytes)}`}
+                    >
+                      <span className="inline-flex shrink-0 items-center gap-1 truncate">
+                        {att.kind === "image" ? (
+                          <ImageIcon aria-hidden className="h-3 w-3" />
+                        ) : (
+                          <FileText aria-hidden className="h-3 w-3" />
+                        )}
+                        <span className="truncate">{att.name}</span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {formatBytes(att.bytes)}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`移除附件 ${att.name}`}
+                        onClick={() => void handleRemoveAttachment(att)}
+                        className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {uploading > 0 && (
+                    <span className="flex items-center gap-1 rounded border border-input px-2 py-1 text-[11px] text-muted-foreground">
+                      <RefreshCw className="h-3 w-3 animate-spin" /> 上传中…（{uploading}）
+                    </span>
+                  )}
+                </div>
+                {uploadError && (
+                  <p className="text-[11px] text-destructive">{uploadError}</p>
+                )}
+              </div>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              hidden
+              aria-label="选择群消息附件"
+              onChange={(e) => void handleFiles(e.target.files)}
+            />
             <textarea
               ref={inputRef}
               value={draft}
@@ -1000,9 +1127,26 @@ export function GroupChatPanel({
               placeholder="发送消息，@昵称 唤起指定 Agent，@全体 通知所有 Agent…"
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleInputKeyDown}
+              onPaste={(e) => {
+                // 剪贴板带文件（截图等）→ 与 📎 同上传管线（单聊同口径）。
+                const files = e.clipboardData?.files;
+                if (!files || files.length === 0) return;
+                e.preventDefault();
+                void handleFiles(files);
+              }}
               className="max-h-[120px] min-h-[44px] w-full resize-none border-none bg-transparent px-3.5 py-2.5 text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70"
             />
             <div className="flex items-center gap-2 px-2.5 pb-2 pt-1">
+              <button
+                type="button"
+                aria-label="添加附件"
+                title="添加图片/文件附件，支持 Ctrl+V 直接粘贴"
+                disabled={sending}
+                onClick={() => fileRef.current?.click()}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Paperclip aria-hidden className="h-4 w-4" />
+              </button>
               <p className="text-[11px] text-muted-foreground/80">
                 Enter 发送 · Shift+Enter 换行 · 输入 @ 提及成员
               </p>
@@ -1010,7 +1154,7 @@ export function GroupChatPanel({
               <button
                 type="button"
                 aria-label="发送群消息"
-                disabled={sending || !draft.trim()}
+                disabled={sending || (!draft.trim() && pendingAttachments.length === 0)}
                 onClick={() => void handleSend()}
                 className="inline-flex items-center gap-1 rounded-full bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1077,6 +1221,7 @@ function GroupTimelineRow({
   }
 
   if (entry.kind === "user") {
+    const chips = entry.attachments ? summaryToChips(entry.attachments) : [];
     return (
       <div
         data-testid="group-msg-user"
@@ -1109,16 +1254,23 @@ function GroupTimelineRow({
             </span>
             <span>{formatTime(entry.timestamp)}</span>
           </div>
-          <div
-            className={cn(
-              "whitespace-pre-wrap break-words rounded-xl border px-3 py-2 text-[13.5px] shadow-sm",
-              entry.isSelf
-                ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-foreground",
-            )}
-          >
-            {renderMentionHighlights(entry.content, memberNames, entry.isSelf)}
-          </div>
+          {/* FR-05 补遗：附件条（气泡下方，单聊 AttachmentChips 惯例——图片
+              缩略图/文件 chip 点击在线预览；self 右对齐、他人左对齐）。 */}
+          {chips.length > 0 && (
+            <AttachmentChips attachments={chips} align={entry.isSelf ? "end" : "start"} />
+          )}
+          {entry.content ? (
+            <div
+              className={cn(
+                "whitespace-pre-wrap break-words rounded-xl border px-3 py-2 text-[13.5px] shadow-sm",
+                entry.isSelf
+                  ? "rounded-br-sm border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-foreground",
+              )}
+            >
+              {renderMentionHighlights(entry.content, memberNames, entry.isSelf)}
+            </div>
+          ) : null}
         </div>
       </div>
     );

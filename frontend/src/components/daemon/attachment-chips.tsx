@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { FileText, ImageIcon } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { fetchAttachmentObjectUrl, fetchAttachmentBlob } from "@/lib/api/session-attachments";
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import type { ParsedAttachmentMarker } from "@/components/daemon/runtime-session-helpers";
@@ -72,8 +73,11 @@ function AttachmentImageChip({
 
 export function AttachmentChips({
   attachments,
+  align = "end",
 }: {
   attachments: ParsedAttachmentMarker[];
+  /** chips 行主轴对齐（单聊用户气泡右对齐缺省；群聊非 self 气泡传 start）。 */
+  align?: "start" | "end";
 }) {
   const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -91,7 +95,12 @@ export function AttachmentChips({
   if (attachments.length === 0) return null;
   return (
     <>
-      <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
+      <div
+        className={cn(
+          "mb-1.5 flex flex-wrap gap-1.5",
+          align === "end" ? "justify-end" : "justify-start",
+        )}
+      >
         {attachments.map((att) =>
           att.kind === "image" ? (
             <AttachmentImageChip

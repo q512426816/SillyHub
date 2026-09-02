@@ -638,12 +638,18 @@ def _build_group_prompt(
     sender_member_name: str,
     content: str,
     source_member_name: str | None = None,
+    attachment_lines: Sequence[str] | None = None,
 ) -> str:
     """影子会话注入 prompt 组装（design §4.3：简报 + 群背景摘要 + 当前消息）。
 
     ``source_member_name``（task-04 互@协作消费）：非 None 表示当前消息来自
     Agent 成员的协作请求——当前消息行身份标签用 ``{source}(Agent)`` 且段头
     标注「来自 Agent 成员的协作请求」（design §4.4），否则 ``{sender}(用户)``。
+
+    ``attachment_lines``（FR-05 补遗）：用户随消息发送的附件提示行
+    （``[附件] name (file_id)`` 逐附件一条）——附 prompt 末尾提示 agent 可读
+    （实际下发走 SESSION_INJECT attachments 通道：多模态块内联 / 磁盘落盘，
+    与单聊同管线）；互@轮不携带（agent 消息无附件）。
     """
     briefing = (
         f"你是群聊「{group.title}」中的 Agent 成员「{member.display_name}」。"
@@ -665,7 +671,25 @@ def _build_group_prompt(
         else "[当前消息 · 需要你回应]"
     )
     parts.append(current_header + "\n" + f"{sender_label}: {content}")
+    if attachment_lines:
+        parts.append(
+            "[当前消息附件 · 用户随消息发送，可直接读取参考]\n" + "\n".join(attachment_lines)
+        )
     return "\n\n".join(parts)
+
+
+def _attachment_summary_rows(rows: Sequence) -> list[dict[str, object]]:
+    """附件行 → 时间线摘要（file_id/name/size/kind）。
+
+    user_input 行 ``metadata_.attachments`` 与群频道 log 事件 payload 共用同一
+    形态（前端 SSE 实时行与回放行消费同一结构）；kind 供前端区分图标。
+    """
+    return [{"file_id": str(r.id), "name": r.name, "size": r.bytes, "kind": r.kind} for r in rows]
+
+
+def _attachment_prompt_lines(rows: Sequence) -> list[str]:
+    """附件行 → agent prompt 提示行（``[附件] name (file_id)`` 逐附件一条）。"""
+    return [f"[附件] {r.name} ({r.id})" for r in rows]
 
 
 async def _publish_group_channel_event(session_id: uuid.UUID, payload: dict[str, object]) -> None:
@@ -2028,17 +2052,24 @@ class GroupChatService:
     # ── 群消息与 @触发管线（task-03，design §4.1-4.3 / §8）──────────────────
 
     async def send_group_message(
-        self, group_id: uuid.UUID, user: User, content: str
+        self,
+        group_id: uuid.UUID,
+        user: User,
+        content: str,
+        attachment_ids: list[uuid.UUID] | None = None,
     ) -> GroupMessageSendRead:
-        """发群消息（design §4.1 步 1-6 / §8 group.message.sent）。
+        """发群消息（design §4.1 步 1-6 / §8 group.message.sent；FR-05 补遗附件）。
 
-        成员校验 → 载体 run + user_input 原文落库 → 群频道 log 事件（sender
-        身份）→ @解析 → 逐命中 agent 成员触发（懒建/注入/排队见
-        ``_trigger_group_member``）。未 @ 消息仅落时间线（进后续群背景摘要），
-        不触发任何成员。
+        成员校验 → 附件校验（发送者归属 + 数量，照单聊管线口径）→ 载体 run +
+        user_input 原文落库（metadata 带附件摘要；附件行绑定群会话防 48h 草稿
+        清理）→ 群频道 log 事件（sender 身份 + 附件摘要）→ @解析 → 逐命中
+        agent 成员触发（懒建/注入/排队见 ``_trigger_group_member``）。未 @ 消息
+        仅落时间线（进后续群背景摘要），不触发任何成员；附件随触发成员注入
+        下发（D-7 看图说话：附件非空豁免空 content）。
 
         失败语义：载体 run 与触发是两个事务——触发失败（如机器未授权 400 /
-        队列满 409）时消息已在时间线，错误照常抛出（前端可提示重发仅触发）。
+        队列满 409 / 成员引擎不支持附件 400）时消息已在时间线，错误照常抛出
+        （前端可提示重发仅触发）。
         """
         group = await self._get_group(group_id)
         membership = await self._require_group_member(group, user)
@@ -2047,12 +2078,19 @@ class GroupChatService:
                 "群已解散，无法发送消息。",
                 details={"group_id": str(group.id)},
             )
-        if not (content or "").strip():
+        if not (content or "").strip() and not attachment_ids:
             raise GroupChatInvalid("消息内容不能为空。", details={"reason": "empty_prompt"})
         # admin 兜底放行无成员行——昵称回落用户显示名。
         sender_member_name = (
             membership.display_name if membership is not None else _user_display_name(user)
         )
+
+        # ── 附件校验（发送侧：归属按发送者 + 数量；引擎门控下沉到逐成员触发）
+        #    口径照单聊 _validate_inject_attachment_rows 的归属/数量段，错误族
+        #    用群 GroupChatInvalid（400，中文文案）。
+        attachment_rows: list = []
+        if attachment_ids:
+            attachment_rows = await self._validate_group_attachments(user.id, attachment_ids)
 
         members = await self._list_active_member_rows(group.id)
 
@@ -2073,37 +2111,50 @@ class GroupChatService:
         )
         self._session.add(carrier)
         await self._session.flush()
+        # 发送者身份（§5.2）+ 附件摘要（FR-05 补遗：回放行/前端附件条数据源）。
+        user_input_metadata: dict[str, object] = {
+            "sender_user_id": str(user.id),
+            "sender_member_name": sender_member_name,
+        }
+        attachment_summary: list[dict[str, object]] = []
+        if attachment_rows:
+            # 物化：附件行绑定群载体会话（draft→bound）——群附件被多成员/时间线
+            # 共享不绑单一影子；session_id 非 NULL 即免 48h 草稿清理（cleanup.py
+            # 只删 session_id IS NULL 行），与单聊 inject 回填同一前进方向。
+            for att_row in attachment_rows:
+                if att_row.session_id is None:
+                    att_row.session_id = group.session_id
+                    self._session.add(att_row)
+            attachment_summary = _attachment_summary_rows(attachment_rows)
+            user_input_metadata["attachments"] = attachment_summary
         log_row = AgentRunLog(
             id=uuid.uuid4(),
             run_id=carrier.id,
             channel="user_input",
             content_redacted=content[:5000],  # 沿用 user_input 既有截断口径
             timestamp=now,
-            # 发送者身份（§5.2：实时事件与回放同源；摘要组装/回放还原消费）。
-            metadata_={
-                "sender_user_id": str(user.id),
-                "sender_member_name": sender_member_name,
-            },
+            metadata_=user_input_metadata,
         )
         self._session.add(log_row)
         await self._session.commit()
 
         # ── 群频道 log 事件（§4.1 步 3；payload 形态照 run_sync session channel
-        #    log 事件扩展 sender 字段，前端 SessionStreamEnvelope 消费）。
-        await _publish_group_channel_event(
-            group.session_id,
-            {
-                "event": "log",
-                "session_id": str(group.session_id),
-                "run_id": str(carrier.id),
-                "log_id": str(log_row.id),
-                "channel": "user_input",
-                "content": content,
-                "timestamp": now.isoformat(),
-                "sender_user_id": str(user.id),
-                "sender_member_name": sender_member_name,
-            },
-        )
+        #    log 事件扩展 sender 字段，前端 SessionStreamEnvelope 消费；附件
+        #    摘要与 metadata 同形态（FR-05 补遗）。
+        log_payload: dict[str, object] = {
+            "event": "log",
+            "session_id": str(group.session_id),
+            "run_id": str(carrier.id),
+            "log_id": str(log_row.id),
+            "channel": "user_input",
+            "content": content,
+            "timestamp": now.isoformat(),
+            "sender_user_id": str(user.id),
+            "sender_member_name": sender_member_name,
+        }
+        if attachment_summary:
+            log_payload["attachments"] = attachment_summary
+        await _publish_group_channel_event(group.session_id, log_payload)
 
         # ── @解析 + 触发编排（§4.1 步 4-6）。
         mentioned = _parse_group_mentions(content, members)
@@ -2137,6 +2188,7 @@ class GroupChatService:
                     content=content,
                     carrier_run_id=carrier.id,
                     exclude_log_id=log_row.id,
+                    attachment_rows=attachment_rows,
                 )
                 triggered.append(trigger)
                 # task-06（design §5.4）：影子 run 开始（即时注入/懒建首轮，非
@@ -2152,6 +2204,55 @@ class GroupChatService:
             triggered=triggered,
         )
 
+    async def _validate_group_attachments(
+        self, sender_user_id: uuid.UUID, attachment_ids: list[uuid.UUID]
+    ) -> list:
+        """群消息附件校验（归属/数量，口径照单聊 ``_validate_inject_attachment_rows``）。
+
+        与单聊差异：①引擎门控不在发送侧——群成员引擎各异，门控下沉到逐成员
+        触发时判定（``_trigger_group_member``，非 Claude 成员 → 400 群错误族）；
+        ②缺失/跨用户归一 400 GroupChatInvalid（群链路错误族语义；单聊是 404
+        资源隐藏——群侧消息整体拒绝即可，无逐会话资源语义）。保序同单聊。
+        """
+        from app.modules.session_attachment.model import SessionAttachment
+        from app.modules.session_attachment.service import (
+            MAX_FILES_PER_MESSAGE,
+            MAX_IMAGES_PER_MESSAGE,
+        )
+
+        rows = (
+            (
+                await self._session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.id.in_(attachment_ids),
+                        SessionAttachment.user_id == sender_user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(rows) != len(set(attachment_ids)):
+            raise GroupChatInvalid(
+                "部分附件不存在或无权访问。",
+                details={"reason": "attachment_not_found"},
+            )
+        image_n = sum(1 for r in rows if r.kind == "image")
+        file_n = sum(1 for r in rows if r.kind == "file")
+        if (
+            image_n > MAX_IMAGES_PER_MESSAGE
+            or file_n > MAX_FILES_PER_MESSAGE
+            or (image_n + file_n) != len(rows)
+        ):
+            raise GroupChatInvalid(
+                f"附件数量超限（图片≤{MAX_IMAGES_PER_MESSAGE}、"
+                f"文件≤{MAX_FILES_PER_MESSAGE}）或类型非法。",
+                details={"image_count": image_n, "file_count": file_n},
+            )
+        # 保留入参顺序（摘要行/注入 payload 按用户勾选顺序稳定）。
+        by_id = {r.id: r for r in rows}
+        return [by_id[i] for i in dict.fromkeys(attachment_ids) if i in by_id]
+
     async def _trigger_group_member(
         self,
         *,
@@ -2166,6 +2267,7 @@ class GroupChatService:
         exclude_log_id: uuid.UUID | None,
         source_member_name: str | None = None,
         chain_depth: int = 0,
+        attachment_rows: list | None = None,
     ) -> GroupMemberTriggerRead:
         """触发单个 agent 成员（design §4.1 步 6 / §8 member.injected）。
 
@@ -2177,7 +2279,24 @@ class GroupChatService:
         ``sender_user_id``：触发方用户 id——用户 @ 路径=实际发送者，互@路径
         （task-04）=群主（服务身份，§9.2 计量归属）；``source_member_name``/
         ``chain_depth`` 为互@协作参数（链沿用原载体 run、深度 +1）。
+
+        ``attachment_rows``（FR-05 补遗）：用户随消息发送的已校验附件行——
+        prompt 末尾附提示行 + SESSION_INJECT attachments 通道下发（多模态块
+        内联/磁盘落盘，与单聊同管线）；互@路径不携带（agent 消息无附件）。
+        非 Claude 成员引擎 → 400（单聊引擎门控 D-6 同口径，群错误族）。
         """
+        # 引擎门控（单聊 D-6 同口径：仅 Claude 支持附件）——发送侧已过归属/
+        # 数量校验并落时间线，此处 fail-loud 拒绝触发（消息保留可重发仅触发）。
+        attachment_lines: list[str] = []
+        if attachment_rows:
+            if (member.provider or "claude") != "claude":
+                raise GroupChatInvalid(
+                    f"成员「{member.display_name}」的引擎不支持附件"
+                    "（仅 Claude 支持多模态与文件注入）。",
+                    details={"member_id": str(member.id), "provider": member.provider},
+                )
+            attachment_lines = _attachment_prompt_lines(attachment_rows)
+
         context_lines = await _load_group_context_lines(
             self._session,
             group_session_id=group.session_id,
@@ -2193,6 +2312,7 @@ class GroupChatService:
             sender_member_name=sender_member_name,
             content=content,
             source_member_name=source_member_name,
+            attachment_lines=attachment_lines,
         )
         # 群链路 metadata（§4.3 注入 / §4.4 链 id 透传）：写本轮 user_input 日志
         # metadata_ 列——task-04 turn_completed 互@检测读取（排队派发的透传
@@ -2210,10 +2330,15 @@ class GroupChatService:
             turn_metadata["sender_member_kind"] = "agent"
 
         shadow, first_run_id = await self._ensure_shadow_session(
-            group, member, first_prompt=prompt, first_turn_metadata=turn_metadata
+            group,
+            member,
+            first_prompt=prompt,
+            first_turn_metadata=turn_metadata,
+            attachment_rows=attachment_rows,
         )
         if first_run_id is not None:
-            # 首次触发：懒建事务内已落首轮 run + SESSION_INJECT。
+            # 首次触发：懒建事务内已落首轮 run + SESSION_INJECT（附件 payload 在
+            # _ensure_shadow_session 内组装下发——见 _send_shadow_first_inject）。
             return GroupMemberTriggerRead(
                 member_id=member.id,
                 member_name=member.display_name,
@@ -2223,13 +2348,17 @@ class GroupChatService:
             )
 
         # 复用轮：注入共享核心（run user_id=影子属主=群主，§9.2；忙轮 → 排队，
-        # entry.sender_user_id=实际发送者）。
+        # entry.sender_user_id=实际发送者）。附件透传：attachment_ids + 归属
+        # 基准覆盖=发送者（影子属主是群主，附件上传者是发送者——按属主校验
+        # 会误拒；排队派发侧从链标记 sender_user_id 同口径推导）。
         result = await SessionService(self._session).inject_session_as_service(
             shadow.id,
             prompt=prompt,
             queue_when_busy=True,
             queue_sender_user_id=sender_user_id,
             turn_metadata=turn_metadata,
+            attachment_ids=[r.id for r in attachment_rows] if attachment_rows else None,
+            attachment_owner_user_id=sender_user_id if attachment_rows else None,
         )
         return GroupMemberTriggerRead(
             member_id=member.id,
@@ -2246,6 +2375,7 @@ class GroupChatService:
         *,
         first_prompt: str,
         first_turn_metadata: dict,
+        attachment_rows: list | None = None,
     ) -> tuple[AgentSession, uuid.UUID | None]:
         """影子会话懒建（design §4.3 / §8 shadow.created，照 worker 三件套）。
 
@@ -2472,7 +2602,13 @@ class GroupChatService:
 
         # 首轮 SESSION_INJECT（照 create_session :2080-2127）：readiness 等待后
         # 控制指令三段式下发（WS 失败落库 pending 待补拉；lease metadata prompt
-        # 为 daemon 侧兜底，不失败）。
+        # 为 daemon 侧兜底，不失败）。FR-05 补遗：附件 payload 组装（MinIO 读）
+        # 在 commit 后进行——不进写事务（单聊 P1 预组装同理由）。
+        first_inject_attachments: list[dict] = []
+        if attachment_rows:
+            first_inject_attachments = await self._assemble_group_inject_attachments(
+                attachment_rows, member=member, owner_user_id=group.created_by
+            )
         await self._send_shadow_first_inject(
             shadow_id=shadow_id,
             lease_id=dispatch.lease_id,
@@ -2480,12 +2616,47 @@ class GroupChatService:
             prompt=first_prompt,
             claim_token=dispatch.claim_token,
             runtime_id=dispatch.runtime_id,
+            inject_attachments=first_inject_attachments,
         )
         await _publish_group_channel_event(
             shadow_id,
             {"event": "turn_injected", "session_id": str(shadow_id), "run_id": str(first_run.id)},
         )
         return shadow, first_run.id
+
+    async def _assemble_group_inject_attachments(
+        self,
+        rows: list,
+        *,
+        member: AgentGroupMember,
+        owner_user_id: uuid.UUID,
+    ) -> list[dict]:
+        """群链路附件 → SESSION_INJECT payload attachments 列表（FR-05 补遗）。
+
+        口径照单聊 ``_assemble_inject_attachment_payload`` + ``_resolve_inject_gate``
+        （复用 session_attachment 组装/门控函数，单一实现不复制粘贴）：gate 基准
+        = 影子会话维度——属主=群主（``owner_user_id``，成员供应商行的归属者）、
+        会话级供应商=成员六要素 ``llm_provider_id``、引擎=成员 ``provider``。
+        组装产物（deliver=block 内联/回拉、disk 落盘）与单聊 SESSION_INJECT
+        attachments 同形态，daemon 侧零改动。
+        """
+        from app.modules.session_attachment.capability import resolve_session_gate
+        from app.modules.session_attachment.service import assemble_inject_attachments
+        from app.modules.session_attachment.storage import SessionAttachmentStorage
+        from app.modules.storage.factory import get_storage_backend
+
+        provider = member.provider or "claude"
+        gate = await resolve_session_gate(
+            self._session,
+            user_id=owner_user_id,
+            session_llm_provider_id=member.llm_provider_id,
+            agent_kind=provider,
+        )
+        return await assemble_inject_attachments(
+            rows,
+            supports_multimodal=gate.supports_multimodal,
+            storage=SessionAttachmentStorage(get_storage_backend()),
+        )
 
     async def _send_shadow_first_inject(
         self,
@@ -2496,6 +2667,7 @@ class GroupChatService:
         prompt: str,
         claim_token: str,
         runtime_id: uuid.UUID,
+        inject_attachments: list[dict] | None = None,
     ) -> None:
         """首轮 SESSION_INJECT 控制指令下发（照 ``create_session`` 尾段）。
 
@@ -2505,6 +2677,10 @@ class GroupChatService:
         待 daemon 补拉，**不让首轮触发整体失败**（lease metadata prompt 是
         daemon 侧兜底）。函数级 import 保持 patch 面与 session/service 一致
         （测试 mock ``get_session_readiness`` 于源模块生效）。
+
+        ``inject_attachments``（FR-05 补遗）：组装好的附件 payload 列表——
+        仅非空时附加（单聊 task-06 同口径：旧 daemon 忽略未知键，协议向后
+        兼容）。
         """
         from app.modules.daemon.control_commands import (
             KIND_SESSION_INJECT,
@@ -2526,18 +2702,21 @@ class GroupChatService:
                 runtime_id=str(runtime_id),
             )
             return
+        inject_payload: dict[str, object] = {
+            "session_id": str(shadow_id),
+            "lease_id": str(lease_id),
+            "run_id": str(run_id),
+            "prompt": prompt,
+            "claim_token": claim_token,
+            "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+        }
+        if inject_attachments:
+            inject_payload["attachments"] = inject_attachments
         _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
             daemon_id=daemon_id,
             runtime_id=runtime_id,
             kind=KIND_SESSION_INJECT,
-            payload={
-                "session_id": str(shadow_id),
-                "lease_id": str(lease_id),
-                "run_id": str(run_id),
-                "prompt": prompt,
-                "claim_token": claim_token,
-                "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
-            },
+            payload=inject_payload,
         )
         if not control_ok:
             log.warning(

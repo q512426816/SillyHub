@@ -3224,6 +3224,15 @@ class SessionService:
         # 当前轮结束边界 reload，下轮生效）。
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # 群聊附件（FR-05 补遗：群消息附件支持）：参数名与用户路径 inject_session
+        # 同名同形（list[uuid.UUID] 引用上传端点产出的 SessionAttachment id）。
+        # ``attachment_ids`` 非空豁免空 prompt（D-7 看图说话同口径）；引擎/归属/
+        # 数量校验与 payload 组装复用 _inject_into_session 既有管线。
+        attachment_ids: list[uuid.UUID] | None = None,
+        # 归属校验基准覆盖：群链路附件上传者是**实际发送者**（普通群成员），
+        # 而影子会话属主恒为群主（§9.2）——按属主校验会误 404。群路径传发送者
+        # id；缺省 None = 既有语义（按会话属主 session.user_id）。
+        attachment_owner_user_id: uuid.UUID | None = None,
     ) -> SessionDispatchResult:
         """Append a turn run to an active session as the **platform service** (D-006@v2).
 
@@ -3244,8 +3253,14 @@ class SessionService:
         # 与 inject_session 入口同口径——空 prompt（含全空白）→ SessionEmptyPrompt
         # 422。task-04 例外：携带切换维度（热切换静默轮）时空 prompt 合法
         # （_inject_into_session 的 config_switch 分支消费，等值+空 prompt 仍被
-        # 其内部守卫拒绝——调用方只在确有 diff 时传入）。
-        if not (prompt or "").strip() and agent_profile_id is None and llm_provider_id is None:
+        # 其内部守卫拒绝——调用方只在确有 diff 时传入）。群聊附件例外：附件
+        # 非空同样豁免空 prompt（D-7 看图说话，与用户路径一致）。
+        if (
+            not (prompt or "").strip()
+            and agent_profile_id is None
+            and llm_provider_id is None
+            and not attachment_ids
+        ):
             raise SessionEmptyPrompt(
                 "消息内容不能为空",
                 details={"reason": "empty_prompt"},
@@ -3278,6 +3293,10 @@ class SessionService:
             # 既有 service 路径零回归）。
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            # 群聊附件：透传共享核心（缺省 None 零回归——既有 service 调用方
+            # 不携带）。归属基准覆盖见 _inject_into_session 同名参数注释。
+            attachment_ids=list(attachment_ids) if attachment_ids else None,
+            attachment_owner_user_id=attachment_owner_user_id,
         )
 
     async def _ensure_session_workspace_writable(self, session: AgentSession) -> None:
@@ -3318,6 +3337,9 @@ class SessionService:
         # 2026-08-20-session-multimodal-attachments task-05：附件引用（None → 零
         # 回归）。校验（引擎门控/归属/数量）在本方法事务内；组装下发归 task-06。
         attachment_ids: list[uuid.UUID] | None = None,
+        # 群聊附件（FR-05 补遗）：归属校验基准覆盖——群影子会话属主恒为群主，
+        # 附件上传者可能是普通群成员；None = 既有语义（按 session.user_id）。
+        attachment_owner_user_id: uuid.UUID | None = None,
         # P1（2026-08-25 会话路径二审 #1）：inject_session 主路径取锁前预组装的
         # 附件产物（校验过的 rows + payload + gate 快照）；None = 调用方未预组
         # 装（service 身份路径 / 直调），走锁内原校验兜底。
@@ -3526,7 +3548,11 @@ class SessionService:
             if attachment_ids and prelocked_attachments is None:
                 validated_attachments = await self._validate_inject_attachment_rows(
                     session_id=session_id,
-                    session_user_id=session.user_id,
+                    session_user_id=(
+                        attachment_owner_user_id
+                        if attachment_owner_user_id is not None
+                        else session.user_id
+                    ),
                     session_provider=session.provider or "",
                     attachment_ids=attachment_ids,
                 )
@@ -4819,6 +4845,17 @@ class SessionService:
             # 派发注入（daemon 看到的文本与即时注入轮一致），链 metadata 写入
             # 新 run 的 user_input 日志（turn_completed 互@检测读取）。
             dispatch_prompt, chain_metadata = _split_group_chain_marker(entry.prompt or "")
+            # 群聊附件（FR-05 补遗）：群排队条目派发时的附件归属基准 = 实际
+            # 发送者（链标记 sender_user_id——仅群链路条目携带；附件在发送时
+            # 已过发送者归属校验并绑定群会话）。非群条目/无标记 → None 走会话
+            # 属主既有语义。
+            attachment_owner_user_id: uuid.UUID | None = None
+            _chain_sender = (chain_metadata or {}).get("sender_user_id")
+            if isinstance(_chain_sender, str) and _chain_sender:
+                try:
+                    attachment_owner_user_id = uuid.UUID(_chain_sender)
+                except (ValueError, AttributeError, TypeError):
+                    attachment_owner_user_id = None
 
             try:
                 await self._inject_into_session(
@@ -4828,6 +4865,7 @@ class SessionService:
                     agent_profile_id=entry.agent_profile_id,
                     llm_provider_id=entry.llm_provider_id,
                     attachment_ids=attachment_ids,
+                    attachment_owner_user_id=attachment_owner_user_id,
                     page_context=page_context,
                     turn_metadata=chain_metadata,
                 )

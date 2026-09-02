@@ -65,6 +65,8 @@ const mocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   profilesHook: vi.fn(),
   listWorkspaces: vi.fn(),
+  uploadSessionAttachment: vi.fn(),
+  removeSessionAttachment: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async (importOriginal) => {
@@ -93,6 +95,15 @@ vi.mock("@/stores/session", () => {
   useSession.getState = () => state;
   return { useSession };
 });
+
+vi.mock("@/lib/api/session-attachments", () => ({
+  // FR-05 补遗：群消息附件上传/移除 mock 断言（单聊上传端点复用）；预览拉取
+  // 恒成功占位（附件条渲染测试只断言 chip 出现，不进真实 blob 链路）。
+  uploadSessionAttachment: (...args: unknown[]) => mocks.uploadSessionAttachment(...args),
+  removeSessionAttachment: (...args: unknown[]) => mocks.removeSessionAttachment(...args),
+  fetchAttachmentObjectUrl: vi.fn(async () => "blob:attachment-preview"),
+  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
+}));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
@@ -366,6 +377,15 @@ beforeEach(() => {
   });
   mocks.listProviders.mockResolvedValue([]);
   mocks.listWorkspaces.mockResolvedValue({ items: [], total: 0 });
+  mocks.uploadSessionAttachment.mockImplementation(async (_file: File, kind: string) => ({
+    id: "att-upload-1",
+    kind,
+    media_type: "text/plain",
+    bytes: 64,
+    name: "报错日志.txt",
+    created_at: "2026-09-01T00:00:00Z",
+  }));
+  mocks.removeSessionAttachment.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -386,6 +406,7 @@ describe("平铺时间线纯函数（task-08 / D-011）", () => {
         senderUserId: "u-lin",
         content: `消息-${id}`,
         isSelf: false,
+        attachments: null,
       }) as const;
     const agent = (id: string, ts: string, memberName: string) =>
       ({
@@ -801,6 +822,8 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
       expect(mocks.sendGroupMessage).toHaveBeenCalledWith(
         "g-1",
         "@小码 帮我定位一下这个白屏问题",
+        // FR-05 补遗：无附件时第 3 参 undefined（不发 attachment_ids 键）。
+        undefined,
       ),
     );
     // 发送成功：清空输入框。
@@ -854,5 +877,162 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
     // 失败保留草稿（用户可重试）。
     await flushAsync(2);
     expect((input as HTMLTextAreaElement).value).toBe("@小码 再看一眼");
+  });
+});
+
+/* ── 6. 群消息附件（FR-05 补遗：上传 chips / 发送参数 / 时间线附件条） ────── */
+
+describe("群消息附件（FR-05 补遗）", () => {
+  /** 触发隐藏 file input 的 change（jsdom 下手工构造 FileList 形态）。 */
+  async function pickFile(name = "报错日志.txt", type = "text/plain"): Promise<void> {
+    const fileInput = screen.getByLabelText("选择群消息附件") as HTMLInputElement;
+    const file = new File(["x"], name, { type });
+    Object.defineProperty(fileInput, "files", { value: [file] });
+    await act(async () => {
+      fireEvent.change(fileInput);
+      await Promise.resolve();
+    });
+  }
+
+  it("📎 选择文件即传 → 待发 chip 展示 → 移除调 removeSessionAttachment 且 chip 消失", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() =>
+      expect(mocks.uploadSessionAttachment).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => {
+      expect(
+        screen.getAllByTestId("group-pending-attachment-chip").length,
+      ).toBe(1);
+    });
+    // chip 文案含文件名。
+    expect(screen.getByText("报错日志.txt")).toBeTruthy();
+
+    // 移除：本地 chip 消失 + 服务端草稿行同步删。
+    fireEvent.click(screen.getByLabelText("移除附件 报错日志.txt"));
+    await waitFor(() =>
+      expect(mocks.removeSessionAttachment).toHaveBeenCalledWith("att-upload-1"),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("group-pending-attachment-chip"),
+      ).toBeNull();
+    });
+  });
+
+  it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId("group-pending-attachment-chip").length,
+      ).toBe(1),
+    );
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "@小码 看下附件日志" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(mocks.sendGroupMessage).toHaveBeenCalledWith(
+        "g-1",
+        "@小码 看下附件日志",
+        ["att-upload-1"],
+      ),
+    );
+    // 发送成功：chips 清空（附件已绑定群会话，不走 removeSessionAttachment）。
+    await waitFor(() => {
+      expect(screen.queryByTestId("group-pending-attachment-chip")).toBeNull();
+    });
+    expect(mocks.removeSessionAttachment).not.toHaveBeenCalled();
+  });
+
+  it("纯附件空文本可发（D-7 看图说话）：发送按钮不禁用 + 参数带附件", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId("group-pending-attachment-chip").length,
+      ).toBe(1),
+    );
+
+    const sendBtn = screen.getByLabelText("发送群消息") as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(false);
+    fireEvent.click(sendBtn);
+    await waitFor(() =>
+      expect(mocks.sendGroupMessage).toHaveBeenCalledWith("g-1", "", [
+        "att-upload-1",
+      ]),
+    );
+  });
+
+  it("时间线附件条：回放行 metadata.attachments → 用户气泡下方文件 chip（点击在线预览）", async () => {
+    harness.logsJson = [
+      {
+        id: "l-att-1",
+        run_id: "r-9",
+        timestamp: "2026-09-01T06:05:00Z",
+        channel: "user_input",
+        content_redacted: "白屏时的报错日志",
+        metadata: {
+          sender_member_name: "林一",
+          sender_user_id: "u-lin",
+          attachments: [
+            { file_id: "att-1", name: "报错日志.txt", size: 128, kind: "file" },
+          ],
+        },
+      },
+    ];
+    renderPanel();
+    await waitForStreamWired();
+
+    await waitFor(() => {
+      expect(screen.getByText("白屏时的报错日志")).toBeTruthy();
+    });
+    // 附件条：单聊 AttachmentChips 惯例（文件 chip 点击预览）。
+    const chip = await waitFor(() =>
+      screen.getByTitle("报错日志.txt（点击在线预览）"),
+    );
+    expect(chip).toBeTruthy();
+    // 点击弹预览窗（FilePreviewModal 打开）。
+    fireEvent.click(chip);
+    await flushAsync(2);
+  });
+
+  it("实时 SSE log 事件带 attachments：气泡下方附件条即时渲染", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-live-1",
+      log_id: "l-live-att-1",
+      timestamp: "2026-09-01T06:08:00Z",
+      channel: "user_input",
+      content: "群里同步一份日志",
+      sender_user_id: "u-lin",
+      sender_member_name: "林一",
+      attachments: [
+        { file_id: "att-2", name: "同步日志.txt", size: 256, kind: "file" },
+      ],
+    });
+    await waitFor(() => {
+      expect(screen.getByText("群里同步一份日志")).toBeTruthy();
+    });
+    expect(
+      await screen.findByTitle("同步日志.txt（点击在线预览）"),
+    ).toBeTruthy();
   });
 });

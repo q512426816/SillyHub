@@ -2559,20 +2559,40 @@ export type GroupMessageSendRequest =
   components["schemas"]["GroupMessageSendRequest"];
 
 /**
+ * 群消息附件摘要（FR-05 补遗）：user_input 行 ``metadata.attachments`` 与群频道
+ * log 事件 payload 的共用形态（backend ``_attachment_summary_rows`` 单一源）——
+ * file_id/name/size/kind，供气泡下方附件条渲染（AttachmentChips 消费）。
+ */
+export interface GroupMessageAttachmentSummary {
+  file_id: string;
+  name: string;
+  size: number;
+  kind?: string | null;
+}
+
+/**
  * POST /api/daemon/group-chats/{id}/messages — 发群消息。
  *
  * 响应携带 carrier_run_id / log_id（实时 log 事件同 id，seenLogIds 去重容错）+
  * mentioned_member_ids / triggered（触发成员与排队态）。触发失败（机器未授权
  * 400 / 队列满 409 DAEMON_SESSION_QUEUE_FULL）时消息已落时间线——错误照抛，
  * 调用方提示「消息已发送，但触发失败」（design §4.1 失败语义）。
+ *
+ * FR-05 补遗：``attachmentIds`` 附件引用（上传端点产出的 SessionAttachment
+ * id，D-7 豁免——携带附件时 content 可空看图说话）；未携带时不发该键（后端
+ * 缺省空列表零回归）。
  */
 export async function sendGroupMessage(
   groupId: string,
   content: string,
+  attachmentIds?: string[],
 ): Promise<GroupMessageSendRead> {
+  const body: GroupMessageSendRequest = attachmentIds?.length
+    ? { content, attachment_ids: attachmentIds }
+    : { content };
   return apiFetch<GroupMessageSendRead>(
     `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/messages`,
-    { method: "POST", json: { content } satisfies GroupMessageSendRequest },
+    { method: "POST", json: body },
   );
 }
 
@@ -2620,6 +2640,8 @@ export interface GroupChatStreamEnvelope extends SessionStreamEnvelope {
   member_kind?: string | null;
   typing?: boolean | null;
   preview?: string | null;
+  /** FR-05 补遗：user_input 行附件摘要（无附件缺省 null/undefined 不渲染）。 */
+  attachments?: GroupMessageAttachmentSummary[] | null;
 }
 
 /** typing 分支事件（design §5.4 typing.ping payload；ts 供调试观测，TTL 归前端）。 */
@@ -2669,6 +2691,8 @@ export interface GroupReplayLogEntry extends AgentRunLogEntry {
     sender_member_name?: string | null;
     sender_user_id?: string | null;
     projection?: boolean;
+    /** FR-05 补遗：user_input 行附件摘要（与 SSE 实时事件 payload 同形态）。 */
+    attachments?: GroupMessageAttachmentSummary[] | null;
   } | null;
 }
 
@@ -2836,11 +2860,13 @@ export function streamGroupChat(
           content: log.content_redacted ?? "",
           // 群身份透传（回放与实时渲染一致）：投影行 member_* / 用户行
           // sender_*（后端 DTO 暴露 metadata 前运行时为 null，前端容错回退）。
+          // FR-05 补遗：user_input 行附件摘要同透传（实时事件 payload 同形态）。
           segment_id: log.segment_id ?? null,
           member_id: meta?.member_id ?? null,
           member_name: meta?.member_name ?? null,
           sender_member_name: meta?.sender_member_name ?? null,
           sender_user_id: meta?.sender_user_id ?? null,
+          attachments: meta?.attachments ?? null,
         }),
       });
     }
