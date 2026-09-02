@@ -35,8 +35,11 @@ from app.modules.agent.schema import (
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.group.service import (
+    GroupChatCreateRead,
     GroupChatService,
     GroupDirectMessageRead,
+    GroupMemberAddRead,
+    GroupMemberInterruptRead,
     GroupMessageSendRead,
     get_last_mention_previews,
     get_last_message_previews,
@@ -155,13 +158,17 @@ def _to_list_item(read: GroupChatRead) -> GroupChatListItemRead:
 # ── 群 CRUD ──────────────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=GroupChatRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=GroupChatCreateRead, status_code=status.HTTP_201_CREATED)
 async def create_group_chat(
     payload: GroupChatCreate,
     session: SessionDep,
     user: GroupChatUser,
-) -> GroupChatRead:
-    """建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。"""
+) -> GroupChatCreateRead:
+    """建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。
+
+    响应 ``warnings``（quick 群 P1 llm_provider 预检）：agent 成员未指定模型
+    （走机器本机默认 LLM 出口）的非阻断提示，前端建群向导展示。
+    """
     return await GroupChatService(session).create_group(user, payload)
 
 
@@ -234,7 +241,7 @@ async def end_group_chat(
 
 @router.post(
     "/{group_id}/members",
-    response_model=GroupMemberRead,
+    response_model=GroupMemberAddRead,
     status_code=status.HTTP_201_CREATED,
 )
 async def add_group_member(
@@ -242,8 +249,12 @@ async def add_group_member(
     payload: GroupMemberCreate,
     session: SessionDep,
     user: GroupChatUser,
-) -> GroupMemberRead:
-    """加成员（用户邀请 / agent 六要素配置；群主或 admin）。"""
+) -> GroupMemberAddRead:
+    """加成员（用户邀请 / agent 六要素配置；群主或 admin）。
+
+    agent 成员响应 ``warnings``（quick 群 P1 llm_provider 预检）：未指定模型
+    走机器本机默认 LLM 出口的非阻断提示。
+    """
     return await GroupChatService(session).add_member(group_id, user, payload)
 
 
@@ -312,6 +323,26 @@ async def send_group_member_direct_message(
         payload.content,
         attachment_ids=payload.attachment_ids or None,
     )
+
+
+@router.post(
+    "/{group_id}/members/{member_id}/interrupt",
+    response_model=GroupMemberInterruptRead,
+)
+async def interrupt_group_member(
+    group_id: uuid.UUID,
+    member_id: uuid.UUID,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> GroupMemberInterruptRead:
+    """群内打断 agent 成员的当前运行任务（quick 群 P1，design §8 member.interrupted）。
+
+    失控 agent 人人可停：**任意群成员**可打断（权限刻意宽于群主专属操作——
+    这是打断功能的存在意义）。影子未建/无活跃 run → 409；打断执行零改动
+    复用单聊 interrupt 服务路径（服务身份=群主=影子属主）；成功后群频道发
+    ``channel='system'`` 系统行「{成员昵称} 的当前任务已被 {打断者昵称} 打断」。
+    """
+    return await GroupChatService(session).interrupt_member(group_id, member_id, user)
 
 
 # ── 群消息（task-03，design §4.1）────────────────────────────────────────────

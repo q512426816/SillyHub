@@ -30,6 +30,11 @@
  *      ——agent 卡整卡点击 → Drawer 内挂 SessionPanel（mode=dialog /
  *      sessionId=影子 id / 成员引擎 providers）；普通成员也可打开；未建影子无
  *      点击语义；卡内按钮不透传。
+ *   9. 打断按钮（quick 群 P1）——**全员可见**（后端 interrupt 端点放行任意群
+ *      成员，不按 isOwner 门控）；无影子（shadow_status=none / 未挂影子会话）
+ *      禁用；Modal.confirm 确认 → POST members/{mid}/interrupt + onRefresh
+ *      （运行徽标由详情 refetch 的 shadow_running 收口）；取消不发；409（无
+ *      运行任务）notify.warning 透传后端中文文案、其他错误 notify.error。
  *
  * mock 策略（对齐 sessions/__tests__/create-group-wizard.test.tsx 惯例）：
  *   - @/lib/api 仅覆写 apiFetch（真实 daemon.ts 群客户端消费 mock——断言路径
@@ -54,6 +59,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Modal } from "antd";
 
+import { ApiError } from "@/lib/api";
 import { MemberPanel } from "@/components/group-chat/member-panel";
 import type { GroupChatRead, GroupMemberRead} from "@/lib/daemon";
 import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
@@ -78,6 +84,13 @@ const mocks = vi.hoisted(() => ({
   // 影子会话面板（2026-09-02）：SessionPanel 本体 mock——只断言挂载 props，
   // 面板内部数据链路由 session-panel 自身测试覆盖。
   sessionPanel: vi.fn(),
+  // quick 群 P1 打断：notify 断言面（409 warning / 其他 error 透传——共享
+  // spy，clearMocks 按用例清调用记录）。
+  notify: {
+    success: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -124,7 +137,9 @@ vi.mock("@/lib/file/api", () => ({
 vi.mock("@/lib/errors", () => ({
   errMessage: (err: unknown) =>
     err instanceof Error ? err.message : "操作失败",
-  useNotify: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
+  // 共享 spy（quick 群 P1 打断：断言 warning/error 透传；各用例经 clearMocks
+  // 隔离调用记录）。
+  useNotify: () => mocks.notify,
 }));
 
 // 影子会话面板本体 mock（quick 2026-09-02）：member-panel 只负责以 dialog 模式
@@ -1117,5 +1132,169 @@ describe("MemberPanel 影子会话面板（quick）", () => {
     );
     expect(screen.getByText(/的 Agent 配置/)).toBeTruthy();
     expect(mocks.sessionPanel).not.toHaveBeenCalled();
+  });
+});
+
+// ── 9. 打断按钮（quick 群 P1：POST members/{mid}/interrupt，全员可打断） ──
+
+describe("MemberPanel 打断按钮（quick 群 P1）", () => {
+  /** 打断用群固件：mem-1 有影子会话（active），mem-2 无影子（none）。 */
+  function makeInterruptGroup(): GroupChatRead {
+    const group = makeGroup();
+    group.members = [
+      agentMember({
+        shadow_session_id: "shadow-1",
+        shadow_status: "active",
+      }),
+      agentMember({
+        id: "mem-2",
+        display_name: "小测",
+        provider: "codex",
+        shadow_session_id: null,
+        shadow_status: "none",
+      }),
+    ];
+    return group;
+  }
+
+  it("全员可见：非群主也有「打断」按钮；有影子可点，无影子（none）禁用", () => {
+    // 非群主视角（u-lin）：打断按钮在（后端放行任意群成员）。
+    renderPanel(
+      <MemberPanel group={makeInterruptGroup()} currentUserId="u-lin" />,
+    );
+
+    const card1 = screen.getByTestId("agent-member-card-mem-1");
+    const interrupt1 = within(card1).getByRole("button", {
+      name: "打断 小码",
+    });
+    expect(interrupt1).not.toBeDisabled();
+    // 同视角下群主专属操作不渲染（对照：打断不按 isOwner 门控）。
+    expect(
+      within(card1).queryByRole("button", { name: "切换配置" }),
+    ).toBeNull();
+
+    // 无影子（shadow_status=none，未挂影子会话）→ 禁用（无任务可打断）。
+    const card2 = screen.getByTestId("agent-member-card-mem-2");
+    expect(
+      within(card2).getByRole("button", { name: "打断 小测" }),
+    ).toBeDisabled();
+  });
+
+  it("点击「打断」→ Modal.confirm 二次确认；点「取消」不发请求", () => {
+    renderPanel(
+      <MemberPanel group={makeInterruptGroup()} currentUserId="u-me" />,
+    );
+    const confirmSpy = spyConfirmCancel();
+
+    fireEvent.click(
+      within(screen.getByTestId("agent-member-card-mem-1")).getByRole("button", {
+        name: "打断 小码",
+      }),
+    );
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("打断「小码」的当前任务"),
+      }),
+    );
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("确认打断 → POST members/{mid}/interrupt + onRefresh（运行徽标由详情 refetch 收口）", async () => {
+    const onRefresh = vi.fn();
+    mocks.apiFetch.mockResolvedValueOnce({
+      member_id: "mem-1",
+      display_name: "小码",
+      run_id: "run-9",
+      interrupted_by_name: "鲸落",
+    });
+    // 非群主打断（后端放行任意群成员——前端不做权限门控）。
+    renderPanel(
+      <MemberPanel
+        group={makeInterruptGroup()}
+        currentUserId="u-lin"
+        onRefresh={onRefresh}
+      />,
+    );
+    const confirmSpy = spyConfirmOk();
+
+    fireEvent.click(
+      within(screen.getByTestId("agent-member-card-mem-1")).getByRole("button", {
+        name: "打断 小码",
+      }),
+    );
+
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1/members/mem-1/interrupt",
+      { method: "POST" },
+    );
+    // 成功提示 + 刷新回调（群详情重拉 → shadow_running 收口运行徽标）。
+    expect(mocks.notify.success).toHaveBeenCalledWith(
+      "已打断「小码」的当前任务",
+    );
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    confirmSpy.mockRestore();
+  });
+
+  it("409（该成员无运行中任务）→ notify.warning 透传后端中文文案（非 error）", async () => {
+    mocks.apiFetch.mockRejectedValueOnce(
+      new ApiError(409, {
+        code: "http_409",
+        message: "该成员当前没有运行中的任务",
+        request_id: null,
+        details: null,
+      }),
+    );
+    renderPanel(
+      <MemberPanel group={makeInterruptGroup()} currentUserId="u-me" />,
+    );
+    const confirmSpy = spyConfirmOk();
+
+    fireEvent.click(
+      within(screen.getByTestId("agent-member-card-mem-1")).getByRole("button", {
+        name: "打断 小码",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.notify.warning).toHaveBeenCalledWith(
+        "该成员当前没有运行中的任务",
+      ),
+    );
+    expect(mocks.notify.error).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("其他错误 → notify.error 兜底（不误报 warning）", async () => {
+    mocks.apiFetch.mockRejectedValueOnce(
+      new ApiError(500, {
+        code: "http_500",
+        message: "服务内部错误",
+        request_id: null,
+        details: null,
+      }),
+    );
+    renderPanel(
+      <MemberPanel group={makeInterruptGroup()} currentUserId="u-me" />,
+    );
+    const confirmSpy = spyConfirmOk();
+
+    fireEvent.click(
+      within(screen.getByTestId("agent-member-card-mem-1")).getByRole("button", {
+        name: "打断 小码",
+      }),
+    );
+
+    await waitFor(() => expect(mocks.notify.error).toHaveBeenCalledTimes(1));
+    // notify.error(err, fallback) 收原始错误对象（useNotify 内部再取中文文案）。
+    const errArg = mocks.notify.error.mock.calls[0]?.[0] as Error;
+    expect(errArg.message).toBe("服务内部错误");
+    expect(mocks.notify.error.mock.calls[0]?.[1]).toBe(
+      "打断失败，请稍后重试",
+    );
+    expect(mocks.notify.warning).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });

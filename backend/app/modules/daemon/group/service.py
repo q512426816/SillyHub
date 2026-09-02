@@ -271,6 +271,33 @@ def group_rate_key(group_id: uuid.UUID, member_id: uuid.UUID) -> str:
     return f"group_rate:{group_id}:{member_id}"
 
 
+def _group_guardrail_settings(group: AgentGroupChat) -> tuple[int, int, int]:
+    """群级互@护栏参数（quick 群 P1，2026-09-02：settings_json 启用）。
+
+    优先读 ``group.settings_json`` 的 ``guardrails`` 键（``rate_limit_per_minute``
+    / ``member_trigger_limit`` / ``chain_ttl_seconds``），缺省字段回落模块常量
+    （默认 6/2/1800，design §9.3 保守值）——存量群 settings_json NULL 与未
+    覆盖字段全部走默认，**行为零变化**。写入侧（``_validate_guardrail_overrides``）
+    已校验范围；此处对脏数据（手改库/迁移残留）再防御一层：非 int（含 bool）
+    一律回退默认，不让护栏因脏配置失效或爆炸。
+    """
+    raw = (group.settings_json or {}).get("guardrails")
+    if not isinstance(raw, dict):
+        raw = {}
+
+    def _pick(key: str, default: int) -> int:
+        value = raw.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return default
+
+    return (
+        _pick("rate_limit_per_minute", GROUP_RATE_LIMIT_PER_MINUTE),
+        _pick("member_trigger_limit", GROUP_CROSS_MEMBER_TRIGGER_LIMIT),
+        _pick("chain_ttl_seconds", GROUP_CHAIN_TTL_SECONDS),
+    )
+
+
 # ── 错误族（AppError 惯例：中文用户可见文案，UUID 进 details）────────────────
 
 
@@ -426,13 +453,20 @@ async def _load_run_reply_text(
 
 
 async def _register_chain_members(
-    redis: Redis, carrier_run_id: uuid.UUID, member_ids: Sequence[uuid.UUID]
+    redis: Redis,
+    carrier_run_id: uuid.UUID,
+    member_ids: Sequence[uuid.UUID],
+    *,
+    ttl_seconds: int = GROUP_CHAIN_TTL_SECONDS,
 ) -> None:
     """用户 @ 直接触发的成员入链登记（链去重集 + TTL，深度仍 0）。
 
     链语义（design §4.4）：链 id=触发该协作的用户消息载体 run id，用户 @ 触发
     的成员即链内首批成员（chain_depth=0 轮）；后续互@命中同链成员即跳过。
-    best-effort：Redis 抖动仅 warning 不阻断消息发送主链路。
+    ``ttl_seconds`` quick 群 P1（2026-09-02）群级可配（默认模块常量）——与
+    互@侧 TTL 刷新同一取值源（``_group_guardrail_settings``），避免登记用默认
+    30min、互@刷新才对齐群配置的窗口错位。best-effort：Redis 抖动仅 warning
+    不阻断消息发送主链路。
     """
     try:
         key = group_chain_key(carrier_run_id)
@@ -443,7 +477,7 @@ async def _register_chain_members(
             # "链内首批"，不占互@去重名额——否则"你们俩讨论下"这类同时 @ 多人
             # 的消息会让后续互@全被去重、讨论一轮即断）。
             await redis.hsetnx(key, str(member_id), "0")  # type: ignore[misc]
-        await redis.expire(key, GROUP_CHAIN_TTL_SECONDS)
+        await redis.expire(key, ttl_seconds)
     except Exception:
         log.warning(
             "group_chain_register_failed",
@@ -488,6 +522,63 @@ async def _publish_member_interrupted_notice(
             "timestamp": datetime.now(UTC).isoformat(),
         },
     )
+
+
+# ── 互@护栏参数群级可配（quick 群 P1，2026-09-02：settings_json 启用）────────
+
+
+# guardrails 子键合法范围（int 边界含端点；范围沿用 design §9.3 保守界 +
+# 模块常量默认值的合理调节带）。
+_GUARDRAIL_FIELD_RANGES: dict[str, tuple[int, int]] = {
+    "rate_limit_per_minute": (1, 60),
+    "member_trigger_limit": (1, 10),
+    "chain_ttl_seconds": (300, 7200),
+}
+
+
+def _validate_guardrail_overrides(raw: object) -> None:
+    """PATCH ``settings_json.guardrails`` 校验（非法键/范围外值 → 400 中文）。
+
+    fail-loud：未知键拒绝（防客户端拼写错误静默落库成死配置）；值必须为
+    范围内整数（bool 是 int 子类，显式排除）。
+    """
+    if not isinstance(raw, dict):
+        raise GroupChatInvalid("settings_json.guardrails 必须是对象。")
+    for key, value in raw.items():
+        if key not in _GUARDRAIL_FIELD_RANGES:
+            raise GroupChatInvalid(
+                f"未知的互@护栏参数「{key}」。",
+                details={"field": key, "allowed": sorted(_GUARDRAIL_FIELD_RANGES)},
+            )
+        low, high = _GUARDRAIL_FIELD_RANGES[key]
+        if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+            raise GroupChatInvalid(
+                f"互@护栏参数「{key}」取值需在 {low}-{high} 之间。",
+                details={"field": key, "value": str(value), "min": low, "max": high},
+            )
+
+
+def _merge_group_settings_json(current: dict | None, incoming: dict) -> dict:
+    """PATCH ``settings_json`` 合并落库（quick 群 P1）。
+
+    顶层键白名单当前仅 ``guardrails``（列是预留扩展位，新键随消费方落地逐个
+    放开）；``guardrails`` 子键**字段级合并**——未传字段保留既有覆盖值（与
+    GroupChatUpdate「None=不改」局部更新语义同构）。返回新 dict（不原地改
+    ORM 属性，赋值才进 dirty）。清除覆盖 = 显式回传默认值。
+    """
+    merged = dict(current or {})
+    rest = dict(incoming)
+    guardrails = rest.pop("guardrails", None)
+    if rest:
+        key = next(iter(rest))
+        raise GroupChatInvalid(
+            f"未知的群设置键「{key}」。",
+            details={"key": key, "allowed": ["guardrails"]},
+        )
+    if guardrails is not None:
+        _validate_guardrail_overrides(guardrails)
+        merged["guardrails"] = {**(merged.get("guardrails") or {}), **guardrails}
+    return merged
 
 
 async def run_cross_mention_detection(
@@ -597,6 +688,11 @@ async def run_cross_mention_detection(
         f"{m.display_name}({'用户' if m.member_type == 'user' else 'Agent'})" for m in members
     ]
     depth_limit = max(int(group.cross_mention_depth or 0), 0)
+    # quick 群 P1（2026-09-02）护栏参数群级可配：settings_json.guardrails 覆盖，
+    # 缺省回落模块常量（默认 6/2/1800——存量群零行为变化）。
+    rate_limit_per_minute, member_trigger_limit, chain_ttl_seconds = _group_guardrail_settings(
+        group
+    )
     # 双轨一致（design §4.4）：DB run metadata 的 chain_depth 与 Redis depth 互为
     # 校验——取 max 为判定基线（链 TTL 30min 过期后 DB 侧深度仍是防环下限，
     # 不会因 Redis 清键而复活长链）。
@@ -623,9 +719,13 @@ async def run_cross_mention_detection(
         # ── 护栏 3（先于去重：超限跳过不烧链内名额）：限频滑窗 ─────────────────
         rate_key = group_rate_key(group.id, target.id)
         rate_count = int(await redis.incr(rate_key))
-        if rate_count == 1:
-            await redis.expire(rate_key, GROUP_RATE_WINDOW_SECONDS)
-        if rate_count > GROUP_RATE_LIMIT_PER_MINUTE:
+        # quick 群 P1（2026-09-02 限频原子化）：incr 后**无条件** expire——原先
+        # 只在 count==1 时 expire，进程恰在 incr 与 expire 间崩溃会留下无 TTL
+        # 的永久计数键（计数只增不清，该成员后续窗口全部误判超限）。代价是
+        # 窗口锚点随每次触发后移（滑窗化）：持续互@风暴下锁止更保守，对
+        # 防环护栏语义可接受；多一次 expire 调用换崩溃窗口闭合，最简可靠。
+        await redis.expire(rate_key, GROUP_RATE_WINDOW_SECONDS)
+        if rate_count > rate_limit_per_minute:
             await _publish_rate_limit_notice(group, target.display_name)
             log.info(
                 "group_cross_mention_rate_limited",
@@ -636,9 +736,10 @@ async def run_cross_mention_detection(
             continue
         # ── 护栏 2：同链同成员互@次数上限（HINCRBY 计数，超上限跳过）────────
         # ql-20260902 讨论场景修复：直接触发占位 0 不占名额，互@每次 +1；
-        # 同一成员最多被互@触发 GROUP_CROSS_MEMBER_TRIGGER_LIMIT 次。
+        # 同一成员最多被互@触发 member_trigger_limit 次（群级可配，默认
+        # GROUP_CROSS_MEMBER_TRIGGER_LIMIT）。
         member_triggers = int(await redis.hincrby(chain_key, str(target.id), 1))  # type: ignore[misc]
-        if member_triggers > GROUP_CROSS_MEMBER_TRIGGER_LIMIT:
+        if member_triggers > member_trigger_limit:
             log.info(
                 "group_cross_mention_member_capped",
                 group_id=str(group.id),
@@ -651,7 +752,7 @@ async def run_cross_mention_detection(
         if redis_depth < base_depth:
             await redis.hset(chain_key, GROUP_CHAIN_DEPTH_FIELD, str(base_depth))  # type: ignore[misc]
         new_depth = int(await redis.hincrby(chain_key, GROUP_CHAIN_DEPTH_FIELD, 1))  # type: ignore[misc]
-        await redis.expire(chain_key, GROUP_CHAIN_TTL_SECONDS)
+        await redis.expire(chain_key, chain_ttl_seconds)
 
         # ── 与用户 @ 同管线触发（链沿用原链，链 id 不新建）────────────────────
         try:
@@ -1030,18 +1131,28 @@ async def get_online_member_ids(group_id: uuid.UUID) -> list[uuid.UUID]:
     """读群在线用户成员 id 集（``group_presence:{group_id}:*`` keys，§5.4）。
 
     key 由群 SSE 生成器循环 touch（TTL 60s）——活跃 key 即在线成员。规模上界
-    = 用户成员上限 50（design §9.3），KEYS 前缀扫可接受（群列表本身小基数据）。
+    = 用户成员上限 50（design §9.3）。quick 群 P1 审计（2026-09-02）：原
+    ``KEYS`` 前缀扫是 O(全库) 阻塞命令（单线程 Redis 上会卡住所有其它命令），
+    换 ``SCAN`` 游标分批（每批 100）增量迭代——SCAN 期间键集可能变化（漏报/
+    重报由下一轮 presence 刷新 + 60s TTL 心跳自愈，在线绿点容忍）。
     Redis 不可用返回空列表（在线绿点降级为全灰，不阻断列表/详情）。
     """
     prefix = f"group_presence:{group_id}:"
+    pattern = f"{prefix}*"
     try:
         redis = get_redis()
-        keys = await redis.keys(f"{prefix}*")
+        keys: list[str] = []
+        cursor: int | str = 0
+        while True:
+            cursor, batch = await redis.scan(cursor=cursor, match=pattern, count=100)
+            keys.extend(batch or [])
+            if int(cursor) == 0:
+                break
     except Exception:
         log.warning("group_presence_read_failed", group_id=str(group_id), exc_info=True)
         return []
     online: list[uuid.UUID] = []
-    for key in keys or []:
+    for key in keys:
         raw = key[len(prefix) :] if isinstance(key, str) else ""
         try:
             online.append(uuid.UUID(raw))
@@ -2088,6 +2199,12 @@ class GroupChatService:
             group.cross_mention_depth = payload.cross_mention_depth
         if payload.context_window is not None:
             group.context_window = payload.context_window
+        if payload.settings_json is not None:
+            # quick 群 P1（2026-09-02）互@护栏群级可配：settings_json.guardrails
+            # 子键写入（字段级合并；非法键/范围外值 400 中文）。
+            group.settings_json = _merge_group_settings_json(
+                group.settings_json, payload.settings_json
+            )
         self._session.add(group)
         await self._session.commit()
         await self._session.refresh(group)
@@ -2815,11 +2932,18 @@ class GroupChatService:
             ]
             # task-04（design §4.4）：用户 @ 直接触发的成员入协作链（链 id=本
             # 载体 run；深度 0；后续互@沿用原链去重/判深）——best-effort，Redis
-            # 抖动不阻断发送（互@侧 fail-closed 自兜底）。
+            # 抖动不阻断发送（互@侧 fail-closed 自兜底）。链 TTL quick 群 P1
+            # 群级可配（与互@侧刷新同源，默认模块常量）。
+            _, _, chain_ttl_seconds = _group_guardrail_settings(group)
             try:
                 redis = get_redis()
                 await redis.ping()  # type: ignore[misc]  # redis-py stubs union 返回
-                await _register_chain_members(redis, carrier.id, [m.id for m in mentioned])
+                await _register_chain_members(
+                    redis,
+                    carrier.id,
+                    [m.id for m in mentioned],
+                    ttl_seconds=chain_ttl_seconds,
+                )
             except Exception:
                 log.warning(
                     "group_chain_register_unavailable",
@@ -3325,6 +3449,23 @@ class GroupChatService:
         P0 修复注释口径）。``parent_session_id`` 恒 NULL（D-007/§5.1）。
         """
         # 幂等复用：指针非空且影子非终态 → 直接复用（懒建只在首次触发发生）。
+        # quick 群 P1（2026-09-02 并发双建修复）：幂等判定前先以行锁重读成员行
+        # （SELECT ... FOR UPDATE，照 auth/service.py refresh-token 并发先例；
+        # SQLite 忽略锁提示、语义不变）——并发触发同一成员时，第二个事务在
+        # 成员行上等锁，首个事务 commit（回填指针）后读到已回填指针直接复用，
+        # 不再双建影子。populate_existing 强制刷新 identity map 内既有对象——
+        # 不带则查询命中缓存旧快照，调用方传入的 member 指针仍是 NULL。锁在
+        # 调用方事务内持有至 commit，不新增 commit。
+        locked_member = (
+            await self._session.execute(
+                select(AgentGroupMember)
+                .where(AgentGroupMember.id == member.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if locked_member is not None:
+            member = locked_member
         if member.shadow_session_id is not None:
             existing = await self._session.get(AgentSession, member.shadow_session_id)
             if existing is not None and existing.status not in ("ended", "failed"):

@@ -3933,6 +3933,9 @@ export interface paths {
         /**
          * Create Group Chat
          * @description 建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。
+         *
+         *     响应 ``warnings``（quick 群 P1 llm_provider 预检）：agent 成员未指定模型
+         *     （走机器本机默认 LLM 出口）的非阻断提示，前端建群向导展示。
          */
         post: operations["create_group_chat_api_daemon_group_chats_post"];
         delete?: never;
@@ -3950,7 +3953,7 @@ export interface paths {
         };
         /**
          * Get Group Chat
-         * @description 群详情：成员完整列表（六要素 + shadow_status + 在线绿点；design §6.1）。
+         * @description 群详情：成员完整列表（六要素 + shadow_status + 在线绿点 + 运行态兜底）。
          */
         get: operations["get_group_chat_api_daemon_group_chats__group_id__get"];
         put?: never;
@@ -3997,6 +4000,9 @@ export interface paths {
         /**
          * Add Group Member
          * @description 加成员（用户邀请 / agent 六要素配置；群主或 admin）。
+         *
+         *     agent 成员响应 ``warnings``（quick 群 P1 llm_provider 预检）：未指定模型
+         *     走机器本机默认 LLM 出口的非阻断提示。
          */
         post: operations["add_group_member_api_daemon_group_chats__group_id__members_post"];
         delete?: never;
@@ -4068,6 +4074,31 @@ export interface paths {
          *     （成员可见群但无直聊权）；影子未建 400（先群内 @ 触发懒建）。
          */
         post: operations["send_group_member_direct_message_api_daemon_group_chats__group_id__members__member_id__direct_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/members/{member_id}/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Interrupt Group Member
+         * @description 群内打断 agent 成员的当前运行任务（quick 群 P1，design §8 member.interrupted）。
+         *
+         *     失控 agent 人人可停：**任意群成员**可打断（权限刻意宽于群主专属操作——
+         *     这是打断功能的存在意义）。影子未建/无活跃 run → 409；打断执行零改动
+         *     复用单聊 interrupt 服务路径（服务身份=群主=影子属主）；成功后群频道发
+         *     ``channel='system'`` 系统行「{成员昵称} 的当前任务已被 {打断者昵称} 打断」。
+         */
+        post: operations["interrupt_group_member_api_daemon_group_chats__group_id__members__member_id__interrupt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10792,6 +10823,8 @@ export interface components {
             change_id: string | null;
             /** User Id */
             user_id?: string | null;
+            /** Session Kind */
+            session_kind?: string | null;
             /** Workspace Id */
             workspace_id: string | null;
             /** Title */
@@ -13907,12 +13940,62 @@ export interface components {
             agent_members?: components["schemas"]["GroupMemberAgentConfig"][];
         };
         /**
+         * GroupChatCreateRead
+         * @description 建群响应体（quick 群 P1 llm_provider 预检）。
+         *
+         *     ``warnings``：非阻断提示列表（agent 成员未指定模型走本机默认 LLM 出口）；
+         *     其余读取路径（列表/详情）不带本字段。
+         */
+        GroupChatCreateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Project Id */
+            project_id?: string | null;
+            /** Title */
+            title: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Agent Cross Mention */
+            agent_cross_mention: boolean;
+            /** Cross Mention Depth */
+            cross_mention_depth: number;
+            /** Context Window */
+            context_window: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Members */
+            members?: components["schemas"]["GroupMemberRead"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
          * GroupChatDetailRead
          * @description 群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。
          *
          *     ``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照
          *     ``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表
-         *     项同源（``get_online_member_ids``）。
+         *     项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体
+         *     （多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）。
          */
         GroupChatDetailRead: {
             /**
@@ -13952,7 +14035,7 @@ export interface components {
             /** Deleted At */
             deleted_at?: string | null;
             /** Members */
-            members?: components["schemas"]["GroupMemberRead"][];
+            members?: components["schemas"]["GroupMemberDetailRead"][];
             /**
              * Online Member Ids
              * @default []
@@ -14085,6 +14168,13 @@ export interface components {
             cross_mention_depth?: number | null;
             /** Context Window */
             context_window?: number | null;
+            /**
+             * Settings Json
+             * @description 群扩展设置；None=不改。当前支持 guardrails 子键（互@护栏群级覆盖）
+             */
+            settings_json?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * GroupDirectMessageRead
@@ -14139,6 +14229,59 @@ export interface components {
              * @description 附件引用（SessionAttachment id）
              */
             attachment_ids?: string[];
+        };
+        /**
+         * GroupMemberAddRead
+         * @description 加成员响应体（quick 群 P1 llm_provider 预检）：``warnings`` 同建群体。
+         */
+        GroupMemberAddRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Member Type */
+            member_type: string;
+            /** Display Name */
+            display_name: string;
+            /** Avatar */
+            avatar?: string | null;
+            /** User Id */
+            user_id?: string | null;
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /**
+             * Team Enabled
+             * @default false
+             */
+            team_enabled: boolean;
+            /** Config Snapshot */
+            config_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+            /** Invited By */
+            invited_by?: string | null;
+            /**
+             * Joined At
+             * Format: date-time
+             */
+            joined_at: string;
+            /** Removed At */
+            removed_at?: string | null;
+            /** Shadow Session Id */
+            shadow_session_id?: string | null;
+            /** Shadow Status */
+            shadow_status: string;
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * GroupMemberAgentConfig
@@ -14199,6 +14342,87 @@ export interface components {
         GroupMemberCreate: {
             user?: components["schemas"]["GroupMemberUserCreate"] | null;
             agent?: components["schemas"]["GroupMemberAgentConfig"] | null;
+        };
+        /**
+         * GroupMemberDetailRead
+         * @description 群详情成员读体扩展（群聊运行态可见 quick，2026-09-02）。
+         *
+         *     ``shadow_running``：该 agent 成员影子会话当前有活跃 run（谓词同群侧
+         *     ``_get_shadow_active_run``）——typing 事件丢失/SSE 迟连时的运行态兜底
+         *     信号；影子未建/已终态/用户成员恒 False。仅群详情端点填充（群列表不加，
+         *     逐成员 LIMIT 1 查询只花在打开详情时）。
+         */
+        GroupMemberDetailRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Member Type */
+            member_type: string;
+            /** Display Name */
+            display_name: string;
+            /** Avatar */
+            avatar?: string | null;
+            /** User Id */
+            user_id?: string | null;
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /**
+             * Team Enabled
+             * @default false
+             */
+            team_enabled: boolean;
+            /** Config Snapshot */
+            config_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+            /** Invited By */
+            invited_by?: string | null;
+            /**
+             * Joined At
+             * Format: date-time
+             */
+            joined_at: string;
+            /** Removed At */
+            removed_at?: string | null;
+            /** Shadow Session Id */
+            shadow_session_id?: string | null;
+            /** Shadow Status */
+            shadow_status: string;
+            /**
+             * Shadow Running
+             * @default false
+             */
+            shadow_running: boolean;
+        };
+        /**
+         * GroupMemberInterruptRead
+         * @description ``POST /group-chats/{gid}/members/{mid}/interrupt`` 响应（quick 群 P1）。
+         *
+         *     ``run_id``：被打断的活跃 run（=响应前查到的影子活跃轮）；``interrupted_by_name``
+         *     为打断者群内昵称（admin 兜底放行时回落用户显示名）。
+         */
+        GroupMemberInterruptRead: {
+            /**
+             * Member Id
+             * Format: uuid
+             */
+            member_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Run Id */
+            run_id?: string | null;
+            /** Interrupted By Name */
+            interrupted_by_name: string;
         };
         /**
          * GroupMemberRead
@@ -19743,6 +19967,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Spec Strategy */
+            spec_strategy?: string | null;
             /** Status */
             status: string;
             /** Error Code */
@@ -29944,7 +30170,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GroupChatRead"];
+                    "application/json": components["schemas"]["GroupChatCreateRead"];
                 };
             };
             /** @description Validation Error */
@@ -30076,7 +30302,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GroupMemberRead"];
+                    "application/json": components["schemas"]["GroupMemberAddRead"];
                 };
             };
             /** @description Validation Error */
@@ -30211,6 +30437,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupDirectMessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    interrupt_group_member_api_daemon_group_chats__group_id__members__member_id__interrupt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupMemberInterruptRead"];
                 };
             };
             /** @description Validation Error */

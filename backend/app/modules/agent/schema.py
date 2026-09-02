@@ -408,6 +408,13 @@ class GroupChatUpdate(BaseModel):
     agent_cross_mention: bool | None = None
     cross_mention_depth: int | None = Field(default=None, ge=1, le=8)
     context_window: int | None = Field(default=None, ge=1, le=100)
+    # quick 群 P1（2026-09-02）互@护栏群级可配：``settings_json.guardrails`` 子键
+    # 写入（rate_limit_per_minute / member_trigger_limit / chain_ttl_seconds）。
+    # None=不改；取值范围校验在 service 层（非法 400 中文提示，非 pydantic 422）。
+    settings_json: dict | None = Field(
+        default=None,
+        description="群扩展设置；None=不改。当前支持 guardrails 子键（互@护栏群级覆盖）",
+    )
 
 
 class GroupMemberCreate(BaseModel):

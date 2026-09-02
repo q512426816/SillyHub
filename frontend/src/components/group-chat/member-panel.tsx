@@ -22,6 +22,8 @@
  *     徽标（active 在线 / pending 待建 / none 未建 / ended 已结束 / failed 异常）
  *     +「运行中」动态徽标（runningMemberIds 命中——群详情 shadow_running ∪
  *     SSE agent typing live 态，群聊运行态可见 quick 2026-09-02）
+ *     +「打断」按钮（quick 群 P1：任意群成员可打断该成员当前任务——后端
+ *     interrupt 端点放行全员，按钮不按 isOwner 门控；无影子 none 禁用）
  *     +「切换配置」热切换弹窗 +「重置记忆」+「移除」（群主可见）；
  *   - 用户成员区：头像 + 昵称 + 在线绿点（online_member_ids 命中 user_id，
  *     presence 数据源）/ 离线灰点 + 群主标识 + 移除按钮（群主可见，confirm 后
@@ -43,17 +45,19 @@
 import { useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button, Drawer, Input, Modal, Select, Switch, Tooltip } from "antd";
-import { Plus, UserMinus } from "lucide-react";
+import { Plus, Square, UserMinus } from "lucide-react";
 
 import { SessionPanel } from "@/components/daemon/session-panel";
 import { validateMemberDisplayName } from "@/components/group-chat/create-group-wizard";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
+import { ApiError } from "@/lib/api";
 import { listProviders } from "@/lib/api/llm-providers";
 import { errMessage, useNotify } from "@/lib/errors";
 import { listProjectMembers } from "@/lib/ppm/project";
 import { listProjectWorkspaces } from "@/lib/workspace";
 import {
   addGroupMember,
+  interruptGroupMember,
   PROVIDER_META,
   removeGroupMember,
   resetGroupMemberMemory,
@@ -276,6 +280,25 @@ export function MemberPanel({
     },
   });
 
+  /* ── quick 群 P1 打断：POST members/{mid}/interrupt（**任意群成员可打断**
+   *    ——后端放行，前端按钮全员可见）；打断后 run 终态由 daemon 回报，运行
+   *    徽标经 onRefresh 详情 refetch 的 shadow_running 收口（不做本地乐观剔除，
+   *    徽标由后端状态驱动）。 ── */
+  const interruptMutation = useMutation({
+    mutationFn: (memberId: string) => interruptGroupMember(group.id, memberId),
+    onSuccess: (res) => {
+      refreshAnd(`已打断「${res.display_name}」的当前任务`);
+    },
+    onError: (err) => {
+      // 409 = 该成员当前没有运行中的任务（后端中文文案透传 warning，非失败态）。
+      if (err instanceof ApiError && err.status === 409) {
+        notify.warning(errMessage(err));
+        return;
+      }
+      notify.error(err, "打断失败，请稍后重试");
+    },
+  });
+
   const removeMutation = useMutation({
     mutationFn: (memberId: string) => removeGroupMember(group.id, memberId),
     onSuccess: () => {
@@ -343,12 +366,15 @@ export function MemberPanel({
     },
   });
 
-  /* ── 群聊体验对齐 quick：添加 Agent（单张六要素表单 → POST members agent 体）。 ── */
+  /* ── 群聊体验对齐 quick：添加 Agent（单张六要素表单 → POST members agent 体；
+   *    quick 群 P1：响应 GroupMemberAddRead.warnings 预检提示逐条透传——
+   *    未指定模型走本机默认 LLM 出口，与建群向导同口径双保险）。 ── */
   const addAgentMutation = useMutation({
     mutationFn: (config: GroupMemberAgentConfig) =>
       addGroupMember(group.id, { agent: config }),
     onSuccess: (member) => {
       refreshAnd(`已添加 Agent 成员「${member.display_name}」`);
+      for (const w of member.warnings ?? []) notify.warning(w);
       setAddingAgent(false);
     },
     onError: (err) => {
@@ -382,6 +408,21 @@ export function MemberPanel({
       okText: "重置记忆",
       cancelText: "取消",
       onOk: () => resetMemoryMutation.mutate(member.id),
+    });
+  };
+
+  /**
+   * 打断该成员当前任务（quick 群 P1）：任意群成员可操作——中断其正在处理中的
+   * 这一轮（影子会话与独立记忆保留，下一轮可继续）。
+   */
+  const confirmInterrupt = (member: GroupMemberRead) => {
+    Modal.confirm({
+      title: `确定打断「${member.display_name}」的当前任务？`,
+      content:
+        "该成员正在处理中的这一轮将被中止；影子会话与独立记忆保留，下一轮可继续。",
+      okText: "打断",
+      cancelText: "取消",
+      onOk: () => interruptMutation.mutate(member.id),
     });
   };
 
@@ -460,6 +501,9 @@ export function MemberPanel({
         const running = runningMemberIds?.has(member.id) ?? false;
         // quick 影子会话面板：有影子会话即可整卡点击打开（title 提示）。
         const shadowViewable = member.shadow_session_id != null;
+        // quick 群 P1 打断：无影子（shadow_status=none / 未挂影子会话）无任务可断。
+        const noShadow =
+          member.shadow_status === "none" || member.shadow_session_id == null;
         return (
           <div
             key={member.id}
@@ -572,50 +616,74 @@ export function MemberPanel({
                   : "未开启"}
               </span>
             </div>
-            {/* 操作（群主可见——后端 update/reset 端点 owner 强校验；quick
-                头像：换头像上传件随行，onChange 直调 PATCH） */}
-            {isOwner && (
-              <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                <GroupMemberAvatarUpload
-                  compact
-                  value={member.avatar ?? null}
-                  name={member.display_name}
-                  label={`Agent 成员 ${member.display_name} 头像`}
-                  onChange={(avatar) =>
-                    avatarMutation.mutate({
-                      memberId: member.id,
-                      avatar: avatar ?? "",
-                    })
-                  }
-                />
+            {/* 操作行：打断按钮**全员可见**（quick 群 P1——后端 interrupt 端点
+                放行任意群成员；无影子 none / 未挂影子会话时禁用）；切换配置/
+                重置记忆/移除仅群主可见（后端 update/reset/remove 端点 owner 强
+                校验；quick 头像：换头像上传件随行，onChange 直调 PATCH）。 */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {isOwner && (
+                <>
+                  <GroupMemberAvatarUpload
+                    compact
+                    value={member.avatar ?? null}
+                    name={member.display_name}
+                    label={`Agent 成员 ${member.display_name} 头像`}
+                    onChange={(avatar) =>
+                      avatarMutation.mutate({
+                        memberId: member.id,
+                        avatar: avatar ?? "",
+                      })
+                    }
+                  />
+                  <Button
+                    size="small"
+                    type="primary"
+                    disabled={switchMutation.isPending}
+                    onClick={() => setSwitching(member)}
+                  >
+                    切换配置
+                  </Button>
+                  <Button
+                    size="small"
+                    loading={resetMemoryMutation.isPending}
+                    onClick={() => confirmResetMemory(member)}
+                  >
+                    重置记忆
+                  </Button>
+                </>
+              )}
+              <Tooltip
+                title={noShadow ? "影子会话未建立，无任务可打断" : undefined}
+              >
                 <Button
                   size="small"
-                  type="primary"
-                  disabled={switchMutation.isPending}
-                  onClick={() => setSwitching(member)}
+                  icon={<Square aria-hidden className="h-3 w-3" />}
+                  disabled={noShadow}
+                  loading={interruptMutation.isPending}
+                  onClick={() => confirmInterrupt(member)}
+                  aria-label={`打断 ${member.display_name}`}
+                  title={noShadow ? undefined : "打断该成员当前运行中的任务"}
+                  data-testid={`member-interrupt-${member.id}`}
                 >
-                  切换配置
+                  打断
                 </Button>
-                <Button
-                  size="small"
-                  loading={resetMemoryMutation.isPending}
-                  onClick={() => confirmResetMemory(member)}
-                >
-                  重置记忆
-                </Button>
-                <span className="flex-1" />
-                <Button
-                  size="small"
-                  type="text"
-                  danger
-                  aria-label={`移除 ${member.display_name}`}
-                  title="移出群聊"
-                  onClick={() => confirmRemove(member)}
-                >
-                  <UserMinus aria-hidden className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            )}
+              </Tooltip>
+              {isOwner && (
+                <>
+                  <span className="flex-1" />
+                  <Button
+                    size="small"
+                    type="text"
+                    danger
+                    aria-label={`移除 ${member.display_name}`}
+                    title="移出群聊"
+                    onClick={() => confirmRemove(member)}
+                  >
+                    <UserMinus aria-hidden className="h-3.5 w-3.5" />
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         );
       })}

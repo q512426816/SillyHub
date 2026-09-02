@@ -2460,6 +2460,25 @@ export type GroupMemberAgentConfig =
 /** 用户成员邀请写体（display_name 缺省=沿用用户显示名）。 */
 export type GroupMemberUserCreate =
   components["schemas"]["GroupMemberUserCreate"];
+/**
+ * 建群响应体（api-types 生成版，禁止手写；quick 群 P1 llm_provider 预检）：
+ * GroupChatRead + ``warnings`` 非阻断提示列表（agent 成员未指定模型走本机默认
+ * LLM 出口）——仅建群/加成员响应携带，列表/详情读取路径不带。
+ */
+export type GroupChatCreateRead =
+  components["schemas"]["GroupChatCreateRead"];
+/**
+ * 加成员响应体（api-types 生成版，禁止手写；quick 群 P1 llm_provider 预检）：
+ * GroupMemberRead + ``warnings``（同建群体口径）。
+ */
+export type GroupMemberAddRead =
+  components["schemas"]["GroupMemberAddRead"];
+/**
+ * 打断 agent 成员响应体（api-types 生成版，禁止手写；quick 群 P1）：
+ * ``run_id``=被打断的活跃 run；``interrupted_by_name``=打断者群内昵称。
+ */
+export type GroupMemberInterruptRead =
+  components["schemas"]["GroupMemberInterruptRead"];
 
 /** 群聊端点 base（design §6.1 前缀偏差见本节头注释）。 */
 const GROUP_CHATS_BASE = "/api/daemon/group-chats";
@@ -2486,11 +2505,15 @@ export async function getGroupChat(
   );
 }
 
-/** POST /api/daemon/group-chats — 建群（群会话 + 群行 + 初始成员）。 */
+/**
+ * POST /api/daemon/group-chats — 建群（群会话 + 群行 + 初始成员）。响应为
+ * GroupChatCreateRead（quick 群 P1：多 ``warnings`` 非阻断提示——agent 成员
+ * 未指定模型走本机默认 LLM 出口，调用方逐条 warning 透传展示）。
+ */
 export async function createGroupChat(
   payload: GroupChatCreate,
-): Promise<GroupChatRead> {
-  return apiFetch<GroupChatRead>(GROUP_CHATS_BASE, {
+): Promise<GroupChatCreateRead> {
+  return apiFetch<GroupChatCreateRead>(GROUP_CHATS_BASE, {
     method: "POST",
     json: payload,
   });
@@ -2515,12 +2538,16 @@ export async function endGroupChat(groupId: string): Promise<GroupChatRead> {
   );
 }
 
-/** POST /api/daemon/group-chats/{id}/members — 加用户成员 / 配置 agent 成员。 */
+/**
+ * POST /api/daemon/group-chats/{id}/members — 加用户成员 / 配置 agent 成员。
+ * 响应为 GroupMemberAddRead（quick 群 P1：agent 体多 ``warnings`` 非阻断提示，
+ * 同建群体口径）。
+ */
 export async function addGroupMember(
   groupId: string,
   payload: GroupMemberCreate,
-): Promise<GroupMemberRead> {
-  return apiFetch<GroupMemberRead>(
+): Promise<GroupMemberAddRead> {
+  return apiFetch<GroupMemberAddRead>(
     `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/members`,
     { method: "POST", json: payload },
   );
@@ -2556,6 +2583,22 @@ export async function resetGroupMemberMemory(
 ): Promise<GroupMemberRead> {
   return apiFetch<GroupMemberRead>(
     `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberId)}/reset-memory`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * POST /api/daemon/group-chats/{id}/members/{mid}/interrupt — 打断 agent 成员
+ * 当前运行中的任务（quick 群 P1）：**任意群成员可打断**（后端放行，前端按钮
+ * 全员可见）；该成员无活跃 run 时 409（后端中文文案「该成员当前没有运行中的
+ * 任务」透传 warning，不打断成功提示流）。
+ */
+export async function interruptGroupMember(
+  groupId: string,
+  memberId: string,
+): Promise<GroupMemberInterruptRead> {
+  return apiFetch<GroupMemberInterruptRead>(
+    `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberId)}/interrupt`,
     { method: "POST" },
   );
 }

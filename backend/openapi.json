@@ -10921,7 +10921,7 @@
           "daemon-group-chat"
         ],
         "summary": "Create Group Chat",
-        "description": "建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。",
+        "description": "建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。\n\n响应 ``warnings``（quick 群 P1 llm_provider 预检）：agent 成员未指定模型\n（走机器本机默认 LLM 出口）的非阻断提示，前端建群向导展示。",
         "operationId": "create_group_chat_api_daemon_group_chats_post",
         "requestBody": {
           "content": {
@@ -10939,7 +10939,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GroupChatRead"
+                  "$ref": "#/components/schemas/GroupChatCreateRead"
                 }
               }
             }
@@ -11107,7 +11107,7 @@
           "daemon-group-chat"
         ],
         "summary": "Add Group Member",
-        "description": "加成员（用户邀请 / agent 六要素配置；群主或 admin）。",
+        "description": "加成员（用户邀请 / agent 六要素配置；群主或 admin）。\n\nagent 成员响应 ``warnings``（quick 群 P1 llm_provider 预检）：未指定模型\n走机器本机默认 LLM 出口的非阻断提示。",
         "operationId": "add_group_member_api_daemon_group_chats__group_id__members_post",
         "parameters": [
           {
@@ -11137,7 +11137,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GroupMemberRead"
+                  "$ref": "#/components/schemas/GroupMemberAddRead"
                 }
               }
             }
@@ -11369,6 +11369,61 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GroupDirectMessageRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/members/{member_id}/interrupt": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Interrupt Group Member",
+        "description": "群内打断 agent 成员的当前运行任务（quick 群 P1，design §8 member.interrupted）。\n\n失控 agent 人人可停：**任意群成员**可打断（权限刻意宽于群主专属操作——\n这是打断功能的存在意义）。影子未建/无活跃 run → 409；打断执行零改动\n复用单聊 interrupt 服务路径（服务身份=群主=影子属主）；成功后群频道发\n``channel='system'`` 系统行「{成员昵称} 的当前任务已被 {打断者昵称} 打断」。",
+        "operationId": "interrupt_group_member_api_daemon_group_chats__group_id__members__member_id__interrupt_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMemberInterruptRead"
                 }
               }
             }
@@ -40077,6 +40132,121 @@
         "title": "GroupChatCreate",
         "description": "``POST /api/group-chats`` 建群体（design §6.1）。\n\n初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建\n群时间线会话（AgentSession.session_kind='group'）。\n\nquick 群 PPM 项目化口径：``project_id`` 必填——群挂 PPM 项目，群工作区由\n项目关联工作区集推导（``workspace_id`` 可选：显式传入时须在项目关联集内，\n未传取首个关联工作区；项目无关联工作区 → 400）。邀请人员范围=项目成员。"
       },
+      "GroupChatCreateRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "agent_cross_mention": {
+            "type": "boolean",
+            "title": "Agent Cross Mention"
+          },
+          "cross_mention_depth": {
+            "type": "integer",
+            "title": "Cross Mention Depth"
+          },
+          "context_window": {
+            "type": "integer",
+            "title": "Context Window"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberRead"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "workspace_id",
+          "title",
+          "agent_cross_mention",
+          "cross_mention_depth",
+          "context_window",
+          "created_at"
+        ],
+        "title": "GroupChatCreateRead",
+        "description": "建群响应体（quick 群 P1 llm_provider 预检）。\n\n``warnings``：非阻断提示列表（agent 成员未指定模型走本机默认 LLM 出口）；\n其余读取路径（列表/详情）不带本字段。"
+      },
       "GroupChatDetailRead": {
         "properties": {
           "id": {
@@ -40495,6 +40665,19 @@
               }
             ],
             "title": "Context Window"
+          },
+          "settings_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Json",
+            "description": "群扩展设置；None=不改。当前支持 guardrails 子键（互@护栏群级覆盖）"
           }
         },
         "type": "object",
@@ -40567,6 +40750,184 @@
         "type": "object",
         "title": "GroupDirectMessageRequest",
         "description": "``POST /group-chats/{gid}/members/{mid}/direct-message`` 写体（影子直聊）。\n\nquick 影子直聊（2026-09-02）：群主对成员影子会话的纯会话注入——不走群\n消息链（零群时间线/零 @ 解析），content 只落影子会话；agent 回复中的\n``[[GROUP]]...[[/GROUP]]`` 段由投影层选择性发群（标记说明进注入 prompt）。\n附件口径同 ``GroupMessageSendRequest``（D-7 豁免空 content）。"
+      },
+      "GroupMemberAddRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "member_type": {
+            "type": "string",
+            "title": "Member Type"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "runtime_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "team_enabled": {
+            "type": "boolean",
+            "title": "Team Enabled",
+            "default": false
+          },
+          "config_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Snapshot"
+          },
+          "invited_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invited By"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Joined At"
+          },
+          "removed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At"
+          },
+          "shadow_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadow Session Id"
+          },
+          "shadow_status": {
+            "type": "string",
+            "title": "Shadow Status"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "member_type",
+          "display_name",
+          "joined_at",
+          "shadow_status"
+        ],
+        "title": "GroupMemberAddRead",
+        "description": "加成员响应体（quick 群 P1 llm_provider 预检）：``warnings`` 同建群体。"
       },
       "GroupMemberAgentConfig": {
         "properties": {
@@ -40860,6 +41221,43 @@
         ],
         "title": "GroupMemberDetailRead",
         "description": "群详情成员读体扩展（群聊运行态可见 quick，2026-09-02）。\n\n``shadow_running``：该 agent 成员影子会话当前有活跃 run（谓词同群侧\n``_get_shadow_active_run``）——typing 事件丢失/SSE 迟连时的运行态兜底\n信号；影子未建/已终态/用户成员恒 False。仅群详情端点填充（群列表不加，\n逐成员 LIMIT 1 查询只花在打开详情时）。"
+      },
+      "GroupMemberInterruptRead": {
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Member Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "interrupted_by_name": {
+            "type": "string",
+            "title": "Interrupted By Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_id",
+          "display_name",
+          "interrupted_by_name"
+        ],
+        "title": "GroupMemberInterruptRead",
+        "description": "``POST /group-chats/{gid}/members/{mid}/interrupt`` 响应（quick 群 P1）。\n\n``run_id``：被打断的活跃 run（=响应前查到的影子活跃轮）；``interrupted_by_name``\n为打断者群内昵称（admin 兜底放行时回落用户显示名）。"
       },
       "GroupMemberRead": {
         "properties": {

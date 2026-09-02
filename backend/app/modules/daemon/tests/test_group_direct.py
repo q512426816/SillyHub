@@ -10,9 +10,10 @@
   事件；[[GROUP]] 段 → 仅该段投影（标记剥离 + 成员身份 metadata）+ 影子原文
   完整保留（含标记）；多段依次各一行投影；partial 半截行不解析（完整行到达
   统一抽段）；
-- @轮无标记兜底：close 收口补一行「（{成员昵称} 已在会话内处理，点击成员卡
-  查看）」（metadata ``projection_fallback=True`` + 群频道 log 事件）；已投影
-  段/直聊轮不补；重复收口不重复补；
+- @轮无标记兜底：close 收口补一行回复首段摘要「{首段文本}…（完整内容见
+  成员会话）」（quick 群 P1 升级；无文本可取回退模板行——专测见
+  test_group_p1.py）（metadata ``projection_fallback=True`` + 群频道 log 事件）；
+  已投影段/直聊轮不补；重复收口不重复补；
 - 标准 inject 端点影子直聊直通：``inject_session``（非群端点）对 group_member
   影子会话 = 直聊（直聊头 + source=shadow_direct + 直聊载体 run）；忙轮排队
   条目链标记带 source；群 @ 触发路径自带 metadata 不被覆盖（回归）；
@@ -1208,9 +1209,13 @@ class TestDirectTurnProjection:
         db_session: AsyncSession,
         recording_redis,
     ) -> None:
-        """@轮整轮无任何标记 → close 收口补一行兜底投影行（防群里死寂）：
-        内容含成员昵称 + metadata projection_fallback=True + 群频道 log 事件
-        （log_id=兜底行 id）；重复收口不重复补行（终态守卫）。"""
+        """@轮整轮无任何标记 → close 收口补一行兜底投影行（防群里死寂）。
+
+        quick 群 P1 兜底升级：内容=本轮首个非空 assistant 文本段摘要（剥
+        [ASSISTANT] 前缀）+「…（完整内容见成员会话）」；metadata
+        projection_fallback=True + 群频道 log 事件（log_id=兜底行 id）；
+        重复收口不重复补行（终态守卫）。
+        """
         _sink, redis = recording_redis
         seed = await _seed_group_bridge(db_session)  # turn_source=None（@轮）
         svc = DaemonService(db_session)
@@ -1242,7 +1247,7 @@ class TestDirectTurnProjection:
         assert len(carrier_rows) == 1, "无标记 @轮收口应补一行兜底投影行"
         fallback = carrier_rows[0]
         assert fallback.channel == "stdout"
-        assert fallback.content_redacted == "（小码 已在会话内处理，点击成员卡查看）"
+        assert fallback.content_redacted == "过程文字，无标记…（完整内容见成员会话）"
         meta = fallback.metadata_ or {}
         assert meta["member_id"] == str(seed.member.id)
         assert meta["member_name"] == "小码"
@@ -1257,7 +1262,7 @@ class TestDirectTurnProjection:
         ]
         assert len(log_events) == 1
         assert log_events[0]["log_id"] == str(fallback.id)
-        assert log_events[0]["content"] == "（小码 已在会话内处理，点击成员卡查看）"
+        assert log_events[0]["content"] == "过程文字，无标记…（完整内容见成员会话）"
         assert log_events[0]["member_name"] == "小码"
 
         # 幂等：重复收口（终态 no-op）不再补行。

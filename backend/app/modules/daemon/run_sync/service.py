@@ -220,7 +220,8 @@ def is_group_projectable_reply(channel: str | None, content: object) -> bool:
 # [[GROUP]]...[[/GROUP]] 包裹要转发的段落——投影层仅抽该段生成投影行（标记
 # 剥离只投内容；同轮多段各成一行、保序）。标记原文保留在影子会话 stdout
 # 原文（会话内显示完整含标记）；未闭合标记不匹配（不转发半截）。@轮整轮
-# 无标记时由 close_interactive_run 补一行兜底系统行（防群里死寂，见
+# 无标记时由 close_interactive_run 补一行兜底行（quick 群 P1 起为回复首段
+# 摘要 + 「完整内容见成员会话」，防群里死寂，见
 # _emit_group_mention_projection_fallback）。标记词与 daemon/group/service.py
 # _SHADOW_DIRECT_HEADER / _GROUP_REPLY_MARKER_REQUIREMENT 中的说明逐字节一致
 # （[[GROUP]] / [[/GROUP]]，大小写敏感）。
@@ -232,9 +233,13 @@ def extract_group_broadcast_segments(text: str) -> list[str]:
     return [m.strip() for m in _GROUP_BROADCAST_MARKER_RE.findall(text) if m.strip()]
 
 
-# quick 投影统一标记制（2026-09-02）：@轮无标记兜底行文案（防群里死寂）——
-# 见 RunSyncService._emit_group_mention_projection_fallback。
+# quick 投影统一标记制（2026-09-02）：@轮无标记兜底行——见
+# RunSyncService._emit_group_mention_projection_fallback。quick 群 P1（2026-09-02）
+# 兜底升级：优先投影本轮回复首段摘要（前 ``GROUP_FALLBACK_SUMMARY_CHARS`` 字），
+# 无文本可取时回退本模板行（保底不变）。
 GROUP_PROJECTION_FALLBACK_TEMPLATE = "（{member_name} 已在会话内处理，点击成员卡查看）"
+# 兜底摘要截断长度（首段前缀）。
+GROUP_FALLBACK_SUMMARY_CHARS = 200
 
 
 # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
@@ -752,6 +757,11 @@ class RunSyncService:
     # 仅 [[GROUP]] 段投影后，agent 忘记打标记 → 群里整轮死寂（用户不知成员
     # 已处理）。收口时补一行简短系统行防死寂（群前端现有渲染显示为普通
     # agent 气泡，可接受）。
+    # quick 群 P1（2026-09-02）兜底升级：模板行 → 回复首段摘要——查影子 run
+    # 本轮完整 assistant 文本（``is_group_projectable_reply`` 同口径过滤，
+    # 剥 ``[ASSISTANT]`` 前缀），取首个非空文本段前
+    # ``GROUP_FALLBACK_SUMMARY_CHARS`` 字投影；无文本可取（整轮纯工具/thinking）
+    # 回退原模板行（保底不变）。
     async def _emit_group_mention_projection_fallback(self, agent_run: AgentRun) -> None:
         """群 @ 轮收口时的无标记兜底行（quick 投影统一标记制 2026-09-02）。
 
@@ -762,6 +772,9 @@ class RunSyncService:
         身份 + ``projection_fallback: True``（前端/回放可辨识兜底行）。幂等：
         兜底行本身带成员身份 metadata，重复收口（终态守卫后不会发生）或并发
         下二次进入时按「已有本成员投影行」跳过。
+
+        兜底内容（quick 群 P1）：影子 run 本轮首个非空 assistant 文本段前
+        200 字 + 「…（完整内容见成员会话）」；无文本可取回退模板行。
 
         独立小事务（close 主 commit 之后追加），fail-open：异常不阻断
         turn_completed / 互@检测 / 排队派发（调用方 try/except 包裹）。
@@ -786,7 +799,14 @@ class RunSyncService:
                 return
         now = datetime.now(UTC)
         fallback_id = uuid.uuid4()
-        fallback_content = GROUP_PROJECTION_FALLBACK_TEMPLATE.format(member_name=ctx.member_name)
+        # quick 群 P1 兜底升级：优先投影回复首段摘要；无文本可取回退模板行。
+        summary = await self._build_group_fallback_summary(agent_run)
+        if summary is not None:
+            fallback_content = f"{summary}…（完整内容见成员会话）"
+        else:
+            fallback_content = GROUP_PROJECTION_FALLBACK_TEMPLATE.format(
+                member_name=ctx.member_name
+            )
         self._session.add(
             AgentRunLog(
                 id=fallback_id,
@@ -833,6 +853,31 @@ class RunSyncService:
                 agent_run_id=str(agent_run.id),
                 group_id=str(ctx.group_id),
             )
+
+    async def _build_group_fallback_summary(self, agent_run: AgentRun) -> str | None:
+        """兜底行摘要（quick 群 P1）：影子 run 本轮首个非空 assistant 文本段。
+
+        过滤口径与投影判定同源（``is_group_projectable_reply``——thinking/tool/
+        系统行不进摘要），剥 ``[ASSISTANT]`` 前缀后取前
+        ``GROUP_FALLBACK_SUMMARY_CHARS`` 字；整轮无可取文本（纯工具/thinking 轮）
+        返回 None（调用方回退模板行）。
+        """
+        rows = (
+            await self._session.execute(
+                select(AgentRunLog.channel, AgentRunLog.content_redacted)
+                .where(AgentRunLog.run_id == agent_run.id)
+                .order_by(AgentRunLog.timestamp, AgentRunLog.id)
+            )
+        ).all()
+        for channel, content in rows:
+            if not is_group_projectable_reply(channel, content):
+                continue
+            text = content.strip()
+            if text.startswith("[ASSISTANT]"):
+                text = text[len("[ASSISTANT]") :].strip()
+            if text:
+                return text[:GROUP_FALLBACK_SUMMARY_CHARS]
+        return None
 
     async def _resolve_dispatch_run_id(
         self,

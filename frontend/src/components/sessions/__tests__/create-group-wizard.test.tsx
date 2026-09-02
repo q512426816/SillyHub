@@ -22,6 +22,12 @@
  *      （/api/file/{id}）；可清除恢复默认（payload 不带 avatar）
  *   4. 校验：昵称必填/保留词（全体、all）/群内查重即时报错；agent 8 上限
  *      拦截；项目无关联工作区禁下一步（引导文案）
+ *   5. 团队能力开关（quick 群成员团队能力）：payload team_enabled 透传 +
+ *      codex 联动禁用
+ *   6. 模型预检（quick 群 P1 llm_provider 预检）：llm_provider 未选（空）→
+ *      卡片底部 warning 警示条（本机默认 LLM 出口不可用则成员无法响应）；
+ *      选中供应商消失；codex 引擎（本机模型语义）不显示；建群成功响应
+ *      warnings 逐条 notify.warning 透传（后端双保险）。
  *
  * mock 策略（对齐 sessions/__tests__ 既有惯例）：
  *   - @/lib/api 仅覆写 apiFetch（daemon.ts 真实实现消费 mock——向导提交与
@@ -61,7 +67,7 @@ import {
   resetGroupMemberMemory,
   updateGroupChat,
   updateGroupMember,
-  type GroupChatRead,
+  type GroupChatCreateRead,
 } from "@/lib/daemon";
 import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
 
@@ -78,6 +84,13 @@ const mocks = vi.hoisted(() => ({
   listProjectMembers: vi.fn(),
   listProjectWorkspaces: vi.fn(),
   uploadFile: vi.fn(),
+  // quick 群 P1 llm_provider 预检：notify 断言面（建群响应 warnings 逐条透传
+  // ——共享 spy，clearMocks 按用例清调用记录）。
+  notify: {
+    success: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -130,11 +143,12 @@ vi.mock("@/stores/session", () => {
   return { useSession };
 });
 
-// jsdom 无 antd <App> 上下文：useNotify 挂 spy（session-list-panel.test 同款）。
+// jsdom 无 antd <App> 上下文：useNotify 挂 spy（session-list-panel.test 同款；
+// quick 群 P1 改共享 spy——warnings 透传断言面）。
 vi.mock("@/lib/errors", () => ({
   errMessage: (err: unknown) =>
     err instanceof Error ? err.message : "操作失败",
-  useNotify: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
+  useNotify: () => mocks.notify,
 }));
 
 // ── antd Select 触发助手（session-list-panel.test 同款，经 id 锚定） ──────
@@ -281,9 +295,10 @@ function makeProjectWorkspace(
   };
 }
 
+/** 建群响应固件（GroupChatCreateRead——quick 群 P1 多 warnings 预检提示）。 */
 function makeGroupRead(
-  overrides: Partial<GroupChatRead> = {},
-): GroupChatRead {
+  overrides: Partial<GroupChatCreateRead> = {},
+): GroupChatCreateRead {
   return {
     id: "g-new",
     session_id: "s-g-new",
@@ -907,5 +922,123 @@ describe("CreateGroupWizard 团队能力开关（quick 群成员团队能力）"
     };
     expect(json.agent_members[0]!.provider).toBe("codex");
     expect(json.agent_members[0]!.team_enabled).toBe(false);
+  });
+});
+
+// ── 6. 模型预检（quick 群 P1 llm_provider 预检：卡片警示条 + 响应 warnings） ──
+
+describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）", () => {
+  /**
+   * 在「当前可见」下拉里选指定文案选项——antd 关闭的下拉仍挂载在 DOM（隐藏），
+   * 全文找首个匹配会命中早前开过的下拉残留（如机器下拉的「Codex」），故按
+   * ``.ant-select-dropdown:not(.ant-select-dropdown-hidden)`` 作用域锚定
+   * （团队能力 describe 同款）。
+   */
+  async function chooseVisibleOption(selectId: string, optionText: string) {
+    openAntdSelect(selectId);
+    const option = await waitFor(() => {
+      const visible = [
+        ...document.querySelectorAll(
+          ".ant-select-dropdown:not(.ant-select-dropdown-hidden)",
+        ),
+      ];
+      const hit = visible
+        .flatMap((d) => [...d.querySelectorAll(".ant-select-item-option-content")])
+        .find((el) => el.textContent?.trim() === optionText);
+      if (!hit) throw new Error(`visible option "${optionText}" not found`);
+      return hit as HTMLElement;
+    });
+    const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+    fireEvent.mouseDown(optionRow);
+    fireEvent.click(optionRow);
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  /** 三步走到 ③ 并加一张就绪卡片（昵称/机器/工作区；模型保持未选）。 */
+  async function setupCardForModel() {
+    renderWizard(
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "群" },
+    });
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /添加 Agent 成员/ }),
+    );
+    fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+      target: { value: "小码" },
+    });
+    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+  }
+
+  it("模型未选（空）→ 卡片底部 warning 警示条；选中供应商后消失", async () => {
+    await setupCardForModel();
+
+    const warn = await screen.findByTestId("agent-model-warning");
+    expect(warn.textContent).toContain("未指定模型");
+    expect(warn.textContent).toContain("本机默认 LLM 出口");
+    expect(warn.className).toContain("text-warning");
+
+    // 选中 GLM 供应商 → 警示条消失（已选不显示）。
+    await chooseAntdOptionByText("cgw-model-0", "GLM 供应商");
+    await waitFor(() =>
+      expect(screen.queryByTestId("agent-model-warning")).toBeNull(),
+    );
+  });
+
+  it("引擎切 Codex（本机模型语义，无供应商选择）→ 不显示预检警示条", async () => {
+    await setupCardForModel();
+    expect(screen.getByTestId("agent-model-warning")).toBeTruthy();
+
+    await chooseVisibleOption("cgw-engine-0", "Codex");
+    await waitFor(() =>
+      expect(screen.queryByTestId("agent-model-warning")).toBeNull(),
+    );
+    // codex 提示语照常（引擎级说明，非预检警示）。
+    expect(
+      screen.getByText("Codex 引擎使用其本机模型配置，无需选择供应商"),
+    ).toBeTruthy();
+  });
+
+  it("建群成功响应含 warnings → notify.warning 逐条透传（后端双保险）", async () => {
+    mocks.apiFetch.mockResolvedValueOnce(
+      makeGroupRead({
+        warnings: [
+          "成员「小码」未指定模型，将使用机器本机默认 LLM 出口（若不可用该成员将无法响应）",
+          "成员「小测」未指定模型，将使用机器本机默认 LLM 出口（若不可用该成员将无法响应）",
+        ],
+      }),
+    );
+    await setupCardForModel();
+
+    fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mocks.notify.warning).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.notify.warning).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("成员「小码」未指定模型"),
+    );
+    expect(mocks.notify.warning).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("成员「小测」未指定模型"),
+    );
+  });
+
+  it("建群成功响应无 warnings → 不弹 warning（成功提示照常）", async () => {
+    await setupCardForModel();
+    // 模型已选 → 卡片警示条不显示。
+    await chooseAntdOptionByText("cgw-model-0", "GLM 供应商");
+
+    fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+    await waitFor(() => expect(mocks.notify.success).toHaveBeenCalledTimes(1));
+    expect(mocks.notify.warning).not.toHaveBeenCalled();
   });
 });

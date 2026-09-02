@@ -32,12 +32,15 @@
  *      ——照 session-config-bar providerLocked 先例禁用）/ 智能体方案
  *      （AgentProfile，缺省=用默认）/ 团队能力开关（quick 群成员团队能力：可派
  *      分身并行干活，仅 Claude 引擎——codex 禁用+tooltip））；每张卡片可上传
- *      成员头像（填 GroupMemberAgentConfig.avatar）。
+ *      成员头像（填 GroupMemberAgentConfig.avatar）；模型未选（空）时卡片底部
+ *      预检警示条（quick 群 P1 llm_provider 预检——本机默认 LLM 出口不可用则
+ *      该成员无法响应，建议选平台供应商）。
  *
  * 提交调 createGroupChat（GroupChatCreate：project_id 必填、**不带
  * workspace_id**（后端推导）；agent_cross_mention 默认开 / cross_mention_depth
  * context_window 20——后端 schema 同款默认值镜像，生成版 TS 类型必填须显式
- * 传）；成功 invalidate ["groupChats"] 前缀 + onCreated(新群) 由门户选中新群。
+ * 传）；成功 invalidate ["groupChats"] 前缀 + onCreated(新群) 由门户选中新群；
+ * 响应 GroupChatCreateRead.warnings（quick 群 P1 预检双保险）逐条 warning 透传。
  *
  * 样式：AI-Native 双主题铁律——brand-* 语义阶 / 不手写 hex / shadow token；
  * 侧栏内组件禁 md: 响应式前缀（本组件为模态，固定 grid-cols-2 两列）。
@@ -381,6 +384,10 @@ export function CreateGroupWizard({
       // 群分区顶部）。
       void qc.invalidateQueries({ queryKey: ["groupChats"] });
       notify.success(`群聊「${group.title}」已创建`);
+      // quick 群 P1 llm_provider 预检（后端双保险）：建群响应 warnings 非阻断
+      // 提示逐条透传（agent 成员未指定模型走本机默认 LLM 出口——卡片内已有
+      // 前置提示条，此处兜底卡片遗漏/直连建群等场景）。
+      for (const w of group.warnings ?? []) notify.warning(w);
       onCreated(group);
     },
     onError: (err) => {
@@ -902,6 +909,18 @@ export function CreateGroupWizard({
                       </span>
                     </div>
                   </div>
+                  {/* 模型预检提示条（quick 群 P1）：llm_provider 未选（空）时警示
+                      ——走机器本机默认 LLM 出口，出口不可用该成员将无法响应；
+                      已选供应商（或 codex 引擎本机模型语义）不显示。 */}
+                  {card.provider === "claude" && card.llmProviderId === "" && (
+                    <p
+                      data-testid="agent-model-warning"
+                      className="mt-2 rounded-md bg-warning/10 px-2.5 py-1.5 text-xs leading-5 text-warning"
+                    >
+                      未指定模型：将使用机器本机默认 LLM 出口，若不可用该成员将
+                      无法响应——建议选择平台供应商。
+                    </p>
+                  )}
                 </div>
               );
             })}

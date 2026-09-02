@@ -810,7 +810,8 @@ class TestGroupDetailShadowRunning:
 
         # 群列表端点不加：members 仍为基线读体（无 shadow_running 字段）。
         fake_redis = AsyncMock()
-        fake_redis.keys = AsyncMock(return_value=[])
+        # quick 群 P1：presence 读已换 SCAN（单批游标归 0，零在线）。
+        fake_redis.scan = AsyncMock(return_value=(0, []))
         with mock_patch("app.modules.daemon.group.service.get_redis", return_value=fake_redis):
             resp = await client.get("/api/daemon/group-chats", headers=_headers(env.owner_token))
         assert resp.status_code == 200
@@ -905,24 +906,35 @@ class TestPresence:
     async def test_get_online_member_ids_parses_keys_and_tolerates_dirty(
         self,
     ) -> None:
-        """keys 前缀扫 → 用户 id 集；脏 key 跳过；Redis 故障降级空数组。"""
+        """SCAN 游标扫（多批）→ 用户 id 集；脏 key 跳过；Redis 故障降级空数组。
+
+        quick 群 P1 审计（2026-09-02）：KEYS 前缀扫换 SCAN 游标分批——本用例
+        同时锁游标循环（首批返回非 0 游标 → 续扫到游标归 0）。
+        """
         gid = uuid.uuid4()
         u1, u2 = uuid.uuid4(), uuid.uuid4()
         redis = AsyncMock()
-        redis.keys = AsyncMock(
-            return_value=[
-                f"group_presence:{gid}:{u1}",
-                f"group_presence:{gid}:{u2}",
-                f"group_presence:{gid}:garbage",  # 脏 key（截断/残留）
-                "group_presence:other:noise",
+        # 首批：非 0 游标（还有下一批）；脏 key / 他人群 key 一并混入。
+        redis.scan = AsyncMock(
+            side_effect=[
+                (
+                    17,
+                    [
+                        f"group_presence:{gid}:{u1}",
+                        f"group_presence:{gid}:garbage",  # 脏 key（截断/残留）
+                        "group_presence:other:noise",
+                    ],
+                ),
+                (0, [f"group_presence:{gid}:{u2}"]),
             ]
         )
         with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
             online = await get_online_member_ids(gid)
         assert sorted(online, key=str) == sorted([u1, u2], key=str)
+        assert redis.scan.await_count == 2, "非 0 游标应续扫直至归 0"
 
         broken = AsyncMock()
-        broken.keys = AsyncMock(side_effect=ConnectionError("redis down"))
+        broken.scan = AsyncMock(side_effect=ConnectionError("redis down"))
         with mock_patch("app.modules.daemon.group.service.get_redis", return_value=broken):
             assert await get_online_member_ids(gid) == []
 
@@ -943,7 +955,8 @@ class TestPresence:
         group_id = uuid.UUID(data["id"])
 
         fake_redis = AsyncMock()
-        fake_redis.keys = AsyncMock(return_value=[f"group_presence:{group_id}:{env.owner.id}"])
+        # SCAN 单批游标归 0（quick 群 P1：KEYS → SCAN）。
+        fake_redis.scan = AsyncMock(return_value=(0, [f"group_presence:{group_id}:{env.owner.id}"]))
         with mock_patch("app.modules.daemon.group.service.get_redis", return_value=fake_redis):
             resp = await client.get("/api/daemon/group-chats", headers=_headers(env.owner_token))
             assert resp.status_code == 200
