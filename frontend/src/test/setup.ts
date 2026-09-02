@@ -59,3 +59,13 @@ if (!globalThis.ResizeObserver) {
     } as unknown as typeof ResizeObserver,
   });
 }
+
+// URL.createObjectURL polyfill: jsdom 未实现（FileImage / GroupMemberAvatar 等
+// blob 图片渲染链路需要——fetchFileBlob → objectURL → <img>；revoke 配套补齐）。
+if (typeof URL.createObjectURL !== "function") {
+  URL.createObjectURL = () =>
+    `blob:mock-${Math.random().toString(36).slice(2)}`;
+}
+if (typeof URL.revokeObjectURL !== "function") {
+  URL.revokeObjectURL = () => {};
+}

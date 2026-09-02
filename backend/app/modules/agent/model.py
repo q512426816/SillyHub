@@ -1147,6 +1147,8 @@ class AgentGroupChat(BaseModel, table=True):
         UniqueConstraint("session_id", name="uq_agent_group_chats_session"),
         # 权限锚工作区维度的群列表兜底查询（§5.3 workspace admin 分支）。
         Index("ix_agent_group_chats_workspace", "workspace_id"),
+        # 群挂 PPM 项目（quick 群 PPM 项目化：建群必填；存量行 NULL=存量群）。
+        Index("ix_agent_group_chats_project", "project_id"),
     )
 
     id: uuid.UUID = Field(
@@ -1168,6 +1170,16 @@ class AgentGroupChat(BaseModel, table=True):
             Uuid(as_uuid=True),
             ForeignKey("workspaces.id", ondelete="CASCADE"),
             nullable=False,
+        ),
+    )
+    # 群挂的 PPM 项目（quick 群 PPM 项目化：建群必填，工作区由项目关联集推导；
+    # 项目删则 SET NULL——存量群 project_id 为 NULL 时邀请范围回退 workspace 口径）。
+    project_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("ppm_project_maintenance.id", ondelete="SET NULL"),
+            nullable=True,
         ),
     )
     title: str = Field(sa_column=Column(String(120), nullable=False))
@@ -1272,6 +1284,12 @@ class AgentGroupMember(BaseModel, table=True):
     # 'user' | 'agent'
     # 群内昵称 = @提及词（群内唯一，见 __table_args__ 约束；六要素之一）。
     display_name: str = Field(sa_column=Column(String(40), nullable=False))
+    # 群内头像（quick 成员头像：文件中心上传端点产出的 URL；用户与 agent 成员
+    # 共用同一列，NULL=未自定义（前端回退默认昵称首字头像））。
+    avatar: str | None = Field(
+        default=None,
+        sa_column=Column(String(512), nullable=True),
+    )
     # 用户成员归属（member_type='user' 时由 service 层保证非 NULL；用户删
     # 则成员行随删）。
     user_id: uuid.UUID | None = Field(

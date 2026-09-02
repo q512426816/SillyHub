@@ -13834,15 +13834,25 @@ export interface components {
          *
          *     初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建
          *     群时间线会话（AgentSession.session_kind='group'）。
+         *
+         *     quick 群 PPM 项目化口径：``project_id`` 必填——群挂 PPM 项目，群工作区由
+         *     项目关联工作区集推导（``workspace_id`` 可选：显式传入时须在项目关联集内，
+         *     未传取首个关联工作区；项目无关联工作区 → 400）。邀请人员范围=项目成员。
          */
         GroupChatCreate: {
             /** Title */
             title: string;
             /**
-             * Workspace Id
+             * Project Id
              * Format: uuid
+             * @description PPM 项目（群归属；工作区由项目关联集推导）
              */
-            workspace_id: string;
+            project_id: string;
+            /**
+             * Workspace Id
+             * @description 工作区；None=自动取项目首个关联工作区（显式传入须在项目关联集内）
+             */
+            workspace_id?: string | null;
             /**
              * Agent Cross Mention
              * @description agent 互@协作开关（默认开）
@@ -13852,7 +13862,7 @@ export interface components {
             /**
              * Cross Mention Depth
              * @description 协作链深度上限（防环护栏）
-             * @default 2
+             * @default 4
              */
             cross_mention_depth: number;
             /**
@@ -13890,6 +13900,8 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+            /** Project Id */
+            project_id?: string | null;
             /** Title */
             title: string;
             /** Created By */
@@ -13942,6 +13954,8 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+            /** Project Id */
+            project_id?: string | null;
             /** Title */
             title: string;
             /** Created By */
@@ -13994,6 +14008,8 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+            /** Project Id */
+            project_id?: string | null;
             /** Title */
             title: string;
             /** Created By */
@@ -14047,6 +14063,11 @@ export interface components {
              */
             display_name: string;
             /**
+             * Avatar
+             * @description 群内头像 URL（文件中心上传产出）
+             */
+            avatar?: string | null;
+            /**
              * Runtime Id
              * Format: uuid
              * @description 机器（daemon runtime，pinned 派发）
@@ -14086,7 +14107,8 @@ export interface components {
          * @description 成员读体（群详情/成员面板，design §6.1）。
          *
          *     agent 成员六要素全量返回（用户成员对应列为 None）；``shadow_status``
-         *     供面板绿点（none/pending/active/failed）。
+         *     供面板绿点（none/pending/active/failed）；``avatar`` 为群内头像 URL
+         *     （用户与 agent 成员共用，None=未自定义）。
          */
         GroupMemberRead: {
             /**
@@ -14098,6 +14120,8 @@ export interface components {
             member_type: string;
             /** Display Name */
             display_name: string;
+            /** Avatar */
+            avatar?: string | null;
             /** User Id */
             user_id?: string | null;
             /** Runtime Id */
@@ -14164,6 +14188,11 @@ export interface components {
         GroupMemberUpdate: {
             /** Display Name */
             display_name?: string | null;
+            /**
+             * Avatar
+             * @description 群内头像 URL；None=不改
+             */
+            avatar?: string | null;
             /** Runtime Id */
             runtime_id?: string | null;
             /** Workspace Id */
@@ -14190,6 +14219,11 @@ export interface components {
              * @description 群内昵称；None=沿用用户显示名（service 层解析并查重）
              */
             display_name?: string | null;
+            /**
+             * Avatar
+             * @description 群内头像 URL（文件中心上传产出）
+             */
+            avatar?: string | null;
         };
         /**
          * GroupMessageSendRead

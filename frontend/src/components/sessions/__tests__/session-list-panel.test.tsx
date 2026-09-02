@@ -63,6 +63,7 @@ import type * as React from "react";
 import {
   SessionListPanel,
   SESSION_TREE_EXPANSION_LS_KEY,
+  GROUP_SECTION_COLLAPSED_LS_KEY,
   sessionListPollInterval,
   type SessionListScope,
 } from "@/components/sessions/session-list-panel";
@@ -429,6 +430,8 @@ beforeEach(() => {
   mocks.machinesRefetch.mockReset();
   // ql-20260824-002：展开记忆隔离（用户手动 toggle 落盘，跨用例须清）
   window.localStorage.removeItem(SESSION_TREE_EXPANSION_LS_KEY);
+  // quick：群聊分区折叠记忆隔离（跨用例须清）。
+  window.localStorage.removeItem(GROUP_SECTION_COLLAPSED_LS_KEY);
 });
 
 afterEach(() => {
@@ -2400,5 +2403,91 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
     expect(
       await screen.findByRole("button", { name: "群聊 前端攻坚小分队" }),
     ).toBeTruthy();
+  });
+});
+
+// ── 12. 群聊分区折叠（quick：折叠交互 + localStorage 记忆） ────────────────
+
+describe("SessionListPanel 群聊分区折叠（quick）", () => {
+  it("默认展开：点分区头折叠 → 群行隐藏只留一行摘要（群聊 + 计数）→ localStorage 记忆", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+
+    const row = await screen.findByRole("button", {
+      name: "群聊 前端攻坚小分队",
+    });
+    const header = screen.getByLabelText("群聊分区头");
+    expect(header).toHaveAttribute("aria-expanded", "true");
+
+    // 点分区头 → 折叠：群行隐藏、仅剩一行摘要（计数仍在头行）。
+    fireEvent.click(header);
+    await waitFor(() =>
+      expect(screen.getByLabelText("群聊分区头")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      ),
+    );
+    expect(
+      screen.queryByRole("button", { name: "群聊 前端攻坚小分队" }),
+    ).toBeNull();
+    expect(screen.getByText("1 个")).toBeTruthy();
+    expect(
+      window.localStorage.getItem(GROUP_SECTION_COLLAPSED_LS_KEY),
+    ).toBe("1");
+
+    // 再点 → 展开恢复（记忆同步翻回）。
+    fireEvent.click(screen.getByLabelText("群聊分区头"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("群聊分区头")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    expect(
+      await screen.findByRole("button", { name: "群聊 前端攻坚小分队" }),
+    ).toBeTruthy();
+    expect(
+      window.localStorage.getItem(GROUP_SECTION_COLLAPSED_LS_KEY),
+    ).toBe("0");
+  });
+
+  it("重进页面读记忆：localStorage=1 → 初始即折叠（刷新恢复用户折叠态）", async () => {
+    window.localStorage.setItem(GROUP_SECTION_COLLAPSED_LS_KEY, "1");
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+
+    // 记忆命中：初始即折叠（群行零渲染），计数摘要仍在（等群列表就位）。
+    await waitFor(() =>
+      expect(screen.getByLabelText("群聊分区头")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      ),
+    );
+    expect(await screen.findByText("1 个")).toBeTruthy();
+    expect(
+      screen.queryByTestId("group-chat-row"),
+    ).toBeNull();
+  });
+
+  it("折叠态分区头「＋」不触发折叠（stopPropagation）→ onNewGroup 正常回调", async () => {
+    const onNewGroup = vi.fn();
+    window.localStorage.setItem(GROUP_SECTION_COLLAPSED_LS_KEY, "1");
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPanel(
+      <SessionListPanel onSelectGroup={vi.fn()} onNewGroup={onNewGroup} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("群聊分区头")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "新建群聊" }));
+    expect(onNewGroup).toHaveBeenCalledTimes(1);
+    // 点「＋」不改变折叠态。
+    expect(screen.getByLabelText("群聊分区头")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 });

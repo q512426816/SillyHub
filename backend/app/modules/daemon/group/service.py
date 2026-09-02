@@ -81,6 +81,13 @@ task-04（design §4.4 互@协作 / §4.5 配置热切换 / §8 member.config.sw
   静默切换轮（SESSION_SWITCH_CONFIG 下轮边界生效，SDK resume id 不变记忆
   延续）；机器组（runtime/workspace）→ end 影子 + ``pending`` + 指针置空
   （下次触发懒重建，记忆重置）。
+
+quick 群 PPM 项目化+成员头像（2026-09-02）：建群 ``project_id`` 必填，群
+workspace 由项目关联工作区集推导（显式传入须在集内 / 未传取首个 / 无关联
+400）；建群者与受邀用户须为项目成员（``PpmProjectMember``）；agent 成员
+cwd 工作区同样须在项目关联集内。存量群（project_id NULL，含项目删除后
+SET NULL 的群）加成员回退 workspace 成员范围。成员 ``avatar``（文件中心
+URL）用户与 agent 成员共用，读写透传（None=不改）。
 """
 
 from __future__ import annotations
@@ -115,6 +122,7 @@ from app.modules.agent.schema import (
     GroupMemberCreate,
     GroupMemberRead,
     GroupMemberUpdate,
+    GroupMemberUserCreate,
 )
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
@@ -1173,6 +1181,86 @@ class GroupChatService:
         read.members = [GroupMemberRead.model_validate(m) for m in members]
         return read
 
+    # ── 项目口径 helper（quick 群 PPM 项目化）────────────────────────────────
+
+    async def _project_linked_workspace_ids(self, project_id: uuid.UUID) -> set[uuid.UUID]:
+        """项目关联工作区 id 集（link_service.list_by_project，过滤软删工作区）。"""
+        from app.modules.workspace import link_service
+
+        linked = await link_service.list_by_project(self._session, ppm_project_id=project_id)
+        return {w.workspace_id for w in linked}
+
+    async def _project_member_user_ids(self, project_id: uuid.UUID) -> set[uuid.UUID]:
+        """项目成员 user_id 集（PpmProjectMember.pm_project_id → user_id）。"""
+        from app.modules.ppm.project.model import PpmProjectMember
+
+        rows = (
+            (
+                await self._session.execute(
+                    select(PpmProjectMember.user_id).where(
+                        PpmProjectMember.pm_project_id == project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return set(rows)
+
+    async def _require_user_in_member_scope(self, group: AgentGroupChat, target: User) -> None:
+        """邀请人员范围校验：项目群=项目成员；存量群（project_id NULL）回退 workspace 范围。
+
+        建群口径（create_group）：project_id 必填、建群者本人须为项目成员——
+        本 helper 只服务加成员（add_member）与建群邀请（调用方自持集合）；
+        存量群回退口径=目标用户在群工作区有任意 workspace 角色（含 platform
+        admin 短路兜底）。
+        """
+        if group.project_id is not None:
+            if target.id not in await self._project_member_user_ids(group.project_id):
+                raise GroupChatInvalid(
+                    "邀请的用户不是项目成员，无法加入群聊。",
+                    details={
+                        "user_id": str(target.id),
+                        "project_id": str(group.project_id),
+                    },
+                )
+            return
+        # 存量群回退 workspace 成员范围（quick 前口径的宽松版：有角色即视为成员）。
+        from app.modules.auth.model import UserWorkspaceRole
+
+        row = await self._session.execute(
+            select(UserWorkspaceRole.user_id).where(
+                UserWorkspaceRole.workspace_id == group.workspace_id,
+                UserWorkspaceRole.user_id == target.id,
+            )
+        )
+        if row.first() is not None:
+            return
+        if target.is_platform_admin:
+            return
+        raise GroupChatInvalid(
+            "邀请的用户不是该工作区成员，无法加入群聊。",
+            details={"user_id": str(target.id), "workspace_id": str(group.workspace_id)},
+        )
+
+    async def _ensure_member_workspace_in_project(
+        self, group: AgentGroupChat, workspace_id: uuid.UUID
+    ) -> None:
+        """agent 成员 cwd 工作区校验：项目群须在项目关联工作区集内。
+
+        存量群（project_id NULL）回退原逻辑——不校验（quick 前口径即直存）。
+        """
+        if group.project_id is None:
+            return
+        if workspace_id not in await self._project_linked_workspace_ids(group.project_id):
+            raise GroupChatInvalid(
+                "agent 成员的工作区不在项目关联范围内。",
+                details={
+                    "workspace_id": str(workspace_id),
+                    "project_id": str(group.project_id),
+                },
+            )
+
     # ── 影子会话 end 子链（解散/移除 agent 成员/reset-memory 共用）────────────
 
     async def _end_member_shadow(
@@ -1221,22 +1309,64 @@ class GroupChatService:
     async def create_group(self, user: User, payload: GroupChatCreate) -> GroupChatRead:
         """建群（design §8 group.created）：群会话 + 群行 + 初始成员（单事务）。
 
-        校验（全部前置，无半成品落库）：workspace 存在且未归档；上限（用户
-        50 含建群者 / agent 8）；用户成员存在；agent 成员六要素引用存在；
-        昵称唯一（用户与 agent 共用命名空间）+ 保留词。
+        校验（全部前置，无半成品落库）：项目存在且有关联工作区（群 workspace
+        由项目关联集推导——显式传入须在集内，未传取首个）；建群者为项目成员；
+        上限（用户 50 含建群者 / agent 8）；用户成员存在且为项目成员；agent
+        成员六要素引用存在且 cwd 工作区在项目关联集内；昵称唯一（用户与 agent
+        共用命名空间）+ 保留词。
+
+        quick 群 PPM 项目化口径：``project_id`` 必填落群行；项目删除后存量群
+        project_id 被 SET NULL，成员邀请范围回退 workspace 口径（add_member）。
         """
         from app.modules.agent.profile.model import AgentProfile
         from app.modules.llm_provider.model import LlmProvider
+        from app.modules.ppm.project.model import PpmProjectMaintenance
+        from app.modules.workspace import link_service
         from app.modules.workspace.model import Workspace
         from app.modules.workspace.service import WorkspaceService
 
-        workspace = await self._session.get(Workspace, payload.workspace_id)
+        # ── 项目口径：存在 → 关联工作区 → workspace 推导 ─────────────────────
+        project = await self._session.get(PpmProjectMaintenance, payload.project_id)
+        if project is None:
+            raise GroupChatInvalid(
+                "目标项目不存在，无法在该项目下建群。",
+                details={"project_id": str(payload.project_id)},
+            )
+        linked = await link_service.list_by_project(self._session, ppm_project_id=project.id)
+        if not linked:
+            raise GroupChatInvalid(
+                "该项目未关联工作区，请先在项目中关联。",
+                details={"project_id": str(project.id)},
+            )
+        linked_ids = {w.workspace_id for w in linked}
+        if payload.workspace_id is not None:
+            if payload.workspace_id not in linked_ids:
+                raise GroupChatInvalid(
+                    "指定的工作区不在项目关联范围内。",
+                    details={
+                        "workspace_id": str(payload.workspace_id),
+                        "project_id": str(project.id),
+                    },
+                )
+            workspace_id = payload.workspace_id
+        else:
+            workspace_id = linked[0].workspace_id
+        workspace = await self._session.get(Workspace, workspace_id)
         if workspace is None:
+            # link_service 已过滤软删工作区，这里防御 FK 竞态（软删发生在两查之间）。
             raise GroupChatInvalid(
                 "目标工作区不存在，无法在该工作区下建群。",
-                details={"workspace_id": str(payload.workspace_id)},
+                details={"workspace_id": str(workspace_id)},
             )
         WorkspaceService.ensure_writable(workspace)
+
+        # 建群者本人须为项目成员（群主是群的锚点人，不适用邀请豁免）。
+        project_member_ids = await self._project_member_user_ids(project.id)
+        if user.id not in project_member_ids:
+            raise GroupChatInvalid(
+                "建群者需为项目成员。",
+                details={"project_id": str(project.id), "user_id": str(user.id)},
+            )
 
         # ── 上限（design §9.3）───────────────────────────────────────────────
         if len(payload.user_members) + 1 > GROUP_USER_MEMBER_LIMIT:
@@ -1280,6 +1410,13 @@ class GroupChatService:
                     "邀请的用户不存在，无法加入群聊。",
                     details={"missing_user_ids": missing},
                 )
+            # quick 群 PPM 项目化：邀请人员范围=项目成员（建群者已在上方单查）。
+            outside = [str(uid) for uid in invited_ids if uid not in project_member_ids]
+            if outside:
+                raise GroupChatInvalid(
+                    "邀请的用户不是项目成员，无法加入群聊。",
+                    details={"user_ids": outside, "project_id": str(project.id)},
+                )
 
         runtime_ids = [m.runtime_id for m in payload.agent_members]
         runtimes: dict[uuid.UUID, tuple[DaemonRuntime, DaemonInstance | None]] = {}
@@ -1301,6 +1438,17 @@ class GroupChatService:
                 raise GroupChatInvalid(
                     "agent 成员绑定的机器不存在，请检查六要素配置。",
                     details={"missing_runtime_ids": missing_rt},
+                )
+
+        # agent 成员 cwd 工作区（六要素②）须在项目关联工作区集内（quick 口径）。
+        for cfg in payload.agent_members:
+            if cfg.workspace_id is not None and cfg.workspace_id not in linked_ids:
+                raise GroupChatInvalid(
+                    "agent 成员的工作区不在项目关联范围内。",
+                    details={
+                        "workspace_id": str(cfg.workspace_id),
+                        "project_id": str(project.id),
+                    },
                 )
 
         profile_ids = [m.agent_profile_id for m in payload.agent_members if m.agent_profile_id]
@@ -1345,7 +1493,7 @@ class GroupChatService:
 
         # ── 昵称解析 + 唯一性（用户与 agent 共用命名空间，design §3.3）────────
         names: dict[str, str] = {}
-        resolved_user_members: list[tuple[User, str]] = []
+        resolved_user_members: list[tuple[User, str, GroupMemberUserCreate]] = []
         owner_name = _validate_display_name(_user_display_name(user))
         names[owner_name] = str(user.id)
         for invite in payload.user_members:
@@ -1357,7 +1505,7 @@ class GroupChatService:
                     details={"display_name": name},
                 )
             names[name] = str(target.id)
-            resolved_user_members.append((target, name))
+            resolved_user_members.append((target, name, invite))
         for cfg in payload.agent_members:
             name = _validate_display_name(cfg.display_name)
             if name in names:
@@ -1389,6 +1537,7 @@ class GroupChatService:
             id=group_session.id,  # id==session_id 不变式（design §3.2）
             session_id=group_session.id,
             workspace_id=workspace.id,
+            project_id=project.id,  # quick 群 PPM 项目化
             title=payload.title,
             created_by=user.id,
             agent_cross_mention=payload.agent_cross_mention,
@@ -1410,12 +1559,13 @@ class GroupChatService:
                 joined_at=now,
             )
         ]
-        for target, name in resolved_user_members:
+        for target, name, invite in resolved_user_members:
             members.append(
                 AgentGroupMember(
                     group_id=group.id,
                     member_type="user",
                     display_name=name,
+                    avatar=invite.avatar,  # quick 成员头像（None=未自定义）
                     user_id=target.id,
                     invited_by=user.id,
                     joined_at=now,
@@ -1430,6 +1580,7 @@ class GroupChatService:
                     group_id=group.id,
                     member_type="agent",
                     display_name=cfg.display_name.strip(),
+                    avatar=cfg.avatar,  # quick 成员头像（None=未自定义）
                     runtime_id=cfg.runtime_id,
                     workspace_id=cfg.workspace_id or workspace.id,
                     provider=cfg.provider,
@@ -1635,6 +1786,9 @@ class GroupChatService:
                     "邀请的用户不存在，无法加入群聊。",
                     details={"user_id": str(payload.user.user_id)},
                 )
+            # quick 群 PPM 项目化：邀请范围=项目成员（存量群 project_id NULL
+            # 回退 workspace 成员范围，见 helper）。
+            await self._require_user_in_member_scope(group, target)
             # 复活语义先行（部分唯一索引 uq_agent_group_members_group_user 按
             # (group_id, user_id) 恒占位）：已移除用户再次邀请走原行复活，不撞
             # 索引（design §3.3 UNIQUE(group_id, user_id)）；在群用户重复邀请
@@ -1665,6 +1819,8 @@ class GroupChatService:
             if revived is not None:
                 revived.removed_at = None
                 revived.display_name = name
+                if payload.user.avatar is not None:
+                    revived.avatar = payload.user.avatar  # quick 成员头像（None=不改）
                 revived.invited_by = user.id
                 revived.joined_at = now
                 self._session.add(revived)
@@ -1677,6 +1833,7 @@ class GroupChatService:
                 group_id=group.id,
                 member_type="user",
                 display_name=name,
+                avatar=payload.user.avatar,  # quick 成员头像（None=未自定义）
                 user_id=target.id,
                 invited_by=user.id,
                 joined_at=now,
@@ -1712,6 +1869,9 @@ class GroupChatService:
                 details={"runtime_id": str(cfg.runtime_id)},
             )
         runtime, instance = rt_row[0], rt_row[1]
+        # agent 成员 cwd 工作区须在项目关联工作区集内（存量群回退原逻辑不校验）。
+        if cfg.workspace_id is not None:
+            await self._ensure_member_workspace_in_project(group, cfg.workspace_id)
         profile: AgentProfile | None = None
         if cfg.agent_profile_id is not None:
             profile = await self._session.get(AgentProfile, cfg.agent_profile_id)
@@ -1736,6 +1896,7 @@ class GroupChatService:
             group_id=group.id,
             member_type="agent",
             display_name=name,
+            avatar=cfg.avatar,  # quick 成员头像（None=未自定义）
             runtime_id=cfg.runtime_id,
             workspace_id=cfg.workspace_id or group.workspace_id,
             provider=cfg.provider,
@@ -1799,6 +1960,10 @@ class GroupChatService:
                 details={"member_id": str(member.id)},
             )
 
+        # quick 成员头像：用户与 agent 成员共用（None=不改，非六要素维度）。
+        if payload.avatar is not None:
+            member.avatar = payload.avatar
+
         # task-04（design §4.5）：六要素 diff 基线——变更前的三组维度值
         # （模型组 provider/llm_provider_id/agent_profile_id 走热切换；机器组
         # runtime_id/workspace_id 走影子重建）。
@@ -1834,6 +1999,9 @@ class GroupChatService:
                 member.runtime_id = payload.runtime_id
                 snapshot_dirty = True
             if payload.workspace_id is not None and payload.workspace_id != member.workspace_id:
+                # quick 群 PPM 项目化：cwd 工作区切换须落在项目关联工作区集内
+                # （存量群 project_id NULL 回退原逻辑不校验）。
+                await self._ensure_member_workspace_in_project(group, payload.workspace_id)
                 member.workspace_id = payload.workspace_id
                 snapshot_dirty = True
             if payload.provider is not None and payload.provider != member.provider:

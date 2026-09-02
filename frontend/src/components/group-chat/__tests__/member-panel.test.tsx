@@ -55,6 +55,8 @@ const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
   listProviders: vi.fn(),
   profilesHook: vi.fn(),
+  // quick 成员头像：上传管线 mock（fetchFileBlob 供头像渲染链路）。
+  uploadFile: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -80,6 +82,12 @@ vi.mock("@/lib/agent-profiles", () => ({
 
 vi.mock("@/lib/workspaces", () => ({
   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+}));
+
+vi.mock("@/lib/file/api", () => ({
+  uploadFile: (...args: unknown[]) => mocks.uploadFile(...args),
+  getFileDownloadUrl: (id: string) => `/api/file/${id}`,
+  fetchFileBlob: vi.fn(async () => new Blob(["x"], { type: "image/png" })),
 }));
 
 vi.mock("@/lib/errors", () => ({
@@ -654,5 +662,95 @@ describe("MemberPanel 邀请/添加入口回调", () => {
     );
     expect(screen.queryByTestId("member-panel-add-agent")).toBeNull();
     expect(screen.queryByTestId("member-panel-invite-user")).toBeNull();
+  });
+});
+
+// ── quick：成员头像（渲染 + 换头像/恢复默认） ──────────────────────────────
+
+describe("MemberPanel 成员头像（quick 群成员头像自定义）", () => {
+  it("头像渲染：avatar 有值 → 图片（blob）；无值 → 首字回退", async () => {
+    const group = makeGroup();
+    // mem-1（agent 小码）带头像；mem-2（agent 小测）无头像。
+    (group.members![0] as Record<string, unknown>).avatar =
+      "/api/file/f-av-1";
+    renderPanel(
+      <MemberPanel group={group} currentUserId="u-me" onlineMemberIds={["u-lin"]} />,
+    );
+
+    const card = screen.getByTestId("agent-member-card-mem-1");
+    await waitFor(() => {
+      expect(
+        card.querySelector('[data-testid="group-member-avatar-img"] img'),
+      ).toBeTruthy();
+    });
+    const card2 = screen.getByTestId("agent-member-card-mem-2");
+    expect(
+      card2.querySelector('[data-testid="group-member-avatar-initial"]'),
+    ).toBeTruthy();
+    expect(card2.querySelector("img")).toBeNull();
+  });
+
+  it("群主给 agent 成员换头像：上传 → PATCH members/{mid} avatar=url；恢复默认 → avatar 空串", async () => {
+    const group = makeGroup();
+    // 已有自定义头像（恢复默认按钮的渲染前提）。
+    (group.members![0] as Record<string, unknown>).avatar =
+      "/api/file/f-av-0";
+    renderPanel(
+      <MemberPanel group={group} currentUserId="u-me" />,
+    );
+    const card = await screen.findByTestId("agent-member-card-mem-1");
+
+    // 上传头像（隐藏 file input → uploadFile → PATCH avatar=/api/file/{id}）。
+    const uploadInput = within(card).getByLabelText(
+      "Agent 成员 小码 头像（选择图片）",
+    );
+    mocks.uploadFile.mockResolvedValue({
+      id: "file-av-9",
+      original_name: "a.png",
+      mime_type: "image/png",
+      size: 10,
+    });
+    fireEvent.change(uploadInput, {
+      target: { files: [new File(["x"], "a.png", { type: "image/png" })] },
+    });
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        "/api/daemon/group-chats/g-1/members/mem-1",
+        { method: "PATCH", json: { avatar: "/api/file/file-av-9" } },
+      ),
+    );
+
+    // 恢复默认 → avatar=""（后端 None=不改、空串=清除）。
+    mocks.apiFetch.mockClear();
+    fireEvent.click(
+      within(card).getByLabelText("Agent 成员 小码 头像恢复默认"),
+    );
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        "/api/daemon/group-chats/g-1/members/mem-1",
+        { method: "PATCH", json: { avatar: "" } },
+      ),
+    );
+  });
+
+  it("用户成员：群主或本人可换头像（非群主非本人无入口）", async () => {
+    // 非群主视角（currentUserId=u-lin）：本人行（林一）有换头像入口，
+    // 陈默行（非本人非群主）无入口；群主行（鲸落）非群主视角也无入口。
+    const group = makeGroup();
+    renderPanel(
+      <MemberPanel group={group} currentUserId="u-lin" />,
+    );
+    const ownRow = await screen.findByTestId("user-member-row-mem-3");
+    expect(
+      within(ownRow).queryByLabelText("用户成员 林一 头像上传"),
+    ).toBeTruthy();
+    const otherRow = screen.getByTestId("user-member-row-mem-4");
+    expect(
+      within(otherRow).queryByLabelText("用户成员 陈默 头像上传"),
+    ).toBeNull();
+    const ownerRow = screen.getByTestId("user-member-row-mem-owner");
+    expect(
+      within(ownerRow).queryByLabelText("用户成员 鲸落 头像上传"),
+    ).toBeNull();
   });
 });

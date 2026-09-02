@@ -57,7 +57,8 @@ from app.modules.daemon.group.service import (
     _parse_group_mentions,
 )
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
-from app.modules.workspace.model import Workspace
+from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
+from app.modules.workspace.model import PpmProjectWorkspace, Workspace
 
 # ── Helpers（镜像 test_group_chat_management.py 夹具范式）────────────────────
 
@@ -170,9 +171,38 @@ async def _seed_runtime(
     return instance, runtime
 
 
+async def _make_project(db_session: AsyncSession) -> PpmProjectMaintenance:
+    """PPM 项目行（quick 群 PPM 项目化：建群 project_id 口径）。"""
+    project = PpmProjectMaintenance(
+        id=uuid.uuid4(),
+        project_code=f"GRP-{uuid.uuid4().hex[:12]}",
+        project_name="群聊测试项目",
+    )
+    db_session.add(project)
+    await db_session.commit()
+    await db_session.refresh(project)
+    return project
+
+
+async def _link_project_workspace(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, workspace_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectWorkspace(ppm_project_id=ppm_project_id, workspace_id=workspace_id))
+    await db_session.commit()
+
+
+async def _add_project_member(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, user_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectMember(id=uuid.uuid4(), pm_project_id=ppm_project_id, user_id=user_id))
+    await db_session.commit()
+
+
 async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> SimpleNamespace:
     """每测试群聊环境：workspace + 群主（TASK_RUN_AGENT 角色）+ 在线机器。"""
     ws = await _make_workspace(db_session)
+    project = await _make_project(db_session)
+    await _link_project_workspace(db_session, ppm_project_id=project.id, workspace_id=ws.id)
     owner, owner_token = await _create_user_with_token(db_session, name=owner_name)
     await _grant_workspace_role(
         db_session,
@@ -180,9 +210,15 @@ async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> 
         user_id=owner.id,
         permissions=[Permission.TASK_RUN_AGENT],
     )
+    await _add_project_member(db_session, ppm_project_id=project.id, user_id=owner.id)
     instance, runtime = await _seed_runtime(db_session, owner.id)
     return SimpleNamespace(
-        ws=ws, owner=owner, owner_token=owner_token, instance=instance, runtime=runtime
+        ws=ws,
+        project=project,
+        owner=owner,
+        owner_token=owner_token,
+        instance=instance,
+        runtime=runtime,
     )
 
 
@@ -196,6 +232,7 @@ async def _env_user(
         user_id=user.id,
         permissions=[Permission.TASK_RUN_AGENT],
     )
+    await _add_project_member(db_session, ppm_project_id=env.project.id, user_id=user.id)
     return user, token
 
 
@@ -203,13 +240,16 @@ async def _create_group(
     client: AsyncClient,
     owner_token: str,
     *,
-    workspace_id: uuid.UUID,
+    project_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
     title: str = "测试群",
     user_members: list[dict] | None = None,
     agent_members: list[dict] | None = None,
     context_window: int | None = None,
 ) -> dict:
-    payload: dict = {"title": title, "workspace_id": str(workspace_id)}
+    payload: dict = {"title": title, "project_id": str(project_id)}
+    if workspace_id is not None:
+        payload["workspace_id"] = str(workspace_id)
     if user_members:
         payload["user_members"] = user_members
     if agent_members:
@@ -850,7 +890,7 @@ class TestGroupMessageIngest:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -895,7 +935,7 @@ class TestGroupMessageIngest:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(member_user.id), "display_name": "鲸落"}],
         )
         group_id = uuid.UUID(data["id"])
@@ -933,7 +973,7 @@ class TestGroupMessageIngest:
         mocked_group_redis,
     ) -> None:
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         _outsider, outsider_token = await _env_user(db_session, env, name=" outsiders")
         resp = await _send_message(client, outsider_token, data["id"], "@全体 hi")
         assert resp.status_code == 404
@@ -946,7 +986,7 @@ class TestGroupMessageIngest:
         mocked_group_redis,
     ) -> None:
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         resp = await _send_message(client, env.owner_token, data["id"], "   ")
         assert resp.status_code == 400  # 纯空白 → service 层中文 400
         assert "不能为空" in resp.json()["message"]
@@ -958,7 +998,7 @@ class TestGroupMessageIngest:
         mocked_group_redis,
     ) -> None:
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         resp = await client.post(
             f"/api/daemon/group-chats/{data['id']}/end", headers=_headers(env.owner_token)
         )
@@ -983,7 +1023,7 @@ class TestShadowLazyCreation:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1090,7 +1130,7 @@ class TestShadowLazyCreation:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1142,7 +1182,7 @@ class TestShadowLazyCreation:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(sender.id)}],
             agent_members=[_agent_config(env.runtime.id)],
         )
@@ -1195,7 +1235,7 @@ class TestShadowLazyCreation:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[
                 _agent_config(env.runtime.id, name="小码"),
                 _agent_config(env.runtime.id, name="小助"),
@@ -1226,7 +1266,7 @@ class TestShadowLazyCreation:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(lender_runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1269,7 +1309,7 @@ class TestShadowLazyCreation:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(lender_runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1309,7 +1349,7 @@ class TestShadowLazyCreation:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(offline_runtime.id)],
         )
         resp = await _send_message(client, env.owner_token, data["id"], "@小码 hi")
@@ -1332,7 +1372,7 @@ class TestBusyQueue:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(sender.id)}],
             agent_members=[_agent_config(env.runtime.id)],
         )
@@ -1381,7 +1421,7 @@ class TestBusyQueue:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1415,7 +1455,7 @@ class TestListLastMessage:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1452,7 +1492,7 @@ class TestListLastMessage:
         mocked_group_redis,
     ) -> None:
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         content = "字" * 100
         resp = await _send_message(client, env.owner_token, data["id"], content)
         assert resp.status_code == 200, resp.text

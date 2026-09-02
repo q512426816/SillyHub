@@ -46,8 +46,9 @@ from app.modules.agent.model import (
 from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
+from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.session_attachment.model import SessionAttachment
-from app.modules.workspace.model import Workspace
+from app.modules.workspace.model import PpmProjectWorkspace, Workspace
 
 # ── Helpers（镜像 test_group_mention_pipeline.py 夹具范式）────────────────────
 
@@ -117,6 +118,33 @@ async def _grant_workspace_role(
     await db_session.commit()
 
 
+async def _make_project(db_session: AsyncSession) -> PpmProjectMaintenance:
+    """PPM 项目行（quick 群 PPM 项目化：建群 project_id 口径）。"""
+    project = PpmProjectMaintenance(
+        id=uuid.uuid4(),
+        project_code=f"GRP-{uuid.uuid4().hex[:12]}",
+        project_name="群聊测试项目",
+    )
+    db_session.add(project)
+    await db_session.commit()
+    await db_session.refresh(project)
+    return project
+
+
+async def _link_project_workspace(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, workspace_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectWorkspace(ppm_project_id=ppm_project_id, workspace_id=workspace_id))
+    await db_session.commit()
+
+
+async def _add_project_member(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, user_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectMember(id=uuid.uuid4(), pm_project_id=ppm_project_id, user_id=user_id))
+    await db_session.commit()
+
+
 async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> SimpleNamespace:
     """每测试的群聊环境：workspace + 群主（TASK_RUN_AGENT 角色）+ 在线机器。"""
     ws = Workspace(
@@ -127,6 +155,8 @@ async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> 
         status="active",
     )
     db_session.add(ws)
+    project = await _make_project(db_session)
+    await _link_project_workspace(db_session, ppm_project_id=project.id, workspace_id=ws.id)
     owner, owner_token = await _create_user_with_token(db_session, name=owner_name)
     await _grant_workspace_role(
         db_session,
@@ -134,6 +164,7 @@ async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> 
         user_id=owner.id,
         permissions=[Permission.TASK_RUN_AGENT],
     )
+    await _add_project_member(db_session, ppm_project_id=project.id, user_id=owner.id)
     instance = DaemonInstance(
         id=uuid.uuid4(),
         user_id=owner.id,
@@ -154,7 +185,9 @@ async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> 
     )
     db_session.add(runtime)
     await db_session.commit()
-    return SimpleNamespace(ws=ws, owner=owner, owner_token=owner_token, runtime=runtime)
+    return SimpleNamespace(
+        ws=ws, project=project, owner=owner, owner_token=owner_token, runtime=runtime
+    )
 
 
 async def _env_user(
@@ -168,6 +201,7 @@ async def _env_user(
         user_id=user.id,
         permissions=[Permission.TASK_RUN_AGENT],
     )
+    await _add_project_member(db_session, ppm_project_id=env.project.id, user_id=user.id)
     return user, token
 
 
@@ -175,11 +209,14 @@ async def _create_group(
     client: AsyncClient,
     owner_token: str,
     *,
-    workspace_id: uuid.UUID,
+    project_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
     agent_members: list[dict] | None = None,
     user_members: list[dict] | None = None,
 ) -> dict:
-    payload: dict = {"title": "附件测试群", "workspace_id": str(workspace_id)}
+    payload: dict = {"title": "附件测试群", "project_id": str(project_id)}
+    if workspace_id is not None:
+        payload["workspace_id"] = str(workspace_id)
     if agent_members:
         payload["agent_members"] = agent_members
     if user_members:
@@ -393,7 +430,7 @@ class TestGroupAttachmentSend:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(sender.id)}],
         )
         group_id = uuid.UUID(data["id"])
@@ -457,7 +494,7 @@ class TestGroupAttachmentSend:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(sender.id)}],
         )
         outsider, _ = await _env_user(db_session, env, name="路人")
@@ -500,7 +537,7 @@ class TestGroupAttachmentSend:
     ) -> None:
         """图片 6 张（上限 5）→ 400（DTO 总量 10 内、逐 kind 校验归 service）。"""
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         atts = [
             await _seed_attachment(
                 db_session, env.owner.id, kind="image", name=f"i{n}.png", media_type="image/png"
@@ -522,7 +559,7 @@ class TestGroupAttachmentSend:
     ) -> None:
         """纯附件空 content 合法（D-7 看图说话豁免，对齐单聊口径）。"""
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         att = await _seed_attachment(db_session, env.owner.id, kind="image", name="图.png")
 
         resp = await _send_message(client, env.owner_token, data["id"], "", [att.id])
@@ -541,7 +578,7 @@ class TestGroupAttachmentSend:
     ) -> None:
         """无附件纯空 content → 400 既有语义零回归。"""
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         resp = await _send_message(client, env.owner_token, data["id"], "   ")
         assert resp.status_code == 400
         assert "不能为空" in resp.json()["message"]
@@ -565,7 +602,7 @@ class TestGroupAttachmentTrigger:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -623,7 +660,7 @@ class TestGroupAttachmentTrigger:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(sender.id)}],
             agent_members=[_agent_config(env.runtime.id)],
         )
@@ -682,7 +719,7 @@ class TestGroupAttachmentTrigger:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id, name="小柯", provider="codex")],
         )
         group_id = uuid.UUID(data["id"])

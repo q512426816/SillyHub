@@ -58,6 +58,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Image as ImageIcon, Paperclip, RefreshCw, SendHorizontal, Users, X } from "lucide-react";
 
 import { MemberPanel } from "@/components/group-chat/member-panel";
+import { GroupMemberAvatar } from "@/components/group-chat/group-member-avatar";
 import {
   SessionMentionPopover,
   buildMemberMentionItems,
@@ -910,6 +911,25 @@ export function GroupChatPanel({
     return map;
   }, [members]);
 
+  /* ── quick 群成员头像自定义：气泡头像解析（member_id / user_id / 昵称 →
+   *    群详情成员表 avatar；空值渲染现状首字回退，见 GroupMemberAvatar）。 ── */
+  const avatarByMemberKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of members) {
+      const v = m.avatar ?? "";
+      if (m.id) map.set(m.id, v);
+      map.set(m.display_name, v);
+    }
+    return map;
+  }, [members]);
+  const avatarByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of members) {
+      if (m.user_id) map.set(m.user_id, m.avatar ?? "");
+    }
+    return map;
+  }, [members]);
+
   return (
     <div
       data-testid="group-chat-panel-mount"
@@ -944,24 +964,27 @@ export function GroupChatPanel({
             </p>
           </div>
           <div className="flex-1" />
-          {/* facepile 头像堆叠（+N 溢出；agent/user 分色，原型 .facepile）。 */}
+          {/* facepile 头像堆叠（+N 溢出；avatar 有值→图片，无值 agent 分色/
+              用户 muted 首字，原型 .facepile）。 */}
           <div
             className="flex flex-none items-center"
             title={`共 ${members.length} 名成员`}
           >
             {facepile.map((m) => (
-              <span
+              <GroupMemberAvatar
                 key={m.id}
+                avatar={m.avatar}
+                name={m.display_name}
+                size={28}
                 title={m.display_name}
-                className={cn(
-                  "-ml-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-card text-[11px] font-semibold text-white first:ml-0",
+                className="rounded-full border-2 border-card first:ml-0 [&:not(:first-child)]:-ml-1.5"
+                fallbackClassName={cn(
+                  "h-7 w-7 text-[11px] font-semibold",
                   m.member_type === "agent"
                     ? agentAvatarColor(m.id, m.display_name)
                     : "bg-muted-foreground/70",
                 )}
-              >
-                {m.display_name.slice(0, 1)}
-              </span>
+              />
             ))}
             {facepileMore > 0 && (
               <span className="-ml-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-card bg-muted text-[11px] font-semibold text-muted-foreground">
@@ -1002,6 +1025,20 @@ export function GroupChatPanel({
                       null)
                     : (providerLabelByMemberKey.get(entry.memberName ?? "") ?? null)
                   : null
+              }
+              avatar={
+                entry.kind === "user"
+                  ? (entry.senderUserId
+                      ? avatarByUserId.get(entry.senderUserId)
+                      : undefined) ||
+                    avatarByMemberKey.get(entry.senderName) ||
+                    null
+                  : entry.kind === "agent"
+                    ? (entry.memberId
+                        ? avatarByMemberKey.get(entry.memberId) ??
+                          avatarByMemberKey.get(entry.memberName ?? "")
+                        : avatarByMemberKey.get(entry.memberName ?? "")) || null
+                    : null
               }
               streaming={
                 entry.kind === "agent" &&
@@ -1202,11 +1239,14 @@ function GroupTimelineRow({
   entry,
   memberNames,
   providerLabel,
+  avatar,
   streaming,
 }: {
   entry: GroupTimelineEntry;
   memberNames: readonly string[];
   providerLabel: string | null;
+  /** 发送者头像 URL（群详情成员表解析；空 → 首字回退，quick 头像自定义）。 */
+  avatar: string | null;
   streaming: boolean;
 }) {
   if (entry.kind === "system") {
@@ -1232,15 +1272,16 @@ function GroupTimelineRow({
           entry.isSelf ? "ml-auto flex-row-reverse" : "",
         )}
       >
-        <span
-          aria-hidden
-          className={cn(
-            "flex h-8 w-8 flex-none items-center justify-center rounded-[9px] text-xs font-bold text-white",
+        <GroupMemberAvatar
+          avatar={avatar}
+          name={entry.senderName}
+          size={32}
+          className="rounded-[9px]"
+          fallbackClassName={cn(
+            "h-8 w-8 text-xs",
             entry.isSelf ? "bg-brand-600" : "bg-muted-foreground/70",
           )}
-        >
-          {entry.senderName.slice(0, 1)}
-        </span>
+        />
         <div className="min-w-0">
           <div
             className={cn(
@@ -1284,15 +1325,16 @@ function GroupTimelineRow({
       data-member-name={entry.memberName ?? undefined}
       className="my-2.5 flex max-w-[82%] gap-2.5"
     >
-      <span
-        aria-hidden
-        className={cn(
-          "flex h-8 w-8 flex-none items-center justify-center rounded-[9px] text-xs font-bold text-white",
+      <GroupMemberAvatar
+        avatar={avatar}
+        name={entry.memberName ?? "Agent"}
+        size={32}
+        className="rounded-[9px]"
+        fallbackClassName={cn(
+          "h-8 w-8 text-xs",
           agentAvatarColor(entry.memberId, entry.memberName),
         )}
-      >
-        {(entry.memberName ?? "Agent").slice(0, 1)}
-      </span>
+      />
       <div className="min-w-0">
         <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
           <span className="font-semibold text-foreground">

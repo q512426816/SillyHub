@@ -60,7 +60,8 @@ from app.modules.daemon.session.service import (
     _split_group_chain_marker,
 )
 from app.modules.llm_provider.model import LlmProvider
-from app.modules.workspace.model import Workspace
+from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
+from app.modules.workspace.model import PpmProjectWorkspace, Workspace
 
 # ── Helpers（镜像 test_group_mention_pipeline.py 夹具范式）────────────────────
 
@@ -172,8 +173,37 @@ async def _seed_runtime(
     return instance, runtime
 
 
+async def _make_project(db_session: AsyncSession) -> PpmProjectMaintenance:
+    """PPM 项目行（quick 群 PPM 项目化：建群 project_id 口径）。"""
+    project = PpmProjectMaintenance(
+        id=uuid.uuid4(),
+        project_code=f"GRP-{uuid.uuid4().hex[:12]}",
+        project_name="群聊测试项目",
+    )
+    db_session.add(project)
+    await db_session.commit()
+    await db_session.refresh(project)
+    return project
+
+
+async def _link_project_workspace(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, workspace_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectWorkspace(ppm_project_id=ppm_project_id, workspace_id=workspace_id))
+    await db_session.commit()
+
+
+async def _add_project_member(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, user_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectMember(id=uuid.uuid4(), pm_project_id=ppm_project_id, user_id=user_id))
+    await db_session.commit()
+
+
 async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> SimpleNamespace:
     ws = await _make_workspace(db_session)
+    project = await _make_project(db_session)
+    await _link_project_workspace(db_session, ppm_project_id=project.id, workspace_id=ws.id)
     owner, owner_token = await _create_user_with_token(db_session, name=owner_name)
     await _grant_workspace_role(
         db_session,
@@ -181,9 +211,15 @@ async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> 
         user_id=owner.id,
         permissions=[Permission.TASK_RUN_AGENT],
     )
+    await _add_project_member(db_session, ppm_project_id=project.id, user_id=owner.id)
     instance, runtime = await _seed_runtime(db_session, owner.id)
     return SimpleNamespace(
-        ws=ws, owner=owner, owner_token=owner_token, instance=instance, runtime=runtime
+        ws=ws,
+        project=project,
+        owner=owner,
+        owner_token=owner_token,
+        instance=instance,
+        runtime=runtime,
     )
 
 
@@ -217,11 +253,14 @@ async def _create_group(
     client: AsyncClient,
     owner_token: str,
     *,
-    workspace_id: uuid.UUID,
+    project_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
     title: str = "测试群",
     agent_members: list[dict] | None = None,
 ) -> dict:
-    payload: dict = {"title": title, "workspace_id": str(workspace_id)}
+    payload: dict = {"title": title, "project_id": str(project_id)}
+    if workspace_id is not None:
+        payload["workspace_id"] = str(workspace_id)
     if agent_members:
         payload["agent_members"] = agent_members
     resp = await client.post("/api/daemon/group-chats", json=payload, headers=_headers(owner_token))
@@ -826,7 +865,7 @@ class TestUserMentionRegistersChain:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1107,7 +1146,7 @@ class TestHotSwitch:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -1166,7 +1205,7 @@ class TestQueuedChainPassthrough:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])

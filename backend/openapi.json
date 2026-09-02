@@ -39879,10 +39879,24 @@
             "minLength": 1,
             "title": "Title"
           },
-          "workspace_id": {
+          "project_id": {
             "type": "string",
             "format": "uuid",
-            "title": "Workspace Id"
+            "title": "Project Id",
+            "description": "PPM 项目（群归属；工作区由项目关联集推导）"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id",
+            "description": "工作区；None=自动取项目首个关联工作区（显式传入须在项目关联集内）"
           },
           "agent_cross_mention": {
             "type": "boolean",
@@ -39896,7 +39910,7 @@
             "minimum": 1.0,
             "title": "Cross Mention Depth",
             "description": "协作链深度上限（防环护栏）",
-            "default": 2
+            "default": 4
           },
           "context_window": {
             "type": "integer",
@@ -39924,10 +39938,10 @@
         "type": "object",
         "required": [
           "title",
-          "workspace_id"
+          "project_id"
         ],
         "title": "GroupChatCreate",
-        "description": "``POST /api/group-chats`` 建群体（design §6.1）。\n\n初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建\n群时间线会话（AgentSession.session_kind='group'）。"
+        "description": "``POST /api/group-chats`` 建群体（design §6.1）。\n\n初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建\n群时间线会话（AgentSession.session_kind='group'）。\n\nquick 群 PPM 项目化口径：``project_id`` 必填——群挂 PPM 项目，群工作区由\n项目关联工作区集推导（``workspace_id`` 可选：显式传入时须在项目关联集内，\n未传取首个关联工作区；项目无关联工作区 → 400）。邀请人员范围=项目成员。"
       },
       "GroupChatDetailRead": {
         "properties": {
@@ -39945,6 +39959,18 @@
             "type": "string",
             "format": "uuid",
             "title": "Workspace Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
           },
           "title": {
             "type": "string",
@@ -40050,6 +40076,18 @@
             "type": "string",
             "format": "uuid",
             "title": "Workspace Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
           },
           "title": {
             "type": "string",
@@ -40166,6 +40204,18 @@
             "type": "string",
             "format": "uuid",
             "title": "Workspace Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
           },
           "title": {
             "type": "string",
@@ -40312,6 +40362,19 @@
             "title": "Display Name",
             "description": "群内昵称=@提及词，群内唯一"
           },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar",
+            "description": "群内头像 URL（文件中心上传产出）"
+          },
           "runtime_id": {
             "type": "string",
             "format": "uuid",
@@ -40415,6 +40478,17 @@
           "display_name": {
             "type": "string",
             "title": "Display Name"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
           },
           "user_id": {
             "anyOf": [
@@ -40554,7 +40628,7 @@
           "shadow_status"
         ],
         "title": "GroupMemberRead",
-        "description": "成员读体（群详情/成员面板，design §6.1）。\n\nagent 成员六要素全量返回（用户成员对应列为 None）；``shadow_status``\n供面板绿点（none/pending/active/failed）。"
+        "description": "成员读体（群详情/成员面板，design §6.1）。\n\nagent 成员六要素全量返回（用户成员对应列为 None）；``shadow_status``\n供面板绿点（none/pending/active/failed）；``avatar`` 为群内头像 URL\n（用户与 agent 成员共用，None=未自定义）。"
       },
       "GroupMemberTriggerRead": {
         "properties": {
@@ -40613,6 +40687,19 @@
               }
             ],
             "title": "Display Name"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar",
+            "description": "群内头像 URL；None=不改"
           },
           "runtime_id": {
             "anyOf": [
@@ -40700,6 +40787,19 @@
             ],
             "title": "Display Name",
             "description": "群内昵称；None=沿用用户显示名（service 层解析并查重）"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar",
+            "description": "群内头像 URL（文件中心上传产出）"
           }
         },
         "type": "object",

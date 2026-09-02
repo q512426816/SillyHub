@@ -140,6 +140,10 @@ const mocks = vi.hoisted(() => ({
   getProviderQuota: vi.fn(),
   listWorkspaces: vi.fn(),
   fetchMyBindings: vi.fn(),
+  // quick 群 PPM 项目化：向导项目/项目人员/项目关联工作区数据源。
+  listSimpleProjects: vi.fn(),
+  listProjectMembers: vi.fn(),
+  listProjectWorkspaces: vi.fn(),
   // task-07（D-106）：预会话上下文行变更名解析（session-panel getChange）。
   getChange: vi.fn(),
   // task-10（X-009）：SessionListPanel「关联」下拉选项数据源。
@@ -260,6 +264,17 @@ vi.mock("@/lib/workspace-binding", () => ({
 }));
 
 // task-07：建群向导步骤②邀请候选数据源（成员列表）。
+vi.mock("@/lib/ppm/project", () => ({
+  // quick 群 PPM 项目化：向导项目下拉 + 项目人员候选数据源。
+  listSimpleProjects: (...args: unknown[]) => mocks.listSimpleProjects(...args),
+  listProjectMembers: (...args: unknown[]) => mocks.listProjectMembers(...args),
+}));
+
+vi.mock("@/lib/workspace", () => ({
+  listProjectWorkspaces: (...args: unknown[]) =>
+    mocks.listProjectWorkspaces(...args),
+}));
+
 vi.mock("@/lib/workspace-members", () => ({
   listMembers: (...args: unknown[]) => mocks.listMembers(...args),
 }));
@@ -579,6 +594,10 @@ beforeEach(() => {
   // 既有用例渲染下拉但选项为空，零干扰）。
   mocks.listChanges.mockResolvedValue({ items: [], total: 0 });
   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+  // quick 群 PPM 项目化：向导项目候选默认空集（建群用例内覆写）。
+  mocks.listSimpleProjects.mockResolvedValue([]);
+  mocks.listProjectMembers.mockResolvedValue([]);
+  mocks.listProjectWorkspaces.mockResolvedValue([]);
   // task-07：群聊分区默认空集（既有用例零渲染干扰）+ 建群提交默认成功 +
   // 邀请候选默认空集（向导步骤②数据源）。
   mocks.listGroupChats.mockResolvedValue([]);
@@ -589,7 +608,7 @@ beforeEach(() => {
     title: "前端攻坚小分队",
     created_by: "u-me",
     agent_cross_mention: true,
-    cross_mention_depth: 2,
+    cross_mention_depth: 4,
     context_window: 20,
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
@@ -606,7 +625,7 @@ beforeEach(() => {
     title: "前端攻坚小分队",
     created_by: "u-me",
     agent_cross_mention: true,
-    cross_mention_depth: 2,
+    cross_mention_depth: 4,
     context_window: 20,
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
@@ -1683,7 +1702,7 @@ function makeGroupListItem(): GroupChatListItemRead {
     title: "前端攻坚小分队",
     created_by: "u-me",
     agent_cross_mention: true,
-    cross_mention_depth: 2,
+    cross_mention_depth: 4,
     context_window: 20,
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
@@ -1771,14 +1790,14 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
   });
 
   it("分区头「＋」→ 三步向导建群成功 → createGroupChat 提交 + 新群挂载点选中 + 群列表 invalidate 重拉", async () => {
-    mocks.listWorkspaces.mockResolvedValue({
-      items: [
-        { id: "ws-1", name: "SillyHub", display_alias: null, status: "active" },
-      ],
-      total: 1,
-      limit: 100,
-      offset: 0,
-    });
+    // quick 群 PPM 项目化：项目候选 + 项目关联工作区（群工作区后端推导，
+    // 提交不带 workspace_id）。
+    mocks.listSimpleProjects.mockResolvedValue([
+      { id: "pj-1", project_name: "SillyHub 平台" },
+    ]);
+    mocks.listProjectWorkspaces.mockResolvedValue([
+      { workspace_id: "ws-1", name: "SillyHub", status: "active", type: null },
+    ]);
     renderPortal();
     fireEvent.click(
       await screen.findByRole("button", { name: "新建群聊" }),
@@ -1786,30 +1805,34 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
     // 向导打开（antd Modal 标题）。
     expect(await screen.findByText("新建群聊")).toBeTruthy();
 
-    // ① 群信息（全局门户：工作区自选）。
+    // ① 群信息：群名 + 项目下拉（quick：无工作区选择）。
     fireEvent.change(screen.getByLabelText("群名称"), {
       target: { value: "前端攻坚小分队" },
     });
-    // antd Select 打开 + 选「SillyHub」（向导 workspace 选项 label =
-    // display_alias ?? name）。
-    const wsInput = document.getElementById("cgw-workspace");
-    const wsRoot = wsInput?.closest(".ant-select") as HTMLElement;
+    const pjInput = document.getElementById("cgw-project");
+    const pjRoot = pjInput?.closest(".ant-select") as HTMLElement;
     fireEvent.mouseDown(
-      (wsRoot.querySelector(".ant-select-selector") as HTMLElement) ??
-        wsRoot,
+      (pjRoot.querySelector(".ant-select-selector") as HTMLElement) ??
+        pjRoot,
     );
-    const wsOption = await waitFor(() => {
+    const pjOption = await waitFor(() => {
       const hit = [
         ...document.querySelectorAll(".ant-select-item-option-content"),
-      ].find((el) => el.textContent?.trim() === "SillyHub");
-      if (!hit) throw new Error("workspace option not found");
+      ].find((el) => el.textContent?.trim() === "SillyHub 平台");
+      if (!hit) throw new Error("project option not found");
       return hit as HTMLElement;
     });
-    fireEvent.mouseDown(wsOption.closest(".ant-select-item-option") as HTMLElement);
-    fireEvent.click(wsOption.closest(".ant-select-item-option") as HTMLElement);
+    fireEvent.mouseDown(pjOption.closest(".ant-select-item-option") as HTMLElement);
+    fireEvent.click(pjOption.closest(".ant-select-item-option") as HTMLElement);
     await act(async () => {
       await Promise.resolve();
     });
+    // 关联工作区提示就位（下一步放行前提）。
+    await waitFor(() =>
+      expect(screen.getByTestId("cgw-workspace-hint")).toHaveTextContent(
+        "已关联 1 个工作区",
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
 
     // ② 邀请用户（默认空，直接下一步）。
@@ -1825,12 +1848,17 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
     expect(mocks.createGroupChat).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "前端攻坚小分队",
-        workspace_id: "ws-1",
+        project_id: "pj-1",
         agent_cross_mention: true,
-        cross_mention_depth: 2,
+        cross_mention_depth: 4,
         context_window: 20,
       }),
     );
+    // quick：群工作区后端推导——提交不带 workspace_id。
+    expect(
+      (mocks.createGroupChat.mock.calls[0]?.[0] as Record<string, unknown>)
+        .workspace_id,
+    ).toBeUndefined();
     // 向导关闭 + 新群挂载点就位 + 群列表 invalidate 重拉（新群落分区顶部）。
     await waitFor(() => {
       expect(screen.getByTestId("group-chat-panel-mount")).toHaveAttribute(

@@ -2,31 +2,40 @@
 
 /**
  * CreateGroupWizard — 三步建群向导对话框（2026-09-01-session-group-chat
- * task-07 / FR-01 / FR-04，design §7「建群向导」）。
+ * task-07 / FR-01 / FR-04，design §7「建群向导」；quick 群 PPM 项目化改造）。
  *
  * 依据：
  *   - tasks/task-07.md（implementation 第 3 点 / acceptance 六要素校验 +
  *     agent 8 / 用户 50 上限拦截）
  *   - design.md §7 建群向导（群名 → 邀请用户 → 配置 agent 成员六要素 →
  *     创建；不内置角色模板——人格即角色，纯自定义）
+ *   - lib/api-types.ts GroupChatCreate（quick 项目化口径：project_id 必填；
+ *     workspace_id 可选——后端自动取项目首个关联工作区，UI 不再出现群工作区
+ *     选择；邀请范围=项目成员、agent 工作区须在项目关联集内——后端 400 校验
+ *     的同口径前端引导：候选直接查项目人员 / 项目关联工作区，从源头避免 400）
  *   - prototype-group-chat.html .modal（createModal 建群向导示意 + 六要素
  *     callout 文案）
  *
- * 三步（对照原型 .modal 结构，antd Modal + 控件 / tailwind 布局，照
- * FRONTEND_PAGE_STYLE §0「UI 组件全用 antd」）：
- *   ① 群信息：群名称（必填 ≤120）+ 工作区（scope 锁定 / 全局可选）；
- *   ② 邀请用户：workspace 成员多选（listMembers，排除本人——建群人自动
- *      成为群主，上限 50）；
+ * 三步（antd Modal + 控件 / tailwind 布局，照 FRONTEND_PAGE_STYLE §0）：
+ *   ① 群信息：群名称（必填 ≤120）+ PPM 项目（listSimpleProjects 全量候选 +
+ *      搜索；选中后显示该项目关联工作区数提示；无关联工作区 → 禁下一步 +
+ *      引导文案「请先在项目管理中关联工作区」）；
+ *   ② 邀请用户：项目人员多选（listProjectMembers({pm_project_id})，排除本人
+ *      ——建群人自动成为群主且后端要求其为项目成员；上限 50）；每个被邀人
+ *      可选上传群内头像（GroupMemberAvatarUpload 同管线，填
+ *      GroupMemberUserCreate.avatar）；
  *   ③ Agent 成员：可增删多张六要素卡片（昵称（群内唯一 @提及词，即时查重 +
  *      保留词「全体/all」禁用）/ 机器（在线 runtime，按机器分组）/ 工作区
- *      （缺省=沿用群工作区）/ 引擎（claude/codex）/ 模型（llm_provider，
- *      codex 引擎无供应商切换语义——照 session-config-bar providerLocked
- *      先例禁用）/ 智能体方案（AgentProfile，缺省=用默认））。
+ *      （**项目关联工作区必选**——群工作区由后端推导，不再有「沿用群工作区」）/
+ *      引擎（claude/codex）/ 模型（llm_provider，codex 引擎无供应商切换语义
+ *      ——照 session-config-bar providerLocked 先例禁用）/ 智能体方案
+ *      （AgentProfile，缺省=用默认））；每张卡片可上传成员头像（填
+ *      GroupMemberAgentConfig.avatar）。
  *
- * 提交调 createGroupChat（GroupChatCreate：agent_cross_mention 默认开 /
- * cross_mention_depth 2 / context_window 20——后端 schema 同款默认值镜像，
- * 生成版 TS 类型必填须显式传）；成功 invalidate ["groupChats"] 前缀 +
- * onCreated(新群) 由门户选中新群。
+ * 提交调 createGroupChat（GroupChatCreate：project_id 必填、**不带
+ * workspace_id**（后端推导）；agent_cross_mention 默认开 / cross_mention_depth
+ * context_window 20——后端 schema 同款默认值镜像，生成版 TS 类型必填须显式
+ * 传）；成功 invalidate ["groupChats"] 前缀 + onCreated(新群) 由门户选中新群。
  *
  * 样式：AI-Native 双主题铁律——brand-* 语义阶 / 不手写 hex / shadow token；
  * 侧栏内组件禁 md: 响应式前缀（本组件为模态，固定 grid-cols-2 两列）。
@@ -40,6 +49,10 @@ import { Bot, Plus, Trash2 } from "lucide-react";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
 import { errMessage, useNotify } from "@/lib/errors";
+import { listSimpleProjects, listProjectMembers } from "@/lib/ppm/project";
+import type { ProjectMember } from "@/lib/ppm/types";
+import { listProjectWorkspaces } from "@/lib/workspace";
+import type { WorkspaceBrief } from "@/lib/workspace";
 import {
   createGroupChat,
   PROVIDER_META,
@@ -47,8 +60,11 @@ import {
   type GroupChatRead,
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
-import { listMembers } from "@/lib/workspace-members";
-import { listWorkspaces } from "@/lib/workspaces";
+import { useSession } from "@/stores/session";
+import {
+  GroupMemberAvatar,
+  GroupMemberAvatarUpload,
+} from "@/components/group-chat/group-member-avatar";
 import { cn } from "@/lib/utils";
 
 /* ────────────────────── 常量（design §9.3 护栏参数镜像） ────────────────────── */
@@ -101,12 +117,14 @@ export function validateMemberDisplayName(
   return null;
 }
 
-/** agent 成员卡片编辑态（六要素；id 为本地 key 供列表渲染）。 */
+/** agent 成员卡片编辑态（六要素 + 头像；id 为本地 key 供列表渲染）。 */
 export interface AgentMemberCardState {
   id: string;
   displayName: string;
+  /** 群内头像 URL（文件中心上传产出；null = 首字默认）。 */
+  avatar: string | null;
   runtimeId: string | null;
-  /** 空串 = 沿用群工作区（design §3.3：cwd 锚默认与群一致）。 */
+  /** 工作区（项目关联工作区内必选——quick 起「沿用群工作区」选项退役）。 */
   workspaceId: string;
   provider: string;
   /** 空串 = 不指定（本机/供应商默认）。 */
@@ -120,6 +138,7 @@ function newAgentCard(): AgentMemberCardState {
   return {
     id: `card-${Math.random().toString(36).slice(2, 10)}`,
     displayName: "",
+    avatar: null,
     runtimeId: null,
     workspaceId: "",
     provider: "claude",
@@ -140,11 +159,6 @@ export interface CreateGroupWizardProps {
    * 挂载点选中态由 onCreated 驱动）。
    */
   onCreated: (_group: GroupChatRead) => void;
-  /**
-   * 锁定/默认工作区（workspace/change/quicklog scope 传入 scope.workspaceId
-   * ——步骤①锁定不可改；全局门户传 null 由用户自选）。
-   */
-  defaultWorkspaceId?: string | null;
 }
 
 const WIZARD_STEPS = ["群信息", "邀请用户", "Agent 成员"] as const;
@@ -153,69 +167,88 @@ export function CreateGroupWizard({
   open,
   onCancel,
   onCreated,
-  defaultWorkspaceId = null,
 }: CreateGroupWizardProps) {
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState("");
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [invitedUserIds, setInvitedUserIds] = useState<string[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  /** 已邀用户（user_id + 可选群内头像；Select onChange 时保号同步）。 */
+  const [invited, setInvited] = useState<{ user_id: string; avatar: string | null }[]>([]);
   const [agentCards, setAgentCards] = useState<AgentMemberCardState[]>([]);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const qc = useQueryClient();
   const notify = useNotify();
 
-  // 打开时重置向导（取消不清父层状态，重开从第一步重新开始；工作区取
-  // defaultWorkspaceId 作初始值——scope 锁定态直接就位）。
+  // 当前用户（邀人候选排除本人——建群人自动成为群主）。
+  const meId = useSession((s) => s.user?.id ?? null);
+
+  // 打开时重置向导（取消不清父层状态，重开从第一步重新开始）。
   useEffect(() => {
     if (open) {
       setStep(0);
       setTitle("");
-      setWorkspaceId(defaultWorkspaceId ?? null);
-      setInvitedUserIds([]);
+      setProjectId(null);
+      setInvited([]);
       setAgentCards([]);
       setSubmitAttempted(false);
     }
-  }, [open, defaultWorkspaceId]);
+  }, [open]);
 
   /* ── 数据源（全部照现有惯例的查询/ hook） ── */
 
-  // 工作区下拉（步骤①自选 + 步骤③ agent 成员工作区）：仅活跃工作区可选
-  //（归档区禁建，后端 409 同款守卫的提示层）。
-  const workspacesQ = useQuery({
-    queryKey: ["workspaces", "create-group-wizard"],
-    queryFn: () => listWorkspaces({ limit: 100 }),
+  // PPM 项目下拉：simple-list 全量候选（登录可见项目）+ 搜索。
+  const projectsQ = useQuery({
+    queryKey: ["ppmProjects", "simple", "create-group-wizard"],
+    queryFn: listSimpleProjects,
     staleTime: 60_000,
     enabled: open,
   });
-  const activeWorkspaces = useMemo(
-    () => (workspacesQ.data?.items ?? []).filter((ws) => ws.status === "active"),
-    [workspacesQ.data],
-  );
-  const workspaceOptions = useMemo(
+  const projectOptions = useMemo(
     () =>
-      activeWorkspaces.map((ws) => ({
-        value: ws.id,
-        label: ws.display_alias ?? ws.name,
+      (projectsQ.data ?? []).map((p) => ({
+        value: p.id,
+        // 项目名空回退 id 短码（PPM 列表惯例）。
+        label: p.project_name?.trim() || p.id.slice(0, 8),
       })),
-    [activeWorkspaces],
+    [projectsQ.data],
   );
 
-  // 邀请候选：workspace 成员列表（排除本人——建群人自动成为群主）。
-  const membersQ = useQuery({
-    queryKey: ["workspaceMembers", "create-group-wizard", workspaceId],
-    queryFn: () => listMembers(workspaceId!),
-    enabled: open && step === 1 && workspaceId != null,
+  // 项目关联工作区（步骤①关联数提示 + 步骤③ agent 成员工作区候选共用）：
+  // quick 后端口径同源——群工作区由该集推导，agent 工作区须在集内。
+  const projectWorkspacesQ = useQuery({
+    queryKey: ["projectWorkspaces", "create-group-wizard", projectId],
+    queryFn: () => listProjectWorkspaces(projectId!),
+    enabled: open && projectId != null,
+    staleTime: 60_000,
+  });
+  const projectWorkspaces = useMemo<WorkspaceBrief[]>(
+    () => projectWorkspacesQ.data ?? [],
+    [projectWorkspacesQ.data],
+  );
+  const projectWorkspaceOptions = useMemo(
+    () =>
+      projectWorkspaces.map((w) => ({
+        value: w.workspace_id,
+        label: w.name,
+      })),
+    [projectWorkspaces],
+  );
+
+  // 邀请候选：项目人员（后端 400 同口径——邀人范围=项目成员；排除本人）。
+  const projectMembersQ = useQuery({
+    queryKey: ["ppmProjectMembers", "create-group-wizard", projectId],
+    queryFn: () => listProjectMembers({ pm_project_id: projectId! }),
+    enabled: open && step === 1 && projectId != null,
     staleTime: 60_000,
   });
   const memberOptions = useMemo(
     () =>
-      (membersQ.data ?? [])
-        .filter((m) => !m.is_current_user)
-        .map((m) => ({
+      (projectMembersQ.data ?? [])
+        .filter((m) => !meId || m.user_id !== meId)
+        .map((m: ProjectMember) => ({
           value: m.user_id,
-          label: m.display_name?.trim() || m.email,
+          label: m.user_name?.trim() || m.username?.trim() || m.user_id.slice(0, 8),
         })),
-    [membersQ.data],
+    [projectMembersQ.data, meId],
   );
 
   // 机器（runtime 下拉）：useDaemonMachines 融合候选（自有+共享），仅在线
@@ -279,7 +312,30 @@ export function CreateGroupWizard({
       return `群名称最长 ${GROUP_TITLE_MAX_LEN} 字`;
     return null;
   }, [title]);
-  const workspaceError = workspaceId ? null : "请选择工作区";
+
+  /** 项目关联工作区提示（null = 不渲染：未选项目/仍在加载）。 */
+  const workspaceHint = useMemo<{
+    kind: "ok" | "empty" | "loading";
+    text: string;
+  } | null>(() => {
+    if (projectId == null) return null;
+    if (projectWorkspacesQ.isLoading) {
+      return { kind: "loading", text: "正在加载项目关联工作区…" };
+    }
+    if (projectWorkspacesQ.isError) {
+      return { kind: "empty", text: "项目关联工作区加载失败，请稍后重试" };
+    }
+    if (projectWorkspaces.length === 0) {
+      return {
+        kind: "empty",
+        text: "该项目尚未关联工作区——请先在项目管理中关联工作区后再建群",
+      };
+    }
+    return {
+      kind: "ok",
+      text: `已关联 ${projectWorkspaces.length} 个工作区（群工作区将自动取该项目首个关联工作区）`,
+    };
+  }, [projectId, projectWorkspacesQ, projectWorkspaces.length]);
 
   /** 某张卡片的昵称错误（即时查重：与其它卡片的已填昵称比对）。 */
   const nameErrorOf = (card: AgentMemberCardState): string | null =>
@@ -291,16 +347,24 @@ export function CreateGroupWizard({
         .filter(Boolean),
     );
 
-  /** 某张卡片整体可提交（昵称通过 + 机器已选）。 */
+  /** 某张卡片整体可提交（昵称通过 + 机器已选 + 工作区已选（项目关联集必选））。 */
   const cardValid = (card: AgentMemberCardState): boolean =>
-    nameErrorOf(card) === null && card.runtimeId != null;
+    nameErrorOf(card) === null && card.runtimeId != null && card.workspaceId !== "";
 
   const stepValid = useMemo(() => {
-    if (step === 0) return !titleError && !workspaceError;
+    if (step === 0) {
+      // 群名 + 项目已选 + 项目关联工作区就位（空集/加载中/失败均禁走下一步）。
+      return (
+        !titleError &&
+        projectId != null &&
+        projectWorkspacesQ.isSuccess &&
+        projectWorkspaces.length > 0
+      );
+    }
     if (step === 1) return true; // 邀请可跳过（0 人合法——仅群主也成群）
     return agentCards.every(cardValid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, titleError, workspaceError, agentCards]);
+  }, [step, titleError, projectId, projectWorkspacesQ.isSuccess, projectWorkspaces.length, agentCards]);
 
   /* ── 提交 ── */
 
@@ -323,20 +387,27 @@ export function CreateGroupWizard({
     setSubmitAttempted(true);
     const payload: GroupChatCreate = {
       title: title.trim(),
-      workspace_id: workspaceId!,
-      // 后端 schema 默认值镜像（生成版 TS 类型必填，显式传不引入第二套取值）。
+      // quick 群 PPM 项目化：project_id 必填；workspace_id 不传——后端自动取
+      // 项目首个关联工作区（步骤①已按同口径引导）。
+      project_id: projectId!,
+      // 生成版 TS 类型必填须显式传；取值沿用向导既有保守值（后端 schema
+      // default=4，取值域 ge=1 le=8，2 合法——非 UI 暴露项，行为维持不变）。
       agent_cross_mention: true,
-      cross_mention_depth: 2,
+      cross_mention_depth: 4,
       context_window: 20,
-      ...(invitedUserIds.length > 0
+      ...(invited.length > 0
         ? {
-            user_members: invitedUserIds.map((uid) => ({ user_id: uid })),
+            user_members: invited.map((u) => ({
+              user_id: u.user_id,
+              ...(u.avatar ? { avatar: u.avatar } : {}),
+            })),
           }
         : {}),
       ...(agentCards.length > 0
         ? {
             agent_members: agentCards.map((c) => ({
               display_name: c.displayName.trim(),
+              ...(c.avatar ? { avatar: c.avatar } : {}),
               runtime_id: c.runtimeId!,
               workspace_id: c.workspaceId || null,
               provider: c.provider,
@@ -363,6 +434,10 @@ export function CreateGroupWizard({
   if (!open) return null;
 
   const showErrors = submitAttempted;
+
+  /** 被邀人昵称解析（头像上传行展示用）。 */
+  const invitedLabel = (userId: string): string =>
+    memberOptions.find((o) => o.value === userId)?.label ?? userId.slice(0, 8);
 
   return (
     <Modal
@@ -460,57 +535,64 @@ export function CreateGroupWizard({
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
-              工作区 <span className="text-destructive">*</span>
+              所属项目 <span className="text-destructive">*</span>
             </span>
             <Select
-              id="cgw-workspace"
-              aria-label="群工作区"
+              id="cgw-project"
+              aria-label="所属项目"
               className="w-full"
-              placeholder="请选择工作区"
-              value={workspaceId ?? undefined}
-              onChange={(v) => setWorkspaceId(v ?? null)}
-              // scope 锁定：workspace/change/quicklog 入口建群固定在当前工作区。
-              disabled={defaultWorkspaceId != null}
-              options={
-                defaultWorkspaceId != null &&
-                workspaceId != null &&
-                !workspaceOptions.some((o) => o.value === workspaceId)
-                  ? [
-                      ...workspaceOptions,
-                      { value: workspaceId, label: "当前工作区" },
-                    ]
-                  : workspaceOptions
-              }
+              placeholder="搜索并选择 PPM 项目"
+              showSearch
+              optionFilterProp="label"
+              value={projectId ?? undefined}
+              onChange={(v) => setProjectId(v ?? null)}
+              loading={projectsQ.isLoading}
+              options={projectOptions}
             />
-            {defaultWorkspaceId != null ? (
+            {(showErrors && projectId == null) && (
+              <span className="text-[11px] text-destructive">请选择所属项目</span>
+            )}
+            {projectsQ.isSuccess && projectOptions.length === 0 && (
               <span className="text-[11px] text-muted-foreground">
-                已锁定为当前入口工作区
+                暂无可选项目——请先在项目管理中创建项目后再建群
               </span>
-            ) : (
-              showErrors &&
-              workspaceError && (
-                <span className="text-[11px] text-destructive">
-                  {workspaceError}
-                </span>
-              )
+            )}
+            {projectsQ.isError && (
+              <span className="text-[11px] text-destructive">
+                项目列表加载失败：{errMessage(projectsQ.error, "请稍后重试")}
+              </span>
+            )}
+            {workspaceHint && (
+              <span
+                data-testid="cgw-workspace-hint"
+                className={cn(
+                  "text-[11px]",
+                  workspaceHint.kind === "empty"
+                    ? "text-destructive"
+                    : "text-muted-foreground",
+                )}
+              >
+                {workspaceHint.text}
+              </span>
             )}
           </div>
           <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
-            群聊支持多用户与多个 Agent 成员在同一会话协作：@昵称 唤起指定
-            Agent，@全体 通知所有 Agent；未被 @ 的消息仅进群背景摘要。
+            群聊归属 PPM 项目：群工作区取项目关联工作区，可邀请项目成员、
+            添加 Agent 成员协作——@昵称 唤起指定 Agent，@全体 通知所有 Agent；
+            未被 @ 的消息仅进群背景摘要。
           </p>
         </div>
       )}
 
-      {/* ── 步骤② 邀请用户 ── */}
+      {/* ── 步骤② 邀请用户（项目人员） ── */}
       {step === 1 && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">
-              邀请用户（workspace 成员，可跳过）
+              邀请用户（项目成员，可跳过）
             </span>
             <span className="text-[11px] text-muted-foreground">
-              已选 {invitedUserIds.length}/{GROUP_USER_MEMBER_LIMIT}（不含群主）
+              已选 {invited.length}/{GROUP_USER_MEMBER_LIMIT}（不含群主）
             </span>
           </div>
           <Select
@@ -520,14 +602,53 @@ export function CreateGroupWizard({
             mode="multiple"
             maxTagCount="responsive"
             maxCount={GROUP_USER_MEMBER_LIMIT}
-            placeholder={membersQ.isLoading ? "加载成员中…" : "搜索并选择要邀请的成员"}
-            value={invitedUserIds}
-            onChange={setInvitedUserIds}
+            placeholder={
+              projectMembersQ.isLoading ? "加载项目成员中…" : "搜索并选择要邀请的项目成员"
+            }
+            value={invited.map((u) => u.user_id)}
+            onChange={(ids: string[]) =>
+              // 保号同步：保留已选成员已上传的头像，移除的丢弃。
+              setInvited((prev) =>
+                ids.map(
+                  (uid) =>
+                    prev.find((p) => p.user_id === uid) ?? {
+                      user_id: uid,
+                      avatar: null,
+                    },
+                ),
+              )
+            }
             options={memberOptions}
-            loading={membersQ.isLoading}
+            loading={projectMembersQ.isLoading}
           />
+          {invited.length > 0 && (
+            <div
+              data-testid="cgw-invited-avatars"
+              className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-2"
+            >
+              <span className="text-[11px] text-muted-foreground">
+                群内头像（可选，未设置时显示昵称首字）
+              </span>
+              {invited.map((u) => (
+                <div key={u.user_id} className="flex items-center gap-2">
+                  <GroupMemberAvatarUpload
+                    value={u.avatar}
+                    name={invitedLabel(u.user_id)}
+                    label={`被邀成员 ${invitedLabel(u.user_id)} 头像`}
+                    onChange={(avatar) =>
+                      setInvited((prev) =>
+                        prev.map((p) =>
+                          p.user_id === u.user_id ? { ...p, avatar } : p,
+                        ),
+                      )
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          )}
           <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
-            仅该工作区成员可邀请（上限 {GROUP_USER_MEMBER_LIMIT} 人）；你将作为群主，
+            仅该项目成员可邀请（上限 {GROUP_USER_MEMBER_LIMIT} 人）；你将作为群主，
             被邀请成员即可查看并参与群聊。
           </p>
         </div>
@@ -568,6 +689,7 @@ export function CreateGroupWizard({
             {agentCards.map((card, idx) => {
               const nameError = nameErrorOf(card);
               const runtimeMissing = card.runtimeId == null;
+              const workspaceMissing = card.workspaceId === "";
               return (
                 <div
                   key={card.id}
@@ -579,7 +701,7 @@ export function CreateGroupWizard({
                       aria-hidden
                       className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-600 text-white"
                     >
-                      <Bot className="h-3.5 w-3.5" />
+                      <Bot aria-hidden className="h-3.5 w-3.5" />
                     </span>
                     <span className="text-[13px] font-semibold text-foreground">
                       Agent 成员 {idx + 1}
@@ -593,6 +715,15 @@ export function CreateGroupWizard({
                     >
                       <Trash2 aria-hidden className="h-3.5 w-3.5" />
                     </button>
+                  </div>
+                  {/* 成员头像（可选，quick 群成员头像自定义） */}
+                  <div className="mb-2 flex items-center gap-2 border-b border-border pb-2">
+                    <GroupMemberAvatarUpload
+                      value={card.avatar}
+                      name={card.displayName || `Agent ${idx + 1}`}
+                      label={`Agent 成员 ${idx + 1} 头像`}
+                      onChange={(avatar) => updateCard(card.id, { avatar })}
+                    />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="flex flex-col gap-1">
@@ -642,26 +773,27 @@ export function CreateGroupWizard({
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="text-[11px] font-medium text-muted-foreground">
-                        工作区
+                        工作区 *
                       </span>
                       <Select
                         id={`cgw-card-ws-${idx}`}
                         aria-label={`Agent 成员 ${idx + 1} 工作区`}
                         className="w-full"
-                        placeholder="沿用群工作区"
-                        allowClear
+                        placeholder="项目关联工作区内选择"
                         value={card.workspaceId || undefined}
                         onChange={(v) =>
                           updateCard(card.id, { workspaceId: v ?? "" })
                         }
-                        options={[
-                          {
-                            value: "",
-                            label: "沿用群工作区",
-                          },
-                          ...workspaceOptions,
-                        ]}
+                        options={projectWorkspaceOptions}
+                        status={
+                          showErrors && workspaceMissing ? "error" : undefined
+                        }
                       />
+                      {showErrors && workspaceMissing && (
+                        <span className="text-[11px] leading-4 text-destructive">
+                          请选择工作区（项目关联集内）
+                        </span>
+                      )}
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="text-[11px] font-medium text-muted-foreground">
@@ -745,21 +877,22 @@ export function CreateGroupWizard({
 /* ────────────────────── 群行 facepile 辅助（session-list-panel 复用导出） ────────────────────── */
 
 /**
- * 成员头像堆叠预览（facepile，原型 .facepile/.fp）：agent=brand 紫、
- * 用户=info 青圆形字头像，前 N 个 + 溢出 +n；空成员回退渐变群头像。
- * 群分区行与（task-08）群视图顶栏共用。
+ * 成员头像堆叠预览（facepile，原型 .facepile/.fp）：avatar 有值 → 头像图片
+ *（GroupMemberAvatar）；无值 → agent=brand 紫、用户=info 青圆形字头像，前 N
+ * 个 + 溢出 +n；空成员回退渐变群头像。群分区行与群视图顶栏共用。
  */
 export function MemberFacepile({
   members,
   max = 3,
   size = "sm",
 }: {
-  members: { display_name: string; member_type: string }[];
+  members: { display_name: string; member_type: string; avatar?: string | null }[];
   max?: number;
   size?: "sm" | "md";
 }): ReactNode {
   const shown = members.slice(0, max);
   const rest = members.length - shown.length;
+  const px = size === "md" ? 28 : 18;
   const dim =
     size === "md"
       ? "h-7 w-7 text-[11px]"
@@ -780,18 +913,18 @@ export function MemberFacepile({
   return (
     <span className="flex shrink-0 items-center" aria-hidden>
       {shown.map((m, i) => (
-        <span
+        <GroupMemberAvatar
           key={`${m.display_name}-${i}`}
+          avatar={m.avatar}
+          name={m.display_name}
+          size={px}
           title={m.display_name}
-          className={cn(
-            "flex items-center justify-center rounded-full border border-card font-bold text-white",
+          className={cn("rounded-full border border-card", i > 0 && "-ml-1")}
+          fallbackClassName={cn(
             dim,
-            i > 0 && "-ml-1",
             m.member_type === "agent" ? "bg-brand-600" : "bg-info",
           )}
-        >
-          {m.display_name.slice(0, 1)}
-        </span>
+        />
       ))}
       {rest > 0 && (
         <span

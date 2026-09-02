@@ -213,6 +213,34 @@ const TOOL_REPORT_SECTION_KEY = "__tool_report__";
 /** 组内「团队分身」孤儿小节 key（2026-08-26-subsession-portal-grouping：父不可见的分身子会话收纳）。 */
 const SUB_ORPHAN_SECTION_KEY = "__sub_orphan__";
 
+/* ────────── 群聊分区折叠记忆（quick：折叠态 localStorage 持久化） ────────── */
+
+/** 群聊分区折叠记忆 key（先例：SESSION_TREE_EXPANSION_LS_KEY 命名风格）。 */
+export const GROUP_SECTION_COLLAPSED_LS_KEY = "sillyhub-group-section-collapsed";
+
+/** 读折叠记忆（"1"=折叠；无记录/坏值/SSR → 展开，默认展示群行）。 */
+function readGroupSectionCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(GROUP_SECTION_COLLAPSED_LS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** 写折叠记忆（隐私模式/配额异常静默忽略——丢记忆不阻断交互）。 */
+function writeGroupSectionCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      GROUP_SECTION_COLLAPSED_LS_KEY,
+      collapsed ? "1" : "0",
+    );
+  } catch {
+    // 写不进只是丢记忆，不影响本次交互。
+  }
+}
+
 /* ────────── 展开记忆（ql-20260824-002：localStorage 持久化用户手动展开） ────────── */
 
 /** 展开记忆 localStorage key（先例：NEW_SESSION_MACHINE_LS_KEY 命名风格）。 */
@@ -1492,11 +1520,12 @@ interface GroupChatSectionProps {
 }
 
 /**
- * 列表顶部「群聊」分区：分区头（Users 图标 + 计数 + 「＋」新建）+ 群行
- * （facepile 成员摘要 + 群名 + 群聊徽标 + 最后消息摘要）。与单聊树视觉分区
- * （照 TOOL_REPORT_SECTION_KEY 分桶先例的收纳形态，原型 .sess-group-label
- * 「群聊」/「单聊」两段式）；@全体 未读徽标位预留（task-03 群消息管线落地
- * 后接入，本卡 DTO 尚无未读计数）。
+ * 列表顶部「群聊」分区：分区头（Users 图标 + 计数 + 「＋」新建，**可折叠**——
+ * quick 照「本地 Agent 小节」折叠惯例 ▶/▼ + localStorage 记忆；折叠时只留
+ * 一行「群聊（N）」摘要）+ 群行（facepile 成员摘要 + 群名 + 群聊徽标 + 最后
+ * 消息摘要）。与单聊树视觉分区（照 TOOL_REPORT_SECTION_KEY 分桶先例的收纳
+ * 形态，原型 .sess-group-label「群聊」/「单聊」两段式）；@全体 未读徽标位
+ * 预留（task-03 群消息管线落地后接入，本卡 DTO 尚无未读计数）。
  */
 function GroupChatSection({
   groups,
@@ -1507,13 +1536,40 @@ function GroupChatSection({
   onSelect,
   onNew,
 }: GroupChatSectionProps) {
+  // 折叠态（挂载时惰性读记忆；仅用户手动 toggle 落盘）。
+  const [collapsed, setCollapsed] = useState<boolean>(() =>
+    readGroupSectionCollapsed(),
+  );
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    writeGroupSectionCollapsed(next);
+  };
   return (
     <section
       data-testid="group-chat-section"
       aria-label="群聊分区"
       className="mb-2 border-b border-border pb-1.5"
     >
-      <div className="flex items-center gap-1.5 px-1.5 pb-1 pt-0.5 text-[11px] font-semibold text-muted-foreground">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        aria-label="群聊分区头"
+        onClick={toggleCollapsed}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") toggleCollapsed();
+        }}
+        className="flex cursor-pointer select-none items-center gap-1.5 px-1.5 pb-1 pt-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span
+          aria-hidden
+          className={`text-[10px] text-muted-foreground transition-transform ${
+            collapsed ? "" : "rotate-90"
+          }`}
+        >
+          ▶
+        </span>
         <Users aria-hidden className="h-3 w-3 shrink-0 text-brand-600" />
         <span className="truncate">群聊</span>
         <span className="shrink-0 font-normal text-muted-foreground/80">
@@ -1525,36 +1581,40 @@ function GroupChatSection({
             type="button"
             aria-label="新建群聊"
             title="新建群聊（三步向导：群信息 → 邀请用户 → 配置 Agent 成员）"
-            onClick={onNew}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNew();
+            }}
             className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary"
           >
             <Plus aria-hidden className="h-3 w-3" />
           </button>
         )}
       </div>
-      {error ? (
-        <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-red-50 px-2 py-1.5 text-[11px] text-destructive">
-          加载群聊失败：{error}
-          <Button size="small" onClick={onRetry}>
-            重新加载
-          </Button>
-        </div>
-      ) : groups.length === 0 ? (
-        !loading && (
-          <p className="px-2.5 py-1.5 text-[11px] text-muted-foreground">
-            暂无群聊——点「＋」发起一个多人多 Agent 协作群
-          </p>
-        )
-      ) : (
-        groups.map((g) => (
-          <GroupChatRow
-            key={g.id}
-            group={g}
-            selected={g.id === selectedGroupId}
-            onSelect={onSelect}
-          />
-        ))
-      )}
+      {!collapsed &&
+        (error ? (
+          <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-red-50 px-2 py-1.5 text-[11px] text-destructive">
+            加载群聊失败：{error}
+            <Button size="small" onClick={onRetry}>
+              重新加载
+            </Button>
+          </div>
+        ) : groups.length === 0 ? (
+          !loading && (
+            <p className="px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              暂无群聊——点「＋」发起一个多人多 Agent 协作群
+            </p>
+          )
+        ) : (
+          groups.map((g) => (
+            <GroupChatRow
+              key={g.id}
+              group={g}
+              selected={g.id === selectedGroupId}
+              onSelect={onSelect}
+            />
+          ))
+        ))}
     </section>
   );
 }

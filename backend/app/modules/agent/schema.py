@@ -339,6 +339,9 @@ class GroupMemberAgentConfig(BaseModel):
     """
 
     display_name: str = Field(min_length=1, max_length=40, description="群内昵称=@提及词，群内唯一")
+    avatar: str | None = Field(
+        default=None, max_length=512, description="群内头像 URL（文件中心上传产出）"
+    )
     runtime_id: uuid.UUID = Field(description="机器（daemon runtime，pinned 派发）")
     workspace_id: uuid.UUID | None = Field(
         default=None, description="工作区（cwd 锚）；None=沿用群工作区"
@@ -360,6 +363,9 @@ class GroupMemberUserCreate(BaseModel):
         max_length=40,
         description="群内昵称；None=沿用用户显示名（service 层解析并查重）",
     )
+    avatar: str | None = Field(
+        default=None, max_length=512, description="群内头像 URL（文件中心上传产出）"
+    )
 
 
 class GroupChatCreate(BaseModel):
@@ -367,10 +373,18 @@ class GroupChatCreate(BaseModel):
 
     初始成员分两数组：用户成员（邀请）+ agent 成员（六要素）。建群时同步创建
     群时间线会话（AgentSession.session_kind='group'）。
+
+    quick 群 PPM 项目化口径：``project_id`` 必填——群挂 PPM 项目，群工作区由
+    项目关联工作区集推导（``workspace_id`` 可选：显式传入时须在项目关联集内，
+    未传取首个关联工作区；项目无关联工作区 → 400）。邀请人员范围=项目成员。
     """
 
     title: str = Field(min_length=1, max_length=120)
-    workspace_id: uuid.UUID
+    project_id: uuid.UUID = Field(description="PPM 项目（群归属；工作区由项目关联集推导）")
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description="工作区；None=自动取项目首个关联工作区（显式传入须在项目关联集内）",
+    )
     agent_cross_mention: bool = Field(default=True, description="agent 互@协作开关（默认开）")
     cross_mention_depth: int = Field(
         default=4, ge=1, le=8, description="协作链深度上限（防环护栏）"
@@ -408,6 +422,7 @@ class GroupMemberUpdate(BaseModel):
     """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=40)
+    avatar: str | None = Field(default=None, max_length=512, description="群内头像 URL；None=不改")
     runtime_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
     provider: str | None = Field(default=None, min_length=1, max_length=20)
@@ -419,7 +434,8 @@ class GroupMemberRead(BaseModel):
     """成员读体（群详情/成员面板，design §6.1）。
 
     agent 成员六要素全量返回（用户成员对应列为 None）；``shadow_status``
-    供面板绿点（none/pending/active/failed）。
+    供面板绿点（none/pending/active/failed）；``avatar`` 为群内头像 URL
+    （用户与 agent 成员共用，None=未自定义）。
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -427,6 +443,7 @@ class GroupMemberRead(BaseModel):
     id: uuid.UUID
     member_type: str
     display_name: str
+    avatar: str | None = None
     user_id: uuid.UUID | None = None
     runtime_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
@@ -453,6 +470,7 @@ class GroupChatRead(BaseModel):
     id: uuid.UUID
     session_id: uuid.UUID
     workspace_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     title: str
     created_by: uuid.UUID | None = None
     agent_cross_mention: bool

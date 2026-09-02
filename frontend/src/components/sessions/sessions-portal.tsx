@@ -692,10 +692,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
         onPick={handlePickerPick}
       />
       {/* task-07（FR-01/FR-04）：三步建群向导（分区头「＋」触发；成功
-          invalidate ["groupChats"] + 选中新群见 handleGroupCreated）。 */}
+          invalidate ["groupChats"] + 选中新群见 handleGroupCreated）。
+          quick 群 PPM 项目化：向导改选项目（群工作区后端推导），
+          scope 工作区锁定 prop 退役不再传入。 */}
       <CreateGroupWizard
         open={groupWizardOpen}
-        defaultWorkspaceId={scopedPickerWorkspaceId()}
         onCancel={() => setGroupWizardOpen(false)}
         onCreated={handleGroupCreated}
       />

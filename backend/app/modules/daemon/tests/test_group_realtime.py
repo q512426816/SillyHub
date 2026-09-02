@@ -58,7 +58,8 @@ from app.modules.daemon.group.service import get_online_member_ids
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.daemon.router import _stream_sessions_events
 from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
-from app.modules.workspace.model import Workspace
+from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
+from app.modules.workspace.model import PpmProjectWorkspace, Workspace
 
 # ── Helpers（镜像 test_group_mention_pipeline.py 夹具范式）────────────────────
 
@@ -171,9 +172,38 @@ async def _seed_runtime(
     return instance, runtime
 
 
+async def _make_project(db_session: AsyncSession) -> PpmProjectMaintenance:
+    """PPM 项目行（quick 群 PPM 项目化：建群 project_id 口径）。"""
+    project = PpmProjectMaintenance(
+        id=uuid.uuid4(),
+        project_code=f"GRP-{uuid.uuid4().hex[:12]}",
+        project_name="群聊测试项目",
+    )
+    db_session.add(project)
+    await db_session.commit()
+    await db_session.refresh(project)
+    return project
+
+
+async def _link_project_workspace(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, workspace_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectWorkspace(ppm_project_id=ppm_project_id, workspace_id=workspace_id))
+    await db_session.commit()
+
+
+async def _add_project_member(
+    db_session: AsyncSession, *, ppm_project_id: uuid.UUID, user_id: uuid.UUID
+) -> None:
+    db_session.add(PpmProjectMember(id=uuid.uuid4(), pm_project_id=ppm_project_id, user_id=user_id))
+    await db_session.commit()
+
+
 async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> SimpleNamespace:
     """每测试群聊环境：workspace + 群主（TASK_RUN_AGENT 角色）+ 在线机器。"""
     ws = await _make_workspace(db_session)
+    project = await _make_project(db_session)
+    await _link_project_workspace(db_session, ppm_project_id=project.id, workspace_id=ws.id)
     owner, owner_token = await _create_user_with_token(db_session, name=owner_name)
     await _grant_workspace_role(
         db_session,
@@ -181,9 +211,15 @@ async def _make_env(db_session: AsyncSession, *, owner_name: str = "群主") -> 
         user_id=owner.id,
         permissions=[Permission.TASK_RUN_AGENT],
     )
+    await _add_project_member(db_session, ppm_project_id=project.id, user_id=owner.id)
     instance, runtime = await _seed_runtime(db_session, owner.id)
     return SimpleNamespace(
-        ws=ws, owner=owner, owner_token=owner_token, instance=instance, runtime=runtime
+        ws=ws,
+        project=project,
+        owner=owner,
+        owner_token=owner_token,
+        instance=instance,
+        runtime=runtime,
     )
 
 
@@ -197,6 +233,7 @@ async def _env_user(
         user_id=user.id,
         permissions=[Permission.TASK_RUN_AGENT],
     )
+    await _add_project_member(db_session, ppm_project_id=env.project.id, user_id=user.id)
     return user, token
 
 
@@ -204,12 +241,15 @@ async def _create_group(
     client: AsyncClient,
     owner_token: str,
     *,
-    workspace_id: uuid.UUID,
+    project_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
     title: str = "测试群",
     user_members: list[dict] | None = None,
     agent_members: list[dict] | None = None,
 ) -> dict:
-    payload: dict = {"title": title, "workspace_id": str(workspace_id)}
+    payload: dict = {"title": title, "project_id": str(project_id)}
+    if workspace_id is not None:
+        payload["workspace_id"] = str(workspace_id)
     if user_members:
         payload["user_members"] = user_members
     if agent_members:
@@ -448,7 +488,7 @@ class TestTypingEndpoint:
     ) -> None:
         """payload 形态 + preview ≤400（DTO 口径）+ 不落时间线（ephemeral 纪律）。"""
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         group_id = uuid.UUID(data["id"])
 
         # 400 字（DTO 上限）原样透传；401+ → 422（DTO max_length 与服务端
@@ -481,7 +521,7 @@ class TestTypingEndpoint:
     ) -> None:
         """typing=False（发送后冲掉指示器）：preview 缺省 None。"""
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         group_id = uuid.UUID(data["id"])
 
         resp = await _send_typing(client, env.owner_token, group_id, typing=False)
@@ -500,7 +540,7 @@ class TestTypingEndpoint:
     ) -> None:
         """非群成员 typing → 404 不泄露存在性（零 publish）。"""
         env = await _make_env(db_session)
-        data = await _create_group(client, env.owner_token, workspace_id=env.ws.id)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
         _outsider, outsider_token = await _env_user(db_session, env, name="圈外人")
 
         resp = await _send_typing(client, outsider_token, data["id"])
@@ -526,7 +566,7 @@ class TestAgentTypingAutoEvent:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -556,7 +596,7 @@ class TestAgentTypingAutoEvent:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
@@ -662,7 +702,7 @@ class TestPresence:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(member_user.id), "display_name": "鲸落"}],
         )
         group_id = uuid.UUID(data["id"])
@@ -775,7 +815,7 @@ class TestAudienceFilter:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(invited.id), "display_name": "鲸落"}],
         )
 
@@ -803,7 +843,7 @@ class TestAudienceFilter:
         data = await _create_group(
             client,
             env.owner_token,
-            workspace_id=env.ws.id,
+            project_id=env.project.id,
             user_members=[{"user_id": str(invited.id), "display_name": "鲸落"}],
         )
         mocked_sessions_events_redis.publish.reset_mock()

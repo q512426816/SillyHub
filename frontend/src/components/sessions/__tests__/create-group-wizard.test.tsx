@@ -1,29 +1,37 @@
 /**
  * CreateGroupWizard 单测 + 群聊 API 客户端单测（2026-09-01-session-group-chat
- * task-07 / FR-01 / FR-04，design §6.1 + §7 建群向导）。
+ * task-07 / FR-01 / FR-04，design §6.1 + §7 建群向导；quick 群 PPM 项目化 +
+ * 成员头像自定义改造）。
  *
  * 依据：
- *   - components/group-chat/create-group-wizard.tsx（本 task 实现）
+ *   - components/group-chat/create-group-wizard.tsx（本 task 实现；quick 改造：
+ *     步骤①项目下拉（project_id 必填、群工作区后端推导）/ ②项目人员候选 /
+ *     ③agent 工作区=项目关联工作区必选 + 头像上传）
  *   - lib/daemon.ts 群聊 API 客户端（9 函数——task-02 已落地端点的前端封装）
- *   - tasks/task-07.md acceptance：向导三步可完成建群；六要素表单校验生效
- *     （昵称重复即时报错、agent 8/用户 50 上限拦截）
- *   - prototype-group-chat.html .modal（createModal 三步 + 六要素 callout）
+ *   - lib/api-types.ts GroupChatCreate（quick：project_id 必填 / workspace_id
+ *     可选不传；GroupMemberUserCreate/AgentConfig 含 avatar）
  *
  * 覆盖：
  *   1. API 客户端：9 函数 → apiFetch 路径 / method / payload 断言（真实
  *      daemon.ts 实现 + @/lib/api apiFetch mock——不经 HTTP 层）
- *   2. 向导三步流转：①群名必填 + 工作区（scope 锁定/全局自选）②邀请多选
- *      ③六要素卡片 → 提交 createGroupChat payload（含 agent_cross_mention
- *      默认镜像）+ onCreated 回调
- *   3. 校验：昵称必填/保留词（全体、all）/群内查重即时报错；agent 8 上限
- *      拦截（添加按钮置灰）；用户 50 上限计数位
+ *   2. 向导三步流转：①群名必填 + 项目下拉（选中显示关联工作区数提示）②项目
+ *      人员邀请多选（排除本人）③六要素卡片（工作区=项目关联工作区必选）→
+ *      提交 createGroupChat payload（project_id + 不带 workspace_id + 默认值
+ *      镜像）+ onCreated 回调
+ *   3. 头像上传管线：agent 卡片与被邀用户上传头像 → payload avatar 填充
+ *      （/api/file/{id}）；可清除恢复默认（payload 不带 avatar）
+ *   4. 校验：昵称必填/保留词（全体、all）/群内查重即时报错；agent 8 上限
+ *      拦截；项目无关联工作区禁下一步（引导文案）
  *
  * mock 策略（对齐 sessions/__tests__ 既有惯例）：
  *   - @/lib/api 仅覆写 apiFetch（daemon.ts 真实实现消费 mock——向导提交与
  *     API 客户端用例共用同一断言面）
- *   - @/lib/use-daemon-machines、@/lib/workspaces、@/lib/workspace-members、
- *     @/lib/api/llm-providers、@/lib/agent-profiles（hook）、@/lib/errors
- *     （useNotify）按向导数据源逐一 mock
+ *   - @/lib/use-daemon-machines、@/lib/api/llm-providers、@/lib/agent-profiles
+ *     （hook）、@/lib/errors（useNotify）按向导数据源逐一 mock
+ *   - quick 数据源：@/lib/ppm/project（listSimpleProjects / listProjectMembers）、
+ *     @/lib/workspace（listProjectWorkspaces）、@/lib/file/api（uploadFile +
+ *     getFileDownloadUrl 保真实现）、@/stores/session（当前用户 id——邀人排除
+ *     本人）
  *   - antd Select 经 id 锚定 + mousedown 打开（session-list-panel.test 同款助手）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -56,8 +64,6 @@ import {
   type GroupChatRead,
 } from "@/lib/daemon";
 import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
-import type { Workspace } from "@/lib/workspaces";
-import type { WorkspaceMemberView } from "@/lib/workspace-members";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -65,10 +71,13 @@ const mocks = vi.hoisted(() => ({
   // @/lib/api apiFetch（向导提交 + API 客户端用例共用断言面）。
   apiFetch: vi.fn(),
   machinesHook: vi.fn(),
-  listWorkspaces: vi.fn(),
-  listMembers: vi.fn(),
   listProviders: vi.fn(),
   profilesHook: vi.fn(),
+  // quick：PPM 项目 / 项目人员 / 项目关联工作区 / 文件上传。
+  listSimpleProjects: vi.fn(),
+  listProjectMembers: vi.fn(),
+  listProjectWorkspaces: vi.fn(),
+  uploadFile: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -84,14 +93,6 @@ vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
 }));
 
-vi.mock("@/lib/workspaces", () => ({
-  listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
-}));
-
-vi.mock("@/lib/workspace-members", () => ({
-  listMembers: (...args: unknown[]) => mocks.listMembers(...args),
-}));
-
 vi.mock("@/lib/api/llm-providers", () => ({
   listProviders: (...args: unknown[]) => mocks.listProviders(...args),
 }));
@@ -99,6 +100,35 @@ vi.mock("@/lib/api/llm-providers", () => ({
 vi.mock("@/lib/agent-profiles", () => ({
   useMineAgentProfiles: () => mocks.profilesHook(),
 }));
+
+vi.mock("@/lib/ppm/project", () => ({
+  listSimpleProjects: (...args: unknown[]) => mocks.listSimpleProjects(...args),
+  listProjectMembers: (...args: unknown[]) => mocks.listProjectMembers(...args),
+}));
+
+vi.mock("@/lib/workspace", () => ({
+  listProjectWorkspaces: (...args: unknown[]) =>
+    mocks.listProjectWorkspaces(...args),
+}));
+
+vi.mock("@/lib/file/api", () => ({
+  uploadFile: (...args: unknown[]) => mocks.uploadFile(...args),
+  // 保真实现（与真实 getFileDownloadUrl 同口径——断言 payload avatar 值用）。
+  getFileDownloadUrl: (id: string) => `/api/file/${id}`,
+  fetchFileBlob: vi.fn(async () => new Blob(["x"], { type: "image/png" })),
+}));
+
+vi.mock("@/stores/session", () => {
+  const state = {
+    user: { id: "u-me", email: "me@sillyhub.dev", displayName: "我自己" },
+    accessToken: null,
+    refreshToken: null,
+  };
+  const useSession = (selector?: (s: typeof state) => unknown) =>
+    selector ? selector(state) : state;
+  useSession.getState = () => state;
+  return { useSession };
+});
 
 // jsdom 无 antd <App> 上下文：useNotify 挂 spy（session-list-panel.test 同款）。
 vi.mock("@/lib/errors", () => ({
@@ -196,28 +226,57 @@ function makeMachine(
   } as DaemonMachineRead;
 }
 
-function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
-  return {
-    id: "ws-1",
-    name: "主工作区",
-    slug: "main",
-    root_path: "C:/main",
-    status: "active",
-    ...overrides,
-  } as Workspace;
+interface PpmProjectFixture {
+  id: string;
+  project_name: string | null;
 }
 
-function makeMember(
-  overrides: Partial<WorkspaceMemberView> = {},
-): WorkspaceMemberView {
+interface PpmProjectMemberFixture {
+  id: string;
+  pm_project_id: string;
+  user_id: string;
+  user_name: string | null;
+  username?: string | null;
+}
+
+function makeProject(
+  overrides: Partial<PpmProjectFixture> = {},
+): PpmProjectFixture {
   return {
+    id: "pj-1",
+    project_name: "SillyHub 平台",
+    ...overrides,
+  };
+}
+
+function makeProjectMember(
+  overrides: Partial<PpmProjectMemberFixture> = {},
+): PpmProjectMemberFixture {
+  return {
+    id: "pm-1",
+    pm_project_id: "pj-1",
     user_id: "u-lin",
-    email: "lin@example.com",
-    display_name: "林一",
-    role_key: "developer",
-    role_name: "Developer",
-    granted_at: "2026-08-01T00:00:00Z",
-    is_current_user: false,
+    user_name: "林一",
+    username: "lin",
+    ...overrides,
+  };
+}
+
+interface WorkspaceBriefFixture {
+  workspace_id: string;
+  name: string;
+  status: string;
+  type: string | null;
+}
+
+function makeProjectWorkspace(
+  overrides: Partial<WorkspaceBriefFixture> = {},
+): WorkspaceBriefFixture {
+  return {
+    workspace_id: "ws-1",
+    name: "主工作区",
+    status: "active",
+    type: null,
     ...overrides,
   };
 }
@@ -232,7 +291,7 @@ function makeGroupRead(
     title: "前端攻坚小分队",
     created_by: "u-me",
     agent_cross_mention: true,
-    cross_mention_depth: 2,
+    cross_mention_depth: 4,
     context_window: 20,
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
@@ -269,29 +328,6 @@ beforeEach(() => {
     error: null,
     refetch: vi.fn(),
   });
-  mocks.listWorkspaces.mockResolvedValue({
-    items: [
-      makeWorkspace(),
-      makeWorkspace({ id: "ws-2", name: "归档工作区", status: "archived" }),
-    ],
-    total: 2,
-    limit: 100,
-    offset: 0,
-  });
-  mocks.listMembers.mockResolvedValue([
-    makeMember(),
-    makeMember({
-      user_id: "u-chen",
-      email: "chen@example.com",
-      display_name: "陈默",
-    }),
-    makeMember({
-      user_id: "u-me",
-      email: "me@example.com",
-      display_name: "我自己",
-      is_current_user: true,
-    }),
-  ]);
   mocks.listProviders.mockResolvedValue([
     { id: "lp-1", name: "GLM 供应商" },
   ]);
@@ -304,6 +340,38 @@ beforeEach(() => {
     isError: false,
     error: null,
     refetch: vi.fn(),
+  });
+  // quick 数据源：项目全量候选 / 项目人员（含本人 u-me——候选须排除）/
+  // 项目关联工作区（2 个）。
+  mocks.listSimpleProjects.mockResolvedValue([
+    makeProject(),
+    makeProject({ id: "pj-2", project_name: "裸项目" }),
+  ]);
+  mocks.listProjectMembers.mockResolvedValue([
+    makeProjectMember(),
+    makeProjectMember({
+      id: "pm-2",
+      user_id: "u-chen",
+      user_name: "陈默",
+      username: "chen",
+    }),
+    // 本人（建群人=群主，后端要求其为项目成员；候选排除）。
+    makeProjectMember({
+      id: "pm-me",
+      user_id: "u-me",
+      user_name: "我自己",
+      username: "me",
+    }),
+  ]);
+  mocks.listProjectWorkspaces.mockImplementation(async (projectId: string) => {
+    if (projectId === "pj-2") return []; // 裸项目：无关联工作区（禁下一步用例）
+    return [makeProjectWorkspace(), makeProjectWorkspace({ workspace_id: "ws-2", name: "资料工作区" })];
+  });
+  mocks.uploadFile.mockResolvedValue({
+    id: "file-av-1",
+    original_name: "avatar.png",
+    mime_type: "image/png",
+    size: 1234,
   });
   mocks.apiFetch.mockResolvedValue(makeGroupRead());
 });
@@ -385,57 +453,110 @@ describe("群聊 API 客户端（task-07 / design §6.1，前缀 /api/daemon/gro
   });
 });
 
-// ── 2. 向导三步流转 ──────────────────────────────────────────────────────
+// ── 2. 向导三步流转（quick：PPM 项目下拉 / 项目人员候选 / 项目工作区必选） ──
 
-describe("CreateGroupWizard 三步流转（task-07 / FR-04）", () => {
-  it("步骤①：群名必填（空名禁用下一步）+ scope 工作区锁定（Select 禁用）", async () => {
+describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
+  it("步骤①：群名必填（空名禁用下一步）+ 项目必选（未选禁用下一步）", async () => {
     renderWizard(
-      <CreateGroupWizard
-        open
-        onCancel={vi.fn()}
-        onCreated={vi.fn()}
-        defaultWorkspaceId="ws-1"
-      />,
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
     );
     // 步骤指示就位
     expect(screen.getByText("群信息")).toBeTruthy();
     expect(screen.getByText("邀请用户")).toBeTruthy();
     expect(screen.getByText("Agent 成员")).toBeTruthy();
 
-    // 群名空 → 下一步禁用
+    // 群名空 → 下一步禁用；群名就位但项目未选 → 仍禁用
     const next = screen.getByRole("button", { name: "下一步" });
     expect(next).toBeDisabled();
     fireEvent.change(screen.getByLabelText("群名称"), {
       target: { value: "前端攻坚小分队" },
     });
+    expect(next).toBeDisabled();
+
+    // 选项目后放行，进入步骤②
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
     await waitFor(() => expect(next).toBeEnabled());
-
-    // scope 工作区锁定：Select 禁用 + 提示文案
-    expect(antdSelectRoot("cgw-workspace")).toHaveClass("ant-select-disabled");
-    expect(screen.getByText("已锁定为当前入口工作区")).toBeTruthy();
-
     fireEvent.click(next);
-    await waitFor(() => expect(screen.getByText("已选 0/" + GROUP_USER_MEMBER_LIMIT + "（不含群主）")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("已选 0/" + GROUP_USER_MEMBER_LIMIT + "（不含群主）")).toBeTruthy(),
+    );
   });
 
-  it("全流程：①群名+自选工作区 → ②邀请成员（排除本人）→ ③六要素卡片 → 创建 payload + onCreated", async () => {
+  it("步骤①：选中项目 → 显示关联工作区数提示；项目候选=全量项目（可搜索）", async () => {
+    renderWizard(
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "前端攻坚小分队" },
+    });
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
+    expect(
+      await screen.findByTestId("cgw-workspace-hint"),
+    ).toHaveTextContent("已关联 2 个工作区");
+    expect(mocks.listProjectWorkspaces).toHaveBeenCalledWith("pj-1");
+    // 候选含第二个项目（全量候选 + 搜索由 antd showSearch 承载）。
+    openAntdSelect("cgw-project");
+    expect(
+      [...document.querySelectorAll(".ant-select-item-option-content")].some(
+        (el) => el.textContent?.trim() === "裸项目",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("步骤①：项目无关联工作区 → 下一步禁用 + 引导文案（项目管理中关联）", async () => {
+    renderWizard(
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "群" },
+    });
+    await chooseAntdOptionByText("cgw-project", "裸项目");
+    const hint = await screen.findByTestId("cgw-workspace-hint");
+    expect(hint).toHaveTextContent("请先在项目管理中关联工作区");
+    const next = screen.getByRole("button", { name: "下一步" });
+    await waitFor(() => expect(next).toBeDisabled());
+  });
+
+  it("步骤①：无可选项目 → 下一步禁用 + 空态引导文案", async () => {
+    mocks.listSimpleProjects.mockResolvedValue([]);
+    renderWizard(
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "群" },
+    });
+    expect(
+      await screen.findByText("暂无可选项目——请先在项目管理中创建项目后再建群"),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
+  });
+
+  it("全流程：①群名+项目 → ②邀请项目成员（排除本人）→ ③六要素卡片（工作区必选）→ payload（project_id + 无 workspace_id）+ onCreated", async () => {
     const onCreated = vi.fn();
     renderWizard(
       <CreateGroupWizard open onCancel={vi.fn()} onCreated={onCreated} />,
     );
 
-    // ① 群信息（全局门户：工作区自选）
+    // ① 群信息：群名 + 项目下拉（quick：群工作区后端推导，UI 无工作区选择）。
     fireEvent.change(screen.getByLabelText("群名称"), {
       target: { value: "前端攻坚小分队" },
     });
-    await chooseAntdOptionByText("cgw-workspace", "主工作区");
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
 
-    // ② 邀请用户（多选林一；陈默认认不选；本人被排除不出现在候选）
+    // ② 邀请用户（项目人员：多选林一；陈默认认不选；本人 u-me 被排除不在候选）。
     await waitFor(() =>
-      expect(mocks.listMembers).toHaveBeenCalledWith("ws-1"),
+      expect(mocks.listProjectMembers).toHaveBeenCalledWith({
+        pm_project_id: "pj-1",
+      }),
     );
     await chooseAntdOptionByText("cgw-invitees", "林一");
+    openAntdSelect("cgw-invitees");
+    expect(
+      [...document.querySelectorAll(".ant-select-item-option-content")].some(
+        (el) => el.textContent?.trim() === "我自己",
+      ),
+    ).toBeFalsy();
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
 
     // ③ Agent 成员六要素卡片
@@ -449,25 +570,33 @@ describe("CreateGroupWizard 三步流转（task-07 / FR-04）", () => {
     });
     // 机器下拉按机器分组（machine-1 · Claude Code）
     await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
-    // 模型 / 方案 / 成员工作区走缺省（不指定/沿用群工作区）
+    // 工作区=项目关联工作区必选（不再有「沿用群工作区」选项）。
+    expect(
+      screen.getByLabelText("Agent 成员 1 工作区").closest(".ant-select"),
+    ).toBeTruthy();
+    await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+    // 模型 / 方案走缺省（不指定）。
     fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
 
     await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    const json = mocks.apiFetch.mock.calls[0]![1]!.json as Record<string, unknown>;
+    // quick：project_id 必填；workspace_id 不传（后端自动推导）。
+    expect(json.project_id).toBe("pj-1");
+    expect(json.workspace_id).toBeUndefined();
     expect(mocks.apiFetch).toHaveBeenCalledWith("/api/daemon/group-chats", {
       method: "POST",
       json: expect.objectContaining({
         title: "前端攻坚小分队",
-        workspace_id: "ws-1",
         // 后端 schema 默认值镜像（生成版 TS 类型必填显式传）
         agent_cross_mention: true,
-        cross_mention_depth: 2,
+        cross_mention_depth: 4,
         context_window: 20,
         user_members: [{ user_id: "u-lin" }],
         agent_members: [
           expect.objectContaining({
             display_name: "小码",
             runtime_id: "rt-1",
-            workspace_id: null,
+            workspace_id: "ws-1",
             provider: "claude",
             llm_provider_id: null,
             agent_profile_id: null,
@@ -481,6 +610,29 @@ describe("CreateGroupWizard 三步流转（task-07 / FR-04）", () => {
     );
   });
 
+  it("步骤③：工作区未选 → 创建按钮禁用（项目关联集内必选）", async () => {
+    renderWizard(
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "群" },
+    });
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /添加 Agent 成员/ }),
+    );
+    fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+      target: { value: "小码" },
+    });
+    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    const create = screen.getByRole("button", { name: "创建群聊" });
+    expect(create).toBeDisabled();
+    await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+    await waitFor(() => expect(create).toBeEnabled());
+  });
+
   it("引擎切 Codex → 模型（llm_provider）禁用并清空（providerLocked 先例）", async () => {
     renderWizard(
       <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
@@ -488,7 +640,7 @@ describe("CreateGroupWizard 三步流转（task-07 / FR-04）", () => {
     fireEvent.change(screen.getByLabelText("群名称"), {
       target: { value: "群" },
     });
-    await chooseAntdOptionByText("cgw-workspace", "主工作区");
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(
@@ -506,7 +658,79 @@ describe("CreateGroupWizard 三步流转（task-07 / FR-04）", () => {
   });
 });
 
-// ── 3. 校验（昵称查重/保留词/必填 + 上限拦截） ────────────────────────────
+// ── 3. 头像上传管线（quick 成员头像自定义：payload avatar 填充/清除） ──────
+
+describe("CreateGroupWizard 头像上传（quick 成员头像自定义）", () => {
+  /** 模拟上传：找到隐藏 file input 触发 change（按调用次数增量等待）。 */
+  async function fireUpload(inputLabel: string) {
+    const before = mocks.uploadFile.mock.calls.length;
+    const input = screen.getByLabelText(inputLabel);
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "avatar.png", { type: "image/png" })] },
+    });
+    await waitFor(() =>
+      expect(mocks.uploadFile.mock.calls.length).toBe(before + 1),
+    );
+    expect(mocks.uploadFile).toHaveBeenLastCalledWith(expect.any(File), {
+      owner_type: "group_member_avatar",
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it("agent 卡片上传头像 + 被邀用户上传头像 → payload avatar= /api/file/{id}", async () => {
+    renderWizard(
+      <CreateGroupWizard open onCancel={vi.fn()} onCreated={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "群" },
+    });
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    // ② 被邀用户头像：选林一 → 上传行出现 → 上传。
+    await waitFor(() =>
+      expect(mocks.listProjectMembers).toHaveBeenCalled(),
+    );
+    await chooseAntdOptionByText("cgw-invitees", "林一");
+    expect(
+      await screen.findByTestId("cgw-invited-avatars"),
+    ).toBeTruthy();
+    await fireUpload("被邀成员 林一 头像（选择图片）");
+
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    // ③ agent 卡片：昵称/机器/工作区 + 头像上传。
+    fireEvent.click(
+      await screen.findByRole("button", { name: /添加 Agent 成员/ }),
+    );
+    fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+      target: { value: "小码" },
+    });
+    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+    await fireUpload("Agent 成员 1 头像（选择图片）");
+
+    fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    let json = mocks.apiFetch.mock.calls[0]![1]!.json as {
+      user_members?: { user_id: string; avatar?: string }[];
+      agent_members?: { display_name: string; avatar?: string }[];
+    };
+    expect(json.user_members).toEqual([
+      { user_id: "u-lin", avatar: "/api/file/file-av-1" },
+    ]);
+    expect(json.agent_members?.[0]).toEqual(
+      expect.objectContaining({
+        display_name: "小码",
+        avatar: "/api/file/file-av-1",
+      }),
+    );
+  });
+});
+
+// ── 4. 校验（昵称查重/保留词/必填 + 上限拦截） ────────────────────────────
 
 describe("CreateGroupWizard 六要素校验（task-07 acceptance）", () => {
   it("validateMemberDisplayName：必填 / 保留词（全体、all）/ 群内查重", () => {
@@ -524,7 +748,7 @@ describe("CreateGroupWizard 六要素校验（task-07 acceptance）", () => {
     fireEvent.change(screen.getByLabelText("群名称"), {
       target: { value: "群" },
     });
-    await chooseAntdOptionByText("cgw-workspace", "主工作区");
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(
@@ -561,7 +785,7 @@ describe("CreateGroupWizard 六要素校验（task-07 acceptance）", () => {
     fireEvent.change(screen.getByLabelText("群名称"), {
       target: { value: "群" },
     });
-    await chooseAntdOptionByText("cgw-workspace", "主工作区");
+    await chooseAntdOptionByText("cgw-project", "SillyHub 平台");
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     const addBtn = await screen.findByRole("button", {

@@ -52,6 +52,10 @@ import {
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
+import {
+  GroupMemberAvatar,
+  GroupMemberAvatarUpload,
+} from "@/components/group-chat/group-member-avatar";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils";
 
@@ -260,6 +264,19 @@ export function MemberPanel({
     },
   });
 
+  /* ── quick 群成员头像自定义：换头像 / 恢复默认（PATCH members/{mid}
+   *    avatar——后端 None=不改、空串=清除；上传管线同建群向导）。 ── */
+  const avatarMutation = useMutation({
+    mutationFn: (vars: { memberId: string; avatar: string }) =>
+      updateGroupMember(group.id, vars.memberId, { avatar: vars.avatar }),
+    onSuccess: (member) => {
+      refreshAnd(`已更新「${member.display_name}」的头像`);
+    },
+    onError: (err) => {
+      notify.error(errMessage(err, "更新头像失败，请稍后重试"));
+    },
+  });
+
   /* ── 确认入口（antd Modal.confirm，不用 window.confirm） ── */
 
   /** 移除成员（agent → end 影子会话；design §8 group.member.removed）。 */
@@ -336,14 +353,16 @@ export function MemberPanel({
             data-testid={`agent-member-card-${member.id}`}
             className="mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm"
           >
-            {/* 卡片头：头像 + 昵称 + 影子状态徽标（原型 .ac-head） */}
+            {/* 卡片头：头像 + 昵称 + 影子状态徽标（原型 .ac-head；quick：
+                avatar 有值→图片，无值→首字回退） */}
             <div className="flex items-center gap-2.5">
-              <span
-                aria-hidden
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-brand-600 text-[13px] font-bold text-white"
-              >
-                {member.display_name.slice(0, 1)}
-              </span>
+              <GroupMemberAvatar
+                avatar={member.avatar}
+                name={member.display_name}
+                size={36}
+                className="rounded-[10px]"
+                fallbackClassName="h-9 w-9 bg-brand-600 text-[13px]"
+              />
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">
                   <span className="truncate">{member.display_name}</span>
@@ -389,9 +408,22 @@ export function MemberPanel({
                 {snapshotString(member, "profile_name") ?? "默认"}
               </dd>
             </dl>
-            {/* 操作（群主可见——后端 update/reset 端点 owner 强校验） */}
+            {/* 操作（群主可见——后端 update/reset 端点 owner 强校验；quick
+                头像：换头像上传件随行，onChange 直调 PATCH） */}
             {isOwner && (
-              <div className="mt-2.5 flex items-center gap-2">
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <GroupMemberAvatarUpload
+                  compact
+                  value={member.avatar ?? null}
+                  name={member.display_name}
+                  label={`Agent 成员 ${member.display_name} 头像`}
+                  onChange={(avatar) =>
+                    avatarMutation.mutate({
+                      memberId: member.id,
+                      avatar: avatar ?? "",
+                    })
+                  }
+                />
                 <Button
                   size="small"
                   type="primary"
@@ -444,21 +476,25 @@ export function MemberPanel({
         const isGroupOwner =
           member.user_id != null && member.user_id === group.created_by;
         const online = member.user_id != null && onlineSet.has(member.user_id);
+        // quick 头像：群主或本人可换头像（群主管理语义 + 用户自定义本人头像）。
+        const canChangeAvatar =
+          isOwner || (member.user_id != null && member.user_id === currentUserId);
         return (
           <div
             key={member.id}
             data-testid={`user-member-row-${member.id}`}
             className="flex items-center gap-2.5 px-4 py-2 transition-colors hover:bg-muted/50"
           >
-            <span
-              aria-hidden
-              className={cn(
-                "flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-xs font-bold text-white",
+            <GroupMemberAvatar
+              avatar={member.avatar}
+              name={member.display_name}
+              size={32}
+              className="rounded-[9px]"
+              fallbackClassName={cn(
+                "h-8 w-8 text-xs",
                 isGroupOwner ? "bg-brand-600" : "bg-info",
               )}
-            >
-              {member.display_name.slice(0, 1)}
-            </span>
+            />
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
                 <span className="truncate">{member.display_name}</span>
@@ -484,6 +520,20 @@ export function MemberPanel({
                   : "bg-muted-foreground/40",
               )}
             />
+            {canChangeAvatar && (
+              <GroupMemberAvatarUpload
+                compact
+                value={member.avatar ?? null}
+                name={member.display_name}
+                label={`用户成员 ${member.display_name} 头像`}
+                onChange={(avatar) =>
+                  avatarMutation.mutate({
+                    memberId: member.id,
+                    avatar: avatar ?? "",
+                  })
+                }
+              />
+            )}
             {isOwner && !isGroupOwner && (
               <Button
                 size="small"

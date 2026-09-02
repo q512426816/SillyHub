@@ -127,6 +127,14 @@ vi.mock("@/lib/errors", () => ({
   useNotify: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
 }));
 
+// quick 成员头像自定义：GroupMemberAvatar 经 fetchFileBlob 带 token 取 blob
+// 渲染——mock 供头像用例（无头像固件不触发该链路）。
+vi.mock("@/lib/file/api", () => ({
+  fetchFileBlob: vi.fn(async () => new Blob(["x"], { type: "image/png" })),
+  uploadFile: vi.fn(),
+  getFileDownloadUrl: (id: string) => `/api/file/${id}`,
+}));
+
 // ── 路由 fetch 假 SSE 流（daemon-session-stream-sync.test 同款） ──────────
 
 interface StreamHarness {
@@ -1034,5 +1042,64 @@ describe("群消息附件（FR-05 补遗）", () => {
     expect(
       await screen.findByTitle("同步日志.txt（点击在线预览）"),
     ).toBeTruthy();
+  });
+});
+
+// ── 6. 成员头像渲染（quick 群成员头像自定义） ───────────────────────────────
+
+describe("GroupChatPanel 成员头像（quick）", () => {
+  it("avatar 有值 → antd Avatar 图片（blob objectURL）；无值 → 首字回退", async () => {
+    // 小码（agent）与鲸落（本人 user）带头像；林一（user）无头像。
+    const detail = makeGroupDetail();
+    const members = detail.members as Record<string, unknown>[];
+    (members.find((m) => m.id === "mem-1") as Record<string, unknown>).avatar =
+      "/api/file/f-av-agent";
+    (members.find((m) => m.id === "mem-3") as Record<string, unknown>).avatar =
+      "/api/file/f-av-me";
+    mocks.getGroupChat.mockResolvedValue(detail);
+    mocks.listGroupChats.mockResolvedValue([detail]);
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+
+    // agent 气泡（小码）：头像 img（fetchFileBlob → objectURL）渲染。
+    const agentBubble = screen
+      .getByTestId("group-chat-timeline")
+      .querySelector('[data-member-name="小码"]');
+    expect(agentBubble).toBeTruthy();
+    await waitFor(() => {
+      const img = agentBubble!.querySelector(
+        '[data-testid="group-member-avatar-img"] img',
+      );
+      expect(img).toBeTruthy();
+      expect(img!.getAttribute("src")).toMatch(/^blob:/);
+    });
+
+    // 本人 user 气泡（鲸落，sender_user_id=u-me → avatarByUserId 命中）同样图片。
+    const selfBubble = screen
+      .getByTestId("group-chat-timeline")
+      .querySelector('[data-sender="鲸落"]');
+    expect(selfBubble).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        selfBubble!.querySelector(
+          '[data-testid="group-member-avatar-img"] img',
+        ),
+      ).toBeTruthy();
+    });
+
+    // 无头像 user 气泡（林一）：首字回退（无 img）。
+    const otherBubble = screen
+      .getByTestId("group-chat-timeline")
+      .querySelector('[data-sender="林一"]');
+    expect(otherBubble).toBeTruthy();
+    expect(
+      otherBubble!.querySelector('[data-testid="group-member-avatar-initial"]'),
+    ).toBeTruthy();
+    expect(otherBubble!.querySelector("img")).toBeNull();
   });
 });
