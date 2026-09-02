@@ -695,6 +695,9 @@ export function GroupChatPanel({
   /* ── typing 指示器（用户 TTL 2.5s 周期裁剪；agent 持续态豁免——止息信号移除，
    *    群聊运行态可见 quick 2026-09-02）+「正在回复」锚点标签表 ── */
   const [typingMap, setTypingMap] = useState<Record<string, GroupTypingIndicator>>({});
+  /* quick-fdd8219a 运行徽标实时性：详情快照 shadow_running 的"已停"覆盖集——
+   * 止息/turn_completed 即时剔除（免刷新），typing:true 复活（新 run）。 */
+  const stoppedDetailIdsRef = useRef<Set<string>>(new Set());
   /* ── quick-fdd8219a 群内搜索（会话工具栏要素对齐；q 参数走 logs 端点） ── */
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -837,6 +840,10 @@ export function GroupChatPanel({
             }
             // 运行态收口（群聊运行态可见 quick 2026-09-02）：同成员 agent typing
             // 持续指示 + 回复锚点标签一并移除（止息 typing:false 丢失时的兜底）。
+            // quick-fdd8219a 实时性：详情快照 shadow_running 同步剔除（徽标即时
+            // 灭，不等详情重拉）+ 触发详情 refetch（六要素/运行态对齐）。
+            if (env.member_id) stoppedDetailIdsRef.current.add(env.member_id);
+            void qc.invalidateQueries({ queryKey: ["groupChat", groupId] });
             const stopKeys = agentTypingKeyCandidates(env.member_id, env.member_name);
             if (stopKeys.length > 0) {
               for (const k of stopKeys) stoppedAgentKeysRef.current.add(k);
@@ -863,8 +870,10 @@ export function GroupChatPanel({
               if (event.typing) {
                 // 重新点亮：清止息记忆（shadow_running 兜底可重新灌入该成员）。
                 for (const k of keys) stoppedAgentKeysRef.current.delete(k);
+                if (event.member_id) stoppedDetailIdsRef.current.delete(event.member_id);
               } else {
                 for (const k of keys) stoppedAgentKeysRef.current.add(k);
+                if (event.member_id) stoppedDetailIdsRef.current.add(event.member_id);
                 // 止息 → 群详情 shadow_running 兜底刷新（成员运行徽标收口）。
                 void qc.invalidateQueries({ queryKey: ["groupChat", groupId] });
               }
@@ -1201,7 +1210,13 @@ export function GroupChatPanel({
   const runningMemberIds = useMemo(() => {
     const ids = new Set<string>();
     for (const m of detail?.members ?? []) {
-      if (m.member_type === "agent" && m.shadow_running) ids.add(m.id);
+      if (
+        m.member_type === "agent" &&
+        m.shadow_running &&
+        !stoppedDetailIdsRef.current.has(m.id)
+      ) {
+        ids.add(m.id);
+      }
     }
     for (const ind of Object.values(typingMap)) {
       if (ind.kind === "agent" && ind.memberId) ids.add(ind.memberId);
