@@ -223,7 +223,16 @@ function setupDialog(overrides: Record<string, unknown> = {}) {
     hasOnlineProvider: true,
     ...overrides,
   };
-  return render(<SessionPanel {...(props as any)} />);
+  // 2026-09-02 版式统一：分身浮层内部已切 page 分支（内嵌 SessionPanel 带
+  // useQueryClient），dialog 宿主渲染也需 QueryClientProvider 包裹。
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={qc}>
+      <SessionPanel {...(props as any)} />
+    </QueryClientProvider>,
+  );
 }
 
 beforeEach(() => {

@@ -1037,9 +1037,9 @@ describe("MemberPanel 影子会话面板（quick）", () => {
     expect(card.getAttribute("title")).toContain("影子会话面板");
     fireEvent.click(within(card).getByText("小码"));
 
-    // Drawer 标题 + SessionPanel 以 dialog 模式挂载（props 断言：会话面板本体
-    // 直挂影子 id；providers/defaultProvider 取成员引擎；rt-1 固件在线 →
-    // hasOnlineProvider=true）。
+    // Drawer 标题 + SessionPanel 以 page 模式挂载（2026-09-02 版式统一：与
+    // /sessions 全页同一渲染分支；machines/llmProviders 页面级数据注入——
+    // machines 取 useDaemonMachines 固件，llmProviders 取 listProviders 固件）。
     expect(await screen.findByText("小码 · 影子会话")).toBeTruthy();
     await waitFor(() => expect(mocks.sessionPanel).toHaveBeenCalled());
     const props = mocks.sessionPanel.mock.calls.at(-1)?.[0] as Record<
@@ -1047,12 +1047,11 @@ describe("MemberPanel 影子会话面板（quick）", () => {
       unknown
     >;
     expect(props).toMatchObject({
-      mode: "dialog",
+      mode: "page",
       sessionId: "shadow-1",
-      providers: ["claude"],
-      defaultProvider: "claude",
-      hasOnlineProvider: true,
     });
+    expect(Array.isArray(props["machines"])).toBe(true);
+    expect(Array.isArray(props["llmProviders"])).toBe(true);
   });
 
   it("普通成员也可打开面板（影子 logs 读端点已放行；写操作后端强校验群主）", async () => {

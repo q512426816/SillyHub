@@ -1016,7 +1016,9 @@ function AgentConfigSwitchModal({
 /**
  * 影子会话面板 Drawer（群聊体验 quick 2026-09-02 重做：自研 shadow-session-viewer
  * 退役，改挂会话面板本体）。影子会话即普通 AgentSession（kind='group_member'），
- * SessionPanel mode="dialog"（attach 续聊形态）自取数链路零适配直挂——logs 预取 /
+ * SessionPanel mode="page"（2026-09-02 版式统一：与 /sessions 全页同一渲染
+ * 分支——头部工具栏/搜索/加载更早/视图切换/用量条完整版式；dialog 紧凑形态退役
+ * 于本场景）自取数链路零适配直挂——logs 预取 /
  * SSE 实时流 / inject 追问 / 打断 / 结束 / 对话·进度视图切换 / 输入框上方用量条
  * 全部走面板既有分支（与 /sessions 页同一内核，像素级一致）。
  *
@@ -1038,19 +1040,14 @@ function ShadowSessionDrawer({
   onClose: () => void;
 }) {
   const { machineCandidates } = useDaemonMachines({ limit: 100 });
-  const provider = member.provider ?? "claude";
+  // 2026-09-02 版式统一：SessionPanel 切 page 分支（与 /sessions 全页完全同构，
+  // 含头部工具栏/搜索/加载更早/用量条），需补 page 必需的 machines/llmProviders。
+  const providersQ = useQuery({
+    queryKey: ["llm-providers"],
+    queryFn: listProviders,
+    staleTime: 30_000,
+  });
   const shadowSessionId = member.shadow_session_id!;
-  const runtimeOnline = useMemo(
-    () =>
-      (machineCandidates ?? []).some(
-        (m) =>
-          m.status === "online" &&
-          (m.runtimes ?? []).some(
-            (r) => r.id === member.runtime_id && r.status === "online",
-          ),
-      ),
-    [machineCandidates, member.runtime_id],
-  );
   return (
     <Drawer
       open
@@ -1065,11 +1062,10 @@ function ShadowSessionDrawer({
       <div className="flex h-full min-h-0 flex-col">
         <SessionPanel
           key={shadowSessionId}
-          mode="dialog"
+          mode="page"
           sessionId={shadowSessionId}
-          providers={[provider]}
-          defaultProvider={provider}
-          hasOnlineProvider={runtimeOnline}
+          machines={machineCandidates ?? []}
+          llmProviders={providersQ.data ?? []}
         />
       </div>
     </Drawer>

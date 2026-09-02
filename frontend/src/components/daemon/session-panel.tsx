@@ -839,22 +839,19 @@ interface WorkerSessionOverlayProps {
   subSessionId: string;
   /** 关闭浮层（返回主控面板）。 */
   onClose: () => void;
-  /** dialog 模式 SessionPanel 必需 props（按消费方上下文透传，见接口注释）。 */
-  providers: string[];
-  defaultProvider: string;
-  model?: string | null;
-  onModelChange?: (next: string | null) => void;
-  hasOnlineProvider: boolean;
+  /** page 模式 SessionPanel 必需 props（2026-09-02 版式统一：内嵌场景与
+   * /sessions 全页同一渲染分支）。page 宿主透传全量；dialog 宿主（runtime 卡
+   * idle 新建分支）无页面级数据，传空数组——machines 空时 machineHit=null 走
+   * 「找不到不判离线」既有兜底，llmProviders 空仅供应商名解析降级。 */
+  machines?: DaemonMachineRead[];
+  llmProviders?: LlmProviderRead[];
 }
 
 function WorkerSessionOverlay({
   subSessionId,
   onClose,
-  providers,
-  defaultProvider,
-  model,
-  onModelChange,
-  hasOnlineProvider,
+  machines,
+  llmProviders,
 }: WorkerSessionOverlayProps) {
   return (
     <div
@@ -878,17 +875,16 @@ function WorkerSessionOverlay({
             返回主控
           </button>
         </div>
-        {/* key 按分身会话驱动整体 remount（R6 同款契约：切换分身即重建建流）。 */}
+        {/* key 按分身会话驱动整体 remount（R6 同款契约：切换分身即重建建流）。
+            2026-09-02 版式统一：改 page 分支渲染——与 /sessions 全页完全同构
+            （头部工具栏/搜索/加载更早/视图切换/用量条），dialog 紧凑形态退役。 */}
         <div className="min-h-0 flex-1">
           <SessionPanel
             key={subSessionId}
-            mode="dialog"
+            mode="page"
             sessionId={subSessionId}
-            providers={providers}
-            defaultProvider={defaultProvider}
-            model={model}
-            onModelChange={onModelChange}
-            hasOnlineProvider={hasOnlineProvider}
+            machines={machines ?? []}
+            llmProviders={llmProviders ?? []}
           />
         </div>
       </div>
@@ -4118,9 +4114,8 @@ function SessionPanelPage({
           onClose={() => {
             setWorkerSessionId(null);
           }}
-          providers={sessionEngine != null ? [sessionEngine] : []}
-          defaultProvider={sessionEngine ?? ""}
-          hasOnlineProvider={machineOnline}
+          machines={machines}
+          llmProviders={llmProviders}
         />
       )}
     </section>
@@ -5963,11 +5958,6 @@ function SessionPanelDialog(props: SessionPanelProps) {
           onClose={() => {
             setWorkerSessionId(null);
           }}
-          providers={providers}
-          defaultProvider={defaultProvider}
-          model={model}
-          onModelChange={onModelChange}
-          hasOnlineProvider={hasOnlineProvider}
         />
       )}
     </section>
