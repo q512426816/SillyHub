@@ -208,6 +208,17 @@ _SHADOW_DIRECT_HEADER = (
 # run_sync 投影判定锚（命中 → 整轮不投影，仅 [[GROUP]] 段例外）。
 SHADOW_DIRECT_SOURCE = "shadow_direct"
 
+# quick 投影统一标记制（2026-09-02）：群 @ 轮回应要求指示行——@轮投影与直聊
+# 同款标记制（完整 assistant 文本仅 [[GROUP]] 段进群时间线），_build_group_prompt
+# 在当前消息段后追加本行告知 agent 标记用法（run_sync.
+# extract_group_broadcast_segments 按同款标记抽段，标记文本保留在影子会话
+# 原文、投影时剥离；@轮整轮无标记时收口侧补兜底行防群里死寂）。
+_GROUP_REPLY_MARKER_REQUIREMENT = (
+    "回应要求：把给群内成员看的结论/回答放进 [[GROUP]] 与 [[/GROUP]] 标记段"
+    "（会以你的身份发送到群里，简洁如聊天）；"
+    "推理过程、工具使用细节写在标记段之外（只保留在你的内部会话中）。"
+)
+
 # ── 互@协作护栏常量（task-04，design §4.4——状态只存 Redis 带 TTL，不建表）──
 # 协作链 Hash TTL（30min：链跨多轮互@，超时自清理不留死键）。
 GROUP_CHAIN_TTL_SECONDS = 30 * 60
@@ -713,6 +724,10 @@ def _build_group_prompt(
     （``[附件] name (file_id)`` 逐附件一条）——附 prompt 末尾提示 agent 可读
     （实际下发走 SESSION_INJECT attachments 通道：多模态块内联 / 磁盘落盘，
     与单聊同管线）；互@轮不携带（agent 消息无附件）。
+
+    quick 投影统一标记制（2026-09-02）：末尾追加回应要求指示行
+    （``_GROUP_REPLY_MARKER_REQUIREMENT``）——@轮仅 [[GROUP]] 标记段进群
+    时间线，prompt 告知 agent 标记用法。
     """
     briefing = (
         f"你是群聊「{group.title}」中的 Agent 成员「{member.display_name}」。"
@@ -751,6 +766,9 @@ def _build_group_prompt(
         parts.append(
             "[当前消息附件 · 用户随消息发送，可直接读取参考]\n" + "\n".join(attachment_lines)
         )
+    # quick 投影统一标记制（2026-09-02）：当前消息段后追加回应要求指示行——
+    # @轮仅 [[GROUP]] 标记段进群时间线（与直聊同款），告知 agent 标记用法。
+    parts.append(_GROUP_REPLY_MARKER_REQUIREMENT)
     return "\n\n".join(parts)
 
 
@@ -783,6 +801,64 @@ async def _publish_group_channel_event(session_id: uuid.UUID, payload: dict[str,
             session_id=str(session_id),
             redis_event=payload.get("event") if isinstance(payload, dict) else None,
         )
+
+
+async def prepare_shadow_direct_turn(
+    db: AsyncSession,
+    *,
+    shadow_session_id: uuid.UUID,
+    sender_user_id: uuid.UUID,
+) -> tuple[str, dict[str, object]] | None:
+    """标准 inject 端点的影子直聊自动直通（quick 投影统一标记制 2026-09-02）。
+
+    群主在 SessionPanel 对群成员影子会话发消息（标准 inject 端点，无群链路
+    turn_metadata）时由 session/service 调用（函数内延迟 import 防循环）：
+    解析直聊 prompt 头 + 直聊轮 metadata（``source=shadow_direct`` + 群/成员/
+    直聊载体 run/发送者——投影过滤判定锚），并在**调用方事务内**落一个零日志
+    的直聊载体 run（``[[GROUP]]`` 转发段投影行挂点，语义对齐
+    send_direct_message 的载体：群时间线对直聊轮零可见 user_input 行）。
+    返回 ``(直聊 prompt 头, 直聊轮 metadata)``。
+
+    非群成员影子会话（成员行缺失）/ 群行缺失 → None（调用方零行为变化）。
+    群 @ 触发 / 直聊端点 / 排队派发等服务路径自带 turn_metadata，不经本函数。
+    """
+    member = (
+        (
+            await db.execute(
+                select(AgentGroupMember).where(
+                    AgentGroupMember.shadow_session_id == shadow_session_id
+                )
+            )
+        )
+        .scalars()
+        .one_or_none()
+    )
+    if member is None:
+        return None
+    group = await db.get(AgentGroupChat, member.group_id)
+    if group is None:
+        return None
+    now = datetime.now(UTC)
+    carrier = AgentRun(
+        id=uuid.uuid4(),
+        agent_type="claude_code",
+        provider=GROUP_SESSION_PROVIDER,
+        status="completed",
+        started_at=now,
+        finished_at=now,
+        spec_strategy=GROUP_CARRIER_SPEC_STRATEGY,
+        agent_session_id=group.session_id,
+        user_id=sender_user_id,  # 直聊发起者归属（回放身份回退源）
+    )
+    db.add(carrier)
+    header = _SHADOW_DIRECT_HEADER.format(group_title=group.title, member_name=member.display_name)
+    return header, {
+        "source": SHADOW_DIRECT_SOURCE,
+        "source_group_id": str(group.id),
+        "source_member_id": str(member.id),
+        "source_carrier_run_id": str(carrier.id),
+        "sender_user_id": str(sender_user_id),
+    }
 
 
 # ── typing / presence（task-06，design §5.4——纯 ephemeral，不落库）───────────

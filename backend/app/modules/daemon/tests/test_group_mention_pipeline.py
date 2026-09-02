@@ -7,7 +7,8 @@
 - 群背景摘要组装：身份标签（用户行 / Agent 投影行兼容）、单条 500 截断、
   总长 6000 上限（丢最旧）、当前消息行排除在背景外；
 - 注入 prompt：成员简报（群名/昵称/成员列表/仅被 @ 回应）+ 背景 + 当前消息
-  三段标记；互@来源标注参数（source_member_name）；
+  三段标记 + 回应要求指示行（quick 投影统一标记制：[[GROUP]] 标记用法）；
+  互@来源标注参数（source_member_name）；
 - 载体 run：status='completed' + started_at 落值 + spec_strategy='group_carrier'
   + user_input 原文落库 + 群频道 log 事件 publish（sender 身份字段）；
 - 影子懒建：六要素 → 影子行（kind='group_member'、user_id=群主、parent 恒
@@ -874,6 +875,25 @@ class TestBuildGroupPrompt:
             source_member_name="小码",
         )
         assert "小码(Agent): @小助 复核一下" in prompt
+
+    def test_prompt_contains_reply_marker_requirement(self) -> None:
+        """quick 投影统一标记制（2026-09-02）：@轮 prompt 末尾追加回应要求
+        指示行——[[GROUP]]/[[/GROUP]] 标记用法（仅标记段进群时间线）。"""
+        from app.modules.daemon.group.service import _GROUP_REPLY_MARKER_REQUIREMENT
+
+        prompt = _build_group_prompt(
+            group=SimpleNamespace(title="测试群"),
+            member=_member_stub(name="小码"),
+            member_lines=["群主(用户)", "小码(Agent)"],
+            context_lines=[],
+            sender_member_name="群主",
+            content="@小码 帮我修复它",
+        )
+        assert _GROUP_REPLY_MARKER_REQUIREMENT in prompt
+        assert "[[GROUP]]" in prompt
+        assert "[[/GROUP]]" in prompt
+        # 指示行在当前消息段之后（prompt 末尾）。
+        assert prompt.endswith(_GROUP_REPLY_MARKER_REQUIREMENT)
 
 
 # ── 消息入群：载体 run + 群频道事件 + 未 @ 不触发（design §4.1）────────────

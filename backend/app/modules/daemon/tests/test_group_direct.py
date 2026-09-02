@@ -1,4 +1,4 @@
-"""quick 影子直聊+选择性回群投影测试（2026-09-02，后端部分）。
+"""quick 影子直聊+选择性回群投影测试（2026-09-02，后端部分；投影统一标记制扩充）。
 
 覆盖（任务卡口径）：
 
@@ -6,13 +6,19 @@
   metadata ``source="shadow_direct"`` + 直聊载体 run 零日志行）；普通成员 403；
   非成员 404；影子未建 400；忙轮中途注入（``busy_strategy="inject"`` 调用
   断言 + mid_turn=True + run_id 沿用活跃 run + 零排队行）；
-- 投影过滤：直聊轮无标记 → 零投影行 + 零群频道事件；[[GROUP]] 段 → 仅该段
-  投影（标记剥离 + 成员身份 metadata）+ 影子原文完整保留（含标记）；多段
-  依次各一行投影；partial 半截行不解析（完整行到达统一抽段）；
+- 投影过滤（统一标记制：@轮与直聊轮同款）：无标记轮 → 零投影行 + 零群频道
+  事件；[[GROUP]] 段 → 仅该段投影（标记剥离 + 成员身份 metadata）+ 影子原文
+  完整保留（含标记）；多段依次各一行投影；partial 半截行不解析（完整行到达
+  统一抽段）；
+- @轮无标记兜底：close 收口补一行「（{成员昵称} 已在会话内处理，点击成员卡
+  查看）」（metadata ``projection_fallback=True`` + 群频道 log 事件）；已投影
+  段/直聊轮不补；重复收口不重复补；
+- 标准 inject 端点影子直聊直通：``inject_session``（非群端点）对 group_member
+  影子会话 = 直聊（直聊头 + source=shadow_direct + 直聊载体 run）；忙轮排队
+  条目链标记带 source；群 @ 触发路径自带 metadata 不被覆盖（回归）；
 - 排队标记 source 透传：直聊轮排队条目 prompt 头链标记带 ``source=
   shadow_direct``，``_split_group_chain_marker`` 还原（老标记无 source 段
   兼容零回归）；
-- 回归：群 @ 轮（无 source 标记）投影行为零变化（全投影照旧）；
 - 互@护栏：直聊轮 turn_completed 后不触发互@协作（run_cross_mention_detection
   直聊轮早退）。
 
@@ -1152,14 +1158,15 @@ class TestDirectTurnProjection:
         carrier_rows = await _fetch_logs(db_session, seed.carrier_run_id)
         assert [r.content_redacted for r in carrier_rows] == ["结论段"]
 
-    async def test_mention_turn_projection_unchanged(
+    async def test_mention_turn_marker_segments_projected(
         self,
         db_session: AsyncSession,
         recording_redis,
     ) -> None:
-        """回归：群 @ 轮（无 source 标记）投影零变化——assistant 文本全投影。"""
+        """投影统一标记制：群 @ 轮（无 source 标记）与直聊同款——仅 [[GROUP]]
+        段投影（标记剥离 + 成员身份 metadata），段外过程文字零投影。"""
         sink, _redis = recording_redis
-        seed = await _seed_group_bridge(db_session)  # turn_source=None
+        seed = await _seed_group_bridge(db_session)  # turn_source=None（@轮）
         svc = DaemonService(db_session)
         result = await svc.submit_messages(
             seed.lease_id,
@@ -1168,26 +1175,158 @@ class TestDirectTurnProjection:
             [
                 {
                     "event_type": "text",
-                    "content": "[ASSISTANT] 已定位：LoginForm.jsx:47 hooks 依赖缺失",
+                    "content": (
+                        "[ASSISTANT] 已定位：LoginForm.jsx:47 hooks 依赖缺失。\n"
+                        "[[GROUP]]登录页白屏根因：hooks 依赖缺失。[[/GROUP]]\n"
+                        "其余推理过程只留在影子会话。"
+                    ),
                     "channel": "stdout",
-                    "dedup_key": "dd-direct-regress",
+                    "dedup_key": "dd-mention-marker",
                 },
                 {"event_type": "text", "content": "[THINKING] 思考", "channel": "stdout"},
             ],
         )
         assert result == 2
 
+        # 载体 run 仅一段投影行（标记剥离；dedup_key=None——段投影不携带）。
         carrier_rows = await _fetch_logs(db_session, seed.carrier_run_id)
-        assert [r.content_redacted for r in carrier_rows] == [
-            "[ASSISTANT] 已定位：LoginForm.jsx:47 hooks 依赖缺失"
-        ]
-        assert carrier_rows[0].dedup_key == "dd-direct-regress"
+        assert [r.content_redacted for r in carrier_rows] == ["登录页白屏根因：hooks 依赖缺失。"]
+        assert carrier_rows[0].dedup_key is None
+        meta = carrier_rows[0].metadata_ or {}
+        assert meta["member_id"] == str(seed.member.id)
+        assert meta["member_name"] == "小码"
+        assert meta["projection"] is True
 
         await publish_submitted_messages(result.publish_intent)
         events = _group_log_events(sink, seed.group_session_id)
         assert len(events) == 1
         assert events[0]["log_id"] == str(carrier_rows[0].id)
-        assert events[0]["content"] == "[ASSISTANT] 已定位：LoginForm.jsx:47 hooks 依赖缺失"
+        assert events[0]["content"] == "登录页白屏根因：hooks 依赖缺失。"
+
+    async def test_mention_turn_no_marker_close_emits_fallback(
+        self,
+        db_session: AsyncSession,
+        recording_redis,
+    ) -> None:
+        """@轮整轮无任何标记 → close 收口补一行兜底投影行（防群里死寂）：
+        内容含成员昵称 + metadata projection_fallback=True + 群频道 log 事件
+        （log_id=兜底行 id）；重复收口不重复补行（终态守卫）。"""
+        _sink, redis = recording_redis
+        seed = await _seed_group_bridge(db_session)  # turn_source=None（@轮）
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] 过程文字，无标记",
+                    "channel": "stdout",
+                }
+            ],
+        )
+        # 轮内：零投影行（无标记 → submit 侧零投影）。
+        assert await _fetch_logs(db_session, seed.carrier_run_id) == []
+
+        result = await svc.close_interactive_run(
+            seed.lease_id,
+            seed.shadow_run_id,
+            seed.claim_token,
+            status="success",
+            is_error=False,
+        )
+        assert result is not None
+
+        carrier_rows = await _fetch_logs(db_session, seed.carrier_run_id)
+        assert len(carrier_rows) == 1, "无标记 @轮收口应补一行兜底投影行"
+        fallback = carrier_rows[0]
+        assert fallback.channel == "stdout"
+        assert fallback.content_redacted == "（小码 已在会话内处理，点击成员卡查看）"
+        meta = fallback.metadata_ or {}
+        assert meta["member_id"] == str(seed.member.id)
+        assert meta["member_name"] == "小码"
+        assert meta["projection_fallback"] is True
+
+        # 群频道 log 事件：log_id=兜底行 id + 成员身份。
+        group_channel = f"agent_session:{seed.group_session_id}"
+        log_events = [
+            json.loads(call.args[1])
+            for call in redis.publish.call_args_list
+            if call.args[0] == group_channel and json.loads(call.args[1]).get("event") == "log"
+        ]
+        assert len(log_events) == 1
+        assert log_events[0]["log_id"] == str(fallback.id)
+        assert log_events[0]["content"] == "（小码 已在会话内处理，点击成员卡查看）"
+        assert log_events[0]["member_name"] == "小码"
+
+        # 幂等：重复收口（终态 no-op）不再补行。
+        await svc.close_interactive_run(
+            seed.lease_id,
+            seed.shadow_run_id,
+            seed.claim_token,
+            status="success",
+            is_error=False,
+        )
+        assert len(await _fetch_logs(db_session, seed.carrier_run_id)) == 1
+
+    async def test_mention_turn_with_marker_close_no_fallback(
+        self,
+        db_session: AsyncSession,
+        recording_redis,
+    ) -> None:
+        """@轮已投影 [[GROUP]] 段 → 收口不补兜底行（载体 run 已有本成员投影）。"""
+        _sink, _redis = recording_redis
+        seed = await _seed_group_bridge(db_session)  # @轮
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[[GROUP]]已在群里可见的结论[[/GROUP]]",
+                    "channel": "stdout",
+                }
+            ],
+        )
+        await svc.close_interactive_run(
+            seed.lease_id,
+            seed.shadow_run_id,
+            seed.claim_token,
+            status="success",
+            is_error=False,
+        )
+        carrier_rows = await _fetch_logs(db_session, seed.carrier_run_id)
+        assert [r.content_redacted for r in carrier_rows] == ["已在群里可见的结论"]
+        assert all(not ((r.metadata_ or {}).get("projection_fallback")) for r in carrier_rows), (
+            "已有段投影的 @轮不补兜底行"
+        )
+
+    async def test_direct_turn_close_no_fallback(
+        self,
+        db_session: AsyncSession,
+        recording_redis,
+    ) -> None:
+        """直聊轮无标记 → 收口不补兜底行（群内静默是直聊的设计语义）。"""
+        _sink, _redis = recording_redis
+        seed = await _seed_group_bridge(db_session, turn_source="shadow_direct")
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [{"event_type": "text", "content": "[ASSISTANT] 直聊私密回复", "channel": "stdout"}],
+        )
+        await svc.close_interactive_run(
+            seed.lease_id,
+            seed.shadow_run_id,
+            seed.claim_token,
+            status="success",
+            is_error=False,
+        )
+        assert await _fetch_logs(db_session, seed.carrier_run_id) == []
 
 
 # ── 标记解析纯函数 + 排队标记 source 透传 ─────────────────────────────────────
@@ -1237,6 +1376,185 @@ class TestMarkerParsing:
         assert rest_old == "正文"
         assert parsed_old is not None
         assert "source" not in parsed_old
+
+
+# ── 标准 inject 端点影子直聊直通（quick 投影统一标记制 2026-09-02）────────────
+
+
+class TestStandardInjectShadowDirect:
+    async def test_standard_inject_on_shadow_session_becomes_direct(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_hub,
+        readiness_ok,
+    ) -> None:
+        """标准 inject 端点（inject_session，非群端点）对影子会话 = 直聊：
+        prompt 前插直聊头（[[GROUP]] 标记说明）+ 本轮 user_input metadata
+        source=shadow_direct（+ 群/成员/直聊载体 run/发送者）+ 直聊载体 run
+        零日志行（群时间线零可见）。"""
+        from app.modules.daemon.group.service import SHADOW_DIRECT_SOURCE
+        from app.modules.daemon.session.service import SessionService
+
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
+        shadow = await _seed_shadow_with_active_run(
+            db_session,
+            member=member,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            run_status="completed",  # 空闲 → 普通注入新 run
+        )
+
+        result = await SessionService(db_session).inject_session(
+            shadow.id, env.owner.id, prompt="帮我看看登录页白屏"
+        )
+        assert result.queued is False
+        assert result.agent_run is not None
+
+        log_row = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == result.agent_run.id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert log_row is not None
+        # prompt 前插直聊头 + 用户内容。
+        assert "[[GROUP]]" in log_row.content_redacted
+        assert "[[/GROUP]]" in log_row.content_redacted
+        assert "独立会话" in log_row.content_redacted
+        assert "不会出现在群里" in log_row.content_redacted
+        assert "帮我看看登录页白屏" in log_row.content_redacted
+        # 轮 metadata：直聊标记 + 群/成员/载体/发送者。
+        meta = log_row.metadata_ or {}
+        assert meta["source"] == SHADOW_DIRECT_SOURCE
+        assert meta["source_group_id"] == str(group_id)
+        assert meta["source_member_id"] == str(member.id)
+        assert meta["sender_user_id"] == str(env.owner.id)
+        # 直聊载体 run：挂群会话、group_carrier、零日志行。
+        carrier = await db_session.get(AgentRun, uuid.UUID(meta["source_carrier_run_id"]))
+        assert carrier is not None
+        assert carrier.agent_session_id == group_id
+        assert carrier.spec_strategy == "group_carrier"
+        carrier_logs = (
+            (await db_session.execute(select(AgentRunLog).where(AgentRunLog.run_id == carrier.id)))
+            .scalars()
+            .all()
+        )
+        assert list(carrier_logs) == []
+
+    async def test_standard_inject_busy_shadow_queues_with_direct_source(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_hub,
+        readiness_ok,
+    ) -> None:
+        """忙轮标准 inject（queue_when_busy）：排队条目 prompt 头链标记带
+        source=shadow_direct + 直聊头（派发侧 _split_group_chain_marker 还原，
+        投影判定不回退成全投影）。"""
+        from app.modules.daemon.session.service import (
+            SessionService,
+            _split_group_chain_marker,
+        )
+
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
+        shadow = await _seed_shadow_with_active_run(
+            db_session,
+            member=member,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+        )  # running → 忙轮排队
+
+        result = await SessionService(db_session).inject_session(
+            shadow.id, env.owner.id, prompt="忙轮直聊追问", queue_when_busy=True
+        )
+        assert result.queued is True
+
+        entries = await _list_queued(db_session, shadow.id)
+        assert len(entries) == 1
+        assert entries[0].sender_user_id == env.owner.id
+        _prompt, chain_meta = _split_group_chain_marker(entries[0].prompt or "")
+        assert chain_meta is not None
+        assert chain_meta.get("source") == "shadow_direct"
+        assert "[[GROUP]]" in (entries[0].prompt or "")
+        assert "忙轮直聊追问" in (entries[0].prompt or "")
+
+    async def test_standard_inject_group_trigger_metadata_not_overwritten(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_hub,
+        readiness_ok,
+    ) -> None:
+        """回归：群 @ 触发路径自带 turn_metadata（无 source 键）不被直聊化——
+        metadata 原样保留（source_group_id/source_carrier_run_id 仍在、无
+        source 键）、prompt 无直聊头。"""
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
+        await _seed_shadow_with_active_run(
+            db_session,
+            member=member,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+            run_status="completed",
+        )
+
+        # 群 @ 触发（走 GroupChatService.send_group_message → _trigger_group_member
+        # → inject_session_as_service 携自带 metadata），不经标准 inject 端点。
+        from app.modules.daemon.group.service import GroupChatService
+
+        await GroupChatService(db_session).send_group_message(
+            group_id, env.owner, content="@小码 群里正常触发"
+        )
+
+        log_row = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog)
+                    .where(AgentRunLog.channel == "user_input")
+                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert log_row is not None
+        meta = log_row.metadata_ or {}
+        assert meta["source_group_id"] == str(group_id)
+        assert meta["source_member_id"] == str(member.id)
+        assert "source" not in meta, "群触发轮 metadata 不被直聊化覆盖"
+        assert "独立会话" not in (log_row.content_redacted or "")
+        assert "回应要求" in (log_row.content_redacted or ""), "群触发 prompt 含回应要求指示行"
 
 
 # ── 互@护栏：直聊轮不触发互@协作 ───────────────────────────────────────────────

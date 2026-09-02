@@ -3088,6 +3088,29 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
+        # ── quick 投影统一标记制（2026-09-02）：标准 inject 端点影子直聊直通 ──
+        # 目标会话为群成员影子会话（kind='group_member'，属主=群主——上方归属
+        # 校验天然直通）且本轮携带真实消息文本（空 prompt 的纯切换轮不适用）
+        # → 按直聊语义注入：prompt 前插直聊头（可见性语义 + [[GROUP]] 标记
+        # 说明）+ 轮 metadata source="shadow_direct"（投影过滤判定锚 + 直聊
+        # 载体 run，[[GROUP]] 段投影层照常选择性回群）。效果：群主在
+        # SessionPanel 对影子会话发消息 = 直聊。群 @ 触发 / 直聊端点 / 排队
+        # 派发等服务路径自带 turn_metadata（inject_session_as_service），不经
+        # 本入口，零影响。group/service 延迟 import 防循环（照
+        # _get_owned_session_for_update 先例）；非群影子（成员行缺失）返回
+        # None 零行为变化。载体 run 随调用方事务落库（失败整体回滚）。
+        direct_turn_metadata: dict | None = None
+        if session.session_kind == "group_member" and prompt.strip():
+            from app.modules.daemon.group.service import prepare_shadow_direct_turn
+
+            direct = await prepare_shadow_direct_turn(
+                self._session,
+                shadow_session_id=session.id,
+                sender_user_id=user_id,
+            )
+            if direct is not None:
+                direct_header, direct_turn_metadata = direct
+                prompt = f"{direct_header}\n{prompt}"
         # ── task-07（2026-08-26-session-input-mention / FR-06 / D-003）：会话绑定 ──
         # @ 联想选中项落 M:N link（bind_session_to_change / bind_session_to_quicklog
         # 幂等 best-effort：savepoint + log.warning 自吞异常，失败不阻断消息发送，
@@ -3202,6 +3225,10 @@ class SessionService:
             prompt=prompt,
             # ql-20260817-003：轮次发送者=实际注入者。
             run_sender_user_id=user_id,
+            # quick 投影统一标记制（2026-09-02）：标准 inject 对群成员影子会话的
+            # 自动直聊化产物（source=shadow_direct + 直聊载体 run）；普通会话
+            # 恒 None（零回归）。
+            turn_metadata=direct_turn_metadata,
             # sessions-portal task-05：切换参数透传共享核心（service 路径不传=零回归）。
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
@@ -6138,6 +6165,10 @@ class SessionService:
                 self._session,
                 session_id=session_id,
                 user_id=user_id,
+                # 影子详情读对群普通成员放行（2026-09-02）：SessionPanel 本体挂在
+                # 成员卡后普通成员 attach 轮询详情会 404 误报「会话恢复失败」——
+                # 读路径与 logs 同口径放行（写路径不受影响）。
+                allow_shadow_member_read=True,
             )
             if group_session is not None and group_session.deleted_at is None:
                 return group_session

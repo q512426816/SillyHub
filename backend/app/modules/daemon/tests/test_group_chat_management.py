@@ -1304,13 +1304,15 @@ class TestPermissionBranchInheritance:
             runtime_id=env.runtime.id,
         )
 
-        # 群主（影子属主）可读；群成员（非属主）不可读（影子不对外暴露）。
+        # 群主（影子属主）可读；群成员（非属主）详情读也已放行
+        # （2026-09-02 影子会话挂 SessionPanel 本体后需要详情——读路径与 logs
+        # 同口径放行，写路径仍仅属主/admin）；非群成员仍 404。
         resp = await client.get(
             f"/api/daemon/sessions/{shadow.id}", headers=_headers(env.owner_token)
         )
         assert resp.status_code == 200, resp.text
         resp = await client.get(f"/api/daemon/sessions/{shadow.id}", headers=_headers(member_token))
-        assert resp.status_code == 404
+        assert resp.status_code == 200, resp.text
 
     async def test_file_artifacts_group_branch(
         self, client: AsyncClient, db_session: AsyncSession

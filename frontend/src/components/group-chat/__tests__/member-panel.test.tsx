@@ -26,6 +26,10 @@
  *   7. 团队能力开关（quick 群成员团队能力）——展示（claude 可切 / codex 禁用）；
  *      群主切换走「重建影子会话并重置独立记忆」Modal.confirm → PATCH
  *      team_enabled；取消不提交；非群主只读。
+ *   8. 影子会话面板（quick 2026-09-02：SessionPanel dialog 本体替换自研查看器）
+ *      ——agent 卡整卡点击 → Drawer 内挂 SessionPanel（mode=dialog /
+ *      sessionId=影子 id / 成员引擎 providers）；普通成员也可打开；未建影子无
+ *      点击语义；卡内按钮不透传。
  *
  * mock 策略（对齐 sessions/__tests__/create-group-wizard.test.tsx 惯例）：
  *   - @/lib/api 仅覆写 apiFetch（真实 daemon.ts 群客户端消费 mock——断言路径
@@ -71,6 +75,9 @@ const mocks = vi.hoisted(() => ({
   listSimpleProjects: vi.fn(),
   // quick 成员头像：上传管线 mock（fetchFileBlob 供头像渲染链路）。
   uploadFile: vi.fn(),
+  // 影子会话面板（2026-09-02）：SessionPanel 本体 mock——只断言挂载 props，
+  // 面板内部数据链路由 session-panel 自身测试覆盖。
+  sessionPanel: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -118,6 +125,21 @@ vi.mock("@/lib/errors", () => ({
   errMessage: (err: unknown) =>
     err instanceof Error ? err.message : "操作失败",
   useNotify: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
+}));
+
+// 影子会话面板本体 mock（quick 2026-09-02）：member-panel 只负责以 dialog 模式
+// 挂载 SessionPanel 并传影子 sessionId，面板内部（logs 预取/SSE/追问）不在本
+// 套件推理面。
+vi.mock("@/components/daemon/session-panel", () => ({
+  SessionPanel: (props: Record<string, unknown>) => {
+    mocks.sessionPanel(props);
+    return (
+      <div
+        data-testid="session-panel-mock"
+        data-session-id={String(props.sessionId)}
+      />
+    );
+  },
 }));
 
 // ── antd Select 触发助手（create-group-wizard.test 同款，经 id 锚定） ──────
@@ -1000,47 +1022,54 @@ describe("MemberPanel 团队能力开关（quick 群成员团队能力）", () =
   });
 });
 
-// ── 8. 影子会话查看器入口（群聊体验 quick，2026-09-02）────────────────────
+// ── 8. 影子会话面板入口（群聊体验 quick，2026-09-02：SessionPanel dialog 本体）──
 
-describe("MemberPanel 影子会话查看器（quick）", () => {
-  it("agent 卡整卡点击（有影子会话）→ 打开 Drawer 时间线（普通成员也可看）", async () => {
+describe("MemberPanel 影子会话面板（quick）", () => {
+  it("agent 卡整卡点击（有影子会话）→ Drawer 内挂 SessionPanel mode=dialog（sessionId=影子 id）", async () => {
     const group = makeGroup();
     group.members = [
       agentMember({ shadow_session_id: "shadow-1", shadow_status: "active" }),
     ];
-    // apiFetch 兜 logs 端点（getAgentSessionLogs 真实现消费 mock）。
-    mocks.apiFetch.mockResolvedValue([
-      {
-        id: "l-1",
-        run_id: "r-1",
-        timestamp: "2026-09-01T06:01:00Z",
-        channel: "user_input",
-        content_redacted: "@小码 看看这个",
-      },
-    ]);
-    // 普通成员（非群主）视角：currentUserId=u-lin。
-    renderPanel(<MemberPanel group={group} currentUserId="u-lin" />);
+    renderPanel(<MemberPanel group={group} currentUserId="u-me" />);
 
     // 卡片本身可点（非按钮命中——点卡片标题文本区域）。
     const card = screen.getByTestId("agent-member-card-mem-1");
-    expect(card.getAttribute("title")).toContain("影子会话时间线");
+    expect(card.getAttribute("title")).toContain("影子会话面板");
     fireEvent.click(within(card).getByText("小码"));
 
-    // Drawer 打开：标题 + 初始 limit=100 参数 + 时间线行（会话体验对齐 quick：
-    // 装配后注入 prompt = 用户 turn 气泡原文）。
-    expect(
-      await screen.findByText("「小码」影子会话时间线"),
-    ).toBeTruthy();
-    await waitFor(() => {
-      expect(mocks.apiFetch).toHaveBeenCalledWith(
-        expect.stringContaining("/api/daemon/sessions/shadow-1/logs?limit=100"),
-        expect.anything(),
-      );
+    // Drawer 标题 + SessionPanel 以 dialog 模式挂载（props 断言：会话面板本体
+    // 直挂影子 id；providers/defaultProvider 取成员引擎；rt-1 固件在线 →
+    // hasOnlineProvider=true）。
+    expect(await screen.findByText("小码 · 影子会话")).toBeTruthy();
+    await waitFor(() => expect(mocks.sessionPanel).toHaveBeenCalled());
+    const props = mocks.sessionPanel.mock.calls.at(-1)?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(props).toMatchObject({
+      mode: "dialog",
+      sessionId: "shadow-1",
+      providers: ["claude"],
+      defaultProvider: "claude",
+      hasOnlineProvider: true,
     });
-    expect(await screen.findByText("@小码 看看这个")).toBeTruthy();
   });
 
-  it("未建影子（shadow_session_id null）→ 无点击查看语义（title 无提示）", () => {
+  it("普通成员也可打开面板（影子 logs 读端点已放行；写操作后端强校验群主）", async () => {
+    const group = makeGroup();
+    group.members = [
+      agentMember({ shadow_session_id: "shadow-1", shadow_status: "active" }),
+    ];
+    // 普通成员（非群主）视角：currentUserId=u-lin。
+    renderPanel(<MemberPanel group={group} currentUserId="u-lin" />);
+    fireEvent.click(
+      within(screen.getByTestId("agent-member-card-mem-1")).getByText("小码"),
+    );
+    expect(await screen.findByText("小码 · 影子会话")).toBeTruthy();
+    await waitFor(() => expect(mocks.sessionPanel).toHaveBeenCalled());
+  });
+
+  it("未建影子（shadow_session_id null）→ 无点击打开语义（title 无提示）", () => {
     const group = makeGroup();
     group.members = [agentMember({ shadow_session_id: null })];
     renderPanel(<MemberPanel group={group} currentUserId="u-me" />);
@@ -1054,13 +1083,13 @@ describe("MemberPanel 影子会话查看器（quick）", () => {
       agentMember({ shadow_session_id: "shadow-1", shadow_status: "active" }),
     ];
     renderPanel(<MemberPanel group={group} currentUserId="u-me" />);
-    // 点「切换配置」按钮 → 只开热切换弹窗，不开影子 Drawer。
+    // 点「切换配置」按钮 → 只开热切换弹窗，不开影子面板。
     fireEvent.click(
       within(screen.getByTestId("agent-member-card-mem-1")).getByRole("button", {
         name: "切换配置",
       }),
     );
     expect(screen.getByText(/的 Agent 配置/)).toBeTruthy();
-    expect(screen.queryByText(/影子会话时间线/)).toBeNull();
+    expect(mocks.sessionPanel).not.toHaveBeenCalled();
   });
 });

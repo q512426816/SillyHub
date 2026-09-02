@@ -2988,7 +2988,7 @@ export function streamGroupChat(
 
 /* ---------- 影子会话 SSE 流（quick 影子直聊，2026-09-02） ---------- */
 
-/** 影子会话流回调集（shadow-session-viewer 消费面）——单聊事件面的收敛子集。 */
+/** 影子会话流回调集——单聊事件面的收敛子集。 */
 export interface ShadowSessionStreamHandlers {
   /** log 分支：实时 / 回放行（调用方按 log_id 去重合并进本地 rows）。 */
   onLog(envelope: SessionStreamEnvelope, cursor: string | null): void;
@@ -3000,8 +3000,8 @@ export interface ShadowSessionStreamHandlers {
 }
 
 /**
- * 订阅影子会话 SSE 流（quick 影子直聊，2026-09-02）——shadow-session-viewer
- * Drawer 打开期间的实时数据源。
+ * 订阅影子会话 SSE 流（quick 影子直聊，2026-09-02）——影子会话 Drawer 形态
+ * 的实时数据源。
  *
  * 端点同单聊 GET /api/daemon/sessions/{sid}/stream（backend 权限：影子属主=
  * 群主 + workspace admin 放行；普通成员 403——调用方按 canDirectMessage 门控

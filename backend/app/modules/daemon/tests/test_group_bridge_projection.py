@@ -1,21 +1,24 @@
-"""task-05（2026-09-01-session-group-chat）桥接投影测试——design §5.2 两个改动点。
+"""task-05（2026-09-01-session-group-chat）桥接投影测试——design §5.2 两个改动点
+（quick 投影统一标记制 2026-09-02 适配：@轮与直聊轮同款，仅 [[GROUP]] 段投影）。
 
 覆盖（任务卡 acceptance）：
 
 - 双写投影行：影子行 + 投影行共存无 PK 冲突（新 uuid id）、投影行 run_id=载体
-  run、dedup_key 复用原值、channel='stdout'、content/segment_id 原值、metadata_
-  身份齐全（member_id/member_name/source_log_id/projection）；
+  run、channel='stdout'、content=标记段剥离文本、metadata_ 身份齐全
+  （member_id/member_name/source_log_id/projection）；段投影 dedup_key 恒 None
+  （不撞载体 run 的 (run_id, dedup_key) 部分唯一索引）；
 - 仅 assistant 文本投影：thinking / tool_call / [TOOL_USE] / stderr / [SYSTEM] /
   [TASK_*] 行不进群时间线（前端 classifySessionLog reply 口径复刻）；
 - 群频道事件：publish_submitted_messages 群分支向 agent_session:{群id} 发 log
   事件，log_id=投影行 id（实时与回放读库同 id）+ 成员身份三字段；
-- partial 透传投影（segment_id 保留）+ override 到达 DELETE 已投影行 + 群频道
-  stale 信号；完整行到达同样收敛为只剩完整投影；
+- partial 不投影（标记可能被流式截断，完整行到达统一抽段）：override 到达
+  仅撤影子 run 侧 partial、载体 run 恒零行、群频道零 stale 信号；
 - 身份按落库时刻快照：成员改名后新行新名、旧行不回填；
 - 非群场景（普通单聊 / worker 形态子会话）零行为变化——无投影行、PublishIntent
   群标量全空、无群频道事件；
 - close_interactive_run：影子 run 收口 → 群频道 turn_completed 带
-  member_id/member_name/member_session_id；非群会话不发。
+  member_id/member_name/member_session_id；非群会话不发（@轮无标记兜底行的
+  专测见 test_group_direct.py）。
 
 范式复用 test_run_sync_ctx_tokens.py（recording_redis 录制 pipeline sink）+
 test_group_mention_pipeline.py（群/影子/载体 run 种子）。
@@ -378,12 +381,13 @@ def _group_log_events(sink: list[tuple[str, str]], group_id: uuid.UUID) -> list[
 
 
 class TestGroupBridgeDoubleWrite:
-    """双写投影行——新 PK 共存、字段齐全、仅 assistant 文本投影。"""
+    """双写投影行——新 PK 共存、字段齐全、仅 assistant 文本 [[GROUP]] 段投影。"""
 
     async def test_projection_row_double_written_no_pk_conflict(
         self, db_session: AsyncSession, mocked_redis
     ) -> None:
-        """影子行 + 投影行共存：新 uuid PK、run_id=载体 run、dedup_key 复用、
+        """影子行 + 投影行共存：新 uuid PK、run_id=载体 run、content=标记段
+        剥离文本、dedup_key=None（段投影不携带，不同 run 本就不撞唯一索引）、
         metadata 身份齐全（member_id/member_name/source_log_id/projection）。"""
         seed = await _seed_group_bridge(db_session)
         svc = DaemonService(db_session)
@@ -394,7 +398,10 @@ class TestGroupBridgeDoubleWrite:
             [
                 {
                     "event_type": "text",
-                    "content": "[ASSISTANT] 已定位：LoginForm.jsx:47 hooks 依赖缺失",
+                    "content": (
+                        "[ASSISTANT] 已定位：LoginForm.jsx:47 hooks 依赖缺失\n"
+                        "[[GROUP]]登录页白屏根因：hooks 依赖缺失。[[/GROUP]]"
+                    ),
                     "channel": "stdout",
                     "dedup_key": "dd-1",
                 }
@@ -408,14 +415,15 @@ class TestGroupBridgeDoubleWrite:
         assert shadow_row.dedup_key == "dd-1"
 
         carrier_rows = await _fetch_logs(db_session, seed.carrier_run_id)
-        assert len(carrier_rows) == 1, "assistant 文本应双写一行投影到载体 run"
+        assert len(carrier_rows) == 1, "assistant 文本应双写一段投影到载体 run"
         proj = carrier_rows[0]
         # 新 PK（≠影子行 id）+ 同事务共存（无 IntegrityError——提交成功即证）。
         assert proj.id != shadow_row.id
         assert proj.run_id == seed.carrier_run_id
         assert proj.channel == "stdout"
-        assert proj.content_redacted == shadow_row.content_redacted
-        assert proj.dedup_key == "dd-1", "dedup_key 复用原值（不同 run 不撞唯一索引）"
+        assert proj.content_redacted == "登录页白屏根因：hooks 依赖缺失。"
+        assert "[[GROUP]]" not in proj.content_redacted
+        assert proj.dedup_key is None, "段投影 dedup_key 恒 None（同源多段不撞唯一索引）"
         assert proj.segment_id is None
         meta = proj.metadata_ or {}
         assert meta["member_id"] == str(seed.member.id)
@@ -427,7 +435,7 @@ class TestGroupBridgeDoubleWrite:
         self, db_session: AsyncSession, mocked_redis
     ) -> None:
         """thinking / tool_call / [TOOL_USE] / [TOOL_RESULT] / stderr / [SYSTEM] /
-        [TASK_*] 行照常落影子 run，但不投影进群时间线。"""
+        [TASK_*] 行照常落影子 run，但不投影进群时间线（仅 [[GROUP]] 段投影）。"""
         seed = await _seed_group_bridge(db_session)
         svc = DaemonService(db_session)
         result = await svc.submit_messages(
@@ -454,7 +462,11 @@ class TestGroupBridgeDoubleWrite:
                     "content": '[TASK_STARTED] {"taskId":"t1"}',
                     "channel": "stdout",
                 },
-                {"event_type": "text", "content": "裸文本回复也投影", "channel": "stdout"},
+                {
+                    "event_type": "text",
+                    "content": "[[GROUP]]裸文本回复的标记段投影[[/GROUP]]",
+                    "channel": "stdout",
+                },
             ],
         )
         assert result == 8
@@ -471,8 +483,8 @@ class TestGroupBridgeDoubleWrite:
         )
 
         carrier_rows = await _fetch_logs(db_session, seed.carrier_run_id)
-        assert [r.content_redacted for r in carrier_rows] == ["裸文本回复也投影"], (
-            "仅 assistant 文本（[ASSISTANT] 前缀与裸 reply）投影，过程信息一律不进群时间线"
+        assert [r.content_redacted for r in carrier_rows] == ["裸文本回复的标记段投影"], (
+            "仅 assistant 文本的 [[GROUP]] 标记段投影，过程信息一律不进群时间线"
         )
 
     async def test_group_channel_log_event_uses_projection_log_id(
@@ -490,7 +502,7 @@ class TestGroupBridgeDoubleWrite:
             [
                 {
                     "event_type": "text",
-                    "content": "[ASSISTANT] 修复完成",
+                    "content": "[ASSISTANT] 分析中\n[[GROUP]]修复完成[[/GROUP]]",
                     "channel": "stdout",
                     "usage": {"input_tokens": 10, "output_tokens": 5},
                 },
@@ -508,16 +520,17 @@ class TestGroupBridgeDoubleWrite:
         assert event["session_id"] == str(seed.group_session_id)
         assert event["run_id"] == str(seed.shadow_run_id)
         assert event["channel"] == "stdout"
-        assert event["content"] == "[ASSISTANT] 修复完成"
+        assert event["content"] == "修复完成"
         assert event["member_id"] == str(seed.member.id)
         assert event["member_name"] == "小码"
         assert event["member_session_id"] == str(seed.shadow_session_id)
 
-    async def test_partial_projected_then_override_deleted_with_stale(
+    async def test_partial_not_projected_override_keeps_carrier_empty(
         self, db_session: AsyncSession, recording_redis
     ) -> None:
-        """partial 半截行透传投影（segment_id 保留）；[ASSISTANT_OVERRIDE] 信号
-        到达 → 载体 run 投影 partial DELETE + 群频道 stale 信号。"""
+        """partial 半截行不投影（标记可能被流式截断）；[ASSISTANT_OVERRIDE]
+        信号到达仅撤影子 run 侧 partial——载体 run 恒零行、群频道零事件
+        （partial 从未投影，无渲染可撤）。"""
         sink, _redis = recording_redis
         seed = await _seed_group_bridge(db_session)
         svc = DaemonService(db_session)
@@ -529,20 +542,15 @@ class TestGroupBridgeDoubleWrite:
             [
                 {
                     "event_type": "text",
-                    "content": "[ASSISTANT] 半截",
+                    "content": "[ASSISTANT] 半截[[GRO",
                     "channel": "stdout",
                     "metadata": {"segmentId": SEG, "isPartial": True},
                 }
             ],
         )
         await publish_submitted_messages(first.publish_intent)
-        partial_rows = await _fetch_logs(db_session, seed.carrier_run_id)
-        assert len(partial_rows) == 1
-        assert partial_rows[0].segment_id == SEG, "partial 投影行保留 segment_id 语义"
-        # partial 实时事件也进群频道（log_id=投影行 id，segment_id 透传）。
-        partial_events = _group_log_events(sink, seed.group_session_id)
-        assert len(partial_events) == 1
-        assert partial_events[0]["segment_id"] == SEG
+        assert await _fetch_logs(db_session, seed.carrier_run_id) == [], "partial 不投影"
+        assert _group_log_events(sink, seed.group_session_id) == [], "partial 不进群频道"
 
         second = await svc.submit_messages(
             seed.lease_id,
@@ -560,21 +568,21 @@ class TestGroupBridgeDoubleWrite:
         assert second == 0
         await publish_submitted_messages(second.publish_intent)
 
-        assert await _fetch_logs(db_session, seed.carrier_run_id) == [], (
-            "override 到达后载体 run 上的投影 partial 应被 DELETE"
-        )
-        stale_events = [
-            e for e in _group_log_events(sink, seed.group_session_id) if e.get("stale") is True
+        assert await _fetch_logs(db_session, seed.carrier_run_id) == []
+        # 群频道零事件（含 stale 令箭——群内无渲染可撤）。
+        assert _group_log_events(sink, seed.group_session_id) == []
+        # 影子 run 侧 partial 照常被既有机制 DELETE（override 信号语义保留）。
+        shadow_partial = [
+            r for r in await _fetch_logs(db_session, seed.shadow_run_id) if r.segment_id == SEG
         ]
-        assert len(stale_events) == 1, "群频道应收到 stale 撤回信号"
-        assert stale_events[0]["segment_id"] == SEG
-        assert stale_events[0]["member_id"] == str(seed.member.id)
+        assert shadow_partial == []
 
-    async def test_partial_then_complete_converges_to_full_projection(
+    async def test_partial_then_complete_converges_to_segment_projection(
         self, db_session: AsyncSession, recording_redis
     ) -> None:
-        """完整行迟到（跨 submit 调用）：已 commit 的投影 partial 被 DELETE，
-        完整投影行（segment_id=None）落库——载体 run 收敛只剩完整行。"""
+        """完整行迟到（跨 submit 调用）：影子 run 收敛只剩完整行（既有机制）；
+        载体 run 由完整行统一抽段落一段投影行（segment_id=None）；群频道只发
+        段事件、零 stale 令箭（partial 从未投影）。"""
         sink, _redis = recording_redis
         seed = await _seed_group_bridge(db_session)
         svc = DaemonService(db_session)
@@ -599,7 +607,7 @@ class TestGroupBridgeDoubleWrite:
             [
                 {
                     "event_type": "text",
-                    "content": "[ASSISTANT] 完整回复全文",
+                    "content": "[ASSISTANT] 完整回复\n[[GROUP]]结论段：已修复[[/GROUP]]",
                     "channel": "stdout",
                     "metadata": {"segmentId": SEG, "isComplete": True},
                 }
@@ -608,14 +616,14 @@ class TestGroupBridgeDoubleWrite:
         await publish_submitted_messages(second.publish_intent)
 
         carrier_rows = await _fetch_logs(db_session, seed.carrier_run_id)
-        assert [r.content_redacted for r in carrier_rows] == ["[ASSISTANT] 完整回复全文"]
+        assert [r.content_redacted for r in carrier_rows] == ["结论段：已修复"]
         assert carrier_rows[0].segment_id is None
-        # 群频道：完整投影事件 + backend 合成 stale 令箭（撤回已渲染半截）。
+        # 群频道：仅完整行的段投影事件（无 stale 令箭——partial 从未投影）。
         events = _group_log_events(sink, seed.group_session_id)
-        full_events = [e for e in events if e.get("stale") is not True and e["log_id"]]
-        assert len(full_events) == 1
-        assert full_events[0]["log_id"] == str(carrier_rows[0].id)
-        assert any(e.get("stale") is True and e.get("segment_id") == SEG for e in events)
+        assert len(events) == 1
+        assert events[0]["log_id"] == str(carrier_rows[0].id)
+        assert events[0]["content"] == "结论段：已修复"
+        assert all(e.get("stale") is not True for e in events)
 
     async def test_identity_snapshot_on_member_rename(
         self, db_session: AsyncSession, mocked_redis
@@ -628,7 +636,7 @@ class TestGroupBridgeDoubleWrite:
             seed.lease_id,
             seed.claim_token,
             seed.shadow_run_id,
-            [{"event_type": "text", "content": "[ASSISTANT] 第一句", "channel": "stdout"}],
+            [{"event_type": "text", "content": "[[GROUP]]第一句[[/GROUP]]", "channel": "stdout"}],
         )
         first_rows = await _fetch_logs(db_session, seed.carrier_run_id)
         assert len(first_rows) == 1
@@ -643,7 +651,7 @@ class TestGroupBridgeDoubleWrite:
             seed.lease_id,
             seed.claim_token,
             seed.shadow_run_id,
-            [{"event_type": "text", "content": "[ASSISTANT] 第二句", "channel": "stdout"}],
+            [{"event_type": "text", "content": "[[GROUP]]第二句[[/GROUP]]", "channel": "stdout"}],
         )
         rows = await _fetch_logs(db_session, seed.carrier_run_id)
         assert len(rows) == 2

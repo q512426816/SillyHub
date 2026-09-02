@@ -40,10 +40,10 @@
 
 import { useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Button, Input, Modal, Select, Switch, Tooltip } from "antd";
+import { Button, Drawer, Input, Modal, Select, Switch, Tooltip } from "antd";
 import { Plus, UserMinus } from "lucide-react";
 
-import { ShadowSessionViewer } from "@/components/group-chat/shadow-session-viewer";
+import { SessionPanel } from "@/components/daemon/session-panel";
 import { validateMemberDisplayName } from "@/components/group-chat/create-group-wizard";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
@@ -175,8 +175,9 @@ export function MemberPanel({
    *    （群主可见；原 onInviteUser/onAddAgent props 回调形态退役）。 ── */
   const [inviting, setInviting] = useState(false);
   const [addingAgent, setAddingAgent] = useState(false);
-  /* ── 群聊体验 quick（2026-09-02）：影子会话查看器——agent 卡整卡点击打开
-   *    （群主 + 普通成员都可看，后端已放行影子会话 logs 只读）。 ── */
+  /* ── 群聊体验对齐 quick（2026-09-02）：影子会话面板——agent 卡整卡点击打开
+   *    Drawer 内嵌 SessionPanel（mode="dialog"，会话面板本体；群主 + 普通成员
+   *    都可打开——影子 logs 读端点已放行普通成员，写操作后端强校验群主）。 ── */
   const [viewingShadow, setViewingShadow] = useState<GroupMemberRead | null>(null);
 
   // 工作区名解析（六要素「工作区」行展示 + 热切换弹窗选项共用）。
@@ -392,7 +393,7 @@ export function MemberPanel({
     });
   };
 
-  /** agent 卡整卡点击 → 打开影子会话查看器（内嵌按钮/开关不透传，防误开）。 */
+  /** agent 卡整卡点击 → 打开影子会话面板（内嵌按钮/开关不透传，防误开）。 */
   const handleAgentCardClick = (member: GroupMemberRead) => (e: MouseEvent<HTMLDivElement>) => {
     if (!member.shadow_session_id) return;
     if (
@@ -446,14 +447,14 @@ export function MemberPanel({
       )}
       {agentMembers.map((member) => {
         const status = shadowStatusMeta(member.shadow_status);
-        // quick 影子会话查看器：有影子会话即可整卡点击查看时间线（title 提示）。
+        // quick 影子会话面板：有影子会话即可整卡点击打开（title 提示）。
         const shadowViewable = member.shadow_session_id != null;
         return (
           <div
             key={member.id}
             data-testid={`agent-member-card-${member.id}`}
             onClick={handleAgentCardClick(member)}
-            title={shadowViewable ? "点击查看该成员的影子会话时间线" : undefined}
+            title={shadowViewable ? "点击打开该成员的影子会话面板" : undefined}
             className={cn(
               "mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm",
               shadowViewable && "cursor-pointer transition-colors hover:border-brand-300",
@@ -703,18 +704,15 @@ export function MemberPanel({
         />
       )}
 
-      {/* quick 影子会话查看器（antd Drawer 全宽抽屉，Portal 挂 body——320px 右栏
-          内嵌不下长时间线，CLAUDE.md 侧栏内宽内容走浮层惯例）。影子直聊 quick：
-          群主视角传 canDirectMessage（输入区 + SSE 订阅门控）。 */}
+      {/* 影子会话面板（2026-09-02 quick：自研查看器退役，改挂 SessionPanel
+          mode="dialog" 会话面板本体——与正常会话同一内核：logs 预取 / SSE 实时
+          流 / inject 追问 / 打断 / 结束 / 视图切换全保留，顶部用量条由面板 dialog
+          分支自带）。antd Drawer 全宽抽屉，Portal 挂 body——320px 右栏内嵌不下
+          长会话面板（CLAUDE.md 侧栏内宽内容走浮层惯例）。 */}
       {viewingShadow && viewingShadow.shadow_session_id && (
-        <ShadowSessionViewer
-          open
+        <ShadowSessionDrawer
+          member={viewingShadow}
           onClose={() => setViewingShadow(null)}
-          shadowSessionId={viewingShadow.shadow_session_id}
-          memberName={viewingShadow.display_name}
-          groupId={group.id}
-          memberId={viewingShadow.id}
-          canDirectMessage={isOwner}
         />
       )}
 
@@ -1010,6 +1008,71 @@ function AgentConfigSwitchModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+/* ────────────────────── 影子会话 Drawer（SessionPanel dialog 内嵌） ────────────────────── */
+
+/**
+ * 影子会话面板 Drawer（群聊体验 quick 2026-09-02 重做：自研 shadow-session-viewer
+ * 退役，改挂会话面板本体）。影子会话即普通 AgentSession（kind='group_member'），
+ * SessionPanel mode="dialog"（attach 续聊形态）自取数链路零适配直挂——logs 预取 /
+ * SSE 实时流 / inject 追问 / 打断 / 结束 / 对话·进度视图切换 / 输入框上方用量条
+ * 全部走面板既有分支（与 /sessions 页同一内核，像素级一致）。
+ *
+ * dialog 必需 props 照 WorkerSessionOverlay 先例（session-panel.tsx 分身浮层）：
+ * providers/defaultProvider 取成员引擎；hasOnlineProvider 由成员 runtime 在线性
+ * 派生（机器融合候选查询，与热切换弹窗同 hook——离线时输入/选择器禁用 + 「未
+ * 连接」徽标兜底）。key=影子会话 id 驱动整体 remount（R6 重挂载契约）。
+ *
+ * 权限面（后端强校验，前端保持开放查看）：logs 读端点已放行群成员；SSE / 会话
+ * 详情 / inject / usage 仅群主（影子属主）——普通成员打开可见历史回放，发送
+ * 会收后端中文错误透传（细化体验归后续 quick）。
+ */
+function ShadowSessionDrawer({
+  member,
+  onClose,
+}: {
+  /** 目标 agent 成员（调用方保证 shadow_session_id 非空）。 */
+  member: GroupMemberRead;
+  onClose: () => void;
+}) {
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+  const provider = member.provider ?? "claude";
+  const shadowSessionId = member.shadow_session_id!;
+  const runtimeOnline = useMemo(
+    () =>
+      (machineCandidates ?? []).some(
+        (m) =>
+          m.status === "online" &&
+          (m.runtimes ?? []).some(
+            (r) => r.id === member.runtime_id && r.status === "online",
+          ),
+      ),
+    [machineCandidates, member.runtime_id],
+  );
+  return (
+    <Drawer
+      open
+      onClose={onClose}
+      width="min(920px, 94vw)"
+      destroyOnClose
+      title={`${member.display_name} · 影子会话`}
+      /* 面板本体自带完整 chrome（头部/输入区边距），Drawer body 零内边距对齐
+         正常会话页布局；宽度沿用原查看器档位。 */
+      styles={{ body: { padding: 0 } }}
+    >
+      <div className="flex h-full min-h-0 flex-col">
+        <SessionPanel
+          key={shadowSessionId}
+          mode="dialog"
+          sessionId={shadowSessionId}
+          providers={[provider]}
+          defaultProvider={provider}
+          hasOnlineProvider={runtimeOnline}
+        />
+      </div>
+    </Drawer>
   );
 }
 
