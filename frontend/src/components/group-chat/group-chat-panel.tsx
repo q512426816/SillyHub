@@ -862,7 +862,7 @@ export function GroupChatPanel({
       // 队列满（HTTP_409_DAEMON_SESSION_QUEUE_FULL）等业务错误：消息可能已落
       // 时间线（design §4.1 失败语义）——提示原文，时间线以对账回显为准；
       // 附件与草稿保留供重发。
-      notify.error(errMessage(err, "发送失败，请稍后重试"));
+      notify.error(err, "发送失败，请稍后重试");
     } finally {
       setSending(false);
       inputRef.current?.focus();

@@ -178,7 +178,7 @@ export function GroupMemberAvatarUpload({
       });
       onChange(getFileDownloadUrl(resp.id));
     } catch (err) {
-      notify.error(errMessage(err, "头像上传失败，请稍后重试"));
+      notify.error(err, "头像上传失败，请稍后重试");
     } finally {
       setUploading(false);
     }

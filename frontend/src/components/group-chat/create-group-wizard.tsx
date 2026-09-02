@@ -384,7 +384,7 @@ export function CreateGroupWizard({
       onCreated(group);
     },
     onError: (err) => {
-      notify.error(errMessage(err, "建群失败，请稍后重试"));
+      notify.error(err, "建群失败，请稍后重试");
     },
   });
 

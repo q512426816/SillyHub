@@ -1901,7 +1901,7 @@ function SessionPanelPage({
       const hits = await getAgentSessionLogs(sessionId, { q, limit: 100 });
       setSearchResults(hits);
     } catch (err) {
-      notify.error(errMessage(err, "搜索失败，请稍后重试"));
+      notify.error(err, "搜索失败，请稍后重试");
     } finally {
       setSearching(false);
     }

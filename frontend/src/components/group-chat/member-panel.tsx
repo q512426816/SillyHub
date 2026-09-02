@@ -251,7 +251,7 @@ export function MemberPanel({
       setSwitching(null);
     },
     onError: (err) => {
-      notify.error(errMessage(err, "切换配置失败，请稍后重试"));
+      notify.error(err, "切换配置失败，请稍后重试");
     },
   });
 
@@ -262,7 +262,7 @@ export function MemberPanel({
       refreshAnd(`已重置「${member.display_name}」的独立记忆`);
     },
     onError: (err) => {
-      notify.error(errMessage(err, "重置记忆失败，请稍后重试"));
+      notify.error(err, "重置记忆失败，请稍后重试");
     },
   });
 
@@ -272,7 +272,7 @@ export function MemberPanel({
       refreshAnd("已移出群聊");
     },
     onError: (err) => {
-      notify.error(errMessage(err, "移除成员失败，请稍后重试"));
+      notify.error(err, "移除成员失败，请稍后重试");
     },
   });
 
@@ -291,7 +291,7 @@ export function MemberPanel({
       );
     },
     onError: (err) => {
-      notify.error(errMessage(err, "切换团队能力失败，请稍后重试"));
+      notify.error(err, "切换团队能力失败，请稍后重试");
     },
   });
 
@@ -304,7 +304,7 @@ export function MemberPanel({
       refreshAnd(`已更新「${member.display_name}」的头像`);
     },
     onError: (err) => {
-      notify.error(errMessage(err, "更新头像失败，请稍后重试"));
+      notify.error(err, "更新头像失败，请稍后重试");
     },
   });
 
@@ -329,7 +329,7 @@ export function MemberPanel({
     },
     onError: (err) => {
       // 后端 400 中文文案透传（如非项目成员/昵称重复）。
-      notify.error(errMessage(err, "邀请失败，请稍后重试"));
+      notify.error(err, "邀请失败，请稍后重试");
     },
   });
 
@@ -342,7 +342,7 @@ export function MemberPanel({
       setAddingAgent(false);
     },
     onError: (err) => {
-      notify.error(errMessage(err, "添加 Agent 成员失败，请稍后重试"));
+      notify.error(err, "添加 Agent 成员失败，请稍后重试");
     },
   });
 
