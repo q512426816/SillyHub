@@ -34,8 +34,8 @@ const wtExecQueue: Array<{
   stderr?: string;
 }> = [];
 
-/** 记录所有 execFile 调用的 (cmd, args)，断言命令构造用。 */
-const wtCalls: Array<{ cmd: string; args: string[] }> = [];
+/** 记录所有 execFile 调用的 (cmd, args, opts)，断言命令构造 + 超时接线用。 */
+const wtCalls: Array<{ cmd: string; args: string[]; opts?: { timeout?: number } }> = [];
 
 // vi.mock 拦截 node:child_process 的 execFile（hoist 到文件顶部）。
 vi.mock('node:child_process', () => ({
@@ -44,7 +44,13 @@ vi.mock('node:child_process', () => ({
     const cmd = args[0] as string;
     const args1 = args[1];
     const arr = Array.isArray(args1) ? (args1 as string[]) : [];
-    wtCalls.push({ cmd, args: arr });
+    // opts 形参（execFile 4 参形式才有）；ql-20260902-001 起记录以断言超时值。
+    const maybeOpts = args[2];
+    const opts =
+      maybeOpts && typeof maybeOpts === 'object' && !Array.isArray(maybeOpts)
+        ? (maybeOpts as { timeout?: number })
+        : undefined;
+    wtCalls.push({ cmd, args: arr, opts });
     const cb = args[args.length - 1] as (
       err: Error | null,
       stdout: Buffer | string,
@@ -377,5 +383,99 @@ describe('HostFsHandler — git_worktree_remove（task-02 WT5~WT6）', () => {
       expect(e).toBeInstanceOf(RpcError);
       expect((e as RpcError).code).toBe('forbidden');
     }
+  });
+
+  // ql-20260902-001：branch 可选参——remove 成功后 best-effort `git branch -D`，
+  // 根治 workers/* 分支永久堆积（worktree remove 本身不删分支）。
+  it('WT5b: 带 branch → remove 成功后 `branch -D <branch>`，{ok:true, branch_deleted:true}', async () => {
+    wtExecQueue.push({ ok: true, stdout: '', stderr: '' });
+    wtExecQueue.push({ ok: true, stdout: 'Deleted branch workers/abc12345.', stderr: '' });
+    const siblingPath = join(siblingRoot, 'abc12345');
+    const result = await handler.gitWorktreeRemove({
+      workdir: root,
+      sibling_path: siblingPath,
+      branch: 'workers/abc12345',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.branch_deleted).toBe(true);
+    // 第二条命令是 branch -D（第一条是 worktree remove）。
+    expect(wtCalls.length).toBe(2);
+    const delArgs = wtCalls[1].args;
+    expect(wtCalls[1].cmd).toBe('git');
+    expect(delArgs).toContain('branch');
+    expect(delArgs).toContain('-D');
+    expect(delArgs).toContain('workers/abc12345');
+  });
+
+  it('WT5c: 带 branch 且 branch -D 失败 → {ok:true, branch_deleted:false, error 非空}（目录已删，主体成功）', async () => {
+    wtExecQueue.push({ ok: true, stdout: '', stderr: '' });
+    wtExecQueue.push({ ok: false, stdout: '', stderr: "error: branch 'workers/x' not found." });
+    const result = await handler.gitWorktreeRemove({
+      workdir: root,
+      sibling_path: join(siblingRoot, 'abc12345'),
+      branch: 'workers/x',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.branch_deleted).toBe(false);
+    expect(result.error).toMatch(/not found/);
+  });
+
+  it('WT5d: 不带 branch → 只跑 remove 一条命令，无 branch_deleted 字段（零回归）', async () => {
+    wtExecQueue.push({ ok: true, stdout: '', stderr: '' });
+    const result = await handler.gitWorktreeRemove({
+      workdir: root,
+      sibling_path: join(siblingRoot, 'abc12345'),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.branch_deleted).toBeUndefined();
+    expect(wtCalls.length).toBe(1);
+  });
+});
+
+// ql-20260902-001：超时回归——worktree add/merge/remove 是 IO 型重命令，10s 在
+// 大仓库（7705 文件）Windows 冷缓存下必杀（生产实证 worktree add 10.0s 被杀 →
+// 分身 worktree_create_failed 派发必败），必须接 120s 档；轻命令仍 10s。
+describe('HostFsHandler — worktree 命令超时接线（ql-20260902-001）', () => {
+  let root: string;
+  let siblingRoot: string;
+  let handler: HostFsHandler;
+
+  beforeEach(async () => {
+    root = await makeRoot();
+    siblingRoot = await makeRoot();
+    handler = new HostFsHandler({ rootsProvider: () => [root, siblingRoot] });
+  });
+
+  afterEach(async () => {
+    wtExecQueue.length = 0;
+    wtCalls.length = 0;
+    await rm(root, { recursive: true, force: true });
+    await rm(siblingRoot, { recursive: true, force: true });
+  });
+
+  it('TT1: git_worktree_add 超时 120s（非 10s 轻命令档）', async () => {
+    wtExecQueue.push({ ok: true, stdout: '', stderr: '' });
+    await handler.gitWorktreeAdd({
+      workdir: root,
+      sibling_path: join(siblingRoot, 'abc12345'),
+      branch: 'workers/abc12345',
+      base_ref: 'main',
+    });
+    expect(wtCalls[0].opts?.timeout).toBe(120_000);
+  });
+
+  it('TT2: git_merge 超时 120s', async () => {
+    wtExecQueue.push({ ok: true, stdout: '', stderr: '' });
+    await handler.gitMerge({ workdir: root, worker_branch: 'workers/abc12345' });
+    expect(wtCalls[0].opts?.timeout).toBe(120_000);
+  });
+
+  it('TT3: git_worktree_remove 超时 120s（大仓库批量删档同为 IO 型）', async () => {
+    wtExecQueue.push({ ok: true, stdout: '', stderr: '' });
+    await handler.gitWorktreeRemove({
+      workdir: root,
+      sibling_path: join(siblingRoot, 'abc12345'),
+    });
+    expect(wtCalls[0].opts?.timeout).toBe(120_000);
   });
 });

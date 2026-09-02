@@ -432,24 +432,30 @@ class HostFsDelegate:
         workspace: Workspace,
         *,
         sibling_path: str,
+        branch: str | None = None,
     ) -> dict:
-        """Remove the worktree at *sibling_path*.
+        """Remove the worktree at *sibling_path* (optionally deleting *branch*).
 
         daemon 侧跑 ``git -C <root> worktree remove --force <sibling_path>``
         （D-006@v1 轻量路径，合并成功后清理 worker 副本；merge 失败回退时副本
         保留供人工排查，见 design §9）。caller 负责仅在成功路径调用。
 
-        daemon-client: forward ``host_fs.git_worktree_remove`` over WS RPC（仿
-        :meth:`git_apply` 走 :meth:`_via_rpc_or_degrade`）。返回
-        ``{ok, error}``；degraded 时 ``{ok: False, error: "rpc unavailable"}``。
+        ql-20260902-001：*branch* 传入时 daemon 在 remove 成功后 best-effort
+        ``git branch -D``（worktree remove 不删 ``workers/*`` 分支，此前全链路
+        无删分支调用致永久堆积）；旧 daemon 忽略未知参，行为向后兼容。返回
+        ``{ok, error, branch_deleted?}``；degraded 时
+        ``{ok: False, error: "rpc unavailable"}``。
         """
+        args: dict[str, str] = {
+            "workdir": workspace.root_path,
+            "sibling_path": sibling_path,
+        }
+        if branch:
+            args["branch"] = branch
         return await self._via_rpc_or_degrade(
             method="git_worktree_remove",
             workspace=workspace,
-            args={
-                "workdir": workspace.root_path,
-                "sibling_path": sibling_path,
-            },
+            args=args,
             degraded={"ok": False, "error": "rpc unavailable"},
         )
 

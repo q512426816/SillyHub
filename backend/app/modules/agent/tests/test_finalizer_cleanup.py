@@ -203,7 +203,7 @@ class TestCleanupPartialFailureBestEffort:
 
         call_count = {"n": 0}
 
-        async def _remove(workspace, *, sibling_path):
+        async def _remove(workspace, *, sibling_path, branch=None):
             call_count["n"] += 1
             if sibling_path == sibling1:
                 return {"ok": False, "error": "rpc unavailable"}
@@ -238,7 +238,7 @@ class TestCleanupPartialFailureBestEffort:
         sibling1 = _expected_sibling(ws.root_path, w1.id)
         sibling2 = _expected_sibling(ws.root_path, w2.id)
 
-        async def _remove(workspace, *, sibling_path):
+        async def _remove(workspace, *, sibling_path, branch=None):
             if sibling_path == sibling1:
                 raise RuntimeError("delegate boom")
             return {"ok": True, "error": None}

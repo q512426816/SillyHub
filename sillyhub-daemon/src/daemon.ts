@@ -4766,11 +4766,17 @@ export class Daemon {
       return handler.gitMerge({ workdir, worker_branch });
     });
     // git_worktree_remove：合并后清理 worker 副本（§7.5 第 8 行 cleanup 事件）。
+    // branch 可选参（ql-20260902-001）：调用方判定分支无保留价值时传入，remove
+    // 成功后顺带 `git branch -D`，根治 workers/* 分支永久堆积；旧调用方不传则行为不变。
     ws.registerRpcHandler('host_fs.git_worktree_remove', async (params) => {
       const workdir = typeof params.workdir === 'string' ? params.workdir : '';
       const sibling_path =
         typeof params.sibling_path === 'string' ? params.sibling_path : '';
-      return handler.gitWorktreeRemove({ workdir, sibling_path });
+      const branch =
+        typeof params.branch === 'string' && params.branch.length > 0
+          ? params.branch
+          : undefined;
+      return handler.gitWorktreeRemove({ workdir, sibling_path, branch });
     });
     ws.registerRpcHandler('host_fs.git_rev_parse', async (params) => {
       const root = typeof params.root === 'string' ? params.root : '';

@@ -25,7 +25,9 @@ created_at: 2026-08-18 01:45:00
   - git 类：`git_apply`（`{ok,conflict_detail,skipped}`）、`git_rev_parse`
     （`{commit,error}`）、`git_worktree_add`（`{ok,worktree_path,error}`）、
     `git_merge`（`{ok,conflicts,merged_files,error}`，conflict 含
-    `{file,marker_lines}`）、`git_worktree_remove`（`{ok,error}`）。
+    `{file,marker_lines}`）、`git_worktree_remove`（`{ok,error,branch_deleted?}`；
+    ql-20260902-001 起可选 `branch` 参：remove 成功后 best-effort
+    `git branch -D`，根治 workers/* 分支堆积，旧调用方不传零变化）。
   - `run_command`：唯一执行宿主命令的方法，白名单极窄。
 - `isGateCommand(command, args)`：run_command 白名单判定，导出供测试。
 - `HostFsHandlerOptions`、各 Result 接口与 backend HostFsDelegate 契约三端对齐。
@@ -42,13 +44,21 @@ git_merge 冲突解析: git diff --name-only --diff-filter=U + 读冲突标记�
   （<<<<<<< / ======= / >>>>>>>，≥2 行才算真冲突）→ 喂主 agent LLM 解决
 run_command: isGateCommand 不命中 → exit_code 126 不执行，结构化回传
   命中模板: sillyspec gate verify --change <非空> --json [flag value 成对...]
-git 命令: execFile(非 shell) + cwd:workdir（防注入）；10s 超时
+git 命令: execFile(非 shell) + cwd:workdir（防注入）
+超时双档(ql-20260902-001): 轻命令(apply/rev-parse 等) 10s；
+  worktree add/merge/remove 是 IO 型重命令 120s（GIT_WORKTREE_TIMEOUT_MS）——
+  10s 在大仓库(7705 文件) Windows 冷缓存下必杀 git worktree add，
+  实证分身 worktree_create_failed 派发必败（git stderr 仅进度条无 fatal 行）
 ```
 
 ## 注意事项
 
 - git 失败一律结构化回传不抛：worktree_add 失败让 backend 标 worker run failed 不
   崩 mission；worktree_remove 失败 backend 仅记 warning 不阻塞收尾。
+- branch 删除 best-effort 语义（ql-20260902-001）：目录已删（ok=true）但
+  `git branch -D` 失败 → `branch_deleted:false` + error 回传，**不翻 ok**——
+  backend 只记日志；用 `-D` 不用 `-d`（调用方传分支即已判定无保留价值，
+  `-d` 会因 not fully merged 误拒）。
 - isGateCommand 与 backend delegate.py `_enforce_command_whitelist` **字符级对齐**
   （command 严格裸 `sillyspec` 防路径注入；头部 5 元素精确匹配；尾部 flag 成对
   消费）；改任何一侧必须同步另一侧。

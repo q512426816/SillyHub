@@ -137,6 +137,9 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
 - host_fs：delegate.py + ws_rpc.py——经 WS RPC 读客户端文件系统
   （list_dir、sillyspec.db 读等；runtime/service.py 的 DaemonRpc* 异常族：
   Timeout/Conflict/GatewayError/ForbiddenError/RemoteGatewayError/RemoteError）。
+  git RPC 族：git_apply/git_rev_parse/git_worktree_add/git_merge/
+  git_worktree_remove——remove 可选 branch 参（ql-20260902-001：remove 成功后
+  daemon 侧连带 `git branch -D` 删 workers/<id> 分支；旧 daemon 忽略未知参向后兼容）。
 - 模型：daemon_instances（build_id/版本；sillyspec 三列 2026-08-31-machine-sillyspec-version：
   sillyspec_version / sillyspec_latest_version VARCHAR(50) NULL + sillyspec_update JSON NULL
   ——升级状态机快照 {state, trigger, from_version, to_version, error, since}）、

@@ -432,6 +432,49 @@ async def prepare_worker_worktree(
                 error_code="worktree_create_failed",
                 message=f"per-worker worktree 创建失败：{wt_error}",
             )
+            # ql-20260902-001：收残。git worktree add 被 timeout 杀掉时分支与
+            # worktree 注册元数据已落（检出中断在文件写入阶段），且此 run 的
+            # worktree_branch 保持 None → finalizer 清理 SQL（worktree_branch IS
+            # NOT NULL）永远漏掉它，残缺副本无人收（F:\WorkNew\SillyHub 实测 13
+            # 个 .worktrees/* 堆积）。此处立即 best-effort remove（连带删
+            # workers/<id> 分支）；daemon 离线 / git 报「非 worktree」时仅记日志，
+            # 不影响已落的 failed 终态。
+            try:
+                cleanup = await host_fs_delegate.git_worktree_remove(
+                    ws, sibling_path=sibling_path, branch=worktree_branch
+                )
+            except Exception as exc:
+                log.warning(
+                    "mission_worker_worktree_cleanup_exception",
+                    run_id=str(run.id),
+                    workspace_id=str(ws.id),
+                    sibling_path=sibling_path,
+                    branch=worktree_branch,
+                    error=str(exc),
+                )
+            else:
+                if isinstance(cleanup, dict) and cleanup.get("ok") is True:
+                    log.info(
+                        "mission_worker_worktree_cleanup_removed",
+                        run_id=str(run.id),
+                        workspace_id=str(ws.id),
+                        sibling_path=sibling_path,
+                        branch=worktree_branch,
+                        branch_deleted=cleanup.get("branch_deleted"),
+                    )
+                else:
+                    # ok=False 常见于「本就没建成」（ref 错误在注册前就失败）——
+                    # 无残可收，debug 级即可；真残留下次同路径再试。
+                    log.debug(
+                        "mission_worker_worktree_cleanup_noop",
+                        run_id=str(run.id),
+                        sibling_path=sibling_path,
+                        error=(
+                            cleanup.get("error")
+                            if isinstance(cleanup, dict)
+                            else "bad_result"
+                        ),
+                    )
             return WorkerWorktreeOutcome(
                 ok=False,
                 git_mode=git_mode,

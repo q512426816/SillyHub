@@ -425,13 +425,14 @@ class FinalizerService:
         2. 采 patch artifact：**复用 task-04 既有采集**（``collect_completed_artifacts``
            在 converge 前已把各 worker ``diff_summary`` 采成 ``kind=patch`` artifact），
            取首个 patch artifact id（避免新读 diff 方法，task-07 授权）；无则 None。
-        3. 取 mission 各终态 worker 的 ``(run_id, target_workspace_id)`` 二元组
-           （target 为 NULL 时回退 mission.workspace_id 即 anchor）；task-09 起
+        3. 取 mission 各终态 worker 的 ``(run_id, target_workspace_id, worktree_branch)``
+           三元组（target 为 NULL 时回退 mission.workspace_id 即 anchor）；task-09 起
            run 归属分身子会话时按 ``is_worker_complete`` 会话判定过滤——只清
            **已完成分身**的副本，未完成分身（idle 未 done / 追问重开工中）cwd
            不动（design §5.C.5）。
         4. 按 target_workspace_id 分组（defaultdict(list)）——每组共享一个 Workspace。
-        5. 每组：resolve Workspace → 逐个 ``git_worktree_remove(ws, sibling_path)``；
+        5. 每组：resolve Workspace → 逐个 ``git_worktree_remove(ws, sibling_path,
+           branch=worktree_branch)``（ql-20260902-001：连带删 ``workers/<id>`` 分支）；
            sibling_path 按 D-001@v2 公式算（``resolve_root_path_for_daemon(ws.root_path)
            + /.worktrees/ + run.id[:8]``，与 task-03 ``execution.dispatch_worker``
            一致——否则清不掉副本）。
@@ -481,6 +482,7 @@ class FinalizerService:
             AgentRun.id,
             AgentRun.target_workspace_id,
             AgentRun.agent_session_id,
+            AgentRun.worktree_branch,
         ).where(
             AgentRun.mission_id == mission_id,
             AgentRun.status.in_(("completed", "failed", "killed")),
@@ -506,8 +508,8 @@ class FinalizerService:
 
         worker_sessions = await mission_worker_sessions_tree(self._session, mission_id)
         worker_sessions_by_id = {s.id: s for s in worker_sessions}
-        rows: list[tuple[uuid.UUID, uuid.UUID | None]] = []
-        for run_id, target_ws, agent_session_id in raw_rows:
+        rows: list[tuple[uuid.UUID, uuid.UUID | None, str | None]] = []
+        for run_id, target_ws, agent_session_id, wt_branch in raw_rows:
             owner_session = (
                 worker_sessions_by_id.get(agent_session_id)
                 if agent_session_id is not None
@@ -523,7 +525,7 @@ class FinalizerService:
                     agent_session_id=str(agent_session_id),
                 )
                 continue
-            rows.append((run_id, target_ws))
+            rows.append((run_id, target_ws, wt_branch))
         if not rows:
             log.info(
                 "finalizer_cleanup_all_workers_incomplete",
@@ -533,11 +535,13 @@ class FinalizerService:
             )
             return {"cleaned": [], "patch_artifact_id": patch_artifact_id}
 
-        # 按 target_workspace_id 分组：NULL 回退 anchor，各组的 [(run_id, target_ws)] 列表
-        grouped: dict[uuid.UUID, list[tuple[uuid.UUID, uuid.UUID | None]]] = defaultdict(list)
-        for run_id, target_ws in rows:
+        # 按 target_workspace_id 分组：NULL 回退 anchor，各组的 [(run_id, target_ws, wt_branch)] 列表
+        grouped: dict[
+            uuid.UUID, list[tuple[uuid.UUID, uuid.UUID | None, str | None]]
+        ] = defaultdict(list)
+        for run_id, target_ws, wt_branch in rows:
             effective_target = target_ws or anchor_workspace_id
-            grouped[effective_target].append((run_id, target_ws))
+            grouped[effective_target].append((run_id, target_ws, wt_branch))
 
         # 每组独立清理：resolve Workspace → 逐个 git_worktree_remove
         cleaned: list[str] = []
@@ -557,12 +561,14 @@ class FinalizerService:
             # 宿主机原生 base（与 task-03 dispatch_worker 同款容器→宿主改写）。
             base_root = resolve_root_path_for_daemon(ws.root_path)
 
-            # 逐个清理该组的 worktree
-            for run_id, _ in run_tuples:
+            # 逐个清理该组的 worktree（ql-20260902-001：连带删 workers/<id> 分支——
+            # worktree remove 只删目录与注册元数据，不删分支；此前全链路无删分支
+            # 调用，converge 清理后 workers/* 分支仍永久堆积）。
+            for run_id, _, wt_branch in run_tuples:
                 sibling_path = f"{base_root}/.worktrees/{str(run_id)[:8]}"
                 try:
                     result = await self._host_fs_delegate.git_worktree_remove(
-                        ws, sibling_path=sibling_path
+                        ws, sibling_path=sibling_path, branch=wt_branch
                     )
                 except Exception as exc:
                     # delegate 异常兜底：不崩，该副本不计 cleaned，继续清其他
@@ -584,6 +590,7 @@ class FinalizerService:
                         target_workspace_id=str(target_ws_id),
                         run_id=str(run_id),
                         sibling_path=sibling_path,
+                        branch_deleted=result.get("branch_deleted"),
                     )
                 else:
                     # ok=False（RPC degraded / git 错）→ 记失败，继续清其他（best-effort）。

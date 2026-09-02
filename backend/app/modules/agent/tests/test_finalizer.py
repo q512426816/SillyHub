@@ -789,6 +789,11 @@ class TestCleanupMissionGroupByWorkspace:
             ws_arg = call[0][0]  # 第一个位置参数是 Workspace
             assert ws_arg.id == anchor_ws.id
 
+        # ql-20260902-001：清理连带删 workers/<id> 分支（worktree remove 不删
+        # 分支，此前 converge 清理后分支仍永久堆积）——branch kwarg 逐 run 传对。
+        branch_args = [c[1]["branch"] for c in mock_delegate.git_worktree_remove.call_args_list]
+        assert set(branch_args) == {f"workers/{str(r1.id)[:8]}", f"workers/{str(r2.id)[:8]}"}
+
     @pytest.mark.asyncio
     async def test_multi_workspace_grouped_cleanup(self, db_session: AsyncSession) -> None:
         """多 workspace mission：按各自 target_workspace_id 分组 cleanup（mock 断言调用分组）。"""

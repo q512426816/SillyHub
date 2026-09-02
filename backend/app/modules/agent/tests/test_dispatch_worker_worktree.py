@@ -84,6 +84,11 @@ def _make_delegate_mock(
     delegate = MagicMock()
     delegate.probe_workspace_git_mode = AsyncMock(return_value="git")
     delegate.git_rev_parse = AsyncMock(return_value=rev_parse_commit)
+    # ql-20260902-001：创建失败路径会 best-effort git_worktree_remove 收残
+    # （删残缺 worktree + workers/<id> 分支），mock 补齐供断言。
+    delegate.git_worktree_remove = AsyncMock(
+        return_value={"ok": True, "branch_deleted": True}
+    )
     delegate.git_worktree_add = AsyncMock(
         return_value={
             "ok": ok,
@@ -211,6 +216,13 @@ async def test_dispatch_worker_marks_run_failed_when_worktree_add_fails(
     assert run.finished_at is not None
     assert run.output_redacted is not None
     assert "rpc unavailable" in (run.output_redacted or "")
+    # ql-20260902-001：创建失败必须收残——git worktree add 被 timeout 杀掉时
+    # 分支与 worktree 注册元数据已落而 run.worktree_branch 为 None，finalizer
+    # 清理 SQL 永远漏掉它；此处断言 best-effort remove 连带删 workers/<id> 分支。
+    delegate.git_worktree_remove.assert_awaited_once()
+    _, remove_kwargs = delegate.git_worktree_remove.await_args
+    assert remove_kwargs["sibling_path"] == f"/tmp/repo/.worktrees/{str(run.id)[:8]}"
+    assert remove_kwargs["branch"] == f"workers/{str(run.id)[:8]}"
 
 
 # ---------------------------------------------------------------------------

@@ -145,16 +145,20 @@ export interface GitMergeResult {
 }
 
 /**
- * git_worktree_remove 返回结构（design §7：`{ ok, error }`）。
+ * git_worktree_remove 返回结构（design §7：`{ ok, error }` + ql-20260902-001 分支删除结果）。
  *
- *   - 成功：`{ ok:true }`。
+ *   - 成功：`{ ok:true }`；带 branch 参时 `{ ok:true, branch_deleted:true/false }`。
  *   - 失败：`{ ok:false, error: <stderr> }`（不抛，结构化回传；backend cleanup 路径
  *     失败仅记 warning，不阻塞 mission 收尾，对齐 design §9 兼容策略）。
+ *   - `branch_deleted:false`：目录已删（ok=true）但 `git branch -D` 失败，error 带
+ *     失败文案——分支残留不影响清理主体，仅记日志。
  */
 export interface GitWorktreeRemoveResult {
   ok: boolean;
-  /** 失败时的 git stderr 文案；成功时缺省。 */
+  /** 失败 / branch_deleted:false 时的 git stderr 文案。 */
   error?: string;
+  /** 带 branch 参时回传：true=分支已删；false=best-effort 删除失败（目录已删）。 */
+  branch_deleted?: boolean;
 }
 
 /** git_rev_parse 返回结构：`{ commit, error }`（非 git 仓库 → commit=null + error 文案）。 */
@@ -446,8 +450,17 @@ export function isGateCommand(command: string, args: string[]): boolean {
 // 分支上不够精确（stdout/stderr 类型导致 .toString('utf8') 报 "Expected 0 arguments"）。
 // 直接用 callback 形式，类型显式可控。
 
-/** execFile 超时（对齐 backend post_scan_validator 的 10s + patch/service.py 子进程语义）。 */
+/** execFile 超时——轻量 git 命令（rev-parse / apply 等，对齐 backend post_scan_validator 的 10s + patch/service.py 子进程语义）。 */
 const GIT_TIMEOUT_MS = 10_000;
+
+/**
+ * worktree 级重命令超时（add 全量检出 / merge / remove 批量删档）。
+ * ql-20260902-001：大仓库全量检出是 IO 型操作，Windows 冷缓存 + 杀毒实时扫描下
+ * 10s 必杀（F:\WorkNew\SillyHub 7705 文件实证 worktree add 10.0s 被杀 → 分身
+ * worktree_create_failed 派发必败，git stderr 只剩进度条无 fatal 行）。轻命令维持
+ * GIT_TIMEOUT_MS，仅 worktree 三命令抬到 120s。
+ */
+const GIT_WORKTREE_TIMEOUT_MS = 120_000;
 
 /** execFile 调用结果（buffer 自行 toString，类型显式）。 */
 interface ExecResult {
@@ -927,7 +940,7 @@ export class HostFsHandler {
         params.branch,
         baseRef,
       ],
-      { timeout: GIT_TIMEOUT_MS },
+      { timeout: GIT_WORKTREE_TIMEOUT_MS },
     );
     if (r.ok) {
       return { ok: true, worktree_path: siblingPath };
@@ -972,7 +985,7 @@ export class HostFsHandler {
     const merge = await runCmd(
       'git',
       ['-C', workdir, 'merge', '--no-ff', params.worker_branch],
-      { timeout: GIT_TIMEOUT_MS },
+      { timeout: GIT_WORKTREE_TIMEOUT_MS },
     );
 
     if (merge.ok) {
@@ -1002,7 +1015,7 @@ export class HostFsHandler {
     const r = await runCmd(
       'git',
       ['-C', workdir, 'diff', '--name-only', '--diff-filter=U'],
-      { timeout: GIT_TIMEOUT_MS },
+      { timeout: GIT_WORKTREE_TIMEOUT_MS },
     );
     if (!r.ok) return [];
     return r.stdout
@@ -1037,7 +1050,7 @@ export class HostFsHandler {
   // ── git_worktree_remove（task-02 / design §7 / §7.5 cleanup 事件）────────────
 
   /**
-   * `git_worktree_remove({ workdir, sibling_path }) → { ok, error }`。
+   * `git_worktree_remove({ workdir, sibling_path, branch? }) → { ok, error, branch_deleted? }`。
    *
    * task-02 三方法之三：合并后清理 worker 副本（design §7.5 第 8 行），跑：
    *
@@ -1045,6 +1058,12 @@ export class HostFsHandler {
    *
    * `--force`：副本可能有未提交改动（worker 异常退出残留），强删避免 `git worktree remove`
    * 拒绝（design §5.1：合并成功路径立即清理，副本价值已被 merge 消化）。
+   *
+   * **branch 可选参（ql-20260902-001）**：`git worktree remove` 只删目录 + 注册元数据，
+   * **不删 `workers/<id>` 分支**——此前全链路无任何 branch -D 调用，workers/* 分支永久
+   * 堆积。调用方（backend execution 创建失败收残 / finalizer converge 清理）确认该分支
+   * 已无保留价值时传入，remove 成功后 best-effort `git branch -D`；删除失败不改变 ok
+   * 语义（目录已删即清理主体成功），经 `branch_deleted:false` + `error` 回传供记日志。
    *
    * **不抛**：失败 → `{ ok:false, error: <stderr> }`（backend cleanup 路径失败仅记 warning，
    * 不阻塞 mission 收尾，对齐 design §9 兼容策略；merge 失败回退时副本保留供人工排查）。
@@ -1054,6 +1073,7 @@ export class HostFsHandler {
   async gitWorktreeRemove(params: {
     workdir: string;
     sibling_path: string;
+    branch?: string;
   }): Promise<GitWorktreeRemoveResult> {
     assertWithinAllowedRoots(params.workdir, this._rootsProvider());
     assertWithinAllowedRoots(params.sibling_path, this._rootsProvider());
@@ -1063,14 +1083,31 @@ export class HostFsHandler {
     const r = await runCmd(
       'git',
       ['-C', workdir, 'worktree', 'remove', '--force', siblingPath],
-      { timeout: GIT_TIMEOUT_MS },
+      { timeout: GIT_WORKTREE_TIMEOUT_MS },
     );
-    if (r.ok) {
-      return { ok: true };
+    if (!r.ok) {
+      const error =
+        r.stderr.trim() || r.stdout.trim() || 'git worktree remove failed';
+      return { ok: false, error };
     }
-    const error =
-      r.stderr.trim() || r.stdout.trim() || 'git worktree remove failed';
-    return { ok: false, error };
+    // ql-20260902-001：分支删除（可选，best-effort）。用 -D 不用 -d——调用方传分支
+    // 即已判定无保留价值（失败收残场景分支无独有提交；converge 场景已 merge 消化），
+    // -d 会因「not fully merged」误拒（merge --no-ff 后 -d 判定正常，但收残场景
+    // 分支可能指向 base 提交之外的中间态，统一 -D 语义最稳）。
+    if (params.branch && params.branch.length > 0) {
+      const del = await runCmd(
+        'git',
+        ['-C', workdir, 'branch', '-D', params.branch],
+        { timeout: GIT_TIMEOUT_MS },
+      );
+      if (del.ok) {
+        return { ok: true, branch_deleted: true };
+      }
+      const delError =
+        del.stderr.trim() || del.stdout.trim() || 'git branch -D failed';
+      return { ok: true, branch_deleted: false, error: delError };
+    }
+    return { ok: true };
   }
 
   // ── git_rev_parse ─────────────────────────────────────────────────────────

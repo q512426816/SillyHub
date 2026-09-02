@@ -184,3 +184,25 @@
 方案：前端三处发送路径改发原始输入（裸 /team 无内容守卫保留前端）；剥离收口到后端派发层 _strip_team_command_prefix（create dispatch_prompt/objective 回落、inject SESSION_INJECT/SWITCH payload/objective 占位回填；整条指令匹配 /teams 不误伤），user_input 日志/队列条目保留原文
 结果：后端 test_inject_first_turn_briefing 15/15 绿（新增 5 用例）+ruff/mypy 0；前端 4 套件 66/66 绿+tsc 0+eslint 0 errors；Docker 重建后浏览器实测气泡显示前缀、刷新回放保留、DB 验证 objective 剥后+日志原文、加载 1.65s 正常
 审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py, frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx, frontend/src/components/daemon/__tests__/session-panel-team.test.tsx, frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx
+
+## ql-20260902-001-4f08 | 2026-09-02 09:33:51 | daemon worktree 命令 10s 超时必杀大仓库检出 + workers 分支与残缺 worktree 无清理路径
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/host-fs-handler.ts（GIT_WORKTREE_TIMEOUT_MS=120s 四处接线 + gitWorktreeRemove 可选 branch 删分支）
+- sillyhub-daemon/src/daemon.ts（RPC 分发透传 branch 参）
+- sillyhub-daemon/tests/host-fs-handler-worktree.test.ts（WT5b/5c/5d 分支三态 + TT1~TT3 超时回归）
+- backend/app/modules/daemon/host_fs/delegate.py（git_worktree_remove branch 透传）
+- backend/app/modules/agent/execution.py（创建失败路径 best-effort 收残）
+- backend/app/modules/agent/finalizer.py（cleanup SQL 补选 worktree_branch 并传 remove）
+- backend/app/modules/agent/tests/test_dispatch_worker_worktree.py（断言收残调用参数）
+- backend/app/modules/agent/tests/test_finalizer.py（断言 branch 逐 run 传对）
+- backend/app/modules/agent/tests/test_finalizer_cleanup.py（假 delegate 签名补 branch=None）
+- .sillyspec/docs/sillyhub-daemon/modules/host-fs-handler.md（契约/超时双档/branch 语义）
+- .sillyspec/docs/backend/modules/agent.md（路径B 收残 + finalizer 删分支）
+- .sillyspec/docs/backend/modules/daemon.md（host_fs git RPC 族 branch 参）
+需求：daemon worktree 命令 10s 超时必杀大仓库检出 + workers 分支与残缺 worktree 无清理路径
+根因：git worktree add 检出 7705 文件在 Windows 冷缓存下超 10s 被 GIT_TIMEOUT_MS 杀掉，分身 worktree_create_failed 派发必败；且创建失败 run 的 worktree_branch 为 NULL 被 finalizer 清理 SQL 漏掉、全链路无 branch -D 调用，残留目录+分支永久堆积
+方案：daemon 新增 GIT_WORKTREE_TIMEOUT_MS=120s 用于 worktree add/merge/remove，git_worktree_remove 增可选 branch 参连带 git branch -D；backend delegate 透传 branch，execution 创建失败路径立即 best-effort 收残，finalizer converge 清理连带删分支
+结果：daemon typecheck 0 错 + vitest 19 passed；backend pytest 定向 8 文件 77 passed（含 2 个签名连带修复）；部署待重建镜像后经 daemon 自动升级生效
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_finalizer_cleanup.py

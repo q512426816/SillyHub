@@ -101,6 +101,13 @@ dispatch_worker caller-worktree(路径A):
   且不写 run.worktree_branch(防 finalize 误 merge caller 主仓)
   worker_prompt 非 None → 覆写 render_worker_prompt(caller 注入约束)
 
+per-worker worktree 创建失败(路径B): mark failed(worktree_create_failed)
+  + 立即 best-effort git_worktree_remove 收残——git 被 timeout 杀掉时分支/
+  注册元数据已落而 run.worktree_branch 为 None, finalizer 清理 SQL 永远漏掉
+  (ql-20260902-001, remove 连带删 workers/<id> 分支)
+finalizer cleanup: git_worktree_remove 传 branch=run.worktree_branch
+  连带删 workers/<id> 分支(此前全链路无删分支调用, 分支永久堆积 ql-20260902-001)
+
 mission external 三重防御: ①入口跳过 orchestrator/lease spawn
   ②converge 检测 external 跳过 finalize/cleanup(不 merge/不清 worktree)
   ③路径A 不写 worktree_branch(误进 finalize 也无 branch 可 merge)
