@@ -203,10 +203,10 @@ describe("admin API client", () => {
     expect(logs).toHaveLength(1);
   });
 
-  it("resetUserPassword returns new password", async () => {
-    jsonOnce({ password: "Plaintext1!", message: "ok" });
+  it("resetUserPassword returns one-time password", async () => {
+    jsonOnce({ plaintext_password: "Sh-Plaintext1-1a" });
     const result = await resetUserPassword("u1");
-    expect(result.password).toBe("Plaintext1!");
+    expect(result.plaintext_password).toBe("Sh-Plaintext1-1a");
   });
 
   it("disableUserLogin returns updated user", async () => {

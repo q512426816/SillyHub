@@ -425,3 +425,47 @@
 根因：①e1f213e4 引入的自动恢复 sweep 无 deleted_at/归档工作区守卫且 confirm 无软删检查，软删会话被复活+补派发排队消息成不可见僵尸；②3c8db98c 隔离收口宣称 8 处全覆盖实漏 sessions.json/audit-failed.jsonl/codex 日志三处直拼 homedir()；③b690c91e 后端 archived 三态化后桌面列表未同步显式传参；④3235 3a594735 双通道文案承诺的按钮在 suspended 态无渲染路径；⑤ce4f4688 覆盖判定排除 ~ 根致重复追加；⑥a565f347 等待循环不查 _running
 方案：sweep 候选与条件 UPDATE 补 deleted_at IS NULL+归档工作区 NOT EXISTS、confirm SELECT 补软删过滤；三处路径改派生 daemonStateDir()（懒函数化）；桌面列表 archived 三态显式传参；页模式横幅补按钮接 handleReopen+dialog 文案去承诺；覆盖判定加精确等值；轮询每拍查 !_running 即中止
 结果：后端定向 13+相邻 88 绿 ruff/format/mypy 0；daemon 定向 17+相邻 107 绿 tsc 0；前端定向 69 绿 tsc 0、eslint 仅 2 条既有无关警告；8 模块文档同步
+
+## ql-20260902-001-51da | 2026-09-02 08:37:10 | 群聊消息支持附件（补 2026-09-01-session-group-chat FR-05 遗漏）：群消息端点接收附件（复用单聊 attachments 机制，存文件中心+挂载体消息+群频道事件可见）；前端群聊面板输入区附件上传按钮与时间…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260902-002-23ba | 2026-09-02 08:38:27 | 群聊消息支持附件（补 FR-05 遗漏）
+状态：已完成
+关联变更：quick-08edb157
+文件：（见实际改动）
+需求：群聊消息支持附件（补 FR-05 遗漏）
+根因：群聊实现时附件作为复用项被漏掉：群消息端点只收 content、前端输入区无附件按钮，与单聊体验不一致；注入管线本身支持附件透传，缺接线
+方案：后端 messages 端点加 attachment_ids（复用单聊上传/校验/gate/组装管线），附件绑定群载体会话防 48h 草稿清理，user_input metadata+群频道事件带附件摘要，首轮懒建与复用注入双路径透传（inject_session_as_service 加 attachment_owner_user_id 归属覆盖——群成员上传而影子属主是群主，按属主校验会误 404），非 Claude 成员带附件 fail-loud 400；前端回形针+Ctrl+V 粘贴上传+待发 chips+气泡附件条（复用 AttachmentChips 加 align）+纯附件空文本可发
+结果：后端新 test_group_attachments.py 8/8+群聊五件套回归 103+queue/inject 71+附件系 17 全绿，ruff/mypy 过；前端 group-chat-panel 18/18（5 新）+attachment-chips 47+tsc 0 错；gen:types 同步；待部署
+
+## ql-20260902-003-280f | 2026-09-02 09:18:32 | 群聊互@讨论场景修复（silly大家庭 真实场景）：直接触发占位计数 0 不占互@去重名额（用户同时@多人讨论不再一轮即断）+同成员互@触发上限 2 次（防死循环兜底）+协作链深度默认 2→4（允许两轮 ping-pong 往返）
+状态：进行中
+关联变更：quick-08edb157
+文件：（见实际改动）
+
+## ql-20260902-004-fc3e | 2026-09-02 09:23:56 | 群聊四项产品改造：①建群改选 PPM 项目（人员范围=项目成员，agent 成员工作区=项目关联工作区必选，群 workspace 锚后端自动取项目首个关联工作区）②群成员头像自定义（成员表 avatar 列+上传）③会话页群聊分区折叠④提…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260902-005-7096 | 2026-09-02 10:43:03 | 群聊 agent 成员集成团队能力：team_enabled 开关（成员表列+向导/面板开关），开启时影子 lease stage=orchestrator（daemon 自动注入主控 5 工具）+成员简报注入团队能力说明（dispatch…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260902-006-7965 | 2026-09-02 10:49:09 | 管理员重置密码修复：默认重置展示一次性密码+字母数字预校验+422 具体原因透传
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/admin/users/page.tsx（删写死 SillyHub@123 与内联弹窗，接线新组件，toast 透传具体原因）
+- frontend/src/components/admin-reset-password-dialog.tsx（新组件：一次性密码展示+字母数字预校验+422 具体原因透传）
+- frontend/src/components/__tests__/admin-reset-password-dialog.test.tsx（新测试 14 用例）
+- frontend/src/lib/admin.ts（ResetPasswordResponse 纠正为 plaintext_password 对齐 OpenAPI）
+- frontend/src/lib/__tests__/admin.test.ts（重置密码契约例对齐 plaintext_password）
+需求：管理员重置密码修复：默认重置展示一次性密码+字母数字预校验+422 具体原因透传
+根因：后端早已废除固定默认密码 SillyHub@123 改为随机一次性口令经响应 plaintext_password 下发，前端却丢弃响应并提示写死旧密码致重置后无人知道真实密码；弹窗只校验长度不校验字母数字同存，纯字母/纯数字被后端 422 拒；422 具体原因（弱口令黑名单等）藏在 details.errors[0].msg 未透传，用户只见笼统报错
+方案：新组件 admin-reset-password-dialog.tsx 替换内联弹窗：默认路径成功后展示一次性密码（复制+仅一次警示），validateResetPassword 预校验对齐后端 assert_password_strength，extractResetPasswordError 剥 Value error 前缀透传具体原因；lib/admin.ts ResetPasswordResponse 类型纠正为 plaintext_password 对齐 OpenAPI
+结果：新组件测试 14 用例+admin 相关 5 套件 78 用例全绿，tsc --noEmit 0 错，eslint 触碰文件 0 新增告警（Tooltip 为 HEAD 预存债）
+审计：⚖️ 归属切分：10 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/model.py, backend/app/modules/agent/schema.py, backend/app/modules/agent/tests/test_group_chat_models.py, backend/app/modules/daemon/group/service.py, frontend/src/components/__tests__/admin-reset-password-dialog.test.tsx, frontend/src/components/admin-reset-password-dialog.tsx, frontend/src/lib/__tests__/admin.test.ts, frontend/src/lib/admin.ts, backend/app/modules/daemon/tests/test_group_team.py, backend/migrations/versions/20260902110000_group_member_team.py

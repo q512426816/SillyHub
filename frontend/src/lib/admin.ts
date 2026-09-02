@@ -109,8 +109,10 @@ export interface ResetPasswordRequest {
 }
 
 export interface ResetPasswordResponse {
-  password: string;
-  message: string;
+  // 对齐后端 backend/app/modules/admin/schema.py ResetPasswordResponse 与
+  // OpenAPI 生成版（frontend/src/lib/api-types.ts）：不填 new_password 时后端
+  // 随机生成一次性口令经该字段下发给管理员转发。
+  plaintext_password: string;
 }
 
 export interface RevokeAllResponse {
