@@ -805,7 +805,8 @@ class TestGrandchildWorkerDone:
     async def test_grandchild_worker_done_keeps_mission_busy_when_worker_pending(
         self, client, db_session, auth_headers, notify_env
     ) -> None:
-        """孙 done 但分身未 done——all_workers_done False、不唤醒（全树判定）。"""
+        """孙 done 但分身未 done——all_workers_done False、不唤醒主控（全树
+        判定）；孙完成逐级回叫直接父（空闲分身注入唤醒，quick-33956fb8）。"""
         _fake_redis, injected = notify_env
         _ws, main_session, mission, _owner, _rt = await _seed_context(
             db_session, with_own_runtime=False
@@ -828,4 +829,10 @@ class TestGrandchildWorkerDone:
         body = resp.json()
         assert body["all_workers_done"] is False
         assert body["orchestrator_notified"] is False
-        assert injected == []
+        # quick-33956fb8（孙完成逐级回叫）：分身（树内中间层、未 done、无活跃
+        # turn）被注入孙完成唤醒恰一次——否则分身派完孙后永不被叫醒（死锁根治）；
+        # 主控（根）不在注入列表（全树未完成不通知）。
+        assert len(injected) == 1
+        assert injected[0][0] == worker.id
+        assert "【系统通知·子分身完成】" in injected[0][1]
+        assert all(tid != main_session.id for tid, _prompt in injected)

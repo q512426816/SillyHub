@@ -333,10 +333,12 @@ class TestShadowMemberReadOnly:
         code, _body = await _get_logs(client, outsider_token, shadow.id)
         assert code == 404
 
-    async def test_member_cannot_read_shadow_detail_or_inject(
+    async def test_member_shadow_readonly_detail_ok_inject_blocked(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """放行仅限 logs 读路径：详情仍 404、写路径 inject 不放行（404）。"""
+        """读路径全放行（logs + 详情，quick-d4a8140d 影子详情读放行普通成员
+        ——成员卡挂 SessionPanel 本体后详情轮询 404 会误报「会话恢复失败」）；
+        写路径 inject 走 for_update 归属校验不放行普通成员（404）。"""
         env = await _make_env(db_session, owner_name="wr-owner")
         member, member_token = await _env_user(db_session, env, name="wr-member")
 
@@ -361,9 +363,10 @@ class TestShadowMemberReadOnly:
             runtime_id=env.runtime.id,
         )
 
-        # 会话详情（get_agent_session 未开启影子放行）→ 404。
+        # 会话详情（get_agent_session 影子放行，与 logs 读同口径）→ 200。
         resp = await client.get(f"/api/daemon/sessions/{shadow.id}", headers=_headers(member_token))
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        assert resp.json()["id"] == str(shadow.id)
 
         # 写路径（inject 走 _get_owned_session_for_update，for_update 分支
         # 不放行普通成员）→ 404 资源隐藏。
