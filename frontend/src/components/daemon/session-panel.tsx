@@ -2356,6 +2356,28 @@ function SessionPanelPage({
     return [...enriched, ...orphanTurns].sort((a, b) => ts(a) - ts(b));
   }, [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id]);
 
+  /* quick（2026-09-02 本地 Agent 会话信息折叠）：tool_report 会话激活后
+   *（turn_count>0），对话流里 CLI 上报的历史轮（run spec_strategy=
+   * 'platform-managed'——CLI 上报链路统一标记）不再混在对话记录里：拆为
+   * localReportTurns，时间线顶部小按钮点开才展开；dialogTurns（用户交互轮）
+   * 为对话流主体。非 tool_report 会话零影响。hook 置于顶层区（early-return
+   * 之前）保 hook 顺序稳定。 */
+  const isToolReportActivated =
+    session?.origin === "tool_report" && (session?.turn_count ?? 0) > 0;
+  const { dialogTurns, localReportTurns } = useMemo(() => {
+    if (!isToolReportActivated || !displayTurns) {
+      return { dialogTurns: displayTurns, localReportTurns: [] as SessionTurnView[] };
+    }
+    const local: SessionTurnView[] = [];
+    const dialog: SessionTurnView[] = [];
+    for (const t of displayTurns) {
+      const meta = runsMeta.get(t.realRunId ?? t.runId);
+      if (meta?.spec_strategy === "platform-managed") local.push(t);
+      else dialog.push(t);
+    }
+    return { dialogTurns: dialog, localReportTurns: local };
+  }, [isToolReportActivated, displayTurns, runsMeta]);
+  const [localReportOpen, setLocalReportOpen] = useState(false);
   // CtxUsageBar：环分子（task-08 / FR-01 改口径）= displayTurns 逆序第一个非 null
   // 的 ctxTokens（最近一次模型调用提示词大小，瞬时量；SSE 实时 + runsMeta 历史回填
   // 两路写入）+ 分母派生（会话供应商 role mapping one_m → fallback model，D-014）。
@@ -3514,8 +3536,42 @@ function SessionPanelPage({
           正在加载更早消息…
         </div>
       )}
+      {/* quick 本地 Agent 会话信息折叠：tool_report 激活后，CLI 上报历史轮收进
+          顶部小按钮（点击展开/收起），对话流只显示用户交互轮。 */}
+      {isToolReportActivated && localReportTurns.length > 0 && (
+        <div className="flex justify-center py-1">
+          <button
+            type="button"
+            aria-expanded={localReportOpen}
+            aria-label={localReportOpen ? "收起本地 Agent 会话信息" : "展开本地 Agent 会话信息"}
+            data-testid="local-report-toggle"
+            onClick={() => setLocalReportOpen((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-0.5 text-[11px] text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {localReportOpen ? "收起" : "展开"}本地 Agent 会话信息（{localReportTurns.length} 轮）
+          </button>
+        </div>
+      )}
+      {localReportOpen && (
+        <div
+          data-testid="local-report-block"
+          className="mx-4 max-h-64 overflow-y-auto rounded-lg border border-border-weak bg-muted/40 px-3 py-2"
+        >
+          {localReportTurns.map((t) => (
+            <div
+              key={t.runId}
+              className="border-b border-border-weak py-1.5 text-[12px] last:border-none"
+            >
+              <span className="mr-1.5 text-[11px] text-muted-foreground">CLI 上报</span>
+              <span className="line-clamp-2 text-foreground/80">
+                {(t.prompt || t.output || "（无内容）").slice(0, 160)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <TurnTimeline
-        turns={displayTurns}
+        turns={dialogTurns}
         viewMode={viewMode}
         errorMsg={errorMsg}
         sessionStatus={

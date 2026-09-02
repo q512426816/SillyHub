@@ -70,6 +70,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Image as ImageIcon, Paperclip, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
 
+import { Drawer } from "antd";
 import { MemberPanel } from "@/components/group-chat/member-panel";
 import { GroupMemberAvatar } from "@/components/group-chat/group-member-avatar";
 import {
@@ -1036,6 +1037,8 @@ export function GroupChatPanel({
 
   /* ── 输入区：草稿 / @补全 / typing 上报 / 发送 / 附件（FR-05 补遗） ── */
   const [draft, setDraft] = useState("");
+  /* 手机端群聊 quick：窄屏成员抽屉开关。 */
+  const [membersDrawerOpen, setMembersDrawerOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1308,7 +1311,9 @@ export function GroupChatPanel({
       data-group-id={groupId}
       aria-label="群聊面板"
       className={cn(
-        "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-3.5",
+        /* 手机端群聊 quick（2026-09-02）：窄屏（<768px）单列——右列成员面板
+         * 不再常驻挤掉对话区，改顶栏「成员」按钮开 Drawer；宽屏维持双列。 */
+        "grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_320px] gap-3.5",
         className,
       )}
     >
@@ -1410,6 +1415,17 @@ export function GroupChatPanel({
             className="flex-none"
           >
             <Search aria-hidden className="h-4 w-4 text-muted-foreground transition-colors hover:text-foreground" />
+          </button>
+          {/* 手机端群聊 quick：窄屏「成员」按钮开抽屉（宽屏 hidden——右列常驻）。 */}
+          <button
+            type="button"
+            aria-label="群成员"
+            title="群成员"
+            data-testid="group-chat-members-toggle"
+            onClick={() => setMembersDrawerOpen(true)}
+            className="flex-none md:hidden"
+          >
+            <Users aria-hidden className="h-4 w-4 text-muted-foreground transition-colors hover:text-foreground" />
           </button>
         </header>
         {/* 搜索输入行（打开时显示，回车执行 q 查询）。 */}
@@ -1681,7 +1697,9 @@ export function GroupChatPanel({
         </div>
       </section>
 
-      {/* ── 右列：成员面板（task-09；原型 .members-panel 常驻右栏形态） ── */}
+      {/* ── 右列：成员面板（task-09；原型 .members-panel 常驻右栏形态——宽屏
+          常驻；窄屏 hidden，改顶栏「成员」按钮开下方 Drawer） ── */}
+      <div className="hidden min-h-0 md:block">
       {detail ? (
         <MemberPanel
           group={detail}
@@ -1707,6 +1725,34 @@ export function GroupChatPanel({
           )}
         </aside>
       )}
+      </div>
+
+      {/* 手机端群聊 quick：窄屏成员抽屉（顶栏「成员」按钮开关；宽屏按钮
+          hidden 不渲染）。 */}
+      <Drawer
+        open={membersDrawerOpen}
+        onClose={() => setMembersDrawerOpen(false)}
+        placement="right"
+        width="min(84vw, 340px)"
+        title="群成员"
+        styles={{ body: { padding: 0 } }}
+      >
+        {detail ? (
+          <MemberPanel
+            group={detail}
+            onlineMemberIds={onlineMemberIds}
+            runningMemberIds={runningMemberIds}
+            currentUserId={currentUserId}
+            onRefresh={() => {
+              void qc.invalidateQueries({ queryKey: ["groupChats"] });
+              void qc.invalidateQueries({ queryKey: ["groupChat", groupId] });
+              onSessionListRefresh?.();
+            }}
+          />
+        ) : (
+          <p className="p-6 text-center text-xs text-muted-foreground">群成员加载中…</p>
+        )}
+      </Drawer>
     </div>
   );
 }

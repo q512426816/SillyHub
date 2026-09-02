@@ -57135,6 +57135,17 @@
             "format": "uuid",
             "title": "Id"
           },
+          "spec_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Strategy"
+          },
           "status": {
             "type": "string",
             "title": "Status"

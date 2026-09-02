@@ -2308,6 +2308,9 @@ class SessionRunRead(BaseModel):
     """
 
     id: uuid.UUID
+    # quick（2026-09-02 本地会话信息折叠）：CLI 上报轮（platform-managed）与
+    # 用户交互轮的区分锚——tool_report 激活会话前端据此折叠前者。
+    spec_strategy: str | None = None
     status: str
     error_code: str | None = None
     error_detail: dict | None = None

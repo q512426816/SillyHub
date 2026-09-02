@@ -19807,6 +19807,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Spec Strategy */
+            spec_strategy?: string | null;
             /** Status */
             status: string;
             /** Error Code */
