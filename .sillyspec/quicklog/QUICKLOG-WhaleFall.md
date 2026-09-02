@@ -206,3 +206,15 @@
 方案：daemon 新增 GIT_WORKTREE_TIMEOUT_MS=120s 用于 worktree add/merge/remove，git_worktree_remove 增可选 branch 参连带 git branch -D；backend delegate 透传 branch，execution 创建失败路径立即 best-effort 收残，finalizer converge 清理连带删分支
 结果：daemon typecheck 0 错 + vitest 19 passed；backend pytest 定向 8 文件 77 passed（含 2 个签名连带修复）；部署待重建镜像后经 daemon 自动升级生效
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_finalizer_cleanup.py
+
+## ql-20260902-002-2849 | 2026-09-02 10:39:23 | runtimes 页升级 daemon 按钮增已是最新判断
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/machine-card.tsx（daemonUpToDate 判定 + 按钮禁用/文案/title 三处接线）
+- frontend/src/components/daemon/__tests__/machine-card.test.tsx（新增已是最新禁用 + 落后仍可点两用例）
+- .sillyspec/docs/frontend/modules/components-daemon.md（MachineCard 已是最新态条目）
+需求：runtimes 页升级 daemon 按钮增已是最新判断
+根因：daemon 侧同版本自更新是静默 no-op（preflight 同版本直接返回不写状态），按钮未拦截导致已最新仍可点且 toast 提示已下发，产生有指令无进度的误导
+方案：machine-card 增 daemonUpToDate 判定（build_id 与 latestVersion.latest_build_id 均已知且相等），按钮禁用+换文案已是最新+title 带版本；任一侧未知不比较保持可点
+结果：vitest machine-card 15 passed（新增 2 用例）+ 相邻 3 文件 50 passed；tsc --noEmit 0 错；components-daemon.md 已同步；部署需重建 frontend 镜像

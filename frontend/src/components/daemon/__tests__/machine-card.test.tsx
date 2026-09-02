@@ -250,6 +250,47 @@ describe("MachineCard（task-08 / FR-4）", () => {
     expect(onUpgrade).toHaveBeenCalledWith(machine);
   });
 
+  // ql-20260902-002：已是最新判定——build_id == latest_build_id 时按钮禁用换文案，
+  // 拦住 daemon 侧同版本静默 no-op（下发了却无任何进度反馈的误导路径）。
+  it("已是最新（build_id == latest_build_id）→ 升级按钮换「已是最新」+ disabled，点击不触发 onUpgrade，title 带版本", () => {
+    const onUpgrade = vi.fn();
+    const machine = makeMachine({ build_id: "f3045094-2026" });
+    const latestVersion = {
+      latest: "0.1.1",
+      minRequired: "0.1.0",
+      downloadUrl: "/daemon/latest/sillyhub-daemon.js",
+      latest_version: "0.1.1",
+      latest_build_id: "f3045094-2026",
+    };
+    renderCard(
+      <MachineCard {...defaultProps(machine, { onUpgrade, latestVersion })} />,
+    );
+    const upToDateBtn = findNativeButtonByName(/已是最新/);
+    expect(upToDateBtn).toBeDisabled();
+    expect(upToDateBtn).toHaveAttribute("title", "已是最新 f3045094-2026");
+    fireEvent.click(upToDateBtn);
+    expect(onUpgrade).not.toHaveBeenCalled();
+  });
+
+  it("latestVersion 已知但 build_id 落后 → 按钮仍可点（不误禁）", () => {
+    const onUpgrade = vi.fn();
+    const machine = makeMachine({ build_id: "b38b922a-2026" });
+    const latestVersion = {
+      latest: "0.1.1",
+      minRequired: "0.1.0",
+      downloadUrl: "/daemon/latest/sillyhub-daemon.js",
+      latest_version: "0.1.1",
+      latest_build_id: "f3045094-2026",
+    };
+    renderCard(
+      <MachineCard {...defaultProps(machine, { onUpgrade, latestVersion })} />,
+    );
+    const upgradeBtn = findNativeButtonByName(/升级 daemon/);
+    expect(upgradeBtn).not.toBeDisabled();
+    fireEvent.click(upgradeBtn);
+    expect(onUpgrade).toHaveBeenCalledWith(machine);
+  });
+
   it("离线机器（status=offline）清理按钮 disabled，点击不触发 onCleanup", () => {
     const onCleanup = vi.fn();
     const machine = makeMachine({ status: "offline" });

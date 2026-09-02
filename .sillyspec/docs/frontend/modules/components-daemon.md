@@ -124,6 +124,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - `MachineCard`（`machine-card.tsx`）：受控手风琴机器卡（expanded 由 page 持有）；
   usageByRuntime 由 page 注入（不在卡内拉用量）；展开体内嵌 RuntimeCard 网格；
   内联 `ACTIVE_SESSION_STATUSES`（与 helpers 集合等值，因 allowed_paths 不能 import）。
+  - 「升级 daemon」按钮已是最新态（ql-20260902-002）：`machine.build_id` 与
+    `latestVersion.latest_build_id` 都已知且相等 → 按钮禁用换文案「已是最新」
+    （title 带版本串）——daemon 侧同版本自更新是静默 no-op（preflight 同版本
+    直接返回不写状态），前置拦截避免「下发成功却无进度」的误导；任一侧未知
+    不比较保持可点（宁宽勿断，同 sillyspec 落后判定语义）。
   - sillyspec UI 三件（2026-08-31-machine-sillyspec-version）：① meta 行 daemon 版本后
     徽标三形态——最新常色 / 落后 warning「当前 → 最新」+「有新版本」/ 未安装
     destructive（落后判定 = version 与 latest 都已知且本地 < latest，本地

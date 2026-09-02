@@ -165,6 +165,17 @@ export function MachineCard({
   const pendingUpdate = machine.pending_update ?? null;
   const isDiskChange = pendingUpdate?.reason === "disk_change";
 
+  // ql-20260902-002：daemon 已是最新判定——心跳上报 build_id 与服务端分发
+  // latest_build_id 都已知且相等。此时下发自更新指令在 daemon 侧是静默 no-op
+  //（preflight runDaemonSelfUpdate 同版本直接返回，不写任何状态），按钮须前置
+  // 拦截；任一侧未知（null/缺省）不比较，按钮保持可点（宁宽勿断，对齐下方
+  // sillyspecOutdated 同款语义）。
+  const daemonUpToDate =
+    machine.build_id !== null &&
+    machine.build_id !== undefined &&
+    latestVersion?.latest_build_id !== undefined &&
+    machine.build_id === latestVersion.latest_build_id;
+
   // 2026-08-31-machine-sillyspec-version task-07 / FR-01~FR-03：sillyspec 三字段
   // 消费（version/latest 兄弟语义 + update 状态机投影，语义同 pending_update；
   // 旧后端无这些字段 → undefined，徽标按未安装、横幅不渲染，零回归）。
@@ -434,11 +445,15 @@ export function MachineCard({
 
           {/* 升级 daemon 按钮（对齐 .btn-outline btn-tiny，offline disabled）。
               task-07 / FR-05：pending_update 期也 disabled——升级已由安全层接管
-              （等待空闲自动执行），手动指令此时无意义，title 提示等待原因。 */}
+              （等待空闲自动执行），手动指令此时无意义，title 提示等待原因。
+              ql-20260902-002：已是最新（build_id == latest_build_id）也 disabled
+              + 换文案——daemon 侧同版本 no-op 静默，不拦会让用户误以为在升级。 */}
           <button
             type="button"
             className={btnOutlineTiny}
-            disabled={isOffline || upgrading || pendingUpdate !== null}
+            disabled={
+              isOffline || upgrading || pendingUpdate !== null || daemonUpToDate
+            }
             onClick={(e) => {
               e.stopPropagation();
               onUpgrade(machine);
@@ -450,11 +465,13 @@ export function MachineCard({
                   ? "升级中…"
                   : pendingUpdate
                     ? "升级进行中"
-                    : "下发 daemon 自更新指令"
+                    : daemonUpToDate
+                      ? `已是最新 ${machine.build_id}`
+                      : "下发 daemon 自更新指令"
             }
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            升级 daemon
+            {daemonUpToDate ? "已是最新" : "升级 daemon"}
           </button>
 
           {/* 升级 sillyspec 按钮（task-07 / FR-02，原型①-⑧）。落后/未安装/升级
