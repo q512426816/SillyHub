@@ -43,7 +43,7 @@ apiFetch(path, opts):
 - 刷新逻辑已从 api.ts 内联迁至 `lib-token-refresh.ensureFreshAccessToken`：模块级 inflight 保证并发 401 风暴只发 1 次 POST /api/auth/refresh；未登录/未 hydrate/refresh 失败均返回 null（走清 session + 跳登录）。
 - 浏览器端用相对路径走 rewrites 代理，应用可从任意 origin（frp/局域网/localhost）访问，客户端 bundle 不硬编码后端地址。
 - SSE/流式订阅不走 `apiFetch`：`lib-agent-stream` 用 `getApiBaseUrl` + `lib-fetch-sse.fetchSse`（token 走 Authorization header）。
-- 错误体识别 `isApiErrorPayload` 只认 `{code:string, message}` 形状；非 JSON 响应体原样塞进 `details`，`message` 用 `resp.statusText` 兜底。
+- 错误体识别 `isApiErrorPayload` 只认 `{code:string, message}` 形状；非 JSON 响应体原样塞进 `details`，`message` 不再用英文 `statusText`——按状态码中文兜底（ql-20260903-012：502/503/504 专用文案，其余「请求失败（HTTP N）」；后端重启窗口网关返回 HTML 时用户不再看到 "Bad Gateway"）。
 - `_module-map` main_symbols 中的 `getDirectApiBaseUrl` 已不存在于源码（历史符号），以本卡为准。
 
 ## 人工备注

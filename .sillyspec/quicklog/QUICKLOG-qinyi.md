@@ -186,3 +186,25 @@
 方案：一 后端 run_sync close_interactive_run 终态 commit 后挂 maybe_autoretry_auth_transient_turn，error.raw 命中 CLI 鉴权签名且会话仍 active 时把本 run 的 user_input 追加为排队消息，携带 run 的 llm_provider_id 与 agent_profile_id 快照和 sender 归属，由 close 末尾既有排队派发钩子随即重放一次，双保险防循环，上一条同会话同 prompt run 亦鉴权失败则跳过，外加同文 pending 去重，全程静默容错；二 前端 normalize 的 isAssistantApiErrorText 增识 CLI 鉴权签名使合成错误行归 error 类不再当 agent 回复文本渲染，buildErrorLogItem 升级为 auth_failed 加 retryable 加中文文案；三 坑记录落 docs sillyspec
 结果：后端新增 test_auth_transient_autoretry 5 用例加 close 既有 7 用例回归共 12 绿，ruff check 与 format 0；前端 normalize 套件补 4 用例共 67 绿，tsc 0，eslint 0 error 仅 1 预存 warning；backend 与 frontend changelog 两处同步
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/agent-log/__tests__/normalize.test.ts, frontend/src/components/agent-log/normalize.ts
+
+## ql-20260903-012-7976 | 2026-09-03 18:08:06 | 会话/群聊错误提示出口统一修复（英文报错中文化 + 附件截断告知）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/api.ts（非 JSON 错误体中文兜底（502/503/504 专用文案 + 请求失败（HTTP N）））
+- frontend/src/components/daemon/session-panel.tsx（11 处 ApiError.message 直出改 errMessage（含顺带发现的首句创建会话 2 处同类））
+- frontend/src/components/group-chat/group-chat-panel.tsx（搜索失败 notify.error 两参形态 + 附件截断 warning + 上传失败 errMessage + 注释修正）
+- frontend/src/components/group-chat/group-member-avatar.tsx（固定文案 notify.error(字符串) 改 notify.warning）
+- frontend/src/components/daemon/session-input-bar.tsx（接入 useNotify/errMessage + 截断 warning + 上传失败 errMessage）
+- frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx（新建 2 用例（截断告知 + 网络错误中文兜底））
+- frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx（mock errMessage 改真实现 + 新增 2 用例）
+- frontend/src/lib/__tests__/api.test.ts（新增 3 用例）
+- frontend/src/lib/errors.test.ts（新增字符串误传契约用例）
+- .sillyspec/docs/frontend/modules/lib-api.md（错误体契约注记）
+- .sillyspec/docs/frontend/modules/lib-errors.md（固定文案误传陷阱注记）
+- docs/sillyspec/2026-09-03-spec-sync-conflict-no-accept-server-option.md（顺手记录 spec-sync 冲突工具缺陷）
+需求：会话/群聊错误提示出口统一修复（英文报错中文化 + 附件截断告知）
+根因：调用方绕过 lib/errors.ts 统一出口——session-panel 11 处直取 ApiError.message（断网时英文 Failed to fetch 直显红条）、群聊 2 处 notify.error 误传文案字符串（被 errMessage 吞成「操作失败」）、api.ts 非 JSON 错误体透传英文 statusText（Bad Gateway）、单聊/群聊附件超 10 个静默截断无提示
+方案：session-panel 11 处与群聊附件上传失败改 errMessage(err, 中文fallback)；搜索失败改 notify.error(err, fallback) 两参、头像固定文案改 notify.warning(msg)；api.ts 新增 502/503/504 中文兜底与其余「请求失败（HTTP N）」；两输入条新增 MAX_ATTACHMENTS_PER_BATCH=10 截断 toast 告知，并修正群聊附件注释与实现不一致（toast→行内红字）
+结果：5 个相关测试文件 102 用例全绿（新增 8 用例：输入条上传 2 + api 兜底 3 + errors 契约 1 + 群聊搜索/截断 2）；typecheck 0 错误；未部署
+审计：⚖️ 归属切分：14 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/model.py, backend/app/modules/agent/schema.py, backend/app/modules/daemon/group/router.py, backend/app/modules/daemon/group/service.py, backend/app/modules/daemon/tests/test_group_chat_management.py, backend/migrations/versions/20260903170000_add_group_chat_archived_at.py, frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/lib/__tests__/api.test.ts, frontend/src/lib/errors.test.ts, docs/sillyspec/2026-09-03-spec-sync-conflict-no-accept-server-option.md

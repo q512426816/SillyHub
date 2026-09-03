@@ -2585,7 +2585,7 @@ function SessionPanelPage({
             currentRunId: null,
             turns: prev.turns.filter((t) => t.runId !== placeholderId),
           }));
-          setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
+          setErrorMsg(errMessage(apiErr, "发送失败"));
         }
       } finally {
         if (inflightSendRef.current?.placeholderId === placeholderId) {
@@ -2620,7 +2620,7 @@ function SessionPanelPage({
         }
       } catch (err) {
         const apiErr = err as ApiError;
-        setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
+        setErrorMsg(errMessage(apiErr, "发送失败"));
       }
     },
     [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
@@ -2857,7 +2857,7 @@ function SessionPanelPage({
         setPendingMentions({});
         onPreSessionCreated?.(resp);
       } catch (err) {
-        setPreError(err instanceof ApiError ? err.message : "创建会话失败，请重试");
+        setPreError(errMessage(err, "创建会话失败，请重试"));
       } finally {
         setPreCreating(false);
       }
@@ -2999,7 +2999,7 @@ function SessionPanelPage({
               : t,
           ),
         }));
-        setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "打断失败");
+        setErrorMsg(errMessage(apiErr, "打断失败"));
       }
     }
   }, [session, turnState.currentRunId, sessionId]);
@@ -3090,7 +3090,7 @@ function SessionPanelPage({
           currentRunId: null,
           turns: prev.turns.filter((t) => t.runId !== placeholderId),
         }));
-        setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "重新发送失败");
+        setErrorMsg(errMessage(apiErr, "重新发送失败"));
       }
     },
     [session, machineOnline, turnState.currentRunId, sessionId],
@@ -3449,7 +3449,7 @@ function SessionPanelPage({
   if (detailQuery.isError) {
     return (
       <div className="m-6 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive" aria-label="会话详情加载失败">
-        加载会话详情失败：{detailQuery.error?.message ?? "未知错误"}
+        加载会话详情失败：{errMessage(detailQuery.error, "未知错误")}
         <Button
           size="small"
           className="ml-3"
@@ -5158,7 +5158,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
           ...prev,
           currentRunId: null,
           turns: prev.turns.filter((t) => t.runId !== placeholderId),
-          errorMsg: apiErr instanceof ApiError ? apiErr.message : "追问失败",
+          errorMsg: errMessage(apiErr, "追问失败"),
         }));
         throw err; // D-003：向上抛 → 调用方按路径处理（见函数头注释）
       } finally {
@@ -5201,7 +5201,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
         const apiErr = err as ApiError;
         setView((prev) => ({
           ...prev,
-          errorMsg: apiErr instanceof ApiError ? apiErr.message : "发送失败",
+          errorMsg: errMessage(apiErr, "发送失败"),
         }));
       }
     },
@@ -5418,7 +5418,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
         // 上报 session_id 给父级写 URL ?session= / 刷新列表
         onSessionCreated?.(resp.session_id);
       } catch (err) {
-        const msg = err instanceof ApiError ? err.message : "创建会话失败";
+        const msg = errMessage(err, "创建会话失败");
         setView({
           ...INITIAL_DIALOG_VIEW,
           status: "idle",
@@ -5536,7 +5536,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
               ? { ...t, status: "running" }
               : t,
           ),
-          errorMsg: apiErr instanceof ApiError ? apiErr.message : "打断失败",
+          errorMsg: errMessage(apiErr, "打断失败"),
         }));
       }
     }
@@ -5563,7 +5563,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
       setView((prev) => ({
         ...prev,
         status: "active",
-        errorMsg: apiErr instanceof ApiError ? apiErr.message : "结束会话失败，请重试",
+        errorMsg: errMessage(apiErr, "结束会话失败，请重试"),
       }));
     }
   }, [view.sessionId, view.status, closeStream, onSessionReset]);

@@ -168,7 +168,9 @@ export function GroupMemberAvatarUpload({
     if (inputRef.current) inputRef.current.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      notify.error("头像仅支持图片文件，请重新选择");
+      // 固定文案走 warning(msg) 通道；error(err) 第一参是错误对象，误传字符串
+      // 会被 errMessage 吞成兜底「操作失败」。
+      notify.warning("头像仅支持图片文件，请重新选择");
       return;
     }
     setUploading(true);

@@ -81,4 +81,12 @@ describe("errMessage", () => {
     expect(errMessage(netErr)).not.toContain("Failed to fetch");
     expect(errMessage(netErr)).not.toContain("HTTP_");
   });
+
+  // 用例 7（ql-20260903-012）：字符串不是错误对象 —— notify.error("文案") 误传
+  // 第一参时文案被吞成「操作失败」。调用方展示固定提示必须走 warning(msg)/
+  // error(err, fallback) 两参形态，本用例固化该契约。
+  it("swallows plain strings (notify.error misuse guard): string arg → 操作失败", () => {
+    expect(errMessage("搜索失败，请稍后重试")).toBe("操作失败");
+    expect(errMessage("头像仅支持图片文件", "上传失败")).toBe("上传失败");
+  });
 });

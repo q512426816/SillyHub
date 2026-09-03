@@ -71,6 +71,16 @@ function generateRequestId(): string {
   return safeUUID();
 }
 
+/**
+ * 非 JSON 错误体（典型：后端重启窗口网关返回的 502/504 HTML）的中文兜底文案。
+ * resp.statusText 是英文技术串（"Bad Gateway"），不能透给用户（errMessage D-006 铁律）。
+ */
+const HTTP_STATUS_FALLBACK_MESSAGES: Record<number, string> = {
+  502: "网关错误（服务可能正在重启），请稍后重试",
+  503: "服务暂不可用，请稍后重试",
+  504: "网关超时，请稍后重试",
+};
+
 export interface ApiRequestOptions extends Omit<RequestInit, "headers" | "body"> {
   headers?: Record<string, string>;
   json?: unknown;
@@ -187,7 +197,9 @@ export async function apiFetch<T = unknown>(
         ? payload
         : {
             code: `http_${resp.status}`,
-            message: resp.statusText || "Request failed",
+            message:
+              HTTP_STATUS_FALLBACK_MESSAGES[resp.status] ??
+              `请求失败（HTTP ${resp.status}）`,
             request_id: resp.headers.get("x-request-id"),
             details: payload,
           };

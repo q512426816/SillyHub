@@ -61,7 +61,11 @@ import {
   type MentionDetection,
 } from "@/lib/session-mention";
 import { useMentionSources, type PpmMentionScope } from "@/lib/session-mention-sources";
+import { errMessage, useNotify } from "@/lib/errors";
 import type { PpmItemKind } from "@/lib/daemon";
+
+/** 单次批量上传附件上限（超出部分忽略并 toast 告知；群聊 group-chat-panel 同值）。 */
+const MAX_ATTACHMENTS_PER_BATCH = 10;
 
 /* ── ql-20260826-010：输入框高度拖拽调节（全局持久化）────────────────────── */
 
@@ -229,6 +233,7 @@ export function SessionInputBar({
   const [attachments, setAttachments] = useState<AttachmentRead[]>([]);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const notify = useNotify();
 
   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
 
@@ -540,7 +545,14 @@ export function SessionInputBar({
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadError(null);
-    for (const file of Array.from(files).slice(0, 10)) {
+    if (files.length > MAX_ATTACHMENTS_PER_BATCH) {
+      notify.warning(
+        `一次最多上传 ${MAX_ATTACHMENTS_PER_BATCH} 个附件，已忽略多余的 ${
+          files.length - MAX_ATTACHMENTS_PER_BATCH
+        } 个`,
+      );
+    }
+    for (const file of Array.from(files).slice(0, MAX_ATTACHMENTS_PER_BATCH)) {
       const kind = file.type.startsWith("image/") ? "image" : "file";
       setUploading((n) => n + 1);
       try {
@@ -551,7 +563,7 @@ export function SessionInputBar({
           return next;
         });
       } catch (err) {
-        setUploadError(err instanceof Error ? err.message : "上传失败");
+        setUploadError(errMessage(err, "上传失败"));
       } finally {
         setUploading((n) => n - 1);
       }

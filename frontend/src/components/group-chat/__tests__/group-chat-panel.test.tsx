@@ -152,13 +152,16 @@ vi.mock("@/lib/workspaces", () => ({
   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
 }));
 
-vi.mock("@/lib/errors", () => ({
-  errMessage: (err: unknown) =>
-    err instanceof Error ? err.message : "操作失败",
-  // 共享 spy（quick 群 P2 触发失败：断言 warning 逐条透传；各用例经 clearMocks
-  // 隔离调用记录）。
-  useNotify: () => mocks.notify,
-}));
+vi.mock("@/lib/errors", async (importOriginal) => {
+  // errMessage 保真（真实现——ql-20260903-012 断言网络错误中文兜底文案）；
+  // useNotify 换共享 spy（quick 群 P2 触发失败：断言 warning 逐条透传；各用例
+  // 经 clearMocks 隔离调用记录）。
+  const actual = await importOriginal<typeof import("@/lib/errors")>();
+  return {
+    errMessage: actual.errMessage,
+    useNotify: () => mocks.notify,
+  };
+});
 
 // quick 群聊 Markdown 渲染：MarkdownText 是 next/dynamic ssr:false 组件，
 // jsdom 同步渲染 null（testing gotcha，agent-log-card.test 同款 mock 惯例）——
@@ -1380,6 +1383,31 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
     await flushAsync(2);
     expect((input as HTMLTextAreaElement).value).toBe("@小码 再看一眼");
   });
+
+  it("群内搜索失败（ql-20260903-012）：notify.error 两参形态 (err, 中文兜底)——文案不再被 errMessage 吞成「操作失败」", async () => {
+    harness.logsJson = [];
+    // 搜索走 /logs?q=…（区别于初始回放无 q）；路由桩抛异常 → apiFetch
+    // network_error → 组件 notify.error(err, "搜索失败，请稍后重试")。
+    harness.logsByUrl = (url) => {
+      if (url.includes("q=")) throw new Error("network down");
+      return harness.logsJson;
+    };
+    renderPanel();
+    await waitForStreamWired();
+
+    fireEvent.click(screen.getByLabelText("搜索群聊记录"));
+    // 输入框与开关按钮同 aria-label（「搜索群聊记录」），以 placeholder 锚定。
+    const searchInput = screen.getByPlaceholderText("搜索群聊记录，回车查询");
+    fireEvent.change(searchInput, { target: { value: "部署" } });
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+
+    await waitFor(() => expect(mocks.notify.error).toHaveBeenCalledTimes(1));
+    const [errArg, fallbackArg] = mocks.notify.error.mock.calls[0]!;
+    // 旧缺陷形态是 notify.error("搜索失败，请稍后重试")——单字符串参，文案被
+    // errMessage 吞掉只显示「操作失败」。固化两参契约。
+    expect(errArg).toBeInstanceOf(Error);
+    expect(fallbackArg).toBe("搜索失败，请稍后重试");
+  });
 });
 
 /* ── 6. 群消息附件（FR-05 补遗：上传 chips / 发送参数 / 时间线附件条） ────── */
@@ -1395,6 +1423,30 @@ describe("群消息附件（FR-05 补遗）", () => {
       await Promise.resolve();
     });
   }
+
+  it("一次选 12 个文件（ql-20260903-012）：warning 告知忽略多余的 2 个，只上传前 10 个", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    const fileInput = screen.getByLabelText("选择群消息附件") as HTMLInputElement;
+    const files = Array.from(
+      { length: 12 },
+      (_, i) => new File(["x"], `文件${i + 1}.txt`, { type: "text/plain" }),
+    );
+    Object.defineProperty(fileInput, "files", { value: files });
+    await act(async () => {
+      fireEvent.change(fileInput);
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mocks.uploadSessionAttachment).toHaveBeenCalledTimes(10),
+    );
+    expect(mocks.notify.warning).toHaveBeenCalledWith(
+      "一次最多上传 10 个附件，已忽略多余的 2 个",
+    );
+  });
 
   it("📎 选择文件即传 → 待发 chip 展示 → 移除调 removeSessionAttachment 且 chip 消失", async () => {
     harness.logsJson = [];

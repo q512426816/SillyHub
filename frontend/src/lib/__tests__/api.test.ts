@@ -167,3 +167,49 @@ describe("apiFetch timeout（ql-20260831-006-6d67）", () => {
     expect(outcome).toBe("pending");
   });
 });
+
+describe("apiFetch 非 JSON 错误体中文兜底（ql-20260903-012）", () => {
+  it("502 HTML（后端重启窗口网关页）→ 中文文案，不透传英文 statusText", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("<html>Bad Gateway</html>", {
+        status: 502,
+        statusText: "Bad Gateway",
+        headers: { "content-type": "text/html" },
+      }),
+    );
+    await expect(apiFetch("/api/example")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 502,
+      code: "http_502",
+      message: "网关错误（服务可能正在重启），请稍后重试",
+    });
+  });
+
+  it("未映射状态码（599）→ 「请求失败（HTTP 599）」而非英文 Request failed", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("", { status: 599, statusText: "" }),
+    );
+    await expect(apiFetch("/api/example")).rejects.toMatchObject({
+      code: "http_599",
+      message: "请求失败（HTTP 599）",
+    });
+  });
+
+  it("JSON 结构化错误体仍透传后端 message（不落状态码兜底）", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "session_not_found",
+          message: "会话不存在或已被删除",
+          request_id: null,
+          details: null,
+        }),
+        { status: 404, headers: { "content-type": "application/json" } },
+      ),
+    );
+    await expect(apiFetch("/api/example")).rejects.toMatchObject({
+      code: "session_not_found",
+      message: "会话不存在或已被删除",
+    });
+  });
+});

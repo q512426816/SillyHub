@@ -158,6 +158,9 @@ const FACEPILE_MAX = 4;
 /** 群回放分页页大小（初始回放与「加载更早消息」同口径；数据层 limit=最新 N 条语义）。 */
 const GROUP_REPLAY_PAGE_SIZE = 200;
 
+/** 单次批量上传附件上限（超出部分忽略并 toast 告知；单聊 session-input-bar 同值）。 */
+const MAX_ATTACHMENTS_PER_BATCH = 10;
+
 /** replying 空集常量（memo 稳定 props：行无「正在回复」标签时恒用同一引用，
  *    避免 map 里 `?? []` 每次新建数组击穿 GroupTimelineRow 的 memo）。 */
 const NO_REPLYING: GroupReplyingMember[] = [];
@@ -821,8 +824,10 @@ export function GroupChatPanel({
     try {
       const logs = await getAgentSessionLogs(groupId, { q, limit: 100 });
       setSearchResults(logs);
-    } catch {
-      notify.error("搜索失败，请稍后重试");
+    } catch (err) {
+      // error(err, fallback)：第一参必须是错误对象，误传文案字符串会被
+      // errMessage 吞成兜底「操作失败」。
+      notify.error(err, "搜索失败，请稍后重试");
     } finally {
       setSearching(false);
     }
@@ -1411,18 +1416,25 @@ export function GroupChatPanel({
     }
   }, [draft]);
 
-  /** 附件上传（单聊 handleFiles 同管线：逐文件上传，失败 toast 不中断其余）。 */
+  /** 附件上传（单聊 handleFiles 同管线：逐文件上传，失败行内红字不中断其余）。 */
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadError(null);
-    for (const file of Array.from(files).slice(0, 10)) {
+    if (files.length > MAX_ATTACHMENTS_PER_BATCH) {
+      notify.warning(
+        `一次最多上传 ${MAX_ATTACHMENTS_PER_BATCH} 个附件，已忽略多余的 ${
+          files.length - MAX_ATTACHMENTS_PER_BATCH
+        } 个`,
+      );
+    }
+    for (const file of Array.from(files).slice(0, MAX_ATTACHMENTS_PER_BATCH)) {
       const kind = file.type.startsWith("image/") ? "image" : "file";
       setUploading((n) => n + 1);
       try {
         const added = await uploadSessionAttachment(file, kind);
         setPendingAttachments((prev) => [...prev, added]);
       } catch (err) {
-        setUploadError(err instanceof Error ? err.message : "上传失败");
+        setUploadError(errMessage(err, "上传失败"));
       } finally {
         setUploading((n) => n - 1);
       }

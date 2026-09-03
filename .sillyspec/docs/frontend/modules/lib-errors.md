@@ -32,6 +32,7 @@ useNotify():
 - 登录页 / 顶层 error-boundary 等不在 `<AntApp>` 内的位置不要用 `useNotify`，改 `errMessage` + 自行控制展示。
 - store 层（如 `stores/kanban.ts`）不能用 hook，错误文案用 `errMessage` + 静态 message 字段。
 - fallback 用于已知操作语义且后端可能空 message 的场景（如 `errMessage(err, "删除失败，请稍后重试")`）；默认「操作失败」是兜底的兜底。
+- **固定文案误传陷阱（ql-20260903-012）**：`notify.error("某文案")` 把文案当 err 传入 → 被 `errMessage` 吞成「操作失败」。catch 里有错误对象时写 `notify.error(err, "某文案")`；纯固定提示走 `notify.warning("某文案")`（warning 直接收文案）。全仓曾有两处此误用，`errors.test.ts` 用例 7 已固化该契约。
 - scan 重生本文档会保留 5 个标准 section，展示策略规范就写在本区，勿新增「变更记录」类 section。
 
 ## 人工备注
