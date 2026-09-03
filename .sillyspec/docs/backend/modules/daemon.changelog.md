@@ -29,3 +29,8 @@ created_at: 2026-08-29 22:56:30
 
 - daemon_instances 加 sillyspec 三列（version/latest/update，迁移 20260831150000）；register/heartbeat DTO 与服务层落 D-002@v1 双通道语义（register 直写含 None / 心跳 version+latest 非 None 覆盖 / sillyspec_update 无键清除、upsert 盖 since、error 截断 200）。
 - protocol.py `DAEMON_MSG_SILLYSPEC_UPDATE` + ws_hub.send_sillyspec_update；router 增 POST /machines/{id}/sillyspec-update（归属 404 + 离线 504 + {"sent":true}）；机器视图 _build_machine_read 显式组装三字段 + MachineSillySpecUpdateRead 嵌套（就近 MachinePendingUpdateRead）。
+
+## 2026-09-04 — 派发失败收链 _row 未绑定修复（quick 修复）
+
+- ql-20260904-003-8e4a | _inject_into_session 派发失败收链 _row 未绑定 UnboundLocalError 修复（24h 审计 H1）
+- de664fb69 在 not control_ok 分支引用仅在非切换分支赋值的 `_row`：切换轮 hub 直推失败与 runtime 解析失败（daemon_id=None）两条路径抛 UnboundLocalError（500 替代 504、run 永久残留 running）。修复为 `_row: DaemonControlCommand | None = None` 预初始化 + 判空后取消；回归用例 test_control_command_dispatch.py::TestInjectDispatchFailureConvergence 两例。

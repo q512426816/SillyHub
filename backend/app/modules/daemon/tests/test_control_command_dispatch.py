@@ -868,3 +868,115 @@ class TestProviderConfigChangedDispatch:
         assert pending[0].kind == KIND_PROVIDER_CONFIG_CHANGED
         assert _payload_of(pending[0])["provider_config"] is None
         assert _payload_of(pending[0])["command_id"] == str(pending[0].id)
+
+
+# ── 派发失败收链 _row 未绑定回归（ql-20260904 审计 H1）─────────────────────────
+#
+# de664fb69 给 not control_ok 分支加 _cancel_pending_control_command(_row.id) 时，
+# _row 仅在非切换分支的 enqueue_and_push 赋值——切换轮 hub 直推失败与 runtime
+# 解析失败（daemon_id=None）两条路径引用未绑定名抛 UnboundLocalError：500 替代
+# 504、run 收敛代码不执行 → run 永久残留 running。两例分别坐实两条路径恢复
+# 「DaemonRuntimeOffline + run→failed(interactive_inject_send_failed)」语义。
+
+
+async def _make_injectable_session(
+    db: AsyncSession, user_id: uuid.UUID, runtime_id: uuid.UUID
+) -> AgentSession:
+    """active 会话 + interactive lease（inject_session 可注入形状），返回会话行。"""
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime_id,
+        agent_run_id=None,
+        kind="interactive",
+        status="pending",
+        metadata_={"claim_token": "tok"},
+    )
+    db.add(lease)
+    await db.flush()
+    sess = AgentSession(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        provider="claude",
+        status="active",
+        config={},
+        turn_count=1,
+        runtime_id=runtime_id,
+        lease_id=lease.id,
+        created_at=datetime.now(UTC),
+    )
+    db.add(sess)
+    await db.commit()
+    return sess
+
+
+class TestInjectDispatchFailureConvergence:
+    async def test_switch_turn_hub_send_fail_converges(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+        mocked_redis: AsyncMock,
+    ) -> None:
+        """切换轮（model 重置）hub 直推失败 → 504 收敛，run→failed，不抛
+        UnboundLocalError（原实现该路径 _row 未绑定）。"""
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+        from app.modules.daemon.session.service import SessionService
+
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)
+        sess = await _make_injectable_session(db_session, user.id, rt.id)
+        # 跳过 readiness 8s 等待（测试无 daemon /ready 上报）。
+        from app.modules.daemon.session.service import get_session_readiness
+
+        get_session_readiness().mark_ready(sess.id)
+        fake = _FakeHub(send_ok=False)
+        _patch_ws_hub(monkeypatch, fake)
+
+        with pytest.raises(DaemonRuntimeOffline):
+            await SessionService(db_session).inject_session(
+                sess.id, user.id, prompt="你好", model=""
+            )
+
+        # 切换分支走 hub 直推（无控制指令行落库），推送确实尝试过。
+        assert [c[1] for c in fake.session_calls] == ["daemon:session_switch_config"]
+        # run 收敛 failed + 既有错误码（而非残留 running）。
+        run = (
+            (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == sess.id)))
+            .scalars()
+            .one()
+        )
+        assert run.status == "failed"
+        assert run.error_code == INJECT_SEND_FAILED_ERROR_CODE
+        assert run.output_redacted is not None
+        # 切换分支无指令行 → 无 pending 残留可补拉。
+        assert await ControlCommandService(db_session).fetch_pending(rt.id) == []
+
+    async def test_runtime_missing_converges(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+        mocked_redis: AsyncMock,
+    ) -> None:
+        """runtime 行缺失（daemon_id 解析 None）→ 504 收敛，run→failed，不抛
+        UnboundLocalError（原实现该路径 _row 未绑定）。"""
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+        from app.modules.daemon.session.service import SessionService, get_session_readiness
+
+        user = await _make_user(db_session)
+        # 会话指向不存在的 runtime 行（runtime_id 非空但查无行）。
+        sess = await _make_injectable_session(db_session, user.id, uuid.uuid4())
+        get_session_readiness().mark_ready(sess.id)
+        fake = _FakeHub(send_ok=False)
+        _patch_ws_hub(monkeypatch, fake)
+
+        with pytest.raises(DaemonRuntimeOffline):
+            await SessionService(db_session).inject_session(sess.id, user.id, prompt="你好")
+
+        assert fake.session_calls == []  # 未到 hub 推送（runtime 解析即失败）
+        run = (
+            (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == sess.id)))
+            .scalars()
+            .one()
+        )
+        assert run.status == "failed"
+        assert run.error_code == INJECT_SEND_FAILED_ERROR_CODE
+        assert run.output_redacted is not None

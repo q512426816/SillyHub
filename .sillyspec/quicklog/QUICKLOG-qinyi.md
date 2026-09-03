@@ -403,7 +403,16 @@
 方案：insertSortedGroupEntry 二分插入（末尾 append 快路径——直播/回放日志本就时序时零比较）；事件应用替换调用；newCount reduce 改 useMemo；等价性由乱序注入 vs 稳定全量排序的单测锚定
 结果：group-chat-panel+member-panel 98 用例全绿（新增等价性 2 例）；tsc 0 错；未部署
 
-## ql-20260904-003-8e4a | 2026-09-04 02:53:43 | 修复 _inject_into_session 派发失败收链 _row 未绑定 UnboundLocalError（de664fb69 引入，24h 审计 H1）
-状态：进行中
+## ql-20260904-003-8e4a | 2026-09-04 02:53:43 | 修复 _inject_into_session 派发失败收链 _row 未绑定 UnboundLocalError（24h 审计 H1）
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/daemon/session/service.py
+文件：
+- backend/app/modules/daemon/session/service.py（_row 预初始化 None + 判空取消 + 注释）
+- backend/app/modules/daemon/tests/test_control_command_dispatch.py（TestInjectDispatchFailureConvergence 两例回归）
+- .sillyspec/docs/backend/modules/daemon.md（ql-20260903-016 条目补审计修正注记）
+- .sillyspec/docs/backend/modules/daemon.changelog.md（追加 ql-20260904-003-8e4a 索引）
+需求：修复 _inject_into_session 派发失败收链 _row 未绑定 UnboundLocalError（24h 审计 H1）
+根因：de664fb69 给 not control_ok 分支新增取消调用时引用了仅在非切换分支赋值的 _row，切换轮 hub 直推失败与 runtime 解析失败两条路径抛 UnboundLocalError，500 替代 504 且 run 永久残留 running
+方案：_row 预初始化 None 并在取消前判空（两条路径本无指令行可取消），补 DaemonControlCommand 类型导入；新增两例回归用例坐实恢复 504 收敛语义
+结果：新增 2 例绿，dispatch 全文件 42 绿，control_commands 全量绿，resilience 6 绿，ruff format/check 0，mypy 0
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_control_command_dispatch.py

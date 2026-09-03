@@ -57,6 +57,7 @@ from app.modules.daemon.control_commands import (
     ControlCommandService,
 )
 from app.modules.daemon.model import (
+    DaemonControlCommand,
     DaemonInstance,
     DaemonRuntime,
     DaemonTaskLease,
@@ -4149,6 +4150,11 @@ class SessionService:
             else None
         )
         control_ok = False
+        # ql-20260904-审计 H1：控制指令行仅在非切换分支的 enqueue_and_push 赋值
+        # ——runtime 解析失败（daemon_id=None）与切换分支 hub 直推失败的路径没有
+        # 指令行，须预初始化 None，下方 not control_ok 收链判空后再取消（原实现
+        # 引用未绑定的 _row 抛 UnboundLocalError：500 + run 永久残留 running）。
+        _row: DaemonControlCommand | None = None
         if daemon_id is not None and runtime_id is not None:
             if config_switch:
                 # task-05 / D-012：切换分支下发 SESSION_SWITCH_CONFIG（原子 payload，
@@ -4232,8 +4238,11 @@ class SessionService:
             # session active so the caller can retry (boundary #13).
             # ql-20260903-016：run 即将判 failed + 504「未能发送」，pending 指令
             # 必须同步取消——否则 daemon TTL 内重连补拉会照常执行本轮（消息
-            # 「复活」，用户重发后同一条消息跑两遍）。
-            await self._cancel_pending_control_command(_row.id, run_id=run.id)
+            # 「复活」，用户重发后同一条消息跑两遍）。仅非切换分支落有指令行
+            # （见上方 _row 预初始化注释）；无行路径（runtime 解析失败/切换直推
+            # 失败）本就没有可补拉的指令，跳过取消。
+            if _row is not None:
+                await self._cancel_pending_control_command(_row.id, run_id=run.id)
             # task-05 / Grill C-11：切换分支同款收敛——run→failed、session 保持
             # active、可重试；会话三列保留已切换的新配置（DB 先于消息落库，
             # 重试重发同一切换即收敛，daemon 未收到消息前不会跑切换轮）。
