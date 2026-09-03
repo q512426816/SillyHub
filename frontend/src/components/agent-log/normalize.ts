@@ -378,19 +378,38 @@ function asStringOrDefault(value: unknown, fallback: string): string {
  * - retryable：仅严格 === true 才可重试（保守，不盲目建议重试）
  * - message：缺失 → "运行失败"
  *
- * 返回 null 表示 error_detail 无值/非对象（调用方据 runStatus 走 failed 兜底或不追加）。
+ * ql-20260903-011：CLI 合成鉴权错误升级——daemon 对这类错误回传 type=unknown /
+ * retryable=false（CLI 把远端 401 误报成本地未登录，raw 为
+ * "Not logged in · Please run /login"）。raw 命中该特征即视为远端瞬时 401：
+ * 升 type=auth_failed + retryable=true（引导出「重新发送」操作），message/hint
+ * 换成事实性中文文案（后端已自动重投一次，见 run_sync
+ * _maybe_autoretry_auth_transient_turn）；raw 原样保留供「查看详情」排查。
  */
 export function buildErrorLogItem(
   errorDetail: { [key: string]: unknown } | null | undefined,
 ): ErrorLogItem | null {
   if (!errorDetail || typeof errorDetail !== "object") return null;
+  const raw = asStringOrNull(errorDetail["raw"]);
+  const isCliAuthTransient =
+    raw !== null &&
+    (/Not\s+logged\s+in/i.test(raw) || /Please\s+run\s+\/login/i.test(raw));
+  if (isCliAuthTransient) {
+    return {
+      type: "auth_failed",
+      code: asStringOrNull(errorDetail["code"]),
+      message: "模型服务鉴权瞬时失败（远端返回 401）",
+      retryable: true,
+      hint: "平台已自动重试一次；若反复出现，请检查供应商密钥或稍后手动重发",
+      raw,
+    };
+  }
   return {
     type: isModelErrorType(errorDetail["type"]) ? errorDetail["type"] : "unknown",
     code: asStringOrNull(errorDetail["code"]),
     message: asStringOrDefault(errorDetail["message"], "运行失败"),
     retryable: errorDetail["retryable"] === true,
     hint: asStringOrNull(errorDetail["hint"]),
-    raw: asStringOrNull(errorDetail["raw"]),
+    raw,
   };
 }
 
@@ -458,10 +477,20 @@ export function buildSystemFailureItem(
  * daemon 把模型失败记为 `[ASSISTANT] API Error: Request rejected (429) · ...`
  * （design §1）。原缺陷 normalize:352 把所有 [ASSISTANT] 归 assistant，这条错误
  * 文本被当普通助手回复。此处用关键词识别，让 classifyLog 归 error 类。
+ *
+ * ql-20260903-011：claude CLI 把模型网关 401 合成的
+ * `[ASSISTANT] Not logged in · Please run /login`（transcript 侧
+ * model=<synthetic> / authentication_failed）同样识别——否则这条误导文案会被
+ * 当作 agent 的正常回复渲染在时间线里（2026-09-03 会话 cb56fabf 事故形态）。
  */
 export function isAssistantApiErrorText(content: string): boolean {
   const body = extractAssistantText(content) || content;
-  return /API\s*Error/i.test(body) || /Request\s+rejected/i.test(body);
+  return (
+    /API\s*Error/i.test(body) ||
+    /Request\s+rejected/i.test(body) ||
+    /Not\s+logged\s+in/i.test(body) ||
+    /Please\s+run\s+\/login/i.test(body)
+  );
 }
 
 /**

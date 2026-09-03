@@ -35,6 +35,7 @@ from app.modules.agent.model import (
     AgentRunLog,
     AgentRunModelUsage,
     AgentSession,
+    AgentSessionQueuedMessage,
 )
 from app.modules.agent.tool_kind import classify_tool_kind
 from app.modules.change.binding import bind_session_to_change, extract_spec_bindings
@@ -58,6 +59,14 @@ if TYPE_CHECKING:
     from app.modules.daemon.service import DaemonService
 
 log = get_logger(__name__)
+
+# ql-20260903-011：claude CLI 把模型网关返回的 401 统一合成
+# "Not logged in · Please run /login" 错误消息注入对话（transcript 侧特征：
+# model=<synthetic>、error=authentication_failed、isApiErrorMessage=true）——
+# 文案把远端瞬时抖动误导成本地凭证缺失。该正则用于识别这类「CLI 合成鉴权
+# 错误」，命中即视为可自动重投的瞬时失败（实证：同一进程同一份密钥 13 秒后
+# 重发即成功，2026-09-03 会话 cb56fabf 事故）。
+_CLI_AUTH_TRANSIENT_RE = re.compile(r"Not\s+logged\s+in|Please\s+run\s+/login", re.IGNORECASE)
 
 
 # ql-20260709-001：tool_result 命令输出截断上限（原 3000 → 100000）。
@@ -2286,6 +2295,11 @@ class RunSyncService:
         await self._session.commit()
         await self._session.refresh(agent_run)
 
+        # ql-20260903-011：CLI 合成鉴权错误（远端 401 被误报为 "Not logged in"）
+        # 自动重投一次——终态已 commit，重投走排队消息表 + 后台派发（供应商/档案
+        # 快照随条目重放，派发语义与忙轮入队一致）。helper 全程静默容错。
+        await self._maybe_autoretry_auth_transient_turn(agent_run, error)
+
         # ql-20260823-006：run 终态翻会话 ended/failed → commit 后 best-effort 补发
         # SESSION_END（失败仅日志，不影响已 commit 终态），daemon 侧 end() 收口
         # （kill driver + close InputQueue + 终态条目不再落盘）。
@@ -2544,6 +2558,146 @@ class RunSyncService:
                     run_id=agent_run.id,
                 )
         return agent_run
+
+    async def _maybe_autoretry_auth_transient_turn(
+        self,
+        agent_run: AgentRun,
+        error: ModelErrorDTO | None,
+    ) -> None:
+        """CLI 合成鉴权错误自动重投一次（ql-20260903-011）。
+
+        背景：claude CLI 把模型网关返回的 401 统一合成 "Not logged in · Please
+        run /login" 错误消息注入对话（transcript 特征 model=<synthetic> /
+        error=authentication_failed / isApiErrorMessage）——远端瞬时抖动被误导成
+        本地凭证缺失，且 retryable=false 不引导重试，用户只能手动重发。实证
+        （2026-09-03 会话 cb56fabf）：同一进程同一份密钥，13 秒后重发即成功。
+
+        处理：把本 run 的 user_input 追加为排队消息（携带 run 上的供应商/档案
+        快照），由 close 末尾既有的排队派发钩子（ql-20260825-011）随即重放——
+        排队条目派发语义与忙轮入队一致（供应商配置原样重放、至多一个活跃 run）。
+
+        防循环（至多一次自动重投）：紧邻的上一条同会话 run 若同为 CLI 鉴权失败
+        且 user_input 相同 → 本 run 已是那次自动重投的结果（网关持续性故障），
+        不再追加，交回用户处理。另查同文 pending 条目防与用户手动重发叠加。
+
+        调用点：close_interactive_run 主事务 commit 之后（终态已落库）。全程
+        静默容错——任何一步失败仅回滚本 helper 的事务并 warn，绝不影响已
+        commit 的 run 终态。
+        """
+        raw = (error.raw if error is not None else None) or ""
+        if agent_run.status != "failed" or not _CLI_AUTH_TRANSIENT_RE.search(raw):
+            return
+        session_id = agent_run.agent_session_id
+        if session_id is None or agent_run.user_id is None:
+            return
+        try:
+            session = await self._session.get(AgentSession, session_id)
+            # 会话已终态（ended/failed）→ 排队派发也无意义，直接放弃。
+            if session is None or session.status != "active":
+                return
+            # 本 run 的原始输入（与 group/service.py 等生产查询同形态绑 UUID）。
+            prompt = (
+                await self._session.execute(
+                    select(AgentRunLog.content_redacted)
+                    .where(
+                        AgentRunLog.run_id == agent_run.id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                    .order_by(AgentRunLog.timestamp)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if prompt is None or not prompt.strip():
+                return
+            prompt = prompt.strip()
+            # 防循环：紧邻上一条同会话 run 同为 CLI 鉴权失败且输入相同 → 已重投过。
+            prev_run = (
+                await self._session.execute(
+                    select(AgentRun)
+                    .where(
+                        AgentRun.agent_session_id == session_id,
+                        AgentRun.started_at < agent_run.started_at,
+                        AgentRun.id != agent_run.id,
+                    )
+                    .order_by(AgentRun.started_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if prev_run is not None and prev_run.status == "failed":
+                prev_raw = ""
+                if isinstance(prev_run.error_detail, dict):
+                    prev_raw = str(prev_run.error_detail.get("raw") or "")
+                if _CLI_AUTH_TRANSIENT_RE.search(prev_raw):
+                    prev_prompt = (
+                        await self._session.execute(
+                            select(AgentRunLog.content_redacted)
+                            .where(
+                                AgentRunLog.run_id == prev_run.id,
+                                AgentRunLog.channel == "user_input",
+                            )
+                            .order_by(AgentRunLog.timestamp)
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if (prev_prompt or "").strip() == prompt:
+                        log.info(
+                            "auth_transient_autoretry_skipped_already_retried",
+                            run_id=str(agent_run.id),
+                            session_id=str(session_id),
+                        )
+                        return
+            # 用户已手动重发同文并排队（pending）→ 不重复追加。
+            dup_pending = (
+                await self._session.execute(
+                    select(func.count())
+                    .select_from(AgentSessionQueuedMessage)
+                    .where(
+                        AgentSessionQueuedMessage.agent_session_id == session_id,
+                        AgentSessionQueuedMessage.status == "pending",
+                        AgentSessionQueuedMessage.prompt == prompt,
+                    )
+                )
+            ).scalar_one()
+            if dup_pending:
+                return
+            position = (
+                await self._session.execute(
+                    select(func.coalesce(func.max(AgentSessionQueuedMessage.position), -1)).where(
+                        AgentSessionQueuedMessage.agent_session_id == session_id
+                    )
+                )
+            ).scalar_one()
+            self._session.add(
+                AgentSessionQueuedMessage(
+                    agent_session_id=session_id,
+                    sender_user_id=agent_run.user_id,
+                    prompt=prompt,
+                    # 供应商/档案快照随 run 重放（排队条目契约：发送时配置原样重放）。
+                    llm_provider_id=(
+                        str(agent_run.llm_provider_id) if agent_run.llm_provider_id else None
+                    ),
+                    agent_profile_id=(
+                        str(agent_run.agent_profile_id) if agent_run.agent_profile_id else None
+                    ),
+                    status="pending",
+                    position=int(position) + 1,
+                )
+            )
+            await self._session.commit()
+            log.info(
+                "auth_transient_turn_autoretry_enqueued",
+                run_id=str(agent_run.id),
+                session_id=str(session_id),
+                # close 末尾的排队派发钩子检测 pending 条目存在即触发重放。
+            )
+        except Exception as exc:
+            await self._session.rollback()
+            log.warning(
+                "auth_transient_autoretry_failed",
+                run_id=str(agent_run.id),
+                session_id=str(agent_run.agent_session_id),
+                error=str(exc),
+            )
 
     # ── Driver Gate enqueue helpers（task-05 / design §5.1） ─────────────────
 

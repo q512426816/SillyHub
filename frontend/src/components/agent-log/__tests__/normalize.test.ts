@@ -745,3 +745,52 @@ describe("buildSystemFailureItem (ql-20260831-004)", () => {
     expect(buildSystemFailureItem(null, null)).toBeNull();
   });
 });
+
+describe("ql-20260903-011：CLI 合成鉴权错误（远端 401 误报 Not logged in）", () => {
+  it("isAssistantApiErrorText 识别 CLI 合成鉴权文案（两种关键词）", () => {
+    expect(isAssistantApiErrorText("[ASSISTANT] Not logged in · Please run /login")).toBe(true);
+    expect(isAssistantApiErrorText("Not logged in")).toBe(true);
+    expect(isAssistantApiErrorText("Please run /login first")).toBe(true);
+    // 普通助手回复不受影响。
+    expect(isAssistantApiErrorText("[ASSISTANT] 你好，已处理完毕")).toBe(false);
+    // 既有 API Error 识别不回退。
+    expect(isAssistantApiErrorText("[ASSISTANT] API Error: Request rejected (429)")).toBe(true);
+  });
+
+  it("classifyLog：CLI 鉴权 [ASSISTANT] 行归 error 类，不再当 agent 回复文本", () => {
+    expect(classifyLog("stdout", "[ASSISTANT] Not logged in · Please run /login")).toBe("error");
+    expect(classifyLog("stdout", "[ASSISTANT] 正常回复")).toBe("assistant");
+  });
+
+  it("buildErrorLogItem：raw 命中 CLI 鉴权签名 → 升级 auth_failed + 可重试 + 中文文案", () => {
+    const item = buildErrorLogItem({
+      type: "unknown",
+      code: null,
+      message: "运行失败",
+      retryable: false,
+      hint: null,
+      raw: "Not logged in · Please run /login",
+    });
+    expect(item).not.toBeNull();
+    expect(item!.type).toBe("auth_failed");
+    expect(item!.retryable).toBe(true);
+    expect(item!.message).toContain("鉴权瞬时失败");
+    expect(item!.hint).toContain("自动重试");
+    // raw 原样保留供「查看详情」排查。
+    expect(item!.raw).toBe("Not logged in · Please run /login");
+  });
+
+  it("buildErrorLogItem：非鉴权错误走原映射不受影响", () => {
+    const item = buildErrorLogItem({
+      type: "rate_limited",
+      code: "429",
+      message: "触发限流",
+      retryable: true,
+      hint: "请稍后再试",
+      raw: "API Error: Request rejected (429)",
+    });
+    expect(item!.type).toBe("rate_limited");
+    expect(item!.message).toBe("触发限流");
+    expect(item!.retryable).toBe(true);
+  });
+});

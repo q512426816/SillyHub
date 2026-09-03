@@ -169,3 +169,20 @@
 根因：流式输出时每个 token 触发全时间线重渲染且行组件无 memo；挂载回放全量拉回历史；上滚读历史后无回底入口、离开期间新消息无任何提示
 方案：GroupTimelineRow memo 化+props 全稳定（NO_REPLYING 常量/handlePin/handleQuoteReply useCallback）；初始回放 limit 200，顶部「加载更早消息」按 before 游标翻页（applyGroupTimelineEvent 归并+scrollTop 增量视口保持）；回到底部悬浮按钮+离开期间新消息计数
 结果：group-chat 目录 93 用例全过（新增 4：分页入口/翻页游标/失败重试/回底按钮全链路）；tsc --noEmit 零错误；两文件 lint 无新增告警；模块文档 frontend_components.md+frontend.changelog.md 已同步
+
+## ql-20260903-011-1b58 | 2026-09-03 14:56:33 | CLI 鉴权瞬时失败自动重投加前端中文错误卡片（远端 401 误报 Not logged in 修复）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/run_sync/service.py（自动重投 helper 加 close 挂接加签名正则）
+- backend/app/modules/daemon/tests/test_auth_transient_autoretry.py（5 用例钉死入队与防循环与不误伤）
+- frontend/src/components/agent-log/normalize.ts（签名识别与错误卡片升级）
+- frontend/src/components/agent-log/__tests__/normalize.test.ts（补 4 用例）
+- docs/sillyspec/2026-09-03-cli-401-misreported-as-not-logged-in.md（根证与缓解与排查教训）
+- .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md（变更索引）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md（变更索引）
+需求：CLI 鉴权瞬时失败自动重投加前端中文错误卡片（远端 401 误报 Not logged in 修复）
+根因：claude CLI 把模型网关 401 统一合成 Not logged in Please run login 误导文案注入对话且 retryable 为 false，用户只能手动重发；实证 2026-09-03 会话 cb56fabf 同一进程同密钥 13 秒后重发即成功，纯远端瞬时抖动，与部署与供应商配置无关
+方案：一 后端 run_sync close_interactive_run 终态 commit 后挂 maybe_autoretry_auth_transient_turn，error.raw 命中 CLI 鉴权签名且会话仍 active 时把本 run 的 user_input 追加为排队消息，携带 run 的 llm_provider_id 与 agent_profile_id 快照和 sender 归属，由 close 末尾既有排队派发钩子随即重放一次，双保险防循环，上一条同会话同 prompt run 亦鉴权失败则跳过，外加同文 pending 去重，全程静默容错；二 前端 normalize 的 isAssistantApiErrorText 增识 CLI 鉴权签名使合成错误行归 error 类不再当 agent 回复文本渲染，buildErrorLogItem 升级为 auth_failed 加 retryable 加中文文案；三 坑记录落 docs sillyspec
+结果：后端新增 test_auth_transient_autoretry 5 用例加 close 既有 7 用例回归共 12 绿，ruff check 与 format 0；前端 normalize 套件补 4 用例共 67 绿，tsc 0，eslint 0 error 仅 1 预存 warning；backend 与 frontend changelog 两处同步
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/agent-log/__tests__/normalize.test.ts, frontend/src/components/agent-log/normalize.ts
