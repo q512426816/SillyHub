@@ -47,6 +47,7 @@ from app.modules.daemon.group.service import (
     get_last_mention_previews,
     get_last_message_previews,
     get_online_member_ids,
+    get_online_member_ids_bulk,
 )
 
 # 自带 /group-chats prefix（空根路径 "" 在 FastAPI 需挂非空 prefix 才合法），
@@ -236,6 +237,8 @@ async def list_group_chats(
         session, user_id=user.id, group_ids=[r.id for r in reads]
     )
     items = [_to_list_item(r) for r in reads]
+    # ql-20260903-024：presence 一次 SCAN 分桶（原逐群各扫一遍全键空间）。
+    online_by_group = await get_online_member_ids_bulk([item.id for item in items])
     for item in items:
         last_content, last_ts = previews.get(item.id, (None, None))
         item.last_message = last_content
@@ -243,7 +246,7 @@ async def list_group_chats(
         item.unread_count = unread.get(item.id, 0)
         item.last_mention = mentions.get(item.id)
         # task-06（§5.4）：presence 在线集接通（Redis 不可用降级空数组）。
-        item.online_member_ids = await get_online_member_ids(item.id)
+        item.online_member_ids = online_by_group.get(item.id, [])
     return items
 
 

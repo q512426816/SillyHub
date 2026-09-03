@@ -886,3 +886,95 @@ class TestUnreadPosition:
         assert await group_service_module.get_group_unread_counts(
             db_session, user_id=env.owner.id, group_ids=[group_id]
         ) == {group_id: 99}
+
+
+class TestListExtrasBatchedMultiGroup:
+    """ql-20260903-024：三个列表数据族批量化后，多群不同位点的语义不回归。"""
+
+    async def test_multi_group_thresholds_previews_mentions_batched(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """三群位点各异（全未读 / 全读后 +1 / 全读）——未读、最后消息摘要、
+        最近 @我 三族批量结果互不串组。"""
+        env = await _make_env(db_session)
+        peer, peer_token = await _env_user(db_session, env, name="批读")
+        ids = []
+        for _ in range(3):
+            data = await _create_group(
+                client,
+                env.owner_token,
+                project_id=env.project.id,
+                user_members=[{"user_id": str(peer.id)}],
+            )
+            ids.append(uuid.UUID(data["id"]))
+
+        counter = {"i": 0}
+
+        async def _seed(gid: uuid.UUID, contents: list[str], *, future: bool = False) -> None:
+            group = await db_session.get(AgentGroupChat, gid)
+            assert group is not None
+            for text in contents:
+                counter["i"] += 1
+                now = (
+                    datetime.now(UTC) + timedelta(seconds=counter["i"])
+                    if future
+                    else datetime.now(UTC) - timedelta(minutes=10) + timedelta(seconds=counter["i"])
+                )
+                carrier = AgentRun(
+                    id=uuid.uuid4(),
+                    agent_type="claude_code",
+                    provider="group",
+                    status="completed",
+                    started_at=now,
+                    finished_at=now,
+                    spec_strategy="group_carrier",
+                    agent_session_id=group.session_id,
+                    user_id=env.owner.id,
+                )
+                db_session.add(carrier)
+                db_session.add(
+                    AgentRunLog(
+                        id=uuid.uuid4(),
+                        run_id=carrier.id,
+                        channel="user_input",
+                        content_redacted=text,
+                        timestamp=now,
+                        metadata_={
+                            "sender_user_id": str(env.owner.id),
+                            "sender_member_name": "群主",
+                        },
+                    )
+                )
+            await db_session.commit()
+
+        # 群甲：3 条（最后一条 @peer）→ 全未读 + mention 命中。
+        await _seed(ids[0], ["群甲-0", "群甲-1", "收到 @批读 请查收"])
+        # 群乙：2 条 → 标记全读 → 未来时间戳 +1 条 → 未读 1。
+        await _seed(ids[1], ["群乙-0", "群乙-1"])
+        assert (await _mark_read(client, peer_token, ids[1])).status_code == 204
+        await _seed(ids[1], ["群乙新-0"], future=True)
+        # 群丙：5 条 → 标记全读 → 未读 0、无 mention。
+        await _seed(ids[2], [f"群丙-{k}" for k in range(5)])
+        assert (await _mark_read(client, peer_token, ids[2])).status_code == 204
+
+        counts = await group_service_module.get_group_unread_counts(
+            db_session, user_id=peer.id, group_ids=ids
+        )
+        assert counts == {ids[0]: 3, ids[1]: 1, ids[2]: 0}
+
+        previews = await group_service_module.get_last_message_previews(db_session, ids)
+        assert previews[ids[0]][0] == "收到 @批读 请查收"
+        assert previews[ids[1]][0] == "群乙新-0"
+        assert previews[ids[2]][0] == "群丙-4"
+        assert all(previews[gid][1] is not None for gid in ids)
+
+        mentions = await group_service_module.get_last_mention_previews(
+            db_session, user_id=peer.id, group_ids=ids
+        )
+        assert mentions[ids[0]] is not None
+        assert mentions[ids[0]]["member_name"] == "群主"
+        assert mentions[ids[1]] is None
+        assert mentions[ids[2]] is None

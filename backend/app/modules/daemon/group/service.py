@@ -141,7 +141,17 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, ValidationError
 from redis.asyncio import Redis
-from sqlalchemy import delete, or_, select
+from sqlalchemy import (
+    DateTime,
+    Uuid,
+    and_,
+    delete,
+    func,
+    literal,
+    or_,
+    select,
+    union_all,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -1254,6 +1264,48 @@ async def _publish_agent_typing_event(
     )
 
 
+async def get_online_member_ids_bulk(
+    group_ids: Sequence[uuid.UUID],
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """批量读群在线用户成员集（ql-20260903-024）。
+
+    原 ``get_online_member_ids`` 逐群各跑一次 ``SCAN``——SCAN 的 MATCH 只是
+    服务端过滤，游标仍要遍历整个键空间，N 群 = N 次全库扫描（群列表端点
+    50 群即 50 次）。本函数一次 ``SCAN group_presence:*`` 按
+    ``group_presence:{gid}:{uid}`` 分桶回填，仅返回请求集合内的群。
+
+    key 契约/降级语义同单群版：SCAN 期间键集变化由下轮 presence 刷新 + 60s
+    TTL 心跳自愈（在线绿点容忍）；Redis 不可用返回各组空列表（降级全灰）。
+    """
+    online: dict[uuid.UUID, list[uuid.UUID]] = {gid: [] for gid in group_ids}
+    if not group_ids:
+        return online
+    wanted = set(group_ids)
+    prefix = "group_presence:"
+    try:
+        redis = get_redis()
+        cursor: int | str = 0
+        while True:
+            cursor, batch = await redis.scan(cursor=cursor, match=f"{prefix}*", count=100)
+            for key in batch or []:
+                raw = key[len(prefix) :] if isinstance(key, str) else ""
+                gid_str, sep, uid_str = raw.partition(":")
+                if not sep:
+                    continue
+                try:
+                    gid = uuid.UUID(gid_str)
+                    uid = uuid.UUID(uid_str)
+                except (ValueError, AttributeError):
+                    continue  # 脏 key（截断/残留）跳过，不炸列表
+                if gid in wanted:
+                    online[gid].append(uid)
+            if int(cursor) == 0:
+                break
+    except Exception:
+        log.warning("group_presence_bulk_read_failed", exc_info=True)
+    return online
+
+
 async def get_online_member_ids(group_id: uuid.UUID) -> list[uuid.UUID]:
     """读群在线用户成员 id 集（``group_presence:{group_id}:*`` keys，§5.4）。
 
@@ -1263,29 +1315,46 @@ async def get_online_member_ids(group_id: uuid.UUID) -> list[uuid.UUID]:
     换 ``SCAN`` 游标分批（每批 100）增量迭代——SCAN 期间键集可能变化（漏报/
     重报由下一轮 presence 刷新 + 60s TTL 心跳自愈，在线绿点容忍）。
     Redis 不可用返回空列表（在线绿点降级为全灰，不阻断列表/详情）。
+    ql-20260903-024：单群详情路径委托 bulk 版（单群成本等价）。
     """
-    prefix = f"group_presence:{group_id}:"
-    pattern = f"{prefix}*"
-    try:
-        redis = get_redis()
-        keys: list[str] = []
-        cursor: int | str = 0
-        while True:
-            cursor, batch = await redis.scan(cursor=cursor, match=pattern, count=100)
-            keys.extend(batch or [])
-            if int(cursor) == 0:
-                break
-    except Exception:
-        log.warning("group_presence_read_failed", group_id=str(group_id), exc_info=True)
-        return []
-    online: list[uuid.UUID] = []
-    for key in keys:
-        raw = key[len(prefix) :] if isinstance(key, str) else ""
-        try:
-            online.append(uuid.UUID(raw))
-        except (ValueError, AttributeError):
-            continue  # 脏 key（截断/残留）跳过，不炸列表
-    return online
+    return (await get_online_member_ids_bulk([group_id])).get(group_id, [])
+
+
+def _timeline_row_source():
+    """群时间线行源（user_input + 投影行，design §4.2）——三个列表数据族共用。"""
+    return or_(
+        AgentRunLog.channel == "user_input",
+        and_(
+            AgentRunLog.channel == "stdout",
+            AgentRunLog.metadata_.is_not(None),
+        ),
+    )
+
+
+async def _get_active_memberships(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    group_ids: Sequence[uuid.UUID],
+) -> dict[uuid.UUID, AgentGroupMember]:
+    """批量取用户在各群的未移除用户成员行（ql-20260903-024，IN 单查）。"""
+    if not group_ids:
+        return {}
+    rows = (
+        (
+            await db.execute(
+                select(AgentGroupMember).where(
+                    AgentGroupMember.group_id.in_(group_ids),
+                    AgentGroupMember.member_type == "user",
+                    AgentGroupMember.user_id == user_id,
+                    AgentGroupMember.removed_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {row.group_id: row for row in rows}
 
 
 async def get_last_message_previews(
@@ -1293,42 +1362,49 @@ async def get_last_message_previews(
 ) -> dict[uuid.UUID, tuple[str | None, datetime | None]]:
     """群列表最后消息摘要 + 最新消息时间（task-02 占位字段接通，task-03）。
 
-    每群查时间线最新一行（user_input / 投影行同 §4.2 行源），取内容前 60 字
+    每群时间线最新一行（user_input / 投影行同 §4.2 行源），取内容前 60 字
     与行 ts（群 P2 第二波：``last_message_at`` 未读排序数据源，无消息 None）。
-    群 id == 群会话 id（§3.2 不变式）。用户群列表规模小（成员上限 50），逐群
-    LIMIT 1 查询可接受。ts 统一 UTC 感知（SQLite 方言往返丢 tz、PG 保留——
-    归一后跨方言一致）。
-    """
-    from sqlalchemy import and_
+    群 id == 群会话 id（§3.2 不变式）。
 
-    previews: dict[uuid.UUID, tuple[str | None, datetime | None]] = {}
-    for group_id in group_ids:
-        row = (
-            await db.execute(
-                select(AgentRunLog.content_redacted, AgentRunLog.timestamp)
-                .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
-                .where(
-                    AgentRun.agent_session_id == group_id,
-                    or_(
-                        AgentRunLog.channel == "user_input",
-                        and_(
-                            AgentRunLog.channel == "stdout",
-                            AgentRunLog.metadata_.is_not(None),
-                        ),
-                    ),
-                )
-                .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
-                .limit(1)
+    ql-20260903-024：原逐群 LIMIT 1 查询改**窗口函数批量**——
+    ``row_number() over (partition by 会话 order by ts desc, id desc) = 1``
+    一查取全部群的首行（SQLite ≥3.25 / PG 均支持）。ts 统一 UTC 感知
+    （SQLite 方言往返丢 tz、PG 保留——归一后跨方言一致）。
+    """
+    if not group_ids:
+        return {}
+    ranked = (
+        select(
+            AgentRun.agent_session_id.label("session_id"),
+            AgentRunLog.content_redacted.label("content"),
+            AgentRunLog.timestamp.label("ts"),
+            func.row_number()
+            .over(
+                partition_by=AgentRun.agent_session_id,
+                order_by=(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc()),
             )
-        ).first()
-        if row is None:
-            previews[group_id] = (None, None)
-            continue
-        content = (row[0] or "").strip()
-        ts = row[1]
+            .label("rn"),
+        )
+        .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
+        .where(
+            AgentRun.agent_session_id.in_(group_ids),
+            _timeline_row_source(),
+        )
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(ranked.c.session_id, ranked.c.content, ranked.c.ts).where(ranked.c.rn == 1)
+        )
+    ).all()
+    previews: dict[uuid.UUID, tuple[str | None, datetime | None]] = {
+        gid: (None, None) for gid in group_ids
+    }
+    for session_id, content, ts in rows:
+        text = (content or "").strip()
         if ts is not None and ts.tzinfo is None:
             ts = ts.replace(tzinfo=UTC)
-        previews[group_id] = (content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS] or None, ts)
+        previews[session_id] = (text[:GROUP_LAST_MESSAGE_PREVIEW_CHARS] or None, ts)
     return previews
 
 
@@ -1348,43 +1424,57 @@ async def get_group_unread_counts(
     ``ts > last_read_at`` 的行数。行源同 ``get_last_message_previews``
     （user_input + 投影行，design §4.2）；发送即已读由 ``send_group_message``
     推进发送者位点保证（自己发的不计未读）。非成员群不出现在请求者列表，
-    admin 兜底视角（无成员行）无位点语义 → 0。
+    admin 兜底视角（无成员行）无位点语义 → 0。计数 cap
+    ``GROUP_UNREAD_DISPLAY_CAP``（99+ 展示语义）。
 
-    N+1 取舍：逐群两查（成员行 + count）——群列表规模 ≤50（design §9.3
-    用户成员上限），与 ``get_last_message_previews`` 同取舍，可接受。计数
-    cap ``GROUP_UNREAD_DISPLAY_CAP``（99+ 展示语义）。
+    ql-20260903-024：原逐群两查（成员行 + count）改两步批量——成员行
+    ``_get_active_memberships`` 单查；计数走阈值表 JOIN
+    （``ts IS NULL（未读位） OR log.timestamp > 阈值``）+ GROUP BY 一查取
+    全部群。阈值表用 UNION ALL 子查询构造（``VALUES ... AS t (a, b)`` 的
+    列名列表是 PG 语法，SQLite 不支持——UNION ALL 双方言可移植）。
     """
-    from sqlalchemy import and_, func
-
-    counts: dict[uuid.UUID, int] = {}
-    for group_id in group_ids:
-        membership = await get_active_user_membership(db, group_id=group_id, user_id=user_id)
-        if membership is None:
-            counts[group_id] = 0
-            continue
-        stmt = (
-            select(func.count())
-            .select_from(AgentRunLog)
-            .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
-            .where(
-                AgentRun.agent_session_id == group_id,
-                or_(
-                    AgentRunLog.channel == "user_input",
-                    and_(
-                        AgentRunLog.channel == "stdout",
-                        AgentRunLog.metadata_.is_not(None),
-                    ),
-                ),
-            )
+    if not group_ids:
+        return {}
+    memberships = await _get_active_memberships(db, user_id=user_id, group_ids=group_ids)
+    counts: dict[uuid.UUID, int] = {gid: 0 for gid in group_ids}
+    threshold_rows = []
+    for gid, membership in memberships.items():
+        last_read = membership.last_read_at
+        if last_read is not None and last_read.tzinfo is None:
+            # SQLite 方言往返丢 tz（与读侧归一同款），补 UTC 后再比较。
+            last_read = last_read.replace(tzinfo=UTC)
+        threshold_rows.append((gid, last_read))
+    if not threshold_rows:
+        return counts
+    selects = [
+        select(
+            literal(gid, Uuid(as_uuid=True)).label("sid"),
+            literal(ts, DateTime(timezone=True)).label("ts"),
         )
-        if membership.last_read_at is not None:
-            last_read = membership.last_read_at
-            if last_read.tzinfo is None:
-                # SQLite 方言往返丢 tz（与读侧归一同款），补 UTC 后再比较。
-                last_read = last_read.replace(tzinfo=UTC)
-            stmt = stmt.where(AgentRunLog.timestamp > last_read)
-        total = (await db.execute(stmt)).scalar() or 0
-        counts[group_id] = min(int(total), GROUP_UNREAD_DISPLAY_CAP)
+        for gid, ts in threshold_rows
+    ]
+    threshold_cte = selects[0] if len(selects) == 1 else union_all(*selects)
+    threshold_table = threshold_cte.subquery()
+    stmt = (
+        select(AgentRun.agent_session_id, func.count())
+        .select_from(AgentRunLog)
+        .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
+        .join(
+            threshold_table,
+            AgentRun.agent_session_id == threshold_table.c.sid,
+        )
+        .where(
+            _timeline_row_source(),
+            or_(
+                threshold_table.c.ts.is_(None),
+                AgentRunLog.timestamp > threshold_table.c.ts,
+            ),
+        )
+        .group_by(AgentRun.agent_session_id)
+    )
+    rows = (await db.execute(stmt)).all()
+    for session_id, total in rows:
+        counts[session_id] = min(int(total), GROUP_UNREAD_DISPLAY_CAP)
     return counts
 
 
@@ -1406,65 +1496,77 @@ async def get_last_mention_previews(
     标签（用户行 = ``metadata_.sender_member_name``，投影行 =
     ``metadata_.member_name``，缺失回退「成员」）。
 
-    N+1 取舍：逐群两查（请求者成员昵称 + 时间线扫描）——群列表规模 ≤50
-    （design §9.3 用户成员上限），与 ``get_last_message_previews`` 同取舍，
-    可接受。
+    ql-20260903-024：原逐群两查（成员昵称 + 时间线扫描）改批量——昵称
+    ``_get_active_memberships`` 单查；时间线窗口函数
+    ``row_number() over (partition by 会话 order by ts desc, id desc) <= N``
+    一查取全部群的扫描窗口，Python 侧按组内新→旧序找首个 @命中。
     """
-    from sqlalchemy import and_
-
-    previews: dict[uuid.UUID, dict[str, str] | None] = {}
-    for group_id in group_ids:
-        membership = await get_active_user_membership(db, group_id=group_id, user_id=user_id)
-        if membership is None:
-            previews[group_id] = None
-            continue
-        name = membership.display_name
-        rows = (
-            (
-                await db.execute(
-                    select(AgentRunLog)
-                    .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
-                    .where(
-                        AgentRun.agent_session_id == group_id,
-                        or_(
-                            AgentRunLog.channel == "user_input",
-                            and_(
-                                AgentRunLog.channel == "stdout",
-                                AgentRunLog.metadata_.is_not(None),
-                            ),
-                        ),
-                    )
-                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
-                    .limit(GROUP_LAST_MENTION_SCAN_ROWS)
-                )
+    if not group_ids:
+        return {}
+    memberships = await _get_active_memberships(db, user_id=user_id, group_ids=group_ids)
+    previews: dict[uuid.UUID, dict[str, str] | None] = {gid: None for gid in group_ids}
+    if not memberships:
+        return previews
+    names_by_group = {gid: m.display_name for gid, m in memberships.items()}
+    ranked = (
+        select(
+            AgentRun.agent_session_id.label("session_id"),
+            AgentRunLog.content_redacted.label("content"),
+            AgentRunLog.metadata_.label("meta"),
+            AgentRunLog.channel.label("channel"),
+            AgentRunLog.timestamp.label("ts"),
+            func.row_number()
+            .over(
+                partition_by=AgentRun.agent_session_id,
+                order_by=(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc()),
             )
-            .scalars()
-            .all()
+            .label("rn"),
         )
-        hit: AgentRunLog | None = None
-        for log_row in rows:
-            content = (log_row.content_redacted or "").strip()
+        .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
+        .where(
+            AgentRun.agent_session_id.in_(list(names_by_group.keys())),
+            _timeline_row_source(),
+        )
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(
+                ranked.c.session_id,
+                ranked.c.content,
+                ranked.c.meta,
+                ranked.c.channel,
+                ranked.c.ts,
+            )
+            .where(ranked.c.rn <= GROUP_LAST_MENTION_SCAN_ROWS)
+            .order_by(ranked.c.session_id, ranked.c.rn)
+        )
+    ).all()
+    # 按组聚合（组内 rn 升序 = 新→旧，与原逐群 desc 扫描序一致）。
+    by_group: dict[uuid.UUID, list[tuple[object, object, str, datetime]]] = {}
+    for session_id, content, meta, channel, ts in rows:
+        by_group.setdefault(session_id, []).append((content, meta, channel, ts))
+    for gid, name in names_by_group.items():
+        hit = None
+        for content, meta, channel, ts in by_group.get(gid, []):
+            text = (content or "").strip()
             # 同口径 @判定：只认请求用户自己的昵称（广播词/agent 昵称与「@我」无关）。
-            if content and any(
-                _mention_match(m.group(1), (name,)) for m in _MENTION_TOKEN_RE.finditer(content)
+            if text and any(
+                _mention_match(m.group(1), (name,)) for m in _MENTION_TOKEN_RE.finditer(text)
             ):
-                hit = log_row
+                hit = (content, meta or {}, channel, ts)
                 break
         if hit is None:
-            previews[group_id] = None
             continue
-        meta = hit.metadata_ or {}
+        content, meta, channel, hit_ts = hit
         member_name = (
-            meta.get("sender_member_name")
-            if hit.channel == "user_input"
-            else meta.get("member_name")
+            meta.get("sender_member_name") if channel == "user_input" else meta.get("member_name")
         )
         # ts 统一 UTC 感知格式（SQLite 方言往返丢 tz、PG 保留——归一后跨方言一致）。
-        hit_ts = hit.timestamp
-        if hit_ts.tzinfo is None:
+        if hit_ts is not None and hit_ts.tzinfo is None:
             hit_ts = hit_ts.replace(tzinfo=UTC)
-        previews[group_id] = {
-            "content": (hit.content_redacted or "").strip()[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
+        previews[gid] = {
+            "content": (content or "").strip()[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
             "ts": hit_ts.isoformat(),
             "member_name": member_name or "成员",
         }

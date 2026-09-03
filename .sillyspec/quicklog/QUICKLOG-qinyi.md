@@ -351,3 +351,17 @@
 根因：Agent 长篇输出时用户上翻历史，下面来了多少新内容毫无感知，只能自己一点点拖回去——群聊有回到底部悬浮按钮（N 条新消息），单聊没有
 方案：TurnTimeline 移植群聊同款：nearBottom 驱动按钮显隐、离开期间新增轮计数（末轮身份锚定防触顶翻页误计、渲染期计算防 ref 滞后）、点击平滑回底；组件根加 relative 包装层承载定位，variant 回归锚同步
 结果：turn-timeline-scroll 13 用例全绿（新增显隐/计数/回底 + prepend 不误计 2 例）+ variant/history-race/pre-session 回归 52 绿；tsc 0 错；未部署
+
+## ql-20260903-024-aa3e | 2026-09-03 23:20:30 | 群列表端点 N+1 批量化——250 串行查询降为常数轮
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/group/service.py（三族批量重写 + presence bulk + memberships 批量）
+- backend/app/modules/daemon/group/router.py（列表 presence 改 bulk 单次）
+- backend/app/modules/daemon/tests/test_group_p2.py（新增多群回归）
+- .sillyspec/docs/backend/modules/daemon.md（人工备注）
+需求：群列表端点 N+1 批量化——250 串行查询降为常数轮
+根因：列表端点逐群查询：LIMIT 1 摘要 + 成员行×2 + COUNT 未读 + Redis SCAN 各一遍，50 群 ≈250 串行查询（SCAN 的 MATCH 只过滤不省游标，逐群各扫全键空间）；群多的用户打开会话门户明显变慢，DB 压力随群数线性放大
+方案：三个查询族各改批量（窗口函数 rn=1 / UNION ALL 阈值表 JOIN GROUP BY / 窗口 rn≤200 + Python 匹配）；presence 一次 SCAN group_presence:* 分桶回填，单群版委托 bulk；成员行 IN 单查共享
+结果：test_group_p2 18 用例全绿（新增多群不同位点三族互不串组回归）+ management/logs_pagination 49 绿；ruff 0；mypy 0；未部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_group_p2.py
