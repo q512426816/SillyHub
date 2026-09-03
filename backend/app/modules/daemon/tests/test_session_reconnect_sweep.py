@@ -535,3 +535,116 @@ class TestOfflineSweep:
 
         assert await sweep_mod.session_offline_sweep_once(db_session) == 1
         assert await sweep_mod.session_offline_sweep_once(db_session) == 0
+
+
+# ── ql-20260903-017：failed 收敛同步清理排队消息（队列不留永久「等待中」）────
+
+
+async def _make_queued(
+    db: AsyncSession,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    status: str = "pending",
+) -> uuid.UUID:
+    from app.modules.agent.model import AgentSessionQueuedMessage
+
+    row = AgentSessionQueuedMessage(
+        id=uuid.uuid4(),
+        agent_session_id=session_id,
+        sender_user_id=user_id,
+        prompt="排队中的追问",
+        status=status,
+    )
+    db.add(row)
+    await db.commit()
+    return row.id
+
+
+async def _queued_status(db: AsyncSession, queued_id: uuid.UUID) -> tuple[str, str | None]:
+    from sqlalchemy import select as sa_select
+
+    from app.modules.agent.model import AgentSessionQueuedMessage
+
+    row = (
+        await db.execute(
+            sa_select(AgentSessionQueuedMessage.status, AgentSessionQueuedMessage.error_msg).where(
+                AgentSessionQueuedMessage.id == queued_id
+            )
+        )
+    ).one()
+    return row.status, row.error_msg
+
+
+class TestSweepFailsQueuedMessages:
+    async def test_reconnecting_converge_fails_pending_queue(
+        self, db_session: AsyncSession
+    ) -> None:
+        """超时收敛 failed 时，pending 排队条目同步翻 failed 带可读原因。"""
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)
+        lease = await _make_lease(db_session, rt.id)
+        sess = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="reconnecting",
+            lease_id=lease.id,
+            last_active_at=datetime.now(UTC)
+            - timedelta(seconds=RECONNECTING_RETRY_WINDOW_SEC + 60),
+        )
+        queued_id = await _make_queued(db_session, sess.id, user.id)
+
+        assert await session_reconnect_sweep_once(db_session) == 1
+
+        status, error_msg = await _queued_status(db_session, queued_id)
+        assert status == "failed"
+        assert error_msg is not None and "排队消息未发送" in error_msg
+
+    async def test_offline_pending_session_fails_queue(self, db_session: AsyncSession) -> None:
+        """runtime 离线 pending 档收敛 failed 时，排队条目同步翻 failed。"""
+        import app.modules.daemon.sweep as sweep_mod
+
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)
+        # runtime 离线：心跳早于宽限窗。
+        rt.status = "offline"
+        rt.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=900)
+        db_session.add(rt)
+        await db_session.commit()
+        sess = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="pending",
+            lease_id=None,
+            last_active_at=datetime.now(UTC),
+        )
+        queued_id = await _make_queued(db_session, sess.id, user.id)
+
+        assert await sweep_mod.session_offline_sweep_once(db_session) >= 1
+
+        status, error_msg = await _queued_status(db_session, queued_id)
+        assert status == "failed"
+        assert error_msg is not None and "排队消息未发送" in error_msg
+
+    async def test_within_window_reconnecting_queue_untouched(
+        self, db_session: AsyncSession
+    ) -> None:
+        """窗口内会话不被收敛，排队条目保持 pending（不误伤活会话）。"""
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)
+        sess = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="reconnecting",
+            lease_id=None,
+            last_active_at=datetime.now(UTC) - timedelta(seconds=10),
+        )
+        queued_id = await _make_queued(db_session, sess.id, user.id)
+
+        assert await session_reconnect_sweep_once(db_session) == 0
+
+        status, _ = await _queued_status(db_session, queued_id)
+        assert status == "pending"

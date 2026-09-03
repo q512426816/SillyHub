@@ -65,7 +65,7 @@ from sqlmodel import col
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.agent.model import AgentRun, AgentSession, AgentSessionQueuedMessage
 from app.modules.daemon.control_commands import KIND_SESSION_RESUME, ControlCommandService
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.session.service import (
@@ -138,6 +138,34 @@ async def _publish_session_ended(session_id, *, reason: str, current_run_id=None
         log.warning("sweep_publish_session_ended_failed", session_id=str(session_id), reason=reason)
 
 
+async def _fail_pending_queued_bulk(
+    session: AsyncSession,
+    session_ids: list[uuid.UUID],
+    *,
+    error_msg: str,
+    now: datetime,
+) -> int:
+    """把 failed 收敛会话的 pending 排队消息批量翻 failed（ql-20260903-017）。
+
+    派发只在 run 终态钩子触发（session/service.dispatch_queued_messages），
+    会话死透（reconnecting 超时 / runtime 离线 pending·worker 档 /
+    suspended 超龄 GC）后永无终态，pending 条目会永久显示「等待中」不派发
+    也不报错。与 end_session 的 _fail_pending_queued_messages 同语义，sweep
+    批量口径（一条 UPDATE）。返回命中行数（观测用）。
+    """
+    if not session_ids:
+        return 0
+    result = await session.execute(
+        update(AgentSessionQueuedMessage)
+        .where(
+            AgentSessionQueuedMessage.agent_session_id.in_(session_ids),
+            AgentSessionQueuedMessage.status == "pending",
+        )
+        .values(status="failed", error_msg=error_msg, updated_at=now)
+    )
+    return int(result.rowcount or 0)
+
+
 async def session_reconnect_sweep_once(session: AsyncSession) -> int:
     """单次扫描收敛卡死的 reconnecting 会话（返回收敛行数 int）.
 
@@ -204,6 +232,7 @@ async def session_reconnect_sweep_once(session: AsyncSession) -> int:
             )
         )
     ).all()
+    failed_ids: list[uuid.UUID] = []
     for row in final_rows:
         if row.status == "failed":
             await _publish_session_ended(row.id, reason="reconnect_window_expired")
@@ -211,6 +240,17 @@ async def session_reconnect_sweep_once(session: AsyncSession) -> int:
             # 会话列表秒级反映。逐行发（design 定案）；publish 内部静默容错，
             # 巡检常驻协程不加重试（constraints）。
             await publish_sessions_changed("status_changed", row.id, row.user_id)
+            failed_ids.append(row.id)
+    # ql-20260903-017：failed 会话的排队消息同步翻 failed——以广播用的同一份
+    # 终态复查为准（条件 UPDATE 未命中的并发行不误伤），队列不留永久「等待中」。
+    if failed_ids:
+        await _fail_pending_queued_bulk(
+            session,
+            failed_ids,
+            error_msg="会话重连超时未恢复，排队消息未发送。",
+            now=now,
+        )
+        await session.commit()
     return converged
 
 
@@ -458,6 +498,8 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
             )
         )
     ).all()
+    failed_offline_ids: list[uuid.UUID] = []
+    failed_gc_ids: list[uuid.UUID] = []
     for row in final_rows:
         if row.status == "failed":
             # GC 档与离线档失败行区分广播 reason（SSE 收尾依赖 session_ended）。
@@ -465,9 +507,30 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
             await _publish_session_ended(row.id, reason=reason)
             # task-03（design §3）：同 reconnecting 档——逐行广播列表变更信号。
             await publish_sessions_changed("status_changed", row.id, row.user_id)
+            (failed_gc_ids if row.id in gc_failed_ids else failed_offline_ids).append(row.id)
         elif row.status == "suspended":
             # 非终态：只发列表变更信号，不发 session_ended（design A5）。
             await publish_sessions_changed("status_changed", row.id, row.user_id)
+
+    # ql-20260903-017：failed 档（pending / worker active / suspended 超龄 GC）
+    # 排队消息同步翻 failed（同 reconnecting 档口径，按档区分可读原因）。
+    queued_failed = 0
+    if failed_offline_ids:
+        queued_failed += await _fail_pending_queued_bulk(
+            session,
+            failed_offline_ids,
+            error_msg="执行代理长时间离线，排队消息未发送。",
+            now=now,
+        )
+    if failed_gc_ids:
+        queued_failed += await _fail_pending_queued_bulk(
+            session,
+            failed_gc_ids,
+            error_msg="会话挂起超时未恢复，排队消息未发送。",
+            now=now,
+        )
+    if queued_failed:
+        await session.commit()
 
     # task-02（2026-08-29-batch-session-inherit / design S2）：worker active 档
     # failed 组（重派种子）事务提交后异步 fire 自动重派——复用原会话 +

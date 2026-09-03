@@ -5977,6 +5977,10 @@ class SessionService:
                     failed_lease.status = "cancelled"
                     failed_lease.updated_at = now
                     self._session.add(failed_lease)
+            # ql-20260903-017：恢复失败 = 会话终态，排队消息一并翻 failed
+            # （对齐 end_session 收口——dispatch 只在 run 终态钩子触发，会话
+            # 已死永无终态，pending 条目会永久「等待中」）。
+            await self._fail_pending_queued_messages(session_id, "会话恢复失败，排队消息未发送。")
             await self._session.commit()
             await self._session.refresh(session)
 

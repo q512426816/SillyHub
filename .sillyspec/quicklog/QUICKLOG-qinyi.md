@@ -259,3 +259,17 @@
 根因：inject/interrupt 推送失败（daemon 离线）时 run 已收敛 failed 并向用户报 504「未能发送」，但 enqueue_and_push 落库的 pending 指令行保留——daemon 在 TTL 内重连补拉会照常执行：界面报错后消息复活，用户重发则同一条消息执行两遍；interrupt 迟到补拉还会误伤新一轮
 方案：control_commands 新增 cancel_pending（pending→cancelled 终态幂等，fetch_pending 不取，GC 按 acked 同款保留期清理）；session/service 注入失败与打断失败两分支经 _cancel_pending_control_command（best-effort）同步取消；会话创建与 tool_report 激活两处有意不取消（lease metadata 兜底是设计语义）
 结果：test_control_commands 20 用例全绿（新增取消/GC 清理/助手 4 例）+ dispatch/resilience 回归 26 绿；ruff format/check 0；mypy 0；未部署
+
+## ql-20260903-017-e12a | 2026-09-03 20:51:37 | failed 会话收链清理排队消息——队列不再永久等待中
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/sweep.py（_fail_pending_queued_bulk + 三档接入）
+- backend/app/modules/daemon/session/service.py（mark_session_recovery_failed 补排队收口）
+- backend/app/modules/daemon/tests/test_session_reconnect_sweep.py（新增 3 用例）
+- .sillyspec/docs/backend/modules/daemon.md（人工备注收链语义）
+需求：failed 会话收链清理排队消息——队列不再永久等待中
+根因：排队消息派发只在 run 终态钩子触发（dispatch_queued_messages），会话被巡检/恢复失败收敛成 failed 后永无终态——用户之前排队的消息永久显示等待中，不派发也不报错
+方案：sweep.py 新增 _fail_pending_queued_bulk（批量 UPDATE，与广播同份终态复查防误伤活会话，按档写可读中文原因）接入 reconnecting 超时档与离线 pending/worker 档、suspended 超龄 GC；mark_session_recovery_failed 复用 _fail_pending_queued_messages 先例在 commit 前收口
+结果：test_session_reconnect_sweep 13 用例全绿（新增 3：超时收敛清队 / 离线 pending 清队 / 窗口内不误伤）+ suspend/redispatch/resilience 52 绿 + recovery 5 绿；ruff format/check 0；mypy 0；未部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_reconnect_sweep.py
