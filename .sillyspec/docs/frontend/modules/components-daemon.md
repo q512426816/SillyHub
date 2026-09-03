@@ -66,6 +66,14 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
     completed 的伪态不再遮蔽失败轮；viewMode（对话/进度）按会话 localStorage
     持久化（page 模式，挂载 effect 回读防 hydration mismatch；dialog 无刷新
     恢复场景不持久化）。
+  - 流式渲染热路径（ql-20260903-025）：displayTurns 富集加**身份稳定守卫**——
+    补齐字段与原值全一致时返回原对象（流式 delta 只 path-copy 改一个 turn，
+    其余 turn 引用不变，下游 MarkdownText/段级 memo 才能命中；此前每 delta
+    全量 clone 击穿一切 memo）；turn-timeline prompt 附件标记解析按内容缓存
+    （FIFO 500）；dialog establishStream 回放拉取对齐 page 分页口径
+    （limit=HISTORY_PAGE_SIZE，弹窗无触顶入口、更早历史去会话页）。遗留：
+    listSessionRuns 无 limit 全量（含 system_prompt 快照）需后端加 limit 参数
+    配合，未在本批。
   - ql-20260826-010 三项行为修正（两模式同步）：
     ① 发送成功清草稿改 **trim 比对**（`onSendSettled`：`prev.trim() === prompt`）——
     handleSend 发的是 `input.trim()`，粘贴带尾随空白时精确比对永不清空，已发送

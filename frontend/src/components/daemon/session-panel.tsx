@@ -2283,15 +2283,14 @@ function SessionPanelPage({
   // run 快照缺失（拉取失败 / 占位 turn）原样返回——whoLine 不渲染（零回归）。
   const displayTurns = useMemo(() => {
     if (runsMeta.size === 0) return turnState.turns;
-    const enriched = turnState.turns.map((t) => {
-      const meta = runsMeta.get(t.realRunId ?? t.runId);
-      if (!meta) return t;
+    /** 单轮快照补齐（?? 链：turn 已有值优先，run 快照只补缺）。 */
+    const enrichOne = (t: SessionTurnView, meta: SessionRunRead): SessionTurnView => {
       // ql-20260822-010：终态回补——历史回看轮（logsToTurns）一律 completed，run
       // 快照为 failed/interrupted/cancelled 时修正为 failed/killed 并回填
       // errorDetail，消除「聊天时红色错误卡、刷新后变已完成」的路径不一致。
       // 实时轮终态与 run 快照一致，覆盖为同值无害；errorDetail 只补缺（?? 链）。
       const terminal = runTerminalTurnStatus(meta.status);
-              const terminalPatch =
+      const terminalPatch =
                 terminal === null
                   ? {}
                   : terminal === "failed"
@@ -2345,9 +2344,29 @@ function SessionPanelPage({
         replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
         // task-09（FR-02）计时锚点 ?? 链：turn 已有值（live 发送占位 / 首条 log
         // timestamp 兜底）优先，run 快照 started_at 次之——attach 恢复计时不归零
-        // 不重计（SSE 流中无 run_started 事件，不覆盖已有锚点）。
+        // 不计（SSE 流中无 run_started 事件，不覆盖已有锚点）。
         turnStartedAt: t.turnStartedAt ?? parseRunStartedAt(meta.started_at),
       };
+    };
+    // ql-20260903-025：身份稳定守卫——补齐字段与原值全部一致时返回**原对象**：
+    // 流式 delta 只 path-copy 改变一个 turn，其余 turn 引用保持不变（下游
+    // MarkdownText/段级 memo 才能命中；此前每 delta 全量 clone 击穿一切 memo，
+    // 是流式卡顿主源之一）。?? 链语义逐字段镜像（turn 已有值优先），行为零变化。
+    const enriched = turnState.turns.map((t) => {
+      const meta = runsMeta.get(t.realRunId ?? t.runId);
+      if (!meta) return t;
+      const candidate = enrichOne(t, meta);
+      const changed =
+        candidate.status !== t.status ||
+        candidate.sender !== t.sender ||
+        candidate.whoLine !== t.whoLine ||
+        candidate.inputTokens !== t.inputTokens ||
+        candidate.outputTokens !== t.outputTokens ||
+        candidate.ctxTokens !== t.ctxTokens ||
+        candidate.replyAt !== t.replyAt ||
+        candidate.turnStartedAt !== t.turnStartedAt ||
+        candidate.errorDetail !== t.errorDetail;
+      return changed ? candidate : t;
     });
     // ql-20260818-011：runsMeta 中的静默切换 run 无 SSE 事件→不在 turnState.turns
     // 中→displayTurns 迭代忽略→重进才可见。补建孤儿 turn（无 prompt/output，
@@ -4617,7 +4636,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
       let streamCursor: string | undefined;
       let initialSync = false;
       try {
-        const logs = await getAgentSessionLogs(sessionId);
+        // ql-20260903-025：对齐 page 模式分页口径——原全量拉日志（长会话从
+        // runtimes 弹窗/分身浮层打开秒级等待 + 内存尖峰），改最新 HISTORY_PAGE_SIZE
+        // 条起步；弹窗无触顶加载入口（快速查看场景），更早历史去会话页看。
+        const logs = await getAgentSessionLogs(sessionId, { limit: HISTORY_PAGE_SIZE });
         streamCursor = maxLogTimestamp(logs);
         if (logs.length > 0) {
           const turns = logsToTurns(logs);

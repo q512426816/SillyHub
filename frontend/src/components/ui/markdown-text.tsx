@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { ComponentProps } from "react";
+import { memo } from "react";
 
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 
@@ -161,7 +162,7 @@ export interface MarkdownTextProps {
   remarkPlugins?: ComponentProps<typeof MarkdownPreview>["remarkPlugins"];
 }
 
-export function MarkdownText({ content, className, size = "compact", remarkPlugins }: MarkdownTextProps) {
+function MarkdownTextInner({ content, className, size = "compact", remarkPlugins }: MarkdownTextProps) {
   if (!content) {
     return null;
   }
@@ -177,3 +178,11 @@ export function MarkdownText({ content, className, size = "compact", remarkPlugi
     </div>
   );
 }
+
+/**
+ * ql-20260903-025：memo——流式 delta 期间父树每次重渲染，未变化内容的历史
+ * markdown 块跳过 remark parse + rehype-sanitize 全链重解析（累计全文重解析
+ * 是流式卡顿主源之一；plugins/components 为模块单例，默认 props 稳定即命中）。
+ * 传内联 remarkPlugins 数组的调用方不命中（引用每次新建），属调用方自身课题。
+ */
+export const MarkdownText = memo(MarkdownTextInner);

@@ -17,7 +17,7 @@ created_at: 2026-08-18 01:45:00
 - `StatusBadge`：`StatusKind = info|success|warning|error|neutral`；内部渲染为 antd Badge（kind→status 映射：info→processing 蓝脉冲 / success→success / warning→warning / error→error / neutral→default），调用方拿 kind 即定色。
 - `ConfirmCaptcha`：props `{ onVerified: (token) => void }`——点按式人机确认：点「我不是机器人」→ 取一次性 captcha_id → 校验换 captcha_token 回调；失败可重试。防爆破主力在后端 IP 限流。
 - `JsonEditor`：受控 JSON 文本编辑（`value/onChange`，非法 JSON 期间也回调不丢输入；`placeholder?`、高度行数）。
-- `MarkdownText`：紧凑型 Markdown 渲染——`@uiw/react-markdown-preview` dynamic import + ssr:false，覆盖默认大字号为 text-xs，代码块横向滚动、链接新窗口、文字色继承父容器。
+- `MarkdownText`：紧凑型 Markdown 渲染——`@uiw/react-markdown-preview` dynamic import + ssr:false，覆盖默认大字号为 text-xs，代码块横向滚动、链接新窗口、文字色继承父容器。ql-20260903-025 起 memo 包裹——流式期间父树重渲染时未变化内容跳过 remark/sanitize 全链重解析（传内联 remarkPlugins 数组的调用方不命中，属调用方课题）。
 
 ## 关键逻辑
 ```

@@ -365,3 +365,16 @@
 方案：三个查询族各改批量（窗口函数 rn=1 / UNION ALL 阈值表 JOIN GROUP BY / 窗口 rn≤200 + Python 匹配）；presence 一次 SCAN group_presence:* 分桶回填，单群版委托 bulk；成员行 IN 单查共享
 结果：test_group_p2 18 用例全绿（新增多群不同位点三族互不串组回归）+ management/logs_pagination 49 绿；ruff 0；mypy 0；未部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_group_p2.py
+
+## ql-20260903-025-abf5 | 2026-09-03 23:33:21 | 单聊流式渲染热路径优化——delta 不再全树重解析
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（displayTurns 身份稳定守卫 + dialog 回放分页）
+- frontend/src/components/daemon/turn-timeline.tsx（标记解析缓存）
+- frontend/src/components/ui/markdown-text.tsx（memo 包裹）
+- .sillyspec/docs/frontend/modules/components-daemon.md、components-ui.md（热路径契约注记）
+需求：单聊流式渲染热路径优化——delta 不再全树重解析
+根因：流式期间每个 SSE delta：displayTurns 把 runsMeta 命中的所有 turn 全量 clone（引用全变击穿下游一切 memo）+ 每轮 prompt 每次渲染重复正则拆分 + MarkdownText 无 memo 全文重新 remark parse/sanitize + dialog 回放全量拉日志——流式输出卡、打字顿的直接来源
+方案：displayTurns 身份稳定守卫（enrichOne 提取 + 逐字段比对，全一致返回原对象）；标记解析内容级缓存（FIFO 500）；MarkdownText memo；dialog 回放对齐 page 分页 limit=100
+结果：5 个相关测试文件 65 用例全绿（variant/history-race/pre-session/scroll/markdown）；tsc 0 错；未部署。遗留 listSessionRuns limit 需后端配合（文档已记）

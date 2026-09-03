@@ -46,6 +46,27 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
 // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+
+/* ── ql-20260903-025：prompt 附件标记解析缓存——流式期间每次渲染对每一轮
+ *    prompt 逐行正则拆分重复计算，按内容字符串缓存（FIFO 上限防泄漏）。 ── */
+const PARSED_MARKER_CACHE = new Map<
+  string,
+  ReturnType<typeof parseAttachmentMarkers>
+>();
+const PARSED_MARKER_CACHE_MAX = 500;
+
+function parseAttachmentMarkersCached(prompt: string) {
+  let hit = PARSED_MARKER_CACHE.get(prompt);
+  if (!hit) {
+    hit = parseAttachmentMarkers(prompt);
+    if (PARSED_MARKER_CACHE.size >= PARSED_MARKER_CACHE_MAX) {
+      const oldest = PARSED_MARKER_CACHE.keys().next().value;
+      if (oldest !== undefined) PARSED_MARKER_CACHE.delete(oldest);
+    }
+    PARSED_MARKER_CACHE.set(prompt, hit);
+  }
+  return hit;
+}
 import { AttachmentChips } from "@/components/daemon/attachment-chips";
 import { CopyButton } from "@/components/daemon/copy-button";
 
@@ -478,7 +499,7 @@ export function TurnTimeline({
                   <div className="group relative max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
                     {(() => {
-                      const parsed = parseAttachmentMarkers(turn.prompt);
+                      const parsed = parseAttachmentMarkersCached(turn.prompt);
                       return (
                         <>
                           {parsed.attachments.length > 0 && (
