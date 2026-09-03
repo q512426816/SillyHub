@@ -49,10 +49,18 @@ describe("splitByChangeNames 切段", () => {
 });
 
 describe("remarkChangeLink mdast 变换", () => {
+  // unified 契约：Plugin(options) 返回 transformer，transformer(tree, file) 原地
+  // 改树并返回 undefined（新树或 undefined；返回函数会被 unified 当成替换树，
+  // ql-20260903-006 曾因此把整棵 mdast 树换成内层箭头函数导致 .md 预览崩溃）
   const run = (tree: object) => {
-    const plugin = remarkChangeLink({ nameToId: MAP, workspaceId: "ws-1" });
-    // remark 插件两层调用：Plugin(options)(...args)(tree, file) —— @uiw 管线同款
-    (plugin as unknown as (...a: unknown[]) => (t: unknown) => void)()(tree);
+    const transformer = remarkChangeLink({ nameToId: MAP, workspaceId: "ws-1" }) as unknown as (
+      tree: unknown,
+      file?: unknown,
+    ) => unknown;
+    const result = transformer(tree);
+    // 契约守护：返回值必须是 undefined，不是「待调用的下一层函数」
+    expect(result).toBeUndefined();
+    expect(typeof transformer).toBe("function");
     return tree;
   };
 

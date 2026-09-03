@@ -486,7 +486,11 @@ export function MemberPanel({
       data-testid="group-member-panel"
       aria-label="群成员面板"
       className={cn(
-        "flex min-h-0 w-full flex-col overflow-y-auto rounded-xl border border-border bg-card shadow-sm",
+        /* 高度契约：h-full 吃满挂载列高（宽屏右列是 grid 拉伸项 / 窄屏是
+         * Drawer body，均有定高），成员多时根节点 overflow-y-auto 内部滚动
+         * ——面板与群聊会话列同高，不被内容撑破（session-list-panel 根
+         * h-full 同惯例）。 */
+        "flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-xl border border-border bg-card shadow-sm",
         className,
       )}
     >

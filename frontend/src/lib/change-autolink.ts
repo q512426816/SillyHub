@@ -107,10 +107,14 @@ function linkifyTree(node: MdastNode, nameToId: Map<string, string>, workspaceId
  * remark 插件工厂：`remarkPlugins={[[remarkChangeLink, { nameToId, workspaceId }]]}`。
  * 插件在 mdast 层变换（rehype-sanitize 之前的 remark 阶段），自产 link 节点
  * 的相对 href 可过 sanitize 协议白名单。
+ *
+ * unified 契约：Plugin(options) 直接返回 transformer（tree, file）=> undefined，
+ * 原地改树。注意不能多包一层（ql-20260903-006：双层箭头让 transformer 返回
+ * 内层函数，被 unified 当成替换树，整篇文档被换成函数、.md 预览渲染崩溃）。
  */
 export function remarkChangeLink(options: { nameToId: Map<string, string>; workspaceId: string }) {
   const { nameToId, workspaceId } = options;
-  return () => (tree: MdastNode) => {
+  return (tree: MdastNode) => {
     linkifyTree(tree, nameToId, workspaceId);
   };
 }
