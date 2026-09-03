@@ -161,6 +161,34 @@ const GROUP_REPLAY_PAGE_SIZE = 200;
 /** 单次批量上传附件上限（超出部分忽略并 toast 告知；单聊 session-input-bar 同值）。 */
 const MAX_ATTACHMENTS_PER_BATCH = 10;
 
+/* ── ql-20260903-022：群输入草稿按群持久化（切群/刷新不丢）——照单聊
+ *    ql-20260825-011 readSessionDraft 模式。面板按 key={groupId} 重挂载，
+ *    草稿不持久化时切群即蒸发（与单聊行为不一致，规则让人摸不清）。 ── */
+
+function groupDraftLsKey(groupId: string): string {
+  return `sillyhub.groupchats.draft.${groupId}`;
+}
+
+/** 挂载回读草稿（SSR 或读取失败返回空串）。 */
+function readGroupDraft(groupId: string): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(groupDraftLsKey(groupId)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** 每次输入变化写入（隐私模式等写入失败静默）。 */
+function writeGroupDraft(groupId: string, draft: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(groupDraftLsKey(groupId), draft);
+  } catch {
+    /* 静默容错 */
+  }
+}
+
 /** replying 空集常量（memo 稳定 props：行无「正在回复」标签时恒用同一引用，
  *    避免 map 里 `?? []` 每次新建数组击穿 GroupTimelineRow 的 memo）。 */
 const NO_REPLYING: GroupReplyingMember[] = [];
@@ -1346,7 +1374,7 @@ export function GroupChatPanel({
   }, [entries, typingMap, replyingBy]);
 
   /* ── 输入区：草稿 / @补全 / typing 上报 / 发送 / 附件（FR-05 补遗） ── */
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(() => readGroupDraft(groupId));
   /* 群 P2 引用回复：输入区引用条目标（null=无引用；发送成功清空、失败保留重发）。 */
   const [replyTarget, setReplyTarget] = useState<GroupQuoteTarget | null>(null);
   /* 手机端群聊 quick：窄屏成员抽屉开关。 */
@@ -1366,6 +1394,10 @@ export function GroupChatPanel({
     [draft],
   );
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  useEffect(() => {
+    // ql-20260903-022：草稿按群持久化（发送成功 setDraft("") 时同步清存）。
+    writeGroupDraft(groupId, draft);
+  }, [groupId, draft]);
   const mentionOpen = mentionDetection?.trigger === "@";
   const mentionFiltered = useMemo(
     () => (mentionOpen ? filterMentionItems(mentionItems, mentionDetection?.query ?? "") : []),

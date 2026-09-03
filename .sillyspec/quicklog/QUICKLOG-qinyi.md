@@ -326,3 +326,15 @@
 方案：两处 onerror 照 2118 行先例逐字对齐：status 命中名单即 close 置 closed 停止重连；无 status 保持退避重连
 结果：daemon-session-stream-done 4 用例全绿（新增 404 停连：推进 120s stream/runs/logs 零增长）+ stream-sync/events/fetch-sse 34 绿；tsc 0 错；未部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/lib/__tests__/daemon-session-stream-done.test.ts
+
+## ql-20260903-022-4a7c | 2026-09-03 22:31:10 | 群聊草稿按群持久化——切群/刷新不丢
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/group-chat/group-chat-panel.tsx（草稿读写 helper + 惰性回读 + 变化即写）
+- frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx（新增持久化用例）
+需求：群聊草稿按群持久化——切群/刷新不丢
+根因：群面板按 key={groupId} 重挂载，draft 是裸 useState——在 A 群打一半切去 B 群再回来字全没了；单聊却有完整草稿持久化，规则不一致
+方案：readGroupDraft/writeGroupDraft 照单聊模式（localStorage 按群键），useState 惰性初始化回读 + effect 随 draft 写入，发送成功清空同步清存
+结果：group-chat-panel 54 用例全绿（新增持久化用例：卸载重挂回填 + 发送清存）；tsc 0 错；未部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx

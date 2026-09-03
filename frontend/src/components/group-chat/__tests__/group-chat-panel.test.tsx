@@ -2530,3 +2530,38 @@ describe("群 P3 回到底部悬浮按钮（ql-20260903-010）", () => {
 });
 
 
+
+// ── ql-20260903-022：群草稿按群持久化（切群/刷新不丢） ──────────────────────
+
+describe("群草稿持久化（ql-20260903-022）", () => {
+  it("输入未发送文字 → 重挂载（切群回来/刷新）草稿回填；发送成功后清存", async () => {
+    window.localStorage.clear();
+    harness.logsJson = [];
+    const { unmount } = renderPanel();
+    await waitForStreamWired();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "这句先放着不发送" } });
+    await flushAsync(2);
+    unmount();
+
+    // 重挂载（key 重挂语义 = 切群回来/刷新）：草稿回填。
+    const second = renderPanel();
+    await waitForStreamWired();
+    const input2 = screen.getByLabelText("群消息输入框");
+    expect((input2 as HTMLTextAreaElement).value).toBe("这句先放着不发送");
+
+    // 发送成功：草稿清空并同步清存。
+    fireEvent.keyDown(input2, { key: "Enter" });
+    await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect((input2 as HTMLTextAreaElement).value).toBe(""),
+    );
+    second.unmount();
+    const third = renderPanel();
+    await waitForStreamWired();
+    const input3 = screen.getByLabelText("群消息输入框");
+    expect((input3 as HTMLTextAreaElement).value).toBe("");
+    third.unmount();
+  });
+});
