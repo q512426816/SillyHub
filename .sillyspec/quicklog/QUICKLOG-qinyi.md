@@ -441,3 +441,13 @@
 根因：401 可发生在 turn 中途，原实现把 user_input 原文重新入队由新 run 从头重放整轮，已执行的工具副作用（写文件/跑命令/git 提交）会再执行一遍且无幂等键防护
 方案：_maybe_autoretry_auth_transient_turn 补 tool_call 活动守卫：本 run tool_call 日志非零即跳过重投交回用户，仅无工具活动的干净轮保持自动重投自愈
 结果：test_auth_transient_autoretry 6 用例绿（新增 1 例），ruff 0，mypy 0
+
+## ql-20260904-007-141f | 2026-09-04 03:13:09 | @全体并行触发 gather 收口注释与实现对齐（24h 审计 M2
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/group/service.py（gather 收口注释并行语义注记）
+需求：@全体并行触发 gather 收口注释与实现对齐（24h 审计 M2，纯注释）
+根因：注释宣称非 AppError 意外异常「照旧 fail-loud 整条抛」暗示串行版中断语义，与并行实现（收口时全部成员已触发）不一致——规则 18 注释与实现不一致须修正
+方案：注释改为如实描述并行语义：上抛只把响应变 500 不阻止成员，与串行版差异属并行化已知取舍；零行为改动
+结果：ruff format 0，ruff check 0（纯注释改动无测试面）

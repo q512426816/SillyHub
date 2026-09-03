@@ -3531,8 +3531,12 @@ class GroupChatService:
                     # quick 群 P2 部分失败收集：单成员触发失败（引擎门控 400 /
                     # 机器不可用 / 队列满 / 会话闸满等 AppError）不整条抛——该
                     # 成员 triggered 项带 error 摘要 + 群频道系统行（用户可感
-                    # 沉默场景：消息已落时间线但成员没跑起来）；非 AppError 的
-                    # 意外异常照旧 fail-loud 整条抛（含 CancelledError）。
+                    # 沉默场景：消息已落时间线但成员没跑起来）。非 AppError 的
+                    # 意外异常（含 CancelledError）fail-loud 上抛，但注意并行
+                    # 语义（ql-20260904-M2 注记）：gather 收口时全部成员已被
+                    # 触发（影子已建/轮已注入），上抛只把响应变 500、不阻止
+                    # 任何成员——与串行版「异常即中断后续成员」不同，属并行化
+                    # 的已知取舍（意外异常是编程错误信号，上抛保可见性）。
                     if not isinstance(result, AppError):
                         raise result
                     reason = _trigger_failure_reason(result)
