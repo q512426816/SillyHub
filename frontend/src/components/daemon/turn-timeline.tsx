@@ -32,7 +32,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
+import { ArrowDown, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
@@ -265,12 +265,51 @@ export function TurnTimeline({
   const isNearBottomRef = useRef(true);
   const lastTurnKeyRef = useRef<string | null>(null);
 
+  // ── 回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊 group-chat-panel
+  //    同款移植）：离开底部后按钮出现；离开期间新增轮数显示「N 条新消息」。
+  //    锚定守卫：末轮身份未变（仅触顶翻页 prepend 历史页）不计入——否则向上
+  //    加载历史会把 prepend 条数误计成「新消息」。末轮身份在渲染期直接从
+  //    turns 计算（不经 effect/ref——ref 更新不触发重渲染，计数会滞后）。 ──
+  const [nearBottom, setNearBottom] = useState(true);
+  const [bottomAnchor, setBottomAnchor] = useState<{
+    count: number;
+    lastIdentity: string | null;
+  } | null>(null);
+  const lastTurnIdentity = (() => {
+    const last = turns[turns.length - 1];
+    return last ? `${last.runId}:${last.turn ?? "-"}` : null;
+  })();
+  const newTurnCount = (() => {
+    if (!bottomAnchor) return 0;
+    if (lastTurnIdentity === bottomAnchor.lastIdentity) return 0;
+    return Math.max(0, turns.length - bottomAnchor.count);
+  })();
+
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    isNearBottomRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    isNearBottomRef.current = near;
+    setNearBottom((prev) => (prev === near ? prev : near));
+    if (near) {
+      // 回到底部（含点击悬浮按钮后的滚底触发）→ 计数锚清零。
+      setBottomAnchor((prev) => (prev === null ? prev : null));
+    } else {
+      setBottomAnchor(
+        (prev) => prev ?? { count: turns.length, lastIdentity: lastTurnIdentity },
+      );
+    }
   };
+
+  /** 点击悬浮按钮平滑回底（滚底 onScroll 触发后锚点自然清零）。 */
+  const jumpToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || typeof el.scrollTo !== "function") return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    isNearBottomRef.current = true;
+    setNearBottom(true);
+    setBottomAnchor(null);
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -344,6 +383,9 @@ export function TurnTimeline({
 
   return (
     <>
+    {/* ql-20260903-023：relative 包装容器承载「回到底部」悬浮按钮的定位
+        （原 fragment 根无定位上下文）；flex 布局角色与原滚动容器等价。 */}
+    <div className="relative flex min-h-0 flex-1 flex-col">
     <div
       ref={scrollRef}
       onScroll={handleScroll}
@@ -658,6 +700,21 @@ export function TurnTimeline({
           {streamFooter}
         </div>
       )}
+    </div>
+    {/* 回到底部悬浮按钮（ql-20260903-023，照群聊同款）：离开底部出现；
+        离开期间新增轮数显示「N 条新消息」（仅触顶翻页 prepend 不计入），
+        点击平滑回底。 */}
+    {!nearBottom && (
+      <button
+        type="button"
+        data-testid="turn-jump-bottom"
+        onClick={jumpToBottom}
+        className="absolute bottom-3 right-4 z-10 inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-md transition-colors hover:bg-muted"
+      >
+        <ArrowDown aria-hidden className="h-3.5 w-3.5" />
+        {newTurnCount > 0 ? `${newTurnCount} 条新消息` : "回到底部"}
+      </button>
+    )}
     </div>
     {/* ql-20260825-006：最小化 pending 提问卡的右下角浮动胶囊——渲染在滚动
         容器外（fixed 定位锚 viewport，不随日志滚动），点击主体还原最近一条，

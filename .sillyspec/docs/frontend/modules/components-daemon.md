@@ -99,6 +99,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   pending→default，色走 token 零手写）。滚动容器贴底跟随（ql-20260822-010）：
   onScroll 维护距底 <80px ref，仅贴底时随 turns 更新滚底（上滚读历史不被拉回），
   新增 pending 轮（用户刚发送）例外强制回底。
+  回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊同款）：离开底部出现，
+  离开期间新增轮显示「N 条新消息」；锚定守卫按**末轮身份**（渲染期从 turns 计算，
+  不经 ref——更新不触发重渲染会滞后）判断——仅触顶翻页 prepend（末轮不变）
+  不计入；组件根新增 relative 包装层承载按钮定位（flex 角色与原滚动容器等价，
+  variant 回归锚已同步）。
   「加载更早」prepend 伪 runId 规则（ql-20260903-002）：logsToTurns 每次调用的
   `__attach_history_N__` 从 1 重新编号，prepend 的每页 turn **全量**加 `#e<全量数字
   游标>` 后缀防跨页撞 React key（多 run 会话更早页的不同 run 与当前窗口必撞）；

@@ -153,3 +153,52 @@ describe("TurnTimeline 贴底跟随滚动（ql-20260822-010）", () => {
     expect(scrollToMock).toHaveBeenCalledWith(0, 1000);
   });
 });
+
+// ── ql-20260903-023：回到底部悬浮按钮 + 新消息计数（照群聊同款） ────────────
+
+describe("TurnTimeline 回到底部悬浮按钮（ql-20260903-023）", () => {
+  it("离开底部出现；离开期间新增轮显示「N 条新消息」；点击回底按钮消失", () => {
+    const { el, scrollToMock, rerenderTurns } = setup([makeTurn()]);
+    // 初始贴底：无按钮。
+    userScrollTo(el, 500);
+    expect(screen.queryByTestId("turn-jump-bottom")).toBeNull();
+
+    // 上滚离开底部 → 按钮出现（尚无新消息 → 只显示「回到底部」）。
+    userScrollTo(el, 100);
+    const btn = screen.getByTestId("turn-jump-bottom");
+    expect(btn.textContent).toContain("回到底部");
+    expect(btn.textContent).not.toContain("新消息");
+
+    // 离开期间追加新轮 → 「1 条新消息」（渲染期计算，无滞后）。
+    rerenderTurns([
+      makeTurn(),
+      makeTurn({ runId: "run-2", turn: 2, output: "新答复" }),
+    ]);
+    expect(screen.getByTestId("turn-jump-bottom").textContent).toContain(
+      "1 条新消息",
+    );
+
+    // 点击 → 平滑滚底 + 按钮消失（状态重置）。
+    fireEvent.click(screen.getByTestId("turn-jump-bottom"));
+    expect(scrollToMock).toHaveBeenCalledWith({
+      top: 1000,
+      behavior: "smooth",
+    });
+    expect(screen.queryByTestId("turn-jump-bottom")).toBeNull();
+  });
+
+  it("触顶翻页 prepend 历史页（末轮未变）不计入「新消息」", () => {
+    const newer = makeTurn({ runId: "run-2", turn: 2, output: "最新" });
+    const { el, rerenderTurns } = setup([makeTurn(), newer]);
+    userScrollTo(el, 100); // 离开底部读历史
+    // prepend 更早一页：末轮身份不变 → 仍只显示「回到底部」。
+    rerenderTurns([
+      makeTurn({ runId: "run-0", turn: 0, output: "更早一页" }),
+      makeTurn(),
+      newer,
+    ]);
+    const btn = screen.getByTestId("turn-jump-bottom");
+    expect(btn.textContent).toContain("回到底部");
+    expect(btn.textContent).not.toContain("新消息");
+  });
+});

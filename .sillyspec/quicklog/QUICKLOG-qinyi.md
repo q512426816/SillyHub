@@ -338,3 +338,16 @@
 方案：readGroupDraft/writeGroupDraft 照单聊模式（localStorage 按群键），useState 惰性初始化回读 + effect 随 draft 写入，发送成功清空同步清存
 结果：group-chat-panel 54 用例全绿（新增持久化用例：卸载重挂回填 + 发送清存）；tsc 0 错；未部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+
+## ql-20260903-023-74fd | 2026-09-03 22:44:53 | 单聊回到底部悬浮按钮 + 新消息计数——照群聊实现移植
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/turn-timeline.tsx（回到底部按钮 + 计数锚定 + relative 包装层）
+- frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx（新增 2 用例）
+- frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx（结构锚同步（新包装层字面量））
+- .sillyspec/docs/frontend/modules/components-daemon.md（TurnTimeline 契约注记）
+需求：单聊回到底部悬浮按钮 + 新消息计数——照群聊实现移植
+根因：Agent 长篇输出时用户上翻历史，下面来了多少新内容毫无感知，只能自己一点点拖回去——群聊有回到底部悬浮按钮（N 条新消息），单聊没有
+方案：TurnTimeline 移植群聊同款：nearBottom 驱动按钮显隐、离开期间新增轮计数（末轮身份锚定防触顶翻页误计、渲染期计算防 ref 滞后）、点击平滑回底；组件根加 relative 包装层承载定位，variant 回归锚同步
+结果：turn-timeline-scroll 13 用例全绿（新增显隐/计数/回底 + prepend 不误计 2 例）+ variant/history-race/pre-session 回归 52 绿；tsc 0 错；未部署
