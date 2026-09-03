@@ -35,6 +35,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -874,7 +875,7 @@ class TestGroupDetailShadowRunning:
 
 class TestPresence:
     async def test_stream_touches_presence_with_ttl(self, db_session: AsyncSession) -> None:
-        """群 SSE 生成器循环 touch：SET key "1" EX 60（首轮立即 touch）。"""
+        """群 SSE 连接建立即内联首触：SET key "1" EX 60（确定性，不依赖任务调度）。"""
         session_ps = _build_mock_pubsub([])
         typing_ps = _build_mock_pubsub([])
         redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
@@ -902,7 +903,12 @@ class TestPresence:
     async def test_presence_touch_throttled_by_interval(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """间隔节流：默认 45s 内不重复 touch；间隔置 0 后每轮都 touch。"""
+        """间隔节流：默认 45s；间隔置 0 后续期任务高频 touch。
+
+        ql-20260903-007：touch 移出流循环（独立 asyncio 任务）——帧产出与
+        touch 节奏解耦后，断言改为轮询等待任务侧 set 次数（不再依赖「每轮
+        循环各触一次」的旧耦合）。
+        """
         monkeypatch.setattr("app.modules.agent.service.GROUP_PRESENCE_TOUCH_INTERVAL_SEC", 0.0)
         session_ps = _build_mock_pubsub([])
         typing_ps = _build_mock_pubsub([])
@@ -914,12 +920,57 @@ class TestPresence:
             sid, typing_channel=f"group_typing:{sid}", presence_key=f"group_presence:{sid}:u"
         )
         with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
-            # 连续 3 轮循环（keepalive 帧 ×3）→ 间隔 0 下每轮都 touch。
-            await _collect(gen, limit=4)
+            collected: list[str] = []
+            async for ev in gen:
+                collected.append(ev)
+                if len(collected) >= 4:
+                    break
+            # 后台任务间隔 0 → 持续续触；轮询至 ≥3 次（内联首触 1 + 任务 ≥2）。
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while redis.set.await_count < 3:
+                assert asyncio.get_running_loop().time() < deadline, (
+                    "独立续期任务未按间隔续触（间隔 0 应高频 set）"
+                )
+                await asyncio.sleep(0.01)
+            await gen.aclose()
 
         assert redis.set.await_count >= 3
         for call in redis.set.await_args_list:
             assert call.kwargs == {"ex": GROUP_PRESENCE_TTL_SEC}
+
+    async def test_presence_touch_survives_backpressure(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """生成器停在 yield（慢消费端 SSE 背压）时续期照常（ql-20260903-007）。
+
+        旧实现 touch 在流循环顶部——生成器卡在 ``yield``（客户端 TCP 背压）时
+        touch 一并停摆，60s 后在线绿点被 TTL 误回收；独立任务不受产出节奏影响。
+        """
+        monkeypatch.setattr("app.modules.agent.service.GROUP_PRESENCE_TOUCH_INTERVAL_SEC", 0.0)
+        session_ps = _build_mock_pubsub([])
+        typing_ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        sid = uuid.uuid4()
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(
+            sid, typing_channel=f"group_typing:{sid}", presence_key=f"group_presence:{sid}:u"
+        )
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            # 拉到 keepalive 帧（订阅/首触/任务均已就绪）后不再驱动生成器——
+            # 模拟消费端背压：生成器停在循环内 yield 上。
+            first = await gen.__anext__()
+            second = await gen.__anext__()
+            assert first == ": connected\n\n"
+            assert second == ": keepalive\n\n"
+            baseline = redis.set.await_count  # 内联首触
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while redis.set.await_count < baseline + 2:
+                assert asyncio.get_running_loop().time() < deadline, (
+                    "生成器挂起期间独立任务应继续续期（背压不熄绿点）"
+                )
+                await asyncio.sleep(0.01)
+            await gen.aclose()
 
     async def test_get_online_member_ids_parses_keys_and_tolerates_dirty(
         self,

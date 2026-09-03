@@ -65,7 +65,8 @@
 
 import { lstat, readFile, readdir, rename, mkdir } from 'node:fs/promises';
 import type { Dirent, Stats } from 'node:fs';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { join, resolve as pathResolve } from 'node:path';
 import yaml from 'js-yaml';
 import { RpcError } from './ws-client.js';
@@ -470,8 +471,45 @@ interface ExecResult {
 }
 
 /**
+ * 杀整棵进程树（超时兜底，ql-20260903-007）。对齐 preflight.ts killTree 同款坑：
+ * execFile/execSync 的 timeout 只杀**直接子进程**（Windows 上 TerminateProcess 单杀），
+ * 杀不掉孙进程——git worktree add/merge 可经 hook / filter 机制 spawn 孙进程，
+ * 120s 超时杀 git.exe 后孙进程残留并继续写目标目录（与 preflight 2026-08-12
+ * .cmd wrapper 孙 node.exe 卡死实证同型）。
+ *
+ * - Windows: `taskkill /PID <pid> /T /F`（/T 含孙进程，/F 强制）；
+ * - Unix: 仅 SIGKILL 直接子进程——execFile 未设 detached，`kill(-pid)` 会命中
+ *   daemon 自身进程组（自杀）；Unix 下 git 子命令通常单进程完成，孙进程暴露面
+ *   远小于 Windows 的 wrapper 形态。
+ *
+ * 不直接 import preflight.ts 的 killTree（避免把它的依赖面拉进 host-fs RPC
+ * 通道）——两处实现语义须同步维护。
+ */
+function killTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (typeof pid !== 'number') return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    } else {
+      process.kill(pid, 'SIGKILL');
+    }
+  } catch {
+    // 杀树失败不抛（最坏情况是孙进程残留，timeout 已杀直接子进程兜底）。
+  }
+}
+
+/**
  * 执行一条命令（execFile 非 shell，防注入），喂 stdin + 收 stdout/stderr。
  * 超时 / exit!=0 → ok:false（不抛，由调用方判定结构化返回）。
+ *
+ * ql-20260903-007：超时（execFile 以 killSignal=SIGTERM 杀直接子进程，err 带
+ * killed+signal）补 killTree 杀孙进程，并在 stderr 追加 `timed out` 标记行——
+ * 既给上层错误映射（runGitRevParse 的 /timed out/ → git_timeout）真实信号，
+ * 也让后端看到的不再是裸进度条（ql-20260902-001 诊断诉求）。
  */
 function runCmd(
   cmd: string,
@@ -495,6 +533,19 @@ function runCmd(
           ? stderr.toString('utf8')
           : stderr ?? '';
         if (err) {
+          const killed = err as NodeJS.ErrnoException & {
+            killed?: boolean;
+            signal?: string;
+          };
+          if (killed.killed && killed.signal === 'SIGTERM') {
+            killTree(child);
+            resolve({
+              ok: false,
+              stdout: out,
+              stderr: `${errOut}\ngit command timed out after ${opts.timeout ?? 0}ms (killed process tree)`.trim(),
+            });
+            return;
+          }
           resolve({ ok: false, stdout: out, stderr: errOut });
         } else {
           resolve({ ok: true, stdout: out, stderr: errOut });

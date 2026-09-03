@@ -44,6 +44,11 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
     GroupChat*/GroupMember* 系生成类型 re-export；`streamGroupChat` 群流封装
     （GroupChatStreamEnvelope 扩展 sender/member 身份字段、GroupChatTypingEvent、
     GroupReplayLogEntry 回放行带 metadata 身份——平铺排序与身份还原的取数基座）
+  - 群聊「@我」未读记忆（lib/group-unread.ts，2026-09-02）：localStorage 已读锚
+    单源（session-list-panel 红点渲染 / group-chat-panel 写锚共用防口径漂移）；
+    ql-20260903-007 起锚改**服务端时间戳**（回放 maxLogTimestamp / 实时事件
+    env.timestamp）——判定方 last_mention.ts 是后端时钟，此前客户端 now 跨时钟域
+    比较会吞红点/出假红点；空群（无服务端 ts）不写锚，缺省参数回落客户端时钟
   - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / permission / agent-profiles / custom-skills
   - spec 域：scan-docs / scan-docs-tree / spec-workspaces / knowledge / incidents / releases / health / git-identities / file/ / auth(+auth/ 子目录) / ppm/*（含 format / types / kanban）/ api/llm-providers（拆分客户端首例）
 - 取数 hooks：

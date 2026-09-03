@@ -49,6 +49,12 @@ git 命令: execFile(非 shell) + cwd:workdir（防注入）
   worktree add/merge/remove 是 IO 型重命令 120s（GIT_WORKTREE_TIMEOUT_MS）——
   10s 在大仓库(7705 文件) Windows 冷缓存下必杀 git worktree add，
   实证分身 worktree_create_failed 派发必败（git stderr 仅进度条无 fatal 行）
+超时杀树(ql-20260903-007): 超时特征(err.killed+signal=SIGTERM) → killTree 补杀
+  孙进程（win32 `taskkill /PID <pid> /T /F`——git hook/filter 可 spawn 孙进程，
+  单杀 git.exe 后孙进程残留继续写目录；Unix 仅 SIGKILL 直子——execFile 未
+  detached，kill(-pid) 会自杀 daemon 进程组）+ stderr 追加 `timed out` 标记行
+  （rev-parse 的 git_timeout 映射此前对真实超时恒不命中）。与 preflight.ts
+  killTree 同款坑两处实现，语义须同步维护（不互相 import）
 ```
 
 ## 注意事项

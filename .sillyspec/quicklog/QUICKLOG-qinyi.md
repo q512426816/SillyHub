@@ -56,3 +56,19 @@
 方案：①delegate._via_rpc_or_degrade补timeout透传，worktree add/merge/remove显式传_WORKTREE_RPC_TIMEOUT_SECONDS=150s（>daemon 120s）；②notify_parent_workers_done改F04同款时间戳波次（键值=本波done_at，SETNX失败新波严格大于才覆盖重投）+mcp_tools调用点hoist is_new_signal双消费方共用并传signal_at；③prepend每页伪runId全量加#e<全量数字游标>后缀（秒级短码改全量防同秒撞）；④直聊头如实表述不投影群时间线+群成员可查会话（保留测试断言短语）；⑤own-send判定补e.isSelf过滤+首帧分支播种own-send基线（修测试暴露的回放旧own消息误判）；⑥realRunId命中改从数组尾部反向取最末块，实时增量落当前尾部块
 结果：后端：test_worker_subsession_done 20 passed（含新增孙重开工二波再唤醒用例）、test_group_direct+test_dispatch_worker_caller_worktree 24、test_group_logs_pagination 14、test_subsession_recursion_dispatch 13，ruff check+format 0；前端：page.test 28（新增多run翻页不撞key+长run翻页SSE增量落末块两用例）、group-chat-panel 29（新增他人发言不拽底用例）、variant+turn-timeline-scroll+runtime-session-helpers 34，tsc 0、eslint 0错误；模块文档4处同步；另登记docs/sillyspec/2026-09-03-quicksync-conflict-granularity.md（spec-sync整树冲突粒度活坑）
 审计：⚖️ 归属切分：7 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/group/router.py, backend/app/modules/daemon/run_sync/service.py, backend/app/modules/daemon/tests/test_group_direct.py, backend/openapi.json, frontend/src/lib/api-types.ts, backend/app/modules/daemon/tests/test_group_p1.py, docs/sillyspec/2026-09-03-quicksync-conflict-granularity.md
+
+## ql-20260903-007-dc97 | 2026-09-03 09:48:38 | 24h审计4低危修复——群未读时钟域/排队链标记sender/host-fs超时杀树/presence续期独立任务
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/group-unread.ts（markGroupOpened服务端锚+头注时钟域说明）
+- frontend/src/components/group-chat/group-chat-panel.tsx（回放lastTs/实时env.timestamp两写锚点，挂载撤客户端now）
+- backend/app/modules/daemon/session/service.py（链标记sender段写入+正则+还原+派发注释对齐）
+- backend/app/modules/agent/service.py（presence内联首触+独立续期任务+finally cancel）
+- sillyhub-daemon/src/host-fs-handler.ts（killTree+runCmd超时检出杀树+timed out标记行）
+- sillyhub-daemon/tests/host-fs-handler-runcmd-kill.test.ts（新增KT1/KT2杀树与误触发两用例）
+需求：24h审计4低危修复——群未读时钟域/排队链标记sender/host-fs超时杀树/presence续期独立任务
+根因：①已读锚写客户端时钟与last_mention服务端ts跨时钟域比较（浏览器快Δ秒吞红点不可恢复）；②排队链标记正则无sender捕获组而派发侧读sender_user_id恒None，普通成员排队附件404转失败（注释与实现不一致）；③execFile超时只杀直接子进程，git hook/filter孙进程残留继续写目录，且rev-parse的git_timeout映射对真实超时恒不命中；④presence触摸被get_message 25s量化（实际间隔~50s余量10s非注释15s）且生成器卡yield背压时touch停摆绿点被TTL误回收。低危②KEYS→SCAN已被并发会话修复跳过
+方案：①markGroupOpened(serverIso)服务端锚优先：回放maxLogTimestamp+onLog env.timestamp两写锚点，空群不写锚，挂载不再写客户端now；②_prepend按turn_metadata.sender_user_id追加sender=<uuid>段（uuid校验防脏）+_split正则还原，旧格式条目零变化；③runCmd超时特征（err.killed+signal=SIGTERM）检出→killTree（win32 taskkill /PID /T /F；Unix仅SIGKILL直子——execFile未detached，kill(-pid)会自杀daemon进程组）+stderr追加timed out标记行；④presence连接内联首触（保测试确定性）+独立asyncio任务45s续期+finally cancel，与SSE产出节奏完全解耦
+结果：后端：test_group_cross_mention+test_group_realtime 45 passed（新增sender roundtrip/集成sender断言/背压存活用例，节流测试改轮询）、mention_pipeline+group_direct相邻54 passed、ruff check+format 0；前端：group-chat-panel 47（重写挂载即写为服务端锚语义）、session-list-panel 71、mobile-session-list 17、tsc 0；daemon：host-fs-handler-runcmd-kill新2用例+worktree回归21 passed、typecheck 0。模块文档4处同步（sillyhub-daemon host-fs-handler/backend daemon×2/SillyHub frontend_lib）
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/file/router.py, backend/app/modules/file/tests/test_file_api.py, frontend/src/lib/__tests__/query-client.test.ts, frontend/src/lib/query-client.ts

@@ -67,10 +67,13 @@ def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
 # ── 群实时通道常量（2026-09-01-session-group-chat task-06，design §5.4）────────
 #
 # presence key TTL 60s + touch 间隔 45s（留 15s 余量）：``stream_session_logs``
-# 的群分支循环内按时间驱动 ``SET key "1" EX 60`` 续期；连接断开后 key 至多
-# 60s 自然过期（在线绿点熄灭，纯 ephemeral 不落库）。key 命名
-# ``group_presence:{group_id}:{user_id}`` 由 daemon/group/service.py 的
-# ``group_presence_key`` 单源构造（本模块只收拼好的 key，避免跨模块 import 环）。
+# 群分支连接时内联首触一次，此后由**独立 asyncio 任务**按 45s 续期
+# ``SET key "1" EX 60``（ql-20260903-007：原循环顶部检查被 ``get_message(25s)``
+# 量化成实际 ~50s 间隔（余量仅 ~10s），且生成器卡在 ``yield``（慢消费端 TCP
+# 背压）时 touch 一并停摆——独立任务不受流产出节奏影响）；连接断开任务随
+# finally cancel，key 至多 60s 自然过期（在线绿点熄灭，纯 ephemeral 不落库）。
+# key 命名 ``group_presence:{group_id}:{user_id}`` 由 daemon/group/service.py
+# 的 ``group_presence_key`` 单源构造（本模块只收拼好的 key，避免跨模块 import 环）。
 GROUP_PRESENCE_TTL_SEC = 60
 GROUP_PRESENCE_TOUCH_INTERVAL_SEC = 45.0
 
@@ -1259,19 +1262,20 @@ class AgentService:
           待发 typing 消息（payload 内已带 ``event='typing'``）以默认 ``data``
           帧透传，与日志事件**合流进同一 SSE 流**（前端不加连接数）；
         * ``presence_key``：群在线 presence key（``group_presence:{gid}:{uid}``），
-          循环内按时间驱动续期（间隔 > 45s，``SET EX 60``）——不挂在 keepalive
-          帧产出上（高流量时 keepalive 不产帧，touch 却必须照常续，否则活跃
-          观看者的 presence 会被 TTL 误回收）。touch 失败仅 warning 不断流。
+          连接建立即内联首触（``SET EX 60``），此后由独立 asyncio 任务按 45s
+          续期（ql-20260903-007：脱离循环节奏——不被 ``get_message`` 25s 量化，
+          也不受 ``yield`` 背压挂起影响，慢消费端在线状态不再被 TTL 误回收）。
+          touch 失败仅 warning 不断流。
 
         取消 / 异常路径：finally 对**两个** pubsub 各自隔离清理（unsubscribe
-        吞异常 + aclose 必达，防 Redis 订阅连接泄漏——对照单订阅清理先例）。
+        吞异常 + aclose 必达，防 Redis 订阅连接泄漏——对照单订阅清理先例），
+        presence 续期任务同点 cancel。
         """
         redis = get_redis()
         pubsub = redis.pubsub()
         typing_pubsub = redis.pubsub() if typing_channel is not None else None
         channel = f"agent_session:{agent_session_id}"
-        loop = asyncio.get_running_loop()
-        last_presence_touch: float | None = None
+        presence_touch_task: asyncio.Task[None] | None = None
         try:
             # Flush proxy buffers immediately with an initial comment.
             yield ": connected\n\n"
@@ -1279,6 +1283,34 @@ class AgentService:
             await pubsub.subscribe(channel)
             if typing_pubsub is not None and typing_channel is not None:
                 await typing_pubsub.subscribe(typing_channel)
+
+            # ql-20260903-007：presence 续期独立任务——首触内联（连接建立即在线，
+            # 保持确定性），后续按 GROUP_PRESENCE_TOUCH_INTERVAL_SEC 续期。任务与
+            # SSE 产出解耦：生成器卡在 yield（慢消费端背压）时续期照常，TTL 60s
+            # 不再被误回收。touch 失败仅 warning（Redis 抖动不杀任务）。
+            if presence_key is not None:
+                try:
+                    await redis.set(presence_key, "1", ex=GROUP_PRESENCE_TTL_SEC)
+                except Exception:
+                    log.warning(
+                        "group_presence_touch_failed",
+                        presence_key=presence_key,
+                        exc_info=True,
+                    )
+
+                async def _touch_presence_forever() -> None:
+                    while True:
+                        await asyncio.sleep(GROUP_PRESENCE_TOUCH_INTERVAL_SEC)
+                        try:
+                            await redis.set(presence_key, "1", ex=GROUP_PRESENCE_TTL_SEC)
+                        except Exception:
+                            log.warning(
+                                "group_presence_touch_failed",
+                                presence_key=presence_key,
+                                exc_info=True,
+                            )
+
+                presence_touch_task = asyncio.create_task(_touch_presence_forever())
 
             # Race-condition guard: if the session ended while the client was
             # connecting, task-05's end_session may have already published
@@ -1292,21 +1324,8 @@ class AgentService:
                 return
 
             while True:
-                # presence 续期（task-06 §5.4）：时间驱动（首个循环立即 touch 一次
-                # ——连接建立即在线），此后每 > 45s 一次，TTL 60s 留 15s 余量。
-                if presence_key is not None and (
-                    last_presence_touch is None
-                    or loop.time() - last_presence_touch >= GROUP_PRESENCE_TOUCH_INTERVAL_SEC
-                ):
-                    try:
-                        await redis.set(presence_key, "1", ex=GROUP_PRESENCE_TTL_SEC)
-                        last_presence_touch = loop.time()
-                    except Exception:
-                        log.warning(
-                            "group_presence_touch_failed",
-                            presence_key=presence_key,
-                            exc_info=True,
-                        )
+                # presence 续期已移至独立任务（见上 ql-20260903-007）——本循环
+                # 只负责流产出，不被 touch 间隔与 get_message 量化耦合。
                 try:
                     message = await asyncio.wait_for(
                         pubsub.get_message(timeout=25),
@@ -1358,7 +1377,10 @@ class AgentService:
         finally:
             # 同上：unsubscribe 异常隔离，aclose 必达（close 已废弃）。群路径的
             # typing 订阅同样两步清理——两 pubsub 各自隔离，一个清理失败不阻断
-            # 另一个的释放（防连接泄漏，任务卡 constraints）。
+            # 另一个的释放（防连接泄漏，任务卡 constraints）。presence 续期
+            # 任务最后 cancel（ql-20260903-007：防生成器关闭后任务残留）。
+            if presence_touch_task is not None:
+                presence_touch_task.cancel()
             try:
                 await pubsub.unsubscribe(channel)
             except Exception:

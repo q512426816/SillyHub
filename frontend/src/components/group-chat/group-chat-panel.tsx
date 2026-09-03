@@ -840,7 +840,9 @@ export function GroupChatPanel({
    *    清零早于首拉（缓存空 no-op）+ invalidate 与首拉去重」的微时序——旧值
    *    5 落缓存后最终仍被清零。 ── */
   useEffect(() => {
-    markGroupOpened(groupId);
+    // ql-20260903-007：已读锚改服务端时钟域——挂载不再写客户端 now（与
+    // last_mention.ts 服务端时钟跨域比较会吞红点），由回放落地（maxLogTimestamp）
+    // 与实时事件（env.timestamp）两处写锚；无消息的空群无 mention 可丢，不写。
     const clearUnreadInCache = () => {
       qc.setQueryData<GroupChatListItemRead[]>(
         ["groupChats", "list", null],
@@ -908,7 +910,12 @@ export function GroupChatPanel({
         setEntries(built);
         for (const e of built) seenIdsRef.current.add(e.id);
         const lastTs = maxLogTimestamp(logs);
-        if (lastTs) lastLogTsRef.current = lastTs;
+        if (lastTs) {
+          lastLogTsRef.current = lastTs;
+          // ql-20260903-007：打开群回放落地 → 已读锚 = 最新消息的服务端 ts
+          // （时钟域与 last_mention.ts 一致，见 lib/group-unread.ts 头注）。
+          markGroupOpened(groupId, lastTs);
+        }
       } catch {
         /* 回放失败 → 空时间线起步，SSE resync/轮后对账兜底（不阻断订阅）。 */
       }
@@ -919,7 +926,8 @@ export function GroupChatPanel({
         {
           onLog: (env) => {
             // 在群内实时收到行 → 推进已读记忆（打开群期间的 @不算未读）。
-            markGroupOpened(groupId);
+            // 锚用事件服务端 timestamp（ql-20260903-007 时钟域统一）。
+            markGroupOpened(groupId, env.timestamp);
             const result = parseGroupLiveLog(env, currentUserIdRef.current);
             if (result.type === "revoke") {
               setEntries((prev) =>

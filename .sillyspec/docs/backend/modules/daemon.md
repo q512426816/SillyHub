@@ -74,7 +74,10 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
     prepare_interactive_dispatch(pinned_runtime_id=成员机器, stage='group_member')
     走 grants 授权分支（pinned_skip_owner_check=False，见 agent 卡 placement）；
     ③回填成员表 shadow_session_id/shadow_status。忙轮排队 AgentSessionQueuedMessage
-    按入队时刻摘要快照派发（不吃后续群进展）。
+    按入队时刻摘要快照派发（不吃后续群进展）；群链信息经 prompt 头
+    `[GROUP_CHAIN carrier depth (source)? (sender)?]` 标记行透传（ql-20260903-007
+    补 sender=<uuid> 段——派发侧附件归属基准读链标记 sender_user_id，此前只读
+    不写恒 None，普通成员的排队附件 404 转失败）。
   - 互@护栏（Redis 全 TTL 自清理）：`group_chain:{载体run_id}` 链去重集+深度
     （cross_mention_depth 默认 2、TTL 30min）、`group_rate` 60s 滑窗限频 6 次/分钟、
     不自我触发；链状态经 run metadata source_carrier_run_id/chain_depth 双轨可查。
@@ -82,7 +85,9 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
     边界生效；runtime/workspace 变更影子 end+pending 按新六要素懒重建（记忆重置）。
   - typing/presence：`group_typing:{gid}` pub/sub（preview ≤400 字、TTL 2.5s，不落库
     不进上下文，agent 触发时后端自动发一条）+ `group_presence:{gid}:{uid}` TTL 60s
-    （群 SSE 生成器循环续期）。
+    （群 SSE 连接建立内联首触 + 独立 asyncio 任务按 45s 续期，ql-20260903-007——
+    原循环顶部检查被 get_message 25s 量化成实际 ~50s 间隔，且生成器卡在 yield
+    （慢消费端背压）时 touch 停摆、绿点被 TTL 误回收；独立任务两问题一并消除）。
   - 桥接投影（run_sync/service.py 两改动点）：①submit_messages **事务内双写投影行**
     ——影子行落库后同事务插新 PK 投影行（run_id=群载体 run、dedup_key 复用、
     metadata={member_id, member_name, source_log_id}），PublishIntent 增

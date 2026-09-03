@@ -1190,6 +1190,40 @@ class TestQueuedChainPassthrough:
         assert parsed["source_carrier_run_id"] == metadata["source_carrier_run_id"]
         assert parsed["chain_depth"] == 3
 
+    def test_marker_roundtrip_with_sender(self) -> None:
+        """ql-20260903-007：sender_user_id 入标记（sender=<uuid> 段）可还原——
+        派发侧附件归属基准读链标记 sender_user_id，此前只读不写恒 None（普通
+        成员的排队附件 404 → 条目 failed）。非法值（非 uuid）不写段不炸。
+        """
+        sender = uuid.uuid4()
+        metadata = {
+            "source_carrier_run_id": str(uuid.uuid4()),
+            "chain_depth": 1,
+            "source": "shadow_direct",
+            "sender_user_id": str(sender),
+        }
+        prompt = _prepend_group_chain_marker("直聊正文", metadata)
+        assert prompt.startswith("[GROUP_CHAIN carrier=")
+        assert f"sender={sender}" in prompt.splitlines()[0]
+        stripped, parsed = _split_group_chain_marker(prompt)
+        assert stripped == "直聊正文"
+        assert parsed is not None
+        assert parsed["sender_user_id"] == str(sender)
+        assert parsed["source"] == "shadow_direct"
+
+        # 非 uuid sender（脏数据）→ 不写段；其余字段照常。
+        dirty = {**metadata, "sender_user_id": "not-a-uuid"}
+        prompt2 = _prepend_group_chain_marker("正文", dirty)
+        assert "sender=" not in prompt2.splitlines()[0]
+        _stripped2, parsed2 = _split_group_chain_marker(prompt2)
+        assert parsed2 is not None and "sender_user_id" not in parsed2
+
+        # 旧格式条目（无 sender 段）照常解析（存量队列零变化）。
+        legacy = f"[GROUP_CHAIN carrier={uuid.uuid4()} depth=0]\n旧正文"
+        stripped3, parsed3 = _split_group_chain_marker(legacy)
+        assert stripped3 == "旧正文"
+        assert parsed3 is not None and "sender_user_id" not in parsed3
+
     def test_non_chain_prompt_untouched(self) -> None:
         assert _prepend_group_chain_marker("普通消息", None) == "普通消息"
         assert _prepend_group_chain_marker("普通消息", {"chain_depth": 0}) == "普通消息"
@@ -1214,6 +1248,8 @@ class TestQueuedChainPassthrough:
             agent_members=[_agent_config(env.runtime.id)],
         )
         group_id = uuid.UUID(data["id"])
+        # 提前捕获属主 id（派发路径多次 commit 后 env.owner 属性过期不可再读）。
+        owner_id = env.owner.id
         member = await _agent_member_row(db_session, group_id)
         lease = DaemonTaskLease(
             id=uuid.uuid4(),
@@ -1292,7 +1328,10 @@ class TestQueuedChainPassthrough:
         assert len(entries) == 1
         entry = entries[0]
         assert entry.prompt is not None
-        assert entry.prompt.startswith(f"[GROUP_CHAIN carrier={carrier_id} depth=0]")
+        # ql-20260903-007：入队标记行带 sender 段（附件归属基准的载体）。
+        assert entry.prompt.startswith(
+            f"[GROUP_CHAIN carrier={carrier_id} depth=0 sender={owner_id}]"
+        )
         assert "@小码 排队的追问" in entry.prompt
 
         # 本轮结束（busy run 置终态）→ 派发：新 run 的 user_input metadata 带链。
@@ -1349,6 +1388,9 @@ class TestQueuedChainPassthrough:
         assert metadata is not None
         assert metadata["source_carrier_run_id"] == str(carrier_id)
         assert metadata["chain_depth"] == 0
+        # ql-20260903-007：sender 段经标记行还原进新 run metadata——派发侧
+        # 附件归属基准（_chain_sender）由此取值，不再恒 None。
+        assert metadata["sender_user_id"] == str(owner_id)
         # 标记行已剥离——daemon 看到的 prompt 与即时注入轮一致。
         assert log_rows[0].content_redacted is not None
         assert "[GROUP_CHAIN" not in log_rows[0].content_redacted

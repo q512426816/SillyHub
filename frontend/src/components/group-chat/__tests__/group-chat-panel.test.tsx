@@ -1668,20 +1668,20 @@ describe("GroupChatPanel Markdown 渲染与已读记忆（quick）", () => {
     expect(screen.getByTestId("group-stream-cursor")).toBeTruthy();
   });
 
-  it("打开群即写已读记忆（localStorage now）+ 实时 log 事件推进时间戳", async () => {
-    harness.logsJson = [];
+  it("打开群写已读记忆用服务端时间锚（回放 max ts / 实时事件 timestamp），空群不写（ql-20260903-007）", async () => {
+    // 时钟域统一：已读锚与 last_mention.ts 同为服务端时钟——回放落地写
+    // maxLogTimestamp（l-4 06:07:00 为最大 ts，工具行不入时间线但计入锚），
+    // 实时事件写 env.timestamp 原值；空群（无消息=无 mention）不写锚。
+    // 旧断言（挂载写客户端 now）作废：跨时钟域比较会吞 @ 红点。
+    window.localStorage.clear();
+    harness.logsJson = makeReplayLogs();
     renderPanel();
     await waitForStreamWired();
+    expect(
+      window.localStorage.getItem("sillyhub-group-last-open-g-1"),
+    ).toBe("2026-09-01T06:07:00Z");
 
-    // 挂载即写（group-unread key；可解析 ISO）。
-    const openedAt = await waitFor(() => {
-      const raw = window.localStorage.getItem("sillyhub-group-last-open-g-1");
-      expect(raw).toBeTruthy();
-      expect(!Number.isNaN(Date.parse(raw!))).toBe(true);
-      return raw!;
-    });
-
-    // 实时行到达 → 推进（时间戳 >= 打开时刻）。
+    // 实时行到达 → 锚 = 事件服务端 timestamp 原值（非本地时钟）。
     await pushSseEvent({
       event: "log",
       session_id: "s-g-1",
@@ -1689,15 +1689,25 @@ describe("GroupChatPanel Markdown 渲染与已读记忆（quick）", () => {
       log_id: "l-read-1",
       channel: "user_input",
       content: "推进已读",
-      timestamp: "2026-09-01T06:06:30Z",
+      timestamp: "2026-09-01T06:08:30Z",
       sender_member_name: "林一",
       sender_user_id: "u-lin",
     });
     await waitFor(() => {
-      const raw = window.localStorage.getItem("sillyhub-group-last-open-g-1");
-      expect(raw).toBeTruthy();
-      expect(Date.parse(raw!)).toBeGreaterThanOrEqual(Date.parse(openedAt));
+      expect(
+        window.localStorage.getItem("sillyhub-group-last-open-g-1"),
+      ).toBe("2026-09-01T06:08:30Z");
     });
+
+    // 空群（回放无日志）→ 不写锚（保留旧值，不用客户端时钟污染时钟域）。
+    window.localStorage.clear();
+    cleanup();
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+    expect(
+      window.localStorage.getItem("sillyhub-group-last-open-g-1"),
+    ).toBeNull();
   });
 });
 

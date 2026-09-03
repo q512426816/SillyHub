@@ -498,9 +498,13 @@ class DaemonSessionNoCurrentRun(AppError):
 # source_carrier_run_id / chain_depth）入队时拼进 prompt 头部标记行，派发侧
 # 解析剥离后写入新 run 的 user_input metadata_：排队派发轮与即时注入轮对
 # turn_completed 互@检测的链可见性一致（task-05 投影 fail-open 缺口闭合）。
+# ql-20260903-007：补 ``sender=<uuid>`` 段——派发侧附件归属基准读链标记的
+# sender_user_id，此前只读不写恒 None（归属回退影子属主=群主，普通成员的
+# 附件 404 → 排队条目 failed，消息丢失；注释与实现不一致）。
 
 _GROUP_CHAIN_MARKER_RE = re.compile(
-    r"^\[GROUP_CHAIN carrier=([0-9a-fA-F-]{36}) depth=(\d+)(?: source=([A-Za-z0-9_]+))?\]",
+    r"^\[GROUP_CHAIN carrier=([0-9a-fA-F-]{36}) depth=(\d+)"
+    r"(?: source=([A-Za-z0-9_]+))?(?: sender=([0-9a-fA-F-]{36}))?\]",
     re.IGNORECASE,
 )
 
@@ -512,6 +516,10 @@ def _prepend_group_chain_marker(prompt: str, turn_metadata: dict | None) -> str:
     ``source=<token>`` 段（当前唯一取值 "shadow_direct"）——直聊轮排队兜底后
     派发的新 run 仍带 source 标记，投影层判定不回退成全投影（否则直聊内容
     经排队派发整轮泄进群时间线）。
+
+    ql-20260903-007：``turn_metadata.sender_user_id``（群链路恒写，task-04
+    互@检测同源）非空且为合法 uuid 时追加 ``sender=<uuid>`` 段——派发侧据此
+    还原附件归属基准（群附件上传者可能是普通成员，影子属主是群主）。
     """
     if not isinstance(turn_metadata, dict):
         return prompt
@@ -525,13 +533,21 @@ def _prepend_group_chain_marker(prompt: str, turn_metadata: dict | None) -> str:
         depth = 0
     source = turn_metadata.get("source")
     source_part = f" source={source}" if isinstance(source, str) and source.isidentifier() else ""
-    return f"[GROUP_CHAIN carrier={carrier} depth={depth}{source_part}]\n{prompt}"
+    sender_part = ""
+    sender = turn_metadata.get("sender_user_id")
+    if isinstance(sender, str) and sender:
+        try:
+            sender_part = f" sender={uuid.UUID(sender)}"
+        except (ValueError, AttributeError):
+            sender_part = ""
+    return f"[GROUP_CHAIN carrier={carrier} depth={depth}{source_part}{sender_part}]\n{prompt}"
 
 
 def _split_group_chain_marker(prompt: str) -> tuple[str, dict | None]:
     """剥离排队 prompt 头部群链标记行 → ``(剩余 prompt, 链 metadata | None)``。
 
-    ``source=`` 段可选（老条目无该段 → metadata 不带 source 键，群 @ 轮零变化）。
+    ``source=`` / ``sender=`` 段可选（老条目无该段 → metadata 不带对应键，
+    旧条目派发零变化）。
     """
     match = _GROUP_CHAIN_MARKER_RE.match(prompt or "")
     if match is None:
@@ -542,6 +558,8 @@ def _split_group_chain_marker(prompt: str) -> tuple[str, dict | None]:
     }
     if match.group(3):
         metadata["source"] = match.group(3)
+    if match.group(4):
+        metadata["sender_user_id"] = match.group(4)
     return prompt[match.end() :].lstrip("\r\n"), metadata
 
 
@@ -5084,9 +5102,10 @@ class SessionService:
             # 新 run 的 user_input 日志（turn_completed 互@检测读取）。
             dispatch_prompt, chain_metadata = _split_group_chain_marker(entry.prompt or "")
             # 群聊附件（FR-05 补遗）：群排队条目派发时的附件归属基准 = 实际
-            # 发送者（链标记 sender_user_id——仅群链路条目携带；附件在发送时
-            # 已过发送者归属校验并绑定群会话）。非群条目/无标记 → None 走会话
-            # 属主既有语义。
+            # 发送者（链标记 sender_user_id——仅群链路条目携带，ql-20260903-007
+            # 起入队侧写入 sender= 段；修复前入队的存量条目无该段 → None 回退
+            # 属主语义；附件在发送时已过发送者归属校验并绑定群会话）。非群
+            # 条目/无标记 → None 走会话属主既有语义。
             attachment_owner_user_id: uuid.UUID | None = None
             _chain_sender = (chain_metadata or {}).get("sender_user_id")
             if isinstance(_chain_sender, str) and _chain_sender:
