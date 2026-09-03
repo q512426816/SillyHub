@@ -26,6 +26,12 @@ describe("makeQueryClient retry strategy (D-002@v1)", () => {
     expect(retry(3, apiError(500))).toBe(false);
     expect(retry(0, apiError(503))).toBe(true);
   });
+  it("network error (status=0, e.g. backend restart window) retries up to 3", () => {
+    const netErr = new ApiError(0, { code: "network_error", message: "Failed to fetch", request_id: null, details: null });
+    expect(retry(0, netErr)).toBe(true);
+    expect(retry(2, netErr)).toBe(true);
+    expect(retry(3, netErr)).toBe(false);
+  });
   it("non-ApiError no retry", () => {
     expect(retry(0, new Error("n"))).toBe(false);
     expect(retry(0, null)).toBe(false);

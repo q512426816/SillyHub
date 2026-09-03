@@ -81,6 +81,12 @@ export interface ApiRequestOptions extends Omit<RequestInit, "headers" | "body">
    * 后端劣化/网络挂起时请求无限 pending、前端占位轮永远「排队中」无兜底；
    * 缺省不设（读操作沿用无超时语义零回归）。调用方自带 `signal` 的外部
    * abort 仍走原 network_error 映射（streamSession resync 静默依赖它）。
+   *
+   * quick 群聊卡加载修复（2026-09-03）：读请求（GET/HEAD，method 缺省即 GET）
+   * 缺省套 30s 默认超时——后端容器重建期前端代理连接可能长时间挂起（无
+   * HTTP 响应也无网络错误），查询 isLoading 恒真导致「加载中」永不退出；
+   * 超时后抛 status=0 ApiError，交由 query-client retry（status=0 可重试）
+   * 自愈或落失败态。写请求仍需调用方显式传 timeoutMs（防慢写被误杀重发）。
    */
   timeoutMs?: number;
   /** 超时 ApiError 的用户可见文案（错误横幅直接展示 message；缺省通用文案）。 */
@@ -126,6 +132,10 @@ export async function apiFetch<T = unknown>(
 
   // ql-20260831-006-6d67：可选超时。合并调用方自带 signal——外部 abort 走原
   // network_error 语义（abort 原因区分：timedOut 只由超时计时器置位）。
+  // quick 群聊卡加载修复：读请求缺省 30s 超时（见 ApiRequestOptions.timeoutMs 注释）。
+  const method = String(rest.method ?? "GET").toUpperCase();
+  const effectiveTimeoutMs =
+    timeoutMs ?? (method === "GET" || method === "HEAD" ? 30_000 : undefined);
   const timeoutController = new AbortController();
   let timedOut = false;
   const externalSignal = rest.signal;
@@ -137,11 +147,11 @@ export async function apiFetch<T = unknown>(
     else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
   }
   const timeoutTimer =
-    timeoutMs != null
+    effectiveTimeoutMs != null
       ? setTimeout(() => {
           timedOut = true;
           timeoutController.abort();
-        }, timeoutMs)
+        }, effectiveTimeoutMs)
       : null;
   init.signal = timeoutController.signal;
 

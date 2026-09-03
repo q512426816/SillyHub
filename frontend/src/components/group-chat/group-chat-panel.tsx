@@ -1745,9 +1745,22 @@ export function GroupChatPanel({
               data-testid="group-chat-timeline-empty"
               className="py-10 text-center text-xs text-muted-foreground"
             >
-              {detailQ.isLoading || presenceListQ.isLoading
-                ? "群消息加载中…"
-                : "还没有消息——发第一句，@昵称 唤起指定 Agent 成员"}
+              {detailQ.isError ? (
+                <>
+                  群消息加载失败。
+                  <button
+                    type="button"
+                    onClick={() => void detailQ.refetch()}
+                    className="ml-1 underline underline-offset-2 hover:text-foreground"
+                  >
+                    点击重试
+                  </button>
+                </>
+              ) : detailQ.isLoading || presenceListQ.isLoading ? (
+                "群消息加载中…"
+              ) : (
+                "还没有消息——发第一句，@昵称 唤起指定 Agent 成员"
+              )}
             </p>
           )}
           {entries.map((entry) => (
@@ -2018,13 +2031,24 @@ export function GroupChatPanel({
       ) : (
         <aside
           data-testid="group-member-panel-loading"
-          aria-label="群成员面板加载中"
-          className="flex min-h-0 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-dashed border-border bg-card px-6 text-center shadow-sm"
+          aria-label={detailQ.isError ? "群成员面板加载失败" : "群成员面板加载中"}
+          className="flex h-full min-h-0 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-dashed border-border bg-card px-6 text-center shadow-sm"
         >
           <Users aria-hidden className="h-6 w-6 text-brand-600" />
-          <p className="text-xs text-muted-foreground">群成员加载中…</p>
-          {detailQ.isError && (
-            <p className="text-xs text-destructive">群详情加载失败，稍后自动重试</p>
+          {detailQ.isError ? (
+            <>
+              <p className="text-xs text-destructive">群详情加载失败</p>
+              <button
+                type="button"
+                data-testid="group-detail-retry"
+                onClick={() => void detailQ.refetch()}
+                className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-accent"
+              >
+                重试
+              </button>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">群成员加载中…</p>
           )}
         </aside>
       )}
@@ -2052,6 +2076,17 @@ export function GroupChatPanel({
               onSessionListRefresh?.();
             }}
           />
+        ) : detailQ.isError ? (
+          <p className="p-6 text-center text-xs text-destructive">
+            群详情加载失败
+            <button
+              type="button"
+              onClick={() => void detailQ.refetch()}
+              className="ml-1 underline underline-offset-2"
+            >
+              点击重试
+            </button>
+          </p>
         ) : (
           <p className="p-6 text-center text-xs text-muted-foreground">群成员加载中…</p>
         )}

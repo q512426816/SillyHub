@@ -66,6 +66,23 @@ async def test_download_image_inline(
     assert resp.headers["content-type"].startswith("image/png")
 
 
+async def test_download_inline_image_cache_control(
+    file_client: AsyncClient, auth_headers: dict
+) -> None:
+    """inline 图片允许浏览器私有缓存（群聊头像防重复拉取）；attachment 不加。"""
+    up = await file_client.post("/api/file/upload", headers=auth_headers, files=png_upload())
+    fid = up.json()["id"]
+    img = await file_client.get(f"/api/file/{fid}", headers=auth_headers)
+    assert img.headers.get("cache-control") == "private, max-age=86400"
+    pdf = await file_client.post(
+        "/api/file/upload",
+        headers=auth_headers,
+        files={"file": ("doc.pdf", b"%PDF-fake", "application/pdf")},
+    )
+    doc = await file_client.get(f"/api/file/{pdf.json()['id']}", headers=auth_headers)
+    assert doc.headers.get("cache-control") is None
+
+
 async def test_download_non_image_attachment(file_client: AsyncClient, auth_headers: dict) -> None:
     up = await file_client.post(
         "/api/file/upload",

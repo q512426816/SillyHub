@@ -106,10 +106,15 @@ async def download_file(
     ascii_name = row.original_name.encode("ascii", "ignore").decode() or "file"
     ascii_name = ascii_name.replace('"', "").strip() or "file"  # BS-9:去引号防注入
     cd = f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(row.original_name)}"
+    headers = {"Content-Disposition": cd}
+    # inline 图片（头像等）内容寻址不可变：允许浏览器私有缓存一天，避免群聊
+    # 时间线每条消息/成员行都重新拉同一头像（实测单次打开重复请求数十次）。
+    if disposition == "inline":
+        headers["Cache-Control"] = "private, max-age=86400"
     return StreamingResponse(
         stream,
         media_type=row.mime_type,
-        headers={"Content-Disposition": cd},
+        headers=headers,
     )
 
 

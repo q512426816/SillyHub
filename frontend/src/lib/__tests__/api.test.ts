@@ -132,9 +132,30 @@ describe("apiFetch timeout（ql-20260831-006-6d67）", () => {
     });
   });
 
-  it("不传 timeoutMs 时无超时行为（读操作零回归：挂起即挂起，不 abort）", async () => {
+  it("GET 缺省 30s 默认超时（quick 群聊卡加载：代理挂起不再永久 pending）", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementationOnce(hangUntilAborted);
+      const pending = apiFetch("/api/example");
+      const caught = pending.catch((e: unknown) => e as ApiError);
+      await vi.advanceTimersByTimeAsync(29_999);
+      // 默认超时未到：仍挂起
+      const early = await Promise.race([
+        caught.then(() => "settled"),
+        Promise.resolve("pending"),
+      ]);
+      expect(early).toBe("pending");
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await caught;
+      expect(err).toMatchObject({ status: 0, code: "timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("写请求（POST）不传 timeoutMs 时无默认超时（慢写不误杀；显式传值不受影响）", async () => {
     fetchMock.mockImplementationOnce(hangUntilAborted);
-    const pending = apiFetch("/api/example");
+    const pending = apiFetch("/api/example", { method: "POST", json: { a: 1 } });
     // 等一小段真实时间确认请求仍 pending（未被动 abort 抛错）。
     const outcome = await Promise.race([
       pending.then(
