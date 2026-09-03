@@ -3958,7 +3958,15 @@ export interface paths {
         get: operations["get_group_chat_api_daemon_group_chats__group_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Group Chat
+         * @description 删除群=软删（design §4：群主/workspace admin；活跃群先 end 收口再双置位）。
+         *
+         *     置位链路/幂等/权限归 service：非群主成员 403 中文文案、非成员/已删群
+         *     404 不泄露存在性——已删群重复删除同为 404（软删过滤天然幂等边界，
+         *     design §7），非 204。
+         */
+        delete: operations["delete_group_chat_api_daemon_group_chats__group_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -3982,6 +3990,46 @@ export interface paths {
          * @description 解散群：end 群会话 + 全部影子会话 + 影子队列清理（design §8 group.ended）。
          */
         post: operations["end_group_chat_api_daemon_group_chats__group_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Group Chat
+         * @description 归档群（design §4：群主/workspace admin；幂等——已归档重复归档无操作）。
+         */
+        post: operations["archive_group_chat_api_daemon_group_chats__group_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive Group Chat
+         * @description 取消归档群（design §4：群主/workspace admin；幂等——未归档重复取消无操作）。
+         */
+        post: operations["unarchive_group_chat_api_daemon_group_chats__group_id__unarchive_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12429,6 +12477,7 @@ export interface components {
             /** Sillyspec Latest Version */
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["DaemonHeartbeatSillySpecUpdate"] | null;
+            sillyspec_status?: components["schemas"]["DaemonHeartbeatSillySpecStatus"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
         };
@@ -12470,6 +12519,92 @@ export interface components {
             runtime_id: string;
             /** Allowed Roots */
             allowed_roots: string[];
+        };
+        /**
+         * DaemonHeartbeatSillySpecChange
+         * @description 心跳 sillyspec_status.changes[] 单项（design §4 摘要投影）.
+         *
+         *     envelope 变更行六字段投影（``stages``/``readable``/``command`` 不透传，
+         *     design §4）；``last_active`` 为 ISO8601 字符串原样透传（不收紧成 datetime——
+         *     daemon 侧格式演进不应 422 整条心跳，前端自行解析展示）。
+         */
+        DaemonHeartbeatSillySpecChange: {
+            /** Name */
+            name?: string | null;
+            /** Ghost */
+            ghost?: boolean | null;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Stage Label */
+            stage_label?: string | null;
+            /** Last Active */
+            last_active?: string | null;
+            steps?: components["schemas"]["DaemonHeartbeatSillySpecChangeSteps"] | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecChangeSteps
+         * @description 心跳 sillyspec_status.changes[].steps（design §4 envelope steps 投影）。
+         *
+         *     ``{total, completed}`` 全可选宽松形态——steps 结构若在 envelope 侧演进，
+         *     不应让整条心跳 422（心跳是保活通道，宁宽勿断）。
+         */
+        DaemonHeartbeatSillySpecChangeSteps: {
+            /** Total */
+            total?: number | null;
+            /** Completed */
+            completed?: number | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecConflict
+         * @description 心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.
+         *
+         *     ``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal
+         *     （DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条
+         *     心跳 422）。
+         */
+        DaemonHeartbeatSillySpecConflict: {
+            /** Change */
+            change?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Type */
+            type?: string | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecStatus
+         * @description 心跳 sillyspec_status 载荷（2026-09-02-changes-overview-card FR-05 / Grill B1）.
+         *
+         *     daemon 周期采集 ``progress show --json`` envelope 的摘要投影（design §4）：
+         *     envelope 全量或超 32KB 预算的计数降级版（截断/降级在 daemon 侧执行，backend
+         *     原样落库）。全字段宽松可选——与 DaemonHeartbeatSillySpecUpdate 同理（心跳是
+         *     保活通道，字段缺失或类型演进均不应 422）：不收紧 Literal、不加 max_length，
+         *     时间字段为 ISO8601 字符串原样承载。
+         */
+        DaemonHeartbeatSillySpecStatus: {
+            /** Ok */
+            ok?: boolean | null;
+            /** Errors Count */
+            errors_count?: number | null;
+            /** Warnings Count */
+            warnings_count?: number | null;
+            /** Generated At */
+            generated_at?: string | null;
+            /** Active Changes */
+            active_changes?: number | null;
+            /** Healthy Count */
+            healthy_count?: number | null;
+            /** Ghost Count */
+            ghost_count?: number | null;
+            /** Conflict Count */
+            conflict_count?: number | null;
+            /** Conflict Types */
+            conflict_types?: {
+                [key: string]: number;
+            } | null;
+            /** Changes */
+            changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
+            /** Pending Conflicts */
+            pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
         };
         /**
          * DaemonHeartbeatSillySpecUpdate
@@ -12649,6 +12784,7 @@ export interface components {
             /** Sillyspec Latest Version */
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
+            sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
         };
         /**
          * DaemonMachineUpdate
@@ -14037,6 +14173,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
             /** Pinned */
@@ -14093,6 +14231,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberDetailRead"][];
             pinned?: components["schemas"]["GroupChatPinnedRead"] | null;
@@ -14168,6 +14308,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
             pinned?: components["schemas"]["GroupChatPinnedRead"] | null;
@@ -14263,6 +14405,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
             /** Pinned */
@@ -15487,6 +15631,45 @@ export interface components {
              * Format: date-time
              */
             since: string;
+        };
+        /**
+         * MachineSillySpecStatusRead
+         * @description 机器视图 sillyspec_status 嵌套（2026-09-02-changes-overview-card FR-05）。
+         *
+         *     即 daemon_instances.sillyspec_status JSON 列宽松透出（design §4 摘要）：
+         *     daemon 侧采集的 ``progress show --json`` envelope 摘要（计数 + changes[] +
+         *     pending_conflicts[]）。与 sillyspec_update 不同，backend 不补任何字段（无
+         *     since 注入），落库形态=上报形态，故嵌套项直接复用心跳 DTO 的
+         *     DaemonHeartbeatSillySpecChange / DaemonHeartbeatSillySpecConflict /
+         *     DaemonHeartbeatSillySpecChangeSteps（同形零转换，免三胞胎模型漂移）。
+         *     NULL（总览不可用——sillyspec 未安装或版本过低）→ 机器视图字段为 null。
+         *     时间字段（generated_at/last_active/created_at）为 ISO8601 字符串原样透传。
+         */
+        MachineSillySpecStatusRead: {
+            /** Ok */
+            ok?: boolean | null;
+            /** Errors Count */
+            errors_count?: number | null;
+            /** Warnings Count */
+            warnings_count?: number | null;
+            /** Generated At */
+            generated_at?: string | null;
+            /** Active Changes */
+            active_changes?: number | null;
+            /** Healthy Count */
+            healthy_count?: number | null;
+            /** Ghost Count */
+            ghost_count?: number | null;
+            /** Conflict Count */
+            conflict_count?: number | null;
+            /** Conflict Types */
+            conflict_types?: {
+                [key: string]: number;
+            } | null;
+            /** Changes */
+            changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
+            /** Pending Conflicts */
+            pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
         };
         /**
          * MachineSillySpecUpdateRead
@@ -30277,7 +30460,9 @@ export interface operations {
     };
     list_group_chats_api_daemon_group_chats_get: {
         parameters: {
-            query?: never;
+            query?: {
+                archived?: boolean | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30291,6 +30476,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupChatListItemRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -30359,6 +30553,35 @@ export interface operations {
             };
         };
     };
+    delete_group_chat_api_daemon_group_chats__group_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_group_chat_api_daemon_group_chats__group_id__patch: {
         parameters: {
             query?: never;
@@ -30413,6 +30636,64 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GroupChatRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_group_chat_api_daemon_group_chats__group_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unarchive_group_chat_api_daemon_group_chats__group_id__unarchive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

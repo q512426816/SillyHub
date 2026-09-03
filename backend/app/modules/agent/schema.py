@@ -499,6 +499,9 @@ class GroupChatRead(BaseModel):
     created_at: datetime
     ended_at: datetime | None = None
     deleted_at: datetime | None = None
+    # 2026-09-03-group-chat-archive-delete：群归档时间戳（NULL=未归档），
+    # 列表项/详情读体经继承自动携带。
+    archived_at: datetime | None = None
     members: list[GroupMemberRead] = Field(default_factory=list)
     # quick 群 P2（2026-09-02）：置顶消息快照（settings_json.pinned 透出；
     # log_id/pinned_by/pinned_at/content/member_name）。schema.py 不宜反向

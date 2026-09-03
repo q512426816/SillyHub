@@ -449,6 +449,8 @@ def test_agent_group_chat_table_contract() -> None:
         "created_at",
         "ended_at",
         "deleted_at",
+        # 2026-09-03-group-chat-archive-delete：归档时间戳。
+        "archived_at",
     }
     actual = set(AgentGroupChat.model_fields.keys())
     assert actual == expected, (

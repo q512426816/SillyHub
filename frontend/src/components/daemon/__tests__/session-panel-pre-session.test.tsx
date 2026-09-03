@@ -156,11 +156,20 @@ vi.mock("@/lib/api", async () => {
 
 // page 模式 chrome（SessionConfigBar）数据 hook：无网络，空数据（转真会话态
 // 后 SessionConfigBar 挂载用）。
-vi.mock("@/lib/errors", () => ({
+vi.mock("@/lib/errors", async () => {
   // ql-20260823-008：配置条 provisional 暂存 toast 走 useNotify（App.useApp
   // 上下文）——测试环境无 antd App 包裹，mock 成 noop（先例 config-bar.test 注释）。
-  useNotify: () => ({ success: vi.fn(), error: vi.fn() }),
-}));
+  // ql-20260903-012 后 session-panel 错误出口统一走 errMessage——部分 mock 只覆
+  // useNotify，errMessage 透传真实实现（缺导出会抛 unhandled rejection，预会话
+  // 创建失败用例的 preError 断言挂掉）。
+  const actual = await vi.importActual<typeof import("@/lib/errors")>(
+    "@/lib/errors",
+  );
+  return {
+    ...actual,
+    useNotify: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
+  };
+});
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => ({ items: [] }),

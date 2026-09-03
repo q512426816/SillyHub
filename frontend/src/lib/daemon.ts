@@ -148,6 +148,15 @@ export interface DaemonMachineRead {
   sillyspec_version?: string | null;
   sillyspec_latest_version?: string | null;
   sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
+  /**
+   * sillyspec 活跃变更总览嵌套（2026-09-02-changes-overview-card task-05 / FR-05）：
+   * 即 ``progress show --json`` envelope 摘要（计数 + changes[] 截断 N=50 +
+   * pending_conflicts[]，conflict_types 为冲突类型→计数映射）。null=CLI 能力缺失
+   * （sillyspec 未安装/版本过低，清除语义——卡片显「总览不可用」占位）；
+   * undefined=旧后端缺该字段，同样按占位消费。嵌套类型引用 api-types 生成版
+   * MachineSillySpecStatusRead（宽松透出，字段全 nullable 宁宽勿断），不手写 DTO。
+   */
+  sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
 }
 
 /** GET /api/daemon/machines 查询参数（design §5.1）。 */
@@ -2497,11 +2506,32 @@ const GROUP_CHATS_BASE = "/api/daemon/group-chats";
 /**
  * GET /api/daemon/group-chats — 群列表（当前用户=群成员，design §5.3：群列表
  * 走本端点而非 list_agent_sessions——后者按 user_id=请求者过滤，非群主成员
- * 不可见）。端点无过滤参（workspace 过滤由调用方客户端筛选）。返回成员摘要
- * chips（members 裁剪版）+ online_member_ids + last_message。
+ * 不可见）。返回成员摘要 chips（members 裁剪版）+ online_member_ids +
+ * last_message（workspace 过滤由调用方客户端筛选）。
+ *
+ * 2026-09-03-group-chat-archive-delete task-05 / design §4：archived 三态过滤参
+ * ——true=仅已归档（归档视图，task-06 消费）；false=仅未归档（与 HTTP 默认
+ * 同义的显式形态）；undefined=不拼参走 HTTP 默认 False（后端 Query(default=
+ * False) 安全默认，桌面/移动端群分区等三个无参消费点零改动零回归）。序列化
+ * 照会话侧 archived 先例（本文件 listAgentSessions：布尔→"true"/"false"）。
+ *
+ * **null 暂无法显式命中后端 None（不过滤全量）口径**：FastAPI 0.136.3 +
+ * pydantic 2.13.4 实测 ``bool | None`` Query 无任何 query 字面量可解析为 None
+ * （archived=null/none/空串均 422 bool_parsing；apiFetch query 序列化对 null
+ * 值亦直接跳过不拼参——api.ts「v === null continue」），design §6.2b presence
+ * 显式 null 的「id 查找不过滤」意图待后端补显式全量入口后在此改拼对应字面量；
+ * 签名先按三态定型（null 与 undefined 暂同走 HTTP 默认 False，调用点届时零
+ * 改动）。
  */
-export async function listGroupChats(): Promise<GroupChatListItemRead[]> {
-  return apiFetch<GroupChatListItemRead[]>(GROUP_CHATS_BASE);
+export async function listGroupChats(
+  opts?: { archived?: boolean | null },
+): Promise<GroupChatListItemRead[]> {
+  if (opts?.archived !== true && opts?.archived !== false) {
+    return apiFetch<GroupChatListItemRead[]>(GROUP_CHATS_BASE);
+  }
+  return apiFetch<GroupChatListItemRead[]>(GROUP_CHATS_BASE, {
+    query: { archived: opts.archived ? "true" : "false" },
+  });
 }
 
 /**
@@ -2547,6 +2577,45 @@ export async function endGroupChat(groupId: string): Promise<GroupChatRead> {
     `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/end`,
     { method: "POST" },
   );
+}
+
+/*
+ * 2026-09-03-group-chat-archive-delete task-05 / design §4：群收纳三件套——
+ * 归档/取消归档/删除（端点 task-03 落地，权限/幂等全在 service 层）。三端点
+ * 均 204 空响应（Promise<void>，照 removeGroupMember 先例）；URL 编码与
+ * { method } 形态照 endGroupChat 上方先例。
+ */
+
+/**
+ * POST /api/daemon/group-chats/{id}/archive — 归档群（群主/workspace admin；
+ * 幂等——已归档重复归档无操作；默认群列表隐藏、归档视图可查）。
+ */
+export async function archiveGroupChat(groupId: string): Promise<void> {
+  await apiFetch(
+    `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/archive`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * POST /api/daemon/group-chats/{id}/unarchive — 取消归档群（群主/workspace
+ * admin；幂等——未归档重复取消无操作；群回默认列表）。
+ */
+export async function unarchiveGroupChat(groupId: string): Promise<void> {
+  await apiFetch(
+    `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/unarchive`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * DELETE /api/daemon/group-chats/{id} — 删除群=软删（群主/workspace admin；
+ * 未解散群后端先 end 收口再双置位 deleted_at，行/审计保留不可再访问）。
+ */
+export async function deleteGroupChat(groupId: string): Promise<void> {
+  await apiFetch(`${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}`, {
+    method: "DELETE",
+  });
 }
 
 /**

@@ -28,6 +28,28 @@ P1 修复回归（2026-09-01 群聊变更代码审查）：
 - 解散群向群频道 ``agent_session:{群id}`` 广播 ``session_ended``（群 SSE
   生成器只认该事件收流）。
 
+task-04（2026-09-03-group-chat-archive-delete）归档/删除全链（design §4/§5）：
+
+- 归档/取消归档：置位 → 默认列表消失 → ``?archived=true`` 视图出现 → 取消
+  归档恢复；重复调用幂等（第二次 204 且 ``archived_at`` 不变——哨兵锚定防
+  同微秒假绿）；已解散群可归档（``ended_at`` ⊥ ``archived_at`` ⊥ ``deleted_at``）；
+- 权限：普通成员 archive/unarchive/DELETE 三端点 → 403（中文文案）；非成员
+  → 404（不泄露存在性）+ DB 零副作用；workspace admin 正向对照；
+- 删除：活跃群（含 agent 影子）——影子会话 status=ended（影子不软删——双置位
+  仅群行+时间线，design §5.2）、群时间线 ended+``deleted_at``、群行 ``deleted_at``
+  双非空、影子队列 pending 清理、群列表三态全滤、``GET /group-chats/{id}``
+  404、影子日志解析分支 404（旁路封堵回归——删除前 200 对照）、群主
+  ``GET /sessions/{时间线id}`` 404（属主旁路封堵）；已解散群删除跳过收口
+  （``ended_at`` 哨兵保留证明不重跑 end 链）直接双置位；重复删除 404（design
+  §7 天然幂等边界）；
+- 三态过滤：无参（HTTP 默认 False）不含已归档群（防泄漏锚点）、``true``/
+  ``false`` 显式口径、HTTP 显式 null 不可达（FastAPI bool 解析 422——传输层
+  边界锁定，None 态照会话侧 ``test_session_review_fixes.TestListArchiveTriState``
+  先例落 service 层）；
+- SSE 信号：archive/unarchive → sessions 频道 ``status_changed``（audience=
+  全部用户成员；幂等重归档不重发）、delete → ``deleted``（末位，前置
+  ``status_changed`` 来自 end 收口链）+ 群频道 ``session_ended``。
+
 夹具范式镜像 ``test_sessions_list_filters.py`` / ``test_session_create_config.py``
 （in-memory SQLite + httpx ASGI client + 手签 JWT + workspace 角色播种——
 端点门 TASK_RUN_AGENT 需 workspace 角色，platform admin 短路免播）。
@@ -357,6 +379,32 @@ def _channel_publishes(redis: AsyncMock, session_id: uuid.UUID) -> list[dict]:
         if call.args[0] == f"agent_session:{session_id}":
             out.append(json.loads(call.args[1]))
     return out
+
+
+@pytest.fixture()
+def mocked_sessions_events_redis():
+    """agent_sessions:changed publish 替身（session_events 模块侧 get_redis）——
+    test_group_realtime.mocked_sessions_events_redis 先例。
+
+    群列表变更信号（归档/取消归档/删除，design §5.4）经
+    ``publish_sessions_changed`` 用本模块自己的 ``get_redis``，与群频道替身
+    （group service 侧）分属两处，各自独立打桩。
+    """
+    redis = AsyncMock()
+    redis.publish = AsyncMock()
+    with mock_patch("app.modules.daemon.session_events.get_redis", return_value=redis):
+        yield redis
+
+
+def _sessions_changed_publishes(redis: AsyncMock) -> list[dict]:
+    """从 fake redis publish 记录中筛出 ``agent_sessions:changed`` 频道 payload。"""
+    from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
+
+    return [
+        json.loads(call.args[1])
+        for call in redis.publish.call_args_list
+        if call.args[0] == SESSIONS_CHANGED_CHANNEL
+    ]
 
 
 # ── 建群 ─────────────────────────────────────────────────────────────────────
@@ -1357,3 +1405,519 @@ class TestPermissionBranchInheritance:
                 agent_session=group_session,
             )
         assert exc_info.value.status_code == 403
+
+
+# ── 归档/取消归档（2026-09-03-group-chat-archive-delete task-04）──────────────
+
+
+class TestGroupArchiveUnarchive:
+    async def test_archive_unarchive_lifecycle(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """归档→默认列表消失→归档视图出现→取消归档恢复（design §5.1 全链）。"""
+        env = await _make_env(db_session, owner_name="arc-owner")
+        member, member_token = await _env_user(db_session, env, name="arc-member")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            user_members=[{"user_id": str(member.id)}],
+        )
+        group_id = uuid.UUID(data["id"])
+
+        # 初始：默认视图可见（群主/成员两视角）且 archived_at NULL。
+        for token in (env.owner_token, member_token):
+            resp = await client.get("/api/daemon/group-chats", headers=_headers(token))
+            assert resp.status_code == 200
+            assert [g["id"] for g in resp.json()] == [data["id"]]
+            assert resp.json()[0]["archived_at"] is None
+
+        # 归档 → 204。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/archive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+
+        # DB：archived_at 置位；ended_at/deleted_at 保持 NULL（design §2 正交性）。
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None
+        assert row.archived_at is not None
+        assert row.ended_at is None and row.deleted_at is None
+
+        # 默认列表（无参=HTTP 默认 False）：群主/成员视角都消失（防泄漏锚点）。
+        for token in (env.owner_token, member_token):
+            resp = await client.get("/api/daemon/group-chats", headers=_headers(token))
+            assert resp.json() == []
+
+        # ?archived=true：归档视图出现且读体携带 archived_at。
+        resp = await client.get(
+            "/api/daemon/group-chats?archived=true", headers=_headers(member_token)
+        )
+        assert resp.status_code == 200
+        assert [g["id"] for g in resp.json()] == [data["id"]]
+        assert resp.json()[0]["archived_at"] is not None
+
+        # 归档≠解散：详情仍可读（历史可见，design §5.1「归档是收纳不是解散」）。
+        resp = await client.get(
+            f"/api/daemon/group-chats/{data['id']}", headers=_headers(member_token)
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["archived_at"] is not None
+
+        # 取消归档 → 204 → 行回默认视图。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/unarchive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None and row.archived_at is None
+        resp = await client.get("/api/daemon/group-chats", headers=_headers(env.owner_token))
+        assert [g["id"] for g in resp.json()] == [data["id"]]
+        resp = await client.get(
+            "/api/daemon/group-chats?archived=true", headers=_headers(env.owner_token)
+        )
+        assert resp.json() == []
+
+    async def test_archive_unarchive_idempotent(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """重复归档/取消归档幂等：第二次 204 且 archived_at 不变（哨兵锚定）。
+
+        手工把 ``archived_at`` 钉到哨兵值再重归档——若幂等早退失效重写列，
+        哨兵必被 now() 覆盖（防「两次请求落在同一微秒」的假绿）。
+        """
+        env = await _make_env(db_session, owner_name="idm-owner")
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
+        group_id = uuid.UUID(data["id"])
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/archive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+
+        # 哨兵锚定（SQLite 方言往返丢 tz——两侧都归一 naive 再比较）。
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None and row.archived_at is not None
+        sentinel = datetime(2020, 1, 1, tzinfo=UTC)
+        row.archived_at = sentinel
+        db_session.add(row)
+        await db_session.commit()
+
+        # 第二次归档 → 204 幂等且 archived_at 不变（哨兵保留）。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/archive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None and row.archived_at is not None
+        assert row.archived_at.replace(tzinfo=None) == sentinel.replace(tzinfo=None)
+
+        # 取消归档后再次取消 → 204 幂等且 archived_at 保持 NULL。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/unarchive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/unarchive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None and row.archived_at is None
+
+    async def test_ended_group_can_be_archived(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """已解散群可归档（收纳解散群主场景，design §5.1）+ 三态正交。"""
+        env = await _make_env(db_session, owner_name="ega-owner")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/end", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 200, resp.text
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/archive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None
+        assert row.ended_at is not None and row.archived_at is not None
+        assert row.deleted_at is None  # 归档不解散不软删（design §2）
+
+        # 已解散+已归档：默认列表消失 / 归档视图出现。
+        resp = await client.get("/api/daemon/group-chats", headers=_headers(env.owner_token))
+        assert resp.json() == []
+        resp = await client.get(
+            "/api/daemon/group-chats?archived=true", headers=_headers(env.owner_token)
+        )
+        assert [g["id"] for g in resp.json()] == [data["id"]]
+
+
+# ── 归档/删除权限（task-04）───────────────────────────────────────────────────
+
+
+class TestGroupArchiveDeletePermissions:
+    async def test_member_forbidden_outsider_hidden_ws_admin_allowed(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """普通成员三端点 403（中文文案）；非成员 404；DB 零副作用；ws admin 放行。"""
+        env = await _make_env(db_session, owner_name="apm-owner")
+        member, member_token = await _env_user(db_session, env, name="apm-member")
+        _outsider, outsider_token = await _env_user(db_session, env, name="apm-out")
+        ws_admin, ws_admin_token = await _create_user_with_token(db_session, name="apm-wsadmin")
+        await _grant_workspace_role(
+            db_session,
+            workspace_id=env.ws.id,
+            user_id=ws_admin.id,
+            permissions=[Permission.TASK_RUN_AGENT, Permission.WORKSPACE_ADMIN],
+        )
+
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            user_members=[{"user_id": str(member.id)}],
+        )
+        group_id = uuid.UUID(data["id"])
+        endpoints = [
+            ("POST", f"/api/daemon/group-chats/{data['id']}/archive"),
+            ("POST", f"/api/daemon/group-chats/{data['id']}/unarchive"),
+            ("DELETE", f"/api/daemon/group-chats/{data['id']}"),
+        ]
+
+        # 普通成员（可见群但非群主）：三端点 403 + 中文文案。
+        for method, path in endpoints:
+            resp = await client.request(method, path, headers=_headers(member_token))
+            assert resp.status_code == 403, f"{method} {path}: {resp.text}"
+            assert resp.json()["code"] == "HTTP_403_GROUP_CHAT_FORBIDDEN"
+            assert "只有群主或工作区管理员" in resp.json()["message"]
+
+        # 非成员：三端点 404（先过成员门，不泄露存在性）。
+        for method, path in endpoints:
+            resp = await client.request(method, path, headers=_headers(outsider_token))
+            assert resp.status_code == 404, f"{method} {path}: {resp.text}"
+            assert resp.json()["code"] == "HTTP_404_GROUP_CHAT_NOT_FOUND"
+
+        # DB：越权尝试零副作用（archived_at/deleted_at 双 NULL）。
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None
+        assert row.archived_at is None and row.deleted_at is None
+
+        # workspace admin（非群主非成员）正向对照：归档放行（§5.1 权限表）。
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/archive", headers=_headers(ws_admin_token)
+        )
+        assert resp.status_code == 204, resp.text
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None and row.archived_at is not None
+
+
+# ── 删除全链（task-04，design §5.2）───────────────────────────────────────────
+
+
+class TestDeleteGroupChain:
+    async def test_delete_active_group_full_chain(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """活跃群（含 agent 影子）删除：收口（影子 ended）→ 群行+时间线双置位 →
+        一切读路径 404（列表三态全滤 / 详情 / 影子日志解析分支 / 属主时间线）。"""
+        env = await _make_env(db_session, owner_name="dga-owner")
+        member, member_token = await _env_user(db_session, env, name="dga-member")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            user_members=[{"user_id": str(member.id)}],
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        agent_member = next(m for m in data["members"] if m["member_type"] == "agent")
+        member_row = await _get_member_row(
+            db_session, group_id=group_id, member_id=uuid.UUID(agent_member["id"])
+        )
+        assert member_row is not None
+        shadow, _lease = await _seed_shadow_session(
+            db_session,
+            member=member_row,
+            owner_user_id=env.owner.id,
+            runtime_id=env.runtime.id,
+        )
+
+        # 删除前对照：成员可经影子会话读日志（旁路封堵回归的正向基线）。
+        resp = await client.get(
+            f"/api/daemon/sessions/{shadow.id}/logs", headers=_headers(member_token)
+        )
+        assert resp.status_code == 200, resp.text
+
+        resp = await client.delete(
+            f"/api/daemon/group-chats/{data['id']}", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+
+        await db_session.reset()
+        # 影子会话：end 收口（status=ended）；软删不落影子——design §5.2 双置位
+        # 仅群行+群时间线，影子行保留审计。
+        shadow_row = await db_session.get(AgentSession, shadow.id)
+        assert shadow_row is not None and shadow_row.status == "ended"
+        assert shadow_row.deleted_at is None
+        # 群时间线会话：ended + deleted_at 置位（严格镜像会话侧软删）。
+        timeline = await db_session.get(AgentSession, group_id)
+        assert timeline is not None
+        assert timeline.status == "ended" and timeline.ended_at is not None
+        assert timeline.deleted_at is not None
+        # 群行：deleted_at 置位（archived_at 正交保持 NULL）。
+        group_row = await db_session.get(AgentGroupChat, group_id)
+        assert group_row is not None and group_row.deleted_at is not None
+        assert group_row.archived_at is None
+        # agent 成员影子态收口 + 影子队列 pending 清理（end 链复用）。
+        row_after = await _get_member_row(db_session, group_id=group_id, member_id=member_row.id)
+        assert row_after is not None and row_after.shadow_status == "ended"
+        assert await _list_queued(db_session, shadow.id) == []
+
+        # 群列表三态全滤（deleted ⊥ archived，归档视图也不复活）。
+        for qs in ("", "?archived=true", "?archived=false"):
+            resp = await client.get(f"/api/daemon/group-chats{qs}", headers=_headers(member_token))
+            assert resp.status_code == 200
+            assert resp.json() == []
+
+        # GET /group-chats/{id} → 404（软删视为不存在，不泄露存在性）。
+        resp = await client.get(
+            f"/api/daemon/group-chats/{data['id']}", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "HTTP_404_GROUP_CHAT_NOT_FOUND"
+
+        # 影子日志解析分支 404（旁路封堵回归：get_group_accessible_session 影子
+        # 分支按 deleted_at IS NULL 过滤群行——对照删除前的 200）。
+        resp = await client.get(
+            f"/api/daemon/sessions/{shadow.id}/logs", headers=_headers(member_token)
+        )
+        assert resp.status_code == 404
+
+        # 属主旁路封堵：群主 GET 群时间线会话详情 404（owner 路径 deleted_at
+        # IS NULL 过滤——裸属主读不出已删群时间线）。
+        resp = await client.get(
+            f"/api/daemon/sessions/{data['session_id']}", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 404
+
+        # 幂等边界（design §7）：已删群重复删除 → 404（取群处即拒，非 204）。
+        resp = await client.delete(
+            f"/api/daemon/group-chats/{data['id']}", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 404
+
+    async def test_delete_ended_group_skips_closure(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """已解散群删除跳过收口直接双置位（end_group 幂等早退——ended_at 哨兵保留
+        证明未重跑 end 链）。"""
+        env = await _make_env(db_session, owner_name="dge-owner")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/end", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 200, resp.text
+
+        # 哨兵锚定 ended_at：若 delete 重跑收口链会覆盖 now()，哨兵必丢。
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None and row.ended_at is not None
+        sentinel = datetime(2020, 1, 1, tzinfo=UTC)
+        row.ended_at = sentinel
+        db_session.add(row)
+        await db_session.commit()
+
+        resp = await client.delete(
+            f"/api/daemon/group-chats/{data['id']}", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+
+        await db_session.reset()
+        row = await db_session.get(AgentGroupChat, group_id)
+        assert row is not None
+        assert row.deleted_at is not None
+        assert row.ended_at is not None
+        assert row.ended_at.replace(tzinfo=None) == sentinel.replace(tzinfo=None)
+        # 时间线：ended 态保持 + 双置位落齐。
+        timeline = await db_session.get(AgentSession, group_id)
+        assert timeline is not None
+        assert timeline.status == "ended" and timeline.deleted_at is not None
+
+
+# ── 列表 archived 三态过滤（task-04，design §5.3）─────────────────────────────
+
+
+class TestGroupListArchivedTriState:
+    async def test_list_archived_tri_state(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """三态：无参（HTTP 默认 False，防泄漏锚点）/ true / false；HTTP 显式
+        null 不可达（FastAPI bool 解析 422）；None=全量照会话侧先例落
+        service 层（test_session_review_fixes.TestListArchiveTriState）。"""
+        env = await _make_env(db_session, owner_name="trs-owner")
+        active = await _create_group(
+            client, env.owner_token, project_id=env.project.id, title="在档群"
+        )
+        archived = await _create_group(
+            client, env.owner_token, project_id=env.project.id, title="归档群"
+        )
+        resp = await client.post(
+            f"/api/daemon/group-chats/{archived['id']}/archive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+
+        # 无参（HTTP 默认 False——防泄漏锚点：无参消费点不见已归档群）。
+        resp = await client.get("/api/daemon/group-chats", headers=_headers(env.owner_token))
+        assert resp.status_code == 200
+        assert {g["id"] for g in resp.json()} == {active["id"]}
+        assert resp.json()[0]["archived_at"] is None
+
+        # ?archived=true：仅已归档。
+        resp = await client.get(
+            "/api/daemon/group-chats?archived=true", headers=_headers(env.owner_token)
+        )
+        assert {g["id"] for g in resp.json()} == {archived["id"]}
+        assert resp.json()[0]["archived_at"] is not None
+
+        # ?archived=false：显式 False 与 HTTP 默认同口径。
+        resp = await client.get(
+            "/api/daemon/group-chats?archived=false", headers=_headers(env.owner_token)
+        )
+        assert {g["id"] for g in resp.json()} == {active["id"]}
+
+        # HTTP 显式 null 不可达：FastAPI 对 bool query 的字符串解析拒绝
+        # "null"/空串 → 422。锁定传输层边界——design §6.2b presence 消费点
+        # 「显式传 archived: null」当前无法经 HTTP 表达（实现缺口，任务报告
+        # 登记；router 若改造支持 null，本断言与下方 service 层用例同步更新）。
+        resp = await client.get(
+            "/api/daemon/group-chats?archived=null", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 422
+
+        # None 态（service 层，照会话侧三态先例）：全量含已归档+未归档。
+        from app.modules.daemon.group.service import GroupChatService
+
+        reads = await GroupChatService(db_session).list_groups(env.owner, archived=None)
+        assert {str(g.id) for g in reads} == {active["id"], archived["id"]}
+        reads_false = await GroupChatService(db_session).list_groups(env.owner, archived=False)
+        assert {str(g.id) for g in reads_false} == {active["id"]}
+
+
+# ── 归档/删除 SSE 信号（task-04，design §5.4）────────────────────────────────
+
+
+class TestArchiveDeleteSseSignals:
+    async def test_archive_unarchive_publish_status_changed(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_sessions_events_redis,
+    ) -> None:
+        """archive/unarchive → agent_sessions:changed status_changed（audience=
+        全部用户成员）；幂等重归档不重发。"""
+        env = await _make_env(db_session, owner_name="sse-owner")
+        member, _member_token = await _env_user(db_session, env, name="sse-member")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            user_members=[{"user_id": str(member.id)}],
+        )
+        mocked_sessions_events_redis.publish.reset_mock()  # 建群 "created" 信号清零
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/archive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+        publishes = _sessions_changed_publishes(mocked_sessions_events_redis)
+        assert publishes, "归档未发布 agent_sessions:changed"
+        payload = publishes[-1]
+        assert payload["event"] == "status_changed"
+        assert payload["session_id"] == data["session_id"]
+        assert payload["user_id"] == str(env.owner.id)  # 群主位
+        assert sorted(payload["audience_user_ids"]) == sorted([str(env.owner.id), str(member.id)])
+
+        # 幂等重归档 → 不重发（publish 计数不变）。
+        before = len(_sessions_changed_publishes(mocked_sessions_events_redis))
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/archive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+        assert len(_sessions_changed_publishes(mocked_sessions_events_redis)) == before
+
+        # 取消归档 → status_changed 再发（群回默认列表的刷新信号）。
+        mocked_sessions_events_redis.publish.reset_mock()
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/unarchive", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+        publishes = _sessions_changed_publishes(mocked_sessions_events_redis)
+        assert publishes, "取消归档未发布 agent_sessions:changed"
+        assert publishes[-1]["event"] == "status_changed"
+        assert publishes[-1]["session_id"] == data["session_id"]
+
+    async def test_delete_publishes_deleted(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_sessions_events_redis,
+        mocked_group_redis,
+    ) -> None:
+        """delete → agent_sessions:changed deleted（末位；前置 status_changed
+        来自 end 收口链）+ 群频道 session_ended（end 链复用，SSE 收流）。"""
+        env = await _make_env(db_session, owner_name="ssd-owner")
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
+        mocked_sessions_events_redis.publish.reset_mock()
+        mocked_group_redis.publish.reset_mock()
+
+        resp = await client.delete(
+            f"/api/daemon/group-chats/{data['id']}", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 204, resp.text
+
+        publishes = _sessions_changed_publishes(mocked_sessions_events_redis)
+        assert publishes, "删除未发布 agent_sessions:changed"
+        events = [p["event"] for p in publishes]
+        # 活跃群删除先走 end 收口（status_changed）再发 deleted——deleted 恰一条
+        # 且居末位（前端 invalidate 重拉后群消失）。
+        assert events.count("deleted") == 1
+        assert events[-1] == "deleted"
+        deleted_payload = publishes[-1]
+        assert deleted_payload["session_id"] == data["session_id"]
+        assert deleted_payload["user_id"] == str(env.owner.id)
+        assert sorted(deleted_payload["audience_user_ids"]) == [str(env.owner.id)]
+
+        # 群频道：end 收口链广播 session_ended（既有语义复用——群 SSE 只认该
+        # 事件收流，P1 修复先例）。
+        session_id = uuid.UUID(data["session_id"])
+        ended_events = [
+            e
+            for e in _channel_publishes(mocked_group_redis, session_id)
+            if e.get("event") == "session_ended"
+        ]
+        assert len(ended_events) == 1
+        assert ended_events[0]["status"] == "ended"

@@ -56,6 +56,7 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type * as React from "react";
@@ -2614,5 +2615,253 @@ describe("SessionListPanel 群聊分区折叠（quick）", () => {
       "aria-expanded",
       "false",
     );
+  });
+});
+
+// ── 13. 群行收纳操作（task-06 / 2026-09-03-group-chat-archive-delete / FR-02/FR-03） ──
+//
+// 群行 hover 三按钮（归档/取消归档按 archived_at 二选一 + 删除）+ 已归档徽标
+// 与整行降调 + 归档视图数据源（archived=true 重拉 +「＋」隐藏）+ Modal.confirm
+// 三处理。断言口径：aria-label/文案/mock 调用参数（蓝图 acceptance），不碰
+// 内部实现；portal 级 invalidate/清选中态接线由 sessions-portal 既有 39 用例
+// 框架覆盖，此处面板级断言回调以正确参数被调用即可。
+// Modal.confirm 交互照本文件会话删除先例（危险按钮类锚定 ok）+ runtimes 页
+// 取消先例（within(confirmRoot) 点 /取\s*消/——antd 对两字中文自动插空格）。
+describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
+  /** 当前 Modal.confirm 弹层（portal 到 body；残留多枚时取末位——最新追加）。 */
+  function findConfirmRoot() {
+    return waitFor(() => {
+      const roots = document.querySelectorAll(".ant-modal-confirm");
+      const el = roots[roots.length - 1] as HTMLElement | undefined;
+      if (!el) throw new Error("confirm not open");
+      return el;
+    });
+  }
+
+  /** 弹层确认按钮（okText 两字中文可访问名被插空格，经主按钮类锚定）。 */
+  function findConfirmOk() {
+    return waitFor(() => {
+      const btns = document.querySelectorAll(
+        ".ant-modal-confirm-btns .ant-btn-primary",
+      );
+      const btn = btns[btns.length - 1] as HTMLElement | undefined;
+      if (!btn) throw new Error("confirm ok button not found");
+      return btn;
+    });
+  }
+
+  it("默认视图未归档群行：hover 区「归档群聊 …」「删除群聊 …」在、「取消归档群聊 …」缺席；无已归档徽标无降调", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]); // archived_at 缺省 null
+    renderPanel(
+      <SessionListPanel
+        onSelectGroup={vi.fn()}
+        onArchiveGroup={vi.fn().mockResolvedValue(0)}
+        onUnarchiveGroup={vi.fn().mockResolvedValue(0)}
+        onDeleteGroup={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    const row = await screen.findByTestId("group-chat-row");
+    expect(
+      screen.getByRole("button", { name: "归档群聊 前端攻坚小分队" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "删除群聊 前端攻坚小分队" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "取消归档群聊 前端攻坚小分队" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("已归档")).not.toBeInTheDocument();
+    expect(row.className).not.toContain("opacity-60");
+  });
+
+  it("已归档群行（archived_at 非空）：「取消归档群聊 …」+「已归档」徽标（相对时间 title）+ 整行 opacity-60 降调；「归档群聊 …」二选一缺席、删除恒在", async () => {
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem({ archived_at: "2026-09-02T00:00:00Z" }),
+    ]);
+    renderPanel(
+      <SessionListPanel
+        onSelectGroup={vi.fn()}
+        onArchiveGroup={vi.fn().mockResolvedValue(0)}
+        onUnarchiveGroup={vi.fn().mockResolvedValue(0)}
+        onDeleteGroup={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    const row = await screen.findByTestId("group-chat-row");
+    expect(
+      screen.getByRole("button", { name: "取消归档群聊 前端攻坚小分队" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "归档群聊 前端攻坚小分队" }),
+    ).not.toBeInTheDocument();
+    // 删除不随归档态隐藏。
+    expect(
+      screen.getByRole("button", { name: "删除群聊 前端攻坚小分队" }),
+    ).toBeInTheDocument();
+    const badge = screen.getByText("已归档");
+    expect(badge.closest("span")?.getAttribute("title")).toContain("已归档（");
+    // 整行降调（hover 恢复全不透明——收纳 vs 在用的层级语义）。
+    expect(row.className).toContain("opacity-60");
+  });
+
+  it("归档视图（状态筛选「已归档会话」哨兵）：listGroupChats 以 archived=true 重拉；分区头「＋」隐藏；空态「暂无已归档群聊」", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPanel(
+      <SessionListPanel onSelectGroup={vi.fn()} onNewGroup={vi.fn()} />,
+    );
+    await screen.findByTestId("group-chat-row");
+    // 默认视图：显式 archived=false（与单聊 sessionsQuery 同口径，仅未归档群）
+    expect(mocks.listGroupChats).toHaveBeenCalledWith({ archived: false });
+    expect(screen.getByRole("button", { name: "新建群聊" })).toBeInTheDocument();
+
+    // 切归档视图：queryKey 视图维度变化自动重拉（mock 换已归档空集）
+    mocks.listGroupChats.mockResolvedValue([]);
+    await chooseAntdOptionByText("slp-status", "已归档会话");
+    await waitFor(() => {
+      const calls = mocks.listGroupChats.mock.calls;
+      expect(calls[calls.length - 1]?.[0]).toEqual({ archived: true });
+    });
+    await waitFor(() =>
+      expect(screen.queryByTestId("group-chat-row")).toBeNull(),
+    );
+    // 归档视图禁建新：分区头「＋」隐藏（design §6.2）。
+    expect(
+      screen.queryByRole("button", { name: "新建群聊" }),
+    ).not.toBeInTheDocument();
+    // 空态文案不引导「点＋」（该视图无「＋」，与实现一致）。
+    expect(screen.getByText("暂无已归档群聊")).toBeInTheDocument();
+  });
+
+  it("删除确认流：Modal 文案含群名与「所有成员」语义；确认 → onDeleteGroup(群 id)", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    const onDeleteGroup = vi.fn().mockResolvedValue(undefined);
+    renderPanel(
+      <SessionListPanel onSelectGroup={vi.fn()} onDeleteGroup={onDeleteGroup} />,
+    );
+    await screen.findByTestId("group-chat-row");
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除群聊 前端攻坚小分队" }),
+    );
+
+    // 二次确认弹层：标题 + 群名 + 「所有成员」不可再见语义。
+    const confirmRoot = await findConfirmRoot();
+    expect(
+      confirmRoot.querySelector(".ant-modal-confirm-title"),
+    ).toHaveTextContent("删除群聊");
+    expect(confirmRoot.textContent).toContain("前端攻坚小分队");
+    expect(confirmRoot.textContent).toContain("所有成员");
+
+    fireEvent.click(await findConfirmOk());
+    await waitFor(() => expect(onDeleteGroup).toHaveBeenCalledWith("g-1"));
+    expect(onDeleteGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("删除确认点「取消」→ onDeleteGroup 零触发（误点保护）", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    const onDeleteGroup = vi.fn().mockResolvedValue(undefined);
+    renderPanel(
+      <SessionListPanel onSelectGroup={vi.fn()} onDeleteGroup={onDeleteGroup} />,
+    );
+    await screen.findByTestId("group-chat-row");
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除群聊 前端攻坚小分队" }),
+    );
+
+    const confirmRoot = await findConfirmRoot();
+    fireEvent.click(
+      within(confirmRoot).getByRole("button", { name: /取\s*消/ }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onDeleteGroup).not.toHaveBeenCalled();
+    // 弹层收尾（防 portal 残留串到后续用例的 confirm 锚定）。
+    await waitFor(() =>
+      expect(document.querySelector(".ant-modal-confirm")).toBeNull(),
+    );
+  });
+
+  it("归档确认流：确认 → onArchiveGroup(群 id) + 成功 toast 指引去归档视图", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    const onArchiveGroup = vi.fn().mockResolvedValue(0);
+    renderPanel(
+      <SessionListPanel
+        onSelectGroup={vi.fn()}
+        onArchiveGroup={onArchiveGroup}
+      />,
+    );
+    await screen.findByTestId("group-chat-row");
+    fireEvent.click(
+      screen.getByRole("button", { name: "归档群聊 前端攻坚小分队" }),
+    );
+    fireEvent.click(await findConfirmOk());
+    await waitFor(() => expect(onArchiveGroup).toHaveBeenCalledWith("g-1"));
+    // 回调契约（返回失败个数=0）→ 成功 toast 指引查看路径。
+    await waitFor(() =>
+      expect(notifyMocks.success).toHaveBeenCalledWith(
+        "已归档群聊「前端攻坚小分队」，可在筛选「已归档会话」中查看",
+      ),
+    );
+  });
+
+  it("已归档群行「取消归档」确认流：Modal 文案恢复语义 → 确认后 onUnarchiveGroup(群 id)", async () => {
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem({ archived_at: "2026-09-02T00:00:00Z" }),
+    ]);
+    const onUnarchiveGroup = vi.fn().mockResolvedValue(0);
+    renderPanel(
+      <SessionListPanel
+        onSelectGroup={vi.fn()}
+        onUnarchiveGroup={onUnarchiveGroup}
+      />,
+    );
+    await screen.findByTestId("group-chat-row");
+    fireEvent.click(
+      screen.getByRole("button", { name: "取消归档群聊 前端攻坚小分队" }),
+    );
+    const confirmRoot = await findConfirmRoot();
+    expect(
+      confirmRoot.querySelector(".ant-modal-confirm-title"),
+    ).toHaveTextContent("取消归档");
+    expect(confirmRoot.textContent).toContain("恢复到默认列表");
+    fireEvent.click(await findConfirmOk());
+    await waitFor(() =>
+      expect(onUnarchiveGroup).toHaveBeenCalledWith("g-1"),
+    );
+  });
+
+  it("多群 id 透传：对第二群删除 → Modal 文案只绑定该群名，onDeleteGroup 收到 g-2（非首群串号）", async () => {
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem(),
+      makeGroupListItem({ id: "g-2", session_id: "s-g-2", title: "测试周会群" }),
+    ]);
+    const onDeleteGroup = vi.fn().mockResolvedValue(undefined);
+    renderPanel(
+      <SessionListPanel onSelectGroup={vi.fn()} onDeleteGroup={onDeleteGroup} />,
+    );
+    await screen.findAllByTestId("group-chat-row");
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除群聊 测试周会群" }),
+    );
+    // Modal 是 portal 独立子树：文案只含被操作群名（绑定无串号）。
+    const confirmRoot = await findConfirmRoot();
+    expect(confirmRoot.textContent).toContain("测试周会群");
+    expect(confirmRoot.textContent).not.toContain("前端攻坚小分队");
+    fireEvent.click(await findConfirmOk());
+    await waitFor(() => expect(onDeleteGroup).toHaveBeenCalledWith("g-2"));
+  });
+
+  it("三收纳回调 props 缺省 → 群行零操作按钮（可选 props 行为锚点，既有消费点零回归）", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+    await screen.findByTestId("group-chat-row");
+    expect(
+      screen.queryByRole("button", { name: "归档群聊 前端攻坚小分队" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "取消归档群聊 前端攻坚小分队" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "删除群聊 前端攻坚小分队" }),
+    ).toBeNull();
   });
 });

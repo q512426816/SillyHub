@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -213,10 +213,17 @@ async def create_group_chat(
 async def list_group_chats(
     session: SessionDep,
     user: GroupChatUser,
+    # 2026-09-03-group-chat-archive-delete task-03 / design §4：archived 三态
+    # 过滤——False（HTTP 默认）=仅未归档、True=仅已归档（归档视图）、None=
+    # 不过滤。默认 False 防三处无参消费点泄漏（design §4，会话侧 Query 默认
+    # None 的 ql-20260831-015 教训前移——桌面/移动端群分区、群面板 presence
+    # 「忘了传参」天然只见未归档群）；显式 null=全量 admin debug（群面板
+    # presence 按需传 null，design §6.2）。**有意分歧**：勿照抄会话侧默认 None。
+    archived: bool | None = Query(default=False),
 ) -> list[GroupChatListItemRead]:
     """当前用户=群成员的群列表（含成员摘要 chips + 最后消息；design §6.1）。"""
     svc = GroupChatService(session)
-    reads = await svc.list_groups(user)
+    reads = await svc.list_groups(user, archived=archived)
     # task-03：最后消息摘要接通（群 id==会话 id 不变式，§3.2）；群 P2 第二波
     # 同查询顺手取最新行 ts（last_message_at）。
     previews = await get_last_message_previews(session, [r.id for r in reads])
@@ -284,6 +291,57 @@ async def end_group_chat(
 ) -> GroupChatRead:
     """解散群：end 群会话 + 全部影子会话 + 影子队列清理（design §8 group.ended）。"""
     return await GroupChatService(session).end_group(group_id, user)
+
+
+# 2026-09-03-group-chat-archive-delete task-03 / design §4：归档/取消归档/删除
+# 三端点（照会话侧 daemon/router.py:3236-3275 三端点先例，薄层——权限/业务
+# 全在 service，204 返回 None 同 pinned/read 形态）。动词口径（design §4
+# Grill X8）：archive/unarchive 会话侧是 PATCH，群侧取 POST——群 router 动作
+# 端点先例统一 POST（end/interrupt/reset-memory/read/typing/pinned 系列）。
+
+
+@router.post(
+    "/{group_id}/archive",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def archive_group_chat(
+    group_id: uuid.UUID,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> None:
+    """归档群（design §4：群主/workspace admin；幂等——已归档重复归档无操作）。"""
+    await GroupChatService(session).archive_group(group_id, user)
+
+
+@router.post(
+    "/{group_id}/unarchive",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def unarchive_group_chat(
+    group_id: uuid.UUID,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> None:
+    """取消归档群（design §4：群主/workspace admin；幂等——未归档重复取消无操作）。"""
+    await GroupChatService(session).unarchive_group(group_id, user)
+
+
+@router.delete(
+    "/{group_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_group_chat(
+    group_id: uuid.UUID,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> None:
+    """删除群=软删（design §4：群主/workspace admin；活跃群先 end 收口再双置位）。
+
+    置位链路/幂等/权限归 service：非群主成员 403 中文文案、非成员/已删群
+    404 不泄露存在性——已删群重复删除同为 404（软删过滤天然幂等边界，
+    design §7），非 204。
+    """
+    await GroupChatService(session).delete_group(group_id, user)
 
 
 # ── 成员管理 ─────────────────────────────────────────────────────────────────

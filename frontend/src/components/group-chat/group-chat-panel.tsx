@@ -764,10 +764,18 @@ export function GroupChatPanel({
 
   /* ── presence 在线集：与列表分区同键查询（["groupChats","list",null] 全局桶）
    *    ——门户 SSE 变更信号 invalidate ["groupChats"] 前缀命中重拉，绿点随刷新
-   *    （task-06 presence 读列表快照口径；详情读体不含 online_member_ids）。 ── */
+   *    （task-06 presence 读列表快照口径；详情读体不含 online_member_ids）。
+   *
+   *    2026-09-03-group-chat-archive-delete task-05 / design §6.2b：显式
+   *    ``archived: null``（id 查找语义，非视图过滤——已归档群仍可打开聊天，
+   *    presence 按 id 查找不能被默认过滤滤掉）。当前后端 FastAPI 无 query
+   *    字面量可命中 None（见 daemon.ts listGroupChats 注释），null 落 HTTP
+   *    默认 False——已归档群不在本列表时走下方 ``group?.online_member_ids``
+   *    快照兜底（门户归档视图列表随 SSE invalidate 同步刷新）；后端补显式
+   *    全量入口后此处自动恢复「不过滤」设计语义（daemon.ts 单点改拼参）。 ── */
   const presenceListQ = useQuery({
     queryKey: ["groupChats", "list", null],
-    queryFn: () => listGroupChats(),
+    queryFn: () => listGroupChats({ archived: null }),
     staleTime: 30_000,
     select: (items: GroupChatListItemRead[]) =>
       items.find((g) => g.id === groupId) ?? null,

@@ -33,6 +33,10 @@
  *   onSelectGroup 传入才启用（全局/workspace scope 生效；change/quicklog/
  *   runtime scope 语义偏离不挂——CC-08 同款排除理由）；选中群行高亮经
  *   selectedGroupId（门户挂载群视图占位，面板本体归 task-08）。
+ *   task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群行收纳
+ *   操作照 SessionRow 先例——hover 三按钮（归档/取消归档按 archived_at 二选
+ *   一 + 删除）+ Modal.confirm 三处理 + 已归档徽标与整行降调；群分区随状态
+ *   筛选「已归档会话」哨兵切数据源（queryKey 视图维度 + 分区头「＋」隐藏）。
  *
  * 工作区树（全局/workspace 形态）结构：
  *   筛选区：
@@ -369,6 +373,19 @@ export interface SessionListPanelProps {
   onSelectGroup?: (_group: GroupChatListItemRead) => void;
   /** task-07：分区头「＋」新建群聊回调（门户开三步建群向导）。 */
   onNewGroup?: () => void;
+  /**
+   * task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群归档/
+   * 取消归档回调（可选，传入才启用群行 hover 操作——照 onArchiveSessions
+   * 可选模式）。群是单条操作无批量，返回失败个数（0=成功）供面板出
+   * 成功/部分失败 toast（notifyArchiveResult 口径）。
+   */
+  onArchiveGroup?: (_id: string) => Promise<number>;
+  onUnarchiveGroup?: (_id: string) => Promise<number>;
+  /**
+   * task-06：群删除回调（照 onDeleteSessions 可选模式，Promise<void>——
+   * 会话删除先例无 toast，群对齐；未传时群行零删除按钮零请求）。
+   */
+  onDeleteGroup?: (_id: string) => Promise<void>;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -578,6 +595,9 @@ function WorkspaceTreeList({
   selectedGroupId,
   onSelectGroup,
   onNewGroup,
+  onArchiveGroup,
+  onUnarchiveGroup,
+  onDeleteGroup,
 }: SessionListPanelProps) {
   // 两层筛选 tab（D-107）：纯视图过滤，不进数据层（机器/智能体值都是 tab id）。
   const [filterMachineId, setFilterMachineId] = useState("");
@@ -810,12 +830,22 @@ function WorkspaceTreeList({
     Boolean(onSelectGroup) &&
     (scope == null || scope.kind === "workspace");
   const groupChatsQuery = useQuery({
+    // task-06（2026-09-03-group-chat-archive-delete / design §6.2）：queryKey
+    // 追加视图维度——归档视图（状态筛选「已归档会话」哨兵）与默认视图分别
+    // 缓存，防切换视图时旧缓存串视图（已归档群闪现默认列表/活跃群残留归档
+    // 视图）。视图切换 = 键变化自动重拉，且仍在 ["groupChats"] 前缀下被门户
+    // invalidate 全覆盖。
     queryKey: [
       "groupChats",
       "list",
       scope?.kind === "workspace" ? scope.workspaceId : null,
+      isArchivedView ? "archived" : "active",
     ],
-    queryFn: () => listGroupChats(),
+    // task-06：queryFn 传 archived 三态参（task-05 落地）——归档视图 true 仅
+    // 已归档群；默认视图**显式 false** 仅未归档群（与单聊 sessionsQuery 同
+    // 口径，见 isArchivedView 注释：后端 HTTP 默认为安全默认但显式形态防
+    // 语义漂移）。
+    queryFn: () => listGroupChats({ archived: isArchivedView }),
     enabled: groupSectionEnabled,
     staleTime: 30_000,
   });
@@ -1240,6 +1270,87 @@ function WorkspaceTreeList({
     });
   };
 
+  // ── task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群收纳
+  // 三处理——照 handleSingleArchive/handleSingleUnarchive/handleSingleDelete
+  // 模式（Modal.confirm + confirmIcon + archiving/deleting 状态防重入 +
+  // useNotify toast），视觉/交互逐项对齐会话先例，群语义差异仅限文案
+  // （design §6.2）。群是单条操作无批量（无批量栏对位）。
+
+  const handleGroupArchive = (id: string, title: string) => {
+    if (!onArchiveGroup || archiving) return;
+    Modal.confirm({
+      title: "归档群聊",
+      icon: confirmIcon(Archive, "text-brand-600"),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定归档群聊「{title}」吗？归档后将从默认列表隐藏，可在「已归档会话」筛选中查看。
+        </p>
+      ),
+      okText: "归档",
+      cancelText: "取消",
+      onOk: async () => {
+        setArchiving(true);
+        try {
+          const failed = await onArchiveGroup(id);
+          notifyArchiveResult(
+            failed,
+            `已归档群聊「${title}」，可在筛选「已归档会话」中查看`,
+          );
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  };
+
+  const handleGroupUnarchive = (id: string, title: string) => {
+    if (!onUnarchiveGroup || archiving) return;
+    Modal.confirm({
+      title: "取消归档",
+      icon: confirmIcon(ArchiveRestore, "text-brand-600"),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定取消归档群聊「{title}」吗？群聊将恢复到默认列表中。
+        </p>
+      ),
+      okText: "取消归档",
+      cancelText: "关闭",
+      onOk: async () => {
+        setArchiving(true);
+        try {
+          const failed = await onUnarchiveGroup(id);
+          notifyArchiveResult(failed, `群聊「${title}」已恢复到默认列表`);
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  };
+
+  const handleGroupDelete = (id: string, title: string) => {
+    if (!onDeleteGroup || deleting) return;
+    Modal.confirm({
+      title: "删除群聊",
+      icon: confirmIcon(Trash2, "text-destructive"),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定删除群聊「{title}」吗？删除后所有成员将不再看到该群，群消息记录保留于平台审计但不可再访问。
+        </p>
+      ),
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await onDeleteGroup(id);
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+
   const visibleTotal = viewFiltered.length;
 
   /**
@@ -1375,7 +1486,8 @@ function WorkspaceTreeList({
         data-testid="session-tree"
         className="min-h-0 flex-1 overflow-y-auto p-2"
       >
-        {/* task-07：群聊分区（独立数据源，见 groupChatsQuery 注释）。 */}
+        {/* task-07：群聊分区（独立数据源，见 groupChatsQuery 注释）。
+            task-06：随 isArchivedView 切数据源 + 群行收纳操作三回调透传。 */}
         {groupSectionEnabled && (
           <GroupChatSection
             groups={groupChats}
@@ -1389,6 +1501,22 @@ function WorkspaceTreeList({
             selectedGroupId={selectedGroupId}
             onSelect={onSelectGroup}
             onNew={onNewGroup}
+            isArchivedView={isArchivedView}
+            onArchive={
+              onArchiveGroup
+                ? (id, title) => handleGroupArchive(id, title)
+                : undefined
+            }
+            onUnarchive={
+              onUnarchiveGroup
+                ? (id, title) => handleGroupUnarchive(id, title)
+                : undefined
+            }
+            onDelete={
+              onDeleteGroup
+                ? (id, title) => handleGroupDelete(id, title)
+                : undefined
+            }
           />
         )}
         {sessionsQuery.isError ? (
@@ -1518,6 +1646,15 @@ interface GroupChatSectionProps {
   selectedGroupId?: string | null;
   onSelect?: (_group: GroupChatListItemRead) => void;
   onNew?: () => void;
+  /**
+   * task-06（2026-09-03-group-chat-archive-delete / design §6.2）：归档视图
+   * 判定（数据源已按视图过滤）——分区头「＋」隐藏 + 空态文案切换。
+   */
+  isArchivedView: boolean;
+  /** task-06：群行收纳操作回调（归档/取消归档/删除，未传零按钮零请求）。 */
+  onArchive?: (_id: string, _title: string) => void;
+  onUnarchive?: (_id: string, _title: string) => void;
+  onDelete?: (_id: string, _title: string) => void;
 }
 
 /**
@@ -1535,6 +1672,10 @@ function GroupChatSection({
   selectedGroupId,
   onSelect,
   onNew,
+  isArchivedView,
+  onArchive,
+  onUnarchive,
+  onDelete,
 }: GroupChatSectionProps) {
   // 折叠态（挂载时惰性读记忆；仅用户手动 toggle 落盘）。
   const [collapsed, setCollapsed] = useState<boolean>(() =>
@@ -1573,10 +1714,19 @@ function GroupChatSection({
         <Users aria-hidden className="h-3 w-3 shrink-0 text-brand-600" />
         <span className="truncate">群聊</span>
         <span className="shrink-0 font-normal text-muted-foreground/80">
-          {loading ? "加载中…" : `${groups.length} 个`}
+          {loading
+            ? "加载中…"
+            : // design §6.2：归档视图计数带「已归档」前缀（数据源已按视图
+              // 过滤，计数值本身正确；验收审查 gap 修正）。
+              isArchivedView
+              ? `已归档群 ${groups.length} 个`
+              : `${groups.length} 个`}
         </span>
         <span className="flex-1" />
-        {onNew && (
+        {/* task-06（design §6.2 群分区新增行为）：归档视图隐藏「＋」——收纳
+            视图禁建新（对齐单聊「归档的会话不进默认列表」语义：已归档区不是
+            建群入口，回默认视图再建）。 */}
+        {onNew && !isArchivedView && (
           <button
             type="button"
             aria-label="新建群聊"
@@ -1602,7 +1752,9 @@ function GroupChatSection({
         ) : groups.length === 0 ? (
           !loading && (
             <p className="px-2.5 py-1.5 text-[11px] text-muted-foreground">
-              暂无群聊——点「＋」发起一个多人多 Agent 协作群
+              {/* task-06：归档视图空态不引导「点＋」（该视图「＋」已隐藏，
+                  原文案与实现矛盾）。 */}
+              {isArchivedView ? "暂无已归档群聊" : "暂无群聊——点「＋」发起一个多人多 Agent 协作群"}
             </p>
           )
         ) : (
@@ -1612,6 +1764,9 @@ function GroupChatSection({
               group={g}
               selected={g.id === selectedGroupId}
               onSelect={onSelect}
+              onArchive={onArchive ? () => onArchive(g.id, g.title?.trim() || "未命名群聊") : undefined}
+              onUnarchive={onUnarchive ? () => onUnarchive(g.id, g.title?.trim() || "未命名群聊") : undefined}
+              onDelete={onDelete ? () => onDelete(g.id, g.title?.trim() || "未命名群聊") : undefined}
             />
           ))
         ))}
@@ -1624,6 +1779,10 @@ interface GroupChatRowProps {
   group: GroupChatListItemRead;
   selected: boolean;
   onSelect?: (_group: GroupChatListItemRead) => void;
+  /** task-06：收纳操作回调（归档/取消归档/删除；未传零按钮——悬浮助手等消费点）。 */
+  onArchive?: () => void;
+  onUnarchive?: () => void;
+  onDelete?: () => void;
 }
 
 /**
@@ -1632,8 +1791,19 @@ interface GroupChatRowProps {
  * group-unread）→ 行首红点 + 摘要行前缀「[有人@我]」（微信式 brand 色高亮）。
  * 群 P2 第二波：unread_count（服务端已读位点）> 0 → 群名右侧数字徽标（99+），
  * 与 @我红点并存（红点视觉优先）。
+ * task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：收纳操作照
+ * SessionRow 先例——hover 三按钮（归档/取消归档按 archived_at 二选一 + 删除）
+ * + 已归档徽标（muted chip + 相对时间 title）+ 整行 opacity-60 降调（hover
+ * 恢复全不透明便于瞄准行内操作），视觉/交互逐项对齐不发明新形态。
  */
-function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
+function GroupChatRow({
+  group,
+  selected,
+  onSelect,
+  onArchive,
+  onUnarchive,
+  onDelete,
+}: GroupChatRowProps) {
   const members = group.members ?? [];
   const agentCount = members.filter((m) => m.member_type === "agent").length;
   const userCount = members.length - agentCount;
@@ -1669,7 +1839,11 @@ function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
         "group mb-0.5 flex cursor-pointer items-center gap-2 rounded-lg border-l-[3px] px-2.5 py-1.5 transition-colors",
         selected
           ? "border-l-brand-600 bg-brand-100"
-          : "border-l-transparent hover:bg-muted/50",
+          : // task-06：已归档群行整行降调（照会话行先例：opacity-60 与活跃群
+            // 拉开「收纳 vs 在用」层级，hover 恢复全不透明便于瞄准行内操作）。
+            group.archived_at
+              ? "border-l-transparent opacity-60 hover:bg-muted/25 hover:opacity-100"
+              : "border-l-transparent hover:bg-muted/50",
       )}
     >
       {/* @我未读行首红点（微信式；红点=destructive 语义阶）。 */}
@@ -1698,6 +1872,17 @@ function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
           >
             群聊
           </span>
+          {/* task-06：已归档徽标（照会话行先例——中性 muted chip 不抢 brand
+              语义，title 相对时间）。 */}
+          {group.archived_at && (
+            <span
+              title={`已归档（${formatRelativeTime(group.archived_at)}）`}
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground"
+            >
+              <Archive aria-hidden className="h-2.5 w-2.5" />
+              已归档
+            </span>
+          )}
         </span>
         <span
           className="flex min-w-0 items-center gap-1"
@@ -1726,6 +1911,52 @@ function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
           className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand-600 px-1 text-[10.5px] font-semibold leading-none text-white"
         >
           {group.unread_count >= 99 ? "99+" : group.unread_count}
+        </span>
+      )}
+      {/* task-06：行尾 hover 操作区（照 SessionRow 单条操作先例——hover 显示 +
+          stopPropagation 防行点击）。归档/取消归档按行 archived_at 二选一
+          （照会话行 ql-20260831-013 语义），删除 destructive hover。 */}
+      {(onArchive || onUnarchive || onDelete) && (
+        <span className="ml-1 flex hidden shrink-0 items-center group-hover:flex">
+          {onArchive && !group.archived_at && (
+            <button
+              type="button"
+              aria-label={`归档群聊 ${title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onArchive();
+              }}
+              className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500"
+            >
+              <Archive className="h-3 w-3" />
+            </button>
+          )}
+          {onUnarchive && group.archived_at && (
+            <button
+              type="button"
+              aria-label={`取消归档群聊 ${title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onUnarchive();
+              }}
+              className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500"
+            >
+              <ArchiveRestore className="h-3 w-3" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              aria-label={`删除群聊 ${title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
         </span>
       )}
     </div>

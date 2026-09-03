@@ -59,12 +59,15 @@ import {
 } from "@/components/group-chat/create-group-wizard";
 import {
   addGroupMember,
+  archiveGroupChat,
   createGroupChat,
+  deleteGroupChat,
   endGroupChat,
   getGroupChat,
   listGroupChats,
   removeGroupMember,
   resetGroupMemberMemory,
+  unarchiveGroupChat,
   updateGroupChat,
   updateGroupMember,
   type GroupChatCreateRead,
@@ -401,6 +404,51 @@ describe("群聊 API 客户端（task-07 / design §6.1，前缀 /api/daemon/gro
   it("listGroupChats → GET /api/daemon/group-chats（无过滤参，群列表专用数据源）", async () => {
     await listGroupChats();
     expect(mocks.apiFetch).toHaveBeenCalledWith("/api/daemon/group-chats");
+  });
+
+  // 2026-09-03-group-chat-archive-delete task-05 / design §4：archived 三态
+  // 序列化——true/false 显式拼参（照会话侧 listAgentSessions archived 先例：
+  // 布尔→"true"/"false"）；null 不拼参走 HTTP 默认 False（FastAPI 0.136.3 +
+  // pydantic 2.13.4 实测 bool|None 无任何 query 字面量可命中 None——
+  // archived=null/none/空串均 422，apiFetch query 序列化对 null 亦跳过；
+  // group-chat-panel presence §6.2b 的 null=全量意图待后端补显式全量入口后
+  // 在 daemon.ts 单点改拼参，此处签名先按三态定型锁定契约）。
+  it("listGroupChats archived 三态：true/false 显式拼参，null 不拼参走 HTTP 默认", async () => {
+    await listGroupChats({ archived: true });
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith("/api/daemon/group-chats", {
+      query: { archived: "true" },
+    });
+    await listGroupChats({ archived: false });
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith("/api/daemon/group-chats", {
+      query: { archived: "false" },
+    });
+    await listGroupChats({ archived: null });
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith("/api/daemon/group-chats");
+  });
+
+  // 2026-09-03-group-chat-archive-delete task-05 / design §4：群收纳三件套
+  // （端点 task-03 落地，均 204 空响应——照 endGroupChat 断言形态）。
+  it("archiveGroupChat → POST /api/daemon/group-chats/{id}/archive", async () => {
+    await archiveGroupChat("g-1");
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1/archive",
+      { method: "POST" },
+    );
+  });
+
+  it("unarchiveGroupChat → POST /api/daemon/group-chats/{id}/unarchive", async () => {
+    await unarchiveGroupChat("g-1");
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1/unarchive",
+      { method: "POST" },
+    );
+  });
+
+  it("deleteGroupChat → DELETE /api/daemon/group-chats/{id}（软删）", async () => {
+    await deleteGroupChat("g-1");
+    expect(mocks.apiFetch).toHaveBeenCalledWith("/api/daemon/group-chats/g-1", {
+      method: "DELETE",
+    });
   });
 
   it("getGroupChat → GET /api/daemon/group-chats/{id}", async () => {

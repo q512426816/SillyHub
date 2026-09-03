@@ -1230,6 +1230,13 @@ class AgentGroupChat(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # 2026-09-03-group-chat-archive-delete：归档时间戳，NULL=可见；非 NULL=已归档
+    # （默认群列表过滤），与 deleted_at/ended_at 正交——对齐 AgentSession
+    # 三态语义（archived_at 同款注释见 AgentSession 邻域）。
+    archived_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class AgentGroupMember(BaseModel, table=True):

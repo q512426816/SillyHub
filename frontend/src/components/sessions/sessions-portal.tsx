@@ -52,6 +52,10 @@
  *   点：平铺时间线 + SSE 消费 + @补全输入区 + 右列 task-09 成员面板；右侧分支
  *   优先级：群视图 > 真会话 > 预会话 > 空门户，key={groupId} 重挂载）；
  *   建群成功与 agent_sessions 变更信号均 invalidate ["groupChats"] 刷新群列表。
+ *   task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群行收纳
+ *   三回调（onArchiveGroup/onUnarchiveGroup/onDeleteGroup——照会话回调模式
+ *   dynamic import lib → invalidate ["groupChats"] → 操作的是 selectedGroupId
+ *   时清群选中态 + ?session=）。
  *
  * 状态机（FR-03 零残留）：
  *   - 组头＋ → 浮层开（当前选中态保持，取消零影响）；
@@ -600,6 +604,43 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
               syncSessionParam(null);
             }
             return results.filter((r) => r.status === "rejected").length;
+          }}
+          /* task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群
+             收纳三回调（照会话回调模式：dynamic import lib → invalidate
+             ["groupChats"] 前缀（视图维度键全在此外）→ 操作的是 selectedGroupId
+             时清 selectedGroupId/selectedGroup + ?session=）。归档/取消归档
+             返回失败个数供面板 toast（群单条操作，无批量口径）。 */
+          onArchiveGroup={async (id) => {
+            const { archiveGroupChat } = await import("@/lib/daemon");
+            const results = await Promise.allSettled([archiveGroupChat(id)]);
+            void qc.invalidateQueries({ queryKey: ["groupChats"] });
+            if (id === selectedGroupId) {
+              setSelectedGroupId(null);
+              setSelectedGroup(null);
+              syncSessionParam(null);
+            }
+            return results.filter((r) => r.status === "rejected").length;
+          }}
+          onUnarchiveGroup={async (id) => {
+            const { unarchiveGroupChat } = await import("@/lib/daemon");
+            const results = await Promise.allSettled([unarchiveGroupChat(id)]);
+            void qc.invalidateQueries({ queryKey: ["groupChats"] });
+            if (id === selectedGroupId) {
+              setSelectedGroupId(null);
+              setSelectedGroup(null);
+              syncSessionParam(null);
+            }
+            return results.filter((r) => r.status === "rejected").length;
+          }}
+          onDeleteGroup={async (id) => {
+            const { deleteGroupChat } = await import("@/lib/daemon");
+            await Promise.allSettled([deleteGroupChat(id)]);
+            void qc.invalidateQueries({ queryKey: ["groupChats"] });
+            if (id === selectedGroupId) {
+              setSelectedGroupId(null);
+              setSelectedGroup(null);
+              syncSessionParam(null);
+            }
           }}
         />
         {/* task-07（FR-01）：选中群 → 群聊面板（task-08 GroupChatPanel 接管原

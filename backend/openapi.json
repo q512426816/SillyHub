@@ -10890,31 +10890,6 @@
       }
     },
     "/api/daemon/group-chats": {
-      "get": {
-        "tags": [
-          "daemon",
-          "daemon-group-chat"
-        ],
-        "summary": "List Group Chats",
-        "description": "当前用户=群成员的群列表（含成员摘要 chips + 最后消息；design §6.1）。",
-        "operationId": "list_group_chats_api_daemon_group_chats_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/GroupChatListItemRead"
-                  },
-                  "type": "array",
-                  "title": "Response List Group Chats Api Daemon Group Chats Get"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "daemon",
@@ -10924,14 +10899,14 @@
         "description": "建群：群会话（kind='group'）+ 群行 + 初始成员（design §8 group.created）。\n\n响应 ``warnings``（quick 群 P1 llm_provider 预检）：agent 成员未指定模型\n（走机器本机默认 LLM 出口）的非阻断提示，前端建群向导展示。",
         "operationId": "create_group_chat_api_daemon_group_chats_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GroupChatCreate"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -10940,6 +10915,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GroupChatCreateRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "List Group Chats",
+        "description": "当前用户=群成员的群列表（含成员摘要 chips + 最后消息；design §6.1）。",
+        "operationId": "list_group_chats_api_daemon_group_chats_get",
+        "parameters": [
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": false,
+              "title": "Archived"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupChatListItemRead"
+                  },
+                  "title": "Response List Group Chats Api Daemon Group Chats Get"
                 }
               }
             }
@@ -11053,6 +11082,42 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Delete Group Chat",
+        "description": "删除群=软删（design §4：群主/workspace admin；活跃群先 end 收口再双置位）。\n\n置位链路/幂等/权限归 service：非群主成员 403 中文文案、非成员/已删群\n404 不泄露存在性——已删群重复删除同为 404（软删过滤天然幂等边界，\ndesign §7），非 204。",
+        "operationId": "delete_group_chat_api_daemon_group_chats__group_id__delete",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/daemon/group-chats/{group_id}/end": {
@@ -11086,6 +11151,82 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/archive": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Archive Group Chat",
+        "description": "归档群（design §4：群主/workspace admin；幂等——已归档重复归档无操作）。",
+        "operationId": "archive_group_chat_api_daemon_group_chats__group_id__archive_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/unarchive": {
+      "post": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Unarchive Group Chat",
+        "description": "取消归档群（design §4：群主/workspace admin；幂等——未归档重复取消无操作）。",
+        "operationId": "unarchive_group_chat_api_daemon_group_chats__group_id__unarchive_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -36677,6 +36818,16 @@
               }
             ]
           },
+          "sillyspec_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DaemonHeartbeatSillySpecStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "providers": {
             "items": {
               "$ref": "#/components/schemas/DaemonHeartbeatProviderItem"
@@ -36746,6 +36897,284 @@
         ],
         "title": "DaemonHeartbeatRuntimePolicy",
         "description": "心跳响应内单个 runtime 的 per-runtime allowed_roots。"
+      },
+      "DaemonHeartbeatSillySpecChange": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "ghost": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ghost"
+          },
+          "current_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Stage"
+          },
+          "stage_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Label"
+          },
+          "last_active": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DaemonHeartbeatSillySpecChangeSteps"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "DaemonHeartbeatSillySpecChange",
+        "description": "心跳 sillyspec_status.changes[] 单项（design §4 摘要投影）.\n\nenvelope 变更行六字段投影（``stages``/``readable``/``command`` 不透传，\ndesign §4）；``last_active`` 为 ISO8601 字符串原样透传（不收紧成 datetime——\ndaemon 侧格式演进不应 422 整条心跳，前端自行解析展示）。"
+      },
+      "DaemonHeartbeatSillySpecChangeSteps": {
+        "properties": {
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "completed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed"
+          }
+        },
+        "type": "object",
+        "title": "DaemonHeartbeatSillySpecChangeSteps",
+        "description": "心跳 sillyspec_status.changes[].steps（design §4 envelope steps 投影）。\n\n``{total, completed}`` 全可选宽松形态——steps 结构若在 envelope 侧演进，\n不应让整条心跳 422（心跳是保活通道，宁宽勿断）。"
+      },
+      "DaemonHeartbeatSillySpecConflict": {
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "title": "DaemonHeartbeatSillySpecConflict",
+        "description": "心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.\n\n``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal\n（DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条\n心跳 422）。"
+      },
+      "DaemonHeartbeatSillySpecStatus": {
+        "properties": {
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          },
+          "errors_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors Count"
+          },
+          "warnings_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings Count"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "active_changes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Changes"
+          },
+          "healthy_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy Count"
+          },
+          "ghost_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ghost Count"
+          },
+          "conflict_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Count"
+          },
+          "conflict_types": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Types"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DaemonHeartbeatSillySpecChange"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changes"
+          },
+          "pending_conflicts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DaemonHeartbeatSillySpecConflict"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Conflicts"
+          }
+        },
+        "type": "object",
+        "title": "DaemonHeartbeatSillySpecStatus",
+        "description": "心跳 sillyspec_status 载荷（2026-09-02-changes-overview-card FR-05 / Grill B1）.\n\ndaemon 周期采集 ``progress show --json`` envelope 的摘要投影（design §4）：\nenvelope 全量或超 32KB 预算的计数降级版（截断/降级在 daemon 侧执行，backend\n原样落库）。全字段宽松可选——与 DaemonHeartbeatSillySpecUpdate 同理（心跳是\n保活通道，字段缺失或类型演进均不应 422）：不收紧 Literal、不加 max_length，\n时间字段为 ISO8601 字符串原样承载。"
       },
       "DaemonHeartbeatSillySpecUpdate": {
         "properties": {
@@ -37246,6 +37675,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MachineSillySpecUpdateRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sillyspec_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MachineSillySpecStatusRead"
               },
               {
                 "type": "null"
@@ -40347,6 +40786,18 @@
             ],
             "title": "Deleted At"
           },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
           "members": {
             "items": {
               "$ref": "#/components/schemas/GroupMemberRead"
@@ -40473,6 +40924,18 @@
               }
             ],
             "title": "Deleted At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
           },
           "members": {
             "items": {
@@ -40617,6 +41080,18 @@
               }
             ],
             "title": "Deleted At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
           },
           "members": {
             "items": {
@@ -40823,6 +41298,18 @@
               }
             ],
             "title": "Deleted At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
           },
           "members": {
             "items": {
@@ -43895,6 +44382,143 @@
         ],
         "title": "MachinePendingUpdateRead",
         "description": "机器视图 pending_update 嵌套（design S4 / M11）。\n\n即 daemon_instances.pending_update JSON 列原样透出：三上报字段 + backend 首落\n库时盖的 ``since``（同内容重放心跳保留原 since，不退化成最后心跳时间）。\nNULL（无待升级）→ 机器视图字段为 null。"
+      },
+      "MachineSillySpecStatusRead": {
+        "properties": {
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          },
+          "errors_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors Count"
+          },
+          "warnings_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings Count"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "active_changes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Changes"
+          },
+          "healthy_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy Count"
+          },
+          "ghost_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ghost Count"
+          },
+          "conflict_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Count"
+          },
+          "conflict_types": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Types"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DaemonHeartbeatSillySpecChange"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changes"
+          },
+          "pending_conflicts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DaemonHeartbeatSillySpecConflict"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Conflicts"
+          }
+        },
+        "type": "object",
+        "title": "MachineSillySpecStatusRead",
+        "description": "机器视图 sillyspec_status 嵌套（2026-09-02-changes-overview-card FR-05）。\n\n即 daemon_instances.sillyspec_status JSON 列宽松透出（design §4 摘要）：\ndaemon 侧采集的 ``progress show --json`` envelope 摘要（计数 + changes[] +\npending_conflicts[]）。与 sillyspec_update 不同，backend 不补任何字段（无\nsince 注入），落库形态=上报形态，故嵌套项直接复用心跳 DTO 的\nDaemonHeartbeatSillySpecChange / DaemonHeartbeatSillySpecConflict /\nDaemonHeartbeatSillySpecChangeSteps（同形零转换，免三胞胎模型漂移）。\nNULL（总览不可用——sillyspec 未安装或版本过低）→ 机器视图字段为 null。\n时间字段（generated_at/last_active/created_at）为 ISO8601 字符串原样透传。"
       },
       "MachineSillySpecUpdateRead": {
         "properties": {

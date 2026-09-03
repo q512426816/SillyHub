@@ -1688,7 +1688,18 @@ async def get_group_accessible_session(
     shadow_member = await resolve_shadow_member(db, shadow_session_id=session_id)
     if shadow_member is None:
         return None
-    shadow_group = await db.get(AgentGroupChat, shadow_member.group_id)
+    # 旁路封堵（2026-09-03-group-chat-archive-delete design §5.2 Grill X2）：
+    # 裸 db.get 不过滤软删——delete_group 置位后成员仍可经影子会话解析读到
+    # 已删群。改带过滤 select（照 get_group_chat_by_session 先例，deleted_at
+    # IS NULL），已删群在此返回 None → 调用方统一 404。
+    shadow_group = (
+        await db.execute(
+            select(AgentGroupChat).where(
+                AgentGroupChat.id == shadow_member.group_id,
+                AgentGroupChat.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
     if shadow_group is None:
         return None
     # 群聊体验 quick（2026-09-02）：影子日志只读放行——反查命中的群里，请求者
@@ -1812,6 +1823,32 @@ class GroupChatService:
                     AgentGroupChat.id == group_id,
                     AgentGroupChat.deleted_at.is_(None),
                 )
+            )
+        ).scalar_one_or_none()
+        if group is None:
+            raise GroupChatNotFound(
+                "群不存在或无权访问。",
+                details={"group_id": str(group_id)},
+            )
+        return group
+
+    async def _get_group_locked(self, group_id: uuid.UUID) -> AgentGroupChat:
+        """带 FOR UPDATE 行锁取未软删的群聚合根（2026-09-03-group-chat-archive-delete design §5.1）。
+
+        同 :meth:`_get_group` 查询口径（含已解散——解散群可归档/可删除）+
+        ``.with_for_update()``：仅归档/取消归档/删除三方法使用，防并发双写
+        （照会话先例 ``archive_session``/``delete_agent_session`` 的行锁取行，
+        session/service.py:6672-6740 / 6527-6583）；其余路径零改动继续用
+        无锁 :meth:`_get_group`。
+        """
+        group = (
+            await self._session.execute(
+                select(AgentGroupChat)
+                .where(
+                    AgentGroupChat.id == group_id,
+                    AgentGroupChat.deleted_at.is_(None),
+                )
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if group is None:
@@ -2344,12 +2381,22 @@ class GroupChatService:
             }
         )
 
-    async def list_groups(self, user: User) -> list[GroupChatRead]:
+    async def list_groups(
+        self, user: User, *, archived: bool | None = False
+    ) -> list[GroupChatRead]:
         """当前用户=群成员（未移除用户成员行）的群列表（design §6.1）。
 
         成员摘要经成员行 + ``config_snapshot`` 冗余直出（免 N+1：按群 IN
         批量取成员）。``online_member_ids``/最后消息摘要由 router 层占位
         （task-06 填充）。
+
+        ``archived`` 三态（2026-09-03-group-chat-archive-delete design §5.3，
+        口径照会话先例 session/service.py:6002/6065-6072）：False（默认）→ 仅
+        未归档；True → 仅已归档（归档视图）；None → 不过滤（admin debug 兜底）。
+        **service 默认 False = HTTP 默认 False**（router Query(default=False)）——
+        有意分会话侧的默认 None（曾致桌面端不传参泄漏已归档行，ql-20260831-015
+        教训前移）：listGroupChats 的无参消费点（桌面/移动端群分区、群面板
+        presence）「忘了传参」天然只见未归档群，防泄漏默认前移到本层。
         """
         stmt = (
             select(AgentGroupChat)
@@ -2361,8 +2408,12 @@ class GroupChatService:
                 & AgentGroupMember.removed_at.is_(None),
             )
             .where(AgentGroupChat.deleted_at.is_(None))
-            .order_by(AgentGroupChat.created_at.desc(), AgentGroupChat.id.desc())
         )
+        if archived is True:
+            stmt = stmt.where(AgentGroupChat.archived_at.isnot(None))
+        elif archived is False:
+            stmt = stmt.where(AgentGroupChat.archived_at.is_(None))
+        stmt = stmt.order_by(AgentGroupChat.created_at.desc(), AgentGroupChat.id.desc())
         groups = list((await self._session.execute(stmt)).scalars().all())
         if not groups:
             return []
@@ -2504,6 +2555,90 @@ class GroupChatService:
         # 已解散群折叠/移出）。
         await self._publish_group_sessions_changed(group, "status_changed")
         return self._to_read(group, members)
+
+    # ── 归档/取消归档/删除（2026-09-03-group-chat-archive-delete design §5.1/§5.2）──
+
+    async def archive_group(self, group_id: uuid.UUID, user: User) -> None:
+        """归档群（design §5.1，照会话先例 ``archive_session`` 镜像，
+        session/service.py:6672-6740）。
+
+        群主/workspace admin 置 ``archived_at``（默认群列表隐藏，已归档视图
+        可查可恢复）。幂等：已归档重复调用无操作（rollback 释放 FOR UPDATE
+        行锁后早退，不悬挂事务）。已解散群**可归档**（解散群仍占列表位，
+        归档是收纳解散群的主场景，design §5.1）；软删群在取群处已 404。
+        ``archived_at`` ⊥ ``deleted_at`` ⊥ ``ended_at``（design §2 正交性）。
+        """
+        group = await self._get_group_locked(group_id)
+        await self._require_group_member(group, user)
+        await self._require_group_owner(group, user)
+        if group.archived_at is not None:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+            return  # 幂等：已归档
+        group.archived_at = datetime.now(UTC)
+        await self._session.commit()
+        # design §5.4：归档已落库（列表按 archived_at IS NULL 过滤），发布列表
+        # 变更信号（audience=全部用户成员）——已连 SSE 客户端秒级看到该群从
+        # 默认列表消失、归档视图出现。
+        await self._publish_group_sessions_changed(group, "status_changed")
+
+    async def unarchive_group(self, group_id: uuid.UUID, user: User) -> None:
+        """取消归档群（design §5.1，照会话先例 ``unarchive_session`` 镜像，
+        session/service.py:6711-6740）。
+
+        群主/workspace admin 清除 ``archived_at``（群回默认列表视图）。
+        幂等：未归档重复调用无操作（rollback 释放行锁后早退），与
+        :meth:`archive_group` 对称。
+        """
+        group = await self._get_group_locked(group_id)
+        await self._require_group_member(group, user)
+        await self._require_group_owner(group, user)
+        if group.archived_at is None:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+            return  # 幂等：未归档
+        group.archived_at = None
+        await self._session.commit()
+        # design §5.4：取消归档已落库（行回默认列表视图），发布列表变更信号——
+        # 与 archive_group 对称，SSE 客户端秒级看到该群重新出现。
+        await self._publish_group_sessions_changed(group, "status_changed")
+
+    async def delete_group(self, group_id: uuid.UUID, user: User) -> None:
+        """删除群=软删（design §5.2，照会话先例 ``delete_agent_session`` 镜像，
+        session/service.py:6527-6583）。
+
+        未解散群先复用 :meth:`end_group` 完整收口链（end 全部影子会话 + 影子
+        队列 pending 清理 + 群时间线会话置 ended + 群行 ended_at + 群频道
+        ``session_ended`` 广播——design §5.2 实现取舍：**不重写**
+        ``_end_group_for_delete`` 私有方法，end_group 即目标语义且幂等，已解散
+        直接回读）；随后对群行 + 群时间线会话双置 ``deleted_at``（行/run 历史
+        保留审计，list/get 端点过滤隐藏）。两段 commit 间的「ended-未删」半态
+        由 end_group 幂等重试收敛；删除本身未落库前无半态。幂等边界：已删群
+        在取群处已 404。删除后成员视角一切读路径 404（属主经影子会话读日志的
+        旁路由 ``get_group_accessible_session`` 的 deleted_at 过滤封堵，design
+        §5.2 Grill X2；群主属主 logs 审计只读口径照会话侧现状保留）。
+        """
+        group = await self._get_group_locked(group_id)
+        await self._require_group_member(group, user)
+        await self._require_group_owner(group, user)
+        # 复用收口链（同 user 二次权限判定幂等通过；内部 commit 结束当前事务
+        # 并释放首轮行锁——影子 end 的 WS 投递失败已由其内部 warning 吞掉，
+        # 不阻断软删，与会话侧分层容错同构：内层 best-effort、外层事务性）。
+        await self.end_group(group_id, user)
+        # 重新行锁取最新行：expire_on_commit=False 下内存对象不自动刷新，
+        # 显式重读拿到 end_group 落库后的 ended 态终值。
+        group = await self._get_group_locked(group_id)
+        now = datetime.now(UTC)
+        # 群时间线会话软删置位（严格镜像 delete_agent_session:6578 对会话行的
+        # 软删置位——封堵属主经 GET /sessions/{id} 直读群时间线的旁路）。
+        group_session = await self._session.get(AgentSession, group.session_id)
+        if group_session is not None:
+            group_session.deleted_at = now
+            self._session.add(group_session)
+        group.deleted_at = now
+        self._session.add(group)
+        await self._session.commit()
+        # design §5.4：软删已落库（列表被 deleted_at IS NULL 过滤），发布列表
+        # 删除信号（audience=全部用户成员）——前端 invalidate 重拉后该群消失。
+        await self._publish_group_sessions_changed(group, "deleted")
 
     # ── 成员管理（design §6.1 / §8）─────────────────────────────────────────
 
