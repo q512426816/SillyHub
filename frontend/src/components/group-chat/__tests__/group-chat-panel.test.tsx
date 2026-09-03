@@ -185,6 +185,9 @@ interface StreamHarness {
   /** 服务端关流（触发 fetch-sse onerror → 退避重连 → resync）。 */
   closeStream: () => void;
   logsJson: unknown;
+  /** 可选（群 P3 分页 quick）：按 URL 动态响应 /logs——初始回放与 before 翻页
+   *    需要返回不同页；未设时回退静态 logsJson。 */
+  logsByUrl?: (url: string) => unknown;
 }
 
 let harness: StreamHarness;
@@ -216,10 +219,15 @@ function installRoutedFetchMock(): void {
       }
       if (url.includes("/logs")) {
         return Promise.resolve(
-          new Response(JSON.stringify(harness.logsJson), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify(
+              harness.logsByUrl ? harness.logsByUrl(url) : harness.logsJson,
+            ),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
         );
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
@@ -2222,4 +2230,251 @@ describe("GroupChatPanel 未读（群 P2 第二波：挂载已读 + 分隔线）
     expect(screen.queryByTestId("group-unread-divider")).toBeNull();
   });
 });
+
+// ── 群 P3 quick（2026-09-03，ql-20260903-010）：回放分页 / 回到底部悬浮按钮 ──
+
+/** 分页回放固件：count 条 user_input 行，时间戳从 baseMs 起每秒一条（单调递增，
+ *    id 全局唯一——before 翻页页与初始页共存时间线，log_id 去重不误伤）。 */
+function makePagedReplayLogs(opts: {
+  count: number;
+  baseMs: number;
+}): GroupReplayLogEntry[] {
+  return Array.from({ length: opts.count }, (_, i) => ({
+    id: `pg-${opts.baseMs}-${i}`,
+    run_id: `r-pg-${i}`,
+    timestamp: new Date(opts.baseMs + i * 1000).toISOString(),
+    channel: "user_input",
+    content_redacted: `历史消息 ${i}`,
+    metadata: { sender_member_name: "林一", sender_user_id: "u-lin" },
+  }));
+}
+
+describe("群 P3 回放分页（ql-20260903-010）", () => {
+  it("回放不足一页（<200 条）→ 无「加载更早消息」入口", async () => {
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+    expect(screen.queryByTestId("group-load-earlier")).toBeNull();
+  });
+
+  it("初始回放拉满一页才显示入口；点击按 before 游标向上翻页、落不满一页入口消失", async () => {
+    const initialPage = makePagedReplayLogs({
+      count: 200,
+      baseMs: Date.UTC(2026, 8, 1, 5, 0, 0),
+    });
+    // 翻页页 3 条（落不满一页 → 翻完后入口应消失），时间戳严格早于初始页首条。
+    const earlierPage = makePagedReplayLogs({
+      count: 3,
+      baseMs: Date.UTC(2026, 8, 1, 4, 59, 57),
+    });
+    harness.logsByUrl = (url) =>
+      url.includes("before=") ? earlierPage : initialPage;
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-log-id='${initialPage[0]!.id}']`),
+      ).toBeTruthy();
+    });
+    // 拉满 200 条 → 入口出现。
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("group-load-earlier"));
+    });
+    // 翻页请求：before=当前最早一条 ts + limit=200。
+    await waitFor(() => {
+      expect(harness.calls.some((u) => u.includes("before="))).toBe(true);
+    });
+    const beforeCall = harness.calls.find((u) => u.includes("before="))!;
+    expect(beforeCall).toContain(
+      `before=${encodeURIComponent(initialPage[0]!.timestamp)}`,
+    );
+    expect(beforeCall).toContain("limit=200");
+    // 更早消息插入时间线最前（视口位置保持由 scrollTop 增量保证，jsdom 高恒 0 不验）。
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-log-id='${earlierPage[0]!.id}']`),
+      ).toBeTruthy();
+    });
+    const rows = Array.from(
+      screen
+        .getByTestId("group-chat-timeline")
+        .querySelectorAll("[data-log-id]"),
+    );
+    expect(rows[0]!.getAttribute("data-log-id")).toBe(earlierPage[0]!.id);
+    // 翻页落不满一页 → 无更早历史 → 入口消失。
+    await waitFor(() => {
+      expect(screen.queryByTestId("group-load-earlier")).toBeNull();
+    });
+  });
+
+  it("翻页失败 → 「加载失败，点击重试」；重试成功返回空页 → 入口消失", async () => {
+    const initialPage = makePagedReplayLogs({
+      count: 200,
+      baseMs: Date.UTC(2026, 8, 1, 5, 0, 0),
+    });
+    let failOnce = true;
+    harness.logsByUrl = (url) => {
+      if (!url.includes("before=")) return initialPage;
+      if (failOnce) {
+        failOnce = false;
+        throw new Error("boom");
+      }
+      return [];
+    };
+    renderPanel();
+    await waitForStreamWired();
+    await screen.findByTestId("group-load-earlier");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("group-load-earlier"));
+    });
+    await screen.findByText("加载失败，点击重试");
+    const failedCalls = harness.calls.filter((u) => u.includes("before=")).length;
+    // 点击重试 → 重新发翻页请求；返回空页 → 判无更早历史，入口消失。
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("group-load-earlier"));
+    });
+    await waitFor(() => {
+      expect(harness.calls.filter((u) => u.includes("before=")).length).toBe(
+        failedCalls + 1,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("group-load-earlier")).toBeNull();
+    });
+  });
+});
+
+describe("群 P3 回到底部悬浮按钮（ql-20260903-010）", () => {
+  /** 布局固件：scrollHeight=1000 / clientHeight=500，scrollTop 可写。 */
+  function mockTimelineGeometry(el: HTMLElement): {
+    scrollToMock: ReturnType<typeof vi.fn>;
+    setScrollTop: (_v: number) => void;
+  } {
+    const scrollToMock = vi.fn();
+    Object.defineProperty(el, "scrollTo", {
+      value: scrollToMock,
+      configurable: true,
+    });
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(el, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    let scrollTop = 0;
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v;
+      },
+    });
+    return { scrollToMock, setScrollTop: (v) => (scrollTop = v) };
+  }
+
+  it("贴底无按钮；上滚出现；离开期间新消息计数；点击平滑回底清零；滚回底部自然清零", async () => {
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+    const el = screen.getByTestId("group-chat-timeline");
+    const { scrollToMock, setScrollTop } = mockTimelineGeometry(el);
+
+    // 消费「首帧无条件回底」分支（stub scrollTo 后首个 entries 变化进入该分支，
+    // 同 ql-20260903-002 用例惯例），避免后续断言被挂载逻辑污染。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-base",
+      log_id: "l-base",
+      channel: "stdout",
+      content: "[ASSISTANT] 基线轮",
+      timestamp: "2026-09-01T06:30:00Z",
+      member_id: "mem-1",
+      member_name: "小码",
+    });
+    await flushAsync();
+    expect(scrollToMock).toHaveBeenCalledTimes(1);
+    scrollToMock.mockClear();
+
+    // 贴底 → 无按钮。
+    expect(screen.queryByTestId("group-jump-bottom")).toBeNull();
+    // 上滚（scrollTop=0 → 距底 500 > 80）→ 按钮出现，无新消息时显示「回到底部」。
+    setScrollTop(0);
+    await act(async () => {
+      fireEvent.scroll(el);
+    });
+    const btn = await screen.findByTestId("group-jump-bottom");
+    expect(btn.textContent).toContain("回到底部");
+
+    // 离开期间到达新消息 → 计数 +1，且上滚不被强制拽底。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-new",
+      log_id: "l-new",
+      channel: "user_input",
+      content: "离开期间的新消息",
+      timestamp: "2026-09-01T07:00:00Z",
+      sender_member_name: "林一",
+      sender_user_id: "u-lin",
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("group-jump-bottom").textContent).toContain(
+        "1 条新消息",
+      );
+    });
+    expect(scrollToMock).not.toHaveBeenCalled();
+
+    // 滚回底部（不点按钮）→ 计数清零、按钮消失；再上滚重新锚定（旧消息不计入）。
+    setScrollTop(600); // 距底 -100 < 80 → 贴底。
+    await act(async () => {
+      fireEvent.scroll(el);
+    });
+    expect(screen.queryByTestId("group-jump-bottom")).toBeNull();
+    setScrollTop(0);
+    await act(async () => {
+      fireEvent.scroll(el);
+    });
+    expect(screen.getByTestId("group-jump-bottom").textContent).toContain(
+      "回到底部",
+    );
+
+    // 离开期间再来两条 → 点击按钮平滑回底，计数清零、按钮消失。
+    for (const [i, ts] of [
+      ["2", "2026-09-01T07:01:00Z"],
+      ["3", "2026-09-01T07:02:00Z"],
+    ] as const) {
+      await pushSseEvent({
+        event: "log",
+        session_id: "s-g-1",
+        run_id: `r-new-${i}`,
+        log_id: `l-new-${i}`,
+        channel: "user_input",
+        content: `离开期间的新消息 ${i}`,
+        timestamp: ts,
+        sender_member_name: "林一",
+        sender_user_id: "u-lin",
+      });
+    }
+    await waitFor(() => {
+      expect(screen.getByTestId("group-jump-bottom").textContent).toContain(
+        "2 条新消息",
+      );
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("group-jump-bottom"));
+    });
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" });
+    expect(screen.queryByTestId("group-jump-bottom")).toBeNull();
+  });
+});
+
 

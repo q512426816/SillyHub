@@ -156,3 +156,16 @@
 方案：①apiFetch 读请求缺省 30s 超时（ql-20260831-006 的 timeoutMs 能力推广到 GET/HEAD；写操作防慢写误杀重发仍需显式传）——挂起有界化，4 次尝试（1+3 重试）×30s≈2 分钟自动自愈窗口正好覆盖典型部署重启；②retry 谓词加 status===0——超时/网络错误进入指数退避重试，backend 恢复后下一次尝试即自愈；③GroupChatPanel 三处失败态（右列成员面板/时间线空态/手机抽屉）补「点击重试」按钮调 detailQ.refetch()；④顺手修头像刷屏：inline 图片加私有缓存一天（file_id 内容寻址不可变，安全；实测单次打开群聊重复拉同一头像数十次）
 结果：前端 api 9+query-client 6+group-chat-panel 47+sessions-portal 39 全绿 tsc 0；后端 file 38 passed（venv）ruff 0。Docker 重建后浏览器故障演练全链路验证：停 backend→群聊页进入有界重试（「加载中」最多~2分钟）→超窗转「加载群聊失败：请求超时，请重试」+重新加载按钮（修复前永久卡加载中）→恢复 backend 后自动自愈实测逮到（群列表自动出现）→深链重开群聊面板完整装配（时间线+成员+历史消息+0加载中）；curl 验证头像响应带 cache-control: private, max-age=86400
 审计：✅ 无新欠账。并行会话协同：与 ql-20260903-008-3c76（成员面板 h-full）同文件不同区域共存无冲突，本提交捎带其对 group-chat-panel.tsx 的一行 h-full（member-panel.tsx 主体与 changelog 留其自行提交）
+
+## ql-20260903-010-f11d | 2026-09-03 11:03:41 | 群聊页面优化——时间线行 memo 化+回放分页+回到底部悬浮按钮
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/group-chat/group-chat-panel.tsx（行 memo 化+回放分页+回底悬浮按钮）
+- frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx（harness 动态 logs 响应器+分页/回底 4 新用例）
+- .sillyspec/docs/SillyHub/modules/frontend_components.md（group-chat-panel 条目补群 P3 quick 说明）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md（ql 变更索引条目）
+需求：群聊页面优化——时间线行 memo 化+回放分页+回到底部悬浮按钮
+根因：流式输出时每个 token 触发全时间线重渲染且行组件无 memo；挂载回放全量拉回历史；上滚读历史后无回底入口、离开期间新消息无任何提示
+方案：GroupTimelineRow memo 化+props 全稳定（NO_REPLYING 常量/handlePin/handleQuoteReply useCallback）；初始回放 limit 200，顶部「加载更早消息」按 before 游标翻页（applyGroupTimelineEvent 归并+scrollTop 增量视口保持）；回到底部悬浮按钮+离开期间新消息计数
+结果：group-chat 目录 93 用例全过（新增 4：分页入口/翻页游标/失败重试/回底按钮全链路）；tsc --noEmit 零错误；两文件 lint 无新增告警；模块文档 frontend_components.md+frontend.changelog.md 已同步

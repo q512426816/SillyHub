@@ -61,6 +61,17 @@
  * PUT /read 推服务端已读位点 + 乐观清零列表缓存；时间线「第 N 条未读」前插
  * 微信式「以下 N 条为新消息」分隔线——挂载快照只算一次，会话中新消息不再插线）。
  *
+ * 群 P3 体验/性能 quick（2026-09-03，ql-20260903-010）：
+ *   - GroupTimelineRow memo 化——流式期间每个 token 原会带动全部历史行重渲染，
+ *     memo + 稳定 props（回调 useCallback / 空 replying 常量数组）后仅变化行
+ *     重渲染；
+ *   - 回放分页——初始回放 limit 200（原全量拉回），顶部「加载更早消息」按
+ *     before=当前最早一条 timestamp 游标向上翻页（数据层既有语义），落不满一页
+ *     即无更早历史；归并走 applyGroupTimelineEvent（log_id 去重 + 同一排序函数），
+ *     加载后 scrollTop 同步抬高增量——视口停留在用户正在读的位置不被下推；
+ *   - 回到底部悬浮按钮——离开底部后出现（上滚读历史不再只能手动划回），离开
+ *     期间到达的消息计入「N 条新消息」，滚回底部或点击按钮清零。
+ *
  * 数据流关键点：
  *   - 回放身份还原：投影行 metadata.member_id/member_name（task-05 落库形态）
  *     ——2026-09-01-session-group-chat 收口：后端 /logs DTO 已暴露 metadata/
@@ -73,15 +84,17 @@
 
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
+import { ArrowDown, FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
 
 import { Drawer, Modal } from "antd";
 import { MemberPanel } from "@/components/group-chat/member-panel";
@@ -141,6 +154,13 @@ const TYPING_PREVIEW_MAX_CHARS = 400;
 
 /** facepile 直显头像数（超出 +N）。 */
 const FACEPILE_MAX = 4;
+
+/** 群回放分页页大小（初始回放与「加载更早消息」同口径；数据层 limit=最新 N 条语义）。 */
+const GROUP_REPLAY_PAGE_SIZE = 200;
+
+/** replying 空集常量（memo 稳定 props：行无「正在回复」标签时恒用同一引用，
+ *    避免 map 里 `?? []` 每次新建数组击穿 GroupTimelineRow 的 memo）。 */
+const NO_REPLYING: GroupReplyingMember[] = [];
 
 /** agent 成员头像配色档（member_id 哈希分色分组，design §7「member_id 分色」）。 */
 const AGENT_AVATAR_COLORS = [
@@ -765,6 +785,18 @@ export function GroupChatPanel({
   );
   const streamConnRef = useRef<{ close: () => void; resync?: () => void } | null>(null);
 
+  /* ── 向上翻页（群 P3 分页 quick）：顶部「加载更早消息」——before=当前最早一条
+   *    timestamp 游标，后端返回「游标之前的最新一页」；经 applyGroupTimelineEvent
+   *    归并（log_id 去重 + 与实时同一全局排序函数）。hasMoreHistory：初始/翻页
+   *    拉回满一页即认为可能有更早，落不满一页即无更早。 ── */
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  /** 翻页前的时间线 scrollHeight：归并渲染后把 scrollTop 同步抬高增量，视口
+   *    停留在用户正在读的位置不被新插入的历史下推（layout 阶段消费，见下方
+   *    useLayoutEffect）。 */
+  const preserveTopHeightRef = useRef<number | null>(null);
+
   /* ── typing 指示器（用户 TTL 2.5s 周期裁剪；agent 持续态豁免——止息信号移除，
    *    群聊运行态可见 quick 2026-09-02）+「正在回复」锚点标签表 ── */
   const [typingMap, setTypingMap] = useState<Record<string, GroupTypingIndicator>>({});
@@ -900,12 +932,22 @@ export function GroupChatPanel({
     setTypingMap({});
     setReplyingBy({});
     stoppedAgentKeysRef.current = new Set();
+    // 群 P3 分页 quick：翻页态随时间线一并归零。
+    setHasMoreHistory(false);
+    setLoadingMore(false);
+    setLoadMoreError(false);
+    preserveTopHeightRef.current = null;
 
     void (async () => {
-      // 回放读库（刷新回放：user_input 行 + 投影行，统一排序平铺）。
+      // 回放读库（刷新回放：user_input 行 + 投影行，统一排序平铺）。limit 分页：
+      // 初始只取最新一页，更早历史走顶部「加载更早消息」（群 P3 分页 quick）。
       try {
-        const logs = (await getAgentSessionLogs(sessionId)) as GroupReplayLogEntry[];
+        const logs = (await getAgentSessionLogs(sessionId, {
+          limit: GROUP_REPLAY_PAGE_SIZE,
+        })) as GroupReplayLogEntry[];
         if (cancelled) return;
+        // 拉回满一页 → 可能有更早历史（不足一页必无更早）。
+        setHasMoreHistory(logs.length >= GROUP_REPLAY_PAGE_SIZE);
         const built = buildTimelineFromReplay(logs, currentUserIdRef.current);
         setEntries(built);
         for (const e of built) seenIdsRef.current.add(e.id);
@@ -1129,12 +1171,95 @@ export function GroupChatPanel({
   const nearBottomRef = useRef(true);
   const lastOwnSendTsRef = useRef<string | null>(null);
   const initialScrollDoneRef = useRef(false);
+  /* ── 回到底部悬浮按钮 + 新消息计数（群 P3 quick）：nearBottom 驱动按钮显隐；
+   *    leftBottomTs=离开底部那一刻的最新消息时间戳，之后时间戳更大的消息计入
+   *    「N 条新消息」——滚回底部（含点按钮）清零。 ── */
+  const [nearBottom, setNearBottom] = useState(true);
+  const [leftBottomTs, setLeftBottomTs] = useState<string | null>(null);
+  /** 当前时间线最新一条的 timestamp（scroll 回调闭包经 ref 读最新值）。 */
+  const newestEntryTsRef = useRef<string | null>(null);
+  useEffect(() => {
+    newestEntryTsRef.current =
+      entries.length > 0 ? entries[entries.length - 1]!.timestamp : null;
+  }, [entries]);
+  /** 离开底部期间到达的新消息数（0 时按钮只显示「回到底部」）。 */
+  const newCount = leftBottomTs
+    ? entries.reduce((n, e) => (e.timestamp > leftBottomTs ? n + 1 : n), 0)
+    : 0;
   const handleTimelineScroll = useCallback(() => {
     const el = timelineRef.current;
     if (!el) return;
-    nearBottomRef.current =
+    const near =
       el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    nearBottomRef.current = near;
+    setNearBottom((prev) => (prev === near ? prev : near));
+    if (near) {
+      // 回到底部 → 新消息计数清零（含点击悬浮按钮后的滚底触发）。
+      setLeftBottomTs((prev) => (prev === null ? prev : null));
+    } else {
+      // 离开底部 → 锚定「离开点」最新时间戳，此后更大的 ts 计入新消息。
+      setLeftBottomTs((prev) => prev ?? newestEntryTsRef.current);
+    }
   }, []);
+  /** 点击悬浮按钮平滑回底（滚底 onScroll 触发后计数自然清零）。 */
+  const jumpToBottom = useCallback(() => {
+    const el = timelineRef.current;
+    if (!el || typeof el.scrollTo !== "function") return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    nearBottomRef.current = true;
+    setNearBottom(true);
+    setLeftBottomTs(null);
+  }, []);
+
+  /* ── 向上翻页（群 P3 分页 quick）：before 游标拉「最早一条之前的一页」，
+   *    归并经 applyGroupTimelineEvent（log_id 去重——SSE resync 可能与翻页
+   *    重叠；同一排序函数）；视口位置保持由下方 useLayoutEffect 完成。 ── */
+  const loadMoreHistory = useCallback(async () => {
+    const oldest = entries[0]?.timestamp;
+    if (!sessionId || !oldest || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(false);
+    preserveTopHeightRef.current = timelineRef.current?.scrollHeight ?? null;
+    try {
+      const logs = (await getAgentSessionLogs(sessionId, {
+        before: oldest,
+        limit: GROUP_REPLAY_PAGE_SIZE,
+      })) as GroupReplayLogEntry[];
+      if (logs.length < GROUP_REPLAY_PAGE_SIZE) setHasMoreHistory(false);
+      if (logs.length === 0) preserveTopHeightRef.current = null;
+      setEntries((prev) => {
+        let next = prev;
+        for (const log of logs) {
+          const entry = entryFromReplayLog(log, currentUserIdRef.current);
+          if (!entry) continue;
+          next = applyGroupTimelineEvent(next, seenIdsRef.current, {
+            type: "entry",
+            entry,
+          });
+        }
+        return next;
+      });
+    } catch {
+      preserveTopHeightRef.current = null;
+      setLoadMoreError(true);
+    } finally {
+      setLoadingMore(false);
+      // 兜底清视口保持标记：若归并后 entries 引用未变（全部去重），layout
+      // effect 不触发，标记不能滞留到下一次无关 entries 变化时误调整视口。
+      setTimeout(() => {
+        preserveTopHeightRef.current = null;
+      }, 0);
+    }
+  }, [entries, sessionId, loadingMore]);
+  /* 翻页视口保持（绘制前）：scrollTop 抬高「新插入历史内容的高度增量」，
+   *    用户正在读的区域保持原位（微信/钉钉向上翻页同款语义）。 */
+  useLayoutEffect(() => {
+    const preserved = preserveTopHeightRef.current;
+    if (preserved == null) return;
+    preserveTopHeightRef.current = null;
+    const el = timelineRef.current;
+    if (el) el.scrollTop += el.scrollHeight - preserved;
+  }, [entries]);
   useEffect(() => {
     const el = timelineRef.current;
     if (!el || typeof el.scrollTo !== "function") return;
@@ -1441,6 +1566,14 @@ export function GroupChatPanel({
       notify.error(err, "取消置顶失败，请稍后重试");
     },
   });
+  /* 群 P3 quick：置顶入口稳定回调——memo 化 GroupTimelineRow 的 props 稳定性
+   *    要求 onPin 跨渲染同引用；先解构出 mutate（React Query 稳定引用，结果
+   *    对象每次渲染新建，不可作 dep 否则回调随渲染重建、memo 失效）。 */
+  const { mutate: pinMutate } = pinMutation;
+  const handlePin = useCallback(
+    (logId: string) => pinMutate(logId),
+    [pinMutate],
+  );
 
   /* ── 运行态派生（群聊运行态可见 quick 2026-09-02） ── */
   /** 有回复锚点标签的 agent 归属键（标签已挂触发消息下方，typing 指示条不重复）。 */
@@ -1731,16 +1864,37 @@ export function GroupChatPanel({
           </div>
         )}
 
-        {/* 平铺时间线（原型 .timeline；容器内距对齐会话 TurnTimeline px-5 py-5）。 */}
-        <div
-          ref={timelineRef}
-          onScroll={handleTimelineScroll}
-          data-testid="group-chat-timeline"
-          role="log"
-          aria-label="群消息时间线"
-          className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
-        >
-          {entries.length === 0 && (
+        {/* 平铺时间线（原型 .timeline；容器内距对齐会话 TurnTimeline px-5 py-5）。
+            外层 relative 容器承载「回到底部」悬浮按钮（定位相对视口而非滚动内容）。 */}
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={timelineRef}
+            onScroll={handleTimelineScroll}
+            data-testid="group-chat-timeline"
+            role="log"
+            aria-label="群消息时间线"
+            className="h-full overflow-y-auto px-5 py-5"
+          >
+            {/* 向上翻页入口（群 P3 分页 quick）：初始拉满一页才出现；点击按
+                before 游标拉更早一页（视口位置保持，见 loadMoreHistory）。 */}
+            {hasMoreHistory && entries.length > 0 && (
+              <div className="mb-3 flex justify-center">
+                <button
+                  type="button"
+                  data-testid="group-load-earlier"
+                  disabled={loadingMore}
+                  onClick={() => void loadMoreHistory()}
+                  className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loadingMore
+                    ? "加载中…"
+                    : loadMoreError
+                      ? "加载失败，点击重试"
+                      : "加载更早消息"}
+                </button>
+              </div>
+            )}
+            {entries.length === 0 && (
             <p
               data-testid="group-chat-timeline-empty"
               className="py-10 text-center text-xs text-muted-foreground"
@@ -1785,7 +1939,11 @@ export function GroupChatPanel({
               <GroupTimelineRow
                 entry={entry}
                 memberNames={memberNames}
-                replying={entry.kind === "user" ? (replyingBy[entry.id] ?? []) : []}
+                replying={
+                  entry.kind === "user"
+                    ? (replyingBy[entry.id] ?? NO_REPLYING)
+                    : NO_REPLYING
+                }
                 onQuote={handleQuoteReply}
                 providerLabel={
                   entry.kind === "agent"
@@ -1818,10 +1976,24 @@ export function GroupChatPanel({
                 canPin={isOwner && entry.kind !== "system"}
                 isPinned={pinned?.log_id === entry.id}
                 pinPending={pinMutation.isPending}
-                onPin={(logId) => pinMutation.mutate(logId)}
+                onPin={handlePin}
               />
             </Fragment>
           ))}
+          </div>
+          {/* 回到底部悬浮按钮（群 P3 quick）：离开底部出现；离开期间有新消息
+              显示「N 条新消息」，否则只显示「回到底部」。 */}
+          {!nearBottom && (
+            <button
+              type="button"
+              data-testid="group-jump-bottom"
+              onClick={jumpToBottom}
+              className="absolute bottom-3 right-4 z-10 inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-md transition-colors hover:bg-muted"
+            >
+              <ArrowDown aria-hidden className="h-3.5 w-3.5" />
+              {newCount > 0 ? `${newCount} 条新消息` : "回到底部"}
+            </button>
+          )}
         </div>
 
         {/* typing 指示器（原型 .typing-bar：谁正在输入 + 三点动画 + 草稿预览）。 */}
@@ -2097,7 +2269,13 @@ export function GroupChatPanel({
 
 /* ────────────────────── 时间线行渲染 ────────────────────── */
 
-/** 单条时间线行（用户/agent 气泡 + 系统事件居中；原型 .msg / .sys-event）。
+/**
+ * 单条时间线行（用户/agent 气泡 + 系统事件居中；原型 .msg / .sys-event）。
+ *
+ * memo 化（群 P3 quick）：流式期间每个 SSE 事件都会重建 entries 数组，未 memo
+ * 时全部历史行随每个 token 重渲染；props 已全部稳定——entry 引用（归并函数
+ * 不可变更新）、memberNames（useMemo）、replying（map 内空集用模块常量
+ * NO_REPLYING）、onPin/onQuote（useCallback），memo 浅比较后仅变化行重渲染。
  *
  * 群聊体验对齐 quick（2026-09-02）：视觉 token 对照会话 TurnTimeline conversation
  * 视图抄语义类（不改 TurnTimeline 本身）——
@@ -2204,7 +2382,7 @@ function ReplyQuoteBar({
   );
 }
 
-function GroupTimelineRow({
+function GroupTimelineRowInner({
   entry,
   memberNames,
   replying,
@@ -2408,6 +2586,9 @@ function GroupTimelineRow({
     </div>
   );
 }
+
+/** 时间线行（memo 包装——流式期间仅变化行重渲染，理由见 GroupTimelineRowInner 头注）。 */
+const GroupTimelineRow = memo(GroupTimelineRowInner);
 
 /**
  * 「XX 正在回复…」标签行（群聊运行态可见 quick 2026-09-02，核心新需求）：

@@ -42,7 +42,12 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
     自动滚底五要素（02df074e4 + ql-20260903-002 修正）：onScroll 距底 <80px ref /
     仅贴底跟随 / **自己**（isSelf）刚发送强制回底——群时间线所有成员发言都是
     kind:"user"，不过滤 isSelf 时他人发言会把上滚读历史的视口拽底；首帧回底
-    同时播种 own-send 基线（回放里已有的自己消息不算「刚发送」）/ 选中文字不滚底
+    同时播种 own-send 基线（回放里已有的自己消息不算「刚发送」）/ 选中文字不滚底；
+    群 P3 体验/性能 quick（ql-20260903-010）：GroupTimelineRow memo 化（props 全稳定——
+    entry 不可变归并引用、空 replying 模块常量、onPin/onQuote useCallback，流式期间
+    仅变化行重渲染）；回放分页（初始 limit 200 取代全量拉回，顶部「加载更早消息」
+    before 游标向上翻页、归并同 applyGroupTimelineEvent、scrollTop 增量保持视口）；
+    回到底部悬浮按钮（离开底部出现，离开期间新消息计「N 条新消息」，回底清零）
   - `create-group-wizard.tsx` — 建群向导三步：群名→邀请用户→配置 agent 成员
     （六要素表单可添加多个，不内置角色模板）
   - `member-panel.tsx` — 成员面板：用户成员 presence 绿点/移除；agent 成员六要素
