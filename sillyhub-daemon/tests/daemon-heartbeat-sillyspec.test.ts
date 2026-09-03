@@ -35,7 +35,10 @@ import type { DaemonMessage } from '../src/types.js';
 import { MSG, REST_PREFIX } from '../src/protocol.js';
 import { DAEMON_VERSION } from '../src/daemon-version.js';
 import { BUILD_ID } from '../src/build-id.js';
-import type { SillySpecSnapshot } from '../src/sillyspec-manager.js';
+import type {
+  SillySpecSnapshot,
+  SillySpecStatusSummary,
+} from '../src/sillyspec-manager.js';
 
 // ── fetch mock 工具（照 daemon-heartbeat-pending.test.ts）─────────────────────
 
@@ -87,6 +90,10 @@ function makeConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     spec_root_map: '',
     self_reload_check_interval_sec: 600,
     sillyspec_update_interval_sec: 9999,
+    // 2026-09-02-changes-overview-card task-04：采集默认关闭（0）——心跳不带
+    // sillyspec_status 键，既有第 4/5 参断言零变化（缺省形态零变化语义）；
+    // 新用例经 overrides 开启（60）断言第 6 参注入。
+    sillyspec_status_interval_sec: 0,
     ...overrides,
   };
 }
@@ -98,6 +105,11 @@ interface FakeManagerControls {
   snapshot: SillySpecSnapshot;
   probeLocalResult: string | null;
   probeLatestResult: string | null;
+  /**
+   * 2026-09-02-changes-overview-card task-04：getStatusSnapshot 可编程返回——
+   * 缺省 undefined（采集未定级，心跳不带 sillyspec_status 键）。
+   */
+  statusSnapshot?: SillySpecStatusSummary | null;
 }
 
 function makeFakeManager(controls: FakeManagerControls) {
@@ -109,15 +121,23 @@ function makeFakeManager(controls: FakeManagerControls) {
     // ql-20260902-003：WS 手动指令改走版本门前置入口。
     requestManualUpgrade: vi.fn(async () => undefined),
     checkAndUpgrade: vi.fn(async () => undefined),
+    getStatusSnapshot: vi.fn(() =>
+      controls.statusSnapshot === undefined ? undefined : controls.statusSnapshot,
+    ),
   };
 }
 
-/** 心跳 harness：真实构造 Daemon（client mock 仅 heartbeat），假 manager 注入。 */
-function makeHeartbeatHarness(controls: FakeManagerControls) {
+/** 心跳 harness：真实构造 Daemon（client mock 仅 heartbeat），假 manager 注入。
+ * 2026-09-02-changes-overview-card task-04：configOverrides 透传（开启采集
+ * 间隔断言第 6 参注入用），缺省维持既有 fixture（采集关闭零变化）。 */
+function makeHeartbeatHarness(
+  controls: FakeManagerControls,
+  configOverrides: Partial<DaemonConfig> = {},
+) {
   const heartbeatMock = vi.fn(async () => ({}));
   const manager = makeFakeManager(controls);
   const daemon = new Daemon(
-    makeConfig(),
+    makeConfig(configOverrides),
     { heartbeat: heartbeatMock } as never,
     null as never,
     { sessionManager: null, sillyspecManager: manager as never },
@@ -256,6 +276,65 @@ describe('task-05 HubClient heartbeat 第 5 可选参数 sillyspec', () => {
         target_version: 'tgt-2',
       },
     });
+  });
+});
+
+// ── HubClient heartbeat 第 6 可选参数 sillyspec_status（body 契约）────────────
+
+const STATUS_SUMMARY: SillySpecStatusSummary = {
+  ok: true,
+  errors_count: 0,
+  warnings_count: 1,
+  generated_at: '2026-09-02T12:51:03Z',
+  active_changes: 2,
+  healthy_count: 1,
+  ghost_count: 1,
+  conflict_count: 1,
+  conflict_types: { 'spec-tree': 1 },
+  changes: [
+    {
+      name: '2026-09-02-changes-overview-card',
+      ghost: false,
+      current_stage: 'execute',
+      stage_label: '执行',
+      last_active: '2026-09-02T12:50:59Z',
+      steps: { total: 8, completed: 3 },
+    },
+  ],
+  pending_conflicts: [
+    { change: 'demo-change', created_at: '2026-08-21T10:00:00Z', type: 'spec-tree' },
+  ],
+};
+
+describe('task-02 HubClient heartbeat 第 6 可选参数 sillyspec_status', () => {
+  beforeEach(() => {
+    lastCall = null;
+    vi.stubGlobal('fetch', mockFetchOk({}));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('摘要对象 → 键出现且深比较透传（三态①，conflict_types 计数映射原样）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.heartbeat('dlid-1', [], null, undefined, undefined, STATUS_SUMMARY);
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body.sillyspec_status).toEqual(STATUS_SUMMARY);
+  });
+
+  it('显式 null → 键出现且值为 null（三态②能力缺失=backend 置 NULL 清除）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.heartbeat('dlid-1', [], null, undefined, undefined, null);
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect('sillyspec_status' in body).toBe(true);
+    expect(body.sillyspec_status).toBeNull();
+  });
+
+  it('缺省（undefined）→ 键完全不出现（采集未启动，既有调用零破坏）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.heartbeat('dlid-1', [], null, undefined, undefined);
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect('sillyspec_status' in body).toBe(false);
   });
 });
 
@@ -473,4 +552,81 @@ describe('task-05 WS SILLYSPEC_UPDATE 指令接线', () => {
 it('类型层：SillySpecSnapshot 形状可引用', () => {
   const snapshot: SillySpecSnapshot = { version: null, latest_version: null };
   expect(snapshot.update).toBeUndefined();
+});
+
+// ── Daemon._sendHeartbeatOnce 注入 sillyspec_status（第 6 参，task-02 组装）────
+// 依赖 daemon.ts 尾参占位修复（task-04 复核 A2）：sillyspec 缺席而 status 存在
+// 时第 5 参须显式 undefined 占位，否则 status 滑入 sillyspec 槽位被丢弃。
+
+describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
+  let restoreConsole: () => void;
+
+  beforeEach(() => {
+    restoreConsole = silenceConsole();
+  });
+  afterEach(() => {
+    restoreConsole();
+    vi.restoreAllMocks();
+  });
+
+  it('采集开启 + 快照摘要（三态①）→ 第 6 参为摘要对象（前 5 参语义不变）', async () => {
+    const h = makeHeartbeatHarness(
+      {
+        snapshot: { version: null, latest_version: null },
+        probeLocalResult: null,
+        probeLatestResult: null,
+        statusSnapshot: STATUS_SUMMARY,
+      },
+      { sillyspec_status_interval_sec: 60 },
+    );
+    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+    const call = h.heartbeatMock.mock.calls[0]!;
+    expect(call.length).toBe(6);
+    expect(call[5]).toEqual(STATUS_SUMMARY);
+    expect(call[3]).toBeUndefined();
+    expect(call[4]).toBeUndefined();
+  });
+
+  it('采集开启 + 能力缺失（三态②null）→ 第 6 参显式 null（backend 置 NULL 清除语义）', async () => {
+    const h = makeHeartbeatHarness(
+      {
+        snapshot: { version: null, latest_version: null },
+        probeLocalResult: null,
+        probeLatestResult: null,
+        statusSnapshot: null,
+      },
+      { sillyspec_status_interval_sec: 60 },
+    );
+    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+    const call = h.heartbeatMock.mock.calls[0]!;
+    expect(call.length).toBe(6);
+    expect(call[5]).toBeNull();
+  });
+
+  it('采集开启 + 未定级（undefined，刚启动未采集）→ 第 6 参不占位（length=4，键缺席零破坏）', async () => {
+    const h = makeHeartbeatHarness(
+      {
+        snapshot: { version: null, latest_version: null },
+        probeLocalResult: null,
+        probeLatestResult: null,
+      },
+      { sillyspec_status_interval_sec: 60 },
+    );
+    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+    const call = h.heartbeatMock.mock.calls[0]!;
+    expect(call.length).toBe(4);
+    expect(call[4]).toBeUndefined();
+  });
+
+  it('采集关闭（缺省 fixture interval=0）→ getStatusSnapshot 不被调用（length=4 零开销）', async () => {
+    const h = makeHeartbeatHarness({
+      snapshot: { version: null, latest_version: null },
+      probeLocalResult: null,
+      probeLatestResult: null,
+      statusSnapshot: STATUS_SUMMARY,
+    });
+    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+    expect(h.manager.getStatusSnapshot).not.toHaveBeenCalled();
+    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(4);
+  });
 });

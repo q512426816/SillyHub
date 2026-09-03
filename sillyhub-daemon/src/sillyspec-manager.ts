@@ -14,6 +14,10 @@
  *     daemon._isBusyForUpdate），不接线 config / protocol / hub-client；
  *   - 版本比较复用 preflight isOutdated（semver 元组 + 字符串不等兜底），不重实现。
  *
+ * 2026-09-02-changes-overview-card task-02 扩展：progress show --json 采集器
+ * （collectStatusOnce/getStatusSnapshot，三态降级矩阵 + 32KB 预算截断），
+ * 与升级状态机相互独立（升级链路不复用本采集器）。
+ *
  * 状态机（内存态，daemon 重启即回 idle——重启后 preflight 启动检查已保证最新）：
  *
  *   idle ──requestUpgrade（空闲）──▶ running ──成功──▶ success ─┐
@@ -45,6 +49,13 @@ import {
   type PreflightLogger,
 } from './preflight.js';
 
+// 2026-09-02-changes-overview-card task-02（FR-02/NFR-02）：progress show --json
+// 采集器用 execFile 数组形参直跑 node <sillyspec-bin>（无 shell 依赖，路径空格
+// 安全）；bin 解析用 existsSync 探测 npm 全局布局候选。
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+
 // ── 导出常量（时间参数默认值，全部可注入覆盖；对齐 design §1）─────────────────
 
 /** `npm view sillyspec version` 探测结果缓存 TTL（10 分钟，design R2）。 */
@@ -61,6 +72,75 @@ export const SILLYSPEC_TERMINAL_WINDOW_MS = 10 * 60 * 1000;
 
 /** failed 态 error 摘要截断上限（字符，design 接口定义）。 */
 const SILLYSPEC_ERROR_MAX_CHARS = 200;
+
+/**
+ * progress 采集子进程超时（30s）。仿 runtime-handler.ts SILLYSPEC_TIMEOUT_MS 先例
+ * （design §5 三态矩阵 ③ / FR-03；backend 侧无 RPC 时限，纯本地采集上限）。
+ */
+export const SILLYSPEC_STATUS_TIMEOUT_MS = 30_000;
+
+/** 心跳摘要 changes 列表截断上限（N=50，design §4 / Grill B2）。 */
+export const SILLYSPEC_STATUS_CHANGES_MAX = 50;
+
+/**
+ * 心跳 sillyspec_status 载荷自设预算（32KB，design §4 / Grill B2 修订）：心跳 REST
+ * 通道无 8KB 级既有限制，自设预算一倍余量；超限降级纯计数模式（丢列表保计数）。
+ */
+export const SILLYSPEC_STATUS_BUDGET_BYTES = 32 * 1024;
+
+/** 采集 stdout maxBuffer（8MB）：envelope 正常 KB 级，防御 ghost 爆量场景。 */
+const SILLYSPEC_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
+
+/**
+ * execFile 一次执行的结果（三态矩阵判别输入）。
+ *
+ * - code：进程退出码；spawn 失败（error 事件，如 ENOENT）为 null。
+ * - timedOut：超时被杀（child_process timeout → SIGTERM + killed=true）。
+ * - errorCode：spawn error 事件的字符串 code（'ENOENT' 等）；正常执行不带。
+ */
+export interface SillySpecProgressOutcome {
+  code: number | null;
+  stdout: string;
+  timedOut: boolean;
+  errorCode?: string;
+}
+
+/**
+ * 心跳 sillyspec_status 摘要（design §4 数据契约，backend 契约锚 task-01
+ * DaemonHeartbeatSillySpecStatus）。envelope 的 readable/command 字段容忍但不透传。
+ */
+export interface SillySpecStatusSummary {
+  ok: boolean;
+  errors_count: number;
+  warnings_count: number;
+  generated_at: string;
+  active_changes: number;
+  healthy_count: number;
+  ghost_count: number;
+  conflict_count: number;
+  /** 冲突按 type 计数（如 { 'spec-tree': 1, progress: 2 }）。 */
+  conflict_types: Record<string, number>;
+  /** 变更行截断至 N=50；每项六字段（steps 为 {total, completed} 投影）。 */
+  changes: SillySpecStatusChangeItem[];
+  pending_conflicts: SillySpecStatusPendingConflict[];
+}
+
+/** 摘要 changes[] 单项（envelope 六字段投影，readable/stages 明细不透传）。 */
+export interface SillySpecStatusChangeItem {
+  name: string;
+  ghost: boolean;
+  current_stage: string;
+  stage_label: string;
+  last_active: string;
+  steps: { total: number; completed: number };
+}
+
+/** 摘要 pending_conflicts[] 单项（change/created_at/type 三字段原样）。 */
+export interface SillySpecStatusPendingConflict {
+  change: string;
+  created_at: string;
+  type: string;
+}
 
 // ── 类型（task-05 心跳/注册接线将复用）─────────────────────────────────────────
 
@@ -119,6 +199,29 @@ export interface SillySpecManagerDeps {
   deferredRecheckMs?: number;
   /** 终态展示窗口（毫秒），默认 {@link SILLYSPEC_TERMINAL_WINDOW_MS}。 */
   terminalWindowMs?: number;
+  /**
+   * 2026-09-02-changes-overview-card task-02（FR-02/NFR-02）：progress 采集执行器
+   * （execFile 数组形参，file=node、args[0]=sillyspec bin JS）。默认真实 execFile；
+   * 测试注入假实现避免真实 spawn。
+   */
+  runProgressJson?: (
+    file: string,
+    args: string[],
+    options: { cwd: string; timeoutMs: number; maxBufferBytes: number },
+  ) => Promise<SillySpecProgressOutcome>;
+  /**
+   * sillyspec bin JS 入口解析器：默认 SILLYSPEC_BIN env（源码直连联调）→ npm 全局
+   * 布局候选（win32: <execDir>/node_modules/...；posix: <execDir>/../lib/node_modules/...）
+   * 逐个 existsSync；全不存在返回 null（=能力缺失三态②）。测试可注入固定值。
+   */
+  resolveSillySpecBin?: () => string | null;
+  /**
+   * 采集 cwd（workspace 主仓根，规则 22 禁 worktree）提供者。daemon 接线为
+   * claim 观察到的 rootPath 回调；返回 null = 本拍跳过（尚无已知主仓根）。
+   */
+  statusCwd?: () => string | null;
+  /** 采集超时（毫秒），默认 SILLYSPEC_STATUS_TIMEOUT_MS；测试注入调小。 */
+  statusTimeoutMs?: number;
 }
 
 // ── 实现 ──────────────────────────────────────────────────────────────────────
@@ -150,6 +253,30 @@ export class SillySpecManager {
   /** deferred 复查定时器（单实例：排新前清旧，不叠）。 */
   private _deferredTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // ── 2026-09-02-changes-overview-card task-02：progress 采集状态（三态矩阵）──
+
+  /** 采集执行器（execFile 数组形参；默认真实实现，测试注入假实现）。 */
+  private readonly _runProgressJson: (
+    file: string,
+    args: string[],
+    options: { cwd: string; timeoutMs: number; maxBufferBytes: number },
+  ) => Promise<SillySpecProgressOutcome>;
+  /** sillyspec bin 解析器（默认 env + npm 全局布局探测）。 */
+  private readonly _resolveSillySpecBin: () => string | null;
+  /** 采集 cwd 提供者（workspace 主仓根；null = 无已知根跳过）。 */
+  private readonly _statusCwd: () => string | null;
+  /** 采集超时毫秒。 */
+  private readonly _statusTimeoutMs: number;
+  /**
+   * 最近一次采集结果摘要；null = 能力缺失（三态②，上报 null=backend 置 NULL 清除）。
+   * 三态③瞬态失败保留旧值不清除；未定级前 _statusKnown=false（上报键缺席）。
+   */
+  private _statusSummary: SillySpecStatusSummary | null = null;
+  /** 是否已有终分级（①快照或②能力缺失）；false=心跳不携带 sillyspec_status 键。 */
+  private _statusKnown = false;
+  /** 三态②同类告警去重（warn 一次后同类静默：bin_not_found/spawn_enoent/bad_json）。 */
+  private readonly _statusWarnedClasses = new Set<string>();
+
   constructor(deps: SillySpecManagerDeps) {
     this._runCommand = deps.runCommand ?? ((cmd: string) => runCmd(cmd));
     this._install = deps.install ?? ((logger: PreflightLogger) => installSillySpec(logger));
@@ -163,6 +290,10 @@ export class SillySpecManager {
     this._latestCacheTtlMs = deps.latestCacheTtlMs ?? SILLYSPEC_LATEST_CACHE_TTL_MS;
     this._deferredRecheckMs = deps.deferredRecheckMs ?? SILLYSPEC_DEFERRED_RECHECK_MS;
     this._terminalWindowMs = deps.terminalWindowMs ?? SILLYSPEC_TERMINAL_WINDOW_MS;
+    this._runProgressJson = deps.runProgressJson ?? runProgressJsonDefault;
+    this._resolveSillySpecBin = deps.resolveSillySpecBin ?? resolveSillySpecBinDefault;
+    this._statusCwd = deps.statusCwd ?? (() => null);
+    this._statusTimeoutMs = deps.statusTimeoutMs ?? SILLYSPEC_STATUS_TIMEOUT_MS;
   }
 
   // ── 探测 ────────────────────────────────────────────────────────────────────
@@ -221,6 +352,122 @@ export class SillySpecManager {
       snapshot.update = { ...this._update };
     }
     return snapshot;
+  }
+
+  // ── 2026-09-02-changes-overview-card task-02：progress 状态采集（三态矩阵）─────
+
+  /**
+   * 采集一拍：spawn `node <sillyspec-bin> progress show --json`（execFile 数组形参，
+   * cwd=workspace 主仓根）→ 三态矩阵（FR-03 / design §5）：
+   *   ① 成功（exit 0 + 合法 JSON）→ 落新快照；
+   *   ② 能力缺失（bin 不存在/spawn ENOENT=未安装；exit 0 但非 JSON=旧版无 --json）
+   *     → warn 一次同类静默，快照置 null（上报=清除）；
+   *   ③ 瞬态失败（超时/非零退出/spawn 其他错误）→ 保留上次快照不清除。
+   * 全路径自收敛不 reject；无已知主仓根（statusCwd→null）本拍跳过（debug）。
+   */
+  async collectStatusOnce(): Promise<void> {
+    const cwd = this._statusCwd();
+    if (!cwd) {
+      this._log('debug', 'sillyspec_status_skip_no_root');
+      return;
+    }
+    const bin = this._resolveSillySpecBin();
+    if (bin === null) {
+      this._markStatusCapabilityMissing('bin_not_found', { cwd });
+      return;
+    }
+    let outcome: SillySpecProgressOutcome;
+    try {
+      outcome = await this._runProgressJson(
+        process.execPath,
+        [bin, 'progress', 'show', '--json'],
+        {
+          cwd,
+          timeoutMs: this._statusTimeoutMs,
+          maxBufferBytes: SILLYSPEC_STATUS_MAX_BUFFER,
+        },
+      );
+    } catch (e) {
+      // 执行器本身抛错（不应发生——默认实现全收敛；注入实现防御）→ 按瞬态处理。
+      this._log('warn', 'sillyspec_status_runner_error', {
+        cwd,
+        error: fmtErrorSnippet(e),
+      });
+      return;
+    }
+    // 三态③：超时 / 非零退出 / spawn 其他错误 → 保留上次快照（不清除不上报 null）。
+    if (outcome.timedOut) {
+      this._log('warn', 'sillyspec_status_collect_timeout', {
+        cwd,
+        timeout_ms: this._statusTimeoutMs,
+      });
+      return;
+    }
+    if (outcome.code === null) {
+      if (outcome.errorCode === 'ENOENT') {
+        this._markStatusCapabilityMissing('spawn_enoent', { cwd });
+        return;
+      }
+      this._log('warn', 'sillyspec_status_spawn_failed', {
+        cwd,
+        error_code: outcome.errorCode ?? 'unknown',
+      });
+      return;
+    }
+    if (outcome.code !== 0) {
+      this._log('warn', 'sillyspec_status_nonzero_exit', {
+        cwd,
+        exit_code: outcome.code,
+      });
+      return;
+    }
+    // 三态①/②分界：exit 0 后 stdout 必须是合法 JSON envelope；非 JSON=旧版本
+    // 无 --json（人类可读输出）→ 能力缺失。
+    let parsed: unknown;
+    try {
+      const text = outcome.stdout;
+      parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+    } catch {
+      this._markStatusCapabilityMissing('bad_json', { cwd });
+      return;
+    }
+    const summary = buildSillySpecStatusSummary(parsed);
+    this._statusSummary = summary;
+    this._statusKnown = true;
+    this._log('debug', 'sillyspec_status_collected', {
+      cwd,
+      active_changes: summary.active_changes,
+      ghost_count: summary.ghost_count,
+      conflict_count: summary.conflict_count,
+    });
+  }
+
+  /**
+   * 采集状态快照（纯同步零 spawn，_sendHeartbeatOnce 组装用）：
+   *   - undefined = 采集未出终分级（未启动/未采集过/无根）→ 心跳不带 sillyspec_status 键；
+   *   - null = 能力缺失（三态②）→ 心跳带 null（backend 置 NULL 清除）；
+   *   - 摘要对象 = 最近一次成功快照（三态①，或③保留的旧值）。
+   */
+  getStatusSnapshot(): SillySpecStatusSummary | null | undefined {
+    return this._statusKnown ? this._statusSummary : undefined;
+  }
+
+  /** 三态②：置能力缺失（快照 null）+ warn 一次同类静默。 */
+  private _markStatusCapabilityMissing(
+    reason: 'bin_not_found' | 'spawn_enoent' | 'bad_json',
+    extra: Record<string, unknown>,
+  ): void {
+    this._statusSummary = null;
+    this._statusKnown = true;
+    if (this._statusWarnedClasses.has(reason)) {
+      this._log('debug', 'sillyspec_status_capability_missing_repeat', {
+        reason,
+        ...extra,
+      });
+      return;
+    }
+    this._statusWarnedClasses.add(reason);
+    this._log('warn', 'sillyspec_status_capability_missing', { reason, ...extra });
   }
 
   // ── 升级入口 ────────────────────────────────────────────────────────────────
@@ -437,4 +684,174 @@ function fmtErrorSnippet(e: unknown): string {
   return text.length > SILLYSPEC_ERROR_MAX_CHARS
     ? text.slice(0, SILLYSPEC_ERROR_MAX_CHARS)
     : text;
+}
+
+// ── 2026-09-02-changes-overview-card task-02：采集器默认实现与摘要构造 ──────────
+
+/**
+ * 默认采集执行器：node child_process execFile（数组形参，无 shell 依赖，NFR-02；
+ * Windows 路径空格安全）。错误映射：err=null → code=0；ExecApiError 的数字 code =
+ * 退出码、字符串 code = spawn 错误码（ENOENT 等）；killed=true → 超时被杀。全收敛
+ * 不 reject。
+ */
+function runProgressJsonDefault(
+  file: string,
+  args: string[],
+  options: { cwd: string; timeoutMs: number; maxBufferBytes: number },
+): Promise<SillySpecProgressOutcome> {
+  return new Promise((resolve) => {
+    execFile(
+      file,
+      args,
+      {
+        cwd: options.cwd,
+        timeout: options.timeoutMs,
+        maxBuffer: options.maxBufferBytes,
+        windowsHide: true,
+      },
+      (err, stdout) => {
+        if (err === null) {
+          resolve({ code: 0, stdout: String(stdout ?? ''), timedOut: false });
+          return;
+        }
+        const e = err as NodeJS.ErrnoException & { killed?: boolean };
+        resolve({
+          code: typeof e.code === 'number' ? e.code : null,
+          stdout: String(stdout ?? ''),
+          timedOut: e.killed === true,
+          errorCode: typeof e.code === 'string' ? e.code : undefined,
+        });
+      },
+    );
+  });
+}
+
+/**
+ * 默认 sillyspec bin 解析：SILLYSPEC_BIN env（源码直连联调，design §9）→ npm 全局
+ * 布局候选（win32: node 同目录 node_modules【nvm-windows 布局】+ %APPDATA%\npm\
+ * node_modules【Node.js 标准安装器布局——npm 全局 prefix 在 APPDATA，node 同目录
+ * 布局覆盖不到，不补此候选时已安装环境会被误判能力缺失，ql-20260904-M4】；
+ * posix: ../lib/node_modules——npm prefix 布局，覆盖 /usr/local、homebrew、nvm）。
+ * 逐个 existsSync，全缺返回 null。
+ */
+function resolveSillySpecBinDefault(): string | null {
+  const candidates: string[] = [];
+  const envBin = process.env.SILLYSPEC_BIN;
+  if (envBin && envBin.trim()) {
+    candidates.push(resolve(envBin.trim()));
+  }
+  const execDir = dirname(process.execPath);
+  if (process.platform === 'win32') {
+    candidates.push(
+      join(execDir, 'node_modules', 'sillyspec', 'bin', 'sillyspec.js'),
+    );
+    // ql-20260904-M4（24h 审计）：标准安装器布局——Node.js Windows 安装器的
+    // npm 全局 prefix 是 %APPDATA%\npm（nvm-windows 才是 node 同目录）。
+    const appData = process.env.APPDATA;
+    if (appData && appData.trim()) {
+      candidates.push(
+        join(appData.trim(), 'npm', 'node_modules', 'sillyspec', 'bin', 'sillyspec.js'),
+      );
+    }
+  } else {
+    candidates.push(
+      join(execDir, '..', 'lib', 'node_modules', 'sillyspec', 'bin', 'sillyspec.js'),
+    );
+  }
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** unknown → Record 收窄守卫。 */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** unknown → string（非字符串归 ''）。 */
+function asString(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+/** unknown → 非负整数计数（数组取长度，数字取整数，其余 0）。 */
+function asCount(v: unknown): number {
+  if (Array.isArray(v)) return v.length;
+  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+    return Math.floor(v);
+  }
+  return 0;
+}
+
+/**
+ * envelope → 心跳摘要（design §4 契约，纯函数导出供 task-04 直测）：
+ *   - changes 截断 N=50，每项六字段投影（readable/command 容忍不透传）；
+ *   - pending_conflicts 原样三字段投影；conflict_types 按 type 计数；
+ *   - active_changes 缺失时回退 changes 全长（截断前）；
+ *   - 序化超 32KB 预算 → 降级纯计数模式（changes/pending_conflicts 置空数组，
+ *     计数字段全保留——卡片显「列表过大，仅计数」）。
+ * 防御式解析：字段缺失/类型不符一律兜底（0/''/空数组），不抛错。
+ */
+export function buildSillySpecStatusSummary(
+  envelope: unknown,
+): SillySpecStatusSummary {
+  const env = isRecord(envelope) ? envelope : {};
+  const data = isRecord(env.data) ? env.data : {};
+  const rawChanges = Array.isArray(data.changes) ? data.changes : [];
+  const changes: SillySpecStatusChangeItem[] = rawChanges
+    .slice(0, SILLYSPEC_STATUS_CHANGES_MAX)
+    .map((raw) => {
+      const c = isRecord(raw) ? raw : {};
+      const steps = isRecord(c.steps) ? c.steps : {};
+      return {
+        name: asString(c.name),
+        ghost: c.ghost === true,
+        current_stage: asString(c.current_stage),
+        stage_label: asString(c.stage_label),
+        last_active: asString(c.last_active),
+        steps: {
+          total: asCount(steps.total),
+          completed: asCount(steps.completed),
+        },
+      };
+    });
+  const rawConflicts = Array.isArray(data.pending_conflicts)
+    ? data.pending_conflicts
+    : [];
+  const pending_conflicts: SillySpecStatusPendingConflict[] = rawConflicts.map(
+    (raw) => {
+      const p = isRecord(raw) ? raw : {};
+      return {
+        change: asString(p.change),
+        created_at: asString(p.created_at),
+        type: asString(p.type),
+      };
+    },
+  );
+  const conflict_types: Record<string, number> = {};
+  for (const c of pending_conflicts) {
+    if (c.type) {
+      conflict_types[c.type] = (conflict_types[c.type] ?? 0) + 1;
+    }
+  }
+  const ghost_count = changes.filter((c) => c.ghost).length;
+  const summary: SillySpecStatusSummary = {
+    ok: env.ok === true,
+    errors_count: asCount(env.errors),
+    warnings_count: asCount(env.warnings),
+    generated_at: asString(env.generated_at),
+    active_changes: asCount(data.active_changes) || rawChanges.length,
+    healthy_count: changes.length - ghost_count,
+    ghost_count,
+    conflict_count: pending_conflicts.length,
+    conflict_types,
+    changes,
+    pending_conflicts,
+  };
+  if (
+    Buffer.byteLength(JSON.stringify(summary), 'utf8') > SILLYSPEC_STATUS_BUDGET_BYTES
+  ) {
+    return { ...summary, changes: [], pending_conflicts: [] };
+  }
+  return summary;
 }

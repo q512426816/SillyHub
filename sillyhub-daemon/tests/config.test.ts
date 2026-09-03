@@ -68,6 +68,7 @@ describe('config', () => {
         'runtime_id',
         'self_reload_check_interval_sec',
         'server_url',
+        'sillyspec_status_interval_sec',
         'sillyspec_update_interval_sec',
         'spec_root_map',
         'terminal_observer_close_on_exit',
@@ -85,6 +86,10 @@ describe('config', () => {
 
     it('ql-20260616-006：lease_heartbeat_interval 默认 5 秒', () => {
       expect(DEFAULT_CONFIG.lease_heartbeat_interval).toBe(5);
+    });
+
+    it('2026-09-02-changes-overview-card task-02：sillyspec_status_interval_sec 默认 60 秒（0=关闭）', () => {
+      expect(DEFAULT_CONFIG.sillyspec_status_interval_sec).toBe(60);
     });
 
     it('ql-20260616-003：terminal_observer_* 4 字段默认值', () => {

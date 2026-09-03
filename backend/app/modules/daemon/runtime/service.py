@@ -195,6 +195,9 @@ class RuntimeService:
         sillyspec_update 恒置 None（daemon 侧升级状态机在内存，进程重启即失，
         register 清除上一进程遗留的升级快照）。清除走 register、刷新走心跳——
         与心跳的「version/latest 仅非 None 覆盖」构成 D-002@v1 双通道语义。
+        2026-09-02-changes-overview-card task-03（FR-05）：sillyspec_status 同款
+        恒置 None（new + else 两分支）——progress 快照随 daemon 进程重启失效，
+        register 清除上一进程遗留快照（同 sillyspec_update 收敛理由）。
 
         1. upsert daemon_instances by ``id=daemon_local_id``：复用身份，更新机器级
            字段（hostname/os/arch/allowed_roots/status=online/last_heartbeat_at）。
@@ -227,6 +230,9 @@ class RuntimeService:
                 sillyspec_version=sillyspec_version,
                 sillyspec_latest_version=sillyspec_latest_version,
                 sillyspec_update=None,
+                # 2026-09-02-changes-overview-card task-03：status 同款恒清——
+                # 进度快照随 daemon 进程重启失效（同 update 收敛理由）。
+                sillyspec_status=None,
                 allowed_roots=roots,
                 status="online",
                 last_heartbeat_at=now,
@@ -259,6 +265,8 @@ class RuntimeService:
             instance.sillyspec_version = sillyspec_version
             instance.sillyspec_latest_version = sillyspec_latest_version
             instance.sillyspec_update = None
+            # 2026-09-02-changes-overview-card task-03：status 同款恒清（else 分支）。
+            instance.sillyspec_status = None
             instance.allowed_roots = roots
             instance.status = "online"
             instance.last_heartbeat_at = now
@@ -363,6 +371,7 @@ class RuntimeService:
         sillyspec_version: str | None = None,
         sillyspec_latest_version: str | None = None,
         sillyspec_update: dict | None = None,
+        sillyspec_status: dict | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -393,6 +402,14 @@ class RuntimeService:
           原 dict（含 since，防退化成最后心跳时间）；``None`` 即清除置 NULL
           （终态展示窗口结束 / daemon 无升级进行中）。``error`` 在本层截断至
           200 字符后落库（约束：截断一处实现，DTO 不重复做）。
+
+        2026-09-02-changes-overview-card task-03（FR-05 / Grill B1）：
+        ``sillyspec_status``（progress show --json envelope 摘要，router 层 DTO
+        已校验）语义同 ``sillyspec_update`` 的 None=清除——``None`` 即置 NULL
+        （daemon 侧 CLI 能力缺失上报 null 清除；采集瞬态失败保留上次快照上报，
+        三态矩阵 design §5）；非 None 时 **dict 整包直写**（progress 快照非状态
+        机，无 since/upsert 概念——backend 不补字段不改写，32KB 预算与 N=50
+        截断在 daemon 侧执行，design §4「落库形态=上报形态」）。
 
         daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend：
 
@@ -505,6 +522,11 @@ class RuntimeService:
                     "error": error,
                     "since": now.isoformat(),
                 }
+        # sillyspec_status（2026-09-02-changes-overview-card task-03 / FR-05 /
+        # Grill B1）：语义同 sillyspec_update——None 即清除置 NULL；非 None dict
+        # 整包直写（非状态机无 since/upsert，backend 不增删改写；32KB 预算与
+        # N=50 截断在 daemon 侧执行，design §4）。
+        instance.sillyspec_status = sillyspec_status
         if instance.status != "disabled":
             instance.status = "online"
         self._session.add(instance)

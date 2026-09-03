@@ -10,6 +10,8 @@
  *      特别保留 task-11 的 default_agent × 3 case 作为「其他区块行为不变」守护。
  * task-05 / 2026-08-20-workspace-overview-redesign：四段式重排后同步断言，
  * 新增统计四数字与 6 入口 href 覆盖（FR-05, D-202）。
+ * task-07 / 2026-09-02-changes-overview-card：新增「活跃变更总览」挂载断言
+ * （mock 隔离组件内部）与卡上变更中心入口 href 覆盖（FR-01 / FR-06）。
  */
 import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,10 +21,13 @@ import type { SpecWorkspace } from "@/lib/spec-workspaces";
 import type { Workspace } from "@/lib/workspaces";
 import { useSession } from "@/stores/session";
 
-// ── next/link mock（详情页多处用 Link）──────────────────────────────────────
+// ── next/link mock（详情页多处用 Link；rest 透传让 data-testid 可断言——
+//     task-07 变更中心入口用，本页 Link 均只传 href/className 无污染）─────────
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  default: ({ children, href, ...rest }: React.ComponentProps<"a">) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
   ),
 }));
 
@@ -30,6 +35,15 @@ vi.mock("next/link", () => ({
 vi.mock("@/components/workspace-config-card", () => ({
   WorkspaceConfigCard: () => (
     <div data-testid="workspace-config-card-mock" />
+  ),
+}));
+// task-07 / 2026-09-02-changes-overview-card：总览卡内部 useQuery 需
+// QueryClientProvider、行为已由组件测试（__tests__/changes-overview-card.test.tsx）
+// 覆盖——page 层仿 WorkspaceConfigCard 先例 data-testid 隔离，仅断言挂载与
+// workspaceId 透传（FR-06 机器绑定过滤的数据源定位入口）。
+vi.mock("@/components/workspace/changes-overview-card", () => ({
+  ChangesOverviewCard: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="changes-overview-card-mock" data-workspace-id={workspaceId} />
   ),
 }));
 vi.mock("@/components/workspace-daemon-switcher", () => ({
@@ -277,6 +291,22 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
       await renderWithStrategy(strat);
       expect(screen.getByTestId("workspace-config-card-mock")).toBeInTheDocument();
     }
+  });
+
+  // ── task-07 / 2026-09-02-changes-overview-card：活跃变更总览挂载 ──
+
+  it("page 渲染 <ChangesOverviewCard> 并透传 workspaceId（FR-06 机器绑定过滤）", async () => {
+    await renderWithStrategy("platform-managed");
+    const card = screen.getByTestId("changes-overview-card-mock");
+    expect(card).toHaveAttribute("data-workspace-id", "ws-1");
+  });
+
+  it("卡片区可见入口指向变更中心路由（卡是门铃、变更中心是操作台，design §1）", async () => {
+    await renderWithStrategy("platform-managed");
+    expect(screen.getByTestId("changes-overview-entry")).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/changes",
+    );
   });
 
   // ── task-05 / 2026-08-20-workspace-overview-redesign：统计四数字 ──

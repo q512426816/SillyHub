@@ -37,6 +37,10 @@ import type { ModelError } from './model-error/types.js';
 // 载荷形状（升级状态机快照），复用 task-04 manager 的导出类型，不重复声明。
 import type { SillySpecUpdateState } from './sillyspec-manager.js';
 
+// 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
+// 形状（progress show --json envelope 摘要），复用 manager 导出类型不重复声明。
+import type { SillySpecStatusSummary } from './sillyspec-manager.js';
+
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
 /**
@@ -141,6 +145,14 @@ export interface HeartbeatBody {
   sillyspec_version?: string | null;
   sillyspec_latest_version?: string | null;
   sillyspec_update?: SillySpecUpdateState;
+  /**
+   * 2026-09-02-changes-overview-card task-02（FR-02/03/04，契约锚 task-01
+   * DaemonHeartbeatSillySpecStatus / None=清除）：progress 总览摘要。键存在性语义：
+   *   - undefined → 键完全不出现 = 采集未启动/未出终分级（旧 daemon 形态零破坏）；
+   *   - null → 键出现携带 null = 能力缺失（backend 置 NULL 清除）；
+   *   - 摘要对象 = 最近快照（瞬态失败时 daemon 侧保留旧值照常携带）。
+   */
+  sillyspec_status?: SillySpecStatusSummary | null;
 }
 
 /**
@@ -719,6 +731,12 @@ export class HubClient {
      * 既有 4 参调用请求体逐字段不变（零破坏）。
      */
     sillyspec?: HeartbeatSillySpecParam,
+    /**
+     * 2026-09-02-changes-overview-card task-02（FR-02）：progress 总览摘要，可选
+     * 追加末位。undefined → 请求体不含 sillyspec_status 键（采集未启动，既有调用
+     * 逐字段不变）；null/摘要 → 键出现（null=backend 置 NULL 清除语义）。
+     */
+    sillyspecStatus?: SillySpecStatusSummary | null,
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -735,6 +753,10 @@ export class HubClient {
       body.sillyspec_latest_version = sillyspec.latest_version;
     }
     if (sillyspec?.update != null) body.sillyspec_update = sillyspec.update;
+    // task-02：undefined → 键不出现（采集未启动）；null/摘要 → 显式携带。
+    if (sillyspecStatus !== undefined) {
+      body.sillyspec_status = sillyspecStatus;
+    }
     return this._request<HeartbeatResponse>(
       'POST',
       `${REST_PREFIX}/heartbeat`,

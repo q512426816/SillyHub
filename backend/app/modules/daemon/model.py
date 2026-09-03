@@ -112,6 +112,19 @@ class DaemonInstance(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # 心跳上报的 sillyspec 全局进度总览快照（2026-09-02-changes-overview-card
+    # FR-05 / Grill B1）：daemon 周期采集 ``progress show --json`` envelope 的摘要
+    # 投影（ok/errors_count/warnings_count/generated_at/active_changes/
+    # healthy_count/ghost_count/conflict_count/conflict_types/changes[]/
+    # pending_conflicts[]，design §4）。语义同 sillyspec_update（权威注释见上）——
+    # 心跳载荷该键为 null 即置 NULL（None=清除；daemon 侧 CLI 能力缺失上报 null，
+    # 采集瞬态失败则保留上次快照上报、不清除）；NULL=总览不可用（sillyspec 未安装
+    # 或版本过低）。32KB 载荷预算与 changes N=50 截断在 daemon 侧执行，backend
+    # JSON 原样落库（写入/清除逻辑在心跳 handler）。
+    sillyspec_status: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     status: str = Field(
         default="online",
         sa_column=Column(

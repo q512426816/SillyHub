@@ -353,6 +353,18 @@ export interface DaemonConfig {
    * 不启动自动循环（本地开发/显式关闭，Design Grill F15 逃生口）。
    */
   sillyspec_update_interval_sec: number;
+  /**
+   * sillyspec 状态采集间隔（秒），默认 60，0=关闭。
+   *
+   * 2026-09-02-changes-overview-card task-02（FR-02 / design §5 daemon 段）：daemon
+   * 第五循环 `_sillyspecStatusLoop` 每该间隔执行一次 `progress show --json`
+   * envelope 摘要采集（实际执行归 SillySpecManager.collectStatusOnce，随心跳
+   * `sillyspec_status` 键上报）。形状对齐 sillyspec_update_interval_sec：config.json
+   * 字段（不引入 env 覆盖先例）、loadConfig 经 DEFAULT_CONFIG 浅合并自动补默认值
+   * （缺字段=60）、不做类型强校验（非法值由消费端 _sillyspecStatusLoop 兜底为
+   * 关闭——旧测试 config 缺该字段同样安全跳过，心跳不携带 sillyspec_status 键）。
+   */
+  sillyspec_status_interval_sec: number;
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -417,6 +429,9 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   // 2026-08-31-machine-sillyspec-version task-05：sillyspec 自动升级检查间隔，
   // 默认 3600s（1h），0=关闭（见 DaemonConfig.sillyspec_update_interval_sec 注释）。
   sillyspec_update_interval_sec: 3600,
+  // 2026-09-02-changes-overview-card task-02（FR-02）：sillyspec 状态采集间隔，
+  // 默认 60s，0=关闭（见 DaemonConfig.sillyspec_status_interval_sec 注释）。
+  sillyspec_status_interval_sec: 60,
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────

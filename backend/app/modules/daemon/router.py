@@ -275,6 +275,72 @@ class DaemonHeartbeatSillySpecUpdate(BaseModel):
     error: str | None = Field(default=None, max_length=200)
 
 
+class DaemonHeartbeatSillySpecChangeSteps(BaseModel):
+    """心跳 sillyspec_status.changes[].steps（design §4 envelope steps 投影）。
+
+    ``{total, completed}`` 全可选宽松形态——steps 结构若在 envelope 侧演进，
+    不应让整条心跳 422（心跳是保活通道，宁宽勿断）。
+    """
+
+    total: int | None = None
+    completed: int | None = None
+
+
+class DaemonHeartbeatSillySpecChange(BaseModel):
+    """心跳 sillyspec_status.changes[] 单项（design §4 摘要投影）.
+
+    envelope 变更行六字段投影（``stages``/``readable``/``command`` 不透传，
+    design §4）；``last_active`` 为 ISO8601 字符串原样透传（不收紧成 datetime——
+    daemon 侧格式演进不应 422 整条心跳，前端自行解析展示）。
+    """
+
+    name: str | None = None
+    ghost: bool | None = None
+    current_stage: str | None = None
+    stage_label: str | None = None
+    last_active: str | None = None
+    steps: DaemonHeartbeatSillySpecChangeSteps | None = None
+
+
+class DaemonHeartbeatSillySpecConflict(BaseModel):
+    """心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.
+
+    ``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal
+    （DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条
+    心跳 422）。
+    """
+
+    change: str | None = None
+    created_at: str | None = None
+    type: str | None = None
+
+
+class DaemonHeartbeatSillySpecStatus(BaseModel):
+    """心跳 sillyspec_status 载荷（2026-09-02-changes-overview-card FR-05 / Grill B1）.
+
+    daemon 周期采集 ``progress show --json`` envelope 的摘要投影（design §4）：
+    envelope 全量或超 32KB 预算的计数降级版（截断/降级在 daemon 侧执行，backend
+    原样落库）。全字段宽松可选——与 DaemonHeartbeatSillySpecUpdate 同理（心跳是
+    保活通道，字段缺失或类型演进均不应 422）：不收紧 Literal、不加 max_length，
+    时间字段为 ISO8601 字符串原样承载。
+    """
+
+    ok: bool | None = None
+    errors_count: int | None = None
+    warnings_count: int | None = None
+    generated_at: str | None = None
+    active_changes: int | None = None
+    healthy_count: int | None = None
+    ghost_count: int | None = None
+    conflict_count: int | None = None
+    # 冲突按 type 计数映射（如 {"spec-tree": 2, "progress": 9}）——对齐 daemon 侧
+    # SillySpecStatusSummary.conflict_types（Record<string, number>）产出形态。
+    # （task-04 复核修正：原 list[str] 收 dict 会 422 整条心跳——保活通道不可断。）
+    conflict_types: dict[str, int] | None = None
+    changes: list[DaemonHeartbeatSillySpecChange] | None = None
+    pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
+
+
 class DaemonHeartbeatRequest(BaseModel):
     """Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。
 
@@ -308,6 +374,12 @@ class DaemonHeartbeatRequest(BaseModel):
     # 反向）：None 即清除置 NULL，非 None 时 upsert（首写盖 since，同内容保留原
     # since，D-002@v1 锚定，详见服务层注释）。
     sillyspec_update: DaemonHeartbeatSillySpecUpdate | None = Field(default=None)
+    # sillyspec 全局进度总览快照（2026-09-02-changes-overview-card FR-05 /
+    # Grill B1）——语义同 sillyspec_update（None=清除）：该键为 null/缺省即置
+    # NULL（daemon 侧 CLI 能力缺失上报 null 清除；采集瞬态失败保留上次快照上报
+    # 不清除，三态矩阵 design §5）。旧 daemon 无该键心跳照常通过（default=None，
+    # NFR-01）。
+    sillyspec_status: DaemonHeartbeatSillySpecStatus | None = Field(default=None)
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
 
 
@@ -513,6 +585,14 @@ async def daemon_heartbeat(
         sillyspec_update=(
             data.sillyspec_update.model_dump() if data.sillyspec_update is not None else None
         ),
+        # 2026-09-02-changes-overview-card task-03 / FR-05（Grill B1）：进度总览
+        # 快照走 sillyspec_update 同款语义（None=清除置 NULL——daemon 侧 CLI 能力
+        # 缺失上报 null；采集瞬态失败则保留上次快照上报，三态矩阵 design §5）。
+        # model_dump 后交服务层 dict 整包直写（progress 快照非状态机，无 since/
+        # upsert 概念，dict 契约同 providers/pending_update 先例）。
+        sillyspec_status=(
+            data.sillyspec_status.model_dump() if data.sillyspec_status is not None else None
+        ),
         # task-03（security-audit-remediation / FR-12）：心跳归属校验——
         # instance.user_id 必须等于当前认证 user，不匹配 404（owner-only）。
         actor_user_id=user.id,
@@ -644,6 +724,35 @@ class MachineSillySpecUpdateRead(BaseModel):
     since: datetime | None = None
 
 
+class MachineSillySpecStatusRead(BaseModel):
+    """机器视图 sillyspec_status 嵌套（2026-09-02-changes-overview-card FR-05）。
+
+    即 daemon_instances.sillyspec_status JSON 列宽松透出（design §4 摘要）：
+    daemon 侧采集的 ``progress show --json`` envelope 摘要（计数 + changes[] +
+    pending_conflicts[]）。与 sillyspec_update 不同，backend 不补任何字段（无
+    since 注入），落库形态=上报形态，故嵌套项直接复用心跳 DTO 的
+    DaemonHeartbeatSillySpecChange / DaemonHeartbeatSillySpecConflict /
+    DaemonHeartbeatSillySpecChangeSteps（同形零转换，免三胞胎模型漂移）。
+    NULL（总览不可用——sillyspec 未安装或版本过低）→ 机器视图字段为 null。
+    时间字段（generated_at/last_active/created_at）为 ISO8601 字符串原样透传。
+    """
+
+    ok: bool | None = None
+    errors_count: int | None = None
+    warnings_count: int | None = None
+    generated_at: str | None = None
+    active_changes: int | None = None
+    healthy_count: int | None = None
+    ghost_count: int | None = None
+    conflict_count: int | None = None
+    # 冲突按 type 计数映射（如 {"spec-tree": 2, "progress": 9}）——对齐 daemon 侧
+    # SillySpecStatusSummary.conflict_types（Record<string, number>）产出形态。
+    # （task-04 复核修正：原 list[str] 收 dict 会 422 整条心跳——保活通道不可断。）
+    conflict_types: dict[str, int] | None = None
+    changes: list[DaemonHeartbeatSillySpecChange] | None = None
+    pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
+
+
 class DaemonMachineReadWithPending(DaemonMachineRead):
     """DaemonMachineRead + 机器级 pending_update + sillyspec 三字段（GET /machines 透出用）。
 
@@ -657,6 +766,10 @@ class DaemonMachineReadWithPending(DaemonMachineRead):
     sillyspec_version: str | None = None
     sillyspec_latest_version: str | None = None
     sillyspec_update: MachineSillySpecUpdateRead | None = None
+    # 2026-09-02-changes-overview-card task-01 / FR-05：进度总览快照就近跟随
+    # sillyspec 三字段同款子类扩展；组装接线（_build_machine_read 逐字段构造）
+    # 归 task-03，本卡仅定义读取模型进 OpenAPI（供 task-05 gen:types）。
+    sillyspec_status: MachineSillySpecStatusRead | None = None
 
 
 class DaemonMachineListResponseWithPending(DaemonMachineListResponse):
@@ -766,6 +879,15 @@ def _build_machine_read(
         sillyspec_update=(
             MachineSillySpecUpdateRead.model_validate(instance.sillyspec_update)
             if instance.sillyspec_update is not None
+            else None
+        ),
+        # 2026-09-02-changes-overview-card task-03 / FR-05：sillyspec_status 同款
+        # 显式构造（Design Grill F2 教训——本函数逐字段构造不走 model_validate，
+        # 漏传即静默丢字段）。JSON dict→宽松同形 Read 校验（零转换投影）；
+        # NULL（总览不可用——未安装/版本过低）→ None。
+        sillyspec_status=(
+            MachineSillySpecStatusRead.model_validate(instance.sillyspec_status)
+            if instance.sillyspec_status is not None
             else None
         ),
         created_at=instance.created_at,

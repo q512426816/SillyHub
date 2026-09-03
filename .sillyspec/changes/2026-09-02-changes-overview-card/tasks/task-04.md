@@ -13,6 +13,9 @@ allowed_paths:
   - sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
   - sillyhub-daemon/tests/sillyspec-progress-collector.test.ts
   - sillyhub-daemon/tests/sillyspec-manager.test.ts
+  # execute 期修正（step 15 assess 拦截后补）：config.test.ts 键表/默认值断言
+  # 更新属本卡范围（任务名与 plan 审查 gap 预告均明文），首版卡片漏列。
+  - sillyhub-daemon/tests/config.test.ts
 goal: >
   为 task-02 落地的 progress 采集器与心跳组装补齐 daemon 侧测试：三态降级矩阵全覆盖
   （成功快照 / 能力缺失上报 null / 瞬态失败保留上次快照）+ 32KB 超限截断与纯计数降级

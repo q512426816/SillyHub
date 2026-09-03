@@ -31,6 +31,13 @@ import {
   SILLYSPEC_LATEST_CACHE_TTL_MS,
   SILLYSPEC_DEFERRED_RECHECK_MS,
   SILLYSPEC_TERMINAL_WINDOW_MS,
+  SILLYSPEC_STATUS_CHANGES_MAX,
+  SILLYSPEC_STATUS_BUDGET_BYTES,
+  buildSillySpecStatusSummary,
+} from '../src/sillyspec-manager.js';
+import type {
+  SillySpecProgressOutcome,
+  SillySpecStatusSummary,
 } from '../src/sillyspec-manager.js';
 import type { PreflightLogger } from '../src/preflight.js';
 
@@ -476,5 +483,329 @@ describe('task-04 checkAndUpgrade 自动检查', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── 2026-09-02-changes-overview-card task-04：progress 采集三态矩阵 + 截断降级 ──
+// 策略同上全依赖注入：runProgressJson / resolveSillySpecBin / statusCwd /
+// statusTimeoutMs 假实现（零真实 spawn，Windows 安全）；超时注入毫秒级（5ms），
+// 不依赖真实 30s/60s 时钟推进。
+
+/** 合法 envelope fixture（含真实 schema 的 stages/readable/command 字段——采集
+ * 容忍，摘要不透传）。 */
+const ENVELOPE_OK = {
+  schema_version: 1,
+  ok: true,
+  errors: [] as string[],
+  warnings: ['w1', 'w2'],
+  generated_at: '2026-09-02T12:51:03+00:00',
+  command: 'progress show --json',
+  data: {
+    project: 'multi-agent-platform',
+    active_changes: 2,
+    changes: [
+      {
+        name: '2026-09-02-changes-overview-card',
+        ghost: false,
+        current_stage: 'execute',
+        stage_label: '执行',
+        last_active: '2026-09-02T12:50:59+00:00',
+        readable: '执行 (3/8)',
+        command: 'progress show',
+        stages: { scan: { status: 'done' }, plan: { status: 'done' } },
+        steps: { total: 8, completed: 3 },
+      },
+      {
+        name: 'ghost-legacy-change',
+        ghost: true,
+        current_stage: 'archive',
+        stage_label: '归档',
+        last_active: '2026-08-01T00:00:00+00:00',
+        steps: { total: 4, completed: 4 },
+      },
+    ],
+    pending_conflicts: [
+      { change: 'demo-a', created_at: '2026-08-21T10:00:00+00:00', type: 'spec-tree' },
+      { change: 'demo-b', created_at: '2026-08-22T10:00:00+00:00', type: 'progress' },
+      { change: 'demo-c', created_at: '2026-08-23T10:00:00+00:00', type: 'progress' },
+    ],
+  },
+};
+
+/** ENVELOPE_OK 的期望摘要（三态①字段全齐基准；readable/command/stages 不透传）。 */
+const SUMMARY_OF_ENVELOPE_OK: SillySpecStatusSummary = {
+  ok: true,
+  errors_count: 0,
+  warnings_count: 2,
+  generated_at: '2026-09-02T12:51:03+00:00',
+  active_changes: 2,
+  healthy_count: 1,
+  ghost_count: 1,
+  conflict_count: 3,
+  conflict_types: { 'spec-tree': 1, progress: 2 },
+  changes: [
+    {
+      name: '2026-09-02-changes-overview-card',
+      ghost: false,
+      current_stage: 'execute',
+      stage_label: '执行',
+      last_active: '2026-09-02T12:50:59+00:00',
+      steps: { total: 8, completed: 3 },
+    },
+    {
+      name: 'ghost-legacy-change',
+      ghost: true,
+      current_stage: 'archive',
+      stage_label: '归档',
+      last_active: '2026-08-01T00:00:00+00:00',
+      steps: { total: 4, completed: 4 },
+    },
+  ],
+  pending_conflicts: [
+    { change: 'demo-a', created_at: '2026-08-21T10:00:00+00:00', type: 'spec-tree' },
+    { change: 'demo-b', created_at: '2026-08-22T10:00:00+00:00', type: 'progress' },
+    { change: 'demo-c', created_at: '2026-08-23T10:00:00+00:00', type: 'progress' },
+  ],
+};
+
+const STATUS_BIN =
+  'C:\\Users\\qinyi\\Idea Projects\\repo\\node_modules\\sillyspec\\bin\\sillyspec.js';
+const STATUS_CWD = 'C:\\Users\\qinyi\\Idea Projects\\repo';
+
+/** 采集 harness：假 bin/cwd/runner（可编程 outcome，逐拍翻转模拟三态流转）。
+ * 默认 bin/cwd 为含空格 Windows 风格路径（NFR-02 数组形参断言载体）；timeoutMs
+ * 默认 5（毫秒级注入）。 */
+function makeStatusHarness(
+  opts: {
+    bin?: string | null;
+    cwd?: string | null;
+    timeoutMs?: number;
+    outcome?: SillySpecProgressOutcome;
+    stdout?: string;
+  } = {},
+) {
+  const events: string[] = [];
+  const logger: PreflightLogger = (_level, msg) => {
+    events.push(msg);
+  };
+  const bin = opts.bin === undefined ? STATUS_BIN : opts.bin;
+  const cwd = opts.cwd === undefined ? STATUS_CWD : opts.cwd;
+  const calls: {
+    file: string;
+    args: string[];
+    options: { cwd: string; timeoutMs: number; maxBufferBytes: number };
+  }[] = [];
+  const runProgressJson = vi.fn(
+    async (
+      file: string,
+      args: string[],
+      options: { cwd: string; timeoutMs: number; maxBufferBytes: number },
+    ): Promise<SillySpecProgressOutcome> => {
+      calls.push({ file, args, options });
+      if (opts.outcome !== undefined) return opts.outcome;
+      return { code: 0, stdout: opts.stdout ?? JSON.stringify(ENVELOPE_OK), timedOut: false };
+    },
+  );
+  const manager = new SillySpecManager({
+    runCommand: async () => null,
+    install: async () => undefined,
+    isBusy: () => false,
+    now: () => 1_700_000_000_000,
+    logger,
+    runProgressJson,
+    resolveSillySpecBin: () => bin,
+    statusCwd: () => cwd,
+    statusTimeoutMs: opts.timeoutMs ?? 5,
+  });
+  return {
+    manager,
+    events,
+    calls,
+    runProgressJson,
+    /** 翻转下一拍 outcome（三态流转 ①→③ 序列用）。 */
+    setOutcome: (o: SillySpecProgressOutcome) => {
+      opts.outcome = o;
+    },
+  };
+}
+
+describe('task-04(2026-09-02) 三态①成功：摘要落快照（readable/command 不透传）', () => {
+  it('exit 0 + 合法 envelope → 深比较期望摘要；execFile 数组形参（含空格 bin 路径不分裂）+ 注入超时透传', async () => {
+    const h = makeStatusHarness();
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toEqual(SUMMARY_OF_ENVELOPE_OK);
+    // NFR-02 跨平台：bin 是 args[0] 单元素（空格路径不分裂，无 shell 拼接）；
+    // file=node 本体；注入毫秒级 timeoutMs 原样透传；cwd=主仓根。
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]!.file).toBe(process.execPath);
+    expect(h.calls[0]!.args).toEqual([STATUS_BIN, 'progress', 'show', '--json']);
+    expect(h.calls[0]!.options.cwd).toBe(STATUS_CWD);
+    expect(h.calls[0]!.options.timeoutMs).toBe(5);
+    // readable/command/stages 被容忍但绝不透传（changes 项恰六键）。
+    const change = h.manager.getStatusSnapshot()!.changes[0]!;
+    expect(Object.keys(change).sort()).toEqual([
+      'current_stage',
+      'ghost',
+      'last_active',
+      'name',
+      'stage_label',
+      'steps',
+    ]);
+  });
+});
+
+describe('task-04(2026-09-02) 三态②能力缺失：null + warn-once', () => {
+  it('bin 不存在（未安装）→ 快照 null；warn 一次后同类静默（第二次 debug）', async () => {
+    const h = makeStatusHarness({ bin: null });
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toBeNull();
+    expect(
+      h.events.filter((e) => e === 'sillyspec_status_capability_missing').length,
+    ).toBe(1);
+    expect(h.events).toContain('sillyspec_status_capability_missing_repeat');
+  });
+
+  it('spawn ENOENT（code=null + errorCode=ENOENT）→ 快照 null + warn 一次', async () => {
+    const h = makeStatusHarness({
+      outcome: { code: null, stdout: '', timedOut: false, errorCode: 'ENOENT' },
+    });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toBeNull();
+    expect(h.events).toContain('sillyspec_status_capability_missing');
+  });
+
+  it('exit 0 但 stdout 非 JSON（旧版本无 --json）→ 快照 null + warn 一次', async () => {
+    const h = makeStatusHarness({ stdout: '人类可读总览（非 JSON）' });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toBeNull();
+    expect(h.events).toContain('sillyspec_status_capability_missing');
+  });
+
+  it('无已知主仓根（statusCwd→null）→ 本拍跳过，快照保持 undefined（心跳不带键）', async () => {
+    const h = makeStatusHarness({ cwd: null });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toBeUndefined();
+  });
+});
+
+describe('task-04(2026-09-02) 三态③瞬态失败：保留上次快照（不清除不上报 null）', () => {
+  it('超时（timedOut）→ 上一拍摘要原样保留', async () => {
+    const h = makeStatusHarness();
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toEqual(SUMMARY_OF_ENVELOPE_OK);
+    h.setOutcome({ code: null, stdout: '', timedOut: true });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toEqual(SUMMARY_OF_ENVELOPE_OK);
+    expect(h.events).toContain('sillyspec_status_collect_timeout');
+  });
+
+  it('非零退出（code=1）→ 上一拍摘要原样保留', async () => {
+    const h = makeStatusHarness();
+    await h.manager.collectStatusOnce();
+    h.setOutcome({ code: 1, stdout: 'boom', timedOut: false });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusSnapshot()).toEqual(SUMMARY_OF_ENVELOPE_OK);
+    expect(h.events).toContain('sillyspec_status_nonzero_exit');
+  });
+
+  it('瞬态失败不落能力缺失告警类（与②互不污染，快照非 null）', async () => {
+    const h = makeStatusHarness();
+    await h.manager.collectStatusOnce();
+    h.setOutcome({ code: 1, stdout: '', timedOut: false });
+    await h.manager.collectStatusOnce();
+    expect(h.events).not.toContain('sillyspec_status_capability_missing');
+    expect(h.manager.getStatusSnapshot()).not.toBeNull();
+  });
+});
+
+describe('task-04(2026-09-02) buildSillySpecStatusSummary 截断与 32KB 降级（纯函数直测）', () => {
+  it(`changes 超 N=${SILLYSPEC_STATUS_CHANGES_MAX} 截至前 50（active_changes 回退全长，计数基于截断后列表）`, () => {
+    const envelope = {
+      ok: true,
+      errors: [] as string[],
+      warnings: [] as string[],
+      generated_at: 'g',
+      data: {
+        active_changes: 60,
+        changes: Array.from({ length: 60 }, (_, i) => ({
+          name: `change-${i}`,
+          ghost: i % 2 === 1,
+          current_stage: 'scan',
+          stage_label: '扫描',
+          last_active: 't',
+          steps: { total: 2, completed: 1 },
+        })),
+        pending_conflicts: [] as unknown[],
+      },
+    };
+    const s = buildSillySpecStatusSummary(envelope);
+    expect(s.changes).toHaveLength(SILLYSPEC_STATUS_CHANGES_MAX);
+    expect(s.changes[0]!.name).toBe('change-0');
+    expect(s.active_changes).toBe(60);
+    // 截断后计数基于前 50：奇数下标 ghost → 25 ghost / 25 healthy。
+    expect(s.ghost_count).toBe(25);
+    expect(s.healthy_count).toBe(25);
+  });
+
+  it('active_changes 缺失 → 回退 changes 全长（截断前）；errors 计数走数组长度', () => {
+    const envelope = {
+      ok: false,
+      errors: ['e1'],
+      warnings: [] as string[],
+      generated_at: 'g',
+      data: { changes: Array.from({ length: 3 }, () => ({ name: 'c' })), pending_conflicts: [] as unknown[] },
+    };
+    const s = buildSillySpecStatusSummary(envelope);
+    expect(s.active_changes).toBe(3);
+    expect(s.ok).toBe(false);
+    expect(s.errors_count).toBe(1);
+  });
+
+  it('摘要序化超 32KB 预算 → 降级纯计数（列表清空、计数保留、降级后低于预算）', () => {
+    const bigName = 'x'.repeat(1000);
+    const envelope = {
+      ok: true,
+      errors: [] as string[],
+      warnings: [] as string[],
+      generated_at: 'g',
+      data: {
+        changes: Array.from({ length: SILLYSPEC_STATUS_CHANGES_MAX }, () => ({
+          name: bigName,
+          ghost: false,
+          current_stage: 'scan',
+          stage_label: '扫描',
+          last_active: 't',
+          steps: { total: 9, completed: 9 },
+        })),
+        pending_conflicts: [{ change: bigName, created_at: 't', type: 'progress' }],
+      },
+    };
+    const s = buildSillySpecStatusSummary(envelope);
+    expect(s.changes).toEqual([]);
+    expect(s.pending_conflicts).toEqual([]);
+    expect(s.conflict_count).toBe(1);
+    expect(s.active_changes).toBe(SILLYSPEC_STATUS_CHANGES_MAX);
+    expect(Buffer.byteLength(JSON.stringify(s), 'utf8')).toBeLessThanOrEqual(
+      SILLYSPEC_STATUS_BUDGET_BYTES,
+    );
+  });
+
+  it('防御式解析：非 object envelope / 脏 data → 全兜底零计数不抛错', () => {
+    expect(buildSillySpecStatusSummary(null)).toEqual({
+      ok: false,
+      errors_count: 0,
+      warnings_count: 0,
+      generated_at: '',
+      active_changes: 0,
+      healthy_count: 0,
+      ghost_count: 0,
+      conflict_count: 0,
+      conflict_types: {},
+      changes: [],
+      pending_conflicts: [],
+    });
+    expect(buildSillySpecStatusSummary('not-json-object').changes).toEqual([]);
+    expect(buildSillySpecStatusSummary({ data: 'oops' }).conflict_types).toEqual({});
   });
 });

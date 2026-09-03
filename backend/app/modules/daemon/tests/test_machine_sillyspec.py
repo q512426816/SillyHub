@@ -20,6 +20,9 @@ task-03 追加端点/视图部分（FR-01 / FR-02，ws_hub mock 范式照
   latest_version 键）、无权限 403、越权/不存在 404、离线/发送失败 504；
 * GET /machines items[] 含 sillyspec_version / sillyspec_latest_version /
   sillyspec_update 三字段（嵌套类型化六键形态，非裸 dict 透传）；
+* 2026-09-02-changes-overview-card task-03 追加 sillyspec_status：心跳 dict 整包
+  直写 / None=清除 / register 恒清 / 机器视图嵌套透出 + OpenAPI 字段（无 since
+  注入，语义同 sillyspec_update / Grill B1）；
 * OpenAPI 含新端点路径与新字段（task-06 gen:types 的输入可再生产出）。
 
 since「保留 vs 刷新」断言用哨兵值改写 DB 后再心跳验证（Windows 低分辨率时钟下
@@ -593,9 +596,10 @@ async def _create_machine(
     sillyspec_version: str | None = None,
     sillyspec_latest_version: str | None = None,
     sillyspec_update: dict | None = None,
+    sillyspec_status: dict | None = None,
 ) -> DaemonInstance:
     """直插 daemon_instance 行（task-03 视图/端点断言用，仿 test_machines_router
-    _create_instance，额外带 sillyspec 三列——不走 register，锁定读视图直读列）。"""
+    _create_instance，额外带 sillyspec 四列——不走 register，锁定读视图直读列）。"""
     inst = DaemonInstance(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -606,6 +610,7 @@ async def _create_machine(
         sillyspec_version=sillyspec_version,
         sillyspec_latest_version=sillyspec_latest_version,
         sillyspec_update=sillyspec_update,
+        sillyspec_status=sillyspec_status,
     )
     db_session.add(inst)
     await db_session.commit()
@@ -797,3 +802,206 @@ def test_openapi_contains_sillyspec_update_endpoint_and_fields() -> None:
         machine_schema["properties"]["sillyspec_update"]["anyOf"][0]["$ref"]
         == "#/components/schemas/MachineSillySpecUpdateRead"
     )
+
+
+# ── task-03（2026-09-02-changes-overview-card）：sillyspec_status 落库/清除/视图 ──
+# 语义锚定 Grill B1（None=清除，与 sillyspec_update 同构；刻意区别于兄弟字段
+# sillyspec_version/latest 的「缺省保留」）：非 None dict 整包直写（progress 快照
+# 非状态机，无 since 注入/同内容 upsert），register 恒清（快照随 daemon 进程
+# 重启失效，同 sillyspec_update 收敛理由）。conflict_types 为计数映射
+# （task-04 复核修正 A1：dict[str,int]，对齐 daemon 侧 Record<string,number>）。
+
+_STATUS_KEYS = {
+    "ok",
+    "errors_count",
+    "warnings_count",
+    "generated_at",
+    "active_changes",
+    "healthy_count",
+    "ghost_count",
+    "conflict_count",
+    "conflict_types",
+    "changes",
+    "pending_conflicts",
+}
+
+_STATUS_FULL = {
+    "ok": True,
+    "errors_count": 0,
+    "warnings_count": 2,
+    "generated_at": "2026-09-02T12:51:03+00:00",
+    "active_changes": 18,
+    "healthy_count": 1,
+    "ghost_count": 17,
+    "conflict_count": 11,
+    "conflict_types": {"spec-tree": 2, "progress": 9},
+    "changes": [
+        {
+            "name": "2026-09-02-changes-overview-card",
+            "ghost": False,
+            "current_stage": "execute",
+            "stage_label": "执行",
+            "last_active": "2026-09-02T12:50:59+00:00",
+            "steps": {"total": 8, "completed": 3},
+        }
+    ],
+    "pending_conflicts": [
+        {
+            "change": "2026-08-20-frontend-ai-native-style",
+            "created_at": "2026-08-21T10:00:00+00:00",
+            "type": "spec-tree",
+        }
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_status_heartbeat_writes_dict_verbatim(db_session: AsyncSession) -> None:
+    """三态①落库（服务层直调）：非 None dict 整包原样直写——无 since 注入、无键
+    增删改写（progress 快照非状态机，design §4「落库形态=上报形态」）。"""
+    user, _token = await _seed_user(db_session, name="u11")
+    daemon_local_id = await _register_daemon(db_session, user.id)
+
+    await RuntimeService(db_session).heartbeat_daemon(
+        daemon_local_id, sillyspec_status=_STATUS_FULL
+    )
+    row = await _reload_instance(db_session, daemon_local_id)
+    assert row.sillyspec_status == _STATUS_FULL, "dict 原样落库，服务层零增删改写"
+    assert "since" not in (row.sillyspec_status or {}), "非状态机，不注入 since"
+
+
+@pytest.mark.asyncio
+async def test_status_heartbeat_without_field_clears(db_session: AsyncSession) -> None:
+    """None=清除：心跳缺省该参 → 置 NULL（daemon 侧 CLI 能力缺失上报 null 的收敛
+    路径；与兄弟字段 version/latest 的「缺省保留」刻意反向，Grill B1）。"""
+    user, _token = await _seed_user(db_session, name="u12")
+    daemon_local_id = await _register_daemon(db_session, user.id)
+    svc = RuntimeService(db_session)
+
+    await svc.heartbeat_daemon(daemon_local_id, sillyspec_status=_STATUS_FULL)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status is not None
+
+    await svc.heartbeat_daemon(daemon_local_id)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status is None
+
+
+@pytest.mark.asyncio
+async def test_register_clears_stale_sillyspec_status(db_session: AsyncSession) -> None:
+    """register 恒清：心跳落了快照后 daemon 重启 register → 置 NULL（快照随进程
+    重启失效，同 sillyspec_update 重启收敛理由，else 分支）。"""
+    user, _token = await _seed_user(db_session, name="u13")
+    user_id = user.id
+    daemon_local_id = await _register_daemon(db_session, user_id)
+    svc = RuntimeService(db_session)
+
+    await svc.heartbeat_daemon(daemon_local_id, sillyspec_status=_STATUS_FULL)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status is not None
+
+    await svc.register_daemon(
+        user_id,
+        daemon_local_id=daemon_local_id,
+        server_url="http://localhost:8001",
+        hostname="sillyspec-host",
+        providers=[{"provider": "claude", "status": "online", "version": "1.0"}],
+    )
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status is None
+
+
+@pytest.mark.asyncio
+async def test_http_heartbeat_accepts_and_clears_sillyspec_status(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    """HTTP 全链路：带对象 → DTO model_dump 落库（11 键齐、嵌套 steps 投影、无
+    since 键）；显式 null → 置 NULL；缺省（旧 daemon 无字段）→ 同样置 NULL
+    （pydantic 缺省与显式 null 不可区分，NFR-01 旧 daemon 路径零破坏）。"""
+    owner, token = await _seed_user(db_session, name="owner-status")
+    daemon_local_id = await _register_daemon(db_session, owner.id)
+    headers = _headers(token)
+
+    resp = await client.post(
+        "/api/daemon/heartbeat",
+        json={"daemon_local_id": str(daemon_local_id), "sillyspec_status": _STATUS_FULL},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    row = await _reload_instance(db_session, daemon_local_id)
+    assert row.sillyspec_status is not None
+    assert set(row.sillyspec_status) == _STATUS_KEYS
+    assert row.sillyspec_status["changes"][0]["steps"] == {"total": 8, "completed": 3}
+    assert "since" not in row.sillyspec_status
+
+    # 显式 null → 置 NULL（三态②能力缺失的 HTTP 形态）。
+    resp2 = await client.post(
+        "/api/daemon/heartbeat",
+        json={"daemon_local_id": str(daemon_local_id), "sillyspec_status": None},
+        headers=headers,
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status is None
+
+    # 缺省（旧 daemon 无该键）→ 同置 NULL（None=清除，区别于兄弟字段保留语义）。
+    resp3 = await client.post(
+        "/api/daemon/heartbeat",
+        json={"daemon_local_id": str(daemon_local_id)},
+        headers=headers,
+    )
+    assert resp3.status_code == 200, resp3.text
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status is None
+
+
+@pytest.mark.asyncio
+async def test_machines_view_exposes_sillyspec_status_typed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """FR-01：GET /machines items[] 含 sillyspec_status——上报机为嵌套类型化 11 键
+    形态（changes[] 六字段 + steps 投影原样，非裸 dict）；NULL 机（旧 daemon/
+    总览不可用）为 null。"""
+    admin, token = await _seed_user(db_session, name="view-status-admin", is_platform_admin=True)
+    await _create_machine(
+        db_session,
+        admin.id,
+        hostname="ss-status-host",
+        sillyspec_status=_STATUS_FULL,
+    )
+    await _create_machine(db_session, admin.id, hostname="ss-status-legacy-host")
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(token))
+    assert resp.status_code == 200, resp.text
+    items = {it["hostname"]: it for it in resp.json()["items"]}
+
+    status = items["ss-status-host"]["sillyspec_status"]
+    assert set(status) == _STATUS_KEYS
+    assert status["ok"] is True
+    assert status["conflict_types"] == {"spec-tree": 2, "progress": 9}
+    change = status["changes"][0]
+    assert set(change) == {
+        "name",
+        "ghost",
+        "current_stage",
+        "stage_label",
+        "last_active",
+        "steps",
+    }
+    assert change["steps"] == {"total": 8, "completed": 3}
+    assert status["pending_conflicts"][0]["type"] == "spec-tree"
+
+    assert items["ss-status-legacy-host"]["sillyspec_status"] is None
+
+
+def test_openapi_contains_machine_sillyspec_status_field() -> None:
+    """验收：OpenAPI schema DaemonMachineReadWithPending 含 sillyspec_status 嵌套
+    引用（task-05 gen:types 的输入可再生产）。app.openapi() 直出（同源
+    dump_openapi.py，不走 HTTP）。"""
+    from app.main import app
+
+    spec = app.openapi()
+    machine_schema = spec["components"]["schemas"]["DaemonMachineReadWithPending"]
+    assert "sillyspec_status" in machine_schema["properties"]
+    assert (
+        machine_schema["properties"]["sillyspec_status"]["anyOf"][0]["$ref"]
+        == "#/components/schemas/MachineSillySpecStatusRead"
+    )
+    # 心跳载荷模型同入 components（DaemonHeartbeatRequest 引用链完整）。
+    assert "DaemonHeartbeatSillySpecStatus" in spec["components"]["schemas"]

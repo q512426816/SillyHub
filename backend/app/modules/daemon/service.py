@@ -189,6 +189,7 @@ class DaemonService:
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
+        sillyspec_status: dict | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -201,6 +202,9 @@ class DaemonService:
         2026-08-05-daemon-start-time：透传 started_at（幂等覆盖恒定值）。
         task-03（security-audit-remediation / FR-12）：透传 actor_user_id 归属
         校验（instance.user_id 不匹配 → 404，owner-only）。
+        2026-09-02-changes-overview-card task-03（FR-05）：透传 sillyspec_status
+        （None=清除置 NULL，语义同 RuntimeService 层注释；HTTP 端点现直调
+        RuntimeService，本 facade 形参与实现层同步防漂移）。
         """
         return await self._rt.heartbeat_daemon(
             daemon_local_id,
@@ -208,6 +212,7 @@ class DaemonService:
             daemon_version=daemon_version,
             daemon_build_id=daemon_build_id,
             started_at=started_at,
+            sillyspec_status=sillyspec_status,
             actor_user_id=actor_user_id,
         )
 

@@ -122,6 +122,10 @@ import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
 //（task-04 核心模块）。daemon 侧接线三处：_sillyspecLoop 第四自动循环（auto 触发）、
 // 心跳/注册快照透传、WS SILLYSPEC_UPDATE 指令入口（server_command 触发）。
 import { SillySpecManager } from './sillyspec-manager.js';
+
+// 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
+// 形状（progress 总览摘要），组装时从 manager.getStatusSnapshot() 取。
+import type { SillySpecStatusSummary } from './sillyspec-manager.js';
 // daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
 import { BUILD_ID } from './build-id.js';
 // 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
@@ -1341,6 +1345,15 @@ export class Daemon {
    * 避免非借用部署（绝大多数）启动时无谓 mkdir borrow-sandboxes 目录。
    */
   private _borrowWorkspaceManager: WorkspaceManager | null = null;
+
+  /**
+   * 2026-09-02-changes-overview-card task-02（FR-02 / D-B3@v1 主仓根锚定）：progress
+   * 采集的主仓根（workspace.root_path）。daemon 无静态 workspace 注册表，唯一既有
+   * 来源是 lease claim payload 的 execPayload.rootPath（非借用形态即工作区绑定根，
+   * :6781 注释）；claim 后观察记录（变更时 info 一笔），采集循环经 manager 的
+   * statusCwd 回调读取。null=尚未观察到（采集跳过，心跳不带 sillyspec_status 键）。
+   */
+  private _sillyspecStatusRoot: string | null = null;
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -1654,6 +1667,9 @@ export class Daemon {
       new SillySpecManager({
         isBusy: () => this._isBusyForUpdate(),
         logger: (level, msg, data) => this._preflightLog(level, msg, data),
+        // 2026-09-02-changes-overview-card task-02：采集 cwd 注入——claim 观察到的
+        // workspace 主仓根（闭包惰性求值，claim 后每拍取最新值）。
+        statusCwd: () => this._sillyspecStatusRoot,
       });
     // task-06（design A2 消费端）：控制指令统一消费入口。handler 全部是下方既有
     // _route* 方法的薄包装（同一实例调用，不复制业务逻辑）；HTTP 源仅在 client
@@ -1828,6 +1844,11 @@ export class Daemon {
     // sillyspec 自动升级检查（间隔 config.sillyspec_update_interval_sec，默认
     // 3600s；0/非法值在 _sillyspecLoop 内部判定为关闭，循环立即返回）。
     this._fire((signal) => this._sillyspecLoop(signal));
+
+    // 2026-09-02-changes-overview-card task-02（FR-02）：第五循环——sillyspec
+    // progress 总览采集（间隔 config.sillyspec_status_interval_sec 默认 60s；
+    // 0/非法值在 _sillyspecStatusLoop 内部判定为关闭，循环立即返回）。
+    this._fire((signal) => this._sillyspecStatusLoop(signal));
 
     // task-07（FR-06 / D-004@v1）：启动 SessionManager 空闲扫描定时器。
     // sessionManager 为 null（task-04 边界 14：未注入）时 ?. 不调；空闲扫描不启动。
@@ -3920,6 +3941,68 @@ export class Daemon {
   }
 
   /**
+   * 2026-09-02-changes-overview-card task-02（FR-02/03/04）：第五循环——sillyspec
+   * progress 总览采集（挂法对齐 _sillyspecLoop 第四循环先例：abortableSleep 每拍）。
+   *
+   * 每拍 `manager.collectStatusOnce()`：spawn `node <sillyspec-bin> progress show
+   * --json`（execFile 数组形参、cwd=claim 观察到的 workspace 主仓根、三态降级矩阵
+   * + 32KB 预算截断全在 manager 内）。间隔读取口：config.sillyspec_status_interval_sec
+   * （默认 60，0=关闭）；Number() 容忍字符串脏值，非法/<=0 一律关闭（旧测试 config
+   * 缺该字段同样安全跳过——心跳不携带 sillyspec_status 键，既有断言零回归）。
+   * abortableSleep/AbortError 处理对齐 _sillyspecLoop 写法。
+   */
+  private async _sillyspecStatusLoop(signal: AbortSignal): Promise<void> {
+    const intervalSec = Number(this._config.sillyspec_status_interval_sec);
+    if (!Number.isFinite(intervalSec) || intervalSec <= 0) {
+      this._logger.debug('sillyspec_status_loop_disabled', {
+        interval_sec: this._config.sillyspec_status_interval_sec,
+      });
+      return;
+    }
+    while (this._running) {
+      try {
+        await abortableSleep(intervalSec * 1000, signal);
+        // collectStatusOnce 全路径内部 catch 收敛不 reject；此处 try/catch 对齐
+        // _sillyspecLoop 的防御性写法（意外异常 warn 不崩循环）。
+        await this._sillyspecManager.collectStatusOnce();
+      } catch (e) {
+        if (e instanceof AbortError) break;
+        this._logger.warn('sillyspec_status_loop_error', { error: e });
+      }
+    }
+  }
+
+  /**
+   * 采集间隔归一（_sillyspecStatusLoop 与 _sendHeartbeatOnce 共用口径）：
+   * 返回有效秒数；0/负数/NaN/非法（含旧 config 缺字段）→ null=采集关闭。
+   */
+  private _sillyspecStatusIntervalSec(): number | null {
+    const sec = Number(this._config.sillyspec_status_interval_sec);
+    if (!Number.isFinite(sec) || sec <= 0) return null;
+    return sec;
+  }
+
+  /**
+   * task-02（D-B3@v1 主仓根锚定）：claim 后观察 workspace 主仓根——非空且非借用
+   * 沙箱 marker 的 rootPath 即工作区绑定根；变更时 info 一笔（首观察/切换可见）。
+   * 规则 22：采集 CLI 只在此主仓根执行，永不进 worktree。
+   */
+  private _noteSillySpecStatusRoot(rootPath: string | undefined): void {
+    if (
+      typeof rootPath !== 'string' ||
+      !rootPath ||
+      rootPath.startsWith(BORROW_SANDBOX_MARKER)
+    ) {
+      return;
+    }
+    if (this._sillyspecStatusRoot === rootPath) return;
+    this._sillyspecStatusRoot = rootPath;
+    this._logger.info('sillyspec_status_root_observed', {
+      root_path: rootPath,
+    });
+  }
+
+  /**
    * task-06（design A1）：单拍心跳（心跳循环每拍 + 重连对账第 1 步共用）。
    *
    * 成功路径：清断连计数/告警标记 → 通知 resilience 健康 → 同步 allowed_roots
@@ -3959,6 +4042,16 @@ export class Daemon {
         sillyspec.update !== undefined
           ? [sillyspec]
           : [];
+      // 2026-09-02-changes-overview-card task-02（FR-02/03）：心跳透传 progress
+      // 总览摘要（manager.getStatusSnapshot 纯同步零 spawn）——undefined=采集未
+      // 启动/未出终分级（键缺席，旧形态零破坏）；null=能力缺失（backend 置 NULL
+      // 清除）；摘要=最近快照（瞬态失败保留旧值）。采集关闭（interval<=0）恒缺席。
+      const sillyspecStatus: SillySpecStatusSummary | null | undefined =
+        this._sillyspecStatusIntervalSec() === null
+          ? undefined
+          : this._sillyspecManager.getStatusSnapshot();
+      const statusTail: (SillySpecStatusSummary | null)[] =
+        sillyspecStatus !== undefined ? [sillyspecStatus] : [];
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
@@ -3972,6 +4065,13 @@ export class Daemon {
               target_version: pending.target_version,
             },
         ...sillyspecTail,
+        // 2026-09-02-changes-overview-card task-04 复核修正：sillyspec 缺席而
+        // status 存在时，第 5 参须显式 undefined 占位——否则 status 滑入
+        // sillyspec 槽位（位置参数陷阱），hub-client 把摘要当 sillyspec 参数读
+        //（version/latest/update 三键全无即静默忽略）→ sillyspec_status 键
+        // 不发出、快照被丢弃。
+        ...(sillyspecTail.length === 0 && statusTail.length > 0 ? [undefined] : []),
+        ...statusTail,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
@@ -6937,6 +7037,10 @@ export class Daemon {
         (rawExec.budgetTokens as number | undefined) ??
         payload.budget_tokens,
     };
+
+    // 2026-09-02-changes-overview-card task-02（FR-02）：claim 后观察 workspace
+    // 主仓根（batch 与 interactive 共用此 execPayload，一处观察两路覆盖）。
+    this._noteSillySpecStatusRoot(execPayload.rootPath);
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走
     // TaskRunner / startLease / completeLease（backend 已 startLease），独立由
