@@ -14,21 +14,29 @@
  * turn_completed 事件后调 refresh()。
  *
  * 2026-08-31-session-queue-ux：补排队三操作——reorderEntry（FR-04 拖拽
- * 重排，D-003 全量有序 ids）/ dispatchNowEntry（FR-05 立即发送，D-001 打断
- * 当前轮语义）/ editEntry（FR-06 重新编辑）。三者逐字对齐 removeEntry 的
- * 「调 API → 无论成败一律 load 以服务端为准」模式：失败静默、不弹错、
- * 不回滚本地（R-02 拖拽 vs 派发竞态：落手瞬间条目恰被派发删除 → 后端
- * 422 QUEUE_ORDER_MISMATCH → catch 静默 + load 后条目已消失自然收敛）；
- * dispatchNowEntry 不消费响应 interrupted 字段（R-04：UI 收敛统一依赖
- * SSE queue_changed + 随后 load）。
+ *   重排，D-003 全量有序 ids）/ dispatchNowEntry（FR-05 立即发送，D-001 打断
+ *   当前轮语义）/ editEntry（FR-06 重新编辑）。三者逐字对齐 removeEntry 的
+ *   「调 API → 无论成败一律 load 以服务端为准」模式：失败静默、不弹错、
+ *   不回滚本地（R-02 拖拽 vs 派发竞态：落手瞬间条目恰被派发删除 → 后端
+ *   422 QUEUE_ORDER_MISMATCH → catch 静默 + load 后条目已消失自然收敛）；
+ *   dispatchNowEntry 不消费响应 interrupted 字段（R-04：UI 收敛统一依赖
+ *   SSE queue_changed + 随后 load）。
+ *
+ * ql-20260903-014：五操作失败不再一律静默——404/409/422 属已知竞态（条目
+ *   恰被派发删除 / 会话非 active / 参数过期），随后的 load 以服务端为准收敛，
+ *   保持静默；网络 / 5xx / 权限等真实失败改为 toast 提示（旧版全静默导致
+ *   「编辑保存后文字弹回原样、删除后条目复活」无任何解释，用户以为功能坏了）。
+ *   无论成败仍一律 load 的模式不变。
  *
  * 实现约束：**不用 react-query**——dialog 模式弹窗测试无 QueryClientProvider
- * （lib/query-keys.ts 头注释的不变式：dialog 适配层零 react-query），本 hook 为
- * 两模式共享，故纯 useState + fetch 轮询（lib/query-keys.ts:12-14 先例）。
+ *   （lib/query-keys.ts 头注释的不变式：dialog 适配层零 react-query），本 hook 为
+ *   两模式共享，故纯 useState + fetch 轮询（lib/query-keys.ts:12-14 先例）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import {
   deleteSessionQueueEntry,
   dispatchNowSessionQueueEntry,
@@ -102,8 +110,12 @@ export interface UseMessageQueueReturn {
   refresh: () => void;
 }
 
-/** 队列上限（D-002 沿用；与后端 SESSION_QUEUE_MAX_PENDING 同值，满员由后端 409 守卫）。 */
-const DEFAULT_MAX_QUEUE = 5;
+/** 队列上限（D-002 沿用；与后端 SESSION_QUEUE_MAX_PENDING 同值，满员由后端 409 守卫）。
+ *  导出供面板「队列已满」toast 文案取值，避免魔数漂移。 */
+export const QUEUE_MAX_PENDING = 5;
+
+/** 已知竞态状态码：catch 后静默（随后 load 以服务端为准收敛），其余真实失败 toast（ql-20260903-014）。 */
+const RECONCILE_SILENT_STATUSES = new Set([404, 409, 422]);
 
 /** 轮询间隔（ms）：active 会话低频兜底（主要靠 SSE 事件触发的 refresh）。 */
 const POLL_INTERVAL_MS = 5000;
@@ -113,6 +125,15 @@ export function useMessageQueue({
   sessionActive,
 }: UseMessageQueueOptions): UseMessageQueueReturn {
   const [queue, setQueue] = useState<QueueEntry[]>([]);
+  const notify = useNotify();
+  /** 竞态静默 / 真实失败 toast 的统一出口（ql-20260903-014）。 */
+  const notifyUnlessReconcile = useCallback(
+    (err: unknown, fallback: string) => {
+      if (err instanceof ApiError && RECONCILE_SILENT_STATUSES.has(err.status)) return;
+      notify.error(err, fallback);
+    },
+    [notify],
+  );
   /** 卸载/换会话后迟到的响应丢弃（epoch 单调递增，响应携带发起时的 epoch）。 */
   const epochRef = useRef(0);
   const mountedRef = useRef(true);
@@ -174,66 +195,72 @@ export function useMessageQueue({
     (id: string) => {
       if (sessionId === "") return;
       void deleteSessionQueueEntry(sessionId, id)
-        .catch(() => {
-          /* 删除失败仍刷新（以服务端为准） */
+        .catch((err) => {
+          /* 删除失败仍刷新（以服务端为准）；404=条目恰被派发删除属竞态静默，其余 toast */
+          notifyUnlessReconcile(err, "删除排队消息失败");
         })
         .then(() => load(sessionId));
     },
-    [sessionId, load],
+    [sessionId, load, notifyUnlessReconcile],
   );
 
   const retryEntry = useCallback(
     (id: string) => {
       if (sessionId === "") return;
       void retrySessionQueueEntry(sessionId, id)
-        .catch(() => {
-          /* 重试失败仍刷新（以服务端为准） */
+        .catch((err) => {
+          /* 重试失败仍刷新（以服务端为准）；竞态（条目已删/会话非 active）静默 */
+          notifyUnlessReconcile(err, "重试排队消息失败");
         })
         .then(() => load(sessionId));
     },
-    [sessionId, load],
+    [sessionId, load, notifyUnlessReconcile],
   );
 
   // 2026-08-31-session-queue-ux：以下三方法逐字对齐 removeEntry/retryEntry 模式
-  // （预会话守卫 → 调 API → catch 静默 → then load；UI 状态只由服务端 load 结果驱动）。
+  // （预会话守卫 → 调 API → catch（竞态静默/真实失败 toast，ql-20260903-014）→
+  //  then load；UI 状态只由服务端 load 结果驱动）。
 
   const reorderEntry = useCallback(
     (ids: string[]) => {
       if (sessionId === "") return;
       void reorderSessionQueue(sessionId, ids)
-        .catch(() => {
+        .catch((err) => {
           /* 重排失败仍刷新：R-02 拖拽落手瞬间条目恰被派发删除 → 后端 422
-             QUEUE_ORDER_MISMATCH，静默 + load 后条目已消失自然收敛（不弹错不回滚本地） */
+             QUEUE_ORDER_MISMATCH 静默 + load 后条目已消失自然收敛（不弹错不回滚本地） */
+          notifyUnlessReconcile(err, "调整排队顺序失败");
         })
         .then(() => load(sessionId));
     },
-    [sessionId, load],
+    [sessionId, load, notifyUnlessReconcile],
   );
 
   const editEntry = useCallback(
     (id: string, prompt: string) => {
       if (sessionId === "") return;
       void updateSessionQueueEntry(sessionId, id, prompt)
-        .catch(() => {
+        .catch((err) => {
           /* 编辑失败仍刷新：422（空/超 8000 字）、409（TASK_WAKEUP 系统通知
-             条目——bar 已隐藏其 ✎，此处属双保险）均以服务端 load 结果为准 */
+             条目——bar 已隐藏其 ✎，此处属双保险）静默，以服务端 load 结果为准 */
+          notifyUnlessReconcile(err, "保存修改失败");
         })
         .then(() => load(sessionId));
     },
-    [sessionId, load],
+    [sessionId, load, notifyUnlessReconcile],
   );
 
   const dispatchNowEntry = useCallback(
     (id: string) => {
       if (sessionId === "") return;
       void dispatchNowSessionQueueEntry(sessionId, id)
-        .catch(() => {
-          /* 立即派发失败仍刷新（409 会话非 active 等；不消费响应 interrupted
-             ——R-04：UI 收敛统一依赖 SSE queue_changed + 本处 load） */
+        .catch((err) => {
+          /* 立即派发失败仍刷新（409 会话非 active 等竞态静默；不消费响应
+             interrupted——R-04：UI 收敛统一依赖 SSE queue_changed + 本处 load） */
+          notifyUnlessReconcile(err, "立即发送失败");
         })
         .then(() => load(sessionId));
     },
-    [sessionId, load],
+    [sessionId, load, notifyUnlessReconcile],
   );
 
   return {
@@ -243,7 +270,7 @@ export function useMessageQueue({
     reorderEntry,
     editEntry,
     dispatchNowEntry,
-    isQueueFull: queue.length >= DEFAULT_MAX_QUEUE,
+    isQueueFull: queue.length >= QUEUE_MAX_PENDING,
     queueCount: queue.length,
     refresh,
   };

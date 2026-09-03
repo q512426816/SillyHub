@@ -11,12 +11,15 @@
  *   7. isQueueFull：5 条 pending 满员（与后端 SESSION_QUEUE_MAX_PENDING 同值）；
  *   8. 2026-08-31-session-queue-ux task-10：reorderEntry / editEntry /
  *      dispatchNowEntry 三方法（「调对应端点 + load 重新拉取」双行为，对齐
- *      removeEntry 既有模式）+ API reject 静默仍 load（R-02）+ position 字段透传。
+ *      removeEntry 既有模式）+ API reject 静默仍 load（R-02）+ position 字段透传；
+ *   9. ql-20260903-014：失败可感知分层——404/409/422 竞态保持静默（load 收敛），
+ *      网络/5xx 等真实失败 notify.error(err, fallback) 且仍 load。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
 import { useMessageQueue } from "@/hooks/use-message-queue";
+import { ApiError } from "@/lib/api";
 import {
   deleteSessionQueueEntry,
   dispatchNowSessionQueueEntry,
@@ -36,6 +39,17 @@ vi.mock("@/lib/daemon", () => ({
   updateSessionQueueEntry: vi.fn(),
   dispatchNowSessionQueueEntry: vi.fn(),
 }));
+
+// ql-20260903-014：hook 内 useNotify 需要可断言的 spy（errMessage 保真用真实现）。
+const notifyMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock("@/lib/errors", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/errors")>();
+  return { errMessage: actual.errMessage, useNotify: () => notifyMock };
+});
 
 const mockedFetch = vi.mocked(fetchSessionQueue);
 const mockedDelete = vi.mocked(deleteSessionQueueEntry);
@@ -234,16 +248,37 @@ describe("useMessageQueue（ql-20260825-011 服务端排队）", () => {
     expect(mockedDispatchNow).toHaveBeenCalledWith("sess-1", "entry-1");
   });
 
-  it("三方法 API reject 静默仍 load（R-02：以服务端为准，不弹错不回滚本地）", async () => {
+  it("竞态失败（404/409/422）保持静默仍 load（R-02 + ql-20260903-014：以服务端为准，不弹错不回滚本地）", async () => {
     mockedFetch.mockResolvedValue([entry()]);
     const { result } = renderHook(() =>
       useMessageQueue({ sessionId: "sess-1", sessionActive: false }),
     );
     await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
 
-    mockedReorder.mockRejectedValue(new Error("422 QUEUE_ORDER_MISMATCH"));
-    mockedUpdate.mockRejectedValue(new Error("409 TASK_WAKEUP"));
-    mockedDispatchNow.mockRejectedValue(new Error("409 session not active"));
+    mockedReorder.mockRejectedValue(
+      new ApiError(422, {
+        code: "queue_order_mismatch",
+        message: "队列顺序已变化",
+        request_id: null,
+        details: null,
+      }),
+    );
+    mockedUpdate.mockRejectedValue(
+      new ApiError(409, {
+        code: "task_wakeup_locked",
+        message: "系统通知条目不可编辑",
+        request_id: null,
+        details: null,
+      }),
+    );
+    mockedDispatchNow.mockRejectedValue(
+      new ApiError(409, {
+        code: "session_not_active",
+        message: "会话不在活跃状态",
+        request_id: null,
+        details: null,
+      }),
+    );
     mockedFetch.mockResolvedValue([entry()]);
     await act(async () => {
       result.current.reorderEntry(["entry-1"]);
@@ -257,6 +292,47 @@ describe("useMessageQueue（ql-20260825-011 服务端排队）", () => {
     // 每次失败后仍各触发一次 load：初始 1 + 三次 = 4，队列未被本地清空/回滚。
     await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(4));
     expect(result.current.queue.length).toBe(1);
+    // 已知竞态：不弹任何错误提示（旧 R-02 语义保留）。
+    expect(notifyMock.error).not.toHaveBeenCalled();
+  });
+
+  it("真实失败（网络/5xx）notify.error(err, fallback) 且仍 load（ql-20260903-014：不再一律静默）", async () => {
+    mockedFetch.mockResolvedValue([entry()]);
+    const { result } = renderHook(() =>
+      useMessageQueue({ sessionId: "sess-1", sessionActive: false }),
+    );
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    const netErr = new ApiError(0, {
+      code: "network_error",
+      message: "Failed to fetch",
+      request_id: null,
+      details: null,
+    });
+    const serverErr = new ApiError(500, {
+      code: "http_500",
+      message: "服务器内部错误",
+      request_id: null,
+      details: null,
+    });
+    mockedDelete.mockRejectedValue(netErr);
+    mockedRetry.mockRejectedValue(serverErr);
+    mockedUpdate.mockRejectedValue(netErr);
+    mockedFetch.mockResolvedValue([entry()]);
+    await act(async () => {
+      result.current.removeEntry("entry-1");
+    });
+    await act(async () => {
+      result.current.retryEntry("entry-1");
+    });
+    await act(async () => {
+      result.current.editEntry("entry-1", "改后消息");
+    });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(4));
+    expect(notifyMock.error).toHaveBeenCalledTimes(3);
+    expect(notifyMock.error).toHaveBeenNthCalledWith(1, netErr, "删除排队消息失败");
+    expect(notifyMock.error).toHaveBeenNthCalledWith(2, serverErr, "重试排队消息失败");
+    expect(notifyMock.error).toHaveBeenNthCalledWith(3, netErr, "保存修改失败");
   });
 
   it("refresh() 主动重新拉取", async () => {

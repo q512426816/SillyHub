@@ -221,3 +221,16 @@
 根因：6f92dc49d 给 worktree 三方法传 150s 超时但 mock 没跑没更新；6a2248ccc 引入 NULL resume_token 跳过守卫漏改旧对照测试；merge 迁移文件名 30f7418b14cf_merge_heads_20260829130000_.py 的 slug 嵌了父 revision 字符串，子串匹配按 os.listdir 顺序随机遮蔽真实迁移文件
 方案：mock send_rpc 补 timeout 形参对齐协议并记入 calls；_make_run 工厂补 resume_token 形参且失败测试两 run 均带 token（中断排除只来自 error_code 过滤，保原始意图）；_load_migration 改精确前缀 f.startswith(revision_id_)。生产代码零改动
 结果：worktree 10 + redispatch 26 + migration 15 用例全绿，ruff check/format 0，mypy 0 错；backend.changelog.md 登记 ql-20260903-013-b057
+
+## ql-20260903-014-639e | 2026-09-03 19:18:32 | 排队消息静默失败补反馈——真实失败可见化
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/hooks/use-message-queue.ts（五操作失败分层（竞态静默/真实失败 toast）+ QUEUE_MAX_PENDING 导出）
+- frontend/src/components/daemon/session-panel.tsx（页面+弹窗超长/队满守卫 toast 化，弹窗补 useNotify）
+- frontend/src/hooks/__tests__/use-message-queue.test.ts（errors mock + 竞态静默改 ApiError 断言 + 新增真实失败用例）
+- .sillyspec/docs/frontend/modules/hooks-message-queue.md（契约修正为服务端排队现状 + 失败分层语义）
+需求：排队消息静默失败补反馈——真实失败可见化
+根因：五操作（删除/重试/重排/编辑/立即发送）catch 一律静默，网络/服务端故障时用户编辑保存后文字弹回、删除后条目复活零解释；队列满与消息超 8000 字的发送守卫同样静默 return，按钮亮着按 Enter 毫无反应
+方案：hook 增加 notifyUnlessReconcile 统一出口——404/409/422 已知竞态保持静默（load 以服务端为准收敛的 R-02 语义不变），其余 notify.error；页面+弹窗两份 handleSend 的超长与队满守卫改 warning toast，QUEUE_MAX_PENDING 导出供文案取值
+结果：use-message-queue 13 用例全绿（含新增竞态静默 ApiError 形态断言与真实失败 toast 用例）；typecheck 0 错；未部署

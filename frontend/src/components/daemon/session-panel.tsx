@@ -132,7 +132,7 @@ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 // 2026-08-29-session-usage-stats task-04：会话累计用量条（自取数组件，双模式
 // 渲染点接线见 page 头部下方 / dialog 输入框上方两处挂载点）。
 import { SessionUsageBar } from "@/components/daemon/session-usage-bar";
-import { useMessageQueue } from "@/hooks/use-message-queue";
+import { QUEUE_MAX_PENDING, useMessageQueue } from "@/hooks/use-message-queue";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
 // task-10（2026-08-28-daemon-agent-share / FR-05）：useActiveSharedAgents 也从
@@ -2882,7 +2882,16 @@ function SessionPanelPage({
   const handleSend = useCallback(() => {
     const prompt = input.trim();
     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
-    if ((!prompt && pendingAttachments.length === 0) || prompt.length > MAX_PROMPT_LEN) return;
+    // ql-20260825-007：D-7 对齐——附件非空豁免空文本（看图说话）；纯文本仍要求非空。
+    // 空文本静默（发送按钮本已禁用）；超长/队满 toast 明示（ql-20260903-014：
+    // 旧版一律静默 return，按钮亮着却毫无反应，用户以为软件坏了）。
+    if (!prompt && pendingAttachments.length === 0) return;
+    if (prompt.length > MAX_PROMPT_LEN) {
+      notify.warning(
+        `单条消息最长 ${MAX_PROMPT_LEN} 字（当前 ${prompt.length} 字），请精简后再发送`,
+      );
+      return;
+    }
     const teamCmd = parseTeamCommand(prompt);
     const hasActiveMission = teamMissions.some((m) => isActiveTeamMission(m.status));
     // task-03（D-102）：预会话首句 → createSession 直发（不走队列——无既有
@@ -2930,7 +2939,13 @@ function SessionPanelPage({
     // task-10：suspended 挂起禁发（daemon 不在线，发也必失败；输入框本已禁用，
     // 此处为发送路径防御性兜底）。
     if (!session || ended || suspended || !machineOnline) return;
-    if (isQueueFull) return; // D-002 满员拒收：提示见 placeholder，草稿与附件保留
+    if (isQueueFull) {
+      // D-002 满员拒收：草稿与附件保留。placeholder 提示打字即不可见，改 toast 明示。
+      notify.warning(
+        `排队消息已达上限（${QUEUE_MAX_PENDING} 条），请等待派发或先删除排队消息`,
+      );
+      return;
+    }
     const attachmentIds = pendingAttachments.map((a) => a.id);
     // D-004：登记附件元数据（投递只携带 ids）——先登记再发送，保证占位轮可查。
     for (const a of pendingAttachments) {
@@ -2943,7 +2958,7 @@ function SessionPanelPage({
       return;
     }
     void sendFromQueue(prompt, attachmentIds);
-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
+  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
@@ -4391,6 +4406,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
 
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
+  const notify = useNotify();
   const [view, setView] = useState<SessionDialogView>(INITIAL_DIALOG_VIEW);
   // task-11（2026-08-22-team-session-unify）：会话内团队触发——弹层开关/预填、
   // 触发在途、错误文案、chip 取消；mission 列表 + 活跃 5s 轮询走共用 hook
@@ -5301,9 +5317,15 @@ function SessionPanelDialog(props: SessionPanelProps) {
     // 仍要求非空。idle 首句走 createSession（无附件可带），但该态附件入口已被
     // 门控（attachmentsDisabled），pendingAttachments 恒空。
     if (
-      (!prompt && pendingAttachments.length === 0) ||
-      prompt.length > MAX_PROMPT_LEN
+      !prompt &&
+      pendingAttachments.length === 0
     ) {
+      return;
+    }
+    if (prompt.length > MAX_PROMPT_LEN) {
+      notify.warning(
+        `单条消息最长 ${MAX_PROMPT_LEN} 字（当前 ${prompt.length} 字），请精简后再发送`,
+      );
       return;
     }
     if (!hasOnlineProvider) return;
@@ -5313,7 +5335,13 @@ function SessionPanelDialog(props: SessionPanelProps) {
     // task-10（design A5）：挂起禁发——daemon 不在线，发也必失败；输入框本已
     // 禁用，此处为发送路径防御性兜底（恢复由 daemon 重启自动完成，D-001）。
     if (view.suspended) return;
-    if (isQueueFull) return; // D-002 满员拒收
+    if (isQueueFull) {
+      // D-002 满员拒收（同 page 模式 toast 明示，ql-20260903-014）
+      notify.warning(
+        `排队消息已达上限（${QUEUE_MAX_PENDING} 条），请等待派发或先删除排队消息`,
+      );
+      return;
+    }
 
     // task-11（D-004 四路等价）：/team 前缀拦截——不发送，弹层确认后目标随下条
     // 消息发出（objective 预填去前缀文本）。仅 Claude 引擎且已有 active 会话时
@@ -5444,7 +5472,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
