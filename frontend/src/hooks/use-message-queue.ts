@@ -182,6 +182,9 @@ export function useMessageQueue({
   useEffect(() => {
     if (sessionId === "" || !sessionActive) return;
     const timer = setInterval(() => {
+      // ql-20260904-009：后台标签页跳过 tick（SSE 断连时后台也不必 5s 空转
+      // 拉队列；回前台下一拍恢复，SSE 重连 resync 自带对账）。
+      if (typeof document !== "undefined" && document.hidden) return;
       void load(sessionId);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);

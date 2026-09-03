@@ -361,3 +361,33 @@ describe("useMessageQueue（ql-20260825-011 服务端排队）", () => {
     expect(result.current.isQueueFull).toBe(true);
   });
 });
+
+describe("后台标签页轮询暂停（ql-20260904-009）", () => {
+  it("document.hidden 时跳过 tick，回前台下一拍恢复", async () => {
+    vi.useFakeTimers();
+    mockedFetch.mockResolvedValue([]);
+    // jsdom document.hidden 默认 false；defineProperty 可覆盖（configurable）。
+    const desc = Object.getOwnPropertyDescriptor(document, "hidden");
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => true,
+    });
+    try {
+      renderHook(() => useMessageQueue({ sessionId: "sess-1", sessionActive: true }));
+      await act(async () => vi.advanceTimersByTimeAsync(20_000));
+      // 后台 20s（4 个 5s 拍）零轮询——只有挂载首拉。
+      expect(mockedFetch).toHaveBeenCalledTimes(1);
+
+      // 回前台：下一拍恢复。
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        get: () => false,
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(mockedFetch.mock.calls.filter((c) => c[0] === "sess-1").length).toBeGreaterThanOrEqual(2);
+    } finally {
+      if (desc) Object.defineProperty(document, "hidden", desc);
+      else delete (document as { hidden?: boolean }).hidden;
+    }
+  });
+});

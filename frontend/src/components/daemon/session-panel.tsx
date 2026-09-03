@@ -643,6 +643,9 @@ function useSessionTeamMissions(
   useEffect(() => {
     if (!sessionId || (!hasActive && !hasRunningTurn)) return;
     const timer = window.setInterval(() => {
+      // ql-20260904-009：后台标签页跳过 tick（回前台下一拍即恢复拉取；切走
+      // 后 5s 轮询照打后端纯耗电耗请求）。
+      if (typeof document !== "undefined" && document.hidden) return;
       void refresh();
     }, TEAM_MISSION_POLL_MS);
     return () => window.clearInterval(timer);
@@ -4948,6 +4951,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
     };
     const tick = async () => {
       if (cancelled) return;
+      // ql-20260904-009：后台标签页跳过 tick（回前台下一拍恢复；超时计数
+      // 同时暂停——不在用户看不见时把恢复窗口耗尽判失败）。
+      if (typeof document !== "undefined" && document.hidden) return;
       const now = Date.now();
       if (suspendedNow && now - lastPollAt < SUSPENDED_SESSION_REFETCH_MS) return;
       lastPollAt = now;

@@ -465,3 +465,15 @@
 根因：spawn 的 error 事件异步派发，无监听器的 ChildProcess 以 uncaughtException 崩 daemon，外层 try/catch 捕不到；两处 killTree（host-fs-handler/preflight）同款隐患
 方案：对 taskkill child 挂 killer.on('error', ()=>{}) 吞掉（杀树失败本就有 timeout 兜底），两处同步维护；测试 mock 返真 EventEmitter + KT3 用例断言监听器存在且 emit 不抛
 结果：runcmd-kill 3 + preflight 40 绿，tsc 0
+
+## ql-20260904-009-c2ae | 2026-09-04 03:27:50 | 后台标签页轮询暂停——裸 setInterval 在 document.hidden 时跳过 tick
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（团队任务/attach 轮询 hidden 守卫）
+- frontend/src/hooks/use-message-queue.ts（队列轮询 hidden 守卫）
+- frontend/src/hooks/__tests__/use-message-queue.test.ts（后台暂停用例）
+需求：后台标签页轮询暂停——裸 setInterval 在 document.hidden 时跳过 tick
+根因：团队任务 5s / 弹窗 attach 恢复 1.5s / 队列 5s 三处裸 setInterval 不随页面隐藏暂停——切走标签页后平台持续打后端（多面板叠加请求量翻倍，弱网还与 SSE 抢连接）
+方案：三处 tick 头部加 document.hidden 守卫（回前台下一拍恢复；attach 超时计数同步暂停防误判恢复失败）；agent-log 的 react-query 轮询默认已暂停不动
+结果：use-message-queue 14 用例全绿（新增后台暂停：hidden 20s 零轮询 + 回前台恢复）+ 面板回归 43 绿；tsc 0 错；未部署
