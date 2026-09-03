@@ -60,13 +60,17 @@ class _MockWsRpc:
         workspace_id: str,
         daemon_id: str,
         args: dict[str, Any],
+        timeout: float | None = None,
     ) -> dict[str, Any]:
+        # timeout 形参对齐 HostFsWsRpc 协议（ql-20260903-013：6f92dc49d 起
+        # worktree 三方法显式传 150s，mock 缺参会 TypeError）。
         self.calls.append(
             {
                 "method": method,
                 "workspace_id": workspace_id,
                 "daemon_id": daemon_id,
                 "args": args,
+                "timeout": timeout,
             }
         )
         if self._exc is not None:

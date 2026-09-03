@@ -44,16 +44,20 @@ DOWN_REVISION_ID = "4766d997cf09"  # execute 实测唯一 head（alembic heads �
 
 
 def _load_migration(revision_id: str):
-    """Load migration module by matching revision ID in filename.
+    """Load migration module by matching revision ID prefix in filename.
 
     Mirrors the helper in test_session_agent_session_id_migration.py.
+    前缀精确匹配而非子串包含（ql-20260903-013）：alembic 文件名约定
+    ``<revision>_<slug>.py``，合并迁移 ``30f7418b14cf_merge_heads_20260829130000_.py``
+    的 slug 里嵌了父 revision 字符串，子串包含会按 ``os.listdir`` 顺序
+    随机命中合并文件（CI 偶发 flaky 实证）。
     """
     from pathlib import Path
 
     backend_root = Path(__file__).resolve().parent.parent
     versions_dir = backend_root / "migrations" / "versions"
     for f in os.listdir(str(versions_dir)):
-        if f.endswith(".py") and revision_id in f and f != "__init__.py":
+        if f.endswith(".py") and f.startswith(f"{revision_id}_") and f != "__init__.py":
             return importlib.import_module(f"migrations.versions.{f[:-3]}")
     raise ImportError(f"No migration found for revision {revision_id} in {versions_dir}")
 

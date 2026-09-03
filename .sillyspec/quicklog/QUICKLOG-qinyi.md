@@ -208,3 +208,16 @@
 方案：session-panel 11 处与群聊附件上传失败改 errMessage(err, 中文fallback)；搜索失败改 notify.error(err, fallback) 两参、头像固定文案改 notify.warning(msg)；api.ts 新增 502/503/504 中文兜底与其余「请求失败（HTTP N）」；两输入条新增 MAX_ATTACHMENTS_PER_BATCH=10 截断 toast 告知，并修正群聊附件注释与实现不一致（toast→行内红字）
 结果：5 个相关测试文件 102 用例全绿（新增 8 用例：输入条上传 2 + api 兜底 3 + errors 契约 1 + 群聊搜索/截断 2）；typecheck 0 错误；未部署
 审计：⚖️ 归属切分：14 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/model.py, backend/app/modules/agent/schema.py, backend/app/modules/daemon/group/router.py, backend/app/modules/daemon/group/service.py, backend/app/modules/daemon/tests/test_group_chat_management.py, backend/migrations/versions/20260903170000_add_group_chat_archived_at.py, frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/lib/__tests__/api.test.ts, frontend/src/lib/errors.test.ts, docs/sillyspec/2026-09-03-spec-sync-conflict-no-accept-server-option.md
+
+## ql-20260903-013-b057 | 2026-09-03 18:44:33 | backend-ci 连续失败修复——worktree mock 缺 timeout + patrol 对照缺 token + 迁移测试撞名 flaky
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/host_fs/tests/test_delegate_worktree.py（_MockWsRpc.send_rpc 补 timeout 形参）
+- backend/app/modules/daemon/tests/test_worker_redispatch.py（_make_run 补 resume_token + 失败测试两 run 带 token）
+- backend/tests/test_platform_deleted_hidden_migration.py（_load_migration 子串改精确前缀匹配）
+- .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md（ql-20260903-013-b057 登记）
+需求：backend-ci 连续失败修复——worktree mock 缺 timeout + patrol 对照缺 token + 迁移测试撞名 flaky
+根因：6f92dc49d 给 worktree 三方法传 150s 超时但 mock 没跑没更新；6a2248ccc 引入 NULL resume_token 跳过守卫漏改旧对照测试；merge 迁移文件名 30f7418b14cf_merge_heads_20260829130000_.py 的 slug 嵌了父 revision 字符串，子串匹配按 os.listdir 顺序随机遮蔽真实迁移文件
+方案：mock send_rpc 补 timeout 形参对齐协议并记入 calls；_make_run 工厂补 resume_token 形参且失败测试两 run 均带 token（中断排除只来自 error_code 过滤，保原始意图）；_load_migration 改精确前缀 f.startswith(revision_id_)。生产代码零改动
+结果：worktree 10 + redispatch 26 + migration 15 用例全绿，ruff check/format 0，mypy 0 错；backend.changelog.md 登记 ql-20260903-013-b057

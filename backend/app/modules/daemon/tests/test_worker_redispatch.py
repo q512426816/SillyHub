@@ -209,6 +209,7 @@ async def _make_run(
     model: str | None = None,
     run_session_id: str | None = None,
     created_at: datetime | None = None,
+    resume_token: str | None = None,
 ) -> AgentRun:
     run = AgentRun(
         agent_type="claude_code",
@@ -223,6 +224,7 @@ async def _make_run(
         model=model,
         session_id=run_session_id,
         spec_strategy="interactive",
+        resume_token=resume_token,
         created_at=created_at if created_at is not None else datetime.now(UTC),
     )
     db.add(run)
@@ -983,7 +985,11 @@ class TestPatrolWorkerRecoveryExclusion:
     ) -> None:
         """patrol 职责④排除：error_code=daemon_interrupted 的 run 不进
         worker_recovery 候选（不走 resume 翻回 pending——防与重派新 run 双跑）；
-        同批无 error_code 的既有候选照常 resume（回归对照）。"""
+        同批无 error_code 的既有候选照常 resume（回归对照）。
+
+        两条 run 都带 resume_token（ql-20260903-013：6a2248ccc 起职责④跳过
+        NULL token 候选，对照 run 缺 token 会被 token 守卫挡下导致 recovered=0），
+        使中断 run 的排除只可能来自 error_code 过滤——本测试的原始意图。"""
         from unittest.mock import AsyncMock
 
         from app.modules.agent.coordinator import ExecutionCoordinatorService
@@ -1023,6 +1029,7 @@ class TestPatrolWorkerRecoveryExclusion:
             mission_id=mission.id,
             objective="被中断的分身",
             role="worker",
+            resume_token="tok-interrupted",
         )
         control_run = await _make_run(
             db_session,
@@ -1032,6 +1039,7 @@ class TestPatrolWorkerRecoveryExclusion:
             mission_id=mission.id,
             objective="既有断线分身",
             role="worker",
+            resume_token="tok-control",
         )
 
         recovered = await MissionPatrolService(db_session)._patrol_worker_recovery()
