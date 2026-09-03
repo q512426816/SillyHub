@@ -118,3 +118,12 @@ CLI 全量实测 10 failed / 1893 passed。**归因：全部 10 项失败集中�
 - 独立 QA 对照设计深审 11/11 pass（execute-review-2026-09-03-152755，含 bug 级核验）
 - 主代理汇总审查（step 13）：风格三端 lint/format 全过；bug——2 处 P0 契约缺陷（A1/A2）已在执行链发现修复并实证；防御式错误处理完备；TODO/FIXME 零残留；无冗余（复用既有基建）；架构与 design §3 一致
 - 总体评价：生产就绪；遗留观察项两项属部署后动作（evidence 边界节登记）
+
+## 2026-09-04 复验附录（实现提交 c0e6fce46 后的独立复核）
+
+- **背景**：原 verify 由实现会话产出（03:50 e03e30823 落库）；实现此前仅存暂存区，c0e6fce46 提交后由独立审计会话复验并完成 verify 流程收口（阶段机此前因实现走 quick 通道停在 plan，经 --skip-approval 进入 verify）。
+- **三面测试独立复跑（07:1x，全绿）**：backend test_machine_sillyspec 29 passed + ruff check 0 + mypy 0；sillyhub-daemon config+heartbeat+sillyspec-manager 108 passed + tsc 0；frontend changes-overview-card + workspaces/[id]/page 23 passed。
+- **追加修复**：resolveSillySpecBinDefault 补 %APPDATA%\npm\node_modules 候选（ql-20260904-M4，随 c0e6fce46 提交）——标准 Node.js 安装器布局原只覆盖 nvm-windows，已安装环境会被误判「能力缺失」；三态降级设计使该缺陷只丢功能不崩溃，属采集覆盖面补全非设计偏离。
+- **探针 5 本轮误报裁定**：本轮 verify-probes 以 change-diff 20 文件为 scope，后端端点提取未含 daemon 路由（prefix="/daemon" 挂 /api 下，router.py:423/757+），把 daemon.ts 中 18 个**既有**调用（/machines、/runtimes、/sessions 等）误报 missing——逐类核对后端路由均存在，非本变更引入的契约缺口，不构成 FAIL blocker；1176 未调用端点为全仓存量现象同原报告判定。
+- **探针 3 task-08 ⚠️**：与原报告口径一致——纯验证任务本质无测试文件，产出为 integration-evidence.md（三段证据链），维持语义标注。
+- **结论维持 PASS**。

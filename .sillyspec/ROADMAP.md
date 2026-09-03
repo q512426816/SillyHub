@@ -10,6 +10,11 @@
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
 
+### 2026-09-02 · 工作台活跃变更总览卡片（机器 sillyspec 进度三端链）
+
+- **changes-overview-card**（2026-09-02，plan 四件套 + 8 task；实现 c0e6fce46、verify PASS 7/7 含 09-04 独立复验）：三端链——①backend：daemon_instances.sillyspec_status JSON 列（迁移 20260903090000）+ 心跳宽松 DTO（宁宽勿断不 422）None=清除置 NULL + register 恒清 + GET /machines 嵌套透出（MachineSillySpecStatusRead）；②daemon：SillySpecManager.collectStatusOnce 三态采集器（execFile 数组形参 spawn progress show --json、cwd=claim 观察的主仓根、能力缺失/瞬态失败/快照三态、changes N=50 截断 + 32KB 预算超限降级纯计数）+ 第五循环（interval 默认 60s 可关）+ 心跳第 6 参透传（sillyspec 缺席显式 undefined 占位防位置滑槽）；③前端：changes-overview-card 组件（健康条/变更行管线/ghost 折叠/冲突区/过滤/null 占位与数据过期标记）+ 工作台 SectionCard 挂载，类型走 gen:types。已知边界：compose 部署级浏览器端到端留部署后观察（integration-evidence 三段链已覆盖逻辑正确性）。补遗：ql-20260904-M4 采集器 bin 解析补 %APPDATA%
+pm 候选（标准 Node.js 安装器布局，原仅覆盖 nvm-windows）。
+
 ### 2026-08-29 · 变更中心删除闭环、文档拉取与进行中可见性（task-15 收尾，待人工确认归档）
 
 - **change-delete-closure-and-spec-pull**（2026-08-29，brainstorm→plan→execute 三轮审过门，revision 1 并入波 4；15 task/4 Wave + 跨仓 X1-X4）：四块能力——①**删除自动收敛+防复活**（波 1）：apply_ops 空目录清理（仅 ops 涉及目录，规避 Windows bind mount stat 断崖）/`spec_file_manifest.platform_deleted` 墓碑四通道拦截（add/rename 拒、delete 幂等放行、`_write_spec_root` 落盘前缀排除、`_ensure_change_row` 双层拒收 409 code=change_deleted）/scoped 定向删除（R-08 收窄修订：scope∩磁盘确认消失可删、scope 外零动作）/删除环与 `_apply_parsed` 对 deleted 行三点豁免（Grill B-1/B-2 加固）/progress 联动删/quicklog apply 期对账 hidden；②**删除入口**（波 2）：`DELETE /workspaces/{ws}/changes/{cid}`（CHANGE_ARCHIVE 或 owner，D-001）→ soft_delete_change_dir（30 天备份区+墓碑）→ location='deleted' 软删+change_events 审计（D-002），前端三页（末段输入防呆弹层/操作列/详情危险按钮/移动端 ActionSheet）；③**拉取口子**（波 3）：`GET /changes/-/spec-bundle`（shpsync、字面量路由前置）+X-Spec-Version 头+tar 顶层 PLATFORM-BUNDLE.json，前端「下载文档包」（blob 范式，快照语义文案），daemon 兼容实证零改；④**进行中可见性**（波 4，D-007 三层）：ChangeSummary.last_pushed_at 投影（零 migration）+活动徽标三态（ACTIVITY_STALE_MS=30min/ISO_LIKE_RE 防御解析，R-12 文案只陈述事实）+CLI X3 步骤开始/X4 任务边界补推（后端零改动）+心跳 Layer 3 Non-Goal。跨仓 sillyspec 仓 X1-X4 全落地（b86a593 墓碑+X3/X4、16c21b0 pull --spec、fb35dc0 --force 保留 local.yaml）。决策 D-001~D-007 沉淀 knowledge/decisions（backend 4/frontend 1/sillyhub-daemon 1/unmapped 1）。已知裁量/遗留：spec-sync HTTP 响应未透传 platform_deleted 诊断键（service 契约先行）、ChangeRead 无 last_pushed_at（详情页 steps 派生）、X3 渲染侧一行接线待后续变更、_compute_reparse_scope docstring 漂移待修（详见 scan/CONCERNS 与 docs/sillyspec 回执）。

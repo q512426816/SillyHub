@@ -31,7 +31,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 ## 关键逻辑
 
 - **目录组织**：`src/app`（路由）、`src/components`（40+ 业务组件，含 daemon/、agent-log/、layout/、charts/、permissions/、ui/ 子树及大量 ppm-/workspace-/admin- 前缀组件）、`src/lib`（工具/API 封装）、`src/stores`（Zustand）、`src/styles`、`src/test`。
-- **核心组件**：app-shell（外壳布局）、top-bar、workspace-tabs、mission-console（任务控制台）、agent-run-panel、agent-log-viewer、runtime-session-dialog、permission-approval-dialog、ask-user-dialog-card、health-card、server-status-card、sillyspec-step-progress、**run-error-item**（模型调用失败结构化展示：type→图标/颜色/文案/hint/actions）。
+- **核心组件**：app-shell（外壳布局）、top-bar、workspace-tabs、mission-console（任务控制台）、agent-run-panel、agent-log-viewer、runtime-session-dialog、permission-approval-dialog、ask-user-dialog-card、health-card、server-status-card、sillyspec-step-progress、**run-error-item**（模型调用失败结构化展示：type→图标/颜色/文案/hint/actions）。**changes-overview-card**（2026-09-02-changes-overview-card：工作台活跃变更总览卡片——健康条/变更行管线/ghost 折叠/冲突区/过滤 tab/null 占位与数据过期标记/32KB 超限计数降级，消费 GET /machines 的 sillyspec_status 嵌套）。
 - **数据层**：React Query 管理服务端状态，Zustand 管 UI/会话状态；daemon 聊天与权限流为长连接交互。
 - **脚本**：dev/build/start/lint/typecheck/test，CI 跑 lint+typecheck+test+build 全链路。
 - ql-20260812-002-7ca3 | vitest 配置：`environmentMatchGlobs` 把 src/lib 下 20 个纯逻辑 .test.ts（白名单）切 node 环境，省 jsdom 每文件初始化（5 个 use-*/daemon-session 用 renderHook/fake EventSource 依赖 jsdom，保留默认环境）。全量 144 文件 1402 用例零回归；墙钟 77→76s（jsdom 组件测试初始化在并行 worker 下本非瓶颈，累计 environment/collect 时间略降，墙钟收益有限）。

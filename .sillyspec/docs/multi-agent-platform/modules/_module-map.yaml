@@ -28,6 +28,7 @@ modules:
       - session_reconnect_sweeper (backend/app/modules/daemon/sweep.py, reconnecting 超时收敛常驻协程, 2026-08-21-session-reopen-resume)
       - publish_session_event / publish_bash_chunk_event (backend/app/modules/daemon/run_sync/service.py, 会话反馈事件 Redis 发布 helper 含 100ms 节流+8KB 截断, 2026-08-24-platform-session-feedback-fix)
       - handle_plan_response (backend/app/modules/daemon/session/service.py, plan 决策落库+WS daemon:plan_response 下发)
+      - heartbeat sillyspec_status 落库/机器视图嵌套 (backend/app/modules/daemon/runtime/service.py + router.py, None=清除语义, 2026-09-02-changes-overview-card)
       - workspace_router
       - members_router
       - auth_router
@@ -54,6 +55,7 @@ modules:
     main_symbols:
       - RootLayout
       - HomePage
+      - ChangesOverviewCard (frontend/src/components/workspace/changes-overview-card.tsx, 工作台活跃变更总览卡片, 2026-09-02-changes-overview-card)
     depends_on: [backend]
     used_by: [deploy, ci, build]
     needs_review: false
@@ -78,6 +80,7 @@ modules:
       - readPid
       - isProcessAlive
       - writePid
+      - SillySpecManager.collectStatusOnce (sillyhub-daemon/src/sillyspec-manager.ts, progress show --json 三态采集器+心跳 sillyspec_status 透传, 2026-09-02-changes-overview-card)
       - removePid
       - writeLocalYaml (src/local-yaml-writer.ts，2026-08-12 init 下发 local.yaml 用)
       - postSpecSync (src/spec-sync.ts，2026-08-13 增量 diff：本地清单缓存+旧 tar 回退+conflict 抛错)
