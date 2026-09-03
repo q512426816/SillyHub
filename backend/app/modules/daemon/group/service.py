@@ -237,12 +237,17 @@ _MID_TURN_NOTICE = (
 # 影子会话详情/日志对全体群成员开放（8dcc562f4 有测试锁定，群定位协作群、
 # 跨成员可见性是需求）。如实表述为「不出现在群时间线 + 群成员可查会话」，
 # 让 agent 据真实可见性把握表述分寸。
+# quick-8170ca59（2026-09-03 修订）：直聊头改为 preamble 统一格式（【影子直聊】
+# 头 + 换行分隔符切出真实消息）——前端 extractPreambleText 剥离（对话视图
+# 只显示用户真实消息，注入说明进「进度」视图 preamble 段），与群 @ 轮
+# 【群聊上下文】前导同款展示语义。
 _SHADOW_DIRECT_HEADER = (
-    "[用户正在群聊「{group_title}」成员「{member_name}」的独立会话中与你单独对话——"
+    "【影子直聊】\n"
+    "用户正在群聊「{group_title}」成员「{member_name}」的独立会话中与你单独对话——"
     "此对话不会出现在群里（不投影到群时间线），但群成员可以在你的会话时间线中"
     "查看本对话内容，请据此把握表述分寸。如果你判断本轮内容对群内其他成员有价值，"
     "可在回复末尾用 [[GROUP]] 和 [[/GROUP]] 包裹要转发的段落，"
-    "该段落会以你的群身份发到群里；无需转发则不要添加标记。]"
+    "该段落会以你的群身份发到群里；无需转发则不要添加标记。\n\n---\n\n"
 )
 
 # quick 影子直聊（2026-09-02）：本轮 user_input metadata 的 source 标记——
@@ -3491,12 +3496,15 @@ class GroupChatService:
         self._session.add(carrier)
         await self._session.commit()
 
-        # prompt：直聊头（可见性语义 + [[GROUP]] 标记说明）+ 用户内容（+附件行）。
+        # prompt：直聊头（preamble 格式——【影子直聊】头 + 分隔符）+ 用户内容
+        # （+附件行，附件随内容之后属消息体参考）。展示层经 extractPreambleText
+        # 剥离前导（对话视图只显示真实用户消息，注入说明进「进度」视图折叠）。
         prompt = _SHADOW_DIRECT_HEADER.format(
             group_title=group.title, member_name=member.display_name
         )
         if (content or "").strip():
-            prompt = f"{prompt}\n{content}"
+            # header 尾部已带 "\n\n---\n\n" 分隔符——用户内容直接衔接。
+            prompt = f"{prompt}{content}"
         if attachment_rows:
             prompt += "\n\n[当前消息附件 · 用户随消息发送，可直接读取参考]\n" + "\n".join(
                 _attachment_prompt_lines(attachment_rows)

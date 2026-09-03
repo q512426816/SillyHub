@@ -1794,9 +1794,20 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
  * 否则 null（普通用户消息不误伤；仅同标题开头但无分隔的消息是用户自己
  * 输入的原文，不算前导）。
  */
-const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报", "【群聊上下文】"];
+const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报", "【群聊上下文】", "【影子直聊】"];
 export function extractPreambleText(content: string): string | null {
   const trimmed = content.trim();
+  // quick（2026-09-03 系统注入刷屏修复）：[GROUP_CHAIN ...] 首行标记是排队
+  // 透传的内部标记（派发侧剥离，直入/历史路径可能残留）——展示层兜底剥掉。
+  // 多行时只剥首行、其余按正常逻辑递归判定。
+  if (trimmed.startsWith("[GROUP_CHAIN ")) {
+    const nl = trimmed.indexOf("\n");
+    const rest = nl < 0 ? "" : trimmed.slice(nl + 1).trim();
+    return rest ? extractPreambleText(rest) : null;
+  }
+  // [后台任务通知] 类注入：整条都是系统通知（无用户正文），整体进 preamble
+  // 折叠——对话视图不再被任务唤醒通知刷屏（无分隔符，特判整条）。
+  if (trimmed.startsWith("[后台任务通知]")) return trimmed;
   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;
   const sep = trimmed.indexOf("\n\n---\n\n");
   if (sep <= 0) return null;
@@ -1811,6 +1822,15 @@ export function extractPreambleText(content: string): string | null {
  */
 export function stripPreambleText(content: string): string {
   const trimmed = content.trim();
+  // quick（2026-09-03 系统注入刷屏修复）：与 extractPreambleText 同款特判——
+  // [GROUP_CHAIN] 标记行剥首行后递归；[后台任务通知] 整条是系统通知，strip
+  // 后为空（无用户正文可显示，对话视图不渲染该轮 prompt 气泡）。
+  if (trimmed.startsWith("[GROUP_CHAIN ")) {
+    const nl = trimmed.indexOf("\n");
+    if (nl < 0) return "";
+    return stripPreambleText(trimmed.slice(nl + 1));
+  }
+  if (trimmed.startsWith("[后台任务通知]")) return "";
   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return content;
   const sep = trimmed.indexOf("\n\n---\n\n");
   if (sep <= 0) return content;
