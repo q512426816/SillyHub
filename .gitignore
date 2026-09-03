@@ -87,3 +87,7 @@ meta.json
 
 # ql-20260826-011：DS/Gotenberg 中文字体挂载目录（微软/方正商用许可，不入库）
 deploy/onlyoffice-fonts/
+
+# 平台文件中心内容寻址上传物（64 位十六进制哈希命名，运行时数据不入库；
+# 历史已跟踪的附件不受影响）
+attachments/[0-9a-f]*

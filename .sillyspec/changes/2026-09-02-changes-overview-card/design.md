@@ -91,18 +91,21 @@ frontend 工作台概览 ⑤ SectionCard「活跃变更总览」 ◀──④ �
 |---|---|---|
 | sillyhub-daemon/src/daemon.ts | 修改 | 心跳 sillyspec 载荷段追加 status 摘要；运行期管理器注入采集器 |
 | sillyhub-daemon/src/config.ts | 修改 | 采集间隔配置项（默认 60s） |
-| sillyhub-daemon/src/__tests__/（新测试文件） | 新增 | 采集器 spawn/降级/摘要截断用例 |
+| sillyhub-daemon/tests/（新测试文件） | 新增 | 采集器 spawn/降级/摘要截断用例（daemon 测试惯例为根级 tests/ 平铺） |
 | backend/app/modules/daemon/model.py | 修改 | Machine.sillyspec_status 列 |
-| backend/app/modules/daemon/schema.py | 修改 | 心跳载荷 + 读取嵌套模型 |
 | backend/app/modules/daemon/service.py（或心跳处理所在文件） | 修改 | 载荷落库 |
 | backend/app/modules/daemon/router.py | 修改 | 机器视图透出 |
-| backend/migrations/versions/2026xxxx_add_machine_sillyspec_status.py | 新增 | 迁移 |
+| backend/migrations/versions/20260903090000_add_machine_sillyspec_status.py | 新增 | 迁移（down_revision 取执行时 alembic heads 唯一 head，撞车 re-parent） |
 | backend/app/modules/daemon/tests/（扩展现有 machine sillyspec 测试） | 修改 | 载荷落库/读取/空覆盖保护用例 |
 | frontend/src/components/workspace/changes-overview-card.tsx | 新增 | 总览卡片组件 |
 | frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx | 新增 | 渲染/过滤/空态/降级占位用例 |
 | frontend/src/app/(dashboard)/workspaces/[id]/page.tsx | 修改 | 挂载卡片 |
 | frontend/src/lib/api-types.ts | 再生成 | pnpm gen:types |
 | backend/openapi.json | 再生成 | 随迁移/schema 变更 |
+
+### 不修改文件
+
+- backend/app/modules/daemon/schema.py：心跳/机器视图 DTO 按模块既有内联先例落 router.py（心跳内联 DTO :230 先例 / 机器视图 :603-609 「不动 schema.py」边界注释），本变更 schema.py 零改动。
 
 ## 7. 生命周期契约
 
