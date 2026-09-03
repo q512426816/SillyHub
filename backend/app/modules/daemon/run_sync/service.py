@@ -2580,6 +2580,10 @@ class RunSyncService:
         且 user_input 相同 → 本 run 已是那次自动重投的结果（网关持续性故障），
         不再追加，交回用户处理。另查同文 pending 条目防与用户手动重发叠加。
 
+        防副作用重复（ql-20260904-M1）：本 run 已有 tool_call 日志（401 发生在
+        turn 中途，工具副作用可能已落地）→ 跳过重投交回用户——重放会再执行
+        一遍；只有无工具活动的干净轮（首 LLM 调用即 401）才自动重投。
+
         调用点：close_interactive_run 主事务 commit 之后（终态已落库）。全程
         静默容错——任何一步失败仅回滚本 helper 的事务并 warn，绝不影响已
         commit 的 run 终态。
@@ -2610,6 +2614,29 @@ class RunSyncService:
             if prompt is None or not prompt.strip():
                 return
             prompt = prompt.strip()
+            # ql-20260904-M1（24h 审计）：本 run 已有工具调用（tool_call 日志非零）
+            # → 跳过自动重投。401 可发生在 turn 中途——此前已执行的工具副作用
+            # （写文件/跑命令/git 提交）已落地，重放同一 prompt 会再执行一遍
+            # （同一条消息执行两遍，无幂等键防护）。首 LLM 调用即 401 的干净轮
+            # （无工具活动）保持自动重投自愈语义；有活动的轮交回用户决定。
+            tool_activity = (
+                await self._session.execute(
+                    select(func.count())
+                    .select_from(AgentRunLog)
+                    .where(
+                        AgentRunLog.run_id == agent_run.id,
+                        AgentRunLog.channel == "tool_call",
+                    )
+                )
+            ).scalar_one()
+            if tool_activity:
+                log.info(
+                    "auth_transient_autoretry_skipped_tool_activity",
+                    run_id=str(agent_run.id),
+                    session_id=str(session_id),
+                    tool_calls=tool_activity,
+                )
+                return
             # 防循环：紧邻上一条同会话 run 同为 CLI 鉴权失败且输入相同 → 已重投过。
             prev_run = (
                 await self._session.execute(

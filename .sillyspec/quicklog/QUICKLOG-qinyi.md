@@ -429,3 +429,15 @@
 根因：ql-20260903-021 的停连只在 es.onerror（建连后可达）生效，断连重连时 resync 快照 REST 先跑，会话被删/权限收回的 404/403 与网络错误无差别退避重试，每 30s 一轮必败请求永久循环
 方案：daemon.ts 新增 isPermanentRestError 分流三处 resyncAndReconnect 的 catch，命中即置 closed+清三定时器停订阅；AbortError/网络错误保持重连
 结果：daemon-session-stream-done 5 例绿（新增 1 例恰一轮即停断言），相邻 daemon.test+stream-sync 39 绿，tsc 0
+
+## ql-20260904-005-a41b | 2026-09-04 03:11:32 | CLI 鉴权自动重投防副作用重复——已有工具活动的 run 不再整轮重放（24h 审计 M1）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/run_sync/service.py（tool_call 计数守卫 + docstring）
+- backend/app/modules/daemon/tests/test_auth_transient_autoretry.py（test_tool_activity_skips_enqueue）
+- .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md（追加 M1 条目）
+需求：CLI 鉴权自动重投防副作用重复——已有工具活动的 run 不再整轮重放（24h 审计 M1）
+根因：401 可发生在 turn 中途，原实现把 user_input 原文重新入队由新 run 从头重放整轮，已执行的工具副作用（写文件/跑命令/git 提交）会再执行一遍且无幂等键防护
+方案：_maybe_autoretry_auth_transient_turn 补 tool_call 活动守卫：本 run tool_call 日志非零即跳过重投交回用户，仅无工具活动的干净轮保持自动重投自愈
+结果：test_auth_transient_autoretry 6 用例绿（新增 1 例），ruff 0，mypy 0

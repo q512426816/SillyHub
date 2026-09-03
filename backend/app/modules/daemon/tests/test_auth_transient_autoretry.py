@@ -217,6 +217,44 @@ async def test_auth_transient_failure_enqueues_retry(
     assert len(entries) == 1
 
 
+# ── 防副作用重复：本 run 已有工具活动 → 不重投（ql-20260904-M1）───────────────
+
+
+@pytest.mark.asyncio
+async def test_tool_activity_skips_enqueue(db_session: AsyncSession, mocked_redis) -> None:
+    """401 发生在 turn 中途（已有 tool_call 日志）→ 不自动重投——重放会再执行
+    一遍已落地的工具副作用；交回用户决定（错误卡可见）。"""
+    lease_id, run_id, token, session_id, _uid = await _seed_session_run_with_input(db_session)
+    db_session.add(
+        AgentRunLog(
+            run_id=run_id,
+            channel="tool_call",
+            content_redacted='{"tool":"Bash","command":"git commit -m x"}',
+            timestamp=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+    with patch(
+        "app.modules.daemon.session.service.dispatch_next_queued_message",
+        new=AsyncMock(),
+    ):
+        svc = DaemonService(db_session)
+        run = await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="error",
+            is_error=True,
+            error=_cli_auth_error(),
+        )
+    assert run.status == "failed"
+
+    # 无排队条目追加（不重投）。
+    assert await _queued_entries(db_session, session_id) == []
+    db_session.expire_all()
+    assert await _queued_entries(db_session, session_id) == []
+
+
 # ── 防循环：上一条同会话同 prompt run 已鉴权失败 → 不再追加 ──────────────────
 
 
