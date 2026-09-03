@@ -416,3 +416,16 @@
 方案：_row 预初始化 None 并在取消前判空（两条路径本无指令行可取消），补 DaemonControlCommand 类型导入；新增两例回归用例坐实恢复 504 收敛语义
 结果：新增 2 例绿，dispatch 全文件 42 绿，control_commands 全量绿，resilience 6 绿，ruff format/check 0，mypy 0
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_control_command_dispatch.py
+
+## ql-20260904-004-d218 | 2026-09-04 03:07:20 | SSE 三订阅 resync 阶段永久性错误停连补口（24h 审计 H2）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/daemon.ts（isPermanentRestError + 三订阅 catch 分流）
+- frontend/src/lib/__tests__/daemon-session-stream-done.test.ts（harness 扩 runsStatus + 连接中被删回归用例）
+- .sillyspec/docs/frontend/modules/lib-daemon.md（R7 条目补口注记）
+- .sillyspec/docs/frontend/modules/lib-daemon.changelog.md（sidecar 新建落 ql-20260904-004 索引）
+需求：SSE 三订阅 resync 阶段永久性错误停连补口（24h 审计 H2）
+根因：ql-20260903-021 的停连只在 es.onerror（建连后可达）生效，断连重连时 resync 快照 REST 先跑，会话被删/权限收回的 404/403 与网络错误无差别退避重试，每 30s 一轮必败请求永久循环
+方案：daemon.ts 新增 isPermanentRestError 分流三处 resyncAndReconnect 的 catch，命中即置 closed+清三定时器停订阅；AbortError/网络错误保持重连
+结果：daemon-session-stream-done 5 例绿（新增 1 例恰一轮即停断言），相邻 daemon.test+stream-sync 39 绿，tsc 0

@@ -1,7 +1,7 @@
 /**
  * Daemon runtime API client.
  */
-import { apiFetch, getApiBaseUrl } from "@/lib/api";
+import { ApiError, apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useSession } from "@/stores/session";
 import type {
   AgentRunLogEntry,
@@ -1564,6 +1564,18 @@ export const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 export const PERMANENT_SSE_ERROR_STATUSES = new Set([401, 403, 404]);
 
 /**
+ * ql-20260904-H2（R7 补口）：resync 阶段 REST 错误的永久性判别——与上方
+ * SSE onerror 的 ev.status 同口径。es.onerror 的停连分支只在建连后可达；
+ * 断连重连时 resync 快照（runs/logs）先跑，若会话已被删/权限收回（401/403/
+ * 404），ApiError 落进 resyncAndReconnect 的 catch 与网络错误无差别退避
+ * 重试 → 每 30s 重打必败请求的永久循环（面板存活期间不停）。命中即由
+ * 调用方停订阅终态。
+ */
+function isPermanentRestError(err: unknown): boolean {
+  return err instanceof ApiError && PERMANENT_SSE_ERROR_STATUSES.has(err.status);
+}
+
+/**
  * resync REST 快照拉取默认超时（F7 / 2026-08-25）：重连前的 runs/logs 拉取无
  * 超时时，TCP 半开 / 后端挂起会让 resync 流程停摆数分钟（退避循环卡死在
  * await）。10s 足够覆盖正常快照拉取；超时视为 resync 失败走既有 catch 退避
@@ -1998,7 +2010,19 @@ export function streamSession(
       // 收到首条实时事件后再转 live）。
       setStatus("reconnected");
       reconcileTimer = setTimeout(() => void reconcileTerminalRuns(), 5000);
-    } catch {
+    } catch (err) {
+      // ql-20260904-H2（R7 补口）：resync 阶段的永久性 REST 错误（会话已删/
+      // 权限收回）与网络错误分流——es.onerror 的停连分支建连前走不到，此处
+      // 不停会把必败 resync 变成每 30s 一轮的永久循环。停订阅终态（清三
+      // 定时器，对齐 close() 收口口径）。
+      if (isPermanentRestError(err)) {
+        closed = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (reconcileTimer) clearTimeout(reconcileTimer);
+        if (postTurnTimer) clearTimeout(postTurnTimer);
+        es?.close();
+        return;
+      }
       scheduleReconnect(); // 后端不可达 → 继续退避重试
     }
   };
@@ -3219,7 +3243,18 @@ export function streamGroupChat(
           /* 静默 */
         });
       }, 5000);
-    } catch {
+    } catch (err) {
+      // ql-20260904-H2（R7 补口，同 streamSession）：resync 阶段的永久性 REST
+      // 错误（会话/群已删/权限收回）停订阅终态——es.onerror 的停连分支建连前
+      // 走不到，不停则每 30s 一轮必败 resync 永久循环。清三定时器对齐 close()。
+      if (isPermanentRestError(err)) {
+        closed = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (reconcileTimer) clearTimeout(reconcileTimer);
+        if (postTurnTimer) clearTimeout(postTurnTimer);
+        es?.close();
+        return;
+      }
       scheduleReconnect(); // 后端不可达 → 继续退避重试
     }
   };
@@ -3482,7 +3517,18 @@ export function streamShadowSession(
           /* 静默 */
         });
       }, 5000);
-    } catch {
+    } catch (err) {
+      // ql-20260904-H2（R7 补口，同 streamSession）：resync 阶段的永久性 REST
+      // 错误（会话/群已删/权限收回）停订阅终态——es.onerror 的停连分支建连前
+      // 走不到，不停则每 30s 一轮必败 resync 永久循环。清三定时器对齐 close()。
+      if (isPermanentRestError(err)) {
+        closed = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (reconcileTimer) clearTimeout(reconcileTimer);
+        if (postTurnTimer) clearTimeout(postTurnTimer);
+        es?.close();
+        return;
+      }
       scheduleReconnect(); // 后端不可达 → 继续退避重试
     }
   };

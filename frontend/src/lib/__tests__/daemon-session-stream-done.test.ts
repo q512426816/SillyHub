@@ -26,6 +26,8 @@ interface StreamHarness {
   logsCalls: number;
   /** 非空时 /stream 返回该状态码（永久性 HTTP 错误场景，ql-20260903-021）。 */
   streamStatus?: number;
+  /** 非空时 /runs 返回该状态码（resync 阶段永久性错误场景，ql-20260904-H2）。 */
+  runsStatus?: number;
   stream: {
     push: (_text: string) => void;
     close: () => void;
@@ -69,6 +71,14 @@ function installRoutedFetchMock(): void {
       }
       if (url.includes("/runs")) {
         harness.runsCalls += 1;
+        if (harness.runsStatus !== undefined) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ detail: "not found" }), {
+              status: harness.runsStatus,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
         return Promise.resolve(
           new Response(JSON.stringify([]), {
             status: 200,
@@ -213,6 +223,36 @@ describe("streamSession — 永久性 HTTP 错误停连（ql-20260903-021，R7�
     expect(harness.streamCalls).toBe(1);
     expect(harness.runsCalls).toBe(0);
     expect(harness.logsCalls).toBe(0);
+    conn.close();
+  });
+
+  it("连接中会话被删：断连后 resync 阶段 404 → 停连（resync 永久错误不再无限重试）", async () => {
+    // ql-20260904-H2（R7 补口）：es.onerror 的停连分支只在建连后可达——本例
+    // 先正常建连（200），会话随后被删（runs 回 404），再模拟网络断连：
+    // scheduleReconnect → resyncAndReconnect → resync REST 404（ApiError）。
+    // 修复前该 404 与网络错误无差别进 catch 退避重试 → 每 30s 一轮必败
+    // resync 永久循环（修复只覆盖了首连 404 场景）。
+    const conn: SessionStreamConnection = streamSession(
+      "sess-deleted-mid",
+      baseHandlers(),
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(harness.streamCalls).toBe(1);
+
+    harness.stream!.push(": connected\n\n");
+    // 会话随后被删（如另一标签页删除）——resync 的 runs 快照开始回 404。
+    harness.runsStatus = 404;
+    // 网络断连（无 status 的普通 onerror）→ 进入退避重连。
+    harness.stream!.close();
+    await vi.runOnlyPendingTimersAsync();
+
+    // 推进远超完整退避序列——修复前 runs/logs 每 30s 一轮持续增长。
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    // 恰一轮 resync（runs 打了一次 404）即停：不再重打 runs/logs/stream。
+    expect(harness.runsCalls).toBe(1);
+    expect(harness.logsCalls).toBe(0);
+    expect(harness.streamCalls).toBe(1);
     conn.close();
   });
 });
