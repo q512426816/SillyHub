@@ -347,6 +347,32 @@ export function sortGroupTimeline(
   return [...entries].sort(compareTimelineEntries);
 }
 
+/**
+ * 有序时间线的**增量插入**（ql-20260904-002）：``entries`` 按不变式已排序，
+ * 二分定位插入点替代 ``sortGroupTimeline([...base, entry])`` 的全量重排——
+ * 流式期间每条 SSE 事件都走这条路（翻页加载后条目上千时，O(n log n)/事件
+ * 变 O(log n) 定位 + 一次 O(n) 浅拷贝）。常见情形（新条目时间戳 ≥ 末条，
+ * 直播/回放日志本就时序）走末尾 append 快路径零比较。等价性：lower-bound
+ * 插入与稳定全量排序（新条目在等键末位）结果一致——乱序注入回归见单测。
+ */
+export function insertSortedGroupEntry(
+  entries: GroupTimelineEntry[],
+  entry: GroupTimelineEntry,
+): GroupTimelineEntry[] {
+  const last = entries[entries.length - 1];
+  if (last === undefined || compareTimelineEntries(last, entry) <= 0) {
+    return [...entries, entry];
+  }
+  let lo = 0;
+  let hi = entries.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (compareTimelineEntries(entries[mid]!, entry) < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  return [...entries.slice(0, lo), entry, ...entries.slice(lo)];
+}
+
 /** 回放日志行 → 时间线条目（null=不进群时间线：工具/思考/撤回令箭/系统行）。 */
 export function entryFromReplayLog(
   log: GroupReplayLogEntry,
@@ -504,7 +530,9 @@ export function applyGroupTimelineEvent(
         ),
     );
   }
-  return sortGroupTimeline([...base, entry]);
+  // ql-20260904-002：增量插入（base 按不变式有序——filter 保持原序）替代
+  // 全量 sortGroupTimeline 重排，与回放排序结果等价（见该函数注释/单测）。
+  return insertSortedGroupEntry(base, entry);
 }
 
 /** 回放日志批量归并（挂载回灌：逐行 entryFromReplayLog + 去重 + 统一排序）。 */
@@ -1255,10 +1283,15 @@ export function GroupChatPanel({
     newestEntryTsRef.current =
       entries.length > 0 ? entries[entries.length - 1]!.timestamp : null;
   }, [entries]);
-  /** 离开底部期间到达的新消息数（0 时按钮只显示「回到底部」）。 */
-  const newCount = leftBottomTs
-    ? entries.reduce((n, e) => (e.timestamp > leftBottomTs ? n + 1 : n), 0)
-    : 0;
+  /** 离开底部期间到达的新消息数（0 时按钮只显示「回到底部」）。
+   *  ql-20260904-002：useMemo——原每次渲染全量 reduce（流式期间每事件重算）。 */
+  const newCount = useMemo(
+    () =>
+      leftBottomTs
+        ? entries.reduce((n, e) => (e.timestamp > leftBottomTs ? n + 1 : n), 0)
+        : 0,
+    [entries, leftBottomTs],
+  );
   const handleTimelineScroll = useCallback(() => {
     const el = timelineRef.current;
     if (!el) return;

@@ -58,12 +58,14 @@ import {
   buildTimelineFromReplay,
   containsMentionAll,
   entryFromReplayLog,
+  insertSortedGroupEntry,
   parseReplySnapshot,
   pruneTypingIndicators,
   quoteHeadOf,
   removeReplyingMembers,
   sortGroupTimeline,
   type GroupReplyingMember,
+  type GroupTimelineEntry,
   type GroupTypingIndicator,
 } from "@/components/group-chat/group-chat-panel";
 import type {
@@ -2563,5 +2565,64 @@ describe("群草稿持久化（ql-20260903-022）", () => {
     const input3 = screen.getByLabelText("群消息输入框");
     expect((input3 as HTMLTextAreaElement).value).toBe("");
     third.unmount();
+  });
+});
+
+// ── ql-20260904-002：时间线增量插入与全量排序等价 ───────────────────────────
+
+describe("insertSortedGroupEntry（ql-20260904-002）", () => {
+  it("乱序注入与全量排序结果逐项一致（含同拍 id 定序与末尾快路径）", () => {
+    const mk = (id: string, ts: string) =>
+      ({
+        kind: "user",
+        id,
+        timestamp: ts,
+        senderName: "甲",
+        senderUserId: null,
+        content: `c-${id}`,
+        isSelf: false,
+        attachments: null,
+        replyTo: null,
+      }) as const;
+    const items = [
+      mk("a", "2026-09-04T10:00:03Z"),
+      mk("b", "2026-09-04T10:00:01Z"),
+      mk("c", "2026-09-04T10:00:02Z"),
+      mk("d", "2026-09-04T10:00:00Z"),
+      mk("e", "2026-09-04T10:00:02.5Z"),
+      mk("f", "2026-09-04T10:00:04Z"), // 末尾快路径
+      mk("g", "2026-09-04T10:00:02Z"), // 与 c 同拍 → id 定序 c < g
+    ];
+    // 乱序注入（流式乱序到达语义）。
+    let acc: GroupTimelineEntry[] = [];
+    for (const it of items) acc = insertSortedGroupEntry(acc, it);
+    // 全量排序基准（新条目等键排末位的稳定语义）。
+    const baseline = sortGroupTimeline(items);
+    expect(acc.map((e) => e.id)).toEqual(baseline.map((e) => e.id));
+    expect(acc.map((e) => e.id)).toEqual(["d", "b", "c", "g", "e", "a", "f"]);
+  });
+
+  it("applyGroupTimelineEvent 乱序注入仍与回放同一时间轴（端到端等价锚）", () => {
+    // 前提：entries 按不变式已有序（l0 < l1）。
+    const entries = [
+      { kind: "user", id: "l0", timestamp: "2026-09-04T10:00:01Z", senderName: "乙", senderUserId: null, content: "一", isSelf: false, attachments: null, replyTo: null },
+      { kind: "user", id: "l1", timestamp: "2026-09-04T10:00:02Z", senderName: "甲", senderUserId: null, content: "二", isSelf: false, attachments: null, replyTo: null },
+    ] as GroupTimelineEntry[];
+    const late = {
+      type: "entry",
+      entry: {
+        kind: "user",
+        id: "l2",
+        timestamp: "2026-09-04T10:00:01.5Z",
+        senderName: "丙",
+        senderUserId: null,
+        content: "插中间",
+        isSelf: false,
+        attachments: null,
+        replyTo: null,
+      },
+    } as const;
+    const out = applyGroupTimelineEvent(entries, new Set(), late);
+    expect(out.map((e) => e.id)).toEqual(["l0", "l2", "l1"]);
   });
 });

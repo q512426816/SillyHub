@@ -391,3 +391,19 @@
 根因：ql-025 已让未变 turn 引用稳定，但行 JSX 仍内联在 map 里——React 依旧逐行重渲染（JSX 重建 + 包装节点），段级/markdown memo 之外仍有整行开销；行级 memo 是渲染热路径三件套的最后一件
 方案：TurnRow = memo(...) 行组件抽取（脚本原文搬运）；page/dialog 内联 onResend/onSwitchProvider 提升 useCallback（memo 生效前提）；markdown 渲染计数回归用例守护（delta 只 +1）
 结果：turn-timeline-scroll 8 用例全绿（新增 memo 计数用例 2→3→4）+ dialog-minimize/variant/history-race/pre-session/stream-done 45 绿；tsc 0 错；未部署
+
+## ql-20260904-002-401d | 2026-09-04 02:50:57 | 群聊时间线流式排序增量化——SSE 事件二分插入替代全量重排
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/group-chat/group-chat-panel.tsx（insertSortedGroupEntry + 事件应用替换 + newCount memo）
+- frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx（等价性 2 用例）
+需求：群聊时间线流式排序增量化——SSE 事件二分插入替代全量重排
+根因：applyGroupTimelineEvent 每条实时事件 sortGroupTimeline([...base, entry]) 全量复制+重排序（O(n log n)/事件），翻页加载后条目上千时流式期间滚动掉帧、打字指示追加变卡；buildTimelineFromReplay 逐行同路径 ≈200 次全量 sort
+方案：insertSortedGroupEntry 二分插入（末尾 append 快路径——直播/回放日志本就时序时零比较）；事件应用替换调用；newCount reduce 改 useMemo；等价性由乱序注入 vs 稳定全量排序的单测锚定
+结果：group-chat-panel+member-panel 98 用例全绿（新增等价性 2 例）；tsc 0 错；未部署
+
+## ql-20260904-003-8e4a | 2026-09-04 02:53:43 | 修复 _inject_into_session 派发失败收链 _row 未绑定 UnboundLocalError（de664fb69 引入，24h 审计 H1）
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/daemon/session/service.py
