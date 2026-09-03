@@ -1177,6 +1177,83 @@ class TestEndGroupChain:
         group_session2 = await db_session.get(AgentSession, group_id)
         assert group_session2 is not None and group_session2.status == "ended"
 
+    async def test_end_group_shadow_unexpected_error_no_half_dead(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ql-20260903-020：影子 end 意外异常（非 AppError）不再 500 留半死群。
+
+        群终态照常落库；end 失败的成员不伪造 shadow_status='ended'（影子实际
+        未终止，留 sweep 收敛）；其余成员影子照常终止。
+        """
+        import app.modules.daemon.group.service as group_service_module
+
+        orig_end = group_service_module.SessionService.end_session
+        calls = {"n": 0}
+
+        async def flaky_end(self: object, *args: object, **kwargs: object):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("db glitch")
+            return await orig_end(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(group_service_module.SessionService, "end_session", flaky_end)
+
+        env = await _make_env(db_session, owner_name="eg2-owner")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[
+                _agent_config(env.runtime.id, name="小码"),
+                _agent_config(env.runtime.id, name="小助"),
+            ],
+        )
+        group_id = uuid.UUID(data["id"])
+        agent_members = [m for m in data["members"] if m["member_type"] == "agent"]
+        shadow_ids: dict[str, uuid.UUID] = {}
+        for m in agent_members:
+            row = await _get_member_row(db_session, group_id=group_id, member_id=uuid.UUID(m["id"]))
+            assert row is not None
+            shadow, _lease = await _seed_shadow_session(
+                db_session,
+                member=row,
+                owner_user_id=env.owner.id,
+                runtime_id=env.runtime.id,
+            )
+            shadow_ids[m["id"]] = shadow.id
+        await db_session.reset()
+
+        resp = await client.post(
+            f"/api/daemon/group-chats/{data['id']}/end", headers=_headers(env.owner_token)
+        )
+        assert resp.status_code == 200, resp.text
+        assert calls["n"] == 2  # 第一个成员失败后第二个照常 end
+
+        await db_session.reset()
+        # 群终态照常落库（不再半死）。
+        group_session = await db_session.get(AgentSession, group_id)
+        assert group_session is not None and group_session.status == "ended"
+        group_row = await db_session.get(AgentGroupChat, group_id)
+        assert group_row is not None and group_row.ended_at is not None
+        # 恰好一个成员 end 失败：影子未终止 + shadow_status 保持 active；
+        # 另一个成员影子 ended + shadow_status='ended'。
+        statuses = []
+        for m in agent_members:
+            row = await _get_member_row(db_session, group_id=group_id, member_id=uuid.UUID(m["id"]))
+            assert row is not None
+            statuses.append(row.shadow_status)
+            shadow_row = await db_session.get(AgentSession, shadow_ids[m["id"]])
+            assert shadow_row is not None
+            if row.shadow_status == "ended":
+                assert shadow_row.status == "ended"
+            else:
+                assert row.shadow_status == "active"
+                assert shadow_row.status == "active"
+        assert sorted(statuses) == ["active", "ended"]
+
     async def test_end_group_publishes_session_ended(
         self,
         client: AsyncClient,

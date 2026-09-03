@@ -2022,18 +2022,26 @@ class GroupChatService:
         *,
         owner_user_id: uuid.UUID,
         reason: str,
-    ) -> None:
+    ) -> bool:
         """end 成员影子会话 + 清理影子队列 pending 行（design §8）。
 
-        本卡（task-02）影子会话尚未存在（task-03 懒建）：``shadow_session_id``
-        为空直接跳过（幂等）；非空则先删影子队列 pending 行（design §8
-        group.member.removed「防终态后静默丢弃」——先删保证 end 链异常时队列
-        也不残留），再走既有 ``end_session`` 链（user_id=群主，影子 user_id
-        同源——服务身份路径先例）。end 失败 best-effort 降级（warning +
-        继续，解散/移除不被单个影子的不变式异常阻断）。
+        ``shadow_session_id`` 为空直接跳过（幂等，视为成功）；非空则先删影子
+        队列 pending 行（design §8 group.member.removed「防终态后静默丢弃」——
+        先删保证 end 链异常时队列也不残留），再走既有 ``end_session`` 链
+        （user_id=群主，影子 user_id 同源——服务身份路径先例）。
+
+        ql-20260903-020：end 失败 best-effort 降级且**扩大到意外异常**——原实现
+        只捕 AppError，DB 抖动等非 AppError 会带着「此前成员影子已逐个 commit」
+        的半途状态把整个解散请求打 500，留下 ended_at 未写的半死群（群还活着、
+        成员影子已终止）。意外异常 rollback 复位事务态后继续（后续成员/群收口
+        仍可写库），返回 False 由调用方决定 shadow_status 口径。
+
+        Returns:
+            True = 影子存在且已终止；False = 无影子（无事发生）或 end 尝试失败
+            （已记日志）。end_group 据此只给真终止的成员置 shadow_status='ended'。
         """
         if member.shadow_session_id is None:
-            return
+            return False
         shadow_session_id = member.shadow_session_id
         await self._session.execute(
             delete(AgentSessionQueuedMessage).where(
@@ -2056,6 +2064,21 @@ class GroupChatService:
                 shadow_session_id=str(shadow_session_id),
                 code=exc.code,
             )
+            return False
+        except Exception:
+            # ql-20260903-020：意外异常同样 best-effort（见 docstring）——rollback
+            # 复位事务态，日志带栈定位，不阻断解散/移除收口。
+            await self._session.rollback()
+            log.warning(
+                "group_member_shadow_end_unexpected_error",
+                group_id=str(member.group_id),
+                member_id=str(member.id),
+                shadow_session_id=str(shadow_session_id),
+                reason=reason,
+                exc_info=True,
+            )
+            return False
+        return True
 
     # ── 建群 / 列表 / 详情 / 改设置 / 解散 ────────────────────────────────────
 
@@ -2506,21 +2529,33 @@ class GroupChatService:
         pending 行删除）→ 群会话置 ended（无 lease，直接 ORM 收口）→ 群行
         ended_at + agent 成员 shadow_status='ended' → 群频道广播
         ``session_ended``（群 SSE 只认该事件收流，P1 修复）。
+
+        ql-20260903-020：①取群改 ``_get_group_locked``（FOR UPDATE）——与
+        send/update/delete 并发时不再交错双写（照归档/删除先例）；②影子 end
+        失败（AppError/意外异常均 best-effort）的成员**不**置
+        shadow_status='ended'（防状态口径漂移——影子实际未终止，留待 sweep
+        收敛），群终态照常落库（不再留半死群）。
         """
-        group = await self._get_group(group_id)
+        group = await self._get_group_locked(group_id)
         await self._require_group_member(group, user)
         await self._require_group_owner(group, user)
         if group.ended_at is not None:
-            # 幂等：重复解散直接回读。
+            # 幂等：重复解散直接回读（rollback 释放 FOR UPDATE 行锁后重取，
+            # 防 ORM expire 属性访问触发同步惰性加载）。
+            await self._session.rollback()
+            group = await self._get_group(group_id)
             members = await self._list_members(group.id)
             return self._to_read(group, members)
 
         active_members = await self._list_active_member_rows(group.id)
+        ended_member_ids: set[uuid.UUID] = set()
         for member in active_members:
             if member.member_type == "agent":
-                await self._end_member_shadow(
+                shadow_ended = await self._end_member_shadow(
                     member, owner_user_id=group.created_by, reason="group_ended"
                 )
+                if shadow_ended:
+                    ended_member_ids.add(member.id)
 
         now = datetime.now(UTC)
         group_session = await self._session.get(AgentSession, group.session_id)
@@ -2532,9 +2567,11 @@ class GroupChatService:
         group.ended_at = now
         self._session.add(group)
         for member in active_members:
-            if member.member_type == "agent" and member.shadow_session_id is not None:
+            if member.member_type == "agent" and member.id in ended_member_ids:
                 member.shadow_status = "ended"  # design §8 group.ended
                 self._session.add(member)
+            # 影子 end 失败的成员保持原 shadow_status（影子实际未终止，
+            # 留待 sweep 按 runtime 离线/超时收敛），不伪造 ended 口径。
         await self._session.commit()
         await self._session.refresh(group)
         members = await self._list_members(group.id)

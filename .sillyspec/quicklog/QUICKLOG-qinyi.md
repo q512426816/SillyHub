@@ -300,3 +300,16 @@
 根因：删除会话 allSettled 结果整体丢弃（连成功提示都没有，全失败时会话原地复现零解释）；群回放失败被吞后与真空群同显「还没有消息」（有几百条历史的群网络抖动时像记录丢了）；群 SSE 断连完全静默（时间线冻结不报错也不更新，单聊有重连横幅群聊没有）
 方案：门户+浮层宿主 onDeleteSessions 返回失败个数（照归档口径），面板删除按结果 toast；群面板 replayFailed 状态区分空态并给「点击重试」（驱动回放+SSE 重建）；onStatusChange 接连接状态横幅（reconnecting 常驻/reconnected 2s 自动消失，样式对齐单聊）
 结果：session-list-panel 81 用例全绿（新增删除结果 toast 用例）+ group-chat-panel/member-panel/floating-host 164 全绿；typecheck 0 错；未部署
+
+## ql-20260903-020-fdf4 | 2026-09-03 22:17:36 | end_group 解散容错分层——意外异常不再留半死群
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/group/service.py（_end_member_shadow 容错分层 + end_group 行锁取群）
+- backend/app/modules/daemon/tests/test_group_chat_management.py（新增意外异常用例）
+- .sillyspec/docs/backend/modules/daemon.md（人工备注）
+需求：end_group 解散容错分层——意外异常不再留半死群
+根因：_end_member_shadow 只捕 AppError：DB 抖动等非 AppError 会带着此前成员影子已逐个 commit 的半途状态把整个解散请求打 500，群行 ended_at 未写、部分成员影子已终止——群在列表里活着但成员全没反应
+方案：异常捕获扩大到 Exception（rollback 复位事务态+栈日志+继续下一成员）并返回 bool；end_group 取群改 _get_group_locked（FOR UPDATE 防与发消息/改设置并发交错）；shadow_status=ended 只写真终止的成员（失败成员保持原状态留 sweep 收敛）
+结果：test_group_chat_management 35 用例全绿（新增意外异常用例：群终态照常落库+失败成员不伪造 ended+其余成员照常终止）；ruff 0；mypy 0；未部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_group_chat_management.py
