@@ -15,7 +15,8 @@
 - 触发透传（复用注入）：``inject_session_as_service`` 附件通道——user_input
   标记行（单聊 D-3 ``[附件:id|kind|name]``）+ SESSION_INJECT attachments +
   **归属覆盖**（附件上传者=普通群成员发送者≠影子属主群主，按属主校验会误拒）；
-- 引擎门控：非 Claude 成员 + 附件 → 400（单聊 D-6 同口径；消息已落时间线）。
+- 引擎门控：非 Claude 成员 + 附件 → 部分失败收集（quick 群 P2）：200 +
+  ``triggered[].error`` 中文摘要 + 群频道系统行（消息已落时间线；不再整条 400）。
 
 夹具范式镜像 ``test_group_mention_pipeline.py``（in-memory SQLite + httpx
 ASGI client + 手签 JWT + ws_hub/readiness/redis/storage mock）；GLMConfig.
@@ -706,7 +707,7 @@ class TestGroupAttachmentTrigger:
         assert payload["attachments"][0]["id"] == str(att.id)
         assert payload["attachments"][0]["deliver"] == "disk"
 
-    async def test_non_claude_member_rejects_attachments_400(
+    async def test_non_claude_member_rejects_attachments_partial_failure(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
@@ -714,7 +715,9 @@ class TestGroupAttachmentTrigger:
         readiness_ok,
         mocked_group_redis,
     ) -> None:
-        """codex 成员 + 附件 → 400（引擎门控下沉触发侧；消息已落时间线）。"""
+        """codex 成员 + 附件 → 部分失败收集（quick 群 P2）：200 + 该成员
+        ``triggered`` 项带 ``error`` 中文摘要 + 群频道系统行；消息已落时间线
+        （附件已绑定群会话）——不再整条 400。"""
         env = await _make_env(db_session)
         data = await _create_group(
             client,
@@ -726,8 +729,24 @@ class TestGroupAttachmentTrigger:
         att = await _seed_attachment(db_session, env.owner.id)
 
         resp = await _send_message(client, env.owner_token, group_id, "@小柯 看附件", [att.id])
-        assert resp.status_code == 400, resp.text
-        assert "不支持附件" in resp.json()["message"]
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["mentioned_member_ids"], "@ 命中成员"
+        assert len(body["triggered"]) == 1
+        failed = body["triggered"][0]
+        assert failed["member_name"] == "小柯"
+        assert failed["run_id"] is None
+        assert failed["shadow_session_id"] is None, "懒建前引擎门控即拒，无影子"
+        assert "不支持附件" in failed["error"]
+
+        # 群频道系统行（触发失败提示，照限频提示先例）。
+        system_lines = [
+            json.loads(call.args[1])
+            for call in mocked_group_redis.publish.call_args_list
+            if call.args[0] == f"agent_session:{group_id}"
+            and json.loads(call.args[1]).get("channel") == "system"
+        ]
+        assert any("「小柯」触发失败" in line["content"] for line in system_lines)
 
         # 失败语义（design §4.1）：载体消息已在时间线（附件已绑定群会话）。
         group = await db_session.get(AgentGroupChat, group_id)

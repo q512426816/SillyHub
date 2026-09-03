@@ -46,6 +46,7 @@ import {
   within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Modal } from "antd";
 
 import {
   GroupChatPanel,
@@ -55,6 +56,7 @@ import {
   applyReplyingEvent,
   applyTypingEvent,
   buildTimelineFromReplay,
+  containsMentionAll,
   entryFromReplayLog,
   pruneTypingIndicators,
   removeReplyingMembers,
@@ -71,12 +73,21 @@ const mocks = vi.hoisted(() => ({
   listGroupChats: vi.fn(),
   sendGroupMessage: vi.fn(),
   sendGroupTyping: vi.fn(),
+  // quick 群 P2 置顶：PUT/DELETE /pinned mock 断言。
+  pinGroupMessage: vi.fn(),
+  unpinGroupMessage: vi.fn(),
   machinesHook: vi.fn(),
   listProviders: vi.fn(),
   profilesHook: vi.fn(),
   listWorkspaces: vi.fn(),
   uploadSessionAttachment: vi.fn(),
   removeSessionAttachment: vi.fn(),
+  // quick 群 P2 触发失败展示：notify warning 断言面（共享 spy）。
+  notify: {
+    success: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/daemon", async (importOriginal) => {
@@ -88,6 +99,8 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
     listGroupChats: (...args: unknown[]) => mocks.listGroupChats(...args),
     sendGroupMessage: (...args: unknown[]) => mocks.sendGroupMessage(...args),
     sendGroupTyping: (...args: unknown[]) => mocks.sendGroupTyping(...args),
+    pinGroupMessage: (...args: unknown[]) => mocks.pinGroupMessage(...args),
+    unpinGroupMessage: (...args: unknown[]) => mocks.unpinGroupMessage(...args),
     // streamGroupChat / getAgentSessionLogs / maxLogTimestamp / PROVIDER_META
     // 保真——真实 SSE 消费循环经路由 fetch 驱动。
   };
@@ -134,7 +147,9 @@ vi.mock("@/lib/workspaces", () => ({
 vi.mock("@/lib/errors", () => ({
   errMessage: (err: unknown) =>
     err instanceof Error ? err.message : "操作失败",
-  useNotify: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
+  // 共享 spy（quick 群 P2 触发失败：断言 warning 逐条透传；各用例经 clearMocks
+  // 隔离调用记录）。
+  useNotify: () => mocks.notify,
 }));
 
 // quick 群聊 Markdown 渲染：MarkdownText 是 next/dynamic ssr:false 组件，
@@ -388,6 +403,15 @@ beforeEach(() => {
     triggered: [],
   });
   mocks.sendGroupTyping.mockResolvedValue(undefined);
+  // quick 群 P2 置顶：默认成功（响应形态仅通知消费，不进断言）。
+  mocks.pinGroupMessage.mockResolvedValue({
+    log_id: "l-2",
+    pinned_by: "u-me",
+    pinned_at: "2026-09-01T07:00:00Z",
+    content: "@小码 帮我定位一下这个白屏问题",
+    member_name: "鲸落",
+  });
+  mocks.unpinGroupMessage.mockResolvedValue(undefined);
   mocks.machinesHook.mockReturnValue({
     items: [],
     sharedToMe: [],
@@ -1610,3 +1634,252 @@ describe("GroupChatPanel Markdown 渲染与已读记忆（quick）", () => {
     });
   });
 });
+
+/* ── 8. quick 群 P2：@全体二次确认 / 置顶 / 触发失败展示 ─────────────────── */
+
+/** Modal.confirm spy（member-panel.test 同款）：模拟点「确认」（调 onOk）。 */
+function spyConfirmOk() {
+  return vi.spyOn(Modal, "confirm").mockImplementation((opts) => {
+    opts.onOk?.(undefined as never);
+    return { destroy: () => {} } as never;
+  });
+}
+
+/** Modal.confirm spy：仅捕获不确认（点「取消」）。 */
+function spyConfirmCancel() {
+  return vi.spyOn(Modal, "confirm").mockImplementation((opts) => {
+    opts.onCancel?.(undefined as never);
+    return { destroy: () => {} } as never;
+  });
+}
+
+describe("containsMentionAll（@全体 判定纯函数，quick 群 P2）", () => {
+  it("@全体/@all（含全角 ＠）命中；@词缀/无 @ 不命中", () => {
+    expect(containsMentionAll("@全体 开会")).toBe(true);
+    expect(containsMentionAll("@all go")).toBe(true);
+    expect(containsMentionAll("＠全体")).toBe(true);
+    expect(containsMentionAll("先说明 @全体")).toBe(true);
+    // token 口径：@ 后首个非空白词须恰为 全体/all。
+    expect(containsMentionAll("@全体成员")).toBe(false);
+    expect(containsMentionAll("全体")).toBe(false);
+    expect(containsMentionAll("@小码")).toBe(false);
+  });
+});
+
+describe("GroupChatPanel @全体 二次确认（quick 群 P2）", () => {
+  it("两 agent 群含 @全体：Modal.confirm 弹出；点「取消」不发送、草稿保留", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+    const confirmSpy = spyConfirmCancel();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "@全体 一起看下白屏" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy.mock.calls[0]![0]).toMatchObject({
+      title: "发送 @全体 消息？",
+      content: expect.stringContaining("将同时触发 2 个 Agent 成员"),
+      okText: "发送",
+      cancelText: "取消",
+    });
+    // 取消：不发消息，草稿保留。
+    expect(mocks.sendGroupMessage).not.toHaveBeenCalled();
+    expect((input as HTMLTextAreaElement).value).toBe("@全体 一起看下白屏");
+    confirmSpy.mockRestore();
+  });
+
+  it("点「发送」确认 → 才调 sendGroupMessage（参数=原文）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+    const confirmSpy = spyConfirmOk();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "@all 巡检一下" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(mocks.sendGroupMessage).toHaveBeenCalledWith(
+        "g-1",
+        "@all 巡检一下",
+        undefined,
+      ),
+    );
+    confirmSpy.mockRestore();
+  });
+
+  it("单 agent 群含 @全体：无并发面，直发不弹确认", async () => {
+    const detail = makeGroupDetail();
+    detail.members = (detail.members as Record<string, unknown>[]).filter(
+      (m) => m.id !== "mem-2",
+    );
+    mocks.getGroupChat.mockResolvedValue(detail);
+    mocks.listGroupChats.mockResolvedValue([detail]);
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+    const confirmSpy = spyConfirmCancel();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "@全体 看下" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(mocks.sendGroupMessage).toHaveBeenCalledWith("g-1", "@全体 看下", undefined),
+    );
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+});
+
+describe("GroupChatPanel 置顶（quick 群 P2）", () => {
+  it("群主可见气泡图钉：点击 → PUT /pinned（log_id=该行 id）", async () => {
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+
+    const pinBtn = document.querySelector<HTMLElement>(
+      "[data-testid='group-msg-pin'][data-log-id='l-2']",
+    );
+    expect(pinBtn).toBeTruthy();
+    fireEvent.click(pinBtn!);
+    await waitFor(() =>
+      expect(mocks.pinGroupMessage).toHaveBeenCalledWith("g-1", { log_id: "l-2" }),
+    );
+  });
+
+  it("置顶横幅：群读体 pinned 快照渲染（成员名+内容+时间）+ 已置顶行浅 brand 高亮；「取消置顶」→ DELETE /pinned", async () => {
+    const detail = {
+      ...makeGroupDetail(),
+      pinned: {
+        log_id: "l-2",
+        pinned_by: "u-me",
+        pinned_at: "2026-09-01T07:00:00Z",
+        content: "@小码 帮我定位一下这个白屏问题",
+        member_name: "鲸落",
+      },
+    };
+    mocks.getGroupChat.mockResolvedValue(detail);
+    mocks.listGroupChats.mockResolvedValue([detail]);
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+
+    const banner = await screen.findByTestId("group-pinned-banner");
+    expect(banner.textContent).toContain("鲸落");
+    expect(banner.textContent).toContain("@小码 帮我定位一下这个白屏问题");
+    // 已置顶行（l-2）浅 brand 底高亮。
+    const pinnedRow = await waitFor(() => {
+      const row = document.querySelector<HTMLElement>("[data-log-id='l-2']");
+      expect(row?.className).toContain("bg-brand-50");
+      return row!;
+    });
+    expect(pinnedRow).toBeTruthy();
+    // 未置顶行无高亮。
+    const plainRow = document.querySelector<HTMLElement>("[data-log-id='l-1']");
+    expect(plainRow?.className).not.toContain("bg-brand-50");
+
+    // 群主取消置顶 → DELETE /pinned。
+    fireEvent.click(screen.getByTestId("group-pinned-unpin"));
+    await waitFor(() => expect(mocks.unpinGroupMessage).toHaveBeenCalledWith("g-1"));
+  });
+
+  it("非群主：无图钉按钮、横幅无「取消置顶」", async () => {
+    const detail = {
+      ...makeGroupDetail(),
+      created_by: "u-other",
+      pinned: {
+        log_id: "l-2",
+        pinned_by: "u-other",
+        pinned_at: "2026-09-01T07:00:00Z",
+        content: "@小码 帮我定位一下这个白屏问题",
+        member_name: "鲸落",
+      },
+    };
+    mocks.getGroupChat.mockResolvedValue(detail);
+    mocks.listGroupChats.mockResolvedValue([detail]);
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+    expect(screen.queryAllByTestId("group-msg-pin")).toHaveLength(0);
+    // 横幅仍全员可见（快照展示），但无取消入口。
+    expect(await screen.findByTestId("group-pinned-banner")).toBeTruthy();
+    expect(screen.queryByTestId("group-pinned-unpin")).toBeNull();
+  });
+});
+
+describe("GroupChatPanel 触发失败展示（quick 群 P2）", () => {
+  it("响应 triggered[].error → 逐条 warning「{成员名} 未能触发：{error}」；成功项不弹", async () => {
+    harness.logsJson = [];
+    mocks.sendGroupMessage.mockResolvedValue({
+      carrier_run_id: "r-c",
+      log_id: "l-x",
+      mention_all: true,
+      triggered: [
+        {
+          member_id: "mem-1",
+          member_name: "小码",
+          shadow_session_id: null,
+          run_id: null,
+          queued: false,
+          mid_turn: false,
+          error: "机器离线，无法触发",
+        },
+        {
+          member_id: "mem-2",
+          member_name: "小测",
+          shadow_session_id: "shadow-2",
+          run_id: "run-2",
+          queued: false,
+          mid_turn: false,
+          error: null,
+        },
+      ],
+    });
+    renderPanel();
+    await waitForStreamWired();
+
+    const input = screen.getByLabelText("群消息输入框");
+    // 无 @全体（避开二次确认路径）——只验证触发失败 toast。
+    fireEvent.change(input, { target: { value: "看下这个白屏" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(mocks.notify.warning).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.notify.warning).toHaveBeenCalledWith(
+      "小码 未能触发：机器离线，无法触发",
+    );
+  });
+
+  it("全部成功（triggered 无 error）→ 不弹任何提示", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "看下这个白屏" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(mocks.sendGroupMessage).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.notify.warning).not.toHaveBeenCalled();
+  });
+});
+

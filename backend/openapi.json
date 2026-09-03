@@ -11544,6 +11544,97 @@
         }
       }
     },
+    "/api/daemon/group-chats/{group_id}/pinned": {
+      "put": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Pin Group Message",
+        "description": "置顶一条群消息（群主/workspace admin；一次一条，新置顶覆盖旧的）。\n\n快照（内容/发送者身份/置顶者/时刻）落 ``settings_json.pinned``（复用\nsettings_json 零迁移）；目标 log 须属本群时间线（跨群/不存在 404）；成功\n后群频道发系统行「{操作者} 置顶了一条消息」。",
+        "operationId": "pin_group_message_api_daemon_group_chats__group_id__pinned_put",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPinnedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupChatPinnedRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Unpin Group Message",
+        "description": "取消置顶（群主/workspace admin；无置顶时幂等 204，不发系统行）。",
+        "operationId": "unpin_group_message_api_daemon_group_chats__group_id__pinned_delete",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/version": {
       "get": {
         "tags": [
@@ -40225,6 +40316,18 @@
             "type": "array",
             "title": "Members"
           },
+          "pinned": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
+          },
           "warnings": {
             "items": {
               "type": "string"
@@ -40340,6 +40443,16 @@
             "type": "array",
             "title": "Members"
           },
+          "pinned": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupChatPinnedRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "online_member_ids": {
             "items": {
               "type": "string",
@@ -40362,7 +40475,7 @@
           "created_at"
         ],
         "title": "GroupChatDetailRead",
-        "description": "群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。\n\n``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照\n``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表\n项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体\n（多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）。"
+        "description": "群详情读体（task-06，design §5.4：成员面板在线绿点数据源）。\n\n``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照\n``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表\n项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体\n（多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）；``pinned``\n置顶快照（quick 群 P2，typed 收窄同列表项）。"
       },
       "GroupChatListItemRead": {
         "properties": {
@@ -40457,6 +40570,16 @@
             "type": "array",
             "title": "Members"
           },
+          "pinned": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupChatPinnedRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "online_member_ids": {
             "items": {
               "type": "string",
@@ -40504,7 +40627,44 @@
           "created_at"
         ],
         "title": "GroupChatListItemRead",
-        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。"
+        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。\n\n``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.\npinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed\n``GroupChatPinnedRead``；无置顶为 None）。"
+      },
+      "GroupChatPinnedRead": {
+        "properties": {
+          "log_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Log Id"
+          },
+          "pinned_by": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Pinned By"
+          },
+          "pinned_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Pinned At"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "member_name": {
+            "type": "string",
+            "title": "Member Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "log_id",
+          "pinned_by",
+          "pinned_at",
+          "content",
+          "member_name"
+        ],
+        "title": "GroupChatPinnedRead",
+        "description": "置顶消息快照读体（quick 群 P2，``settings_json.pinned`` 透出）。\n\n``log_id``：群时间线 ``AgentRunLog`` 行 id（前端可定位原消息气泡）；\n``pinned_by``/``pinned_at``：置顶操作者与时刻；``content``/``member_name``\n为置顶时的消息内容与发送者身份快照（发送者后续改名不影响已置顶快照）。"
       },
       "GroupChatRead": {
         "properties": {
@@ -40598,6 +40758,18 @@
             },
             "type": "array",
             "title": "Members"
+          },
+          "pinned": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
           }
         },
         "type": "object",
@@ -40677,7 +40849,7 @@
               }
             ],
             "title": "Settings Json",
-            "description": "群扩展设置；None=不改。当前支持 guardrails 子键（互@护栏群级覆盖）"
+            "description": "群扩展设置；None=不改。支持 guardrails 子键（互@护栏群级覆盖）与 typing_preview 顶层键（typing 草稿预览开关，默认关）"
           }
         },
         "type": "object",
@@ -41442,8 +41614,15 @@
             "title": "Member Name"
           },
           "shadow_session_id": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Shadow Session Id"
           },
           "run_id": {
@@ -41467,16 +41646,26 @@
             "type": "boolean",
             "title": "Mid Turn",
             "default": false
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           }
         },
         "type": "object",
         "required": [
           "member_id",
-          "member_name",
-          "shadow_session_id"
+          "member_name"
         ],
         "title": "GroupMemberTriggerRead",
-        "description": "单成员触发结果（design §8 member.injected / member.mentioned）。"
+        "description": "单成员触发结果（design §8 member.injected / member.mentioned）。\n\nquick 群 P2（2026-09-02）部分失败收集：触发失败的成员项带 ``error``\n（中文原因摘要，如「引擎不支持附件」「机器会话数已达上限」）——此时\n``run_id`` 为 None、``shadow_session_id`` 可能为 None（影子未建即失败），\n前端按 ``error`` 非空判定失败并展示；成功项 ``error`` 恒 None。"
       },
       "GroupMemberUpdate": {
         "properties": {
@@ -41689,6 +41878,21 @@
         "type": "object",
         "title": "GroupMessageSendRequest",
         "description": "``POST /group-chats/{id}/messages`` 写体（design §4.1；FR-05 补遗扩附件）。\n\nschema.py 不在本卡 allowed_paths——请求体随 router 落地（service 响应体在\ngroup/service.py，``GroupChatListItemRead`` 本文件先例）。\n\n附件口径照单聊 ``SessionInjectRequest``（2026-08-20-session-multimodal-\nattachments）：``attachment_ids`` 为上传端点（POST /daemon/session-\nattachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时\n``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归\nservice，DTO 层总量兜底）。"
+      },
+      "GroupPinnedRequest": {
+        "properties": {
+          "log_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Log Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "log_id"
+        ],
+        "title": "GroupPinnedRequest",
+        "description": "``PUT /group-chats/{id}/pinned`` 写体（quick 群 P2 置顶消息）。\n\n``log_id``：群时间线消息行 id（user_input / 投影行均可置顶；service 校验\n属本群时间线，跨群/不存在 404）。一次一条置顶——重复置顶覆盖旧的。"
       },
       "GroupTypingRequest": {
         "properties": {

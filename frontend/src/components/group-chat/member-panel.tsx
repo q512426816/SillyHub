@@ -16,6 +16,9 @@
  *
  * 结构（独立组件，由 task-08 群聊面板挂载；本卡在 sessions-portal
  * GroupChatPanelMount 占位内以右列形态先行渲染）：
+ *   - 群设置区（quick 群 P2）：输入草稿预览开关（群主可见；本地态 +
+ *     PATCH settings_json.typing_preview——群读体未透出 settings_json，
+ *     无服务端回显真值）；
  *   - Agent 成员区：六要素卡片（昵称/机器/工作区/引擎/模型/方案——config_snapshot
  *     JSON 自取键容错）+ 团队能力开关（quick 群成员团队能力：PATCH team_enabled，
  *     热切换走重建分支——确认弹窗照机器组惯例；仅 Claude 可开）+ shadow_status
@@ -61,6 +64,7 @@ import {
   PROVIDER_META,
   removeGroupMember,
   resetGroupMemberMemory,
+  updateGroupChat,
   updateGroupMember,
   type GroupChatRead,
   type GroupMemberAgentConfig,
@@ -341,6 +345,27 @@ export function MemberPanel({
     },
   });
 
+  /* ── quick 群 P2 群设置：typing 草稿预览开关（settings_json.typing_preview，
+   *    后端默认关=只显示「正在输入」）。群读体（GroupChatRead/DetailRead）未
+   *    透出 settings_json——回显无服务端真值，Switch 以本地态为准（挂载默认
+   *    关=后端默认值，切一次后以本地态为准），切换即 PATCH 局部写（settings_json
+   *    键级合并，只动 typing_preview 不触碰 guardrails），失败回滚本地态。 ── */
+  const [typingPreview, setTypingPreview] = useState(false);
+  const typingPreviewMutation = useMutation({
+    mutationFn: (next: boolean) =>
+      updateGroupChat(group.id, { settings_json: { typing_preview: next } }),
+    onMutate: (next) => {
+      setTypingPreview(next);
+    },
+    onError: (err, next) => {
+      setTypingPreview(!next);
+      notify.error(err, "设置失败，请稍后重试");
+    },
+    onSuccess: (_res, next) => {
+      notify.success(next ? "已开启输入草稿预览" : "已关闭输入草稿预览");
+    },
+  });
+
   /* ── 群聊体验对齐 quick：邀请用户（项目人员多选 → 逐个 POST members user 体；
    *    display_name 默认用户名——后端 GroupMemberUserCreate 同口径）。 ── */
   const inviteMutation = useMutation({
@@ -473,6 +498,29 @@ export function MemberPanel({
           {userMembers.length} 位用户
         </span>
       </div>
+
+      {/* ── 群设置（quick 群 P2）：输入草稿预览开关（群主可见；回显无服务端
+          真值——本地态 + PATCH settings_json.typing_preview，见 mutation 注释） ── */}
+      {isOwner && (
+        <div className="mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Switch
+              size="small"
+              checked={typingPreview}
+              loading={typingPreviewMutation.isPending}
+              onChange={(checked) => typingPreviewMutation.mutate(checked)}
+              aria-label="输入草稿预览"
+              data-testid="group-typing-preview-switch"
+            />
+            <span className="text-[11.5px] font-medium text-foreground">
+              输入草稿预览
+            </span>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+            开启后群成员可看到彼此正在输入的草稿内容；关闭时仅显示「正在输入」。
+          </p>
+        </div>
+      )}
 
       {/* ── Agent 成员区（原型 .sec-label + .agent-card） ── */}
       <div className="flex items-center justify-between px-4 pb-1 pt-2">

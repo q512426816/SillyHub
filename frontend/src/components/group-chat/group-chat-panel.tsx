@@ -49,6 +49,12 @@
  * typing 走 .sh-typing-dots）——只抄语义类不改 TurnTimeline；群特有元素
  * （@提及高亮/成员分色头像/引擎标签）融合进会话风格。
  *
+ * quick 群 P2（2026-09-02）：@全体 二次确认（含 @全体/@all 且 agent 成员 ≥2
+ * 弹 Modal.confirm——后端无拦截，前端兜底防误触多机并发）；置顶消息（顶栏下
+ * 横幅=群读体 pinned 快照；群主可在气泡右上角图钉置顶/横幅取消——PUT/DELETE
+ * /pinned，已置顶行浅 brand 底高亮）；触发失败展示（sendGroupMessage 响应
+ * triggered[].error 逐条 warning——消息本身已落时间线）。
+ *
  * 数据流关键点：
  *   - 回放身份还原：投影行 metadata.member_id/member_name（task-05 落库形态）
  *     ——2026-09-01-session-group-chat 收口：后端 /logs DTO 已暴露 metadata/
@@ -67,10 +73,10 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Image as ImageIcon, Paperclip, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileText, Image as ImageIcon, Paperclip, Pin, PinOff, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
 
-import { Drawer } from "antd";
+import { Drawer, Modal } from "antd";
 import { MemberPanel } from "@/components/group-chat/member-panel";
 import { GroupMemberAvatar } from "@/components/group-chat/group-member-avatar";
 import {
@@ -97,9 +103,11 @@ import {
   getGroupChat,
   listGroupChats,
   maxLogTimestamp,
+  pinGroupMessage,
   sendGroupMessage,
   sendGroupTyping,
   streamGroupChat,
+  unpinGroupMessage,
   type GroupChatListItemRead,
   type GroupChatStreamEnvelope,
   type GroupMessageAttachmentSummary,
@@ -419,6 +427,21 @@ export function buildTimelineFromReplay(
 
 /** 提及 token 正则（backend _MENTION_TOKEN_RE 同口径：全/半角 @ + 非空白词）。 */
 const MENTION_TOKEN_RE = /[@＠](\S+)/g;
+
+/**
+ * @全体 判定（quick 群 P2 二次确认的触发条件；后端 _mention_match 同口径）：
+ * @/＠ 后的首个非空白词恰为「全体」或「all」（``@全体x`` 不算——token 是
+ * ``全体x``）。纯函数，单测推理面。
+ */
+export function containsMentionAll(content: string): boolean {
+  MENTION_TOKEN_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = MENTION_TOKEN_RE.exec(content)) !== null) {
+    const token = match[1]!;
+    if (token === "全体" || token === "all") return true;
+  }
+  return false;
+}
 
 /**
  * @提及高亮节点（backend _mention_match 边界口径的展示侧近似）：@全体/@all
@@ -1180,7 +1203,7 @@ export function GroupChatPanel({
     }
   };
 
-  const handleSend = useCallback(async () => {
+  const performSend = useCallback(async () => {
     const content = draft.trim();
     const attachmentIds = pendingAttachments.map((a) => a.id);
     if ((!content && attachmentIds.length === 0) || sending) return;
@@ -1190,7 +1213,7 @@ export function GroupChatPanel({
     typingLastSentRef.current = 0;
     void sendGroupTyping(groupId, { typing: false }).catch(() => {});
     try {
-      await sendGroupMessage(
+      const res = await sendGroupMessage(
         groupId,
         content,
         attachmentIds.length > 0 ? attachmentIds : undefined,
@@ -1198,6 +1221,12 @@ export function GroupChatPanel({
       setDraft("");
       setPendingAttachments([]);
       setUploadError(null);
+      /* ── quick 群 P2 触发失败展示：消息恒 200 已落时间线，单成员触发失败
+       *    （附件引擎不符/机器离线/闸满等）在 triggered[].error 透传——逐条
+       *    warning 告知；全部成功不弹。 */
+      for (const t of res.triggered ?? []) {
+        if (t.error) notify.warning(`${t.member_name} 未能触发：${t.error}`);
+      }
       // 发送成功主动对账一次（未 @ 消息无成员轮次，SSE log 事件丢失时兜回显）。
       streamConnRef.current?.resync?.();
     } catch (err) {
@@ -1210,6 +1239,31 @@ export function GroupChatPanel({
       inputRef.current?.focus();
     }
   }, [draft, sending, groupId, pendingAttachments, notify, stopTypingReport]);
+
+  const handleSend = useCallback(async () => {
+    const content = draft.trim();
+    const attachmentIds = pendingAttachments.map((a) => a.id);
+    if ((!content && attachmentIds.length === 0) || sending) return;
+    /* ── quick 群 P2：@全体 二次确认（后端无拦截，前端兜底防误触多机并发）——
+     *    消息含 @全体/@all 且群内 agent 成员 ≥2 时弹 Modal.confirm，确认才发；
+     *    单 agent（无并发面）或无 @全体 直发。从简恒确认（不做"不再询问"）。 */
+    if (containsMentionAll(content)) {
+      const agentMemberCount = members.filter((m) => m.member_type === "agent").length;
+      if (agentMemberCount >= 2) {
+        Modal.confirm({
+          title: "发送 @全体 消息？",
+          content: `@全体 将同时触发 ${agentMemberCount} 个 Agent 成员（多机并发），确定发送？`,
+          okText: "发送",
+          cancelText: "取消",
+          onOk: () => {
+            void performSend();
+          },
+        });
+        return;
+      }
+    }
+    await performSend();
+  }, [draft, sending, pendingAttachments, members, performSend]);
 
   const handleInputKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     // IME 组合期不劫持（联想浮层键盘契约前置守卫）。
@@ -1242,6 +1296,36 @@ export function GroupChatPanel({
   const userCount = members.length - agentCount;
   const facepile = members.slice(0, FACEPILE_MAX);
   const facepileMore = members.length - facepile.length;
+
+  /* ── quick 群 P2 置顶：群主判定 + 置顶/取消 mutation（横幅与气泡图钉共用）。
+   *    置顶快照经群读体 pinned 字段透出——成功后 invalidate 群详情 + 群列表
+   *    前缀（横幅/高亮/列表摘要随重拉对齐）。 ── */
+  const isOwner =
+    currentUserId != null &&
+    (detail?.created_by ?? group?.created_by) === currentUserId;
+  const pinned = detail?.pinned ?? null;
+  const pinMutation = useMutation({
+    mutationFn: (logId: string) => pinGroupMessage(groupId, { log_id: logId }),
+    onSuccess: () => {
+      notify.success("已置顶该消息");
+      void qc.invalidateQueries({ queryKey: ["groupChat", groupId] });
+      void qc.invalidateQueries({ queryKey: ["groupChats"] });
+    },
+    onError: (err) => {
+      notify.error(err, "置顶失败，请稍后重试");
+    },
+  });
+  const unpinMutation = useMutation({
+    mutationFn: () => unpinGroupMessage(groupId),
+    onSuccess: () => {
+      notify.success("已取消置顶");
+      void qc.invalidateQueries({ queryKey: ["groupChat", groupId] });
+      void qc.invalidateQueries({ queryKey: ["groupChats"] });
+    },
+    onError: (err) => {
+      notify.error(err, "取消置顶失败，请稍后重试");
+    },
+  });
 
   /* ── 运行态派生（群聊运行态可见 quick 2026-09-02） ── */
   /** 有回复锚点标签的 agent 归属键（标签已挂触发消息下方，typing 指示条不重复）。 */
@@ -1441,6 +1525,40 @@ export function GroupChatPanel({
             <Users aria-hidden className="h-4 w-4 text-muted-foreground transition-colors hover:text-foreground" />
           </button>
         </header>
+        {/* 置顶横幅（quick 群 P2）：图钉 + 内容摘要一行截断 + 成员名 + 时间；
+            群主可「取消置顶」（DELETE pinned → invalidate 群详情/列表）。 */}
+        {pinned && (
+          <div
+            data-testid="group-pinned-banner"
+            className="flex flex-none items-center gap-2 border-b border-brand-200 bg-brand-50/70 px-4 py-2 dark:border-brand-500/40 dark:bg-brand-500/10"
+          >
+            <Pin
+              aria-hidden
+              className="h-3.5 w-3.5 flex-none text-brand-600 dark:text-brand-300"
+            />
+            <p className="min-w-0 flex-1 truncate text-xs text-foreground" title={pinned.content}>
+              <span className="font-semibold">{pinned.member_name}：</span>
+              {pinned.content}
+              <span className="ml-1.5 flex-none text-[10.5px] text-muted-foreground">
+                {formatTime(pinned.pinned_at)}
+              </span>
+            </p>
+            {isOwner && (
+              <button
+                type="button"
+                aria-label="取消置顶"
+                title="取消置顶"
+                data-testid="group-pinned-unpin"
+                disabled={unpinMutation.isPending}
+                onClick={() => unpinMutation.mutate()}
+                className="flex flex-none items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <PinOff aria-hidden className="h-3 w-3" />
+                取消置顶
+              </button>
+            )}
+          </div>
+        )}
         {/* 搜索输入行（打开时显示，回车执行 q 查询）。 */}
         {searchOpen && (
           <div className="flex-none border-b border-border px-4 py-2">
@@ -1551,6 +1669,10 @@ export function GroupChatPanel({
                 streamingKeys.has(agentStreamKey(entry)) &&
                 lastAgentIdByStreamKey.get(agentStreamKey(entry)) === entry.id
               }
+              canPin={isOwner && entry.kind !== "system"}
+              isPinned={pinned?.log_id === entry.id}
+              pinPending={pinMutation.isPending}
+              onPin={(logId) => pinMutation.mutate(logId)}
             />
           ))}
         </div>
@@ -1785,6 +1907,37 @@ export function GroupChatPanel({
  *     高亮等群特有元素融合进该风格；
  *   - 系统事件居中灰字胶囊（会话相邻的 muted 语义）。
  */
+/** 气泡右上角图钉小按钮（quick 群 P2：群主可见；点击置顶该消息）。 */
+function PinMessageButton({
+  logId,
+  onPin,
+  disabled,
+  className,
+}: {
+  logId: string;
+  onPin: (logId: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="置顶该消息"
+      title="置顶该消息"
+      data-testid="group-msg-pin"
+      data-log-id={logId}
+      disabled={disabled}
+      onClick={() => onPin(logId)}
+      className={cn(
+        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-brand-300",
+        className,
+      )}
+    >
+      <Pin aria-hidden className="h-3 w-3" />
+    </button>
+  );
+}
+
 function GroupTimelineRow({
   entry,
   memberNames,
@@ -1792,6 +1945,10 @@ function GroupTimelineRow({
   providerLabel,
   avatar,
   streaming,
+  canPin,
+  isPinned,
+  pinPending,
+  onPin,
 }: {
   entry: GroupTimelineEntry;
   memberNames: readonly string[];
@@ -1801,7 +1958,19 @@ function GroupTimelineRow({
   /** 发送者头像 URL（群详情成员表解析；空 → 首字回退，quick 头像自定义）。 */
   avatar: string | null;
   streaming: boolean;
+  /** 群主可见置顶入口（quick 群 P2；系统行不可置顶由调用方保证）。 */
+  canPin: boolean;
+  /** 该行是当前置顶消息（quick 群 P2 浅 brand 底高亮）。 */
+  isPinned: boolean;
+  /** 置顶请求进行中（防连点）。 */
+  pinPending: boolean;
+  onPin: (logId: string) => void;
 }) {
+  // 已置顶行高亮：浅 brand 底 + 等宽外扩（-mx-2 px-2 不改变行宽，仅底色外延）。
+  const pinnedRowClass = isPinned
+    ? "-mx-2 rounded-xl bg-brand-50/70 px-2 dark:bg-brand-500/10"
+    : "";
+
   if (entry.kind === "system") {
     return (
       <div
@@ -1823,12 +1992,20 @@ function GroupTimelineRow({
           data-self="true"
           data-sender={entry.senderName}
           data-log-id={entry.id}
-          className="my-2.5 flex items-end justify-end gap-1.5"
+          className={cn("my-2.5 flex items-end justify-end gap-1.5", pinnedRowClass)}
         >
           <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
             {formatTime(entry.timestamp)}
           </span>
           <div className="flex max-w-[82%] flex-col items-end gap-1">
+            {canPin && (
+              <PinMessageButton
+                logId={entry.id}
+                onPin={onPin}
+                disabled={pinPending}
+                className="-mb-1"
+              />
+            )}
             {chips.length > 0 && <AttachmentChips attachments={chips} align="end" />}
             {entry.content ? (
               <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
@@ -1856,7 +2033,7 @@ function GroupTimelineRow({
         data-testid="group-msg-user"
         data-sender={entry.senderName}
         data-log-id={entry.id}
-        className="my-2.5 flex items-start gap-2.5"
+        className={cn("my-2.5 flex items-start gap-2.5", pinnedRowClass)}
       >
         <GroupMemberAvatar
           avatar={avatar}
@@ -1869,6 +2046,9 @@ function GroupTimelineRow({
           <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="font-semibold text-foreground">{entry.senderName}</span>
             <span className="text-[10.5px]">{formatTime(entry.timestamp)}</span>
+            {canPin && (
+              <PinMessageButton logId={entry.id} onPin={onPin} disabled={pinPending} />
+            )}
           </div>
           {chips.length > 0 && <AttachmentChips attachments={chips} align="start" />}
           {entry.content ? (
@@ -1890,7 +2070,7 @@ function GroupTimelineRow({
       data-member-id={entry.memberId ?? undefined}
       data-member-name={entry.memberName ?? undefined}
       data-log-id={entry.id}
-      className="my-2.5 flex items-start gap-2.5"
+      className={cn("my-2.5 flex items-start gap-2.5", pinnedRowClass)}
     >
       <GroupMemberAvatar
         avatar={avatar}
@@ -1913,6 +2093,9 @@ function GroupTimelineRow({
             </span>
           )}
           <span className="text-[10.5px]">{formatTime(entry.timestamp)}</span>
+          {canPin && (
+            <PinMessageButton logId={entry.id} onPin={onPin} disabled={pinPending} />
+          )}
         </div>
         {/* 群聊体验 quick（2026-09-02）：agent 回复走 MarkdownText（content 已经
             classifySessionLog 剥 [ASSISTANT] 等前缀；流式 partial 同容器容错渲染），

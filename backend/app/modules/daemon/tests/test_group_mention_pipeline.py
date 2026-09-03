@@ -1281,14 +1281,16 @@ class TestShadowLazyCreation:
         # 各自独立影子会话。
         assert len({t["shadow_session_id"] for t in body["triggered"]}) == 2
 
-    async def test_foreign_runtime_without_grant_400(
+    async def test_foreign_runtime_without_grant_partial_failure(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
         mocked_hub,
         readiness_ok,
     ) -> None:
-        """非群主机器无 grant → 400 fail-loud（D-010：不照抄 worker 豁免）。"""
+        """非群主机器无 grant → 部分失败收集（quick 群 P2）：200 + triggered
+        项带 error 中文摘要（授权 fail-loud 语义不变——D-010 不照抄 worker 豁免，
+        仅从整条 400 改为逐成员收集）；零残留：不建影子/lease/run。"""
         env = await _make_env(db_session)
         lender, _ = await _create_user_with_token(db_session, name="机器主人")
         _lender_instance, lender_runtime = await _seed_runtime(
@@ -1303,8 +1305,10 @@ class TestShadowLazyCreation:
         group_id = uuid.UUID(data["id"])
 
         resp = await _send_message(client, env.owner_token, group_id, "@小码 hi")
-        assert resp.status_code == 400, resp.text
-        assert "无法触发" in resp.json()["message"]
+        assert resp.status_code == 200, resp.text
+        failed = resp.json()["triggered"][0]
+        assert failed["run_id"] is None
+        assert "无法触发" in failed["error"]
         # fail-loud 零残留：不建影子/lease/run。
         assert await _shadow_sessions(db_session) == []
         member = await _agent_member_row(db_session, group_id)
@@ -1384,7 +1388,10 @@ class TestShadowLazyCreation:
             agent_members=[_agent_config(offline_runtime.id)],
         )
         resp = await _send_message(client, env.owner_token, data["id"], "@小码 hi")
-        assert resp.status_code == 400
+        assert resp.status_code == 200, resp.text  # quick 群 P2：部分失败收集不再整条抛
+        failed = resp.json()["triggered"][0]
+        assert failed["run_id"] is None
+        assert "不可用或未授权" in failed["error"]
         assert await _shadow_sessions(db_session) == []
 
 
@@ -1576,12 +1583,14 @@ class TestBusyMidTurnInject:
             assert "后来的进展" not in entries_after[0].prompt
             assert "第一条追问" in entries_after[0].prompt
 
-    async def test_queue_full_returns_409(
+    async def test_queue_full_collects_partial_failure(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
     ) -> None:
-        """降级路径满 5 条 → 409 DaemonSessionQueueFull（排队兜底口径不变）。"""
+        """降级路径满 5 条 → 部分失败收集（quick 群 P2）：200 + triggered 项
+        ``error``=「成员排队消息已满」中文摘要（排队兜底拒绝口径不变，仅从
+        整条 409 改为逐成员收集）；满员后不新增条目。"""
         from app.modules.daemon.session.service import (
             DaemonSessionTurnConflict,
             SessionService,
@@ -1616,8 +1625,11 @@ class TestBusyMidTurnInject:
 
         with mock_patch.object(SessionService, "inject_session_as_service", always_conflict):
             resp = await _send_message(client, env.owner_token, group_id, "@小码 第六条")
-            assert resp.status_code == 409, resp.text
-            assert resp.json()["code"] == "HTTP_409_DAEMON_SESSION_QUEUE_FULL"
+            assert resp.status_code == 200, resp.text
+        failed = resp.json()["triggered"][0]
+        assert failed["member_name"] == "小码"
+        assert failed["queued"] is False
+        assert failed["error"] == "成员排队消息已满，请稍后再试"
         # 满员后不新增条目。
         assert len(await _list_queued(db_session, shadow.id)) == 5
 

@@ -36,6 +36,7 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.group.service import (
     GroupChatCreateRead,
+    GroupChatPinnedRead,
     GroupChatService,
     GroupDirectMessageRead,
     GroupMemberAddRead,
@@ -66,11 +67,16 @@ class GroupChatListItemRead(GroupChatRead):
     ``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要
     （``get_last_mention_previews`` 扫描最近时间线，命中返回
     ``{content(截 60 字), ts, member_name}``，无 @ 为 None）。
+
+    ``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.
+    pinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed
+    ``GroupChatPinnedRead``；无置顶为 None）。
     """
 
     online_member_ids: list[uuid.UUID] = []
     last_message: str | None = None
     last_mention: dict[str, str] | None = None
+    pinned: GroupChatPinnedRead | None = None
 
 
 class GroupMemberDetailRead(GroupMemberRead):
@@ -91,10 +97,12 @@ class GroupChatDetailRead(GroupChatRead):
     ``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照
     ``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表
     项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体
-    （多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）。
+    （多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）；``pinned``
+    置顶快照（quick 群 P2，typed 收窄同列表项）。
     """
 
     online_member_ids: list[uuid.UUID] = []
+    pinned: GroupChatPinnedRead | None = None
     members: list[GroupMemberDetailRead] = Field(default_factory=list)
 
 
@@ -129,6 +137,16 @@ class GroupTypingRequest(BaseModel):
 
     typing: bool = True
     preview: str | None = Field(default=None, max_length=400)
+
+
+class GroupPinnedRequest(BaseModel):
+    """``PUT /group-chats/{id}/pinned`` 写体（quick 群 P2 置顶消息）。
+
+    ``log_id``：群时间线消息行 id（user_input / 投影行均可置顶；service 校验
+    属本群时间线，跨群/不存在 404）。一次一条置顶——重复置顶覆盖旧的。
+    """
+
+    log_id: uuid.UUID
 
 
 class GroupDirectMessageRequest(BaseModel):
@@ -393,3 +411,32 @@ async def send_group_typing(
         typing=payload.typing,
         preview=payload.preview,
     )
+
+
+# ── 置顶消息（quick 群 P2，2026-09-02）───────────────────────────────────────
+
+
+@router.put("/{group_id}/pinned", response_model=GroupChatPinnedRead)
+async def pin_group_message(
+    group_id: uuid.UUID,
+    payload: GroupPinnedRequest,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> GroupChatPinnedRead:
+    """置顶一条群消息（群主/workspace admin；一次一条，新置顶覆盖旧的）。
+
+    快照（内容/发送者身份/置顶者/时刻）落 ``settings_json.pinned``（复用
+    settings_json 零迁移）；目标 log 须属本群时间线（跨群/不存在 404）；成功
+    后群频道发系统行「{操作者} 置顶了一条消息」。
+    """
+    return await GroupChatService(session).pin_message(group_id, user, payload.log_id)
+
+
+@router.delete("/{group_id}/pinned", status_code=status.HTTP_204_NO_CONTENT)
+async def unpin_group_message(
+    group_id: uuid.UUID,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> None:
+    """取消置顶（群主/workspace admin；无置顶时幂等 204，不发系统行）。"""
+    await GroupChatService(session).unpin_message(group_id, user)

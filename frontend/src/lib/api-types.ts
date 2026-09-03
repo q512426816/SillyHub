@@ -4152,6 +4152,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/group-chats/{group_id}/pinned": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Pin Group Message
+         * @description 置顶一条群消息（群主/workspace admin；一次一条，新置顶覆盖旧的）。
+         *
+         *     快照（内容/发送者身份/置顶者/时刻）落 ``settings_json.pinned``（复用
+         *     settings_json 零迁移）；目标 log 须属本群时间线（跨群/不存在 404）；成功
+         *     后群频道发系统行「{操作者} 置顶了一条消息」。
+         */
+        put: operations["pin_group_message_api_daemon_group_chats__group_id__pinned_put"];
+        post?: never;
+        /**
+         * Unpin Group Message
+         * @description 取消置顶（群主/workspace admin；无置顶时幂等 204，不发系统行）。
+         */
+        delete: operations["unpin_group_message_api_daemon_group_chats__group_id__pinned_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/version": {
         parameters: {
             query?: never;
@@ -13985,6 +14013,10 @@ export interface components {
             deleted_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
+            /** Pinned */
+            pinned?: {
+                [key: string]: unknown;
+            } | null;
             /** Warnings */
             warnings?: string[];
         };
@@ -13995,7 +14027,8 @@ export interface components {
          *     ``GroupChatRead`` 在 agent/schema.py（非本卡 allowed_paths），扩展字段照
          *     ``GroupChatListItemRead`` 先例在 router 层落：``online_member_ids`` 与列表
          *     项同源（``get_online_member_ids``）；``members`` 提为详情版成员读体
-         *     （多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）。
+         *     （多 ``shadow_running`` 运行态兜底字段，2026-09-02 quick）；``pinned``
+         *     置顶快照（quick 群 P2，typed 收窄同列表项）。
          */
         GroupChatDetailRead: {
             /**
@@ -14036,6 +14069,7 @@ export interface components {
             deleted_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberDetailRead"][];
+            pinned?: components["schemas"]["GroupChatPinnedRead"] | null;
             /**
              * Online Member Ids
              * @default []
@@ -14054,6 +14088,10 @@ export interface components {
          *     ``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要
          *     （``get_last_mention_previews`` 扫描最近时间线，命中返回
          *     ``{content(截 60 字), ts, member_name}``，无 @ 为 None）。
+         *
+         *     ``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.
+         *     pinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed
+         *     ``GroupChatPinnedRead``；无置顶为 None）。
          */
         GroupChatListItemRead: {
             /**
@@ -14094,6 +14132,7 @@ export interface components {
             deleted_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
+            pinned?: components["schemas"]["GroupChatPinnedRead"] | null;
             /**
              * Online Member Ids
              * @default []
@@ -14105,6 +14144,35 @@ export interface components {
             last_mention?: {
                 [key: string]: string;
             } | null;
+        };
+        /**
+         * GroupChatPinnedRead
+         * @description 置顶消息快照读体（quick 群 P2，``settings_json.pinned`` 透出）。
+         *
+         *     ``log_id``：群时间线 ``AgentRunLog`` 行 id（前端可定位原消息气泡）；
+         *     ``pinned_by``/``pinned_at``：置顶操作者与时刻；``content``/``member_name``
+         *     为置顶时的消息内容与发送者身份快照（发送者后续改名不影响已置顶快照）。
+         */
+        GroupChatPinnedRead: {
+            /**
+             * Log Id
+             * Format: uuid
+             */
+            log_id: string;
+            /**
+             * Pinned By
+             * Format: uuid
+             */
+            pinned_by: string;
+            /**
+             * Pinned At
+             * Format: date-time
+             */
+            pinned_at: string;
+            /** Content */
+            content: string;
+            /** Member Name */
+            member_name: string;
         };
         /**
          * GroupChatRead
@@ -14152,6 +14220,10 @@ export interface components {
             deleted_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
+            /** Pinned */
+            pinned?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * GroupChatUpdate
@@ -14170,7 +14242,7 @@ export interface components {
             context_window?: number | null;
             /**
              * Settings Json
-             * @description 群扩展设置；None=不改。当前支持 guardrails 子键（互@护栏群级覆盖）
+             * @description 群扩展设置；None=不改。支持 guardrails 子键（互@护栏群级覆盖）与 typing_preview 顶层键（typing 草稿预览开关，默认关）
              */
             settings_json?: {
                 [key: string]: unknown;
@@ -14482,6 +14554,11 @@ export interface components {
         /**
          * GroupMemberTriggerRead
          * @description 单成员触发结果（design §8 member.injected / member.mentioned）。
+         *
+         *     quick 群 P2（2026-09-02）部分失败收集：触发失败的成员项带 ``error``
+         *     （中文原因摘要，如「引擎不支持附件」「机器会话数已达上限」）——此时
+         *     ``run_id`` 为 None、``shadow_session_id`` 可能为 None（影子未建即失败），
+         *     前端按 ``error`` 非空判定失败并展示；成功项 ``error`` 恒 None。
          */
         GroupMemberTriggerRead: {
             /**
@@ -14491,11 +14568,8 @@ export interface components {
             member_id: string;
             /** Member Name */
             member_name: string;
-            /**
-             * Shadow Session Id
-             * Format: uuid
-             */
-            shadow_session_id: string;
+            /** Shadow Session Id */
+            shadow_session_id?: string | null;
             /** Run Id */
             run_id?: string | null;
             /**
@@ -14508,6 +14582,8 @@ export interface components {
              * @default false
              */
             mid_turn: boolean;
+            /** Error */
+            error?: string | null;
         };
         /**
          * GroupMemberUpdate
@@ -14609,6 +14685,20 @@ export interface components {
              * @description 附件引用（SessionAttachment id）
              */
             attachment_ids?: string[];
+        };
+        /**
+         * GroupPinnedRequest
+         * @description ``PUT /group-chats/{id}/pinned`` 写体（quick 群 P2 置顶消息）。
+         *
+         *     ``log_id``：群时间线消息行 id（user_input / 投影行均可置顶；service 校验
+         *     属本群时间线，跨群/不存在 404）。一次一条置顶——重复置顶覆盖旧的。
+         */
+        GroupPinnedRequest: {
+            /**
+             * Log Id
+             * Format: uuid
+             */
+            log_id: string;
         };
         /**
          * GroupTypingRequest
@@ -30531,6 +30621,70 @@ export interface operations {
                 "application/json": components["schemas"]["GroupTypingRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pin_group_message_api_daemon_group_chats__group_id__pinned_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupPinnedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupChatPinnedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_group_message_api_daemon_group_chats__group_id__pinned_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             204: {

@@ -130,7 +130,7 @@ export default function MobileWorkspaceSessionsPage() {
   const handleGroupCreated = (group: GroupChatRead) => {
     setGroupWizardOpen(false);
     setPreContext(null);
-    setSelectedGroup({ ...group, online_member_ids: [], last_message: null });
+    setSelectedGroup({ ...group, online_member_ids: [], last_message: null, pinned: null });
     void qc.invalidateQueries({ queryKey: ["groupChats"] });
   };
 

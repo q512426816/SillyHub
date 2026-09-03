@@ -498,7 +498,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setPreContext(null);
       setSelectedSessionId(null);
       setSelectedGroupId(group.id);
-      setSelectedGroup({ ...group, online_member_ids: [], last_message: null });
+      setSelectedGroup({ ...group, online_member_ids: [], last_message: null, pinned: null });
       // quick-fdd8219a：建群成功同样落 URL。
       syncSessionParam(group.id);
     },

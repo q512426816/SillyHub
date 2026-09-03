@@ -324,7 +324,7 @@ function FloatingDrawerBody({
       if (s.sessionId) s.selectSession(null);
       if (s.preContext) useFloatingSessionStore.setState({ preContext: null });
       setSelectedGroupId(group.id);
-      setSelectedGroup({ ...group, online_member_ids: [], last_message: null });
+      setSelectedGroup({ ...group, online_member_ids: [], last_message: null, pinned: null });
       void qc.invalidateQueries({ queryKey: ["groupChats"] });
     },
     [qc],

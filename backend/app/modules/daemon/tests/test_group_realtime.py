@@ -496,18 +496,20 @@ class TestTypingEndpoint:
         db_session: AsyncSession,
         mocked_group_redis,
     ) -> None:
-        """payload 形态 + preview ≤400（DTO 口径）+ 不落时间线（ephemeral 纪律）。"""
+        """payload 形态 + preview 群级开关（quick 群 P2 默认关）+ 不落时间线。
+
+        默认（``settings_json.typing_preview`` 缺省 False）：入参 preview 被丢
+        （payload preview=None——只显示「正在输入」不发草稿）；PATCH 开启后
+        400 字（DTO 上限）原样透传；401+ → 422（DTO max_length 与服务端裁剪
+        口径一致，P2-6 修复：原来是 4000 进 400 裁，现提前拦）。
+        """
         env = await _make_env(db_session)
         data = await _create_group(client, env.owner_token, project_id=env.project.id)
         group_id = uuid.UUID(data["id"])
 
-        # 400 字（DTO 上限）原样透传；401+ → 422（DTO max_length 与服务端
-        # 裁剪口径一致，P2-6 修复：原来是 4000 进 400 裁，现提前拦）。
+        # 默认关：带 preview 的心跳被强制去草稿。
         resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 400)
         assert resp.status_code == 204, resp.text
-        resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 401)
-        assert resp.status_code == 422, resp.text
-
         events = _typing_publishes(mocked_group_redis, group_id)
         assert len(events) == 1
         payload = events[0]
@@ -515,8 +517,24 @@ class TestTypingEndpoint:
         assert payload["member_name"] == "群主"  # 建群者成员行昵称
         assert payload["member_kind"] == "user"
         assert payload["typing"] is True
-        assert payload["preview"] == "草" * 400  # 上限内原样透传
+        assert payload["preview"] is None  # quick 群 P2：默认关入参草稿丢弃
         assert payload["ts"]
+
+        # PATCH 开启 typing_preview 后透传；401+ 仍 422（DTO 上限拦截不变）。
+        resp = await client.patch(
+            f"/api/daemon/group-chats/{group_id}",
+            json={"settings_json": {"typing_preview": True}},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 200, resp.text
+        resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 400)
+        assert resp.status_code == 204, resp.text
+        resp = await _send_typing(client, env.owner_token, group_id, preview="草" * 401)
+        assert resp.status_code == 422, resp.text
+
+        events = _typing_publishes(mocked_group_redis, group_id)
+        assert len(events) == 2  # 422 请求不 publish
+        assert events[-1]["preview"] == "草" * 400  # 开启后上限内原样透传
 
         # 不落库：typing 纯 ephemeral——库内零 AgentRunLog 行（无载体 run /
         # 无投影 / 无任何时间线残留）。

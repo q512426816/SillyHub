@@ -2479,6 +2479,17 @@ export type GroupMemberAddRead =
  */
 export type GroupMemberInterruptRead =
   components["schemas"]["GroupMemberInterruptRead"];
+/**
+ * 置顶消息写体（api-types 生成版；quick 群 P2）：``log_id``=群时间线消息行 id
+ * （user_input / 投影行均可置顶；一次一条，重复置顶覆盖旧的）。
+ */
+export type GroupPinnedRequest = components["schemas"]["GroupPinnedRequest"];
+/**
+ * 置顶消息快照读体（api-types 生成版；quick 群 P2）：群读体 ``pinned`` 字段
+ * 同形（``log_id``/``pinned_by``/``pinned_at`` + 内容与发送者身份快照）。
+ */
+export type GroupChatPinnedRead =
+  components["schemas"]["GroupChatPinnedRead"];
 
 /** 群聊端点 base（design §6.1 前缀偏差见本节头注释）。 */
 const GROUP_CHATS_BASE = "/api/daemon/group-chats";
@@ -2603,6 +2614,35 @@ export async function interruptGroupMember(
   );
 }
 
+/* ---------- 群消息置顶（quick 群 P2，2026-09-02） ----------
+ *
+ * PUT/DELETE /api/daemon/group-chats/{gid}/pinned：群主权限（后端强校验）。
+ * 快照（内容/发送者身份/置顶者/时刻）落 ``settings_json.pinned``，群读体以
+ * typed ``pinned`` 字段透出——前端置顶/取消后 invalidate 群详情 + 群列表即可。
+ */
+
+/**
+ * PUT /api/daemon/group-chats/{id}/pinned — 置顶群消息（群主；一次一条，
+ * 重复置顶覆盖旧的）。目标 log 须属本群时间线（跨群/不存在 404 → ApiError）。
+ */
+export async function pinGroupMessage(
+  groupId: string,
+  payload: GroupPinnedRequest,
+): Promise<GroupChatPinnedRead> {
+  return apiFetch<GroupChatPinnedRead>(
+    `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/pinned`,
+    { method: "PUT", json: payload },
+  );
+}
+
+/** DELETE /api/daemon/group-chats/{id}/pinned — 取消置顶（群主；204 无响应体）。 */
+export async function unpinGroupMessage(groupId: string): Promise<void> {
+  await apiFetch(
+    `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/pinned`,
+    { method: "DELETE" },
+  );
+}
+
 /* ---------- 群消息发送 + typing 上报 + 群流 SSE（task-08 / FR-05 / FR-09 / FR-12 / FR-13） ----------
  *
  * design §4.1（发送→载体 run user_input 落库→@解析触发）、§5.4（typing 心跳：
@@ -2632,9 +2672,11 @@ export interface GroupMessageAttachmentSummary {
  * POST /api/daemon/group-chats/{id}/messages — 发群消息。
  *
  * 响应携带 carrier_run_id / log_id（实时 log 事件同 id，seenLogIds 去重容错）+
- * mentioned_member_ids / triggered（触发成员与排队态）。触发失败（机器未授权
- * 400 / 队列满 409 DAEMON_SESSION_QUEUE_FULL）时消息已落时间线——错误照抛，
- * 调用方提示「消息已发送，但触发失败」（design §4.1 失败语义）。
+ * mentioned_member_ids / triggered（触发成员与排队态）。单成员触发失败（机器
+ * 未授权/离线、队列满、会话闸满、非 Claude 引擎带附件等）**不再整条抛错**
+ * （quick 群 P2 部分失败收集）：消息恒 200 且已落时间线，失败成员的
+ * triggered 项带 ``error`` 中文摘要（群频道同步发系统行）——调用方按
+ * ``error`` 非空提示「消息已发送，部分成员触发失败」。
  *
  * FR-05 补遗：``attachmentIds`` 附件引用（上传端点产出的 SessionAttachment
  * id，D-7 豁免——携带附件时 content 可空看图说话）；未携带时不发该键（后端

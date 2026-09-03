@@ -410,10 +410,14 @@ class GroupChatUpdate(BaseModel):
     context_window: int | None = Field(default=None, ge=1, le=100)
     # quick 群 P1（2026-09-02）互@护栏群级可配：``settings_json.guardrails`` 子键
     # 写入（rate_limit_per_minute / member_trigger_limit / chain_ttl_seconds）。
-    # None=不改；取值范围校验在 service 层（非法 400 中文提示，非 pydantic 422）。
+    # quick 群 P2（2026-09-02）增 ``typing_preview`` 顶层布尔键（typing 草稿预览
+    # 开关，默认关）。None=不改；取值校验在 service 层（非法 400 中文提示）。
     settings_json: dict | None = Field(
         default=None,
-        description="群扩展设置；None=不改。当前支持 guardrails 子键（互@护栏群级覆盖）",
+        description=(
+            "群扩展设置；None=不改。支持 guardrails 子键（互@护栏群级覆盖）"
+            "与 typing_preview 顶层键（typing 草稿预览开关，默认关）"
+        ),
     )
 
 
@@ -496,3 +500,8 @@ class GroupChatRead(BaseModel):
     ended_at: datetime | None = None
     deleted_at: datetime | None = None
     members: list[GroupMemberRead] = Field(default_factory=list)
+    # quick 群 P2（2026-09-02）：置顶消息快照（settings_json.pinned 透出；
+    # log_id/pinned_by/pinned_at/content/member_name）。schema.py 不宜反向
+    # import 群模块 typed 读体（循环），此处 dict 形态——group/router.py 的
+    # 列表/详情子类读体收窄为 typed GroupChatPinnedRead。
+    pinned: dict | None = None

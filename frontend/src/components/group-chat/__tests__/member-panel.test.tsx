@@ -1298,3 +1298,62 @@ describe("MemberPanel 打断按钮（quick 群 P1）", () => {
     confirmSpy.mockRestore();
   });
 });
+
+// ── 11. 群设置：typing 草稿预览开关（quick 群 P2） ────────────────────────
+
+describe("MemberPanel 群设置：输入草稿预览开关（quick 群 P2）", () => {
+  it("群主可见：默认关（本地态——群读体未透出 settings_json 无回显真值）；切换 → PATCH settings_json.typing_preview=true + 开成功提示", async () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+
+    const sw = screen.getByTestId("group-typing-preview-switch");
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(sw);
+
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1",
+      { method: "PATCH", json: { settings_json: { typing_preview: true } } },
+    );
+    await waitFor(() =>
+      expect(sw.getAttribute("aria-checked")).toBe("true"),
+    );
+    expect(mocks.notify.success).toHaveBeenCalledWith("已开启输入草稿预览");
+  });
+
+  it("再切回 → PATCH typing_preview=false（本地态跟随）", async () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+
+    const sw = screen.getByTestId("group-typing-preview-switch");
+    fireEvent.click(sw); // 开
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    fireEvent.click(sw); // 关
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(2));
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith(
+      "/api/daemon/group-chats/g-1",
+      { method: "PATCH", json: { settings_json: { typing_preview: false } } },
+    );
+    await waitFor(() =>
+      expect(sw.getAttribute("aria-checked")).toBe("false"),
+    );
+  });
+
+  it("设置失败 → 回滚本地态 + 错误提示", async () => {
+    mocks.apiFetch.mockRejectedValueOnce(new Error("服务内部错误"));
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+
+    const sw = screen.getByTestId("group-typing-preview-switch");
+    fireEvent.click(sw);
+    await waitFor(() =>
+      expect(mocks.notify.error).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.notify.error.mock.calls[0]?.[1]).toBe("设置失败，请稍后重试");
+    await waitFor(() =>
+      expect(sw.getAttribute("aria-checked")).toBe("false"),
+    );
+  });
+
+  it("非群主：不渲染群设置区", () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-lin" />);
+    expect(screen.queryByTestId("group-typing-preview-switch")).toBeNull();
+  });
+});

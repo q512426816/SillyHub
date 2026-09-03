@@ -96,6 +96,19 @@ quick 群成员团队能力（2026-09-02）：agent 成员 ``team_enabled`` 开�
 → 注入 dispatch_worker 等 5 主控工具，mission 懒建回填链天然兼容），成员简报
 追加团队能力段；仅 Claude 引擎可开（建群/加成员/PATCH 三处 400 门控）；热切
 换归机器组重建分支（stage 随 lease 建时定，复用轮改不掉）。
+
+quick 群 P2（2026-09-02）四项（全部复用 settings_json，零迁移）：
+
+- 置顶消息：``settings_json.pinned`` 存快照（一次一条，新置顶覆盖旧的），
+  ``pin_message``/``unpin_message``（群主/admin）校验目标 log 属本群时间线后
+  落库 + 群频道系统行；列表/详情 Read 透出；
+- typing 草稿预览默认关：``settings_json.typing_preview``（默认 False——只显
+  示「正在输入」不发草稿；True 才随 typing 事件带 preview，入参在关闭时丢弃），
+  PATCH 可配；
+- 触发失败不再整条抛：``send_group_message`` 逐成员触发捕获 AppError → 中文
+  原因摘要进 ``triggered[].error`` + 群频道系统行「成员「X」触发失败：{原因}」，
+  其余成员照常触发（消息已落时间线语义不变——部分失败收集替代 fail-loud）；
+- @我扫描窗口：``GROUP_LAST_MENTION_SCAN_ROWS`` 20 → 200。
 """
 
 from __future__ import annotations
@@ -107,7 +120,7 @@ from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -184,7 +197,10 @@ GROUP_CONTEXT_TOTAL_MAX_CHARS = 6000
 # 群列表最后消息摘要长度（task-03 接通 task-02 占位字段）。
 GROUP_LAST_MESSAGE_PREVIEW_CHARS = 60
 # 群列表「最近 @我」扫描行数（群聊体验 quick 2026-09-02：最近时间线内找最新 @）。
-GROUP_LAST_MENTION_SCAN_ROWS = 20
+# quick 群 P2（2026-09-02）20 → 200：活跃群消息很快把 @ 挤出 20 行窗口（被 @ 后
+# 群里聊几十条，列表侧「最近 @我」就丢了）——扩到 200 行覆盖日常活跃度；查询
+# limit 与本常量同源联动（get_last_mention_previews 单处消费）。
+GROUP_LAST_MENTION_SCAN_ROWS = 200
 # 忙轮中途注入标注行（quick 2026-09-02 群聊 steering）：复用轮查到活跃 run 时
 # 包在 _build_group_prompt 产物**头部**（外层包不动纯函数）——消息将以中途新
 # 指令形式注入当前正在执行的轮，提示 agent 优先阅读并调整工作方式。
@@ -258,6 +274,16 @@ def _build_llm_provider_warnings(
     ]
 
 
+# ── quick 群 P2 常量（2026-09-02：置顶快照 / 触发失败原因摘要）────────────────
+
+# 置顶消息内容快照截断长度（settings_json.pinned.content——完整原文仍在群时间
+# 线行，快照供列表/详情横幅展示，超长截断）。
+GROUP_PINNED_PREVIEW_CHARS = 200
+# 触发失败原因摘要截断长度（triggered[].error + 群频道系统行共用——异常 message
+# 可能很长，系统行保持一行可读）。
+GROUP_TRIGGER_FAIL_REASON_MAX_CHARS = 120
+
+
 def group_chain_key(carrier_run_id: uuid.UUID) -> str:
     """协作链 Redis key（``group_chain:{载体run_id}``，design §4.4）。
 
@@ -296,6 +322,18 @@ def _group_guardrail_settings(group: AgentGroupChat) -> tuple[int, int, int]:
         _pick("member_trigger_limit", GROUP_CROSS_MEMBER_TRIGGER_LIMIT),
         _pick("chain_ttl_seconds", GROUP_CHAIN_TTL_SECONDS),
     )
+
+
+def _group_typing_preview_enabled(group: AgentGroupChat) -> bool:
+    """typing 草稿预览群级开关（quick 群 P2，2026-09-02：默认关）。
+
+    读 ``group.settings_json`` 的 ``typing_preview``（bool）——**默认 False**：
+    只显示「正在输入」不发草稿（隐私从简）；显式 True 才随 typing 事件带
+    preview。存量群 settings_json NULL / 无该键 / 脏值（非 bool）一律 False
+    （与 ``_group_guardrail_settings`` 同款防御口径，脏配置不炸发布链路）。
+    写入侧（PATCH ``_merge_group_settings_json``）已校验 bool。
+    """
+    return (group.settings_json or {}).get("typing_preview") is True
 
 
 # ── 错误族（AppError 惯例：中文用户可见文案，UUID 进 details）────────────────
@@ -338,6 +376,13 @@ class GroupMemberNoActiveRun(AppError):
 
     code = "HTTP_409_GROUP_MEMBER_NO_ACTIVE_RUN"
     http_status = 409
+
+
+class GroupMessageNotFound(AppError):
+    """置顶目标消息不存在或不属于该群时间线（quick 群 P2，404 不泄露他群）。"""
+
+    code = "HTTP_404_GROUP_MESSAGE_NOT_FOUND"
+    http_status = 404
 
 
 # ── @解析（design §4.1，task-03）────────────────────────────────────────────
@@ -524,6 +569,54 @@ async def _publish_member_interrupted_notice(
     )
 
 
+def _trigger_failure_reason(exc: AppError) -> str:
+    """触发失败异常 → 中文原因摘要（quick 群 P2：系统行 + ``triggered[].error``）。
+
+    code 优先映射机器可判的失败族（会话闸满/队列满/机器离线——这类异常的
+    message 面向 HTTP 错误响应，直接进系统行过长且带操作指引重复）；未命中
+    映射的（如群错误族 GroupChatInvalid 的引擎门控/机器不可用）message 本就
+    是中文用户文案，剥掉头部的「成员「X」的」身份前缀（系统行/DTO 已携带
+    成员身份，重复啰嗦）后截 ``GROUP_TRIGGER_FAIL_REASON_MAX_CHARS`` 直用。
+    """
+    code = (exc.code or "").upper()
+    if "SESSION_LIMIT" in code:
+        return "机器会话数已达上限，请稍后再试"
+    if code == "HTTP_409_DAEMON_SESSION_QUEUE_FULL":
+        return "成员排队消息已满，请稍后再试"
+    if code == "HTTP_504_DAEMON_RUNTIME_OFFLINE":
+        return "执行机器当前不在线"
+    message = (getattr(exc, "message", "") or "").strip()
+    if message:
+        message = re.sub(r"^成员「[^」]*」的?", "", message).strip()
+    if message:
+        return message[:GROUP_TRIGGER_FAIL_REASON_MAX_CHARS]
+    return "触发失败，请稍后再试"
+
+
+async def _publish_trigger_failed_notice(
+    group_session_id: uuid.UUID, *, member_name: str, reason: str
+) -> None:
+    """成员触发失败的群内系统提示行（quick 群 P2）。
+
+    只对「消息已落时间线但成员没跑起来」的用户可感沉默场景发（``send_group_
+    message`` 逐成员触发捕获 AppError 的调用点）——形态照 ``_publish_rate_
+    limit_notice`` 先例（``channel='system'`` ephemeral 不落库，实时流提示 +
+    响应 DTO ``triggered[].error`` 双通道）。传**群会话 id 标量**而非群行：
+    调用点处于触发失败子链 rollback 之后，群 ORM 行已 expire（过期属性 lazy
+    IO 在 greenlet 外炸 MissingGreenlet——update_member「先取标量」先例）。
+    """
+    await _publish_group_channel_event(
+        group_session_id,
+        {
+            "event": "log",
+            "session_id": str(group_session_id),
+            "channel": "system",
+            "content": f"成员「{member_name}」触发失败：{reason}",
+            "timestamp": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
 # ── 互@护栏参数群级可配（quick 群 P1，2026-09-02：settings_json 启用）────────
 
 
@@ -559,25 +652,35 @@ def _validate_guardrail_overrides(raw: object) -> None:
 
 
 def _merge_group_settings_json(current: dict | None, incoming: dict) -> dict:
-    """PATCH ``settings_json`` 合并落库（quick 群 P1）。
+    """PATCH ``settings_json`` 合并落库（quick 群 P1；P2 增 ``typing_preview``）。
 
-    顶层键白名单当前仅 ``guardrails``（列是预留扩展位，新键随消费方落地逐个
-    放开）；``guardrails`` 子键**字段级合并**——未传字段保留既有覆盖值（与
-    GroupChatUpdate「None=不改」局部更新语义同构）。返回新 dict（不原地改
-    ORM 属性，赋值才进 dirty）。清除覆盖 = 显式回传默认值。
+    顶层键白名单：``guardrails``（子键**字段级合并**——未传字段保留既有覆盖值，
+    与 GroupChatUpdate「None=不改」局部更新语义同构）+ ``typing_preview``
+    （bool，quick 群 P2 typing 草稿预览开关）。``pinned`` 是置顶端点的内部写
+    键，不经 PATCH（fail-loud 拒绝防外部覆盖快照）。返回新 dict（不原地改
+    ORM 属性，赋值才进 dirty——既有 ``pinned`` 原样保留）。清除覆盖 = 显式
+    回传默认值。
     """
     merged = dict(current or {})
     rest = dict(incoming)
     guardrails = rest.pop("guardrails", None)
+    typing_preview = rest.pop("typing_preview", None)
     if rest:
         key = next(iter(rest))
         raise GroupChatInvalid(
             f"未知的群设置键「{key}」。",
-            details={"key": key, "allowed": ["guardrails"]},
+            details={"key": key, "allowed": ["guardrails", "typing_preview"]},
         )
     if guardrails is not None:
         _validate_guardrail_overrides(guardrails)
         merged["guardrails"] = {**(merged.get("guardrails") or {}), **guardrails}
+    if typing_preview is not None:
+        if not isinstance(typing_preview, bool):
+            raise GroupChatInvalid(
+                "settings_json.typing_preview 必须是布尔值。",
+                details={"field": "typing_preview", "value": str(typing_preview)},
+            )
+        merged["typing_preview"] = typing_preview
     return merged
 
 
@@ -1285,16 +1388,56 @@ async def get_last_mention_previews(
 
 
 class GroupMemberTriggerRead(BaseModel):
-    """单成员触发结果（design §8 member.injected / member.mentioned）。"""
+    """单成员触发结果（design §8 member.injected / member.mentioned）。
+
+    quick 群 P2（2026-09-02）部分失败收集：触发失败的成员项带 ``error``
+    （中文原因摘要，如「引擎不支持附件」「机器会话数已达上限」）——此时
+    ``run_id`` 为 None、``shadow_session_id`` 可能为 None（影子未建即失败），
+    前端按 ``error`` 非空判定失败并展示；成功项 ``error`` 恒 None。
+    """
 
     member_id: uuid.UUID
     member_name: str
-    shadow_session_id: uuid.UUID
+    shadow_session_id: uuid.UUID | None = None  # 失败且未建影子时为 None
     run_id: uuid.UUID | None = None  # 即时注入轮的 run；排队轮为 None
     queued: bool = False  # 忙轮排队（AgentSessionQueuedMessage）
     # quick（2026-09-02 群聊忙轮注入）：忙轮中途注入成功（消息已注入当前
     # 活跃轮 steering，run_id=该活跃 run）；queued=False 且 mid_turn=True。
     mid_turn: bool = False
+    # quick 群 P2（2026-09-02）触发失败原因摘要（成功恒 None）。
+    error: str | None = None
+
+
+class GroupChatPinnedRead(BaseModel):
+    """置顶消息快照读体（quick 群 P2，``settings_json.pinned`` 透出）。
+
+    ``log_id``：群时间线 ``AgentRunLog`` 行 id（前端可定位原消息气泡）；
+    ``pinned_by``/``pinned_at``：置顶操作者与时刻；``content``/``member_name``
+    为置顶时的消息内容与发送者身份快照（发送者后续改名不影响已置顶快照）。
+    """
+
+    log_id: uuid.UUID
+    pinned_by: uuid.UUID
+    pinned_at: datetime
+    content: str
+    member_name: str
+
+
+def _group_pinned_snapshot(group: AgentGroupChat) -> GroupChatPinnedRead | None:
+    """``settings_json.pinned`` → 置顶快照读体（脏数据防御性回落 None）。
+
+    pinned 由 ``pin_message`` 内部写入（键形态受控）；手改库/迁移残留的脏
+    快照（缺字段/非 UUID）在读取侧兜底丢弃，不让列表/详情炸序列化——与
+    ``_group_guardrail_settings`` 同款防御口径。
+    """
+    raw = (group.settings_json or {}).get("pinned")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return GroupChatPinnedRead.model_validate(raw)
+    except ValidationError:
+        log.warning("group_pinned_snapshot_invalid", group_id=str(group.id))
+        return None
 
 
 class GroupMessageSendRead(BaseModel):
@@ -1660,6 +1803,10 @@ class GroupChatService:
     def _to_read(self, group: AgentGroupChat, members: list[AgentGroupMember]) -> GroupChatRead:
         read = GroupChatRead.model_validate(group)
         read.members = [GroupMemberRead.model_validate(m) for m in members]
+        # quick 群 P2：置顶快照透出（GroupChatRead.pinned 为 dict 形态，router
+        # 层子类读体再收窄为 typed GroupChatPinnedRead）。
+        pinned = _group_pinned_snapshot(group)
+        read.pinned = pinned.model_dump(mode="json") if pinned is not None else None
         return read
 
     # ── 项目口径 helper（quick 群 PPM 项目化）────────────────────────────────
@@ -2833,9 +2980,11 @@ class GroupChatService:
         仅落时间线（进后续群背景摘要），不触发任何成员；附件随触发成员注入
         下发（D-7 看图说话：附件非空豁免空 content）。
 
-        失败语义：载体 run 与触发是两个事务——触发失败（如机器未授权 400 /
-        队列满 409 / 成员引擎不支持附件 400）时消息已在时间线，错误照常抛出
-        （前端可提示重发仅触发）。
+        失败语义（quick 群 P2 部分失败收集）：载体 run 与触发是两个事务——消息
+        先落时间线；**逐成员触发失败（机器未授权 / 队列满 / 会话闸满 / 成员引擎
+        不支持附件等 AppError）不再整条抛**：该成员 ``triggered`` 项带 ``error``
+        中文摘要 + 群频道系统行「成员「X」触发失败：{原因}」，其余成员照常触发
+        （响应恒 200，前端按 ``error`` 非空提示「消息已发送，部分成员触发失败」）。
         """
         group = await self._get_group(group_id)
         membership = await self._require_group_member(group, user)
@@ -2924,6 +3073,10 @@ class GroupChatService:
 
         # ── @解析 + 触发编排（§4.1 步 4-6）。
         mentioned = _parse_group_mentions(content, members)
+        mentioned_ids = [m.id for m in mentioned]
+        # quick 群 P2：返回体用标量（触发失败子链 rollback 会 expire 载体行）。
+        carrier_run_id_val = carrier.id
+        log_row_id_val = log_row.id
         triggered: list[GroupMemberTriggerRead] = []
         if mentioned:
             member_lines = [
@@ -2950,19 +3103,66 @@ class GroupChatService:
                     carrier_run_id=str(carrier.id),
                     exc_info=True,
                 )
+            # quick 群 P2 部分失败收集的 ORM 口径：触发失败子链（懒建 rollback /
+            # 注入失败）会 expire 会话内全部对象（工厂 expire_on_commit=False，
+            # 仅 rollback 过期——update_member 先例），而循环还要继续触发其余
+            # 成员并组装返回体——**循环前预取全部标量**（except 分支/返回体零
+            # ORM 属性访问，过期属性 lazy IO 在 greenlet 外炸 MissingGreenlet），
+            # 失败后**重取行**再进下一轮（查询返回 identity map 内既有实例并
+            # 刷新过期属性）。
+            group_id_val = group.id
+            group_session_id_val = group.session_id
+            sender_user_id_val = user.id
+            refresh_needed = False
             for member in sorted(mentioned, key=lambda m: (m.joined_at, m.id)):
-                trigger = await self._trigger_group_member(
-                    group=group,
-                    member=member,
-                    members=members,
-                    member_lines=member_lines,
-                    sender_user_id=user.id,
-                    sender_member_name=sender_member_name,
-                    content=content,
-                    carrier_run_id=carrier.id,
-                    exclude_log_id=log_row.id,
-                    attachment_rows=attachment_rows,
-                )
+                if refresh_needed:
+                    group = await self._get_group(group_id_val)
+                    members = await self._list_active_member_rows(group_id_val)
+                    if attachment_rows:
+                        attachment_rows = await self._reload_attachment_rows(attachment_rows)
+                    refresh_needed = False
+                member_id_val = member.id
+                member_name_val = member.display_name
+                member_shadow_val = member.shadow_session_id
+                # quick 群 P2（2026-09-02）部分失败收集：单成员触发失败（引擎门控
+                # 400 / 机器不可用 / 队列满 / 会话闸满等 AppError）不整条抛——
+                # 该成员 triggered 项带 error 摘要 + 群频道系统行（用户可感沉默
+                # 场景：消息已落时间线但成员没跑起来），其余成员照常触发。
+                try:
+                    trigger = await self._trigger_group_member(
+                        group=group,
+                        member=member,
+                        members=members,
+                        member_lines=member_lines,
+                        sender_user_id=sender_user_id_val,
+                        sender_member_name=sender_member_name,
+                        content=content,
+                        carrier_run_id=carrier_run_id_val,
+                        exclude_log_id=log_row_id_val,
+                        attachment_rows=attachment_rows,
+                    )
+                except AppError as exc:
+                    refresh_needed = True
+                    reason = _trigger_failure_reason(exc)
+                    log.warning(
+                        "group_member_trigger_failed",
+                        group_id=str(group_id_val),
+                        member_id=str(member_id_val),
+                        code=exc.code,
+                        reason=reason,
+                    )
+                    await _publish_trigger_failed_notice(
+                        group_session_id_val, member_name=member_name_val, reason=reason
+                    )
+                    triggered.append(
+                        GroupMemberTriggerRead(
+                            member_id=member_id_val,
+                            member_name=member_name_val,
+                            shadow_session_id=member_shadow_val,
+                            error=reason,
+                        )
+                    )
+                    continue
                 triggered.append(trigger)
                 # task-06（design §5.4）：影子 run 开始（即时注入/懒建首轮，非
                 # 排队）→ 自动发一条 agent typing（「昵称」正在输入…）。排队轮
@@ -2972,18 +3172,43 @@ class GroupChatService:
                 # （载体 run 下的 log_row，前端据此高亮「正在响应哪句话」）。
                 if not trigger.queued:
                     await _publish_agent_typing_event(
-                        group.id,
+                        group_id_val,
                         member.display_name,
-                        member_id=str(member.id),
-                        reply_to_log_id=str(log_row.id),
+                        member_id=str(member_id_val),
+                        reply_to_log_id=str(log_row_id_val),
                     )
         return GroupMessageSendRead(
-            carrier_run_id=carrier.id,
-            log_id=log_row.id,
-            mentioned_member_ids=[m.id for m in mentioned],
+            carrier_run_id=carrier_run_id_val,
+            log_id=log_row_id_val,
+            mentioned_member_ids=mentioned_ids,
             mention_all=_has_broadcast_mention(content),
             triggered=triggered,
         )
+
+    async def _reload_attachment_rows(self, rows: list) -> list:
+        """按 id 重取附件行并保序（quick 群 P2 部分失败收集的刷新链）。
+
+        触发失败子链 rollback 后附件行过期（expire_on_commit=False 仅 rollback
+        过期），后续成员触发仍要读附件属性（prompt 提示行/注入组装）——同 id
+        重查刷新；PK 不过期，取 id 列表安全。
+        """
+        from app.modules.session_attachment.model import SessionAttachment
+
+        by_id = {
+            r.id: r
+            for r in (
+                (
+                    await self._session.execute(
+                        select(SessionAttachment).where(
+                            SessionAttachment.id.in_([r.id for r in rows])
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        }
+        return [by_id[r.id] for r in rows if r.id in by_id]
 
     async def _validate_group_attachments(
         self, sender_user_id: uuid.UUID, attachment_ids: list[uuid.UUID]
@@ -3249,6 +3474,138 @@ class GroupChatService:
             display_name=member.display_name,
             run_id=result.current_run_id or active_run.id,
             interrupted_by_name=interrupter_name,
+        )
+
+    # ── 置顶消息（quick 群 P2，2026-09-02：settings_json.pinned）──────────────
+
+    async def _pin_timeline_row(
+        self, group: AgentGroupChat, log_id: uuid.UUID
+    ) -> tuple[AgentRunLog, str]:
+        """查置顶目标行（须属本群时间线）+ 身份快照标签。
+
+        行源同 ``_load_group_context_lines``：``user_input`` 行（用户消息）与
+        投影行（``channel='stdout'`` 且带成员身份 metadata）都可置顶；身份标签
+        从 metadata 取（用户行 ``sender_member_name`` / 投影行 ``member_name``），
+        缺失回退 run.user_id 查成员表 display_name →「成员」（与背景摘要同款
+        兜底链）。跨群 log / 不存在 → 404 ``GroupMessageNotFound``。
+        """
+        row = (
+            await self._session.execute(
+                select(AgentRunLog, AgentRun.user_id)
+                .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
+                .where(
+                    AgentRunLog.id == log_id,
+                    AgentRun.agent_session_id == group.session_id,
+                )
+            )
+        ).first()
+        if row is None:
+            raise GroupMessageNotFound(
+                "消息不存在或不属于该群。",
+                details={"group_id": str(group.id), "log_id": str(log_id)},
+            )
+        log_row, run_user_id = row[0], row[1]
+        meta = log_row.metadata_ or {}
+        member_name = (
+            meta.get("sender_member_name")
+            if log_row.channel == "user_input"
+            else meta.get("member_name")
+        )
+        if not member_name and run_user_id is not None:
+            members = await self._list_members(group.id)
+            member_name = next(
+                (
+                    m.display_name
+                    for m in members
+                    if m.member_type == "user" and m.user_id == run_user_id
+                ),
+                None,
+            )
+        return log_row, member_name or "成员"
+
+    async def pin_message(
+        self,
+        group_id: uuid.UUID,
+        user: User,
+        log_id: uuid.UUID,
+    ) -> GroupChatPinnedRead:
+        """置顶一条群消息（quick 群 P2：群主/admin；一次一条，新置顶覆盖旧的）。
+
+        快照落 ``settings_json.pinned``（复用 settings_json 零迁移）——内容截
+        ``GROUP_PINNED_PREVIEW_CHARS``、身份快照取置顶时点值（发送者后续改名
+        不影响）；置顶成功群频道发系统行（ephemeral，照打断提示先例）。
+        """
+        group = await self._get_group(group_id)
+        membership = await self._require_group_member(group, user)
+        await self._require_group_owner(group, user)
+        if group.ended_at is not None:
+            raise GroupChatInvalid(
+                "群已解散，无法置顶消息。",
+                details={"group_id": str(group.id)},
+            )
+        log_row, member_name = await self._pin_timeline_row(group, log_id)
+        pinned = GroupChatPinnedRead(
+            log_id=log_row.id,
+            pinned_by=user.id,
+            pinned_at=datetime.now(UTC),
+            content=(log_row.content_redacted or "").strip()[:GROUP_PINNED_PREVIEW_CHARS],
+            member_name=member_name,
+        )
+        settings = dict(group.settings_json or {})
+        settings["pinned"] = pinned.model_dump(mode="json")
+        group.settings_json = settings
+        self._session.add(group)
+        await self._session.commit()
+        await self._session.refresh(group)
+
+        operator_name = (
+            membership.display_name if membership is not None else _user_display_name(user)
+        )
+        await _publish_group_channel_event(
+            group.session_id,
+            {
+                "event": "log",
+                "session_id": str(group.session_id),
+                "channel": "system",
+                "content": f"{operator_name} 置顶了一条消息",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        )
+        return pinned
+
+    async def unpin_message(self, group_id: uuid.UUID, user: User) -> None:
+        """取消置顶（quick 群 P2：群主/admin；无置顶时幂等 204）。
+
+        系统行仅在确有置顶被取消时发（幂等重放不重复提示）。
+        """
+        group = await self._get_group(group_id)
+        membership = await self._require_group_member(group, user)
+        await self._require_group_owner(group, user)
+        if group.ended_at is not None:
+            raise GroupChatInvalid(
+                "群已解散，无法操作置顶消息。",
+                details={"group_id": str(group.id)},
+            )
+        if (group.settings_json or {}).get("pinned") is None:
+            return  # 幂等：无置顶直接收口（不发系统行）。
+        settings = dict(group.settings_json or {})
+        settings.pop("pinned", None)
+        group.settings_json = settings
+        self._session.add(group)
+        await self._session.commit()
+
+        operator_name = (
+            membership.display_name if membership is not None else _user_display_name(user)
+        )
+        await _publish_group_channel_event(
+            group.session_id,
+            {
+                "event": "log",
+                "session_id": str(group.session_id),
+                "channel": "system",
+                "content": f"{operator_name} 取消了置顶消息",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
         )
 
     async def _trigger_group_member(
@@ -3814,12 +4171,19 @@ class GroupChatService:
         自动过期）；**不落库、不进 AI 上下文、不进群背景摘要**（纯 ephemeral，
         Redis pub/sub 即发即忘，无 key 无 TTL 无存储）。preview 服务端再裁
         400 字（DTO 侧已限长，双保险防超长帧）。
+
+        quick 群 P2（2026-09-02）草稿预览默认关：群级 ``settings_json.
+        typing_preview``（默认 False）关闭时入参 ``preview`` 强制丢弃（payload
+        preview=None——只显示「正在输入」不发草稿，隐私从简）；显式 True 才
+        透传（仍走 400 字裁剪）。
         """
         group = await self._get_group(group_id)
         membership = await self._require_group_member(group, user)
         sender_member_name = (
             membership.display_name if membership is not None else _user_display_name(user)
         )
+        if not _group_typing_preview_enabled(group):
+            preview = None  # 群级默认关：入参草稿丢弃（只显示「正在输入」）。
         await _publish_group_typing_event(
             group.id,
             _typing_payload(
