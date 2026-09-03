@@ -64,6 +64,7 @@ _dispatch_execute_team → 多 worker 并行 → 全员收敛 → daemon run_syn
 - 涉 LLM/delegation 的测试必须 monkeypatch GLMConfig.from_env 返 None，防本机环境变量泄漏打真实 LLM（烧 token 且测试漂移）。
 - 借用（borrow）产物回存带审计用量更新，删除/重构 borrow 相关表须连带审计口径。
 - AgentRunLog 的 segment_id 列是 daemon 消息去重的 DB 侧锚点，不入对外 API 响应（DB-only 去重字段）。
+- 分身 run 终态失败（failed/killed，agent 已死不会再调 worker_done）的收链语义（ql-20260903-003，生产 909e1344 实证）：①唤醒侧——`mission_context.workers_all_terminal_with_stats` 把「会话 idle + 未 done + 首 run 终态 failed/killed」计为终态失败（与 `_virtual_status` 首 run 兜底映射同款输入），lease 完成钩子 / patrol 预唤醒据此立即带成败统计唤醒主控，不再等 30min awaiting_input 超时静默收敛；首 run **completed** 未 done 仍不算终态（worker_done 是唯一完成信号）。②恢复侧——patrol 职责④对 `resume_token IS NULL` 的候选直接跳过 resume（interactive 分身 run 终态失败即此形态，token 校验永不可能通过，重试只刷「恢复令牌无效」噪音）；守护用例在 test_mission_context.py::TestWorkersAllTerminalFirstRunFailed + test_patrol.py::TestWorkerRecoveryNullTokenGuard。改「首 run 终态兜底」判定时须同步上条三处镜像 + 本条两消费方。
 
 ## 人工备注
 
@@ -71,3 +72,4 @@ _dispatch_execute_team → 多 worker 并行 → 全员收敛 → daemon run_syn
 
 <!-- MANUAL_NOTES_END -->
 - 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）
+- ql-20260903-003-3e1a：分身终态失败收链修复（唤醒统计计入首 run failed/killed 形态 + patrol 职责④ NULL token 跳过），详见 QUICKLOG 与「注意事项」末条

@@ -581,6 +581,123 @@ class TestWorkersAllTerminalWholeTree:
         assert (done, ok, bad) == (True, 1, 1)
 
 
+class TestWorkersAllTerminalFirstRunFailed:
+    """ql-20260903-003：分身 run 终态失败（429 限流打死等，error_code=
+    interactive_failed）的形态计入全终态判定。
+
+    生产 909e1344 实证：失败分身的 agent 已死不会再调 worker_done，会话保持
+    active + 未 done → ``is_worker_complete_from_active`` 恒 False → 全完成
+    判定永假 → 主控永不被唤醒，只能等 30min awaiting_input 超时静默收敛且无
+    最终汇报。本组对齐 ``mission_derive_status._virtual_status`` 既有「首
+    run failed/killed → failed」映射（ql-20260828-013-a55b），让 lease 完成钩
+    子 / patrol 预唤醒能在失败后立即带成败统计唤醒主控。守护边界：首 run
+    completed 未 done 仍不算终态（worker_done 仍是唯一完成信号，由
+    test_grandchild_incomplete_blocks_wake 锁定）。"""
+
+    async def test_failed_first_run_worker_counts_failed(self, db_session: AsyncSession):
+        """事故主形态：一分身 done、一分身首 run failed（会话 active 未 done）
+        → 全终态 (True, 1, 1)。"""
+        from datetime import UTC, datetime
+
+        from app.modules.agent.mission_context import workers_all_terminal_with_stats
+
+        ws = await _make_workspace(db_session)
+        root = await _seed_agent_session(db_session, ws.id)
+        mission = await _seed_active_mission(db_session, root)
+        await _seed_orchestrator_run(db_session, mission, status="completed")
+        # 分身一：正常完成（done + 首 run completed）
+        w_ok = await _seed_worker_subsession(
+            db_session, mission, root, worker_done_at=datetime.now(UTC)
+        )
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="completed",
+                role="impl",
+                objective="o",
+                agent_session_id=w_ok.id,
+            )
+        )
+        # 分身二：run 被限流打死（failed），agent 不会再调 worker_done
+        w_bad = await _seed_worker_subsession(db_session, mission, root)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="failed",
+                role="impl",
+                objective="o",
+                agent_session_id=w_bad.id,
+                error_code="interactive_failed",
+            )
+        )
+        await db_session.commit()
+
+        done, ok, bad = await workers_all_terminal_with_stats(db_session, mission)
+        assert (done, ok, bad) == (True, 1, 1)
+
+    async def test_killed_first_run_single_worker_all_failed(self, db_session: AsyncSession):
+        """killed 首 run 同形态；单分身全失败 → (True, 0, 1)（主控立即被唤醒
+        汇报失败并收敛，不再等 30min 超时）。"""
+        from app.modules.agent.mission_context import workers_all_terminal_with_stats
+
+        ws = await _make_workspace(db_session)
+        root = await _seed_agent_session(db_session, ws.id)
+        mission = await _seed_active_mission(db_session, root)
+        await _seed_orchestrator_run(db_session, mission, status="completed")
+        w_bad = await _seed_worker_subsession(db_session, mission, root)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="killed",
+                role="impl",
+                objective="o",
+                agent_session_id=w_bad.id,
+            )
+        )
+        await db_session.commit()
+
+        done, ok, bad = await workers_all_terminal_with_stats(db_session, mission)
+        assert (done, ok, bad) == (True, 0, 1)
+
+    async def test_failed_first_run_with_active_followup_blocks(self, db_session: AsyncSession):
+        """失败后追问重开工（更新的 run running = 活跃 turn）→ 不算终态，
+        不提前唤醒主控。"""
+        from app.modules.agent.mission_context import workers_all_terminal_with_stats
+
+        ws = await _make_workspace(db_session)
+        root = await _seed_agent_session(db_session, ws.id)
+        mission = await _seed_active_mission(db_session, root)
+        await _seed_orchestrator_run(db_session, mission, status="completed")
+        w_bad = await _seed_worker_subsession(db_session, mission, root)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="failed",
+                role="impl",
+                objective="o",
+                agent_session_id=w_bad.id,
+                error_code="interactive_failed",
+            )
+        )
+        # 追问轮 run（无 mission_id）仍在跑——会话有活跃 turn
+        db_session.add(
+            AgentRun(
+                agent_type="claude_code",
+                status="running",
+                agent_session_id=w_bad.id,
+                objective="追问",
+            )
+        )
+        await db_session.commit()
+
+        done, ok, bad = await workers_all_terminal_with_stats(db_session, mission)
+        assert (done, ok, bad) == (False, 0, 0)
+
+
 class TestWorkerBriefingCanDispatch:
     def test_default_off_keeps_output_byte_identical(self):
         """can_dispatch 默认 False——输出与不传参逐字节一致，不渲染新段（零回归）。"""

@@ -297,6 +297,16 @@ async def workers_all_terminal_with_stats(
     批量活跃 turn 查询 + ``control.is_worker_complete_from_active`` 纯函数
     （判据等价，test_worker_subsession_control 守护测试锁定）。
 
+    ql-20260903-003：终态判定补「首 run failed/killed」形态——失败分身
+    （429 限流打死等，error_code=interactive_failed）的 agent 已死不会再调
+    worker_done，会话保持 active + 未 done，纯 ``is_worker_complete_from_active``
+    恒 False → 全完成判定永假 → 主控永不被唤醒，只能等 30min awaiting_input
+    超时静默收敛且无最终汇报（生产 909e1344 实证）。本判定对齐
+    ``mission_derive_status._virtual_status`` 既有「首 run failed/killed →
+    failed」映射（ql-20260828-013-a55b）：会话 idle（无活跃 turn）+ 未 done +
+    首 run 终态 failed/killed → 计入终态、成败统计归失败；首 run completed
+    未 done 仍不算终态（worker_done 仍是唯一完成信号，孙层守护用例锁定）。
+
     纯查询：经传入 session 读取（lease 调用方在自身事务内可见本轮未提交的
     终态翻转——即时通知不漏当轮完成事件）。
     """
@@ -319,7 +329,29 @@ async def workers_all_terminal_with_stats(
         # planning 空集=未全完成（语义保留）。
         return False, 0, 0
     active_ids = await sessions_with_active_turns(db, list(worker_session_ids))
-    if not all(is_worker_complete_from_active(w, active_ids) for w in workers):
+    # 首 run 终态查表（mission 下带 role 的最早 run，与 mission_derive_status
+    # 的 first_run_status_by_session 同款构建）：失败分身形态判定输入。
+    first_run_status_by_session: dict[uuid.UUID, str] = {}
+    for r in sorted(
+        await MissionControlService(db).worker_runs(mission.id),
+        key=lambda x: x.created_at.isoformat() if x.created_at else "",
+    ):
+        if r.agent_session_id is not None and r.role is not None:
+            first_run_status_by_session.setdefault(r.agent_session_id, r.status)
+
+    def _is_terminal(w: AgentSession | AgentRun) -> bool:
+        if is_worker_complete_from_active(w, active_ids):
+            return True
+        # ql-20260903-003：idle + 未 done + 首 run 终态 failed/killed → 终态
+        # （失败分身，agent 已死不会调 worker_done；对齐 _virtual_status 映射）。
+        return (
+            isinstance(w, AgentSession)
+            and w.worker_done_at is None
+            and w.id not in active_ids
+            and first_run_status_by_session.get(w.id) in ("failed", "killed")
+        )
+
+    if not all(_is_terminal(w) for w in workers):
         return False, 0, 0
     ok = sum(
         1

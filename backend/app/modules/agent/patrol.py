@@ -715,7 +715,9 @@ class MissionPatrolService:
         中捕获了终态（网络断开前已写到 checkpoint 的产物），→ 补发终态（经
         ``DaemonService.sync_agent_run_status``，幂等，非终态回退被守卫）；②
         否则才走 ``ExecutionCoordinator.resume_run``（重置 pending，daemon 恢复
-        后重跑）。
+        后重跑）——但 ``resume_token`` 为 NULL 的候选直接跳过（ql-20260903-003：
+        token 校验永不可能通过，interactive 分身 run 终态失败即此形态，重试
+        只刷「恢复令牌无效」噪音；详见分支②注释）。
 
         候选 run 判据：``status ∈ {failed, killed}`` 且 ``mission_id`` 非空且
         属于「会话 mission」（session_id 指向真实 AgentSession——本次主修的
@@ -800,12 +802,24 @@ class MissionPatrolService:
 
             # ② 未完成（无 checkpoint 终态快照）→ resume 重置 pending，daemon
             # 恢复后重跑。resume_run 仅接 failed/killed（显式守卫，不猜）。
+            # ql-20260903-003：NULL resume_token 直接跳过——interactive 分身
+            # run 终态失败（429 限流等，error_code=interactive_failed）不携带
+            # token，token 校验（NULL != 任何入参）永不可能通过，逐轮重试只会
+            # 刷「恢复令牌无效」warning 噪音（生产 909e1344 实证 30 分钟死
+            # 循环）；该形态由 workers_all_terminal_with_stats 的「首 run
+            # failed/killed → 终态失败」判定接管唤醒主控，不走 resume。
+            if run.resume_token is None:
+                log.debug(
+                    "mission_patrol_worker_resume_skipped_no_token",
+                    run_id=str(run.id),
+                )
+                continue
             try:
                 await coord.resume_run(run.id, run.resume_token or "")
                 recovered += 1
             except Exception as exc:
-                # resume_token 缺失 / 状态不符 / token 校验失败：记 warn 跳过，
-                # 下轮 patrol 或人工介入；不翻转既有 failed/killed 终态。
+                # resume_token 状态不符 / token 校验失败：记 warn 跳过，下轮
+                # patrol 或人工介入；不翻转既有 failed/killed 终态。
                 log.warning(
                     "mission_patrol_worker_resume_failed",
                     run_id=str(run.id),

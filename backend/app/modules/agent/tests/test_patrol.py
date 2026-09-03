@@ -145,8 +145,14 @@ async def _make_worker_run(
     role: str | None = "arch",
     finished_at: datetime | None = None,
     created_at: datetime | None = None,
+    agent_session_id: uuid.UUID | None = None,
+    resume_token: str | None = None,
 ) -> AgentRun:
-    """建一条分身 run（role 可传 None 覆盖存量 NULL role 形态）。"""
+    """建一条分身 run（role 可传 None 覆盖存量 NULL role 形态）。
+
+    ``agent_session_id`` / ``resume_token`` 供职责④断线恢复候选用例
+    （ql-20260903-003：候选要求 agent_session_id 非空锚会话 mission）。
+    """
     extra: dict = {}
     if created_at is not None:
         extra["created_at"] = created_at
@@ -157,6 +163,8 @@ async def _make_worker_run(
         role=role,
         objective="分身目标",
         finished_at=finished_at,
+        agent_session_id=agent_session_id,
+        resume_token=resume_token,
         **extra,
     )
     session.add(run)
@@ -1731,3 +1739,95 @@ class TestZombieSessionDimension:
         # 存量 external 判死保留 mission zombie 标记（复活窗口语义），会话分身不写。
         assert "zombie_marked_at" in (external_mission.constraints or {})
         assert "zombie_marked_at" not in (session_mission.constraints or {})
+
+
+class TestWorkerRecoveryNullTokenGuard:
+    """ql-20260903-003：职责④ resume 的 NULL resume_token 守卫。
+
+    生产 909e1344 实证：interactive 分身 run 终态失败（429 限流，
+    error_code=interactive_failed）不携带 resume_token，职责④逐轮对它
+    ``resume_run(run.id, "")`` 恒抛 InvalidTokenError「恢复令牌无效」——
+    30 分钟死循环只刷 warning 噪音。NULL token = token 校验永不可能通过，
+    应跳过 resume 不重试（补发终态分支不受影响）；带 token 的断线候选照常
+    resume（正向对照，防守卫误伤既有断线恢复链路）。"""
+
+    @pytest.mark.asyncio
+    async def test_null_resume_token_skips_resume(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """NULL resume_token 的 failed 分身 run → 不尝试 resume（coordinator
+        零调用），recovered=0。"""
+        calls: list[tuple[uuid.UUID, str]] = []
+
+        class _StubCoordinator:
+            def __init__(self, session: AsyncSession) -> None:
+                pass
+
+            async def resume_run(self, run_id, resume_token, context_fingerprint=None):
+                calls.append((run_id, resume_token))
+                return SimpleNamespace(status="pending")
+
+        import app.modules.agent.coordinator as coordinator_mod
+
+        monkeypatch.setattr(coordinator_mod, "ExecutionCoordinatorService", _StubCoordinator)
+
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=1),
+            session_id=agent_session.id,
+        )
+        run = await _make_worker_run(
+            db_session,
+            mission.id,
+            status="failed",
+            agent_session_id=agent_session.id,
+        )
+        assert run.resume_token is None, "前置自检：interactive 分身 run 默认无 token"
+
+        recovered = await MissionPatrolService(db_session)._patrol_worker_recovery()
+
+        assert recovered == 0
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_with_resume_token_still_resumes(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """带 resume_token 的 failed 分身 run（断线候选）→ 照常 resume 一次。"""
+        calls: list[tuple[uuid.UUID, str]] = []
+
+        class _StubCoordinator:
+            def __init__(self, session: AsyncSession) -> None:
+                pass
+
+            async def resume_run(self, run_id, resume_token, context_fingerprint=None):
+                calls.append((run_id, resume_token))
+                return SimpleNamespace(status="pending")
+
+        import app.modules.agent.coordinator as coordinator_mod
+
+        monkeypatch.setattr(coordinator_mod, "ExecutionCoordinatorService", _StubCoordinator)
+
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=1),
+            session_id=agent_session.id,
+        )
+        run = await _make_worker_run(
+            db_session,
+            mission.id,
+            status="failed",
+            agent_session_id=agent_session.id,
+            resume_token="tok-123",
+        )
+
+        recovered = await MissionPatrolService(db_session)._patrol_worker_recovery()
+
+        assert recovered == 1
+        assert calls == [(run.id, "tok-123")]

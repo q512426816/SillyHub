@@ -308,3 +308,13 @@
 根因：初始/翻页后触发用 setTimeout(0)：早于 React 对 setState 的 DOM 提交与布局计算，scrollHeight=0 被 maybeAutoFill 守卫拦下且无重试——补拉链断在首跳（用户实测部署后问题1未解决；另会话偶发成功属时序竞争）
 方案：scheduleAutoFill 调度：双 rAF 等提交+布局；布局不可读（scrollHeight/clientHeight 为 0）继续 rAF 重试至多 10 帧（~160ms）后放弃（下次翻页/滚动再试）；初始满页与翻页链式两处触发统一走调度
 结果：page.test 27/27（新增布局延迟就绪用例——前 2 次读 0 后可读，断言 rAF 重试后仍自动补拉 prepend）绿；tsc 0；待重建 frontend 部署实测
+
+## ql-20260903-003-3e1a | 2026-09-03 10:07:22 | 团队任务分身终态失败后主控30分钟不被唤醒且巡逻resume死循环修复
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/agent/mission_context.py, backend/app/modules/agent/patrol.py
+需求：团队任务分身终态失败后主控30分钟不被唤醒且巡逻resume死循环修复
+根因：分身 run 被 429 限流打死（error_code=interactive_failed，resume_token=NULL）后：①agent 已死不会再调 worker_done，会话 active+未 done 使 workers_all_terminal_with_stats 恒判未全完成，lease 完成钩子与 patrol 预唤醒都不触发，主控永不被唤醒汇报，只能等 30min awaiting_input 超时静默收敛（converged/degraded）且无最终报告，用户看到团队任务卡死；②patrol 职责④每分钟对 NULL token 调 resume_run 恒抛 InvalidTokenError『恢复令牌无效』，30 分钟死循环只刷 warning 噪音（生产会话 909e1344 / mission c3fcf7d3 实证）
+方案：①mission_context.workers_all_terminal_with_stats 终态判定补『会话 idle+未 done+首 run 终态 failed/killed→终态失败』形态（对齐 mission_derive_status._virtual_status 既有 ql-20260828-013-a55b 首 run 兜底映射；首 run completed 未 done 仍不算终态，worker_done 唯一完成信号不动），失败分身计入成败统计，lease 完成钩子/patrol 预唤醒立即带『成功X失败Y』唤醒主控读产出、converge、向用户汇报；②patrol.py 职责④分支②前加 NULL resume_token 守卫直接跳过（debug 日志），断线候选带 token 照常 resume。新增测试 5 例（失败形态 3 + NULL token 守卫 2，含正向对照与追问重开工守护）
+结果：test_mission_context+test_patrol 79 passed（含新增 5）；test_worker_subsession_done/dead_worker/budget/lifecycle 50 passed；derive_status_matrix+converge_close+control 197 passed；ruff check/format 0；agent.md 注意事项+变更索引已同步。部署待办：后端镜像重建后生效
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_mission_context.py, backend/app/modules/agent/tests/test_patrol.py
