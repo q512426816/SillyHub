@@ -257,6 +257,8 @@ if isinstance(msg, dict) and msg.get("kind") == "agent_event":
 - **D-002@v1**（会话级信号事件化：status subtype + 有状态归一化器 + raw 降格调试）：覆盖于 §5.1、§7、R-02。
 - **D-003@v1**（usage 实时透传语义：任意携带事件即更新，非仅 turn_result）：覆盖于 §5.1、§7.5、R-07。
 - **D-004@v1**（override 撤回事件化表达：override:true + segment_id）：覆盖于 §5.1、§7、§7.5、R-01。
+- **D-005@v1**（执行期契约补遗：status 增 thinking_tokens 子类型、usage 增 ctx_tokens）：覆盖于 §7（types/schema 落地，task-03 提交归因）。
+- **D-006@v1**（双轨渲染已知改进差异豁免：主 agent Task result 配对新轨 call_id 优先、cache_* 完整帧聚合新轨更全）：覆盖于 §2 目标 2 的等价判据框架内，差异以测试冻结（dual-path 豁免 #2 + golden TestDocumentedFormatDivergences）。
 - 无未解决的 D-xxx@vN。
 
 ## 12. 自审（Self-Review）
