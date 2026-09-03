@@ -55,6 +55,12 @@
  * /pinned，已置顶行浅 brand 底高亮）；触发失败展示（sendGroupMessage 响应
  * triggered[].error 逐条 warning——消息本身已落时间线）。
  *
+ * 群 P2 第二波（2026-09-02）：引用回复（气泡 hover「引用回复」全员可用 →
+ * 输入区引用条（成员名+摘要+X 取消）→ 发送 body 带 reply_to_log_id；气泡
+ * metadata/SSE 事件 reply_to 快照 → 顶部竖线引用条纯视觉呈现）；未读（挂载
+ * PUT /read 推服务端已读位点 + 乐观清零列表缓存；时间线「第 N 条未读」前插
+ * 微信式「以下 N 条为新消息」分隔线——挂载快照只算一次，会话中新消息不再插线）。
+ *
  * 数据流关键点：
  *   - 回放身份还原：投影行 metadata.member_id/member_name（task-05 落库形态）
  *     ——2026-09-01-session-group-chat 收口：后端 /logs DTO 已暴露 metadata/
@@ -66,6 +72,7 @@
  */
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -74,7 +81,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Image as ImageIcon, Paperclip, Pin, PinOff, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
 
 import { Drawer, Modal } from "antd";
 import { MemberPanel } from "@/components/group-chat/member-panel";
@@ -102,6 +109,7 @@ import {
   getAgentSessionLogs,
   getGroupChat,
   listGroupChats,
+  markGroupRead,
   maxLogTimestamp,
   pinGroupMessage,
   sendGroupMessage,
@@ -111,6 +119,7 @@ import {
   type GroupChatListItemRead,
   type GroupChatStreamEnvelope,
   type GroupMessageAttachmentSummary,
+  type GroupMessageReplySnapshot,
   type GroupReplayLogEntry,
 } from "@/lib/daemon";
 import { useSession } from "@/stores/session";
@@ -185,6 +194,40 @@ function summaryToChips(items: GroupMessageAttachmentSummary[]): {
   }));
 }
 
+/* ────────────────────── 引用回复（群 P2 第二波，2026-09-02） ────────────────── */
+
+/** 引用摘要长度上限（对齐后端 content_head(60) 快照口径）。 */
+const REPLY_HEAD_MAX_CHARS = 60;
+
+/**
+ * 引用回复快照运行时守卫（回放 metadata 与实时事件 payload 同构；生成版
+ * metadata 是松散索引签名，此处窄化）：入参宽收（unknown——畸形旧数据/异常
+ * payload 容错），log_id 缺失/畸形 → null 不渲染引用条。
+ */
+export function parseReplySnapshot(raw: unknown): GroupMessageReplySnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Partial<GroupMessageReplySnapshot>;
+  const logId = typeof r.log_id === "string" ? r.log_id.trim() : "";
+  if (!logId) return null;
+  return {
+    log_id: logId,
+    member_name: typeof r.member_name === "string" ? r.member_name : "",
+    content_head: typeof r.content_head === "string" ? r.content_head : "",
+  };
+}
+
+/** 本地引用摘要（点「引用回复」时由当前气泡内容现算，与后端快照同口径）。 */
+export function quoteHeadOf(content: string): string {
+  return content.replace(/\s+/g, " ").trim().slice(0, REPLY_HEAD_MAX_CHARS);
+}
+
+/** 输入区引用条目标（被引用消息行 id + 发送者 + 内容摘要）。 */
+export interface GroupQuoteTarget {
+  logId: string;
+  memberName: string;
+  contentHead: string;
+}
+
 /* ────────────────────── 平铺时间线纯数据模型（单测推理面） ────────────────────── */
 
 /**
@@ -205,6 +248,8 @@ export type GroupTimelineEntry =
       isSelf: boolean;
       /** FR-05 补遗：随消息发送的附件摘要（metadata/log 事件 attachments；无附件 null）。 */
       attachments: GroupMessageAttachmentSummary[] | null;
+      /** 群 P2 引用回复快照（metadata/log 事件 reply_to；无引用 null）。 */
+      replyTo: GroupMessageReplySnapshot | null;
     }
   | {
       kind: "agent";
@@ -272,6 +317,8 @@ export function entryFromReplayLog(
         currentUserId != null && senderUserId != null && senderUserId === currentUserId,
       // FR-05 补遗：附件摘要（旧行/无附件缺省 null——附件条不渲染）。
       attachments: meta?.attachments ?? null,
+      // 群 P2 引用回复快照（缺省 null——气泡顶部引用条不渲染）。
+      replyTo: parseReplySnapshot(meta?.reply_to),
     };
   }
   if (log.channel !== "stdout") return null;
@@ -325,6 +372,8 @@ export function parseGroupLiveLog(
           senderUserId === currentUserId,
         // FR-05 补遗：附件摘要（实时事件 payload；无附件缺省不渲染）。
         attachments: env.attachments ?? null,
+        // 群 P2 引用回复快照（实时事件 payload；与回放 metadata 同构）。
+        replyTo: parseReplySnapshot(env.reply_to),
       },
     };
   }
@@ -784,10 +833,57 @@ export function GroupChatPanel({
 
   /* ── 群聊体验 quick（2026-09-02）：打开群即视为已读——挂载时写「上次打开 =
    *    now」本地记忆（列表行 @我红点据 this 抑制）。实时收到新 log 事件也推进
-   *    （在群内盯着时间线时到达的 @不构成未读）。 ── */
+   *    （在群内盯着时间线时到达的 @不构成未读）。
+   *    群 P2 第二波：另推服务端已读位点（PUT /read）——成功后本地乐观清零
+   *    presence 群列表缓存 + invalidate 群列表前缀（列表徽标即时消失，不等
+   *    重拉；失败静默，下次进群重试）。invalidate 落地后**再清一次**：兜「乐观
+   *    清零早于首拉（缓存空 no-op）+ invalidate 与首拉去重」的微时序——旧值
+   *    5 落缓存后最终仍被清零。 ── */
   useEffect(() => {
     markGroupOpened(groupId);
-  }, [groupId]);
+    const clearUnreadInCache = () => {
+      qc.setQueryData<GroupChatListItemRead[]>(
+        ["groupChats", "list", null],
+        (items) =>
+          items?.map((g) => (g.id === groupId ? { ...g, unread_count: 0 } : g)),
+      );
+    };
+    void (async () => {
+      try {
+        await markGroupRead(groupId);
+        clearUnreadInCache();
+        await qc.invalidateQueries({ queryKey: ["groupChats"] });
+        clearUnreadInCache();
+      } catch {
+        /* 已读位点纯增益：失败静默（不阻断群聊）。 */
+      }
+    })();
+  }, [groupId, qc]);
+
+  /* ── 群 P2 第二波 未读分隔线：挂载时快照群 unread_count（group props / 群
+   *    详情先到先用——markGroupRead 只清列表缓存与重拉，不动群详情查询，快照
+   *    不被已读动作污染）；回放时间线首次就绪时**计算一次**「第 N 条未读」锚点
+   *    （倒序第 unread_count 条消息行前插分隔线），此后会话中新消息不再改锚
+   *    （不二次插线）；unread=0 恒不渲染。换群 key 重挂载自然重算。 ── */
+  const unreadSnapshotRef = useRef<number | null>(null);
+  const unreadDividerComputedRef = useRef(false);
+  const [unreadDivider, setUnreadDivider] = useState<{
+    beforeId: string;
+    count: number;
+  } | null>(null);
+  useEffect(() => {
+    if (unreadSnapshotRef.current === null) {
+      const count = group?.unread_count ?? detail?.unread_count ?? null;
+      if (count != null && count > 0) unreadSnapshotRef.current = count;
+    }
+    if (unreadDividerComputedRef.current || entries.length === 0) return;
+    unreadDividerComputedRef.current = true;
+    const count = unreadSnapshotRef.current ?? 0;
+    if (count <= 0) return;
+    const messages = entries.filter((e) => e.kind !== "system");
+    const anchor = messages[Math.max(0, messages.length - count)];
+    if (anchor) setUnreadDivider({ beforeId: anchor.id, count });
+  }, [entries, group, detail]);
 
   /* ── 回放 + SSE 订阅（sessionId 就位后一次性装配；key 重挂载清全部状态） ── */
   useEffect(() => {
@@ -1073,6 +1169,8 @@ export function GroupChatPanel({
 
   /* ── 输入区：草稿 / @补全 / typing 上报 / 发送 / 附件（FR-05 补遗） ── */
   const [draft, setDraft] = useState("");
+  /* 群 P2 引用回复：输入区引用条目标（null=无引用；发送成功清空、失败保留重发）。 */
+  const [replyTarget, setReplyTarget] = useState<GroupQuoteTarget | null>(null);
   /* 手机端群聊 quick：窄屏成员抽屉开关。 */
   const [membersDrawerOpen, setMembersDrawerOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -1140,6 +1238,12 @@ export function GroupChatPanel({
     setDraft(value);
     if (value.trim()) reportTyping(value);
   };
+
+  /** 点气泡「引用回复」→ 输入区挂引用条并聚焦（全员可用，群 P2 第二波）。 */
+  const handleQuoteReply = useCallback((target: GroupQuoteTarget) => {
+    setReplyTarget(target);
+    inputRef.current?.focus();
+  }, []);
 
   const handleMentionSelect = useCallback((entity: { displayName: string }) => {
     const input = inputRef.current;
@@ -1217,9 +1321,12 @@ export function GroupChatPanel({
         groupId,
         content,
         attachmentIds.length > 0 ? attachmentIds : undefined,
+        // 群 P2 引用回复：引用条挂起时随消息带被引用行 id（无引用 null 不发键）。
+        replyTarget?.logId ?? null,
       );
       setDraft("");
       setPendingAttachments([]);
+      setReplyTarget(null);
       setUploadError(null);
       /* ── quick 群 P2 触发失败展示：消息恒 200 已落时间线，单成员触发失败
        *    （附件引擎不符/机器离线/闸满等）在 triggered[].error 透传——逐条
@@ -1238,7 +1345,7 @@ export function GroupChatPanel({
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [draft, sending, groupId, pendingAttachments, notify, stopTypingReport]);
+  }, [draft, sending, groupId, pendingAttachments, replyTarget, notify, stopTypingReport]);
 
   const handleSend = useCallback(async () => {
     const content = draft.trim();
@@ -1636,44 +1743,63 @@ export function GroupChatPanel({
             </p>
           )}
           {entries.map((entry) => (
-            <GroupTimelineRow
-              key={entry.id}
-              entry={entry}
-              memberNames={memberNames}
-              replying={entry.kind === "user" ? (replyingBy[entry.id] ?? []) : []}
-              providerLabel={
-                entry.kind === "agent"
-                  ? entry.memberId
-                    ? (providerLabelByMemberKey.get(entry.memberId) ??
-                      providerLabelByMemberKey.get(entry.memberName ?? "") ??
-                      null)
-                    : (providerLabelByMemberKey.get(entry.memberName ?? "") ?? null)
-                  : null
-              }
-              avatar={
-                entry.kind === "user"
-                  ? (entry.senderUserId
-                      ? avatarByUserId.get(entry.senderUserId)
-                      : undefined) ||
-                    avatarByMemberKey.get(entry.senderName) ||
-                    null
-                  : entry.kind === "agent"
-                    ? (entry.memberId
-                        ? avatarByMemberKey.get(entry.memberId) ??
-                          avatarByMemberKey.get(entry.memberName ?? "")
-                        : avatarByMemberKey.get(entry.memberName ?? "")) || null
+            <Fragment key={entry.id}>
+              {/* 群 P2 未读分隔线（微信式居中细线+文字）：挂载快照的第 N 条未读
+                  消息前插一次；会话中后续新消息不再插线（锚点只算一次）。 */}
+              {unreadDivider?.beforeId === entry.id && (
+                <div
+                  data-testid="group-unread-divider"
+                  data-before-log-id={unreadDivider.beforeId}
+                  role="separator"
+                  aria-label={`以下 ${unreadDivider.count} 条为新消息`}
+                  className="my-3 flex items-center gap-2"
+                >
+                  <span aria-hidden className="h-px min-w-8 flex-1 bg-border" />
+                  <span className="flex-none text-[11px] font-medium text-brand-600 dark:text-brand-300">
+                    以下 {unreadDivider.count} 条为新消息
+                  </span>
+                  <span aria-hidden className="h-px min-w-8 flex-1 bg-border" />
+                </div>
+              )}
+              <GroupTimelineRow
+                entry={entry}
+                memberNames={memberNames}
+                replying={entry.kind === "user" ? (replyingBy[entry.id] ?? []) : []}
+                onQuote={handleQuoteReply}
+                providerLabel={
+                  entry.kind === "agent"
+                    ? entry.memberId
+                      ? (providerLabelByMemberKey.get(entry.memberId) ??
+                        providerLabelByMemberKey.get(entry.memberName ?? "") ??
+                        null)
+                      : (providerLabelByMemberKey.get(entry.memberName ?? "") ?? null)
                     : null
-              }
-              streaming={
-                entry.kind === "agent" &&
-                streamingKeys.has(agentStreamKey(entry)) &&
-                lastAgentIdByStreamKey.get(agentStreamKey(entry)) === entry.id
-              }
-              canPin={isOwner && entry.kind !== "system"}
-              isPinned={pinned?.log_id === entry.id}
-              pinPending={pinMutation.isPending}
-              onPin={(logId) => pinMutation.mutate(logId)}
-            />
+                }
+                avatar={
+                  entry.kind === "user"
+                    ? (entry.senderUserId
+                        ? avatarByUserId.get(entry.senderUserId)
+                        : undefined) ||
+                      avatarByMemberKey.get(entry.senderName) ||
+                      null
+                    : entry.kind === "agent"
+                      ? (entry.memberId
+                          ? avatarByMemberKey.get(entry.memberId) ??
+                            avatarByMemberKey.get(entry.memberName ?? "")
+                          : avatarByMemberKey.get(entry.memberName ?? "")) || null
+                      : null
+                }
+                streaming={
+                  entry.kind === "agent" &&
+                  streamingKeys.has(agentStreamKey(entry)) &&
+                  lastAgentIdByStreamKey.get(agentStreamKey(entry)) === entry.id
+                }
+                canPin={isOwner && entry.kind !== "system"}
+                isPinned={pinned?.log_id === entry.id}
+                pinPending={pinMutation.isPending}
+                onPin={(logId) => pinMutation.mutate(logId)}
+              />
+            </Fragment>
           ))}
         </div>
 
@@ -1734,6 +1860,40 @@ export function GroupChatPanel({
             />
           )}
           <div className="rounded-xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-primary focus-within:shadow-primary">
+            {/* 群 P2 引用条：被引用消息摘要一行 + 取消（发送随 body 带
+                reply_to_log_id；X 清空回到普通发送）。 */}
+            {replyTarget && (
+              <div
+                data-testid="group-reply-bar"
+                data-reply-to-log-id={replyTarget.logId}
+                className="flex items-center gap-2 border-b border-border px-3 py-2"
+              >
+                <Quote
+                  aria-hidden
+                  className="h-3.5 w-3.5 flex-none text-brand-600 dark:text-brand-300"
+                />
+                <p
+                  className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+                  title={`${replyTarget.memberName}：${replyTarget.contentHead}`}
+                >
+                  <span className="font-semibold text-foreground">
+                    {replyTarget.memberName}
+                  </span>
+                  <span className="mx-1">：</span>
+                  {replyTarget.contentHead}
+                </p>
+                <button
+                  type="button"
+                  aria-label="取消引用回复"
+                  title="取消引用回复"
+                  data-testid="group-reply-cancel"
+                  onClick={() => setReplyTarget(null)}
+                  className="flex h-5 w-5 flex-none items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <X aria-hidden className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             {/* 待发附件 chips（FR-05 补遗，单聊 session-input-bar 同形态）。 */}
             {(pendingAttachments.length > 0 || uploading > 0 || uploadError) && (
               <div className="space-y-1.5 px-3 pt-2.5">
@@ -1938,6 +2098,69 @@ function PinMessageButton({
   );
 }
 
+/**
+ * 气泡「引用回复」小按钮（群 P2 第二波：**全员可见**，行容器 group hover 浮现；
+ * 点击把被引用消息摘要挂到输入区引用条）。jsdom 无 hover——按钮恒在 DOM，
+ * opacity 仅视觉（测试可直接命中）。
+ */
+function QuoteMessageButton({
+  target,
+  onQuote,
+  className,
+}: {
+  target: GroupQuoteTarget;
+  onQuote: (target: GroupQuoteTarget) => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="引用回复"
+      title="引用回复"
+      data-testid="group-msg-reply"
+      data-log-id={target.logId}
+      onClick={() => onQuote(target)}
+      className={cn(
+        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-colors hover:bg-muted hover:text-brand-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:text-brand-300",
+        className,
+      )}
+    >
+      <Quote aria-hidden className="h-3 w-3" />
+    </button>
+  );
+}
+
+/**
+ * 气泡顶部引用条（群 P2 第二波）：左侧竖线 + 被引用成员名 + 内容摘要截断
+ * （纯视觉呈现，不跳转定位原消息）。self 气泡走白色半透明阶（primary 底上
+ * 可读），他人气泡走 muted + brand 竖线。
+ */
+function ReplyQuoteBar({
+  snapshot,
+  self,
+}: {
+  snapshot: GroupMessageReplySnapshot;
+  self: boolean;
+}) {
+  return (
+    <div
+      data-testid="group-msg-reply-quote"
+      data-reply-to-log-id={snapshot.log_id}
+      className={cn(
+        "mb-1.5 flex items-center gap-1.5 rounded-md border-l-2 px-2 py-1 text-[11px] leading-4",
+        self
+          ? "border-white/60 bg-white/15 text-white/85"
+          : "border-brand-400 bg-muted/60 text-muted-foreground dark:border-brand-500/60",
+      )}
+    >
+      <span className={cn("shrink-0 font-semibold", !self && "text-foreground")}>
+        {snapshot.member_name}
+      </span>
+      <span className="min-w-0 truncate">{snapshot.content_head}</span>
+    </div>
+  );
+}
+
 function GroupTimelineRow({
   entry,
   memberNames,
@@ -1949,6 +2172,7 @@ function GroupTimelineRow({
   isPinned,
   pinPending,
   onPin,
+  onQuote,
 }: {
   entry: GroupTimelineEntry;
   memberNames: readonly string[];
@@ -1965,11 +2189,29 @@ function GroupTimelineRow({
   /** 置顶请求进行中（防连点）。 */
   pinPending: boolean;
   onPin: (logId: string) => void;
+  /** 引用回复入口（群 P2：全员可用；目标=本行摘要）。 */
+  onQuote: (target: GroupQuoteTarget) => void;
 }) {
   // 已置顶行高亮：浅 brand 底 + 等宽外扩（-mx-2 px-2 不改变行宽，仅底色外延）。
   const pinnedRowClass = isPinned
     ? "-mx-2 rounded-xl bg-brand-50/70 px-2 dark:bg-brand-500/10"
     : "";
+
+  // 引用回复目标摘要（群 P2：本行内容现算，口径对齐后端 content_head(60)）。
+  const quoteTarget: GroupQuoteTarget | null =
+    entry.kind === "user"
+      ? {
+          logId: entry.id,
+          memberName: entry.senderName,
+          contentHead: quoteHeadOf(entry.content),
+        }
+      : entry.kind === "agent"
+        ? {
+            logId: entry.id,
+            memberName: entry.memberName ?? "Agent 成员",
+            contentHead: quoteHeadOf(entry.content),
+          }
+        : null;
 
   if (entry.kind === "system") {
     return (
@@ -1992,26 +2234,30 @@ function GroupTimelineRow({
           data-self="true"
           data-sender={entry.senderName}
           data-log-id={entry.id}
-          className={cn("my-2.5 flex items-end justify-end gap-1.5", pinnedRowClass)}
+          className={cn("group my-2.5 flex items-end justify-end gap-1.5", pinnedRowClass)}
         >
           <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
             {formatTime(entry.timestamp)}
           </span>
           <div className="flex max-w-[82%] flex-col items-end gap-1">
-            {canPin && (
-              <PinMessageButton
-                logId={entry.id}
-                onPin={onPin}
-                disabled={pinPending}
-                className="-mb-1"
-              />
+            {/* 悬浮操作行（群 P2：引用回复全员 + 群主图钉；hover 浮现）。 */}
+            {quoteTarget && (
+              <div className="-mb-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                {canPin && (
+                  <PinMessageButton logId={entry.id} onPin={onPin} disabled={pinPending} />
+                )}
+                <QuoteMessageButton target={quoteTarget} onQuote={onQuote} />
+              </div>
             )}
             {chips.length > 0 && <AttachmentChips attachments={chips} align="end" />}
-            {entry.content ? (
+            {(entry.replyTo || entry.content) && (
               <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
-                {renderMentionHighlights(entry.content, memberNames, true)}
+                {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self />}
+                {entry.content
+                  ? renderMentionHighlights(entry.content, memberNames, true)
+                  : null}
               </div>
-            ) : null}
+            )}
             <ReplyingTags replying={replying} />
           </div>
           <GroupMemberAvatar
@@ -2033,7 +2279,7 @@ function GroupTimelineRow({
         data-testid="group-msg-user"
         data-sender={entry.senderName}
         data-log-id={entry.id}
-        className={cn("my-2.5 flex items-start gap-2.5", pinnedRowClass)}
+        className={cn("group my-2.5 flex items-start gap-2.5", pinnedRowClass)}
       >
         <GroupMemberAvatar
           avatar={avatar}
@@ -2049,13 +2295,17 @@ function GroupTimelineRow({
             {canPin && (
               <PinMessageButton logId={entry.id} onPin={onPin} disabled={pinPending} />
             )}
+            {quoteTarget && <QuoteMessageButton target={quoteTarget} onQuote={onQuote} />}
           </div>
           {chips.length > 0 && <AttachmentChips attachments={chips} align="start" />}
-          {entry.content ? (
+          {(entry.replyTo || entry.content) && (
             <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tl-md border border-border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
-              {renderMentionHighlights(entry.content, memberNames, false)}
+              {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self={false} />}
+              {entry.content
+                ? renderMentionHighlights(entry.content, memberNames, false)
+                : null}
             </div>
-          ) : null}
+          )}
           <ReplyingTags replying={replying} />
         </div>
       </div>
@@ -2070,7 +2320,7 @@ function GroupTimelineRow({
       data-member-id={entry.memberId ?? undefined}
       data-member-name={entry.memberName ?? undefined}
       data-log-id={entry.id}
-      className={cn("my-2.5 flex items-start gap-2.5", pinnedRowClass)}
+      className={cn("group my-2.5 flex items-start gap-2.5", pinnedRowClass)}
     >
       <GroupMemberAvatar
         avatar={avatar}
@@ -2096,6 +2346,7 @@ function GroupTimelineRow({
           {canPin && (
             <PinMessageButton logId={entry.id} onPin={onPin} disabled={pinPending} />
           )}
+          {quoteTarget && <QuoteMessageButton target={quoteTarget} onQuote={onQuote} />}
         </div>
         {/* 群聊体验 quick（2026-09-02）：agent 回复走 MarkdownText（content 已经
             classifySessionLog 剥 [ASSISTANT] 等前缀；流式 partial 同容器容错渲染），

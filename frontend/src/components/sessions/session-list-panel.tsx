@@ -1524,9 +1524,8 @@ interface GroupChatSectionProps {
  * 列表顶部「群聊」分区：分区头（Users 图标 + 计数 + 「＋」新建，**可折叠**——
  * quick 照「本地 Agent 小节」折叠惯例 ▶/▼ + localStorage 记忆；折叠时只留
  * 一行「群聊（N）」摘要）+ 群行（facepile 成员摘要 + 群名 + 群聊徽标 + 最后
- * 消息摘要）。与单聊树视觉分区（照 TOOL_REPORT_SECTION_KEY 分桶先例的收纳
- * 形态，原型 .sess-group-label「群聊」/「单聊」两段式）；@全体 未读徽标位
- * 预留（task-03 群消息管线落地后接入，本卡 DTO 尚无未读计数）。
+ * 消息摘要 + 未读数徽标）。与单聊树视觉分区（照 TOOL_REPORT_SECTION_KEY 分桶
+ * 先例的收纳形态，原型 .sess-group-label「群聊」/「单聊」两段式）。
  */
 function GroupChatSection({
   groups,
@@ -1631,6 +1630,8 @@ interface GroupChatRowProps {
  * 群行（原型 .sess-item 群形态）：facepile 头像堆叠 + 群名 + 群聊徽标 + 摘要。
  * 群聊体验 quick（2026-09-02）：last_mention 晚于本地已读记忆（打开群即已读，
  * group-unread）→ 行首红点 + 摘要行前缀「[有人@我]」（微信式 brand 色高亮）。
+ * 群 P2 第二波：unread_count（服务端已读位点）> 0 → 群名右侧数字徽标（99+），
+ * 与 @我红点并存（红点视觉优先）。
  */
 function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
   const members = group.members ?? [];
@@ -1715,8 +1716,18 @@ function GroupChatRow({ group, selected, onSelect }: GroupChatRowProps) {
           </span>
         </span>
       </div>
-      {/* @全体/未读徽标位（预留：task-03 消息管线 + task-08 群视图接入） */}
-      <span aria-hidden className="shrink-0" data-badge-slot="mention" />
+      {/* 未读数徽标（群 P2 第二波，2026-09-02）：unread_count>0 → 群名右侧数字
+          徽标（后端 cap 99 → 显示「99+」；brand 底）；与 @我红点并存（@我 红点
+          视觉优先，徽标只是计数）。进入群聊面板挂载即 PUT /read 清零。 */}
+      {group.unread_count > 0 && (
+        <span
+          data-testid="group-unread-badge"
+          aria-label={`${group.unread_count >= 99 ? "99+" : group.unread_count} 条未读`}
+          className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand-600 px-1 text-[10.5px] font-semibold leading-none text-white"
+        >
+          {group.unread_count >= 99 ? "99+" : group.unread_count}
+        </span>
+      )}
     </div>
   );
 }

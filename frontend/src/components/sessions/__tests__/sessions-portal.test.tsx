@@ -115,6 +115,9 @@ const mocks = vi.hoisted(() => ({
   streamGroupChat: vi.fn(),
   streamGroupClose: vi.fn(),
   streamGroupResync: vi.fn(),
+  // 群 P2 第二波：挂载标记已读（PUT /read）——mock 工厂需同名导出防 undefined
+  // 调用（面板挂载 effect 的静默 catch 会掩盖缺失）。
+  markGroupRead: vi.fn(),
   // task-06（D-001/D-006）：会话列表变更信号订阅——捕获 opts（onEvent /
   // onReconnected 触发 invalidate）+ close 调用断言（unmount 关订阅）。
   // 2026-08-30 补 mock 债（f7f99a2f session-usage-stats，同 page.test）。
@@ -204,6 +207,7 @@ vi.mock("@/lib/daemon", () => ({
   sendGroupMessage: (...args: unknown[]) => mocks.sendGroupMessage(...args),
   sendGroupTyping: (...args: unknown[]) => mocks.sendGroupTyping(...args),
   streamGroupChat: (...args: unknown[]) => mocks.streamGroupChat(...args),
+  markGroupRead: (...args: unknown[]) => mocks.markGroupRead(...args),
   // maxLogTimestamp 纯函数（面板回放游标）：同实现重述（mock 工厂内无法引用
   // 真模块导出；语义=取最大 ISO timestamp）。
   maxLogTimestamp: (
@@ -681,6 +685,8 @@ beforeEach(() => {
     triggered: [],
   });
   mocks.sendGroupTyping.mockResolvedValue(undefined);
+  // 群 P2 第二波：挂载标记已读默认成功（204）。
+  mocks.markGroupRead.mockResolvedValue(undefined);
   mocks.streamGroupChat.mockReturnValue({
     close: mocks.streamGroupClose,
     getLastEventId: () => null,
@@ -1727,6 +1733,7 @@ function makeGroupListItem(): GroupChatListItemRead {
         team_enabled: false,
       },
     ],
+    unread_count: 0,
     online_member_ids: [],
     last_message: null,
   };

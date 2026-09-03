@@ -2300,6 +2300,7 @@ function makeGroupListItem(
     ],
     online_member_ids: [],
     last_message: "小码：已定位到问题在 hooks 依赖数组…",
+    unread_count: 0,
     ...overrides,
   };
 }
@@ -2325,8 +2326,8 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
     // facepile：成员昵称 title 提示（小码/林一）。
     expect(row.querySelector('[title="小码"]')).toBeTruthy();
     expect(row.querySelector('[title="林一"]')).toBeTruthy();
-    // @全体 徽标位预留（占位 slot 存在）。
-    expect(row.querySelector('[data-badge-slot="mention"]')).toBeTruthy();
+    // 群 P2 第二波：unread_count=0（固件缺省）→ 未读徽标不渲染。
+    expect(screen.queryByTestId("group-unread-badge")).toBeNull();
 
     fireEvent.click(row);
     expect(onSelectGroup).toHaveBeenCalledTimes(1);
@@ -2479,6 +2480,54 @@ describe("SessionListPanel 群行 @我未读提示（quick）", () => {
     const row = await screen.findByTestId("group-chat-row");
     expect(row.getAttribute("data-mention-unread")).toBeNull();
     expect(screen.queryByTestId("group-mention-unread-dot")).toBeNull();
+  });
+});
+
+// ── 11c. 群行未读数徽标（群 P2 第二波，2026-09-02）─────────────────────────
+
+describe("SessionListPanel 群行未读数徽标（群 P2 第二波）", () => {
+  it("unread_count>0 → 群名右侧数字徽标；99 封顶显示 99+；0 不渲染", async () => {
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem({ id: "g-unread-5", unread_count: 5 }),
+      makeGroupListItem({ id: "g-unread-99", title: "压测大群", unread_count: 99 }),
+      makeGroupListItem({ id: "g-read-0", title: "已读静默群", unread_count: 0 }),
+    ]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+
+    await screen.findAllByTestId("group-chat-row");
+    const badgeOf = (gid: string): HTMLElement | null =>
+      document.querySelector<HTMLElement>(
+        `[data-group-id='${gid}'] [data-testid='group-unread-badge']`,
+      );
+    // 5 → 数字徽标。
+    expect(badgeOf("g-unread-5")?.textContent).toBe("5");
+    // 99（后端 cap）→ 99+。
+    expect(badgeOf("g-unread-99")?.textContent).toBe("99+");
+    // 0 → 不渲染。
+    expect(badgeOf("g-read-0")).toBeNull();
+  });
+
+  it("与 @我红点并存：unread 徽标计数 + @我 红点/[有人@我] 前缀同屏（红点视觉优先）", async () => {
+    window.localStorage.removeItem("sillyhub-group-last-open-g-1");
+    mocks.listGroupChats.mockResolvedValue([
+      makeGroupListItem({
+        unread_count: 3,
+        last_mention: {
+          content: "@鲸落 看下这个白屏",
+          ts: "2026-09-02T03:00:00Z",
+          member_name: "小码",
+        },
+      }),
+    ]);
+    renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
+
+    const row = await screen.findByTestId("group-chat-row");
+    expect(screen.getByTestId("group-unread-badge").textContent).toBe("3");
+    expect(screen.getByTestId("group-mention-unread-dot")).toBeTruthy();
+    expect(screen.getByTestId("group-mention-unread-badge").textContent).toBe(
+      "[有人@我]",
+    );
+    expect(row.getAttribute("data-mention-unread")).toBe("true");
   });
 });
 

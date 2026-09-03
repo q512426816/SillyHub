@@ -11448,7 +11448,7 @@
           "daemon-group-chat"
         ],
         "summary": "Send Group Message",
-        "description": "发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。\n\n未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员；触发\n成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1）。附件随消息落\nuser_input metadata 摘要并在触发成员时随注入下发（FR-05 补遗）。",
+        "description": "发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。\n\n未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员（并行\n触发，群 P2 第二波）；触发成员忙轮排队（满 5 → 409）。任意用户成员可发\n（§6.1）。附件随消息落 user_input metadata 摘要并在触发成员时随注入下发\n（FR-05 补遗）。``reply_to_log_id`` 引用回复（校验属本群时间线，跨群/\n不存在 404，快照进 metadata 与群频道事件）。",
         "operationId": "send_group_message_api_daemon_group_chats__group_id__messages_post",
         "parameters": [
           {
@@ -11482,6 +11482,44 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/group-chats/{group_id}/read": {
+      "put": {
+        "tags": [
+          "daemon",
+          "daemon-group-chat"
+        ],
+        "summary": "Mark Group Chat Read",
+        "description": "标记群已读至此（本成员视角；无 body——服务端直接置 now()）。\n\n成员校验（非成员 404 不泄露存在性）后推进 ``agent_group_members.\nlast_read_at``；幂等（重复 PUT 只前移位点）。任意用户成员可标记（§6.1\n读权限同款）。",
+        "operationId": "mark_group_chat_read_api_daemon_group_chats__group_id__read_put",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -40461,6 +40499,23 @@
             "type": "array",
             "title": "Online Member Ids",
             "default": []
+          },
+          "last_message_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message At"
+          },
+          "unread_count": {
+            "type": "integer",
+            "title": "Unread Count",
+            "default": 0
           }
         },
         "type": "object",
@@ -40600,6 +40655,23 @@
             ],
             "title": "Last Message"
           },
+          "last_message_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message At"
+          },
+          "unread_count": {
+            "type": "integer",
+            "title": "Unread Count",
+            "default": 0
+          },
           "last_mention": {
             "anyOf": [
               {
@@ -40627,7 +40699,7 @@
           "created_at"
         ],
         "title": "GroupChatListItemRead",
-        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。\n\n``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.\npinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed\n``GroupChatPinnedRead``；无置顶为 None）。"
+        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。\n\n``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.\npinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed\n``GroupChatPinnedRead``；无置顶为 None）。\n\n``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线\n最新一行 ts（无消息 None，未读排序数据源）与本成员未读数\n（``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则\nts > 位点；cap 99+）。"
       },
       "GroupChatPinnedRead": {
         "properties": {
@@ -41873,11 +41945,24 @@
             "maxItems": 10,
             "title": "Attachment Ids",
             "description": "附件引用（SessionAttachment id）"
+          },
+          "reply_to_log_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To Log Id",
+            "description": "引用回复目标：群时间线消息行 id（跨群/不存在 404）"
           }
         },
         "type": "object",
         "title": "GroupMessageSendRequest",
-        "description": "``POST /group-chats/{id}/messages`` 写体（design §4.1；FR-05 补遗扩附件）。\n\nschema.py 不在本卡 allowed_paths——请求体随 router 落地（service 响应体在\ngroup/service.py，``GroupChatListItemRead`` 本文件先例）。\n\n附件口径照单聊 ``SessionInjectRequest``（2026-08-20-session-multimodal-\nattachments）：``attachment_ids`` 为上传端点（POST /daemon/session-\nattachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时\n``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归\nservice，DTO 层总量兜底）。"
+        "description": "``POST /group-chats/{id}/messages`` 写体（design §4.1；FR-05 补遗扩附件）。\n\nschema.py 不在本卡 allowed_paths——请求体随 router 落地（service 响应体在\ngroup/service.py，``GroupChatListItemRead`` 本文件先例）。\n\n附件口径照单聊 ``SessionInjectRequest``（2026-08-20-session-multimodal-\nattachments）：``attachment_ids`` 为上传端点（POST /daemon/session-\nattachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时\n``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归\nservice，DTO 层总量兜底）。\n\n``reply_to_log_id``（群 P2 第二波引用回复）：被引用的群时间线消息行 id\n（user_input / 投影行均可；service 校验属本群时间线，跨群/不存在 404），\n发送后 metadata 与群频道事件落 ``reply_to`` 快照。"
       },
       "GroupPinnedRequest": {
         "properties": {

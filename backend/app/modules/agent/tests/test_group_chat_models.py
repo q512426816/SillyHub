@@ -503,6 +503,9 @@ def test_agent_group_member_table_contract() -> None:
         "invited_by",
         "joined_at",
         "removed_at",
+        # 未读位点（20260902120000，群 P2 第二波）：本成员已读时间戳，NULL=从未
+        # 标记已读（未读数按全量计）。
+        "last_read_at",
     }
     actual = set(AgentGroupMember.model_fields.keys())
     assert actual == expected, (

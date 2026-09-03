@@ -58,13 +58,18 @@ import {
   buildTimelineFromReplay,
   containsMentionAll,
   entryFromReplayLog,
+  parseReplySnapshot,
   pruneTypingIndicators,
+  quoteHeadOf,
   removeReplyingMembers,
   sortGroupTimeline,
   type GroupReplyingMember,
   type GroupTypingIndicator,
 } from "@/components/group-chat/group-chat-panel";
-import type { GroupReplayLogEntry } from "@/lib/daemon";
+import type {
+  GroupChatListItemRead,
+  GroupReplayLogEntry,
+} from "@/lib/daemon";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -76,6 +81,8 @@ const mocks = vi.hoisted(() => ({
   // quick 群 P2 置顶：PUT/DELETE /pinned mock 断言。
   pinGroupMessage: vi.fn(),
   unpinGroupMessage: vi.fn(),
+  // 群 P2 第二波：PUT /read 已读位点 mock 断言。
+  markGroupRead: vi.fn(),
   machinesHook: vi.fn(),
   listProviders: vi.fn(),
   profilesHook: vi.fn(),
@@ -101,6 +108,7 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
     sendGroupTyping: (...args: unknown[]) => mocks.sendGroupTyping(...args),
     pinGroupMessage: (...args: unknown[]) => mocks.pinGroupMessage(...args),
     unpinGroupMessage: (...args: unknown[]) => mocks.unpinGroupMessage(...args),
+    markGroupRead: (...args: unknown[]) => mocks.markGroupRead(...args),
     // streamGroupChat / getAgentSessionLogs / maxLogTimestamp / PROVIDER_META
     // 保真——真实 SSE 消费循环经路由 fetch 驱动。
   };
@@ -357,13 +365,19 @@ function makeReplayLogs(): GroupReplayLogEntry[] {
 
 // ── 渲染助手 ─────────────────────────────────────────────────────────────
 
-function renderPanel(): ReturnType<typeof render> {
+/** 本用例渲染的 QueryClient（乐观清零断言读缓存用；renderPanel 每次覆写）。 */
+let panelQc: QueryClient | null = null;
+
+function renderPanel(
+  group: GroupChatListItemRead | null = null,
+): ReturnType<typeof render> {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  panelQc = qc;
   return render(
     <QueryClientProvider client={qc}>
-      <GroupChatPanel groupId="g-1" group={null} onSessionListRefresh={vi.fn()} />
+      <GroupChatPanel groupId="g-1" group={group} onSessionListRefresh={vi.fn()} />
     </QueryClientProvider>,
   );
 }
@@ -412,6 +426,8 @@ beforeEach(() => {
     member_name: "鲸落",
   });
   mocks.unpinGroupMessage.mockResolvedValue(undefined);
+  // 群 P2 第二波：挂载标记已读默认成功（204）。
+  mocks.markGroupRead.mockResolvedValue(undefined);
   mocks.machinesHook.mockReturnValue({
     items: [],
     sharedToMe: [],
@@ -463,6 +479,7 @@ describe("平铺时间线纯函数（task-08 / D-011）", () => {
         content: `消息-${id}`,
         isSelf: false,
         attachments: null,
+        replyTo: null,
       }) as const;
     const agent = (id: string, ts: string, memberName: string) =>
       ({
@@ -612,7 +629,53 @@ describe("平铺时间线纯函数（task-08 / D-011）", () => {
       ),
     ).toMatchObject({ kind: "user", senderName: "成员", isSelf: false });
   });
+
+  it("parseReplySnapshot/quoteHeadOf（群 P2 引用快照守卫 + 摘要口径）：log_id 缺失 → null；摘要空白折叠 + 60 截断", () => {
+    // 回放/实时同构快照守卫。
+    expect(
+      parseReplySnapshot({ log_id: "l-1", member_name: "林一", content_head: "白屏" }),
+    ).toEqual({ log_id: "l-1", member_name: "林一", content_head: "白屏" });
+    expect(parseReplySnapshot(null)).toBeNull();
+    expect(parseReplySnapshot(undefined)).toBeNull();
+    // log_id 缺失/空串 → 不渲染引用条（畸形数据容错）。
+    expect(parseReplySnapshot({ member_name: "林一", content_head: "白屏" })).toBeNull();
+    expect(parseReplySnapshot({ log_id: "  ", member_name: "林一" })).toBeNull();
+    // 摘要：空白折叠为单空格 + 60 字截断（对齐后端 content_head(60)）。
+    expect(quoteHeadOf("  多行\n\n消息  ")).toBe("多行 消息");
+    expect(quoteHeadOf("x".repeat(80)).length).toBe(60);
+    // entryFromReplayLog：metadata.reply_to → user 条目 replyTo（缺省 null）。
+    const entry = entryFromReplayLog(
+      {
+        ...logsFixtureUserRow(),
+        metadata: {
+          sender_member_name: "林一",
+          sender_user_id: "u-lin",
+          reply_to: { log_id: "l-0", member_name: "小码", content_head: "旧消息" },
+        },
+      },
+      "u-me",
+    );
+    expect(entry).toMatchObject({
+      kind: "user",
+      replyTo: { log_id: "l-0", member_name: "小码", content_head: "旧消息" },
+    });
+    expect(entryFromReplayLog(logsFixtureUserRow(), "u-me")).toMatchObject({
+      replyTo: null,
+    });
+  });
 });
+
+/** 引用回复纯函数用例的最小 user_input 回放行固件。 */
+function logsFixtureUserRow(): GroupReplayLogEntry {
+  return {
+    id: "l-rq",
+    run_id: "r-1",
+    timestamp: "2026-09-01T06:05:00Z",
+    channel: "user_input",
+    content_redacted: "登录页偶现白屏，谁能看看？",
+    metadata: { sender_member_name: "林一", sender_user_id: "u-lin" },
+  };
+}
 
 /* ── 1b. typing/回复锚点纯函数（群聊运行态可见 quick，2026-09-02） ─────────── */
 
@@ -1253,6 +1316,8 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
         "@小码 帮我定位一下这个白屏问题",
         // FR-05 补遗：无附件时第 3 参 undefined（不发 attachment_ids 键）。
         undefined,
+        // 群 P2 引用回复：无引用时第 4 参 null（不发 reply_to_log_id 键）。
+        null,
       ),
     );
     // 发送成功：清空输入框。
@@ -1374,6 +1439,7 @@ describe("群消息附件（FR-05 补遗）", () => {
         "g-1",
         "@小码 看下附件日志",
         ["att-upload-1"],
+        null,
       ),
     );
     // 发送成功：chips 清空（附件已绑定群会话，不走 removeSessionAttachment）。
@@ -1401,7 +1467,7 @@ describe("群消息附件（FR-05 补遗）", () => {
     await waitFor(() =>
       expect(mocks.sendGroupMessage).toHaveBeenCalledWith("g-1", "", [
         "att-upload-1",
-      ]),
+      ], null),
     );
   });
 
@@ -1708,6 +1774,7 @@ describe("GroupChatPanel @全体 二次确认（quick 群 P2）", () => {
         "g-1",
         "@all 巡检一下",
         undefined,
+        null,
       ),
     );
     confirmSpy.mockRestore();
@@ -1731,7 +1798,7 @@ describe("GroupChatPanel @全体 二次确认（quick 群 P2）", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() =>
-      expect(mocks.sendGroupMessage).toHaveBeenCalledWith("g-1", "@全体 看下", undefined),
+      expect(mocks.sendGroupMessage).toHaveBeenCalledWith("g-1", "@全体 看下", undefined, null),
     );
     expect(confirmSpy).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
@@ -1880,6 +1947,269 @@ describe("GroupChatPanel 触发失败展示（quick 群 P2）", () => {
       expect(mocks.sendGroupMessage).toHaveBeenCalledTimes(1),
     );
     expect(mocks.notify.warning).not.toHaveBeenCalled();
+  });
+});
+
+/* ── 9. 群 P2 第二波：引用回复 / 未读（挂载已读 + 分隔线） ────────────────── */
+
+describe("GroupChatPanel 引用回复（群 P2 第二波）", () => {
+  it("点气泡「引用回复」（全员可用，他人 user 行）→ 输入区引用条（成员名+摘要）→ 发送带 reply_to_log_id → 成功后引用条清空", async () => {
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+
+    const quoteBtn = document.querySelector<HTMLElement>(
+      "[data-testid='group-msg-reply'][data-log-id='l-1']",
+    );
+    expect(quoteBtn).toBeTruthy();
+    fireEvent.click(quoteBtn!);
+
+    // 引用条：目标行 id + 成员名 + 内容摘要一行。
+    const bar = screen.getByTestId("group-reply-bar");
+    expect(bar.getAttribute("data-reply-to-log-id")).toBe("l-1");
+    expect(bar.textContent).toContain("林一");
+    expect(bar.textContent).toContain("登录页偶现白屏，谁能看看？");
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "复现步骤我贴在这里" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(mocks.sendGroupMessage).toHaveBeenCalledWith(
+        "g-1",
+        "复现步骤我贴在这里",
+        undefined,
+        "l-1",
+      ),
+    );
+    // 发送成功：引用条清空（回到普通发送态）。
+    await waitFor(() => {
+      expect(screen.queryByTestId("group-reply-bar")).toBeNull();
+    });
+  });
+
+  it("引用 agent 投影行亦可；X 取消 → 引用条消失，再发送不带 reply_to_log_id", async () => {
+    harness.logsJson = makeReplayLogs();
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+
+    const quoteBtn = document.querySelector<HTMLElement>(
+      "[data-testid='group-msg-reply'][data-log-id='l-3']",
+    );
+    expect(quoteBtn).toBeTruthy();
+    fireEvent.click(quoteBtn!);
+    const bar = screen.getByTestId("group-reply-bar");
+    expect(bar.getAttribute("data-reply-to-log-id")).toBe("l-3");
+    expect(bar.textContent).toContain("小码");
+
+    // 取消 → 引用条消失；后续发送为普通消息（第 4 参 null）。
+    fireEvent.click(screen.getByTestId("group-reply-cancel"));
+    expect(screen.queryByTestId("group-reply-bar")).toBeNull();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "直接说结论" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(mocks.sendGroupMessage).toHaveBeenCalledWith(
+        "g-1",
+        "直接说结论",
+        undefined,
+        null,
+      ),
+    );
+  });
+
+  it("气泡引用条渲染：回放 metadata.reply_to → 气泡顶部（成员名+摘要）；实时事件同构", async () => {
+    harness.logsJson = [
+      logsFixtureUserRow(),
+      {
+        id: "l-q2",
+        run_id: "r-9",
+        timestamp: "2026-09-01T06:06:00Z",
+        channel: "user_input",
+        content_redacted: "+1，我也遇到了",
+        metadata: {
+          sender_member_name: "鲸落",
+          sender_user_id: "u-me",
+          reply_to: {
+            log_id: "l-rq",
+            member_name: "林一",
+            content_head: "登录页偶现白屏，谁能看看？",
+          },
+        },
+      },
+    ];
+    renderPanel();
+    await waitForStreamWired();
+
+    // self 气泡（鲸落）顶部引用条：竖线条 + 成员名 + 摘要。
+    const selfRow = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-log-id='l-q2']");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    const quote = selfRow.querySelector('[data-testid="group-msg-reply-quote"]');
+    expect(quote).toBeTruthy();
+    expect(quote?.getAttribute("data-reply-to-log-id")).toBe("l-rq");
+    expect(quote?.textContent).toContain("林一");
+    expect(quote?.textContent).toContain("登录页偶现白屏，谁能看看？");
+    // 无引用行不渲染引用条。
+    const plainRow = document.querySelector<HTMLElement>("[data-log-id='l-rq']");
+    expect(plainRow?.querySelector('[data-testid="group-msg-reply-quote"]')).toBeNull();
+
+    // 实时事件同构：SSE 推带 reply_to 的 user_input 行（他人）→ 引用条渲染。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-live",
+      log_id: "l-live-1",
+      timestamp: "2026-09-01T06:07:00Z",
+      channel: "user_input",
+      content: "收到，我看下日志",
+      sender_member_name: "林一",
+      sender_user_id: "u-lin",
+      reply_to: {
+        log_id: "l-q2",
+        member_name: "鲸落",
+        content_head: "+1，我也遇到了",
+      },
+    });
+    const liveRow = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-log-id='l-live-1']");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    const liveQuote = liveRow.querySelector(
+      '[data-testid="group-msg-reply-quote"]',
+    );
+    expect(liveQuote?.getAttribute("data-reply-to-log-id")).toBe("l-q2");
+    expect(liveQuote?.textContent).toContain("鲸落");
+    expect(liveQuote?.textContent).toContain("+1，我也遇到了");
+  });
+});
+
+describe("GroupChatPanel 未读（群 P2 第二波：挂载已读 + 分隔线）", () => {
+  /** 群列表项形态（unread 快照源；markGroupRead 乐观清零的缓存 key 同源）。 */
+  function groupListItemWithUnread(count: number): GroupChatListItemRead {
+    return {
+      ...makeGroupDetail(),
+      unread_count: count,
+    } as unknown as GroupChatListItemRead;
+  }
+
+  it("挂载 → markGroupRead(g-1)（PUT /read）+ presence 群列表缓存 unread 乐观清零", async () => {
+    // 首拉带未读 5（列表徽标数据源）；重拉（invalidate 后）按服务端已清零回 0
+    // ——两条路径都收敛到 0，断言不受 invalidate/首拉去重时序影响。
+    mocks.listGroupChats
+      .mockResolvedValueOnce([groupListItemWithUnread(5)])
+      .mockResolvedValue([groupListItemWithUnread(0)]);
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => expect(mocks.markGroupRead).toHaveBeenCalledWith("g-1"));
+    await waitFor(() => {
+      const items = panelQc!.getQueryData<GroupChatListItemRead[]>([
+        "groupChats",
+        "list",
+        null,
+      ]);
+      expect(items?.find((g) => g.id === "g-1")?.unread_count).toBe(0);
+    });
+  });
+
+  it("markGroupRead 失败 → 静默（不阻断群聊渲染）", async () => {
+    mocks.markGroupRead.mockRejectedValue(new Error("offline"));
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+    await waitFor(() => expect(mocks.markGroupRead).toHaveBeenCalledTimes(1));
+    // 面板照常（时间线区在渲染，无异常冒泡）。
+    expect(screen.getByTestId("group-chat-timeline")).toBeTruthy();
+  });
+
+  it("未读分隔线：挂载快照 unread=3 → 倒数第 3 条消息前插「以下 3 条为新消息」；会话中新消息不二次插线", async () => {
+    harness.logsJson = makeReplayLogs(); // 消息行 l-1/l-2/l-3 共 3 条
+    renderPanel(groupListItemWithUnread(3));
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+
+    const divider = await screen.findByTestId("group-unread-divider");
+    // 3 条消息全未读 → 分隔线在首条（l-1）前。
+    expect(divider.getAttribute("data-before-log-id")).toBe("l-1");
+    expect(divider.textContent).toContain("以下 3 条为新消息");
+    // DOM 序：分隔线在 l-1 气泡之前。
+    const timeline = screen.getByTestId("group-chat-timeline");
+    const children = Array.from(timeline.children);
+    expect(children.indexOf(divider)).toBeLessThan(
+      children.indexOf(document.querySelector("[data-log-id='l-1']")!),
+    );
+
+    // 会话中到达新消息（第 4 条）：锚点只算一次——分隔线仍在 l-1 前，不跟随移动。
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-live",
+      log_id: "l-live-new",
+      timestamp: "2026-09-01T06:08:00Z",
+      channel: "user_input",
+      content: "刚又复现了一次",
+      sender_member_name: "林一",
+      sender_user_id: "u-lin",
+    });
+    await waitFor(() => {
+      expect(document.querySelector("[data-log-id='l-live-new']")).toBeTruthy();
+    });
+    expect(
+      screen.getByTestId("group-unread-divider").getAttribute("data-before-log-id"),
+    ).toBe("l-1");
+  });
+
+  it("未读分隔线定位：unread=2 → 倒数第 2 条（l-2）前；unread 超消息总数 → 钳制首条前", async () => {
+    harness.logsJson = makeReplayLogs();
+    const first = renderPanel(groupListItemWithUnread(2));
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+    // unread=2 → 倒数第 2 条（l-2，鲸落 self 行）前。
+    expect(
+      (await screen.findByTestId("group-unread-divider")).getAttribute(
+        "data-before-log-id",
+      ),
+    ).toBe("l-2");
+    first.unmount();
+
+    // unread=5 > 消息总数 3 → 钳制到首条（l-1）前。
+    renderPanel(groupListItemWithUnread(5));
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+    expect(
+      (await screen.findByTestId("group-unread-divider")).getAttribute(
+        "data-before-log-id",
+      ),
+    ).toBe("l-1");
+  });
+
+  it("unread=0（默认）→ 恒无分隔线", async () => {
+    harness.logsJson = makeReplayLogs();
+    renderPanel(groupListItemWithUnread(0));
+    await waitForStreamWired();
+    await waitFor(() => {
+      expect(timelineIdentities()).toEqual(["林一", "鲸落", "小码"]);
+    });
+    expect(screen.queryByTestId("group-unread-divider")).toBeNull();
   });
 });
 

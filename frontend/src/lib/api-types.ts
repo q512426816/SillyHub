@@ -4118,11 +4118,37 @@ export interface paths {
          * Send Group Message
          * @description 发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。
          *
-         *     未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员；触发
-         *     成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1）。附件随消息落
-         *     user_input metadata 摘要并在触发成员时随注入下发（FR-05 补遗）。
+         *     未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员（并行
+         *     触发，群 P2 第二波）；触发成员忙轮排队（满 5 → 409）。任意用户成员可发
+         *     （§6.1）。附件随消息落 user_input metadata 摘要并在触发成员时随注入下发
+         *     （FR-05 补遗）。``reply_to_log_id`` 引用回复（校验属本群时间线，跨群/
+         *     不存在 404，快照进 metadata 与群频道事件）。
          */
         post: operations["send_group_message_api_daemon_group_chats__group_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark Group Chat Read
+         * @description 标记群已读至此（本成员视角；无 body——服务端直接置 now()）。
+         *
+         *     成员校验（非成员 404 不泄露存在性）后推进 ``agent_group_members.
+         *     last_read_at``；幂等（重复 PUT 只前移位点）。任意用户成员可标记（§6.1
+         *     读权限同款）。
+         */
+        put: operations["mark_group_chat_read_api_daemon_group_chats__group_id__read_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -14075,6 +14101,13 @@ export interface components {
              * @default []
              */
             online_member_ids: string[];
+            /** Last Message At */
+            last_message_at?: string | null;
+            /**
+             * Unread Count
+             * @default 0
+             */
+            unread_count: number;
         };
         /**
          * GroupChatListItemRead
@@ -14092,6 +14125,11 @@ export interface components {
          *     ``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.
          *     pinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed
          *     ``GroupChatPinnedRead``；无置顶为 None）。
+         *
+         *     ``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线
+         *     最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
+         *     （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
+         *     ts > 位点；cap 99+）。
          */
         GroupChatListItemRead: {
             /**
@@ -14140,6 +14178,13 @@ export interface components {
             online_member_ids: string[];
             /** Last Message */
             last_message?: string | null;
+            /** Last Message At */
+            last_message_at?: string | null;
+            /**
+             * Unread Count
+             * @default 0
+             */
+            unread_count: number;
             /** Last Mention */
             last_mention?: {
                 [key: string]: string;
@@ -14672,6 +14717,10 @@ export interface components {
          *     attachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时
          *     ``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
          *     service，DTO 层总量兜底）。
+         *
+         *     ``reply_to_log_id``（群 P2 第二波引用回复）：被引用的群时间线消息行 id
+         *     （user_input / 投影行均可；service 校验属本群时间线，跨群/不存在 404），
+         *     发送后 metadata 与群频道事件落 ``reply_to`` 快照。
          */
         GroupMessageSendRequest: {
             /**
@@ -14685,6 +14734,11 @@ export interface components {
              * @description 附件引用（SessionAttachment id）
              */
             attachment_ids?: string[];
+            /**
+             * Reply To Log Id
+             * @description 引用回复目标：群时间线消息行 id（跨群/不存在 404）
+             */
+            reply_to_log_id?: string | null;
         };
         /**
          * GroupPinnedRequest
@@ -30595,6 +30649,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GroupMessageSendRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_group_chat_read_api_daemon_group_chats__group_id__read_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

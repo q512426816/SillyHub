@@ -1398,6 +1398,14 @@ class AgentGroupMember(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # 本成员在该群的已读位点（群 P2 第二波·未读位点）：``PUT /group-chats/
+    # {gid}/read`` 服务端置 now()，发送消息时顺带推进到消息时间戳（自己发
+    # 的不算未读）。NULL=从未标记已读（未读数按全量计，显示 cap 99+）。
+    # 成员维度状态直接住成员行（settings_json 是群级共享，不合适）。
+    last_read_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class ConstraintsJSON(TypeDecorator):

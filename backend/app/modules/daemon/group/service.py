@@ -59,11 +59,16 @@ task-06（design §5.4 实时通道，纯 ephemeral 纪律——不落库不进 
   广播 ``agent_sessions:changed``，payload 内嵌全部未移除用户成员 id
   （``audience_user_ids``），订阅侧过滤免每事件查库。
 
-@全体并行触发说明：design §4.1 写「并行」，但单请求 AsyncSession 不可并发
-使用（SQLAlchemy asyncio 约束；成员触发全程复用请求 session 的行锁/事务），
-本实现按成员序（joined_at）顺序触发——成员间无共享可变状态（各自独立影子
-会话），顺序执行语义等价；真并行需按 ``dispatch_next_queued_message`` 的
-独立 session 工厂模式重构，留待出现实际吞吐需求时再做。
+@全体并行触发（群 P2 第二波，2026-09-02）：design §4.1 写「并行」——单请求
+AsyncSession 不可并发使用（SQLAlchemy asyncio 约束），实现按 ``dispatch_
+next_queued_message`` 的独立 session 工厂模式落地：``send_group_message``
+触发编排改为 ``asyncio.gather``（每成员一协程，协程内 ``get_session_factory()``
+开独立短 session、重取 group/member/members 行后调同一 ``_trigger_group_member``
+——单成员触发路径零变化）；懒建 + readiness wait 在各协程内并行等待（总耗时
+= max 而非 sum）；异常项走既有部分失败收集（AppError → ``error`` 字段 + 群
+频道系统行，非 AppError 照旧 fail-loud 整条抛）；``triggered`` 按 gather 保序
+= 成员序（joined_at）重排。互@路径（``run_cross_mention_detection``，护栏
+串行语义）保持顺序触发不变。
 
 task-04（design §4.4 互@协作 / §4.5 配置热切换 / §8 member.config.switched）：
 
@@ -109,10 +114,24 @@ quick 群 P2（2026-09-02）四项（全部复用 settings_json，零迁移）�
   原因摘要进 ``triggered[].error`` + 群频道系统行「成员「X」触发失败：{原因}」，
   其余成员照常触发（消息已落时间线语义不变——部分失败收集替代 fail-loud）；
 - @我扫描窗口：``GROUP_LAST_MENTION_SCAN_ROWS`` 20 → 200。
+
+quick 群 P2 第二波（2026-09-02）三项：
+
+- @全体并行触发：见上方「@全体并行触发」段——gather + 每成员独立 session；
+- 消息引用回复：``GroupMessageSendRequest.reply_to_log_id`` 校验属本群时间线
+  （``_get_timeline_row``，跨群/不存在 404），发送时 user_input 行 metadata 落
+  ``reply_to: {log_id, member_name, content_head(60)}`` 快照 + 群频道 log 事件
+  payload 透传同结构（回放走 logs DTO metadata 已透出，无需改）；
+- 未读位点（服务端）：成员表 ``last_read_at`` 列（迁移 20260902120000）；
+  ``PUT /group-chats/{gid}/read``（成员校验，无 body，服务端置 now()）；发送
+  消息顺带推进发送者位点（自己发的不算未读）；群列表/详情 Read 加
+  ``last_message_at``（时间线最新行 ts）+ ``unread_count``（last_read_at 为
+  NULL → 全量；否则 ts > 位点的行数；显示 cap 99+）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
@@ -1266,20 +1285,22 @@ async def get_online_member_ids(group_id: uuid.UUID) -> list[uuid.UUID]:
 
 async def get_last_message_previews(
     db: AsyncSession, group_ids: Sequence[uuid.UUID]
-) -> dict[uuid.UUID, str | None]:
-    """群列表最后消息摘要（task-02 占位字段接通，task-03）。
+) -> dict[uuid.UUID, tuple[str | None, datetime | None]]:
+    """群列表最后消息摘要 + 最新消息时间（task-02 占位字段接通，task-03）。
 
-    每群查时间线最新一行（user_input / 投影行同 §4.2 行源），取内容前 60 字。
+    每群查时间线最新一行（user_input / 投影行同 §4.2 行源），取内容前 60 字
+    与行 ts（群 P2 第二波：``last_message_at`` 未读排序数据源，无消息 None）。
     群 id == 群会话 id（§3.2 不变式）。用户群列表规模小（成员上限 50），逐群
-    LIMIT 1 查询可接受。
+    LIMIT 1 查询可接受。ts 统一 UTC 感知（SQLite 方言往返丢 tz、PG 保留——
+    归一后跨方言一致）。
     """
     from sqlalchemy import and_
 
-    previews: dict[uuid.UUID, str | None] = {}
+    previews: dict[uuid.UUID, tuple[str | None, datetime | None]] = {}
     for group_id in group_ids:
         row = (
             await db.execute(
-                select(AgentRunLog.content_redacted)
+                select(AgentRunLog.content_redacted, AgentRunLog.timestamp)
                 .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
                 .where(
                     AgentRun.agent_session_id == group_id,
@@ -1295,9 +1316,71 @@ async def get_last_message_previews(
                 .limit(1)
             )
         ).first()
-        content = (row[0] or "").strip() if row is not None else ""
-        previews[group_id] = content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS] or None
+        if row is None:
+            previews[group_id] = (None, None)
+            continue
+        content = (row[0] or "").strip()
+        ts = row[1]
+        if ts is not None and ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        previews[group_id] = (content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS] or None, ts)
     return previews
+
+
+# 未读数显示上限（群 P2 第二波：``unread_count`` cap 99，前端「99+」展示）。
+GROUP_UNREAD_DISPLAY_CAP = 99
+
+
+async def get_group_unread_counts(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    group_ids: Sequence[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """群未读数（请求成员视角，群 P2 第二波未读位点）。
+
+    本成员 ``last_read_at`` 为 NULL（从未标记已读）→ 全部时间线行数；否则
+    ``ts > last_read_at`` 的行数。行源同 ``get_last_message_previews``
+    （user_input + 投影行，design §4.2）；发送即已读由 ``send_group_message``
+    推进发送者位点保证（自己发的不计未读）。非成员群不出现在请求者列表，
+    admin 兜底视角（无成员行）无位点语义 → 0。
+
+    N+1 取舍：逐群两查（成员行 + count）——群列表规模 ≤50（design §9.3
+    用户成员上限），与 ``get_last_message_previews`` 同取舍，可接受。计数
+    cap ``GROUP_UNREAD_DISPLAY_CAP``（99+ 展示语义）。
+    """
+    from sqlalchemy import and_, func
+
+    counts: dict[uuid.UUID, int] = {}
+    for group_id in group_ids:
+        membership = await get_active_user_membership(db, group_id=group_id, user_id=user_id)
+        if membership is None:
+            counts[group_id] = 0
+            continue
+        stmt = (
+            select(func.count())
+            .select_from(AgentRunLog)
+            .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
+            .where(
+                AgentRun.agent_session_id == group_id,
+                or_(
+                    AgentRunLog.channel == "user_input",
+                    and_(
+                        AgentRunLog.channel == "stdout",
+                        AgentRunLog.metadata_.is_not(None),
+                    ),
+                ),
+            )
+        )
+        if membership.last_read_at is not None:
+            last_read = membership.last_read_at
+            if last_read.tzinfo is None:
+                # SQLite 方言往返丢 tz（与读侧归一同款），补 UTC 后再比较。
+                last_read = last_read.replace(tzinfo=UTC)
+            stmt = stmt.where(AgentRunLog.timestamp > last_read)
+        total = (await db.execute(stmt)).scalar() or 0
+        counts[group_id] = min(int(total), GROUP_UNREAD_DISPLAY_CAP)
+    return counts
 
 
 async def get_last_mention_previews(
@@ -2970,6 +3053,7 @@ class GroupChatService:
         user: User,
         content: str,
         attachment_ids: list[uuid.UUID] | None = None,
+        reply_to_log_id: uuid.UUID | None = None,
     ) -> GroupMessageSendRead:
         """发群消息（design §4.1 步 1-6 / §8 group.message.sent；FR-05 补遗附件）。
 
@@ -2979,6 +3063,12 @@ class GroupChatService:
         agent 成员触发（懒建/注入/排队见 ``_trigger_group_member``）。未 @ 消息
         仅落时间线（进后续群背景摘要），不触发任何成员；附件随触发成员注入
         下发（D-7 看图说话：附件非空豁免空 content）。
+
+        引用回复（群 P2 第二波）：``reply_to_log_id`` 校验属本群时间线
+        （``_get_timeline_row``，跨群/不存在 404）后落 ``reply_to`` 快照进
+        user_input metadata 与群频道 log 事件 payload（同结构：
+        ``{log_id, member_name, content_head}``）——回放侧走 logs DTO metadata
+        透出，前端据此高亮「回复的是哪句话」。
 
         失败语义（quick 群 P2 部分失败收集）：载体 run 与触发是两个事务——消息
         先落时间线；**逐成员触发失败（机器未授权 / 队列满 / 会话闸满 / 成员引擎
@@ -2999,6 +3089,18 @@ class GroupChatService:
         sender_member_name = (
             membership.display_name if membership is not None else _user_display_name(user)
         )
+
+        # ── 引用回复校验（先于落库：跨群/不存在的 log 整条 404，不产生半截消息）。
+        reply_to_snapshot: dict[str, str] | None = None
+        if reply_to_log_id is not None:
+            reply_row, reply_member_name = await self._get_timeline_row(group, reply_to_log_id)
+            reply_to_snapshot = {
+                "log_id": str(reply_row.id),
+                "member_name": reply_member_name,
+                "content_head": (reply_row.content_redacted or "").strip()[
+                    :GROUP_LAST_MESSAGE_PREVIEW_CHARS
+                ],
+            }
 
         # ── 附件校验（发送侧：归属按发送者 + 数量；引擎门控下沉到逐成员触发）
         #    口径照单聊 _validate_inject_attachment_rows 的归属/数量段，错误族
@@ -3031,6 +3133,8 @@ class GroupChatService:
             "sender_user_id": str(user.id),
             "sender_member_name": sender_member_name,
         }
+        if reply_to_snapshot is not None:
+            user_input_metadata["reply_to"] = reply_to_snapshot
         attachment_summary: list[dict[str, object]] = []
         if attachment_rows:
             # 物化：附件行绑定群载体会话（draft→bound）——群附件被多成员/时间线
@@ -3051,6 +3155,11 @@ class GroupChatService:
             metadata_=user_input_metadata,
         )
         self._session.add(log_row)
+        # 未读位点（群 P2 第二波）：发送即已读——发送者位点推进到本条消息时间戳
+        # （ts > 位点判定下自己这条不计未读；admin 兜底无成员行则无位点可置）。
+        if membership is not None:
+            membership.last_read_at = now
+            self._session.add(membership)
         await self._session.commit()
 
         # ── 群频道 log 事件（§4.1 步 3；payload 形态照 run_sync session channel
@@ -3069,12 +3178,15 @@ class GroupChatService:
         }
         if attachment_summary:
             log_payload["attachments"] = attachment_summary
+        if reply_to_snapshot is not None:
+            log_payload["reply_to"] = reply_to_snapshot
         await _publish_group_channel_event(group.session_id, log_payload)
 
         # ── @解析 + 触发编排（§4.1 步 4-6）。
         mentioned = _parse_group_mentions(content, members)
         mentioned_ids = [m.id for m in mentioned]
-        # quick 群 P2：返回体用标量（触发失败子链 rollback 会 expire 载体行）。
+        # 返回体用标量（PK 不过期；并行触发子链 rollback 已隔离在各自独立
+        # session，不再触碰请求 session 的对象状态——防御性口径保留）。
         carrier_run_id_val = carrier.id
         log_row_id_val = log_row.id
         triggered: list[GroupMemberTriggerRead] = []
@@ -3103,78 +3215,82 @@ class GroupChatService:
                     carrier_run_id=str(carrier.id),
                     exc_info=True,
                 )
-            # quick 群 P2 部分失败收集的 ORM 口径：触发失败子链（懒建 rollback /
-            # 注入失败）会 expire 会话内全部对象（工厂 expire_on_commit=False，
-            # 仅 rollback 过期——update_member 先例），而循环还要继续触发其余
-            # 成员并组装返回体——**循环前预取全部标量**（except 分支/返回体零
-            # ORM 属性访问，过期属性 lazy IO 在 greenlet 外炸 MissingGreenlet），
-            # 失败后**重取行**再进下一轮（查询返回 identity map 内既有实例并
-            # 刷新过期属性）。
+            # ── 并行触发（群 P2 第二波，模块 docstring「@全体并行触发」段）：每
+            #    成员一协程，协程内经 ``get_session_factory()`` 开**独立短
+            #    session**（单请求 AsyncSession 不可并发使用，照
+            #    ``dispatch_next_queued_message`` 的独立 session 工厂模式）重取
+            #    group/member/members/附件行后调同一 ``_trigger_group_member``
+            #    （单成员触发路径零变化）。懒建 + readiness wait 在各协程内并行
+            #    等待（总耗时 = max 而非 sum）；触发子链的 rollback 发生在各自
+            #    独立 session——不再 expire 请求 session 内对象（原预取标量/失败
+            #    后重取行的刷新链随之移除，仅保留返回体标量预取的防御口径）。
             group_id_val = group.id
             group_session_id_val = group.session_id
             sender_user_id_val = user.id
-            refresh_needed = False
-            for member in sorted(mentioned, key=lambda m: (m.joined_at, m.id)):
-                if refresh_needed:
-                    group = await self._get_group(group_id_val)
-                    members = await self._list_active_member_rows(group_id_val)
-                    if attachment_rows:
-                        attachment_rows = await self._reload_attachment_rows(attachment_rows)
-                    refresh_needed = False
-                member_id_val = member.id
-                member_name_val = member.display_name
-                member_shadow_val = member.shadow_session_id
-                # quick 群 P2（2026-09-02）部分失败收集：单成员触发失败（引擎门控
-                # 400 / 机器不可用 / 队列满 / 会话闸满等 AppError）不整条抛——
-                # 该成员 triggered 项带 error 摘要 + 群频道系统行（用户可感沉默
-                # 场景：消息已落时间线但成员没跑起来），其余成员照常触发。
-                try:
-                    trigger = await self._trigger_group_member(
-                        group=group,
-                        member=member,
-                        members=members,
+            attachment_ids_val = [r.id for r in attachment_rows] if attachment_rows else None
+            targets = sorted(mentioned, key=lambda m: (m.joined_at, m.id))
+            results = await asyncio.gather(
+                *(
+                    self._trigger_member_isolated(
+                        group_id=group_id_val,
+                        member_id=member.id,
                         member_lines=member_lines,
                         sender_user_id=sender_user_id_val,
                         sender_member_name=sender_member_name,
                         content=content,
                         carrier_run_id=carrier_run_id_val,
                         exclude_log_id=log_row_id_val,
-                        attachment_rows=attachment_rows,
+                        attachment_ids=attachment_ids_val,
                     )
-                except AppError as exc:
-                    refresh_needed = True
-                    reason = _trigger_failure_reason(exc)
+                    for member in targets
+                ),
+                return_exceptions=True,
+            )
+            # gather 保序：results 与 targets 按成员序（joined_at）一一对应。
+            for member, result in zip(targets, results, strict=True):
+                if isinstance(result, BaseException):
+                    # quick 群 P2 部分失败收集：单成员触发失败（引擎门控 400 /
+                    # 机器不可用 / 队列满 / 会话闸满等 AppError）不整条抛——该
+                    # 成员 triggered 项带 error 摘要 + 群频道系统行（用户可感
+                    # 沉默场景：消息已落时间线但成员没跑起来）；非 AppError 的
+                    # 意外异常照旧 fail-loud 整条抛（含 CancelledError）。
+                    if not isinstance(result, AppError):
+                        raise result
+                    reason = _trigger_failure_reason(result)
                     log.warning(
                         "group_member_trigger_failed",
                         group_id=str(group_id_val),
-                        member_id=str(member_id_val),
-                        code=exc.code,
+                        member_id=str(member.id),
+                        code=result.code,
                         reason=reason,
                     )
                     await _publish_trigger_failed_notice(
-                        group_session_id_val, member_name=member_name_val, reason=reason
+                        group_session_id_val, member_name=member.display_name, reason=reason
                     )
                     triggered.append(
                         GroupMemberTriggerRead(
-                            member_id=member_id_val,
-                            member_name=member_name_val,
-                            shadow_session_id=member_shadow_val,
+                            member_id=member.id,
+                            member_name=member.display_name,
+                            shadow_session_id=member.shadow_session_id,
                             error=reason,
                         )
                     )
                     continue
-                triggered.append(trigger)
+                triggered.append(result)
                 # task-06（design §5.4）：影子 run 开始（即时注入/懒建首轮，非
                 # 排队）→ 自动发一条 agent typing（「昵称」正在输入…）。排队轮
                 # run 尚未开始不发（typing 指示器语义=正在生成回复）。
                 # 运行态可见 quick（2026-09-02）：payload 补 member_id + 回复
                 # 锚点 reply_to_log_id=本轮触发消息的群时间线 user_input 行 id
                 # （载体 run 下的 log_row，前端据此高亮「正在响应哪句话」）。
-                if not trigger.queued:
+                # 并行化后按成员序在 gather 收口统一补发（成员间触发已并行，
+                # typing 事件相对 run 开始最多延迟到最慢成员返回，纯增益信号
+                # 容忍）。
+                if not result.queued:
                     await _publish_agent_typing_event(
                         group_id_val,
                         member.display_name,
-                        member_id=str(member_id_val),
+                        member_id=str(member.id),
                         reply_to_log_id=str(log_row_id_val),
                     )
         return GroupMessageSendRead(
@@ -3185,30 +3301,57 @@ class GroupChatService:
             triggered=triggered,
         )
 
-    async def _reload_attachment_rows(self, rows: list) -> list:
-        """按 id 重取附件行并保序（quick 群 P2 部分失败收集的刷新链）。
+    async def _trigger_member_isolated(
+        self,
+        *,
+        group_id: uuid.UUID,
+        member_id: uuid.UUID,
+        member_lines: list[str],
+        sender_user_id: uuid.UUID,
+        sender_member_name: str,
+        content: str,
+        carrier_run_id: uuid.UUID,
+        exclude_log_id: uuid.UUID | None,
+        attachment_ids: list[uuid.UUID] | None = None,
+    ) -> GroupMemberTriggerRead:
+        """单成员触发的独立 session 协程体（群 P2 第二波并行编排）。
 
-        触发失败子链 rollback 后附件行过期（expire_on_commit=False 仅 rollback
-        过期），后续成员触发仍要读附件属性（prompt 提示行/注入组装）——同 id
-        重查刷新；PK 不过期，取 id 列表安全。
+        ``send_group_message`` 的 gather 每成员调一次本方法：协程内经
+        ``get_session_factory()`` 开独立短 session（对齐 ``dispatch_next_
+        queued_message`` 后台派发模式——请求级 AsyncSession 不可并发使用），
+        在本 session 内**重取** group / member / members / 附件行（跨 session
+        共享 ORM 实例不安全：``_ensure_shadow_session`` 要 ``add(member)``
+        回填指针，实例必须归属本 session）后调 ``_trigger_group_member``。
+
+        附件行按 id 重走 ``_validate_group_attachments``（归属=发送者，发送侧
+        已过同一校验——幂等重查，只多两条 SELECT/成员）。session 随 async with
+        收口归还连接池；``_trigger_group_member`` 内部各事务边界（懒建 commit /
+        注入 commit / 失败 rollback）自持。
         """
-        from app.modules.session_attachment.model import SessionAttachment
+        from app.core.db import get_session_factory
 
-        by_id = {
-            r.id: r
-            for r in (
-                (
-                    await self._session.execute(
-                        select(SessionAttachment).where(
-                            SessionAttachment.id.in_([r.id for r in rows])
-                        )
-                    )
+        async with get_session_factory()() as db:
+            svc = GroupChatService(db)
+            group = await svc._get_group(group_id)
+            member = await svc._get_member(group_id, member_id)
+            members = await svc._list_active_member_rows(group_id)
+            attachment_rows = None
+            if attachment_ids:
+                attachment_rows = await svc._validate_group_attachments(
+                    sender_user_id, attachment_ids
                 )
-                .scalars()
-                .all()
+            return await svc._trigger_group_member(
+                group=group,
+                member=member,
+                members=members,
+                member_lines=member_lines,
+                sender_user_id=sender_user_id,
+                sender_member_name=sender_member_name,
+                content=content,
+                carrier_run_id=carrier_run_id,
+                exclude_log_id=exclude_log_id,
+                attachment_rows=attachment_rows,
             )
-        }
-        return [by_id[r.id] for r in rows if r.id in by_id]
 
     async def _validate_group_attachments(
         self, sender_user_id: uuid.UUID, attachment_ids: list[uuid.UUID]
@@ -3478,16 +3621,20 @@ class GroupChatService:
 
     # ── 置顶消息（quick 群 P2，2026-09-02：settings_json.pinned）──────────────
 
-    async def _pin_timeline_row(
+    async def _get_timeline_row(
         self, group: AgentGroupChat, log_id: uuid.UUID
     ) -> tuple[AgentRunLog, str]:
-        """查置顶目标行（须属本群时间线）+ 身份快照标签。
+        """查群时间线消息行（须属本群时间线）+ 身份快照标签（置顶/引用回复共用）。
 
         行源同 ``_load_group_context_lines``：``user_input`` 行（用户消息）与
-        投影行（``channel='stdout'`` 且带成员身份 metadata）都可置顶；身份标签
+        投影行（``channel='stdout'`` 且带成员身份 metadata）都命中；身份标签
         从 metadata 取（用户行 ``sender_member_name`` / 投影行 ``member_name``），
         缺失回退 run.user_id 查成员表 display_name →「成员」（与背景摘要同款
         兜底链）。跨群 log / 不存在 → 404 ``GroupMessageNotFound``。
+
+        群 P2 第二波起两个消费方：``pin_message``（置顶快照）与
+        ``send_group_message``（``reply_to_log_id`` 引用回复快照）——校验口径
+        单源，勿在调用方另查。
         """
         row = (
             await self._session.execute(
@@ -3543,7 +3690,7 @@ class GroupChatService:
                 "群已解散，无法置顶消息。",
                 details={"group_id": str(group.id)},
             )
-        log_row, member_name = await self._pin_timeline_row(group, log_id)
+        log_row, member_name = await self._get_timeline_row(group, log_id)
         pinned = GroupChatPinnedRead(
             log_id=log_row.id,
             pinned_by=user.id,
@@ -3607,6 +3754,23 @@ class GroupChatService:
                 "timestamp": datetime.now(UTC).isoformat(),
             },
         )
+
+    async def mark_group_read(self, group_id: uuid.UUID, user: User) -> None:
+        """标记群已读至此（群 P2 第二波未读位点；``PUT /{group_id}/read``）。
+
+        成员校验（非成员 404 不泄露存在性）后服务端直接置 ``now()``——无 body
+        无客户端时间戳（时钟信任单一源=服务端）。已解散群照常可标记（成员仍
+        可读历史，位点语义不变）。admin 兜底放行无成员行 → 幂等收口（无位点
+        可置，未读视角恒 0 不受影响）。幂等：重复 PUT 只是位点前移，无系统行
+        无群频道事件（纯位点写，无副作用广播）。
+        """
+        group = await self._get_group(group_id)
+        membership = await self._require_group_member(group, user)
+        if membership is None:
+            return
+        membership.last_read_at = datetime.now(UTC)
+        self._session.add(membership)
+        await self._session.commit()
 
     async def _trigger_group_member(
         self,

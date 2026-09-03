@@ -1,11 +1,12 @@
-"""quick 群 P2 四项测试（2026-09-02）：置顶消息 / typing 草稿预览默认关 /
-触发失败部分收集（triggered[].error + 群频道系统行）/ @我扫描窗口扩 200。
+"""quick 群 P2 测试（2026-09-02）：置顶消息 / typing 草稿预览默认关 /
+触发失败部分收集（triggered[].error + 群频道系统行）/ @我扫描窗口扩 200；
+第二波三项：@全体并行触发 / 消息引用回复 / 未读位点。
 
 覆盖：
 
 - 置顶（``PUT/DELETE /group-chats/{gid}/pinned``）：群主置顶成功（快照字段
-  log_id/pinned_by/pinned_at/content/member_name + 群频道系统行「置顶了一条
-  消息」）；群列表/详情 Read 透出 ``pinned``；DELETE 取消（系统行 + Read 归
+  log_id/pinned_by/pinned_at/content/member_name + 群频道系统行「置顶了一
+  条消息」）；群列表/详情 Read 透出 ``pinned``；DELETE 取消（系统行 + Read 归
   None + 幂等重放不再发系统行）；普通成员 → 403；跨群 log → 404；脏快照
   （``_group_pinned_snapshot``）防御性回落 None；
 - typing 草稿预览：默认（``typing_preview`` 缺省）入参 preview 被丢弃
@@ -18,7 +19,16 @@
   （error=None）+ Codex 项 ``error`` 摘要（其余成员照常触发，消息已落时间线）；
 - @我扫描窗口（``GROUP_LAST_MENTION_SCAN_ROWS`` 20 → 200）：@ 后造 150 条
   噪音（@ 行落在最近第 151 条，旧 20 窗口外、新 200 窗口内）→ 群列表
-  ``last_mention`` 命中；monkeypatch 回 20 反证窗口查询 limit 联动常量。
+  ``last_mention`` 命中；monkeypatch 回 20 反证窗口查询 limit 联动常量；
+- @全体并行触发（第二波）：mock 两成员触发各 sleep 0.2 → 总耗时 < 0.35s
+  （顺序执行地板 0.4s+）+ 两成员都触发 + ``triggered`` 按成员序（joined_at）
+  重排（gather 保序）；
+- 消息引用回复（第二波）：带 ``reply_to_log_id`` 发送 → user_input 行
+  metadata ``reply_to: {log_id, member_name, content_head(60)}`` + 群频道 log
+  事件 payload 透传同结构；无引用零漂移（键不出现）；跨群 log → 404；
+- 未读位点（第二波）：``last_read_at`` 为 null → 未读数=全量（cap 99+）；
+  ``PUT /read`` 后 unread_count=0（成员行位点落库）；新消息后 +1；发送即
+  已读（发送者自身不计未读）；群详情同款字段。
 
 夹具范式镜像 ``test_group_p1.py``（httpx ASGI + 手签 JWT + ws_hub/readiness/
 redis/storage mock + GLM 离线铁律）。
@@ -26,7 +36,9 @@ redis/storage mock + GLM 离线铁律）。
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -39,10 +51,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules.daemon.group.service as group_service_module
 from app.core.errors import AppError
-from app.modules.agent.model import AgentGroupChat, AgentRun, AgentRunLog
+from app.modules.agent.model import (
+    AgentGroupChat,
+    AgentGroupMember,
+    AgentRun,
+    AgentRunLog,
+)
 from app.modules.daemon.group.service import (
     GROUP_LAST_MENTION_SCAN_ROWS,
     GroupChatService,
+    GroupMemberTriggerRead,
     _group_pinned_snapshot,
     _group_typing_preview_enabled,
 )
@@ -119,13 +137,20 @@ async def _send_message(
     group_id: uuid.UUID | str,
     content: str,
     attachment_ids: list[uuid.UUID] | None = None,
+    reply_to_log_id: uuid.UUID | None = None,
 ):
     body: dict = {"content": content}
     if attachment_ids:
         body["attachment_ids"] = [str(a) for a in attachment_ids]
+    if reply_to_log_id is not None:
+        body["reply_to_log_id"] = str(reply_to_log_id)
     return await client.post(
         f"/api/daemon/group-chats/{group_id}/messages", json=body, headers=_headers(token)
     )
+
+
+async def _mark_read(client: AsyncClient, token: str, group_id: uuid.UUID | str):
+    return await client.put(f"/api/daemon/group-chats/{group_id}/read", headers=_headers(token))
 
 
 async def _send_typing(
@@ -602,3 +627,262 @@ class TestLastMentionScanWindow:
         assert await group_service_module.get_last_mention_previews(
             db_session, user_id=env.owner.id, group_ids=[group_id]
         ) == {group_id: None}
+
+
+# ── 5. @全体并行触发（群 P2 第二波：gather + 每成员独立 session）────────────
+
+
+class TestParallelMentionTrigger:
+    async def test_two_members_trigger_in_parallel(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """mock 两成员触发各 sleep 0.2 → 总耗时 < 0.35s（顺序地板 0.4s+）+
+        两成员都触发 + ``triggered`` 按成员序（joined_at）重排（gather 保序）。
+
+        小柯先入群（建群初始成员）、小码后加（POST members）——@ 解析排序
+        按成员序小柯在前；并行下触发结果仍按该序回排。"""
+
+        async def _slow_trigger(self, *, member, **_kwargs):
+            await asyncio.sleep(0.2)
+            return GroupMemberTriggerRead(
+                member_id=member.id,
+                member_name=member.display_name,
+                shadow_session_id=member.shadow_session_id,
+                queued=False,
+            )
+
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id, name="小柯")],
+        )
+        group_id = uuid.UUID(data["id"])
+        resp = await client.post(
+            f"/api/daemon/group-chats/{group_id}/members",
+            json={"agent": _agent_config(env.runtime.id, name="小码")},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 201, resp.text
+
+        with mock_patch.object(GroupChatService, "_trigger_group_member", _slow_trigger):
+            started = time.perf_counter()
+            resp = await _send_message(client, env.owner_token, group_id, "@全体 都看下")
+            elapsed = time.perf_counter() - started
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert elapsed < 0.35, f"两成员各 0.2s 应并行（实测 {elapsed:.3f}s）"
+        assert [t["member_name"] for t in body["triggered"]] == ["小柯", "小码"]
+        assert all(t["error"] is None for t in body["triggered"])
+        assert all(t["run_id"] is None for t in body["triggered"])  # mock 无 run
+
+
+# ── 6. 消息引用回复（群 P2 第二波：reply_to_log_id 快照 + 事件透传）─────────
+
+
+class TestReplyToMessage:
+    async def test_reply_metadata_and_payload_passthrough(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """带 reply_to_log_id 发送：user_input 行 metadata ``reply_to`` 快照
+        （log_id/成员名/60 字头截断）+ 群频道 log 事件 payload 透传同结构；
+        无引用的普通消息零漂移（键不出现）。"""
+        env = await _make_env(db_session)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
+        group_id = uuid.UUID(data["id"])
+        original = "原始结论：" + "接口地址与鉴权方案都要按新规范调整" * 5  # >60 字
+        sent_a = await _send_message(client, env.owner_token, group_id, original)
+        assert sent_a.status_code == 200, sent_a.text
+        log_id_a = sent_a.json()["log_id"]
+
+        sent_b = await _send_message(
+            client, env.owner_token, group_id, "引用回复：确认这条", reply_to_log_id=log_id_a
+        )
+        assert sent_b.status_code == 200, sent_b.text
+        log_id_b = sent_b.json()["log_id"]
+
+        expected = {
+            "log_id": log_id_a,
+            "member_name": "群主",
+            "content_head": original.strip()[:60],
+        }
+        row_b = await db_session.get(AgentRunLog, uuid.UUID(log_id_b))
+        assert row_b is not None
+        assert (row_b.metadata_ or {})["reply_to"] == expected
+
+        # 群频道 log 事件 payload 透传同结构（按 log_id 定位本条事件）。
+        payload_b = next(
+            p
+            for p in _group_channel_payloads(mocked_group_redis, group_id)
+            if p.get("event") == "log" and p.get("log_id") == log_id_b
+        )
+        assert payload_b["reply_to"] == expected
+
+        # 无引用零漂移：普通消息的 metadata 与事件不带 reply_to 键。
+        row_a = await db_session.get(AgentRunLog, uuid.UUID(log_id_a))
+        assert row_a is not None
+        assert "reply_to" not in (row_a.metadata_ or {})
+        payload_a = next(
+            p
+            for p in _group_channel_payloads(mocked_group_redis, group_id)
+            if p.get("event") == "log" and p.get("log_id") == log_id_a
+        )
+        assert "reply_to" not in payload_a
+
+    async def test_reply_cross_group_log_404(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """跨群 log（B 群消息拿到 A 群引用）→ 404 不泄露；零时间线残留。"""
+        env = await _make_env(db_session)
+        group_a = await _create_group(client, env.owner_token, project_id=env.project.id)
+        group_b = await _create_group(client, env.owner_token, project_id=env.project.id)
+        sent_b = await _send_message(client, env.owner_token, group_b["id"], "B 群的消息")
+        resp = await _send_message(
+            client,
+            env.owner_token,
+            group_a["id"],
+            "引用 B 群消息",
+            reply_to_log_id=sent_b.json()["log_id"],
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "HTTP_404_GROUP_MESSAGE_NOT_FOUND"
+        # A 群时间线零残留（引用消息整条拒绝，不落半截）。
+        rows = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog)
+                    .join(AgentRun, AgentRunLog.run_id == AgentRun.id)
+                    .where(AgentRun.agent_session_id == uuid.UUID(group_a["id"]))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+
+# ── 7. 未读位点（群 P2 第二波：last_read_at / PUT read / unread_count）──────
+
+
+class TestUnreadPosition:
+    async def test_unread_flow_mark_read_and_new_message(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """未读全流程：last_read_at null → 全量未读；PUT read → 0（成员行
+        位点落库）；新消息 → +1；发送即已读（发送者自身不计）；详情同款。"""
+        env = await _make_env(db_session)
+        peer, peer_token = await _env_user(db_session, env, name="小英")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            user_members=[{"user_id": str(peer.id)}],
+        )
+        group_id = uuid.UUID(data["id"])
+        for i in range(3):
+            resp = await _send_message(client, env.owner_token, group_id, f"通知 {i}")
+            assert resp.status_code == 200, resp.text
+
+        async def _peer_item() -> dict:
+            listing = await client.get("/api/daemon/group-chats", headers=_headers(peer_token))
+            assert listing.status_code == 200, listing.text
+            return next(g for g in listing.json() if g["id"] == str(group_id))
+
+        # 初始（last_read_at null）：全量未读 + 最新消息时间戳透出。
+        mine = await _peer_item()
+        assert mine["unread_count"] == 3
+        assert mine["last_message_at"] is not None
+        # 发送即已读：发送者自身视角未读恒 0。
+        owner_listing = await client.get(
+            "/api/daemon/group-chats", headers=_headers(env.owner_token)
+        )
+        owner_mine = next(g for g in owner_listing.json() if g["id"] == str(group_id))
+        assert owner_mine["unread_count"] == 0
+
+        # PUT read → 位点落库 + 未读清零（幂等重放仍 204）。
+        resp = await _mark_read(client, peer_token, group_id)
+        assert resp.status_code == 204, resp.text
+        assert (await _mark_read(client, peer_token, group_id)).status_code == 204
+        member_row = (
+            (
+                await db_session.execute(
+                    select(AgentGroupMember)
+                    .where(
+                        AgentGroupMember.group_id == group_id,
+                        AgentGroupMember.user_id == peer.id,
+                    )
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert member_row.last_read_at is not None
+        assert (await _peer_item())["unread_count"] == 0
+
+        # 新消息 → 未读 +1；群详情同款字段。
+        resp = await _send_message(client, env.owner_token, group_id, "追加通知")
+        assert resp.status_code == 200, resp.text
+        assert (await _peer_item())["unread_count"] == 1
+        detail = await client.get(
+            f"/api/daemon/group-chats/{group_id}", headers=_headers(peer_token)
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["unread_count"] == 1
+        assert detail.json()["last_message_at"] is not None
+
+    async def test_unread_count_capped_at_99(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_group_redis,
+    ) -> None:
+        """未读 cap：120 条时间线（从未标记已读）→ unread_count == 99（99+）。"""
+        env = await _make_env(db_session)
+        data = await _create_group(client, env.owner_token, project_id=env.project.id)
+        group_id = uuid.UUID(data["id"])
+        group = await db_session.get(AgentGroupChat, group_id)
+        assert group is not None
+        base = datetime.now(UTC)
+        for i in range(120):
+            now = base + timedelta(seconds=i)
+            carrier = AgentRun(
+                id=uuid.uuid4(),
+                agent_type="claude_code",
+                provider="group",
+                status="completed",
+                started_at=now,
+                finished_at=now,
+                spec_strategy="group_carrier",
+                agent_session_id=group.session_id,
+                user_id=env.owner.id,
+            )
+            db_session.add(carrier)
+            db_session.add(
+                AgentRunLog(
+                    id=uuid.uuid4(),
+                    run_id=carrier.id,
+                    channel="user_input",
+                    content_redacted=f"刷屏 {i}",
+                    timestamp=now,
+                    metadata_={"sender_user_id": str(env.owner.id), "sender_member_name": "群主"},
+                )
+            )
+        await db_session.commit()
+
+        assert await group_service_module.get_group_unread_counts(
+            db_session, user_id=env.owner.id, group_ids=[group_id]
+        ) == {group_id: 99}

@@ -2643,6 +2643,22 @@ export async function unpinGroupMessage(groupId: string): Promise<void> {
   );
 }
 
+/* ---------- 群已读位点（群 P2 第二波，2026-09-02） ----------
+ *
+ * PUT /api/daemon/group-chats/{gid}/read（204）：推进**本成员**服务端已读位点
+ * （成员表 last_read_at=now；发送消息时后端已自动顺带已读）。群列表 unread_count
+ * 据此清零——前端进入群聊（面板挂载）即调本端点，随后本地乐观清零 + invalidate
+ * 群列表前缀（徽标即时消失，不等重拉）。
+ */
+
+/** PUT /api/daemon/group-chats/{id}/read — 标记本成员已读（204 无响应体）。 */
+export async function markGroupRead(groupId: string): Promise<void> {
+  await apiFetch(
+    `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/read`,
+    { method: "PUT" },
+  );
+}
+
 /* ---------- 群消息发送 + typing 上报 + 群流 SSE（task-08 / FR-05 / FR-09 / FR-12 / FR-13） ----------
  *
  * design §4.1（发送→载体 run user_input 落库→@解析触发）、§5.4（typing 心跳：
@@ -2669,6 +2685,19 @@ export interface GroupMessageAttachmentSummary {
 }
 
 /**
+ * 引用回复快照（群 P2 第二波，2026-09-02）：发送带 ``reply_to_log_id`` 时后端
+ * 落库进 user_input 行 ``metadata.reply_to``，并同构透传到群频道实时 log 事件
+ * payload（backend ``_get_timeline_row`` 单一源）——``log_id``=被引用消息行 id、
+ * ``member_name``/``content_head``(60 字)=发送者与内容摘要快照，气泡顶部引用条
+ * 渲染用（回放与实时同一形态）。
+ */
+export interface GroupMessageReplySnapshot {
+  log_id: string;
+  member_name: string;
+  content_head: string;
+}
+
+/**
  * POST /api/daemon/group-chats/{id}/messages — 发群消息。
  *
  * 响应携带 carrier_run_id / log_id（实时 log 事件同 id，seenLogIds 去重容错）+
@@ -2681,15 +2710,19 @@ export interface GroupMessageAttachmentSummary {
  * FR-05 补遗：``attachmentIds`` 附件引用（上传端点产出的 SessionAttachment
  * id，D-7 豁免——携带附件时 content 可空看图说话）；未携带时不发该键（后端
  * 缺省空列表零回归）。
+ *
+ * 群 P2 第二波：``replyToLogId`` 引用回复目标（群时间线消息行 id，service 校验
+ * 属本群时间线，跨群/不存在 404）；未引用时不发该键。
  */
 export async function sendGroupMessage(
   groupId: string,
   content: string,
   attachmentIds?: string[],
+  replyToLogId?: string | null,
 ): Promise<GroupMessageSendRead> {
-  const body: GroupMessageSendRequest = attachmentIds?.length
-    ? { content, attachment_ids: attachmentIds }
-    : { content };
+  const body: GroupMessageSendRequest = { content };
+  if (attachmentIds?.length) body.attachment_ids = attachmentIds;
+  if (replyToLogId) body.reply_to_log_id = replyToLogId;
   return apiFetch<GroupMessageSendRead>(
     `${GROUP_CHATS_BASE}/${encodeURIComponent(groupId)}/messages`,
     { method: "POST", json: body },
@@ -2779,6 +2812,12 @@ export interface GroupChatStreamEnvelope extends SessionStreamEnvelope {
   reply_to_log_id?: string | null;
   /** FR-05 补遗：user_input 行附件摘要（无附件缺省 null/undefined 不渲染）。 */
   attachments?: GroupMessageAttachmentSummary[] | null;
+  /**
+   * 引用回复快照（群 P2 第二波，2026-09-02）：user_input 行发送带
+   * ``reply_to_log_id`` 时后端随群频道 log 事件下发 ``reply_to``
+   * （{log_id, member_name, content_head}，与回放 metadata 同构）。
+   */
+  reply_to?: GroupMessageReplySnapshot | null;
 }
 
 /**
@@ -2840,6 +2879,8 @@ export interface GroupReplayLogEntry extends AgentRunLogEntry {
     projection?: boolean;
     /** FR-05 补遗：user_input 行附件摘要（与 SSE 实时事件 payload 同形态）。 */
     attachments?: GroupMessageAttachmentSummary[] | null;
+    /** 引用回复快照（群 P2 第二波；与实时事件 payload 同形态）。 */
+    reply_to?: GroupMessageReplySnapshot | null;
   } | null;
 }
 
@@ -3013,13 +3054,15 @@ export function streamGroupChat(
           content: log.content_redacted ?? "",
           // 群身份透传（回放与实时渲染一致）：投影行 member_* / 用户行
           // sender_*（后端 DTO 暴露 metadata 前运行时为 null，前端容错回退）。
-          // FR-05 补遗：user_input 行附件摘要同透传（实时事件 payload 同形态）。
+          // FR-05 补遗：user_input 行附件摘要同透传（实时事件 payload 同形态）；
+          // 群 P2 第二波：reply_to 引用快照同透传（同构）。
           segment_id: log.segment_id ?? null,
           member_id: meta?.member_id ?? null,
           member_name: meta?.member_name ?? null,
           sender_member_name: meta?.sender_member_name ?? null,
           sender_user_id: meta?.sender_user_id ?? null,
           attachments: meta?.attachments ?? null,
+          reply_to: meta?.reply_to ?? null,
         }),
       });
     }

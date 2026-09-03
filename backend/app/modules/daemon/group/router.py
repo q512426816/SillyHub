@@ -16,6 +16,7 @@ audit/grants 先例在 daemon router 静态区 include，复用其 ``/daemon`` p
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -42,6 +43,7 @@ from app.modules.daemon.group.service import (
     GroupMemberAddRead,
     GroupMemberInterruptRead,
     GroupMessageSendRead,
+    get_group_unread_counts,
     get_last_mention_previews,
     get_last_message_previews,
     get_online_member_ids,
@@ -71,10 +73,17 @@ class GroupChatListItemRead(GroupChatRead):
     ``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.
     pinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed
     ``GroupChatPinnedRead``；无置顶为 None）。
+
+    ``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线
+    最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
+    （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
+    ts > 位点；cap 99+）。
     """
 
     online_member_ids: list[uuid.UUID] = []
     last_message: str | None = None
+    last_message_at: datetime | None = None
+    unread_count: int = 0
     last_mention: dict[str, str] | None = None
     pinned: GroupChatPinnedRead | None = None
 
@@ -103,6 +112,9 @@ class GroupChatDetailRead(GroupChatRead):
 
     online_member_ids: list[uuid.UUID] = []
     pinned: GroupChatPinnedRead | None = None
+    # 群 P2 第二波（2026-09-02）：与列表项同源的最新消息 ts + 本成员未读数。
+    last_message_at: datetime | None = None
+    unread_count: int = 0
     members: list[GroupMemberDetailRead] = Field(default_factory=list)
 
 
@@ -117,6 +129,10 @@ class GroupMessageSendRequest(BaseModel):
     attachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时
     ``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
     service，DTO 层总量兜底）。
+
+    ``reply_to_log_id``（群 P2 第二波引用回复）：被引用的群时间线消息行 id
+    （user_input / 投影行均可；service 校验属本群时间线，跨群/不存在 404），
+    发送后 metadata 与群频道事件落 ``reply_to`` 快照。
     """
 
     content: str = Field(
@@ -124,6 +140,9 @@ class GroupMessageSendRequest(BaseModel):
     )
     attachment_ids: list[uuid.UUID] = Field(
         default_factory=list, max_length=10, description="附件引用（SessionAttachment id）"
+    )
+    reply_to_log_id: uuid.UUID | None = Field(
+        default=None, description="引用回复目标：群时间线消息行 id（跨群/不存在 404）"
     )
 
 
@@ -198,15 +217,23 @@ async def list_group_chats(
     """当前用户=群成员的群列表（含成员摘要 chips + 最后消息；design §6.1）。"""
     svc = GroupChatService(session)
     reads = await svc.list_groups(user)
-    # task-03：最后消息摘要接通（群 id==会话 id 不变式，§3.2）。
+    # task-03：最后消息摘要接通（群 id==会话 id 不变式，§3.2）；群 P2 第二波
+    # 同查询顺手取最新行 ts（last_message_at）。
     previews = await get_last_message_previews(session, [r.id for r in reads])
     # 群聊体验 quick（2026-09-02）：最近 @我 摘要（非成员群不会出现，双保险跳过）。
     mentions = await get_last_mention_previews(
         session, user_id=user.id, group_ids=[r.id for r in reads]
     )
+    # 群 P2 第二波：本成员未读数（last_read_at 位点 → count，cap 99+）。
+    unread = await get_group_unread_counts(
+        session, user_id=user.id, group_ids=[r.id for r in reads]
+    )
     items = [_to_list_item(r) for r in reads]
     for item in items:
-        item.last_message = previews.get(item.id)
+        last_content, last_ts = previews.get(item.id, (None, None))
+        item.last_message = last_content
+        item.last_message_at = last_ts
+        item.unread_count = unread.get(item.id, 0)
         item.last_mention = mentions.get(item.id)
         # task-06（§5.4）：presence 在线集接通（Redis 不可用降级空数组）。
         item.online_member_ids = await get_online_member_ids(item.id)
@@ -230,6 +257,11 @@ async def get_group_chat(
     shadow_running = await svc.get_member_shadow_running(group_id)
     for member in detail.members:
         member.shadow_running = shadow_running.get(member.id, False)
+    # 群 P2 第二波：与列表项同源的最新消息 ts + 本成员未读数（单群两查）。
+    previews = await get_last_message_previews(session, [group_id])
+    detail.last_message_at = previews.get(group_id, (None, None))[1]
+    unread = await get_group_unread_counts(session, user_id=user.id, group_ids=[group_id])
+    detail.unread_count = unread.get(group_id, 0)
     return detail
 
 
@@ -375,16 +407,37 @@ async def send_group_message(
 ) -> GroupMessageSendRead:
     """发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。
 
-    未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员；触发
-    成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1）。附件随消息落
-    user_input metadata 摘要并在触发成员时随注入下发（FR-05 补遗）。
+    未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员（并行
+    触发，群 P2 第二波）；触发成员忙轮排队（满 5 → 409）。任意用户成员可发
+    （§6.1）。附件随消息落 user_input metadata 摘要并在触发成员时随注入下发
+    （FR-05 补遗）。``reply_to_log_id`` 引用回复（校验属本群时间线，跨群/
+    不存在 404，快照进 metadata 与群频道事件）。
     """
     return await GroupChatService(session).send_group_message(
         group_id,
         user,
         payload.content,
         attachment_ids=payload.attachment_ids or None,
+        reply_to_log_id=payload.reply_to_log_id,
     )
+
+
+# ── 未读位点（群 P2 第二波，2026-09-02）──────────────────────────────────────
+
+
+@router.put("/{group_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_group_chat_read(
+    group_id: uuid.UUID,
+    session: SessionDep,
+    user: GroupChatUser,
+) -> None:
+    """标记群已读至此（本成员视角；无 body——服务端直接置 now()）。
+
+    成员校验（非成员 404 不泄露存在性）后推进 ``agent_group_members.
+    last_read_at``；幂等（重复 PUT 只前移位点）。任意用户成员可标记（§6.1
+    读权限同款）。
+    """
+    await GroupChatService(session).mark_group_read(group_id, user)
 
 
 # ── typing（task-06，design §5.4）────────────────────────────────────────────
