@@ -88,19 +88,22 @@
 审计：⚖️ 归属切分：7 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/group/router.py, backend/app/modules/daemon/run_sync/service.py, backend/app/modules/daemon/tests/test_group_direct.py, backend/openapi.json, frontend/src/lib/api-types.ts, backend/app/modules/daemon/tests/test_group_p1.py, docs/sillyspec/2026-09-03-quicksync-conflict-granularity.md
 
 ## ql-20260903-003-1fdd | 2026-09-03 07:20:55 | 群聊 P2 第一波六项：①@全体二次确认（显示将触发 N 个成员）②typing 草稿预览默认关闭（改只显示正在输入，群设置可开）③置顶消息/群公告 ④会话闸满/触发失败群内系统提示 ⑤附件部分失败逐成员重发入口 ⑥『最近@我』扫描窗口扩至…
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：（见实际改动）
+完成补记（2026-09-04 手工补全——当时 --done 被 spec-sync 冲突打断）：工作已落地提交 ed17cba38（提交信息以会话 id quick-* 引用），验证数据见该提交说明。
 
 ## ql-20260903-004-14a4 | 2026-09-03 08:02:45 | 群聊 P2 第二波三项：①@全体并行触发（独立 session 工厂消除顺序等待）②消息引用回复（reply_to_log_id：发送可选引用+气泡渲染引用条）③未读分隔线（服务端 last_read位点+前端『以下为未读』）
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：（见实际改动）
+完成补记（2026-09-04 手工补全——当时 --done 被 spec-sync 冲突打断）：工作已落地提交 a06898d54（提交信息以会话 id quick-* 引用），验证数据见该提交说明。
 
 ## ql-20260903-005-cf45 | 2026-09-03 09:18:08 | 影子会话系统注入刷屏修复：直聊头 preamble 化（对话视图只见真实消息）+GROUP_CHAIN 标记行前端剥离+[后台任务通知] 整条折叠
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：（见实际改动）
+完成补记（2026-09-04 手工补全——当时 --done 被 spec-sync 冲突打断）：工作已落地提交 40c6f67b8（提交信息以会话 id quick-* 引用），验证数据见该提交说明。
 
 ## ql-20260903-006-1558 | 2026-09-03 09:42:24 | 修复变更文件 .md 预览崩溃：remarkChangeLink transformer 双层包装摧毁 mdast 树
 状态：已完成
