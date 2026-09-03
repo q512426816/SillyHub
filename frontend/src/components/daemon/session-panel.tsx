@@ -1549,8 +1549,10 @@ function SessionPanelPage({
         setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
         // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
         // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。
+        // 双 rAF：等本批 setState 的 DOM 提交 + 布局完成（setTimeout(0) 早于
+        // 提交，scrollHeight=0 链断——分身会话实测复现「无滚动条不加载」）。
         if (logs.length >= HISTORY_PAGE_SIZE) {
-          setTimeout(() => maybeAutoFillRef.current(), 0);
+          scheduleAutoFillRef.current();
         }
         const restored = logsToTurns(logs);
         setTurnState((prev) => {
@@ -1935,10 +1937,11 @@ function SessionPanelPage({
       historyLoadingRef.current = false;
       setHistoryLoading(false);
       // 视口补拉链：本次满页（可能还有更早）→ DOM 提交后复查是否仍不满
-      // 一屏（无滚动条 scroll 事件永不触发），不满即续拉（见 maybeAutoFill）。
+      // 一屏（无滚动条 scroll 事件永不触发），不满即续拉（见 scheduleAutoFill
+      // ——双 rAF 等提交 + 布局，setTimeout(0) 早于提交链断）。
       if (chainedMore) {
         chainedMore = false;
-        setTimeout(() => maybeAutoFillRef.current(), 0);
+        scheduleAutoFillRef.current();
       }
     }
   }, [sessionId, hasEarlier]);
@@ -1947,7 +1950,8 @@ function SessionPanelPage({
   /** 视口补拉（触顶补口）：内容不满视口且可能还有更早 → 自动续拉一页。
    *  守卫：容器存在且有布局高度（jsdom 无布局 scrollHeight=0 不触发）、
    *  连拉上限 AUTO_FILL_MAX（防整段历史全被空渲染吞掉的极端批量请求；
-   *  换会话重置）。撑出滚动条（scrollHeight > clientHeight）即停走正常触顶。 */
+   *  换会话重置）。撑出滚动条（scrollHeight > clientHeight）即停走正常触顶。
+   *  经 scheduleAutoFill 调用（等布局），不直接从数据回调调（时序见其注释）。 */
   const AUTO_FILL_MAX = 10;
   const maybeAutoFill = useCallback(() => {
     const el = scrollElQueryRef.current();
@@ -1959,6 +1963,29 @@ function SessionPanelPage({
   }, []);
   const maybeAutoFillRef = useRef(maybeAutoFill);
   maybeAutoFillRef.current = maybeAutoFill;
+
+  /** 补拉调度：双 rAF 等数据 setState 的 DOM 提交 + 布局完成；布局仍不可用
+   *  （scrollHeight/clientHeight 为 0——提交竞态或容器零高）则继续 rAF 重试，
+   *  至多 AUTO_FILL_LAYOUT_FRAMES 帧（~160ms）放弃（下次翻页/滚动再试）。
+   *  原 setTimeout(0) 早于 React 提交，scrollHeight=0 被 maybeAutoFill 守卫
+   *  拦下且无重试——补拉链断在首跳（分身会话「无滚动条不加载」实测根因）。 */
+  const AUTO_FILL_LAYOUT_FRAMES = 10;
+  const scheduleAutoFill = useCallback(() => {
+    let frames = 0;
+    const tick = () => {
+      const el = scrollElQueryRef.current();
+      if (el && el.scrollHeight > 0 && el.clientHeight > 0) {
+        maybeAutoFillRef.current();
+        return;
+      }
+      if (++frames < AUTO_FILL_LAYOUT_FRAMES) {
+        requestAnimationFrame(tick);
+      }
+    };
+    requestAnimationFrame(tick);
+  }, []);
+  const scheduleAutoFillRef = useRef(scheduleAutoFill);
+  scheduleAutoFillRef.current = scheduleAutoFill;
 
   // ── quick（2026-09-02 触顶自动加载）：滚动接线 + prepend 滚动锚 ──
   // 捕获阶段监听 TurnTimeline 内部滚动容器（native scroll 不冒泡，capture

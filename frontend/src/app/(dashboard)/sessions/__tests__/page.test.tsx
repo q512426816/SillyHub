@@ -1479,6 +1479,73 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     }
   });
 
+  it("布局延迟就绪（首读 scrollHeight=0，rAF 后可读）→ 补拉链重试不放弃", async () => {
+    // 复现生产时序：数据回调后 DOM 未提交/布局未算（scrollHeight=0）——
+    // 原 setTimeout(0) 一次判定即断链；修复后 rAF 重试直至布局可读。
+    let reads = 0;
+    const shDesc = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight",
+    )!;
+    const chDesc = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientHeight",
+    )!;
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        reads += 1;
+        return reads <= 2 ? 0 : 400; // 前 2 次读（调度链首帧）布局未就绪
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return 600;
+      },
+    });
+    try {
+      const fullPage = [
+        quickLog("b-inj", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+        ...Array.from({ length: 99 }, (_, i) =>
+          quickLog(
+            `b-out-${i}`,
+            "r-cur",
+            "stdout",
+            `窗口内输出 ${i}`,
+            "2026-08-15T08:00:00Z",
+          ),
+        ),
+      ];
+      const older = [
+        quickLog("b-old", "r-old", "user_input", "延迟布局后的更早提问", "2026-08-15T07:00:00Z"),
+      ];
+      mocks.getAgentSessionLogs
+        .mockResolvedValueOnce(fullPage)
+        .mockResolvedValueOnce(older);
+      renderPage();
+      await selectDefaultSession();
+
+      // 布局就绪后自动补拉成功 prepend（rAF 重试链扛过未就绪窗口）。
+      expect(
+        await screen.findByText("延迟布局后的更早提问", {}, { timeout: 3000 }),
+      ).toBeTruthy();
+    } finally {
+      if (shDesc) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", shDesc);
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+          .scrollHeight;
+      }
+      if (chDesc) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", chDesc);
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+          .clientHeight;
+      }
+    }
+  });
+
   it("单 run 跨游标（团队分身会话常态）→ 更早段同 run 不丢弃，伪 runId 轮块 prepend", async () => {
     // 分身会话整段执行是一个长 run：初始窗口与「加载更早」拉回的更早日志
     // 同 run——原 run 级去重会整段丢弃（按钮永远无反应），修复后伪 runId

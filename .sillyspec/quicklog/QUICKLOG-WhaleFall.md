@@ -297,3 +297,14 @@
 根因：初始 100 条日志装配出的对话高度可能不足一屏：容器无滚动条则 scroll 事件永不触发，触顶加载成了死路（用户实测分身会话初始展示未满屏无法继续加载）
 方案：maybeAutoFill 视口补拉：容器有布局高度且 scrollHeight ≤ clientHeight（不满一屏）且有更早历史时自动续拉一页；初始满页后 setTimeout 复查 + 每次翻页满页后链式复查（DOM 提交后）；连拉上限 10 防极端空渲染批量请求，换会话重置；jsdom 无布局（scrollHeight=0）不触发保既有用例零影响
 结果：page.test 26/26（新增无滚动条自动续拉用例——原型级打桩布局尺寸，断言无滚动事件即 prepend 且到头即停）绿；tsc 0 错；待重建 frontend 部署
+
+## ql-20260903-001-4d6e | 2026-09-03 08:42:55 | 视口补拉时序修复——补拉链首跳早于 DOM 提交布局未就绪即断链
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（scheduleAutoFill rAF 重试调度）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（布局延迟就绪用例）
+需求：视口补拉时序修复——补拉链首跳早于 DOM 提交布局未就绪即断链，分身会话无滚动条仍不加载
+根因：初始/翻页后触发用 setTimeout(0)：早于 React 对 setState 的 DOM 提交与布局计算，scrollHeight=0 被 maybeAutoFill 守卫拦下且无重试——补拉链断在首跳（用户实测部署后问题1未解决；另会话偶发成功属时序竞争）
+方案：scheduleAutoFill 调度：双 rAF 等提交+布局；布局不可读（scrollHeight/clientHeight 为 0）继续 rAF 重试至多 10 帧（~160ms）后放弃（下次翻页/滚动再试）；初始满页与翻页链式两处触发统一走调度
+结果：page.test 27/27（新增布局延迟就绪用例——前 2 次读 0 后可读，断言 rAF 重试后仍自动补拉 prepend）绿；tsc 0；待重建 frontend 部署实测
