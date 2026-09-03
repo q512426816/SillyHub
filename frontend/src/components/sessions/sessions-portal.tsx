@@ -570,14 +570,20 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             // invalidate 列表 + 清除选中态（若选中被删的会话）。
             // task-01：前缀 ["agentSessions"] 同时覆盖全局
             //（["agentSessions","sessionsPortal",scope,serverParams] 单一路径——D-003@v2 起 scope 走全局端点加过滤参，前缀 invalidate 全覆盖。
+            // ql-20260903-019：返回失败个数（照 onArchiveSessions 口径）——此前
+            // allSettled 整体吞掉，删除全失败（权限/断网）时会话列表原地复现
+            // 零解释，连成功提示都没有。
             const { deleteAgentSession } = await import("@/lib/daemon");
-            await Promise.allSettled(ids.map((id) => deleteAgentSession(id)));
+            const results = await Promise.allSettled(
+              ids.map((id) => deleteAgentSession(id)),
+            );
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             if (ids.includes(selectedSessionId ?? "")) {
               setSelectedSessionId(null);
               // ql-20260824-012：选中被删清空，同步移除 ?session=。
               syncSessionParam(null);
             }
+            return results.filter((r) => r.status === "rejected").length;
           }}
           // 2026-08-24：归档/取消归档回调（照 onDeleteSessions 模式）。
           // ql-20260831-013：返回失败个数（面板据此 toast 成功/部分失败）。

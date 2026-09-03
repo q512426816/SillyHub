@@ -327,7 +327,7 @@ export interface SessionListPanelProps {
   /** 点击条目回调。 */
   onSelect?: (_session: AgentSessionRead) => void;
   /** ql-20260818-012：删除会话回调（单条/批量共用，软删后 invalidate 列表）。 */
-  onDeleteSessions?: (_ids: string[]) => Promise<void>;
+  onDeleteSessions?: (_ids: string[]) => Promise<number | void>;
   // 2026-08-24：归档/取消归档会话回调。ql-20260831-013：返回失败个数
   //（调用方 Promise.allSettled 口径），面板据此出成功/部分失败 toast。
   onArchiveSessions?: (_ids: string[]) => Promise<number>;
@@ -1117,7 +1117,10 @@ function WorkspaceTreeList({
       onOk: async () => {
         setDeleting(true);
         try {
-          await onDeleteSessions([id]);
+          // ql-20260903-019：删除结果不再零反馈（全失败时会话原地复现无解释）。
+          const failed = await onDeleteSessions([id]);
+          if (!failed) notify.success("会话已删除");
+          else notify.warning(`删除会话失败（${failed} 个，请重试）`);
         } finally {
           setDeleting(false);
         }
@@ -1141,8 +1144,13 @@ function WorkspaceTreeList({
       onOk: async () => {
         setDeleting(true);
         try {
-          await onDeleteSessions([...checkedIds]);
-          setCheckedIds(new Set());
+          const failed = await onDeleteSessions([...checkedIds]);
+          if (!failed) {
+            notify.success(`已删除 ${checkedIds.size} 个会话`);
+            setCheckedIds(new Set());
+          } else {
+            notify.warning(`删除 ${checkedIds.size} 个会话（${failed} 个失败，请重试）`);
+          }
         } finally {
           setDeleting(false);
         }

@@ -260,10 +260,14 @@ function FloatingDrawerBody({
   /** 批量删除/归档/取消归档（门户同款：逐条调用 + invalidate + 选中被删则清）。 */
   const handleDeleteSessions = useCallback(
     async (ids: string[]) => {
+      // ql-20260903-019：返回失败个数（照归档口径，allSettled 不再吞失败）。
       const { deleteAgentSession } = await import("@/lib/daemon");
-      await Promise.allSettled(ids.map((id) => deleteAgentSession(id)));
+      const results = await Promise.allSettled(
+        ids.map((id) => deleteAgentSession(id)),
+      );
       refreshLists();
       if (ids.includes(sessionId ?? "")) selectSession(null);
+      return results.filter((r) => r.status === "rejected").length;
     },
     [refreshLists, sessionId, selectSession],
   );

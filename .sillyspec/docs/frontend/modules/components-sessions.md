@@ -36,7 +36,7 @@ updated_at: 2026-08-23 12:58:00
   - 工作区树数据：`useQuery` 一次拉取 `listAgentSessions({ limit: AGENT_SESSIONS_TREE_FETCH_LIMIT=500 })`（D-103，>500 余量底部提示「仅显示最近 N 条」）；workspace scope 维持端点过滤（D-003@v2 只多传 workspace_id，单组、名称解析失败兜底「当前工作区」）；分组 = 客户端按 workspace_id 分桶 + 工作区列表序（0 会话组仍显示）+「未知工作区」桶（workspace_id 无法解析，无「＋」）+「非工作区」固定末尾组（有「＋」，workspaceId 传 null，D-105）。
   - 筛选（纯视图过滤不进数据层）：标题搜索（回车应用）+ 状态下拉（X-11 保留）+ 两层筛选 tab（D-107）——第一层机器胶囊（含「全部」清空），选中后出第二层智能体（⚡Claude Code/◎Codex + 「全部」）；筛选态隐藏机器小节标题；筛选变化重置展开态与「显示全部」（豁免当前选中会话所在组，R-05）。
   - 树渲染：工作区分组手风琴（组头=▶展开箭头+📂名称+会话数+「＋」新建+多选入口）→ 组内机器小节（机器名+在线 Badge 点，runtime_id→机器映射缺席回退 config_snapshot.machine_name）→ 条目；组内超 50 截断 + 「显示全部」（GROUP_ITEM_LIMIT=50，R-03）。
-  - 保留能力（X-11）：状态下拉/标题搜索（树形态=组内视图过滤）；批量删除（组头「多选」入口→组内勾选/全选本组/删除选中，一次一个组）；单条 hover 删除。全局 `useVirtualizer` 已退役（R-04，分组结构+组内截断取代）。
+  - 保留能力（X-11）：状态下拉/标题搜索（树形态=组内视图过滤）；批量删除（组头「多选」入口→组内勾选/全选本组/删除选中，一次一个组）；单条 hover 删除。删除结果 toast（ql-20260903-019）：`onDeleteSessions` 返回失败个数（门户/浮层宿主 allSettled 计数，void 兼容按 0）→ 成功 success / 部分失败 warning 带个数（照归档 ql-20260831-013 口径；此前全失败时会话原地复现零解释）。全局 `useVirtualizer` 已退役（R-04，分组结构+组内截断取代）。
   - 退役清单（全局形态，X-11）：引擎胶囊 tab（Segmented）→ 两层筛选 tab 智能体层取代；机器多选 Select → 机器 tab 取代；三者仅在 change 分支保留原实现（PAGE_SIZE=50 真分页/ROW_HEIGHT=96 虚拟滚动/引擎胶囊四维筛选均平铺分支专属）。
   - 条目紧凑两行（D-006）：第一行=状态点+标题截断+相对时间+hover 删除；第二行 chips——树形态=引擎/**创建人（👤 owner_name，null 显"—"，D-108@v2）**/档案/供应商/轮数（工作区/机器由组头与小节承载不重复）；flat 形态=工作区/机器/引擎/档案/供应商/轮数（现状）。chips 优先读 `config_snapshot` 直显，缺省回退基础字段。
   - 导出 `WorkspaceScope`/`ChangeScope`/`SessionListScope`（scope 判别联合）、`formatRelativeTime(iso, now?)`。

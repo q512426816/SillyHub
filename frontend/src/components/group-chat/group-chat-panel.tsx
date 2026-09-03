@@ -94,7 +94,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, Users, X } from "lucide-react";
+import { ArrowDown, CheckCircle2, FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, TriangleAlert, Users, X } from "lucide-react";
 
 import { Drawer, Modal } from "antd";
 import { MemberPanel } from "@/components/group-chat/member-panel";
@@ -803,6 +803,16 @@ export function GroupChatPanel({
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
+  /** 回放拉取失败（ql-20260903-019）：与「真空群」空态区分，提供重试入口。 */
+  const [replayFailed, setReplayFailed] = useState(false);
+  /** 回放重试驱动（自增触发订阅 effect 整体重跑：回放 + SSE 重建）。 */
+  const [replayRetryTick, setReplayRetryTick] = useState(0);
+  /** SSE 连接状态横幅（ql-20260903-019）：断连期间时间线不再静默冻结——
+   *  对齐单聊 StreamConnectionBanner（reconnecting 常驻 / reconnected 2s）。 */
+  const [sseConn, setSseConn] = useState<{
+    status: "reconnecting" | "reconnected" | null;
+    attempt: number;
+  }>({ status: null, attempt: 1 });
   /** 翻页前的时间线 scrollHeight：归并渲染后把 scrollTop 同步抬高增量，视口
    *    停留在用户正在读的位置不被新插入的历史下推（layout 阶段消费，见下方
    *    useLayoutEffect）。 */
@@ -949,6 +959,8 @@ export function GroupChatPanel({
     setHasMoreHistory(false);
     setLoadingMore(false);
     setLoadMoreError(false);
+    setReplayFailed(false);
+    setSseConn({ status: null, attempt: 1 });
     preserveTopHeightRef.current = null;
 
     void (async () => {
@@ -961,6 +973,7 @@ export function GroupChatPanel({
         if (cancelled) return;
         // 拉回满一页 → 可能有更早历史（不足一页必无更早）。
         setHasMoreHistory(logs.length >= GROUP_REPLAY_PAGE_SIZE);
+        setReplayFailed(false);
         const built = buildTimelineFromReplay(logs, currentUserIdRef.current);
         setEntries(built);
         for (const e of built) seenIdsRef.current.add(e.id);
@@ -972,7 +985,10 @@ export function GroupChatPanel({
           markGroupOpened(groupId, lastTs);
         }
       } catch {
-        /* 回放失败 → 空时间线起步，SSE resync/轮后对账兜底（不阻断订阅）。 */
+        /* 回放失败 → 空时间线起步，SSE resync/轮后对账兜底（不阻断订阅）。
+           ql-20260903-019：置 replayFailed——空态与「真空群」区分并给重试入口
+           （此前有几百条历史的群网络抖动时显示「还没有消息」，像记录丢了）。 */
+        if (!cancelled) setReplayFailed(true);
       }
       if (cancelled) return;
       // 实时订阅（cursor=回放游标：首连增量同步从该点拉起，避免二次全量）。
@@ -1071,7 +1087,22 @@ export function GroupChatPanel({
           onError: () => {
             /* 解析/校验错误静默（连接层退避重连自兜；避免刷屏）。 */
           },
-          onStatusChange: (status) => {
+          onStatusChange: (status, attempt) => {
+            // ql-20260903-019：连接状态横幅——断连常驻提示、恢复 2s 自动消失
+            //（live 事件到达即提前隐藏；reconnected 无 live 兜底计时，群可能
+            // 暂时无人发言）。setState after unmount 在 React 18 为 no-op。
+            if (status === "reconnecting") {
+              setSseConn({ status: "reconnecting", attempt: attempt ?? 1 });
+            } else if (status === "live") {
+              setSseConn({ status: null, attempt: 1 });
+            } else if (status === "reconnected") {
+              setSseConn({ status: "reconnected", attempt: 1 });
+              window.setTimeout(() => {
+                setSseConn((s) =>
+                  s.status === "reconnected" ? { status: null, attempt: 1 } : s,
+                );
+              }, 2000);
+            }
             if (status === "reconnected") {
               // 重连恢复：清流式光标（群无 run 快照可合成收口，保守归零；
               // 仍在输出的成员下一条实时行会重新点亮）。
@@ -1113,8 +1144,9 @@ export function GroupChatPanel({
       streamConnRef.current = null;
       connection?.close();
     };
+    // replayRetryTick：空态「点击重试」驱动整体重跑（回放 + SSE 重建）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  }, [sessionId, replayRetryTick]);
 
   /* ── 运行态兜底（群聊运行态可见 quick 2026-09-02）：群详情 members[].
    *    shadow_running → agent 运行集灌入 typingMap（持续态、preview=null、
@@ -1884,6 +1916,33 @@ export function GroupChatPanel({
           </div>
         )}
 
+        {/* SSE 连接状态横幅（ql-20260903-019）：断连常驻 / 恢复 2s——样式对齐
+            单聊 StreamConnectionBanner（amber 阶警示 / emerald 阶恢复）。 */}
+        {sseConn.status === "reconnecting" && (
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="group-sse-banner"
+            className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800"
+          >
+            <TriangleAlert aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              实时连接已断开，正在重连…（第 {sseConn.attempt}{" "}
+              次尝试）—— 恢复后将自动同步错过的群消息
+            </span>
+          </div>
+        )}
+        {sseConn.status === "reconnected" && (
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="group-sse-banner"
+            className="flex items-center gap-2 border-b border-emerald-300 bg-emerald-50 px-5 py-2 text-xs text-emerald-800"
+          >
+            <CheckCircle2 aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            <span>连接已恢复，正在同步断线期间的消息…（同步完成后此提示自动消失）</span>
+          </div>
+        )}
         {/* 平铺时间线（原型 .timeline；容器内距对齐会话 TurnTimeline px-5 py-5）。
             外层 relative 容器承载「回到底部」悬浮按钮（定位相对视口而非滚动内容）。 */}
         <div className="relative min-h-0 flex-1">
@@ -1932,6 +1991,20 @@ export function GroupChatPanel({
                 </>
               ) : detailQ.isLoading || presenceListQ.isLoading ? (
                 "群消息加载中…"
+              ) : replayFailed ? (
+                // ql-20260903-019：回放失败与「真空群」区分——有历史的群网络
+                // 抖动时不再误显「还没有消息」；重试驱动回放 + 订阅重建。
+                <>
+                  群消息历史加载失败，新消息仍会实时接收。
+                  <button
+                    type="button"
+                    data-testid="group-replay-retry"
+                    onClick={() => setReplayRetryTick((t) => t + 1)}
+                    className="ml-1 underline underline-offset-2 hover:text-foreground"
+                  >
+                    点击重试
+                  </button>
+                </>
               ) : (
                 "还没有消息——发第一句，@昵称 唤起指定 Agent 成员"
               )}

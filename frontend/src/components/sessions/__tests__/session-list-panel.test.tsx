@@ -1033,6 +1033,35 @@ describe("SessionListPanel 批量与单条删除（组头尾随多选入口）",
     fireEvent.click(okBtn);
     await waitFor(() => expect(onDeleteSessions).toHaveBeenCalledWith(["s-1"]));
   });
+
+  it("删除结果 toast（ql-20260903-019）：回调返回失败个数 → warning 提示，不再零反馈", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onDeleteSessions = vi.fn().mockResolvedValue(1);
+    renderPanel(<SessionListPanel onDeleteSessions={onDeleteSessions} />);
+    await openGroup("SillyHub");
+
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "删除 会话A" }));
+    const okBtn = await waitFor(() => {
+      const btn = document.querySelector(
+        ".ant-modal-confirm-btns .ant-btn-primary",
+      ) as HTMLElement | null;
+      if (!btn) throw new Error("confirm ok button not found");
+      return btn;
+    });
+    fireEvent.click(okBtn);
+    await waitFor(() => expect(onDeleteSessions).toHaveBeenCalledWith(["s-1"]));
+    // 部分失败：warning 带失败个数；成功分支不触发。
+    await waitFor(() =>
+      expect(notifyMocks.warning).toHaveBeenCalledWith(
+        expect.stringContaining("请重试"),
+      ),
+    );
+    expect(notifyMocks.success).not.toHaveBeenCalledWith("会话已删除");
+  });
 });
 
 // ── ql-20260831-013：归档 UX 重做 ─────────────────────────────────────────

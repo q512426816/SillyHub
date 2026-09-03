@@ -285,3 +285,18 @@
 根因：「加载更早」请求不带取消不校验会话身份：A 会话翻页在途切到 B，A 的历史被 prepend 进 B 的时间线闪现串台；触顶滚动监听按 isToolReportBody 渲染期 ref 早退，effect 依赖不含该翻转维度——tool_report 会话聊过首句后主体切到时间线，监听永不挂载、触顶加载静默失效
 方案：sessionEpochRef 换会话自增 + handleLoadEarlier 响应纪元归属校验丢弃 + AbortController 换会话 abort 在途；触顶监听常驻挂载（监听器按 data-testid 自过滤，AgentLog 主体滚动不触发），删渲染期镜像 ref
 结果：新建 session-panel-history-race.test.tsx 2 用例全绿（摘守卫验证过测试转红咬得住）+ 相关 4 测试文件 50 用例全绿；typecheck 0 错；未部署
+
+## ql-20260903-019-1b62 | 2026-09-03 21:15:35 | 静默失败补反馈收尾——删除会话结果 + 群回放失败空态 + 群 SSE 断连横幅
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/sessions-portal.tsx（onDeleteSessions 返回失败个数）
+- frontend/src/components/floating/floating-session-host.tsx（同口径）
+- frontend/src/components/sessions/session-list-panel.tsx（删除结果 toast + prop 类型 Promise<number|void>）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（新增删除结果用例）
+- frontend/src/components/group-chat/group-chat-panel.tsx（回放失败空态+重试 + SSE 断连横幅）
+- .sillyspec/docs/frontend/modules/components-sessions.md（删除契约注记）
+需求：静默失败补反馈收尾——删除会话结果 + 群回放失败空态 + 群 SSE 断连横幅
+根因：删除会话 allSettled 结果整体丢弃（连成功提示都没有，全失败时会话原地复现零解释）；群回放失败被吞后与真空群同显「还没有消息」（有几百条历史的群网络抖动时像记录丢了）；群 SSE 断连完全静默（时间线冻结不报错也不更新，单聊有重连横幅群聊没有）
+方案：门户+浮层宿主 onDeleteSessions 返回失败个数（照归档口径），面板删除按结果 toast；群面板 replayFailed 状态区分空态并给「点击重试」（驱动回放+SSE 重建）；onStatusChange 接连接状态横幅（reconnecting 常驻/reconnected 2s 自动消失，样式对齐单聊）
+结果：session-list-panel 81 用例全绿（新增删除结果 toast 用例）+ group-chat-panel/member-panel/floating-host 164 全绿；typecheck 0 错；未部署
