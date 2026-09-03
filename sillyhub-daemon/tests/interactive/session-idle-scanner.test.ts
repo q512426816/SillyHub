@@ -25,14 +25,14 @@ import type {
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
 function makeMockDriver(opts: { interruptThrow?: boolean } = {}) {
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = {
     interrupt: vi.fn(async () => {
       if (opts.interruptThrow) throw new Error('interrupt boom');
@@ -45,7 +45,7 @@ function makeMockDriver(opts: { interruptThrow?: boolean } = {}) {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -58,7 +58,7 @@ function makeMockDriver(opts: { interruptThrow?: boolean } = {}) {
   return {
     driver,
     fakeQuery,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 

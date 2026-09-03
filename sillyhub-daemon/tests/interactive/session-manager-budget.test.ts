@@ -12,24 +12,19 @@
 //   (c) budget_tokens undefined → 检查点短路：无事件、inject 正常、行为零变化（FR-07）。
 
 import { describe, it, expect, vi } from 'vitest';
+import type { Query, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type {
-  Query,
-  SDKMessage,
-  SDKResultMessage,
-  SDKUserMessage,
-} from '@anthropic-ai/claude-agent-sdk';
+  InteractiveDriverCallbacks,
+  TurnMessageEnvelope,
+} from '../../src/interactive/driver.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import { SessionNotActiveError } from '../../src/interactive/types.js';
-import type {
-  ClaudeSdkDriver,
-  ConsumeCallbacks,
-  StartOptions,
-} from '../../src/interactive/claude-sdk-driver.js';
+import type { ClaudeSdkDriver, StartOptions } from '../../src/interactive/claude-sdk-driver.js';
 
 // ── 辅助构造（对齐 session-manager-usage-cache.test.ts 同款 mock driver）────────
 
 function makeMockDriver() {
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = {
     interrupt: vi.fn(async () => {}),
     // close 在 _terminateSession 里调（task-01 close 已接通），此处 spy 以便断言
@@ -41,7 +36,7 @@ function makeMockDriver() {
       (_input: AsyncIterable<SDKUserMessage>, _opts: StartOptions): Query =>
         fakeQuery,
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -53,8 +48,9 @@ function makeMockDriver() {
   return {
     driver,
     fakeQuery,
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitMessage: (env: TurnMessageEnvelope) =>
+      capturedCallbacks?.onTurnMessage?.(env),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 
@@ -63,7 +59,7 @@ function makeDeps() {
     onTurnResult: vi.fn(
       async (_s: string, _r: string, _res: SDKResultMessage) => {},
     ),
-    onTurnMessage: vi.fn(async (_s: string, _r: string, _m: SDKMessage) => {}),
+    onTurnMessage: vi.fn(async (_s: string, _r: string, _m: unknown) => {}),
     onSessionEnd: vi.fn(async (_s: string, _st: string) => {}),
   };
 }
@@ -78,45 +74,33 @@ const BASE_INPUT = {
   pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
 };
 
-// stream_event fixture（对齐 session-manager-usage-cache.test.ts）。cache_*
-// 全名为 cache_*_input_tokens（与 sdk.d.ts 一致）。
-function streamMessageStart(
-  cacheRead: number,
-  cacheCreation: number,
-  inputTokens = 100,
-): SDKMessage {
+// task-08 事件轨 fixture：raw stream_event（message_start/message_delta）已由
+// ClaudeEventNormalizer 消化为 partial flush 事件——mock 直接上报归一化器等价的
+// usage 携带事件（is_partial + 轮级累计 input/output + cache 快照；cache_* 不进
+// 预算累计，D-009 口径不变）。emitUsageEvent(start) ≙ 旧 message_start(input) +
+// message_delta(output) 两帧的 flush 汇总。
+function usageFlushEvent(
+  inputTokens: number,
+  outputTokens: number,
+  parent?: string,
+): TurnMessageEnvelope {
   return {
-    type: 'stream_event',
-    event: {
-      type: 'message_start',
-      message: {
-        id: 'msg-bg',
+    events: [
+      {
+        type: 'thinking',
+        content: 'partial',
+        is_partial: true,
+        segment_id: `${parent ?? 'main'}:msg-bg:thinking`,
+        ...(parent ? { parent_tool_use_id: parent } : {}),
         usage: {
           input_tokens: inputTokens,
-          cache_read_input_tokens: cacheRead,
-          cache_creation_input_tokens: cacheCreation,
+          output_tokens: outputTokens,
+          cache_read_tokens: 999_999,
+          cache_creation_tokens: 999_999,
         },
       },
-    },
-  } as unknown as SDKMessage;
-}
-
-function streamMessageDelta(
-  cacheRead: number,
-  cacheCreation: number,
-  outputTokens = 50,
-): SDKMessage {
-  return {
-    type: 'stream_event',
-    event: {
-      type: 'message_delta',
-      usage: {
-        output_tokens: outputTokens,
-        cache_read_input_tokens: cacheRead,
-        cache_creation_input_tokens: cacheCreation,
-      },
-    },
-  } as unknown as SDKMessage;
+    ],
+  };
 }
 
 function resultSuccess(): SDKResultMessage {
@@ -169,9 +153,8 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
     // budget=120。message_start input=100 + message_delta output=50 = 150 ≥ 120。
     await sm.create({ ...BASE_INPUT, budget_tokens: 120 });
 
-    // cache_* 不影响：设很大也不进累计（D-009）。
-    emitMessage(streamMessageStart(999_999, 999_999, 100));
-    emitMessage(streamMessageDelta(999_999, 999_999, 50));
+    // cache_* 不影响：设很大也不进累计（D-009；事件 usage 携带但台账只收 input/output）。
+    emitMessage(usageFlushEvent(100, 50));
 
     // 触发 turn result → _onResult → _checkBudgetCutoff
     emitResult(resultSuccess());
@@ -196,8 +179,7 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
     const sm = new SessionManager({ driver, ...deps });
 
     await sm.create({ ...BASE_INPUT, budget_tokens: 50 });
-    emitMessage(streamMessageStart(0, 0, 100));
-    emitMessage(streamMessageDelta(0, 0, 50));
+    emitMessage(usageFlushEvent(100, 50));
     emitResult(resultSuccess());
     await new Promise((r) => setImmediate(r));
 
@@ -215,8 +197,7 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
 
     // budget=1000。input+output = 100+50 = 150（远低）；cache 巨大但**不计入**。
     await sm.create({ ...BASE_INPUT, budget_tokens: 1000 });
-    emitMessage(streamMessageStart(999_999, 999_999, 100));
-    emitMessage(streamMessageDelta(999_999, 999_999, 50));
+    emitMessage(usageFlushEvent(100, 50));
     emitResult(resultSuccess());
     await new Promise((r) => setImmediate(r));
 
@@ -232,8 +213,7 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
 
     // 未配置 budget。usage 巨大也不触发。
     await sm.create({ ...BASE_INPUT });
-    emitMessage(streamMessageStart(0, 0, 99_999));
-    emitMessage(streamMessageDelta(0, 0, 99_999));
+    emitMessage(usageFlushEvent(99_999, 99_999));
     emitResult(resultSuccess());
     await new Promise((r) => setImmediate(r));
 
@@ -253,8 +233,7 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
 
     // budget=50；首 turn input=100/output=50 已超；二 turn 再涨也不重发。
     await sm.create({ ...BASE_INPUT, budget_tokens: 50 });
-    emitMessage(streamMessageStart(0, 0, 100));
-    emitMessage(streamMessageDelta(0, 0, 50));
+    emitMessage(usageFlushEvent(100, 50));
     emitResult(resultSuccess());
     await new Promise((r) => setImmediate(r));
 
@@ -279,8 +258,7 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
     // create 时未带 budget；后续显式补登记。
     await sm.create({ ...BASE_INPUT });
     sm.setBudgetTokens('sess-bg', 80);
-    emitMessage(streamMessageStart(0, 0, 60));
-    emitMessage(streamMessageDelta(0, 0, 30));
+    emitMessage(usageFlushEvent(60, 30));
     emitResult(resultSuccess());
     await new Promise((r) => setImmediate(r));
 
@@ -296,8 +274,7 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
     sm.setBudgetTokens('sess-bg', 0);
     sm.setBudgetTokens('sess-bg', NaN);
     sm.setBudgetTokens('sess-bg', undefined);
-    emitMessage(streamMessageStart(0, 0, 99_999));
-    emitMessage(streamMessageDelta(0, 0, 99_999));
+    emitMessage(usageFlushEvent(99_999, 99_999));
     emitResult(resultSuccess());
     await new Promise((r) => setImmediate(r));
 
@@ -313,31 +290,11 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
     // 合计 130+80=210 ≥ 200。
     await sm.create({ ...BASE_INPUT, budget_tokens: 200 });
 
-    // 主 agent message_start（input=100）+ message_delta（output=30）
-    emitMessage(streamMessageStart(0, 0, 100));
-    emitMessage(streamMessageDelta(0, 0, 30));
-
-    // 子代理 message_start（parent_tool_use_id 场景，input=50）+ delta（output=30）。
-    // _parentKeyOf 对 stream_event 取 event.parent_tool_use_id（子代理）。
-    emitMessage({
-      type: 'stream_event',
-      event: {
-        type: 'message_start',
-        parent_tool_use_id: 'tu-1',
-        message: {
-          id: 'msg-sub',
-          usage: { input_tokens: 50 },
-        },
-      },
-    } as unknown as SDKMessage);
-    emitMessage({
-      type: 'stream_event',
-      event: {
-        type: 'message_delta',
-        parent_tool_use_id: 'tu-1',
-        usage: { output_tokens: 30 },
-      },
-    } as unknown as SDKMessage);
+    // 主 agent 轮级累计 input=100/output=30。
+    emitMessage(usageFlushEvent(100, 30));
+    // 子代理（parent_tool_use_id='tu-1'）轮级累计 input=50/output=30——台账按
+    // parentKey 分桶 replace（对齐旧跨桶求和）。
+    emitMessage(usageFlushEvent(50, 30, 'tu-1'));
 
     emitResult(resultSuccess());
     await new Promise((r) => setImmediate(r));

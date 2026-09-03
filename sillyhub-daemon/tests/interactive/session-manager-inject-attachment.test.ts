@@ -24,7 +24,7 @@ import { makeTmpDir, cleanupDir } from '../helpers.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 import {
@@ -45,7 +45,7 @@ function makeMockDriver() {
       (_input: AsyncIterable<SDKUserMessage>, _opts: StartOptions): Query =>
         fakeQuery,
     ),
-    consume: vi.fn(async (_q: Query, _cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, _cb: InteractiveDriverCallbacks): Promise<void> => {
       // 不自动 yield；测试按需注入消息。
     }),
     interrupt: vi.fn(async (_q: Query | null): Promise<boolean> => true),

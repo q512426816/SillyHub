@@ -10,8 +10,17 @@
 //   - generator 抛错 → onError
 //   - wrapper→exe 解析（task-01 R-exe reverse sync）：
 //     *.exe 直传 / *.cmd 解 wrapper 取真 exe / 找不到真 exe throw
+//
+// task-06（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）追加 envelope 轨：
+//   - mock SDK 流复用 task-03 的 fixture（tests/fixtures/claude-sdk-messages/*.json），
+//     onTurnMessage 收到的 envelope.events 全过 safeParseAgentEvent（zod）
+//   - raw 默认 undefined；SILLYHUB_DEBUG_RAW_EVENTS=1 时为原消息对象（帧级身份对应）
+//   - partial flush 先行 + override 撤回（partial-stream-override fixture）
+//   - onTurnResult 收映射后的 InteractiveDriverResult（usage 短名 cache_*_tokens + session_id）
+//   - 双轨读键：新键存在时旧键不调用（SessionManager 双键形态过渡兼容）
+//   - canUseTool/审批桥相关既有断言零改动（文件内既有 case 不动）
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'node:path';
 import type {
   Query,
@@ -19,7 +28,13 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { UserTurnInput } from '../../src/interactive/driver.js';
+import type {
+  InteractiveDriverResult,
+  TurnMessageEnvelope,
+  UserTurnInput,
+} from '../../src/interactive/driver.js';
+import { safeParseAgentEvent } from '../../src/agent-event-schema.js';
+import { FIXTURES_DIR } from '../helpers';
 
 // ── mock node:fs：existsSync / readFileSync 由测试逐 case 配置。 ───────────────
 // 用 vi.hoisted + vi.mock 让 mock 模块在 import 前 hoist；node:fs 的导出在 ESM 不可
@@ -175,6 +190,33 @@ function makeFakeQuery(
     // Query 接口其他方法桩（driver 不调用，仅为类型满足）。
   } as unknown as Query;
   return query;
+}
+
+/**
+ * 加载 task-03 的 SDK 消息 fixture（每文件一个 JSON 数组，见该目录 README）。
+ *
+ * 本文件对 node:fs 有全局 vi.mock（wrapper→exe 解析用），loadFixture/helpers 的
+ * readFileSync 会拿到 mock（默认返回空串）→ JSON.parse 报空输入。故经
+ * vi.importActual 取真实 fs 直读 fixture 路径（对齐 claude-events.test.ts 的
+ * loadFixture 语义，只绕开本文件的 fs mock，不影响其它 case 的 mock 行为）。
+ */
+async function loadMessages(name: string): Promise<SDKMessage[]> {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return JSON.parse(
+    actual.readFileSync(path.join(FIXTURES_DIR, 'claude-sdk-messages', `${name}.json`), 'utf8'),
+  ) as SDKMessage[];
+}
+
+/** onTurnMessage 入参判别：TurnMessageEnvelope（含 events 数组）。 */
+function isEnvelope(
+  m: TurnMessageEnvelope | Record<string, unknown>,
+): m is TurnMessageEnvelope {
+  return (
+    typeof m === 'object' &&
+    m !== null &&
+    'events' in m &&
+    Array.isArray((m as TurnMessageEnvelope).events)
+  );
 }
 
 beforeEach(() => {
@@ -480,7 +522,7 @@ describe('mapUserTurnInputToSdk（UserTurnInput → SDKUserMessage，D-009@v1）
 // ── ClaudeSdkDriver.consume ───────────────────────────────────────────────────
 
 describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () => {
-  it('两条 result 各触发 onResult；中间消息触发 onMessage', async () => {
+  it('两条 result 各触发 onTurnResult；中间消息触发 onTurnMessage（envelope）', async () => {
     const sessionId = '5b31bbdf-aaaa-bbbb-cccc-dddddddddddd';
     const messages: SDKMessage[] = [
       systemInit(sessionId),
@@ -497,7 +539,12 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
     const onError = vi.fn();
 
     const driver = new ClaudeSdkDriver();
-    await driver.consume(handle, { onResult, onMessage, onError });
+    // task-08：envelope-only（旧键 onResult/onMessage/onError 分支已移除）。
+    await driver.consume(handle, {
+      onTurnResult: onResult,
+      onTurnMessage: onMessage,
+      onTurnError: onError,
+    });
 
     expect(onResult).toHaveBeenCalledTimes(2);
     expect((onResult.mock.calls[0]![0] as SDKResultMessage).result).toBe(
@@ -506,8 +553,19 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
     expect((onResult.mock.calls[1]![0] as SDKResultMessage).result).toBe(
       'TURN2',
     );
-    // onMessage 收到非 result 的消息（system init + assistant ×2）
+    // onTurnMessage 收到非 result 帧的 envelope（init 1 条 + assistant ×2，
+    // 归一化后每帧一个 envelope：session_started / text / text）。
     expect(onMessage).toHaveBeenCalledTimes(3);
+    const events = onMessage.mock.calls.flatMap(
+      (c) => (c[0] as TurnMessageEnvelope).events,
+    );
+    expect(events.filter((e) => e.type === 'status').map((e) => e.subtype)).toEqual([
+      'session_started',
+    ]);
+    expect(events.filter((e) => e.type === 'text').map((e) => e.content)).toEqual([
+      'turn1 ok',
+      'turn2 ok',
+    ]);
     expect(onError).not.toHaveBeenCalled();
   });
 
@@ -520,11 +578,11 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
     const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
     const onResult = vi.fn();
     const driver = new ClaudeSdkDriver();
-    await driver.consume(handle, { onResult });
+    await driver.consume(handle, { onTurnResult: onResult });
     expect(onResult).toHaveBeenCalledTimes(1);
   });
 
-  it('generator 抛错 → onError 触发；不调 onResult', async () => {
+  it('generator 抛错 → onTurnError 触发；不调 onTurnResult', async () => {
     const gen = (async function* (): AsyncGenerator<SDKMessage, void> {
       throw new Error('spawn EINVAL');
     })();
@@ -537,20 +595,20 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
     const onResult = vi.fn();
     const onError = vi.fn();
     const driver = new ClaudeSdkDriver();
-    await driver.consume(handle, { onResult, onError });
+    await driver.consume(handle, { onTurnResult: onResult, onTurnError: onError });
 
     expect(onError).toHaveBeenCalledTimes(1);
     expect((onError.mock.calls[0]![0] as Error).message).toBe('spawn EINVAL');
     expect(onResult).not.toHaveBeenCalled();
   });
 
-  it('interrupt 触发的 result(error_during_execution) 正常走 onResult（D1）', async () => {
+  it('interrupt 触发的 result(error_during_execution) 正常走 onTurnResult（D1）', async () => {
     const sessionId = 's2';
     const q = makeFakeQuery([resultInterrupt(sessionId)]);
     const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
     const onResult = vi.fn();
     const driver = new ClaudeSdkDriver();
-    await driver.consume(handle, { onResult });
+    await driver.consume(handle, { onTurnResult: onResult });
     expect(onResult).toHaveBeenCalledTimes(1);
     expect(
       (onResult.mock.calls[0]![0] as SDKResultMessage).subtype,
@@ -575,7 +633,11 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
       const onMessage = vi.fn();
       const onError = vi.fn();
       const driver = new ClaudeSdkDriver();
-      await driver.consume(handle, { onResult, onMessage, onError });
+      await driver.consume(handle, {
+        onTurnResult: onResult,
+        onTurnMessage: onMessage,
+        onTurnError: onError,
+      });
 
       // 修复点：回调异常只影响那一条消息——迭代继续（修复前：中断迭代进
       // onError → SessionManager fail() → 整会话 terminated + 杀子进程）。
@@ -592,7 +654,7 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
     }
   });
 
-  it('onMessage 回调 reject → 记日志继续迭代，后续 result 照常分发', async () => {
+  it('onTurnMessage 回调 reject → 记日志继续迭代，后续 result 照常分发', async () => {
     const sessionId = 's4';
     const q = makeFakeQuery([
       assistantText('boom-msg'),
@@ -607,13 +669,17 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
       const onResult = vi.fn();
       const onError = vi.fn();
       const driver = new ClaudeSdkDriver();
-      await driver.consume(handle, { onResult, onMessage, onError });
+      await driver.consume(handle, {
+        onTurnResult: onResult,
+        onTurnMessage: onMessage,
+        onTurnError: onError,
+      });
 
       expect(onMessage).toHaveBeenCalledTimes(1);
       expect(onResult).toHaveBeenCalledTimes(1);
       expect(onError).not.toHaveBeenCalled();
       expect(errorSpy).toHaveBeenCalledWith(
-        '[claude-sdk-driver] onMessage callback failed (iteration continues)',
+        '[claude-sdk-driver] onTurnMessage callback failed (iteration continues)',
         'assistant',
         expect.any(Error),
       );
@@ -622,7 +688,7 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
     }
   });
 
-  it('迭代器本身抛错仍走 onError（异常隔离不吞 query 错误）', async () => {
+  it('迭代器本身抛错仍走 onTurnError（异常隔离不吞 query 错误）', async () => {
     const gen = (async function* (): AsyncGenerator<SDKMessage, void> {
       yield assistantText('ok');
       throw new Error('query died');
@@ -635,7 +701,7 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
     const onMessage = vi.fn();
     const onError = vi.fn();
     const driver = new ClaudeSdkDriver();
-    await driver.consume(handle, { onMessage, onError });
+    await driver.consume(handle, { onTurnMessage: onMessage, onTurnError: onError });
     expect(onError).toHaveBeenCalledTimes(1);
     expect((onError.mock.calls[0]![0] as Error).message).toBe('query died');
     expect(onMessage).toHaveBeenCalledTimes(1);
@@ -734,5 +800,202 @@ describe('driver + InputQueue 端到端（spike H2 同进程多轮）', () => {
       message: { role: 'user', content: 'second' },
       parent_tool_use_id: null,
     });
+  });
+});
+
+// ── task-06：consume envelope 轨（TurnMessageEnvelope + 归一化器接入）──────────
+
+describe('ClaudeSdkDriver.consume envelope 轨（task-06 / FR-02 / D-002@v1）', () => {
+  /** 经 start() 取真实 handle（start 时实例化 normalizer/partialSink），mock 流吐给定消息。 */
+  async function startWithMessages(
+    messages: SDKMessage[],
+  ): Promise<ClaudeDriverHandle> {
+    fsExists.mockReturnValue(true);
+    setMockQueryImpl(() => makeFakeQuery(messages));
+    const driver = new ClaudeSdkDriver();
+    return driver.start(
+      { [Symbol.asyncIterator]: () => (async function* () {})() },
+      { pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe', cwd: 'C:\\work' },
+    );
+  }
+
+  afterEach(() => {
+    // 调试开关测试用后清理，绝不外溢影响其它 case。
+    delete process.env.SILLYHUB_DEBUG_RAW_EVENTS;
+  });
+
+  it('session-init-status fixture：envelope.events 全过 safeParseAgentEvent；raw 默认 undefined', async () => {
+    const messages = await loadMessages('session-init-status');
+    const handle = await startWithMessages(messages);
+
+    const onTurnMessage = vi.fn();
+    const onTurnResult = vi.fn();
+    const driver = new ClaudeSdkDriver();
+    await driver.consume(handle, { onTurnResult, onTurnMessage });
+
+    expect(onTurnMessage).toHaveBeenCalled();
+    const envelopes = onTurnMessage.mock.calls
+      .map((c) => c[0] as TurnMessageEnvelope | Record<string, unknown>)
+      .filter(isEnvelope);
+    expect(envelopes.length).toBeGreaterThan(0);
+    const all = envelopes.flatMap((env) => env.events);
+    for (const env of envelopes) {
+      // raw 仅调试开关携带（D-002@v1），默认必须缺席。
+      expect(env.raw).toBeUndefined();
+      for (const ev of env.events) {
+        expect(safeParseAgentEvent(ev).success).toBe(true);
+      }
+    }
+
+    // system/init（主 agent）→ status/session_started（含 session_id）；
+    // 第 9 帧子代理 init（parent_tool_use_id=toolu_task01）守卫丢弃，不产事件。
+    const started = all.filter(
+      (e) => e.type === 'status' && e.subtype === 'session_started',
+    );
+    expect(started).toHaveLength(1);
+    expect(started[0]!.session_id).toBe('sess-sample-0002');
+    // task_* / thinking_tokens 会话信号事件化（D-002@v1 / D-005@v1）。
+    expect(all.some((e) => e.subtype === 'agent_task_status')).toBe(true);
+    expect(all.some((e) => e.subtype === 'task_notification')).toBe(true);
+    expect(all.some((e) => e.subtype === 'thinking_tokens')).toBe(true);
+    // local_command（静默丢弃帧）不产事件——间接触发它的帧若上报会带 error 事件，断言无。
+    expect(all.some((e) => e.type === 'error')).toBe(false);
+    // result 帧不经 onTurnMessage（独立 onTurnResult 链路）。
+    expect(
+      all.some((e) => e.type === 'turn_result' || e.type === 'complete'),
+    ).toBe(false);
+    expect(onTurnResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('onTurnResult 收映射后的 InteractiveDriverResult：usage 短名统一（全名剔除，task-08）+ session_id', async () => {
+    const messages = [assistantText('x'), resultSuccess('R', 'sess-map')];
+    const handle = await startWithMessages(messages);
+    const onTurnResult = vi.fn();
+    const driver = new ClaudeSdkDriver();
+    await driver.consume(handle, { onTurnResult });
+
+    expect(onTurnResult).toHaveBeenCalledTimes(1);
+    const r = onTurnResult.mock.calls[0]![0] as InteractiveDriverResult;
+    expect(r.session_id).toBe('sess-map');
+    expect(r.subtype).toBe('success');
+    expect(r.is_error).toBe(false);
+    // resultSuccess helper 的 usage 四字段全 1/0——映射后短名等值。
+    const usage = r.usage!;
+    expect(usage.input_tokens).toBe(1);
+    expect(usage.output_tokens).toBe(1);
+    // task-08 收口：InteractiveDriverResult.usage 双命名统一短名——Anthropic 全名
+    // cache_*_input_tokens 映射为短名后**剔除**（daemon.onTurnResult 消费面已同步
+    // 改读短名；daemon.ts usage lift 同口径）。
+    expect(usage).not.toHaveProperty('cache_read_input_tokens');
+    expect(usage).not.toHaveProperty('cache_creation_input_tokens');
+    expect(usage.cache_read_tokens).toBe(0);
+    expect(usage.cache_creation_tokens).toBe(0);
+  });
+
+  it('SILLYHUB_DEBUG_RAW_EVENTS=1：每个非 result 帧都上报 envelope，raw 为原消息对象（身份对应）', async () => {
+    process.env.SILLYHUB_DEBUG_RAW_EVENTS = '1';
+    const messages = await loadMessages('session-init-status');
+    const handle = await startWithMessages(messages);
+
+    const onTurnMessage = vi.fn();
+    const driver = new ClaudeSdkDriver();
+    await driver.consume(handle, { onTurnResult: vi.fn(), onTurnMessage });
+
+    const envelopes = onTurnMessage.mock.calls
+      .map((c) => c[0] as TurnMessageEnvelope | Record<string, unknown>)
+      .filter(isEnvelope);
+    // 调试开启：0 事件帧（local_command/子代理 init 等）也上报——raw 调试通道帧级可见。
+    const nonResult = messages.filter(
+      (m) => (m as { type?: string }).type !== 'result',
+    );
+    expect(envelopes).toHaveLength(nonResult.length);
+    envelopes.forEach((env, i) => {
+      // toBe 身份断言：raw 就是 SDK 吐出的原对象（非拷贝）。
+      expect(env.raw).toBe(nonResult[i]);
+    });
+    // 事件仍全过 zod（调试开关不影响归一化产物）。
+    for (const env of envelopes) {
+      for (const ev of env.events) {
+        expect(safeParseAgentEvent(ev).success).toBe(true);
+      }
+    }
+  });
+
+  it('partial-stream-override fixture：partial flush 先行、override 撤回在后，事件全过 zod', async () => {
+    const messages = await loadMessages('partial-stream-override');
+    const handle = await startWithMessages(messages);
+
+    const onTurnMessage = vi.fn();
+    const driver = new ClaudeSdkDriver();
+    await driver.consume(handle, { onTurnResult: vi.fn(), onTurnMessage });
+
+    const envelopes = onTurnMessage.mock.calls
+      .map((c) => c[0] as TurnMessageEnvelope | Record<string, unknown>)
+      .filter(isEnvelope);
+    const all = envelopes.flatMap((env) => env.events);
+
+    // message_stop 边界 flush 同步经 partialSink 桥转发：thinking + text 两段 partial。
+    const partials = all.filter((e) => e.is_partial === true);
+    expect(partials.length).toBeGreaterThanOrEqual(2);
+    for (const p of partials) {
+      expect(typeof p.segment_id).toBe('string');
+      expect(p.segment_id!.length).toBeGreaterThan(0);
+    }
+    // 完整 assistant 到达 → override:true 撤回已 flush partial（D-004@v1）。
+    const overrides = all.filter((e) => e.override === true);
+    expect(overrides.length).toBeGreaterThanOrEqual(1);
+    for (const ov of overrides) {
+      const firstPartialIdx = all.findIndex(
+        (e) => e.is_partial === true && e.segment_id === ov.segment_id,
+      );
+      expect(firstPartialIdx).toBeGreaterThanOrEqual(0);
+      // 顺序契约：同 segment 的 partial 先于 override（envelope 按上报顺序展平）。
+      expect(all.indexOf(ov)).toBeGreaterThan(firstPartialIdx);
+    }
+    // partial envelope 不携带 raw（节流/边界 flush 无对应完整帧语义，默认关）。
+    for (const env of envelopes) {
+      expect(env.raw).toBeUndefined();
+      for (const ev of env.events) {
+        expect(safeParseAgentEvent(ev).success).toBe(true);
+      }
+    }
+  });
+
+  it('双轨读键：新键 onTurnMessage 存在时旧键 onMessage 不调用（SessionManager 双键形态）', async () => {
+    // 手构 handle（不带 normalizer/partialSink）→ 覆盖 consume 懒建归一化器路径。
+    const q = makeFakeQuery([
+      systemInit('s1'),
+      assistantText('hi'),
+      resultSuccess('R', 's1'),
+    ]);
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
+
+    const onTurnMessage = vi.fn();
+    const onMessage = vi.fn();
+    const onTurnResult = vi.fn();
+    const onResult = vi.fn();
+    const driver = new ClaudeSdkDriver();
+    await driver.consume(handle, {
+      onTurnResult,
+      onTurnMessage,
+      onResult,
+      onMessage,
+    });
+
+    // 新键优先：消息轨只走 onTurnMessage（envelope），result 轨只走 onTurnResult。
+    expect(onTurnMessage).toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onTurnResult).toHaveBeenCalledTimes(1);
+    expect(onResult).not.toHaveBeenCalled();
+    // 懒建归一化器同样产合法 envelope。
+    const envelopes = onTurnMessage.mock.calls
+      .map((c) => c[0] as TurnMessageEnvelope | Record<string, unknown>)
+      .filter(isEnvelope);
+    expect(envelopes.length).toBeGreaterThan(0);
+    for (const env of envelopes) {
+      for (const ev of env.events) {
+        expect(safeParseAgentEvent(ev).success).toBe(true);
+      }
+    }
   });
 });

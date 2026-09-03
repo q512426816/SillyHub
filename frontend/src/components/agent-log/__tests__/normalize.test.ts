@@ -794,3 +794,350 @@ describe("ql-20260903-011：CLI 合成鉴权错误（远端 401 误报 Not logge
     expect(item!.retryable).toBe(true);
   });
 });
+
+// ============================================================================
+// task-10（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：
+// agent_event 结构化轨（fromAgentEvent 双轨）。
+//
+// 行带 agent_event（SSE 顶层字段 / 回放 metadata_.agent_event，见
+// extractRowAgentEvent）→ 结构化路径构造渲染模型（不进文本正则）；缺字段 /
+// 未知型 → 回退旧文本协议解析（上方全部既有用例即回退轨守护，零改动）。
+// 等价断言形态：同一事件序列的两种载荷（backend _persist_agent_event 合成的
+// 旧文本行 vs 携带 agent_event 的行）分别过两条路径，渲染模型快照逐字段相等
+// （design §2 目标 2 的双路径对照判据；忽略 log 本体等非渲染字段）。
+// ============================================================================
+
+/** 渲染模型快照（normalize 输出的渲染相关字段，双路径等价对比用）。 */
+function renderModelOf(p: ReturnType<typeof normalizeLogs>[number] | undefined) {
+  return {
+    hidden: p?.hidden,
+    mergedAssistantContent: p?.mergedAssistantContent,
+    mergedThinkingContent: p?.mergedThinkingContent,
+    mergedToolResult: p?.mergedToolResult,
+    parsedToolResult: p?.parsedToolResult,
+    toolUseId: p?.toolUseId,
+    toolDurationMs: p?.toolDurationMs,
+    semanticCategory: p?.semanticCategory,
+  };
+}
+
+describe("task-10: agent_event 双轨——text 事件", () => {
+  it("text 事件 → assistant 块，与旧 [ASSISTANT] 文本解析同输入等价", () => {
+    const evRows = [
+      {
+        ...makeLog("stdout", "[ASSISTANT] 先读取项目", "a1"),
+        agent_event: { type: "text", content: "先读取项目" },
+      },
+    ];
+    const oldRows = [makeLog("stdout", "[ASSISTANT] 先读取项目", "a1")];
+    const ev = normalizeLogs(evRows);
+    const old = normalizeLogs(oldRows);
+    expect(ev.map(renderModelOf)).toEqual(old.map(renderModelOf));
+    expect(ev[0]?.mergedAssistantContent).toBe("先读取项目");
+    expect(ev[0]?.semanticCategory).toBe("assistant");
+  });
+
+  it("连续 text partial（is_partial）追加 + override 完整内容覆盖——与旧协议 partial 行为等价", () => {
+    // 旧协议对 [ASSISTANT] partial 行的处理即 mergeAssistantPiece：
+    // delta 追加、cumulative/override 全文前缀覆盖。结构化轨复用同一函数。
+    const evRows = [
+      { ...makeLog("stdout", "[ASSISTANT] 先读", "p1"), agent_event: { type: "text", content: "先读", is_partial: true, segment_id: "s1" } },
+      { ...makeLog("stdout", "[ASSISTANT] 先读取", "p2"), agent_event: { type: "text", content: "先读取", is_partial: true, segment_id: "s1" } },
+      { ...makeLog("stdout", "[ASSISTANT] 先读取完成", "p3"), agent_event: { type: "text", content: "先读取完成", override: true, segment_id: "s1" } },
+    ];
+    const oldRows = [
+      makeLog("stdout", "[ASSISTANT] 先读", "p1"),
+      makeLog("stdout", "[ASSISTANT] 先读取", "p2"),
+      makeLog("stdout", "[ASSISTANT] 先读取完成", "p3"),
+    ];
+    const ev = normalizeLogs(evRows);
+    const old = normalizeLogs(oldRows);
+    expect(ev.map(renderModelOf)).toEqual(old.map(renderModelOf));
+    // 覆盖语义：override 全文替换已累积半截
+    expect(ev[0]?.mergedAssistantContent).toBe("先读取完成");
+    expect(ev[1]?.hidden).toBe(true);
+    expect(ev[2]?.hidden).toBe(true);
+  });
+
+  it("text 事件内容命中模型错误特征 → error 语义（对齐旧 [ASSISTANT] API Error 行为）", () => {
+    const rows = [
+      {
+        ...makeLog("stdout", "[ASSISTANT] API Error: Request rejected (429)", "e1"),
+        agent_event: { type: "text", content: "API Error: Request rejected (429)" },
+      },
+    ];
+    // 无结构化错误 → 独立 error 项保留
+    const ev = normalizeLogs(rows);
+    expect(ev[0]?.semanticCategory).toBe("error");
+    expect(ev[0]?.hidden).toBe(false);
+    expect(ev[0]?.mergedAssistantContent).toBeUndefined();
+    // 有结构化错误（error_detail）→ hidden（结构化项取代，对齐旧分支）
+    const ev2 = normalizeLogs(
+      [rows[0]!],
+      { errorDetail: { type: "rate_limited", message: "限流", retryable: true } },
+    );
+    expect(ev2[0]?.hidden).toBe(true);
+  });
+});
+
+describe("task-10: agent_event 双轨——thinking 事件", () => {
+  it("连续 thinking 事件合并 + 完整段 override 去重——与旧 [THINKING] 行为等价", () => {
+    const piece = "我先分析项目结构。然后运行 scan 命令。\n最后检查文档完整性。";
+    const evRows = [
+      { ...makeLog("stdout", "[THINKING] 我先分析项目结构。", "t1"), agent_event: { type: "thinking", content: "我先分析项目结构。", is_partial: true, segment_id: "th1" } },
+      { ...makeLog("stdout", `[THINKING] ${piece}`, "t2"), agent_event: { type: "thinking", content: piece, override: true, segment_id: "th1" } },
+    ];
+    const oldRows = [
+      makeLog("stdout", "[THINKING] 我先分析项目结构。", "t1"),
+      makeLog("stdout", `[THINKING] ${piece}`, "t2"),
+    ];
+    const ev = normalizeLogs(evRows);
+    const old = normalizeLogs(oldRows);
+    expect(ev.map(renderModelOf)).toEqual(old.map(renderModelOf));
+    // mergeThinkingPiece 前缀包含 + 明显更长 → 完整段覆盖（无双份）
+    expect(ev[0]?.mergedThinkingContent).toBe(piece);
+    expect(ev[1]?.hidden).toBe(true);
+  });
+
+  it("thinking 增量 delta 按原序拼接（无前缀关系不误判去重）", () => {
+    const ev = normalizeLogs([
+      { ...makeLog("stdout", "[THINKING] The", "t1"), agent_event: { type: "thinking", content: "The", is_partial: true } },
+      { ...makeLog("stdout", "[THINKING]  user", "t2"), agent_event: { type: "thinking", content: " user", is_partial: true } },
+    ]);
+    expect(ev[0]?.mergedThinkingContent).toBe("The user");
+    expect(ev[1]?.hidden).toBe(true);
+  });
+});
+
+describe("task-10: agent_event 双轨——tool_use 事件（双行：卡片 + stdout 回显）", () => {
+  it("stdout [TOOL_USE] 回显 hidden + tool_call 卡片 toolUseId=call_id——与旧文本配对等价", () => {
+    const useEvent = {
+      type: "tool_use",
+      tool_name: "Bash",
+      call_id: "toolu_01",
+      metadata: { tool_input: { command: "ls" } },
+    };
+    const tcJson = JSON.stringify({
+      tool: "Bash",
+      args: { command: "ls" },
+      timestamp: "2026-06-17T13:54:38.000Z",
+      status: "allowed",
+      success: true,
+      tool_use_id: "toolu_01",
+    });
+    const evRows = [
+      { ...makeLog("stdout", "[TOOL_USE] Bash: ls", "tu1"), agent_event: useEvent },
+      { ...makeLog("tool_call", tcJson, "tc1"), agent_event: useEvent },
+    ];
+    const oldRows = [
+      makeLog("stdout", "[TOOL_USE] Bash: ls", "tu1"),
+      makeLog("tool_call", tcJson, "tc1"),
+    ];
+    const ev = normalizeLogs(evRows);
+    const old = normalizeLogs(oldRows);
+    expect(ev.map(renderModelOf)).toEqual(old.map(renderModelOf));
+    expect(ev.find((p) => p.log.id === "tc1")?.toolUseId).toBe("toolu_01");
+    expect(ev.find((p) => p.log.id === "tc1")?.semanticCategory).toBe("tool_call");
+    // 回显行信息已全在卡片 → hidden
+    expect(ev.find((p) => p.log.id === "tu1")?.hidden).toBe(true);
+  });
+
+  it("同 call_id 重复 tool_call 卡 → 首张保留，重复 hidden（对齐旧 toolUseIdIndex 语义）", () => {
+    const useEvent = { type: "tool_use", tool_name: "Bash", call_id: "toolu_dup" };
+    const tcJson = JSON.stringify({
+      tool: "Bash", args: { command: "ls" }, timestamp: "t1",
+      status: "allowed", success: true, tool_use_id: "toolu_dup",
+    });
+    const ev = normalizeLogs([
+      { ...makeLog("tool_call", tcJson, "tc1"), agent_event: useEvent },
+      { ...makeLog("tool_call", tcJson, "tc2"), agent_event: useEvent },
+    ]);
+    expect(ev.find((p) => p.log.id === "tc1")?.hidden).toBe(false);
+    expect(ev.find((p) => p.log.id === "tc2")?.hidden).toBe(true);
+  });
+});
+
+describe("task-10: agent_event 双轨——tool_result 事件（call_id 配对回填）", () => {
+  it("call_id 精确配对 → mergedToolResult + 耗时回填卡 + result 行 hidden——与旧邻近配对等价", () => {
+    const useEvent = {
+      type: "tool_use",
+      tool_name: "Bash",
+      call_id: "toolu_r1",
+      metadata: { tool_input: { command: "ls" } },
+    };
+    const tcJson = JSON.stringify({
+      tool: "Bash", args: { command: "ls" },
+      timestamp: "2026-06-17T13:54:38.000Z",
+      status: "allowed", success: true, tool_use_id: "toolu_r1",
+    });
+    const evRows = [
+      { ...makeLog("stdout", "[TOOL_USE] Bash: ls", "tu1", "2026-06-17T13:54:38.000Z"), agent_event: useEvent },
+      { ...makeLog("tool_call", tcJson, "tc1", "2026-06-17T13:54:38.000Z"), agent_event: useEvent },
+      {
+        ...makeLog("stdout", "[TOOL_RESULT] file1.txt\nfile2.txt", "tr1", "2026-06-17T13:54:40.000Z"),
+        agent_event: { type: "tool_result", call_id: "toolu_r1", content: "file1.txt\nfile2.txt" },
+      },
+    ];
+    const oldRows = [
+      makeLog("stdout", "[TOOL_USE] Bash: ls", "tu1", "2026-06-17T13:54:38.000Z"),
+      makeLog("tool_call", tcJson, "tc1", "2026-06-17T13:54:38.000Z"),
+      makeLog("stdout", "[TOOL_RESULT] file1.txt\nfile2.txt", "tr1", "2026-06-17T13:54:40.000Z"),
+    ];
+    const ev = normalizeLogs(evRows);
+    const old = normalizeLogs(oldRows);
+    expect(ev.map(renderModelOf)).toEqual(old.map(renderModelOf));
+    const evCard = ev.find((p) => p.log.id === "tc1");
+    expect(evCard?.mergedToolResult).toBe("file1.txt\nfile2.txt");
+    expect(evCard?.toolDurationMs).toBe(2000);
+    expect(ev.find((p) => p.log.id === "tr1")?.hidden).toBe(true);
+  });
+
+  it("孤儿 tool_result（call_id 无卡且无前置工具）→ parsedToolResult 独立渲染不丢", () => {
+    const ev = normalizeLogs([
+      {
+        ...makeLog("stdout", "[TOOL_RESULT] 残留结果", "tr1"),
+        agent_event: { type: "tool_result", call_id: "toolu_ghost", content: "残留结果" },
+      },
+    ]);
+    expect(ev[0]?.hidden).toBe(false);
+    expect(ev[0]?.parsedToolResult).toBe("残留结果");
+    expect(ev[0]?.semanticCategory).toBe("tool_result");
+  });
+});
+
+describe("task-10: agent_event 双轨——error / turn_result / complete / status", () => {
+  it("error 事件 → error 块可见——与旧 stderr 行为等价", () => {
+    const evRows = [
+      {
+        ...makeLog("stderr", "boom: connection lost", "e1"),
+        agent_event: { type: "error", content: "boom: connection lost" },
+      },
+    ];
+    const oldRows = [makeLog("stderr", "boom: connection lost", "e1")];
+    const ev = normalizeLogs(evRows);
+    const old = normalizeLogs(oldRows);
+    expect(ev.map(renderModelOf)).toEqual(old.map(renderModelOf));
+    expect(ev[0]?.semanticCategory).toBe("error");
+    expect(ev[0]?.hidden).toBe(false);
+  });
+
+  it("turn_result / complete 事件 → result 块（[RESULT 语义；backend 不落行，防御性映射不丢）", () => {
+    const r1 = normalizeLogs([
+      {
+        ...makeLog("stdout", "turn finished", "r1"),
+        agent_event: { type: "turn_result", content: "turn finished", usage: { input_tokens: 10, output_tokens: 5 } },
+      },
+    ]);
+    expect(r1[0]?.semanticCategory).toBe("result");
+    expect(r1[0]?.hidden).toBe(false);
+    const r2 = normalizeLogs([
+      { ...makeLog("stdout", "done", "r2"), agent_event: { type: "complete", content: "done" } },
+    ]);
+    expect(r2[0]?.semanticCategory).toBe("result");
+  });
+
+  it("status 事件 → system 块（[SYSTEM 语义；会话信号按设计不落库，防御性 generic 通道不丢）", () => {
+    const s = normalizeLogs([
+      {
+        ...makeLog("stdout", "", "s1"),
+        agent_event: { type: "status", subtype: "session_started", session_id: "sess_1", content: "" },
+      },
+    ]);
+    expect(s[0]?.semanticCategory).toBe("system");
+    expect(s[0]?.hidden).toBe(false);
+  });
+});
+
+describe("task-10: 双入口识别与回退轨", () => {
+  it("回放入口：metadata.agent_event（backend metadata_['agent_event']）同样走结构化轨", () => {
+    const ev = normalizeLogs([
+      {
+        ...makeLog("stdout", "[ASSISTANT] 回放行", "a1"),
+        metadata: { agent_event: { type: "text", content: "回放行" } },
+      },
+    ]);
+    expect(ev[0]?.mergedAssistantContent).toBe("回放行");
+    expect(ev[0]?.semanticCategory).toBe("assistant");
+  });
+
+  it("agent_event 非法形状（缺 type）→ 回退旧文本解析", () => {
+    const ev = normalizeLogs([
+      {
+        ...makeLog("stdout", "[ASSISTANT] 降级", "a1"),
+        agent_event: { content: "降级" } as unknown as { type: string; content?: unknown },
+      },
+    ]);
+    // 旧路径接管：[ASSISTANT] 文本解析产出 assistant 块
+    expect(ev[0]?.mergedAssistantContent).toBe("降级");
+  });
+
+  it("未知事件型 → 回退旧文本协议解析（generic 渲染不丢）", () => {
+    const ev = normalizeLogs([
+      {
+        ...makeLog("stdout", "[ASSISTANT] 未知型", "a1"),
+        agent_event: { type: "future_type", content: "未知型" },
+      },
+    ]);
+    expect(ev[0]?.mergedAssistantContent).toBe("未知型");
+    expect(ev[0]?.semanticCategory).toBe("assistant");
+  });
+
+  it("tool_use 缺 call_id → 回退旧文本名匹配+窗口启发式（邻近 tool_call 合并）", () => {
+    // ev 缺 call_id（结构化轨无法精确配对），但 tc JSON 带 tool_use_id（预扫描已索引）
+    // → 回退旧文本路径后仍靠名匹配 + 窗口合并（与旧轨同输入同行为）。
+    const ev = normalizeLogs([
+      {
+        ...makeLog("stdout", "[TOOL_USE] Bash: ls", "tu1"),
+        agent_event: { type: "tool_use", tool_name: "Bash", content: "ls" },
+      },
+      makeLog(
+        "tool_call",
+        JSON.stringify({ tool: "Bash", args: { command: "ls" }, timestamp: "t1", status: "allowed", success: true, tool_use_id: "toolu_fb" }),
+        "tc1",
+      ),
+    ]);
+    expect(ev.find((p) => p.log.id === "tu1")?.hidden).toBe(true);
+    expect(ev.find((p) => p.log.id === "tc1")?.hidden).toBe(false);
+  });
+
+  it("user_input 行即使误带 agent_event 也不走结构化轨（通道守卫）", () => {
+    const ev = normalizeLogs([
+      {
+        ...makeLog("user_input", "用户提问", "u1"),
+        agent_event: { type: "text", content: "用户提问" },
+      },
+    ]);
+    expect(ev[0]?.semanticCategory).toBe("user");
+    expect(ev[0]?.mergedAssistantContent).toBeUndefined();
+  });
+});
+
+describe("task-10: 新旧轨交错（合并指针连续性）", () => {
+  it("旧轨 assistant 行 + 新轨 text 事件交错 → 同一块连续合并", () => {
+    const ev = normalizeLogs([
+      makeLog("stdout", "[ASSISTANT] 旧轨片段", "a1"),
+      { ...makeLog("stdout", "[ASSISTANT] 新轨片段", "a2"), agent_event: { type: "text", content: "新轨片段" } },
+      makeLog("stdout", "[ASSISTANT] 再旧轨", "a3"),
+    ]);
+    expect(ev.filter((p) => !p.hidden)).toHaveLength(1);
+    expect(ev[0]?.mergedAssistantContent).toBe("旧轨片段新轨片段再旧轨");
+  });
+
+  it("新轨 tool 活动重置 assistant/thinking 合并指针（对齐旧轨断块行为）", () => {
+    const useEvent = { type: "tool_use", tool_name: "Bash", call_id: "toolu_x" };
+    const tcJson = JSON.stringify({
+      tool: "Bash", args: { command: "ls" }, timestamp: "t1",
+      status: "allowed", success: true, tool_use_id: "toolu_x",
+    });
+    const ev = normalizeLogs([
+      { ...makeLog("stdout", "[ASSISTANT] 工具前", "a1"), agent_event: { type: "text", content: "工具前" } },
+      { ...makeLog("tool_call", tcJson, "tc1"), agent_event: useEvent },
+      { ...makeLog("stdout", "[ASSISTANT] 工具后", "a2"), agent_event: { type: "text", content: "工具后" } },
+    ]);
+    // 工具卡重置 assistant 指针 → 前后两段 assistant 各自成块
+    const visible = ev.filter((p) => !p.hidden);
+    expect(visible.filter((p) => p.mergedAssistantContent)).toHaveLength(2);
+    expect(ev[0]?.mergedAssistantContent).toBe("工具前");
+    expect(ev[2]?.mergedAssistantContent).toBe("工具后");
+  });
+});

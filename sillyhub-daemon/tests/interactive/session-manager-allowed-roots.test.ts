@@ -32,7 +32,7 @@ import { PolicyCache } from '../../src/policy/runtime-policy.js';
 import { AuditSink } from '../../src/policy/audit-sink.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -41,7 +41,7 @@ import type {
 /** mock driver：捕获 start 的 options（验证 canUseTool 是否注入）。 */
 function makeDriverCapturingOpts() {
   let capturedOpts: StartOptions | null = null;
-  let capturedCb: ConsumeCallbacks | null = null;
+  let capturedCb: InteractiveDriverCallbacks | null = null;
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
 
   const driver: ClaudeSdkDriver = {
@@ -51,7 +51,7 @@ function makeDriverCapturingOpts() {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCb = cb;
     }),
     interrupt: vi.fn(async (): Promise<boolean> => true),
@@ -61,7 +61,7 @@ function makeDriverCapturingOpts() {
     driver,
     fakeQuery,
     getOpts: (): StartOptions | null => capturedOpts,
-    emitResult: (r: SDKResultMessage) => capturedCb?.onResult(r),
+    emitResult: (r: SDKResultMessage) => capturedCb?.onTurnResult?.(r),
   };
 }
 

@@ -23,7 +23,7 @@ import { winPath as P } from '../helpers.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 import type { McpServerConfigForDriver } from '../../src/interactive/driver.js';
@@ -32,7 +32,7 @@ import type { McpServerConfigForDriver } from '../../src/interactive/driver.js';
 
 function makeMockDriver() {
   let capturedStartOpts: StartOptions | null = null;
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
 
   const driver: ClaudeSdkDriver = {
@@ -40,7 +40,7 @@ function makeMockDriver() {
       capturedStartOpts = opts;
       return fakeQuery;
     }),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async () => true),
@@ -49,8 +49,8 @@ function makeMockDriver() {
   return {
     driver,
     getStartOpts: () => capturedStartOpts,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
   };
 }
 

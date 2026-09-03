@@ -74,8 +74,12 @@ function makeCallbacks(): {
   const results: Record<string, unknown>[] = [];
   const errors: unknown[] = [];
   const cb: InteractiveDriverCallbacks = {
-    onTurnMessage: (m) => {
-      messages.push(m);
+    // task-08：envelope-only——摊平 events 收集（codex 每 envelope 单事件，
+    // 既有断言按事件对象书写，摊平后形态不变）。
+    onTurnMessage: (envelope) => {
+      for (const ev of envelope.events) {
+        messages.push(ev as unknown as Record<string, unknown>);
+      }
     },
     onTurnResult: (r) => {
       results.push(r);

@@ -30,11 +30,20 @@
  *     拦截 server request，自己写 fail-closed response（decline / cancel），绝不透传
  *     adapter 的 accept 模板。task-05 接入真实 PermissionResolver 后移除此 fail-closed 占位。
  *
- * D-004 flat message 契约（精确）：
- *   { event_type:'text'|'tool_use'|'tool_result'|'error', content:string,
- *     metadata:Record<string,unknown>, session_id:threadId }
- *   所有 flat message 都带 session_id = threadId。event_type='complete' 不上报（turn 边界
- *   信号，由 turn result 处理）。
+ * D-004 flat message 契约（task-04 起演进为 AgentEvent v2 双层形态）：
+ *   onTurnMessage 上报对象 = AgentEvent v2（一等字段 type/content/subtype/session_id/
+ *   usage/tool_name/call_id + metadata 开放长尾，见 types.ts AgentEvent）**叠加** legacy
+ *   flat 兼容键（event_type 别名 + metadata 原样保留）。保留 legacy 键的原因：本变更
+ *   （2026-09-03-agent-provider-abstraction）按 Wave 分阶段迁移——session-manager
+ *   （thread_started 提取读 metadata.subtype + session_id）、daemon（interactive_codex_
+ *   thread_started 日志读 event_type）、backend submit_messages（flat 分类读顶层
+ *   event_type/content）要到 task-08/09 才切 AgentEvent；纯改名会让 codex 消息在
+ *   中间态被 backend 静默丢弃（design §9「新 daemon + 旧 backend」窗口）。task-08/09
+ *   迁移完成后可移除 event_type 别名。全部上报事件经 safeParseAgentEvent 校验通过
+ *   （z.object 默认剥离未知键，event_type 别名不影响校验）。
+ *   映射表见 toAgentEvent（含逐形状实读依据）。turn/completed 收敛的 complete 事件
+ *   映射为 turn_result 后仅由 turn 收敛消费，不经 onMessage 上报（turn 边界信号由
+ *   onTurnResult 承载，保持 D-004 原语义）。
  *
  * known-issue（AgentRunLog 无 metadata 列）：driver 仍按 D-004 上报带 metadata 的 flat
  * message（契约要求），metadata 落盘丢失是 backend/daemon 层 task-06 的事，本任务不管。
@@ -50,13 +59,14 @@ import readline from 'node:readline';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
 import { daemonStateDir } from '../config.js';
-import type { AgentEvent } from '../types.js';
+import type { AgentEvent, AgentEventUsage } from '../types.js';
 import type { CanUseToolDecision } from './types.js';
 import type {
   InteractiveDriver,
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
   InteractiveDriverStartOptions,
+  TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
 
@@ -423,17 +433,179 @@ export interface CodexHandle extends InteractiveDriverHandle {
   close(): Promise<void>;
 }
 
-/** 把 AgentEvent 转 D-004 flat message（注入 session_id=threadId）。 */
-function toFlatMessage(
-  ev: AgentEvent,
+// ── task-04（2026-09-03-agent-provider-abstraction）：flat message → AgentEvent v2 映射 ──
+//（FR-02 / D-004；任务卡 task-04.md「event_type→type 映射表 + session_id/usage 提取」）。
+// 单一映射点：consume 循环 / stderr 上报 / task-05 server request 日志全部经 toAgentEvent
+// 构造上报事件，禁止旁路手拼 flat record（防止映射表外漂移）。
+
+/**
+ * toAgentEvent 的宽松输入形状（信任边界类型）。
+ *
+ * adapter.parse() 的静态类型虽是 AgentEvent（8 型联合），但输出未经 schema 校验，
+ * 运行时可能因 codex 版本漂移出现未知 type——输入侧按 {type: string} 宽收，
+ * 未知值走 toAgentEvent 内的 fail-safe 降级分支（不丢弃不抛错）。
+ */
+export interface CodexFlatEventInput {
+  type: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * 映射产物：AgentEvent v2 一等字段 + D-004 legacy flat 兼容键（event_type 别名）。
+ *
+ * 同态映射类型（保可选修饰符）而非直接 `AgentEvent & {...}`：接口交叉无隐式索引
+ * 签名，不能赋给 `Record<string, unknown>`（onTurnMessage 回调入参类型）；映射类型
+ * 可以（tsc scratch 实测）。task-08/09 消费面迁移后可移除别名收紧回 AgentEvent。
+ */
+export type CodexAgentEventMessage = { [K in keyof AgentEvent]: AgentEvent[K] } & {
+  /** legacy flat 兼容键 = 输入事件的原始 type（见文件头 D-004 说明）。 */
+  event_type: string;
+};
+
+/**
+ * 从 metadata.usage 尽力提取 token 用量（AgentEventUsage 四字段短名）。
+ *
+ * 实读依据（不主动猜测字段名，对齐本文件 _outcomeFromComplete 既有守卫语义）：
+ *   - metadata.usage 的来源字段名已由 adapter 归一：turn/completed 的
+ *     turn.usage ?? turn.token_usage ?? turn.tokens（json-rpc.ts:788-795）与
+ *     response 的 result.usage ?? result.token_usage ?? result.tokens
+ *     （json-rpc.ts:412-414）都收敛进 metadata.usage；
+ *   - 字段名 input_tokens/output_tokens/cache_read_tokens/cache_creation_tokens 与
+ *     本文件 _outcomeFromComplete 既有提取一致（原 :929-944，typeof 守卫）；
+ *   - codex/OpenAI 系多无 cache：非 number → 不设置（后端 NULL，不伪造 0）。
+ *     若 codex 未来吐 OpenAI 新字段（cached_tokens / prompt_tokens_details.cached_tokens），
+ *     需在此补字段名映射（本 task 不猜，与 _outcomeFromComplete 注释同一约定）。
+ */
+function extractEventUsage(raw: unknown): AgentEventUsage | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const u = raw as Record<string, unknown>;
+  const out: AgentEventUsage = {};
+  if (typeof u.input_tokens === 'number') out.input_tokens = u.input_tokens;
+  if (typeof u.output_tokens === 'number') out.output_tokens = u.output_tokens;
+  if (typeof u.cache_read_tokens === 'number') out.cache_read_tokens = u.cache_read_tokens;
+  if (typeof u.cache_creation_tokens === 'number') {
+    out.cache_creation_tokens = u.cache_creation_tokens;
+  }
+  // 四字段全缺/全非法 → 不带 usage（比「全 undefined 的空壳对象」更干净，
+  // 下游 isPresent 判定与既有 undefined 语义一致）
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * task-04：flat message（adapter 事件，负载在 metadata）→ AgentEvent v2 映射表。
+ *
+ * 输入 = adapter.parse() 产出事件 + driver 内部构造事件（stderr / task-05 审批日志）；
+ * 输出 = 一等字段提升后的 AgentEvent v2 + legacy flat 键（event_type 别名，metadata
+ * 原样保留——types.ts:93-95「合并提升；metadata 仍为开放长尾容器」的既定语义）。
+ *
+ * 映射表（逐形状实读依据；行号 = 本 worktree 当前版本）：
+ * | # | 输入形状 | v2 映射 | 一等字段提升 | 实读依据 |
+ * |---|---|---|---|---|
+ * | 1 | text + metadata.subtype='thread_started'（thread/start·resume response 收敛） | status + subtype='session_started'（content 原样，''） | session_id ← metadata.session_id（缺省回退 threadId） | json-rpc.ts:396-409；本文件 consume thread_started 分支 |
+ * | 2 | text + metadata.thinking=true（reasoning item/started 收敛） | thinking | —（call_id 留 metadata：契约 call_id 仅 tool_use/tool_result 配对，types.ts:110-112） | json-rpc.ts:626-651 |
+ * | 3 | text + metadata.usage（response usage_update 收敛） | text | usage ← metadata.usage（extractEventUsage 四字段守卫） | json-rpc.ts:411-426 |
+ * | 4 | text（其余：agentMessage completed / agentMessage delta flush / turn/started 收敛 text+status:'running'） | text | — | json-rpc.ts:561、579-596、737-755 |
+ * | 5 | tool_use（item/started 收敛 + task-05 审批/权限/elicitation 日志） | tool_use | tool_name ← metadata.tool_name；call_id ← metadata.call_id | json-rpc.ts:489-524、652-669；本文件 _handleApproval/_handlePermissionsApproval 日志 |
+ * | 6 | tool_result（item/completed 收敛） | tool_result | tool_name ← metadata.tool_name；call_id ← metadata.call_id（与 #5 同 id 配对） | json-rpc.ts:598-615 |
+ * | 7 | error（rpc error response / unhandled server request / turn failed / stderr / task-05 fail-closed 日志） | error | — | json-rpc.ts:367-385、526-533、774-785；本文件 stderr 上报与 server request 日志 |
+ * | 8 | complete（turn/completed 收敛，turn 终态） | turn_result | usage ← metadata.usage | json-rpc.ts:757-806；**不经 onMessage 上报**（D-004：turn 边界信号由 onTurnResult 承载，consume complete 分支仅作 turn 收敛输入） |
+ * | 9 | 未知 type（防御：adapter 输出运行时漂移） | status + subtype='task_notification' 降级桶 | content='<原 type>'；metadata={original_event_type, ...原 metadata} | fail-safe，见下方降级桶说明 |
+ *
+ * 降级桶说明（#9）：任务卡规定的降级形态 {type:'status', content, metadata:{original_
+ * event_type, ...}} 不带 subtype，但 agent-event-schema.ts 的 superRefine 强制
+ * type='status' 必须携带闭合枚举 subtype（六值），否则 safeParseAgentEvent 失败、违反
+ * 「全部产出事件过 schema 校验」验收。六枚举中 task_notification 语义最接近「无法归类的
+ * 透传通知」，且按 design §7.5 该 subtype 走 onSessionEvent 瞬时通道（不落 AgentRunLog、
+ * 不污染持久化）——选作降级桶；原值经 content + metadata.original_event_type + legacy
+ * event_type 别名三处完整保留，不丢弃不抛错。已列入交付报告未决问题（建议后续变更补
+ * unknown/passthrough subtype 或放宽 superRefine）。
+ */
+export function toAgentEvent(
+  ev: CodexFlatEventInput,
   threadId: string,
-): Record<string, unknown> {
-  return {
-    event_type: ev.type,
+): CodexAgentEventMessage {
+  const metadata: Record<string, unknown> = ev.metadata ?? {};
+
+  // #9 未知 type → status 降级桶（fail-safe：不丢弃不抛错）
+  const knownTypes: readonly string[] = [
+    'text', 'thinking', 'tool_use', 'tool_result',
+    'status', 'error', 'turn_result', 'complete',
+  ];
+  if (!knownTypes.includes(ev.type)) {
+    return {
+      type: 'status',
+      subtype: 'task_notification',
+      content: ev.type,
+      session_id: threadId,
+      metadata: { original_event_type: ev.type, ...metadata },
+      event_type: ev.type,
+    };
+  }
+
+  // #8 complete → turn_result（turn 终态；是否上报由调用方决定——consume 内仅作
+  // turn 收敛输入，不经 onMessage）
+  if (ev.type === 'complete') {
+    const usage = extractEventUsage(metadata.usage);
+    return {
+      type: 'turn_result',
+      content: ev.content,
+      session_id: threadId,
+      ...(usage ? { usage } : {}),
+      metadata,
+      event_type: ev.type,
+    };
+  }
+
+  // #1 text + thread_started → status/session_started（session_id 一等，含 resume 指针）
+  if (ev.type === 'text' && metadata.subtype === 'thread_started') {
+    const sid =
+      typeof metadata.session_id === 'string' && metadata.session_id
+        ? metadata.session_id
+        : threadId;
+    return {
+      type: 'status',
+      subtype: 'session_started',
+      content: ev.content,
+      session_id: sid,
+      metadata,
+      event_type: ev.type,
+    };
+  }
+
+  // #2 text + thinking:true → thinking（codex reasoning 与 claude thinking 同契约，FR-02）
+  if (ev.type === 'text' && metadata.thinking === true) {
+    const usage = extractEventUsage(metadata.usage);
+    return {
+      type: 'thinking',
+      content: ev.content,
+      session_id: threadId,
+      ...(usage ? { usage } : {}),
+      metadata,
+      event_type: ev.type,
+    };
+  }
+
+  // #3-#7 恒等映射（text/tool_use/tool_result/error/status/turn_result/thinking 直传）；
+  // tool_use/tool_result 额外提升 tool_name/call_id（配对语义）
+  const out: CodexAgentEventMessage = {
+    type: ev.type as AgentEvent['type'],
     content: ev.content,
-    metadata: ev.metadata ?? {},
     session_id: threadId,
+    metadata,
+    event_type: ev.type,
   };
+  const usage = extractEventUsage(metadata.usage);
+  if (usage) out.usage = usage;
+  if (ev.type === 'tool_use' || ev.type === 'tool_result') {
+    if (typeof metadata.call_id === 'string' && metadata.call_id) {
+      out.call_id = metadata.call_id;
+    }
+    if (typeof metadata.tool_name === 'string' && metadata.tool_name) {
+      out.tool_name = metadata.tool_name;
+    }
+  }
+  return out;
 }
 
 /**
@@ -663,11 +835,15 @@ export class CodexAppServerDriver implements InteractiveDriver {
           const line = stderrBuf.slice(0, idx);
           stderrBuf = stderrBuf.slice(idx + 1);
           if (line.trim() && onMessage && h.threadId) {
+            // stderr 行 → error 事件（映射表 #7，经 toAgentEvent 单一映射点构造；
+            // task-08 envelope 包装：单事件成批 events:[ev]，不动 task-04 映射）
             onMessage({
-              event_type: 'error',
-              content: line,
-              metadata: { level: 'stderr' },
-              session_id: h.threadId,
+              events: [
+                toAgentEvent(
+                  { type: 'error', content: line, metadata: { level: 'stderr' } },
+                  h.threadId,
+                ),
+              ],
             });
           }
         }
@@ -764,7 +940,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
       if (!events) return;
 
       for (const ev of events) {
-        // thread_started flat message（thread/start|resume response）：提取 threadId
+        // thread_started 事件（thread/start|resume response 收敛）：提取 threadId
         if (
           ev.type === 'text' &&
           (ev.metadata as { subtype?: string })?.subtype === 'thread_started'
@@ -773,9 +949,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
           if (tid && !h.threadId) {
             h.threadId = tid;
           }
-          // 上报 thread_started flat message（让 backend 对齐 agent_session_id）
+          // 上报 status/session_started 事件（映射表 #1；让 backend 对齐 agent_session_id）
           if (onMessage && h.threadId) {
-            onMessage(toFlatMessage(ev, h.threadId));
+            // task-08：envelope 包装（单事件成批）。
+            onMessage({ events: [toAgentEvent(ev, h.threadId)] });
           }
           continue;
         }
@@ -788,16 +965,18 @@ export class CodexAppServerDriver implements InteractiveDriver {
         ) {
           this._extractTurnId(h, line);
           if (onMessage && h.threadId) {
-            onMessage(toFlatMessage(ev, h.threadId));
+            // task-08：envelope 包装（单事件成批）。
+            onMessage({ events: [toAgentEvent(ev, h.threadId)] });
           }
           continue;
         }
 
-        // turn/completed：收敛为 complete event → resolve 本轮 + 不上报
+        // turn/completed：complete → turn_result 映射（映射表 #8）后 resolve 本轮；
+        // 不经 onMessage 上报（turn 边界信号由 onTurnResult 承载，D-004 原语义）
         if (ev.type === 'complete') {
-          const outcome = this._outcomeFromComplete(ev);
+          const outcome = this._outcomeFromComplete(toAgentEvent(ev, h.threadId ?? ''));
           finishTurn(outcome);
-          continue; // complete 不作为 flat message
+          continue; // turn_result 不作为上报消息
         }
 
         // error event：缓存（failed status 时作 result message）
@@ -805,9 +984,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
           pendingTurnError = ev.content || null;
         }
 
-        // 其余（text/tool_use/tool_result/error）→ flat message
+        // 其余（text/thinking 提升后/tool_use/tool_result/error）→ AgentEvent 上报
         if (onMessage && h.threadId) {
-          onMessage(toFlatMessage(ev, h.threadId));
+          // task-08：envelope 包装（单事件成批）。
+          onMessage({ events: [toAgentEvent(ev, h.threadId)] });
         }
       }
     };
@@ -901,7 +1081,14 @@ export class CodexAppServerDriver implements InteractiveDriver {
     }
   }
 
-  /** 从 complete event 提取 outcome（含 status / usage）。 */
+  /**
+   * 从 turn_result 事件（complete 经 toAgentEvent 映射，映射表 #8）提取 outcome。
+   *
+   * task-04 改造：usage 已由 toAgentEvent → extractEventUsage 从 metadata.usage 提升
+   * 为一等字段（四字段 number 守卫，语义与原实现逐字段一致——非 number 不设置、
+   * 不伪造 0，缺 cache → undefined 后端按 NULL 处理）；turn_status 仍在 metadata
+   * （开放长尾，非一等字段）。
+   */
   private _outcomeFromComplete(ev: AgentEvent): {
     kind: 'success' | 'failed' | 'cancelled' | 'unknown';
     usage?: {
@@ -912,7 +1099,6 @@ export class CodexAppServerDriver implements InteractiveDriver {
     };
   } {
     const status = (ev.metadata as { turn_status?: string })?.turn_status ?? '';
-    const usage = (ev.metadata as { usage?: Record<string, unknown> })?.usage;
     let kind: 'success' | 'failed' | 'cancelled' | 'unknown' = 'unknown';
     if (status === 'completed') kind = 'success';
     else if (status === 'failed') kind = 'failed';
@@ -926,22 +1112,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
         cache_creation_tokens?: number;
       };
     } = { kind };
-    if (usage && typeof usage === 'object') {
-      out.usage = {
-        input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined,
-        output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
-        // task-02（D-001@v1）：尽力而为提取 cache 字段（短名，对齐后端契约）。
-        // codex/OpenAI 系多无 cache（cache_read_tokens/cache_creation_tokens 通常不存在），
-        // typeof !== 'number' → undefined，后端按 NULL 处理，不伪造 0。
-        // 若 codex 某天吐 cached_tokens/prompt_tokens_details.cached_tokens（OpenAI 新字段），
-        // 需在此映射点补字段名映射（本 task 不主动猜测字段名）。
-        cache_read_tokens:
-          typeof usage.cache_read_tokens === 'number' ? usage.cache_read_tokens : undefined,
-        cache_creation_tokens:
-          typeof usage.cache_creation_tokens === 'number'
-            ? usage.cache_creation_tokens
-            : undefined,
-      };
+    if (ev.usage) {
+      out.usage = { ...ev.usage };
     }
     return out;
   }
@@ -1074,7 +1246,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
   private _maybeRespondServerRequest(
     h: CodexHandle,
     line: string,
-    onMessage: ((m: Record<string, unknown>) => void | Promise<void>) | undefined,
+    onMessage:
+      | ((envelope: TurnMessageEnvelope) => void | Promise<void>)
+      | undefined,
     ctx: {
       manualApproval: boolean;
       askUserOnly: boolean;
@@ -1097,9 +1271,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
 
     h.pendingServerRequests.push({ id, method, params, responseTemplate: null });
 
-    const log = (m: Record<string, unknown>): void => {
+    // task-04：审批/错误日志统一经 toAgentEvent 映射后上报（单一映射点，session_id
+    // 由映射函数注入，不再手拼 flat record）
+    const log = (ev: CodexFlatEventInput): void => {
       if (onMessage && h.threadId) {
-        onMessage({ ...m, session_id: h.threadId });
+        // task-08：envelope 包装（单事件成批）。
+        onMessage({ events: [toAgentEvent(ev, h.threadId)] });
       }
     };
 
@@ -1113,7 +1290,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
           /* 连写 response 都失败：仅记 flat 日志，不抛 */
         });
         log({
-          event_type: 'error',
+          type: 'error',
           content: `codex server request handler error: ${method}`,
           metadata: {
             rpc_id: id,
@@ -1160,7 +1337,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     h: CodexHandle,
     id: number | string,
     method: string,
-    _log: (m: Record<string, unknown>) => void,
+    _log: (ev: CodexFlatEventInput) => void,
   ): Promise<void> {
     let result: unknown;
     let isError = false;
@@ -1211,7 +1388,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
       askUserOnly: boolean;
       sessionPermission?: CodexSessionPermissionHooks;
     },
-    log: (m: Record<string, unknown>) => void,
+    log: (ev: CodexFlatEventInput) => void,
   ): Promise<void> {
     const respond = async (result: unknown): Promise<void> => {
       const response: CodexJsonRpcResponse = {
@@ -1257,7 +1434,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         // ql-20260825-f3#4：应答后同步摘除 handle.pendingServerRequests 条目。
         this._markServerRequestResponded(h, req.id);
         log({
-          event_type: 'error',
+          type: 'error',
           content: `unhandled codex server request: ${req.method}`,
           metadata: {
             rpc_id: req.id,
@@ -1286,7 +1463,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
       askUserOnly: boolean;
       sessionPermission?: CodexSessionPermissionHooks;
     },
-    log: (m: Record<string, unknown>) => void,
+    log: (ev: CodexFlatEventInput) => void,
     respond: (result: unknown) => Promise<void>,
     spec: { kind: 'command' | 'file'; toolName: string },
   ): Promise<void> {
@@ -1294,7 +1471,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     if (!ctx.manualApproval || ctx.askUserOnly) {
       await respond({ decision: 'accept' });
       log({
-        event_type: 'tool_use',
+        type: 'tool_use',
         content: '',
         metadata: {
           kind: 'approval',
@@ -1310,7 +1487,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     if (!ctx.sessionPermission) {
       await respond({ decision: 'decline' });
       log({
-        event_type: 'tool_use',
+        type: 'tool_use',
         content: '',
         metadata: {
           kind: 'approval',
@@ -1355,7 +1532,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
       askUserOnly: boolean;
       sessionPermission?: CodexSessionPermissionHooks;
     },
-    log: (m: Record<string, unknown>) => void,
+    log: (ev: CodexFlatEventInput) => void,
     respond: (result: unknown) => Promise<void>,
   ): Promise<void> {
     const requestedProfile = req.params.permissions;
@@ -1364,7 +1541,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     if (!ctx.manualApproval || ctx.askUserOnly) {
       await respond(emptyPermissionProfile());
       log({
-        event_type: 'tool_use',
+        type: 'tool_use',
         content: '',
         metadata: {
           kind: 'permission_request',
@@ -1380,7 +1557,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     if (!ctx.sessionPermission) {
       await respond(emptyPermissionProfile());
       log({
-        event_type: 'tool_use',
+        type: 'tool_use',
         content: '',
         metadata: {
           kind: 'permission_request',
@@ -1417,7 +1594,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     _h: CodexHandle,
     req: CodexServerRequest,
     ctx: { sessionPermission?: CodexSessionPermissionHooks },
-    _log: (m: Record<string, unknown>) => void,
+    _log: (ev: CodexFlatEventInput) => void,
     respond: (result: unknown) => Promise<void>,
   ): Promise<void> {
     const normalized = normalizeCodexRequestUserInput(req.params);
@@ -1460,7 +1637,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     _h: CodexHandle,
     req: CodexServerRequest,
     ctx: { sessionPermission?: CodexSessionPermissionHooks },
-    log: (m: Record<string, unknown>) => void,
+    log: (ev: CodexFlatEventInput) => void,
     respond: (result: unknown) => Promise<void>,
   ): Promise<void> {
     const normalized = normalizeMcpElicitation(req.params);
@@ -1468,7 +1645,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // 不支持归一化：fail-closed decline + error log（D-010 normalized_requirement）。
       await respond({ action: 'decline', content: null });
       log({
-        event_type: 'error',
+        type: 'error',
         content: `unsupported MCP elicitation schema: ${normalized.reason}`,
         metadata: {
           rpc_method: 'mcpServer/elicitation/request',

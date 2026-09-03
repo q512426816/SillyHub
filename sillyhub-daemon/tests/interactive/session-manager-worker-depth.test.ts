@@ -21,7 +21,7 @@ import type { MainAgentMcpContext } from '../../src/interactive/session-manager.
 import { SessionLimitReached } from '../../src/interactive/types.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -31,7 +31,7 @@ function makeMockDriver() {
   let capturedStartOpts: StartOptions | null = null;
   // 多会话场景（snapshot 测试）：每次 consume 的 callbacks 都留档，emitMessage
   // 广播到全部（单会话测试只有一份，行为与 worker-restricted-mcp 的单槽等价）。
-  const callbacksList: ConsumeCallbacks[] = [];
+  const callbacksList: InteractiveDriverCallbacks[] = [];
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
 
   const driver: ClaudeSdkDriver = {
@@ -39,7 +39,7 @@ function makeMockDriver() {
       capturedStartOpts = opts;
       return fakeQuery;
     }),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       callbacksList.push(cb);
     }),
     interrupt: vi.fn(async () => true),
@@ -49,10 +49,10 @@ function makeMockDriver() {
     driver,
     getStartOpts: () => capturedStartOpts,
     emitMessage: (m: SDKMessage) => {
-      for (const cb of callbacksList) cb.onMessage?.(m);
+      for (const cb of callbacksList) cb.onTurnMessage?.(m);
     },
     emitResult: (r: SDKResultMessage) => {
-      for (const cb of callbacksList) cb.onResult(r);
+      for (const cb of callbacksList) cb.onTurnResult?.(r);
     },
   };
 }
@@ -134,10 +134,10 @@ describe('task-04: worker_depth 承载链（create / snapshot / restore / reload
     await sm.create({ ...BASE_INPUT, sessionId: 'sess-depth-x' });
     // agentSessionId 落位（snapshotPersistable 过滤条件：system/init 后才可恢复）
     mock.emitMessage({
-      type: 'system',
-      subtype: 'init',
-      session_id: 'sdk-1',
-    } as unknown as SDKMessage);
+      events: [
+        { type: 'status', subtype: 'session_started', content: '', session_id: 'sdk-1' },
+      ],
+    } as unknown as Record<string, unknown>);
     await flushMicrotasks();
 
     const recs = sm.snapshotPersistable();
@@ -190,10 +190,10 @@ describe('task-04: worker_depth 承载链（create / snapshot / restore / reload
       worker_depth: 1,
     });
     emitMessage({
-      type: 'system',
-      subtype: 'init',
-      session_id: 'sdk-sess-reload',
-    } as unknown as SDKMessage);
+      events: [
+        { type: 'status', subtype: 'session_started', content: '', session_id: 'sdk-sess-reload' },
+      ],
+    } as unknown as Record<string, unknown>);
     await flushMicrotasks();
     emitResult({
       type: 'result',
@@ -334,13 +334,14 @@ describe("审计 F1/F3 回归", () => {
     ).rejects.toBeInstanceOf(SessionLimitReached);
   });
 
-  it("F3：无 partial buffer 的会话 end 后 budget Map 条目同样被回收", async () => {
+  it("F3：无 usage 台账的会话 end 后 budget Map 条目同样被回收", async () => {
     const { SessionManager } = await import("../../src/interactive/session-manager.js");
     const mgr = new SessionManager({ isWorkerSession: () => false });
     mgr["_sessionBudgetTokens"].set("sess-f3", 1000);
     mgr["_overBudgetSessions"].add("sess-f3");
-    // 无 partial buffer 的会话直接销毁
-    mgr["_destroyPartialBuffer"]("sess-f3");
+    // task-08：_destroyUsageLedger 收口旧 _destroyPartialBuffer 的清理职责
+    //（budget/usage 台账；partial 定时器已下沉归一化器由 driver.dispose 兜底）。
+    mgr["_destroyUsageLedger"]("sess-f3");
     expect(mgr["_sessionBudgetTokens"].has("sess-f3")).toBe(false);
     expect(mgr["_overBudgetSessions"].has("sess-f3")).toBe(false);
   });

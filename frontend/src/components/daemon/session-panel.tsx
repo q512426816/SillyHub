@@ -208,6 +208,7 @@ import {
   type TeamMissionSummary,
   type TeamMissionTriggerRequest,
 } from "@/lib/daemon";
+import { getProviderCaps } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
 
 /**
@@ -2199,7 +2200,9 @@ function SessionPanelPage({
     return preQuicklogQuery.data?.title ?? preContext.quickId;
   }, [preContext?.quickId, preQuicklogQuery.data]);
   // 附件门控（D-6 引擎门控同构）：预会话无会话实体，按目标 runtime 引擎判定。
-  const preAttachmentsDisabled = preEngine !== "claude";
+  // task-11（provider-abstraction）：引擎字面量门控收敛查 ProviderCaps 表
+  //（multimodal 键；未知/空引擎全 false 默认拒绝，与原 !== "claude" 等价）。
+  const preAttachmentsDisabled = !getProviderCaps(preEngine ?? "").multimodal;
 
   const status = session?.status ?? null;
   const ended = status === "ended" || status === "failed";
@@ -2216,7 +2219,9 @@ function SessionPanelPage({
 
   // ── 2026-08-20 task-12：附件门控派生（D-6 引擎 / FR-10 D-9 多模态降级）────
   const sessionEngine = session?.provider ?? null;
-  const attachmentsDisabled = sessionEngine !== "claude";
+  // task-11（provider-abstraction）：引擎门控收敛查 ProviderCaps（multimodal 键；
+  // null/未知引擎全 false 默认拒绝，与原 !== "claude" 等价）。
+  const attachmentsDisabled = !getProviderCaps(sessionEngine ?? "").multimodal;
   // 会话实际生效供应商（会话绑定优先；本机默认/未选 → null = 能力未知）。
   const effectiveProvider = useMemo(
     () =>
@@ -2953,10 +2958,12 @@ function SessionPanelPage({
     // ql-20260826-010：已有活跃 mission（弹层确认预建/R-07 单活跃）时放行直发——
     // 确认后回填的 /team 指令若再被拦截会陷入「弹层⇄回填」死循环，且该轮本就
     // 该走主控轮 briefing 注入派发分身。
+    // provider-abstraction task-11：引擎门控收敛查 ProviderCaps（subagent 键，
+    // 团队派工能力；null/未知引擎 false 不拦截，与原 === "claude" 等价）。
     if (
       teamCmd !== null &&
       !hasActiveMission &&
-      sessionEngine === "claude" &&
+      getProviderCaps(sessionEngine ?? "").subagent &&
       !ended &&
       machineOnline
     ) {
@@ -3248,10 +3255,12 @@ function SessionPanelPage({
           ? "机器离线，输入不可用…"
           : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
     // task-13（FR-05）：预会话团队门控——与真会话同构（:1771 附近
-    // teamButtonDisabled/teamButtonTitle 先例）：引擎 claude（D-003 一期专属）
-    // + 所选机器在线；机器列表找不到不武断判离线（preMachineOnline 语义
-    // 保持）。tooltip 按未满足原因更新，可用时提示首句创建会话即预建团队任务。
-    const preTeamEngineOk = preEngine === "claude";
+    // teamButtonDisabled/teamButtonTitle 先例）：引擎门控（D-003 一期 Claude 专属，
+    // provider-abstraction task-11 收敛查 ProviderCaps subagent 键，与原
+    // === "claude" 等价）+ 所选机器在线；机器列表找不到不武断判离线
+    //（preMachineOnline 语义保持）。tooltip 按未满足原因更新，可用时提示首句
+    // 创建会话即预建团队任务。
+    const preTeamEngineOk = getProviderCaps(preEngine ?? "").subagent;
     const preTeamButtonDisabled = !preContext || !preTeamEngineOk || !preMachineOnline;
     const preTeamButtonTitle = !preContext
       ? "请先选择机器与智能体"
@@ -3575,9 +3584,10 @@ function SessionPanelPage({
   const interruptDisabled =
     session.status !== "active" || !turnState.currentRunId || !machineOnline;
 
-  // task-11：团队入口派生——引擎门控（D-003 一期 Claude 专属）+ 活跃 chip
+  // task-11：团队入口派生——引擎门控（D-003 一期 Claude 专属；provider-abstraction
+  // task-11 收敛查 ProviderCaps subagent 键，与原 === "claude" 等价）+ 活跃 chip
   //（R-07 单活跃约束，取首个活跃 mission；chip 收回按 mission id 记忆）。
-  const teamEngineOk = sessionEngine === "claude";
+  const teamEngineOk = getProviderCaps(sessionEngine ?? "").subagent;
   const teamButtonDisabled = !teamEngineOk || ended || !machineOnline;
   const teamButtonTitle = !teamEngineOk
     ? "团队需要 Claude 引擎"
@@ -5401,12 +5411,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
     // 拦截（idle 无会话可挂 mission / 非 active 原路发送）。
     // ql-20260826-010：已有活跃 mission（弹层确认预建）时放行直发——确认后
     // 回填的 /team 指令若再被拦截会陷入「弹层⇄回填」死循环（同 page 模式）。
+    // provider-abstraction task-11：引擎门控收敛查 ProviderCaps（subagent 键，
+    // 与原 === "claude" 等价）。
     const teamCmd = parseTeamCommand(prompt);
     const hasActiveMission = teamMissions.some((m) => isActiveTeamMission(m.status));
     if (
       teamCmd !== null &&
       !hasActiveMission &&
-      provider === "claude" &&
+      getProviderCaps(provider).subagent &&
       view.sessionId &&
       view.status === "active"
     ) {
@@ -5712,9 +5724,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 无 sessionId（idle 首句 / creating）禁：createSession 契约无 attachment_ids
   //（R3），放开会出现「上传成功但发不出去」。attach 模式进入即有 sessionId，
   // 追问/排队路径（injectSession）已支持附件，正常开放。
-  const attachmentsDisabled = provider !== "claude" || !view.sessionId;
+  // provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal 键，
+  // 与原 !== / === "claude" 等价）。
+  const attachmentsDisabled = !getProviderCaps(provider).multimodal || !view.sessionId;
   const attachmentsDisabledTitle =
-    provider === "claude" && !view.sessionId
+    getProviderCaps(provider).multimodal && !view.sessionId
       ? "发送首条消息创建会话后可添加附件"
       : undefined;
 
@@ -5725,8 +5739,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const endDisabled = view.status !== "active" || offlineReadOnly; // 离线只读禁用结束
 
   // task-11：团队入口派生——引擎门控（provider state 即面板现有引擎信息源，
-  // D-003 一期 Claude 专属）+ 活跃 chip（R-07 单活跃约束，取首个活跃 mission）。
-  const teamEngineOk = provider === "claude";
+  // D-003 一期 Claude 专属；provider-abstraction task-11 收敛查 ProviderCaps
+  // subagent 键，与原 === "claude" 等价）+ 活跃 chip（R-07 单活跃约束，取首个
+  // 活跃 mission）。
+  const teamEngineOk = getProviderCaps(provider).subagent;
   const teamButtonDisabled =
     !teamEngineOk ||
     !view.sessionId ||

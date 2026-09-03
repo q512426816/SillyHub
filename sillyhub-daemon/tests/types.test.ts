@@ -16,9 +16,18 @@ import type {
 } from '../src/types';
 
 describe('types.ts type assertions', () => {
-  it('AgentEvent.type is exactly the 5-value union', () => {
+  it('AgentEvent.type is exactly the 8-value union', () => {
+    // v2（2026-09-03-agent-provider-abstraction task-01 / design.md §7）：
+    // 5 型扩 8 型（thinking/status 独立成型 + turn_result；complete 为批量兼容别名）。
     expectTypeOf<AgentEventType>().toEqualTypeOf<
-      'text' | 'tool_use' | 'tool_result' | 'error' | 'complete'
+      | 'text'
+      | 'thinking'
+      | 'tool_use'
+      | 'tool_result'
+      | 'status'
+      | 'error'
+      | 'turn_result'
+      | 'complete'
     >();
   });
 

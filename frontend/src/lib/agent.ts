@@ -1,4 +1,6 @@
 import { apiFetch } from "./api";
+// task-13：StreamLogEvent.agent_event 的载荷形状（type-only，无运行时依赖）。
+import type { AgentEvent } from "@/components/agent-log/normalize";
 
 export type AgentRunStatus =
   | "pending"
@@ -218,6 +220,20 @@ export interface StreamLogEvent {
   // AgentRunLogEntry.tool_kind 同语义。SSE 实时流由 daemon _extract_sdk_messages
   // 注入；非工具调用 / 历史流 → undefined（viewer 灰色兜底）。
   tool_kind?: string | null;
+  // task-13（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：partial
+  // 半截行标识 + Edit structuredPatch——backend session payload 已透传
+  // （run_sync/service.py:411/419），此前 SSE 转换层（use-agent-run-stream
+  // onMessage 逐字段构造行）把它们丢掉，实时流缺半截行标识 / Edit 真实行号
+  // （task-10 发现的既有缺口）。旧轨 / override 信封 / 历史流 → undefined。
+  segment_id?: string | null;
+  edit_patch?: string | null;
+  // task-13 / FR-04：AgentEvent v2 结构化事件（backend _persist_agent_event 落
+  // metadata_['agent_event'] 后 run/session 双通道 SSE 顶层透传，service.py:1548/424）。
+  // 载荷是 SSE JSON（非 OpenAPI 生成类型），运行时形状由 normalize 的
+  // extractRowAgentEvent（isAgentEventShape）校验兜底：非法 → 回退旧文本协议解析。
+  // type-only 引用 normalize 的 AgentEvent（该模块已 module augmentation 本文件的
+  // AgentRunLogEntry，两模块类型层互指无运行时环）。
+  agent_event?: AgentEvent | null;
 }
 
 // ── Agent Run User Input ──

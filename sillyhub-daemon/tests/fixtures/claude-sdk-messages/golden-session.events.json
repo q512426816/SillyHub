@@ -1,0 +1,565 @@
+{
+  "_comment": "task-12 golden：ClaudeEventNormalizer 对 golden-session.json 的完整事件流（含 partial flush）。驱动协议：假时钟每帧 +100ms；帧 4/26 后推进 500ms（节流中途 flush）；帧 22/37 后 onTurnEnd；末尾 dispose。由 tests/interactive/golden/claude-events-golden.test.ts 锚定（快照防实现回归漂移）。",
+  "advance_after_frames": [
+    4,
+    26
+  ],
+  "advance_ms": 500,
+  "turn_end_frames": [
+    22,
+    37
+  ],
+  "frames": [
+    {
+      "frame": 0,
+      "partials": [],
+      "events": [
+        {
+          "type": "status",
+          "subtype": "session_started",
+          "content": "",
+          "session_id": "sess-sample-0003",
+          "metadata": {
+            "model": "claude-sonnet-4-5",
+            "claude_code_version": "2.1.216"
+          }
+        }
+      ]
+    },
+    {
+      "frame": 1,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 2,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 3,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 4,
+      "partials": [
+        {
+          "type": "thinking",
+          "content": "Let me check the ",
+          "is_partial": true,
+          "segment_id": "main:msg_t1_m1:thinking"
+        }
+      ],
+      "events": []
+    },
+    {
+      "frame": 5,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 6,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 7,
+      "partials": [
+        {
+          "type": "thinking",
+          "content": "environment.",
+          "is_partial": true,
+          "segment_id": "main:msg_t1_m1:thinking",
+          "usage": {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_read_tokens": 500,
+            "cache_creation_tokens": 0,
+            "ctx_tokens": 600
+          }
+        }
+      ],
+      "events": []
+    },
+    {
+      "frame": 8,
+      "partials": [],
+      "events": [
+        {
+          "type": "thinking",
+          "content": "Let me check the environment.",
+          "segment_id": "main:msg_t1_m1:thinking",
+          "override": true,
+          "depth": 0,
+          "usage": {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_read_tokens": 500
+          },
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 10,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 11,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 12,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 13,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 14,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 15,
+      "partials": [
+        {
+          "type": "text",
+          "content": "Running docker ps now.",
+          "is_partial": true,
+          "segment_id": "main:msg_t1_m2:text",
+          "usage": {
+            "input_tokens": 420,
+            "output_tokens": 170,
+            "cache_read_tokens": 700,
+            "cache_creation_tokens": 64,
+            "ctx_tokens": 1084
+          }
+        }
+      ],
+      "events": []
+    },
+    {
+      "frame": 16,
+      "partials": [],
+      "events": [
+        {
+          "type": "status",
+          "subtype": "bash_status",
+          "content": "",
+          "metadata": {
+            "command": "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>&1 | head -40",
+            "status": "running"
+          }
+        },
+        {
+          "type": "status",
+          "subtype": "agent_task_status",
+          "content": "",
+          "metadata": {
+            "task_id": "toolu_task01",
+            "task_name": "Compute 17 times 23",
+            "status": "running"
+          }
+        },
+        {
+          "type": "text",
+          "content": "Running docker ps now.",
+          "segment_id": "main:msg_t1_m2:text",
+          "override": true,
+          "depth": 0,
+          "usage": {
+            "input_tokens": 320,
+            "output_tokens": 120,
+            "cache_read_tokens": 700,
+            "cache_creation_tokens": 64
+          },
+          "session_id": "sess-sample-0003"
+        },
+        {
+          "type": "tool_use",
+          "tool_name": "Bash",
+          "content": "{\"command\":\"docker ps --format '{{.Names}}\\t{{.Image}}\\t{{.Ports}}' 2>&1 | head -40\",\"description\":\"List running docker containers\"}",
+          "metadata": {
+            "tool_kind": "bash"
+          },
+          "call_id": "toolu_bash01",
+          "depth": 0
+        },
+        {
+          "type": "tool_use",
+          "tool_name": "Task",
+          "content": "{\"description\":\"Compute 17 times 23\",\"prompt\":\"Compute 17 * 23. Return only the numerical result.\",\"subagent_type\":\"general-purpose\"}",
+          "metadata": {
+            "tool_kind": "task"
+          },
+          "call_id": "toolu_task01",
+          "depth": 0
+        }
+      ]
+    },
+    {
+      "frame": 17,
+      "partials": [],
+      "events": [
+        {
+          "type": "status",
+          "subtype": "bash_chunk",
+          "content": "NAMES\tIMAGE\tPORTS\nsillyhub-backend\tsillyhub:latest\t0.0.0.0:8000->8000/tcp",
+          "metadata": {
+            "command": "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>&1 | head -40",
+            "channel": "stdout",
+            "is_final": true
+          }
+        },
+        {
+          "type": "status",
+          "subtype": "bash_status",
+          "content": "",
+          "metadata": {
+            "command": "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>&1 | head -40",
+            "status": "completed",
+            "exit_code": 0,
+            "elapsed_ms": 100
+          }
+        },
+        {
+          "type": "tool_result",
+          "content": "NAMES\tIMAGE\tPORTS\nsillyhub-backend\tsillyhub:latest\t0.0.0.0:8000->8000/tcp",
+          "call_id": "toolu_bash01",
+          "depth": 0,
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 18,
+      "partials": [],
+      "events": [
+        {
+          "type": "thinking",
+          "content": "The task is a simple multiplication. I will read the project notes first, as the prompt hints they contain a precomputed table.",
+          "segment_id": "toolu_task01:msg_sub_001:thinking",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1,
+          "usage": {
+            "input_tokens": 210,
+            "output_tokens": 33
+          },
+          "session_id": "sess-sample-0003"
+        },
+        {
+          "type": "text",
+          "content": "Reading the project notes before answering.",
+          "segment_id": "toolu_task01:msg_sub_001:text",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        },
+        {
+          "type": "tool_use",
+          "tool_name": "Read",
+          "content": "{\"file_path\":\"<REDACTED>/NOTES.md\"}",
+          "metadata": {
+            "tool_kind": "read"
+          },
+          "call_id": "toolu_read01",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        }
+      ]
+    },
+    {
+      "frame": 19,
+      "partials": [],
+      "events": [
+        {
+          "type": "tool_result",
+          "content": "17 * 23 = 391 (precomputed in notes)",
+          "call_id": "toolu_read01",
+          "parent_tool_use_id": "toolu_task01",
+          "depth": 1,
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 20,
+      "partials": [],
+      "events": [
+        {
+          "type": "text",
+          "content": "17 * 23 = 391",
+          "segment_id": "toolu_task01:msg_sub_002:text",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1,
+          "usage": {
+            "input_tokens": 260,
+            "output_tokens": 21
+          },
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 21,
+      "partials": [],
+      "events": [
+        {
+          "type": "tool_result",
+          "content": "391",
+          "call_id": "toolu_task01",
+          "depth": 0,
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 22,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 23,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 24,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 25,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 26,
+      "partials": [
+        {
+          "type": "text",
+          "content": "I will ",
+          "is_partial": true,
+          "segment_id": "main:msg_t2_m1:text"
+        }
+      ],
+      "events": []
+    },
+    {
+      "frame": 27,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 28,
+      "partials": [],
+      "events": []
+    },
+    {
+      "frame": 29,
+      "partials": [
+        {
+          "type": "text",
+          "content": "edit the walker.",
+          "is_partial": true,
+          "segment_id": "main:msg_t2_m1:text",
+          "usage": {
+            "input_tokens": 900,
+            "output_tokens": 40,
+            "cache_read_tokens": 1500,
+            "cache_creation_tokens": 64,
+            "ctx_tokens": 2400
+          }
+        }
+      ],
+      "events": []
+    },
+    {
+      "frame": 30,
+      "partials": [],
+      "events": [
+        {
+          "type": "text",
+          "content": "I will edit the walker.",
+          "segment_id": "main:msg_t2_m1:text",
+          "override": true,
+          "depth": 0,
+          "usage": {
+            "input_tokens": 900,
+            "output_tokens": 40,
+            "cache_read_tokens": 1500
+          },
+          "session_id": "sess-sample-0003"
+        },
+        {
+          "type": "tool_use",
+          "tool_name": "Edit",
+          "content": "{\"file_path\":\"<REDACTED>/spec-sync.ts\",\"old_string\":\"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"new_string\":\"async function walkDir(\\n  root: string,\\n  pruneTop?: Set<string>,\\n  pruneNames?: Set<string>,\\n): Promise<WalkEntry[]> {\",\"replace_all\":false}",
+          "metadata": {
+            "tool_kind": "write"
+          },
+          "call_id": "toolu_edit01",
+          "depth": 0
+        }
+      ]
+    },
+    {
+      "frame": 31,
+      "partials": [],
+      "events": [
+        {
+          "type": "tool_result",
+          "content": "The file <REDACTED>/spec-sync.ts has been updated successfully. (file state is current in the context — no need to Read it back)",
+          "call_id": "toolu_edit01",
+          "edit_patch": "[{\"oldStart\":536,\"oldLines\":7,\"newStart\":536,\"newLines\":11,\"lines\":[\"  *（tar 标准是 forward slash；Windows 下 join 用反斜杠，但 tar entry name 必须是正斜杠）。\",\"  */\",\"-async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"+async function walkDir(\",\"+  root: string,\",\"+  pruneTop?: Set<string>,\",\"+  pruneNames?: Set<string>,\",\"+): Promise<WalkEntry[]> {\",\"   const out: WalkEntry[] = [];\"]}]",
+          "depth": 0,
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 32,
+      "partials": [],
+      "events": [
+        {
+          "type": "status",
+          "subtype": "agent_task_status",
+          "content": "",
+          "metadata": {
+            "task_id": "toolu_task02",
+            "task_name": "Verify the edit",
+            "status": "running"
+          }
+        },
+        {
+          "type": "tool_use",
+          "tool_name": "Task",
+          "content": "{\"description\":\"Verify the edit\",\"prompt\":\"Verify the walkDir signature change compiles and keeps behavior.\",\"subagent_type\":\"general-purpose\"}",
+          "metadata": {
+            "tool_kind": "task"
+          },
+          "call_id": "toolu_task02",
+          "depth": 0,
+          "usage": {
+            "input_tokens": 950,
+            "output_tokens": 25,
+            "cache_read_tokens": 1600
+          },
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 33,
+      "partials": [],
+      "events": [
+        {
+          "type": "status",
+          "subtype": "agent_task_status",
+          "content": "",
+          "metadata": {
+            "task_id": "toolu_task03",
+            "task_name": "Check tar entry names",
+            "status": "running"
+          }
+        },
+        {
+          "type": "text",
+          "content": "Delegating the entry-name check.",
+          "segment_id": "toolu_task02:msg_sub2_001:text",
+          "parent_tool_use_id": "toolu_task02",
+          "subagent_type": "general-purpose",
+          "depth": 1,
+          "usage": {
+            "input_tokens": 300,
+            "output_tokens": 30
+          },
+          "session_id": "sess-sample-0003"
+        },
+        {
+          "type": "tool_use",
+          "tool_name": "Task",
+          "content": "{\"description\":\"Check tar entry names\",\"prompt\":\"Check that archive entries use forward slashes on Windows.\",\"subagent_type\":\"general-purpose\"}",
+          "metadata": {
+            "tool_kind": "task"
+          },
+          "call_id": "toolu_task03",
+          "parent_tool_use_id": "toolu_task02",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        }
+      ]
+    },
+    {
+      "frame": 34,
+      "partials": [],
+      "events": [
+        {
+          "type": "text",
+          "content": "Entry names verified: forward slashes only.",
+          "segment_id": "toolu_task03:msg_sub3_001:text",
+          "parent_tool_use_id": "toolu_task03",
+          "subagent_type": "general-purpose",
+          "depth": 2,
+          "usage": {
+            "input_tokens": 150,
+            "output_tokens": 18
+          },
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 35,
+      "partials": [],
+      "events": [
+        {
+          "type": "tool_result",
+          "content": "Verified: entry names use forward slashes.",
+          "call_id": "toolu_task02",
+          "depth": 0,
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 36,
+      "partials": [],
+      "events": [
+        {
+          "type": "text",
+          "content": "The walker is fixed and verified. done.",
+          "segment_id": "main:msg_t2_m3:text",
+          "depth": 0,
+          "usage": {
+            "input_tokens": 2000,
+            "output_tokens": 60,
+            "cache_read_tokens": 8000,
+            "cache_creation_tokens": 512
+          },
+          "session_id": "sess-sample-0003"
+        }
+      ]
+    },
+    {
+      "frame": 37,
+      "partials": [],
+      "events": []
+    }
+  ]
+}

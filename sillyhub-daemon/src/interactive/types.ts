@@ -14,13 +14,13 @@
  * @module interactive/types
  */
 
-import type { Query, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Query, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { UserTurnInput } from './driver.js';
 import type {
   InteractiveDriver,
   InteractiveDriverHandle,
-  InteractiveDriverMessage,
   InteractiveDriverResult,
+  InteractiveProvider,
 } from './driver.js';
 // task-07（provider-switch-live-session / D-002@v1）：SessionState.pendingSwitch
 // 字段引用中性 ProviderConfig（与 claim payload 同源，backend 解密后下发；仅在
@@ -195,8 +195,10 @@ export interface SessionState {
    *
    * task-01（D-001@v1）：driver 归属由此字段决定，task-02 起按 provider 从
    * `SessionManagerDeps.drivers` 选 driver（interrupt 路由校验不串 provider，E5）。
+   * task-05（FR-05）：类型改引用注册表推导的 InteractiveProvider 联合
+   *（providers.ts 单源，新增 provider 不改本文件）。
    */
-  provider: 'claude' | 'codex';
+  provider: InteractiveProvider;
   /** pathToClaudeCodeExecutable（create 时由 daemon._agentPaths 提供）。 */
   pathToClaudeCodeExecutable: string;
   /**
@@ -360,7 +362,8 @@ export interface CreateSessionInput {
   firstPrompt: string;
   firstRunId: string;
   cwd: string;
-  provider: 'claude' | 'codex';
+  /** task-05（FR-05）：provider 联合改注册表推导（providers.ts 单源）。 */
+  provider: InteractiveProvider;
   /** pathToClaudeCodeExecutable（来自 daemon._agentPaths.get('claude')）。 */
   pathToClaudeCodeExecutable: string;
   model?: string;
@@ -464,7 +467,7 @@ export interface SessionManagerDeps {
    * 构造只传 `driver`，必填会连锁报缺字段（cli.ts 不在 allowed_paths）。为满足 AC-05
    *（typecheck 全绿）且不动 cli.ts/mock，本任务标 optional；task-02 接线后改必填。
    */
-  drivers?: Partial<Record<'claude' | 'codex', InteractiveDriver>>;
+  drivers?: Partial<Record<InteractiveProvider, InteractiveDriver>>;
   /**
    * @deprecated 兼容入口（task-02 起 SessionManager 构造函数内映射到 drivers.claude）。
    *
@@ -487,12 +490,18 @@ export interface SessionManagerDeps {
   ) => void | Promise<void>;
   /** 中间消息 → submit AgentRunLog（task-06 SSE，本任务用 mock）。
    *
-   * task-02（D-008@v1）：参数类型放宽。Claude driver 透传 SDKMessage 原对象（鸭子
-   * 类型满足 Record）；Codex driver 传 flat InteractiveDriverMessage。daemon 按 provider 归一化。 */
+   * task-09（2026-09-03-agent-provider-abstraction / FR-01 / D-001@v1）：入参为
+   * 上报消息 dict（Record）——task-08 后 driver 回调收口 TurnMessageEnvelope，
+   * SessionManager 经 _eventToReportDict 把 AgentEvent v2 蛇形平铺（+event_type
+   * 别名 + seq）交给本回调；SessionManager 内部另有 legacy flat 行（_writeTaskLine
+   * [TASK_*] / budget_exceeded）同走本通道。daemon.onTurnMessage 按特征
+   * （type===event_type 且 seq 数字）识别事件轨并包 kind:'agent_event' 上报
+   * （SILLYHUB_LEGACY_TEXT_EVENTS=1 时原样透传回退）；旧 SDKMessage /
+   * InteractiveDriverMessage 联合已随 deprecated 导出一并退役。 */
   onTurnMessage: (
     sessionId: string,
     runId: string,
-    msg: SDKMessage | InteractiveDriverMessage,
+    msg: Record<string, unknown>,
   ) => void | Promise<void>;
   /** session 终态通知 backend（end/failed → backend end_session，task-05 实现）。 */
   onSessionEnd: (
@@ -713,8 +722,8 @@ export interface PersistedSessionRecord {
   agentSessionId: string;
   /** 固定工作目录（resume 按 cwd 分目录，R-cwd）。 */
   cwd: string;
-  /** provider（仅 interactive；batch 不进 sessions.json，FR-09）。 */
-  provider: 'claude' | 'codex';
+  /** provider（仅 interactive；batch 不进 sessions.json，FR-09）。task-05：注册表推导联合。 */
+  provider: InteractiveProvider;
   /** 崩溃时可能在执行的 AgentRun.id（恢复对账用；恢复成功后清空再 flush）。 */
   currentRunId?: string;
   /** turn 计数（可观察，恢复 driver 不直接消费）。 */

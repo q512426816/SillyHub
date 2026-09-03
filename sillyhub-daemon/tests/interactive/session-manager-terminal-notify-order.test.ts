@@ -20,7 +20,7 @@ import type {
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -51,21 +51,21 @@ function resultSuccess(): SDKResultMessage {
 }
 
 function makeMockDriver() {
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
   const driver: ClaudeSdkDriver = {
     start: vi.fn(
       (_input: AsyncIterable<SDKUserMessage>, _opts: StartOptions): Query =>
         fakeQuery,
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (_q: Query | null): Promise<boolean> => true),
   } as unknown as ClaudeSdkDriver;
   return {
     driver,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 

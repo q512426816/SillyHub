@@ -103,9 +103,36 @@ export interface SubmitMessagesBody {
    * 可选携带 `dedup_key`（ResilienceService.submitWithRetry 注入到 message 顶层），
    * backend submit_messages 据此 ON CONFLICT DO NOTHING 幂等去重；旧 daemon 不发
    * 该字段时 backend 当 None（向后兼容，不强约束）。
+   * task-09（2026-09-03-agent-provider-abstraction / FR-01 / D-001@v1 双轨）：每条
+   * message 还可为 {@link AgentEventMessage} 形态（daemon 侧把 AgentEvent v2 事件
+   * dict 包装上报）；与旧 dict 在同一数组共存，backend LeaseMessagesRequest.messages
+   * 本就是 list[dict]（schema.py:783-794），OpenAPI 零变化。
    */
-  messages: Record<string, unknown>[];
+  messages: Array<Record<string, unknown> | AgentEventMessage>;
 }
+
+/**
+ * task-09（2026-09-03-agent-provider-abstraction / FR-01 / D-001@v1）：AgentEvent
+ * v2 新轨上报消息形态（type alias——type 别名具隐式索引签名，可赋给
+ * Record<string, unknown>，interface 不行）。
+ *
+ * daemon.onTurnMessage 把 SessionManager._eventToReportDict 产出的事件 dict（AgentEvent
+ * v2 蛇形平铺 + event_type 别名 + seq）包装为本形态经 submitMessages 上报；backend
+ * submit_messages 识别 kind=='agent_event' 走 _persist_agent_event 新轨（task-07），
+ * 无 kind 键的旧形态 dict 零改动走兼容轨。运行时载荷就是普通 JSON dict，本类型
+ * 仅是契约文档（backend LeaseMessagesRequest list[dict] 不强约束）。
+ *
+ * - kind：恒 'agent_event'（backend 分支判据，须在旧 flat 分类之前识别）。
+ * - event：AgentEvent v2 dict（一等字段蛇形平铺；usage/session_id 等聚合量由
+ *   backend 从 event 内提取）。
+ * - dedup_key：可选，daemon 注入（Claude msg.id 优先，缺则 runId:0:flatSeq），
+ *   幂等去重语义同旧形态（与 ResilienceService 展开注入位一致）。
+ */
+export type AgentEventMessage = {
+  kind: 'agent_event';
+  event: Record<string, unknown>;
+  dedup_key?: string;
+};
 
 /** complete_lease 请求体。 */
 export interface CompleteLeaseBody {
@@ -849,12 +876,18 @@ export class HubClient {
    * 增量上报 agent 执行消息（流式）。
    * 端点：POST {REST_PREFIX}/leases/{leaseId}/messages，
    * body `{ claim_token, agent_run_id, messages }`。
+   *
+   * task-09（2026-09-03-agent-provider-abstraction / FR-01 / D-001@v1）：messages
+   * 支持 AgentEventMessage 新轨形态（kind:'agent_event' 包装）与旧 flat dict 共存
+   * （同一数组混排）；运行时载荷不变（backend LeaseMessagesRequest.messages 本就
+   * list[dict]），此处联合类型仅是 daemon 侧契约文档。SILLYHUB_LEGACY_TEXT_EVENTS=1
+   * 时 daemon 不产新形态（backend 未升级的本地回退，design §9）。
    */
   async submitMessages(
     leaseId: string,
     claimToken: string,
     agentRunId: string,
-    messages: Record<string, unknown>[],
+    messages: Array<Record<string, unknown> | AgentEventMessage>,
   ): Promise<Record<string, unknown>> {
     return this._request<Record<string, unknown>>(
       'POST',

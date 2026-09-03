@@ -38,6 +38,11 @@ from app.modules.agent.model import (
     AgentSession,
     AgentSessionQueuedMessage,
 )
+
+# provider-abstraction task-11（design §5.2 / D-002@v1）：本文件散落的引擎
+# 字面量门控（!= "claude" / not in {"claude", "codex"}）收敛为查能力矩阵；
+# provider_caps 为纯表模块（零依赖），import 方向安全无循环。
+from app.modules.agent.provider_caps import get_provider_caps
 from app.modules.auth.permissions import Permission
 
 # D-001@v1：create_session workspace 归属校验（口径与前端 listWorkspaces 一致）。
@@ -1357,9 +1362,11 @@ class SessionService:
         # ── ql-20260825-001：首句附件校验（对齐 inject 路径 task-05 段）──
         # D-6 引擎门控（仅 Claude 支持附件）/ 归属+存在 404 / 数量 422（图≤5、
         # 文≤5）/ 保序。整体拒绝不部分生效：任一失败 raise → 无半成品落库。
+        # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
+        # 键；文案逐字保留，与原 != "claude" 判定等价）。
         validated_attachments: list = []
         if attachment_ids:
-            if provider != "claude":
+            if not get_provider_caps(provider)["multimodal"]:
                 raise DaemonSessionAttachmentsUnsupported(
                     "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
                     details={"provider": provider},
@@ -2309,7 +2316,9 @@ class SessionService:
             if actor is None or not await file_svc._can_access(user=actor, row=row):
                 degrade_lines.append(f"{row.original_name}（无权访问）")
                 continue
-            if provider != "claude":
+            # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
+            # 键，与原 != "claude" 判定等价——不支持附件的引擎整条降级为链接）。
+            if not get_provider_caps(provider)["multimodal"]:
                 degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
                 continue
             entry_kind = "image" if (row.mime_type or "").startswith("image/") else "file"
@@ -2843,7 +2852,9 @@ class SessionService:
         附件归属约束在附件行自身（``user_id``）、引擎建后不可变，均不依赖会话
         行可变状态，前后置判定等价。
         """
-        if session_provider != "claude":
+        # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
+        # 键；文案逐字保留，与原 != "claude" 判定等价）。
+        if not get_provider_caps(session_provider)["multimodal"]:
             raise DaemonSessionAttachmentsUnsupported(
                 "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
                 details={"session_id": str(session_id), "provider": session_provider},
@@ -6341,7 +6352,10 @@ class SessionService:
         now = datetime.now(UTC)
 
         # Pre-flight checks (order is load-bearing — see task-05 §边界处理).
-        if session.provider not in {"claude", "codex"}:
+        # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（resume 键；
+        # 英文文案逐字保留，与原 not in {"claude", "codex"} 判定等价——未知
+        # provider 查表得全 False 同样拒绝）。
+        if not get_provider_caps(session.provider)["resume"]:
             raise DaemonSessionResumeUnsupported(
                 f"Session '{session_id}' provider '{session.provider}' does not "
                 f"support resume (only claude/codex).",

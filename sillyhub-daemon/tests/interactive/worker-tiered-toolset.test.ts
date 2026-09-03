@@ -26,7 +26,7 @@ import type { Query, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-a
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 import type { McpServerConfigForDriver } from '../../src/interactive/driver.js';
@@ -290,7 +290,7 @@ describe('task-05: buildWorkerMcpServerConfig 深度透传（写侧）', () => {
 
 function makeMockDriver() {
   let capturedStartOpts: StartOptions | null = null;
-  const callbacksList: ConsumeCallbacks[] = [];
+  const callbacksList: InteractiveDriverCallbacks[] = [];
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
 
   const driver: ClaudeSdkDriver = {
@@ -298,7 +298,7 @@ function makeMockDriver() {
       capturedStartOpts = opts;
       return fakeQuery;
     }),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       callbacksList.push(cb);
     }),
     interrupt: vi.fn(async () => true),
@@ -308,7 +308,7 @@ function makeMockDriver() {
     driver,
     getStartOpts: () => capturedStartOpts,
     emitMessage: (m: SDKMessage) => {
-      for (const cb of callbacksList) cb.onMessage?.(m);
+      for (const cb of callbacksList) cb.onTurnMessage?.(m);
     },
   };
 }
@@ -463,10 +463,10 @@ describe('task-05: 分身深度档位注入（create / restore）', () => {
     });
     // agentSessionId 落位（snapshotPersistable 过滤条件：system/init 后才可恢复）
     mock.emitMessage({
-      type: 'system',
-      subtype: 'init',
-      session_id: 'sdk-sess-t',
-    } as unknown as SDKMessage);
+      events: [
+        { type: 'status', subtype: 'session_started', content: '', session_id: 'sdk-sess-t' },
+      ],
+    } as unknown as Record<string, unknown>);
     await flushMicrotasks();
 
     // snapshot record 保档（task-04 已落；此处消费验证注入链档位一致）

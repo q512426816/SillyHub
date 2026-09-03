@@ -417,6 +417,11 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 # ql-20260824-020：edit_patch 透传到 session channel，与 run channel
                 # published_logs 对齐。.get() 兼容 override envelope 与历史 payload。
                 "edit_patch": log_payload.get("edit_patch"),
+                # task-07（2026-09-03-agent-provider-abstraction / FR-03）：AgentEvent
+                # 结构化事件透传到 session channel（前端 normalize 双轨：有
+                # agent_event → 结构化渲染，无 → 旧文本协议解析）。.get() 容错——
+                # 旧轨 payload / override 信封 / 标记行无该键 → None（零影响）。
+                "agent_event": log_payload.get("agent_event"),
             }
             pipe.publish(session_channel, json.dumps(session_payload))
         # ql-20260621：实时 token 透传到 session channel（onTokens）。
@@ -1037,6 +1042,24 @@ class RunSyncService:
         # batch mode（已 flat）原样透传，行为不变。
         flat_messages: list[dict] = []
         for msg in messages:
+            # task-07（2026-09-03-agent-provider-abstraction / FR-03 / D-001@v1）：
+            # AgentEvent v2 新轨分支。daemon 归一化器（task-03）经 submitMessages 上报
+            # {"kind": "agent_event", "event": {...}, "dedup_key"?}（task-09 接线前本
+            # 分支休眠）。分支必须在下方 flat 分类（event_type 判断）**之前**：新轨载荷
+            # 顶层无 event_type/content，落进 _extract_sdk_messages 会被静默丢弃
+            # （design §9 升级顺序：backend 先于 daemon 升级）。无 kind 键的旧形态
+            # 消息零改动走原路径（兼容轨）。
+            if isinstance(msg, dict) and msg.get("kind") == "agent_event":
+                ev = msg.get("event")
+                if isinstance(ev, dict):
+                    flat_messages.extend(_persist_agent_event(msg, ev))
+                else:
+                    log.warning(
+                        "daemon_messages_agent_event_invalid_payload",
+                        lease_id=str(lease_id),
+                        agent_run_id=str(agent_run_id),
+                    )
+                continue
             event_type = msg.get("event_type") or ""
             content = msg.get("content", "")
             if event_type or content:
@@ -1451,6 +1474,13 @@ class RunSyncService:
                         (attribution_session_id, dispatch_reg_tuid), effective_run_id
                     )
 
+            # task-07（2026-09-03-agent-provider-abstraction / FR-03）：新轨行的完整
+            # AgentEvent JSON（_persist_agent_event 注入 flat record 的私有键），落
+            # metadata_['agent_event'] 供前端 normalize 双轨结构化渲染 + SSE 透传。
+            # 旧轨消息无该键 → None（metadata_ 列保持 NULL，零回归；群聊投影行是
+            # 独立 INSERT 自带 metadata_，与本键互不覆盖，design §8）。
+            agent_event_payload = msg.get("_agent_event") if isinstance(msg, dict) else None
+
             log_entry = AgentRunLog(
                 id=log_id,
                 run_id=effective_run_id,
@@ -1476,6 +1506,12 @@ class RunSyncService:
                 # ql-20260824-020：Edit structuredPatch JSON（_extract_sdk_messages 注入
                 # flat record），落库供 REST 历史 + SSE 实时两路透传前端 diff 真实行号。
                 edit_patch=msg.get("edit_patch") if isinstance(msg, dict) else None,
+                # task-07：新轨 agent_event 行的结构化事件 JSON（见上方注释）。
+                metadata_=(
+                    {"agent_event": agent_event_payload}
+                    if isinstance(agent_event_payload, dict)
+                    else None
+                ),
             )
             self._session.add(log_entry)
             count += 1
@@ -1505,6 +1541,13 @@ class RunSyncService:
                     # ql-20260824-020：edit_patch 透传到 SSE 实时流（run channel），
                     # 与 DB 列一致；非 Edit 结果行为 None。
                     "edit_patch": log_entry.edit_patch,
+                    # task-07（2026-09-03-agent-provider-abstraction / FR-03）：
+                    # AgentEvent 结构化事件透传到 SSE 实时流（run channel 整 payload
+                    # 直发；session channel 见 publish_submitted_messages）。
+                    # 旧轨行 / override 信封 / 标记行 None（.get() 容错，零影响）。
+                    "agent_event": agent_event_payload
+                    if isinstance(agent_event_payload, dict)
+                    else None,
                 }
             )
 
@@ -3739,6 +3782,255 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
     if attribution:
         for _rec in out:
             _rec.update(attribution)
+
+    return out
+
+
+def _persist_agent_event(msg: dict, ev: dict) -> list[dict]:
+    """AgentEvent v2（新轨）→ 旧轨同款 flat log record 列表（task-07 / FR-03）。
+
+    2026-09-03-agent-provider-abstraction / D-001@v1 双轨：新轨消息形态
+    ``{"kind": "agent_event", "event": {...AgentEvent v2...}, "dedup_key"?}``
+    （task-01 wire 契约，daemon 归一化器 task-03 产出、task-09 接线）。本函数把
+    事件展开成与旧轨**同款**的 flat record ``{event_type, content, channel, ...}``
+    交回 submit_messages 既有落库循环消费——dedup_key 幂等 / partial+override
+    撤回链（_revoke_committed_partials + quick-0e56260f 标记行 + stale 信封）/
+    跨轮归位（task-06）/ 群投影 / sillyspec 绑定 / usage 累计 / session pin
+    全部复用现机制，不旁路自建 AgentRunLog（双轨产物逐字段对齐，design §5.1
+    backend 接收 / R-06 反分叉）。_extract_sdk_messages 是旧轨的 Claude SDK
+    形状展开（一行不改）；本函数是新轨的 AgentEvent 形状展开。
+
+    文本行合成与 _extract_sdk_messages 逐字对齐（未升级前端渲染依赖文本协议，
+    task 卡验收「前缀拼装逐字一致」；新轨 AgentEvent.content 为归一化器原文
+    不带前缀——旧轨 partial 前缀由 daemon 拼、完整行前缀由 backend 拼，新轨
+    统一由 backend 拼）：
+
+    - text        → ``[ASSISTANT] <content>``（stdout，无截断）
+    - thinking    → ``[THINKING] <content[:20000]+...>``（stdout；截断与现状一致
+                    且幂等——daemon 归一化器已按同规则截断，重复应用结果不变）
+    - tool_use    → 双写：``[TOOL_USE] <name>: <args>``（stdout，整行 [:20000]，
+                    command 优先否则 args JSON）+ tc_payload JSON（tool_call 通道）
+    - tool_result → ``[TOOL_RESULT] <content>``（stdout；截断归 daemon 归一化器
+                    所有——backend 重复截断会改写中文标注的原始长度计数，且最终
+                    落库/发布都被循环内 [:50000] 封顶）
+    - error       → stderr 通道原文（无前缀）
+    - status / turn_result / complete → 不生成文本行：status 会话信号走 daemon 侧
+      onSessionEvent 不经 submitMessages；session_started 的 session_id 与任意型
+      事件的 usage（D-003@v1 实时语义，含 partial）经空 content record 提取
+      （落库循环对空 content 只提取聚合量不落行）。
+
+    结构化列：tool_kind 复用 classify_tool_kind（tool_kind.py 单源映射；daemon
+    已识别值 ev.metadata.tool_kind 优先）；parent_tool_use_id / subagent_type /
+    depth / tool_use_id / edit_patch 直填 flat record 键；segmentId+isPartial 走
+    旧轨 metadata 惯例（落库循环据此写 segment_id 列 / 撤回判定）。归属是
+    message 级属性注入**每条** record（对齐 _extract_sdk_messages attribution
+    尾注；主 agent depth=0 也落——现 daemon 对每条消息无条件挂 depth）。
+    usage / session_id 是聚合量仅注入**首条**（对齐 stamp()，防 sibling 重复累加）。
+
+    override（D-004@v1）：ev.override:true + segment_id = 携带完整内容的替换事件
+    → 按完整行展开（is_partial 失效），撤回交给落库循环的完整行自撤链
+    （quick-9f86d2c3「backend 完整行落库时 _revoke_committed_partials 自撤为准，
+    不依赖 daemon override 事件」口径——module-impact 已知问题）。
+
+    dedup_key：消息顶层透传到首条 record（tool_use 双行的第二条不携带，避免
+    同 run 内 (run_id, dedup_key) 部分唯一索引自撞被同调用去重误丢）。
+    ``_agent_event`` 私有键携带完整事件 JSON，落库循环写
+    ``metadata_['agent_event']`` + published_logs / session_payload SSE 透传。
+    """
+    etype = ev.get("type")
+    etype = etype if isinstance(etype, str) else ""
+    content = ev.get("content")
+    content = content if isinstance(content, str) else ""
+
+    # 归属三列（message 级）：注入每条 flat record（见 docstring）。
+    attribution: dict = {}
+    _raw_ptui = ev.get("parent_tool_use_id")
+    if isinstance(_raw_ptui, str) and _raw_ptui:
+        attribution["parent_tool_use_id"] = _raw_ptui
+    _raw_st = ev.get("subagent_type")
+    if isinstance(_raw_st, str) and _raw_st:
+        attribution["subagent_type"] = _raw_st
+    _raw_depth = ev.get("depth")
+    if isinstance(_raw_depth, int) and not isinstance(_raw_depth, bool):
+        attribution["depth"] = _raw_depth
+
+    # usage / session_id（message 级聚合量）：仅注入首条 record（对齐 stamp()）。
+    carried: dict = {}
+    _usage = ev.get("usage")
+    if isinstance(_usage, dict):
+        carried["usage"] = _usage
+    _sid = ev.get("session_id")
+    if isinstance(_sid, str) and _sid:
+        carried["session_id"] = _sid
+
+    out: list[dict] = []
+    stamped = False
+
+    def stamp(rec: dict) -> dict:
+        nonlocal stamped
+        if not stamped and carried:
+            rec.update(carried)
+            stamped = True
+        return rec
+
+    seg = ev.get("segment_id")
+    seg = seg if isinstance(seg, str) and seg else None
+    # override 事件按完整行展开（见 docstring D-004@v1 段）。
+    is_partial = bool(ev.get("is_partial")) and not bool(ev.get("override"))
+
+    def with_segment(rec: dict, *, thinking: bool = False) -> dict:
+        """partial/complete 行的 segment 惯例（旧轨 metadata 形状，落库循环消费）。"""
+        if seg is not None:
+            meta: dict = {"segmentId": seg}
+            if thinking:
+                meta["thinking"] = True
+            if is_partial:
+                meta["isPartial"] = True
+            rec["metadata"] = meta
+        return rec
+
+    call_id = ev.get("call_id")
+    call_id = call_id if isinstance(call_id, str) and call_id else ""
+    ev_metadata = ev.get("metadata")
+    ev_metadata = ev_metadata if isinstance(ev_metadata, dict) else {}
+
+    if etype == "text":
+        if content:
+            out.append(
+                stamp(
+                    with_segment(
+                        {
+                            "event_type": "text",
+                            "content": f"[ASSISTANT] {content}",
+                            "channel": "stdout",
+                        }
+                    )
+                )
+            )
+
+    elif etype == "thinking":
+        if content:
+            preview = content[:20000] + ("..." if len(content) > 20000 else "")
+            out.append(
+                stamp(
+                    with_segment(
+                        {
+                            "event_type": "text",
+                            "content": f"[THINKING] {preview}",
+                            "channel": "stdout",
+                        },
+                        thinking=True,
+                    )
+                )
+            )
+
+    elif etype == "tool_use":
+        name = ev.get("tool_name")
+        name = name if isinstance(name, str) and name else "unknown"
+        # args 来源：ev.metadata.tool_input（结构化优先）或 content（归一化器
+        # JSON 序列化的 args 原文）。行组成对齐 _extract_sdk_messages：
+        # command 优先展示，否则整体 args JSON。
+        raw_input = ev_metadata.get("tool_input")
+        input_obj = raw_input if isinstance(raw_input, dict) else None
+        if input_obj is None:
+            try:
+                parsed = json.loads(content) if content else None
+            except (TypeError, ValueError):
+                parsed = None
+            input_obj = parsed if isinstance(parsed, dict) else {}
+        cmd = str(input_obj.get("command", "") or "")
+        if cmd:
+            args_line = cmd
+        elif content:
+            args_line = content
+        else:
+            try:
+                args_line = json.dumps(input_obj)
+            except (TypeError, ValueError):
+                args_line = ""
+        out.append(
+            stamp(
+                {
+                    "event_type": "tool_use",
+                    "content": f"[TOOL_USE] {name}: {args_line}"[:20000],
+                    "channel": "stdout",
+                }
+            )
+        )
+        # 第二条：tool_call 通道 JSON（前端 ToolCallCard），tc_payload 形状与
+        # _extract_sdk_messages（对齐 task-runner）逐字一致；stdout 文本行不带
+        # tool_kind（design §5 Phase 2：DB 列层面只 tool_call 行有值）。
+        ts = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        tc_payload: dict = {
+            "tool": name,
+            "args": input_obj,
+            "timestamp": ts,
+            "status": "allowed",
+            "success": True,
+        }
+        if call_id:
+            tc_payload["tool_use_id"] = call_id
+        try:
+            tc_json = json.dumps(tc_payload)
+        except (TypeError, ValueError):
+            tc_payload["args"] = {}
+            tc_json = json.dumps(tc_payload)
+        # tool_kind：daemon 归一化器已识别（ev.metadata.tool_kind）优先，缺则
+        # backend 复用 classify_tool_kind 兜底（同一映射单源，不重写）。
+        tool_kind = ev_metadata.get("tool_kind")
+        if not (isinstance(tool_kind, str) and tool_kind):
+            try:
+                tool_kind = classify_tool_kind(name, input_obj)
+            except Exception:
+                tool_kind = None
+        tc_record: dict = {
+            "event_type": "tool_use",
+            "content": tc_json,
+            "channel": "tool_call",
+            "tool_kind": tool_kind,
+        }
+        if call_id:
+            tc_record["tool_use_id"] = call_id
+        out.append(tc_record)
+
+    elif etype == "tool_result":
+        if content:
+            rec: dict = {
+                "event_type": "tool_result",
+                "content": f"[TOOL_RESULT] {content}",
+                "channel": "stdout",
+            }
+            if call_id:
+                rec["tool_use_id"] = call_id
+            edit_patch = ev.get("edit_patch")
+            if isinstance(edit_patch, str) and edit_patch:
+                rec["edit_patch"] = edit_patch
+            out.append(stamp(rec))
+
+    elif etype == "error" and content:
+        out.append(stamp({"event_type": "error", "content": content, "channel": "stderr"}))
+
+    # status / turn_result / complete 及未知 type（防御）：无文本行（见 docstring）。
+
+    # 空 content + 携带 usage/session_id（usage-only 事件，task-03 对齐旧轨空
+    # content 行；status/session_started 的 session pin 也走此路径）：产出一条空
+    # record 让落库循环提取聚合量后跳过落行（无行化）。
+    if not out and carried:
+        out.append(stamp({"event_type": etype or "text", "content": "", "channel": "stdout"}))
+
+    # 归属注入每条（对齐 _extract_sdk_messages attribution 尾注）。
+    if attribution:
+        for _rec in out:
+            _rec.update(attribution)
+
+    # dedup_key：消息顶层透传（首条；见 docstring）。
+    dedup_key = msg.get("dedup_key")
+    if out and dedup_key is not None:
+        out[0]["dedup_key"] = str(dedup_key)
+
+    # 完整事件 JSON（私有键）：落库循环写 metadata_['agent_event'] + SSE 透传。
+    for _rec in out:
+        _rec["_agent_event"] = ev
 
     return out
 

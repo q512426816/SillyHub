@@ -24,21 +24,35 @@
  * @module interactive/session-manager
  */
 
-import type {
-  CanUseTool,
-  OnUserDialog,
-  SDKMessage,
-  SDKResultMessage,
-  UserDialogResult,
-} from '@anthropic-ai/claude-agent-sdk';
+// task-08（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：本文件
+// @anthropic-ai/claude-agent-sdk 类型 import 清零——SessionManager 只消费中性
+// AgentEvent / TurnMessageEnvelope（driver 归一化后的事件轨），不再解析 raw SDK
+// 消息形状。Claude SDK 专属回调类型（CanUseTool/OnUserDialog/UserDialogResult）
+// 改经 ClaudeStartOptions 结构性推导（下方局部别名），不直接 import SDK 包。
 import type {
   InteractiveDriver,
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
   InteractiveDriverResult,
+  InteractiveProvider,
   McpServerConfigForDriver,
+  TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
+import type { ClaudeStartOptions } from './claude-sdk-driver.js';
+import type { AgentEvent } from '../types.js';
+
+/** task-08：Claude SDK ``CanUseTool`` 的结构性本地别名（SDK 类型 import 清零）。 */
+type CanUseToolFn = NonNullable<ClaudeStartOptions['canUseTool']>;
+/** task-08：Claude SDK ``OnUserDialog`` 的结构性本地别名。 */
+type OnUserDialogFn = NonNullable<ClaudeStartOptions['onUserDialog']>;
+/** task-08：Claude SDK ``UserDialogResult`` 的结构性本地别名。 */
+type UserDialogResultFn = Awaited<ReturnType<OnUserDialogFn>>;
+// task-05（FR-05 / design §5.2）：provider 注册表（INTERACTIVE_PROVIDERS 单源，
+// InteractiveProvider 联合由其推导）。运行时 import——_getDriver 读注册表做
+// provider 合法性门控；经 providers.ts 传递引入两 driver 模块（均为纯定义，
+// 模块加载无副作用，与 cli.ts 显式 import 等价）。
+import { INTERACTIVE_PROVIDERS, type ProviderDescriptor } from './providers.js';
 import { basename, join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -327,8 +341,8 @@ export interface MainAgentMcpContext {
   sessionId: string;
   /** 长生命周期 interactive lease.id（主 agent lease 永不过期）。 */
   leaseId: string;
-  /** provider（claude / codex）。 */
-  provider: 'claude' | 'codex';
+  /** provider（claude / codex；task-05 改注册表推导联合）。 */
+  provider: InteractiveProvider;
   /** 固定 cwd（resume 还原用）。 */
   cwd: string;
   /** 模型覆盖（可空，主 agent configured provider/model 透传）。 */
@@ -410,144 +424,31 @@ interface SessionManagerDepsWithQueued extends SessionManagerDeps {
  * _eventToMessages 格式 + 前端 normalize.ts [THINKING] 合并逻辑
  * ql-20260617-012）。完整 assistant message 到达时清空 buffer（delta 是
  * 完整内容的子集，避免重复）。session end/fail 时销毁 timer。
+ *
+ * task-08（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：本机制
+ * **整体下沉 ClaudeEventNormalizer**（claude-events.ts，task-03 移植），SessionManager
+ * 不再持有 partial 缓冲——stream_event 帧、节流 flush、segmentId、override 撤回、
+ * thinking_tokens 缓冲全部在归一化器内完成，事件轨以 is_partial/segment_id/
+ * override 一等字段到达。下列旧接口随之删除；仅保留会话级 usage 台账（budget
+ * 聚合职责，归一化器不持有会话级累计——见其文件尾「契约缺口记录」）。
  */
 /**
- * ql-20260627-usage：partial flush 注入的 usage 快照。cache_* 来自 stream_event
- * message_delta.usage（Claude 流式计费），字段名映射为短名 cache_*_tokens（Claude
- * SDK 原始为 cache_*_input_tokens），与 backend _METADATA_FIELDS 对齐，避免 daemon
- * lift 重复映射。
- * task-02（2026-08-27-session-token-usage-fix / design §7）：input/output 改**轮级**
- * （本轮至今累计，消实时/终态跨语义跳变 FR-02）；cache_* 保持快照语义不变；新增
- * ctx_tokens = 最近一次调用 input+cache_read+cache_creation（上下文环分子 FR-01），
- * **仅 main 桶携带**——子桶 pendingUsage 不含该键（D-006），backend 侧缺键即跳过，
- * 天然兼容老链路。
+ * task-08：会话级 usage 台账条目（input+output 两维，**不含** cache_*——D-009
+ * 预算口径）。
+ *
+ * 取代旧 PartialFlushBuffer 的会话级计数职责（sessionInputTokens /
+ * sessionOutputTokens + turn 级计数器）：事件轨上 usage 以 AgentEvent.usage
+ * 一等字段到达（partial flush 事件携带**轮级累计** input/output + cache 快照
+ * + ctx_tokens）。SessionManager 只维护两级台账：
+ *   - `_sessionUsageBase`：历史轮折算累计（turn 收尾 fold）；
+ *   - `_turnUsageByParent`：本轮各 parentKey（'main'/子代理 tool_use_id）最新
+ *     轮级值（replace 语义——轮内单调递增）。
+ * 会话累计 = base + Σ 本轮各 parent 最新值（对齐旧 `_aggregateSessionUsage`
+ * 跨桶求和口径，含子代理）。
  */
-interface PartialUsageSnapshot {
-  /** 轮级：本轮至今累计输入（task-02 前为会话级累计）。 */
+interface SessionUsageTotals {
   input_tokens: number;
-  /** 轮级：本轮至今累计输出（task-02 前为会话级累计）。 */
   output_tokens: number;
-  /** 快照（不变）：本调用缓存前缀量的最新值（replace 语义）。 */
-  cache_read_tokens: number;
-  /** 快照（不变）：本调用缓存前缀量的最新值（replace 语义）。 */
-  cache_creation_tokens: number;
-  /** 最近一次调用提示词大小（input+cache_read+cache_creation 三分量和）。仅 main 桶。 */
-  ctx_tokens?: number;
-}
-
-interface PartialFlushBuffer {
-  /**
-   * 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：本桶归属 parentKey。
-   * 'main' = 主 agent（parent_tool_use_id=null）；否则 = 子代理的 tool_use_id。
-   * _resolveSegmentId 据此给 segmentId 加 parent 前缀，避免主/子 segment 撞 id。
-   */
-  parentKey: string;
-  /** 累积的 thinking_delta.thinking 内容（待 flush）。 */
-  thinking: string;
-  /** 累积的 text_delta.text 内容（待 flush）。 */
-  assistant: string;
-  /** 最后一次 thinking_tokens.estimated_tokens（running total，非增量）。 */
-  lastTokens: number;
-  /** 上次已 flush 的 tokens 值（去重，仅在变化时 emit）。 */
-  flushedTokens: number;
-  /** 500ms flush 定时器句柄（null = idle，无 pending 内容）。 */
-  timer: ReturnType<typeof setTimeout> | null;
-  /**
-   * task-11（FR-07/FR-08，design §5.3 D1/D2）：当前 turn 的 SDK message.id
-   *（来自 message_start 事件，用于拼 segmentId = `${messageId}:${blockIndex}`）。
-   * null = 尚未收到 message_start，退化方案用 currentRunId。
-   */
-  currentMessageId: string | null;
-  /**
-   * task-11：当前累积中的 thinking segment 的 segmentId（`messageId:index` 或
-   * 退化 `runId:thinking`）。null = 当前 buffer 非 thinking 或尚未收到 delta。
-   */
-  currentSegmentId: string | null;
-  /**
-   * task-05（2026-07-30-daemon-heartbeat-dedup-fix，D-002@v1）：当前累积中的
-   * assistant text segment 的 segmentId（`messageId:blockIndex` 或退化
-   * `runId:thinking`，同 _resolveSegmentId 口径）。null = 尚未收到 text_delta。
-   * 与 currentSegmentId 分桶：thinking 与 assistant text 可能在同一 turn 共存，
-   * 各自 segmentId 互不污染。flush 时据此拼 assistant partial 行的 segmentId，
-   * 与 task-06 _extractCompletedSegments 的 text block segmentId 严格对齐，
-   * 使 _emitOverrideSignals（task-07 扩 assistant）能命中撤回。
-   */
-  currentAssistantSegmentId: string | null;
-  /**
-   * task-11：本 turn 已 flush 的 partial segment 列表（供 _emitOverrideSignals 在
-   * 完整 message 到达时 emit override 覆盖信号）。turn 边界
-   *（_clearPartialBuffer）清空。
-   * task-07：扩 `kind` 字段区分 thinking / assistant override——
-   * - thinking override → emit `[THINKING_OVERRIDE]`，metadata 带 thinking:true
-   * - assistant override → emit `[ASSISTANT_OVERRIDE]`，metadata **严禁** thinking:true（B2）
-   * 两者信号前缀 + metadata 不同，必须按 kind 分流。
-   */
-  flushedSegments: Array<{
-    segmentId: string;
-    logTimestamp: string;
-    kind: 'thinking' | 'assistant';
-  }>;
-  /**
-   * task-11：本 turn 已到达完整 message 的 thinking segmentId 集合（late partial
-   * 守卫：同 segment 的后续 partial 直接丢弃）。_clearPartialBuffer 后清空（turn 边界）。
-   */
-  completedSegments: Set<string>;
-  /**
-   * ql-20260627-usage：最新 message_delta.usage（cumulative）。null = 本 turn 尚未
-   * 收到 message_delta。_flushPartial 注入到 flat 消息顶层 usage，经 daemon
-   * onTurnMessage lift → backend submit_messages 实时更新 AgentRun token
-   *（不必等终态 result 汇总）。
-   */
-  pendingUsage: PartialUsageSnapshot | null;
-  /** ql-20260627-usage：上次已 flush 的 usage（去重，仅在变化时注入）。null = 从未注入。 */
-  flushedUsage: PartialUsageSnapshot | null;
-  /**
-   * ql-session-usage：session 级跨 API call 累积 token（**跨轮不清零**）。
-   * 每次 message_start 累加 input_tokens，message_delta 累加 output delta。
-   * task-02（2026-08-27-session-token-usage-fix）：pendingUsage 数据源改取下方
-   * turn 级计数器（轮级计费量口径 FR-02）；会话级计数器语义不变，仍是 budget
-   * 聚合（_aggregateSessionUsage / _checkBudgetCutoff，R-01）与
-   * _shrinkSubagentBuffers 折算的数据源。
-   */
-  sessionInputTokens: number;
-  sessionOutputTokens: number;
-  sessionCacheReadTokens: number;
-  sessionCacheCreationTokens: number;
-  /**
-   * task-02（design §5 Phase 1.1 / FR-02）：turn 级计数器（本轮至今累计）——
-   * pendingUsage input/output 的数据源。与上方会话级计数器**物理分离**：
-   * _checkBudgetCutoff 只读会话级（R-01：误改即预算漏计）；所有桶（主+子代理）
-   * 都累计——子代理计费量经各自 pendingUsage flush 上报，backend max 聚合接收。
-   * _onResult 轮边界仅清零 main 桶三字段（子桶随 _shrinkSubagentBuffers 删桶
-   * 销毁，turn 级**不折算**——折算发生在轮结束后、后续 flush 因无 runId 早退，
-   * 折算即死代码，B3/R-05）。
-   */
-  turnInputTokens: number;
-  turnOutputTokens: number;
-  /**
-   * task-02（FR-01 / D-006）：最近一次调用提示词大小 = input_tokens +
-   * cache_read_input_tokens + cache_creation_input_tokens（三分量和，上下文环
-   * 分子口径）。**仅 main 桶计算与注入**——子代理桶恒 0：其上下文非会话主上下文，
-   * 注入会在子代理轮把环切到子代理 ctx 再跳回（X-02/B2）。
-   */
-  lastCallCtxTokens: number;
-  /** 当前 API call 上次的 output_tokens（算 delta 用）。 */
-  lastCallOutputTokens: number;
-  /**
-   * ql-20260831-011：当前 API call 上次的 input_tokens（算 delta 用）。官方
-   * Claude message_delta 不带 input_tokens（缺失即跳过，零影响）；GLM 兼容端点
-   * 若在 delta 携带 cumulative input，差分累加让轮内输入实时显示（GLM
-   * message_start 无 input 的实证：轮内 ↑0、终态才有值）。
-   * message_start 设为 startUsage 值（缺失 0）。
-   */
-  lastCallInputTokens: number;
-  /**
-   * task-02：本调用 cache 两维最新快照（main 桶 lastCallCtxTokens 差分重算用——
-   * message_delta 不带 input_tokens，ctx 只能以「上次值 ± cache 差量」更新）。
-   * message_start 设为 startUsage 值（缺失 0），message_delta 携带时 replace。
-   */
-  lastCallCacheReadTokens: number;
-  lastCallCacheCreationTokens: number;
 }
 
 /**
@@ -766,24 +667,43 @@ export class SessionManager {
    *     置位后 ``inject`` 拒绝新 turn（软切断 D-006：当前 turn 自然跑完，**不**调
    *     close/kill），并经现有 ``onTurnMessage`` 回传 ``reason='budget_exceeded'``。
    *
-   * 口径 D-009：``input_tokens + output_tokens``（**不含** cache_*）—— 复用现有
-   * PartialFlushBuffer.sessionInputTokens / sessionOutputTokens（跨 parentKey 桶求和，
-   * 含子代理）。
+   * 口径 D-009：``input_tokens + output_tokens``（**不含** cache_*）—— task-08 起
+   * 数据源改 usage 台账（``_sessionUsageBase`` + ``_turnUsageByParent`` 跨
+   * parentKey 求和，含子代理；旧 PartialFlushBuffer.sessionInput/OutputTokens
+   * 计数已随 partial 链下沉归一化器而移除）。
    */
   private readonly _sessionBudgetTokens = new Map<string, number>();
   private readonly _overBudgetSessions = new Set<string>();
 
   /**
-   * ql-20260621-partial + 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：
-   * 二级 Map partial 缓冲——外层 key=sessionId，内层 key=parentKey（'main'=主 agent /
-   * 子代理 tool_use_id），value=PartialFlushBuffer。按 parent 分桶：子代理完整 assistant
-   * message 只清自己的桶，不误清主 agent partial（R-02 P0）。主 agent 单代理场景恒用
-   * 'main' 桶，行为与改造前单桶逐字节等价。create 时按需懒建，end/fail/shutdown 销毁整 session。
+   * task-08（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：会话级
+   * usage 台账（budget 聚合数据源，取代旧 ``_partialBuffers`` 的
+   * sessionInput/OutputTokens 计数）。
+   *
+   *   - ``_sessionUsageBase``：sessionId → 历史轮折算累计（``_foldTurnUsage``
+   *     turn 收尾时把本轮各 parent 值合入）；
+   *   - ``_turnUsageByParent``：sessionId → （parentKey → 本轮最新轮级 usage）。
+   *     事件轨 partial flush 携带轮级累计（replace 更新），``_aggregateSessionUsage``
+   *     = base + Σ 本轮各 parent 最新值（跨 parent 求和含子代理，口径不变）。
+   *
+   * 数据源守卫（对齐旧语义）：仅 ``is_partial`` 事件与 usage-only 空事件（type=
+   * text 且 content=''）喂台账——完整消息 stamp 的 usage 是**单次调用**终值
+   *（display 用，daemon lift → backend 实时聚合），混入会把轮级累计覆盖回单次
+   * 值造成预算漏计；codex 事件（非 partial、content 非空）天然不喂台账，对齐
+   * 旧链路 codex 无 partial 桶 → budget 恒 0/0 的行为。
    */
-  private readonly _partialBuffers = new Map<string, Map<string, PartialFlushBuffer>>();
+  private readonly _sessionUsageBase = new Map<string, SessionUsageTotals>();
+  private readonly _turnUsageByParent = new Map<
+    string,
+    Map<string, SessionUsageTotals>
+  >();
 
-  /** partial flush 节流间隔（ms）。累积 delta 到此窗口后批量推送一次。 */
-  private static readonly PARTIAL_FLUSH_MS = 500;
+  /**
+   * task-08：turn 内事件 seq 补号计数器（design §7 ``seq?: number``——turn 内
+   * 单调递增，SessionManager 补号）。key=sessionId，value=下一号；``_onResult``
+   * turn 边界重置为 0（新 turn 的 segment/事件序号空间独立）。
+   */
+  private readonly _turnEventSeq = new Map<string, number>();
 
   /**
    * task-09 / D-007@v2（候选 B 主路径）：借用 session 沙箱根目录注册表。
@@ -807,16 +727,12 @@ export class SessionManager {
   private readonly _borrowSandboxRoots = new Map<string, string>();
 
   /**
-   * task-04（FR-02）：运行中 Bash 命令内存索引。
-   *
-   * key = tool_use_id，value = { command, startTime, sessionId }。在 assistant message 的
-   * Bash tool_use 开始时写入，在对应 user message 的 tool_result 到达或 session 终态时
-   * 清理。仅内存态，不持久化。
+   * task-08（FR-02 / D-002@v1）：运行中 Bash 命令追踪**下沉归一化器**——
+   * ClaudeEventNormalizer.runningBash（tool_use Bash 注册 + tool_result 终态配对
+   * + elapsed_ms 计算），SessionManager 只消费 status/bash_chunk、status/
+   * bash_status 事件转发 onSessionEvent。旧 ``_runningBashCommands`` 内存索引
+   * 及 ``_clearRunningBashCommands`` 随 raw 消息解析一并移除（Claude 轨死代码）。
    */
-  private readonly _runningBashCommands = new Map<
-    string,
-    { command: string; startTime: number; sessionId: string }
-  >();
 
   /**
    * task-03（design §5 P1.1）：会话级后台任务注册表（BackgroundTaskRegistry）。
@@ -983,7 +899,7 @@ export class SessionManager {
    * 映射到 `_drivers.claude`，让 cli.ts 现有 `new SessionManager({ driver, ... })` 零改动。
    * 优先级：`deps.drivers.claude`（显式 registry）> `deps.driver`（兼容入口）。
    */
-  private readonly _drivers: Partial<Record<'claude' | 'codex', InteractiveDriver>>;
+  private readonly _drivers: Partial<Record<InteractiveProvider, InteractiveDriver>>;
 
   constructor(
     private readonly deps: SessionManagerDeps,
@@ -1279,14 +1195,35 @@ export class SessionManager {
   }
 
   /**
-   * D-001@v1（task-02）：按 provider 取已注册 driver。未注册 → 抛 UnsupportedProviderError。
+   * D-001@v1（task-02）→ task-05（FR-05 / design §5.2）：按 provider 取已注册 driver，
+   * 改读 INTERACTIVE_PROVIDERS 注册表。未注册 → 抛 UnsupportedProviderError。
+   *
+   * 两道门控（纯重构，错误语义/文案与 task-02 完全一致）：
+   *   1. 注册表门：provider 不在 INTERACTIVE_PROVIDERS（运行时收到联合外的
+   *      串）→ UnsupportedProviderError——provider 合法性以注册表为单源；
+   *   2. 实例门：注册表已知但 `deps.drivers` 未注入该实例（含旧 `deps.driver`
+   *      → `_drivers.claude` 兼容映射仍未覆盖的 provider）→ 同样抛
+   *      UnsupportedProviderError，保持「driver 未注入即不支持」语义（既有
+   *      session-manager 测试锚定此行为）。
    *
    * 兼容入口：`deps.driver`（ClaudeSdkDriver）经构造函数已映射到 `_drivers.claude`，
    * 故 claude 路径无论走 `drivers` registry 还是旧 `driver` 入参都能取到 driver。
-   * 文案保留现有 Wave1/2 模板（task-02 不改文案；codex 未注册时仍抛此错，符合
-   *「driver 未注册即不支持」语义）。
+   * descriptor.createDriver 工厂已在注册表就位（零参构造等价 cli.ts 现行 new），
+   * 但本方法不自动构造——注入实例是现行唯一实例来源（cli.ts 单例注入 + 测试
+   * mock 注入），让 _getDriver 兜底构造会让未注入 provider 静默落到真实 driver，
+   * 属行为变更（既有 UnsupportedProviderError 用例回归），归后续任务决策。
+   * 文案保留现有 Wave1/2 模板（codex 未注入时仍抛此错）。
    */
-  private _getDriver(provider: 'claude' | 'codex'): InteractiveDriver {
+  private _getDriver(provider: InteractiveProvider): InteractiveDriver {
+    // 宽化索引：provider 形参类型是注册表联合，但运行时可能收到联合外字符串
+    //（daemon/持久层透传），按 Record<string, ...> 查防 noUncheckedIndexedAccess 盲区。
+    const descriptor = (INTERACTIVE_PROVIDERS as Record<
+      string,
+      ProviderDescriptor | undefined
+    >)[provider];
+    if (descriptor === undefined) {
+      throw new UnsupportedProviderError(provider);
+    }
     const driver = this._drivers[provider];
     if (!driver) {
       throw new UnsupportedProviderError(provider);
@@ -1434,7 +1371,10 @@ export class SessionManager {
       manualApproval: enableApproval,
       askUserOnly: effectiveAskUserOnly,
       driver, // D-001：写入归属 driver，供 interrupt/consume 路由。
-      subagentDepth: new Map(), // task-02 / D-007@v1：子代理 depth 追踪。
+      // task-08：depth 状态机已下沉 ClaudeEventNormalizer（事件一等字段 depth 直达），
+      // 本字段仅保留满足 SessionState 形状（types.ts 不在本任务 allowed_paths），
+      // 恒空 Map、无消费方；types.ts 收口时随字段一并移除。
+      subagentDepth: new Map(),
       // task-06：lease stage 持久化（snapshotPersistable 输出，恢复用）。
       stage: input.stage,
       // task-04（2026-08-26-team-subsession-recursion）：分身会话深度承载（来自
@@ -1518,7 +1458,9 @@ export class SessionManager {
         driverOpts as unknown as Parameters<InteractiveDriver['start']>[1],
       )) as unknown;
       if (input.provider === 'claude') {
-        state.query = handleOrQuery as import('@anthropic-ai/claude-agent-sdk').Query;
+        // task-08：经 SessionState['query'] 结构类型断言（SessionManager 内
+        // @anthropic-ai/claude-agent-sdk 类型 import 清零；Query 类型由 types.ts 持有）。
+        state.query = handleOrQuery as SessionState['query'];
       } else {
         state.driverHandle = handleOrQuery as InteractiveDriverHandle;
       }
@@ -1533,12 +1475,9 @@ export class SessionManager {
       this._store.delete(input.sessionId);
       // ql-20260825-f3#7：对称清理 budget 软切断登记——_setBudgetTokensInternal 在
       // try 前已执行（上方第 2 步），失败路径不回收则 _sessionBudgetTokens 条目
-      // 只增不减（_destroyPartialBuffer 对无 partial buffer 的 session 早退、清不到
-      // budget，故显式删）。_destroyPartialBuffer 同调防御性兜底（理论上 driver.start
-      // 抛错前无 partial buffer，但保持成功/失败清理对称）。
-      this._destroyPartialBuffer(input.sessionId);
-      this._sessionBudgetTokens.delete(input.sessionId);
-      this._overBudgetSessions.delete(input.sessionId);
+      // 只增不减。task-08：_destroyUsageLedger 统一回收 budget/usage 台账，保持
+      // 成功/失败清理对称。
+      this._destroyUsageLedger(input.sessionId);
       // task-08：create 失败前若已注册 pending resolver（register 在 start 前，
       // 但 start 抛错发生在 register 之后极不可能），防御性 abortAll 清理。
       const r = this._resolversBySession.get(input.sessionId);
@@ -1814,7 +1753,7 @@ export class SessionManager {
     // /默认批准。absent（非 read_only worker）→ 不包，零回归。
     if (spec.allowedTools !== undefined) {
       const _roWhitelist = new Set(spec.allowedTools);
-      const _innerCanUse = driverOpts.canUseTool as CanUseTool | undefined;
+      const _innerCanUse = driverOpts.canUseTool as CanUseToolFn | undefined;
       // R-10 修复（2026-08-28-daemon-agent-share E2E）：SDK allowedTools 语义是
       // 「auto-allowed without prompting——execute automatically without asking for
       // approval」（sdk.d.ts:1420-1424），成员**不经过 canUseTool**。平台共享会话
@@ -1832,7 +1771,7 @@ export class SessionManager {
           delete driverOpts.allowedTools;
         }
       }
-      const _roGate: CanUseTool = async (toolName, input, options) => {
+      const _roGate: CanUseToolFn = async (toolName, input, options) => {
         if (!_roWhitelist.has(toolName)) {
           return {
             behavior: 'deny',
@@ -1872,14 +1811,14 @@ export class SessionManager {
    */
   private _wrapWithWriteGuard(
     sessionId: string,
-    provider: 'claude' | 'codex',
-    inner: CanUseTool,
-  ): CanUseTool {
+    provider: InteractiveProvider,
+    inner: CanUseToolFn,
+  ): CanUseToolFn {
     return async (
       toolName: string,
       toolInput: Record<string, unknown>,
-      options: Parameters<CanUseTool>[2],
-    ): ReturnType<CanUseTool> => {
+      options: Parameters<CanUseToolFn>[2],
+    ): ReturnType<CanUseToolFn> => {
       // task-14 主路径：policyEngine 注入 → 走 canWrite（按 runtimeId 隔离 + 中文文案 + audit）。
       if (this._policyEngine) {
         const deny = this._judgeWriteViaPolicyEngine(
@@ -1963,7 +1902,7 @@ export class SessionManager {
    */
   private _judgeWriteViaPolicyEngine(
     sessionId: string,
-    provider: 'claude' | 'codex',
+    provider: InteractiveProvider,
     toolName: string,
     toolInput: Record<string, unknown>,
   ): string | null {
@@ -2099,12 +2038,12 @@ export class SessionManager {
    * 行为；写拦截只在 running turn 有意义，且 _wrapWithWriteGuard 已先行 deny 越界写）。
    * 实际上 SDK 不会在非 running turn 调 canUseTool，此分支仅为类型完整 + 防御性。
    */
-  private _buildWriteOnlyCanUseToolCallback(_sessionId: string): CanUseTool {
+  private _buildWriteOnlyCanUseToolCallback(_sessionId: string): CanUseToolFn {
     return async (
       _toolName: string,
       toolInput: Record<string, unknown>,
-      _options: Parameters<CanUseTool>[2],
-    ): ReturnType<CanUseTool> => {
+      _options: Parameters<CanUseToolFn>[2],
+    ): ReturnType<CanUseToolFn> => {
       // toolInput 已是 record（SDK 契约）；原样透传满足 Claude CLI Zod record 校验
       //（allow 分支 updatedInput required）。
       return { behavior: 'allow', updatedInput: toolInput };
@@ -2135,12 +2074,12 @@ export class SessionManager {
    *
    * @param sessionId  bind 给当前 session 的回调（同一 SessionManager 多 session 时各独立）。
    */
-  private _buildCanUseToolCallback(sessionId: string, askUserOnly: boolean): CanUseTool {
+  private _buildCanUseToolCallback(sessionId: string, askUserOnly: boolean): CanUseToolFn {
     return async (
       toolName: string,
       toolInput: unknown,
       options?: { signal?: AbortSignal },
-    ): ReturnType<CanUseTool> => {
+    ): ReturnType<CanUseToolFn> => {
       const state = this._store.get(sessionId);
       // state 不存在 / 非 running turn / 无 currentRunId → fail-closed deny。
       if (
@@ -2406,7 +2345,7 @@ export class SessionManager {
    *
    * @param sessionId  bind 给当前 session 的回调（同一 SessionManager 多 session 时各独立）。
    */
-  private _buildOnUserDialogCallback(sessionId: string): OnUserDialog {
+  private _buildOnUserDialogCallback(sessionId: string): OnUserDialogFn {
     return async (
       request: {
         dialogKind: string;
@@ -2414,7 +2353,7 @@ export class SessionManager {
         toolUseID?: string;
       },
       options?: { signal?: AbortSignal },
-    ): Promise<UserDialogResult> => {
+    ): Promise<UserDialogResultFn> => {
       const state = this._store.get(sessionId);
       // state 不存在 / 非 running turn / 无 currentRunId → fail-closed cancelled。
       if (
@@ -2475,18 +2414,17 @@ export class SessionManager {
    *（claude=state.query；codex=state.driverHandle）。过渡兼容：旧内存 state（task-02 前
    * 创建）无 driver 字段 → fallback `_drivers.claude`（FR-10 不回退）。
    *
-   * 回调适配：同时提供 ClaudeSdkDriver 旧形态（onResult/onMessage/onError）与
-   * InteractiveDriver 新形态（onTurnResult/onTurnMessage/onTurnError）两组键，让
-   * Claude driver（task-03 前读旧键）与 Codex driver / fake driver（读新键）都能工作。
-   * task-03 合并后 ClaudeSdkDriver implements InteractiveDriver 改读新键，旧键自然废弃。 */
+   * task-08（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：回调
+   * **envelope-only**——只提供 InteractiveDriverCallbacks 新键（onTurnResult/
+   * onTurnMessage/onTurnError），ClaudeSdkDriver 的旧键兜底（onResult/onMessage/
+   * onError，raw SDK 消息透传）已随本任务收口移除；onTurnMessage 收
+   * TurnMessageEnvelope{events}，经 _onMessage 逐事件分发。 */
   private async _runConsume(state: SessionState): Promise<void> {
     const driver = state.driver ?? this._drivers.claude;
     if (!driver) return;
     // 按 provider 选 consume target：claude=Query，codex=InteractiveDriverHandle。
     const target = state.provider === 'claude' ? state.query : state.driverHandle;
     if (!target) return;
-    // onResult/onMessage 内部 Claude partial buffer 节流逻辑（ql-20260621-partial）保留；
-    // Codex flat message 不触发 stream_event 分支，自然走末尾 onTurnMessage 转发。
     // ql-20260807-001 根因修复（orphan consume 守卫）：
     // reloadWithProvider 替换 state.query 后，本协程持有的 target 变成 orphan。
     // oldQuery.close() 让 SDK 迭代器抛 abort 错（"Claude Code process aborted by user"，
@@ -2497,7 +2435,7 @@ export class SessionManager {
     // 此谓词判定本 consume 是否仍是 session 当前活跃消费者；reload 换 query 后返回 false，
     // 终态回调（onError/catch/onResult/onMessage）静默丢弃，不误杀新会话。
     // 成立前提：reloadWithProvider 已保证先替换 state.query 再 close oldQuery（commit
-    // c40b1319 / ql-20260806-002），故 oldQuery.close 触发旧 consume 回调时 state.query
+    // c401319 / ql-20260806-002），故 oldQuery.close 触发旧 consume 回调时 state.query
     // 已指向新 query，谓词正确判 orphan。两次连续 reload 同理（中间那个 consume 变 orphan）。
     const isAuthoritative = (): boolean => {
       const current =
@@ -2505,13 +2443,13 @@ export class SessionManager {
       return current === target;
     };
 
-    const onResult = async (r: SDKResultMessage | InteractiveDriverResult): Promise<void> => {
+    const onResult = async (r: InteractiveDriverResult): Promise<void> => {
       if (!isAuthoritative()) return; // orphan：reload 已换 query，旧 result 丢弃
       await this._onResult(state, r);
     };
-    const onMessage = async (m: SDKMessage | Record<string, unknown>): Promise<void> => {
-      if (!isAuthoritative()) return; // orphan：旧 query 残留消息丢弃
-      await this._onMessage(state, m as SDKMessage);
+    const onMessage = async (envelope: TurnMessageEnvelope): Promise<void> => {
+      if (!isAuthoritative()) return; // orphan：旧 query 残留事件丢弃
+      await this._onMessage(state, envelope);
     };
     const onError = (_e: unknown): void => {
       // 边界 2：driver 异常 → fail。fail 内部幂等。
@@ -2519,11 +2457,8 @@ export class SessionManager {
       if (!isAuthoritative()) return;
       void this.fail(state.sessionId).then(() => undefined, () => undefined);
     };
-    // 适配对象：新旧两组键并存（见方法注释）。
-    const callbacks = {
-      onResult,
-      onMessage,
-      onError,
+    // task-08：envelope-only（旧键 onResult/onMessage/onError 兜底分支已删）。
+    const callbacks: InteractiveDriverCallbacks = {
       onTurnResult: onResult,
       onTurnMessage: onMessage,
       onTurnError: onError,
@@ -2531,7 +2466,7 @@ export class SessionManager {
     try {
       await driver.consume(
         target as InteractiveDriverHandle,
-        callbacks as unknown as InteractiveDriverCallbacks,
+        callbacks,
       );
     } catch {
       // consume 自身不应抛（driver.consume 内 try/catch），防御性标 failed。
@@ -2702,22 +2637,79 @@ export class SessionManager {
   }
 
   /**
-   * task-08（D-009）：聚合 session 所有 parentKey 桶（主 agent + 各子代理）的
-   * input+output 累计 token。无桶 → 0/0。**不含** cache_*（D-009 口径）。
+   * task-08（D-009；2026-09-03-agent-provider-abstraction 改造）：聚合 session
+   * 会话级 usage（历史轮折算 base + 本轮各 parentKey 最新值求和，主 agent + 各
+   * 子代理）。无台账 → 0/0。**不含** cache_*（D-009 口径）。
+   *
+   * 对齐旧跨 ``_partialBuffers`` 桶求和口径：本轮各 parent（'main'/子代理
+   * tool_use_id）的轮级累计逐一相加，再加历史轮 base。
    */
-  private _aggregateSessionUsage(sessionId: string): {
-    input_tokens: number;
-    output_tokens: number;
-  } {
-    const buckets = this._partialBuffers.get(sessionId);
-    if (!buckets) return { input_tokens: 0, output_tokens: 0 };
-    let inputTokens = 0;
-    let outputTokens = 0;
-    for (const buf of buckets.values()) {
-      inputTokens += buf.sessionInputTokens || 0;
-      outputTokens += buf.sessionOutputTokens || 0;
+  private _aggregateSessionUsage(sessionId: string): SessionUsageTotals {
+    const base = this._sessionUsageBase.get(sessionId);
+    let inputTokens = base?.input_tokens ?? 0;
+    let outputTokens = base?.output_tokens ?? 0;
+    const turn = this._turnUsageByParent.get(sessionId);
+    if (turn) {
+      for (const latest of turn.values()) {
+        inputTokens += latest.input_tokens || 0;
+        outputTokens += latest.output_tokens || 0;
+      }
     }
     return { input_tokens: inputTokens, output_tokens: outputTokens };
+  }
+
+  /**
+   * task-08：事件 usage → 会话级台账更新（``_liftSessionUsage`` 的写侧）。
+   *
+   * 数据源守卫见 ``_turnUsageByParent`` 字段注释：仅轮级累计来源（``is_partial``
+   * 事件 / usage-only 空事件）replace 更新本轮对应 parentKey 条目；其余携带
+   * usage 的事件（完整消息 stamp 的单次调用终值、codex usage_update）不进台账
+   * （display 用途，经上报 dict 顶层 usage 透传 daemon lift）。
+   */
+  private _liftSessionUsage(state: SessionState, ev: AgentEvent): void {
+    const usage = ev.usage;
+    if (!usage) return;
+    const isTurnCumulative =
+      ev.is_partial === true || (ev.type === 'text' && ev.content === '');
+    if (!isTurnCumulative) return;
+    const input = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+    const output =
+      typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+    const parentKey =
+      typeof ev.parent_tool_use_id === 'string' && ev.parent_tool_use_id
+        ? ev.parent_tool_use_id
+        : 'main';
+    let turn = this._turnUsageByParent.get(state.sessionId);
+    if (!turn) {
+      turn = new Map<string, SessionUsageTotals>();
+      this._turnUsageByParent.set(state.sessionId, turn);
+    }
+    turn.set(parentKey, { input_tokens: input, output_tokens: output });
+  }
+
+  /**
+   * task-08：turn 收尾折算（``_onResult`` 在 ``_checkBudgetCutoff`` **之后**调，
+   * 对齐旧 ``_shrinkSubagentBuffers`` 的时序——预算聚合先看到本轮各 parent 值，
+   * 再合入 base）。本轮各 parent 最新值累加进 ``_sessionUsageBase`` 后清空
+   * 本轮表；seq 补号计数器同步归零（新 turn 事件序号空间独立）。
+   */
+  private _foldTurnUsage(state: SessionState): void {
+    const turn = this._turnUsageByParent.get(state.sessionId);
+    if (turn) {
+      if (turn.size > 0) {
+        const base = this._sessionUsageBase.get(state.sessionId) ?? {
+          input_tokens: 0,
+          output_tokens: 0,
+        };
+        for (const latest of turn.values()) {
+          base.input_tokens += latest.input_tokens || 0;
+          base.output_tokens += latest.output_tokens || 0;
+        }
+        this._sessionUsageBase.set(state.sessionId, base);
+      }
+      this._turnUsageByParent.delete(state.sessionId);
+    }
+    this._turnEventSeq.delete(state.sessionId);
   }
 
   /**
@@ -3061,9 +3053,8 @@ export class SessionManager {
       state.lastActiveAt = Date.now();
       // task-08：interrupt 已生效，pending 审批不再有意义 → abortAll deny。
       this._resolversBySession.get(sessionId)?.abortAll('session_interrupted');
-      // task-04（FR-02）：interrupt 时清空本 session 运行中 Bash 命令表（命令被强制终止，
-      // 后续 tool_result 不会到达，避免内存泄漏）。
-      this._clearRunningBashCommands(sessionId);
+      // task-08（FR-02）：运行中 Bash 追踪已下沉归一化器（随 SDK 进程消亡），
+      // 此处不再清 daemon 侧索引（旧 _clearRunningBashCommands 已移除）。
       // task-10：interrupt 后排队 flush（currentRunId 仍在，等 result 收尾）。
       this._scheduleFlush();
     }
@@ -3152,10 +3143,11 @@ export class SessionManager {
       clearTimeout(timer);
     }
     this._terminalCleanupTimers.clear();
-    // ql-20260621-partial：daemon shutdown 时销毁所有 partial buffer 的 timer，
-    // 防止 unref'd timer 在进程退出途中 fire 触发已销毁 store 的访问。
-    for (const sid of Array.from(this._partialBuffers.keys())) {
-      this._destroyPartialBuffer(sid);
+    // ql-20260621-partial（task-08 改造）：partial flush 定时器已随缓冲链下沉
+    // 归一化器（driver.consume finally dispose），daemon 侧无 timer 需清；此处仅
+    // 清会话级 usage 台账（纯内存 Map，防退出途中残留引用）。
+    for (const sid of Array.from(this._sessionUsageBase.keys())) {
+      this._destroyUsageLedger(sid);
     }
   }
 
@@ -3292,8 +3284,8 @@ export class SessionManager {
     // 3. task-09：清借用沙箱登记（session 已终态，写守卫注册表不再需要本条）。
     this._clearBorrowSandbox(state.sessionId);
 
-    // 4. task-04（FR-02）：清运行中 Bash 命令表（session 终态，后续 tool_result 不再到达）。
-    this._clearRunningBashCommands(state.sessionId);
+    // 4. task-08（FR-02）：运行中 Bash 追踪已下沉归一化器（随 SDK 进程消亡），
+    //    daemon 侧不再持索引（旧 _clearRunningBashCommands 移除）。
 
     // 4b. task-03（2026-08-27-background-subagent-progress）：清后台任务注册表 +
     //     Task/Agent tool_use 元数据（session 终态 SDK 进程已 kill，后台任务随之
@@ -3307,9 +3299,9 @@ export class SessionManager {
       this._taskWakeupPending.delete(state.sessionId);
     }
 
-    // 5. ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器仍
-    //    fire 推送到已结束 session。
-    this._destroyPartialBuffer(state.sessionId);
+    // 5. task-08：销毁会话级 usage 台账 + budget 软切断登记（旧 _destroyPartialBuffer
+    //    的清理职责收口；partial 定时器已随缓冲链下沉归一化器，由 driver.dispose 兜底）。
+    this._destroyUsageLedger(state.sessionId);
 
     // 6. task-01 新增（D-003 / D-004 / R-01）：接通 driver kill 链。
     //    Claude 句柄运行时存在 state.query（实为 ClaudeDriverHandle，经 task-01 已补
@@ -3613,7 +3605,8 @@ export class SessionManager {
       manualApproval: restoreManualApproval,
       askUserOnly: restoreAskUserOnly,
       driver, // D-001：写入归属 driver。
-      subagentDepth: new Map(), // task-02 / D-007@v1：恢复后从空开始（depth 不持久化）。
+      // task-08：同 create——depth 已下沉归一化器，恒空 Map 仅满足形状。
+      subagentDepth: new Map(),
       // task-06：恢复主 agent stage（重新注入 MCP tool 用）。
       stage: record.stage,
       // task-04：恢复分身深度（snapshot 保档链，M3——非叶不静默降级叶档）。
@@ -3721,7 +3714,7 @@ export class SessionManager {
         driverOpts as unknown as Parameters<InteractiveDriver['start']>[1],
       )) as unknown;
       if (record.provider === 'claude') {
-        state.query = handleOrQuery as import('@anthropic-ai/claude-agent-sdk').Query;
+        state.query = handleOrQuery as SessionState['query'];
       } else {
         state.driverHandle = handleOrQuery as InteractiveDriverHandle;
       }
@@ -4262,7 +4255,7 @@ export class SessionManager {
       // ── ⑥ 替换句柄（claude=query / codex=driverHandle）+ env + config 快照 ──
       if (state.provider === 'claude') {
         state.query =
-          handleOrQuery as import('@anthropic-ai/claude-agent-sdk').Query;
+          handleOrQuery as NonNullable<SessionState['query']>;
       } else {
         state.driverHandle = handleOrQuery as InteractiveDriverHandle;
       }
@@ -4306,7 +4299,7 @@ export class SessionManager {
       // 之后），catch 保留的 oldHandle 仍可用，会话可真正恢复（旧 consume 继续）。
       // session 不从 store 移除、status 不改（避免 active→failed 硬降级）。
       if (state.provider === 'claude') {
-        state.query = oldHandle as import('@anthropic-ai/claude-agent-sdk').Query | undefined;
+        state.query = oldHandle as SessionState['query'];
       } else {
         state.driverHandle = oldHandle as InteractiveDriverHandle | undefined;
       }
@@ -4374,7 +4367,7 @@ export class SessionManager {
    *   - ended 时不重复调（边界 8：END 与 turn 完成竞态，幂等）
    *   - lastActiveAt 更新
    */
-  private async _onResult(state: SessionState, result: SDKResultMessage | InteractiveDriverResult): Promise<void> {
+  private async _onResult(state: SessionState, result: InteractiveDriverResult): Promise<void> {
     if (state.status === 'ended' || state.status === 'failed') {
       // 迟到的 result，session 已收口：不重复发终态，避免双 onTurnResult。
       return;
@@ -4436,20 +4429,11 @@ export class SessionManager {
           resultRecord['modelError'] = modelError;
         }
       }
-      // ql-20260831-002：轮末补发未 flush 的 pendingUsage——result 与最后一次
-      // message_delta 常落在同一 500ms flush 窗口内，轮边界清零（下方
-      // turnSessionMap 块）会把整轮最后一次 usage 更新（含 ctx_tokens）静默
-      // 丢弃（实证：agent_runs.ctx_tokens 短轮大量 NULL，前端环分子取最新非
-      // null 值滞后）。在 onTurnResult 通知**之前**补发 usage-only 消息（backend
-      // submit_messages 对空 content 消息跳过日志写入只提取 usage，run_sync/
-      // service.py「无 content 的 message」分支既定支持），保消息→result 顺序。
-      // ql-20260831-008：待发判空才 await——空转 await 也会把 _runNotifyChain
-      // 推迟一个 microtask，破坏「空链时 onTurnResult 同步直调」契约
-      //（ql-20260825-f6#4，consume 回调同步可见；无 usage 时跳过 await 恢复
-      // 同步路径，有 usage 时先补发再通知的顺序不变）。
-      if (this._hasPendingTerminalUsage(state)) {
-        await this._flushTerminalUsage(state, runId);
-      }
+      // ql-20260831-002（task-08 改造注）：轮末补发未 flush pendingUsage 的职责
+      // 已随 partial 链下沉归一化器——ClaudeEventNormalizer 在 message_stop 消息
+      // 边界 flush 残留缓冲（含最终 message_delta usage），driver 在 onTurnEnd 前
+      // 已把整轮最后一次 usage 以事件送达（claude-events.ts _flushBucket 的
+      // usage-only 分支），消息→result 顺序天然保持。daemon 侧不再补发。
       // ql-20260825-f6#4：onTurnResult 入 per-session 终态通知链——同会话后续的
       // onSessionEnd（end/fail 收口）必 await 在本通知之后，backend 侧顺序恒
       // result → end。settle 语义（含 rejection 向上抛）与直调一致。
@@ -4459,38 +4443,19 @@ export class SessionManager {
     }
     // task-10：turn result 收尾后排队 flush（currentRunId 已清空）。
     this._scheduleFlush();
-    // task-11（边界 7）+ task-03（D-002）：turn 边界重置所有桶的 completedSegments ——
-    // 新 turn 的 segmentId 空间独立，避免跨 turn 误判 late partial。多桶（主+各子代理）
-    // 全部重置；buffer 不销毁（session 仍 active，下 turn 复用桶）。
-    const turnSessionMap = this._partialBuffers.get(state.sessionId);
-    if (turnSessionMap) {
-      for (const buf of turnSessionMap.values()) {
-        buf.completedSegments = new Set<string>();
-      }
-      // task-02（2026-08-27-session-token-usage-fix / design §5 Phase 1.2）：轮边界
-      // 清零 main 桶 turn 级计数器 + lastCallCtxTokens，并置 pendingUsage=null——防
-      // 上轮残留轮级 usage 注入新 run（下轮 flush 复用同桶）。会话级计数器跨轮
-      // **不清零**（budget 数据源不变，R-01）。子桶 turn 级字段**不折算**：随后
-      // _shrinkSubagentBuffers 删桶即随桶销毁（折算发生在轮结束后、后续 flush 因
-      // 无 runId 早退，折算即死代码，B3/R-05）。
-      const mainBuf = turnSessionMap.get('main');
-      if (mainBuf) {
-        mainBuf.turnInputTokens = 0;
-        mainBuf.turnOutputTokens = 0;
-        mainBuf.lastCallCtxTokens = 0;
-        mainBuf.pendingUsage = null;
-      }
-    }
-    // task-08（D-006 / D-009）：turn 收尾 budget 软切断检查点。在 completedSegments
-    // 重置**之后**调用（聚合 usage 不依赖 completedSegments，但放在末尾确保
-    // _onResult 主路径全部完成后才发 budget_exceeded，语义清晰）。runId 用本 turn
+    // task-11（边界 7）注：completedSegments 跨 turn 重置已随 partial 链下沉归一化器
+    //（driver 在 result 前调 normalizer.onTurnEnd，session-manager 不再持有桶）。
+    // task-08（D-006 / D-009）：turn 收尾 budget 软切断检查点。放在 _onResult 主路径
+    // 完成后（聚合 usage = base + 本轮各 parent 值，含子代理）。runId 用本 turn
     // 刚结束的（currentRunId 已清空，但 runId 局部变量仍持有）。
     if (runId) {
       this._checkBudgetCutoff(state, runId);
     }
-    // ql-20260825-f6#2：turn 收尾收缩子代理桶 + subagentDepth（在 _checkBudgetCutoff
-    // 之后——预算聚合跨桶求和，先删会丢子代理 token 造成漏计）。
-    this._shrinkSubagentBuffers(state);
+    // task-08：turn 收尾折算 usage 台账（在 _checkBudgetCutoff **之后**——对齐旧
+    // _shrinkSubagentBuffers 时序：预算聚合先看到本轮各 parent 值再合入 base，
+    // 先折算会丢子代理 token 造成漏计）+ seq 补号计数器归零（替代旧 subagentDepth/
+    // 子代理桶收缩——子代理 parent 条目随本轮表整体清空，无跨轮膨胀）。
+    this._foldTurnUsage(state);
     // task-07（provider-switch-live-session / D-002@v1）：turn 边界检测 pendingSwitch。
     // 生成中 turn 收到切换时 markPendingSwitch 仅覆盖写 state.pendingSwitch 不中断；
     // 此处 turn 已收尾（status→active / currentRunId 清空），安全触发受控 reload。
@@ -4539,330 +4504,348 @@ export class SessionManager {
   }
 
   /**
-   * onMessage：system/init 写 agentSessionId（只写一次）；其余转发 onTurnMessage。
+   * task-08（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：onTurnMessage
+   * 消费侧收口——输入 ``TurnMessageEnvelope{events}``（driver 归一化后的 AgentEvent
+   * 批次，一帧 provider 消息可产 0..N 条），逐事件分发；SessionManager 不再解析
+   * provider raw 消息形状（raw 依赖清零，envelope.raw 仅调试通道禁止依赖）。
    *
-   * ql-20260621-partial：识别 SDKPartialAssistantMessage（type='stream_event'）
-   * 与 SDKThinkingTokensMessage（type='system', subtype='thinking_tokens'），
-   * 累积到 per-session PartialFlushBuffer，由 500ms 定时器批量 flush 为
-   * [THINKING]/[ASSISTANT]/[SYSTEM:thinking_tokens] stdout 消息（不直接转发，
-   * 避免每 token 一次 HTTP）。完整 assistant message（type='assistant'）到达
-   * 时清空 buffer（delta 是完整内容子集，backend _extract_sdk_messages 会展开
-   * 完整 message 为全文 [THINKING]/[ASSISTANT]，partial delta 必须丢弃避免重复）。
+   * ── 对账表（R-02：旧 _onMessage 每类消费 → 新分发项一一映射）────────────
+   * | # | 旧 _onMessage 消费（raw SDK 形状解析） | 新分发项（事件字段消费） |
+   * |---|---|---|
+   * | 1 | depth 计算 + assistant tool_use 预登记 subagentDepth + 挂 msg.depth | 下沉 ClaudeEventNormalizer（depth 状态机）；事件一等字段 depth 随 dict 透传（_eventToReportDict） |
+   * | 2 | assistant tool_use=Bash → _runningBashCommands 注册 + emit bash_status(running) | status/bash_status 事件 → _emitSessionEvent（Bash 追踪/elapsed 归一化器内配对） |
+   * | 3 | assistant tool_use=Enter/ExitPlanMode → emit plan_mode_entered | status/plan_mode 事件 → _emitSessionEvent（kind plan_mode_entered，summary 自 metadata） |
+   * | 4 | assistant tool_use=Task/Agent → emit agent_task_status(running) + _agentToolUseMeta 登记 | status/agent_task_status → _emitSessionEvent；meta 登记改由 tool_use 事件（call_id 键 + args JSON 解析，_registerAgentToolUseMeta） |
+   * | 5 | system/init → agentSessionId 提取（fork/子代理守卫）+ _scheduleFlush + 透传 | status/session_started → 同守卫提取 + 透传（backend resume 指针 pin，design §7.5） |
+   * | 6 | codex flat thread_started → agentSessionId（resume key，只写一次） | codex driver 映射表 #1 已产 status/session_started → 与 #5 同分支统一消费 |
+   * | 7 | stream_event / system:thinking_tokens partial 缓冲节流（500ms flush [THINKING]/[ASSISTANT]/[SYSTEM:thinking_tokens]） | 下沉归一化器（_bufferPartial/_flushBucket 节流 flush）；partial 以 is_partial+segment_id 事件直达本方法透传 |
+   * | 8 | system/task_* 拦截 → _onBackgroundTaskSystemMessage（注册表/节流/唤醒/[TASK_*] 行） | status/agent_task_status + status/task_notification → _handleAgentTaskStatusEvent / _handleTaskNotificationEvent（语义不变，输入改事件 metadata） |
+   * | 9 | 完整 assistant → 清 partial buffer + emit [*_OVERRIDE] 撤回信号 + 透传 | 下沉归一化器（override:true + segment_id 事件原位替换，D-004@v1）；SessionManager 仅透传 |
+   * |10 | user tool_result 配对 Bash 终态 → bash_chunk(终块) + bash_status(completed/failed) | 归一化器（runningBash 配对）→ status/bash_chunk + status/bash_status 事件 → _emitSessionEvent |
+   * |11 | user tool_result 异步回执（"Async agent launched successfully"）→ _registerAsyncReceiptTask 兜底 | tool_result 事件 content 扫描 + call_id 关联 → _maybeRegisterAsyncReceipt |
+   * |12 | 尾部默认 onTurnMessage 透传（currentRunId 守卫） | 内容事件逐条 _eventToReportDict 透传（seq 补号 + v2 一等字段平铺，task-09 直接可用） |
+   * |13 | usage：partial flush attachUsage（轮级累计注入 flat 消息顶层） | usage lift：事件 usage 一等字段平铺进 dict（daemon lift → backend 实时聚合）+ 会话级台账 _liftSessionUsage（budget 数据源） |
    *
-   * task-03（2026-08-27-background-subagent-progress）：system/task_*（后台任务
-   * 生命周期）拦截消费（_onBackgroundTaskSystemMessage）后 return 不透传——
-   * backend 对 system 类静默丢弃，持久化改由 [TASK_*] 行承载；user tool_result
-   * 分支另识别异步 Agent 启动回执（_registerAsyncReceiptTask 兜底注册）。
+   * status subtype 路由两路（design §5.1 Grill 复核）：bash_chunk/bash_status/
+   * plan_mode/agent_task_status/task_notification 属瞬时会话 UI 信号 → 现
+   * onSessionEvent 独立通道（WS/REST 既有链路，不落 AgentRunLog、不经
+   * submitMessages）；session_started 随 submitMessages 上报（backend resume
+   * 指针 pin）；thinking_tokens（D-005@v1 补遗）经 submitMessages 透传（backend
+   * _persist_agent_event 对 status 不产文本行，仅事件 JSON 落 metadata_.agent_event）。
    */
-  private async _onMessage(state: SessionState, msg: SDKMessage): Promise<void> {
-    // 2026-06-28-daemon-subagent-transcript task-02 / D-007@v1：子代理 depth 计算 +
-    // 注入 msg.depth（转发给 backend 落库 depth 列）。主 agent(parent_tool_use_id=null)
-    // →0；子代理按 parent_tool_use_id 查 state.subagentDepth 得 depth（查不到退化 1，R-04）。
-    // assistant message 另遍历 tool_use blocks 预登记 tool_use.id → msgDepth+1，供该
-    // tool_use 派生的子代理消息查 depth（主 tool_use→子 1，子 tool_use→孙 2，多层嵌套）。
-    const msgRecord = msg as Record<string, unknown>;
-    const rawParent = msgRecord['parent_tool_use_id'];
-    const parentToolUseId = typeof rawParent === 'string' ? rawParent : null;
-    const msgDepth = parentToolUseId
-      ? (state.subagentDepth.get(parentToolUseId) ?? 1)
-      : 0;
-    msgRecord['depth'] = msgDepth;
-    if (msgRecord['type'] === 'assistant') {
-      const inner = msgRecord['message'] as Record<string, unknown> | undefined;
-      const blocks = inner?.['content'];
-      if (Array.isArray(blocks)) {
-        for (const b of blocks) {
-          if (
-            b &&
-            typeof b === 'object' &&
-            (b as { type?: string }).type === 'tool_use'
-          ) {
-            const tId = (b as { id?: string }).id;
-            if (typeof tId === 'string' && tId) {
-              state.subagentDepth.set(tId, msgDepth + 1);
-
-              // task-04（FR-01~03）：识别 plan / Bash / 后台任务 tool_use 并上报 backend。
-              const toolName = (b as { name?: string }).name;
-              const toolInput = (b as { input?: Record<string, unknown> }).input;
-              const runId = state.currentRunId;
-              if (typeof toolName === 'string' && runId) {
-                if (toolName === 'Bash') {
-                  const command =
-                    toolInput && typeof toolInput === 'object'
-                      ? String(toolInput['command'] ?? '')
-                      : '';
-                  this._runningBashCommands.set(tId, {
-                    command,
-                    startTime: Date.now(),
-                    sessionId: state.sessionId,
-                  });
-                  this._emitSessionEvent(state.sessionId, runId, {
-                    kind: 'bash_status',
-                    command,
-                    status: 'running',
-                  });
-                } else if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') {
-                  const objective =
-                    toolInput && typeof toolInput === 'object'
-                      ? String(toolInput['objective'] ?? '')
-                      : '';
-                  const rawTasks =
-                    toolInput && typeof toolInput === 'object'
-                      ? toolInput['tasks']
-                      : undefined;
-                  const tasks = Array.isArray(rawTasks)
-                    ? rawTasks.filter((t): t is string => typeof t === 'string')
-                    : [];
-                  const designSnippet =
-                    toolInput && typeof toolInput === 'object'
-                      ? String(toolInput['design_snippet'] ?? toolInput['plan'] ?? '')
-                      : '';
-                  this._emitSessionEvent(state.sessionId, runId, {
-                    kind: 'plan_mode_entered',
-                    summary: {
-                      objective,
-                      tasks,
-                      ...(designSnippet ? { design_snippet: designSnippet } : {}),
-                    },
-                  });
-                } else if (toolName === 'Task' || toolName === 'Agent') {
-                  const taskId =
-                    toolInput && typeof toolInput === 'object'
-                      ? String(toolInput['task_id'] ?? tId)
-                      : tId;
-                  const taskName =
-                    toolInput && typeof toolInput === 'object'
-                      ? String(toolInput['description'] ?? toolInput['name'] ?? toolName)
-                      : toolName;
-                  this._emitSessionEvent(state.sessionId, runId, {
-                    kind: 'agent_task_status',
-                    task_id: taskId,
-                    task_name: taskName,
-                    status: 'running',
-                  });
-                  // task-03（design §5 P1.2 回执兜底元数据）：登记本 tool_use 的
-                  // 任务名 / 子代理类型，异步启动回执（tool_result 文本含 agentId）
-                  // 到达时据此回填任务表 taskName/subagentType（回执文本自身不带
-                  // 任务名）。仅内存登记，会话终态清理。
-                  const rawSubagentType =
-                    toolInput && typeof toolInput === 'object'
-                      ? toolInput['subagent_type']
-                      : undefined;
-                  const subagentType =
-                    typeof rawSubagentType === 'string' && rawSubagentType
-                      ? rawSubagentType
-                      : undefined;
-                  this._agentToolUseMeta.set(tId, {
-                    sessionId: state.sessionId,
-                    taskName,
-                    ...(subagentType ? { subagentType } : {}),
-                  });
-                }
-              }
-            }
-          }
-        }
+  private async _onMessage(
+    state: SessionState,
+    envelope: TurnMessageEnvelope,
+  ): Promise<void> {
+    const events = Array.isArray(envelope?.events) ? envelope.events : [];
+    // 对账表 #4 前置判定：本 envelope 是否含 Task/Agent tool_use 事件——归一化器把
+    // 同一 assistant message 的 tool_use 派生会话信号（agent_task_status running）
+    // 与 tool_use 内容事件放在**同一 envelope**（statusEvents 先行 + contentEvents
+    // 随后）。该派生信号只 emit（旧 _onMessage toolUse 分支口径：不注册后台任务
+    // 表、不落 [TASK_STARTED] 行——注册/落行由 system/task_started 帧承载），经
+    // 此标志与 system 帧事件（独立 envelope 到达）区分。
+    const envelopeHasTaskToolUse = events.some(
+      (ev) =>
+        ev.type === 'tool_use' &&
+        (ev.tool_name === 'Task' || ev.tool_name === 'Agent'),
+    );
+    for (const ev of events) {
+      // usage lift 先行（D-003@v1：任意型事件可携带；台账只收轮级累计来源，
+      // 见 _liftSessionUsage 守卫注释）。
+      this._liftSessionUsage(state, ev);
+      if (ev.type === 'status') {
+        await this._dispatchStatusEvent(state, ev, envelopeHasTaskToolUse);
+        continue;
       }
-    }
-
-    if (
-      msg &&
-      typeof msg === 'object' &&
-      (msg as { type?: string }).type === 'system' &&
-      (msg as { subtype?: string }).subtype === 'init'
-    ) {
-      const sid = (msg as { session_id?: string }).session_id;
-      // 2026-06-28-daemon-subagent-transcript task-04 / D-003@v1：防御性守卫——
-      // 子代理 system/init（parent_tool_use_id 非空）不得覆盖主 session 的
-      // agentSessionId（resume key）。现有 ===undefined 守卫已挡住（主 init 必
-      // 先于子代理到达），此处加 parent_tool_use_id 双重守卫防御时序异常，
-      // 不依赖单一 ===undefined。
-      const isSubagentInit =
-        (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id != null;
-      // ql-20260818-002：forked reload 的 init 带新 session_id——允许覆盖
-      // （forkedInitPending 由 reloadWithConfig 置位、此处消费清除）。
-      if (
-        sid &&
-        !isSubagentInit &&
-        (state.agentSessionId === undefined ||
-          (state.forkedInitPending === true && sid !== state.agentSessionId))
-      ) {
-        state.agentSessionId = sid;
-        state.forkedInitPending = false;
-        // task-10：首 turn system/init 拿到 agentSessionId 后才可恢复 → 排队 flush。
-        this._scheduleFlush();
+      // 内容事件（text/thinking/tool_use/tool_result/error/turn_result/complete）：
+      // - tool_use(Task/Agent) → _agentToolUseMeta 登记（对账表 #4，异步回执兜底关联键）；
+      // - tool_result → 异步回执兜底（对账表 #11）；
+      // - 全部经 _eventToReportDict 透传（对账表 #12/#13）。
+      if (ev.type === 'tool_use') {
+        this._registerAgentToolUseMeta(state, ev);
+      } else if (ev.type === 'tool_result') {
+        await this._maybeRegisterAsyncReceipt(state, ev);
       }
-    }
-
-    // task-06（Reverse Sync / design §5.3 第 6 点 + task-04 L128-130）：Codex flat
-    // message 的 thread_started 事件（{event_type, content, metadata:{subtype:
-    // 'thread_started'}, session_id:threadId}）携带 Codex thread id。提取 session_id
-    // 写入 state.agentSessionId，让 snapshotPersistable 落盘 + restoreAndReconnect
-    // 可用（Codex thread id = resume key，缺失则不可恢复，D-007）。只写一次（与
-    // Claude system/init 同语义）。仅 Codex provider 的 flat message 走此分支
-    //（Claude 走上方 system/init）。
-    if (
-      state.provider === 'codex' &&
-      state.agentSessionId === undefined &&
-      msg &&
-      typeof msg === 'object'
-    ) {
-      const flat = msg as Record<string, unknown>;
-      const metadata = flat['metadata'] as Record<string, unknown> | undefined;
-      if (
-        metadata?.['subtype'] === 'thread_started' &&
-        typeof flat['session_id'] === 'string' &&
-        flat['session_id']
-      ) {
-        state.agentSessionId = flat['session_id'];
-        // task-10：拿到 agentSessionId 后才可恢复 → 排队 flush。
-        this._scheduleFlush();
-      }
-    }
-
-    // ql-20260621-partial：partial 事件缓冲节流（不直接转发）。
-    const msgType = msg && typeof msg === 'object'
-      ? (msg as { type?: string }).type
-      : undefined;
-    const msgSubtype = msg && typeof msg === 'object'
-      ? (msg as { subtype?: string }).subtype
-      : undefined;
-    if (
-      msgType === 'stream_event' ||
-      (msgType === 'system' && msgSubtype === 'thinking_tokens')
-    ) {
-      this._bufferPartial(state, msg);
-      return; // 不直接转发；由 500ms 定时器批量 flush
-    }
-
-    // task-03（2026-08-27-background-subagent-progress / design §5 P1.1，FR-01/02/03）：
-    // system/task_* 后台任务生命周期拦截。spike 实测（design §10）CLI 0.3.181 确实
-    // 发射 task_started / task_updated / task_notification（task_progress 短任务零
-    // 发射，仍实现消费——字段 task_id/usage/last_tool_name/summary）。四类消息拦截后
-    // **return 不走尾部默认 onTurnMessage 透传**：backend _extract_sdk_messages 只认
-    // assistant/user 两型，system 类静默丢弃，透传即无痕迹；持久化由 [TASK_*] 行
-    // 承载（D-002@v1 双写：SSE 事件 + 日志行）。
-    if (
-      msgType === 'system' &&
-      (msgSubtype === 'task_started' ||
-        msgSubtype === 'task_progress' ||
-        msgSubtype === 'task_notification' ||
-        msgSubtype === 'task_updated')
-    ) {
-      await this._onBackgroundTaskSystemMessage(state, msgSubtype, msgRecord);
-      return; // 拦截收敛，不再透传（[TASK_*] 行已承载持久化）
-    }
-
-    // 完整 assistant message 到达 → 清空 partial buffer 的未 flush 尾部，
-    // 避免与完整 message（backend 展开为全文）重复。
-    if (msgType === 'assistant') {
-      // task-11（design §5.3 D1/D2）：先抓已 flush partial 快照（sync 清理前），
-      // 再 sync 清 buffer + 记 completedSegments，转发完整 message，最后异步 emit
-      // [THINKING_OVERRIDE] 覆盖信号（必须在完整 message 之后，语义"完整行覆盖
-      // partial 行"）。driver 的 onMessage 回调不 await _onMessage 返回值，故 override
-      // 异步 emit 不影响转发时序。
-      // task-03 / D-002@v1：按本 message 的 parentKey 分桶——子代理完整 assistant
-      // message 只清/override 自己的桶，绝不触碰主 agent 桶（R-02 P0）。completed/
-      // segmentId 全部带 parent 前缀，与该桶 partial 对齐。
-      const parentKey = parentToolUseId ?? 'main';
-      const completed = this._extractCompletedSegments(state, msg, parentKey);
-      const buf = this._partialBuffers.get(state.sessionId)?.get(parentKey);
-      const flushedSnapshot = buf
-        ? buf.flushedSegments.slice()
-        : [];
-      // 第一阶段：sync 清 buffer + 记录 completedSegments（late partial 守卫立即生效）。
-      this._clearPartialBufferSync(state.sessionId, parentKey, completed);
-      // 转发完整 message（保持原有 await onTurnMessage 语义）。
       const runId = state.currentRunId;
-      if (runId) {
-        await this.deps.onTurnMessage(state.sessionId, runId, msg);
+      if (!runId) continue; // 无 active turn → 丢弃（对齐旧尾部守卫）
+      await this.deps.onTurnMessage(
+        state.sessionId,
+        runId,
+        this._eventToReportDict(state, ev),
+      );
+    }
+  }
+
+  /**
+   * task-08：status 事件按 subtype 分发（D-002@v1 会话级信号事件化）。输入从
+   * raw SDK 形状改为事件一等字段（session_id）+ metadata 开放容器（command/
+   * channel/status/exit_code/elapsed_ms/summary/task_*），会话级语义零变化。
+   *
+   * @param envelopeHasTaskToolUse 本 envelope 含 Task/Agent tool_use 事件（见
+   *   _onMessage 前置判定）——agent_task_status 据此走 tool_use 派生口径（仅 emit，
+   *   不注册/不落行）。
+   */
+  private async _dispatchStatusEvent(
+    state: SessionState,
+    ev: AgentEvent,
+    envelopeHasTaskToolUse: boolean,
+  ): Promise<void> {
+    switch (ev.subtype) {
+      case 'session_started': {
+        const sid =
+          typeof ev.session_id === 'string' && ev.session_id
+            ? ev.session_id
+            : undefined;
+        // 守卫等价迁移（旧 _onMessage system/init 分支，2026-06-28-daemon-
+        // subagent-transcript task-04 / D-003@v1）：
+        // - 子代理 init（parent_tool_use_id 非空）不得覆盖主 session 的
+        //   agentSessionId（resume key）——归一化器对 Claude 子代理 init 已守卫
+        //   丢弃，此处对事件字段再防御（codex 无该形态）；
+        // - forkedInitPending（reloadWithConfig 置位）：fork 后 init 带新
+        //   session_id 允许覆盖（消费清除）。
+        const isSubagentInit =
+          typeof ev.parent_tool_use_id === 'string' &&
+          ev.parent_tool_use_id !== '';
+        if (
+          sid &&
+          !isSubagentInit &&
+          (state.agentSessionId === undefined ||
+            (state.forkedInitPending === true && sid !== state.agentSessionId))
+        ) {
+          state.agentSessionId = sid;
+          state.forkedInitPending = false;
+          // task-10：拿到 agentSessionId 后才可恢复 → 排队 flush。
+          this._scheduleFlush();
+        }
+        // design §7.5：session_started 随 submitMessages 上报（backend resume
+        // 指针 pin；旧轨 init 消息透传后 backend _extract_sdk_messages 对 system
+        // 类静默丢弃，新轨由 _persist_agent_event 提取 session_id 更新指针）。
+        const startedRunId = state.currentRunId;
+        if (startedRunId) {
+          await this.deps.onTurnMessage(
+            state.sessionId,
+            startedRunId,
+            this._eventToReportDict(state, ev),
+          );
+        }
+        return;
       }
-      // 第二阶段：异步 emit override 信号（fire-and-forget，不阻塞下一事件；
-      // 失败仅记日志，不影响 turn 主流程）。
-      this._emitOverrideSignals(state.sessionId, runId, completed, flushedSnapshot)
-        .catch((err) => {
-          // eslint-disable-next-line no-console
-          console.error('[session-manager] thinking override emit failed', err);
+      case 'bash_chunk': {
+        const runId = state.currentRunId;
+        if (!runId) return; // 信号门控对齐旧 toolUse 分支（runId 存在才 emit）
+        const meta = eventMetaOf(ev);
+        this._emitSessionEvent(state.sessionId, runId, {
+          kind: 'bash_chunk',
+          command: strOf(meta?.['command']),
+          channel: meta?.['channel'] === 'stderr' ? 'stderr' : 'stdout',
+          content: ev.content,
+          is_final: meta?.['is_final'] === true,
         });
+        return;
+      }
+      case 'bash_status': {
+        const runId = state.currentRunId;
+        if (!runId) return;
+        const meta = eventMetaOf(ev);
+        const rawStatus = strOf(meta?.['status']);
+        const status =
+          rawStatus === 'failed'
+            ? 'failed'
+            : rawStatus === 'completed'
+              ? 'completed'
+              : 'running';
+        const exitCode = numOf(meta?.['exit_code']);
+        const elapsedMs = numOf(meta?.['elapsed_ms']);
+        this._emitSessionEvent(state.sessionId, runId, {
+          kind: 'bash_status',
+          command: strOf(meta?.['command']),
+          status,
+          ...(exitCode !== undefined ? { exit_code: exitCode } : {}),
+          ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+        });
+        return;
+      }
+      case 'plan_mode': {
+        const runId = state.currentRunId;
+        if (!runId) return;
+        const meta = eventMetaOf(ev);
+        const summary = meta?.['summary'] as
+          | { objective?: unknown; tasks?: unknown; design_snippet?: unknown }
+          | undefined;
+        const objective =
+          typeof summary?.objective === 'string' ? summary.objective : '';
+        const tasks = Array.isArray(summary?.tasks)
+          ? summary.tasks.filter((t): t is string => typeof t === 'string')
+          : [];
+        const designSnippet = strOf(summary?.['design_snippet']);
+        this._emitSessionEvent(state.sessionId, runId, {
+          kind: 'plan_mode_entered',
+          summary: {
+            objective,
+            tasks,
+            ...(designSnippet ? { design_snippet: designSnippet } : {}),
+          },
+        });
+        return;
+      }
+      case 'agent_task_status':
+        if (envelopeHasTaskToolUse) {
+          // tool_use 派生信号（对账表 #4 的 emit 半边，旧 _onMessage toolUse 分支
+          // 口径）：仅 emit running（不注册后台任务表、不落行——[TASK_*] 行由
+          // system/task_started 帧或异步回执路径承载，防双行）。
+          const deriveRunId = state.currentRunId;
+          if (!deriveRunId) return;
+          const deriveMeta = eventMetaOf(ev);
+          this._emitSessionEvent(state.sessionId, deriveRunId, {
+            kind: 'agent_task_status',
+            task_id: strOf(deriveMeta?.['task_id']),
+            task_name: strOf(deriveMeta?.['task_name']),
+            status: 'running',
+          });
+          return;
+        }
+        await this._handleAgentTaskStatusEvent(state, ev);
+        return;
+      case 'task_notification':
+        await this._handleTaskNotificationEvent(state, ev);
+        return;
+      case 'thinking_tokens': {
+        // D-005@v1：thinking token 计数信号（旧轨 [SYSTEM:thinking_tokens] 行的
+        // 事件等价——该行前端默认隐藏 ql-20260709-003，非渲染依赖）。经
+        // submitMessages 透传（backend 对 status 不产文本行，仅事件 JSON 落
+        // metadata_.agent_event，task-13 双路径等价覆盖该信号）。
+        const runId = state.currentRunId;
+        if (!runId) return; // 旧轨 flush 无 runId 时丢弃残留，口径一致
+        await this.deps.onTurnMessage(
+          state.sessionId,
+          runId,
+          this._eventToReportDict(state, ev),
+        );
+        return;
+      }
+      default:
+        // 未知 subtype 防御丢弃（schema 闭合枚举外的运行时漂移）。
+        return;
+    }
+  }
+
+  /**
+   * task-08：Task/Agent tool_use 事件的元数据登记（对账表 #4 的 meta 半边）。
+   *
+   * 旧实现从 assistant message 的 tool_use block 原生 input 对象读
+   * description/subagent_type；事件轨 tool_use 事件 content = 入参 JSON
+   *（归一化器 service.py:3581 json.dumps 口径），此处解析回对象（失败退化空
+   * 对象，对齐旧 toolInput 非对象守卫）。关联键 = call_id（= 旧 tool_use.id）。
+   * agent_task_status(running) 的 emit 由归一化器产事件、_dispatchStatusEvent
+   * 转发，此处不再 emit（防双发）。
+   */
+  private _registerAgentToolUseMeta(state: SessionState, ev: AgentEvent): void {
+    if (ev.tool_name !== 'Task' && ev.tool_name !== 'Agent') return;
+    const callId = ev.call_id;
+    if (typeof callId !== 'string' || !callId) return;
+    let input: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(ev.content || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        input = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // 非法 JSON 退化空对象（对齐旧 toolInput 非对象守卫）。
+    }
+    const taskName = strOf(input['description'] ?? input['name']) || ev.tool_name;
+    const rawSubagentType = input['subagent_type'];
+    const subagentType =
+      typeof rawSubagentType === 'string' && rawSubagentType
+        ? rawSubagentType
+        : undefined;
+    this._agentToolUseMeta.set(callId, {
+      sessionId: state.sessionId,
+      taskName,
+      ...(subagentType ? { subagentType } : {}),
+    });
+  }
+
+  /**
+   * task-03（design §5 P1.2，FR-01）+ task-08 迁移：异步 Agent 启动回执兜底——
+   * tool_result 事件正文含 "Async agent launched successfully" 且正则提取到
+   * agentId 时调 _registerAsyncReceiptTask（CLI 不发 task_* 的旧版/异常场景，
+   * secondary 路径）。call_id = 旧 tool_use_id 关联键。
+   */
+  private async _maybeRegisterAsyncReceipt(
+    state: SessionState,
+    ev: AgentEvent,
+  ): Promise<void> {
+    const text = ev.content;
+    if (
+      typeof text !== 'string' ||
+      !text.includes('Async agent launched successfully')
+    ) {
       return;
     }
+    const agentIdMatch = /agentId:\s*([0-9a-f]+)/i.exec(text);
+    const agentId = agentIdMatch?.[1];
+    if (!agentId) return;
+    const callId = typeof ev.call_id === 'string' ? ev.call_id : '';
+    if (!callId) return;
+    await this._registerAsyncReceiptTask(
+      state,
+      state.currentRunId,
+      agentId,
+      callId,
+    );
+  }
 
-    // task-04（FR-02）：user message 的 tool_result 到达时，若匹配运行中 Bash 命令则
-    // 上报 bash_chunk + 最终 bash_status，并清理 Map。
-    if (msgType === 'user') {
-      const userContent = msgRecord['content'];
-      const runId = state.currentRunId;
-      if (runId && Array.isArray(userContent)) {
-        for (const item of userContent) {
-          if (
-            item &&
-            typeof item === 'object' &&
-            (item as { type?: string }).type === 'tool_result'
-          ) {
-            const resultToolUseId = (item as { tool_use_id?: string }).tool_use_id;
-            if (typeof resultToolUseId !== 'string' || !resultToolUseId) continue;
-            const running = this._runningBashCommands.get(resultToolUseId);
-            if (running && running.sessionId === state.sessionId) {
-              const content = (item as { content?: unknown }).content;
-              const isError = (item as { is_error?: boolean }).is_error === true;
-              const contentStr =
-                content === undefined
-                  ? ''
-                  : typeof content === 'string'
-                    ? content
-                    : JSON.stringify(content);
-              this._emitSessionEvent(state.sessionId, runId, {
-                kind: 'bash_chunk',
-                command: running.command,
-                channel: isError ? 'stderr' : 'stdout',
-                content: contentStr,
-                is_final: true,
-              });
-              const elapsedMs = Date.now() - running.startTime;
-              const exitCode = isError ? 1 : 0;
-              this._emitSessionEvent(state.sessionId, runId, {
-                kind: 'bash_status',
-                command: running.command,
-                status: isError ? 'failed' : 'completed',
-                exit_code: exitCode,
-                elapsed_ms: elapsedMs,
-              });
-              this._runningBashCommands.delete(resultToolUseId);
-            }
-            // task-03（design §5 P1.2，FR-01）：异步 Agent 启动回执兜底。后台派发的
-            // tool_result（"Async agent launched successfully… agentId: xxx"）与
-            // tool_use 在 0.1s 内配对，若不接管前端会把回执当完成信号（假完成根因）。
-            // CLI 发 task_* 时（spike 结论 primary）task_started 已注册过同
-            // tool_use_id，_registerAsyncReceiptTask 内查重跳过——本路径仅覆盖 CLI
-            // 不发 task_* 的旧版 / 异常场景（secondary）。
-            const receiptContent = (item as { content?: unknown }).content;
-            const receiptText =
-              receiptContent === undefined
-                ? ''
-                : typeof receiptContent === 'string'
-                  ? receiptContent
-                  : JSON.stringify(receiptContent);
-            if (receiptText.includes('Async agent launched successfully')) {
-              const agentIdMatch = /agentId:\s*([0-9a-f]+)/i.exec(receiptText);
-              const agentId = agentIdMatch?.[1];
-              if (agentId) {
-                await this._registerAsyncReceiptTask(
-                  state,
-                  runId,
-                  agentId,
-                  resultToolUseId,
-                );
-              }
-            }
-          }
-        }
-      }
+  /**
+   * task-08：AgentEvent → 上报消息 dict（对账表 #12/#13）。
+   *
+   * v2 一等字段（parent 三列 / segment_id / edit_patch / usage / session_id /
+   * is_partial / override / tool_name / call_id / subtype / depth / seq / metadata）
+   * 蛇形命名平铺 dict 顶层，task-09 接线时直接包 ``{"kind":"agent_event",
+   * "event": {...}}``；legacy 兼容键 ``event_type``（= type 别名）保留给
+   * daemon dedupKeyFor / 旧消费轨（对齐 codex driver toAgentEvent 的双键形态）。
+   * seq 缺号由 SessionManager 补（design §7：turn 内单调递增，_foldTurnUsage
+   * turn 边界重置；事件自带 seq（provider 自产）则透传不覆盖）。
+   */
+  private _eventToReportDict(
+    state: SessionState,
+    ev: AgentEvent,
+  ): Record<string, unknown> {
+    const seq =
+      typeof ev.seq === 'number' ? ev.seq : this._nextEventSeq(state.sessionId);
+    const dict: Record<string, unknown> = {
+      event_type: ev.type,
+      type: ev.type,
+      content: ev.content,
+      seq,
+    };
+    if (ev.subtype !== undefined) dict['subtype'] = ev.subtype;
+    if (ev.tool_name !== undefined) dict['tool_name'] = ev.tool_name;
+    if (ev.call_id !== undefined) dict['call_id'] = ev.call_id;
+    if (ev.session_id !== undefined) dict['session_id'] = ev.session_id;
+    if (ev.usage !== undefined) dict['usage'] = ev.usage;
+    if (ev.parent_tool_use_id !== undefined) {
+      dict['parent_tool_use_id'] = ev.parent_tool_use_id;
     }
+    if (ev.subagent_type !== undefined) dict['subagent_type'] = ev.subagent_type;
+    if (ev.depth !== undefined) dict['depth'] = ev.depth;
+    if (ev.segment_id !== undefined) dict['segment_id'] = ev.segment_id;
+    if (ev.is_partial !== undefined) dict['is_partial'] = ev.is_partial;
+    if (ev.override !== undefined) dict['override'] = ev.override;
+    if (ev.edit_patch !== undefined) dict['edit_patch'] = ev.edit_patch;
+    if (
+      ev.metadata !== undefined &&
+      Object.keys(ev.metadata as Record<string, unknown>).length > 0
+    ) {
+      dict['metadata'] = ev.metadata;
+    }
+    return dict;
+  }
 
-    const runId = state.currentRunId;
-    if (runId) {
-      await this.deps.onTurnMessage(state.sessionId, runId, msg);
-    }
+  /** task-08：turn 内事件 seq 补号（1 起单调递增；turn 边界 _foldTurnUsage 重置）。 */
+  private _nextEventSeq(sessionId: string): number {
+    const next = (this._turnEventSeq.get(sessionId) ?? 0) + 1;
+    this._turnEventSeq.set(sessionId, next);
+    return next;
   }
 
   // ── ql-20260621-partial：streaming delta 缓冲节流 ──────────────────────────
@@ -4890,197 +4873,137 @@ export class SessionManager {
     });
   }
 
+  // ── task-03（2026-08-27-background-subagent-progress）+ task-08 事件化：后台任务生命周期消费 ──
+
   /**
-   * task-04（FR-02）：清理指定 session 的运行中 Bash 命令表。
+   * task-08（对账表 #8）：status/agent_task_status 统一处理器。
+   *
+   * 归一化器把 task_started/task_progress/task_updated 三类 system 帧都映射为
+   * subtype='agent_task_status'（metadata.status running/终态六值映射，design §7 枚举
+   * 无独立 started/progress subtype），消费侧按注册状态统一分派（注册表/
+   * 节流/唤醒/[TASK_*] 行语义不变，SDK 契约依据同旧 _handleTask* 系列：
+   *   - 终态（completed/failed/stopped）：对齐旧 _handleTaskUpdated——仅 emit 轻量事件
+   *     （无行/无注销/无唤醒；权威终态走 task_notification）；任务表无记录时丢弃
+   *     （轻量信号无从挂靠，对齐旧口径）；
+   *   - running + 未注册：对齐旧 _handleTaskStarted——注册 + emit + [TASK_STARTED]
+   *     行（skip_transcript ambient 任务归一化器已丢弃；重复 task_started 仅补关联键）。
+   *     覆盖旧 _handleTaskProgress 的懒注册路径——差异：懒注册现也落
+   *     [TASK_STARTED] 行（旧仅静默注册）；该路径仅在 task_started 丢失/daemon
+   *     重启窗口触发，交付报告已列明）；
+   *   - running + 已注册：对齐旧 _handleTaskProgress——emit（不节流）+
+   *     [TASK_PROGRESS] 行 ≥2000ms 节流（R-03）。已知差异（task_name 键判别的
+   *     固有模糊）：重复 task_started（SDK 重放，注册后到达）走本分支会多一次
+   *     running emit（旧实现静默 return）——注册/落行仍幂等（单一注册表条目 +
+   *     单一 [TASK_STARTED] 行），交付报告已列明。
+   *   - running 态 task_updated（metadata 无 task_name 键）：对齐旧
+   *     _handleTaskUpdated——仅 emit 轻量事件，不落行、不动节流锚点。
    */
-  private _clearRunningBashCommands(sessionId: string): void {
-    for (const [toolUseId, meta] of this._runningBashCommands) {
-      if (meta.sessionId === sessionId) {
-        this._runningBashCommands.delete(toolUseId);
+  private async _handleAgentTaskStatusEvent(
+    state: SessionState,
+    ev: AgentEvent,
+  ): Promise<void> {
+    const meta = eventMetaOf(ev);
+    const taskId = strOf(meta?.['task_id']);
+    if (!taskId) return; // 无 task_id 无法注册/关联（归一化器已过滤，防御运行时异常形态）
+    const toolUseId = strOf(meta?.['tool_use_id']) || undefined;
+    const status = strOf(meta?.['status']);
+
+    // 终态（task_updated patch 映射）：仅 emit（任务表条目仍在——权威终态由
+    // task_notification 注销）。
+    if (status === 'completed' || status === 'failed' || status === 'stopped') {
+      const terminalInfo = this._getOrCreateTaskMap(state.sessionId).get(taskId);
+      if (!terminalInfo) {
+        // 任务表无记录（未注册 / 已注销）→ 轻量信号无从挂靠。
+        return;
       }
-    }
-  }
-
-  // ── task-03（2026-08-27-background-subagent-progress）：后台任务生命周期消费 ──
-
-  /**
-   * task-03（design §5 P1.1）：system/task_* 消息统一入口（_onMessage 拦截分支调用）。
-   *
-   * 四类子消息分派（SDK 0.3.181 sdk.d.ts:4012-4092 契约 + spike 实测字段）：
-   *   - task_started：注册任务表 + emit running + 落 [TASK_STARTED] 行；
-   *   - task_progress：更新 lastProgressAt + emit 进度 + 节流落 [TASK_PROGRESS] 行；
-   *   - task_notification：emit 终态 + 落 [TASK_NOTIFICATION] 行（不节流）+ 注销；
-   *   - task_updated：仅 patch.status/is_backgrounded 变化时 emit 轻量事件，不落行。
-   */
-  private async _onBackgroundTaskSystemMessage(
-    state: SessionState,
-    subtype:
-      | 'task_started'
-      | 'task_progress'
-      | 'task_notification'
-      | 'task_updated',
-    msg: Record<string, unknown>,
-  ): Promise<void> {
-    const taskId = typeof msg['task_id'] === 'string' ? msg['task_id'] : '';
-    if (!taskId) {
-      // 无 task_id 无法注册/关联（类型契约必有，防御运行时异常形态）。
+      const terminalRunId = terminalInfo.runId ?? state.currentRunId;
+      if (!terminalRunId) return;
+      const errorText = strOf(meta?.['summary']) || undefined;
+      this._emitSessionEvent(state.sessionId, terminalRunId, {
+        kind: 'agent_task_status',
+        task_id: taskId,
+        task_name: terminalInfo.taskName,
+        status,
+        ...(terminalInfo.toolUseId
+          ? { tool_use_id: terminalInfo.toolUseId }
+          : {}),
+        ...(errorText ? { summary: errorText } : {}),
+      });
       return;
     }
-    const rawToolUseId = msg['tool_use_id'];
-    const toolUseId =
-      typeof rawToolUseId === 'string' && rawToolUseId ? rawToolUseId : undefined;
-    if (subtype === 'task_started') {
-      await this._handleTaskStarted(state, msg, taskId, toolUseId);
-    } else if (subtype === 'task_progress') {
-      await this._handleTaskProgress(state, msg, taskId, toolUseId);
-    } else if (subtype === 'task_notification') {
-      await this._handleTaskNotification(state, msg, taskId, toolUseId);
-    } else {
-      this._handleTaskUpdated(state, msg, taskId);
-    }
-  }
-
-  /**
-   * task-03：task_started 消费——注册任务表 + emit running + 落 [TASK_STARTED] 行。
-   *
-   * async 标记按 true 记：SDK 任务生命周期系统（task_* 消息族 + task_notification
-   * 跨 turn 到达 + is_backgrounded patch）即后台任务机制，spike 实测消息来自后台
-   * Task 派发；前台子代理可见性走 forwardSubagentText + parent_tool_use_id 转发链
-   * （2026-06-28-daemon-subagent-transcript），不经本表。emit 的 extra **不带**
-   * async（task-03 口径：async 仅回执兜底路径必发）；[TASK_STARTED] 行携带
-   * async:true（task_log_line_format 契约字段）。
-   */
-  private async _handleTaskStarted(
-    state: SessionState,
-    msg: Record<string, unknown>,
-    taskId: string,
-    toolUseId: string | undefined,
-  ): Promise<void> {
-    // SDK 契约：skip_transcript=true 为 ambient/housekeeping 任务（如压缩），
-    // 「Consumers should hide this from the inline transcript」——[TASK_*] 行即
-    // transcript 行，跳过注册/emit/落行避免幽灵任务卡片。
-    if (msg['skip_transcript'] === true) {
-      return;
-    }
-    const tasks = this._getOrCreateTaskMap(state.sessionId);
-    const existing = tasks.get(taskId);
-    if (existing) {
-      // 重复 task_started（SDK 重放）：仅补全缺失关联键，不重复 emit/落行。
-      if (toolUseId && !existing.toolUseId) {
-        existing.toolUseId = toolUseId;
-      }
-      return;
-    }
-    const description =
-      typeof msg['description'] === 'string' ? msg['description'] : '';
-    const subagentType =
-      typeof msg['subagent_type'] === 'string' && msg['subagent_type']
-        ? msg['subagent_type']
-        : undefined;
-    const taskName =
-      description ||
-      (toolUseId ? this._agentToolUseMeta.get(toolUseId)?.taskName : undefined) ||
-      '后台任务';
-    // 捕获派发 runId（task_notification 常在本 turn 收尾后到达，届时 currentRunId
-    // 已被 _onResult 清空——注册表是唯一带 runId 的地方）。
-    const runId = state.currentRunId;
-    tasks.set(taskId, {
-      ...(toolUseId ? { toolUseId } : {}),
-      taskName,
-      ...(subagentType ? { subagentType } : {}),
-      async: true,
-      startedAt: Date.now(),
-      ...(runId ? { runId } : {}),
-    });
-    // 无 runId（极端时序：task_started 在 turn 收尾后到达且注册时未捕获）→
-    // emit/落行双双跳过；注册表仍在，后续 progress/notification 用
-    // info.runId ?? currentRunId 兜住。
-    if (!runId) {
-      return;
-    }
-    this._emitSessionEvent(state.sessionId, runId, {
-      kind: 'agent_task_status',
-      task_id: taskId,
-      task_name: taskName,
-      status: 'running',
-      ...(toolUseId ? { tool_use_id: toolUseId } : {}),
-    });
-    await this._writeTaskLine(state.sessionId, runId, '[TASK_STARTED]', {
-      task_id: taskId,
-      ...(toolUseId ? { tool_use_id: toolUseId } : {}),
-      task_name: taskName,
-      ...(subagentType ? { subagent_type: subagentType } : {}),
-      async: true,
-    }, toolUseId);
-  }
-
-  /**
-   * task-03：task_progress 消费——emit 进度（不节流）+ 节流落 [TASK_PROGRESS] 行。
-   *
-   * elapsed_ms 取 usage.duration_ms（服务端权威值）；usage 三字段按 number 守卫
-   * 读取。注册表缺失（task_started 丢失 / daemon 重启窗口）→ 懒注册：本消息自带
-   * description/subagent_type 可现场补建条目（startedAt 仅兜底，不影响进度精度）。
-   */
-  private async _handleTaskProgress(
-    state: SessionState,
-    msg: Record<string, unknown>,
-    taskId: string,
-    toolUseId: string | undefined,
-  ): Promise<void> {
-    const usage = msg['usage'] as
-      | { total_tokens?: unknown; tool_uses?: unknown; duration_ms?: unknown }
-      | undefined;
-    const elapsedMs =
-      usage && typeof usage.duration_ms === 'number'
-        ? usage.duration_ms
-        : undefined;
-    const totalTokens =
-      usage && typeof usage.total_tokens === 'number'
-        ? usage.total_tokens
-        : undefined;
-    const toolUses =
-      usage && typeof usage.tool_uses === 'number'
-        ? usage.tool_uses
-        : undefined;
-    const lastToolName =
-      typeof msg['last_tool_name'] === 'string' && msg['last_tool_name']
-        ? msg['last_tool_name']
-        : undefined;
-    const summary =
-      typeof msg['summary'] === 'string' && msg['summary']
-        ? msg['summary']
-        : undefined;
 
     const tasks = this._getOrCreateTaskMap(state.sessionId);
-    let info = tasks.get(taskId);
+    const info = tasks.get(taskId);
+    // task_updated 判别：归一化器的 task_updated 事件 metadata 只带
+    // {task_id, status, summary?}（不带 task_name 键）；task_started/task_progress
+    // 恒带 task_name 键（description || '后台任务'）。据此区分 updated 轻量信号
+    //（emit-only，不落行）与 started/progress 家族（注册 + 落行）。
+    const isUpdatedSignal =
+      !meta || !('task_name' in (meta as Record<string, unknown>));
+    if (isUpdatedSignal && info) {
+      // running 态 task_updated（patch.status 映射 running/killed 前的中间态）：
+      // 对齐旧 _handleTaskUpdated——仅 emit 轻量事件，不落行、不动节流锚点。
+      const updatedRunId = info.runId ?? state.currentRunId;
+      if (!updatedRunId) return;
+      const updatedSummary = strOf(meta?.['summary']) || undefined;
+      this._emitSessionEvent(state.sessionId, updatedRunId, {
+        kind: 'agent_task_status',
+        task_id: taskId,
+        task_name: info.taskName,
+        status: 'running',
+        ...(info.toolUseId ? { tool_use_id: info.toolUseId } : {}),
+        ...(updatedSummary ? { summary: updatedSummary } : {}),
+      });
+      return;
+    }
     if (!info) {
-      const description =
-        typeof msg['description'] === 'string' ? msg['description'] : '';
-      const subagentType =
-        typeof msg['subagent_type'] === 'string' && msg['subagent_type']
-          ? msg['subagent_type']
-          : undefined;
-      const meta = toolUseId
-        ? this._agentToolUseMeta.get(toolUseId)
-        : undefined;
-      info = {
+      // running + 未注册：注册 + emit + [TASK_STARTED] 行。
+      const taskName = strOf(meta?.['task_name']) || '后台任务';
+      const subagentType = strOf(meta?.['subagent_type']) || undefined;
+      // 捕获派发 runId（task_notification 常在本 turn 收尾后到达，届时
+      // currentRunId 已清空——注册表是唯一带 runId 的地方）。
+      const runId = state.currentRunId;
+      tasks.set(taskId, {
         ...(toolUseId ? { toolUseId } : {}),
-        taskName: description || meta?.taskName || '后台任务',
+        taskName,
         ...(subagentType ? { subagentType } : {}),
         async: true,
         startedAt: Date.now(),
-        ...(state.currentRunId ? { runId: state.currentRunId } : {}),
-      };
-      tasks.set(taskId, info);
-    } else if (toolUseId && !info.toolUseId) {
+        ...(runId ? { runId } : {}),
+      });
+      // 无 runId（极端时序）→ emit/落行双双跳过；注册表仍在，后续
+      // progress/notification 用 info.runId ?? currentRunId 兜住。
+      if (!runId) return;
+      this._emitSessionEvent(state.sessionId, runId, {
+        kind: 'agent_task_status',
+        task_id: taskId,
+        task_name: taskName,
+        status: 'running',
+        ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+      });
+      await this._writeTaskLine(state.sessionId, runId, '[TASK_STARTED]', {
+        task_id: taskId,
+        ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+        task_name: taskName,
+        ...(subagentType ? { subagent_type: subagentType } : {}),
+        async: true,
+      }, toolUseId);
+      return;
+    }
+
+    // running + 已注册：进度（emit 不节流 + [TASK_PROGRESS] 行 ≥2000ms 节流）。
+    if (toolUseId && !info.toolUseId) {
+      // 重复信号补全缺失关联键（对齐旧 _handleTaskStarted 幅边）。
       info.toolUseId = toolUseId;
     }
     info.lastProgressAt = Date.now();
-
     const runId = info.runId ?? state.currentRunId;
-    if (!runId) {
-      return;
-    }
+    if (!runId) return;
+    const lastToolName = strOf(meta?.['last_tool_name']) || undefined;
+    const summary = strOf(meta?.['summary']) || undefined;
+    const elapsedMs = numOf(meta?.['elapsed_ms']);
+    const totalTokens = numOf(meta?.['total_tokens']);
+    const toolUses = numOf(meta?.['tool_uses']);
     // emit 不节流（SSE 实时精度优先；R-03 节流只作用于落行）。
     this._emitSessionEvent(state.sessionId, runId, {
       kind: 'agent_task_status',
@@ -5114,37 +5037,36 @@ export class SessionManager {
   }
 
   /**
-   * task-03：task_notification 消费——emit 终态 + 落 [TASK_NOTIFICATION] 行
-   * （不节流）+ 任务表注销。usage 可选（类型契约标 ?；spike 实测到达但需
-   * None 容错）——缺失时 elapsed_ms 不发（undefined 守卫剔除，前端走本地
-   * 走秒兜底，design §6 契约表）。
+   * task-08（对账表 #8）：status/task_notification 消费——emit 终态 +
+   * 落 [TASK_NOTIFICATION] 行（不节流）+ 任务表注销 + 完成/失败触发主代理
+   * 唤醒（对齐旧 _handleTaskNotification，elapsed_ms 服务端权威值经归一化器
+   * 从 usage.duration_ms 提升 metadata；缺失时不发，前端本地走秒兜底）。
    */
-  private async _handleTaskNotification(
+  private async _handleTaskNotificationEvent(
     state: SessionState,
-    msg: Record<string, unknown>,
-    taskId: string,
-    toolUseId: string | undefined,
+    ev: AgentEvent,
   ): Promise<void> {
-    const rawStatus = msg['status'];
+    const meta = eventMetaOf(ev);
+    const taskId = strOf(meta?.['task_id']);
+    if (!taskId) return;
+    const rawStatus = strOf(meta?.['status']);
     const tasks = this._getOrCreateTaskMap(state.sessionId);
     const info = tasks.get(taskId);
-    const usage = msg['usage'] as { duration_ms?: unknown } | undefined;
-    const elapsedMs =
-      usage && typeof usage.duration_ms === 'number'
-        ? usage.duration_ms
-        : undefined;
-    const summary = typeof msg['summary'] === 'string' ? msg['summary'] : '';
-    // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同 task_id 的迟到
-    // progress 会走懒注册兜底而非挂死条目）。
+    const elapsedMs = numOf(meta?.['elapsed_ms']);
+    const summary = strOf(meta?.['summary']) || strOf(ev.content);
+    // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同
+    // task_id 的迟到 progress 会走懒注册兜底而非挂死条目）。
     tasks.delete(taskId);
     if (
       rawStatus !== 'completed' &&
       rawStatus !== 'failed' &&
       rawStatus !== 'stopped'
     ) {
-      // 非法终态（类型契约三值，防御运行时异常形态）：已注销，不再 emit/落行。
+      // 非法终态（归一化器已过滤，防御运行时异常形态）：
+      // 已注销，不再 emit/落行。
       return;
     }
+    const toolUseId = strOf(meta?.['tool_use_id']) || undefined;
     const taskName =
       info?.taskName ??
       (toolUseId
@@ -5153,8 +5075,8 @@ export class SessionManager {
       '后台任务';
     const runId = info?.runId ?? state.currentRunId;
     if (!runId) {
-      // 注册表缺失且无在跑 turn（如 daemon 重启后孤儿终态）：无处可归，跳过
-      //（会话 end 收敛兜底，design R-01 降级口径）。
+      // 注册表缺失且无在跑 turn（如 daemon 重启后孤儿终态）：无处可归，
+      // 跳过（会话 end 收敛兜底）。
       return;
     }
     const effectiveToolUseId = info?.toolUseId ?? toolUseId;
@@ -5250,63 +5172,6 @@ export class SessionManager {
   }
 
   /**
-   * task-03：task_updated 消费——轻量辅助信号（spike：patch{status,end_time} 与
-   * 终态 task_notification 同时到达，task_notification 才是权威终态，本消息
-   * 「仅记不消费为主」）。
-   *
-   * patch 只含**变化**字段（SDK 契约「Wire-safe subset of TaskState fields that
-   * changed」），出现即变化：仅 patch.status / patch.is_backgrounded 出现时 emit
-   * 轻量事件（复用 running 态字段 task_name/tool_use_id，failed 时附 patch.error
-   * 作 summary）；不落行、不注销（噪声控制，design §6 契约表第 4 行）。patch.status
-   * 六值 → SSE 四值映射：completed/failed 直通，killed→stopped，pending/running/
-   * paused 归 running。
-   */
-  private _handleTaskUpdated(
-    state: SessionState,
-    msg: Record<string, unknown>,
-    taskId: string,
-  ): void {
-    const patch = msg['patch'] as Record<string, unknown> | undefined;
-    if (!patch || typeof patch !== 'object') {
-      return;
-    }
-    const patchStatus =
-      typeof patch['status'] === 'string' ? patch['status'] : undefined;
-    const patchBackgrounded = patch['is_backgrounded'];
-    if (patchStatus === undefined && patchBackgrounded === undefined) {
-      // 仅 description/end_time 等非关键字段变化 → 不转发（噪声控制）。
-      return;
-    }
-    const info = this._getOrCreateTaskMap(state.sessionId).get(taskId);
-    if (!info) {
-      // 任务表无记录（未注册 / task_notification 已注销）→ 轻量信号无从挂靠。
-      return;
-    }
-    const mapped =
-      patchStatus === 'completed' || patchStatus === 'failed'
-        ? patchStatus
-        : patchStatus === 'killed'
-          ? 'stopped'
-          : 'running';
-    const runId = info.runId ?? state.currentRunId;
-    if (!runId) {
-      return;
-    }
-    const errorText =
-      typeof patch['error'] === 'string' && patch['error']
-        ? patch['error']
-        : undefined;
-    this._emitSessionEvent(state.sessionId, runId, {
-      kind: 'agent_task_status',
-      task_id: taskId,
-      task_name: info.taskName,
-      status: mapped,
-      ...(info.toolUseId ? { tool_use_id: info.toolUseId } : {}),
-      ...(errorText ? { summary: errorText } : {}),
-    });
-  }
-
-  /**
    * task-03（design §5 P1.2）：异步启动回执兜底注册——user tool_result 文本含
    * "Async agent launched successfully" 且正则提取到 agentId 时调用。
    *
@@ -5379,12 +5244,14 @@ export class SessionManager {
     payload: Record<string, unknown>,
     parentToolUseId?: string,
   ): Promise<void> {
-    const line = {
+    const line: Record<string, unknown> = {
       event_type: 'text',
       content: `${prefix} ${JSON.stringify(payload)}`,
       channel: 'stdout',
       ...(parentToolUseId ? { parent_tool_use_id: parentToolUseId } : {}),
-    } as unknown as SDKMessage;
+    };
+    // task-08：SessionManager 内 SDK 类型清零——legacy flat 形态按 Record dict
+    // 直传（原 InteractiveDriverMessage 别名已随 task-09 消费面清理退役删除）。
     await this.deps.onTurnMessage(sessionId, runId, line);
   }
 
@@ -5415,763 +5282,60 @@ export class SessionManager {
   }
 
   /**
-   * 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：从消息读归属 parentKey。
-   * SDKPartialAssistantMessage（stream_event，sdk.d.ts:3723）/ assistant / user message
-   * 带 parent_tool_use_id（非空=子代理该 tool_use 的 id，null=主 agent）→ 取该 id；
-   * 其余消息类型（如 SDKThinkingTokensMessage 不带该字段）读不到 → 退化 'main'
-   *（thinking_tokens 归主桶，estimated_tokens 显示降级，非计费不影响 R-02 回归）。
+   * task-08（FR-02 / D-002@v1）：销毁会话级 usage 台账 + seq 补号计数器
+   *（取代旧 ``_destroyPartialBuffer`` 的清理职责：budget 登记由调用方
+   * 额外显式清理，对齐创建失败/终态/shutdown 三处调用点；partial
+   * 定时器已随缓冲链下沉归一化器，由 driver.consume 的 finally
+   * dispose 兜底）。
    */
-  private _parentKeyOf(msg: SDKMessage): string {
-    const raw = (msg as Record<string, unknown>)['parent_tool_use_id'];
-    return typeof raw === 'string' && raw ? raw : 'main';
-  }
-
-  /**
-   * task-03 / D-002@v1：获取或创建指定 parentKey 的 partial 桶（二级 Map 内层）。
-   * 主 agent → 'main' 桶（行为与改造前单桶等价，R-02）；子代理 → 各自 tool_use_id 桶，
-   * 互不干扰。空桶对象首次 partial 时懒建。
-   */
-  private _getOrCreateBuffer(
-    sessionId: string,
-    parentKey: string,
-  ): PartialFlushBuffer {
-    let sessionMap = this._partialBuffers.get(sessionId);
-    if (!sessionMap) {
-      sessionMap = new Map<string, PartialFlushBuffer>();
-      this._partialBuffers.set(sessionId, sessionMap);
-    }
-    let buf = sessionMap.get(parentKey);
-    if (!buf) {
-      buf = {
-        parentKey,
-        thinking: '',
-        assistant: '',
-        lastTokens: 0,
-        flushedTokens: 0,
-        timer: null,
-        currentMessageId: null,
-        currentSegmentId: null,
-        currentAssistantSegmentId: null,
-        flushedSegments: [],
-        completedSegments: new Set<string>(),
-        pendingUsage: null,
-        flushedUsage: null,
-        sessionInputTokens: 0,
-        sessionOutputTokens: 0,
-        sessionCacheReadTokens: 0,
-        sessionCacheCreationTokens: 0,
-        turnInputTokens: 0,
-        turnOutputTokens: 0,
-        lastCallCtxTokens: 0,
-        lastCallOutputTokens: 0,
-        lastCallInputTokens: 0,
-        lastCallCacheReadTokens: 0,
-        lastCallCacheCreationTokens: 0,
-      };
-      sessionMap.set(parentKey, buf);
-    }
-    return buf;
-  }
-
-  /**
-   * ql-20260825-f6#2：turn 收尾收缩子代理 partial 桶 + subagentDepth（`_onResult` 调）。
-   *
-   * 背景：`_getOrCreateBuffer` 每个子代理 parentKey（tool_use_id）懒建桶，turn 边界
-   * 原只重置 completedSegments 不删桶；`subagentDepth.set(tId, ...)` 同样跨 turn 不清。
-   * 主 agent 长会话（lease 永不过期）每 spawn 一个子代理多一个桶 + 一条 depth，数月
-   * 线性膨胀。
-   *
-   * 语义与时机（选「turn 收尾清整轮桶」而非按 tool_result 精确清——SDK 契约下 turn
-   * result 前本轮所有子代理已结束，整轮回收无需解析 tool_result、无 mid-turn 误删风险）：
-   *   - 在 `_checkBudgetCutoff` **之后**调：`_aggregateSessionUsage` 跨桶求和，先删桶
-   *     会丢子代理 token 造成预算漏计。删除前把子桶的 sessionInput/OutputTokens 折算
-   *     进 'main' 桶（这两维是 per-API-call 增量累加，求和语义成立；cache_* 是会话级
-   *     replace 快照，不求和、保留 main 现值——子代理运行期的 cache 值已随 partial
-   *     flush 实时上报过 backend）。
-   *   - 子代理桶的 pending timer clearTimeout 后删除（late fire 由 `_flushPartial` 的
-   *     桶缺失早退兜底）；残留未 flush 的 thinking/assistant 文本随之丢弃——turn 已
-   *     result，完整 assistant message 早已覆盖（segment 守卫语义同 turn 边界重置）。
-   *   - `subagentDepth.clear()`：本轮 tool_use 登记表整体清空；下轮子代理消息前必有
-   *     其 tool_use 的 assistant message 重新登记（SDK 顺序：tool_use → 子消息 →
-   *     tool_result），跨 turn 无依赖。
-   *   - 'main' 桶保留（下 turn 复用）；无子代理桶时仅清 depth（幂等 no-op）。
-   *   - 会话终态另有 `_destroyPartialBuffer` 整清（含 timer），本方法不涉及。
-   */
-  private _shrinkSubagentBuffers(state: SessionState): void {
-    const sessionMap = this._partialBuffers.get(state.sessionId);
-    if (sessionMap) {
-      let hasSubagentBucket = false;
-      for (const key of sessionMap.keys()) {
-        if (key !== 'main') {
-          hasSubagentBucket = true;
-          break;
-        }
-      }
-      if (hasSubagentBucket) {
-        // 折算承接桶：main 不存在则懒建（仅承接会话级累计计数，正常流 main 早已建）。
-        const main = this._getOrCreateBuffer(state.sessionId, 'main');
-        for (const [key, buf] of sessionMap) {
-          if (key === 'main') continue;
-          main.sessionInputTokens += buf.sessionInputTokens || 0;
-          main.sessionOutputTokens += buf.sessionOutputTokens || 0;
-          if (buf.timer) {
-            clearTimeout(buf.timer);
-            buf.timer = null;
-          }
-          sessionMap.delete(key);
-        }
-      }
-    }
-    // ?.：旧测试替身 / 过渡态 state 可能缺 subagentDepth 字段（对齐 consume 退出处
-    // resolver 同款防御），缺字段时仅跳过 depth 清理。
-    state.subagentDepth?.clear();
-  }
-
-  /**
-   * task-11（design §5.3 D1/D2）：拼 thinking segment 的稳定 segmentId。
-   *
-   * 优先方案：`${messageId}:${blockIndex}`（同 assistant message 内 content block
-   * 数组下标稳定，跨 turn 用 messageId 隔离）。退化方案：message.id 缺失时退化为
-   * `${runId}:thinking`（同 turn 所有 thinking 共享一个 segmentId，边界 6 接受精度损失）。
-   *
-   * @param buf 当前 PartialFlushBuffer（读 currentMessageId）
-   * @param blockIndex content_block_delta 事件的 index 字段（缺失用 'thinking'）
-   */
-  private _resolveSegmentId(
-    state: SessionState,
-    buf: PartialFlushBuffer,
-    typeSegment: string,
-  ): string {
-    // P1 修复：messageId 单一数据源 = buf.currentMessageId（由 message_start 事件
-    // event.message.id 设置）。真实 SDK 的 content_block_delta 事件自身不带
-    // message.id（SDKPartialAssistantMessage 也没有顶层 message 字段），旧实现的
-    // 「从 delta 顶层读 message.id 作 hint」永远拿到 undefined，形同虚设；保留它
-    // 反而掩盖了「currentMessageId 被 _clearPartialBufferSync 清空 → late delta
-    // 退化为 runId:thinking」的真问题。故移除 hint，只信 currentMessageId。
-    // task-03 / D-002：segmentId 加 buf.parentKey 前缀（'main' 或 tool_use_id），
-    // 主/子代理 segment 空间隔离，避免不同 agent 的同 messageId:index 撞 id 导致
-    // completedSegments 守卫跨 agent 误判。partial 与 complete 都加同前缀，去重自洽。
-    const mid = buf.currentMessageId;
-    // task-13修复：segmentId 第 3 段用 block type（thinking/text）而非 stream index。
-    // 根因：SDK 把一个 turn 的 thinking+text 拆成多条同 mid message（每条 content 从 0），
-    // 但 stream content_block_delta.index 是 turn 级累计 → partial(stream index) 与
-    // complete(message content index) 对不上 → override 删不到 partial → 半截+全文双发。
-    // 用 type 不受消息拆分影响，partial 与 complete 稳定对齐（thinking 巧合对齐不再依赖）。
-    const idx = typeSegment;
-    const prefix = buf.parentKey;
-    if (mid) {
-      return `${prefix}:${mid}:${idx}`;
-    }
-    // 退化：同 turn 共享 segmentId（接受合并精度损失，边界 6）。
-    const runKey = state.currentRunId ?? 'unknown';
-    return `${prefix}:${runKey}:thinking`;
-  }
-
-  /**
-   * task-11 / task-06：从完整 assistant message 提取所有 thinking 与 assistant text
-   * block 的 segmentId。
-   *
-   * 遍历 `msg.message.content` 数组：
-   * - `type==='thinking'`（task-11）用其数组下标拼 segmentId；
-   * - `type==='text'`（task-06）用同结构 segmentId（`parentKey:mid:i`）。
-   * segmentId 与 partial 端 `_resolveSegmentId` 严格同格式（`messageId:blockIndex`，
-   * parentKey 前缀由入参提供，与 partial 的 buf.parentKey 同源），使完整 message
-   * 到达时 emit 的 [ASSISTANT_OVERRIDE]（task-07）能命中 partial 行的 segmentId 撤回。
-   * messageId 优先用 `msg.message.id`；缺失时退化到 currentRunId:thinking
-   * （同 _resolveSegmentId 策略，仅 thinking 分支退化，assistant text 不退化见下）。
-   */
-  private _extractCompletedSegments(
-    state: SessionState,
-    msg: SDKMessage,
-    parentKey: string,
-  ): Set<string> {
-    const segments = new Set<string>();
-    const message = (msg as { message?: { id?: string; content?: unknown } }).message;
-    if (!message || typeof message !== 'object') return segments;
-    const mid =
-      typeof message.id === 'string' && message.id ? message.id : null;
-    const runKey = state.currentRunId ?? 'unknown';
-    const content = message.content;
-    if (!Array.isArray(content)) return segments;
-    for (let i = 0; i < content.length; i++) {
-      const block = content[i] as { type?: string } | null;
-      if (!block) continue;
-      if (block.type === 'thinking') {
-        // task-03 / D-002：segmentId 带 parentKey 前缀，与 _resolveSegmentId 对齐
-        //（partial/complete 同前缀，completedSegments 守卫不跨 agent 误判）。
-        segments.add(mid ? `${parentKey}:${mid}:thinking` : `${parentKey}:${runKey}:thinking`);
-      } else if (block.type === 'text') {
-        // task-06（FR-02 / D-002@v1）：assistant text block completed segmentId，
-        // 与 task-05 partial（_resolveSegmentId → `parentKey:mid:idx`，idx=ev.index）
-        // 严格同格式（parentKey + mid + content 数组下标 i）。注意 assistant text 不
-        // 退化到 runKey:thinking——partial 端 mid 缺失时 idx='thinking' 仍走
-        // `prefix:mid:thinking` 不会是 runKey 分支（除非 mid 也缺失），故此处只在 mid
-        // 存在时提取（mid 缺失的退化场景由 thinking 分支覆盖，assistant 无独立退化态，
-        // 与 partial 退化口径一致：partial assistant 同样 mid 缺失才退化 runKey:thinking）。
-        if (mid) {
-          segments.add(`${parentKey}:${mid}:text`);
-        }
-      }
-    }
-    return segments;
-  }
-
-  /**
-   * 把一条 partial 事件（SDKPartialAssistantMessage / SDKThinkingTokensMessage）
-   * 累积到 per-session buffer，并按需启动 500ms flush 定时器。
-   *
-   * content_block_delta.thinking_delta → buf.thinking += delta.thinking
-   * content_block_delta.text_delta     → buf.assistant += delta.text
-   * system/thinking_tokens             → buf.lastTokens = estimated_tokens
-   * 其余 stream_event（message_start / content_block_start / message_delta 等）
-   * 无显示内容，跳过（timer 可能空转一次，flush 时空 buffer no-op）。
-   */
-  private _bufferPartial(state: SessionState, msg: SDKMessage): void {
-    const sessionId = state.sessionId;
-    // task-03 / D-002@v1：按 msg 归属 parentKey 分桶——子代理 partial delta 进自己的
-    // 桶，主 agent 进 'main' 桶。stream_event 带 parent_tool_use_id（sdk.d.ts:3723），
-    // thinking_tokens 不带（退化 'main'）。主/子 partial 互不干扰（R-02 P0）。
-    const parentKey = this._parentKeyOf(msg);
-    const buf = this._getOrCreateBuffer(sessionId, parentKey);
-
-    const msgType = (msg as { type?: string }).type;
-    if (msgType === 'stream_event') {
-      const event = (msg as { event?: unknown }).event;
-      if (event && typeof event === 'object') {
-        const ev = event as {
-          type?: string;
-          index?: number;
-          delta?: { type?: string; thinking?: string; text?: string };
-          message?: { id?: string };
-          // ql-20260627-usage：message_delta.usage（Claude SDK 全名 cache_*_input_tokens）。
-          usage?: Record<string, unknown>;
-        };
-        // task-11：message_start 提取 message.id（segmentId 拼接用，跨 message 隔离）。
-        // SDK 实测 message_start 带 message.id（Anthropic Messages API 标准）；若缺失
-        //（退化方案）后续 segmentId 回退到 currentRunId。
-        if (ev.type === 'message_start' && ev.message) {
-          const mid = ev.message.id;
-          if (typeof mid === 'string' && mid) {
-            buf.currentMessageId = mid;
-          }
-          // ql-session-usage：message_start.usage.input_tokens 是本次 API call
-          // 的完整输入 token（含 context）。累加到 session 级总量。
-          // cache_*_input_tokens 也在 message_start 中（如果启用 prompt caching）。
-          const startUsage = (ev.message as { usage?: Record<string, unknown> }).usage;
-          if (startUsage && typeof startUsage['input_tokens'] === 'number') {
-            buf.sessionInputTokens += startUsage['input_tokens'] as number;
-            // task-02：轮级输入同步累加（所有桶——子代理计费量经各自 pendingUsage
-            // flush 上报，backend max 聚合接收，R-05）。
-            buf.turnInputTokens += startUsage['input_tokens'] as number;
-          }
-          // ql-20260710-001（注释勘误 task-02 / 2026-08-27-session-token-usage-fix
-          // design §5 Phase 1.4）：cache_*_input_tokens 是**本调用缓存前缀量的最新
-          // 快照**（per-call 语义，replace 取最新值）——旧注释「会话级累计快照」描述
-          // 失准但 replace 行为正确（原 += 会与下方 message_delta 的叠加翻倍，见
-          // session-manager-usage-cache.test.ts）。连带勘误旧注释对 batch
-          // stream-json.ts:552/1143-1148 的错引：batch 实为 :498-511 对每次调用
-          // message_start 的 input/cache 三维逐调用 `+=` 累加（恰好佐证 per-call
-          // 语义）；:552 是 thinking 节流、:1143-1148 是 content 展平，均与 usage 无关。
-          if (startUsage && typeof startUsage['cache_read_input_tokens'] === 'number') {
-            buf.sessionCacheReadTokens = startUsage['cache_read_input_tokens'] as number;
-          }
-          if (startUsage && typeof startUsage['cache_creation_input_tokens'] === 'number') {
-            buf.sessionCacheCreationTokens = startUsage['cache_creation_input_tokens'] as number;
-          }
-          // 新 API call 开始，重置 per-call output tracker
-          buf.lastCallOutputTokens = 0;
-          // ql-20260831-011：input tracker 不重置为 0 而是 startUsage 值——GLM
-          // 兼容端点 message_start 无 input（实证轮内 ↑0）而 delta 可能携带
-          // cumulative input；差分基线取 start 值（官方 Claude start 带 input 时
-          // delta 首值 - start = 0 不重复计）。start 无 input → 基线 0。
-          buf.lastCallInputTokens =
-            startUsage && typeof startUsage['input_tokens'] === 'number'
-              ? (startUsage['input_tokens'] as number)
-              : 0;
-          buf.lastCallCacheReadTokens = 0;
-          buf.lastCallCacheCreationTokens = 0;
-          // task-02（FR-01 / D-006）：main 桶计算本调用 ctx = input + cache_read +
-          // cache_creation（三分量和，上下文环分子）。子代理桶不计算（恒 0）——其
-          // 上下文非会话主上下文，注入会把环切到子代理 ctx 再跳回（X-02/B2）。
-          // cache 两维快照存 tracker，供 message_delta 携带 cache 时差分重算
-          //（delta 不带 input_tokens，ctx 只能以「上次值 ± cache 差量」更新）。
-          if (buf.parentKey === 'main') {
-            const startInput =
-              startUsage && typeof startUsage['input_tokens'] === 'number'
-                ? (startUsage['input_tokens'] as number)
-                : 0;
-            const startCr =
-              startUsage && typeof startUsage['cache_read_input_tokens'] === 'number'
-                ? (startUsage['cache_read_input_tokens'] as number)
-                : 0;
-            const startCc =
-              startUsage && typeof startUsage['cache_creation_input_tokens'] === 'number'
-                ? (startUsage['cache_creation_input_tokens'] as number)
-                : 0;
-            buf.lastCallCtxTokens = startInput + startCr + startCc;
-            buf.lastCallCacheReadTokens = startCr;
-            buf.lastCallCacheCreationTokens = startCc;
-          }
-        }
-        // content_block_start 带 content_block.type==='thinking' 仅是开始标记，
-        // thinking_delta 会跟随，无需特殊处理（避免 emit 空消息）。
-        if (ev.type === 'content_block_delta' && ev.delta) {
-          const delta = ev.delta;
-          if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-            // task-11（边界 5，late partial 守卫）+ P1 修复：完整 message 已覆盖
-            // 该 segment → 后到的 partial 直接丢弃（网络重排，罕见）。不累积、
-            // 不重启 timer。
-            //
-            // segmentId 复用 buf.currentMessageId（由 message_start 的
-            // event.message.id 设置）。真实 SDK 的 content_block_delta 事件自身
-            // 不带 message.id（SDKPartialAssistantMessage 也没有顶层 message 字段）
-            // ——旧实现读 msg.message?.id 永远是 undefined，且 _clearPartialBufferSync
-            // 把 currentMessageId 清成 null，导致 late delta 退化为 runId:thinking，
-            // 与 completedSegments 里的 messageId:index 对不上 → 守卫失效，late
-            // partial 被放行。现状：_clearPartialBufferSync 不再清 currentMessageId
-            //（完整 message 与 message_start 共享同一 id，下一条 message_start 自然
-            // 覆盖），late delta 解析出与原 partial 相同的 segmentId → 守卫正确拦截。
-            const segId = this._resolveSegmentId(state, buf, 'thinking');
-            if (buf.completedSegments.has(segId)) {
-              return;
-            }
-            buf.currentSegmentId = segId;
-            buf.thinking += delta.thinking;
-          } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-            // task-05（D-002@v1）：assistant text partial segmentId，照搬 thinking_delta
-            //（:2571-2576）口径——复用 _resolveSegmentId(state, buf, ev.index)，使 partial
-            // segmentId 与 task-06 _extractCompletedSegments 的 text block segmentId
-            //（${parentKey}:${mid}:${i}）严格一致，override（task-07 扩 assistant）才能命中。
-            // late text_delta 守卫（同 thinking：完整 message 已覆盖该 segment → 丢弃）。
-            const textSegId = this._resolveSegmentId(state, buf, 'text');
-            if (buf.completedSegments.has(textSegId)) {
-              return;
-            }
-            buf.currentAssistantSegmentId = textSegId;
-            buf.assistant += delta.text;
-          }
-        }
-        // ql-20260627-usage：message_delta 携带本 message 的 cumulative usage
-        //（Claude 流式计费，整条累计；cache_*_input_tokens 为全名）。
-        // ql-session-usage：message_delta.usage.output_tokens 是本 API call 的累计
-        // output。我们算 delta（本次 - 上次）累加到 session 级总量，让 submitMessages
-        // 发送递增的 session 总量（而非单次 call 的值，避免前端只看到几 k）。
-        if (ev.type === 'message_delta' && ev.usage) {
-          const u = ev.usage;
-          // output delta accumulation
-          const callOut = typeof u['output_tokens'] === 'number' ? (u['output_tokens'] as number) : 0;
-          const outDelta = Math.max(0, callOut - buf.lastCallOutputTokens);
-          buf.sessionOutputTokens += outDelta;
-          buf.lastCallOutputTokens = callOut;
-          // task-02：轮级 output 同步累加同一差分（所有桶，复用 lastCallOutputTokens 差分）。
-          buf.turnOutputTokens += outDelta;
-
-          // ql-20260831-011：input delta accumulation（与 output 同构差分）。官方
-          // Claude message_delta 不带 input_tokens → typeof 守卫不命中，零影响；
-          // GLM 兼容端点若在 delta 携带 cumulative input（message_start 无 input
-          // 场景），差分累加让轮内输入实时上报（前端 ↑执行中… → ↑数值）。
-          if (typeof u['input_tokens'] === 'number') {
-            const callIn = u['input_tokens'] as number;
-            const inDelta = Math.max(0, callIn - buf.lastCallInputTokens);
-            buf.sessionInputTokens += inDelta;
-            buf.turnInputTokens += inDelta;
-            buf.lastCallInputTokens = callIn;
-            // main 桶 ctx 同步加 input 差量（ctx = input+cache_read+cache_creation
-            // 瞬时量；cache 差量在下方 replace 块重算，此处先加 input 份额）。
-            if (buf.parentKey === 'main') {
-              buf.lastCallCtxTokens += inDelta;
-            }
-          }
-
-          // ql-20260710-001（注释勘误 task-02）：cache 两维 replace——cache_*_input_tokens
-          // 是本调用缓存前缀量的最新快照（per-call），取最新值覆盖而非 delta 累加
-          //（message_start 已 replace 设值，此处再 delta 会翻倍；仅当 message_delta
-          // 携带该字段时覆盖，缺失则保留 message_start 的值不变）。旧注释引 batch
-          // stream-json.ts:552「message_delta replace」佐证系错引——batch 实为
-          // :498-511 逐调用 `+=` 累加（per-call 语义同向，replace/累加是交互/批处理
-          // 两种聚合实现，行为零改动）。
-          const deltaHasCr = typeof u['cache_read_input_tokens'] === 'number';
-          const deltaHasCc = typeof u['cache_creation_input_tokens'] === 'number';
-          if (deltaHasCr) {
-            buf.sessionCacheReadTokens = u['cache_read_input_tokens'] as number;
-          }
-          if (deltaHasCc) {
-            buf.sessionCacheCreationTokens = u['cache_creation_input_tokens'] as number;
-          }
-          // task-02（FR-01 / D-006）：main 桶在 delta 携带 cache 时用最新 cache 差分
-          // 重算本调用 ctx（瞬时量，delta 不带 input_tokens，只能以「上次快照 ±
-          // cache 差量」更新）。子代理桶不重算（不注入 ctx）。
-          if (buf.parentKey === 'main' && (deltaHasCr || deltaHasCc)) {
-            const prevCr = buf.lastCallCacheReadTokens;
-            const prevCc = buf.lastCallCacheCreationTokens;
-            const newCr = deltaHasCr ? (u['cache_read_input_tokens'] as number) : prevCr;
-            const newCc = deltaHasCc ? (u['cache_creation_input_tokens'] as number) : prevCc;
-            buf.lastCallCacheReadTokens = newCr;
-            buf.lastCallCacheCreationTokens = newCc;
-            buf.lastCallCtxTokens = buf.lastCallCtxTokens - prevCr - prevCc + newCr + newCc;
-          }
-
-          // task-02：pendingUsage 改**轮级**值（本轮至今累计，消实时/终态跨语义跳变
-          // FR-02）；cache_* 保持快照语义；main 桶附加 ctx_tokens（子桶 pendingUsage
-          // 不含该键，backend 缺键即跳过）。
-          buf.pendingUsage = {
-            input_tokens: buf.turnInputTokens,
-            output_tokens: buf.turnOutputTokens,
-            cache_read_tokens: buf.sessionCacheReadTokens,
-            cache_creation_tokens: buf.sessionCacheCreationTokens,
-          };
-          if (buf.parentKey === 'main') {
-            buf.pendingUsage.ctx_tokens = buf.lastCallCtxTokens;
-          }
-        }
-      }
-    } else if (msgType === 'system') {
-      // SDKThinkingTokensMessage：estimated_tokens 是 running total（非增量）。
-      const tokens = (msg as { estimated_tokens?: number }).estimated_tokens;
-      if (typeof tokens === 'number') {
-        buf.lastTokens = tokens;
-      }
-    }
-
-    // 启动 500ms 定时器（若未在跑）。首次 partial 触发，后续 partial 复用同一 timer
-    // 直到 flush 清 timer；flush 后若仍有 partial 到达会重建 timer（自然节流）。
-    if (buf.timer === null) {
-      buf.timer = setTimeout(() => {
-        // task-03：flush 指定 parentKey 的桶（timer 是 per-buffer 的）。
-        this._flushPartial(sessionId, parentKey).catch((err) => {
-          // flush 失败不崩 session 运行；记日志后继续（buffer 清空，下次 partial 重建）。
-          // eslint-disable-next-line no-console
-          console.error('[session-manager] partial flush failed', err);
-        });
-      }, SessionManager.PARTIAL_FLUSH_MS);
-      // unref 不阻止 node 退出（与 _idleTimer 同策略）。
-      const t = buf.timer as unknown as { unref?: () => void };
-      if (typeof t.unref === 'function') {
-        t.unref();
-      }
-    }
-  }
-
-  /**
-   * flush 一个 session 的 partial buffer：把累积的 thinking/text/tokens
-   * 格式化为 [THINKING]/[ASSISTANT]/[SYSTEM:thinking_tokens] stdout 消息，
-   * 调 onTurnMessage 推送（与 task-runner _eventToMessages 同格式，前端
-   * normalize.ts 自动合并连续 [THINKING] delta）。
-   *
-   * 清空 buffer 内容 + timer 引用（idle）。无 currentRunId / session 不存在
-   * 时丢弃（不推到已结束的 turn）。
-   */
-  private async _flushPartial(
-    sessionId: string,
-    parentKey: string,
-  ): Promise<void> {
-    const buf = this._partialBuffers.get(sessionId)?.get(parentKey);
-    if (!buf) return;
-    // 先清 timer 引用，让下次 partial 能重建（自然节流）。
-    buf.timer = null;
-
-    const state = this._store.get(sessionId);
-    if (!state) {
-      // session 已不存在（end/fail 已销毁 buffer，但定时器可能已 in-flight）→ 销毁
-      // 整个 session 所有桶（_destroyPartialBuffer 遍历内层 Map clearTimeout）。
-      this._destroyPartialBuffer(sessionId);
-      return;
-    }
-    const runId = state.currentRunId;
-    if (!runId) {
-      // 无 active turn（turn 边界已过）→ 丢弃残留 buffer，不推到旧/空 runId。
-      buf.thinking = '';
-      buf.assistant = '';
-      return;
-    }
-
-    // 快照累积内容后清空，允许 flush 期间（async await）继续累积到下个窗口。
-    const thinking = buf.thinking;
-    const assistant = buf.assistant;
-    const tokens = buf.lastTokens;
-    buf.thinking = '';
-    buf.assistant = '';
-
-    // ql-20260627-usage：usage 仅在 pendingUsage 变化时注入一条 flat 消息
-    //（message_delta.usage 是 cumulative 全量，去重避免 backend 重复累加 token）。
-    // 一次 flush 至多注入一条（thinking 优先，否则 assistant）。
-    const usageToFlush =
-      buf.pendingUsage &&
-      !this._usageEqual(buf.pendingUsage, buf.flushedUsage)
-        ? buf.pendingUsage
-        : null;
-    let usageAttached = false;
-    const attachUsage = (formatted: SDKMessage): void => {
-      if (usageToFlush && !usageAttached) {
-        (formatted as Record<string, unknown>)['usage'] = { ...usageToFlush };
-        usageAttached = true;
-      }
-    };
-
-    if (thinking) {
-      // task-11（FR-07/FR-08）：partial 行携带 segmentId + isPartial，
-      // 供 backend（task-12）+ 前端 normalize 识别「该 segment 已有完整行时丢弃」。
-      const segmentId = buf.currentSegmentId ?? this._resolveSegmentId(state, buf, 'thinking');
-      const formatted = {
-        event_type: 'text',
-        content: `[THINKING] ${thinking}`,
-        channel: 'stdout',
-        metadata: { thinking: true, segmentId, isPartial: true },
-      } as unknown as SDKMessage;
-      attachUsage(formatted);
-      // 记录已 flush 的 segment（完整 message 到达时据此 emit override 信号）。
-      // task-07：标 kind:'thinking'——_emitOverrideSignals 据此选 [THINKING_OVERRIDE] 前缀
-      // + thinking:true metadata（与 assistant override 分流）。
-      buf.flushedSegments.push({ segmentId, logTimestamp: new Date().toISOString(), kind: 'thinking' });
-      await this.deps.onTurnMessage(sessionId, runId, formatted);
-      // 清空 currentSegmentId（下批 delta 会重新解析；text_delta 不污染）。
-      buf.currentSegmentId = null;
-    }
-    if (assistant) {
-      // task-05（FR-02 / D-002@v1）：assistant partial 行携带 segmentId + isPartial，
-      // 照搬 thinking partial（:2718-2733）口径，使完整 message 到达时 _emitOverrideSignals
-      //（task-07 扩 assistant）能 emit [ASSISTANT_OVERRIDE] 撤回本 partial 行，
-      // 消除「已 flush 半截 + 完整全文」双发（#35）。
-      // segmentId 复用 buf.currentAssistantSegmentId（text_delta 累积时由 _resolveSegmentId
-      // 解析，:2589-2598），缺失退化到 _resolveSegmentId(state, buf, undefined)——
-      // 与 task-06 _extractCompletedSegments 的 text block segmentId（${parentKey}:${mid}:${i}）
-      // 严格同格式，override 才能命中。
-      // 注意：metadata **不带 thinking:true**（B2，assistant 不是 thinking，否则被 thinking
-      // override 链路误撤）。
-      const segmentId =
-        buf.currentAssistantSegmentId ?? this._resolveSegmentId(state, buf, 'text');
-      const formatted = {
-        event_type: 'text',
-        content: `[ASSISTANT] ${assistant}`,
-        channel: 'stdout',
-        metadata: { segmentId, isPartial: true },
-      } as unknown as SDKMessage;
-      attachUsage(formatted);
-      // 记录已 flush 的 segment（完整 message 到达时据此 emit override 信号，对齐 thinking）。
-      // task-07：标 kind:'assistant'——_emitOverrideSignals 据此选 [ASSISTANT_OVERRIDE]
-      // 前缀，metadata **不带 thinking:true**（B2，assistant override 不走 thinking 链路）。
-      buf.flushedSegments.push({
-        segmentId,
-        logTimestamp: new Date().toISOString(),
-        kind: 'assistant',
-      });
-      await this.deps.onTurnMessage(sessionId, runId, formatted);
-      // 清空 currentAssistantSegmentId（下批 delta 会重新解析）。
-      buf.currentAssistantSegmentId = null;
-    }
-    // thinking_tokens 仅在值变化时 emit（running total，去重）。
-    if (tokens && tokens !== buf.flushedTokens) {
-      buf.flushedTokens = tokens;
-      const formatted = {
-        event_type: 'text',
-        content: `[SYSTEM:thinking_tokens] ${tokens}`,
-        channel: 'stdout',
-      } as unknown as SDKMessage;
-      await this.deps.onTurnMessage(sessionId, runId, formatted);
-    }
-    // usage 没有被任何 content 消息携带（message_delta 在 content 之后到达，
-    // thinking/assistant 可能已被前一轮 flush 清空）→ 发一条独立 usage 消息，
-    // 确保 backend 实时拿到 token 计数。content 为空字符串避免 agent_run_logs 多一行噪声。
-    if (usageToFlush && !usageAttached) {
-      const formatted = {
-        event_type: 'text',
-        content: '',
-        channel: 'stdout',
-      } as unknown as SDKMessage;
-      attachUsage(formatted);
-      await this.deps.onTurnMessage(sessionId, runId, formatted);
-    }
-    // usage 已通过 flat 消息注入 → 标记去重（下次同值不再发）。
-    if (usageToFlush) {
-      buf.flushedUsage = buf.pendingUsage;
-    }
-  }
-
-  /**
-   * ql-20260831-008：_flushTerminalUsage 的同步预判（任一桶存在未 flush 且
-   * 与 flushedUsage 不等的 pendingUsage 才 true）。_onResult 用它跳过空转
-   * await，保住「空链时 onTurnResult 同步直调」契约（见 _onResult 调用点
-   * 注释）；判定与 _flushTerminalUsage 的桶遍历同构，同 tick 内两者看到同一
-   * 状态，无 TOCTOU。
-   */
-  private _hasPendingTerminalUsage(state: SessionState): boolean {
-    const sessionMap = this._partialBuffers.get(state.sessionId);
-    if (!sessionMap) return false;
-    for (const buf of sessionMap.values()) {
-      if (
-        buf.pendingUsage &&
-        !this._usageEqual(buf.pendingUsage, buf.flushedUsage)
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * ql-20260831-002：轮末补发未 flush 的 pendingUsage（_onResult 内、清零前、
-   * onTurnResult 之前调用）。逐桶检查（main 桶带 ctx_tokens；子桶 pendingUsage
-   * 无该键，backend 缺键即跳过，口径不变），与 _flushPartial 的 usage-only 分支
-   * 同构：content 空串 + 顶层 usage，backend 只提取 usage 不落日志行。发后同步
-   * flushedUsage 防与在途 flush 定时器重复（runId 已清空，后续定时 flush 自然
-   * 早退，双保险）。
-   */
-  private async _flushTerminalUsage(state: SessionState, runId: string): Promise<void> {
-    const sessionMap = this._partialBuffers.get(state.sessionId);
-    if (!sessionMap) return;
-    for (const buf of sessionMap.values()) {
-      if (!buf.pendingUsage || this._usageEqual(buf.pendingUsage, buf.flushedUsage)) {
-        continue;
-      }
-      const formatted = {
-        event_type: 'text',
-        content: '',
-        channel: 'stdout',
-        usage: { ...buf.pendingUsage },
-      } as unknown as SDKMessage;
-      await this.deps.onTurnMessage(state.sessionId, runId, formatted);
-      buf.flushedUsage = buf.pendingUsage;
-    }
-  }
-
-  /**
-   * ql-20260627-usage：比较两个 usage 快照是否全字段相等（_flushPartial 去重判定）。
-   * 两者皆 null 视为相等；任一为 null 视为不等。
-   */
-  private _usageEqual(
-    a: PartialUsageSnapshot | null,
-    b: PartialUsageSnapshot | null,
-  ): boolean {
-    if (!a || !b) return a === b;
-    return (
-      a.input_tokens === b.input_tokens &&
-      a.output_tokens === b.output_tokens &&
-      a.cache_read_tokens === b.cache_read_tokens &&
-      a.cache_creation_tokens === b.cache_creation_tokens
-    );
-  }
-
-  /**
-   * 清空 partial buffer 内容 + 取消 pending timer（保留 buffer entry，
-   * session 仍 active，下个 turn 的 partial 会复用）。
-   *
-   * 完整 assistant message 到达时调用：delta 是完整内容子集，backend 会展开
-   * 完整 message 为全文 [THINKING]/[ASSISTANT]，未 flush 的 partial 尾部
-   * 必须丢弃避免重复。
-   *
-   * task-11（design §5.3 D1/D2）：sync 部分只清 buffer + 记录 completedSegments
-   *（late partial 守卫立即生效）；override 信号由 _emitOverrideSignals 异步发
-   *（在完整 message 转发之后，语义上"完整行覆盖 partial 行"）。
-   */
-  private _clearPartialBufferSync(
-    sessionId: string,
-    parentKey: string,
-    completedSegments: ReadonlySet<string> = new Set(),
-  ): void {
-    const buf = this._partialBuffers.get(sessionId)?.get(parentKey);
-    if (!buf) return;
-    if (buf.timer) {
-      clearTimeout(buf.timer);
-      buf.timer = null;
-    }
-    buf.thinking = '';
-    buf.assistant = '';
-    buf.lastTokens = 0;
-    buf.flushedTokens = 0;
-    // ql-20260627-usage：完整 assistant message 已带终态 usage（daemon lift 自
-    // message.usage）；下条 message_start 开始新 message，usage 重新累计，故清零。
-    buf.pendingUsage = null;
-    buf.flushedUsage = null;
-
-    // task-11：记录已完成 segment（late partial 守卫用）。
-    for (const segId of completedSegments) {
-      buf.completedSegments.add(segId);
-    }
-
-    // flushedSegments 清空（override 已在 _emitOverrideSignals 里消费）。
-    // 注意 completedSegments 不在此清——完整 message 到达 ≠ turn 结束，late partial
-    // 守卫需在本 turn 内持续生效；turn 真正结束由 _onResult 收尾时清。
-    buf.flushedSegments = [];
-    buf.currentSegmentId = null;
-    // task-05：同步清 assistant partial segmentId（对齐 currentSegmentId，turn 边界重置）。
-    buf.currentAssistantSegmentId = null;
-    // P1 修复：保留 currentMessageId。完整 assistant message 与 message_start
-    // 共享同一 message.id，late partial delta（content_block_delta 自身不带 id）
-    // 必须据此解析 segmentId 才能与 completedSegments 对齐 → 守卫才能拦截。
-    // 下一条 message_start 会自然覆盖；在此清空会让 late delta 退化为
-    // runId:thinking → 守卫失效。
-  }
-
-  /**
-   * task-11：对「已 flush 过 + 完整 message 已覆盖」的 segment emit override 覆盖信号。
-   * task-07 扩 assistant：按 kind 分流两种信号（信号前缀 + metadata 不同）：
-   * - kind:'thinking'  → `[THINKING_OVERRIDE] <segmentId>`，metadata { thinking:true, segmentId, stale:true }
-   * - kind:'assistant' → `[ASSISTANT_OVERRIDE] <segmentId>`，metadata { segmentId, stale:true }
-   *   **严禁 thinking:true**（B2：否则被 backend thinking override 链路误撤 assistant partial）。
-   *
-   * daemon 无法召回已发给 backend 的 partial 行（HTTP 已发、可能已落库 + SSE push），
-   * 只能 emit 信号通知 backend（task-12 据此丢弃同 segmentId 的 partial 落库行）+
-   * 前端 normalize（据此覆盖展示）。在完整 message 转发之后异步调用，不阻塞主流程。
-   *
-   * @param flushedSnapshot 调用方（_onMessage）在 _clearPartialBufferSync 清空
-   *   flushedSegments 之前抓的快照（sync 清理后 buf.flushedSegments 已空）。
-   */
-  private async _emitOverrideSignals(
-    sessionId: string,
-    runId: string | undefined,
-    completedSegments: ReadonlySet<string>,
-    flushedSnapshot: Array<{
-      segmentId: string;
-      logTimestamp: string;
-      kind: 'thinking' | 'assistant';
-    }>,
-  ): Promise<void> {
-    if (completedSegments.size === 0 || !runId) return;
-    const overrides = flushedSnapshot.filter((s) =>
-      completedSegments.has(s.segmentId),
-    );
-    if (overrides.length === 0) return;
-    await Promise.all(
-      overrides.map((s) => {
-        // task-07：按 kind 选信号前缀 + metadata。assistant 分支 metadata 严禁
-        // thinking:true（B2），否则被 backend thinking override 链路误撤。
-        const isAssistant = s.kind === 'assistant';
-        const content = isAssistant
-          ? `[ASSISTANT_OVERRIDE] ${s.segmentId}`
-          : `[THINKING_OVERRIDE] ${s.segmentId}`;
-        const metadata = isAssistant
-          ? { segmentId: s.segmentId, stale: true }
-          : { thinking: true, segmentId: s.segmentId, stale: true };
-        return this.deps.onTurnMessage(sessionId, runId, {
-          event_type: 'text',
-          content,
-          channel: 'stdout',
-          metadata,
-        } as unknown as SDKMessage);
-      }),
-    );
-  }
-
-  /**
-   * 销毁 partial buffer（含 timer）+ 从 Map 移除。
-   * session end/fail/daemon shutdown 时调用，防止 timer 泄漏。
-   */
-  private _destroyPartialBuffer(sessionId: string): void {
-    // task-03 / D-002：销毁整个 session 的所有桶（主 + 各子代理）。每个桶有独立 timer，
-    // 全部 clearTimeout 防泄漏。
-    // 审计修复 F3（2026-08-26）：budget 软切断状态清理移到 partial buffer 早退**之前**
-    // ——无 partial buffer 的会话（预算会话未必有 partial 流）end/fail 后同样要回收
-    // 两个 Map 条目，原实现早退跳过清理致泄漏（注释宣称会清，实现不清）。
+  private _destroyUsageLedger(sessionId: string): void {
+    this._sessionUsageBase.delete(sessionId);
+    this._turnUsageByParent.delete(sessionId);
+    this._turnEventSeq.delete(sessionId);
+    // budget 软切断登记同点位回收（对齐旧 _destroyPartialBuffer 的 F3 修复口径：
+    // 无 usage 台账的会话 end 后同样回收，防只增不减）。
     this._sessionBudgetTokens.delete(sessionId);
     this._overBudgetSessions.delete(sessionId);
-    const sessionMap = this._partialBuffers.get(sessionId);
-    if (!sessionMap) return;
-    for (const buf of sessionMap.values()) {
-      if (buf.timer) {
-        clearTimeout(buf.timer);
-        buf.timer = null;
-      }
-    }
-    this._partialBuffers.delete(sessionId);
   }
+
+  // ── 以下为 task-08 移除的旧机制归因清单（R-02 对账）─────────────────────────────────────────
+  // 随 partial 缓冲链下沉 ClaudeEventNormalizer（claude-events.ts，task-03 移植）
+  // 而从本文件删除的死代码：
+  //   - _parentKeyOf / _getOrCreateBuffer / _bufferPartial / _flushPartial /
+  //     _resolveSegmentId / _extractCompletedSegments / _clearPartialBufferSync /
+  //     _emitOverrideSignals / _usageEqual / _hasPendingTerminalUsage /
+  //     _flushTerminalUsage / _shrinkSubagentBuffers / _destroyPartialBuffer
+  //     （对应归一化器 _parentKeyOf / _getOrCreateBucket / _bufferPartial /
+  //     _flushBucket / _resolveSegmentId / _extractCompletedSegments /
+  //     _clearBucketSync / normalizeOverrideSignal / usageEqual / onTurnEnd /
+  //     dispose，行为等价由 tests/interactive/claude-events.test.ts 锚定）；
+  //   - _emitOverrideSignals（[ASSISTANT_OVERRIDE]/[THINKING_OVERRIDE] 文本信号发射）：
+  //     事件化为单条 override:true + segment_id 事件（D-004@v1），由归一化器
+  //     在完整消息展开时产出；旧双行（完整行 + 尾随信号行）合并为单事件；
+  //   - subagentDepth 内联状态机：归一化器实例字段维护，事件以 depth 一等字段直达；
+  //   - _runningBashCommands Bash 追踪索引：归一化器 runningBash 内置（含
+  //     elapsed_ms 计算），事件以 status/bash_chunk + status/bash_status 直达。
+
+
+}
+
+// ── task-08：事件字段 duck-type 读取辅助（对齐 claude-events.ts 同款口径） ──────
+
+/** 取事件 metadata 开放容器（非对象/缺失 → undefined）。 */
+function eventMetaOf(ev: AgentEvent): Record<string, unknown> | undefined {
+  const meta = ev.metadata;
+  if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+    return meta as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+/** String 化读取（null/undefined/非 string → ''）。 */
+function strOf(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+/** number 守卫读取（bool 排除；非 number → undefined）。 */
+function numOf(v: unknown): number | undefined {
+  return typeof v === 'number' ? v : undefined;
 }

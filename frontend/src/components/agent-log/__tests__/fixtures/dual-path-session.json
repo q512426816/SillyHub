@@ -1,0 +1,521 @@
+{
+  "_comment": [
+    "task-13（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：双路径渲染等价 fixture（Claude 零回归判据，design §2 目标 2）。",
+    "同一事件序列的两种载荷，行对象逐行同源（agent_event 载荷 = 旧行 + 顶层 agent_event 字段，文本行保留——backend 双写现实）：",
+    "  legacy      —— 旧文本协议行（[ASSISTANT]/[THINKING]/[TOOL_USE]/[TOOL_RESULT] 前缀 + tool_call 双写行 + 结构化列），",
+    "                 形态对齐 backend _extract_sdk_messages 落库/SSE 产物（run_sync/service.py:3489-3759）；",
+    "  agent_event —— 同行对象带顶层 agent_event（backend _persist_agent_event 注入 metadata_['agent_event'] 后 SSE 顶层透传，",
+    "                 run_sync/service.py:3762-4008/1548/424），事件形状对齐 daemon ClaudeEventNormalizer 产出（claude-events.ts：",
+    "                 partial {type,is_partial,segment_id} / 完整段 override {type,segment_id,override:true} / tool_use {tool_name,call_id,content=args JSON,metadata.tool_kind}）。",
+    "事件序列语义与 daemon 侧 tests/fixtures/claude-sdk-messages/golden-session.json 同源（task-12 产出；含 full-message-mixed /",
+    "partial-stream-override / session-init-status 的派生语义：thinking/text partial+override、Bash/Edit/Task tool_use+result 配对、",
+    "子代理段 tool_use+tool_result（msg18/19 形态，parent_tool_use_id=派发 Task 的 call_id）+ thinking/text 归属行、Edit structuredPatch、turn result）。",
+    "覆盖深功能：assistant 文本 / thinking / tool_use+result 配对（含子代理 tool_result 进父 Task 卡）/ 子代理归属行 / Edit patch 行 /",
+    "partial+override / turn result。",
+    "已知差异豁免（不构造的病理载荷，见 normalize-dual-path.test.ts 顶部注释与 task-13 交付报告）：",
+    "  1. tool_result 内容内嵌 [TOOL_USE]/[ASSISTANT] 等协议前缀行——旧轨 extractToolResultBody 会在内嵌前缀处截断，新轨取 ev.content 全文（task-10 报告差异）；本 fixture 的 tool_result 均为纯输出文本。",
+    "  2. 主 agent 的 Task tool_result 行（golden msg21 形态：无 parent 归属、call_id 指向 Task 卡、行序在子代理工具行之后）——旧轨按邻近",
+    "     退化配对落【子代理最后一张工具卡】，新轨按『无 parent → call_id 精确配对』梯级落【Task 卡】，两轨不等价（验收指令 prescribed 梯级的",
+    "     必然推论，待仲裁）；本 fixture 不构造该行——Task 卡的 result 由子代理 parent 配对 result 承载（即旧轨现状渲染），主 agent 收尾",
+    "     文本由 [RESULT:success] 行承载（对齐 golden msg22 形态：turn1 在 Task result 后直接 result 帧）。",
+    "  3. turn_result 行：双轨 backend 均不落行（service.py:3790-3793），本行按批量旧轨 [RESULT:success] 形态构造，覆盖防御性映射等价（task-10 normalize.test.ts 同口径）。",
+    "脱敏：会话/文件路径均为样例值（sess-sample-0001 / <REDACTED>），命令与代码片段为无害样例。"
+  ],
+  "legacy": [
+    {
+      "id": "lg-001",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:00.000Z",
+      "channel": "user_input",
+      "content_redacted": "帮我计算 17 × 23，并确认后端容器在运行。"
+    },
+    {
+      "id": "lg-002",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:02.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 用户想要",
+      "segment_id": "main:msg_m01:thinking"
+    },
+    {
+      "id": "lg-003",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:04.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 先检查容器，再派子代理计算",
+      "segment_id": "main:msg_m01:thinking"
+    },
+    {
+      "id": "lg-004",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:06.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 用户想要先检查容器，再派子代理计算，得到结果后直接汇报。"
+    },
+    {
+      "id": "lg-005",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:08.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 我先检查容器状态",
+      "segment_id": "main:msg_m01:text"
+    },
+    {
+      "id": "lg-006",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:10.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 我先检查容器状态，随后派子代理计算。"
+    },
+    {
+      "id": "lg-007",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:12.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Bash: docker ps --format '{{.Names}}' | head -5"
+    },
+    {
+      "id": "lg-008",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:12.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Bash\",\"args\":{\"command\":\"docker ps --format '{{.Names}}' | head -5\",\"description\":\"List running docker containers\"},\"timestamp\":\"2026-09-03T10:00:12.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_bash01\"}",
+      "tool_kind": "bash"
+    },
+    {
+      "id": "lg-009",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:15.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_RESULT] sillyhub-backend\nsillyhub-daemon"
+    },
+    {
+      "id": "lg-010",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:16.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 容器正常。接下来修正 spec-sync 的目录遍历。"
+    },
+    {
+      "id": "lg-011",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:18.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Edit: {\"file_path\":\"<REDACTED>/spec-sync.ts\",\"old_string\":\"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"new_string\":\"async function walkDir(root: string, pruneTop?: Set<string>, pruneNames?: Set<string>): Promise<WalkEntry[]> {\"}"
+    },
+    {
+      "id": "lg-012",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:18.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Edit\",\"args\":{\"file_path\":\"<REDACTED>/spec-sync.ts\",\"old_string\":\"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"new_string\":\"async function walkDir(root: string, pruneTop?: Set<string>, pruneNames?: Set<string>): Promise<WalkEntry[]> {\"},\"timestamp\":\"2026-09-03T10:00:18.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_edit01\"}",
+      "tool_kind": "write"
+    },
+    {
+      "id": "lg-013",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:21.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_RESULT] The file <REDACTED>/spec-sync.ts has been updated successfully. (file state is current in the context — no need to Read it back)",
+      "edit_patch": "[{\"oldStart\":536,\"oldLines\":7,\"newStart\":536,\"newLines\":11,\"lines\":[\"   */\",\"-async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"+async function walkDir(\",\"+  root: string,\",\"+  pruneTop?: Set<string>,\",\"+  pruneNames?: Set<string>,\",\"+): Promise<WalkEntry[]> {\",\"   const out: WalkEntry[] = [];\"]}]"
+    },
+    {
+      "id": "lg-014",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:23.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Task: {\"description\":\"Compute 17 times 23\",\"prompt\":\"Compute 17 * 23. Return only the numerical result.\",\"subagent_type\":\"general-purpose\"}"
+    },
+    {
+      "id": "lg-015",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:23.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Task\",\"args\":{\"description\":\"Compute 17 times 23\",\"prompt\":\"Compute 17 * 23. Return only the numerical result.\",\"subagent_type\":\"general-purpose\"},\"timestamp\":\"2026-09-03T10:00:23.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_task01\"}",
+      "tool_kind": "task"
+    },
+    {
+      "id": "lg-016",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:26.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 这是一道简单乘法，先读项目笔记再作答。",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1
+    },
+    {
+      "id": "lg-017",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:27.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Read: {\"file_path\":\"<REDACTED>/NOTES.md\"}",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1
+    },
+    {
+      "id": "lg-018",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:27.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Read\",\"args\":{\"file_path\":\"<REDACTED>/NOTES.md\"},\"timestamp\":\"2026-09-03T10:00:27.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_read01\"}",
+      "tool_kind": "read",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1
+    },
+    {
+      "id": "lg-019",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:29.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_RESULT] 17 * 23 = 391 (precomputed in notes)",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1
+    },
+    {
+      "id": "lg-020",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:30.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 17 × 23 = 391",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1
+    },
+    {
+      "id": "lg-021",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:31.000Z",
+      "channel": "stdout",
+      "content_redacted": "[RESULT:success] 17 × 23 = 391，任务完成。 duration=31000ms turns=3"
+    }
+  ],
+  "agent_event": [
+    {
+      "id": "lg-001",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:00.000Z",
+      "channel": "user_input",
+      "content_redacted": "帮我计算 17 × 23，并确认后端容器在运行。"
+    },
+    {
+      "id": "lg-002",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:02.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 用户想要",
+      "segment_id": "main:msg_m01:thinking",
+      "agent_event": {
+        "type": "thinking",
+        "content": "用户想要",
+        "is_partial": true,
+        "segment_id": "main:msg_m01:thinking",
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-003",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:04.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 先检查容器，再派子代理计算",
+      "segment_id": "main:msg_m01:thinking",
+      "agent_event": {
+        "type": "thinking",
+        "content": "先检查容器，再派子代理计算",
+        "is_partial": true,
+        "segment_id": "main:msg_m01:thinking",
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-004",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:06.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 用户想要先检查容器，再派子代理计算，得到结果后直接汇报。",
+      "agent_event": {
+        "type": "thinking",
+        "content": "用户想要先检查容器，再派子代理计算，得到结果后直接汇报。",
+        "override": true,
+        "segment_id": "main:msg_m01:thinking",
+        "depth": 0,
+        "usage": { "input_tokens": 9771, "output_tokens": 752, "cache_read_tokens": 25088 },
+        "session_id": "sess-sample-0001"
+      }
+    },
+    {
+      "id": "lg-005",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:08.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 我先检查容器状态",
+      "segment_id": "main:msg_m01:text",
+      "agent_event": {
+        "type": "text",
+        "content": "我先检查容器状态",
+        "is_partial": true,
+        "segment_id": "main:msg_m01:text",
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-006",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:10.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 我先检查容器状态，随后派子代理计算。",
+      "agent_event": {
+        "type": "text",
+        "content": "我先检查容器状态，随后派子代理计算。",
+        "override": true,
+        "segment_id": "main:msg_m01:text",
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-007",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:12.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Bash: docker ps --format '{{.Names}}' | head -5",
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Bash",
+        "call_id": "toolu_bash01",
+        "content": "{\"command\":\"docker ps --format '{{.Names}}' | head -5\",\"description\":\"List running docker containers\"}",
+        "metadata": { "tool_kind": "bash" },
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-008",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:12.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Bash\",\"args\":{\"command\":\"docker ps --format '{{.Names}}' | head -5\",\"description\":\"List running docker containers\"},\"timestamp\":\"2026-09-03T10:00:12.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_bash01\"}",
+      "tool_kind": "bash",
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Bash",
+        "call_id": "toolu_bash01",
+        "content": "{\"command\":\"docker ps --format '{{.Names}}' | head -5\",\"description\":\"List running docker containers\"}",
+        "metadata": { "tool_kind": "bash" },
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-009",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:15.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_RESULT] sillyhub-backend\nsillyhub-daemon",
+      "agent_event": {
+        "type": "tool_result",
+        "call_id": "toolu_bash01",
+        "content": "sillyhub-backend\nsillyhub-daemon",
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-010",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:16.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 容器正常。接下来修正 spec-sync 的目录遍历。",
+      "agent_event": {
+        "type": "text",
+        "content": "容器正常。接下来修正 spec-sync 的目录遍历。",
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-011",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:18.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Edit: {\"file_path\":\"<REDACTED>/spec-sync.ts\",\"old_string\":\"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"new_string\":\"async function walkDir(root: string, pruneTop?: Set<string>, pruneNames?: Set<string>): Promise<WalkEntry[]> {\"}",
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Edit",
+        "call_id": "toolu_edit01",
+        "content": "{\"file_path\":\"<REDACTED>/spec-sync.ts\",\"old_string\":\"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"new_string\":\"async function walkDir(root: string, pruneTop?: Set<string>, pruneNames?: Set<string>): Promise<WalkEntry[]> {\"}",
+        "metadata": { "tool_kind": "write" },
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-012",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:18.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Edit\",\"args\":{\"file_path\":\"<REDACTED>/spec-sync.ts\",\"old_string\":\"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"new_string\":\"async function walkDir(root: string, pruneTop?: Set<string>, pruneNames?: Set<string>): Promise<WalkEntry[]> {\"},\"timestamp\":\"2026-09-03T10:00:18.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_edit01\"}",
+      "tool_kind": "write",
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Edit",
+        "call_id": "toolu_edit01",
+        "content": "{\"file_path\":\"<REDACTED>/spec-sync.ts\",\"old_string\":\"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"new_string\":\"async function walkDir(root: string, pruneTop?: Set<string>, pruneNames?: Set<string>): Promise<WalkEntry[]> {\"}",
+        "metadata": { "tool_kind": "write" },
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-013",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:21.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_RESULT] The file <REDACTED>/spec-sync.ts has been updated successfully. (file state is current in the context — no need to Read it back)",
+      "edit_patch": "[{\"oldStart\":536,\"oldLines\":7,\"newStart\":536,\"newLines\":11,\"lines\":[\"   */\",\"-async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"+async function walkDir(\",\"+  root: string,\",\"+  pruneTop?: Set<string>,\",\"+  pruneNames?: Set<string>,\",\"+): Promise<WalkEntry[]> {\",\"   const out: WalkEntry[] = [];\"]}]",
+      "agent_event": {
+        "type": "tool_result",
+        "call_id": "toolu_edit01",
+        "content": "The file <REDACTED>/spec-sync.ts has been updated successfully. (file state is current in the context — no need to Read it back)",
+        "edit_patch": "[{\"oldStart\":536,\"oldLines\":7,\"newStart\":536,\"newLines\":11,\"lines\":[\"   */\",\"-async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\",\"+async function walkDir(\",\"+  root: string,\",\"+  pruneTop?: Set<string>,\",\"+  pruneNames?: Set<string>,\",\"+): Promise<WalkEntry[]> {\",\"   const out: WalkEntry[] = [];\"]}]",
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-014",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:23.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Task: {\"description\":\"Compute 17 times 23\",\"prompt\":\"Compute 17 * 23. Return only the numerical result.\",\"subagent_type\":\"general-purpose\"}",
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Task",
+        "call_id": "toolu_task01",
+        "content": "{\"description\":\"Compute 17 times 23\",\"prompt\":\"Compute 17 * 23. Return only the numerical result.\",\"subagent_type\":\"general-purpose\"}",
+        "metadata": { "tool_kind": "task" },
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-015",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:23.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Task\",\"args\":{\"description\":\"Compute 17 times 23\",\"prompt\":\"Compute 17 * 23. Return only the numerical result.\",\"subagent_type\":\"general-purpose\"},\"timestamp\":\"2026-09-03T10:00:23.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_task01\"}",
+      "tool_kind": "task",
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Task",
+        "call_id": "toolu_task01",
+        "content": "{\"description\":\"Compute 17 times 23\",\"prompt\":\"Compute 17 * 23. Return only the numerical result.\",\"subagent_type\":\"general-purpose\"}",
+        "metadata": { "tool_kind": "task" },
+        "depth": 0
+      }
+    },
+    {
+      "id": "lg-016",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:26.000Z",
+      "channel": "stdout",
+      "content_redacted": "[THINKING] 这是一道简单乘法，先读项目笔记再作答。",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1,
+      "agent_event": {
+        "type": "thinking",
+        "content": "这是一道简单乘法，先读项目笔记再作答。",
+        "segment_id": "toolu_task01:msg_s01:thinking",
+        "parent_tool_use_id": "toolu_task01",
+        "subagent_type": "general-purpose",
+        "depth": 1
+      }
+    },
+    {
+      "id": "lg-017",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:27.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_USE] Read: {\"file_path\":\"<REDACTED>/NOTES.md\"}",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1,
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Read",
+        "call_id": "toolu_read01",
+        "content": "{\"file_path\":\"<REDACTED>/NOTES.md\"}",
+        "metadata": { "tool_kind": "read" },
+        "parent_tool_use_id": "toolu_task01",
+        "subagent_type": "general-purpose",
+        "depth": 1
+      }
+    },
+    {
+      "id": "lg-018",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:27.000Z",
+      "channel": "tool_call",
+      "content_redacted": "{\"tool\":\"Read\",\"args\":{\"file_path\":\"<REDACTED>/NOTES.md\"},\"timestamp\":\"2026-09-03T10:00:27.000Z\",\"status\":\"allowed\",\"success\":true,\"tool_use_id\":\"toolu_read01\"}",
+      "tool_kind": "read",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1,
+      "agent_event": {
+        "type": "tool_use",
+        "tool_name": "Read",
+        "call_id": "toolu_read01",
+        "content": "{\"file_path\":\"<REDACTED>/NOTES.md\"}",
+        "metadata": { "tool_kind": "read" },
+        "parent_tool_use_id": "toolu_task01",
+        "subagent_type": "general-purpose",
+        "depth": 1
+      }
+    },
+    {
+      "id": "lg-019",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:29.000Z",
+      "channel": "stdout",
+      "content_redacted": "[TOOL_RESULT] 17 * 23 = 391 (precomputed in notes)",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1,
+      "agent_event": {
+        "type": "tool_result",
+        "call_id": "toolu_read01",
+        "content": "17 * 23 = 391 (precomputed in notes)",
+        "parent_tool_use_id": "toolu_task01",
+        "subagent_type": "general-purpose",
+        "depth": 1
+      }
+    },
+    {
+      "id": "lg-020",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:30.000Z",
+      "channel": "stdout",
+      "content_redacted": "[ASSISTANT] 17 × 23 = 391",
+      "parent_tool_use_id": "toolu_task01",
+      "subagent_type": "general-purpose",
+      "depth": 1,
+      "agent_event": {
+        "type": "text",
+        "content": "17 × 23 = 391",
+        "segment_id": "toolu_task01:msg_s01:text",
+        "parent_tool_use_id": "toolu_task01",
+        "subagent_type": "general-purpose",
+        "depth": 1
+      }
+    },
+    {
+      "id": "lg-021",
+      "run_id": "run-fixture-1",
+      "timestamp": "2026-09-03T10:00:31.000Z",
+      "channel": "stdout",
+      "content_redacted": "[RESULT:success] 17 × 23 = 391，任务完成。 duration=31000ms turns=3",
+      "agent_event": {
+        "type": "turn_result",
+        "content": "17 × 23 = 391，任务完成。 duration=31000ms turns=3",
+        "usage": { "input_tokens": 10112, "output_tokens": 210, "cache_read_tokens": 52000, "cache_creation_tokens": 1024 },
+        "session_id": "sess-sample-0001"
+      }
+    }
+  ]
+}

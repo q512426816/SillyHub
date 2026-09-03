@@ -20,7 +20,7 @@ import type {
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -32,7 +32,7 @@ function makeMockDriver() {
     start: vi.fn(
       (_input: AsyncIterable<SDKUserMessage>, _opts: StartOptions): Query => fakeQuery,
     ),
-    consume: vi.fn(async (_q: Query, _cb: ConsumeCallbacks): Promise<void> => {}),
+    consume: vi.fn(async (_q: Query, _cb: InteractiveDriverCallbacks): Promise<void> => {}),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
       if (!q) return false;
       return true;

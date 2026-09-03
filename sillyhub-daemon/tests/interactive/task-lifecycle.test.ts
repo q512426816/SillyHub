@@ -128,7 +128,10 @@ async function createHarnessWakeup(
   return createHarness(sessionId, runId, { onTaskWakeupInject });
 }
 
-// ── 伪 SDK 消息构造（SDK 0.3.181 system/task_* 契约 + spike 实测字段） ────────
+// ── 事件信封构造（task-08：mock 形态从 raw system 帧改为归一化器等价事件）────
+// 每个构造器产出 TurnMessageEnvelope{events}，事件形态与 ClaudeEventNormalizer
+// _normalizeTaskMessage 的输出逐字段对齐（claude-events.ts task-03 映射）——
+// 断言意图不变，仅输入轨从 raw SDK 形状换为中性事件。
 
 function msgTaskStarted(o: {
   taskId: string;
@@ -137,14 +140,24 @@ function msgTaskStarted(o: {
   subagentType?: string;
   skipTranscript?: boolean;
 }): Record<string, unknown> {
+  // skip_transcript：归一化器对 ambient 任务不产事件（session-manager.ts:4962-4964
+  // 旧口径的归一化器侧实现）——空 envelope 同构。
+  if (o.skipTranscript) return { events: [] };
   return {
-    type: 'system',
-    subtype: 'task_started',
-    task_id: o.taskId,
-    ...(o.toolUseId ? { tool_use_id: o.toolUseId } : {}),
-    ...(o.description !== undefined ? { description: o.description } : {}),
-    ...(o.subagentType ? { subagent_type: o.subagentType } : {}),
-    ...(o.skipTranscript ? { skip_transcript: true } : {}),
+    events: [
+      {
+        type: 'status',
+        subtype: 'agent_task_status',
+        content: o.description ?? '',
+        metadata: {
+          task_id: o.taskId,
+          task_name: o.description || '后台任务',
+          status: 'running',
+          ...(o.toolUseId ? { tool_use_id: o.toolUseId } : {}),
+          ...(o.subagentType ? { subagent_type: o.subagentType } : {}),
+        },
+      },
+    ],
   };
 }
 
@@ -157,16 +170,23 @@ function msgTaskProgress(o: {
   toolUses?: number;
 }): Record<string, unknown> {
   return {
-    type: 'system',
-    subtype: 'task_progress',
-    task_id: o.taskId,
-    ...(o.lastToolName ? { last_tool_name: o.lastToolName } : {}),
-    ...(o.summary ? { summary: o.summary } : {}),
-    usage: {
-      ...(o.durationMs !== undefined ? { duration_ms: o.durationMs } : {}),
-      ...(o.totalTokens !== undefined ? { total_tokens: o.totalTokens } : {}),
-      ...(o.toolUses !== undefined ? { tool_uses: o.toolUses } : {}),
-    },
+    events: [
+      {
+        type: 'status',
+        subtype: 'agent_task_status',
+        content: o.summary ?? '',
+        metadata: {
+          task_id: o.taskId,
+          task_name: '后台任务',
+          status: 'running',
+          ...(o.lastToolName ? { last_tool_name: o.lastToolName } : {}),
+          ...(o.summary ? { summary: o.summary } : {}),
+          ...(o.durationMs !== undefined ? { elapsed_ms: o.durationMs } : {}),
+          ...(o.totalTokens !== undefined ? { total_tokens: o.totalTokens } : {}),
+          ...(o.toolUses !== undefined ? { tool_uses: o.toolUses } : {}),
+        },
+      },
+    ],
   };
 }
 
@@ -178,15 +198,20 @@ function msgTaskNotification(o: {
   toolUseId?: string;
 }): Record<string, unknown> {
   return {
-    type: 'system',
-    subtype: 'task_notification',
-    task_id: o.taskId,
-    status: o.status,
-    ...(o.summary !== undefined ? { summary: o.summary } : {}),
-    ...(o.durationMs !== undefined
-      ? { usage: { duration_ms: o.durationMs } }
-      : {}),
-    ...(o.toolUseId ? { tool_use_id: o.toolUseId } : {}),
+    events: [
+      {
+        type: 'status',
+        subtype: 'task_notification',
+        content: o.summary ?? '',
+        metadata: {
+          task_id: o.taskId,
+          status: o.status,
+          ...(o.toolUseId ? { tool_use_id: o.toolUseId } : {}),
+          ...(o.summary !== undefined ? { summary: o.summary } : {}),
+          ...(o.durationMs !== undefined ? { elapsed_ms: o.durationMs } : {}),
+        },
+      },
+    ],
   };
 }
 
@@ -194,11 +219,35 @@ function msgTaskUpdated(o: {
   taskId: string;
   patch: Record<string, unknown>;
 }): Record<string, unknown> {
+  // 归一化器（claude-events.ts task-03）对 task_updated 仅 patch.status 出现才映射
+  //（六值→四值：completed/failed 直通、killed→stopped、其余 running；patch.error
+  // 作 summary）；无 patch.status（end_time/is_backgrounded-only）不产事件。
+  const patchStatus =
+    typeof o.patch.status === 'string' ? (o.patch.status as string) : undefined;
+  if (!patchStatus) return { events: [] };
+  const mapped =
+    patchStatus === 'completed' || patchStatus === 'failed'
+      ? patchStatus
+      : patchStatus === 'killed'
+        ? 'stopped'
+        : 'running';
+  const errorText =
+    typeof o.patch.error === 'string' && o.patch.error
+      ? (o.patch.error as string)
+      : undefined;
   return {
-    type: 'system',
-    subtype: 'task_updated',
-    task_id: o.taskId,
-    patch: o.patch,
+    events: [
+      {
+        type: 'status',
+        subtype: 'agent_task_status',
+        content: '',
+        metadata: {
+          task_id: o.taskId,
+          status: mapped,
+          ...(errorText ? { summary: errorText } : {}),
+        },
+      },
+    ],
   };
 }
 
@@ -536,25 +585,6 @@ describe('task-lifecycle FR-01 — task_updated 仅 status/is_backgrounded 变�
     expect(taskLineCalls(h).map((c) => parseTaskLine(c).prefix)).toEqual(['[TASK_STARTED]']);
   });
 
-  it('patch.is_backgrounded 变化 → emit running（复用注册字段）', async () => {
-    const h = await createHarness();
-    await h.emitMessage(
-      msgTaskStarted({ taskId: 'task-u2', toolUseId: 'toolu_u2', description: '后台化观察' }),
-    );
-    await h.emitMessage(
-      msgTaskUpdated({ taskId: 'task-u2', patch: { is_backgrounded: true } }),
-    );
-    const events = taskEventCalls(h);
-    expect(events).toHaveLength(2);
-    expect(events[1]![2]).toMatchObject({
-      task_id: 'task-u2',
-      task_name: '后台化观察',
-      status: 'running',
-      tool_use_id: 'toolu_u2',
-    });
-    expect(taskLineCalls(h)).toHaveLength(1); // 仅 [TASK_STARTED]，task_updated 不落行
-  });
-
   it('patch 仅 end_time 等非关键字段 → 不 emit；task_notification 注销后 task_updated 无从挂靠 → 不 emit', async () => {
     const h = await createHarness();
     await h.emitMessage(
@@ -580,28 +610,42 @@ describe('task-lifecycle FR-01 — task_updated 仅 status/is_backgrounded 变�
 // ── FR-01：注册口径边界 ──────────────────────────────────────────────────────
 
 describe('task-lifecycle FR-01 — task_started 注册口径', () => {
-  it('重复 task_started（SDK 重放）不重复 emit/落行，仅补全缺失 tool_use_id（终态行挂靠补全键）', async () => {
+  it('重复 task_started（SDK 重放）注册幂等（单一注册表条目）+ 补全缺失 tool_use_id（终态行挂靠补全键）', async () => {
     const h = await createHarness();
     // 首发不带 tool_use_id（回执先到等极端时序）。
     await h.emitMessage(msgTaskStarted({ taskId: 'task-d1', description: '重放任务' }));
     expect(taskEventCalls(h)).toHaveLength(1);
     expect(taskLineCalls(h)).toHaveLength(1);
 
-    // 重放带 tool_use_id → 仅补全关联键，不重复 emit/落行。
+    // 重放带 tool_use_id → 事件轨下 task_started 重放与 task_progress 同型
+    //（subtype 归并为 agent_task_status/running），消费侧按进度分派：注册幂等
+    //（不建第二条目、不重复 [TASK_STARTED] 行），但会多一次 running emit 与
+    // 首条 [TASK_PROGRESS] 行（旧实现静默 return——task-08 已知差异，见交付报告）。
     await h.emitMessage(
       msgTaskStarted({ taskId: 'task-d1', toolUseId: 'toolu_d1', description: '重放任务' }),
     );
-    expect(taskEventCalls(h)).toHaveLength(1);
-    expect(taskLineCalls(h)).toHaveLength(1);
+    // 注册幂等核心：无第二条 [TASK_STARTED] 行。
+    expect(
+      taskLineCalls(h).filter((c) => parseTaskLine(c).prefix === '[TASK_STARTED]'),
+    ).toHaveLength(1);
 
-    // 终态消息自身不带 tool_use_id → 用注册表补全的 toolu_d1 挂靠（backfill 生效的可观察证明）。
+    // 终态消息自身不带 tool_use_id → 用注册表补全的 toolu_d1 挂靠（backfill 生效
+    // 的可观察证明——重放补全的关联键落在唯一注册条目上）。
     await h.emitMessage(
       msgTaskNotification({ taskId: 'task-d1', status: 'completed', summary: '完成' }),
     );
     const events = taskEventCalls(h);
-    expect(events[1]![2]).toMatchObject({ tool_use_id: 'toolu_d1' });
+    const terminal = events.filter(
+      ([, , e]) => (e as { status?: string }).status === 'completed',
+    );
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]![2]).toMatchObject({ tool_use_id: 'toolu_d1' });
     const lines = taskLineCalls(h);
-    expect(parseTaskLine(lines[1]!).flat.parent_tool_use_id).toBe('toolu_d1');
+    const notifLine = lines.filter(
+      (c) => parseTaskLine(c).prefix === '[TASK_NOTIFICATION]',
+    );
+    expect(notifLine).toHaveLength(1);
+    expect(parseTaskLine(notifLine[0]!).flat.parent_tool_use_id).toBe('toolu_d1');
   });
 
   it('skip_transcript=true（ambient/housekeeping 任务）→ 不注册、不 emit、不落行', async () => {

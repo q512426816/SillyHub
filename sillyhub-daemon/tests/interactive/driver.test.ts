@@ -16,8 +16,8 @@ import type {
   InteractiveDriverHandle,
   InteractiveDriverResult,
   InteractiveDriverStartOptions,
-  InteractiveDriverMessage,
   InteractiveProvider,
+  TurnMessageEnvelope,
   UserTurnInput,
 } from '../../src/interactive/driver.js';
 
@@ -30,9 +30,15 @@ const _sampleUserTurnInput: UserTurnInput = { type: 'user', text: 'hi' };
 const _sampleProvider: InteractiveProvider = 'codex';
 void _sampleProvider;
 
-/** InteractiveDriverMessage 是 Record<string, unknown>（宽松鸭子类型）。 */
-const _sampleMsg: InteractiveDriverMessage = { event_type: 'text', content: 'x' };
-void _sampleMsg;
+/**
+ * TurnMessageEnvelope.events 携带 AgentEvent（宽松 Record 形态）。
+ * task-09：InteractiveDriverMessage @deprecated 导出已随 daemon.ts/types.ts
+ * 消费面清理一并删除，类型层断言改锚 envelope 形态。
+ */
+const _sampleEnvelope: TurnMessageEnvelope = {
+  events: [{ type: 'text', content: 'x' }],
+};
+void _sampleEnvelope;
 
 /** InteractiveDriverResult 字段全可选、宽松。 */
 const _sampleResult: InteractiveDriverResult = {
@@ -107,10 +113,10 @@ class FakeDriver implements InteractiveDriver {
         });
         return;
       }
-      // 每条 user turn：一条中间 message + 一条 success result。
-      const msg: InteractiveDriverMessage = {
-        event_type: 'text',
-        content: `echo:${turn.text}`,
+      // 每条 user turn：一条中间消息（task-08：envelope-only——单事件成批）+
+      // 一条 success result。
+      const msg: TurnMessageEnvelope = {
+        events: [{ type: 'text', content: `echo:${turn.text}` }],
       };
       if (callbacks.onTurnMessage) {
         await callbacks.onTurnMessage(msg);
@@ -149,7 +155,7 @@ describe('InteractiveDriver 契约（driver.ts）', () => {
     }
     const handle = await driver.start(gen(), { cwd: '/tmp' });
 
-    const messages: InteractiveDriverMessage[] = [];
+    const messages: TurnMessageEnvelope[] = [];
     const results: InteractiveDriverResult[] = [];
     const callbacks: InteractiveDriverCallbacks = {
       onTurnResult: (r) => {
@@ -162,7 +168,10 @@ describe('InteractiveDriver 契约（driver.ts）', () => {
 
     await driver.consume(handle, callbacks);
 
-    expect(messages.map((m) => m.content)).toEqual(['echo:q1', 'echo:q2']);
+    // task-08：envelope-only——断言解包 events（单事件成批）。
+    expect(
+      messages.map((m) => m.events.map((e) => e.content).join('')),
+    ).toEqual(['echo:q1', 'echo:q2']);
     expect(results).toHaveLength(2);
     expect(results[0]!.subtype).toBe('success');
     expect(results[0]!.is_error).toBe(false);

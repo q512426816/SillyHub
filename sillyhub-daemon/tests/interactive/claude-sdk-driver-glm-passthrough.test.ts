@@ -16,7 +16,7 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { UserTurnInput } from '../../src/interactive/driver.js';
+import type { TurnMessageEnvelope, UserTurnInput } from '../../src/interactive/driver.js';
 import type { ClaudeDriverHandle } from '../../src/interactive/claude-sdk-driver.js';
 
 // mock node:fs（resolveClaudeExecutable 用 existsSync）。
@@ -199,7 +199,7 @@ describe('ClaudeSdkDriver.start：不传 allowedTools 黑名单（AC-09.8 / D-00
 });
 
 describe('ClaudeSdkDriver.consume：tool_result(is_error=true) 原样透传（AC-09.7 / D-008）', () => {
-  it('tool_result(is_error=true) 经 onMessage 原样转发：payload.is_error 不被改写、content 不裁剪', async () => {
+  it('tool_result(is_error=true) 经 onTurnMessage 转发（envelope）：错误 content 不拦截不裁剪', async () => {
     const longContent = 'E'.repeat(5000); // 超长 content。
     const messages = [
       toolResultError('tu-1', `permission error: ${longContent}`),
@@ -217,19 +217,22 @@ describe('ClaudeSdkDriver.consume：tool_result(is_error=true) 原样透传（AC
     const q = (handle as ClaudeDriverHandle).query;
     const onResult = vi.fn(async () => {});
     const onMessage = vi.fn(async () => {});
-    await driver.consume(handle, { onResult, onMessage });
-    // onMessage 收到 tool_result 原样（is_error=true 未被改写）。
+    // task-08：envelope-only（旧键分支已移除）。
+    await driver.consume(handle, { onTurnResult: onResult, onTurnMessage: onMessage });
+    // task-08 事件轨：tool_result 事件 content 全文直达（不拦截/不裁剪/不重写；
+    // 事件不携带 is_error 布尔——错误语义由 content 全文承载，旧轨 is_error 仅
+    // 影响 bash channel 派生）。
     expect(onMessage).toHaveBeenCalledTimes(1);
-    const forwarded = onMessage.mock.calls[0]![0] as SDKMessage;
-    const tr = (forwarded as unknown as {
-      message: { content: Array<Record<string, unknown>> };
-    }).message.content[0]!;
-    expect(tr.is_error).toBe(true);
-    // content 不裁剪（5000 字符全保留）。
-    expect(String(tr.content).length).toBe(`permission error: ${longContent}`.length);
+    const env = onMessage.mock.calls[0]![0] as TurnMessageEnvelope;
+    expect(env.events).toHaveLength(1);
+    const ev = env.events[0]!;
+    expect(ev.type).toBe('tool_result');
+    expect(ev.call_id).toBe('tu-1');
+    // content 不裁剪（5000 字符全保留，仅受 100000 截断上限约束）。
+    expect(ev.content).toBe(`permission error: ${longContent}`);
   });
 
-  it('tool_result(is_error=false) 也原样转发（driver 不区别 is_error 真假）', async () => {
+  it('tool_result(is_error=false) 也转发（driver 不区别 is_error 真假）', async () => {
     const messages = [
       toolResultSuccess('tu-1', 'file written'),
       resultSuccess(),
@@ -244,13 +247,11 @@ describe('ClaudeSdkDriver.consume：tool_result(is_error=true) 原样透传（AC
       cwd: 'C:\\work',
     });
     const onMessage = vi.fn(async () => {});
-    await driver.consume(handle, { onResult: async () => {}, onMessage });
-    const tr = (
-      onMessage.mock.calls[0]![0] as unknown as {
-        message: { content: Array<Record<string, unknown>> };
-      }
-    ).message.content[0]!;
-    expect(tr.is_error).toBe(false);
+    await driver.consume(handle, { onTurnResult: async () => {}, onTurnMessage: onMessage });
+    const env = onMessage.mock.calls[0]![0] as TurnMessageEnvelope;
+    const ev = env.events[0]!;
+    expect(ev.type).toBe('tool_result');
+    expect(ev.content).toBe('file written');
   });
 });
 
@@ -279,7 +280,8 @@ describe('ClaudeSdkDriver.consume：连续工具失败不阻断（AC-09.9 / spik
     const interruptSpy = vi.spyOn(q, 'interrupt');
     const onResult = vi.fn(async () => {});
     const onMessage = vi.fn(async () => {});
-    await driver.consume(handle, { onResult, onMessage });
+    // task-08：envelope-only（旧键分支已移除）。
+    await driver.consume(handle, { onTurnResult: onResult, onTurnMessage: onMessage });
     // 6 条中间消息全部经 onMessage 转发（3 tool_result + 3 assistant text）。
     expect(onMessage).toHaveBeenCalledTimes(6);
     // driver 不调 interrupt（不强制结束 turn）。
@@ -293,7 +295,7 @@ describe('ClaudeSdkDriver.consume：连续工具失败不阻断（AC-09.9 / spik
 });
 
 describe('ClaudeSdkDriver.consume：result.is_error 与 tool_result(is_error) 不混淆（AC-09.12 / 边界 11）', () => {
-  it('turn 级 result.is_error=true 经 onResult 转发；不混入 tool_result 路径', async () => {
+  it('turn 级 result.is_error=true 经 onTurnResult 转发；不混入 tool_result 路径', async () => {
     const resultErr: SDKResultMessage = {
       type: 'result',
       subtype: 'error_during_execution',
@@ -326,10 +328,17 @@ describe('ClaudeSdkDriver.consume：result.is_error 与 tool_result(is_error) �
     });
     const onResult = vi.fn(async () => {});
     const onMessage = vi.fn(async () => {});
-    await driver.consume(handle, { onResult, onMessage });
-    // turn 级 result 走 onResult，不进 onMessage。
+    // task-08：envelope-only（旧键分支已移除）。
+    await driver.consume(handle, { onTurnResult: onResult, onTurnMessage: onMessage });
+    // turn 级 result 走 onTurnResult，不进 onTurnMessage。task-08：result 经
+    // mapResultToDriverResult 映射（{...msg} 展开 + usage 短名化），identity 不再
+    // 保持——字段等价断言替代 toBe（subtype/is_error/result 透传不改写）。
     expect(onResult).toHaveBeenCalledTimes(1);
-    expect(onResult.mock.calls[0]![0]).toBe(resultErr);
+    expect(onResult.mock.calls[0]![0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+      result: 'turn failed',
+    });
     expect(onMessage).not.toHaveBeenCalled();
   });
 });

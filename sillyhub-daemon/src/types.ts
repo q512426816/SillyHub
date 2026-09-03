@@ -6,7 +6,9 @@
  * 保持 Python 原名以便对照调试；与 server JSON 契约一致）。
  *
  * 来源对照：
- *   - AgentEvent IR:        design.md §7.1（方案B 深化）+ backends/__init__.py:19-31
+ *   - AgentEvent IR v2:   design.md §7（2026-09-03-agent-provider-abstraction task-01，
+ *                         8 型 + 一等可选字段；zod 校验见 agent-event-schema.ts）
+ *   - AgentEvent IR v1:   design.md §7.1（方案B 深化）+ backends/__init__.py:19-31
  *   - TaskResult:           task_runner.py:36-48
  *   - BackendTaskResult:    backends/__init__.py:34-43
  *   - TaskState:            protocol.py:23-27
@@ -26,33 +28,83 @@ import type { MsgType } from './protocol.js';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Agent 事件类型字面量 union（方案B IR 深化版）。
+ * Agent 事件类型字面量 union（v2 统一契约）。
  *
- * 对应 Python `backends/__init__.py:23` 的 event_type 注释，但收敛为 5 元组：
+ * 演进历史：
  *   - Python 原 6 种：text, tool_use, tool_result, thinking, status, error
- *   - Node IR 5 种：text, tool_use, tool_result, error, complete
- * thinking / status 两类事件合入 `type: 'text'` + metadata.status/thinking。
+ *   - Node 批量 IR v1（5 种）：thinking/status 折叠进 `type: 'text'` + metadata
+ *   - v2（2026-09-03-agent-provider-abstraction task-01 / design.md §7）扩为 8 型：
+ *     thinking / status 重新独立成型，新增 turn_result；批量与交互式两条链路
+ *     共用此一份 IR（FR-01 / D-001@v1 双轨路线的契约基座）。
+ *
+ * `complete` 为批量链路（adapters/*）既有兼容别名，语义等同 `turn_result`
+ * （一轮/一次执行结束）；交互式链路统一用 `turn_result`。
  */
 export type AgentEventType =
   | 'text'
+  | 'thinking'
   | 'tool_use'
   | 'tool_result'
+  | 'status'
   | 'error'
+  | 'turn_result'
   | 'complete';
 
 /**
- * 单条 agent 事件 IR。所有协议 adapter 的 parse() 产出此结构。
+ * status 型事件的细分信号枚举（v2，design.md §7）。
  *
- * 对照 Python `backends/__init__.py:19-31` 的 AgentEvent dataclass：
- *   event_type      → type（rename，避免与 JS 联想混淆）
- *   content         → content（保留）
- *   tool_name       → metadata.tool_name
- *   call_id         → metadata.call_id
- *   tool_input      → metadata.tool_input
- *   tool_output     → metadata.tool_output
- *   status          → metadata.status
- *   level           → metadata.level
- *   session_id      → metadata.session_id
+ * 承载现 SessionManager._onMessage 的会话级消费信号事件化（D-002@v1）：
+ * bash_chunk / bash_status 现为双事件（session-manager.ts:4815/4824），
+ * subtype 取值对齐现状。
+ * D-005@v1 契约补遗（2026-09-03 task-03 发现）：追加 thinking_tokens——legacy
+ * 链路发 [SYSTEM:thinking_tokens] 行，六值枚举无承载则新轨静默丢弃，双轨可见
+ * 信息集合不一致（Claude 零回归目标 2 的推论）。
+ */
+export type AgentStatusSubtype =
+  /** 含 session_id；覆盖现 system/init→agentSessionId 提取与 codex thread_started。 */
+  | 'session_started'
+  | 'bash_chunk'
+  | 'bash_status'
+  | 'plan_mode'
+  | 'agent_task_status'
+  | 'task_notification'
+  /** thinking token 估计值（running total，思考进度指示）。D-005@v1 契约补遗。 */
+  | 'thinking_tokens';
+
+/**
+ * token 用量（v2，design.md §7）。字段全可选 number。
+ *
+ * 任意型事件均可携带（partial flush 也实时透传，非仅 turn_result，D-003@v1），
+ * 由 daemon 层 lift → backend 更新 agent_runs 统计并经 SSE summary 透传。
+ */
+export interface AgentEventUsage {
+  /** 输入 token 数。 */
+  input_tokens?: number;
+  /** 输出 token 数。 */
+  output_tokens?: number;
+  /** 缓存命中读取 token 数。 */
+  cache_read_tokens?: number;
+  /** 缓存写入 token 数。 */
+  cache_creation_tokens?: number;
+  /**
+   * 上下文环大小分子 = input + cache_read + cache_creation 瞬时量和（仅主 agent
+   * 桶携带——子代理上下文非会话主上下文，注入会把环切到子代理 ctx 再跳回）。
+   * D-005@v1 契约补遗（2026-09-03 task-03 发现）：现 SSE summary 有 ctx_tokens
+   * 实时透传，封闭 4 字段会让新轨轮内环实时显示缺失。
+   */
+  ctx_tokens?: number;
+}
+
+/**
+ * 单条 agent 事件 IR（v2 统一契约，design.md §7）。
+ * 所有协议 adapter 的 parse() 与交互式 driver 归一化器共同产出此结构；
+ * 运行时校验 schema 见 agent-event-schema.ts（与本接口一字段对齐）。
+ *
+ * v1 对照 Python `backends/__init__.py:19-31` 的 AgentEvent dataclass：
+ *   event_type → type（rename）；tool_name/call_id/session_id 原为 metadata 键。
+ * v2 一等可选字段来源 = 现交互式 flat record 顶层字段（service.py:3702-3711 的
+ * parent_tool_use_id/subagent_type/depth 等）与 metadata 已知键
+ * （tool_name/call_id/session_id/usage 等）的合并提升；metadata 仍为开放长尾容器。
  */
 export interface AgentEvent {
   /** 事件类型，穷举见 AgentEventType。 */
@@ -60,9 +112,38 @@ export interface AgentEvent {
   /** 文本内容 / 工具入参 JSON / 工具结果 / 错误信息。空字符串表示无文本。 */
   content: string;
   /**
-   * 可选元数据，开放结构。
-   * 已知 key（来自 Python dataclass 收敛）：tool_name, call_id, tool_input,
-   * tool_output, status, level, session_id, usage, model 等。
+   * status 型事件的细分信号，见 AgentStatusSubtype。
+   * type='status' 时必填（schema 层强校验）；其余型不使用。
+   */
+  subtype?: AgentStatusSubtype;
+  /** turn 内单调递增序号（由 SessionManager 补号）。 */
+  seq?: number;
+  /** provider 原生工具名，不重命名（multica 原则）。 */
+  tool_name?: string;
+  /** 工具调用 ID（tool_use / tool_result 配对）。 */
+  call_id?: string;
+  /** provider 会话 ID（resume 用；status/session_started 事件携带）。 */
+  session_id?: string;
+  /** token 用量（任意型事件可携带，见 AgentEventUsage）。 */
+  usage?: AgentEventUsage;
+  /** 子代理归属的父 tool_use ID（Claude 深功能）。 */
+  parent_tool_use_id?: string;
+  /** 子代理类型（Claude Task tool 的 subagent_kind）。 */
+  subagent_type?: string;
+  /** 子代理嵌套深度（归一化器 depth 状态机产出）。 */
+  depth?: number;
+  /** partial 流式段标识（同段多次 flush / override 撤回的关联键）。 */
+  segment_id?: string;
+  /** true = 流式半截行（partial flush 事件）。 */
+  is_partial?: boolean;
+  /** true = 替换同 segment_id 已落库 partial（[ASSISTANT_OVERRIDE] 等价语义，D-004@v1）。 */
+  override?: boolean;
+  /** Edit 工具 structuredPatch 的 JSON 文本。 */
+  edit_patch?: string;
+  /**
+   * 可选元数据，开放结构（provider 长尾：model/effort/claude_code_version 等）。
+   * 已知 key（来自 Python dataclass 收敛）：tool_input, tool_output, status,
+   * level, usage, model 等。
    */
   metadata?: Record<string, unknown>;
 }

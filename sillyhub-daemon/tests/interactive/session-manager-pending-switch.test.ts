@@ -27,14 +27,14 @@ import { SessionNotFoundError } from '../../src/interactive/types.js';
 import type { ProviderConfig } from '../../src/types.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
 // ── 辅助构造（对齐 session-manager-budget.test.ts 同款 mock driver）────────────
 
 function makeMockDriver() {
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = {
     interrupt: vi.fn(async () => {}),
     close: vi.fn(),
@@ -44,7 +44,7 @@ function makeMockDriver() {
       (_input: AsyncIterable<SDKUserMessage>, _opts: StartOptions): Query =>
         fakeQuery,
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -56,8 +56,8 @@ function makeMockDriver() {
   return {
     driver,
     fakeQuery,
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 

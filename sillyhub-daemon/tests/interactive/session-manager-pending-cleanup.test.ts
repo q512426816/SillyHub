@@ -24,7 +24,7 @@ import { SessionManager } from '../../src/interactive/session-manager.js';
 import { PermissionResolver } from '../../src/interactive/permission-resolver.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -81,14 +81,14 @@ function resultSuccess(): SDKResultMessage {
 interface CapturedDriver {
   driver: ClaudeSdkDriver;
   capturedOptions: StartOptions | null;
-  capturedCallbacks: ConsumeCallbacks | null;
+  capturedCallbacks: InteractiveDriverCallbacks | null;
   fakeQuery: Query;
   emitResult: (r: SDKResultMessage) => void;
 }
 
 function makeMockDriver(): CapturedDriver {
   let capturedOptions: StartOptions | null = null;
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
   const driver: ClaudeSdkDriver = {
     start: vi.fn(
@@ -97,7 +97,7 @@ function makeMockDriver(): CapturedDriver {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -115,7 +115,7 @@ function makeMockDriver(): CapturedDriver {
     get capturedCallbacks() {
       return capturedCallbacks;
     },
-    emitResult: (r) => capturedCallbacks?.onResult(r),
+    emitResult: (r) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 
@@ -313,7 +313,7 @@ describe('pending 审批时 fail / onError → cancelAllPending（AC-09.5 / 边�
     expect(resolver.pendingCount).toBe(1);
 
     // 模拟 consume 内 onError 回调（query 异常）。
-    await d.capturedCallbacks!.onError(new Error('spawn failed'));
+    await d.capturedCallbacks!.onTurnError?.(new Error('spawn failed'));
     // 给 fail 的 microtask 一个 tick。
     await Promise.resolve();
     await Promise.resolve();

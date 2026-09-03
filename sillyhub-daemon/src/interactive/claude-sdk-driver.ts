@@ -24,6 +24,15 @@
  * 因此 driver 在 start 前必须把 wrapper 解析到底层真 .exe（node_modules\@anthropic-ai\
  * claude-code\bin\claude.exe）。agent-detector.ts 不改（不在 allowed_paths）。
  *
+ * **task-06（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：接入归一化器**。
+ * start() 时实例化 ClaudeEventNormalizer（每会话一实例，挂 handle），consume() 把
+ * SDK 消息流经 normalizeMessage 归一化为 AgentEvent[]，onTurnMessage 上报
+ * TurnMessageEnvelope{events}（partial flush 经构造注入的 onPartialFlush 桥同步转发，
+ * 包装 envelope{events:[单事件]}）；raw 仅环境变量 SILLYHUB_DEBUG_RAW_EVENTS=1 携带
+ *（D-002@v1 调试通道，下游禁止依赖）。turn 结束（type==='result'）先 normalizer.
+ * onTurnEnd() 再走 onTurnResult（usage/session_id 映射进 InteractiveDriverResult 新
+ * 字段）。canUseTool/onUserDialog 审批桥与 SDK query 参数组装零改动（任务约束）。
+ *
  * 来源：design.md §5.1 / §7.1 / §10 R-exe；spike-02 §3.7 H1（env 继承）/ H2（AsyncIterable 两轮）/
  * D1（interrupt 续轮）/ D4（result 边界）；task-01 §「R-exe 关键修正」。
  *
@@ -45,9 +54,13 @@ import type {
   InteractiveDriver,
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
+  InteractiveDriverResult,
   InteractiveDriverStartOptions,
+  TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
+import { ClaudeEventNormalizer } from './claude-events.js';
+import type { AgentEvent, AgentEventUsage } from '../types.js';
 
 /** executable 缺失/解析失败抛出。code 字段供 daemon / 测试识别。 */
 export class ClaudeExecutableNotFoundError extends Error {
@@ -234,25 +247,14 @@ export interface ClaudeStartOptions extends InteractiveDriverStartOptions {
  */
 export type StartOptions = ClaudeStartOptions;
 
-/** consume 回调集合（provider-neutral，对齐 driver.ts InteractiveDriverCallbacks）。 */
-export interface ClaudeDriverCallbacks {
-  /**
-   * spike D4：result 是干净 turn 边界。每条 result 触发一次 onResult，
-   * SessionManager 据此通知 backend 关闭当前 AgentRun（completed/failed）。
-   * SDKResultMessage 是 InteractiveDriverResult 的超集，直接透传。
-   */
-  onResult: (result: SDKResultMessage) => void | Promise<void>;
-  /** 中间消息（assistant text/tool_use/tool_result/system/init）→ onMessage。可选。 */
-  onMessage?: (msg: SDKMessage) => void | Promise<void>;
-  /** query 异常（spawn 失败 / 网络）→ session failed。 */
-  onError?: (err: unknown) => void | Promise<void>;
-}
-
-/**
- * @deprecated task-03 起改用 {@link ClaudeDriverCallbacks}；保留为兼容别名
- *（现有 import / 测试 mock 引用 ConsumeCallbacks 不破，AC-03 alias）。
- */
-export type ConsumeCallbacks = ClaudeDriverCallbacks;
+// ─────────────────────────────────────────────────────────────────────────────
+// task-08（2026-09-03-agent-provider-abstraction / FR-02）：consume 回调旧键
+// （onResult/onMessage/onError，ClaudeDriverCallbacks/ConsumeCallbacks 形态，
+// raw SDK 消息透传）已随 envelope-only 收口移除——consume 只读新键
+// （onTurnResult/onTurnMessage/onTurnError，InteractiveDriverCallbacks）。旧键
+// 兼容别名 ClaudeDriverCallbacks/ConsumeCallbacks 一并删除（glm-passthrough 等
+// 既有测试已迁 envelope 断言）。
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * task-03（D-001@v1）：Claude 专属 driver 句柄。extends provider-neutral
@@ -280,6 +282,30 @@ export interface ClaudeDriverHandle extends InteractiveDriverHandle {
    * `_terminateSession` 的 try/catch 兜底（R-01），本方法不吞错。
    */
   close: () => void;
+  /**
+   * task-06：会话级 ClaudeEventNormalizer（start 时实例化，design §5.1「一轮会话
+   * 一个实例」——跨 turn 维护 depth 状态机与 partial 缓冲桶）。
+   *
+   * 可选：既有测试手构 handle（`{provider, query}`）不带本字段，consume 检测缺失
+   * 时懒建一次性实例（仅本次 consume 生命周期），不要求手构方补字段。
+   */
+  readonly normalizer?: ClaudeEventNormalizer;
+  /**
+   * task-06：partial flush → onTurnMessage 延迟绑定桥。start 时创建占位（forward
+   * no-op），consume 时绑定实际回调——归一化器构造需要 onPartialFlush，但 onTurnMessage
+   * 回调 consume 才有，故经此可变转发器桥接。partial 事件不携带 raw（节流定时器异步
+   * 触发时无对应消息帧，D-002@v1 调试通道语义不适用）。
+   */
+  readonly partialSink?: ClaudePartialSink;
+}
+
+/**
+ * task-06：partial flush 事件 → onTurnMessage(envelope) 的可变转发桥。
+ * `forward` 为函数槽：start 占位 no-op，consume 绑定真实转发（见 ClaudeDriverHandle
+ * .partialSink JSDoc）。
+ */
+export interface ClaudePartialSink {
+  forward(envelope: TurnMessageEnvelope): void;
 }
 
 /**
@@ -440,6 +466,22 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // D-009@v1：UserTurnInput → SDKUserMessage（SDK 类型隔离在 driver 内部）。
     const sdkInput = mapUserTurnInputToSdk(input);
     const query = sdkQuery({ prompt: sdkInput, options });
+
+    // task-06（FR-02 / design §5.1）：会话级归一化器。start 时实例化（一轮会话一个
+    // 实例，跨 turn 维护 depth 状态机/partial 缓冲桶），consume 经 handle 取用。
+    // onPartialFlush 经 ClaudePartialSink 延迟绑定桥转发 onTurnMessage——回调
+    // consume 时才有，start 阶段先占位 no-op。节流参数用默认值（500ms，对齐
+    // session-manager.ts:786 PARTIAL_FLUSH_MS；任务约束禁止顺带调优）。时钟默认
+    // Date.now（bash elapsed_ms 等；归一化器内可注入，driver 不注入）。
+    const partialSink: ClaudePartialSink = { forward: () => {} };
+    const normalizer = new ClaudeEventNormalizer({
+      onPartialFlush: (ev: AgentEvent): void => {
+        // partial 事件单事件成批（envelope{events:[单事件]}，不带 raw——节流定时器
+        // 异步触发时无对应消息帧，见 ClaudeDriverHandle.partialSink JSDoc）。
+        partialSink.forward({ events: [ev] });
+      },
+    });
+
     // task-01（D-003 / D-004）：返回的 ClaudeDriverHandle 补 close 方法接通 SDK kill 链。
     // SessionManager._terminateSession 经可选契约 close?.() 在 end/fail 时触发，
     // SDK 内部走 stdin EOF → SIGTERM → SIGKILL，全平台（含 Windows TerminateProcess）
@@ -450,6 +492,8 @@ export class ClaudeSdkDriver implements InteractiveDriver {
       close: () => {
         query.close();
       },
+      normalizer,
+      partialSink,
     };
   }
 
@@ -479,43 +523,119 @@ export class ClaudeSdkDriver implements InteractiveDriver {
 
   /**
    * 遍历底层 Query AsyncGenerator（spike D4：result 后无孤儿后台事件）。
-   * 对每条 message：onMessage（如有）；对每条 result：onResult。
-   * for-await 正常结束或抛错时按需调 onError，然后 return（query 已结束）。
    *
-   * task-03：签名泛化到 `InteractiveDriverHandle`，从 handle 取底层 query 后行为不变。
-   * 实现：用 SDKResultMessage 的 `type === 'result'` 区分 result 与普通 message。
-   * spike D4 证明 result 后无孤儿事件，所以 onResult 内可以直接收敛 AgentRun。
+   * task-06（FR-02 / D-002@v1）：消息轨接入 ClaudeEventNormalizer——
+   *   - 完整消息：normalizer.normalizeMessage → AgentEvent[] → onTurnMessage(
+   *     TurnMessageEnvelope{events})；raw 仅 SILLYHUB_DEBUG_RAW_EVENTS=1 携带
+   *     （默认 undefined，下游禁止依赖）。归一化 0 事件的帧（stream_event 无边界
+   *     flush / 被丢弃的 system 帧等）不上报 envelope（调试开关开启时例外——raw
+   *     调试通道帧级可见）。
+   *   - partial flush：normalizeMessage 执行期间经 ClaudePartialSink 桥同步转发
+   *     onTurnMessage（envelope{events:[单事件]}），先于本帧 envelope（归一化器
+   *     「partial 在前、完整/override 在后」顺序契约）。
+   *   - turn 结束（type==='result'）：normalizer.onTurnEnd()（depth 回落/桶收缩）
+   *     先于 onTurnResult；result 经 mapResultToDriverResult 把 usage/session_id
+   *     映射进 InteractiveDriverResult 新字段。
+   *
+   * 回调 envelope-only（task-08 收口）：只读新键 onTurnResult/onTurnMessage/
+   * onTurnError；旧键（onResult/onMessage/onError，raw SDK 消息透传）分支已删除。
+   * onTurnMessage 缺省时消息轨静默跳过（fire-and-forget 语义不变）。
+   *
+   * 业务回调异常隔离（ql-20260825-f3#6）不变：每次回调调用独立 try/catch 记日志
+   * 后继续迭代；迭代器本身的错误仍走 onTurnError。
    */
   async consume(
     handle: InteractiveDriverHandle,
     callbacks: InteractiveDriverCallbacks,
   ): Promise<void> {
-    const q = (handle as ClaudeDriverHandle).query;
-    const cb = callbacks as unknown as ClaudeDriverCallbacks;
+    const h = handle as ClaudeDriverHandle;
+    const q = h.query;
+    // task-08：envelope-only 收口——只读新键（onTurnResult/onTurnMessage/
+    // onTurnError）。旧键（onResult/onMessage/onError，raw SDK 消息透传）分支
+    // 已删除；回调缺省时对应轨静默跳过（fire-and-forget 语义不变）。
+    const onResultNew = callbacks.onTurnResult;
+    const onMessageEnvelopeCb = callbacks.onTurnMessage;
+    const onErrorCb = callbacks.onTurnError;
+
+    // 归一化器接线：handle 带（start 产出）则用；手构 handle（既有测试/过渡）缺省
+    // 时懒建一次性实例（仅本次 consume 生命周期，不回写 handle）。
+    let partialSink = h.partialSink;
+    let normalizer = h.normalizer;
+    if (!partialSink || !normalizer) {
+      partialSink = { forward: () => {} };
+      const lazySink = partialSink;
+      normalizer = new ClaudeEventNormalizer({
+        onPartialFlush: (ev: AgentEvent): void => {
+          lazySink.forward({ events: [ev] });
+        },
+      });
+    }
+
+    // 绑定 partial flush → onTurnMessage 转发桥。onPartialFlush 契约是同步 void，
+    // 异步回调（消费侧 onTurnMessage 多为 async）不能阻塞归一化器——fire-and-forget
+    // 上报 + .catch 兜底（对齐 reportResult 的 unhandled rejection 防御口径）。
+    partialSink.forward = (envelope: TurnMessageEnvelope): void => {
+      if (!onMessageEnvelopeCb) return;
+      try {
+        Promise.resolve(onMessageEnvelopeCb(envelope)).catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.error(
+            '[claude-sdk-driver] onTurnMessage(partial flush) callback failed',
+            err,
+          );
+        });
+      } catch (err) {
+        // 同步抛（罕见）不崩归一化器。
+        // eslint-disable-next-line no-console
+        console.error(
+          '[claude-sdk-driver] onTurnMessage(partial flush) callback failed',
+          err,
+        );
+      }
+    };
+
     try {
       for await (const msg of q) {
-        if (msg !== null && typeof msg === 'object' && (msg as { type?: string }).type === 'result') {
-          // ql-20260825-f3#6：业务回调异常隔离——原实现 await 回调 reject 会中断
-          // for-await 迭代进下方 catch → onError → fail() → 整会话终止 + 杀进程
-          //（单条消息的业务处理 bug 误伤整个会话与其背后子进程）。每次回调调用
-          // 独立 try/catch：记 error 日志后继续迭代；迭代器本身的错误仍走 onError。
-          try {
-            await cb.onResult(msg as SDKResultMessage);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error(
-              '[claude-sdk-driver] onResult callback failed (iteration continues)',
-              (msg as { subtype?: string }).subtype,
-              err,
-            );
+        if (
+          msg !== null &&
+          typeof msg === 'object' &&
+          (msg as { type?: string }).type === 'result'
+        ) {
+          // task-06：turn 边界——归一化器收尾（completedSegments 重置/轮级计数清零/
+          // 子代理桶收缩/depth 回落）先于 result 上报（对齐 _onResult 边界顺序）。
+          normalizer.onTurnEnd();
+          if (onResultNew) {
+            try {
+              await onResultNew(mapResultToDriverResult(msg as SDKResultMessage));
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error(
+                '[claude-sdk-driver] onResult callback failed (iteration continues)',
+                (msg as { subtype?: string }).subtype,
+                err,
+              );
+            }
           }
-        } else if (cb.onMessage) {
+          continue;
+        }
+
+        // 完整消息归一化。partial flush（message_stop 边界 / 节流定时器到期）在
+        // normalizeMessage 执行期间经 partialSink 桥先行转发（同步）。
+        const events = normalizer.normalizeMessage(msg);
+
+        // raw 仅调试开关（D-002@v1：raw 降格调试通道）。逐帧读 env（非 import 时
+        // 快照），测试/运维可运行时切换。events 空且未开调试 → 不上报（见方法 JSDoc）。
+        const debugRaw = process.env.SILLYHUB_DEBUG_RAW_EVENTS === '1';
+        if (onMessageEnvelopeCb && (events.length > 0 || debugRaw)) {
+          const envelope: TurnMessageEnvelope = debugRaw
+            ? { events, raw: msg }
+            : { events };
           try {
-            await cb.onMessage(msg);
+            await onMessageEnvelopeCb(envelope);
           } catch (err) {
             // eslint-disable-next-line no-console
             console.error(
-              '[claude-sdk-driver] onMessage callback failed (iteration continues)',
+              '[claude-sdk-driver] onTurnMessage callback failed (iteration continues)',
               (msg as { type?: string }).type,
               err,
             );
@@ -523,9 +643,78 @@ export class ClaudeSdkDriver implements InteractiveDriver {
         }
       }
     } catch (err) {
-      if (cb.onError) {
-        await cb.onError(err);
+      if (onErrorCb) {
+        await onErrorCb(err);
       }
+    } finally {
+      // consume 退出（query 自然结束/迭代器抛错）＝会话流终态：清归一化器全部
+      // 定时器与缓冲（design §5.1 dispose 语义），防 500ms 节流窗内的孤儿 flush。
+      normalizer.dispose();
     }
   }
+}
+
+/**
+ * task-06：SDKResultMessage → InteractiveDriverResult 的 usage/session_id 结构化映射。
+ *
+ * 以实读 SDKResultMessage 可得字段为准（sdk.d.ts SDKResultSuccess/SDKResultError）：
+ *   - `session_id: string`（必填）→ InteractiveDriverResult.session_id；
+ *   - `usage: NonNullableUsage`（必填，Anthropic 全名 input/output/
+ *     cache_read_input_tokens/cache_creation_input_tokens）→ **短名** AgentEventUsage
+ *     （task-08 收口：InteractiveDriverResult.usage 双命名统一短名——全名
+ *     cache_*_input_tokens 映射为 cache_*_tokens 后**剔除**，daemon.onTurnResult
+ *     消费面（daemon.ts usage 读取）已同步改读短名；叠加保留旧全名字段的过渡
+ *     形态随之移除）。
+ * 其余字段（subtype/is_error/result/total_cost_usd/modelUsage 等）经展开原样保留
+ * （SDKResultMessage 是 InteractiveDriverResult 的超集，session-manager._onResult
+ * 的 duck-typing 消费面零变化）。
+ */
+export function mapResultToDriverResult(msg: SDKResultMessage): InteractiveDriverResult {
+  // duck-read（SDKResultMessage 是接口，接口无隐式索引签名，经 unknown 双转 Record——
+  // 对齐 claude-events.ts / session-manager.ts 的同款口径）。
+  const record = msg as unknown as Record<string, unknown>;
+  const rawUsage = record['usage'] as Record<string, unknown> | undefined;
+  let usage: AgentEventUsage | undefined;
+  if (rawUsage && typeof rawUsage === 'object') {
+    // 全名 → 短名映射（短名直传兼容；缺失不 set，backend NULL，不伪造 0——对齐
+    // daemon lift 口径）。全名字段不保留（task-08 双命名统一）。
+    const mapped: AgentEventUsage = {};
+    if (typeof rawUsage['input_tokens'] === 'number') {
+      mapped.input_tokens = rawUsage['input_tokens'];
+    }
+    if (typeof rawUsage['output_tokens'] === 'number') {
+      mapped.output_tokens = rawUsage['output_tokens'];
+    }
+    const rawCr = numOfUsageField(rawUsage, 'cache_read_tokens', 'cache_read_input_tokens');
+    if (rawCr !== undefined) mapped.cache_read_tokens = rawCr;
+    const rawCc = numOfUsageField(
+      rawUsage,
+      'cache_creation_tokens',
+      'cache_creation_input_tokens',
+    );
+    if (rawCc !== undefined) mapped.cache_creation_tokens = rawCc;
+    const rawCtx = numOfUsageField(rawUsage, 'ctx_tokens');
+    if (rawCtx !== undefined) mapped.ctx_tokens = rawCtx;
+    usage = Object.keys(mapped).length > 0 ? mapped : undefined;
+  }
+  return {
+    ...msg,
+    ...(usage !== undefined ? { usage } : {}),
+    ...(typeof record['session_id'] === 'string' && record['session_id']
+      ? { session_id: record['session_id'] }
+      : {}),
+  };
+}
+
+/** usage dict 多键名守卫读取（短名优先，全名兜余；非 number → undefined）。 */
+function numOfUsageField(
+  usage: Record<string, unknown>,
+  ...keys: string[]
+): number | undefined {
+  for (const key of keys) {
+    if (typeof usage[key] === 'number') {
+      return usage[key] as number;
+    }
+  }
+  return undefined;
 }

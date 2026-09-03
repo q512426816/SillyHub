@@ -1,0 +1,211 @@
+[
+  {
+    "_comment": "stream_event partial 序列 + 完整消息 override。thinking 段（msg_p1）经 500ms 节流 flush 后被完整消息以 override 撤回；text 段（msg_p2）在 message_stop 边界 flush 后被完整消息 override。",
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "id": "msg_p1",
+        "role": "assistant",
+        "usage": {
+          "input_tokens": 100,
+          "cache_read_input_tokens": 500
+        }
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p01",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": { "type": "thinking" }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p02",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": { "type": "thinking_delta", "thinking": "Let me " }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p03",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": { "type": "thinking_delta", "thinking": "compute " }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p04",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": { "type": "thinking_delta", "thinking": "17*23." }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p05",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": { "stop_reason": null },
+      "usage": {
+        "output_tokens": 50
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p06",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": { "type": "message_stop" },
+    "parent_tool_use_id": null,
+    "uuid": "u-p07",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_p1",
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "Let me compute 17*23."
+        }
+      ],
+      "usage": {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_read_input_tokens": 500
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p08",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "id": "msg_p2",
+        "role": "assistant",
+        "usage": {
+          "input_tokens": 320,
+          "cache_read_input_tokens": 700,
+          "cache_creation_input_tokens": 64
+        }
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p09",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": { "type": "text" }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p10",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": { "type": "text_delta", "text": "The answer " }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p11",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": { "type": "text_delta", "text": "is " }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p12",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": { "type": "text_delta", "text": "391." }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p13",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": { "stop_reason": "end_turn" },
+      "usage": {
+        "output_tokens": 120
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p14",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "stream_event",
+    "event": { "type": "message_stop" },
+    "parent_tool_use_id": null,
+    "uuid": "u-p15",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_p2",
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "text",
+          "text": "The answer is 391."
+        }
+      ],
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 120,
+        "cache_read_input_tokens": 700,
+        "cache_creation_input_tokens": 64
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-p16",
+    "session_id": "sess-sample-0001"
+  }
+]

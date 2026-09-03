@@ -17,14 +17,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Query, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { SessionManager } from '../../src/interactive/session-manager.js';
-import type { ClaudeSdkDriver, ConsumeCallbacks, StartOptions } from '../../src/interactive/claude-sdk-driver.js';
+import type { ClaudeSdkDriver, InteractiveDriverCallbacks, StartOptions } from '../../src/interactive/claude-sdk-driver.js';
 import type { McpServerConfigForDriver } from '../../src/interactive/driver.js';
 
 // ── mock driver（捕获 start opts，断言 mcpServers）─────────────────────────────
 
 function makeMockDriver() {
   let capturedStartOpts: StartOptions | null = null;
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
 
   const driver: ClaudeSdkDriver = {
@@ -32,7 +32,7 @@ function makeMockDriver() {
       capturedStartOpts = opts;
       return fakeQuery;
     }),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async () => true),
@@ -41,8 +41,8 @@ function makeMockDriver() {
   return {
     driver,
     getStartOpts: () => capturedStartOpts,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
   };
 }
 

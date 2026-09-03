@@ -1,0 +1,149 @@
+[
+  {
+    "_comment": "system/init（主 agent）+ 会话信号帧（plan/task 族）+ 静默丢弃帧（thinking_tokens/local_command/skip_transcript/子代理 init/result）。",
+    "type": "system",
+    "subtype": "init",
+    "session_id": "sess-sample-0002",
+    "model": "claude-sonnet-4-5",
+    "claude_code_version": "2.1.216",
+    "cwd": "<REDACTED>",
+    "tools": ["Bash", "Read", "Edit", "Task"],
+    "mcp_servers": [],
+    "permissionMode": "default",
+    "slash_commands": [],
+    "output_style": "default",
+    "skills": [],
+    "plugins": [],
+    "uuid": "u-init",
+    "apiKeySource": "ANTHROPIC_API_KEY"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_plan_001",
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_plan01",
+          "name": "EnterPlanMode",
+          "input": {
+            "objective": "Refactor the sync layer",
+            "tasks": ["Scan current walkers", "Draft new prune API", "Wire callers"],
+            "design_snippet": "walkDir gains pruneNames: Set<string>"
+          }
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-plan",
+    "session_id": "sess-sample-0002"
+  },
+  {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "bgtask-01",
+    "tool_use_id": "toolu_task01",
+    "description": "Compute 17 times 23",
+    "subagent_type": "general-purpose",
+    "is_backgrounded": true,
+    "uuid": "u-ts1",
+    "session_id": "sess-sample-0002"
+  },
+  {
+    "type": "system",
+    "subtype": "task_progress",
+    "task_id": "bgtask-01",
+    "tool_use_id": "toolu_task01",
+    "description": "Compute 17 times 23",
+    "subagent_type": "general-purpose",
+    "last_tool_name": "Read",
+    "summary": "Reading project notes",
+    "usage": {
+      "total_tokens": 1200,
+      "tool_uses": 2,
+      "duration_ms": 4500
+    },
+    "uuid": "u-tp1",
+    "session_id": "sess-sample-0002"
+  },
+  {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "bgtask-01",
+    "tool_use_id": "toolu_task01",
+    "status": "completed",
+    "output_file": "<REDACTED>/task-outputs/bgtask-01.txt",
+    "summary": "Computed 17 * 23 = 391",
+    "usage": {
+      "total_tokens": 1500,
+      "tool_uses": 3,
+      "duration_ms": 8200
+    },
+    "uuid": "u-tn1",
+    "session_id": "sess-sample-0002"
+  },
+  {
+    "_comment": "ambient/housekeeping 任务（skip_transcript）→ 静默丢弃",
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "bgtask-ambient",
+    "description": "context compaction",
+    "skip_transcript": true,
+    "ambient": true,
+    "uuid": "u-ts2",
+    "session_id": "sess-sample-0002"
+  },
+  {
+    "_comment": "thinking_tokens 估计信号 → AgentEvent v2 无承载槽位，静默丢弃（双轨期旧链路承载）",
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 512,
+    "estimated_tokens_delta": 100,
+    "uuid": "u-tt1",
+    "session_id": "sess-sample-0002"
+  },
+  {
+    "_comment": "无业务价值的 system 帧 → 静默丢弃",
+    "type": "system",
+    "subtype": "local_command",
+    "content": "<local-command-stdout></local-command-stdout>",
+    "level": "info",
+    "uuid": "u-sys1",
+    "session_id": "sess-sample-0002"
+  },
+  {
+    "_comment": "子代理 system/init（parent_tool_use_id 非空）→ 守卫丢弃，不产 session_started",
+    "type": "system",
+    "subtype": "init",
+    "session_id": "sess-inner-9999",
+    "parent_tool_use_id": "toolu_task01",
+    "model": "claude-haiku-4-5",
+    "claude_code_version": "2.1.216",
+    "cwd": "<REDACTED>",
+    "tools": ["Read"],
+    "mcp_servers": [],
+    "permissionMode": "default",
+    "slash_commands": [],
+    "output_style": "default",
+    "skills": [],
+    "plugins": [],
+    "uuid": "u-init-sub",
+    "apiKeySource": "ANTHROPIC_API_KEY"
+  },
+  {
+    "_comment": "result 终态帧走 driver onResult 独立链路（InteractiveDriverResult），不入事件流 → 空",
+    "type": "result",
+    "subtype": "success",
+    "result": "17 × 23 = 391. done.",
+    "session_id": "sess-sample-0002",
+    "usage": {
+      "input_tokens": 10112,
+      "output_tokens": 12,
+      "cache_read_input_tokens": 52000,
+      "cache_creation_input_tokens": 1024
+    },
+    "uuid": "u-res1"
+  }
+]

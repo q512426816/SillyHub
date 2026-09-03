@@ -22,7 +22,7 @@ import type {
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -52,17 +52,17 @@ function resultInterrupt(): SDKResultMessage {
   } as unknown as SDKResultMessage;
 }
 
-function systemInit(sessionId: string): SDKMessage {
+// task-08：归一化器等价 session_started 事件（agentSessionId 提取语义不变）。
+function systemInit(sessionId: string): TurnMessageEnvelope {
   return {
-    type: 'system',
-    subtype: 'init',
-    session_id: sessionId,
-    uuid: 'init',
-  } as unknown as SDKMessage;
+    events: [
+      { type: 'status', subtype: 'session_started', content: '', session_id: sessionId },
+    ],
+  };
 }
 
 function makeMockDriver(opts: { interruptReturn?: boolean } = {}) {
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
 
   const driver: ClaudeSdkDriver = {
@@ -71,7 +71,7 @@ function makeMockDriver(opts: { interruptReturn?: boolean } = {}) {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -84,8 +84,8 @@ function makeMockDriver(opts: { interruptReturn?: boolean } = {}) {
   return {
     driver,
     fakeQuery,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
   };
 }
 

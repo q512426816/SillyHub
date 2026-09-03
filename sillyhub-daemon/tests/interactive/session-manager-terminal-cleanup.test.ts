@@ -21,7 +21,7 @@ import type {
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 import type { PersistedSessionRecord } from '../../src/interactive/types.js';
@@ -31,21 +31,21 @@ import type { PersistedSessionRecord } from '../../src/interactive/types.js';
 const TERMINAL_CLEANUP_DELAY_MS = 10 * 60 * 1000;
 
 function makeMockDriver() {
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const driver: ClaudeSdkDriver = {
     start: vi.fn(
       (_input: AsyncIterable<SDKUserMessage>, _opts: StartOptions): Query =>
         ({ interrupt: vi.fn(async () => {}) }) as unknown as Query,
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async () => true),
   } as unknown as ClaudeSdkDriver;
   return {
     driver,
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 

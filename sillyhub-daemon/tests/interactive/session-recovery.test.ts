@@ -26,7 +26,7 @@ import {
 } from '../../src/interactive/types.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 import { ClaudeExecutableNotFoundError } from '../../src/interactive/claude-sdk-driver.js';
@@ -53,14 +53,17 @@ function resultSuccess(): SDKResultMessage {
 }
 
 function systemInit(sid: string): SDKMessage {
-  return { type: 'system', subtype: 'init', session_id: sid, uuid: 'i' } as unknown as SDKMessage;
+  // task-08：归一化器等价 session_started 事件。
+  return {
+    events: [{ type: 'status', subtype: 'session_started', content: '', session_id: sid }],
+  } as unknown as TurnMessageEnvelope;
 }
 
 /** 捕获 driver.start 的 input queue，让测试能验证恢复后 push 是否到达 driver。 */
 function makeMockDriver(opts?: { startThrows?: Error }) {
   let capturedInput: AsyncIterable<SDKUserMessage> | null = null;
   let capturedOpts: StartOptions | null = null;
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const startCalls: StartOptions[] = [];
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
   const driver: ClaudeSdkDriver = {
@@ -75,7 +78,7 @@ function makeMockDriver(opts?: { startThrows?: Error }) {
       startCalls.push(o);
       return fakeQuery;
     }),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -90,8 +93,8 @@ function makeMockDriver(opts?: { startThrows?: Error }) {
     startCalls,
     getCapturedInput: () => capturedInput,
     getCapturedOpts: () => capturedOpts,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
   };
 }
 

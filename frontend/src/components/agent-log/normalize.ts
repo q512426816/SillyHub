@@ -525,6 +525,367 @@ declare module "./types" {
 }
 
 /* ------------------------------------------------------------------ */
+/*  AgentEvent v2 结构化事件（task-10 / FR-04 / D-001@v1 双轨）        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * task-10（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：
+ * AgentEvent v2 前端形状（对齐 sillyhub-daemon/src/types.ts AgentEvent 与
+ * backend `_persist_agent_event` 落 metadata_['agent_event'] 的事件 JSON）。
+ *
+ * 载荷来源是 SSE JSON / REST dict（非 OpenAPI 生成类型），运行时不可信——
+ * 字段宽松声明（content?: unknown），读取处统一 asString/typeof 收敛；
+ * 非法形状由 isAgentEventShape 拦截（缺合法 type → 回退旧文本协议解析）。
+ */
+export interface AgentEventUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+}
+
+export interface AgentEvent {
+  /** 事件型：text/thinking/tool_use/tool_result/status/error/turn_result/complete。 */
+  type: string;
+  /** 文本内容 / 工具入参 JSON / 工具结果 / 错误信息。空 = 无文本。 */
+  content?: unknown;
+  /** status 型事件的细分信号（session_started/bash_chunk/...）。 */
+  subtype?: string;
+  /** turn 内单调递增序号（daemon SessionManager 补号）。 */
+  seq?: number;
+  /** provider 原生工具名（tool_use）。 */
+  tool_name?: string;
+  /** 工具调用 ID（tool_use / tool_result 配对）。 */
+  call_id?: string;
+  /** provider 会话 ID（resume；status/session_started 携带）。 */
+  session_id?: string;
+  /** token 用量（任意型事件可携带；backend 消费进 agent_runs 统计，行渲染不用）。 */
+  usage?: AgentEventUsage;
+  /** 子代理归属（Claude 深功能；渲染归属列已由行三列承载）。 */
+  parent_tool_use_id?: string;
+  subagent_type?: string;
+  depth?: number;
+  /** partial 流式段标识（同段多次 flush / override 撤回的关联键）。 */
+  segment_id?: string;
+  /** true = 流式半截行（partial flush 事件）。 */
+  is_partial?: boolean;
+  /** true = 替换同 segment_id 已落库 partial（[ASSISTANT_OVERRIDE] 等价语义）。 */
+  override?: boolean;
+  /** Edit 工具 structuredPatch JSON 文本（行 edit_patch 列承载，渲染器直读）。 */
+  edit_patch?: string;
+  /** provider 长尾元数据（model/tool_input/tool_kind/...）。 */
+  metadata?: Record<string, unknown>;
+}
+
+// task-10：行对象类型增可选 agent_event 字段（module augmentation 先例同上
+// task-08 errorLogItem——本任务 allowed_paths 仅 normalize.ts 与其测试，不改
+// lib/agent.ts）。SSE 入口（backend published_logs / session payload 顶层的
+// agent_event 键，service.py:1548/424）与测试直接注入该字段。
+declare module "@/lib/agent" {
+  interface AgentRunLogEntry {
+    agent_event?: AgentEvent | null;
+  }
+}
+
+/** 运行时形状校验：非空对象 + type 为非空字符串（缺/坏 → null 回退旧轨）。 */
+function isAgentEventShape(value: unknown): value is AgentEvent {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const t = (value as { type?: unknown }).type;
+  return typeof t === "string" && t.length > 0;
+}
+
+/**
+ * task-10：从日志行提取结构化事件（双入口识别）。
+ *
+ * - SSE 入口：行顶层 `agent_event`（backend run channel published_logs 与
+ *   session channel log payload 均顶层透传，service.py:1548/424）。
+ * - 回放入口：REST `AgentRunLogEntry.metadata`（backend 落库循环写
+ *   `metadata_['agent_event']`，schema.py AgentRunLogEntry.metadata 经
+ *   validation_alias="metadata_" 直映）。
+ *
+ * 两处都缺/形状非法 → null → 调用方走旧文本协议解析（回退轨，零改动）。
+ */
+export function extractRowAgentEvent(log: AgentRunLogEntry): AgentEvent | null {
+  if (isAgentEventShape(log.agent_event)) return log.agent_event;
+  const meta = log.metadata;
+  if (meta != null && typeof meta === "object" && !Array.isArray(meta)) {
+    const fromMeta = (meta as Record<string, unknown>)["agent_event"];
+    if (isAgentEventShape(fromMeta)) return fromMeta;
+  }
+  return null;
+}
+
+/** fromAgentEvent 只读上下文（主循环单遍处理的既有状态快照）。 */
+export interface AgentEventRenderContext {
+  result: ProcessedLog[];
+  /** 当前行在 result 中的下标。 */
+  index: number;
+  /** tool_use_id → 首个 tool_call 卡片下标（主循环预扫描产物，新旧轨共用）。 */
+  toolUseIdIndex: Map<string, number>;
+  /** task-08：是否已有结构化错误（error_detail / failed 兜底）。 */
+  hasStructuredError: boolean;
+  lastAssistantIdx: number;
+  lastThinkingIdx: number;
+  lastToolSourceIdx: number;
+}
+
+/** fromAgentEvent 处理结果：handled=false → 回退旧文本协议解析。 */
+export interface AgentEventRenderOutcome {
+  handled: boolean;
+  lastAssistantIdx: number;
+  lastThinkingIdx: number;
+  lastToolSourceIdx: number;
+}
+
+function agentEventFallback(ctx: AgentEventRenderContext): AgentEventRenderOutcome {
+  return {
+    handled: false,
+    lastAssistantIdx: ctx.lastAssistantIdx,
+    lastThinkingIdx: ctx.lastThinkingIdx,
+    lastToolSourceIdx: ctx.lastToolSourceIdx,
+  };
+}
+
+/**
+ * task-10 / FR-04 / D-001@v1：AgentEvent v2 → 渲染模型（结构化轨）。
+ *
+ * 映射表（事件型 → 渲染块，与旧文本协议逐型对齐；渲染模型形状与旧路径产出
+ * 一致——不改渲染组件）：
+ *
+ * | 事件型            | 渲染块                     | 旧协议对应                          |
+ * |-------------------|----------------------------|-------------------------------------|
+ * | text              | assistant 块               | stdout `[ASSISTANT]` 连续合并        |
+ * | thinking          | thinking 块                | stdout `[THINKING]` 连续合并         |
+ * | tool_use          | 工具卡（tool_call 行）+    | `[TOOL_USE]` 文本行 + tool_call JSON |
+ * |                   | stdout 回显行 hidden       | 双写合并（call_id 精确配对）         |
+ * | tool_result       | 结果回填进工具卡           | `[TOOL_RESULT]` 配对合并（parent     |
+ * |                   | （mergedToolResult/耗时）  | 归属优先（子代理 result 进父 Task    |
+ * |                   |                           | 卡，D-007 同梯级）→ 无 parent 时     |
+ * |                   |                           | call_id 精确配对 → 邻近退化）        |
+ * | error             | 错误块（stderr 行）        | channel=stderr → error              |
+ * | turn_result/complete | result 块                | `[RESULT` 前缀 → result             |
+ * | status            | system 块（generic 通道）  | `[SYSTEM` 前缀 → system             |
+ * | 未知型            | handled=false              | 回退旧文本解析（不丢）              |
+ *
+ * partial / override 语义（实读旧协议对 `[ASSISTANT]`/`[THINKING]` partial 行
+ * 的处理——覆盖/追加由 merge 函数承载）：is_partial 半截行与普通片段同权参与
+ * 连续合并（追加）；override=true 的完整行内容经 mergeAssistantPiece /
+ * mergeThinkingPiece 的前缀包含判定实现覆盖（piece.startsWith(prev) → 取
+ * piece），与旧轨「完整行到达覆盖已渲染半截」行为一致。
+ *
+ * 指针语义与旧路径各分支逐字对齐（差异 B 回修后）：thinking 行不重置
+ * assistant 指针（旧轨 thinking-only 分支提前 continue）；text 行重置 thinking
+ * 指针（旧轨任何非 thinking-only stdout 行在 isThinkingOnly 判定后重置
+ * lastThinkingIdx）；tool_use / tool_result / error / turn_result / status 行
+ * 重置双指针（对齐旧轨 tool_call 分支与 [TOOL_USE]/[TOOL_RESULT]/非 stdout
+ * 分支的重置点），保证新旧轨行交错时合并块连续性与旧轨自洽。
+ */
+export function fromAgentEvent(
+  ev: AgentEvent,
+  target: ProcessedLog,
+  ctx: AgentEventRenderContext,
+): AgentEventRenderOutcome {
+  const content = asString(ev.content);
+  const callId = typeof ev.call_id === "string" ? ev.call_id : "";
+
+  switch (ev.type) {
+    case "text": {
+      if (!content) return agentEventFallback(ctx);
+      // 指针语义（差异 B 回修 task-13 验收）：text 行**重置 thinking 合并指针**——
+      // 对齐旧轨 normalizeLogsImpl 的 stdout 处理序（任何非 thinking-only 的
+      // stdout 行在 isThinkingOnly 判定未命中后即重置 lastThinkingIdx，含
+      // [ASSISTANT]/API Error/普通流式文本行）。下方三个返回点统一 -1；
+      // assistant 指针语义不变（首块置 index / 后续块保持合并目标）。
+      // task-08 语义保留：text 事件内容命中模型错误特征（daemon 把模型失败记为
+      // [ASSISTANT] API Error 文本）→ 不并入 assistant 合并。有结构化错误 →
+      // hidden（结构化项取代）；否则保留为独立 error 项。
+      if (isAssistantApiErrorText(content)) {
+        if (ctx.hasStructuredError) target.hidden = true;
+        return {
+          handled: true,
+          lastAssistantIdx: -1,
+          lastThinkingIdx: -1,
+          lastToolSourceIdx: ctx.lastToolSourceIdx,
+        };
+      }
+      if (ctx.lastAssistantIdx >= 0) {
+        const t = ctx.result[ctx.lastAssistantIdx];
+        if (t) {
+          const prev = t.mergedAssistantContent ?? "";
+          t.mergedAssistantContent = mergeAssistantPiece(prev, content);
+        }
+        target.hidden = true;
+        return {
+          handled: true,
+          lastAssistantIdx: ctx.lastAssistantIdx,
+          lastThinkingIdx: -1,
+          lastToolSourceIdx: ctx.lastToolSourceIdx,
+        };
+      }
+      target.mergedAssistantContent = content;
+      return {
+        handled: true,
+        lastAssistantIdx: ctx.index,
+        lastThinkingIdx: -1,
+        lastToolSourceIdx: ctx.lastToolSourceIdx,
+      };
+    }
+
+    case "thinking": {
+      if (!content) return agentEventFallback(ctx);
+      if (ctx.lastThinkingIdx >= 0) {
+        const t = ctx.result[ctx.lastThinkingIdx];
+        if (t) {
+          const prev = t.mergedThinkingContent ?? "";
+          t.mergedThinkingContent = mergeThinkingPiece(prev, content);
+        }
+        target.hidden = true;
+        return {
+          handled: true,
+          lastAssistantIdx: ctx.lastAssistantIdx,
+          lastThinkingIdx: ctx.lastThinkingIdx,
+          lastToolSourceIdx: ctx.lastToolSourceIdx,
+        };
+      }
+      target.mergedThinkingContent = content;
+      return {
+        handled: true,
+        lastAssistantIdx: ctx.lastAssistantIdx,
+        lastThinkingIdx: ctx.index,
+        lastToolSourceIdx: ctx.lastToolSourceIdx,
+      };
+    }
+
+    case "tool_use": {
+      // 缺 call_id → 回退旧文本路径（tc JSON 内 tool_use_id / 窗口启发式）。
+      if (!callId) return agentEventFallback(ctx);
+      if (target.log.channel === "tool_call") {
+        // 工具卡本体：toolUseId 直取 call_id（与 tc JSON 内 tool_use_id 同值，
+        // backend 双写保证一致）。同 call_id 重复 emit 合并到首张（对齐旧分支）。
+        target.toolUseId = callId;
+        const firstIdx = ctx.toolUseIdIndex.get(callId);
+        if (firstIdx !== undefined && firstIdx !== ctx.index) {
+          target.hidden = true;
+          return {
+            handled: true,
+            lastAssistantIdx: -1,
+            lastThinkingIdx: -1,
+            lastToolSourceIdx: ctx.lastToolSourceIdx,
+          };
+        }
+        return {
+          handled: true,
+          lastAssistantIdx: -1,
+          lastThinkingIdx: -1,
+          lastToolSourceIdx: ctx.index,
+        };
+      }
+      // stdout [TOOL_USE] 文本回显行（backend 对同一 tool_use 事件双写）：call_id
+      // 命中卡片 → 卡片已承载本事件全部信息（tool_name/入参），回显行 hidden。
+      const cardIdx = ctx.toolUseIdIndex.get(callId);
+      if (cardIdx !== undefined && cardIdx !== ctx.index) {
+        target.hidden = true;
+        return {
+          handled: true,
+          lastAssistantIdx: -1,
+          lastThinkingIdx: -1,
+          lastToolSourceIdx: ctx.lastToolSourceIdx,
+        };
+      }
+      // 卡片未被预扫描索引（tc JSON 缺 tool_use_id 等）→ 回退旧文本窗口启发式。
+      return agentEventFallback(ctx);
+    }
+
+    case "tool_result": {
+      if (!content) return agentEventFallback(ctx);
+      // 配对梯级对齐旧 `[TOOL_RESULT]` 分支（normalizeLogsImpl「[TOOL_RESULT]
+      // handling」，差异 A 回修 task-13 验收）——旧轨唯一 id 配对源是行
+      // parent_tool_use_id 列（D-007），**无 call_id 通道**，逐字对齐：
+      //   1. 行/事件带 parent_tool_use_id（子代理归属，两处同值——行是旧轨的
+      //      字面读取源，事件是同源冗余承载）→ 按其配对进父 Task 卡。优先于
+      //      call_id：子代理 result 的 call_id 指向子代理自己的工具卡，按
+      //      call_id 配对会与旧轨分叉（渲染树不等价）；
+      //   2. parent 有值但卡未索引（派发行在别的 run/批次）→ 与旧轨一致落
+      //      邻近退化（lastToolSourceIdx），**不回落 call_id**（回落会让子代理
+      //      result 又并进自己的卡，重新分叉）；
+      //   3. 无 parent 归属（主 agent result）→ call_id 精确配对（结构化轨
+      //      增量；良序流中 call_id 卡即旧轨邻近配对的目标卡）→ 邻近退化 →
+      //      孤儿独立渲染。
+      // mergeToolResult 复用（含 toolDurationMs 预算，首条语义）。
+      const parentToolUseId =
+        (typeof target.log.parent_tool_use_id === "string" && target.log.parent_tool_use_id)
+        || (typeof ev.parent_tool_use_id === "string" && ev.parent_tool_use_id)
+        || "";
+      let matchedIdx = -1;
+      if (parentToolUseId) {
+        const candidate = ctx.toolUseIdIndex.get(parentToolUseId);
+        if (candidate !== undefined) matchedIdx = candidate;
+      } else if (callId) {
+        const candidate = ctx.toolUseIdIndex.get(callId);
+        if (candidate !== undefined) matchedIdx = candidate;
+      }
+      if (matchedIdx >= 0 && ctx.result[matchedIdx]) {
+        mergeToolResult(ctx.result[matchedIdx]!, content, target.log);
+        target.hidden = true;
+      } else if (ctx.lastToolSourceIdx >= 0) {
+        const tc = ctx.result[ctx.lastToolSourceIdx];
+        if (tc) mergeToolResult(tc, content, target.log);
+        target.hidden = true;
+      } else {
+        target.parsedToolResult = content;
+      }
+      return {
+        handled: true,
+        lastAssistantIdx: -1,
+        lastThinkingIdx: -1,
+        lastToolSourceIdx: ctx.lastToolSourceIdx,
+      };
+    }
+
+    case "error": {
+      // backend 落 stderr 通道原文（无前缀）。分类显式置 error（classifyLog 对
+      // stderr 已判 error，此处对齐结构化语义，防通道异常时误归 assistant）。
+      target.semanticCategory = "error";
+      return {
+        handled: true,
+        lastAssistantIdx: -1,
+        lastThinkingIdx: -1,
+        lastToolSourceIdx: ctx.lastToolSourceIdx,
+      };
+    }
+
+    case "turn_result":
+    case "complete": {
+      // backend 对 turn_result/complete 不落行（usage/session_id 走聚合量提取，
+      // service.py:3790-3793）；防御性映射（对齐 [RESULT → result），不丢。
+      target.semanticCategory = "result";
+      return {
+        handled: true,
+        lastAssistantIdx: -1,
+        lastThinkingIdx: -1,
+        lastToolSourceIdx: ctx.lastToolSourceIdx,
+      };
+    }
+
+    case "status": {
+      // status 会话级信号按设计不经 submitMessages 落库（design §5.1/§7.5）；
+      // 防御性映射走 generic 通道（对齐 [SYSTEM → system），可见不丢。
+      target.semanticCategory = "system";
+      return {
+        handled: true,
+        lastAssistantIdx: -1,
+        lastThinkingIdx: -1,
+        lastToolSourceIdx: ctx.lastToolSourceIdx,
+      };
+    }
+
+    default:
+      // 未知事件型：回退旧文本协议解析（行仍带旧文本行，generic 渲染不丢）。
+      return agentEventFallback(ctx);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Log normalization                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -683,6 +1044,37 @@ function normalizeLogsImpl(
       asString(current.log.content_redacted),
       current.log.tool_kind,
     );
+
+    // task-10 / FR-04 / D-001@v1（2026-09-03-agent-provider-abstraction）：双轨入口。
+    // 行携带 agent_event（SSE 顶层字段或回放 metadata_.agent_event，见
+    // extractRowAgentEvent）→ fromAgentEvent 结构化路径构造渲染模型（不进文本
+    // 正则）；缺字段 / 未知事件型 → handled=false 落到下方旧文本协议解析
+    // （parseStdoutToolUse / classifyLog 前缀分支 / 合并链等现逻辑零改动冻结）。
+    // 通道守卫：agent_event 只由 daemon 产出（backend _persist_agent_event 落
+    // stdout/tool_call/stderr 三类通道），user_input/pending_input 行不走结构化轨。
+    const agentEvent =
+      current.log.channel === "stdout"
+      || current.log.channel === "tool_call"
+      || current.log.channel === "stderr"
+        ? extractRowAgentEvent(current.log)
+        : null;
+    if (agentEvent) {
+      const outcome = fromAgentEvent(agentEvent, current, {
+        result,
+        index: i,
+        toolUseIdIndex,
+        hasStructuredError,
+        lastAssistantIdx,
+        lastThinkingIdx,
+        lastToolSourceIdx,
+      });
+      if (outcome.handled) {
+        lastAssistantIdx = outcome.lastAssistantIdx;
+        lastThinkingIdx = outcome.lastThinkingIdx;
+        lastToolSourceIdx = outcome.lastToolSourceIdx;
+        continue;
+      }
+    }
 
     if (current.log.channel === "tool_call") {
       // task-14 / FR-09：解析 tool_use_id（task-13 注入），记入 ProcessedLog

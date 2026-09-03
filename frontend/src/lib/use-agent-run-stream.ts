@@ -218,6 +218,17 @@ export function useAgentRunStream(
             parent_tool_use_id: event.parent_tool_use_id ?? null,
             subagent_type: event.subagent_type ?? null,
             depth: event.depth ?? null,
+            // task-13（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：
+            // SSE 转换层接线——补透传 agent_event（顶层字段，backend run/session
+            // 双通道 payload 带，service.py:1548/424）+ 顺带 tool_kind / segment_id /
+            // edit_patch（task-10 发现的既有缺口：onMessage 逐字段构造行时全丢，
+            // 实时流结构化渲染轨 / 工具徽标 / 半截行标识 / Edit 真实行号此前只在
+            // REST 回放可达）。缺席 → null（与 AgentRunLogEntry 可选列语义一致，
+            // normalize/渲染层自行兜底），其余字段构造保持原样。
+            agent_event: event.agent_event ?? null,
+            tool_kind: event.tool_kind ?? null,
+            segment_id: event.segment_id ?? null,
+            edit_patch: event.edit_patch ?? null,
           },
         ];
       });

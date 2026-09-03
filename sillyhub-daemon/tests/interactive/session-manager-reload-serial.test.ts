@@ -26,7 +26,7 @@ import { SessionManager } from '../../src/interactive/session-manager.js';
 import type { ProviderConfig } from '../../src/types.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -41,7 +41,7 @@ import type {
 function makeSlowStartDriver() {
   const queries: Query[] = [];
   const closeSpies: ReturnType<typeof vi.fn>[] = [];
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
 
   const driver = {
     start: vi.fn(
@@ -56,7 +56,7 @@ function makeSlowStartDriver() {
         return q;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async () => true),
@@ -67,8 +67,8 @@ function makeSlowStartDriver() {
     driver,
     closeSpies,
     getQueries: () => queries,
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 
@@ -92,7 +92,10 @@ const BASE_INPUT = {
 };
 
 function systemInitMessage(sid = 'sdk-sess-serial'): SDKMessage {
-  return { type: 'system', subtype: 'init', session_id: sid } as unknown as SDKMessage;
+  // task-08：归一化器等价 session_started 事件。
+  return {
+    events: [{ type: 'status', subtype: 'session_started', content: '', session_id: sid }],
+  } as unknown as TurnMessageEnvelope;
 }
 
 function resultSuccess(): SDKResultMessage {

@@ -24,7 +24,7 @@ import { PermissionResolver } from '../../src/interactive/permission-resolver.js
 import { MSG } from '../../src/protocol.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -57,14 +57,14 @@ function resultSuccess(): SDKResultMessage {
 interface CapturedDriver {
   driver: ClaudeSdkDriver;
   capturedOptions: StartOptions | null;
-  capturedCallbacks: ConsumeCallbacks | null;
+  capturedCallbacks: InteractiveDriverCallbacks | null;
   fakeQuery: Query;
   emitResult: (r: SDKResultMessage) => void;
 }
 
 function makeMockDriver(): CapturedDriver {
   let capturedOptions: StartOptions | null = null;
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = { interrupt: vi.fn(async () => {}) } as unknown as Query;
   const driver: ClaudeSdkDriver = {
     start: vi.fn(
@@ -73,7 +73,7 @@ function makeMockDriver(): CapturedDriver {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -91,7 +91,7 @@ function makeMockDriver(): CapturedDriver {
     get capturedCallbacks() {
       return capturedCallbacks;
     },
-    emitResult: (r) => capturedCallbacks?.onResult(r),
+    emitResult: (r) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 

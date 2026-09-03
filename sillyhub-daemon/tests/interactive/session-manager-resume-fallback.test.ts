@@ -19,7 +19,7 @@ import {
 } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -41,7 +41,7 @@ function makeMockClaudeDriver(startBehaviors: StartBehavior[]) {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, _cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, _cb: InteractiveDriverCallbacks): Promise<void> => {
       // 挂起协程：真实 consume 长生命周期不结束，这里直接返回即可。
     }),
     interrupt: vi.fn(async () => true),

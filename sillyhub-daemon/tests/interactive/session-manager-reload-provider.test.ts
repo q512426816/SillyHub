@@ -43,7 +43,7 @@ import { SessionNotFoundError } from '../../src/interactive/types.js';
 import type { ProviderConfig } from '../../src/types.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -59,7 +59,7 @@ import type {
 function makeMockDriver() {
   const startCalls: { input: unknown; opts: StartOptions }[] = [];
   const closeSpies: ReturnType<typeof vi.fn>[] = [];
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
 
   const makeFakeQuery = (): Query => {
     const closeSpy = vi.fn(() => {});
@@ -77,7 +77,7 @@ function makeMockDriver() {
         return makeFakeQuery();
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       // 每次 consume 都覆盖 callbacks；reload 后第二次 consume 写入新手柄。
       capturedCallbacks = cb;
     }),
@@ -94,8 +94,8 @@ function makeMockDriver() {
     closeSpies,
     /** 第 N 次（0-based）start 返回的 query 对应的 close spy。 */
     closeSpyAt: (i: number) => closeSpies[i],
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 
@@ -115,8 +115,8 @@ function makeMockDriverWithAbortOnClose() {
   const startCalls: { input: unknown; opts: StartOptions }[] = [];
   const closeSpies: ReturnType<typeof vi.fn>[] = [];
   // query 引用 → 该 query 的 consume 回调（close 时取它触发 onError）。
-  const callbacksByQuery = new Map<object, ConsumeCallbacks>();
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  const callbacksByQuery = new Map<object, InteractiveDriverCallbacks>();
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
 
   const makeFakeQuery = (): Query => {
     let queryRef: Query;
@@ -145,7 +145,7 @@ function makeMockDriverWithAbortOnClose() {
         return makeFakeQuery();
       },
     ),
-    consume: vi.fn(async (q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       // 按 query 存回调（reload 后两个 consume 各持一份，close 时精准触发各自的）。
       callbacksByQuery.set(q as object, cb);
       capturedCallbacks = cb;
@@ -163,8 +163,8 @@ function makeMockDriverWithAbortOnClose() {
     closeSpies,
     /** 第 N 次（0-based）start 返回的 query 对应的 close spy。 */
     closeSpyAt: (i: number) => closeSpies[i],
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 
@@ -214,13 +214,13 @@ function resultSuccess(): SDKResultMessage {
   } as unknown as SDKResultMessage;
 }
 
-/** system/init 消息（让 _onMessage 写 state.agentSessionId，resume 必需）。 */
-function systemInitMessage(sid = 'sdk-sess'): SDKMessage {
+/** session_started 事件 envelope（task-08：让 _onMessage 写 state.agentSessionId，resume 必需）。 */
+function systemInitMessage(sid = 'sdk-sess'): Record<string, unknown> {
   return {
-    type: 'system',
-    subtype: 'init',
-    session_id: sid,
-  } as unknown as SDKMessage;
+    events: [
+      { type: 'status', subtype: 'session_started', content: '', session_id: sid },
+    ],
+  };
 }
 
 /** 新供应商配置 fixture（ProviderConfig snake_case，对齐 claim payload）。 */

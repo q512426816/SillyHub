@@ -1,0 +1,258 @@
+[
+  {
+    "_comment": "采样来源与脱敏说明见同目录 README.md。本文件 = 完整消息混合序列：text/thinking/tool_use 交错 + Edit structuredPatch tool_result + Task 子代理帧（parent_tool_use_id/subagent_type）。",
+    "type": "assistant",
+    "message": {
+      "id": "msg_main_001",
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The user wants me to spawn a general-purpose subagent to compute 17*23, then reply with the number and \"done\"."
+        },
+        {
+          "type": "text",
+          "text": "I will run a quick environment check and dispatch a subagent for the arithmetic."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_bash01",
+          "name": "Bash",
+          "input": {
+            "command": "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>&1 | head -40",
+            "description": "List running docker containers"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_task01",
+          "name": "Task",
+          "input": {
+            "description": "Compute 17 times 23",
+            "prompt": "Compute 17 * 23. Return only the numerical result.",
+            "subagent_type": "general-purpose"
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 9771,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 25088,
+        "output_tokens": 752
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-001",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_bash01",
+          "type": "tool_result",
+          "content": "NAMES\tIMAGE\tPORTS\nsillyhub-backend\tsillyhub:latest\t0.0.0.0:8000->8000/tcp"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-002",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_main_002",
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "text",
+          "text": "The environment is healthy. Now let me fix the spec sync walk function."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_edit01",
+          "name": "Edit",
+          "input": {
+            "file_path": "<REDACTED>/spec-sync.ts",
+            "old_string": "async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {",
+            "new_string": "async function walkDir(\n  root: string,\n  pruneTop?: Set<string>,\n  pruneNames?: Set<string>,\n): Promise<WalkEntry[]> {",
+            "replace_all": false
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 12345,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 40112,
+        "output_tokens": 210
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-003",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_edit01",
+          "type": "tool_result",
+          "content": "The file <REDACTED>/spec-sync.ts has been updated successfully. (file state is current in your context — no need to Read it back)"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "tool_use_result": {
+      "filePath": "<REDACTED>/spec-sync.ts",
+      "oldString": "async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {",
+      "newString": "async function walkDir(\n  root: string,\n  pruneTop?: Set<string>,\n  pruneNames?: Set<string>,\n): Promise<WalkEntry[]> {",
+      "originalFile": "async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\n  const out: WalkEntry[] = [];\n  return out;\n}\n",
+      "structuredPatch": [
+        {
+          "oldStart": 536,
+          "oldLines": 7,
+          "newStart": 536,
+          "newLines": 11,
+          "lines": [
+            "  *（tar 标准是 forward slash；Windows 下 join 用反斜杠，但 tar entry name 必须是正斜杠）。",
+            "  */",
+            "-async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {",
+            "+async function walkDir(",
+            "+  root: string,",
+            "+  pruneTop?: Set<string>,",
+            "+  pruneNames?: Set<string>,",
+            "+): Promise<WalkEntry[]> {",
+            "   const out: WalkEntry[] = [];"
+          ]
+        }
+      ],
+      "userModified": false,
+      "replaceAll": false
+    },
+    "uuid": "u-004",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_sub_001",
+      "role": "assistant",
+      "model": "claude-haiku-4-5",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The task is a simple multiplication. I will read the project notes first, as the prompt hints they contain a precomputed table."
+        },
+        {
+          "type": "text",
+          "text": "Reading the project notes before answering."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_read01",
+          "name": "Read",
+          "input": {
+            "file_path": "<REDACTED>/NOTES.md"
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 210,
+        "output_tokens": 33
+      }
+    },
+    "parent_tool_use_id": "toolu_task01",
+    "subagent_type": "general-purpose",
+    "uuid": "u-005",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_read01",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "17 * 23 = 391 (precomputed in notes)"
+            }
+          ]
+        }
+      ]
+    },
+    "parent_tool_use_id": "toolu_task01",
+    "uuid": "u-006",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_sub_002",
+      "role": "assistant",
+      "model": "claude-haiku-4-5",
+      "content": [
+        {
+          "type": "text",
+          "text": "17 * 23 = 391"
+        }
+      ]
+    },
+    "parent_tool_use_id": "toolu_task01",
+    "subagent_type": "general-purpose",
+    "uuid": "u-007",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_task01",
+          "type": "tool_result",
+          "content": "391"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "tool_use_result": {
+      "type": "result",
+      "result": "391"
+    },
+    "uuid": "u-008",
+    "session_id": "sess-sample-0001"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_main_003",
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "text",
+          "text": "17 × 23 = 391. done."
+        }
+      ],
+      "usage": {
+        "input_tokens": 10112,
+        "cache_creation_input_tokens": 1024,
+        "cache_read_input_tokens": 52000,
+        "output_tokens": 12
+      }
+    },
+    "parent_tool_use_id": null,
+    "uuid": "u-009",
+    "session_id": "sess-sample-0001"
+  }
+]

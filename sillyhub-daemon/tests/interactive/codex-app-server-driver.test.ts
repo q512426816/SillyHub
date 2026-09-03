@@ -18,6 +18,10 @@
 //   11. 未知 event/坏 JSON 不崩
 //   12. turn/completed failed status
 //   13. server request fail-closed（decline，不 accept）
+//   14.（2026-09-03-agent-provider-abstraction task-04）flat message → AgentEvent v2 映射：
+//       一等字段提升（status/session_started、usage、tool_name/call_id、thinking）+
+//       未知 type 降级 + 全量 safeParseAgentEvent 校验；legacy flat 键（event_type/
+//       metadata 原样）保留供 task-08/09 前的既有消费方（见 driver 文件头 D-004 说明）
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -41,9 +45,12 @@ import { resolveWindowsCmdShim } from '../../src/cmd-shim.js';
 import {
   CodexAppServerDriver,
   CodexExecutableNotFoundError,
+  toAgentEvent,
+  type CodexAgentEventMessage,
   type CodexHandle,
   type CodexStartOptions,
 } from '../../src/interactive/codex-app-server-driver.js';
+import { safeParseAgentEvent } from '../../src/agent-event-schema.js';
 import type {
   InteractiveDriverCallbacks,
   UserTurnInput,
@@ -76,8 +83,12 @@ function makeCallbacks(): {
   const results: Record<string, unknown>[] = [];
   const errors: unknown[] = [];
   const cb: InteractiveDriverCallbacks = {
-    onTurnMessage: (m) => {
-      messages.push(m);
+    // task-08：envelope-only——摊平 events 收集（codex 每 envelope 单事件，
+    // 既有断言按事件对象书写，摊平后形态不变）。
+    onTurnMessage: (envelope) => {
+      for (const ev of envelope.events) {
+        messages.push(ev as unknown as Record<string, unknown>);
+      }
     },
     onTurnResult: (r) => {
       results.push(r);
@@ -347,6 +358,12 @@ describe('TDD-2：新建握手 initialize→initialized→thread/start', () => {
     expect(started).toBeDefined();
     expect(started!.event_type).toBe('text');
     expect(started!.session_id).toBe('thr_123');
+
+    // task-04 映射：thread_started → status/session_started（一等 session_id + subtype），
+    // legacy 键（event_type 别名 + metadata.subtype）保留供既有消费方
+    expect(started!.type).toBe('status');
+    expect(started!.subtype).toBe('session_started');
+    expect(safeParseAgentEvent(started).success).toBe(true);
 
     expect(handle.threadId).toBe('thr_123');
 
@@ -919,6 +936,26 @@ describe('TDD-7：flat message 映射（text/tool_use/tool_result/reasoning）',
     );
     expect(agentText).toBeDefined();
 
+    // task-04 映射：一等字段提升断言（映射表 #2/#5/#6）
+    // tool_use / tool_result：tool_name + call_id 一等化（cmd_1 同 id 配对）
+    expect(toolUse!.type).toBe('tool_use');
+    expect(toolUse!.tool_name).toBe('exec_command');
+    expect(toolUse!.call_id).toBe('cmd_1');
+    expect(toolResult!.type).toBe('tool_result');
+    expect(toolResult!.tool_name).toBe('exec_command');
+    expect(toolResult!.call_id).toBe('cmd_1');
+    // reasoning（metadata.thinking=true）→ type='thinking'（与 claude thinking 同契约）
+    expect(thinking!.type).toBe('thinking');
+    // agentMessage → type='text'（call_id 留 metadata：契约仅 tool 事件一等化）
+    expect(agentText!.type).toBe('text');
+    expect(agentText!.call_id).toBeUndefined();
+    expect((agentText!.metadata as { call_id?: string }).call_id).toBe('msg_1');
+
+    // task-04 验收：全部产出事件过 safeParseAgentEvent 校验
+    for (const m of messages) {
+      expect(safeParseAgentEvent(m).success).toBe(true);
+    }
+
     close();
     emitLines(child, [turnCompletedNotif('completed')]);
     child._emitExit(0);
@@ -1024,6 +1061,9 @@ describe('TDD-10：stderr 作 error flat message 上报', () => {
     expect(stderrMsg!.event_type).toBe('error');
     expect(stderrMsg!.content).toBe('boom');
     expect(stderrMsg!.session_id).toBe('thr_123');
+    // task-04 映射：error → type='error'（恒等，映射表 #7）+ schema 校验
+    expect(stderrMsg!.type).toBe('error');
+    expect(safeParseAgentEvent(stderrMsg).success).toBe(true);
 
     close();
     child._emitExit(0);
@@ -1187,5 +1227,216 @@ describe('TDD-13：server request fail-closed（manualApproval=true 未注入 ho
     emitLines(child, [turnCompletedNotif('cancelled')]);
     child._emitExit(0);
     await consumeP;
+  });
+});
+
+// ── task-04：flat message → AgentEvent v2 映射（FR-02 / D-004）────────────────
+//
+// 覆盖任务卡 task-04.md §implementation/§acceptance：
+//   - 每已知 event_type 至少一例（text/thinking/tool_use/tool_result/error/status/
+//     turn_result，其余在 TDD-2/7/10 内补充断言）；
+//   - usage 从 metadata 提取进 AgentEvent.usage 一等字段（含 cache 两字段）；
+//   - complete（turn 终态）→ turn_result 映射但**不经 onMessage 上报**（D-004：
+//     turn 边界信号由 onTurnResult 承载，外部行为不变）；
+//   - 未知 type → status 降级（不丢弃不抛错，原值经 metadata.original_event_type +
+//     legacy event_type 别名 + content 三处保留）；
+//   - 全部产出事件过 safeParseAgentEvent 校验。
+
+describe('task-04：flat message → AgentEvent v2 映射', () => {
+  it('usage_update（turn/start response 带 usage）→ type=text + usage 一等字段（含 cache 两字段）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // turn/start(id=3) 的 response 携带 usage → adapter 收敛 text+usage_update 事件
+    emitLines(child, [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        result: {
+          usage: {
+            input_tokens: 11,
+            output_tokens: 7,
+            cache_read_tokens: 4,
+            cache_creation_tokens: 2,
+          },
+        },
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    const usageMsg = messages.find(
+      (m) => (m.metadata as { status?: string })?.status === 'usage_update',
+    );
+    expect(usageMsg).toBeDefined();
+    // 映射表 #3：text 恒等 + usage 一等化（四字段全带）
+    expect(usageMsg!.type).toBe('text');
+    expect(usageMsg!.usage).toEqual({
+      input_tokens: 11,
+      output_tokens: 7,
+      cache_read_tokens: 4,
+      cache_creation_tokens: 2,
+    });
+    // metadata 原样保留（合并提升，不搬走）
+    expect((usageMsg!.metadata as { usage?: unknown }).usage).toBeDefined();
+    expect(usageMsg!.session_id).toBe('thr_123');
+    expect(usageMsg!.event_type).toBe('text');
+    expect(safeParseAgentEvent(usageMsg).success).toBe(true);
+
+    close();
+    emitLines(child, [turnCompletedNotif('completed')]);
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('rpc error response → type=error + metadata.rpc_error_code 保留（映射表 #7）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    emitLines(child, [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 99,
+        error: { code: -32000, message: 'rpc boom' },
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    const errEv = messages.find((m) => m.content === 'rpc boom');
+    expect(errEv).toBeDefined();
+    expect(errEv!.type).toBe('error');
+    expect(errEv!.event_type).toBe('error');
+    expect((errEv!.metadata as { rpc_error_code?: number }).rpc_error_code).toBe(
+      -32000,
+    );
+    expect(errEv!.session_id).toBe('thr_123');
+    expect(safeParseAgentEvent(errEv).success).toBe(true);
+
+    close();
+    emitLines(child, [turnCompletedNotif('completed')]);
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('turn/completed → turn_result 映射但不经 onMessage 上报（外部行为不变），usage 走 onTurnResult', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, messages, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [
+      turnStartedNotif('thr_123', 'turn_1'),
+      turnCompletedNotif('completed', {
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // D-004 原语义保持：turn_result 不进消息流（turn 边界信号由 onTurnResult 承载）
+    expect(messages.some((m) => m.type === 'turn_result')).toBe(false);
+    expect(messages.some((m) => m.event_type === 'complete')).toBe(false);
+    // usage 仍经 onTurnResult 汇总（映射表 #8 的消费侧）
+    expect(results).toHaveLength(1);
+    expect((results[0] as { usage?: Record<string, unknown> }).usage)
+      .toMatchObject({ input_tokens: 10, output_tokens: 5 });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('toAgentEvent：complete 输入 → turn_result + usage 一等化（映射表 #8 单元直测）', () => {
+    const ev: CodexAgentEventMessage = toAgentEvent(
+      {
+        type: 'complete',
+        content: '',
+        metadata: {
+          source: 'turn_completed',
+          turn_status: 'completed',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_tokens: 8,
+            cache_creation_tokens: 3,
+          },
+        },
+      },
+      'thr_123',
+    );
+    expect(ev.type).toBe('turn_result');
+    expect(ev.usage).toEqual({
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_tokens: 8,
+      cache_creation_tokens: 3,
+    });
+    expect(ev.session_id).toBe('thr_123');
+    // legacy 别名 = 原始 type（旧 flat 契约里 complete 即原值）
+    expect(ev.event_type).toBe('complete');
+    expect(safeParseAgentEvent(ev).success).toBe(true);
+  });
+
+  it('toAgentEvent：未知 type → status/task_notification 降级，不丢弃不抛错（fail-safe）', () => {
+    // adapter 静态类型保证 8 型联合，此用例模拟运行时契约漂移（宽松输入类型宽收）
+    const ev: CodexAgentEventMessage = toAgentEvent(
+      { type: 'frobnicate', content: 'payload', metadata: { foo: 'bar' } },
+      'thr_123',
+    );
+    expect(ev.type).toBe('status');
+    // schema 闭合枚举约束下的降级桶选择（见 toAgentEvent 降级桶说明）
+    expect(ev.subtype).toBe('task_notification');
+    // 原值三处保留：content + metadata.original_event_type + legacy event_type 别名
+    expect(ev.content).toBe('frobnicate');
+    expect(ev.metadata).toMatchObject({
+      original_event_type: 'frobnicate',
+      foo: 'bar',
+    });
+    expect(ev.event_type).toBe('frobnicate');
+    expect(ev.session_id).toBe('thr_123');
+    // fail-safe 前提：降级产物仍是合法 AgentEvent
+    expect(safeParseAgentEvent(ev).success).toBe(true);
+  });
+
+  it('toAgentEvent：thread_started 缺 metadata.session_id → session_id 回退 threadId 参数', () => {
+    const ev: CodexAgentEventMessage = toAgentEvent(
+      { type: 'text', content: '', metadata: { subtype: 'thread_started' } },
+      'thr_fallback',
+    );
+    expect(ev.type).toBe('status');
+    expect(ev.subtype).toBe('session_started');
+    expect(ev.session_id).toBe('thr_fallback');
+    expect(safeParseAgentEvent(ev).success).toBe(true);
   });
 });

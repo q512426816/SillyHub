@@ -948,6 +948,71 @@ describe("useAgentRunStream — done / message", () => {
     expect(result.current.logs).toHaveLength(2);
   });
 
+  // task-13（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：SSE 转换层
+  // 接线——onMessage 构造行对象补透传 agent_event（顶层字段）+ 顺带 tool_kind /
+  // segment_id / edit_patch（task-10 发现的既有缺口：此前实时流行对象全丢这些字段，
+  // 双轨渲染轨只在 REST 回放可达，实时流恒走旧文本解析）。
+  it("task-13：SSE 消息带 agent_event → 行对象带该字段（+ tool_kind/segment_id/edit_patch 透传）", async () => {
+    installFetchMock(() => jsonResponse({ id: "run-1", session_id: null }));
+
+    const { result } = renderHook(
+      ({ workspaceId, runId, isActive }) =>
+        useAgentRunStream(workspaceId, runId, { isActive }),
+      {
+        initialProps: {
+          workspaceId: "ws-1",
+          runId: "run-1",
+          isActive: true,
+        },
+      },
+    );
+
+    await waitFor(() => expect(currentFake).not.toBeNull());
+
+    act(() => {
+      // partial 文本行：backend session/run 双通道 payload 顶层带 agent_event + segment_id
+      currentFake!.__emitMessage({
+        channel: "stdout",
+        content: "[ASSISTANT] 你好",
+        timestamp: "2026-06-22T10:00:03Z",
+        log_id: "L3",
+        segment_id: "main:msg_x:text",
+        agent_event: {
+          type: "text",
+          content: "你好",
+          is_partial: true,
+          segment_id: "main:msg_x:text",
+        },
+      });
+      // tool_call 行：tool_kind 实时流工具徽标依赖
+      currentFake!.__emitMessage({
+        channel: "tool_call",
+        content:
+          '{"tool":"Bash","args":{"command":"ls"},"tool_use_id":"toolu_01"}',
+        timestamp: "2026-06-22T10:00:04Z",
+        log_id: "L4",
+        tool_kind: "bash",
+      });
+    });
+
+    expect(result.current.logs).toHaveLength(2);
+    // L3：行对象携带顶层 agent_event（结构化事件逐字段透传）+ segment_id 半截标识
+    expect(result.current.logs[0]!.agent_event).toEqual({
+      type: "text",
+      content: "你好",
+      is_partial: true,
+      segment_id: "main:msg_x:text",
+    });
+    expect(result.current.logs[0]!.segment_id).toBe("main:msg_x:text");
+    // L4：tool_kind 透传；edit_patch 缺席 → null（与可选列语义一致）
+    expect(result.current.logs[1]!.tool_kind).toBe("bash");
+    expect(result.current.logs[1]!.edit_patch).toBeNull();
+    // 其它字段构造保持原样（接线只增不改）
+    expect(result.current.logs[0]!.content_redacted).toBe("[ASSISTANT] 你好");
+    expect(result.current.logs[0]!.run_id).toBe("run-1");
+    expect(result.current.logs[0]!.parent_tool_use_id).toBeNull();
+  });
+
   it("onStatusChange → connected 时 streaming=true / loading=false", async () => {
     installFetchMock(() => jsonResponse({ id: "run-1", session_id: null }));
 

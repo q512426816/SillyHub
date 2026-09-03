@@ -232,7 +232,7 @@ describe('task-15 / R-04 (1): mcpServers 注入的 driver.start 返回的 handle
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -243,7 +243,7 @@ import type {
  */
 function makeMockDriverMcpWithClose() {
   let capturedStartOpts: StartOptions | null = null;
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const interruptSpy = vi.fn(async () => {});
   const closeSpy = vi.fn(() => {});
   const fakeQuery = {
@@ -258,7 +258,7 @@ function makeMockDriverMcpWithClose() {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -274,7 +274,7 @@ function makeMockDriverMcpWithClose() {
     interruptSpy,
     closeSpy,
     getStartOpts: () => capturedStartOpts,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 

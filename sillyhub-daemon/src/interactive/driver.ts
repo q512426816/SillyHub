@@ -12,6 +12,11 @@
  *     由 task-02 在 create/restore 路径接线，本契约仅注释引用）。
  *   - D-009@v1：输入队列脱离 Claude Agent SDK。SessionManager 只
  *     push `UserTurnInput`；SDK 类型（SDKUserMessage）只能出现在 Claude driver 内部。
+ *   - task-06/08（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：
+ *     onTurnMessage 契约演进为 TurnMessageEnvelope{events, raw?}（raw 仅
+ *     SILLYHUB_DEBUG_RAW_EVENTS=1 携带、下游禁止依赖）且 **envelope-only 收口**
+ *     （task-08：Claude/Codex 两 driver 旧键兜底与裸消息分支移除）；
+ *     InteractiveDriverResult 增结构化 usage（AgentEventUsage 短名）/session_id。
  *
  * 本文件为纯类型导出，不含任何运行时逻辑；具体 driver 实现见：
  *   - ClaudeSdkDriver（claude-sdk-driver.ts，task-03 让其 implements InteractiveDriver）
@@ -20,8 +25,19 @@
  * @module interactive/driver
  */
 
-/** provider 集合（与 types.ts provider union 对齐，FR-01/FR-10）。 */
-export type InteractiveProvider = 'claude' | 'codex';
+/**
+ * provider 集合（FR-01/FR-10）。
+ *
+ * task-05（FR-05 / design §5.2）：联合类型单源迁至 providers.ts——由注册表
+ * INTERACTIVE_PROVIDERS 推导（`keyof typeof`），新增 provider 只加注册表条目，
+ * 本文件不再维护字面量联合。此处 re-export 自 providers.ts（type-only，不
+ * 引入运行时依赖），保持既有 `from './driver.js'` 导入路径的调用点零改动；
+ * 同时本地 import 供本文件 InteractiveDriverHandle.provider 等引用。
+ */
+import type { InteractiveProvider } from './providers.js';
+import type { AgentEvent, AgentEventUsage } from '../types.js';
+
+export type { InteractiveProvider };
 
 /**
  * D-009@v1：provider-neutral 用户输入单元。SessionManager.create/inject 只 push 此形态。
@@ -53,12 +69,22 @@ export interface UserTurnInput {
 }
 
 /**
- * driver 上报给 SessionManager 的中间消息（onTurnMessage 回调入参）。
- * provider-neutral：Claude driver 透传 SDKMessage 原对象（鸭子类型满足 Record），
- * Codex driver 上报 flat message `{ event_type, content, metadata?, session_id? }`。
- * SessionManager 不假设具体字段，由 daemon.onTurnMessage 按 provider 归一化（task-02/06）。
+ * task-06（2026-09-03-agent-provider-abstraction / FR-02 / D-002@v1）：turn 中间消息信封。
+ *
+ * driver 归一化产出的 AgentEvent 批次：一帧 provider 原始消息可产 0..N 条事件
+ *（Claude 一帧 assistant 多 block → 多事件；partial flush 单事件成批）。
+ *
+ * `raw` **仅为调试通道**：仅当环境变量 `SILLYHUB_DEBUG_RAW_EVENTS=1` 时 driver
+ * 才携带 provider 原始消息（Claude=SDKMessage 原对象），默认 undefined。
+ * **下游（SessionManager / daemon.ts / cli.ts）禁止依赖 raw 的形状与存在性**
+ *（D-002@v1：raw 降格调试通道，终态消费面 raw 依赖清零）。
  */
-export type InteractiveDriverMessage = Record<string, unknown>;
+export interface TurnMessageEnvelope {
+  /** 归一化事件（zod 校验见 agent-event-schema.ts 的 safeParseAgentEvent）。 */
+  events: AgentEvent[];
+  /** provider 原始消息（仅 SILLYHUB_DEBUG_RAW_EVENTS=1 携带；禁止下游依赖）。 */
+  raw?: unknown;
+}
 
 /**
  * driver 上报给 SessionManager 的 turn 结果（onTurnResult 回调入参）。
@@ -81,11 +107,22 @@ export interface InteractiveDriverResult {
   duration_ms?: number;
   /** API 耗时（ms，Claude SDK 字段）。 */
   duration_api_ms?: number;
-  /** token 用量。 */
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
+  /**
+   * token 用量。
+   *
+   * task-06（FR-02）：类型从 `{input_tokens?, output_tokens?}` 扩为 AgentEventUsage
+   *（增 cache_read/cache_creation/ctx 维度，宽松可选，现形状兼容）。Claude driver
+   * 把 SDKResultMessage.usage 的 Anthropic 全名 `cache_*_input_tokens` 映射为短名
+   * `cache_*_tokens`（daemon.ts:3564-3586 lift 同口径，叠加保留原字段），codex
+   * driver 从 metadata.usage 提取四字段短名（task-04）。
+   */
+  usage?: AgentEventUsage;
+  /**
+   * provider 会话 ID（Claude SDK result.session_id / Codex threadId）。
+   * task-06（FR-02）：结构化提升为一等字段（原先仅藏在 Claude 透传对象里），
+   * 供 SessionManager/backend resume 指针消费。
+   */
+  session_id?: string;
 }
 
 /**
@@ -168,8 +205,11 @@ export interface McpServerConfigForDriver {
 
 /**
  * consume 回调集合（SessionManager 注入）。provider-neutral：
- * - Claude driver：把 SDKMessage 透传给 onTurnMessage，SDKResultMessage 给 onTurnResult。
- * - Codex driver：flat message 给 onTurnMessage，归一化 result 给 onTurnResult。
+ * - Claude driver：SDK 消息流经 ClaudeEventNormalizer 归一化 → onTurnMessage 收
+ *   TurnMessageEnvelope{events, raw?}（task-06/08）；SDKResultMessage 经 usage/session_id
+ *   短名映射后给 onTurnResult（InteractiveDriverResult）。
+ * - Codex driver：flat 事件经 toAgentEvent 映射 → 包装 envelope{events:[单事件]}
+ *   给 onTurnMessage（task-08 envelope-only），归一化 result 给 onTurnResult。
  *
  * E4（不改传入参数）：回调由 SessionManager 提供，driver 不得缓存或跨 session 复用。
  * E3（异常不静默）：driver 异常必须经 `onTurnError` 上报，不得吞掉。
@@ -177,8 +217,16 @@ export interface McpServerConfigForDriver {
 export interface InteractiveDriverCallbacks {
   /** turn 收敛结果 → SessionManager 关闭当前 AgentRun（task-02 真接线）。 */
   onTurnResult(result: InteractiveDriverResult): void | Promise<void>;
-  /** 中间消息 → submit AgentRunLog（task-02/06 接 submitMessages）。可选。 */
-  onTurnMessage?(msg: InteractiveDriverMessage): void | Promise<void>;
+  /**
+   * 中间消息（归一化事件批次）→ submit AgentRunLog（task-02/06/09 接 submitMessages）。
+   * 可选。
+   *
+   * task-08（FR-02 / D-002@v1 收口）：**envelope-only**——入参恒为
+   * {@link TurnMessageEnvelope}（`events` 必填；`raw` 仅调试开关携带，下游禁止
+   * 依赖）。旧裸消息形态（InteractiveDriverMessage / raw SDK 透传）分支已随
+   * Claude/Codex 两 driver 的旧键兜底一并移除。
+   */
+  onTurnMessage?(envelope: TurnMessageEnvelope): void | Promise<void>;
   /** driver 异常（spawn 失败/进程退出/网络）→ session failed。可选。 */
   onTurnError?(err: unknown): void | Promise<void>;
 }

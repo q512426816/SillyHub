@@ -35,7 +35,7 @@ import type {
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 
@@ -51,7 +51,7 @@ import type {
  * 吐 result 让 session 进入 active 态，便于测 interrupt no-op / 续轮）。
  */
 function makeMockDriverWithClose() {
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const interruptSpy = vi.fn(async () => {});
   const closeSpy = vi.fn(() => {});
   const fakeQuery = {
@@ -65,7 +65,7 @@ function makeMockDriverWithClose() {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -80,14 +80,14 @@ function makeMockDriverWithClose() {
     fakeQuery,
     interruptSpy,
     closeSpy,
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
   };
 }
 
 function makeMockDriverWithoutClose() {
   // FR-07 brownfield：旧 driver / 未实现 close 的 driver —— close?.() no-op 不报错。
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
   const fakeQuery = {
     interrupt: vi.fn(async () => {}),
     // 故意不定义 close
@@ -98,7 +98,7 @@ function makeMockDriverWithoutClose() {
         return fakeQuery;
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {

@@ -1,0 +1,421 @@
+{
+  "_comment": "task-12 golden：backend _extract_sdk_messages 对 golden-session.json 完整帧的展开行快照（旧链路语义锚）。输入 = 完整帧 + 旧 daemon 顶层附加 depth；usage stamp 为 SDK 原生全名（cache_read_input_tokens 等——daemon.ts lift 的短名映射发生在 submit_messages 聚合层，不改展开行本身）。tool_call 行 content 为 tc_payload JSON（含 timestamp，快照中剥离 timestamp 存 tc_payload 对象）；edit_patch 为旧轨字符串形态 json.dumps(..., ensure_ascii=False)。由 backend test_run_sync_golden_parity.py（live _extract_sdk_messages 对照）与 daemon claude-events-golden.test.ts（normalizer 事件映射对照）双侧锚定。",
+  "frames": [
+    {
+      "frame": 8,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[THINKING] Let me check the environment.",
+          "channel": "stdout",
+          "metadata": {
+            "thinking": true,
+            "segmentId": "main:msg_t1_m1:thinking",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_read_input_tokens": 500
+          },
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        }
+      ]
+    },
+    {
+      "frame": 16,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[ASSISTANT] Running docker ps now.",
+          "channel": "stdout",
+          "metadata": {
+            "segmentId": "main:msg_t1_m2:text",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 320,
+            "output_tokens": 120,
+            "cache_read_input_tokens": 700,
+            "cache_creation_input_tokens": 64
+          },
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        },
+        {
+          "event_type": "tool_use",
+          "content": "[TOOL_USE] Bash: docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>&1 | head -40",
+          "channel": "stdout",
+          "depth": 0
+        },
+        {
+          "event_type": "tool_use",
+          "channel": "tool_call",
+          "tool_kind": "bash",
+          "tool_use_id": "toolu_bash01",
+          "depth": 0,
+          "tc_payload": {
+            "tool": "Bash",
+            "args": {
+              "command": "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>&1 | head -40",
+              "description": "List running docker containers"
+            },
+            "status": "allowed",
+            "success": true,
+            "tool_use_id": "toolu_bash01"
+          }
+        },
+        {
+          "event_type": "tool_use",
+          "content": "[TOOL_USE] Task: {\"description\": \"Compute 17 times 23\", \"prompt\": \"Compute 17 * 23. Return only the numerical result.\", \"subagent_type\": \"general-purpose\"}",
+          "channel": "stdout",
+          "depth": 0
+        },
+        {
+          "event_type": "tool_use",
+          "channel": "tool_call",
+          "tool_kind": "task",
+          "tool_use_id": "toolu_task01",
+          "depth": 0,
+          "tc_payload": {
+            "tool": "Task",
+            "args": {
+              "description": "Compute 17 times 23",
+              "prompt": "Compute 17 * 23. Return only the numerical result.",
+              "subagent_type": "general-purpose"
+            },
+            "status": "allowed",
+            "success": true,
+            "tool_use_id": "toolu_task01"
+          }
+        }
+      ]
+    },
+    {
+      "frame": 17,
+      "rows": [
+        {
+          "event_type": "tool_result",
+          "content": "[TOOL_RESULT] NAMES\tIMAGE\tPORTS\nsillyhub-backend\tsillyhub:latest\t0.0.0.0:8000->8000/tcp",
+          "channel": "stdout",
+          "tool_use_id": "toolu_bash01",
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        }
+      ]
+    },
+    {
+      "frame": 18,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[THINKING] The task is a simple multiplication. I will read the project notes first, as the prompt hints they contain a precomputed table.",
+          "channel": "stdout",
+          "metadata": {
+            "thinking": true,
+            "segmentId": "toolu_task01:msg_sub_001:thinking",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 210,
+            "output_tokens": 33
+          },
+          "session_id": "sess-sample-0003",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        },
+        {
+          "event_type": "text",
+          "content": "[ASSISTANT] Reading the project notes before answering.",
+          "channel": "stdout",
+          "metadata": {
+            "segmentId": "toolu_task01:msg_sub_001:text",
+            "isComplete": true
+          },
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        },
+        {
+          "event_type": "tool_use",
+          "content": "[TOOL_USE] Read: {\"file_path\": \"<REDACTED>/NOTES.md\"}",
+          "channel": "stdout",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        },
+        {
+          "event_type": "tool_use",
+          "channel": "tool_call",
+          "tool_kind": "read",
+          "tool_use_id": "toolu_read01",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1,
+          "tc_payload": {
+            "tool": "Read",
+            "args": {
+              "file_path": "<REDACTED>/NOTES.md"
+            },
+            "status": "allowed",
+            "success": true,
+            "tool_use_id": "toolu_read01"
+          }
+        }
+      ]
+    },
+    {
+      "frame": 19,
+      "rows": [
+        {
+          "event_type": "tool_result",
+          "content": "[TOOL_RESULT] 17 * 23 = 391 (precomputed in notes)",
+          "channel": "stdout",
+          "tool_use_id": "toolu_read01",
+          "session_id": "sess-sample-0003",
+          "parent_tool_use_id": "toolu_task01",
+          "depth": 1
+        }
+      ]
+    },
+    {
+      "frame": 20,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[ASSISTANT] 17 * 23 = 391",
+          "channel": "stdout",
+          "metadata": {
+            "segmentId": "toolu_task01:msg_sub_002:text",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 260,
+            "output_tokens": 21
+          },
+          "session_id": "sess-sample-0003",
+          "parent_tool_use_id": "toolu_task01",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        }
+      ]
+    },
+    {
+      "frame": 21,
+      "rows": [
+        {
+          "event_type": "tool_result",
+          "content": "[TOOL_RESULT] 391",
+          "channel": "stdout",
+          "tool_use_id": "toolu_task01",
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        }
+      ]
+    },
+    {
+      "frame": 30,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[ASSISTANT] I will edit the walker.",
+          "channel": "stdout",
+          "metadata": {
+            "segmentId": "main:msg_t2_m1:text",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 900,
+            "output_tokens": 40,
+            "cache_read_input_tokens": 1500
+          },
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        },
+        {
+          "event_type": "tool_use",
+          "content": "[TOOL_USE] Edit: {\"file_path\": \"<REDACTED>/spec-sync.ts\", \"old_string\": \"async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\", \"new_string\": \"async function walkDir(\\n  root: string,\\n  pruneTop?: Set<string>,\\n  pruneNames?: Set<string>,\\n): Promise<WalkEntry[]> {\", \"replace_all\": false}",
+          "channel": "stdout",
+          "depth": 0
+        },
+        {
+          "event_type": "tool_use",
+          "channel": "tool_call",
+          "tool_kind": "write",
+          "tool_use_id": "toolu_edit01",
+          "depth": 0,
+          "tc_payload": {
+            "tool": "Edit",
+            "args": {
+              "file_path": "<REDACTED>/spec-sync.ts",
+              "old_string": "async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {",
+              "new_string": "async function walkDir(\n  root: string,\n  pruneTop?: Set<string>,\n  pruneNames?: Set<string>,\n): Promise<WalkEntry[]> {",
+              "replace_all": false
+            },
+            "status": "allowed",
+            "success": true,
+            "tool_use_id": "toolu_edit01"
+          }
+        }
+      ]
+    },
+    {
+      "frame": 31,
+      "rows": [
+        {
+          "event_type": "tool_result",
+          "content": "[TOOL_RESULT] The file <REDACTED>/spec-sync.ts has been updated successfully. (file state is current in the context — no need to Read it back)",
+          "channel": "stdout",
+          "tool_use_id": "toolu_edit01",
+          "edit_patch": "[{\"oldStart\": 536, \"oldLines\": 7, \"newStart\": 536, \"newLines\": 11, \"lines\": [\"  *（tar 标准是 forward slash；Windows 下 join 用反斜杠，但 tar entry name 必须是正斜杠）。\", \"  */\", \"-async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {\", \"+async function walkDir(\", \"+  root: string,\", \"+  pruneTop?: Set<string>,\", \"+  pruneNames?: Set<string>,\", \"+): Promise<WalkEntry[]> {\", \"   const out: WalkEntry[] = [];\"]}]",
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        }
+      ]
+    },
+    {
+      "frame": 32,
+      "rows": [
+        {
+          "event_type": "tool_use",
+          "content": "[TOOL_USE] Task: {\"description\": \"Verify the edit\", \"prompt\": \"Verify the walkDir signature change compiles and keeps behavior.\", \"subagent_type\": \"general-purpose\"}",
+          "channel": "stdout",
+          "usage": {
+            "input_tokens": 950,
+            "output_tokens": 25,
+            "cache_read_input_tokens": 1600
+          },
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        },
+        {
+          "event_type": "tool_use",
+          "channel": "tool_call",
+          "tool_kind": "task",
+          "tool_use_id": "toolu_task02",
+          "depth": 0,
+          "tc_payload": {
+            "tool": "Task",
+            "args": {
+              "description": "Verify the edit",
+              "prompt": "Verify the walkDir signature change compiles and keeps behavior.",
+              "subagent_type": "general-purpose"
+            },
+            "status": "allowed",
+            "success": true,
+            "tool_use_id": "toolu_task02"
+          }
+        }
+      ]
+    },
+    {
+      "frame": 33,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[ASSISTANT] Delegating the entry-name check.",
+          "channel": "stdout",
+          "metadata": {
+            "segmentId": "toolu_task02:msg_sub2_001:text",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 300,
+            "output_tokens": 30
+          },
+          "session_id": "sess-sample-0003",
+          "parent_tool_use_id": "toolu_task02",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        },
+        {
+          "event_type": "tool_use",
+          "content": "[TOOL_USE] Task: {\"description\": \"Check tar entry names\", \"prompt\": \"Check that archive entries use forward slashes on Windows.\", \"subagent_type\": \"general-purpose\"}",
+          "channel": "stdout",
+          "parent_tool_use_id": "toolu_task02",
+          "subagent_type": "general-purpose",
+          "depth": 1
+        },
+        {
+          "event_type": "tool_use",
+          "channel": "tool_call",
+          "tool_kind": "task",
+          "tool_use_id": "toolu_task03",
+          "parent_tool_use_id": "toolu_task02",
+          "subagent_type": "general-purpose",
+          "depth": 1,
+          "tc_payload": {
+            "tool": "Task",
+            "args": {
+              "description": "Check tar entry names",
+              "prompt": "Check that archive entries use forward slashes on Windows.",
+              "subagent_type": "general-purpose"
+            },
+            "status": "allowed",
+            "success": true,
+            "tool_use_id": "toolu_task03"
+          }
+        }
+      ]
+    },
+    {
+      "frame": 34,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[ASSISTANT] Entry names verified: forward slashes only.",
+          "channel": "stdout",
+          "metadata": {
+            "segmentId": "toolu_task03:msg_sub3_001:text",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 150,
+            "output_tokens": 18
+          },
+          "session_id": "sess-sample-0003",
+          "parent_tool_use_id": "toolu_task03",
+          "subagent_type": "general-purpose",
+          "depth": 2
+        }
+      ]
+    },
+    {
+      "frame": 35,
+      "rows": [
+        {
+          "event_type": "tool_result",
+          "content": "[TOOL_RESULT] Verified: entry names use forward slashes.",
+          "channel": "stdout",
+          "tool_use_id": "toolu_task02",
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        }
+      ]
+    },
+    {
+      "frame": 36,
+      "rows": [
+        {
+          "event_type": "text",
+          "content": "[ASSISTANT] The walker is fixed and verified. done.",
+          "channel": "stdout",
+          "metadata": {
+            "segmentId": "main:msg_t2_m3:text",
+            "isComplete": true
+          },
+          "usage": {
+            "input_tokens": 2000,
+            "output_tokens": 60,
+            "cache_read_input_tokens": 8000,
+            "cache_creation_input_tokens": 512
+          },
+          "session_id": "sess-sample-0003",
+          "depth": 0
+        }
+      ]
+    }
+  ]
+}

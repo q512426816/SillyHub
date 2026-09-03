@@ -42,7 +42,7 @@ import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 import { mkdir, stat, readFile, writeFile, rename, unlink, chmod } from 'node:fs/promises';
 
 import { join, dirname } from 'node:path';
-import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, normalizeAllowedRoots } from './config.js';
 // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
 // （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
@@ -58,12 +58,11 @@ import { CONTROL_KIND } from './protocol.js';
 import type { PendingControlCommand } from './protocol.js';
 // task-06（design A1+A2 消费端）：控制指令统一消费入口（路由/去重/ack 收集）。
 import { ControlDispatcher } from './control-dispatcher.js';
-// task-06（design §5.4.4）：onTurnMessage/onTurnResult 参数类型从 Claude SDK 专属类型
-// 放宽为 provider-neutral 联合，支持 Codex flat message/result 透传。
-import type {
-  InteractiveDriverMessage,
-  InteractiveDriverResult,
-} from './interactive/driver.js';
+// task-06（design §5.4.4）：onTurnResult 参数类型从 Claude SDK 专属类型放宽为
+// provider-neutral 联合，支持 Codex flat result 透传。
+// task-09（2026-09-03-agent-provider-abstraction）：onTurnMessage 入参随 task-08
+// 收口改为上报消息 dict（Record），InteractiveDriverMessage 旧导出已退役删除。
+import type { InteractiveDriverResult } from './interactive/driver.js';
 import type {
   DaemonMessage,
   ExecutionContextPayload,
@@ -77,6 +76,7 @@ import { extractCause } from './hub-client.js';
 // 2026-08-31-machine-sillyspec-version task-05：register/heartbeat 追加的 sillyspec
 // 参数形状（键存在性语义见 hub-client.ts D-002@v1 注释），daemon 组装快照时用。
 import type {
+  AgentEventMessage,
   HeartbeatSillySpecParam,
   RegisterSillySpecParam,
 } from './hub-client.js';
@@ -1392,7 +1392,11 @@ export class Daemon {
    * 类型带 parent_tool_use_id，天然计入——design §2 口径，与 modelUsage 同源
    * 对齐）。turn 边界不清零：runId 即 turn 维度，新 run 无条目从 0 起。
    *
-   * 生命周期：onTurnMessage（type==='assistant'）递增；onTurnResult 读出后
+   * 生命周期：onTurnMessage 递增——事件轨 dict（type===event_type+seq 特征）按
+   * type==='text' 且非 partial 计（task-09 恢复：task-08 窗口态 type==='assistant'
+   * 恒不中致计数归零；一条 assistant SDK 消息≈一条完整 text 事件，partial flush
+   * 不计，口径≈旧 assistant 计数）；旧形态（raw SDK type==='assistant'，测试
+   * 替身）兜底保留；onTurnResult 读出后
    * delete（api_requests=0 也发——有 modelUsage 而无计数的诚实值；modelUsage
    * 缺失时 payload 两字段都不写，条目仍清理）；onSessionEnd 兜底回收（run
    * 未达终态时防泄漏，复用 _interactiveFlatSeqOwner 归属反查）。
@@ -3363,20 +3367,33 @@ export class Daemon {
         payload.output_tokens = resultMeta.usage.output_tokens;
       }
       // task-16：cache 两维提取（Anthropic SDK 全名 → payload 短名映射）。
-      // 全名 cache_*_input_tokens 来自 Claude SDK result.usage；映射为短名 cache_*_tokens
-      //（对齐 backend agent_runs 列 / _METADATA_FIELDS）。typeof 'number' 守卫，
-      // 字段缺失（codex/老 CLI）不 set → backend NULL（D-001@v1）。0 值合法不丢。
+      // task-08（2026-09-03-agent-provider-abstraction）：InteractiveDriverResult.usage
+      // 双命名统一短名——claude driver mapResultToDriverResult 只产短名
+      // cache_*_tokens（AgentEventUsage 口径，全名字段已剔除），codex driver 本就
+      // 短名；此处消费面同步改读短名（短名优先、全名兜余，兼容未走 driver 映射的
+      // 旧形态测试替身）。typeof 'number' 守卫，字段缺失（codex/老 CLI）不 set →
+      // backend NULL（D-001@v1）。0 值合法不丢。
       if (
         resultMeta.usage &&
-        typeof resultMeta.usage.cache_creation_input_tokens === 'number'
+        (typeof (resultMeta.usage as Record<string, unknown>)['cache_creation_tokens'] ===
+          'number' ||
+          typeof (resultMeta.usage as Record<string, unknown>)['cache_creation_input_tokens'] ===
+            'number')
       ) {
-        payload.cache_creation_tokens = resultMeta.usage.cache_creation_input_tokens;
+        const u = resultMeta.usage as unknown as Record<string, number>;
+        payload.cache_creation_tokens =
+          u['cache_creation_tokens'] ?? u['cache_creation_input_tokens'];
       }
       if (
         resultMeta.usage &&
-        typeof resultMeta.usage.cache_read_input_tokens === 'number'
+        (typeof (resultMeta.usage as Record<string, unknown>)['cache_read_tokens'] ===
+          'number' ||
+          typeof (resultMeta.usage as Record<string, unknown>)['cache_read_input_tokens'] ===
+            'number')
       ) {
-        payload.cache_read_tokens = resultMeta.usage.cache_read_input_tokens;
+        const u = resultMeta.usage as unknown as Record<string, number>;
+        payload.cache_read_tokens =
+          u['cache_read_tokens'] ?? u['cache_read_input_tokens'];
       }
     }
     // task-06（FR-01-3/FR-02-1，design §3.1）：modelUsage 逐模型明细行 + run 级
@@ -3478,20 +3495,29 @@ export class Daemon {
    * 查 SessionState，调 hubClient.submitMessages(leaseId, claimToken, runId, [msg])
    * → backend SSE turn_progress。复用既有 submitMessages 端点（interactive + batch 共用）。
    *
+   * task-09（2026-09-03-agent-provider-abstraction / FR-01 / D-001@v1 双轨）：入参
+   * 为 SessionManager 透传的上报消息 dict（Record），两类形态分流——
+   * ① 事件轨 dict（SessionManager._eventToReportDict 产物：AgentEvent v2 蛇形
+   *    平铺 + event_type 别名 + seq 补号，特征 = type===event_type 且 seq 为数字）：
+   *    默认包 ``{"kind":"agent_event","event":{...},"dedup_key":...}`` 上报（backend
+   *    task-07 _persist_agent_event 新轨：文本行前缀由 backend 合成、usage/session_id
+   *    从 event 内提取）；``SILLYHUB_LEGACY_TEXT_EVENTS=1`` 时跳过包装原样透传
+   *    （task-08 窗口态，backend 未升级时的本地回退，design §9 / R-05）。
+   * ② legacy flat dict（SessionManager 内部 _writeTaskLine [TASK_*] 行 /
+   *    budget_exceeded 软切断事件 / 旧 Codex flat / raw SDK 测试替身）：无
+   *    type+seq 特征 → 恒走旧透传路径（backend 兼容轨），不受开关影响——同一
+   *    messages 数组内新形态与旧 dict 共存（任务卡验收）。
+   *
    * 边界同 onTurnResult：state 不存在 / claimToken 空 / submitMessages 抛错 → warn 不抛。
    *
    * @param sessionId  AgentSession.id
    * @param runId  当前 turn 的 AgentRun.id
-   * @param msg  SDK SDKMessage
+   * @param msg  上报消息 dict（事件轨或 legacy flat，见上）
    */
   async onTurnMessage(
     sessionId: string,
     runId: string,
-    // task-06（design §5.4.4）：放宽为 provider-neutral 联合。Claude driver 传
-    // SDKMessage（{type:'assistant'|'user'|..., message:{usage}}）；Codex driver 传
-    // InteractiveDriverMessage（= Record<string,unknown>，flat：{event_type, content,
-    // metadata, session_id}）。下方 duck-typing 按 type/event_type 分流提取。
-    msg: SDKMessage | InteractiveDriverMessage,
+    msg: Record<string, unknown>,
   ): Promise<void> {
     if (!this._sessionManager) {
       this._logger.warn('on_turn_message_no_manager', { session_id: sessionId });
@@ -3513,24 +3539,81 @@ export class Daemon {
       });
       return;
     }
+    const fwdMsg = msg;
+    // task-09：事件轨 dict 识别。_eventToReportDict 恒产 event_type + type 同值 +
+    // seq 数字；legacy flat（[TASK_*] 行 / budget_exceeded / Codex flat）无
+    // type+seq 对，raw SDK 消息无 event_type/seq——特征不撞车，识别零歧义。
+    const eventTypeAlias =
+      typeof fwdMsg['event_type'] === 'string' ? fwdMsg['event_type'] : '';
+    const isAgentEventDict =
+      eventTypeAlias !== '' &&
+      fwdMsg['type'] === eventTypeAlias &&
+      typeof fwdMsg['seq'] === 'number';
+    // task-06（FR-02-1 / D-01）+ task-09 计数恢复：run 级 assistant 计数（API
+    // 调用次数近似，design §2）。放在 try 之前：模型调用已实际发生，计数不依赖
+    // submitMessages 转发成败。事件轨按 type==='text' 且非 partial 计（一条
+    // assistant 消息≈一条完整 text 事件；子代理 text 事件带 parent_tool_use_id
+    // 天然计入；partial flush 不计）——legacy 开关两态同计（开关只切上报形态，
+    // 不改本地统计口径）。旧 SDK 形态（type==='assistant'，测试替身）兜底保留；
+    // Codex flat（event_type 无 type）不计——其 driver 本就无 modelUsage，口径自洽。
+    if (isAgentEventDict) {
+      if (fwdMsg['type'] === 'text' && fwdMsg['is_partial'] !== true) {
+        this._assistantMsgCountByRun.set(
+          runId,
+          (this._assistantMsgCountByRun.get(runId) ?? 0) + 1,
+        );
+      }
+    } else if (fwdMsg['type'] === 'assistant') {
+      this._assistantMsgCountByRun.set(
+        runId,
+        (this._assistantMsgCountByRun.get(runId) ?? 0) + 1,
+      );
+    }
+    // task-09：per-run flatSeq 先行取号（主路径 submit 与下方 claim_token 空窗
+    // pending_token 入箱两条路径共用，每次调用恰消费一个；记 runId→sessionId
+    // 归属，onSessionEnd 反查回收，ql-20260825-f3#8）。
+    const flatSeq = this._interactiveFlatSeq.get(runId) ?? 0;
+    this._interactiveFlatSeq.set(runId, flatSeq + 1);
+    this._interactiveFlatSeqOwner.set(runId, sessionId);
+    // dedup_key（task-09 / FR-02 / D-002@v1，规则对齐现状）：Claude msg.id 优先
+    //（dedupKeyFor 内部 `if (id) return id`，不动——事件轨 dict 无顶层 id，恒走
+    // 确定性 seq 分支）；无 id 时 `${runId}:0:${flatSeq}`——per-run 递增保唯一，
+    // 重放同 flatSeq 同 key → backend ON CONFLICT 去重（幂等）。turnSeq 固定 0
+    //（interactive 单条转发不区分 turn）。注意不用 event 自带 seq（turn 内计数、
+    // _foldTurnUsage 每轮重置，跨 turn 会撞 key）。
+    const dedupKey = dedupKeyFor(fwdMsg, runId, 0, flatSeq);
+    // task-09（FR-01 / D-001@v1 / design §9 R-05）：legacy 回退开关，默认关闭。
+    // backend 未升级（升级顺序错配窗口：新 daemon + 旧 backend 把 kind 消息当
+    // 普通 dict 静默丢弃）时本地回退——事件轨 dict 原样上报走 backend 旧
+    // _extract_sdk_messages 兼容轨（task-08 窗口态）。只切上报形态，不影响
+    // 计数/守卫等本地逻辑。
+    const legacyTextEvents = process.env.SILLYHUB_LEGACY_TEXT_EVENTS === '1';
+    // task-09：默认态包装（AgentEventMessage 契约类型单源在 hub-client.ts）。
+    // dedup_key 放消息顶层——与 resilience submitWithRetry 的注入位
+    //（{...message, dedup_key}）一致，非 resilience 直发路径也自带。
+    // 事件轨 dict 里的 event_type 别名 / seq 等键原样保留在 event 内（backend
+    // _persist_agent_event 只读 event.type 等一等字段，别名无害）。
+    const agentEventMsg: AgentEventMessage = {
+      kind: 'agent_event',
+      event: fwdMsg,
+      dedup_key: dedupKey,
+    };
+    const reportMsg: Record<string, unknown> =
+      isAgentEventDict && !legacyTextEvents ? agentEventMsg : fwdMsg;
     if (!state.claimToken) {
       // task-07（A5 claim_token 空窗）：消息不再丢弃——带 pending_token 标记入
       // outbox，SESSION_INJECT 刷新 token 后 drain 重放（refresher 咨询
       // SessionState.claimToken）；未注入 resilience（旧测试形态）维持旧行为。
+      // task-09：入箱 message 形态与主路径一致（默认态包 kind，drain 重放走同一
+      // submit_messages 端点，backend 同分支消费；legacy 态原样）。
       this._logger.warn('on_turn_message_no_claim_token', {
         session_id: sessionId,
         lease_id: state.leaseId,
       });
       if (this._resilience) {
-        const fwdMsg = msg as unknown as Record<string, unknown>;
-        // flatSeq 语义与主路径一致（per-run 递增保 dedup_key 确定性，重放同 key
-        // 命中 backend ON CONFLICT 去重）。
-        const flatSeq = this._interactiveFlatSeq.get(runId) ?? 0;
-        this._interactiveFlatSeq.set(runId, flatSeq + 1);
-        this._interactiveFlatSeqOwner.set(runId, sessionId);
         try {
           await this._resilience.enqueuePendingToken(state.leaseId, runId, [
-            { message: fwdMsg, dedup_key: dedupKeyFor(fwdMsg, runId, 0, flatSeq) },
+            { message: reportMsg, dedup_key: dedupKey },
           ]);
         } catch {
           // 落盘失败不向上抛（对齐 submit 失败的容错语义）。
@@ -3538,51 +3621,49 @@ export class Daemon {
       }
       return;
     }
-    // task-06（FR-02-1 / D-01）：run 级 assistant 计数（API 调用次数近似，design
-    // §2）。放在 try 之前：模型调用已实际发生，计数不依赖 submitMessages 转发
-    // 成败。子代理消息同为 type==='assistant'（带 parent_tool_use_id）天然计入；
-    // Codex flat message（event_type，无 type）不计——其 driver 本就无 modelUsage，
-    // payload 两字段都不写，口径自洽。
-    if ((msg as unknown as Record<string, unknown>)['type'] === 'assistant') {
-      this._assistantMsgCountByRun.set(
-        runId,
-        (this._assistantMsgCountByRun.get(runId) ?? 0) + 1,
-      );
-    }
     try {
-      const fwdMsg = msg as unknown as Record<string, unknown>;
       const msgType = fwdMsg['type'];
-      // ql-20260627-usage（实时 token 透传）：通用 usage lift，提到 if/else 之外。
-      // 两类消息都可能携带 usage：
+      // ql-20260627-usage（实时 token 透传）+ task-09 两轨口径：
+      // - 事件轨 dict（isAgentEventDict，legacy 开关两态同）：usage 已由
+      //   SessionManager._eventToReportDict 平铺在 dict 顶层（AgentEventUsage 短名：
+      //   input_tokens/output_tokens/cache_read_tokens/cache_creation_tokens/
+      //   ctx_tokens——归一化器产、无 Anthropic 全名；D-003@v1 任意型事件可携带，
+      //   含 partial flush）。默认态随 event 原样透传，backend _persist_agent_event
+      //   stamp 进首条 flat record → 落库循环实时聚合 + SSE summary 字段名与旧
+      //   链路一致（R-07）——daemon 侧无需再 lift/改名（全名→短名映射对短名恒等，
+      //   强行重拷贝反而偏离「legacy 态 dict 原样上报」承诺）。
+      // - 旧形态 dict（flat / raw SDK）照旧顶层 usage lift，两类消息都可能携带 usage：
       //   1) session-manager flush 产出的 flat 消息（[THINKING]/[ASSISTANT]）——
       //      message_delta.usage 已注入顶层 fwdMsg['usage']（partial 实时计费）。
       //   2) Claude SDK assistant 完整消息——usage 嵌套在 msg.message.usage。
-      // 统一提到顶层并做 Anthropic 全名（cache_*_input_tokens）→ 短名（cache_*_tokens）
-      // 映射，让 backend submit_messages 实时更新 AgentRun token，不必等 result 汇总。
-      // task-16：复制一份再映射，不修改原 usage 对象（adapter 产，只读）；全名缺失 →
-      // 短名也不 set（backend NULL，D-001@v1）。
-      let liftedUsage = fwdMsg['usage'] as Record<string, unknown> | undefined;
-      if (!liftedUsage && msgType === 'assistant') {
-        // assistant 完整消息：usage 嵌套在 message.usage，先取出（message_delta 未及时
-        // flush 被 _clearPartialBufferSync 清掉时的兜底终态来源）。
-        const inner = fwdMsg['message'] as Record<string, unknown> | undefined;
-        liftedUsage = inner?.['usage'] as Record<string, unknown> | undefined;
-      }
-      if (liftedUsage && typeof liftedUsage['input_tokens'] === 'number') {
-        const lifted: Record<string, unknown> = { ...liftedUsage };
-        if (
-          typeof lifted['cache_creation_input_tokens'] === 'number' &&
-          lifted['cache_creation_tokens'] === undefined
-        ) {
-          lifted['cache_creation_tokens'] = lifted['cache_creation_input_tokens'];
+      //   统一提到顶层并做 Anthropic 全名（cache_*_input_tokens）→ 短名（cache_*_tokens）
+      //   映射，让 backend submit_messages 实时更新 AgentRun token，不必等 result 汇总。
+      //   task-16：复制一份再映射，不修改原 usage 对象（adapter 产，只读）；全名缺失 →
+      //   短名也不 set（backend NULL，D-001@v1）。
+      if (!isAgentEventDict) {
+        let liftedUsage = fwdMsg['usage'] as Record<string, unknown> | undefined;
+        if (!liftedUsage && msgType === 'assistant') {
+          // assistant 完整消息：usage 嵌套在 message.usage，先取出（message_delta 未及时
+          // flush 被 _clearPartialBufferSync 清掉时的兜底终态来源）。
+          const inner = fwdMsg['message'] as Record<string, unknown> | undefined;
+          liftedUsage = inner?.['usage'] as Record<string, unknown> | undefined;
         }
-        if (
-          typeof lifted['cache_read_input_tokens'] === 'number' &&
-          lifted['cache_read_tokens'] === undefined
-        ) {
-          lifted['cache_read_tokens'] = lifted['cache_read_input_tokens'];
+        if (liftedUsage && typeof liftedUsage['input_tokens'] === 'number') {
+          const lifted: Record<string, unknown> = { ...liftedUsage };
+          if (
+            typeof lifted['cache_creation_input_tokens'] === 'number' &&
+            lifted['cache_creation_tokens'] === undefined
+          ) {
+            lifted['cache_creation_tokens'] = lifted['cache_creation_input_tokens'];
+          }
+          if (
+            typeof lifted['cache_read_input_tokens'] === 'number' &&
+            lifted['cache_read_tokens'] === undefined
+          ) {
+            lifted['cache_read_tokens'] = lifted['cache_read_input_tokens'];
+          }
+          fwdMsg['usage'] = lifted;
         }
-        fwdMsg['usage'] = lifted;
       }
       // task-06（Reverse Sync / design §5.3 第 6 点）：Codex flat message 的
       // thread_started 事件携带 session_id=threadId。daemon 提取并记日志，便于
@@ -3590,8 +3671,16 @@ export class Daemon {
       // 透传，backend submit_messages 现有逻辑据 message.session_id 写回
       // AgentRun.session_id（ql-20260617-001）。AgentSession.agent_session_id 的对齐
       // 由 session-manager _onMessage 写 state.agentSessionId（供落盘/恢复）。
+      // task-09：事件轨下 thread_started 已由 codex driver 映射为 status/
+      // session_started 事件（subtype 一等字段，SessionManager 侧守卫提取 +
+      // _eventToReportDict 透传，backend 据此 pin resume 指针），本日志分支只服务
+      // legacy flat 形态（metadata.subtype），对事件轨恒不命中。
       const eventType = fwdMsg['event_type'];
-      if (typeof eventType === 'string' && eventType !== undefined) {
+      if (
+        !isAgentEventDict &&
+        typeof eventType === 'string' &&
+        eventType !== undefined
+      ) {
         const metadata = fwdMsg['metadata'] as Record<string, unknown> | undefined;
         const subtype = metadata?.['subtype'];
         const flatSessionId = fwdMsg['session_id'];
@@ -3606,21 +3695,15 @@ export class Daemon {
       }
       // task-10（FR-04 / D-005@v1）：interactive submit 走退避重试。
       // _resilience 未注入 → 回退直接调 _client（无重试，向后兼容）。
-      // dedup_key（task-09 / FR-02 / D-002@v1）：Claude msg.id 优先（dedupKeyFor 内部
-      // `if (id) return id`，不动）；无 msg.id 时走确定性 seq 分支
-      // `${runId}:0:${flatSeq}`——用 per-run 递增 _interactiveFlatSeq 计数，绝不退化
-      // `${runId}:${Date.now()}`（重发会变 key，backend ON CONFLICT 去重失效）。
-      // turnSeq 固定 0：interactive 单条转发不区分 turn，runId 维度 + flatSeq 单调递增
-      // 已保证唯一；同一条消息重发拿到相同 flatSeq → 相同 dedup_key → 命中去重。
-      const flatSeq = this._interactiveFlatSeq.get(runId) ?? 0;
-      this._interactiveFlatSeq.set(runId, flatSeq + 1);
-      // ql-20260825-f3#8：记录 runId→sessionId 归属，onSessionEnd 据此反查清理
-      //（flatSeq 条目不再只增不减；同 session 多 run 各记一条，幂等覆盖）。
-      this._interactiveFlatSeqOwner.set(runId, sessionId);
+      // task-09：flatSeq / dedup_key / 包装消息已在上方统一取号组装（与
+      // claim_token 空窗 pending_token 入箱分支共享同一份，主/兜底路径形态一致）；
+      // resilience 对消息形态零感知——submitWithRetry 仅把 dedup_key 展开注入
+      // message 顶层（`{...message, dedup_key}`，对 kind 包装是幂等覆盖），重试/
+      // 入箱/drain 链路不变。
       if (this._resilience) {
         const envelope: Envelope = {
-          message: fwdMsg,
-          dedup_key: dedupKeyFor(fwdMsg, runId, 0, flatSeq),
+          message: reportMsg,
+          dedup_key: dedupKey,
         };
         await this._resilience.submitWithRetry(
           state.leaseId,
@@ -3633,7 +3716,7 @@ export class Daemon {
           state.leaseId,
           state.claimToken,
           runId,
-          [fwdMsg],
+          [reportMsg],
         );
       }
     } catch (e) {

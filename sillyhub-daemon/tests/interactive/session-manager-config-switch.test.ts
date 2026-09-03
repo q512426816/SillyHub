@@ -47,7 +47,7 @@ import {
 import type { ProviderConfig } from '../../src/types.js';
 import type {
   ClaudeSdkDriver,
-  ConsumeCallbacks,
+  InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 import type { InteractiveDriver } from '../../src/interactive/driver.js';
@@ -58,7 +58,7 @@ import type { InteractiveDriver } from '../../src/interactive/driver.js';
 function makeMockClaudeDriver() {
   const startCalls: Array<{ input: unknown; opts: Record<string, unknown> }> = [];
   const closeSpies: ReturnType<typeof vi.fn>[] = [];
-  let capturedCallbacks: ConsumeCallbacks | null = null;
+  let capturedCallbacks: InteractiveDriverCallbacks | null = null;
 
   const makeFakeQuery = (): Query => {
     const closeSpy = vi.fn(() => {});
@@ -76,7 +76,7 @@ function makeMockClaudeDriver() {
         return makeFakeQuery();
       },
     ),
-    consume: vi.fn(async (_q: Query, cb: ConsumeCallbacks): Promise<void> => {
+    consume: vi.fn(async (_q: Query, cb: InteractiveDriverCallbacks): Promise<void> => {
       capturedCallbacks = cb;
     }),
     interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
@@ -91,8 +91,8 @@ function makeMockClaudeDriver() {
     startCalls,
     /** 第 N 次（0-based）start 返回的句柄对应 close spy。 */
     closeSpyAt: (i: number) => closeSpies[i],
-    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
-    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onTurnMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onTurnResult?.(r),
   };
 }
 
@@ -188,21 +188,22 @@ function resultSuccess(): SDKResultMessage {
   } as unknown as SDKResultMessage;
 }
 
-function systemInitMessage(sid = 'sdk-sess'): SDKMessage {
+// task-08：归一化器等价 envelope（session_started 事件；codex driver 映射表 #1
+// 同型——thread_started 已在 driver 侧转 status/session_started）。
+function systemInitMessage(sid = 'sdk-sess'): Record<string, unknown> {
   return {
-    type: 'system',
-    subtype: 'init',
-    session_id: sid,
-  } as unknown as SDKMessage;
+    events: [
+      { type: 'status', subtype: 'session_started', content: '', session_id: sid },
+    ],
+  };
 }
 
-/** Codex thread_started flat message（_onMessage 提取 threadId 写 agentSessionId）。 */
+/** Codex session_started envelope（提取 threadId 写 agentSessionId，语义不变）。 */
 function threadStartedMessage(threadId: string): Record<string, unknown> {
   return {
-    event_type: 'system',
-    content: '',
-    metadata: { subtype: 'thread_started' },
-    session_id: threadId,
+    events: [
+      { type: 'status', subtype: 'session_started', content: '', session_id: threadId },
+    ],
   };
 }
 

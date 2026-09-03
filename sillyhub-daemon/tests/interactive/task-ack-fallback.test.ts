@@ -96,53 +96,66 @@ async function createHarness(
 
 // ── 伪 SDK 消息构造 ──────────────────────────────────────────────────────────
 
-/** assistant message 含 Task tool_use（触发 _agentToolUseMeta 登记，回执回填源）。 */
+/** assistant Task tool_use 的归一化器等价 envelope（task-08 事件轨）：
+ * 同 envelope 含 [status/agent_task_status 派生信号（仅 emit 口径）] + tool_use
+ * 内容事件（_agentToolUseMeta 登记源，content = 入参 JSON）。 */
 function msgAssistantTaskToolUse(
   toolUseId: string,
   input: { description?: string; subagent_type?: string },
 ): Record<string, unknown> {
+  const taskName = input.description ?? 'Task';
   return {
-    type: 'assistant',
-    parent_tool_use_id: null,
-    message: {
-      content: [
-        {
-          type: 'tool_use',
-          id: toolUseId,
-          name: 'Task',
-          input,
+    events: [
+      {
+        type: 'status',
+        subtype: 'agent_task_status',
+        content: '',
+        metadata: {
+          task_id: toolUseId,
+          task_name: taskName,
+          status: 'running',
         },
-      ],
-    },
+      },
+      {
+        type: 'tool_use',
+        tool_name: 'Task',
+        call_id: toolUseId,
+        content: JSON.stringify(input),
+      },
+    ],
   };
 }
 
-/** user message 含 tool_result（异步启动回执载体）。 */
+/** user tool_result 的归一化器等价 envelope（回执载体；call_id = tool_use 配对键）。 */
 function msgUserToolResult(
   toolUseId: string,
   content: string,
 ): Record<string, unknown> {
   return {
-    type: 'user',
-    parent_tool_use_id: null,
-    content: [
-      { type: 'tool_result', tool_use_id: toolUseId, content, is_error: false },
-    ],
+    events: [{ type: 'tool_result', call_id: toolUseId, content }],
   };
 }
 
-/** system/task_started（primary 路径，双注册防重对照）。 */
+/** system/task_started 的归一化器等价 envelope（primary 路径，双注册防重对照）。 */
 function msgTaskStarted(o: {
   taskId: string;
   toolUseId?: string;
   description?: string;
 }): Record<string, unknown> {
   return {
-    type: 'system',
-    subtype: 'task_started',
-    task_id: o.taskId,
-    ...(o.toolUseId ? { tool_use_id: o.toolUseId } : {}),
-    ...(o.description !== undefined ? { description: o.description } : {}),
+    events: [
+      {
+        type: 'status',
+        subtype: 'agent_task_status',
+        content: o.description ?? '',
+        metadata: {
+          task_id: o.taskId,
+          task_name: o.description || '后台任务',
+          status: 'running',
+          ...(o.toolUseId ? { tool_use_id: o.toolUseId } : {}),
+        },
+      },
+    ],
   };
 }
 
@@ -152,11 +165,18 @@ function msgTaskNotification(o: {
   summary?: string;
 }): Record<string, unknown> {
   return {
-    type: 'system',
-    subtype: 'task_notification',
-    task_id: o.taskId,
-    status: o.status,
-    ...(o.summary !== undefined ? { summary: o.summary } : {}),
+    events: [
+      {
+        type: 'status',
+        subtype: 'task_notification',
+        content: o.summary ?? '',
+        metadata: {
+          task_id: o.taskId,
+          status: o.status,
+          ...(o.summary !== undefined ? { summary: o.summary } : {}),
+        },
+      },
+    ],
   };
 }
 
