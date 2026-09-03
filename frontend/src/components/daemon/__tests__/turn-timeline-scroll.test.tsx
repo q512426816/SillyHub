@@ -17,6 +17,21 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TurnTimeline } from "../turn-timeline";
 import type { SessionTurnView } from "../turn-timeline";
 
+// ql-20260903-026：行级 memo 断言面——计历史 markdown 块渲染次数（jsdom 下
+// 真实 MarkdownText 是 next/dynamic null，mock 替身带计数器）。既有用例的
+// turn 均 output 空串（不渲染 markdown），mock 对其惰性。
+const mdRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => {
+    mdRenders.count += 1;
+    return <div data-testid="md">{content}</div>;
+  },
+}));
+
+/** 稳定引用（行级 memo 生效前提——内联箭头/字面量数组每次 renderProps 新建会击穿）。 */
+const noop = () => {};
+const STABLE_DIALOG_HISTORY: never[] = [];
+
 function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
   return {
     runId: "run-1",
@@ -38,10 +53,10 @@ function renderProps(turns: SessionTurnView[]) {
     errorMsg: null,
     sessionStatus: "active" as const,
     pendingRequests: [],
-    dialogHistory: [],
-    onDialogResolved: () => {},
-    onResend: () => {},
-    onSwitchProvider: () => {},
+    dialogHistory: STABLE_DIALOG_HISTORY,
+    onDialogResolved: noop,
+    onResend: noop,
+    onSwitchProvider: noop,
     hasOnlineProvider: true,
     emptyProviderLabel: "Claude Code",
   };
@@ -200,5 +215,26 @@ describe("TurnTimeline 回到底部悬浮按钮（ql-20260903-023）", () => {
     const btn = screen.getByTestId("turn-jump-bottom");
     expect(btn.textContent).toContain("回到底部");
     expect(btn.textContent).not.toContain("新消息");
+  });
+});
+
+// ── ql-20260903-026：行级 memo——流式 delta 只重渲染变化行 ───────────────────
+
+describe("TurnTimeline 行级 memo（ql-20260903-026）", () => {
+  it("delta 只重渲染变化行：未变行（引用稳定）的 markdown 不重渲染", () => {
+    mdRenders.count = 0;
+    const t1 = makeTurn({ runId: "r1", output: "第一轮答复" });
+    const t2 = makeTurn({ runId: "r2", output: "第二轮答复" });
+    const { rerenderTurns } = setup([t1, t2]);
+    expect(mdRenders.count).toBe(2);
+
+    // 流式 delta 语义（对齐 session-panel displayTurns 引用稳定守卫）：
+    // 仅 r2 path-copy 新对象，r1 引用不变 → 只有 r2 行重渲染。
+    rerenderTurns([t1, makeTurn({ runId: "r2", output: "第二轮答复（增量）" })]);
+    expect(mdRenders.count).toBe(3);
+
+    // 再来一轮 delta（仍只动 r2）。
+    rerenderTurns([t1, makeTurn({ runId: "r2", output: "第二轮答复（再增量）" })]);
+    expect(mdRenders.count).toBe(4);
   });
 });

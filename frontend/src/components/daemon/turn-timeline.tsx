@@ -31,7 +31,7 @@
  * TextSegmentView 的 .seg-caret 承担，双路径语义一致）。数据逻辑 / SSE 零改动。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
@@ -263,217 +263,28 @@ export interface TurnTimelineProps {
   streamFooter?: ReactNode;
 }
 
-export function TurnTimeline({
-  turns,
+/** ql-20260903-026：单轮行 memo 组件——配合 session-panel displayTurns 的引用
+ *  稳定守卫（ql-20260903-025），流式 delta 只重渲染变化行；未变化行连同其
+ *  段级/markdown 子树整体跳过（行 JSX 自 map 原文逐字搬入，分支 key 保留
+ *  冗余无害）。props 稳定性：turn 引用（父级守卫）+ viewMode 字符串 +
+ *  dialogHistory useState 数组 + onResend/onSwitchProvider 父级 useCallback 化。 */
+const TurnRow = memo(function TurnRow({
+  turn,
   viewMode,
-  errorMsg,
-  sessionStatus,
-  pendingRequests,
   dialogHistory,
-  onDialogResolved,
   onResend,
   onSwitchProvider,
-  hasOnlineProvider,
-  emptyProviderLabel,
-  streamFooter,
-}: TurnTimelineProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
-  // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
-  // 阈值」ref，仅贴底时跟随新内容滚底；新增 pending 轮（用户刚发送/入队
-  // 消息的占位 turn）例外强制回底——用户应立即看到自己发出的消息。
-  const isNearBottomRef = useRef(true);
-  const lastTurnKeyRef = useRef<string | null>(null);
-
-  // ── 回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊 group-chat-panel
-  //    同款移植）：离开底部后按钮出现；离开期间新增轮数显示「N 条新消息」。
-  //    锚定守卫：末轮身份未变（仅触顶翻页 prepend 历史页）不计入——否则向上
-  //    加载历史会把 prepend 条数误计成「新消息」。末轮身份在渲染期直接从
-  //    turns 计算（不经 effect/ref——ref 更新不触发重渲染，计数会滞后）。 ──
-  const [nearBottom, setNearBottom] = useState(true);
-  const [bottomAnchor, setBottomAnchor] = useState<{
-    count: number;
-    lastIdentity: string | null;
-  } | null>(null);
-  const lastTurnIdentity = (() => {
-    const last = turns[turns.length - 1];
-    return last ? `${last.runId}:${last.turn ?? "-"}` : null;
-  })();
-  const newTurnCount = (() => {
-    if (!bottomAnchor) return 0;
-    if (lastTurnIdentity === bottomAnchor.lastIdentity) return 0;
-    return Math.max(0, turns.length - bottomAnchor.count);
-  })();
-
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    isNearBottomRef.current = near;
-    setNearBottom((prev) => (prev === near ? prev : near));
-    if (near) {
-      // 回到底部（含点击悬浮按钮后的滚底触发）→ 计数锚清零。
-      setBottomAnchor((prev) => (prev === null ? prev : null));
-    } else {
-      setBottomAnchor(
-        (prev) => prev ?? { count: turns.length, lastIdentity: lastTurnIdentity },
-      );
-    }
-  };
-
-  /** 点击悬浮按钮平滑回底（滚底 onScroll 触发后锚点自然清零）。 */
-  const jumpToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el || typeof el.scrollTo !== "function") return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    isNearBottomRef.current = true;
-    setNearBottom(true);
-    setBottomAnchor(null);
-  }, []);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || typeof el.scrollTo !== "function") return;
-    const last = turns[turns.length - 1] ?? null;
-    const turnKey = last ? `${last.runId}:${last.turn ?? "-"}` : null;
-    // 占位 turn（status=pending）首次出现视为「用户刚发送」→ 无条件回底；
-    // 同一 turn 后续状态更新（running/completed）不再触发强制回底。
-    const isNewPendingTurn =
-      last !== null && last.status === "pending" && lastTurnKeyRef.current !== turnKey;
-    lastTurnKeyRef.current = turnKey;
-    // ql-20260825-011：用户正在选中文字（复制中）时不自动滚底——流式 delta
-    // 每次更新 turns 都会拉底，反复破坏进行中的选区。
-    const selecting =
-      typeof window !== "undefined" &&
-      (() => {
-        const sel = window.getSelection();
-        return sel != null && !sel.isCollapsed && sel.toString().length > 0;
-      })();
-    if (selecting) return;
-    if (isNewPendingTurn || isNearBottomRef.current) {
-      el.scrollTo(0, el.scrollHeight);
-    }
-  }, [turns]);
-
-  // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
-  // task-08 FR-04 / D-003 交互）───────────────────────────────────────────
-  // 最小化集合（会话内存态）：AskUserDialogCard 收 minimized=true 渲染 null 但
-  // 保持挂载 → 已选选项 / 手动输入 state 保留，还原后继续作答。
-  const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
-
-  const handleMinimize = useCallback((requestId: string) => {
-    setMinimizedIds((prev) => {
-      if (prev.has(requestId)) return prev;
-      const next = new Set(prev);
-      next.add(requestId);
-      return next;
-    });
-  }, []);
-
-  const handleRestore = useCallback((requestId: string) => {
-    setMinimizedIds((prev) => {
-      if (!prev.has(requestId)) return prev;
-      const next = new Set(prev);
-      next.delete(requestId);
-      return next;
-    });
-  }, []);
-
-  // 卡片移除（提交成功 / permission_resolved SSE 由父级过滤 pendingRequests）
-  // 后同步清最小化集合，胶囊计数不残留。集合为空时跳过（避免无谓重渲染）。
-  useEffect(() => {
-    setMinimizedIds((prev) => {
-      if (prev.size === 0) return prev;
-      const alive = new Set(pendingRequests.map((r) => r.request_id));
-      const next = new Set([...prev].filter((id) => alive.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [pendingRequests]);
-
-  // ended/failed 会话不回显 pending 卡（既有门控）→ 胶囊同步不渲染。
-  const showPending =
-    pendingRequests.length > 0 &&
-    sessionStatus !== "ended" &&
-    sessionStatus !== "failed";
-  const minimizedPending = showPending
-    ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
-    : [];
-  // 全部最小化时 sticky 容器只剩挂载占位（保卡片 state），去掉视觉框。
-  const visiblePendingCount = pendingRequests.length - minimizedPending.length;
-
+}: {
+  turn: SessionTurnView;
+  viewMode: SessionViewMode;
+  dialogHistory: SessionDialogRead[];
+  onResend: (prompt: string) => void;
+  onSwitchProvider: () => void;
+}) {
   return (
     <>
-    {/* ql-20260903-023：relative 包装容器承载「回到底部」悬浮按钮的定位
-        （原 fragment 根无定位上下文）；flex 布局角色与原滚动容器等价。 */}
-    <div className="relative flex min-h-0 flex-1 flex-col">
-    <div
-      ref={scrollRef}
-      onScroll={handleScroll}
-      data-testid="turn-timeline-scroll"
-      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
-    >
-      {errorMsg && (
-        <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {errorMsg}
-        </div>
-      )}
-      {/* ql-20260621：AskUserQuestion 对话卡（permission_request.dialog_kind）。
-          sticky top-0 让用户在长日志滚动时仍可见、可作答；提交 / SSE resolved
-          后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。
-          ql-20260623（改动三）：ended/failed 会话不回显 pending dialog 卡片
-         （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。
-          ql-20260825-006：卡头最小化按钮 → 收缩为右下角浮动胶囊（下方渲染），
-          已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
-      {showPending && (
-        <div
-          className={
-            visiblePendingCount > 0
-              ? "sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"
-              : undefined
-          }
-        >
-          {pendingRequests.map((req) => (
-            <ErrorBoundary
-              key={req.request_id}
-              label="ask-user-dialog-card"
-              fallback={() => (
-                <div className="text-[11px] text-red-600/70">
-                  提问卡片渲染失败
-                </div>
-              )}
-            >
-              <AskUserDialogCard
-                request={req}
-                minimized={minimizedIds.has(req.request_id)}
-                onMinimize={handleMinimize}
-                onResolved={onDialogResolved}
-              />
-            </ErrorBoundary>
-          ))}
-        </div>
-      )}
-      {/* ql-20260802-001：AskUser 提问记录已改为按 run_id 穿插到对应 turn 内（跟会话
-          顺序），不再在此处堆顶展示。顶部仅保留 pending 实时交互卡片（上方 pendingRequests）。 */}
-      {turns.length === 0 ? (
-        <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
-          <p className="text-xs font-medium text-foreground">
-            {hasOnlineProvider
-              ? `${emptyProviderLabel} 已就绪`
-              : "没有在线守护进程"}
-          </p>
-          <p className="mt-1 max-w-[260px] text-[11px] text-muted-foreground">
-            {hasOnlineProvider
-              ? "首条消息将创建会话；单条 SSE 贯穿整段对话，可中途追问、打断本轮或结束会话。"
-              : "启动守护进程后即可发送。"}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-5">
-          {turns.map((turn) => (
-            // ql-20260818-011：静默切换轮（无 prompt/output，有 whoLine，已
-            // 完成）→ 渲染为紧凑一行配置变更标记，不占轮次气泡。
-            !turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
+    {/* ql-20260818-011：静默切换轮（无 prompt/output，有 whoLine，已 完成）→ 渲染为紧凑一行配置变更标记，不占轮次气泡。 */}
+    {!turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
               <div
                 key={turn.runId}
                 className="flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-70"
@@ -714,6 +525,227 @@ export function TurnTimeline({
                 />
               </div>
             </div>
+    }
+    </>
+  );
+});
+
+export function TurnTimeline({
+  turns,
+  viewMode,
+  errorMsg,
+  sessionStatus,
+  pendingRequests,
+  dialogHistory,
+  onDialogResolved,
+  onResend,
+  onSwitchProvider,
+  hasOnlineProvider,
+  emptyProviderLabel,
+  streamFooter,
+}: TurnTimelineProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
+  // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
+  // 阈值」ref，仅贴底时跟随新内容滚底；新增 pending 轮（用户刚发送/入队
+  // 消息的占位 turn）例外强制回底——用户应立即看到自己发出的消息。
+  const isNearBottomRef = useRef(true);
+  const lastTurnKeyRef = useRef<string | null>(null);
+
+  // ── 回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊 group-chat-panel
+  //    同款移植）：离开底部后按钮出现；离开期间新增轮数显示「N 条新消息」。
+  //    锚定守卫：末轮身份未变（仅触顶翻页 prepend 历史页）不计入——否则向上
+  //    加载历史会把 prepend 条数误计成「新消息」。末轮身份在渲染期直接从
+  //    turns 计算（不经 effect/ref——ref 更新不触发重渲染，计数会滞后）。 ──
+  const [nearBottom, setNearBottom] = useState(true);
+  const [bottomAnchor, setBottomAnchor] = useState<{
+    count: number;
+    lastIdentity: string | null;
+  } | null>(null);
+  const lastTurnIdentity = (() => {
+    const last = turns[turns.length - 1];
+    return last ? `${last.runId}:${last.turn ?? "-"}` : null;
+  })();
+  const newTurnCount = (() => {
+    if (!bottomAnchor) return 0;
+    if (lastTurnIdentity === bottomAnchor.lastIdentity) return 0;
+    return Math.max(0, turns.length - bottomAnchor.count);
+  })();
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    isNearBottomRef.current = near;
+    setNearBottom((prev) => (prev === near ? prev : near));
+    if (near) {
+      // 回到底部（含点击悬浮按钮后的滚底触发）→ 计数锚清零。
+      setBottomAnchor((prev) => (prev === null ? prev : null));
+    } else {
+      setBottomAnchor(
+        (prev) => prev ?? { count: turns.length, lastIdentity: lastTurnIdentity },
+      );
+    }
+  };
+
+  /** 点击悬浮按钮平滑回底（滚底 onScroll 触发后锚点自然清零）。 */
+  const jumpToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || typeof el.scrollTo !== "function") return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    isNearBottomRef.current = true;
+    setNearBottom(true);
+    setBottomAnchor(null);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof el.scrollTo !== "function") return;
+    const last = turns[turns.length - 1] ?? null;
+    const turnKey = last ? `${last.runId}:${last.turn ?? "-"}` : null;
+    // 占位 turn（status=pending）首次出现视为「用户刚发送」→ 无条件回底；
+    // 同一 turn 后续状态更新（running/completed）不再触发强制回底。
+    const isNewPendingTurn =
+      last !== null && last.status === "pending" && lastTurnKeyRef.current !== turnKey;
+    lastTurnKeyRef.current = turnKey;
+    // ql-20260825-011：用户正在选中文字（复制中）时不自动滚底——流式 delta
+    // 每次更新 turns 都会拉底，反复破坏进行中的选区。
+    const selecting =
+      typeof window !== "undefined" &&
+      (() => {
+        const sel = window.getSelection();
+        return sel != null && !sel.isCollapsed && sel.toString().length > 0;
+      })();
+    if (selecting) return;
+    if (isNewPendingTurn || isNearBottomRef.current) {
+      el.scrollTo(0, el.scrollHeight);
+    }
+  }, [turns]);
+
+  // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
+  // task-08 FR-04 / D-003 交互）───────────────────────────────────────────
+  // 最小化集合（会话内存态）：AskUserDialogCard 收 minimized=true 渲染 null 但
+  // 保持挂载 → 已选选项 / 手动输入 state 保留，还原后继续作答。
+  const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
+
+  const handleMinimize = useCallback((requestId: string) => {
+    setMinimizedIds((prev) => {
+      if (prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.add(requestId);
+      return next;
+    });
+  }, []);
+
+  const handleRestore = useCallback((requestId: string) => {
+    setMinimizedIds((prev) => {
+      if (!prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.delete(requestId);
+      return next;
+    });
+  }, []);
+
+  // 卡片移除（提交成功 / permission_resolved SSE 由父级过滤 pendingRequests）
+  // 后同步清最小化集合，胶囊计数不残留。集合为空时跳过（避免无谓重渲染）。
+  useEffect(() => {
+    setMinimizedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const alive = new Set(pendingRequests.map((r) => r.request_id));
+      const next = new Set([...prev].filter((id) => alive.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [pendingRequests]);
+
+  // ended/failed 会话不回显 pending 卡（既有门控）→ 胶囊同步不渲染。
+  const showPending =
+    pendingRequests.length > 0 &&
+    sessionStatus !== "ended" &&
+    sessionStatus !== "failed";
+  const minimizedPending = showPending
+    ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
+    : [];
+  // 全部最小化时 sticky 容器只剩挂载占位（保卡片 state），去掉视觉框。
+  const visiblePendingCount = pendingRequests.length - minimizedPending.length;
+
+  return (
+    <>
+    {/* ql-20260903-023：relative 包装容器承载「回到底部」悬浮按钮的定位
+        （原 fragment 根无定位上下文）；flex 布局角色与原滚动容器等价。 */}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      data-testid="turn-timeline-scroll"
+      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
+    >
+      {errorMsg && (
+        <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+          {errorMsg}
+        </div>
+      )}
+      {/* ql-20260621：AskUserQuestion 对话卡（permission_request.dialog_kind）。
+          sticky top-0 让用户在长日志滚动时仍可见、可作答；提交 / SSE resolved
+          后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。
+          ql-20260623（改动三）：ended/failed 会话不回显 pending dialog 卡片
+         （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。
+          ql-20260825-006：卡头最小化按钮 → 收缩为右下角浮动胶囊（下方渲染），
+          已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
+      {showPending && (
+        <div
+          className={
+            visiblePendingCount > 0
+              ? "sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"
+              : undefined
+          }
+        >
+          {pendingRequests.map((req) => (
+            <ErrorBoundary
+              key={req.request_id}
+              label="ask-user-dialog-card"
+              fallback={() => (
+                <div className="text-[11px] text-red-600/70">
+                  提问卡片渲染失败
+                </div>
+              )}
+            >
+              <AskUserDialogCard
+                request={req}
+                minimized={minimizedIds.has(req.request_id)}
+                onMinimize={handleMinimize}
+                onResolved={onDialogResolved}
+              />
+            </ErrorBoundary>
+          ))}
+        </div>
+      )}
+      {/* ql-20260802-001：AskUser 提问记录已改为按 run_id 穿插到对应 turn 内（跟会话
+          顺序），不再在此处堆顶展示。顶部仅保留 pending 实时交互卡片（上方 pendingRequests）。 */}
+      {turns.length === 0 ? (
+        <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+          <p className="text-xs font-medium text-foreground">
+            {hasOnlineProvider
+              ? `${emptyProviderLabel} 已就绪`
+              : "没有在线守护进程"}
+          </p>
+          <p className="mt-1 max-w-[260px] text-[11px] text-muted-foreground">
+            {hasOnlineProvider
+              ? "首条消息将创建会话；单条 SSE 贯穿整段对话，可中途追问、打断本轮或结束会话。"
+              : "启动守护进程后即可发送。"}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {turns.map((turn) => (
+            <TurnRow
+              key={turn.runId}
+              turn={turn}
+              viewMode={viewMode}
+              dialogHistory={dialogHistory}
+              onResend={onResend}
+              onSwitchProvider={onSwitchProvider}
+            />
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——
               最后一个 turn 之后、同一 space-y-5 流容器内渲染，附加信息以

@@ -378,3 +378,16 @@
 根因：流式期间每个 SSE delta：displayTurns 把 runsMeta 命中的所有 turn 全量 clone（引用全变击穿下游一切 memo）+ 每轮 prompt 每次渲染重复正则拆分 + MarkdownText 无 memo 全文重新 remark parse/sanitize + dialog 回放全量拉日志——流式输出卡、打字顿的直接来源
 方案：displayTurns 身份稳定守卫（enrichOne 提取 + 逐字段比对，全一致返回原对象）；标记解析内容级缓存（FIFO 500）；MarkdownText memo；dialog 回放对齐 page 分页 limit=100
 结果：5 个相关测试文件 65 用例全绿（variant/history-race/pre-session/scroll/markdown）；tsc 0 错；未部署。遗留 listSessionRuns limit 需后端配合（文档已记）
+
+## ql-20260904-001-649e | 2026-09-04 02:40:00 | 单聊时间线行级 memo——流式 delta 只重渲染变化行
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/turn-timeline.tsx（TurnRow memo 行组件抽取）
+- frontend/src/components/daemon/session-panel.tsx（page/dialog onResend/onSwitchProvider useCallback 化）
+- frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx（渲染计数回归 + 夹具 props 稳定化）
+- .sillyspec/docs/frontend/modules/components-daemon.md（行级 memo 契约注记）
+需求：单聊时间线行级 memo——流式 delta 只重渲染变化行
+根因：ql-025 已让未变 turn 引用稳定，但行 JSX 仍内联在 map 里——React 依旧逐行重渲染（JSX 重建 + 包装节点），段级/markdown memo 之外仍有整行开销；行级 memo 是渲染热路径三件套的最后一件
+方案：TurnRow = memo(...) 行组件抽取（脚本原文搬运）；page/dialog 内联 onResend/onSwitchProvider 提升 useCallback（memo 生效前提）；markdown 渲染计数回归用例守护（delta 只 +1）
+结果：turn-timeline-scroll 8 用例全绿（新增 memo 计数用例 2→3→4）+ dialog-minimize/variant/history-race/pre-session/stream-done 45 绿；tsc 0 错；未部署

@@ -3148,6 +3148,20 @@ function SessionPanelPage({
     [session, machineOnline, turnState.currentRunId, sessionId],
   );
 
+  // ql-20260903-026：行级 memo props 稳定化——内联箭头每次渲染新引用会击穿
+  // TurnTimeline 内 TurnRow 的 memo（流式 delta 期间父树每次重渲染）。
+  const timelineOnResend = useCallback(
+    (prompt: string) => {
+      void handleResend(prompt);
+    },
+    [handleResend],
+  );
+  const timelineOnSwitchProvider = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.location.assign("/settings");
+    }
+  }, []);
+
   const handleDialogResolved = useCallback((requestId: string) => {
     setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
   }, []);
@@ -3665,14 +3679,8 @@ function SessionPanelPage({
         pendingRequests={pendingRequests}
         dialogHistory={dialogHistory}
         onDialogResolved={handleDialogResolved}
-        onResend={(prompt) => {
-          void handleResend(prompt);
-        }}
-        onSwitchProvider={() => {
-          if (typeof window !== "undefined") {
-            window.location.assign("/settings");
-          }
-        }}
+        onResend={timelineOnResend}
+        onSwitchProvider={timelineOnSwitchProvider}
         hasOnlineProvider={machineOnline}
         emptyProviderLabel={
           PROVIDER_META[session.provider]?.label ?? session.provider
@@ -5531,6 +5539,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
     }
   }, [view.sessionId, view.status, view.currentRunId, hasOnlineProvider, submitFollowup]);
 
+  // ql-20260903-026：行级 memo props 稳定化（同 page 模式）。
+  const timelineOnResend = useCallback(
+    (prompt: string) => {
+      void handleResend(prompt);
+    },
+    [handleResend],
+  );
+
   // 「切换供应商」— 跳设置页。用 window.location.assign 做整页跳转（非
   // next/navigation useRouter）：后者需在每个渲染本组件的测试文件单独 vi.mock，
   // 整页跳转零 mock 依赖、零回归（page 模式内联同款逻辑）。
@@ -5955,9 +5971,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
         pendingRequests={pendingRequests}
         dialogHistory={dialogHistory}
         onDialogResolved={handleDialogResolved}
-        onResend={(prompt) => {
-          void handleResend(prompt);
-        }}
+        onResend={timelineOnResend}
         onSwitchProvider={handleSwitchProvider}
         hasOnlineProvider={hasOnlineProvider}
         emptyProviderLabel={getProviderLabel(provider)}

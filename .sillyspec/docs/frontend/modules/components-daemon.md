@@ -74,6 +74,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
     （limit=HISTORY_PAGE_SIZE，弹窗无触顶入口、更早历史去会话页）。遗留：
     listSessionRuns 无 limit 全量（含 system_prompt 快照）需后端加 limit 参数
     配合，未在本批。
+  - 行级 memo（ql-20260904-001）：TurnTimeline 单轮行抽为 `TurnRow = memo(...)`
+    （行 JSX 自 map 原文逐字搬入）——配合 025 的引用稳定守卫，流式 delta 只
+    重渲染变化行，未变化行连同段级/markdown 子树整体跳过；生效前提的 props
+    稳定化：page/dialog 的 onResend/onSwitchProvider 内联箭头提升 useCallback
+    （dialogHistory 本是 useState 数组天然稳定）。markdown 渲染计数回归用例
+    守护（delta 只 +1 不 +N）。
   - ql-20260826-010 三项行为修正（两模式同步）：
     ① 发送成功清草稿改 **trim 比对**（`onSendSettled`：`prev.trim() === prompt`）——
     handleSend 发的是 `input.trim()`，粘贴带尾随空白时精确比对永不清空，已发送
