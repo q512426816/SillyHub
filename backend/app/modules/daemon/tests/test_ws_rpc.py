@@ -271,9 +271,9 @@ class TestSendRpcConflict:
         fixed = uuid.UUID("00000000-0000-0000-0000-000000000001")
         monkeypatch.setattr(ws_hub_module.uuid, "uuid4", lambda: fixed)
         # Pre-register the same rpc_id to simulate the (practically impossible)
-        # collision path.
+        # collision path.（ql-20260903-015：值为 (daemon_id, future) 元组。）
         loop = asyncio.get_running_loop()
-        hub._pending_rpcs[str(fixed)] = loop.create_future()
+        hub._pending_rpcs[str(fixed)] = (rid, loop.create_future())
 
         with pytest.raises(DaemonRpcConflict):
             await hub.send_rpc(rid, "list_dir", {"path": "/x"}, timeout=1.0)
@@ -294,13 +294,53 @@ class TestDisconnectCancelsPending:
         await asyncio.sleep(0.02)
         assert len(hub._pending_rpcs) == 1
 
-        # Disconnect the runtime → cancel_all_pending should fire.
+        # Disconnect the runtime → cancel_pending_for_daemon should fire
+        # （ql-20260903-015：按 daemon 归属取消，非整表清空）.
         await hub.disconnect(rid)
 
         with pytest.raises((DaemonRuntimeOffline, asyncio.CancelledError)):
             await task
         assert hub._pending_rpcs == {}
         assert hub.is_connected(rid) is False
+
+    async def test_disconnect_only_cancels_own_daemon_rpcs(self) -> None:
+        """ql-20260903-015：A daemon 断开只取消 A 的在途 RPC，B 的照常完成。
+
+        原实现 cancel_all_pending 整表清空——A 机器网络闪断会误杀 B 机器（其它
+        用户）正在等待的调用，表现为与故障机器无关的随机 504。
+        """
+        hub = DaemonWsHub()
+        rid_a = uuid.uuid4()
+        rid_b = uuid.uuid4()
+        await hub.connect(rid_a, _make_mock_ws())
+        ws_b = _make_mock_ws()
+        await hub.connect(rid_b, ws_b)
+
+        async def _await_rpc_a() -> Any:
+            return await hub.send_rpc(rid_a, "list_dir", {"path": "/a"}, timeout=2.0)
+
+        async def _await_rpc_b() -> Any:
+            return await hub.send_rpc(rid_b, "list_dir", {"path": "/b"}, timeout=2.0)
+
+        task_a = asyncio.create_task(_await_rpc_a())
+        task_b = asyncio.create_task(_await_rpc_b())
+        await asyncio.sleep(0.02)
+        assert len(hub._pending_rpcs) == 2
+
+        # A 断开：A 的 RPC 被 cancel，B 的 pending 仍在表。
+        await hub.disconnect(rid_a)
+        with pytest.raises((DaemonRuntimeOffline, asyncio.CancelledError)):
+            await task_a
+        assert len(hub._pending_rpcs) == 1
+        (only_rpc_id,) = hub._pending_rpcs.keys()
+        assert hub._pending_rpcs[only_rpc_id][0] == rid_b
+
+        # B 的 daemon 回包 → B 的 RPC 正常完成（未被 A 断开波及）。
+        rpc_id_b = ws_b.sent_messages[-1]["payload"]["rpc_id"]
+        await hub.resolve_rpc(rpc_id_b, {"rpc_id": rpc_id_b, "result": {"entries": []}})
+        result = await asyncio.wait_for(task_b, timeout=1.0)
+        assert result == {"entries": []}
+        assert hub.is_connected(rid_b) is True
 
 
 class TestResolveRpcEdgeCases:
@@ -315,7 +355,7 @@ class TestResolveRpcEdgeCases:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[Any] = loop.create_future()
         fut.set_result({"rpc_id": "r1", "result": {}})
-        hub._pending_rpcs["r1"] = fut
+        hub._pending_rpcs["r1"] = (uuid.uuid4(), fut)
 
         await hub.resolve_rpc("r1", {"rpc_id": "r1", "result": {"entries": []}})
         # Already resolved — map untouched (the entry we added manually stays).

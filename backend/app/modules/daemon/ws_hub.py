@@ -62,10 +62,14 @@ class DaemonWsHub:
         self._lock = asyncio.Lock()
         # Sliding window of recently-sent wakeup IDs for dedup.
         self._dedup_window: deque[str] = deque(maxlen=_DEDUP_WINDOW_SIZE)
-        # RPC correlation map: rpc_id → pending future awaiting daemon:rpc_result.
-        # The future is resolved with the raw result dict (transparent passthrough
-        # of the daemon payload); send_rpc extracts result/error before returning.
-        self._pending_rpcs: dict[str, asyncio.Future[Any]] = {}
+        # RPC correlation map: rpc_id → (daemon_id, pending future) awaiting
+        # daemon:rpc_result. The future is resolved with the raw result dict
+        # (transparent passthrough of the daemon payload); send_rpc extracts
+        # result/error before returning.
+        # ql-20260903-015：rpc_id 绑定 daemon_id——断开/逐出只取消该 daemon 自己
+        # 的在途 RPC。原实现按整表清空，A 机器网络闪断会误杀 B 机器（其它用户）
+        # 正在等待的 RPC，表现为与故障机器无关的随机 504。
+        self._pending_rpcs: dict[str, tuple[uuid.UUID, asyncio.Future[Any]]] = {}
         # task-02 / D-007@v1：per-daemon 的「断开 10s 后标 offline」延迟任务。
         # 键 = daemon_instance_id；同 daemon 再次断开时取消旧任务重挂（窗口从
         # 最近一次断开起算）。任务执行时自查 is_connected 取消（见
@@ -110,11 +114,11 @@ class DaemonWsHub:
             removed = self._connections.pop(daemon_id, None)
 
         if removed is not None:
-            # Cancel any pending RPCs so awaiting send_rpc callers fail fast
-            # (DaemonRuntimeOffline) instead of waiting for the full 10s timeout.
-            # rpc_id is not bound to daemon_id, so all pending entries are
-            # cancelled — this is rare and logged for visibility.
-            await self.cancel_all_pending()
+            # Cancel that daemon's pending RPCs so awaiting send_rpc callers fail
+            # fast (DaemonRuntimeOffline) instead of waiting for the full 10s
+            # timeout. rpc_id 已绑定 daemon_id（ql-20260903-015）——只取消本
+            # daemon 的在途 RPC，其它 daemon（其它用户）的调用不再被跨用户误杀。
+            await self.cancel_pending_for_daemon(daemon_id)
             log.info(
                 "ws_daemon_disconnected",
                 daemon_id=str(daemon_id),
@@ -138,8 +142,9 @@ class DaemonWsHub:
                 return False
             self._connections.pop(daemon_id, None)
 
-        # 真正逐出旧连接：取消在途 RPC（awaiters 收 DaemonRuntimeOffline）。
-        await self.cancel_all_pending()
+        # 真正逐出旧连接：取消该 daemon 在途 RPC（awaiters 收 DaemonRuntimeOffline，
+        # 仅本 daemon 的调用——ql-20260903-015 绑定语义）。
+        await self.cancel_pending_for_daemon(daemon_id)
         log.info(
             "ws_daemon_disconnected",
             daemon_id=str(daemon_id),
@@ -491,7 +496,7 @@ class DaemonWsHub:
                     f"daemon '{daemon_id}' is offline (no WS connection).",
                     details={"daemon_id": str(daemon_id)},
                 )
-            self._pending_rpcs[rpc_id] = future
+            self._pending_rpcs[rpc_id] = (daemon_id, future)
 
         # 2. Build and send the daemon:rpc message.
         message = {
@@ -503,8 +508,9 @@ class DaemonWsHub:
             },
         }
         # send_to_runtime evicts + disconnects on send failure, which in turn
-        # triggers cancel_all_pending (clearing our future). We still clean up
-        # defensively before raising so the map never holds a dangling entry.
+        # triggers cancel_pending_for_daemon (clearing our future). We still
+        # clean up defensively before raising so the map never holds a dangling
+        # entry.
         sent = await self.send_to_runtime(daemon_id, message)
         if not sent:
             await self._cancel_rpc(rpc_id)
@@ -527,7 +533,7 @@ class DaemonWsHub:
                 },
             ) from None
         except asyncio.CancelledError:
-            # future.cancel() — most likely disconnect → cancel_all_pending.
+            # future.cancel() — most likely disconnect → cancel_pending_for_daemon.
             # Re-raise as DaemonRuntimeOffline so callers map to 504.
             raise DaemonRuntimeOffline(
                 f"daemon '{daemon_id}' disconnected mid-rpc.",
@@ -551,14 +557,15 @@ class DaemonWsHub:
         reply (arriving after timeout cleanup) cannot crash the WS loop.
         """
         async with self._lock:
-            future = self._pending_rpcs.get(rpc_id)
-            if future is None:
+            entry = self._pending_rpcs.get(rpc_id)
+            if entry is None:
                 log.warning(
                     "ws_rpc_unknown_id",
                     rpc_id=rpc_id,
                     hint="late reply after timeout or duplicate result",
                 )
                 return
+            future = entry[1]
             if future.done():
                 log.warning(
                     "ws_rpc_already_resolved",
@@ -571,25 +578,33 @@ class DaemonWsHub:
     async def _cancel_rpc(self, rpc_id: str) -> None:
         """Cancel and remove a single pending RPC future (if present)."""
         async with self._lock:
-            future = self._pending_rpcs.pop(rpc_id, None)
+            entry = self._pending_rpcs.pop(rpc_id, None)
+        future = entry[1] if entry is not None else None
         if future is not None and not future.done():
             future.cancel()
 
-    async def cancel_all_pending(self) -> None:
-        """Cancel every pending RPC future (called on daemon disconnect).
+    async def cancel_pending_for_daemon(self, daemon_id: uuid.UUID) -> None:
+        """Cancel only the pending RPC futures owned by ``daemon_id``.
 
-        rpc_id is not bound to daemon_id, so we cancel the whole map; this is
-        rare and logged for visibility. Awaiters will surface
+        ql-20260903-015：断开/逐出按 daemon 归属精准取消，其它 daemon 的在途
+        RPC 不受影响（原整表清空会跨用户误杀——A 机器闪断，B 用户的 list_dir
+        收到与己无关的 "daemon disconnected mid-rpc" 504）。Awaiters surface
         DaemonRuntimeOffline via the CancelledError handler in send_rpc.
         """
         async with self._lock:
-            items = list(self._pending_rpcs.items())
-            self._pending_rpcs.clear()
-        for rpc_id, future in items:
+            entries = [
+                (rpc_id, entry[1])
+                for rpc_id, entry in self._pending_rpcs.items()
+                if entry[0] == daemon_id
+            ]
+            for rpc_id, _future in entries:
+                self._pending_rpcs.pop(rpc_id, None)
+        for rpc_id, future in entries:
             if not future.done():
                 log.warning(
                     "ws_rpc_cancelled_on_disconnect",
                     rpc_id=rpc_id,
+                    daemon_id=str(daemon_id),
                 )
                 future.cancel()
 

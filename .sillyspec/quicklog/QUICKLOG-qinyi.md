@@ -234,3 +234,15 @@
 根因：五操作（删除/重试/重排/编辑/立即发送）catch 一律静默，网络/服务端故障时用户编辑保存后文字弹回、删除后条目复活零解释；队列满与消息超 8000 字的发送守卫同样静默 return，按钮亮着按 Enter 毫无反应
 方案：hook 增加 notifyUnlessReconcile 统一出口——404/409/422 已知竞态保持静默（load 以服务端为准收敛的 R-02 语义不变），其余 notify.error；页面+弹窗两份 handleSend 的超长与队满守卫改 warning toast，QUEUE_MAX_PENDING 导出供文案取值
 结果：use-message-queue 13 用例全绿（含新增竞态静默 ApiError 形态断言与真实失败 toast 用例）；typecheck 0 错；未部署
+
+## ql-20260903-015-0ac4 | 2026-09-03 19:30:05 | ws_hub RPC 按 daemon 归属取消——跨用户误杀随机 504 修复
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/ws_hub.py（pending RPC 绑定 daemon_id + cancel_pending_for_daemon）
+- backend/app/modules/daemon/tests/test_ws_rpc.py（新增跨 daemon 隔离用例 + 种子元组化）
+- .sillyspec/docs/backend/modules/daemon.md（RPC 关键逻辑同步）
+需求：ws_hub RPC 按 daemon 归属取消——跨用户误杀随机 504 修复
+根因：_pending_rpcs 只按 rpc_id 索引不绑定 daemon，任一 daemon 断开/逐出触发 cancel_all_pending 整表清空，其它机器（其它用户）正在等待的 RPC 一并被 cancel 成 DaemonRuntimeOffline 504，报错机器与故障机器无关
+方案：_pending_rpcs 值改 (daemon_id, future) 元组；disconnect/_evict_stale 改调新增 cancel_pending_for_daemon 精准取消，移除整表清空方法；resolve/_cancel_rpc 适配元组；新增跨 daemon 隔离测试（A 断开 B 照常完成）
+结果：ws 相关 4 测试文件 61 用例全绿（含新增隔离用例）；ruff format/check 0；mypy 0；未部署

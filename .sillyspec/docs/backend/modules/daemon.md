@@ -157,8 +157,9 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
 
 ## 关键逻辑
 ```
-ws_hub RPC: send_rpc(rpc_id 注册 future, 10s 超时) → daemon 处理 →
-  DAEMON_MSG_RPC_RESULT 按 rpc_id resolve; 断连取消全部 pending
+ws_hub RPC: send_rpc(rpc_id 注册 (daemon_id, future), 10s 超时) → daemon 处理 →
+  DAEMON_MSG_RPC_RESULT 按 rpc_id resolve; 断连只取消该 daemon 自己的 pending
+  （ql-20260903-015 绑定归属——原整表清空会跨用户误杀在途 RPC 成随机 504）
 
 change-write claim 生命周期: daemon 轮询 pending → claim(生成 token) →
   执行(progress 刷计数+claimed_at 心跳) → complete(ok/err)
