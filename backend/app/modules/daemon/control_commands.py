@@ -65,6 +65,9 @@ STATUS_PENDING = "pending"
 STATUS_DELIVERED = "delivered"
 STATUS_ACKED = "acked"
 STATUS_EXPIRED = "expired"
+# ql-20260903-016：派发失败收链终态——调用方已把本轮判死（run failed + 504）
+# 时取消 pending 指令，daemon 重连补拉不再取到（免消息「复活」/重复执行）。
+STATUS_CANCELLED = "cancelled"
 
 # enqueue 未显式给 expires_at 时按 kind 的缺省 TTL（秒）：inject 10min（与
 # inject 过期联动 run→failed 的 10min 窗口对齐）、permission_response 6min
@@ -289,6 +292,27 @@ class ControlCommandService:
         await self._session.commit()
         return int(result.rowcount or 0)
 
+    async def cancel_pending(self, command_id: uuid.UUID) -> bool:
+        """取消仍在 pending 的指令（pending → cancelled，幂等，非 pending 跳过）。
+
+        ql-20260903-016：inject / interrupt 推送失败且调用方已决定本轮失败
+        （run 收敛 failed + 504）时，pending 行若保留，daemon 在 TTL 内重连补拉
+        会照常执行——界面已报「未能发送」，消息却「复活」；用户按提示重发后
+        同一条消息执行两遍。cancelled 为终态：fetch_pending 不再取到，GC 按
+        acked 同款保留期物理清理。返回是否实际翻转。
+        """
+        stmt = (
+            update(DaemonControlCommand)
+            .where(
+                col(DaemonControlCommand.id) == command_id,
+                col(DaemonControlCommand.status) == STATUS_PENDING,
+            )
+            .values(status=STATUS_CANCELLED)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.commit()
+        return int(result.rowcount or 0) > 0
+
     async def fetch_pending(self, runtime_id: uuid.UUID) -> list[DaemonControlCommand]:
         """补拉待发指令：仅 ``status=pending``，``created_at`` 升序（FIFO）。
 
@@ -342,7 +366,9 @@ class ControlCommandService:
 
         1. pending 且 ``expires_at < now`` → expired；
         2. delivered 且 ``delivered_at < now - 10min`` → expired；
-        3. acked 且 ``ack_at < now - 1h`` → DELETE（超龄回执物理清理）。
+        3. acked 且 ``ack_at < now - 1h`` → DELETE（超龄回执物理清理）；
+           cancelled 且 ``created_at < now - 1h`` → DELETE（ql-20260903-016：
+           派发失败收链的终态行同款保留期清理，免永久堆积）。
 
         inject 联动（两条过期路径同样处理，X-15/D-007@v1）：路径 1/2 翻转
         expired 的 ``session_inject`` 行按 ``payload.run_id`` 把对应
@@ -411,6 +437,14 @@ class ControlCommandService:
         )
         result = await self._session.execute(stmt_ack_purge)
         deleted = int(result.rowcount or 0)
+        # ql-20260903-016：cancelled 终态行同款保留期物理清理（按 created_at，
+        # 该状态无 ack_at/delivered_at 可用）。
+        stmt_cancelled_purge = delete(DaemonControlCommand).where(
+            col(DaemonControlCommand.status) == STATUS_CANCELLED,
+            col(DaemonControlCommand.created_at) < ack_threshold,
+        )
+        result = await self._session.execute(stmt_cancelled_purge)
+        deleted += int(result.rowcount or 0)
 
         # ── inject 过期联动：仅「本轮确实翻成 expired」的候选行参与 ──────────
         runs_failed = 0

@@ -474,3 +474,79 @@ class TestGc:
             assert got.error_code == "interactive_inject_send_failed"
             assert got.output_redacted is not None
             assert expect_frag in got.output_redacted
+
+
+# ── cancel_pending（ql-20260903-016：派发失败收链——run 判死后 pending 指令
+#    同步取消，daemon 重连补拉不再「复活」执行） ────────────────────────────────
+
+
+class TestCancelPending:
+    @pytest.mark.asyncio
+    async def test_cancel_pending_flips_and_fetch_excludes(self, db_session) -> None:
+        """pending → cancelled；fetch_pending 不再取到（补拉不会复活执行）；幂等。"""
+        rt = await _setup_runtime(db_session)
+        svc = ControlCommandService(db_session)
+        row = await svc.enqueue(rt.id, "session_inject", {"prompt": "hi"})
+
+        assert await svc.cancel_pending(row.id) is True
+
+        persisted = await _fetch_row(db_session, row.id)
+        assert persisted is not None
+        assert persisted.status == "cancelled"
+        assert await svc.fetch_pending(rt.id) == []
+        # 幂等：已终态再取消返回 False。
+        assert await svc.cancel_pending(row.id) is False
+
+    @pytest.mark.asyncio
+    async def test_cancel_skips_delivered(self, db_session) -> None:
+        """已 delivered（daemon 已收到）不取消——迟到取消不该吞掉在途回执链路。"""
+        rt = await _setup_runtime(db_session)
+        svc = ControlCommandService(db_session)
+        row = await svc.enqueue(rt.id, "session_end", None)
+        await svc.mark_delivered([row.id])
+
+        assert await svc.cancel_pending(row.id) is False
+
+        persisted = await _fetch_row(db_session, row.id)
+        assert persisted is not None
+        assert persisted.status == "delivered"
+
+    @pytest.mark.asyncio
+    async def test_gc_purges_old_cancelled(self, db_session) -> None:
+        """cancelled 终态行按 acked 同款保留期物理清理（免永久堆积）。"""
+        from sqlalchemy import update
+
+        rt = await _setup_runtime(db_session)
+        svc = ControlCommandService(db_session)
+        row = await svc.enqueue(rt.id, "session_interrupt", None)
+        assert await svc.cancel_pending(row.id) is True
+        # created_at 拨回保留期之外（服务 update 不经 identity map，直接 SQL）。
+        old = datetime.now(UTC) - timedelta(seconds=ACK_RETENTION_SECONDS + 60)
+        await db_session.execute(
+            update(DaemonControlCommand)
+            .where(DaemonControlCommand.id == row.id)
+            .values(created_at=old)
+        )
+        await db_session.commit()
+
+        result = await svc.gc(datetime.now(UTC))
+
+        assert result.deleted == 1
+        assert result.expired == 0
+        assert result.runs_failed == 0
+        assert await _fetch_row(db_session, row.id) is None
+
+    @pytest.mark.asyncio
+    async def test_session_service_cancel_helper(self, db_session) -> None:
+        """SessionService._cancel_pending_control_command（收链助手）正常路径取消。"""
+        from app.modules.daemon.session.service import SessionService
+
+        rt = await _setup_runtime(db_session)
+        svc = ControlCommandService(db_session)
+        row = await svc.enqueue(rt.id, "session_inject", {"prompt": "hi"})
+
+        await SessionService(db_session)._cancel_pending_control_command(row.id)
+
+        persisted = await _fetch_row(db_session, row.id)
+        assert persisted is not None
+        assert persisted.status == "cancelled"

@@ -4230,6 +4230,10 @@ class SessionService:
         if not control_ok:
             # New run failed to dispatch → converge it to failed but leave the
             # session active so the caller can retry (boundary #13).
+            # ql-20260903-016：run 即将判 failed + 504「未能发送」，pending 指令
+            # 必须同步取消——否则 daemon TTL 内重连补拉会照常执行本轮（消息
+            # 「复活」，用户重发后同一条消息跑两遍）。
+            await self._cancel_pending_control_command(_row.id, run_id=run.id)
             # task-05 / Grill C-11：切换分支同款收敛——run→failed、session 保持
             # active、可重试；会话三列保留已切换的新配置（DB 先于消息落库，
             # 重试重发同一切换即收敛，daemon 未收到消息前不会跑切换轮）。
@@ -4268,6 +4272,39 @@ class SessionService:
             agent_run=run,
             lease_id=session.lease_id,
         )
+
+    async def _cancel_pending_control_command(
+        self,
+        command_id: uuid.UUID,
+        *,
+        run_id: uuid.UUID | None = None,
+    ) -> None:
+        """派发失败收链：取消 pending 控制指令（ql-20260903-016，best-effort）。
+
+        inject / interrupt 推送失败且调用方已决定本轮失败（run 收敛 failed /
+        504「未能发送」）时，enqueue_and_push 落库的 pending 行若保留，daemon
+        在 TTL 内重连补拉会照常执行——界面报错后消息「复活」；用户按提示重发
+        则同一条消息执行两遍（interrupt payload 不带 run_id，迟到补拉打断的
+        还是该会话「当前正在跑的」那一轮，会误伤新一轮）。取消失败仅记日志，
+        不打断既有 504 收敛语义。
+        """
+        try:
+            cancelled = await ControlCommandService(self._session).cancel_pending(command_id)
+            if not cancelled:
+                # 竞态：daemon 恰在此窗口重连并已补拉（pending→delivered）。
+                log.info(
+                    "control_command_cancel_race_not_pending",
+                    command_id=str(command_id),
+                    run_id=str(run_id) if run_id else None,
+                )
+        except Exception:
+            await self._session.rollback()
+            log.warning(
+                "control_command_cancel_failed",
+                command_id=str(command_id),
+                run_id=str(run_id) if run_id else None,
+                exc_info=True,
+            )
 
     async def _inject_mid_turn_into_run(
         self,
@@ -4465,6 +4502,10 @@ class SessionService:
             },
         )
         if not control_ok:
+            # ql-20260903-016：打断报 504「没停成」后不能留 pending——迟到补拉
+            # 打断的是该会话当前正在跑的那一轮（payload 无 run_id），用户报错
+            # 后新发的消息会被误伤。
+            await self._cancel_pending_control_command(_row.id, run_id=run_id)
             raise DaemonRuntimeOffline(
                 "执行代理当前不在线，无法打断本轮。请稍后重试或等待本轮结束。",
                 details={

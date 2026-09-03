@@ -246,3 +246,16 @@
 根因：_pending_rpcs 只按 rpc_id 索引不绑定 daemon，任一 daemon 断开/逐出触发 cancel_all_pending 整表清空，其它机器（其它用户）正在等待的 RPC 一并被 cancel 成 DaemonRuntimeOffline 504，报错机器与故障机器无关
 方案：_pending_rpcs 值改 (daemon_id, future) 元组；disconnect/_evict_stale 改调新增 cancel_pending_for_daemon 精准取消，移除整表清空方法；resolve/_cancel_rpc 适配元组；新增跨 daemon 隔离测试（A 断开 B 照常完成）
 结果：ws 相关 4 测试文件 61 用例全绿（含新增隔离用例）；ruff format/check 0；mypy 0；未部署
+
+## ql-20260903-016-ea8a | 2026-09-03 19:44:21 | 派发失败收链——run 判死后取消 pending 指令（消息复活修复）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/control_commands.py（cancel_pending + cancelled 终态 + GC 清理）
+- backend/app/modules/daemon/session/service.py（注入/打断失败分支接 _cancel_pending_control_command）
+- backend/app/modules/daemon/tests/test_control_commands.py（新增 4 用例）
+- .sillyspec/docs/backend/modules/daemon.md（人工备注收链语义）
+需求：派发失败收链——run 判死后取消 pending 指令（消息复活修复）
+根因：inject/interrupt 推送失败（daemon 离线）时 run 已收敛 failed 并向用户报 504「未能发送」，但 enqueue_and_push 落库的 pending 指令行保留——daemon 在 TTL 内重连补拉会照常执行：界面报错后消息复活，用户重发则同一条消息执行两遍；interrupt 迟到补拉还会误伤新一轮
+方案：control_commands 新增 cancel_pending（pending→cancelled 终态幂等，fetch_pending 不取，GC 按 acked 同款保留期清理）；session/service 注入失败与打断失败两分支经 _cancel_pending_control_command（best-effort）同步取消；会话创建与 tool_report 激活两处有意不取消（lease metadata 兜底是设计语义）
+结果：test_control_commands 20 用例全绿（新增取消/GC 清理/助手 4 例）+ dispatch/resilience 回归 26 绿；ruff format/check 0；mypy 0；未部署
