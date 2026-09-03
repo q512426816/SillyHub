@@ -18,6 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
 
 /** mock 行为开关（hoisted：vi.mock 工厂闭包内可引用）。 */
 const mockState = vi.hoisted(() => ({
@@ -26,6 +27,8 @@ const mockState = vi.hoisted(() => ({
 
 /** 记录 spawn 调用（taskkill 杀树断言锚）。 */
 const spawnCalls = vi.hoisted(() => [] as Array<{ cmd: string; args: string[] }>);
+/** 最近一次 spawn 返回的 mock child（KT3 断言 'error' 监听器用）。 */
+const lastSpawnedChild = vi.hoisted(() => ({ emitter: null as EventEmitter | null }));
 
 // vi.mock 拦截 node:child_process（hoist 到文件顶部）。
 vi.mock('node:child_process', () => ({
@@ -55,7 +58,11 @@ vi.mock('node:child_process', () => ({
   },
   spawn: (...args: unknown[]): unknown => {
     spawnCalls.push({ cmd: args[0] as string, args: (args[1] as string[]) ?? [] });
-    return { unref: () => undefined };
+    // ql-20260904-L1：killTree 对 taskkill child 挂 'error' 监听（防 spawn
+    // 异步 error 以 uncaughtException 崩 daemon）——mock 返回真 EventEmitter。
+    const child = new EventEmitter();
+    lastSpawnedChild.emitter = child;
+    return child;
   },
 }));
 
@@ -101,5 +108,18 @@ describe('HostFsHandler — runCmd 超时杀树（ql-20260903-007）', () => {
     expect(result.error).toBe('not_git_repo');
     // 无超时特征 → 不触发杀树。
     expect(spawnCalls.length).toBe(0);
+  });
+
+  it('KT3: taskkill spawn 异步 error（ENOENT 等）被监听器吞掉——不崩 daemon（ql-20260904-L1）', async () => {
+    const result = await handler.gitRevParse({ root, ref: 'HEAD' });
+    expect(result.error).toBe('git_timeout');
+    expect(spawnCalls.length).toBe(1);
+
+    // killTree 对 taskkill child 挂了 'error' 监听器——EventEmitter 语义下
+    // 无监听器的 emit('error') 会 throw（对应真实 ChildProcess 的
+    // uncaughtException 崩 daemon）；有监听器则安全吞掉。
+    const killer = lastSpawnedChild.emitter!;
+    expect(killer.listenerCount('error')).toBe(1);
+    expect(() => killer.emit('error', new Error('spawn ENOENT'))).not.toThrow();
   });
 });

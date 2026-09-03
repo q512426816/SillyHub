@@ -54,7 +54,10 @@ git 命令: execFile(非 shell) + cwd:workdir（防注入）
   单杀 git.exe 后孙进程残留继续写目录；Unix 仅 SIGKILL 直子——execFile 未
   detached，kill(-pid) 会自杀 daemon 进程组）+ stderr 追加 `timed out` 标记行
   （rev-parse 的 git_timeout 映射此前对真实超时恒不命中）。与 preflight.ts
-  killTree 同款坑两处实现，语义须同步维护（不互相 import）
+  killTree 同款坑两处实现，语义须同步维护（不互相 import）。
+  spawn 'error' 监听(ql-20260904-L1)：taskkill child 必挂 `killer.on('error',
+  ()=>{})`——spawn 异步 error 事件（ENOENT 等）无监听器会以 uncaughtException
+  崩 daemon，try/catch 只能捕同步异常；两处 killTree 同步加
 ```
 
 ## 注意事项

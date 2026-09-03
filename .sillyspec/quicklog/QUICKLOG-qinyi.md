@@ -451,3 +451,17 @@
 根因：注释宣称非 AppError 意外异常「照旧 fail-loud 整条抛」暗示串行版中断语义，与并行实现（收口时全部成员已触发）不一致——规则 18 注释与实现不一致须修正
 方案：注释改为如实描述并行语义：上抛只把响应变 500 不阻止成员，与串行版差异属并行化已知取舍；零行为改动
 结果：ruff format 0，ruff check 0（纯注释改动无测试面）
+
+## ql-20260904-008-b58e | 2026-09-04 03:16:42 | killTree 两处补 taskkill spawn error 监听器（24h 审计 L1）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/host-fs-handler.ts（killTree error 监听）
+- sillyhub-daemon/src/preflight.ts（killTree 同步）
+- sillyhub-daemon/tests/host-fs-handler-runcmd-kill.test.ts（mock EventEmitter + KT3）
+- .sillyspec/docs/sillyhub-daemon/modules/host-fs-handler.md（杀树段补监听注记）
+- .sillyspec/docs/sillyhub-daemon/modules/preflight.changelog.md（追加 L1 条目）
+需求：killTree 两处补 taskkill spawn error 监听器（24h 审计 L1）
+根因：spawn 的 error 事件异步派发，无监听器的 ChildProcess 以 uncaughtException 崩 daemon，外层 try/catch 捕不到；两处 killTree（host-fs-handler/preflight）同款隐患
+方案：对 taskkill child 挂 killer.on('error', ()=>{}) 吞掉（杀树失败本就有 timeout 兜底），两处同步维护；测试 mock 返真 EventEmitter + KT3 用例断言监听器存在且 emit 不抛
+结果：runcmd-kill 3 + preflight 40 绿，tsc 0

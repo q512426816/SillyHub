@@ -490,10 +490,15 @@ function killTree(child: ChildProcess): void {
   if (typeof pid !== 'number') return;
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
         windowsHide: true,
         stdio: 'ignore',
       });
+      // ql-20260904-L1（24h 审计）：spawn 的 'error' 事件异步派发（taskkill
+      // 丢失/PATH 残缺等场景），外层 try/catch 只能捕同步异常——无 'error'
+      // 监听器的 ChildProcess 会以 uncaughtException 崩掉 daemon 进程。吞掉
+      // 即可：杀树失败本就有「timeout 已杀直接子进程」兜底（同外层语义）。
+      killer.on('error', () => {});
     } else {
       process.kill(pid, 'SIGKILL');
     }

@@ -734,10 +734,14 @@ function killTree(child: ChildProcess): void {
   try {
     if (process.platform === 'win32') {
       // taskkill /T 杀进程树（含 npm.cmd spawn 的孙 node.exe），/F 强制。
-      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
         windowsHide: true,
         stdio: 'ignore',
       });
+      // ql-20260904-L1（24h 审计）：spawn 'error' 异步派发（taskkill 丢失等），
+      // try/catch 捕不到——无监听器会以 uncaughtException 崩掉 daemon。吞掉：
+      // 杀树失败有 timeout 兜底（与 host-fs-handler.ts killTree 同步维护）。
+      killer.on('error', () => {});
     } else {
       // 进程组 kill（spawn 时 detached:true 使子自成组长，负 pid 杀整组）。
       try {

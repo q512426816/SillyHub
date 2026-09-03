@@ -15,3 +15,4 @@ created_at: 2026-08-28 08:28:18
 ## 2026-08-31 — 机器 sillyspec 版本显示与远程升级（2026-08-31-machine-sillyspec-version）
 - runCmd / installSillySpec / isOutdated 加 export 供运行期 sillyspec-manager 复用（探测 spawn / npm 升级 / 版本比较基建唯一实现处；仅可见性变化，行为零变化——本变更铁律）。
 
+- ql-20260904-008-b58e | killTree（preflight.ts + host-fs-handler.ts 两处同步）：taskkill spawn 挂 'error' 监听器——spawn 异步 error 事件（taskkill 丢失/PATH 残缺等）无监听器会以 uncaughtException 崩 daemon，try/catch 只能捕同步异常；KT3 用例断言监听器存在且 emit('error') 不抛（runcmd-kill 3 + preflight 40 绿，tsc 0）
