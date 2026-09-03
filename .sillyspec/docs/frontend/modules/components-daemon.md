@@ -105,6 +105,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   realRunId 保持原值——SSE 实时增量与孤儿 run 补建按 realRunId 匹配，upsertTurn
   对 realRunId 命中取**最末**块（prepend 的同 run 更早段在数组头部，首中会把
   流式输出写进历史块、当前尾部块停滞）。
+  「加载更早」换会话竞态守卫（ql-20260903-018）：请求在途切换会话时，新会话
+  effect 使 sessionEpochRef 自增并 abort 在途请求，响应携带的发起纪元不过校验
+  即丢弃——旧会话历史不再 prepend 进新会话时间线串台；触顶滚动监听不再按
+  isToolReportBody 早退（渲染期镜像 + effect 依赖缺翻转维度 → tool_report 会话
+  聊首句后监听永不挂载），改常驻挂载靠监听器自身 data-testid 过滤。
 - `SessionInputBar`（`session-input-bar.tsx`）：输入区（发送=antd primary、📎=
   antd text，2026-08-22-session-panel-unify；chips 删除为原生 button）。
   ql-20260826-010：胶囊上缘高度拖拽手柄（mousedown+document mousemove 实时

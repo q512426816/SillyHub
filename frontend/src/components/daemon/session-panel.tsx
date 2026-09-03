@@ -1506,6 +1506,11 @@ function SessionPanelPage({
     // 依赖变化自然接管；string→null 时上方 cleanup 已 close 旧流。
     if (!sessionId) return;
     let cancelled = false;
+    // ql-20260903-018：换会话纪元 +1 并 abort 在途「加载更早」——旧会话翻页
+    // 响应经纪元归属校验丢弃，不再串进新会话时间线。
+    sessionEpochRef.current += 1;
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = null;
     setTurnState(INITIAL_TURN_STATE);
     setErrorMsg(null);
     setPendingRequests([]);
@@ -1888,13 +1893,19 @@ function SessionPanelPage({
   const historyLoadingRef = useRef(false);
   /** 视口补拉连拉计数（上限防极端空渲染批量请求；换会话重置）。 */
   const autoFillCountRef = useRef(0);
-  /** 工具报告主体镜像（组件后段条件计算 + 早退渲染未初始化，effect 经 ref 读）。 */
-  const isToolReportBodyRef = useRef(false);
+  /** 会话切换纪元（ql-20260903-018）：在途「加载更早」响应携带发起时纪元，
+   *  归属校验不过即丢弃——旧会话历史不得 prepend 进新会话时间线（串台）。 */
+  const sessionEpochRef = useRef(0);
+  /** 在途「加载更早」请求的取消器（换会话时 abort，省在途带宽）。 */
+  const historyAbortRef = useRef<AbortController | null>(null);
   const handleLoadEarlierRef = useRef<() => Promise<void>>(async () => {});
   const handleLoadEarlier = useCallback(async () => {
     if (!sessionId || historyLoadingRef.current || !hasEarlier) return;
     const cursor = historyCursorRef.current;
     if (!cursor) return;
+    const epochAtStart = sessionEpochRef.current;
+    const abort = new AbortController();
+    historyAbortRef.current = abort;
     historyLoadingRef.current = true;
     setHistoryLoading(true);
     let chainedMore = false;
@@ -1902,7 +1913,11 @@ function SessionPanelPage({
       const older = await getAgentSessionLogs(sessionId, {
         before: cursor,
         limit: HISTORY_PAGE_SIZE,
+        signal: abort.signal,
       });
+      // 会话身份校验（ql-20260903-018）：请求在途切换会话（新会话 effect 已
+      // 重置 turnState）时，旧响应直接丢弃，不 prepend 进新会话时间线。
+      if (epochAtStart !== sessionEpochRef.current) return;
       // 滚动锚：记录 prepend 前 scrollHeight，加载后按增量补回（正在读的
       // 内容不被新段顶走，向上滚动自然续读更早）。
       const scrollEl = scrollElQueryRef.current();
@@ -1932,8 +1947,9 @@ function SessionPanelPage({
         });
       }
     } catch {
-      /* 翻页失败静默（触顶自动重试；不干扰实时流）。 */
+      /* 翻页失败静默（含换会话主动 abort 的 AbortError；触顶自动重试；不干扰实时流）。 */
     } finally {
+      if (historyAbortRef.current === abort) historyAbortRef.current = null;
       historyLoadingRef.current = false;
       setHistoryLoading(false);
       // 视口补拉链：本次满页（可能还有更早）→ DOM 提交后复查是否仍不满
@@ -1988,12 +2004,15 @@ function SessionPanelPage({
   scheduleAutoFillRef.current = scheduleAutoFill;
 
   // ── quick（2026-09-02 触顶自动加载）：滚动接线 + prepend 滚动锚 ──
-  // 捕获阶段监听 TurnTimeline 内部滚动容器（native scroll 不冒泡，capture
-  // 命中全部后代；jsdom fireEvent 派发亦走捕获相位）；触顶（scrollTop ≤
+  // 捕获阶段监听 bodyWrap 内部滚动容器（native scroll 不冒泡，capture 命中
+  // 全部后代；jsdom fireEvent 派发亦走捕获相位）；触顶（scrollTop ≤
   // LOAD_EARLIER_TRIGGER_PX）即触发加载更早一页——hasEarlier=false（到头）
   // 后 handleLoadEarlier 内部自挡，触顶不再发起请求。对齐 shadow-session-viewer
-  // 同款模式。isToolReportBody（组件后段条件计算）经闭包读取——effect 体在
-  // 渲染完成后执行，块级声明已完成；deps 只含挂载维度不重挂。
+  // 同款模式。
+  // ql-20260903-018：不再按 isToolReportBody 早退——该镜像只在渲染期更新，
+  // tool_report 会话聊首句后主体切到时间线时 effect 依赖不含此翻转维度，
+  // 监听永不挂载（触顶加载静默失效）。现常驻挂载：监听器自身按
+  // data-testid 过滤，AgentLog 主体（无该 testid）滚动自然不触发。
   const timelineScrollEl = useCallback(
     () =>
       bodyWrapRef.current?.querySelector<HTMLElement>(
@@ -2002,7 +2021,6 @@ function SessionPanelPage({
     [],
   );
   useEffect(() => {
-    if (isToolReportBodyRef.current) return;
     const wrap = bodyWrapRef.current;
     if (!wrap) return;
     const onScroll = (e: Event) => {
@@ -3559,9 +3577,8 @@ function SessionPanelPage({
   // task-14（design §5.4）：会话主体条件提升为变量——mobile 外包横向滚动容器
   // （PANEL_BODY_WRAP_CLS_MOBILE），desktop 原样直挂（DOM 结构/props 零变化）。
   // 触顶自动加载接线（hooks 在 handleLoadEarlier 旁无条件区，见该处注释）：
-  // 渲染期把时间线滚动容器查询器与工具报告主体镜像注入 ref。
+  // 渲染期把时间线滚动容器查询器注入 ref。
   scrollElQueryRef.current = () => timelineScrollEl();
-  isToolReportBodyRef.current = isToolReportBody;
 
   const sessionBody = isToolReportBody ? (
     <AgentLogSessionBody sessionId={session.id} />

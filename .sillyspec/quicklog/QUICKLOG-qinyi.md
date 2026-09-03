@@ -273,3 +273,15 @@
 方案：sweep.py 新增 _fail_pending_queued_bulk（批量 UPDATE，与广播同份终态复查防误伤活会话，按档写可读中文原因）接入 reconnecting 超时档与离线 pending/worker 档、suspended 超龄 GC；mark_session_recovery_failed 复用 _fail_pending_queued_messages 先例在 commit 前收口
 结果：test_session_reconnect_sweep 13 用例全绿（新增 3：超时收敛清队 / 离线 pending 清队 / 窗口内不误伤）+ suspend/redispatch/resilience 52 绿 + recovery 5 绿；ruff format/check 0；mypy 0；未部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_reconnect_sweep.py
+
+## ql-20260903-018-9afb | 2026-09-03 21:00:47 | 会话切换竞态修复——加载更早防串台 + tool_report 触顶加载失效
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（纪元守卫 + abort + 触顶监听常驻化）
+- frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx（新建竞态回归 2 用例）
+- .sillyspec/docs/frontend/modules/components-daemon.md（加载更早守卫契约注记）
+需求：会话切换竞态修复——加载更早防串台 + tool_report 触顶加载失效
+根因：「加载更早」请求不带取消不校验会话身份：A 会话翻页在途切到 B，A 的历史被 prepend 进 B 的时间线闪现串台；触顶滚动监听按 isToolReportBody 渲染期 ref 早退，effect 依赖不含该翻转维度——tool_report 会话聊过首句后主体切到时间线，监听永不挂载、触顶加载静默失效
+方案：sessionEpochRef 换会话自增 + handleLoadEarlier 响应纪元归属校验丢弃 + AbortController 换会话 abort 在途；触顶监听常驻挂载（监听器按 data-testid 自过滤，AgentLog 主体滚动不触发），删渲染期镜像 ref
+结果：新建 session-panel-history-race.test.tsx 2 用例全绿（摘守卫验证过测试转红咬得住）+ 相关 4 测试文件 50 用例全绿；typecheck 0 错；未部署
