@@ -1855,7 +1855,20 @@ export function streamSession(
       closed = true;
       es?.close();
     });
-    es.onerror = () => {
+    es.onerror = (ev) => {
+      // R7（ql-20260903-021，对齐下方审批流先例）：永久性 HTTP 错误（401/403/404，
+      // PERMANENT_SSE_ERROR_STATUSES）停本订阅重连循环——无权限/已删除会话
+      // 每 30s 重打必败请求（resync runs/logs + stream 三连）无意义且刷日志；
+      // 无 status（网络断/服务端关流）保持退避重连路径不变。
+      if (
+        ev &&
+        typeof ev.status === "number" &&
+        PERMANENT_SSE_ERROR_STATUSES.has(ev.status)
+      ) {
+        es?.close();
+        closed = true;
+        return;
+      }
       scheduleReconnect();
     };
   };
@@ -3161,7 +3174,19 @@ export function streamGroupChat(
       closed = true;
       es?.close();
     });
-    es.onerror = () => {
+    es.onerror = (ev) => {
+      // R7（ql-20260903-021，同 streamSession）：永久性 HTTP 错误（401/403/404）
+      // 停本订阅重连循环——无权限/已删除群每 30s 重打必败请求无意义且刷日志；
+      // 无 status（网络断/服务端关流）保持退避重连路径不变。
+      if (
+        ev &&
+        typeof ev.status === "number" &&
+        PERMANENT_SSE_ERROR_STATUSES.has(ev.status)
+      ) {
+        es?.close();
+        closed = true;
+        return;
+      }
       scheduleReconnect();
     };
   };

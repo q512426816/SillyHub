@@ -24,6 +24,8 @@ interface StreamHarness {
   streamCalls: number;
   runsCalls: number;
   logsCalls: number;
+  /** 非空时 /stream 返回该状态码（永久性 HTTP 错误场景，ql-20260903-021）。 */
+  streamStatus?: number;
   stream: {
     push: (_text: string) => void;
     close: () => void;
@@ -39,6 +41,14 @@ function installRoutedFetchMock(): void {
       const url = typeof input === "string" ? input : input.toString();
       if (url.includes("/stream")) {
         harness.streamCalls += 1;
+        if (harness.streamStatus !== undefined) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ detail: "not found" }), {
+              status: harness.streamStatus,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
         let controller!: ReadableStreamDefaultController<Uint8Array>;
         const body = new ReadableStream<Uint8Array>({
           start(c) {
@@ -173,6 +183,36 @@ describe("streamSession — 终态 done 命名事件收口（ql-20260829-007）"
     await vi.advanceTimersByTimeAsync(2_000);
 
     expect(harness.streamCalls).toBeGreaterThanOrEqual(2);
+    conn.close();
+  });
+});
+
+describe("streamSession — 永久性 HTTP 错误停连（ql-20260903-021，R7）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    installRoutedFetchMock();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("404（已删除/无权限会话）→ 停连不重连：不再每 30s 重打 stream + resync", async () => {
+    harness.streamStatus = 404;
+    const conn: SessionStreamConnection = streamSession(
+      "sess-gone",
+      baseHandlers(),
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(harness.streamCalls).toBe(1);
+
+    // 推进远超完整退避序列（1/2/4/8/16/30s）——修复前每轮重打 SSE 并触发
+    // resync（runs/logs 持续增长），永久循环。
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(harness.streamCalls).toBe(1);
+    expect(harness.runsCalls).toBe(0);
+    expect(harness.logsCalls).toBe(0);
     conn.close();
   });
 });

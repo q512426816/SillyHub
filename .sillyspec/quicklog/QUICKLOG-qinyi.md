@@ -313,3 +313,16 @@
 方案：异常捕获扩大到 Exception（rollback 复位事务态+栈日志+继续下一成员）并返回 bool；end_group 取群改 _get_group_locked（FOR UPDATE 防与发消息/改设置并发交错）；shadow_status=ended 只写真终止的成员（失败成员保持原状态留 sweep 收敛）
 结果：test_group_chat_management 35 用例全绿（新增意外异常用例：群终态照常落库+失败成员不伪造 ended+其余成员照常终止）；ruff 0；mypy 0；未部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_group_chat_management.py
+
+## ql-20260903-021-9499 | 2026-09-03 22:25:26 | SSE 永久错误停连——单聊/群聊订阅对 401/403/404 不再永久循环重连
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/daemon.ts（两处 onerror 补永久错误停连）
+- frontend/src/lib/__tests__/daemon-session-stream-done.test.ts（harness streamStatus 注入 + 404 用例）
+- .sillyspec/docs/frontend/modules/lib-daemon.md（停连契约注记）
+需求：SSE 永久错误停连——单聊/群聊订阅对 401/403/404 不再永久循环重连
+根因：streamSession/streamGroupChat 的 onerror 无条件 scheduleReconnect：打开无权限或已删除的会话/群面板后，每 30s 一轮必败请求（resync runs/logs + stream）永久循环，后台标签页持续空耗并刷日志（审批流与影子查看器已有 PERMANENT_SSE_ERROR_STATUSES 停连，这两处漏齐）
+方案：两处 onerror 照 2118 行先例逐字对齐：status 命中名单即 close 置 closed 停止重连；无 status 保持退避重连
+结果：daemon-session-stream-done 4 用例全绿（新增 404 停连：推进 120s stream/runs/logs 零增长）+ stream-sync/events/fetch-sse 34 绿；tsc 0 错；未部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/lib/__tests__/daemon-session-stream-done.test.ts

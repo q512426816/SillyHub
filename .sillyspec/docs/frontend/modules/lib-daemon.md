@@ -75,6 +75,7 @@ conn.onmessage = (raw) => {
 ## 注意事项
 - **token 走 Authorization header**（fetch-sse），不再拼 URL query——旧卡「SSE 无法带 header 故 token 进 query」已过时。
 - **无自动重连**：fetch-sse 有意取舍，onerror 只通知组件；断流由调用方重建连接 / 查询兜底（fetchPendingDialogs / getAgentSessionLogs 等即兜底面）。
+- **永久性 HTTP 错误停连（ql-20260903-021，R7）**：streamSession / streamGroupChat 的 onerror 命中 `PERMANENT_SSE_ERROR_STATUSES`（401/403/404）即 close 置 closed 停止重连循环——无权限/已删除会话不再每 30s 重打必败请求（resync runs/logs + stream 三连）；无 status（网络断/关流）保持退避重连（同审批流先例）。
 - backend 的 turn/log/permission_* 事件发**默认 data 帧**（无 `event:` 行），必须走 onmessage 单通道按 payload.event 分发；addEventListener 命名事件只收得到 done/error。
 - **一次性 quickChat 已不存在**：`quickChat` / `getQuickChatResult` / `streamQuickChat` 已删除（索引残留符号），多轮交互会话是唯一入口。
 - 类型策略（「规则 20」）：主体迁 api-types 生成版，Omit 掉后端无法表达的字段后手写窄化（AgentSessionRead 的 status 枚举 / config_snapshot 具名结构 / title 必填；SessionCreateRequest / SessionInjectRequest 的可选放宽）。字段漂移在 gen:types 时暴露，勿改回全手写。
