@@ -52,9 +52,13 @@ task-06（design §5.4 实时通道，纯 ephemeral 纪律——不落库不进 
   自动事件（``_publish_agent_typing_event``，影子 run 开始时发）都 publish 到
   ``group_typing:{group_id}`` 频道——Redis pub/sub 即发即忘，无 key 无存储；
   群 SSE 生成器双订阅本频道合流（订阅侧在 agent/service.py）；
-- presence：``group_presence_key`` 单源命名 + ``get_online_member_ids`` 读
+- presence：``group_presence_key`` 单源命名（连接级后缀，群在线实时化 quick
+  2026-09-04：同用户多标签页各自 touch）+ ``get_online_member_ids`` 读
   ``group_presence:{gid}:*`` 活跃集（群列表/详情 online_member_ids 消费）；
-  touch（SET EX 60 续期）挂在 SSE 生成器循环（agent/service.py，间隔 45s）；
+  touch（SET EX 60 续期）挂在 SSE 生成器（agent/service.py，间隔 45s）；
+  上/下线事件（``publish_member_presence`` / ``release_member_presence``，
+  SSE 连接建立/断开触发）与 typing 帧同频道合流即时下发——前端在线绿点
+  免等列表刷新；
 - audience：群操作（建/改/解散/成员变更）经 ``_publish_group_sessions_changed``
   广播 ``agent_sessions:changed``，payload 内嵌全部未移除用户成员 id
   （``audience_user_ids``），订阅侧过滤免每事件查库。
@@ -1178,13 +1182,22 @@ def group_typing_channel(group_id: uuid.UUID) -> str:
     return f"group_typing:{group_id}"
 
 
-def group_presence_key(group_id: uuid.UUID, user_id: uuid.UUID) -> str:
-    """群在线 presence key（``group_presence:{group_id}:{user_id}``，§5.4）。
+def group_presence_key(
+    group_id: uuid.UUID,
+    user_id: uuid.UUID,
+    conn_token: str | None = None,
+) -> str:
+    """群在线 presence key（``group_presence:{group_id}:{user_id}[:{conn}]``，§5.4）。
 
     命名单源：daemon/router.py 群 SSE 分支与测试都经本函数构造；TTL/续期间隔
-    常量在 agent/service.py（touch 执行方）。
+    常量在 agent/service.py（touch 执行方）。连接级后缀（群在线实时化 quick，
+    2026-09-04）：同用户多标签页/多端各连一条 SSE、各自 touch 自己的连接 key
+    ——断连即删本连接 key（``release_member_presence``），互不误伤；在线判定 =
+    该用户任一连接 key 存活。旧两段 key（无 conn）由 bulk 读取兼容解析（部署
+    窗口残留 ≤60s 由 TTL 自愈）。
     """
-    return f"group_presence:{group_id}:{user_id}"
+    key = f"group_presence:{group_id}:{user_id}"
+    return f"{key}:{conn_token}" if conn_token else key
 
 
 async def _publish_group_typing_event(group_id: uuid.UUID, payload: dict[str, object]) -> None:
@@ -1264,6 +1277,75 @@ async def _publish_agent_typing_event(
     )
 
 
+def _presence_payload(*, user_id: uuid.UUID, online: bool) -> dict[str, object]:
+    """presence 事件 payload 组装（群在线实时化 quick，2026-09-04）。
+
+    ``event='presence'`` 与 typing 帧同走群实时频道（``group_typing:{gid}``）
+    合流下发；前端按 ``user_id`` 即时覆盖在线绿点。pub/sub 即发即忘不回放
+    ——断线重连端靠列表快照重拉对账（前端覆盖层同点作废）。
+    """
+    return {
+        "event": "presence",
+        "user_id": str(user_id),
+        "online": online,
+        "ts": datetime.now(UTC).isoformat(),
+    }
+
+
+async def publish_member_presence(
+    group_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    online: bool,
+) -> None:
+    """publish 群实时频道 presence 事件（上/下线即时通知）。
+
+    容错语义同 ``_publish_group_typing_event``：Redis 抖动仅 warning，不阻断
+    调用方（presence 是纯增益信号，列表快照 + 60s TTL 心跳兜底）。
+    """
+    await _publish_group_typing_event(group_id, _presence_payload(user_id=user_id, online=online))
+
+
+async def _scan_matching_keys(redis: Redis, match: str) -> list[str]:
+    """SCAN 游标分批收集匹配 key（presence 剩余连接探测；count=100 批扫）。"""
+    out: list[str] = []
+    cursor: int | str = 0
+    while True:
+        cursor, batch = await redis.scan(cursor=cursor, match=match, count=100)
+        out.extend(batch or [])
+        if int(cursor) == 0:
+            return out
+
+
+async def release_member_presence(
+    group_id: uuid.UUID,
+    user_id: uuid.UUID,
+    conn_key: str,
+) -> None:
+    """SSE 连接退出收口（群在线实时化 quick，2026-09-04）。
+
+    删本连接 presence key（**即时**熄灯——不等 60s TTL 自然过期）；再 SCAN 该
+    用户剩余连接级 key：还有其它标签页/端在群 → 不发 offline（多连接互不
+    误伤）；全部退出 → publish offline 事件。Redis 故障降级：key 由 TTL 60s
+    自愈、事件丢失由列表快照刷新兜底（绿点容忍）。
+    """
+    try:
+        redis = get_redis()
+        await redis.delete(conn_key)
+        remaining = await _scan_matching_keys(redis, f"group_presence:{group_id}:{user_id}:*")
+        if not remaining:
+            await _publish_group_typing_event(
+                group_id, _presence_payload(user_id=user_id, online=False)
+            )
+    except Exception:
+        log.warning(
+            "group_presence_release_failed",
+            group_id=str(group_id),
+            user_id=str(user_id),
+            exc_info=True,
+        )
+
+
 async def get_online_member_ids_bulk(
     group_ids: Sequence[uuid.UUID],
 ) -> dict[uuid.UUID, list[uuid.UUID]]:
@@ -1277,9 +1359,9 @@ async def get_online_member_ids_bulk(
     key 契约/降级语义同单群版：SCAN 期间键集变化由下轮 presence 刷新 + 60s
     TTL 心跳自愈（在线绿点容忍）；Redis 不可用返回各组空列表（降级全灰）。
     """
-    online: dict[uuid.UUID, list[uuid.UUID]] = {gid: [] for gid in group_ids}
+    online_sets: dict[uuid.UUID, set[uuid.UUID]] = {gid: set() for gid in group_ids}
     if not group_ids:
-        return online
+        return {gid: [] for gid in group_ids}
     wanted = set(group_ids)
     prefix = "group_presence:"
     try:
@@ -1289,21 +1371,25 @@ async def get_online_member_ids_bulk(
             cursor, batch = await redis.scan(cursor=cursor, match=f"{prefix}*", count=100)
             for key in batch or []:
                 raw = key[len(prefix) :] if isinstance(key, str) else ""
-                gid_str, sep, uid_str = raw.partition(":")
+                gid_str, sep, rest = raw.partition(":")
                 if not sep:
                     continue
+                # 连接级 key（群在线实时化 quick）：group_presence:{gid}:{uid}:{conn}
+                # ——第三段是连接 token，剥掉取 uid；旧两段 key（无 conn）rest 即
+                # uid。同用户多连接（多标签页）只计一次（set 去重）。
+                uid_str = rest.partition(":")[0]
                 try:
                     gid = uuid.UUID(gid_str)
                     uid = uuid.UUID(uid_str)
                 except (ValueError, AttributeError):
                     continue  # 脏 key（截断/残留）跳过，不炸列表
                 if gid in wanted:
-                    online[gid].append(uid)
+                    online_sets[gid].add(uid)
             if int(cursor) == 0:
                 break
     except Exception:
         log.warning("group_presence_bulk_read_failed", exc_info=True)
-    return online
+    return {gid: sorted(uids) for gid, uids in online_sets.items()}
 
 
 async def get_online_member_ids(group_id: uuid.UUID) -> list[uuid.UUID]:

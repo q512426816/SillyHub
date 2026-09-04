@@ -1201,6 +1201,37 @@ describe("GroupChatPanel 装配（真 streamGroupChat SSE 消费）", () => {
     expect(screen.queryByTestId("member-running-badge-mem-2")).toBeNull();
     expect(screen.queryByTestId("facepile-running-dot-mem-2")).toBeNull();
   });
+
+  it("presence 实时覆盖（群在线实时化）：SSE presence 事件即时翻转成员在线绿点，免列表刷新", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    // 基线：列表快照 online_member_ids=[] → 林一离线灰点。
+    expect(screen.getByLabelText("林一 离线")).toBeTruthy();
+
+    // 上线事件（后端 SSE 连接建立即发）→ 绿点即时点亮。
+    await pushSseEvent({
+      event: "presence",
+      user_id: "u-lin",
+      online: true,
+      ts: "2026-09-04T08:00:00Z",
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("林一 在线")).toBeTruthy();
+    });
+
+    // 下线事件（连接断开、该用户全退出）→ 绿点即时熄灭。
+    await pushSseEvent({
+      event: "presence",
+      user_id: "u-lin",
+      online: false,
+      ts: "2026-09-04T08:00:05Z",
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("林一 离线")).toBeTruthy();
+    });
+  });
 });
 
 /* ── 2b. 气泡视觉 token（群聊体验对齐 quick：会话 TurnTimeline 同款） ────── */

@@ -836,9 +836,22 @@ export function GroupChatPanel({
     select: (items: GroupChatListItemRead[]) =>
       items.find((g) => g.id === groupId) ?? null,
   });
-  const onlineMemberIds = presenceListQ.data?.online_member_ids
-    ?? group?.online_member_ids
-    ?? [];
+  /* ── presence 实时覆盖层（群在线实时化 quick，2026-09-04）：SSE presence 事件
+   *    （群实时频道 event='presence'，后端 SSE 连接建立/断开即发）即时翻转在线
+   *    绿点——列表快照不再是唯一数据源（原纯拉取：30s staleTime + 窗口聚焦才
+   *    刷新，且离线判定滞后 key TTL 60s）。覆盖层 user_id → 在线/离线，事件
+   *    最新胜；不可回放（pub/sub 即发即忘）——断线重连覆盖层作废 + 强制重拉
+   *    列表对账（onStatusChange reconnected 分支）。 ── */
+  const [presenceOverrides, setPresenceOverrides] = useState<Record<string, boolean>>({});
+  const onlineMemberIds = useMemo(() => {
+    const base =
+      presenceListQ.data?.online_member_ids ?? group?.online_member_ids ?? [];
+    const ids = base.filter((uid) => presenceOverrides[uid] !== false);
+    for (const [uid, online] of Object.entries(presenceOverrides)) {
+      if (online && !ids.includes(uid)) ids.push(uid);
+    }
+    return ids;
+  }, [presenceListQ.data, group, presenceOverrides]);
 
   /* ── 平铺时间线状态 ── */
   const [entries, setEntries] = useState<GroupTimelineEntry[]>([]);
@@ -1134,6 +1147,16 @@ export function GroupChatPanel({
               }
             }
           },
+          onPresence: (event) => {
+            // 群在线实时化 quick：成员上/下线即时翻转在线绿点（覆盖层最新胜；
+            // 幂等——同值不触发重渲染）。
+            if (!event.user_id) return;
+            setPresenceOverrides((prev) =>
+              prev[event.user_id as string] === event.online
+                ? prev
+                : { ...prev, [event.user_id as string]: event.online },
+            );
+          },
           // queue_changed：群内不展示队列 UI（design §9.8）——影子队列事件透传
           // 备消费，本面板无渲染动作。
           onSessionEnded: () => {
@@ -1163,6 +1186,11 @@ export function GroupChatPanel({
               // 重连恢复：清流式光标（群无 run 快照可合成收口，保守归零；
               // 仍在输出的成员下一条实时行会重新点亮）。
               setStreamingKeys(new Set());
+              // presence 重对账（群在线实时化 quick）：presence 事件不可回放
+              // ——断连窗口的上/下线已错过，覆盖层作废 + 强制重拉列表快照
+              // （服务端读连接级 key 即时状态，重拉即真值）。
+              setPresenceOverrides({});
+              void qc.invalidateQueries({ queryKey: ["groupChats", "list", null] });
               // 运行态重对账（群聊运行态可见 quick 2026-09-02）：断连窗口可能
               // 错过止息/turn_completed——agent 持续指示降级为 bootstrap 态，
               // 交由群详情 shadow_running 对账（仍在跑→保留；已停→retire 回收

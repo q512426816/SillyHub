@@ -26,7 +26,8 @@
  *     +「运行中」动态徽标（runningMemberIds 命中——群详情 shadow_running ∪
  *     SSE agent typing live 态，群聊运行态可见 quick 2026-09-02）
  *     +「打断」按钮（quick 群 P1：任意群成员可打断该成员当前任务——后端
- *     interrupt 端点放行全员，按钮不按 isOwner 门控；无影子 none 禁用）
+ *     interrupt 端点放行全员，按钮不按 isOwner 门控；仅运行中（running
+ *     命中）渲染，未运行不占位——2026-09-04 收紧）
  *     +「切换配置」热切换弹窗 +「重置记忆」+「移除」（群主可见）；
  *   - 用户成员区：头像 + 昵称 + 在线绿点（online_member_ids 命中 user_id，
  *     presence 数据源）/ 离线灰点 + 群主标识 + 移除按钮（群主可见，confirm 后
@@ -285,9 +286,9 @@ export function MemberPanel({
   });
 
   /* ── quick 群 P1 打断：POST members/{mid}/interrupt（**任意群成员可打断**
-   *    ——后端放行，前端按钮全员可见）；打断后 run 终态由 daemon 回报，运行
-   *    徽标经 onRefresh 详情 refetch 的 shadow_running 收口（不做本地乐观剔除，
-   *    徽标由后端状态驱动）。 ── */
+   *    ——后端放行，前端按钮全员可见、仅运行中渲染）；打断后 run 终态由
+   *    daemon 回报，运行徽标经 onRefresh 详情 refetch 的 shadow_running 收口
+   *    （不做本地乐观剔除，徽标由后端状态驱动）。 ── */
   const interruptMutation = useMutation({
     mutationFn: (memberId: string) => interruptGroupMember(group.id, memberId),
     onSuccess: (res) => {
@@ -553,9 +554,6 @@ export function MemberPanel({
         const running = runningMemberIds?.has(member.id) ?? false;
         // quick 影子会话面板：有影子会话即可整卡点击打开（title 提示）。
         const shadowViewable = member.shadow_session_id != null;
-        // quick 群 P1 打断：无影子（shadow_status=none / 未挂影子会话）无任务可断。
-        const noShadow =
-          member.shadow_status === "none" || member.shadow_session_id == null;
         return (
           <div
             key={member.id}
@@ -668,10 +666,11 @@ export function MemberPanel({
                   : "未开启"}
               </span>
             </div>
-            {/* 操作行：打断按钮**全员可见**（quick 群 P1——后端 interrupt 端点
-                放行任意群成员；无影子 none / 未挂影子会话时禁用）；切换配置/
-                重置记忆/移除仅群主可见（后端 update/reset/remove 端点 owner 强
-                校验；quick 头像：换头像上传件随行，onChange 直调 PATCH）。 */}
+            {/* 操作行：打断按钮**全员可见、仅运行中渲染**（quick 群 P1——后端
+                interrupt 端点放行任意群成员；running 命中=影子会话有活跃 run 才
+                有任务可断，未运行/无影子不渲染不占位——2026-09-04 收紧）；切换
+                配置/重置记忆/移除仅群主可见（后端 update/reset/remove 端点 owner
+                强校验；quick 头像：换头像上传件随行，onChange 直调 PATCH）。 */}
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
               {isOwner && (
                 <>
@@ -704,22 +703,19 @@ export function MemberPanel({
                   </Button>
                 </>
               )}
-              <Tooltip
-                title={noShadow ? "影子会话未建立，无任务可打断" : undefined}
-              >
+              {running && (
                 <Button
                   size="small"
                   icon={<Square aria-hidden className="h-3 w-3" />}
-                  disabled={noShadow}
                   loading={interruptMutation.isPending}
                   onClick={() => confirmInterrupt(member)}
                   aria-label={`打断 ${member.display_name}`}
-                  title={noShadow ? undefined : "打断该成员当前运行中的任务"}
+                  title="打断该成员当前运行中的任务"
                   data-testid={`member-interrupt-${member.id}`}
                 >
                   打断
                 </Button>
-              </Tooltip>
+              )}
               {isOwner && (
                 <>
                   <span className="flex-1" />

@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: frontend_lib
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-02 12:00:00
+updated_at: 2026-09-04 09:00:00
 ---
 
 # 前端 API 封装层（frontend_lib）
@@ -43,7 +43,10 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
     sendGroupMessage / sendGroupTyping（typing 心跳上报，节流在前端）+
     GroupChat*/GroupMember* 系生成类型 re-export；`streamGroupChat` 群流封装
     （GroupChatStreamEnvelope 扩展 sender/member 身份字段、GroupChatTypingEvent、
-    GroupReplayLogEntry 回放行带 metadata 身份——平铺排序与身份还原的取数基座）
+    GroupReplayLogEntry 回放行带 metadata 身份——平铺排序与身份还原的取数基座；
+    ql-20260904-011-6f3f 增 GroupChatPresenceEvent/onPresence 分支——成员上/下线
+    即时事件，group-chat-panel 以覆盖层合并进 onlineMemberIds，事件不可回放故
+    重连 reconnected 作废覆盖层 + 强拉群列表对账）
   - 群聊「@我」未读记忆（lib/group-unread.ts，2026-09-02）：localStorage 已读锚
     单源（session-list-panel 红点渲染 / group-chat-panel 写锚共用防口径漂移）；
     ql-20260903-007 起锚改**服务端时间戳**（回放 maxLogTimestamp / 实时事件

@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-02 12:00:00
+updated_at: 2026-09-04 09:00:00
 ---
 
 # 守护进程中枢（daemon）
@@ -84,10 +84,15 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   - 热切换：provider/llm_provider/agent_profile 变更走 SESSION_SWITCH_CONFIG 下轮
     边界生效；runtime/workspace 变更影子 end+pending 按新六要素懒重建（记忆重置）。
   - typing/presence：`group_typing:{gid}` pub/sub（preview ≤400 字、TTL 2.5s，不落库
-    不进上下文，agent 触发时后端自动发一条）+ `group_presence:{gid}:{uid}` TTL 60s
-    （群 SSE 连接建立内联首触 + 独立 asyncio 任务按 45s 续期，ql-20260903-007——
+    不进上下文，agent 触发时后端自动发一条）+ `group_presence:{gid}:{uid}[:{conn}]`
+    TTL 60s（群 SSE 连接建立内联首触 + 独立 asyncio 任务按 45s 续期，ql-20260903-007——
     原循环顶部检查被 get_message 25s 量化成实际 ~50s 间隔，且生成器卡在 yield
     （慢消费端背压）时 touch 停摆、绿点被 TTL 误回收；独立任务两问题一并消除）。
+    **群在线实时化（ql-20260904-011-6f3f）**：key 增连接级后缀（同用户多标签页
+    各自 touch 互不干扰）；SSE 连接建立/断开经 `presence_on_change` 回调发
+    `event='presence'` 上下线事件（同 typing 频道合流）；断连 release 删本连接
+    key（即时熄灯不等 TTL）+ SCAN 剩余连接全退出才发 offline；bulk 读取剥连接
+    后缀取 uid（去重 + 旧两段 key 兼容）。
   - 桥接投影（run_sync/service.py 两改动点）：①submit_messages **事务内双写投影行**
     ——影子行落库后同事务插新 PK 投影行（run_id=群载体 run、dedup_key 复用、
     metadata={member_id, member_name, source_log_id}），PublishIntent 增
@@ -100,8 +105,11 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
     内联校验）：kind='group' 首查未命中经 `get_group_accessible_session` 探测
     （群成员表命中→workspace admin→404 不泄露存在性）；群消息落载体 run
     （status='completed' 纯载体）；`agent_sessions:changed` payload 增
-    audience_user_ids（群事件=全部用户成员）；群 SSE 多路订阅
-    （agent_session:{gid} + group_typing:{gid} 双 pubsub 合流，event: typing 区分）。
+    audience_user_ids（群事件=全部用户成员）；群 SSE 同一 pubsub 双订阅
+    （agent_session:{gid} + group_typing:{gid} 按 message.channel 分派合流，
+    event: typing/presence 区分——ql-20260904-011-6f3f 改单 pubsub：原双
+    pubsub 抽干在安静群（会话频道静默）要等 25s 超时窗口，typing/presence
+    帧最多滞后一个轮询周期）。
 - change-write 队列（change_write_router.py）：`GET /runtimes/{id}/pending-change-writes`、
   `POST /change-writes/{id}/claim`（daemon 认领，生成 claim_token）、
   `POST /change-writes/{id}/complete`（done/failed 回执）、
@@ -232,4 +240,5 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 - ql-20260903-017：failed 会话收链清理排队消息——队列不再永久「等待中」。派发只在 run 终态钩子（dispatch_queued_messages）触发，会话死透后永无终态，pending 排队条目永久等待也不报错。五条翻 failed 路径补收口：① sweep reconnecting 超时档、② runtime 离线 pending/worker 档、③ suspended 24h 超龄 GC（sweep 批量口径 _fail_pending_queued_bulk，与广播用的同一份终态复查为准防误伤活会话，按档区分可读原因）、④ mark_session_recovery_failed（复用 end_session 的 _fail_pending_queued_messages 先例）。end_session / dispatch 终态分支原有两处不动。
 - ql-20260903-020：end_group 解散容错分层——意外异常不再留半死群。_end_member_shadow 原只捕 AppError：DB 抖动等非 AppError 会带着「此前成员影子已逐个 commit」的半途状态把整个解散请求打 500，群行 ended_at 未写、部分成员影子已终止（群活着但成员全没反应）。① 异常捕获扩大到 Exception（rollback 复位事务态 + 栈日志 + 继续下一成员），返回 bool（True=影子存在且终止成功）；② end_group 取群改 _get_group_locked（FOR UPDATE，与 send/update/delete 并发不再交错双写，照归档先例；幂等早退 rollback 后重取防 ORM expire）；③ shadow_status='ended' 只写真终止的成员（失败成员保持原状态留 sweep 收敛，不伪造口径）。
 - ql-20260903-024：群列表端点 N+1 批量化——三个逐群查询族 + presence 各改批量。原实现 50 群一次列表 ≈250 串行查询（每群 LIMIT 1 摘要 + 成员行×2 + COUNT + Redis SCAN）。① get_last_message_previews 改窗口函数 row_number() over (partition by 会话) =1 单查；② get_group_unread_counts 改成员行 IN 单查 + 阈值表 JOIN（UNION ALL 子查询构造——VALUES AS t(a,b) 列名列表是 PG 语法 SQLite 不支持）OR ts IS NULL / log.timestamp > 阈值 GROUP BY 单查；③ get_last_mention_previews 改窗口 rn ≤ GROUP_LAST_MENTION_SCAN_ROWS 单查 + Python 组内新→旧找 @命中；④ get_online_member_ids_bulk 一次 SCAN group_presence:* 分桶（原逐群各扫一遍全键空间——SCAN MATCH 只过滤不省游标）；单群版委托 bulk。多群不同位点语义有专项回归用例（三族互不串组）。
+- ql-20260904-011-6f3f：群成员在线状态实时化 + 打断按钮仅运行时显示。① presence 连接级化：`group_presence:{gid}:{uid}:{conn}` 后缀（router 群 SSE 分支生成 conn token，同用户多标签页各自 touch 互不干扰）；② 上/下线事件：stream_session_logs 增 presence_on_change 回调（首触成功→online、finally 断连→offline，shield + 吞 CancelledError 保取消路径清理链），group/service 新增 publish_member_presence（event='presence' 同 group_typing 频道）与 release_member_presence（删本连接 key 即时熄灯 + SCAN 剩余连接全退出才发 offline——多标签页互不误伤）；③ 合流通道改单 pubsub 双订阅（agent_session + group_typing 按 message.channel 分派）：原双 pubsub 抽干方案在安静群 typing/presence 帧要等主频道 25s 超时窗口才下发，即达即发顺带修 typing 滞后；④ get_online_member_ids_bulk 剥连接后缀取 uid（set 去重 + 旧两段 key 兼容）；⑤ 前端 daemon.ts GroupChatPresenceEvent/onPresence 分派 + group-chat-panel presenceOverrides 覆盖层（最新事件胜，reconnected 作废 + 强拉列表对账——事件不可回放）；⑥ member-panel 打断按钮改 runningMemberIds 命中才渲染（原常驻禁用），后端 409 兜底不变。
 <!-- MANUAL_NOTES_END -->

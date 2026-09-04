@@ -30,11 +30,12 @@
  *      ——agent 卡整卡点击 → Drawer 内挂 SessionPanel（mode=dialog /
  *      sessionId=影子 id / 成员引擎 providers）；普通成员也可打开；未建影子无
  *      点击语义；卡内按钮不透传。
- *   9. 打断按钮（quick 群 P1）——**全员可见**（后端 interrupt 端点放行任意群
- *      成员，不按 isOwner 门控）；无影子（shadow_status=none / 未挂影子会话）
- *      禁用；Modal.confirm 确认 → POST members/{mid}/interrupt + onRefresh
- *      （运行徽标由详情 refetch 的 shadow_running 收口）；取消不发；409（无
- *      运行任务）notify.warning 透传后端中文文案、其他错误 notify.error。
+ *   9. 打断按钮（quick 群 P1）——**全员可见·仅运行中渲染**（后端 interrupt
+ *      端点放行任意群成员，不按 isOwner 门控；runningMemberIds 命中=有活跃
+ *      run 才渲染，未运行/缺省不占位——2026-09-04 收紧）；Modal.confirm 确认
+ *      → POST members/{mid}/interrupt + onRefresh（运行徽标由详情 refetch 的
+ *      shadow_running 收口）；取消不发；409（无运行任务）notify.warning 透传
+ *      后端中文文案、其他错误 notify.error。
  *
  * mock 策略（对齐 sessions/__tests__/create-group-wizard.test.tsx 惯例）：
  *   - @/lib/api 仅覆写 apiFetch（真实 daemon.ts 群客户端消费 mock——断言路径
@@ -1157,10 +1158,16 @@ describe("MemberPanel 打断按钮（quick 群 P1）", () => {
     return group;
   }
 
-  it("全员可见：非群主也有「打断」按钮；有影子可点，无影子（none）禁用", () => {
-    // 非群主视角（u-lin）：打断按钮在（后端放行任意群成员）。
+  it("全员可见·仅运行中渲染：非群主在运行成员卡上有可点「打断」；未运行成员不渲染（不占位）", () => {
+    // 非群主视角（u-lin）：运行中（runningMemberIds 命中）打断按钮可点
+    //（后端放行任意群成员）；mem-2 未运行 → 按钮不渲染（2026-09-04 收紧：
+    // 原为常驻禁用，现未运行不占位）。
     renderPanel(
-      <MemberPanel group={makeInterruptGroup()} currentUserId="u-lin" />,
+      <MemberPanel
+        group={makeInterruptGroup()}
+        currentUserId="u-lin"
+        runningMemberIds={new Set(["mem-1"])}
+      />,
     );
 
     const card1 = screen.getByTestId("agent-member-card-mem-1");
@@ -1173,16 +1180,29 @@ describe("MemberPanel 打断按钮（quick 群 P1）", () => {
       within(card1).queryByRole("button", { name: "切换配置" }),
     ).toBeNull();
 
-    // 无影子（shadow_status=none，未挂影子会话）→ 禁用（无任务可打断）。
+    // 未运行（不在 runningMemberIds）→ 按钮不渲染。
     const card2 = screen.getByTestId("agent-member-card-mem-2");
     expect(
-      within(card2).getByRole("button", { name: "打断 小测" }),
-    ).toBeDisabled();
+      within(card2).queryByRole("button", { name: "打断 小测" }),
+    ).toBeNull();
+  });
+
+  it("缺省 runningMemberIds（无运行态数据源）→ 无「打断」按钮（有影子也不显示）", () => {
+    renderPanel(
+      <MemberPanel group={makeInterruptGroup()} currentUserId="u-me" />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "打断 小码" }),
+    ).toBeNull();
   });
 
   it("点击「打断」→ Modal.confirm 二次确认；点「取消」不发请求", () => {
     renderPanel(
-      <MemberPanel group={makeInterruptGroup()} currentUserId="u-me" />,
+      <MemberPanel
+        group={makeInterruptGroup()}
+        currentUserId="u-me"
+        runningMemberIds={new Set(["mem-1"])}
+      />,
     );
     const confirmSpy = spyConfirmCancel();
 
@@ -1214,6 +1234,7 @@ describe("MemberPanel 打断按钮（quick 群 P1）", () => {
       <MemberPanel
         group={makeInterruptGroup()}
         currentUserId="u-lin"
+        runningMemberIds={new Set(["mem-1"])}
         onRefresh={onRefresh}
       />,
     );
@@ -1248,7 +1269,11 @@ describe("MemberPanel 打断按钮（quick 群 P1）", () => {
       }),
     );
     renderPanel(
-      <MemberPanel group={makeInterruptGroup()} currentUserId="u-me" />,
+      <MemberPanel
+        group={makeInterruptGroup()}
+        currentUserId="u-me"
+        runningMemberIds={new Set(["mem-1"])}
+      />,
     );
     const confirmSpy = spyConfirmOk();
 
@@ -1277,7 +1302,11 @@ describe("MemberPanel 打断按钮（quick 群 P1）", () => {
       }),
     );
     renderPanel(
-      <MemberPanel group={makeInterruptGroup()} currentUserId="u-me" />,
+      <MemberPanel
+        group={makeInterruptGroup()}
+        currentUserId="u-me"
+        runningMemberIds={new Set(["mem-1"])}
+      />,
     );
     const confirmSpy = spyConfirmOk();
 

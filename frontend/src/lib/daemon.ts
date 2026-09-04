@@ -2924,6 +2924,13 @@ export interface GroupChatStreamEnvelope extends SessionStreamEnvelope {
    * （{log_id, member_name, content_head}，与回放 metadata 同构）。
    */
   reply_to?: GroupMessageReplySnapshot | null;
+  /**
+   * presence 帧（群在线实时化 quick，2026-09-04）：成员上/下线即时通知——
+   * user_id + online；事件不回放（pub/sub 即发即忘），断线重连靠列表重拉对账。
+   */
+  user_id?: string | null;
+  online?: boolean | null;
+  ts?: string | null;
 }
 
 /**
@@ -2946,6 +2953,20 @@ export interface GroupChatTypingEvent {
   reply_to_log_id: string | null;
 }
 
+/**
+ * presence 分支事件（群在线实时化 quick，2026-09-04；design §5.4 群实时频道）。
+ *
+ * SSE 连接建立/断开触发（后端 ``publish_member_presence``）——前端按 user_id
+ * 即时覆盖在线绿点；事件不可回放，断线重连由消费方作废覆盖层 + 重拉列表快照
+ * 对账。
+ */
+export interface GroupChatPresenceEvent {
+  /** 上/下线用户 id（对齐群成员 user_id 匹配在线绿点）。 */
+  user_id: string | null;
+  online: boolean;
+  ts: string | null;
+}
+
 /** 群流回调集（task-08 group-chat-panel 消费面）。 */
 export interface GroupChatStreamHandlers {
   /** log 分支：user_input 行 / 投影行 / stale 撤回令箭（调用方 seenLogIds 去重）。 */
@@ -2954,6 +2975,8 @@ export interface GroupChatStreamHandlers {
   onTurnCompleted(envelope: GroupChatStreamEnvelope): void;
   /** typing 分支（可选）：谁正在输入 + 草稿预览。 */
   onTyping?(event: GroupChatTypingEvent): void;
+  /** presence 分支（可选，群在线实时化 quick）：成员上/下线即时覆盖在线集。 */
+  onPresence?(event: GroupChatPresenceEvent): void;
   /** queue_changed 分支（可选）：群内不展示队列 UI（design §9.8），透传备消费。 */
   onQueueChanged?(envelope: GroupChatStreamEnvelope): void;
   /** session_ended 分支（可选）：群解散（连接自动关闭不再重连）。 */
@@ -3079,8 +3102,8 @@ export function streamGroupChat(
       if (!lastLogTs || env.timestamp > lastLogTs) lastLogTs = env.timestamp;
     }
     const envelope = env as GroupChatStreamEnvelope;
-    // typing 不在 SessionEventKind（task-06 群新增帧类型）——switch 穷尽前以
-    // 字符串比较分流（对齐 permission_* 同款先例，避免联合收窄误判）。
+    // typing/presence 不在 SessionEventKind（task-06 群新增帧类型）——switch
+    // 穷尽前以字符串比较分流（对齐 permission_* 同款先例，避免联合收窄误判）。
     if (String(kind) === "typing") {
       const event: GroupChatTypingEvent = {
         member_name:
@@ -3098,6 +3121,21 @@ export function streamGroupChat(
             : null,
       };
       handlers.onTyping?.(event);
+      return;
+    }
+    if (String(kind) === "presence") {
+      const tsRaw =
+        typeof envelope.ts === "string"
+          ? envelope.ts
+          : typeof envelope.timestamp === "string"
+            ? envelope.timestamp
+            : null;
+      const event: GroupChatPresenceEvent = {
+        user_id: typeof envelope.user_id === "string" ? envelope.user_id : null,
+        online: envelope.online === true,
+        ts: tsRaw,
+      };
+      handlers.onPresence?.(event);
       return;
     }
     switch (kind) {

@@ -16,16 +16,21 @@
   （活跃/无活跃 run/影子未建/用户成员），群列表端点不加；
 - presence：群 SSE 生成器循环 touch（``SET key "1" EX 60``）+ 间隔节流（首
   轮立即 touch）；``get_online_member_ids`` 读 ``group_presence:{gid}:*``
-  keys（脏 key 容错 / Redis 故障降级空数组）；群列表/详情 ``online_member_ids``
-  接通（task-02 占位字段填充）；
+  keys（连接级 ``{uid}:{conn}`` 后缀解析去重 / 脏 key 容错 / Redis 故障降级
+  空数组）；群列表/详情 ``online_member_ids`` 接通（task-02 占位字段填充）；
+  实时事件（群在线实时化 quick 2026-09-04）：连接建立 → ``presence_on_change
+  (True)`` 上线回调 + 断连 aclose → ``(False)`` 下线回调；
+  ``publish_member_presence`` payload 形态；``release_member_presence``
+  删本连接 key + SCAN 剩余连接全退出才发 offline（多标签页互不误伤）；
 - audience：``_stream_sessions_events`` 过滤「user_id 命中 or in
   audience_user_ids」（成员收 / 非成员不收）；群操作（建群/解散）publish
   ``agent_sessions:changed`` payload 内嵌全部用户成员 id；
-- 多路订阅合流：``stream_session_logs(typing_channel=...)`` 双 pubsub 订阅
-  agent_session:{id} + group_typing:{id}，log 与 typing 事件同流合流、静默期
-  typing 事件顶掉 keepalive 帧；消费方断开（aclose）后**两个** pubsub 都
-  unsubscribe + aclose（防 Redis 订阅连接泄漏）；单聊调用点不传可选参数 →
-  仅创建一个 pubsub（单订阅路径零改动护栏）。
+- 多路订阅合流（群在线实时化 quick 改单 pubsub 双订阅）：``stream_session_logs
+  (typing_channel=...)`` 同一 pubsub 订阅 agent_session:{id} + group_typing:
+  {id}，按 ``message['channel']`` 分派——log 与 typing/presence 事件同流合流
+  即达即发（安静群不再等主频道 25s 超时窗口抽干）；消费方断开（aclose）后
+  同 pubsub 退订两频道 + aclose（防 Redis 订阅连接泄漏）；单聊调用点不传可选
+  参数 → 仅创建一个 pubsub、仅订阅会话频道（单订阅路径零改动护栏）。
 
 夹具范式镜像 ``test_group_mention_pipeline.py`` / ``test_session_sse.py`` /
 ``test_sessions_events_stream.py``（in-memory SQLite + httpx ASGI client +
@@ -60,7 +65,11 @@ from app.modules.agent.service import (
 )
 from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
-from app.modules.daemon.group.service import get_online_member_ids
+from app.modules.daemon.group.service import (
+    get_online_member_ids,
+    publish_member_presence,
+    release_member_presence,
+)
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.daemon.router import _stream_sessions_events
 from app.modules.daemon.service import DaemonService
@@ -387,9 +396,8 @@ def _build_mock_pubsub(
     """假 pubsub：get_message 依序吐出 ``messages``，耗尽后永远返回 None。
 
     ``None`` 条目建模静默（timeout 路径）；dict 条目为真实 Redis pub/sub
-    消息形态（``{"type": "message", "data": raw}``）。typing 频道的非阻塞
-    抽干轮询（``_drain_typing_frames``）共用同一 fake（kwargs 兼容两种调用
-    形态：``timeout=25`` / ``ignore_subscribe_messages=True, timeout=0.0``）。
+    消息形态（``{"type": "message", "channel": …, "data": raw}``——群流
+    生成器按 ``channel`` 分派会话频道 / 群实时频道帧）。
     """
     state = {"remaining": list(messages)}
 
@@ -875,12 +883,12 @@ class TestGroupDetailShadowRunning:
 
 class TestPresence:
     async def test_stream_touches_presence_with_ttl(self, db_session: AsyncSession) -> None:
-        """群 SSE 连接建立即内联首触：SET key "1" EX 60（确定性，不依赖任务调度）。"""
-        session_ps = _build_mock_pubsub([])
-        typing_ps = _build_mock_pubsub([])
-        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        """群 SSE 连接建立即内联首触：SET key "1" EX 60（确定性，不依赖任务调度）；
+        会话频道 + 群实时频道同 pubsub 双订阅（群在线实时化 quick）。"""
+        ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([ps])
         sid = uuid.uuid4()
-        presence_key = f"group_presence:{sid}:{uuid.uuid4()}"
+        presence_key = f"group_presence:{sid}:{uuid.uuid4()}:c1"
 
         svc = AgentService(db_session)
         gen = svc.stream_session_logs(
@@ -896,9 +904,33 @@ class TestPresence:
         assert first_call.args == (presence_key, "1")
         assert first_call.kwargs == {"ex": GROUP_PRESENCE_TTL_SEC}
         assert GROUP_PRESENCE_TTL_SEC == 60
-        # 双订阅照常建立（touch 不影响流主体）。
-        session_ps.subscribe.assert_called_once_with(f"agent_session:{sid}")
-        typing_ps.subscribe.assert_called_once_with(f"group_typing:{sid}")
+        # 双频道照常订阅（touch 不影响流主体；同一 pubsub 两条 subscribe）。
+        ps.subscribe.assert_any_call(f"agent_session:{sid}")
+        ps.subscribe.assert_any_call(f"group_typing:{sid}")
+        assert ps.subscribe.await_count == 2
+
+    async def test_presence_online_and_offline_callbacks(self, db_session: AsyncSession) -> None:
+        """群在线实时化 quick：连接建立 → on_change(True)；断连 aclose →
+        on_change(False)（下线收口——删连接 key/发 offline 由回调实现方负责）。"""
+        ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([ps])
+        sid = uuid.uuid4()
+        on_change = AsyncMock()
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(
+            sid,
+            typing_channel=f"group_typing:{sid}",
+            presence_key=f"group_presence:{sid}:{uuid.uuid4()}:c1",
+            presence_on_change=on_change,
+        )
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=2)
+
+        assert collected[0] == ": connected\n\n"
+        on_change.assert_any_call(True)
+        on_change.assert_any_call(False)
+        assert on_change.await_count == 2  # 恰好上线一次 + 下线一次
 
     async def test_presence_touch_throttled_by_interval(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -910,14 +942,13 @@ class TestPresence:
         循环各触一次」的旧耦合）。
         """
         monkeypatch.setattr("app.modules.agent.service.GROUP_PRESENCE_TOUCH_INTERVAL_SEC", 0.0)
-        session_ps = _build_mock_pubsub([])
-        typing_ps = _build_mock_pubsub([])
-        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([ps])
         sid = uuid.uuid4()
 
         svc = AgentService(db_session)
         gen = svc.stream_session_logs(
-            sid, typing_channel=f"group_typing:{sid}", presence_key=f"group_presence:{sid}:u"
+            sid, typing_channel=f"group_typing:{sid}", presence_key=f"group_presence:{sid}:u:c1"
         )
         with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
             collected: list[str] = []
@@ -947,14 +978,13 @@ class TestPresence:
         touch 一并停摆，60s 后在线绿点被 TTL 误回收；独立任务不受产出节奏影响。
         """
         monkeypatch.setattr("app.modules.agent.service.GROUP_PRESENCE_TOUCH_INTERVAL_SEC", 0.0)
-        session_ps = _build_mock_pubsub([])
-        typing_ps = _build_mock_pubsub([])
-        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        ps = _build_mock_pubsub([])
+        redis = _mock_redis_with_pubsubs([ps])
         sid = uuid.uuid4()
 
         svc = AgentService(db_session)
         gen = svc.stream_session_logs(
-            sid, typing_channel=f"group_typing:{sid}", presence_key=f"group_presence:{sid}:u"
+            sid, typing_channel=f"group_typing:{sid}", presence_key=f"group_presence:{sid}:u:c1"
         )
         with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
             # 拉到 keepalive 帧（订阅/首触/任务均已就绪）后不再驱动生成器——
@@ -972,10 +1002,57 @@ class TestPresence:
                 await asyncio.sleep(0.01)
             await gen.aclose()
 
+    async def test_publish_member_presence_payload(self) -> None:
+        """上线事件 payload 形态：event='presence' + user_id + online + ts。"""
+        gid, uid = uuid.uuid4(), uuid.uuid4()
+        redis = AsyncMock()
+        with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
+            await publish_member_presence(gid, uid, online=True)
+
+        events = _typing_publishes(redis, gid)
+        assert len(events) == 1
+        assert events[0]["event"] == "presence"
+        assert events[0]["user_id"] == str(uid)
+        assert events[0]["online"] is True
+        assert events[0]["ts"]
+
+    async def test_release_last_conn_deletes_key_and_publishes_offline(self) -> None:
+        """release（最后一个连接退出）：删本连接 key（即时熄灯不等 TTL 60s）+
+        SCAN 无剩余连接 → publish offline。"""
+        gid, uid = uuid.uuid4(), uuid.uuid4()
+        conn_key = f"group_presence:{gid}:{uid}:c1"
+        redis = AsyncMock()
+        redis.scan = AsyncMock(return_value=(0, []))
+
+        with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
+            await release_member_presence(gid, uid, conn_key)
+
+        redis.delete.assert_awaited_once_with(conn_key)
+        # SCAN 探剩余连接：pattern 锚定该群该用户的连接级 key。
+        assert redis.scan.await_args.kwargs.get("match") == f"group_presence:{gid}:{uid}:*"
+        events = _typing_publishes(redis, gid)
+        assert len(events) == 1
+        assert events[0]["event"] == "presence"
+        assert events[0]["user_id"] == str(uid)
+        assert events[0]["online"] is False
+
+    async def test_release_with_sibling_conn_keeps_online(self) -> None:
+        """多标签页：另一连接 key 存活 → 删本连接 key 但不发 offline（互不误伤）。"""
+        gid, uid = uuid.uuid4(), uuid.uuid4()
+        redis = AsyncMock()
+        redis.scan = AsyncMock(return_value=(0, [f"group_presence:{gid}:{uid}:c2"]))
+
+        with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
+            await release_member_presence(gid, uid, f"group_presence:{gid}:{uid}:c1")
+
+        assert redis.delete.await_count == 1
+        assert _typing_publishes(redis, gid) == []
+
     async def test_get_online_member_ids_parses_keys_and_tolerates_dirty(
         self,
     ) -> None:
-        """SCAN 游标扫（多批）→ 用户 id 集；脏 key 跳过；Redis 故障降级空数组。
+        """SCAN 游标扫（多批）→ 用户 id 集；连接级 key 第三段剥离 + 同用户多
+        连接去重 + 旧两段 key 兼容；脏 key 跳过；Redis 故障降级空数组。
 
         quick 群 P1 审计（2026-09-02）：KEYS 前缀扫换 SCAN 游标分批——本用例
         同时锁游标循环（首批返回非 0 游标 → 续扫到游标归 0）。
@@ -983,18 +1060,25 @@ class TestPresence:
         gid = uuid.uuid4()
         u1, u2 = uuid.uuid4(), uuid.uuid4()
         redis = AsyncMock()
-        # 首批：非 0 游标（还有下一批）；脏 key / 他人群 key 一并混入。
+        # 首批：非 0 游标（还有下一批）；脏 key / 他人群 key / 连接级多连接一并混入。
         redis.scan = AsyncMock(
             side_effect=[
                 (
                     17,
                     [
-                        f"group_presence:{gid}:{u1}",
+                        f"group_presence:{gid}:{u1}:c1",
+                        f"group_presence:{gid}:{u1}:c2",  # 同用户多标签页 → 去重
                         f"group_presence:{gid}:garbage",  # 脏 key（截断/残留）
                         "group_presence:other:noise",
                     ],
                 ),
-                (0, [f"group_presence:{gid}:{u2}"]),
+                (
+                    0,
+                    [
+                        f"group_presence:{gid}:{u2}",  # 旧两段 key（无 conn 后缀）
+                        f"group_presence:{gid}:{u2}:c9",
+                    ],
+                ),
             ]
         )
         with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
@@ -1181,7 +1265,7 @@ class TestAudienceFilter:
         assert sorted(payload["audience_user_ids"]) == sorted([str(env.owner.id), str(invited.id)])
 
 
-# ── 多路订阅合流（design §5.4：双 pubsub + 释放）────────────────────────────
+# ── 多路订阅合流（群在线实时化 quick：单 pubsub 双订阅 + 释放）──────────────
 
 
 class TestGroupStreamMultiSubscription:
@@ -1189,7 +1273,7 @@ class TestGroupStreamMultiSubscription:
         self, db_session: AsyncSession
     ) -> None:
         """log（agent_session 频道）与 typing（group_typing 频道）同流合流；
-        断开后两个 pubsub 都 unsubscribe + aclose（防泄漏）。"""
+        断开后同 pubsub 退订两频道 + aclose（防泄漏）。"""
         sid = uuid.uuid4()
         log_raw = json.dumps(
             {
@@ -1212,9 +1296,14 @@ class TestGroupStreamMultiSubscription:
                 "ts": "2026-09-01T08:00:01Z",
             }
         )
-        session_ps = _build_mock_pubsub([{"type": "message", "data": log_raw}])
-        typing_ps = _build_mock_pubsub([{"type": "message", "data": typing_raw}])
-        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        # 同一 pubsub：两频道消息按到达顺序吐出（路由按 message['channel']）。
+        ps = _build_mock_pubsub(
+            [
+                {"type": "message", "channel": f"agent_session:{sid}", "data": log_raw},
+                {"type": "message", "channel": f"group_typing:{sid}", "data": typing_raw},
+            ]
+        )
+        redis = _mock_redis_with_pubsubs([ps])
 
         svc = AgentService(db_session)
         gen = svc.stream_session_logs(sid, typing_channel=f"group_typing:{sid}")
@@ -1222,19 +1311,46 @@ class TestGroupStreamMultiSubscription:
             collected = await _collect(gen, limit=4)
 
         assert collected[0] == ": connected\n\n"
-        # 合流顺序：日志帧后立刻抽干 typing 频道（同一 SSE 流）。
+        # 合流：日志帧与群实时频道帧同流依序下发（同一 SSE 流）。
         assert collected[1] == f"data: {log_raw}\n\n"
         assert collected[2] == f"data: {typing_raw}\n\n"
-        # 双订阅建立 + 双释放（任务卡 constraints：防 Redis 连接泄漏）。
-        session_ps.subscribe.assert_called_once_with(f"agent_session:{sid}")
-        typing_ps.subscribe.assert_called_once_with(f"group_typing:{sid}")
-        session_ps.unsubscribe.assert_called_once_with(f"agent_session:{sid}")
-        session_ps.aclose.assert_called_once()
-        typing_ps.unsubscribe.assert_called_once_with(f"group_typing:{sid}")
-        typing_ps.aclose.assert_called_once()
+        # 同 pubsub 双订阅建立 + 断开双退订 + 单连接释放（任务卡 constraints）。
+        ps.subscribe.assert_any_call(f"agent_session:{sid}")
+        ps.subscribe.assert_any_call(f"group_typing:{sid}")
+        ps.unsubscribe.assert_any_call(f"agent_session:{sid}")
+        ps.unsubscribe.assert_any_call(f"group_typing:{sid}")
+        ps.aclose.assert_called_once()
+
+    async def test_presence_frame_routed_and_delivered(self, db_session: AsyncSession) -> None:
+        """presence 帧（群在线实时化 quick）与 log 帧同流：channel 路由即达
+        即发（data 帧透传，前端按 payload.event='presence' 分派）。"""
+        sid = uuid.uuid4()
+        presence_raw = json.dumps(
+            {
+                "event": "presence",
+                "user_id": str(uuid.uuid4()),
+                "online": True,
+                "ts": "2026-09-04T08:00:00Z",
+            }
+        )
+        ps = _build_mock_pubsub(
+            [
+                {"type": "message", "channel": f"group_typing:{sid}", "data": presence_raw},
+            ]
+        )
+        redis = _mock_redis_with_pubsubs([ps])
+
+        svc = AgentService(db_session)
+        gen = svc.stream_session_logs(sid, typing_channel=f"group_typing:{sid}")
+        with mock_patch("app.modules.agent.service.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=2)
+
+        assert collected[0] == ": connected\n\n"
+        assert collected[1] == f"data: {presence_raw}\n\n"
 
     async def test_typing_event_delivered_on_silence(self, db_session: AsyncSession) -> None:
-        """静默期（日志频道无消息）typing 事件照常下发，顶掉该轮 keepalive。"""
+        """会话频道静默（无 log 消息）时群实时频道事件照常下发——单 pubsub
+        双订阅下不再依赖主频道消息/超时窗口的抽干节拍（即达即发）。"""
         sid = uuid.uuid4()
         typing_raw = json.dumps(
             {
@@ -1246,9 +1362,10 @@ class TestGroupStreamMultiSubscription:
                 "ts": "2026-09-01T08:00:00Z",
             }
         )
-        session_ps = _build_mock_pubsub([])  # 日志频道永久静默
-        typing_ps = _build_mock_pubsub([{"type": "message", "data": typing_raw}])
-        redis = _mock_redis_with_pubsubs([session_ps, typing_ps])
+        ps = _build_mock_pubsub(
+            [{"type": "message", "channel": f"group_typing:{sid}", "data": typing_raw}]
+        )
+        redis = _mock_redis_with_pubsubs([ps])
 
         svc = AgentService(db_session)
         gen = svc.stream_session_logs(sid, typing_channel=f"group_typing:{sid}")
@@ -1256,12 +1373,12 @@ class TestGroupStreamMultiSubscription:
             collected = await _collect(gen, limit=2)
 
         assert collected[0] == ": connected\n\n"
-        # typing 事件帧而非 keepalive（typing 频道有流量时不出空转注释帧）。
+        # typing 事件帧而非 keepalive（群实时频道有流量时不出空转注释帧）。
         assert collected[1] == f"data: {typing_raw}\n\n"
-        typing_ps.aclose.assert_called_once()
+        ps.aclose.assert_called_once()
 
     async def test_single_chat_path_creates_single_pubsub(self, db_session: AsyncSession) -> None:
-        """单聊零改动护栏：不传可选参数 → 仅创建一个 pubsub（无 typing 订阅）。"""
+        """单聊零改动护栏：不传可选参数 → 仅创建一个 pubsub（仅会话频道订阅）。"""
         sid = uuid.uuid4()
         session_ps = _build_mock_pubsub([])
         redis = _mock_redis_with_pubsubs([session_ps])
@@ -1275,6 +1392,6 @@ class TestGroupStreamMultiSubscription:
         assert collected[1] == ": keepalive\n\n"
         redis.pubsub.assert_called_once()
         session_ps.subscribe.assert_called_once_with(f"agent_session:{sid}")
-        # presence 未启用 → 无 touch。
+        # presence 未启用 → 无 touch、无生命周期回调副作用。
         redis.set.assert_not_called()
         session_ps.aclose.assert_called_once()

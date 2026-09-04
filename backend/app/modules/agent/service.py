@@ -7,12 +7,11 @@ import json
 import logging
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from redis.asyncio.client import PubSub
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -72,25 +71,13 @@ def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
 # 量化成实际 ~50s 间隔（余量仅 ~10s），且生成器卡在 ``yield``（慢消费端 TCP
 # 背压）时 touch 一并停摆——独立任务不受流产出节奏影响）；连接断开任务随
 # finally cancel，key 至多 60s 自然过期（在线绿点熄灭，纯 ephemeral 不落库）。
-# key 命名 ``group_presence:{group_id}:{user_id}`` 由 daemon/group/service.py
-# 的 ``group_presence_key`` 单源构造（本模块只收拼好的 key，避免跨模块 import 环）。
+# key 命名 ``group_presence:{group_id}:{user_id}[:{conn_token}]`` 由
+# daemon/group/service.py 的 ``group_presence_key`` 单源构造（本模块只收拼好的
+# key，避免跨模块 import 环）；连接级后缀（群在线实时化 quick，2026-09-04）
+# 支持同用户多标签页/多端各自 touch——断连即删本连接 key + 下线判定经
+# ``presence_on_change`` 回调（见 ``stream_session_logs``）。
 GROUP_PRESENCE_TTL_SEC = 60
 GROUP_PRESENCE_TOUCH_INTERVAL_SEC = 45.0
-
-
-async def _drain_typing_frames(pubsub: PubSub) -> AsyncGenerator[str, None]:
-    """非阻塞抽干群 typing 频道待发消息（task-06 §5.4 多路订阅合流）。
-
-    ``timeout=0`` 单次轮询：有 ``message`` 类型消息即产出默认 ``data`` 帧
-    （typing payload 内已带 ``event='typing'``，前端按 payload 字段分派，
-    与 log/turn_completed 同通道同帧式）；无消息立即返回（不阻塞主循环的
-    日志频道轮询）。
-    """
-    while True:
-        message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.0)
-        if not message or message.get("type") != "message":
-            return
-        yield f"data: {message['data']}\n\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1239,6 +1226,7 @@ class AgentService:
         *,
         typing_channel: str | None = None,
         presence_key: str | None = None,
+        presence_on_change: Callable[[bool], Awaitable[None]] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Yield SSE events aggregating all AgentRuns of an AgentSession.
 
@@ -1256,24 +1244,30 @@ class AgentService:
         connection; a single turn completing does NOT.
 
         群实时通道扩展（2026-09-01-session-group-chat task-06，design §5.4）——
-        两可选参数默认 None，单聊调用点不传即**逐字节走原单订阅路径**：
+        可选参数默认 None，单聊调用点不传即**逐字节走原单订阅路径**：
 
-        * ``typing_channel``：额外双订阅群 typing 频道（``group_typing:{gid}``），
-          待发 typing 消息（payload 内已带 ``event='typing'``）以默认 ``data``
-          帧透传，与日志事件**合流进同一 SSE 流**（前端不加连接数）；
-        * ``presence_key``：群在线 presence key（``group_presence:{gid}:{uid}``），
-          连接建立即内联首触（``SET EX 60``），此后由独立 asyncio 任务按 45s
-          续期（ql-20260903-007：脱离循环节奏——不被 ``get_message`` 25s 量化，
-          也不受 ``yield`` 背压挂起影响，慢消费端在线状态不再被 TTL 误回收）。
-          touch 失败仅 warning 不断流。
+        * ``typing_channel``：群实时频道（``group_typing:{gid}``，typing 与
+          presence 帧共用）与 session 频道**同一 pubsub 双订阅**——两频道消息
+          同连接按序到达，主循环 ``get_message`` 任一频道有消息即唤醒，帧
+          即达即发（群在线实时化 quick 2026-09-04：原双 pubsub 抽干方案下
+          安静群（session 频道静默）typing/presence 帧要等 25s 超时窗口才
+          抽干，事件最多滞后一个轮询周期）；
+        * ``presence_key``：群在线 presence key（``group_presence:{gid}:{uid}``
+          或连接级 ``…:{conn}``），连接建立即内联首触（``SET EX 60``），此后由
+          独立 asyncio 任务按 45s 续期（ql-20260903-007：脱离循环节奏——不被
+          ``get_message`` 25s 量化，也不受 ``yield`` 背压挂起影响，慢消费端
+          在线状态不再被 TTL 误回收）。touch 失败仅 warning 不断流。
+        * ``presence_on_change``（群在线实时化 quick 2026-09-04）：presence
+          生命周期回调——首触成功后调 ``on_change(True)``（上线事件），断连
+          finally 调 ``on_change(False)``（删连接级 key + 全退出才发下线，由
+          daemon/group/service 实现方负责）。回调自身兜异常（本生成器只管
+          调用），单聊/无 presence 场景不传即零改动。
 
-        取消 / 异常路径：finally 对**两个** pubsub 各自隔离清理（unsubscribe
-        吞异常 + aclose 必达，防 Redis 订阅连接泄漏——对照单订阅清理先例），
-        presence 续期任务同点 cancel。
+        取消 / 异常路径：finally 对 pubsub 双频道 unsubscribe（吞异常 + aclose
+        必达，防 Redis 订阅连接泄漏），presence 续期任务与下线回调同点收口。
         """
         redis = get_redis()
         pubsub = redis.pubsub()
-        typing_pubsub = redis.pubsub() if typing_channel is not None else None
         channel = f"agent_session:{agent_session_id}"
         presence_touch_task: asyncio.Task[None] | None = None
         try:
@@ -1281,22 +1275,41 @@ class AgentService:
             yield ": connected\n\n"
 
             await pubsub.subscribe(channel)
-            if typing_pubsub is not None and typing_channel is not None:
-                await typing_pubsub.subscribe(typing_channel)
+            # 群实时频道（typing/presence 帧共用）同 pubsub 订阅（群在线实时化
+            # quick 2026-09-04）：消息同连接按序到达，主循环即时唤醒——替代原
+            # 双 pubsub「主频道有消息/25s 超时后才抽干」的合流（安静群帧滞后
+            # 最多一个轮询周期）。
+            if typing_channel is not None:
+                await pubsub.subscribe(typing_channel)
 
             # ql-20260903-007：presence 续期独立任务——首触内联（连接建立即在线，
             # 保持确定性），后续按 GROUP_PRESENCE_TOUCH_INTERVAL_SEC 续期。任务与
             # SSE 产出解耦：生成器卡在 yield（慢消费端背压）时续期照常，TTL 60s
             # 不再被误回收。touch 失败仅 warning（Redis 抖动不杀任务）。
             if presence_key is not None:
+                touched = False
                 try:
                     await redis.set(presence_key, "1", ex=GROUP_PRESENCE_TTL_SEC)
+                    touched = True
                 except Exception:
                     log.warning(
                         "group_presence_touch_failed",
                         presence_key=presence_key,
                         exc_info=True,
                     )
+
+                # 上线事件（群在线实时化 quick）：首触落键成功即通知群实时频道
+                # ——其余成员端免等列表刷新即时点亮绿点；touch 失败不发（事件
+                # 与键状态保持一致，Redis 抖动由列表快照兜底）。回调兜异常。
+                if touched and presence_on_change is not None:
+                    try:
+                        await presence_on_change(True)
+                    except Exception:
+                        log.warning(
+                            "group_presence_online_publish_failed",
+                            presence_key=presence_key,
+                            exc_info=True,
+                        )
 
                 async def _touch_presence_forever() -> None:
                     while True:
@@ -1335,6 +1348,11 @@ class AgentService:
                     yield ": keepalive\n\n"
                     continue
                 if message and message["type"] == "message":
+                    # 群实时频道帧（typing / presence，群在线实时化 quick）：
+                    # 即达即发（默认 data 帧，前端按 payload.event 分派）。
+                    if typing_channel is not None and message.get("channel") == typing_channel:
+                        yield f"data: {message['data']}\n\n"
+                        continue
                     data = message["data"]
                     try:
                         payload = json.loads(data)
@@ -1359,30 +1377,32 @@ class AgentService:
                     # Transparent passthrough: structured log / turn_completed
                     # events already carry run_id (task-05 / task-06 publish).
                     yield f"data: {data}\n\n"
-                    # 群多路订阅（task-06）：日志事件后抽干 typing 频道待发消息，
-                    # 合流进同一 SSE 流（高流量下 typing 不被日志饿死）。
-                    if typing_pubsub is not None:
-                        async for frame in _drain_typing_frames(typing_pubsub):
-                            yield frame
                 else:
-                    emitted = False
-                    if typing_pubsub is not None:
-                        async for frame in _drain_typing_frames(typing_pubsub):
-                            yield frame
-                            emitted = True
-                    if not emitted:
-                        yield ": keepalive\n\n"
+                    yield ": keepalive\n\n"
         except Exception:
             yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'
         finally:
-            # 同上：unsubscribe 异常隔离，aclose 必达（close 已废弃）。群路径的
-            # typing 订阅同样两步清理——两 pubsub 各自隔离，一个清理失败不阻断
-            # 另一个的释放（防连接泄漏，任务卡 constraints）。presence 续期
-            # 任务最后 cancel（ql-20260903-007：防生成器关闭后任务残留）。
+            # 下线收口（群在线实时化 quick）先于订阅清理：回调删连接级 presence
+            # key + 该用户全退出才 publish offline（实现方兜异常，此处只管调用）。
+            # shield + 吞 CancelledError：任务取消路径下回调转后台完成，其余
+            # 清理照常执行——不重抛取消（清理链本身 best-effort，与下方
+            # unsubscribe 吞异常同口径）。
+            if presence_on_change is not None:
+                offline_task = asyncio.ensure_future(presence_on_change(False))
+                try:
+                    await asyncio.shield(offline_task)
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    log.warning("group_presence_offline_publish_failed", exc_info=True)
             if presence_touch_task is not None:
                 presence_touch_task.cancel()
+            # 同上：unsubscribe 异常隔离，aclose 必达（close 已废弃）。群路径的
+            # 实时频道在同一 pubsub 上补退订——一个清理失败不阻断连接释放。
             try:
                 await pubsub.unsubscribe(channel)
+                if typing_channel is not None:
+                    await pubsub.unsubscribe(typing_channel)
             except Exception:
                 log.warning(
                     "agent_session_logs_unsubscribe_failed",
@@ -1390,16 +1410,6 @@ class AgentService:
                     exc_info=True,
                 )
             await pubsub.aclose()
-            if typing_pubsub is not None and typing_channel is not None:
-                try:
-                    await typing_pubsub.unsubscribe(typing_channel)
-                except Exception:
-                    log.warning(
-                        "group_typing_unsubscribe_failed",
-                        channel=typing_channel,
-                        exc_info=True,
-                    )
-                await typing_pubsub.aclose()
 
     # ------------------------------------------------------------------
     # Stale run cleanup

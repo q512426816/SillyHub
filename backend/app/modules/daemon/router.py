@@ -3480,18 +3480,33 @@ async def stream_session_logs(
             # task-07：外层包一层 _inject_run_error_events，在 failed turn 后追加
             # run_error 帧（透传 ModelError）；既有事件流不变。
             # 2026-09-01-session-group-chat task-06（design §5.4）：群会话 SSE
-            # 生成器多路订阅——额外订阅 typing 频道（事件合流进同一 SSE 流）+
-            # presence key（循环内 touch 续期）。chat / 影子（group_member）
-            # 不传可选参数 → 单订阅原路径零改动。
-            stream_kwargs: dict[str, str] = {}
+            # 生成器多路订阅——实时频道（typing/presence 帧合流）+ presence key
+            # （连接级，touch 续期）+ presence 生命周期回调（上线即发事件、断连
+            # 删 key + 全退出发下线——群在线实时化 quick 2026-09-04）。chat /
+            # 影子（group_member）不传可选参数 → 单订阅原路径零改动。
+            stream_kwargs: dict[str, object] = {}
             if owned.session_kind == "group":
                 from app.modules.daemon.group.service import (
                     group_presence_key,
                     group_typing_channel,
+                    publish_member_presence,
+                    release_member_presence,
                 )
 
-                stream_kwargs["typing_channel"] = group_typing_channel(owned.id)
-                stream_kwargs["presence_key"] = group_presence_key(owned.id, user.id)
+                group_id = owned.id
+                stream_kwargs["typing_channel"] = group_typing_channel(group_id)
+                # 连接级 presence key：同用户多标签页/多端各自 touch 互不干扰；
+                # 断连 release 删本连接 key，SCAN 剩余连接全退出才发 offline。
+                presence_conn_key = group_presence_key(group_id, user.id, uuid.uuid4().hex)
+
+                async def _on_presence_change(online: bool) -> None:
+                    if online:
+                        await publish_member_presence(group_id, user.id, online=True)
+                    else:
+                        await release_member_presence(group_id, user.id, presence_conn_key)
+
+                stream_kwargs["presence_key"] = presence_conn_key
+                stream_kwargs["presence_on_change"] = _on_presence_change
             gen = _inject_run_error_events(
                 session_id,
                 AgentService(session).stream_session_logs(session_id, **stream_kwargs),
