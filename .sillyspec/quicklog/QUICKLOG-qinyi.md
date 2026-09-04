@@ -168,7 +168,16 @@
 结果：backend test_session_permissions 三处断言补 runtime_id + 新增 dialog 应答 payload 用例（事故路径回归），permission/control 相关 6 套件 97/97 绿；ruff check/format 0；daemon tsc --noEmit 0
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_permissions.py, sillyhub-daemon/src/protocol.ts
 
-## ql-20260904-024-e59b | 2026-09-04 15:29:03 | 修 daemon-ci/backend-ci 两处红：init-lease 测试适配 pull manifest 回写 + sweep error_code 收窄回设计边界
-状态：进行中
+## ql-20260904-024-e59b | 2026-09-04 15:29:03 | 修 daemon-ci/backend-ci 两处红——init-lease 测试适配 pull manifest 回写新契约 + sweep 非 worker…
+状态：已完成
 关联变更：（无）
-文件：sillyhub-daemon/tests/test_init_lease.test.ts, backend/app/modules/daemon/sweep.py, backend/app/modules/daemon/tests/test_worker_redispatch.py, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md, .sillyspec/docs/multi-agent-platform/modules/backend.md
+文件：
+- sillyhub-daemon/tests/test_init_lease.test.ts（ws-init-ok 改锁 post 跳过契约 + order-C/postfail 两例 spawn 写骨架文件使 post 真实触发 + 头部注释补 ql-019 语义）
+- backend/app/modules/daemon/sweep.py（非 worker 判死 error_code 收窄 active_main_ids + pending_ids 无码收敛分支 + docstring 同步）
+- backend/app/modules/daemon/tests/test_worker_redispatch.py（_run_row 补 output_redacted + 主会话 active 回归锁改锁新行为）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引加 ql-20260904-024-e59b（post 条件触发契约））
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引加 ql-20260904-024-e59b（收窄与重派封堵依据））
+需求：修 daemon-ci/backend-ci 两处红——init-lease 测试适配 pull manifest 回写新契约 + sweep 非 worker 判死 error_code 收窄回 design 边界（封堵 worker pending 未评审自动重派回归）
+根因：①28bf3bc3e(ql-019) pull 成功后按落地树重建 manifest 缓存，handleInitLease 第4步 post 在 init 无新增文件时 diff 恒零按契约跳过，test_init_lease 两例仍锁「init 后必 post」旧前提致 daemon-ci 红；②87d237f68(ql-020) 给非 worker 判死补 daemon_interrupted 的分桶口径是 active worker 之外全部，越界 design「pending 档不加分流」显式边界覆盖 pending 档（含 worker pending），且 worker pending 落码后命中 sweep retry_seeds 自愈查询会在 runtime 回在线时被自动重派（从未开跑的 run 重建 lease），backend-ci 3 例红
+方案：①test_init_lease ws-init-ok 改锁无改动跳过 post，order-C 与 postfail 两例 spawn mock 镜像 sillyspec init 落骨架写真实文件使 post 真实触发（保住时序覆盖与 R-03 软失败路径不空转），生产代码零改动；②sweep.py error_code+output_redacted 赋值收窄到 active_main_ids、新增 pending_ids 无码收敛分支，docstring 同步；test_main_active_suspended_regression_locked 改锁新行为（daemon_interrupted+可读原因，_run_row 补 output_redacted），pending 档两例不动随收窄复绿；两模块文档变更索引各加 ql-20260904-024-e59b 条目
+结果：daemon test_init_lease 28/28 绿（原 2 红）+tsc 0；backend daemon 模块 1974 passed（原 3 红）+patrol 4 文件 89 passed+ruff 0+mypy 0；frontend-ci 用户所贴失败实为 02:25 旧红（admin/organizations 抖动）已被 d56b01d41 修复，远端 main frontend-ci 当前绿；待推送后 CI 复验

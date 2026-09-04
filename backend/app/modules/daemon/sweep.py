@@ -279,12 +279,24 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
     **pending 档不加分流**（含 worker pending 维持既有 pending→failed 与无
     error_code 现状——design 显式边界）。
 
+    quick-bfec20a6（2026-09-04）：主会话 active 组的判死 run 补
+    ``error_code=daemon_interrupted`` + 中文可读原因（output_redacted 经
+    SessionRunRead.failure_summary 透出前端错误卡；事故会话 e148364e 交互轮
+    被 daemon 离线杀掉零线索，前端只能显示「运行失败（无详情）」）。
+    ql-20260904-024 收窄：分桶口径从「active worker 之外全部」收回 active
+    主会话组——pending 档（含 worker pending）落码违反上方 design 显式边界，
+    且 worker pending 落码后会命中本函数尾部 retry_seeds 自愈查询
+    （latest_run_interrupted）在 runtime 回在线时被自动重派（从未开跑的 run
+    重建 lease+新首 run，未评审行为）；pending 档用户可见解释已有
+    「排队消息未发送」文案（_fail_pending_queued_bulk）兜底。
+
     daemon 正常重启的会话走 recover → reconnecting → 既有 sweep，不会进本档
     （重启即翻状态）；进本档的都是长时间无心跳且未恢复的 runtime。
 
     同事务保持既有两步（对齐 reconnecting sweep 手法）：
     1. 命中会话（两态）的挂起 run（pending/running）→ ``failed`` + ``finished_at``
-       （worker active 组额外落 ``error_code=daemon_interrupted``）；
+       （worker active 组与主会话 active 组额外落 ``error_code=daemon_interrupted``，
+       主会话组附可读原因；pending 档不落）；
     2. 挂起 lease（pending/claimed）→ ``cancelled``。
 
     **suspended 超龄 GC（task-05 / design A5，每轮顺带）**：``status='suspended'``
@@ -377,8 +389,9 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
         converged += int(result.rowcount or 0)
 
     # 命中会话的挂起 run 一并收敛（否则 run 永远 running）。worker active 组落
-    # daemon_interrupted（重派种子口径）；其余（主会话 active + 全部 pending 档，
-    # 含 worker pending——design 显式边界不加分流）维持无 error_code 现状。
+    # daemon_interrupted（重派种子口径）；主会话 active 组落 daemon_interrupted +
+    # 可读原因（quick-bfec20a6，事故会话 e148364e）；全部 pending 档（含 worker
+    # pending——design 显式边界不加分流）维持无 error_code 现状。
     if active_worker_ids:
         await session.execute(
             update(AgentRun)
@@ -392,21 +405,26 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
                 error_code=DAEMON_INTERRUPTED_ERROR_CODE,
             )
         )
-    worker_id_set = set(active_worker_ids)
-    non_worker_ids = [row_id for row_id in hit_ids if row_id not in worker_id_set]
-    if non_worker_ids:
-        # quick-bfec20a6：此前非 worker 组维持无 error_code 现状（design 显式
+    if active_main_ids:
+        # quick-bfec20a6：此前主会话 active 组维持无 error_code 现状（design 显式
         # 边界），但被 daemon 自更新重启/离线杀掉的交互轮 error_detail/output
         # 全空，前端只能显示「运行失败（无详情）」（事故会话 e148364e 实证）。
         # 补 daemon_interrupted + 可读原因（output_redacted 经
         # SessionRunRead.failure_summary 别名透出前端错误卡，沿
         # control_commands.py 注入过期联动判死先例）。worker 重派链以
-        # mission_id/worker 会话为锚（patrol.py:759 显式排除本 code 的
-        # mission 候选且交互 run 无 mission_id），此处不与之碰撞。
+        # parent_session_id 为锚（主会话 parent 恒 NULL，不进下方 retry_seeds
+        # 自愈查询），此处不与之碰撞。
+        # ql-20260904-024 收窄：原实现分桶口径是「active worker 之外全部」
+        # （non_worker_ids 含全部 pending 档会话），越界 design「pending 档不加
+        # 分流」显式边界——worker pending 落码后命中下方 retry_seeds 自愈查询
+        # （latest_run_interrupted）会在 runtime 回在线后被自动重派（从未开跑
+        # 的 run 重建 lease+新首 run，未评审行为）；pending 档的用户可见解释
+        # 已有 _fail_pending_queued_bulk「排队消息未发送」文案兜底。收窄回
+        # active 主会话组。
         await session.execute(
             update(AgentRun)
             .where(
-                AgentRun.agent_session_id.in_(non_worker_ids),
+                AgentRun.agent_session_id.in_(active_main_ids),
                 AgentRun.status.in_(("pending", "running")),
             )
             .values(
@@ -418,6 +436,17 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
                     "本轮执行被中断；会话恢复在线后重新发送消息即可继续"
                 ),
             )
+        )
+    if pending_ids:
+        # pending 档（主会话 + worker，design 显式边界不加分流）：run 收敛
+        # failed + finished_at，维持无 error_code 现状。
+        await session.execute(
+            update(AgentRun)
+            .where(
+                AgentRun.agent_session_id.in_(pending_ids),
+                AgentRun.status.in_(("pending", "running")),
+            )
+            .values(status="failed", finished_at=now)
         )
 
     lease_ids = [row.lease_id for row in hit_rows if row.lease_id is not None]

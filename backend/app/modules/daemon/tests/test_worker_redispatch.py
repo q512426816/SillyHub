@@ -280,9 +280,12 @@ async def _lease_status(db: AsyncSession, lease_id: uuid.UUID) -> str:
 async def _run_row(db: AsyncSession, run_id: uuid.UUID):
     return (
         await db.execute(
-            select(AgentRun.status, AgentRun.error_code, AgentRun.finished_at).where(
-                AgentRun.id == run_id
-            )
+            select(
+                AgentRun.status,
+                AgentRun.error_code,
+                AgentRun.finished_at,
+                AgentRun.output_redacted,
+            ).where(AgentRun.id == run_id)
         )
     ).one()
 
@@ -504,8 +507,10 @@ class TestOfflineSweepWorkerSeed:
     async def test_main_active_suspended_regression_locked(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """offline sweep 主会话回归锁定：active→suspended、run failed 但不落
-        error_code（既有现状）、不发 session_ended。"""
+        """offline sweep 主会话回归锁定：active→suspended、run failed +
+        daemon_interrupted + 可读原因（quick-bfec20a6 事故修复 e148364e，替代旧
+        「不落 error_code」现状；ql-20260904-024 收窄后仅 active 主会话组落码）、
+        不发 session_ended。"""
         from app.modules.daemon import sweep as sweep_mod
 
         captured = _capture_redis(monkeypatch, "app.modules.daemon.sweep")
@@ -530,7 +535,12 @@ class TestOfflineSweepWorkerSeed:
         assert row.ended_at is None
         run_row = await _run_row(db_session, run.id)
         assert run_row.status == "failed"
-        assert run_row.error_code is None  # 既有 offline sweep 主会话 run 不落 error_code
+        # quick-bfec20a6：主会话 active 组判死补 daemon_interrupted + 可读原因
+        # （output_redacted 经 SessionRunRead.failure_summary 透出前端错误卡，
+        # 替代「运行失败（无详情）」）
+        assert run_row.error_code == DAEMON_INTERRUPTED_ERROR_CODE
+        assert run_row.output_redacted is not None
+        assert "daemon 离线" in run_row.output_redacted
         events = [json.loads(p) for ch, p in captured if ch == f"agent_session:{main.id}"]
         assert not any(e.get("event") == "session_ended" for e in events)
 

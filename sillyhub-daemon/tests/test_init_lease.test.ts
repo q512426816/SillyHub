@@ -41,6 +41,7 @@ vi.mock('../src/local-yaml-writer.js', async (importOriginal) => {
 });
 
 import { mkdtemp, mkdir, writeFile, rm, readFile, lstat } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -118,6 +119,9 @@ afterAll(async () => {
 // ~/.sillyhub/daemon/manifests/{ws}.json 本地清单缓存（增量 diff）。本文件不 mock
 // homedir（沿用真实 home + 测试 wsId 隔离策略），每测试前清空 manifests 目录避免
 // 跨 run 残留缓存污染首同步判定（导致 postSpecSync 0 调用）。
+// ql-20260904-019 起：pull 成功路径会用落地树重建 manifest（本地==服务器 → 增量
+// diff 恒零 ops → post 按契约跳过不发请求），清空的「首同步必 post」语义仅对
+// 404 容错路径（提前 return，无 manifest 回写）仍生效。
 beforeEach(async () => {
   await rm(join(homedir(), '.sillyhub', 'daemon', 'manifests'), {
     recursive: true,
@@ -140,7 +144,7 @@ function makeClient(overrides: {
 }
 
 describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
-  it('成功：写状态文件 + pull + post，返回 ok + specVersion + daemonState（2 字段）', async () => {
+  it('成功：写状态文件 + pull（init 无新增文件 → post 按契约跳过），返回 ok + specVersion + daemonState（2 字段）', async () => {
     const client = makeClient();
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-ok',
@@ -160,11 +164,15 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     expect(result.daemonState!.synced_at.length).toBeGreaterThan(0);
     expect(result.specDir).not.toBeNull();
 
-    // pull + post 均被调用一次
+    // pull 被调用一次
     expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
     expect(client.getSpecBundle).toHaveBeenCalledWith('ws-init-ok');
-    expect(client.postSpecSync).toHaveBeenCalledTimes(1);
-    expect(client.postSpecSync).toHaveBeenCalledWith('ws-init-ok', expect.any(Buffer), undefined);
+    // ql-20260904-019：pull 成功后 manifest 已被落地树重建（pullSpecBundle 尾段
+    // writeLocalManifest），mock init spawn 未产出新文件 → 增量 diff 恒零 ops →
+    // post 按契约跳过不发请求（postSpecSyncImpl ops.length===0 早退，
+    // spec-sync.ts:691）。init 真实产出骨架时 post 触发的形态由用例 C
+    // （ws-init-order）与 postfail 用例覆盖。
+    expect(client.postSpecSync).not.toHaveBeenCalled();
 
     // D-001@v1：不再写 {rootPath}/.sillyspec-platform.json（rootPath 是 dummy，验证不产生该文件）
     await expect(readFile(join('/tmp/init-lease-rootpath-unused', '.sillyspec-platform.json'))).rejects.toThrow();
@@ -225,16 +233,32 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     const client = makeClient({
       postSpecSync: vi.fn().mockRejectedValue(new Error('post boom')),
     });
+    // ql-20260904-024：ql-019 起 pull 成功即按落地树重建 manifest，init 无新增
+    // 文件时 post 按契约跳过——为让本用例真实走「post 抛错」软失败路径，spawn
+    // mock 镜像 sillyspec init 落骨架行为在 init 步写一个文件，使增量 diff
+    // ops>0 触发 post（mock client 无 postSpecSyncIncremental → 回退旧 tar）。
+    const baseSpawn = makeInitSpawn();
+    const spawnFn: SpawnFn = ((cmd: unknown, opts?: unknown) => {
+      if (!String(cmd).includes('--version')) {
+        writeFileSync(
+          join(resolveSpecDir('ws-init-postfail'), 'init-scaffold.md'),
+          '# scaffold\n',
+        );
+      }
+      return baseSpawn(cmd as never, opts as never);
+    }) as SpawnFn;
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-postfail',
       rootPath: '/tmp/x',
       serverOrigin: 'http://127.0.0.1:8000',
       latestSpecVersion: 1,
-      spawnFn: makeInitSpawn(),
+      spawnFn,
     });
 
     expect(result.ok).toBe(true);
     expect(result.specVersion).toBe(1);
+    // 软失败路径真实触发：post 被调且抛错，handleInitLease catch 后仅 warn 不 abort
+    expect(client.postSpecSync).toHaveBeenCalledTimes(1);
   });
 
   // ── writeDaemonState 单元（取代旧 writePlatformConfig/readPlatformConfig 往返用例）──
@@ -448,9 +472,21 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     const client = makeClient();
     const spawnFn = makeInitSpawn();
     const order: string[] = [];
-    // 包一层记录 init 时机（spawnFn 注入点）：init 的 spawn 发生在 post 之前
+    // 包一层记录 init 时机（spawnFn 注入点）：init 的 spawn 发生在 post 之前。
+    // ql-20260904-024：ql-019 起 pull 成功即按落地树重建 manifest，post 仅在
+    // init 真实产出新文件时触发（增量 diff ops>0 → mock client 无
+    // postSpecSyncIncremental → 回退旧 tar，spec-sync.ts:698）。镜像 sillyspec
+    // init 落骨架的真实行为在 init 步写一个文件，保住「init → post → localYaml」
+    // 时序覆盖（无新增文件时 post 按契约跳过的形态由 ws-init-ok 用例锁定）。
     const trackedSpawn: SpawnFn = ((cmd: unknown, opts?: unknown) => {
-      order.push(String(cmd).includes('--version') ? 'init_version_gate' : 'init_spawn');
+      const isGate = String(cmd).includes('--version');
+      order.push(isGate ? 'init_version_gate' : 'init_spawn');
+      if (!isGate) {
+        writeFileSync(
+          join(resolveSpecDir('ws-init-order'), 'init-scaffold.md'),
+          '# scaffold\n',
+        );
+      }
       return spawnFn(cmd as never, opts as never);
     }) as SpawnFn;
     // pull / post 时机经 client mock 记录；localYaml 时机经模块 mock 记录
