@@ -15,7 +15,7 @@
  *   - 第一步仅在线机器卡（在线徽标 + 心跳时间，机器卡样式语义复用
  *     new-session-form.tsx ① 区：Badge status / display_alias || hostname /
  *     formatHeartbeat）；
- *   - 第二步该机器 runtimes 过滤 provider∈{claude, codex} 且在线，默认
+ *   - 第二步该机器 runtimes 过滤 provider∈{claude, codex, pi} 且在线，默认
  *     Claude Code 高亮（主色边框 + 「默认」Tag，同 new-session-form ② 区）；
  *   - 选完智能体立即 onPick(runtimeId) 关闭，无确认按钮（两步即达）；
  *   - 取消/遮罩点击仅回调 onCancel，不清父层状态（open 受控于父层）；
@@ -40,8 +40,11 @@ import {
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 
-/** 支持交互式会话的引擎白名单（与 new-session-form 同源约束，D-107）。 */
-const SESSION_SUPPORTED_PROVIDERS = new Set(["claude", "codex"]);
+/**
+ * 支持交互式会话的引擎白名单（与 new-session-form 同源约束，D-107）；
+ * 2026-09-04-provider-pi-onboarding task-05（B-02 / FR-04）：加 pi。
+ */
+const SESSION_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi"]);
 
 export interface PreSessionPickerProps {
   /**
@@ -116,7 +119,7 @@ export function PreSessionPicker({
     [onlineMachines, machineId],
   );
 
-  // ② 该机器可会话智能体：provider∈{claude,codex} 且在线。
+  // ② 该机器可会话智能体：provider∈{claude,codex,pi} 且在线。
   const supportedRuntimes = useMemo(
     () =>
       (machine?.runtimes ?? []).filter(
