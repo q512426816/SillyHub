@@ -325,6 +325,20 @@ class RuntimeService:
                     provider=provider_name,
                 )
             else:
+                # ql-20260904-027：runtime 归属随实例归属自愈对齐——实例归属改绑
+                # （如管理员把机器从用户 A 改绑用户 B）后旧 runtime 行仍挂 A，
+                # 一切 runtime 级端点（pending-controls/lease/…）对 B 恒 404 且无
+                # 自愈路径（实事故：7 个 runtime 全 404）。register 已保证实例归属
+                # 与注册者一致，runtime 是实例的从属行，user_id 必须同步。
+                if rt.user_id != user_id:
+                    log.info(
+                        "daemon_runtime_owner_realigned",
+                        runtime_id=str(rt.id),
+                        daemon_instance_id=str(daemon_local_id),
+                        old_user_id=str(rt.user_id),
+                        new_user_id=str(user_id),
+                    )
+                    rt.user_id = user_id
                 rt.version = version
                 if rt.status != "disabled":
                     rt.status = "online"

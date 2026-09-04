@@ -163,6 +163,58 @@ class TestRegisterDaemon:
         assert instances[0].hostname == "new-host"
 
     @pytest.mark.asyncio
+    async def test_reregister_realigns_runtime_owner_with_instance(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260904-027：实例归属改绑后重注册 → runtime.user_id 自愈对齐。
+
+        实事故：管理员把 daemon_instances.user_id 从用户 A 改绑用户 B 后，runtime
+        行仍挂 A——pending-controls 等 runtime 级端点按「runtime 属于当前用户」
+        校验，对 B 恒 404 且无自愈路径。register 已保证实例归属=注册者，runtime
+        是实例从属行，重注册时必须同步 user_id。
+        """
+        user_a = await _seed_user(db_session, name="owner-a")
+        user_b = await _seed_user(db_session, name="owner-b")
+        svc = RuntimeService(db_session)
+        daemon_local_id = uuid.uuid4()
+
+        await svc.register_daemon(
+            user_a,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host",
+            providers=_providers("claude", "codex"),
+        )
+
+        # 管理员改绑实例归属 A→B（直接改行模拟平台侧归属变更）
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        instance.user_id = user_b
+        await db_session.commit()
+
+        # B 用自己的 key 重注册（实例归属已=B，通过归属门）
+        await svc.register_daemon(
+            user_b,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host",
+            providers=_providers("claude", "codex"),
+        )
+
+        runtimes = (
+            (
+                await db_session.execute(
+                    select(DaemonRuntime).where(DaemonRuntime.daemon_instance_id == daemon_local_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(runtimes) == 2
+        # 全部 runtime 归属对齐到 B（修复前保持 user_a → runtime 级端点 404）
+        assert all(rt.user_id == user_b for rt in runtimes)
+
+    @pytest.mark.asyncio
     async def test_two_different_local_ids_produce_two_instances(
         self, db_session: AsyncSession
     ) -> None:

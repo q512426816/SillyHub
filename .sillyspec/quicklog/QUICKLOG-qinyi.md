@@ -206,3 +206,34 @@
 根因：换账号 API Key 复用机器身份被 403 ownership mismatch 拒绝时 daemon 只在内部日志静默重试，且自更新 respawn（stdio=ignore）与 VBS 隐藏自启的 console 输出凭空丢失，用户看到启动命令退出即误判启动不了且零提示（2026-09-04 实事故）
 方案：daemon.ts 新增 buildRegisterFailureHint（403 ownership 单列含两条出路/401 重签 key/通用一行，网络错静默）+ _registerFailStreak 节流（首错立即每 5 次重发，成功清零并提示注册已恢复）；cli.ts 新增 attachConsoleToLogFile（console 四方法 tee 到 daemon.log，!stdout.isTTY 时挂接覆盖 respawn 与隐藏自启两场景，幂等+失败静默防递归）
 结果：新建 daemon-register-error-hint.test.ts 6 用例 6/6 绿（403 首提示/节流静默+第 6 次重发/恢复提示+清零/401 文案/网络错无提示/tee 落文件+幂等）；近邻 multi-runtime/heartbeat-sillyspec/daemon/cli/preflight/autostart 6 套件 208 passed 8 skipped；tsc 0
+
+## ql-20260904-027-25f6 | 2026-09-04 22:12:48 | 修三件部署遗留——daemon 服务器轮询自更新+runtime 归属自愈+entrypoint chown 守卫
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（startServerVersionProbe+reason 扩 server_poll+getter）
+- sillyhub-daemon/tests/daemon-server-version-probe.test.ts（新建 5 用例）
+- backend/app/modules/daemon/runtime/service.py（runtime else 支 user_id 对齐+日志）
+- backend/app/modules/daemon/tests/test_register_heartbeat_daemon.py（新增归属对齐用例）
+- backend/docker-entrypoint.sh（chown -R 属主守卫）
+- 两模块文档（变更索引）
+需求：修三件部署遗留——daemon 服务器轮询自更新+runtime 归属自愈+entrypoint chown 守卫
+根因：①运行中自更新只有平台 WS 指令与磁盘旁路探测两触发源，无服务器轮询，部署新 bundle 后运行中 daemon 永不自发现（等 11 分钟零触发实事故）②register runtime 更新分支从不写 rt.user_id，实例归属改绑后 runtime 永挂旧用户致 pending-controls 等端点恒 404（7 runtime 全 404 实事故，存量已 SQL 同步）③entrypoint chown -R 对 67847 文件在 Docker Desktop virtiofs 实测 114s，每次启动阻塞 alembic/uvicorn 前（claude plugin 同步实测 1s 排除）
+方案：daemon.ts 新增 startServerVersionProbe（复用 self_reload_check_interval_sec，fetchLatestBuildId 严格不等即回调 _tryUpdate('server_poll') 进既有升级链，reason 联合类型三处扩 server_poll，start/stop 接线+serverVersionProbeActive getter）；backend runtime/service.py register 更新分支对齐 rt.user_id+realigned 日志；docker-entrypoint.sh chown -R 前 stat 根目录属主守卫（已 app 即跳过）
+结果：daemon 新建 daemon-server-version-probe.test.ts 5/5 绿；自更新近邻 disk-probe-pending+selfupdate-orchestrator 48 passed；tsc 0。backend daemon 模块 1975 passed、register 文件 15 passed（含新归属对齐用例）、ruff/mypy 干净、entrypoint sh -n 过。未部署（本地 daemon 现连阿里云，部署后靠新轮询自更新即可验证端到端）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/daemon-server-version-probe.test.ts
+
+## ql-20260904-028-3cb5 | 2026-09-04 22:14:40 | 工作区 spec 策略支持修改——前端补修改入口
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/spec-workspaces.ts（新增 updateSpecWorkspace PATCH 客户端函数）
+- frontend/src/components/workspace-config-card.tsx（策略行 owner 门禁修改入口 + Modal 三选保存）
+- frontend/src/components/workspace-config-card.test.tsx（新增 5 用例（门禁/同值禁存/成功链路/警告/失败态））
+- frontend/src/lib/spec-workspaces.test.ts（新增 lib 透传测试（新文件））
+- .sillyspec/docs/SillyHub/modules/spec_workspace.md（注意事项补策略修改生效语义）
+- .sillyspec/docs/SillyHub/modules/frontend_components.md（配置卡条目 + 变更索引）
+需求：工作区 spec 策略支持修改——前端补修改入口
+根因：后端 PATCH /spec-workspace 早已支持改 strategy，但前端无任何入口（lib 无客户端函数、配置卡策略行只读 Badge），用户创建时选错策略后无法调整
+方案：lib/spec-workspaces.ts 新增 updateSpecWorkspace（PATCH 三字段 omit 不改）；workspace-config-card 策略行加 owner 门禁「修改」入口：antd Modal 三选（与创建对话框同文案、repo-native 写源项目警告、同值禁存），保存成功 toast 提示点「初始化」重建本地缓存；生效语义：改库对后续 dispatch 实时生效（lease 每次读库），daemon 缓存布局等下次无条件 pull（初始化链路）重建，语义落 spec_workspace.md 注意事项 + frontend_components.md 变更索引
+结果：vitest 相关 2 文件 38/38 绿（新增 8 用例：组件 5——owner 门禁/同值禁存/保存成功链路/repo-native 警告/失败保持 Modal；lib 3——PATCH 透传/三策略值/422 抛 ApiError）；tsc --noEmit 0 错；eslint 改动文件 0 错 4 条既有告警；后端零改动

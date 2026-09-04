@@ -10,7 +10,13 @@ mkdir -p /data/spec-workspaces
 if [ -d /app/sillyspec-skills ] && [ ! -e "${HOME:-/app}/.claude/skills" ]; then
   ln -s /app/sillyspec-skills "${HOME:-/app}/.claude/skills"
 fi
-chown -R app:app /data/spec-workspaces 2>/dev/null || true
+# ql-20260904-027：chown -R 加属主守卫——spec-workspaces 卷可达数万文件
+# （本机实测 6.7 万 / 114s，Docker Desktop virtiofs），稳态下属主已正确却每次
+# 启动全量重扫，把 alembic/uvicorn 阻塞 2 分钟。根目录已归 app 即跳过（仅
+# 首次挂载/宿主机改写属主后才做一次全量；stat O(1)）。
+if [ "$(stat -c %u /data/spec-workspaces 2>/dev/null)" != "$(id -u app)" ]; then
+  chown -R app:app /data/spec-workspaces 2>/dev/null || true
+fi
 
 python - <<'PY'
 import json

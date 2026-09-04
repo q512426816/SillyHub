@@ -293,7 +293,7 @@ const DISK_BUILD_ID_RE = /BUILD_ID\s*=\s*["']([^"']+)/;
  * 「pending 起点」的权威 since 在 backend（upsert 同内容保留原值，不随心跳漂移）。
  */
 export interface PendingUpdateRecord {
-  /** 推迟原因：'server_command'（服务端指令）| 'disk_change'（磁盘旁路探测）。 */
+  /** 推迟原因：'server_command'（服务端指令）｜'server_poll'（服务器版本轮询，ql-20260904-027）｜'disk_change'（磁盘旁路探测）。 */
   reason: string;
   /** 推迟时进程内存中的 BUILD_ID。 */
   current_version: string;
@@ -1638,6 +1638,11 @@ export class Daemon {
    * startDiskProbe 创建（unref 不阻止进程退出），stop() 清理。
    */
   private _diskProbeTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * ql-20260904-027：服务器版本轮询循环定时器（null=未启动/已停止）。
+   * startServerVersionProbe 创建（unref），stop() 清理。
+   */
+  private _serverVersionProbeTimer: ReturnType<typeof setInterval> | null = null;
   /** task-03（S2）：探测读的 bundle 文件路径（构造注入或默认 DAEMON_BIN_DIR 下）。 */
   private readonly _selfUpdateBundlePath: string;
   /** task-03（S3）：pending-update.json 路径（构造注入或默认 DEFAULT_CONFIG_DIR 下）。 */
@@ -1927,6 +1932,13 @@ export class Daemon {
       void this._tryUpdate('disk_change', diskBuildId),
     );
 
+    // ql-20260904-027：服务器版本轮询——补齐「运行中发现新部署」的缺口（原本
+    // 只有平台指令+磁盘探测两源，服务器轮询恒缺）。同间隔同守卫，差异走
+    // _tryUpdate('server_poll') 进既有升级链（下载+校验+交接，防降级门在内）。
+    this.startServerVersionProbe((latestVersion) =>
+      void this._tryUpdate('server_poll', latestVersion),
+    );
+
     this._logger.info('started', { runtime_id: this._config.runtime_id });
   }
 
@@ -1974,6 +1986,9 @@ export class Daemon {
     // task-03（S2）：清磁盘旁路探测定时器（stop 后不再探测；respawn 前的新进程
     // 会自行 startDiskProbe 重建，接线归 task-04）。
     this._stopDiskProbe();
+
+    // ql-20260904-027：清服务器版本轮询定时器（同上，新进程自行重建）。
+    this._stopServerVersionProbe();
 
     // task-04（S1）：清推迟升级复查定时器——daemon 已停，30s 重探不应再触发
     //（正常交接路径 _tryUpdate 在 stop 前已清；此处兜底 SIGTERM 等旁路 stop）。
@@ -2051,6 +2066,11 @@ export class Daemon {
     return this._diskProbeTimer !== null;
   }
 
+  /** ql-20260904-027：服务器版本轮询循环是否在跑（测试断言用）。 */
+  get serverVersionProbeActive(): boolean {
+    return this._serverVersionProbeTimer !== null;
+  }
+
   /**
    * task-03（S2 / FR-03 / D-003@v2）：启动磁盘旁路探测循环。
    *
@@ -2113,6 +2133,68 @@ export class Daemon {
     if (this._diskProbeTimer) {
       clearInterval(this._diskProbeTimer);
       this._diskProbeTimer = null;
+    }
+  }
+
+  /**
+   * ql-20260904-027：启动服务器版本轮询循环。
+   *
+   * 背景：运行期自更新原本只有两个触发源——平台 WS ``daemon:self_update`` 指令
+   * 与磁盘旁路探测（本机文件被换）——**没有任何路径主动轮询服务器**，部署新
+   * bundle 后运行中的 daemon 永远不会自己发现（2026-09-04 实事故：部署后等
+   * 11 分钟零触发，重启靠启动预检才更上）。
+   *
+   * 每间隔（复用 ``config.self_reload_check_interval_sec``，默认 600s，与磁盘
+   * 探测同一节拍）``fetchLatestBuildId`` 拉 ``/daemon/latest.json`` 与内存
+   * BUILD_ID 比对；**严格更新才触发**（不同即回调，含降级——升级链
+   * runDaemonSelfUpdate 内部有防降级/noop 门，这里只负责发现差异）。拉取失败
+   * （网络/非 2xx）由 fetchLatestBuildId 内部 warn 后返回 null，本轮静默跳过。
+   *
+   * 同款守卫（对齐 startDiskProbe）：interval <=0 / 非数值不创建定时器（0=显式
+   * 关闭）；dev 构建（BUILD_ID='dev'）跳过；unref；重复调用先清旧定时器；
+   * stop() 统一清理。回调异常由 interval 包装 catch 收敛（不冒泡杀进程）。
+   *
+   * @param onNewer 发现与内存 BUILD_ID 不同的最新版本号时的回调（参数=latest
+   * version；start() 接线为 ``_tryUpdate('server_poll', latest)`` 走既有升级链）。
+   */
+  startServerVersionProbe(onNewer: (latestVersion: string) => void): void {
+    const intervalSec = Number(this._config.self_reload_check_interval_sec);
+    if (!Number.isFinite(intervalSec) || intervalSec <= 0) {
+      this._logger.debug('server_version_probe_disabled', {
+        interval_sec: this._config.self_reload_check_interval_sec,
+      });
+      return;
+    }
+    const memoryBuildId: string = BUILD_ID;
+    if (!memoryBuildId || memoryBuildId === 'dev') {
+      this._logger.debug('server_version_probe_skipped_dev_build', { build_id: memoryBuildId });
+      return;
+    }
+    this._stopServerVersionProbe();
+    this._serverVersionProbeTimer = setInterval(() => {
+      void (async () => {
+        const latest = await fetchLatestBuildId(
+          this._config,
+          this._preflightLog.bind(this),
+        );
+        if (latest && latest !== memoryBuildId) {
+          onNewer(latest);
+        }
+      })().catch((e) => {
+        this._logger.error('server_version_probe_round_failed', { error: e });
+      });
+    }, intervalSec * 1000);
+    if (typeof this._serverVersionProbeTimer.unref === 'function') {
+      this._serverVersionProbeTimer.unref();
+    }
+    this._logger.debug('server_version_probe_started', { interval_sec: intervalSec });
+  }
+
+  /** ql-20260904-027：清服务器版本轮询定时器（stop() / 重建前调用）。 */
+  private _stopServerVersionProbe(): void {
+    if (this._serverVersionProbeTimer) {
+      clearInterval(this._serverVersionProbeTimer);
+      this._serverVersionProbeTimer = null;
     }
   }
 
@@ -2331,7 +2413,7 @@ export class Daemon {
    * /盘上文件决定）。
    */
   private async _deferUpdate(
-    reason: 'server_command' | 'disk_change',
+    reason: 'server_command' | 'server_poll' | 'disk_change',
     targetVersion?: string,
   ): Promise<void> {
     // 先释放再落盘/排时：此后即便有新触发穿插（写 pending 竞态）也只是刷新目标。
@@ -2365,7 +2447,7 @@ export class Daemon {
    * 从零重探，无 drain-hook 状态机（D-002 明示不做）。
    */
   private _scheduleUpdateRetry(
-    reason: 'server_command' | 'disk_change',
+    reason: 'server_command' | 'server_poll' | 'disk_change',
     targetVersion: string,
   ): void {
     if (this._updateRetryTimer) clearTimeout(this._updateRetryTimer);
@@ -2436,7 +2518,7 @@ export class Daemon {
    * HOME 常量（集成测试环境无 ~/.sillyhub 部署时校验必挂，CI 环境依赖）。
    */
   private async _tryUpdate(
-    reason: 'server_command' | 'disk_change',
+    reason: 'server_command' | 'server_poll' | 'disk_change',
     targetVersion?: string,
   ): Promise<void> {
     // 所有权占位（JS 单线程下 check+set 原子）。推迟态所有权已释放，不在此列；
