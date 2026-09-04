@@ -102,6 +102,45 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序�
     expect(turns[0]!.processItems).toEqual([]);
   });
 
+  // ── ql-20260904-013：前导条 prompt 提取（影子直聊无干净条兜底） ──────────
+  it("仅一条带前导的 user_input（影子直聊形态）→ 剩余正文进 prompt（不再收空），前导块进 preamble 段", () => {
+    const shadowInput =
+      "【影子直聊】\n用户正在群聊「silly大家庭」成员的独立会话中与你单独对话——此对话不会出现在群里。\n\n---\n\n【群聊上下文】\n你是群聊中的 Agent 成员。\n\n[群聊记录]\n系统管理员(用户): @agent 继续干吧";
+    const turns = toSegmentTurns([
+      makeLog("1", "run-1", "user_input", shadowInput),
+      makeLog("2", "run-1", "stdout", "[ASSISTANT] Not logged in · Please run /login"),
+    ]);
+    expect(turns).toHaveLength(1);
+    const turn = turns[0]!;
+    // 剩余正文（群聊上下文）成为 prompt——用户气泡可渲染、失败卡可重发
+    expect(turn.prompt).toBe("【群聊上下文】\n你是群聊中的 Agent 成员。\n\n[群聊记录]\n系统管理员(用户): @agent 继续干吧");
+    // 前导块仍进 preamble 段（对话视图不渲染，「全部」视图显示注入来源）
+    const preambles = (turn.segments ?? []).filter((s) => s.kind === "preamble");
+    expect(preambles).toHaveLength(1);
+    expect((preambles[0] as { text?: string }).text).toContain("【影子直聊】");
+    // CLI 鉴权错误行不再进 output（ql-20260904-013 分类丢弃）
+    expect(turn.output).toBe("");
+  });
+
+  it("前导条 + 干净条双写（常规形态）→ 剩余正文与干净条同主体归并，prompt 不双显", () => {
+    const userText = "帮我修下登录页的样式";
+    const fullInput = `【页面上下文】\n当前在项目详情页。\n\n---\n\n${userText}`;
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "user_input", fullInput),
+      makeLog("2", "run-1", "user_input", userText),
+      makeLog("3", "run-1", "stdout", "[ASSISTANT] 好的"),
+    ]);
+    expect(turns[0]!.prompt).toBe(userText);
+  });
+
+  it("纯系统注入（[后台任务通知]，无用户正文）→ prompt 仍为空", () => {
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "user_input", "[后台任务通知] TASK_WAKEUP 唤醒"),
+      makeLog("2", "run-1", "stdout", "[ASSISTANT] 已核对"),
+    ]);
+    expect(turns[0]!.prompt).toBe("");
+  });
+
   it("tool_call JSON(success:true) + [TOOL_RESULT] → ok + 补 result 文本", () => {
     const turns = logsToTurns([
       makeLog("1", "run-1", "tool_call", '{"tool":"Read","args":{"file_path":"a.ts"},"success":true}'),

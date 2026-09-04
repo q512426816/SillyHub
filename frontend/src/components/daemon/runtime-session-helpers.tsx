@@ -321,16 +321,18 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
             ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
           });
         }
-        // ql-20260825-011：prompt 气泡剥掉前导块——上下文注入只在「进度」视图的
-        // preamble 段（默认收起）展示，对话视图不重复显示前导全文。
-        // 用户反馈⑥修正：含前导的全文条剥完与干净条文本相同，两者都 push 会让
-        // prompt 气泡显示两次同一问题——前导条只产 preamble 段，prompt 一律由
-        // 干净条承载（backend 恒写干净 user_input，见 create/inject 路径）。
-        if (preambleText) {
-          continue;
-        }
+        // ql-20260904-013：前导条不再整条跳过——剥前导后的剩余正文进 prompt 归并。
+        // 影子直聊（群聊触发的独立会话，会话 2f08b5da 实证）只落一条带前导的
+        // user_input、无「干净条」兜底，原 continue 把 prompt 收空 → 无用户消息
+        // 气泡、失败卡无重试按钮。常规路径（backend 前导条 + 干净条双写）中前导
+        // 条剩余正文与干净条同主体，二阶段归并同组不双显。剩余为空（纯前导 /
+        // [后台任务通知] 等系统注入）仍跳过。
+        const promptSource = preambleText
+          ? stripPreambleText(seg.text).trim()
+          : seg.text;
+        if (!promptSource.trim()) continue;
         // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。
-        const lines = seg.text.split("\n");
+        const lines = promptSource.split("\n");
         const markerLines: string[] = [];
         let bodyStart = 0;
         const MARKER_RE = /^\[附件:[0-9a-fA-F-]{36}\|/;
@@ -345,14 +347,14 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
           promptGroupIndex.set(key, promptGroups.length);
           promptGroups.push({
             key,
-            withMarker: markerLines.length > 0 ? seg.text : null,
-            plain: markerLines.length > 0 ? null : seg.text,
+            withMarker: markerLines.length > 0 ? promptSource : null,
+            plain: markerLines.length > 0 ? null : promptSource,
           });
         } else {
           const group = promptGroups[gi];
           if (group && markerLines.length > 0 && group.withMarker === null) {
             // 同主体组内后到的 marker 版替换位置（marker 版优先保留）。
-            group.withMarker = seg.text;
+            group.withMarker = promptSource;
           }
         }
         continue;

@@ -1092,6 +1092,52 @@ describe("技能装载注入行（ql-20260824-017：不进对话正文，挂 Ski
   });
 });
 
+// ── ql-20260904-013：[ASSISTANT] 模型网关/CLI 鉴权错误行丢弃 ────────────────
+// 会话 2f08b5da 实证：CLI 把模型网关 401 误报为 "[ASSISTANT] Not logged in ·
+// Please run /login"，被 kind=reply 渲染成带复制按钮的回复气泡。此类行不是
+// agent 答复（展示归 turn.errorDetail 的 RunErrorItem 失败卡），分类即丢弃；
+// 与 normalize.ts isAssistantApiErrorText 同口径（仅 [ASSISTANT] 前缀形态）。
+describe("classifySessionLog 模型错误行丢弃（ql-20260904-013）", () => {
+  it("CLI 鉴权误报行（Not logged in / Please run /login）→ 丢弃（null）", () => {
+    expect(
+      classifySessionLog("[ASSISTANT] Not logged in · Please run /login", "stdout"),
+    ).toBeNull();
+  });
+
+  it("模型网关错误行（API Error / Request rejected）→ 丢弃（null）", () => {
+    expect(
+      classifySessionLog(
+        "[ASSISTANT] API Error: Request rejected (429) · [1310][已达上限]",
+        "stdout",
+      ),
+    ).toBeNull();
+  });
+
+  it("丢弃后 output 零贡献（错误展示归 RunErrorItem，不残留回复气泡）", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "[ASSISTANT] 前文正常答复"),
+      makeLog("2", "stdout", "[ASSISTANT] Not logged in · Please run /login"),
+    ]);
+    expect(turn.output).toBe("前文正常答复");
+    expect(turn.segments.map((s) => s.kind)).toEqual(["text"]);
+  });
+
+  it("裸文本（codex / json-rpc 无前缀流）正文真含错误词 → 不误吞（前缀门控）", () => {
+    expect(classifySessionLog("Not logged in · Please run /login", "stdout")?.kind).toBe(
+      "reply",
+    );
+    expect(classifySessionLog("我遇到了 API Error，建议排查", "stdout")?.kind).toBe(
+      "reply",
+    );
+  });
+
+  it("[ASSISTANT] 正常答复不受影响", () => {
+    expect(classifySessionLog("[ASSISTANT] 已完成修改，共 3 个文件", "stdout")?.kind).toBe(
+      "reply",
+    );
+  });
+});
+
 // ── 2026-08-25-unified-floating-session task-11：前导段提取（FR-7）──────────
 describe("extractPreambleText", () => {
   it("含【页面上下文】+ 分隔线 → 提取前导块", () => {

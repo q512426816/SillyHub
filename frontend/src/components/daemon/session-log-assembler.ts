@@ -59,10 +59,12 @@
  * 容错（坏行降级普通文本，R-07 不抛错）；applyLogToSegments 按行级
  * parent_tool_use_id 路由（复用既有归属路由的容器定位）把解析结果写入派发
  * tool 段元数据：taskStatus（STARTED→running；NOTIFICATION→其 status）/
- * taskElapsedMs / taskAsync / taskSummary / taskToolName（tool 段可选字段，
+ * taskElapsedMs / taskAsync / taskSummary（tool 段可选字段，
  * task_segment_metadata 契约）。行本身消费后不产生正文文本段（不显示为普通
  * 文本行）；无路由目标的历史孤儿行丢弃不崩（不建 stub 空壳，取更安全者）。
  */
+
+import { isAssistantApiErrorText } from "@/components/agent-log/normalize";
 
 /* ───────────────── 分类（自 session-log-sanitize.ts 平移，语义不变） ───────────────── */
 /**
@@ -75,7 +77,8 @@
  *
  * 分类规则：
  *   - 丢弃（返回 null）：AskUserQuestion 卡片协议行 / [TOOL_RESULT] User answered /
- *     [SYSTEM…] / [RESULT…] 与空内容（丢弃优先于 channel 分流）
+ *     [SYSTEM…] / [RESULT…] 与空内容（丢弃优先于 channel 分流）；[ASSISTANT]
+ *     模型网关/CLI 鉴权错误特征行（ql-20260904-013，展示归 RunErrorItem 失败卡）
  *   - kind=thinking：[THINKING] 前缀行（剥前缀）
  *   - kind=tool_use：channel=tool_call（daemon 上报的工具 JSON，含 tool_use_id/success，
  *     权威源）。stdout 的 [TOOL_USE] 文本行与该 JSON 重复 → 丢弃（双发去重，否则 tool_use
@@ -343,6 +346,16 @@ export function classifySessionLog(
   // 裸文本（用户手打 / codex 无前缀流）不误吞。
   if (/^\[ASSISTANT\]\s*Base directory for this skill:/i.test(trimmed)) {
     return { kind: "skill", text: trimmed.replace(/^\[ASSISTANT\]\s?/, "") };
+  }
+  // ql-20260904-013：CLI 合成鉴权行（"[ASSISTANT] Not logged in · Please run
+  // /login"，CLI 把模型网关 401 误报为本地未登录）与模型网关错误行（"API Error:
+  // …" / "Request rejected"）不是 agent 答复——丢弃正文，展示由 turn.errorDetail
+  // 渲染的 RunErrorItem 失败卡承担（会话 2f08b5da 实证：原文被当 kind=reply 渲染
+  // 成带复制按钮的回复气泡）。与 normalize.ts isAssistantApiErrorText 同口径，
+  // 仅 [ASSISTANT] 前缀形态（codex / json-rpc 裸文本流不误吞——正文真含这些词
+  // 的合法回复不受影响）。
+  if (/^\[ASSISTANT\]\s?/.test(trimmed) && isAssistantApiErrorText(trimmed)) {
+    return null;
   }
   return {
     kind: "reply",
