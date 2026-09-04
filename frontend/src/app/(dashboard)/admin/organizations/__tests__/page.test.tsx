@@ -113,9 +113,11 @@ describe("/admin/organizations 页（ql-20260903-012-7c69 antd 重构）", () =>
     renderPage();
 
     expect(await screen.findByText("组织管理")).toBeInTheDocument();
-    // 树表：父子两级都可见（defaultExpandAllRows）
+    // 树表：父子两级都可见（defaultExpandAllRows）。子行用 findBy 等待——antd
+    // Table 子行在慢速 CI 机上比父行晚一个渲染提交，同步 get 会扑空（CI 连续
+    // 两次红、本地恒绿的根因）。
     expect(await screen.findByText("总部")).toBeInTheDocument();
-    expect(screen.getByText("研发部")).toBeInTheDocument();
+    expect(await screen.findByText("研发部")).toBeInTheDocument();
     // 状态 Tag（antd Tag 渲染文本；「启用」与行内操作按钮重名，按 ant-tag 类圈定状态列）
     const tagTexts = Array.from(document.querySelectorAll(".ant-tag")).map(
       (t) => t.textContent,

@@ -44,3 +44,14 @@
 方案：backend 纯类型修复不动逻辑；frontend 断言补 signal: expect.any(AbortSignal)；daemon 测试 harness 包真实 ClaudeEventNormalizer 保持喂 raw 消息的端到端口径，6 处 user 消息改标准 SDK 形状 message.content
 结果：backend mypy 834 文件 0 错 + 4 文件 pytest 74 过 + ruff/format 0；frontend page.test.tsx 29/29 绿 + tsc 0；daemon session-plan-bash-events 31/31 绿 + tsc 0
 审计：📝 文档欠账（D-8）：6 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260904-018-16e4 | 2026-09-04 10:35:05 | 修 admin/organizations 树表子行断言 CI 抖动（研发部 getByText 扑空）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/admin/organizations/__tests__/page.test.tsx（研发部断言 get→find，子行晚一帧根因注释）
+需求：修 admin/organizations 树表子行断言 CI 抖动（研发部 getByText 扑空）
+根因：antd Table 树表子行在慢速 CI 机上比父行晚一个渲染提交，测试用同步 getByText 断言子行文本，本地快机恒绿但 CI 连续两次红同一处
+方案：同步 get 改 await findByText 等待子行渲染，注释记录根因
+结果：本地连跑 3 次 5/5 绿；纯测试断言改动无实现影响
+审计：📝 文档欠账（D-8）：1 个源码文件改动未同步任何模块文档（涉及模块：frontend）
