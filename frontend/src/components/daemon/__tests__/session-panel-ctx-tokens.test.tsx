@@ -297,9 +297,9 @@ beforeEach(() => {
 /* ───────── FR-01：环分子逆序取最新非 null ctxTokens（非 Σ inputTokens） ───────── */
 
 describe("SessionPanel ctx 环分子口径（逆序最新非 null）", () => {
-  it("三轮 [500, 800, null]（时间序）→ 环显最新非 null 800，非求和 1.3k、非最新 null 的未知态", async () => {
+  it("三轮 [500, 800, null]（时间序）→ 环显最新非 null 800，非求和 1.3K、非最新 null 的未知态", async () => {
     // 时间序：r-1（最旧，ctx=500）→ r-2（ctx=800）→ r-3（最新，ctx=null）。
-    // 旧口径 Σ inputTokens 会显示 1.3k（design §1.1 失真根因），新口径取 800。
+    // 旧口径 Σ inputTokens 会显示 1.3K（design §1.1 失真根因），新口径取 800。
     sessionApi.listSessionRuns.mockResolvedValue([
       makeRun({
         id: "r-1",
@@ -332,9 +332,9 @@ describe("SessionPanel ctx 环分子口径（逆序最新非 null）", () => {
       // 800/1M = 0.08% → 中心取整 0%（占比显示取代旧「直显分子格式化值」）。
       expect(ring).toHaveTextContent("0%");
     });
-    // 非求和（500+800+300=1.6k / 仅 ctx 求和 1.3k 均不得出现）
-    expect(ring.textContent).not.toContain("1.3k");
-    expect(ring.textContent).not.toContain("1.6k");
+    // 非求和（500+800+300=1.6K / 仅 ctx 求和 1.3K 均不得出现）
+    expect(ring.textContent).not.toContain("1.3K");
+    expect(ring.textContent).not.toContain("1.6K");
   });
 
   it("全 null（含老 run 行缺 ctx_tokens 键）→ 环未知态「—」，不显示 0.0%", async () => {
@@ -354,8 +354,8 @@ describe("SessionPanel ctx 环分子口径（逆序最新非 null）", () => {
     // 未知态不算百分比（旧 Σ=0 口径的 0.0% 坑，X-09）
     expect(ring.textContent).not.toContain("%");
     expect(ring.textContent).not.toContain("0.0%");
-    // 有历史 input_tokens 也不得回退旧口径求和（1.2k / 5.7k / 6.9k 均不出现）
-    expect(ring.textContent).not.toContain("6.9k");
+    // 有历史 input_tokens 也不得回退旧口径求和（1.2K / 5.7K / 6.9K 均不出现）
+    expect(ring.textContent).not.toContain("6.9K");
   });
 });
 
@@ -376,7 +376,7 @@ describe("SessionPanel ctx 环 SSE 实时更新", () => {
     });
 
     const conn = stream.conn;
-    // 建运行中轮 + 首次 tokens 上报 ctx_tokens=200k → 环立即变 20%
+    // 建运行中轮 + 首次 tokens 上报 ctx_tokens=200K → 环立即变 20%
     //（ql-20260831-002：llm_provider_id=null 兜底 1M 分母，环中心显示占比）
     act(() => {
       conn.handlers.route(
@@ -447,7 +447,7 @@ describe("SessionPanel ctx 环 runsMeta 历史回填", () => {
       expect(ring).toHaveTextContent("—");
     });
 
-    // attach 拉回的历史 run 带 ctx_tokens=300k → 孤儿轮回填，环变 30%（1M 兜底分母）
+    // attach 拉回的历史 run 带 ctx_tokens=300K → 孤儿轮回填，环变 30%（1M 兜底分母）
     await act(async () => {
       resolveRuns([
         makeRun({

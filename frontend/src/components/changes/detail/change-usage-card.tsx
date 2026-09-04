@@ -74,16 +74,18 @@ function formatDurationZh(ms: number): string {
 }
 
 /**
- * token 数中文紧凑格式化——私有复制自 session-usage-bar formatTokensZh（口径锚定，
- * 抽公共库属另一变更范围）：>= 1 万 →「X.X 万」（一位小数）；万以下千分位（如 6,204）。
+ * token 数紧凑格式化——私有复制自 session-usage-bar formatTokensCompact（口径锚定，
+ * 抽公共库属另一变更范围；ql-20260904-012 单位统一 K/M 废除「万」）：
+ * >= 1M →「X.XM」；>= 1K →「X.XK」（一位小数）；K 以下原值直显。
  */
-function formatTokensZh(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  if (n >= 10_000) return `${(n / 10_000).toFixed(1)} 万`;
-  return n.toLocaleString("en-US");
+function formatTokensCompact(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
-/** 请求次数/轮次千分位直显（计数语义不做万缩写，同 session-usage-bar formatCount）。 */
+/** 请求次数/轮次千分位直显（计数语义不做 K/M 缩写，同 session-usage-bar formatCount）。 */
 function formatCount(n: number): string {
   return Number.isFinite(n) ? n.toLocaleString("en-US") : "0";
 }
@@ -237,15 +239,15 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
           </span>
         ) : null}
         <UsageItem label="轮次" value={formatCount(usage.totals.num_turns)} />
-        <UsageItem label="输入" value={formatTokensZh(usage.totals.input_tokens)} />
-        <UsageItem label="输出" value={formatTokensZh(usage.totals.output_tokens)} />
+        <UsageItem label="输入" value={formatTokensCompact(usage.totals.input_tokens)} />
+        <UsageItem label="输出" value={formatTokensCompact(usage.totals.output_tokens)} />
         <UsageItem
           label="缓存读取"
-          value={formatTokensZh(usage.totals.cache_read_tokens)}
+          value={formatTokensCompact(usage.totals.cache_read_tokens)}
         />
         <UsageItem
           label="缓存写入"
-          value={formatTokensZh(usage.totals.cache_creation_tokens)}
+          value={formatTokensCompact(usage.totals.cache_creation_tokens)}
         />
         <UsageItem label="请求次数" value={formatCount(usage.totals.api_requests)} />
         <UsageItem
@@ -331,16 +333,16 @@ export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardPr
                     )}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.input_tokens)}
+                    {formatTokensCompact(row.input_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.output_tokens)}
+                    {formatTokensCompact(row.output_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.cache_read_tokens)}
+                    {formatTokensCompact(row.cache_read_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.cache_creation_tokens)}
+                    {formatTokensCompact(row.cache_creation_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
                     {formatCount(row.api_requests)}

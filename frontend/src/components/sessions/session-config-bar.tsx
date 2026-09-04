@@ -157,6 +157,12 @@ export interface SessionConfigBarProps {
    * 父层接线（并入首句 createSession）归后续任务，未传时组件内仍暂存显示。
    */
   onProvisionalModelSwitch?: (model: string) => void;
+  /**
+   * ql-20260904-010：外部请求打开供应商下拉的信号（每次递增触发一次）。运行失败
+   * 卡「切换供应商」定位到会话底部配置条时由父级递增；锁定/不可切
+   * （running/ended/Codex）时不响应。0/不传 = 无动作（零回归）。
+   */
+  providerOpenSignal?: number;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -197,6 +203,7 @@ export function SessionConfigBar({
   provisional,
   onProvisionalSwitch,
   onProvisionalModelSwitch,
+  providerOpenSignal = 0,
 }: SessionConfigBarProps) {
   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
   const { activeSharedAgents } = useActiveSharedAgents();
@@ -242,6 +249,18 @@ export function SessionConfigBar({
   // D-010：Codex 引擎无会话级供应商 → 控件锁定（下拉不可开；task-10 起模型
   // 子下拉同锁——直接不渲染）。
   const providerLocked = effectiveEngine != null && effectiveEngine !== "claude";
+
+  // ql-20260904-010：外部信号打开供应商下拉（运行失败卡「切换供应商」定位本条）。
+  // ref 记已消费的信号值——canSwitch/providerLocked 后续翻转不重放旧信号（避免
+  // running→false 时凭旧信号突开下拉）；锁定/不可切时信号直接吞掉（不排队等解锁）。
+  const lastProviderSignalRef = useRef(0);
+  useEffect(() => {
+    if (providerOpenSignal === lastProviderSignalRef.current) return;
+    lastProviderSignalRef.current = providerOpenSignal;
+    if (providerOpenSignal <= 0) return;
+    if (providerLocked || !canSwitch) return;
+    setOpenKind("provider");
+  }, [providerOpenSignal, providerLocked, canSwitch]);
 
   // ── task-10（FR-03-2/5 / D-002@v1）：供应商+模型级联 ──────────────────────
 

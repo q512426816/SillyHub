@@ -216,11 +216,12 @@ export function formatRelativeTime(iso: string | null): string {
 
 // ===== task-14 / FR-01 / FR-04：用量统计格式化 helper（照搬 formatRelativeTime 的位置风格） =====
 
-/** token 数值 k/M 格式化（FR-01）。< 1000 原值；>= 1e6 用 M；>= 1e3 用 k。 */
+/** token 数值 K/M 格式化（FR-01；ql-20260904-012 小写 k→K，全仓 token 单位统一）。
+ * < 1000 原值；>= 1e6 用 M；>= 1e3 用 K。 */
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n === 0) return "0";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 

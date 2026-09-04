@@ -3166,11 +3166,30 @@ function SessionPanelPage({
     },
     [handleResend],
   );
+  // ql-20260904-010：错误卡「切换供应商」不再整页跳 /settings——会话页底部本就有
+  // 「只影响本会话」的供应商配置条（SessionConfigBar），改为定位它并打开供应商
+  // 下拉（signal 递增触发）。ref 用于视口外时滚入视野（面板底部常驻可见，
+  // scrollIntoView nearest 为无害兜底）。会话已结束/机器离线/引擎锁定时配置条
+  // 无法切换，给出事实性提示而非点击无响应。
+  const configBarWrapRef = useRef<HTMLDivElement>(null);
+  const [configProviderSignal, setConfigProviderSignal] = useState(0);
   const timelineOnSwitchProvider = useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.location.assign("/settings");
+    if (ended || !machineOnline) {
+      notify.warning("会话已结束或机器离线，无法切换供应商");
+      return;
     }
-  }, []);
+    if (session?.provider && session.provider !== "claude") {
+      notify.warning("当前引擎不支持会话级供应商切换");
+      return;
+    }
+    setConfigProviderSignal((v) => v + 1);
+    configBarWrapRef.current?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+    // deps 取原始值（布尔/字符串）：session 轮询换引用不重建回调（TurnRow memo
+    // props 稳定，ql-20260903-026）。
+  }, [ended, machineOnline, session?.provider, notify]);
 
   const handleDialogResolved = useCallback((requestId: string) => {
     setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
@@ -4233,7 +4252,7 @@ function SessionPanelPage({
           teamTriggerDisabled={teamButtonDisabled}
           teamTriggerTitle={teamButtonTitle}
         />
-        <div className="px-5 pb-3">
+        <div ref={configBarWrapRef} className="px-5 pb-3">
           <SessionConfigBar
             sessionId={sessionId}
             running={running}
@@ -4242,6 +4261,8 @@ function SessionPanelPage({
             llmProviderId={session.llm_provider_id ?? null}
             configSnapshot={session.config_snapshot ?? null}
             engine={session.provider ?? null}
+            // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
+            providerOpenSignal={configProviderSignal}
             onSwitched={() => {
               // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips + runsMeta
               // （立即显示新 whoLine，不等重进页面）。F7：mountedRef 守卫——
@@ -5540,9 +5561,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
   }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
-  // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
-  // （onResend 仅在 retryable 时渲染），故点击时必为可重试错误。不走队列
-  //（用户已显式点击，等价 retry 语义）。
+  // turn 级串行 / active / 在线守卫；ql-20260904-010 起 RunErrorItem 对所有失败
+  // 卡渲染重发按钮（不再按 retryable 门控），重试约束由上述提交守卫承担。
+  // 不走队列（用户已显式点击，等价 retry 语义）。
   const handleResend = useCallback(async (prompt: string) => {
     if (!view.sessionId) return;
     if (!hasOnlineProvider) return;
@@ -5565,9 +5586,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
     [handleResend],
   );
 
-  // 「切换供应商」— 跳设置页。用 window.location.assign 做整页跳转（非
-  // next/navigation useRouter）：后者需在每个渲染本组件的测试文件单独 vi.mock，
-  // 整页跳转零 mock 依赖、零回归（page 模式内联同款逻辑）。
+  // 「切换供应商」— 跳设置页（ql-20260904-010：page 模式已改为定位会话底部
+  // 配置条，见 timelineOnSwitchProvider；dialog 浮窗内无供应商配置条，跳设置页
+  // 仍是唯一去处）。用 window.location.assign 做整页跳转（非 next/navigation
+  // useRouter）：后者需在每个渲染本组件的测试文件单独 vi.mock，整页跳转零 mock
+  // 依赖、零回归。
   const handleSwitchProvider = useCallback(() => {
     if (typeof window !== "undefined") {
       window.location.assign("/settings");

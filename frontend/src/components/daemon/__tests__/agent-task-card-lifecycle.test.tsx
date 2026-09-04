@@ -69,7 +69,7 @@ describe("AgentTaskCard 生命周期（task-12 / FR-06）—— running「正在
       <AgentTaskCard taskId="t-3" taskName="用量任务" status="running" totalTokens={12_345} toolUses={3} />,
     );
     expect(screen.getByTestId("agent-task-usage").textContent).toBe(
-      "tokens 12.3k · 工具 3 次",
+      "tokens 12.3K · 工具 3 次",
     );
     // 未携带用量字段 → usage 行不渲染（不显示空行）
     rerender(<AgentTaskCard taskId="t-3" taskName="无用量" status="running" />);

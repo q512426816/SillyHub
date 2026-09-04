@@ -9,7 +9,7 @@
  *
  * 覆盖:
  *   1. 卡片显示输入/输出/缓存/费用 4 数字(AC-01)
- *   2. token k/M 格式化(999→999 / 1500→1.5k / 1500000→1.5M)
+ *   2. token k/M 格式化(999→999 / 1500→1.5K / 1500000→1.5M)
  *   3. 时间窗切窗触发 getRuntimesUsage 重拉 + 数字/图同步(AC-02)
  *   4. codex 无 cache → 缓存项显示「—」(D-001@v1/AC-05)
  *   5. loading=true 显示「加载中」(AC-07 子项)
@@ -287,7 +287,7 @@ describe("task-14 / FR-01: 卡片用量区 4 数字(AC-01)", () => {
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [
         makeUsageItem("rt-b", {
-          // 输入 999(原值)/ 输出 1500(1.5k)/ 缓存合并 1500000(1.5M)/ 费用 0
+          // 输入 999(原值)/ 输出 1500(1.5K)/ 缓存合并 1500000(1.5M)/ 费用 0
           input_tokens: 999,
           output_tokens: 1500,
           cache_read_tokens: 1500000,
@@ -301,7 +301,7 @@ describe("task-14 / FR-01: 卡片用量区 4 数字(AC-01)", () => {
     const card = await findUsageSectionByName("EdgeClaude");
 
     expect(within(card).getByText("999")).toBeInTheDocument(); // < 1000 原值
-    expect(within(card).getByText("1.5k")).toBeInTheDocument(); // 1500 → 1.5k
+    expect(within(card).getByText("1.5K")).toBeInTheDocument(); // 1500 → 1.5K
     expect(within(card).getByText("1.5M")).toBeInTheDocument(); // 1500000 → 1.5M
     expect(within(card).getByText("$0.00")).toBeInTheDocument(); // 0 → $0.00
   });
@@ -346,13 +346,13 @@ describe("task-14 / FR-04: 时间窗切换(AC-02)", () => {
 
   it("切窗后卡片数字同步刷新(getRuntimesUsage 新返回值反映在 DOM)", async () => {
     daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-c", name: "SyncClaude" })]));
-    // 初始 7d:输入 1000(1.0k)
+    // 初始 7d:输入 1000(1.0K)
     daemon.getRuntimesUsage.mockResolvedValueOnce(
       usageResponse("7d", [
         makeUsageItem("rt-c", { input_tokens: 1000 }),
       ]),
     );
-    // 切到 1d:输入 2000(2.0k)
+    // 切到 1d:输入 2000(2.0K)
     daemon.getRuntimesUsage.mockResolvedValueOnce(
       usageResponse("1d", [
         makeUsageItem("rt-c", { input_tokens: 2000 }),
@@ -361,15 +361,15 @@ describe("task-14 / FR-04: 时间窗切换(AC-02)", () => {
 
     await renderAndWaitForUsage();
     const card = await findUsageSectionByName("SyncClaude");
-    expect(within(card).getByText("1.0k")).toBeInTheDocument();
+    expect(within(card).getByText("1.0K")).toBeInTheDocument();
 
     // 切到「当日」
     const todayBtn = await screen.findByRole("button", { name: /切换用量统计时间窗为当日/ });
     fireEvent.click(todayBtn);
 
-    // 数字同步更新为 2.0k
+    // 数字同步更新为 2.0K
     await waitFor(() => {
-      expect(within(card).getByText("2.0k")).toBeInTheDocument();
+      expect(within(card).getByText("2.0K")).toBeInTheDocument();
     });
   });
 
@@ -417,7 +417,7 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
               provider_id: "p-openai",
               provider_name: "OpenAI",
               model: "gpt-5",
-              // 明细数字刻意与 summary 不同（4000/900），避免与 stat 的 5.0k/1.0k 撞文本。
+              // 明细数字刻意与 summary 不同（4000/900），避免与 stat 的 5.0K/1.0K 撞文本。
               input_tokens: 4000,
               output_tokens: 900,
               cache_read_tokens: 0,
@@ -432,9 +432,9 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
     await renderAndWaitForUsage();
     const card = await findUsageSectionByName("CodexAgent");
 
-    // input/output 正常显示(5.0k / 1.0k),cost $2.50
-    expect(within(card).getByText("5.0k")).toBeInTheDocument();
-    expect(within(card).getByText("1.0k")).toBeInTheDocument();
+    // input/output 正常显示(5.0K / 1.0K),cost $2.50
+    expect(within(card).getByText("5.0K")).toBeInTheDocument();
+    expect(within(card).getByText("1.0K")).toBeInTheDocument();
     expect(within(card).getByText("$2.50")).toBeInTheDocument();
 
     // 缓存项显示「—」(cache_read+creation=0 → formatCache 返回「—」)
@@ -468,7 +468,7 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
               provider_id: "p-anthropic",
               provider_name: "Anthropic",
               model: "claude-opus-4-6",
-              // 明细缓存 30000 刻意不等于 summary 合并值 35000，避免「35.0k」撞文本。
+              // 明细缓存 30000 刻意不等于 summary 合并值 35000，避免「35.0K」撞文本。
               input_tokens: 1200,
               output_tokens: 340,
               cache_read_tokens: 30000,
@@ -483,8 +483,8 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
     await renderAndWaitForUsage();
     const card = await findUsageSectionByName("ClaudeAgent");
 
-    // 合并 35000 → 35.0k
-    expect(within(card).getByText("35.0k")).toBeInTheDocument();
+    // 合并 35000 → 35.0K
+    expect(within(card).getByText("35.0K")).toBeInTheDocument();
     // 无「—」(cache 有值)
     expect(within(card).queryByText("—")).not.toBeInTheDocument();
   });
@@ -572,11 +572,11 @@ describe("task-12 / FR-04-2: by_provider 分组明细 + 调用次数 + footnote"
     expect(within(table).getByText("未记录")).toBeInTheDocument();
     expect(within(table).getByText("glm-4.7")).toBeInTheDocument();
     expect(within(table).getByText("glm-4.5-air")).toBeInTheDocument();
-    // 数字复用 formatTokens：140210→140.2k / 10502→10.5k / 540000→540.0k / 5726→5.7k
-    expect(within(table).getByText("140.2k")).toBeInTheDocument();
-    expect(within(table).getByText("10.5k")).toBeInTheDocument();
-    expect(within(table).getByText("540.0k")).toBeInTheDocument();
-    expect(within(table).getByText("5.7k")).toBeInTheDocument();
+    // 数字复用 formatTokens：140210→140.2K / 10502→10.5K / 540000→540.0K / 5726→5.7K
+    expect(within(table).getByText("140.2K")).toBeInTheDocument();
+    expect(within(table).getByText("10.5K")).toBeInTheDocument();
+    expect(within(table).getByText("540.0K")).toBeInTheDocument();
+    expect(within(table).getByText("5.7K")).toBeInTheDocument();
     // 调用列：数值行 35；「未记录」行 api_requests=null → 调用列「—」
     expect(within(table).getByText("35")).toBeInTheDocument();
     expect(within(table).getAllByText("—").length).toBeGreaterThanOrEqual(1);

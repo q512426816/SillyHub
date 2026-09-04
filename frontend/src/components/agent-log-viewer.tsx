@@ -309,8 +309,8 @@ export function AgentLogRow({
   /**
    * task-10 / FR-03 / D-004@v1：错误项 actions 回调（透传到 RunErrorItem）。
    * 仅当 processedLog.errorLogItem 存在时本行渲染 RunErrorItem；回调由父级
-   * AgentLogViewer 按场景注入（重发=复用 inject 链路 / 切换供应商=跳设置页 /
-   * 查看详情=组件内折叠 raw）。缺失则 RunErrorItem 不显示对应按钮（零回归）。
+   * AgentLogViewer 按场景注入（重发=复用 inject 链路 / 切换供应商=父级定位供应商
+   * 切换入口 / 查看详情=组件内折叠 raw）。缺失则 RunErrorItem 不显示对应按钮（零回归）。
    */
   onRunErrorResend?: () => void;
   onRunErrorSwitchProvider?: () => void;
@@ -715,8 +715,9 @@ export function AgentLogViewer({
   /**
    * task-10 / D-004@v1：错误项 actions 回调（注入 RunErrorItem）。
    * - onRunErrorResend：重新发送——父级复用现有 inject 链路重新提交同一 prompt
-   *   （不新建提交逻辑）；仅 retryable=true 的错误项渲染按钮。
-   * - onRunErrorSwitchProvider：切换供应商——父级跳 llm-provider 设置页。
+   *   （不新建提交逻辑）；ql-20260904-010 起传入即渲染（不按 retryable 门控）。
+   * - onRunErrorSwitchProvider：切换供应商——父级定位供应商切换入口（会话页
+   *   = 底部配置条；其余场景跳 llm-provider 设置页）。
    * - onRunErrorViewDetail：查看详情——RunErrorItem 内部已折叠展开 raw，此回调
    *   仅作额外埋点（可空）。
    * 全部可选；不传则 RunErrorItem 不显示对应按钮（零回归）。

@@ -5,7 +5,8 @@
 //   - 各 type 渲染对应图标 / 颜色 / 文案
 //   - message 与 hint 正确显示（hint 缺失走 defaultHint 兜底）
 //   - code 徽标按有 / 无渲染
-//   - actions 触发回调：重新发送（retryable 门控）/ 切换供应商 / 查看详情
+//   - actions 触发回调：重新发送（传入 onResend 即显示，ql-20260904-010 不再
+//     按 retryable 门控）/ 切换供应商 / 查看详情
 //   - 查看详情展开 raw（再次点击收起）
 //   - 无 actions 时不渲染操作区
 
@@ -208,17 +209,43 @@ describe("task-09: actions 触发回调（重发 / 切换供应商 / 查看详�
     );
   });
 
-  it("retryable=false + onResend → 不显示「重新发送」（不诱导重发不可重试错误）", () => {
+  it("retryable=false + onResend → 也显示「重新发送」并触发回调（ql-20260904-010 所有失败卡可重试）", () => {
+    const onResend = vi.fn();
+    render(
+      <RunErrorItem
+        item={makeItem({ type: "quota_exceeded", retryable: false })}
+        onResend={onResend}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /重新发送/ });
+    expect(btn.className).toContain("bg-primary");
+    fireEvent.click(btn);
+    expect(onResend).toHaveBeenCalledTimes(1);
+  });
+
+  it("传 onResend 即显示「重新发送」，与 retryable 无关", () => {
+    render(
+      <RunErrorItem
+        item={makeItem({ type: "auth_failed", retryable: false })}
+        onResend={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /重新发送/ })).toBeInTheDocument();
+  });
+
+  it("传 onResend 但未传 onSwitchProvider → 不显示「切换供应商」", () => {
     render(
       <RunErrorItem
         item={makeItem({ type: "quota_exceeded", retryable: false })}
         onResend={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /重新发送/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /切换供应商/ }),
+    ).not.toBeInTheDocument();
   });
 
-  it("retryable=true 但未传 onResend → 不显示「重新发送」", () => {
+  it("未传 onResend → 不显示「重新发送」（无可重放内容，与 retryable 无关）", () => {
     render(<RunErrorItem item={makeItem({ type: "timeout", retryable: true })} />);
     expect(screen.queryByRole("button", { name: /重新发送/ })).not.toBeInTheDocument();
   });
@@ -235,7 +262,7 @@ describe("task-09: actions 触发回调（重发 / 切换供应商 / 查看详�
     expect(onSwitch).toHaveBeenCalledTimes(1);
   });
 
-  it("quota_exceeded(retryable=false) + onSwitchProvider → 切换供应商升为 primary", () => {
+  it("quota_exceeded(retryable=false) + onSwitchProvider 且未传 onResend → 切换供应商升为 primary", () => {
     render(
       <RunErrorItem
         item={makeItem({ type: "quota_exceeded", retryable: false })}

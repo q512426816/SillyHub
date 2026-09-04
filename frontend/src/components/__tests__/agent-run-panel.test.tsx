@@ -10,7 +10,7 @@
 //   - run 有 token 时徽标显示格式化后的 ↓ input | ↑ output
 //   - run token 为 null 时显示 "—" 占位
 //   - runId=null 时不渲染徽标（边界 4）
-//   - 大数字格式化（1234 → 1.2k，边界 3）
+//   - 大数字格式化（1234 → 1.2K，边界 3）
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -95,7 +95,7 @@ describe("task-16: AgentRunPanel token 徽标展示 (FR-11)", () => {
       />,
     );
     // 等待徽标渲染（useEffect 异步 fetchUsage）
-    expect(await screen.findByText(/1\.2k/)).toBeInTheDocument();
+    expect(await screen.findByText(/1\.2K/)).toBeInTheDocument();
     expect(screen.getByText(/567/)).toBeInTheDocument();
     // 两个方向符号都出现
     expect(screen.getByText(/↓/)).toBeInTheDocument();

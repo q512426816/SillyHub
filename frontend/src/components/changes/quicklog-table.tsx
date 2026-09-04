@@ -59,15 +59,16 @@ function StatusColumn({ status, note }: { status: string; note?: string | null }
 /** 列表「执行」列用量摘要（api-types 生成，禁止手写）。 */
 type UsageSummaryRead = components["schemas"]["UsageSummaryRead"];
 
-/** token 数中文紧凑格式化（session-usage-bar formatTokensZh 同款）：
- * >= 1 万 →「X.X 万」（一位小数）；万以下原数千分位（如 9,800）。 */
-function formatTokensZh(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  if (n >= 10_000) return `${(n / 10_000).toFixed(1)} 万`;
-  return n.toLocaleString("en-US");
+/** token 数紧凑格式化（session-usage-bar formatTokensCompact 同款；ql-20260904-012
+ * 单位统一 K/M 废除「万」）：>= 1M →「X.XM」；>= 1K →「X.XK」（一位小数）；K 以下原值直显。 */
+function formatTokensCompact(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
-/** 请求次数千分位（计数语义不做万缩写，session-usage-bar 同款）。 */
+/** 请求次数千分位（计数语义不做 K/M 缩写，session-usage-bar 同款）。 */
 function formatCount(n: number): string {
   return Number.isFinite(n) ? n.toLocaleString("en-US") : "0";
 }
@@ -139,7 +140,7 @@ function UsageExecCell({
         )}
       </div>
       <div className="text-[11px] tabular-nums text-muted-foreground">
-        {`${formatTokensZh(tokenTotal)} tok · ${counts}`}
+        {`${formatTokensCompact(tokenTotal)} tok · ${counts}`}
       </div>
     </div>
   );

@@ -299,6 +299,82 @@ describe("SessionConfigBar 切换供应商", () => {
   });
 });
 
+// ── 4.2 ql-20260904-010：外部信号打开供应商下拉（运行失败卡「切换供应商」
+//      定位本配置条） ─────────────────────────────────────────────────────────
+
+describe("SessionConfigBar providerOpenSignal（ql-20260904-010）", () => {
+  /** rerender 需复用同一 QueryClientProvider（renderBar 不暴露 rerender）。 */
+  function renderSignalBar(initial: Record<string, unknown> = {}) {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0, refetchInterval: false },
+        mutations: { retry: false },
+      },
+    });
+    const props = () => ({ ...BASE_PROPS, ...initial }) as any;
+    const utils = render(
+      <QueryClientProvider client={client}>
+        <SessionConfigBar {...props()} />
+      </QueryClientProvider>,
+    );
+    return {
+      ...utils,
+      rerenderWith: (over: Record<string, unknown>) =>
+        utils.rerender(
+          <QueryClientProvider client={client}>
+            <SessionConfigBar {...({ ...BASE_PROPS, ...initial, ...over } as any)} />
+          </QueryClientProvider>,
+        ),
+    };
+  }
+
+  it("signal 递增 → 打开供应商下拉（config-dd-provider 出现）", async () => {
+    const { rerenderWith } = renderSignalBar({ providerOpenSignal: 0 });
+    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+    rerenderWith({ providerOpenSignal: 1 });
+    expect(await screen.findByTestId("config-dd-provider")).toBeInTheDocument();
+    // 下拉标题即「切换供应商 · 只影响本会话」——定位语义直接可见
+    expect(screen.getByText("切换供应商 · 只影响本会话")).toBeInTheDocument();
+  });
+
+  it("挂载即 signal>0 → 直接打开（无需先渲染 0）", () => {
+    renderSignalBar({ providerOpenSignal: 1 });
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+  });
+
+  it("signal 不变（其它 props 变化重渲染）→ 不重复动作，已开下拉保持", () => {
+    const { rerenderWith } = renderSignalBar({ providerOpenSignal: 1 });
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+    rerenderWith({ llmProviderId: "prov-kimi" });
+    // 下拉仍开（未被重置）；档案下拉未开
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+    expect(screen.queryByTestId("config-dd-profile")).not.toBeInTheDocument();
+  });
+
+  it("running 锁定 → 信号被吞不开下拉；解锁后不凭旧信号重放", () => {
+    const { rerenderWith } = renderSignalBar({
+      running: true,
+      providerOpenSignal: 1,
+    });
+    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+    rerenderWith({ running: false });
+    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+  });
+
+  it("Codex 引擎锁定（D-010）→ 信号不开下拉", () => {
+    renderSignalBar({
+      engine: "codex",
+      providerOpenSignal: 1,
+      configSnapshot: {
+        machine_name: "machine-1",
+        agent_name: "Codex",
+        engine: "codex",
+      },
+    });
+    expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+  });
+});
+
 // ── 4.5 task-10：供应商+模型级联（2026-08-29-usage-by-provider-model /
 //        FR-03-2/3/5 / D-002@v1） ────────────────────────────────────────────
 

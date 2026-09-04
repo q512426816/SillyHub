@@ -498,9 +498,10 @@ const TurnRow = memo(function TurnRow({
                       )}
                     >
                       {/* 2026-07-29-model-error-visibility：turn 失败的结构化错误展示
-                          （原因 + 针对性建议 + 操作）。onResend 仅在 prompt 存在时提供，
-                          RunErrorItem 内部再按 retryable 决定是否渲染「重新发送」；
-                          retryable=false 时主操作自动升为「切换供应商」。 */}
+                          （原因 + 针对性建议 + 操作）。onResend 仅在 prompt 存在时提供
+                          （ql-20260904-010：重试按钮不再按 retryable 门控，所有失败卡
+                          可重发）；onSwitchProvider 由父级定位供应商切换入口（会话页
+                          = 底部配置条）。 */}
                       <RunErrorItem
                         item={turn.errorDetail}
                         onResend={

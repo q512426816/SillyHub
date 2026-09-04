@@ -3,7 +3,7 @@
 // lib 数据源（getChangeUsage / getQuicklogUsage），render 包 QueryClientProvider
 //（retry: false 保证错误态一次落定）。
 //
-// 覆盖：①摘要行数字/命中率渲染（万级 token / 千分位 / 耗时格式化）②命中率分母
+// 覆盖：①摘要行数字/命中率渲染（K/M 紧凑 token / 千分位 / 耗时格式化）②命中率分母
 // 0 →「—」（汇总级 + 模型行级同公式）③时间三元组「进行中」标记（started 有值
 // finished 缺，耗时照显示已累计值）④kind=quicklog 分派 getQuicklogUsage（调用
 // 次数与参数，getChangeUsage 不被调）⑤折叠/展开交互 + 「未记录」灰桶 + 两 kind
@@ -52,10 +52,10 @@ function usageOf(overrides: Partial<ChangeUsageRead> = {}): ChangeUsageRead {
     finished_at: END,
     duration_ms: 12_960_000, // 3.6 小时
     totals: {
-      input_tokens: 384_000, // 38.4 万
-      output_tokens: 6_204, // 6,204
-      cache_read_tokens: 4_210_000, // 421.0 万
-      cache_creation_tokens: 261_000, // 26.1 万
+      input_tokens: 384_000, // 384.0K
+      output_tokens: 6_204, // 6.2K
+      cache_read_tokens: 4_210_000, // 4.2M
+      cache_creation_tokens: 261_000, // 261.0K
       api_requests: 214,
       num_turns: 96,
     },
@@ -100,7 +100,7 @@ describe("ChangeUsageCard（task-07）", () => {
     vi.clearAllMocks();
   });
 
-  it("摘要行渲染时间三元组/耗时/轮次/四维 token/请求次数/命中率（万级与千分位口径）", async () => {
+  it("摘要行渲染时间三元组/耗时/轮次/四维 token/请求次数/命中率（K/M 紧凑口径）", async () => {
     mocks.getChangeUsage.mockResolvedValue(usageOf());
     renderCard();
 
@@ -109,10 +109,10 @@ describe("ChangeUsageCard（task-07）", () => {
     expect(screen.getByText(compactTime(START))).toBeInTheDocument();
     expect(screen.getByText(compactTime(END))).toBeInTheDocument();
     expect(screen.getByText("96")).toBeInTheDocument();
-    expect(screen.getByText("38.4 万")).toBeInTheDocument();
-    expect(screen.getByText("6,204")).toBeInTheDocument();
-    expect(screen.getByText("421.0 万")).toBeInTheDocument();
-    expect(screen.getByText("26.1 万")).toBeInTheDocument();
+    expect(screen.getByText("384.0K")).toBeInTheDocument();
+    expect(screen.getByText("6.2K")).toBeInTheDocument();
+    expect(screen.getByText("4.2M")).toBeInTheDocument();
+    expect(screen.getByText("261.0K")).toBeInTheDocument();
     expect(screen.getByText("214")).toBeInTheDocument();
     // 命中率 = 4210000 / (4210000 + 384000) = 91.6%（一位小数）。
     expect(screen.getByText("91.6%")).toBeInTheDocument();

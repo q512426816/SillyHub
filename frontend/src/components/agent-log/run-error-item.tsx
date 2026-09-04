@@ -151,11 +151,13 @@ export interface RunErrorItemProps {
   /** task-08 结构化错误载荷（type/code/message/retryable/hint/raw）。 */
   item: ErrorLogItem;
   /**
-   * 重新发送回调；仅当 item.retryable=true 时渲染按钮（D-006：quota/auth 等不可重试
-   * 错误不诱导重发）。task-10 接 inject 链路。
+   * 重新发送回调；传入即渲染按钮。ql-20260904-010：不再按 item.retryable 门控
+   * （原 D-006 的 quota/auth 隐藏逻辑废除——用户决策所有失败卡都提供重试入口，
+   * 重试守卫由父级提交链路承担）；turn 无 prompt 时父级不传（无可重放内容）。
+   * task-10 接 inject 链路。
    */
   onResend?: () => void;
-  /** 切换供应商回调；传入即渲染按钮。task-10 接 llm-provider 设置。 */
+  /** 切换供应商回调；传入即渲染按钮（父级定位供应商切换入口，如会话页底部配置条）。 */
   onSwitchProvider?: () => void;
   /**
    * 查看详情回调；无论是否传入，「查看详情」都作为内部折叠开关展开 raw（若 raw 存在）。
@@ -182,16 +184,17 @@ export function RunErrorItem({
   const [showDetail, setShowDetail] = useState(false);
 
   // actions 可见性：
-  // - 重新发送：retryable=true 且父组件传入 onResend（可重试才显示重发）。
-  // - 切换供应商：父组件传入 onSwitchProvider（由 task-10 按场景决定是否提供）。
+  // - 重新发送：父组件传入 onResend（ql-20260904-010：所有失败卡都可重试，
+  //   不再按 item.retryable 门控）。
+  // - 切换供应商：父组件传入 onSwitchProvider（由父级按场景决定是否提供）。
   // - 查看详情：有 raw 可展开，或父组件传入 onViewDetail。
-  const showResend = item.retryable && Boolean(onResend);
+  const showResend = Boolean(onResend);
   const showSwitch = Boolean(onSwitchProvider);
   const showDetailBtn = hasRaw || Boolean(onViewDetail);
   const hasActions = showResend || showSwitch || showDetailBtn;
 
   // 主操作按钮（primary 蓝底）：首个可用「修复」动作——重发优先，其次切换供应商
-  // （quota 等不可重试错误，切换供应商升为 primary，匹配原型意图）。
+  // （无 prompt 可重放（onResend 缺席）时，切换供应商升为 primary）。
   const resendPrimary = showResend;
   const switchPrimary = !showResend && showSwitch;
 

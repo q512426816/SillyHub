@@ -3,7 +3,7 @@
 //
 // 依据：
 //   - .sillyspec/changes/2026-06-22-agent-run-pipeline-fix/task-16.md §TDD
-//   - design.md §5.5 Token 消耗展示（边界：1234 → 1.2k）
+//   - design.md §5.5 Token 消耗展示（边界：1234 → 1.2K）
 //   - requirements.md FR-11
 //
 // 覆盖边界（task-16.md §边界处理）：
@@ -34,10 +34,10 @@ describe("task-16: formatTokenCount 数字格式化 (FR-11)", () => {
   });
 
   it("1000-999999 显示 k 后缀（1 位小数）", () => {
-    expect(formatTokenCount(1000)).toBe("1.0k");
-    expect(formatTokenCount(1234)).toBe("1.2k");
-    expect(formatTokenCount(12345)).toBe("12.3k");
-    expect(formatTokenCount(999999)).toBe("1000.0k");
+    expect(formatTokenCount(1000)).toBe("1.0K");
+    expect(formatTokenCount(1234)).toBe("1.2K");
+    expect(formatTokenCount(12345)).toBe("12.3K");
+    expect(formatTokenCount(999999)).toBe("1000.0K");
   });
 
   it("≥ 1_000_000 显示 M 后缀（1 位小数）", () => {

@@ -145,14 +145,14 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
       const rt = makeRuntime({ id: "rt-edge" });
       const usage = usageItem("rt-edge", {
         input_tokens: 999, // 999 原值
-        output_tokens: 1500, // 1.5k
+        output_tokens: 1500, // 1.5K
         cache_read_tokens: 1500000, // 1.5M（合并）
         cache_creation_tokens: 0,
         total_cost_usd: 0, // $0.00
       });
       renderCard(<RuntimeCard {...defaultProps(rt, { usage })} />);
       expect(screen.getByText("999")).toBeInTheDocument();
-      expect(screen.getByText("1.5k")).toBeInTheDocument();
+      expect(screen.getByText("1.5K")).toBeInTheDocument();
       expect(screen.getByText("1.5M")).toBeInTheDocument();
       expect(screen.getByText("$0.00")).toBeInTheDocument();
     });
@@ -162,8 +162,8 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
       const usage = usageItem(
         "rt-codex",
         {
-          input_tokens: 5000, // 5.0k
-          output_tokens: 1000, // 1.0k
+          input_tokens: 5000, // 5.0K
+          output_tokens: 1000, // 1.0K
           cache_read_tokens: 0,
           cache_creation_tokens: 0,
           total_cost_usd: 2.5, // $2.50
@@ -175,7 +175,7 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
             provider_id: "p-openai",
             provider_name: "OpenAI",
             model: "gpt-5",
-            // 明细数字刻意与 summary 不同（4000/900），避免与 stat 的 5.0k/1.0k 撞文本。
+            // 明细数字刻意与 summary 不同（4000/900），避免与 stat 的 5.0K/1.0K 撞文本。
             input_tokens: 4000,
             output_tokens: 900,
             cache_read_tokens: 0,
@@ -186,8 +186,8 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
       );
       renderCard(<RuntimeCard {...defaultProps(rt, { usage })} />);
       // input/output 正常显示，cache 显示「—」
-      expect(screen.getByText("5.0k")).toBeInTheDocument();
-      expect(screen.getByText("1.0k")).toBeInTheDocument();
+      expect(screen.getByText("5.0K")).toBeInTheDocument();
+      expect(screen.getByText("1.0K")).toBeInTheDocument();
       expect(screen.getByText("$2.50")).toBeInTheDocument();
       expect(screen.getByText("—")).toBeInTheDocument();
     });

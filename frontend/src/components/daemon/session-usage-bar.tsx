@@ -73,17 +73,18 @@ function formatHitRate(rate: number | null): string {
 }
 
 /**
- * token 数中文紧凑格式化（仿 runtime-card-helpers formatTokens 的 helper 先例，
- * 改万级口径对齐原型「1.5 万 / 64.3 万 / 9,800 / 128」）：
- * >= 1 万 →「X.X 万」（一位小数）；万以下原数千分位（如 9,800）。
+ * token 数紧凑格式化（ql-20260904-012：单位统一 K/M，废除中文「万」口径，
+ * 与 runtime-card-helpers formatTokens / lib formatTokenCount 同制式）：
+ * >= 1M →「X.XM」；>= 1K →「X.XK」（一位小数）；K 以下原值直显（如 128）。
  */
-function formatTokensZh(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  if (n >= 10_000) return `${(n / 10_000).toFixed(1)} 万`;
-  return n.toLocaleString("en-US");
+function formatTokensCompact(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
-/** 请求次数千分位（计数语义不做万缩写，对齐原型 128 / 102 / 0 直显）。 */
+/** 请求次数千分位（计数语义不做 K/M 缩写，对齐原型 128 / 102 / 0 直显）。 */
 function formatCount(n: number): string {
   return Number.isFinite(n) ? n.toLocaleString("en-US") : "0";
 }
@@ -157,22 +158,22 @@ export function SessionUsageBar({ sessionId, refreshSignal }: SessionUsageBarPro
         <UsageItem
           icon={ArrowDownToLine}
           label="输入"
-          value={formatTokensZh(usage.totals.input_tokens)}
+          value={formatTokensCompact(usage.totals.input_tokens)}
         />
         <UsageItem
           icon={ArrowUpFromLine}
           label="输出"
-          value={formatTokensZh(usage.totals.output_tokens)}
+          value={formatTokensCompact(usage.totals.output_tokens)}
         />
         <UsageItem
           icon={HardDriveDownload}
           label="缓存读取"
-          value={formatTokensZh(usage.totals.cache_read_tokens)}
+          value={formatTokensCompact(usage.totals.cache_read_tokens)}
         />
         <UsageItem
           icon={HardDriveUpload}
           label="缓存写入"
-          value={formatTokensZh(usage.totals.cache_creation_tokens)}
+          value={formatTokensCompact(usage.totals.cache_creation_tokens)}
         />
         <UsageItem
           icon={Repeat}
@@ -256,16 +257,16 @@ export function SessionUsageBar({ sessionId, refreshSignal }: SessionUsageBarPro
                     )}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.input_tokens)}
+                    {formatTokensCompact(row.input_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.output_tokens)}
+                    {formatTokensCompact(row.output_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.cache_read_tokens)}
+                    {formatTokensCompact(row.cache_read_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
-                    {formatTokensZh(row.cache_creation_tokens)}
+                    {formatTokensCompact(row.cache_creation_tokens)}
                   </td>
                   <td className="px-1.5 py-1 text-right tabular-nums text-slate-700">
                     {formatCount(row.api_requests)}

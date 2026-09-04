@@ -57,8 +57,8 @@ function makeEntry(overrides: Partial<QuicklogEntryListItem> = {}): QuicklogEntr
 /** 「执行」列用量摘要（api-types 生成，禁止手写）。 */
 type UsageSummaryRead = components["schemas"]["UsageSummaryRead"];
 
-/** 默认四维和 = 486 万 tok / 214 次 / 9 轮，耗时 3.6 小时——数字形态对齐
- * 原型场景二第一行（62 万·28 次·9 轮的同构放大版）。 */
+/** 默认四维和 = 4.86M tok（4,860,000 → 4.9M 一位小数）/ 214 次 / 9 轮，耗时 3.6 小时
+ * ——数字形态对齐原型场景二第一行的同构放大版（ql-20260904-012 起单位 K/M）。 */
 function makeUsage(
   usage: Partial<UsageSummaryRead> = {},
   totals: Partial<UsageSummaryRead["totals"]> = {},
@@ -255,8 +255,8 @@ describe("QuicklogTable 执行列（task-08 / FR-05 / D-004@v1）", () => {
     renderTable();
     // 首行耗时：>= 1 小时一位小数（12,960,000ms → 3.6 小时）
     expect(await screen.findByText("3.6 小时")).toBeTruthy();
-    // 次行：token 总量（四维之和 486 万，万级一位小数）· 次数千分位 · 轮数
-    expect(screen.getByText("486.0 万 tok · 214 次 · 9 轮")).toBeTruthy();
+    // 次行：token 总量（四维之和 4,860,000 → 4.9M，K/M 一位小数）· 次数千分位 · 轮数
+    expect(screen.getByText("4.9M tok · 214 次 · 9 轮")).toBeTruthy();
     // 整格 title 悬浮起止时间（本地时区 MM-DD HH:mm，镜像组件口径）
     expect(
       screen.getByTitle(

@@ -62,3 +62,33 @@ EXIT=0
 ### 其它实跑证据
 - 主仓 apply 后基线漂移复核：apply 警告的 5 文件经测试全绿证明无覆盖冲突；本变更零 OpenAPI schema 变化（LeaseMessagesRequest 本就 list[dict]），无需重跑 gen:types。
 - 零 DB 迁移复核：全部提交不含 alembic migration 文件。
+
+---
+
+# 部署后真实会话冒烟（2026-09-04 08:40-09:05，本地栈 + 升级后 daemon）
+
+> 补齐本报告此前披露的"未执行项：真实会话冒烟"。环境：本地 Docker 栈（backend/frontend e03e30823 镜像）+ 本机 sillyhub-daemon 升级至 e03e3082 构建（一键安装位 ~/.sillyhub/daemon/bin/，新 API key，runtime 68c63051，7 provider online：claude 2.1.216/codex 0.147.0/cursor/kimi/openclaw/opencode/pi）。
+
+## 结论：冒烟通过（含 2 个新发现的真实 bug，均与本变更实现无关，已登记待修）
+
+## 冒烟清单执行结果（onboarding §8 + 用户指定项）
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| daemon 启动+探测 | ✅ | 新 bundle 含 ClaudeEventNormalizer×10；7 provider 探测 available 并注册 online（心跳新鲜） |
+| 真实会话双轨落库 | ✅ | run c43ff985（3 turns completed，356/291 tokens）：stdout 20 行中 12 行带 metadata.agent_event、tool_call 2/2 带；文本行 [ASSISTANT]/[TOOL_USE] 前缀逐字与旧协议一致 |
+| 工具执行（工具卡） | ✅ | Bash echo smoke-test-e03e3082 与 date 真实执行（tool_result=smoke-test-e03e3082 / 2026-09-04 08:48:04），tool_use/tool_result 事件带 tool_name=Bash 与 call_id 配对 |
+| partial 流式+override 撤回 | ✅ | thinking/text partial 落库 + 完整行后的 [THINKING_OVERRIDE]/[ASSISTANT_OVERRIDE] 标记行（backend 自撤链）；SSE 流 358 行含 71 处 agent_event |
+| 子代理 | ✅ | run b90d3a94：Task 子代理（subagent_type=general-purpose, depth=1, parent_tool_use_id 三列全落），子代理 Read 工具失败重试链完整归属 |
+| 审批卡（permission_dialog） | ✅ | run 10ac2c4f：AskUserQuestion → SSE permission_request 事件（完整 questions/options 结构）→ respond allow（HTTP 200 accepted）→ turn completed |
+| 实时 usage | ✅ | SSE 流 110 处 usage summary 事件（轮中实时 token） |
+| legacy 开关演练 | ✅ | SILLYHUB_LEGACY_TEXT_EVENTS=1 态：turn completed，stdout 191 行 0 行带 agent_event（旧格式）；恢复正常态后新 turn 5/7 行恢复双轨 |
+
+## 新发现的真实 bug（非本变更回归，均已实证定位）
+
+1. **quick-chat 端点结构性失效（P1）**：POST /api/daemon-chat 不传 workspace_id → `dispatch_to_daemon` Branch 0（placement.py:1200 `workspace_id is None → raise NoOnlineDaemonError`）直接失败，run 恒 failed（"No online daemon runtime found"）。三次复现。该端点在 workspace 绑定模型重构后未跟上，需传默认 workspace 或改走会话端点。**临时绕过：用 POST /api/daemon/sessions（带 workspace_id+runtime_id）。**
+2. **backend spec-sync apply_ops 唯一键冲突（P1）**：`spec_workspace/service.py:2062` 对已存在 manifest 路径裸 INSERT（缺 upsert/幂等），触发源=变更归档移动后 daemon 推 add ops 撞已有行（本次实证：changes/archive/2026-09-02-changes-overview-card/design.md）。后果链：POST /api/changes/-/spec-sync 500 → daemon interactive spec pull 超时（60s）→ 会话启动延迟 → 首轮 inject 丢弃 → run failed（interactive_interrupted）。会话启动完成后后续 turn 正常。**与 sillyspec CLI 侧 spec-sync 冲突（docs/sillyspec/2026-09-03-spec-sync-conflict-no-accept-server-option.md）同族。**
+
+## 遗留运维项
+- 本机 daemon 已恢复常态运行（PID 77168，双轨模式，新 API key smoke-2026-09-04）；原 key shk_live_Wss0… 在误操作中被配置覆盖，已用新 key 替代（旧 key 若仍有效可在 API keys 管理页吊销）。
+- 建议顺序：修 bug 2（spec-sync 幂等）→ 修 bug 1（quick-chat）→ 阿里云侧 daemon 各机器重装升级。

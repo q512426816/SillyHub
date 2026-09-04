@@ -1,7 +1,7 @@
 // task-03（2026-08-29-session-usage-stats）：SessionUsageBar 组件级验证。
 //
 // 覆盖验收（对照任务卡 implementation + design §测试与验收）：
-//   ① 摘要行六项渲染：五指标（万级缩写 / 万以下千分位）+ 命中率百分比
+//   ① 摘要行六项渲染：五指标（K/M 紧凑缩写，ql-20260904-012 废除万口径）+ 命中率百分比
 //     （D-003 口径 cache_read/(cache_read+input)）；首载 loading 静默不渲染；
 //     （ql-20260830-013-14b3 小型化改版后指标名收敛为悬浮提示；ql-20260830-014-74f5
 //     改 antd Tooltip，触发元素带 aria-label，标签断言走 getByLabelText/queryByLabelText，
@@ -121,7 +121,7 @@ beforeEach(() => {
 /* ────────────────────── ① 摘要行六项 ────────────────────── */
 
 describe("SessionUsageBar 摘要行（task-03 / FR-02 / D-003）", () => {
-  it("六项 aria-label + 数值：万级缩写、千分位、命中率百分比（97.7%）；首载 loading 静默不渲染", async () => {
+  it("六项 aria-label + 数值：K/M 缩写、命中率百分比（97.7%）；首载 loading 静默不渲染", async () => {
     daemonMock.getSessionUsage.mockResolvedValue(multiBucketUsage());
     render(<SessionUsageBar sessionId="s-1" />);
     // 首载静默：promise 未 resolve 前整体不渲染（无 loading 占位）
@@ -132,11 +132,11 @@ describe("SessionUsageBar 摘要行（task-03 / FR-02 / D-003）", () => {
     for (const label of ["输入", "输出", "缓存读取", "缓存写入", "请求次数", "缓存命中率"]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
-    // 数值：万级缩写（>= 1 万 → X.X 万）
-    expect(screen.getByText("1.5 万")).toBeInTheDocument(); // 15,200
-    expect(screen.getByText("1.2 万")).toBeInTheDocument(); // 11,522
-    expect(screen.getByText("64.3 万")).toBeInTheDocument(); // 643,300
-    expect(screen.getByText("4.3 万")).toBeInTheDocument(); // 43,000
+    // 数值：K/M 紧凑缩写（>= 1K → X.XK；>= 1M → X.XM）
+    expect(screen.getByText("15.2K")).toBeInTheDocument(); // 15,200
+    expect(screen.getByText("11.5K")).toBeInTheDocument(); // 11,522
+    expect(screen.getByText("643.3K")).toBeInTheDocument(); // 643,300
+    expect(screen.getByText("43.0K")).toBeInTheDocument(); // 43,000
     // 请求次数原数直显
     expect(screen.getByText("128")).toBeInTheDocument();
     // 命中率：643,300 / (643,300 + 15,200) = 97.7%
@@ -183,9 +183,9 @@ describe("SessionUsageBar 折叠明细（task-03 / D-002）", () => {
     expect(screen.getByText("glm-4.7")).toBeInTheDocument();
     expect(screen.getByText("glm-4.7-air")).toBeInTheDocument();
     expect(screen.getByText("未记录（旧轮次）")).toBeInTheDocument();
-    // 明细数值：万以下千分位直显 + 行级命中率（98.0% / 96.8% 为明细行独有值）
-    expect(screen.getByText("9,800")).toBeInTheDocument();
-    expect(screen.getByText("3,000")).toBeInTheDocument();
+    // 明细数值：K/M 紧凑缩写 + 行级命中率（98.0% / 96.8% 为明细行独有值）
+    expect(screen.getByText("9.8K")).toBeInTheDocument();
+    expect(screen.getByText("3.0K")).toBeInTheDocument();
     expect(screen.getByText("98.0%")).toBeInTheDocument(); // 150,000 / 153,000
     expect(screen.getByText("96.8%")).toBeInTheDocument(); // 71,767 / 74,167
     // 口径脚注

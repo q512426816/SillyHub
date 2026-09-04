@@ -2,7 +2,7 @@
 // CtxUsageRing + QuotaPill 单元测试。
 //
 // 覆盖：
-//   - 分母三级降级链（one_m→1000k / 常量 200k / 无分母只显示累计）；
+//   - 分母三级降级链（one_m→1000K / 常量 200K / 无分母只显示累计）；
 //   - 阈值变色（50 / 80 边界，≥50 黄 ≥80 红）；
 //   - 点击详情浮层（占比 / 已用总量 / 口径说明——2026-08-27-session-token-
 //     usage-fix task-08 起为「最近一次模型调用」新口径文案）；
@@ -60,13 +60,13 @@ describe("resolveCtxWindowTokens（分母四级解析链）", () => {
     expect(resolveCtxWindowTokens(512_000, { model: "glm-4.6" }, null)).toBe(512_000);
   });
 
-  it("第 1 级：role mapping one_m=true → 1000k（供应商配置派生）", () => {
+  it("第 1 级：role mapping one_m=true → 1M（供应商配置派生）", () => {
     expect(
       resolveCtxWindowTokens(null, { model: "glm-4.6", one_m: true }, null),
     ).toBe(ONE_M_CTX_WINDOW_TOKENS);
   });
 
-  it("第 2 级：有模型名（常量表命中或默认）→ 200k", () => {
+  it("第 2 级：有模型名（常量表命中或默认）→ 200K", () => {
     expect(resolveCtxWindowTokens(null, { model: "glm-4.6" }, null)).toBe(
       DEFAULT_CTX_WINDOW_TOKENS,
     );
@@ -95,7 +95,7 @@ describe("resolveCtxWindowTokens（分母四级解析链）", () => {
 // ── CtxUsageRing：环渲染 / 阈值变色 / 详情浮层 ────────────────────────────
 
 describe("CtxUsageRing", () => {
-  it("显示占比百分比：100k / 200k = 50%", () => {
+  it("显示占比百分比：100K / 200K = 50%", () => {
     render(
       <CtxUsageRing usedTokens={100_000} roleMapping={{ model: "glm-4.6" }} />,
     );
@@ -130,7 +130,7 @@ describe("CtxUsageRing", () => {
     expect(screen.getByTestId("ctx-ring").textContent).toContain("100%");
   });
 
-  it("第 1 级分母：one_m=true 按 1000k 计（500k → 50%）", () => {
+  it("第 1 级分母：one_m=true 按 1000K 计（500K → 50%）", () => {
     render(
       <CtxUsageRing
         usedTokens={500_000}
@@ -147,7 +147,7 @@ describe("CtxUsageRing", () => {
     expect(ring.textContent).toContain("1%");
   });
 
-  it("会话覆盖分母：200k 模型手动指定 400k → 占比按覆盖值计算", () => {
+  it("会话覆盖分母：200K 模型手动指定 400K → 占比按覆盖值计算", () => {
     render(
       <CtxUsageRing
         usedTokens={100_000}
@@ -165,7 +165,7 @@ describe("CtxUsageRing", () => {
     fireEvent.click(screen.getByTestId("ctx-ring"));
     expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
     expect(await screen.findByText("50.0%")).toBeInTheDocument();
-    expect(screen.getByText("100.0k / 200.0k")).toBeInTheDocument();
+    expect(screen.getByText("100.0K / 200.0K")).toBeInTheDocument();
     // 口径说明——task-08（2026-08-27-session-token-usage-fix FR-01）改新口径：
     // 分子=最近一次模型调用的提示词大小（含缓存命中部分），不再是会话累计求和。
     expect(
@@ -191,9 +191,9 @@ describe("CtxUsageRing", () => {
 
     fireEvent.click(ring);
     expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
-    // 浮层：用量占比 = 未知（非 0.0%）；已用分子 = 「—」，分母照常派生 200k。
+    // 浮层：用量占比 = 未知（非 0.0%）；已用分子 = 「—」，分母照常派生 200K。
     expect(screen.getByText("未知")).toBeInTheDocument();
-    expect(screen.getByText("— / 200.0k")).toBeInTheDocument();
+    expect(screen.getByText("— / 200.0K")).toBeInTheDocument();
     expect(screen.queryByText("0.0%")).not.toBeInTheDocument();
   });
 
@@ -243,7 +243,7 @@ describe("CtxUsageRing", () => {
     expect(onChange).toHaveBeenCalledWith(null);
 
     // 覆盖态浮层「已用 / 总量」带（手动）标记
-    expect(await screen.findByText("100.0k / 400.0k（手动）")).toBeInTheDocument();
+    expect(await screen.findByText("100.0K / 400.0K（手动）")).toBeInTheDocument();
   });
 });
 
