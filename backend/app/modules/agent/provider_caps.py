@@ -41,6 +41,19 @@ PROVIDER_CAPS: dict[str, dict[str, bool]] = {
         "edit_patch": False,
         "model_select": True,
     },
+    # pi（2026-09-04-provider-pi-onboarding task-04 / design §5.3）：取值依据
+    # 锚点见 daemon 侧 providers.ts 的 PROVIDER_CAPS docblock pi 段；
+    # subagent 初始 False（§6.2 纪律，实证后只由 task-06 在三端同步翻值）。
+    "pi": {
+        "resume": True,
+        "mcp": False,
+        "multimodal": True,
+        "thinking": True,
+        "subagent": False,
+        "permission_dialog": False,
+        "edit_patch": False,
+        "model_select": True,
+    },
 }
 
 # 键序取自镜像表首条目（claude）；8 键齐全与三端一致性由守护测试保证。

@@ -1,9 +1,10 @@
 // tests/interactive/provider-registry.test.ts
 // task-05（FR-05 / D-002@v1 / design §5.2）：providers.ts 注册表与 InteractiveProvider 推导。
+// 2026-09-04-provider-pi-onboarding task-04：用例 1/3/5 扩 pi（注册键/family/实例化）。
 //
 // 覆盖（task-05 验收）：
 //   1. 注册表键集合 = InteractiveProvider 联合（编译层 canary + 运行时键集断言）
-//   2. 两 provider 的 createDriver 可实例化（mock deps；零参构造等价 cli.ts 现行 new）
+//   2. 各 provider 的 createDriver 可实例化（mock deps；零参构造等价 cli.ts 现行 new）
 //   3. 未注册键经 SessionManager.create → UnsupportedProviderError（错误语义不变）
 //   4. descriptor.caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等
 //   5. family 值合法：属于 6 协议联合，且与 adapters 反查表 PROVIDER_TO_PROTOCOL 一致
@@ -22,6 +23,7 @@ import {
 } from '../../src/adapters/index.js';
 import { ClaudeSdkDriver } from '../../src/interactive/claude-sdk-driver.js';
 import { CodexAppServerDriver } from '../../src/interactive/codex-app-server-driver.js';
+import { PiRpcDriver } from '../../src/interactive/pi-rpc-driver.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type { SessionManagerDeps } from '../../src/interactive/types.js';
 import { UnsupportedProviderError } from '../../src/interactive/types.js';
@@ -35,13 +37,14 @@ import type {
 // ── 编译层断言（tsc / IDE 报错即失败；先例：tests/interactive/driver.test.ts） ──
 
 /**
- * 键集 canary：InteractiveProvider 联合当前恰为 claude|codex。
+ * 键集 canary：InteractiveProvider 联合当前恰为 claude|codex|pi。
  * 注册表新增 provider 而未更新此字面量 → 此处编译报错，强制同步确认联合扩展
  *（编译层守护：keyof 推导本身不会「漂移」，此 canary 防的是误删键 / 键改名）。
  */
 const _compileTimeKeySet: Record<InteractiveProvider, true> = {
   claude: true,
   codex: true,
+  pi: true,
 };
 void _compileTimeKeySet;
 
@@ -75,8 +78,8 @@ function makeFakeDriver(provider: 'claude' | 'codex'): InteractiveDriver {
 }
 
 describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', () => {
-  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex）', () => {
-    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex']);
+  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/pi）', () => {
+    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex', 'pi']);
     // 编译层 canary 字面量与运行时注册表键两视角对齐（同集）。
     expect(Object.keys(_compileTimeKeySet).sort()).toEqual(
       Object.keys(INTERACTIVE_PROVIDERS).sort(),
@@ -108,9 +111,11 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       // 一致性：与批量层反查表同源（interactive 注册表不得另立映射）。
       expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
     }
-    // 现值锚点（漂移可见）：PROTOCOL_PROVIDERS 中 claude∈stream_json、codex∈json_rpc。
+    // 现值锚点（漂移可见）：PROTOCOL_PROVIDERS 中 claude∈stream_json、codex∈json_rpc、
+    // pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）。
     expect(INTERACTIVE_PROVIDERS.claude?.family).toBe('stream_json');
     expect(INTERACTIVE_PROVIDERS.codex?.family).toBe('json_rpc');
+    expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
   it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、8 契约键齐全', () => {
@@ -135,7 +140,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     }
   });
 
-  it('5. createDriver 可实例化（mock deps）：claude→ClaudeSdkDriver / codex→CodexAppServerDriver', () => {
+  it('5. createDriver 可实例化（mock deps）：claude→ClaudeSdkDriver / codex→CodexAppServerDriver / pi→PiRpcDriver', () => {
     // mock deps：预留占位入参（工厂现状零参构造不消费，传占位验证签名兼容）。
     const mockDeps = { env: { SILLYHUB_TEST: '1' } };
 
@@ -146,6 +151,12 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     const codexDriver = INTERACTIVE_PROVIDERS.codex?.createDriver(mockDeps);
     expect(codexDriver).toBeInstanceOf(CodexAppServerDriver);
     expect(codexDriver?.provider).toBe('codex');
+
+    // task-04：pi 当前为占位 driver（零参可构造即过；真实 rpc 实现归
+    // task-02/06 替换 pi-rpc-driver.ts，本断言不依赖占位内部行为）。
+    const piDriver = INTERACTIVE_PROVIDERS.pi?.createDriver(mockDeps);
+    expect(piDriver).toBeInstanceOf(PiRpcDriver);
+    expect(piDriver?.provider).toBe('pi');
   });
 
   it('6. 未注册键 → UnsupportedProviderError（经 SessionManager.create，错误语义不变）', async () => {

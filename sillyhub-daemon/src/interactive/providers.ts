@@ -20,6 +20,7 @@ import type { ProtocolType } from '../adapters/index.js';
 import type { InteractiveDriver } from './driver.js';
 import { ClaudeSdkDriver } from './claude-sdk-driver.js';
 import { CodexAppServerDriver } from './codex-app-server-driver.js';
+import { PiRpcDriver } from './pi-rpc-driver.js';
 
 /** provider 能力矩阵（8 键全 boolean，缺省 false 默认拒绝）。 */
 export interface ProviderCaps {
@@ -87,6 +88,25 @@ export interface ProviderCaps {
  * - subagent：session-panel.tsx:3237 / 3563 / 5707 团队派工仅 claude；
  * - edit_patch：run_sync/service.py:3679 structuredPatch 仅 Claude SDK 形状，
  *   codex flat message 契约无此字段。
+ *
+ * pi（2026-09-04-provider-pi-onboarding task-04 / design §5.3 能力矩阵，
+ * 4 项 true 4 项 false——三态结论「原生 / 暂缺」依据，D-002@v1 桥接补齐+
+ * 如实标记）：
+ * - resume=true（原生）：rpc --session-id / switch_session / fork + 隔离
+ *   session-dir（design §5.1 resume 链路）；
+ * - mcp=false（暂缺）：pi 无原生 MCP（自家 extension 生态另轨），桥接留后续
+ *   变更（design §3 非目标）；
+ * - multimodal=true（原生）：rpc prompt images（ImageContent base64）；
+ * - thinking=true（原生）：--thinking 七档 + set_thinking_level + thinking
+ *   内容块；
+ * - subagent=false（初始，桥接-示例扩展）：subagent/ 是 pi examples/ 示例扩展
+ *   非内置（-e 需路径非名称），子代理事件无 per-child 归属——按 onboarding
+ *   §6.2 纪律初始 false，R-02 实证后由 task-06 翻 true（本 task 不动）；
+ * - permission_dialog=false（暂缺）：rpc 无审批命令，pi 权限门在 extension 层；
+ * - edit_patch=false（暂缺）：pi edit 工具结果为 diff 文本无结构化 patch，
+ *   前端 LCS 回退可用；
+ * - model_select=true（原生）：set_model / cycle_model /
+ *   get_available_models rpc 全套。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -106,6 +126,18 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     thinking: false,
     subagent: false,
     permission_dialog: true,
+    edit_patch: false,
+    model_select: true,
+  },
+  // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 初始 false
+  // 遵守 §6.2 纪律，翻值只归 task-06）。
+  pi: {
+    resume: true,
+    mcp: false,
+    multimodal: true,
+    thinking: true,
+    subagent: false,
+    permission_dialog: false,
     edit_patch: false,
     model_select: true,
   },
@@ -209,10 +241,11 @@ function capsOf(provider: string): ProviderCaps {
 }
 
 /**
- * interactive provider 注册表（design §5.2；claude / codex 两键）。
+ * interactive provider 注册表（design §5.2；claude / codex / pi 三键——pi 为
+ * 2026-09-04-provider-pi-onboarding task-04 接入）。
  *
  * `satisfies` 手法：不 widen 键类型，`keyof typeof INTERACTIVE_PROVIDERS`
- * 保持 'claude' | 'codex' 字面量联合——InteractiveProvider 由此推导（单源）。
+ * 保持 'claude' | 'codex' | 'pi' 字面量联合——InteractiveProvider 由此推导（单源）。
  * 新增 provider 在此加条目（caps 同步进上方 PROVIDER_CAPS + backend/frontend
  * 两端镜像），类型系统自动扩展，无需改 driver.ts / types.ts 的联合定义。
  */
@@ -232,6 +265,16 @@ export const INTERACTIVE_PROVIDERS = {
     displayName: 'Codex',
     createDriver: (): InteractiveDriver => new CodexAppServerDriver(),
     caps: capsOf('codex'),
+  },
+  // pi：family='pi_json' 与批量层 PROVIDER_TO_PROTOCOL 反查一致（守护测试断言）；
+  // displayName='PI'；driver 当前为 task-04 占位（零参构造可实例化，契约方法
+  // NotImplemented），真实 rpc 实现归 task-02/06 替换 pi-rpc-driver.ts。
+  pi: {
+    provider: 'pi',
+    family: 'pi_json',
+    displayName: 'PI',
+    createDriver: (): InteractiveDriver => new PiRpcDriver(),
+    caps: capsOf('pi'),
   },
 } satisfies Record<string, ProviderDescriptor>;
 

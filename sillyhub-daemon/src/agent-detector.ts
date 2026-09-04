@@ -153,6 +153,9 @@ export const PROVIDER_SPECS = {
     envPath: 'SILLYHUB_PI_PATH',
     versionPattern: /(\d+\.\d+\.\d+)/,
     protocol: 'pi_json' as const,
+    // 2026-09-04-provider-pi-onboarding task-04（R-03）：rpc 事件流词汇随版本
+    // 漂移，interactive 接入以 0.81.x 实测词表为基线，低于 0.81.0 探测警告。
+    minVersion: '0.81.0',
   },
   cursor: {
     bin: 'cursor-agent',
