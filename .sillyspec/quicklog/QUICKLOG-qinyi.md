@@ -181,3 +181,15 @@
 根因：①28bf3bc3e(ql-019) pull 成功后按落地树重建 manifest 缓存，handleInitLease 第4步 post 在 init 无新增文件时 diff 恒零按契约跳过，test_init_lease 两例仍锁「init 后必 post」旧前提致 daemon-ci 红；②87d237f68(ql-020) 给非 worker 判死补 daemon_interrupted 的分桶口径是 active worker 之外全部，越界 design「pending 档不加分流」显式边界覆盖 pending 档（含 worker pending），且 worker pending 落码后命中 sweep retry_seeds 自愈查询会在 runtime 回在线时被自动重派（从未开跑的 run 重建 lease），backend-ci 3 例红
 方案：①test_init_lease ws-init-ok 改锁无改动跳过 post，order-C 与 postfail 两例 spawn mock 镜像 sillyspec init 落骨架写真实文件使 post 真实触发（保住时序覆盖与 R-03 软失败路径不空转），生产代码零改动；②sweep.py error_code+output_redacted 赋值收窄到 active_main_ids、新增 pending_ids 无码收敛分支，docstring 同步；test_main_active_suspended_regression_locked 改锁新行为（daemon_interrupted+可读原因，_run_row 补 output_redacted），pending 档两例不动随收窄复绿；两模块文档变更索引各加 ql-20260904-024-e59b 条目
 结果：daemon test_init_lease 28/28 绿（原 2 红）+tsc 0；backend daemon 模块 1974 passed（原 3 红）+patrol 4 文件 89 passed+ruff 0+mypy 0；frontend-ci 用户所贴失败实为 02:25 旧红（admin/organizations 抖动）已被 d56b01d41 修复，远端 main frontend-ci 当前绿；待推送后 CI 复验
+
+## ql-20260904-025-45f7 | 2026-09-04 15:54:46 | 修归档变更步骤时间线丢失——rename 检测跨日期兜底+progress 收件箱改名迁移
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/service.py（_strip_date_prefix+_detect_renames 描述段兜底+_rename_progress_rows 收件箱改名迁移）
+- backend/app/modules/change/tests/test_reparse_delete_closure.py（3 个归档 rename 用例+_seed_progress_row steps 参数+_seed_archived_change helper）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引加 ql-20260904-025-45f7 条目）
+需求：修归档变更步骤时间线丢失——rename 检测跨日期兜底+progress 收件箱改名迁移
+根因：CLI 归档把目录改名「去源日期+拼归档日期」，_detect_renames 同日期前缀匹配必然 miss，旧行误判 orphaned 进删除环物理删且 _delete_progress_rows 连带清 platform_change_progress 收件箱 steps；新归档行 key 变了投影 join 也 miss，前端 steps 为空即不渲染时间线卡片
+方案：①_detect_renames 增描述段兜底（_strip_date_prefix 剥 YYYY-MM-DD- 前缀，唯一候选才配对，≥2 静默放弃）②新增 _rename_progress_rows（主 commit 后独立短事务 best-effort）：新名无行直接改 change_name，已有行则目标 steps 空时回填源 steps 再删源行
+结果：新增 3 用例（跨日期匹配+迁移/目标已存在回填合并/描述段二义放弃）；change 模块 500 passed 2 skipped、platform_sync 189 passed、删除闭环文件 14 passed，ruff check/format 干净、mypy 0 issue；存量已丢 steps 的归档行不可恢复（项目未上线不补历史兼容）

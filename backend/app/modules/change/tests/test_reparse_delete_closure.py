@@ -66,6 +66,13 @@ def _seed_change(spec_root: Path, key: str, title: str) -> None:
     (d / "proposal.md").write_text(f"# {title}\n", encoding="utf-8")
 
 
+def _seed_archived_change(spec_root: Path, key: str, title: str) -> None:
+    """落归档目录 changes/archive/<key>/（ql-20260904-025 归档改名用例）。"""
+    d = spec_root / "changes" / "archive" / key
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "proposal.md").write_text(f"# {title}\n", encoding="utf-8")
+
+
 async def _fetch(db_session, ws_id: uuid.UUID, key: str) -> Change | None:
     return (
         (
@@ -82,17 +89,29 @@ async def _fetch(db_session, ws_id: uuid.UUID, key: str) -> Change | None:
 
 
 async def _seed_progress_row(
-    db_session, ws_id: uuid.UUID, change_name: str, *, updated_at: datetime | None = None
+    db_session,
+    ws_id: uuid.UUID,
+    change_name: str,
+    *,
+    updated_at: datetime | None = None,
+    steps: list | None = None,
 ) -> None:
-    """插收件箱行（latest_progress 报 active；表由 conftest autouse fixture 建）。"""
+    """插收件箱行（latest_progress 报 active；表由 conftest autouse fixture 建）。
+
+    ``steps`` 非 None 时覆盖 latest_progress.steps（归档 rename 迁移用例用：
+    旧名行带时间线数据 / 新名行 steps 空数组模拟 CLI 归档后新名推送）。
+    """
+    latest_progress: dict = {
+        "project": {"name": "demo"},
+        "changes": [{"name": change_name, "status": "active"}],
+    }
+    if steps is not None:
+        latest_progress["steps"] = steps
     db_session.add(
         PlatformChangeProgressORM(
             workspace_id=ws_id,
             change_name=change_name,
-            latest_progress={
-                "project": {"name": "demo"},
-                "changes": [{"name": change_name, "status": "active"}],
-            },
+            latest_progress=latest_progress,
             last_pushed_at="2026-08-29T00:00:00.000Z",
             last_pusher="tester",
             **({"updated_at": updated_at} if updated_at is not None else {}),
@@ -509,3 +528,101 @@ async def test_member_local_delete_without_anchor_still_physical_deleted(db_sess
     assert stats["deleted"] == 1, "无锚点 → 照常物理删"
     assert stats["tombstoned"] == 0
     assert await _fetch(db_session, ws.id, "2026-08-29-local") is None
+
+
+# ===========================================================================
+# 归档改名跨日期 rename + progress 收件箱改名迁移（ql-20260904-025）
+# ===========================================================================
+#
+# 事故链：CLI 归档把 changes/2026-08-29-x/ 改名为 changes/archive/2026-08-30-x/
+# （去源日期 + 拼归档日期）→ _detect_renames 同日期前缀匹配必然 miss → 旧行进
+# 删除环物理删除 + _delete_progress_rows 连带清收件箱 steps → 变更中心已归档
+# 变更详情页步骤时间线整张不渲染（前端 steps 为空即不挂载时间线卡片）。
+
+_ARCHIVE_STEPS = [
+    {"stage": "brainstorm", "status": "completed", "completed_at": "2026-08-29T01:00:00Z"},
+    {"stage": "plan", "status": "completed", "completed_at": "2026-08-29T02:00:00Z"},
+]
+
+
+async def test_archive_rename_matched_across_dates_and_progress_migrated(db_session, tmp_path):
+    """归档改名跨日期：描述段兜底匹配 rename，Change 行保工作流状态 + 收件箱行
+    连带改名（steps 时间线数据不丢）。"""
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_ws(db_session, ws, spec_root)
+    _seed_change(spec_root, "2026-08-29-move", "Move")
+    service = ChangeService(db_session)
+    stats, _ = await service.reparse(ws.id)
+    assert stats["created"] == 1
+    old_row = await _fetch(db_session, ws.id, "2026-08-29-move")
+    await _seed_progress_row(db_session, ws.id, "2026-08-29-move", steps=_ARCHIVE_STEPS)
+
+    # 模拟 CLI 归档：源目录消失，归档目录以新日期前缀出现
+    shutil.rmtree(spec_root / "changes" / "2026-08-29-move")
+    _seed_archived_change(spec_root, "2026-08-30-move", "Move")
+
+    stats, _ = await service.reparse(ws.id)  # 全量
+
+    assert stats["renamed"] == 1, "归档跨日期改名应被描述段兜底匹配为 rename"
+    assert stats["deleted"] == 0, "旧行不进删除环"
+    assert stats["created"] == 0, "归档目录不新建行"
+    assert await _fetch(db_session, ws.id, "2026-08-29-move") is None
+    new_row = await _fetch(db_session, ws.id, "2026-08-30-move")
+    assert new_row is not None
+    assert new_row.id == old_row.id, "同一 DB 行换 key，工作流状态随行走"
+    assert new_row.location == "archive"
+    # 收件箱行连带改名 → 投影按新 key join 命中，steps 原样保留
+    assert await _fetch_progress(db_session, ws.id, "2026-08-29-move") is None
+    progress = await _fetch_progress(db_session, ws.id, "2026-08-30-move")
+    assert progress is not None, "收件箱行 change_name 迁到新 key"
+    assert progress.latest_progress["steps"] == _ARCHIVE_STEPS
+
+
+async def test_archive_rename_progress_merges_steps_when_target_exists(db_session, tmp_path):
+    """CLI 归档后已用新名推过（新名行 steps 空）：rename 迁移回填 steps 并删旧名行，
+    防同变更双行共存投影不确定。"""
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_ws(db_session, ws, spec_root)
+    _seed_change(spec_root, "2026-08-29-dup", "Dup")
+    service = ChangeService(db_session)
+    await service.reparse(ws.id)
+    await _seed_progress_row(db_session, ws.id, "2026-08-29-dup", steps=_ARCHIVE_STEPS)
+    # 新名行：CLI 归档后推送，payload 无 steps（空数组）
+    await _seed_progress_row(db_session, ws.id, "2026-08-30-dup", steps=[])
+
+    shutil.rmtree(spec_root / "changes" / "2026-08-29-dup")
+    _seed_archived_change(spec_root, "2026-08-30-dup", "Dup")
+
+    stats, _ = await service.reparse(ws.id)
+
+    assert stats["renamed"] == 1
+    assert await _fetch_progress(db_session, ws.id, "2026-08-29-dup") is None
+    progress = await _fetch_progress(db_session, ws.id, "2026-08-30-dup")
+    assert progress is not None
+    assert progress.latest_progress["steps"] == _ARCHIVE_STEPS, "目标 steps 空 → 源非空 steps 回填"
+
+
+async def test_archive_rename_ambiguous_desc_not_matched(db_session, tmp_path):
+    """描述段不唯一（两个不同日期的同名孤儿行）→ 放弃匹配，归档目录新建独立行，
+    防误配吞掉合法历史行。"""
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_ws(db_session, ws, spec_root)
+    _seed_change(spec_root, "2026-08-28-same", "Same A")
+    _seed_change(spec_root, "2026-08-29-same", "Same B")
+    service = ChangeService(db_session)
+    stats, _ = await service.reparse(ws.id)
+    assert stats["created"] == 2
+
+    # 两源目录同时消失 + 归档目录出现（描述段 same 有两个孤儿候选）
+    shutil.rmtree(spec_root / "changes" / "2026-08-28-same")
+    shutil.rmtree(spec_root / "changes" / "2026-08-29-same")
+    _seed_archived_change(spec_root, "2026-08-30-same", "Same C")
+
+    stats, _ = await service.reparse(ws.id)
+
+    assert stats["renamed"] == 0, "≥2 候选静默放弃，不错配"
+    assert stats["created"] == 1, "归档目录按新变更建行"
+    assert stats["deleted"] == 2, "两孤儿行进删除环（磁盘权威）"

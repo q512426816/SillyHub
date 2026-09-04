@@ -106,6 +106,27 @@ class RerunStageResult:
     agent_dispatch: dict
 
 
+def _strip_date_prefix(key: str) -> str | None:
+    """「YYYY-MM-DD-<desc>」→「<desc>」；非日期前缀的 key 返回 None。
+
+    ql-20260904-025：归档改名的跨日期匹配按描述段配对（见
+    ``_detect_renames`` 兜底分支）；本项目变更名约定带前导日期，剥离后
+    的描述段才是跨日期稳定的部分。不用正则——按固定位校验四个分隔字符
+    与数字段，等价且零依赖。
+    """
+    if (
+        len(key) > 11
+        and key[4] == "-"
+        and key[7] == "-"
+        and key[10] == "-"
+        and key[:4].isdigit()
+        and key[5:7].isdigit()
+        and key[8:10].isdigit()
+    ):
+        return key[11:]
+    return None
+
+
 class ChangeService:
     """List, fetch, and reparse changes for a workspace."""
 
@@ -1355,8 +1376,13 @@ class ChangeService:
         )
 
         # Update existing_by_key for renamed entries: old_key → new_key
+        # ql-20260904-025：同时收集 (old_key, new_key) 对，主 commit 后连带迁移
+        # progress 收件箱行 change_name（见 _rename_progress_rows）——否则投影
+        # 按新 key join change_name 恒 miss，steps 时间线丢数据。
+        renamed_pairs: list[tuple[str, str]] = []
         for new_key, old_row in rename_map.items():
             old_key = old_row.change_key
+            renamed_pairs.append((old_key, new_key))
             existing_by_key.pop(old_key, None)
             existing_by_key[new_key] = old_row
 
@@ -1544,6 +1570,12 @@ class ChangeService:
         # 的 get_session_factory 范式）彻底隔离：联动删失败仅告警，主事务已落库。
         if deleted_keys:
             await self._delete_progress_rows(workspace_id, deleted_keys)
+        # ql-20260904-025：rename 命中的 key 连带迁移 progress 收件箱行——
+        # 与 _delete_progress_rows 同范式（主 commit 后独立短事务、best-effort
+        # 失败仅告警）。rename 行已弹出删除候选集，不会进 deleted_keys，两
+        # 通道键集不相交，先后顺序无影响。
+        if renamed_pairs:
+            await self._rename_progress_rows(workspace_id, renamed_pairs)
         return stats, result
 
     async def _progress_reported_active_keys(
@@ -1646,6 +1678,69 @@ class ChangeService:
                 error=str(exc),
             )
 
+    async def _rename_progress_rows(
+        self, workspace_id: uuid.UUID, rename_pairs: list[tuple[str, str]]
+    ) -> None:
+        """rename 联动迁移 ``platform_change_progress`` 收件箱行（ql-20260904-025）。
+
+        ``_detect_renames`` 命中目录改名（典型=归档改名换日期前缀）后，Change 行
+        的 change_key 换成新 key，而收件箱行仍挂旧 ``change_name``——投影
+        ``_project_current_stage`` 按新 key join 恒 miss，``steps`` 时间线数据
+        虽在库里却读不出来。这里把收件箱行一并改名：
+
+        - 新名无行：源行 ``change_name`` 直接改新名（最常见——CLI 归档前最后
+          一推仍用旧名）；
+        - 新名已有行（CLI 归档后以新名推过）：目标 ``steps`` 为空且源非空时把
+          源 ``steps`` 回填进目标 ``latest_progress``（浅拷贝改键，其余字段以
+          目标新推为准），随后删源行——防同变更双行共存导致投影不确定。
+
+        与 ``_delete_progress_rows`` 同范式：独立短事务 + best-effort，任何 DB
+        异常只告警不影响主 reparse 结果；行不存在静默跳过。
+        """
+        try:
+            from app.core.db import get_session_factory
+            from app.modules.platform_sync.model import PlatformChangeProgressORM
+
+            async with get_session_factory()() as rename_session:
+                for old_name, new_name in rename_pairs:
+                    rows = (
+                        (
+                            await rename_session.execute(
+                                select(PlatformChangeProgressORM).where(
+                                    col(PlatformChangeProgressORM.workspace_id) == workspace_id,
+                                    col(PlatformChangeProgressORM.change_name).in_(
+                                        [old_name, new_name]
+                                    ),
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    by_name = {r.change_name: r for r in rows}
+                    src = by_name.get(old_name)
+                    if src is None:
+                        continue
+                    dst = by_name.get(new_name)
+                    if dst is None:
+                        src.change_name = new_name
+                        continue
+                    src_steps = (src.latest_progress or {}).get("steps")
+                    dst_steps = (dst.latest_progress or {}).get("steps")
+                    if src_steps and not dst_steps:
+                        merged = dict(dst.latest_progress or {})
+                        merged["steps"] = src_steps
+                        dst.latest_progress = merged
+                    await rename_session.delete(src)
+                await rename_session.commit()
+        except Exception as exc:  # best-effort 守卫，任何 DB 异常只告警不回滚 rename
+            log.warning(
+                "change.reparse_progress_rename_failed",
+                workspace_id=str(workspace_id),
+                rename_pairs=rename_pairs,
+                error=str(exc),
+            )
+
     async def _bind_change_to_session(
         self,
         workspace_id: uuid.UUID,
@@ -1708,6 +1803,8 @@ class ChangeService:
         When sillyspec CLI renames a change directory, the old key disappears
         and a new key appears. This method matches them so the existing DB row
         keeps its workflow state (current_stage, human_gate, stages JSON).
+        匹配两档（ql-20260904-025）：①同日期前缀；②归档改名跨日期时按
+        「去日期前缀的描述段」兜底（均要求唯一候选才配对）。
 
         Returns a map of new_key → existing Change row for detected renames.
 
@@ -1764,7 +1861,23 @@ class ChangeService:
                 for old_key, row in orphaned.items()
                 if old_key[:11] == new_prefix and old_key not in matched_old_keys
             ]
-            # Only match when unambiguous (exactly one candidate with same date)
+            # ql-20260904-025：归档改名跨日期兜底——sillyspec 归档把目录改名为
+            # 「去源日期前缀 + 拼归档日期」（docs/sillyspec/finished/
+            # archive-step5-leading-date-change-name.md），同日期前缀匹配必然
+            # miss → 旧行被误判 orphaned 进删除环物理删除，progress 收件箱行
+            # （steps 时间线数据源）连带清空，变更中心已归档变更详情页时间线
+            # 整张不渲染。按「去日期前缀后的描述段」二次匹配，同样要求唯一
+            # 候选才配对（≥2 候选静默放弃，防同日多变更/同名复用误配）。
+            if len(candidates) != 1:
+                new_desc = _strip_date_prefix(new_key)
+                if new_desc:
+                    candidates = [
+                        (old_key, row)
+                        for old_key, row in orphaned.items()
+                        if old_key not in matched_old_keys
+                        and _strip_date_prefix(old_key) == new_desc
+                    ]
+            # Only match when unambiguous (exactly one candidate)
             if len(candidates) == 1:
                 result[new_key] = candidates[0][1]
                 matched_old_keys.add(candidates[0][0])
