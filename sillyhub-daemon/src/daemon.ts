@@ -5434,6 +5434,13 @@ export class Daemon {
     const outcome = await this._controlDispatcher.consume(kind, rawPayload, {
       commandId,
       runtimeId,
+      // ql-20260904-022：WS 送达指令消费后立即回执。冲刷原本只在补拉趟发生，
+      // 而补拉触发条件（心跳 pending_controls>0 只统计 pending 行 / 重连对账）
+      // 对 WS 已送达（delivered）的指令永不成立——ack 永远留队，10 分钟后
+      // backend GC 按 delivered-未-ack 判死 run，误杀正在等 AskUserQuestion
+      // 用户回答的活轮（事故会话 e148364e）。runtimeId 缺省时 dispatcher 自然
+      // 退回入队等捎带（未知桶语义不变）。
+      immediateAck: true,
     });
     if (outcome === 'duplicate') {
       this._logger.info('control_command_duplicate_dropped', {

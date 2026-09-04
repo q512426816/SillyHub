@@ -140,7 +140,15 @@
 方案：AgentLogCard 从对话流尾部气泡条目（turn-timeline streamFooter 挂载）改为面板级整宽折叠栏，挂横幅之下/会话主体之上；默认一行摘要细栏点击展开明细（明细/复制/查看内容/展开全部/刷新交互保留）；新增 mobile prop 对齐横幅内边距；纯 tool_report 主体不重复挂载；turn-timeline 注入口保留备用
 结果：agent-log-card 23 用例（补顶部栏根断言）+ session-panel×15/turn-timeline×5 相关套件 231 用例全绿，tsc 0，eslint 0 新增告警（仅存量），改动文件已 git add
 
-## ql-20260904-022-ab52 | 2026-09-04 14:44:52 | 修复 WS 送达控制指令 ack 无冲刷触发点致 GC 误杀等待用户回答的活轮（事故 e148364e）
-状态：进行中
+## ql-20260904-022-ab52 | 2026-09-04 14:44:52 | 修 WS 送达控制指令 ack 无冲刷触发点（daemon 消费后立即回执）
+状态：已完成
 关联变更：（无）
-文件：sillyhub-daemon/src/control-dispatcher.ts, sillyhub-daemon/src/control-dispatcher.test.ts
+文件：
+- sillyhub-daemon/src/control-dispatcher.ts（immediateAck 选项+_queueAck 入桶即冲刷）
+- sillyhub-daemon/src/daemon.ts（_dispatchControl 传 immediateAck: true）
+- sillyhub-daemon/tests/control-dispatcher.test.ts（新增 4 用例）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引追加 ql-20260904-022）
+需求：修 WS 送达控制指令 ack 无冲刷触发点（daemon 消费后立即回执）
+根因：ack 冲刷只在 pullAndConsume（触发=心跳 pending_controls>0 或重连对账），而 pending_controls 只统计 pending 行、WS 送达即 delivered 的指令永不触发——ack 永远留队，10 分钟后 backend GC 按 delivered-未-ack 联动判死 run，误杀等 AskUserQuestion 用户回答的活轮（事故会话 e148364e，run ca7ec9b8，点选报 no active run to approve）
+方案：control-dispatcher consume() 新增 immediateAck 选项（入桶后 fire-and-forget 冲刷该 runtime 桶，失败留队由补拉/重连兜底，UNKNOWN 桶维持捎带）；daemon.ts _dispatchControl 传 immediateAck: true；补拉路径不传保持批尾单次冲刷
+结果：control-dispatcher 新增 4 用例 19/19 绿；近邻 10 套件 146/146 绿；tsc --noEmit 0

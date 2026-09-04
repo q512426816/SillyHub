@@ -7,6 +7,9 @@
 //   - 处理成功与业务失败（handler 抛错 / 未知 kind）均发 ack；
 //   - ack 网络失败不删队列留待下轮；getPendingControls 网络错上抛由调用方降级；
 //   - LRU 容量淘汰（滑动窗语义，同 backend ws_hub 128 先例）。
+// ql-20260904-022 追加：WS 送达指令 immediateAck 立即冲刷——防 delivered 指令
+// 无冲刷触发点（心跳 pending_controls 只统计 pending 行）被 backend GC 按
+// delivered-未-ack 误杀等用户回答的活轮（事故会话 e148364e）。
 
 import { describe, it, expect, vi } from 'vitest';
 import {
@@ -355,5 +358,98 @@ describe('ControlDispatcher — ack 语义（成功/业务失败均回执）', (
     const summary = await d.pullAndConsume('rt-1');
     expect(summary.consumed).toBe(1);
     expect(handler).toHaveBeenCalledWith({});
+  });
+});
+
+describe('ControlDispatcher — WS 送达指令立即回执（ql-20260904-022）', () => {
+  it('immediateAck：WS 消费成功后不等补拉即冲刷 ack（runtime_id 实值）', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource();
+    const d = new ControlDispatcher({
+      handlers: { [CONTROL_KIND.SESSION_INJECT]: handler },
+      source,
+      logger: silentLogger,
+    });
+    // WS 消费（payload 尾部 command_id + runtime_id，同 daemon _dispatchControl
+    // 提取后的调用形状）——不跑 pullAndConsume，ack 也应已发出。
+    const outcome = await d.consume(
+      CONTROL_KIND.SESSION_INJECT,
+      { session_id: 's1', command_id: 'cmd-i1', runtime_id: 'rt-1' },
+      { commandId: 'cmd-i1', runtimeId: 'rt-1', immediateAck: true },
+    );
+    expect(outcome).toBe('handled');
+    await vi.waitFor(() => expect(source.ackCalls.length).toBe(1));
+    expect(source.ackCalls[0]!.runtimeId).toBe('rt-1');
+    expect(source.ackCalls[0]!.ids).toContain('cmd-i1');
+    // mock 在 POST 开始时记录调用、dispatcher 在 POST 成功后才出队（一个微任务
+    // 之差）——等出队收敛后再断言队列清空。
+    await vi.waitFor(() => expect(d.pendingAckCount).toBe(0));
+  });
+
+  it('immediateAck 冲刷失败（网络抖动）→ ids 留桶，补拉趟兜底重发', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource();
+    source.ackImpl.fn = async () => {
+      throw new Error('ack network down');
+    };
+    const d = new ControlDispatcher({
+      handlers: { [CONTROL_KIND.SESSION_INJECT]: handler },
+      source,
+      logger: silentLogger,
+    });
+    await d.consume(
+      CONTROL_KIND.SESSION_INJECT,
+      { session_id: 's1', command_id: 'cmd-i2', runtime_id: 'rt-1' },
+      { commandId: 'cmd-i2', runtimeId: 'rt-1', immediateAck: true },
+    );
+    // 立即冲刷已尝试且失败（调用发生）但 ids 未出队。
+    await vi.waitFor(() => expect(source.ackCalls.length).toBe(1));
+    expect(d.pendingAckCount).toBe(1);
+    // 网络恢复：空补拉趟（无 pending 指令）冲刷留队 ack。
+    source.ackImpl.fn = async (_rid, ids) => ({ acked: ids.length });
+    const summary = await d.pullAndConsume('rt-1');
+    expect(summary.acked).toBe(1);
+    expect(d.pendingAckCount).toBe(0);
+    expect(source.ackCalls[1]!.ids).toContain('cmd-i2');
+  });
+
+  it('immediateAck 但 runtimeId 缺省（UNKNOWN 桶）→ 不立即 POST，维持入队等捎带', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource();
+    const d = new ControlDispatcher({
+      handlers: { [CONTROL_KIND.PERMISSION_RESPONSE]: handler },
+      source,
+      logger: silentLogger,
+    });
+    await d.consume(
+      CONTROL_KIND.PERMISSION_RESPONSE,
+      { request_id: 'q1', command_id: 'cmd-i3' },
+      { commandId: 'cmd-i3', immediateAck: true },
+    );
+    // 无 runtime_id 无 ack 端点可定位——立即冲刷不触发（既有未知桶语义）。
+    await new Promise((r) => setTimeout(r, 10));
+    expect(source.ackCalls.length).toBe(0);
+    expect(d.pendingAckCount).toBe(1);
+    // 下一趟任意 runtime 补拉捎带回执。
+    const summary = await d.pullAndConsume('rt-1');
+    expect(summary.acked).toBe(1);
+  });
+
+  it('补拉路径不传 immediateAck → 维持批尾单次 ack（批量语义不变）', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource([cmd('b1'), cmd('b2', CONTROL_KIND.SESSION_INTERRUPT)]);
+    const d = new ControlDispatcher({
+      handlers: {
+        [CONTROL_KIND.SESSION_INJECT]: handler,
+        [CONTROL_KIND.SESSION_INTERRUPT]: handler,
+      },
+      source,
+      logger: silentLogger,
+    });
+    const summary = await d.pullAndConsume('rt-1');
+    expect(summary).toEqual({ pulled: 2, consumed: 2, acked: 2 });
+    // 批量语义：两条指令一次 ack POST（不是逐条立即冲刷）。
+    expect(source.ackCalls.length).toBe(1);
+    expect(source.ackCalls[0]!.ids.sort()).toEqual(['b1', 'b2']);
   });
 });

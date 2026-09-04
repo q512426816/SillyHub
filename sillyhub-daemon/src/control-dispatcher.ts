@@ -17,7 +17,9 @@
  *     design A2 / D-006）；
  *   - ack 收集：消费成功与业务失败（handler 抛错 / 未知 kind）均收集 command_id，
  *     批量 POST controls/ack——毒丸指令不无限重投；ack 网络失败不删队列，留待
- *     下轮补拉重试（backend 端 ack 幂等）。
+ *     下轮补拉重试（backend 端 ack 幂等）。WS 通道消费后经 immediateAck 立即
+ *     冲刷（ql-20260904-022，防 delivered 指令无冲刷触发点被 backend GC 误杀
+ *     活轮）；补拉趟维持批尾单次冲刷。
  *
  * 不做：
  *   - 不内嵌业务逻辑（session 状态机 / 权限 resolver / reload 全在 handler）；
@@ -140,14 +142,15 @@ export class ControlDispatcher {
    *
    * @param kind      控制指令 kind（CONTROL_KIND 词表）。
    * @param payload   与既有 WS 消息同构的 payload（补拉路径可能为 null → 传空对象）。
-   * @param opts      commandId（去重键）/ runtimeId（回执归属）。
+   * @param opts      commandId（去重键）/ runtimeId（回执归属）/ immediateAck
+   *                  （WS 通道传 true：入桶后立即冲刷，见 _queueAck）。
    */
   async consume(
     kind: string,
     payload: Record<string, unknown>,
-    opts: { commandId?: string; runtimeId?: string } = {},
+    opts: { commandId?: string; runtimeId?: string; immediateAck?: boolean } = {},
   ): Promise<ControlConsumeOutcome> {
-    const { commandId, runtimeId } = opts;
+    const { commandId, runtimeId, immediateAck } = opts;
     if (commandId !== undefined) {
       if (!this._markSeen(commandId)) {
         this._logger?.info?.('control_command_duplicate', {
@@ -156,14 +159,14 @@ export class ControlDispatcher {
         });
         // 补拉趟里重复出现 = 上次消费后 ack 未达（backend 仍 pending）——重新
         // 排队回执，让 ack 最终收敛（重复执行已被上方去重拦截）。
-        this._queueAck(runtimeId, commandId);
+        this._queueAck(runtimeId, commandId, immediateAck);
         return 'duplicate';
       }
     }
     const handler = this._handlers[kind];
     if (!handler) {
       this._logger?.warn?.('control_command_unknown_kind', { kind });
-      this._queueAck(runtimeId, commandId);
+      this._queueAck(runtimeId, commandId, immediateAck);
       return 'unknown_kind';
     }
     try {
@@ -174,10 +177,10 @@ export class ControlDispatcher {
         command_id: commandId,
         error: e,
       });
-      this._queueAck(runtimeId, commandId);
+      this._queueAck(runtimeId, commandId, immediateAck);
       return 'handler_error';
     }
-    this._queueAck(runtimeId, commandId);
+    this._queueAck(runtimeId, commandId, immediateAck);
     return 'handled';
   }
 
@@ -240,10 +243,23 @@ export class ControlDispatcher {
     return true;
   }
 
-  /** 收集回执（commandId/runtimeId 任一缺省则跳过——无 id 无法回执，无桶可挂）。 */
+  /**
+   * 收集回执（commandId/runtimeId 任一缺省则跳过——无 id 无法回执，无桶可挂）。
+   *
+   * ``immediateAck``（WS 通道传 true）：入桶后立即 fire-and-forget 冲刷该桶。
+   * ql-20260904-022：ack 冲刷原本只发生在 pullAndConsume（触发条件 = 心跳
+   * pending_controls>0 或重连对账），而 pending_controls 只统计 pending 行、
+   * WS 送达即 delivered 的指令永不触发补拉——daemon 活着消费了指令、ack 却
+   * 永远留队，10 分钟后被 backend GC 按「delivered 未 ack」联动判死 run，
+   * 误杀正在等 AskUserQuestion 用户回答的活轮（事故会话 e148364e，run
+   * ca7ec9b8）。立即冲刷后 10min GC 窗口与「等用户回答」时间天然解耦；冲刷
+   * 失败（网络抖动）ids 留桶，由既有补拉/重连路径兜底。runtimeId 缺省
+   * （UNKNOWN 桶）无 ack 端点可定位，维持入队等下趟捎带（既有语义）。
+   */
   private _queueAck(
     runtimeId: string | undefined,
     commandId: string | undefined,
+    immediateAck = false,
   ): void {
     if (commandId === undefined) return;
     const key = runtimeId !== undefined && runtimeId !== '' ? runtimeId : UNKNOWN_RUNTIME_KEY;
@@ -253,6 +269,9 @@ export class ControlDispatcher {
       this._pendingAcks.set(key, bucket);
     }
     bucket.add(commandId);
+    if (immediateAck && key !== UNKNOWN_RUNTIME_KEY) {
+      void this._flushAcks(key);
+    }
   }
 
   /**
