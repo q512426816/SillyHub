@@ -409,6 +409,12 @@ export interface PermissionResponsePayload {
    * 向后兼容：旧 daemon 不读此字段，按普通 allow 处理。
    */
   dialog_result?: unknown;
+  /**
+   * ack 归属桶键（ql-20260904-023，可选）：daemon 消费后据此立即回执
+   *（control-dispatcher immediateAck 按 runtime 桶冲刷）。旧 backend 无此键
+   * → 入未知桶等补拉捎带（行为不变）；旧 daemon 忽略未知键。
+   */
+  runtime_id?: string;
 }
 
 // ── 控制指令 kind 词表（2026-08-29-daemon-platform-resilience task-06）──────────

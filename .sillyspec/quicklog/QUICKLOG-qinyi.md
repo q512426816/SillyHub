@@ -152,3 +152,23 @@
 根因：ack 冲刷只在 pullAndConsume（触发=心跳 pending_controls>0 或重连对账），而 pending_controls 只统计 pending 行、WS 送达即 delivered 的指令永不触发——ack 永远留队，10 分钟后 backend GC 按 delivered-未-ack 联动判死 run，误杀等 AskUserQuestion 用户回答的活轮（事故会话 e148364e，run ca7ec9b8，点选报 no active run to approve）
 方案：control-dispatcher consume() 新增 immediateAck 选项（入桶后 fire-and-forget 冲刷该 runtime 桶，失败留队由补拉/重连兜底，UNKNOWN 桶维持捎带）；daemon.ts _dispatchControl 传 immediateAck: true；补拉路径不传保持批尾单次冲刷
 结果：control-dispatcher 新增 4 用例 19/19 绿；近邻 10 套件 146/146 绿；tsc --noEmit 0
+
+## ql-20260904-023-0bea | 2026-09-04 15:05:29 | permission_response 下发 payload 补 runtime_id（daemon ack 归属桶键）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/permission_service.py（三处 ws_payload 补 runtime_id）
+- backend/app/modules/daemon/tests/test_session_permissions.py（断言补 runtime_id + 新增 dialog 用例）
+- sillyhub-daemon/src/protocol.ts（PermissionResponsePayload 加可选 runtime_id）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引 ql-20260904-023）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（ql-022 条目补收口注记）
+需求：permission_response 下发 payload 补 runtime_id（daemon ack 归属桶键）
+根因：ql-20260904-022 immediateAck 修复后残余缺口：permission_response 三处下发点（plain 审批 / dialog 应答 / 超时 deny）payload 无 runtime_id，daemon WS 消费后 ack 落 UNKNOWN 桶、无后续事件时等不到补拉捎带——超时 deny 行过期还会把 pending timer 状态的 run 一并按 delivered-未-ack 判死（同一误杀的变体）
+方案：backend permission_service 三处 ws_payload 统一带 runtime_id（plain/dialog 取 session_obj.runtime_id，超时路径 None 省略），旧 daemon 忽略未知键向后兼容；daemon protocol.ts PermissionResponsePayload 加可选 runtime_id 标注契约；期间发现编辑时误改既有用例 test_non_owner_session_raises_not_found 的 user_id=other_uid→uid（预期 404 的用例被改坏成必失败），已还原
+结果：backend test_session_permissions 三处断言补 runtime_id + 新增 dialog 应答 payload 用例（事故路径回归），permission/control 相关 6 套件 97/97 绿；ruff check/format 0；daemon tsc --noEmit 0
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_permissions.py, sillyhub-daemon/src/protocol.ts
+
+## ql-20260904-024-e59b | 2026-09-04 15:29:03 | 修 daemon-ci/backend-ci 两处红：init-lease 测试适配 pull manifest 回写 + sweep error_code 收窄回设计边界
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/tests/test_init_lease.test.ts, backend/app/modules/daemon/sweep.py, backend/app/modules/daemon/tests/test_worker_redispatch.py, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md, .sillyspec/docs/multi-agent-platform/modules/backend.md

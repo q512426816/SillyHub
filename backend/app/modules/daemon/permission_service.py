@@ -1024,6 +1024,9 @@ class DaemonPermissionService:
             "session_id": str(session_id),
             "request_id": request_id,
             "decision": decision,
+            # ql-20260904-023：ack 归属桶键——daemon WS 消费后据此立即回执
+            # （control-dispatcher immediateAck），旧 daemon 忽略未知键。
+            "runtime_id": str(session_obj.runtime_id),
         }
         if message is not None:
             ws_payload["message"] = message
@@ -1133,6 +1136,9 @@ class DaemonPermissionService:
             "session_id": str(session_id),
             "request_id": request_id,
             "decision": decision,
+            # ql-20260904-023：ack 归属桶键——daemon WS 消费后据此立即回执
+            # （control-dispatcher immediateAck），旧 daemon 忽略未知键。
+            "runtime_id": str(session_obj.runtime_id),
         }
         if message is not None:
             ws_payload["message"] = message
@@ -1328,6 +1334,9 @@ class DaemonPermissionService:
             "request_id": request_id,
             "decision": "deny",
             "message": "permission request timed out (5min)",
+            # ql-20260904-023：ack 归属桶键——daemon WS 消费后据此立即回执
+            # （control-dispatcher immediateAck），旧 daemon 忽略未知键。
+            **({"runtime_id": str(runtime_id)} if runtime_id is not None else {}),
         }
         # task-06: WS hub routes by daemon_instance_id (migration-window
         # fallback routes by runtime_id).

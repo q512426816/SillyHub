@@ -295,6 +295,8 @@ class TestRespondPermission:
         assert ws_arg.args[0] == rt.id
         assert ws_arg.args[1]["decision"] == "allow"
         assert ws_arg.args[1]["request_id"] == "req-1"
+        # ql-20260904-023：payload 携带 runtime_id（daemon ack 归属桶键）。
+        assert ws_arg.args[1]["runtime_id"] == str(rt.id)
         # Timer removed
         assert "req-1" not in perm._timers
 
@@ -319,6 +321,8 @@ class TestRespondPermission:
         )
         ws_arg = hub.send_permission_response.await_args
         assert ws_arg.args[1]["message"] == "no way"
+        # ql-20260904-023：deny+message 路径同样携带 runtime_id。
+        assert ws_arg.args[1]["runtime_id"] == str(rt.id)
 
     @pytest.mark.asyncio
     async def test_unknown_request_id_raises_not_found(self, db_session, mocked_redis) -> None:
@@ -431,6 +435,39 @@ class TestRespondPermission:
                 decision="allow",
             )
 
+    @pytest.mark.asyncio
+    async def test_dialog_response_payload_carries_runtime_id(
+        self, db_session, mocked_redis
+    ) -> None:
+        """ql-20260904-023：dialog 应答（_respond_dialog）WS payload 携带
+        runtime_id——daemon WS 消费后 ack 按 runtime 桶立即冲刷的归属键
+        （事故会话 e148364e：旧 payload 无此键，ack 落 UNKNOWN 桶等不到捎带，
+        backend GC 把等用户回答的活轮按 delivered-未-ack 判死）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="dlg-rt-1")
+        )
+
+        result = await perm.respond_permission(
+            uid,
+            sess.id,
+            "dlg-rt-1",
+            "allow",
+            dialog_result={"answers": [{"question": "q", "answer": "A"}]},
+        )
+        assert result.accepted is True
+        hub.send_permission_response.assert_awaited_once()
+        ws_arg = hub.send_permission_response.await_args
+        assert ws_arg.args[1]["runtime_id"] == str(rt.id)
+        assert ws_arg.args[1]["dialog_result"] == {"answers": [{"question": "q", "answer": "A"}]}
+
 
 # ── 5min timeout (fake clock) ────────────────────────────────────────────────
 
@@ -470,6 +507,8 @@ class TestPermissionTimeout:
         assert any(
             c.args[1]["decision"] == "deny" and c.args[1]["request_id"] == "req-1" for c in ws_calls
         )
+        # ql-20260904-023：超时 deny 路径携带 runtime_id（daemon ack 归属桶键）。
+        assert any(c.args[1].get("runtime_id") == str(rt.id) for c in ws_calls)
         # SSE permission_resolved{reason:timeout} published
         assert any(
             "permission_resolved" in c.args[1] and "timeout" in c.args[1]
