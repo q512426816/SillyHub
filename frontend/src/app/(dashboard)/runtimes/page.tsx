@@ -735,8 +735,9 @@ export default function RuntimesPage() {
   // modal.confirm 二次确认 → triggerMachineSillySpecUpdate（WS fire-and-forget
   // 无回执）→ 成功/失败 toast + invalidate machines。升级进度由 daemon 状态机经
   // 心跳 sillyspec_update 回传（机器卡横幅四态 + 徽标），15s 轮询自然刷新；
-  // running/deferred 期的重复指令由 daemon 侧 in-flight 门去重。npm latest 由
-  // daemon 自行探测（后端不代查，design §接口定义）。
+  // 已最新时 daemon 版本门静默 no-op（无任何状态回传/横幅），toast 文案已如实
+  // 说明（ql-20260904-016）。running/deferred 期的重复指令由 daemon 侧 in-flight
+  // 门去重。npm latest 由 daemon 自行探测（后端不代查，design §接口定义）。
   const handleSillySpecUpgrade = useCallback(
     (machine: DaemonMachineRead) => {
       if (machine.status !== "online") return;
@@ -745,11 +746,17 @@ export default function RuntimesPage() {
         content: `确定升级机器「${machine.display_alias ?? machine.hostname}」的 sillyspec 到最新版？daemon 将在本机执行 npm install -g sillyspec@latest；机器忙（有会话/任务运行）时自动推迟到空闲执行，不打断运行中的任务。`,
         okText: "升级",
         cancelText: "取消",
-        onOk: async () => {
-          setSillyspecUpgradingId(machine.id);
-          try {
-            await triggerMachineSillySpecUpdate(machine.id);
-            notify.success("升级指令已下发，进度将显示在机器卡横幅上");
+          onOk: async () => {
+            setSillyspecUpgradingId(machine.id);
+            try {
+              await triggerMachineSillySpecUpdate(machine.id);
+              // ql-20260904-016：toast 如实化——daemon 侧 requestManualUpgrade 先过
+              // 版本门（ql-20260902-003），已最新（以其本机 npm view 探测为准，镜像
+              // 滞后时会误判已最新）则静默 no-op 不写状态 → 心跳无 sillyspec_update →
+              // 无横幅；文案不能无条件承诺横幅，须说清这条零反馈路径。
+              notify.success(
+                "升级指令已下发；机器已是最新版时将直接跳过（不显示横幅），否则进度将显示在机器卡横幅上",
+              );
             // 软刷新 machines：升级状态经心跳 sillyspec_update 回传，实际横幅
             // 要等下一轮心跳（15s 轮询自然看到）。
             void queryClient.invalidateQueries({ queryKey: queryKeys.daemonMachines.all });

@@ -378,3 +378,16 @@
 根因：重构后操作列无 width 无 fixed：宽屏随内容伸缩、出横向滚动条时不钉右被滚走，与 roles/users 管理页不一致
 方案：操作列补 width: 260（本列 4 个按钮比 roles 多「新建子组织」，260 容纳不换行）+ fixed: right + onCell 卡片背景防 fixed 列透明穿透（roles/page.tsx 同款）；修正旁注释过时的「无需 fixed 列」结论（无横滚时 fixed 静止贴右无副作用）
 结果：organizations 页测试 5/5 绿；tsc 0；待重建 frontend 部署
+
+## ql-20260904-016-7b4a | 2026-09-04 11:05:40 | runtimes 页升级 sillyspec 成功 toast 文案如实化（已最新时无横幅须说明）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/runtimes/page.tsx（toast 文案如实化 + 注释补 no-op 路径说明）
+- frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx（补 mock + 确认弹层→toast 断言用例）
+- .sillyspec/docs/frontend/modules/app-pages.md（handleSillySpecUpgrade 描述补已最新无横幅说明）
+- .sillyspec/docs/frontend/modules/app-pages.changelog.md（新建变更索引 sidecar）
+需求：runtimes 页升级 sillyspec 成功 toast 文案如实化（已最新时无横幅须说明）
+根因：daemon 侧 requestManualUpgrade 版本门（ql-20260902-003）在已最新时静默 no-op 不写状态，心跳无 sillyspec_update、机器卡无横幅（实测：crrcdt-hubin 的 npm 元数据滞后误判已最新）；原 toast 无条件承诺「进度将显示在机器卡横幅上」构成误导
+方案：page.tsx toast 改为「升级指令已下发；机器已是最新版时将直接跳过（不显示横幅），否则进度将显示在机器卡横幅上」+ 注释补 daemon 版本门与镜像滞后误判依据；page.test.tsx 补 triggerMachineSillySpecUpdate mock 与确认弹层→API 调用→toast 文案断言用例；app-pages.md 模块文档同步 + 新建 changelog sidecar
+结果：runtimes/__tests__/page.test.tsx 16/16 绿（15 旧 + 1 新），pnpm typecheck 0 错误，未涉及后端 schema（无需 gen:types）

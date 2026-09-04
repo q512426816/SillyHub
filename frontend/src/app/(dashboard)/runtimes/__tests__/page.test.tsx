@@ -70,6 +70,8 @@ const daemon = vi.hoisted(() => {
     getRuntimesUsage: vi.fn(),
     getDaemonVersion: vi.fn(),
     triggerMachineSelfUpdate: vi.fn(),
+    // ql-20260904-016：升级 sillyspec 指令（机器级 WS fire-and-forget）。
+    triggerMachineSillySpecUpdate: vi.fn(),
     // task-09（2026-08-28-daemon-agent-share）：平台共享智能体管理卡数据源。
     fetchSharedAgents: vi.fn(),
     fetchSharedAgentsActive: vi.fn(),
@@ -86,6 +88,7 @@ vi.mock("@/lib/daemon", async () => {
     listDaemonMachines: daemon.listDaemonMachines,
     updateDaemonMachine: vi.fn(),
     triggerMachineSelfUpdate: daemon.triggerMachineSelfUpdate,
+    triggerMachineSillySpecUpdate: daemon.triggerMachineSillySpecUpdate,
     listAgentSessions: daemon.listAgentSessions,
     deleteAgentSession: daemon.deleteAgentSession,
     deleteDaemonRuntime: daemon.deleteDaemonRuntime,
@@ -229,6 +232,7 @@ beforeEach(() => {
   daemon.getRuntimesUsage.mockResolvedValue({ window: "7d", runtimes: [] });
   daemon.getDaemonVersion.mockResolvedValue(LATEST_VERSION);
   daemon.triggerMachineSelfUpdate.mockResolvedValue({ sent: true, latest_version: "1.4.2" });
+  daemon.triggerMachineSillySpecUpdate.mockResolvedValue({ sent: true });
   // task-09：管理卡/共享区块数据源默认空（具体用例各自覆盖）。
   daemon.fetchSharedAgents.mockResolvedValue([]);
   daemon.fetchSharedAgentsActive.mockResolvedValue([]);
@@ -476,6 +480,53 @@ describe("2026-07-04-daemon-version-management task-09: 升级按钮（task-09 �
     await waitFor(() => {
       expect(daemon.triggerMachineSelfUpdate).toHaveBeenCalledWith("m-1");
     });
+  });
+});
+
+describe("ql-20260904-016-7b4a: 升级 sillyspec 指令下发 + toast 文案如实化", () => {
+  /**
+   * 定位机器头「升级 sillyspec」按钮（tagName=BUTTON 过滤折叠头，同
+   * findUpgradeButton 模式——折叠头 role=button 的 accessible name 含子按钮文本）。
+   * fixture 给 sillyspec_version=latest（非未安装/非落后），按钮文案恒「升级 sillyspec」。
+   */
+  function findSillySpecButton(): HTMLElement {
+    const matches = screen.getAllByRole("button", { name: /升级\s*sillyspec/ });
+    const real = matches.filter((el) => el.tagName === "BUTTON");
+    expect(real.length, "机器头「升级 sillyspec」按钮应恰有 1 个").toBe(1);
+    return real[0] as HTMLElement;
+  }
+
+  it("确认弹层点「升级」→ triggerMachineSillySpecUpdate(m-1) + toast 说明已最新时无横幅（不再无条件承诺）", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(
+      wrapMachines([makeRuntime({ id: "rt-ss", name: "SillySpecClaude", status: "online" })], {
+        sillyspec_version: "3.27.12",
+        sillyspec_latest_version: "3.27.12",
+      }),
+    );
+
+    await renderAndWaitForRuntime();
+    fireEvent.click(findSillySpecButton());
+
+    // 二次确认弹层（portal 到 body）：标题「升级 sillyspec」+ npm 安装说明。
+    const confirmRoot = await waitFor(() => {
+      const el = document.querySelector(".ant-modal-confirm");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
+    expect(confirmTitle).toHaveTextContent("升级 sillyspec");
+    expect(within(confirmRoot).getByText(/npm install -g sillyspec@latest/)).toBeInTheDocument();
+
+    fireEvent.click(within(confirmRoot).getByRole("button", { name: /^升\s*级$/ }));
+
+    await waitFor(() => {
+      expect(daemon.triggerMachineSillySpecUpdate).toHaveBeenCalledWith("m-1");
+    });
+    // toast 如实化：daemon 侧版本门已最新时静默 no-op（无 sillyspec_update 回传、
+    // 无横幅），文案必须把这条零反馈路径说清——断言含「直接跳过（不显示横幅）」。
+    expect(
+      await screen.findByText(/已是最新版时将直接跳过（不显示横幅）/),
+    ).toBeInTheDocument();
   });
 });
 
