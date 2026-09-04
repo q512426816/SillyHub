@@ -97,3 +97,16 @@
 方案：同步 get 改 await findByText 等待子行渲染，注释记录根因
 结果：本地连跑 3 次 5/5 绿；纯测试断言改动无实现影响
 审计：📝 文档欠账（D-8）：1 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260904-019-17cc | 2026-09-04 12:17:36 | 修复 pullSpecBundle 成功后不回写本地 manifest 缓存导致 push-before-pull 误冲突拦截 pull（ql-20260904…
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spec-sync.ts（pullSpecBundle 落地后 buildFullManifest 重建 manifest 缓存）
+- sillyhub-daemon/tests/spec-pull-swap.test.ts（+3 用例）
+- sillyhub-daemon/tests/task-09-spec-pull-push.test.ts（4 用例改两轮 lease 新契约）
+需求：修复 pullSpecBundle 成功后不回写本地 manifest 缓存导致 push-before-pull 误冲突拦截 pull（ql-20260904-016 遗留缺口）
+根因：pull 整树覆盖本地后 manifests 缓存仍是上次 push 时旧态，版本文件丢失或 mtime 信号触发回灌时 diff 出全量假 ops，撞服务器 base_version 乐观锁判 conflict 后 abort pull
+方案：pull 落地后用落地树 buildFullManifest 重建 manifest 缓存，version=0 对齐 full-tar 回退语义，真实改动走同内容豁免或既有降级链
+结果：spec-pull-swap +3 与 task-09 四用例改两轮 lease 新契约，16+77 用例全绿，tsc 零错误
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/spec-pull-swap.test.ts, sillyhub-daemon/tests/task-09-spec-pull-push.test.ts

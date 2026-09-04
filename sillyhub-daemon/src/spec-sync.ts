@@ -220,6 +220,21 @@ export async function pullSpecBundle(
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     await extractTar(tarBuf, specDir);
   }
+
+  // ql-20260904-019：pull 落地后用落地树重建本地 manifest 缓存（best-effort）。
+  // 缺口（ql-20260904-016 E2E 实证，会话 0871e917/b3fa8993）：pull 整树覆盖本地后
+  // manifest 仍是上次 push 时的旧态——下次「版本文件丢失 / mtime 信号」触发
+  // push_before_pull 时 diff（旧 manifest ↔ pull 后本地）产出全量假 ops，服务器
+  // base_version 乐观锁判 conflict → SpecPushConflict abort pull（会话被旧缓存
+  // 卡住直到版本追平）。修：落地树即服务器镜像，据此重建 manifest 后 diff 恒零
+  // ops。version=0 对齐 full-tar 回退路径既有语义（buildFullManifest 注释 Q7/R-07）：
+  // pull 后首次真实改动若撞乐观锁，走同内容豁免（hash 相同 no-op + new_versions
+  // 对齐）或既有全量回退降级链，无新增失败模式。
+  try {
+    await writeLocalManifest(wsId, await buildFullManifest(specDir));
+  } catch (e) {
+    console.warn('spec_sync: post_pull_manifest_write_failed', wsId, specDir, e);
+  }
   return specDir;
 }
 

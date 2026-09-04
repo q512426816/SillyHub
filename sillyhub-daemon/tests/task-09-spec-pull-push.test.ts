@@ -89,6 +89,9 @@ function defaultMockAdapter(overrides: Partial<Record<string, unknown>> = {}): R
 interface LooseLeaseCtx extends LeaseCtx {
   workspaceId?: string;
   specRoot?: string;
+  /** ql-20260904-019：两轮 lease 方案——第一轮 pull+bump 本地版本，第二轮同版本
+   *  走版本一致跳过 pull（防二轮 pull 把注入的本地改动洗掉），任务末尾才回传。 */
+  latestSpecVersion?: number;
 }
 
 function makeLease(overrides: Partial<LooseLeaseCtx> = {}): LooseLeaseCtx {
@@ -452,18 +455,42 @@ describe('task-09 pull 解包到 ~/.sillyhub/daemon/specs/{wsId}', () => {
 // ── 3. push 收尾（specRoot 非空时触发 postSpecSync）──────────────────────────
 
 describe('task-09 push 收尾', () => {
-  it('pull 成功 → collectDiff 之后调 postSpecSync（整树打包回传）', async () => {
+  it('pull 落地即镜像 → 无本地改动不回传；注入改动后二轮回传（ql-20260904-019）', async () => {
     const tarBuf = buildTar([{ name: 'a.md', content: 'spec-a' }]);
     const client = makeMockClient({
       getSpecBundle: vi.fn().mockResolvedValue(tarBuf),
       postSpecSync: vi.fn().mockResolvedValue({ ok: true, reparsed: 2 }),
     });
     const { runner } = setupRunner({ client });
-    const fakeChild = createFakeChild();
-    mockSpawnReturn(fakeChild);
 
-    const p = runner.runLease(makeLease({ leaseId: 'lease-push', workspaceId: 'ws-push' }));
-    await waitForNextSpawn();
+    // 第一轮：pull 落地 + manifest 重建（ql-20260904-019）+ bump 本地版本 7。
+    // pull 后本地 == 服务器 → 任务末尾 diff 零 ops → 不回传（原断言「必整树回传」
+    // 编码的是修复前的无谓 no-op 往返）。
+    // spawn baseline 动态捕获（waitForNextSpawn 默认 baseline=0，二轮会因一轮
+    // 已有调用而立即返回 → emitExit 早于监听注册 → runLease 死锁，见其报错注释）
+    const spawnBase1 = vi.mocked(spawn).mock.calls.length;
+    let fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    let p = runner.runLease(
+      makeLease({ leaseId: 'lease-push-r1', workspaceId: 'ws-push', latestSpecVersion: 7 }),
+    );
+    await waitForNextSpawn(spawnBase1);
+    fakeChild._emitExit(0);
+    await p;
+    expect(client.postSpecSync).not.toHaveBeenCalled();
+
+    // 注入本地改动，第二轮同版本（跳过 pull 防洗掉）→ 任务末尾 diff 出 ops 回传。
+    writeFileSync(
+      join(fakeHomeDir, '.sillyhub', 'daemon', 'specs', 'ws-push', 'local.md'),
+      'local-change',
+    );
+    const spawnBase2 = vi.mocked(spawn).mock.calls.length;
+    fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    p = runner.runLease(
+      makeLease({ leaseId: 'lease-push-r2', workspaceId: 'ws-push', latestSpecVersion: 7 }),
+    );
+    await waitForNextSpawn(spawnBase2);
     fakeChild._emitExit(0);
     await p;
 
@@ -471,8 +498,10 @@ describe('task-09 push 收尾', () => {
     const [wsId, syncBuf] = client.postSpecSync.mock.calls[0]!;
     expect(wsId).toBe('ws-push');
     expect(Buffer.isBuffer(syncBuf)).toBe(true);
-    // sync 返回的 tar 应能被服务器解出 a.md（round-trip 验证）
-    expect(syncBuf.length).toBeGreaterThan(1024); // 至少结尾 zero block
+    // 回传 tar 含注入文件与镜像文件（round-trip 验证）
+    const names = parseTarEntryNames(syncBuf as Buffer);
+    expect(names).toContain('a.md');
+    expect(names).toContain('local.md');
   });
 
   it('server-local（specRoot=null）→ postSpecSync 未调用', async () => {
@@ -518,11 +547,32 @@ describe('task-09 push 收尾', () => {
       postSpecSync: vi.fn().mockRejectedValue(new Error('HTTP 413 POST .../sync')),
     });
     const { runner } = setupRunner({ client });
-    const fakeChild = createFakeChild();
-    mockSpawnReturn(fakeChild);
 
-    const p = runner.runLease(makeLease({ leaseId: 'lease-413', workspaceId: 'ws-413' }));
-    await waitForNextSpawn();
+    // 第一轮 pull 落档（回传会因零 ops 跳过，413 尚不触发）。
+    // spawn baseline 动态捕获（waitForNextSpawn 默认 baseline=0，二轮会因一轮
+    // 已有调用而立即返回 → emitExit 早于监听注册 → runLease 死锁，见其报错注释）
+    const spawnBase1 = vi.mocked(spawn).mock.calls.length;
+    let fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    let p = runner.runLease(
+      makeLease({ leaseId: 'lease-413-r1', workspaceId: 'ws-413', latestSpecVersion: 5 }),
+    );
+    await waitForNextSpawn(spawnBase1);
+    fakeChild._emitExit(0);
+    await p;
+
+    // 注入改动 + 二轮（版本一致跳过 pull）→ 回传真实发生且撞 413。
+    writeFileSync(
+      join(fakeHomeDir, '.sillyhub', 'daemon', 'specs', 'ws-413', 'local.md'),
+      'x',
+    );
+    const spawnBase2 = vi.mocked(spawn).mock.calls.length;
+    fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    p = runner.runLease(
+      makeLease({ leaseId: 'lease-413-r2', workspaceId: 'ws-413', latestSpecVersion: 5 }),
+    );
+    await waitForNextSpawn(spawnBase2);
     fakeChild._emitExit(0);
     const result = await p;
 
@@ -549,11 +599,32 @@ describe('task-09 push 收尾', () => {
       postSpecSync: vi.fn().mockResolvedValue({ ok: true, reparsed: 0 }),
     });
     const { runner } = setupRunner({ client });
-    const fakeChild = createFakeChild();
-    mockSpawnReturn(fakeChild);
 
-    const p = runner.runLease(makeLease({ leaseId: 'lease-rt', workspaceId: 'ws-rt' }));
-    await waitForNextSpawn();
+    // 两轮（ql-20260904-019）：一轮 pull 落地（.runtime 随 tar 落盘，pull 不排除）；
+    // 注入改动后二轮（版本一致跳过 pull）触发回传，断言回传 tar 排除 .runtime。
+    // spawn baseline 动态捕获（waitForNextSpawn 默认 baseline=0，二轮会因一轮
+    // 已有调用而立即返回 → emitExit 早于监听注册 → runLease 死锁，见其报错注释）
+    const spawnBase1 = vi.mocked(spawn).mock.calls.length;
+    let fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    let p = runner.runLease(
+      makeLease({ leaseId: 'lease-rt-r1', workspaceId: 'ws-rt', latestSpecVersion: 3 }),
+    );
+    await waitForNextSpawn(spawnBase1);
+    fakeChild._emitExit(0);
+    await p;
+
+    writeFileSync(
+      join(fakeHomeDir, '.sillyhub', 'daemon', 'specs', 'ws-rt', 'local.md'),
+      'x',
+    );
+    const spawnBase2 = vi.mocked(spawn).mock.calls.length;
+    fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    p = runner.runLease(
+      makeLease({ leaseId: 'lease-rt-r2', workspaceId: 'ws-rt', latestSpecVersion: 3 }),
+    );
+    await waitForNextSpawn(spawnBase2);
     fakeChild._emitExit(0);
     await p;
 
@@ -561,7 +632,7 @@ describe('task-09 push 收尾', () => {
     const syncBuf = client.postSpecSync.mock.calls[0]![1] as Buffer;
     const names = parseTarEntryNames(syncBuf);
     // ql-20260813-007：push tar 不含任何 .runtime 段（整树排除，含子目录 sub/.runtime）
-    const runtimeHits = names.filter((n) => n.split(/[\\/]/).includes('.runtime'));
+    const runtimeHits = names.filter((n) => n.split(/[\/]/).includes('.runtime'));
     expect(runtimeHits).toEqual([]);
     // 正常文件保留
     expect(names).toContain('doc.md');
@@ -588,11 +659,32 @@ describe('task-09 pack/extract round-trip', () => {
       postSpecSync: vi.fn().mockResolvedValue({ ok: true, reparsed: 0 }),
     });
     const { runner } = setupRunner({ client });
-    const fakeChild = createFakeChild();
-    mockSpawnReturn(fakeChild);
 
-    const p = runner.runLease(makeLease({ leaseId: 'lease-roundtrip', workspaceId: 'ws-roundtrip-x' }));
-    await waitForNextSpawn();
+    // 两轮（ql-20260904-019）：一轮 pull 落地（断言 (1) 解包正确）；注入改动后
+    // 二轮（版本一致跳过 pull）触发回传（断言 (2) 打包正确，tar = 源树 ∪ 注入文件）。
+    // spawn baseline 动态捕获（waitForNextSpawn 默认 baseline=0，二轮会因一轮
+    // 已有调用而立即返回 → emitExit 早于监听注册 → runLease 死锁，见其报错注释）
+    const spawnBase1 = vi.mocked(spawn).mock.calls.length;
+    let fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    let p = runner.runLease(
+      makeLease({ leaseId: 'lease-roundtrip-r1', workspaceId: 'ws-roundtrip-x', latestSpecVersion: 9 }),
+    );
+    await waitForNextSpawn(spawnBase1);
+    fakeChild._emitExit(0);
+    await p;
+
+    writeFileSync(
+      join(fakeHomeDir, '.sillyhub', 'daemon', 'specs', 'ws-roundtrip-x', 'injected.md'),
+      'injected',
+    );
+    const spawnBase2 = vi.mocked(spawn).mock.calls.length;
+    fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    p = runner.runLease(
+      makeLease({ leaseId: 'lease-roundtrip-r2', workspaceId: 'ws-roundtrip-x', latestSpecVersion: 9 }),
+    );
+    await waitForNextSpawn(spawnBase2);
     fakeChild._emitExit(0);
     await p;
 
@@ -603,13 +695,14 @@ describe('task-09 pack/extract round-trip', () => {
     expect(Array.from(readFileSync(join(rtDir, 'sub', 'deep', 'bin.bin')))).toEqual([0, 1, 2, 3, 255, 0xfe]);
     expect(statSync(join(rtDir, 'sub', 'deep', 'empty.txt')).size).toBe(0);
 
-    // (2) push 打包的 tar 内 entry 集合与 source 一致（含子目录路径）
+    // (2) push 打包的 tar 内 entry 集合 = 源树 ∪ 注入文件（含子目录路径）
     expect(client.postSpecSync).toHaveBeenCalledOnce();
     const syncBuf = client.postSpecSync.mock.calls[0]![1] as Buffer;
     const names = parseTarEntryNames(syncBuf);
     for (const e of sourceEntries) {
       expect(names).toContain(e.name);
     }
+    expect(names).toContain('injected.md');
   });
 });
 

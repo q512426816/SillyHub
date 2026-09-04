@@ -238,3 +238,76 @@ process.on('exit', () => {
     /* best-effort：tmpdir 由系统回收 */
   }
 });
+
+// ── ql-20260904-019：pull 成功后 manifest 缓存重建（push_before_pull 误冲突修复）──
+
+describe('pullSpecBundle 后置 manifest 重建（ql-20260904-019）', () => {
+  /** 读 FAKE_HOME 下的 manifest 缓存文件（与 resolveManifestCachePath 同根）。 */
+  async function readManifestRaw(wsId: string): Promise<Record<string, unknown> | null> {
+    const { readFile } = await import('node:fs/promises');
+    try {
+      return JSON.parse(
+        await readFile(
+          join(FAKE_HOME, '.sillyhub', 'daemon', 'manifests', `${wsId}.json`),
+          'utf-8',
+        ),
+      ) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  it('pull 落地后 manifest 缓存与落地树一致（hash 逐文件匹配）', async () => {
+    const wsId = 'ws-manifest-rebuild';
+    const tar = buildTar([{ name: 'docs/a.md', content: 'server-content' }]);
+    await pullSpecBundle(makeClient(tar) as never, wsId);
+    const manifest = await readManifestRaw(wsId);
+    expect(manifest).not.toBeNull();
+    const files = (manifest as { files: Record<string, { hash: string; version: number }> }).files;
+    expect(files['docs/a.md']).toBeDefined();
+    const { createHash } = await import('node:crypto');
+    const localHash = createHash('sha256')
+      .update(await readFile(join(resolveSpecDir(wsId), 'docs', 'a.md')))
+      .digest('hex');
+    expect(files['docs/a.md'].hash).toBe(localHash);
+  });
+
+  it('事故回归：版本文件丢失触发 push_before_pull，重建后 diff 零 ops 不 POST，pull 成功', async () => {
+    const wsId = 'ws-manifest-conflict-fix';
+    const tar = buildTar([{ name: 'docs/a.md', content: 'server-v1' }]);
+    // 第一次 pull：落地 + manifest 重建（fix 后行为）。
+    await pullSpecBundle(makeClient(tar) as never, wsId);
+
+    // 模拟事故前置：pull 后版本文件丢失（崩溃窗口 / 手删）→ unsynced 信号触发。
+    await rm(join(resolveSpecDir(wsId), '.runtime', 'spec-version.json'), {
+      force: true,
+    }).catch(() => {});
+
+    // 第二次 pull：push_before_pull 必走——重建后的 manifest 与本地树一致 →
+    // computeIncrementalOps 零 ops → 不 POST（旧实现会以旧 manifest diff 出全量
+    // 假 ops 撞服务器 base_version 乐观锁 conflict，abort pull）。
+    const client2 = makeClient(tar);
+    const specDir = await pullSpecBundle(client2 as never, wsId);
+    expect(specDir).toBe(resolveSpecDir(wsId));
+    // ops=0 路径不发同步请求（postSpecSync 仅在 ops>0 / 首同步无缓存时调用）。
+    expect(client2.postSpecSync).not.toHaveBeenCalled();
+    // 落地内容仍正确。
+    expect(await readFile(join(specDir, 'docs', 'a.md'), 'utf-8')).toBe('server-v1');
+  });
+
+  it('pull 后本地真实改动：diff 产出真 update op（修复不吞真实变化）', async () => {
+    const wsId = 'ws-manifest-real-edit';
+    const tar = buildTar([{ name: 'docs/a.md', content: 'server-v1' }]);
+    await pullSpecBundle(makeClient(tar) as never, wsId);
+    // 用户本地真实编辑（mtime + 内容都变）。
+    await writeFile(join(resolveSpecDir(wsId), 'docs', 'a.md'), 'local-edit', 'utf-8');
+
+    // 再 pull：push_before_pull 应识别出真实 diff——ops>0 → 发 postSpecSync
+    //（内容豁免/全量回退归服务器语义，本测试只断言「真实变化不被 fix 吞掉」）。
+    const client2 = makeClient(tar);
+    // computeIncrementalOps 对 update op 走 sync-incremental（client 未实现该方法
+    // → 回退旧 tar 全量 postSpecSync）。断言 postSpecSync 被调用且带 tar Buffer。
+    await pullSpecBundle(client2 as never, wsId);
+    expect(client2.postSpecSync).toHaveBeenCalled();
+  });
+});
