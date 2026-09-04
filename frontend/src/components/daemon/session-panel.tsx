@@ -3717,7 +3717,6 @@ function SessionPanelPage({
         emptyProviderLabel={
           PROVIDER_META[session.provider]?.label ?? session.provider
         }
-        streamFooter={<AgentLogCard sessionId={session.id} />}
       />
     </>
   );
@@ -4090,15 +4089,23 @@ function SessionPanelPage({
         </div>
       )}
 
+      {/* ql-20260904-021：本地 Agent 日志收纳顶部——原对话流尾部气泡条目
+          （streamFooter 挂载）改面板级折叠栏，挂横幅之下、会话主体之上，
+          点击展开明细，不再挤占聊天窗口（同 ql-20260826-010 后台目录收纳
+          动机）。无上报时组件返回 null 不占位；纯 tool_report 主体
+          （AgentLogSessionBody 即日志条目流）不重复挂载。 */}
+      {!isToolReportBody && (
+        <AgentLogCard sessionId={session.id} mobile={mobile} />
+      )}
+
       {/* 会话主体（task-07 / 2026-08-23-agent-activity-sessions design §3.4）：
           - origin=tool_report 且 turn_count===0（未继续过对话）→ 本地 Agent
             日志条目流即会话主体（AgentLogSessionBody），输入区保留在下方
             （首条消息懒激活派发，D-002）；
           - 其余会话（chat / 已激活 tool_report 继续对话后）→ 正常对话流
             （task-13 共享子组件；弹窗与新页面同构复用。gap-fix：turns 用
-            displayTurns），尾部挂仅关联本会话的折叠日志条目（AgentLogCard
-            sessionId 关联；D-004：workspace 级旧挂载已移除，streamFooter
-            注入口保留复用）。
+            displayTurns）；关联本会话的日志改走顶部折叠栏（AgentLogCard，
+            ql-20260904-021，见上方挂载；streamFooter 注入口保留但暂无消费方）。
           - task-14：mobile 外包横向滚动容器（表格等横向内容不撑破竖屏视口）。 */}
       {mobile ? (
         <div className={PANEL_BODY_WRAP_CLS_MOBILE}>

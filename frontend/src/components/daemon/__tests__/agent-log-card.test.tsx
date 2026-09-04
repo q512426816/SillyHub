@@ -1,12 +1,14 @@
 // task-04（2026-08-23-platform-agent-log-ingest / FR-04 / D-006）+
 // ql-20260823-002-6a1a（改会话流内展示）+ task-07（2026-08-23-agent-
 // activity-sessions：sessionId 驱动会话化 + AgentLogSessionBody + 查看内容）+
-// task-05（2026-08-23-agent-log-conversation-view：查看内容对话化升级）：
-// AgentLogCard「本地 Agent 日志」会话流条目 + AgentLogSessionBody 会话主体单测。
+// task-05（2026-08-23-agent-log-conversation-view：查看内容对话化升级）+
+// ql-20260904-021（气泡条目改面板顶部折叠栏）：
+// AgentLogCard「本地 Agent 日志」面板顶部折叠栏 + AgentLogSessionBody 会话主体单测。
 //
 // 覆盖：
-//   1. 折叠默认态：只渲染一行摘要（标题 + N 个 + 最新 X 前），明细不渲染；
-//      listAgentLogs 收到 sessionId（session_id 关联，非 workspace 语义）；
+//   1. 折叠默认态：只渲染一行摘要栏（agent-log-top-bar 根 + 标题 + N 个 +
+//      最新 X 前），明细不渲染；listAgentLogs 收到 sessionId（session_id
+//      关联，非 workspace 语义）；
 //   2. 展开交互：点头部摘要 → 明细列表（harness 徽标双分支 / originator /
 //      session 短码 / 大小人性化 / 相对时间 + 绿点 / 调用次数 / 最近命令 /
 //      log_path）；再点收起；
@@ -319,8 +321,9 @@ describe("AgentLogCard 会话流条目（折叠默认态）", () => {
     // 查询参数：sessionId 透传给 listAgentLogs（session_id 关联本会话）。
     await waitFor(() => expect(agentLogsApi.listAgentLogs).toHaveBeenCalledWith("sess-1"));
 
-    // 摘要：标题 + 2 个 + 最新 N 分钟前（首条即最新，列表 last_seen_at 新→旧）。
+    // 摘要：顶部折叠栏根 + 标题 + 2 个 + 最新 N 分钟前（首条即最新，列表 last_seen_at 新→旧）。
     const toggle = await screen.findByTestId("agent-log-toggle");
+    expect(screen.getByTestId("agent-log-top-bar")).toBeInTheDocument();
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByText("本地 Agent 日志")).toBeInTheDocument();
     expect(screen.getByText(/2 个 · 最新 \d+ 分钟前/)).toBeInTheDocument();

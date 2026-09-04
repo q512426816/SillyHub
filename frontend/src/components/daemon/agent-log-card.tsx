@@ -6,11 +6,12 @@
  * 前身 2026-08-23-platform-agent-log-ingest task-04 ql-20260823-002-6a1a）。
  *
  * 依据（design §3.4 + prototype-agent-activity-sessions.html）：
- *   - AgentLogCard：普通会话（chat 或已激活 tool_report）对话流**尾部**的折叠
- *     条目——streamFooter 注入（turn-timeline.tsx），仅关联本会话的上报
- *     （listAgentLogs(sessionId)，GET /api/agent-logs?session_id=…）。
- *     形态沿用：🧾 头像 + 助手答复同款气泡 + 一行摘要「N 个 · 最新 X 前 ▸」
- *     + 展开明细（harness 徽标 / originator / session 短码 / 大小 / 活跃绿点 /
+ *   - AgentLogCard：普通会话（chat 或已激活 tool_report）面板**顶部**的整宽
+ *     折叠栏（ql-20260904-021：原对话流尾部 streamFooter 气泡条目收编顶部，
+ *     不再挤占聊天窗口；session-panel.tsx 挂载于横幅之下、会话主体之上），
+ *     仅关联本会话的上报（listAgentLogs(sessionId)，GET /api/agent-logs?session_id=…）。
+ *     形态：🧾 图标 + 一行摘要「N 个 · 最新 X 前 ▸」细栏，点击展开明细
+ *     （harness 徽标 / originator / session 短码 / 大小 / 活跃绿点 /
  *     调用次数 / 最近命令 / log_path 复制）。
  *   - AgentLogSessionBody：origin=tool_report 且 turn_count===0 的会话**主体**
  *     ——全量 entries 逐条气泡流（不折叠成 3 条），顶部说明「由 SillySpec CLI
@@ -27,8 +28,8 @@
  *     404 / 5xx）一律静默回落原文 <pre> + 黄条原因（不弹错框）；仅原文端点
  *     自身失败保留红条（现状语义，design §7.2 / §7.3 / §5.2）。
  *
- * 渲染门控（AgentLogCard）：空列表 / error / loading 一律返回 null——流内
- * 不出现占位块（有上报才出现，避免每条会话尾巴挂空盒）。SessionBody 是
+ * 渲染门控（AgentLogCard）：空列表 / error / loading 一律返回 null——顶部
+ * 不出现占位栏（有上报才出现，避免每个会话顶上挂空盒）。SessionBody 是
  * 会话主体，loading / error / 空态各有显式中文提示。
  *
  * 视觉（双主题铁律）：harness 徽标走 brand-* 语义阶（bg-brand-50/
@@ -860,22 +861,30 @@ function useSessionAgentLogs(sessionId: string) {
 /* ───────────────── 形态一：对话流尾部折叠条目 ───────────────── */
 
 /**
- * AgentLogCard —— 普通会话（chat / 已激活 tool_report）对话流尾部条目：
- * 默认折叠成一行摘要，点击展开明细（>3 条再折叠一层）。
- * 挂载走 TurnTimeline streamFooter（session-panel.tsx 传 sessionId 关联）。
+ * AgentLogCard —— 普通会话（chat / 已激活 tool_report）面板顶部折叠栏：
+ * 默认收起成一行整宽摘要细栏，点击展开明细（>3 条再折叠一层）。
+ * ql-20260904-021：原对话流尾部气泡条目（streamFooter 挂载）收编到顶部
+ * （session-panel 挂横幅之下、会话主体之上），不再挤占聊天窗口。
  */
-export function AgentLogCard({ sessionId }: { sessionId: string }) {
+export function AgentLogCard({
+  sessionId,
+  mobile = false,
+}: {
+  sessionId: string;
+  /** 面板级横幅同款：mobile 收窄左右内边距（对齐 StreamConnectionBanner）。 */
+  mobile?: boolean;
+}) {
   const qc = useQueryClient();
   const { copiedKey, copy } = useCopyFeedback();
-  // 外层折叠（会话流内默认收起成一行摘要，点击头部展开）；内层 expanded 管
+  // 外层折叠（默认收起成一行摘要栏，点击头部展开）；内层 expanded 管
   // 「展开全部 N 条」（条数超过 COLLAPSED_COUNT 时）。
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
   const logsQ = useSessionAgentLogs(sessionId);
 
-  // sessionId 空 / error / loading / 空列表 一律不渲染：会话流内不出现占位块
-  //（ql-20260823-002-6a1a：有上报才出现；design §4 增强信息不干扰主体验）。
+  // sessionId 空 / error / loading / 空列表 一律不渲染：顶部不出现占位栏
+  //（ql-20260823-002-6a1a 语义保留：有上报才出现；design §4 增强信息不干扰主体验）。
   // 注意先调完 hook 再 return（hooks 规则）。
   if (!sessionId || logsQ.isError || logsQ.isPending) return null;
 
@@ -892,94 +901,95 @@ export function AgentLogCard({ sessionId }: { sessionId: string }) {
   return (
     <div
       aria-label="本地 Agent 日志"
-      className="flex items-start gap-2.5"
-      data-testid="agent-log-stream-entry"
+      className="shrink-0 border-b border-border bg-muted/40"
+      data-testid="agent-log-top-bar"
     >
-      {/* 头像：助手答复同款圆形头像（h-7 w-7 rounded-full border bg-muted），
-          图标用 FileText 标识「日志条目」身份（Bot 是答复专用）。 */}
-      <span
-        aria-hidden
-        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground"
+      {/* 头部（可点击折叠）：🧾 图标 + 标题 + 概要 + 展开箭头，整宽细栏。 */}
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={open ? "收起本地 Agent 日志" : "展开本地 Agent 日志"}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-2 px-5 py-1.5 text-left transition-colors hover:bg-muted",
+          mobile && "px-3",
+        )}
+        data-testid="agent-log-toggle"
       >
-        <FileText className="h-3.5 w-3.5" />
-      </span>
-      {/* 气泡：助手答复同款（rounded-2xl rounded-tl-md border bg-card）。 */}
-      <div className="min-w-0 max-w-[86%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm shadow-sm">
-        {/* 头部（可点击折叠）：标题 + 概要 + 展开箭头。 */}
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label={open ? "收起本地 Agent 日志" : "展开本地 Agent 日志"}
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 text-left"
-          data-testid="agent-log-toggle"
+        <FileText
+          aria-hidden
+          className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+        />
+        <span className="text-xs font-medium text-foreground">
+          本地 Agent 日志
+        </span>
+        <span className="text-[11px] text-muted-foreground">
+          {items.length} 个 · {newestText ? `最新 ${newestText}` : "—"}
+        </span>
+        <span
+          aria-hidden
+          className={cn(
+            "ml-auto shrink-0 text-[10px] text-muted-foreground transition-transform",
+            open && "rotate-90",
+          )}
         >
-          <span className="text-xs font-medium text-foreground">
-            本地 Agent 日志
-          </span>
-          <span className="text-[11px] text-muted-foreground">
-            {items.length} 个 · {newestText ? `最新 ${newestText}` : "—"}
-          </span>
-          <span
-            aria-hidden
-            className={cn(
-              "ml-auto shrink-0 text-[10px] text-muted-foreground transition-transform",
-              open && "rotate-90",
-            )}
-          >
-            ▸
-          </span>
-        </button>
+          ▸
+        </span>
+      </button>
 
-        {open && (
-          <>
-            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-              agent 会话的完整模型 I/O 日志（本机文件），由 SillySpec CLI 自动上报
-            </p>
-            <ul
-              className="mt-2 flex flex-col gap-2"
-              data-testid="agent-log-entries"
-            >
-              {visible.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="rounded-md border border-border px-2.5 py-2"
-                >
-                  <AgentLogEntry
-                    entry={entry}
-                    copiedKey={copiedKey}
-                    onCopy={copy}
-                  />
-                </li>
-              ))}
-            </ul>
-            <div className="mt-2 flex items-center justify-between gap-2">
-              {items.length > COLLAPSED_COUNT ? (
-                <button
-                  type="button"
-                  onClick={() => setExpanded((v) => !v)}
-                  className="cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  {expanded ? "收起" : `展开全部 ${items.length} 条`}
-                </button>
-              ) : (
-                <span />
-              )}
-              {/* 刷新：invalidate agentLogs 键（30s 轮询之外的手动补偿）。 */}
+      {open && (
+        <div
+          className={cn(
+            "max-h-[45vh] overflow-y-auto border-t border-border bg-card px-5 py-2.5",
+            mobile && "px-3",
+          )}
+        >
+          <p className="text-[11px] leading-4 text-muted-foreground">
+            agent 会话的完整模型 I/O 日志（本机文件），由 SillySpec CLI 自动上报
+          </p>
+          <ul
+            className="mt-2 flex flex-col gap-2"
+            data-testid="agent-log-entries"
+          >
+            {visible.map((entry) => (
+              <li
+                key={entry.id}
+                className="rounded-md border border-border px-2.5 py-2"
+              >
+                <AgentLogEntry
+                  entry={entry}
+                  copiedKey={copiedKey}
+                  onCopy={copy}
+                />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            {items.length > COLLAPSED_COUNT ? (
               <button
                 type="button"
-                title="刷新"
-                onClick={() => {
-                  void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
-                }}
-                className="shrink-0 cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onClick={() => setExpanded((v) => !v)}
+                className="cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                刷新
+                {expanded ? "收起" : `展开全部 ${items.length} 条`}
               </button>
-            </div>
-          </>
-        )}
-      </div>
+            ) : (
+              <span />
+            )}
+            {/* 刷新：invalidate agentLogs 键（30s 轮询之外的手动补偿）。 */}
+            <button
+              type="button"
+              title="刷新"
+              onClick={() => {
+                void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
+              }}
+              className="shrink-0 cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              刷新
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

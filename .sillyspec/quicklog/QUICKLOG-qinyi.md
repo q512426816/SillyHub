@@ -125,3 +125,22 @@
 根因：quick-6966fcee 删 config.manual_approval=False 意图放开弹窗，但 permission_service 闸门 is not True 对 None 同样拒，AskUserQuestion 被吞前端收不到 agent 死等；等答题的安静轮被 60s stale-flip 翻 active 后自更新忙屏障只认 running，12:39 新版发布 daemon 重启杀活轮；sweep 非 worker run 判死不写原因，前端只能显示运行失败无详情
 方案：group/service.py 影子建行 config 显式 manual_approval/ask_user_only true 且存量自愈升级为 False/None 一律修成显式 True；daemon hasRunningTurn 新增 stale-flip 宽限臂与写通道守卫共用谓词；sweep 非 worker 判死补 daemon_interrupted + 中文原因经 failure_summary 透出前端
 结果：backend pytest 34+13 全绿 ruff 0 告警，daemon vitest 16+43 全绿 tsc 0 错，存量 7 行 group_member config 已回填（含事故会话 e148364e 立即恢复弹窗），待提交并重建 backend 镜像部署生效
+
+## ql-20260904-021-ea77 | 2026-09-04 14:39:39 | 本地 Agent 日志收纳会话面板顶部折叠栏
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/agent-log-card.tsx（AgentLogCard 改顶部折叠栏形态）
+- frontend/src/components/daemon/session-panel.tsx（挂载点 streamFooter→顶部（横幅下/主体上））
+- frontend/src/components/daemon/turn-timeline.tsx（streamFooter 注释标注暂无消费方）
+- frontend/src/components/daemon/__tests__/agent-log-card.test.tsx（头注释+顶部栏根断言）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引补 ql-20260904-021-ea77）
+需求：本地 Agent 日志收纳会话面板顶部折叠栏
+根因：无，纯样式与挂载位置调整——用户反馈会话主面板里的本地 Agent 日志信息块挤占聊天窗口，要求移到顶部点击再展示
+方案：AgentLogCard 从对话流尾部气泡条目（turn-timeline streamFooter 挂载）改为面板级整宽折叠栏，挂横幅之下/会话主体之上；默认一行摘要细栏点击展开明细（明细/复制/查看内容/展开全部/刷新交互保留）；新增 mobile prop 对齐横幅内边距；纯 tool_report 主体不重复挂载；turn-timeline 注入口保留备用
+结果：agent-log-card 23 用例（补顶部栏根断言）+ session-panel×15/turn-timeline×5 相关套件 231 用例全绿，tsc 0，eslint 0 新增告警（仅存量），改动文件已 git add
+
+## ql-20260904-022-ab52 | 2026-09-04 14:44:52 | 修复 WS 送达控制指令 ack 无冲刷触发点致 GC 误杀等待用户回答的活轮（事故 e148364e）
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/control-dispatcher.ts, sillyhub-daemon/src/control-dispatcher.test.ts

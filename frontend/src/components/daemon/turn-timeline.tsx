@@ -256,9 +256,10 @@ export interface TurnTimelineProps {
   emptyProviderLabel: string;
   /**
    * ql-20260823-002-6a1a：消息流末尾注入位（会话式条目挂载口）——渲染在最后
-   * 一个 turn 之后、同一滚动容器内，让附加信息以「对话流里的一条消息」形态出现
-   * （先例：AgentLogCard 本地 Agent 日志条目）而非面板级独立卡片。null/undefined
-   * 不渲染（零回归）；空 turns（空态占位）不渲染（流不存在无落点）。
+   * 一个 turn 之后、同一滚动容器内，让附加信息以「对话流里的一条消息」形态
+   * 出现而非面板级独立卡片。null/undefined 不渲染（零回归）；空 turns（空态
+   * 占位）不渲染（流不存在无落点）。ql-20260904-021：首个消费方 AgentLogCard
+   * 已迁面板顶部折叠栏，本注入口保留备用（暂无消费方）。
    */
   streamFooter?: ReactNode;
 }
@@ -750,7 +751,7 @@ export function TurnTimeline({
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——
               最后一个 turn 之后、同一 space-y-5 流容器内渲染，附加信息以
-              「对话流里的一条消息」形态出现（AgentLogCard 先例）。 */}
+              「对话流里的一条消息」形态出现（ql-20260904-021 起暂无消费方）。 */}
           {streamFooter}
         </div>
       )}
