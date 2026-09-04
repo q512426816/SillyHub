@@ -1197,7 +1197,7 @@ class TestEndGroupChain:
             calls["n"] += 1
             if calls["n"] == 1:
                 raise RuntimeError("db glitch")
-            return await orig_end(self, *args, **kwargs)  # type: ignore[arg-type]
+            return await orig_end(self, *args, **kwargs)
 
         monkeypatch.setattr(group_service_module.SessionService, "end_session", flaky_end)
 

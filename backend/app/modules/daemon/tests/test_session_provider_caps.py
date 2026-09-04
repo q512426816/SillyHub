@@ -144,8 +144,8 @@ def _make_service_with_stubbed_preflight(provider: str, *, status: str) -> Sessi
         # reconnecting 恒 False——None 即可，驱动走到 NotActive 抛点）。
         last_active_at=None,
     )
-    svc._get_owned_session_for_update = AsyncMock(return_value=fake_session)  # type: ignore[method-assign]
-    svc._ensure_session_workspace_writable = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    svc._get_owned_session_for_update = AsyncMock(return_value=fake_session)
+    svc._ensure_session_workspace_writable = AsyncMock(return_value=None)
     return svc
 
 

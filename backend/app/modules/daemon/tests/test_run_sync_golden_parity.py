@@ -574,7 +574,7 @@ _CHAIN_FINAL_CONTENTS_CANON = {
 }
 
 
-def _canon_stdout_contents(rows: list[AgentRunLog]) -> set[str]:
+def _canon_stdout_contents(rows: list[AgentRunLog]) -> set[str | None]:
     """非 tool_call 行 content 语义化集合（[TOOL_USE] JSON args 归一）。"""
     return {
         _canon_content("stdout", r.content_redacted or "") for r in rows if r.channel != "tool_call"

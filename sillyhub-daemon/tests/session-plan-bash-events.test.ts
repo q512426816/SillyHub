@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HubClient, HubHttpError } from '../src/hub-client';
 import { REST_PREFIX } from '../src/protocol';
 import { SessionManager } from '../src/interactive/session-manager';
+import { ClaudeEventNormalizer } from '../src/interactive/claude-events';
 import type {
   InteractiveDriver,
   InteractiveDriverHandle,
@@ -221,10 +222,18 @@ describe('HubClient — session feedback notify 方法错误处理', () => {
  *
  * create() 触发 _runConsume → driver.consume(callbacks) 捕获 onTurnMessage；
  * 调用 onTurnMessage(msg) 相当于 driver 推送一条消息进 _onMessage 处理链。
+ *
+ * AgentEvent v2（2026-09-03-agent-provider-abstraction）：归一化下沉 driver，
+ * onTurnMessage 契约改为 TurnMessageEnvelope{events}，session-manager 不再解析
+ * raw SDK 消息。本文件保持「喂原始 SDK 消息」的端到端口径——捕获回调包一层
+ * 真实 ClaudeEventNormalizer（raw → 归一化 events → envelope → _onMessage 分发
+ * → onSessionEvent），与 claude driver 生产路径同构。
  */
 function createSessionManagerWithFakeDriver(onSessionEvent?: SessionManagerDeps['onSessionEvent']) {
   let capturedOnTurnMessage: ((msg: Record<string, unknown>) => Promise<void>) | null = null;
   let startResolved = false;
+
+  const normalizer = new ClaudeEventNormalizer({ onPartialFlush: () => {} });
 
   const fakeDriver: InteractiveDriver = {
     provider: 'claude',
@@ -234,9 +243,11 @@ function createSessionManagerWithFakeDriver(onSessionEvent?: SessionManagerDeps[
     },
     async consume(_handle, callbacks: InteractiveDriverCallbacks) {
       // _runConsume 内部对 callbacks.onTurnMessage 包了一层 orphan 守卫后转发 _onMessage；
-      // 直接捕获原始 onTurnMessage 引用，调用即触发 _onMessage 全链路。
-      const cb = callbacks.onTurnMessage as unknown as (msg: Record<string, unknown>) => Promise<void>;
-      capturedOnTurnMessage = cb;
+      // 直接捕获原始 onTurnMessage 引用，调用即触发 _onMessage 全链路（见上：入参
+      // 先经 normalizer 归一化成 envelope，模拟 claude driver 的下沉归一化）。
+      const cb = callbacks.onTurnMessage as unknown as (envelope: unknown) => Promise<void>;
+      capturedOnTurnMessage = (msg) =>
+        cb({ events: normalizer.normalizeMessage(msg as never) });
       // simulate driver running indefinitely until close
       return new Promise<void>(() => {});
     },
@@ -539,13 +550,16 @@ describe('session-manager — user message tool_result → bash_chunk + bash_sta
     expect(onSessionEvent).toHaveBeenCalledTimes(1);
     expect(onSessionEvent.mock.calls[0][2]).toMatchObject({ kind: 'bash_status', status: 'running' });
 
-    // 2. user 回送 tool_result（is_error=false）
+    // 2. user 回送 tool_result（is_error=false）。标准 SDK 形状：content 嵌在
+    // message.content（旧测试顶层 content 是适配旧 session-manager 的非标准形状）。
     await onTurnMessage({
       type: 'user',
       parent_tool_use_id: null,
-      content: [
-        { type: 'tool_result', tool_use_id: 'tu-1', content: 'hi\n', is_error: false },
-      ],
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu-1', content: 'hi\n', is_error: false },
+        ],
+      },
     });
 
     // 应新增 2 个事件：bash_chunk(final) + bash_status(completed)
@@ -588,9 +602,11 @@ describe('session-manager — user message tool_result → bash_chunk + bash_sta
     await onTurnMessage({
       type: 'user',
       parent_tool_use_id: null,
-      content: [
-        { type: 'tool_result', tool_use_id: 'tu-err', content: 'exit 1', is_error: true },
-      ],
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu-err', content: 'exit 1', is_error: true },
+        ],
+      },
     });
 
     const statusCall = onSessionEvent.mock.calls[2][2];
@@ -623,9 +639,11 @@ describe('session-manager — user message tool_result → bash_chunk + bash_sta
     await onTurnMessage({
       type: 'user',
       parent_tool_use_id: null,
-      content: [
-        { type: 'tool_result', tool_use_id: 'tu-obj', content: objContent, is_error: false },
-      ],
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu-obj', content: objContent, is_error: false },
+        ],
+      },
     });
 
     const chunkCall = onSessionEvent.mock.calls[1][2];
@@ -688,7 +706,9 @@ describe('session-manager — 重复 tool_use_id 幂等（不产生双倍 runnin
     await onTurnMessage({
       type: 'user',
       parent_tool_use_id: null,
-      content: [{ type: 'tool_result', tool_use_id: 'tu-once', content: 'ok', is_error: false }],
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tu-once', content: 'ok', is_error: false }],
+      },
     });
     const countAfterFirst = onSessionEvent.mock.calls.length;
 
@@ -696,7 +716,9 @@ describe('session-manager — 重复 tool_use_id 幂等（不产生双倍 runnin
     await onTurnMessage({
       type: 'user',
       parent_tool_use_id: null,
-      content: [{ type: 'tool_result', tool_use_id: 'tu-once', content: 'dup', is_error: false }],
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tu-once', content: 'dup', is_error: false }],
+      },
     });
 
     expect(onSessionEvent.mock.calls.length).toBe(countAfterFirst);
@@ -715,7 +737,9 @@ describe('session-manager — 未知 tool_use_id 的 tool_result 被忽略', () 
     await onTurnMessage({
       type: 'user',
       parent_tool_use_id: null,
-      content: [{ type: 'tool_result', tool_use_id: 'unknown-id', content: 'stale', is_error: false }],
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'unknown-id', content: 'stale', is_error: false }],
+      },
     });
 
     expect(onSessionEvent).not.toHaveBeenCalled();
@@ -743,7 +767,9 @@ describe('session-manager — 非 Bash 工具的 tool_result 不触发事件', (
     await onTurnMessage({
       type: 'user',
       parent_tool_use_id: null,
-      content: [{ type: 'tool_result', tool_use_id: 'tu-read', content: 'file data', is_error: false }],
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tu-read', content: 'file data', is_error: false }],
+      },
     });
 
     expect(onSessionEvent).not.toHaveBeenCalled();

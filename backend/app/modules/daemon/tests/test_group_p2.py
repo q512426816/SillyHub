@@ -974,7 +974,8 @@ class TestListExtrasBatchedMultiGroup:
         mentions = await group_service_module.get_last_mention_previews(
             db_session, user_id=peer.id, group_ids=ids
         )
-        assert mentions[ids[0]] is not None
-        assert mentions[ids[0]]["member_name"] == "群主"
+        mention_preview = mentions[ids[0]]
+        assert mention_preview is not None
+        assert mention_preview["member_name"] == "群主"
         assert mentions[ids[1]] is None
         assert mentions[ids[2]] is None

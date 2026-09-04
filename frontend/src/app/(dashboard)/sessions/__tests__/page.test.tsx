@@ -1392,6 +1392,8 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
         before: "2026-08-15T08:00:00Z",
         limit: 100,
+        // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
+        signal: expect.any(AbortSignal),
       });
     });
     // prepend：更早轮出现在顶部，当前窗口内容保留；加载完成后提示消失。
@@ -1578,6 +1580,8 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
         before: "2026-08-15T08:00:00Z",
         limit: 100,
+        // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
+        signal: expect.any(AbortSignal),
       });
     });
     // 同 run 更早段不被丢弃：内容 prepend 到顶部。
