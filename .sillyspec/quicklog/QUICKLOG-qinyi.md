@@ -193,3 +193,16 @@
 根因：CLI 归档把目录改名「去源日期+拼归档日期」，_detect_renames 同日期前缀匹配必然 miss，旧行误判 orphaned 进删除环物理删且 _delete_progress_rows 连带清 platform_change_progress 收件箱 steps；新归档行 key 变了投影 join 也 miss，前端 steps 为空即不渲染时间线卡片
 方案：①_detect_renames 增描述段兜底（_strip_date_prefix 剥 YYYY-MM-DD- 前缀，唯一候选才配对，≥2 静默放弃）②新增 _rename_progress_rows（主 commit 后独立短事务 best-effort）：新名无行直接改 change_name，已有行则目标 steps 空时回填源 steps 再删源行
 结果：新增 3 用例（跨日期匹配+迁移/目标已存在回填合并/描述段二义放弃）；change 模块 500 passed 2 skipped、platform_sync 189 passed、删除闭环文件 14 passed，ruff check/format 干净、mypy 0 issue；存量已丢 steps 的归档行不可恢复（项目未上线不补历史兼容）
+
+## ql-20260904-026-ad9b | 2026-09-04 20:53:22 | daemon register 拒绝时终端中文提示+后台进程日志 tee 落 daemon.log
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（buildRegisterFailureHint+_registerFailStreak 节流+恢复提示）
+- sillyhub-daemon/src/cli.ts（attachConsoleToLogFile console tee+startAction 非 TTY 挂接）
+- sillyhub-daemon/tests/daemon-register-error-hint.test.ts（新建 6 用例）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引加 ql-20260904-026-ad9b）
+需求：daemon register 拒绝时终端中文提示+后台进程日志 tee 落 daemon.log
+根因：换账号 API Key 复用机器身份被 403 ownership mismatch 拒绝时 daemon 只在内部日志静默重试，且自更新 respawn（stdio=ignore）与 VBS 隐藏自启的 console 输出凭空丢失，用户看到启动命令退出即误判启动不了且零提示（2026-09-04 实事故）
+方案：daemon.ts 新增 buildRegisterFailureHint（403 ownership 单列含两条出路/401 重签 key/通用一行，网络错静默）+ _registerFailStreak 节流（首错立即每 5 次重发，成功清零并提示注册已恢复）；cli.ts 新增 attachConsoleToLogFile（console 四方法 tee 到 daemon.log，!stdout.isTTY 时挂接覆盖 respawn 与隐藏自启两场景，幂等+失败静默防递归）
+结果：新建 daemon-register-error-hint.test.ts 6 用例 6/6 绿（403 首提示/节流静默+第 6 次重发/恢复提示+清零/401 文案/网络错无提示/tee 落文件+幂等）；近邻 multi-runtime/heartbeat-sillyspec/daemon/cli/preflight/autostart 6 套件 208 passed 8 skipped；tsc 0

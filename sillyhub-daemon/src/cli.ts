@@ -41,8 +41,9 @@
 
 import { Command } from 'commander';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { readFile, writeFile, mkdir, rm, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, readdir, appendFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { inspect } from 'node:util';
 import { hostname } from 'node:os';
 
 import {
@@ -135,6 +136,45 @@ export function getPidFile(): string {
  */
 export function getLogFile(): string {
   return join(DEFAULT_CONFIG_DIR, 'daemon.log');
+}
+
+// ── 后台/无终端进程的 console tee（ql-20260904-026）──────────────────────────
+
+/**
+ * attachConsoleToLogFile 幂等标记——console 方法一旦包装即不再重复包装。
+ */
+let consoleAttachedToLog = false;
+
+/**
+ * ql-20260904-026：把 console 四方法 tee 到 daemon.log（原输出通道保留）。
+ *
+ * 覆盖两个「console 输出凭空丢失」的后台场景：
+ * 1. 自更新 respawn——preflight spawn 用 ``stdio: 'ignore'``（detached 必需），
+ *    respawn 进程的 console 输出无人接收，原终端早已无连接（本次事故根因：
+ *    register 403 静默重试 + respawn 后零日志，用户误判「启动不了」）；
+ * 2. Windows VBS 隐藏自启——WScript.Shell.Run 窗口样式 0 且无重定向。
+ *
+ * 触发条件在 startAction：``!process.stdout.isTTY``（后台两场景均为非 TTY；
+ * 前台终端不受影响保持现状）。append 逐行异步、失败静默（写不进日志不该
+ * 反过来打断 daemon 主流程；失败路径再 console 会递归，必须吞）。
+ * 导出供单测直接验证 tee 行为；幂等防测试重复调用双重包装。
+ */
+export function attachConsoleToLogFile(logFile: string = getLogFile()): void {
+  if (consoleAttachedToLog) return;
+  consoleAttachedToLog = true;
+  const tee =
+    (original: (...args: unknown[]) => void) =>
+    (...args: unknown[]) => {
+      original(...args);
+      const line = `${args
+        .map((a) => (typeof a === 'string' ? a : a instanceof Error ? a.stack ?? a.message : inspect(a)))
+        .join(' ')}\n`;
+      void appendFile(logFile, line, 'utf-8').catch(() => {});
+    };
+  console.log = tee(console.log.bind(console));
+  console.info = tee(console.info.bind(console));
+  console.warn = tee(console.warn.bind(console));
+  console.error = tee(console.error.bind(console));
 }
 
 // ── 配置加载/保存包装（可测试性：task-22 可 spy）─────────────────────────────
@@ -637,6 +677,11 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // 只进内存（模块级变量 → spawn env），不落日志 / 配置文件。token 模式（无 apiKey）
   // 传 null → proxy 形态退化不写 AUTH_TOKEN 键。
   setDaemonApiKey(config.api_key);
+
+  // ql-20260904-026：非 TTY（自更新 respawn stdio=ignore / VBS 隐藏自启 / 外部
+  // 重定向）→ console 输出 tee 到 daemon.log，保证 ``sillyhub-daemon logs`` 与
+  // 排障始终有料；前台终端不受影响。
+  if (!process.stdout.isTTY) attachConsoleToLogFile();
 
   // step 5 前置：echo 启动信息（对齐 Python __main__.py:93-94）。
   process.stdout.write(`Starting SillyHub daemon (server=${config.server_url})...\n`);

@@ -72,7 +72,7 @@ import type {
 } from './types.js';
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
-import { extractCause } from './hub-client.js';
+import { extractCause, HubHttpError } from './hub-client.js';
 // 2026-08-31-machine-sillyspec-version task-05：register/heartbeat 追加的 sillyspec
 // 参数形状（键存在性语义见 hub-client.ts D-002@v1 注释），daemon 组装快照时用。
 import type {
@@ -196,6 +196,54 @@ const CONTROL_MSG_TYPE_TO_KIND: Record<string, string> = {
 // 成功清计数恢复正常心跳。常量导出便于测试注入时间。
 export const REGISTER_RETRY_BASE_MS = 15_000;
 export const REGISTER_RETRY_MAX_MS = 60_000;
+
+// ql-20260904-026：register 鉴权/归属类失败（401/403）的终端中文提示重发间隔——
+// 首错立即提示，其后每 5 次失败重发一次（60s 退避下约 5 分钟一条），防刷屏。
+// 背景：key 归属不符被 403 拒绝时 daemon 只在内部日志静默重试，用户看到的是
+// 「启动不了」却无任何提示（自更新 respawn 后原终端更是零输出）。
+export const REGISTER_HINT_EVERY_N_FAILURES = 5;
+
+/**
+ * ql-20260904-026：把 register 失败翻译为面向用户的中文终端提示行。
+ *
+ * 仅 HubHttpError（服务器明确拒绝）给提示；网络错误（fetch failed 等）静默——
+ * 心跳降级日志已覆盖且属常见瞬态，刷终端提示只会造成噪音。
+ * 403 ownership mismatch 单列文案：这是「换账号 key 复用机器身份」的高频卡点，
+ * 需要告诉用户两条出路（改回原账号 key / 平台侧改绑机器归属）。
+ */
+export function buildRegisterFailureHint(error: unknown): string[] | null {
+  if (!(error instanceof HubHttpError)) return null;
+  if (error.status === 403) {
+    let ownershipMismatch = false;
+    try {
+      ownershipMismatch =
+        (JSON.parse(error.bodyText) as { code?: string } | null)?.code ===
+        'HTTP_403_DAEMON_INSTANCE_OWNERSHIP_MISMATCH';
+    } catch {
+      // body 非 JSON（网关裸 403 等）→ 走通用 403 文案。
+    }
+    if (ownershipMismatch) {
+      return [
+        '✗ 注册被服务器拒绝（403）：该机器的守护进程身份（daemon_local_id）已绑定其他账号。',
+        '  处理办法：改用原账号签发的 API Key 启动，或在平台让管理员把该机器归属改绑到当前账号。',
+        '  daemon 将继续自动重试，归属匹配后自动恢复在线。',
+      ];
+    }
+    return [
+      `✗ 注册被服务器拒绝（403）。服务器响应：${error.bodyText.slice(0, 200)}`,
+      '  daemon 将继续自动重试。',
+    ];
+  }
+  if (error.status === 401) {
+    return [
+      '✗ 注册被服务器拒绝（401）：API Key 无效、已过期或已被吊销。',
+      '  处理办法：在 SillyHub 平台重新签发 API Key，然后执行',
+      '  sillyhub-daemon start --server <服务器地址> --api-key <新Key>',
+      '  daemon 将继续自动重试。',
+    ];
+  }
+  return [`✗ 注册失败（HTTP ${error.status}），daemon 将继续自动重试。`];
+}
 
 // task-04（S1 / D-002@v1）：忙推迟升级的空闲复查间隔——忙时记 pending 后每 30s
 // 重探（完整重跑 _tryUpdate，无状态机），无限等空闲。导出供测试断言间隔语义。
@@ -1520,6 +1568,12 @@ export class Daemon {
   private _nextRegisterRetryAt = 0;
 
   /**
+   * ql-20260904-026：register 连续失败计数（成功清零）——驱动 401/403 终端
+   * 中文提示的防刷屏节流（首错 + 每 REGISTER_HINT_EVERY_N_FAILURES 次重发）。
+   */
+  private _registerFailStreak = 0;
+
+  /**
    * task-06（design A1+A2）：控制指令统一消费入口。六类控制消息（WS 推送 +
    * HTTP 补拉）经它按 kind 路由到下方既有 _route* 方法（不复制业务逻辑）、
    * LRU 256 command_id 去重、收集 ack 回执。构造器创建（handler 闭包捕获 this）。
@@ -2662,10 +2716,30 @@ export class Daemon {
         daemon_local_id: this._config.runtime_id,
         providers: [...this._registeredRuntimes.keys()],
       });
+      // ql-20260904-026：失败后恢复的可见性——之前打过失败提示的话，成功时给
+      // 一行恢复提示（前台终端 / respawn tee 到 daemon.log 两条路都可见）。
+      if (this._registerFailStreak > 0) {
+        this._registerFailStreak = 0;
+        // eslint-disable-next-line no-console
+        console.log('✓ 注册已恢复：daemon 已重新在线。');
+      }
     } catch (e) {
+      // ql-20260904-026：鉴权/归属类失败（401/403）给终端中文提示——首错立即、
+      // 其后每 REGISTER_HINT_EVERY_N_FAILURES 次重发（防 60s 重试刷屏）；网络错
+      // 无提示（瞬态常见，心跳降级日志已覆盖）。respawn/隐藏自启进程经 cli.ts
+      // 的 console tee 同样落 daemon.log。
+      this._registerFailStreak += 1;
+      const hint = buildRegisterFailureHint(e);
+      if (hint && (this._registerFailStreak - 1) % REGISTER_HINT_EVERY_N_FAILURES === 0) {
+        for (const line of hint) {
+          // eslint-disable-next-line no-console
+          console.error(line);
+        }
+      }
       this._logger.error('daemon_register_failed', {
         daemon_local_id: this._config.runtime_id,
         error: e,
+        ...(hint ? { hint: hint.join(' ') } : {}),
       });
     }
   }
