@@ -94,11 +94,14 @@ delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False（30 天机会式
   旧 pull 快照，推不出新 change——sync-manual 透传宿主 root_path 让 daemon 改打
   宿主 `.sillyspec`（与 get_spec_bundle RPC 同源）
 - strategy 可创建后修改（PATCH /spec-workspace，前端入口在 workspace-config-card
-  策略行「修改」，owner 门禁）：改库对后续 dispatch/init 实时生效（lease payload
-  每次读 spec_workspaces.strategy），但 daemon 本地缓存布局（repo-native junction /
-  repo-mirrored 首拷）只在下次**无条件 pull** 时重建——interactive/batch 有
-  spec_version 一致跳 pull 的保鲜逻辑，故可靠生效路径是点「初始化」（handleInitLease
-  无条件 pullSpecBundle）；普通会话若 version 未变可能仍用旧缓存直到版本变化
+  策略行「修改」，owner 门禁）：改库后**携带策略的派发链路只有扫描与初始化**——
+  scan dispatch 与 init lease platform_config 每次实时读 spec_workspaces.strategy；
+  普通会话与变更任务（placement.dispatch_to_daemon）的 lease **不写 spec_strategy 键**
+  （context.py 只从 lease_meta 取），daemon pullSpecBundle 按 platform-managed 兜底——
+  version 一致跳 pull 无副作用；version 变化时按 platform-managed 覆盖拉取，会把
+  repo-native junction 拆除退化（既有缺口，非修改功能引入；重建靠下次扫描/初始化）。
+  可靠生效路径＝点「初始化」（handleInitLease 无条件 pullSpecBundle 按新策略重建
+  本地布局：repo-native junction / repo-mirrored 首拷 / platform pull）
 - workspace 创建时经 `_ensure_spec_workspace(_from_platform)` 自动连带建 1:1
   spec 空间，无需显式建
 - bundle 下载是流式响应，前端按 blob 接收

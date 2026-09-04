@@ -83,14 +83,15 @@ import { cn } from "@/lib/utils";
 
 /* ────────────────────── 常量与纯辅助 ────────────────────── */
 
-/** 引擎选项（与 task-07 向导 ENGINE_OPTIONS 同源两档；群聊 agent 成员仅 claude/codex）。 */
+/** 引擎选项（与 task-07 向导 ENGINE_OPTIONS 同源两档；群聊 agent 成员 claude/codex/pi）。 */
 const ENGINE_OPTIONS = [
   { label: "Claude Code", value: "claude" },
   { label: "Codex", value: "codex" },
+  { label: "PI", value: "pi" },
 ] as const;
 
 /** 支持作为群 agent 成员的引擎白名单（机器下拉 runtime 过滤，向导同源）。 */
-const GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex"]);
+const GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi"]);
 
 /**
  * shadow_status 徽标口径（design §3.3 none/pending/active/failed + 移除/解散

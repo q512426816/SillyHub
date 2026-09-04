@@ -361,9 +361,10 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     try {
       await updateSpecWorkspace(workspaceId, { strategy: strategyDraft });
       setStrategyEditing(false);
-      // 生效语义（调研结论）：backend dispatch/init 每次实时读库，新策略对后续任务
-      // 即时生效；但 daemon 本地缓存布局（junction/首拷）只在下次无条件 pull 时重建
-      // ——handleInitLease 是无条件 pull，故提示用户点「初始化」。
+      // 生效语义（复核 ql-20260904-028-3cb5）：携带策略的派发链路只有扫描与初始化
+      // （lease 实时读 spec_workspaces.strategy）；普通会话/变更任务 lease 不带该键，
+      // daemon pull 按 platform-managed 兜底。daemon 本地缓存布局（junction/首拷）
+      // 只在无条件 pull 时重建——handleInitLease 是无条件 pull，故提示点「初始化」。
       notify.success("spec 策略已更新。建议点击「初始化」让新策略在本地缓存生效。");
       onRefresh();
     } catch (err) {
@@ -753,7 +754,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
             {STRATEGY_LABEL[specWs.strategy] ?? specWs.strategy}
           </Badge>
           {isOwner && (
-            <Tooltip title="修改 spec 同步策略。新策略对后续任务派发即时生效；本地缓存布局建议修改后点「初始化」重建。">
+            <Tooltip title="修改 spec 同步策略。保存后点击「初始化」按新策略重建本地文档缓存（新策略在扫描/初始化时生效）。">
               <Button
                 data-testid="strategy-edit-entry"
                 size="small"
@@ -939,7 +940,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         destroyOnHidden
       >
         <p className="mb-2 text-xs text-muted-foreground">
-          源项目已有 .sillyspec 如何进入平台。新策略对后续任务派发即时生效；本地缓存布局建议保存后点击「初始化」重建。
+          源项目已有 .sillyspec 如何进入平台。保存后点击「初始化」按新策略重建本地文档缓存（新策略在扫描/初始化时生效）。
         </p>
         <Radio.Group
           className="flex flex-col gap-1"

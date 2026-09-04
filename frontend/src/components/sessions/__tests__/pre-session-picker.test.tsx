@@ -288,7 +288,7 @@ describe("PreSessionPicker 空态引导", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /选择机器 机器一/ }));
     expect(
-      screen.getByText(/该机器暂无可会话智能体（需要 Claude Code 或 Codex 在线）/),
+      screen.getByText(/该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）/),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /选择智能体/ }),

@@ -25,6 +25,7 @@ import {
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
+import { getProviderCaps } from "@/lib/provider-caps";
 
 export function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id;
@@ -168,8 +169,9 @@ export function isActiveSession(s: AgentSessionRead): boolean {
  */
 export function canResumeSession(session: AgentSessionRead | null): boolean {
   if (!session) return false;
+  // ql-20260904-029：引擎硬编码改查 caps（pi resume=true 因此可续聊；未知引擎全 false 默认拒绝）
   return (
-    (session.provider === "claude" || session.provider === "codex") &&
+    getProviderCaps(session.provider).resume &&
     !!session.agent_session_id &&
     (session.status === "ended" ||
       session.status === "failed" ||
@@ -179,7 +181,7 @@ export function canResumeSession(session: AgentSessionRead | null): boolean {
 
 /** 续聊按钮不可用时的 title 提示文案。 */
 export function resumeDisabledTitle(session: AgentSessionRead): string {
-  if (session.provider !== "claude" && session.provider !== "codex") {
+  if (!getProviderCaps(session.provider).resume) {
     return "当前会话不支持续聊";
   }
   if (!session.agent_session_id) return "会话未建立，无法续聊";

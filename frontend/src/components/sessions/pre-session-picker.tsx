@@ -240,7 +240,7 @@ export function PreSessionPicker({
             </p>
             {supportedRuntimes.length === 0 ? (
               <p className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                该机器暂无可会话智能体（需要 Claude Code 或 Codex 在线）
+                该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）
               </p>
             ) : (
               <div className="mt-2 flex flex-col gap-2" aria-label="智能体列表">

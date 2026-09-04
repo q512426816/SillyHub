@@ -33,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1364,3 +1365,30 @@ class TestCreateSessionModelSelect:
         s = result.agent_session
         assert s.config_snapshot is not None
         assert s.config_snapshot["model"] == "glm-4.7"
+
+
+class TestPiProviderLiteral:
+    """ql-20260904-029（F-1 回归）：InteractiveProviderLiteral 含 pi——provider='pi'
+    显式创建不再 422（2026-09-04-provider-pi-onboarding 冒烟发现的第三处引擎白名单）。"""
+
+    @pytest.mark.parametrize("provider", ["claude", "codex", "pi"])
+    async def test_explicit_provider_accepted_by_literal(
+        self, client: AsyncClient, db_session, auth_admin_token: str, provider: str
+    ) -> None:
+        uid = await _create_user(db_session, admin=True)
+        rt = await _create_runtime(db_session, uid, provider=provider, name=provider.upper())
+        resp = await client.post(
+            "/api/daemon/sessions",
+            headers={"Authorization": f"Bearer {auth_admin_token}"},
+            json={
+                "prompt": "hi",
+                "provider": provider,
+                "runtime_id": str(rt.id),
+            },
+        )
+        # 修复前 pi 会 422（Literal 不含）；修复后三 provider 都被 DTO 接受。
+        # 派发成败取决于 runtime 绑定（此处无 workspace 绑定，NoOnlineDaemonError
+        # 属 4xx/失败路径均可），只断言不因 Literal 拒绝。
+        assert resp.status_code != 422, resp.text
+        if resp.status_code == 201:
+            assert resp.json().get("provider") == provider

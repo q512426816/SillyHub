@@ -149,7 +149,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 
 ## 变更索引
 
-- ql-20260904-028-3cb5 | 工作区 spec 策略支持修改：后端 PATCH /spec-workspace 早已存在但前端无入口——lib/spec-workspaces.ts 补 updateSpecWorkspace（PATCH + 三字段透传）；workspace-config-card 策略行加 owner 门禁「修改」入口（antd Modal 三选、同值禁存、repo-native 写源项目警告、成功 toast 提示点「初始化」重建本地缓存）；生效语义：改库对后续 dispatch 实时生效、daemon 缓存布局等下次无条件 pull（=初始化按钮）重建，详见 spec_workspace.md 注意事项
+- ql-20260904-028-3cb5 | 工作区 spec 策略支持修改：后端 PATCH /spec-workspace 早已存在但前端无入口——lib/spec-workspaces.ts 补 updateSpecWorkspace（PATCH + 三字段透传）；workspace-config-card 策略行加 owner 门禁「修改」入口（antd Modal 三选、同值禁存、repo-native 写源项目警告、成功 toast 提示点「初始化」重建本地缓存）；生效语义：新策略在扫描/初始化链路实时读库生效（普通会话/变更任务 lease 不带策略键，daemon pull 按 platform-managed 兜底），daemon 缓存布局等无条件 pull（=初始化按钮）重建，详见 spec_workspace.md 注意事项
 - ql-20260903-001-4d6e | 视口补拉时序修复（ql-010 部署后实测未解决）：初始/翻页触发原 setTimeout(0) 早于 React DOM 提交与布局——scrollHeight=0 被守卫拦下且无重试，补拉链断在首跳（偶发成功属时序竞争）；scheduleAutoFill 双 rAF 等提交+布局，布局不可读继续 rAF 重试至多 10 帧（~160ms）后放弃，两处触发统一走调度；新增布局延迟就绪用例（前 2 读 0 后可读）
 - ql-20260902-016-3a75 | variant 回归锚补同步（CI 修复）：ql-009 给会话主体加 display:contents 挂载点（触顶自动加载滚动监听）后 session-panel-variant.test.tsx 锚未跟着走——desktop 断 scroll.parentElement=panel、mobile 断外包层=scroll 父级，CI 连挂 4 次；锚更新为「挂载点布局透明（className=contents）+ 挂载点直挂面板根（desktop）/ 挂载点父级=mobile 横向外包层（min-h-0 flex-1 + 表格横滚锁类仍全在，CSS 后代选择器穿透 contents 照常生效）」
 - ql-20260902-010-f493 | 触顶自动加载补口（视口补拉链）：初始 100 条日志装配的对话可能不足一屏——容器无滚动条 scroll 事件永不触发成死路；maybeAutoFill 在「容器有布局高度且 scrollHeight ≤ clientHeight 且有更早」时自动续拉一页（初始满页后 + 每次翻页满页后 setTimeout 复查 DOM 提交后状态），撑出滚动条即停走正常触顶；连拉上限 10 防极端空渲染批量请求，换会话重置；jsdom 无布局（scrollHeight=0）不触发保既有用例零影响

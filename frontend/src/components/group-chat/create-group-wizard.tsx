@@ -89,14 +89,15 @@ const GROUP_MEMBER_NAME_MAX_LEN = 40;
  */
 const RESERVED_MEMBER_NAMES = new Set(["全体", "all"]);
 
-/** 引擎选项（对齐 AGENT_TABS 两档；群聊 agent 成员仅 claude/codex）。 */
+/** 引擎选项（对齐 AGENT_TABS 两档；群聊 agent 成员 claude/codex/pi）。 */
 const ENGINE_OPTIONS = [
   { label: "Claude Code", value: "claude" },
   { label: "Codex", value: "codex" },
+  { label: "PI", value: "pi" },
 ] as const;
 
 /** 支持作为群 agent 成员的引擎白名单（PreSessionPicker 同源约束）。 */
-const GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex"]);
+const GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi"]);
 
 /* ────────────────────── 纯校验（组件外便于单测推理） ────────────────────── */
 
