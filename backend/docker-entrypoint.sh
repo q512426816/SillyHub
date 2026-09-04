@@ -10,13 +10,12 @@ mkdir -p /data/spec-workspaces
 if [ -d /app/sillyspec-skills ] && [ ! -e "${HOME:-/app}/.claude/skills" ]; then
   ln -s /app/sillyspec-skills "${HOME:-/app}/.claude/skills"
 fi
-# ql-20260904-027：chown -R 加属主守卫——spec-workspaces 卷可达数万文件
-# （本机实测 6.7 万 / 114s，Docker Desktop virtiofs），稳态下属主已正确却每次
-# 启动全量重扫，把 alembic/uvicorn 阻塞 2 分钟。根目录已归 app 即跳过（仅
-# 首次挂载/宿主机改写属主后才做一次全量；stat O(1)）。
-if [ "$(stat -c %u /data/spec-workspaces 2>/dev/null)" != "$(id -u app)" ]; then
-  chown -R app:app /data/spec-workspaces 2>/dev/null || true
-fi
+# ql-20260904-027（修正轮）：删除 chown -R /data/spec-workspaces——容器以 USER app
+# 运行（Dockerfile L132），chown 在任何挂载形态下都不可能成功：bind mount（本机
+# 与阿里云的实际形态）属主恒 root 且 EPERM（2>/dev/null || true 把 6.7 万文件
+# 的逐文件失败全吞掉，纯耗 114s/次阻塞 alembic）；named volume 场景的属主已由
+# Dockerfile L117-118 构建期 chown 覆盖（首次挂载继承镜像目录属主）。bind 场景
+# 的可写性由宿主目录权限保证（Docker Desktop 宽松映射 / 阿里云 HOST_PATH_PREFIX=/tmp 1777）。
 
 python - <<'PY'
 import json
