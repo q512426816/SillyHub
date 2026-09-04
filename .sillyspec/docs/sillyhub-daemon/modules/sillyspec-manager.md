@@ -13,7 +13,7 @@ created_at: 2026-08-31 16:30:00
 
 ## 契约摘要
 - `SillySpecManager(deps: SillySpecManagerDeps)`——全依赖注入可测：`runCommand`（默认 preflight runCmd）/ `install`（默认 preflight installSillySpec）/ **`isBusy`（必填）**（生产接 daemon._isBusyForUpdate 三臂忙判定）/ `now`（假钟）/ `logger` / 三个间隔常量（latestCacheTtlMs / deferredRecheckMs / terminalWindowMs）。
-- 对外 API：`probeLocal()`（`sillyspec --version`，失败缓存置 null=未安装语义）；`probeLatest()`（`npm view sillyspec version`，成功结果缓存 TTL 10 分钟，失败不缓存下次即重试）；`getSnapshot()`（纯同步零 spawn，返回 `{version, latest_version, update?}` 浅拷贝——update 键仅在存在且未过 10min 终态展示窗时携带）；`requestUpgrade(trigger)`（WS 指令 server_command / 自动 auto 统一入口，全路径 catch 收敛不 reject）；`requestManualUpgrade()`（ql-20260902-003：WS SILLYSPEC_UPDATE 手动指令入口——先 probeLatest+probeLocal 版本门，已安装且 !isOutdated → no-op 不白跑 npm；探测失败/未安装放行，门内转 requestUpgrade('server_command')。刻意独立于 requestUpgrade——后者依赖「running 同步置位先于首个 await」契约，异步探测须外置）；`checkAndUpgrade(trigger?)`（1h 循环入口：probeLatest+probeLocal → 未安装或 isOutdated 才 requestUpgrade，已最新 no-op，latest 不可达仅 warn）。
+- 对外 API：`probeLocal()`（`sillyspec --version`，失败缓存置 null=未安装语义）；`probeLatest()`（`npm view sillyspec version`，成功结果缓存 TTL 10 分钟，失败不缓存下次即重试）；`getSnapshot()`（纯同步零 spawn，返回 `{version, latest_version, update?}` 浅拷贝——update 键仅在存在且未过 10min 终态展示窗时携带）；`requestUpgrade(trigger)`（WS 指令 server_command / 自动 auto 统一入口，全路径 catch 收敛不 reject）；`requestManualUpgrade()`（ql-20260902-003：WS SILLYSPEC_UPDATE 手动指令入口——先 probeLatest+probeLocal 版本门，已安装且 !isOutdated → 写 up_to_date 终态不白跑 npm（ql-20260904-019 推翻原静默 no-op：无反馈无法与指令丢失区分，改横幅明示「已是最新版」；running/deferred in-flight 期不覆盖只记 debug）；探测失败/未安装放行，门内转 requestUpgrade('server_command')。刻意独立于 requestUpgrade——后者依赖「running 同步置位先于首个 await」契约，异步探测须外置）；`checkAndUpgrade(trigger?)`（1h 循环入口：probeLatest+probeLocal → 未安装或 isOutdated 才 requestUpgrade，已最新 no-op，latest 不可达仅 warn）。
 - 类型导出：`SillySpecUpdateTrigger`（'server_command'|'auto'）、`SillySpecUpdateStatus`（'running'|'deferred'|'success'|'failed'，idle 以快照 update 键缺席表达）、`SillySpecUpdateState`（state/trigger/from_version/to_version?/error?——heartbeat sillyspec_update 键的载荷形状，hub-client 复用）、`SillySpecSnapshot`。
 - 常量导出：`SILLYSPEC_LATEST_CACHE_TTL_MS`（10min）/ `SILLYSPEC_DEFERRED_RECHECK_MS`（30s）/ `SILLYSPEC_TERMINAL_WINDOW_MS`（10min）。
 - 升级成败判定：installSillySpec 保持 preflight 原样 void 返回，故以**安装后 probeLocal** 为准——探到版本即 success（to_version=探测值），探不到即 failed（error 截断 200 字符）。
@@ -27,7 +27,9 @@ created_at: 2026-08-31 16:30:00
   deferred ──每 30s 复查：转空闲 ▶ running；仍忙 ▶ 再推迟（定时器单实例不叠，unref）
 
 in-flight 门: running/deferred 期间新 requestUpgrade 仅记日志去重（CLEANUP 惯例）；
-  终态(success/failed)展示窗内新请求可再次进入升级
+  终态(success/failed/up_to_date)展示窗内新请求可再次进入升级
+requestManualUpgrade 已最新(!isOutdated) ─▶ up_to_date（终态，同 10min 展示窗；
+  ql-20260904-019——原静默 no-op 改为横幅明示「已是最新版」）
 终态 10min 过期为惰性判定: getSnapshot 每次调用(生产=每拍心跳)时判 now-终态时刻
   ≥ 窗口即回 idle——无人取快照时终态留内存无外部可见副作用
 _runUpgrade: 置 running(同步先于任何 await，in-flight 门依赖) → installSillySpec

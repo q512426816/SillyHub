@@ -26,8 +26,11 @@
  *     ▼
  *   deferred ──每 30s 复查：转空闲 ▶ running；仍忙 ▶ 再推迟（定时器单实例不叠）
  *
+ *   requestManualUpgrade 已最新（!isOutdated）─▶ up_to_date（终态，同 10min 展示
+ *   窗；ql-20260904-019——原静默 no-op 改为横幅明示「已是最新版」）
+ *
  *   in-flight 门：running/deferred 期间新 requestUpgrade 仅记日志去重
- *   （CLEANUP 惯例）；终态（success/failed）展示窗内新请求可再次进入升级。
+ *   （CLEANUP 惯例）；终态（success/failed/up_to_date）展示窗内新请求可再次进入升级。
  *
  * 终态 10min 过期采用**惰性判定**而非定时器：getSnapshot 每次调用（生产 = 每拍
  * 心跳）时判定 now - 终态时刻 ≥ 窗口即回 idle——常驻进程专门排一个 10min 定时器
@@ -148,7 +151,12 @@ export interface SillySpecStatusPendingConflict {
 export type SillySpecUpdateTrigger = 'server_command' | 'auto';
 
 /** 升级状态机阶段（idle 为无状态，不在此联合内——快照以 update 键缺席表达）。 */
-export type SillySpecUpdateStatus = 'running' | 'deferred' | 'success' | 'failed';
+export type SillySpecUpdateStatus =
+  | 'running'
+  | 'deferred'
+  | 'success'
+  | 'failed'
+  | 'up_to_date';
 
 /** 升级状态快照（heartbeat sillyspec_update 键的载荷形状，design 接口定义）。 */
 export interface SillySpecUpdateState {
@@ -479,16 +487,40 @@ export class SillySpecManager {
    * ql-20260902-003：auto 路径经 :meth:`checkAndUpgrade` 已有 isOutdated 门
    * （已最新 no-op），手动 server_command 原先直入 requestUpgrade 无门——已最新
    * 时白跑一次 `npm install -g` 还滚动一轮 running→success 横幅。此处先探
-   * latest+local（probeLatest 有 10min 缓存），已安装且 !isOutdated → no-op
-   * （不写状态，横幅不动）；探测失败不阻断（网络不可达照旧升级，宁装勿漏）。
-   * 刻意不把门塞进 requestUpgrade——该方法依赖「running 同步置位先于首个
-   * await」契约（in-flight 门/测试同步断言），异步探测必须外置。
+   * latest+local（probeLatest 有 10min 缓存），已安装且 !isOutdated → 写
+   * up_to_date 终态不跑 npm（ql-20260904-019 推翻原静默 no-op：无反馈无法与
+   * 指令丢失区分，改为横幅明示「已是最新版」，10min 后自然消失）；探测失败
+   * 不阻断（网络不可达照旧升级，宁装勿漏）。刻意不把门塞进 requestUpgrade——
+   * 该方法依赖「running 同步置位先于首个 await」契约（in-flight 门/测试同步
+   * 断言），异步探测必须外置。
    */
   async requestManualUpgrade(): Promise<void> {
     const latest = await this.probeLatest();
     const local = await this.probeLocal();
     if (latest !== null && local !== null && !isOutdated(local, latest)) {
-      this._log('debug', 'sillyspec_upgrade_skipped_up_to_date', {
+      // ql-20260904-019：已最新不再静默——回传 up_to_date 终态（10min 展示窗，
+      // 与 success/failed 同款惰性过期），机器卡横幅给「已是最新版」明确反馈
+      // （推翻 ql-20260902-003 的静默 no-op：用户点升级却无任何可见结果，无法
+      // 与指令丢失区分）。running/deferred in-flight 期不覆盖（保留升级轨迹，
+      // 与 requestUpgrade 侧 in-flight 门同语义）；覆盖 deferred 前清复查定时器。
+      const current = this._update;
+      if (current !== null && (current.state === 'running' || current.state === 'deferred')) {
+        this._log('debug', 'sillyspec_up_to_date_during_inflight', {
+          current_state: current.state,
+          local,
+          latest,
+        });
+        return;
+      }
+      this._clearDeferredTimer();
+      this._terminalAt = this._now();
+      this._update = {
+        state: 'up_to_date',
+        trigger: 'server_command',
+        from_version: local,
+        to_version: local,
+      };
+      this._log('info', 'sillyspec_upgrade_skipped_up_to_date', {
         trigger: 'server_command',
         local,
         latest,
@@ -621,7 +653,9 @@ export class SillySpecManager {
     const current = this._update;
     if (
       current === null ||
-      (current.state !== 'success' && current.state !== 'failed') ||
+      (current.state !== 'success' &&
+        current.state !== 'failed' &&
+        current.state !== 'up_to_date') ||
       this._terminalAt === null
     ) {
       return;

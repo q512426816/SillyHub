@@ -230,14 +230,58 @@ describe('task-04 requestUpgrade 升级执行与终态', () => {
     expect(h.events).toContain('sillyspec_upgrade_success');
   });
 
-  // ql-20260902-003：手动指令版本前置门（requestManualUpgrade）——已最新 no-op
-  // 不白跑 npm；探测失败 / 未安装不阻断（宁装勿漏）。
-  it('server_command 已最新（local == latest）→ no-op：install 不执行，无 update 状态，记 skipped_up_to_date', async () => {
+  // ql-20260902-003：手动指令版本前置门（requestManualUpgrade）——已最新不白跑
+  // npm。ql-20260904-019 推翻静默 no-op：改写 up_to_date 终态（横幅明示「已是
+  // 最新版」），10min 展示窗后回 idle；探测失败 / 未安装不阻断（宁装勿漏）。
+  it('server_command 已最新（local == latest）→ up_to_date 终态：install 不执行，快照 from/to=local', async () => {
     const h = makeHarness({ local: '3.27.12', latest: '3.27.12' });
     await h.manager.requestManualUpgrade();
     expect(h.install).not.toHaveBeenCalled();
-    expect(h.manager.getSnapshot().update).toBeUndefined();
+    expect(h.manager.getSnapshot().update).toEqual({
+      state: 'up_to_date',
+      trigger: 'server_command',
+      from_version: '3.27.12',
+      to_version: '3.27.12',
+    });
     expect(h.events).toContain('sillyspec_upgrade_skipped_up_to_date');
+  });
+
+  it('up_to_date 终态 10min 展示窗过期 → getSnapshot 回 idle（update 键缺席）', async () => {
+    const h = makeHarness({ local: '3.27.12', latest: '3.27.12' });
+    await h.manager.requestManualUpgrade();
+    expect(h.manager.getSnapshot().update?.state).toBe('up_to_date');
+
+    h.advance(10 * 60 * 1000); // 恰过窗口（≥ 判定）
+    expect(h.manager.getSnapshot().update).toBeUndefined();
+  });
+
+  it('up_to_date 展示窗内重复手动指令 → 重探后重写 up_to_date（可反复确认，无 in-flight 拦截）', async () => {
+    const h = makeHarness({ local: '3.27.12', latest: '3.27.12' });
+    await h.manager.requestManualUpgrade();
+    await h.manager.requestManualUpgrade();
+    expect(h.manager.getSnapshot().update?.state).toBe('up_to_date');
+    expect(h.install).not.toHaveBeenCalled();
+  });
+
+  it('running in-flight 期手动指令探到已最新 → 不覆盖 running（保留升级轨迹）', async () => {
+    const h = makeHarness({});
+    // 手动把状态推入 running 并卡住 install（latest/local 探测返回已最新值）。
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.install.mockImplementationOnce(() => gate);
+    const pending = h.manager.requestUpgrade('server_command');
+    expect(h.manager.getSnapshot().update?.state).toBe('running');
+
+    // install 在跑期间探到 local==latest（缓存 latest + probe local 同值）。
+    h.state.local = '3.27.11';
+    h.state.latest = '3.27.11';
+    await h.manager.requestManualUpgrade();
+    expect(h.manager.getSnapshot().update?.state).toBe('running');
+    expect(h.events).toContain('sillyspec_up_to_date_during_inflight');
+
+    release();
+    await pending;
+    expect(h.manager.getSnapshot().update?.state).toBe('success');
   });
 
   it('server_command latest 不可达（null）→ 前置门放行照旧升级（网络失败不阻断）', async () => {
