@@ -1,9 +1,12 @@
 // tests/interactive/pi-rpc-driver.test.ts
-// 2026-09-04-provider-pi-onboarding task-02：PiRpcDriver 核心生命周期测试。
+// 2026-09-04-provider-pi-onboarding task-02（核心生命周期）+ task-03（高级语义）。
 //
-// 依据：tasks/task-02.md（LF 分帧/命令收发/契约/get_state 握手/退出收敛）、
-// design.md §5.1（B-03 session_started 合成 / B-05 agent_settled 边界）、
-// pi 包 docs/rpc.md（分帧:30-37 / get_state:162-190 / 命令面）。
+// 依据：tasks/task-02.md / tasks/task-03.md、design.md §5.1（B-03/B-05）、
+// pi 包 docs/rpc.md（分帧:30-37 / prompt:43-78 / steer:80-100 / follow_up:102-122
+// / abort:124-135 / get_state:162-190 / extension UI:1126-1335）与
+// dist/modes/rpc/rpc-client.js（waitForIdle 事件先订阅:356-370）、
+// dist/core/agent-session.js（streaming 拒收文案:830 / _emitAgentSettled
+// finally 必发:744-756）。
 // 用 tests/helpers/fake-child.ts 驱动 spawn 的 stdin/stdout，不依赖真实 pi 二进制。
 //
 // 收尾约定：consume 主循环阻塞在 inputIt.next() 上，只有 close 输入队列才能
@@ -14,7 +17,8 @@
 //   1. LF 分帧器（LfLineFramer 单元）：多行切分 / 尾部 \r 剥离 / 跨 chunk 多字节
 //      UTF-8 / **U+2028+U+2029 在 JSON 字符串内不切分**（readline 不合规锚点）/
 //      end() 冲刷无换行残行；
-//   2. spawn 参数面：--mode rpc --session-dir 隔离目录 / --model / resume --session /
+//   2. spawn 参数面：--mode rpc --session-dir 隔离目录 / --model / resume --session
+//      （到达链：CreateSessionInput.resume → driverOpts.resume → spawn 旗标）/
 //      Windows pi.cmd shim 解析与 shell 兜底（R-05）/ executable 缺失；
 //   3. get_state 握手：session_started 合成（status/session_started + session_id，
 //      过 safeParseAgentEvent）/ handle.sessionId 回填 / isStreaming 初始值；
@@ -22,12 +26,20 @@
 //      turn error 收敛（不挂死，后续输入继续）；
 //   5. turn 生命周期：agent_start/message_update/turn_end usage/agent_settled →
 //      事件流上报 + onTurnResult(success + session_id + usage)；多轮串行；
-//   6. isStreaming 维护 + streaming 态 prompt 带 streamingBehavior:'steer'；
-//   7. 子进程非正常退出 → onError 会话级 fail + turn error 收敛（不挂死）；
-//   8. 握手超时 → error 事件，会话通道仍可用；
-//   9. 容错：坏 JSON 行 / 无主 response 不崩不产事件；空输入跳过（E1）；
-//  10. interrupt：streaming 态发 abort 返回 true / 非 streaming 返回 false；
-//  11. U+2028 全链路（分帧 + 归一化）：含 U+2028 的 text_delta → 单条 text 事件。
+//   6. task-03 inject 三模式：非 streaming→prompt / streaming→steer（含 images）；
+//      被拒降级链（prompt↔steer / steer→follow_up / steer→prompt[extension cmd]）；
+//      无降级路径被拒 → error 事件含 command 名；
+//   7. task-03 settled 复核：response 后 agent_start 跨 chunk → get_state 复核
+//      true 等事件流 / 复核 false 直接收敛 / 复核往返期间 settled 已到（同 chunk
+//      wire 序）不死锁；
+//   8. task-03 extension_ui_request：dialog 自动回 cancelled:true；fire-and-forget
+//      warn 降级不回话；均不阻塞事件流；
+//   9. task-03 interrupt：等 abort response——成功 true / 被拒 false；abort 后
+//      settled 到达 → waiter 释放 result 上报；非 streaming false；
+//  10. 子进程非正常退出 → onError 会话级 fail + turn error 收敛（不挂死）；
+//  11. 握手超时 → error 事件，会话通道仍可用；
+//  12. 容错：坏 JSON 行 / 无主 response 不崩不产事件；空输入跳过（E1）；
+//  13. U+2028 全链路（分帧 + 归一化）：含 U+2028 的 text_delta → 单条 text 事件。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -620,7 +632,7 @@ describe('turn 生命周期', () => {
     await consumeP;
   });
 
-  it('prompt 被 success:false 拒收 → error 事件 + turn error 收敛，循环继续', async () => {
+  it('prompt 被 success:false 拒收（无降级文案）→ error 事件（含 command 名）+ turn error 收敛，循环继续', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
@@ -634,17 +646,24 @@ describe('turn 生命周期', () => {
 
     push('被拒的');
     await tick();
+    // 错误文案不含 already processing/streamingBehavior/followUp/cannot be
+    // queued——命中降级正则的拒收见「inject 三模式降级」describe。
     respond(child, 'prompt', {
       success: false,
-      error: 'Agent is streaming and no streamingBehavior was specified',
+      error: 'pi rpc: model not configured',
     });
     await tick();
 
     const errEv = events.find(
-      (e) => e.type === 'error' && e.content.includes('Agent is streaming'),
+      (e) => e.type === 'error' && e.content.includes('model not configured'),
     );
     expect(errEv).toBeDefined();
     expect(safeParseAgentEvent(errEv!).success).toBe(true);
+    // task-03：被拒命令名随 error 事件上报（PiCommandError.command）
+    expect(errEv!.metadata).toMatchObject({
+      kind: 'pi_command_rejected',
+      command: 'prompt',
+    });
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
       subtype: 'error_during_execution',
@@ -668,7 +687,7 @@ describe('turn 生命周期', () => {
     await consumeP;
   });
 
-  it('image blocks → prompt images（ImageContent：data/mimeType）；document 无通道跳过', async () => {
+  it('image blocks → prompt images（ImageContent）；document 无通道 → 文本降级注明', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
@@ -689,7 +708,27 @@ describe('turn 生命周期', () => {
     expect(prompt.images).toEqual([
       { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
     ]);
-    // document 无 rpc 通道：不进 images（文本降级由 SessionManager filesToFetch 链承担）
+    // task-03：document（deliver='block' 的 PDF 不走 SessionManager 落盘清单链，
+    // session-manager.ts:2924-2961 仅 disk 投递追加 text 路径）→ 驱动侧文本降级
+    // 注明追加在原文后，不静默丢内容（design §5.1 multimodal 桥接口径）
+    expect(String(prompt.message)).toBe(
+      '看图\n（已收到 application/pdf document 附件，但 pi rpc 通道不支持 document 内容投递，原文未送达模型）',
+    );
+    expect(prompt.images).toHaveLength(1);
+
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    // document-only turn：文本空但带 document 块 → 注记成为 message（E1 不跳过）
+    push('', [{ type: 'document', mediaType: 'application/pdf', base64: 'cGRm' }]);
+    await tick();
+    const prompts = readStdinJson(child).filter((l) => l.type === 'prompt');
+    expect(prompts).toHaveLength(2);
+    expect(String(prompts[1]!.message)).toContain('application/pdf document 附件');
+    expect(String(prompts[1]!.message)).toContain('未送达模型');
+    expect(prompts[1]!.images).toBeUndefined();
 
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
@@ -741,16 +780,16 @@ describe('turn 生命周期', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. isStreaming 维护 / steer 兜底 / interrupt
+// 5. isStreaming 维护 / inject 三模式主通道（streaming→steer）/ interrupt
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('isStreaming 骨架与 interrupt', () => {
-  it('agent_start/agent_settled 维护 handle.isStreaming；interrupt 发 abort 返回 true', async () => {
+describe('isStreaming 维护、steer 主通道与 interrupt', () => {
+  it('agent_start/agent_settled 维护 handle.isStreaming；interrupt 等 abort 应答成功 → true；settled 释放 waiter 上报 result', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
-    const { queue, close: closeQueue } = makeInputQueue();
-    const { cb } = makeCallbacks();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
     const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
     const consumeP = driver.consume(handle, cb);
     await tick();
@@ -761,27 +800,181 @@ describe('isStreaming 骨架与 interrupt', () => {
     // 非 streaming interrupt → false（无 active turn）
     await expect(driver.interrupt(handle)).resolves.toBe(false);
 
+    push('跑起来');
+    await tick();
+    respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
     await tick();
     expect(handle.isStreaming).toBe(true);
 
-    await expect(driver.interrupt(handle)).resolves.toBe(true);
+    // task-03：interrupt 等 abort response 成功与否（rpc.md:124-135）
+    const interruptP = driver.interrupt(handle);
     await tick();
     const abort = readStdinJson(child).find((l) => l.type === 'abort');
     expect(abort).toBeDefined();
     respond(child, 'abort');
-    await tick();
+    await expect(interruptP).resolves.toBe(true);
 
+    // abort 后 agent_settled 到达（pi 在 run finally 必发）→ waiter 释放 → result
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(handle.isStreaming).toBe(false);
+    expect(results).toHaveLength(1);
     await expect(driver.interrupt(handle)).resolves.toBe(false);
 
     closeQueue();
     await consumeP;
   });
 
-  it('握手回 isStreaming=true → 首条 prompt 带 streamingBehavior:steer（task-03 三模式基础兜底）', async () => {
+  it('interrupt abort 应答 success:false → false（不抛不挂）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child, { isStreaming: true });
+    await tick();
+
+    const interruptP = driver.interrupt(handle);
+    await tick();
+    respond(child, 'abort', { success: false, error: 'no active run' });
+    await expect(interruptP).resolves.toBe(false);
+
+    // 收尾：释放 streaming 镜像让 consume 自然退出
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+    closeQueue();
+    await consumeP;
+  });
+
+  it('streaming 态注入 → steer 命令（默认通道，含 images；非 prompt+streamingBehavior）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, events, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child, { isStreaming: true });
+    await tick();
+    expect(handle.isStreaming).toBe(true);
+
+    push('streaming 中追加', [
+      { type: 'image', mediaType: 'image/png', base64: 'aW1n' },
+    ]);
+    await tick();
+
+    // task-03 三模式：streaming → type:'steer'（rpc.md:80-100，message+images），
+    // 不再走 prompt+streamingBehavior（task-02 的兜底形状）
+    const steer = readStdinJson(child).find((l) => l.type === 'steer')!;
+    expect(steer).toBeDefined();
+    expect(steer.message).toBe('streaming 中追加');
+    expect(steer.images).toEqual([
+      { type: 'image', data: 'aW1n', mimeType: 'image/png' },
+    ]);
+    expect(steer.streamingBehavior).toBeUndefined();
+    expect(readStdinJson(child).filter((l) => l.type === 'prompt')).toHaveLength(0);
+
+    respond(child, 'steer');
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('interrupt(null) → false（E3 no-op 不冒泡）', async () => {
+    const driver = await makeDriver();
+    await expect(driver.interrupt(null)).resolves.toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5b. task-03 inject 三模式降级链
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('inject 三模式降级链（被拒单次重试）', () => {
+  it('prompt 被拒（already processing 文案）→ 降级重试 steer（isStreaming 镜像滞后竞态）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, events, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('竞态注入');
+    await tick();
+    // agent-session.js:830 拒收文案原文
+    respond(child, 'prompt', {
+      success: false,
+      error:
+        "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+    });
+    await tick();
+
+    const steer = readStdinJson(child).find((l) => l.type === 'steer');
+    expect(steer).toBeDefined();
+    expect(steer!.message).toBe('竞态注入');
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+
+    respond(child, 'steer');
+    emitEvent(child, { type: 'agent_start' });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('steer 被拒（followUp 提示文案）→ 降级重试 follow_up', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, events, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child, { isStreaming: true });
+    await tick();
+
+    push('稍后处理');
+    await tick();
+    respond(child, 'steer', {
+      success: false,
+      error: 'steering queue unavailable, use followUp',
+    });
+    await tick();
+
+    const followUp = readStdinJson(child).find((l) => l.type === 'follow_up');
+    expect(followUp).toBeDefined();
+    expect(followUp!.message).toBe('稍后处理');
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+
+    respond(child, 'follow_up');
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('steer 被拒（extension command 文案）→ 降级重试 prompt（rpc.md:67 立即执行通道）', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
@@ -792,25 +985,283 @@ describe('isStreaming 骨架与 interrupt', () => {
     await tick();
     handshakeOk(child, { isStreaming: true });
     await tick();
-    expect(handle.isStreaming).toBe(true);
 
-    push('streaming 中追加');
+    push('/mycommand 跑一下');
     await tick();
-    const prompt = readStdinJson(child).find((l) => l.type === 'prompt')!;
-    expect(prompt.streamingBehavior).toBe('steer');
+    // agent-session.js _throwIfExtensionCommand 文案原文
+    respond(child, 'steer', {
+      success: false,
+      error:
+        'Extension command "/mycommand" cannot be queued. Use prompt() or execute the command when not streaming.',
+    });
+    await tick();
+
+    const prompt = readStdinJson(child).find((l) => l.type === 'prompt');
+    expect(prompt).toBeDefined();
+    expect(prompt!.message).toBe('/mycommand 跑一下');
+    // extension command 经 prompt 立即执行，无需 streamingBehavior 排队字段
+    expect(prompt!.streamingBehavior).toBeUndefined();
 
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
 
     closeQueue();
     await consumeP;
   });
 
-  it('interrupt(null) → false（E3 no-op 不冒泡）', async () => {
+  it('steer 被拒（无降级文案）→ error 事件含 command=steer + turn error，循环继续', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
-    await expect(driver.interrupt(null)).resolves.toBe(false);
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, events, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child, { isStreaming: true });
+    await tick();
+
+    push('会失败的');
+    await tick();
+    respond(child, 'steer', { success: false, error: 'pi exploded' });
+    await tick();
+
+    const errEv = events.find((e) => e.type === 'error' && e.content.includes('pi exploded'));
+    expect(errEv).toBeDefined();
+    expect(errEv!.metadata).toMatchObject({
+      kind: 'pi_command_rejected',
+      command: 'steer',
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+    });
+
+    // 不挂死：下一条继续（仍 streaming → steer）
+    push('再来');
+    await tick();
+    expect(readStdinJson(child).filter((l) => l.type === 'steer')).toHaveLength(2);
+
+    respond(child, 'steer');
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+    expect(results).toHaveLength(2);
+
+    closeQueue();
+    await consumeP;
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5c. task-03 agent_settled 收敛细化（get_state 复核）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('agent_settled 收敛细化（response→agent_start 跨 chunk 竞态）', () => {
+  it('agent_start 延迟未达 → get_state 复核 isStreaming=true → 等事件流 settled 才收敛', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('慢启动');
+    await tick();
+    // 仅应答 prompt，不发任何 agent 事件（模拟 agent_start 跨 chunk 延迟）
+    respond(child, 'prompt');
+    await tick(60);
+
+    // 复核 get_state 已发出（握手 1 次 + 复核 1 次）
+    expect(readStdinJson(child).filter((l) => l.type === 'get_state')).toHaveLength(2);
+    respond(child, 'get_state', {
+      data: { sessionId: 'sess_pi_1', isStreaming: true },
+    });
+    await tick();
+
+    // 服务端真值 streaming：未收敛（等事件流 agent_settled）
+    expect(results).toHaveLength(0);
+    expect(handle.isStreaming).toBe(true);
+
+    emitEvent(child, { type: 'agent_start' });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('复核 isStreaming=false（extension command 等无 run 语义）→ 直接收敛不挂死', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('/cmd 立即执行');
+    await tick();
+    respond(child, 'prompt'); // extension command：response success 后无 agent run
+    await tick(60);
+    respond(child, 'get_state', {
+      data: { sessionId: 'sess_pi_1', isStreaming: false },
+    });
+    await tick();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('复核往返期间 settled 已到（同 chunk wire 序 [get_state resp=true, agent_settled]）→ 事件计数守卫不死锁', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('竞态轮');
+    await tick();
+    respond(child, 'prompt');
+    await tick(60);
+
+    // 手工构造单 chunk 两行：复核应答（isStreaming=true，读取时刻 run 未完）+
+    // 随后落地的 agent_settled——data 已过期，事件计数守卫应只信事件流（本地
+    // isStreaming 已回落）直接收敛。无守卫则 markStreaming+waiter 永挂（本用例
+    // 会以 vitest 超时失败暴露回归）。
+    const req = [...readStdinJson(child)]
+      .reverse()
+      .find((l) => l.type === 'get_state' && typeof l.id === 'string')!;
+    child.stdout.push(
+      JSON.stringify({
+        id: req.id,
+        type: 'response',
+        command: 'get_state',
+        success: true,
+        data: { sessionId: 'sess_pi_1', isStreaming: true },
+      }) +
+        '\n' +
+        JSON.stringify({ type: 'agent_settled' }) +
+        '\n',
+    );
+    await tick(60);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    closeQueue();
+    await consumeP;
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5d. task-03 extension_ui_request 子协议（dialog 自动取消）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('extension_ui_request 自动取消（rpc.md:1126-1335）', () => {
+  it('dialog（select）→ 自动回 extension_ui_response cancelled:true，事件流不被阻塞', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length; // 握手 session_started 已占位
+
+    // dialog 类 ui_request（select，阻塞至应答——不答会死锁 pi 侧 await）
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-dialog-1',
+      method: 'select',
+      title: 'Allow dangerous command?',
+      options: ['Allow', 'Block'],
+    });
+    await tick();
+
+    const uiResp = readStdinJson(child).find((l) => l.type === 'extension_ui_response');
+    expect(uiResp).toBeDefined();
+    expect(uiResp).toMatchObject({
+      type: 'extension_ui_response',
+      id: 'ui-dialog-1',
+      cancelled: true,
+    });
+    // 子协议不进事件流（不污染 AgentEvent 通道；排除握手 session_started 基线）
+    expect(events.slice(baseline)).toHaveLength(0);
+
+    // 事件流继续：后续 agent 事件正常归一化上报
+    emitEvent(child, {
+      type: 'message_update',
+      message: {},
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: '继续' },
+    });
+    await tick();
+    expect(events.find((e) => e.type === 'text' && e.content === '继续')).toBeDefined();
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('fire-and-forget（notify）→ 不回应答（协议无应答期望），事件流不受影响', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length;
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-notify-1',
+      method: 'notify',
+      message: 'Command blocked by user',
+      notifyType: 'warning',
+    });
+    await tick();
+
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(0);
+    expect(events.slice(baseline)).toHaveLength(0);
+
+    emitEvent(child, {
+      type: 'message_update',
+      message: {},
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: '流' },
+    });
+    await tick();
+    expect(events.find((e) => e.type === 'text' && e.content === '流')).toBeDefined();
+
+    closeQueue();
+    await consumeP;
   });
 });
 

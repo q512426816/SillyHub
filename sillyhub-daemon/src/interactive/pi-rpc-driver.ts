@@ -1,12 +1,14 @@
 /**
  * interactive/pi-rpc-driver.ts —— PI rpc driver（`pi --mode rpc` JSONL 长驻子进程）。
- *（2026-09-04-provider-pi-onboarding task-02 / design §5.1 §7 / FR-01 / D-001@v1；
- * 替换 task-04 留下的编译占位。）
+ *（2026-09-04-provider-pi-onboarding task-02（通道+握手）+ task-03（高级语义）/
+ * design §5.1 §7 / FR-01 / D-001@v1。）
  *
- * 职责（task-02 范围 = 通道 + 握手；高级语义归 task-03）：
+ * 职责汇总（task-02 通道骨架 + task-03 高级语义）：
  *   1. spawn `pi --mode rpc --session-dir <daemon 隔离目录>`（exe 路径经
  *      resolveWindowsCmdShim 解 pi.cmd shim，codex driver 同款 R-exe 先例；
  *      凭证 env 走既有 spawn-env 链——opts.env ?? process.env，不新造注入）。
+ *      resume = spawn 旗标 `--session <path|id>`（CreateSessionInput.resume →
+ *      spec.resume → driverOpts.resume 既有链，session-manager.ts:1708-1709）。
  *   2. LF 严格分帧（自实现 LfLineFramer，禁 Node readline——readline 会把
  *      U+2028/U+2029 当行分隔，而它们在 JSON 字符串里合法，pi rpc.md 明示）。
  *   3. JSONL 命令收发：pending Map<id,{resolve,reject}> 关联 response；
@@ -15,22 +17,30 @@
  *   4. get_state 握手：启动后发 get_state 取 data.sessionId → 合成
  *      status/session_started 事件（resume 指针载体，B-03：rpc 模式无 session
  *      首帧）；握手超时/失败 → error 事件上报，不挂死（会话继续可用）。
- *   5. isStreaming 骨架：按事件流 agent_start/agent_settled 维护布尔 +
- *      get_state 初始值同步；streaming 态 prompt 带 streamingBehavior:'steer'
- *      （三模式深化归 task-03）。
- *   6. turn 收敛（基础版）：prompt 响应成功后等 agent_settled（B-05：turn 边界
- *      信号；turn_end 仅 usage 载体）→ onTurnResult；turn 内 error 事件 →
- *      is_error result。子进程非正常退出 → onError 会话级 fail（codex 同款）。
+ *   5. inject 三模式（task-03）：非 streaming → `prompt`；streaming → `steer`
+ *      （默认，UserTurnInput 无模式字段——steer 语义即「streaming 中注入」）；
+ *      被拒时按 pi 错误文案单次降级重试（prompt↔steer / steer→follow_up，
+ *      见 _sendInject）；重试仍拒 → error 事件上报不抛崩（含 command 名）。
+ *   6. turn 收敛（task-03 细化）：以事件流 agent_settled 为准（B-05：turn 边界
+ *      信号，含 steer/followUp 队列清空；turn_end 仅 usage 载体）；response 与
+ *      agent_start 跨 chunk 的竞态用「事件计数 + get_state 复核一次」补强
+ *      （waitAgentSettled）。turn 内 error 事件 → is_error result。子进程非正常
+ *      退出 → onError 会话级 fail（codex 同款）。
+ *   7. extension_ui_request（task-03）：dialog 类（select/confirm/input/editor，
+ *      阻塞至应答）自动回 cancelled:true（permission_dialog=false 不死锁，
+ *      B-05）；fire-and-forget 类 warn 降级不回话；同步分流不阻塞事件流。
+ *   8. interrupt（task-03）：rpc abort 并等 response——成功 true / 失败或超时
+ *      false；abort 后 pi 在 run 收尾发 agent_settled（agent-session.js:744-756
+ *      _emitAgentSettled 在 finally 必发）→ waiter 自然释放、turn 正常收敛。
  *
- * task-03 预留接口（本文件已留缝，不改公共契约即可深化）：
- *   - inject 三模式：_buildPromptCommand（当前 = prompt + streaming 态 steer 兜底）；
- *   - interrupt 深化 / ui_request 自动取消 / resume（switch_session/fork）/
- *     agent_settled 收敛细化（usage 聚合口径等）：见 _sendCommand /
- *     _handleLineClosure 的注释锚点。
- *
- * 官方参照：pi 包 docs/rpc.md（分帧:30-37 / get_state:162-190 / 命令面）与
- * dist/modes/rpc/rpc-client.js（id 关联 `req_${n}`、30s 请求超时、exit 时
- * reject pending）+ dist/modes/rpc/jsonl.js（StringDecoder + indexOf('\n') 分帧）。
+ * 官方参照：pi 包 docs/rpc.md（分帧:30-37 / prompt:43-78 / steer:80-100 /
+ * follow_up:102-122 / abort:124-135 / get_state:162-190 / extension UI 子协议
+ * :1126-1335）与 dist/modes/rpc/rpc-client.js（id 关联 `req_${n}`、30s 请求超时、
+ * waitForIdle=等 agent_settled 事件:356-370、exit 时 reject pending）+
+ * dist/modes/rpc/rpc-mode.js（服务端命令分发/extension_ui_response 按 id 关联）
+ * + dist/core/agent-session.js（isStreaming=_isAgentRunActive:745 /
+ * _emitAgentSettled 在 _runAgentPrompt finally:744-756 / streaming 拒收文案:830）
+ * + dist/modes/rpc/jsonl.js（StringDecoder + indexOf('\n') 分帧）。
  *
  * @module interactive/pi-rpc-driver
  */
@@ -68,6 +78,37 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
  * 小值加速）。超时走 error 事件 + 继续（不挂死，见 _handshake）。
  */
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 30_000;
+
+/**
+ * extension_ui_request 的 dialog 类方法（rpc.md:1130-1133 / 1152-1217）：
+ * emit 后**阻塞至客户端回 extension_ui_response**（按 id 关联，rpc-mode.js:596-608
+ * pendingExtensionRequests）。
+ *
+ * permission_dialog=false（design §5.3 如实标记）下 driver 统一自动回
+ * cancelled:true（rpc.md:1310-1315 取消应答形状）——不答会死锁 agent run
+ * （dialog 类在 pi 侧是 await 的 Promise；仅带 timeout 字段的 dialog 有
+ * agent 侧自动兜底，rpc.md:1135，不能依赖）。
+ */
+const EXTENSION_UI_DIALOG_METHODS: ReadonlySet<string> = new Set([
+  'select',
+  'confirm',
+  'input',
+  'editor',
+]);
+
+/**
+ * extension_ui_request 的 fire-and-forget 类方法（rpc.md:1133 / 1219-1292）：
+ * emit 后不等待应答（pi 侧不进 pendingExtensionRequests），客户端可展示可忽略。
+ * driver 无 TUI 渲染面 → warn 降级，不回话（回话也会被 pi 按 id 无主丢弃，
+ * 但按协议本就无应答更干净）。
+ */
+const EXTENSION_UI_FIRE_AND_FORGET_METHODS: ReadonlySet<string> = new Set([
+  'notify',
+  'setStatus',
+  'setWidget',
+  'setTitle',
+  'set_editor_text',
+]);
 
 /**
  * pi 交互会话隔离目录：`<daemonStateDir()>/runs/pi-sessions`。
@@ -198,20 +239,40 @@ export interface PiRpcHandle extends InteractiveDriverHandle {
   close(): Promise<void>;
 }
 
-/** UserTurnInput.blocks 的 image 块 → pi rpc ImageContent。 */
-function piImagesFromBlocks(
-  blocks: UserTurnInput['blocks'],
-): Array<{ type: 'image'; data: string; mimeType: string }> {
-  if (!blocks || blocks.length === 0) return [];
-  const out: Array<{ type: 'image'; data: string; mimeType: string }> = [];
-  for (const b of blocks) {
+/** pi rpc 注入载荷：message（文本 + document 降级注记）+ images（ImageContent）。 */
+interface PiInjectPayload {
+  message: string;
+  images: Array<{ type: 'image'; data: string; mimeType: string }>;
+}
+
+/**
+ * UserTurnInput → pi rpc 注入载荷（prompt/steer/follow_up 三命令共用形状，
+ * rpc.md:47-53 / 86-93 / 108-115 的 message+images 字段面完全一致）。
+ *
+ * - image 块 → images[{type:'image', data, mimeType}]（pi ImageContent，
+ *   design §5.1 multimodal 原生通道）；
+ * - document 块（application/pdf）→ pi rpc 无 document 通道 → **文本降级注明**
+ *   （design §5.1：无通道则降级；任务卡 implementation 同款）。注：块投递的
+ *   document 不走 SessionManager 的落盘清单链（session-manager.ts:2924-2961
+ *   仅 deliver='disk' 附件往 text 追加路径，deliver='block' 的 PDF 只进 blocks），
+ *   若此处静默跳过则内容彻底丢失——必须留注记让模型/用户知晓未投递。
+ */
+function buildPiInjectPayload(turn: UserTurnInput): PiInjectPayload {
+  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
+  const docNotes: string[] = [];
+  for (const b of turn.blocks ?? []) {
     if (b.type === 'image') {
-      out.push({ type: 'image', data: b.base64, mimeType: b.mediaType });
+      images.push({ type: 'image', data: b.base64, mimeType: b.mediaType });
+    } else {
+      docNotes.push(
+        `（已收到 ${b.mediaType} document 附件，但 pi rpc 通道不支持 document 内容投递，原文未送达模型）`,
+      );
     }
-    // document（application/pdf）无 rpc 通道：SessionManager 已把附件路径追加进
-    // text（filesToFetch 既有链，即 design §5.1 的文本降级），此处跳过。
   }
-  return out;
+  const note = docNotes.length > 0 ? docNotes.join('\n') : '';
+  const message =
+    turn.text === '' ? note : note === '' ? turn.text : `${turn.text}\n${note}`;
+  return { message, images };
 }
 
 /** 类型守卫：非 null 非数组 plain object。 */
@@ -285,7 +346,23 @@ export class PiRpcDriver implements InteractiveDriver {
     // 参数面（rpc.md:7-19 / sessions.md:14）：--mode rpc + --session-dir 隔离；
     // --model 透传（支持 provider/id 模式）；resume 用 --session <path|id>
     // （pi 的 --session-id 是「指定新会话 id」不是 resume——design §5.1 写的
-    // "--session-id" 以实读 CLI args.js:64-67 为准修正为 --session）。
+    // "--session-id" 以实读 CLI args.js:64-67 为准修正为 --session，
+    // args.js:235 帮助文案「Use specific session file or partial UUID」确认
+    // 语义；id 在 --session-dir 隔离目录内查找）。
+    //
+    // resume 链路（task-03 实读验证，契约完整无需改消费侧）：
+    //   CreateSessionInput.resume（daemon.ts 从 execPayload 归一化）→
+    //   _buildDriverOptions spec.resume → driverOpts.resume
+    //   （session-manager.ts:1509-1516）→ 本处 spawn 旗标；
+    //   daemon 重启恢复路径 record.agentSessionId → 同链
+    //   （session-manager.ts:3783）。agentSessionId 存 pi get_state 的
+    //   sessionId（_handshake 回填 handle.sessionId → SessionManager 既有
+    //   session_started 事件消费链落库）。
+    //   对照：codex 无 spawn 旗标 resume，spawn 后发 thread/resume
+    //   （codex-app-server-driver.ts:1174-1180）；pi 有旗标则一步到位。
+    //   switch_session/fork（rpc 运行时会话切换命令，rpc.md:595-639）本变更
+    //   不接——平台的会话级 resume 用 spawn 旗标已覆盖，无「运行中换会话」
+    //   需求场景（SessionManager 的 resume 走 create-with-resume 重建进程）。
     const args: string[] = ['--mode', 'rpc', '--session-dir', sessionDir];
     if (opts.model) args.push('--model', opts.model);
     if (opts.resume) args.push('--session', opts.resume);
@@ -360,21 +437,32 @@ export class PiRpcDriver implements InteractiveDriver {
     const normalizer = new PiEventNormalizer();
 
     // ── consume 内部状态 ────────────────────────────────────────────────────
-    // streaming 态（isStreaming 骨架，task-03 深化）：agent_start/agent_settled
-    // 事件维护 + settledWaiters 让 consume 循环阻塞到 turn 收敛。
-    // sawAgentEvent：握手期间是否已见过 agent 事件（resume 恢复时 pi 可能正
-    // streaming——get_state 的 isStreaming 初始值仅在事件流尚未发言时采信，
-    // 防止「握手期间 agent_settled 已到、却被初始值强制拉回 streaming」卡死）。
+    // streaming 态（isStreaming 双镜像——闭包 + handle.isStreaming 供 interrupt
+    // 路由读）：agent_start/agent_settled 事件维护 + settledWaiters 让 consume
+    // 循环阻塞到 turn 收敛。sawAgentEvent：握手期间是否已见过 agent 事件（resume
+    // 恢复时 pi 可能正 streaming——get_state 的 isStreaming 初始值仅在事件流尚未
+    // 发言时采信，防止「握手期间 agent_settled 已到、却被初始值强制拉回
+    // streaming」卡死）。
     let isStreaming = false;
     let sawAgentEvent = false;
+    // agent_start/agent_settled 事件计数（task-03「事件计数法」）：waitAgentSettled
+    // 的 get_state 复核期间事件流是否发言的判定依据（见 waitAgentSettled）。
+    let agentEventSeq = 0;
+    // 本轮 turn 是否已见过 agent 运行事件（start/settled 任一）：区分
+    // 「run 已完整观察完」（无需复核）与「run 尚未开始」（需 get_state 复核）。
+    let turnSawRun = false;
     let settledWaiters: Array<() => void> = [];
     const markStreaming = (): void => {
       sawAgentEvent = true;
+      turnSawRun = true;
+      agentEventSeq++;
       isStreaming = true;
       h.isStreaming = true;
     };
     const markSettled = (): void => {
       sawAgentEvent = true;
+      turnSawRun = true;
+      agentEventSeq++;
       isStreaming = false;
       h.isStreaming = false;
       const ws = settledWaiters;
@@ -386,19 +474,66 @@ export class PiRpcDriver implements InteractiveDriver {
       settledWaiters = [];
       for (const w of ws) w();
     };
+    const settleWaiter = (): Promise<void> =>
+      new Promise<void>((r) => settledWaiters.push(r));
     /**
-     * 等 turn 收敛（agent_settled）。已停稳时仍让出一拍再查一次：response 与
-     * agent_start 分属两个 stdout chunk 时，等一拍可覆盖绝大多数竞态
-     * （基础版启发式；task-03 以 get_state 轮询/事件细化）。
+     * 等 turn 收敛（agent_settled，B-05 turn 边界；对照官方 rpc-client.js
+     * waitForIdle:356-370——官方在发 prompt **前**订阅事件流规避竞态，我们的
+     * consume 循环在 response 后才等，需自行补窗）。
+     *
+     * 三级收敛（task-03 细化，覆盖 response 与 agent_start 跨 stdout chunk 的
+     * 竞态——服务端时序：prompt response 经 preflightResult 回调先写
+     * （rpc-mode.js:301-318），_runAgentPrompt 随后置 _isAgentRunActive=true
+     * （agent-session.js:744-745，与 response 写出之间无 await），agent_start
+     * 事件再晚若干 chunk 落地）：
+     *   1. isStreaming 已 true（agent_start 已见）→ 等 settled waiter；
+     *   2. 让一拍 setImmediate（同 chunk / 近邻 chunk 的 agent_start 覆盖）；
+     *   3. 本轮已见过 run 事件且已 settled（turnSawRun）→ run 完整观察过，
+     *      直接收敛（extension command 等无 run 场景也走复核分支区分）；
+     *   4. 复核一次 get_state：data.isStreaming 是服务端真值
+     *      （rpc-mode.js:347 直读 session.isStreaming）。事件计数守卫：复核
+     *      往返期间事件流若发言（agentEventSeq 变化）则只信事件流——防
+     *      「get_state 应答 isStreaming=true 之后、应答行落盘前 run 恰好
+     *      settled」的过期数据把 waiter 挂死（该场景 settled 行随后必到，
+     *      本地 isStreaming 已回落，直接收敛即可）。
+     *
+     * 复核失败（超时/进程亡）→ 退化为直接收敛：挂死风险由 exit handler /
+     * pending reject / interrupt 兜底；_emitAgentSettled 在 _runAgentPrompt
+     * 的 finally 必发（agent-session.js:744-756），等 waiter 的路径有界。
      */
     const waitAgentSettled = async (): Promise<void> => {
       if (isStreaming) {
-        await new Promise<void>((r) => settledWaiters.push(r));
+        await settleWaiter();
         return;
       }
       await new Promise<void>((r) => setImmediate(r));
       if (isStreaming) {
-        await new Promise<void>((r) => settledWaiters.push(r));
+        await settleWaiter();
+        return;
+      }
+      if (turnSawRun) {
+        // 本轮 run 已被事件流完整观察（start+settled 均已处理）——不再复核。
+        return;
+      }
+      try {
+        const seqBefore = agentEventSeq;
+        const data = await this._sendCommand(
+          h,
+          { type: 'get_state' },
+          this.requestTimeoutMs,
+        );
+        if (agentEventSeq !== seqBefore) {
+          // 复核往返期间事件流已发言：data 可能过期，只信事件流本地态。
+          if (isStreaming) await settleWaiter();
+          return;
+        }
+        if (isRecord(data) && data.isStreaming === true) {
+          // 服务端真值：run 已开跑但 agent_start 事件未达——按 streaming 收敛。
+          markStreaming();
+          await settleWaiter();
+        }
+      } catch {
+        /* 复核失败退化为直接收敛（见上） */
       }
     };
 
@@ -511,13 +646,10 @@ export class PiRpcDriver implements InteractiveDriver {
     }
 
     /**
-     * 单行处理：response（id 关联 pending）优先；事件型交归一化器；
+     * 单行处理：response（id 关联 pending）优先；extension_ui_request 分流
+     * （task-03，rpc.md:1126-1335 子协议）；事件型交归一化器；
      * agent_start/agent_settled 在 driver 侧维护 streaming 态（归一化器对
      * 这两类零产出，任务卡明示）。
-     *
-     * task-03 缝：extension_ui_request（dialog 类）在此分流自动回
-     * cancelled:true；resume（switch_session/fork）与 inject 三模式同样在此
-     * 扩展，不动分帧/关联骨架。
      */
     const handleLine = (line: string): void => {
       if (h.closing) return;
@@ -552,6 +684,56 @@ export class PiRpcDriver implements InteractiveDriver {
           // eslint-disable-next-line no-console
           console.warn(
             'pi_driver: unmatched response dropped',
+            line.slice(0, 120),
+          );
+        }
+        return;
+      }
+
+      // extension_ui_request 分流（task-03，B-05）：pi extension 的 UI 子协议，
+      // **不是** AgentSessionEvent（不带 run 语义，不进归一化器——归一化器会
+      // 落未知事件降级桶污染事件流）。同步分流 + 异步写应答，不阻塞事件流。
+      if (msg.type === 'extension_ui_request') {
+        const method = typeof msg.method === 'string' ? msg.method : '';
+        const uiId = typeof msg.id === 'string' ? msg.id : '';
+        if (EXTENSION_UI_FIRE_AND_FORGET_METHODS.has(method)) {
+          // notify/setStatus/setWidget/setTitle/set_editor_text：无应答期望，
+          // warn 降级（driver 无 TUI 渲染面）。
+          // eslint-disable-next-line no-console
+          console.warn(
+            `pi_driver: extension_ui_request(${method}) degraded (fire-and-forget UI)`,
+            line.slice(0, 120),
+          );
+        } else if (uiId !== '') {
+          // dialog 类（select/confirm/input/editor）+ 未知 method 防御性同路：
+          // 回 cancelled:true（rpc.md:1310-1315）。已知 dialog warn 记录自动取消
+          // （可见性）；未知 method 若实为 fire-and-forget，pi 侧按 id 无主应答
+          // 静默丢弃（rpc-mode.js:601-607）无副作用；若实为 dialog 则避免死锁。
+          if (!EXTENSION_UI_DIALOG_METHODS.has(method)) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `pi_driver: unknown extension_ui_request method "${method}" treated as dialog (auto-cancelled)`,
+            );
+          } else {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `pi_driver: extension_ui_request dialog "${method}" auto-cancelled (permission_dialog=false)`,
+            );
+          }
+          void this._writeLine(
+            h,
+            JSON.stringify({
+              type: 'extension_ui_response',
+              id: uiId,
+              cancelled: true,
+            }),
+          );
+        } else {
+          // 无 id 的畸形请求无法应答：warn（pi 侧 dialog 自带 timeout 的有
+          // agent 端兜底，rpc.md:1135）。
+          // eslint-disable-next-line no-console
+          console.warn(
+            'pi_driver: extension_ui_request without id dropped',
             line.slice(0, 120),
           );
         }
@@ -619,8 +801,10 @@ export class PiRpcDriver implements InteractiveDriver {
         const turn = res.value;
         if (h.closing || finalized) break;
 
-        // E1：空文本且无多模态块 → 跳过（队列不校验语义，driver 自行决定）
-        if (turn.text === '' && piImagesFromBlocks(turn.blocks).length === 0) {
+        // E1：空载荷（无文本、无 image、无 document 注记）→ 跳过（队列不校验
+        // 语义，driver 自行决定）
+        const payload = buildPiInjectPayload(turn);
+        if (payload.message === '' && payload.images.length === 0) {
           continue;
         }
 
@@ -628,23 +812,21 @@ export class PiRpcDriver implements InteractiveDriver {
         pendingTurnError = null;
         turnUsage = undefined;
         turnReported = false;
+        turnSawRun = false;
 
-        // 基础版注入通道（task-03 深化三模式：steer/follow_up 按
-        // UserTurnInput 场景分流；当前 = 非 streaming 直发 prompt，
-        // streaming 态兜底 streamingBehavior:'steer' 防被 pi 拒收）
-        const cmd: Record<string, unknown> = { type: 'prompt', message: turn.text };
-        const images = piImagesFromBlocks(turn.blocks);
-        if (images.length > 0) cmd.images = images;
-        if (isStreaming) cmd.streamingBehavior = 'steer';
-
+        // inject 三模式（task-03）：非 streaming → prompt；streaming → steer
+        //（默认——UserTurnInput 无模式字段，steer 语义即「streaming 中注入」；
+        // 被拒按 pi 错误文案单次降级，见 _sendInject）
         try {
-          await this._sendCommand(h, cmd, this.requestTimeoutMs);
+          await this._sendInject(h, payload, isStreaming);
         } catch (err) {
-          // 错误响应（success:false / 超时 / 进程亡）→ error 事件 + turn error
-          // 收敛（不挂死；rpc.md:76 失败语义只到 response 为止）
+          // 命令被拒（PiCommandError success:false / 超时 / 进程亡）→ error 事件
+          // 上报 + turn error 收敛（不挂死不抛崩；含被拒命令名，rpc.md:76 失败
+          // 语义只到 response 为止）
           const errMsg = err instanceof Error ? err.message : String(err);
-          emitErrorEvent(`pi prompt failed: ${errMsg}`, {
-            kind: 'pi_prompt_rejected',
+          emitErrorEvent(`pi inject failed: ${errMsg}`, {
+            kind: 'pi_command_rejected',
+            ...(err instanceof PiCommandError ? { command: err.command } : {}),
           });
           reportTurnResult({
             subtype: 'error_during_execution',
@@ -699,9 +881,15 @@ export class PiRpcDriver implements InteractiveDriver {
   }
 
   /**
-   * interrupt（FR-03 基础版）：streaming 态发 rpc abort 返回 true；否则 false
-   * （无 active turn，契约 no-op 不冒泡 E3）。不等 agent_settled——turn 收敛
-   * 由 consume 的 waitAgentSettled 自然结束（task-03 深化取消语义）。
+   * interrupt（task-03 深化）：streaming 态发 rpc abort 并**等 response**——
+   * success:true → true（abort 命令被 pi 接受，rpc.md:124-135）；被拒/超时/
+   * 进程亡 → false。非 streaming / 已 closing → false（无 active turn，契约
+   * no-op 不冒泡 E3）。
+   *
+   * abort 后的 turn 收敛：pi 在 run 收尾必发 agent_settled（agent-session.js
+   * :744-756 _emitAgentSettled 在 _runAgentPrompt finally）→ consume 的
+   * settledWaiters 自然释放、onTurnResult 正常上报（abort 语义的流层表现是
+   * message_update ame.error reason='aborted' → 归一化器产 error 事件）。
    */
   async interrupt(handle: InteractiveDriverHandle | null): Promise<boolean> {
     if (handle === null || handle === undefined) return false;
@@ -710,14 +898,14 @@ export class PiRpcDriver implements InteractiveDriver {
     if (!h.isStreaming) return false;
     const stdin = h.child.stdin;
     if (!stdin || stdin.destroyed) return false;
-    // fire-and-forget：abort 应答（success response）由 pending 关联消费掉，
-    // 超时/失败由 agent_settled / exit 收敛兜底，不影响 interrupt 返回语义。
-    void this._sendCommand(h, { type: 'abort' }, this.requestTimeoutMs).catch(
-      () => {
-        /* no-op（E3） */
-      },
-    );
-    return true;
+    try {
+      await this._sendCommand(h, { type: 'abort' }, this.requestTimeoutMs);
+      return true;
+    } catch {
+      // abort 应答失败/超时：不重试不打断调用方——turn 收敛由 settled 事件 /
+      // exit handler 兜底（若 abort 实际生效，settled 仍会到达）。
+      return false;
+    }
   }
 
   // ── 私有方法 ──────────────────────────────────────────────────────────────
@@ -771,6 +959,77 @@ export class PiRpcDriver implements InteractiveDriver {
       await hooks.onTurnMessage({ events: [ev] });
       return { sessionId: null, isStreaming: false };
     }
+  }
+
+  /**
+   * inject 三模式主通道（task-03，design §5.1）：
+   *   - 非 streaming → `prompt`（rpc.md:43-78，不带 streamingBehavior）；
+   *   - streaming → `steer`（默认，rpc.md:80-100——UserTurnInput 无模式字段，
+   *     「streaming 中注入」即 steer 语义：当前 assistant turn 工具批完成后、
+   *     下一次 LLM 调用前投递）。
+   *   （`follow_up` 不作首选：等 agent 完全停稳才投递，交互体验劣于 steer；
+   *     仅作 pi 拒 steer 且提示 followUp 时的单次降级。）
+   *
+   * 降级重试（各至多一次，锚定 pi 实测错误文案）：
+   *   - prompt 被拒且文案含「already processing / streamingBehavior」→ 重试
+   *     steer：isStreaming 镜像滞后的竞态（agent-session.js:829-831 的拒收
+   *     文案原文「Agent is already processing. Specify streamingBehavior
+   *     ('steer' or 'followUp') to queue the message.」）；
+   *   - steer 被拒且文案含「followUp」→ 重试 follow_up（防御未来 pi 版本
+   *     拒 steer 的提示语义）；
+   *   - steer 被拒且文案含「cannot be queued / Use prompt()」→ 重试 prompt：
+   *     extension command（`/cmd` 文本）不可排队（agent-session.js
+   *     _throwIfExtensionCommand），但 prompt 对 extension command 即使
+   *     streaming 中也立即执行（rpc.md:67），重试必达。
+   *
+   * @throws 最后一次尝试的 PiCommandError / 超时 / 进程亡（上层转 error 事件）
+   */
+  private async _sendInject(
+    h: PiRpcHandle,
+    payload: PiInjectPayload,
+    streaming: boolean,
+  ): Promise<void> {
+    const first: Record<string, unknown> = streaming
+      ? { type: 'steer', message: payload.message }
+      : { type: 'prompt', message: payload.message };
+    if (payload.images.length > 0) first.images = payload.images;
+    try {
+      await this._sendCommand(h, first, this.requestTimeoutMs);
+      return;
+    } catch (err) {
+      if (!(err instanceof PiCommandError)) throw err;
+      const fallback = this._fallbackCommandFor(streaming, err.message, payload);
+      if (!fallback) throw err;
+      await this._sendCommand(h, fallback, this.requestTimeoutMs);
+    }
+  }
+
+  /**
+   * 被拒命令的降级选择（_sendInject 注释锚定的三条文案规则）。
+   * @returns 降级命令（无降级路径返回 null）
+   */
+  private _fallbackCommandFor(
+    streaming: boolean,
+    errMessage: string,
+    payload: PiInjectPayload,
+  ): Record<string, unknown> | null {
+    const base = (type: string): Record<string, unknown> => {
+      const cmd: Record<string, unknown> = { type, message: payload.message };
+      if (payload.images.length > 0) cmd.images = payload.images;
+      return cmd;
+    };
+    if (!streaming && /already processing|streamingbehavior/i.test(errMessage)) {
+      return base('steer');
+    }
+    if (streaming) {
+      if (/follow\s*up/i.test(errMessage)) return base('follow_up');
+      if (/cannot be queued|use prompt\(\)/i.test(errMessage)) {
+        // extension command：prompt 通道立即执行（rpc.md:67），不带
+        // streamingBehavior（该字段仅对普通文本排队有意义，带上反成噪声）。
+        return base('prompt');
+      }
+    }
+    return null;
   }
 
   /**
