@@ -3,7 +3,7 @@
 //
 // 覆盖（TaskCard acceptance）：
 //   1. 两步流程：第一步仅列在线机器（离线不出现）；第二步仅列该机器
-//      provider∈{claude,codex} 且在线的智能体；选完立即 onPick(runtimeId)，
+//      provider∈{claude,codex,pi} 且在线的智能体；选完立即 onPick(runtimeId)，
 //      无确认按钮；
 //   2. 默认 Claude Code 高亮（aria-pressed + 「默认」Tag）；
 //   3. 取消 / 遮罩点击关闭不清父层状态（仅 onCancel 回调，onPick 不触发）；
@@ -12,7 +12,11 @@
 //   5. variant 容器形态（task-13，2026-08-26-mobile-workspace-page / FR-08 / FR-11）：
 //      不传 variant 容器类与改前逐字一致（桌面零回归锚）；bottomSheet 贴底抽屉
 //      （items-end/满宽/顶圆角/80dvh 滚动/安全区留白）+ 两步流程同构 + 选项行
-//      ≥44px 触摸热区抽检（jsdom 不量布局，按 min-h-[44px] 类锚抽检）。
+//      ≥44px 触摸热区抽检（jsdom 不量布局，按 min-h-[44px] 类锚抽检）；
+//   6. PI 引擎可选性（task-05，2026-09-04-provider-pi-onboarding / FR-04 / B-02）：
+//      门户路径 pi 出现在第二步选择器；对话框路径（runtime-session-helpers 白名单）
+//      以 SessionPanel 桩探针断言 providers 含 pi；pi 态 caps 门控锁查表前置事实
+//      （multimodal=true / subagent=false）。
 //
 // 纯展示受控组件零数据请求——无网络 mock，仅断言回调与渲染。
 
@@ -20,10 +24,34 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 import { PreSessionPicker } from "../pre-session-picker";
-import type {
-  DaemonMachineRead,
-  DaemonRuntimeRead,
+// task-05 对话框路径白名单被测组件（B-02 第二处：InteractiveSessionChatSection
+// 的 onlineProviders 过滤）。import 链含 next/navigation，mock 防 jsdom 解析异常
+//（同 daemon/__tests__/runtime-session-helpers.test.tsx 惯例）。
+import { InteractiveSessionChatSection } from "@/components/daemon/runtime-session-helpers";
+import { getProviderCaps } from "@/lib/provider-caps";
+import {
+  PROVIDER_META,
+  type DaemonMachineRead,
+  type DaemonRuntimeRead,
 } from "@/lib/daemon";
+
+// 对话框路径探针：SessionPanel 替换为只回显 providers/defaultProvider 的桩——
+// InteractiveSessionChatSection 是薄包装（白名单过滤 + props 透传），会话面板本体
+// 行为由 daemon/__tests__/session-panel-*.test.tsx 守护，此处只锁 pi 进列表。
+vi.mock("@/components/daemon/session-panel", () => ({
+  SessionPanel: (props: { providers: string[]; defaultProvider: string }) => (
+    <div
+      data-testid="session-panel-stub"
+      data-providers={props.providers.join(",")}
+      data-default-provider={props.defaultProvider}
+    />
+  ),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 /* ----- fixture ----- */
 
@@ -357,5 +385,123 @@ describe("PreSessionPicker variant 容器形态（默认 center 零回归）", (
       "items-center",
       "p-4",
     );
+  });
+});
+
+/* ───────── 6. PI 引擎可选性（task-05 / 2026-09-04-provider-pi-onboarding / FR-04 / B-02） ───────── */
+
+// pi 机 fixture：在线 claude/codex/pi + 白名单外 copilot + 离线 pi——一步覆盖
+// 「白名单内在线入选 / 白名单外滤除 / 离线滤除」三条件。
+function makePiMachine(): DaemonMachineRead {
+  return makeMachine({
+    runtimes: [
+      makeRuntime("rt-claude", "claude"),
+      makeRuntime("rt-codex", "codex"),
+      makeRuntime("rt-pi", "pi"),
+      makeRuntime("rt-copilot", "copilot"),
+      makeRuntime("rt-pi-off", "pi", { status: "offline" }),
+    ],
+  });
+}
+
+describe("PreSessionPicker PI 引擎可选（门户主路径白名单加 pi）", () => {
+  it("第二步列出在线 pi 智能体（PROVIDER_META 主显「Pi」）；点击立即 onPick(runtimeId)", () => {
+    const { onPick } = setupPicker({ machines: [makePiMachine()] });
+    fireEvent.click(screen.getByRole("button", { name: /选择机器 机器一/ }));
+
+    // getByRole 唯一性同时证明离线 pi（rt-pi-off）未重复出现；白名单外 copilot 不列出。
+    const pi = screen.getByRole("button", { name: /选择智能体 Pi/ });
+    expect(pi).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Copilot/ })).not.toBeInTheDocument();
+
+    fireEvent.click(pi);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick).toHaveBeenCalledWith("rt-pi");
+  });
+
+  it("pi 非默认引擎：不高亮（aria-pressed=false，「默认」Tag 仍仅 claude 一个）", () => {
+    setupPicker({ machines: [makePiMachine()] });
+    fireEvent.click(screen.getByRole("button", { name: /选择机器 机器一/ }));
+
+    const pi = screen.getByRole("button", {
+      name: /选择智能体 Pi/,
+    }) as HTMLButtonElement;
+    expect(pi.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getAllByText("默认")).toHaveLength(1);
+  });
+
+  it("仅 pi 在线：不落空态文案，pi 可选出（pi 独立成会话入口）", () => {
+    const { onPick } = setupPicker({
+      machines: [
+        makeMachine({
+          runtimes: [
+            makeRuntime("rt-claude-off", "claude", { status: "offline" }),
+            makeRuntime("rt-pi-only", "pi"),
+          ],
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /选择机器 机器一/ }));
+
+    expect(
+      screen.queryByText(/该机器暂无可会话智能体/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /选择智能体 Pi/ }));
+    expect(onPick).toHaveBeenCalledWith("rt-pi-only");
+  });
+});
+
+describe("对话框路径 PI 引擎可选（runtime-session-helpers 白名单加 pi，SessionPanel 桩探针）", () => {
+  it("在线 pi 进 providers 列表；离线 pi 与白名单外引擎被滤除，顺序随 runtime 声明序", () => {
+    render(
+      <InteractiveSessionChatSection
+        runtimes={[
+          makeRuntime("rt-claude", "claude"),
+          makeRuntime("rt-codex", "codex"),
+          makeRuntime("rt-pi", "pi"),
+          makeRuntime("rt-pi-off", "pi", { status: "offline" }),
+          makeRuntime("rt-copilot", "copilot"),
+        ]}
+      />,
+    );
+
+    const stub = screen.getByTestId("session-panel-stub");
+    expect(stub.getAttribute("data-providers")).toBe("claude,codex,pi");
+    // 默认引擎优先级不变：claude 在线时仍默认 claude（pi 加入不改变默认链）。
+    expect(stub.getAttribute("data-default-provider")).toBe("claude");
+  });
+
+  it("仅 pi 在线：pi 进 providers 且成为默认引擎（claude 缺席时首个在线 provider 回退）", () => {
+    render(
+      <InteractiveSessionChatSection
+        runtimes={[
+          makeRuntime("rt-claude-off", "claude", { status: "offline" }),
+          makeRuntime("rt-pi", "pi"),
+        ]}
+      />,
+    );
+
+    const stub = screen.getByTestId("session-panel-stub");
+    expect(stub.getAttribute("data-providers")).toBe("pi");
+    expect(stub.getAttribute("data-default-provider")).toBe("pi");
+  });
+});
+
+/* ───────── 7. pi 态 caps 门控（查表裁剪前置事实，FR-03 / FR-04） ───────── */
+
+// session-panel 附件（multimodal）/ 团队派工（subagent）门控均为 getProviderCaps
+// 查表的 provider 无关通用代码（2026-09-03-agent-provider-abstraction task-11 收敛；
+// claude/codex 两态渲染对照由 daemon/__tests__/session-panel-provider-caps.test.tsx
+// 守护）——pi 态 UI 随表值自动裁剪（design §5.3「门控零新代码」红利）。本卡
+// allowed_paths 不含该测试文件，此处锁 pi 表值前置事实：multimodal=true → 附件
+// 入口可用；subagent=false → 团队派工置灰（§6.2 纪律，实证后由 task-06 三端翻值）。
+describe("pi 态 caps 门控前置事实（getProviderCaps 查表值）", () => {
+  it("multimodal=true（附件按钮可见）/ subagent=false（团队派工隐藏）", () => {
+    expect(getProviderCaps("pi").multimodal).toBe(true);
+    expect(getProviderCaps("pi").subagent).toBe(false);
+  });
+
+  it("PROVIDER_META 含 pi（选择器「选择智能体 Pi」主显标签来源，零改动锚）", () => {
+    expect(PROVIDER_META.pi?.label).toBe("Pi");
   });
 });

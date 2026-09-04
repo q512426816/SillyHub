@@ -144,13 +144,18 @@ describe('PROVIDER_SPECS', () => {
     expect(PROVIDER_SPECS.copilot.minVersion).toBe('1.0.0');
   });
 
-  it('9 个无版本要求的 provider minVersion === undefined', () => {
+  // 2026-09-04-provider-pi-onboarding task-04（R-03）：interactive pi 接入以
+  // 0.81.x rpc 词表为基线，pi 补 minVersion。
+  it('pi minVersion === "0.81.0"', () => {
+    expect(PROVIDER_SPECS.pi.minVersion).toBe('0.81.0');
+  });
+
+  it('8 个无版本要求的 provider minVersion === undefined', () => {
     const noMin = [
       'opencode',
       'openclaw',
       'hermes',
       'gemini',
-      'pi',
       'cursor',
       'kimi',
       'kiro',

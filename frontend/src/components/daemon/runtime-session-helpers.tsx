@@ -60,8 +60,10 @@ export function InteractiveSessionChatSection({
   // task-08 / D-005@v1：Codex 与 Claude 均走 interactive SessionManager（撤销 quick-chat 分流）。
   // daemon SessionManager（task-06）与 backend reopen（task-07）已放开 codex，二者都是
   // 在线 interactive provider。
+  // 2026-09-04-provider-pi-onboarding task-05（B-02 / FR-04）：白名单加 pi——
+  // pi_rpc driver 同走 interactive SessionManager，与 claude/codex 同为在线会话引擎。
   const onlineProviders = useMemo(() => {
-    const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex"];
+    const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex", "pi"];
     const list = runtimes
       .filter(
         (r) =>

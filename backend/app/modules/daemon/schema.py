@@ -103,7 +103,8 @@ class AgentSessionListResponse(BaseModel):
 # min/max_length、provider Literal（值非空时仍只收 claude/codex）。
 
 # 交互式会话 provider 枚举（与原 router inline 版一致；Literal 校验保留）。
-InteractiveProviderLiteral = Literal["claude", "codex"]
+# 2026-09-04-provider-pi-onboarding 冒烟 F-1：加 pi（第三处引擎白名单，档B 第 10 步已补文档）。
+InteractiveProviderLiteral = Literal["claude", "codex", "pi"]
 
 # ── 预会话团队任务块（2026-08-24-session-team-mission-context task-07 / design
 # §5.E1/§7 / FR-05/06）─────────────────────────────────────────────────────────
