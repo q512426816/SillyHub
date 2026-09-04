@@ -14,7 +14,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
 
 ## 契约摘要
 - 全局骨架：
-  - `app-shell.tsx` — 侧栏按 SECTION_ORDER 渲染分组；菜单隔离（/ppm/* 只渲染 ppm section，其它路径只渲染非 ppm section）；条目经 `visibleMenusBySection(user, section)` 权限过滤；本文件仅管图标映射（MENU_ICON_MAP），菜单条目数据来自 menu-permissions。
+  - `app-shell.tsx` — 侧栏按 SECTION_ORDER 渲染分组；菜单隔离（/ppm/* 只渲染 ppm section，其它路径只渲染非 ppm section）；条目经 `visibleMenusBySection(user, section)` 权限过滤；菜单高亮为最长匹配独占（见「关键逻辑」；ql-20260903-011）；本文件仅管图标映射（MENU_ICON_MAP），菜单条目数据来自 menu-permissions。
   - `top-bar.tsx` — 顶栏（平台切换 / 菜单 section 隔离与 AppShell 一致）
   - `antd-providers.tsx` — ConfigProvider（zhCN locale + token + Table 主题，dayjs zh-cn 双保险）
   - `error-boundary.tsx` / `logout-confirm-dialog.tsx`
@@ -94,12 +94,18 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `stage-team-config` / `team-progress`（阶段团队配置与进度）、charts/（图表）
 
 ## 关键逻辑
-菜单隔离（app-shell）：
+菜单隔离 + 高亮（app-shell）：
 ```
 inPpm = pathname 以 /ppm 开头
-SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
+sidebarSections = SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 → ppm 与主平台菜单互不可见
-→ 每组内 visibleMenusBySection(user, section) 按用户权限过滤条目
+→ 每组内 visibleMenusBySection(user, section) 按用户权限过滤条目（空组连标题不渲染）
+高亮（ql-20260903-011 最长匹配独占）：
+matchLength(menu) = 命中规则（absolute startsWith(matchPattern)/精确、
+  相对 includes(matchPattern)/段前缀）换算成匹配段长度，-1=不命中
+active = matchLength 是 sidebarSections 全部菜单中的最大值
+→ 兄弟路径不再互相连累（/settings 不会跟着 /settings/providers 亮、
+  /components 不会跟着 /components/topology 亮）
 ```
 交互会话渲染（/sessions 页与 /runtimes 弹窗共享范式，2026-08-19-session-stream-ux 起统一走装配器）：
 ```

@@ -318,3 +318,53 @@
 方案：①mission_context.workers_all_terminal_with_stats 终态判定补『会话 idle+未 done+首 run 终态 failed/killed→终态失败』形态（对齐 mission_derive_status._virtual_status 既有 ql-20260828-013-a55b 首 run 兜底映射；首 run completed 未 done 仍不算终态，worker_done 唯一完成信号不动），失败分身计入成败统计，lease 完成钩子/patrol 预唤醒立即带『成功X失败Y』唤醒主控读产出、converge、向用户汇报；②patrol.py 职责④分支②前加 NULL resume_token 守卫直接跳过（debug 日志），断线候选带 token 照常 resume。新增测试 5 例（失败形态 3 + NULL token 守卫 2，含正向对照与追问重开工守护）
 结果：test_mission_context+test_patrol 79 passed（含新增 5）；test_worker_subsession_done/dead_worker/budget/lifecycle 50 passed；derive_status_matrix+converge_close+control 197 passed；ruff check/format 0；agent.md 注意事项+变更索引已同步。部署待办：后端镜像重建后生效
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_mission_context.py, backend/app/modules/agent/tests/test_patrol.py
+
+## ql-20260903-011-66a4 | 2026-09-03 14:17:29 | 侧边栏菜单高亮最长匹配独占修复——兄弟路径前缀连累
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/app-shell.tsx（isActive 改 matchLength+bestMatchLength 最长匹配独占，sidebarSections 供高亮与渲染共用）
+- frontend/src/components/__tests__/app-shell.test.tsx（新增 8 用例（兄弟页独占/回归/无命中））
+- .sillyspec/docs/SillyHub/modules/frontend_components.md（契约摘要+关键逻辑同步）
+- .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md（变更索引条目）
+需求：侧边栏菜单高亮最长匹配独占修复——兄弟路径前缀连累
+根因：isActive 对每菜单独立前缀判断（absolute startsWith(matchPattern)、相对 includes），/settings 是 /settings/* 全部兄弟页前缀被一并命中（/components 命中 /components/topology 同理）
+方案：app-shell.tsx 改 matchLength（命中规则不变、换算匹配段长度）+ sidebarSections（渲染菜单集合提前算与 JSX 共用、空组不渲染标题行为保留）取最大值独占高亮；新增 __tests__/app-shell.test.tsx 8 用例
+结果：新增 8 用例绿，相关面 4 文件 86 用例绿，tsc 0 错；Docker 前端镜像重建部署 127.0.0.1:3000，浏览器实测三页高亮正确
+
+## ql-20260903-012-7c69 | 2026-09-03 14:41:20 | 组织管理页全 antd 重构——树表 + Modal 弹窗对齐 FRONTEND_PAGE_STYLE
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/admin/organizations/page.tsx（全量重写（antd 树表 + OrgFormModal + 删除确认 Modal + useNotify））
+- frontend/src/app/(dashboard)/admin/organizations/__tests__/page.test.tsx（新增 5 用例（骨架/新建/编辑/删除/权限门禁））
+- frontend/src/components/admin-organization-tree.tsx（删除（零引用死代码，组织树改由 DataTable treeData 承载））
+- frontend/src/components/__tests__/admin-organization-tree.test.tsx（随组件删除）
+- .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md（新建 sidecar 首条）
+- .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md（组件删除条目）
+需求：组织管理页全 antd 重构——树表 + Modal 弹窗对齐 FRONTEND_PAGE_STYLE
+根因：无，纯样式重构（旧版手搓 div 抽屉/弹窗/Toast + shadcn Button 与其它 antd 管理页观感割裂）
+方案：page.tsx 重写为 PageContainer+SectionCard+DataTable 树表（treeData 承载层级、客户端过滤保留祖先链、默认全展开）+ antd Modal Form（新建/编辑统一弹窗、TreeSelect 父组织防环、edit code 只读）+ antd Modal 删除确认 + useNotify toast；删除零引用的 admin-organization-tree 组件及测试
+结果：新增页测试 5 用例绿 + 相邻 admin 测试 39 用例绿；tsc 0 错；eslint 0 警告；Docker 前端镜像重建部署 127.0.0.1:3000，浏览器实测树表/编辑/新建弹窗正常、AI 视觉复查无样式错乱
+
+## ql-20260903-013-7a5e | 2026-09-03 15:03:08 | 组织管理页表格横向滚动条修复——scroll.x max-content 窄表误用
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/admin/organizations/page.tsx（去 scroll.x/fixed 列/操作列定宽，补注释说明窄表不传 scroll.x 的原因）
+- .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md（ql-013 条目）
+需求：组织管理页表格横向滚动条修复——scroll.x max-content 窄表误用
+根因：ql-012 重构按规范 §4 给 DataTable 传 scroll x max-content（多列宽表惯例），本页 9 列窄表被强制按内容自然宽度撑开不压缩，容器不足即出横向滚动条；去掉后列最小内容宽合计仍比容器多 2px（操作列 width 260 比按钮实际 ~215 宽）
+方案：去掉 scroll x 与配套 fixed right + onCell 背景（无横滚时固定列无意义），操作列放开 width 按内容收缩，列宽自适应铺满容器；DataTable 上方留注释说明不传 scroll.x 原因防按规范补回
+结果：页测试 5 用例绿、tsc 0 错；Docker 前端镜像重建部署，浏览器实测 scrollWidth==clientWidth 无横向滚动条，AI 视觉复查九列完整、操作按钮正常
+
+## ql-20260903-014-4d37 | 2026-09-03 15:19:24 | 组织管理页布局对齐 roles 页——查询条件卡与列表表格拆两块
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/admin/organizations/page.tsx（SectionCard 收窄为查询卡，DataTable 移出为独立块）
+- .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md（ql-014 条目）
+需求：组织管理页布局对齐 roles 页——查询条件卡与列表表格拆两块
+根因：ql-012 重构按 FRONTEND_PAGE_STYLE §1 字面把工具栏+搜索+表格包进一张 SectionCard，与 admin 三页（roles/users）实际惯例（搜索卡与表格分块）不符，用户实测指出
+方案：SectionCard 收窄为只装工具栏+搜索表单，DataTable 移出作 PageContainer 独立兄弟块（gap-4 分隔），错误条改替换表格位置（roles 同款）
+结果：页测试 5 用例绿、tsc 0 错；Docker 前端镜像重建部署，浏览器实测查询卡与表格分离间隔 16px、无横向滚动条，AI 视觉复查两块结构清晰

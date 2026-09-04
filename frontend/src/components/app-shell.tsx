@@ -225,16 +225,61 @@ export function AppShell({ children }: { children: ReactNode }) {
         ? `/workspaces/${effectiveWorkspaceId}/${menu.href}`
         : "/workspaces";
 
-  const isActive = (menu: MenuPermissionGroup) => {
+  // 侧边栏实际渲染的菜单（权限可见 + 非 navHidden + ppm/主平台 section 隔离）。
+  // 提前算好供「最长匹配独占高亮」与下方渲染共用，避免两处各写一遍过滤逻辑。
+  // 菜单隔离：进入 /ppm/* 只渲染 ppm section，其它路径只渲染非 ppm section
+  // （设计依据：用户要求 ppm 与主平台菜单完全隔离、互不可见）。
+  const sidebarSections = SECTION_ORDER.filter((section) =>
+    inPpm ? section === "ppm" : section !== "ppm",
+  )
+    .map((section) => ({
+      section,
+      menus: visibleMenusBySection(user, section).filter((m) => !m.navHidden),
+    }))
+    .filter(({ menus }) => menus.length > 0);
+
+  /**
+   * 菜单与当前地址的匹配长度（-1 = 不匹配）。
+   * 匹配规则沿用原有语义（absolute startsWith / 相对 includes / 精确或段前缀），
+   * 只把布尔结果换算成「匹配段长度」，用于同一地址下菜单间比较。
+   */
+  const matchLength = (menu: MenuPermissionGroup): number => {
     if (menu.absolute) {
-      if (menu.href === "/workspaces") return pathname === "/workspaces";
-      if (menu.matchPattern) return pathname.startsWith(menu.matchPattern);
-      return pathname === menu.href;
+      if (menu.href === "/workspaces") {
+        return pathname === "/workspaces" ? menu.href.length : -1;
+      }
+      if (menu.matchPattern) {
+        return pathname.startsWith(menu.matchPattern)
+          ? menu.matchPattern.length
+          : -1;
+      }
+      return pathname === menu.href ? menu.href.length : -1;
     }
-    if (!workspaceId) return false;
-    if (menu.matchPattern) return pathname.includes(menu.matchPattern);
+    if (!workspaceId) return -1;
+    if (menu.matchPattern) {
+      return pathname.includes(menu.matchPattern)
+        ? menu.matchPattern.length
+        : -1;
+    }
     const full = `/workspaces/${workspaceId}/${menu.href}`;
-    return pathname === full || pathname.startsWith(full + "/");
+    return pathname === full || pathname.startsWith(full + "/")
+      ? full.length
+      : -1;
+  };
+
+  // ql-20260903-011-66a4：最长匹配独占高亮。原先每个菜单各自做前缀判断，
+  // 兄弟路径互相连累——「设置」(/settings) 命中 /settings/providers 等全部
+  // /settings/* 子页，「我的供应商」选中时「设置」同时亮；「项目组组件」
+  // (/components) 命中 /components/topology 同理。改为同一地址下所有命中
+  // 菜单中只高亮匹配段最长的一个（页面路径更长的具体菜单优先）。
+  const bestMatchLength = sidebarSections.reduce(
+    (best, { menus }) => menus.reduce((b, m) => Math.max(b, matchLength(m)), best),
+    -1,
+  );
+
+  const isActive = (menu: MenuPermissionGroup) => {
+    const len = matchLength(menu);
+    return len >= 0 && len === bestMatchLength;
   };
 
   // 用户点退出（TopBar 菜单 / 侧边栏底部）→ 先弹确认，确认后才执行真正登出。
@@ -360,24 +405,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2 pb-4">
-          {SECTION_ORDER.filter((section) => {
-            // 菜单隔离：进入 /ppm/* 只渲染 ppm section，
-            // 其它路径只渲染非 ppm section（overview/management/admin/system）。
-            // 设计依据：用户要求 ppm 与主平台菜单完全隔离、互不可见。
-            const inPpm = pathname.startsWith("/ppm");
-            return inPpm ? section === "ppm" : section !== "ppm";
-          }).map((section) => {
-            const menus = visibleMenusBySection(user, section).filter(
-              (m) => !m.navHidden,
-            );
-            if (menus.length === 0) return null;
-            return (
-              <Fragment key={section}>
-                {renderGroupTitle(SECTION_LABEL[section])}
-                {menus.map((menu) => renderNavLink(menu))}
-              </Fragment>
-            );
-          })}
+          {sidebarSections.map(({ section, menus }) => (
+            <Fragment key={section}>
+              {renderGroupTitle(SECTION_LABEL[section])}
+              {menus.map((menu) => renderNavLink(menu))}
+            </Fragment>
+          ))}
         </nav>
 
         {/* User section at bottom */}
