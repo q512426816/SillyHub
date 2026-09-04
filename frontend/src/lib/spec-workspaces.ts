@@ -29,6 +29,30 @@ export async function getSpecWorkspace(
   );
 }
 
+/**
+ * PATCH /api/workspaces/{workspaceId}/spec-workspace — 修改 spec 工作区可维护字段。
+ *
+ * 三字段全部可选（omit 不改）。strategy 值域 SpecStrategy 三值，非法值后端
+ * Pydantic Literal 422。改 strategy 对后续派发实时生效（backend dispatch/init
+ * 每次从 spec_workspaces 读库），但 daemon 本地缓存布局（repo-native junction /
+ * repo-mirrored 首拷）要等下次无条件 pull（初始化按钮）才重建。
+ */
+export interface SpecWorkspaceUpdateInput {
+  strategy?: SpecStrategy;
+  repo_sillyspec_path?: string | null;
+  profile_version?: string;
+}
+
+export async function updateSpecWorkspace(
+  workspaceId: string,
+  input: SpecWorkspaceUpdateInput,
+): Promise<SpecWorkspace> {
+  return apiFetch<SpecWorkspace>(
+    `/api/workspaces/${workspaceId}/spec-workspace`,
+    { method: "PATCH", json: input },
+  );
+}
+
 export type ImportPhase =
   | "packing"
   | "packed"

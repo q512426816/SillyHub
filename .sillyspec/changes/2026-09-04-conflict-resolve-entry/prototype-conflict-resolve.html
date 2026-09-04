@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 平台同步处理区（变更中心）— 2026-09-04-conflict-resolve-entry</title>
+<style>
+  /* 设计语言对齐 FRONTEND_PAGE_STYLE / 前置原型 prototype-changes-overview.html v2（AI-Native 亮主题） */
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --border: #e5e7eb; --muted: #6b7280;
+    --fg: #111827; --brand: #3b6ef6; --brand-dark: #2f56c9;
+    --success: #16a34a; --error: #dc2626; --warning: #d97706;
+    --violet-bg: #ede9fe; --violet-fg: #6d28d9;
+    --warn-bg: #fef3c7; --warn-fg: #b45309;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; padding: 24px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+  .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .card-title { font-weight: 600; font-size: 15px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
+  .dot.ok { background: var(--success); } .dot.bad { background: var(--error); }
+  .meta { color: var(--muted); font-size: 12px; margin-left: auto; font-family: var(--mono); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .badge { border-radius: 4px; padding: 1px 6px; font-size: 11px; line-height: 18px; white-space: nowrap; }
+  .badge.spec { background: var(--violet-bg); color: var(--violet-fg); }
+  .badge.prog { background: var(--warn-bg); color: var(--warn-fg); }
+  .badge.active-warn { background: #fee2e2; color: #b91c1c; border: 1px dashed #fca5a5; }
+  .cname { font-family: var(--mono); font-size: 13px; font-weight: 600; word-break: break-all; }
+  .btns { margin-left: auto; display: flex; gap: 8px; }
+  button.op { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all .15s; }
+  button.op:hover { border-color: var(--brand); color: var(--brand); }
+  button.op.danger { color: var(--error); }
+  button.op.danger:hover { border-color: var(--error); background: #fef2f2; }
+  button.op:disabled { opacity: .5; cursor: not-allowed; }
+  .ghost-zone { padding: 12px 16px; }
+  .ghost-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .ghost-line b { color: var(--error); }
+  code.cmd { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-family: var(--mono); font-size: 11px; }
+  .state { font-size: 12px; color: var(--brand); }
+  .state.fail { color: var(--error); }
+  .ro-note { padding: 10px 16px; font-size: 12px; color: var(--muted); border-top: 1px dashed var(--border); background: #fafafa; }
+  .modal-mask { position: fixed; inset: 0; background: rgba(17,24,39,.45); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .modal-mask.show { display: flex; }
+  .modal { background: var(--card); border-radius: 12px; width: 480px; max-width: 92vw; padding: 20px; box-shadow: 0 20px 50px rgba(0,0,0,.2); }
+  .modal h3 { font-size: 15px; margin-bottom: 10px; }
+  .modal .body { font-size: 13px; color: #374151; margin-bottom: 14px; }
+  .modal .body b { color: var(--error); }
+  .modal .warn-box { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #b91c1c; margin: 10px 0; display: none; }
+  .modal .warn-box.show { display: block; }
+  .modal .foot { display: flex; justify-content: flex-end; gap: 10px; }
+  .btn-p { background: var(--brand); color: #fff; border: none; border-radius: 8px; padding: 6px 16px; font-size: 13px; cursor: pointer; }
+  .btn-p.danger { background: var(--error); }
+  .btn-p:disabled { opacity: .6; }
+  .toast { position: fixed; right: 20px; bottom: 20px; background: var(--fg); color: #fff; border-radius: 8px; padding: 10px 16px; font-size: 13px; opacity: 0; transition: opacity .3s; z-index: 20; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>变更中心 · 平台同步处理区（原型）</h1>
+  <p class="sub">变更 2026-09-04-conflict-resolve-entry · 变更中心页新增区段（页面骨架不变，卡片插在变更列表上方/侧栏）· 权限：机器所有者 + 平台管理员可见按钮，其他成员只读 · 交互演示：点行内按钮 → 确认弹窗 → 已下发 → 心跳回报（模拟 1.5s）→ 列表回绿</p>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">平台同步</span>
+      <span style="font-size:12px;color:var(--muted)">未决冲突 5 · ghost 0</span>
+      <span class="meta">数据源机器：DEV-QINYI · 更新于 刚刚</span>
+    </div>
+
+    <div class="row">
+      <span class="badge spec">spec</span>
+      <span class="cname">2026-09-02-changes-overview-card</span>
+      <span class="state" data-state>空闲</span>
+      <div class="btns">
+        <button class="op" onclick="openModal(this,'2026-09-02-changes-overview-card','keep_local')">保本地</button>
+        <button class="op danger" onclick="openModal(this,'2026-09-02-changes-overview-card','take_platform')">取平台</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="badge spec">spec</span>
+      <span class="cname">quick-aac62562</span>
+      <span class="state" data-state>空闲</span>
+      <div class="btns">
+        <button class="op" onclick="openModal(this,'quick-aac62562','keep_local')">保本地</button>
+        <button class="op danger" onclick="openModal(this,'quick-aac62562','take_platform')">取平台</button>
+      </div>
+    </div>
+
+    <!-- 活跃变更的冲突：警示徽标 + 确认弹窗加重文案（不硬禁） -->
+    <div class="row">
+      <span class="badge prog">进度</span>
+      <span class="cname">2026-09-04-provider-pi-onboarding</span>
+      <span class="badge active-warn">⚠ 活跃变更 · 谨慎裁决</span>
+      <span class="state" data-state>空闲</span>
+      <div class="btns">
+        <button class="op" onclick="openModal(this,'2026-09-04-provider-pi-onboarding','keep_local',true)">保本地</button>
+        <button class="op danger" onclick="openModal(this,'2026-09-04-provider-pi-onboarding','take_platform',true)">取平台</button>
+      </div>
+    </div>
+
+    <div class="ghost-zone">
+      <div class="ghost-line">
+        残留记录 (ghost) <b>0</b> 个 —— 目录已不存在 · 建议清理
+        <div class="btns" style="margin-left:auto">
+          <button class="op danger" disabled title="演示：ghost=0 时禁用">一键清理 ghost</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ro-note">只读视角说明：非机器所有者/平台管理员看不到上方操作按钮，仅显示冲突清单与红灯计数（本行仅为原型注释，实际不渲染）。</div>
+  </div>
+</div>
+
+<div class="modal-mask" id="mask">
+  <div class="modal">
+    <h3 id="m-title">确认裁决</h3>
+    <div class="body" id="m-body"></div>
+    <div class="warn-box" id="m-warn">⚠ 该变更当前处于活跃阶段（非归档），另一会话可能正在推进。裁决会用一端版本覆盖另一端，确认你了解现场再继续。</div>
+    <div class="foot">
+      <button class="op" onclick="closeModal()">取消</button>
+      <button class="btn-p" id="m-confirm" onclick="confirmResolve()">确认执行</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  let pending = null;
+  const STRATEGY_TEXT = {
+    keep_local: { title: '保本地（keep-local）', body: '用<b>本机版本覆盖平台版本</b>。适用于：本机是最新现场（如本会话刚完成的工作、归档后的终态）。平台端他机未拉取的更新将被本机版本覆盖。',
+      btn: '确认 · 保本地', cls: '' },
+    take_platform: { title: '取平台（take-platform）', body: '用<b>平台版本覆盖本机版本</b>。适用于：他端推进了而你本机落后（如服务器/其他机器已裁决过的最新状态）。本机未推送的本地改动会被覆盖。',
+      btn: '确认 · 取平台', cls: 'danger' },
+  };
+  function openModal(btn, change, strategy, activeWarn) {
+    pending = { btn, change, strategy };
+    const t = STRATEGY_TEXT[strategy];
+    document.getElementById('m-title').textContent = `裁决冲突：${t.title}`;
+    document.getElementById('m-body').innerHTML = `变更 <code class="cmd">${change}</code><br><br>${t.body}`;
+    document.getElementById('m-warn').className = 'warn-box' + (activeWarn ? ' show' : '');
+    const c = document.getElementById('m-confirm');
+    c.textContent = t.btn; c.className = 'btn-p ' + t.cls;
+    document.getElementById('mask').className = 'modal-mask show';
+  }
+  function closeModal() { document.getElementById('mask').className = 'modal-mask'; pending = null; }
+  function confirmResolve() {
+    if (!pending) return;
+    const { btn, change, strategy } = pending;
+    closeModal();
+    const row = btn.closest('.row');
+    const state = row.querySelector('[data-state]');
+    row.querySelectorAll('button.op').forEach(b => b.disabled = true);
+    state.className = 'state'; state.textContent = '已下发 · 等待机器回报（≤60s 心跳）…';
+    toast(`指令已下发：${change} → ${strategy === 'keep_local' ? '保本地' : '取平台'}`);
+    // 模拟心跳回报（真实链路：daemon 执行 sillyspec CLI → sillyspec_status.last_command_result 随心跳上报 → 前端 30s 轮询回显）
+    setTimeout(() => {
+      if (change === 'quick-aac62562') { // 演示失败分支：exit_code≠0 显示 stderr 摘要
+        state.className = 'state fail';
+        state.textContent = '执行失败（exit 1）：change not found in pending conflicts';
+        row.querySelectorAll('button.op').forEach(b => b.disabled = false);
+        toast('❌ 机器回报：执行失败，可重试');
+      } else {
+        row.style.transition = 'opacity .4s'; row.style.opacity = '0';
+        setTimeout(() => row.remove(), 400);
+        toast('✅ 机器回报：冲突已消解，下一轮采集将刷新计数');
+      }
+    }, 1500);
+  }
+  let toastTimer;
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg; el.className = 'toast show';
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = 'toast', 2600);
+  }
+</script>
+</body>
+</html>

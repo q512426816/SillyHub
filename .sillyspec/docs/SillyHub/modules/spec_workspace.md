@@ -93,6 +93,12 @@ delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False（30 天机会式
 - strategy 决定 spec 物理位置与同步方向；platform-managed 下 daemon 本地缓存是
   旧 pull 快照，推不出新 change——sync-manual 透传宿主 root_path 让 daemon 改打
   宿主 `.sillyspec`（与 get_spec_bundle RPC 同源）
+- strategy 可创建后修改（PATCH /spec-workspace，前端入口在 workspace-config-card
+  策略行「修改」，owner 门禁）：改库对后续 dispatch/init 实时生效（lease payload
+  每次读 spec_workspaces.strategy），但 daemon 本地缓存布局（repo-native junction /
+  repo-mirrored 首拷）只在下次**无条件 pull** 时重建——interactive/batch 有
+  spec_version 一致跳 pull 的保鲜逻辑，故可靠生效路径是点「初始化」（handleInitLease
+  无条件 pullSpecBundle）；普通会话若 version 未变可能仍用旧缓存直到版本变化
 - workspace 创建时经 `_ensure_spec_workspace(_from_platform)` 自动连带建 1:1
   spec 空间，无需显式建
 - bundle 下载是流式响应，前端按 blob 接收

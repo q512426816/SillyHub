@@ -19,6 +19,8 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
 `permission_service.py` `DaemonPermissionService`（审批/dialog 解析）。
 
 ## 契约摘要
+
+- **provider 枚举**（2026-09-04-provider-pi-onboarding）：`daemon/schema.py` 的 `InteractiveProviderLiteral = Literal["claude","codex","pi"]` 是后端第三处引擎白名单（另两处在 daemon cli 装配+前端选择器）；`agent/provider_caps.py` 镜像含 pi（resume/multimodal/thinking/model_select=true；mcp/edit_patch/permission_dialog/subagent=false）。
 - 注册与运行时：`GET /api/daemon/version`（camelCase 契约，install.sh/前端消费）、
   `POST /register`、`POST /heartbeat`、`GET /runtimes`（当前用户可见）、
   `GET /runtimes/page`（管理员分页全 owner，q/type/status/user_id/limit/offset）、

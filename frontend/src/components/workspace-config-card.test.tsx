@@ -14,6 +14,7 @@ import { ConfigProvider, Modal } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceConfigCard } from "@/components/workspace-config-card";
+import { ApiError } from "@/lib/api";
 import type { DaemonInstanceRead } from "@/lib/daemon";
 import type { SpecWorkspace } from "@/lib/spec-workspaces";
 import type { Workspace } from "@/lib/workspaces";
@@ -97,6 +98,7 @@ const specApi = vi.hoisted(() => ({
   listPendingSync: vi.fn(),
   importSpecWorkspace: vi.fn(),
   generateProjects: vi.fn(),
+  updateSpecWorkspace: vi.fn(),
 }));
 vi.mock("@/lib/spec-workspaces", async () => {
   const actual = await vi.importActual<typeof import("@/lib/spec-workspaces")>(
@@ -110,6 +112,7 @@ vi.mock("@/lib/spec-workspaces", async () => {
     listPendingSync: specApi.listPendingSync,
     importSpecWorkspace: specApi.importSpecWorkspace,
     generateProjects: specApi.generateProjects,
+    updateSpecWorkspace: specApi.updateSpecWorkspace,
   };
 });
 
@@ -1051,5 +1054,97 @@ describe("WorkspaceConfigCard 下载文档包（task-09 / FR-06 / FR-08，design
     expect(antdToast.messageError).toHaveBeenCalledWith("下载失败（HTTP 401）");
     expect(fetchMock).toHaveBeenCalledTimes(1); // 刷新拿不到 token 不重试
     expect(createObjectURL).not.toHaveBeenCalled();
+  });
+});
+
+// ── spec 策略修改（ql-20260904-028-3cb5：owner 门禁 + Modal 编辑 + 保存回调）──
+
+describe("WorkspaceConfigCard spec 策略修改（ql-20260904-028-3cb5）", () => {
+  afterEach(() => {
+    cleanup();
+    specApi.updateSpecWorkspace.mockReset();
+    antdToast.messageSuccess.mockClear();
+    antdToast.messageError.mockClear();
+  });
+
+  it("owner 可见「修改」入口；非 owner 不渲染（策略是工作区级共享配置）", () => {
+    renderCard({ isOwner: true });
+    expect(screen.getByTestId("strategy-edit-entry")).toBeInTheDocument();
+    cleanup();
+
+    renderCard({ isOwner: false });
+    expect(screen.queryByTestId("strategy-edit-entry")).not.toBeInTheDocument();
+    // 策略 Badge 本身对非 owner 仍可见（只读展示）
+    expect(screen.getByText("平台托管")).toBeInTheDocument();
+  });
+
+  it("打开 Modal 回填当前策略；未改选时「保存」禁用（防误触同值提交）", () => {
+    renderCard({});
+    fireEvent.click(screen.getByTestId("strategy-edit-entry"));
+
+    expect(screen.getByText("修改 spec 策略")).toBeInTheDocument();
+    // 当前策略 platform-managed 选中
+    const current = screen.getByRole("radio", {
+      name: /平台托管/,
+    }) as HTMLInputElement;
+    expect(current.checked).toBe(true);
+    // 同值 → 保存禁用
+    const okBtn = screen.getByRole("button", { name: "保存" }) as HTMLButtonElement;
+    expect(okBtn.disabled).toBe(true);
+  });
+
+  it("改选新策略保存：调 updateSpecWorkspace({strategy}) → 成功 toast（含初始化提示）+ onRefresh + Modal 关闭", async () => {
+    specApi.updateSpecWorkspace.mockResolvedValue(
+      makeSpecWs({ strategy: "repo-mirrored" }),
+    );
+    const { onRefresh } = renderCard({});
+
+    fireEvent.click(screen.getByTestId("strategy-edit-entry"));
+    fireEvent.click(
+      screen.getByRole("radio", { name: /单次导入/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(specApi.updateSpecWorkspace).toHaveBeenCalledWith("ws-1", {
+        strategy: "repo-mirrored",
+      }),
+    );
+    expect(antdToast.messageSuccess).toHaveBeenCalledWith(
+      "spec 策略已更新。建议点击「初始化」让新策略在本地缓存生效。",
+    );
+    expect(antdToast.messageError).not.toHaveBeenCalled();
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    // destroyOnClose：关闭后 Modal 内容卸载
+    expect(screen.queryByText("修改 spec 策略")).not.toBeInTheDocument();
+  });
+
+  it("repo-native 选中时展示写源项目警告文案", () => {
+    renderCard({});
+    fireEvent.click(screen.getByTestId("strategy-edit-entry"));
+    expect(screen.queryByText(/扫描产出会写入源项目/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /源项目即真理/ }));
+    expect(screen.getByText(/扫描产出会写入源项目/)).toBeInTheDocument();
+  });
+
+  it("保存失败：失败 toast 非静默 + Modal 保持打开（可改选重试）", async () => {
+    specApi.updateSpecWorkspace.mockRejectedValue(
+      new ApiError(500, {
+        code: "internal_error",
+        message: "修改 spec 策略失败（HTTP 500）",
+        request_id: null,
+        details: null,
+      }),
+    );
+    renderCard({});
+
+    fireEvent.click(screen.getByTestId("strategy-edit-entry"));
+    fireEvent.click(screen.getByRole("radio", { name: /单次导入/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(antdToast.messageError).toHaveBeenCalled());
+    expect(antdToast.messageSuccess).not.toHaveBeenCalled();
+    expect(screen.getByText("修改 spec 策略")).toBeInTheDocument();
   });
 });

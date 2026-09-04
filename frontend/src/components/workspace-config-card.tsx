@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
 import { Badge } from "@/components/ui/badge";
-import { Button, Modal, Progress, Tooltip } from "antd";
+import { Button, Modal, Progress, Radio, Tooltip } from "antd";
 import { SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import { PROVIDER_META, type DaemonInstanceRead } from "@/lib/daemon";
@@ -18,7 +18,9 @@ import {
   initDispatch,
   listPendingSync,
   syncManual,
+  updateSpecWorkspace,
   type ImportPhase,
+  type SpecStrategy,
   type SpecWorkspace,
 } from "@/lib/spec-workspaces";
 import { scanGenerate, type Workspace } from "@/lib/workspaces";
@@ -69,6 +71,13 @@ const STRATEGY_LABEL: Record<string, string> = {
   "repo-mirrored": "仓库镜像",
   "repo-native": "仓库原生",
 };
+
+/** spec 策略可改值域（与创建对话框 workspace-scan-dialog.tsx 同文案口径）。 */
+const STRATEGY_OPTIONS: ReadonlyArray<{ value: SpecStrategy; label: string }> = [
+  { value: "platform-managed", label: "平台托管（默认，不碰源项目，从零扫描）" },
+  { value: "repo-mirrored", label: "单次导入（复制源项目 .sillyspec 快照，不污染源项目）" },
+  { value: "repo-native", label: "源项目即真理（软链接，扫描直接写源项目）" },
+];
 
 const IMPORT_PHASE_LABEL: Record<ImportPhase, string> = {
   packing: "打包中",
@@ -148,6 +157,12 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   // 不建 DaemonChangeWrite 任务、不轮询，与 syncManual/syncStatus 状态机完全独立。
   const [downloading, setDownloading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  // spec 策略修改（ql-20260904-028-3cb5）：Modal 开合 + 草稿值 + 保存中态。
+  // 策略是工作区级共享配置（影响 daemon 本地缓存布局），仅 owner 可改（对齐扫描门禁）；
+  // 草稿在打开 Modal 时取当前策略，避免首渲染快照过期。
+  const [strategyEditing, setStrategyEditing] = useState(false);
+  const [strategyDraft, setStrategyDraft] = useState<SpecStrategy>("platform-managed");
+  const [strategySaving, setStrategySaving] = useState(false);
 
   const initPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -330,6 +345,31 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       notify.error(err, "下载文档包失败");
     } finally {
       setDownloading(false);
+    }
+  }
+
+  /* ---- Strategy edit handler（ql-20260904-028-3cb5：spec 策略支持修改）---- */
+  function openStrategyEdit(): void {
+    if (!specWs) return;
+    setStrategyDraft(specWs.strategy);
+    setStrategyEditing(true);
+  }
+
+  async function handleStrategySave(): Promise<void> {
+    if (!specWs || strategyDraft === specWs.strategy) return;
+    setStrategySaving(true);
+    try {
+      await updateSpecWorkspace(workspaceId, { strategy: strategyDraft });
+      setStrategyEditing(false);
+      // 生效语义（调研结论）：backend dispatch/init 每次实时读库，新策略对后续任务
+      // 即时生效；但 daemon 本地缓存布局（junction/首拷）只在下次无条件 pull 时重建
+      // ——handleInitLease 是无条件 pull，故提示用户点「初始化」。
+      notify.success("spec 策略已更新。建议点击「初始化」让新策略在本地缓存生效。");
+      onRefresh();
+    } catch (err) {
+      notify.error(err, "修改 spec 策略失败");
+    } finally {
+      setStrategySaving(false);
     }
   }
 
@@ -708,10 +748,21 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         <dd>{formatTs(specWs.last_synced_at)}</dd>
 
         <dt className="text-muted-foreground">spec 策略</dt>
-        <dd>
+        <dd className="flex items-center gap-1.5">
           <Badge variant="default">
             {STRATEGY_LABEL[specWs.strategy] ?? specWs.strategy}
           </Badge>
+          {isOwner && (
+            <Tooltip title="修改 spec 同步策略。新策略对后续任务派发即时生效；本地缓存布局建议修改后点「初始化」重建。">
+              <Button
+                data-testid="strategy-edit-entry"
+                size="small"
+                onClick={openStrategyEdit}
+              >
+                修改
+              </Button>
+            </Tooltip>
+          )}
         </dd>
       </dl>
     );
@@ -872,6 +923,41 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         </h3>
         {renderStorageGroup()}
       </div>
+
+      {/* spec 策略修改 Modal（ql-20260904-028-3cb5，owner 门禁入口在存储组策略行） */}
+      <Modal
+        title="修改 spec 策略"
+        open={strategyEditing}
+        okText="保存"
+        cancelText="取消"
+        okButtonProps={{
+          loading: strategySaving,
+          disabled: !specWs || strategyDraft === specWs.strategy,
+        }}
+        onOk={() => void handleStrategySave()}
+        onCancel={() => setStrategyEditing(false)}
+        destroyOnHidden
+      >
+        <p className="mb-2 text-xs text-muted-foreground">
+          源项目已有 .sillyspec 如何进入平台。新策略对后续任务派发即时生效；本地缓存布局建议保存后点击「初始化」重建。
+        </p>
+        <Radio.Group
+          className="flex flex-col gap-1"
+          value={strategyDraft}
+          onChange={(e) => setStrategyDraft(e.target.value as SpecStrategy)}
+        >
+          {STRATEGY_OPTIONS.map((option) => (
+            <Radio key={option.value} value={option.value}>
+              <span className="text-xs">{option.label}</span>
+            </Radio>
+          ))}
+        </Radio.Group>
+        {strategyDraft === "repo-native" && (
+          <p className="mt-2 text-[11px] text-amber-600">
+            ⚠ 扫描产出会写入源项目 .sillyspec（若被 git 跟踪需自行 commit）。
+          </p>
+        )}
+      </Modal>
     </SectionCard>
   );
 }

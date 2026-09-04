@@ -6,7 +6,7 @@
 schema_version: 1
 project: multi-agent-platform
 source_commit: 04bb45fe
-generated_at: 2026-08-24T19:10:00+08:00
+generated_at: 2026-09-04T22:25:00+08:00
 generator: sillyspec-scan
 
 modules:
@@ -78,6 +78,9 @@ modules:
       - getPidFile
       - getLogFile
       - readPid
+      - INTERACTIVE_PROVIDERS (sillyhub-daemon/src/interactive/providers.ts, provider 注册表+caps 单源, 2026-09-04-provider-pi-onboarding)
+      - PiRpcDriver (sillyhub-daemon/src/interactive/pi-rpc-driver.ts, pi rpc 长驻 driver, 2026-09-04-provider-pi-onboarding)
+      - PiEventNormalizer (sillyhub-daemon/src/interactive/pi-events.ts, rpc 事件→AgentEvent v2, 2026-09-04-provider-pi-onboarding)
       - isProcessAlive
       - writePid
       - SillySpecManager.collectStatusOnce (sillyhub-daemon/src/sillyspec-manager.ts, progress show --json 三态采集器+心跳 sillyspec_status 透传, 2026-09-02-changes-overview-card)

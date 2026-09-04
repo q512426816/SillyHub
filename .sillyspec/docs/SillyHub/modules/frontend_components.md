@@ -67,7 +67,8 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
     textarea，均消费 lib/workspace-types，2026-08-18-workspace-role-type）
   - git-log/（工作区 Git 日志视图，2026-08-25-workspace-git-log）：`commit-graph`（SVG 泳道渲染 + lanePalette 三主题色板）/ `commit-list`（react-virtual 虚拟滚动行）/ `commit-detail-drawer`（提交详情 + diff 按需展开）/ `file-tree`（变更文件按 `/` 聚合目录树、目录节点 +x/-y）/ `git-status-bar`（共享 Git 状态条 full/compact 双形态：git-log 页完整态 + sessions 门户紧凑态 Tooltip 展开；自治取数 useGitLogStatus，状态色经 statusBarPalette → 组件级 `--sb-*` 变量注入零硬编码 hex；五边界形态——fetch 降级黄条/无 upstream/detached HEAD/空仓库/no_git 返 null，2026-08-26-workspace-git-status）；workspace-tabs TABS 追加「Git 日志」项（纯三字段）
   - 绑定与成员：`workspace-binding-dialog` / `workspace-binding-guard` / `workspace-member-row` / `workspace-member-add-dialog`
-  - 配置与路径：`workspace-config-card` / `workspace-path-picker` / `workspace-path-fields` / `workspace-daemon-switcher`（两步切换：点选非当前 daemon 先进路径确认态——WorkspacePathPicker 绑定新 daemon 预填旧 root_path 可改可浏览，确认才一并提交 daemon_id+root_path，不再沿用旧路径，ql-20260828-010-ca22）/ `workspace-access-guide` / `workspace-session-section`
+  - 配置与路径：`workspace-config-card` / `workspace-path-picker` / `workspace-path-fields` / `workspace-daemon-switcher`（两步切换：点选非当前 daemon 先进路径确认态——WorkspacePathPicker 绑定新 daemon 预填旧 root_path 可改可浏览，确认才一并提交 daemon_id+root_path，不再沿用旧路径，ql-20260828-010-ca22）/ `workspace-access-guide` / `workspace-session-section`；
+    workspace-config-card 存储组「spec 策略」行 owner 可「修改」——antd Modal 三选（与创建对话框同文案，repo-native 带写源项目警告）→ updateSpecWorkspace PATCH，同值保存禁用，成功 toast 提示点「初始化」重建本地缓存（生效语义见 spec_workspace.md，ql-20260904-028-3cb5）
   - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）；LinkWorkspaceDialog 已关联/可选两侧均按词表徽标渲染
     工作区类型（title 带 role/description 摘要）
 - 供应商域（llm-providers/）：
@@ -126,6 +127,8 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 ```
 
 ## 注意事项
+
+- **引擎可选性白名单**（2026-09-04-provider-pi-onboarding）：会话门户 `sessions/pre-session-picker.tsx`（Set）与对话框 `daemon/runtime-session-helpers.tsx`（数组）各有一份硬编码引擎集合（现 claude/codex/pi）；群聊两处（create-group-wizard/member-panel）仍 claude/codex。新 provider 接入这三~四处都要改（档B 第 10 步文档化）。
 - AppShell / TopBar / antd-providers 是全局组件，改动影响所有页面；菜单条目缺失是 menu-permissions 数据问题，app-shell 只管图标映射。
 - interactive-session-panel 与 sessions 页共享 TurnTimeline / SessionInputBar / 事件处理语义：日志处理已收敛到 session-log-assembler 单一装配器（2026-08-19-session-stream-ux），改会话流逻辑只改装配器一处；但改 TurnTimeline 渲染仍需两处回归（/runtimes 弹窗零回归是 sessions-portal 的硬约束）。
 - session-log-assembler 是纯函数模块（零 React 依赖），分类函数（classifySessionLog 等）实现已迁入其中，session-log-sanitize.ts 保留 re-export 垫片——新代码 import 分类一律从 assembler 取。
@@ -146,6 +149,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 
 ## 变更索引
 
+- ql-20260904-028-3cb5 | 工作区 spec 策略支持修改：后端 PATCH /spec-workspace 早已存在但前端无入口——lib/spec-workspaces.ts 补 updateSpecWorkspace（PATCH + 三字段透传）；workspace-config-card 策略行加 owner 门禁「修改」入口（antd Modal 三选、同值禁存、repo-native 写源项目警告、成功 toast 提示点「初始化」重建本地缓存）；生效语义：改库对后续 dispatch 实时生效、daemon 缓存布局等下次无条件 pull（=初始化按钮）重建，详见 spec_workspace.md 注意事项
 - ql-20260903-001-4d6e | 视口补拉时序修复（ql-010 部署后实测未解决）：初始/翻页触发原 setTimeout(0) 早于 React DOM 提交与布局——scrollHeight=0 被守卫拦下且无重试，补拉链断在首跳（偶发成功属时序竞争）；scheduleAutoFill 双 rAF 等提交+布局，布局不可读继续 rAF 重试至多 10 帧（~160ms）后放弃，两处触发统一走调度；新增布局延迟就绪用例（前 2 读 0 后可读）
 - ql-20260902-016-3a75 | variant 回归锚补同步（CI 修复）：ql-009 给会话主体加 display:contents 挂载点（触顶自动加载滚动监听）后 session-panel-variant.test.tsx 锚未跟着走——desktop 断 scroll.parentElement=panel、mobile 断外包层=scroll 父级，CI 连挂 4 次；锚更新为「挂载点布局透明（className=contents）+ 挂载点直挂面板根（desktop）/ 挂载点父级=mobile 横向外包层（min-h-0 flex-1 + 表格横滚锁类仍全在，CSS 后代选择器穿透 contents 照常生效）」
 - ql-20260902-010-f493 | 触顶自动加载补口（视口补拉链）：初始 100 条日志装配的对话可能不足一屏——容器无滚动条 scroll 事件永不触发成死路；maybeAutoFill 在「容器有布局高度且 scrollHeight ≤ clientHeight 且有更早」时自动续拉一页（初始满页后 + 每次翻页满页后 setTimeout 复查 DOM 提交后状态），撑出滚动条即停走正常触顶；连拉上限 10 防极端空渲染批量请求，换会话重置；jsdom 无布局（scrollHeight=0）不触发保既有用例零影响
