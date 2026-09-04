@@ -333,6 +333,12 @@ export default function AdminOrganizationsPage() {
       title: "操作",
       key: "actions",
       align: "center",
+      // 与 roles/users 管理页同款：固定宽度 + fixed right（本列 4 个按钮比
+      // roles 多一个「新建子组织」，宽 260 容纳不换行；onCell 背景防 fixed
+      // 列滚动时透明穿透，roles/page.tsx 同款）。
+      width: 260,
+      fixed: "right",
+      onCell: () => ({ style: { background: "hsl(var(--card))" } }),
       render: (_v: unknown, o: OrgRow) => (
         <div className="flex justify-center gap-1">
           <Button
@@ -441,8 +447,8 @@ export default function AdminOrganizationsPage() {
       ) : (
         <>
           {/* 不传 scroll.x（规范 §4 的 max-content 是多列宽表惯例）：本表 9 列可压缩，
-              max-content 会坚持内容自然宽度，容器不足即出横向滚动条（ql-20260903-013）；
-              无横滚也无需 fixed 列。 */}
+              max-content 会坚持内容自然宽度，容器不足即出横向滚动条（ql-20260903-013）。
+              操作列 fixed right（无横滚时静止贴右无副作用，出横滚时随视口钉右）。 */}
           <DataTable<OrgRow>
             rowKey="id"
             columns={columns}

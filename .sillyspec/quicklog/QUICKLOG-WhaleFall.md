@@ -368,3 +368,13 @@
 根因：ql-012 重构按 FRONTEND_PAGE_STYLE §1 字面把工具栏+搜索+表格包进一张 SectionCard，与 admin 三页（roles/users）实际惯例（搜索卡与表格分块）不符，用户实测指出
 方案：SectionCard 收窄为只装工具栏+搜索表单，DataTable 移出作 PageContainer 独立兄弟块（gap-4 分隔），错误条改替换表格位置（roles 同款）
 结果：页测试 5 用例绿、tsc 0 错；Docker 前端镜像重建部署，浏览器实测查询卡与表格分离间隔 16px、无横向滚动条，AI 视觉复查两块结构清晰
+
+## ql-20260904-014-f420 | 2026-09-04 10:14:24 | 组织管理页操作列固定宽度并固定右侧——对齐其它管理页（roles/users）惯例
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/admin/organizations/page.tsx（操作列 width/fixed/onCell 三件套）
+需求：组织管理页操作列固定宽度并固定右侧——对齐其它管理页（roles/users）惯例
+根因：重构后操作列无 width 无 fixed：宽屏随内容伸缩、出横向滚动条时不钉右被滚走，与 roles/users 管理页不一致
+方案：操作列补 width: 260（本列 4 个按钮比 roles 多「新建子组织」，260 容纳不换行）+ fixed: right + onCell 卡片背景防 fixed 列透明穿透（roles/page.tsx 同款）；修正旁注释过时的「无需 fixed 列」结论（无横滚时 fixed 静止贴右无副作用）
+结果：organizations 页测试 5/5 绿；tsc 0；待重建 frontend 部署
