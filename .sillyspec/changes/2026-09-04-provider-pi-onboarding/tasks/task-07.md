@@ -10,6 +10,10 @@ blocks: []
 requirement_ids: [FR-05]
 decision_ids: [D-002@v1]
 allowed_paths:
+  - backend/app/modules/daemon/schema.py
+  - sillyhub-daemon/src/interactive/session-store-persistence.ts
+  - sillyhub-daemon/tests/interactive/session-store-persistence.test.ts
+
   - docs/agent-provider-onboarding.md
   - .sillyspec/changes/2026-09-04-provider-pi-onboarding/smoke-result.md
 goal: >
