@@ -473,6 +473,17 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const SPEC_SYNC_TIMEOUT_MS = 300_000;
 
 /**
+ * spec bundle 下载专用超时 120 秒（ql-20260904-016 会话首响优化）。
+ *
+ * bundle 是全树 tar（实测 36MB 级）：backend 冷缓存经 bind mount 打包 + 本地
+ * 传输实测 15-30s+，DEFAULT 30s 会被打穿（会话 f0f76381/a8f52057 pull 恒
+ * timeout 失败、daemon 回落旧缓存）；gzip + 服务端字节缓存后常态秒级，冷首拉
+ * 仍可能慢。与 SPEC_SYNC_TIMEOUT_MS 同款「大 payload 单独放宽」模式；不取
+ * 300s 是因为下载侧超 2 分钟通常意味着真故障，快速失败好过会话挂 5 分钟。
+ */
+const SPEC_BUNDLE_TIMEOUT_MS = 120_000;
+
+/**
  * agent 文件制品上传专用超时 300 秒（task-05 2026-08-23-agent-file-upload-mcp）。
  *
  * 文件受 backend ``file_max_size_mb`` 上限约束（可达几十 MB），multipart 全量
@@ -1597,7 +1608,7 @@ export class HubClient {
     const resp = await fetch(url, {
       method: 'GET',
       headers,
-      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+signal: AbortSignal.timeout(SPEC_BUNDLE_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const bodyText = await resp.text();

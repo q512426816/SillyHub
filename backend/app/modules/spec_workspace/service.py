@@ -26,7 +26,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -86,6 +86,88 @@ BUNDLE_METADATA_MEMBER = "PLATFORM-BUNDLE.json"
 _BUNDLE_CHUNK_BYTES = 64 * 1024
 _BUNDLE_QUEUE_MAX_CHUNKS = 32
 _BUNDLE_CANCEL_JOIN_S = 5.0
+
+
+# ── bundle gzip 字节缓存（ql-20260904-016 会话首响优化）────────────────────────
+#
+# 实测 3563 文件 / 36MB spec 树：后端每次打包经 Windows bind mount（Docker
+# Desktop gRPC-FUSE）逐文件读 ~15-20s，daemon 拉取濒临/打穿 30s fetch 超时
+# （会话 f0f76381/a8f52057 实证 pull 恒失败）。同一 (workspace, spec_version)
+# 的 tar 内容确定（仅快照元数据 generated_at 随构建时刻变——缓存后首包时刻
+# 固化，可接受：spec_version 才是新旧判据，daemon 比对版本不比 generated_at）
+# → gzip 变体按 key 缓存整包字节，命中路径零打包零 mount 读、秒级吐完。
+#
+# 内存边界（对齐审计 P1-性能④精神）：仅缓存 gzip 变体（~树大小/4），每
+# workspace 保留最新 2 个版本，plain/identity 路径零缓存零行为变化。
+_BUNDLE_CACHE_VERSIONS_PER_WS = 2
+_bundle_gzip_cache: dict[tuple[uuid.UUID, int], bytes] = {}
+_bundle_gzip_cache_lock = threading.Lock()
+
+
+class _BundleStreamLike(Protocol):
+    """build_bundle 三种产出流的消费协议：同步分块迭代 + 显式 close 清理。
+
+    ql-20260904-016：产出从单一 _BundleTarStream 扩为三种（原始流 / 缓存回填
+    包装 / 缓存重放），iter_bundle_stream 与路由按本协议消费。
+    """
+
+    def __iter__(self) -> "Iterator[bytes]": ...
+
+    def close(self) -> None: ...
+
+
+def _bundle_gzip_cache_get(key: tuple[uuid.UUID, int]) -> bytes | None:
+    with _bundle_gzip_cache_lock:
+        return _bundle_gzip_cache.get(key)
+
+
+def _bundle_gzip_cache_put(key: tuple[uuid.UUID, int], data: bytes) -> None:
+    with _bundle_gzip_cache_lock:
+        same_ws = [k for k in _bundle_gzip_cache if k[0] == key[0]]
+        if len(same_ws) >= _BUNDLE_CACHE_VERSIONS_PER_WS and key not in _bundle_gzip_cache:
+            oldest = min(same_ws, key=lambda k: k[1])
+            _bundle_gzip_cache.pop(oldest, None)
+        _bundle_gzip_cache[key] = data
+
+
+class _ReplayBundleStream:
+    """缓存命中重放：整包字节按 64KB 分块吐出；无后台资源，close 无操作。"""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __iter__(self) -> "Iterator[bytes]":
+        for i in range(0, len(self._data), _BUNDLE_CHUNK_BYTES):
+            yield self._data[i : i + _BUNDLE_CHUNK_BYTES]
+
+    def close(self) -> None:  # 无清理（区别于 _BundleTarStream 的线程回收）
+        pass
+
+
+class _CachingBundleIterator:
+    """包裹 _BundleTarStream：透传分块，完整消费后整包回填 gzip 缓存。
+
+    消费端提前关闭（断连）→ 生成器在 yield 处废弃，不回填（防半包入缓存）。
+    属性委托内层（``_cancelled``/``_thread`` 测试钩子照常可用）。
+    """
+
+    def __init__(self, inner: "_BundleTarStream", key: tuple[uuid.UUID, int]) -> None:
+        self._inner = inner
+        self._key = key
+
+    def __iter__(self) -> "Iterator[bytes]":
+        buf = bytearray()
+        for chunk in self._inner:
+            buf.extend(chunk)
+            yield chunk
+        if buf:
+            _bundle_gzip_cache_put(self._key, bytes(buf))
+
+    def close(self) -> None:
+        self._inner.close()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
 
 
 class _TarStreamCancelled(Exception):
@@ -205,7 +287,7 @@ def _next_bundle_chunk(iterator: Iterator[bytes]) -> Any:
         return _BUNDLE_STREAM_END
 
 
-async def iter_bundle_stream(stream: _BundleTarStream) -> AsyncIterator[bytes]:
+async def iter_bundle_stream(stream: "_BundleStreamLike") -> AsyncIterator[bytes]:
     """bundle 流的 async 消费包装（2026-08-30 审计⑦）。
 
     starlette 1.1.0 的 ``StreamingResponse`` **不会**调用同步迭代器的
@@ -796,7 +878,9 @@ class SpecWorkspaceService:
     async def build_bundle(
         self,
         workspace_id: uuid.UUID,
-    ) -> tuple[str, int, Iterator[bytes]]:
+        *,
+        gzip_output: bool = False,
+    ) -> tuple[str, int, "_BundleStreamLike"]:
         """Stream the server ``spec_root`` as a tar stream.
 
         Excludes any ``.runtime/`` directory (top-level or nested) — that is
@@ -814,6 +898,16 @@ class SpecWorkspaceService:
         （后台线程 ``w|`` 模式打包 + 有界队列背压 + ``close()`` 取消回收）——
         驻留内存上限 ≈ 队列容量×分块（2MB），与 spec 树大小无关；旧实现整包
         攒 BytesIO（万级文件≈100MB 峰值×并发拉取数）。
+
+        ql-20260904-016（会话首响优化）：``gzip_output=True`` 时 tarfile 用
+        ``w|gz`` 流式 gzip（响应侧配 ``Content-Encoding: gzip``）。实测 36MB
+        文本型 spec 树经 Docker Desktop localhost 端口转发 ~2.4MB/s，下载 15s+
+        打穿 daemon 30s fetch 超时（会话 f0f76381/a8f52057 两代实测同款 30.07s
+        失败）；gzip 后 ~6MB 回到秒级。消费方浏览器/undici/httpx 均按
+        Content-Encoding 透明解压，明文 tar 语义不变（路由按 Accept-Encoding
+        协商，不主动 gzip 不声明的客户端）。gzip 变体并按 (ws, spec_version)
+        缓存整包字节（见 _bundle_gzip_cache 模块注释）——命中路径跳过打包与
+        bind mount 逐文件读（实测 ~15-20s → 秒级）。
         """
         spec_ws = await self.get(workspace_id)
         spec_root = Path(spec_ws.spec_root)
@@ -826,10 +920,12 @@ class SpecWorkspaceService:
         spec_version = int(spec_ws.spec_version or 0)
         strategy = spec_ws.strategy
 
+        tar_mode = "w|gz" if gzip_output else "w|"
+
         def _produce(writer: _QueueBackedTarWriter) -> None:
             # ``w|`` 流式（不可 seek）模式：成员按序写入 writer（有界队列），
             # 消费端逐块取走——格式仍为默认 PAX（daemon/CLI 侧解析均已支持）。
-            with tarfile.open(fileobj=writer, mode="w|", bufsize=_BUNDLE_CHUNK_BYTES) as tar:
+            with tarfile.open(fileobj=writer, mode=tar_mode, bufsize=_BUNDLE_CHUNK_BYTES) as tar:
                 # 快照元数据成员（task-08）：generated_at 取打包时刻 UTC ISO；
                 # server 取 hub 对外 origin（多平台实例部署下可辨快照来源）。
                 meta = {
@@ -858,7 +954,21 @@ class SpecWorkspaceService:
                         continue
                     tar.add(path, arcname=str(rel), recursive=False)
 
-        return spec_root_abs, spec_version, _BundleTarStream(_produce)
+        if not gzip_output:
+            return spec_root_abs, spec_version, _BundleTarStream(_produce)
+
+        # gzip 变体：命中缓存整包直吐（零打包零 mount 读）；未命中流式构建 +
+        # 完整消费后回填缓存（断连半包不入缓存）。
+        cache_key = (workspace_id, spec_version)
+        cached = _bundle_gzip_cache_get(cache_key)
+        if cached is not None:
+            return spec_root_abs, spec_version, _ReplayBundleStream(cached)
+
+        return (
+            spec_root_abs,
+            spec_version,
+            _CachingBundleIterator(_BundleTarStream(_produce), cache_key),
+        )
 
     @staticmethod
     def _extract_spec_tar_to_staging(

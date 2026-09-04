@@ -488,3 +488,111 @@ class TestBundleStreamLeakWindow:
         assert thread is not None
         thread.join(timeout=5.0)
         assert not thread.is_alive()
+
+
+# ===========================================================================
+# Bundle gzip 协商传输（ql-20260904-016 会话首响优化）
+# ===========================================================================
+
+
+class TestBundleGzip:
+    """Accept-Encoding 含 gzip 时流式 gzip（w|gz + Content-Encoding），语义不变。
+
+    背景：36MB 文本 spec 树经 Docker Desktop localhost 端口转发 ~2.4MB/s，daemon
+    30s fetch 超时被打穿（会话 f0f76381 实证 pull 恒失败）。gzip 后 ~6MB 回秒级；
+    浏览器/undici/httpx 均按 Content-Encoding 透明解压，明文 tar 语义不变。
+    """
+
+    async def test_build_bundle_gzip_roundtrip_and_smaller(self, db_session, tmp_path) -> None:
+        import gzip as gzip_mod
+
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        (spec_root / "docs").mkdir(parents=True)
+        # 高度可压缩文本（真实 spec 树为 markdown/JSON 文本）
+        (spec_root / "docs" / "big.md").write_text(
+            "# spec\n" + "内容行\n" * 20000, encoding="utf-8"
+        )
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        service = SpecWorkspaceService(db_session)
+        _, _, plain_stream = await service.build_bundle(ws.id)
+        plain = b"".join(list(plain_stream))
+        _, _, gz_stream = await service.build_bundle(ws.id, gzip_output=True)
+        gz = b"".join(list(gz_stream))
+
+        # gzip magic（1f 8b）且显著小于明文
+        assert gz[:2] == b"\x1f\x8b"
+        assert len(gz) < len(plain) * 0.2, "文本树 gzip 后应缩到 20% 以下"
+
+        # 解压后与明文 tar 成员一致（快照元数据成员同样在）
+        with tarfile.open(fileobj=io.BytesIO(gzip_mod.decompress(gz)), mode="r:*") as tf:
+            gz_names = set(tf.getnames())
+        with tarfile.open(fileobj=io.BytesIO(plain), mode="r:*") as tf:
+            plain_names = set(tf.getnames())
+        assert gz_names == plain_names
+        assert "PLATFORM-BUNDLE.json" in gz_names
+        assert "docs/big.md" in gz_names
+
+    async def test_router_gzip_negotiation(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        (spec_root / "docs").mkdir(parents=True)
+        (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        # 显式带 gzip → Content-Encoding: gzip（httpx 透明解压后 content 仍是合法 tar）
+        resp_gz = await client.get(
+            f"/api/workspaces/{ws.id}/spec-workspace/bundle",
+            headers={**auth_headers, "accept-encoding": "gzip"},
+        )
+        assert resp_gz.status_code == 200, resp_gz.text
+        assert resp_gz.headers.get("content-encoding") == "gzip"
+        assert resp_gz.headers.get("vary") == "Accept-Encoding"
+        with tarfile.open(fileobj=io.BytesIO(resp_gz.content), mode="r:*") as tf:
+            assert "docs/A.md" in tf.getnames()
+
+        # identity → 明文 tar，无 Content-Encoding（老客户端零变化）
+        resp_plain = await client.get(
+            f"/api/workspaces/{ws.id}/spec-workspace/bundle",
+            headers={**auth_headers, "accept-encoding": "identity"},
+        )
+        assert resp_plain.status_code == 200, resp_plain.text
+        assert "content-encoding" not in resp_plain.headers
+        with tarfile.open(fileobj=io.BytesIO(resp_plain.content), mode="r:*") as tf:
+            assert "docs/A.md" in tf.getnames()
+
+    async def test_build_bundle_gzip_cached_on_second_call(self, db_session, tmp_path) -> None:
+        """ql-20260904-016：gzip 变体按 (ws, spec_version) 缓存——二次拉取命中字节
+        缓存（零打包零 bind mount 读），plain 变体不入缓存。"""
+        from app.modules.spec_workspace import service as spec_svc
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        (spec_root / "docs").mkdir(parents=True)
+        (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
+        await _make_spec_workspace(db_session, ws, spec_root, spec_version=3)
+
+        spec_svc._bundle_gzip_cache.clear()
+        service = spec_svc.SpecWorkspaceService(db_session)
+
+        _, _, s1 = await service.build_bundle(ws.id, gzip_output=True)
+        first = b"".join(list(s1))
+        # 完整消费后缓存应落位
+        assert (ws.id, 3) in spec_svc._bundle_gzip_cache
+
+        # 二次构建：命中缓存，字节与首次一致（generated_at 固化为首包时刻）
+        _, _, s2 = await service.build_bundle(ws.id, gzip_output=True)
+        second = b"".join(list(s2))
+        assert second == first
+
+        # plain 变体不缓存（内存边界：仅 gzip 入缓存）
+        n_before = len(spec_svc._bundle_gzip_cache)
+        _, _, _plain = await service.build_bundle(ws.id, gzip_output=False)
+        list(_plain)
+        assert len(spec_svc._bundle_gzip_cache) == n_before
+        assert all(k[0] == ws.id for k in spec_svc._bundle_gzip_cache)

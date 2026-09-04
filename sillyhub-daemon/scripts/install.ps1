@@ -15,6 +15,7 @@
 #      (node.exe absolute path fallback + %~dp0 relative bundle)
 #   5. Write config.json (server_url embedded + new runtime_id)
 #   6. Add bin dir to user PATH (setx, idempotent)
+#   6.5 Add ~/.sillyhub to Windows Defender exclusions (best-effort, ql-20260904-016)
 #   7. Verify sillyhub-daemon --version
 #   8. Print next steps (no auto start)
 #
@@ -315,6 +316,46 @@ function Set-Path {
   }
 }
 
+# -- 6.5 Windows Defender 排除目录（best-effort）──────────────────────────────────
+# 把 ~/.sillyhub 加入 Defender 排除（ql-20260904-016：spec 全量同步逐文件写盘在
+# 实机被杀软逐文件扫描放大 ~8ms/文件，数千文件累计数十秒，是会话首响延迟大头之一）。
+# 需管理员权限：当前会话不足时自动 UAC 提权尝试一次（用户可拒绝）；任何失败只
+# 提示手动命令，绝不阻塞安装主流程。无 Defender（第三方杀软/精简系统）静默跳过。
+function Set-DefenderExclusion {
+  $exclDir = Join-Path $env:USERPROFILE '.sillyhub'
+  if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) {
+    return
+  }
+  try {
+    Add-MpPreference -ExclusionPath $exclDir -ErrorAction Stop
+    Write-Ok "Defender exclusion added: $exclDir"
+    return
+  } catch {
+    # 当前会话非管理员 → 落到下方 UAC 提权尝试
+  }
+  $inner = "Add-MpPreference -ExclusionPath '$exclDir'"
+  try {
+    $proc = Start-Process powershell -Verb RunAs -WindowStyle Hidden -PassThru `
+      -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $inner
+    # UAC 应答带 120s 超时（WaitForExit(ms)）：无人值守安装（CI / irm|iex 后离开）
+    # 不因弹窗无人确认而无限挂起——超时先继续安装，用户稍后批准则排除仍会生效。
+    if ($proc.WaitForExit(120000)) {
+      if ($proc.ExitCode -eq 0) {
+        Write-Ok "Defender exclusion added (elevated): $exclDir"
+      } else {
+        Write-Warn "Defender exclusion failed (elevated exit=$($proc.ExitCode))"
+        Write-Host "  手动执行（管理员 PowerShell）: Add-MpPreference -ExclusionPath '$exclDir'"
+      }
+    } else {
+      Write-Warn "UAC 确认超时（120s），安装先行继续；稍后批准弹窗则排除仍会生效。"
+      Write-Host "  或手动执行（管理员 PowerShell）: Add-MpPreference -ExclusionPath '$exclDir'"
+    }
+  } catch {
+    Write-Warn "Defender exclusion needs admin (UAC declined?), 手动执行（管理员 PowerShell）:"
+    Write-Host "  Add-MpPreference -ExclusionPath '$exclDir'"
+  }
+}
+
 # -- 7. Verify --version ─────────────────────────────────────────────────────────
 function Invoke-Verify {
   Write-Info "Verifying sillyhub-daemon --version"
@@ -343,6 +384,7 @@ function Main {
   Write-CmdWrapper
   Save-Config
   Set-Path
+  Set-DefenderExclusion
   Invoke-Verify
 
   Write-Host ""

@@ -252,6 +252,7 @@ async def push_spec_sync(
 
 @router.get("/changes/-/spec-bundle")
 async def get_spec_bundle(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     auth: _write_auth,
 ) -> StreamingResponse:
@@ -284,20 +285,27 @@ async def get_spec_bundle(
     # 函数级 import 防模块加载环（对齐 service.py 透调 SpecWorkspaceService 惯例）。
     from app.modules.spec_workspace.service import SpecWorkspaceService
 
+    # ql-20260904-016（会话首响优化）：Accept-Encoding 协商 gzip（对齐 spec_workspace
+    # 的 /spec-workspace/bundle 端点）——CLI 直跑拉取同样受益于压缩传输。
+    accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
     _spec_root, spec_version, tar_stream = await SpecWorkspaceService(session).build_bundle(
-        scope.workspace_id
+        scope.workspace_id, gzip_output=accepts_gzip
     )
     # 2026-08-30 审计⑦：经 async 包装消费——断连/结束显式 close（starlette 1.1.0
     # 不调同步迭代器 close），阻塞段挪线程池不卡事件循环。
     from app.modules.spec_workspace.service import iter_bundle_stream
 
+    headers = {
+        "Content-Disposition": f'attachment; filename="spec-bundle-{scope.workspace_id}.tar"',
+        "X-Spec-Version": str(spec_version),
+    }
+    if accepts_gzip:
+        headers["Content-Encoding"] = "gzip"
+        headers["Vary"] = "Accept-Encoding"
     return StreamingResponse(
         iter_bundle_stream(tar_stream),
         media_type="application/x-tar",
-        headers={
-            "Content-Disposition": f'attachment; filename="spec-bundle-{scope.workspace_id}.tar"',
-            "X-Spec-Version": str(spec_version),
-        },
+        headers=headers,
     )
 
 

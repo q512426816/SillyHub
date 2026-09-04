@@ -29,6 +29,15 @@
 结果：assembler 72（新增 5 用例）+ sanitize 42 + helpers 25（新增 3 用例）= 146 绿 + normalize 59 绿 + tsc 0；page.test 仅 2 个已知预存触顶失败（stash 实证与本改动无关）；frontend.md/frontend.changelog.md 已同步
 审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：frontend）
 
+## ql-20260904-014-f4c6 | 2026-09-04 09:09:22 | 修复冒烟发现的两个 P1（quick-chat 端点 workspace 缺失派发失效
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/spec_workspace/tests/test_sync_incremental.py
+需求：修复冒烟发现的两个 P1（quick-chat 端点 workspace 缺失派发失效；spec-sync apply_ops 并发重复插入 500 拖死会话启动）。
+根因：①quick_chat 不传 workspace_id，placement.dispatch_to_daemon Branch 0 对 None 直接抛 NoOnlineDaemonError（2026-06 workspace 绑定模型后端点未跟上）；②apply_ops 对 pending_adds 走 ORM 裸 INSERT，归档移动场景 daemon/CLI 双端并发推同 path（read-check-insert TOCTOU）撞 ux_spec_manifest_ws_path 唯一约束整批 500。
+方案：①main.py quick_chat 解析用户首个 user_workspace_roles 成员关系作 dispatch workspace_id（UUID 参数 .hex 双方言安全；无成员关系失败原因中文化）；②pending_adds 改 pg_insert ON CONFLICT DO UPDATE 幂等 upsert（version 用 case 高位对齐保 SQLite 兼容）。
+结果：dcb027fcc 提交并推送；342 相关测试全绿（含新增并发回归用例）+ruff/format 过；调试中顺修 UPDATE 参数 UUID 绑定与 str(uuid) 连字符不匹配两个次生坑。
+
 ## ql-20260904-015-a399 | 2026-09-04 09:47:58 | 修复 backend/frontend/daemon 三处 CI 失败（mypy 5 错误 + 加载更早两断言 + session-plan-bash-even…
 状态：已完成
 关联变更：（无）
@@ -44,6 +53,39 @@
 方案：backend 纯类型修复不动逻辑；frontend 断言补 signal: expect.any(AbortSignal)；daemon 测试 harness 包真实 ClaudeEventNormalizer 保持喂 raw 消息的端到端口径，6 处 user 消息改标准 SDK 形状 message.content
 结果：backend mypy 834 文件 0 错 + 4 文件 pytest 74 过 + ruff/format 0；frontend page.test.tsx 29/29 绿 + tsc 0；daemon session-plan-bash-events 31/31 绿 + tsc 0
 审计：📝 文档欠账（D-8）：6 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260904-016-7cab | 2026-09-04 10:24:42 | 会话首响 46.5 秒全面优化（spec 同步并行化+原子替换、8 秒死等移除、bundle gzip 传输+服务端缓存、安装器 Defender 排除）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spec-sync.ts（extractTar 两段式并行写+tmp 原子交换+trash 后台清理+错误带内因）
+- sillyhub-daemon/src/hub-client.ts（getSpecBundle 超时 30s→120s（SPEC_BUNDLE_TIMEOUT_MS））
+- sillyhub-daemon/scripts/install.ps1（安装时加 ~/.sillyhub Defender 排除（UAC 提权 120s 超时不阻塞））
+- sillyhub-daemon/tests/spec-pull-swap.test.ts（新 8 用例覆盖交换语义）
+- backend/app/modules/daemon/session/service.py（create 两路径去掉 8s ready 死等）
+- backend/app/modules/spec_workspace/service.py（build_bundle gzip_output+gzip 字节缓存）
+- backend/app/modules/spec_workspace/router.py（bundle 端点 Accept-Encoding 协商）
+- backend/app/modules/platform_sync/router.py（CLI 拉取口子同款协商）
+- backend/app/modules/spec_workspace/tests/test_bundle_sync.py（gzip 往返/协商/缓存 3 用例）
+需求：会话首响 46.5 秒全面优化（spec 同步并行化+原子替换、8 秒死等移除、bundle gzip 传输+服务端缓存、安装器 Defender 排除）
+根因：pullSpecBundle 串行 rm+逐文件写经杀软放大约 30 秒、backend create 路径原地等 session ready 8 秒冷启动必超时、36MB 全树 tar 经 Docker 转发 15-30 秒打穿 daemon 30 秒 fetch 超时导致 pull 恒失败、后端每次冷打包经 bind mount 逐文件读 15-20 秒
+方案：daemon 侧 extractTar 两段式 16 并行写加 tmp 目录原子交换与后台清理、getSpecBundle 超时放宽 120 秒、install.ps1 安装时自动加 Defender 排除（UAC 提权带 120 秒应答超时）；backend 侧 create 两路径去掉 8 秒死等改立即发 SESSION_INJECT、bundle 双端点按 Accept-Encoding 协商 gzip 并按工作区与版本缓存 gzip 字节
+结果：E2E 实测 POST 8.2 秒降至 0.1-0.3 秒、pull 由 30 秒超时失败降至缓存命中约 1.5 秒（冷预热一次性约 41 秒后全命中）；新增 daemon 测试 8 例加 backend 测试 3 例、既有套件零回归、ruff 与 mypy 与 tsc 全过；本机 Docker 镜像已重建并重装 daemon 完成部署验证
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/hub-client.ts, sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts, sillyhub-daemon/tests/spec-pull-swap.test.ts
+
+## ql-20260904-017-28be | 2026-09-04 10:27:17 | daemon 会话创建凭证持久化——修复重启后 SDK 裸起 Not logged in
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/types.ts（CreateSessionInput 加 providerConfig）
+- sillyhub-daemon/src/interactive/session-manager.ts（state 记录（与并行 stale-running 改动同文件））
+- sillyhub-daemon/src/daemon.ts（create 透传（同上））
+- sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts（PERSIST-0/0b 用例）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引）
+需求：daemon 会话创建凭证持久化——修复重启后 SDK 裸起 Not logged in
+根因：claim 下发的 provider_config 只进 spawn env（内存），state.providerConfig 唯一赋值点是切换供应商——首次创建的会话凭证从不落盘 sessions.json（18 会话实证全无 providerConfig 键），daemon 重启后恢复链无凭证 + claude 隔离目录无登录态 → SDK 报 Not logged in（0 次 API 请求，被误读为远端 401）
+方案：types.ts CreateSessionInput 加 providerConfig 可选字段；session-manager _createInternal 建 state 条件展开记录（null 不写键，复用既有 snapshotPersistable 落盘 + restore 读回链）；daemon.ts _startInteractiveSession create 调用透传 execPayload.provider_config
+结果：config-switch 29 用例（新增 PERSIST-0/PERSIST-0b：create 带凭证落盘/不带不落键）+ pending-switch/profile/main-agent-mcp 41 用例全绿 + tsc 0；sillyhub-daemon.md 变更索引已同步；session-manager.ts/daemon.ts 混有并行会话 stale-running 改动未整体暂存（防夹带），提交需分离 hunk
 
 ## ql-20260904-018-16e4 | 2026-09-04 10:35:05 | 修 admin/organizations 树表子行断言 CI 抖动（研发部 getByText 扑空）
 状态：已完成
