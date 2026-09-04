@@ -243,8 +243,11 @@ stream-json SDK 帧集；codex 族 = app-server JSON-RPC 方法集）。若帧�
 
 8. [ ] **测试同步**：
    - `sillyhub-daemon/tests/interactive/provider-registry.test.ts`：用例 1
-     键集合断言（现 `'claude' | 'codex'`）与用例 5 `createDriver` 实例化
-     断言补 `xxx`；用例 3 的"现值锚点"按需补一行。
+     键集合断言**必改**——注册表加 `xxx` 键后
+     `expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude','codex'])`
+     这类集合断言**必然失败**（pi 接入实证：现值为
+     `['claude','codex','pi']`），不是"按需补"；用例 5 `createDriver` 实例化
+     断言与用例 3 的"现值锚点"同理补齐。
    - 三端 caps 对齐守护 `backend/app/modules/agent/tests/test_provider_caps_alignment.py`
      **自动覆盖**新 provider（源文件读取断言：键集/provider 集/逐值相等/
      未知全 false），无需改断言，跑一遍确认三端同步即可。
@@ -261,6 +264,22 @@ stream-json SDK 帧集；codex 族 = app-server JSON-RPC 方法集）。若帧�
     lease 永远 claimed（历史坑 ql-20260703-001）。
 
 11. [ ] 验证：跑本档相关测试 + 冒烟（§8）。
+
+> **步骤 10 补充（2026-09-04-provider-pi-onboarding Grill 实证）**：除
+> `normalizeProvider` 映射外，还有**三处硬编码引擎清单是必改点**，漏改时
+> 新 provider 虽注册但不可用/不可选：
+> 1. **装配行**：`sillyhub-daemon/src/cli.ts` 的 drivers 装配对象——
+>    SessionManager `_getDriver` 走 `deps.drivers` 注入而非 descriptor 的
+>    `createDriver` 工厂，cli.ts 硬编码 `{claude, codex}` 映射，新 provider
+>    需加 `xxx: new XxxDriver()` 一行（否则创建会话抛 UnsupportedProvider）；
+> 2. **前端引擎可选性白名单两处**：`frontend/src/components/sessions/
+>    pre-session-picker.tsx`（门户主路径）与 `frontend/src/components/daemon/
+>    runtime-session-helpers.tsx`（对话框路径）的硬编码集合需加 `xxx`
+>    （否则前端不列出该引擎）；
+> 3. **backend DTO Literal**：`backend/app/modules/daemon/schema.py`
+>    `InteractiveProviderLiteral = Literal["claude","codex"]`——POST
+>    /api/daemon/sessions 显式带 provider 字段的路径会 422（runtime_id 双
+>    入口可绕过，provider 由 runtime 记录解析；真机冒烟实证，F-1）。
 
 ### 4.3 族内差异微调点（事件契约复用）
 
@@ -390,6 +409,78 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
       自动覆盖。
 
 12. [ ] 验收：typecheck + 上述测试 + 冒烟（§8）。
+
+### 5.3 档C 完整案例锚：PI 接入（2026-09-04-provider-pi-onboarding）
+
+首个档C 实战的 12 步勾选回填（对照上方 §5.2 逐步，`pi 0.81.1` 真机 +
+Zhipu GLM-5.3 端到端实证，冒烟 10 项记录见变更目录 `smoke-result.md`）：
+
+1. [x] 协议调研：pi `docs/rpc.md` 词表实测（`prompt / steer / follow_up /
+   abort / new_session / switch_session / fork / set_model /
+   get_available_models / set_thinking_level / get_state / get_messages`；
+   响应按 `response.id` 关联 pending 命令）。**旗标语义修正**：resume 用
+   `--session <path|id>`——`--session-id` 是"指定新会话 id"不是 resume
+   （design 初稿笔误，以 CLI `args.js` 实读为准）。
+2. [x] 归一化器 `interactive/pi-events.ts`：`text_delta` 直通 text（pi 天然
+   逐 delta，无 Anthropic block 缓冲，不需要 is_partial/override）；thinking
+   内容块→thinking；`tool_execution_start/end`→tool_use/tool_result（call_id
+   天然配对）；`turn_end.message.usage`→usage-only 空事件（cacheRead→
+   cache_read / cacheWrite→cache_creation，批量 pi_json 已验证口径）；未知
+   事件降级 status 带原值不丢。
+3. [x] driver `interactive/pi-rpc-driver.ts`：JSONL 双向**严格 LF 逐字节分帧**
+   （禁 Node readline——U+2028/U+2029 会切坏帧，rpc.md 明示）；`agent_settled`
+   为 turn 收敛界（`turn_end` 仅 usage 载体——steer 队列存在时按 turn_end
+   收敛会误拆 run）；`get_state` 握手合成 `status/session_started`（rpc 模式
+   无 session 首帧；backend 从该事件提取 session_id pin resume 指针后**不落
+   行**——无行化是 backend 预期行为）；extension dialog 类 ui_request 默认回
+   `cancelled:true`（permission_dialog=false 下不答会死锁）；Windows pi.cmd
+   经 `resolveWindowsCmdShim` 解析（codex 先例）。
+4. [x] caps 单源：`PROVIDER_CAPS.pi` 8 键三态（resume/multimodal/thinking/
+   model_select=true；mcp/permission_dialog/edit_patch=false；subagent 见下）。
+5. [x] 注册表：`INTERACTIVE_PROVIDERS.pi`（family='pi_json'，capsOf 守卫）。
+6. [x] 探测表：pi 原已在 `PROVIDER_SPECS`（批量 pi_json 先例），本变更仅补
+   `minVersion: '0.81.0'`。
+7. [x] 批量层联动：`PROVIDER_TO_PROTOCOL` 已含 pi（pi_json 族正向映射既有，
+   零改动——守护测试只断言一致性）。
+8. [x] caps 镜像：backend `provider_caps.py` + frontend `provider-caps.ts`
+   同步，三端对齐守护自动覆盖。
+9. [x] 前端展示：`PROVIDER_META`/`MIN_VERSIONS` 落位；**额外必改**——引擎
+   可选性白名单两处（见档B 步骤 10 补充；Grill B-02）。
+10. [x] 零改动确认：SessionManager / daemon 事件上报链 / backend
+    `_persist_agent_event` / 前端 normalize 对 pi 全零改动（真机双轨落库
+    44 行/43 事件行实证）。**例外两处必改**：cli.ts drivers 装配行（Grill
+    B-01，`_getDriver` 走 deps.drivers 注入非 createDriver 工厂）；以及冒烟
+    抓出的两处白名单破口——backend DTO `InteractiveProviderLiteral`
+    （schema.py，显式 provider:'pi' 422，runtime_id 入口可绕过）与 daemon
+    sessions.json 载入白名单 `VALID_PROVIDERS`（session-store-persistence.ts，
+    pi 记录 load 即丢→daemon 本地恢复缺失，靠 backend auto-recover sweep
+    兜底收敛）——回修后此处应改写为"必改点"。
+11. [x] 测试：`pi-events.test.ts` + `pi-rpc-driver.test.ts` 新增；
+    `provider-registry.test.ts` 键集合断言改 `['claude','codex','pi']`；
+    54 文件 / 770 用例全绿。
+12. [x] 验收：真机冒烟 10 项全 PASS（创建/双轨/SSE partial/usage 实时/
+    inject/interrupt/resume 记忆连续性/thinking/claude 零回归/subagent）。
+
+**subagent 结论（task-06 实证 + task-07 真机复核，caps.subagent=false）**：
+vendored 扩展（`sillyhub-daemon/vendor/pi-extensions/subagent/`，pi 0.81.1
+examples 快照，`--extension <绝对路径>` 装载，bundle 随 daemon 分发）真机
+复核三点：① 无 agent 定义（~/.pi/agent/agents/ 空）→ `Unknown agent:
+"scout". Available agents: none.`（扩展在、工具在、定义缺——预期锚）；
+② 临时放置 agent md（模型指向本机可用 provider）后子代理真实 spawn
+（`pi -p --mode json` 子进程）执行 Bash 成功，汇报**聚合进父流 tool_result
+details**；③ 父事件流无 per-child 事件/归属字段可映射 → 按 §6.2 纪律
+caps.subagent 维持 false。扩展的 ExtensionAPI 面与 pi 版本强耦合，升级风险
+与 `SILLYHUB_PI_SUBAGENT_EXTENSION=off` 降级开关见 driver 源注释。
+
+**其它实测要点**（坑与口径，供下一个档C 复用）：
+- usage 仅 turn_end 报：轮中途 SSE tokens 事件携带上一快照值属预期（协议
+  行为，非 bug）；run 终值以 turn_end 快照为准。
+- interrupt 后 run 终态 completed/exit 0/usage 0/0（abort→settled→_onResult
+  正常收敛），DB 无 cancelled 区分标记——既有语义，产品层如需标记另行变更。
+- daemon 重启后 pi 会话恢复当前依赖 backend auto-recover sweep（suspended→
+  SESSION_RESUME 推送），daemon 本地 sessions.json 恢复被载入白名单挡住
+  （上见第 10 步）——修复 VALID_PROVIDERS 前勿把"重启后立即 inject 失败"
+  误判为 driver 缺陷。
 
 ---
 
