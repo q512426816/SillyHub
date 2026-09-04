@@ -99,9 +99,16 @@ export interface ProviderCaps {
  * - multimodal=true（原生）：rpc prompt images（ImageContent base64）；
  * - thinking=true（原生）：--thinking 七档 + set_thinking_level + thinking
  *   内容块；
- * - subagent=false（初始，桥接-示例扩展）：subagent/ 是 pi examples/ 示例扩展
- *   非内置（-e 需路径非名称），子代理事件无 per-child 归属——按 onboarding
- *   §6.2 纪律初始 false，R-02 实证后由 task-06 翻 true（本 task 不动）；
+ * - subagent=false（终值，task-06 实证）：pi subagent 是 examples/ 示例扩展
+ *   （task-06 已 vendor 进 sillyhub-daemon/vendor/pi-extensions/subagent/ 并经
+ *   driver --extension 装载——模型侧可用），但其子代理跑 `pi --mode json -p
+ *   --no-session` 子进程、消息聚合进 tool result details（实测事件流样本：
+ *   全流唯一 toolCallId=父 subagent 调用，子代理 4 条 messages 仅存在于
+ *   tool_execution_end.result.details.results[0]），父事件流无 per-child
+ *   归属（AgentEvent 的 parent_tool_use_id/subagent_type/depth 无从映射，
+ *   聚合快照为 replace 语义、产出 per-child 流需跨行差分合成，超出无状态
+ *   归一化「补映射」范畴）——团队派工 UI 依赖的归属链路不可落，如实 false
+ *   （§6.2 纪律 / R-02 / D-002@v1；证据与复测步骤见 onboarding §5.3 PI 案例锚）；
  * - permission_dialog=false（暂缺）：rpc 无审批命令，pi 权限门在 extension 层；
  * - edit_patch=false（暂缺）：pi edit 工具结果为 diff 文本无结构化 patch，
  *   前端 LCS 回退可用；
@@ -129,8 +136,8 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     edit_patch: false,
     model_select: true,
   },
-  // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 初始 false
-  // 遵守 §6.2 纪律，翻值只归 task-06）。
+  // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
+  // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3）。
   pi: {
     resume: true,
     mcp: false,

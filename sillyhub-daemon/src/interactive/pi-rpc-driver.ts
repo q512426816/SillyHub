@@ -1,7 +1,7 @@
 /**
  * interactive/pi-rpc-driver.ts —— PI rpc driver（`pi --mode rpc` JSONL 长驻子进程）。
- *（2026-09-04-provider-pi-onboarding task-02（通道+握手）+ task-03（高级语义）/
- * design §5.1 §7 / FR-01 / D-001@v1。）
+ *（2026-09-04-provider-pi-onboarding task-02（通道+握手）+ task-03（高级语义）
+ * + task-06（vendored subagent 扩展装载）/ design §5.1 §7 / FR-01 / D-001@v1。）
  *
  * 职责汇总（task-02 通道骨架 + task-03 高级语义）：
  *   1. spawn `pi --mode rpc --session-dir <daemon 隔离目录>`（exe 路径经
@@ -46,9 +46,11 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { fileURLToPath } from 'node:url';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { daemonStateDir } from '../config.js';
 import type { AgentEvent, AgentEventUsage } from '../types.js';
@@ -121,6 +123,74 @@ const EXTENSION_UI_FIRE_AND_FORGET_METHODS: ReadonlySet<string> = new Set([
  */
 export function piRpcSessionDir(): string {
   return join(daemonStateDir(), 'runs', 'pi-sessions');
+}
+
+// ── vendored subagent 扩展装载（task-06 / R-02 / D-002@v1） ──────────────────
+
+/**
+ * vendored subagent 扩展装载的环境变量开关（task-06 / R-02）：
+ *   - 绝对路径 → 显式指定扩展入口文件（最高优先级，不做存在性校验直接透传）；
+ *   - `off` / `0` / `false` / `disabled` / 空串 → 禁用装载；
+ *   - 未设置 → 默认候选定位（见 piVendoredSubagentExtensionPath）。
+ *
+ * 用途：pi 版本升级后扩展不兼容时的一键降级（vendored 拷贝与 pi 的
+ * ExtensionAPI 面强耦合，见版本脆弱性说明）。
+ */
+export const PI_SUBAGENT_EXTENSION_ENV = 'SILLYHUB_PI_SUBAGENT_EXTENSION';
+
+/** vendored subagent 扩展入口（相对路径段，join 到候选根上）。 */
+const VENDORED_SUBAGENT_ENTRY = join('vendor', 'pi-extensions', 'subagent', 'index.ts');
+
+/**
+ * 解析 vendored subagent 扩展入口的绝对路径（spawn `--extension` 实参来源）。
+ *
+ * 解析顺序（task-06「daemon 安装目录相对 / 环境变量」双路）：
+ *   1. 环境变量 `SILLYHUB_PI_SUBAGENT_EXTENSION`（见 PI_SUBAGENT_EXTENSION_ENV）；
+ *   2. 默认候选（existsSync 首个命中；都不存在 → null，spawn 不带
+ *      `--extension`——扩展是可选增强，缺文件不阻断会话）：
+ *      a. `<本模块目录>/vendor/pi-extensions/subagent/index.ts`
+ *         —— ncc bundle 布局（build-bundle.sh 把 vendor/ 拷到与
+ *         sillyhub-daemon.js 同目录；本模块经 ncc 内联后 import.meta.url
+ *         即 bundle 文件，mcp-server.js 伴生文件同款定位手法）；
+ *      b. `<本模块目录>/../../vendor/pi-extensions/subagent/index.ts`
+ *         —— dev 布局（dist/interactive/ → sillyhub-daemon/vendor/；
+ *         vitest 直跑 src/ 时同构）。
+ *
+ * **版本脆弱性（R-02 应对，验收项）**：vendored 拷贝是 pi 0.81.1
+ * `examples/extensions/subagent/` 的快照（`sillyhub-daemon/vendor/`，随
+ * daemon 版本钉住，不随 pi 升级漂移）。pi 的扩展加载器（dist/core/
+ * extensions/loader.js）经 jiti + virtualModules 把扩展内 `@earendil-works/*`
+ * / `typebox` 导入映射到**当前运行的 pi 实例**——拷贝无需自带 node_modules，
+ * 但 ExtensionAPI 面与已装 pi 版本强耦合：pi 大版本升级后扩展可能加载失败
+ * （pi 启动诊断报 extension 错误，官方提示 `-ne` 规避）。降级路径 =
+ * PI_SUBAGENT_EXTENSION_ENV=off；刷新流程见 vendor/pi-extensions/README.md。
+ *
+ * 注意：扩展装载只让模型侧拿到 `subagent` 工具（子代理是扩展自己 spawn 的
+ * `pi --mode json -p` 子进程，消息聚合进 tool result details，父事件流无
+ * per-child 归属）——与 PROVIDER_CAPS.pi.subagent（平台侧团队派工门控）
+ * 是两个独立命题，caps 取值以 task-06 实测结论为准。
+ *
+ * @returns 扩展入口绝对路径；未配置且候选均缺失（或显式 off）返回 null
+ */
+export function piVendoredSubagentExtensionPath(): string | null {
+  const raw = process.env[PI_SUBAGENT_EXTENSION_ENV]?.trim();
+  if (raw !== undefined) {
+    if (raw === '' || /^(off|0|false|disabled)$/i.test(raw)) return null;
+    return raw;
+  }
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(moduleDir, VENDORED_SUBAGENT_ENTRY),
+    join(moduleDir, '..', '..', VENDORED_SUBAGENT_ENTRY),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate)) return candidate;
+    } catch {
+      // existsSync 对非法路径（NUL 等）会抛——按未命中处理继续下一候选
+    }
+  }
+  return null;
 }
 
 /** executable 缺失/解析失败抛出。code 字段供 daemon / 测试识别。 */
@@ -366,6 +436,13 @@ export class PiRpcDriver implements InteractiveDriver {
     const args: string[] = ['--mode', 'rpc', '--session-dir', sessionDir];
     if (opts.model) args.push('--model', opts.model);
     if (opts.resume) args.push('--session', opts.resume);
+
+    // vendored subagent 扩展装载（task-06 / R-02）：`--extension <绝对路径>`
+    // （pi CLI args.js:120-122；-e 路径经 main.js:485 → additionalExtensionPaths
+    // 对全部 app mode 生效，含 rpc）。解析失败/显式 off → 不带参数（会话不受
+    // 影响）；脆弱性与刷新流程见 piVendoredSubagentExtensionPath 注释。
+    const subagentExtension = piVendoredSubagentExtensionPath();
+    if (subagentExtension) args.push('--extension', subagentExtension);
 
     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
 

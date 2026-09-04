@@ -1,5 +1,6 @@
 // tests/interactive/pi-rpc-driver.test.ts
-// 2026-09-04-provider-pi-onboarding task-02（核心生命周期）+ task-03（高级语义）。
+// 2026-09-04-provider-pi-onboarding task-02（核心生命周期）+ task-03（高级语义）
+// + task-06（vendored subagent 扩展装载 / R-02）。
 //
 // 依据：tasks/task-02.md / tasks/task-03.md、design.md §5.1（B-03/B-05）、
 // pi 包 docs/rpc.md（分帧:30-37 / prompt:43-78 / steer:80-100 / follow_up:102-122
@@ -39,7 +40,9 @@
 //  10. 子进程非正常退出 → onError 会话级 fail + turn error 收敛（不挂死）；
 //  11. 握手超时 → error 事件，会话通道仍可用；
 //  12. 容错：坏 JSON 行 / 无主 response 不崩不产事件；空输入跳过（E1）；
-//  13. U+2028 全链路（分帧 + 归一化）：含 U+2028 的 text_delta → 单条 text 事件。
+//  13. U+2028 全链路（分帧 + 归一化）：含 U+2028 的 text_delta → 单条 text 事件；
+//  14. task-06 vendored subagent 扩展装载：默认候选命中 → --extension 绝对路径；
+//       env off → 不装载；env 显式路径 → 透传（解析器单元 + spawn 参数面）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -65,9 +68,11 @@ import { spawn } from 'node:child_process';
 import { resolveWindowsCmdShim } from '../../src/cmd-shim.js';
 import {
   LfLineFramer,
+  PI_SUBAGENT_EXTENSION_ENV,
   PiExecutableNotFoundError,
   PiRpcDriver,
   piRpcSessionDir,
+  piVendoredSubagentExtensionPath,
   type PiRpcHandle,
   type PiStartOptions,
 } from '../../src/interactive/pi-rpc-driver.js';
@@ -88,11 +93,21 @@ import {
 /** 共享 tmp session-dir（构造注入，避免写真 daemon 状态目录）。 */
 let tmpSessionDir: string;
 
+/** task-06：保存 env 原值（beforeEach 统一 off，扩展专测内自行改写）。 */
+let prevSubagentExtEnv: string | undefined;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // task-06：默认关闭 vendored subagent 扩展装载——既有 spawn 参数面断言是
+  // 精确匹配（不含 --extension）；扩展装载行为在专属 describe 内定点打开。
+  prevSubagentExtEnv = process.env[PI_SUBAGENT_EXTENSION_ENV];
+  process.env[PI_SUBAGENT_EXTENSION_ENV] = 'off';
 });
 
 afterEach(async () => {
+  if (prevSubagentExtEnv === undefined) delete process.env[PI_SUBAGENT_EXTENSION_ENV];
+  else process.env[PI_SUBAGENT_EXTENSION_ENV] = prevSubagentExtEnv;
+  prevSubagentExtEnv = undefined;
   if (tmpSessionDir) {
     await rm(tmpSessionDir, { recursive: true, force: true }).catch(() => {});
     tmpSessionDir = '';
@@ -443,6 +458,76 @@ describe('spawn 参数面（design §5.1）', () => {
       if (prev === undefined) delete process.env.SILLYHUB_DAEMON_DIR;
       else process.env.SILLYHUB_DAEMON_DIR = prev;
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2.5 task-06：vendored subagent 扩展装载（R-02 / D-002@v1）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('vendored subagent 扩展装载（task-06 / R-02）', () => {
+  it('piVendoredSubagentExtensionPath 默认候选命中 vendored 拷贝（dev 布局）', () => {
+    delete process.env[PI_SUBAGENT_EXTENSION_ENV];
+    // worktree 内 vendor/pi-extensions/subagent/index.ts 真实存在（task-06 拷入），
+    // vitest 直跑 src/ → ../../vendor 候选命中；endsWith 断言跨平台（分隔符差异）。
+    const p = piVendoredSubagentExtensionPath();
+    expect(p).not.toBeNull();
+    expect(p!.endsWith(join('vendor', 'pi-extensions', 'subagent', 'index.ts'))).toBe(true);
+  });
+
+  it('env off/0/false/disabled/空串 → null（版本脆弱性降级开关）', () => {
+    for (const v of ['off', '0', 'false', 'disabled', 'OFF', '']) {
+      process.env[PI_SUBAGENT_EXTENSION_ENV] = v;
+      expect(piVendoredSubagentExtensionPath()).toBeNull();
+    }
+  });
+
+  it('env 显式路径 → 原样透传（不做存在性校验，最高优先级）', () => {
+    process.env[PI_SUBAGENT_EXTENSION_ENV] = join(tmpdir(), 'custom-subagent', 'index.ts');
+    expect(piVendoredSubagentExtensionPath()).toBe(
+      join(tmpdir(), 'custom-subagent', 'index.ts'),
+    );
+  });
+
+  it('spawn 参数面：默认解析命中 → --extension <绝对路径> 追加在基础参数后', async () => {
+    delete process.env[PI_SUBAGENT_EXTENSION_ENV];
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+    const driver = await makeDriver();
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    const extPath = piVendoredSubagentExtensionPath();
+    expect(extPath).not.toBeNull();
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/local/bin/pi',
+      ['--mode', 'rpc', '--session-dir', tmpSessionDir, '--extension', extPath!],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+
+  it('spawn 参数面：env off → 不带 --extension（beforeEach 默认态）', async () => {
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+    const driver = await makeDriver();
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    const [, args] = (spawn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect(args).toEqual(['--mode', 'rpc', '--session-dir', tmpSessionDir]);
+  });
+
+  it('spawn 参数面：env 显式路径 → --extension 透传该路径', async () => {
+    const custom = join(tmpdir(), 'my-subagent-ext', 'index.ts');
+    process.env[PI_SUBAGENT_EXTENSION_ENV] = custom;
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+    const driver = await makeDriver();
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/local/bin/pi',
+      ['--mode', 'rpc', '--session-dir', tmpSessionDir, '--extension', custom],
+      expect.anything(),
+    );
   });
 });
 

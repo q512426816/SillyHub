@@ -391,6 +391,61 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
 
 12. [ ] 验收：typecheck + 上述测试 + 冒烟（§8）。
 
+### 5.3 案例锚：PI（pi-coding-agent，2026-09-04）
+
+> 档C 首个实战（2026-09-04-provider-pi-onboarding）。本小节先落 task-06 的
+> **subagent 实证结论**；完整案例锚（§5.2 十二步勾选 + 冒烟对照 + 全部证据
+> 摘要）见 task-07 补全。
+
+#### subagent 实证结论（task-06 / R-02 / D-002@v1）
+
+**caps.subagent 终值 = false（聚合型，per-child 归属不可落）。**
+
+- **接入方式（模型侧可用，平台侧不可归属——两个独立命题）**：
+  - pi 的 subagent 不是内置能力，是 `examples/extensions/subagent/` 示例扩展
+    （`-e/--extension <路径>` 装载，pi CLI args.js:120-122）；
+  - 已 vendor 进 `sillyhub-daemon/vendor/pi-extensions/subagent/`（pi 0.81.1
+    快照；随 daemon 版本钉住防 pi 升级漂移），`scripts/build-bundle.sh` 会
+    拷进 bundle（mcp-server.js 同级伴生文件先例）；
+  - driver spawn 参数加 `--extension <vendored index.ts 绝对路径>`，运行时
+    定位：env `SILLYHUB_PI_SUBAGENT_EXTENSION`（显式路径 / `off` 降级）→
+    bundle 同目录 `vendor/` → dev `../../vendor/` 候选（见
+    `pi-rpc-driver.ts` 的 `piVendoredSubagentExtensionPath`）；**版本脆弱性**
+    ——扩展经 pi 的 jiti virtualModules 与已装 pi 的 ExtensionAPI 强耦合，
+    pi 大版本升级可能装载失败，降级开关 env=off、缺文件静默跳过，刷新流程
+    见 `vendor/pi-extensions/README.md`。
+- **静态实读**（examples/extensions/subagent/index.ts）：
+  - 子代理执行 = 每个 invocation spawn 独立子进程
+    `pi --mode json -p --no-session [--model] [--tools] [--append-system-prompt <tmp>] "Task: ..."`；
+  - 子进程 stdout 事件（`message_end` / `tool_result_end`）在扩展内解析并
+    累积进 `SingleResult.messages`，**不进父事件流**；工具返回
+    `details = {mode, agentScope, results[]}`（agent 名/exitCode/messages/
+    usage/stopReason 聚合快照）。
+- **动态实测**（2026-09-04 13:03，本机 pi 0.81.1 + 智谱 GLM；vendored 扩展
+  + rpc 模式 + prompt 指定 `agent="linecounter"` 查 package.json 行数）：
+  - 父事件流全程事件序列：`agent_start → message_update(thinking/toolcall) →
+    tool_execution_start:subagent → tool_execution_update:subagent ×4 →
+    tool_execution_end:subagent → … → agent_settled`；
+  - **全流唯一 toolCallId** = 父的 subagent 调用（`call_b4d4…`）——子代理的
+    read 工具调用与文本输出（4 条 messages：user / assistant(thinking+
+    toolCall:read) / toolResult / assistant(text)）仅存在于
+    `tool_execution_end.result.details.results[0].messages`；
+  - `tool_execution_update.partialResult` 为 replace 语义累积快照（每次
+    重带全量 results），子代理运行态只有 agent 名 + exitCode=-1 占位。
+- **为何不翻 true**：前端团队派工/子代理树依赖 AgentEvent 的
+  `parent_tool_use_id / subagent_type / depth` 归属三件套（claude-events.ts
+  同款映射前提是子代理事件以独立事件进父流）；pi 的聚合快照要产出该形状
+  需跨 update 差分合成的有状态机器，超出无状态归一化器「补映射」范畴
+  （design §7 契约），且合成事件非真实协议事实——§6.2「先实现后翻 true」
+  纪律下如实留 false。若未来 pi 原生提供 per-child 事件（或平台愿意接受
+  合成归属），重跑本节实测步骤翻值即可。
+- **复测步骤**（pi 升级后回归）：① 定义测试 agent（`~/.pi/agent/agents/
+  <name>.md`，frontmatter `name/description/tools`，不 pin model 用默认
+  provider）；② 起探针进程 `pi --mode rpc --session-dir <tmp> --extension
+  <vendored>/index.ts`，发 prompt 指定 `agent="<name>"` 委派一个读文件任务；
+  ③ 全量 stdout 行落文件，统计 distinct `toolCallId`（=1 即聚合型未变）并
+  检查 `details.results[].messages` 形状。
+
 ---
 
 ## 6. 能力矩阵维护规范

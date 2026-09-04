@@ -56,6 +56,18 @@ pnpm exec ncc build dist/mcp-server.js -o build/bundle/_mcp --no-source-map-regi
 mv build/bundle/_mcp/index.js build/bundle/mcp-server.js
 rm -rf build/bundle/_mcp
 
+# 2026-09-04-provider-pi-onboarding task-06（R-02）：vendored pi 扩展随 bundle
+# 分发。pi-rpc-driver 的 piVendoredSubagentExtensionPath 按「bundle 文件同目录
+# vendor/pi-extensions/...」候选定位（mcp-server.js 同级伴生文件先例）；不拷贝
+# 则 bundle 运行时找不到扩展 → --extension 静默跳过（subagent 工具不可用）。
+if [ -d vendor/pi-extensions ]; then
+    echo "==> [5/5] Copying vendored pi extensions → build/bundle/vendor/pi-extensions"
+    mkdir -p build/bundle/vendor
+    cp -r vendor/pi-extensions build/bundle/vendor/
+else
+    echo "==> [5/5] vendor/pi-extensions 不存在，跳过（未 vendor 的开发树）"
+fi
+
 echo ""
 echo "✅ Bundle ready:"
 echo "   build/bundle/index.js"
