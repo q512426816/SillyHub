@@ -151,7 +151,23 @@ describe('JsonSessionPersistence.load', () => {
     expect(records[0].sessionId).toBe('sess-1');
   });
 
-  it('单条记录 provider 非 claude/codex → 该条丢弃', async () => {
+  it('pi 记录载入保留（冒烟 F-2 回归——白名单缺 pi 曾致静默丢弃+重启恢复缺失）', async () => {
+    const piRec = { ...mkRecord({ sessionId: 's-pi' }), provider: 'pi' as never };
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [mkRecord(), piRec],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toHaveLength(2);
+    expect(records.some((r) => r.sessionId === 's-pi')).toBe(true);
+  });
+
+  it('单条记录 provider 非 claude/codex/pi → 该条丢弃', async () => {
     const bad = { ...mkRecord({ sessionId: 's2' }), provider: 'foo' as never };
     writeFileSync(
       file,
