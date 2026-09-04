@@ -253,10 +253,26 @@ def stub_placement(monkeypatch: pytest.MonkeyPatch):
     return _StubPlacement
 
 
+async def _mk_membership(db_session: AsyncSession, user_id, workspace_id=None):
+    """ql-20260904-014：quick-chat 现按用户首个 workspace 成员关系解析派发上下文
+    （此前 workspace 缺失时 dispatch Branch 0 直接失败）——stub 用例补最小成员行。"""
+    from app.modules.auth.model import UserWorkspaceRole
+
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=user_id,
+            workspace_id=workspace_id or uuid.uuid4(),
+            role_id=uuid.uuid4(),
+        )
+    )
+    await db_session.commit()
+
+
 async def test_post_prev_run_owner_resumes_session(
     client: AsyncClient, db_session, users, stub_placement
 ):
     a, a_tok, _b, _b_tok = users
+    await _mk_membership(db_session, a.id)
     prev = await _seed_quick_chat_run(db_session, a.id, session_id="sess-alice-123")
     resp = await client.post(
         "/api/daemon-chat",
@@ -272,6 +288,7 @@ async def test_post_prev_run_other_user_resume_none(
 ):
     """他人 prev_run_id 视为不存在：resume_session_id 置 None，不泄探（D-001）。"""
     a, _a_tok, _b, b_tok = users
+    await _mk_membership(db_session, _b.id)
     prev = await _seed_quick_chat_run(db_session, a.id, session_id="sess-alice-123")
     resp = await client.post(
         "/api/daemon-chat",

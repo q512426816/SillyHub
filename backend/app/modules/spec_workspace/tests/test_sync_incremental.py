@@ -1339,3 +1339,71 @@ class TestSoftDeleteRevival:
         quicklog = await self._get_row(db_session, ws.id, "quicklog/Q.md")
         assert quicklog is not None and quicklog.version == 2
         assert (spec_root / "quicklog" / "Q.md").read_text(encoding="utf-8") == "q2"
+
+
+class TestConcurrentDuplicateAddUpsert:
+    """ql-20260904-014（P1）：并发/陈旧基线重复 add 的幂等收敛。
+
+    归档移动场景下 daemon 与 CLI 双端可并发推送指向同一目标 path 的
+    add/rename（双方 load manifest 时都未见过对方未提交的行，read-check-insert
+    TOCTOU）——裸 INSERT 撞 ux_spec_manifest_ws_path 整批 500，daemon
+    interactive spec pull 超时会话启动拖死。修复为 ON CONFLICT 幂等 upsert
+    后：并发重复 add 两请求都成功、无 500、终态恰一行且版本单调。
+    """
+
+    async def test_concurrent_same_path_add_no_integrity_error(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        import asyncio
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        payload = {
+            "ops": [
+                _op(
+                    "add",
+                    "docs/race.md",
+                    base_version=0,
+                    content=_b64("# race"),
+                    hash="h-race",
+                )
+            ]
+        }
+
+        # 两客户端并发同 path add（独立 session，模拟 daemon 与 CLI 双端）
+        results = await asyncio.gather(
+            client.post(
+                f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+                headers=auth_headers,
+                json=payload,
+            ),
+            client.post(
+                f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+                headers=auth_headers,
+                json=payload,
+            ),
+            return_exceptions=True,
+        )
+
+        for r in results:
+            assert not isinstance(r, BaseException), r
+            # 修复前：后提交方 IntegrityError → 500；修复后：upsert 收敛，双方 200
+            assert r.status_code == 200, r.text
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == ws.id,
+                        SpecFileManifest.path == "docs/race.md",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].version >= 1
+        assert rows[0].content_hash == hashlib.sha256(b"# race").hexdigest()

@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2057,8 +2057,46 @@ class SpecWorkspaceService:
             # 此刻才打开，紧接 commit，事务窗口毫秒级）——全部写仍是单事务。
             for stale in pending_deletes:
                 await self._session.delete(stale)
-            for new_row in pending_adds:
-                self._session.add(new_row)
+            # ql-20260904-014（P1）：pending_adds 原走 ORM session.add 裸 INSERT——
+            # 归档移动等场景下 daemon/CLI 双端基线偏斜会推 add/rename 指向服务器
+            # 已存在的 path（in-memory manifest_by_path 未含并发已插入的行），
+            # 撞 ux_spec_manifest_ws_path 唯一约束整批 500 → daemon interactive
+            # spec pull 超时会话启动拖死。改 ON CONFLICT 幂等 upsert：冲突时按
+            # 版本高位对齐（case 便携实现）（内容已落盘，清单跟随），陈旧基线重放变 no-op 收敛。
+            if pending_adds:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                add_stmt = pg_insert(SpecFileManifest).values(
+                    [
+                        {
+                            "id": r.id,
+                            "workspace_id": r.workspace_id,
+                            "path": r.path,
+                            "content_hash": r.content_hash,
+                            "version": r.version,
+                            "exists": r.exists,
+                            "platform_deleted": r.platform_deleted,
+                            "updated_at": r.updated_at,
+                        }
+                        for r in pending_adds
+                    ]
+                )
+                add_stmt = add_stmt.on_conflict_do_update(
+                    index_elements=["workspace_id", "path"],
+                    set_={
+                        "content_hash": add_stmt.excluded.content_hash,
+                        "version": case(
+                            (
+                                add_stmt.excluded.version > SpecFileManifest.version,
+                                add_stmt.excluded.version,
+                            ),
+                            else_=SpecFileManifest.version,
+                        ),
+                        "exists": True,
+                        "updated_at": add_stmt.excluded.updated_at,
+                    },
+                )
+                await self._session.execute(add_stmt)
             await self._session.commit()
         finally:
             # task-03 / R-02：终态回写兜底（含 422 中断路径——已处理计数最终准确）。

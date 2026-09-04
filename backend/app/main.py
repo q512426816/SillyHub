@@ -539,15 +539,39 @@ def create_app() -> FastAPI:
             await session.commit()
 
             placement = RunPlacementService(session)
+            # ql-20260904-014（P1）：quick-chat 不带 workspace 上下文，而
+            # dispatch_to_daemon 对 workspace_id=None 直接抛 NoOnlineDaemonError
+            # （placement.py Branch 0）——端点自 2026-06 workspace 绑定模型起结构性
+            # 失效（run 恒 failed，误报「No online daemon runtime found」）。修复：
+            # 解析用户首个有成员关系的 workspace 作派发上下文；无成员关系时给
+            # 明确中文失败原因。
+            fail_reason = "No online daemon runtime found"
             try:
-                lease_id = await placement.dispatch_to_daemon(
-                    run_id,
-                    user.id,
-                    provider=provider,
-                    model=model,
-                    prompt=prompt,
-                    resume_session_id=resume_session_id,
-                )
+                ws_row = (
+                    await session.execute(
+                        sa_text(
+                            "SELECT uwr.workspace_id FROM user_workspace_roles uwr "
+                            "WHERE uwr.user_id = :uid "
+                            "ORDER BY uwr.granted_at NULLS LAST LIMIT 1"
+                        ),
+                        # SQLite/PG 双方言安全：Uuid 列以 32 位 hex 存储（同 run 插入
+                        # 的 run_id.hex 先例），str(uuid) 带连字符在 SQLite 不命中。
+                        {"uid": user.id.hex},
+                    )
+                ).first()
+                if ws_row is None:
+                    lease_id = None
+                    fail_reason = "当前账号未加入任何工作区，无法发起快捷聊天。"
+                else:
+                    lease_id = await placement.dispatch_to_daemon(
+                        run_id,
+                        user.id,
+                        workspace_id=ws_row[0],
+                        provider=provider,
+                        model=model,
+                        prompt=prompt,
+                        resume_session_id=resume_session_id,
+                    )
             except Exception:
                 await session.rollback()
                 lease_id = None
@@ -558,10 +582,10 @@ def create_app() -> FastAPI:
                     await session.execute(
                         sa_text(
                             "UPDATE agent_runs SET status='failed', "
-                            "output_redacted='No online daemon runtime found' "
+                            "output_redacted=:reason "
                             "WHERE id=:id"
                         ),
-                        {"id": run_id},
+                        {"id": run_id.hex, "reason": fail_reason},
                     )
                     await session.commit()
                 except Exception:
