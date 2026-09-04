@@ -514,6 +514,15 @@ const DEFAULT_IDLE_SCAN_SEC = 60;
  */
 const DEFAULT_MAX_ACTIVE_SESSIONS = 20;
 
+/**
+ * 坑 subagent-write-channel（2026-09-03 实证）：inject 的 stale-running 自愈
+ * （>60s 无 result 强翻 active）误伤仍活着但安静的长 turn 时，写通道宽限窗——
+ * 窗内（active + currentRunId 仍在 + staleRunResetAt 新鲜）写类工具调用放行。
+ * 60min 覆盖实测事故的 30 分钟封锁全程；误翻源头若真死（SDK query 挂死）本就
+ * 不会有工具调用进来，宽限不产生额外风险。
+ */
+const STALE_RUN_WRITE_GRACE_MS = 60 * 60_000;
+
 export class SessionManager {
   /** 内存 SessionStore。Wave1/2 内存态，daemon 重启丢失（D-003）。 */
   private readonly _store = new Map<string, SessionState>();
@@ -1091,6 +1100,54 @@ export class SessionManager {
    * 与 _buildCanUseToolCallback 共享同一套 fail-closed 语义（resolver.register 内部
    * send 失败/signal aborted/5min 超时全 deny）。供 Codex driver 与未来 Claude helper 重构复用。
    */
+  /**
+   * 写通道守卫（坑 subagent-write-channel，2026-09-03 实证 30 分钟写通道封锁）：
+   * _requestPermission / _buildCanUseToolCallback 共用的 not-running 判定。
+   *
+   * 三态：
+   *   - null = 放行继续正常审批流（running + currentRunId；或 stale-flip 宽限窗内）；
+   *   - deny 对象 = fail-closed（含诊断上下文：status/currentRunId/stale 翻转距今/
+   *     lastActiveAt 距今——2026-09-03 事故排查时裸文案零线索，触发条件至今不明）。
+   *
+   * stale-flip 宽限（误翻不封锁写通道）：inject 的 >60s 无 result 自愈会把仍活着
+   * 但安静的长 turn 强翻 active 且保留 currentRunId（正常 result 收尾才清）——
+   * 「active + currentRunId + staleRunResetAt 在宽限窗内」时 SDK turn 很可能未死，
+   * 写调用放行；误翻是启发式猜测，写通道不该被猜测封锁。SDK 正常结束后不会调
+   * canUseTool，正常收尾路径（active + currentRunId=undefined）不受宽限影响。
+   */
+  private _writeChannelGuardDeny(
+    state: SessionState | undefined,
+    toolName: string,
+  ): { behavior: 'deny'; message: string } | null {
+    if (!state) {
+      return {
+        behavior: 'deny',
+        message: `session state missing (daemon restart?) — tool "${toolName}" denied; retry in a new turn`,
+      };
+    }
+    if (state.status === 'running' && state.currentRunId) return null;
+    const inGrace =
+      state.status === 'active' &&
+      !!state.currentRunId &&
+      !!state.staleRunResetAt &&
+      Date.now() - state.staleRunResetAt < STALE_RUN_WRITE_GRACE_MS;
+    if (inGrace) return null;
+    const parts = [
+      `status=${state.status}`,
+      `currentRunId=${state.currentRunId ? 'set' : 'unset'}`,
+      state.staleRunResetAt
+        ? `staleRunReset=${Math.round((Date.now() - state.staleRunResetAt) / 1000)}s ago`
+        : null,
+      `lastActive=${Math.round((Date.now() - state.lastActiveAt) / 1000)}s ago`,
+    ].filter(Boolean);
+    return {
+      behavior: 'deny',
+      message:
+        `session not in running turn (${parts.join(', ')}) — tool "${toolName}" denied. ` +
+        'If this turn is actually still running (long quiet tool), the >60s-silent auto-reset may have misfired; wait or continue in a new turn.',
+    };
+  }
+
   private async _requestPermission(input: {
     sessionId: string;
     toolName: string;
@@ -1100,9 +1157,12 @@ export class SessionManager {
     isUserInputKind?: boolean;
   }): Promise<CanUseToolDecision> {
     const state = this._store.get(input.sessionId);
-    // session 非 running / 无 currentRunId → fail-closed deny。
-    if (!state || state.status !== 'running' || !state.currentRunId) {
-      return { behavior: 'deny', message: 'session not in running turn' };
+    // session 非 running / 无 currentRunId → fail-closed deny（stale-flip 宽限窗内放行）。
+    const guardDeny = this._writeChannelGuardDeny(state, input.toolName);
+    if (guardDeny) return guardDeny;
+    if (!state || !state.currentRunId) {
+      // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空
+      return { behavior: 'deny', message: `session not in running turn — tool "${input.toolName}" denied` };
     }
     const runId = state.currentRunId;
     // D-006：askUserOnly=true 且非用户输入类 → allow-through（scan 场景普通工具自动推进）。
@@ -1393,6 +1453,14 @@ export class SessionManager {
       // 本任务闭合 config 快照持久化链路）。
       ...(input.systemPrompt !== undefined
         ? { systemPrompt: input.systemPrompt }
+        : {}),
+      // ql-20260904-017：会话级供应商凭证同款闭合——claim 下发的 provider_config
+      // 原本只进 spawn env（内存），daemon 重启后 sessions.json 无凭证、恢复出的
+      // SDK 裸起 "Not logged in"（会话 2f08b5da 实证）。记入 state.providerConfig
+      // → 既有 snapshotPersistable 落盘 + restore 读回链生效。null/undefined（本机
+      // 默认）不写键，与切换供应商链的语义一致。
+      ...(input.providerConfig != null
+        ? { providerConfig: input.providerConfig }
         : {}),
     };
     this._store.set(input.sessionId, state);
@@ -2081,13 +2149,13 @@ export class SessionManager {
       options?: { signal?: AbortSignal },
     ): ReturnType<CanUseToolFn> => {
       const state = this._store.get(sessionId);
-      // state 不存在 / 非 running turn / 无 currentRunId → fail-closed deny。
-      if (
-        !state ||
-        state.status !== 'running' ||
-        !state.currentRunId
-      ) {
-        return { behavior: 'deny', message: 'session not in running turn' };
+      // state 不存在 / 非 running turn / 无 currentRunId → fail-closed deny（stale-flip
+      // 宽限窗内放行——见 _writeChannelGuardDeny，坑 subagent-write-channel）。
+      const guardDeny = this._writeChannelGuardDeny(state, toolName);
+      if (guardDeny) return guardDeny;
+      if (!state || !state.currentRunId) {
+        // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空
+        return { behavior: 'deny', message: `session not in running turn — tool "${toolName}" denied` };
       }
       const runId = state.currentRunId;
       // Claude CLI 经 --permission-prompt-tool stdio 对 allow 分支做 Zod 运行时校验，
@@ -2807,6 +2875,12 @@ export class SessionManager {
     // 超时阈值 60s：正常 turn 可跑几分钟，但 result 事件（含长时间思考的
     // heartbeat）不会间隔 60s 无任何回调——超时说明 SDK 通道已断。
     // 强制重置为 active 让本条 inject 直接消费，自愈死锁。
+    //
+    // 坑 subagent-write-channel（2026-09-03 实证）：该启发式会误伤「仍活着但安静」
+    // 的长 turn（长时间无流式回调的工具执行）——翻转后旧 turn 的写类工具调用全撞
+    // "session not in running turn"（30 分钟级封锁，turn 真正结束才恢复）。翻转时
+    // 记 staleRunResetAt 且不清 currentRunId（正常 result 收尾才清）：写通道守卫据此
+    // 在宽限窗内放行（见 _writeChannelGuardDeny）。
     if (
       state.status === 'running' &&
       Date.now() - state.lastActiveAt > 60_000
@@ -2814,10 +2888,12 @@ export class SessionManager {
       // eslint-disable-next-line no-console
       console.warn(
         '[session-manager] inject: stale running state detected (>60s no result), ' +
-          'resetting to active. Possible backend restart while turn was running.',
+          'resetting to active. Possible backend restart while turn was running. ' +
+          '(write-channel grace armed: staleRunResetAt recorded; quiet long turns stay writable)',
         { sessionId, lastActiveAt: state.lastActiveAt },
       );
       state.status = 'active';
+      state.staleRunResetAt = Date.now();
       // 清理可能挂起的 pending 计数（旧 turn 的排队消息已无意义）。
       this._pendingInjectCount.delete(sessionId);
     }

@@ -820,6 +820,38 @@ describe('task-08 / reloadWithConfig Codex 路径（NG-02：人格不注入）',
 // ── (5) 持久化恢复：config 快照落盘 + 旧 sessions.json 容错 ────────────────────
 
 describe('task-08 / 持久化 config 快照（design §5 Wave2 / §9）', () => {
+  it('PERSIST-0: create 带 providerConfig（claim 首次下发）→ state 记录并随 snapshotPersistable 落盘（ql-20260904-017）', async () => {
+    // 会话 2f08b5da 实证回归形态：claim 下发的 provider_config 原本只进 spawn env
+    // （内存），sessions.json 从无凭证 → daemon 重启恢复的 SDK 裸起
+    // "Not logged in · Please run /login"。create 侧记录后落盘链生效。
+    const mock = makeMockClaudeDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    const cfg = newProviderConfig('https://glm.example.com');
+    await sm.create({ ...BASE_INPUT, providerConfig: cfg });
+    mock.emitMessage(systemInitMessage('sdk-sess-p0'));
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+
+    const records = sm.snapshotPersistable();
+    expect(records).toHaveLength(1);
+    expect(records[0].providerConfig).toEqual(cfg);
+  });
+
+  it('PERSIST-0b: create 不带 providerConfig（本机默认）→ 不落键（零回归）', async () => {
+    const mock = makeMockClaudeDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT });
+    mock.emitMessage(systemInitMessage('sdk-sess-p0b'));
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+
+    const records = sm.snapshotPersistable();
+    expect(records).toHaveLength(1);
+    expect(records[0].providerConfig).toBeUndefined();
+  });
+
   it('PERSIST-1: reloadWithConfig 后 snapshotPersistable 带 systemPrompt + providerConfig', async () => {
     // Arrange
     const mock = makeMockClaudeDriver();

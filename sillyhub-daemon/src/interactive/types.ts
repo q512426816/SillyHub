@@ -186,6 +186,14 @@ export interface SessionState {
   currentRunId?: string;
   /** 当前 turn 状态：active=空闲可接 inject，running=turn 执行中。 */
   status: SessionStatus;
+  /**
+   * 坑 subagent-write-channel（2026-09-03 实证 30 分钟写通道封锁）：inject 的
+   * stale-running 自愈（>60s 无 result 强翻 running→active）发生时刻。正常 result
+   * 收尾会清 currentRunId，此翻转不清——「active + currentRunId 仍在 + 本时间戳在
+   * 宽限窗内」= turn 可能仍活着（误翻是启发式猜测），写类工具调用放行不封锁。
+   * 仅内存态，不参与持久化语义。
+   */
+  staleRunResetAt?: number;
   /** 最后活动时间（D-004 空闲 30min 回收，task-07 实现）。 */
   lastActiveAt: number;
   /** 固定 cwd（resume 还原用，spike D3）。driver.start 必须用 state.cwd。 */
@@ -388,6 +396,15 @@ export interface CreateSessionInput {
    * 裸 process.env（向后兼容 task-04）。**仅本地内存**，禁止序列化/落盘/回传。
    */
   env?: NodeJS.ProcessEnv;
+  /**
+   * ql-20260904-017：本次 lease 下发的会话级供应商配置（backend claim payload 的
+   * provider_config，结构同 reloadWithProvider）。daemon 侧 spawn env 仍由
+   * ``_startInteractiveSession`` 构造（env 仅内存），本字段只负责把凭证记入
+   * ``state.providerConfig`` → sessions.json 落盘（snapshotPersistable 既有链），
+   * 防 daemon 重启后恢复会话凭证丢失（SDK 裸起 "Not logged in"，会话 2f08b5da
+   * 实证）。undefined/null（本机默认）→ 不写键（零回归）。
+   */
+  providerConfig?: ProviderConfig | null;
   /**
    * D-002/D-006（task-02）：provider-neutral executable path。
    * codex session 由 daemon 用 `_agentPaths.get('codex')` 填；claude session 不填

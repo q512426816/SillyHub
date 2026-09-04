@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Header, Query
+from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -77,6 +77,7 @@ async def get_spec_workspace(
 @router.get("/spec-workspace/bundle")
 async def download_spec_bundle(
     workspace_id: uuid.UUID,
+    request: Request,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
 ) -> StreamingResponse:
@@ -89,21 +90,33 @@ async def download_spec_bundle(
     §7.3）：响应头追加 ``X-Spec-Version``（= ``spec_ws.spec_version``），tar 顶层
     含内存生成的 ``PLATFORM-BUNDLE.json`` 快照元数据（service.build_bundle）——
     持包方离线即可辨快照新旧，无需解包对账。
+
+    ql-20260904-016（会话首响优化）：客户端 ``Accept-Encoding`` 含 gzip 时流式
+    gzip 传输（``w|gz`` + ``Content-Encoding: gzip``）——36MB 文本 spec 树压到
+    ~6MB，daemon 拉取从 15s+（打穿 30s fetch 超时）回到秒级；浏览器/undici/
+    httpx 均透明解压，明文 tar 语义与下载文件名不变。
     """
     service = SpecWorkspaceService(session)
-    spec_root, spec_version, tar_stream = await service.build_bundle(workspace_id)
+    accepts_gzip = "gzip" in request.headers.get("accept-encoding", "")
+    spec_root, spec_version, tar_stream = await service.build_bundle(
+        workspace_id, gzip_output=accepts_gzip
+    )
     # 2026-08-30 审计⑦：经 async 包装消费——断连/结束显式 close（starlette 1.1.0
     # 不调同步迭代器 close），阻塞段挪线程池不卡事件循环。
     from app.modules.spec_workspace.service import iter_bundle_stream
 
+    headers = {
+        "Content-Disposition": f'attachment; filename="spec-bundle-{workspace_id}.tar"',
+        "X-Spec-Root": spec_root,
+        "X-Spec-Version": str(spec_version),
+    }
+    if accepts_gzip:
+        headers["Content-Encoding"] = "gzip"
+        headers["Vary"] = "Accept-Encoding"
     return StreamingResponse(
         iter_bundle_stream(tar_stream),
         media_type="application/x-tar",
-        headers={
-            "Content-Disposition": f'attachment; filename="spec-bundle-{workspace_id}.tar"',
-            "X-Spec-Root": spec_root,
-            "X-Spec-Version": str(spec_version),
-        },
+        headers=headers,
     )
 
 

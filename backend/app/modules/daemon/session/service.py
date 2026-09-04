@@ -2162,13 +2162,13 @@ class SessionService:
         # task-06: WS Hub routes by daemon_instance_id; resolve from the
         # provider runtime_id carried on the dispatch.
         daemon_id = await _resolve_daemon_id_for_runtime(self._session, dispatch.runtime_id)
-        # 等 daemon session ready（create 完成）再发首 prompt SESSION_INJECT，避免在
-        # daemon _startInteractiveSession 完成前到被 _routeSessionControl session_not_found
-        # 丢（/model 空白根因）。同 inject_session（task-08）逻辑；超时 fallback 仍发
-        # （兼容不上报 ready 的旧 daemon）。
-        ready = await get_session_readiness().wait(session.id, timeout=8)
-        if not ready:
-            log.warning("session_ready_timeout", session_id=str(session.id))
+        # ql-20260904-016（会话首响优化）：不再原地 await ready（原 timeout=8 死等——
+        # 新会话 daemon create 全链实机 3~31s，冷启动必然超时，POST /api/daemon/sessions
+        # 白挂 8s，实测会话 f0f76381 首响 46.5s 中占 8.2s）。改为立即发 SESSION_INJECT，
+        # 早到安全由 daemon 侧三重兜底承接：①inject 早到 park 窗口 60s
+        # （daemon.ts _awaitSessionThenRoute，ql-20260831-006）；②控制指令三段式
+        # （落库 pending + WS 推送 + daemon 重连补拉，task-04 design A2）；③daemon
+        # create 的 firstPrompt 10s fallback（session-manager _pendingFirstPrompt）。
         control_ok = False
         if daemon_id is not None:
             _create_inject_payload = {
@@ -2787,14 +2787,11 @@ class SessionService:
                 },
             )
 
-        # best-effort SESSION_INJECT 携带首条消息（对齐 create_session :1022-1065：
-        # 唤醒已信号 lease，控制消息让 daemon SessionManager 拿到确切首 prompt；
-        # 等 session ready 再发，超时 fallback 仍发兼容不上报 ready 的旧 daemon）。
-        # task-04（design A2）：走控制指令三段式——WS 失败落库 pending 待补拉。
+        # best-effort SESSION_INJECT 携带首条消息（对齐 create_session 主路径：
+        # task-04（design A2）三段式——WS 失败落库 pending 待补拉）。
+        # ql-20260904-016：与 create_session 同步去掉 timeout=8 的原地 ready 死等
+        # ——早到 inject 由 daemon 60s park 窗口 + 补拉 + firstPrompt fallback 兜底。
         daemon_id = await _resolve_daemon_id_for_runtime(self._session, dispatch.runtime_id)
-        ready = await get_session_readiness().wait(session.id, timeout=8)
-        if not ready:
-            log.warning("session_ready_timeout", session_id=str(session.id))
         control_ok = False
         if daemon_id is not None:
             inject_payload = {

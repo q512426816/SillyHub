@@ -21,8 +21,8 @@
 import { createHash } from 'node:crypto';
 import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join, relative, isAbsolute, dirname, resolve, sep as pathSep } from 'node:path';
-import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile } from 'node:fs/promises';
+import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
+import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile, rename } from 'node:fs/promises';
 import type { HubClient } from './hub-client.js';
 import type { FileOp } from './hub-client.js';
 import { daemonStateDir } from './config.js';
@@ -191,16 +191,117 @@ export async function pullSpecBundle(
     throw e; // 其他 status / 网络错透传
   }
 
-  // 覆盖语义：先 rm -rf（容忍不存在），再解包。
-  // Windows EBUSY 降级：忽略 rm 错误，仍 mkdir + 解包（容忍残留，agent 侧覆盖读取）。
-  // R-01：仅 pull 路径走 rm（repo-native 已 return 不到此，junction 不会被 rm）。
+  // ql-20260904-016（会话首响优化）：tmp 目录解包 + 目录交换，替代原「rm -rf 旧缓存
+  // + 原地逐文件解包」。实测（会话 f0f76381，Windows）：3563 文件 / 30MB 全量拉取
+  // 串行 rm+写盘 ~30s，占交互会话首响延迟 2/3。三处改进：
+  //   1) extractTar 有界并行写（16 并发）——原逐文件 await 串行，Windows 每文件
+  //      ~8ms 延迟（含杀软扫描）×3563 ≈ 28s 是主瓶颈；
+  //   2) 解包到同级 tmp 目录后原子交换（旧目录改名让位 + tmp 改名顶上，改名瞬时），
+  //      旧目录 3563 文件的删除成本移出关键路径转后台异步清理；
+  //   3) 解包失败旧缓存完好无损（原实现 rm 先行，坏 tar 会把缓存打成残缺半解包）。
+  // 交换失败（Windows EBUSY 等句柄占用重试仍败）→ 退回原地解包（旧语义：容忍残留
+  // 覆盖写，agent 侧覆盖读取），行为不劣于原实现。
+  const parent = dirname(specDir);
+  const base = basename(specDir);
+  const tmpDir = join(parent, `${base}.tmp-${process.pid}-${Date.now()}`);
+  await sweepStalePullScraps(parent, base);
   try {
-    await rm(specDir, { recursive: true, force: true });
+    await extractTar(tarBuf, tmpDir);
   } catch (e) {
-    console.warn('spec_sync: spec_dir_rm_failed', specDir, e);
+    // 坏 tar：tmp best-effort 清理，旧缓存原样保留，透传给调用方（R-03 容错：
+    // pull 失败不阻塞 session 启动）。
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    throw e;
   }
-  await extractTar(tarBuf, specDir);
+  try {
+    await swapExtractedDir(tmpDir, specDir);
+  } catch (e) {
+    console.warn('spec_sync: swap_failed_fallback_inplace_extract', wsId, specDir, e);
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    await extractTar(tarBuf, specDir);
+  }
   return specDir;
+}
+
+/**
+ * ql-20260904-016：把解包完成的 tmp 目录交换到 specDir 位置（pullSpecBundle 用）。
+ *
+ * - specDir 不存在（首拉）→ 直接 rename tmp→specDir；
+ * - specDir 是符号链接/junction 残留 → 只删链接本身（rm force 不递归不跟随目标），
+ *   防「改名成 trash 后后台 recursive 清理」误删 junction 指向的源项目；
+ * - 普通目录 → rename specDir→trash（瞬时）+ rename tmp→specDir（瞬时），trash
+ *   后台异步 rm（删除成本移出 pull 关键路径）。
+ *
+ * rename 经 renameWithRetry（Windows 索引器/杀软短暂持有句柄的 EBUSY/EPERM 暂态失败）。
+ */
+async function swapExtractedDir(tmpDir: string, specDir: string): Promise<void> {
+  let oldStat: Awaited<ReturnType<typeof lstat>> | null = null;
+  try {
+    oldStat = await lstat(specDir);
+  } catch {
+    oldStat = null;
+  }
+  if (oldStat) {
+    if (oldStat.isSymbolicLink()) {
+      await rm(specDir, { force: true });
+    } else {
+      const trash = join(
+        dirname(specDir),
+        `${basename(specDir)}.trash-${process.pid}-${Date.now()}`,
+      );
+      await renameWithRetry(specDir, trash);
+      void rm(trash, { recursive: true, force: true }).catch((e) => {
+        console.warn('spec_sync: trash_cleanup_failed', trash, e);
+      });
+    }
+  }
+  await renameWithRetry(tmpDir, specDir);
+}
+
+/** rename + 暂态占用重试（EBUSY/EPERM/EACCES × 3 次 × 200ms，其余错误立抛）。 */
+async function renameWithRetry(from: string, to: string, attempts = 3): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      return await rename(from, to);
+    } catch (e) {
+      if (i >= attempts - 1) throw e;
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== 'EBUSY' && code !== 'EPERM' && code !== 'EACCES') throw e;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+}
+
+/**
+ * ql-20260904-016：清理本 workspace 上一次崩溃 pull 留下的 tmp/trash 残留
+ * （`${wsId}.tmp-*` / `${wsId}.trash-*` 同级兄弟目录）。仅清 mtime 距今超 10 分钟的
+ * ——进行中的并发 pull（tmp 名含 pid+ts，必然新鲜）不受影响。best-effort，失败静默。
+ */
+async function sweepStalePullScraps(parent: string, base: string): Promise<void> {
+  const STALE_SCRAP_AGE_MS = 10 * 60 * 1000;
+  let entries: string[];
+  try {
+    entries = await readdir(parent);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  await Promise.all(
+    entries
+      .filter((n) => n.startsWith(`${base}.tmp-`) || n.startsWith(`${base}.trash-`))
+      .map(async (n) => {
+        const p = join(parent, n);
+        try {
+          const st = await lstat(p);
+          if (now - st.mtimeMs > STALE_SCRAP_AGE_MS) {
+            await rm(p, { recursive: true, force: true });
+            console.warn('spec_sync: stale_scrap_swept', p);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }),
+  );
 }
 
 // ── repo-native / repo-mirrored helper（2026-06-28）───────────────────────────
@@ -999,8 +1100,21 @@ export async function packSpecDir(
  *
  * 调用方负责先 rm -rf（见 pullSpecBundle，覆盖语义）。
  */
+/** extractTar 文件写的并行度（ql-20260904-016：Windows 串行逐文件写是 30s 大头）。 */
+const EXTRACT_WRITE_CONCURRENCY = 16;
+
+/**
+ * ql-20260904-016：两段式解包——先解析+校验全部 entry（任何路径非法在任何写盘前
+ * 抛出，配合 pullSpecBundle 的 tmp 交换语义：坏 tar 不留半解包残缺目录），再有界
+ * 并行写盘（目录先行 dedupe mkdir，文件 worker pool 并发写）。解析逻辑（PAX 'x' /
+ * GNU 'L' / ustar prefix / Tar Slip 双重校验）与原逐条写实现逐字一致，仅重排 IO。
+ */
 async function extractTar(tarBuf: Buffer, targetDir: string): Promise<void> {
+  // 根目录先建（空 tar 零 entry 时也保证目标目录存在，pullSpecBundle 交换语义依赖）。
   await mkdir(targetDir, { recursive: true });
+  // 第 1 段：解析全部 entry（纯内存，无 IO）。
+  const dirs = new Set<string>();
+  const files: Array<{ fullPath: string; data: Buffer }> = [];
   let offset = 0;
   // PAX 'x' path 记录 / GNU 'L' 长名：覆盖下一实条目的 name（扩展头与实体头成对，
   // Python/GNU tar 打包器均紧邻输出）。
@@ -1061,17 +1175,38 @@ async function extractTar(tarBuf: Buffer, targetDir: string): Promise<void> {
     }
 
     if (typeflag === '5' || fullName.endsWith('/')) {
-      await mkdir(fullPath, { recursive: true });
+      dirs.add(fullPath);
       continue;
     }
     if (typeflag === '0' || typeflag === '\0') {
-      await mkdir(dirname(fullPath), { recursive: true });
-      await writeFile(fullPath, data);
+      // 显式目录 entry 与「文件父目录」（tar 可能省略目录 entry）统一进 dirs 集合。
+      dirs.add(dirname(fullPath));
+      files.push({ fullPath, data });
       continue;
     }
     // symlink / 其他 → 跳过 + warn（daemon spec 树不应含）
     console.warn('spec_sync: tar_skip_entry', { name: fullName, typeflag });
   }
+
+  // 第 2 段：目录先行（dedupe 并行 mkdir，recursive 容忍并发 EEXIST），文件 worker pool 写。
+  await Promise.all([...dirs].map((d) => mkdir(d, { recursive: true })));
+  let cursor = 0;
+  const workerCount = Math.min(EXTRACT_WRITE_CONCURRENCY, files.length);
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < workerCount; i++) {
+    workers.push(
+      (async () => {
+        // cursor 抢占发生在 await 间隙之间的同步段，单线程事件循环下无竞态；
+        // 越界 undefined（并发 worker 先抢完）由长度守卫前置拦截，断言仅过类型。
+        while (cursor < files.length) {
+          const f = files[cursor++];
+          if (!f) break;
+          await writeFile(f.fullPath, f.data);
+        }
+      })(),
+    );
+  }
+  await Promise.all(workers);
 }
 
 interface WalkEntry {
