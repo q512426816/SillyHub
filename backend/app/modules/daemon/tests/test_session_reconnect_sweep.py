@@ -451,10 +451,20 @@ class TestOfflineSweep:
         assert row.status == "suspended"  # task-05：active 档收敛改挂起（原 failed）
         assert row.ended_at is None  # 非终态不写 ended_at
         assert await _lease_status(db_session, lease.id) == "cancelled"
-        run_status = (
-            await db_session.execute(select(AgentRun.status).where(AgentRun.id == run.id))
-        ).scalar_one()
-        assert run_status == "failed"
+        run_row = (
+            await db_session.execute(
+                select(AgentRun.status, AgentRun.error_code, AgentRun.output_redacted).where(
+                    AgentRun.id == run.id
+                )
+            )
+        ).one()
+        assert run_row.status == "failed"
+        # quick-bfec20a6：非 worker run 判死补 daemon_interrupted + 可读原因
+        # （output_redacted 经 SessionRunRead.failure_summary 透出前端错误卡，
+        # 替代「运行失败（无详情）」；事故会话 e148364e 实证旧状零线索）。
+        assert run_row.error_code == "daemon_interrupted"
+        assert run_row.output_redacted is not None
+        assert "daemon 离线" in run_row.output_redacted
         # suspended 非终态：不广播 session_ended（SSE 流不收尾，列表经 status_changed 刷新）
         events = [json.loads(p) for ch, p in captured if ch == f"agent_session:{sess.id}"]
         assert not any(e.get("event") == "session_ended" for e in events)

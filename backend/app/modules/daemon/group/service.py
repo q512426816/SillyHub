@@ -3113,19 +3113,28 @@ class GroupChatService:
 
         # quick-6966fcee 存量自愈：早期影子建行带 config.manual_approval=False
         # （审批不进群旧设计）——影子已挂完整 SessionPanel 可作答，此处幂等
-        # 修正为 None（复用任何成员 PATCH 路径触达；不重建影子、记忆无损）。
+        # 修正（复用任何成员 PATCH 路径触达；不重建影子、记忆无损）。
+        # quick-bfec20a6 修正自愈语义：quick-6966fcee 只把 False 删成 None，
+        # 但 permission_service 闸门 `is not True` 对 None 同样拒——自愈必须
+        # 显式落 True 才真正放开弹窗（与建行 config 同形，含 ask_user_only）。
+        # config=None（JSON null 建行 / 自愈删空）同样命中，一并修。
         if (
             member.shadow_session_id is not None
             and isinstance(
                 member_config := (await self._session.get(AgentSession, member.shadow_session_id)),
                 AgentSession,
             )
-            and isinstance(member_config.config, dict)
-            and member_config.config.get("manual_approval") is False
+            and (
+                member_config.config is None
+                or (
+                    isinstance(member_config.config, dict)
+                    and member_config.config.get("manual_approval") is not True
+                )
+            )
         ):
-            healed = dict(member_config.config)
-            healed.pop("manual_approval", None)
-            member_config.config = healed or None
+            healed = dict(member_config.config) if isinstance(member_config.config, dict) else {}
+            healed.update({"manual_approval": True, "ask_user_only": True})
+            member_config.config = healed
             self._session.add(member_config)
             log.info(
                 "group_shadow_manual_approval_healed",
@@ -4404,10 +4413,15 @@ class GroupChatService:
             lease_id=None,  # 同上
             provider=provider,
             status="pending",  # 事务内随 lease 回填激活为 active
-            # quick-6966fcee：不再设 manual_approval=False——影子会话已挂完整
-            # SessionPanel（群主可作答 AskUserQuestion/权限请求），放开后 agent
-            # 遇需拍板问题可正常弹对话框（此前 False 会把 ask 类工具调用拒掉，
-            # agent 卡住干等）。群 @ 触发轮的请求出现在影子面板，群主点开作答。
+            # quick-6966fcee 意图是放开 AskUserQuestion 弹窗（影子已挂完整
+            # SessionPanel 可作答），但彼时只删了 manual_approval=False——
+            # permission_service 的闸门是 `config.get("manual_approval") is not
+            # True` 即拒，删 key（config=null）与 False 同样被丢，agent 提问
+            # 被吞、前端收不到、agent 死等（quick-bfec20a6 实证：事故会话
+            # e148364e 弹窗请求 0 行 + 日志 permission_request_manual_disabled）。
+            # 对齐 placement stage 路径（placement.py:556 同坑先修）显式写 True；
+            # ask_user_only 与 lease metadata（placement 统一 True）同形。
+            config={"manual_approval": True, "ask_user_only": True},
             turn_count=0,
             created_at=now,
             workspace_id=member.workspace_id,

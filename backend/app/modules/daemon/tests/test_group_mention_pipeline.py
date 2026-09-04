@@ -12,7 +12,8 @@
 - 载体 run：status='completed' + started_at 落值 + spec_strategy='group_carrier'
   + user_input 原文落库 + 群频道 log 事件 publish（sender 身份字段）；
 - 影子懒建：六要素 → 影子行（kind='group_member'、user_id=群主、parent 恒
-  NULL、config.manual_approval=False、title）+ interactive lease（stage=
+  NULL、config.manual_approval=True（quick-bfec20a6：permission_service 闸门
+  `is not True` 对 None 也拒，必须显式 True）、title）+ interactive lease（stage=
   'group_member'、pinned runtime、cwd）+ 成员表回填 + 首轮 run/user_input
   metadata（source_group_id/source_member_id/source_carrier_run_id/
   chain_depth/sender_user_id）+ SESSION_INJECT 控制指令；幂等（二次触发复用）；
@@ -1070,9 +1071,11 @@ class TestShadowLazyCreation:
         assert shadow.parent_session_id is None  # D-007：恒 NULL
         assert shadow.status == "active"
         assert shadow.title == "群「测试群」·小码"
-        # quick-6966fcee：影子不再设 manual_approval=False（askuser 恢复——影子
-        # 会话已挂完整 SessionPanel，群主可作答 AskUserQuestion/权限请求）。
-        assert shadow.config is None
+        # quick-bfec20a6：config 显式落 manual_approval=True——permission_service
+        # 闸门 `is not True` 对 None/False 一律丢 PERMISSION_REQUEST（quick-
+        # 6966fcee 只删 False 留 None，AskUserQuestion 被吞、agent 死等）；对齐
+        # placement stage 路径 shape，ask_user_only 与 lease metadata 同形。
+        assert shadow.config == {"manual_approval": True, "ask_user_only": True}
         assert shadow.runtime_id == env.runtime.id
         assert shadow.workspace_id == env.ws.id  # 成员工作区锚（建群缺省=群工作区）
         assert shadow.lease_id is not None
@@ -1147,6 +1150,58 @@ class TestShadowLazyCreation:
         assert payload["run_id"] == str(first_run.id)
         assert "你是群聊「测试群」中的 Agent 成员「小码」" in payload["prompt"]
         assert "[当前消息 · 需要你回应]" in payload["prompt"]
+
+    async def test_shadow_manual_approval_healed_on_member_patch(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mocked_hub,
+        readiness_ok,
+    ) -> None:
+        """quick-bfec20a6：存量影子 config 自愈——None / False 均经成员 PATCH
+        幂等修正为显式 True（闸门 `is not True` 对 None 同样拒，删 key 不是放开）。
+
+        复现事故形状：quick-6966fcee 早期行 config=None、更早行 False，两类
+        PERMISSION_REQUEST 都被 permission_service 丢弃（AskUserQuestion 被吞）。
+        """
+        env = await _make_env(db_session)
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = uuid.UUID(data["id"])
+        member = await _agent_member_row(db_session, group_id)
+        member_name = member.display_name  # 循环内 commit/过期后懒加载会炸，先取
+
+        resp = await _send_message(client, env.owner_token, group_id, "@小码 你好")
+        assert resp.status_code == 200, resp.text
+        shadow_id = uuid.UUID(resp.json()["triggered"][0]["shadow_session_id"])
+
+        for broken in (None, {"manual_approval": False}):
+            # 手工注入存量坏形状（None=quick-6966fcee 删 False 后的形状）。
+            shadow = await db_session.get(AgentSession, shadow_id)
+            assert shadow is not None
+            shadow.config = broken
+            await db_session.commit()
+
+            patch = await client.patch(
+                f"/api/daemon/group-chats/{group_id}/members/{member.id}",
+                json={"display_name": member_name},  # 无实际变更也触达自愈
+                headers=_headers(env.owner_token),
+            )
+            assert patch.status_code == 200, patch.text
+
+            # 列查询断言（绕过 identity map 过期属性懒加载）。
+            cfg = (
+                await db_session.execute(
+                    select(AgentSession.config).where(AgentSession.id == shadow_id)
+                )
+            ).scalar_one()
+            assert cfg == {"manual_approval": True, "ask_user_only": True}, (
+                f"config={broken!r} 未被自愈为显式 True"
+            )
 
     async def test_second_mention_reuses_shadow(
         self,

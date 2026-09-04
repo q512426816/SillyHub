@@ -395,13 +395,29 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
     worker_id_set = set(active_worker_ids)
     non_worker_ids = [row_id for row_id in hit_ids if row_id not in worker_id_set]
     if non_worker_ids:
+        # quick-bfec20a6：此前非 worker 组维持无 error_code 现状（design 显式
+        # 边界），但被 daemon 自更新重启/离线杀掉的交互轮 error_detail/output
+        # 全空，前端只能显示「运行失败（无详情）」（事故会话 e148364e 实证）。
+        # 补 daemon_interrupted + 可读原因（output_redacted 经
+        # SessionRunRead.failure_summary 别名透出前端错误卡，沿
+        # control_commands.py 注入过期联动判死先例）。worker 重派链以
+        # mission_id/worker 会话为锚（patrol.py:759 显式排除本 code 的
+        # mission 候选且交互 run 无 mission_id），此处不与之碰撞。
         await session.execute(
             update(AgentRun)
             .where(
                 AgentRun.agent_session_id.in_(non_worker_ids),
                 AgentRun.status.in_(("pending", "running")),
             )
-            .values(status="failed", finished_at=now)
+            .values(
+                status="failed",
+                finished_at=now,
+                error_code=DAEMON_INTERRUPTED_ERROR_CODE,
+                output_redacted=(
+                    "执行端 daemon 离线（可能因版本自更新重启或连接中断），"
+                    "本轮执行被中断；会话恢复在线后重新发送消息即可继续"
+                ),
+            )
         )
 
     lease_ids = [row.lease_id for row in hit_rows if row.lease_id is not None]

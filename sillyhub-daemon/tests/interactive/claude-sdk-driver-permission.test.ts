@@ -422,3 +422,77 @@ describe('plan 审批 dialog 升级（ExitPlanMode → plan_approval）', () => 
     expect(decision.message).toContain('改用方案B，理由X');
   });
 });
+
+// ── 写通道守卫（坑 subagent-write-channel，2026-09-03 实证 30 分钟写通道封锁）──
+// inject 的 stale-running 自愈（>60s 无 result 强翻 active）误伤仍活着但安静的长 turn：
+// 翻转后旧 turn 写类工具调用全撞 "session not in running turn"。修复三态：
+// 宽限窗内放行 / 窗外/正常收尾 fail-closed（含诊断上下文）。
+
+describe('写通道守卫（stale-flip 宽限 + 诊断化拒绝）', () => {
+  type StateShape = {
+    status: string;
+    currentRunId?: string;
+    staleRunResetAt?: number;
+    lastActiveAt: number;
+  };
+  const getState = (sm: SessionManager): StateShape =>
+    (sm as unknown as { _store: Map<string, StateShape> })._store.get('sess-1')!;
+
+  it('宽限窗内（active + currentRunId 仍在 + staleRunResetAt 新鲜）→ 写工具放行进正常审批流', async () => {
+    const d = makeMockDriver();
+    const { sm, wsClient } = makeManualSession(d);
+    await sm.create(BASE_INPUT);
+    const st = getState(sm);
+    st.status = 'active';
+    st.currentRunId = 'run-1'; // stale-flip 不清 currentRunId（正常 result 收尾才清）
+    st.staleRunResetAt = Date.now() - 5 * 60_000; // 翻转后 5 分钟（60min 宽限窗内）
+    const canUseTool = d.capturedOptions!.canUseTool!;
+    const pending = canUseTool('Write', { path: '/w/x' });
+    const reqId = (
+      wsClient.send.mock.calls[0]![0].payload as { request_id: string }
+    ).request_id;
+    sm.getPermissionResolver('sess-1')!.resolve(
+      { session_id: 'sess-1', request_id: reqId, decision: 'allow' },
+      'sess-1',
+    );
+    const decision = (await pending) as Record<string, unknown>;
+    expect(decision.behavior).toBe('allow'); // 未被守卫拦截，进正常审批流并 allow
+  });
+
+  it('宽限窗外（翻转超过 60min）→ fail-closed deny 且 message 含 staleRunReset 诊断', async () => {
+    const d = makeMockDriver();
+    const { sm } = makeManualSession(d);
+    await sm.create(BASE_INPUT);
+    const st = getState(sm);
+    st.status = 'active';
+    st.currentRunId = 'run-1';
+    st.staleRunResetAt = Date.now() - 61 * 60_000;
+    const decision = (await d.capturedOptions!.canUseTool!('Edit', { path: '/e/x' })) as {
+      behavior: string;
+      message?: string;
+    };
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('status=active');
+    expect(decision.message).toContain('staleRunReset=');
+    expect(decision.message).toContain('auto-reset');
+  });
+
+  it('正常收尾态（active + currentRunId=undefined）→ deny 且 message 含完整诊断（不再裸文案）', async () => {
+    const d = makeMockDriver();
+    const { sm } = makeManualSession(d);
+    await sm.create(BASE_INPUT);
+    // create 带首句会直接起 turn（status=running）；显式构造正常 result 收尾后的状态
+    const st = getState(sm);
+    st.status = 'active';
+    st.currentRunId = undefined; // 正常收尾清空（区别于 stale-flip 的保留）
+    st.staleRunResetAt = undefined;
+    const decision = (await d.capturedOptions!.canUseTool!('Bash', { command: 'ls' })) as {
+      behavior: string;
+      message?: string;
+    };
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('session not in running turn');
+    expect(decision.message).toContain('currentRunId=unset');
+    expect(decision.message).toContain('lastActive=');
+  });
+});

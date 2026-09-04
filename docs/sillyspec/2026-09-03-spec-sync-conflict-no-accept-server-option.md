@@ -32,3 +32,8 @@ quick 会话（quick-1b00c2c0）启动后，每次执行 `sillyspec run quick ..
 ## 2026-09-04 补充：`--take-platform` 旗标已出现但对 spec-tree 冲突未实现
 
 3.27.12 的 `platform resolve` 已暴露 `--take-platform`，但对 spec-tree 冲突直接拒绝：「平台无文件下载端点，无法把服务器内容写回本地：请手动对齐本地文件后跑 --keep-local」——即「接受服务器」仍是空壳。`--keep-local` 当日重试两次仍裁决竞态失败（平台侧有持续并发更新）。处置：把累积的 21 个待决冲突（19+探测新增 2）全部 `--abort` 后**刷屏消失**、待决清零——abort 之后的新命令未再打印 164 文件 JSON（此前「每次命令必刷屏」的判断过重，实际刷屏来自待决冲突被反复上报）。结论不变：收敛需等平台提供文件下载端点，abort 是当前唯一处置。
+
+## 巡检注记（2026-09-04 定时扫描）
+
+- **修复已在 sillyspec 仓工作区完整落地（另一会话在途、未提交）**：`resolve --take-platform` spec 树分支接入 `_takePlatformSpecPaths`——拉平台 spec-bundle（X2 端点）但**只覆盖冲突文件列出的路径**（服务器已删→删本地），覆盖后刷新内容基线快照闭环防回推；配套 `test/spec-sync-conflict-banner-dedup.test.mjs`（刷屏治理）+ hub08 扩展，工作区 12/12 全绿。待该会话提交发版后即可收敛本坑（下轮巡检复核归档）。
+- 前置缓解已生效：2026-09-03 的 quicksync-conflict-granularity 修复（v3.28.0）使「本地未改动+服务器前进」文件不再制造冲突——本坑 164 文件形态的主体已消失，take-platform 补齐剩余「本地真改动但想接受服务器」的收敛路径。

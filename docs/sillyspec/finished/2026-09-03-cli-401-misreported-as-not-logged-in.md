@@ -34,3 +34,9 @@
 
 - CLI 把远端 401 一律翻译成 "Not logged in" 的行为无法在本仓修；若未来出现同签名但非瞬时的持续性 401（密钥真失效），自动重投一次失败后会停在错误卡片（retryable=true，用户可手动重发/切换供应商），不会无限循环。
 - daemon 侧 classifyModelError 未对 CLI 合成错误特判（回传 type=unknown/retryable=false），靠后端签名识别兜底；若 daemon 升级了错误分类，前后端两处签名识别需同步复核。
+
+## 处置记录（2026-09-04 定时巡检，验证归档）
+
+- 缓解双层落地均已实证：后端 `run_sync/service.py` ql-20260903-011（error.raw 签名识别 + 排队重投一次，防循环/同文去重在位）；前端 `agent-log/normalize.ts` `isAssistantApiErrorText`（[ASSISTANT] 行归 error 类 + 中文错误卡片 retryable，含配套测试）。
+- 遗留两条维持原状定性：CLI 合成文案本仓不可修（持续性 401 由错误卡片手动出口兜底，不会无限循环）；daemon classifyModelError 特判为观察项（若 daemon 升级错误分类需同步复核签名识别）。
+- 四层取证与排查教训（varchar/uuid join 静默过滤、以产物时间戳为准、daemon 日志盲区）价值高，随文件归档备查。

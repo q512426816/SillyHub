@@ -155,6 +155,56 @@ describe('task-01 / FR-01 / D-001@v1: SessionManager.hasRunningTurn 忙判定', 
     expect(sm.get('sess-a')!.status).toBe('active');
     expect(sm.get('sess-b')!.status).toBe('running');
   });
+
+  // ── quick-bfec20a6：stale-flip 宽限臂（自更新忙屏障不被误翻绕过）──
+  //
+  // 背景：等 AskUserQuestion 作答等安静长 turn 被 inject 的 >60s 启发式翻
+  // active（保留 currentRunId + 记 staleRunResetAt）后，忙屏障若只认 running
+  // 会放行 daemon 自更新重启杀掉活轮（事故会话 e148364e）。宽限窗内
+  // （active + currentRunId + staleRunResetAt 新鲜）必须算忙；窗口过期或
+  // currentRunId 已清（正常收尾）则不忙——真死 turn 不永久阻塞升级。
+  describe('quick-bfec20a6: stale-flip 宽限臂', () => {
+    /** 对齐 STALE_RUN_WRITE_GRACE_MS = 60min（src/interactive/session-manager.ts）。 */
+    const GRACE_MS = 60 * 60_000;
+
+    function makeStaleState(
+      sessionId: string,
+      opts: { staleAgeMs: number; withRunId?: boolean },
+    ): SessionState {
+      const base = makeState(sessionId, 'active');
+      base.staleRunResetAt = Date.now() - opts.staleAgeMs;
+      if (opts.withRunId !== false) base.currentRunId = `run-${sessionId}`;
+      return base;
+    }
+
+    it('active + currentRunId + staleRunResetAt 新鲜（宽限窗内）→ true（自更新须推迟）', () => {
+      const sm = createSessionManager();
+      seed(sm, makeStaleState('sess-stale-fresh', { staleAgeMs: 60_000 }));
+      expect(sm.hasRunningTurn()).toBe(true);
+    });
+
+    it('active + currentRunId + staleRunResetAt 过期（超 60min）→ false（真死 turn 不永久阻塞升级）', () => {
+      const sm = createSessionManager();
+      seed(sm, makeStaleState('sess-stale-old', { staleAgeMs: GRACE_MS + 60_000 }));
+      expect(sm.hasRunningTurn()).toBe(false);
+    });
+
+    it('active + staleRunResetAt 新鲜但 currentRunId 已清（正常收尾）→ false', () => {
+      const sm = createSessionManager();
+      seed(sm, makeStaleState('sess-stale-norun', { staleAgeMs: 60_000, withRunId: false }));
+      expect(sm.hasRunningTurn()).toBe(false);
+    });
+
+    it('宽限态与空闲态混租：任一宽限态在即 true', () => {
+      const sm = createSessionManager();
+      seed(sm, makeState('sess-idle', 'active'));
+      seed(sm, makeState('sess-recon', 'reconnecting'));
+      expect(sm.hasRunningTurn()).toBe(false);
+
+      seed(sm, makeStaleState('sess-stale', { staleAgeMs: 30_000 }));
+      expect(sm.hasRunningTurn()).toBe(true);
+    });
+  });
 });
 
 // ── ql-20260831-001-6dde：restoreAndReconnect 活会话守卫（恢复链不杀在途 turn）──

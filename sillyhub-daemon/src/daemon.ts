@@ -6691,6 +6691,10 @@ export class Daemon {
         // SessionManager 据此设 SDK systemPrompt preset+append（保留 claude 默认能力 +
         // 追加档案提示词）。undefined → 不注入（行为同今天，零回归）。
         systemPrompt: execPayload.systemPrompt,
+        // ql-20260904-017：claim 下发的会话级供应商凭证透传记录（spawn env 仍在上方
+        // interactiveEnv 构造，本字段只进 state.providerConfig → sessions.json 落盘，
+        // 防 daemon 重启后恢复会话 SDK 裸起 "Not logged in"）。
+        providerConfig: execPayload.provider_config,
         // task-04（2026-08-29-batch-session-inherit / D-001@v1）：resume 目标会话 id
         // 透传 SessionManager.create（CreateSessionInput.resume）。取 execPayload
         // .resumeSessionId（上方归一化区既有：resumeSessionId ?? resume_session_id，
