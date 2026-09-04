@@ -1,0 +1,2 @@
+{"type": "extension_error", "extensionPath": "/home/<redacted>/example-ext/index.ts", "event": "session_before_prompt", "error": "TypeError: Cannot read properties of undefined (reading 'x')"}
+{"type": "some_future_event", "foo": "bar", "count": 42}
