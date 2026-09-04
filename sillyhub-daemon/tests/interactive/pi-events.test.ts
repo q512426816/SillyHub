@@ -10,7 +10,7 @@
 //      形状）→ error；message_update+ame.error（流层中止）→ error；顶层 error → error；
 //   3. 未知事件降级——不丢不抛（content=原 type，metadata.original_event_type +
 //      原字段全量保留），全部产出过 safeParseAgentEvent；
-//   4. text_delta 逐条直通不合并——两条 delta 产两个独立 text 事件。
+//   4. text_delta 轮内合并（ql-20260904-031）——节流增量 partial+message_end override 全文。
 //
 // 全部产出事件（含内联构造例）逐条过 safeParseAgentEvent（zod 校验，
 // agent-event-schema.ts——档C onboarding 清单要求）。
@@ -60,18 +60,63 @@ describe('PiEventNormalizer / manual-success-turn（成功轮逐型映射）', (
     for (const { ev } of all) expectValid(ev);
   });
 
-  it('text_delta 逐条直通不合并：两条 delta → 两个独立 text 事件', () => {
-    // fixture 第二次 LLM 调用有两条 text_delta："Bash " 与 "已执行成功，输出为 pi-smoke。"
+  it('text_delta 轮内合并（ql-20260904-031）：节流窗内 delta 累积、message_end override 全文', () => {
+    // fixture 第二次 LLM 调用有两条 text_delta（"Bash " / "已执行成功，输出为 pi-smoke。"）
+    // + message_end text part 全文。新语义：500ms 窗外首 delta 起段 flush 增量（partial），
+    // message_end 产 override 完整事件（撤 partial+落全文）。
     const texts = all.filter((x) => x.ev.type === 'text' && x.ev.content !== '');
-    expect(texts.map((x) => x.ev.content)).toEqual([
-      'Bash ',
-      '已执行成功，输出为 pi-smoke。',
-    ]);
-    // 直通形态：无 is_partial / segment_id（pi delta 本就是流式单元，非 partial flush）
-    for (const { ev } of texts) {
+    // 终态断言：必含 override 完整事件（全文），且不再有"逐 delta 碎片直通"
+    const overrides = texts.filter((x) => x.ev.override === true);
+    expect(overrides.length).toBeGreaterThanOrEqual(1);
+    expect(overrides.map((x) => x.ev.content)).toContain('Bash 已执行成功，输出为 pi-smoke。'.slice(0, Math.min(30, 'Bash 已执行成功，输出为 pi-smoke。'.length)) );
+    for (const { ev } of overrides) {
       expect(ev.is_partial).toBeUndefined();
-      expect(ev.segment_id).toBeUndefined();
+      expect(typeof ev.segment_id).toBe('string');
     }
+    // partial 事件（若有 flush）带 is_partial+segment_id
+    for (const { ev } of texts.filter((x) => x.ev.is_partial === true)) {
+      expect(typeof ev.segment_id).toBe('string');
+      expect(ev.override).toBeUndefined();
+    }
+  });
+
+  it('轮内合并·快照增量+节流+乱序免疫（ql-20260904-031 内联）', () => {
+    // 可注入时钟：t=0 起，500ms 节流窗。
+    let t = 0;
+    const n = new PiEventNormalizer({ flushIntervalMs: 500, now: () => t });
+    const mk = (delta: string, snap: string, ci = 1) =>
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', contentIndex: ci, delta, partial: { role: 'assistant', content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: snap }] } },
+      });
+    const start = JSON.stringify({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    expect(n.normalizeRpcLine(start)).toEqual([]);
+    // t=0：首个 delta（快照"你好"）→ 起段 flush "你好"（partial）
+    let out = n.normalizeRpcLine(mk('你好', '你好'));
+    expect(out).toEqual([{ type: 'text', content: '你好', is_partial: true, segment_id: 'pi:msg0:ci1' }]);
+    // t=100（窗内）：快照"你好世界" → 累积不 flush
+    t = 100;
+    out = n.normalizeRpcLine(mk('世界', '你好世界'));
+    expect(out).toEqual([]);
+    // t=499（仍窗内）
+    t = 499;
+    out = n.normalizeRpcLine(mk('！', '你好世界！'));
+    expect(out).toEqual([]);
+    // t=600（窗外）：flush 增量"世界！"（快照-已flush）
+    t = 600;
+    out = n.normalizeRpcLine(mk('。', '你好世界！。'));
+    expect(out).toEqual([{ type: 'text', content: '世界！。', is_partial: true, segment_id: 'pi:msg0:ci1' }]);
+    // 乱序旧快照（长度回缩）→ 忽略
+    out = n.normalizeRpcLine(mk('旧', '你好'));
+    expect(out).toEqual([]);
+    // message_end → override 全文（撤 partial+落完整行）
+    out = n.normalizeRpcLine(JSON.stringify({
+      type: 'message_end',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: '完整思考' }, { type: 'text', text: '你好世界！。终态' }] },
+    }));
+    const textEv = out.find((e) => e.type === 'text');
+    expect(textEv).toMatchObject({ type: 'text', content: '你好世界！。终态', override: true, segment_id: 'pi:msg0:ci1' });
+    expect(out.find((e) => e.type === 'thinking')).toMatchObject({ type: 'thinking', content: '完整思考' });
   });
 
   it('message_end thinking part → thinking（每 part 一事件，逐字段）', () => {

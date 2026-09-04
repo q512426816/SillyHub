@@ -91,6 +91,31 @@ const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
  */
 export class PiEventNormalizer {
   /**
+   * ql-20260904-031：轮内合并状态（修复 pi 输出碎片乱序）。
+   *
+   * 原「text_delta 逐条直通」在真实会话暴雷：一个 turn 277 行 1-5 字碎片行
+   * （DB 膨胀+前端拼接乱序——pi 高速 delta 下游异步段存在乱序窗口）。
+   * 改对齐 claude-events 的流式模式：
+   *   - delta 到达时按 contentIndex 取 partial 快照（累积文本，天然免疫 delta
+   *     乱序/丢失），500ms 节流 flush **增量**（快照长度 - 已 flush 长度）产
+   *     is_partial+segment_id 事件（前端追加语义正确）；
+   *   - message_end 产 **override 完整事件**（D-004 语义：backend 撤同 segment
+   *     已落库 partial 行+落完整行；前端替换同 segment）——终态以全文为准，
+   *     partial 乱序不影响最终渲染。
+   */
+  private readonly flushIntervalMs: number;
+  private readonly now: () => number;
+  /** assistant message 轮内序号（message_start role=assistant 时递增）。 */
+  private assistantMsgSeq = -1;
+  /** segment 累积状态：key=`ci<contentIndex>`，值为已 flush 长度+上次 flush 时刻。 */
+  private readonly segments = new Map<string, { flushedLen: number; lastFlushAt: number }>();
+
+  constructor(opts: { flushIntervalMs?: number; now?: () => number } = {}) {
+    this.flushIntervalMs = opts.flushIntervalMs ?? 500;
+    this.now = opts.now ?? Date.now;
+  }
+
+  /**
    * 归一化一行 pi rpc 下行 JSON。
    *
    * 边界处理（fail-safe，对照批量 pi-json.ts parse 的 B-04 约定）：
@@ -142,6 +167,12 @@ export class PiEventNormalizer {
         return [this.handleTopLevelError(raw)];
       case 'extension_error':
         return [this.handleExtensionError(raw)];
+      case 'message_start': {
+        // assistant 消息边界：递增轮内序号（segment 隔离）。user/toolResult 不计。
+        const msg = isRecord(raw.message) ? raw.message : {};
+        if (msg.role === 'assistant') this.assistantMsgSeq += 1;
+        return [];
+      }
       default:
         // 已知生命周期型（含 agent_settled/session）→ 无 IR 产出（映射表第 8 行）
         return [];
@@ -150,12 +181,11 @@ export class PiEventNormalizer {
 
   /**
    * message_update：按 assistantMessageEvent.type 分派。
-   *   - text_delta → text 逐条直通（不合并、无 is_partial——pi delta 本就是
-   *     流式单元，契约 is_partial 语义是「同段多次 flush」标记，直通场景恒缺省）；
+   *   - text_delta → 轮内合并节流（见类头 ql-20260904-031 说明）：partial 快照
+   *     增量 500ms 节流 flush（is_partial+segment_id）；无 partial 时退化 delta
+   *     追加（旧链路兼容，防御 pi 变体）；
    *   - error → error（流层中止：reason=aborted|error + error: AssistantMessage）；
    *   - 其余子事件（text_start/text_end/thinking 三段/toolcall 三段/start/done）→ []。
-   *
-   * 空 delta 跳过（无信息量，批量 pi-json.ts:275-276 同决策）。
    */
   private handleMessageUpdate(raw: Record<string, unknown>): AgentEvent[] {
     const ame = isRecord(raw.assistantMessageEvent)
@@ -164,9 +194,47 @@ export class PiEventNormalizer {
     const sub = typeof ame.type === 'string' ? ame.type : '';
 
     if (sub === 'text_delta') {
+      const contentIndex = typeof ame.contentIndex === 'number' ? ame.contentIndex : 0;
+      // 优先用 partial 快照（累积文本，免疫 delta 乱序）；缺失退化 delta 追加。
+      const partialMsg = isRecord(ame.partial) ? ame.partial : (isRecord(raw.partial) ? raw.partial : null);
+      const partialContent = partialMsg && Array.isArray(partialMsg.content) ? partialMsg.content : null;
+      const part =
+        partialContent && isRecord(partialContent[contentIndex]) ? partialContent[contentIndex] : null;
+      const snapshot = part && typeof part.text === 'string' ? part.text : null;
+
+      const segKey = `ci${contentIndex}`;
+      const seg = this.segments.get(segKey);
+      if (snapshot !== null && seg) {
+        // 快照守卫：长度回缩（乱序旧快照/异常）→ 忽略，等终态 override 纠正。
+        if (snapshot.length <= seg.flushedLen) return [];
+        if (this.now() - seg.lastFlushAt < this.flushIntervalMs) return [];
+        const inc = snapshot.slice(seg.flushedLen);
+        seg.flushedLen = snapshot.length;
+        seg.lastFlushAt = this.now();
+        return [{
+          type: 'text',
+          content: inc,
+          is_partial: true,
+          segment_id: this.segmentId(contentIndex),
+        }];
+      }
+      // 退化路径：无快照状态（首个 delta）用 delta 起段。
       const delta = typeof ame.delta === 'string' ? ame.delta : '';
       if (!delta) return [];
-      return [{ type: 'text', content: delta }];
+      if (!seg) {
+        this.segments.set(segKey, { flushedLen: delta.length, lastFlushAt: this.now() });
+        return [{
+          type: 'text',
+          content: delta,
+          is_partial: true,
+          segment_id: this.segmentId(contentIndex),
+        }];
+      }
+      // 已有段但无快照：累积近似（delta 追加到 flushedLen 记账）——仅防御。
+      if (this.now() - seg.lastFlushAt < this.flushIntervalMs) return [];
+      seg.flushedLen += delta.length;
+      seg.lastFlushAt = this.now();
+      return [{ type: 'text', content: delta, is_partial: true, segment_id: this.segmentId(contentIndex) }];
     }
 
     if (sub === 'error') {
@@ -184,25 +252,43 @@ export class PiEventNormalizer {
     return [];
   }
 
+  /** segment_id：轮内 assistant 序 + contentIndex（同 turn 内唯一）。 */
+  private segmentId(contentIndex: number): string {
+    return `pi:msg${Math.max(this.assistantMsgSeq, 0)}:ci${contentIndex}`;
+  }
+
   /**
-   * message_end：完整消息边界——提取 content 内 thinking part → thinking。
+   * message_end：完整消息边界——text part 产 **override 完整事件**（撤同 segment
+   * partial+落全文，D-004 语义），thinking part 产完整 thinking（现状保留）。
    *
-   * 只提取 thinking：text 已由 text_delta 逐条直通，message_end 再展开 text
-   * part 会双计（批量 pi-json.ts:263-266 对 text_end 的同款防双计决策）；
-   * thinking 不走 delta 直通（design §5.2「message content thinking part」），
-   * 以完整 part 为单位在本边界产出，天然无重复。
-   *
-   * user/toolResult 消息的 content（text/image part）不含 thinking，自然零产出。
+   * override 终态是本次修复的关键：即使 partial 行因上游乱序错位，最终渲染/
+   * 落库以本事件全文为准（backend 撤 partial 行+前端替换同 segment）。
+   * thinking 不走 delta 直通（design §5.2），以完整 part 为单位产出无重复。
+   * user/toolResult 消息的 content 不含 assistant text/thinking，自然零产出。
    */
   private handleMessageEnd(raw: Record<string, unknown>): AgentEvent[] {
     const message = isRecord(raw.message) ? raw.message : {};
+    if (message.role !== 'assistant') return [];
     if (!Array.isArray(message.content)) return [];
 
     const out: AgentEvent[] = [];
     for (const part of message.content) {
       if (!isRecord(part)) continue;
-      // ThinkingContent（pi-ai types.d.ts:230-238）：{type:'thinking', thinking}
-      if (part.type === 'thinking' && typeof part.thinking === 'string') {
+      if (part.type === 'text' && typeof part.text === 'string') {
+        if (!part.text) continue;
+        // 找该 part 的 contentIndex（同序数组定位；找不到退化 0——单 text part 主流）
+        const idx = message.content.findIndex(
+          (p) => isRecord(p) && p.type === 'text' && p.text === part.text
+        );
+        const ci = idx >= 0 ? idx : 0;
+        out.push({
+          type: 'text',
+          content: part.text,
+          override: true,
+          segment_id: this.segmentId(ci),
+        });
+      } else if (part.type === 'thinking' && typeof part.thinking === 'string') {
+        // ThinkingContent（pi-ai types.d.ts:230-238）
         if (!part.thinking) continue;
         out.push({ type: 'thinking', content: part.thinking });
       }
