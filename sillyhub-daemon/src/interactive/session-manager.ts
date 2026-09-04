@@ -1115,6 +1115,24 @@ export class SessionManager {
    * 写调用放行；误翻是启发式猜测，写通道不该被猜测封锁。SDK 正常结束后不会调
    * canUseTool，正常收尾路径（active + currentRunId=undefined）不受宽限影响。
    */
+  /**
+   * stale-flip 宽限窗判定（坑 subagent-write-channel + quick-bfec20a6）：
+   * 「active + currentRunId 仍在 + staleRunResetAt 在宽限窗内」——turn 很可能
+   * 仍活着（>60s 无 result 的强翻是启发式猜测）。写通道守卫与自更新忙屏障
+   * （hasRunningTurn）共用：误翻既不该封锁写调用，也不该放行 daemon 自更新
+   * 重启杀活轮（事故会话 e148364e：等 AskUserQuestion 作答的安静轮被翻 active
+   * 后忙屏障放行自更新，12:39 daemon 重启杀轮）。SDK 真死时本就无调用进来；
+   * 窗口 60min 有界，真死 turn 最多推迟升级 1 小时。
+   */
+  private _withinStaleFlipGrace(state: SessionState): boolean {
+    return (
+      state.status === 'active' &&
+      !!state.currentRunId &&
+      !!state.staleRunResetAt &&
+      Date.now() - state.staleRunResetAt < STALE_RUN_WRITE_GRACE_MS
+    );
+  }
+
   private _writeChannelGuardDeny(
     state: SessionState | undefined,
     toolName: string,
@@ -1126,12 +1144,7 @@ export class SessionManager {
       };
     }
     if (state.status === 'running' && state.currentRunId) return null;
-    const inGrace =
-      state.status === 'active' &&
-      !!state.currentRunId &&
-      !!state.staleRunResetAt &&
-      Date.now() - state.staleRunResetAt < STALE_RUN_WRITE_GRACE_MS;
-    if (inGrace) return null;
+    if (this._withinStaleFlipGrace(state)) return null;
     const parts = [
       `status=${state.status}`,
       `currentRunId=${state.currentRunId ? 'set' : 'unset'}`,
@@ -3490,11 +3503,19 @@ export class SessionManager {
    * （_terminalCleanupTimers 窗口内，见 ql-20260825-f3#1）同样不算。遍历口径照
    * create 内活会话计数先例（本文件 for..of _store.values()）。
    *
+   * quick-bfec20a6 例外臂：stale-flip 宽限窗内（active + currentRunId 仍在 +
+   * staleRunResetAt 新鲜，见 _withinStaleFlipGrace）也算忙——等 AskUserQuestion
+   * 作答等安静长 turn 被 >60s 启发式误翻 active 后，忙屏障若只认 running 会放行
+   * 自更新重启杀掉活轮（事故会话 e148364e，12:39 daemon 自更新重启杀等答轮）。
+   * 正常 result 收尾清 currentRunId，active+currentRunId ⟺ stale-flip 态；窗口
+   * 有界（60min），真死 turn 不会永久阻塞升级。
+   *
    * 零副作用纯查询：不修改 _store 生命周期、不触发挂起/取消。
    */
   hasRunningTurn(): boolean {
     for (const state of this._store.values()) {
       if (state.status === 'running') return true;
+      if (this._withinStaleFlipGrace(state)) return true;
     }
     return false;
   }
