@@ -107,7 +107,13 @@ export class PiEventNormalizer {
   private readonly now: () => number;
   /** assistant message 轮内序号（message_start role=assistant 时递增）。 */
   private assistantMsgSeq = -1;
-  /** segment 累积状态：key=`ci<contentIndex>`，值为已 flush 长度+上次 flush 时刻。 */
+  /**
+   * segment 累积状态：key=`m<msgSeq>ci<contentIndex>`，值为已 flush 长度+上次
+   * flush 时刻。ql-20260905-001：键并入 msgSeq——contentIndex 是每条消息内 content
+   * 数组下标，跨消息天然重号（真实 fixture 两条 text 消息均 ci0），只按 ci 记键会让
+   * 第二条消息继承上一条的 flushedLen → partial 全被压制或从错误偏移截取。
+   * message_end 清当前消息段（override 已出全文，记账作废）、turn_end 全清兜底。
+   */
   private readonly segments = new Map<string, { flushedLen: number; lastFlushAt: number }>();
 
   constructor(opts: { flushIntervalMs?: number; now?: () => number } = {}) {
@@ -202,7 +208,9 @@ export class PiEventNormalizer {
         partialContent && isRecord(partialContent[contentIndex]) ? partialContent[contentIndex] : null;
       const snapshot = part && typeof part.text === 'string' ? part.text : null;
 
-      const segKey = `ci${contentIndex}`;
+      // ql-20260905-001：键并入 msgSeq（见类头 segments 注释）——跨消息 contentIndex
+      // 重号不再共用记账。
+      const segKey = `m${this.assistantMsgSeq}ci${contentIndex}`;
       const seg = this.segments.get(segKey);
       if (snapshot !== null && seg) {
         // 快照守卫：长度回缩（乱序旧快照/异常）→ 忽略，等终态 override 纠正。
@@ -293,6 +301,12 @@ export class PiEventNormalizer {
         out.push({ type: 'thinking', content: part.thinking });
       }
     }
+    // ql-20260905-001：override 全文已出，清当前消息的 segment 记账（键前缀
+    // m<seq>ci）——Map 不随消息数膨胀，也杜绝后续异常 delta 复用旧记账。
+    const msgPrefix = `m${this.assistantMsgSeq}ci`;
+    for (const k of this.segments.keys()) {
+      if (k.startsWith(msgPrefix)) this.segments.delete(k);
+    }
     return out;
   }
 
@@ -351,6 +365,9 @@ export class PiEventNormalizer {
     if (isRecord(message.usage)) {
       out.push(this.buildUsageEvent(message.usage));
     }
+    // ql-20260905-001：turn 边界全清 segment 记账（message_end 丢帧时的兜底，
+    // 下一 turn 从零起段）。
+    this.segments.clear();
     return out;
   }
 

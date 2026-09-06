@@ -31,16 +31,21 @@ export type SemVerTuple = readonly [number, number, number];
 /**
  * 各 provider 的最低版本要求。
  *
- * 仅 3 个 provider 有版本门槛（其余 provider 无 entry → checkMinVersion 直接返回 null，
+ * 仅 4 个 provider 有版本门槛（其余 provider 无 entry → checkMinVersion 直接返回 null，
  * 即无要求）。新增 provider 的版本限制需在此添加。
  *
  * 对照 Python version.py:11-15：
- *   MIN_VERSIONS = {"claude": (2,0,0), "codex": (0,100,0), "copilot": (1,0,0)}
+ *   MIN_VERSIONS = {"claude": (2,0,0), "codex": (0,100,0), "copilot": (1,0,0), "pi": (0,81,0)}
+ *
+ * ql-20260905-001：补 pi 条目——PROVIDER_SPECS.pi.minVersion 声明 0.81.0 但本表
+ * 此前缺条目，checkMinVersion('pi', v) 恒 null，版本门禁从未生效（旧版 pi 静默
+ * 注册为 available）。与 agent-detector.ts PROVIDER_SPECS.pi.minVersion 保持同值。
  */
 export const MIN_VERSIONS: Readonly<Record<string, SemVerTuple>> = {
   claude: [2, 0, 0],
   codex: [0, 100, 0],
   copilot: [1, 0, 0],
+  pi: [0, 81, 0],
 };
 
 /**

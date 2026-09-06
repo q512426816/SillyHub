@@ -153,6 +153,24 @@ class TestSoftDeleteActiveChange:
         assert (spec_root / "changes" / "other_change" / "keep.md").exists()
         assert (spec_root / "docs" / "readme.md").exists()
 
+    async def test_soft_delete_bumps_spec_version(self, db_session, tmp_path) -> None:
+        """ql-20260905-001：镜像树已变（文件移出 + 墓碑）→ bump spec_version。
+
+        不 bump 则 gzip bundle 缓存键 (ws, spec_version) 不变，恒吐软删前的
+        旧树；lease latest_spec_version 不变，他机也不重拉。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        spec_ws = await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+        await svc.apply_ops(ws.id, [_op("add", "changes/gone/proposal.md", content=_b64("p"))])
+        base_version = int(spec_ws.spec_version or 0)
+
+        await svc.soft_delete_change_dir(ws.id, "gone")
+
+        await db_session.refresh(spec_ws)
+        assert int(spec_ws.spec_version or 0) == base_version + 1
+
     async def test_pre_existing_soft_deleted_row_only_strengthened(
         self, db_session, tmp_path
     ) -> None:

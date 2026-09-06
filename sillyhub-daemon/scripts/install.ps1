@@ -317,12 +317,20 @@ function Set-Path {
 }
 
 # -- 6.5 Windows Defender 排除目录（best-effort）──────────────────────────────────
-# 把 ~/.sillyhub 加入 Defender 排除（ql-20260904-016：spec 全量同步逐文件写盘在
-# 实机被杀软逐文件扫描放大 ~8ms/文件，数千文件累计数十秒，是会话首响延迟大头之一）。
+# 把 ~/.sillyhub/daemon/specs（spec 缓存目录）加入 Defender 排除（ql-20260904-016：
+# spec 全量同步逐文件写盘在实机被杀软逐文件扫描放大 ~8ms/文件，数千文件累计数十秒，
+# 是会话首响延迟大头之一）。ql-20260905-001：排除范围从整个 ~/.sillyhub 收窄到
+# specs 子目录——整个 ~/.sillyhub 还含 workspaces（agent 任意 git clone + npm
+# install 的代码执行区，postinstall 即任意代码执行点）与 daemon 本体下载区，
+# 全排除等于把这些代码执行移出实时防护，超出写放大优化的必要范围。
 # 需管理员权限：当前会话不足时自动 UAC 提权尝试一次（用户可拒绝）；任何失败只
 # 提示手动命令，绝不阻塞安装主流程。无 Defender（第三方杀软/精简系统）静默跳过。
 function Set-DefenderExclusion {
-  $exclDir = Join-Path $env:USERPROFILE '.sillyhub'
+  $exclDir = Join-Path $env:USERPROFILE '.sillyhub\daemon\specs'
+  # 目录可能尚未创建（首次安装 pull 前不存在）——先建，保证排除路径有效。
+  if (-not (Test-Path $exclDir)) {
+    New-Item -ItemType Directory -Path $exclDir -Force | Out-Null
+  }
   if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) {
     return
   }

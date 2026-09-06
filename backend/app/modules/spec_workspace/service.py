@@ -97,6 +97,11 @@ _BUNDLE_CANCEL_JOIN_S = 5.0
 # 固化，可接受：spec_version 才是新旧判据，daemon 比对版本不比 generated_at）
 # → gzip 变体按 key 缓存整包字节，命中路径零打包零 mount 读、秒级吐完。
 #
+# 确定性前提（ql-20260905-001）：快照元数据含 manifest_versions（daemon 版本
+# 回填），要求「manifest 行版本变化 ⇒ spec_version 递增」恒成立——_write_spec_root /
+# apply_ops / soft_delete_change_dir 三个树写入口都已同语义 bump。若未来新增
+# 树写入口漏 bump，此缓存会吐旧 manifest 版本（daemon 回填错版本 → 假 conflict）。
+#
 # 内存边界（对齐审计 P1-性能④精神）：仅缓存 gzip 变体（~树大小/4），每
 # workspace 保留最新 2 个版本，plain/identity 路径零缓存零行为变化。
 _BUNDLE_CACHE_VERSIONS_PER_WS = 2
@@ -920,6 +925,24 @@ class SpecWorkspaceService:
         spec_version = int(spec_ws.spec_version or 0)
         strategy = spec_ws.strategy
 
+        # ql-20260905-001：快照元数据附带现存清单行的 per-file version——daemon
+        # pull 落地后据此重建本地 manifest 缓存（真实 base_version）。若缓存全 0，
+        # pull 后首次真实改动的增量 update op 恒撞服务器乐观锁 conflict 且无降级
+        # （ql-20260904-019 遗留缺口）。仅取 exists=True 行（墓碑/平台删除行不在
+        # 镜像树，daemon 缓存也只记现存文件）。查询在 async 段先行完成——_produce
+        # 跑在打包线程，不触碰 session。
+        manifest_versions = {
+            path: version
+            for path, version in (
+                await self._session.execute(
+                    select(SpecFileManifest.path, SpecFileManifest.version).where(
+                        SpecFileManifest.workspace_id == workspace_id,
+                        SpecFileManifest.exists.is_(True),
+                    )
+                )
+            ).all()
+        }
+
         tar_mode = "w|gz" if gzip_output else "w|"
 
         def _produce(writer: _QueueBackedTarWriter) -> None:
@@ -933,6 +956,8 @@ class SpecWorkspaceService:
                     "strategy": strategy,
                     "generated_at": datetime.now(UTC).isoformat(),
                     "server": get_settings().hub_proxy_base_url,
+                    # ql-20260905-001：daemon pull 后 manifest 版本回填（见上方注释）。
+                    "manifest_versions": manifest_versions,
                 }
                 meta_bytes = json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8")
                 meta_info = tarfile.TarInfo(name=BUNDLE_METADATA_MEMBER)
@@ -1753,6 +1778,12 @@ class SpecWorkspaceService:
 
         await asyncio.to_thread(self._cleanup_empty_dirs, spec_root, cleanup_dirs)
         await asyncio.to_thread(self._prune_spec_backups, backup_root)
+        # ql-20260905-001：镜像树已变（文件移出 + 墓碑）→ bump spec_version（保鲜
+        # + gzip 缓存键联动，理由同 apply_ops 注释）。幂等路径（file_count=0 且全部
+        # 行已是墓碑）树未变也 bump——版本是新鲜度信号非变更计数，多 bump 一次
+        # 至多触发一次冗余 pull，无正确性影响。
+        spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
+        spec_ws.updated_at = now
         await self._session.commit()
         log.info(
             "spec_workspace.change_dir_soft_deleted",
@@ -2207,6 +2238,13 @@ class SpecWorkspaceService:
                     },
                 )
                 await self._session.execute(add_stmt)
+            # ql-20260905-001：增量落盘与 _write_spec_root 同语义 bump spec_version
+            # ——①保鲜：lease 下发的 latest_spec_version 变化触发他机重拉新树；
+            # ②gzip 整包缓存键联动：不 bump 则 (ws, spec_version) 同键恒吐增量
+            # 落盘前的旧树（e7bef3cc0 缓存引入后的陈旧命中缺口）。conflict 跳过
+            # 的 op 不落盘，但同请求其余 op 已 apply，树已变即 bump。
+            spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
+            spec_ws.updated_at = now
             await self._session.commit()
         finally:
             # task-03 / R-02：终态回写兜底（含 422 中断路径——已处理计数最终准确）。

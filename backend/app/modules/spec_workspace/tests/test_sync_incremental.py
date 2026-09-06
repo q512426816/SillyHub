@@ -1407,3 +1407,37 @@ class TestConcurrentDuplicateAddUpsert:
         assert len(rows) == 1
         assert rows[0].version >= 1
         assert rows[0].content_hash == hashlib.sha256(b"# race").hexdigest()
+
+
+# ===========================================================================
+# ql-20260905-001：增量落盘 bump spec_version（保鲜 + gzip bundle 缓存键联动）
+# ===========================================================================
+
+
+class TestApplyOpsBumpsSpecVersion:
+    async def test_apply_ops_bumps_spec_version(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """增量落盘后 spec_version 递增。
+
+        不 bump 的两处实害：①他机 lease 携带的 latest_spec_version 不变 → 永不
+        重拉新树；②gzip 整包缓存键 (ws, spec_version) 不变 → 恒吐增量落盘前的
+        旧树（e7bef3cc0 缓存引入后的陈旧命中缺口）。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        spec_ws = await _make_spec_workspace(db_session, ws, spec_root)
+        base_version = int(spec_ws.spec_version or 0)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={"ops": [_op("add", "docs/c.md", base_version=0, content=_b64("v1"))]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["conflict"] is False
+
+        # 路由侧是独立 session；db_session 的 identity map 缓存了创建时的实例
+        # （expire_on_commit=False 不自动过期），refresh 强制重读落库终值。
+        await db_session.refresh(spec_ws)
+        assert int(spec_ws.spec_version or 0) == base_version + 1

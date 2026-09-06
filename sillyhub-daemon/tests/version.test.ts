@@ -115,11 +115,27 @@ describe('formatSemver', () => {
 
 describe('MIN_VERSIONS', () => {
   // test_version.py:67-71 test_has_three_providers
-  it('恰好 3 个 provider，含 claude / codex / copilot', () => {
-    expect(Object.keys(MIN_VERSIONS)).toHaveLength(3);
+  it('恰好 4 个 provider，含 claude / codex / copilot / pi', () => {
+    expect(Object.keys(MIN_VERSIONS)).toHaveLength(4);
     expect(MIN_VERSIONS.claude).toEqual([2, 0, 0]);
     expect(MIN_VERSIONS.codex).toEqual([0, 100, 0]);
     expect(MIN_VERSIONS.copilot).toEqual([1, 0, 0]);
+    // ql-20260905-001：pi 门禁实装——PROVIDER_SPECS.pi.minVersion 声明 0.81.0
+    // 但此前本表缺条目，checkMinVersion('pi', v) 恒 null，门禁从未生效。
+    expect(MIN_VERSIONS.pi).toEqual([0, 81, 0]);
+  });
+
+  it('PROVIDER_SPECS 声明 minVersion 的 provider 必有同值 MIN_VERSIONS 条目（防门禁空转再犯）', async () => {
+    const { PROVIDER_SPECS } = await import('../src/agent-detector.js');
+    const gated = Object.entries(PROVIDER_SPECS) as Array<[string, { minVersion?: string }]>;
+    const withGate = gated.filter(([, spec]) => typeof spec.minVersion === 'string');
+    expect(withGate.length).toBeGreaterThanOrEqual(4);
+    for (const [name, spec] of withGate) {
+      const tuple = MIN_VERSIONS[name as keyof typeof MIN_VERSIONS];
+      // 声明了 minVersion 却无表条目 = checkMinVersion 恒 null 的静默空转（审计 #5）
+      expect(tuple, `PROVIDER_SPECS.${name} 声明 minVersion=${spec.minVersion} 但 MIN_VERSIONS 缺条目`).toBeDefined();
+      expect(tuple!.join('.')).toBe(spec.minVersion);
+    }
   });
 });
 

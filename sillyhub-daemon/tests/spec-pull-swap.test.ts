@@ -310,4 +310,36 @@ describe('pullSpecBundle 后置 manifest 重建（ql-20260904-019）', () => {
     await pullSpecBundle(client2 as never, wsId);
     expect(client2.postSpecSync).toHaveBeenCalled();
   });
+
+  it('bundle 元数据带 manifest_versions：重建 manifest 回填真实 version，元数据文件不进清单（ql-20260905-001）', async () => {
+    const wsId = 'ws-manifest-versions';
+    const meta = JSON.stringify({ spec_version: 3, manifest_versions: { 'docs/a.md': 7 } });
+    const tar = buildTar([
+      { name: 'PLATFORM-BUNDLE.json', content: meta },
+      { name: 'docs/a.md', content: 'server-content' },
+    ]);
+    await pullSpecBundle(makeClient(tar) as never, wsId);
+    const manifest = await readManifestRaw(wsId);
+    expect(manifest).not.toBeNull();
+    const files = (manifest as { files: Record<string, { version: number }> }).files;
+    // 真实 base_version 回填——修复前恒 0，pull 后首次真实改动必撞服务器乐观锁。
+    expect(files['docs/a.md'].version).toBe(7);
+    // 快照元数据文件落地但不进 manifest（UPLOAD_PRUNE_NAMES_BASE 排除，不上传）。
+    expect(files['PLATFORM-BUNDLE.json']).toBeUndefined();
+    expect(existsSync(join(resolveSpecDir(wsId), 'PLATFORM-BUNDLE.json'))).toBe(true);
+  });
+
+  it('旧服务器 bundle 无 manifest_versions 键 → version=0 旧语义（向后兼容）', async () => {
+    const wsId = 'ws-manifest-legacy';
+    const meta = JSON.stringify({ spec_version: 3 });
+    const tar = buildTar([
+      { name: 'PLATFORM-BUNDLE.json', content: meta },
+      { name: 'docs/a.md', content: 'server-content' },
+    ]);
+    await pullSpecBundle(makeClient(tar) as never, wsId);
+    const manifest = await readManifestRaw(wsId);
+    const files = (manifest as { files: Record<string, { version: number }> }).files;
+    expect(files['docs/a.md'].version).toBe(0);
+    expect(files['PLATFORM-BUNDLE.json']).toBeUndefined();
+  });
 });

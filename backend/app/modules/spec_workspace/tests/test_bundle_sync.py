@@ -152,7 +152,8 @@ class TestBundleMetadata:
 
     - 响应头 ``X-Spec-Version`` = ``spec_ws.spec_version``（持包方不解包即可辨新旧）
     - tar 顶层 ``PLATFORM-BUNDLE.json`` 含 {spec_version, strategy, generated_at,
-      server} 四键（离线可辨快照来源/时点）
+      server, manifest_versions} 五键（离线可辨快照来源/时点；manifest_versions 为
+      ql-20260905-001 新增——daemon pull 后 manifest 版本回填依据）
     - ``.runtime/`` 与 local.yaml 任意深度排除零回归 + 元数据不落 spec_root 磁盘
     """
 
@@ -195,11 +196,19 @@ class TestBundleMetadata:
             raw = tf.extractfile("PLATFORM-BUNDLE.json")
             assert raw is not None
             meta = json.loads(raw.read())
-        assert set(meta) == {"spec_version", "strategy", "generated_at", "server"}
+        assert set(meta) == {
+            "spec_version",
+            "strategy",
+            "generated_at",
+            "server",
+            "manifest_versions",
+        }
         assert meta["spec_version"] == 12
         assert meta["strategy"] == "repo-mirrored"
         datetime.fromisoformat(str(meta["generated_at"]))  # 打包时刻 UTC ISO 可解析
         assert isinstance(meta["server"], str) and meta["server"]
+        # 本测试无清单行 → 空 map（键恒存在，daemon 侧无需判缺键歧义）
+        assert meta["manifest_versions"] == {}
 
         # 排除零回归：.runtime 任意深度 / local.yaml 任意深度不出服务器
         for n in names:
@@ -209,6 +218,51 @@ class TestBundleMetadata:
 
         # 元数据仅存在于 tar 流内，spec_root 磁盘零残留（镜像树不被污染）
         assert not (spec_root / "PLATFORM-BUNDLE.json").exists()
+
+    async def test_bundle_metadata_manifest_versions_only_existing_rows(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """ql-20260905-001：manifest_versions 仅含 exists=True 行（daemon pull 后
+        据此回填真实 base_version——缺该键则 pull 后首次真实改动必撞乐观锁）。
+        """
+        import base64
+        import json
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        def _b64(text: str) -> str:
+            return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+        # add 两文件（version=1）后增量软删其一（exists=False 墓碑）
+        for path, text in (("docs/keep.md", "k"), ("docs/gone.md", "g")):
+            resp = await client.post(
+                f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+                headers=auth_headers,
+                json={
+                    "ops": [{"op": "add", "path": path, "base_version": 0, "content": _b64(text)}]
+                },
+            )
+            assert resp.status_code == 200, resp.text
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={"ops": [{"op": "delete", "path": "docs/gone.md", "base_version": 1}]},
+        )
+        assert resp.status_code == 200, resp.text
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/spec-workspace/bundle",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tf:
+            raw = tf.extractfile("PLATFORM-BUNDLE.json")
+            assert raw is not None
+            meta = json.loads(raw.read())
+        # 仅现存行；软删墓碑行（已不在镜像树）不含
+        assert meta["manifest_versions"] == {"docs/keep.md": 1}
 
 
 # ===========================================================================

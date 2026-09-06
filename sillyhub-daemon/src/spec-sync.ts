@@ -222,16 +222,19 @@ export async function pullSpecBundle(
   }
 
   // ql-20260904-019：pull 落地后用落地树重建本地 manifest 缓存（best-effort）。
-  // 缺口（ql-20260904-016 E2E 实证，会话 0871e917/b3fa8993）：pull 整树覆盖本地后
-  // manifest 仍是上次 push 时的旧态——下次「版本文件丢失 / mtime 信号」触发
-  // push_before_pull 时 diff（旧 manifest ↔ pull 后本地）产出全量假 ops，服务器
-  // base_version 乐观锁判 conflict → SpecPushConflict abort pull（会话被旧缓存
-  // 卡住直到版本追平）。修：落地树即服务器镜像，据此重建 manifest 后 diff 恒零
-  // ops。version=0 对齐 full-tar 回退路径既有语义（buildFullManifest 注释 Q7/R-07）：
-  // pull 后首次真实改动若撞乐观锁，走同内容豁免（hash 相同 no-op + new_versions
-  // 对齐）或既有全量回退降级链，无新增失败模式。
+  // ql-20260904-016 遗留缺口（E2E 实证，会话 0871e917/b3fa8993）：pull 整树覆盖
+  // 本地后 manifest 仍是上次 push 时的旧态——下次「版本文件丢失 / mtime 信号」
+  // 触发 push_before_pull 时 diff（旧 manifest ↔ pull 后本地）产出全量假 ops，服务
+  // 器 base_version 乐观锁判 conflict → SpecPushConflict abort pull。
+  // ql-20260905-001（修正轮）：仅重建还不够——version 全 0 会让 pull 后首次真实
+  // 改动（update op base_version=0 vs 服务器行 ≥1 且 hash 已变）恒 conflict 且
+  // SpecPushConflict 不回退全量 tar（人工拍板语义）→ 本地改动永久推不上去。
+  // 修：读落地树顶层 PLATFORM-BUNDLE.json 的 manifest_versions 回填真实版本
+  // （服务器 ql-20260905-001 同批落盘）；旧服务器 bundle 无该键 → null 退化
+  // version=0 旧语义，下次 pull 到新服务器后自愈。
+  const manifestVersions = await readBundleManifestVersions(specDir);
   try {
-    await writeLocalManifest(wsId, await buildFullManifest(specDir));
+    await writeLocalManifest(wsId, await buildFullManifest(specDir, manifestVersions));
   } catch (e) {
     console.warn('spec_sync: post_pull_manifest_write_failed', wsId, specDir, e);
   }
@@ -568,7 +571,10 @@ async function writeLocalManifest(wsId: string, m: LocalManifest): Promise<void>
 //（N-01 复核收口：只改增量会引入「缓存有 projects 行 + walk 无 → delete op 误删服务器行」）。
 // pull 路径（extractTar 解包）**不**排除——服务器已有（历史遗留）projects 行 pull 仍落地本地无妨。
 const UPLOAD_EXCLUDE_TOP_BASE = new Set(['.runtime', 'runtime', 'projects']);
-const UPLOAD_PRUNE_NAMES_BASE = new Set(['worktrees']);
+// ql-20260905-001：PLATFORM-BUNDLE.json（服务器 bundle 顶层快照元数据成员，pull
+// 解包后落进镜像树）不进 manifest / 不上传——否则 buildFullManifest 会把它记进
+// 缓存、packSpecDir 会把它回推服务器（服务器侧重打包时才被剔除，纯磁盘污染）。
+const UPLOAD_PRUNE_NAMES_BASE = new Set(['worktrees', 'PLATFORM-BUNDLE.json']);
 
 /** relPath 是否命中上传排除（对齐 walkDir 剪枝口径：pruneTop 看首段 / pruneNames 看任意段 basename）。
  *  computeIncrementalOps 对缓存残留行（旧状态曾上传、现在 walk 已排除的路径）跳过 diff 用，
@@ -579,8 +585,17 @@ function isUploadExcludedPath(relPath: string): boolean {
   return segs.some((s) => UPLOAD_PRUNE_NAMES_BASE.has(s));
 }
 
-/** 全量快照清单（旧 tar 落盘后/首同步用）：version=0（服务器清单已清 Q7，下次增量 R-07 重建）。 */
-async function buildFullManifest(specRoot: string): Promise<LocalManifest> {
+/**
+ * 全量快照清单（pull 落地后 / 全量 tar 回退路径用）。version 优先取服务器快照
+ * 元数据 PLATFORM-BUNDLE.json 的 manifest_versions 真实值（ql-20260905-001：pull
+ * 后缓存若全 0，首次真实改动的增量 update op 携 base_version=0 恒撞服务器乐观锁
+ * conflict 且无降级）；元数据缺失 / 旧服务器 bundle 无 manifest_versions 键 →
+ * 退化 version=0（旧语义，兼容期行为）。
+ */
+async function buildFullManifest(
+  specRoot: string,
+  versionsByPath?: Map<string, number> | null,
+): Promise<LocalManifest> {
   const files: Record<string, ManifestFileEntry> = {};
   // 三处排除统一（task-07）：UPLOAD_EXCLUDE_TOP_BASE / UPLOAD_PRUNE_NAMES_BASE
   //（与 computeIncrementalOps / packSpecDir 共用常量，勿各自内联——防再漂移）。
@@ -590,11 +605,33 @@ async function buildFullManifest(specRoot: string): Promise<LocalManifest> {
     const content = await readFile(e.absPath);
     files[e.relPath] = {
       hash: createHash('sha256').update(content).digest('hex'),
-      version: 0,
+      version: versionsByPath?.get(e.relPath) ?? 0,
       mtime: Math.floor(e.mtimeMs),
     };
   }
   return { version: 1, files };
+}
+
+/**
+ * 读落地树顶层 PLATFORM-BUNDLE.json（服务器内存生成的快照元数据成员）的
+ * manifest_versions（path → version，仅现存行）。缺失 / 坏 JSON / 形状不符 →
+ * null（调用方退化 version=0 旧语义）。文件本体留在镜像树——walk/pack 侧由
+ * UPLOAD_PRUNE_NAMES_BASE 排除，不进 manifest 不上传。
+ */
+async function readBundleManifestVersions(specDir: string): Promise<Map<string, number> | null> {
+  try {
+    const raw: unknown = JSON.parse(await readFile(join(specDir, 'PLATFORM-BUNDLE.json'), 'utf-8'));
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+    const mv = (raw as { manifest_versions?: unknown }).manifest_versions;
+    if (typeof mv !== 'object' || mv === null || Array.isArray(mv)) return null;
+    const out = new Map<string, number>();
+    for (const [k, v] of Object.entries(mv as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0) out.set(k, v);
+    }
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 /**

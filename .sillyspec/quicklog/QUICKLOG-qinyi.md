@@ -237,3 +237,55 @@
 根因：后端 PATCH /spec-workspace 早已支持改 strategy，但前端无任何入口（lib 无客户端函数、配置卡策略行只读 Badge），用户创建时选错策略后无法调整
 方案：lib/spec-workspaces.ts 新增 updateSpecWorkspace（PATCH 三字段 omit 不改）；workspace-config-card 策略行加 owner 门禁「修改」入口：antd Modal 三选（与创建对话框同文案、repo-native 写源项目警告、同值禁存），保存成功 toast 提示点「初始化」重建本地缓存；生效语义：改库对后续 dispatch 实时生效（lease 每次读库），daemon 缓存布局等下次无条件 pull（初始化链路）重建，语义落 spec_workspace.md 注意事项 + frontend_components.md 变更索引
 结果：vitest 相关 2 文件 38/38 绿（新增 8 用例：组件 5——owner 门禁/同值禁存/保存成功链路/repo-native 警告/失败保持 Modal；lib 3——PATCH 透传/三策略值/422 抛 ApiError）；tsc --noEmit 0 错；eslint 改动文件 0 错 4 条既有告警；后端零改动
+
+## ql-20260904-029-9254 | 2026-09-04 22:33:17 | 清理 PI 接入 verify 登记的 4 项 P3 遗留
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：清理 PI 接入 verify 登记的 4 项 P3 遗留。
+根因：①F-1 backend Literal 修复缺直接回归用例 ②群聊两文件引擎白名单未加 pi ③canResumeSession 硬编码 claude||codex ④picker 空态文案未提 PI。
+方案：①TestPiProviderLiteral 参数化用例断言三 provider 非 422 ②两文件 ENGINE_OPTIONS+GROUP_SUPPORTED_PROVIDERS 加 pi ③改查 getProviderCaps().resume ④文案三引擎。
+结果：5b8f2d156 已推送；backend 36 passed+frontend 120 passed+tsc 零错+ruff 过；PI 三路径（门户/对话框/群聊）可选+caps 化续聊。知识沉淀：无新条目（白名单模式已在 frontend_components.md+onboarding 档B 第 10 步）
+
+## ql-20260904-030-45d1 | 2026-09-04 22:40:42 | spec 策略透传缺口修复——普通会话/主控 lease 补 specStrategy 回退源
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/lease/context.py（tar 分支 specStrategy 回退读 _resolved_spec_ws.strategy）
+- backend/app/modules/daemon/tests/test_build_claim_payload.py（新增 S1-S3 断言矩阵与 _create_spec_ws 夹具）
+- frontend/src/components/workspace-config-card.tsx（Tooltip/Modal 文案校准（后续任务拉取也按新策略））
+- frontend/src/lib/spec-workspaces.ts（lib 注释生效语义校准）
+- .sillyspec/docs/SillyHub/modules/spec_workspace.md（策略修改条目更新为回退源已补）
+- .sillyspec/docs/SillyHub/modules/frontend_components.md（028 条目生效语义同步）
+需求：spec 策略透传缺口修复——普通会话/主控 lease 补 specStrategy 回退源
+根因：claim payload 的 specStrategy 原只读 lease_meta.spec_strategy（仅扫描派发写），普通工作区会话与 orchestrator 主控 lease 不带该键 → daemon pullSpecBundle 按 platform-managed 兜底，version 变化的覆盖拉取会拆 repo-native junction（策略静默退化，ql-20260820-007 只修了 daemon 侧透传、后端漏补）
+方案：context.py _build_claim_payload tar 分支单点收口：来源优先级改 lease_meta.spec_strategy > SpecWorkspace.strategy（latestSpecVersion 同一查询已带出的 _resolved_spec_ws，零新增 DB 查询，claim 时点读库更新鲜）；scan 显式值优先零回归、quick-chat/mission_worker ws_id=None 不下发、daemon 零改动（双写字段 execPayload 归一化已消费）；test_build_claim_payload.py 补 S1-S3 断言矩阵；前端三处文案/注释与模块文档（spec_workspace.md 缺口改已修、frontend_components.md 028 条目）同步校准
+结果：pytest 相关 4 套件 86/86 绿（build_claim_payload 11 含新增 3 + lease_claim_transport 11 + lease_context/provider_priority/session_create_config 53）；ruff 两改动文件 0 错；vitest config-card 35/35；tsc 0 错
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档（涉及模块：backend）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_build_claim_payload.py
+
+## ql-20260904-031-a2a0 | 2026-09-04 23:10:22 | 修 PI 输出碎片乱序：pi-events.ts 升级为有状态轮内合并——text/thinking delta 按 segment 累积+500ms 节流 flush 增量（is_partial+segment_id）+message_e…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260905-001-fc24 | 2026-09-05 01:27:02 | 修复昨日审计 5 项高置信缺陷：spec-sync version=0 必冲突+gzip 缓存不失效+pi segments 撞键+MIN_VERSIONS 缺…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/spec_workspace/service.py（元数据第五键 manifest_versions+apply_ops/软删 bump spec_version）
+- backend/app/modules/spec_workspace/tests/test_bundle_sync.py（元数据键集更新+新增 manifest_versions 仅现存行用例）
+- backend/app/modules/spec_workspace/tests/test_sync_incremental.py（新增 apply_ops bump 用例（identity map 需 refresh））
+- backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py（新增软删 bump 用例）
+- sillyhub-daemon/src/spec-sync.ts（pull 后真实版本回填+PLATFORM-BUNDLE.json 上传排除）
+- sillyhub-daemon/src/interactive/pi-events.ts（segment 键并入消息序号+message_end/turn_end 清账）
+- sillyhub-daemon/src/version.ts（MIN_VERSIONS 补 pi）
+- sillyhub-daemon/scripts/install.ps1（Defender 排除收窄到 daemon/specs）
+- sillyhub-daemon/tests/spec-pull-swap.test.ts（版本回填+旧 bundle 兼容 2 例）
+- sillyhub-daemon/tests/version.test.ts（4 provider 断言+声明必配表条目守护）
+- sillyhub-daemon/tests/interactive/pi-events.test.ts（跨消息重号+turn_end 清账回归）
+需求：修复昨日审计 5 项高置信缺陷：spec-sync version=0 必冲突+gzip 缓存不失效+pi segments 撞键+MIN_VERSIONS 缺 pi+Defender 排除过宽
+根因：28bf3bc3e pull 落地重建 manifest 全 version=0 而 SpecPushConflict 不回退全量 tar，pull 后首次真实改动必撞乐观锁；e7bef3cc0 缓存键 (ws,spec_version) 但 apply_ops/软删绕过唯一 bump 点；b21c17e30 segment 键只含 contentIndex 跨消息重号；7c4dd4efd 版本门禁实际查 MIN_VERSIONS 表而表缺 pi；排除动机只是 spec 缓存写放大却覆盖 agent 代码执行区
+方案：backend build_bundle 元数据第五键 manifest_versions（仅 exists 行）随包下发，daemon pull 后回填真实 base_version（旧 bundle 无键退化 0 兼容），PLATFORM-BUNDLE.json 加上传排除；apply_ops/soft_delete_change_dir 同 _write_spec_root 语义 bump spec_version；segment 键改 m<msgSeq>ci<idx>+message_end 清当前段+turn_end 全清；MIN_VERSIONS 补 pi [0,81,0]+声明必配表条目守护；install.ps1 排除收窄到 daemon/specs
+结果：backend 3 文件 56 passed 1 skipped（既有 symlink 跳过）ruff 0 mypy 0；daemon 3 文件 72 passed tsc 0；新增回归 7 例；模块文档 2 份同步
+审计：📝 文档欠账（D-8）：11 个源码文件改动未同步任何模块文档（涉及模块：backend · sillyhub-daemon）

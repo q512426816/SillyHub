@@ -119,6 +119,57 @@ describe('PiEventNormalizer / manual-success-turn（成功轮逐型映射）', (
     expect(out.find((e) => e.type === 'thinking')).toMatchObject({ type: 'thinking', content: '完整思考' });
   });
 
+  it('跨消息 contentIndex 重号不串段（ql-20260905-001）：第二条消息从零起段，turn_end 全清', () => {
+    // 事故形状：两条 assistant text 消息同用 ci0（真实 fixture 两消息均 ci0）。
+    // 旧实现 segment 键只有 ci0——第二条消息继承第一条的 flushedLen →
+    // 快照长度 ≤ 遗留值时 partial 全被压制（或从错误偏移截取）。
+    let t = 0;
+    const n = new PiEventNormalizer({ flushIntervalMs: 500, now: () => t });
+    const start = JSON.stringify({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    const mk = (snap: string, ci = 0) =>
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'text_delta',
+          contentIndex: ci,
+          delta: snap,
+          partial: { role: 'assistant', content: [{ type: 'text', text: snap }] },
+        },
+      });
+
+    // 第一条消息：起段 flush + message_end override（并清当前消息段）。
+    expect(n.normalizeRpcLine(start)).toEqual([]);
+    expect(n.normalizeRpcLine(mk('第一段'))).toEqual([
+      { type: 'text', content: '第一段', is_partial: true, segment_id: 'pi:msg0:ci0' },
+    ]);
+    expect(
+      n.normalizeRpcLine(
+        JSON.stringify({
+          type: 'message_end',
+          message: { role: 'assistant', content: [{ type: 'text', text: '第一段终态' }] },
+        }),
+      ),
+    ).toMatchObject([{ type: 'text', content: '第一段终态', override: true, segment_id: 'pi:msg0:ci0' }]);
+
+    // 第二条消息（同 ci0）：必须从零起段正常 flush——旧键撞车时
+    // 「第二条」（3 字）≤ 遗留 flushedLen（3 字）→ 被长度守卫全吞。
+    t = 1000;
+    expect(n.normalizeRpcLine(start)).toEqual([]);
+    let out = n.normalizeRpcLine(mk('第二条'));
+    expect(out).toEqual([
+      { type: 'text', content: '第二条', is_partial: true, segment_id: 'pi:msg1:ci0' },
+    ]);
+
+    // turn_end 全清记账：下一 turn 从零起段（message_end 丢帧的兜底）。
+    t = 2000;
+    expect(n.normalizeRpcLine(JSON.stringify({ type: 'turn_end', message: {} }))).toEqual([]);
+    expect(n.normalizeRpcLine(start)).toEqual([]);
+    out = n.normalizeRpcLine(mk('新turn'));
+    expect(out).toEqual([
+      { type: 'text', content: '新turn', is_partial: true, segment_id: 'pi:msg2:ci0' },
+    ]);
+  });
+
   it('message_end thinking part → thinking（每 part 一事件，逐字段）', () => {
     const thinkings = all.filter((x) => x.ev.type === 'thinking');
     expect(thinkings.length).toBe(1);
