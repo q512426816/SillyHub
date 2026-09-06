@@ -19,12 +19,15 @@
  *     批量 POST controls/ack——毒丸指令不无限重投；ack 网络失败不删队列，留待
  *     下轮补拉重试（backend 端 ack 幂等）。WS 通道消费后经 immediateAck 立即
  *     冲刷（ql-20260904-022，防 delivered 指令无冲刷触发点被 backend GC 误杀
- *     活轮）；补拉趟维持批尾单次冲刷。
+ *     活轮），失败后短退避**单次**自驱动重试（ql-20260906-002，见
+ *     _immediateFlushWithRetry）；补拉趟维持批尾单次冲刷。
  *
  * 不做：
  *   - 不内嵌业务逻辑（session 状态机 / 权限 resolver / reload 全在 handler）；
  *   - 不做过期判断（backend GC 收口，daemon 只消费推送/补拉到的指令）；
- *   - 不做重试调度（补拉时机归 daemon 对账/心跳循环，本模块 pullAndConsume 单趟）。
+ *   - 不做**指令**重投调度（补拉时机归 daemon 对账/心跳循环，本模块
+ *     pullAndConsume 单趟）——ack 冲刷失败的单次退避重试属回执链路收口，
+ *     不属指令重投。
  *
  * @module control-dispatcher
  */
@@ -39,6 +42,13 @@ import type { PendingControlCommand } from './protocol.js';
  * 超容量淘汰最旧条目（Set 迭代序 = 插入序，天然 LRU 滑窗）。
  */
 export const CONTROL_DEDUP_LRU_CAPACITY = 256;
+
+/**
+ * immediateAck 冲刷失败后的单次退避重试延迟（ms，ql-20260906-002）。取短值
+ * （秒级）——要盖住的是瞬时网络抖动，10 分钟 GC 窗口远在其后；重试仅一次，
+ * 二次失败即留桶交还既有补拉/重连兜底。
+ */
+export const CONTROL_ACK_RETRY_DELAY_MS = 5_000;
 
 /** WS 通道消费但 payload 不携带 runtime_id 时，回执暂存的桶键（见 _queueAck）。 */
 const UNKNOWN_RUNTIME_KEY = '';
@@ -91,6 +101,11 @@ export interface ControlDispatcherOptions {
   logger?: ControlDispatcherLogger | null;
   /** 去重窗容量（默认 256；测试可缩小）。 */
   lruCapacity?: number;
+  /**
+   * immediateAck 冲刷失败后的单次退避重试延迟（ms，默认
+   * CONTROL_ACK_RETRY_DELAY_MS=5000；测试可缩短）。
+   */
+  ackRetryDelayMs?: number;
 }
 
 /** pullAndConsume 单趟汇总（观测/测试断言用）。 */
@@ -119,6 +134,12 @@ export class ControlDispatcher {
    *（backend ack 按行归属翻转，不属该 runtime 的 id 静默 no-op，多发无害）。
    */
   private readonly _pendingAcks = new Map<string, Set<string>>();
+  /**
+   * immediateAck 冲刷失败后的单次退避重试定时器（按 runtime key 去重，同 key
+   * 退避窗内只挂一个——fire 时清位，不留常驻句柄；unref 不阻止进程退出）。
+   */
+  private readonly _ackRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly _ackRetryDelayMs: number;
 
   constructor(opts: ControlDispatcherOptions) {
     this._handlers = opts.handlers;
@@ -128,6 +149,10 @@ export class ControlDispatcher {
       opts.lruCapacity && opts.lruCapacity > 0
         ? Math.floor(opts.lruCapacity)
         : CONTROL_DEDUP_LRU_CAPACITY;
+    this._ackRetryDelayMs =
+      opts.ackRetryDelayMs && opts.ackRetryDelayMs > 0
+        ? Math.floor(opts.ackRetryDelayMs)
+        : CONTROL_ACK_RETRY_DELAY_MS;
   }
 
   /**
@@ -252,9 +277,12 @@ export class ControlDispatcher {
    * WS 送达即 delivered 的指令永不触发补拉——daemon 活着消费了指令、ack 却
    * 永远留队，10 分钟后被 backend GC 按「delivered 未 ack」联动判死 run，
    * 误杀正在等 AskUserQuestion 用户回答的活轮（事故会话 e148364e，run
-   * ca7ec9b8）。立即冲刷后 10min GC 窗口与「等用户回答」时间天然解耦；冲刷
-   * 失败（网络抖动）ids 留桶，由既有补拉/重连路径兜底。runtimeId 缺省
-   * （UNKNOWN 桶）无 ack 端点可定位，维持入队等下趟捎带（既有语义）。
+   * ca7ec9b8）。立即冲刷后 10min GC 窗口与「等用户回答」时间天然解耦。runtimeId
+   * 缺省（UNKNOWN 桶）无 ack 端点可定位，维持入队等下趟捎带（既有语义）。
+   * ql-20260906-002（审计 R1 残余窗口收口）：立即冲刷失败后短退避**重试一次**
+   *（见 _immediateFlushWithRetry）——原「失败留桶交补拉/重连兜底」的两个触发
+   * 点在「网络抖动单次失败 + WS 不断 + 10 分钟无新 pending 指令」组合下都不会
+   * 发生，正是误杀事故的窄残口。
    */
   private _queueAck(
     runtimeId: string | undefined,
@@ -270,8 +298,33 @@ export class ControlDispatcher {
     }
     bucket.add(commandId);
     if (immediateAck && key !== UNKNOWN_RUNTIME_KEY) {
-      void this._flushAcks(key);
+      this._immediateFlushWithRetry(key);
     }
+  }
+
+  /**
+   * immediateAck 冲刷 + 失败后短退避单次自驱动重试（ql-20260906-002）。
+   *
+   * 语义边界：
+   *   - **只重试一次**：二次失败留桶，交还既有兜底（心跳补拉 pending>0 触发 /
+   *     WS 重连对账）——不无限重试，不引入周期任务；
+   *   - **不与补拉批量语义耦合**：补拉趟批尾的 `_flushAcks`（await 直调）不经
+   *     本路径、失败不挂重试；本定时器只重刷单 runtime 桶，与趟批冲刷并发时
+   *     backend ack 幂等（重发 no-op）无害；
+   *   - 同 key 定时器去重：退避窗内再失败不叠加；成功（含空桶）不挂定时器。
+   *     fire 后清位，Map 不随会话增长；unref 不阻止进程退出。
+   */
+  private _immediateFlushWithRetry(key: string): void {
+    void this._flushAcks(key).then((acked) => {
+      if (acked > 0 || this._ackRetryTimers.has(key)) return;
+      const timer = setTimeout(() => {
+        this._ackRetryTimers.delete(key);
+        void this._flushAcks(key);
+      }, this._ackRetryDelayMs);
+      // vitest fake timers 返回句柄无 unref——可选调用兼容两侧环境。
+      (timer as { unref?: () => void }).unref?.();
+      this._ackRetryTimers.set(key, timer);
+    });
   }
 
   /**

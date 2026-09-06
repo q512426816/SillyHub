@@ -304,3 +304,14 @@
 根因：raw text() 结果 SQLite 返回 CHAR(32) hex 字符串不经类型回转，placement 内 .hex 对 str 抛 AttributeError 被 except 吞掉误报无在线 runtime；错误词正则全文任意位置匹配，成功 run 正文提到 API Error 等词即被整条丢弃且无失败卡兜底
 方案：main.py 派发前 uuid.UUID(x) if isinstance(x, str) else x 归一化（对齐 placement.py raw SQL 先例）；isAssistantApiErrorText 四正则收紧为行首锚定（^ + trimStart），合成错误行恒以特征词开头真阳性零回退，assembler 注释同步修正
 结果：backend 新端点回归测试 1 passed（patch dispatch 断言 UUID 实例）+ ruff 0 + mypy 0；前端 2 文件 160 passed + tsc 0；接口无变更免 gen:types；模块文档 2 份同步
+
+## ql-20260906-002-f6b7 | 2026-09-06 22:28:46 | 修复审计 R1：immediateAck 冲刷失败后短退避单次自驱动重试收口误杀残余窗口
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/control-dispatcher.ts（退避常量+Options.ackRetryDelayMs+_ackRetryTimers+_immediateFlushWithRetry）
+- sillyhub-daemon/tests/control-dispatcher.test.ts（4 个重试回归用例+waitFor 竞态加固）
+需求：修复审计 R1：immediateAck 冲刷失败后短退避单次自驱动重试收口误杀残余窗口
+根因：立即冲刷失败仅 warn 留桶，后续唯二触发点（心跳补拉 pending_controls>0 不含 delivered 行 / WS 重连对账）在单次网络失败+WS 不断+10min 无新 pending 组合下都不发生，GC 按 delivered-未-ack 误杀活轮
+方案：control-dispatcher 新增 _immediateFlushWithRetry：失败后 CONTROL_ACK_RETRY_DELAY_MS=5000 退避重试一次，按 runtime key 定时器去重、unref、fire 清位；二次失败留桶交还既有兜底；补拉趟批尾 _flushAcks 保持直调零耦合；类头注释同步收窄不做范围
+结果：control-dispatcher 23/23（+4 新用例）+ resilience-scenarios 27/27 + tsc 0；模块文档同步

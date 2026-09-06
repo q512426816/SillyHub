@@ -413,6 +413,116 @@ describe('ControlDispatcher — WS 送达指令立即回执（ql-20260904-022）
     expect(source.ackCalls[1]!.ids).toContain('cmd-i2');
   });
 
+  // ── ql-20260906-002（审计 R1 残余窗口）：immediateAck 失败后短退避单次重试 ──
+
+  it('immediateAck 冲刷失败后短退避自驱动重试一次成功（无需补拉/重连触发）', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource();
+    let failFirst = true;
+    source.ackImpl.fn = async (_rid, ids) => {
+      if (failFirst) {
+        failFirst = false;
+        throw new Error('ack transient failure');
+      }
+      return { acked: ids.length };
+    };
+    const d = new ControlDispatcher({
+      handlers: { [CONTROL_KIND.SESSION_INJECT]: handler },
+      source,
+      logger: silentLogger,
+      ackRetryDelayMs: 20,
+    });
+    await d.consume(
+      CONTROL_KIND.SESSION_INJECT,
+      { session_id: 's1', command_id: 'cmd-r1', runtime_id: 'rt-1' },
+      { commandId: 'cmd-r1', runtimeId: 'rt-1', immediateAck: true },
+    );
+    await vi.waitFor(() => expect(source.ackCalls.length).toBe(1));
+    expect(d.pendingAckCount).toBe(1);
+    // 退避后自驱动重试成功出队——修复前此处无任何触发点（留桶等 10min GC 误杀）。
+    // pendingAckCount 并入 waitFor：mock 在 ackControls 入口即 push 调用记录，
+    // 出队在 await 返回后的微任务里，只盯调用数会在出队前通过。
+    await vi.waitFor(() => {
+      expect(source.ackCalls.length).toBe(2);
+      expect(d.pendingAckCount).toBe(0);
+    });
+    expect(source.ackCalls[1]!.ids).toContain('cmd-r1');
+  });
+
+  it('重试仍失败 → 只重试一次后停（不无限重试，留桶交还补拉/重连兜底）', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource();
+    source.ackImpl.fn = async () => {
+      throw new Error('ack still down');
+    };
+    const d = new ControlDispatcher({
+      handlers: { [CONTROL_KIND.SESSION_INJECT]: handler },
+      source,
+      logger: silentLogger,
+      ackRetryDelayMs: 20,
+    });
+    await d.consume(
+      CONTROL_KIND.SESSION_INJECT,
+      { session_id: 's1', command_id: 'cmd-r2', runtime_id: 'rt-1' },
+      { commandId: 'cmd-r2', runtimeId: 'rt-1', immediateAck: true },
+    );
+    // 首冲 + 单次重试 = 恰好 2 次调用。
+    await vi.waitFor(() => expect(source.ackCalls.length).toBe(2));
+    expect(d.pendingAckCount).toBe(1);
+    // 等 4 个退避窗，确认没有第三次（无限重试回归封堵）。
+    await new Promise((r) => setTimeout(r, 80));
+    expect(source.ackCalls.length).toBe(2);
+    expect(d.pendingAckCount).toBe(1);
+  });
+
+  it('退避窗内多次失败不叠加定时器（同 key 去重，合并一次重试）', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource();
+    source.ackImpl.fn = async () => {
+      throw new Error('ack down');
+    };
+    const d = new ControlDispatcher({
+      handlers: { [CONTROL_KIND.SESSION_INJECT]: handler },
+      source,
+      logger: silentLogger,
+      ackRetryDelayMs: 40,
+    });
+    for (const cid of ['cmd-d1', 'cmd-d2']) {
+      await d.consume(
+        CONTROL_KIND.SESSION_INJECT,
+        { session_id: 's1', command_id: cid, runtime_id: 'rt-1' },
+        { commandId: cid, runtimeId: 'rt-1', immediateAck: true },
+      );
+    }
+    // 两次首冲各失败，但退避定时器只挂一个。
+    await vi.waitFor(() => expect(source.ackCalls.length).toBe(2));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(source.ackCalls.length).toBe(3);
+    expect(d.pendingAckCount).toBe(2);
+  });
+
+  it('冲刷成功不挂重试定时器（无多余 POST）', async () => {
+    const handler = vi.fn(async () => undefined);
+    const source = makeSource();
+    const d = new ControlDispatcher({
+      handlers: { [CONTROL_KIND.SESSION_INJECT]: handler },
+      source,
+      logger: silentLogger,
+      ackRetryDelayMs: 20,
+    });
+    await d.consume(
+      CONTROL_KIND.SESSION_INJECT,
+      { session_id: 's1', command_id: 'cmd-r4', runtime_id: 'rt-1' },
+      { commandId: 'cmd-r4', runtimeId: 'rt-1', immediateAck: true },
+    );
+    await vi.waitFor(() => {
+      expect(source.ackCalls.length).toBe(1);
+      expect(d.pendingAckCount).toBe(0);
+    });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(source.ackCalls.length).toBe(1);
+  });
+
   it('immediateAck 但 runtimeId 缺省（UNKNOWN 桶）→ 不立即 POST，维持入队等捎带', async () => {
     const handler = vi.fn(async () => undefined);
     const source = makeSource();
