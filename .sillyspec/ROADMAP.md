@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-29
+最近更新：2026-09-07
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-09-07 · 会话任务执行面板（任务进度一眼可见 + 持久化）
+
+- **session-task-execution-panel**（2026-09-04~07，brainstorm→plan→execute→verify 全流程 PASS，10 task/7 Wave，实现 d4fdcc7ac 已推送+阿里云生产部署验证）：会话头部新增「⚙ 任务执行」折叠面板（方案 B，D-004 自主决策已追认）——折叠态一行常驻摘要（运行中 N·任务 M 成功 X 失败 Y·轮次 K），展开三页签：①任务清单（新表 agent_session_task 持久化：(session_id,task_id) 唯一 upsert、终态定格、run_id 仅索引无硬 FK、会话级联删除；GET /sessions/{id}/tasks 快照端点鉴权同 runs 限 200 + agent_task_status 上报旁路落库失败不影响 SSE 转发）+useSessionTasks hook（快照/实时归并/refreshSignal 重连对账三链路）；②运行中（agent-task-card/bash-progress-card/team-task-block 三类卡复用 props 注入）；③轮次历史（listSessionRuns 自取数，惰性取数——首次查看才拉防灌水对账计数）。配套：applyAgentTaskStatusEvent 等值抽出 agent-task-store（session-panel 保留 re-export）、gen:types 同步、前端 22 新用例+session-panel 系 17 文件回归全绿、后端 18 用例、R-07 查证 plan_mode_entered 无历史回放→总纲降级仅活跃轮显示。坑沉淀：useNotify 每渲染返回新对象，直接进 useCallback 依赖会无限重拉（ref 稳定化修复，已入模块卡注释）。
 
 ### 2026-09-02 · 工作台活跃变更总览卡片（机器 sillyspec 进度三端链）
 
