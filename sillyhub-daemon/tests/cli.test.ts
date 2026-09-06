@@ -199,6 +199,8 @@ describe('TestStatus (test_cli.py)', () => {
     expect(output).toContain('running');
     expect(output).toContain('rt-live-8001');
     expect(output).toContain('http://127.0.0.1:8001');
+    // 反查成功 → 不出回退提示行（ql-20260906-001）。
+    expect(output).not.toContain('提示：');
   });
 
   // ql-20260818-001：lock 指向的 per-server config 不存在 → 回退 DEFAULT 配置
@@ -217,6 +219,26 @@ describe('TestStatus (test_cli.py)', () => {
     expect(code).toBe(0);
     expect(output).toContain('running');
     expect(output).toContain('http://localhost:8000');
+    // ql-20260906-001：运行中但反查失败 → 五字段照旧 + 追加中文提示行揭示回退
+    //（生产实证：未注册 daemon 显示 localhost 旧档案，掩盖机器未上线）。
+    expect(output).toContain('提示：');
+    expect(output).toContain('默认档案');
+  });
+
+  // ql-20260906-001：运行中且 locks 目录为空（未注册 daemon 的真实形态——
+  // 无 agent 不注册 → 无运行锁）→ 同样出回退提示。
+  it('status_running_no_locks_shows_fallback_hint: 无运行锁 → DEFAULT 档案 + 提示行', async () => {
+    await cli.writePid(process.pid);
+    const daemonDir = join(tmpDir, '.sillyhub', 'daemon');
+    mkdirSync(join(daemonDir, 'locks'), { recursive: true });
+    // 不写任何 lock 文件。
+
+    const code = await cli.statusAction();
+    const output = out.writes.join('');
+    expect(code).toBe(0);
+    expect(output).toContain('running');
+    expect(output).toContain('http://localhost:8000');
+    expect(output).toContain('提示：');
   });
 });
 

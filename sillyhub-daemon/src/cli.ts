@@ -1373,6 +1373,11 @@ export async function statusAction(): Promise<number> {
   if (running && pid !== null) {
     config = await resolveRunningDaemonConfig(pid);
   }
+  // ql-20260906-001：运行中但反查失败 → 下方 Runtime ID / Server URL 是 DEFAULT
+  // 档案，与运行进程实际连接的 server 可能完全不符（2026-09-05 生产实证：未
+  // 注册 daemon 跑着，status 显示 localhost:8000 旧档案，掩盖机器未上线事实）。
+  // 五个规范字段输出不变（task-22 逐字断言），记标志在字段后追加中文提示行。
+  const fellBackToDefault = config === null;
   if (config === null) {
     try {
       config = await loadConfigFn(DEFAULT_CONFIG.server_url);
@@ -1402,6 +1407,14 @@ export async function statusAction(): Promise<number> {
   process.stdout.write(`Runtime ID:  ${config.runtime_id}\n`);
   process.stdout.write(`Server URL:  ${config.server_url}\n`);
   process.stdout.write(`Config dir:  ${DEFAULT_CONFIG_DIR}\n`);
+  if (running && fellBackToDefault) {
+    // 仅运行中且反查失败才提示：stopped 时读 DEFAULT 本就是既定语义（无运行
+    // 进程可反查），加了反而噪声。
+    process.stdout.write(
+      '提示：未能反查运行进程的实际 server 配置（无运行锁或 per-server 档案缺失），'
+        + '以上 Runtime ID / Server URL 为默认档案，可能与运行进程实际不符。\n',
+    );
+  }
   // task-03（2026-08-29-daemon-selfupdate-safety S3 / FR-01）：pending-update.json
   // 存在时追加等待空闲升级行（本地可见性；后端横幅走 task-05 心跳透传）。读失败
   // / 无效结构视为无 pending（readPendingUpdateFile 统一口径），不中断 status。

@@ -344,3 +344,8 @@
 根因：close 杀进程后不会再有收敛帧（agent_settled/turn/completed），exit handler 因 closing 早退不兜底，waiter 无人释放→协程+闭包泄漏且 finally 清理被跳过（codex 既有模式，pi 复制引入同款）
 方案：释放器挂 handle 内部槽（pi _releaseSettledWaiters / codex _finishTurnOnClose→cancelled）+ _close 置 closing 后调用 + finally 清槽；codex 主循环补 closing 守卫防假 result 上报（对齐 pi 既有守卫）
 结果：pi-rpc-driver + codex-app-server-driver(+approval) 3 套件 114 passed（各 +1 回归：turn 在途 close→3s 超时兜底断言 consume 返回且零上报）；tsc 0；模块文档同步
+
+## ql-20260906-001-b9bc | 2026-09-06 22:46:21 | 修复 daemon 四个排查遗留缺陷：macos 自启 plist 不写 PATH 致机器不上线；无 agent 不注册静默无告警；status 回退显示 DEFAULT 档案误导；停机 suspend-batch 404
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/autostart/macos.ts

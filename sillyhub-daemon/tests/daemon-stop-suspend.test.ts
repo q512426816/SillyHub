@@ -178,13 +178,17 @@ function buildDaemon(opts: {
     recoveryClient: ReturnType<typeof mkRecoveryClient>;
   };
   client?: ReturnType<typeof mkClient>;
+  /** ql-20260906-001：无 agent 形态（detect 全 unavailable → 不注册）。 */
+  noAgents?: boolean;
 }) {
   const client = opts.client ?? mkClient();
   const ws = mkWsFactory();
   const detector = {
-    detectAgents: vi.fn(async () => [
-      { provider: 'claude', path: 'C:\\bin\\claude.exe', status: 'available' },
-    ]),
+    detectAgents: vi.fn(async () =>
+      opts.noAgents
+        ? [{ provider: 'claude', path: 'C:\\bin\\claude.exe', status: 'unavailable' }]
+        : [{ provider: 'claude', path: 'C:\\bin\\claude.exe', status: 'available' }],
+    ),
   };
   const options: Record<string, unknown> = {
     detector,
@@ -265,6 +269,20 @@ describe('task-08：daemon 优雅停止挂起（suspend-batch）', () => {
     await daemon.start();
     await expect(daemon.stop()).resolves.toBeUndefined();
     expect(client.markOffline).toHaveBeenCalledWith('srv-rt-claude');
+  });
+
+  // ql-20260906-001：本进程从未注册（无 agent）→ backend 无实例行，POST 必
+  // 404（2026-09-05 生产实证）。stop 跳过 suspend-batch，不发必败请求；
+  // 遗留 active 会话由 backend 600s offline sweep 兜底（A5 fallback，语义不劣化）。
+  it('未注册 daemon（无 agent）stop 跳过 suspend-batch：不发必败 404 请求', async () => {
+    const client = mkClient();
+    const { daemon } = buildDaemon({ client, noAgents: true });
+    holder = daemon;
+    await daemon.start();
+    expect(client.register).not.toHaveBeenCalled();
+    await expect(daemon.stop()).resolves.toBeUndefined();
+    expect(client.suspendSessions).not.toHaveBeenCalled();
+    expect(client.markOffline).not.toHaveBeenCalled();
   });
 
   it('stop 收尾：遗留待恢复记录（网络失败入队）合并落盘，不被 flush 只写 snapshot 冲掉', async () => {
