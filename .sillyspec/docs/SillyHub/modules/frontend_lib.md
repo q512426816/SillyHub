@@ -58,6 +58,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - `use-agent-run-stream` — run 级 SSE 订阅
   - `use-agent-runs` — Agent 运行列表 5s 条件轮询
   - `use-daemon-machines` — 机器级列表 + 会话，refetchInterval 15s
+  - `use-session-tasks`（hooks/，2026-09-04-session-task-execution-panel）— 会话任务清单三链路：mount/sessionId 变化拉 `listSessionTasks` 快照（lib/daemon.ts 新函数，形态对齐 listSessionRuns，类型=api-types 生成 AgentSessionTaskRead）+applyEvent 按 task_id upsert 实时合并（复用 agent-task-store 归约，单元素数组过桥规避 slice(-6) 截断）+refreshSignal 重连对账重拉；纯 useState/useEffect 零 react-query（dialog 无 QueryClientProvider）；useNotify 经 ref 稳定化（其每渲染新对象会让 load useCallback 无限重拉——task-10 回归实证）；AgentSessionTaskView extends AgentTaskEntry 使 AgentTaskCard 零适配层直接渲染
   - `use-workspace-context` — 从 URL 重建工作区上下文写 workspace store
   - `agent-stream` — agent 事件流底层
 - 工具：

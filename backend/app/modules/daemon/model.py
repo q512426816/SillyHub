@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     text,
 )
@@ -122,6 +124,17 @@ class DaemonInstance(BaseModel, table=True):
     # 或版本过低）。32KB 载荷预算与 changes N=50 截断在 daemon 侧执行，backend
     # JSON 原样落库（写入/清除逻辑在心跳 handler）。
     sillyspec_status: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 心跳上报的 sillyspec 命令执行结果槽（2026-09-04-conflict-resolve-entry
+    # FR-05 / D-004@v1）：daemon 侧 resolve / ghost_cleanup 执行器的最新结果
+    # （{action, change, strategy, state, exit_code, error, executed_at}，
+    # latest-wins 只留最新一条，R-07）。语义同 sillyspec_update（权威注释见上）——
+    # 心跳载荷该键为对象即整包直写，键不出现即置 NULL 清除（daemon 终态窗口
+    # 过期后停发该键，不发显式 null，X-04 两态）；register 恒清（结果槽在
+    # 内存，进程重启即失）。NULL=无近期命令结果。
+    sillyspec_command_result: dict | None = Field(
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
@@ -620,4 +633,135 @@ class DaemonControlCommand(BaseModel, table=True):
     expires_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+class AgentSessionTask(BaseModel, table=True):
+    """Persisted agent task status within a session (task execution panel).
+
+    2026-09-04-session-task-execution-panel task-01（FR-05 / D-006@v1）：
+    agent 任务粒度状态（SSE ``agent_task_status`` 事件契约，schema.py
+    :class:`AgentTaskStatusEvent`）的服务端持久化——此前只存在前端组件
+    内存态，刷新/切会话即丢。一行 = 会话内一个 ``task_id``（(session_id,
+    task_id) 唯一约束即 upsert 定位键）。
+
+    数据流：producer=上报端点 ``notify_agent_task_status`` 调 upsert 服务
+    （task-03 ``agent_task_store.py``：无则插入 started_at=now，有则刷新，
+    终态定格不再回退）；consumer=``GET /sessions/{id}/tasks`` 快照端点
+    （task-02，updated_at desc 最近 200 条）+ 前端 SSE 实时合并。
+
+    刻意**不做逐事件流水表**——upsert 单行承载任务全生命周期即可支撑
+    清单展示与刷新恢复，控写放大（design §数据模型 / R-03）；``run_id``
+    随事件入库（事件必填字段）但**不建对 agent_runs 的硬外键**（避免与
+    agent_runs 删除链耦合），仅建索引支撑后续按 run 分组增强。
+    """
+
+    __tablename__ = "agent_session_task"
+    __table_args__ = (
+        # upsert 定位键：同会话同 task 一行。模型与迁移建表两侧同语义
+        # （grants/model.py 先例注释口径，20260905004300）。
+        UniqueConstraint(
+            "session_id",
+            "task_id",
+            name="uq_agent_session_task_session_task",
+        ),
+        Index("idx_agent_session_task_session_id", "session_id"),
+        Index("idx_agent_session_task_run_id", "run_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    session_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # 事件必填字段（schema.py AgentTaskStatusEvent.run_id），随事件入库；
+    # 无 FK 硬约束（design §数据模型——避免与 agent_runs 删除链耦合）。
+    run_id: uuid.UUID = Field(
+        sa_column=Column(Uuid(as_uuid=True), nullable=False),
+    )
+    task_id: str = Field(
+        sa_column=Column(String(255), nullable=False),
+    )
+    task_name: str = Field(
+        sa_column=Column(String(512), nullable=False),
+    )
+    # running / completed / failed / stopped（free-form string column，
+    # 与 lease.status 同风格免后续加值迁移）；终态定格语义在 upsert 服务。
+    status: str = Field(
+        default="running",
+        sa_column=Column(String(20), nullable=False),
+    )
+    # 事件契约字段（int，schema.py progress）；当前后端无总量基准恒 NULL，
+    # 列保留对齐契约防漂移（design 字段取舍说明 / D-006@v1）。
+    progress: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    # 「正在做什么」摘要（task_progress.summary），逐次覆盖。
+    summary: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    # 终态消息（task_notification 失败/完成文案，前端归约消费）。
+    message: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    last_tool_name: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
+    # 与前端 tool 段 id 关联（卡片定位 / 跨轮归位关联键）。
+    tool_use_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
+    elapsed_ms: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    total_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    tool_uses: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    # 事件契约 ``async``（Python 关键字，DB/ORM 侧更名 is_async）。
+    is_async: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False),
+    )
+    # 首次 upsert 插入时置 now（task-03）。
+    started_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    # 终态时置 now（task-03）。
+    finished_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
     )

@@ -1253,6 +1253,43 @@ class AgentTaskStatusEvent(BaseModel):
     async_: bool | None = Field(None, alias="async")
 
 
+class AgentSessionTaskRead(BaseModel):
+    """Response body for GET /sessions/{session_id}/tasks（任务清单快照，task-02 / FR-06）。
+
+    2026-09-04-session-task-execution-panel：AgentSessionTask 持久化行（model.py）
+    的读侧 DTO。字段与 AgentTaskStatusEvent 事件契约一一对应（snake_case 对齐
+    仓内 DTO 惯例，D-006@v1）；事件契约名 ``async`` 在表列与 DTO 均落为
+    ``is_async``（Python 关键字更名，与 AgentSessionTask.is_async 同名）。
+    ``created_at`` 仅落库不外露（快照按 updated_at 排序，无消费方）。
+
+    数据流：producer=model.py AgentSessionTask 行（task-03 upsert 写入）→
+    GET 端点 model_validate 逐行序列化 → consumer=前端任务清单页签
+    （useSessionTasks 快照拉取，刷新/重连后恢复）。
+    """
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    task_id: str
+    task_name: str
+    # running / completed / failed / stopped（表列 free-form str，同 lease.status）
+    status: str
+    progress: int | None = None
+    summary: str | None = None
+    message: str | None = None
+    last_tool_name: str | None = None
+    tool_use_id: str | None = None
+    elapsed_ms: int | None = None
+    total_tokens: int | None = None
+    tool_uses: int | None = None
+    is_async: bool = False
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime
+
+
 class PlanResponseDecision(enum.StrEnum):
     """plan 响应决策（前端 → 后端，design §接口定义）。
 

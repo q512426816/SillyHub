@@ -157,6 +157,16 @@ export interface DaemonMachineRead {
    * MachineSillySpecStatusRead（宽松透出，字段全 nullable 宁宽勿断），不手写 DTO。
    */
   sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
+  /**
+   * sillyspec 命令结果槽嵌套（2026-09-04-conflict-resolve-entry task-08 / FR-05）：
+   * daemon 侧冲突裁决 / ghost 清理命令执行器的最新结果（action/change/strategy/
+   * state/exit_code/error/executed_at 七字段），经心跳落库后在终态展示窗口（约
+   * 10 分钟）内随机器视图透出。null=窗口已过期 / register 恒清；undefined=旧
+   * 后端缺该字段——均按无回报消费（PlatformSyncSection 等 150s 后恢复可重试）。
+   * 嵌套类型引用 api-types 生成版 MachineSillySpecCommandResultRead（宽松透出，
+   * 七字段全 nullable 宁宽勿断），不手写 DTO。
+   */
+  sillyspec_command_result?: components["schemas"]["MachineSillySpecCommandResultRead"] | null;
 }
 
 /** GET /api/daemon/machines 查询参数（design §5.1）。 */
@@ -243,6 +253,44 @@ export async function triggerMachineSillySpecUpdate(
 ): Promise<{ sent: boolean }> {
   return apiFetch(
     `/api/daemon/machines/${encodeURIComponent(instanceId)}/sillyspec-update`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * POST /api/daemon/machines/{instance_id}/sillyspec-resolve — 推送 sillyspec
+ * 冲突裁决指令（admin，2026-09-04-conflict-resolve-entry task-08 / FR-02 /
+ * D-001@v1）。fire-and-forget 无回执（同 SILLYSPEC_UPDATE）：daemon 收到后
+ * 调本机 sillyspec CLI 执行裁决（strategy 下划线字面量 → --keep-local /
+ * --take-platform flag 映射归 daemon 单点），结果经心跳 sillyspec_command_result
+ * 字段回传（终态窗口内，不走本消息）。change 白名单与 strategy Literal 校验在
+ * 后端 422 兜底。失败抛 ApiError（404 归属 / 504 DaemonRuntimeOffline）。
+ * 返回 {sent}，仿 triggerMachineSillySpecUpdate。
+ */
+export async function triggerMachineSillySpecResolve(
+  instanceId: string,
+  body: components["schemas"]["MachineSillySpecResolveRequest"],
+): Promise<{ sent: boolean }> {
+  return apiFetch(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/sillyspec-resolve`,
+    { method: "POST", json: body },
+  );
+}
+
+/**
+ * POST /api/daemon/machines/{instance_id}/sillyspec-ghost-cleanup — 推送
+ * sillyspec ghost 清理指令（admin，2026-09-04-conflict-resolve-entry task-08 /
+ * FR-03 / D-001@v1），无请求体。fire-and-forget 无回执（同 SILLYSPEC_UPDATE）：
+ * daemon 收到后先 ``doctor --cleanup-ghosts --confirm`` 清本地幽灵行，再
+ * ``platform sync`` 收敛平台侧；结果经心跳 sillyspec_command_result 字段回传
+ * （终态窗口内，不走本消息）。失败抛 ApiError（404 归属 / 504
+ * DaemonRuntimeOffline）。返回 {sent}，仿 triggerMachineCleanup。
+ */
+export async function triggerMachineSillySpecGhostCleanup(
+  instanceId: string,
+): Promise<{ sent: boolean }> {
+  return apiFetch(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/sillyspec-ghost-cleanup`,
     { method: "POST" },
   );
 }
@@ -3788,6 +3836,33 @@ export async function listSessionRuns(
 ): Promise<SessionRunRead[]> {
   return apiFetch<SessionRunRead[]>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/runs`,
+    { signal: opts?.signal },
+  );
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/tasks 返回行（2026-09-04-session-task-execution-panel
+ * task-06 / FR-02）：后端 AgentSessionTaskRead 读侧 DTO——agent_session_task
+ * 持久化行（AgentTaskStatusEvent 事件契约字段一一对应，事件名 ``async`` 落
+ * DTO 为 ``is_async``，D-006@v1）。类型经 type 别名引用 api-types 生成产物
+ * （写法对齐 SharedAgentView 先例，禁手写——CLAUDE.md 规则 21，后端 schema
+ * 漂移在下次 gen:types + tsc 时暴露）。
+ */
+export type AgentSessionTaskRead = components["schemas"]["AgentSessionTaskRead"];
+
+/**
+ * GET /api/daemon/sessions/{id}/tasks — 会话任务清单快照（task-06 / FR-02 /
+ * FR-07）：agent_session_task 持久化行按 updated_at 倒序取最近 200 条；不上报
+ * 任务的会话（多引擎差异 / D-003@v1 空态降级）返回 []。鉴权与 runs 端点同款
+ * （get_agent_session + TaskRunAgentUser 读端口径）。形态对齐 listSessionRuns：
+ * opts.signal 透传 apiFetch（AbortSignal，调用方按需注入）。
+ */
+export async function listSessionTasks(
+  sessionId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<AgentSessionTaskRead[]> {
+  return apiFetch<AgentSessionTaskRead[]>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/tasks`,
     { signal: opts?.signal },
   );
 }

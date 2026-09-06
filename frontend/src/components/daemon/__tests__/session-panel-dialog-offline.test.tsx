@@ -12,7 +12,8 @@ vi.mock("@/components/ui/markdown-text", () => ({
 const sessionApi = vi.hoisted(() => ({
   // 会话用量条（session-usage-bar）自取数：必须 resolve（裸 vi.fn() 返回
   // undefined 会被组件 .then 同步崩）；null = 按无数据不渲染。
-  getSessionUsage: vi.fn().mockResolvedValue(null),
+  getSessionUsage: vi.fn().mockResolvedValue(null),
+  listSessionTasks: vi.fn().mockResolvedValue([]),  // 任务执行面板快照（task-10 补 mock 防真实 fetch）
   createSession: vi.fn().mockResolvedValue({ id: "s-1" }),
   injectSession: vi.fn().mockResolvedValue(undefined),
   interruptSession: vi.fn().mockResolvedValue(undefined),

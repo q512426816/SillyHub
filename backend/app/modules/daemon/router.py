@@ -26,7 +26,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy import select as sa_select
@@ -42,7 +42,13 @@ from app.modules.agent.schema import AgentRunLogEntry
 from app.modules.auth.api_key_service import API_KEY_PREFIX, ApiKeyService
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.agent_task_store import upsert_agent_task
+from app.modules.daemon.model import (
+    AgentSessionTask,
+    DaemonInstance,
+    DaemonRuntime,
+    DaemonTaskLease,
+)
 from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.permission_service import (
     DaemonPermissionService,
@@ -63,6 +69,7 @@ from app.modules.daemon.run_sync.service import (
 from app.modules.daemon.schema import (
     AgentSessionListResponse,
     AgentSessionRead,
+    AgentSessionTaskRead,
     AgentTaskStatusEvent,
     BashChunkEvent,
     BashStatusEvent,
@@ -341,6 +348,30 @@ class DaemonHeartbeatSillySpecStatus(BaseModel):
     pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
 
 
+class DaemonHeartbeatSillySpecCommandResult(BaseModel):
+    """心跳 sillyspec_command_result 载荷（2026-09-04-conflict-resolve-entry FR-05）.
+
+    daemon 侧 sillyspec 命令执行器（resolve / ghost_cleanup）的最新结果槽投影
+    （design §7 心跳结果字段）：action 当前取值 ``resolve`` / ``ghost_cleanup``，
+    strategy 取值 ``keep_local`` / ``take_platform``，state 取值 ``success`` /
+    ``failed``——均不收紧成 Literal（DaemonHeartbeatSillySpecUpdate.state 同
+    决策：收紧会让未来新增取值的整条心跳 422，心跳是保活通道宁宽勿断）；全字段
+    宽松可选，不加 max_length，``executed_at`` 为 ISO8601 字符串原样承载（机器
+    本地钟，跨机比较仅作辅助——X-18）；``error`` 已在 daemon 侧截断 ≤200 字。
+    携带语义两态（D-004@v1）：终态窗口内每跳携带对象（latest-wins 只留最新一条，
+    R-07），窗口过期后键即不出现——backend 侧 None=置 NULL 清除，daemon 无需
+    也不得发送显式 null（X-04 修订）。
+    """
+
+    action: str | None = None
+    change: str | None = None
+    strategy: str | None = None
+    state: str | None = None
+    exit_code: int | None = None
+    error: str | None = None
+    executed_at: str | None = None
+
+
 class DaemonHeartbeatRequest(BaseModel):
     """Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。
 
@@ -380,6 +411,12 @@ class DaemonHeartbeatRequest(BaseModel):
     # 不清除，三态矩阵 design §5）。旧 daemon 无该键心跳照常通过（default=None，
     # NFR-01）。
     sillyspec_status: DaemonHeartbeatSillySpecStatus | None = Field(default=None)
+    # sillyspec 命令执行结果槽（2026-09-04-conflict-resolve-entry FR-05 /
+    # D-004@v1）——语义同 sillyspec_update / sillyspec_status（None=清除）：键不
+    # 出现即置 NULL（daemon 终态窗口过期后停发该键，无需显式 null，X-04 两态）；
+    # 对象=整包直写（latest-wins，daemon 只保留最新一条，R-07）。旧 daemon 无该
+    # 键心跳照常通过（default=None，兼容）。
+    sillyspec_command_result: DaemonHeartbeatSillySpecCommandResult | None = Field(default=None)
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
 
 
@@ -593,6 +630,16 @@ async def daemon_heartbeat(
         sillyspec_status=(
             data.sillyspec_status.model_dump() if data.sillyspec_status is not None else None
         ),
+        # 2026-09-04-conflict-resolve-entry task-03 / FR-05（D-004@v1）：命令结果
+        # 槽走 sillyspec_update 同款语义（None=清除置 NULL——daemon 终态窗口过期
+        # 后停发该键，无「保持旧值」三态分支，X-04）。model_dump 后交服务层 dict
+        # 整包直写（latest-wins 结果槽非状态机，无 since/upsert，dict 契约同
+        # providers/pending_update 先例）。
+        sillyspec_command_result=(
+            data.sillyspec_command_result.model_dump()
+            if data.sillyspec_command_result is not None
+            else None
+        ),
         # task-03（security-audit-remediation / FR-12）：心跳归属校验——
         # instance.user_id 必须等于当前认证 user，不匹配 404（owner-only）。
         actor_user_id=user.id,
@@ -753,6 +800,26 @@ class MachineSillySpecStatusRead(BaseModel):
     pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
 
 
+class MachineSillySpecCommandResultRead(BaseModel):
+    """机器视图 sillyspec_command_result 嵌套（2026-09-04-conflict-resolve-entry FR-05）。
+
+    即 daemon_instances.sillyspec_command_result JSON 列宽松透出（design §7）：
+    daemon 侧 sillyspec 命令执行器的最新结果槽（action/change/strategy/state/
+    exit_code/error/executed_at）。与 sillyspec_status 同款零转换——backend 不补
+    字段，落库形态=上报形态（七字段全宽松可选，与心跳 DTO 同形免三胞胎模型漂移）。
+    NULL（终态展示窗口已过期 / register 恒清）→ 机器视图字段为 null；executed_at
+    为机器本地钟 ISO8601 字符串原样透传（跨机比较仅作辅助——X-18）。
+    """
+
+    action: str | None = None
+    change: str | None = None
+    strategy: str | None = None
+    state: str | None = None
+    exit_code: int | None = None
+    error: str | None = None
+    executed_at: str | None = None
+
+
 class DaemonMachineReadWithPending(DaemonMachineRead):
     """DaemonMachineRead + 机器级 pending_update + sillyspec 三字段（GET /machines 透出用）。
 
@@ -770,6 +837,10 @@ class DaemonMachineReadWithPending(DaemonMachineRead):
     # sillyspec 三字段同款子类扩展；组装接线（_build_machine_read 逐字段构造）
     # 归 task-03，本卡仅定义读取模型进 OpenAPI（供 task-05 gen:types）。
     sillyspec_status: MachineSillySpecStatusRead | None = None
+    # 2026-09-04-conflict-resolve-entry task-03 / FR-05：命令结果槽同款子类扩展
+    # 跟随 sillyspec 四字段（组装接线在 _build_machine_read 逐字段构造，供前端
+    # PlatformSyncSection 回显与 task-02 端点共享读视图）。
+    sillyspec_command_result: MachineSillySpecCommandResultRead | None = None
 
 
 class DaemonMachineListResponseWithPending(DaemonMachineListResponse):
@@ -888,6 +959,15 @@ def _build_machine_read(
         sillyspec_status=(
             MachineSillySpecStatusRead.model_validate(instance.sillyspec_status)
             if instance.sillyspec_status is not None
+            else None
+        ),
+        # 2026-09-04-conflict-resolve-entry task-03 / FR-05：command_result 同款
+        # 显式构造（Design Grill F2 教训——本函数逐字段构造不走 model_validate，
+        # 漏传即静默丢字段）。JSON dict→宽松同形 Read 校验（零转换投影）；
+        # NULL（终态窗口过期 / register 恒清）→ None。
+        sillyspec_command_result=(
+            MachineSillySpecCommandResultRead.model_validate(instance.sillyspec_command_result)
+            if instance.sillyspec_command_result is not None
             else None
         ),
         created_at=instance.created_at,
@@ -1292,6 +1372,100 @@ async def trigger_machine_sillyspec_update(
 
     hub = get_daemon_ws_hub()
     sent = await hub.send_sillyspec_update(instance_id)
+    if not sent:
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        raise DaemonRuntimeOffline(
+            "目标机器当前离线或消息下发失败，请确认守护进程在线后重试。",
+            details={"daemon_instance_id": str(instance_id)},
+        )
+    return {"sent": True}
+
+
+class MachineSillySpecResolveRequest(BaseModel):
+    """Body for POST /machines/{instance_id}/sillyspec-resolve（task-02 / FR-02）。
+
+    ``strategy`` 用 Literal 限定 keep_local / take_platform（非法值 422）；
+    ``change`` 走白名单正则（首字符字母数字，其余字母数字/./-/_，长度 1-128）
+    且显式拒绝含 ``..``（防路径穿越；daemon 侧 CLI ``assertSafeChangeName``
+    SEC-05 双保险，backend 只做格式校验不查存在性——机器才是事实源）。
+    """
+
+    change: str
+    strategy: Literal["keep_local", "take_platform"]
+
+    @field_validator("change")
+    @classmethod
+    def _validate_change(cls, v: str) -> str:
+        if ".." in v or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", v) is None:
+            raise ValueError(
+                "change 仅允许字母数字与 . _ - 组成（长度 1-128，首字符须为字母数字，"
+                "且不得包含 ..）。"
+            )
+        return v
+
+
+@router.post(
+    "/machines/{instance_id}/sillyspec-resolve",
+)
+async def trigger_machine_sillyspec_resolve(
+    instance_id: uuid.UUID,
+    data: MachineSillySpecResolveRequest,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> dict[str, bool]:
+    """推送 sillyspec 冲突裁决指令到指定机器（admin，task-02 / FR-02 / D-001@v1）。
+
+    机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+    ``daemon:sillyspec_resolve``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE
+    语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 执行裁决（strategy
+    下划线字面量 → --keep-local / --take-platform flag 的映射归 daemon 侧单点），
+    结果经心跳 sillyspec_command_result 字段回传（终态窗口内，不走本消息）。
+    先 ``_get_owned_instance`` 做归属校验（越权/不存在 404，普通用户非本机防
+    存在性泄漏，owner 与平台管理员放行），离线或 WS 发送失败 → 504
+    ``DaemonRuntimeOffline``（与机器级 sillyspec-update 先例同款文案与 details）。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    sent = await hub.send_sillyspec_resolve(instance_id, data.change, data.strategy)
+    if not sent:
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        raise DaemonRuntimeOffline(
+            "目标机器当前离线或消息下发失败，请确认守护进程在线后重试。",
+            details={"daemon_instance_id": str(instance_id)},
+        )
+    return {"sent": True}
+
+
+@router.post(
+    "/machines/{instance_id}/sillyspec-ghost-cleanup",
+)
+async def trigger_machine_sillyspec_ghost_cleanup(
+    instance_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> dict[str, bool]:
+    """推送 sillyspec ghost 清理指令到指定机器（admin，task-02 / FR-03 / D-001@v1）。
+
+    机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+    ``daemon:sillyspec_ghost_cleanup``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE
+    语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 清理 ghost 行并
+    platform sync 收敛，结果经心跳 sillyspec_command_result 字段回传（终态窗口
+    内，不走本消息）。权限/归属校验与 504 结构与 sillyspec-resolve 同款
+    （RuntimeAdminUser + ``_get_owned_instance``，owner 与平台管理员放行）。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    sent = await hub.send_sillyspec_ghost_cleanup(instance_id)
     if not sent:
         from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 
@@ -2081,6 +2255,10 @@ async def notify_agent_task_status(
     last_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随
     ``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。
 
+    2026-09-04-session-task-execution-panel task-03（FR-05）：转发之外把事件
+    交给 ``upsert_agent_task``（agent_task_store.py）落库 ``agent_session_task``
+    ——持久化旁路，失败只记日志，不影响 SSE 转发与 200 返回。
+
     越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
     归属校验（404 不泄露存在性）。
     """
@@ -2091,6 +2269,18 @@ async def notify_agent_task_status(
         )
     await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     await publish_session_event(session_id, data)
+    # task-03 持久化旁路（design §兼容策略「可回退」）：SSE 主链路优先，转发与
+    # 落库不做强事务绑定——upsert 抛异常只记日志 + 回滚复位请求 session，本端点
+    # 照常返回 200（落库失败零影响，快照缺口由后续事件自愈）。
+    try:
+        await upsert_agent_task(session, data)
+    except Exception:
+        await session.rollback()
+        log.exception(
+            "agent_task_status_persist_failed",
+            session_id=str(session_id),
+            task_id=data.task_id,
+        )
     return {"ok": True}
 
 
@@ -3568,6 +3758,47 @@ async def list_session_runs(
         SessionRunRead.model_validate(run).model_copy(update={"sender_name": display_name})
         for run, display_name in rows
     ]
+
+
+# 2026-09-04-session-task-execution-panel task-02（FR-06）：任务清单快照上限。
+# upsert 单行/任务（task-03），200 与 _SESSION_RUNS_MAX 同口径覆盖面板可视历史。
+_SESSION_TASKS_MAX = 200
+
+
+@router.get(
+    "/sessions/{session_id}/tasks",
+    response_model=list[AgentSessionTaskRead],
+)
+async def list_session_tasks(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> list[AgentSessionTaskRead]:
+    """List the persisted agent task snapshot of an owned session (task-02 / FR-06).
+
+    任务清单页签的服务端快照：agent_task_status 事件落库行（AgentSessionTask，
+    task-03 upsert 写入）按 updated_at desc 取最近 _SESSION_TASKS_MAX 条，供前端
+    刷新/重连后恢复（useSessionTasks 拉取 + SSE 实时合并）。归属 / 存在性复用
+    ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与
+    runs 端点同一道闸门；查询内联在此（service.py 非本任务 allowed_path），
+    与 list_session_runs 同款口径。未上报任务的会话返回 []（D-003 空态，不报错）。
+    """
+    svc = DaemonService(session)
+    # 归属 / 存在性校验（404 on missing / cross-user / soft-deleted）。
+    await svc.get_agent_session(session_id, user.id)
+    rows = (
+        (
+            await session.execute(
+                select(AgentSessionTask)
+                .where(AgentSessionTask.session_id == session_id)
+                .order_by(AgentSessionTask.updated_at.desc())
+                .limit(_SESSION_TASKS_MAX)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [AgentSessionTaskRead.model_validate(row) for row in rows]
 
 
 @router.get(

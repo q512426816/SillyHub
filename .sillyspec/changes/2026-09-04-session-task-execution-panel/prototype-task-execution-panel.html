@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务执行面板原型 — 会话面板增强 (2026-09-04-session-task-execution-panel)</title>
+<style>
+  /* ai-native 主题 token 对照 frontend/src/styles/themes.ts（brand=violet 阶） */
+  :root {
+    --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-200: #ddd6fe;
+    --brand-500: #8b5cf6; --brand-600: #7c3aed; --brand-700: #6d28d9;
+    --bg-page: #fafafa; --bg-panel: #ffffff; --bg-subtle: #f8fafc;
+    --border: #e2e8f0; --border-strong: #cbd5e1;
+    --text-1: #1e293b; --text-2: #475569; --text-3: #94a3b8;
+    --ok: #16a34a; --ok-bg: #f0fdf4; --err: #dc2626; --err-bg: #fef2f2;
+    --run: #2563eb; --run-bg: #eff6ff; --stop: #64748b; --stop-bg: #f1f5f9;
+    --shadow: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.08);
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; background: var(--bg-page); color: var(--text-1); font-size: 13px; padding: 16px; }
+  .note { max-width: 1180px; margin: 0 auto 12px; padding: 10px 14px; background: var(--brand-50); border: 1px solid var(--brand-200); border-radius: var(--radius); color: var(--brand-700); font-size: 12.5px; }
+  .layout { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 260px minmax(0,1fr); gap: 14px; height: 780px; }
+
+  /* ===== 左栏会话列表（现状不动，示意） ===== */
+  .side { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; overflow: auto; }
+  .side h3 { font-size: 12px; color: var(--text-3); font-weight: 600; margin: 4px 0 8px; padding-left: 4px; }
+  .s-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; cursor: default; }
+  .s-item:hover { background: var(--bg-subtle); }
+  .s-item.active { background: var(--brand-50); border: 1px solid var(--brand-200); }
+  .s-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.run { background: var(--run); box-shadow: 0 0 0 3px var(--run-bg); animation: pulse 1.6s infinite; }
+  .dot.ok { background: var(--ok); } .dot.idle { background: var(--text-3); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px transparent; } }
+  .s-meta { color: var(--text-3); font-size: 11.5px; margin-top: 2px; padding-left: 14px; }
+
+  /* ===== 右侧会话主面板 ===== */
+  .main { display: flex; flex-direction: column; min-width: 0; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .hdr { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .hdr .t { font-weight: 700; font-size: 14px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--run-bg); color: var(--run); font-weight: 600; }
+  .hdr .spacer { flex: 1; }
+  .seg { display: flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; font-size: 12px; }
+  .seg span { padding: 4px 12px; color: var(--text-2); } .seg span.on { background: var(--brand-600); color: #fff; }
+  .btn { border: 1px solid var(--border-strong); background: var(--bg-panel); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+  .usage { display: flex; gap: 14px; padding: 6px 14px; border-bottom: 1px solid var(--border); color: var(--text-3); font-size: 11.5px; background: var(--bg-subtle); }
+  .usage b { color: var(--text-2); font-weight: 600; }
+
+  /* ===== ★ 任务执行面板（本变更新增） ===== */
+  .tep { border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+  .tep-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; cursor: pointer; user-select: none; }
+  .tep-bar:hover { background: var(--bg-subtle); }
+  .tep-bar .icon { color: var(--brand-600); font-weight: 700; }
+  .tep-bar .sum { color: var(--text-2); font-size: 12.5px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .sum .chip { display: inline-flex; align-items: center; gap: 5px; }
+  .sum .chip.run { color: var(--run); font-weight: 600; }
+  .sum .chip.ok { color: var(--ok); } .sum .chip.err { color: var(--err); }
+  .caret { margin-left: auto; color: var(--text-3); transition: transform .2s; }
+  .tep.open .caret { transform: rotate(90deg); }
+  .tep-body { display: none; border-top: 1px dashed var(--border); }
+  .tep.open .tep-body { display: block; }
+  .tep-tabs { display: flex; gap: 2px; padding: 8px 14px 0; }
+  .tep-tab { padding: 5px 12px; border-radius: 8px 8px 0 0; font-size: 12.5px; color: var(--text-2); cursor: pointer; border: 1px solid transparent; }
+  .tep-tab.on { background: var(--brand-50); color: var(--brand-700); border-color: var(--brand-200); border-bottom-color: transparent; font-weight: 600; }
+  .tep-pane { display: none; padding: 10px 14px 12px; max-height: 300px; overflow: auto; background: linear-gradient(var(--brand-50), var(--bg-panel) 24px); }
+  .tep-pane.on { display: block; }
+  .plan { padding: 8px 10px; border: 1px solid var(--brand-200); background: var(--brand-50); border-radius: 8px; margin-bottom: 10px; font-size: 12px; color: var(--brand-700); }
+  .plan b { display: block; margin-bottom: 2px; }
+
+  /* 步骤/任务行 */
+  .task-row { display: flex; align-items: flex-start; gap: 9px; padding: 7px 8px; border-radius: 8px; }
+  .task-row:hover { background: var(--bg-subtle); }
+  .st { flex: none; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; margin-top: 1px; }
+  .st.pending { border: 1.5px solid var(--border-strong); color: transparent; }
+  .st.run { background: var(--run-bg); color: var(--run); animation: spinPulse 1.8s infinite; }
+  .st.ok { background: var(--ok-bg); color: var(--ok); }
+  .st.err { background: var(--err-bg); color: var(--err); }
+  .st.stop { background: var(--stop-bg); color: var(--stop); }
+  @keyframes spinPulse { 50% { opacity: .45; } }
+  .tk-main { flex: 1; min-width: 0; }
+  .tk-name { font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+  .tk-what { color: var(--text-2); font-size: 12px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tk-meta { color: var(--text-3); font-size: 11px; margin-top: 1px; display: flex; gap: 8px; }
+  .pill { flex: none; font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600; margin-top: 2px; }
+  .pill.run { background: var(--run-bg); color: var(--run); } .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.err { background: var(--err-bg); color: var(--err); } .pill.stop { background: var(--stop-bg); color: var(--stop); }
+
+  /* 运行中卡片（复用现有 agent-task-card / bash-progress-card / team-task-block 形态） */
+  .card { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; background: var(--bg-panel); box-shadow: var(--shadow); }
+  .card-h { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .card-h .tag { font-size: 10.5px; color: var(--brand-700); background: var(--brand-100); padding: 1px 7px; border-radius: 999px; }
+  .card-h .live { color: var(--run); animation: spinPulse 1.4s infinite; }
+  .card-b { color: var(--text-2); font-size: 12px; margin-top: 4px; font-family: ui-monospace, Consolas, monospace; background: var(--bg-subtle); border-radius: 6px; padding: 6px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .team-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+
+  /* 轮次历史 */
+  .turn-row { display: grid; grid-template-columns: 44px 60px 70px 1fr 86px; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 8px; font-size: 12px; }
+  .turn-row:hover { background: var(--bg-subtle); }
+  .turn-row .no { color: var(--text-3); font-family: ui-monospace, monospace; }
+  .empty { color: var(--text-3); text-align: center; padding: 22px 0; font-size: 12.5px; }
+
+  /* 会话主体（示意） */
+  .chat { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--bg-subtle); }
+  .msg { max-width: 76%; padding: 8px 12px; border-radius: 12px; background: var(--bg-panel); border: 1px solid var(--border); box-shadow: var(--shadow); }
+  .msg.me { align-self: flex-end; background: var(--brand-600); color: #fff; border: none; }
+  .agent-run { align-self: flex-start; color: var(--text-2); font-size: 12px; display: flex; gap: 7px; align-items: center; }
+  .inputbar { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+  .inputbar input { flex: 1; border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none; }
+  .inputbar input:focus { border-color: var(--brand-500); box-shadow: 0 0 0 3px var(--brand-100); }
+  .send { background: var(--brand-600); color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="note">原型：任务执行面板（变更 <b>2026-09-04-session-task-execution-panel</b>）——点击下方「⚙ 任务执行」摘要行可折叠/展开；面板内三个页签切换。主题对照 ai-native（brand=violet）。</div>
+<div class="layout">
+  <aside class="side">
+    <h3>会话列表（现状不动）</h3>
+    <div class="s-item active"><div class="s-title"><span class="dot run"></span>会话 A · 调研登录改版</div><div class="s-meta">运行中 · 3 个后台任务</div></div>
+    <div class="s-item"><div class="s-title"><span class="dot ok"></span>会话 B · 修分页 bug</div><div class="s-meta">空闲 · 12 分钟前</div></div>
+    <div class="s-item"><div class="s-title"><span class="dot idle"></span>会话 C · 周报整理</div><div class="s-meta">空闲 · 昨天</div></div>
+  </aside>
+
+  <section class="main">
+    <div class="hdr">
+      <span class="t">会话 A · 调研登录改版</span>
+      <span class="badge">运行中</span>
+      <span class="spacer"></span>
+      <div class="seg"><span>对话</span><span>进度</span></div>
+      <button class="btn">打断</button>
+    </div>
+    <div class="usage"><span>轮次 <b>12</b></span><span>tokens <b>84.2k</b></span><span>工具调用 <b>63</b></span><span>缓存命中 <b>71%</b></span></div>
+
+    <!-- ★ 新增：任务执行面板（折叠态=一行摘要常驻） -->
+    <div class="tep open" id="tep">
+      <div class="tep-bar" onclick="toggleTep()">
+        <span class="icon">⚙</span>
+        <span class="sum">
+          <b>任务执行</b>
+          <span class="chip run" id="chipRun">● 运行中 2</span>
+          <span class="chip">任务 6（<span class="chip ok">成功 3</span> / <span class="chip err">失败 1</span>）</span>
+          <span class="chip">轮次 12</span>
+        </span>
+        <span class="caret">▶</span>
+      </div>
+      <div class="tep-body">
+        <div class="tep-tabs">
+          <div class="tep-tab on" onclick="switchTab(0,this)">任务清单</div>
+          <div class="tep-tab" onclick="switchTab(1,this)">运行中 <span id="tabRunCnt">2</span></div>
+          <div class="tep-tab" onclick="switchTab(2,this)">轮次历史</div>
+        </div>
+
+        <div class="tep-pane on" id="pane0">
+          <div class="plan"><b>计划：调研登录页改版并输出结论</b>进入计划模式时确认的 5 个步骤（来自 plan 事件，持久化）</div>
+          <div class="task-row"><span class="st ok">✓</span><div class="tk-main"><div class="tk-name">梳理现有登录流程</div><div class="tk-what">读 auth 模块与路由定义</div><div class="tk-meta"><span>4 分 12 秒</span><span>12.4k tokens</span><span>工具 9 次</span></div></div><span class="pill ok">完成</span></div>
+          <div class="task-row"><span class="st ok">✓</span><div class="tk-main"><div class="tk-name">竞品截图收集</div><div class="tk-what">Bash: crawl.sh --out shots/</div><div class="tk-meta"><span>1 分 40 秒</span><span>3.1k tokens</span></div></div><span class="pill ok">完成</span></div>
+          <div class="task-row"><span class="st err">✕</span><div class="tk-main"><div class="tk-name">埋点数据核对</div><div class="tk-what">连接 metrics 库超时</div><div class="tk-meta"><span>58 秒</span></div></div><span class="pill err">失败</span></div>
+          <div class="task-row"><span class="st run">◐</span><div class="tk-main"><div class="tk-name">改版方案初稿撰写</div><div class="tk-what" id="liveWhat">正在写：交互流程章节…</div><div class="tk-meta"><span id="liveElapsed">已运行 6 分 32 秒</span><span>31.8k tokens</span><span>工具 21 次</span></div></div><span class="pill run">运行中</span></div>
+          <div class="task-row"><span class="st run">◐</span><div class="tk-main"><div class="tk-name">子代理：可用性清单核对</div><div class="tk-what">last_tool: Grep（heuristics 清单）</div><div class="tk-meta"><span>已运行 2 分 05 秒</span></div></div><span class="pill run">运行中</span></div>
+          <div class="task-row"><span class="st pending">·</span><div class="tk-main"><div class="tk-name">结论汇总与评审</div><div class="tk-what">等待前置步骤完成</div></div><span class="pill stop">待办</span></div>
+        </div>
+
+        <div class="tep-pane" id="pane1">
+          <div class="card">
+            <div class="card-h"><span class="live">◐</span>改版方案初稿撰写 <span class="tag">agent 任务</span><span style="margin-left:auto;color:var(--text-3)">6 分 32 秒</span></div>
+            <div class="card-b">Writing ./docs/login-redesign-draft.md …</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><span class="live">◐</span>Bash #3 · crawl.sh <span class="tag">Bash</span><span style="margin-left:auto;color:var(--text-3)">运行 1 分 12 秒</span></div>
+            <div class="card-b">stdout: [14/20] fetched competitor-14.png ✓</div>
+          </div>
+          <div class="card">
+            <div class="card-h">团队任务 · 登录可用性走查 <span class="tag">团队</span><span style="margin-left:auto;color:var(--text-3)">2 分身 · 成功 1 / 运行 1</span></div>
+            <div class="team-row"><span class="st run">◐</span>worker-1 · 扫描表单可访问性问题</div>
+            <div class="team-row"><span class="st ok">✓</span>worker-2 · 输出键盘导航清单</div>
+          </div>
+        </div>
+
+        <div class="tep-pane" id="pane2">
+          <div class="turn-row" style="color:var(--text-3);font-size:11px"><span>轮次</span><span>状态</span><span>耗时</span><span>发送者</span><span>tokens</span></div>
+          <div class="turn-row"><span class="no">#12</span><span class="pill run">运行中</span><span>6 分 32 秒</span><span>我</span><span>31.8k</span></div>
+          <div class="turn-row"><span class="no">#11</span><span class="pill ok">成功</span><span>4 分 03 秒</span><span>我</span><span>18.2k</span></div>
+          <div class="turn-row"><span class="no">#10</span><span class="pill err">失败</span><span>58 秒</span><span>我</span><span>2.1k</span></div>
+          <div class="turn-row"><span class="no">#9</span><span class="pill ok">成功</span><span>2 分 47 秒</span><span>我</span><span>12.9k</span></div>
+          <div class="turn-row"><span class="no">#8</span><span class="pill stop">已停止</span><span>31 秒</span><span>队列</span><span>0.6k</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat">
+      <div class="msg me">帮我调研登录页改版，把任务拆出来跑</div>
+      <div class="agent-run"><span class="st run" style="width:14px;height:14px">◐</span>正在执行：改版方案初稿撰写 · 已用工具 21 次</div>
+      <div class="msg">已建立调研计划（5 步），前两步完成：登录流程梳理、竞品截图收集。埋点核对失败（metrics 库超时），可稍后重试。当前正在撰写初稿——完整任务状态点上方「⚙ 任务执行」查看。</div>
+    </div>
+    <div class="inputbar"><input placeholder="发送消息，/team 派团队任务…"><button class="send">发送</button></div>
+  </section>
+</div>
+
+<script>
+  function toggleTep() { document.getElementById('tep').classList.toggle('open'); }
+  function switchTab(i, el) {
+    document.querySelectorAll('.tep-tab').forEach(t => t.classList.remove('on'));
+    document.querySelectorAll('.tep-pane').forEach(p => p.classList.remove('on'));
+    el.classList.add('on'); document.getElementById('pane' + i).classList.add('on');
+  }
+  // 模拟 SSE 实时刷新（agent_task_status 事件驱动）
+  const whats = ['正在写：交互流程章节…', '正在写：视觉规范章节…', '正在引用竞品截图…', '正在核对可用性清单…'];
+  let wi = 0, sec = 392;
+  setInterval(() => {
+    document.getElementById('liveWhat').textContent = whats[wi++ % whats.length];
+    sec += 3;
+    document.getElementById('liveElapsed').textContent = '已运行 ' + Math.floor(sec / 60) + ' 分 ' + String(sec % 60).padStart(2, '0') + ' 秒';
+  }, 3000);
+</script>
+</body>
+</html>

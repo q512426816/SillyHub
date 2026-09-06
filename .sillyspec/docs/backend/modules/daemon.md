@@ -56,6 +56,14 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   run 的 AgentRun 四维列 NOT EXISTS 兜底（ctx_tokens 快照列排除，「未记录」桶末位
   api_requests=0），全 SQL 侧聚合）、
   `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
+  任务执行面板（2026-09-04-session-task-execution-panel）：`GET /{id}/tasks`
+  （AgentSessionTaskRead 18 字段 snake_case，鉴权同 runs 端点
+  TaskRunAgentUser+get_agent_session，updated_at desc 限 200）+ 新表
+  `agent_session_task`（(session_id,task_id) 唯一 upsert、run_id 仅索引无硬 FK、
+  session 级联删除；`agent_task_store.upsert_agent_task` 五语义——首插 started_at
+  定/终态吸收跳过/异种终态覆盖置 finished_at/九 Optional 字段 None-keep/写路径
+  updated_at=now，与前端归约同构）；写入点=`notify_agent_task_status` 先转发 SSE
+  后旁路落库（try/except 失败仅记日志不影响 200）；
   列表 `GET /sessions`：`limit` 收口 `le=500`（2026-08-23-sessions-workspace-hub
   D-103@v1，le=100→le=500 供门户树单页全量取回，>500 仍 422）；响应含非 ORM 列
   `owner_name`（FR-05/D-108@v2——router 层对本页 owner_ids `IN` 批量查

@@ -157,12 +157,22 @@ import {
 } from "@/components/daemon/agent-log-card";
 import { PlanApprovalCard } from "@/components/daemon/plan-approval-card";
 import { type BashChunkItem } from "@/components/daemon/bash-progress-card";
+// task-05（2026-09-04-session-task-execution-panel）：agent_task_status 归约实现
+// 已等值抽出到 ./agent-task-store（文件底部保留 re-export，既有 import 路径不变）。
+import { applyAgentTaskStatusEvent } from "./agent-task-store";
+// task-08（2026-09-04-session-task-execution-panel / FR-01 / D-004@v1）：会话任务
+// 执行面板（折叠摘要行 + 任务清单/运行中/轮次历史三页签）——page（含 mobile
+// variant）/ dialog 两渲染路径挂载；实时 agent_task_status 经 ref handle
+// applyEvent 由 SSE 分发处注入（不建第二条 SSE 连接）。
+import {
+  TaskExecutionPanel,
+  type TaskExecutionPanelHandle,
+} from "@/components/daemon/task-execution-panel";
 import type {
   PlanModeEnteredEvent,
   PlanSummary,
   BashStatusEvent,
   BashChunkEvent,
-  AgentTaskStatusEvent,
 } from "@/lib/daemon";
 import type { AgentRunLogEntry } from "@/lib/agent";
 import {
@@ -1487,6 +1497,20 @@ function SessionPanelPage({
     },
   });
 
+  // ── task-08（2026-09-04-session-task-execution-panel）：任务执行面板接线 ────
+  // ref 桥接：下方建流 effect 的 onAgentTaskStatus 分发（定义早于渲染 JSX 挂
+  // ref）经 ref 注入实时事件（queueRefreshRef 先例语义，避开 use-before-define；
+  // 不重建 SSE、不新建第二条任务数据链路）。
+  const taskPanelRef = useRef<TaskExecutionPanelHandle | null>(null);
+  // 任务清单快照重拉信号：SSE 重连恢复（connStatus → reconnected）后递增一次，
+  // 对账断线期间落库的任务行（TaskExecutionPanel 内 useSessionTasks 自取数）。
+  const [tasksRefresh, setTasksRefresh] = useState(0);
+  useEffect(() => {
+    if (connGuard.connStatus === "reconnected") {
+      setTasksRefresh((n) => n + 1);
+    }
+  }, [connGuard.connStatus]);
+
   // ── SSE 建流 + 历史预取（sessionId 驱动，切换会话即重建）────────────────
   // gap-fix（FR-07/FR-08）：runs 快照拉取失败不阻断——whoLine 不注入、历史
   // usage 走实时 SSE 路径，与 logs 预取同一容错语义。
@@ -1836,6 +1860,10 @@ function SessionPanelPage({
           // 字段合并 + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
           onAgentTaskStatus: (event) => {
             setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
+            // task-08（2026-09-04-session-task-execution-panel / FR-02）：既有
+            // AgentTaskCard 链路行为不变；追加经 ref 注入任务执行面板（组件内
+            // useSessionTasks 按 session_id 守卫 + task_id upsert 归并任务清单）。
+            taskPanelRef.current?.applyEvent(event);
           },
         }),
         { cursor: streamCursor, initialSync },
@@ -4098,6 +4126,32 @@ function SessionPanelPage({
         <AgentLogCard sessionId={session.id} mobile={mobile} />
       )}
 
+      {/* task-08（2026-09-04-session-task-execution-panel / FR-01 / D-004@v1）：
+          任务执行折叠面板——横幅之下、会话主体之上的横向信息条层级（AgentLogCard
+          同层）。desktop / mobile 两 variant 共用本渲染路径（对照 AgentLogCard
+          单挂载先例；组件自适应容器宽度，折叠条常驻空数据显示 0 计数）。运行中
+          区数据与头部 ActivityCatalog 同源（agentTasks / bashProgress /
+          teamMissions 既有内存态，不新建 state / SSE）；实时事件经 taskPanelRef
+          由上方 onAgentTaskStatus 分发注入。 */}
+      <TaskExecutionPanel
+        ref={taskPanelRef}
+        sessionId={session.id}
+        runningTasks={agentTasks.filter((t) => t.status === "running")}
+        bashProgress={bashProgress}
+        teamMissions={teamMissions}
+        workspaceId={session.workspace_id ?? preContext?.workspaceId ?? null}
+        onRefreshMissions={() => {
+          void refreshTeamMissions();
+        }}
+        onOpenWorkerSession={(subSessionId) => {
+          setWorkerSessionId(subSessionId);
+        }}
+        planObjective={planPending?.summary.objective ?? null}
+        planTasks={planPending?.summary.tasks ?? null}
+        runsRefreshSignal={usageRefresh}
+        tasksRefreshSignal={tasksRefresh}
+      />
+
       {/* 会话主体（task-07 / 2026-08-23-agent-activity-sessions design §3.4）：
           - origin=tool_report 且 turn_count===0（未继续过对话）→ 本地 Agent
             日志条目流即会话主体（AgentLogSessionBody），输入区保留在下方
@@ -4594,6 +4648,20 @@ function SessionPanelDialog(props: SessionPanelProps) {
     getConnection: () => streamConnRef.current,
   });
 
+  // ── task-08（2026-09-04-session-task-execution-panel）：任务执行面板接线 ────
+  // ref 桥接：establishStream（useCallback，定义早于渲染 JSX 挂 ref）内
+  // onAgentTaskStatus 分发经 ref 注入实时事件（queueRefreshRef 先例语义，避开
+  // use-before-define；不重建 SSE、不新建第二条任务数据链路）。
+  const taskPanelRef = useRef<TaskExecutionPanelHandle | null>(null);
+  // 任务清单快照重拉信号：SSE 重连恢复（connStatus → reconnected）后递增一次，
+  // 对账断线期间落库的任务行（TaskExecutionPanel 内 useSessionTasks 自取数）。
+  const [tasksRefresh, setTasksRefresh] = useState(0);
+  useEffect(() => {
+    if (connGuard.connStatus === "reconnected") {
+      setTasksRefresh((n) => n + 1);
+    }
+  }, [connGuard.connStatus]);
+
   // ql-20260825-011：输入草稿持久化（同 page 模式；dialog 会话键 = view.sessionId，
   // idle 无会话用 __pre__ 固定键）。
   const draftHydratedRef = useRef(false);
@@ -4902,6 +4970,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
             // 字段合并 + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
             onAgentTaskStatus: (event) => {
               setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
+              // task-08（2026-09-04-session-task-execution-panel / FR-02）：既有
+              // AgentTaskCard 链路行为不变；追加经 ref 注入任务执行面板（组件内
+              // useSessionTasks 按 session_id 守卫 + task_id upsert 归并任务清单）。
+              taskPanelRef.current?.applyEvent(event);
             },
           }),
           { cursor: streamCursor, initialSync },
@@ -6012,6 +6084,31 @@ function SessionPanelDialog(props: SessionPanelProps) {
         </div>
       </header>
 
+      {/* task-08（2026-09-04-session-task-execution-panel / FR-01 / D-004@v1 / R-04）：
+          任务执行折叠面板——弹窗头部之下、消息流之上的横向信息条层级（page 模式
+          AgentLogCard 同层语义）。折叠态仅一行常驻不挤压弹窗纵向空间（展开态由
+          组件内部 max-h 滚动兜底）；运行中区数据与头部 ActivityCatalog 同源
+          （agentTasks / bashProgress / teamMissions 既有内存态，不新建 state /
+          SSE），实时事件经 taskPanelRef 由 establishStream 分发注入。 */}
+      <TaskExecutionPanel
+        ref={taskPanelRef}
+        sessionId={view.sessionId ?? ""}
+        runningTasks={agentTasks.filter((t) => t.status === "running")}
+        bashProgress={bashProgress}
+        teamMissions={teamMissions}
+        workspaceId={workspaceId ?? null}
+        onRefreshMissions={() => {
+          void refreshTeamMissions();
+        }}
+        onOpenWorkerSession={(subSessionId) => {
+          setWorkerSessionId(subSessionId);
+        }}
+        planObjective={planPending?.summary.objective ?? null}
+        planTasks={planPending?.summary.tasks ?? null}
+        runsRefreshSignal={usageRefresh}
+        tasksRefreshSignal={tasksRefresh}
+      />
+
       {/* 消息流（task-13 共享子组件）。R7：dialog 模式 turns 原样喂 TurnTimeline
           （无 whoLine / 历史 usage / 孤儿 turn 派生链——ISP 现状，强开会多打
           listSessionRuns 请求并重排顺序）。 */}
@@ -6514,54 +6611,10 @@ export function appendBashChunk(
   return start > 0 ? { ...prev, chunks: chunks.slice(start) } : { ...prev, chunks };
 }
 
-/* ── 后台 Agent 任务状态归约（task-12 / 2026-08-27-background-subagent-progress）── */
-
-/**
- * agent_task_status 归约（page / dialog 两模式共用，对齐 bash 先例收口到底部）：
- * 按 task_id upsert，扩展字段（工具名 / summary / tokens / 走秒锚点）事件未带
- * （null）时保留旧值——服务端累计量只增不减，心跳缺字段不回退；running 心跳
- * 推进「最后活跃」锚点；终态事件到达即定格（记 terminalAt + 服务端 elapsed），
- * 此后迟到的 running 心跳不复活转圈（终态为吸收态，后到终态允许覆盖定格数据）；
- * 最近 6 条截断语义与原实现一致（终态保留供回看，会话结束由调用方清空）。
- */
-export function applyAgentTaskStatusEvent(
-  prev: AgentTaskEntry[],
-  event: AgentTaskStatusEvent,
-): AgentTaskEntry[] {
-  const now = Date.now();
-  const idx = prev.findIndex((t) => t.taskId === event.task_id);
-  const existing = idx >= 0 ? (prev[idx] ?? null) : null;
-  // 终态定格：已定格（completed / failed / stopped）的卡片忽略迟到 running 心跳。
-  if (existing && existing.status !== "running" && event.status === "running") {
-    return prev;
-  }
-  const next: AgentTaskEntry = {
-    taskId: event.task_id,
-    taskName: event.task_name,
-    status: event.status,
-    progress: event.progress,
-    message: event.message,
-    // FR-04 扩展字段：事件缺省（null / undefined）时沿用旧值（首见任务为 null）。
-    isAsync: event.async ?? existing?.isAsync ?? null,
-    lastToolName: event.last_tool_name ?? existing?.lastToolName ?? null,
-    summary: event.summary ?? existing?.summary ?? null,
-    elapsedMs: event.elapsed_ms ?? existing?.elapsedMs ?? null,
-    totalTokens: event.total_tokens ?? existing?.totalTokens ?? null,
-    toolUses: event.tool_uses ?? existing?.toolUses ?? null,
-    // 走秒校准锚点：elapsed_ms 到达即重置；首见任务记 startedAt 兜底（无服务端
-    // 时长时卡片走 startedAt 起本地走秒）。
-    elapsedSyncedAt:
-      event.elapsed_ms != null ? now : existing?.elapsedSyncedAt ?? null,
-    startedAt: existing?.startedAt ?? now,
-    // 「最后活跃」锚点：running 心跳推进，终态定格后不再更新（卡片据此判 >5min
-    // 沉默；终态本身不触发警示）。
-    lastActivityAt:
-      event.status === "running" ? now : existing?.lastActivityAt ?? null,
-    terminalAt: event.status === "running" ? existing?.terminalAt ?? null : now,
-  };
-  if (idx === -1) return [...prev, next].slice(-6);
-  const copy = [...prev];
-  copy[idx] = next;
-  return copy;
-}
+/* ── 后台 Agent 任务状态归约（task-12 / 2026-08-27-background-subagent-progress）──
+   task-05（2026-09-04-session-task-execution-panel / FR-02）：实现体已等值抽出到
+   ./agent-task-store（纯函数共享模块，page / dialog 两模式统一归约入口），此处
+   保留 re-export 防断链——agent-task-card-lifecycle.test.tsx 仍从本模块 import
+   该函数；上方 agentTasks state 与 SSE 分发调用仅 import 来源变化，行为零改动。 */
+export { applyAgentTaskStatusEvent } from "./agent-task-store";
 

@@ -39,6 +39,7 @@ const sessionApi = vi.hoisted(() => ({
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionRuns: vi.fn(),
+  listSessionTasks: vi.fn().mockResolvedValue([]),  // 任务执行面板快照（task-10 补 mock 防真实 fetch）
   listSessionTeamMissions: vi.fn(),
   triggerSessionTeamMission: vi.fn(),
   // ql-20260828-009-4a13：handleTeamTrigger 前置取消（更新指派）依赖。

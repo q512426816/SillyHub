@@ -58,6 +58,7 @@ const daemonMock = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   listSessionRuns: vi.fn(),
+  listSessionTasks: vi.fn().mockResolvedValue([]),  // 任务执行面板快照（task-10 补 mock 防真实 fetch）
   getAgentSessionLogs: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionQueue: vi.fn(),

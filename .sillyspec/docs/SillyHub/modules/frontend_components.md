@@ -24,6 +24,8 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `turn-timeline.tsx` / `session-input-bar.tsx` — /sessions 总入口复用
   - `session-usage-bar.tsx` — 会话用量条（2026-08-29-session-usage-stats；ql-20260830-013-14b3 小型化）：摘要行五指标+缓存命中率为图标化小号形态（lucide 图标 + 11px 值，指标名收敛为 antd Tooltip 悬浮提示（触发元素 aria-label，ql-20260830-014-74f5）；命中率 cache_read÷(cache_read+input)，分母 0「—」）+按模型折叠明细（ChevronDown 图标按钮 aria-label 保语义）；自取数（useEffect+refreshSignal prop，零 react-query 对齐 dialog 渲染约束），session-panel page（头部下方）/dialog（输入框上方）双模式挂载，轮次终态递增信号重取
   - `machine-card.tsx` / `runtime-card.tsx` — 机器级与实例级卡片
+  - `task-execution-panel.tsx` — 任务执行折叠面板（2026-09-04-session-task-execution-panel，D-004 方案B）：折叠态一行常驻摘要（运行中 N·任务 M 成功 X 失败 Y·轮次 K）+三页签（任务清单=useSessionTasks 快照+applyEvent 实时合并+plan 总纲仅活跃轮显示[R-07 降级：syncGapFromDb 不回放 plan_mode_entered，勿当 bug 修]/运行中=agent-task-card+bash-progress-card+team-task-block 三类卡 props 注入/轮次=listSessionRuns 自取数+refreshSignal，惰性取数——轮次页签首次查看才拉，避免挂载即请求灌水对账计数）；forwardRef 暴露 applyEvent（SSE 分发处 ref 桥接，不建第二条连接）；page（AgentLogCard 同层）/dialog/mobile 三挂载同组件；brand-* 语义阶零视口断点前缀
+  - `agent-task-store.ts` — applyAgentTaskStatusEvent 等值抽出共享模块（session-panel 保留 re-export 保 agent-task-card-lifecycle.test.tsx 直连 import；终态定格/缺字段保旧值/最近 6 条截断语义不变）
   - `remote-folder-picker.tsx` — daemon list_roots/list_dir 懒加载目录树（自治：初始化根 / Tree loadData / 手输跳转校验 / 错误降级红条）
   - `session-list-layout.tsx` / `session-log-sanitize.ts` / `daemon-required-notice.tsx`
   - `agent-log-card.tsx` — 本地 Agent 会话（tool_report）日志条目卡；「查看内容」对话化回显（2026-08-23-agent-log-conversation-view）：先调 messages 端点，parsed 时直构段列表渲染（用户气泡/MarkdownText/思考折叠/tool_use↔tool_result 按 tool_use_id 配对、失配「结果未记录」中性徽章禁「执行中」）+「对话/原文」tab + truncated 加载更早；status≠parsed/ApiError 静默回落原文 <pre> 黄条提示；不走 session-log-assembler（Grill B2 裁决）
@@ -149,7 +151,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 
 ## 变更索引
 
-- ql-20260904-028-3cb5 | 工作区 spec 策略支持修改：后端 PATCH /spec-workspace 早已存在但前端无入口——lib/spec-workspaces.ts 补 updateSpecWorkspace（PATCH + 三字段透传）；workspace-config-card 策略行加 owner 门禁「修改」入口（antd Modal 三选、同值禁存、repo-native 写源项目警告、成功 toast 提示点「初始化」重建本地缓存）；生效语义：新策略在扫描/初始化链路实时读库生效（普通会话/变更任务 lease 不带策略键，daemon pull 按 platform-managed 兜底），daemon 缓存布局等无条件 pull（=初始化按钮）重建，详见 spec_workspace.md 注意事项
+- ql-20260904-028-3cb5 | 工作区 spec 策略支持修改：后端 PATCH /spec-workspace 早已存在但前端无入口——lib/spec-workspaces.ts 补 updateSpecWorkspace（PATCH + 三字段透传）；workspace-config-card 策略行加 owner 门禁「修改」入口（antd Modal 三选、同值禁存、repo-native 写源项目警告、成功 toast 提示点「初始化」重建本地缓存）；生效语义：claim payload 实时读库下发（lease_meta 显式值 > SpecWorkspace.strategy 回退，普通会话缺口由 ql-20260904-030-45d1 补齐），daemon 缓存布局等无条件 pull（=初始化按钮）重建，详见 spec_workspace.md 注意事项
 - ql-20260903-001-4d6e | 视口补拉时序修复（ql-010 部署后实测未解决）：初始/翻页触发原 setTimeout(0) 早于 React DOM 提交与布局——scrollHeight=0 被守卫拦下且无重试，补拉链断在首跳（偶发成功属时序竞争）；scheduleAutoFill 双 rAF 等提交+布局，布局不可读继续 rAF 重试至多 10 帧（~160ms）后放弃，两处触发统一走调度；新增布局延迟就绪用例（前 2 读 0 后可读）
 - ql-20260902-016-3a75 | variant 回归锚补同步（CI 修复）：ql-009 给会话主体加 display:contents 挂载点（触顶自动加载滚动监听）后 session-panel-variant.test.tsx 锚未跟着走——desktop 断 scroll.parentElement=panel、mobile 断外包层=scroll 父级，CI 连挂 4 次；锚更新为「挂载点布局透明（className=contents）+ 挂载点直挂面板根（desktop）/ 挂载点父级=mobile 横向外包层（min-h-0 flex-1 + 表格横滚锁类仍全在，CSS 后代选择器穿透 contents 照常生效）」
 - ql-20260902-010-f493 | 触顶自动加载补口（视口补拉链）：初始 100 条日志装配的对话可能不足一屏——容器无滚动条 scroll 事件永不触发成死路；maybeAutoFill 在「容器有布局高度且 scrollHeight ≤ clientHeight 且有更早」时自动续拉一页（初始满页后 + 每次翻页满页后 setTimeout 复查 DOM 提交后状态），撑出滚动条即停走正常触顶；连拉上限 10 防极端空渲染批量请求，换会话重置；jsdom 无布局（scrollHeight=0）不触发保既有用例零影响

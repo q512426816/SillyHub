@@ -4607,6 +4607,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/machines/{instance_id}/sillyspec-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Sillyspec Resolve
+         * @description 推送 sillyspec 冲突裁决指令到指定机器（admin，task-02 / FR-02 / D-001@v1）。
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+         *     ``daemon:sillyspec_resolve``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE
+         *     语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 执行裁决（strategy
+         *     下划线字面量 → --keep-local / --take-platform flag 的映射归 daemon 侧单点），
+         *     结果经心跳 sillyspec_command_result 字段回传（终态窗口内，不走本消息）。
+         *     先 ``_get_owned_instance`` 做归属校验（越权/不存在 404，普通用户非本机防
+         *     存在性泄漏，owner 与平台管理员放行），离线或 WS 发送失败 → 504
+         *     ``DaemonRuntimeOffline``（与机器级 sillyspec-update 先例同款文案与 details）。
+         */
+        post: operations["trigger_machine_sillyspec_resolve_api_daemon_machines__instance_id__sillyspec_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/sillyspec-ghost-cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Sillyspec Ghost Cleanup
+         * @description 推送 sillyspec ghost 清理指令到指定机器（admin，task-02 / FR-03 / D-001@v1）。
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+         *     ``daemon:sillyspec_ghost_cleanup``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE
+         *     语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 清理 ghost 行并
+         *     platform sync 收敛，结果经心跳 sillyspec_command_result 字段回传（终态窗口
+         *     内，不走本消息）。权限/归属校验与 504 结构与 sillyspec-resolve 同款
+         *     （RuntimeAdminUser + ``_get_owned_instance``，owner 与平台管理员放行）。
+         */
+        post: operations["trigger_machine_sillyspec_ghost_cleanup_api_daemon_machines__instance_id__sillyspec_ghost_cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/disable": {
         parameters: {
             query?: never;
@@ -5748,6 +5804,33 @@ export interface paths {
          *     与 get_session_detail 的 run 查询同款。
          */
         get: operations["list_session_runs_api_daemon_sessions__session_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Tasks
+         * @description List the persisted agent task snapshot of an owned session (task-02 / FR-06).
+         *
+         *     任务清单页签的服务端快照：agent_task_status 事件落库行（AgentSessionTask，
+         *     task-03 upsert 写入）按 updated_at desc 取最近 _SESSION_TASKS_MAX 条，供前端
+         *     刷新/重连后恢复（useSessionTasks 拉取 + SSE 实时合并）。归属 / 存在性复用
+         *     ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与
+         *     runs 端点同一道闸门；查询内联在此（service.py 非本任务 allowed_path），
+         *     与 list_session_runs 同款口径。未上报任务的会话返回 []（D-003 空态，不报错）。
+         */
+        get: operations["list_session_tasks_api_daemon_sessions__session_id__tasks_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9533,6 +9616,11 @@ export interface paths {
          *     §7.3）：响应头追加 ``X-Spec-Version``（= ``spec_ws.spec_version``），tar 顶层
          *     含内存生成的 ``PLATFORM-BUNDLE.json`` 快照元数据（service.build_bundle）——
          *     持包方离线即可辨快照新旧，无需解包对账。
+         *
+         *     ql-20260904-016（会话首响优化）：客户端 ``Accept-Encoding`` 含 gzip 时流式
+         *     gzip 传输（``w|gz`` + ``Content-Encoding: gzip``）——36MB 文本 spec 树压到
+         *     ~6MB，daemon 拉取从 15s+（打穿 30s fetch 超时）回到秒级；浏览器/undici/
+         *     httpx 均透明解压，明文 tar 语义与下载文件名不变。
          */
         get: operations["download_spec_bundle_api_workspaces__workspace_id__spec_workspace_bundle_get"];
         put?: never;
@@ -10963,6 +11051,73 @@ export interface components {
              * @default 0
              */
             tree_depth: number;
+        };
+        /**
+         * AgentSessionTaskRead
+         * @description Response body for GET /sessions/{session_id}/tasks（任务清单快照，task-02 / FR-06）。
+         *
+         *     2026-09-04-session-task-execution-panel：AgentSessionTask 持久化行（model.py）
+         *     的读侧 DTO。字段与 AgentTaskStatusEvent 事件契约一一对应（snake_case 对齐
+         *     仓内 DTO 惯例，D-006@v1）；事件契约名 ``async`` 在表列与 DTO 均落为
+         *     ``is_async``（Python 关键字更名，与 AgentSessionTask.is_async 同名）。
+         *     ``created_at`` 仅落库不外露（快照按 updated_at 排序，无消费方）。
+         *
+         *     数据流：producer=model.py AgentSessionTask 行（task-03 upsert 写入）→
+         *     GET 端点 model_validate 逐行序列化 → consumer=前端任务清单页签
+         *     （useSessionTasks 快照拉取，刷新/重连后恢复）。
+         */
+        AgentSessionTaskRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Task Id */
+            task_id: string;
+            /** Task Name */
+            task_name: string;
+            /** Status */
+            status: string;
+            /** Progress */
+            progress?: number | null;
+            /** Summary */
+            summary?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Last Tool Name */
+            last_tool_name?: string | null;
+            /** Tool Use Id */
+            tool_use_id?: string | null;
+            /** Elapsed Ms */
+            elapsed_ms?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Tool Uses */
+            tool_uses?: number | null;
+            /**
+             * Is Async
+             * @default false
+             */
+            is_async: boolean;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * AgentTaskStatusEvent
@@ -12478,6 +12633,7 @@ export interface components {
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["DaemonHeartbeatSillySpecUpdate"] | null;
             sillyspec_status?: components["schemas"]["DaemonHeartbeatSillySpecStatus"] | null;
+            sillyspec_command_result?: components["schemas"]["DaemonHeartbeatSillySpecCommandResult"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
         };
@@ -12553,6 +12709,37 @@ export interface components {
             total?: number | null;
             /** Completed */
             completed?: number | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecCommandResult
+         * @description 心跳 sillyspec_command_result 载荷（2026-09-04-conflict-resolve-entry FR-05）.
+         *
+         *     daemon 侧 sillyspec 命令执行器（resolve / ghost_cleanup）的最新结果槽投影
+         *     （design §7 心跳结果字段）：action 当前取值 ``resolve`` / ``ghost_cleanup``，
+         *     strategy 取值 ``keep_local`` / ``take_platform``，state 取值 ``success`` /
+         *     ``failed``——均不收紧成 Literal（DaemonHeartbeatSillySpecUpdate.state 同
+         *     决策：收紧会让未来新增取值的整条心跳 422，心跳是保活通道宁宽勿断）；全字段
+         *     宽松可选，不加 max_length，``executed_at`` 为 ISO8601 字符串原样承载（机器
+         *     本地钟，跨机比较仅作辅助——X-18）；``error`` 已在 daemon 侧截断 ≤200 字。
+         *     携带语义两态（D-004@v1）：终态窗口内每跳携带对象（latest-wins 只留最新一条，
+         *     R-07），窗口过期后键即不出现——backend 侧 None=置 NULL 清除，daemon 无需
+         *     也不得发送显式 null（X-04 修订）。
+         */
+        DaemonHeartbeatSillySpecCommandResult: {
+            /** Action */
+            action?: string | null;
+            /** Change */
+            change?: string | null;
+            /** Strategy */
+            strategy?: string | null;
+            /** State */
+            state?: string | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Executed At */
+            executed_at?: string | null;
         };
         /**
          * DaemonHeartbeatSillySpecConflict
@@ -12785,6 +12972,7 @@ export interface components {
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
             sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
+            sillyspec_command_result?: components["schemas"]["MachineSillySpecCommandResultRead"] | null;
         };
         /**
          * DaemonMachineUpdate
@@ -15631,6 +15819,51 @@ export interface components {
              * Format: date-time
              */
             since: string;
+        };
+        /**
+         * MachineSillySpecCommandResultRead
+         * @description 机器视图 sillyspec_command_result 嵌套（2026-09-04-conflict-resolve-entry FR-05）。
+         *
+         *     即 daemon_instances.sillyspec_command_result JSON 列宽松透出（design §7）：
+         *     daemon 侧 sillyspec 命令执行器的最新结果槽（action/change/strategy/state/
+         *     exit_code/error/executed_at）。与 sillyspec_status 同款零转换——backend 不补
+         *     字段，落库形态=上报形态（七字段全宽松可选，与心跳 DTO 同形免三胞胎模型漂移）。
+         *     NULL（终态展示窗口已过期 / register 恒清）→ 机器视图字段为 null；executed_at
+         *     为机器本地钟 ISO8601 字符串原样透传（跨机比较仅作辅助——X-18）。
+         */
+        MachineSillySpecCommandResultRead: {
+            /** Action */
+            action?: string | null;
+            /** Change */
+            change?: string | null;
+            /** Strategy */
+            strategy?: string | null;
+            /** State */
+            state?: string | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Executed At */
+            executed_at?: string | null;
+        };
+        /**
+         * MachineSillySpecResolveRequest
+         * @description Body for POST /machines/{instance_id}/sillyspec-resolve（task-02 / FR-02）。
+         *
+         *     ``strategy`` 用 Literal 限定 keep_local / take_platform（非法值 422）；
+         *     ``change`` 走白名单正则（首字符字母数字，其余字母数字/./-/_，长度 1-128）
+         *     且显式拒绝含 ``..``（防路径穿越；daemon 侧 CLI ``assertSafeChangeName``
+         *     SEC-05 双保险，backend 只做格式校验不查存在性——机器才是事实源）。
+         */
+        MachineSillySpecResolveRequest: {
+            /** Change */
+            change: string;
+            /**
+             * Strategy
+             * @enum {string}
+             */
+            strategy: "keep_local" | "take_platform";
         };
         /**
          * MachineSillySpecStatusRead
@@ -19960,7 +20193,7 @@ export interface components {
             /** Runtime Id */
             runtime_id?: string | null;
             /** Provider */
-            provider?: ("claude" | "codex") | null;
+            provider?: ("claude" | "codex" | "pi") | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Llm Provider Id */
@@ -31584,6 +31817,76 @@ export interface operations {
             };
         };
     };
+    trigger_machine_sillyspec_resolve_api_daemon_machines__instance_id__sillyspec_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineSillySpecResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_sillyspec_ghost_cleanup_api_daemon_machines__instance_id__sillyspec_ghost_cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     disable_runtime_api_daemon_runtimes__runtime_id__disable_post: {
         parameters: {
             query?: never;
@@ -33209,6 +33512,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_tasks_api_daemon_sessions__session_id__tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionTaskRead"][];
                 };
             };
             /** @description Validation Error */
