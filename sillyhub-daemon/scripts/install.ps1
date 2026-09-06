@@ -60,6 +60,8 @@ $script:BUNDLE_NAME = 'sillyhub-daemon.js'
 $script:MCP_NAME    = 'mcp-server.js'
 $script:WRAPPER_NAME = 'sillyhub-daemon.cmd'
 $script:NODE_BIN    = $null
+# ql-20260906-003（审计 #10）：latest.json vendorFiles 清单（vendored pi 扩展树）。
+$script:VENDOR_FILES = @()
 
 # -- Logging ──────────────────────────────────────────────────────────────────────
 function Write-Info { param([string]$Msg) Write-Host "[info]  $Msg" -ForegroundColor Cyan }
@@ -173,6 +175,10 @@ function Get-LatestManifest {
         $script:DOWNLOAD_URL = $dl
       }
     }
+    # ql-20260906-003（审计 #10）：vendored pi 扩展树清单（旧服务器无该键 → 空数组跳过）。
+    if ($resp.vendorFiles) {
+      $script:VENDOR_FILES = @($resp.vendorFiles | Where-Object { $_ -is [string] })
+    }
   } catch {
     Write-Warn "Cannot fetch latest.json ($url), using default download path."
     return
@@ -208,6 +214,33 @@ function Download-Bundle {
     Write-Ok "$($script:MCP_NAME) downloaded"
   } catch {
     Write-Warn "$($script:MCP_NAME) 下载失败（$mcpUrl）——team 主 agent MCP 注入将不可用"
+  }
+
+  # ql-20260906-003（审计 #10）：vendored pi 扩展树按 vendorFiles 清单逐文件下载
+  # 到 bin\vendor\ 下（pi-rpc-driver 的 --extension 实参据此定位）。单文件失败仅
+  # warn 不中止（best-effort，对齐 mcp-server.js 语义）。白名单：vendor/ 前缀 +
+  # 无 `..` / 反斜杠——防 latest.json 被篡改写到 bin 目录之外。
+  if ($script:VENDOR_FILES.Count -gt 0) {
+    $vbase = "$($script:SERVER_URL)/daemon/latest"
+    foreach ($rel in $script:VENDOR_FILES) {
+      if ($rel -notmatch '^vendor/' -or $rel -match '\.\.' -or $rel -match '\\') {
+        Write-Warn "vendor 路径不合规，跳过: $rel"
+        continue
+      }
+      $dest = Join-Path $script:BIN_DIR ($rel -replace '/', '\')
+      $destDir = Split-Path $dest -Parent
+      if (-not (Test-Path -LiteralPath $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+      }
+      try {
+        Invoke-WebRequest -Uri "$vbase/$rel" -OutFile "$dest.tmp" -UseBasicParsing -ErrorAction Stop
+        Move-Item -Force "$dest.tmp" $dest
+        Write-Ok "vendor file ready: $rel"
+      } catch {
+        if (Test-Path "$dest.tmp") { Remove-Item "$dest.tmp" -Force }
+        Write-Warn "vendor 文件下载失败: $vbase/$rel"
+      }
+    }
   }
 }
 

@@ -42,8 +42,63 @@ def daemon_dist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         'Write-Host "installing from $server"\n',
         encoding="utf-8-sig",
     )
+    # ql-20260906-003（审计 #10）：vendored pi 扩展树（真实 build-bundle.sh [5/5]
+    # 拷贝产物 + Dockerfile COPY 进镜像的最小形态）。
+    vendor_sub = dist / "vendor" / "pi-extensions" / "subagent"
+    vendor_sub.mkdir(parents=True)
+    # newline="\n"：write_text 默认按 os.linesep 落盘（Windows 变 CRLF），
+    # 下方 test_vendor_file_served 要严格字节断言，fixture 须平台无关。
+    (vendor_sub / "index.ts").write_text(
+        "// vendored subagent entry\n", encoding="utf-8", newline="\n"
+    )
+    (vendor_sub / "agents.ts").write_text("// vendored agents\n", encoding="utf-8", newline="\n")
     monkeypatch.setattr(get_settings(), "daemon_dist_dir", dist)
     return dist
+
+
+# ── ql-20260906-003（审计 #10）：vendored pi 扩展树分发 ──
+
+
+async def test_latest_manifest_lists_vendor_files(client: AsyncClient, daemon_dist: Path) -> None:
+    resp = await client.get("/daemon/latest.json")
+    assert resp.status_code == 200
+    payload = resp.json()
+    # 含 vendor/ 前缀的相对 POSIX 路径、排序稳定（install.sh grep 解析的前提）。
+    assert payload["vendorFiles"] == [
+        "vendor/pi-extensions/subagent/agents.ts",
+        "vendor/pi-extensions/subagent/index.ts",
+    ]
+
+
+async def test_latest_manifest_empty_vendor_when_missing(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """未打包 vendor 的旧镜像形态：vendorFiles 恒为空列表（客户端 no-op 兼容）。"""
+    monkeypatch.setattr(get_settings(), "daemon_dist_dir", tmp_path)
+    resp = await client.get("/daemon/latest.json")
+    assert resp.status_code == 200
+    assert resp.json()["vendorFiles"] == []
+
+
+async def test_vendor_file_served(client: AsyncClient, daemon_dist: Path) -> None:
+    resp = await client.get("/daemon/latest/vendor/pi-extensions/subagent/index.ts")
+    assert resp.status_code == 200
+    # octet-stream 固定：按扩展名猜测会把 .ts 判成 video/mp2t。
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.text == "// vendored subagent entry\n"
+
+
+async def test_vendor_file_404_when_missing(client: AsyncClient, daemon_dist: Path) -> None:
+    resp = await client.get("/daemon/latest/vendor/pi-extensions/subagent/absent.ts")
+    assert resp.status_code == 404
+
+
+async def test_vendor_file_rejects_backslash_traversal(
+    client: AsyncClient, daemon_dist: Path
+) -> None:
+    """反斜杠形态逃逸（%5C 不被 httpx 规范化掉）→ 404，不泄露 daemon-dist 其它文件。"""
+    resp = await client.get("/daemon/latest/vendor/pi-extensions%5C..%5C..%5Csillyhub-daemon.js")
+    assert resp.status_code == 404
 
 
 async def test_install_script(client: AsyncClient, daemon_dist: Path) -> None:

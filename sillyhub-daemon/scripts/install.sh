@@ -221,11 +221,15 @@ fetch_latest() {
     warn "无法获取 latest.json（$url），回退到默认下载路径。"
     LATEST_VERSION="unknown"
     DOWNLOAD_URL="${SERVER_URL}/daemon/latest/sillyhub-daemon.js"
+    VENDOR_FILES=""
     return
   fi
   # 纯 shell 解析 JSON（不依赖 jq）：取 "version" / "downloadUrl" 字段。
   LATEST_VERSION="$(printf '%s' "$resp" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
   DOWNLOAD_URL="$(printf '%s' "$resp" | sed -n 's/.*"downloadUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  # ql-20260906-003（审计 #10）：vendorFiles 数组逐条提取（"vendor/..." 字面量
+  # 稳定，grep -o 不受 JSON 字段顺序影响；旧服务器无该键 → 空 → 跳过）。
+  VENDOR_FILES="$(printf '%s' "$resp" | grep -o '"vendor/[^"]*"' | tr -d '"')"
   if [[ -z "$LATEST_VERSION" ]]; then LATEST_VERSION="unknown"; fi
   if [[ -z "$DOWNLOAD_URL" ]]; then
     DOWNLOAD_URL="${SERVER_URL}/daemon/latest/sillyhub-daemon.js"
@@ -259,6 +263,39 @@ download_bundle() {
     ok "mcp-server.js 下载完成"
   else
     warn "mcp-server.js 下载失败（$mcp_url）——team 主 agent MCP 注入将不可用"
+  fi
+
+  # ql-20260906-003（审计 #10）：vendored pi 扩展树按 latest.json vendorFiles
+  # 清单逐文件下载到 $BIN_DIR/vendor/ 下（pi-rpc-driver 的 --extension 实参据此
+  # 定位）。单文件失败仅 warn 不中止（best-effort，对齐 mcp-server.js 语义——
+  # 缺文件时扩展静默跳过的既有降级不变）。
+  if [[ -n "$VENDOR_FILES" ]]; then
+    local vbase="${SERVER_URL}/daemon/latest"
+    local rel dest
+    while IFS= read -r rel; do
+      [[ -z "$rel" ]] && continue
+      # 白名单校验（防 latest.json 被篡改写 bin 目录之外）：vendor/ 前缀 +
+      # 无 `..`（子串级，保守但 vendor 文件名不含）+ 无反斜杠。空段（//）与
+      # ./ 不构成逃逸（join 后仍收敛在 $BIN_DIR/vendor 树内）。
+      case "$rel" in
+        vendor/*) ;;
+        *) warn "vendor 路径不合规，跳过: $rel"; continue ;;
+      esac
+      if [[ "$rel" == *".."* || "$rel" == *'\\'* ]]; then
+        warn "vendor 路径不合规，跳过: $rel"
+        continue
+      fi
+      dest="$BIN_DIR/$rel"
+      mkdir -p "$(dirname "$dest")"
+      if curl -fSL "$vbase/$rel" -o "$dest.tmp" 2>/dev/null; then
+        mv "$dest.tmp" "$dest"
+        chmod 0644 "$dest"
+        ok "vendor 文件就位: $rel"
+      else
+        rm -f "$dest.tmp"
+        warn "vendor 文件下载失败: $vbase/$rel"
+      fi
+    done <<< "$VENDOR_FILES"
   fi
 }
 

@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { downloadAndReplace, validateBundleContent, MIN_BUNDLE_BYTES } from '../src/preflight.js';
+import { downloadAndReplace, validateBundleContent, MIN_BUNDLE_BYTES, updateVendorBundles } from '../src/preflight.js';
 
 // ql-20260831-001-6dde：copyFile 可覆写口（默认透传真实实现）——备份失败用例
 // 模拟 ENOSPC 中途留下半截 .bak。先例：autostart.test.ts 的 node:fs/promises
@@ -253,5 +253,120 @@ describe('downloadAndReplace（R3 .tmp 清理）', () => {
     // 多轮后完整历史备份被挤光，人工 .bak 兜底无物可用。
     expect(readdirSync(dir).filter((n) => n.startsWith('daemon.js.bak-'))).toEqual([]);
     expect(validateBundleContent(readFileSync(join(dir, 'daemon.js'))).buildId).toBe('v2');
+  });
+});
+
+// ── ql-20260906-003（审计 #10）：vendored pi 扩展树伴生更新 ──────────────────
+
+describe('updateVendorBundles（vendorFiles 清单逐文件替换）', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vendor-update-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const MAIN_URL = 'http://hub.test/daemon/latest/sillyhub-daemon.js';
+
+  it('成功路径：嵌套子目录链 mkdir + 逐文件原子落盘，无 .tmp 残留', async () => {
+    const fetchMock = vi.fn(
+      async (url: unknown) => new Response(`content:${String(url)}`, { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await updateVendorBundles(
+      MAIN_URL,
+      ['vendor/pi-extensions/subagent/index.ts', 'vendor/pi-extensions/subagent/agents.ts'],
+      'v2',
+      dir,
+      noopLogger,
+    );
+    // URL 推导 = 主 bundle URL 同目录 + rel；两文件各 fetch 一次。
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://hub.test/daemon/latest/vendor/pi-extensions/subagent/index.ts',
+    );
+    const entry = join(dir, 'vendor', 'pi-extensions', 'subagent', 'index.ts');
+    expect(readFileSync(entry, 'utf-8')).toBe(
+      'content:http://hub.test/daemon/latest/vendor/pi-extensions/subagent/index.ts',
+    );
+    expect(existsSync(join(dir, 'vendor', 'pi-extensions', 'subagent', 'agents.ts'))).toBe(true);
+    // 原子替换语义：目录链已建、无 .tmp 残留。
+    expect(existsSync(`${entry}.tmp`)).toBe(false);
+  });
+
+  it('不安全路径拒绝：无 vendor/ 前缀 / 含 .. / 含反斜杠 → 不 fetch 不落盘，其余照常', async () => {
+    const fetchMock = vi.fn(
+      async (url: unknown) => new Response(`content:${String(url)}`, { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { fn, entries } = makeLogger();
+    await updateVendorBundles(
+      MAIN_URL,
+      [
+        'bin/evil.ts',
+        'vendor/../evil.ts',
+        'vendor/pi\\..\\evil.ts',
+        'vendor/pi..evil.ts',
+        'vendor/pi-extensions/subagent/index.ts',
+      ],
+      'v2',
+      dir,
+      fn,
+    );
+    // 只下载白名单内的那一条；四条恶意路径各记一条 warn。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(entries.filter((x) => x.msg === 'vendor_file_path_rejected')).toHaveLength(4);
+    expect(existsSync(join(dir, 'bin'))).toBe(false);
+    expect(existsSync(join(dir, 'evil.ts'))).toBe(false);
+    expect(existsSync(join(dir, 'vendor', 'pi-extensions', 'subagent', 'index.ts'))).toBe(true);
+  });
+
+  it('空清单 / undefined → no-op（旧服务器 latest.json 无 vendorFiles 键的兼容形态）', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await updateVendorBundles(MAIN_URL, undefined, 'v2', dir, noopLogger);
+    await updateVendorBundles(MAIN_URL, [], 'v2', dir, noopLogger);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('主 bundle URL 不以 sillyhub-daemon.js 结尾 → debug 跳过（自定义分发形态）', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { fn, entries } = makeLogger();
+    await updateVendorBundles(
+      'http://hub.test/custom/daemon-bundle.js',
+      ['vendor/pi-extensions/subagent/index.ts'],
+      'v2',
+      dir,
+      fn,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(entries.some((x) => x.msg === 'vendor_files_skip_url_shape')).toBe(true);
+  });
+
+  it('单文件 404 → warn 继续，不阻塞清单其余文件（best-effort 同 mcp 语义）', async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      return u.endsWith('agents.ts')
+        ? new Response('missing', { status: 404 })
+        : new Response('content', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { fn, entries } = makeLogger();
+    await updateVendorBundles(
+      MAIN_URL,
+      ['vendor/pi-extensions/subagent/index.ts', 'vendor/pi-extensions/subagent/agents.ts'],
+      'v2',
+      dir,
+      fn,
+    );
+    expect(existsSync(join(dir, 'vendor', 'pi-extensions', 'subagent', 'index.ts'))).toBe(true);
+    expect(existsSync(join(dir, 'vendor', 'pi-extensions', 'subagent', 'agents.ts'))).toBe(false);
+    expect(entries.some((x) => x.msg === 'vendor_file_download_non_ok')).toBe(true);
+    expect(entries.some((x) => x.msg === 'vendor_files_self_updated')).toBe(true);
   });
 });

@@ -98,6 +98,11 @@ COPY --from=daemon build/bundle/sillyhub-daemon.js /app/daemon-dist/sillyhub-dae
 # sillyhub-daemon.js 同目录分发，否则远程 daemon 装完后 mcp-server.js 缺失
 # → node spawn 不存在的文件 → 主 agent MCP 永不启动 → team 链路断。
 COPY --from=daemon build/bundle/mcp-server.js /app/daemon-dist/mcp-server.js
+# 2026-09-04-provider-pi-onboarding task-06 / ql-20260906-003（审计 #10 分发链补口）：
+# vendored pi 扩展树随镜像分发——/daemon/latest/vendor/{path} 路由按此目录服务，
+# latest.json 的 vendorFiles 清单由此扫描。漏 COPY 则 install/自更新均拉不到
+# → pi --extension 静默跳过（subagent 工具在真实部署不可用）。
+COPY --from=daemon build/bundle/vendor /app/daemon-dist/vendor
 COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
 # task-04（DG-02）：Windows PowerShell 安装脚本，偏好 CRLF 换行（与 install.sh 的 LF 相反）。
 COPY --from=daemon scripts/install.ps1 /app/daemon-dist/install.ps1

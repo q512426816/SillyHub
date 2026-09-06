@@ -118,11 +118,14 @@ async def get_install_ps1(request: Request) -> Response:
 
 
 @router.get("/latest.json")
-async def get_latest_manifest() -> dict[str, str]:
-    """Return ``{version, downloadUrl}`` consumed by ``install.sh``'s ``fetch_latest``.
+async def get_latest_manifest() -> dict[str, object]:
+    """Return ``{version, downloadUrl, vendorFiles}`` consumed by installers/preflight.
 
     Field names: ``version``（BUILD_ID / git SHA）+ ``url``（preflight.ts 消费）+ ``downloadUrl``
-    （install.sh 消费）。同时返回两种字段名以兼容两个消费方。
+    （install.sh 消费）。同时返回两种字段名以兼容两个消费方。``vendorFiles``
+    （ql-20260906-003，审计 #10）：``vendor/`` 下相对路径清单（按需扫描
+    daemon-dist，未打包 → 空列表），install.sh / install.ps1 / preflight 自更新
+    据此逐文件伴生下载 vendored pi 扩展树。
     """
     version = get_daemon_latest_version()
     download_url = DAEMON_DOWNLOAD_URL
@@ -130,7 +133,21 @@ async def get_latest_manifest() -> dict[str, str]:
         "version": version,
         "url": download_url,
         "downloadUrl": download_url,
+        "vendorFiles": _vendor_file_list(),
     }
+
+
+def _vendor_file_list() -> list[str]:
+    """扫描 daemon-dist/vendor 下全部文件的相对 POSIX 路径（排序稳定）。
+
+    条目形如 ``vendor/pi-extensions/subagent/index.ts``（含 vendor/ 前缀——
+    客户端 join(binDir, rel) 直落位）。目录缺失 → 空列表（旧镜像/未打包 vendor
+    的兼容形态，客户端 no-op）。
+    """
+    root = get_settings().daemon_dist_dir / "vendor"
+    if not root.is_dir():
+        return []
+    return sorted(p.relative_to(root.parent).as_posix() for p in root.rglob("*") if p.is_file())
 
 
 @router.get("/latest/sillyhub-daemon.js")
@@ -154,3 +171,31 @@ async def get_mcp_server_bundle() -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="mcp-server bundle not bundled in image")
     return FileResponse(path, media_type="application/javascript", filename="mcp-server.js")
+
+
+@router.get("/latest/vendor/{file_path:path}")
+async def get_vendor_file(file_path: str) -> FileResponse:
+    """Serve a vendored pi-extension file（ql-20260906-003，审计 #10 分发链补口）.
+
+    ``vendor/`` 树随 bundle 打进镜像（Dockerfile COPY），install / preflight
+    自更新按 latest.json 的 vendorFiles 清单逐文件下载到 bin 目录 ``vendor/``
+    下——pi-rpc-driver 的 ``piVendoredSubagentExtensionPath`` 按「bundle 同目录
+    vendor/pi-extensions/...」候选定位 ``--extension`` 实参；漏分发则候选落空、
+    扩展静默跳过（subagent 工具不可用）。路径双保险校验：分段白名单（拒绝
+    ``..`` / 空段 / 反斜杠 / NUL）+ resolve 后 containment 复核（防符号链接逃逸）；
+    不合规与缺失统一 404（不泄露存在性）。媒体类型固定 octet-stream——按扩展名
+    猜测会把 .ts 判成 video/mp2t，且客户端均按字节落盘不消费类型。
+    """
+    segments = file_path.split("/")
+    if (
+        not file_path
+        or any(seg in ("", ".", "..") for seg in segments)
+        or "\\" in file_path
+        or "\x00" in file_path
+    ):
+        raise HTTPException(status_code=404, detail="vendor file not found")
+    root = (get_settings().daemon_dist_dir / "vendor").resolve()
+    target = (root / file_path).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise HTTPException(status_code=404, detail="vendor file not found")
+    return FileResponse(target, media_type="application/octet-stream")

@@ -315,3 +315,19 @@
 根因：立即冲刷失败仅 warn 留桶，后续唯二触发点（心跳补拉 pending_controls>0 不含 delivered 行 / WS 重连对账）在单次网络失败+WS 不断+10min 无新 pending 组合下都不发生，GC 按 delivered-未-ack 误杀活轮
 方案：control-dispatcher 新增 _immediateFlushWithRetry：失败后 CONTROL_ACK_RETRY_DELAY_MS=5000 退避重试一次，按 runtime key 定时器去重、unref、fire 清位；二次失败留桶交还既有兜底；补拉趟批尾 _flushAcks 保持直调零耦合；类头注释同步收窄不做范围
 结果：control-dispatcher 23/23（+4 新用例）+ resilience-scenarios 27/27 + tsc 0；模块文档同步
+
+## ql-20260906-003-a611 | 2026-09-06 22:38:48 | 修复审计 #10：vendored pi 扩展树分发链断裂——vendor 永不到 bin 目录致 pi --extension 静默跳过
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/dist_router.py（vendorFiles 清单+vendor 路由）
+- backend/Dockerfile（补 COPY build/bundle/vendor）
+- backend/tests/test_daemon_dist.py（+5 用例（fixture newline 平台无关））
+- sillyhub-daemon/src/preflight.ts（LatestInfo.vendorFiles+updateVendorBundles+isSafeVendorRelPath）
+- sillyhub-daemon/tests/preflight-download-replace.test.ts（+5 vendor 用例）
+- sillyhub-daemon/scripts/install.sh（vendorFiles 提取+逐文件下载）
+- sillyhub-daemon/scripts/install.ps1（VENDOR_FILES+逐文件下载）
+需求：修复审计 #10：vendored pi 扩展树分发链断裂——vendor 永不到 bin 目录致 pi --extension 静默跳过
+根因：Dockerfile 只 COPY 两个 js、dist_router 只有两条硬编码 bundle 路由、install 与 preflight 无 vendor 清单可拉——build-bundle.sh 拷进的 vendor 在分发链每一环都被丢下
+方案：Dockerfile 补 vendor COPY；latest.json 增 vendorFiles 扫描清单+新 vendor 通用路由（双保险路径校验+octet-stream）；install.sh/ps1/preflight 三端按清单逐文件伴生下载（白名单防篡改+tmp+rename 原子+best-effort 单文件失败不中止+旧服务器无键 no-op）
+结果：backend test_daemon_dist 14 passed（+5）ruff 0 mypy 0；daemon preflight 51 passed（+5）tsc 0；install.sh bash -n 过、install.ps1 AST parse 过；模块文档 2 份同步；gen:types 单字段债待并行会话收尾统一重生成（openapi 正被他者暂存）

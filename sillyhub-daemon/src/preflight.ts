@@ -50,7 +50,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { mkdir, readFile, writeFile, rename, unlink, copyFile, readdir, access } from 'node:fs/promises';
 import type { DaemonConfig } from './config.js';
 import { daemonBinDir } from './config.js';
@@ -189,6 +189,12 @@ interface LatestInfo {
   url: string;
   /** 发布时间（ISO 字符串，仅记录用，可选）。 */
   publishedAt?: string;
+  /**
+   * vendored pi 扩展树相对路径清单（ql-20260906-003，审计 #10）：形如
+   * `vendor/pi-extensions/subagent/index.ts`，逐文件伴生下载到 bin 目录。
+   * 旧服务器 latest.json 无该键 → undefined → updateVendorBundles no-op。
+   */
+  vendorFiles?: string[];
 }
 
 // ── 入口 ─────────────────────────────────────────────────────────────────────
@@ -361,6 +367,10 @@ export async function runDaemonSelfUpdate(
   // mcp-server.js best-effort 伴生替换（失败仅 warn，不影响主 bundle 更新结果）。
   await updateMcpServerBundle(fullUrl, latest.version, binDir, logger);
 
+  // ql-20260906-003（审计 #10）：vendored pi 扩展树伴生替换（vendorFiles 清单，
+  // best-effort 同 mcp 语义）。
+  await updateVendorBundles(fullUrl, latest.vendorFiles, latest.version, binDir, logger);
+
   logger('info', 'daemon_self_update_restart', {
     from: buildId,
     to: latest.version,
@@ -425,6 +435,92 @@ async function updateMcpServerBundle(
     // 下次会话 spawn 时若文件已换则用新版；保持旧文件也不影响主流程）。
     logger('warn', 'mcp_server_update_failed_keep_old', { url: mcpUrl });
   }
+}
+
+/**
+ * 伴生更新 vendored pi 扩展树（ql-20260906-003，审计 #10 分发链补口）。
+ *
+ * 背景：build-bundle.sh 把 vendor/pi-extensions 拷进 bundle，但 install 下载与
+ * 自更新此前只搬运 sillyhub-daemon.js / mcp-server.js 两个单文件——vendor 树
+ * 永远到不了 bin 目录，pi-rpc-driver 的 piVendoredSubagentExtensionPath 两候选
+ * 落空 → pi `--extension` 静默跳过（subagent 工具在真实部署不可用）。
+ *
+ * 语义：
+ *   - 清单来源 latest.json 的 `vendorFiles`（backend 扫描 daemon-dist/vendor
+ *     生成）；旧服务器无该键 / 空数组 → no-op（兼容，不 fetch 不落盘）。
+ *   - **不做 BUILD_ID 校验**（.ts/.md 非 JS bundle，validateBundleContent 必挂），
+ *     仍走 tmp + rename 原子替换 + mkdir 目录链；无备份轮换（小文件，旧文件
+ *     被覆盖即新版本，无人工救回诉求）。
+ *   - 单文件失败 warn 继续（best-effort，对齐 mcp-server.js 语义——主 bundle
+ *     更新结果不受影响；缺文件时 --extension 静默跳过的既有降级不变）。
+ *   - URL 推导同 mcp-server.js：主 bundle URL 不以 sillyhub-daemon.js 结尾
+ *     （自定义分发形态）→ debug 跳过。
+ *   - 路径白名单：必须 `vendor/` 前缀、无 `..` / 空段 / 反斜杠 / NUL——manifest
+ *     被篡改时不会写 bin 目录之外（join 后仍收敛在 binDir/vendor/ 树内）。
+ */
+export async function updateVendorBundles(
+  daemonBundleUrl: string,
+  vendorFiles: string[] | undefined,
+  newVersion: string,
+  binDir: string,
+  logger: PreflightLogger,
+): Promise<void> {
+  if (!vendorFiles || vendorFiles.length === 0) {
+    logger('debug', 'vendor_files_empty_skip', { version: newVersion });
+    return;
+  }
+  if (!daemonBundleUrl.endsWith(DAEMON_BUNDLE_NAME)) {
+    logger('debug', 'vendor_files_skip_url_shape', { url: daemonBundleUrl });
+    return;
+  }
+  const base = daemonBundleUrl.slice(0, -DAEMON_BUNDLE_NAME.length);
+  let replaced = 0;
+  for (const rel of vendorFiles) {
+    if (!isSafeVendorRelPath(rel)) {
+      logger('warn', 'vendor_file_path_rejected', { rel });
+      continue;
+    }
+    const url = `${base}${rel}`;
+    let resp: Response;
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      logger('warn', 'vendor_file_download_failed', { url, error: fmtErr(e) });
+      continue;
+    }
+    if (!resp.ok) {
+      logger('warn', 'vendor_file_download_non_ok', { url, status: resp.status });
+      continue;
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const target = join(binDir, rel);
+    const tmp = `${target}.tmp`;
+    try {
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(tmp, buf);
+      await rename(tmp, target);
+      replaced += 1;
+    } catch (e) {
+      await unlink(tmp).catch(() => undefined);
+      logger('warn', 'vendor_file_write_failed', { url, error: fmtErr(e) });
+    }
+  }
+  logger('info', 'vendor_files_self_updated', {
+    version: newVersion,
+    replaced,
+    total: vendorFiles.length,
+  });
+}
+
+/** vendor 相对路径白名单校验（见 updateVendorBundles 语义段）。 */
+function isSafeVendorRelPath(rel: string): boolean {
+  if (!rel.startsWith('vendor/') || rel.includes('\\') || rel.includes('\0')) return false;
+  // `..` 子串级保守匹配（对齐 install.sh / install.ps1 两侧口径——vendor 文件
+  // 名不含 `..`，宁可误拒不可漏放；段级判等挡不住 `pi..evil` 形态的子串）。
+  if (rel.includes('..')) return false;
+  const segs = rel.split('/');
+  // 其余段禁空/当前目录引用（空段与 ./ 不逃逸，但拒绝以保持三端口径一致）。
+  return segs.slice(1).every((s) => s !== '' && s !== '.');
 }
 
 /**
@@ -565,6 +661,11 @@ async function fetchLatest(
     url: downloadUrl,
     publishedAt:
       typeof obj.publishedAt === 'string' ? obj.publishedAt : undefined,
+    // ql-20260906-003：vendorFiles 逐条过滤到 string 形态（非 string 条目静默
+    // 丢弃；isSafeVendorRelPath 在下载侧二次校验，此处只保证数组可迭代安全）。
+    vendorFiles: Array.isArray(obj.vendorFiles)
+      ? obj.vendorFiles.filter((v): v is string => typeof v === 'string')
+      : undefined,
   };
 }
 
