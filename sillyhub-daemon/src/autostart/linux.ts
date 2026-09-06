@@ -200,10 +200,15 @@ function sanitizeIniValue(value: string): string {
  *   引用本文件导出的 linuxAutostartStrategy，反向值 import 会成运行时循环
  *   （测试直引 linux.js 时 index.ts 读到 TDZ 的 linuxAutostartStrategy 会崩），
  *   故只保留 `import type`。
+ * - Environment=PATH=<envPath>（ql-20260906-001：systemd 用户实例默认 PATH 同样
+ *   精简（通常 /usr/bin:/bin），~/.local/bin、/usr/local/bin 等 CLI 安装目录
+ *   不在内——daemon 子进程靠 PATH 探测 AI CLI，探测不到即按「无 agent 不注册」
+ *   语义永不上线（与 macOS launchd 同缺陷，2026-09-05 生产实证）。envPath
+ *   缺省/空串时省略该行，退回 systemd 默认 PATH（旧行为））。
  * - **不写 Restart 键**（systemd 默认 no）——D-002 仅开机/登录启动一次，无保活。
  * - WantedBy=default.target：用户会话建立时触发（非纯开机语义）。
  */
-function buildServiceContent(record: AutostartRecord): string {
+function buildServiceContent(record: AutostartRecord, envPath?: string): string {
   const serverUrl = sanitizeIniValue(record.server_url);
   const execStart = [
     quoteIniToken(sanitizeIniValue(record.node_path)),
@@ -212,17 +217,25 @@ function buildServiceContent(record: AutostartRecord): string {
     '--server',
     serverUrl,
   ].join(' ');
+  // PATH 值再走一遍 sanitizeIniValue 防御（PATH 不含换行，但统一口径不吃亏）。
+  const environment =
+    envPath && envPath.length > 0
+      ? [`Environment=PATH=${sanitizeIniValue(envPath)}`]
+      : [];
   return [
     '[Unit]',
     `Description=SillyHub Daemon (${serverUrl})`,
     '',
     '[Service]',
     `ExecStart=${execStart}`,
+    environment,
     '',
     '[Install]',
     'WantedBy=default.target',
     '',
-  ].join('\n');
+  ]
+    .flat()
+    .join('\n');
 }
 
 // ── 策略实现 ─────────────────────────────────────────────────────────────────
@@ -247,7 +260,8 @@ export const linuxAutostartStrategy: AutostartPlatformStrategy = {
     const unitFile = join(SYSTEMD_USER_DIR, record.task_name);
     try {
       await mkdir(SYSTEMD_USER_DIR, { recursive: true });
-      await writeFile(unitFile, buildServiceContent(record), 'utf-8');
+      // PATH 固化自注册时 process.env.PATH（enable 在用户终端跑，含 CLI 安装目录）。
+      await writeFile(unitFile, buildServiceContent(record, process.env.PATH), 'utf-8');
     } catch (e) {
       return {
         ok: false,

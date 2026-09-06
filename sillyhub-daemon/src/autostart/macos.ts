@@ -82,14 +82,20 @@ function escapePlistXml(s: string): string {
  *   - Label = task_name（com.sillyhub.daemon.<hash8>）；
  *   - ProgramArguments 五元素绝对路径数组：node / 脚本 / start / --server /
  *     server_url（launchd 环境 PATH 受限，R-06；凭据不进数组，D-004）；
+ *   - EnvironmentVariables.PATH = envPath（ql-20260906-001：launchd 默认 PATH
+ *     只有 /usr/bin:/bin:/usr/sbin:/sbin，Homebrew CLI 目录（/opt/homebrew/bin）
+ *     不在内——daemon 子进程靠 PATH 探测 AI CLI，探测不到即按「无 agent
+ *     不注册」语义永不上线。2026-09-05 生产实证：Mac-mini-3 注册 0 次。
+ *     envPath 缺省/空串时省略整键，退回 launchd 默认 PATH（旧行为））；
  *   - RunAtLoad = true（登录加载时拉起一次）；
  *   - **不写 KeepAlive 键**（D-002 无保活——崩溃不拉起，exit(0) 自更新不双开）；
  *   - StandardOutPath / StandardErrorPath 均指向 autostart-<hash8>.launchd.txt
  *     （R-09 避 clean glob）。
  *
  * @param record enableAutostart 组装的注册记录（node/script 双绝对路径已固化）
+ * @param envPath 注册时 process.env.PATH（固化进 plist；不传则不写该键）
  */
-export function buildLaunchdPlist(record: AutostartRecord): string {
+export function buildLaunchdPlist(record: AutostartRecord, envPath?: string): string {
   const esc = escapePlistXml;
   const logPath = launchdLogPath(record);
   const programArguments = [
@@ -101,6 +107,17 @@ export function buildLaunchdPlist(record: AutostartRecord): string {
   ]
     .map((arg) => `\t\t<string>${esc(arg)}</string>`)
     .join('\n');
+  // PATH 键两行成对出现（或整键省略），模板数组用条件展开保持缩进一致。
+  const environmentVariables =
+    envPath && envPath.length > 0
+      ? [
+          '\t<key>EnvironmentVariables</key>',
+          '\t<dict>',
+          '\t\t<key>PATH</key>',
+          `\t\t<string>${esc(envPath)}</string>`,
+          '\t</dict>',
+        ]
+      : [];
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -114,6 +131,7 @@ export function buildLaunchdPlist(record: AutostartRecord): string {
     '\t</array>',
     '\t<key>RunAtLoad</key>',
     '\t<true/>',
+    environmentVariables,
     '\t<key>StandardOutPath</key>',
     `\t<string>${esc(logPath)}</string>`,
     '\t<key>StandardErrorPath</key>',
@@ -121,7 +139,9 @@ export function buildLaunchdPlist(record: AutostartRecord): string {
     '</dict>',
     '</plist>',
     '',
-  ].join('\n');
+  ]
+    .flat()
+    .join('\n');
 }
 
 // ── launchctl 命令封装（对齐 host-fs-handler.ts 的 execFile 模式）────────────
@@ -227,10 +247,11 @@ export const macosAutostartStrategy: AutostartPlatformStrategy = {
     const plistPath = launchAgentPlistPath(label);
 
     // 步骤 1：写 plist（LaunchAgents 目录不存在则 mkdir -p；权限走默认
-    // umask，launchd 要求用户所有，默认即满足，无需 chmod）。
+    // umask，launchd 要求用户所有，默认即满足，无需 chmod）。PATH 固化自
+    // 注册时 process.env.PATH（enable 在用户终端跑，含 Homebrew 等 CLI 目录）。
     try {
       await mkdir(dirname(plistPath), { recursive: true });
-      await writeFile(plistPath, buildLaunchdPlist(record), 'utf-8');
+      await writeFile(plistPath, buildLaunchdPlist(record, process.env.PATH), 'utf-8');
     } catch (e) {
       return {
         ok: false,

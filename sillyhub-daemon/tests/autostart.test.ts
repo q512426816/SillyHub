@@ -648,6 +648,27 @@ describe('macOS：buildLaunchdPlist plist 产物', () => {
     const plist = buildLaunchdPlist(record);
     expect(plist).toContain('http://h:8000/?a=1&amp;b=&lt;2&gt;');
   });
+
+  // ql-20260906-001：PATH 固化（launchd 默认 PATH 无 CLI 目录，无 agent 不注册）。
+  it('envPath 传入 → EnvironmentVariables dict 含转义后的 PATH（ql-20260906-001）', () => {
+    const plist = buildLaunchdPlist(
+      makeRecord('darwin'),
+      '/opt/homebrew/bin:/usr/bin:/bin',
+    );
+    expect(plist).toContain('<key>EnvironmentVariables</key>');
+    expect(plist).toContain('<key>PATH</key>');
+    expect(plist).toContain('<string>/opt/homebrew/bin:/usr/bin:/bin</string>');
+  });
+
+  it('envPath 含 XML 实体字符 → PATH 值同样转义', () => {
+    const plist = buildLaunchdPlist(makeRecord('darwin'), '/a&b<c>/bin');
+    expect(plist).toContain('<string>/a&amp;b&lt;c&gt;/bin</string>');
+  });
+
+  it('envPath 空串/不传 → 整键省略，退回 launchd 默认 PATH（旧行为）', () => {
+    expect(buildLaunchdPlist(makeRecord('darwin'))).not.toContain('EnvironmentVariables');
+    expect(buildLaunchdPlist(makeRecord('darwin'), '')).not.toContain('EnvironmentVariables');
+  });
 });
 
 // ── macOS 策略（launchctl）──────────────────────────────────────────────────
@@ -666,7 +687,9 @@ describe('macOS 策略（launchd LaunchAgent）', () => {
 
     expect(res).toEqual({ ok: true });
     expect(existsSync(plistPath)).toBe(true);
-    expect(readFileSync(plistPath, 'utf-8')).toBe(buildLaunchdPlist(record));
+    // ql-20260906-001：register 写盘固化注册时 process.env.PATH（launchd 默认
+    // PATH 无 Homebrew CLI 目录 → 无 agent 不注册，机器永不上线）。
+    expect(readFileSync(plistPath, 'utf-8')).toBe(buildLaunchdPlist(record, process.env.PATH));
     expect(execCalls()).toEqual([
       ['launchctl', ['bootout', `gui/501/${record.task_name}`]],
       ['launchctl', ['bootstrap', 'gui/501', plistPath]],
@@ -816,6 +839,9 @@ describe('Linux 策略（systemd user service）', () => {
       `ExecStart=/usr/bin/node /home/dev/.sillyhub/daemon/bin/sillyhub-daemon.js start --server ${SERVER_URL}`,
     );
     expect(content).toContain(`Description=SillyHub Daemon (${SERVER_URL})`);
+    // ql-20260906-001：systemd 用户实例默认 PATH 同样精简，Environment= 固化
+    // 注册时 process.env.PATH（与 macOS launchd 同缺陷对称修复）。
+    expect(content).toContain(`Environment=PATH=${process.env.PATH}`);
   });
 
   it('register 成功：ExecStart 路径含空格时该词元双引号包裹（INI 引号规则）', async () => {

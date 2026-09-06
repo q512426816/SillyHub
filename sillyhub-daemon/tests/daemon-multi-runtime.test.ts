@@ -245,11 +245,21 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
       makeAgent('claude', { available: false }),
       makeAgent('codex', { available: false }),
     ];
+    // ql-20260906-001：无 agent 不注册 → warn 级 + 中文修复提示（daemon 日志走
+    // console，spy console.warn 捕获；生产实证：launchd 默认 PATH 无 Homebrew
+    // CLI 目录，info 级静默一行让机器 0 注册跑了一整天无人察觉）。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { daemon, client } = build({ agents });
     daemons.push(daemon);
 
     await daemon.start();
     expect(client.register).not.toHaveBeenCalled();
+    const warnLine = warnSpy.mock.calls
+      .map((c) => c.join(' '))
+      .find((s) => s.includes('no_agents_detected'));
+    expect(warnLine).toBeDefined();
+    expect(warnLine).toContain('不注册');
+    expect(warnLine).toContain('PATH');
     await daemon.stop();
     // 走到这里说明没崩
     expect(daemon.isRunning).toBe(false);

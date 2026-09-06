@@ -1851,7 +1851,19 @@ export class Daemon {
     // daemon_local_id + 探测到的 provider 列表。单个失败不中断（错误隔离在
     // _registerDaemon 内）。
     if (availableAgents.length === 0) {
-      this._logger.info('no_agents_detected');
+      // ql-20260906-001：无 agent = daemon 不注册、平台永不见此机器，但三循环
+      // 照常启动——info 级单行日志用户完全无感（2026-09-05 生产实证：launchd
+      // 默认 PATH 无 Homebrew CLI 目录，机器 0 注册跑了一整天没人发现）。
+      // 升 warn + 中文修复提示；_retryRegisterIfNeeded 对空快照静默跳过不变
+      //（每 15s 心跳打一条只会刷屏）。
+      this._logger.warn('no_agents_detected', {
+        hint:
+          '未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、'
+          + '不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI '
+          + '安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认'
+          + ' CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 '
+          + 'PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。',
+      });
     } else {
       // ql-20260624-006：注册前 acquire runtime lock（强制单实例）。
       // 任一 provider lock 被活跃进程持有 → 回滚已持有 + _running 复位 + 抛错，
@@ -2689,6 +2701,18 @@ export class Daemon {
    */
   private async _suspendSessionsOnStop(): Promise<void> {
     if (typeof this._client.suspendSessions !== 'function') return;
+    // ql-20260906-001：本进程从未注册成功（无 agent 或注册一直失败）→ backend
+    // 大概率没有本 daemon_local_id 的实例行，POST 必 404（2026-09-05 生产实证：
+    // launchd 未注册 daemon 停机 suspend-batch 404 噪声）。跳过省一次必败请求；
+    // 若确有上一进程遗留 active 会话未挂起，600s offline sweep 兜底收敛（A5
+    // 已声明 fallback），语义不劣化。_registeredRuntimes 仅注册成功时填充、
+    // 永不清空，size>0 即本进程注册过。
+    if (this._registeredRuntimes.size === 0) {
+      this._logger.info('daemon_stop_suspend_skipped_unregistered', {
+        daemon_local_id: this._config.runtime_id,
+      });
+      return;
+    }
     try {
       const resp = (await this._client.suspendSessions(
         this._config.runtime_id,
