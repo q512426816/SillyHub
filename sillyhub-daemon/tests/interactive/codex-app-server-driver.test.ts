@@ -425,6 +425,40 @@ describe('TDD-3：首轮 turn 生命周期', () => {
     child._emitExit(0);
     await consumeP;
   });
+
+  it('turn 在途 close() → consume 不挂在 currentTurnPromise 且不产假 result（ql-20260906-004 审计 #9）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push } = makeInputQueue();
+    const { cb, results, errors } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 在途轮：turn/started 已见、turn/completed 不发——用户此时结束会话
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_1')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    await handle.close();
+    // 修复前：exit handler 因 closing 早退、currentTurnPromise 永不 resolve →
+    // consume 永挂（codex 既有模式，pi 同款）。超时兜底防回归挂死测试进程。
+    await Promise.race([
+      consumeP,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error('consume hung on currentTurnPromise after close')), 3000),
+      ),
+    ]);
+    // 会话正在被终止：不产生 turn result / 会话级 error（终态归 _terminateSession）
+    expect(results).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+  });
 });
 
 // ── 第四批 code-quality：子进程非主动退出对称收敛（exit handler 回归）─────────

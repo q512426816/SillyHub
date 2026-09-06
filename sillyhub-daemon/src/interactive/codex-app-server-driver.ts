@@ -787,6 +787,15 @@ export class CodexAppServerDriver implements InteractiveDriver {
       }
     };
 
+    // ql-20260906-004（审计 #9）：把「close 释放轮次」挂到 handle（沿 _ctx cast
+    // 惯例的内部槽）——turn 在途时 _close 杀进程不会再有 turn/completed 帧、
+    // exit handler 又因 closing 早退，若无人 finishTurn 则 consume 永挂在
+    // await currentTurnPromise（协程+闭包泄漏，finally 清理全被跳过）。finally
+    // 清槽防陈旧引用。
+    (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose = (): void => {
+      finishTurn({ kind: 'cancelled' });
+    };
+
     /** 本轮 turn 是否已上报 result（防同轮 turn/completed 与进程退出双触发重复）。 */
     let turnReported = false;
 
@@ -1049,6 +1058,11 @@ export class CodexAppServerDriver implements InteractiveDriver {
         await this._writeTurnStart(h, ctx, turn.text);
         // 等本轮 turn/completed（或进程退出 / error）
         const outcome = await currentTurnPromise!;
+        // ql-20260906-004（审计 #9）：close 释放的轮次（cancelled outcome）不上报
+        // ——会话正在被终止，终态归 _terminateSession；对齐 pi 驱动 waiter 之后的
+        // closing 守卫（此处也顺带覆盖「turn 恰好完成后、上报前 close」的竞态，
+        // 该窗口跳过上报无害——reportResult 本有 finalized 幂等守卫）。
+        if (h.closing || finalized) break;
         // 上报本轮 result
         this._reportOutcome(outcome, pendingTurnError, reportResult);
         pendingTurnError = null;
@@ -1067,6 +1081,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         result: `codex consume error: ${(err as Error).message}`,
       });
     } finally {
+      delete (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose;
       try {
         stdoutLogStream?.end();
       } catch {
@@ -1736,6 +1751,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
   private _close(h: CodexHandle): Promise<void> {
     if (h.closing) return Promise.resolve();
     h.closing = true;
+
+    // ql-20260906-004（审计 #9）：释放 consume 的当前轮等待者——进程被杀后不会
+    // 再有 turn/completed 帧，exit handler 因 closing 早退；不释放则 consume 永挂
+    // 在 await currentTurnPromise。cancelled outcome 由主循环新增 closing 守卫
+    // 拦下不上报（终态归 _terminateSession）。
+    (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose?.();
 
     try {
       const stdin = h.child.stdin;

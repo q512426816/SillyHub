@@ -1390,6 +1390,39 @@ describe('退出收敛与容错', () => {
     expect(errors[0]).toBeInstanceOf(Error);
   });
 
+  it('turn 在途 close() → consume 不挂在 settleWaiter 且不产假 result（ql-20260906-004 审计 #9）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push } = makeInputQueue();
+    const { cb, results, errors } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    // 正在等 agent_settled 时用户结束会话（_terminateSession → handle.close）
+    push('进行中');
+    await tick();
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    await tick();
+
+    await handle.close();
+    // 修复前：exit handler 因 closing 早退不释放 settled waiter → consume 永挂
+    //（每次会话关闭泄漏一个协程+闭包）。超时兜底防回归挂死测试进程。
+    await Promise.race([
+      consumeP,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error('consume hung on settleWaiter after close')), 3000),
+      ),
+    ]);
+    // 会话正在被终止：不产生 turn result / 会话级 error（终态归 _terminateSession）
+    expect(results).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+  });
+
   it('坏 JSON 行 / 无主 response / 未知事件 → 不崩不丢（降级桶/警告路径）', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);

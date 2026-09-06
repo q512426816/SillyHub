@@ -331,3 +331,16 @@
 根因：Dockerfile 只 COPY 两个 js、dist_router 只有两条硬编码 bundle 路由、install 与 preflight 无 vendor 清单可拉——build-bundle.sh 拷进的 vendor 在分发链每一环都被丢下
 方案：Dockerfile 补 vendor COPY；latest.json 增 vendorFiles 扫描清单+新 vendor 通用路由（双保险路径校验+octet-stream）；install.sh/ps1/preflight 三端按清单逐文件伴生下载（白名单防篡改+tmp+rename 原子+best-effort 单文件失败不中止+旧服务器无键 no-op）
 结果：backend test_daemon_dist 14 passed（+5）ruff 0 mypy 0；daemon preflight 51 passed（+5）tsc 0；install.sh bash -n 过、install.ps1 AST parse 过；模块文档 2 份同步；gen:types 单字段债待并行会话收尾统一重生成（openapi 正被他者暂存）
+
+## ql-20260906-004-62c6 | 2026-09-06 23:02:24 | 修复审计 #9：turn 在途 close() 后 consume 挂在轮次等待者永不返回——pi 与 codex 两 driver 统一在 _close 释放
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（释放器挂槽+_close 调用+finally 清槽）
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（_finishTurnOnClose+循环 closing 守卫+_close 调用）
+- sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（turn 在途 close 回归）
+- sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts（turn 在途 close 回归）
+需求：修复审计 #9：turn 在途 close() 后 consume 挂在轮次等待者永不返回——pi 与 codex 两 driver 统一在 _close 释放
+根因：close 杀进程后不会再有收敛帧（agent_settled/turn/completed），exit handler 因 closing 早退不兜底，waiter 无人释放→协程+闭包泄漏且 finally 清理被跳过（codex 既有模式，pi 复制引入同款）
+方案：释放器挂 handle 内部槽（pi _releaseSettledWaiters / codex _finishTurnOnClose→cancelled）+ _close 置 closing 后调用 + finally 清槽；codex 主循环补 closing 守卫防假 result 上报（对齐 pi 既有守卫）
+结果：pi-rpc-driver + codex-app-server-driver(+approval) 3 套件 114 passed（各 +1 回归：turn 在途 close→3s 超时兜底断言 consume 返回且零上报）；tsc 0；模块文档同步

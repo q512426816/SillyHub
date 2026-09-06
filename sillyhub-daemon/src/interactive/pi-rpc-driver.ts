@@ -551,6 +551,13 @@ export class PiRpcDriver implements InteractiveDriver {
       settledWaiters = [];
       for (const w of ws) w();
     };
+    // ql-20260906-004（审计 #9）：把释放器挂到 handle（沿 _ctx cast 惯例的内部
+    // 槽）——turn 在途时 _close 杀进程不会再有 agent_settled 帧、exit handler 又
+    // 因 closing 早退，若无人释放 settledWaiters 则 consume 协程永久挂在
+    // settleWaiter（闭包+normalizer+segments 泄漏，finally 清理全被跳过）。
+    // finally 清槽防陈旧引用。
+    (h as { _releaseSettledWaiters?: () => void })._releaseSettledWaiters =
+      releaseSettledWaiters;
     const settleWaiter = (): Promise<void> =>
       new Promise<void>((r) => settledWaiters.push(r));
     /**
@@ -946,6 +953,7 @@ export class PiRpcDriver implements InteractiveDriver {
       });
     } finally {
       releaseSettledWaiters();
+      delete (h as { _releaseSettledWaiters?: () => void })._releaseSettledWaiters;
       this._rejectAllPending(h, new Error('pi rpc consume ended'));
       try {
         child.stdout.off('data', onStdoutData);
@@ -1205,6 +1213,12 @@ export class PiRpcDriver implements InteractiveDriver {
     h.closing = true;
 
     this._rejectAllPending(h, new Error('pi rpc handle closed'));
+
+    // ql-20260906-004（审计 #9）：释放 consume 的 settled 等待者——进程被杀后
+    // 不会再有 agent_settled 帧，exit handler 因 closing 早退；不释放则 consume
+    // 挂在 settleWaiter 永不返回。释放后主循环经既有 finalized||closing 守卫
+    // 干净退出，不产生假 turn result（终态归 _terminateSession）。
+    (h as { _releaseSettledWaiters?: () => void })._releaseSettledWaiters?.();
 
     try {
       const stdin = h.child.stdin;
