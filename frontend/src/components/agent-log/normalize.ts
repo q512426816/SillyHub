@@ -482,14 +482,20 @@ export function buildSystemFailureItem(
  * `[ASSISTANT] Not logged in · Please run /login`（transcript 侧
  * model=<synthetic> / authentication_failed）同样识别——否则这条误导文案会被
  * 当作 agent 的正常回复渲染在时间线里（2026-09-03 会话 cb56fabf 事故形态）。
+ *
+ * ql-20260906-001（审计修复）：匹配收紧为**行首锚定**。原全文任意位置匹配会把
+ * 正文提到这些词的合法助手回复误判（最重路径：session-log-assembler 丢弃整条
+ * 回复，成功 run 无失败卡兜底，UI 直接丢内容）。CLI/daemon 合成错误行恒以特征词
+ * 开头，锚定后真阳性不受影响；classifyLog 重分类 / 新旧轨合流拦截 / assembler
+ * 丢弃四处调用点同享收紧。
  */
 export function isAssistantApiErrorText(content: string): boolean {
-  const body = extractAssistantText(content) || content;
+  const body = (extractAssistantText(content) || content).trimStart();
   return (
-    /API\s*Error/i.test(body) ||
-    /Request\s+rejected/i.test(body) ||
-    /Not\s+logged\s+in/i.test(body) ||
-    /Please\s+run\s+\/login/i.test(body)
+    /^API\s*Error/i.test(body) ||
+    /^Request\s+rejected/i.test(body) ||
+    /^Not\s+logged\s+in/i.test(body) ||
+    /^Please\s+run\s+\/login/i.test(body)
   );
 }
 

@@ -635,6 +635,19 @@ describe("task-08: 模型错误可见性 (buildErrorLogItem / :352 修正 / brow
     expect(isAssistantApiErrorText("[ASSISTANT] 我来帮你实现这个功能")).toBe(false);
   });
 
+  it("isAssistantApiErrorText 行首锚定：正文中段提及错误词不误判（ql-20260906-001 审计修复）", () => {
+    // 成功 run 的合法回复正文提到这些词（如帮用户排查报错、引用错误原文）
+    // 不得被判为错误文本——最重路径 session-log-assembler 会整条丢弃且无失败卡兜底。
+    expect(
+      isAssistantApiErrorText("[ASSISTANT] 我排查了日志，API Error: 429 出现在重试第 3 次"),
+    ).toBe(false);
+    expect(isAssistantApiErrorText("[ASSISTANT] 这个报错是 Request rejected，原因是限流")).toBe(false);
+    expect(isAssistantApiErrorText("[ASSISTANT] 报错写着 Not logged in，但其实是 token 过期")).toBe(false);
+    // 行首命中仍识别（真阳性不回退）。
+    expect(isAssistantApiErrorText("[ASSISTANT] API Error: Request rejected (429)")).toBe(true);
+    expect(isAssistantApiErrorText("Not logged in")).toBe(true);
+  });
+
   // ---- classifyLog :352 修正：[ASSISTANT] + API Error → error ----
   it("classifyLog [ASSISTANT] 含 API Error 归 error（修正原 :352 全归 assistant 的缺陷）", () => {
     expect(classifyLog("stdout", "[ASSISTANT] API Error: Request rejected (429)")).toBe("error");

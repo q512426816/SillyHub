@@ -289,3 +289,18 @@
 方案：backend build_bundle 元数据第五键 manifest_versions（仅 exists 行）随包下发，daemon pull 后回填真实 base_version（旧 bundle 无键退化 0 兼容），PLATFORM-BUNDLE.json 加上传排除；apply_ops/soft_delete_change_dir 同 _write_spec_root 语义 bump spec_version；segment 键改 m<msgSeq>ci<idx>+message_end 清当前段+turn_end 全清；MIN_VERSIONS 补 pi [0,81,0]+声明必配表条目守护；install.ps1 排除收窄到 daemon/specs
 结果：backend 3 文件 56 passed 1 skipped（既有 symlink 跳过）ruff 0 mypy 0；daemon 3 文件 72 passed tsc 0；新增回归 7 例；模块文档 2 份同步
 审计：📝 文档欠账（D-8）：11 个源码文件改动未同步任何模块文档（涉及模块：backend · sillyhub-daemon）
+
+## ql-20260906-001-9232 | 2026-09-06 22:13:35 | 修复审计两中危项：quick-chat SQLite hex 未归一化派发必败 + isAssistantApiErrorText 全文正则误吞正常回复
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/main.py（daemon-chat 派发 workspace_id 归一化）
+- backend/tests/test_daemon_chat_workspace_uuid.py（新建端点回归测试（此前零覆盖））
+- frontend/src/components/agent-log/normalize.ts（isAssistantApiErrorText 行首锚定）
+- frontend/src/components/agent-log/__tests__/normalize.test.ts（中段提及不误判用例）
+- frontend/src/components/daemon/session-log-assembler.ts（丢弃判定注释同步修正）
+- frontend/src/components/daemon/__tests__/session-log-assembler.test.ts（中段提及保留 reply 用例）
+需求：修复审计两中危项：quick-chat SQLite hex 未归一化派发必败 + isAssistantApiErrorText 全文正则误吞正常回复
+根因：raw text() 结果 SQLite 返回 CHAR(32) hex 字符串不经类型回转，placement 内 .hex 对 str 抛 AttributeError 被 except 吞掉误报无在线 runtime；错误词正则全文任意位置匹配，成功 run 正文提到 API Error 等词即被整条丢弃且无失败卡兜底
+方案：main.py 派发前 uuid.UUID(x) if isinstance(x, str) else x 归一化（对齐 placement.py raw SQL 先例）；isAssistantApiErrorText 四正则收紧为行首锚定（^ + trimStart），合成错误行恒以特征词开头真阳性零回退，assembler 注释同步修正
+结果：backend 新端点回归测试 1 passed（patch dispatch 断言 UUID 实例）+ ruff 0 + mypy 0；前端 2 文件 160 passed + tsc 0；接口无变更免 gen:types；模块文档 2 份同步

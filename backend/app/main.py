@@ -563,10 +563,17 @@ def create_app() -> FastAPI:
                     lease_id = None
                     fail_reason = "当前账号未加入任何工作区，无法发起快捷聊天。"
                 else:
+                    # ql-20260906-001（审计 #6）：raw text() 结果不经类型回转——
+                    # SQLite 返回 CHAR(32) hex 字符串、PG 返回 UUID 对象。未归一化
+                    # 直传时 placement 内 workspace_id.hex 对 str 抛 AttributeError，
+                    # 被下方 except Exception 吞掉后误报「No online daemon runtime
+                    # found」。对齐 placement.py raw SQL 结果归一化先例。
+                    ws_raw = ws_row[0]
+                    dispatch_ws_id = uuid.UUID(ws_raw) if isinstance(ws_raw, str) else ws_raw
                     lease_id = await placement.dispatch_to_daemon(
                         run_id,
                         user.id,
-                        workspace_id=ws_row[0],
+                        workspace_id=dispatch_ws_id,
                         provider=provider,
                         model=model,
                         prompt=prompt,

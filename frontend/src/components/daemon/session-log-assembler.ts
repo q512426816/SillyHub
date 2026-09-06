@@ -352,8 +352,10 @@ export function classifySessionLog(
   // …" / "Request rejected"）不是 agent 答复——丢弃正文，展示由 turn.errorDetail
   // 渲染的 RunErrorItem 失败卡承担（会话 2f08b5da 实证：原文被当 kind=reply 渲染
   // 成带复制按钮的回复气泡）。与 normalize.ts isAssistantApiErrorText 同口径，
-  // 仅 [ASSISTANT] 前缀形态（codex / json-rpc 裸文本流不误吞——正文真含这些词
-  // 的合法回复不受影响）。
+  // 仅 [ASSISTANT] 前缀形态（codex / json-rpc 裸文本流不误吞）。
+  // ql-20260906-001（审计修复）：isAssistantApiErrorText 已收紧为行首锚定——此前
+  // 全文任意位置匹配会把正文**中段**提到这些词的成功 run 合法回复整条吞掉（无
+  // 失败卡兜底，UI 丢内容）；合成错误行恒以特征词开头，锚定后丢弃判定真阳性不变。
   if (/^\[ASSISTANT\]\s?/.test(trimmed) && isAssistantApiErrorText(trimmed)) {
     return null;
   }

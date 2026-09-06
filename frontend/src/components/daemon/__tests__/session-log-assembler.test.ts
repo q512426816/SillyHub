@@ -1113,6 +1113,17 @@ describe("classifySessionLog 模型错误行丢弃（ql-20260904-013）", () => 
     ).toBeNull();
   });
 
+  it("正文中段提及错误词的成功回复不丢弃（ql-20260906-001 行首锚定修复）", () => {
+    // 审计形态：成功 run 的合法回复正文提到错误词（如帮用户排查报错）——
+    // 全文任意位置匹配会整条吞掉且无失败卡兜底；行首锚定后保留为 reply。
+    expect(
+      classifySessionLog("[ASSISTANT] 日志里出现了 API Error: 429，原因是限流，我加了重试", "stdout"),
+    ).toEqual({
+      kind: "reply",
+      text: "日志里出现了 API Error: 429，原因是限流，我加了重试",
+    });
+  });
+
   it("丢弃后 output 零贡献（错误展示归 RunErrorItem，不残留回复气泡）", () => {
     const turn = applyAll([
       makeLog("1", "stdout", "[ASSISTANT] 前文正常答复"),
