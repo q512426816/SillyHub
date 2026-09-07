@@ -93,7 +93,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Input, Modal, Select, Spin, Tag } from "antd";
+import { Button, Input, Modal, Popover, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import {
   Archive,
@@ -133,6 +133,13 @@ import {
   type GroupChatListItemRead,
   type PpmItemKind,
 } from "@/lib/daemon";
+import type { AgentLogListItem } from "@/lib/agent-logs";
+import { LIVENESS_META, LivenessDot } from "@/components/agent-log/liveness-badge";
+import {
+  clearUnread,
+  isUnread,
+  useSessionLiveness,
+} from "@/hooks/use-session-liveness";
 import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
 import { listPersonalPlanTasks } from "@/lib/ppm/task";
 import { listProblems } from "@/lib/ppm/problem";
@@ -856,6 +863,13 @@ function WorkspaceTreeList({
     [sessionsQuery.data],
   );
   const totalFromServer = sessionsQuery.data?.total ?? 0;
+
+  // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
+  // 行尾活性小灯数据源：useSessionLiveness 固定 all 槽 30s 轮询 + 客户端
+  // working/blocked→idle 转移检测（未读标记）。本面板调一次建 map，经
+  // WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未命
+  // 中不传 → 不渲染灯，fail-open 与无日志会话现状一致）。
+  const { bySessionId: livenessBySessionId } = useSessionLiveness();
 
   // ── task-07（2026-09-01-session-group-chat / FR-01）：群聊分区 ──────────
   // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——design §5.3 群列表
@@ -1725,6 +1739,9 @@ function WorkspaceTreeList({
                 hideEngineChip={filterAgent !== ""}
                 runtimeToMachine={runtimeToMachine}
                 isArchivedView={isArchivedView}
+                /* 2026-09-08-session-list-liveness-dot task-02：liveness map
+                   组内行级命中（未命中 undefined → 行不渲染灯）。 */
+                livenessBySessionId={livenessBySessionId}
               />
             );
           })}
@@ -2143,6 +2160,9 @@ function WorkspaceGroupNode({
   isArchivedView,
   /** ql-20260829-010：归档工作区 id 集（组头「＋」置灰，后端 409 同款守卫）。 */
   archivedWorkspaceIds,
+  /** 2026-09-08-session-list-liveness-dot task-02：key=agent_session_id 的
+   * 活性条目映射（行级命中下发；未传/未命中 → 行不渲染小灯）。 */
+  livenessBySessionId,
 }: {
   group: TreeGroup;
   visibleSessions: AgentSessionRead[];
@@ -2185,6 +2205,7 @@ function WorkspaceGroupNode({
   /** 2026-08-24：归档视图判定（控制批量操作按钮显隐）。 */
   isArchivedView: boolean;
   archivedWorkspaceIds?: Set<string>;
+  livenessBySessionId?: Map<string, AgentLogListItem>;
 }) {
   // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
   const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
@@ -2570,6 +2591,9 @@ function WorkspaceGroupNode({
                     const parentOpen =
                       openParents.has(s.id) ||
                       Boolean(childSubs?.some((c) => c.id === selectedSessionId));
+                    // task-02（2026-09-08-session-list-liveness-dot）：行级 liveness
+                    // 命中（map 未命中 undefined → 行不渲染灯，fail-open）。
+                    const liveness = livenessBySessionId?.get(s.id);
                     return (
                       <div key={s.id}>
                         <SessionRow
@@ -2580,6 +2604,8 @@ function WorkspaceGroupNode({
                           runtimeToMachine={runtimeToMachine}
                           hideEngineChip={hideEngineChip}
                           onSelect={onSelect}
+                          liveness={liveness}
+                          livenessUnread={liveness ? isUnread(s.id) : undefined}
                           batchMode={batchActive}
                           checked={checkedIds.has(s.id)}
                           onToggleCheck={() => onToggleChecked(s.id)}
@@ -2635,6 +2661,13 @@ function WorkspaceGroupNode({
                                   runtimeToMachine={runtimeToMachine}
                                   hideEngineChip={hideEngineChip}
                                   onSelect={onSelect}
+                                  /* task-02：分身行照主行透传（map 命中才有值）。 */
+                                  liveness={livenessBySessionId?.get(c.id)}
+                                  livenessUnread={
+                                    livenessBySessionId?.get(c.id)
+                                      ? isUnread(c.id)
+                                      : undefined
+                                  }
                                   batchMode={batchActive}
                                   checked={checkedIds.has(c.id)}
                                   onToggleCheck={() => onToggleChecked(c.id)}
@@ -2708,6 +2741,62 @@ interface SessionRowProps {
   onRename?: (_newTitle: string) => void;
   /** ql-20260823-003：树形态筛选智能体后隐藏引擎 chip（全组同引擎冗余）。 */
   hideEngineChip?: boolean;
+  /**
+   * 2026-09-08-session-list-liveness-dot task-02（FR-01 / FR-02 / D-002@v1）：
+   * 关联 agent 日志的活性条目（liveness map 命中 session.id 才传；未传不渲染
+   * 行尾小灯——无关联日志会话行为与现状一致）。
+   */
+  liveness?: AgentLogListItem;
+  /** working/blocked→idle 新转移未读（isUnread 命中才传；selected 置真清除）。 */
+  livenessUnread?: boolean;
+}
+
+/** 悬停卡证据摘要截断上限（超出加省略号；title 悬浮看全文）。 */
+const LIVENESS_EVIDENCE_MAX_LEN = 80;
+
+/**
+ * 活性悬停卡内容（task-02 / FR-02 / D-002@v1）——组合渲染四项而非
+ * livenessTitle 单行字符串（Grill CC-04）：状态全名（LIVENESS_META 五态
+ * 色点 + label）/ 静默时长（last_event_at 相对时间，复用文件内
+ * formatRelativeTime）/ 证据摘要（state_evidence 截断）/ 推导时间
+ * （state_derived_at）。「关联」行不设——AgentLogListItem 无 change_key/
+ * quick_id 数据源。经 antd Popover portal 渲染（防行根 overflow-hidden 裁剪）。
+ */
+function SessionLivenessPopoverContent({ entry }: { entry: AgentLogListItem }) {
+  const meta = LIVENESS_META[entry.state];
+  const evidence = entry.state_evidence?.trim();
+  return (
+    <div className="w-64 space-y-1 text-xs" data-testid="liveness-hover-card">
+      <div className="flex items-center gap-1.5 font-medium">
+        <span
+          aria-hidden
+          className={cn(
+            "h-2 w-2 shrink-0 rounded-full",
+            meta.dotCls,
+            meta.pulse && "animate-pulse",
+          )}
+        />
+        {meta.label}（{entry.state}）
+      </div>
+      <div className="text-muted-foreground">
+        静默时长：{formatRelativeTime(entry.last_event_at)}
+      </div>
+      <div
+        className="truncate text-muted-foreground"
+        title={evidence ?? undefined}
+      >
+        证据摘要：
+        {evidence
+          ? evidence.length > LIVENESS_EVIDENCE_MAX_LEN
+            ? `${evidence.slice(0, LIVENESS_EVIDENCE_MAX_LEN)}…`
+            : evidence
+          : "—"}
+      </div>
+      <div className="text-muted-foreground">
+        推导时间：{formatRelativeTime(entry.state_derived_at)}
+      </div>
+    </div>
+  );
 }
 
 function SessionRow({
@@ -2730,12 +2819,34 @@ function SessionRow({
   onUnpin,
   onRename,
   hideEngineChip,
+  liveness,
+  livenessUnread,
 }: SessionRowProps) {
   // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-02）：行内
   // 重命名编辑态（标题位 ↔ 输入框，本地管理）：Enter/blur 提交、Esc 取消；
   // renameCancelledRef 标记 Esc 路径，防 setEditing(false) 触发的 blur 再提交。
   const [editing, setEditing] = useState(false);
   const renameCancelledRef = useRef(false);
+  // ── 2026-09-08-session-list-liveness-dot task-02 / FR-03 / D-001@v2：selected
+  // prop false→true 边沿清除该会话 idle 未读标记——覆盖点击选中 / 行级 Enter /
+  // 深链 ?session= 三路入口（深链经 selected 初挂即 true，wasSelectedRef 初值
+  // false 首跑即清）；批量模式勾选走 onToggleCheck 不动 selected，不触发清除。
+  const wasSelectedRef = useRef(false);
+  // 未读红点本地显示态：真源是 localStorage（isUnread 经 props 每渲染期取值），
+  // 但 selected 边沿的 clearUnread 在 effect 里执行后需要本行即时重渲染红点才
+  // 消失（否则要等下一轮轮询重渲染，最长 30s 残影）——本地态跟随 props 同步、
+  // 边沿清除时立即置 false。
+  const [unreadVisible, setUnreadVisible] = useState(Boolean(livenessUnread));
+  useEffect(() => {
+    setUnreadVisible(Boolean(livenessUnread));
+  }, [livenessUnread]);
+  useEffect(() => {
+    if (selected && !wasSelectedRef.current) {
+      clearUnread(session.id);
+      setUnreadVisible(false);
+    }
+    wasSelectedRef.current = selected;
+  }, [selected, session.id]);
   /** 提交（strip 非空 ≤255 且与当前标题不同才回调；空/未变静默退出不弹错）。 */
   const finishRename = (raw: string) => {
     setEditing(false);
@@ -2909,6 +3020,32 @@ function SessionRow({
         <span className="shrink-0 text-[11px] text-muted-foreground">
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
+        {/* 2026-09-08-session-list-liveness-dot task-02 / FR-01~03：行尾活性
+            小灯（相对时间之后、hover 操作按钮之前；liveness map 命中才渲染，
+            行内 flex 尾部 flex-none 18px 节点，不新增列——R-01 布局零变化）。
+            antd Popover trigger hover 默认 portal 渲染到 body，防行根节点
+            overflow-hidden 裁剪（Grill BL-02）；悬停卡内容组合渲染见
+            SessionLivenessPopoverContent。 */}
+        {liveness && (
+          <Popover
+            trigger="hover"
+            placement="bottomRight"
+            content={<SessionLivenessPopoverContent entry={liveness} />}
+          >
+            <span
+              data-testid="liveness-dot"
+              className="relative inline-flex h-[18px] w-[18px] flex-none items-center justify-center"
+            >
+              <LivenessDot state={liveness.state} />
+              {unreadVisible && (
+                <span
+                  aria-label="有新的空闲状态未读"
+                  className="absolute right-0 top-0 h-[7px] w-[7px] rounded-full border-[1.5px] border-card bg-destructive"
+                />
+              )}
+            </span>
+          </Popover>
+        )}
         {/* 单条操作按钮：hover 显示，阻止行点击冒泡 */}
         {!batchMode && (
           <span className="ml-1 flex hidden items-center group-hover:flex">
