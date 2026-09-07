@@ -316,11 +316,17 @@ class DaemonHeartbeatSillySpecConflict(BaseModel):
     ``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal
     （DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条
     心跳 422）。
+
+    2026-09-07-conflict-diff-compare task-04（design §7.3）：新增可选 ``ql_id``
+    （QUICKLOG 块头编号，如 ``ql-20260907-006-2972``）——daemon 侧对 ``quick-*``
+    名冲突 best-effort 读 guard.json 补报，普通变更/读不到 → None。宽松可选
+    （零改写透传语义不变）：旧 daemon 不上报不影响心跳落库。
     """
 
     change: str | None = None
     created_at: str | None = None
     type: str | None = None
+    ql_id: str | None = None
 
 
 class DaemonHeartbeatSillySpecStatus(BaseModel):
@@ -694,23 +700,18 @@ async def daemon_heartbeat(
         from app.modules.spec_workspace.model import SpecWorkspace
 
         ws_rows = (
-            (
-                await session.execute(
-                    select(
-                        SpecWorkspace.workspace_id,
-                        SpecWorkspace.spec_version,
-                    ).where(
-                        _col(SpecWorkspace.workspace_id).in_(
-                            [item.workspace_id for item in data.spec_cache]
-                        )
+            await session.execute(
+                select(
+                    SpecWorkspace.workspace_id,
+                    SpecWorkspace.spec_version,
+                ).where(
+                    _col(SpecWorkspace.workspace_id).in_(
+                        [item.workspace_id for item in data.spec_cache]
                     )
                 )
             )
-            .all()
-        )
-        spec_versions = {
-            str(row.workspace_id): int(row.spec_version or 0) for row in ws_rows
-        }
+        ).all()
+        spec_versions = {str(row.workspace_id): int(row.spec_version or 0) for row in ws_rows}
     return DaemonHeartbeatResponse(
         daemon_instance_id=instance.id,
         status=instance.status or "online",
@@ -1523,6 +1524,137 @@ async def trigger_machine_sillyspec_ghost_cleanup(
             details={"daemon_instance_id": str(instance_id)},
         )
     return {"sent": True}
+
+
+# ── 冲突对比（2026-09-07-conflict-diff-compare task-04 / FR-06~09 / D-001@v1）──
+# design §7.2 SillySpecConflictCompareResponse 族：编排与 diff 计算在
+# sillyspec_compare.py（service 层），此处只落响应 DTO 与参数校验/权限/组装。
+
+
+class SillySpecConflictDiffRow(BaseModel):
+    """spec-tree 比对的对齐行（design §7.2 files[].diff_rows[] 单项）。
+
+    ``type`` = equal（双侧同）/ delete（本地删，platform_* 为 null）/ insert
+    （平台增，local_* 为 null）；replace 段在 service 侧展开为相邻 delete+insert。
+    lineno 双侧各自从 1 起。
+    """
+
+    type: Literal["equal", "delete", "insert"]
+    local_lineno: int | None = None
+    local_text: str | None = None
+    platform_lineno: int | None = None
+    platform_text: str | None = None
+
+
+class SillySpecConflictCompareFile(BaseModel):
+    """spec-tree 比对的单文件结果（design §7.2 files[] 单项）。
+
+    ``status`` 四分类（Grill B4）：modified / local_only（本地有平台缺失或读取
+    被拒）/ platform_only / identical；双侧均缺失的路径不进本清单（计数在顶层
+    ``dropped_paths``）。本地 truncated/binary 无 content 的文件 ``diff_rows``
+    为空（不出全 insert 的失真信号）；单文件 diff 超 5000 行截断置
+    ``diff_truncated``。
+    """
+
+    path: str
+    status: Literal["modified", "local_only", "platform_only", "identical"]
+    local_mtime: str | None = None
+    platform_mtime: str | None = None
+    local_truncated: bool = False
+    local_missing: bool = False
+    diff_rows: list[SillySpecConflictDiffRow] = Field(default_factory=list)
+    diff_truncated: bool = False
+    binary: bool = False
+
+
+class SillySpecConflictProgressRow(BaseModel):
+    """progress 比对行（design §7.2 progress_rows[] 单项，D-003@v1 对比表）。
+
+    字段白名单六项（当前阶段/阶段标签/步骤进度/最近活跃/ql_id/ghost），缺失侧
+    显式「—」；``differ`` 由两侧展示值不等判定。
+    """
+
+    label: str
+    local_value: str
+    platform_value: str
+    differ: bool
+
+
+class SillySpecConflictCompareResponse(BaseModel):
+    """GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。
+
+    kind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。
+    ``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。
+    ``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。
+    """
+
+    change: str
+    kind: Literal["spec-tree", "progress"]
+    ql_id: str | None = None
+    conflict_created_at: str | None = None
+    local_updated_at: str | None = None
+    platform_updated_at: str | None = None
+    response_truncated: bool = False
+    dropped_paths: int = 0
+    files: list[SillySpecConflictCompareFile] = Field(default_factory=list)
+    progress_rows: list[SillySpecConflictProgressRow] = Field(default_factory=list)
+
+
+def _validate_sillyspec_change_segment(change: str) -> str:
+    """compare 路径段 ``change`` 白名单（复用 resolve ``_validate_change`` 同款正则）。
+
+    GET 的路径参数不进 Body 模型，此处手动校验（422 早于任何 RPC 外呼）：
+    首字符字母数字、其余 ``[A-Za-z0-9._-]``、长度 1-128，且显式拒 ``..``
+    （正则可过但语义是穿越，resolve 端点同款双保险）。
+    """
+    if ".." in change or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", change) is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "change 仅允许字母数字与 . _ - 组成（长度 1-128，首字符须为字母数字，"
+                "且不得包含 ..）。"
+            ),
+        )
+    return change
+
+
+@router.get(
+    "/machines/{instance_id}/sillyspec-conflicts/{change}/compare",
+    response_model=SillySpecConflictCompareResponse,
+)
+async def compare_machine_sillyspec_conflict(
+    instance_id: uuid.UUID,
+    change: str,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+    kind: Literal["spec-tree", "progress"] = Query(description="冲突类型（心跳 type 字段）"),
+    workspace_id: uuid.UUID = Query(description="平台侧 spec_root/progress 定位用工作区"),
+) -> SillySpecConflictCompareResponse:
+    """拉取单条 sillyspec 冲突的双侧对比（admin，task-04 / FR-06~09 / D-001@v1）.
+
+    权限同裁决端点（RuntimeAdminUser + ``_get_owned_instance`` 越权 404），
+    另校验当前用户是 ``workspace_id`` 成员（平台侧内容按工作区定位，Grill B1：
+    compare 数据与裁决同一权限集合）。RPC 腿走请求/响应式
+    ``sillyspec_conflict_snapshot``（explorer 先例，区别于一写即忘的裁决通道），
+    显式 15s 超时；机器离线/超时 → 504 既有异常形态原样上抛。编排/diff 计算在
+    ``sillyspec_compare.SillySpecCompareService``（service 层），本端点只做
+    校验/权限/响应组装。
+    """
+    _validate_sillyspec_change_segment(change)
+
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.sillyspec_compare import SillySpecCompareService
+
+    payload = await SillySpecCompareService(session).compare(
+        instance_id=instance_id,
+        user_id=user.id,
+        change=change,
+        kind=kind,
+        workspace_id=workspace_id,
+    )
+    return SillySpecConflictCompareResponse.model_validate(payload)
 
 
 @router.delete(
