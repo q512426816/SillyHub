@@ -380,6 +380,62 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
     await daemon.stop();
   });
 
+  // ql-20260907-005：create 链分步计时埋点——慢启动归因（>60s 案此前无分步数据）。
+  it('interactive create 链分步计时：started 汇总 timings/total_ms，各段记 interactive_create_step', async () => {
+    const sessionManager = createMockSessionManager();
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+    track(daemon);
+
+    await daemon.start();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-i',
+      payload: {
+        kind: 'interactive',
+        prompt: 'hi',
+        provider: 'claude',
+        agent_session_id: 'sess-timing',
+        agent_run_id: 'run-timing',
+        root_path: tmpdir(),
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-timing',
+        kind: 'interactive',
+        prompt: 'hi',
+        agentSessionId: 'sess-timing',
+        agentRunId: 'run-timing',
+        rootPath: tmpdir(),
+      },
+    });
+    // started 日志在 create 返回后同步打：先等 create spy 命中，再让一拍 flush 日志。
+    await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
+    await sleep(50);
+
+    const lines = infoSpy.mock.calls.map((c) => c.map(String).join(' '));
+    const started = lines.find((l) => l.includes('interactive_session_started'));
+    expect(started).toBeTruthy();
+    expect(started).toContain('total_ms=');
+    // timings 整体 JSON 落日志：本夹具 shared 模式 + 无 workspaceId，spec/mcp 段
+    // ~0（endStep 无条件收口即「跳过生效」证据），skills/create 为实测段。
+    expect(started).toContain('timings=');
+    expect(started).toContain('skills_ms');
+    expect(started).toContain('create_ms');
+    const stepLines = lines.filter((l) => l.includes('interactive_create_step'));
+    expect(stepLines.some((l) => l.includes('step=skills_ms') && l.includes('elapsed_ms='))).toBe(
+      true,
+    );
+    expect(stepLines.some((l) => l.includes('step=create_ms') && l.includes('elapsed_ms='))).toBe(
+      true,
+    );
+
+    infoSpy.mockRestore();
+    await daemon.stop();
+  });
+
   it('AC-07: kind=interactive 但 _agentPaths 无 claude → onSessionEnd(failed)，日志 CLAUDE_EXECUTABLE_NOT_FOUND，不崩', async () => {
     const sessionManager = createMockSessionManager();
     // SessionManager.create 抛 ClaudeExecutableNotFoundError（模拟 driver.start 内拒）

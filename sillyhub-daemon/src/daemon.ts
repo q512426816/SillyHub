@@ -6442,6 +6442,24 @@ export class Daemon {
     const sessionId = execPayload.agentSessionId ?? '';
     const firstRunId = execPayload.agentRunId ?? '';
     let prompt = execPayload.prompt ?? '';
+
+    // ql-20260907-005：create 链分步计时（慢启动归因用，接 ql-20260907-003 等待侧
+    // 兜底——实机 >60s 慢启动案此前无分步数据只能猜）。各段完成即记
+    // interactive_create_step（后置步骤挂死/超时时，已完成的分步日志可定位停点），
+    // timings 汇总进 interactive_session_started / create_failed 的 total_ms。
+    // 未埋点的段（字段校验/守卫/spec_root 翻译/buildSpawnEnv）均为内存级或单 stat。
+    const createStartedAt = Date.now();
+    const timings: Record<string, number> = {};
+    const endStep = (step: string, stepStartedAt: number): void => {
+      const elapsed = Date.now() - stepStartedAt;
+      timings[step] = elapsed;
+      this._logger.info('interactive_create_step', {
+        session_id: sessionId,
+        step,
+        elapsed_ms: elapsed,
+      });
+    };
+
     // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
     // /data/spec-workspaces/{id}）；daemon 跑在宿主机上（Windows/Mac），本地无 /data。
     // spec_root_map 格式 "from:to"，如 "/data/spec-workspaces:C:/data/spec-workspaces"。
@@ -6500,6 +6518,7 @@ export class Daemon {
       rawRootPath.startsWith(BORROW_SANDBOX_MARKER)
     ) {
       const sandboxSlug = rawRootPath.slice(BORROW_SANDBOX_MARKER.length);
+      const borrowStart = Date.now();
       try {
         borrowSandboxRoot = await this._getBorrowWorkspaceManager().prepareWorkspace(
           sandboxSlug,
@@ -6522,6 +6541,7 @@ export class Daemon {
           fallback_cwd: cwd,
         });
       }
+      endStep('borrow_sandbox_ms', borrowStart);
     } else {
       // 非借用：rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
       // 2026-08-28-fix-cross-machine-worker-dispatch task-06（Grill D-1.2 修订）：
@@ -6683,6 +6703,7 @@ export class Daemon {
     // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 cwd/.claude/skills/，让 claude
     // 能加载 sillyspec/custom skills（syncSkills 同步到 ~/.sillyhub/daemon/skills/，
     // claude 只读 <cwd>/.claude/skills/——不接线则交互式会话看不到技能）。失败仅 warn。
+    const skillsStart = Date.now();
     try {
       await linkSkillsToWorkdir(cwd, (level, msg, data) => {
         this._logger[level](msg, data);
@@ -6690,6 +6711,7 @@ export class Daemon {
     } catch (e) {
       this._logger.warn('interactive_link_skills_failed', { lease_id: leaseId, error: String(e) });
     }
+    endStep('skills_ms', skillsStart);
 
     // gap-8（interactive 凭证 parity）+ task-09（X-02 门控独立化）：
     // 与 batch 一致用 buildSpawnEnv 构造子进程 env，让 driver 能读到 credentials.json
@@ -6756,7 +6778,9 @@ export class Daemon {
         (execPayload as { root_path?: string }).root_path);
 
     // task-09：借用 session 跳过 spec pull（业务/管理人员读源码，不写 spec；沙箱 cwd 也
-    // 非 spec 根）。非借用维持 tar/shared 原逻辑。
+    // 非 spec 根）。非借用维持 tar/shared 原逻辑。计时覆盖整个分支（版本比对跳过路径
+    // 的 ~0ms 本身即「跳过生效」的观测证据，ql-20260907-005）。
+    const specPullStart = Date.now();
     if (transport === 'tar' && !borrowSandboxRoot) {
       if (!workspaceId) {
         // 边界 5：transport=tar 但 workspaceId 缺失 → task-03 透传链路异常，warn 不阻塞。
@@ -6828,6 +6852,7 @@ export class Daemon {
       }
     }
     // transport !== 'tar'（shared）→ 跳过 pull + 不 set specSyncCtx（onSessionEnd 自然跳过 sync）。
+    endStep('spec_pull_ms', specPullStart);
 
     // task-07（2026-08-26-workspace-mcp-edit / design §5 Wave2 第 5 条 / D-007@v2）：
     // 会话级 MCP 三件套预取。有 workspaceId（工作区会话，覆盖普通对话 + 主控，
@@ -6845,6 +6870,7 @@ export class Daemon {
     // PersistedSessionRecord/SESSION_RESUME payload 均不携带 workspaceId，无从
     // 定向重取）——后续增强点：restore 链路补 workspace 下发 + 异步重取供下次
     // reload 用（D-007@v2 完整形态，本任务最小实现先回落）。
+    const mcpPrefetchStart = Date.now();
     if (workspaceId) {
       try {
         const bundle = await fetchMcpBundle(
@@ -6880,12 +6906,14 @@ export class Daemon {
         });
       }
     }
+    endStep('mcp_prefetch_ms', mcpPrefetchStart);
 
     // ql-20260825-002：原 2026-07-08「派发 prompt 记入 agent 日志」的 user_input
     // 上报已删除——backend create_session 已落一条 user_input（带附件标记行版本，
     // 无论 daemon 死活都在库），daemon 再报一条裸文本造成双日志 + 双回显（首句
     // 渲染两个气泡的根因之一）。claude 秒退场景的可见性由 backend 那条覆盖。
 
+    const createStepStart = Date.now();
     try {
       await this._sessionManager.create({
         sessionId,
@@ -6952,6 +6980,7 @@ export class Daemon {
         // read_only=[Read,Glob,Grep]，写 worker=[...+Edit,Write,Bash]。absent → SDK 默认。
         allowedTools: (execPayload.toolConfig as { allowed_tools?: string[] } | undefined)?.allowed_tools,
       });
+      endStep('create_ms', createStepStart);
       // task-09（D-007@v2 候选 B）：借用 session 登记沙箱根，激活 SessionManager
       // 按 lease 隔离的只读 policy（写守卫只允许落沙箱内，不命中 lender runtime 缓存）。
       // create 成功后立即登记（同步，在 SDK 跑首 turn 前生效）；非借用 session 不登记，
@@ -6964,6 +6993,8 @@ export class Daemon {
         session_id: sessionId,
         run_id: firstRunId,
         borrow_sandbox: borrowSandboxRoot ?? null,
+        timings,
+        total_ms: Date.now() - createStartedAt,
       });
       // task-02（design Phase 1 / FR-01）：create 成功后上报 session ready，让 backend
       // inject_session 的 ready wait 解除（修复 inject 在 create 完成前到达被丢导致
@@ -6988,6 +7019,8 @@ export class Daemon {
         session_id: sessionId,
         code,
         error: e,
+        timings,
+        total_ms: Date.now() - createStartedAt,
       });
       // P2b（daemon H4）治本：create 失败必须回传 run failed。interactive lease
       // lease_expires_at=NULL（长生命周期）+ WS 不失活时 backend 永不收 failed，

@@ -401,7 +401,14 @@
 结果：vitest 定向 3 文件 154 passed（pi/codex 各 +1 用例、task-runner 主流程补断言），tsc 0；模块文档变更索引已同步 ql-20260907-004-dea5
 审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts, sillyhub-daemon/tests/task-runner.test.ts
 
-## ql-20260907-005-5858 | 2026-09-07 09:59:33 | daemon 会话创建链加分步计时埋点：skills/spec/MCP/create 各段 elapsed_ms + interactive_session_started 汇总
-状态：进行中
+## ql-20260907-005-5858 | 2026-09-07 09:59:33 | daemon 会话创建链加分步计时埋点：慢启动会话可直接从日志归因耗时段
+状态：已完成
 关联变更：（无）
-文件：sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-kind-dispatch.test.ts
+文件：
+- sillyhub-daemon/src/daemon.ts（_startInteractiveSession 五段计时（borrow_sandbox/skills/spec_pull/mcp_prefetch/create）+ started/failed 汇总 timings/total_ms）
+- sillyhub-daemon/tests/daemon-kind-dispatch.test.ts（新增计时埋点断言用例（console.info spy））
+- .sillyspec/docs/sillyhub-daemon/modules/daemon.md（MANUAL_NOTES 补 ql-20260907-005 条目）
+需求：daemon 会话创建链加分步计时埋点：慢启动会话可直接从日志归因耗时段
+根因：ql-20260907-003 只解决了等待侧兜底（在途 lease 延长），但实机 >60s 慢启动案（1a9c601c）无分步数据无法归因是 skills 拷贝 / spec pull / MCP 预取 / spawn 哪段慢——已知 spec 大头已由 ql-20260904-016 修掉，剩余嫌疑需数据说话
+方案：_startInteractiveSession 头部建 timings 收集器，五段各记 interactive_create_step（step+elapsed_ms，后置步骤挂死时已完成的分步可定位停点），started/failed 日志汇总 timings+total_ms；纯日志零行为变更
+结果：vitest daemon-kind-dispatch 20/20 通过（新增计时断言用例），daemon-inject-drop-report 10/10 回归通过；pnpm typecheck 零错误
