@@ -8,6 +8,8 @@ created_at: 2026-09-07 22:58:28
 ## D-001@v1 定时发送的实现方案
 
 - type: architecture
+- priority: P1
+- status: accepted（source: ai 代答，可 reopen 否决）
 - source: ai（自主模式：CLI --wait 展示方案 A/B/C 后用户未及时作答，且 AskUserQuestion 无回执，按推荐方案继续；用户可随时否决重开）
 - question: 定时发送如何实现——复用消息队列表加 dispatch_at，还是新建定时消息表 + 独立 sweeper 协程，还是前端到点触发？
 - answer: **方案 B：新建 `agent_session_scheduled_messages` 表 + 独立 sweeper 常驻协程**。到点扫描 due 条目，逐条复用 `inject_session_as_service`（忙轮自动入 `agent_session_queued_messages` 既有队列），单条状态 pending → dispatched / cancelled / failed，失败隔离。
@@ -36,6 +38,8 @@ created_at: 2026-09-07 22:58:28
 ## D-002@v1 定时发送的模式与置顶范围
 
 - type: requirement
+- priority: P1
+- status: accepted（source: ai 代答，可 reopen 修订）
 - source: ai（自主模式：AskUserQuestion 无回执，按推荐默认继续，可 reopen 修订）
 - question: 定时发送支持一次性还是周期重复？置顶是分组内还是全局？
 - answer: 定时发送**仅一次性**（精确到分钟，到点发一次）；置顶为**分组内置顶**（置顶会话排在其所属工作区分组最前，多个置顶按最近活跃排）。
