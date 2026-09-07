@@ -561,54 +561,6 @@ export interface SillySpecCommandResult {
   executed_at?: string;
 }
 
-// ── sillyspec 平台同步命令（2026-09-04-conflict-resolve-entry task-05）────────
-// SILLYSPEC_RESOLVE / SILLYSPEC_GHOST_CLEANUP 的 payload 与心跳结果字段类型
-//（design §5 Phase2 第1/2条、§7）。strategy 值域为下划线字面量（keep_local /
-// take_platform，REST 与 WS 一致），到 CLI 中划线 flag（--keep-local /
-// --take-platform）的单点映射归 task-06，本文件不做映射。
-
-/**
- * SILLYSPEC_RESOLVE payload（Server → Daemon，FR-02 / design §7）。
- *
- * change 已过 backend 白名单（``^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`` 且不含
- * ``..``，防穿越）；daemon 入口仍做缺字段/值域校验（缺 change 或 strategy 不在
- * 值域 → warn 丢弃）。
- */
-export interface SillySpecResolvePayload {
-  /** 待裁决的变更名（如 2026-09-02-changes-overview-card）。 */
-  change: string;
-  /** 裁决策略：keep_local=保本地（CLI 自动重推平台）/ take_platform=取平台版本。 */
-  strategy: 'keep_local' | 'take_platform';
-}
-
-/**
- * 心跳 ``sillyspec_command_result`` 字段载荷（Daemon → Server，FR-05 /
- * design §7）。命令种类为 resolve（冲突裁决，携带 change/strategy）或
- * ghost_cleanup（ghost 清理）。
- *
- * 七字段全可选宽松（保活通道宁宽勿断，与 sillyspec_status 摘要同风格）；
- * daemon 内存槽只保留最新一条（latest-wins，design R-07）。携带语义两态
- *（X-04 修订）：终态窗口内每跳携带对象、过期后键不出现（backend 置 NULL
- * 清除），daemon 无需也不得发送显式 null。task-06 将本类型挂到 hub-client
- * HeartbeatBody.sillyspec_command_result 与 sillyspec-manager 结果槽共用。
- */
-export interface SillySpecCommandResult {
-  /** 命令种类：resolve（冲突裁决）/ ghost_cleanup（ghost 清理）。 */
-  action?: 'resolve' | 'ghost_cleanup';
-  /** 仅 resolve：目标变更名。 */
-  change?: string;
-  /** 仅 resolve：裁决策略。 */
-  strategy?: 'keep_local' | 'take_platform';
-  /** 执行结果：success / failed。 */
-  state?: 'success' | 'failed';
-  /** sillyspec CLI 退出码（spawn 失败/超时等取不到时缺省）。 */
-  exit_code?: number;
-  /** failed 时的错误摘要（截断 ≤200 字符，同 sillyspec_update error 风格）。 */
-  error?: string;
-  /** 执行时刻（机器本地钟 ISO 字符串；跨机时钟偏差仅作辅助比较——X-18）。 */
-  executed_at?: string;
-}
-
 // ── Lease 任务状态 ────────────────────────────────────────────────────────────
 // 与 backend lease 状态机字符串值一一对应。
 
