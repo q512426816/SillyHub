@@ -27,8 +27,10 @@ autogenerate 漂移，20260902010000 先例口径）：
 写入/查询链路在 task-03（upsert 服务）与 task-02（快照端点）；本迁移
 纯建表，无数据回填（新表零存量）。
 
-down_revision 接执行时唯一 head 20260904223000（alembic heads 实测单
-head，R-02 防并行撞 head）。downgrade 对称删索引+删表。
+down_revision 原写 20260904223000（提交者本地执行时 heads），但该文件
+未随 d4fdcc7a 入库（git 全历史查无）——部署侧 alembic KeyError crash-loop
+实证。接仓库真实链尾 20260903170000（群聊归档）；DB 当前恰停在该版本，
+upgrade 链恢复后正常执行本迁移。downgrade 对称删索引+删表。
 
 author: qinyi
 created_at: 2026-09-05 00:43:00
@@ -42,7 +44,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260905004300"
-down_revision: str | None = "20260904223000"
+down_revision: str | None = "20260903170000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
