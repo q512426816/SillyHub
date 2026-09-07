@@ -1,7 +1,7 @@
 # spec-sync 间歇 "aborted" 异常——CLI 侧已治理，平台侧行动项
 
 - 创建：2026-09-07（sillyspec 仓，quick-2c6da904 / commit 6f17a56 同日闭环 CLI 侧）
-- 状态：**CLI 侧已修复（本仓 npm 包，下次发版自带）**；平台侧剩两个行动项（见 §4），均为非紧急
+- 状态：**双侧均已闭环（2026-09-07 下午）**——CLI 侧修复待发版（npm latest 仍 3.28.0）；平台侧行动项 1 已落地（daemon 注入缺省 20s，commit e0af8e3a0 + 阿里云上架分发），行动项 2 核对后**无需开发**（监控早已存在，见 §4.1 补记）
 - 涉及版本：sillyspec ≥ 3.28.1（未发版修复，以 main HEAD 为准）；multi-agent-platform 后端（平台执行环境）
 
 ## 1. 现象
@@ -31,16 +31,26 @@
 
 **daemon/平台执行环境如需立即缓解**：给 sillyspec 命令环境注入 `SILLYSPEC_SYNC_TIMEOUT_MS=20000`（示例值），熔断预算从 8s 放宽到 20s。代价是 `--done` 最坏等待同比例变长；不改也仅是 warn 噪音，数据不丢。
 
+**✅ 平台侧已落地（2026-09-07，multi-agent-platform commit e0af8e3a0，ql-20260907-007-67df）**：
+- `sillyhub-daemon/src/spawn-env.ts`——`buildSpawnEnv` 填补缺省注入 20000（**填补非覆盖**：process.env / tool_config.env 已预设保留原值，空串视同未配置），batch / interactive / restore / reload 全部 agent 子进程路径单点覆盖；
+- `sillyhub-daemon/src/sillyspec-manager.ts`——`runProgressJsonDefault`（daemon 自身跑 sillyspec 命令的 execFile 执行器）显式传 env「缺省垫底 + process.env 覆盖」，覆盖 runResolve / ghostCleanup（含平台同步收敛）；
+- 同日随 backend 镜像重建上架阿里云 `/daemon/` 分发（BUILD_ID 9a9bd881-20260907132501），存量 daemon 经自更新拉新 bundle 后生效；vitest 80 passed + tsc 0。
+- 生效前提：sillyspec npm 发版 ≥3.28.1（3.28.0 不认该 env，注入空转无害；daemon preflight/1h 循环装 latest 自动跟上）。
+
 ## 4. 平台侧行动项（治本：为什么 manifest 会 >8s）
 
-### 4.1 【建议先做】给平台同步端点加响应时长观测
+### 4.1 【已核对，无需开发】端点响应时长观测——平台早已有
+
+> **补记（2026-09-07）**：本文档初稿「平台侧没有任何 per-endpoint 耗时统计」系误判。backend 监控三件套 **2026-07-27 已上线**（commit `3a181291a`，`backend/app/core/monitoring.py`，main.py 已挂 middleware）：①慢请求日志（任何接口 >1s 打 `slow.request`，含 path/status/duration/request_id）；②慢查询日志（SQL >500ms 打 `slow.query`）；③请求 ≥10s 自动异步采样 `pg_stat_activity`（含 wait_event 与锁等待链，打 `db.stat_activity_sample`，30s 节流）。
+>
+> 熔断预算注入 20s 后，任何熔断类事件都蕴含**服务端耗时 ≥20s**——必然先触发 slow.request 日志并大概率触发 pg_stat_activity 采样（并发状态快照正中 §4.2 要查的池位/锁争抢）。观测链已闭环，本节原建议的「加 p50/p95/p99 middleware」不必再做；若将来需要长期分位数面板再议。
 
 `GET /api/changes/-/spec-manifest`、`POST /api/changes/-/spec-sync`（以及同族 progress/approval 推送端点）目前**没有 per-endpoint 耗时统计**。建议（任一即可，按平台现有监控体系选最小改造）：
 
 - FastAPI middleware 按路由记录响应时长（p50/p95/p99），进现有日志或监控面板；
 - 或 SQLAlchemy 事件层记慢查询（`statement_timeout` 已在 30s，但这只防失控全表扫描，不管「正常但慢」的查询）。
 
-验收标准：下次 CLI 侧再报熔断类 warn 时，能在平台侧直接查到该时刻 manifest 端点耗时与并发状态，不用靠推断。
+验收标准：下次 CLI 侧再报熔断类 warn 时，能在平台侧直接查到该时刻 manifest 端点耗时与并发状态，不用靠推断。（已由监控三件套满足，见上方补记。）
 
 ### 4.2 【按观测结果决定】排查忙时慢点
 

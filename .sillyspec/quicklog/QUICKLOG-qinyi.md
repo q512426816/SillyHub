@@ -462,7 +462,12 @@
 方案：补提交迁移文件；heartbeat_daemon/register_daemon 补 sillyspec_command_result 参数（None=清除、非 None 整包直写、register 恒清）；bundle 测试四键改五键+manifest_versions 类型断言；前端 5 文件补 listSessionTasks 接线/导出+listSessionRuns 默认 resolve+ctx-tokens 收集全部 pending resolver
 结果：backend 心跳 50 passed+迁移链 16 passed+bundle 12 passed，ruff/format/mypy 0 错；前端 5 文件 125 passed、tsc 0、eslint 0 error；经 worktree 推送 origin/main 修 CI
 
-## ql-20260907-009-26f4 | 2026-09-07 13:22:25 | 构建 daemon bundle（含 e0af8e3a0 SILLYSPEC_SYNC_TIMEOUT_MS 注入）并部署阿里云上架自更新分发：干净 worktree 出 bundle → build-and-save 打镜像 → scp …
-状态：进行中
+## ql-20260907-009-26f4 | 2026-09-07 13:22:25 | daemon bundle 构建并上架阿里云自更新分发（含 SILLYSPEC_SYNC_TIMEOUT_MS 注入）+ 交接文档补记
+状态：已完成
 关联变更：（无）
-文件：docs/sillyspec/2026-09-07-spec-sync-abort-classification.md
+文件：
+- docs/sillyspec/2026-09-07-spec-sync-abort-classification.md（§3 补平台落地记录（commit/build/生效前提）；§4.1 改判已核对无需开发 + 监控三件套补记）
+需求：daemon bundle 构建并上架阿里云自更新分发（含 SILLYSPEC_SYNC_TIMEOUT_MS 注入）+ 交接文档补记
+根因：env 注入只在 daemon 源码里，须随 backend 镜像 /app/daemon-dist 分发上架后存量 daemon 自更新才能拉到；主树有并发 WIP 不能直接打包，且 e0af8e3a0 单独不可编译需取补齐后的 main HEAD
+方案：detached worktree @9a9bd8811（e0af8e3a0 为祖先）干净构建 bundle（BUILD_ID 9a9bd881-20260907132501，注入 5 处验证）→ PROD_API_URL=https://crrcdt.ppdmq.top build-and-save 打镜像（镜像内再验注入+BUILD_ID）→ scp 阿里云双层 deploy 目录 → 旧镜像 tag backup-20260907-1331 后 load + compose up → 服务器 tar 清理与 worktree 删除；交接文档 §3 补落地记录与生效前提（sillyspec 发版 ≥3.28.1）、§4.1 改判已核对无需开发并补记监控三件套（3a181291a）早已存在
+结果：部署验证全绿：5 容器 healthy、health ok、latest.json 公网==后端直连==9a9bd881-20260907132501、线上 bundle 含 SILLYSPEC_SYNC_TIMEOUT_MS 5 处、无迁移报错；本机 daemon 现版本 d4fdcc7a-20260907045827 待自更新拉新；仓库改动仅 docs/sillyspec/2026-09-07-spec-sync-abort-classification.md（无代码变更，测试不适用）
