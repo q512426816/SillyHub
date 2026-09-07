@@ -20,7 +20,7 @@ generator: sillyspec-scan
 
 - **CI 资源受限竞态 flaky 债（预存、非业务回归）**：GitHub Actions 2 核下 xdist + async fixture + in-memory SQLite 偶发竞态（task/change/runtime reparse created=0 → StopIteration），本机 20 核全量绿复现不了；已用 `dist=loadscope` 挡大部分 + `--reruns 2 --reruns-delay 1` 兜底（`backend/pyproject.toml` dev 依赖注释、`.github/workflows/backend-ci.yml:54-57` 注释）。CI 红而本机同命令绿时停止盲改。
 - **双根命名空间并存**：`.sillyspec/docs/` 下 `SillyHub/`（scan 8 篇 + 模块文档）与 `multi-agent-platform/`（scan / flows / modules / glossary）两套平台级文档并行，另有 backend / frontend / sillyhub-daemon 子项目目录；根项目视角的文档归属在两个名字间分裂，职责未收敛，检索与维护双份成本（本轮 ls 实测）。
-- **spec_profile 模块骨架未实现**：`backend/app/modules/spec_profile/provider.py:75`、`policy.py`、`policy.py` 三处「后续任务实现」占位注释——阶段冲突与文档冲突检测尚未实现；backend 源码内未完成标记全部集中在此模块（grep 实测）。
+- **spec_profile 模块骨架未实现**：`backend/app/modules/spec_profile/provider.py`、`policy.py`、`policy.py` 三处「后续任务实现」占位注释——阶段冲突与文档冲突检测尚未实现；backend 源码内未完成标记全部集中在此模块（grep 实测）。
 - **workflow/spec_guardian 死代码**：`run_guard` 全仓仅被 `workflow/tests/test_spec_guardian.py` 引用，G3-G7 质量 / 文档 / 组件守护门从未在生产路径生效（grep 实测）。
 - **tool_policies 注释引用不存在的方法**：`backend/app/modules/tool_gateway/tool_policy.py:175` docstring 写「loaded by the caller (e.g., ToolGatewayService._load_policy)」，但全仓 grep 无 `def _load_policy` 定义——注释与实现不一致（项目规则 18：注释和实现不一致是万恶之源）。
 - **release 生产审批门只数 approve 票**：`_require_approvals` 仅统计 `verdict=="approve"`，reject 完全不阻断；`deploy_policy.min_approvers` 直接 `policy.get(...)` 无下界钳制（`backend/app/modules/release/service.py:271-290` 本轮实测；create 侧是否校验未复核，审计原判 🔴，未复核部分降 🟡）。

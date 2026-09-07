@@ -73,7 +73,7 @@ generator: sillyspec-scan
        │  spec 文件推拉（增量 ops / 整树 bundle 快照，2026-08-29 起 CLI 侧 `pull --spec`）
 ```
 - backend 是唯一持久化与鉴权中心；daemon 是执行边缘节点（无独立 HTTP 服务），主动连 backend `/ws`（`backend/app/modules/daemon/router.py:4865`），WS 双向消息 + lease 轮询领取任务。
-- LLM 调用经 LiteLLM 网关统一出口：backend `llm_provider` 模块持 `litellm_client.py`；daemon 侧经 backend `/api/llm-proxy/{path}` 透传端点（`backend/app/modules/daemon/router.py:4533`，master key 不出 backend 进程）。
+- LLM 调用经 LiteLLM 网关统一出口：backend `llm_provider` 模块持 `litellm_client.py`；daemon 侧经 backend `/api/llm-proxy/{path}` 透传端点（`backend/app/modules/daemon/router.py:4670`，master key 不出 backend 进程）。
 - SillySpec CLI 在 agent 进程内运行，进度经 `platform_sync` 模块回传（详见"关键横切"）。
 
 ### backend 分层（`backend/app/`）

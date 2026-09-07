@@ -43,7 +43,7 @@
 - `backend/app/modules/daemon/lease_service.py:281-340` `cancel_lease` —— 把 lease 置 cancelled + AgentRun 置 killed（给用户即时反馈），末尾调 `_ws_cancel_stub`
 - `backend/app/modules/daemon/lease_service.py` `_ws_cancel_stub` —— **只打一行日志，什么都不发**。注释仍写"Wave 2 实现 WS Hub 后替换"（陈旧）
 - daemon 端 interactive 路径 `sillyhub-daemon/src/daemon.ts:3234` `if (kind === 'interactive') { _startInteractiveSession(...); return; }` —— **直接 return，不进 TaskRunner，不启 lease 心跳循环**
-- 心跳循环 `sillyhub-daemon/src/task-runner.ts:694` `_runLeaseHeartbeatLoop` 只在 batch `runLease`（sillyhub-daemon/src/task-runner.ts:523）内启动 → **interactive session 没有任何机制感知 backend 的 cancel**
+- 心跳循环 `sillyhub-daemon/src/task-runner.ts:1193` `_runLeaseHeartbeatLoop` 只在 batch `runLease`（sillyhub-daemon/src/task-runner.ts:512）内启动 → **interactive session 没有任何机制感知 backend 的 cancel**
 
 **结果**：lease=cancelled + AgentRun=killed（DB 层"停了"），daemon 内存里 SDK 进程继续跑到自然结束 / idle expire。
 
@@ -130,7 +130,7 @@
 - **价值**：立刻让你"真正用上 agent 团队"做并行分析
 
 #### P1-2 前端补 resume 按钮
-- **改动**：`frontend/src/lib/agent.ts` 加 `resumeRun`（后端 `resume_agent_run` API 已有，sillyhub-daemon/src/api-types.ts:1589）；智能体控制台失败/中断 run 加"续跑"按钮
+- **改动**：`frontend/src/lib/agent.ts` 加 `resumeRun`（后端 `resume_agent_run` API 已有，sillyhub-daemon/src/api-types.ts:28756）；智能体控制台失败/中断 run 加"续跑"按钮
 - **依据**：后端 `backend/app/modules/agent/coordinator.py:191` `resume_run`（token + 重置 pending）；interactive SESSION_RESUME 续上下文（claude/codex，`backend/app/modules/daemon/session/service.py`）；token 预生成（`backend/app/modules/agent/service.py`）
 - **改动量**：小
 - **注意**：batch 是整个重跑（retry_count+1），只有 interactive 真续上下文——UI 要标注
@@ -138,7 +138,7 @@
 
 #### P1-3 前端展示 diff_summary
 - **改动**：智能体控制台活跃卡/历史行加"改动"展开，渲染 `run.diff_summary`（最好 +/- 着色 diff 视图）
-- **依据**：字段早有（`frontend/src/lib/agent.ts`），后端 `diff_collector.py` 产出；全前端零展示（仅 `frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/tasks/[tid]frontend/src/app/page.tsx:749` 一行纯文本）
+- **依据**：字段早有（`frontend/src/lib/agent.ts`），后端 `diff_collector.py` 产出；全前端零展示（仅任务详情页 `frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/tasks/[tid]` 一处纯文本）
 - **改动量**：小
 
 #### P1-4 审批卡"查看详情"补 onClick

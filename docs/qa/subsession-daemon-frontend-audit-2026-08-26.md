@@ -23,7 +23,7 @@ created_at: 2026-08-26 05:45:10
 | F1 | P2 | daemon | `SILLYHUB_MAX_ACTIVE_SESSIONS` 空串/纯空白被解析为 0 = 不限，闸静默失效 | sillyhub-daemon/src/interactive/session-manager.ts:803 |
 | F2 | P2 | 前端 | `shownSessions` 每渲染新数组（截断态 slice 未 memo）→ subGrouping/sections useMemo 恒重算 | frontend/src/components/sessions/session-list-panel.tsx:2080 |
 | F3 | P3 | daemon | `_destroyPartialBuffer` 早退在 budget 清理之前 → 无 partial buffer 会话的 `_sessionBudgetTokens`/`_overBudgetSessions` 永不回收（慢泄漏 + 注释与实现不符） | sillyhub-daemon/src/interactive/session-manager.ts |
-| F4 | P3 | daemon | daemon.ts 读 `rawExec.worker_depth` 未归一化：字符串形态运行期可被 normalize 救回，但落盘重启后 validateRecord 拒收 → 非叶静默降级叶档 | sillyhub-daemon/src/daemon.ts:7787 |
+| F4 | P3 | daemon | daemon.ts 读 `rawExec.worker_depth` 未归一化：字符串形态运行期可被 normalize 救回，但落盘重启后 validateRecord 拒收 → 非叶静默降级叶档 | sillyhub-daemon/src/daemon.ts |
 | F5 | P3 | 前端 | `filterEpoch` 拼接串理论碰撞（筛选值含 `\|`）→ openParents 不重置；另截断边界漂移时已展开子折叠组会瞬时跳成孤儿小节（视觉） | frontend/src/components/sessions/session-list-panel.tsx:1369,1383 |
 | F6 | P3 | 前端 | 浮层打开期间主控 SSE 不关 + 浮层面板挂载即发 ~6 个并发请求（含对分身会话恒空的 team-missions 查询） | frontend/src/components/daemon/session-panel.tsx:2616-2626,2812 |
 | F7 | P3 | 前端 | 组内 >50 截断时「分身 N」徽标按 shownSessions 计数偏小；子会话被截掉时父行计数为 0 不渲染折叠组头 | frontend/src/components/sessions/session-list-panel.tsx:1372-1402,1775 |
@@ -59,8 +59,8 @@ const gateRaw = gateRawStr ? Number(gateRawStr) : Number.NaN;
 
 **snapshot 往返丢档场景**：
 1.（既有设计边界，非缺陷）会话在首 turn `system/init` 前终态 → 无 agentSessionId → 整条 record 不落盘（snapshotPersistable :2960-2962 只取 active/running 且有 agentSessionId）；reconnecting 态同样不落盘（daemon 重启丢会话，Wave1/2 D-003 已知限制）。
-2.（F4, P3）sillyhub-daemon/src/daemon.ts:4043 直接 `rawExec.worker_depth as number | undefined`，**未套 normalizeWorkerDepth**。若 backend 侧写出字符串 `"1"`：运行期 `buildWorkerMcpServerConfig` 的 normalize（sillyhub-daemon/src/mcp-config.ts:707）会救回（env 正确写 1）；但 `snapshotPersistable` 原样写字符串 → 重启 load 时 validateRecord `typeof r.worker_depth === 'number'` 拒收丢字段 → **非叶分身降级叶档**（砍掉合法递归派工，静默）。当前 backend Python 写 int，纯防御缺口。
-**最小修复**（sillyhub-daemon/src/daemon.ts:4321）：读入后 `normalizeWorkerDepth(raw) ?? undefined` 再赋 execPayload（或落 CreateSessionInput 前归一），与 mcp-config 单源口径对齐。
+2.（F4, P3）sillyhub-daemon/src/daemon.ts 直接 `rawExec.worker_depth as number | undefined`，**未套 normalizeWorkerDepth**。若 backend 侧写出字符串 `"1"`：运行期 `buildWorkerMcpServerConfig` 的 normalize（sillyhub-daemon/src/mcp-config.ts:707）会救回（env 正确写 1）；但 `snapshotPersistable` 原样写字符串 → 重启 load 时 validateRecord `typeof r.worker_depth === 'number'` 拒收丢字段 → **非叶分身降级叶档**（砍掉合法递归派工，静默）。当前 backend Python 写 int，纯防御缺口。
+**最小修复**（sillyhub-daemon/src/daemon.ts）：读入后 `normalizeWorkerDepth(raw) ?? undefined` 再赋 execPayload（或落 CreateSessionInput 前归一），与 mcp-config 单源口径对齐。
 
 ### A3. 分层工具集（非叶 5 件 / orchestration 6 件 / 叶 1 件）—— 无注册漂移、无两源冲突
 
@@ -93,7 +93,7 @@ const gateRaw = gateRawStr ? Number(gateRawStr) : Number.NaN;
 
 ### A6. 会话列表轮询 / sessions_events 信号流与新分组交互 —— 正确
 
-- sessions_events 哑信号 → 400ms leading+trailing 去抖 invalidate（frontend/src/components/sessions-portal.tsx:203-241，含 onConnected/onReconnected 补拉）→ refetch。
+- sessions_events 哑信号 → 400ms leading+trailing 去抖 invalidate（frontend/src/components/sessions/sessions-portal.tsx:249-291，含 onConnected/onReconnected 补拉）→ refetch。
 - 折叠态全部为组件 state（组级 collapsedIds、openParents、subOrphanOpen、toolOpenState），WorkspaceGroupNode key=group.id 跨 refetch 稳定不 remount → **折叠态保持**；react-query structuralSharing 数据不变零重渲染。
 - 轮询间隔自适应：有进行中会话 10s / 全静默 30s（frontend/src/components/sessions/session-list-panel.tsx:351-358），后台标签不轮询。
 - 唯一交互瑕疵即 F5 的截断边界漂移视觉跳变。

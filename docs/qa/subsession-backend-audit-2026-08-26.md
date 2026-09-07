@@ -26,8 +26,8 @@ created_at: 2026-08-26 05:56:48
 | 循环点 | 位置 | 说明 |
 |---|---|---|
 | `_list_workers_core` | backend/app/modules/agent/mcp_tools.py:1547 | 每个 done 分身 1 查询；list_workers / mission_status / `_team_mission_summary` 三端点共用 |
-| `_converge_core` busy 计数 | backend/app/modules/agent/mcp_tools.py:1745 | busy 分支逐 worker 判定（分身+存量 run） |
-| `_worker_done_core` 全完成判定 | backend/app/modules/agent/mcp_tools.py:2114 | `all([await is_worker_complete(session, w) for w in workers])` 逐分身 1 查询 |
+| `_converge_core` busy 计数 | backend/app/modules/agent/mcp_tools.py:1797 | busy 分支逐 worker 判定（分身+存量 run） |
+| `_worker_done_core` 全完成判定 | backend/app/modules/agent/mcp_tools.py:2171 | 全完成判定（全树枚举 + 批量活跃 turn + 纯函数逐分身判定） |
 | `_worker_form_count` | backend/app/modules/agent/control.py:240 | **每次派发治理门必经**（running_worker_count），done 分身逐个查 |
 | `cleanup_mission` | backend/app/modules/agent/finalizer.py:475 | 有 worktree_branch 且属子会话的 run 逐个判定 |
 | `_patrol_budget_force_end` | backend/app/modules/agent/patrol.py:918 | 活跃未完成分身逐个判定（未 done 的不查 DB，实际查询少） |
@@ -42,7 +42,7 @@ created_at: 2026-08-26 05:56:48
 
 `mission_worker_sessions_tree`（backend/app/modules/agent/model.py:890）每次调用 = 2 查询（mission get + CTE）。生产调用点（grep 全量）：
 
-- **热路径**：`mission_derive_status`（backend/app/modules/agent/mission.py:174——converge busy / mission_status / _team_mission_summary / patrol 收敛兜底全走）；`_converge_core` busy（backend/app/modules/agent/mcp_tools.py:1673）；`_worker_done_core`（backend/app/modules/agent/mcp_tools.py:2119）；`_split_worker_forms`（backend/app/modules/agent/control.py:161——派发门×2、cancel）；`_team_mission_summary`（backend/app/modules/daemon/router.py）；`workers_all_terminal_with_stats`（backend/app/modules/agent/mission_context.py:275，lease complete 路径）。
+- **热路径**：`mission_derive_status`（backend/app/modules/agent/mission.py:174——converge busy / mission_status / _team_mission_summary / patrol 收敛兜底全走）；`_converge_core` busy（backend/app/modules/agent/mcp_tools.py:1853）；`_worker_done_core`（backend/app/modules/agent/mcp_tools.py:2171）；`_split_worker_forms`（backend/app/modules/agent/control.py:161——派发门×2、cancel）；`_team_mission_summary`（backend/app/modules/daemon/router.py）；`workers_all_terminal_with_stats`（backend/app/modules/agent/mission_context.py:275，lease complete 路径）。
 - **低频**：backend/app/modules/agent/finalizer.py:507/674、backend/app/modules/agent/patrol.py:767/858。
 
 即：**一次派发 2 次、一次 converge busy 2 次、一次 worker_done 2 次、一次团队概要 2 次（derive 内 1 + 显式 1）**。EXPLAIN（本库 297 行）实证：
@@ -77,7 +77,7 @@ backend/app/modules/daemon/router.py:2797-2961，单次调用：
 
 ### A.5 锁与并发（清单 5）
 
-1. **worker_done DEL→SETNX 竞态【P2-F04】**：`_worker_done_core`（backend/app/modules/agent/mcp_tools.py:2158）先 `clear_workers_done_notify_key`（DEL）再 `notify_orchestrator_workers_done`（SETNX，backend/app/modules/agent/mission_context.py:384）。两个「最后完成」分身 A/B 同波并发（各自 `old_done_at=None`，都是新信号）：A DEL→SETNX 成功→注入；B 在 A SETNX **之后** DEL→SETNX 又成功→**二次注入**。主控收到重复系统通知轮（烧 token、可能触发两次 converge）。窗口小但真实。修：Lua 原子 DEL+SETNX，或去掉 DEL 改「SETNX 失败→GET 比较周期时间戳」。
+1. **worker_done DEL→SETNX 竞态【P2-F04】**：`_worker_done_core`（backend/app/modules/agent/mcp_tools.py:2320-2343）先判 `is_new_signal` 再 `notify_orchestrator_workers_done`（SETNX + signal_at 时间戳波次比较，backend/app/modules/agent/mission_context.py——F04 已修为同波幂等 + 新波再唤醒，替代旧 DEL→SETNX）。两个「最后完成」分身 A/B 同波并发（各自 `old_done_at=None`，都是新信号）：A SETNX 成功→注入；B 在 A 写入 signal_at **之后** SETNX 比较时间戳不覆盖→**不再二次注入**（原竞态已由 F04 修复闭合；主控收到重复系统通知轮烧 token、可能触发两次 converge 的窗口已消除）。
 2. **budget_force_ended_at 与 converged_at 抢占互不互踩【通过】**：职责⑥抢占条件含 `converged_at IS NULL AND cancelled_at IS NULL`（backend/app/modules/agent/patrol.py:879-892），converge 抢占条件只查 `converged_at IS NULL`（backend/app/modules/agent/finalizer.py:834-838）——converge 先置位则 patrol rowcount=0 跳过；patrol 先置位（constraints 标记）不妨碍 converge 置位（标记只影响虚拟映射），顺序语义自洽。
 3. **constraints JSON 丢更新【P2-F05】**：职责⑥的原子 UPDATE 用**早前读的** `existing_constraints` 整体覆盖 constraints（backend/app/modules/agent/patrol.py:157）；并发的 `_bump_conflict_attempts`（backend/app/modules/agent/mcp_tools.py:702-712）、`_mark_mission_needs_manual`（:715-733）、zombie 标记（backend/app/modules/agent/patrol.py:157）都是 ORM read-modify-write。两类交错会互相抹键（如 conflict_attempts 被 budget 抢占覆盖丢失 → R-07 计数漂移）。修：PG 侧 `constraints = constraints || :patch`（jsonb merge）。
 4. **converge 收口与 patrol 孤儿扫描同收口同一会话【通过】**：`end_session` 自带幂等（已 ended/failed 早退），重复调用零副作用、不会重复 SESSION_END（backend/app/modules/agent/finalizer.py:644-646 docstring + 实现核对）。
@@ -85,12 +85,12 @@ backend/app/modules/daemon/router.py:2797-2961，单次调用：
 
 ### A.6 边界（清单 6）
 
-1. **【P1-F01】「会话 ended 且未 done（无 budget 标记）」存在预算强收之外的生成源，mission 无出口死锁**。虚拟映射把该形态定为 `running`（backend/app/modules/agent/mission.py:224-228：`budget_force_ended` 才映 failed，否则 running），而 `is_worker_complete` 对会话终态（failed/**ended**）返回 True（backend/app/modules/agent/mission.py:149-151）。设计假设「ended 未 done 只由预算强收产生」，但实际生成源还有：① 属主在门户手动结束分身会话（`SessionService.end_session`）；② reconnecting 空闲清扫（backend/app/modules/daemon/session/service.py 注释 "converged by task-07 idle sweep"）；③ patrol 职责③把分身 run 标 failed（backend/app/modules/agent/patrol.py:383）但会话留 active（反例形态：run 全终态 + 会话 active 未 done → 同样 running）。后果链：derive 恒 running → converge 永远 busy（backend/app/modules/agent/mcp_tools.py:1668-1704）；`_auto_converge_awaiting_input` 的 `should_converge` 判据 `mission_derive_status(workers_only=True)` 同样不满足（backend/app/modules/agent/finalizer.py:781-782）→ awaiting_input 超时收敛永不触发；孤儿扫描只管终态 mission（backend/app/modules/agent/patrol.py:840）→ **非预算 mission 一旦出现这种分身，唯一出口是人工 cancel**。同时 `is_worker_complete=True` 释放了 MAX_WORKERS 槽（`_worker_form_count` 计数减一）→ 还能继续派新分身，形成「能派不能收」的怪态。修（最小侵入）：把孤儿扫描扩展出「活跃 mission 的死分身」档——`会话 ended/failed 或 run 全终态 + worker_done 空 + 持续超宽限`→ 置一个通用 `force_ended_at` 标记（复用 budget 键或新键），让虚拟映射落到 failed。
+1. **【P1-F01】「会话 ended 且未 done（无 budget 标记）」存在预算强收之外的生成源，mission 无出口死锁**。虚拟映射把该形态定为 `running`（backend/app/modules/agent/mission.py:224-228：`budget_force_ended` 才映 failed，否则 running），而 `is_worker_complete` 对会话终态（failed/**ended**）返回 True（backend/app/modules/agent/mission.py:149-151）。设计假设「ended 未 done 只由预算强收产生」，但实际生成源还有：① 属主在门户手动结束分身会话（`SessionService.end_session`）；② reconnecting 空闲清扫（backend/app/modules/daemon/session/service.py 注释 "converged by task-07 idle sweep"）；③ patrol 职责③把分身 run 标 failed（backend/app/modules/agent/patrol.py:383）但会话留 active（反例形态：run 全终态 + 会话 active 未 done → 同样 running）。后果链：derive 恒 running → converge 永远 busy（backend/app/modules/agent/mcp_tools.py:1797-1885 `_converge_core` busy 前置判定）；`_auto_converge_awaiting_input` 的 `should_converge` 判据 `mission_derive_status(workers_only=True)` 同样不满足（backend/app/modules/agent/finalizer.py:781-782）→ awaiting_input 超时收敛永不触发；孤儿扫描只管终态 mission（backend/app/modules/agent/patrol.py:840）→ **非预算 mission 一旦出现这种分身，唯一出口是人工 cancel**。同时 `is_worker_complete=True` 释放了 MAX_WORKERS 槽（`_worker_form_count` 计数减一）→ 还能继续派新分身，形成「能派不能收」的怪态。修（最小侵入）：把孤儿扫描扩展出「活跃 mission 的死分身」档——`会话 ended/failed 或 run 全终态 + worker_done 空 + 持续超宽限`→ 置一个通用 `force_ended_at` 标记（复用 budget 键或新键），让虚拟映射落到 failed。
 2. **budget_usd=0【P3-F12】**：schema `ge=0` 允许 0（backend/app/modules/agent/mission_schema.py、backend/app/modules/daemon/schema.py/821）。判空写法全部 `is not None`（强收语义不跳过）：`can_dispatch_worker` 在 cost=0 时 `0>=0` 恒 budget_exceeded（backend/app/modules/agent/control.py:285）→ budget=0 的 mission 永远派不出分身；patrol 职责⑥同样 `0<0` 为假即命中（backend/app/modules/agent/patrol.py），只是因派发被挡而无强收对象。属配置陷阱而非逻辑错：建议改 `gt=0` 或前端禁 0。
 3. **孙层计入 MAX_WORKERS 口径【通过】**：`running_worker_count` → `_split_worker_forms` → 全树（backend/app/modules/agent/control.py:161），未完成孙占额度；MAX_WORKERS=5（delegation.py）。
 4. **ACTIVE_RUN_STATUSES 含 pending_approval【记录】**：审批中轮算活跃 turn → 分身 done 置位后仍判未完成直至审批轮终态；预算强收会杀审批中轮。这是 2026-08-25 二审 #3 的有意选择（防 awaiting_input 误判），语义一致无缺陷。
-5. **resolve include_terminal 迟到 409【通过】**：`_worker_done_core` 活跃 miss → 含终态二次解析取根上最新 mission，converged/cancelled → 409 零写入零唤醒（backend/app/modules/agent/mcp_tools.py:2119）；无 mission → 404。锚失配 404、越权校验齐全。
-6. **tree_depth 与 parent 脏数据【P3-F16】**：写入路径单 INSERT 同事务（backend/app/modules/agent/mcp_tools.py:1706）结构性一致，仅手工改库可造不一致。影响面：`_enforce_converge_layer0` 按 tree_depth 判层（backend/app/modules/agent/mcp_tools.py:1706，脏 depth=0 的分身可过层 0 守卫）；爬根解析（resolve_mission_for_session）不受影响。低风险记录。
+5. **resolve include_terminal 迟到 409【通过】**：`_worker_done_core` 活跃 miss → 含终态二次解析取根上最新 mission，converged/cancelled → 409 零写入零唤醒（backend/app/modules/agent/mcp_tools.py:2171）；无 mission → 404。锚失配 404、越权校验齐全。
+6. **tree_depth 与 parent 脏数据【P3-F16】**：写入路径单 INSERT 同事务（backend/app/modules/agent/mcp_tools.py:1758）结构性一致，仅手工改库可造不一致。影响面：`_enforce_converge_layer0` 按 tree_depth 判层（backend/app/modules/agent/mcp_tools.py:1758，脏 depth=0 的分身可过层 0 守卫）；爬根解析（resolve_mission_for_session）不受影响。低风险记录。
 
 ### A.7 run_sync 四闸（清单 7）
 
@@ -142,7 +142,7 @@ backend/app/modules/daemon/router.py:2797-2961，单次调用：
 |---|---|---|---|---|
 | F01 | **P1** | backend/app/modules/agent/mission.py:217-228 / backend/app/modules/agent/patrol.py:713-790 | 「ended 未 done 无标记」分身使 derive 恒 running，converge 永久 busy、awaiting_input 超时收敛永不触发，非预算 mission 无自动出口 | 孤儿扫描扩档：活跃 mission 下「会话 ended/failed 或 run 全终态 + 未 done + 超宽限期」→ 置通用 force_ended 标记键（虚拟映射即落 failed） |
 | F02 | **P1** | backend/app/modules/agent/patrol.py:747-758 | 终态 mission 名单 `created_at ASC LIMIT 100` 无水位，>100 后新终态 mission 的孤儿永远扫不到（零孤儿承诺失效）且每轮恒付 ~201 查询 | 加时间窗（如 `GREATEST(converged_at,cancelled_at) > now()-interval '7 days'`）或扫描水位；排序按终态时间 |
-| F03 | **P1(性能)** | backend/app/modules/daemon/router.py:3961 / backend/app/modules/agent/model.py:894+ / backend/app/modules/agent/mission.py+ | `_team_mission_summary` 每 mission ≈14+Nd 查询，mission 行重复 get 4 次 | `mission_worker_sessions*` 加可选 `root_session_id` 参数；summary 内一次树结果喂三口径；done 判定批量 |
+| F03 | **P1(性能)** | backend/app/modules/daemon/router.py:4098 | `_team_mission_summary` 每 mission ≈14+Nd 查询，mission 行重复 get 4 次 | `mission_worker_sessions*` 加可选 `root_session_id` 参数；summary 内一次树结果喂三口径；done 判定批量 |
 | F04 | P2 | backend/app/modules/agent/mcp_tools.py:2141 / backend/app/modules/agent/mission_context.py:343 | worker_done 的 DEL→SETNX 非原子，同波双完成 → 主控双注入 | Lua 原子 DEL+SETNX，或 SETNX 失败后 GET 比较周期时间戳再决定 |
 | F05 | P2 | backend/app/modules/agent/patrol.py:879-899 / backend/app/modules/agent/mcp_tools.py:702-733 | constraints JSON 多写者 read-modify-write 互相丢键（conflict_attempts 被 budget 抢占覆盖等） | 抢占 UPDATE 改 `constraints = constraints \|\| :patch`（jsonb 合并） |
 | F06 | P2 | backend/app/modules/agent/mcp_tools.py:1175 | commit#1 与 lease 段 try 外异常/崩溃 → 「pending session+run 无 lease」半孤儿永久占 MAX_WORKERS 且阻塞 converge | commit#1 降 flush 实现真单事务；或 patrol 补 TTL 清理档 |
@@ -152,10 +152,10 @@ backend/app/modules/daemon/router.py:2797-2961，单次调用：
 | F10 | P2 | backend/app/modules/agent/mcp_tools.py:2664 | mission_status 每次 per-scope git probe RPC | 30-60s TTL 缓存探测结果 |
 | F11 | P2 | backend/app/modules/daemon/run_sync/service.py:1106 / backend/app/modules/daemon/session/service.py:615 | readiness 进程内单例，多副本部署四闸③误判 → 存活分身被误收口 | Redis 共享 readiness 或文档钉死单进程部署约束 |
 | F12 | P3 | backend/app/modules/agent/mission_schema.py:17 等 | budget_usd=0 合法但语义=永不能派工 | `ge=0`→`gt=0` 或前端禁 0 并文案说明 |
-| F13 | P3 | backend/app/modules/agent/mcp_tools.py / backend/app/modules/daemon/router.py:4068 | workers 行三值映射漏 budget_force_ended 分支（行 running vs mission degraded 展示不一致） | 对齐 `_virtual_status` 补该分支 |
+| F13 | P3 | backend/app/modules/agent/mcp_tools.py / backend/app/modules/daemon/router.py:4205-4224 | workers 行三值映射漏 budget_force_ended 分支（行 running vs mission degraded 展示不一致） | 对齐 `_virtual_status` 补该分支 |
 | F14 | P3 | backend/app/modules/agent/patrol.py:654 | 职责④ `role != 'orchestrator'` 无 NULL 守卫，与全库 `or_(role IS NULL,...)` 口径不一致（当前首 run 恒有 role 难命中） | 补 NULL 守卫对齐 |
 | F15 | P3 | backend/app/modules/agent/mcp_tools.py:1582-1618 | 层 0 守卫「三 header 皆无放行」依赖外层 401 契约（当前不可达，脆弱） | 该分支也 403，注释改「防御性」 |
-| F16 | P3 | backend/app/modules/agent/mcp_tools.py:1608 | 层 0 判层按 tree_depth，脏数据 depth=0 分身可过守卫 | 可选改为 parent_session_id 判空或双判 |
+| F16 | P3 | backend/app/modules/agent/mcp_tools.py:1758 | 层 0 判层按 tree_depth，脏数据 depth=0 分身可过守卫 | 可选改为 parent_session_id 判空或双判 |
 
 核验通过项（无需修复）：converge/budget 抢占互踩、end_session 幂等（无重复 SESSION_END）、深度门读-判-写、MAX_WORKERS 孙层口径、include_terminal 迟到 409、门户列表零增量、CTE 索引支撑与防环、递归深度截断语义。
 

@@ -54,6 +54,6 @@ generator: sillyspec-scan
 
 1. **后端 router→service 分层调用**：router 拿 `SessionDep` → 请求内 `svc = IncidentService(session)` → 调 service 方法 → schema 序列化返回。例：`backend/app/modules/incident/router.py`（:26 SessionDep、:40 实例化）+ `backend/app/modules/incident/service.py`。
 2. **前端数据获取（react-query 三件套）**：`src/lib/` 下纯 `export async function fetchX` 请求函数 + 同文件封装 `useQuery`/`useMutation` hook + query key 统一走 `queryKeys` 工厂（凡影响查询结果的变量都进 key）。例：`frontend/src/lib/mcp-settings.ts:17,93-94,110-111`；key 工厂：`frontend/src/lib/query-keys.ts`。
-3. **前端组件变体（cva + cn）**：原子件用 `cva` 声明变体表导出 `xxxVariants`，业务组件用 `cn(...)` 合并外部 className。例：`frontend/src/components/ui/button.tsx:2,6`；`frontend/src/lib/utils.ts`。
+3. **前端组件变体（cva + cn）**：原子件用 `cva` 声明变体表导出 `xxxVariants`，业务组件用 `cn(...)` 合并外部 className。例：`frontend/src/components/ui/button.tsx:6`（`buttonVariants` 声明）；`frontend/src/lib/utils.ts`。
 4. **daemon MCP 工具 schema（zod + describe）**：`z.object({...})` 定义入参，每个字段 `.describe()` 面向 LLM。例：`sillyhub-daemon/src/mcp-server.ts,164-169`。
 5. **后端领域错误定义**：继承 `AppError` 按事件命名、构造时传中文用户文案。例：`backend/app/core/errors.py:28-38`（基类）；`backend/app/modules/incident/service.py`（`IncidentNotFound` 等子类同模式）。

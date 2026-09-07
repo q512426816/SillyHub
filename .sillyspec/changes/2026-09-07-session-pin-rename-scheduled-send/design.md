@@ -93,6 +93,9 @@ scale: large
 | 新增 | frontend/src/components/daemon/scheduled-messages-bar.tsx | 定时消息列表条（状态 tag + 取消，挂 MessageQueueBar 邻位） |
 | 新增 | frontend/src/hooks/use-scheduled-messages.ts | 定时消息 react-query hook（30s 轮询 + invalidate） |
 | 修改 | backend/app/modules/daemon/tests/（新增测试文件） | 见 §接口定义下方测试清单 |
+| 修改 | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | 补置顶/重命名/排序用例（复用既有 mock 结构） |
+| 新增 | frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx | 定时列表条用例（渲染/状态 tag/取消/空态） |
+| 新增 | frontend/src/hooks/__tests__/use-scheduled-messages.test.ts | hook 用例（queryKey/轮询/失效），照 use-message-queue.test.ts 惯例 |
 
 字段数据流（新增对外字段）：`pinned_at`：agent/model.py ORM 列 → migration → `AgentSessionRead`（from_attributes）→ openapi/api-types.ts → session-list-panel.tsx 按钮显隐与徽标 → pin/unpin API 写回。`ScheduledMessageRead`：scheduled_send CRUD 构造 → router 响应 → api-types.ts → use-scheduled-messages.ts → scheduled-messages-bar.tsx。
 
