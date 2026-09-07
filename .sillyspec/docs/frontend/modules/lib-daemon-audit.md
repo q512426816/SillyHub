@@ -33,7 +33,7 @@ usePolicyAudit = useQuery({ queryKey, queryFn: fetchPolicyAudit, enabled, refetc
 ## 注意事项
 - **实际路径含 `/daemon` 段**：design §7.3 原写 `/api/workspaces/...`，但 audit router 挂在 daemon router 下继承 `/daemon` prefix（allowed_paths 禁止改 main.py），前端必须用 `/api/daemon/workspaces/...` 否则 404（task-10 已记录该偏差）。
 - 参数名是 `since/until/limit/offset`（对齐后端 Query 实现），非 design 文案的 startTime/endTime/page/pageSize；响应分页字段为 total/limit/offset（无 page/pageSize）。
-- queryKey 内联在本模块而非 `lib/query-keys.ts`——当时该文件不在任务 allowed_paths 内；若统一收敛 queryKey 需同步迁移两处 key 定义。
+- queryKey 内联在本模块而非 `frontend/src/lib/query-keys.ts`——当时该文件不在任务 allowed_paths 内；若统一收敛 queryKey 需同步迁移两处 key 定义。
 - `AuditDecision` 收敛为字面量联合，但 `AuditLogRead.decision` 放宽为 string——后端按 str 存储，兼容未来扩展。
 
 ## 人工备注

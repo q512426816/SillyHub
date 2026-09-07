@@ -36,11 +36,11 @@ allParts = doc.path.split("/")
   platform-managed）与包裹布局 `.sillyspec/docs/<组件>/...`（repo-native）。
   前缀规则与 backend `scan_docs/parser.py` 的 `platform_managed` 决定的 rel_path
   前缀对应；修复前写死 `slice(2)` 只适配包裹布局，会把扁平布局的「组件名」层切掉。
-- `components/admin-organization-tree.tsx` 内有另一个同名局部 `buildTree`，
+- `frontend/components/admin-organization-tree.tsx` 内有另一个同名局部 `buildTree`，
   与本模块无关，改动时勿混淆。
 - 有配套单测 `frontend/src/lib/__tests__/scan-docs-tree.test.ts`（含两种布局用例），
   改剥离逻辑必须同步补用例。
-- 唯一生产消费方：`app/(dashboard)/workspaces/[id]/scan-docs/page.tsx`。
+- 唯一生产消费方：`frontend/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx`。
 
 ## 人工备注
 

@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, RootModel, model_validator
+from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 
 from app.modules.spec_workspace.schema import FileOp
 
@@ -314,6 +314,48 @@ class AgentLogPushOk(BaseModel):
     upserted: int = Field(description="本次落库的日志行数（同请求去重后）")
 
 
+# ── 2026-09-07-agent-liveness-states task-08（design §5.3 / §7 / FR-03）──
+
+
+class AgentLogStateEntry(BaseModel):
+    """POST /agent-logs/states 单条状态上报（daemon 鉴权通道，枚举级数据）。
+
+    状态是派生数据不进 CLI 上报契约（D-005）；``harness`` 等元信息仅在落库行
+    不存在时用于 create（X-001：自发现裸会话可能尚无登记行——登记只发生在
+    CLI 调用入口），缺省时该条 skipped 不建行（不猜 harness）。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    log_path: str = Field(max_length=1024)
+    state: Literal["working", "blocked", "idle", "ended", "unknown"]
+    evidence: str = Field(default="", max_length=200)
+    derived_at: datetime
+    last_event_at: datetime | None = None
+    # 以下仅行不存在时用于 create。
+    harness: str | None = Field(default=None, max_length=32)
+    format: str | None = Field(default=None, max_length=64)
+    agent_session_id: str | None = Field(default=None, max_length=128)
+    agent_cwd: str | None = Field(default=None, max_length=1024)
+
+
+class AgentLogStatesPush(BaseModel):
+    """POST /agent-logs/states 请求体（批量 ≤64，daemon tailer 周期 10s 一批）。"""
+
+    model_config = {"extra": "ignore"}
+
+    entries: list[AgentLogStateEntry] = Field(min_length=1, max_length=64)
+
+
+class AgentLogStatesOk(BaseModel):
+    """POST /agent-logs/states 200 响应（daemon best-effort，任意 2xx 即成功）。"""
+
+    ok: bool = True
+    updated: int = Field(description="既有行状态更新数（登记元信息不动）")
+    created: int = Field(description="自发现裸会话新建行数（origin=liveness-discovered）")
+    skipped: int = Field(description="行不存在且缺 harness 元信息被跳过数")
+
+
 class AgentLogListItem(BaseModel):
     """GET /agent-logs 列表项——design §3.1 全列 snake_case 原样（X-06）。
 
@@ -344,8 +386,22 @@ class AgentLogListItem(BaseModel):
     # 2026-08-23-agent-activity-sessions task-04（design §3.3.2 / FR-04）：所属平台
     # 会话（hub 关联或 tool_report 聚合写入）；NULL = 未归属（存量行不回填，R-03）。
     agent_session_id: uuid.UUID | None = None
+    # ── 2026-09-07-agent-liveness-states task-07（design §5.3 / FR-03）──
+    # daemon liveness 推导状态（写入端点在 task-08）。旧行/未部署 daemon 场景
+    # ORM ``state`` 为 NULL，由下方 validator 归一 ``unknown``（存量不回填，对齐
+    # agent_session_id 先例 R-03 口径）；其余三字段可空直传。
+    state: Literal["working", "blocked", "idle", "ended", "unknown"] = "unknown"
+    state_derived_at: datetime | None = None
+    state_evidence: str | None = None
+    last_event_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _normalize_state(cls, raw: object) -> object:
+        """ORM ``state`` NULL（旧行未回填 / daemon 未部署未上报）→ ``unknown``。"""
+        return "unknown" if raw is None else raw
 
 
 class AgentLogListResponse(BaseModel):

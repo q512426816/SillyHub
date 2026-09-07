@@ -1,19 +1,21 @@
 /**
- * PlatformSyncSection 组件测试（2026-09-04-conflict-resolve-entry task-09 /
- * FR-01~FR-05 / D-003@v1）。
+ * PlatformSyncSection 组件测试（2026-09-04-conflict-resolve-entry task-09 落地；
+ * 2026-09-07-conflict-diff-compare task-06 适配行改造——TDD 红态锚定）。
  *
- * 覆盖任务卡 acceptance：
- *   1. 渲染/隐藏两分支——无绑定（daemon_id=null）或 sillyspec_status=null
- *      整卡不渲染；正常态冲突行（type 徽章 / mono 变更名 / 活跃警示在场但不
- *      硬禁）+ ghost 计数 + 数据源机器摘要；
- *   2. 权限 gating——机器所有者 / 平台管理员见操作按钮；其他成员只读
- *      （无按钮 + 只读说明，清单与计数保留）；
- *   3. 回显——确认弹窗（STRATEGY_TEXT 覆盖方向 + 活跃警示段 + 旧 daemon
- *      提示）→ 下发参数 → command_result 的 action+change 匹配：成功 toast +
- *      「已消解」+ 行随快照消失 / 失败红字摘要 + 按钮恢复；
- *   4. 150s 无回报恢复（fake timers）——按钮恢复可点 + 旧版 daemon 提示；
- *   5. ghost 区——弹窗写明波及范围（幽灵记录 + 超 7 天空壳目录）→ 下发 →
- *      成功回显；ghost=0 清理按钮禁用。
+ * task-06 适配范围（design §5 Phase 3.2 / D-002@v1，组件改造由 task-07 实现，
+ * 当前红 = 行为未实现属预期）：
+ *   - 按钮收敛：行上不再有「保本地/取平台」，只留「查看对比」单按钮（裁决
+ *     收进对比弹窗）；旧 modal.confirm 裁决流程断言移除（弹窗内流程由
+ *     conflict-compare-modal.test.tsx 覆盖）；
+ *   - ql 标题：ql_id 存在 → 【ql-编号】快速修复 + 小字原始 ID；缺失兜底变更名；
+ *   - 行上补冲突发生时间（created_at 相对时间）；
+ *   - 机器离线 → 「查看对比」禁用 + title 提示「机器离线，无法读取本地内容」；
+ *   - 无权限（非机器所有者且非平台管理员）→ 不渲染「查看对比」。
+ *
+ * 回显链路（waiting/succeeded/failed/timeout、ECHO_TIMEOUT、快照刷新行消失）
+ * 仍归本组件：裁决下发入口改经对比弹窗——本文件以 vi.mock stub 掉弹窗组件，
+ * 用 stub 暴露的「下发/关闭」按钮驱动（props 契约与 conflict-compare-modal
+ * .test.tsx 钉死的一致：open/onClose/conflict/canOperate/onDispatched）。
  *
  * 惯例：数据源 mock 仿 changes-overview-card.test.tsx（vi.hoisted +
  * importActual 部分 mock + QueryClientProvider retry:false/gcTime:0）；
@@ -67,6 +69,61 @@ vi.mock("@/lib/workspace-binding", async (importOriginal) => ({
   fetchMyBinding: mocks.fetchMyBinding,
 }));
 
+/**
+ * 对比弹窗 stub（task-07 落地前 section 尚未渲染该组件，vi.mock 不激活——
+ * 红态来自「查看对比」按钮缺失而非导入错误；task-07 后本 stub 替换真实弹窗，
+ * 把「下发成功 → onDispatched + onClose」暴露为按钮，驱动 section 回显链路。
+ * 弹窗内部行为（compare 拉取/差异渲染/确认弹窗）由 conflict-compare-modal
+ * .test.tsx 覆盖，本文件不重复。
+ */
+vi.mock("@/components/changes/conflict-compare-modal", () => ({
+  ConflictCompareModal: (props: {
+    open: boolean;
+    onClose: () => void;
+    instanceId?: string;
+    workspaceId?: string;
+    conflict: { change?: string | null } | null;
+    canOperate?: boolean;
+    onDispatched?: (
+      change: string,
+      strategy: "keep_local" | "take_platform",
+    ) => void;
+  }) =>
+    props.open && props.conflict?.change ? (
+      <div data-testid="conflict-compare-modal-stub">
+        <span data-testid="stub-conflict-change">{props.conflict.change}</span>
+        <span data-testid="stub-instance-id">{props.instanceId ?? ""}</span>
+        <span data-testid="stub-workspace-id">{props.workspaceId ?? ""}</span>
+        <span data-testid="stub-can-operate">
+          {props.canOperate ? "true" : "false"}
+        </span>
+        <button
+          type="button"
+          data-testid="stub-keep-local"
+          onClick={() => {
+            props.onDispatched?.(props.conflict?.change ?? "", "keep_local");
+            props.onClose();
+          }}
+        >
+          stub:保本地下发
+        </button>
+        <button
+          type="button"
+          data-testid="stub-take-platform"
+          onClick={() => {
+            props.onDispatched?.(props.conflict?.change ?? "", "take_platform");
+            props.onClose();
+          }}
+        >
+          stub:取平台下发
+        </button>
+        <button type="button" data-testid="stub-close" onClick={props.onClose}>
+          stub:关闭
+        </button>
+      </div>
+    ) : null,
+}));
+
 // ── fixtures ───────────────────────────────────────────────────────────────
 
 const OWNER_ID = "u-owner";
@@ -108,7 +165,8 @@ function makeChange(
 
 /**
  * 默认 fixture：1 条活跃变更（与冲突同名 → 活跃警示在场）+ 1 条 ghost +
- * 2 条冲突（progress=活跃同名 / spec-tree=quick-x 独立）。
+ * 2 条冲突（progress=活跃同名无 ql_id / spec-tree=quick-x 带 ql_id——ql 标题
+ * 两分支同卡覆盖）。冲突 created_at=25 分钟前（行上「冲突发生时间」断言锚）。
  */
 function makeStatus(overrides: Partial<StatusFixture> = {}): StatusFixture {
   return {
@@ -133,8 +191,17 @@ function makeStatus(overrides: Partial<StatusFixture> = {}): StatusFixture {
       }),
     ],
     pending_conflicts: [
-      { change: "2026-09-04-active-change", created_at: isoAgo(70 * MIN), type: "progress" },
-      { change: "quick-x", created_at: isoAgo(70 * MIN), type: "spec-tree" },
+      {
+        change: "2026-09-04-active-change",
+        created_at: isoAgo(25 * MIN),
+        type: "progress",
+      },
+      {
+        change: "quick-x",
+        created_at: isoAgo(25 * MIN),
+        type: "spec-tree",
+        ql_id: "ql-20260904-002-62e1",
+      },
     ],
     ...overrides,
   } as StatusFixture;
@@ -147,6 +214,7 @@ function makeMachine(
   return {
     id: "machine-1",
     hostname: "DEV-QINYI",
+    status: "online",
     owner: { user_id: OWNER_ID, email: "o@t.com", display_name: "Owner" },
     sillyspec_status: status,
     sillyspec_command_result: null,
@@ -220,12 +288,12 @@ async function openConfirmRoot(): Promise<HTMLElement> {
   });
 }
 
-/** 冲突行（按变更名定位 li）。 */
-function rowOf(name: string): HTMLElement {
-  return screen.getByText(name).closest("li") as HTMLElement;
+/** 冲突行（按文本定位所在 li）。 */
+function rowOf(text: string): HTMLElement {
+  return screen.getByText(text).closest("li") as HTMLElement;
 }
 
-describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
+describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", () => {
   beforeEach(() => {
     useSession.setState({
       user: OWNER_USER,
@@ -250,22 +318,37 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
 
   // ── 1. 渲染 / 隐藏两分支 ──────────────────────────────────────────────
 
-  it("渲染——type 徽章 / mono 变更名 / 活跃警示在场（不硬禁）/ ghost 计数 / 数据源机器", async () => {
+  it("渲染——type 徽章 / ql 标题两分支 / 冲突发生时间 / 查看对比单按钮（无行内裁决）/ ghost 计数 / 数据源机器", async () => {
     renderSection();
 
     expect(await screen.findByText("平台同步")).toBeInTheDocument();
-    // 冲突行：type 徽章（spec=紫 / 进度=琥珀）+ 变更名
+    // 冲突行：type 徽章（spec=紫 / 进度=琥珀）
     expect(screen.getByText("spec")).toBeInTheDocument();
     expect(screen.getByText("进度")).toBeInTheDocument();
-    expect(screen.getByText("2026-09-04-active-change")).toBeInTheDocument();
+
+    // ql 标题（D-004@v1）：ql_id 存在 → 【ql-编号】快速修复 + 小字原始 ID；
+    // 缺失 → 兜底原变更名
+    expect(screen.getAllByText(/【ql-20260904-002-62e1】/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/快速修复/).length).toBeGreaterThan(0);
     expect(screen.getByText("quick-x")).toBeInTheDocument();
-    // 活跃警示：冲突名出现在 changes[] 活跃行 → ⚠ 徽标在场，但行按钮不硬禁（D-003@v1）
+    expect(screen.getByText("2026-09-04-active-change")).toBeInTheDocument();
+
+    // 行上补冲突发生时间（created_at 相对时间）
+    expect(within(rowOf("quick-x")).getByText(/25 分钟前/)).toBeInTheDocument();
+
+    // 活跃警示：冲突名出现在 changes[] 活跃行 → ⚠ 徽标在场，但按钮不硬禁（D-003@v1）
     expect(screen.getByTestId("platform-sync-active-warn")).toHaveTextContent(
       "活跃变更",
     );
     expect(
-      within(rowOf("2026-09-04-active-change")).getByRole("button", { name: "保本地" }),
+      within(rowOf("2026-09-04-active-change")).getByRole("button", { name: "查看对比" }),
     ).toBeEnabled();
+
+    // 按钮收敛（D-002@v1）：行上不再有保本地/取平台，只留「查看对比」
+    expect(screen.queryAllByRole("button", { name: "保本地" })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: "取平台" })).toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: "查看对比" })).toHaveLength(2);
+
     // ghost 区：计数行 + 清理按钮（ghost=1 可用）+ 卡头数据源机器
     expect(screen.getByText(/目录已不存在 · 建议清理/)).toBeInTheDocument();
     expect(screen.getByTestId("platform-sync-ghost-cleanup")).toBeEnabled();
@@ -297,15 +380,16 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
     expect(screen.queryByText("平台同步")).toBeNull();
   });
 
-  // ── 2. 权限 gating（D-003@v1：所有者 + 平台管理员可操作，其余只读）─────
+  // ── 2. 权限 gating（D-003@v1 + Grill B1：compare 与裁决同权限集合）────────
 
-  it("权限——非所有者非平台管理员只读：无裁决/清理按钮，清单与计数保留 + 只读说明", async () => {
+  it("权限——非所有者非平台管理员只读：无查看对比/清理按钮，清单与计数保留 + 只读说明", async () => {
     useSession.setState({ user: OTHER_USER } as never);
     renderSection();
 
     expect(await screen.findByText("平台同步")).toBeInTheDocument();
     expect(screen.getByText("2026-09-04-active-change")).toBeInTheDocument();
     expect(screen.getByText("quick-x")).toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: "查看对比" })).toHaveLength(0);
     expect(screen.queryAllByRole("button", { name: "保本地" })).toHaveLength(0);
     expect(screen.queryAllByRole("button", { name: "取平台" })).toHaveLength(0);
     expect(screen.queryByTestId("platform-sync-ghost-cleanup")).toBeNull();
@@ -316,14 +400,49 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
     useSession.setState({ user: ADMIN_USER } as never);
     renderSection();
 
-    // fixture 两条冲突行 → 多命中用 findAllBy（至少一行可见裁决按钮）
+    // fixture 两条冲突行 → 多命中用 findAllBy（至少一行可见查看对比）
     expect(
-      (await screen.findAllByRole("button", { name: "保本地" })).length,
+      (await screen.findAllByRole("button", { name: "查看对比" })).length,
     ).toBeGreaterThan(0);
     expect(screen.getByTestId("platform-sync-ghost-cleanup")).toBeInTheDocument();
   });
 
-  // ── 3. ghost 区独立断言 ────────────────────────────────────────────────
+  // ── 3. 查看对比入口（离线禁用 + 弹窗接线）──────────────────────────────
+
+  it("机器离线——「查看对比」禁用并带 title 提示（无法读取本地内容）", async () => {
+    setupMachine(makeMachine(makeStatus(), { status: "offline" }));
+    renderSection();
+    await screen.findByText("quick-x");
+
+    const btn = within(rowOf("quick-x")).getByRole("button", { name: "查看对比" });
+    expect(btn).toBeDisabled();
+    expect(btn.getAttribute("title") ?? "").toContain("机器离线");
+  });
+
+  it("查看对比——点击打开弹窗（conflict/instanceId/workspaceId 接线），关闭后弹窗卸载", async () => {
+    renderSection();
+    await screen.findByText("quick-x");
+    fireEvent.click(
+      within(rowOf("quick-x")).getByRole("button", { name: "查看对比" }),
+    );
+
+    const stub = await screen.findByTestId("conflict-compare-modal-stub");
+    expect(within(stub).getByTestId("stub-conflict-change")).toHaveTextContent(
+      "quick-x",
+    );
+    expect(within(stub).getByTestId("stub-instance-id")).toHaveTextContent(
+      "machine-1",
+    );
+    expect(within(stub).getByTestId("stub-workspace-id")).toHaveTextContent("ws-1");
+    expect(within(stub).getByTestId("stub-can-operate")).toHaveTextContent("true");
+
+    fireEvent.click(within(stub).getByTestId("stub-close"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("conflict-compare-modal-stub")).toBeNull(),
+    );
+  });
+
+  // ── 4. ghost 区独立断言（行级操作不变）────────────────────────────────
 
   it("ghost=0 → 一键清理按钮禁用（无 ghost 行）", async () => {
     setupMachine(
@@ -386,47 +505,26 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
     ).toBeInTheDocument();
   });
 
-  // ── 4. 裁决回显（成功 / 失败 / 150s 恢复）───────────────────────────────
+  // ── 5. 裁决回显（入口收进弹窗，经 stub 下发；成功 / 失败 / 150s 恢复）────
 
-  it("回显成功——保本地弹窗（覆盖方向 + 活跃警示段 + 旧 daemon 提示）→ 下发参数 → toast + 已消解 + 行随快照消失", async () => {
+  it("回显成功——弹窗内保本地 → 等待回报 → toast + 已消解 + 行随快照消失", async () => {
     renderSection();
     await screen.findByText("2026-09-04-active-change");
     const row = rowOf("2026-09-04-active-change");
-    fireEvent.click(within(row).getByRole("button", { name: "保本地" }));
+    fireEvent.click(within(row).getByRole("button", { name: "查看对比" }));
 
-    // 弹窗文案（原型 STRATEGY_TEXT：保本地 = 本机覆盖平台 + 活跃警示加重不硬禁）
-    const confirmRoot = await openConfirmRoot();
-    expect(
-      confirmRoot.querySelector(".ant-modal-confirm-title"),
-    ).toHaveTextContent("裁决冲突：保本地（keep-local）");
-    expect(
-      within(confirmRoot).getByText(/用本机版本覆盖平台版本/),
-    ).toBeInTheDocument();
-    expect(
-      within(confirmRoot).getByText("2026-09-04-active-change"),
-    ).toBeInTheDocument();
-    expect(
-      within(confirmRoot).getByText(/另一会话可能正在推进/),
-    ).toBeInTheDocument();
-    expect(
-      within(confirmRoot).getByText(/旧版本会静默忽略/),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      within(confirmRoot).getByRole("button", { name: /确\s*认\s*·\s*保\s*本\s*地/ }),
-    );
+    // 弹窗内下发保本地（stub 模拟：onDispatched(change,"keep_local") + onClose）
+    const stub = await screen.findByTestId("conflict-compare-modal-stub");
+    fireEvent.click(within(stub).getByTestId("stub-keep-local"));
     await waitFor(() =>
-      expect(mocks.triggerResolve).toHaveBeenCalledWith("machine-1", {
-        change: "2026-09-04-active-change",
-        strategy: "keep_local",
-      }),
+      expect(screen.queryByTestId("conflict-compare-modal-stub")).toBeNull(),
     );
 
-    // 回显 waiting：行按钮禁用 + 状态文案
+    // 回显 waiting：行上查看对比禁用 + 状态文案
     await waitFor(() =>
       expect(screen.getByText("已下发 · 等待机器回报")).toBeInTheDocument(),
     );
-    expect(within(row).getByRole("button", { name: "保本地" })).toBeDisabled();
+    expect(within(row).getByRole("button", { name: "查看对比" })).toBeDisabled();
 
     // 心跳回报 success（action+change+strategy 匹配）→ 成功 toast + 已消解 + 按钮隐藏
     await pushMachine(
@@ -438,14 +536,19 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
     expect(
       screen.getByText("已消解 · 等待快照刷新（≤75 秒）"),
     ).toBeInTheDocument();
-    expect(within(row).queryByRole("button", { name: "保本地" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "查看对比" })).toBeNull();
 
     // 快照刷新（≤60-75s 采集）→ 冲突行随快照消失
     await pushMachine(
       makeMachine(
         makeStatus({
           pending_conflicts: [
-            { change: "quick-x", created_at: isoAgo(70 * MIN), type: "spec-tree" },
+            {
+              change: "quick-x",
+              created_at: isoAgo(25 * MIN),
+              type: "spec-tree",
+              ql_id: "ql-20260904-002-62e1",
+            },
           ],
           conflict_count: 1,
           conflict_types: { "spec-tree": 1 },
@@ -461,25 +564,11 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
     renderSection();
     await screen.findByText("2026-09-04-active-change");
     const row = rowOf("2026-09-04-active-change");
-    fireEvent.click(within(row).getByRole("button", { name: "取平台" }));
+    fireEvent.click(within(row).getByRole("button", { name: "查看对比" }));
 
-    // 弹窗文案（取平台 = 平台覆盖本机，危险方向）
-    const confirmRoot = await openConfirmRoot();
-    expect(
-      confirmRoot.querySelector(".ant-modal-confirm-title"),
-    ).toHaveTextContent("裁决冲突：取平台（take-platform）");
-    expect(
-      within(confirmRoot).getByText(/用平台版本覆盖本机版本/),
-    ).toBeInTheDocument();
-    fireEvent.click(
-      within(confirmRoot).getByRole("button", { name: /确\s*认\s*·\s*取\s*平\s*台/ }),
-    );
-    await waitFor(() =>
-      expect(mocks.triggerResolve).toHaveBeenCalledWith("machine-1", {
-        change: "2026-09-04-active-change",
-        strategy: "take_platform",
-      }),
-    );
+    // 弹窗内下发取平台（stub 模拟 onDispatched(change,"take_platform")）
+    const stub = await screen.findByTestId("conflict-compare-modal-stub");
+    fireEvent.click(within(stub).getByTestId("stub-take-platform"));
     await waitFor(() =>
       expect(screen.getByText("已下发 · 等待机器回报")).toBeInTheDocument(),
     );
@@ -498,8 +587,7 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
     expect(await screen.findByTestId("platform-sync-fail-text")).toHaveTextContent(
       "执行失败（exit 1）：change not found in pending conflicts",
     );
-    expect(within(row).getByRole("button", { name: "保本地" })).toBeEnabled();
-    expect(within(row).getByRole("button", { name: "取平台" })).toBeEnabled();
+    expect(within(row).getByRole("button", { name: "查看对比" })).toBeEnabled();
   });
 
   it("150 秒无回报恢复——fake timers 推进后按钮恢复可点并提示旧版 daemon", async () => {
@@ -513,33 +601,25 @@ describe("PlatformSyncSection（task-09 / 平台同步处理区）", () => {
         });
       }
       const row = rowOf("2026-09-04-active-change");
-      const keepBtn = within(row).getByRole("button", { name: "保本地" });
+      const compareBtn = within(row).getByRole("button", { name: "查看对比" });
 
-      fireEvent.click(keepBtn);
-      let confirmRoot: HTMLElement | null = null;
-      for (let i = 0; i < 10 && confirmRoot === null; i++) {
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(20);
-        });
-        confirmRoot = document.querySelector(".ant-modal-confirm");
-      }
-      expect(confirmRoot).not.toBeNull();
-      fireEvent.click(
-        within(confirmRoot as HTMLElement).getByRole("button", { name: /确\s*认/ }),
-      );
+      fireEvent.click(compareBtn);
+      // stub 同步挂载（fireEvent 已包 act），无需 findBy*（fake timers 下不适用）
+      const stub = screen.getByTestId("conflict-compare-modal-stub");
+      fireEvent.click(within(stub).getByTestId("stub-keep-local"));
       for (let i = 0; i < 4; i++) {
         await act(async () => {
           await vi.advanceTimersByTimeAsync(1);
         });
       }
       expect(screen.getByText("已下发 · 等待机器回报")).toBeInTheDocument();
-      expect(keepBtn).toBeDisabled();
+      expect(compareBtn).toBeDisabled();
 
       // 150s 无回报（旧 daemon 静默忽略，R-03）→ timeout：按钮恢复 + 提示
       act(() => {
         vi.advanceTimersByTime(ECHO_TIMEOUT_MS + 1_000);
       });
-      expect(keepBtn).toBeEnabled();
+      expect(compareBtn).toBeEnabled();
       expect(screen.getByText(/150 秒无机器回报/)).toBeInTheDocument();
       expect(screen.getByText(/旧版 daemon 可能已忽略/)).toBeInTheDocument();
     } finally {

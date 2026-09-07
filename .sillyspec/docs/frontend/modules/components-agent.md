@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 借用方案查看组件（components-agent）
 
 ## 定位
-「借用方案」查看组件（`components/agent/`，2 个组件 + 3 个测试文件），服务业务人员（business_member）
+「借用方案」查看组件（`frontend/components/agent/`，2 个组件 + 3 个测试文件），服务业务人员（business_member）
 借用工作区共享 daemon 跑智能体后的产出查看。借用产出的方案文件由后端回调
 （close_interactive_run/complete_lease）落文件中心：owner_type="workspace"、owner_id=ws_id、
 uploaded_by=业务人员。前端严格两层分工：容器层拉活数据、展示层纯渲染，预览全量复用

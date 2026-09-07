@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 页面骨架布局组件（components-layout）
 
 ## 定位
-页面骨架级布局组件（`components/layout/`，5 组件文件 + index.ts barrel）：页面容器 /
+页面骨架级布局组件（`frontend/components/layout/`，5 组件文件 + index.ts barrel）：页面容器 /
 页头 / 区块卡片 / 搜索栏 / 数据表格的标准拼装件，统一全站（PPM / admin / 设置页为主）
 的页面结构。全部是对现有原语（antd Table / 原生 div）的薄封装 + tailwind 类收敛——
 固化 max-w 档位、空态文案、overflow 包装等约定，减少各页重复样板。

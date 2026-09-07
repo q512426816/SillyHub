@@ -1935,3 +1935,58 @@ class TestMissionOnlyRoutes:
             headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
         )
         assert resp.status_code == 404, resp.text
+
+
+# ── 2026-09-07-agent-liveness-states task-12：list_workers 附 liveness（直查 platform_agent_logs）──
+
+
+@pytest.mark.asyncio
+async def test_list_workers_liveness_from_platform_agent_logs(
+    client, db_session, auth_headers
+) -> None:
+    """running worker 直查落库状态附 liveness；completed 行与无日志行保持 None。"""
+    from app.modules.platform_sync.model import AgentSessionLogORM
+
+    agent_session, _ws = await _seed_agent_session(db_session)
+    mission = await _seed_session_mission(db_session, agent_session)
+    run_session_id = uuid.uuid4()
+    db_session.add(
+        AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="running",
+            role="w1",
+            objective="干活",
+            agent_session_id=run_session_id,
+        )
+    )
+    db_session.add(
+        AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="w2",
+            objective="完了",
+            agent_session_id=uuid.uuid4(),
+        )
+    )
+    log_row = AgentSessionLogORM(
+        workspace_id=agent_session.workspace_id,
+        log_path="C:/x/w1.jsonl",
+        harness="claude-code",
+        agent_session_id=run_session_id,
+        state="blocked",
+        state_evidence="PERMISSION_REQUEST(pending)",
+        state_derived_at=datetime.now(UTC),
+    )
+    db_session.add(log_row)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/sessions/{agent_session.id}/missions/workers", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    by_role = {w["role"]: w for w in resp.json()["workers"]}
+    assert by_role["w1"]["liveness"]["state"] == "blocked"
+    assert by_role["w1"]["liveness"]["evidence"] == "PERMISSION_REQUEST(pending)"
+    assert by_role["w2"]["liveness"] is None

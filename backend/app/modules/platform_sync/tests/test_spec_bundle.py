@@ -273,10 +273,15 @@ class TestRoutePrecedence:
 
 
 class TestBundleContent:
-    """tar 内容断言：元数据四键 + 排除项零回归 + 磁盘零残留。"""
+    """tar 内容断言：元数据五键 + 排除项零回归 + 磁盘零残留。"""
 
-    async def test_platform_bundle_json_four_keys(self, spec_env: dict[str, Any]) -> None:
-        """顶层 PLATFORM-BUNDLE.json 含且仅含四键，值与 DB 行一致。"""
+    async def test_platform_bundle_json_five_keys(self, spec_env: dict[str, Any]) -> None:
+        """顶层 PLATFORM-BUNDLE.json 含且仅含五键，值与 DB 行一致。
+
+        第五键 manifest_versions（ql-20260905-001）：现存清单行 path → version
+        映射，daemon pull 后据此重建 manifest 缓存（真实 base_version）。仅含
+        exists=True 行（墓碑行不在镜像树）。
+        """
         client: AsyncClient = spec_env["client"]
         resp = await client.get("/api/changes/-/spec-bundle", headers=spec_env["headers"])
         assert resp.status_code == 200, resp.text
@@ -290,12 +295,24 @@ class TestBundleContent:
             raw = tf.extractfile("PLATFORM-BUNDLE.json")
             assert raw is not None
             meta = json.loads(raw.read())
-        assert set(meta) == {"spec_version", "strategy", "generated_at", "server"}
+        assert set(meta) == {
+            "spec_version",
+            "strategy",
+            "generated_at",
+            "server",
+            "manifest_versions",
+        }
         assert meta["spec_version"] == spec_env["spec_version"]
         assert meta["strategy"] == spec_env["strategy"]
         # generated_at 是可解析的 ISO 时间（打包时刻 UTC）
         datetime.fromisoformat(str(meta["generated_at"]))
         assert isinstance(meta["server"], str) and meta["server"]
+        # manifest_versions：path → version 的 dict，版本值为正整数
+        manifest_versions = meta["manifest_versions"]
+        assert isinstance(manifest_versions, dict)
+        for path, version in manifest_versions.items():
+            assert isinstance(path, str) and path
+            assert isinstance(version, int) and version > 0
 
     async def test_runtime_and_local_yaml_excluded_any_depth(
         self, spec_env: dict[str, Any]

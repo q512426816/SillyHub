@@ -26,7 +26,7 @@ generator: sillyspec-scan
 
 - 顶层 `backend/tests/`：76 个 `test_*.py`，按 `modules/<域>/`、`core/`、`e2e/` 分组。
 - 模块内 `backend/app/modules/**/test_*.py`：278 个（垂直切片自带测试，agent / daemon / ppm / workspace 等大模块占多）。
-- 合计 354 个测试文件；`conftest.py` 共 13 个（根 1 个 + 模块级 12 个：ppm 六域、file、mcp_gateway、change、daemon、workspace.member_runtimes、platform_sync）。
+- 合计 354 个测试文件；`backend/conftest.py` 共 13 个（根 1 个 + 模块级 12 个：ppm 六域、file、mcp_gateway、change、daemon、workspace.member_runtimes、platform_sync）。
 
 ## 测试环境策略（根 backend/conftest.py，hermetic）
 
@@ -39,9 +39,9 @@ generator: sillyspec-scan
 
 ## 守护测试
 
-- 错误文案中文化守护：`tests/core/test_error_message_l10n.py`（参数化断言用户面报错保持中文，防新代码回退英文硬编码；本轮只核实到 2 个测试函数带参数化展开，不虚构用例数）。
-- 审计挂载守护：`tests/core/test_audit_hooks_effective.py`；登录/设置手工审计：`tests/modules/auth/test_login_audit.py`、`tests/modules/settings/test_settings_audit.py`。
-- config/spec 传输：`tests/core/test_config_spec_transport.py`、`tests/test_config.py`。
+- 错误文案中文化守护：`backend/tests/core/test_error_message_l10n.py`（参数化断言用户面报错保持中文，防新代码回退英文硬编码；本轮只核实到 2 个测试函数带参数化展开，不虚构用例数）。
+- 审计挂载守护：`backend/tests/core/test_audit_hooks_effective.py`；登录/设置手工审计：`backend/tests/modules/auth/test_login_audit.py`、`backend/tests/modules/settings/test_settings_audit.py`。
+- config/spec 传输：`backend/tests/core/test_config_spec_transport.py`、`backend/tests/test_config.py`。
 
 ## 覆盖域清单（backend/tests/ 主要文件，按域分组罗列）
 

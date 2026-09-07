@@ -28,41 +28,41 @@
 
 | 编号 | 级别 | 问题 | 位置 |
 |---|---|---|---|
-| BE-P0-1 | P0 | `POST /api/missions/{id}/cancel` 永久 422：`require_permission` 的 checker 声明 `workspace_id: Path(...)`，路由路径不含该参数，已认证请求 422（实测复现：`{"type":"missing","loc":["path","workspace_id"]}`）。附带：端点无 mission 归属校验 | `agent/router.py:1101`、`core/auth_deps.py:102-106` |
-| BE-P0-2 | P0 | 跨 ws 越权派发：dispatch_worker 只要求调用者对 path 中一个 ws 有 WORKSPACE_WRITE（且 `_get_mission` 放宽到 scope 内任一 ws，比设计 D-006 的"锚=anchor"更宽），`target_workspace_id` 仅校验 ∈ scope，不校验调用者对 target 的权限。综合后果：scope 内 A ws 普通成员可向自己无权限的 B ws 注入带 Bash/Edit/Write 的 worker（representative binding 落到 B 成员机器执行） | `agent/mcp_tools.py:382-489`、`agent/execution.py:291-304` |
-| BE-P1-1 | P1 | `list_missions` 用 `require_permission_any(TASK_READ)`（path 的 workspace_id 不参与鉴权，任意 ws 有 TASK_READ 即可列他人 ws 的 mission）；`get_mission` 无归属校验 | `agent/router.py:903-910`、`1082-1090` |
-| BE-P1-2 | P1 | target ws 无 bound daemon 时 `git_worktree_add` 抛 `HostFsDelegateUnavailable`，run 已落库 pending 且无终态化路径 → mission 永久 running。scope 缺 binding 是"预检仅 warning 不阻断"明确放行的场景，非罕见路径 | `agent/mcp_tools.py:447-495`、`agent/execution.py:243-276` |
-| BE-P1-3 | P1 | 收敛守卫先置位 `converged_at` 并 commit，再执行 finalize；finalize 抛异常无回滚，后续重进因 rowcount=0 直接返回 → merge/GLM 摘要永久丢失 | `agent/finalizer.py:602-624` |
-| BE-P1-4 | P1 | worktree/分支两条泄漏路径：(a) failed worker 的 worktree 副本与分支永不清理（cleanup 只处理 completed）；(b) `converge_mission_for_completed_run`（complete_lease/schedule_loop 路径）从不调 cleanup_mission，仅 MCP converge 端点调 | `agent/execution.py:243-276`、`agent/finalizer.py:272-279、448-455、541-644` |
-| BE-P1-5 | P1 | prompt 的 scope 在线状态恒"离线"：`query_daemon_online_by_id` SQL 含 `AND user_id=:uid`，orchestrator 传全零 UUID 占位（注释声称"不依赖 user_id"与实现不符）→ 查询恒 None | `agent/orchestrator.py:129-151`、`member_runtimes/queries.py:26-48` |
-| BE-P1-6 | P1 | 主 run `pending + no_online_daemon` 无重派机制（注释承诺"靠 reconcile 重派"但不存在）；叠加项目维度 mission 的 run 完成回调被 `change_id is None` 短路，schedule_loop 对项目 mission 无触发点 → mission 挂死只能重启 | `agent/orchestrator.py:321-332`、`daemon/run_sync/service.py:1598-1600` |
-| BE-P1-7 | P1 | 治理拒绝（max_workers_reached/budget_exceeded）把新 run 标 killed；killed ∈ _FAILED → 全部实际 worker 成功的 mission 也会 derive 出 degraded | `agent/mcp_tools.py:456-471`、`agent/mission.py:26、48-53` |
-| BE-P2-1 | P2 | dispatch 治理门 check-then-act 竞态（先建 run 再 gate，无锁） | `agent/mcp_tools.py:447-456`、`agent/control.py:78-87` |
-| BE-P2-2 | P2 | N+1/无上限输入：`_check_scope_bindings` 每 ws 2 查、render prompt 每 ws 3 查、`scope_workspace_ids` 无 max_length、`agent_missions.project_id` 无索引 | `agent/router.py:1145-1167`、`orchestrator.py:122-152`、`mission_schema.py:41`、`model.py` |
-| BE-P2-3 | P2 | converge MCP 端点无"worker 全终态"前置检查：derive=running 时仍无条件重跑 merge+cleanup 返回 merged，主 agent 可提前"成功"收敛遗漏在跑 worker；成功场景同组分支 merge 两次 | `agent/mcp_tools.py:603-612、663-665` |
-| BE-P2-4 | P2 | constraints 原样透传未滤保留键（用户可预置 `orchestration_mode:"external"`/`conflict_attempts`/`needs_manual` 操纵状态机）；objective 等无长度上限 | `agent/router.py:1253-1258`、`mission_schema.py` |
-| BE-P2-5 | P2 | `worktree_path` 无归属校验（caller 传任意绝对路径作 daemon root_path） | `agent/mcp_tools.py:75-77`、`execution.py:217-218` |
-| BE-P2-6 | P2 | 代表 binding "owner 优先"实现与语义不符：owner 分支条件是 `w.created_by = 发起用户`，发起人非 owner 恒落空 | `member_runtimes/queries.py:324-395` |
-| BE-P2-7 | P2 | dispatch 链路 5+ 次独立小事务，`dispatch_to_daemon` 内部 commit 会卷入调用方未提交变更 | `agent/placement.py:484-540` |
-| BE-P2-8 | P2 | daemon 离线时 lease 唤醒广播到所有已连接 daemon | `agent/placement.py:1513-1528` |
+| BE-P0-1 | P0 | `POST /api/missions/{id}/cancel` 永久 422：`require_permission` 的 checker 声明 `workspace_id: Path(...)`，路由路径不含该参数，已认证请求 422（实测复现：`{"type":"missing","loc":["path","workspace_id"]}`）。附带：端点无 mission 归属校验 | `backend/app/modules/agent/router.py:979`、`backend/app/core/auth_deps.py:102-106` |
+| BE-P0-2 | P0 | 跨 ws 越权派发：dispatch_worker 只要求调用者对 path 中一个 ws 有 WORKSPACE_WRITE（且 `_get_mission` 放宽到 scope 内任一 ws，比设计 D-006 的"锚=anchor"更宽），`target_workspace_id` 仅校验 ∈ scope，不校验调用者对 target 的权限。综合后果：scope 内 A ws 普通成员可向自己无权限的 B ws 注入带 Bash/Edit/Write 的 worker（representative binding 落到 B 成员机器执行） | `backend/app/modules/agent/mcp_tools.py:382-489`、`backend/app/modules/agent/execution.py:540` |
+| BE-P1-1 | P1 | `list_missions` 用 `require_permission_any(TASK_READ)`（path 的 workspace_id 不参与鉴权，任意 ws 有 TASK_READ 即可列他人 ws 的 mission）；`get_mission` 无归属校验 | `backend/app/modules/agent/router.py:947`、`backend/app/modules/agent/router.py:1005` |
+| BE-P1-2 | P1 | target ws 无 bound daemon 时 `git_worktree_add` 抛 `HostFsDelegateUnavailable`，run 已落库 pending 且无终态化路径 → mission 永久 running。scope 缺 binding 是"预检仅 warning 不阻断"明确放行的场景，非罕见路径 | `backend/app/modules/agent/mcp_tools.py`、`backend/app/modules/agent/execution.py:296` |
+| BE-P1-3 | P1 | 收敛守卫先置位 `converged_at` 并 commit，再执行 finalize；finalize 抛异常无回滚，后续重进因 rowcount=0 直接返回 → merge/GLM 摘要永久丢失 | `backend/app/modules/agent/finalizer.py:659` |
+| BE-P1-4 | P1 | worktree/分支两条泄漏路径：(a) failed worker 的 worktree 副本与分支永不清理（cleanup 只处理 completed）；(b) `converge_mission_for_completed_run`（complete_lease/schedule_loop 路径）从不调 cleanup_mission，仅 MCP converge 端点调 | `backend/app/modules/agent/execution.py`、`backend/app/modules/agent/finalizer.py:230、448-455、541-644` |
+| BE-P1-5 | P1 | prompt 的 scope 在线状态恒"离线"：`query_daemon_online_by_id` SQL 含 `AND user_id=:uid`，orchestrator 传全零 UUID 占位（注释声称"不依赖 user_id"与实现不符）→ 查询恒 None | `backend/app/modules/agent/orchestrator.py:198`、`backend/app/modules/member_runtimes/queries.py` |
+| BE-P1-6 | P1 | 主 run `pending + no_online_daemon` 无重派机制（注释承诺"靠 reconcile 重派"但不存在）；叠加项目维度 mission 的 run 完成回调被 `change_id is None` 短路，schedule_loop 对项目 mission 无触发点 → mission 挂死只能重启 | `backend/app/modules/agent/orchestrator.py:321-332`、`backend/app/modules/daemon/run_sync/service.py:1598-1600` |
+| BE-P1-7 | P1 | 治理拒绝（max_workers_reached/budget_exceeded）把新 run 标 killed；killed ∈ _FAILED → 全部实际 worker 成功的 mission 也会 derive 出 degraded | `backend/app/modules/agent/mcp_tools.py:456-471`、`backend/app/modules/agent/mission.py:26、48-53` |
+| BE-P2-1 | P2 | dispatch 治理门 check-then-act 竞态（先建 run 再 gate，无锁） | `backend/app/modules/agent/mcp_tools.py:447-456`、`backend/app/modules/agent/control.py:78-87` |
+| BE-P2-2 | P2 | N+1/无上限输入：`_check_scope_bindings` 每 ws 2 查、render prompt 每 ws 3 查、`scope_workspace_ids` 无 max_length、`agent_missions.project_id` 无索引 | `backend/app/modules/agent/router.py:1041`、`backend/app/modules/agent/orchestrator.py:308`、`backend/app/modules/agent/mission_schema.py:41`、`backend/app/modules/agent/model.py` |
+| BE-P2-3 | P2 | converge MCP 端点无"worker 全终态"前置检查：derive=running 时仍无条件重跑 merge+cleanup 返回 merged，主 agent 可提前"成功"收敛遗漏在跑 worker；成功场景同组分支 merge 两次 | `backend/app/modules/agent/mcp_tools.py:603-612、663-665` |
+| BE-P2-4 | P2 | constraints 原样透传未滤保留键（用户可预置 `orchestration_mode:"external"`/`conflict_attempts`/`needs_manual` 操纵状态机）；objective 等无长度上限 | `backend/app/modules/agent/router.py`、`backend/app/modules/agent/mission_schema.py` |
+| BE-P2-5 | P2 | `worktree_path` 无归属校验（caller 传任意绝对路径作 daemon root_path） | `backend/app/modules/agent/mcp_tools.py:57`、`backend/app/modules/agent/execution.py:280` |
+| BE-P2-6 | P2 | 代表 binding "owner 优先"实现与语义不符：owner 分支条件是 `w.created_by = 发起用户`，发起人非 owner 恒落空 | `backend/app/modules/member_runtimes/queries.py` |
+| BE-P2-7 | P2 | dispatch 链路 5+ 次独立小事务，`dispatch_to_daemon` 内部 commit 会卷入调用方未提交变更 | `backend/app/modules/agent/placement.py:484-540` |
+| BE-P2-8 | P2 | daemon 离线时 lease 唤醒广播到所有已连接 daemon | `backend/app/modules/agent/placement.py:1513-1528` |
 
 ### 前端
 
 | 编号 | 级别 | 问题 | 位置 |
 |---|---|---|---|
-| FE-P1-1 | P1 | 终态 `degraded` 被归入 ACTIVE：终态任务每 10s 永久轮询 + 显示"取消任务"按钮（点击会把部分完成改成已取消，语义错误） | `mission-console.tsx:70、964-968、1208-1214` |
-| FE-P1-2 | P1 | mission 轮询无竞态守卫：在飞请求 resolve 后覆盖用户新选中的 mission（历史切换/新建场景真实存在） | `mission-console.tsx:956-962、1063-1071` |
-| FE-P1-3 | P1 | worker 日志增量游标方向错误：`after=最早一条`使每次轮询重拉近乎全量日志（上限 5000 行/次/worker，TEXT 大列） | `mission-console.tsx:308-315、340-342` |
-| FE-P1-4 | P1 | 非项目经理无前端门禁：可见可点入口、表单完整可用，提交才 403；历史区 403 被静默吞掉显示"无历史"（误导） | `ppm/projects/page.tsx:164-170`、`mission-console.tsx:948-950` |
-| FE-P2-1 | P2 | `missing_bindings` 警告只活在创建响应里（后端只塞响应不落库），10s 后轮询覆盖即消失，违背 R-04 持续提示意图 | `mission-console.tsx:872-889`、`router.py:1283-1286` |
-| FE-P2-2 | P2 | scope 缺失时 `Math.max(len,1)` 伪造"1 个工作区"计数 + crossWorkspace 误判 | `mission-console.tsx:853、1240-1243` |
-| FE-P2-3 | P2 | 轮询无退避/页面隐藏不暂停/错误全吞；日志首拉失败显示"暂无日志"误导 | `mission-console.tsx:956-962、365-370、358-362` |
-| FE-P2-4 | P2 | budget 输入 0/负数/Infinity 静默按"不限"提交 | `mission-console.tsx:989-994、1159-1167` |
-| FE-P2-5 | P2 | 非 ApiError 用 `String(e)` 可能渲染 `[object Object]`；未复用 `errMessage` 工具 | `mission-console.tsx:1023、1040` |
-| FE-P2-6 | P2 | `?mission=` 深链不校验 mission 归属项目；失败静默回创建态 | `mission-console.tsx:929-937` |
-| FE-P2-7 | P2 | 历史列表硬编码 limit 20 无分页（后端上限 50，第 21 条起不可见） | `mission-console.tsx:943` |
-| FE-P2-8 | P2 | projectId 为空时页面永久 loading（防御分支缺失） | `projects/[id]/missions/page.tsx:34-44、98-102` |
-| FE-P2-9 | P2 | 过期注释声称后端 anchor 缺省比对 "backend" 永不命中（后端已改 backend-code），误导维护者 | `mission-console.tsx:166-171` |
+| FE-P1-1 | P1 | 终态 `degraded` 被归入 ACTIVE：终态任务每 10s 永久轮询 + 显示"取消任务"按钮（点击会把部分完成改成已取消，语义错误） | `mission-console.tsx` |
+| FE-P1-2 | P1 | mission 轮询无竞态守卫：在飞请求 resolve 后覆盖用户新选中的 mission（历史切换/新建场景真实存在） | `mission-console.tsx` |
+| FE-P1-3 | P1 | worker 日志增量游标方向错误：`after=最早一条`使每次轮询重拉近乎全量日志（上限 5000 行/次/worker，TEXT 大列） | `mission-console.tsx` |
+| FE-P1-4 | P1 | 非项目经理无前端门禁：可见可点入口、表单完整可用，提交才 403；历史区 403 被静默吞掉显示"无历史"（误导） | `backend/app/modules/ppm/projects/page.tsx`、`mission-console.tsx` |
+| FE-P2-1 | P2 | `missing_bindings` 警告只活在创建响应里（后端只塞响应不落库），10s 后轮询覆盖即消失，违背 R-04 持续提示意图 | `mission-console.tsx`、`backend/app/modules/agent/router.py` |
+| FE-P2-2 | P2 | scope 缺失时 `Math.max(len,1)` 伪造"1 个工作区"计数 + crossWorkspace 误判 | `mission-console.tsx` |
+| FE-P2-3 | P2 | 轮询无退避/页面隐藏不暂停/错误全吞；日志首拉失败显示"暂无日志"误导 | `mission-console.tsx` |
+| FE-P2-4 | P2 | budget 输入 0/负数/Infinity 静默按"不限"提交 | `mission-console.tsx` |
+| FE-P2-5 | P2 | 非 ApiError 用 `String(e)` 可能渲染 `[object Object]`；未复用 `errMessage` 工具 | `mission-console.tsx` |
+| FE-P2-6 | P2 | `?mission=` 深链不校验 mission 归属项目；失败静默回创建态 | `mission-console.tsx` |
+| FE-P2-7 | P2 | 历史列表硬编码 limit 20 无分页（后端上限 50，第 21 条起不可见） | `mission-console.tsx` |
+| FE-P2-8 | P2 | projectId 为空时页面永久 loading（防御分支缺失） | `projects/[id]/missions/page.tsx` |
+| FE-P2-9 | P2 | 过期注释声称后端 anchor 缺省比对 "backend" 永不命中（后端已改 backend-code），误导维护者 | `mission-console.tsx` |
 
 ## 三、修复范围决策
 

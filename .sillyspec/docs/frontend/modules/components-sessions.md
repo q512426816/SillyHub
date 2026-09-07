@@ -10,7 +10,7 @@ updated_at: 2026-08-23 12:58:00
 # 会话门户组件（components-sessions）
 
 ## 定位
-会话门户（`/sessions`）的功能组件（`components/sessions/`），2026-08-14-sessions-portal 变更派生 + 切换静默化系列 quick 迭代（ql-20260817-010）+ 2026-08-23-sessions-workspace-hub 工作区中心化重构：
+会话门户（`/sessions`）的功能组件（`frontend/components/sessions/`），2026-08-14-sessions-portal 变更派生 + 切换静默化系列 quick 迭代（ql-20260817-010）+ 2026-08-23-sessions-workspace-hub 工作区中心化重构：
 - `SessionsPortal`：共享门户组件——左列表 + 右**三分支**（真会话 / 预会话 / 空门户态）+ SessionPanel page 模式 + 页级数据，可选 `scope`（WorkspaceScope/ChangeScope 判别联合，类型自 SessionListPanel 导出）派生列表数据源/标题后缀；`?session=` 深链（挂载解析一次，getAgentSession 验证，无效静默落空门户态）；三入口（/sessions、/workspaces/[id]/sessions、/workspaces/[id]/changes/[cid]/sessions）渲染同一组件。2026-08-23-sessions-workspace-hub task-06/07 起双态接线：组头「＋」/change 页头按钮 → PreSessionPicker 浮层 → preContext 预会话态（详见契约摘要）。
 - `SessionListPanel`（2026-08-23-sessions-workspace-hub task-05 重构）：左栏**工作区树**——全局/workspace scope 走两层筛选 tab + 工作区分组手风琴 + 机器小节（数据一次拉取 limit=500 客户端分组，D-103）；change scope 维持现状平铺列表（引擎胶囊/机器多选/虚拟滚动/真分页只在此分支保留）。
 - `PreSessionPicker`（2026-08-23-sessions-workspace-hub task-04 新增）：全部态新建的两步轻选择浮层（①在线机器 → ②智能体，两步即达）。

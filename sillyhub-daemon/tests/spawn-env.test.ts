@@ -23,6 +23,8 @@ import {
   ANTHROPIC_API_KEY_FIELD,
   CLAUDE_OAUTH_TOKEN_FIELD,
   SILLYHUB_SESSION_ID_FIELD,
+  SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS,
+  SILLYSPEC_SYNC_TIMEOUT_MS_FIELD,
 } from '../src/spawn-env.js';
 import type { ProviderConfig } from '../src/types.js';
 
@@ -485,5 +487,63 @@ describe('spawn-env SILLYHUB_SESSION_ID (task-02: 平台会话身份注入)', ()
       { credential: cred },
     );
     expect(withUndefined).toEqual(without);
+  });
+});
+
+// ql-20260907-007：SILLYSPEC_SYNC_TIMEOUT_MS 缺省放宽注入（spec-sync 8s 熔断缓解，
+// sillyspec ≥3.28.1 env 开关）。覆盖：缺省注入 20000 / process.env 预设优先 /
+// tool_config.env 预设优先 / 空串视同未配置。daemon 侧 execFile 同缺省值的用例在
+// sillyspec-manager.test.ts（runProgressJsonDefault 直测）。
+describe('spawn-env SILLYSPEC_SYNC_TIMEOUT_MS (ql-20260907-007: 熔断预算缺省放宽)', () => {
+  let credDir: string;
+  let cred: CredentialManager;
+  const envBackup: Record<string, string | undefined> = {};
+  const ENV_KEYS = [SILLYSPEC_SYNC_TIMEOUT_MS_FIELD];
+
+  beforeEach(async () => {
+    credDir = await mkdtemp(join(tmpdir(), 'sillyhub-synctimeout-'));
+    cred = new CredentialManager(join(credDir, 'credentials.json'));
+    for (const k of ENV_KEYS) {
+      envBackup[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+
+  afterEach(async () => {
+    for (const k of ENV_KEYS) {
+      if (envBackup[k] === undefined) delete process.env[k];
+      else process.env[k] = envBackup[k];
+    }
+    await rm(credDir, { recursive: true, force: true });
+  });
+
+  it('缺省注入：未预设时 env 含 SILLYSPEC_SYNC_TIMEOUT_MS=20000', () => {
+    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+    expect(env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD]).toBe(
+      SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS,
+    );
+  });
+
+  it('process.env 预设优先：daemon 进程级显式配置不被缺省值覆盖', () => {
+    process.env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD] = '8000';
+    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+    expect(env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD]).toBe('8000');
+  });
+
+  it('tool_config.env 预设优先：lease 下发值不被缺省值覆盖', () => {
+    const env = buildSpawnEnv(
+      { toolConfig: { sillyspec_sync_timeout_ms: '30000' } },
+      { credential: cred },
+    );
+    // tool_config.env 经 buildEnv 大写 → SILLYSPEC_SYNC_TIMEOUT_MS，填补缺省跳过
+    expect(env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD]).toBe('30000');
+  });
+
+  it('空串视同未配置：填缺省值（对齐 token 空串约定）', () => {
+    process.env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD] = '';
+    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+    expect(env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD]).toBe(
+      SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS,
+    );
   });
 });

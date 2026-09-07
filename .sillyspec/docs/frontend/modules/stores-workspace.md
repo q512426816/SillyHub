@@ -31,7 +31,7 @@ useWorkspaceStore = create((set) => ({
 - 本 store 是**纯内存缓存**，无 persist / 无 selector 工厂；别在此追加派生逻辑，聚合类状态（daemon 在线）属 lib-workspace-context 的 statusMap。
 - 写入有双来源约定：hook 只做最小填充（id + statusMap 反查 daemon 字段，name 留空），完整 name 由消费方用列表数据覆盖；hook 的 effect 有 id 一致的幂等保护，不会覆盖更完整的 current。
 - 消费方：app-workspace-pages、app-layouts、components-shared（app-shell）、lib-workspace-context。
-- 有 colocated 测试 `src/stores/workspace.test.ts`（改 store 行为先跑它）。
+- 有 colocated 测试 `frontend/src/stores/workspace.test.ts`（改 store 行为先跑它）。
 
 ## 人工备注
 

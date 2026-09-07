@@ -112,6 +112,7 @@ function makeItem(overrides: Partial<AgentLogListItem> = {}): AgentLogListItem {
     workspace_id: "ws-1",
     log_path: CODEX_LOG_PATH,
     harness: "codex",
+    state: "unknown",
     format: "codex-rollout-jsonl",
     session_id: CODEX_SESSION_ID,
     originator: "sillyhub-daemon",

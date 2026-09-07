@@ -23,8 +23,13 @@ runCmd / installSillySpec / isOutdated 供运行期 sillyspec-manager 复用（�
   调 respawnDaemonAndExit（启动期尚未持 runtime lock，直接拉起退出）。
 - `PreflightLogger = (level: 'debug'|'info'|'warn'|'error', msg, data?) => void`，
   daemon.start 适配内部 Logger。
-- `runSillySpecCheck(logger)`——`sillyspec --version` vs `npm view sillyspec version`；
-  npm 不可达 → warn 不装；未安装 / 本地旧（semver 或字符串不等）→ `npm install -g sillyspec@latest`。
+- `runSillySpecCheck(logger)`——`sillyspec --version` vs `npm view sillyspec
+  version --prefer-online`（ql-20260907-001：跳过本地 HTTP 缓存新鲜度检查，防
+  镜像/缓存滞后误判已最新）；npm 不可达 → warn 不装；未安装 / 本地旧（semver 或
+  字符串不等）→ `npm install -g sillyspec@latest`。
+- `installSillySpec(logger, opts?: { registry?: string })`——ql-20260907-001 加
+  可选 registry（官方源仲裁判定镜像滞后时由 sillyspec-manager 传官方地址，仍走
+  机器默认源会装回旧版）；缺省零变化。
 - `runDaemonSelfUpdate(buildId, config, logger, binDir = ~/.sillyhub/daemon/bin):
   Promise<boolean>`——拉 `{server_url}/daemon/latest.json`（LatestInfo
   `{ version, url, publishedAt? }`），version 与本地 BUILD_ID 不一致 → 下载 bundle

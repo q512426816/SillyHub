@@ -17,7 +17,7 @@ daemon 机器列表的机器级数据 hook（会话门户/runtimes 页共用）�
 - sharedToMe/machineCandidates（2026-08-28-daemon-agent-share）：hook 透传响应 shared_to_me
   并融合共享机器候选（自有在前、runtimes 真实明细可选引擎）；既有字段/轮询/queryKey 零变化。
 
-- `useDaemonMachines(params: DaemonMachineListParams)`（类型来自 `lib/daemon`）→
+- `useDaemonMachines(params: DaemonMachineListParams)`（类型来自 `frontend/src/lib/daemon`）→
   `{ items: DaemonMachineRead[]; total: number; sessions: AgentSessionRead[];
   isLoading; isFetching; isError; error: ApiError; refetch }`；
   各字段无数据时兜底空数组 / 0。
@@ -40,10 +40,10 @@ refetchInterval: 15000（无条件）
   徽标/计数缺失，不整块报错。
 - **用量统计不走本 hook**（D-004）：runtimes 页单独调
   `getRuntimesUsage(window)` 管理，勿内联进 `/machines` 查询。
-- 依赖 `lib/daemon` 的 `listDaemonMachines` / `listAgentSessions` 与
-  `lib/query-keys`（lib-react-query）；单测
-  `lib/__tests__/use-daemon-machines.test.ts`。
-- 消费方：`app/(dashboard)/runtimes/page.tsx`、`app/(dashboard)/sessions/page.tsx`
+- 依赖 `frontend/src/lib/daemon` 的 `listDaemonMachines` / `listAgentSessions` 与
+  `frontend/src/lib/query-keys`（lib-react-query）；单测
+  `frontend/src/lib/__tests__/use-daemon-machines.test.ts`。
+- 消费方：`frontend/app/(dashboard)/runtimes/page.tsx`、`frontend/app/(dashboard)/sessions/page.tsx`
   及 components-sessions 面板。
 
 ## 人工备注

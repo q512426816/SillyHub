@@ -31,30 +31,30 @@ created_at: 2026-07-27 00:50:00
 ## 1. 执行范围（按 Wave）
 
 ### Wave 1 — sillyhub-daemon 死代码清理
-- echoAgentEvent（task-runner.ts:2668-2678，零调用，事件循环已内联 renderAgentEvent）+ config.ts:247 注释 + 3 处文档
-- releaseLock（runtime-lock.ts:242-253，被 releaseLockByKey 取代）
-- APPROVAL_METHODS（json-rpc.ts:48-64 含 JSDoc，审批匹配已改内联 string 比较）
-- daemon.ts 未用字段 _auditSink(629)/_policyEngine(631)/_wsReconnectDelay(681) + DaemonOptions + cli.ts 透传
-- daemon.ts:59 HubClient 等 9 处未用 import（实际 tsc 全扫共 16 处 TS6133，一次性清完）
-- session-manager.ts _lastError(1589 write-only) / resolver(832 write-only) / 未用类型 import
-- task-runner.ts exitSignal(1033 write-only) / randomUUID(45)
-- ws-client.ts RECONNECT_MAX_INTERVAL_MS(39 YAGNI) / types.ts TaskAvailablePayload(182) / src/index.ts(W0 占位) / filesystem-policy.ts RuntimePolicy+runtimeId / cli.ts level(151)
+- echoAgentEvent（`sillyhub-daemon/src/task-runner.ts:2668-2678`，零调用，事件循环已内联 renderAgentEvent）+ `sillyhub-daemon/src/config.ts:247` 注释 + 3 处文档
+- releaseLock（`sillyhub-daemon/src/runtime-lock.ts:242-253`，被 releaseLockByKey 取代）
+- APPROVAL_METHODS（`sillyhub-daemon/src/adapters/json-rpc.ts:48-64` 含 JSDoc，审批匹配已改内联 string 比较）
+- `sillyhub-daemon/src/daemon.ts` 未用字段 _auditSink(629)/_policyEngine(631)/_wsReconnectDelay(681) + DaemonOptions + `sillyhub-daemon/src/cli.ts` 透传
+- `sillyhub-daemon/src/daemon.ts:59` HubClient 等 9 处未用 import（实际 tsc 全扫共 16 处 TS6133，一次性清完）
+- `sillyhub-daemon/src/interactive/session-manager.ts` _lastError(1589 write-only) / resolver(832 write-only) / 未用类型 import
+- `sillyhub-daemon/src/task-runner.ts` exitSignal(1033 write-only) / randomUUID(45)
+- `sillyhub-daemon/src/ws-client.ts` RECONNECT_MAX_INTERVAL_MS(39 YAGNI) / `sillyhub-daemon/src/types.ts` TaskAvailablePayload(182) / `sillyhub-daemon/src/index.ts`(W0 占位) / `sillyhub-daemon/src/policy/filesystem-policy.ts` RuntimePolicy+runtimeId / `sillyhub-daemon/src/cli.ts` level(151)
 
 ### Wave 2 — 前端死代码清理
-- use-daemon-runtimes.ts hook + 自测（被 useDaemonMachines 取代）+ 清锚点注释
-- FormLayout（layout/form-layout.tsx + index.ts:15 桶导出，零消费）+ 2 处文档
-- SessionsSidebar（daemon/runtime-session-helpers.tsx:142-235 + 仅它用的 4 import）
-- QuickChat 死簇（lib/daemon.ts:333-442，含孤儿 _eventTypeFromChannel）+ 清两测试文件 streamQuickChat 幽灵 mock
-- frontend/lib ~30 个未用 wrapper 导出（ppm/task 8 个、kanban 4、plan 4、project 3、problem 2、admin 3、client-path 2、changes createChange、health 3 类型、spec-workspaces/aggregations/workday/workspaces/ppm-types 散点）— 逐个核实无未来接线计划再删
+- `frontend/src/lib/use-daemon-runtimes.ts` hook + 自测（被 useDaemonMachines 取代）+ 清锚点注释
+- FormLayout（`frontend/src/components/layout/form-layout.tsx` + `frontend/src/components/layout/index.ts` 桶导出，零消费）+ 2 处文档
+- SessionsSidebar（`frontend/src/components/daemon/runtime-session-helpers.tsx:142-235` + 仅它用的 4 import）
+- QuickChat 死簇（`frontend/src/lib/daemon.ts:333-442`，含孤儿 _eventTypeFromChannel）+ 清两测试文件 streamQuickChat 幽灵 mock
+- `frontend/src/lib` ~30 个未用 wrapper 导出（ppm/task 8 个、kanban 4、plan 4、project 3、problem 2、admin 3、client-path 2、changes createChange、health 3 类型、spec-workspaces/aggregations/workday/workspaces/ppm-types 散点）— 逐个核实无未来接线计划再删
 
 ### Wave 3 — 后端死代码清理（low，逐个核实）
-- SpecWorkspaceService.sync(455 stub 被 apply_sync 取代) / get_by_id(134)
-- AgentAdapter.validate_bundle(210 无 override/调用/测试)
-- AuthService._lookup_active_user_by_email(205 登录改 username-only)
-- ProblemService.list_list_tasks/list_list_logs(698 无路由)
-- workbench._task_alert(88)/_worst_alert(241) 被 _progress_alert/_bump_alert 取代
-- core/security.py REFRESH_TOKEN_TYPE(26 refresh 非 JWT 无 typ)
-- WorkspaceService.list_(338 全表 load 计数 + 无生产调用方，迁移 4 测试用例)
+- `backend/app/modules/spec_workspace/service.py:455` SpecWorkspaceService.sync(stub 被 apply_sync 取代) / `backend/app/modules/spec_workspace/service.py:134` get_by_id
+- `backend/app/modules/agent/service.py:210` AgentAdapter.validate_bundle(无 override/调用/测试)
+- `backend/app/modules/auth/service.py:205` AuthService._lookup_active_user_by_email(登录改 username-only)
+- `backend/app/modules/ppm/problem/service.py:698` ProblemService.list_list_tasks/list_list_logs(无路由)
+- `backend/app/modules/ppm/workbench.py` workbench._task_alert / `backend/app/modules/ppm/workbench.py` _worst_alert 被 _progress_alert/_bump_alert 取代
+- `backend/app/core/security.py:26` REFRESH_TOKEN_TYPE(refresh 非 JWT 无 typ)
+- `backend/app/modules/workspace/service.py:338` WorkspaceService.list_(全表 load 计数 + 无生产调用方，迁移 4 测试用例)
 
 ### Wave 4 — 测试债清理
 - backend/tests/modules/agent/test_scan_dispatch.py 整删（269 行 6 测试全 skip，被测方法已删）
@@ -62,13 +62,13 @@ created_at: 2026-07-27 00:50:00
 - backend/tests/modules/admin/test_users_router.py 删 10 处失效 xfail（迁移已让 email nullable），保留 631/715/794 真实缺陷
 
 ### Wave 5 — 性能优化
-- task/service.py:231 enrich_summaries N+1 → 单次 IN（secondary 去重排除 primary，不能照抄 agent enrich_list）
-- spec_workspace/service.py:640 _write_spec_root N+1 → path.in_(rel_paths) 循环前预取
-- agent-log-viewer.tsx 流式日志 rAF coalesce 批处理（仅零回归子集，硬上限/虚拟化见 DEFER）
+- `backend/app/modules/ppm/task/service.py:231` enrich_summaries N+1 → 单次 IN（secondary 去重排除 primary，不能照抄 agent enrich_list）
+- `backend/app/modules/spec_workspace/service.py:640` _write_spec_root N+1 → path.in_(rel_paths) 循环前预取
+- `frontend/src/components/agent-log-viewer.tsx` 流式日志 rAF coalesce 批处理（仅零回归子集，硬上限/虚拟化见 DEFER）
 
 ### Wave 6 — 结构优化
-- placement.py:1000 抽 resolve_member_binding_or_none helper 收敛 4 处 try/except 脚手架（含 borrow_resolver.py:151 漏报的第 4 处），decide 处补 user_id
-- ppm problem-list/page.tsx:124 + task-plans 抽共享 loader hook 放 lib/（两页无 page.test.tsx，须补测试或声明靠类型检查）
+- `backend/app/modules/agent/placement.py:1000` 抽 resolve_member_binding_or_none helper 收敛 4 处 try/except 脚手架（含 `backend/app/modules/agent/borrow_resolver.py:151` 漏报的第 4 处），decide 处补 user_id
+- `frontend/src/app/(dashboard)/ppm/problem-list/page.tsx` + `frontend/src/app/(dashboard)/ppm/task-plans` 抽共享 loader hook 放 lib/（两页无 page.test.tsx，须补测试或声明靠类型检查）
 
 ---
 
@@ -76,9 +76,9 @@ created_at: 2026-07-27 00:50:00
 
 | 项 | 原因 |
 |---|---|
-| workspace-switcher.tsx:119 重复 fetchMyBindings | **撞 ungate task-02**（switcher 未提交改动） |
+| workspace-switcher.tsx 重复 fetchMyBindings | **撞 ungate task-02**（switcher 未提交改动） |
 | runtime/page.tsx + scan-docs 抽 useDaemonBinding hook | **撞 ungate task-06/07** |
-| app/m/workspaces/page.tsx:273 搜索防抖 | **撞 ungate task-03** |
+| frontend/src/app/m/workspaces/page.tsx:273 搜索防抖 | **撞 ungate task-03** |
 | WorkspaceBindingDialog 删除 | uncertain + ungate design 决策"组件保留供复用"；要删须先开新 change 撤销决策 |
 | agent-log-viewer 虚拟化（react-window） | 中期大重构，重写渲染层影响多测试，独立变更 |
 | WorkHourBarChart ECharts 按需注册 | 需逐图目视回归（漏注册静默缺图） |
@@ -93,7 +93,7 @@ created_at: 2026-07-27 00:50:00
 
 | Wave | 内容 | 验证 |
 |---|---|---|
-| W1 sillyhub-daemon 死代码 | echoAgentEvent / releaseLock / APPROVAL_METHODS / _auditSink / _policyEngine / _wsReconnectDelay 全链路（字段+option+构造+cli透传+类型import） / 9 处未用 import / _lastError / resolver / exitSignal / TaskAvailablePayload / RECONNECT_MAX_INTERVAL_MS / src/index.ts 占位 + 9 处 scan 文档同步 | tsc --noEmit ✅ + tsc --noUnusedLocals ✅（15 处 TS6133 清零）+ 296 测试 passed（runtime-lock/task-runner/ws-client/json-rpc/session-manager/filesystem-policy/daemon-policy-update/audit-sink/cli-session-manager-injection）|
+| W1 sillyhub-daemon 死代码 | echoAgentEvent / releaseLock / APPROVAL_METHODS / _auditSink / _policyEngine / _wsReconnectDelay 全链路（字段+option+构造+cli透传+类型import） / 9 处未用 import / _lastError / resolver / exitSignal / TaskAvailablePayload / RECONNECT_MAX_INTERVAL_MS / `sillyhub-daemon/src/index.ts` 占位 + 9 处 scan 文档同步 | tsc --noEmit ✅ + tsc --noUnusedLocals ✅（15 处 TS6133 清零）+ 296 测试 passed（runtime-lock/task-runner/ws-client/json-rpc/session-manager/filesystem-policy/daemon-policy-update/audit-sink/cli-session-manager-injection）|
 | W2 前端死代码 | use-daemon-runtimes hook+test / FormLayout+桶 / SessionsSidebar+4 import / QuickChat 死簇（daemon.ts 333-442 + 两测试文件 streamQuickChat/quickChat/getQuickChatResult 幽灵 mock 清理）/ D9 ~30 个 lib 死导出（子代理删 13 源文件+4 测试同步+删 spec-workspaces.test.ts，DEFER exportPlanNodes/ProblemImportCommitReq）| 前端 tsc --noEmit ✅ + vitest（runtime-session-dialog 10 + interactive-session-panel 38 + D9 受测 58）passed |
 | W3 后端死代码 | SpecWorkspaceService.sync/get_by_id / AgentAdapter.validate_bundle / AuthService._lookup_active_user_by_email / ProblemService.list_list_tasks+logs（+2 未用 import）/ workbench._task_alert+_worst_alert / REFRESH_TOKEN_TYPE。DEFER WorkspaceService.list_（3 处 test_service 调用需迁移） | ruff ✅ + mypy ✅ + auth/spec_workspace/ppm/agent 308 passed / 6 skipped / 2 xfailed 零失败；grep 证实无任何测试引用已删符号 |
 | W4 测试债 | 删 test_scan_dispatch.py（269 行 6 全 skip）/ 删 admin-global-checkpoints.test.ts（30 it.todo 0 expect）/ test_users_router.py 10 处 email-nullable 失效 xfail 转直断言（migration 202608010900 已修），保留 631/715/794 真实 task-03 缺陷 | test_users_router 36 passed / 3 xfailed（真实缺陷）零失败 |

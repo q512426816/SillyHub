@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 智能体运行客户端（lib-agent）
 
 ## 定位
-Agent Run 领域 API 客户端（`lib/agent.ts`，324 行）。封装 Agent 运行的创建/查询/杀死/用户输入提交、日志游标拉取、daemon runtime 列表，以及 mission（多 worker 任务会话）系列接口与 workspace 维度 agent 会话列表。是 `lib-agent-stream` / `lib-use-agent-run-stream` / components-daemon / components-changes 的底层依赖。
+Agent Run 领域 API 客户端（`frontend/src/lib/agent.ts`，324 行）。封装 Agent 运行的创建/查询/杀死/用户输入提交、日志游标拉取、daemon runtime 列表，以及 mission（多 worker 任务会话）系列接口与 workspace 维度 agent 会话列表。是 `lib-agent-stream` / `lib-use-agent-run-stream` / components-daemon / components-changes 的底层依赖。
 
 边界：SSE 客户端逻辑（重连/去重/分流）在 lib-agent-stream；交互式会话域（createSession/injectSession/listAgentSessions 门户版/PROVIDER_META）在 lib-daemon，均不在本文件。
 
@@ -50,7 +50,7 @@ listDaemonRuntimes():
 - `after` 游标用日志 id，配合 SSE 的 lastLogId 实现断线补帧；改游标语义须与 lib-agent-stream 对齐。
 - `createAgentRun` 的 `provider` 覆盖工作区默认 agent，不传走默认；`AgentProviderSelect`（components-shared）用 `listDaemonRuntimes` 填充下拉。
 - mission 系列与单次 AgentRun 是两条生命周期：MissionWorkerRun 关联各 worker 的 run，console 展示归 MissionConsole。
-- 交互式会话域在 `lib/daemon.ts`（lib-daemon 模块），components-sessions 引的是那边，勿在本文件找 createSession/injectSession。
+- 交互式会话域在 `frontend/src/lib/daemon.ts`（lib-daemon 模块），components-sessions 引的是那边，勿在本文件找 createSession/injectSession。
 
 ## 人工备注
 

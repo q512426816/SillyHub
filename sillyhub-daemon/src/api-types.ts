@@ -114,10 +114,13 @@ export interface paths {
         };
         /**
          * Get Latest Manifest
-         * @description Return ``{version, downloadUrl}`` consumed by ``install.sh``'s ``fetch_latest``.
+         * @description Return ``{version, downloadUrl, vendorFiles}`` consumed by installers/preflight.
          *
          *     Field names: ``version``（BUILD_ID / git SHA）+ ``url``（preflight.ts 消费）+ ``downloadUrl``
-         *     （install.sh 消费）。同时返回两种字段名以兼容两个消费方。
+         *     （install.sh 消费）。同时返回两种字段名以兼容两个消费方。``vendorFiles``
+         *     （ql-20260906-003，审计 #10）：``vendor/`` 下相对路径清单（按需扫描
+         *     daemon-dist，未打包 → 空列表），install.sh / install.ps1 / preflight 自更新
+         *     据此逐文件伴生下载 vendored pi 扩展树。
          */
         get: operations["get_latest_manifest_daemon_latest_json_get"];
         put?: never;
@@ -164,6 +167,35 @@ export interface paths {
          *     缺失则主 agent session 注入的 MCP server spawn 失败 → team 5 tool 链路断。
          */
         get: operations["get_mcp_server_bundle_daemon_latest_mcp_server_js_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daemon/latest/vendor/{file_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vendor File
+         * @description Serve a vendored pi-extension file（ql-20260906-003，审计 #10 分发链补口）.
+         *
+         *     ``vendor/`` 树随 bundle 打进镜像（Dockerfile COPY），install / preflight
+         *     自更新按 latest.json 的 vendorFiles 清单逐文件下载到 bin 目录 ``vendor/``
+         *     下——pi-rpc-driver 的 ``piVendoredSubagentExtensionPath`` 按「bundle 同目录
+         *     vendor/pi-extensions/...」候选定位 ``--extension`` 实参；漏分发则候选落空、
+         *     扩展静默跳过（subagent 工具不可用）。路径双保险校验：分段白名单（拒绝
+         *     ``..`` / 空段 / 反斜杠 / NUL）+ resolve 后 containment 复核（防符号链接逃逸）；
+         *     不合规与缺失统一 404（不泄露存在性）。媒体类型固定 octet-stream——按扩展名
+         *     猜测会把 .ts 判成 video/mp2t，且客户端均按字节落盘不消费类型。
+         */
+        get: operations["get_vendor_file_daemon_latest_vendor__file_path__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3958,7 +3990,15 @@ export interface paths {
         get: operations["get_group_chat_api_daemon_group_chats__group_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Group Chat
+         * @description 删除群=软删（design §4：群主/workspace admin；活跃群先 end 收口再双置位）。
+         *
+         *     置位链路/幂等/权限归 service：非群主成员 403 中文文案、非成员/已删群
+         *     404 不泄露存在性——已删群重复删除同为 404（软删过滤天然幂等边界，
+         *     design §7），非 204。
+         */
+        delete: operations["delete_group_chat_api_daemon_group_chats__group_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -3982,6 +4022,46 @@ export interface paths {
          * @description 解散群：end 群会话 + 全部影子会话 + 影子队列清理（design §8 group.ended）。
          */
         post: operations["end_group_chat_api_daemon_group_chats__group_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Group Chat
+         * @description 归档群（design §4：群主/workspace admin；幂等——已归档重复归档无操作）。
+         */
+        post: operations["archive_group_chat_api_daemon_group_chats__group_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive Group Chat
+         * @description 取消归档群（design §4：群主/workspace admin；幂等——未归档重复取消无操作）。
+         */
+        post: operations["unarchive_group_chat_api_daemon_group_chats__group_id__unarchive_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4118,11 +4198,37 @@ export interface paths {
          * Send Group Message
          * @description 发群消息：载体 run 落时间线 + @解析触发命中 agent 成员（design §4.1）。
          *
-         *     未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员；触发
-         *     成员忙轮排队（满 5 → 409）。任意用户成员可发（§6.1）。附件随消息落
-         *     user_input metadata 摘要并在触发成员时随注入下发（FR-05 补遗）。
+         *     未 @ 消息仅落时间线（进群背景摘要）；@全体 广播全部 agent 成员（并行
+         *     触发，群 P2 第二波）；触发成员忙轮排队（满 5 → 409）。任意用户成员可发
+         *     （§6.1）。附件随消息落 user_input metadata 摘要并在触发成员时随注入下发
+         *     （FR-05 补遗）。``reply_to_log_id`` 引用回复（校验属本群时间线，跨群/
+         *     不存在 404，快照进 metadata 与群频道事件）。
          */
         post: operations["send_group_message_api_daemon_group_chats__group_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/group-chats/{group_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark Group Chat Read
+         * @description 标记群已读至此（本成员视角；无 body——服务端直接置 now()）。
+         *
+         *     成员校验（非成员 404 不泄露存在性）后推进 ``agent_group_members.
+         *     last_read_at``；幂等（重复 PUT 只前移位点）。任意用户成员可标记（§6.1
+         *     读权限同款）。
+         */
+        put: operations["mark_group_chat_read_api_daemon_group_chats__group_id__read_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4527,6 +4633,62 @@ export interface paths {
          *     sillyspec_latest_version 上报，backend 不代查（design §接口定义）。
          */
         post: operations["trigger_machine_sillyspec_update_api_daemon_machines__instance_id__sillyspec_update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/sillyspec-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Sillyspec Resolve
+         * @description 推送 sillyspec 冲突裁决指令到指定机器（admin，task-02 / FR-02 / D-001@v1）。
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+         *     ``daemon:sillyspec_resolve``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE
+         *     语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 执行裁决（strategy
+         *     下划线字面量 → --keep-local / --take-platform flag 的映射归 daemon 侧单点），
+         *     结果经心跳 sillyspec_command_result 字段回传（终态窗口内，不走本消息）。
+         *     先 ``_get_owned_instance`` 做归属校验（越权/不存在 404，普通用户非本机防
+         *     存在性泄漏，owner 与平台管理员放行），离线或 WS 发送失败 → 504
+         *     ``DaemonRuntimeOffline``（与机器级 sillyspec-update 先例同款文案与 details）。
+         */
+        post: operations["trigger_machine_sillyspec_resolve_api_daemon_machines__instance_id__sillyspec_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/sillyspec-ghost-cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Sillyspec Ghost Cleanup
+         * @description 推送 sillyspec ghost 清理指令到指定机器（admin，task-02 / FR-03 / D-001@v1）。
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+         *     ``daemon:sillyspec_ghost_cleanup``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE
+         *     语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 清理 ghost 行并
+         *     platform sync 收敛，结果经心跳 sillyspec_command_result 字段回传（终态窗口
+         *     内，不走本消息）。权限/归属校验与 504 结构与 sillyspec-resolve 同款
+         *     （RuntimeAdminUser + ``_get_owned_instance``，owner 与平台管理员放行）。
+         */
+        post: operations["trigger_machine_sillyspec_ghost_cleanup_api_daemon_machines__instance_id__sillyspec_ghost_cleanup_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5039,6 +5201,10 @@ export interface paths {
          *     AgentTaskStatusEvent（schema.py），生命周期扩展字段（tool_use_id/summary/
          *     last_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随
          *     ``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。
+         *
+         *     2026-09-04-session-task-execution-panel task-03（FR-05）：转发之外把事件
+         *     交给 ``upsert_agent_task``（agent_task_store.py）落库 ``agent_session_task``
+         *     ——持久化旁路，失败只记日志，不影响 SSE 转发与 200 返回。
          *
          *     越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
          *     归属校验（404 不泄露存在性）。
@@ -5674,6 +5840,33 @@ export interface paths {
          *     与 get_session_detail 的 run 查询同款。
          */
         get: operations["list_session_runs_api_daemon_sessions__session_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Tasks
+         * @description List the persisted agent task snapshot of an owned session (task-02 / FR-06).
+         *
+         *     任务清单页签的服务端快照：agent_task_status 事件落库行（AgentSessionTask，
+         *     task-03 upsert 写入）按 updated_at desc 取最近 _SESSION_TASKS_MAX 条，供前端
+         *     刷新/重连后恢复（useSessionTasks 拉取 + SSE 实时合并）。归属 / 存在性复用
+         *     ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与
+         *     runs 端点同一道闸门；查询内联在此（service.py 非本任务 allowed_path），
+         *     与 list_session_runs 同款口径。未上报任务的会话返回 []（D-003 空态，不报错）。
+         */
+        get: operations["list_session_tasks_api_daemon_sessions__session_id__tasks_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9459,6 +9652,11 @@ export interface paths {
          *     §7.3）：响应头追加 ``X-Spec-Version``（= ``spec_ws.spec_version``），tar 顶层
          *     含内存生成的 ``PLATFORM-BUNDLE.json`` 快照元数据（service.build_bundle）——
          *     持包方离线即可辨快照新旧，无需解包对账。
+         *
+         *     ql-20260904-016（会话首响优化）：客户端 ``Accept-Encoding`` 含 gzip 时流式
+         *     gzip 传输（``w|gz`` + ``Content-Encoding: gzip``）——36MB 文本 spec 树压到
+         *     ~6MB，daemon 拉取从 15s+（打穿 30s fetch 超时）回到秒级；浏览器/undici/
+         *     httpx 均透明解压，明文 tar 语义与下载文件名不变。
          */
         get: operations["download_spec_bundle_api_workspaces__workspace_id__spec_workspace_bundle_get"];
         put?: never;
@@ -10889,6 +11087,73 @@ export interface components {
              * @default 0
              */
             tree_depth: number;
+        };
+        /**
+         * AgentSessionTaskRead
+         * @description Response body for GET /sessions/{session_id}/tasks（任务清单快照，task-02 / FR-06）。
+         *
+         *     2026-09-04-session-task-execution-panel：AgentSessionTask 持久化行（model.py）
+         *     的读侧 DTO。字段与 AgentTaskStatusEvent 事件契约一一对应（snake_case 对齐
+         *     仓内 DTO 惯例，D-006@v1）；事件契约名 ``async`` 在表列与 DTO 均落为
+         *     ``is_async``（Python 关键字更名，与 AgentSessionTask.is_async 同名）。
+         *     ``created_at`` 仅落库不外露（快照按 updated_at 排序，无消费方）。
+         *
+         *     数据流：producer=model.py AgentSessionTask 行（task-03 upsert 写入）→
+         *     GET 端点 model_validate 逐行序列化 → consumer=前端任务清单页签
+         *     （useSessionTasks 快照拉取，刷新/重连后恢复）。
+         */
+        AgentSessionTaskRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Task Id */
+            task_id: string;
+            /** Task Name */
+            task_name: string;
+            /** Status */
+            status: string;
+            /** Progress */
+            progress?: number | null;
+            /** Summary */
+            summary?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Last Tool Name */
+            last_tool_name?: string | null;
+            /** Tool Use Id */
+            tool_use_id?: string | null;
+            /** Elapsed Ms */
+            elapsed_ms?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Tool Uses */
+            tool_uses?: number | null;
+            /**
+             * Is Async
+             * @default false
+             */
+            is_async: boolean;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * AgentTaskStatusEvent
@@ -12403,8 +12668,12 @@ export interface components {
             /** Sillyspec Latest Version */
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["DaemonHeartbeatSillySpecUpdate"] | null;
+            sillyspec_status?: components["schemas"]["DaemonHeartbeatSillySpecStatus"] | null;
+            sillyspec_command_result?: components["schemas"]["DaemonHeartbeatSillySpecCommandResult"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
+            /** Spec Cache */
+            spec_cache?: components["schemas"]["DaemonHeartbeatSpecCacheItem"][];
         };
         /**
          * DaemonHeartbeatResponse
@@ -12431,6 +12700,10 @@ export interface components {
              * @default 0
              */
             pending_controls: number;
+            /** Spec Versions */
+            spec_versions?: {
+                [key: string]: number;
+            };
         };
         /**
          * DaemonHeartbeatRuntimePolicy
@@ -12446,11 +12719,129 @@ export interface components {
             allowed_roots: string[];
         };
         /**
+         * DaemonHeartbeatSillySpecChange
+         * @description 心跳 sillyspec_status.changes[] 单项（design §4 摘要投影）.
+         *
+         *     envelope 变更行六字段投影（``stages``/``readable``/``command`` 不透传，
+         *     design §4）；``last_active`` 为 ISO8601 字符串原样透传（不收紧成 datetime——
+         *     daemon 侧格式演进不应 422 整条心跳，前端自行解析展示）。
+         */
+        DaemonHeartbeatSillySpecChange: {
+            /** Name */
+            name?: string | null;
+            /** Ghost */
+            ghost?: boolean | null;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Stage Label */
+            stage_label?: string | null;
+            /** Last Active */
+            last_active?: string | null;
+            steps?: components["schemas"]["DaemonHeartbeatSillySpecChangeSteps"] | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecChangeSteps
+         * @description 心跳 sillyspec_status.changes[].steps（design §4 envelope steps 投影）。
+         *
+         *     ``{total, completed}`` 全可选宽松形态——steps 结构若在 envelope 侧演进，
+         *     不应让整条心跳 422（心跳是保活通道，宁宽勿断）。
+         */
+        DaemonHeartbeatSillySpecChangeSteps: {
+            /** Total */
+            total?: number | null;
+            /** Completed */
+            completed?: number | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecCommandResult
+         * @description 心跳 sillyspec_command_result 载荷（2026-09-04-conflict-resolve-entry FR-05）.
+         *
+         *     daemon 侧 sillyspec 命令执行器（resolve / ghost_cleanup）的最新结果槽投影
+         *     （design §7 心跳结果字段）：action 当前取值 ``resolve`` / ``ghost_cleanup``，
+         *     strategy 取值 ``keep_local`` / ``take_platform``，state 取值 ``success`` /
+         *     ``failed``——均不收紧成 Literal（DaemonHeartbeatSillySpecUpdate.state 同
+         *     决策：收紧会让未来新增取值的整条心跳 422，心跳是保活通道宁宽勿断）；全字段
+         *     宽松可选，不加 max_length，``executed_at`` 为 ISO8601 字符串原样承载（机器
+         *     本地钟，跨机比较仅作辅助——X-18）；``error`` 已在 daemon 侧截断 ≤200 字。
+         *     携带语义两态（D-004@v1）：终态窗口内每跳携带对象（latest-wins 只留最新一条，
+         *     R-07），窗口过期后键即不出现——backend 侧 None=置 NULL 清除，daemon 无需
+         *     也不得发送显式 null（X-04 修订）。
+         */
+        DaemonHeartbeatSillySpecCommandResult: {
+            /** Action */
+            action?: string | null;
+            /** Change */
+            change?: string | null;
+            /** Strategy */
+            strategy?: string | null;
+            /** State */
+            state?: string | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Executed At */
+            executed_at?: string | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecConflict
+         * @description 心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.
+         *
+         *     ``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal
+         *     （DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条
+         *     心跳 422）。
+         */
+        DaemonHeartbeatSillySpecConflict: {
+            /** Change */
+            change?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Type */
+            type?: string | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecStatus
+         * @description 心跳 sillyspec_status 载荷（2026-09-02-changes-overview-card FR-05 / Grill B1）.
+         *
+         *     daemon 周期采集 ``progress show --json`` envelope 的摘要投影（design §4）：
+         *     envelope 全量或超 32KB 预算的计数降级版（截断/降级在 daemon 侧执行，backend
+         *     原样落库）。全字段宽松可选——与 DaemonHeartbeatSillySpecUpdate 同理（心跳是
+         *     保活通道，字段缺失或类型演进均不应 422）：不收紧 Literal、不加 max_length，
+         *     时间字段为 ISO8601 字符串原样承载。
+         */
+        DaemonHeartbeatSillySpecStatus: {
+            /** Ok */
+            ok?: boolean | null;
+            /** Errors Count */
+            errors_count?: number | null;
+            /** Warnings Count */
+            warnings_count?: number | null;
+            /** Generated At */
+            generated_at?: string | null;
+            /** Active Changes */
+            active_changes?: number | null;
+            /** Healthy Count */
+            healthy_count?: number | null;
+            /** Ghost Count */
+            ghost_count?: number | null;
+            /** Conflict Count */
+            conflict_count?: number | null;
+            /** Conflict Types */
+            conflict_types?: {
+                [key: string]: number;
+            } | null;
+            /** Changes */
+            changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
+            /** Pending Conflicts */
+            pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
+        };
+        /**
          * DaemonHeartbeatSillySpecUpdate
          * @description 心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.
          *
          *     daemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值
-         *     ``running`` / ``deferred`` / ``success`` / ``failed``，trigger 取值
+         *     ``running`` / ``deferred`` / ``success`` / ``failed`` / ``up_to_date``
+         *     （ql-20260904-019：手动指令已最新的明确反馈终态），trigger 取值
          *     ``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖
          *     ``since=now``（同 pending_update 先例），同内容重放保留原 since。
          *     state/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422
@@ -12468,6 +12859,24 @@ export interface components {
             to_version?: string | null;
             /** Error */
             error?: string | null;
+        };
+        /**
+         * DaemonHeartbeatSpecCacheItem
+         * @description 心跳 ``spec_cache[]`` 单项（ql-20260907-010：spec 拉取工作区级化）.
+         *
+         *     daemon 上报本机已有的 spec 缓存（``~/.sillyhub/daemon/specs/{ws}``）版本，
+         *     backend 在响应 ``spec_versions`` 里回服务器权威 ``spec_workspaces.spec_version``，
+         *     daemon 据此对「版本落后且无活跃会话」的工作区后台预取——把全量 bundle 下载
+         *     挪出会话创建关键路径（实机 47MB 树 / ~0.4MB/s 链路下创建被拖 40s+）。
+         */
+        DaemonHeartbeatSpecCacheItem: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Spec Version */
+            spec_version: number;
         };
         /**
          * DaemonInstanceProviderItem
@@ -12623,6 +13032,8 @@ export interface components {
             /** Sillyspec Latest Version */
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
+            sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
+            sillyspec_command_result?: components["schemas"]["MachineSillySpecCommandResultRead"] | null;
         };
         /**
          * DaemonMachineUpdate
@@ -14011,6 +14422,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
             /** Pinned */
@@ -14067,6 +14480,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberDetailRead"][];
             pinned?: components["schemas"]["GroupChatPinnedRead"] | null;
@@ -14075,6 +14490,13 @@ export interface components {
              * @default []
              */
             online_member_ids: string[];
+            /** Last Message At */
+            last_message_at?: string | null;
+            /**
+             * Unread Count
+             * @default 0
+             */
+            unread_count: number;
         };
         /**
          * GroupChatListItemRead
@@ -14092,6 +14514,11 @@ export interface components {
          *     ``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.
          *     pinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed
          *     ``GroupChatPinnedRead``；无置顶为 None）。
+         *
+         *     ``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线
+         *     最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
+         *     （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
+         *     ts > 位点；cap 99+）。
          */
         GroupChatListItemRead: {
             /**
@@ -14130,6 +14557,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
             pinned?: components["schemas"]["GroupChatPinnedRead"] | null;
@@ -14140,6 +14569,13 @@ export interface components {
             online_member_ids: string[];
             /** Last Message */
             last_message?: string | null;
+            /** Last Message At */
+            last_message_at?: string | null;
+            /**
+             * Unread Count
+             * @default 0
+             */
+            unread_count: number;
             /** Last Mention */
             last_mention?: {
                 [key: string]: string;
@@ -14218,6 +14654,8 @@ export interface components {
             ended_at?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Members */
             members?: components["schemas"]["GroupMemberRead"][];
             /** Pinned */
@@ -14672,6 +15110,10 @@ export interface components {
          *     attachments）产出的 SessionAttachment id 引用；**D-7 豁免**——附件非空时
          *     ``content`` 可空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
          *     service，DTO 层总量兜底）。
+         *
+         *     ``reply_to_log_id``（群 P2 第二波引用回复）：被引用的群时间线消息行 id
+         *     （user_input / 投影行均可；service 校验属本群时间线，跨群/不存在 404），
+         *     发送后 metadata 与群频道事件落 ``reply_to`` 快照。
          */
         GroupMessageSendRequest: {
             /**
@@ -14685,6 +15127,11 @@ export interface components {
              * @description 附件引用（SessionAttachment id）
              */
             attachment_ids?: string[];
+            /**
+             * Reply To Log Id
+             * @description 引用回复目标：群时间线消息行 id（跨群/不存在 404）
+             */
+            reply_to_log_id?: string | null;
         };
         /**
          * GroupPinnedRequest
@@ -15435,12 +15882,97 @@ export interface components {
             since: string;
         };
         /**
+         * MachineSillySpecCommandResultRead
+         * @description 机器视图 sillyspec_command_result 嵌套（2026-09-04-conflict-resolve-entry FR-05）。
+         *
+         *     即 daemon_instances.sillyspec_command_result JSON 列宽松透出（design §7）：
+         *     daemon 侧 sillyspec 命令执行器的最新结果槽（action/change/strategy/state/
+         *     exit_code/error/executed_at）。与 sillyspec_status 同款零转换——backend 不补
+         *     字段，落库形态=上报形态（七字段全宽松可选，与心跳 DTO 同形免三胞胎模型漂移）。
+         *     NULL（终态展示窗口已过期 / register 恒清）→ 机器视图字段为 null；executed_at
+         *     为机器本地钟 ISO8601 字符串原样透传（跨机比较仅作辅助——X-18）。
+         */
+        MachineSillySpecCommandResultRead: {
+            /** Action */
+            action?: string | null;
+            /** Change */
+            change?: string | null;
+            /** Strategy */
+            strategy?: string | null;
+            /** State */
+            state?: string | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Executed At */
+            executed_at?: string | null;
+        };
+        /**
+         * MachineSillySpecResolveRequest
+         * @description Body for POST /machines/{instance_id}/sillyspec-resolve（task-02 / FR-02）。
+         *
+         *     ``strategy`` 用 Literal 限定 keep_local / take_platform（非法值 422）；
+         *     ``change`` 走白名单正则（首字符字母数字，其余字母数字/./-/_，长度 1-128）
+         *     且显式拒绝含 ``..``（防路径穿越；daemon 侧 CLI ``assertSafeChangeName``
+         *     SEC-05 双保险，backend 只做格式校验不查存在性——机器才是事实源）。
+         */
+        MachineSillySpecResolveRequest: {
+            /** Change */
+            change: string;
+            /**
+             * Strategy
+             * @enum {string}
+             */
+            strategy: "keep_local" | "take_platform";
+        };
+        /**
+         * MachineSillySpecStatusRead
+         * @description 机器视图 sillyspec_status 嵌套（2026-09-02-changes-overview-card FR-05）。
+         *
+         *     即 daemon_instances.sillyspec_status JSON 列宽松透出（design §4 摘要）：
+         *     daemon 侧采集的 ``progress show --json`` envelope 摘要（计数 + changes[] +
+         *     pending_conflicts[]）。与 sillyspec_update 不同，backend 不补任何字段（无
+         *     since 注入），落库形态=上报形态，故嵌套项直接复用心跳 DTO 的
+         *     DaemonHeartbeatSillySpecChange / DaemonHeartbeatSillySpecConflict /
+         *     DaemonHeartbeatSillySpecChangeSteps（同形零转换，免三胞胎模型漂移）。
+         *     NULL（总览不可用——sillyspec 未安装或版本过低）→ 机器视图字段为 null。
+         *     时间字段（generated_at/last_active/created_at）为 ISO8601 字符串原样透传。
+         */
+        MachineSillySpecStatusRead: {
+            /** Ok */
+            ok?: boolean | null;
+            /** Errors Count */
+            errors_count?: number | null;
+            /** Warnings Count */
+            warnings_count?: number | null;
+            /** Generated At */
+            generated_at?: string | null;
+            /** Active Changes */
+            active_changes?: number | null;
+            /** Healthy Count */
+            healthy_count?: number | null;
+            /** Ghost Count */
+            ghost_count?: number | null;
+            /** Conflict Count */
+            conflict_count?: number | null;
+            /** Conflict Types */
+            conflict_types?: {
+                [key: string]: number;
+            } | null;
+            /** Changes */
+            changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
+            /** Pending Conflicts */
+            pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
+        };
+        /**
          * MachineSillySpecUpdateRead
          * @description 机器视图 sillyspec_update 嵌套（2026-08-31-machine-sillyspec-version FR-05）。
          *
          *     即 daemon_instances.sillyspec_update JSON 列原样透出（design §接口定义）：
          *     daemon 侧 sillyspec-manager 状态机投影五字段（state 取值 running/deferred/
-         *     success/failed，trigger 取值 server_command/auto）+ backend 首落库时盖的
+         *     success/failed/up_to_date——后者为手动指令已最新的明确反馈终态
+         *     （ql-20260904-019），trigger 取值 server_command/auto）+ backend 首落库时盖的
          *     ``since``（同内容重放心跳保留原 since，MachinePendingUpdateRead 同款语义）。
          *     NULL（无升级进行中 / 终态展示窗口已过）→ 机器视图字段为 null。
          *
@@ -19723,7 +20255,7 @@ export interface components {
             /** Runtime Id */
             runtime_id?: string | null;
             /** Provider */
-            provider?: ("claude" | "codex") | null;
+            provider?: ("claude" | "codex" | "pi") | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Llm Provider Id */
@@ -23718,7 +24250,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string;
+                        [key: string]: unknown;
                     };
                 };
             };
@@ -23760,6 +24292,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_vendor_file_daemon_latest_vendor__file_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -30223,7 +30786,9 @@ export interface operations {
     };
     list_group_chats_api_daemon_group_chats_get: {
         parameters: {
-            query?: never;
+            query?: {
+                archived?: boolean | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -30237,6 +30802,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupChatListItemRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -30305,6 +30879,35 @@ export interface operations {
             };
         };
     };
+    delete_group_chat_api_daemon_group_chats__group_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_group_chat_api_daemon_group_chats__group_id__patch: {
         parameters: {
             query?: never;
@@ -30359,6 +30962,64 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GroupChatRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_group_chat_api_daemon_group_chats__group_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unarchive_group_chat_api_daemon_group_chats__group_id__unarchive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -30595,6 +31256,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GroupMessageSendRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_group_chat_read_api_daemon_group_chats__group_id__read_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -31188,6 +31878,76 @@ export interface operations {
         };
     };
     trigger_machine_sillyspec_update_api_daemon_machines__instance_id__sillyspec_update_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_sillyspec_resolve_api_daemon_machines__instance_id__sillyspec_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineSillySpecResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_sillyspec_ghost_cleanup_api_daemon_machines__instance_id__sillyspec_ghost_cleanup_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -32845,6 +33605,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_tasks_api_daemon_sessions__session_id__tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionTaskRead"][];
                 };
             };
             /** @description Validation Error */

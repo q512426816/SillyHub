@@ -11,7 +11,7 @@ created_at: 2026-08-18 01:45:00
 ## 定位
 前端唯一 HTTP 客户端封装 + 类型真相源（`frontend/src/lib/api.ts` 约 191 行 + `frontend/src/lib/api-types.ts` 约 3.29 万行生成物）。所有领域 lib 与页面均经 `apiFetch` 调后端，统一承担 URL 解析、鉴权注入、错误归一化、401 单飞刷新重试、请求追踪；不携带任何领域语义。
 
-`api-types.ts` 由 OpenAPI 生成（`pnpm gen:types`，经 `scripts/gen-api-types.mjs` 跑后端 `dump_openapi.py` → `openapi-typescript`），**禁止手写**；`gen:types:check` 以 git diff 守护漂移（根 CLAUDE.md 规则 21）。
+`api-types.ts` 由 OpenAPI 生成（`pnpm gen:types`，经 `frontend/scripts/gen-api-types.mjs` 跑后端 `dump_openapi.py` → `openapi-typescript`），**禁止手写**；`gen:types:check` 以 git diff 守护漂移（根 CLAUDE.md 规则 21）。
 
 ## 契约摘要
 - `apiFetch<T>(path, options?): Promise<T>` — 核心请求函数。

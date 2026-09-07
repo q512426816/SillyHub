@@ -68,7 +68,7 @@ tier: independent
 
 1. `lib/daemon.ts` 加 `triggerMachineSillySpecResolve` / `triggerMachineSillySpecGhostCleanup`；后端 schema 落地后 `pnpm gen:types` 重生成 api-types。
 2. 新组件 `components/changes/platform-sync-section.tsx`（原型：prototype-conflict-resolve.html）：
-   - 数据链复刻总览卡：`fetchMyBinding(workspaceId).daemon_id` → `useDaemonMachines`（15s 轮询）按 id 匹配 → `machine.sillyspec_status` + `machine.sillyspec_command_result`；无绑定或无 sillyspec_status → 卡片不渲染。
+   - 数据链复刻总览卡：`fetchMyBinding(workspaceId).daemon_id` → 15s 轮询机器列表（总览卡同款本地 `useQuery` + `listDaemonMachines` 形态，P2-5 修订）按 id 匹配 → `machine.sillyspec_status` + `machine.sillyspec_command_result`；无绑定或无 sillyspec_status → 卡片不渲染。
    - 冲突行：类型徽章（spec 树/进度，按 `type`）、变更名、活跃警示（冲突名出现在 `changes[]` 即活跃 → ⚠ 徽标 + 弹窗加重文案，不硬禁）、保本地/取平台按钮（取平台 danger）。
    - ghost 区：`ghost_count` + 清单（`changes[]` 中 `ghost=true` 项，≤50）+ 一键清理 danger 按钮（0 时禁用）。
    - 确认弹窗走 antd `modal.confirm`（`App.useApp()` 实例，`okType:"danger"` 用于取平台/清理），文案按原型 STRATEGY_TEXT；清理弹窗如实说明波及范围（幽灵记录 + 超 7 天空壳目录）。
@@ -87,7 +87,7 @@ tier: independent
 | 修改 | backend/app/modules/daemon/ws_hub.py | 新增 send_sillyspec_resolve(change, strategy) / send_sillyspec_ghost_cleanup()，复用 send_to_runtime |
 | 修改 | backend/app/modules/daemon/router.py | 2 个 POST 端点 + 请求模型 + 心跳 DTO DaemonHeartbeatSillySpecCommandResult + MachineSillySpecCommandResultRead + _build_machine_read 组装 |
 | 修改 | backend/app/modules/daemon/model.py | daemon_instances 加 sillyspec_command_result JSON nullable 列 |
-| 新增 | backend/migrations/versions/<rev>_add_sillyspec_command_result.py | 列迁移 |
+| 新增 | backend/migrations/versions/20260904223000_add_sillyspec_command_result.py | 列迁移（ADD COLUMN sillyspec_command_result JSON NULL，无回填） |
 | 修改 | backend/app/modules/daemon/runtime/service.py | heartbeat_daemon 新参数；对象=整包直写 / 键不出现=置 NULL（两态）；register 恒清 |
 | 新增 | backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py | 端点权限（owner/admin/越权 404）、change 白名单、离线 504、心跳结果落库/清除（键不出现=置 NULL） |
 
@@ -99,7 +99,7 @@ resolve 指令数据流：前端 strategy `"keep_local"`（下划线）→ POST 
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 修改 | sillyhub-daemon/src/protocol.ts | 2 条 MSG 常量 + SillySpecResolvePayload 类型 + HeartbeatBody.sillyspec_command_result 字段 |
+| 修改 | sillyhub-daemon/src/protocol.ts | 2 条 MSG 常量 + SillySpecResolvePayload 类型 + SillySpecCommandResult 结果类型（HeartbeatBody 挂接归 hub-client.ts 行——P2-2 修订） |
 | 修改 | sillyhub-daemon/src/daemon.ts | _handleWsMessage 2 个直连 case（含 in-flight 串行 guard、忙时记 failed）+ 心跳携带结果 |
 | 修改 | sillyhub-daemon/src/sillyspec-manager.ts | runResolve / runGhostCleanup（sillyspec_command_timeout_sec 默认 120s execFile）+ _lastCommandResult 槽 + 10min 惰性过期（过期停发键，不发显式 null） |
 | 修改 | sillyhub-daemon/src/hub-client.ts | heartbeat 签名加 sillyspecCommandResult 可选参数（对象=携带，省略=清除） |
@@ -113,6 +113,7 @@ resolve 指令数据流：前端 strategy `"keep_local"`（下划线）→ POST 
 | 修改 | frontend/src/lib/daemon.ts | triggerMachineSillySpecResolve / triggerMachineSillySpecGhostCleanup |
 | 重新生成 | frontend/src/lib/api-types.ts + backend/openapi.json | `pnpm gen:types`（后端 schema 先落地） |
 | 新增 | frontend/src/components/changes/platform-sync-section.tsx | 平台同步处理区卡片（冲突行 + ghost 区 + 弹窗 + 回显 + 权限） |
+| 新增 | frontend/src/components/changes/__tests__/platform-sync-section.test.tsx | 组件测试：渲染/隐藏两分支、权限 gating、回显与 150s 恢复（plan-review P2-1 补） |
 | 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx | 解析警告卡后挂卡 |
 | 修改 | frontend/src/app/m/workspaces/[id]/changes/page.tsx | 移动端镜像挂卡 |
 | 修改 | frontend/src/components/workspace/changes-overview-card.tsx | CLI 指引文案 → 跳转变更中心 |
@@ -121,7 +122,9 @@ resolve 指令数据流：前端 strategy `"keep_local"`（下划线）→ POST 
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 修改 | .sillyspec/docs/multi-agent-platform/modules/backend.md、modules/sillyhub-daemon.md、modules/frontend.md | execute 完成后按惯例加变更索引条目 |
+| 修改 | .sillyspec/docs/multi-agent-platform/modules/backend.md | execute 完成后按惯例加变更索引条目 |
+| 修改 | .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md | execute 完成后按惯例加变更索引条目 |
+| 修改 | .sillyspec/docs/multi-agent-platform/modules/frontend.md | execute 完成后按惯例加变更索引条目 |
 
 ## 7. 接口定义
 

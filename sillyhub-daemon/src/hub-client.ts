@@ -194,6 +194,12 @@ export interface HeartbeatBody {
    * **禁显式 null**（X-04 修订：v1 误写三态；daemon 无需也不得发送 null）。
    */
   sillyspec_command_result?: SillySpecCommandResult;
+  /**
+   * ql-20260907-010：本机 spec 缓存清单（读请求键，无落库语义）。daemon 每
+   * 跳心跳枚举本地 specs 目录组装；backend 仅据此在响应 spec_versions 回
+   * 权威版本。undefined/空数组 → 键不出现（旧 backend 零感知）。
+   */
+  spec_cache?: { workspace_id: string; spec_version: number }[];
 }
 
 /**
@@ -797,6 +803,15 @@ export class HubClient {
      * null**）；对象 → 整包直写。既有 6 参调用请求体逐字段不变（零破坏）。
      */
     sillyspecCommandResult?: SillySpecCommandResult,
+    /**
+     * ql-20260907-010（spec 拉取工作区级化）：本机 spec 缓存清单——daemon
+     * ``_sendHeartbeatOnce`` 从 ``~/.sillyhub/daemon/specs/`` 枚举各工作区
+     * ``.runtime/spec-version.json`` 组装。backend 响应 ``spec_versions`` 回
+     * 服务器权威版本，daemon 对「本地落后且无活跃会话」的工作区后台预取，
+     * 把全量 bundle 下载挪出会话创建关键路径。可选追加末位——undefined/空
+     * 时请求体不含 spec_cache 键（旧 backend 零感知），既有 7 参调用零破坏。
+     */
+    specCache?: { workspace_id: string; spec_version: number }[],
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -821,6 +836,12 @@ export class HubClient {
     // 过期/无结果 = backend 置 NULL 清除）。参数类型不含 null，禁显式 null 写键。
     if (sillyspecCommandResult !== undefined) {
       body.sillyspec_command_result = sillyspecCommandResult;
+    }
+    // ql-20260907-010：本机 spec 缓存清单（workspace_id + 本地版本）——backend
+    // 响应 spec_versions 回权威版本供 daemon 判定后台预取。undefined / 空数组 →
+    // 键不出现（旧 backend 零感知）。
+    if (specCache && specCache.length > 0) {
+      body.spec_cache = specCache;
     }
     return this._request<HeartbeatResponse>(
       'POST',
@@ -2333,5 +2354,121 @@ export async function fetchMcpWhitelist(
   } catch (e) {
     logger?.('warn', 'mcp_whitelist_fetch_unreachable', { url, error: String(e) });
     return null;
+  }
+}
+
+// ── 2026-09-07-agent-liveness-states task-06（design §5.2/§5.3 + §4.1 D-012）──
+// liveness 状态上行/登记行拉取/纯组装 helper。独立于 HubClient 实例的 X-API-Key
+// 通道：states 写端点仅收 shpsync_（platform_sync D-004@v1），daemon 用 workspace
+// 根 local.yaml 的 platform token（init 下发、daemon 自己写入的，见
+// local-yaml-writer writeLocalYaml）以 Bearer 直推——协议 §1 的 env 通道同源。
+
+/** states 上报单条（design §7 AgentLogStateEntry 对应，create 元信息可选）。 */
+export interface AgentLogStatePushItem {
+  log_path: string;
+  state: 'working' | 'blocked' | 'idle' | 'ended' | 'unknown';
+  evidence: string;
+  derived_at: string;
+  last_event_at?: string;
+  harness?: string;
+  format?: string;
+  agent_session_id?: string;
+  agent_cwd?: string;
+}
+
+/** 每 watch 目标的推送侧元数据（workspace token 分组 + X-001 create 元信息 + D-012 覆盖）。 */
+export interface LivenessPushTargetMeta {
+  serverUrl: string;
+  token: string;
+  harness?: string;
+  format?: string;
+  agentSessionId?: string | null;
+  agentCwd?: string;
+}
+
+/**
+ * 组装按 (serverUrl, token) 分组的推送载荷（纯函数，测试直打）。
+ *
+ * D-012 状态源优先级在此落点：目标会话存在**第一方未决权限请求**
+ * （isSessionBlocked，daemon 内存 PermissionResolver.pendingCount>0）→ state
+ * 覆写 blocked、evidence=PERMISSION_REQUEST(pending)——日志推导不重复判定，
+ * 禁止两套 blocked 语义。无元信息的目标（如 registry-sync 只知路径）不带
+ * create 字段（服务端 skipped 不建行，仅既有行更新）。
+ */
+export function buildAgentLogStatePushGroups(
+  results: Array<{
+    logPath: string;
+    state: 'working' | 'blocked' | 'idle' | 'ended' | 'unknown';
+    evidence: string;
+    derivedAt: number;
+    lastEventAt: number | null;
+  }>,
+  metaByPath: Map<string, LivenessPushTargetMeta>,
+  isSessionBlocked: (sessionId: string) => boolean,
+): Map<string, { serverUrl: string; token: string; items: AgentLogStatePushItem[] }> {
+  const groups = new Map<string, { serverUrl: string; token: string; items: AgentLogStatePushItem[] }>();
+  for (const r of results) {
+    const meta = metaByPath.get(r.logPath);
+    if (!meta) continue; // 无推送元数据（无 token）的目标本轮跳过
+    const firstPartyBlocked =
+      typeof meta.agentSessionId === 'string' && meta.agentSessionId !== '' && isSessionBlocked(meta.agentSessionId);
+    const item: AgentLogStatePushItem = {
+      log_path: r.logPath,
+      state: firstPartyBlocked ? 'blocked' : r.state,
+      evidence: firstPartyBlocked ? 'PERMISSION_REQUEST(pending)' : r.evidence,
+      derived_at: new Date(r.derivedAt).toISOString(),
+    };
+    if (r.lastEventAt !== null) item.last_event_at = new Date(r.lastEventAt).toISOString();
+    if (meta.harness) item.harness = meta.harness;
+    if (meta.format) item.format = meta.format;
+    if (meta.agentSessionId) item.agent_session_id = meta.agentSessionId;
+    if (meta.agentCwd) item.agent_cwd = meta.agentCwd;
+    const key = `${meta.serverUrl}|${meta.token}`;
+    const g = groups.get(key) ?? { serverUrl: meta.serverUrl, token: meta.token, items: [] };
+    g.items.push(item);
+    groups.set(key, g);
+  }
+  return groups;
+}
+
+/** POST /api/agent-logs/states（Bearer shpsync，5s 超时 best-effort；false=本次未上成）。 */
+export async function pushAgentLogStates(
+  serverUrl: string,
+  token: string,
+  items: AgentLogStatePushItem[],
+): Promise<boolean> {
+  try {
+    const resp = await fetch(`${serverUrl.replace(/\/$/, '')}/api/agent-logs/states`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ entries: items.slice(0, 64) }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** GET /api/agent-logs 登记行（watch list 增强源；空数组=拉取失败或无行）。 */
+export async function fetchRegisteredAgentLogs(
+  serverUrl: string,
+  token: string,
+  limit = 100,
+): Promise<Array<{ log_path: string; format: string | null; harness: string; session_id: string | null }>> {
+  try {
+    const resp = await fetch(`${serverUrl.replace(/\/$/, '')}/api/agent-logs?limit=${limit}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!resp.ok) return [];
+    const body = (await resp.json()) as { items?: Array<{ log_path?: unknown; format?: unknown; harness?: unknown; session_id?: unknown }> };
+    return (body.items ?? []).flatMap((it) =>
+      typeof it.log_path === 'string' && typeof it.harness === 'string'
+        ? [{ log_path: it.log_path, format: typeof it.format === 'string' ? it.format : null, harness: it.harness, session_id: typeof it.session_id === 'string' ? it.session_id : null }]
+        : [],
+    );
+  } catch {
+    return [];
   }
 }

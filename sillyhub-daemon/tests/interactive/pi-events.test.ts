@@ -10,7 +10,11 @@
 //      形状）→ error；message_update+ame.error（流层中止）→ error；顶层 error → error；
 //   3. 未知事件降级——不丢不抛（content=原 type，metadata.original_event_type +
 //      原字段全量保留），全部产出过 safeParseAgentEvent；
-//   4. text_delta 轮内合并（ql-20260904-031）——节流增量 partial+message_end override 全文。
+//   4. text_delta 轮内合并（ql-20260904-031）——节流增量 partial+message_end override 全文；
+//   5. turnTask 状态机（2026-09-07-pi-task-events task-02）——轮生命周期派生
+//      agent_task_status（running/工具刷新/completed/failed）、FR-03 防御补终态、
+//      task_id 实例内递增、now 注入走秒；既有 fixture 用例 expected 已按
+//      「派生 status 先行、原内容事件随后」适配（R-01 预期适配非破坏）。
 //
 // 全部产出事件（含内联构造例）逐条过 safeParseAgentEvent（zod 校验，
 // agent-event-schema.ts——档C onboarding 清单要求）。
@@ -229,23 +233,27 @@ describe('PiEventNormalizer / manual-success-turn（成功轮逐型映射）', (
     expectValid(ev);
   });
 
-  it('已知生命周期型零产出（agent_start/turn_start/message_start/tool_execution_update/agent_settled 等）', () => {
-    // fixture 全部事件中，无产出的已知型：agent_start×2、turn_start、message_start×2、
-    // thinking_start/delta/end、toolcall_start/end、text_start、text_end、
-    // tool_execution_update、agent_end、agent_settled —— 共 15 行
+  it('已知生命周期型零产出（agent_start/message_start/tool_execution_update/agent_settled 等）', () => {
+    // fixture 全部事件中，无产出的已知型：agent_start、message_start×2、
+    // thinking 三段等 message_update 子事件、tool_execution_update、节流窗内
+    // text_delta×3、agent_end、agent_settled —— 共 14 行
+    // （2026-09-07-pi-task-events：turn_start 现派生 running status，不再静默）
     const producing = new Set(all.map((x) => x.lineNo));
     const lines = loadLines('pi-rpc-events/manual-success-turn.jsonl');
     const silentLines = lines.filter((_l, i) => !producing.has(i + 1));
-    expect(silentLines.length).toBe(15);
+    expect(silentLines.length).toBe(14);
   });
 
-  it('产出全集恰为预期序列（6 事件：thinking + tool_use + tool_result + 2×text + usage）', () => {
+  it('产出全集恰为预期序列（9 事件：派生 status×3 + thinking + tool_use + tool_result + 2×text + usage）', () => {
     expect(all.map((x) => x.ev.type)).toEqual([
+      'status', // turn_start → 派生 agent_task_status(running)（2026-09-07-pi-task-events）
       'thinking', // message_end（第一次调用：thinking part）
+      'status', // tool_execution_start → 派生 agent_task_status(running) 刷新（status 先行）
       'tool_use', // tool_execution_start
-      'tool_result', // tool_execution_end
-      'text', // text_delta #1
-      'text', // text_delta #2
+      'tool_result', // tool_execution_end（派生零事件）
+      'text', // text_delta 起段 flush
+      'text', // message_end override 全文
+      'status', // turn_end → 派生 agent_task_status(completed)（status 先行）
       'text', // turn_end → usage 快照（空 text 载体）
     ]);
   });
@@ -284,10 +292,15 @@ describe('PiEventNormalizer / real-error-turn（实跑采样错误路径）', ()
     });
   });
 
-  it('实跑事件序（session/agent_*/auto_retry_end/agent_settled 等）零产出', () => {
-    // 修剪后的实跑 fixture：仅 turn_end 一行产出 2 事件，其余 10 行零产出
-    expect(all.length).toBe(2);
-    expect(all.map((x) => x.ev.type)).toEqual(['error', 'text']);
+  it('实跑事件序（turn_start/user 消息/turn_end 派生 status + error + usage；其余生命周期行零产出）', () => {
+    // 修剪后的实跑 fixture：turn_start 一行派生 running status；message_start(user)
+    // 一行派生任务名刷新（ql-20260907-011）；turn_end 一行产出
+    // failed status（先行）+ error + 全零 usage 快照；其余 8 行零产出
+    expect(all.length).toBe(5);
+    expect(all.map((x) => x.ev.type)).toEqual(['status', 'status', 'status', 'error', 'text']);
+    // 任务名升级断言：user 指令摘要覆盖缺省名（第 2 个 status 事件）
+    const nameEv = all[1]!.ev;
+    expect(nameEv.type === 'status' && nameEv.metadata?.task_name).toBeTruthy();
   });
 });
 
@@ -420,7 +433,8 @@ describe('PiEventNormalizer / 未知事件降级与边界', () => {
     expect(
       normalizer.normalizeRpcLine(JSON.stringify({ type: 'message_end' })),
     ).toEqual([]);
-    // turn_end 无 message → 零产出（无 usage 载体）
+    // turn_end 无 message 且无前序 turn_start → 零产出：无 running 行时派生
+    // 防御跳过（2026-09-07-pi-task-events）+ 无 usage 载体，[] 即防御语义守护
     expect(normalizer.normalizeRpcLine(JSON.stringify({ type: 'turn_end' }))).toEqual([]);
     // message_update 无 assistantMessageEvent → 零产出
     expect(
@@ -438,6 +452,11 @@ describe('PiEventNormalizer / 未知事件降级与边界', () => {
   });
 
   it('usage 非数值字段按 0 容错（numOr0 守卫）', () => {
+    // 先开一行任务：有 running 行时 turn_end(stop) 会先派生 completed status
+    // （2026-09-07-pi-task-events R-01 适配：status 先行、usage 快照随后）
+    const opened = normalizer.normalizeRpcLine(JSON.stringify({ type: 'turn_start' }));
+    expect(opened.length).toBe(1);
+    expect(opened[0]!.metadata).toMatchObject({ task_id: 'pi-t1', status: 'running' });
     const line = JSON.stringify({
       type: 'turn_end',
       message: {
@@ -447,12 +466,233 @@ describe('PiEventNormalizer / 未知事件降级与边界', () => {
       },
     });
     const out = normalizer.normalizeRpcLine(line);
-    expect(out.length).toBe(1);
-    expect(out[0]!.usage).toEqual({
+    expect(out.length).toBe(2);
+    expect(out[0]!.metadata).toMatchObject({ task_id: 'pi-t1', status: 'completed', tool_uses: 0 });
+    expect(out[1]!.usage).toEqual({
       input_tokens: 0,
       output_tokens: 5,
       cache_read_tokens: 0,
       cache_creation_tokens: 0,
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. turnTask 状态机（2026-09-07-pi-task-events task-02：派生 agent_task_status）
+//    每测试独立 normalizer 实例 + now 注入时钟（elapsed_ms 可断言走秒）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PiEventNormalizer / turnTask 状态机（轮生命周期派生 agent_task_status）', () => {
+  it('完整轮：turn_start→tool_execution_start×2→tool_execution_end→turn_end(stop) → running→刷新→completed', () => {
+    let t = 1_000;
+    const n = new PiEventNormalizer({ now: () => t });
+
+    // turn_start → running（task_id=pi-t1；task_name 保守命名'执行任务'）
+    const startOut = n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' }));
+    expect(startOut).toEqual([
+      {
+        type: 'status',
+        subtype: 'agent_task_status',
+        content: '',
+        metadata: { task_id: 'pi-t1', task_name: '执行任务', status: 'running' },
+      },
+    ]);
+
+    // 第 1 个工具：running 刷新（tool_uses=1 + last_tool_name + summary）
+    t = 1_500;
+    const tool1 = n.normalizeRpcLine(
+      JSON.stringify({ type: 'tool_execution_start', toolName: 'read', toolCallId: 'c1', args: { path: 'a.ts' } }),
+    );
+    expect(tool1.length).toBe(2); // 派生 status 先行 + tool_use 内容事件
+    expect(tool1[0]).toEqual({
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: '正在调用 read',
+      metadata: {
+        task_id: 'pi-t1',
+        task_name: '执行任务',
+        status: 'running',
+        last_tool_name: 'read',
+        summary: '正在调用 read',
+        tool_uses: 1,
+      },
+    });
+    expect(tool1[1]!.type).toBe('tool_use');
+
+    // 第 2 个工具：再次刷新（tool_uses=2）
+    t = 2_000;
+    const tool2 = n.normalizeRpcLine(
+      JSON.stringify({ type: 'tool_execution_start', toolName: 'bash', toolCallId: 'c2', args: { command: 'ls' } }),
+    );
+    expect(tool2.length).toBe(2);
+    expect(tool2[0]).toEqual({
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: '正在调用 bash',
+      metadata: {
+        task_id: 'pi-t1',
+        task_name: '执行任务',
+        status: 'running',
+        last_tool_name: 'bash',
+        summary: '正在调用 bash',
+        tool_uses: 2,
+      },
+    });
+
+    // tool_execution_end：零派生事件（tool_uses 已在 start 计；工具成败≠任务成败）
+    t = 2_500;
+    const toolEnd = n.normalizeRpcLine(
+      JSON.stringify({ type: 'tool_execution_end', toolName: 'bash', toolCallId: 'c2', result: 'ok' }),
+    );
+    expect(toolEnd.length).toBe(1);
+    expect(toolEnd[0]!.type).toBe('tool_result');
+
+    // turn_end(stop) → completed（status 先行 + usage 快照随后）；
+    // elapsed_ms 走秒断言：started 基准 t=1_000，收行 t=5_000 → 4_000
+    t = 5_000;
+    const endOut = n.normalizeRpcLine(
+      JSON.stringify({
+        type: 'turn_end',
+        message: { role: 'assistant', stopReason: 'stop', usage: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0 } },
+      }),
+    );
+    expect(endOut.length).toBe(2);
+    expect(endOut[0]).toEqual({
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: '',
+      metadata: {
+        task_id: 'pi-t1',
+        task_name: '执行任务',
+        status: 'completed',
+        last_tool_name: 'bash',
+        elapsed_ms: 4_000,
+        tool_uses: 2,
+      },
+    });
+    expect(endOut[1]!.type).toBe('text'); // usage 快照（既有语义不变）
+    for (const ev of [...startOut, ...tool1, ...tool2, ...toolEnd, ...endOut]) expectValid(ev);
+  });
+
+  it('错误轮：turn_end stopReason=error → failed（summary=errorMessage，elapsed_ms 走秒）', () => {
+    let t = 100;
+    const n = new PiEventNormalizer({ now: () => t });
+    expect(n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' })).length).toBe(1);
+
+    t = 700; // 600ms 后失败
+    const out = n.normalizeRpcLine(
+      JSON.stringify({
+        type: 'turn_end',
+        message: { role: 'assistant', stopReason: 'error', errorMessage: '429 已达到使用上限' },
+      }),
+    );
+    expect(out.length).toBe(2); // failed status 先行 + error 内容事件
+    expect(out[0]).toEqual({
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: '429 已达到使用上限',
+      metadata: {
+        task_id: 'pi-t1',
+        task_name: '执行任务',
+        status: 'failed',
+        summary: '429 已达到使用上限',
+        elapsed_ms: 600,
+        tool_uses: 0,
+      },
+    });
+    expect(out[1]).toEqual({ type: 'error', content: '429 已达到使用上限' });
+    for (const ev of out) expectValid(ev);
+  });
+
+  it('FR-03 防御：上轮缺 turn_end 时新 turn_start 先补 completed(pi-t1) 再开 running(pi-t2)', () => {
+    let t = 1_000;
+    const n = new PiEventNormalizer({ now: () => t });
+    // 第一轮开启后未收 turn_end（异常流：turn_end 丢失）
+    expect(n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' })).length).toBe(1);
+
+    t = 3_000;
+    const out = n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' }));
+    expect(out.length).toBe(2);
+    expect(out[0]).toEqual({
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: '',
+      metadata: {
+        task_id: 'pi-t1',
+        task_name: '执行任务',
+        status: 'completed', // 防御补终态，不产生悬挂 running
+        elapsed_ms: 2_000,
+        tool_uses: 0,
+      },
+    });
+    expect(out[1]).toEqual({
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: '',
+      metadata: { task_id: 'pi-t2', task_name: '执行任务', status: 'running' },
+    });
+    for (const ev of out) expectValid(ev);
+  });
+
+  it('error 帧仅置 pendingError 零新增派生；FR-03 补 completed 时 summary 带出错误', () => {
+    let t = 1_000;
+    const n = new PiEventNormalizer({ now: () => t });
+    expect(n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' })).length).toBe(1);
+
+    // 顶层 error：error 内容事件照旧，无新增派生事件（派生规则表第 6 行）
+    t = 2_000;
+    const errOut = n.normalizeRpcLine(JSON.stringify({ type: 'error', error: { message: 'boom' } }));
+    expect(errOut).toEqual([{ type: 'error', content: 'boom' }]);
+
+    // 下一轮 turn_start：补 completed(pi-t1, summary=pendingError) + running(pi-t2)
+    t = 2_500;
+    const out = n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' }));
+    expect(out.length).toBe(2);
+    expect(out[0]).toEqual({
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: 'boom',
+      metadata: {
+        task_id: 'pi-t1',
+        task_name: '执行任务',
+        status: 'completed',
+        summary: 'boom',
+        elapsed_ms: 1_500,
+        tool_uses: 0,
+      },
+    });
+    expect(out[1]!.metadata).toMatchObject({ task_id: 'pi-t2', status: 'running' });
+    for (const ev of [...errOut, ...out]) expectValid(ev);
+  });
+
+  it('task_id 实例内递增；无 running 行时工具/turn_end 防御跳过派生（仅内容事件）', () => {
+    const n = new PiEventNormalizer();
+    // 无前序 turn_start：tool_execution_start 防御跳过派生（仅 tool_use）
+    const orphanTool = n.normalizeRpcLine(
+      JSON.stringify({ type: 'tool_execution_start', toolName: 'read', toolCallId: 'c0', args: {} }),
+    );
+    expect(orphanTool.length).toBe(1);
+    expect(orphanTool[0]!.type).toBe('tool_use');
+    // 孤立 turn_end（无前序 turn_start）→ 零产出（防御跳过）
+    expect(
+      n.normalizeRpcLine(JSON.stringify({ type: 'turn_end', message: { stopReason: 'stop' } })),
+    ).toEqual([]);
+
+    // 两轮依次开行：pi-t1 → pi-t2 递增（上一轮未收尾走 FR-03 补 completed）
+    const t1 = n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' }));
+    expect(t1.length).toBe(1);
+    expect(t1[0]!.metadata).toMatchObject({ task_id: 'pi-t1', status: 'running' });
+    const t2 = n.normalizeRpcLine(JSON.stringify({ type: 'turn_start' }));
+    expect(t2.length).toBe(2);
+    expect(t2.map((e) => (e.metadata as Record<string, unknown>).task_id)).toEqual(['pi-t1', 'pi-t2']);
+    expect(t2.map((e) => (e.metadata as Record<string, unknown>).status)).toEqual(['completed', 'running']);
+
+    // 有 running 行时 tool_execution_end 仍零任务事件（仅 tool_result）
+    const toolEnd = n.normalizeRpcLine(
+      JSON.stringify({ type: 'tool_execution_end', toolName: 'read', toolCallId: 'c1', result: 'ok' }),
+    );
+    expect(toolEnd.length).toBe(1);
+    expect(toolEnd[0]!.type).toBe('tool_result');
+    for (const ev of [...orphanTool, ...t1, ...t2, ...toolEnd]) expectValid(ev);
   });
 });

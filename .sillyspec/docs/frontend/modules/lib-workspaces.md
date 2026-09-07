@@ -45,7 +45,7 @@ getTopology: GET /api/workspaces/topology → { nodes, edges }
 - PATCH 语义依赖后端 `exclude_unset`：null 显式清空、省略不变，适用 `default_agent`（FR-02）与 `display_alias` 等。
 - 后端 schema 变动时：响应类型经 `pnpm gen:types` 自动跟随；但手写的请求输入类型与 `Component` 需人工核对（CLAUDE.md 规则：schema 改动同 change 内必须跑 gen:types）。
 - `lib-components`（lib/components.ts）是 getWorkspaceComponents 的薄封装且复用其 `Component` 类型——组件查询新能力落在那边，勿在此扩。
-- 同文件名近邻易混：`lib/workspace.ts`（单数，PPM 关联客户端）、`lib/workspace-*.ts`（binding/status/members/path），import 时看清。
+- 同文件名近邻易混：`frontend/src/lib/workspace.ts`（单数，PPM 关联客户端）、`frontend/src/lib/workspace-*.ts`（binding/status/members/path），import 时看清。
 
 ## 人工备注
 

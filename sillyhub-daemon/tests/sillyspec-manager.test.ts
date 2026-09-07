@@ -17,6 +17,10 @@
  *   - checkAndUpgrade：未安装/落后（真实 preflight isOutdated 参与）→
  *     requestUpgrade('auto')；已最新 no-op；latest 不可达 warn no-op；缓存使连续
  *     检查不重探 npm。
+ *   - ql-20260907-001 官方源仲裁版本门：镜像滞后（本地源旧值）不再误判
+ *     up_to_date——官方源直查取较新者、官方较新时 install 切官方源、心跳缓存
+ *     覆盖为官方值；官方不可达静默回退本地源；探测命令带 --prefer-online；
+ *     手动触发强制现探（绕 10min 缓存）；deferred 保留官方源安装 flag。
  *
  * 策略（依赖注入，task-04 DI 契约）：不 vi.mock preflight——runCommand / install /
  * isBusy / now 全经构造注入假实现（零真实 spawn / 零文件 IO）；deferred 30s 复查
@@ -34,6 +38,7 @@ import {
   SILLYSPEC_STATUS_CHANGES_MAX,
   SILLYSPEC_STATUS_BUDGET_BYTES,
   buildSillySpecStatusSummary,
+  runProgressJsonDefault,
 } from '../src/sillyspec-manager.js';
 import type {
   SillySpecProgressOutcome,
@@ -47,12 +52,21 @@ import type { PreflightLogger } from '../src/preflight.js';
 interface HarnessOptions {
   /** `sillyspec --version` 返回（默认 '3.26.15'；null=未安装）。 */
   local?: string | null;
-  /** `npm view sillyspec version` 返回（默认 '3.27.11'；null=不可达）。 */
+  /** `npm view sillyspec version --prefer-online`（本地源）返回（默认 '3.27.11'；null=不可达）。 */
   latest?: string | null;
+  /**
+   * 官方源直查（`--registry=https://registry.npmjs.org`）返回（ql-20260907-001
+   * 仲裁用）。缺省跟随 latest（官方与本地源一致的常态）；null=官方源不可达
+   * （内网机器常态，仲裁须静默回退本地源结果）。
+   */
+  official?: string | null;
   /** 初始忙标志（isBusy 回调读它，测试中翻转模拟任务起止）。 */
   busy?: boolean;
-  /** 自定义安装行为（默认：本机版本翻到 '3.27.11' 模拟安装成功）。 */
-  install?: (logger: PreflightLogger) => Promise<void>;
+  /** 自定义安装行为（默认：本机版本翻到本地源 latest 模拟安装成功）。 */
+  install?: (
+    logger: PreflightLogger,
+    opts?: { officialRegistry?: boolean },
+  ) => Promise<void>;
 }
 
 /**
@@ -64,7 +78,13 @@ function makeHarness(opts: HarnessOptions = {}) {
     // ?? 会吞显式 null（未安装语义），须用 === undefined 判缺省。
     local: opts.local === undefined ? '3.26.15' : opts.local,
     latest: opts.latest === undefined ? '3.27.11' : opts.latest,
+    official: opts.official === undefined ? undefined : opts.official,
   };
+  if (state.official === undefined) {
+    // 缺省：官方源与本地源一致（常态）——显式传 null 才模拟官方不可达。
+    state.official =
+      opts.latest === undefined ? '3.27.11' : (opts.latest as string | null);
+  }
   const busyFlag = { busy: opts.busy ?? false };
   let clockNow = 1_700_000_000_000;
   const events: string[] = [];
@@ -73,14 +93,19 @@ function makeHarness(opts: HarnessOptions = {}) {
   };
   const runCommand = vi.fn(async (cmd: string): Promise<string | null> => {
     if (cmd === 'sillyspec --version') return state.local;
-    if (cmd === 'npm view sillyspec version') return state.latest;
+    if (cmd === 'npm view sillyspec version --prefer-online') return state.latest;
+    if (cmd.startsWith('npm view sillyspec version --registry=')) {
+      return state.official;
+    }
     return null;
   });
   const install = vi.fn(
     opts.install ??
       (async () => {
-        // 默认假安装：本机版本翻到默认 latest，供 success/版本刷新断言。
-        state.local = '3.27.11';
+        // 默认假安装：本机版本翻到本地源 latest，供 success/版本刷新断言。
+        // latest=null（view 不可达）时落 '3.27.11'——保持旧 stub 语义（安装
+        // 网络路径可达、成功装上已知版），不产生 from==to 的意外形状。
+        state.local = state.latest ?? '3.27.11';
       }),
   );
   const manager = new SillySpecManager({
@@ -101,10 +126,11 @@ function makeHarness(opts: HarnessOptions = {}) {
     advance: (ms: number) => {
       clockNow += ms;
     },
-    /** `npm view sillyspec version` 被真实执行的次数（缓存断言用）。 */
+    /** 本地源 `npm view`（--prefer-online）被真实执行的次数（缓存断言用）。 */
     npmViewCalls: () =>
-      runCommand.mock.calls.filter(([c]) => c === 'npm view sillyspec version')
-        .length,
+      runCommand.mock.calls.filter(
+        ([c]) => c === 'npm view sillyspec version --prefer-online',
+      ).length,
   };
 }
 
@@ -230,14 +256,58 @@ describe('task-04 requestUpgrade 升级执行与终态', () => {
     expect(h.events).toContain('sillyspec_upgrade_success');
   });
 
-  // ql-20260902-003：手动指令版本前置门（requestManualUpgrade）——已最新 no-op
-  // 不白跑 npm；探测失败 / 未安装不阻断（宁装勿漏）。
-  it('server_command 已最新（local == latest）→ no-op：install 不执行，无 update 状态，记 skipped_up_to_date', async () => {
+  // ql-20260902-003：手动指令版本前置门（requestManualUpgrade）——已最新不白跑
+  // npm。ql-20260904-019 推翻静默 no-op：改写 up_to_date 终态（横幅明示「已是
+  // 最新版」），10min 展示窗后回 idle；探测失败 / 未安装不阻断（宁装勿漏）。
+  it('server_command 已最新（local == latest）→ up_to_date 终态：install 不执行，快照 from/to=local', async () => {
     const h = makeHarness({ local: '3.27.12', latest: '3.27.12' });
     await h.manager.requestManualUpgrade();
     expect(h.install).not.toHaveBeenCalled();
-    expect(h.manager.getSnapshot().update).toBeUndefined();
+    expect(h.manager.getSnapshot().update).toEqual({
+      state: 'up_to_date',
+      trigger: 'server_command',
+      from_version: '3.27.12',
+      to_version: '3.27.12',
+    });
     expect(h.events).toContain('sillyspec_upgrade_skipped_up_to_date');
+  });
+
+  it('up_to_date 终态 10min 展示窗过期 → getSnapshot 回 idle（update 键缺席）', async () => {
+    const h = makeHarness({ local: '3.27.12', latest: '3.27.12' });
+    await h.manager.requestManualUpgrade();
+    expect(h.manager.getSnapshot().update?.state).toBe('up_to_date');
+
+    h.advance(10 * 60 * 1000); // 恰过窗口（≥ 判定）
+    expect(h.manager.getSnapshot().update).toBeUndefined();
+  });
+
+  it('up_to_date 展示窗内重复手动指令 → 重探后重写 up_to_date（可反复确认，无 in-flight 拦截）', async () => {
+    const h = makeHarness({ local: '3.27.12', latest: '3.27.12' });
+    await h.manager.requestManualUpgrade();
+    await h.manager.requestManualUpgrade();
+    expect(h.manager.getSnapshot().update?.state).toBe('up_to_date');
+    expect(h.install).not.toHaveBeenCalled();
+  });
+
+  it('running in-flight 期手动指令探到已最新 → 不覆盖 running（保留升级轨迹）', async () => {
+    const h = makeHarness({});
+    // 手动把状态推入 running 并卡住 install（latest/local 探测返回已最新值）。
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.install.mockImplementationOnce(() => gate);
+    const pending = h.manager.requestUpgrade('server_command');
+    expect(h.manager.getSnapshot().update?.state).toBe('running');
+
+    // install 在跑期间探到 local==latest（缓存 latest + probe local 同值）。
+    h.state.local = '3.27.11';
+    h.state.latest = '3.27.11';
+    await h.manager.requestManualUpgrade();
+    expect(h.manager.getSnapshot().update?.state).toBe('running');
+    expect(h.events).toContain('sillyspec_up_to_date_during_inflight');
+
+    release();
+    await pending;
+    expect(h.manager.getSnapshot().update?.state).toBe('success');
   });
 
   it('server_command latest 不可达（null）→ 前置门放行照旧升级（网络失败不阻断）', async () => {
@@ -480,6 +550,145 @@ describe('task-04 checkAndUpgrade 自动检查', () => {
       await h.manager.checkAndUpgrade();
       expect(h.manager.getSnapshot().update?.state).toBe('deferred');
       expect(h.install).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── ql-20260907-001：官方源仲裁版本门（镜像滞后误判「已是最新」修复）─────────
+// 背景（2026-09-07 explore 结论 + crrcdt-hubin 实测）：`npm view` 走机器配置的
+// npm 源，镜像滞后时返回旧 latest → 版本门判 !isOutdated → 写 up_to_date 终态
+// 拦死升级（清 npm 本地缓存无效——旧数据在镜像服务器上）。修复：版本门在本地源
+// 探测外直查官方源（--registry + --prefer-online）取较新者；官方较新时安装同带
+// 官方源（否则仍走镜像装回旧版）；官方不可达静默回退本地源现行为。
+
+describe('ql-20260907-001 官方源仲裁版本门', () => {
+  it('手动·镜像滞后（本地源 3.27.12 / 官方 3.28.0 / 本机 3.27.12）→ 不写 up_to_date，install 切官方源且装上官方版', async () => {
+    const h = makeHarness({
+      local: '3.27.12',
+      latest: '3.27.12',
+      official: '3.28.0',
+      install: async () => {
+        h.state.local = '3.28.0'; // 官方源安装成功
+      },
+    });
+    await h.manager.requestManualUpgrade();
+
+    expect(h.manager.getSnapshot().update).toEqual({
+      state: 'success',
+      trigger: 'server_command',
+      from_version: '3.27.12',
+      to_version: '3.28.0',
+    });
+    expect(h.install).toHaveBeenCalledTimes(1);
+    expect(h.install.mock.calls[0]?.[1]).toEqual({ officialRegistry: true });
+    // 心跳徽标以真实最新为准：latest_version 被官方值覆盖（非镜像旧值）。
+    expect(h.manager.getSnapshot().latest_version).toBe('3.28.0');
+    expect(h.events).toContain('sillyspec_latest_arbitrated');
+    expect(h.events).not.toContain('sillyspec_upgrade_skipped_up_to_date');
+  });
+
+  it('手动·两源一致且新于本机 → install 不带官方源（镜像已有新版，走本地源更快）', async () => {
+    const h = makeHarness({ local: '3.26.15', latest: '3.28.0', official: '3.28.0' });
+    await h.manager.requestManualUpgrade();
+    expect(h.install).toHaveBeenCalledTimes(1);
+    expect(h.install.mock.calls[0]?.[1]).toBeUndefined();
+    expect(h.manager.getSnapshot().update?.state).toBe('success');
+  });
+
+  it('手动·官方不可达（内网机器）→ 静默回退本地源：已最新照旧 up_to_date，install 零调用', async () => {
+    const h = makeHarness({ local: '3.27.12', latest: '3.27.12', official: null });
+    await h.manager.requestManualUpgrade();
+    expect(h.install).not.toHaveBeenCalled();
+    expect(h.manager.getSnapshot().update).toEqual({
+      state: 'up_to_date',
+      trigger: 'server_command',
+      from_version: '3.27.12',
+      to_version: '3.27.12',
+    });
+    expect(h.events).toContain('sillyspec_official_probe_failed');
+  });
+
+  it('探测命令串：本地源 view 带 --prefer-online；官方源 view 带 --registry 官方地址 + --prefer-online', async () => {
+    const h = makeHarness({});
+    await h.manager.probeLatest();
+    const cmds = h.runCommand.mock.calls.map(([c]) => c as string);
+    expect(cmds).toContain('npm view sillyspec version --prefer-online');
+    await h.manager.requestManualUpgrade();
+    const officialCmds = h.runCommand.mock.calls
+      .map(([c]) => c as string)
+      .filter((c) => c.startsWith('npm view sillyspec version --registry='));
+    expect(officialCmds).toEqual([
+      'npm view sillyspec version --registry=https://registry.npmjs.org --prefer-online',
+    ]);
+  });
+
+  it('手动强制现探：TTL 缓存命中窗口内点升级，本地源 view 仍真实重探（不信 10min 旧值）', async () => {
+    const h = makeHarness({});
+    await h.manager.probeLatest(); // 填充缓存
+    expect(h.npmViewCalls()).toBe(1);
+    await h.manager.requestManualUpgrade(); // 缓存窗口内手动触发
+    expect(h.npmViewCalls()).toBe(2); // force=true 绕过缓存重探
+  });
+
+  it('auto·镜像滞后 → checkAndUpgrade 仲裁后升级且 install 切官方源（每小时自动检查自愈）', async () => {
+    const h = makeHarness({
+      local: '3.27.12',
+      latest: '3.27.12',
+      official: '3.28.0',
+      install: async () => {
+        h.state.local = '3.28.0';
+      },
+    });
+    await h.manager.checkAndUpgrade();
+    expect(h.install).toHaveBeenCalledTimes(1);
+    expect(h.install.mock.calls[0]?.[1]).toEqual({ officialRegistry: true });
+    expect(h.manager.getSnapshot().update).toEqual({
+      state: 'success',
+      trigger: 'auto',
+      from_version: '3.27.12',
+      to_version: '3.28.0',
+    });
+  });
+
+  it('auto·缓存联动：10min 内连续两次检查，本地源 view 只探一次（官方源直查每次执行不缓存）', async () => {
+    const h = makeHarness({ local: '3.27.11', latest: '3.27.11' });
+    await h.manager.checkAndUpgrade(); // 已最新 no-op
+    await h.manager.checkAndUpgrade();
+    expect(h.npmViewCalls()).toBe(1);
+    const officialCalls = h.runCommand.mock.calls
+      .map(([c]) => c as string)
+      .filter((c) => c.startsWith('npm view sillyspec version --registry='));
+    expect(officialCalls).toHaveLength(2); // 仲裁直查不走 10min 缓存
+  });
+
+  it('deferred 保留官方源安装 flag：忙时手动升级（镜像滞后）→ 转空闲复查后 install 仍切官方源', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness({
+        local: '3.27.12',
+        latest: '3.27.12',
+        official: '3.28.0',
+        busy: true,
+        install: async () => {
+          h.state.local = '3.28.0';
+        },
+      });
+      await h.manager.requestManualUpgrade();
+      expect(h.manager.getSnapshot().update?.state).toBe('deferred');
+      expect(h.install).not.toHaveBeenCalled();
+
+      h.busy.busy = false;
+      await vi.advanceTimersByTimeAsync(SILLYSPEC_DEFERRED_RECHECK_MS);
+      expect(h.install).toHaveBeenCalledTimes(1);
+      expect(h.install.mock.calls[0]?.[1]).toEqual({ officialRegistry: true });
+      expect(h.manager.getSnapshot().update).toEqual({
+        state: 'success',
+        trigger: 'server_command',
+        from_version: '3.27.12',
+        to_version: '3.28.0',
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -807,5 +1016,49 @@ describe('task-04(2026-09-02) buildSillySpecStatusSummary 截断与 32KB 降级�
     });
     expect(buildSillySpecStatusSummary('not-json-object').changes).toEqual([]);
     expect(buildSillySpecStatusSummary({ data: 'oops' }).conflict_types).toEqual({});
+  });
+});
+
+// ql-20260907-007：runProgressJsonDefault 默认执行器 env 注入（spec-sync 熔断预算
+// 缺省放宽 20s）。与上方 harness 的零真实 spawn 策略不同——本块直测真实 execFile
+// 「env 传递」这一行为本身，必须真实 spawn（process.execPath -e 打印环境变量，
+// 跨平台无 shell 依赖）。
+describe('runProgressJsonDefault env (ql-20260907-007: spec-sync 熔断缺省)', () => {
+  const PRINT_ENV_ARGS = [
+    '-e',
+    `process.stdout.write(process.env.SILLYSPEC_SYNC_TIMEOUT_MS ?? '<unset>')`,
+  ];
+  const OPTS = { cwd: process.cwd(), timeoutMs: 15_000, maxBufferBytes: 1024 };
+  let backup: string | undefined;
+
+  beforeEach(() => {
+    backup = process.env.SILLYSPEC_SYNC_TIMEOUT_MS;
+    delete process.env.SILLYSPEC_SYNC_TIMEOUT_MS;
+  });
+
+  afterEach(() => {
+    if (backup === undefined) delete process.env.SILLYSPEC_SYNC_TIMEOUT_MS;
+    else process.env.SILLYSPEC_SYNC_TIMEOUT_MS = backup;
+  });
+
+  it('缺省注入：process.env 未预设时子进程读到 20000', async () => {
+    const outcome = await runProgressJsonDefault(
+      process.execPath,
+      PRINT_ENV_ARGS,
+      OPTS,
+    );
+    expect(outcome.code).toBe(0);
+    expect(outcome.stdout).toBe('20000');
+  });
+
+  it('process.env 预设优先：显式配置（含调回 8000）不被缺省值覆盖', async () => {
+    process.env.SILLYSPEC_SYNC_TIMEOUT_MS = '8000';
+    const outcome = await runProgressJsonDefault(
+      process.execPath,
+      PRINT_ENV_ARGS,
+      OPTS,
+    );
+    expect(outcome.code).toBe(0);
+    expect(outcome.stdout).toBe('8000');
   });
 });

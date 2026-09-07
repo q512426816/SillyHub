@@ -18,18 +18,18 @@ generator: sillyspec-scan
 
 - **语言/运行时**：Python ≥ 3.12（`requires-python = ">=3.12"`），hatchling 构建，wheel 只打包 `app`。
 - **Web 框架**：FastAPI ≥ 0.115，ASGI 服务器 uvicorn[standard] ≥ 0.30。
-  - 应用工厂 `create_app()`（`app/main.py`），`lifespan` 启动钩子（详见「请求流」）。
+  - 应用工厂 `create_app()`（`backend/app/main.py`），`lifespan` 启动钩子（详见「请求流」）。
   - 文档：`/api/docs`（Swagger）、`/api/redoc`、`/api/openapi.json`。
-  - 中间件：CORS、`x-request-id` 透传、`monitoring_middleware`（慢请求 >1s 打 `slow.request`）、统一异常处理（`core/errors.py`）。
+  - 中间件：CORS、`x-request-id` 透传、`monitoring_middleware`（慢请求 >1s 打 `slow.request`）、统一异常处理（`backend/app/core/errors.py`）。
 - **数据建模/校验**：Pydantic ≥ 2.8 + pydantic-settings ≥ 2.4；SQLModel ≥ 0.0.22。
 - **ORM/数据库**：SQLAlchemy[asyncio] ≥ 2.0，异步驱动 asyncpg ≥ 0.29（PostgreSQL）；测试用 aiosqlite ≥ 0.20。
-  - 引擎与会话工厂：`core/db.py`（`get_engine`/`get_session_factory`/`get_session`）。连接池 `pool_size=20 / max_overflow=30 / pool_timeout=30s / recycle=300s`；asyncpg 会话级超时：`statement_timeout=30s`、`idle_in_transaction_session_timeout=120s`（ql-20260728-008 由 10s 放宽，防误杀事务内 await 慢外部调用的合法长事务）、`lock_timeout=5s`。
-- **缓存/消息**：Redis ≥ 5.0（`core/redis.py`：API key 正负缓存、RBAC 权限缓存、SSE pub/sub、daemon 心跳）。
-- **对象存储**：aiobotocore ≥ 3.8,<4（S3 兼容，默认 MinIO；`modules/storage/factory.py` + `minio_backend.py`）。
+  - 引擎与会话工厂：`backend/app/core/db.py`（`get_engine`/`get_session_factory`/`get_session`）。连接池 `pool_size=20 / max_overflow=30 / pool_timeout=30s / recycle=300s`；asyncpg 会话级超时：`statement_timeout=30s`、`idle_in_transaction_session_timeout=120s`（ql-20260728-008 由 10s 放宽，防误杀事务内 await 慢外部调用的合法长事务）、`lock_timeout=5s`。
+- **缓存/消息**：Redis ≥ 5.0（`backend/app/core/redis.py`：API key 正负缓存、RBAC 权限缓存、SSE pub/sub、daemon 心跳）。
+- **对象存储**：aiobotocore ≥ 3.8,<4（S3 兼容，默认 MinIO；`backend/app/modules/storage/factory.py` + `backend/app/modules/storage/minio_backend.py`）。
 - **对外 MCP 服务**：官方 `mcp>=1.29,<2`（v1 线；v2.0.0 移除 FastMCP 属 breaking，pyproject 注释锁定依据）。FastMCP streamable HTTP 子 app 以 ASGI mount 挂在 `/mcp`。
 - **迁移**：Alembic ≥ 1.13，`backend/migrations/versions/` 共 **144 个** version 文件（含 10 个 merge revision 合并并行 head）。
-- **认证/加密**：python-jose[cryptography] ≥ 3.3（JWT）、passlib[bcrypt] ≥ 1.7（口令）、pynacl ≥ 1.5（`core/crypto.py`，git 凭证箱）。
-- **可观测性**：structlog ≥ 24.4（`core/logging.py` JSON 日志）；`core/monitoring.py`（慢请求中间件 + slow.query >500ms SQL 事件监听 + 事件循环堵塞看门狗 100ms 自检 + pg_stat_activity 采样）；`core/telemetry.py` 当前为 **stub**（`otel_endpoint` 配置存在但仅打日志，未引入 OpenTelemetry 依赖）。
+- **认证/加密**：python-jose[cryptography] ≥ 3.3（JWT）、passlib[bcrypt] ≥ 1.7（口令）、pynacl ≥ 1.5（`backend/app/core/crypto.py`，git 凭证箱）。
+- **可观测性**：structlog ≥ 24.4（`backend/app/core/logging.py` JSON 日志）；`backend/app/core/monitoring.py`（慢请求中间件 + slow.query >500ms SQL 事件监听 + 事件循环堵塞看门狗 100ms 自检 + pg_stat_activity 采样）；`backend/app/core/telemetry.py` 当前为 **stub**（`otel_endpoint` 配置存在但仅打日志，未引入 OpenTelemetry 依赖）。
 - **HTTP 客户端**：httpx ≥ 0.27（LLM provider 转发、daemon 通信）。
 - **工具库**：python-frontmatter（变更/文档解析）、openpyxl + Pillow（PPM Excel 导入/导出与图像）、python-multipart（文件上传）、psutil。
 - **代码质量**：ruff（line-length 100，py312；中文串/裸 except 等按 ignore 豁免）、mypy（py312 非 strict，禁中文 `# type:ignore`）、pytest + pytest-asyncio + pytest-xdist（`addopts="-o dist=loadscope"` 按模块分组到 worker，消除跨模块状态污染 flaky）+ pytest-rerunfailures（CI 兜底）。testpaths 同时覆盖 `tests/` 与 `app/`（模块内单测）。
@@ -38,7 +38,7 @@ generator: sillyspec-scan
 
 ### 分层
 
-来源：`backend/app/` 目录结构、`app/main.py`。
+来源：`backend/app/` 目录结构、`backend/app/main.py`。
 
 ```
 backend/app/
@@ -63,7 +63,7 @@ backend/app/
 
 请求路径分层：路由层（`router.py`）→ 权限依赖（`require_permission_any` 等，走 `permission_cache` Redis 缓存）→ 服务层（`service.py`）→ 查询层（`queries.py`/repo）→ SQLModel 表模型（`model.py`）→ DB。
 
-### 业务模块（`app/modules/`，共 29 个一级模块 + ppm 6 子域 + agent/profile 子包）
+### 业务模块（`backend/app/modules/`，共 29 个一级模块 + ppm 6 子域 + agent/profile 子包）
 
 | 模块 | 职责 |
 |---|---|
@@ -101,18 +101,18 @@ backend/app/
 
 ### 鉴权四轨
 
-来源：`core/auth_deps.py`、`core/security.py`、`platform_sync/auth.py`、`platform_sync/token_service.py`、`mcp_gateway/auth.py`。
+来源：`backend/app/core/auth_deps.py`、`backend/app/core/security.py`、`backend/app/modules/platform_sync/auth.py`、`backend/app/modules/platform_sync/token_service.py`、`backend/app/modules/mcp_gateway/auth.py`。
 
 | 通道 | 形态 | 依据 |
 |---|---|---|
-| JWT | `Authorization: Bearer <access_token>`（`?token=` query 回退已删除，防进访问日志） | `core/security.py` 签发/校验 + `core/auth_deps.py` |
-| API Key | `X-API-Key: <shk_live_...>`（header-only） | `core/auth_deps.py` → `auth/api_key_service.py` |
-| 平台同步 token | `Authorization: Bearer <shpsync_...>`，workspace 级；platform_sync 端点 Bearer 三路分流（`shpsync_`/`shk_live_`/JWT）；**写通道仅 shpsync_ 放行**，其余 403 PermissionDenied | `platform_sync/token_service.py`（sha256 直存 + hash O(1) 查表 + GitHub secret scanning 前缀规则）+ `platform_sync/auth.py` |
-| McpToken | `/mcp` 子 app 的 `McpAuthMiddleware` 只认 `Authorization: Bearer <McpToken>`，与 `/api` 通道物理隔离（CC-06）；scope 校验 `require_mcp_scope` | `mcp_gateway/auth.py` + `mcp_gateway/service.py`（正/负缓存） |
+| JWT | `Authorization: Bearer <access_token>`（`?token=` query 回退已删除，防进访问日志） | `backend/app/core/security.py` 签发/校验 + `backend/app/core/auth_deps.py` |
+| API Key | `X-API-Key: <shk_live_...>`（header-only） | `backend/app/core/auth_deps.py` → `backend/app/modules/auth/api_key_service.py` |
+| 平台同步 token | `Authorization: Bearer <shpsync_...>`，workspace 级；platform_sync 端点 Bearer 三路分流（`shpsync_`/`shk_live_`/JWT）；**写通道仅 shpsync_ 放行**，其余 403 PermissionDenied | `backend/app/modules/platform_sync/token_service.py`（sha256 直存 + hash O(1) 查表 + GitHub secret scanning 前缀规则）+ `backend/app/modules/platform_sync/auth.py` |
+| McpToken | `/mcp` 子 app 的 `McpAuthMiddleware` 只认 `Authorization: Bearer <McpToken>`，与 `/api` 通道物理隔离（CC-06）；scope 校验 `require_mcp_scope` | `backend/app/modules/mcp_gateway/auth.py` + `backend/app/modules/mcp_gateway/service.py`（正/负缓存） |
 
 ### 请求流
 
-来源：`main.py` lifespan（L81-190）。
+来源：`backend/app/main.py` lifespan（L81-190）。
 
 1. ASGI 入口 → CORS → `x-request-id` → monitoring（slow.request）→ 异常处理器。
 2. `get_session` 依赖：从连接池取 `AsyncSession`，审计上下文（actor/workspace）注入 `session.info`。
@@ -121,12 +121,12 @@ backend/app/
 
 ### 关键机制
 
-- **进度投影**：`change/projection.py` 读时投影——以 `changes.current_stage` 落库值为基，结合 stages 完成态推导展示阶段（brainstorm→PLAN_REVIEW / verify→HUMAN_TEST 等）；平台侧 `platform_change_progress` 表（CLI 镜像）由 platform_sync `POST /changes/{name}/progress` 写入，读端点取 latest_progress 覆盖 CLI 镜像。落库值与投影值可能短暂不一致（双轨设计）。
-- **SSE 通道**（`text/event-stream` + StreamingResponse，EventSource 帧格式）：`main.py` Quick Chat 流式（`stream_quick_chat`，参数化路由前注册保匹配优先）；`agent/router.py`；`daemon/router.py` session SSE；`mcp_gateway/sse.py` mission worker_status 帧；`spec_workspace/router.py` 仓库导入流式读（不再返回 JSON）。
+- **进度投影**：`backend/app/modules/change/projection.py` 读时投影——以 `changes.current_stage` 落库值为基，结合 stages 完成态推导展示阶段（brainstorm→PLAN_REVIEW / verify→HUMAN_TEST 等）；平台侧 `platform_change_progress` 表（CLI 镜像）由 platform_sync `POST /changes/{name}/progress` 写入，读端点取 latest_progress 覆盖 CLI 镜像。落库值与投影值可能短暂不一致（双轨设计）。
+- **SSE 通道**（`text/event-stream` + StreamingResponse，EventSource 帧格式）：`backend/app/main.py` Quick Chat 流式（`stream_quick_chat`，参数化路由前注册保匹配优先）；`backend/app/modules/agent/router.py`；`backend/app/modules/daemon/router.py` session SSE；`backend/app/modules/mcp_gateway/sse.py` mission worker_status 帧；`backend/app/modules/spec_workspace/router.py` 仓库导入流式读（不再返回 JSON）。
 - **spec 文件增量同步**：`platform_sync` `GET /changes/-/spec-manifest`（服务器权威清单）+ `POST /changes/-/spec-sync`（增量 diff 推送），落库 `spec_file_manifest`；替代旧 tar 全量覆盖。
-- **审计钩子**：`core/audit_hooks.py` `register_audit_hooks(engine)` 在 lifespan 挂载（2026-08-14 audit-system-completion），自动捕获表级 insert/update/delete 产生 `audit_logs` 行；actor/workspace 从 `session.info` 取。
-- **SSRF 防护**：`core/ssrf.py` `assert_public_url`（scheme 白名单 + host 解析公网校验，IPv4+IPv6+`asyncio.to_thread` 防 DNS 阻塞）、`assert_safe_repo_url`；`ToolPolicyService.assert_public_hostname` 为底层原语。
-- **错误文案中文化**：用户面报错 250+ 处中文化，`tests/core/test_error_message_l10n.py` 守护测试防回退。
+- **审计钩子**：`backend/app/core/audit_hooks.py` `register_audit_hooks(engine)` 在 lifespan 挂载（2026-08-14 audit-system-completion），自动捕获表级 insert/update/delete 产生 `audit_logs` 行；actor/workspace 从 `session.info` 取。
+- **SSRF 防护**：`backend/app/core/ssrf.py` `assert_public_url`（scheme 白名单 + host 解析公网校验，IPv4+IPv6+`asyncio.to_thread` 防 DNS 阻塞）、`assert_safe_repo_url`；`ToolPolicyService.assert_public_hostname` 为底层原语。
+- **错误文案中文化**：用户面报错 250+ 处中文化，`backend/tests/core/test_error_message_l10n.py` 守护测试防回退。
 - **性能整改落点**（perf-remediation）：reparse `to_thread` 化、批量回写、IN 预取、`load_only` 列裁剪、`scandir` 单遍目录扫描、daemon 门控等。
 
 ### 路由前缀约定

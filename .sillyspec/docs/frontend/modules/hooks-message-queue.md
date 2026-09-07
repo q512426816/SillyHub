@@ -10,7 +10,7 @@ created_at: 2026-08-22T02:45:00
 
 ## 定位
 
-`src/hooks/` 目录首个模块（2026-08-21-session-message-queue 新建目录）：会话消息排队
+`frontend/src/hooks/` 目录首个模块（2026-08-21-session-message-queue 新建目录）：会话消息排队
 状态机 `useMessageQueue`（2026-08-25-011 起为**服务端排队**版：入队=POST inject 忙轮落
 `agent_session_queued_messages`，展示=GET /queue，前端不再持有投递状态机），纯 React hook
 无 react-query 依赖（dialog 模式无 QueryClientProvider），被 components-daemon 的

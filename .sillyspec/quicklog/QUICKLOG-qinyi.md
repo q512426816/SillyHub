@@ -349,3 +349,142 @@
 状态：进行中
 关联变更：（无）
 文件：sillyhub-daemon/src/autostart/macos.ts
+
+## ql-20260907-001-e373 | 2026-09-07 08:59:09 | 任务执行面板轮次历史懒加载导致摘要轮次计数恒 0/列表空到点开页签才拉
+状态：已完成
+关联变更：2026-09-04-session-task-execution-panel
+文件：frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx, frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx, frontend/src/components/daemon/task-execution-panel.tsx
+需求：任务执行面板轮次历史懒加载导致摘要轮次计数恒 0/列表空到点开页签才拉，影响体验，用户要求恢复挂载即取数。
+根因：task-10 回归修正时为避开看门狗测试的 listSessionRuns 绝对计数断言加了 runsViewedRef 惰性闸门——测试口径问题不该由产品行为买单。
+方案：面板移除闸门恢复 mount/sessionId 即取数（refreshSignal 重拉保留）；connection 测试 5 处绝对计数改挂载后快照增量口径（终态/卸载两处改快照不变断言）；面板测试 4 处还原。
+结果：tsc 0 错；面板 12/12+connection 13/13+hook/variant/lifecycle 33/33 全绿；lint 无新增；3 文件已暂存待提交。部署：待提交后重新打包前端镜像更新阿里云
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/brainstorm-numbered-heading-postcheck-parse-gap.md
+
+## ql-20260907-002-b595 | 2026-09-07 09:34:56 | 修复 pi driver pendingTurnError 轮内粘滞：pi 自动重试恢复后 turn 仍误报失败
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（handleLine 新增轮内恢复清值（turn_end 非 error 原始帧 + text override 全文事件））
+- sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（新增 3 用例覆盖恢复/单独恢复信号/防过清）
+- .sillyspec/docs/sillyhub-daemon/modules/interactive.md（MANUAL_NOTES 补 ql-20260907-002 条目）
+需求：修复 pi driver pendingTurnError 轮内粘滞：pi 自动重试恢复后 turn 仍误报失败
+根因：pendingTurnError 是 consume 内会话级闭包变量，轮内只在下一轮 inject 前清一次（pi-rpc-driver.ts:896）；pi 对 API 失败自动重试，前 2 次 attempt 超时的 ame.error 已写值，第 3 次成功出完整答案后旧值粘滞，agent_settled 后 :928 一票否决把成功轮翻成 error_during_execution（会话 33f958d2 实机）
+方案：handleLine 两个轮内恢复信号到达即置 null：① 归一化事件 text+override 全文（message_end assistant 完整产出终态）；② 原始帧 turn_end 且 stopReason 非 error（清在归一化前，真实失败轮 stopReason=error 仍由归一化器产 error 事件重新写入，防过清）。codex driver 不动：双清+成败权威在 turn_status，success 路径本就忽略 stale 值
+结果：vitest tests/interactive/pi-rpc-driver.test.ts 48/48 通过（含 3 新用例：33f958d2 复现恢复→success+usage、turn_end stop 单独恢复信号、恢复后真失败仍 error 防过清）；pnpm typecheck 零错误
+
+## ql-20260907-003-271d | 2026-09-07 09:42:46 | daemon inject 早到等待在会话 create 在途时延长：lease 状态机仍在跑就不按固定 60s 丢弃
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（常量区新增 extend 上限 + _awaitSessionThenRoute 在途 lease 逐拍续推 deadline（硬顶 waitMs+extendMax））
+- sillyhub-daemon/tests/daemon-inject-drop-report.test.ts（新增用例 I/J（在途延长接住晚到会话 / 在途硬顶防无限等待））
+- .sillyspec/docs/sillyhub-daemon/modules/daemon.md（MANUAL_NOTES 补 ql-20260907-003 条目）
+需求：daemon inject 早到等待在会话 create 在途时延长：lease 状态机仍在跑就不按固定 60s 丢弃
+根因：backend 等 session ready 仅 8s 即 fallback 发 inject，daemon _awaitSessionThenRoute 固定 60s 窗口轮询等 create 写 store，Windows 冷启动 create 全链偶发超 60s（实测 ~31s，会话 1a9c601c 实机超窗）→ 超时被当会话不存在丢弃 + 报 run failed，重发即恢复（瞬时竞态非真死）。WS 短暂离线丢指令已由控制指令三段式落库+补拉覆盖，无需后端缓存重投
+方案：_awaitSessionThenRoute 轮询时读 inject payload 的 lease_id：仍在 _inflightLeases（_executeTask try/finally 全程维护，claim→create 全链在途证据）期间逐拍续推 deadline 至 now+waitMs，硬顶 waitMs+extendMaxMs（新常量 DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS=240s，env SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS 可调，总硬顶 5min）；lease 离开在途（create 完成/失败）即停推，余量到期回落原 005 丢弃上报；lease 不在途的真不存在会话零回归
+结果：vitest tests/daemon-inject-drop-report.test.ts 10/10 通过（新增 I 在途延长接住 600ms 晚到会话 / J 在途硬顶 450ms 到顶即丢弃两用例，既有 A-H 零回归）；pnpm typecheck 零错误
+
+## ql-20260907-004-dea5 | 2026-09-07 09:52:32 | Windows 弹黑框修复——三处 agent spawn 补 windowsHide
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/task-runner.ts（批量任务 agent spawn 补 windowsHide）
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（pi 会话 spawn 补 windowsHide）
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（codex 会话 spawn 补 windowsHide）
+- sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（新增 windowsHide 断言用例）
+- sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts（新增 windowsHide 断言用例）
+- sillyhub-daemon/tests/task-runner.test.ts（主流程用例补 windowsHide 断言）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引条目）
+需求：Windows 弹黑框修复——三处 agent spawn 补 windowsHide
+根因：daemon 无自有控制台（IDE 直跑/VBS 隐藏自启）时，Windows 为控制台子进程新开可见命令窗口挂整个会话，pi 会话实测弹窗
+方案：task-runner.ts / interactive/pi-rpc-driver.ts / interactive/codex-app-server-driver.ts 三处 spawn options 补 windowsHide: true（CREATE_NO_WINDOW，stdio 管道不受影响，非 Windows 无操作），对齐仓内其余 spawn 点既有约定；三测试文件补对应断言
+结果：vitest 定向 3 文件 154 passed（pi/codex 各 +1 用例、task-runner 主流程补断言），tsc 0；模块文档变更索引已同步 ql-20260907-004-dea5
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts, sillyhub-daemon/tests/task-runner.test.ts
+
+## ql-20260907-005-5858 | 2026-09-07 09:59:33 | daemon 会话创建链加分步计时埋点：慢启动会话可直接从日志归因耗时段
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（_startInteractiveSession 五段计时（borrow_sandbox/skills/spec_pull/mcp_prefetch/create）+ started/failed 汇总 timings/total_ms）
+- sillyhub-daemon/tests/daemon-kind-dispatch.test.ts（新增计时埋点断言用例（console.info spy））
+- .sillyspec/docs/sillyhub-daemon/modules/daemon.md（MANUAL_NOTES 补 ql-20260907-005 条目）
+需求：daemon 会话创建链加分步计时埋点：慢启动会话可直接从日志归因耗时段
+根因：ql-20260907-003 只解决了等待侧兜底（在途 lease 延长），但实机 >60s 慢启动案（1a9c601c）无分步数据无法归因是 skills 拷贝 / spec pull / MCP 预取 / spawn 哪段慢——已知 spec 大头已由 ql-20260904-016 修掉，剩余嫌疑需数据说话
+方案：_startInteractiveSession 头部建 timings 收集器，五段各记 interactive_create_step（step+elapsed_ms，后置步骤挂死时已完成的分步可定位停点），started/failed 日志汇总 timings+total_ms；纯日志零行为变更
+结果：vitest daemon-kind-dispatch 20/20 通过（新增计时断言用例），daemon-inject-drop-report 10/10 回归通过；pnpm typecheck 零错误
+
+## ql-20260907-006-2972 | 2026-09-07 10:11:46 | create 前置链提速：skills/spec/MCP 三步并行化 + skills 拷贝版本跳过
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（skills/spec/MCP 三步 Promise.all 并行化（闭包防御 catch））
+- sillyhub-daemon/src/skill-manager.ts（linkSkillsToWorkdir 版本缓存跳过 + resetLinkedWorkdirVersionsForTest）
+- sillyhub-daemon/tests/skill-manager.test.ts（新增 3 用例（跳过/刷新/存在性守卫/无 manifest））
+- sillyhub-daemon/tests/daemon-kind-dispatch.test.ts（无改动（005 计时用例回归覆盖并行链路））
+- .sillyspec/docs/sillyhub-daemon/modules/daemon.md（MANUAL_NOTES 补 ql-20260907-006 条目）
+- .sillyspec/docs/sillyhub-daemon/modules/skill-manager.md（MANUAL_NOTES 补 ql-20260907-006 条目）
+需求：create 前置链提速：skills/spec/MCP 三步并行化 + skills 拷贝版本跳过
+根因：三步互相无数据依赖却串行执行（总耗时=三者之和，Windows 慢启动主因之一）；skills 每会话全量 rm+重拷而内容只在启动 syncSkills 变化（逐文件 IO+杀软扫描 ~8ms/文件）
+方案：① daemon.ts 三步改 Promise.all（各步闭包外层防御 catch、specSyncCtx/MCP 写入由收口保证先于 create、005 分步计时保留，并行后各段之和可大于 total_ms 属预期）；② skill-manager linkSkillsToWorkdir 加 (workdir→version) 缓存：版本不变+目标目录在+上轮无失败→跳过（link_skills_version_fresh_skip），存在性守卫兜 worktree 重建，部分失败不记缓存下轮全量自愈，无 manifest 不启用；MCP 工作区缓存不做（不在临界路径+失效语义需设计）
+结果：vitest 7 套 86/86 通过（skill-manager 28 含 3 新用例：同版本跳过/版本变更刷新/worktree 重建重拷+无 manifest 不启用；kind-dispatch 20、inject-drop 10、interactive-codex/borrow-sandbox/notify-ready/worker-resume 28 全回归），pnpm typecheck 零错误
+
+## ql-20260907-007-67df | 2026-09-07 11:00:38 | daemon 执行环境 sillyspec 命令注入 SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（spec-sync 8s 熔断缓解）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spawn-env.ts（新增 SILLYSPEC_SYNC_TIMEOUT_MS 常量对 + buildSpawnEnv 填补缺省注入（层 1 后层 0 前））
+- sillyhub-daemon/src/sillyspec-manager.ts（runProgressJsonDefault execFile 传 env（缺省垫底+process.env 覆盖），导出供直测）
+- sillyhub-daemon/tests/spawn-env.test.ts（新增 4 用例（缺省/预设优先×2/空串填补））
+- sillyhub-daemon/tests/sillyspec-manager.test.ts（新增 2 用例（真实 spawn node -e 断言子进程 env））
+- .sillyspec/docs/sillyhub-daemon/modules/spawn-env.md（契约/关键逻辑/注意事项同步）
+- .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md（注意事项补 runner env 语义）
+- .sillyspec/docs/sillyhub-daemon/modules/spawn-env.changelog.md（新建 sidecar 建档）
+- .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.changelog.md（新建 sidecar 建档）
+需求：daemon 执行环境 sillyspec 命令注入 SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（spec-sync 8s 熔断缓解）
+根因：sillyspec CLI 每步 --done 后自动同步走 8s 总预算熔断，平台 manifest 端点忙时偶发 >8s 触发 abort warn（数据不丢但噪音吓人）；CLI 3.28.1 新增 SILLYSPEC_SYNC_TIMEOUT_MS env 开关（sillyspec 仓 commit 6f17a56），平台侧行动项 1 要求执行环境注入放宽（docs/sillyspec/2026-09-07-spec-sync-abort-classification.md）
+方案：spawn-env.ts 新增 SILLYSPEC_SYNC_TIMEOUT_MS_FIELD/DEFAULT_MS('20000') 常量并在 buildSpawnEnv 的 tool_config 层后填补缺省（process.env/tool_config 预设保留、空串视同未配置），覆盖 batch/interactive/restore/reload 全部 agent 子进程；sillyspec-manager.ts runProgressJsonDefault execFile 显式传 env（缺省垫底+process.env 覆盖）并导出，覆盖 daemon 自身 runResolve/ghostCleanup 命令；模块文档 spawn-env/sillyspec-manager 同步 + changelog sidecar 建档
+结果：vitest 目标两文件 80 passed（spawn-env 38 + sillyspec-manager 42，含新增 6 用例：缺省注入/process.env 预设/tool_config 预设/空串填补/runner 缺省/runner 预设优先），pnpm typecheck 0 错；行动项 2（端点耗时观测）核对结论为无需改动——backend 监控三件套 2026-07-27 已上线（slow.request>1s/slow.query>500ms/>=10s pg_stat_activity 采样），注入 20s 后熔断事件蕴含服务端 >=20s，观测链完整覆盖
+
+## ql-20260907-008-48b9 | 2026-09-07 12:45:13 | 修复 CI 四类失败：迁移链断链+heartbeat 签名+bundle 五键+前端 mock 债
+状态：已完成
+关联变更：（无）
+文件：
+- backend/migrations/versions/20260904223000_add_sillyspec_command_result.py（补提交断链迁移节点（d4fdcc7ac 漏提交））
+- backend/app/modules/daemon/runtime/service.py（heartbeat/register 补 sillyspec_command_result 落库语义）
+- backend/app/modules/platform_sync/tests/test_spec_bundle.py（四键断言改五键（manifest_versions ql-20260905-001 债））
+- frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx（补接线+listSessionRuns 默认 resolve）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（补接线+listSessionRuns 默认 resolve）
+- frontend/src/components/daemon/__tests__/session-panel-ctx-tokens.test.tsx（单 resolver 改收集全部 pending+补 listSessionTasks 接线）
+- frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx（补 listSessionRuns 接线+默认（防 spyOn fetch 计数污染））
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（补 listSessionTasks 导出+beforeEach 默认）
+需求：修复 CI 四类失败：迁移链断链+heartbeat 签名+bundle 五键+前端 mock 债
+根因：d4fdcc7ac 夹带 conflict-resolve-entry 的 router/DTO/模型但漏提交 service 实现与 20260904223000 迁移文件，迁移链断链+心跳 TypeError；ql-20260905-001 bundle 加第五键 manifest_versions 未同步测试；4eb9f0626 移除任务面板惰性闸门后 5 个测试文件 mock 债（缺导出/裸 vi.fn()/单 resolver）
+方案：补提交迁移文件；heartbeat_daemon/register_daemon 补 sillyspec_command_result 参数（None=清除、非 None 整包直写、register 恒清）；bundle 测试四键改五键+manifest_versions 类型断言；前端 5 文件补 listSessionTasks 接线/导出+listSessionRuns 默认 resolve+ctx-tokens 收集全部 pending resolver
+结果：backend 心跳 50 passed+迁移链 16 passed+bundle 12 passed，ruff/format/mypy 0 错；前端 5 文件 125 passed、tsc 0、eslint 0 error；经 worktree 推送 origin/main 修 CI
+
+## ql-20260907-009-26f4 | 2026-09-07 13:22:25 | daemon bundle 构建并上架阿里云自更新分发（含 SILLYSPEC_SYNC_TIMEOUT_MS 注入）+ 交接文档补记
+状态：已完成
+关联变更：（无）
+文件：
+- docs/sillyspec/2026-09-07-spec-sync-abort-classification.md（§3 补平台落地记录（commit/build/生效前提）；§4.1 改判已核对无需开发 + 监控三件套补记）
+需求：daemon bundle 构建并上架阿里云自更新分发（含 SILLYSPEC_SYNC_TIMEOUT_MS 注入）+ 交接文档补记
+根因：env 注入只在 daemon 源码里，须随 backend 镜像 /app/daemon-dist 分发上架后存量 daemon 自更新才能拉到；主树有并发 WIP 不能直接打包，且 e0af8e3a0 单独不可编译需取补齐后的 main HEAD
+方案：detached worktree @9a9bd8811（e0af8e3a0 为祖先）干净构建 bundle（BUILD_ID 9a9bd881-20260907132501，注入 5 处验证）→ PROD_API_URL=https://crrcdt.ppdmq.top build-and-save 打镜像（镜像内再验注入+BUILD_ID）→ scp 阿里云双层 deploy 目录 → 旧镜像 tag backup-20260907-1331 后 load + compose up → 服务器 tar 清理与 worktree 删除；交接文档 §3 补落地记录与生效前提（sillyspec 发版 ≥3.28.1）、§4.1 改判已核对无需开发并补记监控三件套（3a181291a）早已存在
+结果：部署验证全绿：5 容器 healthy、health ok、latest.json 公网==后端直连==9a9bd881-20260907132501、线上 bundle 含 SILLYSPEC_SYNC_TIMEOUT_MS 5 处、无迁移报错；本机 daemon 现版本 d4fdcc7a-20260907045827 待自更新拉新；仓库改动仅 docs/sillyspec/2026-09-07-spec-sync-abort-classification.md（无代码变更，测试不适用）
+
+## ql-20260907-010-38f5 | 2026-09-07 14:10:37 | spec 拉取工作区级化：心跳驱动后台预取 + single-flight
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/router.py（心跳 DTO spec_cache/spec_versions + IN 批查）
+- backend/app/modules/daemon/tests/test_heartbeat_spec_cache.py（新建 3 用例（对答/兼容/归属））
+- sillyhub-daemon/src/daemon.ts（single-flight+预取+记账三 Map+specStep 接线+_running 门控）
+- sillyhub-daemon/src/hub-client.ts（heartbeat 第 8 参 specCache + HeartbeatBody.spec_cache）
+- sillyhub-daemon/src/protocol.ts（HeartbeatResponse.spec_versions）
+- sillyhub-daemon/src/api-types.ts + frontend/src/lib/api-types.ts + backend/openapi.json（gen:types 重生成）
+- sillyhub-daemon/tests/daemon-spec-prefetch.test.ts（新建 5 用例）
+- .sillyspec/docs/{sillyhub-daemon,backend}/modules/daemon.md（MANUAL_NOTES 补 ql-20260907-010）
+需求：spec 拉取工作区级化：心跳驱动后台预取 + single-flight，消除每会话全量下载等待
+根因：spec pull 挂在会话创建关键路径：同工作区版本每被 agent 会话推进一次，下个会话就现场全量下载（实机 47MB 树压缩 15.9MB / ~0.4MB/s 公网 = 40s+，2057cde1/834486c1 的 spec_pull_ms 44408/42548），并发会话还各拉一份抢同一链路；缓存本是工作区×机器共享但版本恒流动使跳过路径从未触发（日志 0 次）
+方案：①daemon _pullSpecShared single-flight：同工作区并发创建/预取共享一次拉取；②心跳协议对答：请求 spec_cache（本机 specs 清单+版本）→ 响应 spec_versions（backend IN 批查权威版本）→ 本地落后且无活跃会话 → 后台预取+bump 版本对齐，创建时只消费缓存或等在途；③活跃会话门控+pull 上下文记账（防后台覆盖 agent 在途工作 / repo-native junction 降级）；④_.running 门控（未启动不上报，心跳位置参数旧形态零回归）；后端 additive 纯读，旧 daemon 零影响
+结果：backend 新 3 用例+回归 49 过、openapi 重导、两端 gen:types（frontend node_modules 先 --force 修复）；daemon 新 5 用例（并发一次下载/预取触发+版本对齐 9/活跃门控/版本不落后/旧 backend 兼容）+回归 6 套 97 + spec-sync 37 全过、tsc 0；部署验证待发版（预取生效需 backend+daemon 同升）

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -283,6 +284,18 @@ class WorkerListItem(BaseModel):
     status: str
     objective: str | None = None
     total_cost_usd: float | None = None
+    # 2026-09-07-agent-liveness-states task-12（design §5.6 / FR-06）：running 期间
+    # 附 liveness（backend 直查 platform_agent_logs 最新推导行——spike-01 定稿
+    # 直查即正道，R-03）；非 running 或无日志行为 None（不猜）。
+    liveness: "WorkerLiveness | None" = None
+
+
+class WorkerLiveness(BaseModel):
+    """worker 活性推导快照（design §7；state 五态与 daemon 侧一致）。"""
+
+    state: Literal["working", "blocked", "idle", "ended", "unknown"]
+    evidence: str | None = None
+    derived_at: datetime
 
 
 class ScopeWorkspaceStatus(BaseModel):

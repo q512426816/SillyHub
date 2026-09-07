@@ -216,6 +216,14 @@ class AgentSessionLogORM(BaseModel, table=True):
     命中直挂、无关联按 entry ctx 聚合 find-or-create，task-04 实现）。NULL = 未归属
     （存量行不回填，R-03）；ON DELETE SET NULL——会话删除不拖日志行（行属 workspace
     留底审计）。
+
+    Change 2026-09-07-agent-liveness-states task-07（design §5.3 / FR-03）：加
+    ``state`` / ``state_derived_at`` / ``state_evidence`` / ``last_event_at`` 四列
+    ——daemon liveness 推导状态落库（写入端点在 task-08）。四列全 nullable、存量行
+    不回填（对齐 ``agent_session_id`` 先例 R-03 口径：旧行 state NULL 由响应层归一
+    ``unknown``）。时间两列用 ``DateTime(timezone=True)`` 而非上方 ISO 原文 String
+    先例（D-003）：states 端点上报的 derived_at/last_event_at 是 Pydantic datetime
+    结构化值（design §7），无 CLI 字典序比较需求。
     """
 
     __tablename__ = "platform_agent_logs"
@@ -327,6 +335,28 @@ class AgentSessionLogORM(BaseModel, table=True):
             ForeignKey("agent_sessions.id", ondelete="SET NULL"),
             nullable=True,
         ),
+    )
+    # ── 2026-09-07-agent-liveness-states task-07（design §5.3 / FR-03）──
+    # daemon liveness 推导状态列（task-08 states 端点 upsert 写入）：
+    # state 五态枚举值（working/blocked/idle/ended/unknown），列 NULL = 旧行/
+    # 未部署 daemon（响应层归一 unknown，存量不回填）；state_derived_at /
+    # last_event_at 为结构化 DateTime（D-003，非上方 ISO 原文 String 先例）；
+    # state_evidence 为短摘要（≤200，如 last_event=model_io）。
+    state: str | None = Field(
+        default=None,
+        sa_column=Column(String(16), nullable=True),
+    )
+    state_derived_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    state_evidence: str | None = Field(
+        default=None,
+        sa_column=Column(String(200), nullable=True),
+    )
+    last_event_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

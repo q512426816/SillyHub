@@ -391,3 +391,37 @@
 根因：daemon 侧 requestManualUpgrade 版本门（ql-20260902-003）在已最新时静默 no-op 不写状态，心跳无 sillyspec_update、机器卡无横幅（实测：crrcdt-hubin 的 npm 元数据滞后误判已最新）；原 toast 无条件承诺「进度将显示在机器卡横幅上」构成误导
 方案：page.tsx toast 改为「升级指令已下发；机器已是最新版时将直接跳过（不显示横幅），否则进度将显示在机器卡横幅上」+ 注释补 daemon 版本门与镜像滞后误判依据；page.test.tsx 补 triggerMachineSillySpecUpdate mock 与确认弹层→API 调用→toast 文案断言用例；app-pages.md 模块文档同步 + 新建 changelog sidecar
 结果：runtimes/__tests__/page.test.tsx 16/16 绿（15 旧 + 1 新），pnpm typecheck 0 错误，未涉及后端 schema（无需 gen:types）
+
+## ql-20260904-019-b4f4 | 2026-09-04 13:49:50 | 升级 sillyspec 版本一致时给明确横幅反馈（up_to_date 终态贯通 daemon/backend/frontend）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/sillyspec-manager.ts（up_to_date 终态 + in-flight 不覆盖 + 状态机图注释）
+- sillyhub-daemon/tests/sillyspec-manager.test.ts（改已最新用例并新增过期、重复点击、in-flight 不覆盖三用例）
+- backend/app/modules/daemon/router.py（两处 docstring 补 up_to_date）
+- backend/openapi.json（gen:types 再生注释文本）
+- frontend/src/lib/api-types.ts（gen:types 再生注释文本）
+- frontend/src/components/daemon/machine-card.tsx（横幅第五态）
+- frontend/src/components/daemon/__tests__/machine-card-sillyspec.test.tsx（up_to_date 横幅用例）
+- frontend/src/app/(dashboard)/runtimes/page.tsx（toast 回归承诺横幅）
+- frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx（toast 断言更新）
+需求：升级 sillyspec 版本一致时给明确横幅反馈（up_to_date 终态贯通 daemon/backend/frontend）
+根因：ql-20260902-003 让手动升级在已最新时静默 no-op，用户点按钮后无任何可见结果，无法与指令丢失区分（实测 crrcdt-hubin npm 镜像滞后误判已最新时点两次均无声）；用户明确要求版本一致也要有反馈
+方案：daemon SillySpecUpdateStatus 加 up_to_date 终态，requestManualUpgrade 已最新分支写 {state up_to_date, from/to=local}（清 deferred 定时器，running/deferred in-flight 期不覆盖只记 debug），与 success/failed 同款 10min 惰性过期；backend 两处 docstring 补取值（schema 本就 string 不收紧零行为改动）+ gen:types 同步；前端 machine-card 横幅扩五态（up_to_date=success 色阶「已是最新版（X），无需升级」），runtimes 页 toast 回归「升级指令已下发，检查与升级结果将显示在机器卡横幅上」；模块文档 4 处 + changelog sidecar 3 份同步
+结果：daemon sillyspec-manager 43/43 绿 + heartbeat 23/23 绿 + daemon tsc exit 0；前端 machine-card-sillyspec + runtimes page 45/45 绿 + frontend tsc 0；backend 零行为改动；三端模块文档已同步
+
+## ql-20260907-001-5bff | 2026-09-07 09:37:00 | 修 sillyspec 升级被镜像源滞后误判「已是最新」（实测 crrcdt-hubin 滞后 3 天
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/sillyspec-manager.ts（仲裁核心：probeLatest force 参数+prefer-online、probeLatestOfficial/_resolveLatestForGate 新增、requestUpgrade/_runUpgrade useOfficialRegistry、deferred flag 保留）
+- sillyhub-daemon/src/preflight.ts（runSillySpecCheck 探测加 --prefer-online、installSillySpec 可选 registry）
+- sillyhub-daemon/tests/sillyspec-manager.test.ts（harness 命令串/official 注入/install 签名 + 仲裁矩阵 8 用例）
+- .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md（契约/关键逻辑/注意事项同步仲裁设计）
+- .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.changelog.md（ql-20260907-001-5bff 条目）
+- .sillyspec/docs/sillyhub-daemon/modules/preflight.md（探测命令与 installSillySpec 契约更新）
+- .sillyspec/docs/sillyhub-daemon/modules/preflight.changelog.md（ql-20260907-001-5bff 条目）
+需求：修 sillyspec 升级被镜像源滞后误判「已是最新」（实测 crrcdt-hubin 滞后 3 天，官方 3.28.0 已发布而机器探测仍 3.27.12，版本门拦死升级且每小时自动检查永不自愈）。
+根因：daemon 版本门信源是机器本地 npm 源（npm view sillyspec version），镜像/本地 HTTP 缓存滞后时返回旧 latest，与旧数据自身比较恒等——清 npm 缓存无效，旧数据在镜像服务器上（2026-09-07 早上 explore 会话结论）。
+方案：探测命令一律加 --prefer-online；版本门（requestManualUpgrade/checkAndUpgrade）经 _resolveLatestForGate 仲裁——本地源探测外新增 probeLatestOfficial 官方源直查（--registry+prefer-online），取较新者为 effective，官方较新时安装同带官方源 --registry（不自动回退镜像安装）、心跳缓存覆盖为官方值；手动触发 force 现探绕 10min 缓存；deferred 保留官方源 flag 复查时消费；preflight installSillySpec 加可选 registry 参数缺省零变化。
+结果：sillyspec-manager.test 51/51 绿（新增仲裁矩阵 8 用例）+ preflight.test 40 绿 + tsc 0；官方不可达机器静默回退现行为（runCmd 30s 超时封顶、每小时一次直查成本被接受）。

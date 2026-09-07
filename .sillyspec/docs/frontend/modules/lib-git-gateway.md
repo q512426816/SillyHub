@@ -22,7 +22,7 @@ created_at: 2026-08-18 01:45:00
 （已删除，无逻辑可记。）
 
 ## 注意事项
-- **语义去向：纯删除、无后继**。前端不存在任何「在 worktree 租约内执行 git 命令」的入口；git 相关的活代码只有 `lib/git-identities.ts`（身份凭据管理，独立端点 `/api/git/*`，后端 schema 在 `backend/app/modules/git`，与租约域无关）。
+- **语义去向：纯删除、无后继**。前端不存在任何「在 worktree 租约内执行 git 命令」的入口；git 相关的活代码只有 `frontend/src/lib/git-identities.ts`（身份凭据管理，独立端点 `/api/git/*`，后端 schema 在 `backend/app/modules/git`，与租约域无关）。
 - 同批删除的 `worktree.ts` / `tool-gateway.ts` 至今未恢复（2026-08-18 glob 仍不存在）；`_module-map.yaml` 对 lib-worktree / lib-tool-gateway / 本模块三者的 active 标记均为死条目，待 scan 清理。
 - 后端 `/api/worktrees/{leaseId}/git` 端点当前是否存在未核实；若要恢复「受控 git 操作网关」能力应按新需求重新立项，不要按旧卡描述 resurrect 本文件。
 - 排查 `/api/worktrees/{leaseId}/git` 调用链时：前端侧已断开，勿在本模块找调用点。

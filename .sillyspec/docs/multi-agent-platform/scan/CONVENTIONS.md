@@ -34,7 +34,7 @@ monorepo 根项目（path=`.`），含三个子项目：`backend/`（FastAPI + P
 - **ruff format**：`quote-style = "double"`。
 - **mypy**：`python_version = "3.12"`，非 strict；`warn_unused_ignores`/`warn_redundant_casts`/`ignore_missing_imports = true`；`plugins = ["pydantic.mypy"]`；`disable_error_code = ["attr-defined","union-attr","assignment","arg-type","valid-type","operator","call-overload","call-arg","unused-ignore"]`。
 - **运行命令**（`local.yaml`）：`uv run ruff format`（format）、`uv run ruff check . && uv run ruff format --check . && uv run mypy app`（lint）、`uv run pytest -q --cov=app --cov-fail-under=60`（test，覆盖率门槛 60%）。
-- **典型片段**（请求/响应契约）：FastAPI router 统一 `APIRouter()`，在 `app/main.py` 用 `app.include_router(<x>_router, prefix="/api")` 挂载；Pydantic `BaseModel` + `Field(...)` 定义 schema，异常按事件命名（受 N818 ignore 支持）。
+- **典型片段**（请求/响应契约）：FastAPI router 统一 `APIRouter()`，在 `backend/app/main.py` 用 `app.include_router(<x>_router, prefix="/api")` 挂载；Pydantic `BaseModel` + `Field(...)` 定义 schema，异常按事件命名（受 N818 ignore 支持）。
 
 ### frontend（Next.js 14，`frontend/package.json` + `.eslintrc.json`）
 
@@ -71,7 +71,7 @@ Conventional Commits，`<type>(<scope>): <subject>`，subject 中文为主：
 
 ## 组件间 API 契约约定
 
-- **REST 统一前缀 `/api`**：backend 所有 router 在 `app/main.py` 通过 `app.include_router(<x>_router, prefix="/api")` 挂载（health/workspace/members/auth/change/scan-docs/task/git-identity/agent/daemon/worktree/lease/git-gateway/change-writer/workflow/incident 等），前端与 daemon 均打 `/api/...`。
+- **REST 统一前缀 `/api`**：backend 所有 router 在 `backend/app/main.py` 通过 `app.include_router(<x>_router, prefix="/api")` 挂载（health/workspace/members/auth/change/scan-docs/task/git-identity/agent/daemon/worktree/lease/git-gateway/change-writer/workflow/incident 等），前端与 daemon 均打 `/api/...`。
 - **schema 定义**：请求/响应用 Pydantic v2 `BaseModel` + `Field(...)`；路径/查询参数用 FastAPI `Query(...)` 默认值（受 ruff `B008` ignore 支持）。
 - **daemon ↔ backend**：REST + WebSocket（`ws@^8.18`）；session 运行态、turn 事件走 WS 推送，CRUD 走 REST。
 - **transport 抽象**：spec 文档在 daemon 与 backend 间同步模式由全局开关 `SPEC_TRANSPORT`（`shared|tar`，默认 `shared`）决定，正交于 `SpecWorkspace.strategy`、不入库（纯运行时），backend `Settings.spec_transport` + `field_validator` 规范化。

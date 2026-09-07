@@ -685,6 +685,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: useShell,
+      // ql-20260907-004：daemon 无自有控制台时 Windows 给控制台子进程新开可见黑框，
+      // windowsHide=CREATE_NO_WINDOW（对齐 pi driver 同日修复与仓内其余 spawn 点）。
+      windowsHide: true,
     });
 
     // 用闭包把 start options 存进 handle（consume 读），避免再定义 handle 字段污染契约。

@@ -33,9 +33,9 @@ refetchInterval: (q) => quicklogPollInterval(q.state.data?.items ?? [])
   消费点自 ql-20260820-008-fcb7 起默认显式传 true——进行中 quick 会话 CLI 只落
   「(quick 任务)」占位标题（真实标题 step3 `--done` 才回填），不传则会话全程不可见。
 - 已核实的消费点：
-  - `changes/page.tsx` — 计数 pill 用 `page_size: 1` 只取 total（含空壳占位，与表格口径一致）；
-  - `quicklog-table.tsx` — `refetchInterval: (q) => quicklogPollInterval(q.state.data?.items ?? [])`；`showPlaceholder` 默认 true（复选框取消=收窄筛选）；
-  - `quicklog-drawer.tsx` / `detail/quicklog-linked-card.tsx` — 详情与 linked_change 过滤（linked-card 同样含空壳占位）。
+  - `frontend/app/(dashboard)/workspaces/[id]/changes/page.tsx` — 计数 pill 用 `page_size: 1` 只取 total（含空壳占位，与表格口径一致）；
+  - `frontend/components/changes/quicklog-table.tsx` — `refetchInterval: (q) => quicklogPollInterval(q.state.data?.items ?? [])`；`showPlaceholder` 默认 true（复选框取消=收窄筛选）；
+  - `frontend/components/changes/quicklog-drawer.tsx` / `frontend/components/changes/detail/quicklog-linked-card.tsx` — 详情与 linked_change 过滤（linked-card 同样含空壳占位）。
 - 消费方全终态自动停轮，勿另设定时器。
 
 ## 人工备注

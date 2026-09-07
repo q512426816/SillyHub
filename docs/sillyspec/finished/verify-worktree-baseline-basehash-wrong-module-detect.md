@@ -29,7 +29,7 @@ worktree 隔离 + baseline checkpoint 模式下（meta.json 同时有 `baseHash`
 
 `git diff <baseHash=d9dfc971>..HEAD` 含 baseline checkpoint 那一笔（同步的 52 个跨模块 overlay 文件）+ 本 change 改动 → `pickHitModules` 命中所有 overlay 涉及的模块。
 
-**同源不一致**：`src/task-review.js:694` 已正确用 `meta.baselineCommit || meta.baseHash`，唯独 `verify-postcheck.js` 只用 `meta.baseHash`。
+**同源不一致**：`sillyhub-daemon/src/task-review.js:694` 已正确用 `meta.baselineCommit || meta.baseHash`，唯独 `verify-postcheck.js` 只用 `meta.baseHash`。
 
 ## 实测证据
 

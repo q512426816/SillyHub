@@ -24,9 +24,9 @@ generator: sillyspec-scan
 | 集成 | 用途 | SDK / 通道 | 依据 |
 |---|---|---|---|
 | LiteLLM 网关 | OpenAI 格式供应商统一接入（Anthropic /v1/messages ↔ OpenAI 上游转换由 LiteLLM 承担）；后端经 admin API `/model/new` 动态注册 `usr-<uid>-<pid>` 模型路由 | 镜像 `ghcr.io/berriai/litellm:v1.95.0` + 独立 `litellm-db`（postgres）；master key 走 env `LITELLM_MASTER_KEY` | deploy/docker-compose.yml `litellm`/`litellm-db` 服务 + deploy/litellm-config.yaml；backend/app/modules/llm_provider/litellm_client.py |
-| Anthropic Claude | 执行 Agent 任务、交互式会话 | `@anthropic-ai/claude-agent-sdk` 0.3.181（daemon 引入）；daemon 同时 spawn 本地 `claude` CLI（`CLAUDE_CODE_VERSION` build arg 随 backend 镜像分发） | sillyhub-daemon/package.json；src/interactive/claude-sdk-driver.ts、spawn-env.ts；compose `backend.build.args` |
+| Anthropic Claude | 执行 Agent 任务、交互式会话 | `@anthropic-ai/claude-agent-sdk` 0.3.181（daemon 引入）；daemon 同时 spawn 本地 `claude` CLI（`CLAUDE_CODE_VERSION` build arg 随 backend 镜像分发） | sillyhub-daemon/package.json；sillyhub-daemon/src/interactive/claude-sdk-driver.ts、sillyhub-daemon/src/spawn-env.ts；compose `backend.build.args` |
 | Codex | 备选 Agent（OpenAI Codex app-server 协议） | daemon 内 `codex-app-server-driver.ts`（自定义适配，未引第三方 SDK） | sillyhub-daemon/src/interactive/ |
-| 模型供应商管理 | 运行期切换/配置 Claude、OpenAI 格式等供应商 | backend `llm_provider` 模块（litellm_client/router/service/schema）+ 前端 `components/llm-providers/` 与 `lib/config/llmProviderPresets.ts` | backend/app/modules/llm_provider/；frontend/src/components/llm-providers/ |
+| 模型供应商管理 | 运行期切换/配置 Claude、OpenAI 格式等供应商 | backend `llm_provider` 模块（litellm_client/router/service/schema）+ 前端 `components/llm-providers/` 与 `frontend/src/config/llmProviderPresets.ts` | backend/app/modules/llm_provider/；frontend/src/components/llm-providers/ |
 
 注：backend 本身不直接 import Anthropic SDK，仅经环境变量/网关传递凭证，实际推理由 daemon 驱动的 Claude 子进程或 LiteLLM 网关上游完成。
 
@@ -34,8 +34,8 @@ generator: sillyspec-scan
 
 | 集成 | 用途 | 实现 | 依据 |
 |---|---|---|---|
-| WebSocket | daemon ↔ backend 长连接（daemon 主动连，WS 鉴权/握手/权限校验），配 lease 轮询 + outbox 韧性 | backend `daemon/router.py` WS 端点；daemon `ws` ^8.18（`ws-client.ts` / `hub-client.ts`） | backend/app/modules/daemon/（test_ws_auth 等）；sillyhub-daemon/src/ |
-| SSE | Agent 运行流 / daemon 会话流 / spec 导入进度 / MCP 传输 | backend 多端点 `text/event-stream`；前端 `lib/fetch-sse.ts` | backend/app/main.py、modules/agent/router.py、modules/daemon/router.py（test_session_sse）、modules/spec_workspace/router.py；frontend/src/lib/fetch-sse.ts |
+| WebSocket | daemon ↔ backend 长连接（daemon 主动连，WS 鉴权/握手/权限校验），配 lease 轮询 + outbox 韧性 | backend `daemon/router.py` WS 端点；daemon `ws` ^8.18（`sillyhub-daemon/src/ws-client.ts` / `sillyhub-daemon/src/hub-client.ts`） | backend/app/modules/daemon/（test_ws_auth 等）；sillyhub-daemon/src/ |
+| SSE | Agent 运行流 / daemon 会话流 / spec 导入进度 / MCP 传输 | backend 多端点 `text/event-stream`；前端 `frontend/src/lib/fetch-sse.ts` | backend/app/main.py、modules/agent/router.py、modules/daemon/router.py（test_session_sse）、modules/spec_workspace/router.py；frontend/src/lib/fetch-sse.ts |
 | MCP（对外服务） | backend 对平台外 Agent 暴露 MCP 工具集（SSE 传输 + webhooks） | 官方 Python SDK `mcp>=1.29,<2`（FastMCP + http_app ASGI mount）；`mcp_gateway` 模块（server/tools/sse/auth） | backend/pyproject.toml；backend/app/modules/mcp_gateway/；docs/mcp/（tools-reference/sse/webhooks） |
 | MCP（daemon 侧） | daemon 作为 MCP server 暴露本机工具；按 workspace 注入 MCP 配置 | `@modelcontextprotocol/sdk` ^1.29.0 | sillyhub-daemon/src/mcp-server.ts、mcp-config.ts |
 
@@ -54,7 +54,7 @@ generator: sillyspec-scan
 | 集成 | 用途 | 实现 | 依据 |
 |---|---|---|---|
 | SillySpec CLI | 文档驱动开发流程（brainstorm/plan/execute/verify/archive + quick），多项目定义 | `.sillyspec/`（projects/、changes/、quicklog/、workflows/）+ local.yaml | 仓库 `.sillyspec/` 目录 |
-| openapi-typescript | 后端 schema → 前端/daemon 类型（禁止手写） | 前端 `pnpm gen:types` → `src/lib/api-types.ts`；daemon `pnpm gen:types` → `src/api-types.ts`（openapi-typescript ^7.13）；产物 `backend/openapi.json` | frontend/package.json、sillyhub-daemon/package.json、backend/scripts/ |
+| openapi-typescript | 后端 schema → 前端/daemon 类型（禁止手写） | 前端 `pnpm gen:types` → `frontend/src/lib/api-types.ts`；daemon `pnpm gen:types` → `sillyhub-daemon/src/api-types.ts`（openapi-typescript ^7.13）；产物 `backend/openapi.json` | frontend/package.json、sillyhub-daemon/package.json、backend/scripts/ |
 | pnpm / uv | 前端+daemon 包管理（pnpm workspace 分离）/ backend Python 依赖（uv.lock） | Node>=20、Python 3.12 | frontend/package.json、backend/uv.lock |
 | Docker Compose | 本机与服务器统一部署（7 服务） | deploy/docker-compose.yml + .env + images.tar.gz | deploy/ |
 | Git / GitHub | 仓库克隆、worktree、Git 凭证管理、变更提交 | backend `git_gateway`/`git_identity`/`worktree` 模块；httpx 调 GitHub API | backend/app/modules/ |
@@ -93,7 +93,7 @@ generator: sillyspec-scan
 
 ## 9. 跨端通信通道小结
 
-- **backend ↔ daemon**：WebSocket（daemon 主动连；`ws-client.ts`/`hub-client.ts`）+ REST 注册/心跳；outbox 韧性（`src/resilience/outbox.ts`）。
-- **frontend ↔ backend**：REST / SSE（`src/lib/api.ts` + TanStack Query + `fetch-sse.ts`；Next.js `app/api/` BFF：daemon/daemon-chat/workspaces）。
-- **daemon ↔ 本机 Agent**：stdio / 自定义 JSON 协议（`src/adapters/`：stream-json/jsonl/ndjson/json-rpc/pi-json/text）。
+- **backend ↔ daemon**：WebSocket（daemon 主动连；`sillyhub-daemon/src/ws-client.ts`/`sillyhub-daemon/src/hub-client.ts`）+ REST 注册/心跳；outbox 韧性（`sillyhub-daemon/src/resilience/outbox.ts`）。
+- **frontend ↔ backend**：REST / SSE（`frontend/src/lib/api.ts` + TanStack Query + `frontend/src/lib/fetch-sse.ts`；Next.js `app/api/` BFF：daemon/daemon-chat/workspaces）。
+- **daemon ↔ 本机 Agent**：stdio / 自定义 JSON 协议（`sillyhub-daemon/src/adapters/`：stream-json/jsonl/ndjson/json-rpc/pi-json/text）。
 - **平台 ↔ 外部 Agent**：MCP 网关（SSE 传输 + webhooks，`mcp_gateway` 模块）。

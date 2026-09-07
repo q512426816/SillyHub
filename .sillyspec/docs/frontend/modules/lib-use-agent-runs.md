@@ -33,10 +33,10 @@ useQuery(queryKeys.agentRuns.list(workspaceId), () => listAgentRuns(workspaceId)
 
 - 轮询判定只认 `"running"`（对齐 agent 页 runningRuns 过滤），pending/completed
   等不算——改判定先确认页面口径。
-- queryKey 来自 `lib/query-keys.ts`（lib-react-query 模块），queryFn 直接复用
-  `lib/agent` 的 `listAgentRuns`，鉴权与 ApiError 处理天然衔接，本模块零请求代码。
+- queryKey 来自 `frontend/src/lib/query-keys.ts`（lib-react-query 模块），queryFn 直接复用
+  `frontend/src/lib/agent` 的 `listAgentRuns`，鉴权与 ApiError 处理天然衔接，本模块零请求代码。
 - 消费方为 workspace agent 页运行列表；单测
-  `lib/__tests__/use-agent-runs.test.tsx`。
+  `frontend/src/lib/__tests__/use-agent-runs.test.tsx`。
 
 ## 人工备注
 

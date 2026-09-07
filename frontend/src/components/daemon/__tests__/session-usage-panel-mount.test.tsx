@@ -68,7 +68,10 @@ vi.mock("@/lib/agent", async () => {
 const daemonMock = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
-  listSessionRuns: vi.fn(),
+  // 任务执行面板挂载即取数（task-10 惰性闸门移除）：runs/tasks 都必须 resolve
+  //（裸 vi.fn()/缺键走 actual 真 fetch，失败 notify 在无 App 上下文炸 unhandled）。
+  listSessionRuns: vi.fn().mockResolvedValue([]),
+  listSessionTasks: vi.fn().mockResolvedValue([]),
   getAgentSessionLogs: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionQueue: vi.fn(),

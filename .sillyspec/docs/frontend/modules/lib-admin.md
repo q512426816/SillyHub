@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 后台管理 API 客户端（lib-admin）
 
 ## 定位
-平台后台管理（admin）域浏览器侧 API 客户端（`lib/admin.ts`，420 行）。统一封装后端 `/api/admin/**` 下「用户 / 组织 / 角色」三大子资源的 CRUD、启停、会话管理、审计与密码重置。所有请求经 lib-api 的 `apiFetch` 发起，错误统一抛 `ApiError`。供 `app-admin-pages`（后台页面）与 `components-admin`（管理对话框）调用。
+平台后台管理（admin）域浏览器侧 API 客户端（`frontend/src/lib/admin.ts`，420 行）。统一封装后端 `/api/admin/**` 下「用户 / 组织 / 角色」三大子资源的 CRUD、启停、会话管理、审计与密码重置。所有请求经 lib-api 的 `apiFetch` 发起，错误统一抛 `ApiError`。供 `app-admin-pages`（后台页面）与 `components-admin`（管理对话框）调用。
 
 ## 契约摘要
 用户（无单查 getUser）：

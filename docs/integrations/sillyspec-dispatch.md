@@ -43,7 +43,7 @@ SillyHub backend 的 workspace `root_path` 必须配成 **caller 仓根 `<repo>`
 
 - worktree 落在 `<repo>/.sillyspec/.runtime/worktrees/<change>/`，是仓根的**子路径**；
 - daemon 的两道路径白名单都是「边界敏感前缀比较」（`resolved === root` 或
-  `startsWith(root + sep)`，见 `file-rpc.ts:88-95`）；
+  `startsWith(root + sep)`，见 `sillyhub-daemon/src/file-rpc.ts:73`）；
 - 所以**把仓根放进白名单一条，整族 worktree（任意 `<change>`）都被放行**——不用为每个
   change 单独配，也不会随 change 增减而漏配。
 
@@ -61,11 +61,11 @@ daemon 侧有**两条独立**的路径白名单，分别守不同入口。**两�
 
 | 项 | 值 |
 | --- | --- |
-| 数据源 | daemon 本地配置文件 `~/.sillyhub/daemon/config-<server_hash>.json` 的 `allowed_roots` 数组（`DaemonConfig.allowed_roots`，`config.ts:282`） |
-| 默认值 | `[os.homedir()]`（`config.ts:352`）——只允许家目录 |
-| 守卫函数 | `assertWithinAllowedRoots(path, allowed_roots)`（`file-rpc.ts:70-99`） |
-| 触发入口 | `HostFsHandler`（`host-fs-handler.ts`）——daemon 自跑的 `run_command` 的 cwd 校验、`list_dir` RPC、host-fs 文件读写都走这条 |
-| 越界表现 | 抛 `RpcError(code='forbidden', message='path outside allowed_roots: <path>')`（`file-rpc.ts:97`） |
+| 数据源 | daemon 本地配置文件 `~/.sillyhub/daemon/config-<server_hash>.json` 的 `allowed_roots` 数组（`DaemonConfig.allowed_roots`，`sillyhub-daemon/src/config.ts:316`） |
+| 默认值 | `[os.homedir()]`（`sillyhub-daemon/src/config.ts:352`）——只允许家目录 |
+| 守卫函数 | `assertWithinAllowedRoots(path, allowed_roots)`（`sillyhub-daemon/src/file-rpc.ts:70-99`） |
+| 触发入口 | `HostFsHandler`（`sillyhub-daemon/src/host-fs-handler.ts`）——daemon 自跑的 `run_command` 的 cwd 校验、`list_dir` RPC、host-fs 文件读写都走这条 |
+| 越界表现 | 抛 `RpcError(code='forbidden', message='path outside allowed_roots: <path>')`（`sillyhub-daemon/src/file-rpc.ts:97`） |
 | 命中时机 | **worker spawn 阶段**——daemon 拿到 lease、要起进程时 cwd=`root_path` 越界，直接拒。**这是 R-03 的爆发点** |
 
 路径A worker 的 `root_path` = caller worktree。仓根不在此白名单 → spawn 即拒，worker
@@ -75,17 +75,17 @@ daemon 侧有**两条独立**的路径白名单，分别守不同入口。**两�
 
 | 项 | 值 |
 | --- | --- |
-| 数据源 | backend DB：`DaemonRuntime.allowed_roots`（per-runtime，2026-07-06 下沉后主用）；legacy 回退 `DaemonInstance.allowed_roots`（`service.py:654-658`）。经心跳 / WS 下发到 daemon 的 per-runtime `PolicyCache`（`ws_hub.py:375-396`） |
-| 守卫函数 | `PolicyEngine.judgeWrite` → `isPathUnderAnyRoot(normalizedPath, policy.allowedRoots)`（`policy/filesystem-policy.ts:201`、`policy/path-utils.ts:149-175`） |
+| 数据源 | backend DB：`DaemonRuntime.allowed_roots`（per-runtime，2026-07-06 下沉后主用）；legacy 回退 `DaemonInstance.allowed_roots`（`backend/app/modules/agent/service.py:679`）。经心跳 / WS 下发到 daemon 的 per-runtime `PolicyCache`（`backend/app/modules/daemon/ws_hub.py:463-489`） |
+| 守卫函数 | `PolicyEngine.judgeWrite` → `isPathUnderAnyRoot(normalizedPath, policy.allowedRoots)`（`sillyhub-daemon/src/policy/filesystem-policy.ts:201`、`sillyhub-daemon/src/policy/path-utils.ts:149-175`） |
 | 触发入口 | agent 的**写类工具**——Claude Code 的 Write / Edit、Codex 的写操作等（写沙箱） |
-| 越界表现 | 返回 `{allowed: false, reason: 'Runtime Policy 拒绝本次写入。\n... 原因：目标目录未配置为可写目录。'}`（`filesystem-policy.ts:56,209`） |
+| 越界表现 | 返回 `{allowed: false, reason: 'Runtime Policy 拒绝本次写入。\n... 原因：目标目录未配置为可写目录。'}`（`sillyhub-daemon/src/policy/filesystem-policy.ts:56,209`） |
 | 命中时机 | **worker 跑起来之后**调写工具时——worker 进程起来了，但每个写操作被 deny |
 
-effective 计算（`service.py:648-650`）：`effective = daemon_roots ∩ AgentProfile.allowed_roots_overlay`。
+effective 计算（`backend/app/modules/agent/service.py:648-650`）：`effective = daemon_roots ∩ AgentProfile.allowed_roots_overlay`。
 overlay 空则等于 daemon 原值（不收紧）；overlay 非空且越界则抛 `AgentProfileOverlayTooWide`
 （profile 只能收紧、不能放宽）。
 
-> 读类工具（`canRead`）默认全 allow、不审计（`filesystem-policy.ts:88-90`），不在本守卫
+> 读类工具（`canRead`）默认全 allow、不审计（`sillyhub-daemon/src/policy/filesystem-policy.ts:88-90`），不在本守卫
 > 关注范围。
 
 ### 两道守卫的关系
@@ -108,7 +108,7 @@ worker 压根起不来。
 ### 3.1 守卫一：编辑 daemon 本地 config
 
 定位文件：daemon 按它连接的 backend 地址算 hash，文件名
-`~/.sillyhub/daemon/config-<sha256[0:8]>.json`（`config.ts:94-114`）。例如连
+`~/.sillyhub/daemon/config-<sha256[0:8]>.json`（`sillyhub-daemon/src/config.ts:94-114`）。例如连
 `http://localhost:8000` 的 daemon，文件可能是
 `~/.sillyhub/daemon/config-a1b2c3d4.json`。不确定文件名就交给校验脚本（§4）全量扫。
 
@@ -124,13 +124,13 @@ worker 压根起不来。
 }
 ```
 
-约定（来自 `config.ts:264-282`、`normalizeAllowedRoots` `config.ts:533-559`）：
+约定（来自 `sillyhub-daemon/src/config.ts:308`、`normalizeAllowedRoots` `sillyhub-daemon/src/config.ts:575`）：
 
 - **必须绝对路径**——相对路径会被 `path.resolve` 基于 cwd 折叠，跨工作目录不可靠；
 - **不要写 `~`**——Node 的 `path.resolve` 不识别 `~`，会当成字面目录名，写成真实的
   绝对路径；
 - **Windows 盘符保留原样**（`C:\\Users\\...`）——loadConfig 不做大小写归一，比较时再按
-  平台归一（`file-rpc.ts:83-86`）；
+  平台归一（`sillyhub-daemon/src/file-rpc.ts:83-86`）；
 - 反斜杠 / 正斜杠均可（win32 `path.resolve` 自动统一）；
 - 配完**重启 daemon**（config 在启动时读入内存，`cli.ts` 加载流程）。
 
@@ -140,7 +140,7 @@ worker 压根起不来。
 
 1. **daemon 实体 / runtime 的 `allowed_roots`**（主）：在 SillyHub 后端给目标 daemon 实体
    （或其 runtime）的 `allowed_roots` 加上仓根。这是 per-runtime 沙箱的来源
-   （`service.py:654-658`），下发到 daemon 的 `PolicyCache`。
+   （`backend/app/modules/agent/service.py`），下发到 daemon 的 `PolicyCache`。
 2. **AgentProfile `allowed_roots_overlay`**（可选收紧）：如果 dispatch 时绑定的 profile
    设了 overlay，overlay 也必须覆盖仓根，否则 effective 取交集后可能丢掉仓根。**路径A
    最省心做法：profile overlay 留空**（默认），effective 即等于 daemon roots。
@@ -177,7 +177,7 @@ node scripts/check-dispatch-allowed-roots.mjs --server-url http://localhost:8000
 - 不传 `--server-url` → 全量扫 `~/.sillyhub/daemon/config-*.json`，**任一缺失仓根即判
   失败**（fail-closed，避免「这个 server 配了、那个 server 没配」的暗坑）；
 - 跨平台：Windows 盘符大小写归一、POSIX 大小写敏感，比较语义 1:1 对照
-  `file-rpc.ts:82-95`；
+  `sillyhub-daemon/src/file-rpc.ts:82-95`；
 - 纯读 JSON 文件，**不启动 / 不依赖 daemon 进程**，也不连 backend。
 
 > 脚本只覆盖**守卫一**。守卫二（runtime overlay）在 backend DB，需在 SillyHub 后端 /
@@ -197,8 +197,8 @@ node scripts/check-dispatch-allowed-roots.mjs --server-url http://localhost:8000
 | worker 不起来；daemon 日志 / dispatch 响应见 `forbidden` + `path outside allowed_roots: <cwd>` | 守卫一 | 本地 `config-<hash>.json` 的 `allowed_roots` 没含仓根；跑 §4 脚本；改完重启 daemon |
 | worker 起来了但写文件被拒；agent 输出见「目标目录未配置为可写目录」 | 守卫二 | backend `DaemonRuntime.allowed_roots`（或 `DaemonInstance.allowed_roots`）没含仓根；或 profile `allowed_roots_overlay` 把仓根交集掉了 |
 | 路径前缀撞库：`/home/user` 配了，`/home/user-evil` 反而被放行 / 被拒异常 | 比较语义 | 检查是否误配了兄弟目录前缀；`under` 是边界敏感的（必须 `root + sep` 前缀），别手动拼字符串判断 |
-| Windows 大小写：`C:\Repo` 配了，实际 cwd 是 `c:\repo` 被拒 | 守卫一比较 | 不应发生（`file-rpc.ts:85` toLowerCase 归一）；若发生说明 daemon 版本旧或被改，对照 `file-rpc.ts:82-95` |
-| 换 backend 地址后配置「丢了」 | per-server 隔离 | daemon 按 `server_url` hash 分文件存配置（`config.ts:110-114`），新地址 = 新 hash = 新空配置 → 需重新加仓根 |
+| Windows 大小写：`C:\Repo` 配了，实际 cwd 是 `c:\repo` 被拒 | 守卫一比较 | 不应发生（`sillyhub-daemon/src/file-rpc.ts:85` toLowerCase 归一）；若发生说明 daemon 版本旧或被改，对照 `sillyhub-daemon/src/file-rpc.ts:82-95` |
+| 换 backend 地址后配置「丢了」 | per-server 隔离 | daemon 按 `server_url` hash 分文件存配置（`sillyhub-daemon/src/config.ts:110-114`），新地址 = 新 hash = 新空配置 → 需重新加仓根 |
 
 ---
 
@@ -207,9 +207,9 @@ node scripts/check-dispatch-allowed-roots.mjs --server-url http://localhost:8000
 | 角色 | 文件:行 |
 | --- | --- |
 | 守卫一：`assertWithinAllowedRoots`（含 `under` 边界敏感比较、Windows 归一） | `sillyhub-daemon/src/file-rpc.ts:70-99` |
-| 守卫一数据：`DaemonConfig.allowed_roots` 字段 | `sillyhub-daemon/src/config.ts:282` |
+| 守卫一数据：`DaemonConfig.allowed_roots` 字段 | `sillyhub-daemon/src/config.ts:316` |
 | 守卫一默认：`[homedir()]` | `sillyhub-daemon/src/config.ts:352` |
 | per-server 配置文件定位 `configPathForServer` / `serverHash` | `sillyhub-daemon/src/config.ts:94-114` |
 | 守卫二：`PolicyEngine.judgeWrite` → `isPathUnderAnyRoot` | `sillyhub-daemon/src/policy/filesystem-policy.ts:201`、`sillyhub-daemon/src/policy/path-utils.ts:149-175` |
-| 守卫二下发：WS 推 `allowed_roots` 到 daemon | `backend/app/modules/daemon/ws_hub.py:375-396` |
+| 守卫二下发：WS 推 `allowed_roots` 到 daemon | `backend/app/modules/daemon/ws_hub.py:466` |
 | 守卫二 effective 计算：`daemon ∩ profile.overlay` | `backend/app/modules/agent/service.py:648-658,697-720` |

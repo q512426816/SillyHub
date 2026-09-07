@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 平台级页面（app-pages）
 
 ## 定位
-顶层路由页面集合（`src/app/` 根 + `(auth)` + `(dashboard)` 平台级页面），共 12 个 page.tsx：落地页 `/`、登录 `/login`、工作区选择器 `/workspaces`、机器列表 `/runtimes`、机器审计 `/runtimes/[id]/audit`、设置域 `/settings` 及其 5 个子页（git-identities / api-keys / mcp / providers / skills）、个人中心 `/account`。页面负责数据拉取与交互编排，UI 骨架下沉 components-layout / components-shared / components-llm-providers / components-daemon。
+顶层路由页面集合（`frontend/src/app/` 根 + `(auth)` + `(dashboard)` 平台级页面），共 12 个 page.tsx：落地页 `/`、登录 `/login`、工作区选择器 `/workspaces`、机器列表 `/runtimes`、机器审计 `/runtimes/[id]/audit`、设置域 `/settings` 及其 5 个子页（git-identities / api-keys / mcp / providers / skills）、个人中心 `/account`。页面负责数据拉取与交互编排，UI 骨架下沉 components-layout / components-shared / components-llm-providers / components-daemon。
 
 ## 契约摘要
 - /runtimes（2026-08-28-daemon-agent-share）：统计行加「共享给我」计数卡；挂载
@@ -18,7 +18,7 @@ created_at: 2026-08-18 01:45:00
 - `HomePage`（`/`）：client 组件，hydrate 后按 accessToken `router.replace` 到 `/workspaces` 或 `/login`；token 在 localStorage、server 端读不到，故 client effect 跳转；persist 恢复前 `return null` 防首帧误判闪烁。
 - `LoginPage`（`/login`，`(auth)` 路由组，不进 dashboard layout）：表单 → `login(account, password)` → 成功跳平台默认页；localStorage 记忆账号/平台偏好（`sillyhub.login.remember` / `sillyhub.login.platform`，移动端 `/m/login` 复用同组 key 保持两端回填一致）。
 - `WorkspacesPage`（`/workspaces`，387 行）：`listWorkspaces` + `fetchMyBindings` + `useDaemonStatusMap` 组装 `WorkspaceCard` 卡片列表；扫描入口 `WorkspaceScanDialog`；平台管理员可见人员搜索（`listUsers`，`is_platform_admin` 控制显隐，失败降级隐藏控件）。
-- `RuntimesPage`（`/runtimes`，1197 行）：数据源 `useDaemonMachines`（机器级聚合：machines/total/sessions 一体管理）；点卡片开 `RuntimeSessionDialog`（`key={runtime.id}` 重 mount 清旧态）；跨机器 runtime 扁平化支持 `?session` 查询参数恢复定位。`handleSillySpecUpgrade`（2026-08-31-machine-sillyspec-version）：modal.confirm 二次确认 → `triggerMachineSillySpecUpdate`（fire-and-forget）→ toast + invalidate machines，进度由 daemon 心跳 sillyspec_update 经 15s 轮询回传机器卡横幅；已最新时 daemon 版本门静默 no-op（无状态回传/无横幅），toast 文案已如实说明（ql-20260904-016）；`sillyspecUpgradingId` 即时禁用标记随 `onUpgradeSillySpec`/`upgradingSillySpec` 注入 MachineCard。
+- `RuntimesPage`（`/runtimes`，1197 行）：数据源 `useDaemonMachines`（机器级聚合：machines/total/sessions 一体管理）；点卡片开 `RuntimeSessionDialog`（`key={runtime.id}` 重 mount 清旧态）；跨机器 runtime 扁平化支持 `?session` 查询参数恢复定位。`handleSillySpecUpgrade`（2026-08-31-machine-sillyspec-version）：modal.confirm 二次确认 → `triggerMachineSillySpecUpdate`（fire-and-forget）→ toast + invalidate machines，进度由 daemon 心跳 sillyspec_update 经 15s 轮询回传机器卡横幅；已最新时 daemon 版本门回传 up_to_date 终态（横幅明示「已是最新版」，ql-20260904-019；此前静默无横幅的文案处理见 ql-20260904-016）；`sillyspecUpgradingId` 即时禁用标记随 `onUpgradeSillySpec`/`upgradingSillySpec` 注入 MachineCard。
 - `AuditPage`（`/runtimes/[id]/audit`，88 行起）：机器级策略审计视图，数据走 lib-daemon-audit（`usePolicyAuditByRuntime`）。
 - `SettingsPage`（`/settings`）：多 Tab 个人设置（`listSettings`/`updateSettings`）。
 - `GitIdentitiesPage`（`/settings/git-identities`）：git 凭证管理，含创建表单（provider/username/email/token/repos）与 `checkGitAccess` 连通性校验。

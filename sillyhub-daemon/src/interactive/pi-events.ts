@@ -36,6 +36,24 @@
 //   | 其余已知生命周期型（session/agent_start/agent_end/turn_start/message_start/tool_execution_update/queue_update/compaction_*/auto_retry_*/summarization_retry_*/entry_appended/session_info_changed/thinking_level_changed） | [] | 批量 pi-json.ts:234-240 同决策（纯生命周期无 IR）；session 为打印模式首帧，rpc 不发，防御容忍 |
 //   | 未知事件 | status + subtype='task_notification' 降级桶（content=原 type；metadata.original_event_type + 原字段全量保留） | design §5.2 第 7 条 fail-safe；subtype 取值与 codex driver 降级桶一致（codex-app-server-driver.ts:513-520：schema 强制 status 必带闭合枚举 subtype，task_notification 走瞬时通道不污染持久化） |
 //
+// ── 任务事件派生层（2026-09-07-pi-task-events task-01，D-001/D-002/D-004）───
+//   上表映射产出**原始内容事件**之外，本归一化器按实例级 turnTask 状态机额外
+//   **派生** status/agent_task_status 事件（一轮一任务聚合，metadata 键对齐
+//   claude-events _normalizeTaskMessage 先例：task_id/task_name/status 必填 +
+//   last_tool_name/summary/elapsed_ms/tool_uses 可选）。派生事件在返回数组
+//   **前部**、原始内容事件随后（statusEvents 先行约定）；上表各行映射语义
+//   **零改动**，仅追加：
+//   | turn_start | 开新行：task_id=`pi-t<seq>`（实例内单调递增）、task_name='执行任务'（pi 无首轮摘要可提取，保守命名） | agent_task_status(running)；上轮行仍 open（turn_end 丢失）先补 completed（FR-03 防御，summary=pendingError） |
+//   | tool_execution_start | last_tool_name=toolName、tool_uses+1 | agent_task_status(running) 刷新（summary=`正在调用 <toolName>`）；无 running 行防御跳过 |
+//   | tool_execution_end | 零状态零事件（tool_uses 已在 start 计；工具成败≠任务成败） | — |
+//   | turn_end stopReason==='error' | failed，summary=errorMessage | agent_task_status(failed) |
+//   | turn_end 其余 stopReason（fixture 实证仅 'stop'） | completed（D-004：aborted 非 stopReason 取值，打断走 ame.error，轮收尾按 completed 收行，无悬挂 running） | agent_task_status(completed) |
+//   | error / extension_error / ame.error | 置 pendingError 记录、零新增事件（轮失败主要经 turn_end 浮出，design 派生规则表） | — |
+//
+//   派生推进整体 try/catch 隔离（design 兼容策略降级条款）：任何异常仅
+//   console.error('[pi-events] turnTask derive failed', err) 并跳过派生，
+//   原始内容事件照常返回。
+//
 // 全部产出事件满足 agent-event-schema.ts 的 safeParseAgentEvent（验收项，
 // 测试逐条断言）。
 
@@ -87,7 +105,12 @@ const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
  *     }
  *   }
  *
- * 无状态：可单实例复用多会话；无构造参数；不抛错（fail-safe）。
+ * 实例状态（per-session：pi-rpc-driver 每会话 `new PiEventNormalizer()`，
+ * 单实例不可跨会话复用）：
+ *   - 轮内合并缓冲（ql-20260904-031：segments / assistantMsgSeq）；
+ *   - turnTask 任务行状态机（2026-09-07-pi-task-events task-01，见字段注释与
+ *     文件头「任务事件派生层」表）。
+ * 不抛错（fail-safe）：行解析与任务派生均有隔离。
  */
 export class PiEventNormalizer {
   /**
@@ -115,6 +138,29 @@ export class PiEventNormalizer {
    * message_end 清当前消息段（override 已出全文，记账作废）、turn_end 全清兜底。
    */
   private readonly segments = new Map<string, { flushedLen: number; lastFlushAt: number }>();
+
+  // ── turnTask 任务行状态机（2026-09-07-pi-task-events task-01 / D-001）──────
+  /** 已开任务行序号：task_id=`pi-t<seq>`，实例内单调递增（R-04：pi 前缀隔离）。 */
+  private turnSeq = 0;
+  /**
+   * 当前轮的任务行聚合状态；null=无行。open=true 表示行已开未收终态
+   * （turn_end 收行置 false）。字段语义见文件头「任务事件派生层」表。
+   */
+  private turnTask: {
+    taskId: string;
+    taskName: string;
+    toolUses: number;
+    lastToolName: string;
+    startedAtMs: number;
+    open: boolean;
+  } | null = null;
+  /**
+   * 最近一次错误记录（顶层 error / extension_error / ame.error 置入，零新增
+   * 事件）：仅用于 FR-03 防御补 completed 时的 summary——轮失败主要经
+   * turn_end(errorMessage) 浮出，error 帧先到而无 turn_end 承接的异常流里
+   * 任务行收行时把错误带出来。''=无。turn 边界（turn_start/turn_end 收行）消费清零。
+   */
+  private pendingError = '';
 
   constructor(opts: { flushIntervalMs?: number; now?: () => number } = {}) {
     this.flushIntervalMs = opts.flushIntervalMs ?? 500;
@@ -163,12 +209,22 @@ export class PiEventNormalizer {
         return this.handleMessageUpdate(raw);
       case 'message_end':
         return this.handleMessageEnd(raw);
-      case 'tool_execution_start':
-        return [this.handleToolStart(raw)];
+      case 'turn_start':
+        // 任务派生：开新行（status 先行；turn_start 本无原始内容事件产出）
+        return this.derive(() => this.deriveTurnStart());
+      case 'tool_execution_start': {
+        // status 派生事件先行，tool_use 内容事件随后（statusEvents 先行约定）
+        const derived = this.derive(() => this.deriveToolStart(raw));
+        return [...derived, this.handleToolStart(raw)];
+      }
       case 'tool_execution_end':
+        // 派生零事件零状态（tool_uses 已在 start 计；工具成败≠任务成败）
         return [this.handleToolEnd(raw)];
-      case 'turn_end':
-        return this.handleTurnEnd(raw);
+      case 'turn_end': {
+        // status 派生终态先行，既有 error/usage 内容事件随后
+        const derived = this.derive(() => this.deriveTurnEnd(raw));
+        return [...derived, ...this.handleTurnEnd(raw)];
+      }
       case 'error':
         return [this.handleTopLevelError(raw)];
       case 'extension_error':
@@ -177,10 +233,18 @@ export class PiEventNormalizer {
         // assistant 消息边界：递增轮内序号（segment 隔离）。user/toolResult 不计。
         const msg = isRecord(raw.message) ? raw.message : {};
         if (msg.role === 'assistant') this.assistantMsgSeq += 1;
+        // ql-20260907-011：user 消息在轮初携带指令全文（真实流实证）——提取
+        // 摘要升级任务名（backend upsert task_name latest-wins，前端同步覆盖）。
+        if (msg.role === 'user') {
+          const derived = this.derive(() => this.deriveUserName(msg));
+          return derived;
+        }
         return [];
       }
       default:
-        // 已知生命周期型（含 agent_settled/session）→ 无 IR 产出（映射表第 8 行）
+        // 其余已知生命周期型（agent_start/agent_end/message_start/
+        // tool_execution_update/agent_settled/session 等；turn_start 已上移
+        // 任务派生）→ 无 IR 产出（映射表第 8 行）
         return [];
     }
   }
@@ -254,6 +318,7 @@ export class PiEventNormalizer {
         typeof errObj.errorMessage === 'string' && errObj.errorMessage
           ? errObj.errorMessage
           : `assistant stream ${reason}`;
+      this.notePendingError(content);
       return [{ type: 'error', content }];
     }
 
@@ -388,6 +453,7 @@ export class PiEventNormalizer {
     } else {
       content = 'unknown error';
     }
+    this.notePendingError(content);
     return { type: 'error', content };
   }
 
@@ -402,6 +468,7 @@ export class PiEventNormalizer {
     const eventName = typeof raw.event === 'string' ? raw.event : '';
     const errorText = typeof raw.error === 'string' ? raw.error : '';
     const content = `extension error (${extensionPath}) in ${eventName}: ${errorText}`;
+    this.notePendingError(content);
     return {
       type: 'error',
       content,
@@ -463,11 +530,186 @@ export class PiEventNormalizer {
       metadata: { status: 'usage_update', usage: mapped },
     };
   }
+
+  // ── turnTask 派生（2026-09-07-pi-task-events task-01，私有）───────────────
+
+  /**
+   * 派生推进的异常隔离（design 兼容策略降级条款）：turnTask 状态机任何异常
+   * 仅记错误并跳过派生（返回 []），原始内容事件照常产出——不阻断事件流。
+   */
+  private derive(fn: () => AgentEvent[]): AgentEvent[] {
+    try {
+      return fn();
+    } catch (err) {
+      console.error('[pi-events] turnTask derive failed', err);
+      return [];
+    }
+  }
+
+  /** 顶层 error / extension_error / ame.error 的 pendingError 记录（零新增事件）。 */
+  private notePendingError(content: string): void {
+    this.pendingError = content;
+  }
+
+  /**
+   * turn_start → 开新任务行（D-001 一轮一任务）。
+   * FR-03 防御：上轮行仍 open（turn_end 丢失的异常流）先补 completed 再开
+   * 新行（summary 用 pendingError 兜底带出错误），不产生悬挂 running。
+   */
+  private deriveTurnStart(): AgentEvent[] {
+    const out: AgentEvent[] = [];
+    if (this.turnTask?.open) {
+      const stale = this.turnTask;
+      out.push(
+        this.buildTurnTaskEvent('completed', {
+          taskId: stale.taskId,
+          taskName: stale.taskName,
+          toolUses: stale.toolUses,
+          lastToolName: stale.lastToolName,
+          summary: this.pendingError || undefined,
+          elapsedMs: Math.max(this.now() - stale.startedAtMs, 0),
+        }),
+      );
+    }
+    this.pendingError = '';
+    this.turnSeq += 1;
+    this.turnTask = {
+      taskId: `pi-t${this.turnSeq}`,
+      taskName: DEFAULT_TASK_NAME,
+      toolUses: 0,
+      lastToolName: '',
+      startedAtMs: this.now(),
+      open: true,
+    };
+    out.push(
+      this.buildTurnTaskEvent('running', { taskId: this.turnTask.taskId }),
+    );
+    return out;
+  }
+
+  /**
+   * message_start(role=user) → 任务名升级（ql-20260907-011）：真实流实证 user
+   * 帧在轮初携带指令全文（content[0].text）——截断摘要写进行名并刷新一次 running
+   * 事件。无 open 行 / 无文本防御跳过（零事件）。摘要规则：去换行压空白、
+   * 40 字符截断加省略号。
+   */
+  private deriveUserName(msg: Record<string, unknown>): AgentEvent[] {
+    const task = this.turnTask;
+    if (!task?.open) return [];
+    const parts = Array.isArray(msg.content) ? msg.content : [];
+    let text = '';
+    for (const part of parts) {
+      if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
+        text = part.text;
+        break;
+      }
+    }
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!snippet) return [];
+    task.taskName = snippet.length < text.replace(/\s+/g, ' ').trim().length
+      ? `${snippet}…`
+      : snippet;
+    return [
+      this.buildTurnTaskEvent('running', {
+        taskId: task.taskId,
+        taskName: task.taskName,
+      }),
+    ];
+  }
+
+  /**
+   * tool_execution_start → running 刷新：last_tool_name / tool_uses / summary
+   * （`正在调用 <toolName>`）。无 running 行（turnTask 未开）防御跳过派生，
+   * 工具内容事件不受影响。
+   */
+  private deriveToolStart(raw: Record<string, unknown>): AgentEvent[] {
+    const task = this.turnTask;
+    if (!task?.open) return [];
+    const toolName = typeof raw.toolName === 'string' ? raw.toolName : '';
+    task.lastToolName = toolName;
+    task.toolUses += 1;
+    const summary = `正在调用 ${toolName}`;
+    return [
+      this.buildTurnTaskEvent('running', {
+        taskId: task.taskId,
+        taskName: task.taskName,
+        toolUses: task.toolUses,
+        lastToolName: task.lastToolName,
+        summary,
+      }),
+    ];
+  }
+
+  /**
+   * turn_end → 收行终态：stopReason==='error' → failed（summary=errorMessage）；
+   * 其余（fixture 实证仅 'stop'；D-004：aborted 非 stopReason 取值，打断的轮
+   * 按 completed 收行）→ completed。无 running 行防御跳过。elapsed_ms =
+   * now()-startedAtMs（now 注入可测）。收行置 open=false，轮边界 pendingError 清零。
+   */
+  private deriveTurnEnd(raw: Record<string, unknown>): AgentEvent[] {
+    const task = this.turnTask;
+    if (!task?.open) return [];
+    const message = isRecord(raw.message) ? raw.message : {};
+    const failed = message.stopReason === 'error';
+    const summary = failed
+      ? typeof message.errorMessage === 'string' && message.errorMessage
+        ? message.errorMessage
+        : 'pi turn ended with error'
+      : undefined;
+    const event = this.buildTurnTaskEvent(failed ? 'failed' : 'completed', {
+      taskId: task.taskId,
+      taskName: task.taskName,
+      toolUses: task.toolUses,
+      lastToolName: task.lastToolName,
+      summary,
+      elapsedMs: Math.max(this.now() - task.startedAtMs, 0),
+    });
+    task.open = false;
+    this.pendingError = '';
+    return [event];
+  }
+
+  /**
+   * 构造 agent_task_status 事件（形状对齐 claude-events _normalizeTaskMessage
+   * 先例，claude-events.ts:663-797）：metadata 键 task_id/task_name/status 必填
+   * + last_tool_name/summary/elapsed_ms/tool_uses 可选（缺省不出现键；
+   * async 契约字段 pi 恒 false 不传）。content=summary（无则 ''）。
+   */
+  private buildTurnTaskEvent(
+    status: 'running' | 'completed' | 'failed',
+    fields: {
+      taskId: string;
+      taskName?: string;
+      toolUses?: number;
+      lastToolName?: string;
+      summary?: string;
+      elapsedMs?: number;
+    },
+  ): AgentEvent {
+    const metadata: Record<string, unknown> = {
+      task_id: fields.taskId,
+      task_name: fields.taskName || DEFAULT_TASK_NAME,
+      status,
+    };
+    if (fields.lastToolName) metadata.last_tool_name = fields.lastToolName;
+    if (fields.summary) metadata.summary = fields.summary;
+    if (fields.elapsedMs !== undefined) metadata.elapsed_ms = fields.elapsedMs;
+    if (fields.toolUses !== undefined) metadata.tool_uses = fields.toolUses;
+    return {
+      type: 'status',
+      subtype: 'agent_task_status',
+      content: fields.summary ?? '',
+      metadata,
+    };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 私有 helper（模块级，纯函数；对照批量 pi-json.ts:445-453 同款守卫）
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** 任务名缺省值（user 指令摘要到达前的占位，ql-20260907-011 前恒定值）。 */
+const DEFAULT_TASK_NAME = '执行任务';
 
 /** 类型守卫：值是非 null 的 plain object（非数组）。 */
 function isRecord(v: unknown): v is Record<string, unknown> {

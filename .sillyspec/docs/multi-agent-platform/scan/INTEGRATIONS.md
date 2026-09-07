@@ -10,7 +10,7 @@ generator: sillyspec-scan
 
 > 由 `sillyspec-scan` 在 `ba87eec` 处扫描根 monorepo 生成。
 > 与 SillyHub 功能视角互补：本文聚焦**组件边界**上的集成点、协议、用途与关键文件。
-> 来源：`deploy/docker-compose*.yml`、`backend/app/main.py`、各 `router.py`、daemon `ws-client.ts`/`hub-client.ts`、`sillyhub-daemon/package.json`，以及对源码的 grep 结果。
+> 来源：`deploy/docker-compose*.yml`、`backend/app/main.py`、各 `router.py`、daemon `sillyhub-daemon/src/ws-client.ts`/`sillyhub-daemon/src/hub-client.ts`、`sillyhub-daemon/package.json`，以及对源码的 grep 结果。
 
 ## 1. frontend ↔ backend（REST + SSE）
 
@@ -29,19 +29,19 @@ generator: sillyspec-scan
 
 - **WebSocket 通道**（daemon → backend）：
   - backend 端点：`backend/app/modules/daemon/router.py` 中 `@router.websocket("/ws")`（路由前缀 `/api/daemon`，即 `/api/daemon/ws`），按 `runtime_id` 接入 `DaemonWsHub`（`hub.connect(rid, websocket)`），receive_json 驱动；无效 runtime 关闭码 4001。
-  - daemon 侧：`sillyhub-daemon/src/ws-client.ts`（`import WebSocket from 'ws'`），内部把 http(s) URL 转 `ws://`/`wss://`，与 backend `_build_ws_url` 1:1；交互式会话远程人审（manualApproval）依赖该通道回传 resolver 信号（`interactive/session-manager.ts`）。
+  - daemon 侧：`sillyhub-daemon/src/ws-client.ts`（`import WebSocket from 'ws'`），内部把 http(s) URL 转 `ws://`/`wss://`，与 backend `_build_ws_url` 1:1；交互式会话远程人审（manualApproval）依赖该通道回传 resolver 信号（`sillyhub-daemon/src/interactive/session-manager.ts`）。
 - **REST 注册/心跳**（daemon → backend，启动时与兜底）：
-  - `/api/daemon/register`（`router.py:136`）：daemon 启动时在三个循环（heartbeat/poll/ws）前注册 runtime。
-  - `/api/daemon/heartbeat`（`router.py:168`）：HTTP 心跳，作为 WebSocket 不可用时的兜底。
+  - `/api/daemon/register`（`backend/app/modules/daemon/router.py:136`）：daemon 启动时在三个循环（heartbeat/poll/ws）前注册 runtime。
+  - `/api/daemon/heartbeat`（`backend/app/modules/daemon/router.py:168`）：HTTP 心跳，作为 WebSocket 不可用时的兜底。
   - lease 相关：`backend/app/modules/daemon/lease_service.py` 维护租约与取消信号（注释表明 WS Hub 取消信号在 Wave 2 接入）。
 - **daemon 侧心跳循环**：
-  - `config.ts`：`heartbeat_interval=15`、`lease_heartbeat_interval=5`。
-  - `task-runner.ts`：在 `runLease` 内并发跑 lease heartbeat 循环（`_runLeaseHeartbeatLoop`，检测 backend cancel 信号 + 续期），`finally` 停止循环避免泄漏。
-- **backend 内部桥接**：`daemon/session/service.py` 用 Redis `publish` 把会话事件转发给 SSE 客户端；`health/router.py` 探测 redis ping。
+  - `sillyhub-daemon/src/config.ts`：`heartbeat_interval=15`、`lease_heartbeat_interval=5`。
+  - `sillyhub-daemon/src/task-runner.ts`：在 `runLease` 内并发跑 lease heartbeat 循环（`_runLeaseHeartbeatLoop`，检测 backend cancel 信号 + 续期），`finally` 停止循环避免泄漏。
+- **backend 内部桥接**：`backend/app/modules/daemon/session/service.py` 用 Redis `publish` 把会话事件转发给 SSE 客户端；`backend/app/modules/health/router.py` 探测 redis ping。
 
 ### 2.1 WS 消息类型（Server ↔ Daemon，含 kill 通道）
 
-> 消息常量双端逐字对齐：backend `app/modules/daemon/protocol.py`（`DAEMON_MSG_*`）↔ daemon `sillyhub-daemon/src/protocol.ts`（`MSG.*`）。任一字符漂移即双侧契约单测红（design R-02）。下表含 change `2026-08-05-daemon-kill-channel-unify` 引入的 `LEASE_CANCEL` 及 `SESSION_END` / `SESSION_INTERRUPT` 语义调整。
+> 消息常量双端逐字对齐：backend `backend/app/modules/daemon/protocol.py`（`DAEMON_MSG_*`）↔ daemon `sillyhub-daemon/src/protocol.ts`（`MSG.*`）。任一字符漂移即双侧契约单测红（design R-02）。下表含 change `2026-08-05-daemon-kill-channel-unify` 引入的 `LEASE_CANCEL` 及 `SESSION_END` / `SESSION_INTERRUPT` 语义调整。
 
 | 消息 | 字面量 | 方向 | 用途 |
 |---|---|---|---|
@@ -70,17 +70,17 @@ generator: sillyspec-scan
 - **Redis**：
   - 镜像 `redis:7-alpine`（`--appendonly yes`），命名卷 `redisdata`，连接 `redis://redis:6379/0`。
   - 客户端依赖：`redis>=5.0`；封装见 `backend/app/core/redis.py`（`get_redis`）。
-  - 用途：缓存 + Pub/Sub（daemon session/run 事件桥接 SSE）+ 健康检查。grep 命中 `health/router.py`、`daemon/session/service.py`、`daemon/run_sync/service.py` 等多处。
+  - 用途：缓存 + Pub/Sub（daemon session/run 事件桥接 SSE）+ 健康检查。grep 命中 `backend/app/modules/health/router.py`、`backend/app/modules/daemon/session/service.py`、`backend/app/modules/daemon/run_sync/service.py` 等多处。
 
 ## 4. daemon ↔ Claude Agent SDK（本地子进程编排）
 
 - **承载**：`sillyhub-daemon`（Node ≥20 ESM 单进程）。
 - **依赖**：`@anthropic-ai/claude-agent-sdk@0.3.181`（`sillyhub-daemon/package.json`，pnpm overrides 对 win32/linux/darwin 多平台二进制统一指向主包）。
 - **使用点**（type/value import，grep 命中）：
-  - `src/interactive/claude-sdk-driver.ts`：`import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'`，驱动交互式会话；启动前解析 wrapper 到底层 `@anthropic-ai/claude-code/bin/claude(.exe)`。
-  - `src/interactive/session-manager.ts`、`src/interactive/types.ts`：复用 `Query` / `SDKMessage` / `SDKResultMessage` / `SDKUserMessage` 类型。
-- **凭证 / 子进程环境**：`src/credential.ts`、`src/spawn-env.ts` 把宿主凭证注入子进程；Docker 部署下由 `deploy/.env` 注入 backend 容器。
-- **协议适配**：`src/adapters/`（stream-json / json-rpc / jsonl / ndjson）统一 SDK 输出协议。
+  - `sillyhub-daemon/src/interactive/claude-sdk-driver.ts`：`import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'`，驱动交互式会话；启动前解析 wrapper 到底层 `@anthropic-ai/claude-code/bin/claude(.exe)`。
+  - `sillyhub-daemon/src/interactive/session-manager.ts`、`sillyhub-daemon/src/interactive/types.ts`：复用 `Query` / `SDKMessage` / `SDKResultMessage` / `SDKUserMessage` 类型。
+- **凭证 / 子进程环境**：`sillyhub-daemon/src/credential.ts`、`sillyhub-daemon/src/spawn-env.ts` 把宿主凭证注入子进程；Docker 部署下由 `deploy/.env` 注入 backend 容器。
+- **协议适配**：`sillyhub-daemon/src/adapters/`（stream-json / json-rpc / jsonl / ndjson）统一 SDK 输出协议。
 
 ## 5. deploy docker 编排（组件拓扑）
 

@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 组件清单薄封装（lib-components）
 
 ## 定位
-组件清单 API 的薄封装（变更 2026-07-06-component-readonly-split，D-001@V1）。组件数据已改为从 `projects/*.yaml` 只读派生（后端 `GET /workspaces/{id}/components`），不再是可写的 workspace 行；本模块只做转发，真正的客户端与类型定义都在 `@/lib/workspaces`——`Component` 类型与 `getWorkspaceComponents` 留在原处，避免循环依赖、保持单一真相。消费方为工作区详情页（`workspaces/[id]/page.tsx` 的组件区块）。
+组件清单 API 的薄封装（变更 2026-07-06-component-readonly-split，D-001@V1）。组件数据已改为从 `projects/*.yaml` 只读派生（后端 `GET /workspaces/{id}/components`），不再是可写的 workspace 行；本模块只做转发，真正的客户端与类型定义都在 `@/lib/workspaces`——`Component` 类型与 `getWorkspaceComponents` 留在原处，避免循环依赖、保持单一真相。消费方为工作区详情页（`frontend/workspaces/[id]/page.tsx` 的组件区块）。
 
 ## 契约摘要
 - `listComponents(workspaceId: string): Promise<{ items: Component[]; total: number }>`

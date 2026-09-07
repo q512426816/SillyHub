@@ -56,6 +56,8 @@ from app.modules.platform_sync.schema import (
     AgentLogMessagesResponse,
     AgentLogPushOk,
     AgentLogPushRequest,
+    AgentLogStatesOk,
+    AgentLogStatesPush,
     ApprovalSubmitOk,
     ApprovalSubmitRequest,
     ChangeApprovalResponse,
@@ -484,6 +486,38 @@ async def push_agent_logs(
         hub_session_id=body.hub_session_id,
     )
     return AgentLogPushOk(upserted=upserted)
+
+
+# ── 2026-09-07-agent-liveness-states task-08（design §5.3 / §7 / FR-03）──
+
+
+@router.post("/agent-logs/states", response_model=AgentLogStatesOk)
+async def push_agent_log_states(
+    body: AgentLogStatesPush,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> AgentLogStatesOk:
+    """POST agent 会话活性状态批量上报（daemon liveness tailer 周期 10s）。
+
+    状态是派生数据不进 CLI 上报契约（D-005）：body 仅枚举级数据（log_path/
+    state/evidence 短摘要/derived_at/last_event_at），**日志内容不出本机**
+    （协议 §7 克制口径延伸）。鉴权与 ``/agent-logs`` 完全同源（shpsync_ token
+    派生 workspace，写通道唯一；无凭据 401 / shk_live_·JWT 403）——daemon 是
+    唯一合法上报方。
+
+    upsert-create 语义（X-001）：自发现裸会话可能尚无登记行（登记只在 CLI
+    调用入口），行不存在时按 entry 元信息 create（origin=liveness-discovered，
+    harness 必填否则 skipped 不建行）；既有行只更新状态四列，登记元信息不动。
+    blocked 段转移检测在 service 内（BLOCKED_SEGMENTS，task-09 消费）。
+    """
+    _user, scope = auth
+    if scope.workspace_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    updated, created, skipped = await PlatformSyncService(session).upsert_agent_log_states(
+        workspace_id=scope.workspace_id,
+        entries=body.entries,
+    )
+    return AgentLogStatesOk(updated=updated, created=created, skipped=skipped)
 
 
 @router.get("/agent-logs", response_model=AgentLogListResponse)

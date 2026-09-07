@@ -100,7 +100,7 @@ from app.modules.daemon.group.router import router as group_chat_router  # noqa:
 
 router.include_router(group_chat_router)
 
-# 四子路由 include 段结束锚点：后续端点重排只作用于锚点之后的 83 个端点路由，
+# 四子路由 include 段结束锚点：后续端点重排只作用于锚点之后的 84 个端点路由，
 # 四子路由块的相对序保持原样（挂载顺序不变量，design R-05）。
 _routes_before_endpoints = len(router.routes)
 
@@ -121,7 +121,7 @@ from . import (  # noqa: E402, F401, I001
     version,  # 首现 #1-2（version/register）
     heartbeat,  # 首现 #3（heartbeat）
     runtimes,  # 首现 #4-8（usage/page/update/allowed-roots/self-update，#17-23）
-    machines,  # 首现 #9-16（machines ×8，#22 instances）
+    machines,  # 首现 #9-16（machines ×9 含 compare，#22 instances）
     lease,  # 首现 #24-30（leases ×7，#41-42）
     notify,  # 首现 #31-40（恢复/挂起 + notify_*×6，#45-48 权限/dialog）
     daemon_rpc,  # 首现 #43-44（fs list-dir/roots，#77-83 pending/controls/skills/mcp）
@@ -133,7 +133,7 @@ from . import (  # noqa: E402, F401, I001
 )
 
 # ── 拆前端点注册顺序恢复（R-05 不变量，勿删）─────────────────────────────────
-# 拆分后 83 端点按域分居 12 个子模块，import 触发的注册天然是「按域分块」顺序；
+# 拆分后 84 端点按域分居 12 个子模块，import 触发的注册天然是「按域分块」顺序；
 # 但拆前 router.py 的端点定义在域间交错（runtimes→machines→runtimes→machines→
 # runtimes→lease→恢复/notify→lease→fs/权限→session_crud→队列→session_crud→
 # 观测/team→llm/ws/controls，见下表分组注释）。FastAPI 按注册顺序匹配路由、
@@ -160,6 +160,7 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "trigger_machine_sillyspec_update",
     "trigger_machine_sillyspec_resolve",
     "trigger_machine_sillyspec_ghost_cleanup",
+    "compare_machine_sillyspec_conflict",
     "delete_machine",
     # runtimes（拆前 #17-21）
     "get_runtime",
@@ -261,6 +262,12 @@ del _endpoint_routes, _routes_by_name, _routes_before_endpoints
 # + patch 面（get_redis 等 setattr/patch 字符串目标，见模块 docstring）。
 from .gateway_misc import close_llm_proxy_client  # noqa: E402
 from .lease import InteractiveRunResultRequest  # noqa: E402
+from .machines import (  # noqa: E402
+    SillySpecConflictCompareFile,
+    SillySpecConflictCompareResponse,
+    SillySpecConflictDiffRow,
+    SillySpecConflictProgressRow,
+)
 from .notify import PermissionServiceDep  # noqa: E402
 from .runtimes import _derive_policy_version  # noqa: E402
 from .session_crud import _stream_sessions_events, stream_sessions_events  # noqa: E402
@@ -283,6 +290,10 @@ __all__ = [
     "RuntimeAdminUser",
     "SessionDep",
     "SessionService",
+    "SillySpecConflictCompareFile",
+    "SillySpecConflictCompareResponse",
+    "SillySpecConflictDiffRow",
+    "SillySpecConflictProgressRow",
     "TaskRunAgentUser",
     "_derive_policy_version",
     "_session_has_active_turn",

@@ -27,7 +27,7 @@ created_at: 2026-09-05 00:10:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/daemon.md` | 更新 daemon 模块卡（新表+快照端点+上报落库链路） | done |
-| `modules/frontend_components.md` | 更新前端组件卡（任务执行面板组件+归约抽出+三挂载） | done |
-| `modules/frontend_lib.md` | 更新前端 lib 卡（listSessionTasks+useSessionTasks） | done |
-| `_module-map.yaml` | 无变化（未增删模块，变更路径均落既有模块范围；hooks/ 未匹配项已在未匹配文件节说明） | skipped |
+| `modules/daemon.md` | 更新 daemon 模块卡（新表+快照端点+上报落库链路） | pending |
+| `modules/frontend_components.md` | 更新前端组件卡（任务执行面板组件+归约抽出+三挂载） | pending |
+| `modules/frontend_lib.md` | 更新前端 lib 卡（listSessionTasks+api-types 再生成） | pending |
+| `_module-map.yaml` | 无变化（未增删模块，变更路径均落既有模块范围） | skipped |

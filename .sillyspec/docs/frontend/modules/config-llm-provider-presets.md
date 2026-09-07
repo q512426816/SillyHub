@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # LLM 供应商预设模板（config-llm-provider-presets）
 
 ## 定位
-LLM 供应商预设模板（`src/config/llmProviderPresets.ts`，330 行，src/config 目录首个文件）。纯前端常量——后端/DB/migration 零改动；点预设一键预填供应商表单（name/base_url/auth_field/default_model/角色映射/settings_config），api_key 永远留空给用户手填。数据源逐字抄自 cc-switch 的 `claudeProviderPresets.ts`（剔 affiliate 参数），不臆造模型名/URL。被 components-llm-providers（供应商表单预设选择器）消费。
+LLM 供应商预设模板（`frontend/src/config/llmProviderPresets.ts`，330 行，src/config 目录首个文件）。纯前端常量——后端/DB/migration 零改动；点预设一键预填供应商表单（name/base_url/auth_field/default_model/角色映射/settings_config），api_key 永远留空给用户手填。数据源逐字抄自 cc-switch 的 `claudeProviderPresets.ts`（剔 affiliate 参数），不臆造模型名/URL。被 components-llm-providers（供应商表单预设选择器）消费。
 
 ## 契约摘要
 - `LlmProviderPresetCategory = "official" | "cn_official" | "aggregator"`：预设分类（与 cc-switch 对齐，决定选择器分组顺序）。
@@ -34,7 +34,7 @@ PRESET_BY_KEY[key] ?? PRESETS_BY_CATEGORY 顺序遍历
 
 ## 注意事项
 - api_key 永不预填（settings_config_partial 里 AUTH_TOKEN 恒为 `""`），新增预设不得写入任何明文 token。
-- `LlmProviderUsageType` 的单一源在 `lib/api/llm-providers`（数据层），本文件仅复用，config→api 单向依赖无环——勿在本文件重定义类型。
+- `LlmProviderUsageType` 的单一源在 `frontend/src/lib/api/llm-providers`（数据层），本文件仅复用，config→api 单向依赖无环——勿在本文件重定义类型。
 - usage 标注必须与后端 `detect_provider` 能力对齐：新增一家先确认后端真的可查，否则出现假 💰。
 - env 键名逐字对齐 cc-switch（含厂商特有键），改键名等于换协议，会破坏既有供应商配置兼容。
 

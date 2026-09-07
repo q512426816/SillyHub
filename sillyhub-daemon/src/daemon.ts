@@ -39,11 +39,11 @@
 import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 // stat：2026-08-28-fix-cross-machine-worker-dispatch task-06——认领段 cwd 存在性
 // 预检（FR-05/D-004@v1，正确机器上 worktree 必已存在，存在性即「对机」试金石）。
-import { mkdir, stat, readFile, writeFile, rename, unlink, chmod } from 'node:fs/promises';
+import { mkdir, stat, readFile, writeFile, rename, unlink, chmod, readdir } from 'node:fs/promises';
 
 import { join, dirname } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, normalizeAllowedRoots } from './config.js';
+import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, daemonStateDir, normalizeAllowedRoots } from './config.js';
 // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
 // （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
 import { fetchMcpBundle, normalizeWorkerDepth } from './mcp-config.js';
@@ -98,6 +98,17 @@ import {
   assertWithinAllowedRoots,
 } from './file-rpc.js';
 import { listRoots } from './roots-rpc.js';
+// 2026-09-07-agent-liveness-states task-06：liveness tailer 自发现/上报接线。
+import { LivenessTailer, type WatchTarget } from './agent-log/liveness/tailer.js';
+import { discoverLivenessWatchTargets } from './agent-log/liveness/discovery.js';
+import {
+  buildAgentLogStatePushGroups,
+  fetchRegisteredAgentLogs,
+  pushAgentLogStates,
+  type LivenessPushTargetMeta,
+} from './hub-client.js';
+import { findTopLevelSectionRange } from './local-yaml-writer.js';
+import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 // 2026-08-28-fix-cross-machine-worker-dispatch task-05/06（FR-05 / D-004@v1）：
 // interactive 会话 cwd 守卫纯函数——白名单终检 + 存在性判定，daemon.ts 认领段只接线。
 import { checkWorkspaceBoundCwd } from './interactive-cwd-guard.js';
@@ -158,6 +169,7 @@ import {
   shouldRefreshSpec,
   bumpLocalSpecVersion,
   resolveSpecDir,
+  hasUnsyncedLocalChanges,
 } from './spec-sync.js';
 import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
 // ql-20260831-001-6dde：恢复链/重开与本地在途 turn 竞态守卫（SessionBusyError
@@ -798,6 +810,12 @@ interface ClientLike {
      * 禁显式 null。
      */
     sillyspecCommandResult?: SillySpecCommandResult,
+    /**
+     * ql-20260907-010（spec 拉取工作区级化）：本机 spec 缓存清单（对齐
+     * hub-client heartbeat 第 8 参数）。undefined/空=键不出现（旧 backend
+     * 零感知），backend 响应 spec_versions 供后台预取判定。
+     */
+    specCache?: { workspace_id: string; spec_version: number }[],
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -1188,6 +1206,26 @@ export function injectWaitSessionMs(): number {
   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_INJECT_WAIT_SESSION_MS;
 }
 
+// ql-20260907-003（quick）：在途 lease 的等待延长上限（叠加在基础窗口之上，
+// 硬顶 waitMs + extendMaxMs）。实机案（会话 1a9c601c）：backend 等 ready 仅 8s
+// 即 fallback 发 inject，daemon create 全链（Windows 冷启动 skills 拷贝 / MCP
+// bundle 预取 / spawn 握手）偶发超 60s 基础窗口 → 超时按会话不存在丢弃并报
+// run failed，重发即恢复（瞬时竞态非真死）。_inflightLeases 由 _executeTask
+// try/finally 全程维护（claim→create 全链在途），_awaitSessionThenRoute 轮询
+// 见该 inject 的 lease 在途即续推 deadline（create 完成/失败离开在途后不再
+// 续推，窗口自然到期回落原丢弃上报）；lease 不在途（真不存在的会话，如
+// daemon 重启丢失）行为不变。默认 240s → 总硬顶 5min（控制指令 backend 侧
+// TTL 10min 同量级，指令落库 pending 不会因等待而丢）。
+export const DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS = 240_000;
+
+/** 读取在途延长上限（env SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS，非法/缺省回落默认；逐次读取便于测试覆写）。 */
+export function injectWaitInflightExtendMs(): number {
+  const raw = process.env.SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS;
+  if (raw === undefined || raw === '') return DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS;
+  const v = Number.parseInt(raw, 10);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS;
+}
+
 // ── task-08（design A5 / FR-04）：recover 网络类失败重试退避 + 超龄清理常量 ────
 //
 // _recoverOneSession 遇 recover HTTP 网络类失败（请求未达/超时/5xx——HubHttpError
@@ -1533,6 +1571,24 @@ export class Daemon {
     string,
     { workspaceId: string }
   >();
+  // ── ql-20260907-010（spec 拉取工作区级化）───────────────────────────────────
+  // 实机根因：spec pull 挂在会话创建关键路径上，47MB 树 / ~0.4MB/s 公网链路下
+  // 每次版本落后都现场下载 40s+（且并发会话各拉一份）。工作区级化三件套：
+  //   ① single-flight：同工作区同时只有一个 pullSpecBundle 在飞，会话创建与
+  //      心跳预取共享同一 promise（并发创建不再重复下载）；
+  //   ② 心跳预取：心跳响应 spec_versions（服务器权威版本）比对本地落后且该
+  //      工作区无活跃会话 → 后台预取，把下载挪出创建关键路径；
+  //   ③ 活跃会话门控：agent 正在读写 spec 目录时绝不后台动盘（覆盖会毁掉
+  //      在途工作）；pull 上下文（strategy/rootPath）沿用该工作区最近一次
+  //      创建会话的取值，防 repo-native junction 被默认参数降级覆盖。
+  /** workspaceId → 在途 pullSpecBundle promise（single-flight 去重键）。 */
+  private readonly _specPullsInFlight = new Map<string, Promise<string | null>>();
+  /** workspaceId → 最近一次会话创建使用的 pull 上下文（后台预取复用）。 */
+  private readonly _specPullContext = new Map<string, { strategy?: string; rootPath?: string }>();
+  /** sessionId → workspaceId（活跃会话门控 + 心跳自愈清账）。 */
+  private readonly _specSessionActiveWs = new Map<string, string>();
+  /** workspaceId → 上次后台预取尝试时刻（失败冷却，防每跳心跳重试刷日志）。 */
+  private readonly _specPrefetchLastAttempt = new Map<string, number>();
   /**
    * task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套缓存
    * （sessionId → McpBundle）。
@@ -1595,6 +1651,14 @@ export class Daemon {
 
   /** 运行标志，三循环 while 条件。 */
   private _running = false;
+
+  // ── 2026-09-07-agent-liveness-states task-06：liveness 接线状态 ──
+  /** spawn 记录（自发现数据源①）：sessionId → provider/cwd（_startInteractiveSession 填）。 */
+  private readonly _livenessSpawnRecords = new Map<string, { provider: string; cwd: string }>();
+  /** liveness tailer（10s tick；独立 try 包裹，R-02 崩溃不影响主循环）。 */
+  private _livenessTailer: LivenessTailer | null = null;
+  /** logPath → 推送元数据（serverUrl/token 分组 + create 元信息 + D-012 覆盖键）。 */
+  private readonly _livenessMetaByPath = new Map<string, LivenessPushTargetMeta>();
 
   /** 每个 _fire 的 AbortController（stop 时全部 abort，R7）。 */
   private readonly _controllers = new Set<AbortController>();
@@ -1977,6 +2041,7 @@ export class Daemon {
     }
 
     // 3. 启动三循环
+    this._fire((signal) => this._livenessLoop(signal));
     this._fire((signal) => this._heartbeatLoop(signal));
     this._fire((signal) => this._pollLoop(signal));
     this._fire((signal) => this._wsLoop(signal));
@@ -4344,6 +4409,142 @@ export class Daemon {
     });
   }
 
+  // ── ql-20260907-010：spec 拉取工作区级化（方法组）────────────────────────────
+
+  /** 工作区 pull 上下文记账（create 路径调用；仅 tar+非借用形态有意义的取值）。 */
+  private _noteSpecPullContext(
+    workspaceId: string | undefined,
+    ctx: { strategy?: string; rootPath?: string },
+  ): void {
+    if (!workspaceId) return;
+    this._specPullContext.set(workspaceId, ctx);
+  }
+
+  /** 工作区活跃会话数（仅本 daemon 进程内存口径——工作区按 placement 分配单 daemon）。 */
+  private _activeSessionsForWorkspace(workspaceId: string): number {
+    let count = 0;
+    for (const [, wsId] of this._specSessionActiveWs) {
+      if (wsId === workspaceId) count += 1;
+    }
+    return count;
+  }
+
+  /** 会话存续记账（活跃门控 + 心跳自愈清账）：create 入口记，end/catch 清。 */
+  private _noteSessionActive(sessionId: string, workspaceId: string | undefined): void {
+    if (workspaceId) this._specSessionActiveWs.set(sessionId, workspaceId);
+  }
+
+  private _noteSessionInactive(sessionId: string): void {
+    this._specSessionActiveWs.delete(sessionId);
+  }
+
+  /**
+   * 心跳自愈合账（清账触发之二）：会话非自然结束时 catch 清理已兜底；唯
+   * 一缺口是 daemon 进程内 SessionStore 消失但 _specSessionActiveWs 未清
+   *（异常路径/未来代码漂移）——每跳心跳按 store 现值对齐，活跃记账绝不
+   * 永久卡住后台预取。
+   */
+  private _reconcileSpecSessionActivity(): void {
+    const sm = this._sessionManager;
+    if (!sm) return;
+    for (const sessionId of [...this._specSessionActiveWs.keys()]) {
+      if (!sm.get(sessionId)) this._specSessionActiveWs.delete(sessionId);
+    }
+  }
+
+  /**
+   * 本机 spec 缓存清单（心跳上报）：枚举 specs 根下各工作区目录，读
+   * ``.runtime/spec-version.json`` 版本（无版本文件的目录不上报——上报 null
+   * 无意义，backend 无从比较）。读失败容忍跳过（best-effort）。
+   */
+  private async _collectSpecCacheEntries(): Promise<
+    { workspace_id: string; spec_version: number }[]
+  > {
+    const specsRoot = join(daemonStateDir(), 'specs');
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await readdir(specsRoot, { withFileTypes: true });
+    } catch {
+      return []; // specs 根不存在（本机从未拉过 spec）
+    }
+    const out: { workspace_id: string; spec_version: number }[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const version = await readLocalSpecVersion(resolveSpecDir(entry.name));
+      if (version !== null) {
+        out.push({ workspace_id: entry.name, spec_version: version });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * single-flight 拉取（会话创建与心跳预取共用）：同工作区同时只有一个
+   * pullSpecBundle 在飞，后来者共享同一 promise（返回其结果——并发创建两个
+   * 会话只拉一次，谁先到谁等的语义天然安全）。
+   */
+  private async _pullSpecShared(
+    workspaceId: string,
+    ctx: { strategy?: string; rootPath?: string },
+  ): Promise<string | null> {
+    const existing = this._specPullsInFlight.get(workspaceId);
+    if (existing) {
+      this._logger.info('spec_pull_shared_inflight', { workspace_id: workspaceId });
+      return existing;
+    }
+    const p = pullSpecBundle(this._client as never, workspaceId, ctx);
+    this._specPullsInFlight.set(workspaceId, p);
+    try {
+      return await p;
+    } finally {
+      this._specPullsInFlight.delete(workspaceId);
+    }
+  }
+
+  /**
+   * 心跳触发的工作区级后台预取：服务器权威版本（响应 spec_versions）落后于
+   * 本地版本的工作区 → 仅在**无活跃会话**时 fire-and-forget 拉取（agent 正在
+   * 读写 spec 目录时后台覆盖会毁掉在途工作；创建路径的 push-before-pull 互斥
+   * 不适用于后台预取，门控必须保守）。失败 60s 冷却防每跳心跳重试刷日志；
+   * pull 上下文沿用该工作区最近创建的取值（防 repo-native junction 降级）。
+   */
+  private _maybePrefetchSpecCaches(specVersions: Record<string, number>): void {
+    if (!this._running) return; // 停机竞态：stop() 后不再起后台拉取
+    for (const [workspaceId, serverVersion] of Object.entries(specVersions)) {
+      if (this._specPullsInFlight.has(workspaceId)) continue;
+      if (this._activeSessionsForWorkspace(workspaceId) > 0) continue;
+      const lastAttempt = this._specPrefetchLastAttempt.get(workspaceId) ?? 0;
+      if (Date.now() - lastAttempt < 60_000) continue;
+      const ctx = this._specPullContext.get(workspaceId) ?? {};
+      // fire-and-forget：不阻塞心跳；预取失败仅 warn（下次心跳再试，含冷却）。
+      const localVersionRef = workspaceId;
+      void (async () => {
+        const local = await readLocalSpecVersion(resolveSpecDir(localVersionRef));
+        if (local !== null && local >= serverVersion) return; // 已不落后（可能刚被创建路径拉起）
+        this._logger.info('spec_prefetch_started', {
+          workspace_id: workspaceId,
+          local_version: local,
+          server_version: serverVersion,
+        });
+        this._specPrefetchLastAttempt.set(workspaceId, Date.now());
+        await this._pullSpecShared(workspaceId, ctx);
+        // 预取成功后回写本地版本到服务器权威值（pull 的整树换目录不含
+        // .runtime——不 bump 则本地恒落后，下跳心跳反复预取、下个会话仍现场
+        // pull，预取白做）。对齐创建路径 pull 后 bumpLocalSpecVersion 语义。
+        await bumpLocalSpecVersion(resolveSpecDir(workspaceId), serverVersion);
+        this._logger.info('spec_prefetch_done', {
+          workspace_id: workspaceId,
+          server_version: serverVersion,
+        });
+      })().catch((e) => {
+        this._logger.warn('spec_prefetch_failed', {
+          workspace_id: workspaceId,
+          error: (e as Error)?.message ?? String(e),
+        });
+      });
+    }
+  }
+
   /**
    * task-06（design A1）：单拍心跳（心跳循环每拍 + 重连对账第 1 步共用）。
    *
@@ -4406,6 +4607,19 @@ export class Daemon {
           : null;
       const commandResultTail: SillySpecCommandResult[] =
         sillyspecCommandResult !== null ? [sillyspecCommandResult] : [];
+      // ql-20260907-010：心跳前对齐会话活跃记账（自愈清账），随后上报本机
+      // spec 缓存清单（best-effort；未枚举到/读失败 → 空数组 → 键不出现）。
+      // 位置参数末位（第 8 参）：在场时由下方扩展占位链保证 5/6/7 槽齐占位，
+      // 不滑入 sillyspec/status/commandResult 槽。
+      this._reconcileSpecSessionActivity();
+      // 运行态门控：spec 缓存上报属运行态心跳行为（未 start 的 daemon——含
+      // 直调 _sendHeartbeatOnce 的测试前置——不上报，心跳位置参数保持旧形态；
+      // 生产心跳循环/重连对账恒为运行态，零影响）。
+      const specCacheEntries = this._running
+        ? await this._collectSpecCacheEntries()
+        : [];
+      const specCacheTail: { workspace_id: string; spec_version: number }[][] =
+        specCacheEntries.length > 0 ? [specCacheEntries] : [];
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
@@ -4424,21 +4638,35 @@ export class Daemon {
         // sillyspec 槽位（位置参数陷阱），hub-client 把摘要当 sillyspec 参数读
         //（version/latest/update 三键全无即静默忽略）→ sillyspec_status 键
         // 不发出、快照被丢弃。task-06 扩展：commandResult 存在时同样触发第 5
-        // 参占位（status/commandResult 任一在场即需占位）。
+        // 参占位（status/commandResult 任一在场即需占位）。ql-20260907-010
+        // 再扩展：specCache 在场同样触发（spec_cache 必须落在第 8 参）。
         ...(
           sillyspecTail.length === 0 &&
-          (statusTail.length > 0 || commandResultTail.length > 0)
+          (statusTail.length > 0 ||
+            commandResultTail.length > 0 ||
+            specCacheTail.length > 0)
             ? [undefined]
             : []
         ),
         // task-06 同坑：status 缺席而 commandResult 存在时，第 6 参须显式
         // undefined 占位——否则 commandResult 滑入 status 槽位（status 参数
-        // 类型不含结果形状，hub-client 静默按 status 发错键）。
-        ...(statusTail.length === 0 && commandResultTail.length > 0
+        // 类型不含结果形状，hub-client 静默按 status 发错键）。ql-20260907-010
+        // 再扩展：specCache 在场同样触发。
+        ...(
+          statusTail.length === 0 &&
+          (commandResultTail.length > 0 || specCacheTail.length > 0)
+            ? [undefined]
+            : []
+        ),
+        // ql-20260907-010：commandResult 缺席而 specCache 存在时，第 7 参须
+        // 显式 undefined 占位——否则 specCache 数组滑入 commandResult 槽位
+        //（结构不含 workspace_id/spec_version，被静默按结果键发错）。
+        ...(commandResultTail.length === 0 && specCacheTail.length > 0
           ? [undefined]
           : []),
         ...statusTail,
         ...commandResultTail,
+        ...specCacheTail,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
@@ -4460,6 +4688,14 @@ export class Daemon {
       // task-06（design A1）：心跳响应 pending_controls > 0 → 控制指令补拉
       //（backend task-04 起携带；旧 backend 无该字段视为 0 不触发）。
       this._maybeTriggerControlPull(hbResp);
+      // ql-20260907-010：spec 版本对答消费——旧 backend / 未携带 → 键缺席，
+      // 视为无对答不预取（心跳保活通道零依赖）。mock client 心跳返回 {} 同样
+      // 安全跳过（既有测试零回归）。
+      const specVersions = (hbResp as { spec_versions?: Record<string, number> })
+        ?.spec_versions;
+      if (specVersions && Object.keys(specVersions).length > 0) {
+        this._maybePrefetchSpecCaches(specVersions);
+      }
       return true;
     } catch (e) {
       // task-06（design A1）：heartbeat 401/403 → 凭证被平台拒绝（D-002 边界外
@@ -4914,6 +5150,148 @@ export class Daemon {
   }
 
   /** Hub HTTP origin（WsClient 内部 http→ws / https→wss 转换）。 */
+  /**
+   * liveness 主循环（task-06 / design §5.2 §4.1，R-02：全程 try 包裹，任何异常
+   * 只 delay 后继续，绝不影响 daemon 主循环与既有链路）。
+   *
+   * 节拍：60s 发现刷新（spawn 记录 + sessions.json + 窗口重扫 + 登记行拉取）
+   * 喂 tailer watch；tailer 自身 10s tick 推导，onResult 缓冲即推（按 workspace
+   * token 分组 Bearer 直推 states 端点；D-012 第一方 pending 覆写 blocked）。
+   * workspace token 读各 root 的 .sillyspec/local.yaml platform 段（init 下发、
+   * daemon 自己写入——local-yaml-writer writeLocalYaml 同源格式）。
+   */
+  private async _livenessLoop(signal: AbortSignal): Promise<void> {
+    const serverUrl = this._serverOrigin();
+    const tailer = new LivenessTailer({
+      intervalMs: 10_000,
+      onResult: (r) => {
+        void this._flushLivenessResults(serverUrl, [r]).catch(() => undefined);
+      },
+    });
+    this._livenessTailer = tailer;
+    tailer.start();
+    try {
+      while (!signal.aborted) {
+        try {
+          await this._refreshLivenessWatch(serverUrl);
+        } catch (e) {
+          if (e instanceof AbortError) break;
+          this._logger.warn('liveness_refresh_failed', { error: String(e) });
+        }
+        // 可中断睡眠（abortableSleep：stop 触发立即醒来退出，不拖 daemon.stop）
+        try {
+          await abortableSleep(60_000, signal);
+        } catch {
+          break;
+        }
+      }
+    } finally {
+      tailer.stop();
+      this._livenessTailer = null;
+    }
+  }
+
+  /** 发现刷新：spawn 记录（活会话）+ 重扫兜底 + 登记行 → tailer watch + 推送元数据。 */
+  private async _refreshLivenessWatch(serverUrl: string): Promise<void> {
+    // spawn 记录瘦身：会话已不在 sessionManager 的条目移除（防无限增长）。
+    for (const [sid] of this._livenessSpawnRecords) {
+      if (this._sessionManager && !this._sessionManager.get(sid)) {
+        this._livenessSpawnRecords.delete(sid);
+      }
+    }
+    const roots = this._effectiveAllowedRoots();
+    // 数据源②（sessions.json 重启恢复，design §5.2）：daemon 重启后内存 spawn 记录
+    // 清空，经恢复的 interactive 会话（provider/cwd）由此层重建发现——覆盖 rescan
+    // 够不着的 codex/zcode（窄扫需 cwd 输入）。加载失败（损坏/缺失）静默空集，
+    // rescan 兜底仍在（claude/pi）。
+    let persistedProviderCwds: Array<{ provider: string; cwd: string; agentSessionId: string | null }> = [];
+    try {
+      persistedProviderCwds = (await new JsonSessionPersistence().load()).map((r) => ({
+        provider: r.provider,
+        cwd: r.cwd,
+        agentSessionId: r.agentSessionId || null,
+      }));
+    } catch {
+      persistedProviderCwds = [];
+    }
+    const targets: WatchTarget[] = discoverLivenessWatchTargets({
+      spawnRecords: [
+        ...[...this._livenessSpawnRecords.entries()].map(([agentSessionId, r]) => ({
+          provider: r.provider,
+          cwd: r.cwd,
+          agentSessionId,
+        })),
+        ...persistedProviderCwds,
+      ],
+      rescan: true,
+      resolveWorkspace: () => 'daemon',
+    });
+    // 登记行增强源：各 root 的 local.yaml token 拉本 workspace 已登记日志。
+    const rootTokens = await Promise.all(
+      roots.map(async (root) => ({ root, token: await this._readRootPlatformToken(root) })),
+    );
+    for (const { root, token } of rootTokens) {
+      if (!token) continue;
+      const registered = await fetchRegisteredAgentLogs(serverUrl, token);
+      for (const it of registered) {
+        targets.push({
+          logPath: it.log_path,
+          format: it.format ?? 'unknown',
+          workspace: 'daemon',
+          harness: it.harness,
+          agentSessionId: it.session_id,
+          source: 'registry-sync',
+        });
+      }
+    }
+    for (const t of targets) {
+      // 推送元数据：token 取 cwd 命中的 root（登记行按 agent_cwd 归属；无 cwd 用首个有 token 的 root）。
+      const root =
+        rootTokens.find((rt) => rt.token && t.logPath.includes(_posixRoot(rt.root)))?.root ??
+        rootTokens.find((rt) => rt.token)?.root;
+      const token = root ? await this._readRootPlatformToken(root) : undefined;
+      if (!token) continue;
+      this._livenessMetaByPath.set(t.logPath, {
+        serverUrl,
+        token,
+        harness: t.harness,
+        format: t.format,
+        agentSessionId: t.agentSessionId ?? null,
+        agentCwd: undefined,
+      });
+      this._livenessTailer?.add(t);
+    }
+  }
+
+  /** 推送一批推导结果（按 token 分组 + D-012 第一方覆盖；best-effort）。 */
+  private async _flushLivenessResults(serverUrl: string, results: Parameters<typeof buildAgentLogStatePushGroups>[0]): Promise<void> {
+    const groups = buildAgentLogStatePushGroups(results, this._livenessMetaByPath, (sid) => {
+      const resolver = this._sessionManager?.getPermissionResolver(sid);
+      return (resolver?.pendingCount ?? 0) > 0;
+    });
+    for (const g of groups.values()) {
+      // 分批 ≤64（端点上限）。
+      for (let i = 0; i < g.items.length; i += 64) {
+        const ok = await pushAgentLogStates(serverUrl, g.token, g.items.slice(i, i + 64));
+        if (!ok) this._logger.debug?.('liveness_push_failed', { count: g.items.length });
+      }
+    }
+  }
+
+  /** 读 root 的 local.yaml platform 段 token（无段/无 token → null）。 */
+  private async _readRootPlatformToken(root: string): Promise<string | null> {
+    try {
+      const text = await readFile(join(root, '.sillyspec', 'local.yaml'), 'utf8');
+      const range = findTopLevelSectionRange(text, 'platform');
+      if (!range) return null;
+      const section = text.slice(range.start, range.end);
+      const m = /^\s*token:\s*(\S+)\s*$/m.exec(section);
+      return m?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private _serverOrigin(): string {
     return this._config.server_url.replace(/\/+$/, '');
   }
@@ -5069,6 +5447,11 @@ export class Daemon {
     // RPC（工作区文件浏览器，design §7.1）。roots 每次 RPC 现取 _effectiveAllowedRoots()，
     // **不**照抄裸 list_dir 的空 roots 跳校验写法（design §5 关键安全设计 1 警示条）。
     this._registerExplorerRpcHandler(ws);
+    // task-02（2026-09-07-conflict-diff-compare）：注册 sillyspec_conflict_snapshot
+    // 只读冲突快照 RPC——backend compare 编排实时拉取本地侧冲突内容与 ql 编号
+    //（design §5 Phase 1 / §7.1）。业务全在 SillySpecManager.conflictSnapshot，
+    // RpcError code 经 _dispatchRpc 原样回填（explorer 系同约定）。
+    this._registerSillySpecRpcHandler(ws);
     // task-01（2026-08-25-workspace-git-log）：注册 git_log 系四只读 RPC（平名，
     // design §5.2 CC-02 / §7.2 契约），供 backend git_log 模块经 MemberBindingResolver
     // 解析绑定后直连（不走 host_fs. 前缀降级通道）。task-01（2026-08-26-
@@ -5371,6 +5754,29 @@ export class Daemon {
           ? EXPLORER_DEFAULT_MAX_RESULTS
           : (params.max_results as number);
       return explorerSearch(root, query, this._effectiveAllowedRoots(), maxResults);
+    });
+  }
+
+  /**
+   * task-02（2026-09-07-conflict-diff-compare / design §5 Phase 1 第 2 条 + §7.1）：
+   * 注册 sillyspec_conflict_snapshot 只读冲突快照 RPC——backend compare 编排端点
+   * 经 ws_hub.send_rpc 实时拉取本地侧冲突内容与 ql 编号（D-001@v1 方案A，请求/
+   * 响应式，区别于一写即忘的裁决通道）。
+   *
+   * params 归一对齐既有 handler 写法：change/kind 非字符串或缺省归一为空串，由
+   * manager.conflictSnapshot 入口断言拒 RpcError('invalid_params')；handler 不吞
+   * RpcError（no_spec_root / conflict_record_missing 等语义码原样上抛），交
+   * ws-client._dispatchRpc 回填 error.code（explorer / git 系同约定）。
+   */
+  private _registerSillySpecRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('sillyspec_conflict_snapshot', async (params) => {
+      const change = typeof params.change === 'string' ? params.change : '';
+      const kind = typeof params.kind === 'string' ? params.kind : '';
+      return this._sillyspecManager.conflictSnapshot(change, kind);
     });
   }
 
@@ -6051,6 +6457,8 @@ export class Daemon {
       case MSG.SESSION_END: {
         await this._sessionManager.end(sessionId);
         this._interactiveSessionsByLease.delete(state.leaseId);
+        // ql-20260907-010：会话终局清活跃记账（后台预取门控解除）。
+        this._noteSessionInactive(sessionId);
         break;
       }
       default: {
@@ -6082,13 +6490,29 @@ export class Daemon {
    * Restart=always 场景会拖慢新实例接管）。停机即中止等待：不报 run failed
    * （消息未处理的原因是 daemon 退出而非会话未建，语义不符；backend 侧由
    * 控制指令 GC 兜底收敛），仅 warn 留痕。
+   *
+   * ql-20260907-003（quick）：在途 lease 延长——实机案（会话 1a9c601c）create
+   * 全链偶发超 60s 基础窗口，超时被当会话不存在丢弃（重发即恢复的瞬时竞态）。
+   * 该 inject 的 lease_id 仍在 _inflightLeases（_executeTask 全程维护，create
+   * 在途证据）期间逐拍续推 deadline，硬顶 waitMs + extendMaxMs（默认 60s+240s
+   * =5min）；离开在途（create 完成/失败/异常）后停推，余量到期回落原丢弃。
+   * lease 不在途的真不存在会话行为不变（零回归）。
    */
   private async _awaitSessionThenRoute(
     sessionId: string,
     raw: Record<string, unknown>,
   ): Promise<void> {
     const waitMs = injectWaitSessionMs();
-    const deadline = Date.now() + waitMs;
+    // ql-20260907-003：在途 lease 延长（见常量注释）。deadline 在 lease 于
+    // _inflightLeases 期间逐拍续推（now+waitMs），硬顶 startedAt+waitMs+extendMax；
+    // 离开在途即停推，窗口余量走完自然到期（回落原丢弃语义）。
+    const extendMaxMs = injectWaitInflightExtendMs();
+    const leaseId =
+      (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
+    const startedAt = Date.now();
+    const hardDeadline = startedAt + waitMs + extendMaxMs;
+    let deadline = startedAt + waitMs;
+    let extendLogged = false;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, INJECT_WAIT_POLL_MS));
       if (!this._running) {
@@ -6100,7 +6524,7 @@ export class Daemon {
       if (this._sessionManager?.get(sessionId)) {
         this._logger.info('inject_wait_session_appeared', {
           session_id: sessionId,
-          waited_ms: waitMs - (deadline - Date.now()),
+          waited_ms: Date.now() - startedAt,
         });
         try {
           await this._routeSessionControl(MSG.SESSION_INJECT, raw);
@@ -6112,14 +6536,30 @@ export class Daemon {
         }
         return;
       }
+      if (leaseId && this._inflightLeases.has(leaseId)) {
+        const next = Math.min(Date.now() + waitMs, hardDeadline);
+        if (next > deadline) {
+          deadline = next;
+          if (!extendLogged) {
+            extendLogged = true;
+            this._logger.info('inject_wait_extended_inflight', {
+              session_id: sessionId,
+              lease_id: leaseId,
+              base_wait_ms: waitMs,
+              hard_deadline_ms: waitMs + extendMaxMs,
+            });
+          }
+        }
+      }
     }
     this._logger.warn('inject_wait_session_timeout', {
       session_id: sessionId,
       wait_ms: waitMs,
+      waited_ms: Date.now() - startedAt,
     });
     await this._reportInjectDropped(
       raw,
-      `daemon 本地无该会话状态（等待 ${waitMs}ms 会话仍未创建，可能已结束、或 daemon 重启后未恢复），消息未被处理`,
+      `daemon 本地无该会话状态（等待 ${Date.now() - startedAt}ms 会话仍未创建，可能已结束、或 daemon 重启后未恢复），消息未被处理`,
     );
   }
 
@@ -6620,6 +7060,24 @@ export class Daemon {
     const sessionId = execPayload.agentSessionId ?? '';
     const firstRunId = execPayload.agentRunId ?? '';
     let prompt = execPayload.prompt ?? '';
+
+    // ql-20260907-005：create 链分步计时（慢启动归因用，接 ql-20260907-003 等待侧
+    // 兜底——实机 >60s 慢启动案此前无分步数据只能猜）。各段完成即记
+    // interactive_create_step（后置步骤挂死/超时时，已完成的分步日志可定位停点），
+    // timings 汇总进 interactive_session_started / create_failed 的 total_ms。
+    // 未埋点的段（字段校验/守卫/spec_root 翻译/buildSpawnEnv）均为内存级或单 stat。
+    const createStartedAt = Date.now();
+    const timings: Record<string, number> = {};
+    const endStep = (step: string, stepStartedAt: number): void => {
+      const elapsed = Date.now() - stepStartedAt;
+      timings[step] = elapsed;
+      this._logger.info('interactive_create_step', {
+        session_id: sessionId,
+        step,
+        elapsed_ms: elapsed,
+      });
+    };
+
     // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
     // /data/spec-workspaces/{id}）；daemon 跑在宿主机上（Windows/Mac），本地无 /data。
     // spec_root_map 格式 "from:to"，如 "/data/spec-workspaces:C:/data/spec-workspaces"。
@@ -6678,6 +7136,7 @@ export class Daemon {
       rawRootPath.startsWith(BORROW_SANDBOX_MARKER)
     ) {
       const sandboxSlug = rawRootPath.slice(BORROW_SANDBOX_MARKER.length);
+      const borrowStart = Date.now();
       try {
         borrowSandboxRoot = await this._getBorrowWorkspaceManager().prepareWorkspace(
           sandboxSlug,
@@ -6700,6 +7159,7 @@ export class Daemon {
           fallback_cwd: cwd,
         });
       }
+      endStep('borrow_sandbox_ms', borrowStart);
     } else {
       // 非借用：rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
       // 2026-08-28-fix-cross-machine-worker-dispatch task-06（Grill D-1.2 修订）：
@@ -6731,6 +7191,9 @@ export class Daemon {
       });
       return;
     }
+
+    // 2026-09-07-agent-liveness-states task-06：spawn 记录（自发现数据源①，design §5.2）。
+    this._livenessSpawnRecords.set(sessionId, { provider, cwd });
 
     // 跨机派发守卫（2026-08-28-fix-cross-machine-worker-dispatch task-06 / FR-05 / D-004@v1）：
     // workspace 绑定会话（rootPath 非空且非借用沙箱 marker）——白名单终检先行 +
@@ -6858,17 +7321,6 @@ export class Daemon {
       }
     }
 
-    // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 cwd/.claude/skills/，让 claude
-    // 能加载 sillyspec/custom skills（syncSkills 同步到 ~/.sillyhub/daemon/skills/，
-    // claude 只读 <cwd>/.claude/skills/——不接线则交互式会话看不到技能）。失败仅 warn。
-    try {
-      await linkSkillsToWorkdir(cwd, (level, msg, data) => {
-        this._logger[level](msg, data);
-      });
-    } catch (e) {
-      this._logger.warn('interactive_link_skills_failed', { lease_id: leaseId, error: String(e) });
-    }
-
     // gap-8（interactive 凭证 parity）+ task-09（X-02 门控独立化）：
     // 与 batch 一致用 buildSpawnEnv 构造子进程 env，让 driver 能读到 credentials.json
     // 的 ANTHROPIC token（+ lease tool_config 占位符渲染）。**provider_config 第 0 层
@@ -6933,79 +7385,125 @@ export class Daemon {
       : ((execPayload as { rootPath?: string }).rootPath ??
         (execPayload as { root_path?: string }).root_path);
 
-    // task-09：借用 session 跳过 spec pull（业务/管理人员读源码，不写 spec；沙箱 cwd 也
-    // 非 spec 根）。非借用维持 tar/shared 原逻辑。
-    if (transport === 'tar' && !borrowSandboxRoot) {
-      if (!workspaceId) {
-        // 边界 5：transport=tar 但 workspaceId 缺失 → task-03 透传链路异常，warn 不阻塞。
-        this._logger.warn('interactive_spec_pull_no_workspace', {
-          lease_id: leaseId,
+    // ql-20260907-010：工作区级记账——pull 上下文供心跳后台预取复用（防
+    // repo-native junction 被默认参数降级覆盖），会话活跃供预取门控（agent
+    // 在读写 spec 目录时绝不后台动盘）。清账：create catch + SESSION_END +
+    // 心跳自愈三路兜底。
+    this._noteSpecPullContext(workspaceId, { strategy: specStrategy, rootPath: specRootPath });
+    this._noteSessionActive(sessionId, workspaceId);
+
+    // ql-20260907-006：前置链并行化——skills 拷贝 / spec pull / MCP 预取三步互相
+    // 无数据依赖（skills 只需 cwd；spec pull 写 ~/.sillyhub/daemon/specs 本地缓存，
+    // 与 cwd 无关；MCP 预取写会话级缓存，只需在下方 create 前完成——由 Promise.all
+    // 收口保证），原串行实现总耗时 = 三者之和（Windows 实机慢启动主因之一），
+    // 现临界路径 = 最慢者。各步自带容错（warn 继续）+ 闭包外层防御 catch（任何
+    // 一步的意外异常都不炸整条 create 链），互不拖累。分步计时（ql-20260907-005）
+    // 仍按各步独立记录：并行后各段之和可大于 total_ms，属预期。
+    // 2026-07-08 修复（skills 步）：spawn 前把同步的平台 skills 拷到 cwd/.claude/skills/
+    // 让 claude 能加载（syncSkills 同步到 ~/.sillyhub/daemon/skills/，claude 只读
+    // <cwd>/.claude/skills/——不接线则交互式会话看不到技能）。失败仅 warn。
+    const skillsStep = async (): Promise<void> => {
+      const skillsStart = Date.now();
+      try {
+        await linkSkillsToWorkdir(cwd, (level, msg, data) => {
+          this._logger[level](msg, data);
         });
-      } else {
-        // task-11（D-010 日常保鲜）：pull 前比对 lease latest_spec_version 与本地
-        // `.runtime/spec-version.json.spec_version`（D-001@v1）。一致 → 跳过 pull（interactive 路径仍
-        // set specSyncCtx 保证 onSessionEnd 回灌）；不一致 / 本地无记录 → pullSpecBundle
-        // 刷新，成功后 bumpLocalSpecVersion 回写新版本。lease 未透传 latest_spec_version
-        //（旧 backend）→ 保持旧行为（无条件 pull）。
-        const leaseSpecVersion =
-          (execPayload as { latestSpecVersion?: number }).latestSpecVersion ??
-          (execPayload as { latest_spec_version?: number }).latest_spec_version;
-        let skipPullDueToVersion = false;
-        if (leaseSpecVersion !== undefined) {
-          const localVersion = await readLocalSpecVersion(resolveSpecDir(workspaceId));
-          if (!shouldRefreshSpec(localVersion, leaseSpecVersion)) {
-            skipPullDueToVersion = true;
-            this._logger.info('interactive_spec_version_fresh_skip_pull', {
-              lease_id: leaseId,
-              workspace_id: workspaceId,
-              spec_version: localVersion,
-            });
-          }
-        }
-        // 无论 pull 与否，specSyncCtx 都登记（interactive 路径 onSessionEnd 兜底回灌）。
-        this._interactiveSpecSyncCtx.set(leaseId, { workspaceId });
-        if (skipPullDueToVersion) {
-          // 版本一致跳过 pull：仍 info 一次便于观测，specSyncCtx 已 set。
-          this._logger.info('interactive_spec_pulled', {
-            lease_id: leaseId,
-            workspace_id: workspaceId,
-            spec_dir: resolveSpecDir(workspaceId),
-            skipped: 'version_fresh',
-          });
-        } else {
-          try {
-            // `as never`：ClientLike 是 daemon 内部鸭子类型，spec-sync utility 期望 HubClient
-            // 具体类型；ClientLike 已声明 getSpecBundle/postSpecSync 签名（additive），运行时
-            // 真实 _client 为 HubClient 实例（main.ts 注入），duck-type 安全（task-06 §4.1/边界 11）。
-            const specDir = await pullSpecBundle(
-              this._client as never,
-              workspaceId,
-              { strategy: specStrategy, rootPath: specRootPath },
-            );
-            // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
-            // lease 带了 latest_spec_version → 回写本地版本保鲜（D-010）。
-            if (leaseSpecVersion !== undefined) {
-              await bumpLocalSpecVersion(resolveSpecDir(workspaceId), leaseSpecVersion);
-            }
-            this._logger.info('interactive_spec_pulled', {
-              lease_id: leaseId,
-              workspace_id: workspaceId,
-              spec_dir: specDir,
-            });
-          } catch (e) {
-            // R-03 容错：pull 失败（5xx/网络，404 已被 utility 容错）不阻塞 session 启动。
-            // agent 仍可跑（读不到缓存则 sillyspec 生成新文档）。specSyncCtx 已 set，
-            // onSessionEnd 仍会尝试回灌（保守：即使 pull 失败也回传本地状态）。
-            this._logger.warn('interactive_spec_pull_failed', {
-              lease_id: leaseId,
-              workspace_id: workspaceId,
-              error: (e as Error)?.message ?? String(e),
-            });
-          }
-        }
+      } catch (e) {
+        this._logger.warn('interactive_link_skills_failed', { lease_id: leaseId, error: String(e) });
       }
-    }
-    // transport !== 'tar'（shared）→ 跳过 pull + 不 set specSyncCtx（onSessionEnd 自然跳过 sync）。
+      endStep('skills_ms', skillsStart);
+    };
+
+    // task-09：借用 session 跳过 spec pull（业务/管理人员读源码，不写 spec；沙箱 cwd 也
+    // 非 spec 根）。非借用维持 tar/shared 原逻辑。计时覆盖整个分支（版本比对跳过路径
+    // 的 ~0ms 本身即「跳过生效」的观测证据，ql-20260907-005）。
+    const specStep = async (): Promise<void> => {
+      const specPullStart = Date.now();
+      try {
+        if (transport === 'tar' && !borrowSandboxRoot) {
+          if (!workspaceId) {
+            // 边界 5：transport=tar 但 workspaceId 缺失 → task-03 透传链路异常，warn 不阻塞。
+            this._logger.warn('interactive_spec_pull_no_workspace', {
+              lease_id: leaseId,
+            });
+          } else {
+            // task-11（D-010 日常保鲜）：pull 前比对 lease latest_spec_version 与本地
+            // `.runtime/spec-version.json.spec_version`（D-001@v1）。一致 → 跳过 pull（interactive 路径仍
+            // set specSyncCtx 保证 onSessionEnd 回灌）；不一致 / 本地无记录 → pullSpecBundle
+            // 刷新，成功后 bumpLocalSpecVersion 回写新版本。lease 未透传 latest_spec_version
+            //（旧 backend）→ 保持旧行为（无条件 pull）。
+            const leaseSpecVersion =
+              (execPayload as { latestSpecVersion?: number }).latestSpecVersion ??
+              (execPayload as { latest_spec_version?: number }).latest_spec_version;
+            let skipPullDueToVersion = false;
+            if (leaseSpecVersion !== undefined) {
+              const localVersion = await readLocalSpecVersion(resolveSpecDir(workspaceId));
+              if (!shouldRefreshSpec(localVersion, leaseSpecVersion)) {
+                skipPullDueToVersion = true;
+                this._logger.info('interactive_spec_version_fresh_skip_pull', {
+                  lease_id: leaseId,
+                  workspace_id: workspaceId,
+                  spec_version: localVersion,
+                });
+              }
+            }
+            // 无论 pull 与否，specSyncCtx 都登记（interactive 路径 onSessionEnd 兜底回灌）。
+            this._interactiveSpecSyncCtx.set(leaseId, { workspaceId });
+            if (skipPullDueToVersion) {
+              // 版本一致跳过 pull：仍 info 一次便于观测，specSyncCtx 已 set。
+              this._logger.info('interactive_spec_pulled', {
+                lease_id: leaseId,
+                workspace_id: workspaceId,
+                spec_dir: resolveSpecDir(workspaceId),
+                skipped: 'version_fresh',
+              });
+            } else {
+          try {
+            // ql-20260907-010：single-flight 拉取——同工作区并发创建共享同一
+            // promise（不再各拉一份全量 bundle），心跳后台预取在途时直接等它。
+            // `as never`：ClientLike 是 daemon 内部鸭子类型，spec-sync utility 期望
+            // HubClient 具体类型；ClientLike 已声明 getSpecBundle/postSpecSync
+            // 签名（additive），运行时真实 _client 为 HubClient 实例（main.ts
+            // 注入），duck-type 安全（task-06 §4.1/边界 11）——该断言已收进
+            // _pullSpecShared，此处不再直调 pullSpecBundle。
+            const specDir = await this._pullSpecShared(workspaceId, {
+              strategy: specStrategy,
+              rootPath: specRootPath,
+            });
+                // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
+                // lease 带了 latest_spec_version → 回写本地版本保鲜（D-010）。
+                if (leaseSpecVersion !== undefined) {
+                  await bumpLocalSpecVersion(resolveSpecDir(workspaceId), leaseSpecVersion);
+                }
+                this._logger.info('interactive_spec_pulled', {
+                  lease_id: leaseId,
+                  workspace_id: workspaceId,
+                  spec_dir: specDir,
+                });
+              } catch (e) {
+                // R-03 容错：pull 失败（5xx/网络，404 已被 utility 容错）不阻塞 session 启动。
+                // agent 仍可跑（读不到缓存则 sillyspec 生成新文档）。specSyncCtx 已 set，
+                // onSessionEnd 仍会尝试回灌（保守：即使 pull 失败也回传本地状态）。
+                this._logger.warn('interactive_spec_pull_failed', {
+                  lease_id: leaseId,
+                  workspace_id: workspaceId,
+                  error: (e as Error)?.message ?? String(e),
+                });
+              }
+            }
+          }
+        }
+        // transport !== 'tar'（shared）→ 跳过 pull + 不 set specSyncCtx（onSessionEnd 自然跳过 sync）。
+      } catch (e) {
+        // ql-20260907-006 防御外层（readLocalSpecVersion 等未内包 try 的 await）：
+        // 闭包绝不 reject（Promise.all 不被单步意外炸掉），warn 继续。
+        this._logger.warn('interactive_spec_pull_step_failed', {
+          lease_id: leaseId,
+          error: (e as Error)?.message ?? String(e),
+        });
+      }
+      endStep('spec_pull_ms', specPullStart);
+    };
 
     // task-07（2026-08-26-workspace-mcp-edit / design §5 Wave2 第 5 条 / D-007@v2）：
     // 会话级 MCP 三件套预取。有 workspaceId（工作区会话，覆盖普通对话 + 主控，
@@ -7013,57 +7511,73 @@ export class Daemon {
     // provider 随 create 被同步调用）**之前** await fetchMcpBundle 拉取「平台默认
     // + 白名单 + 工作区配置」写入会话级缓存（key=sessionId，与 cli.ts
     // mainAgentMcpConfigProvider 共享同一 Map 引用——provider 同步签名不能
-    // await，只能读缓存，故必须 create 前完成）。fetchMcpBundle 全链路容错回落
-    // （platform→本地文件 / workspace→空 / whitelist→[]）且设计永不抛，任何失败
-    // 仅 warn 不阻塞会话创建（R-03）。无 workspaceId（quick-chat/legacy shared）
-    // 不预取——provider 缓存 miss 回落空 bundle，行为与现状一致。
+    // await，只能读缓存，故必须 create 前完成——Promise.all 收口保证）。
+    // fetchMcpBundle 全链路容错回落（platform→本地文件 / workspace→空 /
+    // whitelist→[]）且设计永不抛，任何失败仅 warn 不阻塞会话创建（R-03）。
+    // 无 workspaceId（quick-chat/legacy shared）不预取——provider 缓存 miss
+    // 回落空 bundle，行为与现状一致。
     // restore/reload：reload（会话存活期）缓存条目仍在 → 命中；daemon 重启
     // restore 内存缓存必然缺失 → provider 回落空 + warn（cli.ts 侧记
     // mcp_bundle_cache_miss）。同步重取不可行（provider 同步签名 +
     // PersistedSessionRecord/SESSION_RESUME payload 均不携带 workspaceId，无从
     // 定向重取）——后续增强点：restore 链路补 workspace 下发 + 异步重取供下次
     // reload 用（D-007@v2 完整形态，本任务最小实现先回落）。
-    if (workspaceId) {
+    const mcpStep = async (): Promise<void> => {
+      const mcpPrefetchStart = Date.now();
       try {
-        const bundle = await fetchMcpBundle(
-          this._config.server_url,
-          this._config.token,
-          workspaceId,
-          (level, msg, data) => {
-            this._logger[level](msg, data);
-          },
-          this._config.api_key ?? undefined,
-        );
-        this._mcpBundleBySession.set(sessionId, bundle);
-        this._logger.debug('mcp_bundle_prefetched', {
-          session_id: sessionId,
-          workspace_id: workspaceId,
-          platform_servers: Object.keys(bundle.platform.mcpServers).length,
-          workspace_servers: Object.keys(bundle.workspace.mcpServers).length,
-          whitelist_size: bundle.whitelist.length,
-        });
+        if (workspaceId) {
+          try {
+            const bundle = await fetchMcpBundle(
+              this._config.server_url,
+              this._config.token,
+              workspaceId,
+              (level, msg, data) => {
+                this._logger[level](msg, data);
+              },
+              this._config.api_key ?? undefined,
+            );
+            this._mcpBundleBySession.set(sessionId, bundle);
+            this._logger.debug('mcp_bundle_prefetched', {
+              session_id: sessionId,
+              workspace_id: workspaceId,
+              platform_servers: Object.keys(bundle.platform.mcpServers).length,
+              workspace_servers: Object.keys(bundle.workspace.mcpServers).length,
+              whitelist_size: bundle.whitelist.length,
+            });
+          } catch (e) {
+            // 防御性兜底（fetchMcpBundle 设计永不抛，此处防意外异常）：写空 bundle
+            // + warn，绝不阻塞会话创建（R-03 / 验收 1）——provider 读到空 bundle
+            // 时仅注入内置双 server，等价现状行为。
+            this._mcpBundleBySession.set(sessionId, {
+              platform: { mcpServers: {} },
+              whitelist: [],
+              workspace: { mcpServers: {} },
+            });
+            this._logger.warn('mcp_bundle_prefetch_failed', {
+              session_id: sessionId,
+              workspace_id: workspaceId,
+              error: (e as Error)?.message ?? String(e),
+            });
+          }
+        }
       } catch (e) {
-        // 防御性兜底（fetchMcpBundle 设计永不抛，此处防意外异常）：写空 bundle
-        // + warn，绝不阻塞会话创建（R-03 / 验收 1）——provider 读到空 bundle
-        // 时仅注入内置双 server，等价现状行为。
-        this._mcpBundleBySession.set(sessionId, {
-          platform: { mcpServers: {} },
-          whitelist: [],
-          workspace: { mcpServers: {} },
-        });
-        this._logger.warn('mcp_bundle_prefetch_failed', {
-          session_id: sessionId,
-          workspace_id: workspaceId,
+        // ql-20260907-006 防御外层：闭包绝不 reject，warn 继续。
+        this._logger.warn('interactive_mcp_prefetch_step_failed', {
+          lease_id: leaseId,
           error: (e as Error)?.message ?? String(e),
         });
       }
-    }
+      endStep('mcp_prefetch_ms', mcpPrefetchStart);
+    };
+
+    await Promise.all([skillsStep(), specStep(), mcpStep()]);
 
     // ql-20260825-002：原 2026-07-08「派发 prompt 记入 agent 日志」的 user_input
     // 上报已删除——backend create_session 已落一条 user_input（带附件标记行版本，
     // 无论 daemon 死活都在库），daemon 再报一条裸文本造成双日志 + 双回显（首句
     // 渲染两个气泡的根因之一）。claude 秒退场景的可见性由 backend 那条覆盖。
 
+    const createStepStart = Date.now();
     try {
       await this._sessionManager.create({
         sessionId,
@@ -7130,6 +7644,7 @@ export class Daemon {
         // read_only=[Read,Glob,Grep]，写 worker=[...+Edit,Write,Bash]。absent → SDK 默认。
         allowedTools: (execPayload.toolConfig as { allowed_tools?: string[] } | undefined)?.allowed_tools,
       });
+      endStep('create_ms', createStepStart);
       // task-09（D-007@v2 候选 B）：借用 session 登记沙箱根，激活 SessionManager
       // 按 lease 隔离的只读 policy（写守卫只允许落沙箱内，不命中 lender runtime 缓存）。
       // create 成功后立即登记（同步，在 SDK 跑首 turn 前生效）；非借用 session 不登记，
@@ -7142,6 +7657,8 @@ export class Daemon {
         session_id: sessionId,
         run_id: firstRunId,
         borrow_sandbox: borrowSandboxRoot ?? null,
+        timings,
+        total_ms: Date.now() - createStartedAt,
       });
       // task-02（design Phase 1 / FR-01）：create 成功后上报 session ready，让 backend
       // inject_session 的 ready wait 解除（修复 inject 在 create 完成前到达被丢导致
@@ -7155,6 +7672,8 @@ export class Daemon {
       // rethrow（不触发 onSessionEnd）——此前注释称「已标 failed（onSessionEnd）」
       // 与实现不符（2026-08-24 会话审查 P2b/daemon H4 修正）。
       this._interactiveSessionsByLease.delete(leaseId);
+      // ql-20260907-010：会话终局清活跃记账（后台预取门控解除）。
+      this._noteSessionInactive(sessionId);
       // task-07（D-007@v2）：create 失败路径不经 onSessionEnd，显式清会话级 MCP
       // bundle 缓存（防泄漏；WS 重放重试时会重新预取，幂等安全）。
       this._mcpBundleBySession.delete(sessionId);
@@ -7166,6 +7685,8 @@ export class Daemon {
         session_id: sessionId,
         code,
         error: e,
+        timings,
+        total_ms: Date.now() - createStartedAt,
       });
       // P2b（daemon H4）治本：create 失败必须回传 run failed。interactive lease
       // lease_expires_at=NULL（长生命周期）+ WS 不失活时 backend 永不收 failed，
@@ -7708,4 +8229,9 @@ export class Daemon {
       this._sigintHandler = null;
     }
   }
+}
+
+/** root → POSIX 化（liveness 登记行按路径前缀归属 root 用，task-06）。 */
+function _posixRoot(root: string): string {
+  return root.replace(/\\/g, '/');
 }

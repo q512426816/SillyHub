@@ -8,7 +8,7 @@
 
 | ID | 问题 | 位置 | 复核 | 状态 |
 |----|------|------|------|------|
-| DA-1 | daemon shell 回退路径 spawn 参数零转义：`.bat/.ps1/wrapper` 及 `.cmd` 解析失败时走 `shell:true`，cursor 分支把用户完整 prompt、backend 下发的 model 作位置参数拼进 cmd.exe 命令行，含 `&`\|`>` 等元字符即命令注入 | sillyhub-daemon/src/task-runner.ts:1183-1193、src/adapters/stream-json.ts:290-308 | ✅ | 已修复（2026-08-20）|
+| DA-1 | daemon shell 回退路径 spawn 参数零转义：`.bat/.ps1/wrapper` 及 `.cmd` 解析失败时走 `shell:true`，cursor 分支把用户完整 prompt、backend 下发的 model 作位置参数拼进 cmd.exe 命令行，含 `&`\|`>` 等元字符即命令注入 | sillyhub-daemon/src/task-runner.ts:1183-1193、src/adapters/stream-json.ts | ✅ | 已修复（2026-08-20）|
 
 ## 二、P1（安全/数据完整性/阻塞 CI）
 
@@ -26,22 +26,22 @@
 | ID | 问题 | 位置 | 复核 | 状态 |
 |----|------|------|------|------|
 | BQ-1 | 任务计划 Excel 导出走分页 page_size=200 静默截断，超 200 行丢数据无提示（工时导出走 list_for_export limit=5000，不一致） | backend/app/modules/ppm/task/router.py:244-267 | ✅ | 已修复（2026-08-20）|
-| BQ-2 | knowledge 服务 4 个 async 方法同步全树解析（rglob+read）占事件循环；get 单个文件也全量重扫（scan_docs 已改线程版，此处漏改） | backend/app/modules/knowledge/service.py:50,57,72,78 + parser.py:34-41 | 🤖 | 已修复（2026-08-20）|
-| BQ-3 | `create_change` async 内同步 mkdir + 3 次 write_text 占事件循环（同文件 267-270 已按规范用 to_thread，自相矛盾） | backend/app/modules/change_writer/service.py:144-158 | 🤖 | 已修复（2026-08-20）|
+| BQ-2 | knowledge 服务 4 个 async 方法同步全树解析（rglob+read）占事件循环；get 单个文件也全量重扫（scan_docs 已改线程版，此处漏改） | backend/app/modules/knowledge/service.py:50,57,72,78 + backend/app/modules/knowledge/parser.py:34-41 | 🤖 | 已修复（2026-08-20）|
+| BQ-3 | `create_change` async 内同步 mkdir + 3 次 write_text 占事件循环（同文件 267-270 已按规范用 to_thread，自相矛盾） | backend/app/modules/change_writer/service.py:111 | 🤖 | 已修复（2026-08-20）|
 | BQ-4 | 周计划导出模板 `Path("templates/...")` 依赖 CWD，仅 Docker WORKDIR=/app 下成立，仓库根启动即 FileNotFoundError（违反跨平台规则 13） | backend/app/modules/ppm/plan/router.py:920 | 🤖 | 已修复（2026-08-20）|
 
 ### 前端
 
 | ID | 问题 | 位置 | 复核 | 状态 |
 |----|------|------|------|------|
-| FE-2 | `tsc --noEmit` exit 1：测试文件引用组件已删除的 `__setBindingMap` 导出（TS2305）+ unknown→ReactNode（TS2322），阻塞 CI 类型门禁 | frontend/src/components/sessions/__tests__/new-session-form.test.tsx:47,97,858,927、workspace-session-picker.test.tsx:66 | ✅ | 已修复（2026-08-20）|
+| FE-2 | `tsc --noEmit` exit 1：测试文件引用组件已删除的 `__setBindingMap` 导出（TS2305）+ unknown→ReactNode（TS2322），阻塞 CI 类型门禁 | frontend/src/components/sessions/__tests__/new-session-form.test.tsx,97,858,927、workspace-session-picker.test.tsx | ✅ | 已修复（2026-08-20）|
 
 ### daemon
 
 | ID | 问题 | 位置 | 复核 | 状态 |
 |----|------|------|------|------|
-| DA-2 | `get_spec_bundle` RPC 无 allowed_roots 守卫，恶意/失陷 backend 可打包宿主任意路径 `.sillyspec` 整树外传（同文件其余 host_fs handler 均有校验） | sillyhub-daemon/src/daemon.ts:2383-2395 | ✅ | 已修复（2026-08-20）|
-| DA-5 | shell:true 路径下 `_killChild` 只杀 cmd.exe 包装层，agent 孙进程成孤儿继续烧 token（runtime-handler 已有 taskkill /PID /T /F 范式未复用） | sillyhub-daemon/src/task-runner.ts:2234-2241 | ✅ | 已修复（2026-08-20）|
+| DA-2 | `get_spec_bundle` RPC 无 allowed_roots 守卫，恶意/失陷 backend 可打包宿主任意路径 `.sillyspec` 整树外传（同文件其余 host_fs handler 均有校验） | sillyhub-daemon/src/daemon.ts | ✅ | 已修复（2026-08-20）|
+| DA-5 | shell:true 路径下 `_killChild` 只杀 cmd.exe 包装层，agent 孙进程成孤儿继续烧 token（runtime-handler 已有 taskkill /PID /T /F 范式未复用） | sillyhub-daemon/src/task-runner.ts:2456 | ✅ | 已修复（2026-08-20）|
 
 ### CI
 
@@ -63,18 +63,18 @@
 | BS-5 | OpenAPI 三端点（/api/docs /redoc /openapi.json）无条件开放，匿名可枚举全部攻击面 | backend/app/main.py:192-194 | 已修复（2026-08-20）|
 | BS-6 | /api/system-status 匿名返回用户数/业务统计/CPU内存磁盘 | backend/app/modules/health/router.py:80-126 | 不修（首页看板匿名用，需产品决策，另开变更） |
 | BS-7 | MinIO 凭证默认 minioadmin/minioadmin 无告警 | backend/app/core/config.py:255-256 | 已修复（2026-08-20）|
-| BS-9 | Content-Disposition ASCII 回退 filename 未转义引号（file/explorer 两处） | backend/app/modules/file/router.py:106、explorer/router.py:92 | 已修复（2026-08-20）|
+| BS-9 | Content-Disposition ASCII 回退 filename 未转义引号（file/explorer 两处） | backend/app/modules/file/router.py:106 | 已修复（2026-08-20）|
 | BS-10 | worktree clone 失败 stderr 原样回传可泄内嵌 token 的 repo URL | backend/app/modules/worktree/git_runner.py:88-91 | 已修复（2026-08-20）|
 | BS-11 | backend/.env 有 4+ 键不在 .env.example（SILLYSPEC_MASTER_KEY 等），部署漏配走降级 | backend/.env.example | 已修复（2026-08-20）|
 | BS-12 | 自改密码无复杂度校验（bootstrap 有黑名单未复用） | backend/app/modules/auth/schema.py:51 | 已修复（2026-08-20）|
 | BQ-5 | 6 个模型 naive `datetime.utcnow` 与全库 aware 混用（需配 alembic 迁移） | incident/worktree/git_gateway/git_identity/llm_provider/tool_gateway 的 model.py | 不修（涉及 DB 数据迁移+全链路比较逻辑，需完整 SillySpec 变更） |
-| BQ-6 | mission scope 预检 N+1（每 workspace 1-2 查） | backend/app/modules/agent/router.py:1147-1171 | 不修（性能优化需基准测试，另开变更） |
+| BQ-6 | mission scope 预检 N+1（每 workspace 1-2 查） | backend/app/modules/agent/router.py | 不修（性能优化需基准测试，另开变更） |
 | BQ-7 | gate 孤儿回收逐行 session.get(Change) | backend/app/modules/change/dispatch.py:1249-1253 | 已修复（2026-08-20）|
 | BQ-8 | 「查 SpecWorkspace 失败 except:pass」样板复制 ≥7 处，DB 故障静默降级无日志 | knowledge/quicklog/scan_docs/change/dispatch/workspace/agent 各 service | 不修（抽公共 helper 属重构，另开变更） |
 | BQ-9 | 问题变更导出无上限全表 SELECT 进 Excel | backend/app/modules/ppm/problem/service.py:965-971 | 已修复（2026-08-20）|
 | BQ-10 | create_tables.py 过期（缺 19 个模块模型，索引只在 alembic），误导新环境初始化 | backend/create_tables.py | 已修复（2026-08-20）|
 | BQ-11 | seed_workbench_demo.py 一次性演示种子残留 | backend/seed_workbench_demo.py | 已修复（2026-08-20）|
-| BQ-12 | ppm 两个 router 逐行相同的 _build_excel_response + 12 处 SessionDep 别名重复 | backend/app/modules/ppm/plan/router.py:1022、problem/router.py:672 | 已修复（2026-08-20）|
+| BQ-12 | ppm 两个 router 逐行相同的 _build_excel_response + 12 处 SessionDep 别名重复 | backend/app/modules/ppm/plan/router.py:1022、problem/router.py | 已修复（2026-08-20）|
 | BQ-14 | 工时导出端点伪装分页参数（page_size=20 无效果） | backend/app/modules/ppm/task/router.py:634 | 已修复（2026-08-20）|
 | FE-3 | stage-team-config.tsx 生产零引用（含孤儿测试） | frontend/src/components/stage-team-config.tsx | 已修复（2026-08-20）|
 | FE-4 | workspace-binding-dialog.tsx 仅存在于注释（含孤儿测试） | frontend/src/components/workspace-binding-dialog.tsx | 已修复（2026-08-20）|
@@ -88,7 +88,7 @@
 | DA-10 | WS RPC 分发无在途上限，可被打满 | sillyhub-daemon/src/ws-client.ts:427 | 不修（需设计信号量策略，另开变更） |
 | DA-11 | src/index.ts W0 占位注释严重失实 + .gitkeep 残留 | sillyhub-daemon/src/index.ts | 已修复（2026-08-20）|
 | DA-12 | spikes/06-mcp-server 已结题吸收进 src 仍被跟踪 | sillyhub-daemon/spikes/06-mcp-server/ | 已修复（2026-08-20）|
-| DA-13 | toRpcError 两份「字符级对齐」复制实现 | sillyhub-daemon/src/file-rpc.ts:208、host-fs-handler.ts:220 | 已修复（2026-08-20）|
+| DA-13 | toRpcError 两份「字符级对齐」复制实现 | sillyhub-daemon/src/file-rpc.ts:208、sillyhub-daemon/src/host-fs-handler.ts:220 | 已修复（2026-08-20）|
 | DA-15 | agent-detector 用 exec 引号拼接跑 --version，与 cmd-shim 体系脱节 | sillyhub-daemon/src/agent-detector.ts:358-364 | 已修复（2026-08-20）|
 | HY-4 | meta.json（worktree 状态文件含他机绝对路径）被 git 跟踪，几乎每次提交变动 | 根目录 meta.json | 已修复（2026-08-20）|
 | HY-5 | dev compose postgres/redis/minio 端口无 127.0.0.1 前缀 + 弱默认口令（prod 已收紧，dev 未同步） | deploy/docker-compose.dev.yml | 已修复（2026-08-20）|
@@ -103,8 +103,8 @@
 | ID | 问题 | 位置 | 状态 |
 |----|------|------|------|
 | HY-8 | actions/checkout 版本不一致（v6.0.2 vs v4） | .github/workflows/ | 已修复（2026-08-20）|
-| HY-9 | backend-ci 注入不存在的 DATABASE_URL/REDIS_URL 死配置 | backend-ci.yml:50-51 | 已修复（2026-08-20）|
-| HY-10 | scripts/test_scan_drift_check.py 测试无 CI 执行 | scan-drift.yml | 已修复（2026-08-20）|
+| HY-9 | backend-ci 注入不存在的 DATABASE_URL/REDIS_URL 死配置 | .github/workflows/backend-ci.yml:50-51 | 已修复（2026-08-20）|
+| HY-10 | scripts/test_scan_drift_check.py 测试无 CI 执行 | .github/workflows/scan-drift.yml | 已修复（2026-08-20）|
 | HY-11 | Makefile help 漂移 + daemon-* 四目标漏 .PHONY | Makefile | 已修复（2026-08-20）|
 | HY-12 | 根 node_modules/ 孤儿（无 package.json，仅 .vite 缓存） | 根目录 | 已修复（2026-08-20）|
 | HY-13 | .sillyspec-platform-cleaned 已 tracked，gitignore 规则失效 | 根目录 | 已修复（2026-08-20）|

@@ -22,7 +22,11 @@ process.env 副本。附 redactEnv / redactProviderConfig 脱敏守卫。是 dae
 - `SpawnCredentialManager` 本地接口（get / buildEnv 两方法，鸭子类型对齐
   CredentialManager，避免 task-runner 注入 RunnerCredentialManager 的类型耦合 G-04）。
 - 常量：`ANTHROPIC_API_KEY_FIELD` / `CLAUDE_OAUTH_TOKEN_FIELD`（两模式并存都注入，
-  优先级由 claude CLI 自身决定；token 绝不写空串）。
+  优先级由 claude CLI 自身决定；token 绝不写空串）；
+  `SILLYHUB_SESSION_ID_FIELD`（平台会话身份）；
+  `SILLYSPEC_SYNC_TIMEOUT_MS_FIELD` / `SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS`
+  （ql-20260907-007：spec-sync 熔断预算 env 缺省 20000，填补缺省非覆盖，
+  与 sillyspec-manager 默认 runner 共用同一对常量）。
 - `redactEnv(env)`：key 命中 `SENSITIVE_KEY` 正则（词边界 `KEY\b|TOKEN\b|SECRET\b|
   PASSWORD\b|PAT\b|CREDENTIAL\b`，大小写不敏感）→ value 替换 `***REDACTED***`，
   返回新对象不改入参。
@@ -37,6 +41,8 @@ buildSpawnEnv:
   env = { ...process.env }                                  # 层 3
   token: credential.get(field) || process.env[field]        # 层 2，credentials 优先
   toolEnv = credential.buildEnv(toolConfig) 覆盖赋值         # 层 1（系统键覆盖仅 warn）
+  agentSessionId 非空 → SILLYHUB_SESSION_ID（层 1 之上）；空 → delete 残留
+  SILLYSPEC_SYNC_TIMEOUT_MS 缺省填补 20000（已预设保留，空串视同未配置）  # ql-20260907-007
   provider_config 存在且 injector 注册 → Object.assign(env,
     injector.toEnv(provider_config))                        # 层 0 最后赋值最高优先
   provider_config 有 → env.CLAUDE_CONFIG_DIR 隔离；无 → delete 残留值
@@ -61,6 +67,11 @@ redactEnv: for [k,v]: SENSITIVE_KEY.test(k) → '***REDACTED***'
   warning key 名（不含 value）不阻断（dispatch 侧应避免下发）。
 - credential.buildEnv 渲染 `{{USER_*}}` 占位符 + key 大写 + 过滤未解析项；
   API key 与 OAuth token 两键并存时都注入不做选择（实测 claude CLI API key 优先）。
+- SILLYSPEC_SYNC_TIMEOUT_MS 缺省填补（ql-20260907-007）：sillyspec ≥3.28.1 的
+  spec-sync 总预算熔断 env 开关（CLI 默认 8s），平台执行环境 manifest 忙时偶发
+  >8s 触发熔断 warn，此处填缺省 20000 缓解；**填补缺省非覆盖**——process.env /
+  tool_config.env 已预设（含显式调回 8000）保留原值，空串视同未配置；非敏感值
+  redactEnv 不遮蔽。背景 docs/sillyspec/2026-09-07-spec-sync-abort-classification.md。
 
 ## 人工备注
 

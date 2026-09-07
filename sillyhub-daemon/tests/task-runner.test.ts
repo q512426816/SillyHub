@@ -266,6 +266,9 @@ describe('AC-01：runLease 编排链 9 步完整执行', () => {
     expect(arr).toContain('-p');
     expect(arr).toContain('--output-format');
     expect(arr).toContain('stream-json');
+    // ql-20260907-004：agent spawn 恒带 windowsHide——Windows 无控制台 daemon
+    // 不给子进程新开可见黑框（对齐 interactive 两 driver 同日修复）。
+    expect(callArgs[2]).toMatchObject({ windowsHide: true });
 
     // 步骤 7：parse 被调用 2 次
     expect(mockAdapter.parse).toHaveBeenCalledTimes(2);

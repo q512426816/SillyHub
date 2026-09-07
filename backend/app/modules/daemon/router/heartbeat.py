@@ -52,7 +52,8 @@ class DaemonHeartbeatSillySpecUpdate(BaseModel):
     """心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.
 
     daemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值
-    ``running`` / ``deferred`` / ``success`` / ``failed``，trigger 取值
+    ``running`` / ``deferred`` / ``success`` / ``failed`` / ``up_to_date``
+    （ql-20260904-019：手动指令已最新的明确反馈终态），trigger 取值
     ``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖
     ``since=now``（同 pending_update 先例），同内容重放保留原 since。
     state/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422
@@ -100,11 +101,17 @@ class DaemonHeartbeatSillySpecConflict(BaseModel):
     ``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal
     （DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条
     心跳 422）。
+
+    2026-09-07-conflict-diff-compare task-04（design §7.3）：新增可选 ``ql_id``
+    （QUICKLOG 块头编号，如 ``ql-20260907-006-2972``）——daemon 侧对 ``quick-*``
+    名冲突 best-effort 读 guard.json 补报，普通变更/读不到 → None。宽松可选
+    （零改写透传语义不变）：旧 daemon 不上报不影响心跳落库。
     """
 
     change: str | None = None
     created_at: str | None = None
     type: str | None = None
+    ql_id: str | None = None
 
 
 class DaemonHeartbeatSillySpecStatus(BaseModel):
@@ -157,6 +164,19 @@ class DaemonHeartbeatSillySpecCommandResult(BaseModel):
     executed_at: str | None = None
 
 
+class DaemonHeartbeatSpecCacheItem(BaseModel):
+    """心跳 ``spec_cache[]`` 单项（ql-20260907-010：spec 拉取工作区级化）.
+
+    daemon 上报本机已有的 spec 缓存（``~/.sillyhub/daemon/specs/{ws}``）版本，
+    backend 在响应 ``spec_versions`` 里回服务器权威 ``spec_workspaces.spec_version``，
+    daemon 据此对「版本落后且无活跃会话」的工作区后台预取——把全量 bundle 下载
+    挪出会话创建关键路径（实机 47MB 树 / ~0.4MB/s 链路下创建被拖 40s+）。
+    """
+
+    workspace_id: uuid.UUID
+    spec_version: int = Field(ge=0)
+
+
 class DaemonHeartbeatRequest(BaseModel):
     """Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。
 
@@ -203,6 +223,10 @@ class DaemonHeartbeatRequest(BaseModel):
     # 键心跳照常通过（default=None，兼容）。
     sillyspec_command_result: DaemonHeartbeatSillySpecCommandResult | None = Field(default=None)
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
+    # ql-20260907-010：daemon 本机 spec 缓存清单（workspace_id + 本地版本）——
+    # backend 响应 spec_versions 回权威版本供 daemon 判定后台预取。缺省（旧
+    # daemon）= 空列表，响应 spec_versions 恒 {}，零破坏。
+    spec_cache: list[DaemonHeartbeatSpecCacheItem] = Field(default_factory=list)
 
 
 class DaemonHeartbeatRuntimePolicy(BaseModel):
@@ -226,6 +250,10 @@ class DaemonHeartbeatResponse(BaseModel):
     status: str
     runtimes: list[DaemonHeartbeatRuntimePolicy] = Field(default_factory=list)
     pending_controls: int = 0
+    # ql-20260907-010：请求 spec_cache 各工作区的服务器权威 spec_version
+    # （键 = workspace_id 字符串；请求未携带 / 服务器无该工作区行 → 键缺席）。
+    # daemon 据此判定「本地落后 → 后台预取」。恒为 dict（旧 daemon 收到 {}）。
+    spec_versions: dict[str, int] = Field(default_factory=dict)
 
 
 @router.post(
@@ -318,6 +346,26 @@ async def daemon_heartbeat(
     # pending 行，一次聚合查询）——daemon 据此触发控制指令补拉对账。
     # （RuntimeService 已在函数上方 import，task-06 起心跳本体也走它。）
     pending_controls = await RuntimeService(session).count_pending_control_commands(instance.id)
+    # ql-20260907-010：spec 缓存版本对答——请求携带 spec_cache 时按 workspace_id
+    # 批查 spec_workspaces 权威版本（一次 IN 查询；缺行的工作区键缺席，daemon 视
+    # 为「服务器无此工作区缓存语义」不预取）。纯读，不触碰心跳其余语义。
+    spec_versions: dict[str, int] = {}
+    if data.spec_cache:
+        from app.modules.spec_workspace.model import SpecWorkspace
+
+        ws_rows = (
+            await session.execute(
+                select(
+                    SpecWorkspace.workspace_id,
+                    SpecWorkspace.spec_version,
+                ).where(
+                    _col(SpecWorkspace.workspace_id).in_(
+                        [item.workspace_id for item in data.spec_cache]
+                    )
+                )
+            )
+        ).all()
+        spec_versions = {str(row.workspace_id): int(row.spec_version or 0) for row in ws_rows}
     return DaemonHeartbeatResponse(
         daemon_instance_id=instance.id,
         status=instance.status or "online",
@@ -329,4 +377,5 @@ async def daemon_heartbeat(
             for rt in rt_rows
         ],
         pending_controls=pending_controls,
+        spec_versions=spec_versions,
     )

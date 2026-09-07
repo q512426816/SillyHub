@@ -296,6 +296,27 @@ export async function triggerMachineSillySpecGhostCleanup(
 }
 
 /**
+ * GET /api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare —
+ * 拉取 sillyspec 同步冲突的本地/平台对比数据（2026-09-07-conflict-diff-compare
+ * task-07 / FR-02 / D-001@v1 方案A：请求/响应式，区别于 fire-and-forget 裁决
+ * 通道）。kind 与 workspace_id 走 query 参数（design §7.2）；权限与裁决端点同
+ * 集合（机器所有者 + 平台管理员，越权 404）；机器离线 / RPC 超时（后端显式
+ * 15s）→ 504 抛 ApiError。返回生成版 SillySpecConflictCompareResponse——
+ * diff_rows / progress_rows 由后端 difflib 算好，前端纯渲染（不引入 diff 库）。
+ */
+export async function getSillySpecConflictCompare(
+  instanceId: string,
+  change: string,
+  kind: components["schemas"]["SillySpecConflictCompareResponse"]["kind"],
+  workspaceId: string,
+): Promise<components["schemas"]["SillySpecConflictCompareResponse"]> {
+  return apiFetch<components["schemas"]["SillySpecConflictCompareResponse"]>(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/sillyspec-conflicts/${encodeURIComponent(change)}/compare`,
+    { query: { kind, workspace_id: workspaceId } },
+  );
+}
+
+/**
  * POST /api/daemon/machines/{instance_id}/cleanup — 按 instance 路由 daemon 缓存清理。
  * daemon 收到后清理 specs/、会话日志、备份等本地缓存。返回 {sent}。
  */

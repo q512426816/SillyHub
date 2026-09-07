@@ -6,7 +6,7 @@
 schema_version: 1
 project: multi-agent-platform
 source_commit: 04bb45fe
-generated_at: 2026-09-04T22:25:00+08:00
+generated_at: 2026-09-07T22:15:00+08:00
 generator: sillyspec-scan
 
 modules:
@@ -29,6 +29,8 @@ modules:
       - publish_session_event / publish_bash_chunk_event (backend/app/modules/daemon/run_sync/service.py, 会话反馈事件 Redis 发布 helper 含 100ms 节流+8KB 截断, 2026-08-24-platform-session-feedback-fix)
       - handle_plan_response (backend/app/modules/daemon/session/service.py, plan 决策落库+WS daemon:plan_response 下发)
       - heartbeat sillyspec_status 落库/机器视图嵌套 (backend/app/modules/daemon/runtime/service.py + router.py, None=清除语义, 2026-09-02-changes-overview-card)
+      - upsert_agent_log_states / BLOCKED_SEGMENTS (backend/app/modules/platform_sync/service.py+router.py, POST /agent-logs/states 批量 upsert-create+blocked 段转移/120s agent_blocked 通知, 2026-09-07-agent-liveness-states)
+      - WorkerLiveness 直查 (backend/app/modules/agent/mcp_tools.py, list_workers running worker 附 liveness{state,evidence,derived_at}, 2026-09-07-agent-liveness-states)
       - workspace_router
       - members_router
       - auth_router
@@ -56,6 +58,7 @@ modules:
       - RootLayout
       - HomePage
       - ChangesOverviewCard (frontend/src/components/workspace/changes-overview-card.tsx, 工作台活跃变更总览卡片, 2026-09-02-changes-overview-card)
+      - AgentLivenessOverviewCard / LivenessBadge (src/components/agent-log/，五态徽章+工作台状态总览卡，D-004 两层, 2026-09-07-agent-liveness-states)
     depends_on: [backend]
     used_by: [deploy, ci, build]
     needs_review: false
@@ -89,6 +92,8 @@ modules:
       - postSpecSync (src/spec-sync.ts，2026-08-13 增量 diff：本地清单缓存+旧 tar 回退+conflict 抛错)
       - postSpecSyncIncremental (src/hub-client.ts，2026-08-13 增量推送 JSON POST 客户端)
       - resolvePlanResponse (src/interactive/session-manager.ts，plan 决策经 inject 注入 turn，2026-08-24-platform-session-feedback-fix verify P0 返工)
+      - LivenessTailer / discoverLivenessWatchTargets / getDeriver (src/agent-log/liveness/，会话活性五态推导子层：tailer 周期 offset 差量读+三源自发现+format→deriver 注册表，2026-09-07-agent-liveness-states)
+      - pushAgentLogStates / buildAgentLogStatePushGroups (src/hub-client.ts，liveness 状态 Bearer shpsync 直推+D-012 第一方覆写，2026-09-07-agent-liveness-states)
     depends_on: [backend]
     used_by: [deploy]
     needs_review: false

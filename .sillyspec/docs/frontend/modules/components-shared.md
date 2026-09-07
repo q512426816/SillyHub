@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 业务级通用组件（components-shared）
 
 ## 定位
-跨页面复用的"业务级"通用组件集合（16 文件，`components/` 根目录），区别于 components-ui 的设计系统原语。覆盖四块：
+跨页面复用的"业务级"通用组件集合（16 文件，`frontend/components/` 根目录），区别于 components-ui 的设计系统原语。覆盖四块：
 - 全局骨架：AppShell / TopBar / AntdProviders / ErrorBoundary。
 - 工作区相关卡片与对话框：WorkspaceCard / WorkspaceScanDialog / WorkspaceTabs / WorkspaceDaemonSwitcher / WorkspacePathFields / WorkspaceSessionSection / LogoutConfirmDialog。
 - Agent 运行：AgentRunPanel / AgentModelInput / AgentProviderSelect。

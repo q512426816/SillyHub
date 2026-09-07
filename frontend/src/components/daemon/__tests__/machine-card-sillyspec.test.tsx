@@ -457,7 +457,7 @@ describe("MachineCard「升级 sillyspec」按钮五态（task-07 / FR-02）", (
   });
 });
 
-describe("MachineCard sillyspec_update 横幅四态（task-07 / FR-03）", () => {
+describe("MachineCard sillyspec_update 横幅五态（task-07 / FR-03 + ql-20260904-019）", () => {
   it("running → info 色阶旋转横幅「正在升级 sillyspec（from → to）」（原型③）", () => {
     const { container } = renderCard(
       <MachineCard
@@ -594,6 +594,35 @@ describe("MachineCard sillyspec_update 横幅四态（task-07 / FR-03）", () =>
     expect(text).toContain("重试升级");
   });
 
+  it("up_to_date → success 色阶「已是最新版（to），无需升级」（ql-20260904-019 明确反馈）", () => {
+    const { container } = renderCard(
+      <MachineCard
+        {...defaultProps(
+          makeMachine({
+            sillyspec_update: makeSillySpecUpdate({
+              state: "up_to_date",
+              from_version: "3.27.11",
+              to_version: "3.27.11",
+            }),
+          }),
+        )}
+      />,
+    );
+    const banner = getSillySpecBanner(container, "up_to_date");
+    expect(banner).not.toBeNull();
+    expect(banner).toHaveAttribute("role", "status");
+    const cls = banner!.className;
+    expect(cls).toContain("border-success/30");
+    expect(cls).toContain("bg-success/10");
+    expect(cls).toContain("text-success");
+    const text = banner!.textContent ?? "";
+    expect(text).toContain("已是最新版（3.27.11），无需升级");
+    expect(text).toContain("点击升级时 daemon 检查过版本");
+    expect(text).toContain("横幅展示 10 分钟后自动消失，版本徽标常驻");
+    // up_to_date 是「无升级发生」的信息态：不是失败，不渲染重试入口文案。
+    expect(text).not.toContain("重试升级");
+  });
+
   it("sillyspec_update=null → 不渲染横幅", () => {
     const { container } = renderCard(
       <MachineCard {...defaultProps(makeMachine({ sillyspec_update: null }))} />,
@@ -601,7 +630,7 @@ describe("MachineCard sillyspec_update 横幅四态（task-07 / FR-03）", () =>
     expect(getSillySpecBanner(container)).toBeNull();
   });
 
-  it("未知 state（宁宽勿断的心跳通道）→ 四态之外不渲染横幅", () => {
+  it("未知 state（宁宽勿断的心跳通道）→ 五态之外不渲染横幅", () => {
     const { container } = renderCard(
       <MachineCard
         {...defaultProps(

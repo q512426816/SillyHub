@@ -59,4 +59,5 @@ linkSkillsToWorkdir: copy 而非 symlink（Windows symlink 需开发者模式）
 
 <!-- MANUAL_NOTES_START -->
 
+- ql-20260907-006-2972：linkSkillsToWorkdir 加 (workdir → manifest version) 进程内缓存跳过——原实现每会话对每个 skill 全量 rm+重拷（Windows 逐文件 IO + 杀软扫描，spec-sync 同源实测 ~8ms/文件），而内容只在 daemon 启动 syncSkills 时变化。语义：manifest 版本不变 + 该 workdir 上轮接线无失败（passClean 才写缓存，部分失败不记、下轮全量重拷自愈，对齐旧跨会话语义）+ 单 skill 目标目录存在（存在性守卫：worktree 重建/外部删除 → 该 skill 重拷）→ 跳过重拷记 link_skills_version_fresh_skip；版本变更/daemon 重启（缓存空）/无 manifest（version=null 不启用）→ 维持全量重拷。导出 resetLinkedWorkdirVersionsForTest 供测试隔离。
 <!-- MANUAL_NOTES_END -->

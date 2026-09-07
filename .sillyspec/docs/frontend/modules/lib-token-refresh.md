@@ -40,9 +40,9 @@ inflight = doRefresh(); try { ... } finally { inflight = null }
 - `doRefresh` 失败返回 null 而非抛出，重试/登出决策交由调用方（401 收口点）。
 - `decodeJwtExp` 的 base64url 解码走 `atob` 优先、`Buffer.from` 兜底，浏览器与
   Node（测试环境）双平台可用；主动刷新调度（AppShell）用它算 TTL。
-- 消费方：`lib/api.ts`、`lib/auth.ts`、`components/app-shell.tsx`、
-  `lib/ppm/problem.ts`、`lib/ppm/export.ts`、`lib/file/api.ts`；
-  单测 `lib/__tests__/token-refresh.test.ts`。
+- 消费方：`frontend/src/lib/api.ts`、`frontend/src/lib/auth.ts`、`frontend/components/app-shell.tsx`、
+  `frontend/src/lib/ppm/problem.ts`、`frontend/src/lib/ppm/export.ts`、`frontend/src/lib/file/api.ts`；
+  单测 `frontend/src/lib/__tests__/token-refresh.test.ts`。
 
 ## 人工备注
 

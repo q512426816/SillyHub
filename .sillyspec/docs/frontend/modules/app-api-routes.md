@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # SSE 流中继路由（app-api-routes）
 
 ## 定位
-Next.js Route Handler（`src/app/api/**/route.ts`）集合，当前仅 3 个 SSE 流中继端点，是浏览器到后端长连接流的同源中转层。存在原因：前端流客户端（lib-fetch-sse）需带鉴权访问后端 SSE，经 Next 路由中转可把 token 放 `Authorization` header 转发（后端 auth 已 header-only），并顺带解决跨域。三条路由均为纯透传——不解析、不改写事件，事件语义演进无需动这里。
+Next.js Route Handler（`frontend/src/app/api/**/route.ts`）集合，当前仅 3 个 SSE 流中继端点，是浏览器到后端长连接流的同源中转层。存在原因：前端流客户端（lib-fetch-sse）需带鉴权访问后端 SSE，经 Next 路由中转可把 token 放 `Authorization` header 转发（后端 auth 已 header-only），并顺带解决跨域。三条路由均为纯透传——不解析、不改写事件，事件语义演进无需动这里。
 
 ## 契约摘要
 - `GET /api/workspaces/[workspaceId]/agent/runs/[runId]/stream`：workspace agent-run 级日志流，供 `useAgentRunStream` / `AgentRunStreamClient` 订阅；透传 `after` 断线续传游标。

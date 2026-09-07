@@ -429,12 +429,26 @@ export async function pathExists(p: string): Promise<boolean> {
 // 看不到 sillyspec/custom skills。spawn 前调本函数把同步的 skills 拷到工作目录。
 // 用 copy（跨平台安全，Windows symlink 需开发者模式）；幂等覆盖（同步版本新则更新）。
 
+// ql-20260907-006：workdir → 已接线版本缓存（进程内）。原实现每会话对每个
+// skill 全量 rm+重拷——Windows 逐文件 IO 叠加杀软扫描（spec-sync 同源实测
+// ~8ms/文件），而内容只在 daemon 启动 syncSkills 时变化。版本（manifest.json
+// 的 version）不变 + 目标目录仍在 → 跳过重拷；daemon 重启缓存即空（首会话
+// 重拷一次，可接受）；worktree 重建/目标被外部删除 → 存在性守卫强制重拷；
+// 版本变更（下次启动 syncSkills 更新）→ 全量重拷刷新内容。
+const linkedWorkdirVersions = new Map<string, string>();
+
+/** 清空 workdir 接线版本缓存（测试隔离用；生产无调用点）。 */
+export function resetLinkedWorkdirVersionsForTest(): void {
+  linkedWorkdirVersions.clear();
+}
+
 /**
  * 把 `~/.sillyhub/daemon/skills/` 下同步好的平台 skills 拷到 `<workdir>/.claude/skills/`，
  * 让 claude（cwd=workdir）能加载。spawn 前调用（交互式 + batch）。
  *
  * - 源：skillsDir() 下每个 skill 目录（排除 manifest.json / .tmp-extract / 隐藏项）
  * - 目标：<workdir>/.claude/skills/<name>，覆盖（daemon 同步为权威源）
+ * - ql-20260907-006：manifest 版本未变 + 目标目录仍在 → 跳过重拷（见缓存注释）
  * - workdir 不可写/源空 → 静默跳过（不阻塞 spawn）
  * - 失败仅 warn（skill 缺失不应让会话挂掉）
  */
@@ -466,21 +480,54 @@ export async function linkSkillsToWorkdir(
   }
   const targetBase = join(workdir, '.claude', 'skills');
   await mkdir(targetBase, { recursive: true }).catch(() => undefined);
+  // ql-20260907-006：版本未变 + 该 workdir 已完成过接线 → 逐 skill 存在性校验后跳过。
+  const version = await getLocalSkillsVersion();
+  const versionFresh = version !== null && linkedWorkdirVersions.get(workdir) === version;
   let linked = 0;
+  let freshSkipped = 0;
+  let passClean = true;
   for (const entry of entries) {
     // 仅拷 skill 目录（排除 manifest.json / .tmp-extract / 隐藏）
     if (!entry.isDirectory()) continue;
     if (entry.name === '.tmp-extract' || entry.name.startsWith('.')) continue;
     const src = join(srcDir, entry.name);
     const dest = join(targetBase, entry.name);
+    if (versionFresh) {
+      // 存在性守卫：worktree 重建/外部删除的单个 skill 目录 → 该 skill 重拷
+      let destOk = false;
+      try {
+        const s = await stat(dest);
+        destOk = s.isDirectory();
+      } catch {
+        destOk = false;
+      }
+      if (destOk) {
+        freshSkipped += 1;
+        continue;
+      }
+    }
     try {
       // 清旧再拷（保证删除的文件不残留 + 内容更新）
       await rm(dest, { recursive: true, force: true }).catch(() => undefined);
       await mkdir(dest, { recursive: true });
       linked += await copyDirBestEffort(src, dest, log);
     } catch (e) {
+      passClean = false;
       log('warn', 'link_skill_failed', { skill: entry.name, error: String(e) });
     }
+  }
+  // 本轮无失败才记版本（部分失败时不记，下轮全量重拷自愈——对齐旧「每次重拷」的
+  // 跨会话自愈语义；copyDirBestEffort 的单文件 best-effort 失败不可见，接受）。
+  if (version !== null && passClean) {
+    linkedWorkdirVersions.set(workdir, version);
+  }
+  if (freshSkipped > 0) {
+    log('info', 'link_skills_version_fresh_skip', {
+      workdir,
+      version,
+      skills_skipped: freshSkipped,
+      skills_copied: linked,
+    });
   }
   log('info', 'link_skills_to_workdir_done', { workdir, files: linked });
   return { linked, skipped: linked === 0 };

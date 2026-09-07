@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # LLM 供应商管理组件（components-llm-providers）
 
 ## 定位
-LLM 供应商管理 UI（`components/llm-providers/`，4 组件）：「我的供应商」区块（列表 +
+LLM 供应商管理 UI（`frontend/components/llm-providers/`，4 组件）：「我的供应商」区块（列表 +
 新建/编辑/启停/删除）+ 供应商表单 + 带拉取的模型输入框 + 用量页脚。配置跟随账号、
 所有工作空间通用（D-002）；嵌入设置页 /settings/providers，不单独开路由
 （task allowed_paths 限定）。派生自 llm-provider-openai-format 系列变更，交互范式

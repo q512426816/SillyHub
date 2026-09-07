@@ -41,6 +41,7 @@
  * zh-CN 语境（CONVENTIONS 类型与数据契约 8）。
  */
 
+import { LivenessBadge, livenessTitle } from "@/components/agent-log/liveness-badge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs from "dayjs";
@@ -460,6 +461,8 @@ function AgentLogEntry({
     ? `${dayjs(entry.last_seen_at).fromNow()}活跃`
     : null;
   const recentlyActive = isRecentlyActive(entry.last_seen_at);
+  // 2026-09-07-agent-liveness-states task-14：行尾活性徽章（D-004 悬浮详情）
+  const livenessTitleStr = livenessTitle(entry);
 
   // 「查看内容」内联展开态（task-05 对话化升级）：展开先调 messages 端点——
   // parsed 直构对话流；status≠parsed / ApiError 一律静默回落 content 原文
@@ -604,6 +607,11 @@ function AgentLogEntry({
         >
           {entry.harness}
         </span>
+        {entry.state && (
+          <span title={livenessTitleStr}>
+            <LivenessBadge state={entry.state} />
+          </span>
+        )}
         {entry.originator && (
           <span
             title={`上报来源：${entry.originator}`}

@@ -39,7 +39,7 @@ source_commit: ba87eec
         ▼
   ARCHIVED (终态)
 ```
-> 转换表见 `change/model.py:85` 的 `TRANSITION`；`QUICK` 是 SillySpec 快速通道入口（VERIFY ↔ QUICK/BLOCKED）。
+> 转换表见 `backend/app/modules/change/model.py:106` 的 `TRANSITION`；`QUICK` 是 SillySpec 快速通道入口（VERIFY ↔ QUICK/BLOCKED）。
 > `BLOCKED` 可被 reviewer 解封到 PROPOSE/PLAN/EXECUTE。
 
 ## 按需触发（形态A，2026-08-08-change-center-on-demand）

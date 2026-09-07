@@ -24,6 +24,10 @@
 //   G. 会话在等待窗口内晚到（ql-20260831-006）→ 正常 inject，绝不报失败
 //   H. 等待中停机（quick 风险审查修 2026-09-01）→ 下一拍轮询即中止，不上报
 //      失败（未处理原因是 daemon 退出而非会话未建）、不等满窗口
+//   I. 在途 lease 延长等待（ql-20260907-003）：会话晚到超出基础窗口但在
+//      lease 仍在途期间出现 → 接住正常 inject，绝不报失败
+//   J. 在途 lease 有硬顶（waitMs+extendMax）：lease 永远在途 + 会话永不出现
+//      → 到硬顶即丢弃上报，不无限等待
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Daemon } from '../src/daemon.js';
@@ -136,6 +140,9 @@ const FULL_PAYLOAD: Record<string, unknown> = {
 // ql-20260831-006：等待窗 env 键；测试统一压到 150ms 控时（默认 60s 会挂死单测）。
 const WAIT_ENV = 'SILLYHUB_INJECT_WAIT_SESSION_MS';
 
+// ql-20260907-003：在途 lease 延长上限 env 键；用例 I/J 各自覆写控时。
+const EXTEND_ENV = 'SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS';
+
 describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005/006）', () => {
   let daemons: Daemon[] = [];
 
@@ -151,6 +158,7 @@ describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005/006）', () =>
     }
     daemons = [];
     delete process.env[WAIT_ENV];
+    delete process.env[EXTEND_ENV];
   });
 
   it('A. session_not_found（等待窗口超时后仍无本地状态）→ notifyRunResult 失败带原因', async () => {
@@ -269,6 +277,68 @@ describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005/006）', () =>
     const elapsed = Date.now() - t0;
 
     expect(client.notifyRunResult).not.toHaveBeenCalled();
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  // ql-20260907-003：在途 lease 延长等待（env SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS）。
+  it('I. 在途 lease 延长：会话晚到超基础窗口但在 lease 在途期间出现 → 正常 inject，绝不报失败', async () => {
+    // 复现实机形状（会话 1a9c601c）：基础窗 200ms 内会话没建出来（create 全链
+    // 慢），但 lease 一直处于 _inflightLeases（_executeTask 仍在跑 create）——
+    // 延长机制逐拍续推 deadline，600ms 处会话写入 store 后接住正常消费；修复
+    // 前 200ms 窗口到期即丢弃 + 上报 run failed。
+    process.env[WAIT_ENV] = '200';
+    process.env[EXTEND_ENV] = '5000';
+    const appearAt = Date.now() + 600;
+    const sm = createMockSessionManager({ leaseId: 'lease-1' });
+    (sm.get as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Date.now() >= appearAt
+        ? { sessionId: 'sess-1', leaseId: 'lease-1', status: 'active' }
+        : undefined,
+    );
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+    // lease 进在途（模拟 _executeTask 已 add 未 delete：create 仍在跑）。
+    const inflight = (daemon as unknown as { _inflightLeases: Set<string> })._inflightLeases;
+    inflight.add('lease-1');
+
+    const handle = (
+      daemon as unknown as {
+        _handleWsMessage: (m: { type: string; payload: unknown }) => Promise<void>;
+      }
+    )._handleWsMessage.bind(daemon);
+    await handle({ type: MSG.SESSION_INJECT, payload: FULL_PAYLOAD });
+    // 等到晚到会话出现后的一拍轮询（600ms + 轮询 100ms + 余量）。
+    await new Promise((r) => setTimeout(r, 800));
+
+    expect(sm.inject).toHaveBeenCalledTimes(1);
+    expect(client.notifyRunResult).not.toHaveBeenCalled();
+  });
+
+  it('J. 在途 lease 有硬顶（waitMs+extendMax）：lease 永在途 + 会话永不出现 → 到顶即丢弃上报，不无限等待', async () => {
+    // 基础窗 150ms + 延长上限 300ms → 硬顶 ~450ms。lease 全程在途（模拟 create
+    // 卡死）：deadline 续推但不得越过硬顶，到顶走原丢弃上报（防在途判据异常
+    // 时把等待变成无限挂起）。
+    process.env[WAIT_ENV] = '150';
+    process.env[EXTEND_ENV] = '300';
+    const { daemon, client } = buildDaemon(createMockSessionManager(undefined));
+    daemons.push(daemon);
+    const inflight = (daemon as unknown as { _inflightLeases: Set<string> })._inflightLeases;
+    inflight.add('lease-1');
+
+    const handle = (
+      daemon as unknown as {
+        _handleWsMessage: (m: { type: string; payload: unknown }) => Promise<void>;
+      }
+    )._handleWsMessage.bind(daemon);
+    const t0 = Date.now();
+    await handle({ type: MSG.SESSION_INJECT, payload: FULL_PAYLOAD });
+    // 硬顶 450ms + 轮询粒度 + 余量；若无限续推则等不到上报。
+    await new Promise((r) => setTimeout(r, 1000));
+    const elapsed = Date.now() - t0;
+
+    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+    const payload = client.notifyRunResult.mock.calls[0]![3];
+    expect(payload.result_summary as string).toContain('本地无该会话状态');
     expect(elapsed).toBeLessThan(2000);
   });
 });

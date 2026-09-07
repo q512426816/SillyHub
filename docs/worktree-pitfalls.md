@@ -56,7 +56,7 @@ cmd //c 'rmdir "<worktree>/sillyhub-daemon/node_modules"'
 
 ## 4. worktree sillyhub-daemon/src 缺 build-id.ts（gitignored 构建生成）
 
-**现象**：worktree 内跑 daemon vitest 全套时，`hub-client.ts:26` 导入 `./build-id.ts` 找不到，测试套件全 fail to load。
+**现象**：worktree 内跑 daemon vitest 全套时，`sillyhub-daemon/src/hub-client.ts:26` 导入 `./build-id.ts` 找不到，测试套件全 fail to load。
 
 **根因**：`sillyhub-daemon/src/build-id.ts` 是 `scripts/build-bundle.sh` 构建时注入的生成文件，被 gitignore，fresh worktree 没有。
 

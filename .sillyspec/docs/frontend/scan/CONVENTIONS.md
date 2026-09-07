@@ -15,17 +15,17 @@ generator: sillyspec-scan
 
 这些是"不写就会踩"的框架级硬约束，违反通常不立即报错，而在构建/运行期/提交守护处爆雷。
 
-1. **API 类型由 OpenAPI 生成，禁止手改 `src/lib/api-types.ts`，提交前必须跑类型漂移守护。**
+1. **API 类型由 OpenAPI 生成，禁止手改 `frontend/src/lib/api-types.ts`，提交前必须跑类型漂移守护。**
    `frontend/package.json:13-14` 的 `gen:types` 从后端 OpenAPI 生成类型，`gen:types:check` 重新生成后用 `git diff --exit-code` 阻止漂移提交。后端 schema（DTO/请求/响应）一改，同一变更内必须先 `pnpm gen:types` 再改前端（项目 CLAUDE.md 规则 21），不能凭记忆手写类型。
 
 2. **`Date.toLocaleString()` 必须显式传 `"zh-CN"`，否则开发机 zh-CN 过 CI en-US 红。**
-   现状（744e3de4 grep 统计）：`src/` 内共约 45 处 `toLocaleString`、36 个文件，日期时间格式化处均已显式带 `"zh-CN"`（如 `frontend/src/app/(dashboard)/ppm/shared.tsx:21`、`frontend/src/app/(dashboard)/ppm/project-plans/page.tsx:63`、`frontend/src/components/charts/RuntimeUsageLineChart.tsx:61-62`）；不带 locale 参数的仅剩**数字千分位**格式化（token 数值等），如 `RuntimeUsageLineChart.tsx:93`、`frontend/src/components/daemon/turn-timeline.tsx:725,728`——数字千分位是约定保留项，不算漏网。Windows Node 忽略 LANG，本地无法复现 en-US，必须靠写死 locale 防护。
+   现状（744e3de4 grep 统计）：`src/` 内共约 45 处 `toLocaleString`、36 个文件，日期时间格式化处均已显式带 `"zh-CN"`（如 `frontend/src/app/(dashboard)/ppm/shared.tsx:21`、`frontend/src/app/(dashboard)/ppm/project-plans/page.tsx:63`、`frontend/src/components/charts/RuntimeUsageLineChart.tsx:61-62`）；不带 locale 参数的仅剩**数字千分位**格式化（token 数值等），如 `frontend/src/components/charts/RuntimeUsageLineChart.tsx:102`、`frontend/src/components/daemon/turn-timeline.tsx,728`——数字千分位是约定保留项，不算漏网。Windows Node 忽略 LANG，本地无法复现 en-US，必须靠写死 locale 防护。
 
 3. **Tailwind `md:` 是视口断点不是容器断点，侧栏/卡片内嵌组件禁用响应式前缀做布局决策。**
    桌面视口下即使容器只有 320px，`md:grid-cols-2` 仍强制两栏挤崩。代码注释明证：`frontend/src/components/changes/detail/change-sessions-card.tsx:20`（"整包塞进 320px 折叠卡——`md:` 是视口断点非容器断点"），测试标题也固化此认知（`frontend/src/components/changes/__tests__/quicklog-drawer.test.tsx:81`）。侧栏内宽内容改用 Dialog（radix Portal 脱离侧栏）承载。
 
 4. **Markdown 渲染必须过 rehype-sanitize，禁止裸渲后端/用户内容。**
-   统一入口 `frontend/src/components/ui/markdown-text.tsx:6,89`：自定义 `MARKDOWN_SANITIZE_SCHEMA` + 导出 `markdownRehypePlugins = [[rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]]`，供 `@uiw/react-markdown-preview` 挂载；行为有专门测试守护（`frontend/src/components/ui/markdown-text.test.tsx:232-240`）。新渲染位复用该导出，不各自拼 schema。
+   统一入口 `frontend/src/components/ui/markdown-text.tsx:51,89`：自定义 `MARKDOWN_SANITIZE_SCHEMA` + 导出 `markdownRehypePlugins = [[rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]]`，供 `@uiw/react-markdown-preview` 挂载；行为有专门测试守护（`frontend/src/components/ui/markdown-text.test.tsx:232-240`）。新渲染位复用该导出，不各自拼 schema。
 
 5. **antd 6 静态方法 `message.xxx` 在 App Router 下拿不到主题/上下文，提示统一经 `useNotify()`。**
    `frontend/src/lib/errors.ts:2,39,44` 以 `App.useApp()` 封装 `useNotify()` 收敛错误提示，新代码不要 `message.error(...)` 裸调；`App` 包裹入口在 providers 层。
@@ -45,13 +45,13 @@ generator: sillyspec-scan
 ## 代码风格
 
 1. **服务端状态全部走 react-query，queryKey 必须经集中工厂 `queryKeys` 构造，不能就地拼字符串。**
-   工厂在 `frontend/src/lib/query-keys.ts:15`，文件头注释明确规则"凡影响查询结果的变量都进 key"（分页/过滤 params 整体进 key）。mutation 失效缓存复用同一 key 做 `invalidateQueries`，key 拼错会静默去重到不存在的缓存条目，是已踩过的坑。
+   工厂在 `frontend/src/lib/query-keys.ts:110`，文件头注释明确规则"凡影响查询结果的变量都进 key"（分页/过滤 params 整体进 key）。mutation 失效缓存复用同一 key 做 `invalidateQueries`，key 拼错会静默去重到不存在的缓存条目，是已踩过的坑。
 
 2. **数据 hook 统一 `useXxx` 命名，集中在 `src/lib/`，返回 react-query 结果对象（含 `data/isLoading/error`），不拆散。**
    典型文件：`frontend/src/lib/use-daemon-runtimes.ts`（风格基准）、`frontend/src/lib/use-daemon-machines.ts`、`frontend/src/lib/use-agent-runs.ts`、`frontend/src/lib/use-workspace-context.ts`；业务模块 hook 如 `frontend/src/lib/daemon-audit.ts`、`frontend/src/lib/mcp-settings.ts` 内的 `useMcpConfig / useUpdateMcpConfig`。
 
 3. **UI 基元用 `cva` 定义 variant，再用 `cn()` 合并 className，放在 `src/components/ui/`。**
-   `cn = twMerge(clsx(inputs))` 定义在 `frontend/src/lib/utils.ts:4-6`。variant 用例：`frontend/src/components/ui/badge.tsx:2,6,29`——`cva(...)` 产出 `badgeVariants`，组件内 `className={cn(badgeVariants({ variant }), className)}`；Radix + Tailwind 的 dialog/input 同构。antd 管交互/语义，Tailwind 管布局/间距/微调，经 `className` 叠加，不引第三个 UI 库。
+   `cn = twMerge(clsx(inputs))` 定义在 `frontend/src/lib/utils.ts`。variant 用例：`frontend/src/components/ui/badge.tsx:2,6,29`——`cva(...)` 产出 `badgeVariants`，组件内 `className={cn(badgeVariants({ variant }), className)}`；Radix + Tailwind 的 dialog/input 同构。antd 管交互/语义，Tailwind 管布局/间距/微调，经 `className` 叠加，不引第三个 UI 库。
 
 4. **组件文件按领域分子目录组织，文件名 kebab-case。**
    `frontend/src/components/` 下分域：`agent/ agent-log/ changes/ charts/ daemon/ layout/ llm-providers/ mobile/ permissions/ ppm/ sessions/ workspace/`，基础件在 `ui/`（button/badge/dialog/input/markdown-text 等 13 个）。历史遗留两个大写开头文件（`AgentModelInput.tsx`、`AgentProviderSelect.tsx`），新文件一律 kebab-case。
@@ -73,7 +73,7 @@ generator: sillyspec-scan
 
 ## 典型模式
 
-1. **数据 hook 模式**：`useXxx` + `queryKeys` 工厂 + `apiFetch` + `ApiError`，返回完整 query 结果对象。样板见 `frontend/src/lib/use-daemon-machines.ts`、key 定义见 `frontend/src/lib/query-keys.ts:27-31`（params 整体进 key 的写法）。
+1. **数据 hook 模式**：`useXxx` + `queryKeys` 工厂 + `apiFetch` + `ApiError`，返回完整 query 结果对象。样板见 `frontend/src/lib/use-daemon-machines.ts`、key 定义见 `frontend/src/lib/query-keys.ts:16`（params 整体进 key 的写法）。
 2. **UI 基元模式**：`cva` variant + `cn()` 合并 + `VariantProps` 暴露类型。样板 `frontend/src/components/ui/badge.tsx`（全文 30 行，完整示范 variants/defaultVariants/组合写法）。
 3. **安全 Markdown 模式**：统一 schema + 导出插件数组复用。样板 `frontend/src/components/ui/markdown-text.tsx:89`（`markdownRehypePlugins` 导出），配套行为测试 `frontend/src/components/ui/markdown-text.test.tsx`。
 4. **zustand store 模式**：`create<T>()` + 显式状态/动作接口 + 头部 JSDoc 写设计依据与 persist 边界。样板 `frontend/src/stores/workspace.ts`。

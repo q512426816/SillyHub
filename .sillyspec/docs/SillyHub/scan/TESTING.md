@@ -23,7 +23,7 @@ SillyHub 三端（backend / frontend / sillyhub-daemon）各自独立测试栈�
 
 ## 测试规模（Glob 实测，source_commit 744e3de4；含 2026-08-29-change-delete-closure-and-spec-pull 增量）
 
-- **backend**：`backend/tests/` 下 76 个 `test_*.py`（另 11 个 `__init__.py`）+ `backend/app/**/tests/` 模块内 291 个 `test_*.py`，合计约 367 个测试文件；conftest.py 共 13 个（根 `backend/conftest.py` + ppm 各子域 / file / mcp_gateway / change / daemon / workspace.member_runtimes / platform_sync 共 12 个模块级 fixture）。CI 注释口径：全量 4000+ 用例（`.github/workflows/backend-ci.yml` 超时注释，2026-08-15）。2026-08-29 变更新增 8 个：`tests/test_platform_deleted_hidden_migration.py`（迁移冒烟）+ 模块内 7 个（`change/tests/test_reparse_delete_closure.py`、`test_delete_change.py`；`platform_sync/tests/test_change_deleted_guard.py`、`test_spec_bundle.py`；`spec_workspace/tests/test_platform_deleted_guard.py`、`test_soft_delete_change_dir.py`、`test_quicklog_reconcile.py`），并改写 `test_reparse_scoped_zero_delete.py` 为「scope 内消失可删 / scope 外不删」双断言。
+- **backend**：`backend/tests/` 下 76 个 `test_*.py`（另 11 个 `__init__.py`）+ `backend/app/**/tests/` 模块内 291 个 `test_*.py`，合计约 367 个测试文件；conftest.py 共 13 个（根 `backend/conftest.py` + ppm 各子域 / file / mcp_gateway / change / daemon / workspace.member_runtimes / platform_sync 共 12 个模块级 fixture）。CI 注释口径：全量 4000+ 用例（`.github/workflows/backend-ci.yml` 超时注释，2026-08-15）。2026-08-29 变更新增 8 个：`backend/tests/test_platform_deleted_hidden_migration.py`（迁移冒烟）+ 模块内 7 个（`change/tests/test_reparse_delete_closure.py`、`test_delete_change.py`；`platform_sync/tests/test_change_deleted_guard.py`、`test_spec_bundle.py`；`spec_workspace/tests/test_platform_deleted_guard.py`、`test_soft_delete_change_dir.py`、`test_quicklog_reconcile.py`），并改写 `test_reparse_scoped_zero_delete.py` 为「scope 内消失可删 / scope 外不删」双断言。
 - **frontend**：160 个 `frontend/src/**/*.test.ts(x)`，覆盖页面（`app/`）、组件（`components/`）、lib 钩子与纯函数（`lib/__tests__/`）、store、middleware。2026-08-29 变更新增 3 个（`delete-change-confirm` / `change-activity-badge` / 详情页 `page-last-signal`），扩展列表页与 `workspace-config-card` 既有用例。
 - **daemon**：142 个 `sillyhub-daemon/tests/**/*.test.ts`（interactive 会话与驱动、policy、adapters、resilience、task-runner、spec 同步等）；spikes 探索性测试另走 `vitest.spikes.config.ts`（`include=['spikes/**/*.test.ts']`，串行 forks ≤2），不进 CI 主套件。2026-08-29 变更新增 `test_bundle_metadata_compat.test.ts`（bundle 含 PLATFORM-BUNDLE.json 后 pullSpecBundle/spec_version 判定兼容回归，daemon 源码零改动前提）。
 
@@ -31,7 +31,7 @@ SillyHub 三端（backend / frontend / sillyhub-daemon）各自独立测试栈�
 
 - **错误文案中文化守护**：`backend/tests/core/test_error_message_l10n.py`——AST 扫描 `app/modules/` 下 `*router*.py` / `*service*.py` 及用户链路 core 文件的 raise / HTTPException detail，纯字面量与 f-string 常量段须含 CJK；机器对机器链路（daemon 内部 RPC、mcp_gateway 协议端点、platform_sync、storage）走排除清单，`PENDING_L10N_FILES` 渐进白名单逐步清空（依据 `.sillyspec/changes/archive/2026-08-15-error-message-l10n/design.md` §5.4）。
 - **审计挂载守护**：`backend/tests/core/test_audit_hooks_effective.py`（audit_hooks 全表挂载 + 手工审计点有效，依据 `2026-08-14-audit-system-completion` 归档 change）。
-- **类型漂移守护**：frontend 与 daemon 各有 `gen:types` / `gen:types:check` script（两端 `package.json`）——openapi-typescript 生成后 `git diff --exit-code`，前端 `src/lib/api-types.ts` / daemon `src/api-types.ts` 与后端 OpenAPI 漂移即红；daemon 侧同样纳入 CI。
+- **类型漂移守护**：frontend 与 daemon 各有 `gen:types` / `gen:types:check` script（两端 `package.json`）——openapi-typescript 生成后 `git diff --exit-code`，前端 `frontend/src/lib/api-types.ts` / daemon `sillyhub-daemon/src/api-types.ts` 与后端 OpenAPI 漂移即红；daemon 侧同样纳入 CI。
 
 ## CI（.github/workflows/，共 4 个）
 

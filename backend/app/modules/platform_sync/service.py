@@ -49,10 +49,28 @@ from app.modules.platform_sync.model import (
 
 if TYPE_CHECKING:
     # 类型标注专用（``from __future__ import annotations`` 惰性求值），运行时零导入。
-    from app.modules.platform_sync.schema import AgentLogEntry
+    from app.modules.platform_sync.schema import AgentLogEntry, AgentLogStateEntry
     from app.modules.spec_workspace.schema import FileOp
 
 log = get_logger(__name__)
+
+# ── 2026-09-07-agent-liveness-states task-08（design §5.3 / §7.5 blocked 段转移检测）──
+#: 活跃 blocked 段表：(workspace_id, log_path) → (blocked_since, 段序号)——进入
+#: blocked 记段、消解（离开 blocked）移除；task-09 agent_blocked 通知的 120s
+#: 阈值与段级 dedupe_key 消费此状态（本模块只记不通知）。单进程内存态：通知
+#: 触发方（同进程状态机/轮询任务）读即一致；多 worker 部署时随 states 端点
+#: 同路由分片（现状单实例，不做跨进程同步）。
+BLOCKED_SEGMENTS: dict[tuple[uuid.UUID, str], tuple[datetime, int]] = {}
+#: 每键最近 blocked 段序号（消解后保留，供下一段递增——「消解后再次进入视为
+#: 新段，可再触发」design §5.3）。
+LAST_BLOCKED_SEGMENT_SEQ: dict[tuple[uuid.UUID, str], int] = {}
+#: blocked 通知阈值（秒）：进入 blocked 持续未消解 ≥120s 触发（design §5.3
+#: BLOCKED_ALERT_MS；与既有 PERMISSION_REQUEST 5min auto-deny 分级——本提醒
+#: 引用待审事实不取代它）。
+BLOCKED_ALERT_SECONDS = 120
+#: 已触发过通知的段（键 → 段序号）——段级去重第一道（第二道为 notify_broadcast
+#: 的 unresolved 幂等）。
+_NOTIFIED_BLOCKED_SEGMENTS: dict[tuple[uuid.UUID, str], int] = {}
 
 # ── 2026-08-23-agent-activity-sessions task-04（design §3.3.3 / D-007）──
 #: harness → tool_report 会话 ``AgentSession.provider`` 映射：激活派发用默认引擎，
@@ -995,6 +1013,140 @@ class PlatformSyncService:
     # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
     # ── 2026-08-23-agent-activity-sessions task-04（design §3.3.3 归属扩展）──
     # ── 2026-08-25-session-spec-binding task-06（design §5.W2.2/W2.3 双分支 ctx 绑定）──
+    # ── 2026-09-07-agent-liveness-states task-08（design §5.3 状态落库）──
+
+    async def upsert_agent_log_states(
+        self,
+        workspace_id: uuid.UUID,
+        entries: list[AgentLogStateEntry],
+    ) -> tuple[int, int, int]:
+        """POST /agent-logs/states：批量状态 upsert-create + blocked 段转移检测。
+
+        行存在 → 只更新状态四列（state/state_derived_at/state_evidence/
+        last_event_at），登记元信息（invocations/originator/last_command 等）
+        一律不动（design §5.3：CLI 登记是元信息权威，状态是派生数据）；行不
+        存在且带 harness 元信息 → create（origin=``liveness-discovered``，
+        X-001 自发现裸会话通道；后续 CLI 登记到达按既有键整行覆盖融合，状态
+        列会被登记整行覆盖重置——daemon 下一轮 tick 即重推，可接受）；行不
+        存在且无元信息 → skipped 不建行（不猜 harness）。
+
+        blocked 段转移检测（design §7.5 liveness tick 行）：进入 blocked 记
+        (blocked_since, 段序号) 到模块级 ``BLOCKED_SEGMENTS``，消解（离开
+        blocked）移除；``LAST_BLOCKED_SEGMENT_SEQ`` 留存最近段序号供下一段
+        递增——task-09 agent_blocked 通知的 dedupe_key/120s 阈值消费此状态，
+        本方法只记不通知。
+
+        返回 (updated, created, skipped)。
+        """
+        deduped: dict[str, AgentLogStateEntry] = {entry.log_path: entry for entry in entries}
+        existing_by_path: dict[str, AgentSessionLogORM] = {}
+        if deduped:
+            existing_rows = (
+                (
+                    await self._session.execute(
+                        select(AgentSessionLogORM).where(
+                            col(AgentSessionLogORM.workspace_id) == workspace_id,
+                            col(AgentSessionLogORM.log_path).in_(deduped.keys()),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            existing_by_path = {row.log_path: row for row in existing_rows}
+        updated = created = skipped = 0
+        # 本轮处于 blocked 的条目（段龄检查在落库后统一做，task-09 触发点）。
+        blocked_candidates: list[
+            tuple[tuple[uuid.UUID, str], uuid.UUID, datetime, int, str, datetime]
+        ] = []
+        for entry in deduped.values():
+            row = existing_by_path.get(entry.log_path)
+            if row is None:
+                if not entry.harness:
+                    skipped += 1
+                    continue
+                derived_iso = entry.derived_at.isoformat()
+                row = AgentSessionLogORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    log_path=entry.log_path,
+                    harness=entry.harness,
+                    format=entry.format,
+                    session_id=entry.agent_session_id,
+                    originator="liveness-discovered",
+                    detected_via="liveness-tailer",
+                    agent_cwd=entry.agent_cwd,
+                    exists=True,
+                    first_seen_at=derived_iso,
+                    last_seen_at=derived_iso,
+                )
+                self._session.add(row)
+                existing_by_path[entry.log_path] = row
+                created += 1
+            else:
+                updated += 1
+            old_state = row.state
+            row.state = entry.state
+            row.state_evidence = entry.evidence
+            row.state_derived_at = entry.derived_at
+            row.last_event_at = entry.last_event_at
+            key = (workspace_id, entry.log_path)
+            if entry.state == "blocked" and old_state != "blocked":
+                seq = LAST_BLOCKED_SEGMENT_SEQ.get(key, 0) + 1
+                LAST_BLOCKED_SEGMENT_SEQ[key] = seq
+                BLOCKED_SEGMENTS[key] = (entry.derived_at, seq)
+            elif entry.state != "blocked" and old_state == "blocked":
+                BLOCKED_SEGMENTS.pop(key, None)
+            if entry.state == "blocked":
+                seg = BLOCKED_SEGMENTS.get(key)
+                if seg is not None:
+                    blocked_candidates.append(
+                        (key, row.id, seg[0], seg[1], entry.evidence, entry.derived_at)
+                    )
+        await self._session.commit()
+        await self._maybe_notify_blocked(workspace_id, blocked_candidates)
+        return updated, created, skipped
+
+    async def _maybe_notify_blocked(
+        self,
+        workspace_id: uuid.UUID,
+        candidates: list[tuple[tuple[uuid.UUID, str], uuid.UUID, datetime, int, str, datetime]],
+    ) -> None:
+        """blocked 段龄 ≥120s 触发 agent_blocked 广播（task-09 / design §5.3）。
+
+        调度即推送：tailer 10s 周期推送天然充当检查节拍（段龄超阈值的下一次
+        推送即触发，验收口径「阈值 +10s 内到达」）。双去重：``_NOTIFIED_...
+        SEGMENTS`` 段级（内存）+ notify_broadcast unresolved 幂等（库级）；触发
+        尝试即标记（含 0 收件人——避免无成员工作区每轮重试刷日志）。best-effort：
+        通知失败不回滚状态落库（R-02 同源精神）。
+        """
+        from app.modules.auth.permissions import Permission
+        from app.modules.notification.service import NotificationService
+
+        for key, row_id, blocked_since, seq, evidence, derived_at in candidates:
+            if _NOTIFIED_BLOCKED_SEGMENTS.get(key) == seq:
+                continue
+            # 段龄按上报的 derived_at 差值（确定性可测；不用服务器墙钟——daemon 时钟才是活性权威）。
+            since = blocked_since if blocked_since.tzinfo else blocked_since.replace(tzinfo=UTC)
+            at = derived_at if derived_at.tzinfo else derived_at.replace(tzinfo=UTC)
+            age = (at - since).total_seconds()
+            if age < BLOCKED_ALERT_SECONDS:
+                continue
+            _NOTIFIED_BLOCKED_SEGMENTS[key] = seq
+            try:
+                await NotificationService(self._session).notify_broadcast(
+                    workspace_id=workspace_id,
+                    permission=Permission.WORKSPACE_READ,
+                    type="agent_blocked",
+                    title=f"agent 在等你：会话阻塞 {int(age // 60)} 分钟未消解",
+                    body=f"活性推导 blocked（证据：{evidence or 'n/a'}）。超过 5 分钟未处理将按既有权限审批规则自动拒绝。",
+                    link=None,
+                    ref_type="agent_log",
+                    ref_id=str(row_id),
+                    dedupe_key=f"{key[1]}:blocked:{seq}",
+                )
+            except Exception:
+                log.warning("agent_blocked_notify_failed", log_path=key[1], seq=seq)
 
     async def upsert_agent_log_entries(
         self,

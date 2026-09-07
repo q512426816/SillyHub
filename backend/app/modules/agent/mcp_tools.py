@@ -97,6 +97,7 @@ from app.modules.agent.schema import (
     MissionStatusResponse,
     ScopeWorkspaceStatus,
     WorkerListItem,
+    WorkerLiveness,
 )
 from app.modules.agent.service import _build_agent_profile_snapshot
 from app.modules.auth.model import User
@@ -1653,6 +1654,57 @@ async def _list_workers_core(session: AsyncSession, mission: AgentMission) -> Wo
         for r in runs
         if r.role != "orchestrator" and r.agent_session_id not in sub_session_ids
     )
+
+    # 2026-09-07-agent-liveness-states task-12（design §5.6 / FR-06，spike-01 定稿：
+    # backend 直查即正道）：running worker 批量直查 platform_agent_logs 按
+    # agent_session_id 取 state_derived_at 最新一行的推导状态（daemon 同机推导
+    # 已落库，语义等价；IN 批量防 N+1）。无日志行的 worker liveness 保持 None。
+    # 两种行形态统一按 run.agent_session_id 覆写（子会话行 id=首 run id 也在 runs 内）。
+    run_session_by_id: dict[uuid.UUID, uuid.UUID | None] = {r.id: r.agent_session_id for r in runs}
+    running_ids = sorted(
+        {
+            r.agent_session_id
+            for r in runs
+            if r.status == "running" and r.agent_session_id is not None
+        }
+        | set(sub_session_ids),
+        key=str,
+    )
+    liveness_by_session: dict[uuid.UUID, WorkerLiveness] = {}
+    if running_ids:
+        from sqlalchemy import select as _select
+
+        from app.modules.platform_sync.model import AgentSessionLogORM
+
+        state_rows = (
+            (
+                await session.execute(
+                    _select(AgentSessionLogORM)
+                    .where(
+                        AgentSessionLogORM.agent_session_id.in_(running_ids),
+                        AgentSessionLogORM.state.is_not(None),
+                    )
+                    .order_by(AgentSessionLogORM.state_derived_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in state_rows:
+            if row.agent_session_id is not None and row.agent_session_id not in liveness_by_session:
+                liveness_by_session[row.agent_session_id] = WorkerLiveness(
+                    state=row.state,
+                    evidence=row.state_evidence,
+                    derived_at=row.state_derived_at,
+                )
+    workers = [
+        (
+            w.model_copy(update={"liveness": liveness_by_session[sid]})
+            if (sid := run_session_by_id.get(w.id)) is not None and sid in liveness_by_session
+            else w
+        )
+        for w in workers
+    ]
     return WorkerListResponse(mission_id=mission.id, workers=workers)
 
 

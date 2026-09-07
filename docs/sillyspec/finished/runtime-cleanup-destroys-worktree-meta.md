@@ -14,7 +14,7 @@ type: sillyspec-tool-bug
 反复重创 worktree 无解。
 
 ## 根因
-`src/run.js:1294-1299`（同样逻辑在 `src/init.js:130-137`）：每次 `sillyspec run` 命令启动时，检测到源码目录的 `.sillyspec/` 含真实资产（changes/projects/sillyspec.db），执行"仅清理运行时残留"：
+`sillyhub-daemon/src/run.js:1294-1299`（同样逻辑在 `sillyhub-daemon/src/init.js:130-137`）：每次 `sillyspec run` 命令启动时，检测到源码目录的 `.sillyspec/` 含真实资产（changes/projects/sillyspec.db），执行"仅清理运行时残留"：
 ```js
 for (const residue of ['.runtime', 'local.yaml', 'codebase']) {
   const p = join(legacyDir, residue);

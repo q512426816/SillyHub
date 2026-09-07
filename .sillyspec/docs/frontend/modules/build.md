@@ -12,20 +12,20 @@ created_at: 2026-08-18 01:45:00
 前端工程构建与工具链配置集合（frontend 根 8 个配置文件）。定义脚本命令、依赖版本、路径别名、代理规则、测试环境与 Docker 产物形态，是本地 dev、CI 构建、镜像产出的总开关。
 
 ## 契约摘要
-- `package.json`：name `multi-agent-platform-web`；`engines.node >= 20`、`packageManager pnpm@9.6.0`。
-  - scripts：`dev` / `build` / `start` / `lint`（next lint）/ `typecheck`（tsc --noEmit）/ `test`（vitest run）/ `test:watch` + **`gen:types`**（OpenAPI → `src/lib/api-types.ts`，scripts/gen-api-types.mjs）+ **`gen:types:check`**（生成后 `git diff --exit-code src/lib/api-types.ts` 防漂移）。
+- `frontend/package.json`：name `multi-agent-platform-web`；`engines.node >= 20`、`packageManager pnpm@9.6.0`。
+  - scripts：`dev` / `build` / `start` / `lint`（next lint）/ `typecheck`（tsc --noEmit）/ `test`（vitest run）/ `test:watch` + **`gen:types`**（OpenAPI → `frontend/src/lib/api-types.ts`，frontend/scripts/gen-api-types.mjs）+ **`gen:types:check`**（生成后 `git diff --exit-code src/lib/api-types.ts` 防漂移）。
   - 关键 deps：next 14.2.5、react 18.3.1、antd ^6.4.4 + @ant-design/icons + nextjs-registry、@tanstack/react-query + react-virtual、zustand ^4.5、dayjs、echarts 6 + echarts-for-react、@xyflow/react、zod、lucide-react、@uiw/react-markdown-preview + rehype-sanitize、radix 原语（dialog/dropdown-menu/avatar）、@fontsource/inter。
   - devDeps：vitest 2 + @testing-library(react/jest-dom) + jsdom、openapi-typescript、puppeteer、@playwright/test、eslint-config-next。
-- `next.config.mjs`：
+- `frontend/next.config.mjs`：
   - `reactStrictMode`、`poweredByHeader:false`、`experimental.typedRoutes:true`、`experimental.proxyTimeout:300000`（rewrite 代理响应超时 5 分钟，Next 14 默认 30s 会掐断 reparse 等长请求，ql-20260821-014）、`experimental.optimizePackageImports:[antd, @ant-design/icons, lucide-react, @xyflow/react]`（重依赖命名导入按需转换，减 chunk 加速构建）。
   - `output: standalone` 仅当 `NEXT_BUILD_STANDALONE=1`（Docker 用；本地 dev 不启用）。
   - rewrites 两条：`/api/:path*` 与 `/daemon/:path*`（daemon 安装脚本/版本清单公开端点，backend dist_router 提供无 /api 前缀）→ `${apiBase}` 同名路径；apiBase = `INTERNAL_API_BASE_URL ?? NEXT_PUBLIC_API_BASE_URL ?? http://localhost:8000`（去尾斜杠）。
-- `tsconfig.json`：ES2022、`strict` + `noUncheckedIndexedAccess`、moduleResolution bundler、别名 `@/* → ./src/*`、`types` 含 vitest/globals + @testing-library/jest-dom、include 含 `.next/types/**/*.ts`（typedRoutes 生成类型）。
-- `tailwind.config.ts`：darkMode class；content 三目录（app/components/lib）；shadcn 语义色 hsl(var(--…)) + hex 调色板；container 居中 2xl:1280。
-- `vitest.config.ts`：jsdom + globals + `setupFiles: src/test/setup.ts`；`clearMocks:true`（明确**不用** restoreMocks——大量测试在 describe/beforeAll 级持久 mock，restore 会还原实现致 21 用例红）；`testTimeout:15000`（治全量并行 jsdom flaky 超时）；`environmentMatchGlobs` 把纯逻辑 lib 测试（白名单精确到文件名）切 node 环境省 jsdom 启动。
-- `postcss.config.mjs`：tailwindcss + autoprefixer。
-- `Dockerfile`：多阶段（deps → builder → runtime），`node:20-slim` 基底；corepack enable pnpm + `COREPACK_NPM_REGISTRY=npmmirror` 规避国内拉 pnpm tarball TLS 失败；standalone 产物拷入最小运行镜像。
-- `components.json`：shadcn CLI 配置（style default、rsc、tsx、slate baseColor、cssVariables、别名 `@/components` / `@/lib/utils` / `@/components/ui`）。
+- `frontend/tsconfig.json`：ES2022、`strict` + `noUncheckedIndexedAccess`、moduleResolution bundler、别名 `@/* → ./src/*`、`types` 含 vitest/globals + @testing-library/jest-dom、include 含 `.next/types/**/*.ts`（typedRoutes 生成类型）。
+- `frontend/tailwind.config.ts`：darkMode class；content 三目录（app/components/lib）；shadcn 语义色 hsl(var(--…)) + hex 调色板；container 居中 2xl:1280。
+- `frontend/vitest.config.ts`：jsdom + globals + `setupFiles: frontend/src/test/setup.ts`；`clearMocks:true`（明确**不用** restoreMocks——大量测试在 describe/beforeAll 级持久 mock，restore 会还原实现致 21 用例红）；`testTimeout:15000`（治全量并行 jsdom flaky 超时）；`environmentMatchGlobs` 把纯逻辑 lib 测试（白名单精确到文件名）切 node 环境省 jsdom 启动。
+- `frontend/postcss.config.mjs`：tailwindcss + autoprefixer。
+- `frontend/Dockerfile`：多阶段（deps → builder → runtime），`node:20-slim` 基底；corepack enable pnpm + `COREPACK_NPM_REGISTRY=npmmirror` 规避国内拉 pnpm tarball TLS 失败；standalone 产物拷入最小运行镜像。
+- `frontend/components.json`：shadcn CLI 配置（style default、rsc、tsx、slate baseColor、cssVariables、别名 `@/components` / `@/lib/utils` / `@/components/ui`）。
 
 ## 关键逻辑
 ```
@@ -39,7 +39,7 @@ Docker: deps(pnpm install) → builder(next build, STANDALONE=1)
 
 ## 注意事项
 - **api-types.ts 必须生成、禁手写**：后端 schema 有改动的 change 内必须跑 `pnpm gen:types` 并提交 api-types.ts + openapi.json；node_modules 半坏会产生**假的** `CSSProperties 不存在某属性` / `Cannot find module '@ant-design/icons'` 报错，先 `pnpm install --force` 再排查代码。
-- `typedRoutes:true` 校验 `<Link href>` 合法性：新页面路由需 `next build` / typecheck 生成 `.next/types` 后才过；拼动态路径须满足类型约束。
+- `typedRoutes:true` 校验 `<Link href>` 合法性：新页面路由需 `next build` / typecheck 生成 `frontend/.next/types` 后才过；拼动态路径须满足类型约束。
 - `noUncheckedIndexedAccess` 索引访问返回 `T|undefined`，新代码须显式判空。
 - `/daemon/*` rewrite 是 daemon 安装链路（`curl | bash` 拉 install.sh、latest.json、bundle 都经前端代理到 backend）依赖，勿删；只代理 /api 会让安装脚本 404。
 - rewrite 代理响应超时走 `experimental.proxyTimeout`（Next 14 内置默认 30s，router-utils/proxy-request.js `proxyTimeout || 30000`）：后端 30s+ 的长请求（changes/reparse 全量扫描、scan-docs/reparse 等）会被前端掐断报 500，而后端仍在后台跑完记 200——排障时先对时间戳（前端 ECONNRESET 时刻 vs 后端完成时刻）。已设 300000ms；若未来有更长的同步接口，优先改后端异步化而不是继续调大超时（ql-20260821-014）。

@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 工作区绑定配置组件（components-workspace-config）
 
 ## 定位
-工作区绑定/配置/守卫域组件（7 文件，`components/` 根目录）：
+工作区绑定/配置/守卫域组件（7 文件，`frontend/components/` 根目录）：
 - 成员 daemon 绑定表单：`WorkspaceAccessGuide`（+ `WorkspacePathPicker` 路径选择）。
 - 绑定守卫与弹窗壳：`WorkspaceBindingGuard` / `WorkspaceBindingDialog`。
 - 工作区概览配置大卡：`WorkspaceConfigCard`（901 行）。
