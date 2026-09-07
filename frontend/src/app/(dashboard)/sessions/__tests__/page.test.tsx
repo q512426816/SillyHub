@@ -70,6 +70,9 @@ const mocks = vi.hoisted(() => ({
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionRuns: vi.fn(),
+  // 任务执行面板快照（task-10 惰性闸门移除后挂载即取数，缺导出会让
+  // useSessionTasks 命中真实 fetch 并把 vitest 报错文案弹成首条 notify）。
+  listSessionTasks: vi.fn(),
   streamClose: vi.fn(),
   machinesHook: vi.fn(),
   profilesHook: vi.fn(),
@@ -132,6 +135,7 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
     fetchSessionDialogHistory: (...args: unknown[]) =>
       mocks.fetchSessionDialogHistory(...args),
     listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
+    listSessionTasks: (...args: unknown[]) => mocks.listSessionTasks(...args),
     deleteAgentSession: vi.fn(),
     // task-07（2026-09-01-session-group-chat）：SessionsPortal 群聊分区数据源
     //（经真实组件 import；列表默认空集，防 react-query data undefined 债）。
@@ -419,6 +423,7 @@ beforeEach(() => {
   mocks.fetchPendingDialogs.mockResolvedValue([]);
   mocks.fetchSessionDialogHistory.mockResolvedValue([]);
   mocks.listSessionRuns.mockResolvedValue([]);
+  mocks.listSessionTasks.mockResolvedValue([]);
   window.localStorage.clear();
 });
 

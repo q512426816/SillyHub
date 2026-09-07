@@ -198,6 +198,9 @@ class RuntimeService:
         2026-09-02-changes-overview-card task-03（FR-05）：sillyspec_status 同款
         恒置 None（new + else 两分支）——progress 快照随 daemon 进程重启失效，
         register 清除上一进程遗留快照（同 sillyspec_update 收敛理由）。
+        2026-09-04-conflict-resolve-entry task-03（FR-05 / D-004@v1）：
+        sillyspec_command_result 同款恒置 None（new + else 两分支）——命令
+        结果槽在 daemon 内存，进程重启即失，register 清除上一进程遗留结果。
 
         1. upsert daemon_instances by ``id=daemon_local_id``：复用身份，更新机器级
            字段（hostname/os/arch/allowed_roots/status=online/last_heartbeat_at）。
@@ -233,6 +236,9 @@ class RuntimeService:
                 # 2026-09-02-changes-overview-card task-03：status 同款恒清——
                 # 进度快照随 daemon 进程重启失效（同 update 收敛理由）。
                 sillyspec_status=None,
+                # 2026-09-04-conflict-resolve-entry task-03：command_result 同款
+                # 恒清——命令结果槽在内存，进程重启即失（同 status 收敛理由）。
+                sillyspec_command_result=None,
                 allowed_roots=roots,
                 status="online",
                 last_heartbeat_at=now,
@@ -267,6 +273,9 @@ class RuntimeService:
             instance.sillyspec_update = None
             # 2026-09-02-changes-overview-card task-03：status 同款恒清（else 分支）。
             instance.sillyspec_status = None
+            # 2026-09-04-conflict-resolve-entry task-03：command_result 同款恒清
+            # （else 分支，同 status 收敛理由）。
+            instance.sillyspec_command_result = None
             instance.allowed_roots = roots
             instance.status = "online"
             instance.last_heartbeat_at = now
@@ -386,6 +395,7 @@ class RuntimeService:
         sillyspec_latest_version: str | None = None,
         sillyspec_update: dict | None = None,
         sillyspec_status: dict | None = None,
+        sillyspec_command_result: dict | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -424,6 +434,14 @@ class RuntimeService:
         三态矩阵 design §5）；非 None 时 **dict 整包直写**（progress 快照非状态
         机，无 since/upsert 概念——backend 不补字段不改写，32KB 预算与 N=50
         截断在 daemon 侧执行，design §4「落库形态=上报形态」）。
+
+        2026-09-04-conflict-resolve-entry task-03（FR-05 / D-004@v1）：
+        ``sillyspec_command_result``（sillyspec 命令执行器最新结果槽七键 dict，
+        router 层 DTO 已校验）语义同 ``sillyspec_status`` 的两态——``None`` 即
+        置 NULL 清除（daemon 终态窗口 10min 过期后停发该键，无需显式 null，
+        X-04 修订）；非 None 时 **dict 整包直写**（latest-wins 结果槽非状态机，
+        无 since/upsert——backend 不补字段不改写，design §7「落库形态=上报
+        形态」）。register 恒清（进程重启即失，见 register_daemon 注释）。
 
         daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend：
 
@@ -541,6 +559,11 @@ class RuntimeService:
         # 整包直写（非状态机无 since/upsert，backend 不增删改写；32KB 预算与
         # N=50 截断在 daemon 侧执行，design §4）。
         instance.sillyspec_status = sillyspec_status
+        # sillyspec_command_result（2026-09-04-conflict-resolve-entry task-03 /
+        # FR-05 / D-004@v1）：语义同 sillyspec_status 两态——None 即置 NULL 清除
+        # （daemon 终态窗口过期后停发该键，无「保持旧值」三态分支，X-04）；非
+        # None dict 整包直写（latest-wins，backend 不增删改写，design §7）。
+        instance.sillyspec_command_result = sillyspec_command_result
         if instance.status != "disabled":
             instance.status = "online"
         self._session.add(instance)

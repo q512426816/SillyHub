@@ -73,6 +73,9 @@ vi.mock("@/lib/daemon", async () => {
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
+    // 惰性闸门移除后挂载即取数：缺接线会走 actual 真 apiFetch，失败路径
+    // notify.error 在无 antd App 上下文的 render 里炸 unhandled rejection。
+    listSessionTasks: sessionApi.listSessionTasks,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
     fetchSessionQueue: sessionApi.fetchSessionQueue,
@@ -433,11 +436,14 @@ describe("SessionPanel ctx 环 SSE 实时更新", () => {
 describe("SessionPanel ctx 环 runsMeta 历史回填", () => {
   it("GET runs 返回 ctx_tokens → 历史轮填充，环从未知态「—」变为该值", async () => {
     // 延迟 resolve：先观察回填前的未知态，再放行 runs 响应验证回填路径。
-    let resolveRuns: (runs: SessionRunRead[]) => void = () => {};
+    // task-10 惰性闸门移除后挂载即取数：SessionPanel（runsMeta/whoLine）与
+    // TaskExecutionPanel（轮次历史页签）都会调 listSessionRuns——收集全部
+    // pending resolver 一次放行，漏掉任何一个都会让对应消费方永久挂起。
+    const pendingRunsResolvers: Array<(runs: SessionRunRead[]) => void> = [];
     sessionApi.listSessionRuns.mockImplementation(
       () =>
         new Promise<SessionRunRead[]>((resolve) => {
-          resolveRuns = resolve;
+          pendingRunsResolvers.push(resolve);
         }),
     );
 
@@ -450,14 +456,16 @@ describe("SessionPanel ctx 环 runsMeta 历史回填", () => {
 
     // attach 拉回的历史 run 带 ctx_tokens=300K → 孤儿轮回填，环变 30%（1M 兜底分母）
     await act(async () => {
-      resolveRuns([
-        makeRun({
-          id: "r-hist",
-          started_at: "2026-08-27T09:00:00Z",
-          finished_at: "2026-08-27T09:00:10Z",
-          ctx_tokens: 300_000,
-        }),
-      ]);
+      for (const resolve of pendingRunsResolvers.splice(0)) {
+        resolve([
+          makeRun({
+            id: "r-hist",
+            started_at: "2026-08-27T09:00:00Z",
+            finished_at: "2026-08-27T09:00:10Z",
+            ctx_tokens: 300_000,
+          }),
+        ]);
+      }
     });
     await waitFor(() => {
       expect(ring).toHaveTextContent("30%");
