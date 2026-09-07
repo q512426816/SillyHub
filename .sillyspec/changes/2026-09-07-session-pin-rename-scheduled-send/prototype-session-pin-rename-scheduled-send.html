@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 会话置顶/重命名 + 定时发送（2026-09-07-session-pin-rename-scheduled-send）</title>
+<style>
+/* ============ 主题 token（单源模拟 frontend/src/styles/themes.ts） ============ */
+:root, [data-theme="ai-native"] {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --primary-soft: #EDE9FE;
+  --accent: #0891B2; --accent-soft: #CFFAFE; --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF;
+  --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --border: #DDD6FE; --border-weak: #EEE9F8;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --error: #DC2626; --error-soft: #FEE2E2; --error-text: #991B1B;
+  --shadow-sm: 0 1px 2px rgba(30,27,75,.06); --shadow-md: 0 4px 14px rgba(30,27,75,.08);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+[data-theme="blue"] {
+  --primary: #1677FF; --primary-hover: #0958D9; --primary-soft: #E6F4FF;
+  --accent: #13C2C2; --accent-soft: #E6FFFB; --accent-text: #08979C;
+  --brand-gradient: linear-gradient(135deg, #1677FF 0%, #13C2C2 100%);
+  --bg: #F0F5FF; --fg: #10233F; --card: #FFFFFF;
+  --muted: #EEF2F8; --muted-fg: #45556C; --faint: #94A3B8;
+  --border: #B9D8FF; --border-weak: #E3EEFF;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); padding: 24px; font-size: 14px; }
+.wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.header { display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand .logo { width: 34px; height: 34px; border-radius: 9px; background: var(--brand-gradient); display: grid; place-items: center; color: #fff; font-weight: 700; }
+.brand h1 { font-size: 17px; }
+.brand small { color: var(--muted-fg); font-weight: 400; display: block; margin-top: 2px; }
+.theme-toggle { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 6px 12px; cursor: pointer; color: var(--fg); font-size: 13px; box-shadow: var(--shadow-sm); }
+.card { background: var(--card); border: 1px solid var(--border-weak); border-radius: 12px; box-shadow: var(--shadow-md); padding: 18px 20px; }
+.card h2 { font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.card .desc { color: var(--muted-fg); font-size: 12.5px; margin-bottom: 14px; line-height: 1.6; }
+.note { background: var(--primary-soft); color: var(--primary-hover); border-radius: 8px; padding: 10px 14px; font-size: 12.5px; line-height: 1.6; margin-bottom: 14px; }
+
+/* ============ 双栏演示：左会话树 + 右聊天区 ============ */
+.stage { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .stage { grid-template-columns: 1fr; } }
+.panel { border: 1px solid var(--border-weak); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); overflow: hidden; }
+.panel-head { padding: 10px 14px; border-bottom: 1px solid var(--border-weak); font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.panel-head .sub { font-weight: 400; color: var(--faint); font-size: 11.5px; }
+.tree { padding: 8px; }
+
+/* 工作区分组 */
+.group-head { display: flex; align-items: center; gap: 6px; padding: 7px 8px; font-size: 12.5px; font-weight: 600; color: var(--muted-fg); cursor: pointer; border-radius: 8px; }
+.group-head .chev { font-size: 10px; transition: transform .15s; }
+.group-head.open .chev { transform: rotate(90deg); }
+.group-body { padding-left: 14px; }
+
+/* 会话行 */
+.row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; position: relative; }
+.row:hover { background: var(--muted); }
+.row.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .pin { font-size: 11px; color: var(--primary); flex: none; }
+.row .ops { display: none; gap: 2px; flex: none; }
+.row:hover .ops { display: inline-flex; }
+.op { width: 22px; height: 22px; border: none; background: transparent; border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--muted-fg); display: grid; place-items: center; }
+.op:hover { background: var(--card); color: var(--primary); box-shadow: var(--shadow-sm); }
+.op.danger:hover { color: var(--error); }
+
+/* 重命名行内编辑态 */
+.row input { flex: 1; min-width: 0; border: 1px solid var(--primary); border-radius: 6px; padding: 3px 8px; font-size: 13px; font-family: inherit; color: var(--fg); background: var(--card); outline: none; }
+.row .ok-btn { border: none; background: var(--primary); color: #fff; border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+
+/* ============ 聊天区 ============ */
+.chat { display: flex; flex-direction: column; height: 520px; }
+.chat-body { flex: 1; padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; background: var(--bg); border-radius: 0; }
+.msg { max-width: 78%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.55; }
+.msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
+.msg.agent { align-self: flex-start; background: var(--card); border: 1px solid var(--border-weak); border-bottom-left-radius: 4px; box-shadow: var(--shadow-sm); }
+.msg.sys { align-self: center; font-size: 12px; color: var(--faint); background: none; padding: 2px; }
+
+/* 输入栏 */
+.inputbar { display: flex; align-items: flex-end; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border-weak); background: var(--card); }
+.inputbar textarea { flex: 1; resize: none; border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; font-family: inherit; font-size: 13px; color: var(--fg); background: var(--card); outline: none; min-height: 40px; max-height: 110px; }
+.inputbar textarea:focus { border-color: var(--primary); }
+.icon-btn { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 16px; color: var(--muted-fg); display: grid; place-items: center; flex: none; }
+.icon-btn:hover { color: var(--primary); border-color: var(--primary); }
+.icon-btn.scheduled { color: var(--accent-text); border-color: var(--accent); background: var(--accent-soft); }
+.send-btn { height: 36px; border: none; border-radius: 10px; background: var(--brand-gradient); color: #fff; font-size: 13px; font-weight: 600; padding: 0 18px; cursor: pointer; flex: none; }
+.send-btn:hover { filter: brightness(1.06); }
+.send-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ============ Modal（antd 风格遮罩弹窗） ============ */
+.mask { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; place-items: center; z-index: 50; }
+.mask.show { display: grid; }
+.modal { width: 420px; background: var(--card); border-radius: 14px; box-shadow: 0 18px 50px rgba(15,23,42,.25); padding: 20px; }
+.modal h3 { font-size: 15px; margin-bottom: 4px; }
+.modal .mdesc { font-size: 12.5px; color: var(--muted-fg); margin-bottom: 14px; line-height: 1.6; }
+.modal .preview { background: var(--muted); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; color: var(--fg); margin-bottom: 14px; max-height: 72px; overflow-y: auto; line-height: 1.55; }
+.modal .preview .lab { color: var(--faint); font-size: 11.5px; }
+.dt-picker { display: flex; gap: 8px; margin-bottom: 14px; }
+.dt-picker input, .dt-picker select { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; color: var(--fg); background: var(--card); outline: none; }
+.dt-picker input:focus, .dt-picker select:focus { border-color: var(--primary); }
+.quick-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.chip { border: 1px solid var(--border); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: var(--muted-fg); }
+.chip:hover, .chip.on { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.modal .foot { display: flex; justify-content: flex-end; gap: 8px; }
+.btn { border-radius: 8px; padding: 7px 16px; font-size: 13px; cursor: pointer; font-family: inherit; }
+.btn.plain { border: 1px solid var(--border); background: var(--card); color: var(--fg); }
+.btn.plain:hover { border-color: var(--primary); color: var(--primary); }
+.btn.primary { border: none; background: var(--primary); color: #fff; }
+.btn.primary:hover { background: var(--primary-hover); }
+
+/* ============ 定时消息列表面板（消息队列区同款形态） ============ */
+.sched-list { display: flex; flex-direction: column; gap: 8px; }
+.sched-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-weak); border-radius: 10px; background: var(--card); }
+.sched-item .when { flex: none; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--accent-text); font-weight: 600; min-width: 118px; }
+.sched-item .what { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { flex: none; font-size: 11px; border-radius: 999px; padding: 1px 9px; line-height: 18px; }
+.tag.pending { background: var(--warning-soft); color: var(--warning-text); }
+.tag.dispatched { background: var(--success-soft); color: var(--success-text); }
+.tag.cancelled { background: var(--muted); color: var(--muted-fg); }
+.tag.failed { background: var(--error-soft); color: var(--error-text); }
+.cancel-x { flex: none; width: 22px; height: 22px; border: none; background: transparent; border-radius: 6px; cursor: pointer; color: var(--faint); font-size: 13px; }
+.cancel-x:hover { color: var(--error); background: var(--error-soft); }
+.empty { color: var(--faint); font-size: 12.5px; padding: 8px 2px; }
+.toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 9px 18px; border-radius: 10px; font-size: 13px; box-shadow: var(--shadow-md); opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 99; }
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <div class="brand">
+      <div class="logo">S</div>
+      <h1>会话置顶 / 重命名 + 定时发送 <small>2026-09-07-session-pin-rename-scheduled-send · 原型</small></h1>
+    </div>
+    <button class="theme-toggle" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='ai-native'?'blue':'ai-native'">切换主题（blue / ai-native）</button>
+  </div>
+
+  <div class="note">交互演示：① 会话树行 hover 出现操作按钮（置顶 / 重命名 / 归档 / 删除），置顶会话带 📌 排分组最前；② 点击「重命名」行内进入编辑态；③ 聊天输入栏 ⏰ 按钮打开定时发送弹窗（分钟级）；④ 已设定时消息展示在「定时消息」面板，到点前可取消。</div>
+
+  <div class="stage">
+    <!-- 左：会话树 -->
+    <div class="panel">
+      <div class="panel-head">会话 <span class="sub">按工作区分组 · 置顶排组内最前</span></div>
+      <div class="tree">
+        <div class="group-head open" onclick="this.classList.toggle('open');this.nextElementSibling.style.display=this.classList.contains('open')?'':'none'"><span class="chev">▶</span> multi-agent-platform</div>
+        <div class="group-body">
+          <!-- 置顶行（组内最前，带📌） -->
+          <div class="row" id="row-pin">
+            <span class="pin">📌</span>
+            <span class="title">Liveness 状态推导联调</span>
+            <span class="ops">
+              <button class="op" title="取消置顶" onclick="toast('已取消置顶（PATCH /sessions/{id}/unpin → SSE 同步）')">📌→</button>
+              <button class="op" title="重命名" onclick="startRename('row-pin')">✏️</button>
+              <button class="op" title="归档" onclick="toast('归档确认弹窗（既有逻辑）')">📦</button>
+              <button class="op danger" title="删除" onclick="toast('删除确认弹窗（既有逻辑）')">🗑</button>
+            </span>
+          </div>
+          <div class="row" id="row-2">
+            <span class="pin" style="display:none">📌</span>
+            <span class="title">conflict-diff-compare 验证</span>
+            <span class="ops">
+              <button class="op" title="置顶" onclick="toast('已置顶（PATCH /sessions/{id}/pin → SSE 同步）')">📌</button>
+              <button class="op" title="重命名" onclick="startRename('row-2')">✏️</button>
+              <button class="op" title="归档">📦</button>
+              <button class="op danger" title="删除">🗑</button>
+            </span>
+          </div>
+          <!-- 重命名编辑态示例 -->
+          <div class="row" id="row-rename-demo" style="display:none">
+            <span class="pin" style="display:none">📌</span>
+            <input value="arch-large-file-split 拆分执行" />
+            <button class="ok-btn" onclick="this.parentElement.style.display='none';document.getElementById('row-3').style.display='flex';toast('已重命名（PATCH /sessions/{id}/title）')">确定</button>
+          </div>
+          <div class="row" id="row-3">
+            <span class="pin" style="display:none">📌</span>
+            <span class="title">arch-large-file-split 拆分执行</span>
+            <span class="ops">
+              <button class="op" title="置顶" onclick="toast('已置顶')">📌</button>
+              <button class="op" title="重命名" onclick="startRename('row-3')">✏️</button>
+              <button class="op" title="归档">📦</button>
+              <button class="op danger" title="删除">🗑</button>
+            </span>
+          </div>
+          <div class="row" style="color:var(--faint)">
+            <span class="pin" style="display:none">📌</span>
+            <span class="title">（其余会话按最近活跃排序……）</span>
+          </div>
+        </div>
+        <div class="group-head open"><span class="chev">▶</span> 另一个工作区</div>
+        <div class="group-body">
+          <div class="row">
+            <span class="pin" style="display:none">📌</span>
+            <span class="title">日常问答会话</span>
+            <span class="ops"><button class="op" title="置顶" onclick="toast('置顶只影响本分组内排序')">📌</button><button class="op" title="重命名">✏️</button></span>
+          </div>
+        </div>
+        <div class="group-head"><span class="chev">▶</span> 非工作区</div>
+      </div>
+    </div>
+
+    <!-- 右：聊天区 -->
+    <div class="panel chat">
+      <div class="panel-head">Liveness 状态推导联调 <span class="sub">会话聊天 · 输入栏新增定时发送</span></div>
+      <div class="chat-body">
+        <div class="msg sys">—— 会话开始 ——</div>
+        <div class="msg user">帮我把 daemon 滚动尾读的 offset 对齐三源推导</div>
+        <div class="msg agent">已完成 liveness tailer 的 offset 差量读改造，三源（claude/pi/codex）自发现注册表就绪，活性五态推导已接入。</div>
+        <div class="msg user">好，一小时后再继续做 states 批量上报的联调</div>
+        <div class="msg sys" id="sched-sys" style="display:none">⏰ 已创建定时消息：今天 23:59 发送「继续做 states 批量上报的联调」</div>
+      </div>
+      <div class="inputbar">
+        <button class="icon-btn" title="附件（既有）">📎</button>
+        <textarea id="draft" placeholder="输入消息，Enter 发送；⏰ 设定定时发送">一小时后继续做 states 批量上报的联调</textarea>
+        <button class="icon-btn" id="sched-btn" title="定时发送" onclick="openSched()">⏰</button>
+        <button class="send-btn" onclick="toast('立即发送（既有 inject 链路）')">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 定时消息面板 -->
+  <div class="card">
+    <h2>⏰ 定时消息 <span class="desc" style="margin:0">会话工具区「消息队列」旁新增 · 状态 pending → dispatched / cancelled / failed · 到点由后端 sweeper 派发</span></h2>
+    <div class="desc">到点派发复用既有 inject 链路：会话空闲直接发出；正忙则自动进入既有消息队列排队。仅一次性定时（分钟级），不含周期重复。</div>
+    <div class="sched-list" id="sched-list">
+      <div class="sched-item">
+        <span class="when">2026-09-07 23:59</span>
+        <span class="what">一小时后继续做 states 批量上报的联调</span>
+        <span class="tag pending">待发送</span>
+        <button class="cancel-x" title="取消" onclick="toast('已取消定时消息（DELETE /sessions/{id}/scheduled/{mid}）')">✕</button>
+      </div>
+      <div class="sched-item">
+        <span class="when">2026-09-08 09:00</span>
+        <span class="what">跑一遍 agent 模块回归并汇总失败清单</span>
+        <span class="tag pending">待发送</span>
+        <button class="cancel-x" title="取消">✕</button>
+      </div>
+      <div class="sched-item" style="opacity:.75">
+        <span class="when">2026-09-07 18:30</span>
+        <span class="what">提醒检查 conflict-diff-compare 的 verify NOTES</span>
+        <span class="tag dispatched">已发送</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 定时发送弹窗 -->
+  <div class="mask" id="sched-mask">
+    <div class="modal">
+      <h3>⏰ 定时发送</h3>
+      <div class="mdesc">到点自动发送以下消息；会话正忙时进入消息队列排队。设定后可随时取消。</div>
+      <div class="preview"><div class="lab">将发送的内容</div><span id="sched-preview">一小时后继续做 states 批量上报的联调</span></div>
+      <div class="dt-picker">
+        <input type="date" value="2026-09-07" />
+        <select><option>23:59</option><option selected>22:58</option><option>23:30</option></select>
+      </div>
+      <div class="quick-chips">
+        <button class="chip" onclick="toast('+30 分钟 → 2026-09-07 23:28')">30 分钟后</button>
+        <button class="chip on" onclick="toast('+1 小时 → 2026-09-07 23:59')">1 小时后</button>
+        <button class="chip" onclick="toast('明早 09:00')">明早 9 点</button>
+        <button class="chip" onclick="toast('自定义时间')">自定义…</button>
+      </div>
+      <div class="foot">
+        <button class="btn plain" onclick="closeSched()">取消</button>
+        <button class="btn primary" onclick="confirmSched()">创建定时消息</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+function toast(t) { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2200); }
+function startRename(rowId) {
+  const row = document.getElementById(rowId);
+  const demo = document.getElementById('row-rename-demo');
+  row.style.display = 'none'; demo.style.display = 'flex';
+  toast('重命名：行内编辑 → 确定/Enter 提交，Esc 取消');
+}
+function openSched() {
+  document.getElementById('sched-preview').textContent = document.getElementById('draft').value || '（空）';
+  document.getElementById('sched-mask').classList.add('show');
+}
+function closeSched() { document.getElementById('sched-mask').classList.remove('show'); }
+function confirmSched() {
+  closeSched();
+  const sys = document.getElementById('sched-sys'); sys.style.display = '';
+  document.getElementById('draft').value = '';
+  toast('已创建定时消息（POST /sessions/{id}/scheduled）· 到点由后端 sweeper 自动派发');
+}
+</script>
+</body>
+</html>
