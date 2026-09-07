@@ -23,8 +23,6 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.auth.model import User
-from app.modules.daemon.runtime.service import RuntimeService
 from app.modules.spec_workspace.model import SpecWorkspace
 
 from .test_machine_sillyspec import _headers, _register_daemon, _seed_user
@@ -37,14 +35,13 @@ def _heartbeat_body(daemon_local_id: uuid.UUID, spec_cache: list[dict] | None) -
     return body
 
 
-async def _seed_spec_workspace(
-    db_session: AsyncSession, *, version: int
-) -> uuid.UUID:
+async def _seed_spec_workspace(db_session: AsyncSession, *, version: int) -> uuid.UUID:
     """插入一条 spec_workspaces 行（随机 workspace_id，SQLite 不强制 FK）。"""
     ws_id = uuid.uuid4()
     db_session.add(
         SpecWorkspace(
             workspace_id=ws_id,
+            spec_root=f"/tmp/specs/{ws_id}",
             strategy="platform-managed",
             sync_status="clean",
             spec_version=version,
@@ -105,8 +102,7 @@ class TestHeartbeatSpecVersions:
         """非 owner 心跳仍 404（spec_cache 不旁路归属校验）。"""
         owner, _owner_token = await _seed_user(db_session, name="owner-guard")
         daemon_local_id = await _register_daemon(db_session, owner.id)
-        intruder: User
-        intruder, intruder_token = await _seed_user(db_session, name="intruder")
+        _intruder, intruder_token = await _seed_user(db_session, name="intruder")
 
         resp = await client.post(
             "/api/daemon/heartbeat",
