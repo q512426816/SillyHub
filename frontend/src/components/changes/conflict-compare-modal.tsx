@@ -71,8 +71,8 @@ export interface ConflictCompareModalProps {
 const QUERY_KEY_ROOT = ["conflict-compare-modal"] as const;
 
 /**
- * 确认弹窗文案——与 platform-sync-section.tsx STRATEGY_TEXT 逐字一致（覆盖
- * 方向 + 适用场景；组件不互相 import，同值副本，改动需两处同步）。
+ * 确认弹窗文案——文案唯一源在本文件（task-08 起裁决入口收进弹窗，
+ * platform-sync-section 的同值副本已移除；覆盖方向 + 适用场景）。
  */
 const STRATEGY_TEXT: Record<
   ResolveStrategy,
