@@ -444,3 +444,25 @@
 根因：sillyspec CLI 每步 --done 后自动同步走 8s 总预算熔断，平台 manifest 端点忙时偶发 >8s 触发 abort warn（数据不丢但噪音吓人）；CLI 3.28.1 新增 SILLYSPEC_SYNC_TIMEOUT_MS env 开关（sillyspec 仓 commit 6f17a56），平台侧行动项 1 要求执行环境注入放宽（docs/sillyspec/2026-09-07-spec-sync-abort-classification.md）
 方案：spawn-env.ts 新增 SILLYSPEC_SYNC_TIMEOUT_MS_FIELD/DEFAULT_MS('20000') 常量并在 buildSpawnEnv 的 tool_config 层后填补缺省（process.env/tool_config 预设保留、空串视同未配置），覆盖 batch/interactive/restore/reload 全部 agent 子进程；sillyspec-manager.ts runProgressJsonDefault execFile 显式传 env（缺省垫底+process.env 覆盖）并导出，覆盖 daemon 自身 runResolve/ghostCleanup 命令；模块文档 spawn-env/sillyspec-manager 同步 + changelog sidecar 建档
 结果：vitest 目标两文件 80 passed（spawn-env 38 + sillyspec-manager 42，含新增 6 用例：缺省注入/process.env 预设/tool_config 预设/空串填补/runner 缺省/runner 预设优先），pnpm typecheck 0 错；行动项 2（端点耗时观测）核对结论为无需改动——backend 监控三件套 2026-07-27 已上线（slow.request>1s/slow.query>500ms/>=10s pg_stat_activity 采样），注入 20s 后熔断事件蕴含服务端 >=20s，观测链完整覆盖
+
+## ql-20260907-008-48b9 | 2026-09-07 12:45:13 | 修复 CI 四类失败：迁移链断链+heartbeat 签名+bundle 五键+前端 mock 债
+状态：已完成
+关联变更：（无）
+文件：
+- backend/migrations/versions/20260904223000_add_sillyspec_command_result.py（补提交断链迁移节点（d4fdcc7ac 漏提交））
+- backend/app/modules/daemon/runtime/service.py（heartbeat/register 补 sillyspec_command_result 落库语义）
+- backend/app/modules/platform_sync/tests/test_spec_bundle.py（四键断言改五键（manifest_versions ql-20260905-001 债））
+- frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx（补接线+listSessionRuns 默认 resolve）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（补接线+listSessionRuns 默认 resolve）
+- frontend/src/components/daemon/__tests__/session-panel-ctx-tokens.test.tsx（单 resolver 改收集全部 pending+补 listSessionTasks 接线）
+- frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx（补 listSessionRuns 接线+默认（防 spyOn fetch 计数污染））
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（补 listSessionTasks 导出+beforeEach 默认）
+需求：修复 CI 四类失败：迁移链断链+heartbeat 签名+bundle 五键+前端 mock 债
+根因：d4fdcc7ac 夹带 conflict-resolve-entry 的 router/DTO/模型但漏提交 service 实现与 20260904223000 迁移文件，迁移链断链+心跳 TypeError；ql-20260905-001 bundle 加第五键 manifest_versions 未同步测试；4eb9f0626 移除任务面板惰性闸门后 5 个测试文件 mock 债（缺导出/裸 vi.fn()/单 resolver）
+方案：补提交迁移文件；heartbeat_daemon/register_daemon 补 sillyspec_command_result 参数（None=清除、非 None 整包直写、register 恒清）；bundle 测试四键改五键+manifest_versions 类型断言；前端 5 文件补 listSessionTasks 接线/导出+listSessionRuns 默认 resolve+ctx-tokens 收集全部 pending resolver
+结果：backend 心跳 50 passed+迁移链 16 passed+bundle 12 passed，ruff/format/mypy 0 错；前端 5 文件 125 passed、tsc 0、eslint 0 error；经 worktree 推送 origin/main 修 CI
+
+## ql-20260907-009-26f4 | 2026-09-07 13:22:25 | 构建 daemon bundle（含 e0af8e3a0 SILLYSPEC_SYNC_TIMEOUT_MS 注入）并部署阿里云上架自更新分发：干净 worktree 出 bundle → build-and-save 打镜像 → scp …
+状态：进行中
+关联变更：（无）
+文件：docs/sillyspec/2026-09-07-spec-sync-abort-classification.md

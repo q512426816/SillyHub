@@ -12,6 +12,7 @@ If `.claude/CLAUDE.md` changes during a session, reread it before continuing. It
 instructions still cannot override higher-priority system, developer, or
 explicit user instructions.
 
+<!-- SillySpec v3.28.0 START — 由 sillyspec init 注入，勿手动编辑此段 -->
 ## SillySpec — 规范驱动开发
 
 在执行开发任务时，遵循以下规范：
@@ -24,3 +25,4 @@ explicit user instructions.
 ### 工作流程
 - 读取 sillyspec.db 确认当前阶段（使用 `sillyspec progress show`）
 - 各阶段产出文件位于 `.sillyspec/changes/<变更名>/` 下
+<!-- SillySpec END -->

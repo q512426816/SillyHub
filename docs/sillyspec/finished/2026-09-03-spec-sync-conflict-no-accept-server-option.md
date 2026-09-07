@@ -37,3 +37,11 @@ quick 会话（quick-1b00c2c0）启动后，每次执行 `sillyspec run quick ..
 
 - **修复已在 sillyspec 仓工作区完整落地（另一会话在途、未提交）**：`resolve --take-platform` spec 树分支接入 `_takePlatformSpecPaths`——拉平台 spec-bundle（X2 端点）但**只覆盖冲突文件列出的路径**（服务器已删→删本地），覆盖后刷新内容基线快照闭环防回推；配套 `test/spec-sync-conflict-banner-dedup.test.mjs`（刷屏治理）+ hub08 扩展，工作区 12/12 全绿。待该会话提交发版后即可收敛本坑（下轮巡检复核归档）。
 - 前置缓解已生效：2026-09-03 的 quicksync-conflict-granularity 修复（v3.28.0）使「本地未改动+服务器前进」文件不再制造冲突——本坑 164 文件形态的主体已消失，take-platform 补齐剩余「本地真改动但想接受服务器」的收敛路径。
+- 2026-09-05 复核：take-platform 实现仍在工作区未提交（sync.js 在途改动集内），四件 spec-sync 测试 13/13 绿——维持活跃，待提交发版。
+
+## 处置记录（2026-09-07 定时收口，已修复归档）
+
+- `resolve --take-platform` spec 树分支已提交（sillyspec 仓 69369a0）：`_takePlatformSpecPaths` 拉平台 spec-bundle（X2 端点）但只覆盖冲突文件列出的路径（服务器已删→删本地），覆盖后刷新内容基线快照闭环防回推；「接受服务器版本」收敛路径补齐，与 --keep-local / --abort 构成完整三态。
+- 刷屏治理同批落地：`test/spec-sync-conflict-banner-dedup.test.mjs`（待决冲突上报摘要化）+ hub08 扩展。
+- 复核证据（2026-09-07）：spec-sync 四件测试（banner-dedup / hub08 / quicksync-conflict-granularity / platform-spec-sync-incremental）15/15 全绿。
+- 前置缓解回顾：v3.28.0 quicksync-conflict-granularity（内容基线快照 + follower 自动跟随）已使本坑 164 文件形态的主体（本地未改动+服务器前进）不再制造冲突；take-platform 补齐剩余「本地真改动但想接受服务器」路径。本坑诉求全部落地，归档。

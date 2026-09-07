@@ -40,7 +40,7 @@ plan_level: full
 | task-06 | daemon 命令执行与结果槽 | W2 | P0 | task-05 | FR-02, FR-03, FR-05, D-004@v1 | runResolve/runGhostCleanup + _lastCommandResult 10min 终态窗 + 心跳携带 + config 键；与 task-05 共享 daemon.ts 故串行 |
 | task-07 | daemon 测试 | W3 | P0 | task-05, task-06 | FR-02, FR-03, FR-05 | case 分发/flag 映射/超时/忙拒/心跳携带与过期停发（不发显式 null） |
 | task-08 | 前端 API 与类型 | W3 | P0 | task-02, task-03 | FR-02, FR-03, FR-05 | lib/daemon.ts 两函数 + pnpm gen:types 再生成 api-types.ts/openapi.json |
-| task-09 | 前端平台同步卡片 | W4 | P0 | task-08 | FR-01, FR-02, FR-03, FR-04, FR-05, D-002@v1, D-003@v1 | platform-sync-section.tsx + 权限 hook + 桌面/移动挂载 + 回显/150s 恢复 |
+| task-09 | 前端平台同步卡片 | W4 | P0 | task-08 | FR-01, FR-02, FR-03, FR-04, FR-05, D-002@v1, D-003@v1 | platform-sync-section.tsx + 权限 hook + 桌面/移动挂载 + 回显/150s 恢复 + 组件测试 + 两页面既有测试零回归 |
 | task-10 | 前端总览卡收口 | W4 | P1 | task-08 | FR-01 | changes-overview-card.tsx CLI 指引改跳转变更中心 |
 | task-11 | 模块文档更新 | W5 | P1 | task-01~10 | 全 FR | backend.md / sillyhub-daemon.md / frontend.md 变更索引条目 |
 

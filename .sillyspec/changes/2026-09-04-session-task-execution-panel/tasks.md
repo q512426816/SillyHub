@@ -16,4 +16,5 @@ created_at: 2026-09-05 00:02:21
 - [x] task-07: 前端面板组件——TaskExecutionPanel（折叠摘要行 + 任务清单/运行中/轮次历史三页签，复用三类卡，brand-* 双主题）
 - [x] task-08: 前端挂载接线——session-panel page/dialog/mobile 三挂载点 + SSE 分发处 applyEvent 接线
 - [x] task-09: 类型同步——pnpm gen:types（api-types.ts + openapi.json，先验 node_modules 健康）
-- [x] task-10: 前端测试——面板三页签/折叠摘要/空态用例 + useSessionTasks 用例 + session-panel 既有测试全绿回归
+- [ ] task-10: 前端测试——面板三页签/折叠摘要/空态用例 + useSessionTasks 用例 + session-panel 既有测试全绿回归
+- [x] ql-20260907-001-e373 修复任务执行面板轮次历史懒加载——恢复挂载即取数，session-panel-connection 看门狗测试改为增量计数断言

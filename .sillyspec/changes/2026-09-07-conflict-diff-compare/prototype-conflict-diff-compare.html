@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 冲突对比弹窗（变更中心平台同步）— 2026-09-07-conflict-diff-compare</title>
+<style>
+  /* 设计语言对齐 prototype-conflict-resolve.html（AI-Native 亮主题） */
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --border: #e5e7eb; --muted: #6b7280;
+    --fg: #111827; --brand: #3b6ef6; --brand-dark: #2f56c9;
+    --success: #16a34a; --error: #dc2626; --warning: #d97706;
+    --violet-bg: #ede9fe; --violet-fg: #6d28d9;
+    --warn-bg: #fef3c7; --warn-fg: #b45309;
+    --diff-add: #dcfce7; --diff-add-strong: #bbf7d0; --diff-del: #fee2e2; --diff-del-strong: #fecaca;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; padding: 24px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+  .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .card-title { font-weight: 600; font-size: 15px; }
+  .meta { color: var(--muted); font-size: 12px; margin-left: auto; font-family: var(--mono); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .badge { border-radius: 4px; padding: 1px 6px; font-size: 11px; line-height: 18px; white-space: nowrap; }
+  .badge.spec { background: var(--violet-bg); color: var(--violet-fg); }
+  .badge.prog { background: var(--warn-bg); color: var(--warn-fg); }
+  .cname { font-family: var(--mono); font-size: 13px; font-weight: 600; word-break: break-all; }
+  .cid { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .ctime { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .btns { margin-left: auto; display: flex; gap: 8px; }
+  button.op { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all .15s; }
+  button.op:hover { border-color: var(--brand); color: var(--brand); }
+  button.op.danger { color: var(--error); }
+  button.op.danger:hover { border-color: var(--error); background: #fef2f2; }
+  .ghost-zone { padding: 12px 16px; font-size: 13px; color: var(--muted); }
+
+  /* ── 对比弹窗 ── */
+  .modal-mask { position: fixed; inset: 0; background: rgba(17,24,39,.45); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .modal-mask.show { display: flex; }
+  .modal { background: var(--card); border-radius: 12px; width: 1080px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,.2); overflow: hidden; }
+  .modal-head { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-close { margin-left: auto; border: none; background: none; font-size: 18px; color: var(--muted); cursor: pointer; }
+  .time-strip { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 20px; background: #fafafa; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .time-strip b { color: var(--fg); font-weight: 600; }
+  .time-strip .winner { color: var(--warning); }
+  .modal-body { flex: 1; display: flex; min-height: 0; }
+  /* 左栏：文件清单 */
+  .file-list { width: 300px; border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; }
+  .file-list-head { padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--card); display: flex; align-items: center; gap: 8px; }
+  .file-item { padding: 8px 12px; border-bottom: 1px solid #f3f4f6; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .file-item:hover { background: #f9fafb; }
+  .file-item.sel { background: #eff4ff; border-left: 3px solid var(--brand); padding-left: 9px; }
+  .file-item .fname { font-family: var(--mono); font-size: 11px; word-break: break-all; }
+  .fstat { border-radius: 3px; padding: 0 4px; font-size: 10px; line-height: 16px; white-space: nowrap; flex-shrink: 0; }
+  .fstat.mod { background: var(--warn-bg); color: var(--warn-fg); }
+  .fstat.local-only { background: #dbeafe; color: #1d4ed8; }
+  .fstat.plat-only { background: #f3e8ff; color: #7e22ce; }
+  .fstat.same { background: #f3f4f6; color: var(--muted); }
+  /* 右栏：side-by-side diff */
+  .diff-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .diff-cols { display: flex; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+  .diff-cols > div { flex: 1; padding: 6px 14px; min-width: 0; }
+  .diff-cols .lc { border-right: 1px solid var(--border); }
+  .diff-scroll { flex: 1; overflow: auto; font-family: var(--mono); font-size: 11px; line-height: 1.55; }
+  .dline { display: flex; min-height: 18px; }
+  .dline > div { flex: 1; padding: 0 8px; white-space: pre-wrap; word-break: break-all; min-width: 0; }
+  .dline .dl { border-right: 1px solid var(--border); }
+  .dline.del .dl { background: var(--diff-del); }
+  .dline.add .dr { background: var(--diff-add); }
+  .dline.del .dl .ln { color: #991b1b; }
+  .dline.add .dr .ln { color: #166534; }
+  .ln { display: inline-block; width: 34px; color: #9ca3af; user-select: none; text-align: right; margin-right: 8px; }
+  /* 进度对比表 */
+  .ptable-wrap { flex: 1; overflow: auto; padding: 0; }
+  table.ptable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.ptable th, table.ptable td { text-align: left; padding: 8px 14px; border-bottom: 1px solid #f3f4f6; }
+  table.ptable th { background: #fafafa; color: var(--muted); font-weight: 500; position: sticky; top: 0; }
+  table.ptable tr.diff td { background: #fffbeb; }
+  table.ptable tr.diff td:first-child { border-left: 3px solid var(--warning); }
+  table.ptable td.v { font-family: var(--mono); font-size: 12px; }
+  table.ptable .hl { color: var(--warning); font-weight: 600; }
+  /* 底部裁决条 */
+  .modal-foot { border-top: 1px solid var(--border); padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #fafafa; }
+  .foot-note { font-size: 12px; color: var(--muted); flex: 1; min-width: 240px; }
+  button.act { border-radius: 8px; padding: 7px 18px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: var(--card); transition: all .15s; }
+  button.act.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.act.primary:hover { background: var(--brand-dark); }
+  button.act.danger { color: var(--error); border-color: #fca5a5; }
+  button.act.danger:hover { background: #fef2f2; }
+  .anno { background: #fffbeb; border: 1px dashed var(--warning); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #92400e; margin: 16px 0; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: none; background: var(--card); padding: 4px 12px; font-size: 12px; cursor: pointer; color: var(--muted); }
+  .seg button.on { background: var(--brand); color: #fff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>原型 · 冲突对比弹窗 — 变更中心「平台同步」增强</h1>
+  <div class="sub">2026-09-07-conflict-diff-compare · 变更中心页 → 平台同步卡 → 冲突行「查看对比」→ 对比弹窗（本原型演示 spec 树 / 进度两种冲突形态）</div>
+
+  <div class="anno">
+    演示操作：点击下方每行的「查看对比」按钮打开弹窗。第 1 行演示 <b>spec 树冲突</b>（文件清单 + 左右分栏差异高亮），第 2 行演示 <b>quick 快速修复条目（标题显示 ql 编号）</b>，第 3 行演示 <b>进度类冲突</b>（关键信息对比表）。裁决按钮（保本地/取平台）已收进弹窗底部。
+  </div>
+
+  <!-- 平台同步卡（改造后形态） -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">平台同步</span>
+      <span class="meta">未决冲突 3 · ghost 0</span>
+      <span class="meta">数据源机器：DESKTOP-HJ0AM09 · 更新于 刚刚</span>
+    </div>
+
+    <!-- 冲突行 1：普通变更 spec 树冲突 -->
+    <div class="row">
+      <span class="badge spec">spec 树</span>
+      <span>
+        <div class="cname">2026-09-02-changes-overview-card</div>
+        <div class="ctime">冲突发生于 2026-09-04 12:19:03 · 涉及 183 个文件</div>
+      </span>
+      <span class="btns">
+        <button class="op" onclick="openModal('spec')">查看对比</button>
+      </span>
+    </div>
+
+    <!-- 冲突行 2：quick 条目（标题 = ql 编号） -->
+    <div class="row">
+      <span class="badge spec">spec 树</span>
+      <span>
+        <div class="cname">【ql-20260904-002-62e1】快速修复</div>
+        <div class="cid">quick-62e1d5fb</div>
+        <div class="ctime">冲突发生于 2026-09-04 08:35:27 · 涉及 164 个文件</div>
+      </span>
+      <span class="btns">
+        <button class="op" onclick="openModal('spec')">查看对比</button>
+      </span>
+    </div>
+
+    <!-- 冲突行 3：进度类冲突 -->
+    <div class="row">
+      <span class="badge prog">进度</span>
+      <span>
+        <div class="cname">【ql-20260904-003-aac6】快速修复</div>
+        <div class="cid">quick-aac62562</div>
+        <div class="ctime">冲突发生于 2026-09-04 08:57:42</div>
+      </span>
+      <span class="btns">
+        <button class="op" onclick="openModal('prog')">查看对比</button>
+      </span>
+    </div>
+
+    <div class="ghost-zone">残留记录 (ghost) 0 个 —— 目录已不存在 · 建议清理</div>
+  </div>
+
+  <div class="anno" style="background:#eff4ff;border-color:var(--brand);color:#1e40af;">
+    <b>改动点对照（相对现状）</b><br>
+    ① 行上去掉「保本地 / 取平台」两个按钮，只留「查看对比」——必须看过差异才能裁决，防误触；<br>
+    ② quick 快速修复条目标题显示 ql 编号【ql-20260904-002-62e1】+ 灰色小字原始 ID，用户不再面对看不懂的 quick-62e1d5fb；<br>
+    ③ 行上补「冲突发生时间 + 涉及文件数」；<br>
+    ④ 弹窗顶部展示双方「最后更新时间」（本地 vs 平台，较旧一侧标橙提示）。
+  </div>
+</div>
+
+<!-- ══════════ 对比弹窗 ══════════ -->
+<div class="modal-mask" id="mask">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title" id="mTitle">对比：2026-09-02-changes-overview-card</span>
+      <span class="badge spec" id="mBadge">spec 树</span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="time-strip">
+      <span>本地最后更新：<b>2026-09-04 12:19:03</b></span>
+      <span>平台最后更新：<b>2026-09-04 11:58:41</b></span>
+      <span class="winner">⚠ 平台版本较旧，取平台将回退这些文件</span>
+    </div>
+
+    <!-- spec 树模式：文件清单 + side-by-side diff -->
+    <div class="modal-body" id="bodySpec">
+      <div class="file-list">
+        <div class="file-list-head">
+          差异文件 <b id="diffCount">4</b> / 共 183
+          <span class="seg" style="margin-left:auto">
+            <button class="on" id="segDiff" onclick="toggleSame(false)">只看差异</button>
+            <button id="segAll" onclick="toggleSame(true)">全部</button>
+          </span>
+        </div>
+        <div class="file-item sel" onclick="pickFile(this)">
+          <span class="fstat mod">修改</span><span class="fname">changes/2026-09-02-changes-overview-card/design.md</span>
+        </div>
+        <div class="file-item" onclick="pickFile(this)">
+          <span class="fstat mod">修改</span><span class="fname">changes/2026-09-02-changes-overview-card/tasks.md</span>
+        </div>
+        <div class="file-item" onclick="pickFile(this)">
+          <span class="fstat local-only">仅本地</span><span class="fname">changes/2026-09-02-changes-overview-card/decisions.md</span>
+        </div>
+        <div class="file-item" onclick="pickFile(this)">
+          <span class="fstat plat-only">仅平台</span><span class="fname">changes/archive/2026-08-20-workspace-nav-consolidate/design.md</span>
+        </div>
+        <div class="file-item same-only" style="display:none" onclick="pickFile(this)">
+          <span class="fstat same">相同</span><span class="fname">changes/archive/2026-08-20-workspace-nav-consolidate/plan.md</span>
+        </div>
+        <div class="file-item same-only" style="display:none" onclick="pickFile(this)">
+          <span class="fstat same">相同</span><span class="fname">… 其余 178 个内容相同文件（折叠）</span>
+        </div>
+      </div>
+      <div class="diff-pane">
+        <div class="diff-cols">
+          <div class="lc">本地（DESKTOP-HJ0AM09）</div>
+          <div>平台</div>
+        </div>
+        <div class="diff-scroll">
+          <div class="dline"><div class="dl"><span class="ln">12</span>## 2. 设计目标</div><div class="dr"><span class="ln">12</span>## 2. 设计目标</div></div>
+          <div class="dline"><div class="dl"><span class="ln">13</span></div><div class="dr"><span class="ln">13</span></div></div>
+          <div class="dline del"><div class="dl"><span class="ln">14</span>1. 变更中心页新增「平台同步」处理区，列出冲突与 ghost。</div><div class="dr"><span class="ln"></span></div></div>
+          <div class="dline add"><div class="dl"><span class="ln"></span></div><div class="dr"><span class="ln">14</span>1. 变更中心页新增「平台同步」处理区：列出当前机器的未决同步冲突与 ghost 残留。</div></div>
+          <div class="dline del"><div class="dl"><span class="ln">15</span>2. 冲突行内一键裁决：保本地 / 取平台。</div><div class="dr"><span class="ln"></span></div></div>
+          <div class="dline add"><div class="dl"><span class="ln"></span></div><div class="dr"><span class="ln">15</span>2. 冲突行内一键裁决：保本地（keep-local）/ 取平台（take-platform），带危险确认弹窗。</div></div>
+          <div class="dline"><div class="dl"><span class="ln">16</span>3. ghost 一键清理。</div><div class="dr"><span class="ln">16</span>3. ghost 一键清理。</div></div>
+          <div class="dline del"><div class="dl"><span class="ln">17</span>4. 执行结果回显。</div><div class="dr"><span class="ln"></span></div></div>
+          <div class="dline add"><div class="dl"><span class="ln"></span></div><div class="dr"><span class="ln">17</span>4. 执行结果回显：fire-and-forget 下发后心跳捎带结果。</div></div>
+          <div class="dline"><div class="dl"><span class="ln">18</span></div><div class="dr"><span class="ln">18</span></div></div>
+          <div class="dline"><div class="dl"><span class="ln">19</span>## 3. 非目标</div><div class="dr"><span class="ln">19</span>## 3. 非目标</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 进度模式：关键信息对比表 -->
+    <div class="modal-body" id="bodyProg" style="display:none">
+      <div class="ptable-wrap">
+        <table class="ptable">
+          <thead><tr><th style="width:220px">对比项</th><th>本地（DESKTOP-HJ0AM09）</th><th>平台</th></tr></thead>
+          <tbody>
+            <tr><td>当前阶段</td><td class="v">⚡ 波次执行</td><td class="v">⚡ 波次执行</td></tr>
+            <tr class="diff"><td>当前步骤</td><td class="v hl">task-07 前端弹窗（进行中）</td><td class="v hl">task-05 daemon RPC（已完成）</td></tr>
+            <tr><td>步骤进度</td><td class="v">7 / 11</td><td class="v">5 / 11</td></tr>
+            <tr class="diff"><td>最近活跃时间</td><td class="v hl">2026-09-04 08:57:42</td><td class="v hl">2026-09-03 22:14:05</td></tr>
+            <tr><td>关联变更</td><td class="v">—</td><td class="v">—</td></tr>
+            <tr class="diff"><td>quicklog 条目</td><td class="v hl">ql-20260904-003-aac6（已写 QUICKLOG）</td><td class="v hl">（平台未收到推送）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <div class="foot-note" id="footNote">
+        裁决会影响整个变更的同步方向：<b>保本地</b> = 以这台机器的内容为准覆盖平台；<b>取平台</b> = 拉平台内容覆盖本机。请对照上方差异确认后再选择。
+      </div>
+      <button class="act primary" onclick="alert('演示：确认后走现有 sillyspec-resolve 通道（保本地）')">保本地</button>
+      <button class="act danger" onclick="alert('演示：确认后走现有 sillyspec-resolve 通道（取平台）')">取平台</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openModal(kind) {
+    document.getElementById('mask').classList.add('show');
+    var isProg = kind === 'prog';
+    document.getElementById('bodySpec').style.display = isProg ? 'none' : 'flex';
+    document.getElementById('bodyProg').style.display = isProg ? 'flex' : 'none';
+    document.getElementById('mTitle').textContent = isProg
+      ? '对比：【ql-20260904-003-aac6】快速修复'
+      : '对比：2026-09-02-changes-overview-card';
+    document.getElementById('mBadge').textContent = isProg ? '进度' : 'spec 树';
+    document.getElementById('mBadge').className = 'badge ' + (isProg ? 'prog' : 'spec');
+  }
+  function closeModal() { document.getElementById('mask').classList.remove('show'); }
+  function pickFile(el) {
+    document.querySelectorAll('.file-item').forEach(function (i) { i.classList.remove('sel'); });
+    el.classList.add('sel');
+  }
+  function toggleSame(showAll) {
+    document.querySelectorAll('.same-only').forEach(function (i) { i.style.display = showAll ? 'flex' : 'none'; });
+    document.getElementById('segDiff').className = showAll ? '' : 'on';
+    document.getElementById('segAll').className = showAll ? 'on' : '';
+  }
+  document.getElementById('mask').addEventListener('click', function (e) {
+    if (e.target === this) closeModal();
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — Agent 会话活性状态（2026-09-07-agent-liveness-states）</title>
+<style>
+/* ============ 主题 token（单源模拟 frontend/src/styles/themes.ts） ============ */
+:root, [data-theme="ai-native"] {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --primary-soft: #EDE9FE;
+  --accent: #0891B2; --accent-soft: #CFFAFE; --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF;
+  --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --border: #DDD6FE; --border-weak: #EEE9F8;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --error: #DC2626; --error-soft: #FEE2E2; --error-text: #991B1B;
+  --shadow-sm: 0 1px 2px rgba(30,27,75,.06); --shadow-md: 0 4px 14px rgba(30,27,75,.08);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+[data-theme="blue"] {
+  --primary: #1677FF; --primary-hover: #0958D9; --primary-soft: #E6F4FF;
+  --accent: #13C2C2; --accent-soft: #E6FFFB; --accent-text: #08979C;
+  --brand-gradient: linear-gradient(135deg, #1677FF 0%, #13C2C2 100%);
+  --bg: #F0F5FF; --fg: #10233F; --card: #FFFFFF;
+  --muted: #EEF2F8; --muted-fg: #45556C; --faint: #94A3B8;
+  --border: #B9D8FF; --border-weak: #E3EEFF;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); padding: 24px; font-size: 14px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+/* ============ 页头 ============ */
+.header { display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand .logo { width: 34px; height: 34px; border-radius: 9px; background: var(--brand-gradient); display: grid; place-items: center; color: #fff; font-weight: 700; }
+.brand h1 { font-size: 17px; }
+.brand small { color: var(--muted-fg); font-weight: 400; display: block; margin-top: 2px; }
+.theme-toggle { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 6px 12px; cursor: pointer; color: var(--fg); font-size: 13px; box-shadow: var(--shadow-sm); }
+
+/* ============ 卡片 ============ */
+.card { background: var(--card); border: 1px solid var(--border-weak); border-radius: 12px; box-shadow: var(--shadow-md); padding: 18px 20px; }
+.card h2 { font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.card .desc { color: var(--muted-fg); font-size: 12.5px; margin-bottom: 14px; }
+
+/* ============ 五态徽章 ============ */
+.state { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+.state .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.state-working { background: var(--accent-soft); color: var(--accent-text); } .state-working .dot { background: var(--accent); animation: pulse 1.6s infinite; }
+.state-blocked { background: var(--error-soft); color: var(--error-text); } .state-blocked .dot { background: var(--error); animation: pulse 1.6s infinite; }
+.state-idle { background: var(--warning-soft); color: var(--warning-text); } .state-idle .dot { background: var(--warning); }
+.state-ended { background: var(--muted); color: var(--muted-fg); } .state-ended .dot { background: var(--faint); }
+.state-unknown { background: transparent; color: var(--faint); border: 1px dashed var(--faint); } .state-unknown .dot { background: var(--faint); opacity: .5; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+
+/* ============ 聚合视图（工作台） ============ */
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 12px; color: var(--muted-fg); font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--border-weak); }
+td { padding: 10px; border-bottom: 1px solid var(--border-weak); font-size: 13px; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+.harness { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.harness .ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; color: #fff; }
+.h-zcode .ic { background: var(--primary); } .h-claude .ic { background: var(--accent); } .h-codex .ic { background: var(--warning); }
+.silent { color: var(--muted-fg); font-variant-numeric: tabular-nums; }
+.ctx { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted-fg); }
+.unread { width: 8px; height: 8px; border-radius: 50%; background: var(--error); display: inline-block; }
+.evidence { color: var(--faint); font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; }
+
+/* ============ blocked 通知卡 ============ */
+.notif { display: flex; gap: 12px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--error-soft); background: var(--error-soft); }
+.notif .nicon { font-size: 18px; }
+.notif .title { font-weight: 600; color: var(--error-text); }
+.notif .body { color: var(--error-text); font-size: 12.5px; margin-top: 3px; line-height: 1.55; }
+.notif .meta { color: var(--faint); font-size: 11.5px; margin-top: 5px; }
+
+/* ============ 会话视图 agent 日志面板 ============ */
+.panel-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--border-weak); border-radius: 10px; margin-bottom: 8px; }
+.panel-row .left { display: flex; align-items: center; gap: 12px; }
+.filepath { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted-fg); }
+.derived { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* ============ 演示控制 ============ */
+.demo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.demo button { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; color: var(--fg); }
+.demo button:hover { border-color: var(--primary); color: var(--primary); }
+.demo .hint { font-size: 12px; color: var(--faint); }
+.note { background: var(--primary-soft); color: var(--primary-hover); border-radius: 8px; padding: 10px 14px; font-size: 12.5px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <div class="brand">
+      <div class="logo">S</div>
+      <h1>Agent 会话活性状态 <small>2026-09-07-agent-liveness-states · 原型（P1c 前端增量）</small></h1>
+    </div>
+    <button class="theme-toggle" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='ai-native'?'blue':'ai-native'">切换主题（blue / ai-native）</button>
+  </div>
+
+  <!-- ① 工作台·多会话状态聚合 -->
+  <div class="card">
+    <h2>① 工作台 · 多会话状态聚合</h2>
+    <div class="desc">全部托管会话（daemon 自发现，含未跑 SillySpec 的裸会话）+ 登记会话按 (workspace, log_path) 汇聚去重。状态 ≤10s 可见；idle 且有未读转移边 → 小红点（D-006）。</div>
+    <div class="legend">
+      <span class="state state-working"><span class="dot"></span>working 在干活</span>
+      <span class="state state-blocked"><span class="dot"></span>blocked 在等人</span>
+      <span class="state state-idle"><span class="dot"></span>idle 空闲</span>
+      <span class="state state-ended"><span class="dot"></span>ended 已结束</span>
+      <span class="state state-unknown"><span class="dot"></span>unknown</span>
+    </div>
+    <table>
+      <thead><tr><th>会话</th><th>状态</th><th>静默时长</th><th>关联</th><th>证据摘要</th><th></th></tr></thead>
+      <tbody>
+        <tr id="r1">
+          <td><span class="harness h-zcode"><span class="ic">Z</span>zcode · 401ba557</span></td>
+          <td><span class="state state-working" data-state><span class="dot"></span><span data-label>working</span></span></td>
+          <td class="silent">3s</td>
+          <td class="ctx">2026-09-07-arch-…</td>
+          <td class="evidence">last_event=model_io</td>
+          <td></td>
+        </tr>
+        <tr id="r2">
+          <td><span class="harness h-claude"><span class="ic">C</span>claude · 7f21c0aa</span></td>
+          <td><span class="state state-blocked" data-state><span class="dot"></span><span data-label>blocked</span></span></td>
+          <td class="silent">2m 41s</td>
+          <td class="ctx">quick-a3f8b2c1</td>
+          <td class="evidence">PERMISSION_REQUEST(write)</td>
+          <td></td>
+        </tr>
+        <tr id="r3">
+          <td><span class="harness h-codex"><span class="ic">X</span>codex · 01a02598</span></td>
+          <td><span class="state state-idle" data-state><span class="dot"></span><span data-label>idle</span></span></td>
+          <td class="silent">4m 12s</td>
+          <td class="ctx">2026-09-04-conflict-…</td>
+          <td class="evidence">last_event=task_complete</td>
+          <td><span class="unread" title="working→idle 转移未读"></span></td>
+        </tr>
+        <tr id="r4">
+          <td><span class="harness h-zcode"><span class="ic">Z</span>zcode · 5ece4062</span></td>
+          <td><span class="state state-ended" data-state><span class="dot"></span><span data-label>ended</span></span></td>
+          <td class="silent">18m 05s</td>
+          <td class="ctx">—</td>
+          <td class="evidence">file_gone(reset)</td>
+          <td></td>
+        </tr>
+        <tr id="r5">
+          <td><span class="harness h-claude"><span class="ic">C</span>claude · 9b3d1e77</span></td>
+          <td><span class="state state-unknown" data-state><span class="dot"></span><span data-label>unknown</span></span></td>
+          <td class="silent">—</td>
+          <td class="ctx">—</td>
+          <td class="evidence">deriver_error(retry)</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="demo" style="margin-top:12px">
+      <span class="hint">演示状态流转（点按钮模拟 tailer 推导变化）：</span>
+      <button onclick="cycle('r2')">claude·7f21c0aa 下一态</button>
+      <button onclick="cycle('r1')">zcode·401ba557 下一态</button>
+    </div>
+  </div>
+
+  <!-- ② blocked 通知 -->
+  <div class="card">
+    <h2>② blocked 主动通知（type=agent_blocked）</h2>
+    <div class="desc">进入 blocked 且超阈值（BLOCKED_ALERT_MS，默认 120s）未消解 → 站内通知 + Redis 实时推；与既有 PERMISSION_REQUEST 待审 5min timer 同源汇聚去重（同一 blocked 段只发一次）。消解后再次进入视为新段可再触发。</div>
+    <div class="notif">
+      <div class="nicon">⏳</div>
+      <div>
+        <div class="title">agent 在等你：claude · 7f21c0aa（quick-a3f8b2c1）</div>
+        <div class="body">权限确认等待 2 分 41 秒未消解：Bash 写入 <b>src/dispatch/</b>（PERMISSION_REQUEST，待审 #4821）。超过 5 分钟未处理将按既有规则自动拒绝。</div>
+        <div class="meta">workspace: multi-agent-platform · dedupe_key: (session 7f21c0aa, blocked 段 #3) · 2026-09-07 10:24:31</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 会话视图·agent 日志面板 -->
+  <div class="card">
+    <h2>③ 会话视图 · agent 日志面板（增量）</h2>
+    <div class="desc">既有面板每行（harness / session_id / 大小 / 对话渲染入口）尾部追加状态徽章 + state_derived_at；面板骨架不变（组件级增量）。</div>
+    <div class="panel-row">
+      <div class="left">
+        <span class="harness h-zcode"><span class="ic">Z</span>zcode · 401ba557</span>
+        <span class="filepath">~/.zcode/cli/rollout/model-io-sess_401ba557….jsonl</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="derived">推导于 10:24:28</span>
+        <span class="state state-working"><span class="dot"></span>working</span>
+      </div>
+    </div>
+    <div class="panel-row">
+      <div class="left">
+        <span class="harness h-claude"><span class="ic">C</span>claude · 7f21c0aa</span>
+        <span class="filepath">~/.claude/projects/…/019f….jsonl</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="derived">推导于 10:24:26</span>
+        <span class="state state-blocked"><span class="dot"></span>blocked</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ P1e 编排知情决策说明 -->
+  <div class="card">
+    <h2>④ 派活系统 · 知情决策（P1e，非 UI）</h2>
+    <div class="note">
+      <b>list_workers 返回值增 liveness 字段</b>（worker running 期间附 state + evidence）。编排决策规则从「per-worker 超时 → kill lease」升级为：<b>blocked 超阈值 → 升级给人（agent_blocked 通知 + 平台待办），不直接 kill</b>（D-010：绝不自动批准）；<b>working 久无终态 → 按既有超时再等，不抢跑 kill</b>（区分"长任务"与"死了"）。blocked 源优先级：第一方权限事件 &gt; 日志推导（D-012）。
+    </div>
+  </div>
+
+</div>
+<script>
+const ORDER = ['working','blocked','idle','ended','unknown'];
+const LABEL = { working:'working', blocked:'blocked', idle:'idle', ended:'ended', unknown:'unknown' };
+function cycle(rowId) {
+  const el = document.querySelector('#' + rowId + ' [data-state]');
+  const cur = [...el.classList].find(c => c.startsWith('state-') && c !== 'state-unknown' || c === 'state-unknown');
+  const cls = [...el.classList].find(c => ORDER.includes(c.slice(6)));
+  const next = ORDER[(ORDER.indexOf(cls.slice(6)) + 1) % ORDER.length];
+  el.classList.remove(cls);
+  el.classList.add('state-' + next);
+  el.querySelector('[data-label]').textContent = LABEL[next];
+}
+</script>
+</body>
+</html>
