@@ -16,14 +16,22 @@
  *   - 无绑定 / 机器缺失 / sillyspec_status 缺失（含加载中）→ 整卡不渲染
  *     （return null，页面行为与现状一致，design §9 兼容策略）。
  *
- * 操作链（fire-and-forget 无回执，D-001@v1）：行内「保本地/取平台」与
- * 「一键清理 ghost」→ antd App.useApp() 的 modal.confirm（取平台/清理
- * okType:"danger"）→ triggerMachineSillySpecResolve / GhostCleanup →
- * 结果经心跳 sillyspec_command_result 回传 → action+change 匹配本次下发
- * 即认定回报（executed_at 为机器本地钟仅辅助、跨机不比较——X-18）→ 成功
- * toast（行随快照 ≤60-75s 消失，R-06）/ 失败红字摘要 + 恢复重试；
- * ECHO_TIMEOUT_MS（150s = 执行上限 120s + 一个心跳周期，X-17）无回报恢复
- * 可重试——旧 daemon 静默忽略指令的兜底（R-03），不做版本门控。
+ * 操作链（fire-and-forget 无回执，D-001@v1）：冲突行「查看对比」打开
+ * ConflictCompareModal（2026-09-07-conflict-diff-compare task-07 产物），
+ * 裁决（保本地/取平台）在弹窗内确认并下发（D-002@v1 按钮从行收进弹窗），
+ * onDispatched 回调登记回显条目；「一键清理 ghost」仍走 antd App.useApp()
+ * 的 modal.confirm（okType:"danger"）→ GhostCleanup。两者结果均经心跳
+ * sillyspec_command_result 回传 → action+change 匹配本次下发即认定回报
+ * （executed_at 为机器本地钟仅辅助、跨机不比较——X-18）→ 成功 toast（行随
+ * 快照 ≤60-75s 消失，R-06）/ 失败红字摘要 + 恢复重试；ECHO_TIMEOUT_MS
+ * （150s = 执行上限 120s + 一个心跳周期，X-17）无回报恢复可重试——旧
+ * daemon 静默忽略指令的兜底（R-03），不做版本门控。
+ *
+ * 行改造（2026-09-07-conflict-diff-compare task-08 / D-004@v1）：quick 冲突
+ * ql_id 存在时标题显示「【ql 编号】快速修复」+ 灰色小字原始会话 ID，缺失兜底
+ * 原变更名；行上补冲突发生时间（created_at 相对时间）。「查看对比」机器离线
+ * 禁用（compare 实时读本地快照无缓存，D-001@v1 方案A）并 title 提示；无权限
+ * 用户不渲染（与 compare 端点同权限集合，Grill B1）。
  *
  * 权限（D-003@v1）：机器所有者 + 平台管理员可操作，其他成员只读（清单与
  * 计数）——useMachineSyncActionAccess 前端启发式仅控按钮显隐，后端权威。
@@ -41,12 +49,12 @@ import {
   formatAge,
   parseIsoLikeMs,
 } from "@/components/changes/change-activity-badge";
+import { ConflictCompareModal } from "@/components/changes/conflict-compare-modal";
 import { Button } from "@/components/ui/button";
 import type { components } from "@/lib/api-types";
 import {
   listDaemonMachines,
   triggerMachineSillySpecGhostCleanup,
-  triggerMachineSillySpecResolve,
 } from "@/lib/daemon";
 import { useNotify } from "@/lib/errors";
 import { useMachineSyncActionAccess } from "@/lib/use-machine-sync-action-access";
@@ -82,32 +90,11 @@ const QUERY_KEY_ROOT = ["platform-sync-section"] as const;
  */
 export const ECHO_TIMEOUT_MS = 150_000;
 
-/** 确认弹窗文案（原型 STRATEGY_TEXT 逐字对齐：覆盖方向 + 适用场景）。 */
-const STRATEGY_TEXT: Record<
-  ResolveStrategy,
-  { title: string; label: string; body: string; okText: string; danger: boolean }
-> = {
-  keep_local: {
-    title: "保本地（keep-local）",
-    label: "保本地",
-    body: "用本机版本覆盖平台版本。适用于：本机是最新现场（如本会话刚完成的工作、归档后的终态）。平台端他机未拉取的更新将被本机版本覆盖。",
-    okText: "确认 · 保本地",
-    danger: false,
-  },
-  take_platform: {
-    title: "取平台（take-platform）",
-    label: "取平台",
-    body: "用平台版本覆盖本机版本。适用于：他端推进了而你本机落后（如服务器/其他机器已裁决过的最新状态）。本机未推送的本地改动会被覆盖。",
-    okText: "确认 · 取平台",
-    danger: true,
-  },
-};
+// 裁决确认弹窗文案（STRATEGY_TEXT/ACTIVE_WARN_TEXT）与下发动作已按 D-002@v1
+// 收进对比弹窗（conflict-compare-modal.tsx，2026-09-07-conflict-diff-compare
+// task-07 产物），本文件不再持有行内裁决入口。
 
-/** 活跃变更警示段（原型 .warn-box 逐字对齐；出现即加重文案，不硬禁——D-003@v1）。 */
-const ACTIVE_WARN_TEXT =
-  "⚠ 该变更当前处于活跃阶段（非归档），另一会话可能正在推进。裁决会用一端版本覆盖另一端，确认你了解现场再继续。";
-
-/** 旧 daemon 兜底提示（两弹窗共用，R-03）。 */
+/** 旧 daemon 兜底提示（ghost 清理确认弹窗用，R-03）。 */
 const DAEMON_VERSION_NOTE =
   "指令需较新版本 daemon 支持，旧版本会静默忽略（150 秒无回报将自动恢复按钮）。";
 
@@ -195,6 +182,18 @@ function failureText(r: CommandResult): string {
   return `执行失败${exit}：${err}`;
 }
 
+/**
+ * 对比弹窗当前冲突（task-08 接线，ConflictCompareModal props 契约钉死的
+ * conflict 形态）：kind 由冲突行 type 投影——progress 原样，其余按 spec-tree
+ * （type 不收紧是心跳契约的既定决策，未知值走文件对比兜底）。
+ */
+interface CompareConflictTarget {
+  change: string;
+  kind: "spec-tree" | "progress";
+  ql_id?: string | null;
+  created_at?: string | null;
+}
+
 // ── 主组件 ──────────────────────────────────────────────────────────────────
 
 export interface PlatformSyncSectionProps {
@@ -216,6 +215,10 @@ export function PlatformSyncSection({
   const [pendingMap, setPendingMap] = useState<Record<string, PendingEntry>>({});
   // ghost 清单折叠组展开态（默认折一行计数，对齐总览卡 ghost 折叠组交互）。
   const [ghostExpanded, setGhostExpanded] = useState(false);
+  // 对比弹窗当前冲突（null=关闭；行点击「查看对比」置值，弹窗关闭清态）。
+  const [compareTarget, setCompareTarget] = useState<CompareConflictTarget | null>(
+    null,
+  );
 
   // 数据链（复刻 changes-overview-card）：fetchMyBinding 内部 catch → null。
   const bindingQ = useQuery({
@@ -337,55 +340,35 @@ export function PlatformSyncSection({
    */
   if (machine === null || status === null) return null;
 
-  // ── 下发动作（modal.confirm → fire-and-forget 指令 → 记 waiting 条目）────
+  // 机器在线判定（session-panel machineOnline 先例）：「查看对比」需实时读取
+  // 本地快照（D-001@v1 方案A 无缓存），离线时禁用入口。
+  const machineOnline = machine.status === "online";
 
-  const dispatchResolve = (change: string, strategy: ResolveStrategy) => {
-    const text = STRATEGY_TEXT[strategy];
-    const activeWarn = activeNames.has(change);
-    modal.confirm({
-      title: `裁决冲突：${text.title}`,
-      content: (
-        <div className="text-[13px] leading-6">
-          <p className="mb-3">
-            变更{" "}
-            <code className="rounded border bg-muted px-1.5 py-px font-mono text-xs">
-              {change}
-            </code>
-          </p>
-          <p>{text.body}</p>
-          {activeWarn && (
-            <p className="mt-3 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {ACTIVE_WARN_TEXT}
-            </p>
-          )}
-          <p className="mt-3 text-xs text-muted-foreground">{DAEMON_VERSION_NOTE}</p>
-        </div>
-      ),
-      okText: text.okText,
-      okType: text.danger ? "danger" : undefined,
-      cancelText: "取消",
-      onOk: async () => {
-        try {
-          await triggerMachineSillySpecResolve(machine.id, { change, strategy });
-          setPendingMap((prev) => ({
-            ...prev,
-            [`resolve:${change}:${strategy}`]: {
-              phase: "waiting",
-              kind: "resolve",
-              change,
-              strategy,
-              dispatchedAt: Date.now(),
-              baselineResultKey: commandResultKeyOf(machine.sillyspec_command_result),
-              errorText: null,
-            },
-          }));
-          notify.success(`指令已下发：${change} → ${text.label}（等待机器回报）`);
-        } catch (err) {
-          // 404（非本机归属）/ 504（机器离线）等统一中文 toast，行按钮不动。
-          notify.error(err, "下发裁决指令失败");
-        }
+  // ── 回显登记（对比弹窗裁决下发成功回调 / ghost 清理确认下发）─────────────
+
+  /**
+   * 对比弹窗 onDispatched（task-08 / design §5 Phase 3.3）：裁决确认与
+   * triggerMachineSillySpecResolve 下发都在弹窗内完成（D-002@v1），本回调仅
+   * 登记 waiting 回显条目，走既有 sillyspec_command_result 回显链路。
+   */
+  const handleCompareDispatched = (change: string, strategy: ResolveStrategy) => {
+    setPendingMap((prev) => ({
+      ...prev,
+      [`resolve:${change}:${strategy}`]: {
+        phase: "waiting",
+        kind: "resolve",
+        change,
+        strategy,
+        dispatchedAt: Date.now(),
+        baselineResultKey: commandResultKeyOf(machine.sillyspec_command_result),
+        errorText: null,
       },
-    });
+    }));
+    notify.success(
+      `指令已下发：${change} → ${
+        strategy === "keep_local" ? "保本地" : "取平台"
+      }（等待机器回报）`,
+    );
   };
 
   const dispatchGhostCleanup = () => {
@@ -532,9 +515,25 @@ export function PlatformSyncSection({
                     >
                       {meta.label}
                     </span>
-                    <code className="break-all font-mono text-[13px] font-semibold">
-                      {name}
-                    </code>
+                    {c.ql_id ? (
+                      <>
+                        {/* ql 标题（D-004@v1）：quick 冲突显示 QUICKLOG 编号，
+                            原始会话 ID 降为灰色小字 */}
+                        <span className="break-all text-[13px] font-semibold">
+                          【{c.ql_id}】快速修复
+                        </span>
+                        <code className="break-all font-mono text-[11px] text-muted-foreground">
+                          {name}
+                        </code>
+                      </>
+                    ) : (
+                      <code className="break-all font-mono text-[13px] font-semibold">
+                        {name}
+                      </code>
+                    )}
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">
+                      冲突发生于 {relativeAge(c.created_at)}
+                    </span>
                     {activeWarn && (
                       <span
                         data-testid="platform-sync-active-warn"
@@ -564,23 +563,29 @@ export function PlatformSyncSection({
                         compact ? "w-full" : "ml-auto",
                       )}
                     >
+                      {/* 按钮收敛（D-002@v1）：裁决收进对比弹窗，行上只留入口；
+                          离线禁用（compare 实时读本地快照），waiting 回显期间禁用 */}
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={waiting}
-                        onClick={() => dispatchResolve(name, "keep_local")}
+                        disabled={waiting || !machineOnline}
+                        title={
+                          machineOnline
+                            ? undefined
+                            : "机器离线，无法读取本地内容"
+                        }
+                        onClick={() => {
+                          if (!c.change) return;
+                          setCompareTarget({
+                            change: c.change,
+                            kind: c.type === "progress" ? "progress" : "spec-tree",
+                            ql_id: c.ql_id ?? null,
+                            created_at: c.created_at ?? null,
+                          });
+                        }}
                         className={cn(compact && "min-h-[44px] flex-1")}
                       >
-                        保本地
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={waiting}
-                        onClick={() => dispatchResolve(name, "take_platform")}
-                        className={cn(compact && "min-h-[44px] flex-1")}
-                      >
-                        取平台
+                        查看对比
                       </Button>
                     </div>
                   )}
@@ -687,6 +692,18 @@ export function PlatformSyncSection({
           只读视角：仅机器所有者与平台管理员可执行裁决 / 清理操作。
         </p>
       )}
+
+      {/* 对比弹窗（task-07 产物，task-08 接线）：行点击置当前冲突，关闭清态；
+          裁决在弹窗内确认下发，onDispatched 仅登记回显条目（D-002@v1） */}
+      <ConflictCompareModal
+        open={compareTarget !== null}
+        onClose={() => setCompareTarget(null)}
+        instanceId={machine.id}
+        workspaceId={workspaceId}
+        conflict={compareTarget}
+        canOperate={access.canOperate}
+        onDispatched={handleCompareDispatched}
+      />
     </SectionCard>
   );
 }
