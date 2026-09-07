@@ -754,7 +754,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
             {STRATEGY_LABEL[specWs.strategy] ?? specWs.strategy}
           </Badge>
           {isOwner && (
-            <Tooltip title="修改 spec 同步策略。保存后点击「初始化」按新策略重建本地文档缓存（新策略在扫描/初始化时生效）。">
+            <Tooltip title="修改 spec 同步策略。保存后点击「初始化」按新策略重建本地文档缓存；后续任务拉取文档也按新策略处理。">
               <Button
                 data-testid="strategy-edit-entry"
                 size="small"
@@ -940,7 +940,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         destroyOnHidden
       >
         <p className="mb-2 text-xs text-muted-foreground">
-          源项目已有 .sillyspec 如何进入平台。保存后点击「初始化」按新策略重建本地文档缓存（新策略在扫描/初始化时生效）。
+          源项目已有 .sillyspec 如何进入平台。保存后点击「初始化」按新策略重建本地文档缓存；后续任务拉取文档也按新策略处理。
         </p>
         <Radio.Group
           className="flex flex-col gap-1"

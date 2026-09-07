@@ -76,6 +76,14 @@ vi.mock("@/lib/quicklog", async () => {
   };
 });
 
+// task-09（2026-09-04-conflict-resolve-entry）：新挂载的 PlatformSyncSection 数据源
+// mock 接线——工作区未绑定（fetchMyBinding → null）→ 组件渲染 null 且不发机器查询，
+// 页面行为与挂载前一致（仅 mock 接线，不改既有用例断言语义）
+const bindingApi = vi.hoisted(() => ({ fetchMyBinding: vi.fn() }));
+vi.mock("@/lib/workspace-binding", () => ({
+  fetchMyBinding: bindingApi.fetchMyBinding,
+}));
+
 import MobileChangesPage from "@/app/m/workspaces/[id]/changes/page";
 import { MobileWorkspaceContext } from "@/app/m/workspaces/[id]/layout";
 import type { ChangeList, ChangeSummary } from "@/lib/changes";
@@ -222,6 +230,8 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
+    // task-09：PlatformSyncSection 数据源——未绑定（null）即组件不渲染
+    bindingApi.fetchMyBinding.mockResolvedValue(null);
     // 默认数据面：active 2 条 / archive 0 条 / quicklog 3 条
     changesApi.listChanges.mockImplementation(
       async (_ws: string, params?: { location?: string; page?: number }) => {

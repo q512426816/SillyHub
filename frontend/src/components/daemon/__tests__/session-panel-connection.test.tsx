@@ -323,8 +323,9 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）", 
     await flushEstablish();
     // 进入 running 轮（currentRunId 置位 → 看门狗 90s 计时从即刻起算）。
     // 注：attach 轮询（1.5s 一次性）会多调一次 getAgentSession，不碰 listSessionRuns
-    // ——对账计数断言统一走 listSessionRuns。async act：onTurnStarted 内联的队列
-    // 刷新（void load）promise 链需在 act 内冲刷。
+    // ——对账计数断言统一走 listSessionRuns（增量口径：任务执行面板挂载也会调一次
+    // listSessionRuns，故一律以挂载后的调用数快照为基线断言增量，不数绝对次数）。
+    // async act：onTurnStarted 内联的队列刷新（void load）promise 链需在 act 内冲刷。
     await act(async () => {
       streamHandlers!.onTurnStarted!(env("turn_started"));
     });
@@ -334,15 +335,15 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）", 
     vi.useFakeTimers();
     try {
       await renderRunningDialog();
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(0);
+      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
 
       // <90s：不对账
       await advance(89_999);
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(0);
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(runsBase);
 
       // 满 90s：对账一次（getAgentSession + listSessionRuns）
       await advance(1);
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(1);
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(runsBase + 1);
       expect(daemonMock.getAgentSession).toHaveBeenCalledTimes(2); // attach 轮询 1 + 看门狗 1
 
       // run 仍 running（mock 默认）：走不到 resync、无长时间无响应提示
@@ -361,21 +362,22 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）", 
     vi.useFakeTimers();
     try {
       await renderRunningDialog();
+      const runsBase = daemonMock.listSessionRuns.mock.calls.length;
       fireStatus("reconnecting", 1); // SSE 断开态
 
       // 第 1 轮（90s）：对账、无提示
       await advance(90_000);
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(1);
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(runsBase + 1);
       expect(screen.queryByText(/本轮长时间无响应/)).toBeNull();
 
       // 第 2 轮（+30s）：对账、无提示
       await advance(30_000);
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(2);
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(runsBase + 2);
       expect(screen.queryByText(/本轮长时间无响应/)).toBeNull();
 
       // 第 3 轮（+30s）：连续 3 轮仍 running 且 SSE 断开 → 提示（accent，不伪造终态）
       await advance(30_000);
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(3);
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(runsBase + 3);
       expect(screen.getByText(/本轮长时间无响应，正在与平台核对/)).toBeInTheDocument();
       // 不伪造终态：打断按钮仍可用（turn 未被本地标终态）
       const interrupt = screen.getByTitle("打断本轮（session 保持 active）");
@@ -417,9 +419,11 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）", 
       });
       expect(screen.queryByText(/本轮长时间无响应/)).toBeNull();
 
-      // 之后 120s 不再有新的对账调用
+      // 之后 120s 不再有新的对账调用（终态时刻快照——turn_completed 会触发面板重拉
+      // 一次 listSessionRuns，属正常刷新，不计入看门狗对账口径）
+      const afterTerminal = daemonMock.listSessionRuns.mock.calls.length;
       await advance(120_000);
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(3); // 仅前 3 轮
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(afterTerminal);
     } finally {
       vi.useRealTimers();
     }
@@ -441,8 +445,9 @@ describe("SessionPanel（dialog）运行轮看门狗（task-09 / design A6）", 
         streamHandlers!.onTurnStarted!(env("turn_started"));
       });
       unmount();
+      const atUnmount = daemonMock.listSessionRuns.mock.calls.length;
       await advance(200_000);
-      expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(0);
+      expect(daemonMock.listSessionRuns.mock.calls.length).toBe(atUnmount);
     } finally {
       vi.useRealTimers();
     }

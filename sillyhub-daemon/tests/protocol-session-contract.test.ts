@@ -115,13 +115,26 @@ describe('protocol — batch 协议常量值不回归（FR-09 / AC-08）', () =>
     expect(MSG.RPC_RESULT).toBe('daemon:rpc_result');
   });
 
-  it('MSG 总数 = 22（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE），互不干扰', () => {
-    expect(Object.keys(MSG)).toHaveLength(22);
+  it('MSG 总数 = 24（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE + 2 平台同步命令），互不干扰', () => {
+    expect(Object.keys(MSG)).toHaveLength(24);
   });
 
   it('SILLYSPEC_UPDATE（sillyspec 升级指令）字符串值 = daemon:sillyspec_update（与 backend DAEMON_MSG_SILLYSPEC_UPDATE 逐字对齐）', () => {
     expect(MSG.SILLYSPEC_UPDATE).toBe('daemon:sillyspec_update');
     expect(MSG.SILLYSPEC_UPDATE.startsWith('daemon:')).toBe(true);
+  });
+
+  // 2026-09-04-conflict-resolve-entry task-05：平台同步两条新常量（与 backend
+  // protocol.py DAEMON_MSG_SILLYSPEC_RESOLVE / DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP
+  // 逐字对齐——任一字符漂移即双侧契约单测失败，design R-02）。
+  it('SILLYSPEC_RESOLVE（冲突裁决指令）字符串值 = daemon:sillyspec_resolve（与 backend DAEMON_MSG_SILLYSPEC_RESOLVE 逐字对齐）', () => {
+    expect(MSG.SILLYSPEC_RESOLVE).toBe('daemon:sillyspec_resolve');
+    expect(MSG.SILLYSPEC_RESOLVE.startsWith('daemon:')).toBe(true);
+  });
+
+  it('SILLYSPEC_GHOST_CLEANUP（ghost 清理指令）字符串值 = daemon:sillyspec_ghost_cleanup（与 backend DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP 逐字对齐）', () => {
+    expect(MSG.SILLYSPEC_GHOST_CLEANUP).toBe('daemon:sillyspec_ghost_cleanup');
+    expect(MSG.SILLYSPEC_GHOST_CLEANUP.startsWith('daemon:')).toBe(true);
   });
 
   it('SELF_UPDATE（自更新链路）字符串值 = daemon:self_update', () => {

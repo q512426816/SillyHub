@@ -365,6 +365,19 @@ export interface DaemonConfig {
    * 关闭——旧测试 config 缺该字段同样安全跳过，心跳不携带 sillyspec_status 键）。
    */
   sillyspec_status_interval_sec: number;
+  /**
+   * sillyspec 平台命令执行超时（秒），默认 120。
+   *
+   * 2026-09-04-conflict-resolve-entry task-06（FR-02/FR-03 / design §5 Phase2
+   * 第2条）：SillySpecManager 执行 `platform resolve` / `doctor --cleanup-ghosts`
+   * + `platform sync` 的单进程 execFile 超时。形状对齐 sillyspec_status_interval_sec：
+   * config.json 字段（不引入 env 覆盖先例）、loadConfig 经 DEFAULT_CONFIG 浅合并
+   * 自动补默认值（缺字段=120）、不做类型强校验（脏值由 daemon 接线归一回退默认）。
+   * 与采集键一点不同：超时无「关闭」语义，0/负数不开禁用口（回退 120）。默认比
+   * 采集 30s 宽——keep-local 内置自动重推 sync 有网络往返（Grill 裁决：重推为单
+   * 变更粒度，120s 够用）。
+   */
+  sillyspec_command_timeout_sec: number;
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -432,6 +445,9 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   // 2026-09-02-changes-overview-card task-02（FR-02）：sillyspec 状态采集间隔，
   // 默认 60s，0=关闭（见 DaemonConfig.sillyspec_status_interval_sec 注释）。
   sillyspec_status_interval_sec: 60,
+  // 2026-09-04-conflict-resolve-entry task-06（FR-02/FR-03）：sillyspec 平台命令
+  // 执行超时，默认 120s（见 DaemonConfig.sillyspec_command_timeout_sec 注释）。
+  sillyspec_command_timeout_sec: 120,
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────

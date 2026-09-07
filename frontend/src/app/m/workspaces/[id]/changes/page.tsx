@@ -52,6 +52,7 @@ import { MobileChangeCard } from "@/components/mobile/mobile-change-card";
 import { MobileDetailSheet } from "@/components/mobile/mobile-detail-sheet";
 import { MobileFilterDrawer } from "@/components/mobile/mobile-filter-drawer";
 import { MobileWorkspaceHeader } from "@/components/mobile/mobile-workspace-header";
+import { PlatformSyncSection } from "@/components/changes/platform-sync-section";
 import {
   DeleteChangeConfirm,
   canDeleteChange,
@@ -735,6 +736,12 @@ export default function MobileChangesPage() {
           工作区加载中…
         </div>
       )}
+
+      {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09）：与桌面
+          changes 页「解析警告」卡后同位镜像（本页无解析警告卡，置于顶栏后、
+          Tab 前的对应位置）；compact 紧凑布局（行纵向堆叠 + 44px 触摸热区）。
+          无绑定或无 sillyspec_status 时组件自渲染 null，页面行为与现状一致 */}
+      <PlatformSyncSection workspaceId={workspaceId} compact />
 
       {/* 三 Tab + 计数徽标（tabTotals 独立 useQuery，不随筛选变化） */}
       <div

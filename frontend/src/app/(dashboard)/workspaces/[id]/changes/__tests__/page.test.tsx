@@ -83,6 +83,14 @@ vi.mock("next/link", () => ({
   }) => <a href={href}>{children}</a>,
 }));
 
+// task-09（2026-09-04-conflict-resolve-entry）：新挂载的 PlatformSyncSection 数据源
+// mock 接线——工作区未绑定（fetchMyBinding → null）→ 组件渲染 null 且不发机器查询，
+// 页面行为与挂载前一致（仅 mock 接线，不改既有用例断言语义）
+const bindingApi = vi.hoisted(() => ({ fetchMyBinding: vi.fn() }));
+vi.mock("@/lib/workspace-binding", () => ({
+  fetchMyBinding: bindingApi.fetchMyBinding,
+}));
+
 // ── fixtures ───────────────────────────────────────────────────────────────
 
 function makeChange(overrides: Partial<ChangeSummary> = {}): ChangeSummary {
@@ -195,6 +203,8 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
   beforeEach(() => {
     // 每个用例默认空列表 + 0 计数；用例内按需 setupListChanges 覆盖
     setupListChanges();
+    // task-09：PlatformSyncSection 数据源——未绑定（null）即组件不渲染
+    bindingApi.fetchMyBinding.mockResolvedValue(null);
   });
   afterEach(() => {
     vi.clearAllMocks();

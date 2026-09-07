@@ -33,8 +33,8 @@ export async function getSpecWorkspace(
  * PATCH /api/workspaces/{workspaceId}/spec-workspace — 修改 spec 工作区可维护字段。
  *
  * 三字段全部可选（omit 不改）。strategy 值域 SpecStrategy 三值，非法值后端
- * Pydantic Literal 422。改 strategy 在扫描/初始化链路实时读库生效；普通会话与
- * 变更任务 lease 不带该键（daemon pull 按 platform-managed 兜底）；daemon 本地
+ * Pydantic Literal 422。改 strategy 后 claim payload 实时读库下发（lease_meta
+ * 显式值 > SpecWorkspace.strategy 回退，ql-20260904-030-45d1）；daemon 本地
  * 缓存布局（repo-native junction / repo-mirrored 首拷）要等无条件 pull（初始化
  * 按钮）才重建——生效语义详见模块文档 spec_workspace.md 注意事项。
  */

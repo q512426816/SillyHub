@@ -18,6 +18,13 @@
  * （collectStatusOnce/getStatusSnapshot，三态降级矩阵 + 32KB 预算截断），
  * 与升级状态机相互独立（升级链路不复用本采集器）。
  *
+ * 2026-09-04-conflict-resolve-entry task-06 扩展：平台命令执行器与结果槽——
+ * runResolve（冲突裁决）/ runGhostCleanup（doctor 清理 + platform sync 收敛）
+ * 复用 runProgressJson 执行器形态（execFile 数组形参、windowsHide、全收敛不
+ * reject，超时 config 键 sillyspec_command_timeout_sec）；最新一条结果内存槽
+ * _lastCommandResult（latest-wins，10min 终态窗惰性过期——语义同 _update/
+ * _terminalAt，过期后 getCommandResult 返回 null、心跳键不出现）。
+ *
  * 状态机（内存态，daemon 重启即回 idle——重启后 preflight 启动检查已保证最新）：
  *
  *   idle ──requestUpgrade（空闲）──▶ running ──成功──▶ success ─┐
@@ -55,6 +62,10 @@ import {
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+// 2026-09-04-conflict-resolve-entry task-06：平台命令结果槽类型（心跳
+// sillyspec_command_result 载荷，task-05 落于 protocol.ts；type-only import，
+// protocol 不反向依赖本模块，无环）。
+import type { SillySpecCommandResult } from './protocol.js';
 
 // ── 导出常量（时间参数默认值，全部可注入覆盖；对齐 design §1）─────────────────
 
@@ -90,6 +101,32 @@ export const SILLYSPEC_STATUS_BUDGET_BYTES = 32 * 1024;
 
 /** 采集 stdout maxBuffer（8MB）：envelope 正常 KB 级，防御 ghost 爆量场景。 */
 const SILLYSPEC_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
+
+/**
+ * 平台命令（resolve / ghost cleanup 各步）单进程执行超时默认（120s）。design
+ * §5 Phase2 第2条 Grill 裁决：keep-local 内置自动重推 sync 有网络往返，比 30s
+ * 采集宽，单变更粒度 120s 够用。config 键 sillyspec_command_timeout_sec（默认
+ * 120）经 daemon 接线换算毫秒注入覆盖（commandTimeoutMs 依赖）。
+ */
+export const SILLYSPEC_COMMAND_TIMEOUT_MS = 120 * 1000;
+
+/**
+ * resolve strategy（payload/REST 下划线值域）→ CLI 中划线 flag 单点映射
+ * （design §6 resolve 数据流：前端 keep_local → … → daemon 此处单点映射
+ * --keep-local → execFile）。daemon.ts 入口已做值域校验，映射不到（运行时
+ * 脏值）记 failed 不 spawn——三重防线之一（backend 白名单 + 数组参数不经
+ * shell + CLI assertSafeChangeName）。
+ */
+const RESOLVE_STRATEGY_FLAG: Record<string, string> = {
+  keep_local: '--keep-local',
+  take_platform: '--take-platform',
+};
+
+/**
+ * 平台命令身份字段：resolve 携带 change/strategy（回显匹配键，design R-07）；
+ * ghost_cleanup 无身份字段（空对象展开为无键）。
+ */
+type SillySpecCommandIdentify = Pick<SillySpecCommandResult, 'change' | 'strategy'>;
 
 /**
  * execFile 一次执行的结果（三态矩阵判别输入）。
@@ -222,6 +259,13 @@ export interface SillySpecManagerDeps {
   statusCwd?: () => string | null;
   /** 采集超时（毫秒），默认 SILLYSPEC_STATUS_TIMEOUT_MS；测试注入调小。 */
   statusTimeoutMs?: number;
+  /**
+   * 2026-09-04-conflict-resolve-entry task-06（FR-02/FR-03 / design §5 Phase2
+   * 第2条）：平台命令执行超时（毫秒），默认 {@link SILLYSPEC_COMMAND_TIMEOUT_MS}
+   * （daemon 接线从 config 键 sillyspec_command_timeout_sec × 1000 注入）。
+   * 非有限/非正数回退默认——超时无「关闭」语义，不开 0=禁用口。
+   */
+  commandTimeoutMs?: number;
 }
 
 // ── 实现 ──────────────────────────────────────────────────────────────────────
@@ -277,6 +321,18 @@ export class SillySpecManager {
   /** 三态②同类告警去重（warn 一次后同类静默：bin_not_found/spawn_enoent/bad_json）。 */
   private readonly _statusWarnedClasses = new Set<string>();
 
+  // ── 2026-09-04-conflict-resolve-entry task-06：平台命令执行器与结果槽 ──────────
+
+  /** 平台命令执行超时毫秒（runResolve/runGhostCleanup 每步 execFile timeout）。 */
+  private readonly _commandTimeoutMs: number;
+  /**
+   * 最新一条平台命令结果（latest-wins，design R-07：连续多条只留最新，页面按
+   * 下发时刻+action/change 匹配回显）；null=无结果或终态窗已过（心跳键不出现）。
+   */
+  private _lastCommandResult: SillySpecCommandResult | null = null;
+  /** 结果写入时刻（惰性 10min 过期判定用，与 _update/_terminalAt 同款取舍）；null=槽空。 */
+  private _commandResultAt: number | null = null;
+
   constructor(deps: SillySpecManagerDeps) {
     this._runCommand = deps.runCommand ?? ((cmd: string) => runCmd(cmd));
     this._install = deps.install ?? ((logger: PreflightLogger) => installSillySpec(logger));
@@ -294,6 +350,13 @@ export class SillySpecManager {
     this._resolveSillySpecBin = deps.resolveSillySpecBin ?? resolveSillySpecBinDefault;
     this._statusCwd = deps.statusCwd ?? (() => null);
     this._statusTimeoutMs = deps.statusTimeoutMs ?? SILLYSPEC_STATUS_TIMEOUT_MS;
+    // task-06：超时无关闭口——undefined/null/非有限/<=0 一律回退默认。
+    this._commandTimeoutMs =
+      typeof deps.commandTimeoutMs === 'number' &&
+      Number.isFinite(deps.commandTimeoutMs) &&
+      deps.commandTimeoutMs > 0
+        ? deps.commandTimeoutMs
+        : SILLYSPEC_COMMAND_TIMEOUT_MS;
   }
 
   // ── 探测 ────────────────────────────────────────────────────────────────────
@@ -468,6 +531,261 @@ export class SillySpecManager {
     }
     this._statusWarnedClasses.add(reason);
     this._log('warn', 'sillyspec_status_capability_missing', { reason, ...extra });
+  }
+
+  // ── 2026-09-04-conflict-resolve-entry task-06：平台命令执行器与结果槽 ──────────
+
+  /**
+   * 执行冲突裁决（FR-02 / design §5 Phase2 第2条）：`sillyspec platform resolve
+   * --change <名> --keep-local|--take-platform`。
+   *
+   * - strategy→flag 单点映射（RESOLVE_STRATEGY_FLAG）；映射不到（运行时脏值）记
+   *   failed 不 spawn（daemon.ts 入口已校验值域，此处防御兜底）；
+   * - cwd 用 statusCwd 回调根（claim 观察到的 workspace 主仓根，规则 22 禁
+   *   worktree），无根直接记 failed 不 spawn；bin 解析失败同记 failed；
+   * - 执行复用 runProgressJson 形态（execFile 数组形参、windowsHide、数组参数
+   *   不经 shell，NFR 兼容三平台），超时=commandTimeoutMs；
+   * - 终判全收敛不 reject：timedOut / 退出码 null（spawn 失败）/ 非零 → failed
+   *   （error 截 ≤200 字符），exit 0 → success；结果写 _lastCommandResult 槽。
+   *
+   * 忙拒（命令 in-flight / 升级链在跑）归 daemon.ts _runSillySpecCommand 前置
+   * guard（两臂判定），本方法不做忙判定——调用到达即视为已过串行保护。
+   */
+  async runResolve(
+    change: string,
+    strategy: 'keep_local' | 'take_platform',
+  ): Promise<void> {
+    const identify: SillySpecCommandIdentify = { change, strategy };
+    this._log('info', 'sillyspec_resolve_started', { change, strategy });
+    try {
+      const flag = RESOLVE_STRATEGY_FLAG[strategy as string];
+      if (flag === undefined) {
+        this.recordCommandResult({
+          action: 'resolve',
+          ...identify,
+          state: 'failed',
+          error: `未知的裁决策略（${String(strategy)}），合法值 keep_local / take_platform`,
+        });
+        return;
+      }
+      const pre = this._requireCommandPrecondition('resolve', identify);
+      if (pre === null) return;
+      const outcome = await this._execSillySpecCli(
+        pre.bin,
+        ['platform', 'resolve', '--change', change, flag],
+        pre.cwd,
+      );
+      this._recordCommandOutcome('resolve', identify, outcome);
+    } catch (e) {
+      this._recordCommandExecutorError('resolve', identify, e);
+    }
+  }
+
+  /**
+   * 执行 ghost 清理（FR-03 / design §5 Phase2 第2条）：先 `doctor
+   * --cleanup-ghosts --confirm`（本地 DB 幽灵行翻 archived + 超 7 天空壳归档），
+   * 成功后再 `platform sync`（上行终态 + 墓碑，平台侧收敛——闭环依据 sync.js
+   * X1 墓碑链，X-05 修订）。任一步超时/非零/spawn 失败 → 记 failed 终止，不
+   * 继续后续步。cwd/超时/收敛语义同 runResolve（每步独立计超时——doctor 为纯
+   * 本地 DB 操作秒级，正常路径总耗远低于前端 150s 恢复窗）。
+   */
+  async runGhostCleanup(): Promise<void> {
+    const identify: SillySpecCommandIdentify = {};
+    this._log('info', 'sillyspec_ghost_cleanup_started', {});
+    try {
+      const pre = this._requireCommandPrecondition('ghost_cleanup', identify);
+      if (pre === null) return;
+      const doctor = await this._execSillySpecCli(
+        pre.bin,
+        ['doctor', '--cleanup-ghosts', '--confirm'],
+        pre.cwd,
+      );
+      if (!isSuccessOutcome(doctor)) {
+        this._recordCommandOutcome('ghost_cleanup', identify, doctor);
+        return;
+      }
+      const sync = await this._execSillySpecCli(pre.bin, ['platform', 'sync'], pre.cwd);
+      this._recordCommandOutcome('ghost_cleanup', identify, sync);
+    } catch (e) {
+      this._recordCommandExecutorError('ghost_cleanup', identify, e);
+    }
+  }
+
+  /**
+   * npm 升级链在跑判定（running/deferred → true）——daemon 忙拒第二臂
+   * （design §5 Phase2 第4条：命令执行与升级链共用同一 in-flight 判定，
+   * 升级进行中到达的命令同样记 failed busy，不排队）。
+   */
+  isUpgradeInFlight(): boolean {
+    const current = this._update;
+    return (
+      current !== null &&
+      (current.state === 'running' || current.state === 'deferred')
+    );
+  }
+
+  /**
+   * 写命令结果内存槽（latest-wins：新结果覆盖旧并重开 10min 终态窗，design
+   * R-07）。规范化单点：error 截断 ≤200 字符（协议契约）、executed_at 缺省补
+   * 机器本地钟 ISO 串（与 daemon.ts 忙拒戳记同款 new Date().toISOString()）。
+   * 调用方：daemon.ts 忙拒路径（task-05）+ 本模块执行器终判（task-06）。
+   */
+  recordCommandResult(result: SillySpecCommandResult): void {
+    const normalized: SillySpecCommandResult = { ...result };
+    if (normalized.error !== undefined) {
+      normalized.error = truncateToMaxChars(normalized.error, SILLYSPEC_ERROR_MAX_CHARS);
+    }
+    if (normalized.executed_at == null) {
+      normalized.executed_at = new Date().toISOString();
+    }
+    this._lastCommandResult = normalized;
+    this._commandResultAt = this._now();
+    this._log(
+      normalized.state === 'failed' ? 'warn' : 'info',
+      `sillyspec_command_${normalized.state ?? 'recorded'}`,
+      { ...normalized },
+    );
+  }
+
+  /**
+   * 读最新一条命令结果（daemon._sendHeartbeatOnce 组装 sillyspec_command_result
+   * 用，纯同步零 spawn）：null = 无结果或终态窗已过 → 心跳不携带键（backend 置
+   * NULL 清除，两态语义 D-004@v1——daemon 无需也不得发送显式 null）。返回浅
+   * 拷贝，调用方改写不影响槽内值。
+   */
+  getCommandResult(): SillySpecCommandResult | null {
+    this._expireCommandResultIfDue();
+    return this._lastCommandResult === null ? null : { ...this._lastCommandResult };
+  }
+
+  /**
+   * 惰性终态过期（取舍同 _expireTerminalIfDue：常驻进程不为清内存标志排专门
+   * 定时器，仅在 get 口判定）：超窗清槽——下次 getCommandResult 返回 null，
+   * 心跳键随之不出现（backend 侧置 NULL 清除）。
+   */
+  private _expireCommandResultIfDue(): void {
+    if (this._lastCommandResult === null || this._commandResultAt === null) {
+      return;
+    }
+    if (this._now() - this._commandResultAt >= this._terminalWindowMs) {
+      this._lastCommandResult = null;
+      this._commandResultAt = null;
+      this._log('debug', 'sillyspec_command_result_window_expired');
+    }
+  }
+
+  /**
+   * 执行前置校验：cwd（statusCwd 回调根）与 sillyspec bin 双就绪才返回
+   * {cwd, bin}；任一缺失记 failed（不 spawn——无根/无 CLI 时起进程必错，还
+   * 浪费超时窗）并返回 null。change 名不再重复校验：daemon.ts 入口已验非空、
+   * backend 白名单 + CLI assertSafeChangeName 双保险，数组形参不经 shell。
+   */
+  private _requireCommandPrecondition(
+    action: 'resolve' | 'ghost_cleanup',
+    identify: SillySpecCommandIdentify,
+  ): { cwd: string; bin: string } | null {
+    const cwd = this._statusCwd();
+    if (!cwd) {
+      this.recordCommandResult({
+        action,
+        ...identify,
+        state: 'failed',
+        error: '未观察到 workspace 主仓根，无法执行 sillyspec 命令',
+      });
+      return null;
+    }
+    const bin = this._resolveSillySpecBin();
+    if (bin === null) {
+      this.recordCommandResult({
+        action,
+        ...identify,
+        state: 'failed',
+        error: '未找到 sillyspec CLI（bin 解析失败），请先安装 sillyspec',
+      });
+      return null;
+    }
+    return { cwd, bin };
+  }
+
+  /**
+   * 单步 CLI 执行：node <sillyspec-bin> <args...>（execFile 数组形参，windowsHide
+   * + 超时杀进程，maxBuffer 同采集器）。默认实现全收敛不 reject；此处 try/catch
+   * 防御注入实现的异常 → 合成 spawn 失败形态（errorCode='runner_error'）交终判。
+   */
+  private async _execSillySpecCli(
+    bin: string,
+    args: string[],
+    cwd: string,
+  ): Promise<SillySpecProgressOutcome> {
+    try {
+      return await this._runProgressJson(process.execPath, [bin, ...args], {
+        cwd,
+        timeoutMs: this._commandTimeoutMs,
+        maxBufferBytes: SILLYSPEC_STATUS_MAX_BUFFER,
+      });
+    } catch (e) {
+      this._log('warn', 'sillyspec_command_runner_error', {
+        args: args.join(' '),
+        error: fmtErrorSnippet(e),
+      });
+      return { code: null, stdout: '', timedOut: false, errorCode: 'runner_error' };
+    }
+  }
+
+  /**
+   * 终判 outcome → 结果槽（全收敛不 reject）：
+   * timedOut → failed（超时文案）；code null → failed（spawn 失败，exit_code
+   * 缺省——协议「取不到时缺省」）；非零 → failed（带 exit_code + 输出尾段
+   * 摘要）；0 → success（exit_code=0）。
+   */
+  private _recordCommandOutcome(
+    action: 'resolve' | 'ghost_cleanup',
+    identify: SillySpecCommandIdentify,
+    outcome: SillySpecProgressOutcome,
+  ): void {
+    if (outcome.timedOut) {
+      this.recordCommandResult({
+        action,
+        ...identify,
+        state: 'failed',
+        error: `执行超时（${Math.round(this._commandTimeoutMs / 1000)}s）被终止`,
+      });
+      return;
+    }
+    if (outcome.code === null) {
+      this.recordCommandResult({
+        action,
+        ...identify,
+        state: 'failed',
+        error: `进程启动失败（${outcome.errorCode ?? 'unknown'}）`,
+      });
+      return;
+    }
+    if (outcome.code !== 0) {
+      this.recordCommandResult({
+        action,
+        ...identify,
+        state: 'failed',
+        exit_code: outcome.code,
+        error: `执行失败（exit ${outcome.code}）${cliOutputSnippet(outcome.stdout)}`,
+      });
+      return;
+    }
+    this.recordCommandResult({ action, ...identify, state: 'success', exit_code: 0 });
+  }
+
+  /** 执行器意外异常防御（约定不 reject，此处兜底记 failed 不上抛）。 */
+  private _recordCommandExecutorError(
+    action: 'resolve' | 'ghost_cleanup',
+    identify: SillySpecCommandIdentify,
+    e: unknown,
+  ): void {
+    this.recordCommandResult({
+      action,
+      ...identify,
+      state: 'failed',
+      error: `执行器异常：${fmtErrorSnippet(e)}`,
+    });
   }
 
   // ── 升级入口 ────────────────────────────────────────────────────────────────
@@ -684,6 +1002,29 @@ function fmtErrorSnippet(e: unknown): string {
   return text.length > SILLYSPEC_ERROR_MAX_CHARS
     ? text.slice(0, SILLYSPEC_ERROR_MAX_CHARS)
     : text;
+}
+
+// ── 2026-09-04-conflict-resolve-entry task-06：平台命令终判辅助 ────────────────
+
+/** outcome 是否成功一步（未超时且退出码 0）——ghost cleanup 链式推进的门。 */
+function isSuccessOutcome(outcome: SillySpecProgressOutcome): boolean {
+  return !outcome.timedOut && outcome.code === 0;
+}
+
+/** 字符串截断至 max 字符（结果槽 error ≤200 契约的单点实现，含边界==max 不截）。 */
+function truncateToMaxChars(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max) : text;
+}
+
+/**
+ * CLI 输出尾段摘要（非零退出 error 拼接用）：trim 后取尾 120 字符（sillyspec
+ * 报错摘要多在输出末尾）；空输出返回空串（error 恰为「执行失败（exit N）」）。
+ * 整串最终仍经 recordCommandResult 截 ≤200。
+ */
+function cliOutputSnippet(stdout: string): string {
+  const trimmed = stdout.trim();
+  if (trimmed === '') return '';
+  return `：${trimmed.slice(-120)}`;
 }
 
 // ── 2026-09-02-changes-overview-card task-02：采集器默认实现与摘要构造 ──────────

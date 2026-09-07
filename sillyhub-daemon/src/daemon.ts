@@ -56,6 +56,9 @@ import type { SessionInjectAttachment } from './protocol.js';
 // 共用 control-dispatcher 路由）。
 import { CONTROL_KIND } from './protocol.js';
 import type { PendingControlCommand } from './protocol.js';
+// 2026-09-04-conflict-resolve-entry task-05：sillyspec 平台同步命令（冲突裁决 /
+// ghost 清理）的心跳结果类型——忙拒结果写入与 task-06 执行器结果槽共用。
+import type { SillySpecCommandResult } from './protocol.js';
 // task-06（design A1+A2 消费端）：控制指令统一消费入口（路由/去重/ack 收集）。
 import { ControlDispatcher } from './control-dispatcher.js';
 // task-06（design §5.4.4）：onTurnResult 参数类型从 Claude SDK 专属类型放宽为
@@ -121,7 +124,9 @@ import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
 // 2026-08-31-machine-sillyspec-version task-05：sillyspec 运行期版本管理与升级状态机
 //（task-04 核心模块）。daemon 侧接线三处：_sillyspecLoop 第四自动循环（auto 触发）、
 // 心跳/注册快照透传、WS SILLYSPEC_UPDATE 指令入口（server_command 触发）。
-import { SillySpecManager } from './sillyspec-manager.js';
+// 2026-09-04-conflict-resolve-entry task-06：SILLYSPEC_COMMAND_TIMEOUT_MS——平台
+// 命令执行超时默认（config 键 sillyspec_command_timeout_sec 非法/<=0 时回退）。
+import { SillySpecManager, SILLYSPEC_COMMAND_TIMEOUT_MS } from './sillyspec-manager.js';
 
 // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
 // 形状（progress 总览摘要），组装时从 manager.getStatusSnapshot() 取。
@@ -779,6 +784,20 @@ interface ClientLike {
      * 任何 sillyspec_* 键。
      */
     sillyspec?: HeartbeatSillySpecParam,
+    /**
+     * 2026-09-02-changes-overview-card task-02：progress 总览摘要（对齐
+     * hub-client heartbeat 第 6 参数）。此前本接口漏列该参（尾数组 spread
+     * 编译宽容未报错），task-06 补声明——undefined=键不出现（采集未启动）；
+     * null/摘要=键出现（null=能力缺失，backend 置 NULL 清除）。
+     */
+    sillyspecStatus?: SillySpecStatusSummary | null,
+    /**
+     * 2026-09-04-conflict-resolve-entry task-06：sillyspec 平台命令最新一条
+     * 结果（对齐 hub-client heartbeat 第 7 参数，D-004@v1 两态）。undefined=
+     * 键不出现（无结果/终态窗过期=backend 置 NULL 清除）；对象=整包直写。
+     * 禁显式 null。
+     */
+    sillyspecCommandResult?: SillySpecCommandResult,
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -1318,6 +1337,39 @@ export interface RuntimeLockLike {
   releaseAll(): Promise<void>;
 }
 
+/**
+ * 2026-09-04-conflict-resolve-entry task-05（FR-02/FR-03 / design §5 Phase2 第2/4条）：
+ * sillyspec 平台同步命令执行器最小接口约定——SILLYSPEC_RESOLVE / SILLYSPEC_GHOST_
+ * CLEANUP 两直连 case 的转发终点、升级链在跑探询与命令结果写入均走本接口。
+ *
+ * 实现归 task-06（在 SillySpecManager 上落 runResolve/runGhostCleanup 执行器 +
+ * `_lastCommandResult` 结果槽 + 升级链 in-flight 判定后自然满足本接口）；task-05
+ * 仅以本类型表达契约，daemon 侧 duck-type 探测（同 controlSource 对 client 两方法
+ * 的探测惯例），未接线前收到指令 warn 丢弃不崩（同 plan_response_no_manager）。
+ * 结果回传链：执行器写结果槽 → 心跳 sillyspec_command_result（task-06 挂接
+ * hub-client HeartbeatBody）→ backend 落库，本接口不经手 WS 回执（fire-and-forget）。
+ */
+export interface SillySpecCommandExecutor {
+  /**
+   * 执行冲突裁决：`sillyspec platform resolve --change <名> --keep-local|
+   * --take-platform`（strategy→flag 单点映射、cwd 取主仓根、超时 config 化均归
+   * task-06）。结果全收敛写结果槽不 reject（同 runProgressJsonDefault 风格）。
+   */
+  runResolve(change: string, strategy: 'keep_local' | 'take_platform'): Promise<void>;
+  /**
+   * 执行 ghost 清理：`doctor --cleanup-ghosts --confirm` + `platform sync` 平台侧
+   * 收敛（闭环依据 design §5 Phase2 第2条）。结果全收敛写结果槽不 reject。
+   */
+  runGhostCleanup(): Promise<void>;
+  /** npm 升级链在跑判定（running/deferred 期间 true）——忙拒的第二臂（task-06）。 */
+  isUpgradeInFlight(): boolean;
+  /** 写命令结果内存槽（latest-wins；心跳 sillyspec_command_result 回传源，task-06）。 */
+  recordCommandResult(result: SillySpecCommandResult): void;
+}
+
+/** 忙拒结果固定 error 文案（design §5 Phase2 第4条，页面据此可重试）。 */
+const SILLYSPEC_COMMAND_BUSY_ERROR = 'another sillyspec command is running';
+
 // ── Daemon class（核心）──────────────────────────────────────────────────────
 
 /**
@@ -1410,6 +1462,15 @@ export class Daemon {
   private readonly _interactiveSessionsByLease = new Map<string, string>();
   /** CLEANUP 指令 in-flight guard：并发指令去重（对齐 terminal-observer cleanupStarted 模式）。 */
   private _cleanupInFlight = false;
+  /**
+   * 2026-09-04-conflict-resolve-entry task-05（design §5 Phase2 第4条）：sillyspec
+   * 平台命令（resolve/ghost_cleanup）in-flight guard——同一时刻仅允许一条命令在跑
+   *（串行保护，仿 _cleanupInFlight）。置位/复位归本卡（_runSillyspecCommand 的
+   * try/finally）；忙时新指令立即记 failed 不排队（D-001 拒排队语义，Grill 裁决
+   * 维持）。忙判定第二臂（npm 升级链在跑）经 SillySpecCommandExecutor.isUpgradeInFlight
+   * 探询（task-06 实现）。
+   */
+  private _sillyspecCommandInFlight = false;
   /**
    * task-09（FR-02 / D-002@v1）：interactive 转发 per-run 确定性 flatSeq 计数。
    *
@@ -1733,6 +1794,11 @@ export class Daemon {
         // 2026-09-02-changes-overview-card task-02：采集 cwd 注入——claim 观察到的
         // workspace 主仓根（闭包惰性求值，claim 后每拍取最新值）。
         statusCwd: () => this._sillyspecStatusRoot,
+        // 2026-09-04-conflict-resolve-entry task-06：平台命令执行超时（config 键
+        // sillyspec_command_timeout_sec 默认 120s）。归一口径仿
+        // _sillyspecStatusIntervalSec（Number() 容忍字符串/null 脏值），但超时无
+        // 「关闭」语义——非法/<=0 回退默认 120s，不开 0=禁用口。
+        commandTimeoutMs: this._sillyspecCommandTimeoutMs(),
       });
     // task-06（design A2 消费端）：控制指令统一消费入口。handler 全部是下方既有
     // _route* 方法的薄包装（同一实例调用，不复制业务逻辑）；HTTP 源仅在 client
@@ -4246,6 +4312,19 @@ export class Daemon {
   }
 
   /**
+   * task-06（FR-02/FR-03 / design §5 Phase2 第2条）：平台命令执行超时归一
+   * （runResolve/runGhostCleanup 每步 execFile timeout 毫秒）。口径仿
+   * _sillyspecStatusIntervalSec（Number() 容忍字符串/null 脏值——旧 config 缺
+   * 字段经 DEFAULT_CONFIG 浅合并已补 120），差别：超时无「关闭」语义，非法/<=0
+   * 回退默认 120s，不开 0=禁用口。
+   */
+  private _sillyspecCommandTimeoutMs(): number {
+    const sec = Number(this._config.sillyspec_command_timeout_sec);
+    if (!Number.isFinite(sec) || sec <= 0) return SILLYSPEC_COMMAND_TIMEOUT_MS;
+    return sec * 1000;
+  }
+
+  /**
    * task-02（D-B3@v1 主仓根锚定）：claim 后观察 workspace 主仓根——非空且非借用
    * 沙箱 marker 的 rootPath 即工作区绑定根；变更时 info 一笔（首观察/切换可见）。
    * 规则 22：采集 CLI 只在此主仓根执行，永不进 worktree。
@@ -4315,6 +4394,18 @@ export class Daemon {
           : this._sillyspecManager.getStatusSnapshot();
       const statusTail: (SillySpecStatusSummary | null)[] =
         sillyspecStatus !== undefined ? [sillyspecStatus] : [];
+      // 2026-09-04-conflict-resolve-entry task-06（FR-05 / D-004@v1 两态）：心跳
+      // 透传最新一条平台命令结果（manager.getCommandResult 纯同步零 spawn，10min
+      // 终态窗惰性过期在 manager 内判定）。null=无结果/已过期 → 尾参不占位（键
+      // 不出现 = backend 置 NULL 清除，禁显式 null）。typeof 探测兜底：注入的假
+      // manager（旧测试）缺该方法时跳过——同 _sillyspecCommandExecutor duck-type
+      // 探测惯例，不破坏既有心跳断言。
+      const sillyspecCommandResult: SillySpecCommandResult | null =
+        typeof this._sillyspecManager.getCommandResult === 'function'
+          ? this._sillyspecManager.getCommandResult()
+          : null;
+      const commandResultTail: SillySpecCommandResult[] =
+        sillyspecCommandResult !== null ? [sillyspecCommandResult] : [];
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
@@ -4332,9 +4423,22 @@ export class Daemon {
         // status 存在时，第 5 参须显式 undefined 占位——否则 status 滑入
         // sillyspec 槽位（位置参数陷阱），hub-client 把摘要当 sillyspec 参数读
         //（version/latest/update 三键全无即静默忽略）→ sillyspec_status 键
-        // 不发出、快照被丢弃。
-        ...(sillyspecTail.length === 0 && statusTail.length > 0 ? [undefined] : []),
+        // 不发出、快照被丢弃。task-06 扩展：commandResult 存在时同样触发第 5
+        // 参占位（status/commandResult 任一在场即需占位）。
+        ...(
+          sillyspecTail.length === 0 &&
+          (statusTail.length > 0 || commandResultTail.length > 0)
+            ? [undefined]
+            : []
+        ),
+        // task-06 同坑：status 缺席而 commandResult 存在时，第 6 参须显式
+        // undefined 占位——否则 commandResult 滑入 status 槽位（status 参数
+        // 类型不含结果形状，hub-client 静默按 status 发错键）。
+        ...(statusTail.length === 0 && commandResultTail.length > 0
+          ? [undefined]
+          : []),
         ...statusTail,
+        ...commandResultTail,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
@@ -5553,6 +5657,38 @@ export class Daemon {
         void this._sillyspecManager.requestManualUpgrade();
         break;
       }
+      // Server → Daemon：变更中心「平台同步」处理区触发的两条机器级命令
+      //（2026-09-04-conflict-resolve-entry task-05 / FR-02 / FR-03 / D-001@v1 /
+      // design §5 Phase2 第1条、§7.5）。与 SELF_UPDATE/CLEANUP/SILLYSPEC_UPDATE
+      // 同路径直连分发——不进 control-dispatcher、不入 CONTROL_KIND 词表、不经
+      // run/lease/control_commands 状态机（机器级 fire-and-forget，无回执）。
+      // 执行结果经心跳 sillyspec_command_result 回传（SillySpecCommandResult，
+      // 挂接归 task-06）；忙拒与转发骨架见 _runSillySpecCommand。
+      case MSG.SILLYSPEC_RESOLVE: {
+        // payload: SillySpecResolvePayload（backend 白名单已校验；入口仍做缺字段/
+        // 值域校验——缺 change 或 strategy 不在 keep_local/take_platform 值域 →
+        // warn 丢弃不崩，同 lease_cancel_no_lease_id 惯例）。
+        const change = typeof rawPayload.change === 'string' ? rawPayload.change : '';
+        const strategy = rawPayload.strategy;
+        if (!change || (strategy !== 'keep_local' && strategy !== 'take_platform')) {
+          this._logger.warn('sillyspec_resolve_missing_fields', {
+            change,
+            strategy,
+          });
+          break;
+        }
+        this._logger.info('sillyspec_resolve_received', { change, strategy });
+        // 非阻塞分发（同 SILLYSPEC_UPDATE 风格，不阻塞 WS 接收）。
+        void this._routeSillySpecResolve(change, strategy);
+        break;
+      }
+      case MSG.SILLYSPEC_GHOST_CLEANUP: {
+        // payload: `{}`（无参数；doctor --cleanup-ghosts --confirm + platform sync
+        // 闭环归 task-06）。
+        this._logger.info('sillyspec_ghost_cleanup_received', {});
+        void this._routeSillySpecGhostCleanup();
+        break;
+      }
       // Server → Daemon：清理本地缓存（specs 缓存 / Claude 会话日志 / 备份 / 日志）。
       // 黑名单删除（cleanup.ts CLEANABLE_DIRS），outbox/（未投递消息）与 runs/
       // （活跃任务日志，terminal-observer 另有 7 天保留期清理）不在清理范围。
@@ -5628,6 +5764,100 @@ export class Daemon {
         command_id: commandId,
       });
     }
+  }
+
+  /**
+   * 2026-09-04-conflict-resolve-entry task-05（FR-02 / design §5 Phase2 第1条）：
+   * SILLYSPEC_RESOLVE 直连路由——归一化后的 change/strategy 转发 sillyspec-manager
+   * 执行方法（经 SillySpecCommandExecutor 最小接口；strategy→CLI flag 单点映射
+   * 归 task-06，本方法不做映射）。
+   */
+  private _routeSillySpecResolve(
+    change: string,
+    strategy: 'keep_local' | 'take_platform',
+  ): Promise<void> {
+    return this._runSillySpecCommand(
+      'resolve',
+      { change, strategy },
+      (executor) => executor.runResolve(change, strategy),
+    );
+  }
+
+  /**
+   * 同上（FR-03 / design §5 Phase2 第1条）：SILLYSPEC_GHOST_CLEANUP 直连路由——
+   * 转发无参执行方法。
+   */
+  private _routeSillySpecGhostCleanup(): Promise<void> {
+    return this._runSillySpecCommand('ghost_cleanup', {}, (executor) =>
+      executor.runGhostCleanup(),
+    );
+  }
+
+  /**
+   * task-05（design §5 Phase2 第4条）：sillyspec 平台命令统一转发 + in-flight
+   * 串行 guard。
+   *
+   * - 忙判定两臂：本 guard 在跑（``_sillyspecCommandInFlight``）或 npm 升级链在跑
+   *   （executor.isUpgradeInFlight 探询，task-06 实现）——命令执行与升级链共用
+   *   同一 in-flight 判定，升级进行中到达的命令同样记 failed busy；
+   * - 忙时立即记 failed（error 固定文案 {@link SILLYSPEC_COMMAND_BUSY_ERROR}）
+   *   不排队，让页面可见可重试（D-001 拒排队语义）；结果写入走与转发同一最小
+   *   接口（recordCommandResult，结果槽实现归 task-06）；
+   * - guard 置位同步先于执行、finally 复位（仿 _cleanupInFlight 模式）；
+   * - executor 未接线（task-06 未落地 / 测试未注入实现）→ warn 丢弃不崩
+   *   （同 plan_response_no_manager 惯例，tsc 独立编译不依赖 task-06）。
+   */
+  private async _runSillySpecCommand(
+    action: 'resolve' | 'ghost_cleanup',
+    identify: Pick<SillySpecCommandResult, 'change' | 'strategy'>,
+    exec: (executor: SillySpecCommandExecutor) => Promise<void>,
+  ): Promise<void> {
+    const executor = this._sillyspecCommandExecutor();
+    if (!executor) {
+      this._logger.warn('sillyspec_command_no_executor', { action });
+      return;
+    }
+    if (this._sillyspecCommandInFlight || executor.isUpgradeInFlight()) {
+      this._logger.warn('sillyspec_command_rejected_busy', { action, ...identify });
+      executor.recordCommandResult({
+        action,
+        ...identify,
+        state: 'failed',
+        error: SILLYSPEC_COMMAND_BUSY_ERROR,
+        executed_at: new Date().toISOString(),
+      });
+      return;
+    }
+    this._sillyspecCommandInFlight = true;
+    try {
+      await exec(executor);
+    } catch (e) {
+      // 防御兜底：约定 executor 全路径收敛不 reject（task-06，结果自写槽），
+      // 此处仅防异常上抛阻塞 WS 接收（同 plan_response_route_failed 收敛语义）。
+      this._logger.error('sillyspec_command_route_failed', { action, error: e });
+    } finally {
+      this._sillyspecCommandInFlight = false;
+    }
+  }
+
+  /**
+   * task-05：从 sillyspec-manager 解析命令执行器（duck-type 探测四方法，同构造器
+   * controlSource 对 client 两方法的探测惯例；双重断言绕开弱类型检查）。task-06
+   * 在 SillySpecManager 落 runResolve/runGhostCleanup/isUpgradeInFlight/
+   * recordCommandResult 四方法后本探测恒命中；命中前返回 null → 上层 warn 丢弃。
+   */
+  private _sillyspecCommandExecutor(): SillySpecCommandExecutor | null {
+    const candidate = this._sillyspecManager as unknown as Partial<SillySpecCommandExecutor>;
+    if (
+      typeof candidate.runResolve === 'function' &&
+      typeof candidate.runGhostCleanup === 'function' &&
+      typeof candidate.isUpgradeInFlight === 'function' &&
+      typeof candidate.recordCommandResult === 'function'
+    ) {
+      // 四方法 typeof 探测全命中——Partial 断言回完整接口（探测即守卫）。
+      return candidate as SillySpecCommandExecutor;
+    }
+    return null;
   }
 
   /**

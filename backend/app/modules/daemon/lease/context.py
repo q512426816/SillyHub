@@ -629,11 +629,21 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
                 payload["workspaceId"] = str(ws_id)  # daemon pullSpecBundle 需 wsId（task-06）
                 payload["workspace_id"] = str(ws_id)  # snake_case 双写
             # spec 同步策略透传（2026-06-28-daemon-client-spec-sync-strategy，D-001）：
-            # daemon pullSpecBundle 据此三分支初始化缓存。来源 lease_meta.spec_strategy
-            # （placement.py prepare_scan_interactive_dispatch 写入）。双写 camelCase+snake_case，
-            # 与 transport/workspaceId 惯例一致。未写（旧 lease/quick-chat）→ daemon 按默认
+            # daemon pullSpecBundle 据此三分支初始化缓存。来源优先级（ql-20260904-030-45d1
+            # 补回退源）：
+            #   1. lease_meta.spec_strategy（placement.py prepare_scan_interactive_dispatch
+            #      写入——scan 显式值优先，行为不变）；
+            #   2. SpecWorkspace.strategy（上方 latestSpecVersion 已查出的 _resolved_spec_ws，
+            #      零新增查询；claim 时点读库比 dispatch 时点更新鲜）——补普通工作区会话
+            #      （prepare_interactive_dispatch 写 workspace_id 不写策略键）与 orchestrator
+            #      主控（mission 兜底解析 ws_id）的缺口：缺省时 daemon pull 按
+            #      platform-managed 兜底，version 变化的覆盖拉取会拆 repo-native junction。
+            # 双写 camelCase+snake_case，与 transport/workspaceId 惯例一致。两者皆无
+            # （quick-chat ws_id=None / 查无 SpecWorkspace 行）→ 不透传，daemon 按默认
             # platform-managed 兼容。
-            _spec_strategy = lease_meta.get("spec_strategy")
+            _spec_strategy = lease_meta.get("spec_strategy") or getattr(
+                _resolved_spec_ws, "strategy", None
+            )
             if _spec_strategy:
                 payload["specStrategy"] = _spec_strategy
                 payload["spec_strategy"] = _spec_strategy

@@ -26,6 +26,17 @@ interactive 分支原本不透传，daemon claim 拿不到续会话 id。断言�
   - R1/R2: metadata 含 resume_session_id → tar 与 shared 两路 payload 透传值一致；
   - R3: metadata 无该键（存量 quick-chat / 主控）→ payload 无该键（缺省不下发）；
   - B1: batch 分支既有 resume_session_id 透传（context.py batch 段先例）回归不变。
+
+ql-20260904-030-45d1 追加：specStrategy 回退源守护——普通工作区会话 /
+orchestrator 主控 lease 不写 metadata.spec_strategy（只有 scan 写），context
+原只读 lease_meta → daemon pull 按 platform-managed 兜底，version 变化的覆盖
+拉取会拆 repo-native junction。修复后来源优先级 = lease_meta.spec_strategy >
+SpecWorkspace.strategy（latestSpecVersion 同一查询带出，零新增查询）。断言矩阵：
+  - S1: metadata 带 workspace_id + SpecWorkspace 行 strategy=repo-native、无
+    metadata.spec_strategy → tar payload 双写 specStrategy/spec_strategy（源 DB 行）；
+  - S2: metadata.spec_strategy 显式（scan 形态）→ 优先于 DB 行值；
+  - S3: metadata 带 workspace_id 但无 SpecWorkspace 行 → 不下发任一策略键
+    （daemon 维持 platform-managed 兜底，防御不伪造默认值）。
 """
 
 from __future__ import annotations
@@ -48,6 +59,9 @@ from app.modules.daemon.tests.test_lease_service import (
 # build_claim_payload → _inject_provider_config 查 llm_providers 表；import 模型
 # 注册到 BaseModel.metadata 让 db_engine 建表（镜像 test_lease_budget_dispatch 惯例）。
 from app.modules.llm_provider.model import LlmProvider  # noqa: F401
+
+# ql-20260904-030-45d1：S1-S3 需要 SpecWorkspace 行（表注册 + 构造）。
+from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
 
 
@@ -446,3 +460,148 @@ class TestInteractiveResumeSessionIdPassthrough:
         assert payload["kind"] == "batch"
         assert payload["agent_run_id"] == str(run.id)
         assert payload["resume_session_id"] == resume_key
+
+
+# ---------------------------------------------------------------------------
+# ql-20260904-030-45d1：specStrategy 回退源（lease_meta > SpecWorkspace.strategy）
+# ---------------------------------------------------------------------------
+
+
+async def _create_spec_ws(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    strategy: str,
+    spec_version: int = 0,
+) -> SpecWorkspace:
+    """构造 SpecWorkspace 行（spec_root nullable=False 必须给值；值无消费方随便填）。"""
+    spec_ws = SpecWorkspace(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        spec_root=f"/tmp/spec-ws-{uuid.uuid4().hex[:8]}",
+        strategy=strategy,
+        spec_version=spec_version,
+    )
+    session.add(spec_ws)
+    await session.commit()
+    await session.refresh(spec_ws)
+    return spec_ws
+
+
+class TestBuildClaimPayloadSpecStrategyFallback:
+    """ql-20260904-030-45d1：specStrategy 回退源单测（断言矩阵 S1-S3）。"""
+
+    @pytest.mark.asyncio
+    async def test_s1_workspace_lease_falls_back_to_spec_ws_strategy(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """S1: 普通工作区会话 lease（写 workspace_id 不写策略键）→ 回退 SpecWorkspace.strategy。
+
+        prepare_interactive_dispatch 形态 metadata（session_id/run_id/workspace_id，
+        无 stage 无 spec_strategy）。修复前 specStrategy 缺失 → daemon pull 按
+        platform-managed 兜底；修复后回退读 DB 行 strategy 双写透传。
+        """
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session)
+        await _create_spec_ws(db_session, ws.id, strategy="repo-native", spec_version=7)
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(run.id),
+                "prompt": "workspace session",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "workspace_id": str(ws.id),
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["transport"] == "tar"
+        assert payload["workspaceId"] == str(ws.id)
+        # 回退源命中：DB 行 strategy 双写（camelCase + snake_case）
+        assert payload["specStrategy"] == "repo-native"
+        assert payload["spec_strategy"] == "repo-native"
+        # 同一查询带出的 latestSpecVersion 顺带断言（无额外 DB 往返）
+        assert payload["latestSpecVersion"] == 7
+
+    @pytest.mark.asyncio
+    async def test_s2_explicit_lease_meta_strategy_wins(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """S2: metadata.spec_strategy 显式（scan 形态）→ 优先于 DB 行值。
+
+        scan lease 同时写 workspace_id + spec_strategy，优先级保证既有行为不变。
+        """
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session)
+        await _create_spec_ws(db_session, ws.id, strategy="repo-native")
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(run.id),
+                "prompt": "scan",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "workspace_id": str(ws.id),
+                "spec_strategy": "repo-mirrored",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["specStrategy"] == "repo-mirrored"
+        assert payload["spec_strategy"] == "repo-mirrored"
+
+    @pytest.mark.asyncio
+    async def test_s3_no_spec_ws_row_no_strategy_keys(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """S3: workspace_id 有值但查无 SpecWorkspace 行 → 不下发任一策略键。
+
+        防御不伪造默认值——daemon 维持 platform-managed 兜底（与 latestSpecVersion
+        归 0 同语义，context.py quick-chat/无行注释先例）。
+        """
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session)  # 有 Workspace 无 SpecWorkspace 行
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(run.id),
+                "prompt": "workspace session",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "workspace_id": str(ws.id),
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["workspaceId"] == str(ws.id)
+        assert "specStrategy" not in payload
+        assert "spec_strategy" not in payload
+        assert payload["latestSpecVersion"] == 0

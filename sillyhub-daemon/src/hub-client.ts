@@ -24,7 +24,11 @@
 import { REST_PREFIX } from './protocol.js';
 // 2026-08-29-daemon-platform-resilience task-06：控制指令补拉响应条目类型
 //（手写类型过渡，task-11 收口进 api-types 生成物）+ 心跳响应扩展字段类型。
-import type { PendingControlCommand, HeartbeatResponse } from './protocol.js';
+import type {
+  PendingControlCommand,
+  HeartbeatResponse,
+  SillySpecCommandResult,
+} from './protocol.js';
 import type { components } from './api-types.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { BUILD_ID } from './build-id.js';
@@ -180,6 +184,16 @@ export interface HeartbeatBody {
    *   - 摘要对象 = 最近快照（瞬态失败时 daemon 侧保留旧值照常携带）。
    */
   sillyspec_status?: SillySpecStatusSummary | null;
+  /**
+   * 2026-09-04-conflict-resolve-entry task-06（FR-05 / 契约锚 task-02
+   * DaemonHeartbeatSillySpecCommandResult）：sillyspec 平台命令（resolve /
+   * ghost_cleanup）最新一条执行结果（daemon 内存槽 latest-wins）。携带语义
+   * 两态（D-004@v1，与 sillyspec_status 的三态不同）：
+   *   - 对象 → 整包直写（终态窗内每跳携带）；
+   *   - undefined → 键完全不出现 = backend 置 NULL 清除（无结果/终态窗过期）。
+   * **禁显式 null**（X-04 修订：v1 误写三态；daemon 无需也不得发送 null）。
+   */
+  sillyspec_command_result?: SillySpecCommandResult;
 }
 
 /**
@@ -775,6 +789,14 @@ export class HubClient {
      * 逐字段不变）；null/摘要 → 键出现（null=backend 置 NULL 清除语义）。
      */
     sillyspecStatus?: SillySpecStatusSummary | null,
+    /**
+     * 2026-09-04-conflict-resolve-entry task-06（FR-05 / D-004@v1 两态）：sillyspec
+     * 平台命令最新一条结果（daemon._sendHeartbeatOnce 从 manager.getCommandResult()
+     * 读取）。可选且追加末位——undefined（无结果/终态窗已过）时请求体不含
+     * sillyspec_command_result 键（键不出现 = backend 置 NULL 清除，**禁显式
+     * null**）；对象 → 整包直写。既有 6 参调用请求体逐字段不变（零破坏）。
+     */
+    sillyspecCommandResult?: SillySpecCommandResult,
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -794,6 +816,11 @@ export class HubClient {
     // task-02：undefined → 键不出现（采集未启动）；null/摘要 → 显式携带。
     if (sillyspecStatus !== undefined) {
       body.sillyspec_status = sillyspecStatus;
+    }
+    // task-06（D-004@v1 两态）：对象 → 整包直写；undefined → 键不出现（终态窗
+    // 过期/无结果 = backend 置 NULL 清除）。参数类型不含 null，禁显式 null 写键。
+    if (sillyspecCommandResult !== undefined) {
+      body.sillyspec_command_result = sillyspecCommandResult;
     }
     return this._request<HeartbeatResponse>(
       'POST',
