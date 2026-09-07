@@ -504,6 +504,13 @@ export type PendingControlCommand = components['schemas']['ControlCommandItem'];
 export interface HeartbeatResponse extends Record<string, unknown> {
   /** 该 daemon 全部 runtime 的 pending 控制指令计数；>0 触发控制指令补拉。 */
   pending_controls?: number;
+  /**
+   * ql-20260907-010：请求 spec_cache 各工作区的服务器权威 spec_version
+   * （键 = workspace_id 字符串）。旧 backend / 未携带 spec_cache → 键缺席或
+   * {}，daemon 视为无对答不预取。daemon 据此对「本地落后且无活跃会话」的
+   * 工作区后台预取（spec 拉取工作区级化）。
+   */
+  spec_versions?: Record<string, number>;
 }
 
 // ── sillyspec 平台同步命令（2026-09-04-conflict-resolve-entry task-05）────────

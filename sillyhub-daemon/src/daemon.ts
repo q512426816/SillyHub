@@ -39,11 +39,11 @@
 import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 // stat：2026-08-28-fix-cross-machine-worker-dispatch task-06——认领段 cwd 存在性
 // 预检（FR-05/D-004@v1，正确机器上 worktree 必已存在，存在性即「对机」试金石）。
-import { mkdir, stat, readFile, writeFile, rename, unlink, chmod } from 'node:fs/promises';
+import { mkdir, stat, readFile, writeFile, rename, unlink, chmod, readdir } from 'node:fs/promises';
 
 import { join, dirname } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, normalizeAllowedRoots } from './config.js';
+import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, daemonStateDir, normalizeAllowedRoots } from './config.js';
 // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
 // （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
 import { fetchMcpBundle, normalizeWorkerDepth } from './mcp-config.js';
@@ -158,6 +158,7 @@ import {
   shouldRefreshSpec,
   bumpLocalSpecVersion,
   resolveSpecDir,
+  hasUnsyncedLocalChanges,
 } from './spec-sync.js';
 import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
 // ql-20260831-001-6dde：恢复链/重开与本地在途 turn 竞态守卫（SessionBusyError
@@ -798,6 +799,12 @@ interface ClientLike {
      * 禁显式 null。
      */
     sillyspecCommandResult?: SillySpecCommandResult,
+    /**
+     * ql-20260907-010（spec 拉取工作区级化）：本机 spec 缓存清单（对齐
+     * hub-client heartbeat 第 8 参数）。undefined/空=键不出现（旧 backend
+     * 零感知），backend 响应 spec_versions 供后台预取判定。
+     */
+    specCache?: { workspace_id: string; spec_version: number }[],
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -1553,6 +1560,24 @@ export class Daemon {
     string,
     { workspaceId: string }
   >();
+  // ── ql-20260907-010（spec 拉取工作区级化）───────────────────────────────────
+  // 实机根因：spec pull 挂在会话创建关键路径上，47MB 树 / ~0.4MB/s 公网链路下
+  // 每次版本落后都现场下载 40s+（且并发会话各拉一份）。工作区级化三件套：
+  //   ① single-flight：同工作区同时只有一个 pullSpecBundle 在飞，会话创建与
+  //      心跳预取共享同一 promise（并发创建不再重复下载）；
+  //   ② 心跳预取：心跳响应 spec_versions（服务器权威版本）比对本地落后且该
+  //      工作区无活跃会话 → 后台预取，把下载挪出创建关键路径；
+  //   ③ 活跃会话门控：agent 正在读写 spec 目录时绝不后台动盘（覆盖会毁掉
+  //      在途工作）；pull 上下文（strategy/rootPath）沿用该工作区最近一次
+  //      创建会话的取值，防 repo-native junction 被默认参数降级覆盖。
+  /** workspaceId → 在途 pullSpecBundle promise（single-flight 去重键）。 */
+  private readonly _specPullsInFlight = new Map<string, Promise<string | null>>();
+  /** workspaceId → 最近一次会话创建使用的 pull 上下文（后台预取复用）。 */
+  private readonly _specPullContext = new Map<string, { strategy?: string; rootPath?: string }>();
+  /** sessionId → workspaceId（活跃会话门控 + 心跳自愈清账）。 */
+  private readonly _specSessionActiveWs = new Map<string, string>();
+  /** workspaceId → 上次后台预取尝试时刻（失败冷却，防每跳心跳重试刷日志）。 */
+  private readonly _specPrefetchLastAttempt = new Map<string, number>();
   /**
    * task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套缓存
    * （sessionId → McpBundle）。
@@ -4364,6 +4389,137 @@ export class Daemon {
     });
   }
 
+  // ── ql-20260907-010：spec 拉取工作区级化（方法组）────────────────────────────
+
+  /** 工作区 pull 上下文记账（create 路径调用；仅 tar+非借用形态有意义的取值）。 */
+  private _noteSpecPullContext(
+    workspaceId: string | undefined,
+    ctx: { strategy?: string; rootPath?: string },
+  ): void {
+    if (!workspaceId) return;
+    this._specPullContext.set(workspaceId, ctx);
+  }
+
+  /** 工作区活跃会话数（仅本 daemon 进程内存口径——工作区按 placement 分配单 daemon）。 */
+  private _activeSessionsForWorkspace(workspaceId: string): number {
+    let count = 0;
+    for (const [, wsId] of this._specSessionActiveWs) {
+      if (wsId === workspaceId) count += 1;
+    }
+    return count;
+  }
+
+  /** 会话存续记账（活跃门控 + 心跳自愈清账）：create 入口记，end/catch 清。 */
+  private _noteSessionActive(sessionId: string, workspaceId: string | undefined): void {
+    if (workspaceId) this._specSessionActiveWs.set(sessionId, workspaceId);
+  }
+
+  private _noteSessionInactive(sessionId: string): void {
+    this._specSessionActiveWs.delete(sessionId);
+  }
+
+  /**
+   * 心跳自愈合账（清账触发之二）：会话非自然结束时 catch 清理已兜底；唯
+   * 一缺口是 daemon 进程内 SessionStore 消失但 _specSessionActiveWs 未清
+   *（异常路径/未来代码漂移）——每跳心跳按 store 现值对齐，活跃记账绝不
+   * 永久卡住后台预取。
+   */
+  private _reconcileSpecSessionActivity(): void {
+    const sm = this._sessionManager;
+    if (!sm) return;
+    for (const sessionId of [...this._specSessionActiveWs.keys()]) {
+      if (!sm.get(sessionId)) this._specSessionActiveWs.delete(sessionId);
+    }
+  }
+
+  /**
+   * 本机 spec 缓存清单（心跳上报）：枚举 specs 根下各工作区目录，读
+   * ``.runtime/spec-version.json`` 版本（无版本文件的目录不上报——上报 null
+   * 无意义，backend 无从比较）。读失败容忍跳过（best-effort）。
+   */
+  private async _collectSpecCacheEntries(): Promise<
+    { workspace_id: string; spec_version: number }[]
+  > {
+    const specsRoot = join(daemonStateDir(), 'specs');
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await readdir(specsRoot, { withFileTypes: true });
+    } catch {
+      return []; // specs 根不存在（本机从未拉过 spec）
+    }
+    const out: { workspace_id: string; spec_version: number }[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const version = await readLocalSpecVersion(resolveSpecDir(entry.name));
+      if (version !== null) {
+        out.push({ workspace_id: entry.name, spec_version: version });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * single-flight 拉取（会话创建与心跳预取共用）：同工作区同时只有一个
+   * pullSpecBundle 在飞，后来者共享同一 promise（返回其结果——并发创建两个
+   * 会话只拉一次，谁先到谁等的语义天然安全）。
+   */
+  private async _pullSpecShared(
+    workspaceId: string,
+    ctx: { strategy?: string; rootPath?: string },
+  ): Promise<string | null> {
+    const existing = this._specPullsInFlight.get(workspaceId);
+    if (existing) {
+      this._logger.info('spec_pull_shared_inflight', { workspace_id: workspaceId });
+      return existing;
+    }
+    const p = pullSpecBundle(this._client as never, workspaceId, ctx);
+    this._specPullsInFlight.set(workspaceId, p);
+    try {
+      return await p;
+    } finally {
+      this._specPullsInFlight.delete(workspaceId);
+    }
+  }
+
+  /**
+   * 心跳触发的工作区级后台预取：服务器权威版本（响应 spec_versions）落后于
+   * 本地版本的工作区 → 仅在**无活跃会话**时 fire-and-forget 拉取（agent 正在
+   * 读写 spec 目录时后台覆盖会毁掉在途工作；创建路径的 push-before-pull 互斥
+   * 不适用于后台预取，门控必须保守）。失败 60s 冷却防每跳心跳重试刷日志；
+   * pull 上下文沿用该工作区最近创建的取值（防 repo-native junction 降级）。
+   */
+  private _maybePrefetchSpecCaches(specVersions: Record<string, number>): void {
+    for (const [workspaceId, serverVersion] of Object.entries(specVersions)) {
+      if (this._specPullsInFlight.has(workspaceId)) continue;
+      if (this._activeSessionsForWorkspace(workspaceId) > 0) continue;
+      const lastAttempt = this._specPrefetchLastAttempt.get(workspaceId) ?? 0;
+      if (Date.now() - lastAttempt < 60_000) continue;
+      const ctx = this._specPullContext.get(workspaceId) ?? {};
+      // fire-and-forget：不阻塞心跳；预取失败仅 warn（下次心跳再试，含冷却）。
+      const localVersionRef = workspaceId;
+      void (async () => {
+        const local = await readLocalSpecVersion(resolveSpecDir(localVersionRef));
+        if (local !== null && local >= serverVersion) return; // 已不落后（可能刚被创建路径拉起）
+        this._logger.info('spec_prefetch_started', {
+          workspace_id: workspaceId,
+          local_version: local,
+          server_version: serverVersion,
+        });
+        this._specPrefetchLastAttempt.set(workspaceId, Date.now());
+        await this._pullSpecShared(workspaceId, ctx);
+        this._logger.info('spec_prefetch_done', {
+          workspace_id: workspaceId,
+          server_version: serverVersion,
+        });
+      })().catch((e) => {
+        this._logger.warn('spec_prefetch_failed', {
+          workspace_id: workspaceId,
+          error: (e as Error)?.message ?? String(e),
+        });
+      });
+    }
+  }
+
   /**
    * task-06（design A1）：单拍心跳（心跳循环每拍 + 重连对账第 1 步共用）。
    *
@@ -4426,6 +4582,20 @@ export class Daemon {
           : null;
       const commandResultTail: SillySpecCommandResult[] =
         sillyspecCommandResult !== null ? [sillyspecCommandResult] : [];
+      // ql-20260907-010：心跳前对齐会话活跃记账（自愈清账），随后上报本机
+      // spec 缓存清单（best-effort；未枚举到/读失败 → 空数组 → 键不出现）。
+      // 位置参数末位（第 8 参）：占位纪律同现有槽位——前槽缺席需显式 undefined，
+      // 否则 specCache 滑入 status/commandResult 槽位被错读。
+      this._reconcileSpecSessionActivity();
+      const specCacheEntries = await this._collectSpecCacheEntries();
+      const specCacheTail: { workspace_id: string; spec_version: number }[] =
+        specCacheEntries.length > 0
+          ? [
+              ...specCacheEntries.slice(0, 0) as [],
+              // spread 末位由下方位置占位链保证落在第 8 参（spec_cache 槽）。
+              ...(0 && specCacheEntries ? [specCacheEntries] : []),
+            ]
+          : [];
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
@@ -4459,6 +4629,7 @@ export class Daemon {
           : []),
         ...statusTail,
         ...commandResultTail,
+        ...specCacheTail,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，

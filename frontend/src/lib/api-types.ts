@@ -114,10 +114,13 @@ export interface paths {
         };
         /**
          * Get Latest Manifest
-         * @description Return ``{version, downloadUrl}`` consumed by ``install.sh``'s ``fetch_latest``.
+         * @description Return ``{version, downloadUrl, vendorFiles}`` consumed by installers/preflight.
          *
          *     Field names: ``version``（BUILD_ID / git SHA）+ ``url``（preflight.ts 消费）+ ``downloadUrl``
-         *     （install.sh 消费）。同时返回两种字段名以兼容两个消费方。
+         *     （install.sh 消费）。同时返回两种字段名以兼容两个消费方。``vendorFiles``
+         *     （ql-20260906-003，审计 #10）：``vendor/`` 下相对路径清单（按需扫描
+         *     daemon-dist，未打包 → 空列表），install.sh / install.ps1 / preflight 自更新
+         *     据此逐文件伴生下载 vendored pi 扩展树。
          */
         get: operations["get_latest_manifest_daemon_latest_json_get"];
         put?: never;
@@ -164,6 +167,35 @@ export interface paths {
          *     缺失则主 agent session 注入的 MCP server spawn 失败 → team 5 tool 链路断。
          */
         get: operations["get_mcp_server_bundle_daemon_latest_mcp_server_js_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daemon/latest/vendor/{file_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vendor File
+         * @description Serve a vendored pi-extension file（ql-20260906-003，审计 #10 分发链补口）.
+         *
+         *     ``vendor/`` 树随 bundle 打进镜像（Dockerfile COPY），install / preflight
+         *     自更新按 latest.json 的 vendorFiles 清单逐文件下载到 bin 目录 ``vendor/``
+         *     下——pi-rpc-driver 的 ``piVendoredSubagentExtensionPath`` 按「bundle 同目录
+         *     vendor/pi-extensions/...」候选定位 ``--extension`` 实参；漏分发则候选落空、
+         *     扩展静默跳过（subagent 工具不可用）。路径双保险校验：分段白名单（拒绝
+         *     ``..`` / 空段 / 反斜杠 / NUL）+ resolve 后 containment 复核（防符号链接逃逸）；
+         *     不合规与缺失统一 404（不泄露存在性）。媒体类型固定 octet-stream——按扩展名
+         *     猜测会把 .ts 判成 video/mp2t，且客户端均按字节落盘不消费类型。
+         */
+        get: operations["get_vendor_file_daemon_latest_vendor__file_path__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5169,6 +5201,10 @@ export interface paths {
          *     AgentTaskStatusEvent（schema.py），生命周期扩展字段（tool_use_id/summary/
          *     last_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随
          *     ``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。
+         *
+         *     2026-09-04-session-task-execution-panel task-03（FR-05）：转发之外把事件
+         *     交给 ``upsert_agent_task``（agent_task_store.py）落库 ``agent_session_task``
+         *     ——持久化旁路，失败只记日志，不影响 SSE 转发与 200 返回。
          *
          *     越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
          *     归属校验（404 不泄露存在性）。
@@ -12636,6 +12672,8 @@ export interface components {
             sillyspec_command_result?: components["schemas"]["DaemonHeartbeatSillySpecCommandResult"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
+            /** Spec Cache */
+            spec_cache?: components["schemas"]["DaemonHeartbeatSpecCacheItem"][];
         };
         /**
          * DaemonHeartbeatResponse
@@ -12662,6 +12700,10 @@ export interface components {
              * @default 0
              */
             pending_controls: number;
+            /** Spec Versions */
+            spec_versions?: {
+                [key: string]: number;
+            };
         };
         /**
          * DaemonHeartbeatRuntimePolicy
@@ -12817,6 +12859,24 @@ export interface components {
             to_version?: string | null;
             /** Error */
             error?: string | null;
+        };
+        /**
+         * DaemonHeartbeatSpecCacheItem
+         * @description 心跳 ``spec_cache[]`` 单项（ql-20260907-010：spec 拉取工作区级化）.
+         *
+         *     daemon 上报本机已有的 spec 缓存（``~/.sillyhub/daemon/specs/{ws}``）版本，
+         *     backend 在响应 ``spec_versions`` 里回服务器权威 ``spec_workspaces.spec_version``，
+         *     daemon 据此对「版本落后且无活跃会话」的工作区后台预取——把全量 bundle 下载
+         *     挪出会话创建关键路径（实机 47MB 树 / ~0.4MB/s 链路下创建被拖 40s+）。
+         */
+        DaemonHeartbeatSpecCacheItem: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Spec Version */
+            spec_version: number;
         };
         /**
          * DaemonInstanceProviderItem
@@ -24190,7 +24250,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string;
+                        [key: string]: unknown;
                     };
                 };
             };
@@ -24232,6 +24292,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_vendor_file_daemon_latest_vendor__file_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

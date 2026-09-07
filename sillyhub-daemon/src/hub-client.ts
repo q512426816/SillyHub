@@ -194,6 +194,12 @@ export interface HeartbeatBody {
    * **禁显式 null**（X-04 修订：v1 误写三态；daemon 无需也不得发送 null）。
    */
   sillyspec_command_result?: SillySpecCommandResult;
+  /**
+   * ql-20260907-010：本机 spec 缓存清单（读请求键，无落库语义）。daemon 每
+   * 跳心跳枚举本地 specs 目录组装；backend 仅据此在响应 spec_versions 回
+   * 权威版本。undefined/空数组 → 键不出现（旧 backend 零感知）。
+   */
+  spec_cache?: { workspace_id: string; spec_version: number }[];
 }
 
 /**
@@ -797,6 +803,15 @@ export class HubClient {
      * null**）；对象 → 整包直写。既有 6 参调用请求体逐字段不变（零破坏）。
      */
     sillyspecCommandResult?: SillySpecCommandResult,
+    /**
+     * ql-20260907-010（spec 拉取工作区级化）：本机 spec 缓存清单——daemon
+     * ``_sendHeartbeatOnce`` 从 ``~/.sillyhub/daemon/specs/`` 枚举各工作区
+     * ``.runtime/spec-version.json`` 组装。backend 响应 ``spec_versions`` 回
+     * 服务器权威版本，daemon 对「本地落后且无活跃会话」的工作区后台预取，
+     * 把全量 bundle 下载挪出会话创建关键路径。可选追加末位——undefined/空
+     * 时请求体不含 spec_cache 键（旧 backend 零感知），既有 7 参调用零破坏。
+     */
+    specCache?: { workspace_id: string; spec_version: number }[],
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -821,6 +836,12 @@ export class HubClient {
     // 过期/无结果 = backend 置 NULL 清除）。参数类型不含 null，禁显式 null 写键。
     if (sillyspecCommandResult !== undefined) {
       body.sillyspec_command_result = sillyspecCommandResult;
+    }
+    // ql-20260907-010：本机 spec 缓存清单（workspace_id + 本地版本）——backend
+    // 响应 spec_versions 回权威版本供 daemon 判定后台预取。undefined / 空数组 →
+    // 键不出现（旧 backend 零感知）。
+    if (specCache && specCache.length > 0) {
+      body.spec_cache = specCache;
     }
     return this._request<HeartbeatResponse>(
       'POST',
