@@ -5089,6 +5089,11 @@ export class Daemon {
     // RPC（工作区文件浏览器，design §7.1）。roots 每次 RPC 现取 _effectiveAllowedRoots()，
     // **不**照抄裸 list_dir 的空 roots 跳校验写法（design §5 关键安全设计 1 警示条）。
     this._registerExplorerRpcHandler(ws);
+    // task-02（2026-09-07-conflict-diff-compare）：注册 sillyspec_conflict_snapshot
+    // 只读冲突快照 RPC——backend compare 编排实时拉取本地侧冲突内容与 ql 编号
+    //（design §5 Phase 1 / §7.1）。业务全在 SillySpecManager.conflictSnapshot，
+    // RpcError code 经 _dispatchRpc 原样回填（explorer 系同约定）。
+    this._registerSillySpecRpcHandler(ws);
     // task-01（2026-08-25-workspace-git-log）：注册 git_log 系四只读 RPC（平名，
     // design §5.2 CC-02 / §7.2 契约），供 backend git_log 模块经 MemberBindingResolver
     // 解析绑定后直连（不走 host_fs. 前缀降级通道）。task-01（2026-08-26-
@@ -5391,6 +5396,29 @@ export class Daemon {
           ? EXPLORER_DEFAULT_MAX_RESULTS
           : (params.max_results as number);
       return explorerSearch(root, query, this._effectiveAllowedRoots(), maxResults);
+    });
+  }
+
+  /**
+   * task-02（2026-09-07-conflict-diff-compare / design §5 Phase 1 第 2 条 + §7.1）：
+   * 注册 sillyspec_conflict_snapshot 只读冲突快照 RPC——backend compare 编排端点
+   * 经 ws_hub.send_rpc 实时拉取本地侧冲突内容与 ql 编号（D-001@v1 方案A，请求/
+   * 响应式，区别于一写即忘的裁决通道）。
+   *
+   * params 归一对齐既有 handler 写法：change/kind 非字符串或缺省归一为空串，由
+   * manager.conflictSnapshot 入口断言拒 RpcError('invalid_params')；handler 不吞
+   * RpcError（no_spec_root / conflict_record_missing 等语义码原样上抛），交
+   * ws-client._dispatchRpc 回填 error.code（explorer / git 系同约定）。
+   */
+  private _registerSillySpecRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('sillyspec_conflict_snapshot', async (params) => {
+      const change = typeof params.change === 'string' ? params.change : '';
+      const kind = typeof params.kind === 'string' ? params.kind : '';
+      return this._sillyspecManager.conflictSnapshot(change, kind);
     });
   }
 
