@@ -90,9 +90,9 @@ const QUERY_KEY_ROOT = ["platform-sync-section"] as const;
  */
 export const ECHO_TIMEOUT_MS = 150_000;
 
-// 裁决确认弹窗文案（STRATEGY_TEXT/ACTIVE_WARN_TEXT）与下发动作已按 D-002@v1
-// 收进对比弹窗（conflict-compare-modal.tsx，2026-09-07-conflict-diff-compare
-// task-07 产物），本文件不再持有行内裁决入口。
+// 裁决确认弹窗文案（STRATEGY_TEXT）与下发动作已按 D-002@v1 收进对比弹窗
+// （conflict-compare-modal.tsx，2026-09-07-conflict-diff-compare task-07 产物），
+// 本文件不再持有行内裁决入口；ACTIVE_WARN_TEXT 活跃警示徽章仍归本文件（行上展示）。
 
 /** 旧 daemon 兜底提示（ghost 清理确认弹窗用，R-03）。 */
 const DAEMON_VERSION_NOTE =
