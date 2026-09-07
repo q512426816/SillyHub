@@ -349,3 +349,25 @@
 状态：进行中
 关联变更：（无）
 文件：sillyhub-daemon/src/autostart/macos.ts
+
+## ql-20260907-001-e373 | 2026-09-07 08:59:09 | 任务执行面板轮次历史懒加载导致摘要轮次计数恒 0/列表空到点开页签才拉
+状态：已完成
+关联变更：2026-09-04-session-task-execution-panel
+文件：frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx, frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx, frontend/src/components/daemon/task-execution-panel.tsx
+需求：任务执行面板轮次历史懒加载导致摘要轮次计数恒 0/列表空到点开页签才拉，影响体验，用户要求恢复挂载即取数。
+根因：task-10 回归修正时为避开看门狗测试的 listSessionRuns 绝对计数断言加了 runsViewedRef 惰性闸门——测试口径问题不该由产品行为买单。
+方案：面板移除闸门恢复 mount/sessionId 即取数（refreshSignal 重拉保留）；connection 测试 5 处绝对计数改挂载后快照增量口径（终态/卸载两处改快照不变断言）；面板测试 4 处还原。
+结果：tsc 0 错；面板 12/12+connection 13/13+hook/variant/lifecycle 33/33 全绿；lint 无新增；3 文件已暂存待提交。部署：待提交后重新打包前端镜像更新阿里云
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/brainstorm-numbered-heading-postcheck-parse-gap.md
+
+## ql-20260907-002-b595 | 2026-09-07 09:34:56 | 修复 pi driver pendingTurnError 轮内粘滞：pi 自动重试恢复后 turn 仍误报失败
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（handleLine 新增轮内恢复清值（turn_end 非 error 原始帧 + text override 全文事件））
+- sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（新增 3 用例覆盖恢复/单独恢复信号/防过清）
+- .sillyspec/docs/sillyhub-daemon/modules/interactive.md（MANUAL_NOTES 补 ql-20260907-002 条目）
+需求：修复 pi driver pendingTurnError 轮内粘滞：pi 自动重试恢复后 turn 仍误报失败
+根因：pendingTurnError 是 consume 内会话级闭包变量，轮内只在下一轮 inject 前清一次（pi-rpc-driver.ts:896）；pi 对 API 失败自动重试，前 2 次 attempt 超时的 ame.error 已写值，第 3 次成功出完整答案后旧值粘滞，agent_settled 后 :928 一票否决把成功轮翻成 error_during_execution（会话 33f958d2 实机）
+方案：handleLine 两个轮内恢复信号到达即置 null：① 归一化事件 text+override 全文（message_end assistant 完整产出终态）；② 原始帧 turn_end 且 stopReason 非 error（清在归一化前，真实失败轮 stopReason=error 仍由归一化器产 error 事件重新写入，防过清）。codex driver 不动：双清+成败权威在 turn_status，success 路径本就忽略 stale 值
+结果：vitest tests/interactive/pi-rpc-driver.test.ts 48/48 通过（含 3 新用例：33f958d2 复现恢复→success+usage、turn_end stop 单独恢复信号、恢复后真失败仍 error 防过清）；pnpm typecheck 零错误

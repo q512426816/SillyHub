@@ -862,6 +862,161 @@ describe('turn 生命周期', () => {
     closeQueue();
     await consumeP;
   });
+
+  // ql-20260907-002：pendingTurnError 轮内粘滞修复（会话 33f958d2 实机案）。
+  it('轮内 ame.error 后恢复（message_end override 全文 + turn_end stop）→ success，粘滞 error 被清', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, events, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    // 复现实机形状：前 2 次 api attempt 超时（ame.error 连发，旧值第 2 条覆盖
+    // 第 1 条），第 3 次 attempt 成功出完整答案（message_end override 全文 +
+    // turn_end stopReason='stop'）——修复前粘滞的 'api timeout (attempt 2)'
+    // 把成功轮翻成 error_during_execution。
+    push('查一下');
+    await tick();
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    for (const attempt of [1, 2]) {
+      emitEvent(child, {
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'error',
+          reason: 'error',
+          error: { errorMessage: `api timeout (attempt ${attempt})` },
+        },
+      });
+    }
+    emitEvent(child, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '完整答案' }],
+        stopReason: 'stop',
+      },
+    });
+    emitEvent(child, {
+      type: 'turn_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'stop',
+        usage: { input: 10, output: 5 },
+      },
+    });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    // usage 快照仍随成功轮上报（pi usage 字段名映射口径）
+    expect((results[0] as { usage?: Record<string, unknown> }).usage).toMatchObject({
+      input_tokens: 10,
+      output_tokens: 5,
+    });
+    // override 全文事件正常上抛（恢复信号本身也是正常产出）
+    expect(
+      events.some((e) => e.type === 'text' && e.override === true && e.content === '完整答案'),
+    ).toBe(true);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('轮内 ame.error 后仅 turn_end stopReason=stop（无 message_end 全文）→ success', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('跑');
+    await tick();
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    emitEvent(child, {
+      type: 'message_update',
+      assistantMessageEvent: {
+        type: 'error',
+        reason: 'error',
+        error: { errorMessage: 'api timeout' },
+      },
+    });
+    // message_end 丢帧场景：turn_end stopReason='stop' 单独作为恢复信号。
+    emitEvent(child, {
+      type: 'turn_end',
+      message: { role: 'assistant', content: [], stopReason: 'stop' },
+    });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('恢复信号后真失败（message_end 全文后 turn_end error）→ 仍 error（后到 error 事件重新写入）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('先答一半再挂');
+    await tick();
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    // 部分 assistant 产出已 message_end 落全文（触发恢复清值），随后 turn 内
+    // 最终 api 调用失败 → turn_end stopReason='error' 必须重新写回失败。
+    emitEvent(child, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '部分产出' }],
+        stopReason: 'stop',
+      },
+    });
+    emitEvent(child, {
+      type: 'turn_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'final call failed',
+      },
+    });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+      result: 'final call failed',
+    });
+
+    closeQueue();
+    await consumeP;
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

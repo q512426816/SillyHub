@@ -835,10 +835,28 @@ export class PiRpcDriver implements InteractiveDriver {
       }
 
       // 其余事件 → PiEventNormalizer（含未知事件降级桶，fail-safe 不丢不抛）
+      // ql-20260907-002：turn_end stopReason 非 error → turn 正常终结，清轮内
+      // 已缓存的早先 error。pi 对 API 失败会自动重试（会话 33f958d2 实机案：
+      // 前 2 次 attempt 超时的 ame.error 已写满 pendingTurnError，第 3 次成功
+      // 出完整答案仍被粘滞旧值翻成 error result——轮内恢复信号必须清值）。
+      // 真实失败轮 stopReason='error' 由归一化器产 error 事件在下方循环重新
+      // 写入，清值不影响其判定。
+      if (msg.type === 'turn_end') {
+        const turnMsg = isRecord(msg.message) ? msg.message : {};
+        if (turnMsg.stopReason !== 'error') {
+          pendingTurnError = null;
+        }
+      }
       const events = normalizer.normalizeRpcLine(line);
       for (const ev of events) {
         if (ev.type === 'error' && ev.content) {
           pendingTurnError = ev.content;
+        }
+        // ql-20260907-002（续）：message_end 的 override 全文（assistant 完整
+        // 产出终态，pi-events.ts handleMessageEnd）同为轮内恢复信号——api
+        // 重试成功后先于 turn_end 到达，提前清粘滞 error。
+        if (ev.type === 'text' && ev.override === true) {
+          pendingTurnError = null;
         }
         if (ev.usage) {
           turnUsage = ev.usage; // 轮级累计 replace 语义（pi-events.ts 口径）
