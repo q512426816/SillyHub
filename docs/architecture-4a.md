@@ -533,8 +533,8 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 
 | 层 | 代表文件 | 职责 |
 |---|---|---|
-| **F1 路由 `app/`** | `(auth)/login/`、`(dashboard)/`（`workspaces/`、`admin/`、`ppm/`、`settings/`、`runtimes/`、`account/`、`agent-profiles/`）、`m/`（移动）、`page.tsx` | 路由组（auth）登录守卫、（dashboard）工作区守卫（`frontend/app/layout.tsx WORKSPACE_WHITELIST` + `:46` 客户端工作区守卫） |
-| **F2 API 代理 `app/api/`** | `daemon/sessions/[sessionId]/stream/route.ts`、`daemon-chat/[runId]/stream/route.ts`、`workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts` | Next.js Route Handler 作 **无缓冲 SSE 代理**，解决浏览器 EventSource 不能自定义 header（token 走 query → 转 `Authorization` header，`frontend/app/api/sessions/[id]frontend/app/api/agent/runs/[runId]frontend/app/api/agent/runs/[runId]frontend/app/api/agent/runs/[runId]frontend/app/api/agent/runs/[runId]/stream/route.ts:36-47`）+ `compress:false` 关 undici 缓冲（`:57`） |
+| **F1 路由 `app/`** | `(auth)/login/`、`(dashboard)/`（`workspaces/`、`admin/`、`ppm/`、`settings/`、`runtimes/`、`account/`、`agent-profiles/`）、`m/`（移动）、`page.tsx` | 路由组（auth）登录守卫、（dashboard）工作区守卫（`frontend/src/app/layout.tsx WORKSPACE_WHITELIST` + `:46` 客户端工作区守卫） |
+| **F2 API 代理 `app/api/`** | `daemon/sessions/[sessionId]/stream/route.ts`、`daemon-chat/[runId]/stream/route.ts`、`workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts` | Next.js Route Handler 作 **无缓冲 SSE 代理**，解决浏览器 EventSource 不能自定义 header（token 走 query → 转 `Authorization` header，`frontend/app/api/.../stream/route.ts:36-47`）+ `compress:false` 关 undici 缓冲（`:57`） |
 | **F3 组件 `components/`** | `app-shell.tsx`、`agent/`、`agent-log/`、`agent-profile/`、`daemon/`、`workspace/`、`ppm/`、`changes/`、`charts/`、`ui/`（12 个基础组件）、`layout/`、`mobile/`、`permissions/` | 业务组件按域分目录，`ui/` 是设计系统基础组件（对标 style-system 总纲） |
 | **F4 API client `lib/`** | `api.ts`（fetch wrapper，`:46 ApiError`）、`api-types.ts`（**自动生成，禁止手写**，`:1-3`）、`auth/`（`route-guard.ts`）、按域的 `*.ts`（`agent.ts`/`daemon.ts`/`workspace.ts`/`changes.ts`/`ppm/`…）、`token-refresh.ts`、`query-client.ts`（React Query） | 每个后端域一个 client 文件，统一经 `api.ts` fetch 包装 |
 | **F5 状态 `stores/`** | `session.ts`（zustand+persist，token/user）、`workspace.ts`（**非 persist**，URL 为真相源，`frontend/src/lib/workspace.ts`）、`kanban.ts` | 客户端状态；session 持久化、workspace 仅缓存 |
@@ -684,7 +684,7 @@ daemon 侧 `spec-sync.ts` 负责 spec bundle 的拉取（`pullSpecBundle:91` tar
 #### 3.5.2 SSE stream 契约（log/事件流）
 
 - **backend SSE 生成器** `AgentService.stream_run_logs`（`backend/app/modules/agent/service.py:1108`）：订阅 Redis Pub/Sub `agent_run:{run_id}` + `agent_session:{session_id}`（permission_request/turn_completed 事件），发 `data` / `done` / `: keepalive`（~30s）。**连接池安全**：用 `get_session_factory()` 短 session，不占请求级连接（`:1039-1043`）。
-- **前端代理** Route Handler（`app/api/.../stream/route.ts`）无缓冲转发：`compress:false` 关 undici 缓冲（`frontend/app/api/sessions/[id]frontend/app/api/agent/runs/[runId]frontend/app/api/agent/runs/[runId]frontend/app/api/agent/runs/[runId]frontend/app/api/agent/runs/[runId]/stream/route.ts:57`）、token 从 query 转 `Authorization` header（`:36-47`，不进 backend access log）、`X-Accel-Buffering:no`。
+- **前端代理** Route Handler（`app/api/.../stream/route.ts`）无缓冲转发：`compress:false` 关 undici 缓冲（`frontend/app/api/.../stream/route.ts:57`）、token 从 query 转 `Authorization` header（`:36-47`，不进 backend access log）、`X-Accel-Buffering:no`。
 - **mission SSE** `backend/app/modules/mcp_gateway/backend/app/modules/agent/sse.py stream_mission_events`：短轮询 AgentRun 每 2s 推 worker_status 帧 + 终态 done 帧。
 - **stream 端点清单**：`backend/app/modules/agent/router.py:482`（run 级）、`backend/app/main.py:643`（quick-chat run 级）、`backend/app/modules/mcp_gateway/backend/app/modules/agent/sse.py`（mission 级）、backend `daemon` 模块（session 级）。
 

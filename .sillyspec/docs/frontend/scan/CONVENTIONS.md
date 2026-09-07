@@ -19,7 +19,7 @@ generator: sillyspec-scan
    `frontend/package.json:13-14` 的 `gen:types` 从后端 OpenAPI 生成类型，`gen:types:check` 重新生成后用 `git diff --exit-code` 阻止漂移提交。后端 schema（DTO/请求/响应）一改，同一变更内必须先 `pnpm gen:types` 再改前端（项目 CLAUDE.md 规则 21），不能凭记忆手写类型。
 
 2. **`Date.toLocaleString()` 必须显式传 `"zh-CN"`，否则开发机 zh-CN 过 CI en-US 红。**
-   现状（744e3de4 grep 统计）：`src/` 内共约 45 处 `toLocaleString`、36 个文件，日期时间格式化处均已显式带 `"zh-CN"`（如 `frontend/src/app/(dashboard)frontend/src/app/ppm/shared.tsx:21`、`frontend/src/app/(dashboard)frontend/src/app/ppm/project-plans/page.tsx:63`、`frontend/src/components/charts/RuntimeUsageLineChart.tsx:61-62`）；不带 locale 参数的仅剩**数字千分位**格式化（token 数值等），如 `frontend/src/components/charts/RuntimeUsageLineChart.tsx:102`、`frontend/src/components/daemon/turn-timeline.tsx,728`——数字千分位是约定保留项，不算漏网。Windows Node 忽略 LANG，本地无法复现 en-US，必须靠写死 locale 防护。
+   现状（744e3de4 grep 统计）：`src/` 内共约 45 处 `toLocaleString`、36 个文件，日期时间格式化处均已显式带 `"zh-CN"`（如 `frontend/src/app/(dashboard)/ppm/shared.tsx:21`、`frontend/src/app/(dashboard)/ppm/project-plans/page.tsx:63`、`frontend/src/components/charts/RuntimeUsageLineChart.tsx:61-62`）；不带 locale 参数的仅剩**数字千分位**格式化（token 数值等），如 `frontend/src/components/charts/RuntimeUsageLineChart.tsx:102`、`frontend/src/components/daemon/turn-timeline.tsx,728`——数字千分位是约定保留项，不算漏网。Windows Node 忽略 LANG，本地无法复现 en-US，必须靠写死 locale 防护。
 
 3. **Tailwind `md:` 是视口断点不是容器断点，侧栏/卡片内嵌组件禁用响应式前缀做布局决策。**
    桌面视口下即使容器只有 320px，`md:grid-cols-2` 仍强制两栏挤崩。代码注释明证：`frontend/src/components/changes/detail/change-sessions-card.tsx:20`（"整包塞进 320px 折叠卡——`md:` 是视口断点非容器断点"），测试标题也固化此认知（`frontend/src/components/changes/__tests__/quicklog-drawer.test.tsx:81`）。侧栏内宽内容改用 Dialog（radix Portal 脱离侧栏）承载。

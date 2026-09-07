@@ -75,7 +75,7 @@ AgentService.start_run()                    backend/app/modules/agent/service.py
          MemberBindingResolver
            .resolve_member_binding_or_none()      member_runtimes/resolver.py
            → 读 workspace_member_runtimes 表
-           → 取 daemon_id                       backend/app/modules/member_runtimes/model.py:68-75
+           → 取 daemon_id                       backend/app/modules/workspace/member_runtimes/model.py:68-75
          ↓
          _query_daemon_online_by_id()        backend/app/modules/agent/placement.py:1096-1111
            → SELECT daemon_instances WHERE id=:id AND status='online'
@@ -85,9 +85,9 @@ AgentService.start_run()                    backend/app/modules/agent/service.py
          ↓
          返回 runtime dict {id, user_id, provider, status, daemon_instance_id}
   ↓
-  (6) dispatch_to_daemon()                  backend/app/modules/agent/backend/app/modules/agent/placement.py:313-532
+  (6) dispatch_to_daemon()                  backend/app/modules/agent/placement.py:313-532
        ↓
-       _resolve_dispatch_runtime()          backend/app/modules/agent/backend/app/modules/agent/placement.py:949-1067
+       _resolve_dispatch_runtime()          backend/app/modules/agent/placement.py:949-1067
          （同样解析 member binding → daemon → runtime）
        ↓
        INSERT INTO daemon_task_leases        backend/app/modules/agent/placement.py:465-483
@@ -125,7 +125,7 @@ Workspace (workspaces 表)
 
 ### 2.3 当前"选 daemon"逻辑（placement.py）
 
-路由决策入口 `_resolve_dispatch_runtime()`（`backend/app/modules/agent/backend/app/modules/agent/placement.py:949-1067`）：
+路由决策入口 `_resolve_dispatch_runtime()`（`backend/app/modules/agent/placement.py:949-1067`）：
 
 ```
 Step 0: workspace_id is None → 直接抛 NoOnlineDaemonError
@@ -203,9 +203,9 @@ CREATE INDEX ix_agent_profiles_workspace ON agent_profiles(workspace_id);
 | `backend/app/modules/agent/service.py:361-525` | `start_run()` | 解析 agent_profile_id → 读 provider/model/agent_type |
 | `backend/app/modules/agent/service.py:1430` | `start_stage_dispatch()` | 同上 |
 | `backend/app/modules/agent/service.py:1711` | `start_scan_dispatch()` | 同上 |
-| `backend/app/modules/agent/backend/app/modules/agent/placement.py:949-1067` | `_resolve_dispatch_runtime()` | provider 解析来源从 workspace.default_agent 改为 agent_profile.provider |
-| `backend/app/modules/agent/backend/app/modules/agent/execution.py:145-268` | `dispatch_worker()` | worker dispatch 读 agent_profile 配置 |
-| `backend/app/modules/agent/backend/app/modules/agent/execution.py:74-94` | `worker_tool_config()` | tool_config 从 agent_profile.tool_policy 派生 |
+| `backend/app/modules/agent/placement.py:949-1067` | `_resolve_dispatch_runtime()` | provider 解析来源从 workspace.default_agent 改为 agent_profile.provider |
+| `backend/app/modules/agent/execution.py:145-268` | `dispatch_worker()` | worker dispatch 读 agent_profile 配置 |
+| `backend/app/modules/agent/execution.py:74-94` | `worker_tool_config()` | tool_config 从 agent_profile.tool_policy 派生 |
 | `backend/app/modules/agent/finalizer.py:77-100` | `FinalizerService.__init__()` | 收敛时读 agent_profile 配置 |
 | `context_builder.py` | `build_spec_bundle()` | prompt 构造时可注入 agent_profile.system_prompt |
 
@@ -254,7 +254,7 @@ AgentRunWorkspace  — run↔workspace M:N
 
 ### 5.1 当前逻辑（placement.py）
 
-当前 `_resolve_dispatch_runtime()`（`backend/app/modules/agent/backend/app/modules/agent/placement.py:949-1067`）的决策链：
+当前 `_resolve_dispatch_runtime()`（`backend/app/modules/agent/placement.py:949-1067`）的决策链：
 
 ```
 输入: (workspace_id, user_id, provider)
@@ -318,7 +318,7 @@ AgentRunWorkspace  — run↔workspace M:N
 
 **backend/app/modules/agent/execution.py:145-268 — `MissionExecutionService.dispatch_worker()`**
 
-当前 `dispatch_worker()` 从 `run.role` 决定 `read_only` 和 tool_config（`backend/app/modules/agent/backend/app/modules/agent/execution.py:74-94`）。改造后：
+当前 `dispatch_worker()` 从 `run.role` 决定 `read_only` 和 tool_config（`backend/app/modules/agent/execution.py:74-94`）。改造后：
 
 ```diff
   async def dispatch_worker(self, run, *, workspace_id, user_id, read_only):
