@@ -115,7 +115,7 @@
           "daemon-distribution"
         ],
         "summary": "Get Latest Manifest",
-        "description": "Return ``{version, downloadUrl}`` consumed by ``install.sh``'s ``fetch_latest``.\n\nField names: ``version``（BUILD_ID / git SHA）+ ``url``（preflight.ts 消费）+ ``downloadUrl``\n（install.sh 消费）。同时返回两种字段名以兼容两个消费方。",
+        "description": "Return ``{version, downloadUrl, vendorFiles}`` consumed by installers/preflight.\n\nField names: ``version``（BUILD_ID / git SHA）+ ``url``（preflight.ts 消费）+ ``downloadUrl``\n（install.sh 消费）。同时返回两种字段名以兼容两个消费方。``vendorFiles``\n（ql-20260906-003，审计 #10）：``vendor/`` 下相对路径清单（按需扫描\ndaemon-dist，未打包 → 空列表），install.sh / install.ps1 / preflight 自更新\n据此逐文件伴生下载 vendored pi 扩展树。",
         "operationId": "get_latest_manifest_daemon_latest_json_get",
         "responses": {
           "200": {
@@ -123,9 +123,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get Latest Manifest Daemon Latest Json Get"
                 }
@@ -169,6 +167,47 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/daemon/latest/vendor/{file_path}": {
+      "get": {
+        "tags": [
+          "daemon-distribution"
+        ],
+        "summary": "Get Vendor File",
+        "description": "Serve a vendored pi-extension file（ql-20260906-003，审计 #10 分发链补口）.\n\n``vendor/`` 树随 bundle 打进镜像（Dockerfile COPY），install / preflight\n自更新按 latest.json 的 vendorFiles 清单逐文件下载到 bin 目录 ``vendor/``\n下——pi-rpc-driver 的 ``piVendoredSubagentExtensionPath`` 按「bundle 同目录\nvendor/pi-extensions/...」候选定位 ``--extension`` 实参；漏分发则候选落空、\n扩展静默跳过（subagent 工具不可用）。路径双保险校验：分段白名单（拒绝\n``..`` / 空段 / 反斜杠 / NUL）+ resolve 后 containment 复核（防符号链接逃逸）；\n不合规与缺失统一 404（不泄露存在性）。媒体类型固定 octet-stream——按扩展名\n猜测会把 .ts 判成 video/mp2t，且客户端均按字节落盘不消费类型。",
+        "operationId": "get_vendor_file_daemon_latest_vendor__file_path__get",
+        "parameters": [
+          {
+            "name": "file_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "File Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -12801,6 +12840,86 @@
         }
       }
     },
+    "/api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Compare Machine Sillyspec Conflict",
+        "description": "拉取单条 sillyspec 冲突的双侧对比（admin，task-04 / FR-06~09 / D-001@v1）.\n\n权限同裁决端点（RuntimeAdminUser + ``_get_owned_instance`` 越权 404），\n另校验当前用户是 ``workspace_id`` 成员（平台侧内容按工作区定位，Grill B1：\ncompare 数据与裁决同一权限集合）。RPC 腿走请求/响应式\n``sillyspec_conflict_snapshot``（explorer 先例，区别于一写即忘的裁决通道），\n显式 15s 超时；机器离线/超时 → 504 既有异常形态原样上抛。编排/diff 计算在\n``sillyspec_compare.SillySpecCompareService``（service 层），本端点只做\n校验/权限/响应组装。",
+        "operationId": "compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get",
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instance Id"
+            }
+          },
+          {
+            "name": "change",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Change"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "spec-tree",
+                "progress"
+              ],
+              "type": "string",
+              "description": "冲突类型（心跳 type 字段）",
+              "title": "Kind"
+            },
+            "description": "冲突类型（心跳 type 字段）"
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "平台侧 spec_root/progress 定位用工作区",
+              "title": "Workspace Id"
+            },
+            "description": "平台侧 spec_root/progress 定位用工作区"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SillySpecConflictCompareResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/disable": {
       "post": {
         "tags": [
@@ -13873,7 +13992,7 @@
           "daemon"
         ],
         "summary": "Notify Agent Task Status",
-        "description": "Receive daemon agent-task-status report and forward to frontend SSE (task-02).\n\n2026-08-27-background-subagent-progress task-05（FR-04）：请求模型即\nAgentTaskStatusEvent（schema.py），生命周期扩展字段（tool_use_id/summary/\nlast_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随\n``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。\n\n越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime\n归属校验（404 不泄露存在性）。",
+        "description": "Receive daemon agent-task-status report and forward to frontend SSE (task-02).\n\n2026-08-27-background-subagent-progress task-05（FR-04）：请求模型即\nAgentTaskStatusEvent（schema.py），生命周期扩展字段（tool_use_id/summary/\nlast_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随\n``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。\n\n2026-09-04-session-task-execution-panel task-03（FR-05）：转发之外把事件\n交给 ``upsert_agent_task``（agent_task_store.py）落库 ``agent_session_task``\n——持久化旁路，失败只记日志，不影响 SSE 转发与 200 返回。\n\n越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime\n归属校验（404 不泄露存在性）。",
         "operationId": "notify_agent_task_status_api_daemon_sessions__session_id__agent_task_status_post",
         "parameters": [
           {
@@ -37163,6 +37282,13 @@
             },
             "type": "array",
             "title": "Providers"
+          },
+          "spec_cache": {
+            "items": {
+              "$ref": "#/components/schemas/DaemonHeartbeatSpecCacheItem"
+            },
+            "type": "array",
+            "title": "Spec Cache"
           }
         },
         "type": "object",
@@ -37194,6 +37320,13 @@
             "type": "integer",
             "title": "Pending Controls",
             "default": 0
+          },
+          "spec_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Spec Versions"
           }
         },
         "type": "object",
@@ -37446,11 +37579,22 @@
               }
             ],
             "title": "Type"
+          },
+          "ql_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ql Id"
           }
         },
         "type": "object",
         "title": "DaemonHeartbeatSillySpecConflict",
-        "description": "心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.\n\n``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal\n（DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条\n心跳 422）。"
+        "description": "心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.\n\n``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal\n（DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条\n心跳 422）。\n\n2026-09-07-conflict-diff-compare task-04（design §7.3）：新增可选 ``ql_id``\n（QUICKLOG 块头编号，如 ``ql-20260907-006-2972``）——daemon 侧对 ``quick-*``\n名冲突 best-effort 读 guard.json 补报，普通变更/读不到 → None。宽松可选\n（零改写透传语义不变）：旧 daemon 不上报不影响心跳落库。"
       },
       "DaemonHeartbeatSillySpecStatus": {
         "properties": {
@@ -37655,6 +37799,27 @@
         "type": "object",
         "title": "DaemonHeartbeatSillySpecUpdate",
         "description": "心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.\n\ndaemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值\n``running`` / ``deferred`` / ``success`` / ``failed`` / ``up_to_date``\n（ql-20260904-019：手动指令已最新的明确反馈终态），trigger 取值\n``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖\n``since=now``（同 pending_update 先例），同内容重放保留原 since。\nstate/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422\n（心跳是保活通道，宁宽勿断，DaemonHeartbeatPendingUpdate.reason 同决策）；\nerror 在服务层截断至 200 字符后落库。"
+      },
+      "DaemonHeartbeatSpecCacheItem": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "spec_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Spec Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "spec_version"
+        ],
+        "title": "DaemonHeartbeatSpecCacheItem",
+        "description": "心跳 ``spec_cache[]`` 单项（ql-20260907-010：spec 拉取工作区级化）.\n\ndaemon 上报本机已有的 spec 缓存（``~/.sillyhub/daemon/specs/{ws}``）版本，\nbackend 在响应 ``spec_versions`` 里回服务器权威 ``spec_workspaces.spec_version``，\ndaemon 据此对「版本落后且无活跃会话」的工作区后台预取——把全量 bundle 下载\n挪出会话创建关键路径（实机 47MB 树 / ~0.4MB/s 链路下创建被拖 40s+）。"
       },
       "DaemonInstanceProviderItem": {
         "properties": {
@@ -59736,6 +59901,263 @@
         ],
         "title": "SharedMachineView",
         "description": "「共享给我的」机器行 DTO（2026-08-28-daemon-agent-share task-07 / design §6）。\n\n字段对齐 grants.queries.SharedMachineRow 五字段（task-02 provides 契约）：\ndisplay_name = 机器别名（display_alias）回退 hostname；online 取机器权威\n在线源 daemon_instances.status。service 层装配（runtime/service.py），router\n透传序列化；platform 共享智能体不进本视图（走 shared-agents 选择器）。\n\ntask-13（契约修复）：附加 ``runtimes`` runtime 明细（Wave 6 审查——共享授权\n是机器级而会话创建需要 runtime_id，五字段无明细导致前端锁 machine_id 404 /\npicker 第二步无 runtime 可选）。纯增量可选（默认空列表），OpenAPI 非必填，\n既有五字段与旧消费端零变化。"
+      },
+      "SillySpecConflictCompareFile": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "modified",
+              "local_only",
+              "platform_only",
+              "identical"
+            ],
+            "title": "Status"
+          },
+          "local_mtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Mtime"
+          },
+          "platform_mtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Mtime"
+          },
+          "local_truncated": {
+            "type": "boolean",
+            "title": "Local Truncated",
+            "default": false
+          },
+          "local_missing": {
+            "type": "boolean",
+            "title": "Local Missing",
+            "default": false
+          },
+          "diff_rows": {
+            "items": {
+              "$ref": "#/components/schemas/SillySpecConflictDiffRow"
+            },
+            "type": "array",
+            "title": "Diff Rows"
+          },
+          "diff_truncated": {
+            "type": "boolean",
+            "title": "Diff Truncated",
+            "default": false
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "status"
+        ],
+        "title": "SillySpecConflictCompareFile",
+        "description": "spec-tree 比对的单文件结果（design §7.2 files[] 单项）。\n\n``status`` 四分类（Grill B4）：modified / local_only（本地有平台缺失或读取\n被拒）/ platform_only / identical；双侧均缺失的路径不进本清单（计数在顶层\n``dropped_paths``）。本地 truncated/binary 无 content 的文件 ``diff_rows``\n为空（不出全 insert 的失真信号）；单文件 diff 超 5000 行截断置\n``diff_truncated``。"
+      },
+      "SillySpecConflictCompareResponse": {
+        "properties": {
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "spec-tree",
+              "progress"
+            ],
+            "title": "Kind"
+          },
+          "ql_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ql Id"
+          },
+          "conflict_created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Created At"
+          },
+          "local_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Updated At"
+          },
+          "platform_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Updated At"
+          },
+          "response_truncated": {
+            "type": "boolean",
+            "title": "Response Truncated",
+            "default": false
+          },
+          "dropped_paths": {
+            "type": "integer",
+            "title": "Dropped Paths",
+            "default": 0
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SillySpecConflictCompareFile"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "progress_rows": {
+            "items": {
+              "$ref": "#/components/schemas/SillySpecConflictProgressRow"
+            },
+            "type": "array",
+            "title": "Progress Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "change",
+          "kind"
+        ],
+        "title": "SillySpecConflictCompareResponse",
+        "description": "GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。\n\nkind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。\n``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。\n``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。"
+      },
+      "SillySpecConflictDiffRow": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "equal",
+              "delete",
+              "insert"
+            ],
+            "title": "Type"
+          },
+          "local_lineno": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Lineno"
+          },
+          "local_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Text"
+          },
+          "platform_lineno": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Lineno"
+          },
+          "platform_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "SillySpecConflictDiffRow",
+        "description": "spec-tree 比对的对齐行（design §7.2 files[].diff_rows[] 单项）。\n\n``type`` = equal（双侧同）/ delete（本地删，platform_* 为 null）/ insert\n（平台增，local_* 为 null）；replace 段在 service 侧展开为相邻 delete+insert。\nlineno 双侧各自从 1 起。"
+      },
+      "SillySpecConflictProgressRow": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "local_value": {
+            "type": "string",
+            "title": "Local Value"
+          },
+          "platform_value": {
+            "type": "string",
+            "title": "Platform Value"
+          },
+          "differ": {
+            "type": "boolean",
+            "title": "Differ"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "local_value",
+          "platform_value",
+          "differ"
+        ],
+        "title": "SillySpecConflictProgressRow",
+        "description": "progress 比对行（design §7.2 progress_rows[] 单项，D-003@v1 对比表）。\n\n字段白名单六项（当前阶段/阶段标签/步骤进度/最近活跃/ql_id/ghost），缺失侧\n显式「—」；``differ`` 由两侧展示值不等判定。"
       },
       "SkillCreateRequest": {
         "properties": {
