@@ -39,3 +39,9 @@ _runUpgrade: 置 running(同步先于任何 await，in-flight 门依赖) → ins
 - deferred 复查定时器迟到回调守卫：到点时状态已离开 deferred（新升级已开/终态）不动作。
 - latest 失败不缓存、不做离线重试/退避——调用频率为小时级循环/手动触发，失败留给下轮自动检查或手动重试。
 - daemon 接线三处见 daemon 卡：_sillyspecLoop 第四循环（auto 触发）、心跳/注册快照透传、WS SILLYSPEC_UPDATE（server_command 触发）；测试注入假 manager 避免真实 spawn。
+- `runProgressJsonDefault`（默认 execFile 执行器，progress 采集 / runResolve /
+  ghostCleanup 共用）env 显式传「`SILLYSPEC_SYNC_TIMEOUT_MS=20000` 缺省垫底 +
+  process.env 覆盖」（ql-20260907-007，常量单一源在 spawn-env.ts）：daemon 自身
+  跑的 sillyspec 命令（ghostCleanup 含平台同步收敛）同样获得熔断预算放宽，
+  process.env 预设时原值优先。该函数已导出供测试真实 spawn 直测（`node -e`
+  打印环境变量断言），属 harness 零 spawn 策略的例外块。

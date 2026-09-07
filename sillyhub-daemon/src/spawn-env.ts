@@ -88,6 +88,18 @@ export const CLAUDE_OAUTH_TOKEN_FIELD = 'CLAUDE_OAUTH_TOKEN';
  */
 export const SILLYHUB_SESSION_ID_FIELD = 'SILLYHUB_SESSION_ID';
 
+/**
+ * ql-20260907-007：sillyspec CLI spec-sync 总预算熔断的 env 开关（sillyspec ≥3.28.1
+ * resolveSyncTotalTimeoutMs 读取，CLI 默认 8s）。平台执行环境实测 manifest 端点忙时
+ * 偶发 >8s 触发熔断 warn（数据不丢但噪音吓人），此处注入放宽默认值 20s。
+ * 语义 = 填补缺省（非覆盖）：process.env / tool_config.env 已预设（含用户显式
+ * 调回 8000）时保留原值。与 daemon 侧 sillyspec-manager runProgressJsonDefault
+ * 共用本常量（两路 sillyspec 命令同一缺省值，改值只改这里）。
+ * 背景：docs/sillyspec/2026-09-07-spec-sync-abort-classification.md §3 行动项 1。
+ */
+export const SILLYSPEC_SYNC_TIMEOUT_MS_FIELD = 'SILLYSPEC_SYNC_TIMEOUT_MS';
+export const SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS = '20000';
+
 const TOKEN_FIELDS: readonly string[] = [
   ANTHROPIC_API_KEY_FIELD,
   CLAUDE_OAUTH_TOKEN_FIELD,
@@ -173,6 +185,14 @@ export function buildSpawnEnv(
     env[SILLYHUB_SESSION_ID_FIELD] = ctx.agentSessionId;
   } else if (env[SILLYHUB_SESSION_ID_FIELD] !== undefined) {
     delete env[SILLYHUB_SESSION_ID_FIELD];
+  }
+
+  // ql-20260907-007：spec-sync 熔断预算缺省放宽（20s）。填补缺省而非覆盖——
+  // 放在层 1（tool_config）赋值之后：process.env（层 3）/ tool_config.env（层 1）
+  // 已预设时保留原值（用户显式配置优先）；空串视同未配置（对齐 token 约定，CLI
+  // 对空串也会回退自身 8s 默认，不如直接给有效值）。非敏感配置值，redactEnv 不遮蔽。
+  if (!env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD]) {
+    env[SILLYSPEC_SYNC_TIMEOUT_MS_FIELD] = SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS;
   }
 
   // 层 0：provider_config（最高优先级，task-09 / D-004）

@@ -34,6 +34,7 @@ import {
   SILLYSPEC_STATUS_CHANGES_MAX,
   SILLYSPEC_STATUS_BUDGET_BYTES,
   buildSillySpecStatusSummary,
+  runProgressJsonDefault,
 } from '../src/sillyspec-manager.js';
 import type {
   SillySpecProgressOutcome,
@@ -807,5 +808,49 @@ describe('task-04(2026-09-02) buildSillySpecStatusSummary 截断与 32KB 降级�
     });
     expect(buildSillySpecStatusSummary('not-json-object').changes).toEqual([]);
     expect(buildSillySpecStatusSummary({ data: 'oops' }).conflict_types).toEqual({});
+  });
+});
+
+// ql-20260907-007：runProgressJsonDefault 默认执行器 env 注入（spec-sync 熔断预算
+// 缺省放宽 20s）。与上方 harness 的零真实 spawn 策略不同——本块直测真实 execFile
+// 「env 传递」这一行为本身，必须真实 spawn（process.execPath -e 打印环境变量，
+// 跨平台无 shell 依赖）。
+describe('runProgressJsonDefault env (ql-20260907-007: spec-sync 熔断缺省)', () => {
+  const PRINT_ENV_ARGS = [
+    '-e',
+    `process.stdout.write(process.env.SILLYSPEC_SYNC_TIMEOUT_MS ?? '<unset>')`,
+  ];
+  const OPTS = { cwd: process.cwd(), timeoutMs: 15_000, maxBufferBytes: 1024 };
+  let backup: string | undefined;
+
+  beforeEach(() => {
+    backup = process.env.SILLYSPEC_SYNC_TIMEOUT_MS;
+    delete process.env.SILLYSPEC_SYNC_TIMEOUT_MS;
+  });
+
+  afterEach(() => {
+    if (backup === undefined) delete process.env.SILLYSPEC_SYNC_TIMEOUT_MS;
+    else process.env.SILLYSPEC_SYNC_TIMEOUT_MS = backup;
+  });
+
+  it('缺省注入：process.env 未预设时子进程读到 20000', async () => {
+    const outcome = await runProgressJsonDefault(
+      process.execPath,
+      PRINT_ENV_ARGS,
+      OPTS,
+    );
+    expect(outcome.code).toBe(0);
+    expect(outcome.stdout).toBe('20000');
+  });
+
+  it('process.env 预设优先：显式配置（含调回 8000）不被缺省值覆盖', async () => {
+    process.env.SILLYSPEC_SYNC_TIMEOUT_MS = '8000';
+    const outcome = await runProgressJsonDefault(
+      process.execPath,
+      PRINT_ENV_ARGS,
+      OPTS,
+    );
+    expect(outcome.code).toBe(0);
+    expect(outcome.stdout).toBe('8000');
   });
 });

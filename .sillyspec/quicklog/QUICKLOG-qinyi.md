@@ -427,3 +427,20 @@
 根因：三步互相无数据依赖却串行执行（总耗时=三者之和，Windows 慢启动主因之一）；skills 每会话全量 rm+重拷而内容只在启动 syncSkills 变化（逐文件 IO+杀软扫描 ~8ms/文件）
 方案：① daemon.ts 三步改 Promise.all（各步闭包外层防御 catch、specSyncCtx/MCP 写入由收口保证先于 create、005 分步计时保留，并行后各段之和可大于 total_ms 属预期）；② skill-manager linkSkillsToWorkdir 加 (workdir→version) 缓存：版本不变+目标目录在+上轮无失败→跳过（link_skills_version_fresh_skip），存在性守卫兜 worktree 重建，部分失败不记缓存下轮全量自愈，无 manifest 不启用；MCP 工作区缓存不做（不在临界路径+失效语义需设计）
 结果：vitest 7 套 86/86 通过（skill-manager 28 含 3 新用例：同版本跳过/版本变更刷新/worktree 重建重拷+无 manifest 不启用；kind-dispatch 20、inject-drop 10、interactive-codex/borrow-sandbox/notify-ready/worker-resume 28 全回归），pnpm typecheck 零错误
+
+## ql-20260907-007-67df | 2026-09-07 11:00:38 | daemon 执行环境 sillyspec 命令注入 SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（spec-sync 8s 熔断缓解）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spawn-env.ts（新增 SILLYSPEC_SYNC_TIMEOUT_MS 常量对 + buildSpawnEnv 填补缺省注入（层 1 后层 0 前））
+- sillyhub-daemon/src/sillyspec-manager.ts（runProgressJsonDefault execFile 传 env（缺省垫底+process.env 覆盖），导出供直测）
+- sillyhub-daemon/tests/spawn-env.test.ts（新增 4 用例（缺省/预设优先×2/空串填补））
+- sillyhub-daemon/tests/sillyspec-manager.test.ts（新增 2 用例（真实 spawn node -e 断言子进程 env））
+- .sillyspec/docs/sillyhub-daemon/modules/spawn-env.md（契约/关键逻辑/注意事项同步）
+- .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md（注意事项补 runner env 语义）
+- .sillyspec/docs/sillyhub-daemon/modules/spawn-env.changelog.md（新建 sidecar 建档）
+- .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.changelog.md（新建 sidecar 建档）
+需求：daemon 执行环境 sillyspec 命令注入 SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（spec-sync 8s 熔断缓解）
+根因：sillyspec CLI 每步 --done 后自动同步走 8s 总预算熔断，平台 manifest 端点忙时偶发 >8s 触发 abort warn（数据不丢但噪音吓人）；CLI 3.28.1 新增 SILLYSPEC_SYNC_TIMEOUT_MS env 开关（sillyspec 仓 commit 6f17a56），平台侧行动项 1 要求执行环境注入放宽（docs/sillyspec/2026-09-07-spec-sync-abort-classification.md）
+方案：spawn-env.ts 新增 SILLYSPEC_SYNC_TIMEOUT_MS_FIELD/DEFAULT_MS('20000') 常量并在 buildSpawnEnv 的 tool_config 层后填补缺省（process.env/tool_config 预设保留、空串视同未配置），覆盖 batch/interactive/restore/reload 全部 agent 子进程；sillyspec-manager.ts runProgressJsonDefault execFile 显式传 env（缺省垫底+process.env 覆盖）并导出，覆盖 daemon 自身 runResolve/ghostCleanup 命令；模块文档 spawn-env/sillyspec-manager 同步 + changelog sidecar 建档
+结果：vitest 目标两文件 80 passed（spawn-env 38 + sillyspec-manager 42，含新增 6 用例：缺省注入/process.env 预设/tool_config 预设/空串填补/runner 缺省/runner 预设优先），pnpm typecheck 0 错；行动项 2（端点耗时观测）核对结论为无需改动——backend 监控三件套 2026-07-27 已上线（slow.request>1s/slow.query>500ms/>=10s pg_stat_activity 采样），注入 20s 后熔断事件蕴含服务端 >=20s，观测链完整覆盖
