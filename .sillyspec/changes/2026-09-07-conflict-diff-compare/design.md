@@ -66,7 +66,7 @@ tier: independent
    - 权限同裁决端点：`RuntimeAdminUser` + `_get_owned_instance`（越权 404）；`change` 白名单正则复用同款；`workspace_id` 校验当前用户是该 workspace 成员（平台侧 spec_root/progress 定位所需）。**前端无权限用户不渲染「查看对比」按钮**（Grill B1 修订：compare 数据与裁决同一权限集合，「无权限看对比」在契约上不可达，统一为同权限）。
    - 机器离线/RPC 超时（15s，显式传，send_rpc 默认 10s 不够）→ 504 同 DaemonRuntimeOffline 范式。
 2. compare service（新文件 `backend/app/modules/daemon/sillyspec_compare.py`）：
-   - 并行：`hub.send_rpc(daemon_id,'sillyspec_conflict_snapshot',...)` + 平台侧读取。
+   - 执行顺序（task-10 实机验收修订，原设计 gather 并行在真实环境触发 asyncpg 同请求连接并发冲突，已改顺序化并在代码 docstring 落痕）：`_ensure_workspace_member` → 平台侧定位（session 查询）→ `send_rpc(daemon_id,'sillyspec_conflict_snapshot',...)`（15s 显式超时）→ 归一化比对。
    - 平台侧 spec-tree：SpecWorkspaceService 拿 spec_root，按 daemon 回的 conflicting_paths 逐路径读内容 + 文件 mtime；**containment 校验**（Grill B3 修订：daemon 是半可信端）——逐路径拒绝对 `..` 段、resolve 落点必须在 spec_root 内（spec_workspace/service.py:1486-1504 同款范式），越界路径按平台侧缺失处理不读取。`platform_updated_at` = 这些文件 mtime 最大值。
    - 平台侧 progress：`PlatformSyncService.get_progress(name=change)`（router.py:312 同款服务调用），`platform_updated_at` = last_pushed_at。
    - spec-tree 比对：逐路径分类 `modified / local_only / platform_only / identical`（Grill B4 修订枚举方向：**local_only=本地有而平台没有/平台侧缺失或读取被拒**，**platform_only=平台有而本地缺失**；双侧均缺失的路径从清单剔除并计数入 `dropped_paths`）；modified 文本对用 `difflib.SequenceMatcher` 出对齐行 `[{type: equal|delete|insert, local_lineno, local_text, platform_lineno, platform_text}]`（replace 段展开成 delete+insert 相邻行）。**本地 truncated 无 content 的文件不出 diff_rows**（status 按元信息分类，前端显示截断提示，避免全 insert 的方向信号失真——Grill 复审残留 gap）。截断护栏：单文件 diff ≤5000 行（超出置该文件 `diff_truncated`）、整响应 JSON ≤2MB（超出按文件倒序丢 diff_rows 并置 `response_truncated`）。
