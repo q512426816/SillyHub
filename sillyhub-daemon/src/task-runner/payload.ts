@@ -5,60 +5,22 @@
  * pickStr / pickNum / pickStrList / intersectAllowedRoots / pickBudgetUsageSnapshot
  * 模块级纯函数原样搬移（零改写；包内导出供 facade 引用，不进 index 公共面）。
  *
+ * task-04 轻重构①（同变更）：pickStr / pickNum / pickStrList /
+ * pickBudgetUsageSnapshot 实现收敛至 src/payload-utils.ts（与 session-manager
+ * 包 helpers.ts 的 strOf/numOf 统一为单一实现源）；本模块保留同名导出转发
+ * （对外导出面不变，行为零变化——tests/payload-utils.test.ts 断言实现同一）。
+ * intersectAllowedRoots 是集合求交逻辑（session-manager 侧无平行实现，不同构），
+ * 不收敛，仍由本模块自持。
+ *
  * @module task-runner/payload
  */
 
-import type { LeaseCtx } from '../types.js';
-
-/**
- * task-07：从 lease payload 鸭子类型 Record 安全取 string / number 字段（多键名兜底）。
- *
- * init lease 的 platform_config 由 backend task-06 下发，字段名 camelCase / snake_case
- * 兼容；直接 `(typeof x === 'string' && x)` 会产出 `string | false` 污染类型，本辅助函数
- * 收敛为 `string | undefined` / `number | undefined`，避免 `||` 回退链的类型 widen。
- */
-export function pickStr(
-  obj: Record<string, unknown>,
-  ...keys: string[]
-): string | undefined {
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === 'string' && v) return v;
-  }
-  return undefined;
-}
-
-export function pickNum(
-  obj: Record<string, unknown>,
-  ...keys: string[]
-): number | undefined {
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-  }
-  return undefined;
-}
-
-/**
- * task-09：从 lease ctx 鸭子类型读 string[] 字段（camelCase + snake_case 兼容）。
- *
- * claim payload 经 context.py（task-07）透传 profile 字段（mcp_refs / skill_refs /
- * effective_allowed_roots），types.ts LeaseCtx 未声明这些字段，用 duck-typing 读取
- * （与 stage_meta / mode / platformConfig 等既有字段同模式）。非数组 / 空 → undefined。
- *
- * 纯函数，不修改入参。
- */
-export function pickStrList(
-  ctx: LeaseCtx,
-  camel: string,
-  snake: string,
-): string[] | undefined {
-  const obj = ctx as unknown as Record<string, unknown>;
-  const raw = obj[camel] ?? obj[snake];
-  if (!Array.isArray(raw)) return undefined;
-  const arr = raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
-  return arr.length > 0 ? arr : undefined;
-}
+export {
+  pickStr,
+  pickNum,
+  pickStrList,
+  pickBudgetUsageSnapshot,
+} from '../payload-utils.js';
 
 /**
  * task-09（D-013）：物理沙箱 ∩ profile effective 下推值（只能收紧）。
@@ -79,23 +41,4 @@ export function intersectAllowedRoots(
   if (!physical || physical.length === 0) return effective;
   const effSet = new Set(effective);
   return physical.filter((p) => effSet.has(p));
-}
-
-/**
- * task-08（D-009）：从 stats 拆出 budget 事件回传用的 usage 快照（仅 input+output，
- * 不含 cache，对齐累计口径）。
- */
-export function pickBudgetUsageSnapshot(
-  stats: Record<string, unknown> | undefined,
-): { input_tokens: number; output_tokens: number } {
-  if (!stats) return { input_tokens: 0, output_tokens: 0 };
-  const inp =
-    typeof stats.input_tokens === 'number' && Number.isFinite(stats.input_tokens)
-      ? stats.input_tokens
-      : 0;
-  const out =
-    typeof stats.output_tokens === 'number' && Number.isFinite(stats.output_tokens)
-      ? stats.output_tokens
-      : 0;
-  return { input_tokens: inp, output_tokens: out };
 }

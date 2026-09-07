@@ -7,6 +7,10 @@
  * _maybeRegisterAsyncReceipt / _eventToReportDict / _nextEventSeq /
  * _emitSessionEvent 方法体原样下沉（仅 ``this`` → ``mgr`` 改显式传参，行为零变化）。
  *
+ * task-04 轻重构②（同变更）：eventToReportDict 的字段平铺核心收敛至
+ * src/event-wire.ts（与 task-runner _eventToMessages 共用 AgentEvent→wire dict
+ * 转换单一实现），本模块保留 seq 补号 + 委托，输出逐字节不变。
+ *
  * @module interactive/session-manager/events
  */
 
@@ -21,6 +25,7 @@ import type {
 // 与 stream-json.ts:954 批量路径同源（近源归类，D-005 方案 C 三端标准协议）。
 import { classifyModelError } from '../../model-error/classifier.js';
 import type { ModelError } from '../../model-error/types.js';
+import { eventToReportWireDict } from '../../event-wire.js';
 import { eventMetaOf, numOf, strOf } from './helpers.js';
 import type { SessionManagerCore } from './types.js';
 
@@ -489,33 +494,9 @@ export function eventToReportDict(
 ): Record<string, unknown> {
   const seq =
     typeof ev.seq === 'number' ? ev.seq : nextEventSeq(mgr, state.sessionId);
-  const dict: Record<string, unknown> = {
-    event_type: ev.type,
-    type: ev.type,
-    content: ev.content,
-    seq,
-  };
-  if (ev.subtype !== undefined) dict['subtype'] = ev.subtype;
-  if (ev.tool_name !== undefined) dict['tool_name'] = ev.tool_name;
-  if (ev.call_id !== undefined) dict['call_id'] = ev.call_id;
-  if (ev.session_id !== undefined) dict['session_id'] = ev.session_id;
-  if (ev.usage !== undefined) dict['usage'] = ev.usage;
-  if (ev.parent_tool_use_id !== undefined) {
-    dict['parent_tool_use_id'] = ev.parent_tool_use_id;
-  }
-  if (ev.subagent_type !== undefined) dict['subagent_type'] = ev.subagent_type;
-  if (ev.depth !== undefined) dict['depth'] = ev.depth;
-  if (ev.segment_id !== undefined) dict['segment_id'] = ev.segment_id;
-  if (ev.is_partial !== undefined) dict['is_partial'] = ev.is_partial;
-  if (ev.override !== undefined) dict['override'] = ev.override;
-  if (ev.edit_patch !== undefined) dict['edit_patch'] = ev.edit_patch;
-  if (
-    ev.metadata !== undefined &&
-    Object.keys(ev.metadata as Record<string, unknown>).length > 0
-  ) {
-    dict['metadata'] = ev.metadata;
-  }
-  return dict;
+  // task-04 轻重构②：字段平铺核心收敛至 src/event-wire.ts（与 task-runner
+  // _eventToMessages 同源单一实现；本方法保留 seq 补号职责，输出逐字节不变）。
+  return eventToReportWireDict(ev, seq);
 }
 
 /** task-08：turn 内事件 seq 补号（1 起单调递增；turn 边界 _foldTurnUsage 重置）。 */

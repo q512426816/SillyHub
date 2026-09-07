@@ -21,6 +21,22 @@ import type {
 } from './types.js';
 
 /**
+ * task-04 轻重构⑥（2026-09-07-arch-large-file-split / design §5 Wave 1 / FR-05）：
+ * allow decision 上 dialogResult 鸭子读取收敛（原 session-manager.ts 1260/2224/
+ * 2322/2478 行四份复制粘贴：requestUserDialogImpl / AskUserQuestion 拦截 /
+ * ExitPlanMode 审批 / buildOnUserDialogCallback 各自内联同一读取）。
+ *
+ * resolver 把 backend PERMISSION_RESPONSE.allow 的 dialog_result 回喂为
+ * decision.dialogResult（permission-resolver.ts allow 扩展字段，前端用户选择
+ * 回传）。缺失 → undefined；null 是合法「用户未答」值原样返回——缺省语义由
+ * 各调用点判定（回喂 null / 'no answer payload' / answers 链），本 helper 只
+ * 收敛读取，不吞不编。导出供定向测试（tests/dialog-result.test.ts）。
+ */
+export function dialogResultOf(decision: CanUseToolDecision): unknown {
+  return (decision as { dialogResult?: unknown }).dialogResult;
+}
+
+/**
  * task-08：按 sessionId 取 resolver（daemon._handleWsMessage 路由
  * PERMISSION_RESPONSE 时调用 resolver.resolve）。session 不存在或
  * manualApproval=false 时返回 undefined。
@@ -257,7 +273,7 @@ async function requestUserDialogImpl(
     if (decision.behavior === 'deny') {
       return { behavior: 'cancelled' };
     }
-    const dialogResult = (decision as { dialogResult?: unknown }).dialogResult;
+    const dialogResult = dialogResultOf(decision); // task-04 轻重构⑥：收敛读取
     return {
       behavior: 'completed',
       result: dialogResult !== undefined ? dialogResult : null,
@@ -361,8 +377,7 @@ export function buildCanUseToolCallback(
         if (decision.behavior === 'allow') {
           // 用户回答了。优先取 dialogResult（前端用户选择回传字段），
           // 否则 fallback 到兜底文案（兼容旧 backend 不识别 dialog_result 的 allow）。
-          const dialogResult = (decision as { dialogResult?: unknown })
-            .dialogResult;
+          const dialogResult = dialogResultOf(decision); // task-04 轻重构⑥：收敛读取
           const answer =
             dialogResult !== undefined && dialogResult !== null
               ? dialogResult
@@ -459,8 +474,7 @@ export function buildCanUseToolCallback(
         if (decision.behavior === 'allow') {
           // 问答卡提交语义 = allow + dialog_result.answers；单选答案为选中 label，
           // 填了自定义文本时为文本本身（卡片逻辑：custom 非空时替换选中项）。
-          const dialogResult = (decision as { dialogResult?: unknown })
-            .dialogResult;
+          const dialogResult = dialogResultOf(decision); // task-04 轻重构⑥：收敛读取
           const answers = (
             dialogResult as { answers?: unknown } | undefined
           )?.answers;
@@ -618,8 +632,7 @@ export function buildOnUserDialogCallback(
         return { behavior: 'cancelled' };
       }
       // allow：dialog_result 存在则原样回喂，否则 null（不本地编造）。
-      const dialogResult = (decision as { dialogResult?: unknown })
-        .dialogResult;
+      const dialogResult = dialogResultOf(decision); // task-04 轻重构⑥：收敛读取
       return {
         behavior: 'completed',
         result: dialogResult !== undefined ? dialogResult : null,
