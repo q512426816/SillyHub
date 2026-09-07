@@ -17,7 +17,7 @@ allowed_paths:
 target_files:
   - backend/app/modules/platform_sync/model.py
   - backend/app/modules/platform_sync/schema.py
-  - NEW:backend/migrations/versions/<rev>_agent_liveness_states.py
+  - NEW:backend/migrations/versions/20260907141041_agent_liveness_states.py
   - NEW:backend/app/modules/platform_sync/tests/test_agent_liveness_states_migration.py
 goal: >
   为 platform_agent_logs 补 liveness 状态四列（state/state_derived_at/state_evidence/

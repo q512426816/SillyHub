@@ -17,12 +17,10 @@ allowed_paths:
   - sillyhub-daemon/src/agent-log/liveness/derive-claude-code.ts
   - sillyhub-daemon/src/agent-log/liveness/registry.ts
   - sillyhub-daemon/tests/agent-log/liveness/derive-claude.test.ts
-  - .sillyspec/changes/2026-09-07-agent-liveness-states/design.md
 target_files:
   - NEW:sillyhub-daemon/src/agent-log/liveness/derive-claude-code.ts
   - NEW:sillyhub-daemon/tests/agent-log/liveness/derive-claude.test.ts
   - NEW:sillyhub-daemon/src/agent-log/liveness/registry.ts
-  - .sillyspec/changes/2026-09-07-agent-liveness-states/design.md
 goal: >
   实现 claude-code-jsonl deriver 的 working/idle 规则。E-01 已实证证伪（2026-09-07
   spike-02：160 个最近 transcript 扫描，顶层记录类型无"等待审批"事件——permission-mode

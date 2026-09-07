@@ -20,8 +20,7 @@ expects_from:
       needs: [liveness.state, liveness.evidence, liveness.derived_at]
 allowed_paths:
   - src/dispatch/backends/sillyhub-mcp.js
-target_files:
-  - src/dispatch/backends/sillyhub-mcp.js
+target_files: []
 goal: >
   改写 sillyspec 仓派发模板「终态轮询 + 超时 kill lease」指令段（sillyhub-mcp.js :231 起）：
   编排 agent 从"超时即 kill lease"升级为按 worker.liveness 知情决策——blocked 超阈值升级

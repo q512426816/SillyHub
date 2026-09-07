@@ -17,6 +17,7 @@ target_files:
   - NEW:sillyhub-daemon/src/agent-log/liveness/derive-zcode-model-io.ts
   - NEW:sillyhub-daemon/src/agent-log/liveness/registry.ts
   - NEW:sillyhub-daemon/tests/agent-log/liveness/derive-zcode.test.ts
+  - sillyhub-daemon/tests/agent-log/liveness/registry.test.ts
 goal: >
   实现 zcode model-io 格式的 L1 活性推导器（E-03 实证规则：completedAt 新鲜或 toolCalls 未配对即 working，静默即 idle，永不产 blocked）并注册进 liveness 注册表。
 implementation:

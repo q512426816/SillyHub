@@ -10,20 +10,14 @@ blocks: []
 requirement_ids: [FR-04]
 decision_ids: ['D-001@v1', 'D-003@v1']
 allowed_paths:
-  - backend/app/modules/notification/model.py
-  - backend/app/modules/notification/schema.py
   - backend/app/modules/notification/service.py
-  - backend/app/modules/notification/events.py
   - backend/app/modules/platform_sync/service.py
   - backend/app/modules/notification/tests/test_agent_blocked_notify.py
   - backend/app/modules/platform_sync/tests/test_agent_log_states_push.py
 target_files:
-  - backend/app/modules/notification/model.py
-  - backend/app/modules/notification/schema.py
   - backend/app/modules/notification/service.py
-  - backend/app/modules/notification/events.py
   - backend/app/modules/platform_sync/service.py
-  - NEW:backend/app/modules/notification/tests/test_agent_blocked_notify.py
+  - NEW:backend/app/modules/platform_sync/tests/test_agent_blocked_notify.py
   - NEW:backend/app/modules/platform_sync/tests/test_agent_log_states_push.py
 goal: >
   Notification 新 type=agent_blocked：blocked 持续 ≥120s 未消解触发站内通知（120s

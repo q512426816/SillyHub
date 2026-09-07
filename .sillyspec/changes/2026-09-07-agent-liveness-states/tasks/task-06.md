@@ -18,7 +18,6 @@ target_files:
   - sillyhub-daemon/src/hub-client.ts
   - sillyhub-daemon/src/daemon.ts
   - NEW:sillyhub-daemon/tests/agent-log/liveness/hub-client-states.test.ts
-  - NEW:sillyhub-daemon/tests/agent-log/liveness/daemon-liveness-wiring.test.ts
 goal: >
   打通 daemon liveness 全链路：hub-client 增批量上报、登记行周期拉取、第一方 blocked 并入三职，daemon.ts 完成生命周期挂接（独立 try 包裹），推导结果周期上行 backend。
 implementation:

@@ -16,22 +16,28 @@ expects_from:
 allowed_paths:
   - frontend/src/components/agent-log/types.ts
   - frontend/src/components/agent-log/liveness-badge.tsx
-  - frontend/src/components/agent-log/__tests__/liveness-badge.test.tsx
   - frontend/src/components/sessions/session-list-panel.tsx
   - frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
-  - frontend/src/components/workspace/agent-liveness-overview-card.tsx
-  - frontend/src/components/workspace/__tests__/agent-liveness-overview-card.test.tsx
+  - NEW:frontend/src/components/agent-log/agent-liveness-overview-card.tsx
   - frontend/src/components/daemon/agent-log-card.tsx
   - frontend/src/components/notifications/notification-bell.tsx
   - frontend/src/lib/agent-logs.ts
   - frontend/src/lib/api-types.ts
+  - frontend/src/lib/agent-logs.ts
+  - frontend/src/components/daemon/agent-log-card.tsx
+  - frontend/src/components/daemon/__tests__/agent-log-card.test.tsx
+  - frontend/src/components/notifications/notification-bell.tsx
+  - frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
   - backend/openapi.json
 target_files:
   - NEW:frontend/src/components/agent-log/liveness-badge.tsx
-  - NEW:frontend/src/components/agent-log/__tests__/liveness-badge.test.tsx
-  - NEW:frontend/src/components/workspace/agent-liveness-overview-card.tsx
-  - NEW:frontend/src/components/workspace/__tests__/agent-liveness-overview-card.test.tsx
+  - NEW:frontend/src/components/agent-log/agent-liveness-overview-card.tsx
   - frontend/src/lib/api-types.ts
+  - frontend/src/lib/agent-logs.ts
+  - frontend/src/components/daemon/agent-log-card.tsx
+  - frontend/src/components/daemon/__tests__/agent-log-card.test.tsx
+  - frontend/src/components/notifications/notification-bell.tsx
+  - frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
   - backend/openapi.json
 goal: >
   落地 D-004 两层状态展示：会话列表行尾 ~18px 状态小灯+悬停详情卡（不新增列不改布局）、
