@@ -14,6 +14,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ChangesOverviewCard } from "@/components/workspace/changes-overview-card";
+import { AgentLivenessOverviewCard } from "@/components/agent-log/agent-liveness-overview-card";
 import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
 import { WorkspaceStatsRow } from "@/components/workspace/stats-row";
 import { ApiError } from "@/lib/api";
@@ -636,6 +637,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
           archivedChanges={archivedChanges}
           quickTotal={quickTotal}
         />
+
+        {/* 段②′：Agent 状态总览卡（2026-09-07-agent-liveness-states / D-004 第二层：
+            分组计数 + 在等你组跳转；完整状态信息只在此卡与会话详情日志面板两处） */}
+        <AgentLivenessOverviewCard workspaceId={workspaceId} />
 
         {/* 段③-1：基本信息卡片（编辑入口在卡头 extra） */}
         <SectionCard title="基本信息" extra={basicInfoExtra} bodyPadding="p-4">

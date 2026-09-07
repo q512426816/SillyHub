@@ -49,6 +49,17 @@ export async function listAgentLogs(
 }
 
 /**
+ * GET /api/agent-logs（workspace 全量维度）——工作台「Agent 状态总览」数据源
+ * （2026-09-07-agent-liveness-states task-14 / D-004 第二层：完整信息只出现在
+ * 总览卡，不挤会话列表）。鉴权 scope 内全部登记/自发现行，state 四字段透传。
+ */
+export async function listWorkspaceAgentLogs(limit = 100): Promise<AgentLogListResponse> {
+  return apiFetch<AgentLogListResponse>("/api/agent-logs", {
+    query: { limit },
+  });
+}
+
+/**
  * GET /api/agent-logs/{entry_id}/content — 日志内容尾部文本。
  *
  * 失败（409 二进制黑名单 / 404 无归属 / 504 机器离线或 RPC 超时）抛

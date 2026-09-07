@@ -35,6 +35,7 @@ NotificationType = Literal[
     "approval_result",  # change 审批动作结果（定向 owner）
     "permission_request",  # daemon 权限/对话审批请求（定向 owner）
     "permission_timeout",  # daemon 权限请求超时失效（定向 owner）
+    "agent_blocked",  # agent 会话活性阻塞提醒（2026-09-07-agent-liveness-states task-09，广播 WORKSPACE_READ）
 ]
 
 

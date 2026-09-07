@@ -98,6 +98,17 @@ import {
   assertWithinAllowedRoots,
 } from './file-rpc.js';
 import { listRoots } from './roots-rpc.js';
+// 2026-09-07-agent-liveness-states task-06：liveness tailer 自发现/上报接线。
+import { LivenessTailer, type WatchTarget } from './agent-log/liveness/tailer.js';
+import { discoverLivenessWatchTargets } from './agent-log/liveness/discovery.js';
+import {
+  buildAgentLogStatePushGroups,
+  fetchRegisteredAgentLogs,
+  pushAgentLogStates,
+  type LivenessPushTargetMeta,
+} from './hub-client.js';
+import { findTopLevelSectionRange } from './local-yaml-writer.js';
+import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 // 2026-08-28-fix-cross-machine-worker-dispatch task-05/06（FR-05 / D-004@v1）：
 // interactive 会话 cwd 守卫纯函数——白名单终检 + 存在性判定，daemon.ts 认领段只接线。
 import { checkWorkspaceBoundCwd } from './interactive-cwd-guard.js';
@@ -1641,6 +1652,14 @@ export class Daemon {
   /** 运行标志，三循环 while 条件。 */
   private _running = false;
 
+  // ── 2026-09-07-agent-liveness-states task-06：liveness 接线状态 ──
+  /** spawn 记录（自发现数据源①）：sessionId → provider/cwd（_startInteractiveSession 填）。 */
+  private readonly _livenessSpawnRecords = new Map<string, { provider: string; cwd: string }>();
+  /** liveness tailer（10s tick；独立 try 包裹，R-02 崩溃不影响主循环）。 */
+  private _livenessTailer: LivenessTailer | null = null;
+  /** logPath → 推送元数据（serverUrl/token 分组 + create 元信息 + D-012 覆盖键）。 */
+  private readonly _livenessMetaByPath = new Map<string, LivenessPushTargetMeta>();
+
   /** 每个 _fire 的 AbortController（stop 时全部 abort，R7）。 */
   private readonly _controllers = new Set<AbortController>();
 
@@ -2022,6 +2041,7 @@ export class Daemon {
     }
 
     // 3. 启动三循环
+    this._fire((signal) => this._livenessLoop(signal));
     this._fire((signal) => this._heartbeatLoop(signal));
     this._fire((signal) => this._pollLoop(signal));
     this._fire((signal) => this._wsLoop(signal));
@@ -5130,6 +5150,148 @@ export class Daemon {
   }
 
   /** Hub HTTP origin（WsClient 内部 http→ws / https→wss 转换）。 */
+  /**
+   * liveness 主循环（task-06 / design §5.2 §4.1，R-02：全程 try 包裹，任何异常
+   * 只 delay 后继续，绝不影响 daemon 主循环与既有链路）。
+   *
+   * 节拍：60s 发现刷新（spawn 记录 + sessions.json + 窗口重扫 + 登记行拉取）
+   * 喂 tailer watch；tailer 自身 10s tick 推导，onResult 缓冲即推（按 workspace
+   * token 分组 Bearer 直推 states 端点；D-012 第一方 pending 覆写 blocked）。
+   * workspace token 读各 root 的 .sillyspec/local.yaml platform 段（init 下发、
+   * daemon 自己写入——local-yaml-writer writeLocalYaml 同源格式）。
+   */
+  private async _livenessLoop(signal: AbortSignal): Promise<void> {
+    const serverUrl = this._serverOrigin();
+    const tailer = new LivenessTailer({
+      intervalMs: 10_000,
+      onResult: (r) => {
+        void this._flushLivenessResults(serverUrl, [r]).catch(() => undefined);
+      },
+    });
+    this._livenessTailer = tailer;
+    tailer.start();
+    try {
+      while (!signal.aborted) {
+        try {
+          await this._refreshLivenessWatch(serverUrl);
+        } catch (e) {
+          if (e instanceof AbortError) break;
+          this._logger.warn('liveness_refresh_failed', { error: String(e) });
+        }
+        // 可中断睡眠（abortableSleep：stop 触发立即醒来退出，不拖 daemon.stop）
+        try {
+          await abortableSleep(60_000, signal);
+        } catch {
+          break;
+        }
+      }
+    } finally {
+      tailer.stop();
+      this._livenessTailer = null;
+    }
+  }
+
+  /** 发现刷新：spawn 记录（活会话）+ 重扫兜底 + 登记行 → tailer watch + 推送元数据。 */
+  private async _refreshLivenessWatch(serverUrl: string): Promise<void> {
+    // spawn 记录瘦身：会话已不在 sessionManager 的条目移除（防无限增长）。
+    for (const [sid] of this._livenessSpawnRecords) {
+      if (this._sessionManager && !this._sessionManager.get(sid)) {
+        this._livenessSpawnRecords.delete(sid);
+      }
+    }
+    const roots = this._effectiveAllowedRoots();
+    // 数据源②（sessions.json 重启恢复，design §5.2）：daemon 重启后内存 spawn 记录
+    // 清空，经恢复的 interactive 会话（provider/cwd）由此层重建发现——覆盖 rescan
+    // 够不着的 codex/zcode（窄扫需 cwd 输入）。加载失败（损坏/缺失）静默空集，
+    // rescan 兜底仍在（claude/pi）。
+    let persistedProviderCwds: Array<{ provider: string; cwd: string; agentSessionId: string | null }> = [];
+    try {
+      persistedProviderCwds = (await new JsonSessionPersistence().load()).map((r) => ({
+        provider: r.provider,
+        cwd: r.cwd,
+        agentSessionId: r.agentSessionId || null,
+      }));
+    } catch {
+      persistedProviderCwds = [];
+    }
+    const targets: WatchTarget[] = discoverLivenessWatchTargets({
+      spawnRecords: [
+        ...[...this._livenessSpawnRecords.entries()].map(([agentSessionId, r]) => ({
+          provider: r.provider,
+          cwd: r.cwd,
+          agentSessionId,
+        })),
+        ...persistedProviderCwds,
+      ],
+      rescan: true,
+      resolveWorkspace: () => 'daemon',
+    });
+    // 登记行增强源：各 root 的 local.yaml token 拉本 workspace 已登记日志。
+    const rootTokens = await Promise.all(
+      roots.map(async (root) => ({ root, token: await this._readRootPlatformToken(root) })),
+    );
+    for (const { root, token } of rootTokens) {
+      if (!token) continue;
+      const registered = await fetchRegisteredAgentLogs(serverUrl, token);
+      for (const it of registered) {
+        targets.push({
+          logPath: it.log_path,
+          format: it.format ?? 'unknown',
+          workspace: 'daemon',
+          harness: it.harness,
+          agentSessionId: it.session_id,
+          source: 'registry-sync',
+        });
+      }
+    }
+    for (const t of targets) {
+      // 推送元数据：token 取 cwd 命中的 root（登记行按 agent_cwd 归属；无 cwd 用首个有 token 的 root）。
+      const root =
+        rootTokens.find((rt) => rt.token && t.logPath.includes(_posixRoot(rt.root)))?.root ??
+        rootTokens.find((rt) => rt.token)?.root;
+      const token = root ? await this._readRootPlatformToken(root) : undefined;
+      if (!token) continue;
+      this._livenessMetaByPath.set(t.logPath, {
+        serverUrl,
+        token,
+        harness: t.harness,
+        format: t.format,
+        agentSessionId: t.agentSessionId ?? null,
+        agentCwd: undefined,
+      });
+      this._livenessTailer?.add(t);
+    }
+  }
+
+  /** 推送一批推导结果（按 token 分组 + D-012 第一方覆盖；best-effort）。 */
+  private async _flushLivenessResults(serverUrl: string, results: Parameters<typeof buildAgentLogStatePushGroups>[0]): Promise<void> {
+    const groups = buildAgentLogStatePushGroups(results, this._livenessMetaByPath, (sid) => {
+      const resolver = this._sessionManager?.getPermissionResolver(sid);
+      return (resolver?.pendingCount ?? 0) > 0;
+    });
+    for (const g of groups.values()) {
+      // 分批 ≤64（端点上限）。
+      for (let i = 0; i < g.items.length; i += 64) {
+        const ok = await pushAgentLogStates(serverUrl, g.token, g.items.slice(i, i + 64));
+        if (!ok) this._logger.debug?.('liveness_push_failed', { count: g.items.length });
+      }
+    }
+  }
+
+  /** 读 root 的 local.yaml platform 段 token（无段/无 token → null）。 */
+  private async _readRootPlatformToken(root: string): Promise<string | null> {
+    try {
+      const text = await readFile(join(root, '.sillyspec', 'local.yaml'), 'utf8');
+      const range = findTopLevelSectionRange(text, 'platform');
+      if (!range) return null;
+      const section = text.slice(range.start, range.end);
+      const m = /^\s*token:\s*(\S+)\s*$/m.exec(section);
+      return m?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private _serverOrigin(): string {
     return this._config.server_url.replace(/\/+$/, '');
   }
@@ -7002,6 +7164,9 @@ export class Daemon {
       return;
     }
 
+    // 2026-09-07-agent-liveness-states task-06：spawn 记录（自发现数据源①，design §5.2）。
+    this._livenessSpawnRecords.set(sessionId, { provider, cwd });
+
     // 跨机派发守卫（2026-08-28-fix-cross-machine-worker-dispatch task-06 / FR-05 / D-004@v1）：
     // workspace 绑定会话（rootPath 非空且非借用沙箱 marker）——白名单终检先行 +
     // 存在性检查（正确机器上 worktree 必已存在，存在性即「对机」试金石）；
@@ -8036,4 +8201,9 @@ export class Daemon {
       this._sigintHandler = null;
     }
   }
+}
+
+/** root → POSIX 化（liveness 登记行按路径前缀归属 root 用，task-06）。 */
+function _posixRoot(root: string): string {
+  return root.replace(/\\/g, '/');
 }

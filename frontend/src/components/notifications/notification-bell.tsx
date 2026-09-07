@@ -27,6 +27,7 @@ import {
   Clock,
   Inbox,
   KeyRound,
+  Hourglass,
   TimerOff,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -73,6 +74,12 @@ const TYPE_META: Record<
     icon: TimerOff,
     colorCls: "bg-neutral/20 text-neutral",
     labelCls: "text-neutral",
+  },
+  agent_blocked: {
+    label: "agent 在等你",
+    icon: Hourglass,
+    colorCls: "bg-destructive/15 text-destructive",
+    labelCls: "text-destructive",
   },
 };
 

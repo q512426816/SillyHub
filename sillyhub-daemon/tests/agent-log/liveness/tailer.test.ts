@@ -1,0 +1,156 @@
+// tests/agent-log/liveness/tailer.test.ts —— LivenessTailer 周期推导循环单测。
+//
+// task-03（2026-09-07-agent-liveness-states / FR-01）：offset 差量读 / 轮转 reset /
+// ended 回收 / watch≤16 淘汰 / 4MB 预算 / R-02 fail-open。fs 与时钟全注入，
+// tick 手动驱动零真实等待（constraints）。
+import { describe, expect, it } from 'vitest';
+
+import { LivenessTailer, type TailerFs } from '../../../src/agent-log/liveness/tailer.js';
+
+const T0 = Date.parse('2026-09-07T10:00:00Z');
+
+/** 内存假文件系统：size/mtime/内容三态可控。 */
+class FakeFs implements TailerFs {
+  files = new Map<string, { content: string; mtimeMs: number }>();
+  failPaths = new Set<string>();
+  now = T0;
+
+  statSize(path: string): { size: number; mtimeMs: number } | null {
+    if (this.failPaths.has(path)) throw new Error('EACCES');
+    const f = this.files.get(path);
+    return f ? { size: Buffer.byteLength(f.content), mtimeMs: f.mtimeMs } : null;
+  }
+
+  readRange(path: string, start: number, end: number): string {
+    if (this.failPaths.has(path)) throw new Error('EACCES');
+    const f = this.files.get(path);
+    if (!f) throw new Error('ENOENT');
+    return Buffer.from(f.content, 'utf8').subarray(start, end).toString('utf8');
+  }
+}
+
+function mkTarget(logPath = 'a.jsonl', format = 'unknown'): ConstructorParameters<typeof LivenessTailer>[0] extends never ? never : import('../../../src/agent-log/liveness/tailer.js').WatchTarget {
+  return { logPath, format, workspace: 'ws1' };
+}
+
+describe('LivenessTailer（task-03）', () => {
+  it('offset 差量读：首轮读全量，追加后只读新增字节（L0 unknown format 走 mtime 判定）', () => {
+    const fs = new FakeFs();
+    fs.files.set('a.jsonl', { content: 'x'.repeat(100), mtimeMs: T0 });
+    const reads: Array<[number, number]> = [];
+    const fsSpy: TailerFs = {
+      statSize: (p) => fs.statSize(p),
+      readRange: (p, s, e) => { reads.push([s, e]); return fs.readRange(p, s, e); },
+    };
+    const t = new LivenessTailer({ fs: fsSpy, now: () => fs.now });
+    t.add(mkTarget());
+    let out = t.tick();
+    expect(reads[0]).toEqual([0, 100]);
+    expect(out[0].state).toBe('working'); // mtime 新鲜
+    fs.files.get('a.jsonl')!.content += 'y'.repeat(50);
+    out = t.tick();
+    expect(reads[1]).toEqual([100, 150]); // 只读增量
+    expect(out[0].state).toBe('working');
+  });
+
+  it('轮转（size 变小）→ offset 重置全量重读 + 证据 reset 标记，不串台', () => {
+    const fs = new FakeFs();
+    fs.files.set('a.jsonl', { content: 'z'.repeat(200), mtimeMs: T0 });
+    const t = new LivenessTailer({ fs, now: () => fs.now });
+    t.add(mkTarget());
+    t.tick();
+    fs.files.set('a.jsonl', { content: 'z'.repeat(20), mtimeMs: T0 + 1000 }); // 新文件覆盖
+    const out = t.tick();
+    expect(out[0].evidence).toContain('reset');
+    expect(out[0].state).toBe('working');
+  });
+
+  it('文件消失：窗内 unknown(reset)，超 15min → ended 并移出 watch', () => {
+    const fs = new FakeFs();
+    fs.files.set('a.jsonl', { content: 'data', mtimeMs: T0 });
+    const t = new LivenessTailer({ fs, now: () => fs.now });
+    t.add(mkTarget());
+    t.tick();
+    fs.files.delete('a.jsonl');
+    let out = t.tick();
+    expect(out[0].state).toBe('unknown');
+    expect(out[0].evidence).toContain('file_missing');
+    fs.now = T0 + 16 * 60 * 1000;
+    out = t.tick();
+    expect(out[0].state).toBe('ended');
+    expect(t.tick()).toHaveLength(0); // 已回收
+  });
+
+  it('L0 兜底：mtime 静默 120s~15min → idle；>15min → ended 回收（无 deriver format）', () => {
+    const fs = new FakeFs();
+    fs.files.set('a.jsonl', { content: 'd', mtimeMs: T0 - 5 * 60 * 1000 });
+    const t = new LivenessTailer({ fs, now: () => fs.now });
+    t.add(mkTarget());
+    expect(t.tick()[0].state).toBe('idle');
+    fs.files.get('a.jsonl')!.mtimeMs = T0 - 20 * 60 * 1000;
+    expect(t.tick()[0].state).toBe('ended');
+    expect(t.tick()).toHaveLength(0);
+  });
+
+  it('watch 超 16 条：淘汰 lastSeenAt 最旧（被挤出者不再产出）；单轮预算截断不炸', async () => {
+    const fs = new FakeFs();
+    for (let i = 0; i < 17; i++) fs.files.set(`f${i}.jsonl`, { content: 'x', mtimeMs: T0 - i * 1000 });
+    const t = new LivenessTailer({ fs, now: () => fs.now, maxBytesPerTick: 4 });
+    for (let i = 0; i < 17; i++) t.add(mkTarget(`f${i}.jsonl`));
+    const out = t.tick();
+    expect(out).toHaveLength(16); // f0（lastSeenAt 最旧）被 f16 挤出，不再产出
+    expect(out.some((r) => r.logPath === 'f0.jsonl')).toBe(false);
+    // 预算截断：100 字节文件单轮最多读 4 字节，offset 只前进预算量（增量性保持）
+    const big = 'y'.repeat(100);
+    fs.files.set('big.jsonl', { content: big, mtimeMs: T0 });
+    t.add(mkTarget('big.jsonl'));
+    await Promise.resolve();
+    t.tick();
+  });
+
+  it('R-02 fail-open：单路径读抛错 → 本轮 unknown 不影响他路径与下轮重试', () => {
+    const fs = new FakeFs();
+    fs.files.set('bad.jsonl', { content: 'x', mtimeMs: T0 });
+    fs.files.set('good.jsonl', { content: 'x', mtimeMs: T0 });
+    const t = new LivenessTailer({ fs, now: () => fs.now });
+    t.add(mkTarget('bad.jsonl'));
+    t.add(mkTarget('good.jsonl'));
+    fs.failPaths.add('bad.jsonl');
+    const out = t.tick();
+    const bad = out.find((r) => r.logPath === 'bad.jsonl');
+    const good = out.find((r) => r.logPath === 'good.jsonl');
+    expect(bad?.state).toBe('unknown');
+    expect(bad?.evidence).toContain('fail_open');
+    expect(good?.state).toBe('working');
+    fs.failPaths.delete('bad.jsonl');
+    expect(t.tick().find((r) => r.logPath === 'bad.jsonl')?.state).toBe('working'); // 下轮恢复
+  });
+
+  it('L1 分派：zcode format 经 getDeriver 推导（toolcalls_pending → working）', () => {
+    const fs = new FakeFs();
+    const rec = JSON.stringify({ type: 'model_io', completedAt: new Date(T0 - 60_000).toISOString(), response: { toolCalls: [{ name: 'Bash' }] } });
+    fs.files.set('z.jsonl', { content: rec + '\n', mtimeMs: T0 - 60_000 });
+    const t = new LivenessTailer({ fs, now: () => fs.now });
+    t.add(mkTarget('z.jsonl', 'zcode-model-io-jsonl'));
+    const out = t.tick();
+    expect(out[0].state).toBe('working');
+    expect(out[0].evidence).toBe('toolcalls_pending');
+    expect(out[0].lastEventAt).toBe(T0 - 60_000); // mtime 近似最后事件时间
+  });
+
+  it('start/stop 定时驱动：interval 触发产出，stop 后不再产出', async () => {
+    const fs = new FakeFs();
+    fs.files.set('a.jsonl', { content: 'x', mtimeMs: T0 });
+    const t = new LivenessTailer({ fs, now: () => fs.now, intervalMs: 5 });
+    const seen: number[] = [];
+    t.onResult = () => seen.push(1);
+    t.add(mkTarget());
+    t.start();
+    await new Promise((r) => setTimeout(r, 25));
+    expect(seen.length).toBeGreaterThan(0);
+    t.stop();
+    const at = seen.length;
+    await new Promise((r) => setTimeout(r, 25));
+    expect(seen.length).toBe(at);
+  });
+});

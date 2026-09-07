@@ -10175,6 +10175,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-logs/states": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Agent Log States
+         * @description POST agent 会话活性状态批量上报（daemon liveness tailer 周期 10s）。
+         *
+         *     状态是派生数据不进 CLI 上报契约（D-005）：body 仅枚举级数据（log_path/
+         *     state/evidence 短摘要/derived_at/last_event_at），**日志内容不出本机**
+         *     （协议 §7 克制口径延伸）。鉴权与 ``/agent-logs`` 完全同源（shpsync_ token
+         *     派生 workspace，写通道唯一；无凭据 401 / shk_live_·JWT 403）——daemon 是
+         *     唯一合法上报方。
+         *
+         *     upsert-create 语义（X-001）：自发现裸会话可能尚无登记行（登记只在 CLI
+         *     调用入口），行不存在时按 entry 元信息 create（origin=liveness-discovered，
+         *     harness 必填否则 skipped 不建行）；既有行只更新状态四列，登记元信息不动。
+         *     blocked 段转移检测在 service 内（BLOCKED_SEGMENTS，task-09 消费）。
+         */
+        post: operations["push_agent_log_states_api_agent_logs_states_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agent-logs/{entry_id}/content": {
         parameters: {
             query?: never;
@@ -10456,6 +10487,18 @@ export interface components {
             /** Agent Session Id */
             agent_session_id?: string | null;
             /**
+             * State
+             * @default unknown
+             * @enum {string}
+             */
+            state: "working" | "blocked" | "idle" | "ended" | "unknown";
+            /** State Derived At */
+            state_derived_at?: string | null;
+            /** State Evidence */
+            state_evidence?: string | null;
+            /** Last Event At */
+            last_event_at?: string | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -10617,6 +10660,77 @@ export interface components {
             hub_session_id?: string | null;
             /** Entries */
             entries: components["schemas"]["AgentLogEntry"][];
+        };
+        /**
+         * AgentLogStateEntry
+         * @description POST /agent-logs/states 单条状态上报（daemon 鉴权通道，枚举级数据）。
+         *
+         *     状态是派生数据不进 CLI 上报契约（D-005）；``harness`` 等元信息仅在落库行
+         *     不存在时用于 create（X-001：自发现裸会话可能尚无登记行——登记只发生在
+         *     CLI 调用入口），缺省时该条 skipped 不建行（不猜 harness）。
+         */
+        AgentLogStateEntry: {
+            /** Log Path */
+            log_path: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "working" | "blocked" | "idle" | "ended" | "unknown";
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /**
+             * Derived At
+             * Format: date-time
+             */
+            derived_at: string;
+            /** Last Event At */
+            last_event_at?: string | null;
+            /** Harness */
+            harness?: string | null;
+            /** Format */
+            format?: string | null;
+            /** Agent Session Id */
+            agent_session_id?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+        };
+        /**
+         * AgentLogStatesOk
+         * @description POST /agent-logs/states 200 响应（daemon best-effort，任意 2xx 即成功）。
+         */
+        AgentLogStatesOk: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Updated
+             * @description 既有行状态更新数（登记元信息不动）
+             */
+            updated: number;
+            /**
+             * Created
+             * @description 自发现裸会话新建行数（origin=liveness-discovered）
+             */
+            created: number;
+            /**
+             * Skipped
+             * @description 行不存在且缺 harness 元信息被跳过数
+             */
+            skipped: number;
+        };
+        /**
+         * AgentLogStatesPush
+         * @description POST /agent-logs/states 请求体（批量 ≤64，daemon tailer 周期 10s 一批）。
+         */
+        AgentLogStatesPush: {
+            /** Entries */
+            entries: components["schemas"]["AgentLogStateEntry"][];
         };
         /**
          * AgentProfileAggregatedItem
@@ -23277,6 +23391,7 @@ export interface components {
             objective?: string | null;
             /** Total Cost Usd */
             total_cost_usd?: number | null;
+            liveness?: components["schemas"]["WorkerLiveness"] | null;
         };
         /** WorkerListResponse */
         WorkerListResponse: {
@@ -23287,6 +23402,24 @@ export interface components {
             mission_id: string;
             /** Workers */
             workers: components["schemas"]["WorkerListItem"][];
+        };
+        /**
+         * WorkerLiveness
+         * @description worker 活性推导快照（design §7；state 五态与 daemon 侧一致）。
+         */
+        WorkerLiveness: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "working" | "blocked" | "idle" | "ended" | "unknown";
+            /** Evidence */
+            evidence?: string | null;
+            /**
+             * Derived At
+             * Format: date-time
+             */
+            derived_at: string;
         };
         /**
          * WorkerResultResponse
@@ -42392,6 +42525,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentLogPushOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_agent_log_states_api_agent_logs_states_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentLogStatesPush"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogStatesOk"];
                 };
             };
             /** @description Validation Error */

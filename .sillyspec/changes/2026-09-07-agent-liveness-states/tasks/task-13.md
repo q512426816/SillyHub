@@ -11,6 +11,8 @@ requirement_ids: [FR-06]
 decision_ids: [D-001@v1]
 repo: sillyspec
 base_commit: f05701b12276f5ac3c9a6b889675796147081ce8
+head_commit: 4aa40c6183686a906a87025a04b572fe0d802e4e
+base_commit: f05701b12276f5ac3c9a6b889675796147081ce8
 head_commit: f05701b12276f5ac3c9a6b889675796147081ce8
 expects_from:
   task-12:

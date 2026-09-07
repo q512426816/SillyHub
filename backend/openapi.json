@@ -30917,6 +30917,49 @@
         }
       }
     },
+    "/api/agent-logs/states": {
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Push Agent Log States",
+        "description": "POST agent 会话活性状态批量上报（daemon liveness tailer 周期 10s）。\n\n状态是派生数据不进 CLI 上报契约（D-005）：body 仅枚举级数据（log_path/\nstate/evidence 短摘要/derived_at/last_event_at），**日志内容不出本机**\n（协议 §7 克制口径延伸）。鉴权与 ``/agent-logs`` 完全同源（shpsync_ token\n派生 workspace，写通道唯一；无凭据 401 / shk_live_·JWT 403）——daemon 是\n唯一合法上报方。\n\nupsert-create 语义（X-001）：自发现裸会话可能尚无登记行（登记只在 CLI\n调用入口），行不存在时按 entry 元信息 create（origin=liveness-discovered，\nharness 必填否则 skipped 不建行）；既有行只更新状态四列，登记元信息不动。\nblocked 段转移检测在 service 内（BLOCKED_SEGMENTS，task-09 消费）。",
+        "operationId": "push_agent_log_states_api_agent_logs_states_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentLogStatesPush"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentLogStatesOk"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agent-logs/{entry_id}/content": {
       "get": {
         "tags": [
@@ -31594,6 +31637,53 @@
             ],
             "title": "Agent Session Id"
           },
+          "state": {
+            "type": "string",
+            "enum": [
+              "working",
+              "blocked",
+              "idle",
+              "ended",
+              "unknown"
+            ],
+            "title": "State",
+            "default": "unknown"
+          },
+          "state_derived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Derived At"
+          },
+          "state_evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Evidence"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -31882,6 +31972,156 @@
         ],
         "title": "AgentLogPushRequest",
         "description": "POST /agent-logs 请求（CLI ``sillyspec run`` 入口 best-effort 批量推送，协议 §1）。\n\n**不声明 workspace_id 字段**——body 里出现的值被 extra=ignore 吞掉，workspace\n一律由 shpsync_ token 派生（token 派生唯一权威，协议 §1「不信任 body 里的\nworkspace_id」）。``entries`` 1..50 条防滥用；同请求内同 log_path 重复条目由\nservice 层去重取后者（design §3.2）。\n\n2026-08-23-agent-activity-sessions task-04（design §3.3.2）：增 body 级\n``hub_session_id``——daemon 派发时经 env ``SILLYHUB_SESSION_ID`` 注入的平台会话\nid（run 所属会话唯一，故 body 级而非 entry 级，D-008）；服务端校验 workspace\n归属，未命中/跨 ws 静默降级（D-005 best-effort）。"
+      },
+      "AgentLogStateEntry": {
+        "properties": {
+          "log_path": {
+            "type": "string",
+            "maxLength": 1024,
+            "title": "Log Path"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "working",
+              "blocked",
+              "idle",
+              "ended",
+              "unknown"
+            ],
+            "title": "State"
+          },
+          "evidence": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Evidence",
+            "default": ""
+          },
+          "derived_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Derived At"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "agent_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Session Id"
+          },
+          "agent_cwd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Cwd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "log_path",
+          "state",
+          "derived_at"
+        ],
+        "title": "AgentLogStateEntry",
+        "description": "POST /agent-logs/states 单条状态上报（daemon 鉴权通道，枚举级数据）。\n\n状态是派生数据不进 CLI 上报契约（D-005）；``harness`` 等元信息仅在落库行\n不存在时用于 create（X-001：自发现裸会话可能尚无登记行——登记只发生在\nCLI 调用入口），缺省时该条 skipped 不建行（不猜 harness）。"
+      },
+      "AgentLogStatesOk": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated",
+            "description": "既有行状态更新数（登记元信息不动）"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created",
+            "description": "自发现裸会话新建行数（origin=liveness-discovered）"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped",
+            "description": "行不存在且缺 harness 元信息被跳过数"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updated",
+          "created",
+          "skipped"
+        ],
+        "title": "AgentLogStatesOk",
+        "description": "POST /agent-logs/states 200 响应（daemon best-effort，任意 2xx 即成功）。"
+      },
+      "AgentLogStatesPush": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AgentLogStateEntry"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "AgentLogStatesPush",
+        "description": "POST /agent-logs/states 请求体（批量 ≤64，daemon tailer 周期 10s 一批）。"
       },
       "AgentProfileAggregatedItem": {
         "properties": {
@@ -65297,6 +65537,16 @@
               }
             ],
             "title": "Total Cost Usd"
+          },
+          "liveness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkerLiveness"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -65328,6 +65578,44 @@
           "workers"
         ],
         "title": "WorkerListResponse"
+      },
+      "WorkerLiveness": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "working",
+              "blocked",
+              "idle",
+              "ended",
+              "unknown"
+            ],
+            "title": "State"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "derived_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Derived At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "derived_at"
+        ],
+        "title": "WorkerLiveness",
+        "description": "worker 活性推导快照（design §7；state 五态与 daemon 侧一致）。"
       },
       "WorkerResultResponse": {
         "properties": {
