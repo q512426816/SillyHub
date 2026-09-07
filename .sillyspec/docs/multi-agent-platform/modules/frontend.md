@@ -154,3 +154,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - change 2026-09-04-conflict-resolve-entry（frontend 侧） | 变更中心「平台同步」处理区：lib/daemon.ts 新增 triggerMachineSillySpecResolve / triggerMachineSillySpecGhostCleanup 两触发函数（POST /api/daemon/machines/{id}/sillyspec-resolve|sillyspec-ghost-cleanup）+ api-types.ts 经 gen:types 再生成（两端点与 MachineSillySpecCommandResultRead 读模型）；新组件 changes/platform-sync-section.tsx——冲突裁决（keep_local/take_platform）与 ghost 一键清理（危险弹窗 okType danger）两区 + 回显「已下发·等待机器回报」+ sillyspec_command_result 匹配 action/change 即认定回报 + ECHO_TIMEOUT_MS 150s（执行 120s+一个心跳周期）无回报恢复可重试 + 旧版 daemon 静默忽略提示；权限走新 hook lib/use-machine-sync-action-access.ts（机器 owner 本人或平台管理员 canOperate，无权隐藏按钮）；桌面 `(dashboard)/workspaces/[id]/changes` 与移动 `m/workspaces/[id]/changes` 双端挂载；总览卡（workspace/changes-overview-card）ghost/冲突区 CLI 指引文案收口为跳转变更中心处理区的入口链接（操作单一入口，入口 Link 置折叠按钮外防 a 嵌 button 非法嵌套）。
 
 <!-- MANUAL_NOTES_END -->
+
+### 2026-09-07-agent-liveness-states（agent 会话活性状态推导）
+
+- `components/agent-log/liveness-badge.tsx` 五态视觉单源（语义色阶+呼吸动画，badge/dot/悬浮详情）；`agent-liveness-overview-card.tsx` 工作台「Agent 状态总览」卡（D-004 第二层：分组计数+在等人组跳转，30s 轮询）；日志面板行尾徽章；通知铃 agent_blocked 类型。api-types 经 gen:types 同步。已知缺口：会话列表小灯/idle 小红点待 SessionsPortal 联表管道（见 verify-result NOTES）。

@@ -11,3 +11,4 @@ created_at: 2026-09-07 10:30:00
 - [x] task-02: pi-events 既有用例 expected 适配 + 新状态机用例（轮生命周期/工具刷新/防御/时钟）
 - [x] task-03: session-manager 分派集成用例（pi 任务事件经 _dispatchStatusEvent 正确 emit）
 - [x] task-04: daemon 全套件相关子集回归 + 模块卡 pi 派生说明
+- [ ] ql-20260907-011-14e0 pi 任务名升级：message_start(user) 携带的用户指令作 task_name 摘要（替代恒定'执行任务'）

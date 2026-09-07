@@ -18,8 +18,12 @@ allowed_paths:
   - backend/app/modules/daemon/router/machines.py
   - backend/app/modules/daemon/router/lease.py
   - backend/app/modules/daemon/router/session_crud.py
-  - backend/app/modules/daemon/router/session_extras.py
-  - backend/app/modules/daemon/router/notify_misc.py
+  - backend/app/modules/daemon/router/session_queue.py
+  - backend/app/modules/daemon/router/session_insights.py
+  - backend/app/modules/daemon/router/session_team.py
+  - backend/app/modules/daemon/router/notify.py
+  - backend/app/modules/daemon/router/gateway_misc.py
+  - backend/app/modules/daemon/router/daemon_rpc.py
 goal: >
   把 5468 行的 daemon/router.py（83 端点 + 39 内联 Pydantic 模型 + 21 私有 helper）拆为
   router/ 9 文件包，导入路径 app.modules.daemon.router 原样工作，挂载顺序不变量与

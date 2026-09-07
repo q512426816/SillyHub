@@ -214,15 +214,19 @@ Wave 顺序：**Wave 1 daemon → Wave 2 backend → Wave 3 frontend**（D-003�
 | 新增 | sillyhub-daemon/tests/event-wire.test.ts | [W1] 轻重构1/2/6 定向测试（新增文件不改既有测试） |
 | 新增 | sillyhub-daemon/tests/dialog-result.test.ts | [W1] 轻重构1/2/6 定向测试（新增文件不改既有测试） |
 | 删除 | backend/app/modules/daemon/router.py | [W2] 被 router/ 包替代 |
-| 新增 | backend/app/modules/daemon/router/__init__.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/version.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/heartbeat.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/runtimes.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/machines.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/lease.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/session_crud.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/session_extras.py | [W2] 9 文件包，导入路径不变 |
-| 新增 | backend/app/modules/daemon/router/notify_misc.py | [W2] 9 文件包，导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/__init__.py | [W2] 12 文件包（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/version.py | [W2] 12 文件包（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/heartbeat.py | [W2] 12 文件包（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/runtimes.py | [W2] 12 文件包（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/machines.py | [W2] 12 文件包（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/lease.py | [W2] 12 文件包（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/session_crud.py | [W2] 12 文件包（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/session_queue.py | [W2] 12 文件包（execute 细化拆分），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/session_insights.py | [W2] 12 文件包（execute 细化拆分），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/session_team.py | [W2] team 端点独立（execute 细化），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/notify.py | [W2] 12 文件包（execute 细化拆分），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/gateway_misc.py | [W2] 12 文件包（execute 细化拆分），导入路径不变 |
+| 新增 | backend/app/modules/daemon/router/daemon_rpc.py | [W2] rpc/ws 类端点独立（execute 细化），导入路径不变 |
 | 删除 | backend/app/modules/daemon/session/service.py | [W2] 被 session/service/ 包替代 |
 | 新增 | backend/app/modules/daemon/session/service/__init__.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |
 | 新增 | backend/app/modules/daemon/session/service/errors.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |

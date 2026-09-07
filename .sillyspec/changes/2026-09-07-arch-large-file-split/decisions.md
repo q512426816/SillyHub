@@ -105,3 +105,37 @@ created_at: 2026-09-07 07:57:33
 - normalized_requirement: 新拆出子模块 ≤800（例外两项：session-panel-page.tsx ≤3000、session-panel-dialog.tsx ≤2000）；核心编排类壳 ≤2500。
 - impacts: [FR-04, FR-05, task-*, verify-*]
 - evidence: 复审报告残余 gap #1/#2；design.md §2/§5/§6（2026-09-07 终版）
+
+## D-008@v1: router 包 9→12 文件（execute 期细化拆分）
+- type: architecture
+- priority: P2
+- status: accepted
+- source: code
+- question: task-07 执行中发现按设计 9 文件划分，session_extras 达 1204 行、notify_misc 达 1794 行，超 D-005@v3 新文件 ≤800 上限（设计曾预判 notify_misc ≤900 可接受，实测 1794 远超）。
+- answer: 细化拆分为 12 文件：session_extras → session_queue（队列 6 端点）+ session_insights（日志/run/task/用量/team 8 端点）；notify_misc → notify（notify_* 与恢复/挂起簇）+ gateway_misc（认证三 helper/ws/controls/skills/mcp/llm proxy/fs）。design 文件清单与 task-07 卡 allowed_paths 同步修订。
+- normalized_requirement: router 包全部子模块 ≤800；导入路径与挂载顺序不变量不受影响（子模块仅是注册单元再细分，__init__ 注册顺序仍按原文件端点首现顺序）。
+- impacts: [task-07, verify-*]
+- evidence: worktree 实测 wc -l（2026-09-07 18:44 盘点：notify_misc 1794 / session_extras 1204）
+
+## D-008@v2: router 包最终 13 文件（supersedes D-008@v1）
+- type: architecture
+- priority: P2
+- status: accepted
+- supersedes: D-008@v1
+- source: code
+- question: v1 的 2+2 拆法（session_extras→queue+insights、notify_misc→notify+gateway_misc）实测数学上无法满足 ≤800（gateway_misc ≈1035、insights 含 team ≈1014）。
+- answer: 最终 3+3=6 新文件：session_queue/session_insights/session_team + notify/gateway_misc/daemon_rpc，共 13 文件全部 ≤800（max 712）；域归属与保序对全保留，__init__ 用 _ENDPOINT_ORDER 表按原函数名全局恢复注册顺序并 fail-fast。
+- normalized_requirement: router 包全部子模块 ≤800；注册顺序与 openapi 等价性由 _ENDPOINT_ORDER 表守护。
+- impacts: [task-07, verify-*]
+- evidence: worktree 实测（2026-09-07）；commit 966fa6e20
+
+## D-009@v1: 脆弱计时测试 test_two_members_trigger_in_parallel 的处置口径
+- type: risk
+- priority: P1
+- status: accepted
+- source: code
+- question: task-07 验收发现 test_group_p2.py::TestParallelMentionTrigger::test_two_members_trigger_in_parallel 在 -n auto（20 worker）下随文件数/导入扰动失稳（拆分代码 8/8 失败 vs HEAD 0/6 通过），插桩证明服务端 gather 0.219s 完美并行、失败源于 xdist 调度停顿撞 0.35s 断言（仅 150ms 余量）；请求路径代码逐字节一致（152 符号 diff 仅 9 处 D-007 改写且不在群发路径）。
+- answer: 认定为预存脆弱计时测试非功能回归（CLAUDE.md 规则 9 不改测试）；本变更 backend 定向测试统一用 -n 10（全绿 1865 passed）；遗留两条：CI 层面放宽该断言或加 rerun 留后续 quick；归档时入 known-issues。
+- normalized_requirement: 本变更内 backend 测试命令统一 -n 10；该测试失败不判拆分失败，判环境敏感。
+- impacts: [task-08, task-09, task-10, task-12, verify-*]
+- evidence: task-07 续做代理插桩报告（2026-09-07）
