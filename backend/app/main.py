@@ -118,6 +118,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # 定义而掩盖原始异常（对齐上方 patrol_task / sweep_task 注释）。
     lease_sweep_task: asyncio.Task[None] | None = None
     control_gc_task: asyncio.Task[None] | None = None
+    # 2026-09-07-session-pin-rename-scheduled-send task-04 / design §总体方案
+    # Wave2：定时消息到点派发常驻协程占位——同样先占 None 保证 bootstrap 抛错
+    # 走 finally 时不会因未定义而掩盖原始异常（对齐上方三协程注释）。
+    scheduled_send_task: asyncio.Task[None] | None = None
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_engine, get_session_factory
@@ -264,6 +268,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             control_command_gc_sweeper(), name="control-command-gc-sweeper"
         )
         log.info("control_command_gc_sweeper_started")
+        # 2026-09-07-session-pin-rename-scheduled-send task-04（design FR-05 /
+        # D-001@v1 方案 B）：定时消息到点派发常驻协程——30s 周期扫
+        # agent_session_scheduled_messages 的 due pending 条目，逐条复用
+        # inject_session_as_service（忙轮自动入既有消息队列；四分支收敛见
+        # scheduled_send.py 模块 docstring）。关停走 finally 的 cancel +
+        # await gather（对齐 session_reconnect_sweeper——巡检轮内有 DB 写，
+        # 须等取消落地）。
+        from app.modules.daemon.scheduled_send import scheduled_send_sweeper
+
+        scheduled_send_task = asyncio.create_task(
+            scheduled_send_sweeper(), name="scheduled-send-sweeper"
+        )
+        log.info("scheduled_send_sweeper_started")
         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
@@ -308,6 +325,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if control_gc_task is not None:
             control_gc_task.cancel()
             await asyncio.gather(control_gc_task, return_exceptions=True)
+        # 2026-09-07-session-pin-rename-scheduled-send task-04：定时派发巡检
+        # 协程关停——同上 cancel 后 await gather 等取消落地（sweeper 的
+        # asyncio.sleep 处 CancelledError 透传保证干净退出）。
+        if scheduled_send_task is not None:
+            scheduled_send_task.cancel()
+            await asyncio.gather(scheduled_send_task, return_exceptions=True)
         try:
             from app.modules.storage.factory import get_storage_backend
 

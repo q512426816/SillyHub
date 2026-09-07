@@ -18,7 +18,7 @@ import re
 import secrets
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, NamedTuple
 
 from sqlalchemy import select, update
@@ -37,6 +37,7 @@ from app.modules.agent.model import (
     AgentRunModelUsage,
     AgentSession,
     AgentSessionQueuedMessage,
+    AgentSessionScheduledMessage,
 )
 
 # provider-abstraction task-11（design §5.2 / D-002@v1）：本文件散落的引擎
@@ -72,6 +73,7 @@ from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import (
     PageContextCreateBlock,
     PlanResponseDecision,
+    ScheduledMessageCreateRequest,
     SessionReopenResponse,
     SessionUsageModelItemRead,
     SessionUsageRead,
@@ -666,6 +668,71 @@ class DaemonSessionAttachmentInvalid(AppError):
 
     code = "HTTP_422_SESSION_ATTACHMENT_INVALID"
     http_status = 422
+
+
+class DaemonSessionTitleInvalid(AppError):
+    """rename 标题非法（task-02 / FR-03）：strip 后为空或超 255 字符，422 不落库。
+
+    长度上限对齐 ``AgentSession.title`` 列 String(255)；空标题拒绝口径与
+    :class:`SessionEmptyPrompt` 一致（422 + 中文文案，schema 层不拦、
+    service 层统一出口）。
+    """
+
+    code = "HTTP_422_DAEMON_SESSION_TITLE_INVALID"
+    http_status = 422
+
+
+# ── 定时消息错误（task-03 2026-09-07-session-pin-rename-scheduled-send / FR-04）──
+
+
+class DaemonScheduledMessageDispatchTooSoon(AppError):
+    """定时消息 ``dispatch_at`` 非未来时间（task-03 / FR-04）：早于
+    now(UTC)+60s（:data:`SCHEDULED_DISPATCH_MIN_LEAD_SEC`），422 不落库。
+
+    最小提前量防「刚建即过期」竞态（design §总体方案 Wave 2）——避免条目落库
+    瞬间即被 sweeper 到点捞走，用户还没看到列表条目就已派发。空 prompt 拒绝
+    不单设类：复用 :class:`SessionEmptyPrompt`（同 inject 中文口径）。
+    """
+
+    code = "HTTP_422_DAEMON_SCHEDULED_MESSAGE_DISPATCH_TOO_SOON"
+    http_status = 422
+
+
+class DaemonScheduledMessageSessionInactive(AppError):
+    """定时消息目标会话不可用（task-03 / FR-04）：终态（ended/failed）或已软删
+    （``deleted_at`` 非空），409 不落库。
+
+    不复用 :class:`DaemonSessionNotActive`（inject/reopen 流专用语义）——
+    独立 code 让前端（task-05）按定时上下文给文案；错误归类字符串对齐 task-04
+    sweeper 的 ``error_code='session_inactive'`` 归档口径。
+    """
+
+    code = "HTTP_409_DAEMON_SCHEDULED_MESSAGE_SESSION_INACTIVE"
+    http_status = 409
+
+
+class DaemonScheduledMessageNotFound(AppError):
+    """定时条目不存在 / 非该会话条目（task-03 / FR-04，404 不泄露存在性）。"""
+
+    code = "HTTP_404_DAEMON_SCHEDULED_MESSAGE_NOT_FOUND"
+    http_status = 404
+
+
+class DaemonScheduledMessageNotPending(AppError):
+    """非 pending 定时条目不可取消（task-03 / FR-04）。
+
+    dispatched / cancelled / failed 均为终态不回退（状态机单向往，对齐
+    ``AgentSessionScheduledMessage.status`` 契约）——取消已派发条目语义上
+    是「撤回已发消息」，超出本变更范围（非目标：不做编辑/撤回）。
+    """
+
+    code = "HTTP_409_DAEMON_SCHEDULED_MESSAGE_NOT_PENDING"
+    http_status = 409
+
+
+# task-03 / FR-04：定时消息最小提前量（秒）——``dispatch_at`` 必须 ≥
+# now(UTC)+60s 才接受创建（design §总体方案 Wave 2「防刚建即过期竞态」）。
+SCHEDULED_DISPATCH_MIN_LEAD_SEC = 60
 
 
 class DaemonSessionWorkspaceNotFound(AppError):
@@ -6082,11 +6149,11 @@ class SessionService:
         - ``machine_id``：经 ``daemon_runtimes.daemon_instance_id`` EXISTS 关联
           （runtime 缺失的旧会话不匹配任何 machine）。
         - ``provider``：``AgentSession.provider`` 精确匹配（router 层 Literal 校验）。
-        - ``q``：标题模糊搜索。title 非持久化列（router 层由首条 user_input
-          摘要派生），故按「会话存在 channel=user_input 且 content_redacted
-          ilike q 的日志」EXISTS 过滤——title 恒为某条 user_input 的前缀，
-          语义上为标题搜索的超集（无漏报）；``%``/``_``/反斜杠 按字面转义，
-          参数经 SQLAlchemy 绑定（防注入）。
+        - ``q``：内容模糊搜索。title 已是持久列（Grill P1-1 落列，rename 可
+          写），但本参数按「会话存在 channel=user_input 且 content_redacted
+          ilike q 的日志」EXISTS 过滤——即匹配首条/任一条用户输入内容，不
+          匹配改过的 title 列（ISS-06：如实描述口径，不改查询行为）；
+          ``%``/``_``/反斜杠 按字面转义，参数经 SQLAlchemy 绑定（防注入）。
 
         2026-08-22-workspace-sessions-portal / D-003@v2 新增（可选，零回归）：
 
@@ -6203,11 +6270,22 @@ class SessionService:
         count_stmt = select(func.count()).select_from(AgentSession).where(*base_filters)
         total = int((await self._session.execute(count_stmt)).scalar() or 0)
 
+        # task-02（2026-09-07-session-pin-rename-scheduled-send / D-002@v1）：
+        # 置顶优先排序——前置谓词 ``(pinned_at IS NULL) ASC``（IS NULL 为假=已置顶
+        # → 0/false 排前，aiosqlite（0/1）与 PG（boolean ASC false 先）双方言
+        # 同语义），多置顶之间按既有最近活跃续排（「多个置顶按最近活跃排」）；
+        # 未置顶行维持既有序。pinned_at 全 NULL 的存量数据谓词恒真（值序退化为
+        # 既有键），列表序与升级前一致（FR-07 / R-03）。仅动 order_by，不动
+        # base_filters 与分页。
         order_key = func.coalesce(AgentSession.last_active_at, AgentSession.created_at)
         list_stmt = (
             select(AgentSession)
             .where(*base_filters)
-            .order_by(order_key.desc(), AgentSession.id.desc())
+            .order_by(
+                AgentSession.pinned_at.is_(None).asc(),
+                order_key.desc(),
+                AgentSession.id.desc(),
+            )
             .limit(limit)
             .offset(offset)
         )
@@ -6803,6 +6881,311 @@ class SessionService:
         # task-02：取消归档已落库（行回到默认列表视图），发布列表变更信号——
         # 与 archive_session 对称，SSE 客户端秒级看到该行重新出现。
         await publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
+
+    # ── task-02（2026-09-07-session-pin-rename-scheduled-send）：置顶/取消置顶/
+    # 重命名三操作——照 archive_session/unarchive_session 模板（行锁归属 404 不
+    # 泄露、幂等早退 rollback 释放行锁、commit 后 publish_sessions_changed 广播
+    # status_changed，FR-06 SSE 多端秒级同步）。
+
+    async def pin_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Pin an owned session (task-02 / FR-01：置顶，分组内置顶语义由列表
+        pinned 优先排序 + 前端分组桶保序插入天然实现，D-002@v1）。
+
+        写 ``pinned_at = now(UTC)``。幂等：已置顶早退（rollback 释放 FOR UPDATE
+        行锁），不刷新时间戳（FR-02）。
+        """
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if agent_session.pinned_at is not None:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+            return  # 幂等：已置顶，不刷新时间戳
+        agent_session.pinned_at = datetime.now(UTC)
+        await self._session.commit()
+        # 置顶已落库（列表序变化），发布列表变更信号——SSE 客户端秒级重排。
+        await publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
+
+    async def unpin_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Unpin an owned session (task-02 / FR-02：取消置顶，回到既有最近活跃序)。
+
+        清 ``pinned_at``。幂等：未置顶早退（rollback 释放行锁）。
+        """
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if agent_session.pinned_at is None:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+            return  # 幂等：未置顶
+        agent_session.pinned_at = None
+        await self._session.commit()
+        # 取消置顶已落库（行回到最近活跃序），发布列表变更信号——与 pin 对称。
+        await publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
+
+    async def rename_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        title: str,
+    ) -> None:
+        """Rename an owned session (task-02 / FR-03：写持久 ``title`` 列).
+
+        title 先 strip 再校验非空且 ≤255 字符（对齐列 String(255)），非法抛
+        :class:`DaemonSessionTitleInvalid`（422 语义，不落库）。列表标题派生
+        （router 层 title 优先、回退首条 user_input 摘要）零改动——重命名天然
+        优先生效。
+        """
+        stripped = title.strip()
+        if not stripped or len(stripped) > 255:
+            raise DaemonSessionTitleInvalid(
+                "会话标题不能为空且不超过 255 个字符。",
+                details={"session_id": str(session_id), "title_length": len(stripped)},
+            )
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if agent_session.title == stripped:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+            return  # 幂等：标题未变，免事务免广播
+        agent_session.title = stripped
+        await self._session.commit()
+        # 标题已落库（列表行显示变化），发布列表变更信号——SSE 客户端秒级刷新。
+        await publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
+
+    # ── task-03（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息
+    # CRUD——创建（三重校验）/列表/取消三操作。创建只落 pending 条目，到点派发归
+    # task-04 sweeper（D-001@v1 方案 B）。不发 publish_sessions_changed——定时
+    # 列表由前端 30s 轮询 + invalidate 消费（design §Wave 3），不在 sessions
+    # 列表 SSE 信号语义域内。
+
+    async def list_scheduled_messages(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> list[AgentSessionScheduledMessage]:
+        """List all scheduled messages of an owned session (task-03 / FR-04).
+
+        归属校验 404 不泄露存在性（get_agent_session_logs 无锁只读先例）；返回
+        **全部状态**条目（dispatched / cancelled / failed 审计留档一并返回，
+        前端列表条带状态 tag），按 ``dispatch_at`` 升序（design §Wave 2）。
+        """
+        owned = (
+            await self._session.execute(
+                select(AgentSession.id).where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        rows = await self._session.execute(
+            select(AgentSessionScheduledMessage)
+            .where(AgentSessionScheduledMessage.agent_session_id == session_id)
+            .order_by(AgentSessionScheduledMessage.dispatch_at.asc())
+        )
+        return list(rows.scalars().all())
+
+    async def create_scheduled_message(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        data: ScheduledMessageCreateRequest,
+    ) -> AgentSessionScheduledMessage:
+        """Create a one-shot scheduled message for an owned session (task-03 / FR-04).
+
+        行锁取归属会话（404 不泄露存在性）→ 三重校验（不落库）→ 落一行
+        status=pending。本方法不触发任何 inject 链路——到点由 task-04 sweeper
+        调 :meth:`inject_session_as_service` 派发（空闲直发 / 忙轮入队）。
+
+        三重校验（错误码口径 FR-04：422 / 422 / 409 / 404）：
+
+        1. prompt strip 非空，``attachment_ids`` 非空豁免（D-7 看图说话，
+           与 :meth:`inject_session` 入口同口径）→ :class:`SessionEmptyPrompt`；
+        2. ``dispatch_at`` 早于 now(UTC)+60s →
+           :class:`DaemonScheduledMessageDispatchTooSoon`（naive 入参先归一为
+           UTC，SQLite 测试读回 naive 先例同款）；
+        3. 会话终态（ended/failed）或 ``deleted_at`` 非空 →
+           :class:`DaemonScheduledMessageSessionInactive`（锁内复核，与
+           end_session / delete_agent_session 串行，无 TOCTOU 窗口，R-01）。
+
+        快照字段（prompt / attachment_ids 转 str 列表 / agent_profile_id /
+        llm_provider_id）原样落库；``sender_user_id`` 记账创建者（派发时作
+        queue_sender_user_id，design §Wave 2 归属语义）。
+        """
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        # 校验一：空 prompt（含全空白）拒绝口径与 inject_session 入口一致
+        # （SessionEmptyPrompt 422 中文文案）；附件非空豁免（D-7 看图说话）。
+        if not data.prompt.strip() and not data.attachment_ids:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（校验失败不悬挂事务）
+            raise SessionEmptyPrompt(
+                "消息内容不能为空",
+                details={"reason": "empty_prompt"},
+            )
+        # 校验二：dispatch_at 至少领先 now+60s（naive 入参按 UTC 补齐后再比较，
+        # 防「刚建即过期」竞态，SCHEDULED_DISPATCH_MIN_LEAD_SEC）。
+        dispatch_at = data.dispatch_at
+        if dispatch_at.tzinfo is None:
+            dispatch_at = dispatch_at.replace(tzinfo=UTC)
+        if dispatch_at < datetime.now(UTC) + timedelta(seconds=SCHEDULED_DISPATCH_MIN_LEAD_SEC):
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁
+            raise DaemonScheduledMessageDispatchTooSoon(
+                f"定时发送时间必须至少在 {SCHEDULED_DISPATCH_MIN_LEAD_SEC} 秒之后。",
+                details={
+                    "session_id": str(session_id),
+                    "dispatch_at": dispatch_at.isoformat(),
+                },
+            )
+        # 校验三：终态/软删会话不能接受定时消息（锁内复核，与 sweeper 到点
+        # 复核同结论——软删会话余留条目到点置 failed 收敛，此处前置拒绝）。
+        if agent_session.status in ("ended", "failed") or agent_session.deleted_at is not None:
+            status = agent_session.status
+            deleted = agent_session.deleted_at is not None
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁
+            raise DaemonScheduledMessageSessionInactive(
+                "会话已结束或已删除，无法创建定时消息。",
+                details={
+                    "session_id": str(session_id),
+                    "status": status,
+                    "deleted": deleted,
+                },
+            )
+        row = AgentSessionScheduledMessage(
+            agent_session_id=agent_session.id,
+            sender_user_id=user_id,
+            prompt=data.prompt,
+            # 附件快照转 str 列表（SessionAttachment id 字符串形态，对齐
+            # AgentSessionQueuedMessage.attachment_ids 落库惯例；到点派发转回
+            # uuid 走锁内附件校验兜底）。
+            attachment_ids=([str(a) for a in data.attachment_ids] if data.attachment_ids else None),
+            agent_profile_id=data.agent_profile_id,
+            llm_provider_id=data.llm_provider_id,
+            dispatch_at=dispatch_at,
+            status="pending",
+        )
+        self._session.add(row)
+        await self._session.commit()
+        return row
+
+    async def cancel_scheduled_message(
+        self,
+        session_id: uuid.UUID,
+        message_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Cancel a pending scheduled message (task-03 / FR-04).
+
+        会话归属复核（404 不泄露存在性）→ 行锁取条目（条目不存在 / 非该会话
+        条目 → 404 :class:`DaemonScheduledMessageNotFound`）→ 非 pending → 409
+        :class:`DaemonScheduledMessageNotPending`（终态不回退）→ 置
+        ``cancelled`` 并写 ``cancelled_at = now(UTC)``。
+
+        条目行锁 + 锁内状态复核与 task-04 sweeper 到点派发互为串行化（R-01）：
+        取消与派发谁先拿到锁谁生效，后到者见非 pending 幂等退出（派发侧）/
+        409（取消侧）。
+        """
+        owned = (
+            await self._session.execute(
+                select(AgentSession.id).where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        entry = (
+            await self._session.execute(
+                select(AgentSessionScheduledMessage)
+                .where(
+                    AgentSessionScheduledMessage.id == message_id,
+                    AgentSessionScheduledMessage.agent_session_id == session_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if entry is None:
+            raise DaemonScheduledMessageNotFound(
+                f"ScheduledMessage '{message_id}' not found in session '{session_id}'.",
+                details={"session_id": str(session_id), "message_id": str(message_id)},
+            )
+        if entry.status != "pending":
+            status = entry.status
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（终态不可取消）
+            raise DaemonScheduledMessageNotPending(
+                f"定时消息已处于 {status} 状态，仅待发送条目可取消。",
+                details={
+                    "session_id": str(session_id),
+                    "message_id": str(message_id),
+                    "status": status,
+                },
+            )
+        entry.status = "cancelled"
+        entry.cancelled_at = datetime.now(UTC)
+        await self._session.commit()
 
     async def update_ctx_window(
         self,

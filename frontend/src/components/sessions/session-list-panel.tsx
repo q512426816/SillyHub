@@ -38,6 +38,16 @@
  *   一 + 删除）+ Modal.confirm 三处理 + 已归档徽标与整行降调；群分区随状态
  *   筛选「已归档会话」哨兵切数据源（queryKey 视图维度 + 分区头「＋」隐藏）。
  *
+ * task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~FR-03）：单聊
+ *   行置顶/重命名——hover 按钮区归档按钮左侧新增置顶（Pin）/取消置顶
+ *   （PinOff，按 session.pinned_at 二选一）+ 重命名（Pencil，行内编辑态：
+ *   标题位变输入框，Enter/blur 提交、Esc 取消、strip 非空 ≤255 空不提交）；
+ *   置顶行标题前 Pin 小徽标（brand 阶）。三回调可选（onPinSessions/
+ *   onUnpinSessions/onRenameSession，未传零按钮——悬浮助手 runtime 抽屉等
+ *   消费点零渲染变化）；置顶分组内最前语义靠服务端排序（pinned_at IS NULL
+ *   前置键，D-002），前端 byWs 桶保序插入不做本地重排；群行（GroupChatRow）
+ *   不加（群列表无 pinned 字段）。
+ *
  * 工作区树（全局/workspace 形态）结构：
  *   筛选区：
  *     - 标题搜索（回车应用，X-11 保留；树形态为纯视图过滤不进数据层）
@@ -96,6 +106,9 @@ import {
   FolderOpen,
   ListChecks,
   Monitor,
+  Pencil,
+  Pin,
+  PinOff,
   Plus,
   Trash2,
   User,
@@ -208,6 +221,13 @@ function confirmIcon(Icon: LucideIcon, colorCls: string) {
 
 /** 组内截断阈值 + 「显示全部」（R-03）。 */
 const GROUP_ITEM_LIMIT = 50;
+
+/**
+ * 重命名标题长度上限（task-07 / 2026-09-07-session-pin-rename-scheduled-send
+ * / FR-02）：与后端 rename 校验同源（strip 后非空 ≤255，超出 422）——输入框
+ * maxLength 拦截 + 提交前 slice 双保险。
+ */
+const SESSION_TITLE_MAX_LEN = 255;
 
 /** 「非工作区」固定末尾组 id（分组/展开集合用；区别于 workspace uuid）。 */
 const NO_WORKSPACE_GROUP_ID = "__no_workspace__";
@@ -332,6 +352,20 @@ export interface SessionListPanelProps {
   //（调用方 Promise.allSettled 口径），面板据此出成功/部分失败 toast。
   onArchiveSessions?: (_ids: string[]) => Promise<number>;
   onUnarchiveSessions?: (_ids: string[]) => Promise<number>;
+  /**
+   * task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01）：置顶/
+   * 取消置顶回调（可选，照 onArchiveSessions 模式——传入才启用行内按钮；
+   * 返回失败个数供面板 toast）。置顶 = 分组内最前，排序语义靠服务端
+   * （pinned_at IS NULL 前置键，D-002），前端不做本地重排。
+   */
+  onPinSessions?: (_ids: string[]) => Promise<number>;
+  onUnpinSessions?: (_ids: string[]) => Promise<number>;
+  /**
+   * task-07（FR-02）：重命名回调（单条；SessionRow 行内编辑态已 strip 非空
+   * ≤255 才提交到这里）。返回失败个数（0=成功）供面板 toast；调用方仅
+   * invalidate 列表，不动选中态与 ?session=。
+   */
+  onRenameSession?: (_id: string, _title: string) => Promise<number>;
   /**
    * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
    * 到工作区/变更级。D-003@v2：scope 仅给全局端点多传 workspace_id/change_id
@@ -589,6 +623,9 @@ function WorkspaceTreeList({
   onDeleteSessions,
   onArchiveSessions,
   onUnarchiveSessions,
+  onPinSessions,
+  onUnpinSessions,
+  onRenameSession,
   scope,
   onNewInGroup,
   defaultExpandedWorkspaceId,
@@ -1278,6 +1315,55 @@ function WorkspaceTreeList({
     });
   };
 
+  // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：
+  // 置顶/重命名三处理——照 handleSingleArchive 模式（回调门控 + pinning/
+  // renaming 状态防重入 + useNotify toast 照 notifyArchiveResult 口径）。
+  // 置顶/取消置顶是轻量可逆开关，照原型直连不弹确认（对照归档的
+  // Modal.confirm：归档会从默认列表隐藏故需确认）；重命名行内编辑态归
+  // SessionRow 本地管理，本层只承接提交结果。
+  // ─────────────────────────────────────────────────────────────────
+
+  const [pinning, setPinning] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+
+  const handleSinglePin = async (id: string, title: string) => {
+    if (!onPinSessions || pinning) return;
+    setPinning(true);
+    try {
+      const failed = await onPinSessions([id]);
+      notifyArchiveResult(failed, `已置顶「${title}」（排分组内最前）`);
+    } finally {
+      setPinning(false);
+    }
+  };
+
+  const handleSingleUnpin = async (id: string, title: string) => {
+    if (!onUnpinSessions || pinning) return;
+    setPinning(true);
+    try {
+      const failed = await onUnpinSessions([id]);
+      notifyArchiveResult(failed, `已取消置顶「${title}」`);
+    } finally {
+      setPinning(false);
+    }
+  };
+
+  /** 重命名提交（SessionRow 已 strip 非空 ≤255 才回调到这里）。 */
+  const handleSingleRename = async (
+    id: string,
+    oldTitle: string,
+    newTitle: string,
+  ) => {
+    if (!onRenameSession || renaming) return;
+    setRenaming(true);
+    try {
+      const failed = await onRenameSession(id, newTitle);
+      notifyArchiveResult(failed, `「${oldTitle}」已重命名为「${newTitle}」`);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   // ── task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群收纳
   // 三处理——照 handleSingleArchive/handleSingleUnarchive/handleSingleDelete
   // 模式（Modal.confirm + confirmIcon + archiving/deleting 状态防重入 +
@@ -1606,6 +1692,24 @@ function WorkspaceTreeList({
                 onUnarchive={
                   onUnarchiveSessions
                     ? (id, title) => handleSingleUnarchive(id, title)
+                    : undefined
+                }
+                /* task-07（2026-09-07-session-pin-rename-scheduled-send）：置顶/
+                   重命名照 onArchive 透传路径（可选回调门控，未传零按钮）。 */
+                onPin={
+                  onPinSessions
+                    ? (id, title) => handleSinglePin(id, title)
+                    : undefined
+                }
+                onUnpin={
+                  onUnpinSessions
+                    ? (id, title) => handleSingleUnpin(id, title)
+                    : undefined
+                }
+                onRename={
+                  onRenameSession
+                    ? (id, oldTitle, newTitle) =>
+                        handleSingleRename(id, oldTitle, newTitle)
                     : undefined
                 }
                 showAll={showAllGroupIds.has(group.id)}
@@ -2028,6 +2132,9 @@ function WorkspaceGroupNode({
   onDelete,
   onArchive,
   onUnarchive,
+  onPin,
+  onUnpin,
+  onRename,
   showAll,
   onToggleShowAll,
   hideMachineTitles,
@@ -2062,6 +2169,12 @@ function WorkspaceGroupNode({
   onDelete?: (_id: string, _title: string) => void;
   onArchive?: (_id: string, _title: string) => void;
   onUnarchive?: (_id: string, _title: string) => void;
+  /** task-07（2026-09-07-session-pin-rename-scheduled-send）：置顶/取消置顶
+   *（照 onArchive 透传路径，未传零按钮）。 */
+  onPin?: (_id: string, _title: string) => void;
+  onUnpin?: (_id: string, _title: string) => void;
+  /** task-07：重命名提交（newTitle 已 strip 非空 ≤255）。 */
+  onRename?: (_id: string, _oldTitle: string, _newTitle: string) => void;
   showAll: boolean;
   onToggleShowAll: () => void;
   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
@@ -2473,6 +2586,15 @@ function WorkspaceGroupNode({
                           onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
                           onArchive={onArchive ? () => onArchive(s.id, title) : undefined}
                           onUnarchive={onUnarchive ? () => onUnarchive(s.id, title) : undefined}
+                          /* task-07（2026-09-07-session-pin-rename-scheduled-send）：
+                             置顶/重命名照 onArchive 绑定模式（id/title 渲染期闭包）。 */
+                          onPin={onPin ? () => onPin(s.id, title) : undefined}
+                          onUnpin={onUnpin ? () => onUnpin(s.id, title) : undefined}
+                          onRename={
+                            onRename
+                              ? (next: string) => onRename(s.id, title, next)
+                              : undefined
+                          }
                         />
                         {/* 2026-08-26-subsession-portal-grouping：父行附属分身
                             折叠组（组级 violet 徽标 + 子行缩进，design §4.B） */}
@@ -2519,6 +2641,15 @@ function WorkspaceGroupNode({
                                   onDelete={onDelete ? () => onDelete(c.id, c.title ?? "分身") : undefined}
                                   onArchive={onArchive ? () => onArchive(c.id, c.title ?? "分身") : undefined}
                                   onUnarchive={onUnarchive ? () => onUnarchive(c.id, c.title ?? "分身") : undefined}
+                                  /* task-07：分身行照主行透传（archive/delete 先例）。 */
+                                  onPin={onPin ? () => onPin(c.id, c.title ?? "分身") : undefined}
+                                  onUnpin={onUnpin ? () => onUnpin(c.id, c.title ?? "分身") : undefined}
+                                  onRename={
+                                    onRename
+                                      ? (next: string) =>
+                                          onRename(c.id, c.title ?? "分身", next)
+                                      : undefined
+                                  }
                                 />
                               ))}
                           </div>
@@ -2566,6 +2697,15 @@ interface SessionRowProps {
   // 2026-08-24：归档/取消归档回调。
   onArchive?: () => void;
   onUnarchive?: () => void;
+  /**
+   * task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：置顶/
+   * 取消置顶/重命名回调（可选，未传零按钮——悬浮助手 runtime 抽屉等消费点）。
+   * 置顶/取消置顶按行 pinned_at 二选一显隐（照归档按钮 archived_at 先例）；
+   * onRename 参数为 strip 后的新标题（非空 ≤255 由本组件校验后再回调）。
+   */
+  onPin?: () => void;
+  onUnpin?: () => void;
+  onRename?: (_newTitle: string) => void;
   /** ql-20260823-003：树形态筛选智能体后隐藏引擎 chip（全组同引擎冗余）。 */
   hideEngineChip?: boolean;
 }
@@ -2586,8 +2726,27 @@ function SessionRow({
   onDelete,
   onArchive,
   onUnarchive,
+  onPin,
+  onUnpin,
+  onRename,
   hideEngineChip,
 }: SessionRowProps) {
+  // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-02）：行内
+  // 重命名编辑态（标题位 ↔ 输入框，本地管理）：Enter/blur 提交、Esc 取消；
+  // renameCancelledRef 标记 Esc 路径，防 setEditing(false) 触发的 blur 再提交。
+  const [editing, setEditing] = useState(false);
+  const renameCancelledRef = useRef(false);
+  /** 提交（strip 非空 ≤255 且与当前标题不同才回调；空/未变静默退出不弹错）。 */
+  const finishRename = (raw: string) => {
+    setEditing(false);
+    if (renameCancelledRef.current) {
+      renameCancelledRef.current = false;
+      return;
+    }
+    const next = raw.trim().slice(0, SESSION_TITLE_MAX_LEN);
+    if (!next || next === title) return;
+    onRename?.(next);
+  };
   // chips 数据源：config_snapshot 直显免二次查询；快照缺省回退基础信息。
   const snapshot = session.config_snapshot;
   const machineHit = session.runtime_id
@@ -2680,16 +2839,51 @@ function SessionRow({
         {/* task-07：tool_report 标题旁 FileText「本地 Agent」徽标（原型
             .badge-tool：brand 阶，图标线性化 2026-08-24）。 */}
         <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span
-            className={cn(
-              "min-w-0 truncate text-[13px] font-medium",
-              variant === "tree" && selected
-                ? "text-brand-700"
-                : "text-foreground",
-            )}
-          >
-            {title}
-          </span>
+          {/* task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01）：
+              置顶徽标——标题前 Pin 小图标（原型 .row .pin 📌 位，brand 阶，
+              形态对齐「本地 Agent」徽标的圆角描边 chip；置顶排分组内最前靠
+              服务端排序，本行只做标识）。 */}
+          {session.pinned_at && (
+            <span
+              title={`已置顶（${formatRelativeTime(session.pinned_at)}）`}
+              className="inline-flex h-4 shrink-0 items-center justify-center rounded-full border border-brand-600 bg-brand-100 px-1 text-brand-700"
+            >
+              <Pin aria-hidden className="h-2.5 w-2.5" />
+            </span>
+          )}
+          {/* task-07（FR-02）：重命名编辑态——标题位变输入框（预填当前标题
+              派生值，Enter/blur 提交、Esc 取消；stopPropagation 防冒泡触发
+              行选中/行级 Enter）。 */}
+          {editing ? (
+            <input
+              aria-label={`重命名会话 ${title}`}
+              defaultValue={title}
+              maxLength={SESSION_TITLE_MAX_LEN}
+              autoFocus
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") finishRename(e.currentTarget.value);
+                else if (e.key === "Escape") {
+                  renameCancelledRef.current = true;
+                  setEditing(false);
+                }
+              }}
+              onBlur={(e) => finishRename(e.currentTarget.value)}
+              className="h-5 min-w-0 flex-1 rounded border border-brand-600 bg-card px-1.5 text-[13px] font-medium leading-5 text-foreground outline-none"
+            />
+          ) : (
+            <span
+              className={cn(
+                "min-w-0 truncate text-[13px] font-medium",
+                variant === "tree" && selected
+                  ? "text-brand-700"
+                  : "text-foreground",
+              )}
+            >
+              {title}
+            </span>
+          )}
           {/* ql-20260831-013：已归档徽标——归档视图内行与普通会话同貌、
               无法分辨（用户反馈）；中性 muted chip 不抢 brand 语义。 */}
           {session.archived_at && (
@@ -2718,6 +2912,52 @@ function SessionRow({
         {/* 单条操作按钮：hover 显示，阻止行点击冒泡 */}
         {!batchMode && (
           <span className="ml-1 flex hidden items-center group-hover:flex">
+            {/* task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：
+                置顶/取消置顶（按行 pinned_at 二选一，照归档按钮 archived_at
+                先例）+ 重命名，排归档按钮左侧（原型 .ops 顺序：置顶 → 重命名
+                → 归档 → 删除）；hover 走 brand 语义阶（原型 .op:hover 主色）。
+                编辑态隐藏重命名按钮（防 blur 提交与重开编辑态竞态），置顶/归
+                档/删除保留——点击先 blur 提交重命名再执行原操作，语义自洽。 */}
+            {onPin && !session.pinned_at && (
+              <button
+                type="button"
+                aria-label={`置顶 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPin();
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700"
+              >
+                <Pin className="h-3 w-3" />
+              </button>
+            )}
+            {onUnpin && session.pinned_at && (
+              <button
+                type="button"
+                aria-label={`取消置顶 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUnpin();
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700"
+              >
+                <PinOff className="h-3 w-3" />
+              </button>
+            )}
+            {onRename && !editing && (
+              <button
+                type="button"
+                aria-label={`重命名 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  renameCancelledRef.current = false;
+                  setEditing(true);
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
             {/* 2026-08-24：归档/取消归档按钮（在删除按钮左侧）。
                 ql-20260831-013：按行 archived_at 二选一——原两按钮无条件齐显，
                 点错侧后端幂等静默无反馈（对齐批量栏 isArchivedView 显隐语义）。 */}

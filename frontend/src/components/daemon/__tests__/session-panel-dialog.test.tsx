@@ -49,6 +49,10 @@ const sessionApi = vi.hoisted(() => ({
   // 单次假 Response（非数组 → 面板 (runs ?? []).some 崩 + fetch 计数污染）。
   listSessionRuns: vi.fn().mockResolvedValue([]),
   listSessionTasks: vi.fn().mockResolvedValue([]),  // 任务执行面板快照（task-10 补 mock 防真实 fetch）
+  // 定时消息列表（2026-09-07-session-pin-rename-scheduled-send task-08 连带补 mock）：
+  // ScheduledMessagesBar 挂载即取数，缺省会撞各用例 spyOn(globalThis.fetch) 的
+  // 单次假 Response（消费掉 body → 真正被测 fetch 拿已消费流失败，fetch 计数污染）。
+  listScheduledMessages: vi.fn().mockResolvedValue([]),
   createSession: vi.fn(),
   injectSession: vi.fn(),
   interruptSession: vi.fn(),
@@ -80,6 +84,7 @@ vi.mock("@/lib/daemon", async () => {
     ...actual,
     getSessionUsage: sessionApi.getSessionUsage,
     listSessionTasks: sessionApi.listSessionTasks, // 任务执行面板快照（task-10）
+    listScheduledMessages: sessionApi.listScheduledMessages, // 定时消息列表（task-08 连带）
     listSessionRuns: sessionApi.listSessionRuns, // 任务执行面板轮次历史挂载即取数
     createSession: sessionApi.createSession,
     injectSession: sessionApi.injectSession,

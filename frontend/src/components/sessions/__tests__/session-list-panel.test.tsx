@@ -2894,3 +2894,216 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
     ).toBeNull();
   });
 });
+
+// ── 14. 单聊行置顶/重命名（task-07 / 2026-09-07-session-pin-rename-scheduled-send
+//        / FR-01 FR-02 FR-03 / D-002@v1 分组内置顶语义） ─────────────────────
+//
+// 断言口径（constraints）：置顶基于 pinned_at 二态与分组内置顶语义（不做跨分组
+// 全局排序断言——置顶行排分组内最前靠服务端 pinned_at IS NULL 前置键，前端
+// byWs 桶保序不重排）；语义查询（aria-label）锚定，不碰 brand 色值。徽标为
+// 纯图标（无文本），经 title 前缀「已置顶（」锚定（已归档徽标先例同款 title
+// 口径）；置顶/取消置顶是轻量可逆开关，实现直连不弹确认（对照归档 confirm）。
+describe("SessionListPanel 单聊行置顶与重命名（task-07）", () => {
+  /** 一未置顶（s-1/会话A）+ 一已置顶（s-2/会话B，pinned_at 非空）标准固件。 */
+  function pinFixture() {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({
+          id: "s-2",
+          workspace_id: "ws-1",
+          title: "会话B",
+          pinned_at: "2026-09-06T08:00:00Z",
+        }),
+      ]),
+    );
+  }
+
+  it("置顶按钮按 pinned_at 二选一：未置顶行「置顶 …」在/「取消置顶 …」缺席；点击 → onPinSessions([id]) 且不触发行选中（stopPropagation）", async () => {
+    pinFixture();
+    const onPinSessions = vi.fn().mockResolvedValue(0);
+    const onUnpinSessions = vi.fn().mockResolvedValue(0);
+    const onSelect = vi.fn();
+    renderPanel(
+      <SessionListPanel
+        onPinSessions={onPinSessions}
+        onUnpinSessions={onUnpinSessions}
+        onSelect={onSelect}
+      />,
+    );
+    await openGroup("SillyHub");
+
+    // 二选一显隐（对齐归档按钮 archived_at 先例）：未置顶行只有「置顶」。
+    expect(
+      screen.getByRole("button", { name: "置顶 会话A" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "取消置顶 会话A" }),
+    ).not.toBeInTheDocument();
+
+    // 点击：回调携带行 id（批量口径单条数组）；stopPropagation 不冒泡行选中。
+    fireEvent.click(screen.getByRole("button", { name: "置顶 会话A" }));
+    await waitFor(() => expect(onPinSessions).toHaveBeenCalledWith(["s-1"]));
+    expect(onPinSessions).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("已置顶行：「取消置顶 …」在/「置顶 …」缺席；点击 → onUnpinSessions([id])", async () => {
+    pinFixture();
+    const onPinSessions = vi.fn().mockResolvedValue(0);
+    const onUnpinSessions = vi.fn().mockResolvedValue(0);
+    renderPanel(
+      <SessionListPanel
+        onPinSessions={onPinSessions}
+        onUnpinSessions={onUnpinSessions}
+        onSelect={vi.fn()}
+      />,
+    );
+    await openGroup("SillyHub");
+
+    expect(
+      screen.getByRole("button", { name: "取消置顶 会话B" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "置顶 会话B" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消置顶 会话B" }));
+    await waitFor(() => expect(onUnpinSessions).toHaveBeenCalledWith(["s-2"]));
+    expect(onPinSessions).not.toHaveBeenCalled();
+  });
+
+  it("置顶徽标（FR-03）：pinned_at 非空行标题前渲染（title 含置顶时间）；未置顶行无", async () => {
+    pinFixture();
+    renderPanel(
+      <SessionListPanel
+        onPinSessions={vi.fn().mockResolvedValue(0)}
+        onUnpinSessions={vi.fn().mockResolvedValue(0)}
+      />,
+    );
+    await openGroup("SillyHub");
+
+    const rowA = await screen.findByRole("button", { name: "会话 会话A" });
+    const rowB = screen.getByRole("button", { name: "会话 会话B" });
+    // 已置顶行：徽标在标题前（title 相对时间；纯图标无文本，title 锚定）。
+    const badge = rowB.querySelector('span[title^="已置顶（"]');
+    expect(badge).not.toBeNull();
+    // 徽标在标题文本之前（D-002 分组内置顶标识位——取叶子文本 span 锚定：
+    // 徽标纯图标，其外层容器 textContent 同为「会话B」不算标题位）。
+    const titleSpan = [...rowB.querySelectorAll("span")].find(
+      (el) => el.textContent === "会话B" && el.children.length === 0,
+    );
+    expect(titleSpan).toBeTruthy();
+    expect(badge!.compareDocumentPosition(titleSpan!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    // 未置顶行：零徽标。
+    expect(rowA.querySelector('span[title^="已置顶（"]')).toBeNull();
+  });
+
+  it("行内重命名（FR-02）：Pencil → 输入框预填当前标题；Enter 提交 onRenameSession(id, strip 后新标题) 且退出编辑态", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onRenameSession = vi.fn().mockResolvedValue(0);
+    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
+    await openGroup("SillyHub");
+
+    // 进入编辑态：标题位变输入框，预填当前标题。
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重命名 会话A" }),
+    );
+    const input = screen.getByLabelText("重命名会话 会话A");
+    expect((input as HTMLInputElement).value).toBe("会话A");
+
+    // 带空白输入 → strip 后提交；Enter 收口（卸载不触发二次 blur 提交）。
+    fireEvent.change(input, { target: { value: "  新标题  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(onRenameSession).toHaveBeenCalledWith("s-1", "新标题"),
+    );
+    expect(onRenameSession).toHaveBeenCalledTimes(1);
+    // 退出编辑态：输入框消失，标题位恢复（仍为服务端旧值——收敛靠调用方 invalidate）。
+    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "会话 会话A" })).toBeInTheDocument();
+  });
+
+  it("Esc 取消：退出编辑态不回调，行标题保持原值", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onRenameSession = vi.fn().mockResolvedValue(0);
+    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
+    await openGroup("SillyHub");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重命名 会话A" }),
+    );
+    const input = screen.getByLabelText("重命名会话 会话A");
+    fireEvent.change(input, { target: { value: "改了一半的草稿" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(onRenameSession).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
+    // 行标题不被草稿污染（Esc 丢弃编辑值）。
+    expect(screen.getByRole("button", { name: "会话 会话A" })).toBeInTheDocument();
+  });
+
+  it("空值不提交：清空输入 + Enter → 静默退出编辑态零回调", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onRenameSession = vi.fn().mockResolvedValue(0);
+    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
+    await openGroup("SillyHub");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重命名 会话A" }),
+    );
+    const input = screen.getByLabelText("重命名会话 会话A");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onRenameSession).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
+  });
+
+  it("blur 提交：失焦等效 Enter（移动端/外点场景收口）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onRenameSession = vi.fn().mockResolvedValue(0);
+    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
+    await openGroup("SillyHub");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重命名 会话A" }),
+    );
+    const input = screen.getByLabelText("重命名会话 会话A");
+    fireEvent.change(input, { target: { value: "失焦提交" } });
+    fireEvent.blur(input);
+
+    await waitFor(() =>
+      expect(onRenameSession).toHaveBeenCalledWith("s-1", "失焦提交"),
+    );
+  });
+
+  it("三回调 props 缺省（悬浮助手 runtime 抽屉等消费点）→ 零置顶/重命名按钮，徽标照常渲染", async () => {
+    pinFixture();
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+
+    await screen.findByRole("button", { name: "会话 会话A" });
+    expect(screen.queryByRole("button", { name: "置顶 会话A" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消置顶 会话B" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "重命名 会话A" })).toBeNull();
+    // 徽标是展示态（非操作）：不随回调缺省隐藏。
+    const rowB = screen.getByRole("button", { name: "会话 会话B" });
+    expect(rowB.querySelector('span[title^="已置顶（"]')).not.toBeNull();
+  });
+});

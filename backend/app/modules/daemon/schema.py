@@ -48,6 +48,11 @@ class AgentSessionRead(BaseModel):
     deleted_at: datetime | None = None
     # 2026-08-24：会话归档时间戳（archived_at）。NULL = 可见；非 NULL = 已归档。
     archived_at: datetime | None = None
+    # task-02（2026-09-07-session-pin-rename-scheduled-send / FR-01）：置顶时间戳
+    # （task-01 落列）。NULL = 未置顶；非 NULL = 已置顶（列表 pinned 优先排序键，
+    # 前端据此切换置顶/取消置顶按钮与徽标）。from_attributes 直接映射，默认 None
+    # 守护全 NULL 存量行（升级前数据序不变，FR-07）。
+    pinned_at: datetime | None = None
     # 当前运行 run（attach 恢复 currentRunId，启用打断按钮；非 ORM 字段，router 注入）
     current_run_id: uuid.UUID | None = None
     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
@@ -336,6 +341,76 @@ class SessionCtxWindowUpdateRequest(BaseModel):
     """
 
     ctx_window_tokens: int | None = Field(default=None, ge=1_000, le=100_000_000)
+
+
+class SessionTitleUpdateRequest(BaseModel):
+    """PATCH /api/daemon/sessions/{id}/title 请求体（task-02 / FR-03）。
+
+    会话重命名：``title`` strip 后非空且 ≤255 字符（对齐 AgentSession.title
+    列 String(255)）；校验归 service 层（rename_session 抛 422 语义 AppError，
+    不落库）——schema 层不写 min/max，让「全空白拒绝」的中文文案与
+    SessionEmptyPrompt 同口径从 service 统一出口。
+    """
+
+    title: str
+
+
+# ── 会话定时消息 DTO（task-03 2026-09-07-session-pin-rename-scheduled-send /
+# FR-04 / D-001@v1）──────────────────────────────────────────────────────────
+
+
+class ScheduledMessageCreateRequest(BaseModel):
+    """POST /api/daemon/sessions/{id}/scheduled 请求体（task-03 / FR-04）。
+
+    为会话预约一条**一次性**定时消息（D-002@v1，不做周期规则），到点由
+    task-04 sweeper 走 inject 管线派发。三重校验全部归 service 层
+    （create_scheduled_message，照 SessionTitleUpdateRequest 口径——schema
+    层不重复拦空 prompt，让「全空白拒绝」的中文文案与 SessionEmptyPrompt
+    同口径统一出口）：
+
+    - ``prompt`` strip 非空，或 ``attachment_ids`` 非空豁免（对齐 inject 的
+      D-7 看图说话口径）→ 否则 422；
+    - ``dispatch_at`` 必须 ≥ now(UTC)+60s（防「刚建即过期」竞态）→ 否则 422；
+    - 目标会话非终态（ended/failed）且未软删 → 否则 409。
+
+    ``prompt`` 无字段级 min_length（附件豁免轮合法携带空 prompt），max_length
+    对齐 SessionInjectRequest（8000）；``attachment_ids`` 上限 10 = 图 5 + 文 5
+    （DTO 层总量兜底，逐 kind 校验到点归 inject 链），落库时转 str 列表快照。
+    """
+
+    prompt: str = Field(max_length=8000)
+    # 计划派发时间（tz-aware；naive 入参按 UTC 补，service 层归一）。
+    dispatch_at: datetime
+    attachment_ids: list[uuid.UUID] | None = Field(default=None, max_length=10)
+    agent_profile_id: str | None = None
+    llm_provider_id: str | None = None
+
+
+class ScheduledMessageRead(BaseModel):
+    """定时消息读侧 DTO（POST 201 响应 / GET 列表项，task-03 / FR-04）。
+
+    ``AgentSessionScheduledMessage`` ORM 行的 from_attributes 直映射——
+    ``status`` 为 pending / dispatched / cancelled / failed 四态字符串
+    （派发成功不删行，dispatched_at / cancelled_at / error_code 审计留档，
+    消费方=前端 scheduled-messages-bar 状态 tag 与失败原因展示，task-05）；
+    ``attachment_ids`` 为落库的 str 列表快照（派发时转回 uuid）。
+    """
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    agent_session_id: uuid.UUID
+    prompt: str
+    dispatch_at: datetime
+    status: str
+    attachment_ids: list[str] | None = None
+    agent_profile_id: str | None = None
+    llm_provider_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    dispatched_at: datetime | None = None
+    cancelled_at: datetime | None = None
 
 
 # ── 会话队列操作 DTO（2026-08-31-session-queue-ux task-04 / design §5） ───────

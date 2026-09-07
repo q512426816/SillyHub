@@ -111,10 +111,13 @@ from app.modules.daemon.schema import (
     QueueReorderRequest,
     RuntimeUsageListResponse,
     RuntimeUsageWindow,
+    ScheduledMessageCreateRequest,
+    ScheduledMessageRead,
     SessionCreateRequest,
     SessionCtxWindowUpdateRequest,
     SessionInjectRequest,
     SessionReopenResponse,
+    SessionTitleUpdateRequest,
     SessionUsageRead,
     SharedMachineRuntimeView,
     SharedMachineView,
@@ -3066,8 +3069,9 @@ async def list_sessions(
     """List the current user's AgentSessions (owner-scoped, stable paging).
 
     task-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经
-    daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容
-    ilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。
+    daemon_runtimes 关联）/ provider / q（内容模糊，实现为 user_input 的内容
+    ilike，不匹配改过的 title 列，见 service 层 docstring——ISS-06）；全部可选，
+    不传时查询与现状一致（零回归）。
     过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset
     作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。
     2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /
@@ -3660,6 +3664,97 @@ async def update_session_ctx_window(
 ) -> None:
     """Set/clear the context window override for an owned session (display-only)."""
     await DaemonService(session).update_ctx_window(session_id, user.id, data.ctx_window_tokens)
+
+
+# task-02（2026-09-07-session-pin-rename-scheduled-send / FR-01~FR-03 / FR-06）：
+# 会话置顶/取消置顶/重命名三端点——照 archive/unarchive 模式（owner 校验归
+# service、404 不泄露存在性、成功后 publish_sessions_changed 广播 status_changed）。
+
+
+@router.patch(
+    "/sessions/{session_id}/pin",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def pin_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Pin an owned session (pinned-first ordering, idempotent)."""
+    await DaemonService(session).pin_session(session_id, user.id)
+
+
+@router.patch(
+    "/sessions/{session_id}/unpin",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def unpin_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Unpin an owned session (restore to recent-activity ordering, idempotent)."""
+    await DaemonService(session).unpin_session(session_id, user.id)
+
+
+@router.patch(
+    "/sessions/{session_id}/title",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def rename_session(
+    session_id: uuid.UUID,
+    data: SessionTitleUpdateRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Rename an owned session (title strip 后非空 ≤255，非法 422 不落库)."""
+    await DaemonService(session).rename_session(session_id, user.id, data.title)
+
+
+# task-03（2026-09-07-session-pin-rename-scheduled-send / FR-04 / D-001@v1）：
+# 定时消息三端点——创建（201）/列表/取消（204），TaskRunAgentUser 鉴权。三重
+# 校验（空 prompt 422 / dispatch_at 过近 422 / 终态或软删会话 409）与归属
+# 404 均归 SessionService；到点派发归 task-04 sweeper，端点不触发 inject。
+
+
+@router.post(
+    "/sessions/{session_id}/scheduled",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_scheduled_message(
+    session_id: uuid.UUID,
+    data: ScheduledMessageCreateRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> ScheduledMessageRead:
+    """Create a one-shot scheduled message for an owned session (status=pending)."""
+    row = await DaemonService(session).create_scheduled_message(session_id, user.id, data)
+    return ScheduledMessageRead.model_validate(row)
+
+
+@router.get("/sessions/{session_id}/scheduled")
+async def list_scheduled_messages(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> list[ScheduledMessageRead]:
+    """List all scheduled messages of an owned session (all statuses, dispatch_at asc)."""
+    rows = await DaemonService(session).list_scheduled_messages(session_id, user.id)
+    return [ScheduledMessageRead.model_validate(row) for row in rows]
+
+
+@router.delete(
+    "/sessions/{session_id}/scheduled/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def cancel_scheduled_message(
+    session_id: uuid.UUID,
+    message_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Cancel a pending scheduled message (non-pending → 409, terminal no-revert)."""
+    await DaemonService(session).cancel_scheduled_message(session_id, message_id, user.id)
 
 
 async def _inject_run_error_events(

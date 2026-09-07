@@ -23,12 +23,17 @@
  * 结构化选中（change/quick 两槽位、同类型后选覆盖先选；父级发送组装归 task-05）。
  * placeholder prop 保持父级传入不动（文案更新归 task-05）。
  *
+ * task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：发送按钮左侧
+ * 加 ⏰ 定时发送按钮——可选 onSchedule 注入（父层开定时弹窗），未传不渲染（预会话
+ * idle 态无 sessionId，父层不传即不出现入口）；本组件纯入口不持弹窗/时间状态。
+ *
  * 本组件无弹窗上下文依赖，/runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AtSign,
+  Clock,
   FileText,
   Image as ImageIcon,
   Paperclip,
@@ -146,6 +151,10 @@ export interface SessionInputBarProps {
   /** 派团队入口 tooltip（启用态动作说明 / 禁用态原因，对齐原 TeamTriggerRow
    *  按钮的 tooltip 口径由父层合成）。 */
   teamTriggerTitle?: string;
+  /** task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：⏰ 定时发送
+   *  入口——点击开父层定时弹窗（草稿预览 + 分钟级时间选择）；未传不渲染（预会话
+   *  idle 态父层不注入即不出现入口）。 */
+  onSchedule?: () => void;
 }
 
 function formatBytes(n: number): string {
@@ -226,6 +235,7 @@ export function SessionInputBar({
   onTeamTrigger,
   teamTriggerDisabled = false,
   teamTriggerTitle,
+  onSchedule,
 }: SessionInputBarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -876,6 +886,21 @@ export function SessionInputBar({
           disabled={disabled}
           style={inputHeight != null ? { height: inputHeight } : undefined}
         />
+        {/* task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：⏰ 定时
+            发送按钮——发送按钮左侧，点击开父层定时弹窗（onSchedule 注入，预会话
+            idle 态不注入不渲染）。原生 button（antd .ant-btn height:32 会盖掉
+            Tailwind 尺寸，＋ 按钮同款先例）；hover brand 语义阶双主题换肤。 */}
+        {onSchedule && (
+          <button
+            type="button"
+            onClick={onSchedule}
+            aria-label="定时发送"
+            title="定时发送——设定时间到点自动发送这条消息"
+            className="flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-full text-muted-foreground transition-colors hover:bg-brand-50 hover:text-brand-600"
+          >
+            <Clock aria-hidden className="h-4 w-4" />
+          </button>
+        )}
         <Button
           type="primary"
           shape="circle"

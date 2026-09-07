@@ -611,6 +611,37 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             }
             return results.filter((r) => r.status === "rejected").length;
           }}
+          /* task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：
+             置顶/取消置顶/重命名三回调（照 onArchiveSessions 模式：dynamic
+             import @/lib/daemon → Promise.allSettled → invalidate
+             ["agentSessions"] 前缀 → 返回失败个数供面板 toast）。置顶/取消
+             置顶不动选中态（会话行原位收敛）；重命名仅 invalidate 收敛标题，
+             不动 ?session= 深链与选中会话（key 不变面板不重挂载）。API 由
+             task-05 落地（pinAgentSession/unpinAgentSession/renameAgentSession）。 */
+          onPinSessions={async (ids) => {
+            const { pinAgentSession } = await import("@/lib/daemon");
+            const results = await Promise.allSettled(
+              ids.map((id) => pinAgentSession(id)),
+            );
+            void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+            return results.filter((r) => r.status === "rejected").length;
+          }}
+          onUnpinSessions={async (ids) => {
+            const { unpinAgentSession } = await import("@/lib/daemon");
+            const results = await Promise.allSettled(
+              ids.map((id) => unpinAgentSession(id)),
+            );
+            void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+            return results.filter((r) => r.status === "rejected").length;
+          }}
+          onRenameSession={async (id, title) => {
+            const { renameAgentSession } = await import("@/lib/daemon");
+            const results = await Promise.allSettled([
+              renameAgentSession(id, title),
+            ]);
+            void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+            return results.filter((r) => r.status === "rejected").length;
+          }}
           /* task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群
              收纳三回调（照会话回调模式：dynamic import lib → invalidate
              ["groupChats"] 前缀（视图维度键全在此外）→ 操作的是 selectedGroupId
