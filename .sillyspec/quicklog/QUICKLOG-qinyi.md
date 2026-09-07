@@ -471,3 +471,8 @@
 根因：env 注入只在 daemon 源码里，须随 backend 镜像 /app/daemon-dist 分发上架后存量 daemon 自更新才能拉到；主树有并发 WIP 不能直接打包，且 e0af8e3a0 单独不可编译需取补齐后的 main HEAD
 方案：detached worktree @9a9bd8811（e0af8e3a0 为祖先）干净构建 bundle（BUILD_ID 9a9bd881-20260907132501，注入 5 处验证）→ PROD_API_URL=https://crrcdt.ppdmq.top build-and-save 打镜像（镜像内再验注入+BUILD_ID）→ scp 阿里云双层 deploy 目录 → 旧镜像 tag backup-20260907-1331 后 load + compose up → 服务器 tar 清理与 worktree 删除；交接文档 §3 补落地记录与生效前提（sillyspec 发版 ≥3.28.1）、§4.1 改判已核对无需开发并补记监控三件套（3a181291a）早已存在
 结果：部署验证全绿：5 容器 healthy、health ok、latest.json 公网==后端直连==9a9bd881-20260907132501、线上 bundle 含 SILLYSPEC_SYNC_TIMEOUT_MS 5 处、无迁移报错；本机 daemon 现版本 d4fdcc7a-20260907045827 待自更新拉新；仓库改动仅 docs/sillyspec/2026-09-07-spec-sync-abort-classification.md（无代码变更，测试不适用）
+
+## ql-20260907-010-38f5 | 2026-09-07 14:10:37 | spec 拉取工作区级化：心跳驱动 single-flight 后台预取 + 会话创建共享在途拉取，消除每会话全量下载
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/daemon/router.py, backend/app/modules/daemon/tests/test_heartbeat_spec_cache.py, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/hub-client.ts, sillyhub-daemon/src/api-types.ts, sillyhub-daemon/tests/daemon-spec-prefetch.test.ts, backend/openapi.json, frontend/src/lib/api-types.ts, .sillyspec/docs/sillyhub-daemon/modules/daemon.md, .sillyspec/docs/backend/modules/daemon.md

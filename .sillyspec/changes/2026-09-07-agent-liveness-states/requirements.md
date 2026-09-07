@@ -57,10 +57,11 @@ Given E-01 实证（裸 claude transcript 是否记 permission 等待）
 When 证伪
 Then 日志推导侧 blocked 关闭并如实定稿（托管会话不受影响）；通过则实现 claude deriver blocked 分支
 
-### FR-05: 前端展示
-Given 前端 agent 日志面板与工作台
+### FR-05: 前端展示（D-004@v1 两层）
+覆盖决策：D-001@v1, D-004@v1
+Given 会话列表 / 工作台首页 / 会话详情 agent 日志面板
 When 状态四字段可用（api-types 经 pnpm gen:types 重新生成）
-Then 面板逐行状态徽章 + 推导时间（骨架不变）；工作台多会话聚合表（状态/静默时长=now-last_event_at/关联 ctx/证据摘要）；idle 未读小红点（working/blocked→idle 转移边 + 已读状态）；agent_blocked 通知渲染与跳转
+Then ①会话列表每行行尾 ~18px 状态小灯（五态色 + 工作/阻塞呼吸闪烁，不新增列不改布局），悬停弹小卡（状态全名/静默时长=now-last_event_at/关联 ctx/证据摘要/推导时间）；②工作台首页新「Agent 状态总览」卡片（按状态分组计数，"在等人"组列会话名+等待时长+跳转入口）；③会话详情 agent 日志面板逐行状态徽章+推导时间；④idle 未读小红点（working/blocked→idle 转移边+已读状态）；⑤agent_blocked 通知渲染与跳转
 
 ### FR-06: 编排知情决策（P1e）
 覆盖决策：D-001@v1
@@ -85,3 +86,4 @@ Then blocked→升级给人（通知+待办）不 kill（D-010 绝不自动批�
 | D-001@v1 | FR-01~FR-06 | 范围=P1 全量 a-e |
 | D-002@v1 | FR-04 | E-01 纳入本期，证伪即定稿关闭 |
 | D-003@v1 | FR-01, FR-02, FR-04 | 方案 1：daemon 自发现+日志推导+第一方汇聚（D-012 优先级） |
+| D-004@v1 | FR-05 | 状态展示两层：会话列表小灯+悬浮卡（不新增列），完整总览放工作台首页卡片 |

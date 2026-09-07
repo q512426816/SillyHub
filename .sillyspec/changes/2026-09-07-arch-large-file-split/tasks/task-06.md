@@ -5,6 +5,7 @@ title_zh: 'Wave2 前置对账——import 语句 + patch 字符串目标两类�
 author: 'qinyi'
 created_at: 2026-09-07 08:48:02
 priority: P0
+low_risk: true
 depends_on: ['task-05']
 blocks: []
 requirement_ids: [FR-02]

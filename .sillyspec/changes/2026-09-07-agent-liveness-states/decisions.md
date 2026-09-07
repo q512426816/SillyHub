@@ -37,3 +37,14 @@ created_at: 2026-09-07 10:15:00
 - normalized_requirement: 发现通道双源（daemon 自发现为主 + SillySpec 登记为 ctx 增强）；状态源优先级＝第一方权限事件 > 日志推导（禁止两套 blocked 语义并行）；推导规则以协议文档为单一事实源、双端 fixture 对拍
 - impacts: [FR-01, FR-02, FR-03, FR-04, FR-05]
 - evidence: 用户 AskUserQuestion 方案轮实答选方案 1（2026-09-07）；方案依据＝sillyspec 仓 docs/agent-liveness-derivation-design-draft.md（2026-09-07 实证回写版，D-001~D-012 决策链）+ 本会话 E-02/E-03/E-08 三项实证
+
+## D-004@v1: 状态展示两层——会话列表小灯+悬浮卡，完整总览放工作台
+- type: architecture
+- priority: P1
+- status: accepted
+- source: user
+- question: 会话列表空间紧张，状态信息（状态/静默时长/关联/证据）怎么展示？（A 小灯+悬浮卡 / B 只做工作台面板 / C 可开关窄列）
+- answer: A。会话列表每行行尾只加 ~18px 状态小灯（五态色+呼吸闪烁，不新增列不改布局），悬停弹详情小卡（静默时长/关联 ctx/证据摘要）；完整「Agent 状态总览」卡片（分组计数+等人跳转）放工作台首页。用户原话背景：会话列表没那么大空间展示这些信息
+- normalized_requirement: 会话列表零新增列、列表布局不变；完整状态信息只能出现在悬浮卡与工作台总览卡片两处
+- impacts: [FR-05, task-14]
+- evidence: 用户 AskUserQuestion 实答选 A（2026-09-07，brainstorm 完成后的设计修订）

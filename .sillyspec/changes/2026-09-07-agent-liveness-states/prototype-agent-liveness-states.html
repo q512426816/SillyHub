@@ -100,67 +100,49 @@ tr:last-child td { border-bottom: none; }
     <button class="theme-toggle" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='ai-native'?'blue':'ai-native'">切换主题（blue / ai-native）</button>
   </div>
 
-  <!-- ① 工作台·多会话状态聚合 -->
+  <!-- ① 会话列表小灯 + 悬浮卡 + 工作台总览（D-004 两层） -->
   <div class="card">
-    <h2>① 工作台 · 多会话状态聚合</h2>
-    <div class="desc">全部托管会话（daemon 自发现，含未跑 SillySpec 的裸会话）+ 登记会话按 (workspace, log_path) 汇聚去重。状态 ≤10s 可见；idle 且有未读转移边 → 小红点（D-006）。</div>
-    <div class="legend">
+    <h2>① 第一层：会话列表行尾小灯（不新增列）+ 悬停悬浮卡</h2>
+    <div class="desc">列表布局零改动，每行行尾只多一个 ~18px 状态点；鼠标悬停弹出详情小卡。下面模拟列表行（把鼠标放到状态点上）：</div>
+    <div class="panel-row">
+      <div class="left"><span class="harness h-zcode"><span class="ic">Z</span>会话：改前端样式 · 任务执行中 68%</span></div>
+      <span class="state state-working" style="cursor:help" title="working 在干活 · 静默 3s · 2026-09-04-conflict-… · last_event=model_io · 推导于 10:24:28"><span class="dot"></span></span>
+    </div>
+    <div class="panel-row">
+      <div class="left"><span class="harness h-claude"><span class="ic">C</span>会话：跑回归测试 · 等待确认</span></div>
+      <span class="state state-blocked" style="cursor:help" title="blocked 在等人 2分41秒 · quick-a3f8b2c1 · PERMISSION_REQUEST(write) · 推导于 10:24:26"><span class="dot"></span></span>
+    </div>
+    <div class="panel-row">
+      <div class="left"><span class="harness h-codex"><span class="ic">X</span>会话：变更A · 已完成</span></div>
+      <span class="state state-idle" style="cursor:help" title="idle 空闲 · 静默 4分12秒 · last_event=task_complete"><span class="dot"></span></span>
+    </div>
+    <div class="note" style="margin-top:6px">悬停任一状态点即可看到悬浮卡内容（本原型用系统 tooltip 模拟，真实实现为自定义悬浮卡）。徽章图例：</div>
+    <div class="legend" style="margin-top:10px">
       <span class="state state-working"><span class="dot"></span>working 在干活</span>
       <span class="state state-blocked"><span class="dot"></span>blocked 在等人</span>
       <span class="state state-idle"><span class="dot"></span>idle 空闲</span>
       <span class="state state-ended"><span class="dot"></span>ended 已结束</span>
       <span class="state state-unknown"><span class="dot"></span>unknown</span>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>①′ 第二层：工作台首页「Agent 状态总览」卡片</h2>
+    <div class="desc">完整信息在这里总览（不挤会话列表）：按状态分组计数；"在等人"组列出会话与等待时长，点击跳转会话处理。</div>
     <table>
-      <thead><tr><th>会话</th><th>状态</th><th>静默时长</th><th>关联</th><th>证据摘要</th><th></th></tr></thead>
+      <thead><tr><th>分组</th><th>会话</th><th>等待/静默</th><th></th></tr></thead>
       <tbody>
-        <tr id="r1">
-          <td><span class="harness h-zcode"><span class="ic">Z</span>zcode · 401ba557</span></td>
-          <td><span class="state state-working" data-state><span class="dot"></span><span data-label>working</span></span></td>
-          <td class="silent">3s</td>
-          <td class="ctx">2026-09-07-arch-…</td>
-          <td class="evidence">last_event=model_io</td>
-          <td></td>
-        </tr>
-        <tr id="r2">
-          <td><span class="harness h-claude"><span class="ic">C</span>claude · 7f21c0aa</span></td>
-          <td><span class="state state-blocked" data-state><span class="dot"></span><span data-label>blocked</span></span></td>
-          <td class="silent">2m 41s</td>
-          <td class="ctx">quick-a3f8b2c1</td>
-          <td class="evidence">PERMISSION_REQUEST(write)</td>
-          <td></td>
-        </tr>
-        <tr id="r3">
-          <td><span class="harness h-codex"><span class="ic">X</span>codex · 01a02598</span></td>
-          <td><span class="state state-idle" data-state><span class="dot"></span><span data-label>idle</span></span></td>
-          <td class="silent">4m 12s</td>
-          <td class="ctx">2026-09-04-conflict-…</td>
-          <td class="evidence">last_event=task_complete</td>
-          <td><span class="unread" title="working→idle 转移未读"></span></td>
-        </tr>
-        <tr id="r4">
-          <td><span class="harness h-zcode"><span class="ic">Z</span>zcode · 5ece4062</span></td>
-          <td><span class="state state-ended" data-state><span class="dot"></span><span data-label>ended</span></span></td>
-          <td class="silent">18m 05s</td>
-          <td class="ctx">—</td>
-          <td class="evidence">file_gone(reset)</td>
-          <td></td>
-        </tr>
-        <tr id="r5">
-          <td><span class="harness h-claude"><span class="ic">C</span>claude · 9b3d1e77</span></td>
-          <td><span class="state state-unknown" data-state><span class="dot"></span><span data-label>unknown</span></span></td>
-          <td class="silent">—</td>
-          <td class="ctx">—</td>
-          <td class="evidence">deriver_error(retry)</td>
-          <td></td>
-        </tr>
+        <tr><td><span class="state state-blocked"><span class="dot"></span>在等人（1）</span></td>
+            <td>跑回归测试 · claude · quick-a3f8b2c1</td><td class="silent">2m 41s</td>
+            <td><a href="#" style="color:var(--primary)">去处理 →</a></td></tr>
+        <tr><td><span class="state state-working"><span class="dot"></span>在干活（2）</span></td>
+            <td>改前端样式 · zcode ／ 变更C · codex</td><td class="silent">3s ／ 12s</td><td></td></tr>
+        <tr><td><span class="state state-idle"><span class="dot"></span>空闲（1）</span></td>
+            <td>变更A · codex <span class="unread" title="working→idle 转移未读"></span></td><td class="silent">4m 12s</td><td></td></tr>
+        <tr><td><span class="state state-ended"><span class="dot"></span>已结束（1）</span></td>
+            <td>变更B · zcode</td><td class="silent">18m</td><td></td></tr>
       </tbody>
     </table>
-    <div class="demo" style="margin-top:12px">
-      <span class="hint">演示状态流转（点按钮模拟 tailer 推导变化）：</span>
-      <button onclick="cycle('r2')">claude·7f21c0aa 下一态</button>
-      <button onclick="cycle('r1')">zcode·401ba557 下一态</button>
-    </div>
   </div>
 
   <!-- ② blocked 通知 -->

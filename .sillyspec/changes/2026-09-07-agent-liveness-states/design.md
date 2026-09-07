@@ -69,15 +69,17 @@ input_material: sillyspec 仓 docs/agent-liveness-derivation-design-draft.md（2
 - 新端点 `POST /api/agent-logs/states`（批量）：daemon 鉴权通道（与 `/api/agent-logs` 同规则分流），body 仅枚举级数据。**upsert 含 create 语义**：自发现的新会话（裸 agent）可能尚无落库行（登记只发生在 CLI 调用入口），对不存在的 `(workspace_id, log_path)` 按 entry 携带的最小元信息（harness / format / session 短 id / agent_cwd）create 行，origin 标 `liveness-discovered`，后续 CLI 登记到达时按既有键 upsert 融合（ctx 增强不覆盖状态列）。
 - 通知：type `agent_blocked`，blocked 持续 ≥120s 未消解触发；与既有 5min auto-deny timer **同源分级**（120s 轻提醒 / 5min 自动拒绝照旧）；消解后再次进入视为新段。
 
-### 5.4 P1c — frontend
+### 5.4 P1c — frontend（D-004@v1：小灯+悬浮卡，两层展示）
 
-- 会话视图 agent 日志面板逐行加状态徽章 + 推导时间（骨架不变，组件级增量）。
-- 工作台多会话状态聚合表（状态/静默时长/关联 ctx/证据摘要；idle 未读小红点＝`working/blocked → idle` 转移边 + 视图已读状态，D-006）。
-- `agent_blocked` 通知渲染与跳转。原型：`prototype-agent-liveness-states.html`（双主题、五态徽章、流转演示）。
+- **会话列表**：每行**行尾加一个 ~18px 状态小灯**（颜色区分五态、工作/阻塞带呼吸闪烁），**不新增列**、不改列表布局；鼠标悬停弹出小卡片（状态全名 / 静默时长 / 关联 change_key|quick_id / 证据摘要 / 推导时间）。
+- **工作台首页**：新增「Agent 状态总览」卡片——按状态分组计数（在干活 N / 在等人 N / 空闲 N / 已结束 N），"在等人"组列出会话名 + 等待时长 + 跳转入口（完整信息在这里总览，不挤会话列表）。
+- **会话视图 agent 日志面板**：逐行状态徽章 + 推导时间（骨架不变，组件级增量）。
+- idle 未读小红点＝`working/blocked → idle` 转移边 + 视图已读状态（D-006）。
+- `agent_blocked` 通知渲染与跳转。原型：`prototype-agent-liveness-states.html`（双主题、五态、悬浮卡与总览卡片演示）。
 
 ### 5.5 P1d — deriver 补齐
 
-codex deriver（E-02 词汇表规则）+ claude deriver（E-01 实证门控：先十分钟实证裸 claude transcript 是否记 permission 等待，通过则实现 blocked 规则，证伪则记录结论关闭该路径）。
+codex deriver（E-02 词汇表规则）+ claude deriver（**E-01 已证伪定稿（2026-09-07，160 transcript 实证：无等待审批事件类型）——只实现 working/idle 规则（tool_use 未配对→working / 纯文本→idle），blocked 分支关闭，日志推导 blocked 全线不承诺**，D-002@v1 处置生效）。
 
 ### 5.6 P1e — 编排知情决策
 
@@ -98,17 +100,18 @@ backend `list_workers`（`app/modules/agent/mcp_tools.py`）返回值 worker 增
 | 新增 | sillyhub-daemon/src/agent-log/liveness/discovery.ts | 自发现三层数据源 + 两档定位（直算/窄扫）；布局规则自 sillyspec JS 移植 |
 | 新增 | sillyhub-daemon/tests/agent-log/liveness/*.test.ts | 每 deriver fixture 单测 + tailer 轮转/预算/fail-open 测试 |
 | 修改 | sillyhub-daemon/src/daemon.ts | tailer 生命周期挂接（启动/优雅停止；独立 try 包裹，崩溃不影响主循环） |
-| 修改 | sillyhub-daemon/src/hub-client.ts | 批量上报 `POST /api/agent-logs/states`（producer=tailer 推导结果 → hub-client HTTP（daemon 鉴权）→ consumer=backend platform_sync router；字段见 §7） |
+| 修改 | sillyhub-daemon/src/hub-client.ts | 三职：①批量上报 `POST /api/agent-logs/states`（producer=tailer 推导结果 → hub-client HTTP（daemon 鉴权）→ consumer=backend platform_sync router；字段见 §7）；②周期 `GET /api/agent-logs` 拉登记落库行作 watch list 增强源（FR-02 双源汇聚的登记侧摄取通道，现无此读取方法需新增）；③**第一方 blocked 源并入（D-012）**：推送某会话 states 时，若该会话存在未消解的 PERMISSION_REQUEST（daemon 内存 `_resolversBySession` pending），blocked 优先取第一方事件证据，日志推导不重复判定 |
 | 修改 | backend/app/modules/platform_sync/model.py | `AgentSessionLogORM` 增 `state`/`state_derived_at`/`state_evidence`/`last_event_at` 四列；states 端点 upsert-create（origin=`liveness-discovered` 行由元信息 create，producer=daemon → consumer=前端 GET agent-logs 响应） |
-| 新增 | backend/alembic/versions/<rev>_agent_liveness_states.py | 四列迁移 |
+| 新增 | backend/migrations/versions/<rev>_agent_liveness_states.py | 四列迁移（alembic 实际目录为 backend/migrations/versions/，非 alembic/） |
 | 修改 | backend/app/modules/platform_sync/schema.py | `AgentLogStatePush`/`AgentLogStateEntry` 请求模型 + 列表响应模型增状态字段（producer=daemon → schema 反序列化 → consumer=前端 api-types） |
 | 修改 | backend/app/modules/platform_sync/router.py | `POST /agent-logs/states`（批量 upsert + 状态转移检测 → 触发 agent_blocked 通知）；GET agent-logs 响应透传状态三字段 |
 | 修改 | backend/app/modules/platform_sync/service.py | 状态 upsert / 转移检测（进入 blocked 时间戳记段）/ dedupe 段计数 |
 | 修改 | backend/app/modules/notification/（model/schema/service/events） | 新 type 值 `agent_blocked`（model.type 为 String(40) 存量自由值，无迁移；渲染模板 + Redis 推送复用既有通道） |
-| 修改 | backend/app/modules/agent/mcp_tools.py（list_workers）+ worker/mission 状态链路（orchestrator/mission_context 按汇入点实调） | worker 返回值增 `liveness`：producer=daemon 推导 → worker 状态上报链路（汇入点 plan 定）→ mission 上下文 → consumer=list_workers MCP 响应 + 派发模板 |
+| 修改 | backend/app/modules/agent/mcp_tools.py | list_workers 返回值增 `liveness`：producer=daemon 推导 → worker 状态上报链路汇入（orchestrator.py/mission_context.py 汇入点由 spike-01 实调定位，按需并入 task-12 allowed_paths，design 不预列路径；链路过重则降级 backend 直查 platform_agent_logs，R-03）→ consumer=list_workers MCP 响应 + 派发模板 |
 | 修改 | frontend/src/components/agent-log/（面板组件 + types.ts） | 逐行状态徽章 + 推导时间（consumer；api-types 重新生成后接线） |
-| 修改 | frontend/src/lib/api-types.ts | `pnpm gen:types` 重新生成（后端 schema 改动后强制，规则 21） |
-| 修改 | frontend/src/components/（工作台聚合 + 通知渲染） | 多会话状态聚合表（原型对照）+ agent_blocked 通知卡 |
+| 修改 | frontend/src/lib/api-types.ts + backend/openapi.json | `pnpm gen:types` 重新生成并同步提交两文件（后端 schema 改动后强制，规则 21） |
+| 修改 | frontend/src/components/（会话列表行状态小灯+悬浮卡 / 工作台「Agent 状态总览」卡片 / 通知渲染） | D-004 两层展示：列表行尾 ~18px 状态点（不新增列，hover 弹详情卡）+ 工作台总览卡片（分组计数+等人跳转）（原型对照）+ agent_blocked 通知卡 |
+| 新增 | backend/app/modules/platform_sync/tests/（test_agent_liveness_states_migration.py / test_agent_log_states_push.py）+ backend/app/modules/notification/tests/test_agent_blocked_notify.py | task-07/08/09 对应测试：迁移升降级 / states 端点 upsert-create 与鉴权 / agent_blocked 阈值与段级 dedupe |
 
 ### sillyspec 仓变更
 
@@ -199,6 +202,7 @@ Notification type=agent_blocked：
 - **D-001@v1（范围=P1 全量 a–e）**：覆盖 §5.2–§5.6 全部 Phase 与文件清单。
 - **D-002@v1（E-01 纳入本期）**：覆盖 §5.5 claude deriver 门控与 R-04。
 - **D-003@v1（方案 1：daemon 自发现+日志推导+第一方汇聚）**：覆盖 §5.1/§5.2 总体架构与 §7.5 生命周期契约。
+- **D-004@v1（状态展示两层：列表小灯+悬浮卡 / 工作台总览卡片）**：覆盖 §5.4 前端两层展示与 FR-05。
 - 输入材料草案 D-001~D-012（sillyspec 仓）作为设计前提整体采纳，其中 D-012（第一方>日志推导）经 E-08 实证强化为本设计 §5.1 状态源优先级。
 - 无未解决决策；R-03 汇入点细节留 plan 阶段实调（非用户决策）。
 

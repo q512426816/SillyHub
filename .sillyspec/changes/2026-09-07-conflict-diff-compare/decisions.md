@@ -48,5 +48,5 @@ created_at: 2026-09-07 11:05:00
 - source: assistant
 - 日期: 2026-09-07
 - question: quick-<hex8> 冲突条目对用户是不可读 ID，用户要求展示 ql 编号（如 ql-20260907-006-2972）。quick 会话与 ql 编号的结构化映射只存在于 daemon 机器本地 `.sillyspec/.runtime/quick-sessions/<名>/guard.json` 的 `quicklogId` 字段，且 `.runtime/` 在上传排除集内，平台侧拿不到，怎么补？
-- answer: daemon 侧 `collectStatusOnce()` 投影 pending_conflicts 时，对 `quick-*` 名 best-effort 读本地 guard.json 的 quicklogId 补 `ql_id` 字段（读不到则缺省）；backend `DaemonHeartbeatSillySpecConflict` DTO 加可选 `ql_id` 透传；前端标题展示 ql 编号 + 小字原 ID 兜底。不改外部 sillyspec CLI（不在本仓）。
-- evidence: 探索实测 `.sillyspec/.runtime/quick-sessions/quick-1ed69695/guard.json:123` 存在 quicklogId 字段；映射实例见 docs/sillyspec/finished/2026-09-03-quicksync-conflict-granularity.md:7。
+- answer: daemon 侧 `collectStatusOnce()` 后处理投影 pending_conflicts 时，对 `quick-*` 名 best-effort 读本地 guard.json 的 quicklogId 补 `ql_id` 字段（读不到则缺省）；backend `DaemonHeartbeatSillySpecConflict` DTO 加可选 `ql_id` 透传；前端标题展示 ql 编号 + 小字原 ID 兜底。不改外部 sillyspec CLI（不在本仓）。
+- evidence: guard.json 的 quicklogId 字段实证于 `.sillyspec/.runtime/quick-sessions/quick-0343fb5a/guard.json:47`（Grill 复核修订：初稿引用的 quick-1ed69695 目录已清理）；映射实例见 docs/sillyspec/finished/2026-09-03-quicksync-conflict-granularity.md:7。**已知限制**（Grill gap-1）：存量两条 quick 冲突（quick-62e1d5fb/quick-aac62562）的 guard.json 已不存在，QUICKLOG 正文与 quick 会话名无稳定结构化映射可反查（正文偶有 quick-名提及但不构成解析依据），这两条将兜底显示原始 ID；ql 编号展示对新产生的 quick 冲突生效。
