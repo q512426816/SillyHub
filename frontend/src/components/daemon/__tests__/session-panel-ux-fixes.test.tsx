@@ -64,6 +64,9 @@ vi.mock("@/lib/daemon", async () => {
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
+    // 任务执行面板挂载即取数（task-10）：缺接线走 actual 真 fetch → 无 App
+    // 上下文 notify 炸 unhandled rejection。
+    listSessionTasks: sessionApi.listSessionTasks,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
     cancelTeamMission: sessionApi.cancelTeamMission,
