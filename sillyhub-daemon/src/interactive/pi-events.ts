@@ -148,6 +148,7 @@ export class PiEventNormalizer {
    */
   private turnTask: {
     taskId: string;
+    taskName: string;
     toolUses: number;
     lastToolName: string;
     startedAtMs: number;
@@ -232,6 +233,12 @@ export class PiEventNormalizer {
         // assistant 消息边界：递增轮内序号（segment 隔离）。user/toolResult 不计。
         const msg = isRecord(raw.message) ? raw.message : {};
         if (msg.role === 'assistant') this.assistantMsgSeq += 1;
+        // ql-20260907-011：user 消息在轮初携带指令全文（真实流实证）——提取
+        // 摘要升级任务名（backend upsert task_name latest-wins，前端同步覆盖）。
+        if (msg.role === 'user') {
+          const derived = this.derive(() => this.deriveUserName(msg));
+          return derived;
+        }
         return [];
       }
       default:
@@ -556,6 +563,7 @@ export class PiEventNormalizer {
       out.push(
         this.buildTurnTaskEvent('completed', {
           taskId: stale.taskId,
+          taskName: stale.taskName,
           toolUses: stale.toolUses,
           lastToolName: stale.lastToolName,
           summary: this.pendingError || undefined,
@@ -567,6 +575,7 @@ export class PiEventNormalizer {
     this.turnSeq += 1;
     this.turnTask = {
       taskId: `pi-t${this.turnSeq}`,
+      taskName: DEFAULT_TASK_NAME,
       toolUses: 0,
       lastToolName: '',
       startedAtMs: this.now(),
@@ -576,6 +585,36 @@ export class PiEventNormalizer {
       this.buildTurnTaskEvent('running', { taskId: this.turnTask.taskId }),
     );
     return out;
+  }
+
+  /**
+   * message_start(role=user) → 任务名升级（ql-20260907-011）：真实流实证 user
+   * 帧在轮初携带指令全文（content[0].text）——截断摘要写进行名并刷新一次 running
+   * 事件。无 open 行 / 无文本防御跳过（零事件）。摘要规则：去换行压空白、
+   * 40 字符截断加省略号。
+   */
+  private deriveUserName(msg: Record<string, unknown>): AgentEvent[] {
+    const task = this.turnTask;
+    if (!task?.open) return [];
+    const parts = Array.isArray(msg.content) ? msg.content : [];
+    let text = '';
+    for (const part of parts) {
+      if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
+        text = part.text;
+        break;
+      }
+    }
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!snippet) return [];
+    task.taskName = snippet.length < text.replace(/\s+/g, ' ').trim().length
+      ? `${snippet}…`
+      : snippet;
+    return [
+      this.buildTurnTaskEvent('running', {
+        taskId: task.taskId,
+        taskName: task.taskName,
+      }),
+    ];
   }
 
   /**
@@ -593,6 +632,7 @@ export class PiEventNormalizer {
     return [
       this.buildTurnTaskEvent('running', {
         taskId: task.taskId,
+        taskName: task.taskName,
         toolUses: task.toolUses,
         lastToolName: task.lastToolName,
         summary,
@@ -618,6 +658,7 @@ export class PiEventNormalizer {
       : undefined;
     const event = this.buildTurnTaskEvent(failed ? 'failed' : 'completed', {
       taskId: task.taskId,
+      taskName: task.taskName,
       toolUses: task.toolUses,
       lastToolName: task.lastToolName,
       summary,
@@ -638,6 +679,7 @@ export class PiEventNormalizer {
     status: 'running' | 'completed' | 'failed',
     fields: {
       taskId: string;
+      taskName?: string;
       toolUses?: number;
       lastToolName?: string;
       summary?: string;
@@ -646,7 +688,7 @@ export class PiEventNormalizer {
   ): AgentEvent {
     const metadata: Record<string, unknown> = {
       task_id: fields.taskId,
-      task_name: '执行任务',
+      task_name: fields.taskName || DEFAULT_TASK_NAME,
       status,
     };
     if (fields.lastToolName) metadata.last_tool_name = fields.lastToolName;
@@ -665,6 +707,9 @@ export class PiEventNormalizer {
 // ─────────────────────────────────────────────────────────────────────────────
 // 私有 helper（模块级，纯函数；对照批量 pi-json.ts:445-453 同款守卫）
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** 任务名缺省值（user 指令摘要到达前的占位，ql-20260907-011 前恒定值）。 */
+const DEFAULT_TASK_NAME = '执行任务';
 
 /** 类型守卫：值是非 null 的 plain object（非数组）。 */
 function isRecord(v: unknown): v is Record<string, unknown> {

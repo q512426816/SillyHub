@@ -292,11 +292,15 @@ describe('PiEventNormalizer / real-error-turn（实跑采样错误路径）', ()
     });
   });
 
-  it('实跑事件序（turn_start/turn_end 派生 status + error + usage；其余生命周期行零产出）', () => {
-    // 修剪后的实跑 fixture：turn_start 一行派生 running status；turn_end 一行产出
-    // failed status（先行）+ error + 全零 usage 快照；其余 9 行零产出
-    expect(all.length).toBe(4);
-    expect(all.map((x) => x.ev.type)).toEqual(['status', 'status', 'error', 'text']);
+  it('实跑事件序（turn_start/user 消息/turn_end 派生 status + error + usage；其余生命周期行零产出）', () => {
+    // 修剪后的实跑 fixture：turn_start 一行派生 running status；message_start(user)
+    // 一行派生任务名刷新（ql-20260907-011）；turn_end 一行产出
+    // failed status（先行）+ error + 全零 usage 快照；其余 8 行零产出
+    expect(all.length).toBe(5);
+    expect(all.map((x) => x.ev.type)).toEqual(['status', 'status', 'status', 'error', 'text']);
+    // 任务名升级断言：user 指令摘要覆盖缺省名（第 2 个 status 事件）
+    const nameEv = all[1]!.ev;
+    expect(nameEv.type === 'status' && nameEv.metadata?.task_name).toBeTruthy();
   });
 });
 
