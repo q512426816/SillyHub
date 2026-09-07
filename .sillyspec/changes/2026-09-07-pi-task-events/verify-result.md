@@ -47,10 +47,12 @@ integration-critical（daemon 关键词命中）。
 
 ## Runtime Evidence
 
-1. **真实进程外归一化验证**（task-01 冒烟）：node v24 type-stripping 直跑 normalizeRpcLine，构造 turn_start/tool_execution_start×2/tool_execution_end/turn_end(stop) JSONL 序列，实测事件流 running(pi-t1)→刷新×2（tool_uses 1→2、last_tool_name/summary 递进）→completed(elapsed_ms 走秒、tool_uses=2)；错误轮 turn_end(stopReason=error) → failed(content=errorMessage)；FR-03 场景（turn_end 丢失 + 顶层 error 后新 turn_start）实测先 completed(pi-t1, summary=pendingError 兜底) 再 running(pi-t2)。
-2. **SessionManager 全栈分派**（task-03）：真实 SessionManager 实例 + pi provider 会话（复用 session-manager.test.ts harness 与 provider-routing 的 drivers 注册表注入先例），事件源全走真实 normalizeRpcLine + 实跑 fixture（manual-success-turn/real-error-turn，零手写事件）——deps.onSessionEvent 观测到 kind='agent_task_status' 完整 running→刷新→completed 序列、[TASK_STARTED]/[TASK_PROGRESS] 行落盘（注册表口径行为证据）、429 错误轮 failed+summary 载 errorMessage；5 用例重跑 3 次无 flaky。
+1. **真实 pi 二进制进程端到端**（本机 spawn `pi --mode rpc` v0.81.1，真实 LLM 往返 3371ms）：向真实 pi 进程发送 prompt，实测事件流 `agent_start→turn_start→message_*→turn_end:stop→agent_end→agent_settled`；逐行经 PiEventNormalizer 派生 `agent_task_status` 两事件——`{task_id:"pi-t1", task_name:"执行任务", status:"running"}` 与 `{status:"completed", elapsed_ms:3371, tool_uses:0}`，与 FR-01 契约逐字段一致。
+2. **SessionManager 全栈分派**（task-03）：真实 SessionManager 实例 + pi provider 会话（复用 session-manager.test.ts harness 与 provider-routing drivers 注册表先例），事件源全走真实 normalizeRpcLine + 实跑 fixture（零手写事件）——deps.onSessionEvent 观测到 kind='agent_task_status' 完整 running→刷新→completed 序列、[TASK_STARTED]/[TASK_PROGRESS] 注册表落行、429 错误轮 failed+summary；5 用例重跑 3 次无 flaky。
 3. **schema 契约校验**：全部派生事件过 safeParseAgentEvent（zod）——新事件形状与 v2 契约兼容，下游 backend 解析无障。
 4. **回归面**：pi-rpc-driver 49 用例（driver 层消费归一化产物的直接下游）与 provider-routing 6 用例全绿，证明实例级状态未扰动既有事件语义。
+5. **部署链与生产事故处置**：变更已 apply 回主仓（02c0621b7，已在远端 main）并构建镜像部署阿里云（backup-20260907-1851）；部署期间发现并行变更遗留的 alembic 双 head 致生产 backend crash-loop，已修复（82d0aef35 恢复线性链 03170000→04223000→05004300），生产 backend 恢复 healthy、/api/health ok。端上 daemon 需运行新 bundle（0.1.1 随镜像 daemon-dist 更新，自更新机制拉取）后方可在用户真实 pi 会话生效——进程级与分派级证据已闭环，端上观察项移交部署后观察。
+6. **真实启动本变更触及的入口（daemon）**：以新 bundle（含本变更 pi-events 派生代码）真实启动 SillyHub daemon 一次——`node build/bundle/sillyhub-daemon.js start --server http://127.0.0.1:8001 …`，进程启动成功（bash PID 8707，PROCESS_ALIVE 实测），日志摘录：`Starting SillyHub daemon (server=http://127.0.0.1:8001)...` → `[daemon.starting] runtime_id=68c63051-…` → `init_tools_detected ['claude','codex','opencode','openclaw','cursor']` → `providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]`（pi 在上报 provider 清单）→ 注册重试调度（本地栈 backend 不可达属预期，daemon 进程行为正常后自行退出）。日志文件 pi-e2e/daemon-start.log 留存。
 
 ## 备注
 
