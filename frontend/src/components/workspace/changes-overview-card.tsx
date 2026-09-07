@@ -15,6 +15,10 @@
  * 冲突两区的处理指引收口为跳转变更中心「平台同步」处理区的入口链接——操作单一
  * 入口，design §5 Phase 3 第 4 条）。挂载归 task-07（工作台 SectionCard 网格）。
  *
+ * 2026-09-07-conflict-diff-compare task-08（D-004@v1）：未决冲突清单标题同步
+ * ql 编号规则（quick 冲突 ql_id 存在 → 「【ql-编号】快速修复」+ 灰色小字原始
+ * 会话 ID，缺失兜底原变更名），与变更中心冲突行同规则；只读定位不变。
+ *
  * 三态展示：
  *   - sillyspec_status 为 null/undefined → 「总览不可用（sillyspec 未安装/版本过低）」占位；
  *   - generated_at 陈旧（> STALE_THRESHOLD_MS，采集 60s×多轮未刷新的启发式）→
@@ -515,12 +519,28 @@ export function ChangesOverviewCard({ workspaceId, className }: ChangesOverviewC
                           >
                             {meta.label}
                           </span>
-                          <code
-                            className="truncate font-mono text-[11px] text-foreground"
-                            title={c.change ?? undefined}
-                          >
-                            {c.change || "—"}
-                          </code>
+                          {/* ql 标题（D-004@v1，与变更中心冲突行同规则）：quick 冲突
+                              显示 QUICKLOG 编号 + 灰色小字原始会话 ID，缺失兜底变更名 */}
+                          {c.ql_id ? (
+                            <>
+                              <span className="truncate text-[11px] font-medium">
+                                【{c.ql_id}】快速修复
+                              </span>
+                              <code
+                                className="truncate font-mono text-[10px] text-muted-foreground"
+                                title={c.change ?? undefined}
+                              >
+                                {c.change || "—"}
+                              </code>
+                            </>
+                          ) : (
+                            <code
+                              className="truncate font-mono text-[11px] text-foreground"
+                              title={c.change ?? undefined}
+                            >
+                              {c.change || "—"}
+                            </code>
+                          )}
                         </div>
                       );
                     })}

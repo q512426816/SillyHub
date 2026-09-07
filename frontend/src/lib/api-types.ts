@@ -4695,6 +4695,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare Machine Sillyspec Conflict
+         * @description 拉取单条 sillyspec 冲突的双侧对比（admin，task-04 / FR-06~09 / D-001@v1）.
+         *
+         *     权限同裁决端点（RuntimeAdminUser + ``_get_owned_instance`` 越权 404），
+         *     另校验当前用户是 ``workspace_id`` 成员（平台侧内容按工作区定位，Grill B1：
+         *     compare 数据与裁决同一权限集合）。RPC 腿走请求/响应式
+         *     ``sillyspec_conflict_snapshot``（explorer 先例，区别于一写即忘的裁决通道），
+         *     显式 15s 超时；机器离线/超时 → 504 既有异常形态原样上抛。编排/diff 计算在
+         *     ``sillyspec_compare.SillySpecCompareService``（service 层），本端点只做
+         *     校验/权限/响应组装。
+         */
+        get: operations["compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/disable": {
         parameters: {
             query?: never;
@@ -12904,6 +12932,11 @@ export interface components {
          *     ``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal
          *     （DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条
          *     心跳 422）。
+         *
+         *     2026-09-07-conflict-diff-compare task-04（design §7.3）：新增可选 ``ql_id``
+         *     （QUICKLOG 块头编号，如 ``ql-20260907-006-2972``）——daemon 侧对 ``quick-*``
+         *     名冲突 best-effort 读 guard.json 补报，普通变更/读不到 → None。宽松可选
+         *     （零改写透传语义不变）：旧 daemon 不上报不影响心跳落库。
          */
         DaemonHeartbeatSillySpecConflict: {
             /** Change */
@@ -12912,6 +12945,8 @@ export interface components {
             created_at?: string | null;
             /** Type */
             type?: string | null;
+            /** Ql Id */
+            ql_id?: string | null;
         };
         /**
          * DaemonHeartbeatSillySpecStatus
@@ -21101,6 +21136,130 @@ export interface components {
             online: boolean;
             /** Runtimes */
             runtimes?: components["schemas"]["SharedMachineRuntimeView"][];
+        };
+        /**
+         * SillySpecConflictCompareFile
+         * @description spec-tree 比对的单文件结果（design §7.2 files[] 单项）。
+         *
+         *     ``status`` 四分类（Grill B4）：modified / local_only（本地有平台缺失或读取
+         *     被拒）/ platform_only / identical；双侧均缺失的路径不进本清单（计数在顶层
+         *     ``dropped_paths``）。本地 truncated/binary 无 content 的文件 ``diff_rows``
+         *     为空（不出全 insert 的失真信号）；单文件 diff 超 5000 行截断置
+         *     ``diff_truncated``。
+         */
+        SillySpecConflictCompareFile: {
+            /** Path */
+            path: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "modified" | "local_only" | "platform_only" | "identical";
+            /** Local Mtime */
+            local_mtime?: string | null;
+            /** Platform Mtime */
+            platform_mtime?: string | null;
+            /**
+             * Local Truncated
+             * @default false
+             */
+            local_truncated: boolean;
+            /**
+             * Local Missing
+             * @default false
+             */
+            local_missing: boolean;
+            /** Diff Rows */
+            diff_rows?: components["schemas"]["SillySpecConflictDiffRow"][];
+            /**
+             * Diff Truncated
+             * @default false
+             */
+            diff_truncated: boolean;
+            /**
+             * Binary
+             * @default false
+             */
+            binary: boolean;
+        };
+        /**
+         * SillySpecConflictCompareResponse
+         * @description GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。
+         *
+         *     kind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。
+         *     ``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。
+         *     ``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。
+         */
+        SillySpecConflictCompareResponse: {
+            /** Change */
+            change: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "spec-tree" | "progress";
+            /** Ql Id */
+            ql_id?: string | null;
+            /** Conflict Created At */
+            conflict_created_at?: string | null;
+            /** Local Updated At */
+            local_updated_at?: string | null;
+            /** Platform Updated At */
+            platform_updated_at?: string | null;
+            /**
+             * Response Truncated
+             * @default false
+             */
+            response_truncated: boolean;
+            /**
+             * Dropped Paths
+             * @default 0
+             */
+            dropped_paths: number;
+            /** Files */
+            files?: components["schemas"]["SillySpecConflictCompareFile"][];
+            /** Progress Rows */
+            progress_rows?: components["schemas"]["SillySpecConflictProgressRow"][];
+        };
+        /**
+         * SillySpecConflictDiffRow
+         * @description spec-tree 比对的对齐行（design §7.2 files[].diff_rows[] 单项）。
+         *
+         *     ``type`` = equal（双侧同）/ delete（本地删，platform_* 为 null）/ insert
+         *     （平台增，local_* 为 null）；replace 段在 service 侧展开为相邻 delete+insert。
+         *     lineno 双侧各自从 1 起。
+         */
+        SillySpecConflictDiffRow: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "equal" | "delete" | "insert";
+            /** Local Lineno */
+            local_lineno?: number | null;
+            /** Local Text */
+            local_text?: string | null;
+            /** Platform Lineno */
+            platform_lineno?: number | null;
+            /** Platform Text */
+            platform_text?: string | null;
+        };
+        /**
+         * SillySpecConflictProgressRow
+         * @description progress 比对行（design §7.2 progress_rows[] 单项，D-003@v1 对比表）。
+         *
+         *     字段白名单六项（当前阶段/阶段标签/步骤进度/最近活跃/ql_id/ghost），缺失侧
+         *     显式「—」；``differ`` 由两侧展示值不等判定。
+         */
+        SillySpecConflictProgressRow: {
+            /** Label */
+            label: string;
+            /** Local Value */
+            local_value: string;
+            /** Platform Value */
+            platform_value: string;
+            /** Differ */
+            differ: boolean;
         };
         /**
          * SkillCreateRequest
@@ -32100,6 +32259,43 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get: {
+        parameters: {
+            query: {
+                /** @description 冲突类型（心跳 type 字段） */
+                kind: "spec-tree" | "progress";
+                /** @description 平台侧 spec_root/progress 定位用工作区 */
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+                change: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SillySpecConflictCompareResponse"];
                 };
             };
             /** @description Validation Error */

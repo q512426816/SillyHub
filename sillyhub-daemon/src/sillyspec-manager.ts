@@ -25,6 +25,14 @@
  * _lastCommandResult（latest-wins，10min 终态窗惰性过期——语义同 _update/
  * _terminalAt，过期后 getCommandResult 返回 null、心跳键不出现）。
  *
+ * 2026-09-07-conflict-diff-compare task-02 扩展：本地冲突快照 conflictSnapshot
+ * （change, kind）——只读快照供 backend compare 编排经 sillyspec_conflict_snapshot
+ * RPC 实时拉取（D-001@v1 方案A）：spec-tree 逐路径读 .sillyspec 下冲突文件（realpath
+ * 落点校验 + 256KB/300 路径/4MB 聚合三道截断护栏 + 二进制嗅探），progress 跑
+ * progress show --json 全局 envelope 自行过滤；ql_id best-effort 读 quick 会话
+ * guard.json；collectStatusOnce 心跳后处理对 quick-* 冲突条补 ql_id（buildSillySpec
+ * StatusSummary 保持纯函数不落 fs）。
+ *
  * 状态机（内存态，daemon 重启即回 idle——重启后 preflight 启动检查已保证最新）：
  *
  *   idle ──requestUpgrade（空闲）──▶ running ──成功──▶ success ─┐
@@ -74,7 +82,13 @@ import {
 // 安全）；bin 解析用 existsSync 探测 npm 全局布局候选。
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+// 2026-09-07-conflict-diff-compare task-02：冲突快照逐路径 stat/realpath/readFile
+//（只读，不写任何文件——RPC 只读快照铁律）。
+import { readFile, realpath, stat } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
+// task-02 同上：冲突快照错误经 RpcError 通道回传（code 语义见 _dispatchRpc）；
+// ws-client 不反向依赖本模块，无环。
+import { RpcError } from './ws-client.js';
 // 2026-09-04-conflict-resolve-entry task-06：平台命令结果槽类型（心跳
 // sillyspec_command_result 载荷，task-05 落于 protocol.ts；type-only import，
 // protocol 不反向依赖本模块，无环）。
@@ -134,6 +148,24 @@ const SILLYSPEC_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
  * 120）经 daemon 接线换算毫秒注入覆盖（commandTimeoutMs 依赖）。
  */
 export const SILLYSPEC_COMMAND_TIMEOUT_MS = 120 * 1000;
+
+// ── 2026-09-07-conflict-diff-compare task-02：冲突快照截断护栏常量（design §8，集中文件头）──
+
+/**
+ * 冲突快照单文件读取上限（256KB，design §8 护栏 1）：超限置 truncated=true 且
+ * content 缺省（不部分读取——部分内容会被 backend 误算全 insert 方向失真的 diff）。
+ */
+export const SILLYSPEC_SNAPSHOT_FILE_MAX_BYTES = 256 * 1024;
+
+/** conflicting_paths 路径数上限（300，design §8 护栏 2）：超出直接截断。 */
+export const SILLYSPEC_SNAPSHOT_PATHS_MAX = 300;
+
+/**
+ * files 内容聚合预算（4MB，design §8 护栏 3 / Grill B2 修订）：RPC 腿护栏，低于
+ * WS 帧默认 16MB 上限一倍余量；超预算路径按信噪比排序（本变更目录优先、archive
+ * 沉底）溢出仅元信息（truncated=true 不带 content）。
+ */
+export const SILLYSPEC_SNAPSHOT_CONTENT_BUDGET_BYTES = 4 * 1024 * 1024;
 
 /**
  * resolve strategy（payload/REST 下划线值域）→ CLI 中划线 flag 单点映射
@@ -197,11 +229,64 @@ export interface SillySpecStatusChangeItem {
   steps: { total: number; completed: number };
 }
 
-/** 摘要 pending_conflicts[] 单项（change/created_at/type 三字段原样）。 */
+/**
+ * 摘要 pending_conflicts[] 单项（change/created_at/type 三字段原样）。
+ *
+ * 2026-09-07-conflict-diff-compare task-02：加可选 ql_id（quick-* 名 best-effort
+ * 读 quick 会话 guard.json 的 quicklogId；非 quick 条/读不到为 null 或缺省——
+ * collectStatusOnce 后处理填充，buildSillySpecStatusSummary 纯函数不落 fs）。
+ */
 export interface SillySpecStatusPendingConflict {
   change: string;
   created_at: string;
   type: string;
+  /** quick 会话映射到的 QUICKLOG 编号（如 ql-20260907-006-2972）；无映射 null/缺省。 */
+  ql_id?: string | null;
+}
+
+// ── 2026-09-07-conflict-diff-compare task-02：sillyspec_conflict_snapshot 契约类型 ──
+
+/**
+ * 冲突快照 files[] 单项（design §7.1）。content 仅在可读文本且未被截断护栏命中时
+ * 携带：单文件 256KB 帽 / 聚合 4MB 帽 / 二进制（非 utf8）/ 磁盘缺失 / 越界拒读
+ * 五种情形均缺省 content。
+ */
+export interface SillySpecConflictSnapshotFile {
+  /** conflicting_paths 原始相对路径（.sillyspec/ 下，POSIX 风格原样透传）。 */
+  path: string;
+  /** 文件内容（utf8 文本）；truncated/binary/missing/越界拒读时缺省。 */
+  content?: string;
+  /** 修改时间 ISO 串；读不到 stat（缺失/拒读）为 null。 */
+  mtime: string | null;
+  /** 原始字节数（未截断值）；拒读为 0（不泄漏根外文件元信息）。 */
+  size: number;
+  /** true=被单文件 256KB 帽或聚合 4MB 帽截断（content 缺省）。 */
+  truncated: boolean;
+  /** true=非 utf8 二进制（NUL 或严格解码失败），不带 content。 */
+  binary: boolean;
+  /** true=清单内有、磁盘上无（realpath/stat ENOENT 等）。 */
+  missing: boolean;
+}
+
+/**
+ * sillyspec_conflict_snapshot RPC result（design §7.1）：
+ * kind=spec-tree 时 files 非空、progress=null；kind=progress 时 files=[]、
+ * progress=全局 envelope data.changes[] 中该 change 的条目（CLI --json 忽略
+ * --change 恒回全局 envelope，daemon 自行过滤）。
+ */
+export interface SillySpecConflictSnapshot {
+  change: string;
+  kind: 'spec-tree' | 'progress';
+  /** quick-* 名且 guard.json 可读时为其 quicklogId；否则 null。 */
+  ql_id: string | null;
+  /** 冲突记录 created_at 原样透传。 */
+  conflict_created_at: string;
+  /** spec-tree=冲突文件 mtime 最大值（无文件回退记录 created_at）；progress=last_active。 */
+  local_updated_at: string | null;
+  /** 按信噪比排序（changes/<change>/ 优先、changes/archive/ 沉底、其余居中稳定序）。 */
+  files: SillySpecConflictSnapshotFile[];
+  /** kind=progress 时非空（envelope 条目原样）；其余 null。 */
+  progress: Record<string, unknown> | null;
 }
 
 // ── 类型（task-05 心跳/注册接线将复用）─────────────────────────────────────────
@@ -587,6 +672,10 @@ export class SillySpecManager {
       return;
     }
     const summary = buildSillySpecStatusSummary(parsed);
+    // 2026-09-07-conflict-diff-compare task-02：心跳补报——buildSillySpecStatusSummary
+    // 是纯函数不落 fs，ql_id 在此处后处理填充（quick-* 名读 guard.json，单条失败仅
+    // 缺省该条不阻断心跳，design §5 Phase 1 第 3 条）。
+    await this._attachPendingConflictQlIds(cwd, summary);
     this._statusSummary = summary;
     this._statusKnown = true;
     this._log('debug', 'sillyspec_status_collected', {
@@ -878,6 +967,220 @@ export class SillySpecManager {
       state: 'failed',
       error: `执行器异常：${fmtErrorSnippet(e)}`,
     });
+  }
+
+  // ── 2026-09-07-conflict-diff-compare task-02：本地冲突快照（只读，RPC 实时拉取）──
+
+  /**
+   * 生成本地冲突快照（design §5 Phase 1 第 1 条 / §7.1 契约，D-001@v1 方案A）：
+   * backend compare 编排经 sillyspec_conflict_snapshot RPC 实时拉取，本方法只读
+   * 不写任何文件、不进状态机。
+   *
+   * - spec 根复用 _statusCwd 回调（claim 观察到的 workspace 主仓根，runResolve
+   *   同款）；无根抛 RpcError('no_spec_root')；
+   * - kind=spec-tree：读 .sillyspec/.runtime/spec-sync-conflict-<change>.json 取
+   *   conflicting_paths，逐路径读 .sillyspec/<path>（realpath 落点必须在根内——
+   *   file-rpc explorer 系同款校验双保险；单文件 256KB / 路径 300 / 聚合 4MB
+   *   三道截断护栏 + 非 utf8 二进制嗅探）；local_updated_at=冲突文件 mtime 最大值
+   *   （无文件回退记录 created_at）；
+   * - kind=progress：读 .runtime/sync-conflict-<change>.json 后跑 progress show
+   *   --json（CLI --json 忽略 --change 恒回全局 envelope，daemon 自行从
+   *   data.changes[] 过滤该 change 条目）；local_updated_at=条目 last_active；
+   * - ql_id：quick-* 名 best-effort 读 .runtime/quick-sessions/<change>/guard.json
+   *   的 quicklogId，读不到/非 quick 为 null。
+   *
+   * @throws {RpcError} no_spec_root（无已知主仓根）/ invalid_params（kind 值域外
+   *   或 change 空）/ conflict_record_missing|conflict_record_corrupt（记录缺失或
+   *   JSON 损坏）/ progress_collect_failed（progress 分支采集失败）。
+   */
+  async conflictSnapshot(
+    change: string,
+    kind: string,
+  ): Promise<SillySpecConflictSnapshot> {
+    const root = this._statusCwd();
+    if (!root) {
+      throw new RpcError('no_spec_root', '未观察到 workspace 主仓根，无法生成冲突快照');
+    }
+    if (typeof change !== 'string' || change === '') {
+      throw new RpcError('invalid_params', 'change 名为空，无法生成冲突快照');
+    }
+    if (kind !== 'spec-tree' && kind !== 'progress') {
+      throw new RpcError(
+        'invalid_params',
+        `未知的冲突类型 kind=${kind}，合法值 spec-tree / progress`,
+      );
+    }
+    const record = await readSillySpecConflictRecord(root, change, kind);
+    const qlId = await readQuickSessionQuicklogId(root, change);
+    if (kind === 'progress') {
+      return this._conflictSnapshotProgress(root, change, qlId, record);
+    }
+    return this._conflictSnapshotSpecTree(root, change, qlId, record);
+  }
+
+  /**
+   * spec-tree 快照分支：conflicting_paths 截 300 → 信噪比排序（changes/<change>/
+   * 优先、archive 沉底）→ 并行逐路径 stat/readFile（realpath 落点校验逐路径粒度
+   * 拒读，不连坐）→ 聚合 4MB 帽按排序顺序收内容，溢出仅元信息。
+   */
+  private async _conflictSnapshotSpecTree(
+    root: string,
+    change: string,
+    qlId: string | null,
+    record: Record<string, unknown>,
+  ): Promise<SillySpecConflictSnapshot> {
+    const createdAt = asString(record.created_at);
+    const rawPaths = Array.isArray(record.conflicting_paths)
+      ? record.conflicting_paths
+      : [];
+    const paths = rawPaths
+      .filter((p): p is string => typeof p === 'string')
+      .slice(0, SILLYSPEC_SNAPSHOT_PATHS_MAX)
+      .sort(
+        (a, b) =>
+          specPathSignalRank(a, change) - specPathSignalRank(b, change),
+      );
+    const specDir = join(root, '.sillyspec');
+    let realRoot: string;
+    try {
+      realRoot = await realpath(root);
+    } catch (e) {
+      throw new RpcError(
+        'no_spec_root',
+        `workspace 主仓根不可达：${fmtErrorSnippet(e)}`,
+      );
+    }
+    const works = await Promise.all(
+      paths.map((rel) => snapshotOneSpecPath(realRoot, specDir, rel)),
+    );
+    // 聚合帽按排序顺序收内容（先到先得——高信噪比路径优先占预算）。
+    const files: SillySpecConflictSnapshotFile[] = [];
+    let usedBytes = 0;
+    let maxMtimeMs: number | null = null;
+    for (const w of works) {
+      if (w.mtimeMs !== null) {
+        maxMtimeMs = maxMtimeMs === null ? w.mtimeMs : Math.max(maxMtimeMs, w.mtimeMs);
+      }
+      if (w.content !== undefined) {
+        const bytes = Buffer.byteLength(w.content, 'utf8');
+        if (usedBytes + bytes > SILLYSPEC_SNAPSHOT_CONTENT_BUDGET_BYTES) {
+          w.entry.truncated = true; // 聚合 4MB 帽：溢出路径仅元信息
+        } else {
+          w.entry.content = w.content;
+          usedBytes += bytes;
+        }
+      }
+      files.push(w.entry);
+    }
+    return {
+      change,
+      kind: 'spec-tree',
+      ql_id: qlId,
+      conflict_created_at: createdAt,
+      local_updated_at:
+        maxMtimeMs !== null ? new Date(maxMtimeMs).toISOString() : createdAt,
+      files,
+      progress: null,
+    };
+  }
+
+  /**
+   * progress 快照分支：CLI progress show --json 的 --json 分支忽略 --change、恒回
+   * 全局 envelope（外部 CLI 实测行为），故只跑一次全局采集（runProgressJsonDefault
+   * 形态：execFile 数组形参、cwd=spec 根、windowsHide），daemon 自行从
+   * data.changes[] 过滤该 change 条目；过滤不到回 progress=null（local_updated_at
+   * 同步为 null，不伪造时间）。
+   */
+  private async _conflictSnapshotProgress(
+    root: string,
+    change: string,
+    qlId: string | null,
+    record: Record<string, unknown>,
+  ): Promise<SillySpecConflictSnapshot> {
+    const bin = this._resolveSillySpecBin();
+    if (bin === null) {
+      throw new RpcError(
+        'bin_not_found',
+        '未找到 sillyspec CLI（bin 解析失败），无法采集进度快照',
+      );
+    }
+    let outcome: SillySpecProgressOutcome;
+    try {
+      outcome = await this._runProgressJson(
+        process.execPath,
+        [bin, 'progress', 'show', '--json'],
+        {
+          cwd: root,
+          timeoutMs: this._statusTimeoutMs,
+          maxBufferBytes: SILLYSPEC_STATUS_MAX_BUFFER,
+        },
+      );
+    } catch (e) {
+      throw new RpcError(
+        'progress_collect_failed',
+        `progress show --json 执行器异常：${fmtErrorSnippet(e)}`,
+      );
+    }
+    if (outcome.timedOut || outcome.code === null || outcome.code !== 0) {
+      throw new RpcError(
+        'progress_collect_failed',
+        `progress show --json 采集失败（${
+          outcome.timedOut ? '超时被终止' : `exit ${String(outcome.code)}`
+        }）`,
+      );
+    }
+    let envelope: unknown;
+    try {
+      const text = outcome.stdout;
+      envelope = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+    } catch {
+      throw new RpcError(
+        'progress_collect_failed',
+        'progress show --json 输出非合法 JSON envelope',
+      );
+    }
+    const env = isRecord(envelope) ? envelope : {};
+    const data = isRecord(env.data) ? env.data : {};
+    const changes = Array.isArray(data.changes) ? data.changes : [];
+    const target = changes.find(
+      (c) => isRecord(c) && asString(c.name) === change,
+    );
+    const progress = isRecord(target) ? target : null;
+    const lastActive =
+      progress !== null ? asString(progress.last_active) : '';
+    return {
+      change,
+      kind: 'progress',
+      ql_id: qlId,
+      conflict_created_at: asString(record.created_at),
+      local_updated_at: progress !== null && lastActive !== '' ? lastActive : null,
+      files: [],
+      progress,
+    };
+  }
+
+  /**
+   * 心跳补报后处理（design §5 Phase 1 第 3 条）：对 summary.pending_conflicts 的
+   * quick-* 条同步读 guard.json 补 ql_id。best-effort——readQuickSessionQuicklogId
+   * 内部全收敛回 null，此处再兜一层 try/catch 保证单条意外（防御注入 fs 异常）仅
+   * 缺省该条，绝不阻断其余条与整拍心跳快照。
+   */
+  private async _attachPendingConflictQlIds(
+    root: string,
+    summary: SillySpecStatusSummary,
+  ): Promise<void> {
+    for (const entry of summary.pending_conflicts) {
+      if (!entry.change.startsWith('quick-')) continue;
+      try {
+        entry.ql_id = await readQuickSessionQuicklogId(root, entry.change);
+      } catch (e) {
+        entry.ql_id = null;
+        this._log('debug', 'sillyspec_conflict_ql_id_read_failed', {
+          change: entry.change,
+          error: fmtErrorSnippet(e),
+        });
+      }
+    }
   }
 
   // ── 升级入口 ────────────────────────────────────────────────────────────────
@@ -1207,6 +1510,191 @@ function cliOutputSnippet(stdout: string): string {
   if (trimmed === '') return '';
   return `：${trimmed.slice(-120)}`;
 }
+
+// ── 2026-09-07-conflict-diff-compare task-02：冲突快照模块级辅助 ────────────────
+
+/**
+ * 读冲突记录（按 kind 分文件名，CLI 实证：spec-tree → spec-sync-conflict-<change>
+ * .json、progress → sync-conflict-<change>.json，均位于 <根>/.sillyspec/.runtime/）。
+ *
+ * @throws {RpcError} conflict_record_missing（文件不存在）/ conflict_record_corrupt
+ *   （JSON 损坏或非对象）——不回退空快照（task-01 契约：backend 可区分错误码）。
+ */
+async function readSillySpecConflictRecord(
+  root: string,
+  change: string,
+  kind: 'spec-tree' | 'progress',
+): Promise<Record<string, unknown>> {
+  const filename =
+    kind === 'spec-tree'
+      ? `spec-sync-conflict-${change}.json`
+      : `sync-conflict-${change}.json`;
+  let raw: string;
+  try {
+    raw = await readFile(join(root, '.sillyspec', '.runtime', filename), 'utf8');
+  } catch {
+    throw new RpcError('conflict_record_missing', `冲突记录不存在：${filename}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
+  } catch {
+    throw new RpcError('conflict_record_corrupt', `冲突记录 JSON 损坏：${filename}`);
+  }
+  if (!isRecord(parsed)) {
+    throw new RpcError('conflict_record_corrupt', `冲突记录结构损坏：${filename}`);
+  }
+  return parsed;
+}
+
+/**
+ * quick 会话名 → QUICKLOG 编号映射（D-004@v1）：唯一来源是 daemon 机器本地
+ * .sillyspec/.runtime/quick-sessions/<change>/guard.json 的 quicklogId 字段
+ * （.runtime/ 在上传排除集内，平台侧拿不到）。best-effort：非 quick 名 / 文件
+ * 缺失 / JSON 损坏 / 字段非字符串 一律回 null 不抛（guard 已清理的存量冲突属
+ * design §8 低风险行——前端兜底显示原始 ID）。
+ */
+async function readQuickSessionQuicklogId(
+  root: string,
+  change: string,
+): Promise<string | null> {
+  if (typeof change !== 'string' || !change.startsWith('quick-')) {
+    return null;
+  }
+  try {
+    const raw = await readFile(
+      join(root, '.sillyspec', '.runtime', 'quick-sessions', change, 'guard.json'),
+      'utf8',
+    );
+    const parsed: unknown = JSON.parse(
+      raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw,
+    );
+    if (isRecord(parsed) && typeof parsed.quicklogId === 'string' && parsed.quicklogId !== '') {
+      return parsed.quicklogId;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 路径信噪比排序秩（design §8 风险表：存量冲突实测 164 条全是 archive 旧归档）：
+ * changes/<change>/（本变更目录）=0 最优先，其余（ROADMAP 等）=1，changes/archive/
+ * 旧归档 =2 沉底。分隔符兼容 Windows（\ 归一为 / 后比较）。
+ */
+function specPathSignalRank(path: string, change: string): number {
+  const posix = path.replace(/\\/g, '/');
+  if (posix.startsWith(`changes/${change}/`)) return 0;
+  if (posix.startsWith('changes/archive/')) return 2;
+  return 1;
+}
+
+/**
+ * realpath 落点边界敏感前缀比较（file-rpc assertWithinExplorerRoot 同款语义）：
+ * 相等或 startsWith(realRoot + sep)（杜绝兄弟撞名）；Windows 盘符大小写归一。
+ * 双方都是 realpath 结果——覆盖「根内 symlink/junction 指向根外」逃逸面。
+ */
+function isRealPathWithinRoot(realPath: string, realRoot: string): boolean {
+  const isWin =
+    sep === '\\' || /^[A-Za-z]:[\\/]/.test(realPath) || /^[A-Za-z]:[\\/]/.test(realRoot);
+  const norm = (p: string): string => (isWin ? p.toLowerCase() : p);
+  const np = norm(realPath);
+  const nr = norm(realRoot);
+  return np === nr || np.startsWith(nr + sep);
+}
+
+/** 严格 UTF-8 解码器（fatal：非法序列抛错而非产出 U+FFFD，二进制嗅探用）。 */
+const SNAPSHOT_UTF8_FATAL_DECODER = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * 二进制嗅探（file-rpc explorerReadFile 同款双判据）：窗口含 NUL 字节（文本文件
+ * 几乎不可能含 0x00）或严格 UTF-8 解码失败 → 二进制。快照整读文件（≤256KB 才
+ * 读，无截断误切多字节序列问题），无需 explorer 的截断边界裁剪。
+ */
+function snapshotLooksBinary(buf: Buffer): boolean {
+  if (buf.includes(0)) return true;
+  try {
+    SNAPSHOT_UTF8_FATAL_DECODER.decode(buf);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** 单路径快照工作产物：entry 元信息骨架 + 候选 content（聚合帽裁决前）+ mtime 毫秒。 */
+interface SnapshotSpecPathWork {
+  entry: SillySpecConflictSnapshotFile;
+  /** 候选内容（已过单文件帽 + 二进制嗅探）；不携带 = 该路径无内容可收。 */
+  content: string | undefined;
+  /** stat 成功时的 mtime 毫秒值（local_updated_at 聚合用）；未 stat 到为 null。 */
+  mtimeMs: number | null;
+}
+
+/**
+ * 逐路径快照（task-01 契约的拒读/缺失/截断/二进制四态全落在这）：
+ *   - realpath 失败（ENOENT/ENOTDIR 等）→ missing=true 不带 content；
+ *   - realpath 落点在根外（.. 段折叠 / junction·symlink 越界）→ 拒读：不带
+ *     content、不置 missing（文件存在但拒绝读取），元信息不泄漏（size=0/mtime=null）；
+ *   - stat 后非普通文件 → 元信息保留、无内容（目录等不该出现在 conflicting_paths，
+ *     防御兜底）；
+ *   - size > 256KB → truncated=true、content 缺省（元信息保留）；
+ *   - 非 utf8（NUL/严格解码失败）→ binary=true、content 缺省；
+ *   - 其余 → 候选 content（聚合 4MB 帽由调用方按信噪比顺序裁决）。
+ */
+async function snapshotOneSpecPath(
+  realRoot: string,
+  specDir: string,
+  rel: string,
+): Promise<SnapshotSpecPathWork> {
+  const entry: SillySpecConflictSnapshotFile = {
+    path: rel,
+    mtime: null,
+    size: 0,
+    truncated: false,
+    binary: false,
+    missing: false,
+  };
+  let real: string;
+  try {
+    real = await realpath(resolve(specDir, rel));
+  } catch {
+    entry.missing = true;
+    return { entry, content: undefined, mtimeMs: null };
+  }
+  if (!isRealPathWithinRoot(real, realRoot)) {
+    return { entry, content: undefined, mtimeMs: null };
+  }
+  let st;
+  try {
+    st = await stat(real);
+  } catch {
+    entry.missing = true; // realpath 通过后竞态消失
+    return { entry, content: undefined, mtimeMs: null };
+  }
+  entry.size = st.size;
+  entry.mtime = st.mtime.toISOString();
+  if (!st.isFile()) {
+    return { entry, content: undefined, mtimeMs: st.mtimeMs };
+  }
+  if (st.size > SILLYSPEC_SNAPSHOT_FILE_MAX_BYTES) {
+    entry.truncated = true;
+    return { entry, content: undefined, mtimeMs: st.mtimeMs };
+  }
+  let buf: Buffer;
+  try {
+    buf = await readFile(real);
+  } catch {
+    entry.missing = true; // stat 后竞态消失
+    return { entry, content: undefined, mtimeMs: st.mtimeMs };
+  }
+  if (snapshotLooksBinary(buf)) {
+    entry.binary = true;
+    return { entry, content: undefined, mtimeMs: st.mtimeMs };
+  }
+  return { entry, content: buf.toString('utf8'), mtimeMs: st.mtimeMs };
+}
+
 
 // ── 2026-09-02-changes-overview-card task-02：采集器默认实现与摘要构造 ──────────
 

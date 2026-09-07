@@ -11,6 +11,10 @@
  * 2026-09-04-conflict-resolve-entry task-10：ghost/冲突两处 CLI 指引断言改为
  * 跳转变更中心入口断言（真实 next/link 渲染 <a>，断言惯例同
  * quicklog-sessions-card.test.tsx，无需 mock）。
+ *
+ * 2026-09-07-conflict-diff-compare task-06：只读冲突清单同步 ql 标题规则
+ * （design §5 Phase 3.5 / D-004@v1，组件改造 task-08 实现，红态属预期）——
+ * ql_id 存在显示【ql-编号】快速修复 + 原始 ID 小字，缺失兜底原变更名。
  */
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -261,6 +265,37 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     });
     expect(resolveEntry).toHaveAttribute("href", "/workspaces/ws-1/changes");
     expect(screen.queryByText(/sillyspec platform resolve/)).toBeNull();
+  });
+
+  it("冲突区 ql 标题（2026-09-07-conflict-diff-compare task-06）——ql_id 存在显示【ql-编号】快速修复 + 原始 ID 小字，缺失兜底原变更名", async () => {
+    mockHappyPath(
+      makeStatus({
+        changes: [makeChange({ name: "chg-live" })],
+        pending_conflicts: [
+          {
+            change: "quick-62e1d5fb",
+            created_at: isoAgo(70 * MIN),
+            type: "spec-tree",
+            ql_id: "ql-20260904-002-62e1",
+          },
+          { change: "big-change", created_at: isoAgo(70 * MIN), type: "progress" },
+        ],
+        conflict_count: 2,
+        conflict_types: { "spec-tree": 1, progress: 1 },
+      }),
+    );
+
+    renderCard();
+
+    expect(await screen.findByText("未决同步冲突 (2)")).toBeInTheDocument();
+    // ql_id 存在（D-004@v1 同标题规则）：【ql-编号】快速修复 + 原始 ID 小字兜底
+    expect(
+      screen.getAllByText(/【ql-20260904-002-62e1】/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(/快速修复/).length).toBeGreaterThan(0);
+    expect(screen.getByText("quick-62e1d5fb")).toBeInTheDocument();
+    // ql_id 缺失 → 兜底显示原变更名（不渲染空【】占位）
+    expect(screen.getByText("big-change")).toBeInTheDocument();
   });
 
   it("过滤 tab——全部/需关注计数正确，切换后仅留冲突关联活跃行（ghost 组与冲突区保留）", async () => {

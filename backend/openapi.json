@@ -12840,6 +12840,86 @@
         }
       }
     },
+    "/api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Compare Machine Sillyspec Conflict",
+        "description": "拉取单条 sillyspec 冲突的双侧对比（admin，task-04 / FR-06~09 / D-001@v1）.\n\n权限同裁决端点（RuntimeAdminUser + ``_get_owned_instance`` 越权 404），\n另校验当前用户是 ``workspace_id`` 成员（平台侧内容按工作区定位，Grill B1：\ncompare 数据与裁决同一权限集合）。RPC 腿走请求/响应式\n``sillyspec_conflict_snapshot``（explorer 先例，区别于一写即忘的裁决通道），\n显式 15s 超时；机器离线/超时 → 504 既有异常形态原样上抛。编排/diff 计算在\n``sillyspec_compare.SillySpecCompareService``（service 层），本端点只做\n校验/权限/响应组装。",
+        "operationId": "compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get",
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instance Id"
+            }
+          },
+          {
+            "name": "change",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Change"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "spec-tree",
+                "progress"
+              ],
+              "type": "string",
+              "description": "冲突类型（心跳 type 字段）",
+              "title": "Kind"
+            },
+            "description": "冲突类型（心跳 type 字段）"
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "平台侧 spec_root/progress 定位用工作区",
+              "title": "Workspace Id"
+            },
+            "description": "平台侧 spec_root/progress 定位用工作区"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SillySpecConflictCompareResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/disable": {
       "post": {
         "tags": [
@@ -37739,11 +37819,22 @@
               }
             ],
             "title": "Type"
+          },
+          "ql_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ql Id"
           }
         },
         "type": "object",
         "title": "DaemonHeartbeatSillySpecConflict",
-        "description": "心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.\n\n``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal\n（DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条\n心跳 422）。"
+        "description": "心跳 sillyspec_status.pending_conflicts[] 单项（design §4）.\n\n``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal\n（DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条\n心跳 422）。\n\n2026-09-07-conflict-diff-compare task-04（design §7.3）：新增可选 ``ql_id``\n（QUICKLOG 块头编号，如 ``ql-20260907-006-2972``）——daemon 侧对 ``quick-*``\n名冲突 best-effort 读 guard.json 补报，普通变更/读不到 → None。宽松可选\n（零改写透传语义不变）：旧 daemon 不上报不影响心跳落库。"
       },
       "DaemonHeartbeatSillySpecStatus": {
         "properties": {
@@ -60050,6 +60141,263 @@
         ],
         "title": "SharedMachineView",
         "description": "「共享给我的」机器行 DTO（2026-08-28-daemon-agent-share task-07 / design §6）。\n\n字段对齐 grants.queries.SharedMachineRow 五字段（task-02 provides 契约）：\ndisplay_name = 机器别名（display_alias）回退 hostname；online 取机器权威\n在线源 daemon_instances.status。service 层装配（runtime/service.py），router\n透传序列化；platform 共享智能体不进本视图（走 shared-agents 选择器）。\n\ntask-13（契约修复）：附加 ``runtimes`` runtime 明细（Wave 6 审查——共享授权\n是机器级而会话创建需要 runtime_id，五字段无明细导致前端锁 machine_id 404 /\npicker 第二步无 runtime 可选）。纯增量可选（默认空列表），OpenAPI 非必填，\n既有五字段与旧消费端零变化。"
+      },
+      "SillySpecConflictCompareFile": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "modified",
+              "local_only",
+              "platform_only",
+              "identical"
+            ],
+            "title": "Status"
+          },
+          "local_mtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Mtime"
+          },
+          "platform_mtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Mtime"
+          },
+          "local_truncated": {
+            "type": "boolean",
+            "title": "Local Truncated",
+            "default": false
+          },
+          "local_missing": {
+            "type": "boolean",
+            "title": "Local Missing",
+            "default": false
+          },
+          "diff_rows": {
+            "items": {
+              "$ref": "#/components/schemas/SillySpecConflictDiffRow"
+            },
+            "type": "array",
+            "title": "Diff Rows"
+          },
+          "diff_truncated": {
+            "type": "boolean",
+            "title": "Diff Truncated",
+            "default": false
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "status"
+        ],
+        "title": "SillySpecConflictCompareFile",
+        "description": "spec-tree 比对的单文件结果（design §7.2 files[] 单项）。\n\n``status`` 四分类（Grill B4）：modified / local_only（本地有平台缺失或读取\n被拒）/ platform_only / identical；双侧均缺失的路径不进本清单（计数在顶层\n``dropped_paths``）。本地 truncated/binary 无 content 的文件 ``diff_rows``\n为空（不出全 insert 的失真信号）；单文件 diff 超 5000 行截断置\n``diff_truncated``。"
+      },
+      "SillySpecConflictCompareResponse": {
+        "properties": {
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "spec-tree",
+              "progress"
+            ],
+            "title": "Kind"
+          },
+          "ql_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ql Id"
+          },
+          "conflict_created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Created At"
+          },
+          "local_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Updated At"
+          },
+          "platform_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Updated At"
+          },
+          "response_truncated": {
+            "type": "boolean",
+            "title": "Response Truncated",
+            "default": false
+          },
+          "dropped_paths": {
+            "type": "integer",
+            "title": "Dropped Paths",
+            "default": 0
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SillySpecConflictCompareFile"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "progress_rows": {
+            "items": {
+              "$ref": "#/components/schemas/SillySpecConflictProgressRow"
+            },
+            "type": "array",
+            "title": "Progress Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "change",
+          "kind"
+        ],
+        "title": "SillySpecConflictCompareResponse",
+        "description": "GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。\n\nkind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。\n``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。\n``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。"
+      },
+      "SillySpecConflictDiffRow": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "equal",
+              "delete",
+              "insert"
+            ],
+            "title": "Type"
+          },
+          "local_lineno": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Lineno"
+          },
+          "local_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Text"
+          },
+          "platform_lineno": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Lineno"
+          },
+          "platform_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "SillySpecConflictDiffRow",
+        "description": "spec-tree 比对的对齐行（design §7.2 files[].diff_rows[] 单项）。\n\n``type`` = equal（双侧同）/ delete（本地删，platform_* 为 null）/ insert\n（平台增，local_* 为 null）；replace 段在 service 侧展开为相邻 delete+insert。\nlineno 双侧各自从 1 起。"
+      },
+      "SillySpecConflictProgressRow": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "local_value": {
+            "type": "string",
+            "title": "Local Value"
+          },
+          "platform_value": {
+            "type": "string",
+            "title": "Platform Value"
+          },
+          "differ": {
+            "type": "boolean",
+            "title": "Differ"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "local_value",
+          "platform_value",
+          "differ"
+        ],
+        "title": "SillySpecConflictProgressRow",
+        "description": "progress 比对行（design §7.2 progress_rows[] 单项，D-003@v1 对比表）。\n\n字段白名单六项（当前阶段/阶段标签/步骤进度/最近活跃/ql_id/ghost），缺失侧\n显式「—」；``differ`` 由两侧展示值不等判定。"
       },
       "SkillCreateRequest": {
         "properties": {
