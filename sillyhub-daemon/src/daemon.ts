@@ -4489,6 +4489,7 @@ export class Daemon {
    * pull 上下文沿用该工作区最近创建的取值（防 repo-native junction 降级）。
    */
   private _maybePrefetchSpecCaches(specVersions: Record<string, number>): void {
+    if (!this._running) return; // 停机竞态：stop() 后不再起后台拉取
     for (const [workspaceId, serverVersion] of Object.entries(specVersions)) {
       if (this._specPullsInFlight.has(workspaceId)) continue;
       if (this._activeSessionsForWorkspace(workspaceId) > 0) continue;
@@ -4507,6 +4508,10 @@ export class Daemon {
         });
         this._specPrefetchLastAttempt.set(workspaceId, Date.now());
         await this._pullSpecShared(workspaceId, ctx);
+        // 预取成功后回写本地版本到服务器权威值（pull 的整树换目录不含
+        // .runtime——不 bump 则本地恒落后，下跳心跳反复预取、下个会话仍现场
+        // pull，预取白做）。对齐创建路径 pull 后 bumpLocalSpecVersion 语义。
+        await bumpLocalSpecVersion(resolveSpecDir(workspaceId), serverVersion);
         this._logger.info('spec_prefetch_done', {
           workspace_id: workspaceId,
           server_version: serverVersion,
@@ -4584,18 +4589,17 @@ export class Daemon {
         sillyspecCommandResult !== null ? [sillyspecCommandResult] : [];
       // ql-20260907-010：心跳前对齐会话活跃记账（自愈清账），随后上报本机
       // spec 缓存清单（best-effort；未枚举到/读失败 → 空数组 → 键不出现）。
-      // 位置参数末位（第 8 参）：占位纪律同现有槽位——前槽缺席需显式 undefined，
-      // 否则 specCache 滑入 status/commandResult 槽位被错读。
+      // 位置参数末位（第 8 参）：在场时由下方扩展占位链保证 5/6/7 槽齐占位，
+      // 不滑入 sillyspec/status/commandResult 槽。
       this._reconcileSpecSessionActivity();
-      const specCacheEntries = await this._collectSpecCacheEntries();
-      const specCacheTail: { workspace_id: string; spec_version: number }[] =
-        specCacheEntries.length > 0
-          ? [
-              ...specCacheEntries.slice(0, 0) as [],
-              // spread 末位由下方位置占位链保证落在第 8 参（spec_cache 槽）。
-              ...(0 && specCacheEntries ? [specCacheEntries] : []),
-            ]
-          : [];
+      // 运行态门控：spec 缓存上报属运行态心跳行为（未 start 的 daemon——含
+      // 直调 _sendHeartbeatOnce 的测试前置——不上报，心跳位置参数保持旧形态；
+      // 生产心跳循环/重连对账恒为运行态，零影响）。
+      const specCacheEntries = this._running
+        ? await this._collectSpecCacheEntries()
+        : [];
+      const specCacheTail: { workspace_id: string; spec_version: number }[][] =
+        specCacheEntries.length > 0 ? [specCacheEntries] : [];
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
@@ -4614,17 +4618,30 @@ export class Daemon {
         // sillyspec 槽位（位置参数陷阱），hub-client 把摘要当 sillyspec 参数读
         //（version/latest/update 三键全无即静默忽略）→ sillyspec_status 键
         // 不发出、快照被丢弃。task-06 扩展：commandResult 存在时同样触发第 5
-        // 参占位（status/commandResult 任一在场即需占位）。
+        // 参占位（status/commandResult 任一在场即需占位）。ql-20260907-010
+        // 再扩展：specCache 在场同样触发（spec_cache 必须落在第 8 参）。
         ...(
           sillyspecTail.length === 0 &&
-          (statusTail.length > 0 || commandResultTail.length > 0)
+          (statusTail.length > 0 ||
+            commandResultTail.length > 0 ||
+            specCacheTail.length > 0)
             ? [undefined]
             : []
         ),
         // task-06 同坑：status 缺席而 commandResult 存在时，第 6 参须显式
         // undefined 占位——否则 commandResult 滑入 status 槽位（status 参数
-        // 类型不含结果形状，hub-client 静默按 status 发错键）。
-        ...(statusTail.length === 0 && commandResultTail.length > 0
+        // 类型不含结果形状，hub-client 静默按 status 发错键）。ql-20260907-010
+        // 再扩展：specCache 在场同样触发。
+        ...(
+          statusTail.length === 0 &&
+          (commandResultTail.length > 0 || specCacheTail.length > 0)
+            ? [undefined]
+            : []
+        ),
+        // ql-20260907-010：commandResult 缺席而 specCache 存在时，第 7 参须
+        // 显式 undefined 占位——否则 specCache 数组滑入 commandResult 槽位
+        //（结构不含 workspace_id/spec_version，被静默按结果键发错）。
+        ...(commandResultTail.length === 0 && specCacheTail.length > 0
           ? [undefined]
           : []),
         ...statusTail,
@@ -4651,6 +4668,14 @@ export class Daemon {
       // task-06（design A1）：心跳响应 pending_controls > 0 → 控制指令补拉
       //（backend task-04 起携带；旧 backend 无该字段视为 0 不触发）。
       this._maybeTriggerControlPull(hbResp);
+      // ql-20260907-010：spec 版本对答消费——旧 backend / 未携带 → 键缺席，
+      // 视为无对答不预取（心跳保活通道零依赖）。mock client 心跳返回 {} 同样
+      // 安全跳过（既有测试零回归）。
+      const specVersions = (hbResp as { spec_versions?: Record<string, number> })
+        ?.spec_versions;
+      if (specVersions && Object.keys(specVersions).length > 0) {
+        this._maybePrefetchSpecCaches(specVersions);
+      }
       return true;
     } catch (e) {
       // task-06（design A1）：heartbeat 401/403 → 凭证被平台拒绝（D-002 边界外
@@ -6242,6 +6267,8 @@ export class Daemon {
       case MSG.SESSION_END: {
         await this._sessionManager.end(sessionId);
         this._interactiveSessionsByLease.delete(state.leaseId);
+        // ql-20260907-010：会话终局清活跃记账（后台预取门控解除）。
+        this._noteSessionInactive(sessionId);
         break;
       }
       default: {
@@ -7165,6 +7192,13 @@ export class Daemon {
       : ((execPayload as { rootPath?: string }).rootPath ??
         (execPayload as { root_path?: string }).root_path);
 
+    // ql-20260907-010：工作区级记账——pull 上下文供心跳后台预取复用（防
+    // repo-native junction 被默认参数降级覆盖），会话活跃供预取门控（agent
+    // 在读写 spec 目录时绝不后台动盘）。清账：create catch + SESSION_END +
+    // 心跳自愈三路兜底。
+    this._noteSpecPullContext(workspaceId, { strategy: specStrategy, rootPath: specRootPath });
+    this._noteSessionActive(sessionId, workspaceId);
+
     // ql-20260907-006：前置链并行化——skills 拷贝 / spec pull / MCP 预取三步互相
     // 无数据依赖（skills 只需 cwd；spec pull 写 ~/.sillyhub/daemon/specs 本地缓存，
     // 与 cwd 无关；MCP 预取写会话级缓存，只需在下方 create 前完成——由 Promise.all
@@ -7231,15 +7265,18 @@ export class Daemon {
                 skipped: 'version_fresh',
               });
             } else {
-              try {
-                // `as never`：ClientLike 是 daemon 内部鸭子类型，spec-sync utility 期望 HubClient
-                // 具体类型；ClientLike 已声明 getSpecBundle/postSpecSync 签名（additive），运行时
-                // 真实 _client 为 HubClient 实例（main.ts 注入），duck-type 安全（task-06 §4.1/边界 11）。
-                const specDir = await pullSpecBundle(
-                  this._client as never,
-                  workspaceId,
-                  { strategy: specStrategy, rootPath: specRootPath },
-                );
+          try {
+            // ql-20260907-010：single-flight 拉取——同工作区并发创建共享同一
+            // promise（不再各拉一份全量 bundle），心跳后台预取在途时直接等它。
+            // `as never`：ClientLike 是 daemon 内部鸭子类型，spec-sync utility 期望
+            // HubClient 具体类型；ClientLike 已声明 getSpecBundle/postSpecSync
+            // 签名（additive），运行时真实 _client 为 HubClient 实例（main.ts
+            // 注入），duck-type 安全（task-06 §4.1/边界 11）——该断言已收进
+            // _pullSpecShared，此处不再直调 pullSpecBundle。
+            const specDir = await this._pullSpecShared(workspaceId, {
+              strategy: specStrategy,
+              rootPath: specRootPath,
+            });
                 // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
                 // lease 带了 latest_spec_version → 回写本地版本保鲜（D-010）。
                 if (leaseSpecVersion !== undefined) {
@@ -7442,6 +7479,8 @@ export class Daemon {
       // rethrow（不触发 onSessionEnd）——此前注释称「已标 failed（onSessionEnd）」
       // 与实现不符（2026-08-24 会话审查 P2b/daemon H4 修正）。
       this._interactiveSessionsByLease.delete(leaseId);
+      // ql-20260907-010：会话终局清活跃记账（后台预取门控解除）。
+      this._noteSessionInactive(sessionId);
       // task-07（D-007@v2）：create 失败路径不经 onSessionEnd，显式清会话级 MCP
       // bundle 缓存（防泄漏；WS 重放重试时会重新预取，幂等安全）。
       this._mcpBundleBySession.delete(sessionId);
