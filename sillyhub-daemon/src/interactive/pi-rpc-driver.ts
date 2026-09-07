@@ -468,6 +468,10 @@ export class PiRpcDriver implements InteractiveDriver {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: useShell,
+      // ql-20260907-004：daemon 无自有控制台（IDE / VBS 隐藏自启形态）时，Windows
+      // 会给控制台子进程（node 跑 pi）新开可见黑框。windowsHide=CREATE_NO_WINDOW，
+      // 对齐仓内其余 spawn 点先例（preflight/runtime-handler/taskkill）。
+      windowsHide: true,
     });
 
     // 闭包存 start options 供 consume 读（codex 同款，不污染公共契约）。

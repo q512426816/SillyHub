@@ -283,6 +283,20 @@ describe('ql-20260624-002：Windows codex.cmd wrapper 解析（R-exe，规避 sp
       expect.objectContaining({ shell: false }),
     );
   });
+
+  it('windowsHide: true——daemon 无自有控制台时 Windows 不为 codex 新开黑框（ql-20260907-004）', async () => {
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ windowsHide: true }),
+    );
+  });
 });
 
 describe('TDD-1：executable 缺失抛 CodexExecutableNotFoundError', () => {

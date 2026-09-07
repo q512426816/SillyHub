@@ -347,6 +347,19 @@ describe('spawn 参数面（design §5.1）', () => {
     );
   });
 
+  it('windowsHide: true——daemon 无自有控制台时 Windows 不为 pi 新开黑框（ql-20260907-004）', async () => {
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+    const driver = await makeDriver();
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ windowsHide: true }),
+    );
+  });
+
   it('model/resume 透传：--model <m> + --session <id>（pi 实读 CLI 修正 design 笔误）', async () => {
     vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
     const driver = await makeDriver();

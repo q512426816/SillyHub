@@ -1401,6 +1401,10 @@ export class TaskRunner {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // ql-20260907-004：daemon 无自有控制台（IDE / VBS 隐藏自启形态）时，Windows
+      // 会给控制台子进程（node 跑 agent CLI）新开可见黑框。windowsHide=
+      // CREATE_NO_WINDOW，对齐仓内其余 spawn 点先例；stdio 管道不受影响。
+      windowsHide: true,
       ...(useShell ? { shell: true } : {}),
     }) as ChildProcess;
 

@@ -383,3 +383,25 @@
 根因：backend 等 session ready 仅 8s 即 fallback 发 inject，daemon _awaitSessionThenRoute 固定 60s 窗口轮询等 create 写 store，Windows 冷启动 create 全链偶发超 60s（实测 ~31s，会话 1a9c601c 实机超窗）→ 超时被当会话不存在丢弃 + 报 run failed，重发即恢复（瞬时竞态非真死）。WS 短暂离线丢指令已由控制指令三段式落库+补拉覆盖，无需后端缓存重投
 方案：_awaitSessionThenRoute 轮询时读 inject payload 的 lease_id：仍在 _inflightLeases（_executeTask try/finally 全程维护，claim→create 全链在途证据）期间逐拍续推 deadline 至 now+waitMs，硬顶 waitMs+extendMaxMs（新常量 DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS=240s，env SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS 可调，总硬顶 5min）；lease 离开在途（create 完成/失败）即停推，余量到期回落原 005 丢弃上报；lease 不在途的真不存在会话零回归
 结果：vitest tests/daemon-inject-drop-report.test.ts 10/10 通过（新增 I 在途延长接住 600ms 晚到会话 / J 在途硬顶 450ms 到顶即丢弃两用例，既有 A-H 零回归）；pnpm typecheck 零错误
+
+## ql-20260907-004-dea5 | 2026-09-07 09:52:32 | Windows 弹黑框修复——三处 agent spawn 补 windowsHide
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/task-runner.ts（批量任务 agent spawn 补 windowsHide）
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（pi 会话 spawn 补 windowsHide）
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（codex 会话 spawn 补 windowsHide）
+- sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（新增 windowsHide 断言用例）
+- sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts（新增 windowsHide 断言用例）
+- sillyhub-daemon/tests/task-runner.test.ts（主流程用例补 windowsHide 断言）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引条目）
+需求：Windows 弹黑框修复——三处 agent spawn 补 windowsHide
+根因：daemon 无自有控制台（IDE 直跑/VBS 隐藏自启）时，Windows 为控制台子进程新开可见命令窗口挂整个会话，pi 会话实测弹窗
+方案：task-runner.ts / interactive/pi-rpc-driver.ts / interactive/codex-app-server-driver.ts 三处 spawn options 补 windowsHide: true（CREATE_NO_WINDOW，stdio 管道不受影响，非 Windows 无操作），对齐仓内其余 spawn 点既有约定；三测试文件补对应断言
+结果：vitest 定向 3 文件 154 passed（pi/codex 各 +1 用例、task-runner 主流程补断言），tsc 0；模块文档变更索引已同步 ql-20260907-004-dea5
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts, sillyhub-daemon/tests/task-runner.test.ts
+
+## ql-20260907-005-5858 | 2026-09-07 09:59:33 | daemon 会话创建链加分步计时埋点：skills/spec/MCP/create 各段 elapsed_ms + interactive_session_started 汇总
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-kind-dispatch.test.ts
