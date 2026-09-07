@@ -18,7 +18,7 @@ generator: sillyspec-scan
 
 ### 🟡 中（债务 / 边界）
 
-- **local.yaml 写入非原子**：`src/local-yaml-writer.ts:121` 直接 `await fs.writeFile(join(rootPath, '.sillyspec', 'local.yaml'), text, 'utf8')`，无 tmp+rename 两段式——进程在写中途崩溃/断电会留下半截文件，而该文件承载 platform/mcp 配置（token 上行），损坏后 daemon 起不来需人工修。
+- **local.yaml 写入非原子**：`sillyhub-daemon/src/local-yaml-writer.ts:121` 直接 `await fs.writeFile(join(rootPath, '.sillyspec', 'local.yaml'), text, 'utf8')`，无 tmp+rename 两段式——进程在写中途崩溃/断电会留下半截文件，而该文件承载 platform/mcp 配置（token 上行），损坏后 daemon 起不来需人工修。
 - **`--passWithNoTests` 掩盖 include 回归**：`pnpm test` = `vitest run --passWithNoTests`（package.json scripts）。当前实际有 141 个测试文件、不构成零测试风险；但若 `vitest.config.ts` 的 include 模式被误改/路径拼错，套件会以 0 个测试**静默全绿**而非报错。
 
 ### 🟢 低 / 已核实无虞

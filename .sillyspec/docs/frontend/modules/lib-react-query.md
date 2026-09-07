@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # React Query 基础设施（lib-react-query）
 
 ## 定位
-React Query（@tanstack/react-query 5）基础设施两件套：`query-client.ts` 提供 `makeQueryClient()` 工厂（freshness-first 默认配置），`query-keys.ts` 提供集中式 query key 工厂。上层 Provider 在 `src/lib/providers.tsx` 的 `AppProviders`（useState 初始化器调工厂创建每会话实例 + QueryClientProvider + dev 才挂 Devtools）。供 `lib-use-agent-runs` / `lib-use-daemon-machines` / `lib-daemon-audit` / `lib-mcp-skills` hooks 及多个页面/组件消费。
+React Query（@tanstack/react-query 5）基础设施两件套：`query-client.ts` 提供 `makeQueryClient()` 工厂（freshness-first 默认配置），`query-keys.ts` 提供集中式 query key 工厂。上层 Provider 在 `frontend/src/lib/providers.tsx` 的 `AppProviders`（useState 初始化器调工厂创建每会话实例 + QueryClientProvider + dev 才挂 Devtools）。供 `lib-use-agent-runs` / `lib-use-daemon-machines` / `lib-daemon-audit` / `lib-mcp-skills` hooks 及多个页面/组件消费。
 
 ## 契约摘要
 `query-client.ts`：

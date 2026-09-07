@@ -10,9 +10,9 @@ created_at: 2026-08-18 01:45:00
 
 ## 定位
 工作区上下文三件套，串起「当前在哪个工作区、绑没绑 daemon、daemon 在不在线、怎么切过去」四件事：
-- `src/lib/use-workspace-context.ts`（131 行）— 组合 hook：URL 派生（真相源）+ store 缓存 + daemon 在线聚合 + switchWorkspace 切同模块路径替换（change 2026-07-09-workspace-prioritization task-04 / FR-01 / D-002）。
-- `src/lib/workspace-binding.ts`（155 行）— per-member daemon 绑定 API：自有 binding 读写、批量拉取、daemon 共享（lender 标记 / owner 查询撤销）、借用门禁（change 2026-07-01-collaborative-workspace task-03/10 + 2026-07-25-daemon-borrow-for-business task-12/13）。
-- `src/lib/workspace-daemon-status.ts`（131 行）— daemon 在线状态批量聚合（同 change task-03 / FR-06 / R-02）。
+- `frontend/src/lib/use-workspace-context.ts`（131 行）— 组合 hook：URL 派生（真相源）+ store 缓存 + daemon 在线聚合 + switchWorkspace 切同模块路径替换（change 2026-07-09-workspace-prioritization task-04 / FR-01 / D-002）。
+- `frontend/src/lib/workspace-binding.ts`（155 行）— per-member daemon 绑定 API：自有 binding 读写、批量拉取、daemon 共享（lender 标记 / owner 查询撤销）、借用门禁（change 2026-07-01-collaborative-workspace task-03/10 + 2026-07-25-daemon-borrow-for-business task-12/13）。
+- `frontend/src/lib/workspace-daemon-status.ts`（131 行）— daemon 在线状态批量聚合（同 change task-03 / FR-06 / R-02）。
 
 核心设计约束：**URL 是真相源，store 仅叠加缓存**；刷新后由 hook 从 URL 重建。实测消费方：workspace-switcher.tsx 与 app-shell.tsx（useWorkspaceContext）、workspace-binding-guard / workspace-config-card / workspace-path-picker / shared-daemon-manager / shared-daemon-toggle / shared-daemon 系列与多个 workspace 页面（binding/status）；agent 域 borrow-trigger-contract 测试锁借用契约。
 
@@ -61,7 +61,7 @@ aggregateDaemonStatus(bindings, instances):
 - 30s 轮询是刻意节奏：daemon status 由后端心跳驱动非秒级变化，且切换器常驻顶栏；别对齐 use-daemon-machines 的 15s。
 - `useDaemonStatusMap` 内 `listDaemonInstances().catch(() => [])` 保证 instances 失败不阻塞；isError 实际恒 false（两数据源都被 catch 降级），仅作透传。
 - buildSwitchPath 不做 URL 编码（targetId 原样拼段，编码交给 router.push）。
-- 单测落位：`src/lib/__tests__/use-workspace-context.test.ts` 与 `workspace-daemon-status.test.ts`（都用 renderHook + QueryClientProvider，故在 vitest node 环境白名单外、走 jsdom）；binding 的测试是同层 colocated `src/lib/workspace-binding.test.ts`（node 白名单内）。改本模块行为先跑这三处。
+- 单测落位：`frontend/src/lib/__tests__/use-workspace-context.test.ts` 与 `workspace-daemon-status.test.ts`（都用 renderHook + QueryClientProvider，故在 vitest node 环境白名单外、走 jsdom）；binding 的测试是同层 colocated `frontend/src/lib/workspace-binding.test.ts`（node 白名单内）。改本模块行为先跑这三处。
 
 ## 人工备注
 

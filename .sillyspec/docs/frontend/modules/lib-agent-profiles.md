@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 智能体档案客户端（lib-agent-profiles）
 
 ## 定位
-AgentProfile（智能体档案）API 客户端 + React Query hooks（`lib/agent-profiles.ts`，360 行，2026-08-02-agent-profile-layer 变更派生）。覆盖 workspace 级 CRUD+复制、platform 级只读列表与跨级删除、全局聚合（scope=mine）、tool policy 列表，以及配套 useQuery/useMutation hooks。类型一律取自 api-types.ts 的 `components["schemas"]`（规则 20 禁手写）。
+AgentProfile（智能体档案）API 客户端 + React Query hooks（`frontend/src/lib/agent-profiles.ts`，360 行，2026-08-02-agent-profile-layer 变更派生）。覆盖 workspace 级 CRUD+复制、platform 级只读列表与跨级删除、全局聚合（scope=mine）、tool policy 列表，以及配套 useQuery/useMutation hooks。类型一律取自 api-types.ts 的 `components["schemas"]`（规则 20 禁手写）。
 
 ## 契约摘要
 - 类型（全部 `components["schemas"]` 别名）：

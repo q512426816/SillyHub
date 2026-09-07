@@ -7,7 +7,7 @@
 
 ## 背景结论（调研已证实）
 
-- 分身运行形态已是 SDK 交互会话：`placement.py:485-535` 统一插 `kind='interactive'` lease
+- 分身运行形态已是 SDK 交互会话：`backend/app/modules/agent/placement.py:485-535` 统一插 `kind='interactive'` lease
   + AgentSession 行；daemon 按 kind 分流走 SessionManager → claude-agent-sdk。
 - 防递归闸：`stage='mission_worker'` 被 daemon `isMainAgentSession` 谓词
   （`sillyhub-daemon/src/cli.ts:787-791`）排除，不给 5 个派工 MCP 工具。
@@ -19,11 +19,11 @@
 
 - [x] **P0-1** daemon 会话持久化恢复丢 stage：`session-store-persistence.ts`
   `validateRecord` 不回填 `stage/mcpRefs/skillRefs/effectiveAllowedRoots`，与
-  `interactive/types.ts:646` 声明矛盾。后果：重启后 mission_worker 会话 stage 变空 →
+  `sillyhub-daemon/src/interactive/types.ts:646` 声明矛盾。后果：重启后 mission_worker 会话 stage 变空 →
   谓词命中 → 被静默注入派工工具，防递归防线重启即失效。
   **已完成（ql-20260825-012-89d6，commit 91227636）**：isStringArray 守卫 + 四字段容错回填。
 - [x] **P0-2** backend `cancel_lease` 对 interactive 的 lease-None 分支不发
-  SESSION_END（`lease_service.py:432-448`，注释自认是内存僵尸缺口）。
+  SESSION_END（`lease_service.py`，注释自认是内存僵尸缺口）。
   **已完成（ql-20260825-013-c299，commit 6e0b6396）**：by-run miss 后沿
   run→session→lease_id 回捞 interactive lease 复用主路径；测试 fixture 一并改回
   生产形态（原误写 agent_run_id=run_id 掩盖盲区）。
@@ -68,7 +68,7 @@
 
 ## 顺带发现（不阻塞主线，见机修）
 
-- `list_workers` MCP 不排除主控轮，与 UI 数据源口径不一致（`mcp_tools.py:1009`）。
+- `list_workers` MCP 不排除主控轮，与 UI 数据源口径不一致（`backend/app/modules/agent/mcp_tools.py:1536`）。
 - session 路径不写 AgentRunWorkspace 关联行（ql-20260825-003 修的是 batch 路径同款）。
 - per-worker worktree 的 SDK transcript 在副本删除后残留无人清理。
 - 权限 AskUserQuestion dialog 无超时，无人应答永久挂起 turn。

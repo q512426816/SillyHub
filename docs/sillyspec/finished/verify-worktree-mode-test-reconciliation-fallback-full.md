@@ -33,7 +33,7 @@ sillyspec 的 verify 对账设计假设「代码在主仓工作区有改动」(b
 
 相关源码:
 - `src/verify-postcheck.js`:`runVerifyTestCheck`(cwd=主仓)、`gitChangedFiles`(`git diff --name-only HEAD`)、`pickHitModules`(path 前缀匹配)、`computeFullFallbackReason`(hitCount=0 → 回退全量)。
-- `src/run/gates.js:172-181`:verify stage `testCheck.status==='failed'` → `rollbackCompletionAndReturn` 阻断。
+- `sillyhub-daemon/src/run/gates.js:172-181`:verify stage `testCheck.status==='failed'` → `rollbackCompletionAndReturn` 阻断。
 
 ## 加重因素:worktree apply 也被 baseline 漂移阻断
 

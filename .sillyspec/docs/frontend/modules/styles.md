@@ -10,10 +10,10 @@ created_at: 2026-08-18 01:45:00
 
 ## 定位
 全局样式与设计令牌的单一来源，4 文件共约 454 行：
-- `src/app/globals.css`（252 行）— CSS 变量总纲 + 基础层样式 + 动效 utility + 无障碍降级 + 路由加载骨架。
-- `src/styles/tokens.ts`（148 行）— TS 常量 `tokens` 与 CSS 变量注入串 `cssVars`（design token 单一源，前端样式系统 change task-01 / FR-01 / D-005@V1 / D-006@V1）。
-- `src/styles/index.ts`（7 行）— barrel：`export { tokens, cssVars } from './tokens'`，组件统一 `import { tokens, cssVars } from '@/styles'`。
-- `src/styles/fonts.ts`（47 行）— Inter 自托管字体（task-02 / D-004@V2）。
+- `frontend/src/app/globals.css`（252 行）— CSS 变量总纲 + 基础层样式 + 动效 utility + 无障碍降级 + 路由加载骨架。
+- `frontend/src/styles/tokens.ts`（148 行）— TS 常量 `tokens` 与 CSS 变量注入串 `cssVars`（design token 单一源，前端样式系统 change task-01 / FR-01 / D-005@V1 / D-006@V1）。
+- `frontend/src/styles/index.ts`（7 行）— barrel：`export { tokens, cssVars } from './tokens'`，组件统一 `import { tokens, cssVars } from '@/styles'`。
+- `frontend/src/styles/fonts.ts`（47 行）— Inter 自托管字体（task-02 / D-004@V2）。
 
 经 tailwind.config.ts 把变量映射成工具类；antd token 在运行时经 cssVars 直供 hex；`inter` 由根布局（app-layouts）挂载。
 

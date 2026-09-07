@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 移动端专用组件（components-mobile）
 
 ## 定位
-移动端（/m/ 域，PPM 业务）专用组件（`components/mobile/`，12 个 tsx：10 组件 + 2 测试）。
+移动端（/m/ 域，PPM 业务）专用组件（`frontend/components/mobile/`，12 个 tsx：10 组件 + 2 测试）。
 两条铁律：① 独立于桌面组件体系——不复用 / 不改桌面 app-shell、top-bar、components/layout
 （D-001 桌面零回归）；② 数据层 100% 复用 lib/ppm 等现有客户端（D-003 禁止自写请求）。
 全组件遵守 R-04：触摸热区 ≥ 44×44px、正文 ≥ 14px。

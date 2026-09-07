@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 横切基础设施（core）
 
 ## 定位
-后端横切基础设施层：配置、数据库会话、Redis、JWT/口令安全、凭证加密、RBAC 权限缓存、审计钩子、SSRF 防护、结构化日志、监控、错误类型、spec 路径解析。被全部业务模块依赖，自身不依赖任何业务模块（`used_by` 覆盖所有模块）。无对外路由（`app/core/tests/` 除外），全部以函数/类/FastAPI 依赖项形态供各模块 import。
+后端横切基础设施层：配置、数据库会话、Redis、JWT/口令安全、凭证加密、RBAC 权限缓存、审计钩子、SSRF 防护、结构化日志、监控、错误类型、spec 路径解析。被全部业务模块依赖，自身不依赖任何业务模块（`used_by` 覆盖所有模块）。无对外路由（`backend/app/core/tests/` 除外），全部以函数/类/FastAPI 依赖项形态供各模块 import。
 
 ## 契约摘要
 - `config.py` — `Settings`（pydantic-settings，~395 行）+ `get_settings()` 单例：

@@ -10,9 +10,9 @@ created_at: 2026-08-18 01:45:00
 
 ## 定位
 PPM（项目管理）业务通用组件集合，分三处：
-- `components/ppm-*.tsx`：10 个通用控件（字典/用户/子表/CRUD 表格/成员表/计划/状态/文本）。
-- `components/ppm/milestone/`：里程碑模块 5 文件（详情抽屉/导入/表单抽屉/共享辅助）。
-- `components/ppm/problem/`：问题清单 Excel 导入弹窗。
+- `frontend/components/ppm-*.tsx`：10 个通用控件（字典/用户/子表/CRUD 表格/成员表/计划/状态/文本）。
+- `frontend/components/ppm/milestone/`：里程碑模块 5 文件（详情抽屉/导入/表单抽屉/共享辅助）。
+- `frontend/components/ppm/problem/`：问题清单 Excel 导入弹窗。
 
 是 `/ppm/*` 页面与 lib-ppm 之间的中间展示层；配置驱动的 `PpmResourceTable` 是项目/客户/项目成员/干系人四个维护页的共同 CRUD 底座。
 

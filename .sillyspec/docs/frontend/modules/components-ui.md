@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 设计系统原语组件（components-ui）
 
 ## 定位
-设计系统底层原语组件（shadcn 风格），位于 `components/ui/`，当前 12 个原语文件：avatar、badge、button、card、confirm-captcha、dialog、dropdown-menu、empty-state、input、json-editor、markdown-text、status-badge（Skeleton/Tag/Tooltip 已删）。基于 Radix UI + Tailwind + `class-variance-authority`（cva），是所有上层业务组件与页面的样式交互原子。与 antd 并存：antd 管复杂表单/表格，ui/* 管轻量展示态控件与统一视觉。
+设计系统底层原语组件（shadcn 风格），位于 `frontend/components/ui/`，当前 12 个原语文件：avatar、badge、button、card、confirm-captcha、dialog、dropdown-menu、empty-state、input、json-editor、markdown-text、status-badge（Skeleton/Tag/Tooltip 已删）。基于 Radix UI + Tailwind + `class-variance-authority`（cva），是所有上层业务组件与页面的样式交互原子。与 antd 并存：antd 管复杂表单/表格，ui/* 管轻量展示态控件与统一视觉。
 
 ## 契约摘要
 - `Button` / `Input` / `Badge` / `Avatar` / `Card` / `Dialog` / `DropdownMenu`：cva 变体原语，forwardRef 透传（Dialog/DropdownMenu 为 Radix 组合导出多子件）。

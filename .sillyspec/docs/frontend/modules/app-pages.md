@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 平台级页面（app-pages）
 
 ## 定位
-顶层路由页面集合（`src/app/` 根 + `(auth)` + `(dashboard)` 平台级页面），共 12 个 page.tsx：落地页 `/`、登录 `/login`、工作区选择器 `/workspaces`、机器列表 `/runtimes`、机器审计 `/runtimes/[id]/audit`、设置域 `/settings` 及其 5 个子页（git-identities / api-keys / mcp / providers / skills）、个人中心 `/account`。页面负责数据拉取与交互编排，UI 骨架下沉 components-layout / components-shared / components-llm-providers / components-daemon。
+顶层路由页面集合（`frontend/src/app/` 根 + `(auth)` + `(dashboard)` 平台级页面），共 12 个 page.tsx：落地页 `/`、登录 `/login`、工作区选择器 `/workspaces`、机器列表 `/runtimes`、机器审计 `/runtimes/[id]/audit`、设置域 `/settings` 及其 5 个子页（git-identities / api-keys / mcp / providers / skills）、个人中心 `/account`。页面负责数据拉取与交互编排，UI 骨架下沉 components-layout / components-shared / components-llm-providers / components-daemon。
 
 ## 契约摘要
 - /runtimes（2026-08-28-daemon-agent-share）：统计行加「共享给我」计数卡；挂载

@@ -35,8 +35,8 @@ generator: sillyspec-scan
 
 ### daemon（Node.js）
 
-13. **daemon 是纯 ESM：相对 import 必须带 `.js` 后缀，Node 内置模块走 `node:` 前缀**——TS 源里写 `from './cursor-version.js'`（编译后产物名），漏后缀运行时 `ERR_MODULE_NOT_FOUND`。依据：`sillyhub-daemon/package.json`（`"type": "module"`）；`sillyhub-daemon/src/cmd-shim.ts:19,21`（`from 'node:fs'` + `from './cursor-version.js'`）。
-14. **MCP 工具入参一律 zod schema 校验并附 `.describe()` 给 LLM 看**。依据：`sillyhub-daemon/src/mcp-server.ts:36`（`import { z } from 'zod'`）、`:168-169`（`workspace_id: z.string().describe('Target workspace UUID')` 等）。
+13. **daemon 是纯 ESM：相对 import 必须带 `.js` 后缀，Node 内置模块走 `node:` 前缀**——TS 源里写 `from './cursor-version.js'`（编译后产物名），漏后缀运行时 `ERR_MODULE_NOT_FOUND`。依据：`sillyhub-daemon/package.json`（`"type": "module"`）；`sillyhub-daemon/src/cmd-shim.ts,21`（`from 'node:fs'` + `from './cursor-version.js'`）。
+14. **MCP 工具入参一律 zod schema 校验并附 `.describe()` 给 LLM 看**。依据：`sillyhub-daemon/src/mcp-server.ts`（`import { z } from 'zod'`）、`:168-169`（`workspace_id: z.string().describe('Target workspace UUID')` 等）。
 
 ## 代码风格
 
@@ -46,7 +46,7 @@ generator: sillyspec-scan
 4. **后端日志：structlog**（stdlib logging + structlog 双轨，merge_contextvars / add_log_level / iso-utc TimeStamper 等处理器，幂等配置）。权限缓存失效等可监控异常升 ERROR 级走 structlog。依据：`backend/app/core/logging.py:13-30`；`backend/app/core/permission_cache.py:234`。
 5. **后端依赖注入**：会话固定别名 `SessionDep = Annotated[AsyncSession, Depends(get_session)]`，权限用 `Depends(require_permission(Permission.X))`。依据：`backend/app/modules/incident/router.py:26` 及各模块 router 同款。
 6. **前端 lint：ESLint（eslint-config-next）**。`next/core-web-vitals` 预设 + `no-unused-vars` warn（`argsIgnorePattern: "^_"`，未用参数/变量前缀 `_`）。依据：`frontend/.eslintrc.json`；`frontend/package.json:9`（`lint: next lint`）。
-7. **前端样式：Tailwind + antd 共存，`cn()` 拼类名 + cva 做变体**。`cn = twMerge(clsx(...))` 统一入口；shadcn 风格原子件用 `cva` 定义变体（如 `buttonVariants`）；`components/ui/`（原子件）、`components/layout/`、`components/charts/`、`components/<域>/` 按域分目录，组件文件 kebab-case `.tsx`，同目录 `__tests__/` 放测试。依据：`frontend/src/lib/utils.ts`（cn 实现）；`frontend/src/components/ui/button.tsx:2,6`（`cva` + `buttonVariants`）；`frontend/tailwind.config.ts`。
+7. **前端样式：Tailwind + antd 共存，`cn()` 拼类名 + cva 做变体**。`cn = twMerge(clsx(...))` 统一入口；shadcn 风格原子件用 `cva` 定义变体（如 `buttonVariants`）；`components/ui/`（原子件）、`components/layout/`、`components/charts/`、`components/<域>/` 按域分目录，组件文件 kebab-case `.tsx`，同目录 `__tests__/` 放测试。依据：`frontend/src/lib/utils.ts`（cn 实现）；`frontend/src/components/ui/button.tsx,6`（`cva` + `buttonVariants`）；`frontend/tailwind.config.ts`。
 8. **前端测试：vitest + @testing-library/react**。jsdom 环境、`globals: true`、`clearMocks: true`（每测试清 mock 调用计数；刻意不开 restoreMocks——大量测试在 beforeAll 级持久化 spy）；`testTimeout: 15000` 治全量并行 flaky；纯逻辑测试按 `environmentMatchGlobs` 白名单切 node 环境省 jsdom 启动。依据：`frontend/vitest.config.ts`（含逐条中文注释说明取舍）。
 9. **daemon：tsc 严格模式**。`strict: true` + `noUncheckedIndexedAccess` + `noImplicitOverride` + `verbatimModuleSyntax`（type 导入必须显式 `import type`）+ `isolatedModules`。依据：`sillyhub-daemon/tsconfig.json:7-15`；测试与前端共用 vitest 栈（`sillyhub-daemon/package.json` test 脚本 + `vitest.config.ts` / `vitest.spikes.config.ts`）。
 
@@ -55,5 +55,5 @@ generator: sillyspec-scan
 1. **后端 router→service 分层调用**：router 拿 `SessionDep` → 请求内 `svc = IncidentService(session)` → 调 service 方法 → schema 序列化返回。例：`backend/app/modules/incident/router.py`（:26 SessionDep、:40 实例化）+ `backend/app/modules/incident/service.py`。
 2. **前端数据获取（react-query 三件套）**：`src/lib/` 下纯 `export async function fetchX` 请求函数 + 同文件封装 `useQuery`/`useMutation` hook + query key 统一走 `queryKeys` 工厂（凡影响查询结果的变量都进 key）。例：`frontend/src/lib/mcp-settings.ts:17,93-94,110-111`；key 工厂：`frontend/src/lib/query-keys.ts`。
 3. **前端组件变体（cva + cn）**：原子件用 `cva` 声明变体表导出 `xxxVariants`，业务组件用 `cn(...)` 合并外部 className。例：`frontend/src/components/ui/button.tsx:2,6`；`frontend/src/lib/utils.ts`。
-4. **daemon MCP 工具 schema（zod + describe）**：`z.object({...})` 定义入参，每个字段 `.describe()` 面向 LLM。例：`sillyhub-daemon/src/mcp-server.ts:36,164-169`。
+4. **daemon MCP 工具 schema（zod + describe）**：`z.object({...})` 定义入参，每个字段 `.describe()` 面向 LLM。例：`sillyhub-daemon/src/mcp-server.ts,164-169`。
 5. **后端领域错误定义**：继承 `AppError` 按事件命名、构造时传中文用户文案。例：`backend/app/core/errors.py:28-38`（基类）；`backend/app/modules/incident/service.py`（`IncidentNotFound` 等子类同模式）。

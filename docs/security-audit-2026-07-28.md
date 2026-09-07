@@ -45,7 +45,7 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 
 ### P0-1 daemon WebSocket 零鉴权
 - **文件**:`backend/app/modules/daemon/router.py:1958-2023`
-- **证据**:handler 仅校验 `daemon_local_id` 在 `DaemonInstance` 表存在即 `websocket.accept()`,**无 Bearer / X-API-Key / Origin 校验**;docstring 声称的"HTTP upgrade 阶段鉴权"未实现。daemon 侧 `sillyhub-daemon/src/ws-client.ts:350,355-357` 连接时不带任何认证头。
+- **证据**:handler 仅校验 `daemon_local_id` 在 `DaemonInstance` 表存在即 `websocket.accept()`,**无 Bearer / X-API-Key / Origin 校验**;docstring 声称的"HTTP upgrade 阶段鉴权"未实现。daemon 侧 `sillyhub-daemon/src/ws-client.ts:435,355-357` 连接时不带任何认证头。
 - **修复**:WS 握手强制 `_extract_bearer`+`get_current_user`(失败 `close(4401)`),并比对连接方是注册 owner;daemon_local_id 不再当 bearer,改用已下发的长期 API key 做 WS 鉴权,改走 header(不入 access log)并支持轮换。
 
 ### P0-2 claim_lease IDOR 泄露明文 LLM api_key
@@ -65,7 +65,7 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 - **注**:注入维度子代理曾误判此点"有防护",本条以文件存储维度子代理的精确行号证据为准。
 
 ### P0-5 文件中心全量 IDOR
-- **文件**:`backend/app/modules/file/service.py:111-175`、`router.py:93,112,123,133`
+- **文件**:`backend/app/modules/file/service.py:111-175`、`backend/app/modules/file/router.py:93,112,123,133`
 - **证据**:`_get_active(file_id)` 纯主键查,不校验 `uploaded_by`/`owner`;`list_files()` 无参时返回**全平台文件**元数据 + 所有 file_id;`soft_delete` 无归属校验且会同步删 MinIO 对象本体。任意登录用户可读/删他人文件。
 - **修复**:`get_stream/get_meta/soft_delete` 注入 user 校验归属;`list_files` 按 `uploaded_by=user.id` 收口。
 
@@ -98,7 +98,7 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 - **修复**:把 `get_ppm_data_scope` 提到 router 级 `dependencies=[...]` 统一覆盖;单资源在 service 内按 `plan_operable_by_scope`/项目成员角色收口。
 
 ### P1-10 PPM problem-change 全 CRUD 无授权
-- **文件**:`backend/app/modules/ppm/problem/router.py:515-605`、`service.py:490-497`
+- **文件**:`backend/app/modules/ppm/problem/router.py:515-605`、`backend/app/modules/ppm/problem/service.py:490-497`
 - **证据**:端点标注 deprecated(D-005)但仍可写;`AuthUser=get_current_principal` 仅认证不授权;service 纯 CRUD 无 user/scope。任意 ppm 用户可读改删任意 problem-change、列表/导出不按 scope 裁剪。
 - **修复**:废弃则下线;保留则照 problem-list 范式加 `_assert_can_operate`,list 接 scope。
 
@@ -108,18 +108,18 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 - **修复**:schema 加 `Field(pattern=r"^[^\n\r\0]+$")`;或写入前 `re.sub(r"[\n\r\0]","",...)`。
 
 ### P1-12 tool_gateway SSRF(重定向绕过)
-- **文件**:`backend/app/modules/tool_gateway/service.py:510-549`、`tool_policy.py:273-321`
+- **文件**:`backend/app/modules/tool_gateway/service.py:510-549`、`backend/app/modules/agent/tool_policy.py`
 - **证据**:`_check_domain_allowed` 仅查初始域名,但 `httpx.AsyncClient(follow_redirects=True)` 跟随 302 → 攻击者服务器重定向到 `http://169.254.169.254/latest/meta-data/`(IMDSv1)窃云凭证,或访问内网服务。
 - **修复**:禁用 `follow_redirects` 手动逐跳校验私网 IP;或 event_hooks 重定向时重新验证。
 
 ### P1-13 Access token 不可吊销
-- **文件**:`backend/app/core/security.py:103-122`、`auth_deps.py:75-83`、`auth/service.py:170-173`
+- **文件**:`backend/app/core/security.py:103-122`、`backend/app/modules/auth/dependencies.py`、`backend/app/modules/auth/service.py:170-173`
 - **证据**:JWT 无状态 HS256,`jti` 写入 claim 但 decode/消费从不校验黑名单(全仓无 jti 黑名单)。logout/改密只吊销 refresh session 行,旧 access token 在 TTL(默认 30min)内仍有效,含 admin 全权限。
 - **修复**:Redis jti 黑名单,decode 校验;logout/改密写黑名单。或缩短 access TTL 到 5min。
 
 ### P1-14 登录无限流 + 默认弱口令无强制改密
-- **文件**:`backend/app/main.py:139-163`(无 slowapi)、`auth/router.py:48-59`、`README.md:152`、`auth/service.py:362-411`
-- **证据**:登录接口无限流/锁定;README 文档化默认弱口令;bootstrap 建 admin 无 `must_change_password` 标记(User 模型无此列);admin 重置默认密码 `SillyHub@123`(`admin/users_service.py:48`)的 `force_change_on_next_login` 只写审计、auth 模块零引用。
+- **文件**:`backend/app/main.py:139-163`(无 slowapi)、`backend/app/modules/auth/router.py:48-59`、`README.md:152`、`backend/app/modules/auth/service.py:362-411`
+- **证据**:登录接口无限流/锁定;README 文档化默认弱口令;bootstrap 建 admin 无 `must_change_password` 标记(User 模型无此列);admin 重置默认密码 `SillyHub@123`(`backend/app/modules/admin/users_service.py`)的 `force_change_on_next_login` 只写审计、auth 模块零引用。
 - **修复**:slowapi/redis 限流(5次/分/IP+username);User 加 `must_change_password` 列,login 后强制改密。
 
 ---
@@ -128,34 +128,34 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 
 **P2**:
 - access+refresh token 双存 localStorage(`frontend/src/stores/session.ts:31-58`)→ XSS 盗长期凭证
-- 登录页明文密码入 localStorage + 默认回填已知弱口令(`frontend/src/app/(auth)/login/page.tsx:45-74`)
-- quick-chat run 全局 IDOR(读/杀/续接他人会话,`main.py:181-484`)
-- agent mission/execution-context 单资源 IDOR(`agent/router.py:149-156,919-927`)
-- release 部署/回滚/审批跨工作区 + list 弱授权(`release/router.py:48-128`)
-- problem 单资源 get 越权读(`ppm/problem/router.py:414-424`)
-- git_gateway 参数注入黑名单漏 `--receive-pack`/`-c`(`git_gateway/service.py:51-57`)
-- worktree clone 缺 `--` 终止符(`worktree/git_runner.py:78-79`)
-- MIME 校验信任客户端 Content-Type(`file/router.py:56-60`)
-- 上传 `await file.read()` 全量读内存后校验大小 → OOM(`file/router.py:56`)
+- 登录页明文密码入 localStorage + 默认回填已知弱口令(`frontend/src/app/(auth)/login/page.tsx`)
+- quick-chat run 全局 IDOR(读/杀/续接他人会话,`backend/app/main.py:181-484`)
+- agent mission/execution-context 单资源 IDOR(`backend/app/modules/agent/router.py:149-156,919-927`)
+- release 部署/回滚/审批跨工作区 + list 弱授权(`backend/app/modules/release/router.py:48-128`)
+- problem 单资源 get 越权读(`backend/app/modules/ppm/problem/router.py:414-424`)
+- git_gateway 参数注入黑名单漏 `--receive-pack`/`-c`(`backend/app/modules/git_gateway/service.py:51-57`)
+- worktree clone 缺 `--` 终止符(`backend/app/modules/worktree/git_runner.py:78-79`)
+- MIME 校验信任客户端 Content-Type(`backend/app/modules/file/router.py:56-60`)
+- 上传 `await file.read()` 全量读内存后校验大小 → OOM(`backend/app/modules/file/router.py:56`)
 - daemon 本地凭证明文 + 无 chmod 0600(`sillyhub-daemon/src/config.ts:583-585`)
-- `assertWithinAllowedRoots` 不解析 realpath,symlink 可逃逸(`file-rpc.ts:70-99`)
-- auto 模式(manual_approval=false)Bash 工具不经 daemon 策略门禁(`lease/context.py:199-208`)
-- API key 正缓存不回查 key 自身 revoked/expires(`api_key_service.py:215-225`)
-- token/api_key 经 query param 传递 → URL/日志泄露(`auth_deps.py:38-53`)
-- 登录用户名存在性时序枚举(bcrypt 短路,`auth/service.py:93-96`)
-- refresh 不校验 login_enabled(`auth/service.py:280-282`)
+- `assertWithinAllowedRoots` 不解析 realpath,symlink 可逃逸(`sillyhub-daemon/src/file-rpc.ts:70-99`)
+- auto 模式(manual_approval=false)Bash 工具不经 daemon 策略门禁(`backend/app/modules/lease/context.py`)
+- API key 正缓存不回查 key 自身 revoked/expires(`backend/app/modules/auth/api_key_service.py:215-225`)
+- token/api_key 经 query param 传递 → URL/日志泄露(`backend/app/modules/auth/dependencies.py`)
+- 登录用户名存在性时序枚举(bcrypt 短路,`backend/app/modules/auth/service.py:93-96`)
+- refresh 不校验 login_enabled(`backend/app/modules/auth/service.py:280-282`)
 - 前端缺安全响应头 CSP/HSTS/X-Frame-Options(`frontend/next.config.mjs`)
-- CORS `allow_credentials=True`+origins 来自 env,需防误配 `*`(`main.py:139-146`)
-- HOST_PROJECTS_DIR 把宿主 IdeaProjects 整目录挂进容器(`docker-compose.yml:90`)
+- CORS `allow_credentials=True`+origins 来自 env,需防误配 `*`(`backend/app/main.py:139-146`)
+- HOST_PROJECTS_DIR 把宿主 IdeaProjects 整目录挂进容器(`deploy/docker-compose.yml:90`)
 
 **P3**:
-- `secret_key` min_length=16 偏弱(`config.py:37`)
-- bcrypt 72 字节截断无预哈希(`security.py:58-66`)
-- refresh grace 60s 静默重放(`auth/service.py:299-311`)
+- `secret_key` min_length=16 偏弱(`backend/app/core/config.py:86`)
+- bcrypt 72 字节截断无预哈希(`backend/app/core/security.py:58-66`)
+- refresh grace 60s 静默重放(`backend/app/modules/auth/service.py:299-311`)
 - `.env.example` SECRET_KEY 占位串易被原样提交(`deploy/.env.example:18`)
 - MinIO console 9001 暴露风险(`docker-compose.yml:44-46`)
-- tool_gateway run_tests 的 test_path 路径注入(影响有限,`tool_gateway/service.py:391-443`)
-- `require_permission` 误用致 `/releases/.../promote`、`/missions/.../cancel` 端点 422 不可用(`release/router.py:103-111`、`agent/router.py:938-946`)
+- tool_gateway run_tests 的 test_path 路径注入(影响有限,`backend/app/modules/tool_gateway/service.py:391-443`)
+- `require_permission` 误用致 `/releases/.../promote`、`/missions/.../cancel` 端点 422 不可用(`backend/app/modules/release/router.py:70`、`backend/app/modules/agent/router.py:938-946`)
 - 后端 `python-jose[cryptography]>=3.3`(jose 3.3 有已知 CVE,代码硬编码 HS256 降低可利用性,建议迁 pyjwt)
 - 前端 `next 14.2.5`(14.2 早期版本,后续有安全补丁,建议升 14.2 最新补丁)
 

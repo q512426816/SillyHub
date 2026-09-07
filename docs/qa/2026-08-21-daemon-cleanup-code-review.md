@@ -82,7 +82,7 @@
 
 ### P6 审查过程中发现的既有测试债（顺手修复）
 
-**20. `sillyhub-daemon/tests/daemon-kind-dispatch.test.ts:643`、`tests/daemon-session-switch-config.test.ts:483-486` — inject 断言停留在 3 参签名**
+**20. `sillyhub-daemon/tests/daemon-kind-dispatch.test.ts:643`、`tests/daemon-session-switch-config.test.ts` — inject 断言停留在 3 参签名**
 2026-08-20-session-multimodal-attachments 后 daemon 的 `sessionManager.inject` 固定传 5 参（无附件时 attachments/downloadAttachment 为 undefined），两处断言仍按旧 3 参写，全量套件在 HEAD 即红。
 **修正**：断言补全后两参 undefined，注释同步。
 另：`tests/task-09-spec-pull-push.test.ts` 在全量并发下偶发失败（单独运行 16/16 绿），属既有 timing 抖动，未动。

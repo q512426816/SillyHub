@@ -10,7 +10,7 @@ updated_at: 2026-08-26 19:45:00
 # Daemon 运行时交互组件（components-daemon）
 
 ## 定位
-Daemon 运行时 / 机器 / 会话交互组件（`components/daemon/`，13 源文件 + 十余套测试）。三块职责：
+Daemon 运行时 / 机器 / 会话交互组件（`frontend/components/daemon/`，13 源文件 + 十余套测试）。三块职责：
 ① 运行时管理页展示（machine-card 手风琴机器卡 + runtime-card 运行时卡 + helpers 格式化件）；
 ② 会话交互（session-panel 共享双模式面板【2026-08-21-session-message-queue 起，sessions 页与弹窗统一实现 + useMessageQueue 排队；2026-08-22-session-panel-unify 起适配层已删、chrome 统一 antd】、runtime-session-dialog 统一弹窗、
 turn-timeline 消息流、session-input-bar 输入区、session-list-layout 公共列表）；
@@ -215,7 +215,7 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   hooks/use-message-queue.ts 头注释（D-001~D-004）。
 - `isActiveSession` 判定完全依赖状态集合——新增会话状态须同步
   `ACTIVE_SESSION_VIEW_STATUSES`；MachineCard 内联等值集合两处同步。
-- attach 流程涉及 SSE 连接 + 轮询到 active 的竞态，改动必须跑 `daemon/__tests__`
+- attach 流程涉及 SSE 连接 + 轮询到 active 的竞态，改动必须跑 `frontend/components/daemon/__tests__`
   （session-panel-dialog×3 / session-panel-pre-session / runtime-session-dialog×3 /
   turn-timeline-session-input-bar /
   session-list-layout / runtime-card×2 / machine-card / remote-folder-picker /

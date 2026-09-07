@@ -56,7 +56,7 @@
 
 已知事实（本仓代码核对，2026-09-07）：
 
-- `get_spec_manifest` 是单表查询（`spec_file_manifest`，有 `(workspace_id, path)` 唯一索引 + version 索引，`spec_workspace/service.py:498`），逻辑上不该慢——**慢大概率不在 SQL 本身**；
+- `get_spec_manifest` 是单表查询（`spec_file_manifest`，有 `(workspace_id, path)` 唯一索引 + version 索引，`backend/app/modules/spec_workspace/service.py:498`），逻辑上不该慢——**慢大概率不在 SQL 本身**；
 - 更可疑的争抢来源：执行忙时多 worker 并发跑 `--done`，各自 POST progress/ops，共享 `AsyncSession` 连接池（`core/db.py`：pool 20 + overflow 30）与 PG 写锁（manifest/change 行级锁），读请求排队等池位/等锁；
 - 相关先例：core/db.py 的 `_IDLE_IN_TXN_TIMEOUT_MS` 注释记录过「事务内 await 慢外部调用导致全站周期性卡 ~17s」（2026-07-28 阿里云实测，ql-20260728-008）——同形态的事务持锁等待是本类抖动的已知家族。
 

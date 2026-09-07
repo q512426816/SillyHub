@@ -33,7 +33,7 @@ dispatchFrame: 无 data 行的帧不派发；frame.event=="" → onmessage，否
 - 外部 `signal` abort 视为调用方主动终止：直接置 CLOSED 且**不报 onerror**（对齐主动 close()）；close() 先于响应到达也安全（isClosed 守卫）。
 - `state` 在多处闭包被改，TS 控制流窄化不跨闭包共享——统一走 `snapshotState()` 读取，避免 2367 假报；勿改回直接比较。
 - fetch 必须带 `cache: "no-store"`（EventSource 实现同样 no-store），勿删。
-- 单测在 `lib/__tests__/fetch-sse.test.ts`（parseSseChunk 帧解析是主要测试面，导出即为此）。
+- 单测在 `frontend/src/lib/__tests__/fetch-sse.test.ts`（parseSseChunk 帧解析是主要测试面，导出即为此）。
 
 ## 人工备注
 

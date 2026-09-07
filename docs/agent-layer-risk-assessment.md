@@ -91,7 +91,7 @@
 
 **影响**：中等。
 
-变更流程的 stage dispatch 走 `service.py:992 start_stage_dispatch` → interactive lease → `placement.py:259`。当前 dispatch 解析的是 user → workspace binding → daemon_id。如果 binding 改为 agent_profile_id，dispatch 路径多一跳（agent_profile → daemon），但不改变核心逻辑。
+变更流程的 stage dispatch 走 `backend/app/modules/agent/service.py:992 start_stage_dispatch` → interactive lease → `backend/app/modules/agent/placement.py:259`。当前 dispatch 解析的是 user → workspace binding → daemon_id。如果 binding 改为 agent_profile_id，dispatch 路径多一跳（agent_profile → daemon），但不改变核心逻辑。
 
 **风险点**：
 - `prepare_scan_interactive_dispatch`（placement.py）需要适配新解析路径

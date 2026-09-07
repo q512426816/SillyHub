@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 会话审批询问组件（components-permissions）
 
 ## 定位
-会话级实时审批/询问聚合组件（`components/permissions/`，2 源文件 + 各自测试）。`SessionPermissionPanel` 订阅多个 daemon 会话的 SSE 流，解析 `permission_request` / `permission_resolved` 事件并结合数据库兜底查询，聚合成统一的"待决策卡片"列表；按 `dialog_kind` 分流渲染 AskUserDialogCard（结构化问答）或 PermissionApprovalCard（allow/deny 审批）。`DialogContextBar` 是卡片的兄弟包裹层，提供来源上下文条（工作区/场景/会话链接/时间/摘要），不侵入卡组件内部。被 `app-layouts`（approvals 区）与 `app-sessions-pages` 使用。
+会话级实时审批/询问聚合组件（`frontend/components/permissions/`，2 源文件 + 各自测试）。`SessionPermissionPanel` 订阅多个 daemon 会话的 SSE 流，解析 `permission_request` / `permission_resolved` 事件并结合数据库兜底查询，聚合成统一的"待决策卡片"列表；按 `dialog_kind` 分流渲染 AskUserDialogCard（结构化问答）或 PermissionApprovalCard（allow/deny 审批）。`DialogContextBar` 是卡片的兄弟包裹层，提供来源上下文条（工作区/场景/会话链接/时间/摘要），不侵入卡组件内部。被 `app-layouts`（approvals 区）与 `app-sessions-pages` 使用。
 
 ## 契约摘要
 - `SessionPermissionPanel`：props `{ sessionIds: string[], pendingFallback?: SessionPermissionRequest[], workspaceName?: string }`。对每个 sessionId 经 `fetchSse`（lib-fetch-sse）订阅 `/api/daemon/sessions/{sid}/stream`，token 走 Authorization Bearer header（不再拼 URL query）。

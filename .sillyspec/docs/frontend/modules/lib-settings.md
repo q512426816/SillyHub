@@ -34,7 +34,7 @@ updateSettings: apiFetch("/api/settings", { method: PUT, json: { settings } })
 - **边界**：凡是用户/角色/组织 CRUD 一律走 `lib-admin`，别往这里加回来；
   文件头注释亦明确此分工。
 - 后端 settings schema 有改动时须 `pnpm gen:types` 重新生成 api-types.ts。
-- 生产消费方为 `app/(dashboard)/settings/page.tsx`（设置页读写平台配置）。
+- 生产消费方为 `frontend/app/(dashboard)/settings/page.tsx`（设置页读写平台配置）。
 
 ## 人工备注
 

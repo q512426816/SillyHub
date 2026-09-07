@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 后台管理页面（app-admin-pages）
 
 ## 定位
-后台管理页面集合，挂在 `/admin/*` 路由组下（layout + 3 页：users / roles / organizations），负责平台级用户、角色、组织管理。所有页面共享 `admin/layout.tsx` 管理员准入校验，写操作与下钻视图多经 components-admin 的抽屉/选择器承载，数据走 lib-admin。
+后台管理页面集合，挂在 `/admin/*` 路由组下（layout + 3 页：users / roles / organizations），负责平台级用户、角色、组织管理。所有页面共享 `frontend/admin/layout.tsx` 管理员准入校验，写操作与下钻视图多经 components-admin 的抽屉/选择器承载，数据走 lib-admin。
 
 ## 契约摘要
 - `AdminLayout`（`/admin`，31 行）：hydrate 后无 token → `replace("/login")`；`hasAdminPermission(user)` 不过 → `setDenied(true)` + `replace("/")`；渲染层 denied / 无权限一律 `return null`。

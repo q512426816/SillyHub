@@ -102,7 +102,7 @@ Hub 同步/读取 DB，更新 Change/AgentRun/UI
 
 ### Phase 3：修正阶段配置
 
-> **前置**：`StageEnum` 已统一为 8 个 SillySpec 阶段（`scan/brainstorm/propose/plan/execute/verify/archive/quick`）+ 3 个 Hub 扩展（`draft/rework_required/accepted`）。`STAGE_AGENT_CONFIG`（`dispatch.py:45`）当前只覆盖 `propose/plan/execute/verify/brainstorm/scan`，**缺 `archive` 和 `quick`**，且未用 `StageEnum` 常量约束。必须全部补齐。
+> **前置**：`StageEnum` 已统一为 8 个 SillySpec 阶段（`scan/brainstorm/propose/plan/execute/verify/archive/quick`）+ 3 个 Hub 扩展（`draft/rework_required/accepted`）。`STAGE_AGENT_CONFIG`（`backend/app/modules/agent/dispatch.py`）当前只覆盖 `propose/plan/execute/verify/brainstorm/scan`，**缺 `archive` 和 `quick`**，且未用 `StageEnum` 常量约束。必须全部补齐。
 
 - [ ] 将 `STAGE_AGENT_CONFIG` 键名改为引用 `StageEnum` 成员值，编译期保证覆盖完整性。
 - [ ] `scan`：写扫描文档到 `.sillyspec/docs/`，不应标记 `read_only=True`（除非纯检测模式）。
@@ -142,7 +142,7 @@ Hub 同步/读取 DB，更新 Change/AgentRun/UI
 
 ### Phase 6：API 与前端契约
 
-> **前置**：`ChangeService.transition_with_dispatch()`（`service.py:374`）已实现 transition 后自动 dispatch，路由 `router.py:270` 直接使用。TRANSITIONS 已在 workflow-state-unification 变更中重写，对齐新 StageEnum。但 transition 路由返回 `{ change, agent_dispatch }` 的 response model 未明确声明，前端 `transitionChange()` 仍按 `ChangeRead` 理解。
+> **前置**：`ChangeService.transition_with_dispatch()`（`service.py`）已实现 transition 后自动 dispatch，路由 `router.py` 直接使用。TRANSITIONS 已在 workflow-state-unification 变更中重写，对齐新 StageEnum。但 transition 路由返回 `{ change, agent_dispatch }` 的 response model 未明确声明，前端 `transitionChange()` 仍按 `ChangeRead` 理解。
 
 - [ ] **完整链路画清楚**：
   ```

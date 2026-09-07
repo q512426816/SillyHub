@@ -9,8 +9,8 @@ created_at: 2026-08-18 01:45:00
 # 变更中心组件（components-changes）
 
 ## 定位
-变更中心组件群：`changes/` 顶层 4 件（会话区块 / quicklog 表 / quicklog 抽屉 / 列表徽章）+
-`changes/detail/` 9 张详情页卡片（左主右辅布局的拆分产物）+ 根级 3 件（change-file-tree /
+变更中心组件群：`frontend/components/changes/` 顶层 4 件（会话区块 / quicklog 表 / quicklog 抽屉 / 列表徽章）+
+`frontend/components/changes/detail/` 9 张详情页卡片（左主右辅布局的拆分产物）+ 根级 3 件（change-file-tree /
 stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-layout-rework
 （详情页重做，page.tsx 1119→484 行拆 8 组件）、ql-20260811-002（侧栏宽内容卡挤崩修复）、
 2026-08-14-change-center-conversation-driven（会话驱动化翻转：详情页退化成展示板+审批）、
@@ -103,7 +103,7 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
 ## 注意事项
 - **容器断点陷阱（关键）**：`md:` 是视口断点非容器断点——侧栏 320px 内禁止内嵌带
   `md:grid-cols-*` 两栏的宽组件（ChangeSessionSection 的 `md:grid-cols-[230px_1fr]`、
-  ChangeFileTree 预览），一律走入口卡 + 宽 Dialog 模式（change-sessions-card.tsx:20-21
+  ChangeFileTree 预览），一律走入口卡 + 宽 Dialog 模式（frontend/src/components/changes/change-sessions-card.tsx:20-21
   代码注释为证；桌面视口下 320px 容器仍强制两栏 → 面板挤到 ~80px 不可用）。
 - Dialog 内容仅 open 时 mount（radix Portal 惰性），关闭即卸载——勿把数据请求/SSE
   提升到入口卡层，保持零空载请求。
@@ -113,8 +113,8 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
   日期坑，Grill #18）；output 全量透传 + max-h 滚动兜底（R-07 超长不撑爆布局）。
 - review_history 两种异构形状消费前必须过 normalizeReviewHistory，勿直读原始字段。
 - quicklog 状态口径 4 态在 table/drawer/linked-card 三处各自定义，改动须三处同步。
-- 测试：`changes/__tests__/`（session-section / step-badge / quicklog-drawer / table）
-  + `detail/__tests__/` 8 套（9 卡中仅 quicklog-linked-card 无专属测试，其余全覆盖）。
+- 测试：`frontend/components/changes/__tests__/`（session-section / step-badge / quicklog-drawer / table）
+  + `frontend/components/changes/detail/__tests__/` 8 套（9 卡中仅 quicklog-linked-card 无专属测试，其余全覆盖）。
 
 - 快速修复关联会话卡（2026-08-25-session-spec-binding）：quicklog-sessions-card 镜像 change-sessions-card（listQuicklogSessions 取数/仅本人过滤/前3条预览/?session= 深链到 /workspaces/[id]/quicklog/[qlId]/sessions）；挂在 quicklog-drawer 结构化视图底部（原始 md 视图不渲染）。
 

@@ -7,11 +7,11 @@ revision_note: |
   v1 错→v2 双路径→v3 单路径 daemon→v4 HostFsDelegate 同步→v5 异步化（close 快速 commit + 后台 gate 任务 + reconcile）。
 
   v6（子代理第 6 轮 review + 我核实，2026-07-10）：v5 架构对，但有 4 个"伪代码没贴合项目现有基础设施"的硬伤：
-  H1 gate 任务用 self._session_factory——RunSyncService 没这属性（run_sync/service.py:198-199 只有 self._session）；
+  H1 gate 任务用 self._session_factory——RunSyncService 没这属性（backend/app/modules/daemon/run_sync/service.py:198-199 只有 self._session）；
   H2 _trigger_stage_completion_callback 写死 self._session（:959/965/969/987），gate 任务复用会踩同坑；
   H3 migration down_revision 写死 419d34f8e33f——当前分支多 head，应开工时 alembic heads 确认；
-  H4 裸 asyncio.create_task——GC 静默回收 + 异常静默丢失，项目有 _fire_background_task 范式（agent/service.py:358）。
-  v6 修复：① gate 任务用 get_session_factory()()（core/db.py:53）开独立 session；② gate 任务内联 sync+auto_dispatch
+  H4 裸 asyncio.create_task——GC 静默回收 + 异常静默丢失，项目有 _fire_background_task 范式（backend/app/modules/agent/service.py:358）。
+  v6 修复：① gate 任务用 get_session_factory()()（backend/app/core/db.py:53）开独立 session；② gate 任务内联 sync+auto_dispatch
   （不调 callback，避免 self._session）；③ migration down_revision 不写死；④ 复用 _fire_background_task（强引用 set +
   add_done_callback）；⑤ M2 gate_status 随 :876 commit；⑥ M3 reconcile_gate 挂 lifespan startup + 重置 running→pending；
   ⑦ M4 补 auto_dispatch:197 改动伪代码；⑧ M5 send_rpc 协议加 timeout。
@@ -31,17 +31,17 @@ revision_note: |
 
 > **gate 命令就绪状态**：`sillyspec gate`/`derive` 源码在 sillyspec 主仓库就绪（归档 2026-07-09-machine-interface-v1），bin 实测可跑。`package.json` 仍 3.22.9 未 npm publish。本机已 `npm link` 开发版；**生产部署需 sillyspec 侧 npm version patch + publish**。
 
-> **命名约定（host 移除方向）**：后期 host 移除、daemon 本地跑时，统一重命名 host_*→daemon_*：HostFsDelegate→DaemonFsDelegate、host-fs-handler.ts→daemon-fs-handler.ts、host_fs 模块→daemon_fs、HOST_FS_RPC_TIMEOUT→DAEMON_FS_RPC_TIMEOUT、_registerHostFsRpcHandler→_registerDaemonFsRpcHandler。本文档沿用**现有代码名**（便于实现时 grep 定位），重命名随 host 移除独立做（不在 P3 范围）。
+> **命名约定（host 移除方向）**：后期 host 移除、daemon 本地跑时，统一重命名 host_*→daemon_*：HostFsDelegate→DaemonFsDelegate、sillyhub-daemon/src/host-fs-handler.ts→daemon-fs-handler.ts、host_fs 模块→daemon_fs、HOST_FS_RPC_TIMEOUT→DAEMON_FS_RPC_TIMEOUT、_registerHostFsRpcHandler→_registerDaemonFsRpcHandler。本文档沿用**现有代码名**（便于实现时 grep 定位），重命名随 host 移除独立做（不在 P3 范围）。
 
 ## 1. 问题（现状）
 
 ### 1.1 核验全是声明态
-`sync_stage_status` 读 agent 自己 `--done` 写的 sillyspec.db（`dispatch.py:1019`）；verify 靠 `read_verify_result`（`dispatch.py:769`），**文件缺失默认 passed**（`:775`）。无客观核验。
+`sync_stage_status` 读 agent 自己 `--done` 写的 sillyspec.db（`backend/app/modules/agent/dispatch.py`）；verify 靠 `read_verify_result`（`backend/app/modules/agent/dispatch.py`），**文件缺失默认 passed**（`:775`）。无客观核验。
 
 ### 1.2 stage 完成唯一路径
-- `placement.py:285-292`：`dispatch_to_daemon` lease kind 硬编码 `'interactive'`（bfaa9256）
-- `daemon.ts:3192-3196`：`kind==='interactive'` → `_startInteractiveSession` early-return
-- **stage 完成唯一出口是 `close_interactive_run`**（`daemon/router.py:1116` → `run_sync/service.py:684`）
+- `backend/app/modules/agent/placement.py:364`：`dispatch_to_daemon` lease kind 硬编码 `'interactive'`（bfaa9256）
+- `sillyhub-daemon/src/daemon.ts`：`kind==='interactive'` → `_startInteractiveSession` early-return
+- **stage 完成唯一出口是 `close_interactive_run`**（`backend/app/modules/daemon/router.py:1910` → `backend/app/modules/daemon/run_sync/service.py:464`）
 - `complete_lease:541` 的 callback 对 stage 是死代码（lease:608 过时注释与 :802 task-05 矛盾，以 :802 为准）
 - **task-00 原始障碍**：`close_interactive_run`（`:684`）只更新 `last_dispatch.status`（`:806-842`），不触发 auto_dispatch
 
@@ -50,7 +50,7 @@ revision_note: |
 |---|---|
 | ① 核验源代码产物 | gate 执行必须在 daemon（agent 在 daemon 跑，产物在 daemon 侧） |
 | ② 只在 stage 完成跑一次 | 触发必须由 backend（daemon 不知 stage 完成） |
-| ③ gate 慢（27s+）不能在 HTTP 同步链 | daemon fetch 30s 超时（hub-client.ts:177/588）+ TimeoutError 可重试（error-classify.ts:45）→ double-fire |
+| ③ gate 慢（27s+）不能在 HTTP 同步链 | daemon fetch 30s 超时（sillyhub-daemon/src/hub-client.ts:177/588）+ TimeoutError 可重试（sillyhub-daemon/src/resilience/error-classify.ts:45）→ double-fire |
 
 三约束交集：**backend 触发 + daemon 执行 + 后台异步**。
 
@@ -65,23 +65,23 @@ revision_note: |
 - **reconcile_gate**：挂 lifespan startup（M3），重启时扫 + 重置孤儿 running→pending 重 enqueue
 
 ### 3a. HostFsDelegate run_command RPC 扩展（同 v4/v5 + M5）
-现状：`delegate.py:131` 8 方法锁死契约（`:13-15`），WS RPC `send_rpc`（`:117-125`），超时 `HOST_FS_RPC_TIMEOUT=30s`（`ws_rpc.py:49`）；daemon `host-fs-handler.ts:282` 八方法靠 `assertWithinAllowedRoots`（`:298`）。
+现状：`backend/app/modules/daemon/host_fs/delegate.py:131` 8 方法锁死契约（`:13-15`），WS RPC `send_rpc`（`:117-125`），超时 `HOST_FS_RPC_TIMEOUT=30s`（`backend/app/modules/daemon/host_fs/ws_rpc.py:67`）；daemon `sillyhub-daemon/src/host-fs-handler.ts:340` 八方法靠 `assertWithinAllowedRoots`（`:298`）。
 
 扩展第 9 方法 `run_command(command, args, cwd, timeout, env)` → `{exit_code, stdout, stderr, duration_ms}`：
 - daemon-client 分支：`send_rpc(method="run_command", ...)` → daemon 执行
 - 🔴 **命令白名单安全层**（新抽象）：路径白名单约束不了命令，需命令白名单只允 `sillyspec gate` 模板（stage 枚举 + changeName）
 - **M5 超时穿透**：`_WsRpcLike.send_rpc` 协议（`:117-125`）**当前无 timeout 参数**——扩展签名加 `timeout: float | None = None`（向下兼容，其他 8 方法不传走默认 30s），run_command 传 12min（verify-test 27s 余量）
-- 破锁死契约 → 更新 design §5.1 + 跨任务契约表；daemon 加 `run_command` handler + `daemon.ts:_registerHostFsRpcHandler` 注册
+- 破锁死契约 → 更新 design §5.1 + 跨任务契约表；daemon 加 `run_command` handler + `sillyhub-daemon/src/daemon.ts:_registerHostFsRpcHandler` 注册
 
 ### 3b. close 快速返回 + gate 异步任务 + reconcile（v6 用项目范式）
 
-**close_interactive_run（`run_sync/service.py:684`）改动**：
+**close_interactive_run（`backend/app/modules/daemon/run_sync/service.py:684`）改动**：
 - 保留：agent_run 终态映射（`:783-800`）+ `gate_status='pending'`（**M2：在此区设，随 :876 commit**）+ last_dispatch.status（`:806-842`）+ usage（`:849-866`）+ `:876` commit + Redis publish（`:879-924`）
 - 🔴 **删 v4 R2**（末尾补 callback）
 - 🔴 **新增**：`commit :876` 后、`return :935` 前，`self._fire_background_task(self._run_gate_decision_task(agent_run.id, workspace_id, change_id))` → 快速返回。gate_status='pending' 已随 commit 持久化，gate 任务能读到
 
 **🔴 H4：复用 `_fire_background_task` 范式**（防 GC + 异常静默）：
-RunSyncService 加类级 `_background_tasks: set[asyncio.Task]` + helper（抄 `agent/service.py:358-375`）：
+RunSyncService 加类级 `_background_tasks: set[asyncio.Task]` + helper（抄 `backend/app/modules/agent/service.py:358-375`）：
 ```python
 def _fire_background_task(self, coro):
     task = asyncio.create_task(coro)
@@ -98,7 +98,7 @@ def _on_bg_task_done(self, task):
 **🔴 H1+H2：gate 任务用 `get_session_factory()()` 独立 session + 内联决策**（不调 callback）：
 ```python
 async def _run_gate_decision_task(self, agent_run_id, workspace_id, change_id):
-    # H1：独立 session（core/db.py:53 get_session_factory，项目范式 agent/service.py:842）
+    # H1：独立 session（backend/app/core/db.py:53 get_session_factory，项目范式 backend/app/modules/agent/service.py:842）
     # 禁用 self._session——那是 handler 的，close 返回后已关
     async with get_session_factory()() as gate_session:
         # R3：cas gate_status pending→running（原子防 double-enqueue / 重启重复）
@@ -117,7 +117,7 @@ async def _run_gate_decision_task(self, agent_run_id, workspace_id, change_id):
             agent_run.gate_status = "decided"
             await gate_session.commit()
             # H2：内联 sync + auto_dispatch（用 gate_session，不调 self._trigger_stage_completion_callback
-            # 避免它写死 self._session 踩坑；逻辑对齐 run_sync/service.py:969-993）
+            # 避免它写死 self._session 踩坑；逻辑对齐 backend/app/modules/daemon/run_sync/service.py:969-993）
             from app.modules.change.dispatch import SillySpecStageDispatchService, auto_dispatch_next_step
             svc = SillySpecStageDispatchService(gate_session)
             sync_result = await svc.sync_stage_status(gate_session, change_id, agent_run_id)
@@ -136,7 +136,7 @@ async def _run_gate_decision_task(self, agent_run_id, workspace_id, change_id):
 > **M1 cas 原子性**：PG 的 `UPDATE...WHERE...rowcount` 对并发原子可靠；SQLite（测试）rowcount 语义不稳，单测用 mock 或 `RETURNING` 验证。生产 PG 才是真核验。
 
 **🔴 M3：reconcile_gate 挂 lifespan startup**（非 per-dispatch）：
-`reconcile_stale_runs`（dispatch.py:358）是 `_cleanup_before_dispatch`（:553）同步调，重启后无 dispatch 不触发——**不能对齐它**。v6 挂 `main.py:73-81` lifespan startup（重启必跑一次）：
+`reconcile_stale_runs`（`backend/app/modules/change/dispatch.py:429`）是 `_cleanup_before_dispatch`（:553）同步调，重启后无 dispatch 不触发——**不能对齐它**。v6 挂 `backend/app/main.py` lifespan startup（重启必跑一次）：
 ```python
 async def reconcile_pending_gate_decisions(session):
     # 启动时：所有 completed + gate_status in (pending, running) 都是孤儿（旧进程死，in-flight 全丢）
@@ -150,9 +150,9 @@ async def reconcile_pending_gate_decisions(session):
         svc = RunSyncService(session)
         svc._fire_background_task(svc._run_gate_decision_task(run.id, ...))
 ```
-挂 `main.py` lifespan（`AgentService.cleanup_stale_runs` 旁加一行）。
+挂 `backend/app/main.py` lifespan（`AgentService.cleanup_stale_runs` 旁加一行）。
 
-**🔴 M4：auto_dispatch_next_step 决策改动伪代码**（`dispatch.py:197` stage_completed 分支）：
+**🔴 M4：auto_dispatch_next_step 决策改动伪代码**（`backend/app/modules/agent/dispatch.py` stage_completed 分支）：
 当前 :219-222 读 `read_verify_result`（声明态 md），改成读 gate_result：
 ```python
 if sync_result.stage_completed:
@@ -187,15 +187,15 @@ agent turn 完成 → daemon notifyRunResult:1402 → backend close_interactive_
 
 | 侧 | 文件:行号 | 改动 |
 |---|---|---|
-| 🔴 close 改 enqueue | `run_sync/service.py:684`（commit `:876` 后、return `:935` 前） | 删 R2；加 `_fire_background_task(_run_gate_decision_task)`；gate_status='pending' 在 :784 区随 commit |
-| 🔴 H4 后台任务范式 | `run_sync/service.py` RunSyncService 类 | 加 `_background_tasks: set` + `_fire_background_task` + `_on_bg_task_done`（抄 agent/service.py:358-375） |
-| 🔴 H1+H2 gate 任务 | `run_sync/service.py` 新 `_run_gate_decision_task` | `get_session_factory()()` 独立 session + R3 cas + gate + 内联 sync/auto_dispatch（不调 callback） |
-| 🔴 M3 reconcile | `dispatch.py` 新 `reconcile_pending_gate_decisions` + 挂 `main.py:73-81` lifespan | 启动扫 completed + gate_status in (pending, running) 全重置 pending + 重 enqueue（都是孤儿，无超时阈值） |
-| HostFsDelegate 新方法 | `delegate.py:131`（破 `:13-15`）+ `:117-125` send_rpc | 加 `run_command` + **M5 send_rpc 协议加 timeout 参数** |
-| daemon handler | `host-fs-handler.ts:282` + `daemon.ts:_registerHostFsRpcHandler` | 加 `run_command`（命令白名单 + execFile）+ 注册 |
-| backend 决策 | `dispatch.py:197`（def `:145`）+ `:221-222` | M4：读 gate_result 替代 read_verify_result（三态分支） |
+| 🔴 close 改 enqueue | `backend/app/modules/daemon/run_sync/service.py:595`（commit `:876` 后、return `:935` 前） | 删 R2；加 `_fire_background_task(_run_gate_decision_task)`；gate_status='pending' 在 :784 区随 commit |
+| 🔴 H4 后台任务范式 | `backend/app/modules/daemon/run_sync/service.py` RunSyncService 类 | 加 `_background_tasks: set` + `_fire_background_task` + `_on_bg_task_done`（抄 backend/app/modules/agent/service.py:358-375） |
+| 🔴 H1+H2 gate 任务 | `backend/app/modules/daemon/run_sync/service.py` 新 `_run_gate_decision_task` | `get_session_factory()()` 独立 session + R3 cas + gate + 内联 sync/auto_dispatch（不调 callback） |
+| 🔴 M3 reconcile | `backend/app/modules/change/dispatch.py` 新 `reconcile_pending_gate_decisions` + 挂 `backend/app/main.py:150` lifespan | 启动扫 completed + gate_status in (pending, running) 全重置 pending + 重 enqueue（都是孤儿，无超时阈值） |
+| HostFsDelegate 新方法 | `backend/app/modules/daemon/host_fs/delegate.py:131`（破 `:13-15`）+ `:117-125` send_rpc | 加 `run_command` + **M5 send_rpc 协议加 timeout 参数** |
+| daemon handler | `sillyhub-daemon/src/host-fs-handler.ts:334` + `sillyhub-daemon/src/daemon.ts:_registerHostFsRpcHandler` | 加 `run_command`（命令白名单 + execFile）+ 注册 |
+| backend 决策 | `backend/app/modules/agent/dispatch.py`（def `:145`）+ `:221-222` | M4：读 gate_result 替代 read_verify_result（三态分支） |
 | backend gate 探测（Z1） | `_run_gate_via_delegate` 内部 | 探测 gate 子命令，缺失给 exit 2（诊断） |
-| 🔴 backend 存储（列） | `agent/model.py` AgentRun + migration | 加 `gate_result` JSON + `gate_status` str（pending/running/decided/failed）；migration `down_revision` = **开工时 `alembic heads` 确认的真实 head**（H3：不写死，当前分支多 head） |
+| 🔴 backend 存储（列） | `backend/app/modules/agent/model.py` AgentRun + migration | 加 `gate_result` JSON + `gate_status` str（pending/running/decided/failed）；migration `down_revision` = **开工时 `alembic heads` 确认的真实 head**（H3：不写死，当前分支多 head） |
 | sillyspec 发版 🔴 | sillyspec 主仓库 | 3.22.9 未含 gate；部署前 publish |
 
 > H3 提醒：main 当前 **14 个 head**（含 419d34f8e33f / dceb0c45ab3e 等 merge），migration 链碎片化。P3 实现必须：① `alembic heads` 看全貌；② 合并或确认目标 head 再定 down_revision（挂错会 crash-loop，见 migration-chain-fragmentation-pattern）。
@@ -208,7 +208,7 @@ agent turn 完成 → daemon notifyRunResult:1402 → backend close_interactive_
 ## 6. 风险与对策
 | 风险 | 对策 |
 |---|---|
-| 🔴 H4 后台任务 GC/异常静默 | `_fire_background_task` 强引用 set + add_done_callback 取异常（agent/service.py:358 范式） |
+| 🔴 H4 后台任务 GC/异常静默 | `_fire_background_task` 强引用 set + add_done_callback 取异常（backend/app/modules/agent/service.py:373 范式） |
 | 🔴 H1 session 关闭 | gate 任务用 `get_session_factory()()` 独立 session，禁用 self._session |
 | 🔴 H2 callback 写死 self._session | gate 任务内联 sync+auto_dispatch（用 gate_session），不调 callback |
 | 🔴 H3 migration 多 head | 开工 `alembic heads` 确认真实 head；切 main |
@@ -249,18 +249,18 @@ agent turn 完成 → daemon notifyRunResult:1402 → backend close_interactive_
 
 | 函数/类 | 位置 | 职责 |
 |---|---|---|
-| `auto_dispatch_next_step` | `dispatch.py:145`（stage_completed `:197-269`） | 决策点：M4 读 gate_result（替代 read_verify_result :222） |
-| `read_verify_result` | `dispatch.py:769` | 被 gate verify 替代 |
-| `sync_stage_status` | `dispatch.py:1019` | gate 任务内联调（gate_session） |
-| `reconcile_stale_runs` | `dispatch.py:358`（被 `_cleanup_before_dispatch:553` 同步调） | per-dispatch 非启动 cron；**reconcile_gate 不对齐它，挂 lifespan** |
-| `close_interactive_run` | `run_sync/service.py:684`（早返回 `:772-779` / commit `:876` / 末尾 `:935`） | v6：快速 commit + `_fire_background_task` enqueue |
-| `RunSyncService.__init__` | `run_sync/service.py:198-199`（仅 self._session + self._facade） | **无 session_factory** → H1 用 get_session_factory()() |
-| `_trigger_stage_completion_callback` | `run_sync/service.py:939`（self._session `:959/965/969/987`） | **H2 gate 任务不调它，内联** |
-| `get_session_factory` | `core/db.py:53` | H1 独立 session（范式 agent/service.py:842） |
-| `_fire_background_task` 范式 | `agent/service.py:358-375`、`coordinator.py:95-112` | H4 复用（强引用 set + done_callback） |
-| `reconcile_pending_gate_decisions`（新） | 挂 `main.py:73-81` lifespan | M3 启动扫孤儿 |
-| `HostFsDelegate` | `delegate.py:131`（锁死 `:13-15`）+ `send_rpc:117-125` | v6 加 run_command + M5 send_rpc timeout |
-| `HostFsHandler` | `host-fs-handler.ts:282`（白名单 `:298`） | v6 加 run_command + 命令白名单 |
-| `HOST_FS_RPC_TIMEOUT` | `ws_rpc.py:49`（30s） | run_command per-call 传 12min（经 M5 send_rpc） |
-| daemon notifyRunResult 超时 | `hub-client.ts:177/588`（30s） | close 快速返回规避 |
-| `_runLeaseStateMachine` | `daemon.ts:3062`（kind 分流 `:3192-3196`） | interactive early-return |
+| `auto_dispatch_next_step` | `backend/app/modules/agent/dispatch.py`（stage_completed `:197-269`） | 决策点：M4 读 gate_result（替代 read_verify_result :222） |
+| `read_verify_result` | `backend/app/modules/agent/dispatch.py` | 被 gate verify 替代 |
+| `sync_stage_status` | `backend/app/modules/agent/dispatch.py` | gate 任务内联调（gate_session） |
+| `reconcile_stale_runs` | `backend/app/modules/agent/dispatch.py`（被 `_cleanup_before_dispatch:553` 同步调） | per-dispatch 非启动 cron；**reconcile_gate 不对齐它，挂 lifespan** |
+| `close_interactive_run` | `backend/app/modules/daemon/run_sync/service.py:595`（早返回 `:772-779` / commit `:876` / 末尾 `:935`） | v6：快速 commit + `_fire_background_task` enqueue |
+| `RunSyncService.__init__` | `backend/app/modules/daemon/run_sync/service.py:103`（仅 self._session + self._facade） | **无 session_factory** → H1 用 get_session_factory()() |
+| `_trigger_stage_completion_callback` | `backend/app/modules/daemon/run_sync/service.py:3126`（self._session `:959/965/969/987`） | **H2 gate 任务不调它，内联** |
+| `get_session_factory` | `backend/app/core/db.py:87` | H1 独立 session（范式 backend/app/modules/agent/service.py:1126） |
+| `_fire_background_task` 范式 | `backend/app/modules/agent/service.py:358-375`、`backend/app/modules/agent/coordinator.py` | H4 复用（强引用 set + done_callback） |
+| `reconcile_pending_gate_decisions`（新） | 挂 `backend/app/main.py:150` lifespan | M3 启动扫孤儿 |
+| `HostFsDelegate` | `backend/app/modules/daemon/host_fs/delegate.py:152`（锁死 `:13-15`）+ `send_rpc:117-125` | v6 加 run_command + M5 send_rpc timeout |
+| `HostFsHandler` | `sillyhub-daemon/src/host-fs-handler.ts:352`（白名单 `:298`） | v6 加 run_command + 命令白名单 |
+| `HOST_FS_RPC_TIMEOUT` | `backend/app/modules/daemon/host_fs/ws_rpc.py:49`（30s） | run_command per-call 传 12min（经 M5 send_rpc） |
+| daemon notifyRunResult 超时 | `sillyhub-daemon/src/hub-client.ts:177/588`（30s） | close 快速返回规避 |
+| `_runLeaseStateMachine` | `sillyhub-daemon/src/daemon.ts`（kind 分流 `:3192-3196`） | interactive early-return |

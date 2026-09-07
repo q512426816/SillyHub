@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 智能体档案全局卡片墙（app-agent-profiles-pages）
 
 ## 定位
-智能体档案全局卡片墙页（单一页面 `src/app/(dashboard)/agent-profiles/page.tsx`），一级菜单入口 `/agent-profiles`，跨工作区聚合视图（2026-08-04-agent-profile-ui-redesign task-05 落地）。与工作区内页（`workspaces/[id]/agent-profiles`，属 app-workspace-pages）复用同一套卡片墙 + 表单组件（components-agent-profile），差异只在数据 sourcing 与 CRUD 细节。
+智能体档案全局卡片墙页（单一页面 `frontend/src/app/(dashboard)/agent-profiles/page.tsx`），一级菜单入口 `/agent-profiles`，跨工作区聚合视图（2026-08-04-agent-profile-ui-redesign task-05 落地）。与工作区内页（`workspaces/[id]/agent-profiles`，属 app-workspace-pages）复用同一套卡片墙 + 表单组件（components-agent-profile），差异只在数据 sourcing 与 CRUD 细节。
 
 ## 契约摘要
 - `AgentProfilesGlobalPage`：

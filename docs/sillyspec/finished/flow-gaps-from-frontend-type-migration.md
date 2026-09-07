@@ -18,7 +18,7 @@ source_change: 2026-07-04-fix-frontend-type-divergence
 ## A. 主动校验类（升级后消灭根因，最有价值）
 
 ### A1. design "零改动/无依赖"断言反向 grep 校验
-- **现象**：design 倾向于写"零改动/不影响 service/无依赖"等断言，但实际可能漏看调用方。本次 W1-1 删 pydantic alias 时 design 初稿断言"service 层不依赖 alias key"，Grill 阶段才查到 `runtime/service.py:178-185` 用 alias key（`currentStage=`/`_version=`）构造 RuntimeProgress——差点漏改导致运行时崩。
+- **现象**：design 倾向于写"零改动/不影响 service/无依赖"等断言，但实际可能漏看调用方。本次 W1-1 删 pydantic alias 时 design 初稿断言"service 层不依赖 alias key"，Grill 阶段才查到 `backend/app/modules/runtime/service.py:178-185` 用 alias key（`currentStage=`/`_version=`）构造 RuntimeProgress——差点漏改导致运行时崩。
 - **建议**：design 自审/Grill 阶段，扫描 design 正文出现的"零改动/无影响/不依赖/不影响 X"等断言，对断言里提到的文件/符号做反向 grep，矛盾就警告。能让工具稳定抓到现在靠 Grill 运气抓的 bug。
 
 ### A2. 类型迁移 diff lint（可选性差异高亮）

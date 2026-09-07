@@ -26,41 +26,41 @@
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| R1 | `daemon/lease/service.py:151` claim_lease | 两个 daemon 同时 claim 同一 lease 的 TOCTOU（都拿走工作区上下文/密钥）| `select(...).with_for_update()` 锁行到 commit |
-| R2 | `auth/service.py:270` _consume_refresh_token | 并发 refresh 同一 token 都走"存活"分支→都签发新对，**复用检测永不触发（安全漏洞）**| 匹配后 `FOR UPDATE` 锁 session 行 + 复查 revoked_at，并发第二个转入 grace/重放路径 |
-| R3 | `daemon/lease/service.py:713` expire_leases | 并发 expire cron 都选同一批→都标 expired→都触发 handle_lease_expiry 造重复新 lease | `with_for_update()` + `limit(200)` 有界 |
-| R4 | `daemon/ws_hub.py:120` send_to_runtime | 锁外持 ws 引用，快速重连时 send 失误会误逐**新**连接 + 取消所有在途 RPC | 锁内快照 ws + 新增 `_evict_stale` 按对象身份 check-and-remove |
-| R6 | `ppm/task/service.py:260` start | 双击"启动"产生重复 in-flight TaskExecute（1 plan : 2 execute，第二条永挂）| FOR UPDATE 锁 plan 行 |
-| R7 | `ppm/problem/service.py:531` start_problem | 同 R6（problem 双击重复 execute）| FOR UPDATE 锁 problem 行 |
-| R8 | `ppm/project/service.py:189` create | 并发建同 project_code，commit 撞唯一约束→500（预检注释承诺 409）| `try/except IntegrityError`→rollback→重跑预检转 409 |
-| R9 | `admin/users_service.py:195` create_user | 并发建同 username→500 | 同 R8 模式 |
-| R10 | `spec_workspace/service.py:143` ensure_spec_workspace | 并发 init-dispatch get-or-create 都 NotFound→都 create→第二个 500 | catch IntegrityError→rollback→重查 |
-| R14 | `workspace/service.py:505` update | 并发改同 slug→500 | `try/except IntegrityError`→`_translate_integrity_error` 转 409（对齐 create 路径）|
-| P8 | `daemon/ws_hub.py:147` broadcast | 顺序扇出，单个慢 daemon 拖到 N×10s | 锁内快照 targets + `asyncio.gather` 并发 |
-| P10 | `daemon/lease/service.py:735` handle_lease_expiry | 批处理已持 lease 对象却按 agent_run_id 重查（每 GC tick N 次冗余 SELECT）| 加 `lease` 参数直传 |
-| P14 | `daemon/lease/service.py:720` expire_leases | 无界 SELECT，后端宕机积压一次性入内存 | `.limit(200)` 分批 |
+| R1 | `backend/app/modules/daemon/lease/service.py:151` claim_lease | 两个 daemon 同时 claim 同一 lease 的 TOCTOU（都拿走工作区上下文/密钥）| `select(...).with_for_update()` 锁行到 commit |
+| R2 | `backend/app/modules/auth/service.py:270` _consume_refresh_token | 并发 refresh 同一 token 都走"存活"分支→都签发新对，**复用检测永不触发（安全漏洞）**| 匹配后 `FOR UPDATE` 锁 session 行 + 复查 revoked_at，并发第二个转入 grace/重放路径 |
+| R3 | `backend/app/modules/daemon/lease/service.py:939` expire_leases | 并发 expire cron 都选同一批→都标 expired→都触发 handle_lease_expiry 造重复新 lease | `with_for_update()` + `limit(200)` 有界 |
+| R4 | `backend/app/modules/daemon/ws_hub.py:132` send_to_runtime | 锁外持 ws 引用，快速重连时 send 失误会误逐**新**连接 + 取消所有在途 RPC | 锁内快照 ws + 新增 `_evict_stale` 按对象身份 check-and-remove |
+| R6 | `backend/app/modules/ppm/task/service.py:260` start | 双击"启动"产生重复 in-flight TaskExecute（1 plan : 2 execute，第二条永挂）| FOR UPDATE 锁 plan 行 |
+| R7 | `backend/app/modules/ppm/problem/service.py:531` start_problem | 同 R6（problem 双击重复 execute）| FOR UPDATE 锁 problem 行 |
+| R8 | `backend/app/modules/ppm/project/service.py:189` create | 并发建同 project_code，commit 撞唯一约束→500（预检注释承诺 409）| `try/except IntegrityError`→rollback→重跑预检转 409 |
+| R9 | `backend/app/modules/admin/users_service.py:195` create_user | 并发建同 username→500 | 同 R8 模式 |
+| R10 | `backend/app/modules/spec_workspace/service.py:143` ensure_spec_workspace | 并发 init-dispatch get-or-create 都 NotFound→都 create→第二个 500 | catch IntegrityError→rollback→重查 |
+| R14 | `backend/app/modules/workspace/service.py:589` update | 并发改同 slug→500 | `try/except IntegrityError`→`_translate_integrity_error` 转 409（对齐 create 路径）|
+| P8 | `backend/app/modules/daemon/ws_hub.py:219` broadcast | 顺序扇出，单个慢 daemon 拖到 N×10s | 锁内快照 targets + `asyncio.gather` 并发 |
+| P10 | `backend/app/modules/daemon/lease/service.py:735` handle_lease_expiry | 批处理已持 lease 对象却按 agent_run_id 重查（每 GC tick N 次冗余 SELECT）| 加 `lease` 参数直传 |
+| P14 | `backend/app/modules/daemon/lease/service.py:720` expire_leases | 无界 SELECT，后端宕机积压一次性入内存 | `.limit(200)` 分批 |
 
-> 统一修法两类：(a) check-then-modify 单行路径加 `with_for_update`（SQLite no-op / Postgres 行锁，对齐 `session/service.py:1225`）；(b) 唯一约束 commit/flush 路径加 `try/except IntegrityError`→领域 409（对齐 `tool_gateway/policy_router.py:65`）。
+> 统一修法两类：(a) check-then-modify 单行路径加 `with_for_update`（SQLite no-op / Postgres 行锁，对齐 `backend/app/modules/daemon/session/service.py:1082`）；(b) 唯一约束 commit/flush 路径加 `try/except IntegrityError`→领域 409（对齐 `backend/app/modules/tool_gateway/policy_router.py`）。
 
 ### Wave C — 后端同步 I/O 移出事件循环 ✅ 验证 2955 passed 零回归
 
-> 系统级最大阻塞风险：单线程 worker 上一个慢同步 I/O 卡死所有协程 + WS 连接。统一 `asyncio.to_thread`（照抄 `post_scan_validator` / PPM Excel 模板）。
+> 系统级最大阻塞风险：单线程 worker 上一个慢同步 I/O 卡死所有协程 + WS 连接。统一 `asyncio.to_thread`（照抄 `backend/app/modules/agent/post_scan_validator` / PPM Excel 模板）。
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| C1 | `tool_gateway/service.py:152` ToolPolicyService.check | check 内同步 `socket.getaddrinfo`（SSRF 检查）在每个工具调度阻塞事件循环 | `await asyncio.to_thread(ToolPolicyService.check, ...)`（纯函数，异常透传）|
-| C2 | `tool_gateway/service.py:248/266` _handle_file_read/write | 同步 read_text/write_text 在事件循环 | `asyncio.to_thread` |
-| C3 | `tool_gateway/service.py:285/316` _handle_file_list/search | 同步 rglob/iterdir 遍历（递归列大目录阻塞数秒）| 闭包封装遍历 + `asyncio.to_thread` |
-| C4 | `worktree/service.py:112,151` acquire/release cleanup | `shutil.rmtree` 整个 git checkout 在事件循环（release 每次都拆全检出）| `asyncio.to_thread(self._exec_env.cleanup, lease_root)` |
-| C5 | `workspace/service.py:957` _ensure_spec_workspace | `shutil.rmtree`+`copytree` 整个 .sillyspec 树（文档/变更/技能）在事件循环 | 闭包封装 + `asyncio.to_thread` |
+| C1 | `backend/app/modules/tool_gateway/service.py:158` ToolPolicyService.check | check 内同步 `socket.getaddrinfo`（SSRF 检查）在每个工具调度阻塞事件循环 | `await asyncio.to_thread(ToolPolicyService.check, ...)`（纯函数，异常透传）|
+| C2 | `backend/app/modules/tool_gateway/service.py:269/266` _handle_file_read/write | 同步 read_text/write_text 在事件循环 | `asyncio.to_thread` |
+| C3 | `backend/app/modules/tool_gateway/service.py:291/316` _handle_file_list/search | 同步 rglob/iterdir 遍历（递归列大目录阻塞数秒）| 闭包封装遍历 + `asyncio.to_thread` |
+| C4 | `backend/app/modules/worktree/service.py:112,151` acquire/release cleanup | `shutil.rmtree` 整个 git checkout 在事件循环（release 每次都拆全检出）| `asyncio.to_thread(self._exec_env.cleanup, lease_root)` |
+| C5 | `backend/app/modules/workspace/service.py` _ensure_spec_workspace | `shutil.rmtree`+`copytree` 整个 .sillyspec 树（文档/变更/技能）在事件循环 | 闭包封装 + `asyncio.to_thread` |
 
 ### Wave D — daemon 健壮性 ✅ typecheck 通过，vitest 验证中
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| D1 | `task-runner.ts:887` _runLeaseHeartbeatLoop | 可中断 sleep 两条路径都不移除 abort 监听器→每个 lease 跑超 25s 累积 10+ 监听器触发 MaxListenersExceededWarning + 内存膨胀 | `done` 守卫 + 统一 cleanup 在定时器/abort 两路径都移除两信号监听器 |
-| D2 | `interactive/codex-app-server-driver.ts:718` handleLine | `adapter.parse(line)` 未包 try/catch→畸形行抛异常被 cli.ts 全局处理器吞掉，但 currentTurnPromise 永不 resolve→交互式会话永久卡死 | 包 try/catch（对齐 task-runner.ts:1420），记 warn 后 return |
-| D4 | `resilience/service.ts:197` drainOutbox | 外层 `void` 调用，runs()/外层 markDelivered 异常会成未处理 rejection 被静默吞、drain 中途终止 | 加外层 catch 兜底记 warn（_draining 由 finally 复位）|
+| D1 | `sillyhub-daemon/src/task-runner.ts:887` _runLeaseHeartbeatLoop | 可中断 sleep 两条路径都不移除 abort 监听器→每个 lease 跑超 25s 累积 10+ 监听器触发 MaxListenersExceededWarning + 内存膨胀 | `done` 守卫 + 统一 cleanup 在定时器/abort 两路径都移除两信号监听器 |
+| D2 | `sillyhub-daemon/src/interactive/codex-app-server-driver.ts:718` handleLine | `adapter.parse(line)` 未包 try/catch→畸形行抛异常被 cli.ts 全局处理器吞掉，但 currentTurnPromise 永不 resolve→交互式会话永久卡死 | 包 try/catch（对齐 sillyhub-daemon/src/task-runner.ts:1420），记 warn 后 return |
+| D4 | `sillyhub-daemon/src/resilience/service.ts:197` drainOutbox | 外层 `void` 调用，runs()/外层 markDelivered 异常会成未处理 rejection 被静默吞、drain 中途终止 | 加外层 catch 兜底记 warn（_draining 由 finally 复位）|
 
 ### Wave E — 前端健壮性 ✅ 验证 1059 passed 零回归
 
@@ -77,9 +77,9 @@
 | Wave B 索引（`agent_run_workspaces.agent_run_id`、`PlanTask.ps_plan_node_detail_id`、leases 复合索引 `(runtime_id,status,created_at)`、`agent_run_logs channel` 部分索引、`agent_runs.started_at`）| 单改模型 `__table_args__` 而不配 alembic migration 会误导（prod PG 不生效）；migrations 已有多个 merge revision，需先 `alembic heads` 核实真实 head 再接一个 migration 防链断裂。**应作为"索引 + migration"专项**，本轮避免半成品。|
 | Wave B N+1 查询重写（list_daemon_instances、get_pending_leases、dialogs、import_commit、_find_role_members、_cleanup_before_dispatch、reparse、placement、list_missions 等 ~10 处）| 每处需读懂查询结构 + 批量化改写，涉及面广；与索引专项一起做更高效。|
 | Wave C 其余同步 I/O（spec_workspace `_write_spec_root` 混合 DB await 需拆分、worktree/workspace `shutil`、scan_docs/knowledge/task/workspace 解析器 4 处）| 模板同 C1-C3，但 spec_workspace 那处混合 await 不能整块 to_thread 需谨慎拆分；其余可批量照抄。|
-| R5 converge_mission 双重 finalize（`finalizer.py:498`）| 光加行锁不够（两并发 converge 串行后第二个仍看到"全终态"再 finalize）；需持久化守卫字段（`converged_at` 列 + migration），属需设计的 MED 项。|
+| R5 converge_mission 双重 finalize（`backend/app/modules/agent/finalizer.py:659`）| 光加行锁不够（两并发 converge 串行后第二个仍看到"全终态"再 finalize）；需持久化守卫字段（`converged_at` 列 + migration），属需设计的 MED 项。|
 | R12 remove_member 最后所有者 TOCTOU、R11 kanban order、R13 _BreakerState 模块级可变无锁 | LOW，触发条件极窄（双管理员同时删两个不同 owner / 同卡序并发），收益低。|
-| A6 缓存 token 聚合不一致（`stream-json.ts` `+=` vs `=`，重复计费）| SAFE=N（改变上报数字），需对照既有输出 diff 验证；印证 memory `claude-cache-token-semantics`。|
+| A6 缓存 token 聚合不一致（`sillyhub-daemon/src/adapters/stream-json.ts` `+=` vs `=`，重复计费）| SAFE=N（改变上报数字），需对照既有输出 diff 验证；印证 memory `claude-cache-token-semantics`。|
 | D3 ws-client 回调 try/catch、D5 重连退避、D6 大负载超时、D7 背压、D8 _fire 一次性任务重用、daemon god 文件拆分 | D3 当前回调均 void-async 实际安全（纯防御）；D5/D7 需设计决策（故意为之的 5s 对齐）；god 文件拆分属高风险大改。|
 | 前端 F2(useSession 选择器)、F3(permission-panel token 依赖)、F4(log-viewer 预计算)、F6(can_edit helper)、架构 A1/A3/A5 去重 | 均为明确的安全改进，本轮范围/time 已覆盖三大端核心；留二轮。|
 
@@ -113,9 +113,9 @@
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| B-idx | `workspace/model.py:167` / `ppm/task/model.py:47` / `daemon/model.py:294` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
-| B2 | `daemon/router.py:904` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
-| A1 | `daemon/permission_service.py:388` _resolve_daemon_id_for_runtime | 与 `session/service.py:83` 完全重复（docstring 自承 mirrors），演进漂移风险 | 委托 session.service 单一真相源（lazy import 避循环）|
+| B-idx | `backend/app/modules/workspace/model.py:157` / `backend/app/modules/ppm/task/model.py:47` / `backend/app/modules/daemon/model.py:280` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
+| B2 | `backend/app/modules/daemon/router.py:1678` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
+| A1 | `backend/app/modules/daemon/permission_service.py:388` _resolve_daemon_id_for_runtime | 与 `backend/app/modules/daemon/session/service.py:83` 完全重复（docstring 自承 mirrors），演进漂移风险 | 委托 session.service 单一真相源（lazy import 避循环）|
 
 ### Wave E（续）— 前端 F2 useSession 选择器（安全子集）✅ 验证 1059 passed 零回归
 
@@ -158,14 +158,14 @@ token 轮换（~20min + 401 刷新）不再重渲染这些页（含 3000 行的 
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| C6 | `change/service.py` list_files/read_file/write_file/sync_documents | rglob+stat / read_text / write_text（含循环）在 async 内 | 抽 `_list_files_sync`/`_read_file_sync`/`_write_text_sync` helper + `asyncio.to_thread` |
-| C7 | `runtime/service.py` get_artifacts/_read_text | iterdir+stat（server-local 分支）/ read_text | 抽 `_list_artifacts_local`/`_read_text_local` + to_thread |
-| C8 | `change/dispatch.py:1238` read_verify_result | read_text | 抽 `_read_verify_result_sync` + to_thread |
-| C9 | `workspace/skills_view_service.py` list_skills/get_mcp_config | iterdir / read_text+json | 抽 `_list_skills_sync`/`_read_mcp_config_sync` + to_thread |
-| C10 | `agent/skills_bundle_service.py` _gather_all_files/build_skills_bundle | 经同步 helper（glob/rglob/read_bytes）/ tarfile 构建 | `_collect_skill_files` 调用点 to_thread + 抽 `_build_tar_gz` + to_thread |
-| C11 | `workspace/router.py:93` + `workspace/service.py:440` | scanner.scan（iterdir+parse）被 async 调用点同步调用 | 调用点 `asyncio.to_thread(service.scan, ...)` |
-| C12 | `spec_workspace/service.py:560` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
-| C13 | `change/projection.py:62` compute_pending_review | sqlite3 直读 sillyspec.db（mode=ro）在 async 内 | 抽 `_read_stage_progress_sync` + to_thread（对齐 `runtime/service.py:108` 范式） |
+| C6 | `backend/app/modules/change/service.py` list_files/read_file/write_file/sync_documents | rglob+stat / read_text / write_text（含循环）在 async 内 | 抽 `_list_files_sync`/`_read_file_sync`/`_write_text_sync` helper + `asyncio.to_thread` |
+| C7 | `backend/app/modules/runtime/service.py` get_artifacts/_read_text | iterdir+stat（server-local 分支）/ read_text | 抽 `_list_artifacts_local`/`_read_text_local` + to_thread |
+| C8 | `backend/app/modules/change/dispatch.py:962` read_verify_result | read_text | 抽 `_read_verify_result_sync` + to_thread |
+| C9 | `backend/app/modules/workspace/skills_view_service.py` list_skills/get_mcp_config | iterdir / read_text+json | 抽 `_list_skills_sync`/`_read_mcp_config_sync` + to_thread |
+| C10 | `backend/app/modules/agent/skills_bundle_service.py` _gather_all_files/build_skills_bundle | 经同步 helper（glob/rglob/read_bytes）/ tarfile 构建 | `_collect_skill_files` 调用点 to_thread + 抽 `_build_tar_gz` + to_thread |
+| C11 | `backend/app/modules/workspace/router.py:104` + `backend/app/modules/workspace/service.py:476` | scanner.scan（iterdir+parse）被 async 调用点同步调用 | 调用点 `asyncio.to_thread(service.scan, ...)` |
+| C12 | `backend/app/modules/spec_workspace/service.py:999` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
+| C13 | `backend/app/modules/change/projection.py:45` compute_pending_review | sqlite3 直读 sillyspec.db（mode=ro）在 async 内 | 抽 `_read_stage_progress_sync` + to_thread（对齐 `backend/app/modules/runtime/service.py` 范式） |
 | D9 | `sillyhub-daemon/src/skill-manager.ts:171` extractSkillsBundle | gunzipSync（bundle 解压在 async 内） | `promisify(gunzip)` → `gunzipAsync` |
 
 DEFER（带原因，非遗漏）：
@@ -176,8 +176,8 @@ DEFER（带原因，非遗漏）：
 | `change/dispatch.py` _sync_stage_status_daemon_client（sqlite3）| 降级 `return StageSyncResult` 路径多、频率中、阻塞不大；重写风险/收益不划算 |
 | daemon `workspace.ts` prepareWorkspace existsSync/statSync 探针 | 单次 syscall，收益微 |
 | daemon `dist_router` get_install_ps1 / dispatch `_resolve_db_path` | 一次性小文件 / 单次 stat |
-| `agent/context_builder` + `post_scan_validator`（async 调 sync helper）| 一次性 spec 读 / scan 校验，非高频瓶颈 |
-| daemon `rmtreeWindowsSafe`（workspace.ts:369）| **有意同步设计**（R-06/FR-06）：Node v26 `fs.promises.rm` 在 vitest 有 rimraf callback 竞态，注释明示；改异步重引入测试竞态 |
+| `backend/app/modules/agent/context_builder` + `backend/app/modules/agent/post_scan_validator`（async 调 sync helper）| 一次性 spec 读 / scan 校验，非高频瓶颈 |
+| daemon `rmtreeWindowsSafe`（`sillyhub-daemon/src/workspace.ts:369`）| **有意同步设计**（R-06/FR-06）：Node v26 `fs.promises.rm` 在 vitest 有 rimraf callback 竞态，注释明示；改异步重引入测试竞态 |
 | daemon `path-utils` realpathSync（写决策热路径）| 异步化要改 `resolveRealPath` 签名，波及 PolicyEngine 所有 canWrite/canCreate，中风险 |
 
 ### Wave B — N+1 查询批量化（部分）✅ 零回归
@@ -186,9 +186,9 @@ DEFER（带原因，非遗漏）：
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| B3 | `agent/router.py:730` list_missions | 每 mission 调 worker_runs + cost_so_far（**内部重复 worker_runs**）+ _load_mission_artifacts = 3 SELECT × N | 一次 runs `IN mission_ids` + 一次 artifacts `IN run_ids`；cost 复用 runs 聚合（sum total_cost_usd） |
-| B4 | `change/service.py:975` reparse → _sync_docs | 每 change 一次 `_fetch_existing_docs`（ChangeDocument WHERE change_id） | 循环前一次 `ChangeDocument WHERE change_id IN (...)` → dict 分组；_sync_docs 加 `existing_docs` 参数（None 兜底旧调用方） |
-| B5 | `daemon/permission_service.py:578` list_pending_dialogs（chat 分支）| 每 chat 型 dialog 一次 `SELECT AgentRunLog LIMIT 1` | 预推导 session_type + 一次 `SELECT AgentRunLog WHERE run_id IN (...) ORDER BY timestamp DESC` → Python 端按 run_id 取首条 |
+| B3 | `backend/app/modules/agent/router.py:730` list_missions | 每 mission 调 worker_runs + cost_so_far（**内部重复 worker_runs**）+ _load_mission_artifacts = 3 SELECT × N | 一次 runs `IN mission_ids` + 一次 artifacts `IN run_ids`；cost 复用 runs 聚合（sum total_cost_usd） |
+| B4 | `backend/app/modules/change/service.py:923` reparse → _sync_docs | 每 change 一次 `_fetch_existing_docs`（ChangeDocument WHERE change_id） | 循环前一次 `ChangeDocument WHERE change_id IN (...)` → dict 分组；_sync_docs 加 `existing_docs` 参数（None 兜底旧调用方） |
+| B5 | `backend/app/modules/daemon/permission_service.py:578` list_pending_dialogs（chat 分支）| 每 chat 型 dialog 一次 `SELECT AgentRunLog LIMIT 1` | 预推导 session_type + 一次 `SELECT AgentRunLog WHERE run_id IN (...) ORDER BY timestamp DESC` → Python 端按 run_id 取首条 |
 
 DEFER（带原因）：
 
@@ -201,17 +201,17 @@ DEFER（带原因）：
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| R5 | `agent/finalizer.py:469` converge_mission_for_completed_run | 两个 worker 同时 complete → 都 derive 出 done/degraded → 都跑 finalize（重复 GLM 合并 / 重复 merge artifact / 重复计费） | `AgentMission` 加 `converged_at` 列 + migration `202607251000`；finalize 前原子 `UPDATE...WHERE converged_at IS NULL` 抢占，`rowcount=0` 跳过 |
+| R5 | `backend/app/modules/agent/finalizer.py:469` converge_mission_for_completed_run | 两个 worker 同时 complete → 都 derive 出 done/degraded → 都跑 finalize（重复 GLM 合并 / 重复 merge artifact / 重复计费） | `AgentMission` 加 `converged_at` 列 + migration `202607251000`；finalize 前原子 `UPDATE...WHERE converged_at IS NULL` 抢占，`rowcount=0` 跳过 |
 
 > **为何用原子 UPDATE 而非 with_for_update 行锁**：`finalize_bootstrap_mission`/`finalize_execute_mission` 内部有 commit（会释放行锁），行锁挡不住"finalize commit 后、converged_at 置位前"的并发窗口；原子 `UPDATE...WHERE IS NULL` 是单 SQL，不受后续 commit 影响。
-> **为何守卫放 finalize 前而非 collect 前**：`collect_completed_artifacts` 幂等（execution.py:305 注释 + 321 查重，已有 artifact 的 run 跳过），重复 collect 无害，守卫只需挡重的 finalize。
+> **为何守卫放 finalize 前而非 collect 前**：`collect_completed_artifacts` 幂等（backend/app/modules/agent/execution.py:305 注释 + 321 查重，已有 artifact 的 run 跳过），重复 collect 无害，守卫只需挡重的 finalize。
 > **不破坏重入**：`mcp_tools.converge_mission` 的冲突重入靠 `_finalize_merge_for_mission`（独立调 finalize_execute_mission，task-06 §5.2），不依赖 `converge_mission_for_completed_run` 内的 finalize；`test_converge_mission_reentrant` mock 了 `converge_mission_for_completed_run`，不触及守卫。
 
 ### Wave C — A6 缓存 token 聚合（DEFER）
 
 | 项 | 原因 |
 |---|---|
-| `stream-json.ts` cache token 聚合（L461 `+=` / L549 `=` / L706 `+=`）| **语义微妙 + SAFE=N**：message_start（L461 `+=`）累加每个 API call 的 cache（一 turn 多 tool-use call 各自增量），message_delta（L549 `=`）是累计覆盖——这不是简单"+= → ="，需对照真实 Claude stream-json 输出确认每事件的 cache 语义。代码经 ql-token-fix/task-01 修正过，盲目改破坏计费。留专项（需真实数据 diff 验证）。印证 memory `claude-cache-token-semantics`。 |
+| `sillyhub-daemon/src/adapters/stream-json.ts` cache token 聚合（L461 `+=` / L549 `=` / L706 `+=`）| **语义微妙 + SAFE=N**：message_start（L461 `+=`）累加每个 API call 的 cache（一 turn 多 tool-use call 各自增量），message_delta（L549 `=`）是累计覆盖——这不是简单"+= → ="，需对照真实 Claude stream-json 输出确认每事件的 cache 语义。代码经 ql-token-fix/task-01 修正过，盲目改破坏计费。留专项（需真实数据 diff 验证）。印证 memory `claude-cache-token-semantics`。 |
 
 ### 验证（累计三批）
 
@@ -237,13 +237,13 @@ DEFER（带原因）：
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| F1 | `change/dispatch.py:840` | gate_retry_count 被 dispatch() 用新 dict 覆盖→**R12 死循环防护生产完全失效**（verify gate 失败无限重跑烧钱）；现有 test_gate_retry 全 mock dispatch 绕过覆盖点，单测全绿却掩盖 | :840 改 merge 保留 count + 跨 stage 重置；补不 mock dispatch 的 e2e（同 stage 保留 / 跨 stage 重置两条） |
-| F2 | `auth/service.py:278,330` | refresh token 校验循环内同步 bcrypt（cost-12，250-400ms/次 × N session 全表扫）**阻塞事件循环**；api_key 同模式已修（to_thread + Redis），refresh 漏修且每~20min 轮换更高频。R2 只修并发未修 blocking | `_consume_refresh_token` + `_find_revoked_session` 两处 verify 包 `asyncio.to_thread`（对齐 api_key_service:237） |
-| F3 | `daemon/session/service.py:1719` | session 日志 min_ts_subq 对最大表 agent_run_logs **全表 GROUP BY 无 session 过滤**，随日志增长线性恶化 | 子查询加 `WHERE run_id IN (该 session 的 runs)` 收敛聚合范围 |
-| F4 | `ppm/workbench/service.py:502,520` | 工作台"我的待办"①② 无 limit + concat 包裹 now_handle_user 致索引失效全表扫（含 Text 大列），首屏必跑；③ 已有 limit | ①② 各加 `.limit(_TODO_SOURCE_LIMIT)` 对齐③（止血全表实体化；根治 concat-LIKE 需拆关联子表 + migration，DEFER） |
-| F5 | `codex-app-server-driver.ts:669` | exit handler 仅 code!==0 才 finalize → codex 干净退出(0)/被信号杀(null) 时不置 finalized，consume 主循环永不退出、currentTurnPromise 永不 resolve → **交互式会话永久卡死**（主 agent lease 永不过期，卡到 daemon 重启）。现有测试都先 close() input 让 consume break 再 _emitExit，故未捕获 | exit handler 改任何 !h.closing 退出都 finalizeWithError（对称于 'error' handler，加 signal 参数）+ 补不 close input 的 fake child exit(0)/exit(null) 回归测试。finalizeWithError 幂等（finalized 守卫） |
-| F6 | `workspace-config-card.tsx` | MED-1: handleInit initPoll 无 5min deadline（daemon 卡住时无限轮询，handleSyncManual 已有 R-06 5min 兜底）；LOW-1: handleSyncManual 5min setTimeout 未存 ref，unmount 未 clearTimeout | handleInit 加 5min deadline（initDeadlineRef）对齐 R-06；setTimeout 存 syncDeadlineRef；unmount + 自停分支 clearTimeout |
-| F7 | `frontend/lib/daemon.ts:459` | streamQuickChat 死代码（无生产调用方，仅 2 个 test 的 vi.mock 字段 + 废弃注释） | 删除函数（test 用 vi.mock 独立 vi.fn()，零影响） |
+| F1 | `backend/app/modules/change/dispatch.py:840` | gate_retry_count 被 dispatch() 用新 dict 覆盖→**R12 死循环防护生产完全失效**（verify gate 失败无限重跑烧钱）；现有 test_gate_retry 全 mock dispatch 绕过覆盖点，单测全绿却掩盖 | :840 改 merge 保留 count + 跨 stage 重置；补不 mock dispatch 的 e2e（同 stage 保留 / 跨 stage 重置两条） |
+| F2 | `backend/app/modules/auth/service.py:309,330` | refresh token 校验循环内同步 bcrypt（cost-12，250-400ms/次 × N session 全表扫）**阻塞事件循环**；api_key 同模式已修（to_thread + Redis），refresh 漏修且每~20min 轮换更高频。R2 只修并发未修 blocking | `_consume_refresh_token` + `_find_revoked_session` 两处 verify 包 `asyncio.to_thread`（对齐 api_key_service:237） |
+| F3 | `backend/app/modules/daemon/session/service.py:1719` | session 日志 min_ts_subq 对最大表 agent_run_logs **全表 GROUP BY 无 session 过滤**，随日志增长线性恶化 | 子查询加 `WHERE run_id IN (该 session 的 runs)` 收敛聚合范围 |
+| F4 | `backend/app/modules/ppm/workbench/service.py:502,520` | 工作台"我的待办"①② 无 limit + concat 包裹 now_handle_user 致索引失效全表扫（含 Text 大列），首屏必跑；③ 已有 limit | ①② 各加 `.limit(_TODO_SOURCE_LIMIT)` 对齐③（止血全表实体化；根治 concat-LIKE 需拆关联子表 + migration，DEFER） |
+| F5 | `sillyhub-daemon/src/interactive/codex-app-server-driver.ts:669` | exit handler 仅 code!==0 才 finalize → codex 干净退出(0)/被信号杀(null) 时不置 finalized，consume 主循环永不退出、currentTurnPromise 永不 resolve → **交互式会话永久卡死**（主 agent lease 永不过期，卡到 daemon 重启）。现有测试都先 close() input 让 consume break 再 _emitExit，故未捕获 | exit handler 改任何 !h.closing 退出都 finalizeWithError（对称于 'error' handler，加 signal 参数）+ 补不 close input 的 fake child exit(0)/exit(null) 回归测试。finalizeWithError 幂等（finalized 守卫） |
+| F6 | `frontend/src/components/workspace-config-card.tsx` | MED-1: handleInit initPoll 无 5min deadline（daemon 卡住时无限轮询，handleSyncManual 已有 R-06 5min 兜底）；LOW-1: handleSyncManual 5min setTimeout 未存 ref，unmount 未 clearTimeout | handleInit 加 5min deadline（initDeadlineRef）对齐 R-06；setTimeout 存 syncDeadlineRef；unmount + 自停分支 clearTimeout |
+| F7 | `frontend/src/lib/daemon.ts:459` | streamQuickChat 死代码（无生产调用方，仅 2 个 test 的 vi.mock 字段 + 废弃注释） | 删除函数（test 用 vi.mock 独立 vi.fn()，零影响） |
 
 ### DEFER 复评结论（维持不做，附核验依据）
 
@@ -251,7 +251,7 @@ DEFER（带原因）：
 |---|---|
 | 后端新增索引 | **无需**：性能 agent 逐一核实候选（AgentRunLog.channel/subagent_type、DaemonTaskLease.kind、ChangeDocument.last_modified_at 等），leading filter 已被既有索引覆盖或仅写入无查询；剩余 LOW 遵循 Wave1 YAGNI |
 | daemon D3/D5/D6/D7 | 维持不做：D3 回调实际安全（fire-and-forget 不 reject）；D5 重连 5s 对齐 Python parity；D6 30s 超时够；D7 背压 parity |
-| **daemon D8 `_fire` 一次性任务重用** | **确认是前批误判**：daemon.ts:1714-1769 每次 crash 后 .catch 内递归调 _fire 新建 AbortController + promise（_controllers finally 删旧），非重用 one-shot controller。代码实际正确 |
+| **daemon D8 `_fire` 一次性任务重用** | **确认是前批误判**：sillyhub-daemon/src/daemon.ts:1714-1769 每次 crash 后 .catch 内递归调 _fire 新建 AbortController + promise（_controllers finally 删旧），非重用 one-shot controller。代码实际正确 |
 | daemon ND-2 codex _close 不等 exit | 维持 DEFER：仅 daemon 异常 shutdown 时 codex 子进程可能孤儿，待 shutdown 链路专项 |
 | daemon god 文件拆分 | 维持不做：高耦合 lease payload 鸭子类型几十处，无低风险切片 |
 | import_commit N+1（_build_module_maps/两段循环） | 维持 DEFER：手动 Excel 导入低频，N 小；批量化需重写 kanban per-user 计数器 |
@@ -287,9 +287,9 @@ DEFER（带原因）：
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| G1 | `file/service.py:80,122` | upload_file MinIO put 先于 DB commit 无补偿 → commit 失败留孤儿对象；soft_delete 仅置 deleted_at 不删存储本体（注释称"后续清理流程"但全仓不存在）→ MinIO 孤儿单调增长（账单泄漏） | upload commit 失败 best-effort 补偿 `delete_object`；soft_delete 同步删对象本体（先 commit DB 后删 MinIO，宁可孤儿不可损坏） |
-| G2 | `workspace/service.py:456` | soft_delete 仅置 deleted_at/status，**不取消该 workspace 下在跑 AgentRun** → daemon 继续 burn token / 向已删实体回写 | 复用 P0-2 链路：查 active runs（经 AgentRunWorkspace JOIN）逐个 `cancel_lease`（含 pending 兜底），best-effort 单 run 失败不中断 |
-| G3 | `frontend/lib/daemon.ts:398` | 第四批删 streamQuickChat 后注释仍提及（纯注释瑕疵） | 清理注释 |
+| G1 | `backend/app/modules/file/service.py:114,122` | upload_file MinIO put 先于 DB commit 无补偿 → commit 失败留孤儿对象；soft_delete 仅置 deleted_at 不删存储本体（注释称"后续清理流程"但全仓不存在）→ MinIO 孤儿单调增长（账单泄漏） | upload commit 失败 best-effort 补偿 `delete_object`；soft_delete 同步删对象本体（先 commit DB 后删 MinIO，宁可孤儿不可损坏） |
+| G2 | `backend/app/modules/workspace/service.py:527` | soft_delete 仅置 deleted_at/status，**不取消该 workspace 下在跑 AgentRun** → daemon 继续 burn token / 向已删实体回写 | 复用 P0-2 链路：查 active runs（经 AgentRunWorkspace JOIN）逐个 `cancel_lease`（含 pending 兜底），best-effort 单 run 失败不中断 |
+| G3 | `frontend/src/lib/daemon.ts:398` | 第四批删 streamQuickChat 后注释仍提及（纯注释瑕疵） | 清理注释 |
 
 ### DEFER 复评（修正 a4f18dab 判断 + 大工程留专项）
 
@@ -325,27 +325,27 @@ DEFER（带原因）：
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| H1 | `change/dispatch.py:789`(_write_last_dispatch_payload)/`:847`/`:1683` | `dispatch()` 与 `dispatch_next_step()` 两条平行 stage 调度入口各写各的 `last_dispatch`——第四批 F1 只给 `dispatch()` 加了 gate 计数 merge，`dispatch_next_step()`（/execute 端点 + 测试入口）仍用全新 dict 覆盖丢 `gate_retry_count`，双入口漂移 | 抽模块级 `_write_last_dispatch_payload(stages,stage,user,config)` 单一真相源（同 stage 保留 gate_retry_count/gate_last_errors、跨 stage 重置），两入口各自传 config 形状（dispatch=prompt_template / dispatch_next_step=phase）调用，消除漂移 |
-| H2 | `daemon/host_fs/delegate.py:655`(_via_rpc)/`:529`(run_command) + `change/dispatch.py:1386`(_run_gate_via_delegate) + `daemon/run_sync/service.py:1150` | gate 决策任务的 12min 网络 RPC 期间持有 DB 事务（`gate_session.get(Workspace)` 开事务 → `_run_gate_via_delegate` 内 daemon_id 解析 SELECT 后 `send_rpc` 持事务到返回 → commit），触发 PG `idle_in_transaction_session_timeout` | `_via_rpc` 加 `release_transaction: bool=False` 参数，daemon_id 解析后、`send_rpc` 前 `await self._session.commit()` 释放事务（快照 `ws_id` 避免 commit 后 workspace expire）；`run_command` 透传 flag；`_run_gate_via_delegate` 默认 `release_transaction=True`（gate 专用）；gate 任务 RPC 前 snapshot `change_owner_id`（commit 后 change expire，:1192 不再访问 `change.owner_id`）。默认 False = 现有 8 方法事务语义逐字节零回归 |
+| H1 | `backend/app/modules/change/dispatch.py:800`(_write_last_dispatch_payload)/`:847`/`:1683` | `dispatch()` 与 `dispatch_next_step()` 两条平行 stage 调度入口各写各的 `last_dispatch`——第四批 F1 只给 `dispatch()` 加了 gate 计数 merge，`dispatch_next_step()`（/execute 端点 + 测试入口）仍用全新 dict 覆盖丢 `gate_retry_count`，双入口漂移 | 抽模块级 `_write_last_dispatch_payload(stages,stage,user,config)` 单一真相源（同 stage 保留 gate_retry_count/gate_last_errors、跨 stage 重置），两入口各自传 config 形状（dispatch=prompt_template / dispatch_next_step=phase）调用，消除漂移 |
+| H2 | `backend/app/modules/daemon/host_fs/delegate.py:619`(_via_rpc)/`:529`(run_command) + `backend/app/modules/change/dispatch.py:1236`(_run_gate_via_delegate) + `backend/app/modules/daemon/run_sync/service.py` | gate 决策任务的 12min 网络 RPC 期间持有 DB 事务（`gate_session.get(Workspace)` 开事务 → `_run_gate_via_delegate` 内 daemon_id 解析 SELECT 后 `send_rpc` 持事务到返回 → commit），触发 PG `idle_in_transaction_session_timeout` | `_via_rpc` 加 `release_transaction: bool=False` 参数，daemon_id 解析后、`send_rpc` 前 `await self._session.commit()` 释放事务（快照 `ws_id` 避免 commit 后 workspace expire）；`run_command` 透传 flag；`_run_gate_via_delegate` 默认 `release_transaction=True`（gate 专用）；gate 任务 RPC 前 snapshot `change_owner_id`（commit 后 change expire，:1192 不再访问 `change.owner_id`）。默认 False = 现有 8 方法事务语义逐字节零回归 |
 
 ### Wave B（续）— 后端 N+1 批量化（6 处）✅ 零回归
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| B6 | `agent/control.py:43`(cost_from_runs) + `router.py:827/882/901/918` + `orchestrator.py:283` | `cost_so_far(mission_id)` 内部再 `worker_runs` SELECT 一次；5 个调用点上一行已 fetch 同款 runs → 每 get_mission 轮询 / 每 worker 完成多跑一次冗余 SELECT | 加 `@staticmethod cost_from_runs(runs)`（与 cost_so_far 同公式），`cost_so_far` 复用它；5 调用点改用上文内存 runs（fresh/runs/all_runs）。`cost_so_far` 原签名不动（test_control 直测通过） |
-| B7 | `agent/execution.py:317`(collect_completed_artifacts) | 每 completed run 一次 `SELECT AgentArtifact WHERE run_id=? LIMIT 1` 探测是否已有 artifact（N worker = N 次，converge 每 worker 触发一次 = O(N²)） | 循环前一次 `SELECT run_id WHERE run_id IN(...)` → set，循环内 `if run.id in existing: continue`。语义等价（collect_artifact 本身幂等，R5 已接受并发重复 collect 无害） |
-| B8 | `change/service.py:591`(sync_documents) | 逐文档 `SELECT ChangeDocument WHERE change_id+doc_type` 探测 upsert（N 文档 = N 次） | `list(documents)` 物化 + 一次 `WHERE change_id+doc_type IN(...)` → dict，循环内 `existing_docs.get(filename)` |
-| B9 | `ppm/plan/service.py:1357`(build_milestone_export_sections) | 每 has_module 里程碑一次 `list_modules_by_node`（N 里程碑 = N 次 SELECT PlanNodeModule） | 循环前一次 `WHERE plan_node_id IN(...)` → 按 node 分组 + 复用 `_no_sort_key` 排序，循环内 `modules_by_node.get(node.id,[])` |
-| B10 | `admin/roles_service.py:159`(list) + 新增 `_perms_by_roles`/`_count_users_by_roles`/`_to_read_many` | 角色列表每角色 3 查询（权限 + user_workspace_roles 计数 + user_roles 计数），20 行页=62 往返 | 新增批量 helper：perms 一次 `WHERE role_id IN(...)`、user 计数 fetch (role_id,user_id) 对后按角色 set-union（语义对齐 _count_users 跨表去重）；`list()` 改用 `_to_read_many`。单角色路径（get/create/update）仍走 `_to_read`（非 N+1，不动） |
-| B11 | `ppm/kanban/service.py:517`(_aggregate_task_stats) | `select(PlanTask)` 载入整行（含 task_description/content/remarks 等 Text 大列），循环只用 user_id/work_load/id 三字段 | `select(PlanTask.user_id, PlanTask.work_load, PlanTask.id)` 列裁剪，循环 `for user_id, work_load, task_id in result.all()` |
+| B6 | `backend/app/modules/agent/control.py:25`(cost_from_runs) + `backend/app/modules/agent/router.py:907/882/901/918` + `backend/app/modules/agent/orchestrator.py:846` | `cost_so_far(mission_id)` 内部再 `worker_runs` SELECT 一次；5 个调用点上一行已 fetch 同款 runs → 每 get_mission 轮询 / 每 worker 完成多跑一次冗余 SELECT | 加 `@staticmethod cost_from_runs(runs)`（与 cost_so_far 同公式），`cost_so_far` 复用它；5 调用点改用上文内存 runs（fresh/runs/all_runs）。`cost_so_far` 原签名不动（test_control 直测通过） |
+| B7 | `backend/app/modules/agent/execution.py:317`(collect_completed_artifacts) | 每 completed run 一次 `SELECT AgentArtifact WHERE run_id=? LIMIT 1` 探测是否已有 artifact（N worker = N 次，converge 每 worker 触发一次 = O(N²)） | 循环前一次 `SELECT run_id WHERE run_id IN(...)` → set，循环内 `if run.id in existing: continue`。语义等价（collect_artifact 本身幂等，R5 已接受并发重复 collect 无害） |
+| B8 | `backend/app/modules/change/service.py:884`(sync_documents) | 逐文档 `SELECT ChangeDocument WHERE change_id+doc_type` 探测 upsert（N 文档 = N 次） | `list(documents)` 物化 + 一次 `WHERE change_id+doc_type IN(...)` → dict，循环内 `existing_docs.get(filename)` |
+| B9 | `backend/app/modules/ppm/plan/service.py:1345`(build_milestone_export_sections) | 每 has_module 里程碑一次 `list_modules_by_node`（N 里程碑 = N 次 SELECT PlanNodeModule） | 循环前一次 `WHERE plan_node_id IN(...)` → 按 node 分组 + 复用 `_no_sort_key` 排序，循环内 `modules_by_node.get(node.id,[])` |
+| B10 | `backend/app/modules/admin/roles_service.py:141`(list) + 新增 `_perms_by_roles`/`_count_users_by_roles`/`_to_read_many` | 角色列表每角色 3 查询（权限 + user_workspace_roles 计数 + user_roles 计数），20 行页=62 往返 | 新增批量 helper：perms 一次 `WHERE role_id IN(...)`、user 计数 fetch (role_id,user_id) 对后按角色 set-union（语义对齐 _count_users 跨表去重）；`list()` 改用 `_to_read_many`。单角色路径（get/create/update）仍走 `_to_read`（非 N+1，不动） |
+| B11 | `backend/app/modules/ppm/kanban/service.py:517`(_aggregate_task_stats) | `select(PlanTask)` 载入整行（含 task_description/content/remarks 等 Text 大列），循环只用 user_id/work_load/id 三字段 | `select(PlanTask.user_id, PlanTask.work_load, PlanTask.id)` 列裁剪，循环 `for user_id, work_load, task_id in result.all()` |
 
 ### Wave F（续）— 前端请求优化 ✅ 零回归
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| F8 | `app/(dashboard)/runtimes/page.tsx:385` | 搜索框每按键改 `query` → listParams → react-query queryKey 变 → 重取（"project" 8 键 = 8 次重取） | 加 `debouncedQuery` state + 300ms setTimeout effect；输入框仍绑 `query`（即时回显），listParams 用 `debouncedQuery` |
-| F9 | `app/(dashboard)/workspaces/page.tsx:57` | 同上，且 reload 把 4 路请求（listWorkspaces + runtimes + instances + bindings）绑在 query 变化上，每键 4 请求 | 同款 `debouncedQuery`，reload deps + listWorkspaces `q` 改用 `debouncedQuery`（"project" 8 键 32 请求 → 4） |
-| F10 | `app/(dashboard)/workspaces/[id]/page.tsx:90` | `fetchMyBinding` 串行排在 6 路 Promise.all 之后（独立于其它 6 路却不同发），白多一个 RTT | 并入 Promise.all（第 7 路，带 .catch 降级），与原 fetch 同源同语义 |
+| F8 | `frontend/src/app/(dashboard)/runtimes/page.tsx` | 搜索框每按键改 `query` → listParams → react-query queryKey 变 → 重取（"project" 8 键 = 8 次重取） | 加 `debouncedQuery` state + 300ms setTimeout effect；输入框仍绑 `query`（即时回显），listParams 用 `debouncedQuery` |
+| F9 | `frontend/src/app/(dashboard)/workspaces/page.tsx` | 同上，且 reload 把 4 路请求（listWorkspaces + runtimes + instances + bindings）绑在 query 变化上，每键 4 请求 | 同款 `debouncedQuery`，reload deps + listWorkspaces `q` 改用 `debouncedQuery`（"project" 8 键 32 请求 → 4） |
+| F10 | `frontend/src/app/(dashboard)/workspaces/[id]frontend/src/app/page.tsx:90` | `fetchMyBinding` 串行排在 6 路 Promise.all 之后（独立于其它 6 路却不同发），白多一个 RTT | 并入 Promise.all（第 7 路，带 .catch 降级），与原 fetch 同源同语义 |
 
 ### 回归测试新增
 
@@ -357,13 +357,13 @@ DEFER（带原因）：
 
 | 项 | 原因 |
 |---|---|
-| `session-manager.ts:1777` end/fail 不清 `_store`（MEDIUM 内存泄漏） | `_store.delete` 删除会与 `get()`(daemon 路由校验) / list `_store.values()` / 落盘 flush（"不复活 ended session"逻辑）/ restore 交织；需设计"哪些 session 可驱逐 + 与持久化协调"，非安全局部改 |
-| `workspace-binding-guard.tsx:35` fetchMyBinding 走 react-query（LOW） | 验证者提示"零风险被高估，需补三项实现细节"——guard 内 check→redirect 逻辑改 react-query 需逐处反应性设计 |
-| `ppm/plan:192` + `ppm/problem:173` `_Crud[T]` 去重（LOW） | 两处已漂移（plan create 显式设 created_at，problem 不设依赖模型默认）；去重到 common/crud.py 需先定 created_at 哪个为准（LOW 维护性去重 + 漂移决策） |
-| `scan_docs/service.py:53` 列裁剪（LOW） | `list_` 返回完整 ORM 对象供 `ScanDocSummary.model_validate(d)` + conflict_counts 用 `.path`；列裁剪需同步改返回构造（pydantic 从 Row 校验会破），比 kanban 侵入大 |
-| `agent/service.py:177` tool_failure 死代码（LOW） | 删代码 + 删对应测试 + 核实无动态引用，范围大于本轮；死代码不影响运行 |
-| `codex-app-server-driver.ts:1061` pendingServerRequests 累积（LOW） | 该数组是**有意审计轨迹**（test 在 dispatch 完成后断言 length≥1），"完成后移除"会破坏测试（rule 9）；生产从不读，仅 cap 可选但边际 |
-| `coordinator.py:86` _fire_background_task 三处复制（LOW） | 去重需共享基类 + 三处类级 `_background_tasks` set 迁移，纯维护性无正确性收益 |
+| `sillyhub-daemon/src/interactive/session-manager.ts:1958` end/fail 不清 `_store`（MEDIUM 内存泄漏） | `_store.delete` 删除会与 `get()`(daemon 路由校验) / list `_store.values()` / 落盘 flush（"不复活 ended session"逻辑）/ restore 交织；需设计"哪些 session 可驱逐 + 与持久化协调"，非安全局部改 |
+| `frontend/src/components/workspace-binding-guard.tsx`（文件已删除） fetchMyBinding 走 react-query（LOW） | 验证者提示"零风险被高估，需补三项实现细节"——guard 内 check→redirect 逻辑改 react-query 需逐处反应性设计 |
+| `backend/app/modules/ppm/plan/service.py:192` + `backend/app/modules/ppm/problem/service.py:173` `_Crud[T]` 去重（LOW） | 两处已漂移（plan create 显式设 created_at，problem 不设依赖模型默认）；去重到 common/crud.py 需先定 created_at 哪个为准（LOW 维护性去重 + 漂移决策） |
+| `backend/app/modules/scan_docs/service.py:47` 列裁剪（LOW） | `list_` 返回完整 ORM 对象供 `ScanDocSummary.model_validate(d)` + conflict_counts 用 `.path`；列裁剪需同步改返回构造（pydantic 从 Row 校验会破），比 kanban 侵入大 |
+| `backend/app/modules/agent/service.py:177` tool_failure 死代码（LOW） | 删代码 + 删对应测试 + 核实无动态引用，范围大于本轮；死代码不影响运行 |
+| `sillyhub-daemon/src/interactive/codex-app-server-driver.ts:1061` pendingServerRequests 累积（LOW） | 该数组是**有意审计轨迹**（test 在 dispatch 完成后断言 length≥1），"完成后移除"会破坏测试（rule 9）；生产从不读，仅 cap 可选但边际 |
+| `backend/app/modules/agent/coordinator.py` _fire_background_task 三处复制（LOW） | 去重需共享基类 + 三处类级 `_background_tasks` set 迁移，纯维护性无正确性收益 |
 
 ### 验证（第六批）
 

@@ -14,7 +14,7 @@ created_at: 2026-08-18 01:45:00
 ## 契约摘要
 - `WorkspaceDetailPage`（根，375 行）：`Promise.all` 七路并行——`getWorkspace` / switcher / components / active + archive 两份 `listChanges`（各自 `.catch` 降级空）/ runtime / binding。
 - `ChangesPage`（`changes`，672 行）：三 Tab（进行中 active / 已归档 archive / 快速修复 quicklog），react-query（`keepPreviousData`）；查询条件垂直 Field + 筛选（Checkbox/Input/Select）；待办徽标数据源 = `ChangeSummary.pending_review`（PG 镜像投影）+ status=blocked；`reparseChanges` 重扫入口；QUICKLOG Tab 走 lib-quicklog（`QuicklogTable` + `QuicklogDrawer`）。
-- `ChangeDetailPage`（`changes/[cid]`，366 行）：左主右辅布局（会话驱动化重做后），聚合文档 / 审批 / 进度 / 阶段操作（components-changes 组件群承载）。
+- `ChangeDetailPage`（`frontend/app/(dashboard)/workspaces/[id]/changes/[cid]`，366 行）：左主右辅布局（会话驱动化重做后），聚合文档 / 审批 / 进度 / 阶段操作（components-changes 组件群承载）。
 - `TaskBoardPage` / `TaskDetailPage`（`[cid]/tasks`、`[tid]`）：任务看板与流转（`getTaskBoard` / `transitionTask`）。
 - `AgentPage`（`agent`）：历史列表 `useAgentRuns` 轮询；活跃 run 日志流 + input + 权限卡片全在 `<AgentRunPanel>`（内含 `useAgentRunStream` 连 SSE 中继）闭环，页面只切 `activeRunId`。
 - `WorkspaceAgentProfilesPage`（`agent-profiles`）：workspace 作用域档案卡片墙（`AgentProfileCardGrid` + 表单，components-agent-profile）。

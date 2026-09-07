@@ -51,8 +51,8 @@ importSpecWorkspace:
   是 progress 端点（D-004）。
 - import 走 SSE 是为了突破同步 POST 的超时（D-001）；调用方 done 后须自行刷新
   spec_ws 状态 + 变更中心列表。
-- 消费方：`workspaces/[id]/page.tsx`、`workspaces/[id]/agent/page.tsx`、
-  `components/workspace-config-card.tsx`。
+- 消费方：`frontend/workspaces/[id]/page.tsx`、`frontend/workspaces/[id]/agent/page.tsx`、
+  `frontend/components/workspace-config-card.tsx`。
 
 ## 人工备注
 

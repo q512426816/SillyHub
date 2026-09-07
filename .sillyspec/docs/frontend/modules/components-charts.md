@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # ECharts 图表组件（components-charts）
 
 ## 定位
-ECharts 图表组件（`components/charts/`，3 图 + 1 桶文件），基于 `echarts-for-react` 封装。
+ECharts 图表组件（`frontend/components/charts/`，3 图 + 1 桶文件），基于 `echarts-for-react` 封装。
 两张 PPM 工时图（柱状/饼图）+ 一张 daemon 运行时用量 sparkline 折线图。ECharts 依赖
 window/DOM，Next.js App Router 下必须 ssr:false——`index.tsx` 桶统一用 `next/dynamic`
 动态包装并带 Loading 占位，页面只从桶 import 动态版，无需各自再 dynamic。

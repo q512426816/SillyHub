@@ -51,7 +51,7 @@ cleanup: cancelled=true + disconnect（cancelled flag 防卸载后写 state）
 - `input` 用 useMemo 稳定引用，避免 AgentRunPanel 每帧拿新对象失效 memo；
   切 runId 时调用方应手动 `clear()`。
 - 消费方：components-daemon（RuntimeSessionDialog 等）+ workspace agent 页；
-  单测 `lib/__tests__/use-agent-run-stream.test.ts`。
+  单测 `frontend/src/lib/__tests__/use-agent-run-stream.test.ts`。
 
 ## 人工备注
 

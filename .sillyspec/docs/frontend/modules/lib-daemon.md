@@ -82,7 +82,7 @@ conn.onmessage = (raw) => {
 - `injectSession` 的 `llm_provider_id === ""`（切回本机默认）必须下发——判 `undefined` 而非真值。
 - 流式分片撤回：`SessionStreamEnvelope.segment_id`（partial 半截行标记，形如 "main:<msg_id>"）+ override 令箭（stale=true）；旧 backend 缺字段时 undefined 空转，不误撤回；正文分类在 components-agent-log 的 classifySessionLog。
 - `AgentSessionListResponseSchema`（zod）仅 dev-time 校验，不进业务层。
-- 测试分布：`lib/daemon.test.ts` + `lib/__tests__/daemon-session.test.ts`（会话/SSE）、`daemon-permission.test.ts`（权限事件解析）、`daemon-usage.test.ts`（用量聚合）。
+- 测试分布：`frontend/src/lib/daemon.test.ts` + `frontend/src/lib/__tests__/daemon-session.test.ts`（会话/SSE）、`frontend/src/lib/__tests__/daemon-permission.test.ts`（权限事件解析）、`frontend/src/lib/__tests__/daemon-usage.test.ts`（用量聚合）。
 
 - 会话绑定客户端三入口（2026-08-25-session-spec-binding）：listAgentSessions options 加 ql_id；createSession input 加 quicklog_id；新增 listQuicklogSessions(workspaceId, qlId)（类型经 gen:types 从后端生成，禁止手写）。
 

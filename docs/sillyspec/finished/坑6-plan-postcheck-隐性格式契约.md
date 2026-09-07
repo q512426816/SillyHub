@@ -11,7 +11,7 @@ created_at: 2026-08-15T15:45:00+08:00
 
 **根因清单**（6 个具体问题）：
 
-1. **`parseAllowedPaths` 块列表正则缺陷**（`src/stages/plan-postcheck.js:73-77`）：
+1. **`parseAllowedPaths` 块列表正则缺陷**（`sillyhub-daemon/src/stages/plan-postcheck.js:73-77`）：
    `allowed_paths:\s*\n((?:\s+-\s+.+\n?)+)` 中 `\s*` 贪婪匹配会吃掉换行符与列表项的前导空白，导致 YAML 标准块列表格式（`allowed_paths:\n- a\n- b`）**永远匹配失败**，只有 inline 数组 `allowed_paths: [a, b]` 能过。这是正则 bug 非文档约定——标准 YAML 写法被静默判「缺少 allowed_paths」。
 2. **CRLF 行尾全失配**：所有 frontmatter/章节正则用 `^---\n` 锚点，Windows 编辑器默认 CRLF 的卡片全部静默失配（fmMatch 都不成立），报错误导为「缺字段」。Windows agent 写卡片必须显式 `newline="\n"`。
 3. **报错不聚合**：blueprint consistency / feasibility / design coverage / FR 引用 / module-impact / checkbox 收容是 6 个独立检查，失败一个抛一个，其余不输出。修 1 个错重跑才知道下一个。

@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 工作区关联与共享组件（components-workspace）
 
 ## 定位
-`components/workspace/` 目录（4 源文件 + 2 测试），两个子域：①PPM↔workspace 关联（2026-07-28-ppm-project-link-workspace 派生）——`LinkWorkspaceDialog`（项目侧绑定/解绑工作区弹窗）与 `LinkedProjectsSection`（工作区侧关联项目区块），双边操作同一张 `ppm_project_workspace` 表；②共享 daemon（2026-07-25-daemon-borrow-for-business 派生）——`SharedDaemonToggle`（lender 出借开关）与 `SharedDaemonManager`（owner 撤销管理区）。
+`frontend/components/workspace/` 目录（4 源文件 + 2 测试），两个子域：①PPM↔workspace 关联（2026-07-28-ppm-project-link-workspace 派生）——`LinkWorkspaceDialog`（项目侧绑定/解绑工作区弹窗）与 `LinkedProjectsSection`（工作区侧关联项目区块），双边操作同一张 `ppm_project_workspace` 表；②共享 daemon（2026-07-25-daemon-borrow-for-business 派生）——`SharedDaemonToggle`（lender 出借开关）与 `SharedDaemonManager`（owner 撤销管理区）。
 
 ## 契约摘要
 - `LinkWorkspaceDialog`：props `{ open, projectId, projectName, onClose }`。项目维护页行内打开；调 lib-workspace 的 `listProjectWorkspaces` / `linkWorkspace` / `unlinkWorkspace`，辅以 `listWorkspaces` 补候选。antd 体系（与 ppm 页一致）；工作区状态 Tag 语义色（active 绿/pending 蓝/archived 灰/deleted 红）。

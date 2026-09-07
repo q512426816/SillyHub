@@ -10,17 +10,17 @@
 
 ### sillyspec 工具（全局 `C:\nvm4w\nodejs\node_modules\sillyspec` v3.22.5）
 
-- 读 `src/progress.js:68 resolvePlatformSpecDir`：必须有 `specRoot`，缺则抛
+- 读 `sillyhub-daemon/src/progress.js:68 resolvePlatformSpecDir`：必须有 `specRoot`，缺则抛
   `PointerUnreachableError: pointer 缺少 specRoot 字段`（fail-closed）。
-- 损坏判定 `src/constants.js:68 isPointerCorrupted`：`!specRoot || !savedAt` 即坏。
-- 写 `src/run.js:1279`：`{ specRoot, runtimeRoot, workspaceId, scanRunId, savedAt }`（camelCase）。
+- 损坏判定 `sillyhub-daemon/src/constants.js:68 isPointerCorrupted`：`!specRoot || !savedAt` 即坏。
+- 写 `sillyhub-daemon/src/run.js:1279`：`{ specRoot, runtimeRoot, workspaceId, scanRunId, savedAt }`（camelCase）。
 - 触发：`sillyspec run --spec-root …` 平台模式。
 
 ### sillyhub daemon（`sillyhub-daemon/src/spec-sync.ts`）
 
 - 写 `writePlatformConfig`（`:866`）：`{ workspace_id, server_origin, strategy, spec_version, cache_root, synced_at }`
   （snake_case 6 字段，**无 specRoot / savedAt**）。
-- 活代码路径：`task-runner.ts:386-392` 探测 `mode==='init'` → `_runInitLease` → `handleInitLease` → `writePlatformConfig`。
+- 活代码路径：`sillyhub-daemon/src/task-runner.ts:386-392` 探测 `mode==='init'` → `_runInitLease` → `handleInitLease` → `writePlatformConfig`。
 - 写入位置：`join(rootPath, '.sillyspec-platform.json')`。
 
 ### 冲突点
