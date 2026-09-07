@@ -19,9 +19,13 @@ allowed_paths:
   - frontend/src/components/daemon/session-input-bar.tsx
   - frontend/src/components/daemon/scheduled-messages-bar.tsx
   - frontend/src/hooks/use-scheduled-messages.ts
+  - frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
 target_files:
   - NEW:frontend/src/components/daemon/scheduled-messages-bar.tsx
   - NEW:frontend/src/hooks/use-scheduled-messages.ts
+related_tests:
+  - path: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+    reason: ScheduledMessagesBar 挂载即取数撞全局单次 fetch mock（消费 body 污染被测 fetch），mock 工厂补 listScheduledMessages 空桩（主 agent 连带修复，task-10 补 listSessionTasks 同款先例）
 goal: >
   会话聊天加定时发送 UI——输入栏 ⏰ 入口 + antd 定时弹窗（分钟级 + 快捷项）、
   use-scheduled-messages hook 与 ScheduledMessagesBar 双挂载（page/dialog 两模式），覆盖一次性定时消息创建、查看、取消全链路。

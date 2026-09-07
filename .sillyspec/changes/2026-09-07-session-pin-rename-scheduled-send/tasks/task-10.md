@@ -2,6 +2,7 @@
 id: task-10
 title: 'regression-verify-backend-and-frontend'
 title_zh: '回归验证（backend daemon/agent 模块测试 + frontend typecheck/lint + 既有测试零回归）'
+task_type: verification
 author: 'qinyi'
 created_at: 2026-09-07 23:32:39
 priority: P0

@@ -12,9 +12,18 @@ decision_ids: [D-001@v1, D-002@v1]
 allowed_paths:
   - backend/app/modules/agent/model.py
   - backend/migrations/versions/
+  - backend/app/modules/agent/tests/test_agent_session_model.py
+  - backend/app/modules/agent/tests/test_mission_session_id.py
 target_files:
   - backend/app/modules/agent/model.py
   - NEW:backend/migrations/versions/20260907231000_add_session_pin_title_scheduled.py
+  - backend/app/modules/agent/tests/test_agent_session_model.py
+  - backend/app/modules/agent/tests/test_mission_session_id.py
+related_tests:
+  - path: backend/app/modules/agent/tests/test_agent_session_model.py
+    reason: 字段清单守卫断言精确集合与计数（28→29），加 pinned_at 列后清单需同步——仓库惯例由加列变更同步更新
+  - path: backend/app/modules/agent/tests/test_mission_session_id.py
+    reason: 同款 agent_sessions 字段清单守卫，需补 pinned_at
 provides:
   - contract: AgentSession
     fields: [pinned_at]
@@ -35,8 +44,8 @@ verify:
   - cd backend && uv run alembic upgrade head
   - cd backend && uv run pytest app/modules/agent -q --no-cov -n auto
 constraints:
-  - 只改 agent/model.py 与迁移文件，不碰 daemon 侧 schema/router/service（归 task-02/03 的 allowed_paths）
-  - 不写新测试文件（backend 测试归 task-06），不动既有列、索引与表定义
+  - 只改 agent/model.py、迁移文件与两处字段清单守卫测试（related_tests），不碰 daemon 侧 schema/router/service（归 task-02/03 的 allowed_paths）
+  - 不写新测试文件（backend 新测试归 task-06），不动既有列、索引与表定义
   - 迁移只做 DDL 不回填数据，写法兼容 aiosqlite/PG 双方言（对齐既有迁移惯例）
 ---
 
