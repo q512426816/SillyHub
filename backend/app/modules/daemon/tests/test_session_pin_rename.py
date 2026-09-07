@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
@@ -143,7 +144,7 @@ def _capture_publish(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
     return calls
 
 
-async def _session_row(db: AsyncSession, session_id: uuid.UUID) -> tuple:
+async def _session_row(db: AsyncSession, session_id: uuid.UUID) -> Row:
     """列级直查（绕开 identity map——HTTP 请求经共享连接已 commit）。"""
     return (
         await db.execute(

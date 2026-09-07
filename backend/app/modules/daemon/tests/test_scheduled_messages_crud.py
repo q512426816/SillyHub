@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentSession, AgentSessionScheduledMessage
@@ -120,7 +121,7 @@ async def _make_scheduled(
     return row
 
 
-async def _row(db: AsyncSession, message_id: uuid.UUID) -> tuple:
+async def _row(db: AsyncSession, message_id: uuid.UUID) -> Row:
     """列级直查（绕开 identity map）：(status, error_code, cancelled_at, dispatched_at)。"""
     return (
         await db.execute(

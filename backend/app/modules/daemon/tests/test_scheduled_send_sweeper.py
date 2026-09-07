@@ -29,6 +29,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import (
@@ -181,7 +182,7 @@ async def _seed_pending_queue(
     await db.commit()
 
 
-async def _entry_row(db: AsyncSession, entry_id: uuid.UUID) -> tuple:
+async def _entry_row(db: AsyncSession, entry_id: uuid.UUID) -> Row:
     """(status, error_code, error_message, dispatched_at) 列级直查。"""
     return (
         await db.execute(
