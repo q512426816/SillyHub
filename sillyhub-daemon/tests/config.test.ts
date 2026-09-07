@@ -44,7 +44,7 @@ describe('config', () => {
   // ── AC-03：字段与默认值对照 Python config.py:22-32 DEFAULTS ──
 
   describe('字段与默认值（AC-03，对照 Python DEFAULTS）', () => {
-    it('DEFAULT_CONFIG 键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval；2026-06-18-workspace-client-path task-02 新增 allowed_roots；2026-06-22-agent-run-pipeline-fix task-02 新增 spec_root_map；2026-06-24-daemon-network-resilience task-09 新增 retry_* / loop_restart_backoff_ms / outbox_max_* / disconnect_log_threshold_sec；断路器新增 max_loop_restarts；2026-08-31-machine-sillyspec-version task-05 新增 sillyspec_update_interval_sec）', () => {
+    it('DEFAULT_CONFIG 键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval；2026-06-18-workspace-client-path task-02 新增 allowed_roots；2026-06-22-agent-run-pipeline-fix task-02 新增 spec_root_map；2026-06-24-daemon-network-resilience task-09 新增 retry_* / loop_restart_backoff_ms / outbox_max_* / disconnect_log_threshold_sec；断路器新增 max_loop_restarts；2026-08-31-machine-sillyspec-version task-05 新增 sillyspec_update_interval_sec；2026-09-02-changes-overview-card task-02 新增 sillyspec_status_interval_sec；2026-09-04-conflict-resolve-entry task-06 新增 sillyspec_command_timeout_sec）', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
         'allowed_roots',
         'api_key',
@@ -68,6 +68,7 @@ describe('config', () => {
         'runtime_id',
         'self_reload_check_interval_sec',
         'server_url',
+        'sillyspec_command_timeout_sec',
         'sillyspec_status_interval_sec',
         'sillyspec_update_interval_sec',
         'spec_root_map',
@@ -90,6 +91,10 @@ describe('config', () => {
 
     it('2026-09-02-changes-overview-card task-02：sillyspec_status_interval_sec 默认 60 秒（0=关闭）', () => {
       expect(DEFAULT_CONFIG.sillyspec_status_interval_sec).toBe(60);
+    });
+
+    it('2026-09-04-conflict-resolve-entry task-06：sillyspec_command_timeout_sec 默认 120 秒（超时无关闭口，脏值回退 120）', () => {
+      expect(DEFAULT_CONFIG.sillyspec_command_timeout_sec).toBe(120);
     });
 
     it('ql-20260616-003：terminal_observer_* 4 字段默认值', () => {

@@ -89,6 +89,18 @@ DAEMON_MSG_CLEANUP = "daemon:cleanup"
 # default 仅 warn（向后兼容）。
 DAEMON_MSG_SILLYSPEC_UPDATE = "daemon:sillyspec_update"  # Server → Daemon, D-001@v1
 
+# change 2026-09-04-conflict-resolve-entry / task-01 / D-001@v1:
+# sillyspec 冲突裁决与 ghost 清理指令 WS push（Server → Daemon）。用户在机器卡
+# 触发裁决/清理后 backend 立即下发，daemon 收到后调本机 sillyspec CLI 执行
+# （resolve → sillyspec resolve --change X --keep-local/--take-platform，
+# ghost_cleanup → sillyspec doctor --cleanup-ghosts --confirm，均归 task-06）；
+# 执行结果不走本消息回传，而是经心跳 sillyspec_command_result 字段上报
+# （backend 侧落库归 task-03，daemon 侧归 task-06）。fire-and-forget，无回执
+# （同 SILLYSPEC_UPDATE 语义）。纯新增消息，旧 daemon 收到走 default 仅 warn
+# （向后兼容）。与 sillyhub-daemon/src/protocol.ts MSG 逐字对齐。
+DAEMON_MSG_SILLYSPEC_RESOLVE = "daemon:sillyspec_resolve"  # Server → Daemon, D-001@v1
+DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP = "daemon:sillyspec_ghost_cleanup"  # Server → Daemon, D-001@v1
+
 
 # ── Message envelope ────────────────────────────────────────────────────────
 

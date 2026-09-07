@@ -22,6 +22,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ChangeStepBadge } from "@/components/changes/change-step-badge";
 import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
+import { PlatformSyncSection } from "@/components/changes/platform-sync-section";
 import { QuicklogDrawer } from "@/components/changes/quicklog-drawer";
 import { QuicklogTable } from "@/components/changes/quicklog-table";
 import {
@@ -717,6 +718,11 @@ export default function ChangesPage({ params }: Props) {
           </ul>
         </SectionCard>
       )}
+
+      {/* 平台同步处理区（2026-09-04-conflict-resolve-entry task-09 / FR-01~05）：
+          本机未决同步冲突 + ghost 残留的一键裁决/清理；无绑定或无 sillyspec_status
+          时组件自渲染 null，页面行为与现状一致（design §9） */}
+      <PlatformSyncSection workspaceId={workspaceId} />
 
       {/* 主 tab：进行中 / 已归档（按 location，D-007），挂数量（tabTotals 独立 useQuery 拉） */}
       <div className="flex items-center gap-1">

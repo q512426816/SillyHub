@@ -6,7 +6,7 @@ import asyncio
 import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import WebSocket
 
@@ -18,6 +18,8 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_POLICY_UPDATE,
     DAEMON_MSG_RPC,
     DAEMON_MSG_SELF_UPDATE,
+    DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP,
+    DAEMON_MSG_SILLYSPEC_RESOLVE,
     DAEMON_MSG_SILLYSPEC_UPDATE,
     DAEMON_MSG_TASK_AVAILABLE,
 )
@@ -421,6 +423,41 @@ class DaemonWsHub:
         与否由前端 preflight 轮询兜底。
         """
         message = {"type": DAEMON_MSG_SILLYSPEC_UPDATE, "payload": {}}
+        return await self.send_to_runtime(daemon_id, message)
+
+    async def send_sillyspec_resolve(
+        self,
+        daemon_id: uuid.UUID,
+        change: str,
+        strategy: Literal["keep_local", "take_platform"],
+    ) -> bool:
+        """推送 sillyspec 冲突裁决指令（Server → Daemon，task-01 / D-001@v1）。
+
+        daemon 收到后调本机 sillyspec CLI 执行裁决（strategy 下划线字面量 →
+        --keep-local / --take-platform 中划线 flag 的映射归 daemon 侧 task-06
+        单点实现，backend 不做映射）；执行结果经心跳 sillyspec_command_result
+        字段回传（不走本消息）。fire-and-forget，无回执（同 SILLYSPEC_UPDATE
+        语义）。``change`` 格式与 ``strategy`` 值域校验归调用方端点（task-02），
+        本方法只透传不重复校验。返回 True 表示已下发；False 表示 daemon 离线或
+        发送失败，由调用方（REST 端点，task-02）转 504 DaemonRuntimeOffline。
+        """
+        payload = {"change": change, "strategy": strategy}
+        message = {"type": DAEMON_MSG_SILLYSPEC_RESOLVE, "payload": payload}
+        return await self.send_to_runtime(daemon_id, message)
+
+    async def send_sillyspec_ghost_cleanup(
+        self,
+        daemon_id: uuid.UUID,
+    ) -> bool:
+        """推送 sillyspec ghost 清理指令（Server → Daemon，task-01 / D-001@v1）。
+
+        daemon 收到后调本机 sillyspec CLI（doctor --cleanup-ghosts --confirm，
+        归 task-06）清理本地 DB ghost 行；执行结果经心跳 sillyspec_command_result
+        字段回传（不走本消息）。fire-and-forget，无回执（同 SILLYSPEC_UPDATE
+        语义）。返回 True 表示已下发；False 表示 daemon 离线或发送失败，由调用方
+        （REST 端点，task-02）转 504 DaemonRuntimeOffline。
+        """
+        message = {"type": DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP, "payload": {}}
         return await self.send_to_runtime(daemon_id, message)
 
     async def send_policy_update(

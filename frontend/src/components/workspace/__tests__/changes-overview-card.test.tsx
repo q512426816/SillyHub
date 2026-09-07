@@ -7,6 +7,10 @@
  *
  * fixture 用真实 envelope 形态（含 daemon 摘要不透传的 readable/command/stages
  * 字段——卡片不消费但解析需容忍不报错，task-06 acceptance）。
+ *
+ * 2026-09-04-conflict-resolve-entry task-10：ghost/冲突两处 CLI 指引断言改为
+ * 跳转变更中心入口断言（真实 next/link 渲染 <a>，断言惯例同
+ * quicklog-sessions-card.test.tsx，无需 mock）。
  */
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -189,7 +193,7 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     ).toHaveAttribute("aria-valuenow", "50");
   });
 
-  it("ghost 折叠组——默认折一行（计数+清理指引 code），展开逐行，再点收起", async () => {
+  it("ghost 折叠组——默认折一行（计数+跳变更中心入口），展开逐行，再点收起", async () => {
     mockHappyPath(
       makeStatus({
         changes: [
@@ -211,11 +215,13 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     const toggle = await screen.findByRole("button", {
       name: /残留记录 \(ghost\) 1 个/,
     });
-    // 默认折叠：ghost 行不可见；折行上带清理指引 code
+    // 默认折叠：ghost 行不可见；折行上带跳变更中心入口（不再显 CLI 命令原文）
     expect(screen.queryByText("quick-ghost-9")).toBeNull();
-    expect(
-      screen.getByText("sillyspec doctor --cleanup-ghosts --confirm"),
-    ).toBeInTheDocument();
+    const ghostEntry = screen.getByRole("link", {
+      name: "到变更中心 · 平台同步处理区一键清理",
+    });
+    expect(ghostEntry).toHaveAttribute("href", "/workspaces/ws-1/changes");
+    expect(screen.queryByText(/sillyspec doctor/)).toBeNull();
 
     fireEvent.click(toggle);
     expect(await screen.findByText("quick-ghost-9")).toBeInTheDocument();
@@ -228,7 +234,7 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     await waitFor(() => expect(screen.queryByText("quick-ghost-9")).toBeNull());
   });
 
-  it("冲突区——spec·进度 type 徽标 + change 名 mono + resolve 指引", async () => {
+  it("冲突区——spec·进度 type 徽标 + change 名 mono + 跳变更中心裁决入口", async () => {
     mockHappyPath(
       makeStatus({
         changes: [makeChange({ name: "chg-live" })],
@@ -249,7 +255,12 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     expect(screen.getByText("spec ×1 · 进度 ×1")).toBeInTheDocument();
     expect(screen.getByText("quick-x")).toBeInTheDocument();
     expect(screen.getByText("big-change")).toBeInTheDocument();
-    expect(screen.getByText("sillyspec platform resolve")).toBeInTheDocument();
+    // 裁决入口指向变更中心（不再显 CLI 命令原文）
+    const resolveEntry = screen.getByRole("link", {
+      name: "到变更中心裁决（保本地/取平台）",
+    });
+    expect(resolveEntry).toHaveAttribute("href", "/workspaces/ws-1/changes");
+    expect(screen.queryByText(/sillyspec platform resolve/)).toBeNull();
   });
 
   it("过滤 tab——全部/需关注计数正确，切换后仅留冲突关联活跃行（ghost 组与冲突区保留）", async () => {

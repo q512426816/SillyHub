@@ -11,8 +11,9 @@
  *     listDaemonMachines 机器视图按 id 匹配 → machine.sillyspec_status
  *     （task-05 产物，api-types 生成版 MachineSillySpecStatusRead，null=CLI 能力缺失）。
  *
- * 只读监控卡（design §2 Non-Goals：清理 ghost / resolve 冲突仍走 CLI，卡片仅展示
- * 指引文案，无写操作按钮）。挂载归 task-07（工作台 SectionCard 网格）。
+ * 只读监控卡（无写操作按钮；2026-09-04-conflict-resolve-entry task-10 起，ghost/
+ * 冲突两区的处理指引收口为跳转变更中心「平台同步」处理区的入口链接——操作单一
+ * 入口，design §5 Phase 3 第 4 条）。挂载归 task-07（工作台 SectionCard 网格）。
  *
  * 三态展示：
  *   - sillyspec_status 为 null/undefined → 「总览不可用（sillyspec 未安装/版本过低）」占位；
@@ -24,6 +25,7 @@
  * 相对时间复用 @/components/changes/change-activity-badge 的 parseIsoLikeMs/formatAge
  * （ISO 白名单防御解析 + 刚刚/x 分钟前/x 小时前/x 天前分档，不重复造轮子）。
  */
+import Link from "next/link";
 import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tag } from "antd";
@@ -440,27 +442,35 @@ export function ChangesOverviewCard({ workspaceId, className }: ChangesOverviewC
                 </ul>
               )}
 
-              {/* ghost 折叠组（默认折一行：计数 + 清理指引 code；展开逐行） */}
+              {/* ghost 折叠组（默认折一行：计数 + 跳变更中心入口；展开逐行）。
+                  入口 Link 在 toggle button 外——<a> 嵌 <button> 非法交互嵌套，
+                  且避免点入口误触折叠（task-10：操作收口变更中心）。 */}
               {ghosts.length > 0 && (
                 <div className="border-b">
-                  <button
-                    type="button"
-                    aria-expanded={ghostExpanded}
-                    onClick={() => setGhostExpanded((v) => !v)}
-                    className="flex w-full flex-wrap items-center gap-1.5 px-4 py-2 text-left text-xs text-muted-foreground hover:text-brand-600"
-                  >
-                    <span aria-hidden>{ghostExpanded ? "▾" : "▸"}</span>
-                    <span className="font-semibold text-error">
-                      残留记录 (ghost) {ghosts.length} 个
-                    </span>
-                    <span>—— 目录已不存在 · 步骤长期停滞 · 建议清理</span>
-                    <code className="rounded border bg-muted px-1 py-px font-mono text-[11px]">
-                      sillyspec doctor --cleanup-ghosts --confirm
-                    </code>
-                    <span className="text-brand-600">
-                      {ghostExpanded ? "收起" : "展开查看"}
-                    </span>
-                  </button>
+                  <div className="flex w-full flex-wrap items-center gap-1.5 px-4 py-2 text-xs text-muted-foreground">
+                    <button
+                      type="button"
+                      aria-expanded={ghostExpanded}
+                      onClick={() => setGhostExpanded((v) => !v)}
+                      className="flex flex-wrap items-center gap-1.5 text-left hover:text-brand-600"
+                    >
+                      <span aria-hidden>{ghostExpanded ? "▾" : "▸"}</span>
+                      <span className="font-semibold text-error">
+                        残留记录 (ghost) {ghosts.length} 个
+                      </span>
+                      <span>—— 目录已不存在 · 步骤长期停滞 · 建议清理</span>
+                      <span className="text-brand-600">
+                        {ghostExpanded ? "收起" : "展开查看"}
+                      </span>
+                    </button>
+                    <Link
+                      href={`/workspaces/${workspaceId}/changes`}
+                      prefetch={false}
+                      className="text-brand-600 hover:underline"
+                    >
+                      到变更中心 · 平台同步处理区一键清理
+                    </Link>
+                  </div>
                   {ghostExpanded && (
                     <ul>
                       {ghostsSorted.map((c) => (
@@ -471,7 +481,7 @@ export function ChangesOverviewCard({ workspaceId, className }: ChangesOverviewC
                 </div>
               )}
 
-              {/* 未决冲突区（双列网格 + resolve 指引，仅展示不写操作） */}
+              {/* 未决冲突区（双列网格 + 跳变更中心裁决入口，仅展示不写操作） */}
               {conflicts.length > 0 && (
                 <div className="border-b bg-muted px-4 py-3">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -479,10 +489,14 @@ export function ChangesOverviewCard({ workspaceId, className }: ChangesOverviewC
                       未决同步冲突 ({conflicts.length})
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      —— <span>{typeSummary}</span> → 处理{" "}
-                      <code className="rounded border bg-card px-1 font-mono text-[11px]">
-                        sillyspec platform resolve
-                      </code>
+                      —— <span>{typeSummary}</span> →{" "}
+                      <Link
+                        href={`/workspaces/${workspaceId}/changes`}
+                        prefetch={false}
+                        className="text-brand-600 hover:underline"
+                      >
+                        到变更中心裁决（保本地/取平台）
+                      </Link>
                     </span>
                   </div>
                   <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">

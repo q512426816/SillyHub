@@ -94,6 +94,9 @@ function makeConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     // sillyspec_status 键，既有第 4/5 参断言零变化（缺省形态零变化语义）；
     // 新用例经 overrides 开启（60）断言第 6 参注入。
     sillyspec_status_interval_sec: 0,
+    // 2026-09-04-conflict-resolve-entry task-07：平台命令超时键补进 fixture
+    //（DaemonConfig 必填字段，fake manager 不消费——保持键表 1:1 防漂移）。
+    sillyspec_command_timeout_sec: 120,
     ...overrides,
   };
 }
