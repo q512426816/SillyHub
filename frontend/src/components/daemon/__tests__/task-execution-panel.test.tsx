@@ -219,7 +219,6 @@ describe("TaskExecutionPanel 折叠条（task-07 / FR-01 / FR-07）", () => {
     expect(screen.getByTestId("task-execution-empty").textContent).toBe("当前无运行中任务");
     // 轮次页签空态
     fireEvent.click(screen.getByTestId("task-execution-tab-runs"));
-    await flush(); // 惰性取数（task-10）：首次进入轮次页签才拉快照
     expect(screen.getByTestId("task-execution-empty").textContent).toBe("暂无轮次记录");
     // 再点击折叠条收起：内容区移除
     fireEvent.click(screen.getByTestId("task-execution-bar"));
@@ -301,9 +300,6 @@ describe("TaskExecutionPanel 折叠摘要计数（task-07 / FR-01）", () => {
   it("轮次计数随 listSessionRuns 快照派生", async () => {
     daemonMock.listSessionRuns.mockResolvedValue([runRow(), runRow({ id: "run-b" })]);
     render(<TaskExecutionPanel sessionId="sess-1" />);
-    // 惰性取数（task-10）：轮次计数在轮次页签首次查看后才从快照派生
-    fireEvent.click(screen.getByTestId("task-execution-bar"));
-    fireEvent.click(screen.getByTestId("task-execution-tab-runs"));
     await waitFor(() =>
       expect(screen.getByTestId("task-execution-summary").textContent).toContain("轮次 2"),
     );
@@ -388,7 +384,6 @@ describe("TaskExecutionPanel 轮次历史页签（task-07 / FR-04）", () => {
     await flush();
     fireEvent.click(screen.getByTestId("task-execution-bar"));
     fireEvent.click(screen.getByTestId("task-execution-tab-runs"));
-    await flush(); // 惰性取数（task-10）：首次进入才拉
     const rows = screen.getAllByTestId("task-execution-run-row");
     expect(rows).toHaveLength(2);
     // 服务端倒序（队首最新）→ 序号 = 总数 - 下标：#2 / #1
@@ -401,9 +396,6 @@ describe("TaskExecutionPanel 轮次历史页签（task-07 / FR-04）", () => {
 
   it("runsRefreshSignal 递增触发 listSessionRuns 重拉", async () => {
     const { rerender } = render(<TaskExecutionPanel sessionId="sess-1" />);
-    // 惰性取数（task-10）：先激活轮次页签建立取数闸门
-    fireEvent.click(screen.getByTestId("task-execution-bar"));
-    fireEvent.click(screen.getByTestId("task-execution-tab-runs"));
     await waitFor(() => expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(1));
     rerender(<TaskExecutionPanel sessionId="sess-1" runsRefreshSignal={1} />);
     await waitFor(() => expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(2));

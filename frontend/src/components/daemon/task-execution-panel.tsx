@@ -414,8 +414,6 @@ export const TaskExecutionPanel = forwardRef<
   const [runs, setRuns] = useState<SessionRunRead[] | null>(null);
   const [runsLoading, setRunsLoading] = useState(false);
   const [runsError, setRunsError] = useState(false);
-  /** 轮次页签是否已被查看（惰性取数闸门，task-10）。 */
-  const runsViewedRef = useRef(false);
   // 会话切换先清旧列表（新数据到达前不显示上个会话的轮次）。
   useEffect(() => {
     setRuns([]);
@@ -427,11 +425,6 @@ export const TaskExecutionPanel = forwardRef<
       setRunsError(false);
       return;
     }
-    // 惰性取数：轮次页签首次被查看才拉（此后 refreshSignal 照常重拉）——避免
-    // 面板挂载即多发一次 listSessionRuns（既有看门狗对账测试按调用计数断言，
-    // 且辅助信息不值得每次会话挂载都请求；task-10 回归修正）。
-    if (tab === "runs") runsViewedRef.current = true;
-    if (!runsViewedRef.current) return;
     let cancelled = false;
     setRunsLoading(true);
     setRunsError(false);
@@ -450,7 +443,7 @@ export const TaskExecutionPanel = forwardRef<
     return () => {
       cancelled = true;
     };
-  }, [sessionId, runsRefreshSignal, tab]);
+  }, [sessionId, runsRefreshSignal]);
 
   // ── 摘要行计数（FR-01）──
   const activeMissions = useMemo(
