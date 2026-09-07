@@ -25,7 +25,6 @@ platform_sync 进度表），归一化成对比响应（§7.2）——router 只
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -320,20 +319,23 @@ class SillySpecCompareService:
     ) -> dict[str, Any]:
         """产出 §7.2 对比响应 dict（JSON 原生类型，router 直接 model_validate）。
 
-        顺序：workspace 成员校验（早于任何 RPC 外呼）→ asyncio.gather 并行
-        「daemon 快照 RPC」与「平台侧事实源定位」→ 按 kind 归一化比对。
+        顺序：workspace 成员校验 → 平台侧事实源定位（session 查询，**先于 RPC 顺序执行**）
+        → daemon 快照 RPC（长等待）→ 按 kind 归一化比对。
+
+        不并行说明（task-10 实机验收实证 2026-09-07）：gather(RPC, session 查询) 在
+        真实环境触发 asyncpg「another operation is in progress / manually started
+        transaction」并发连接冲突（单测 mock RPC 立即返回，交叠窗口趋零未暴露）——
+        平台侧定位是单行主键查询（毫秒级），并行收益可忽略，顺序化彻底消除
+        同请求 session 并发面。
         """
         await self._ensure_workspace_member(user_id, workspace_id)
-        snapshot_coro = self._fetch_snapshot(instance_id, change, kind)
         if kind == "progress":
-            snapshot, platform_progress = await asyncio.gather(
-                snapshot_coro, self._load_platform_progress(workspace_id, change)
-            )
+            platform_progress = await self._load_platform_progress(workspace_id, change)
+            snapshot = await self._fetch_snapshot(instance_id, change, kind)
             payload = self._build_progress_compare(change, snapshot, platform_progress)
         else:
-            snapshot, spec_root = await asyncio.gather(
-                snapshot_coro, self._load_spec_root(workspace_id)
-            )
+            spec_root = await self._load_spec_root(workspace_id)
+            snapshot = await self._fetch_snapshot(instance_id, change, kind)
             payload = self._build_spec_tree_compare(change, snapshot, spec_root)
         return _enforce_response_cap(payload)
 
