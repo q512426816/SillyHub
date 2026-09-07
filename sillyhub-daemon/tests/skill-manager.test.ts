@@ -24,6 +24,7 @@ import {
   syncSkills,
   syncWorkspaceSkills,
   linkSkillsToWorkdir,
+  resetLinkedWorkdirVersionsForTest,
   pathExists,
 } from '../src/skill-manager.js';
 
@@ -338,6 +339,78 @@ describe('skill-manager: linkSkillsToWorkdir', () => {
     await linkSkillsToWorkdir(workdir);
     expect(await pathExists(join(workdir, '.claude', 'skills', '.tmp-extract'))).toBe(false);
     expect(await pathExists(join(workdir, '.claude', 'skills', 'real-skill', 'SKILL.md'))).toBe(true);
+  });
+});
+
+// ql-20260907-006：workdir→版本缓存跳过重拷（原每会话全量 rm+重拷，Windows 逐文件
+// IO+杀软扫描成本高，内容却只在启动 syncSkills 时变化）。
+describe('skill-manager: linkSkillsToWorkdir 版本跳过（ql-20260907-006）', () => {
+  let tmpHome: string;
+  let origHome: string | undefined;
+  let skillsRoot: string;
+  let workdir: string;
+
+  beforeEach(async () => {
+    resetLinkedWorkdirVersionsForTest();
+    tmpHome = await mkdtemp(join(tmpdir(), 'link-skip-home-'));
+    origHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+    skillsRoot = join(tmpHome, '.sillyhub', 'daemon', 'skills');
+    await mkdir(join(skillsRoot, 'my-skill'), { recursive: true });
+    await writeFile(join(skillsRoot, 'my-skill', 'SKILL.md'), 'v1-content');
+    await writeFile(join(skillsRoot, 'manifest.json'), '{"version":"v1"}');
+    workdir = await mkdtemp(join(tmpdir(), 'link-skip-wt-'));
+  });
+  afterEach(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmpHome, { recursive: true, force: true });
+    await rm(workdir, { recursive: true, force: true });
+  });
+
+  it('同版本二次调用 → 跳过重拷（目标期间被外部改动不覆盖），版本变更 → 全量重拷刷新', async () => {
+    // 第一次：全量拷贝。
+    const r1 = await linkSkillsToWorkdir(workdir);
+    expect(r1.linked).toBeGreaterThan(0);
+    expect(await readFile(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'), 'utf-8')).toBe('v1-content');
+
+    // 第二次（同版本）：删除目标文件后调用——跳过重拷则文件不复活。
+    await rm(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'));
+    const logs: string[] = [];
+    const r2 = await linkSkillsToWorkdir(workdir, (level, msg) => {
+      logs.push(msg);
+    });
+    expect(r2.linked).toBe(0);
+    expect(logs).toContain('link_skills_version_fresh_skip');
+    expect(await pathExists(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(false);
+
+    // 第三次（版本升 v2 + 内容更新）：全量重拷，删掉的文件复活且内容刷新。
+    await writeFile(join(skillsRoot, 'my-skill', 'SKILL.md'), 'v2-content');
+    await writeFile(join(skillsRoot, 'manifest.json'), '{"version":"v2"}');
+    const r3 = await linkSkillsToWorkdir(workdir);
+    expect(r3.linked).toBeGreaterThan(0);
+    expect(await readFile(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'), 'utf-8')).toBe('v2-content');
+  });
+
+  it('同版本但目标 skill 目录被删（worktree 重建）→ 存在性守卫强制重拷', async () => {
+    await linkSkillsToWorkdir(workdir);
+    expect(await pathExists(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+
+    // 模拟 worktree 重建：目标整个 skills 目录消失，版本不变。
+    await rm(join(workdir, '.claude', 'skills'), { recursive: true, force: true });
+    const r = await linkSkillsToWorkdir(workdir);
+    expect(r.linked).toBeGreaterThan(0);
+    expect(await pathExists(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+  });
+
+  it('无 manifest（version=null）→ 不启用跳过，维持每次重拷', async () => {
+    await rm(join(skillsRoot, 'manifest.json'));
+    await linkSkillsToWorkdir(workdir);
+    await rm(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'));
+    const r = await linkSkillsToWorkdir(workdir);
+    // 无版本记录 → 不缓存 → 每次全量重拷（旧语义）
+    expect(r.linked).toBeGreaterThan(0);
+    expect(await pathExists(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
   });
 });
 

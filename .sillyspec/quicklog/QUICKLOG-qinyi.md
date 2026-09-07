@@ -412,3 +412,18 @@
 根因：ql-20260907-003 只解决了等待侧兜底（在途 lease 延长），但实机 >60s 慢启动案（1a9c601c）无分步数据无法归因是 skills 拷贝 / spec pull / MCP 预取 / spawn 哪段慢——已知 spec 大头已由 ql-20260904-016 修掉，剩余嫌疑需数据说话
 方案：_startInteractiveSession 头部建 timings 收集器，五段各记 interactive_create_step（step+elapsed_ms，后置步骤挂死时已完成的分步可定位停点），started/failed 日志汇总 timings+total_ms；纯日志零行为变更
 结果：vitest daemon-kind-dispatch 20/20 通过（新增计时断言用例），daemon-inject-drop-report 10/10 回归通过；pnpm typecheck 零错误
+
+## ql-20260907-006-2972 | 2026-09-07 10:11:46 | create 前置链提速：skills/spec/MCP 三步并行化 + skills 拷贝版本跳过
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（skills/spec/MCP 三步 Promise.all 并行化（闭包防御 catch））
+- sillyhub-daemon/src/skill-manager.ts（linkSkillsToWorkdir 版本缓存跳过 + resetLinkedWorkdirVersionsForTest）
+- sillyhub-daemon/tests/skill-manager.test.ts（新增 3 用例（跳过/刷新/存在性守卫/无 manifest））
+- sillyhub-daemon/tests/daemon-kind-dispatch.test.ts（无改动（005 计时用例回归覆盖并行链路））
+- .sillyspec/docs/sillyhub-daemon/modules/daemon.md（MANUAL_NOTES 补 ql-20260907-006 条目）
+- .sillyspec/docs/sillyhub-daemon/modules/skill-manager.md（MANUAL_NOTES 补 ql-20260907-006 条目）
+需求：create 前置链提速：skills/spec/MCP 三步并行化 + skills 拷贝版本跳过
+根因：三步互相无数据依赖却串行执行（总耗时=三者之和，Windows 慢启动主因之一）；skills 每会话全量 rm+重拷而内容只在启动 syncSkills 变化（逐文件 IO+杀软扫描 ~8ms/文件）
+方案：① daemon.ts 三步改 Promise.all（各步闭包外层防御 catch、specSyncCtx/MCP 写入由收口保证先于 create、005 分步计时保留，并行后各段之和可大于 total_ms 属预期）；② skill-manager linkSkillsToWorkdir 加 (workdir→version) 缓存：版本不变+目标目录在+上轮无失败→跳过（link_skills_version_fresh_skip），存在性守卫兜 worktree 重建，部分失败不记缓存下轮全量自愈，无 manifest 不启用；MCP 工作区缓存不做（不在临界路径+失效语义需设计）
+结果：vitest 7 套 86/86 通过（skill-manager 28 含 3 新用例：同版本跳过/版本变更刷新/worktree 重建重拷+无 manifest 不启用；kind-dispatch 20、inject-drop 10、interactive-codex/borrow-sandbox/notify-ready/worker-resume 28 全回归），pnpm typecheck 零错误
