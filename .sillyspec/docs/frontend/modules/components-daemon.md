@@ -170,10 +170,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
     sillyspec」五态——离线 / running / deferred / 本地 upgrading 禁用（title 说明
     原因），未安装换文案「安装 sillyspec」、失败后换「重试升级」，落后/未安装/
     升级中/失败 warning 高亮；props 增可选 `onUpgradeSillySpec` + `upgradingSillySpec`
-    （page 注入，缺省按钮渲染但点击无动作）；③ sillyspec_update 四态横幅（pending
+    （page 注入，缺省按钮渲染但点击无动作）；③ sillyspec_update 五态横幅（pending
     横幅后独立 `data-machine-sillyspec-banner` 槽位，色阶走主题语义 token）：
     running=info 旋转 / deferred=warning（机器忙排队，每 30s 复查）/ success=success
-    （副行渲染 backend 盖的 since 完成时刻）/ failed=destructive（error 摘要）；
+    （副行渲染 backend 盖的 since 完成时刻）/ failed=destructive（error 摘要）/
+    up_to_date=success（「已是最新版（X），无需升级」——ql-20260904-019 手动升级
+    已最新的明确反馈终态）；
     state 未知或 null 不渲染。三字段消费兄弟语义（旧后端无字段 → undefined 按未
     安装、无横幅，零回归）。
 - `RuntimeCard`（`runtime-card.tsx`）+ `runtime-card-helpers.tsx`：运行时卡与视觉/格式

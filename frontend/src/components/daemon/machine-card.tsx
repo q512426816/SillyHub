@@ -16,8 +16,10 @@
  * 版本后加 sillyspec 版本徽标三形态（最新常色 / 落后 warning「当前 → 最新」+
  * 「有新版本」/ 未安装 destructive），按钮组加「升级 sillyspec」（离线 /
  * running / deferred 禁用；未安装换「安装 sillyspec」、失败换「重试升级」），
- * pending 横幅后加 sillyspec_update 四态横幅（独立 data-machine-sillyspec-banner
+ * pending 横幅后加 sillyspec_update 横幅（独立 data-machine-sillyspec-banner
  * 槽位，色阶走主题语义 token），文案对照 prototype-machine-sillyspec.html 场景①-⑧。
+ * ql-20260904-019：横幅扩五态——up_to_date（手动升级已最新的明确反馈终态，
+ * success 色阶「已是最新版」，推翻原静默 no-op 无反馈设计）。
  */
 import type { ReactNode } from "react";
 import {
@@ -233,9 +235,10 @@ export function MachineCard({
     sillyspecDeferred ||
     sillyspecState === "failed";
 
-  // sillyspec_update 四态横幅描述（task-07 / FR-03，原型③④⑤⑥）：running=info
-  // 旋转 / deferred=warning / success=success / failed=destructive（带 error 摘要）。
-  // state 未知或 null → 不渲染（四态之外无文案，不误示）。from/to 全 nullable
+  // sillyspec_update 五态横幅描述（task-07 / FR-03，原型③④⑤⑥ + ql-20260904-019）：
+  // running=info 旋转 / deferred=warning / success=success / failed=destructive
+  // （带 error 摘要）/ up_to_date=success（已最新明确反馈，无升级发生）。
+  // state 未知或 null → 不渲染（五态之外无文案，不误示）。from/to 全 nullable
   //（running/deferred 可无 to_version），兜底「—」/「latest」。
   const sillyspecFrom = sillyspecUpdate?.from_version ?? null;
   const sillyspecTo = sillyspecUpdate?.to_version ?? null;
@@ -285,6 +288,17 @@ export function MachineCard({
       icon: <AlertCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />,
       main: `sillyspec 升级失败：${sillyspecUpdate?.error ?? "未知原因"}`,
       sub: "可点击「重试升级」再次尝试；daemon 每小时自动检查也会自动重试",
+    };
+  } else if (sillyspecState === "up_to_date") {
+    // ql-20260904-019：手动升级已最新的明确反馈终态（daemon 版本门改写此状态
+    // 而非静默 no-op）——用户点了按钮必有可见结果，不再与指令丢失无法区分。
+    sillyspecBanner = {
+      state: "up_to_date",
+      cls: "border-success/30 bg-success/10 text-success",
+      subCls: "text-success/80",
+      icon: <CheckCircle2 aria-hidden className="h-3.5 w-3.5 shrink-0" />,
+      main: `已是最新版（${sillyspecTo ?? sillyspecFrom ?? "—"}），无需升级`,
+      sub: "刚才点击升级时 daemon 检查过版本；横幅展示 10 分钟后自动消失，版本徽标常驻",
     };
   }
 
@@ -596,8 +610,8 @@ export function MachineCard({
         </div>
       ) : null}
 
-      {/* ===== sillyspec_update 四态横幅（2026-08-31-machine-sillyspec-version
-       * task-07 / FR-03，原型③④⑤⑥）=====
+      {/* ===== sillyspec_update 五态横幅（2026-08-31-machine-sillyspec-version
+       * task-07 / FR-03，原型③④⑤⑥ + ql-20260904-019 up_to_date 态）=====
        * daemon sillyspec-manager 状态机经心跳 sillyspec_update 字段投影。置于
        * pending_update 横幅之后（同折叠头外、expanded 两侧都渲染——升级按钮被
        * 禁用的原因需始终可见）。running=info 旋转 / deferred=warning / success=

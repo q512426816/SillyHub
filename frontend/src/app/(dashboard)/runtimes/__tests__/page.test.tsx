@@ -483,7 +483,7 @@ describe("2026-07-04-daemon-version-management task-09: 升级按钮（task-09 �
   });
 });
 
-describe("ql-20260904-016-7b4a: 升级 sillyspec 指令下发 + toast 文案如实化", () => {
+describe("ql-20260904-016-7b4a / ql-20260904-019-b4f4: 升级 sillyspec 指令下发 + toast 文案", () => {
   /**
    * 定位机器头「升级 sillyspec」按钮（tagName=BUTTON 过滤折叠头，同
    * findUpgradeButton 模式——折叠头 role=button 的 accessible name 含子按钮文本）。
@@ -496,7 +496,7 @@ describe("ql-20260904-016-7b4a: 升级 sillyspec 指令下发 + toast 文案如�
     return real[0] as HTMLElement;
   }
 
-  it("确认弹层点「升级」→ triggerMachineSillySpecUpdate(m-1) + toast 说明已最新时无横幅（不再无条件承诺）", async () => {
+  it("确认弹层点「升级」→ triggerMachineSillySpecUpdate(m-1) + toast 承诺横幅（已最新也回传 up_to_date 终态）", async () => {
     daemon.listDaemonMachines.mockResolvedValue(
       wrapMachines([makeRuntime({ id: "rt-ss", name: "SillySpecClaude", status: "online" })], {
         sillyspec_version: "3.27.12",
@@ -522,11 +522,9 @@ describe("ql-20260904-016-7b4a: 升级 sillyspec 指令下发 + toast 文案如�
     await waitFor(() => {
       expect(daemon.triggerMachineSillySpecUpdate).toHaveBeenCalledWith("m-1");
     });
-    // toast 如实化：daemon 侧版本门已最新时静默 no-op（无 sillyspec_update 回传、
-    // 无横幅），文案必须把这条零反馈路径说清——断言含「直接跳过（不显示横幅）」。
-    expect(
-      await screen.findByText(/已是最新版时将直接跳过（不显示横幅）/),
-    ).toBeInTheDocument();
+    // toast（ql-20260904-019 回归承诺横幅）：daemon 已最新改回传 up_to_date 终态，
+    // 点了按钮必有横幅（升级进度或「已是最新版」）。
+    expect(await screen.findByText(/检查与升级结果将显示在机器卡横幅上/)).toBeInTheDocument();
   });
 });
 

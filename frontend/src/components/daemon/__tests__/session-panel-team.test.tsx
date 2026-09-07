@@ -55,7 +55,9 @@ const sessionApi = vi.hoisted(() => ({
   getAgentSessionLogs: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
-  listSessionRuns: vi.fn(),
+  // 任务执行面板挂载即取数（task-10 惰性闸门移除）：runs/tasks 都必须 resolve
+  //（裸 vi.fn() 返回 undefined 会被面板 .then 同步崩）。
+  listSessionRuns: vi.fn().mockResolvedValue([]),
   listSessionTasks: vi.fn().mockResolvedValue([]),  // 任务执行面板快照（task-10 补 mock 防真实 fetch）
   listSessionTeamMissions: vi.fn(),
   triggerSessionTeamMission: vi.fn(),
@@ -82,6 +84,7 @@ vi.mock("@/lib/daemon", async () => {
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
+    listSessionTasks: sessionApi.listSessionTasks,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
     cancelTeamMission: sessionApi.cancelTeamMission,

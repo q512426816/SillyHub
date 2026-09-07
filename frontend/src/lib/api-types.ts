@@ -12798,7 +12798,8 @@ export interface components {
          * @description 心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.
          *
          *     daemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值
-         *     ``running`` / ``deferred`` / ``success`` / ``failed``，trigger 取值
+         *     ``running`` / ``deferred`` / ``success`` / ``failed`` / ``up_to_date``
+         *     （ql-20260904-019：手动指令已最新的明确反馈终态），trigger 取值
          *     ``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖
          *     ``since=now``（同 pending_update 先例），同内容重放保留原 since。
          *     state/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422
@@ -15910,7 +15911,8 @@ export interface components {
          *
          *     即 daemon_instances.sillyspec_update JSON 列原样透出（design §接口定义）：
          *     daemon 侧 sillyspec-manager 状态机投影五字段（state 取值 running/deferred/
-         *     success/failed，trigger 取值 server_command/auto）+ backend 首落库时盖的
+         *     success/failed/up_to_date——后者为手动指令已最新的明确反馈终态
+         *     （ql-20260904-019），trigger 取值 server_command/auto）+ backend 首落库时盖的
          *     ``since``（同内容重放心跳保留原 since，MachinePendingUpdateRead 同款语义）。
          *     NULL（无升级进行中 / 终态展示窗口已过）→ 机器视图字段为 null。
          *
