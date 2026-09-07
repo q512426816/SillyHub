@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-07-session-pin-rename-scheduled-send",
+  "generatedAt": "2026-09-07T23:19:11.844Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-07-session-pin-rename-scheduled-send",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 1,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-07-session-pin-rename-scheduled-send",
+      "metrics": {
+        "tasks": 10,
+        "hasTest": 10
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-07-session-pin-rename-scheduled-send",
+      "metrics": {
+        "backendEndpoints": 4942,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-07-session-pin-rename-scheduled-send",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  }
+}
