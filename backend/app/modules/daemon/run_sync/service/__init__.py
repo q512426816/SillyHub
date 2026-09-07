@@ -18,7 +18,10 @@ sdk_pipeline（SDK 消息展开管线 + 截断常量 + 派发 LRU）/ group_brid
   委托到子模块函数（第一参数传 service 实例——``self._session`` 经
   ``svc._session`` 显式传参）；类内互调保持 ``svc.<方法>`` 形态（拆分前
   ``self.<方法>`` 的运行时解析语义逐一保留，含 patch.object 类方法场景）；
-  ``sync_agent_run_status`` / 后台任务 helper 为小方法，逐字节保留在壳内；
+  ``sync_agent_run_status`` 为小方法，逐字节保留在壳内；后台任务 helper 经
+  task-11 轻重构③收敛进共享 mixin（daemon/_background_tasks.py，与
+  SessionService 单源——``_fire_background_task`` 原实现删除、继承 mixin；
+  ``_on_background_task_done`` 保留 staticmethod 壳守住既有测试契约）；
 - 聚合重导出拆前命名空间的全部被消费符号（task-06 基线 15 符号 + 冒烟面）。
 
 patch 兼容（D-007，本拆分最高风险点）：本命名空间保留 ``get_redis``
@@ -55,6 +58,8 @@ from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 # D-007 patch 绑定（1 处 patch，test_run_sync_gate_decision_task:250）：gate
 # 子模块经 _rsvc._run_gate_via_delegate 延迟解析。
 from app.modules.change.dispatch import _run_gate_via_delegate
+from app.modules.daemon import _background_tasks as _bg_tasks
+from app.modules.daemon._background_tasks import BackgroundTaskMixin
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
@@ -144,15 +149,17 @@ from . import submit_commit as _submit_commit  # noqa: E402
 from . import submit_steps as _submit_steps  # noqa: E402
 
 
-class RunSyncService:
+class RunSyncService(BackgroundTaskMixin):
     """AgentRun 状态同步子 service。构造接 AsyncSession。
 
     task-10 拆分类壳：保留全部方法签名（公共签名逐一不变），方法体一行委托
-    到子模块函数（第一参数传 service 实例）；小方法（构造 / 后台任务 helper /
-    sync_agent_run_status）逐字节保留在壳内。
+    到子模块函数（第一参数传 service 实例）；小方法（构造 / sync_agent_run_
+    status）逐字节保留在壳内。task-11 轻重构③：后台任务 helper 收敛进共享
+    mixin（daemon/_background_tasks.py，与 SessionService 单源）。
     """
 
-    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
+    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收（每宿主类各持一份，
+    # 与 SessionService 的集合互不串扰）
     _background_tasks: set[asyncio.Task] = set()
 
     def __init__(self, session: AsyncSession) -> None:
@@ -164,40 +171,19 @@ class RunSyncService:
         self._facade: DaemonService | None = None
 
     # ------------------------------------------------------------------
-    # Background task lifecycle helpers（H4 / R5，逐字对齐 agent/service.py:347-386）
-    # task-05（gate enqueue）/ task-07（gate 任务派发）将复用本能力；
-    # 本 task 仅提取 helper，不接通调用点、不实现 gate 业务。
+    # Background task lifecycle helpers（H4 / R5，原逐字对齐 agent/service.py
+    # :347-386；gate enqueue（task-05）/ gate 任务派发（task-07）消费）。
+    # task-11 轻重构③：``_fire_background_task`` 原实现与 SessionService 逐字节
+    # 相同，删除并继承共享 mixin 单源；``_on_background_task_done`` 的
+    # staticmethod 表面是既有测试契约（test_run_sync_fire_background_task 以
+    # getattr_static 断言 staticmethod + ``(task)`` 签名与 AgentService 对齐），
+    # 保留两行壳、核心经共享函数 discard 本类集合并按本模块 log 记日志。
     # ------------------------------------------------------------------
-
-    def _fire_background_task(
-        self,
-        coro,
-        *,
-        workspace_id: uuid.UUID | None = None,
-        run_id: uuid.UUID | None = None,
-    ) -> asyncio.Task:
-        """Create a background task and hold a strong reference to prevent GC."""
-        task = asyncio.create_task(coro)
-        self._background_tasks.add(task)
-        task.add_done_callback(self._on_background_task_done)
-        log.info(
-            "background_task_fired",
-            task_id=id(task),
-            workspace_id=str(workspace_id),
-            run_id=str(run_id),
-        )
-        return task
 
     @staticmethod
     def _on_background_task_done(task: asyncio.Task) -> None:
         """Remove task from the tracking set and surface exceptions."""
-        RunSyncService._background_tasks.discard(task)
-        try:
-            exc = task.exception()
-        except (asyncio.InvalidStateError, asyncio.CancelledError):
-            return
-        if exc is not None:
-            log.exception("background_task_failed", task_id=id(task), exc_info=exc)
+        _bg_tasks.on_background_task_done(RunSyncService, task)
 
     async def _revoke_committed_partials(self, agent_run_id: uuid.UUID, segment_id: str) -> int:
         return await _submit_commit._revoke_committed_partials(self, agent_run_id, segment_id)

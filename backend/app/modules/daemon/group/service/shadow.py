@@ -31,6 +31,7 @@ from app.modules.agent.model import (
     AgentRunLog,
     AgentSession,
 )
+from app.modules.daemon import attachment_pipeline
 from app.modules.daemon.session.service import DaemonSessionTurnConflict
 
 from .helpers import (
@@ -684,24 +685,19 @@ async def _assemble_group_inject_attachments(
     会话级供应商=成员六要素 ``llm_provider_id``、引擎=成员 ``provider``。
     组装产物（deliver=block 内联/回拉、disk 落盘）与单聊 SESSION_INJECT
     attachments 同形态，daemon 侧零改动。
-    """
-    from app.modules.session_attachment.capability import resolve_session_gate
-    from app.modules.session_attachment.service import assemble_inject_attachments
-    from app.modules.session_attachment.storage import SessionAttachmentStorage
-    from app.modules.storage.factory import get_storage_backend
 
+    task-11 轻重构⑤：gate 解析与组装调用收敛到
+    ``daemon/attachment_pipeline.resolve_multimodal_gate`` /
+    ``assemble_attachments``（与单聊 inject/create 路径单源）。
+    """
     provider = member.provider or "claude"
-    gate = await resolve_session_gate(
+    supports = await attachment_pipeline.resolve_multimodal_gate(
         svc._session,
         user_id=owner_user_id,
         session_llm_provider_id=member.llm_provider_id,
         agent_kind=provider,
     )
-    return await assemble_inject_attachments(
-        rows,
-        supports_multimodal=gate.supports_multimodal,
-        storage=SessionAttachmentStorage(get_storage_backend()),
-    )
+    return await attachment_pipeline.assemble_attachments(rows, supports_multimodal=supports)
 
 
 async def _send_shadow_first_inject(

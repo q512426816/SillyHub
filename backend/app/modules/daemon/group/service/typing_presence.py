@@ -12,7 +12,6 @@ D-007：get_redis 为本命名空间 patch 目标（18 处），一律 ``_gsvc.g
 
 from __future__ import annotations
 
-import json
 import re
 import uuid
 from collections.abc import Sequence
@@ -24,6 +23,7 @@ import app.modules.daemon.group.service as _gsvc
 from app.core.errors import AppError
 from app.modules.agent.model import AgentGroupChat
 from app.modules.auth.model import User
+from app.modules.daemon.event_publish import publish_json_event
 from app.modules.daemon.session_events import (
     SessionChangeEvent,
     publish_sessions_changed,
@@ -127,17 +127,19 @@ async def _publish_group_channel_event(session_id: uuid.UUID, payload: dict[str,
     """publish 群频道 ``agent_session:{session_id}``（复用现有 SSE 频道，§5.4）。
 
     容错语义对齐 ``session/service._publish_session_event``：Redis 抖动仅
-    warning，不阻断消息落库/触发主链路。
+    warning，不阻断消息落库/触发主链路。task-11 轻重构④：序列化 + publish +
+    异常吞噬 + 日志核心收敛到 ``daemon/event_publish.publish_json_event``
+    （get_redis / log 经 ``_gsvc.`` 延迟解析后传入，既有 patch 面不变）。
     """
-    try:
-        redis = _gsvc.get_redis()
-        await redis.publish(f"agent_session:{session_id}", json.dumps(payload, default=str))
-    except Exception:
-        _gsvc.log.warning(
-            "publish_group_channel_event_failed",
-            session_id=str(session_id),
-            redis_event=payload.get("event") if isinstance(payload, dict) else None,
-        )
+    await publish_json_event(
+        redis_getter=_gsvc.get_redis,
+        channel=f"agent_session:{session_id}",
+        payload=payload,
+        log=_gsvc.log,
+        failure_event="publish_group_channel_event_failed",
+        session_id=str(session_id),
+        redis_event=payload.get("event") if isinstance(payload, dict) else None,
+    )
 
 
 # ── typing / presence（task-06，design §5.4——纯 ephemeral，不落库）───────────
@@ -178,16 +180,18 @@ async def _publish_group_typing_event(group_id: uuid.UUID, payload: dict[str, ob
 
     容错语义同 ``_publish_group_channel_event``：Redis 抖动仅 warning——
     typing 是纯增益信号（前端 TTL 自动过期），不阻断调用方主链路。
+    task-11 轻重构④：publish 核心同收敛到 ``daemon/event_publish.
+    publish_json_event``（channel 单源仍走 ``group_typing_channel``）。
     """
-    try:
-        redis = _gsvc.get_redis()
-        await redis.publish(group_typing_channel(group_id), json.dumps(payload, default=str))
-    except Exception:
-        _gsvc.log.warning(
-            "publish_group_typing_event_failed",
-            group_id=str(group_id),
-            redis_event=payload.get("event") if isinstance(payload, dict) else None,
-        )
+    await publish_json_event(
+        redis_getter=_gsvc.get_redis,
+        channel=group_typing_channel(group_id),
+        payload=payload,
+        log=_gsvc.log,
+        failure_event="publish_group_typing_event_failed",
+        group_id=str(group_id),
+        redis_event=payload.get("event") if isinstance(payload, dict) else None,
+    )
 
 
 def _typing_payload(

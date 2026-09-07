@@ -30,6 +30,7 @@ from app.modules.agent.model import (
     AgentSession,
 )
 from app.modules.auth.model import User
+from app.modules.daemon import attachment_pipeline
 from app.modules.daemon.session.service import DaemonSessionTurnConflict
 
 from .helpers import (
@@ -466,45 +467,36 @@ async def _validate_group_attachments(
     触发时判定（``_trigger_group_member``，非 Claude 成员 → 400 群错误族）；
     ②缺失/跨用户归一 400 GroupChatInvalid（群链路错误族语义；单聊是 404
     资源隐藏——群侧消息整体拒绝即可，无逐会话资源语义）。保序同单聊。
+
+    task-11 轻重构⑤：归属/数量/保序核心收敛到
+    ``daemon/attachment_pipeline.validate_owned_attachments``（与单聊 inject/
+    create 校验单源；错误族经工厂回调保留群链路 GroupChatInvalid 语义）。
     """
-    from app.modules.session_attachment.model import SessionAttachment
     from app.modules.session_attachment.service import (
         MAX_FILES_PER_MESSAGE,
         MAX_IMAGES_PER_MESSAGE,
     )
 
-    rows = (
-        (
-            await svc._session.execute(
-                select(SessionAttachment).where(
-                    SessionAttachment.id.in_(attachment_ids),
-                    SessionAttachment.user_id == sender_user_id,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if len(rows) != len(set(attachment_ids)):
-        raise GroupChatInvalid(
+    def _not_found() -> AppError:
+        return GroupChatInvalid(
             "部分附件不存在或无权访问。",
             details={"reason": "attachment_not_found"},
         )
-    image_n = sum(1 for r in rows if r.kind == "image")
-    file_n = sum(1 for r in rows if r.kind == "file")
-    if (
-        image_n > MAX_IMAGES_PER_MESSAGE
-        or file_n > MAX_FILES_PER_MESSAGE
-        or (image_n + file_n) != len(rows)
-    ):
-        raise GroupChatInvalid(
+
+    def _invalid_count(image_n: int, file_n: int) -> AppError:
+        return GroupChatInvalid(
             f"附件数量超限（图片≤{MAX_IMAGES_PER_MESSAGE}、"
             f"文件≤{MAX_FILES_PER_MESSAGE}）或类型非法。",
             details={"image_count": image_n, "file_count": file_n},
         )
-    # 保留入参顺序（摘要行/注入 payload 按用户勾选顺序稳定）。
-    by_id = {r.id: r for r in rows}
-    return [by_id[i] for i in dict.fromkeys(attachment_ids) if i in by_id]
+
+    return await attachment_pipeline.validate_owned_attachments(
+        svc._session,
+        user_id=sender_user_id,
+        attachment_ids=attachment_ids,
+        not_found_error=_not_found,
+        invalid_count_error=_invalid_count,
+    )
 
 
 async def send_direct_message(

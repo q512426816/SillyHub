@@ -6,7 +6,9 @@
 + 切换轮 lease metadata 同步 + providerConfig 构造，自 _inject_into_session
 :3976-4114 拆出，task-08 行数均衡落位于此）。全部为分步函数，调用点语义
 逐字节不变；第一参数传 service 实例（svc）。D-007：_merge_lease_metadata
-调用点经 ``_svc.`` 延迟解析。
+调用点经 ``_svc.`` 延迟解析。task-11 轻重构⑤：归属/数量校验、gate 解析、
+MinIO 组装三个核心收敛到 ``daemon/attachment_pipeline``（与 group 侧单源，
+错误族与引擎门控留本链路）。
 """
 
 from __future__ import annotations
@@ -17,8 +19,10 @@ from typing import NamedTuple
 from sqlalchemy import select
 
 import app.modules.daemon.session.service as _svc
+from app.core.errors import AppError
 from app.modules.agent.model import AgentSession
 from app.modules.agent.provider_caps import get_provider_caps
+from app.modules.daemon import attachment_pipeline
 
 from .errors import (
     DaemonSessionAttachmentInvalid,
@@ -44,6 +48,10 @@ async def _validate_inject_attachment_rows(
     兜底（service 身份路径 / 直调方不带预组装时）复用同一判定，语义不变。
     附件归属约束在附件行自身（``user_id``）、引擎建后不可变，均不依赖会话
     行可变状态，前后置判定等价。
+
+    task-11 轻重构⑤：归属/数量/保序核心收敛到
+    ``daemon/attachment_pipeline.validate_owned_attachments``（错误族经工厂
+    回调保留在本链路语义：缺失/跨用户 404 资源隐藏、数量超限 422）。
     """
     # provider-abstraction task-11：引擎门控收敛查 ProviderCaps（multimodal
     # 键；文案逐字保留，与原 != "claude" 判定等价）。
@@ -52,36 +60,32 @@ async def _validate_inject_attachment_rows(
             "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
             details={"session_id": str(session_id), "provider": session_provider},
         )
-    from app.modules.session_attachment.model import SessionAttachment
-
-    rows = (
-        (
-            await svc._session.execute(
-                select(SessionAttachment).where(
-                    SessionAttachment.id.in_(attachment_ids),
-                    SessionAttachment.user_id == session_user_id,
-                )
-            )
-        )
-        .scalars()
-        .all()
+    from app.modules.session_attachment.service import (
+        MAX_FILES_PER_MESSAGE,
+        MAX_IMAGES_PER_MESSAGE,
     )
-    # 缺失/跨用户归一 404（资源隐藏语义，不泄露存在性）。
-    if len(rows) != len(set(attachment_ids)):
-        raise DaemonSessionNotFound(
+
+    def _not_found() -> AppError:
+        # 缺失/跨用户归一 404（资源隐藏语义，不泄露存在性）。
+        return DaemonSessionNotFound(
             "部分附件不存在或无权访问。",
             details={"session_id": str(session_id)},
         )
-    image_n = sum(1 for r in rows if r.kind == "image")
-    file_n = sum(1 for r in rows if r.kind == "file")
-    if image_n > 5 or file_n > 5 or (image_n + file_n) != len(rows):
-        raise DaemonSessionAttachmentInvalid(
-            "附件数量超限（图片≤5、文件≤5）或类型非法。",
+
+    def _invalid_count(image_n: int, file_n: int) -> AppError:
+        return DaemonSessionAttachmentInvalid(
+            f"附件数量超限（图片≤{MAX_IMAGES_PER_MESSAGE}、"
+            f"文件≤{MAX_FILES_PER_MESSAGE}）或类型非法。",
             details={"image_count": image_n, "file_count": file_n},
         )
-    # 保留入参顺序（payload/标记行按用户勾选顺序稳定）。
-    by_id = {r.id: r for r in rows}
-    return [by_id[i] for i in dict.fromkeys(attachment_ids) if i in by_id]
+
+    return await attachment_pipeline.validate_owned_attachments(
+        svc._session,
+        user_id=session_user_id,
+        attachment_ids=attachment_ids,
+        not_found_error=_not_found,
+        invalid_count_error=_invalid_count,
+    )
 
 
 async def _resolve_inject_gate(
@@ -96,16 +100,16 @@ async def _resolve_inject_gate(
     ``gate_provider_id_basis`` = 本轮将生效的会话供应商 id（切换轮为新值、
     激活轮为激活参数值、否则当前值）——预组装与锁内复核用同一口径计算基准，
     两者比较即「预读与取锁之间供应商是否漂移」。
-    """
-    from app.modules.session_attachment.capability import resolve_session_gate
 
-    gate = await resolve_session_gate(
+    task-11 轻重构⑤：gate 解析核心收敛到
+    ``daemon/attachment_pipeline.resolve_multimodal_gate``。
+    """
+    return await attachment_pipeline.resolve_multimodal_gate(
         svc._session,
         user_id=user_id,
         session_llm_provider_id=gate_provider_id_basis,
         agent_kind=agent_kind,
     )
-    return gate.supports_multimodal
 
 
 async def _assemble_inject_attachment_payload(
@@ -118,15 +122,12 @@ async def _assemble_inject_attachment_payload(
 
     内部经对象存储读字节（MinIO）——P1（二审 #1）后本调用只出现在取锁前的
     预组装段，或锁内 gate 漂移且 supports 翻转的罕见竞态兜底。
-    """
-    from app.modules.session_attachment.service import assemble_inject_attachments
-    from app.modules.session_attachment.storage import SessionAttachmentStorage
-    from app.modules.storage.factory import get_storage_backend
 
-    return await assemble_inject_attachments(
-        rows,
-        supports_multimodal=supports_multimodal,
-        storage=SessionAttachmentStorage(get_storage_backend()),
+    task-11 轻重构⑤：组装调用收敛到
+    ``daemon/attachment_pipeline.assemble_attachments``。
+    """
+    return await attachment_pipeline.assemble_attachments(
+        rows, supports_multimodal=supports_multimodal
     )
 
 
@@ -211,6 +212,10 @@ async def validate_create_attachments(
 
     D-6 引擎门控（ProviderCaps multimodal 键）/ 归属+存在 404 / 数量 422
     （图≤5、文≤5）/ 保序；任一失败 raise → 无半成品落库。
+
+    task-11 轻重构⑤：归属/数量/保序核心收敛到
+    ``daemon/attachment_pipeline.validate_owned_attachments``（与 inject 校验
+    单源；此处 not-found details 保留 create 原口径 reason=attachment_not_found）。
     """
 
     validated_attachments: list = []
@@ -220,36 +225,31 @@ async def validate_create_attachments(
                 "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
                 details={"provider": provider},
             )
-        from app.modules.session_attachment.model import SessionAttachment
-
-        _att_rows = (
-            (
-                await svc._session.execute(
-                    select(SessionAttachment).where(
-                        SessionAttachment.id.in_(attachment_ids),
-                        SessionAttachment.user_id == user_id,
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        from app.modules.session_attachment.service import (
+            MAX_FILES_PER_MESSAGE,
+            MAX_IMAGES_PER_MESSAGE,
         )
-        if len(_att_rows) != len(set(attachment_ids)):
-            raise DaemonSessionNotFound(
+
+        def _not_found() -> AppError:
+            return DaemonSessionNotFound(
                 "部分附件不存在或无权访问。",
                 details={"reason": "attachment_not_found"},
             )
-        _image_n = sum(1 for r in _att_rows if r.kind == "image")
-        _file_n = sum(1 for r in _att_rows if r.kind == "file")
-        if _image_n > 5 or _file_n > 5 or (_image_n + _file_n) != len(_att_rows):
-            raise DaemonSessionAttachmentInvalid(
-                "附件数量超限（图片≤5、文件≤5）或类型非法。",
-                details={"image_count": _image_n, "file_count": _file_n},
+
+        def _invalid_count(image_n: int, file_n: int) -> AppError:
+            return DaemonSessionAttachmentInvalid(
+                f"附件数量超限（图片≤{MAX_IMAGES_PER_MESSAGE}、"
+                f"文件≤{MAX_FILES_PER_MESSAGE}）或类型非法。",
+                details={"image_count": image_n, "file_count": file_n},
             )
-        _att_by_id = {r.id: r for r in _att_rows}
-        validated_attachments = [
-            _att_by_id[i] for i in dict.fromkeys(attachment_ids) if i in _att_by_id
-        ]
+
+        validated_attachments = await attachment_pipeline.validate_owned_attachments(
+            svc._session,
+            user_id=user_id,
+            attachment_ids=attachment_ids,
+            not_found_error=_not_found,
+            invalid_count_error=_invalid_count,
+        )
     return validated_attachments
 
 
@@ -266,35 +266,26 @@ async def assemble_create_attachments(
 
     同事务：①session_id 回填（draft→bound 唯一前进迁移）；②多模态 gate 判定
     + payload 组装（D-4 闸门/降级路由），供首 turn SESSION_INJECT 携带。
+
+    task-11 轻重构⑤：gate 解析与组装调用收敛到
+    ``daemon/attachment_pipeline.resolve_multimodal_gate`` /
+    ``assemble_attachments``（与 inject 路径单源）。
     """
 
     if validated_attachments:
-        from app.modules.session_attachment.capability import (
-            resolve_session_gate,
-        )
-        from app.modules.session_attachment.service import (
-            assemble_inject_attachments,
-        )
-        from app.modules.session_attachment.storage import (
-            SessionAttachmentStorage,
-        )
-        from app.modules.storage.factory import get_storage_backend
-
         for _att in validated_attachments:
             if _att.session_id is None:
                 _att.session_id = session.id
                 svc._session.add(_att)
 
-        _gate = await resolve_session_gate(
+        _gate_supports = await attachment_pipeline.resolve_multimodal_gate(
             svc._session,
             user_id=user_id,
             session_llm_provider_id=(llm_provider_row.id if llm_provider_row is not None else None),
             agent_kind=provider,
         )
-        return await assemble_inject_attachments(
-            validated_attachments,
-            supports_multimodal=_gate.supports_multimodal,
-            storage=SessionAttachmentStorage(get_storage_backend()),
+        return await attachment_pipeline.assemble_attachments(
+            validated_attachments, supports_multimodal=_gate_supports
         )
     return []
 

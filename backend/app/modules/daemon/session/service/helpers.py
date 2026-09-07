@@ -16,7 +16,6 @@ sessions_changed 等被 patch 或定义于 ``__init__`` 的名字一律经 ``_sv
 
 from __future__ import annotations
 
-import json
 import re
 import uuid
 from typing import NamedTuple
@@ -28,6 +27,7 @@ from sqlmodel import col
 import app.modules.daemon.session.service as _svc
 from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.control_commands import KIND_SESSION_END, ControlCommandService
+from app.modules.daemon.event_publish import publish_json_event
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.ppm.common.session_binding import (
     PpmItemKind,
@@ -529,19 +529,20 @@ async def _publish_session_event(
     (permission events). Failures are logged but never raised so a Redis
     blip cannot abort end/interrupt. Does NOT implement the SSE route,
     history replay, or cursor — those belong to task-06.
+
+    task-11 轻重构④：序列化 + publish + 异常吞噬 + 日志核心收敛到
+    ``daemon/event_publish.publish_json_event``（get_redis / log 经 ``_svc.``
+    延迟解析后传入，既有 patch 面不变）。
     """
-    try:
-        redis = _svc.get_redis()
-        await redis.publish(
-            f"agent_session:{session_id}",
-            json.dumps(payload, default=str),
-        )
-    except Exception:
-        _svc.log.warning(
-            "publish_session_event_failed",
-            session_id=str(session_id),
-            redis_event=payload.get("event") if isinstance(payload, dict) else None,
-        )
+    await publish_json_event(
+        redis_getter=_svc.get_redis,
+        channel=f"agent_session:{session_id}",
+        payload=payload,
+        log=_svc.log,
+        failure_event="publish_session_event_failed",
+        session_id=str(session_id),
+        redis_event=payload.get("event") if isinstance(payload, dict) else None,
+    )
 
 
 async def _resolve_runtime_labels(

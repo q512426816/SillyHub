@@ -5,7 +5,9 @@ PublishIntent / SubmittedMessages（QueuePool 修复 3：publish 移出 DB sessi
 通用事件（publish_session_event / 节流 bash_chunk）+ _publish_run_event 类
 方法体下沉。D-007：get_redis 为本命名空间 patch 目标（43 处 patch 的大头），
 一律 ``_rsvc.get_redis()`` 延迟解析；log 经 ``_rsvc.log`` 保持原模块 logger
-身份。
+身份。task-11 轻重构④：单条 publish 的序列化 + publish + 异常吞噬 + 日志
+核心收敛到 ``daemon/event_publish.publish_json_event``（pipeline 批量发布
+形态不同构，保留原实现）。
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 import app.modules.daemon.run_sync.service as _rsvc
+from app.modules.daemon.event_publish import publish_json_event
 from app.modules.daemon.schema import BashChunkEvent
 
 # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
@@ -296,6 +299,10 @@ async def publish_session_event(session_id: uuid.UUID, payload: dict | BaseModel
     序列化对象（对齐 ``_publish_gate_status_changed`` 的容错风格）。Redis 获取
     方式为 ``_rsvc.get_redis()``；发布失败仅 ``log.warning`` 不抛——Pub/Sub 无历史，
     漏发实时事件不影响 DB 真相，前端重连即续流。
+
+    task-11 轻重构④：序列化 + publish + 异常吞噬 + 日志核心收敛到
+    ``daemon/event_publish.publish_json_event``（get_redis / log 经 ``_rsvc.``
+    延迟解析后传入，既有 patch 面不变）。
     """
     if isinstance(payload, BaseModel):
         # by_alias=True：agent_task_status 的 async_ 字段按契约名 "async" 发布
@@ -303,15 +310,15 @@ async def publish_session_event(session_id: uuid.UUID, payload: dict | BaseModel
         # 前端/daemon 侧契约名就是 async）；其余经此 helper 的事件模型均无别名，
         # 序列化行为不变。UUID / Literal 由 mode="json" 自动转 JSON 兼容形态。
         payload = payload.model_dump(mode="json", by_alias=True)
-    try:
-        redis = _rsvc.get_redis()
-        await redis.publish(f"agent_session:{session_id}", json.dumps(payload, default=str))
-    except Exception:
-        _rsvc.log.warning(
-            "session_event_redis_publish_failed",
-            session_id=str(session_id),
-            event_type=payload.get("event") if isinstance(payload, dict) else None,
-        )
+    await publish_json_event(
+        redis_getter=_rsvc.get_redis,
+        channel=f"agent_session:{session_id}",
+        payload=payload,
+        log=_rsvc.log,
+        failure_event="session_event_redis_publish_failed",
+        session_id=str(session_id),
+        event_type=payload.get("event") if isinstance(payload, dict) else None,
+    )
 
 
 async def publish_bash_chunk_event(event: BashChunkEvent) -> bool:
@@ -354,17 +361,17 @@ async def _publish_run_event(
 
     Failures are logged but never raised -- callers should not
     abort their workflow due to a Redis publish error.
+
+    task-11 轻重构④：publish 核心收敛到 ``daemon/event_publish.
+    publish_json_event``（get_redis / log 经 ``_rsvc.`` 延迟解析后传入）。
     """
     payload = {"event": event, "status": status, **extra}
-    try:
-        redis = _rsvc.get_redis()
-        await redis.publish(
-            f"agent_run:{agent_run_id}",
-            json.dumps(payload, default=str),
-        )
-    except Exception:
-        _rsvc.log.warning(
-            "publish_run_event_failed",
-            agent_run_id=str(agent_run_id),
-            redis_event=event,
-        )
+    await publish_json_event(
+        redis_getter=_rsvc.get_redis,
+        channel=f"agent_run:{agent_run_id}",
+        payload=payload,
+        log=_rsvc.log,
+        failure_event="publish_run_event_failed",
+        agent_run_id=str(agent_run_id),
+        redis_event=event,
+    )

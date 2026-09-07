@@ -51,6 +51,8 @@ from app.modules.agent.model import (
 # patch("...session.service.allowed_workspace_ids") 拦截，inject_gates 消费点经
 # _svc.allowed_workspace_ids 延迟解析。
 from app.modules.auth.rbac import allowed_workspace_ids
+from app.modules.daemon import _background_tasks as _bg_tasks
+from app.modules.daemon._background_tasks import BackgroundTaskMixin
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import (  # noqa: F401 —— 委托签名注解用
     PageContextCreateBlock,
@@ -226,7 +228,7 @@ from . import recovery as _recovery  # noqa: E402
 from . import session_lifecycle as _session_lifecycle  # noqa: E402
 
 
-class SessionService:
+class SessionService(BackgroundTaskMixin):
     """AgentSession 生命周期子域 service（task-05 / design §5.2；task-08 拆分）。
 
     类壳保留全部方法签名（公共签名逐一不变），方法体一行委托到子模块函数
@@ -238,47 +240,27 @@ class SessionService:
 
     _LIST_STATUSES = frozenset({"pending", "active", "reconnecting", "ended", "failed"})
 
-    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
+    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收（每宿主类各持一份，
+    # 与 RunSyncService 的集合互不串扰）
     _background_tasks: set[asyncio.Task] = set()
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     # ── Background task lifecycle helpers（2026-08-31-session-queue-ux task-03
-    # / D-008——逐字对齐 run_sync/service.py RunSyncService 同名 helper；run_sync
-    # 不动，本类持有同款能力供 confirm_session_reconnected 恢复钩子 fire 派发。
-    # 派发协程走 dispatch_next_queued_message 的独立 DB session（H1），不复用
-    # 请求级 session。 ────────────────────────────────────────────────────────
-
-    def _fire_background_task(
-        self,
-        coro,
-        *,
-        workspace_id: uuid.UUID | None = None,
-        run_id: uuid.UUID | None = None,
-    ) -> asyncio.Task:
-        """Create a background task and hold a strong reference to prevent GC."""
-        task = asyncio.create_task(coro)
-        self._background_tasks.add(task)
-        task.add_done_callback(self._on_background_task_done)
-        log.info(
-            "background_task_fired",
-            task_id=id(task),
-            workspace_id=str(workspace_id),
-            run_id=str(run_id),
-        )
-        return task
+    # / D-008——供 confirm_session_reconnected 恢复钩子 fire 派发。派发协程走
+    # dispatch_next_queued_message 的独立 DB session（H1），不复用请求级
+    # session。task-11 轻重构③：``_fire_background_task`` 已收敛进共享 mixin
+    # （daemon/_background_tasks.py，与 RunSyncService 单源，原逐字节相同实现
+    # 删除）；``_on_background_task_done`` 的 staticmethod 表面是既有测试契约
+    # （test_run_sync_fire_background_task 断言 getattr_static + ``(task)`` 签名），
+    # 保留两行壳、核心经共享函数 discard 本类集合并按本模块 log 记日志。
+    # ────────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _on_background_task_done(task: asyncio.Task) -> None:
         """Remove task from the tracking set and surface exceptions."""
-        SessionService._background_tasks.discard(task)
-        try:
-            exc = task.exception()
-        except (asyncio.InvalidStateError, asyncio.CancelledError):
-            return
-        if exc is not None:
-            log.exception("background_task_failed", task_id=id(task), exc_info=exc)
+        _bg_tasks.on_background_task_done(SessionService, task)
 
     # ── 一行委托（方法体下沉子模块；签名与拆前逐一相同）─────────────────────
 
