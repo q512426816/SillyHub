@@ -15,4 +15,5 @@ created_at: 2026-08-28 08:28:18
 ## 2026-08-31 — 机器 sillyspec 版本显示与远程升级（2026-08-31-machine-sillyspec-version）
 - runCmd / installSillySpec / isOutdated 加 export 供运行期 sillyspec-manager 复用（探测 spawn / npm 升级 / 版本比较基建唯一实现处；仅可见性变化，行为零变化——本变更铁律）。
 
+- ql-20260907-001-5bff | sillyspec 探测/安装配合运行期版本门官方源仲裁（主改动在 sillyspec-manager，见其 changelog）：runSillySpecCheck 的 `npm view sillyspec version` 加 --prefer-online（跳本地 HTTP 缓存新鲜度检查，防启动期检查同样被镜像/缓存滞后误判）；installSillySpec 加可选 `{ registry?: string }` 参数（仲裁判定镜像滞后时传官方源直装，缺省零变化走机器默认源）；preflight.test 40 绿（命令子串匹配不受后缀影响，零用例改动）+ tsc 0
 - ql-20260904-008-b58e | killTree（preflight.ts + host-fs-handler.ts 两处同步）：taskkill spawn 挂 'error' 监听器——spawn 异步 error 事件（taskkill 丢失/PATH 残缺等）无监听器会以 uncaughtException 崩 daemon，try/catch 只能捕同步异常；KT3 用例断言监听器存在且 emit('error') 不抛（runcmd-kill 3 + preflight 40 绿，tsc 0）

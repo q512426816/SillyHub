@@ -42,6 +42,16 @@
  * 安装失败（npm 不可达等）但旧版本仍在位时，探测返回旧版本 → 上报 from==to 的
  * success；版本徽标仍以真实探测值为准、下轮自动检查自愈（design R4 同思路）。
  *
+ * ql-20260907-001：版本门官方源仲裁。`npm view` 走机器配置的 npm 源（常见为
+ * 镜像），镜像滞后时返回旧 latest → 版本门误判「已是最新」拦死升级（实测
+ * crrcdt-hubin 滞后 3 天；清 npm 本地缓存无效——旧数据在镜像服务器上）。修复：
+ *   - 探测命令一律加 `--prefer-online`（跳过本地 HTTP 缓存新鲜度检查）；
+ *   - 版本门（手动/自动入口）在本地源探测外直查官方源（--registry）取较新者；
+ *   - 官方较新（或本地源不可达）→ 安装同带 `--registry` 官方源——仍走镜像会装回
+ *     旧版；官方安装失败不自动回退镜像（装回旧版报 success 比诚实 failed 更糟）；
+ *   - 官方源不可达（内网机器常态）→ 静默回退本地源现行为，仲裁直查不缓存
+ *     （每小时一次直查是被设计接受的探测成本）。
+ *
  * @module sillyspec-manager
  */
 
@@ -84,6 +94,12 @@ export const SILLYSPEC_STATUS_TIMEOUT_MS = 30_000;
 
 /** 心跳摘要 changes 列表截断上限（N=50，design §4 / Grill B2）。 */
 export const SILLYSPEC_STATUS_CHANGES_MAX = 50;
+
+/**
+ * 官方 npm 源地址（ql-20260907-001 版本门仲裁直查用）。镜像滞后时以官方源
+ * 为权威信源；官方源不可达的内网机器由仲裁静默回退本地源。
+ */
+export const SILLYSPEC_OFFICIAL_REGISTRY = 'https://registry.npmjs.org';
 
 /**
  * 心跳 sillyspec_status 载荷自设预算（32KB，design §4 / Grill B2 修订）：心跳 REST
@@ -174,10 +190,24 @@ export interface SillySpecUpdateState {
 export interface SillySpecSnapshot {
   /** 本机 sillyspec 版本（最近一次 probeLocal 结果）；null=未安装或未知。 */
   version: string | null;
-  /** npm 最新版（最近一次成功 probeLatest 的缓存值）；null=未知。 */
+  /** npm 最新版（最近一次成功探测/仲裁的缓存值）；null=未知。 */
   latest_version: string | null;
   /** 升级状态；键仅在存在（且未过 10min 展示窗）时携带——缺席=idle/backend 清除。 */
   update?: SillySpecUpdateState;
+}
+
+/**
+ * 版本门 latest 仲裁结果（ql-20260907-001，见 `_resolveLatestForGate`）。
+ */
+interface SillySpecLatestGate {
+  /** 本地源（机器配置的 npm 源，常见镜像）latest 探测值；null=不可达。 */
+  local: string | null;
+  /** 官方源 latest 直查值；null=不可达（内网机器常态）。 */
+  official: string | null;
+  /** 两路取较新者；两路都失败为 null（调用方按探测失败现语义放行/no-op）。 */
+  effective: string | null;
+  /** 官方严格新于本地源（或本地源不可达）——安装须切官方源。 */
+  officialNewer: boolean;
 }
 
 /** 构造依赖（runner/isBusy/clock/间隔常量注入供测试；生产由 task-05 接线）。 */
@@ -188,10 +218,15 @@ export interface SillySpecManagerDeps {
    */
   runCommand?: (cmd: string) => Promise<string | null>;
   /**
-   * 安装执行器：默认 preflight installSillySpec（`npm install -g sillyspec@latest`）。
-   * 测试注入假实现；升级执行只经此（不在 manager 内另写 npm spawn）。
+   * 安装执行器：默认 preflight installSillySpec（`npm install -g sillyspec@latest`，
+   * ql-20260907-001：opts.officialRegistry=true 时同带官方源 --registry——镜像
+   * 滞后时仍走镜像会装回旧版）。测试注入假实现；升级执行只经此（不在 manager
+   * 内另写 npm spawn）。
    */
-  install?: (logger: PreflightLogger) => Promise<void>;
+  install?: (
+    logger: PreflightLogger,
+    opts?: { officialRegistry?: boolean },
+  ) => Promise<void>;
   /**
    * 机器忙判定（必填）：生产接 daemon._isBusyForUpdate（恢复在途+运行中轮次+
    * 活跃 lease 三臂）。忙时升级走 deferred，不打断运行中的会话/任务。
@@ -242,7 +277,10 @@ export interface SillySpecManagerDeps {
  */
 export class SillySpecManager {
   private readonly _runCommand: (cmd: string) => Promise<string | null>;
-  private readonly _install: (logger: PreflightLogger) => Promise<void>;
+  private readonly _install: (
+    logger: PreflightLogger,
+    opts?: { officialRegistry?: boolean },
+  ) => Promise<void>;
   private readonly _isBusy: () => boolean;
   private readonly _now: () => number;
   private readonly _log: PreflightLogger;
@@ -260,6 +298,11 @@ export class SillySpecManager {
   private _terminalAt: number | null = null;
   /** deferred 复查定时器（单实例：排新前清旧，不叠）。 */
   private _deferredTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * deferred 期间保留的官方源安装 flag（ql-20260907-001）：忙推迟时记下仲裁
+   * 结论，30s 复查转 running 时消费——否则镜像滞后场景推迟一轮后装回旧版。
+   */
+  private _deferredOfficialRegistry = false;
 
   // ── 2026-09-02-changes-overview-card task-02：progress 采集状态（三态矩阵）──
 
@@ -287,7 +330,15 @@ export class SillySpecManager {
 
   constructor(deps: SillySpecManagerDeps) {
     this._runCommand = deps.runCommand ?? ((cmd: string) => runCmd(cmd));
-    this._install = deps.install ?? ((logger: PreflightLogger) => installSillySpec(logger));
+    this._install =
+      deps.install ??
+      ((logger: PreflightLogger, opts?: { officialRegistry?: boolean }) =>
+        installSillySpec(
+          logger,
+          opts?.officialRegistry
+            ? { registry: SILLYSPEC_OFFICIAL_REGISTRY }
+            : undefined,
+        ));
     this._isBusy = deps.isBusy;
     this._now = deps.now ?? (() => Date.now());
     this._log =
@@ -323,17 +374,25 @@ export class SillySpecManager {
   }
 
   /**
-   * 探测 npm 最新版（`npm view sillyspec version`），成功结果缓存 TTL 10 分钟。
+   * 探测 npm 最新版（`npm view sillyspec version --prefer-online`——跳过本地
+   * HTTP 缓存新鲜度检查，ql-20260907-001），成功结果缓存 TTL 10 分钟。
    *
    * 失败（npm 不可达）不缓存——下次调用即重试（调用频率为小时级循环/手动触发，
    * 无重试风暴风险）；缓存过期后旧值仅作 getSnapshot 兜底展示，探到新值即覆盖。
+   *
+   * @param force true=跳过缓存读强制现探（手动升级触发用——刚发布的版本不该被
+   *   10min 旧缓存拦住）；成功仍写缓存，快照随之刷新。
    */
-  async probeLatest(): Promise<string | null> {
+  async probeLatest(force: boolean = false): Promise<string | null> {
     const cached = this._latestCache;
-    if (cached !== null && this._now() - cached.at < this._latestCacheTtlMs) {
+    if (
+      !force &&
+      cached !== null &&
+      this._now() - cached.at < this._latestCacheTtlMs
+    ) {
       return cached.value;
     }
-    const out = await this._runCommand('npm view sillyspec version');
+    const out = await this._runCommand('npm view sillyspec version --prefer-online');
     if (out === null || out.trim() === '') {
       this._log('warn', 'sillyspec_latest_probe_failed');
       return null;
@@ -341,6 +400,25 @@ export class SillySpecManager {
     const latest = out.trim();
     this._latestCache = { value: latest, at: this._now() };
     return latest;
+  }
+
+  /**
+   * 直查官方 npm 源最新版（ql-20260907-001 版本门仲裁信源）：
+   * `npm view sillyspec version --registry=<官方源> --prefer-online`。
+   *
+   * 机器配置的 npm 源（常见镜像）滞后时返回旧 latest，本方法绕过它直连官方源。
+   * 失败（官方源不可达——内网机器常态）返回 null，调用方静默回退本地源结果；
+   * 结果不缓存（每次仲裁现查，探测成本被小时级/手动触发频率接受）。
+   */
+  async probeLatestOfficial(): Promise<string | null> {
+    const out = await this._runCommand(
+      `npm view sillyspec version --registry=${SILLYSPEC_OFFICIAL_REGISTRY} --prefer-online`,
+    );
+    if (out === null || out.trim() === '') {
+      this._log('debug', 'sillyspec_official_probe_failed');
+      return null;
+    }
+    return out.trim();
   }
 
   /**
@@ -481,23 +559,27 @@ export class SillySpecManager {
   // ── 升级入口 ────────────────────────────────────────────────────────────────
 
   /**
-   * 手动指令入口（WS SILLYSPEC_UPDATE → daemon.ts 接线）：先版本门再
-   * :meth:`requestUpgrade`。
+   * 手动指令入口（WS SILLYSPEC_UPDATE → daemon.ts 接线）：先版本门（官方源
+   * 仲裁）再 :meth:`requestUpgrade`。
    *
    * ql-20260902-003：auto 路径经 :meth:`checkAndUpgrade` 已有 isOutdated 门
    * （已最新 no-op），手动 server_command 原先直入 requestUpgrade 无门——已最新
    * 时白跑一次 `npm install -g` 还滚动一轮 running→success 横幅。此处先探
-   * latest+local（probeLatest 有 10min 缓存），已安装且 !isOutdated → 写
-   * up_to_date 终态不跑 npm（ql-20260904-019 推翻原静默 no-op：无反馈无法与
-   * 指令丢失区分，改为横幅明示「已是最新版」，10min 后自然消失）；探测失败
-   * 不阻断（网络不可达照旧升级，宁装勿漏）。刻意不把门塞进 requestUpgrade——
-   * 该方法依赖「running 同步置位先于首个 await」契约（in-flight 门/测试同步
-   * 断言），异步探测必须外置。
+   * latest+local，已安装且 !isOutdated → 写 up_to_date 终态不跑 npm
+   * （ql-20260904-019 推翻原静默 no-op：无反馈无法与指令丢失区分，改为横幅明示
+   * 「已是最新版」，10min 后自然消失）；探测失败不阻断（网络不可达照旧升级，宁
+   * 装勿漏）。刻意不把门塞进 requestUpgrade——该方法依赖「running 同步置位先于
+   * 首个 await」契约（in-flight 门/测试同步断言），异步探测必须外置。
+   *
+   * ql-20260907-001：门的 latest 信源升级为官方源仲裁（:meth:
+   * `_resolveLatestForGate`）+ 手动触发强制现探（force=true 绕过 10min 缓存）。
+   * 镜像滞后（本地源旧值 == 本机版 → 误判已最新）由官方直查纠正；官方较新时
+   * requestUpgrade 切官方源安装。探测失败语义不变（两路都 null 才放行）。
    */
   async requestManualUpgrade(): Promise<void> {
-    const latest = await this.probeLatest();
+    const gate = await this._resolveLatestForGate(true);
     const local = await this.probeLocal();
-    if (latest !== null && local !== null && !isOutdated(local, latest)) {
+    if (gate.effective !== null && local !== null && !isOutdated(local, gate.effective)) {
       // ql-20260904-019：已最新不再静默——回传 up_to_date 终态（10min 展示窗，
       // 与 success/failed 同款惰性过期），机器卡横幅给「已是最新版」明确反馈
       // （推翻 ql-20260902-003 的静默 no-op：用户点升级却无任何可见结果，无法
@@ -508,7 +590,7 @@ export class SillySpecManager {
         this._log('debug', 'sillyspec_up_to_date_during_inflight', {
           current_state: current.state,
           local,
-          latest,
+          latest: gate.effective,
         });
         return;
       }
@@ -523,24 +605,34 @@ export class SillySpecManager {
       this._log('info', 'sillyspec_upgrade_skipped_up_to_date', {
         trigger: 'server_command',
         local,
-        latest,
+        latest: gate.effective,
+        local_latest: gate.local,
+        official_latest: gate.official,
       });
       return;
     }
-    await this.requestUpgrade('server_command');
+    await this.requestUpgrade('server_command', gate.officialNewer);
   }
 
   /**
    * 请求升级（WS 指令 server_command / 自动检查 auto 统一入口）。
    *
    * - in-flight 门：running/deferred 期间新请求仅记日志去重（CLEANUP 惯例）；
-   * - 机器忙（isBusy）→ deferred + 30s 复查定时（空闲转 running）；
+   * - 机器忙（isBusy）→ deferred + 30s 复查定时（空闲转 running，官方源安装
+   *   flag 随 deferred 保留、复查时消费——ql-20260907-001）；
    * - 空闲 → running：installSillySpec → probeLocal 刷新 → success（from/to）；
    *   安装后探测失败或过程异常 → failed（error 截断 200 字符）。
    *
    * 全路径自收敛不 reject。
+   *
+   * @param useOfficialRegistry ql-20260907-001：官方源仲裁判定镜像滞后时为 true，
+   *   安装命令同带官方源 --registry（仍走镜像会装回旧版）。官方安装失败不自动
+   *   回退镜像安装——装回旧版报 success 比诚实 failed 更糟，失败留给下轮重试。
    */
-  async requestUpgrade(trigger: SillySpecUpdateTrigger): Promise<void> {
+  async requestUpgrade(
+    trigger: SillySpecUpdateTrigger,
+    useOfficialRegistry: boolean = false,
+  ): Promise<void> {
     const current = this._update;
     if (
       current !== null &&
@@ -555,48 +647,84 @@ export class SillySpecManager {
     }
     if (this._isBusy()) {
       const from = this._version;
+      this._deferredOfficialRegistry = useOfficialRegistry;
       this._terminalAt = null;
       this._update = { state: 'deferred', trigger, from_version: from };
       this._log('info', 'sillyspec_upgrade_deferred', {
         trigger,
         from_version: from,
         recheck_ms: this._deferredRecheckMs,
+        official_registry: useOfficialRegistry,
       });
       this._scheduleDeferredRecheck();
       return;
     }
-    await this._runUpgrade(trigger);
+    await this._runUpgrade(trigger, useOfficialRegistry);
   }
 
   /**
    * 自动检查入口（1h 循环/启动衔接探测用，task-05 接线）：
-   * probeLatest + probeLocal → 未安装或 isOutdated → requestUpgrade(trigger)；
-   * 已最新 no-op（debug 记录）；latest 不可达 → warn no-op（不做离线重试/退避，
-   * 失败留给下轮自动检查或手动重试）。
+   * 版本门（官方源仲裁，本地源探测走 10min 缓存）+ probeLocal → 未安装或
+   * isOutdated → requestUpgrade(trigger)；已最新 no-op（debug 记录）；两路
+   * latest 都不可达 → warn no-op（不做离线重试/退避，失败留给下轮自动检查或
+   * 手动重试）。仲裁（ql-20260907-001）让镜像滞后的机器在小时级自动检查中
+   * 自愈——实测镜像可滞后 3 天以上，单信源门永不触发。
    */
   async checkAndUpgrade(
     trigger: SillySpecUpdateTrigger = 'auto',
   ): Promise<void> {
-    const latest = await this.probeLatest();
-    if (latest === null) {
+    const gate = await this._resolveLatestForGate(false);
+    if (gate.effective === null) {
       this._log('warn', 'sillyspec_latest_unavailable');
       return;
     }
     const local = await this.probeLocal();
     if (local === null) {
-      this._log('info', 'sillyspec_not_installed', { latest });
-      await this.requestUpgrade(trigger);
+      this._log('info', 'sillyspec_not_installed', { latest: gate.effective });
+      await this.requestUpgrade(trigger, gate.officialNewer);
       return;
     }
-    if (isOutdated(local, latest)) {
-      this._log('info', 'sillyspec_outdated', { local, latest });
-      await this.requestUpgrade(trigger);
+    if (isOutdated(local, gate.effective)) {
+      this._log('info', 'sillyspec_outdated', {
+        local,
+        latest: gate.effective,
+        official_latest: gate.official,
+      });
+      await this.requestUpgrade(trigger, gate.officialNewer);
       return;
     }
-    this._log('debug', 'sillyspec_up_to_date', { version: local, latest });
+    this._log('debug', 'sillyspec_up_to_date', { version: local, latest: gate.effective });
   }
 
-  // ── 内部：升级执行与状态机流转 ───────────────────────────────────────────────
+  // ── 内部：官方源仲裁与升级执行、状态机流转 ──────────────────────────────────
+
+  /**
+   * 版本门 latest 仲裁（ql-20260907-001）：本地源探测 + 官方源直查，取较新者。
+   *
+   * - 官方严格新于本地源（或本地源不可达）→ officialNewer=true，安装须切官方源；
+   * - 官方较新时把心跳缓存覆盖为官方值（getSnapshot 徽标显示真实最新，不被镜像
+   *   旧值拖累），并记 info 事件 `sillyspec_latest_arbitrated` 留痕；
+   * - 官方不可达 → 静默回退本地源结果（内网机器常态）；两路都失败 → effective
+   *   为 null，调用方按「探测失败放行/_warn no-op」现语义处理。
+   *
+   * @param force 本地源探测是否强制现探（手动触发传 true 绕过 10min 缓存）。
+   */
+  private async _resolveLatestForGate(
+    force: boolean,
+  ): Promise<SillySpecLatestGate> {
+    const local = await this.probeLatest(force);
+    const official = await this.probeLatestOfficial();
+    const officialNewer =
+      official !== null && (local === null || isOutdated(local, official));
+    if (officialNewer) {
+      this._latestCache = { value: official, at: this._now() };
+      this._log('info', 'sillyspec_latest_arbitrated', {
+        local_latest: local,
+        official_latest: official,
+      });
+    }
+    return { local, official, effective: officialNewer ? official : local, officialNewer };
+  }
 
   /**
    * 执行升级链：置 running（同步——requestUpgrade 的 in-flight 门依赖此置位先于
@@ -605,14 +733,24 @@ export class SillySpecManager {
    * from_version 取最近已知本机版本（checkAndUpgrade 刚探测过；server_command
    * 路径未探测过则为 null，展示窗语义允许）。全链 try/catch 收敛不 reject。
    */
-  private async _runUpgrade(trigger: SillySpecUpdateTrigger): Promise<void> {
+  private async _runUpgrade(
+    trigger: SillySpecUpdateTrigger,
+    useOfficialRegistry: boolean = false,
+  ): Promise<void> {
     this._clearDeferredTimer();
     const from = this._version;
     this._terminalAt = null;
     this._update = { state: 'running', trigger, from_version: from };
-    this._log('info', 'sillyspec_upgrade_started', { trigger, from_version: from });
+    this._log('info', 'sillyspec_upgrade_started', {
+      trigger,
+      from_version: from,
+      official_registry: useOfficialRegistry,
+    });
     try {
-      await this._install(this._log);
+      await this._install(
+        this._log,
+        useOfficialRegistry ? { officialRegistry: true } : undefined,
+      );
       const to = await this.probeLocal();
       if (to === null) {
         // 安装后探测不到版本：安装可能失败（旧版本在位）或 CLI 不可用——统一按
@@ -690,9 +828,12 @@ export class SillySpecManager {
         this._scheduleDeferredRecheck();
         return;
       }
-      // 空闲 → 转 running（保持原 trigger）。_runUpgrade 全路径 catch 收敛不
-      // reject；.catch 为防御性兜底（daemon 定时器惯例）。
-      void this._runUpgrade(current.trigger).catch((e: unknown) => {
+      // 空闲 → 转 running（保持原 trigger 与官方源安装 flag——ql-20260907-001：
+      // 仲裁结论跨 deferred 存活，推迟一轮后不能装回镜像旧版）。_runUpgrade 全
+      // 路径 catch 收敛不 reject；.catch 为防御性兜底（daemon 定时器惯例）。
+      const official = this._deferredOfficialRegistry;
+      this._deferredOfficialRegistry = false;
+      void this._runUpgrade(current.trigger, official).catch((e: unknown) => {
         this._log('error', 'sillyspec_upgrade_recheck_failed', {
           error: fmtErrorSnippet(e),
         });

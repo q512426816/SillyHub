@@ -255,7 +255,11 @@ export async function runPreflight(
  */
 export async function runSillySpecCheck(logger: PreflightLogger): Promise<void> {
   const localVersion = await runCmd('sillyspec --version');
-  const latestVersion = await runCmd('npm view sillyspec version');
+  // ql-20260907-001：--prefer-online 跳过本地 HTTP 缓存新鲜度检查——镜像/缓存
+  // 滞后会让启动期检查也误判已最新（与运行期 sillyspec-manager 版本门同病灶）。
+  const latestVersion = await runCmd(
+    'npm view sillyspec version --prefer-online',
+  );
 
   if (latestVersion === null) {
     // npm 不可达 / 包不存在 → 无法判断最新版，warn 不安装（不阻断启动）。
@@ -285,9 +289,18 @@ export async function runSillySpecCheck(logger: PreflightLogger): Promise<void> 
 /**
  * 执行 `npm install -g sillyspec@latest` 安装/升级 sillyspec。
  * 失败仅记 warn（runCmdFailed 内部已记 cmd_failed）。
+ *
+ * @param opts.registry ql-20260907-001：指定 npm 源（官方源仲裁判定镜像滞后时
+ *   传官方地址——仍走机器默认源会装回旧版）。缺省零变化（走机器默认源）。
  */
-export async function installSillySpec(logger: PreflightLogger): Promise<void> {
-  const ok = await runCmdBoolean('npm install -g sillyspec@latest', logger);
+export async function installSillySpec(
+  logger: PreflightLogger,
+  opts: { registry?: string } = {},
+): Promise<void> {
+  const cmd = opts.registry
+    ? `npm install -g sillyspec@latest --registry=${opts.registry}`
+    : 'npm install -g sillyspec@latest';
+  const ok = await runCmdBoolean(cmd, logger);
   if (ok) {
     logger('info', 'sillyspec_updated');
   }
