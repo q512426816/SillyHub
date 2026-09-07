@@ -371,3 +371,15 @@
 根因：pendingTurnError 是 consume 内会话级闭包变量，轮内只在下一轮 inject 前清一次（pi-rpc-driver.ts:896）；pi 对 API 失败自动重试，前 2 次 attempt 超时的 ame.error 已写值，第 3 次成功出完整答案后旧值粘滞，agent_settled 后 :928 一票否决把成功轮翻成 error_during_execution（会话 33f958d2 实机）
 方案：handleLine 两个轮内恢复信号到达即置 null：① 归一化事件 text+override 全文（message_end assistant 完整产出终态）；② 原始帧 turn_end 且 stopReason 非 error（清在归一化前，真实失败轮 stopReason=error 仍由归一化器产 error 事件重新写入，防过清）。codex driver 不动：双清+成败权威在 turn_status，success 路径本就忽略 stale 值
 结果：vitest tests/interactive/pi-rpc-driver.test.ts 48/48 通过（含 3 新用例：33f958d2 复现恢复→success+usage、turn_end stop 单独恢复信号、恢复后真失败仍 error 防过清）；pnpm typecheck 零错误
+
+## ql-20260907-003-271d | 2026-09-07 09:42:46 | daemon inject 早到等待在会话 create 在途时延长：lease 状态机仍在跑就不按固定 60s 丢弃
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（常量区新增 extend 上限 + _awaitSessionThenRoute 在途 lease 逐拍续推 deadline（硬顶 waitMs+extendMax））
+- sillyhub-daemon/tests/daemon-inject-drop-report.test.ts（新增用例 I/J（在途延长接住晚到会话 / 在途硬顶防无限等待））
+- .sillyspec/docs/sillyhub-daemon/modules/daemon.md（MANUAL_NOTES 补 ql-20260907-003 条目）
+需求：daemon inject 早到等待在会话 create 在途时延长：lease 状态机仍在跑就不按固定 60s 丢弃
+根因：backend 等 session ready 仅 8s 即 fallback 发 inject，daemon _awaitSessionThenRoute 固定 60s 窗口轮询等 create 写 store，Windows 冷启动 create 全链偶发超 60s（实测 ~31s，会话 1a9c601c 实机超窗）→ 超时被当会话不存在丢弃 + 报 run failed，重发即恢复（瞬时竞态非真死）。WS 短暂离线丢指令已由控制指令三段式落库+补拉覆盖，无需后端缓存重投
+方案：_awaitSessionThenRoute 轮询时读 inject payload 的 lease_id：仍在 _inflightLeases（_executeTask try/finally 全程维护，claim→create 全链在途证据）期间逐拍续推 deadline 至 now+waitMs，硬顶 waitMs+extendMaxMs（新常量 DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS=240s，env SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS 可调，总硬顶 5min）；lease 离开在途（create 完成/失败）即停推，余量到期回落原 005 丢弃上报；lease 不在途的真不存在会话零回归
+结果：vitest tests/daemon-inject-drop-report.test.ts 10/10 通过（新增 I 在途延长接住 600ms 晚到会话 / J 在途硬顶 450ms 到顶即丢弃两用例，既有 A-H 零回归）；pnpm typecheck 零错误

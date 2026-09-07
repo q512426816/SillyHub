@@ -1169,6 +1169,26 @@ export function injectWaitSessionMs(): number {
   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_INJECT_WAIT_SESSION_MS;
 }
 
+// ql-20260907-003（quick）：在途 lease 的等待延长上限（叠加在基础窗口之上，
+// 硬顶 waitMs + extendMaxMs）。实机案（会话 1a9c601c）：backend 等 ready 仅 8s
+// 即 fallback 发 inject，daemon create 全链（Windows 冷启动 skills 拷贝 / MCP
+// bundle 预取 / spawn 握手）偶发超 60s 基础窗口 → 超时按会话不存在丢弃并报
+// run failed，重发即恢复（瞬时竞态非真死）。_inflightLeases 由 _executeTask
+// try/finally 全程维护（claim→create 全链在途），_awaitSessionThenRoute 轮询
+// 见该 inject 的 lease 在途即续推 deadline（create 完成/失败离开在途后不再
+// 续推，窗口自然到期回落原丢弃上报）；lease 不在途（真不存在的会话，如
+// daemon 重启丢失）行为不变。默认 240s → 总硬顶 5min（控制指令 backend 侧
+// TTL 10min 同量级，指令落库 pending 不会因等待而丢）。
+export const DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS = 240_000;
+
+/** 读取在途延长上限（env SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS，非法/缺省回落默认；逐次读取便于测试覆写）。 */
+export function injectWaitInflightExtendMs(): number {
+  const raw = process.env.SILLYHUB_INJECT_WAIT_INFLIGHT_EXTEND_MS;
+  if (raw === undefined || raw === '') return DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS;
+  const v = Number.parseInt(raw, 10);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS;
+}
+
 // ── task-08（design A5 / FR-04）：recover 网络类失败重试退避 + 超龄清理常量 ────
 //
 // _recoverOneSession 遇 recover HTTP 网络类失败（请求未达/超时/5xx——HubHttpError
@@ -5852,13 +5872,29 @@ export class Daemon {
    * Restart=always 场景会拖慢新实例接管）。停机即中止等待：不报 run failed
    * （消息未处理的原因是 daemon 退出而非会话未建，语义不符；backend 侧由
    * 控制指令 GC 兜底收敛），仅 warn 留痕。
+   *
+   * ql-20260907-003（quick）：在途 lease 延长——实机案（会话 1a9c601c）create
+   * 全链偶发超 60s 基础窗口，超时被当会话不存在丢弃（重发即恢复的瞬时竞态）。
+   * 该 inject 的 lease_id 仍在 _inflightLeases（_executeTask 全程维护，create
+   * 在途证据）期间逐拍续推 deadline，硬顶 waitMs + extendMaxMs（默认 60s+240s
+   * =5min）；离开在途（create 完成/失败/异常）后停推，余量到期回落原丢弃。
+   * lease 不在途的真不存在会话行为不变（零回归）。
    */
   private async _awaitSessionThenRoute(
     sessionId: string,
     raw: Record<string, unknown>,
   ): Promise<void> {
     const waitMs = injectWaitSessionMs();
-    const deadline = Date.now() + waitMs;
+    // ql-20260907-003：在途 lease 延长（见常量注释）。deadline 在 lease 于
+    // _inflightLeases 期间逐拍续推（now+waitMs），硬顶 startedAt+waitMs+extendMax；
+    // 离开在途即停推，窗口余量走完自然到期（回落原丢弃语义）。
+    const extendMaxMs = injectWaitInflightExtendMs();
+    const leaseId =
+      (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
+    const startedAt = Date.now();
+    const hardDeadline = startedAt + waitMs + extendMaxMs;
+    let deadline = startedAt + waitMs;
+    let extendLogged = false;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, INJECT_WAIT_POLL_MS));
       if (!this._running) {
@@ -5870,7 +5906,7 @@ export class Daemon {
       if (this._sessionManager?.get(sessionId)) {
         this._logger.info('inject_wait_session_appeared', {
           session_id: sessionId,
-          waited_ms: waitMs - (deadline - Date.now()),
+          waited_ms: Date.now() - startedAt,
         });
         try {
           await this._routeSessionControl(MSG.SESSION_INJECT, raw);
@@ -5882,14 +5918,30 @@ export class Daemon {
         }
         return;
       }
+      if (leaseId && this._inflightLeases.has(leaseId)) {
+        const next = Math.min(Date.now() + waitMs, hardDeadline);
+        if (next > deadline) {
+          deadline = next;
+          if (!extendLogged) {
+            extendLogged = true;
+            this._logger.info('inject_wait_extended_inflight', {
+              session_id: sessionId,
+              lease_id: leaseId,
+              base_wait_ms: waitMs,
+              hard_deadline_ms: waitMs + extendMaxMs,
+            });
+          }
+        }
+      }
     }
     this._logger.warn('inject_wait_session_timeout', {
       session_id: sessionId,
       wait_ms: waitMs,
+      waited_ms: Date.now() - startedAt,
     });
     await this._reportInjectDropped(
       raw,
-      `daemon 本地无该会话状态（等待 ${waitMs}ms 会话仍未创建，可能已结束、或 daemon 重启后未恢复），消息未被处理`,
+      `daemon 本地无该会话状态（等待 ${Date.now() - startedAt}ms 会话仍未创建，可能已结束、或 daemon 重启后未恢复），消息未被处理`,
     );
   }
 
