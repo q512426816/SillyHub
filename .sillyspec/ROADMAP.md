@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-09-07
+最近更新：2026-09-08
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-09-08 · 会话轮次刻度轨导航（高轮次会话一眼回顾 + 点击定位）
+
+- **session-turn-nav**（2026-09-08，brainstorm→plan→execute→verify 全流程 PASS，6 task/6 Wave，实现 74d02404 已部署本机 Docker 验证）：智能体会话页聊天区左缘新增 ZCode 式「轮次刻度轨」（用户两轮原型反馈+实机截图对齐定稿 D-007）——每轮一条 2px 刻度（垂直居中、失败红/运行中琥珀脉冲/未加载空心），hover/键盘焦点飞出深色信息卡（轮号+提问+助手正文摘要+meta），点击平滑跳转定位+2.2s 高亮；**覆盖全部历史轮次**（D-002）：已加载轮即时跳，未加载轮由既有 runsMeta 补全目录、点击自动循环加载日志（≤8 页+触顶抑制 R-02）后定位回填。零后端（D-004：displayTurns+runsMeta 前端拼装，runs 接口无 prompt 字段故未加载条目 v1 元数据+回填，D-005）。多宿主：desktop 常驻、mobile ⋯ 菜单抽屉行式列表、悬浮窗 desktop variant 零改动复用（D-006 Grill 修正）、dialog 不挂载；TurnRow data-turn-key 锚点+per-row 布尔高亮防 memo 击穿（R-07）。配套：variant 测试 desktop 父链断言有意更新、page.test +354 集成用例（直跳/循环/上限 toast/suppress/Drawer）、组件 13 单测，相关子集 55/55 绿。原型三轮迭代（卡片→横杠列表→刻度轨）沉淀于 changes/archive 原型文件，可交互对照。
 
 ### 2026-09-07 · 会话任务执行面板（任务进度一眼可见 + 持久化）
 

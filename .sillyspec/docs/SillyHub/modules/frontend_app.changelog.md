@@ -5,6 +5,7 @@ created_at: 2026-09-03 14:49:48
 
 # frontend_app 模块变更索引
 
+- 2026-09-08-session-turn-nav | /sessions 会话页获得轮次刻度轨导航能力（间接——app/ 源码零改动，能力经 SessionPanelPage 组件注入；page.test.tsx +354 集成用例含 6 条轮次导航路径；详见 frontend_components 索引同日条目）
 - ql-20260908-001-96a2 | /runtimes 页面去掉 1600px 限宽——外层自写 <main max-w-[1600px]> 收敛为共享 PageContainer size="full"（对齐 /settings/providers 与 FRONTEND_PAGE_STYLE 列表页「外层一律 PageContainer」规范），内容占满宽度
 - ql-20260903-014-4d37 | 组织管理页布局对齐 roles 页——查询条件与列表拆两块：SectionCard 只装工具栏+搜索表单，DataTable 移出作 PageContainer 独立兄弟块（gap-4 分隔，16px 间隔），错误条改替换表格位置（roles 同款）；用户实测反馈 ql-012 按 FRONTEND_PAGE_STYLE §1 字面把三者包一张卡与 admin 三页（roles/users）实际惯例不符
 - ql-20260903-013-7a5e | 组织管理页表格横向滚动条修复——ql-012 按规范 §4 传 scroll={{x:'max-content'}} 是多列宽表惯例，本页 9 列窄表被强制按内容自然宽度（~1012px）撑开，容器不足即出横向滚动条；去掉 scroll.x 与配套 fixed:'right'+onCell（无横滚时固定列无意义）、操作列放开 width 按内容收缩，列宽自适应铺满容器（实测 scrollWidth=clientWidth 无滚动条）

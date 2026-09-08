@@ -87,6 +87,8 @@
 - unmapped|decision|决策|三波交付|打包 → [decisions/unmapped.md](decisions/unmapped.md)
 - backend|decision|决策|变更删除|软删|location=deleted|防复活|platform_deleted|镜像驱动收敛|墓碑 → [decisions/backend.md](decisions/backend.md)
 - frontend|decision|决策|活动徽标|last_pushed_at|进行中可见性 → [decisions/frontend.md](decisions/frontend.md)
+- frontend_components|decision|决策|轮次刻度轨|会话导航|飞出卡|runs 补全 → [decisions/frontend_components.md](decisions/frontend_components.md)
+- frontend_app|decision|决策|会话页|轮次导航（间接） → [decisions/frontend_app.md](decisions/frontend_app.md)
 - sillyhub-daemon|decision|决策|spec-bundle|pull --spec|daemon 零改动 → [decisions/sillyhub-daemon.md](decisions/sillyhub-daemon.md)
 - styles|decision|决策 → [decisions/styles.md](decisions/styles.md)
 - change|decision|决策 → [decisions/change.md](decisions/change.md)
