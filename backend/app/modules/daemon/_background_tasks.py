@@ -53,7 +53,7 @@ def fire_background_task(
     ``host`` 为宿主 service 实例——强引用集经 ``host._background_tasks``
     多态解析，日志经宿主类模块的 ``log`` 记录。
     """
-    task = asyncio.create_task(coro)
+    task: asyncio.Task = asyncio.create_task(coro)
     host._background_tasks.add(task)
     task.add_done_callback(host._on_background_task_done)
     _host_log(type(host)).info(

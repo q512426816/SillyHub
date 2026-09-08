@@ -90,7 +90,7 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
 
     st.now = datetime.now(UTC)
     st.count = 0
-    st.published_logs: list[dict] = []
+    st.published_logs = []
     # ql-20260617-001：daemon _eventToMessages 把 usage/session_id 透传到首条
     # message（task-runner.ts:1142-1155），但首条 message 总有 content（[ASSISTANT]/
     # [TOOL_USE]/[TOOL_RESULT] 等），所以「仅在 content 为空时提取 usage」的旧分支
@@ -100,19 +100,19 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
     # 命中时 result 事件的 input_tokens 也是合法的 0（真实输入在 cache_read）。
     # 旧 >0 守卫把合法 0 当噪声丢，致 AgentRun.input_tokens 永久 NULL；现接受 0，
     # 靠 max 累积 + 仅增不减写回（service.py:478-501）防御中间事件 0/0。
-    st.latest_input_tokens: int | None = None
-    st.latest_output_tokens: int | None = None
+    st.latest_input_tokens = None
+    st.latest_output_tokens = None
     # task-07 / FR-02：prompt cache 词元累积（同 input/output，取 max 防御
     # Claude 中间事件 usage=0/0 乱序）。daemon Wave1 task-01/02/03 已把
     # snake_case cache_read_tokens/cache_creation_tokens 写入 usage dict。
-    st.latest_cache_read_tokens: int | None = None
-    st.latest_cache_creation_tokens: int | None = None
-    st.latest_session_id: str | None = None
+    st.latest_cache_read_tokens = None
+    st.latest_cache_creation_tokens = None
+    st.latest_session_id = None
     # task-05 / FR-01 / D-002@v1：ctx_tokens（最近一次 API 调用的提示词大小 =
     # input + cache_read + cache_creation，daemon 仅 main 桶 pendingUsage 携带）。
     # 瞬时量可上可下——批内最后出现值胜出直接赋值（last-write-wins），刻意
     # 不用 input/output 的 max 累积（design §7 守卫差异）。
-    st.latest_ctx_tokens: int | None = None
+    st.latest_ctx_tokens = None
     # ql-006：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
     # （{type:"assistant"|"user", message:{content:[ContentBlock]}}），顶层无
     # content/event_type。旧代码只拼 text blocks、丢弃 thinking/tool_use/tool_result，
@@ -120,7 +120,7 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
     # _extract_sdk_messages 展开成 0..N 条 flat {event_type, content, channel}
     # （对齐 task-runner _eventToMessages），再统一进入下面的写入循环。
     # batch mode（已 flat）原样透传，行为不变。
-    st.flat_messages: list[dict] = []
+    st.flat_messages = []
     for msg in messages:
         # task-07（2026-09-03-agent-provider-abstraction / FR-03 / D-001@v1）：
         # AgentEvent v2 新轨分支。daemon 归一化器（task-03）经 submitMessages 上报
@@ -153,7 +153,7 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
     # dedup_key，写入循环跳过它们（等价 INSERT ON CONFLICT DO NOTHING，但 dialect
     # 无关——SQLite 测试 + PG 生产一致）。dedup_key 由 daemon 注入 message 顶层
     # （task-19），旧 daemon / 未注入路径无 dedup_key → None → 不约束（照常 append）。
-    st.existing_dedup_keys: set[str] = set()
+    st.existing_dedup_keys = set()
     submitted_dedup_keys = {
         str(m["dedup_key"]) for m in st.flat_messages if m.get("dedup_key") is not None
     }
@@ -171,14 +171,14 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
     # 落库后登记的 segment。同 segment 的 partial 到达时若已在集合内，跳过 INSERT
     # （丢弃重复）。跨调用去重交给前端 normalize 覆盖（task-14 范围，design §5.3
     # 修复1 简化方案 / 实现要求 6 优先简化）。
-    st.completed_segments: set[str] = set()
+    st.completed_segments = set()
     # task-12：partial 先到、完整后到（daemon 真实流式顺序，最常见场景）——
     # 同 segment 的 partial 已 session.add 进 pending（未 commit），完整行到达
     # 时必须回退旧 partial（从 session 删除 + 从 st.published_logs 移除），让 DB /
     # SSE 只剩完整行（验收点："只落库完整行"）。AgentRunLog 无 metadata 列，无法
     # 软删标记；commit 前 pending 对象还在 identity map，session.delete 直接撤销
     # 即可，无额外 SQL 开销。
-    st.flushed_partials: dict[str, AgentRunLog] = {}
+    st.flushed_partials = {}
     # ql-20260706-002：tool_use_id → tool_kind 缓存（tool_kind 跨消息继承）。
     # _extract_sdk_messages 的 tool_result 分支产出的 stdout 行无 tool_kind，但
     # 自带 tool_use_id（Anthropic API）；配对的 tool_use（同 id）在上一轮 assistant
@@ -187,13 +187,13 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
     # tool_result 行回查补 kind。让 [TOOL_RESULT] 命令输出也带 tool_kind，前端
     # 第二层 SillySpec 筛选才能命中 sillyspec 的 ✅ Step 进度等（d751a871 根因）。
     # 缓存单次调用内有效；跨调用的 tool_result 查不到则保持 None（兼容不报错）。
-    st.tool_kind_by_tool_use_id: dict[str, str] = {}
+    st.tool_kind_by_tool_use_id = {}
     # 2026-08-25-session-spec-binding task-05 / FR-01 / D-003@v1：落库循环中
     # 收集的 sillyspec 命令原文（tool_kind=sillyspec 且 channel=tool_call 的
     # 入库行），循环后经 run 二跳定位会话再走 change.binding 落绑定
     # （design §5 W2.1 / §7.5 生命周期契约表第 1 行）。仅 sillyspec 行触发
     # 收集（R-03 低频热路径），空列表时循环后零额外查询。
-    st.sillyspec_commands: list[str] = []
+    st.sillyspec_commands = []
     # task-06 / FR-05 / D-003@v1：跨轮归位预处理。提前 get AgentRun（原在
     # 循环后状态同步处；identity map 复用，无额外查询），取 agent_session_id
     # 作归位映射的会话维度 key——后台子代理行经同 session 的后续 run 上报，
@@ -208,15 +208,15 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
     # st.last_projection_log_id：本次调用最后一条投影行 id（PublishIntent 快照
     # 标量）。投影行仅由完整行抽 [[GROUP]] 段产生（partial 从不投影），无
     # 投影 partial 回退需求（影子行 partial 的 st.flushed_partials 机制照旧）。
-    st.last_projection_log_id: str | None = None
+    st.last_projection_log_id = None
     # quick 投影统一标记制（2026-09-02）：[[GROUP]] 转发段的群频道事件（每段
     # 一项，与投影行一一对应；timestamp 口径与 st.published_logs 同款 Z 后缀
     # ISO；@轮与直聊轮同款）。
-    st.group_projection_events: list[dict] = []
+    st.group_projection_events = []
     # 冷启动反查未命中集合（本次调用局部）：同一 parent_tool_use_id 的多行
     # 只查一次 DB；不做跨调用负缓存——派发行迟到时后续调用反查仍可成功
     # （design §5 P2.2），失败行保持当前 run_id 兜底。
-    st.cold_lookup_misses: set[tuple[uuid.UUID, str]] = set()
+    st.cold_lookup_misses = set()
 
 
 async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:

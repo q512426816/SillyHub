@@ -58,7 +58,9 @@ _SESSION_RUNS_MAX = 200
 # test_llm_proxy.py 的 reset fixture 直接对包属性赋 None 复位（D-007）。
 _LLM_PROXY_CLIENT = None
 
-router = APIRouter(prefix="/daemon", tags=["daemon"])
+# 显式注解（D-007 拆分后子模块反向导入本包 router 成环，mypy 环内推不出
+# 隐式类型 → 全部 @router.* 装饰器报 has-type；显式注解即环内可见的声明类型）。
+router: APIRouter = APIRouter(prefix="/daemon", tags=["daemon"])
 
 # task-09：change-write 任务队列回执三端点（FR-08 / D-004@v1），复用本 router 的
 # /daemon prefix + tag；路由写相对路径（/runtimes/{rid}/pending-change-writes 等），

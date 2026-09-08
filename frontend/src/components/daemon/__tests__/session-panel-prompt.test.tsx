@@ -66,6 +66,7 @@ vi.mock("@/lib/daemon", async () => {
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionRuns: sessionApi.listSessionRuns,
+    listSessionTasks: sessionApi.listSessionTasks,  // 任务执行面板快照（task-10 补 mock 防真实 fetch）
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
   };
