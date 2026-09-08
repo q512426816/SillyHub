@@ -405,26 +405,40 @@ export class CursorDriver implements InteractiveDriver {
     handle.sawFirstTurn = true;
 
     let stderrBuf = '';
-    child.stderr?.on('data', (chunk: Buffer | string) => {
+    const onStderrData = (chunk: Buffer | string): void => {
       const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
       stderrBuf += text;
       if (stderrBuf.length > STDERR_MAX_BYTES) {
         stderrBuf = stderrBuf.slice(-STDERR_MAX_BYTES);
       }
-    });
+    };
+    child.stderr?.on('data', onStderrData);
 
     const framer = new LfLineFramer((line) => {
       this._handleStdoutLine(handle, line, callbacks, snapshotRef);
     });
-    child.stdout?.on('data', (chunk: Buffer | string) => {
+    const onStdoutData = (chunk: Buffer | string): void => {
       framer.push(chunk);
-    });
+    };
+    child.stdout?.on('data', onStdoutData);
     child.stdout?.on('end', () => {
       framer.end();
     });
     child.stdout?.on('error', () => {
       // 流错误走 child 'error' / exit 收敛，不在此抛
     });
+
+    // ql-20260909-002：轮次收敛时摘除 data 监听并销毁两条流——排空宽限超时收敛
+    // 时旧流可能仍开放（shell:true 回退链下孙进程持有管道写端），迟到字节不得
+    // 再喂 framer 外发（防迟到帧记到下一轮 runId 名下错轮归因，child/framer 亦
+    // 不随轮滞留）；正常排空路径流已 ended，destroy 幂等无副作用。'error' no-op
+    // 监听刻意保留——destroy 引发的流错误需有承接（EventEmitter 无监听即抛）。
+    const detachStreams = (): void => {
+      child.stdout?.removeListener('data', onStdoutData);
+      child.stderr?.removeListener('data', onStderrData);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+    };
 
     const exitP = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
       (resolve) => {
@@ -481,8 +495,9 @@ export class CursorDriver implements InteractiveDriver {
       });
       await Promise.race([
         exitP,
-        new Promise<void>((r) => setTimeout(r, this.killGraceMs)),
+        new Promise<void>((r) => setTimeout(r, this.killGraceMs).unref?.()),
       ]);
+      detachStreams();
       this._clearChild(handle);
       return;
     }
@@ -494,6 +509,7 @@ export class CursorDriver implements InteractiveDriver {
         is_error: true,
         result: outcome.err.message,
       });
+      detachStreams();
       this._clearChild(handle);
       return;
     }
@@ -505,6 +521,7 @@ export class CursorDriver implements InteractiveDriver {
       stdoutDrainedP,
       new Promise<void>((r) => setTimeout(r, this.killGraceMs).unref?.()),
     ]);
+    detachStreams();
     framer.end();
 
     const snap = snapshotRef.current;

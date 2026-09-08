@@ -773,4 +773,34 @@ describe('⑨ stdout/exit 竞态（ql-20260908-007）：exit 先到时等 stdout
     close();
     await consumeP;
   });
+
+  it('ql-20260909-002 排空超时收敛：迟到帧不再外发（监听摘除+流销毁），不错轮归因', async () => {
+    const driver = new CursorDriver({ killGraceMs: 40 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results, envelopes } = makeCallbacks();
+    const handle = await driver.start(queue, makeOpts());
+    const consumeP = driver.consume(handle, cb);
+    push('late-frame-turn');
+    await waitForAgentSpawnCount(1);
+
+    const child = agentChildren[0]!;
+    child._emitLines([assistantLine('partial')]); // 收敛前已解析内容
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    // 不 _endStdout——僵流形态，宽限超时后按已解析内容收敛
+    await waitUntil(() => results.length === 1, 3000);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    // 收敛后旧流再推帧（孙进程持有管道写端、迟到字节形态）——监听已摘除+流已
+    // 销毁：迟到帧不得经 onTurnMessage/onTurnResult 外发（否则会记到下一轮名下）
+    expect(child.stdout.destroyed).toBe(true);
+    const envelopesBefore = envelopes.length;
+    child._emitLines([resultLine()]);
+    await new Promise<void>((r) => setImmediate(r));
+    await new Promise<void>((r) => setImmediate(r));
+    expect(envelopes.length).toBe(envelopesBefore);
+    expect(results.length).toBe(1);
+    close();
+    await consumeP;
+  });
 });

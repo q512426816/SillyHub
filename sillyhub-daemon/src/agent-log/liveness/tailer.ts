@@ -16,6 +16,8 @@
  * @module agent-log/liveness/tailer
  */
 
+import { statSync } from 'node:fs';
+
 import { getDeriver } from './registry.js';
 import type { LivenessState } from './types.js';
 
@@ -70,6 +72,9 @@ export interface LivenessTailerOptions {
   maxBytesPerTick?: number;
   fs?: TailerFs;
   now?: () => number;
+  /** 复活探针（ql-20260909-002）：add() 命中 ended 登记时同步探一次 mtime，
+   * > endedAt 判复用路径复活（pi 固定 session.jsonl）。默认 node:fs statSync。 */
+  statSizeSync?: (path: string) => { mtimeMs: number } | null;
   /** 每条推导结果的回调（task-06 上报接线消费；回调抛错按 R-02 吞掉）。 */
   onResult?: (r: TickResult) => void;
 }
@@ -147,8 +152,8 @@ interface WatchEntry {
   evicted: boolean;
 }
 
-/** ended 路径登记上限（R2）：超限丢最早一批（Set 保插入序；日志文件名按会话唯一，
- * ended 路径不会合法复活，淘汰只为防极长运行下的无界增长）。 */
+/** ended 路径登记上限（R2）：超限丢最早一批（Map 保插入序；淘汰只为防极长运行
+ * 下的无界增长——被淘汰路径最坏回到「重加→再 ended」一轮自愈）。 */
 const ENDED_PATHS_MAX = 4096;
 const ENDED_PATHS_TRIM = 1024;
 
@@ -161,10 +166,17 @@ const ENDED_PATHS_TRIM = 1024;
  */
 export class LivenessTailer {
   private readonly entries = new Map<string, WatchEntry>();
-  /** R2（ql-20260908-006）：已 ended 的 logPath——registry-sync 每 60s 无条件重加
-   * 会让死文件在「15min unknown → ended → 60s 后重加」间永久震荡，且挤占 16 个
-   * watch 槽位挤出活会话；ended 登记后在 add() 拦截。 */
-  private readonly endedPaths = new Set<string>();
+  /** R2（ql-20260908-006）：已 ended 的 logPath → endedAt（登记时刻）。registry-sync
+   * 每 60s 无条件重加会让死文件在「15min unknown → ended → 60s 后重加」间永久
+   * 震荡，且挤占 16 个 watch 槽位挤出活会话；ended 登记后在 add() 拦截。
+   * ql-20260909-002：登记值由 Set 升级为 endedAt——「日志路径按会话唯一、ended 后
+   * 不会合法复活」的前提对 pi 不成立（其 session.jsonl 按 cwd 固定、跨会话复用，
+   * 且无 deriver 走 L0 mtime 判 ended）。修复：add() 命中登记时探一次当前 mtime，
+   * mtime > endedAt = 复用路径恢复写入（原会话恢复/新会话），放行复活；mtime 未动
+   * （registry-sync 重推死路径）维持拒绝，防震荡语义不变。 */
+  private readonly endedPaths = new Map<string, number>();
+  /** 复活探针（add 时刻同步 stat）：默认走 node:fs statSync；测试注入假实现。 */
+  private readonly statSizeSync: (path: string) => { mtimeMs: number } | null;
   private readonly fs: TailerFs | DefaultFs;
   private readonly defaultFs: DefaultFs | null;
   private readonly now: () => number;
@@ -181,6 +193,15 @@ export class LivenessTailer {
       maxBytesPerTick: opts.maxBytesPerTick ?? MAX_BYTES_PER_TICK,
     };
     this.now = opts.now ?? Date.now;
+    this.statSizeSync =
+      opts.statSizeSync ??
+      ((path) => {
+        try {
+          return { mtimeMs: statSync(path).mtimeMs };
+        } catch {
+          return null; // 不存在/不可 stat → 无法证明复活，维持拒绝（fail-closed）
+        }
+      });
     this.onResult = opts.onResult;
     const injected = opts.fs;
     this.defaultFs = injected ? null : new DefaultFs();
@@ -188,9 +209,16 @@ export class LivenessTailer {
   }
 
   /** 加入 watch；超上限淘汰 lastSeenAt 最旧条目（新者优先，design §5.2）。
-   * R2：已 ended 的路径直接拒绝（防 registry-sync 重加震荡）。 */
+   * R2：已 ended 的路径直接拒绝（防 registry-sync 重加震荡）。ql-20260909-002：
+   * 复用路径例外——探针 mtime > endedAt（登记后文件又有写入）视为合法复活，
+   * 摘除登记放行（pi 固定 session.jsonl 跨会话复用场景）。 */
   add(target: WatchTarget): boolean {
-    if (this.endedPaths.has(target.logPath)) return false;
+    const endedAt = this.endedPaths.get(target.logPath);
+    if (endedAt !== undefined) {
+      const st = this.statSizeSync(target.logPath);
+      if (st === null || st.mtimeMs <= endedAt) return false;
+      this.endedPaths.delete(target.logPath); // 复活：摘除登记后照常加入
+    }
     if (this.entries.has(target.logPath)) return true;
     if (this.entries.size >= this.opts.maxWatch) {
       let oldest: WatchEntry | null = null;
@@ -292,7 +320,7 @@ export class LivenessTailer {
       results.push(out);
       if (out.state === 'ended') {
         this.entries.delete(logPath);
-        this.rememberEnded(logPath); // R2：登记防重加
+        this.rememberEnded(logPath, now); // R2：登记防重加（记 endedAt 供复活判定）
         this.defaultFs?.forget(logPath); // R9：终结即清缓存
       } else {
         entry.lastSeenAt = now;
@@ -306,11 +334,12 @@ export class LivenessTailer {
     return results;
   }
 
-  /** R2：登记 ended 路径（超限丢最早一批，防无界）。 */
-  private rememberEnded(logPath: string): void {
-    this.endedPaths.add(logPath);
+  /** R2：登记 ended 路径与时刻（超限丢最早一批，防无界）。endedAt 供 add() 的
+   * 复用路径复活判定（ql-20260909-002）：此后文件 mtime 前进过即放行重加。 */
+  private rememberEnded(logPath: string, endedAt: number): void {
+    this.endedPaths.set(logPath, endedAt);
     if (this.endedPaths.size > ENDED_PATHS_MAX) {
-      const it = this.endedPaths.values();
+      const it = this.endedPaths.keys();
       for (let i = 0; i < ENDED_PATHS_TRIM; i++) {
         const n = it.next();
         if (n.done) break;

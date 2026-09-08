@@ -6,7 +6,7 @@
 // ql-20260908-006（审查修复）：R1 生产路径（默认 fs）tickAsync 回归——预读缓存
 // 后同步推导，不再「异步 readRange 进同步 tick」恒抛永久 unknown；R2 ended 路径
 // 不被 add 重加（registry-sync 每 60s 无条件重加的 unknown↔ended 震荡）。
-import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -202,5 +202,46 @@ describe('LivenessTailer 生产路径（默认 fs，ql-20260908-006 审查修复
     expect(t.add(mkTarget())).toBe(false);
     expect(t.tick()).toHaveLength(0);
     expect(t.watchCount()).toBe(0);
+  });
+
+  it('ql-20260909-002 pi 复用路径：ended 后 mtime 前进（复活）→ add 放行；mtime 未动仍拒绝', () => {
+    // pi 日志是每 cwd 固定 session.jsonl（跨会话复用，registry 无 pi deriver 走
+    // L0 mtime 判 ended）——R2 登记曾把该路径永久拒之门外。修复：登记改记
+    // endedAt，add 时 mtime > endedAt 视为合法复活放行。
+    const fs = new FakeFs();
+    fs.files.set('pi-session.jsonl', { content: 'd', mtimeMs: T0 - 20 * 60 * 1000 });
+    let probeMtime = T0 - 20 * 60 * 1000; // 复活探针（模拟 add 时刻文件 mtime）
+    const t = new LivenessTailer({
+      fs,
+      now: () => fs.now,
+      statSizeSync: (p) => (p === 'pi-session.jsonl' ? { mtimeMs: probeMtime } : null),
+    });
+    const target = mkTarget('pi-session.jsonl');
+    t.add(target);
+    expect(t.tick()[0]!.state).toBe('ended'); // 超窗 ended，登记 endedAt=T0
+    // 文件未再动（registry-sync 重推死路径）→ 仍拒绝（防震荡保持）
+    expect(t.add(target)).toBe(false);
+    expect(t.watchCount()).toBe(0);
+    // pi 同 cwd 会话恢复写入/新会话：mtime 前进到 endedAt 之后 → 放行复活
+    probeMtime = T0 + 60_000;
+    fs.files.set('pi-session.jsonl', { content: 'd2', mtimeMs: T0 + 60_000 });
+    expect(t.add(target)).toBe(true);
+    expect(t.tick()[0]!.state).toBe('working'); // 新鲜 mtime 正常推导
+  });
+
+  it('ql-20260909-002 默认复活探针（真实 fs）：utimes 推进 mtime 后 ended 路径复活', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'liveness-revive-'));
+    const p = join(dir, 'session.jsonl');
+    writeFileSync(p, 'x');
+    const stale = new Date(T0 - 20 * 60 * 1000);
+    utimesSync(p, stale, stale); // 真实 mtime 拉到超窗（时钟注入 T0）
+    const t = new LivenessTailer({ now: () => T0 });
+    t.add(mkTarget(p));
+    expect((await t.tickAsync())[0]!.state).toBe('ended');
+    expect(t.add(mkTarget(p))).toBe(false); // mtime 仍旧（statSync 探到旧值）→ 拒绝
+    const fresh = new Date(T0 + 60_000);
+    utimesSync(p, fresh, fresh);
+    expect(t.add(mkTarget(p))).toBe(true); // mtime 新 → 复活
+    expect((await t.tickAsync())[0]!.state).toBe('working');
   });
 });

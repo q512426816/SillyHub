@@ -68,12 +68,46 @@ export interface PullSpecBundleOptions {
    * 缺省 = 文件系统判定器 hasUnsyncedLocalChanges（查 specDir/.runtime/pending_push
    * 标记 + specDir 本地 mtime 新于 platform.json.synced_at）。返回 true 时 pullSpecBundle
    * 在覆盖本地之前先调 postSpecSync 回灌到 backend，回灌失败抛 SpecPushBeforePullError
-   * abort pull（不强行覆盖本地）。
+   * abort pull（不强行覆盖本地）。ql-20260909-002：判定器在 pull 起点与整树交换前
+   * 各评估一次（下载窗口内的在途写入由第二次兜住）。
    *
    * 测试可注入自定义判定器（mock 未回灌标记 / mtime 比对），绕过文件系统副作用。
    * 传 `() => false` 显式禁用回灌检查（保持旧行为）。
    */
   unsyncedChecker?: (specDir: string) => Promise<boolean>;
+}
+
+/**
+ * D-008 回灌闸（ql-20260909-002 抽取，pull 起点与整树交换前两处复用）：未回灌
+ * 改动存在 → postSpecSync 回灌（服务器留底）；回灌失败抛 SpecPushBeforePullError
+ * （abort pull，不强行覆盖本地），由调用方决定 lease failed 终态。判定器自身异常
+ * 不阻塞（保守：宁可多拉一次，不因检测错中断）。phase 仅区分日志（pull_start /
+ * pre_swap），行为一致。
+ */
+async function pushUnsyncedIfDirty(
+  client: HubClient,
+  wsId: string,
+  specDir: string,
+  checker: (dir: string) => Promise<boolean>,
+  phase: 'pull_start' | 'pre_swap',
+): Promise<void> {
+  let hasUnsynced = false;
+  try {
+    hasUnsynced = await checker(specDir);
+  } catch (e) {
+    console.warn('spec_sync: unsynced_check_failed_continue_pull', wsId, specDir, e);
+    return;
+  }
+  if (!hasUnsynced) return;
+  console.info('spec_sync: push_before_pull_triggered', wsId, specDir, phase);
+  if (typeof client.postSpecSync !== 'function') return; // mock client 未实现 → 视为回灌跳过，继续 pull（mock 测试不要求 abort）
+  try {
+    await postSpecSync(client, wsId, specDir);
+  } catch (e) {
+    const err = new SpecPushBeforePullError(wsId, specDir, e);
+    console.warn('spec_sync: push_before_pull_failed_abort', err.message, phase);
+    throw err;
+  }
 }
 
 /**
@@ -155,27 +189,7 @@ export async function pullSpecBundle(
   // lease failed 终态。repo-native（junction 已 return）/ repo-mirrored 首次 cp（cacheEmpty）
   // 不会覆盖本地改动，故不触发回灌（上面分支已 return）。
   const checker = opts.unsyncedChecker ?? hasUnsyncedLocalChanges;
-  let hasUnsynced = false;
-  try {
-    hasUnsynced = await checker(specDir);
-  } catch (e) {
-    // 判定器自身异常（如 stat 失败）→ 不阻塞 pull（保守：宁可多拉一次，不因检测错中断）。
-    console.warn('spec_sync: unsynced_check_failed_continue_pull', wsId, specDir, e);
-  }
-  if (hasUnsynced) {
-    console.info('spec_sync: push_before_pull_triggered', wsId, specDir);
-    if (typeof client.postSpecSync === 'function') {
-      try {
-        await postSpecSync(client, wsId!, specDir);
-      } catch (e) {
-        // 回灌失败 → abort pull，保留本地改动（design §7.3 D-008）。
-        const err = new SpecPushBeforePullError(wsId!, specDir, e);
-        console.warn('spec_sync: push_before_pull_failed_abort', err.message);
-        throw err;
-      }
-    }
-    // postSpecSync 未实现（mock client）→ 视为回灌跳过，继续 pull（mock 测试不要求 abort）。
-  }
+  await pushUnsyncedIfDirty(client, wsId, specDir, checker, 'pull_start');
 
   let tarBuf: Buffer;
   try {
@@ -210,6 +224,19 @@ export async function pullSpecBundle(
   } catch (e) {
     // 坏 tar：tmp best-effort 清理，旧缓存原样保留，透传给调用方（R-03 容错：
     // pull 失败不阻塞 session 启动）。
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    throw e;
+  }
+  // ql-20260909-002（swap 前二次回灌）：D-008 检查在 pull 起点只做一次，其后
+  // getSpecBundle 下载 + 解包的长窗口（实测全量 ~40s）内会话进程新写的 spec 文件
+  // 不受任何保护——SWR 后台 revalidate（quick-c1ac3c85）恰在会话启动成功后 fire，
+  // 正落在这个窗口。整树交换前重查一次：有新写入 → 先回灌（服务器留底）再交换
+  //（bundle 是二次回灌前的快照，本地短暂缺新文件，下跳心跳预取对齐自愈）；回灌
+  // 失败 → abort 交换保留本地改动。注意不能落进下方 swap 失败的 in-place 解包
+  // 兜底——那会用旧 bundle 覆盖本地，正是本检查要防的事。
+  try {
+    await pushUnsyncedIfDirty(client, wsId, specDir, checker, 'pre_swap');
+  } catch (e) {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     throw e;
   }
