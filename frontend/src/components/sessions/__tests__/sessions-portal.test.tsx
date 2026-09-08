@@ -35,6 +35,12 @@
  *   8. 会话列表变更信号订阅（2026-08-24-sessions-live-updates task-06 /
  *      D-001 / D-006）：onEvent / onReconnected → invalidate ["agentSessions"]
  *      前缀命中树查询重拉 listAgentSessions；unmount → sub.close() 关订阅
+ *   9. 三分屏接线（2026-09-09-sessions-file-browser-three-pane task-03 /
+ *      FR-01~05 / D-002~006，mock @/components/explorer/file-explorer 与
+ *      file-preview 两组件，R-04）：左栏二模切换与返回 / 📁 置灰+title /
+ *      选中会话与群（onSelect/onSelectGroup/handleGroupCreated/
+ *      enterPreSession 写入点快照 + 清选中回置灰）/ 深链恢复翻转（会话+群，
+ *      R-05）/ 预览列开关 / 切回会话预览保留与不串档（D-004）
  *
  * mock 策略（对齐 sessions 页 page.test.tsx 既有结构——同一渲染树）：
  *   - @/lib/daemon 整模块 mock（列表 API + 面板/表单/控件条消费函数，
@@ -168,6 +174,16 @@ const mocks = vi.hoisted(() => ({
   // task-10：SessionPanel props 捕获（quicklog preContext 合成断言用——
   // quickId 首句上送链属 task-11，本卡经 props 层断言不依赖其落地时序）。
   lastSessionPanelProps: null as Record<string, unknown> | null,
+  // task-03（2026-09-09-sessions-file-browser-three-pane）：explorer 两组件
+  // stub 的 props 捕获（workspaceId / filePath / onSelectFile 断言用）。
+  lastFileExplorerProps: null as {
+    workspaceId: string;
+    onSelectFile: (_path: string) => void;
+  } | null,
+  lastFilePreviewProps: null as {
+    workspaceId: string;
+    filePath: string | null;
+  } | null,
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -373,6 +389,51 @@ vi.mock("@/components/ui/markdown-text", () => ({
   ),
 }));
 
+// task-03（2026-09-09-sessions-file-browser-three-pane / R-04 两层各测各的）：
+// portal 层只 mock explorer 渲染两组件（stub 渲染 + props 捕获，named 与
+// default 导出都提供防导入形态差异）；薄壳与 FileExplorer/FilePreview 的接线
+// 归 portal-file-panels.test（其 mock @/lib/explorer 取数层），不 mock
+// @/lib/explorer——本文件零取数噪声。
+vi.mock("@/components/explorer/file-explorer", () => {
+  const FileExplorerStub = ({
+    workspaceId,
+    onSelectFile,
+  }: {
+    workspaceId: string;
+    onSelectFile: (_path: string) => void;
+  }) => {
+    mocks.lastFileExplorerProps = { workspaceId, onSelectFile };
+    return (
+      <div data-testid="file-explorer-stub">
+        {workspaceId}
+        {/* 模拟点文件：直通 onSelectFile（portal 接线归 setFilePreview 断言） */}
+        <button type="button" onClick={() => onSelectFile("README.md")}>
+          stub-选文件
+        </button>
+      </div>
+    );
+  };
+  return { FileExplorer: FileExplorerStub, default: FileExplorerStub };
+});
+
+vi.mock("@/components/explorer/file-preview", () => {
+  const FilePreviewStub = ({
+    workspaceId,
+    filePath,
+  }: {
+    workspaceId: string;
+    filePath: string | null;
+  }) => {
+    mocks.lastFilePreviewProps = { workspaceId, filePath };
+    return (
+      <div data-testid="file-preview-stub">
+        {workspaceId}:{filePath ?? ""}
+      </div>
+    );
+  };
+  return { FilePreview: FilePreviewStub, default: FilePreviewStub };
+});
+
 // ── jsdom 虚拟滚动桩：scroll 容器给出非零视口（列表条目才进可视区） ────────
 
 const SCROLL_VIEWPORT = { height: 600, width: 320 };
@@ -562,6 +623,8 @@ beforeEach(() => {
   mocks.searchParams = new URLSearchParams();
   mocks.lastListPanelProps = null;
   mocks.lastSessionPanelProps = null;
+  mocks.lastFileExplorerProps = null;
+  mocks.lastFilePreviewProps = null;
   // machineCandidates 与 items 同源注入：门户 picker/两层筛选已改读融合候选
   // （task-10，2026-08-28-daemon-agent-share），漏配机器层 tab 全空。
   const defaultMachines = [
@@ -1948,5 +2011,405 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
         callsBefore,
       ),
     );
+  });
+});
+
+// ── 9. 三分屏接线（2026-09-09-sessions-file-browser-three-pane task-03 / FR-01~05） ──
+
+/**
+ * task-03：展开指定名称的工作区分组（分组默认折叠，同 openNoWorkspaceGroup
+ * 惯例）。全局门户默认 listWorkspaces 空集——带 workspace_id 的固件会话落
+ * 「未知工作区」桶。
+ */
+async function openWorkspaceGroup(groupName: string) {
+  const head = await screen.findByRole("button", {
+    name: `工作区分组 ${groupName}`,
+  });
+  fireEvent.click(head);
+  await waitFor(() => expect(head).toHaveAttribute("aria-expanded", "true"));
+}
+
+/** task-03：点「📁」进文件模式（调用前自行确保按钮 enabled）。 */
+function clickFilesToggle() {
+  fireEvent.click(screen.getByTestId("sessions-left-files-toggle"));
+}
+
+/** task-03：stub 点文件（FileExplorer mock 内置「stub-选文件」按钮 → onSelectFile）。 */
+async function stubPickFile() {
+  fireEvent.click(await screen.findByRole("button", { name: "stub-选文件" }));
+}
+
+// 9.1 左栏二模切换/返回（FR-01 / D-003）
+
+describe("SessionsPortal 左栏二模切换（task-03 FR-01）", () => {
+  it("📁 点击进文件模式：FileExplorer 挂载且 workspaceId=选中会话工作区，SessionListPanel 卸载，中栏会话面板不受影响；← 返回会话复原", async () => {
+    mocks.listAgentSessions.mockResolvedValue({
+      items: [makeSession({ id: "s-ws", title: "工作区会话", workspace_id: "ws-1" })],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    renderPortal();
+    await openWorkspaceGroup("未知工作区");
+    fireEvent.click(screen.getByRole("button", { name: "会话 工作区会话" }));
+    await waitFor(() => expect(screen.getByLabelText("会话面板")).toBeTruthy());
+
+    // 📁 → 文件模式：树壳 + FileExplorer 挂载（workspaceId=快照），列表卸载
+    //（D-003），左把手常驻，中栏会话面板原样（R-01 四分支不动）。
+    clickFilesToggle();
+    expect(await screen.findByTestId("file-explorer-stub")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-1"),
+    );
+    expect(screen.getByTestId("sessions-files-back")).toBeInTheDocument();
+    expect(screen.getByTestId("sessions-left-resizer")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByLabelText("会话列表")).toBeNull());
+    expect(screen.getByLabelText("会话面板")).toBeTruthy();
+
+    // ← 返回会话：列表复原（重挂无损），树卸载，中栏与选中态零影响。
+    fireEvent.click(screen.getByTestId("sessions-files-back"));
+    await waitFor(() => expect(screen.getByLabelText("会话列表")).toBeTruthy());
+    expect(screen.queryByTestId("file-explorer-stub")).toBeNull();
+    expect(screen.getByLabelText("会话面板")).toBeTruthy();
+  });
+});
+
+// 9.2 📁 置灰与提示（FR-02 / D-006 派生兜底）
+
+describe("SessionsPortal 📁 置灰与提示（task-03 FR-02）", () => {
+  it("全局无选中：disabled + title 提示，点击零效果（不进文件模式）", async () => {
+    renderPortal();
+
+    const toggle = screen.getByTestId("sessions-left-files-toggle");
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAttribute(
+      "title",
+      "请先选择一个会话，再查看其所属工作区的文件",
+    );
+    // jsdom 对 disabled 元素仍派发 click——守卫（fileWorkspaceId null 早退）
+    // 承载置灰语义：点击后仍停留会话列表。
+    fireEvent.click(toggle);
+    expect(screen.getByLabelText("会话列表")).toBeTruthy();
+    expect(screen.queryByTestId("file-explorer-stub")).toBeNull();
+  });
+
+  it("scope 入口（workspace）：无选中也恒可点（恒 scope.workspaceId），无 title", async () => {
+    renderPortal(WORKSPACE_SCOPE);
+
+    const toggle = screen.getByTestId("sessions-left-files-toggle");
+    expect(toggle).toBeEnabled();
+    expect(toggle).not.toHaveAttribute("title");
+    clickFilesToggle();
+    expect(await screen.findByTestId("file-explorer-stub")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-1"),
+    );
+  });
+
+  it("清选中路径（删除选中会话）：selectedWorkspaceId 置 null → 按钮回置灰", async () => {
+    mocks.listAgentSessions.mockResolvedValue({
+      items: [makeSession({ id: "s-ws", title: "工作区会话", workspace_id: "ws-1" })],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    renderPortal();
+    await openWorkspaceGroup("未知工作区");
+    fireEvent.click(screen.getByRole("button", { name: "会话 工作区会话" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled(),
+    );
+
+    // 删除选中会话（确认弹窗）→ 选中与工作区快照一并清空。
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除 工作区会话" }),
+    );
+    const okBtn = await waitFor(() => {
+      const btn = document.querySelector(
+        ".ant-modal-confirm-btns .ant-btn-primary",
+      ) as HTMLElement | null;
+      if (!btn) throw new Error("confirm ok button not found");
+      return btn;
+    });
+    fireEvent.click(okBtn);
+    await waitFor(() => expect(screen.getByLabelText("门户空态")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-left-files-toggle")).toBeDisabled(),
+    );
+  });
+});
+
+// 9.3 选中工作区快照（D-006 写入点：onSelect / onSelectGroup / handleGroupCreated / enterPreSession）
+
+describe("SessionsPortal 选中工作区快照（task-03 D-006）", () => {
+  it("选中会话（onSelect s.workspace_id 行对象直取）→ 📁 可点且树按该工作区", async () => {
+    mocks.listAgentSessions.mockResolvedValue({
+      items: [makeSession({ id: "s-a", title: "工作区会话", workspace_id: "ws-a" })],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    renderPortal();
+    await openWorkspaceGroup("未知工作区");
+    fireEvent.click(screen.getByRole("button", { name: "会话 工作区会话" }));
+
+    clickFilesToggle();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-a"),
+    );
+  });
+
+  it("选中群（onSelectGroup group.workspace_id）→ 📁 可点且树按群工作区", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    renderPortal();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "群聊 前端攻坚小分队" }),
+    );
+
+    clickFilesToggle();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-1"),
+    );
+  });
+
+  it("建群成功（handleGroupCreated group.workspace_id）→ 新群选中即快照可切", async () => {
+    // 向导数据源（同群分区建群用例固件：项目 + 项目关联工作区）。
+    mocks.listSimpleProjects.mockResolvedValue([
+      { id: "pj-1", project_name: "SillyHub 平台" },
+    ]);
+    mocks.listProjectWorkspaces.mockResolvedValue([
+      { workspace_id: "ws-1", name: "SillyHub", status: "active", type: null },
+    ]);
+    renderPortal();
+    fireEvent.click(await screen.findByRole("button", { name: "新建群聊" }));
+    fireEvent.change(screen.getByLabelText("群名称"), {
+      target: { value: "前端攻坚小分队" },
+    });
+    const pjInput = document.getElementById("cgw-project");
+    const pjRoot = pjInput?.closest(".ant-select") as HTMLElement;
+    fireEvent.mouseDown(
+      (pjRoot.querySelector(".ant-select-selector") as HTMLElement) ?? pjRoot,
+    );
+    const pjOption = await waitFor(() => {
+      const hit = [
+        ...document.querySelectorAll(".ant-select-item-option-content"),
+      ].find((el) => el.textContent?.trim() === "SillyHub 平台");
+      if (!hit) throw new Error("project option not found");
+      return hit as HTMLElement;
+    });
+    fireEvent.mouseDown(pjOption.closest(".ant-select-item-option") as HTMLElement);
+    fireEvent.click(pjOption.closest(".ant-select-item-option") as HTMLElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "下一步" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(await screen.findByRole("button", { name: "下一步" }));
+    fireEvent.click(await screen.findByRole("button", { name: "创建群聊" }));
+    await waitFor(() =>
+      expect(mocks.createGroupChat).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("group-chat-panel-mount")).toHaveAttribute(
+        "data-group-id",
+        "g-new",
+      );
+    });
+
+    // 建群返回体 workspace_id=ws-1（beforeEach 固件）→ 快照写入可切。
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled(),
+    );
+    clickFilesToggle();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-1"),
+    );
+  });
+
+  it("进预会话（enterPreSession）：非工作区组 workspaceId=null → 按钮置灰；工作区组 → 快照可切", async () => {
+    // null 分支：非工作区组两步浮层 → preContext.workspaceId=null。
+    const noWsView = renderPortal();
+    await enterPreSession("在 非工作区 新建会话");
+    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+    expect(screen.getByTestId("sessions-left-files-toggle")).toBeDisabled();
+    noWsView.unmount();
+
+    // 非空分支：工作区组（listWorkspaces 命中 → 组头「＋」带组 workspaceId）。
+    mocks.listWorkspaces.mockResolvedValue({
+      items: [
+        {
+          id: "ws-a",
+          name: "SillyHub",
+          slug: "sillyhub",
+          root_path: "C:/sillyhub",
+          status: "active",
+        },
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+    renderPortal();
+    await enterPreSession("在 SillyHub 新建会话");
+    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled(),
+    );
+    clickFilesToggle();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-a"),
+    );
+  });
+});
+
+// 9.4 深链恢复翻转（R-05：快照来自深链验证请求返回体）
+
+describe("SessionsPortal 深链恢复翻转（task-03 R-05）", () => {
+  it("会话深链：getAgentSession resolve 前按钮置灰，resolve 后按返回体 workspace_id 翻转为可点", async () => {
+    // 手控 deferred：断言「验证完成前」的置灰暂态非异步竞态。首次调用=深链
+    // 验证；后续（SessionPanel detailQuery 等）立即返回同体（防面板常驻
+    // loading 无 aria-label 锚）。
+    const deepSession = makeSession({
+      id: "s-deep",
+      workspace_id: "ws-deep",
+      title: "深链会话",
+    });
+    let resolveSession: (_s: AgentSessionRead) => void = () => {};
+    let firstCall = true;
+    mocks.getAgentSession.mockImplementation(() => {
+      if (!firstCall) return Promise.resolve(deepSession);
+      firstCall = false;
+      return new Promise<AgentSessionRead>((res) => {
+        resolveSession = res;
+      });
+    });
+    mocks.searchParams = new URLSearchParams("session=s-deep");
+    renderPortal();
+
+    expect(screen.getByTestId("sessions-left-files-toggle")).toBeDisabled();
+    await act(async () => {
+      resolveSession(deepSession);
+    });
+    await waitFor(() => expect(screen.getByLabelText("会话面板")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled(),
+    );
+    clickFilesToggle();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-deep"),
+    );
+  });
+
+  it("群深链（session_kind=group）：resolve 后按群返回体 workspace_id 翻转可点", async () => {
+    mocks.searchParams = new URLSearchParams("session=g-deep");
+    mocks.getAgentSession.mockResolvedValue(
+      makeSession({
+        id: "g-deep",
+        session_kind: "group",
+        workspace_id: "ws-g",
+        title: "深链群",
+      }),
+    );
+    renderPortal();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("group-chat-panel-mount")).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled(),
+    );
+    clickFilesToggle();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-g"),
+    );
+  });
+});
+
+// 9.5 预览列开关（FR-03：点文件才展开，✕ 整列含把手收起）
+
+describe("SessionsPortal 文件预览列开关（task-03 FR-03）", () => {
+  it("stub 点文件 → FilePreview 收到 {workspaceId=进模式快照, filePath}，右列+右把手开；✕ → 整列含把手卸载；同文件重复点幂等", async () => {
+    renderPortal(WORKSPACE_SCOPE);
+    expect(screen.queryByTestId("sessions-file-preview-column")).toBeNull();
+    expect(screen.queryByTestId("sessions-file-preview-resizer")).toBeNull();
+
+    clickFilesToggle();
+    await stubPickFile();
+    await waitFor(() =>
+      expect(mocks.lastFilePreviewProps).toEqual({
+        workspaceId: "ws-1",
+        filePath: "README.md",
+      }),
+    );
+    expect(screen.getByTestId("sessions-file-preview-column")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("sessions-file-preview-resizer"),
+    ).toBeInTheDocument();
+
+    // 同文件重复点：幂等（列仍在，props 同值）。
+    await stubPickFile();
+    expect(mocks.lastFilePreviewProps).toEqual({
+      workspaceId: "ws-1",
+      filePath: "README.md",
+    });
+    expect(screen.getByTestId("sessions-file-preview-column")).toBeInTheDocument();
+
+    // ✕（壳组件承载）→ 整列含把手收起，树仍在文件模式。
+    fireEvent.click(screen.getByTestId("sessions-file-preview-close"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("sessions-file-preview-column")).toBeNull(),
+    );
+    expect(screen.queryByTestId("sessions-file-preview-resizer")).toBeNull();
+    expect(screen.getByTestId("file-explorer-stub")).toBeInTheDocument();
+  });
+});
+
+// 9.6 切回会话预览保留（D-004：预览列生命周期独立于左栏模式）
+
+describe("SessionsPortal 切回会话预览保留（task-03 D-004）", () => {
+  it("← 返回会话后预览列仍在；换选中重进文件模式树按新工作区、旧预览不跨工作区串档", async () => {
+    mocks.listAgentSessions.mockResolvedValue({
+      items: [
+        makeSession({ id: "s-a", title: "会话甲", workspace_id: "ws-a" }),
+        makeSession({ id: "s-b", title: "会话乙", workspace_id: "ws-b" }),
+      ],
+      total: 2,
+      limit: 50,
+      offset: 0,
+    });
+    renderPortal();
+    await openWorkspaceGroup("未知工作区");
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话甲" }));
+    await waitFor(() => expect(screen.getByLabelText("会话面板")).toBeTruthy());
+
+    clickFilesToggle();
+    await stubPickFile();
+    await waitFor(() =>
+      expect(mocks.lastFilePreviewProps).toEqual({
+        workspaceId: "ws-a",
+        filePath: "README.md",
+      }),
+    );
+
+    // ← 返回会话：列表复原（选中会话所在组豁免展开），预览列保留（边聊边看）。
+    fireEvent.click(screen.getByTestId("sessions-files-back"));
+    await waitFor(() => expect(screen.getByLabelText("会话列表")).toBeTruthy());
+    expect(screen.getByTestId("sessions-file-preview-column")).toBeInTheDocument();
+
+    // 换选中（乙 → ws-b）再进文件模式：树按届时 fileWorkspaceId 重建，
+    // 旧预览仍按其 {workspaceId, path} 取数不串档（D-004）。
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 会话乙" }),
+    );
+    clickFilesToggle();
+    await waitFor(() =>
+      expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-b"),
+    );
+    expect(mocks.lastFilePreviewProps).toEqual({
+      workspaceId: "ws-a",
+      filePath: "README.md",
+    });
   });
 });

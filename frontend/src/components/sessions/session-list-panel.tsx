@@ -97,7 +97,7 @@
  * task-11 v3 返工）：scope 判别联合（WorkspaceScope/ChangeScope 导出）、D-003@v2
  * 端点过滤、D-006 紧凑两行、ql-20260818-012 批量删除——语义均随本次重构迁移。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Input, Modal, Popover, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
@@ -470,6 +470,13 @@ export interface SessionListPanelProps {
    * 会话删除先例无 toast，群对齐；未传时群行零删除按钮零请求）。
    */
   onDeleteGroup?: (_id: string) => Promise<void>;
+  /**
+   * 头部「共 N 个」右侧插槽（2026-09-09-sessions-file-browser-three-pane
+   * task-02 / D-002：portal 文件模式切换按钮经此注入，task-03 接线）。
+   * 未传不渲染（条件渲染不残留空节点），纯透传零行为变化——其余消费点
+   * （悬浮助手 runtime 抽屉等）不传即与现状完全等价。
+   */
+  headerExtra?: ReactNode;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -688,6 +695,7 @@ function WorkspaceTreeList({
   onArchiveGroup,
   onUnarchiveGroup,
   onDeleteGroup,
+  headerExtra,
 }: SessionListPanelProps) {
   // 两层筛选下拉（D-107；ql-20260908-005 胶囊 tab → 下拉）：纯视图过滤，不进
   // 数据层（机器/智能体值与胶囊时期同源——机器 id / 引擎 value）。筛选值经
@@ -1549,12 +1557,17 @@ function WorkspaceTreeList({
       aria-label="会话列表"
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
     >
-      {/* 头部：标题 + 总数（视图过滤后计数；无筛选时 = 拉取条数） */}
+      {/* 头部：标题 + 总数（视图过滤后计数；无筛选时 = 拉取条数）。
+          右侧 flex 组：计数徽章 + headerExtra 插槽（task-02 / D-002，portal
+          文件模式切换按钮注入；shrink-0 防长内容挤压徽章，未传不渲染）。 */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold text-foreground">会话</h2>
-        <span className="rounded-full bg-brand-100 px-2 py-px text-[10.5px] font-semibold text-brand-700">
-          共 {visibleTotal} 个
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="rounded-full bg-brand-100 px-2 py-px text-[10.5px] font-semibold text-brand-700">
+            共 {visibleTotal} 个
+          </span>
+          {headerExtra != null ? headerExtra : null}
+        </div>
       </div>
 
       {/* ql-20260831-013：归档视图上下文横幅——用户反馈切进「已归档会话」

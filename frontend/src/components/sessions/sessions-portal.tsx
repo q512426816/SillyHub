@@ -66,6 +66,19 @@
  *     （新会话落对应分组顶部）；
  *   - 用户切走（列表 onSelect）→ 清 preContext（首句未发 = 零服务端残留）。
  *
+ * 三分屏文件浏览（2026-09-09-sessions-file-browser-three-pane task-03 / FR-01~
+ *   FR-04）：左栏二模——会话列表 ⇄ 工作区文件树（D-003 files 模式卸载
+ *   SessionListPanel），左栏头部「📁」切换（aria「查看工作区文件」；
+ *   fileWorkspaceId=null 时置灰 + title「请先选择一个会话，再查看其所属工作区
+ *   的文件」）。fileWorkspaceId 解析（D-006）：scope 入口（workspace/change/
+ *   quicklog）恒 scope.workspaceId；全局入口取 selectedWorkspaceId——六写入点
+ *   显式快照（列表 onSelect / onSelectGroup / handleGroupCreated / 深链
+ *   getAgentSession 返回体 / enterPreSession / 清选中路径置 null）。进文件模式
+ *   快照 filesModeWorkspaceId（树不随选中闪跳，D-004）；filePreview
+ *   {workspaceId, path} 右列生命周期独立——✕ 关整列、「← 返回会话」保留预览
+ *   （边聊边看），预览按其 workspaceId 取数不跨工作区串档。grid 换 flex 三栏 +
+ *   两把 PanelResizer（宽度 localStorage 记忆，D-005 左栏默认 320 与现状一致）。
+ *
  * 深链恢复（D-004@v1）语义保留：?session= 有效直达选中态；无效/无参静默落
  * 空门户态（原落新建表单态，design §9 兼容策略）。
  *
@@ -85,7 +98,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { Clock, Plus, Sparkles } from "lucide-react";
+import { Clock, FolderOpen, Plus, Sparkles } from "lucide-react";
 
 import {
   SessionPanel,
@@ -95,9 +108,22 @@ import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
 import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
 import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
 import {
+  PortalFilePreviewPanel,
+  PortalFileTreePanel,
+  SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT,
+  SESSIONS_FILE_PREVIEW_WIDTH_LS_KEY,
+  SESSIONS_FILE_PREVIEW_WIDTH_MAX,
+  SESSIONS_FILE_PREVIEW_WIDTH_MIN,
+  SESSIONS_LEFT_PANEL_WIDTH_DEFAULT,
+  SESSIONS_LEFT_PANEL_WIDTH_LS_KEY,
+  SESSIONS_LEFT_PANEL_WIDTH_MAX,
+  SESSIONS_LEFT_PANEL_WIDTH_MIN,
+} from "@/components/sessions/portal-file-panels";
+import {
   SessionListPanel,
   type SessionListScope,
 } from "@/components/sessions/session-list-panel";
+import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
 import { GitStatusBar } from "@/components/git-log/git-status-bar";
 import { PageContainer, PageHeader } from "@/components/layout";
 import { listProviders } from "@/lib/api/llm-providers";
@@ -147,6 +173,27 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   const [selectedGroup, setSelectedGroup] = useState<GroupChatListItemRead | null>(
     null,
   );
+  // ── task-03（2026-09-09-sessions-file-browser-three-pane / FR-01~04）：三分屏 ──
+  // 左栏二模（sessions 会话列表 / files 工作区文件树；files 模式卸载
+  // SessionListPanel——列表数据在 react-query 缓存、筛选/展开态 localStorage
+  // 持久化，重挂无损，D-003）。
+  const [leftMode, setLeftMode] = useState<"sessions" | "files">("sessions");
+  // 进文件模式时快照的工作区（树按此取数不随选中闪跳，D-004；「← 返回会话」
+  // 清快照但不清预览列）。
+  const [filesModeWorkspaceId, setFilesModeWorkspaceId] = useState<string | null>(
+    null,
+  );
+  // 右侧文件预览列独立生命周期：{workspaceId, path} 防跨工作区串档（点文件以
+  // 当时树的工作区落值，✕ 关列才清；切回会话列表保留——边聊边看）。
+  const [filePreview, setFilePreview] = useState<{
+    workspaceId: string;
+    path: string;
+  } | null>(null);
+  // 全局入口当前选中归属工作区（六写入点显式快照，D-006——原派生链有群深链不
+  // 回填 selectedGroup、旁路列表外 find 不命中两处缺口；scope 入口不经此值）。
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+    null,
+  );
   const qc = useQueryClient();
 
   // task-01（D-004@v1）：?session= 深链——挂载时解析一次（urlRestoreDoneRef
@@ -161,6 +208,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     urlRestoreDoneRef.current = true;
     void getAgentSession(deepSessionId)
       .then((session) => {
+        // task-03（D-006 深链写入点）：深链验证请求返回体天然带全字段——按
+        // workspace_id 快照（会话/群两分支共用；覆盖列表 limit=100 之外/已归档
+        // 的选中，R-05：验证完成前的短暂置灰是暂态非 bug）。
+        setSelectedWorkspaceId(session.workspace_id);
         // quick-fdd8219a：群会话深链分流——?session=<群id> 同样有效（群 id
         // 即群会话 id，详情端点群成员可读），按 session_kind 分流群选中。
         if (session.session_kind === "group") {
@@ -305,6 +356,30 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   const scopedWorkspaceArchived =
     scopedWorkspaceId != null && scopedWorkspaceQuery.data?.status === "archived";
 
+  // task-03（FR-02 / D-006）：「📁」切换钮的目标工作区——scope 入口
+  // （workspace/change/quicklog）恒 scope.workspaceId；全局入口取
+  // selectedWorkspaceId 快照（null 时按钮置灰 + title 提示）。
+  const fileWorkspaceId = useMemo(
+    () => (scopedWorkspaceId != null ? scopedWorkspaceId : selectedWorkspaceId),
+    [scopedWorkspaceId, selectedWorkspaceId],
+  );
+
+  // task-03（FR-04）：三栏宽度（usePanelWidth localStorage 记忆；左栏默认 320
+  // 与改造前固定宽一致 D-005；预览列默认 480）。常量与 storageKey 由
+  // portal-file-panels 集中导出。
+  const [leftWidth, setLeftWidth] = usePanelWidth({
+    storageKey: SESSIONS_LEFT_PANEL_WIDTH_LS_KEY,
+    defaultWidth: SESSIONS_LEFT_PANEL_WIDTH_DEFAULT,
+    minWidth: SESSIONS_LEFT_PANEL_WIDTH_MIN,
+    maxWidth: SESSIONS_LEFT_PANEL_WIDTH_MAX,
+  });
+  const [previewWidth, setPreviewWidth] = usePanelWidth({
+    storageKey: SESSIONS_FILE_PREVIEW_WIDTH_LS_KEY,
+    defaultWidth: SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT,
+    minWidth: SESSIONS_FILE_PREVIEW_WIDTH_MIN,
+    maxWidth: SESSIONS_FILE_PREVIEW_WIDTH_MAX,
+  });
+
   /** ql-20260823-005：?new=1 直达时预会话/兜底浮层的默认组——workspace/change
    *  scope 锁定本组，全局门户不指定（null，与组头「＋」非工作区分组同语义）。
    *  task-10（X-008 消费点四）：quicklog scope 同锁定本工作区。 */
@@ -326,7 +401,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
    * （quickId 字段类型由 task-11 同 Wave 落地，两卡 constraints 已声明耦合）。 */
   const enterPreSession = useCallback(
     (runtimeId: string, workspaceId: string | null) => {
-      setPreContext(
+      // task-03（D-006 预会话写入点）：先合成 preContext 再按其 workspaceId
+      // 快照选中工作区（可 null=非工作区组，按钮随之置灰）。
+      const nextPreContext: SessionPreContext =
         scope?.kind === "change"
           ? {
               workspaceId: scope.workspaceId,
@@ -339,8 +416,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                 quickId: scope.qlId,
                 runtimeId,
               }
-            : { workspaceId, runtimeId },
-      );
+            : { workspaceId, runtimeId };
+      setPreContext(nextPreContext);
+      setSelectedWorkspaceId(nextPreContext.workspaceId);
       setSelectedSessionId(null);
       // task-07：进预会话清群选中（右侧三分支优先级：群视图 > 真会话 > 预会话）。
       setSelectedGroupId(null);
@@ -487,6 +565,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setSelectedSessionId(null);
       setSelectedGroup(group);
       setSelectedGroupId(group.id);
+      // task-03（D-006 群选中写入点）：群必带工作区，直接快照。
+      setSelectedWorkspaceId(group.workspace_id);
       // quick-fdd8219a：群选中落 URL（?session=<群id>——刷新保持群视图，同
       // 单聊 ql-20260824-001 语义；深链按 session_kind 分流回群选中）。
       syncSessionParam(group.id);
@@ -502,6 +582,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setPreContext(null);
       setSelectedSessionId(null);
       setSelectedGroupId(group.id);
+      // task-03（D-006 建群写入点）：建群即选中，同样按返回体工作区快照。
+      setSelectedWorkspaceId(group.workspace_id);
       setSelectedGroup({
       ...group,
       online_member_ids: [],
@@ -538,21 +620,73 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
         }
       />
       {/* 原型 .main-grid：左 320px 列表 + 右面板；gap-3 与 PageContainer 卡片间距
-          统一（ql-20260908-016，原 3.5 与页头间距不一致）。 */}
-      <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-3">
-        <SessionListPanel
+          统一（ql-20260908-016，原 3.5 与页头间距不一致）。
+          task-03（FR-04）：grid 换 flex 三栏——左栏宽度 usePanelWidth 可拖
+          （240–560，默认 320 与原固定宽一致 D-005）+ 中栏 flex-1 min-w-0
+          （R-01：grid 1fr ↔ flex-1 min-w-0 等价，四分支原样迁入）+ filePreview
+          时追加右把手与预览列（320–860，默认 480）；overflow-hidden 兜窄视口
+          三栏总宽溢出（R-03，用户可拖窄/关列）。 */}
+      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+        {/* 左栏：leftMode 二模（D-003 files 模式卸载 SessionListPanel，宽度两模
+            共用同一 usePanelWidth 状态）。 */}
+        <div className="min-w-0 shrink-0" style={{ width: `${leftWidth}px` }}>
+          {leftMode === "files" && filesModeWorkspaceId != null ? (
+            <PortalFileTreePanel
+              workspaceId={filesModeWorkspaceId}
+              onBack={() => {
+                // 「← 返回会话」：仅清进模式快照（filePreview 保留——边聊边看，
+                // D-004；再次进入按届时 fileWorkspaceId 重建树）。
+                setFilesModeWorkspaceId(null);
+                setLeftMode("sessions");
+              }}
+              onSelectFile={(path) =>
+                // 点文件以当时树的工作区（快照）落值；同文件重复点幂等（同值
+                // 重设零行为差异）。
+                setFilePreview({ workspaceId: filesModeWorkspaceId, path })
+              }
+            />
+          ) : (
+            <SessionListPanel
           scope={scope}
           selectedSessionId={selectedSessionId}
           onSelect={(s) => {
             // 用户切走（task-06 / FR-03）：清预会话态不残留。
             setPreContext(null);
             setSelectedSessionId(s.id);
+            // task-03（D-006 会话选中写入点）：行对象直取 workspace_id 快照
+            //（非列表查找——旁路列表 limit/archived 外也能命中）。
+            setSelectedWorkspaceId(s.workspace_id);
             // task-07：切单聊清群选中（右侧分支让位真会话面板）。
             setSelectedGroupId(null);
             setSelectedGroup(null);
             // ql-20260824-001：选中落 URL（刷新保持当前会话）。
             syncSessionParam(s.id);
           }}
+          headerExtra={
+            /* task-03（D-002 / FR-01~02）：左栏头部「📁」切换到工作区文件——
+               贴近列表视线焦点；全局入口未解析出工作区（无选中）时置灰 +
+               title 提示（FR-02）；scope 入口恒可点。纯图标按钮对齐原型
+               .icon-btn，样式沿用列表组头「＋」同款 brand 语义阶。 */
+            <button
+              type="button"
+              aria-label="查看工作区文件"
+              data-testid="sessions-left-files-toggle"
+              disabled={fileWorkspaceId == null}
+              title={
+                fileWorkspaceId == null
+                  ? "请先选择一个会话，再查看其所属工作区的文件"
+                  : undefined
+              }
+              onClick={() => {
+                if (fileWorkspaceId == null) return;
+                setFilesModeWorkspaceId(fileWorkspaceId);
+                setLeftMode("files");
+              }}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand-100 disabled:hover:text-brand-700 disabled:hover:shadow-none"
+            >
+              <FolderOpen aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          }
           onNewInGroup={handleNewInGroup}
           /* task-07：群聊分区接线——选中群行/分区头「＋」开建群向导
              （onSelectGroup 传入即启用分区，见 session-list-panel 注释）。 */
@@ -581,6 +715,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             if (ids.includes(selectedSessionId ?? "")) {
               setSelectedSessionId(null);
+              // task-03（D-006 清选中路径）：选中归属工作区一并清空（按钮回置灰）。
+              setSelectedWorkspaceId(null);
               // ql-20260824-012：选中被删清空，同步移除 ?session=。
               syncSessionParam(null);
             }
@@ -596,6 +732,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             if (ids.includes(selectedSessionId ?? "")) {
               setSelectedSessionId(null);
+              // task-03（D-006 清选中路径）：同删除口径清工作区快照。
+              setSelectedWorkspaceId(null);
               syncSessionParam(null);
             }
             return results.filter((r) => r.status === "rejected").length;
@@ -608,6 +746,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             if (ids.includes(selectedSessionId ?? "")) {
               setSelectedSessionId(null);
+              // task-03（D-006 清选中路径）：同删除口径清工作区快照。
+              setSelectedWorkspaceId(null);
               syncSessionParam(null);
             }
             return results.filter((r) => r.status === "rejected").length;
@@ -655,6 +795,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             if (id === selectedGroupId) {
               setSelectedGroupId(null);
               setSelectedGroup(null);
+              // task-03（D-006 清选中路径）：群选中被操作时同步清工作区快照。
+              setSelectedWorkspaceId(null);
               syncSessionParam(null);
             }
             return results.filter((r) => r.status === "rejected").length;
@@ -666,6 +808,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             if (id === selectedGroupId) {
               setSelectedGroupId(null);
               setSelectedGroup(null);
+              // task-03（D-006 清选中路径）：同归档口径清工作区快照。
+              setSelectedWorkspaceId(null);
               syncSessionParam(null);
             }
             return results.filter((r) => r.status === "rejected").length;
@@ -677,10 +821,30 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             if (id === selectedGroupId) {
               setSelectedGroupId(null);
               setSelectedGroup(null);
+              // task-03（D-006 清选中路径）：同归档口径清工作区快照。
+              setSelectedWorkspaceId(null);
               syncSessionParam(null);
             }
           }}
+            />
+          )}
+        </div>
+        {/* 左把手：会话列表/文件树两模共用（宽度同一 leftWidth，把手不随模式
+            切换重挂——拖拽状态零丢失）。 */}
+        <PanelResizer
+          width={leftWidth}
+          onWidthChange={setLeftWidth}
+          defaultWidth={SESSIONS_LEFT_PANEL_WIDTH_DEFAULT}
+          minWidth={SESSIONS_LEFT_PANEL_WIDTH_MIN}
+          maxWidth={SESSIONS_LEFT_PANEL_WIDTH_MAX}
+          ariaLabel="调整会话列表宽度"
+          testId="sessions-left-resizer"
         />
+        {/* 中栏：既有四分支（群/会话/预会话/空态）原样迁入（R-01）。grid 单元
+            格保持原 grid item 拉伸语义（四分支根类 h-full/flex-1/纯 stretch 三种
+            混用，block 容器会丢高度链）；作为行 flex 子项 flex-1 min-w-0 与原
+            grid 1fr 列等价。 */}
+        <div className="grid min-h-0 min-w-0 flex-1">
         {/* task-07（FR-01）：选中群 → 群聊面板（task-08 GroupChatPanel 接管原
             GroupChatPanelMount：平铺时间线 + SSE 消费 + 输入区 + 右列成员面板；
             key 重挂载契约照 SessionPanel——换群即清 SSE/时间线/typing 状态；
@@ -777,6 +941,34 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
               )}
             </div>
           </div>
+        )}
+        </div>
+        {/* task-03（FR-03）：filePreview 非空时追加右把手 + 预览列——「✕」（壳
+            组件承载 sessions-file-preview-close）清空整列含把手，中栏回宽；
+            预览按其 {workspaceId, path} 独立取数，切回会话列表不卸载（D-004）。 */}
+        {filePreview != null && (
+          <>
+            <PanelResizer
+              width={previewWidth}
+              onWidthChange={setPreviewWidth}
+              defaultWidth={SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT}
+              minWidth={SESSIONS_FILE_PREVIEW_WIDTH_MIN}
+              maxWidth={SESSIONS_FILE_PREVIEW_WIDTH_MAX}
+              ariaLabel="调整文件预览宽度"
+              testId="sessions-file-preview-resizer"
+            />
+            <div
+              className="min-w-0 shrink-0"
+              style={{ width: `${previewWidth}px` }}
+              data-testid="sessions-file-preview-column"
+            >
+              <PortalFilePreviewPanel
+                workspaceId={filePreview.workspaceId}
+                filePath={filePreview.path}
+                onClose={() => setFilePreview(null)}
+              />
+            </div>
+          </>
         )}
       </div>
       {/* task-06（FR-04/D-107）：组头「＋」两步浮层（①在线机器 ②智能体，默认
