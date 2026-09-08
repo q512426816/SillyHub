@@ -7,9 +7,10 @@
  * prototype-task-execution-panel.html（.tep 系列样式语义，形态对照非像素照抄）。
  *
  * 结构（方案 B / D-004@v1；挂载于会话头部横幅之下、会话主体之上，接线归 task-08）：
- *   - 折叠态：一行常驻摘要「任务执行 · 运行中 N · 任务 M（成功 X / 失败 Y）·
- *     轮次 K」（FR-01 常驻形态——与 AgentLogCard 空态返回 null 不同，本面板
- *     折叠条常驻，空数据显示 0 计数），点击整行展开 / 收起；
+ *   - 折叠态：有数据才渲染的一行摘要「任务执行 · 运行中 N · 任务 M（成功 X /
+ *     失败 Y）· 轮次 K」（ql-20260909-003-8a54 FR-01 决策演进：全零空数据返回 null，
+ *     对齐 AgentLogCard 空态先例；原 task-07「折叠条常驻，空数据显示 0 计数」
+ *     废弃），点击整行展开 / 收起；
  *   - 展开态三页签 + 内容区 max-h-[300px] 内部滚动（R-04：dialog 模式不挤压
  *     会话主体）：
  *     ① 任务清单：useSessionTasks(sessionId)（快照 + 实时合并，task-06）渲染
@@ -51,7 +52,6 @@ import {
   useId,
   useImperativeHandle,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { ChevronRight, Cog } from "lucide-react";
@@ -485,12 +485,28 @@ export const TaskExecutionPanel = forwardRef<
   const runningTotal =
     (runningTasks?.length ?? 0) + sortedMissions.length + (bashProgress ? 1 : 0);
 
+  // ql-20260909-003-8a54（quick，FR-01 决策演进）：全零空数据不再常驻折叠条——返回
+  // null 对齐 AgentLogCard 空态先例（原「常驻 0 计数」是 task-07 FR-01 决策，
+  // 用户反馈右栏信息条挤：SessionUsageBar+AgentLogCard+本面板三叠，全零条是
+  // 纯噪音）。「有数据」口径 = 运行中 / 任务快照 / 轮次历史 / 团队任务（含终态）
+  // / 计划总纲 任一非空。取数进行中（tasksLoading/runsLoading）不视为有数据：
+  // 真有数据的会话条随数据到达弹入（一次性布局下移，与 AgentLogCard 同款）；
+  // 真空的会话恒隐藏。首载请求失败（runsError）保守显示（fail-closed 防误隐）。
+  const hasAnyData =
+    runningTotal > 0 ||
+    tasks.length > 0 ||
+    runsCount > 0 ||
+    (planObjective ?? "").trim().length > 0 ||
+    (planTasks ?? []).length > 0 ||
+    runsError;
+  if (!hasAnyData && !open) return null;
+
   return (
     <div
       data-testid="task-execution-panel"
       className="shrink-0 border-b border-border bg-card"
     >
-      {/* ===== 折叠条（常驻——空数据 0 计数，点击整行切换展开/收起） ===== */}
+      {/* ===== 折叠条（有数据才渲染——点击整行切换展开/收起） ===== */}
       <button
         type="button"
         data-testid="task-execution-bar"

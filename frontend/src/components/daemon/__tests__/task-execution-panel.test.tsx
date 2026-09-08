@@ -178,51 +178,50 @@ beforeEach(() => {
   daemonMock.listSessionRuns.mockResolvedValue([]);
 });
 
-/* ───────── ① 折叠条常驻 + 展开（FR-01 / FR-07 空态） ───────── */
+/* ───────── ① 折叠条显隐 + 展开（FR-01 / FR-07；ql-20260909-003-8a54 演进） ───────── */
 
 describe("TaskExecutionPanel 折叠条（task-07 / FR-01 / FR-07）", () => {
-  it("空数据折叠条常驻显示 0 计数，不报错（FR-07 引擎不上报任务降级）", async () => {
+  // ql-20260909-003-8a54（quick，FR-01 决策演进）：全零空数据折叠条不再常驻——
+  // 返回 null 对齐 AgentLogCard 空态先例（原「常驻显示 0 计数」断言随行为翻转）。
+  it("空数据不渲染折叠条（全零返回 null，右栏降噪）", async () => {
     render(<TaskExecutionPanel sessionId="sess-1" />);
     await flush();
-    const summary = screen.getByTestId("task-execution-summary");
-    expect(summary.textContent).toContain("运行中 0");
-    expect(summary.textContent).toContain("任务 0");
-    expect(summary.textContent).toContain("成功 0");
-    expect(summary.textContent).toContain("失败 0");
-    expect(summary.textContent).toContain("轮次 0");
-    // 折叠态：内容区不渲染
-    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByTestId("task-execution-panel")).toBeNull();
+    expect(screen.queryByTestId("task-execution-summary")).toBeNull();
   });
 
-  it("预会话态（sessionId 空串）两处自取数跳过、计数收敛 0", async () => {
+  it("预会话态（sessionId 空串）两处自取数跳过，同样不渲染", async () => {
     render(<TaskExecutionPanel sessionId="" />);
     await flush();
     expect(daemonMock.listSessionTasks).not.toHaveBeenCalled();
     expect(daemonMock.listSessionRuns).not.toHaveBeenCalled();
-    expect(screen.getByTestId("task-execution-summary").textContent).toContain("任务 0");
+    expect(screen.queryByTestId("task-execution-panel")).toBeNull();
   });
 
-  it("点击折叠条展开三页签（任务清单 / 运行中 N / 轮次历史），空数据显示空态文案", async () => {
+  it("有任务数据即渲染折叠条；点击展开三页签，空页签显示空态文案", async () => {
+    daemonMock.listSessionTasks.mockResolvedValue([
+      taskRow({ task_id: "bg-1", task_name: "后台调研", status: "completed" }),
+    ]);
     render(<TaskExecutionPanel sessionId="sess-1" />);
     await flush();
+    expect(screen.getByTestId("task-execution-summary").textContent).toContain("任务 1");
     fireEvent.click(screen.getByTestId("task-execution-bar"));
     // 三页签按钮（任务清单 / 运行中 0 / 轮次历史）
     expect(screen.getByTestId("task-execution-tab-tasks").textContent).toBe("任务清单");
     expect(screen.getByTestId("task-execution-tab-running").textContent).toBe("运行中 0");
     expect(screen.getByTestId("task-execution-tab-runs").textContent).toBe("轮次历史");
-    // 默认任务清单页签空态文案（FR-07：不报错、不阻塞）
-    expect(screen.getByTestId("task-execution-empty").textContent).toContain(
-      "暂无任务记录",
-    );
+    // 默认任务清单页签渲染任务行（非空态）
+    expect(screen.getByText("后台调研")).toBeTruthy();
     // 运行中页签空态
     fireEvent.click(screen.getByTestId("task-execution-tab-running"));
     expect(screen.getByTestId("task-execution-empty").textContent).toBe("当前无运行中任务");
     // 轮次页签空态
     fireEvent.click(screen.getByTestId("task-execution-tab-runs"));
     expect(screen.getByTestId("task-execution-empty").textContent).toBe("暂无轮次记录");
-    // 再点击折叠条收起：内容区移除
+    // 再点击折叠条收起：内容区移除（折叠条仍在——有数据）
     fireEvent.click(screen.getByTestId("task-execution-bar"));
     expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByTestId("task-execution-summary")).toBeTruthy();
   });
 });
 
