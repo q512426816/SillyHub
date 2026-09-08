@@ -1,7 +1,12 @@
-# 团队分身子会话系统 backend 审计报告（缺陷 + 性能双视角）
-
+---
+# 历史审计快照：file:line 锚记录的是审计时点位置，不随后续代码演进追改
+#（ql-20260908-012 预防性对齐 ql-20260908-011 的 daemon-frontend 审计同款豁免）。
+doc_type: snapshot
 author: qinyi
 created_at: 2026-08-26 05:56:48
+---
+
+# 团队分身子会话系统 backend 审计报告（缺陷 + 性能双视角）
 
 审计对象：`2026-08-25-team-subsession-governance` / `2026-08-26-team-subsession-recursion` / `2026-08-26-subsession-portal-grouping` 三个已归档变更的 backend 产物（已在 main）。
 
