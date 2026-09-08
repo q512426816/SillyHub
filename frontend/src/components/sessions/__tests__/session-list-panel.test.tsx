@@ -64,6 +64,7 @@ import type * as React from "react";
 import {
   SessionListPanel,
   SESSION_TREE_EXPANSION_LS_KEY,
+  SESSION_TREE_FILTER_LS_KEY,
   GROUP_SECTION_COLLAPSED_LS_KEY,
   sessionListPollInterval,
   type SessionListScope,
@@ -481,6 +482,8 @@ beforeEach(() => {
   window.localStorage.removeItem(SESSION_TREE_EXPANSION_LS_KEY);
   // quick：群聊分区折叠记忆隔离（跨用例须清）。
   window.localStorage.removeItem(GROUP_SECTION_COLLAPSED_LS_KEY);
+  // ql-20260908-005：两层筛选记忆隔离（选择落盘恢复，跨用例须清）。
+  window.localStorage.removeItem(SESSION_TREE_FILTER_LS_KEY);
   // 2026-09-08-session-list-liveness-dot task-03：liveness 转移检测/未读标记
   // 隔离（默认空集——既有用例零渲染干扰）。
   clearLivenessStorage();
@@ -657,9 +660,9 @@ describe("SessionListPanel 树条目 chips", () => {
   });
 });
 
-// ── 3/4. 两层筛选 tab（D-107：纯视图过滤不进数据层） ──────────────────────
+// ── 3/4. 两层筛选下拉（D-107：纯视图过滤不进数据层；ql-20260908-005 胶囊→下拉） ──
 
-describe("SessionListPanel 两层筛选 tab", () => {
+describe("SessionListPanel 两层筛选下拉", () => {
   function mixedSessions() {
     return [
       makeSession({ id: "s-1", runtime_id: "rt-m1", provider: "claude", title: "机器一Claude" }),
@@ -676,11 +679,11 @@ describe("SessionListPanel 两层筛选 tab", () => {
     renderPanel(<SessionListPanel selectedSessionId="s-3" />);
     await waitFor(() => expect(sessionRows().length).toBe(3));
 
-    // 默认：仅机器层（无智能体层）
-    expect(document.querySelector('[aria-label="智能体筛选层"]')).toBeNull();
+    // 默认：仅机器层（无智能体下拉）
+    expect(document.getElementById("slp-agent")).toBeNull();
 
-    // 选 machine-2 → 仅其条目 + 智能体层出现 + 小节标题隐藏（FR-02）
-    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-2" }));
+    // 选 machine-2 → 仅其条目 + 智能体下拉出现 + 小节标题隐藏（FR-02）
+    await chooseAntdOptionByText("slp-machine", "machine-2");
     await waitFor(() => expect(sessionRows().length).toBe(1));
     expect(
       screen.queryByRole("button", { name: "会话 机器二Claude" }),
@@ -688,7 +691,7 @@ describe("SessionListPanel 两层筛选 tab", () => {
     expect(
       screen.queryByRole("button", { name: "会话 机器一Claude" }),
     ).not.toBeInTheDocument();
-    expect(document.querySelector('[aria-label="智能体筛选层"]')).not.toBeNull();
+    expect(document.getElementById("slp-agent")).not.toBeNull();
     expect(machineSection("machine-2")).toBeNull(); // 筛选态隐藏机器小节标题
 
     // 纯视图过滤：不进数据层（调用次数不变）
@@ -704,23 +707,23 @@ describe("SessionListPanel 两层筛选 tab", () => {
     renderPanel(<SessionListPanel selectedSessionId="s-1" />);
     await waitFor(() => expect(sessionRows().length).toBe(3));
 
-    // 选 machine-1 → 两条；再选 ◎ Codex → 仅 Codex
-    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    // 选 machine-1 → 两条；再选 Codex → 仅 Codex
+    await chooseAntdOptionByText("slp-machine", "machine-1");
     await waitFor(() => expect(sessionRows().length).toBe(2));
-    fireEvent.click(screen.getByRole("button", { name: "智能体tab Codex" }));
+    await chooseAntdOptionByText("slp-agent", "Codex");
     await waitFor(() => expect(sessionRows().length).toBe(1));
     expect(
       screen.getByRole("button", { name: "会话 机器一Codex" }),
     ).toBeInTheDocument();
 
-    // 智能体「全部」清空
-    fireEvent.click(screen.getByRole("button", { name: "智能体tab 全部" }));
+    // 智能体「全部智能体」清空
+    await chooseAntdOptionByText("slp-agent", "全部智能体");
     await waitFor(() => expect(sessionRows().length).toBe(2));
 
-    // 机器「全部」清空并隐藏第二层
-    fireEvent.click(screen.getByRole("button", { name: "机器tab 全部" }));
+    // 机器「全部机器」清空并隐藏第二层
+    await chooseAntdOptionByText("slp-machine", "全部机器");
     await waitFor(() => expect(sessionRows().length).toBe(3));
-    expect(document.querySelector('[aria-label="智能体筛选层"]')).toBeNull();
+    expect(document.getElementById("slp-agent")).toBeNull();
     expect(machineSection("machine-1")).not.toBeNull(); // 小节标题恢复
   });
 
@@ -745,7 +748,7 @@ describe("SessionListPanel 两层筛选 tab", () => {
     ).toHaveAttribute("aria-expanded", "false");
 
     // 筛选变化：当前组（选中会话所在 ws-1）保持展开，ws-2 折叠
-    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    await chooseAntdOptionByText("slp-machine", "machine-1");
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "会话 会话B" })).not.toBeInTheDocument(),
     );
@@ -788,6 +791,81 @@ describe("SessionListPanel 两层筛选 tab", () => {
     );
     expect(screen.getByRole("button", { name: "会话 会话B" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "会话 会话A" })).not.toBeInTheDocument();
+  });
+
+  // ── ql-20260908-005：两层筛选值 localStorage 记忆（刷新恢复用户选择） ──
+
+  it("选择落盘 localStorage：机器+智能体两层值成对写入；机器清空时 agent 一并清", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse(mixedSessions()));
+    // selectedSessionId 锚定「非工作区」组豁免展开（默认全折叠下行可见）
+    renderPanel(<SessionListPanel selectedSessionId="s-1" />);
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+
+    await chooseAntdOptionByText("slp-machine", "machine-1");
+    await chooseAntdOptionByText("slp-agent", "Codex");
+    expect(
+      JSON.parse(
+        window.localStorage.getItem(SESSION_TREE_FILTER_LS_KEY) ?? "{}",
+      ),
+    ).toEqual({ machineId: "m-1", agent: "codex" });
+
+    // 机器切「全部机器」→ 第二层随清（pickMachine 语义），记忆同步为全空
+    await chooseAntdOptionByText("slp-machine", "全部机器");
+    expect(
+      JSON.parse(
+        window.localStorage.getItem(SESSION_TREE_FILTER_LS_KEY) ?? "{}",
+      ),
+    ).toEqual({ machineId: "", agent: "" });
+  });
+
+  it("刷新恢复：localStorage 预置记忆 → 初始即筛选态（过滤生效+智能体下拉出现+小节标题隐藏）", async () => {
+    window.localStorage.setItem(
+      SESSION_TREE_FILTER_LS_KEY,
+      JSON.stringify({ machineId: "m-2", agent: "" }),
+    );
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse(mixedSessions()));
+    // s-3 是 machine-2 上的会话：恢复筛选后仍锚定所在组展开
+    renderPanel(<SessionListPanel selectedSessionId="s-3" />);
+
+    // 初始即为 machine-2 筛选态：仅 1 条 + 智能体下拉在 + 机器小节标题隐藏
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(document.getElementById("slp-agent")).not.toBeNull();
+    expect(machineSection("machine-2")).toBeNull();
+  });
+
+  it("陈旧机器 id 兜底：记忆中的机器已不在列表 → 机器列表到位后重置两层筛选", async () => {
+    window.localStorage.setItem(
+      SESSION_TREE_FILTER_LS_KEY,
+      JSON.stringify({ machineId: "m-gone", agent: "codex" }),
+    );
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse(mixedSessions()));
+    renderPanel(<SessionListPanel selectedSessionId="s-1" />);
+
+    // 机器列表到位后兜底 effect 重置：全部条目可见 + 智能体下拉消失 + 记忆清
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+    await waitFor(() => expect(document.getElementById("slp-agent")).toBeNull());
+    expect(
+      JSON.parse(
+        window.localStorage.getItem(SESSION_TREE_FILTER_LS_KEY) ?? "{}",
+      ),
+    ).toEqual({ machineId: "", agent: "" });
+  });
+
+  it("坏数据容错：localStorage 存垃圾 JSON → 静默回未筛默认", async () => {
+    window.localStorage.setItem(SESSION_TREE_FILTER_LS_KEY, "{oops");
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse(mixedSessions()));
+    renderPanel(<SessionListPanel selectedSessionId="s-1" />);
+
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+    expect(document.getElementById("slp-agent")).toBeNull();
   });
 });
 
@@ -882,15 +960,15 @@ describe("SessionListPanel 筛选后条目去冗余（ql-20260823-003）", () =>
     // R-05：筛选切换重置展开态（无选中会话 → 全组折叠），断言前先重新展开组
     const groupHead = () =>
       screen.getByRole("button", { name: "工作区分组 SillyHub" });
-    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
-    fireEvent.click(screen.getByRole("button", { name: "智能体tab Claude Code" }));
+    await chooseAntdOptionByText("slp-machine", "machine-1");
+    await chooseAntdOptionByText("slp-agent", "Claude Code");
     fireEvent.click(groupHead());
     await waitFor(() => {
       const filtered = screen.getByRole("button", { name: "会话 会话A" });
       expect(filtered.textContent).not.toContain("Claude"); // 筛选后隐藏
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "机器tab 全部" }));
+    await chooseAntdOptionByText("slp-machine", "全部机器");
     fireEvent.click(groupHead());
     await waitFor(() => {
       const restored = screen.getByRole("button", { name: "会话 会话A" });
@@ -975,10 +1053,8 @@ describe("SessionListPanel 组头回调与截断", () => {
 
     // 默认折叠下组头「＋」仍在 DOM；两层筛选：机器 machine-1 → 智能体 Claude Code
     await screen.findByRole("button", { name: "在 SillyHub 新建会话" });
-    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
-    fireEvent.click(
-      screen.getByRole("button", { name: "智能体tab Claude Code" }),
-    );
+    await chooseAntdOptionByText("slp-machine", "machine-1");
+    await chooseAntdOptionByText("slp-agent", "Claude Code");
     fireEvent.click(screen.getByRole("button", { name: "在 SillyHub 新建会话" }));
     expect(onNewInGroup).toHaveBeenCalledWith("ws-1", {
       machineId: "m-1",
@@ -1406,9 +1482,10 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
     expect(
       screen.getByRole("button", { name: "在 SillyHub 新建会话" }),
     ).toBeInTheDocument();
-    // 平铺控件退役（引擎胶囊/机器多选/加载更多）
+    // 平铺控件退役（引擎胶囊/机器多选/加载更多）。机器筛选用例 ql-20260908-005
+    // 起为树下拉（#slp-machine 单选形态）——退役守卫锚定多选形态而非 id。
     expect(document.querySelector(".ant-segmented")).toBeNull();
-    expect(document.getElementById("slp-machine")).toBeNull();
+    expect(document.querySelector(".ant-select-multiple")).toBeNull();
     expect(screen.queryByRole("button", { name: /加载更多/ })).toBeNull();
   });
 
@@ -1658,8 +1735,8 @@ describe("SessionListPanel 分组默认折叠与本地 Agent 小节（ql-2026082
       ).toBeInTheDocument(),
     );
 
-    // 机器 tab 切换 → R-05 重置：组与小节都回默认折叠
-    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    // 机器筛选切换 → R-05 重置：组与小节都回默认折叠
+    await chooseAntdOptionByText("slp-machine", "machine-1");
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: "会话 CLI 上报的会话" }),

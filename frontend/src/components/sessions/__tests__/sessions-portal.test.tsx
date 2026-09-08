@@ -727,6 +727,41 @@ afterEach(() => {
   cleanup();
 });
 
+// ── antd Select 触发助手（jsdom portal 语义；同 session-list-panel.test 先例） ──
+
+/** 打开 antd Select 下拉（v5/v6 DOM 兼容，经 id 锚定）。 */
+function openAntdSelect(selectId: string) {
+  const anchor = document.getElementById(selectId);
+  if (!anchor) throw new Error(`element #${selectId} not found`);
+  const root = anchor.classList.contains("ant-select")
+    ? anchor
+    : (anchor.closest(".ant-select") as HTMLElement | null);
+  if (!root) throw new Error(`.ant-select for #${selectId} not found`);
+  const clickZone =
+    (root.querySelector(".ant-select-content") as HTMLElement | null) ??
+    (root.querySelector(".ant-select-selector") as HTMLElement | null);
+  if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
+  fireEvent.mouseDown(clickZone);
+}
+
+/** 点选 antd Select 下拉中含指定文本的选项。 */
+async function chooseAntdOptionByText(selectId: string, optionText: string) {
+  openAntdSelect(selectId);
+  const option = await waitFor(() => {
+    const hit = [
+      ...document.querySelectorAll(".ant-select-item-option-content"),
+    ].find((el) => el.textContent?.trim() === optionText);
+    if (!hit) throw new Error(`option "${optionText}" not found`);
+    return hit as HTMLElement;
+  });
+  const optionRow = option.closest(".ant-select-item-option") as HTMLElement;
+  fireEvent.mouseDown(optionRow);
+  fireEvent.click(optionRow);
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 // ── 1. 三 scope 渲染（design §4.A / §4.E / D-001@v1 / D-003@v2） ──────────
 
 describe("SessionsPortal 三 scope 渲染", () => {
@@ -1234,12 +1269,8 @@ describe("SessionsPortal 筛选态直带上下文（ql-20260823-001）", () => {
   it("两层筛选已选（机器+智能体）点组头「＋」→ 跳过浮层直接预会话，上下文行=筛选机器+引擎", async () => {
     renderPortal();
     // 树内两层筛选（默认 mock：m-1 machine-1 rt-1 claude 在线）
-    fireEvent.click(
-      await screen.findByRole("button", { name: "机器tab machine-1" }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "智能体tab Claude Code" }),
-    );
+    await chooseAntdOptionByText("slp-machine", "machine-1");
+    await chooseAntdOptionByText("slp-agent", "Claude Code");
     fireEvent.click(
       screen.getByRole("button", { name: "在 非工作区 新建会话" }),
     );
@@ -1258,9 +1289,7 @@ describe("SessionsPortal 筛选态直带上下文（ql-20260823-001）", () => {
 
   it("仅选机器未选智能体（或未筛选）→ 仍走两步浮层（上下文不完整不直带）", async () => {
     renderPortal();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "机器tab machine-1" }),
-    );
+    await chooseAntdOptionByText("slp-machine", "machine-1");
     fireEvent.click(
       screen.getByRole("button", { name: "在 非工作区 新建会话" }),
     );
@@ -1286,12 +1315,8 @@ describe("SessionsPortal 筛选态直带上下文（ql-20260823-001）", () => {
       refetch: vi.fn(),
     });
     renderPortal();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "机器tab machine-2" }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "智能体tab Codex" }),
-    );
+    await chooseAntdOptionByText("slp-machine", "machine-2");
+    await chooseAntdOptionByText("slp-agent", "Codex");
     fireEvent.click(
       screen.getByRole("button", { name: "在 非工作区 新建会话" }),
     );

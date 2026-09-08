@@ -52,9 +52,12 @@
  *   筛选区：
  *     - 标题搜索（回车应用，X-11 保留；树形态为纯视图过滤不进数据层）
  *     - 状态下拉（X-11 保留：组内过滤 = 视图过滤）
- *     - 两层筛选 tab（FR-02 / D-107）：第一层机器（含「全部」清空），选中后
- *       出第二层智能体（⚡Claude Code/◎Codex，含「全部」）；纯视图过滤不进
- *       数据层；筛选态隐藏机器小节标题；筛选变化重置展开态除当前组（R-05）
+ *     - 两层筛选下拉（FR-02 / D-107；ql-20260908-005 胶囊 tab → 下拉，机器
+ *       多时胶囊换行撑爆左栏）：第一层机器（含「全部机器」清空，可搜索），
+ *       选中后出第二层智能体（Claude Code/Codex，含「全部智能体」）；纯视图
+ *       过滤不进数据层；筛选态隐藏机器小节标题；筛选变化重置展开态除当前组（R-05）；
+ *       筛选值 localStorage 记忆（刷新恢复用户选择），陈旧机器 id 待机器列表
+ *       到位后兜底重置
  *   树：
  *     - 工作区分组手风琴：组头 = 📂名称 + 会话数 + 「＋」新建 + 多选入口 +
  *       展开箭头；0 会话组仍显示（计数 0）；「非工作区」（workspace_id null）
@@ -82,7 +85,9 @@
  * 退役清单（全局形态，X-11 / task-05 implementation 第 5 点）：
  *   引擎胶囊 tab（Segmented）→ 两层筛选 tab 智能体层取代；全局 useVirtualizer
  *   → 分组结构 + 组内截断取代（R-04）；机器多选 Select → 机器 tab 取代
- *  （ql-20260823-003：change 分支随平铺形态一并退役，三入口零残留）。
+ *  （ql-20260823-003：change 分支随平铺形态一并退役，三入口零残留）；
+ *   两层筛选胶囊 tab（FilterPill）+ 引擎标记 EngineMark → ql-20260908-005
+ *   下拉形态取代（机器多时胶囊换行撑爆左栏）。
  *
  * 组头回调 onNewInGroup(workspaceId)（props 新增，上下文解析归 task-06）；
  * defaultExpandedWorkspaceId（受控展开 prop，供 task-06 workspace 深链预展开）。
@@ -91,7 +96,7 @@
  * task-11 v3 返工）：scope 判别联合（WorkspaceScope/ChangeScope 导出）、D-003@v2
  * 端点过滤、D-006 紧凑两行、ql-20260818-012 批量删除——语义均随本次重构迁移。
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Input, Modal, Popover, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
@@ -100,7 +105,6 @@ import {
   ArchiveRestore,
   BookUser,
   Cloud,
-  Command,
   FileText,
   Folder,
   FolderOpen,
@@ -113,7 +117,6 @@ import {
   Trash2,
   User,
   Users,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { ApiError } from "@/lib/api";
@@ -195,21 +198,12 @@ const STATUS_OPTIONS = [
   { label: "已归档会话", value: "__archived__" },
 ] as const;
 
-/** 第二层智能体 tab 选项（D-107：claude/codex 固定两档，引擎标记线性图标）。 */
+/** 第二层智能体下拉选项（D-107：claude/codex 固定两档；ql-20260908-005 起
+ * 以 Select 选项形态消费——引擎图标随胶囊 tab 一并退役）。 */
 const AGENT_TABS = [
   { label: "Claude Code", value: "claude" },
   { label: "Codex", value: "codex" },
 ] as const;
-
-/** 引擎身份标记（线性图标统一，2026-08-24 用户裁决 emoji 全退役）：claude=Zap / codex=Command。 */
-function EngineMark({ provider }: { provider: string }) {
-  const cls = "h-3 w-3 shrink-0";
-  return provider === "claude" ? (
-    <Zap aria-hidden className={cls} />
-  ) : (
-    <Command aria-hidden className={cls} />
-  );
-}
 
 /**
  * ql-20260831-016：Modal.confirm 功能图标（删除/归档/取消归档共用）。
@@ -342,6 +336,54 @@ function saveToolSectionOpen(groupId: string, isOpen: boolean): void {
   else next.delete(groupId);
   cache.openToolSections = [...next];
   writeExpansionCache(cache);
+}
+
+/* ────────── 筛选记忆（ql-20260908-005：两层筛选值 localStorage 持久化） ────────── */
+
+/** 筛选记忆 localStorage key（先例：SESSION_TREE_EXPANSION_LS_KEY 命名风格）。 */
+export const SESSION_TREE_FILTER_LS_KEY = "sillyhub.sessions.tree.filter";
+
+/**
+ * 筛选记忆形状：与两层筛选 state 同源（机器 id / 引擎 value，空串=未选）。
+ * 机器筛选跨 scope 通用（机器不属于某个工作区），记忆不做 scope 分桶。
+ */
+interface SessionTreeFilterCache {
+  machineId: string;
+  agent: string;
+}
+
+/**
+ * 读筛选记忆（无记录/坏 JSON/SSR → 未筛默认）。智能体层依赖机器层：
+ * machineId 为空时 agent 一并置空——孤儿 agent 不恢复，防用户随后选机器
+ * 时陈旧智能体筛选突然生效。
+ */
+function readFilterCache(): SessionTreeFilterCache {
+  if (typeof window === "undefined") return { machineId: "", agent: "" };
+  try {
+    const raw = window.localStorage.getItem(SESSION_TREE_FILTER_LS_KEY);
+    if (!raw) return { machineId: "", agent: "" };
+    const parsed = JSON.parse(raw) as Partial<SessionTreeFilterCache>;
+    const machineId =
+      typeof parsed.machineId === "string" ? parsed.machineId : "";
+    const agent = typeof parsed.agent === "string" ? parsed.agent : "";
+    if (!machineId) return { machineId: "", agent: "" };
+    return { machineId, agent };
+  } catch {
+    return { machineId: "", agent: "" };
+  }
+}
+
+/** 写筛选记忆（隐私模式/配额异常静默忽略——丢记忆不阻断交互）。 */
+function writeFilterCache(cache: SessionTreeFilterCache): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      SESSION_TREE_FILTER_LS_KEY,
+      JSON.stringify(cache),
+    );
+  } catch {
+    // 写不进只是丢记忆，不影响本次交互。
+  }
 }
 
 export interface SessionListPanelProps {
@@ -643,9 +685,13 @@ function WorkspaceTreeList({
   onUnarchiveGroup,
   onDeleteGroup,
 }: SessionListPanelProps) {
-  // 两层筛选 tab（D-107）：纯视图过滤，不进数据层（机器/智能体值都是 tab id）。
-  const [filterMachineId, setFilterMachineId] = useState("");
-  const [filterAgent, setFilterAgent] = useState("");
+  // 两层筛选下拉（D-107；ql-20260908-005 胶囊 tab → 下拉）：纯视图过滤，不进
+  // 数据层（机器/智能体值与胶囊时期同源——机器 id / 引擎 value）。筛选值经
+  // localStorage 记忆（用户反馈刷新要保留选择，先例：展开记忆 ql-20260824-002），
+  // 恢复的机器 id 若已不在机器列表，machines 到位后经下方兜底 effect 重置。
+  const [initialFilter] = useState(readFilterCache);
+  const [filterMachineId, setFilterMachineId] = useState(initialFilter.machineId);
+  const [filterAgent, setFilterAgent] = useState(initialFilter.agent);
   // X-11 保留：状态下拉（组内过滤）+ 标题搜索（回车应用）——树形态同为视图过滤。
   const [status, setStatus] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -1112,12 +1158,25 @@ function WorkspaceTreeList({
   const pickMachineTab = (id: string) => {
     setFilterMachineId(id);
     setFilterAgent(""); // 第二层随第一层重置（原型 pickMachine 语义）
+    writeFilterCache({ machineId: id, agent: "" }); // ql-20260908-005 记忆
     resetExpansionForFilter();
   };
   const pickAgentTab = (v: string) => {
     setFilterAgent(v);
+    writeFilterCache({ machineId: filterMachineId, agent: v }); // 同上
     resetExpansionForFilter();
   };
+
+  // ql-20260908-005：恢复的机器 id 兜底校验——机器列表到位（非空）后已无该
+  // id（机器被删/共享收回/换浏览器）时重置两层筛选，防下拉显示裸 id + 树空。
+  // 机器手动选择后列表刷新移除该机器同样命中此兜底（语义一致：筛选目标没了）。
+  useEffect(() => {
+    if (!filterMachineId || machines.length === 0) return;
+    if (machines.some((m) => m.id === filterMachineId)) return;
+    setFilterMachineId("");
+    setFilterAgent("");
+    writeFilterCache({ machineId: "", agent: "" });
+  }, [filterMachineId, machines]);
 
   const toggleGroup = (id: string) => {
     // 基于生效态切换（ql-20260824-001）：默认折叠后 collapsedIds null 表示
@@ -1494,7 +1553,8 @@ function WorkspaceTreeList({
       )}
 
       {/* 筛选区：搜索（回车应用）+ 状态下拉（X-11 保留）+「关联」下拉
-          （X-009，仅 workspace scope）+ 两层筛选 tab（D-107） */}
+          （X-009，仅 workspace scope）+ 两层筛选下拉（D-107；ql-20260908-005
+          由胶囊 tab 改下拉——机器多时胶囊换行撑爆 320px 左栏） */}
       <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
         <div className="flex items-center gap-1.5">
           <Input
@@ -1535,56 +1595,42 @@ function WorkspaceTreeList({
             options={assocOptions}
           />
         )}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="shrink-0 text-[11px] text-muted-foreground">机器</span>
-          <FilterPill
-            label="机器tab 全部"
-            active={filterMachineId === ""}
-            onClick={() => pickMachineTab("")}
-          >
-            全部
-          </FilterPill>
-          {machines.map((m) => (
-            <FilterPill
-              key={m.id}
-              label={`机器tab ${machineLabel(m)}`}
-              active={filterMachineId === m.id}
-              onClick={() => pickMachineTab(m.id)}
-            >
-              <Monitor aria-hidden className="h-3 w-3 shrink-0" />
-              {machineLabel(m)}
-            </FilterPill>
-          ))}
+        {/* 两层筛选下拉（ql-20260908-005：胶囊 tab → 下拉，防机器多撑爆）。
+            第一层机器（「全部机器」清空，showSearch 机器多时可搜）；第二层
+            智能体仅选中机器后出现（依赖语义不变），随选随占一行尾部宽度。 */}
+        <div className="flex items-center gap-1.5">
+          <Select
+            id="slp-machine"
+            size="small"
+            showSearch
+            optionFilterProp="label"
+            className="min-w-0 flex-1"
+            aria-label="机器筛选"
+            value={filterMachineId}
+            onChange={(v) => pickMachineTab(v ?? "")}
+            options={[
+              { value: "", label: "全部机器" },
+              ...machines.map((m) => ({
+                value: m.id,
+                label: machineLabel(m),
+              })),
+            ]}
+          />
+          {filterMachineId !== "" && (
+            <Select
+              id="slp-agent"
+              size="small"
+              className="w-28 shrink-0"
+              aria-label="智能体筛选"
+              value={filterAgent}
+              onChange={(v) => pickAgentTab(v ?? "")}
+              options={[
+                { value: "", label: "全部智能体" },
+                ...AGENT_TABS.map((t) => ({ ...t })),
+              ]}
+            />
+          )}
         </div>
-        {/* 第二层：选中机器后出现（原型 #agentTabs display 语义）；「全部」清空智能体 */}
-        {filterMachineId !== "" && (
-          <div
-            className="flex flex-wrap items-center gap-1.5"
-            aria-label="智能体筛选层"
-          >
-            <span className="shrink-0 text-[11px] text-muted-foreground">
-              智能体
-            </span>
-            <FilterPill
-              label="智能体tab 全部"
-              active={filterAgent === ""}
-              onClick={() => pickAgentTab("")}
-            >
-              全部
-            </FilterPill>
-            {AGENT_TABS.map((t) => (
-              <FilterPill
-                key={t.value}
-                label={`智能体tab ${t.label}`}
-                active={filterAgent === t.value}
-                onClick={() => pickAgentTab(t.value)}
-              >
-                <EngineMark provider={t.value} />
-                {t.label}
-              </FilterPill>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* 树区（分组结构 + 组内截断替代全局虚拟滚动，R-04）。task-07 起滚动容器
@@ -2089,37 +2135,6 @@ function GroupChatRow({
         </span>
       )}
     </div>
-  );
-}
-
-/** 两层筛选 tab 的胶囊按钮（原型 .ftab：圆角胶囊，选中态主色描边+底色）。 */
-function FilterPill({
-  active,
-  onClick,
-  label,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  /** 无障碍名（两层都有「全部」，测试/读屏需锚定层级）。 */
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex min-w-0 max-w-[160px] shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
-        active
-          ? "border-primary bg-primary/10 font-medium text-primary"
-          : "border-border bg-muted/40 text-muted-foreground hover:border-primary/50",
-      )}
-    >
-      <span className="inline-flex min-w-0 items-center gap-0.5 overflow-hidden">{children}</span>
-    </button>
   );
 }
 

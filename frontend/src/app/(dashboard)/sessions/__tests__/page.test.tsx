@@ -1307,8 +1307,8 @@ describe("SessionPanel reconnecting 恢复超时入口 + reopen 409 中文化（
   });
 });
 
-describe("机器筛选 tab 接入共享机器（quick 机器行修复）", () => {
-  it("hook 返回融合候选时，机器 tab 出现共享机器选项（180024 无自有机器场景）", async () => {
+describe("机器筛选下拉接入共享机器（quick 机器行修复；ql-20260908-005 胶囊→下拉）", () => {
+  it("hook 返回融合候选时，机器下拉出现共享机器选项（180024 无自有机器场景）", async () => {
     const sharedCandidate = {
       id: "sm-share-2",
       hostname: "shared-host-2",
@@ -1329,9 +1329,29 @@ describe("机器筛选 tab 接入共享机器（quick 机器行修复）", () =>
       isError: false,
     });
     renderPage();
-    expect(
-      await screen.findByRole("button", { name: /机器tab 共享的机器/ }),
-    ).toBeTruthy();
+    // 机器筛选现为下拉：打开 #slp-machine，断言共享机器在选项中
+    const anchor = await waitFor(() => {
+      const el = document.getElementById("slp-machine");
+      if (!el) throw new Error("#slp-machine not found");
+      return el;
+    });
+    const root =
+      anchor.classList.contains("ant-select")
+        ? anchor
+        : (anchor.closest(".ant-select") as HTMLElement);
+    const clickZone =
+      (root.querySelector(".ant-select-content") as HTMLElement | null) ??
+      (root.querySelector(".ant-select-selector") as HTMLElement | null);
+    if (!clickZone) throw new Error("select click zone for #slp-machine not found");
+    fireEvent.mouseDown(clickZone);
+    const option = await waitFor(() => {
+      const hit = [
+        ...document.querySelectorAll(".ant-select-item-option-content"),
+      ].find((el) => el.textContent?.trim() === "共享的机器");
+      if (!hit) throw new Error('option "共享的机器" not found');
+      return hit as HTMLElement;
+    });
+    expect(option).toBeTruthy();
   });
 });
 
