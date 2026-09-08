@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-07-arch-large-file-split",
+  "generatedAt": "2026-09-08T00:58:08.598Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-07-arch-large-file-split",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 6,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-07-arch-large-file-split",
+      "metrics": {
+        "tasks": 17,
+        "hasTest": 12
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-07-arch-large-file-split",
+      "metrics": {
+        "backendEndpoints": 6024,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-07-arch-large-file-split",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  }
+}
