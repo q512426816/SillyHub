@@ -21,10 +21,10 @@ created_at: 2026-08-26 05:45:10
 | # | 等级 | 侧 | 摘要 | 位置 |
 | --- | --- | --- | --- | --- |
 | F1 | P2 | daemon | `SILLYHUB_MAX_ACTIVE_SESSIONS` 空串/纯空白被解析为 0 = 不限，闸静默失效 | sillyhub-daemon/src/interactive/session-manager/types.ts:439 |
-| F2 | P2 | 前端 | `shownSessions` 每渲染新数组（截断态 slice 未 memo）→ subGrouping/sections useMemo 恒重算 | frontend/src/components/sessions/session-list-panel.tsx:2214 |
+| F2 | P2 | 前端 | `shownSessions` 每渲染新数组（截断态 slice 未 memo）→ subGrouping/sections useMemo 恒重算 | frontend/src/components/sessions/session-list-panel.tsx:2229 |
 | F3 | P3 | daemon | `_destroyPartialBuffer` 早退在 budget 清理之前 → 无 partial buffer 会话的 `_sessionBudgetTokens`/`_overBudgetSessions` 永不回收（慢泄漏 + 注释与实现不符） | sillyhub-daemon/src/interactive/session-manager.ts |
 | F4 | P3 | daemon | daemon.ts 读 `rawExec.worker_depth` 未归一化：字符串形态运行期可被 normalize 救回，但落盘重启后 validateRecord 拒收 → 非叶静默降级叶档 | sillyhub-daemon/src/daemon.ts |
-| F5 | P3 | 前端 | `filterEpoch` 拼接串理论碰撞（筛选值含 `\|`）→ openParents 不重置；另截断边界漂移时已展开子折叠组会瞬时跳成孤儿小节（视觉） | frontend/src/components/sessions/session-list-panel.tsx:1469,1383 |
+| F5 | P3 | 前端 | `filterEpoch` 拼接串理论碰撞（筛选值含 `\|`）→ openParents 不重置；另截断边界漂移时已展开子折叠组会瞬时跳成孤儿小节（视觉） | frontend/src/components/sessions/session-list-panel.tsx:1528,1442 |
 | F6 | P3 | 前端 | 浮层打开期间主控 SSE 不关 + 浮层面板挂载即发 ~6 个并发请求（含对分身会话恒空的 team-missions 查询） | frontend/src/components/daemon/session-panel/index.tsx,2812 |
 | F7 | P3 | 前端 | 组内 >50 截断时「分身 N」徽标按 shownSessions 计数偏小；子会话被截掉时父行计数为 0 不渲染折叠组头 | frontend/src/components/sessions/session-list-panel.tsx:1372-1402,1775 |
 

@@ -28,7 +28,7 @@ stripped = stripMobilePrefix(pathname)   # /m→/、/m/x→/x
 ```
 
 ## 注意事项
-- R-10 防漂移锚点（文件头注释显式声明）：白名单镜像 `(dashboard)frontend/src/app/layout.tsx:14`，登录守卫镜像 `:21-24`，工作区守卫 CB-3 顺序镜像 `:44-52`——**改桌面守卫必须同步本文件与测试**，否则两端行为分叉。
+- R-10 防漂移锚点（文件头注释显式声明）：白名单镜像 `frontend/src/app/(dashboard)/layout.tsx:14`，登录守卫镜像 `:21-24`，工作区守卫 CB-3 顺序镜像 `:44-52`——**改桌面守卫必须同步本文件与测试**，否则两端行为分叉。
 - CB-3 顺序不可倒：先判 `/workspaces/:id` 放行再判白名单前缀，否则 `/workspaces/xxx` 被前缀 `/workspaces` 误匹配造成重定向循环。
 - 与桌面的语义差异仅两点：重定向目标带 `/m` 前缀（`/m/login`、`/m/workspaces`）；`/m/login` 显式公开（移动登录页与受保护页共用同一 layout，不放行会无限重定向；桌面 `/login` 在 (auth) 路由组根本不进 dashboard layout，故无需此条）。
 - 白名单前缀匹配用 `=== w || startsWith(w + "/")`，避免 `/admins` 误命中 `/admin`。

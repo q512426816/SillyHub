@@ -249,8 +249,10 @@ stream-json SDK 帧集；codex 族 = app-server JSON-RPC 方法集）。若帧�
      `['claude','codex','pi']`），不是"按需补"；用例 5 `createDriver` 实例化
      断言与用例 3 的"现值锚点"同理补齐。
    - 三端 caps 对齐守护 `backend/app/modules/agent/tests/test_provider_caps_alignment.py`
-     **自动覆盖**新 provider（源文件读取断言：键集/provider 集/逐值相等/
-     未知全 false），无需改断言，跑一遍确认三端同步即可。
+    ：源文件读取断言覆盖键集/provider 集/逐值相等/未知全 false——**但**
+     `EXPECTED_PROVIDERS` 为硬编码 frozenset（D-004@v1），新 provider **必须
+     同 commit 手改加键**，不是"三端表一改就自动覆盖"。漏改则
+     `test_provider_sets_identical` 必失败。
 
 9. [ ] **前端展示（建议）**：`frontend/src/lib/daemon.ts` `PROVIDER_META`
    加 `{ label, icon, color }`；有版本门槛则 `MIN_VERSIONS` 加条目。
@@ -381,8 +383,8 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
    `getBackend` 实现就位）。
 
 8. [ ] **backend / frontend caps 镜像**：`backend/app/modules/agent/provider_caps.py`
-   与 `frontend/src/lib/provider-caps.ts` 同步条目（三端逐键一致，守护
-   测试自动覆盖）。
+   与 `frontend/src/lib/provider-caps.ts` 同步条目（三端逐键一致）；并同
+   commit 更新守护测试 `EXPECTED_PROVIDERS`（D-004@v1，非自动覆盖）。
 
 9. [ ] **前端展示**：`frontend/src/lib/daemon.ts` `PROVIDER_META` 加条目
    （+ `MIN_VERSIONS` 视需要）。session-panel / backend 的能力门控已查表，
@@ -406,7 +408,7 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
     - 注册表测试更新：`tests/interactive/provider-registry.test.ts`
       （键集合/family 反查/实例化断言，同档B 第 8 步）；
     - caps 对齐：`backend/app/modules/agent/tests/test_provider_caps_alignment.py`
-      自动覆盖。
+      （含 `EXPECTED_PROVIDERS` 手改，D-004@v1）。
 
 12. [ ] 验收：typecheck + 上述测试 + 冒烟（§8）。
 
@@ -482,11 +484,86 @@ caps.subagent 维持 false。扩展的 ExtensionAPI 面与 pi 版本强耦合，
   （上见第 10 步）——修复 VALID_PROVIDERS 前勿把"重启后立即 inject 失败"
   误判为 driver 缺陷。
 
+### 5.4 档C 完整案例锚：Cursor 接入（2026-09-08-cursor-interactive-session）
+
+第二个档C 实战的 12 步勾选回填（对照 §5.2；`cursor-agent
+2026.06.16-20-30-07-a07d3ac` 真机 + Free 计划须 `--model auto`；冒烟 10
+项见变更目录 `smoke-result.md`；帧样本见 `spike-cursor-frames.md`）：
+
+1. [x] 协议调研：cursor-agent headless `stream-json`（**非** claude 同族可复用
+   归一化器——thinking/tool_call 为顶层帧，usage 在 result 帧 camelCase）。
+   启动形：`-p --output-format stream-json --trust --force [--resume chatId]
+   --model <model|auto> <prompt>`（位置 prompt，stdin 空）。Wave 0 验证 A/B/C
+   通过：system/init 带 session_id；`--resume` 记忆连续且 ID 同空间；
+   `create-chat` 输出裸 UUID 可作 resume 目标。
+2. [x] 归一化器 `interactive/cursor-events.ts`：`normalizeCursorFrame` 无状态
+   纯函数——system/init→session_started；user/connection/retry→[]；assistant
+   文本块→text；顶层 thinking delta→thinking（is_partial）；tool_call
+   started/completed→tool_use/tool_result（call_id 配对）；result→turn_result
+   + usage 四字段短名映射（inputTokens→input_tokens 等）。37 条 golden 全绿。
+3. [x] driver `interactive/cursor-driver.ts`：**每轮 respawn**（start 只建
+   handle，consume 内 spawn——pi 长驻进程先例对照的首例）；后续轮自动
+   `--resume <chatId>`；stdout LF 分帧（禁 Node readline）；Windows
+   `.cmd`→`resolveWindowsCmdShim`，`.ps1`→`powershell -NoProfile
+   -ExecutionPolicy Bypass -File`（sillyhub-daemon/src/interactive/cursor-driver.ts:170-184）；interrupt/
+   close 走 SIGTERM→SIGKILL；result 帧
+   `{subtype:'error_during_execution', is_error:true}` 收敛 → backend
+   `error_code=interactive_interrupted`（区别 pi abort→settled 报 success）。
+4. [x] caps 单源：`PROVIDER_CAPS.cursor`（sillyhub-daemon/src/interactive/providers.ts:133-178）3 true /
+   5 false——`resume/thinking/model_select=true`；`mcp/multimodal/subagent/
+   permission_dialog/edit_patch=false`。thinking=true 为 task-01 实测修正
+   （顶层 thinking 帧稳定），不以过期任务卡 thinking=false 为准。
+5. [x] 注册表：`INTERACTIVE_PROVIDERS.cursor`（family 与批量
+   `PROVIDER_TO_PROTOCOL` 反查一致，`createDriver`→`CursorDriver`）。
+6. [x] 探测表：cursor 原已在 `PROVIDER_SPECS`（批量 stream-json 先例），本
+   变更 interactive 侧消费既有探测路径。
+7. [x] 批量层联动：`PROVIDER_TO_PROTOCOL` 已含 cursor（零改动——守护只断言
+   一致性）。
+8. [x] caps 镜像：backend `provider_caps.py` + frontend `provider-caps.ts` +
+   守护 `EXPECTED_PROVIDERS` 加 `cursor`（D-004@v1 四同步，非三同步）。
+9. [x] 前端展示：引擎白名单两处加 cursor——`pre-session-picker.tsx`
+   `SESSION_SUPPORTED_PROVIDERS`、`runtime-session-helpers.tsx`
+   `SUPPORTED_SESSION_PROVIDERS`。
+10. [x] 零改动确认：SessionManager / 事件上报链 / `_persist_agent_event` /
+    前端 normalize **对 cursor 零协议特判**。**必改点**（同 PI 踩坑回写）：
+    cli.ts drivers 装配 `cursor: new CursorDriver()`；
+    `VALID_PROVIDERS` 加 cursor（sillyhub-daemon/src/interactive/session-store-persistence.ts:86）；
+    backend `InteractiveProviderLiteral` 加 `"cursor"`（backend/app/modules/daemon/schema.py:113）。
+11. [x] 测试：`cursor-events.test.ts` + `cursor-driver.test.ts` 新增；
+    `provider-registry.test.ts` 键集含 cursor；三端 caps 对齐 4/4；frontend
+    picker / normalize 相关用例全绿（task-09 验证区间）。
+12. [x] 验收：真机冒烟 API 全链路 PASS（创建双轨/usage/resume 记忆/
+    interrupt=`interactive_interrupted`/model=auto/claude 零回归）。UI
+    白名单与浏览器 SSE 渲染依赖 worktree apply + frontend 镜像重建后复验
+    （见 smoke-result.md F-UI）。
+
+**本变更特色四项**（相对 §5.3 PI）：
+
+1. **respawn-per-turn**：无长驻 JSON-RPC 子进程；每轮独立 headless 进程，
+   chatId 靠 `--resume` 串记忆——SessionManager 生命周期仍是一会话一 handle。
+2. **坏 ps1 版本目录绕过**：Windows 入口常为 `.cmd`/`.ps1`；复用
+   `resolveWindowsCmdShim`，并对 `.ps1` 显式 Bypass 包装（上见 driver L170-184）。
+3. **D-003@v2 权限定版**：恒带 `--force --trust`；`permission_dialog=false`
+   （无 per-turn 审批 CLI 通道）；非 force 探针结论归档于 task-02 / decisions。
+4. **interrupt 规范通道**：driver 以 `error_during_execution` 收敛 → DB
+   `failed` + `interactive_interrupted`（smoke run `061423dc-…`），区别 PI
+   abort 后 completed/exit 0 无 cancelled 标记的既有语义。
+
+**其它实测要点**（坑与口径）：
+
+- Free 计划缺 `--model`/`auto` 时可能拒跑——driver 透传 model，冒烟用
+  `model=auto`。
+- usage 仅 result 帧报（camelCase）——轮中途无流式 usage；终值以 result 为准。
+- PowerShell 默认编码会把中文 inject prompt 打成 `????`——冒烟须 UTF-8 bytes
+  直发（smoke-result.md F-ENC）。
+- 正式 daemon 若默认连远程后端，本地 8001 冒烟须临时切换 worktree daemon
+  并恢复（F-ENV）。
+
 ---
 
 ## 6. 能力矩阵维护规范
 
-### 6.1 改值流程（单源 → 两镜像 → 守护测试）
+### 6.1 改值流程（单源 → 两镜像 → EXPECTED_PROVIDERS → 守护测试）
 
 `ProviderCaps` 8 键：`resume / mcp / multimodal / thinking / subagent /
 permission_dialog / edit_patch / model_select`（全 boolean）。
@@ -498,7 +575,11 @@ permission_dialog / edit_patch / model_select`（全 boolean）。
 2. [ ] 同步 **backend 镜像** `backend/app/modules/agent/provider_caps.py`
    `PROVIDER_CAPS`；
 3. [ ] 同步 **frontend 镜像** `frontend/src/lib/provider-caps.ts` `PROVIDER_CAPS`；
-4. [ ] 跑对齐守护测试：
+4. [ ] **同 commit** 更新守护测试硬编码集合
+   `backend/app/modules/agent/tests/test_provider_caps_alignment.py`
+   `EXPECTED_PROVIDERS`（D-004@v1——新 provider 不是自动覆盖；漏改则
+   provider 集断言失败）；
+5. [ ] 跑对齐守护测试：
    `pytest backend/app/modules/agent/tests/test_provider_caps_alignment.py`
    （4 用例：三端键集一致且为 8 契约键 / provider 集一致 / 逐 provider 逐键
    取值相等 / 未知 provider 返回全 false 且 8 键齐全）。
