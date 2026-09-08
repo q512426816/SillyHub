@@ -15,6 +15,12 @@ session_lifecycle（生命周期）。本 ``__init__`` 是兼容层：
   私有符号——run_sync/service.py 顶部多行 import 依赖的
   ``_apply_session_terminal_status`` / ``_send_session_end_best_effort`` 等）。
 
+D-010 第二回合（merge main 2ad590192，2026-09-07-session-pin-rename-
+scheduled-send）：+scheduled_messages 子模块（定时消息 CRUD 三方法——queue.py
+725 行加 235 超 ≤800 故独立成域）；pin/unpin/rename 三方法进 session_lifecycle；
+5 个新异常进 errors；置顶排序进 read_model；常量
+SCHEDULED_DISPATCH_MIN_LEAD_SEC 归本命名空间（D-007，子模块经 _svc 取值）。
+
 patch 兼容（D-007，本拆分最高风险点）：本命名空间保留 ``get_redis`` /
 ``publish_sessions_changed`` / ``log`` / ``SessionService`` /
 ``_merge_lease_metadata`` / ``get_session_readiness`` 绑定；子模块内一律
@@ -45,6 +51,7 @@ from app.modules.agent.model import (
     AgentRunLog,
     AgentSession,
     AgentSessionQueuedMessage,
+    AgentSessionScheduledMessage,
 )
 
 # D-007 patch 绑定（原 :49 顶层 import）：test_session_service 等 7 处以
@@ -57,6 +64,7 @@ from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import (  # noqa: F401 —— 委托签名注解用
     PageContextCreateBlock,
     PlanResponseDecision,
+    ScheduledMessageCreateRequest,
     SessionReopenResponse,
     SessionUsageModelItemRead,
     SessionUsageRead,
@@ -106,9 +114,21 @@ DAEMON_STOPPED_ERROR_CODE = "daemon_stopped"
 # 本码作自动重派（--resume 继承原会话）的种子标识。
 DAEMON_INTERRUPTED_ERROR_CODE = "daemon_interrupted"
 
+# task-03 / FR-04（2026-09-07-session-pin-rename-scheduled-send，D-010 第二回合
+# 自 main 移植）：定时消息最小提前量（秒）——``dispatch_at`` 必须 ≥
+# now(UTC)+60s 才接受创建（design §总体方案 Wave 2「防刚建即过期竞态」）。
+# main 原定义于单文件模块级（定时消息异常族之后）；拆分包形态下归本命名空间，
+# scheduled_messages 子模块经 ``_svc.`` 延迟解析（D-007 同
+# RECONNECTING_RETRY_WINDOW_SEC 惯例）。
+SCHEDULED_DISPATCH_MIN_LEAD_SEC = 60
+
 # ── 聚合重导出（import 面 + patch 面，D-006/D-007）─────────────────────────
 from .errors import (  # noqa: E402
     DaemonOffline,
+    DaemonScheduledMessageDispatchTooSoon,
+    DaemonScheduledMessageNotFound,
+    DaemonScheduledMessageNotPending,
+    DaemonScheduledMessageSessionInactive,
     DaemonSessionAttachmentInvalid,
     DaemonSessionAttachmentsUnsupported,
     DaemonSessionConfigInvalid,
@@ -127,6 +147,7 @@ from .errors import (  # noqa: E402
     DaemonSessionRuntimeNotFound,
     DaemonSessionRuntimeUnavailable,
     DaemonSessionTeamMissionInvalid,
+    DaemonSessionTitleInvalid,
     DaemonSessionTurnConflict,
     DaemonSessionWorkspaceNotFound,
     SessionEmptyPrompt,
@@ -156,18 +177,23 @@ from .results import (  # noqa: E402
 # 导出面清单（task-06 基线 47 符号 + patch 专用绑定 + 私有符号保位项）——
 # ``__all____`` 显式声明兼容面，杜绝子模块内部符号意外泄漏 / 遗漏。
 __all__ = [
-    # 常量（8）
+    # 常量（9；D-010 二回合 +SCHEDULED_DISPATCH_MIN_LEAD_SEC）
     "ACTIVE_SESSION_STATUSES",
     "ACTIVE_TURN_STATUSES",
     "DAEMON_INTERRUPTED_ERROR_CODE",
     "DAEMON_MSG_SESSION_SWITCH_CONFIG",
     "DAEMON_STOPPED_ERROR_CODE",
     "RECONNECTING_RETRY_WINDOW_SEC",
+    "SCHEDULED_DISPATCH_MIN_LEAD_SEC",
     "TASK_WAKEUP_PROMPT_PREFIX",
     "TERMINAL_TURN_STATUSES",
-    # 异常族（24）
+    # 异常族（29；D-010 二回合 +定时消息 4 + rename 1）
     "DaemonOffline",
     "DaemonRuntimeOffline",
+    "DaemonScheduledMessageDispatchTooSoon",
+    "DaemonScheduledMessageNotFound",
+    "DaemonScheduledMessageNotPending",
+    "DaemonScheduledMessageSessionInactive",
     "DaemonSessionAttachmentInvalid",
     "DaemonSessionAttachmentsUnsupported",
     "DaemonSessionConfigInvalid",
@@ -186,6 +212,7 @@ __all__ = [
     "DaemonSessionRuntimeNotFound",
     "DaemonSessionRuntimeUnavailable",
     "DaemonSessionTeamMissionInvalid",
+    "DaemonSessionTitleInvalid",
     "DaemonSessionTurnConflict",
     "DaemonSessionWorkspaceNotFound",
     # 结果对象 + readiness（6）
@@ -225,6 +252,7 @@ from . import ppm_activation as _ppm_activation  # noqa: E402
 from . import queue as _queue  # noqa: E402
 from . import read_model as _read_model  # noqa: E402
 from . import recovery as _recovery  # noqa: E402
+from . import scheduled_messages as _scheduled_messages  # noqa: E402
 from . import session_lifecycle as _session_lifecycle  # noqa: E402
 
 
@@ -964,6 +992,80 @@ class SessionService(BackgroundTaskMixin):
         return await _session_lifecycle.unarchive_session(
             self,
             session_id=session_id,
+            user_id=user_id,
+        )
+
+    # ── D-010 第二回合（merge main 2ad590192）：置顶/重命名 + 定时消息 CRUD ──
+
+    async def pin_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        return await _session_lifecycle.pin_session(
+            self,
+            session_id=session_id,
+            user_id=user_id,
+        )
+
+    async def unpin_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        return await _session_lifecycle.unpin_session(
+            self,
+            session_id=session_id,
+            user_id=user_id,
+        )
+
+    async def rename_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        title: str,
+    ) -> None:
+        return await _session_lifecycle.rename_session(
+            self,
+            session_id=session_id,
+            user_id=user_id,
+            title=title,
+        )
+
+    async def list_scheduled_messages(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> list[AgentSessionScheduledMessage]:
+        return await _scheduled_messages.list_scheduled_messages(
+            self,
+            session_id=session_id,
+            user_id=user_id,
+        )
+
+    async def create_scheduled_message(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        data: ScheduledMessageCreateRequest,
+    ) -> AgentSessionScheduledMessage:
+        return await _scheduled_messages.create_scheduled_message(
+            self,
+            session_id=session_id,
+            user_id=user_id,
+            data=data,
+        )
+
+    async def cancel_scheduled_message(
+        self,
+        session_id: uuid.UUID,
+        message_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        return await _scheduled_messages.cancel_scheduled_message(
+            self,
+            session_id=session_id,
+            message_id=message_id,
             user_id=user_id,
         )
 

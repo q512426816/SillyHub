@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import dayjs, { type Dayjs } from "dayjs";
 import {
   Ban, Bot, ClipboardList, FolderOpen, Lock, Monitor, MoreHorizontal, PauseCircle, Puzzle,
   Search, TriangleAlert, Zap,
@@ -20,6 +21,14 @@ import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+// task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
+// （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
+// 不破，panel 层零 react-query）。
+import {
+  ScheduledMessagesBar,
+  formatScheduledTime,
+  summarizeScheduledPrompt,
+} from "@/components/daemon/scheduled-messages-bar";
 import { SessionUsageBar } from "@/components/daemon/session-usage-bar";
 import { QUEUE_MAX_PENDING, useMessageQueue } from "@/hooks/use-message-queue";
 import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
@@ -45,7 +54,7 @@ import { getProject } from "@/lib/ppm/project";
 import { getChange } from "@/lib/changes";
 import { getQuicklogDetail } from "@/lib/quicklog";
 import {
-  cancelTeamMission, createSession, fetchPendingDialogs, fetchSessionDialogHistory,
+  cancelTeamMission, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory,
   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
   triggerSessionTeamMission, maxLogTimestamp, reopenSession, streamSession,
   updateSessionCtxWindow, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest,
@@ -63,6 +72,7 @@ import {
   readSessionDraft, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
 } from "./turn-state";
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
+import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
 import { TeamTriggerRow } from "./team-trigger-row";
 import { WorkerSessionOverlay } from "./worker-session-overlay";
 import {
@@ -305,6 +315,56 @@ export function SessionPanelPage({
     if (!draftHydratedRef.current) return;
     writeSessionDraft(sessionId, input);
   }, [sessionId, input]);
+
+  // ── task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时发送 ──
+  // 弹窗开合 + 选定时间（Dayjs，分钟级）+ 提交在途 + 定时条刷新信号（驱动
+  // ScheduledMessagesBar 局部 client 失效重拉，panel 零 react-query）+ 聊天流
+  // 系统提示行（streamFooter 注入，本地态刷新即逝——权威列表在定时条）。
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [schedAt, setSchedAt] = useState<Dayjs | null>(null);
+  const [schedSubmitting, setSchedSubmitting] = useState(false);
+  const [schedRefresh, setSchedRefresh] = useState(0);
+  const [schedHints, setSchedHints] = useState<string[]>([]);
+  // 切会话：关弹窗 + 清系统提示行（本地会话作用域态，防 A 会话提示残留到 B）。
+  useEffect(() => {
+    setSchedOpen(false);
+    setSchedHints([]);
+  }, [sessionId]);
+  // 打开弹窗：默认选「1 小时后」（原型 .quick-chips 默认选中项同款）。
+  const openSchedModal = useCallback(() => {
+    setSchedAt(dayjs().add(1, "hour"));
+    setSchedOpen(true);
+  }, []);
+  /**
+   * 确认创建：createScheduledMessage 成功 → 关弹窗 + 清草稿（trim 比对，同
+   * onSendSettled 口径防覆盖弹窗期间不可变的输入）+ 聊天流插系统提示行 +
+   * 递增刷新信号（定时条立即出现新条目）+ toast。失败保持弹窗开（可改后重试）；
+   * dispatch_at ≥ now+60s 校验由后端兜底（422 → toast，DatePicker 已禁选过去日期）。
+   */
+  const confirmSchedCreate = useCallback(async () => {
+    const sid = sessionId;
+    const prompt = input.trim();
+    if (!sid || !schedAt || !prompt || schedSubmitting) return;
+    setSchedSubmitting(true);
+    try {
+      await createScheduledMessage(sid, {
+        prompt,
+        dispatch_at: schedAt.toISOString(),
+      });
+      setSchedOpen(false);
+      setInput((prev) => (prev.trim() === prompt ? "" : prev));
+      setSchedHints((prev) => [
+        ...prev,
+        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(prompt)}」`,
+      ]);
+      setSchedRefresh((n) => n + 1);
+      notify.success("已创建定时消息");
+    } catch (err) {
+      notify.error(err, "创建定时消息失败");
+    } finally {
+      setSchedSubmitting(false);
+    }
+  }, [sessionId, input, schedAt, schedSubmitting, notify]);
 
   // ── task-03（2026-08-23-sessions-workspace-hub）：预会话首句创建态 ────────
   // creating 在途（发送按钮 spinner + 防重复提交）；失败内联错误（R-02：输入
@@ -2351,6 +2411,12 @@ export function SessionPanelPage({
         onSwitchProvider={timelineOnSwitchProvider}
         hasOnlineProvider={machineOnline}
         emptyProviderLabel={providerLabelOf(session.provider)}
+        // task-08（FR-04）：定时发送系统提示行——创建成功后经 streamFooter 注入
+        // 口以「对话流里的一条消息」形态出现（ql-20260823-002-6a1a 预留位首个
+        // 消费方；空 turns 空态不渲染是注入口语义，非缺陷）。
+        streamFooter={
+          schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : undefined
+        }
       />
     </>
   );
@@ -2849,6 +2915,15 @@ export function SessionPanelPage({
             void dispatchNowEntry(id);
           }}
         />
+        {/* task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息
+            展示条——MessageQueueBar 邻位挂载（输入框上方工具区，Grill B-05 双挂载
+            点之一）。组件自建局部 QueryClientProvider（R4 不变式不破），空列表返回
+            null 零布局变化；refreshSignal 在创建成功后递增驱动新条目即时出现。
+            预会话分支不挂载（sessionId 为空的组件内部也自守卫双保险）。 */}
+        <ScheduledMessagesBar
+          sessionId={sessionId ?? ""}
+          refreshSignal={schedRefresh}
+        />
         {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
             .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。ql-20260827-020：
             派团队按钮移入 SessionInputBar ＋ 菜单，本行按需渲染（chip/错误/弹层）。 */}
@@ -2918,6 +2993,9 @@ export function SessionPanelPage({
           onTeamTrigger={() => openTeamPopover(null)}
           teamTriggerDisabled={teamButtonDisabled}
           teamTriggerTitle={teamButtonTitle}
+          // task-08（FR-04）：⏰ 定时发送入口——真会话（已有 sessionId）注入；
+          // 预会话渲染点（上方）不传即不渲染。
+          onSchedule={openSchedModal}
         />
         <div ref={configBarWrapRef} className="px-5 pb-3">
           <SessionConfigBar
@@ -2962,6 +3040,21 @@ export function SessionPanelPage({
           llmProviders={llmProviders}
         />
       )}
+
+      {/* task-08（FR-04）：定时发送弹窗（⏰ 入口打开；确认走 confirmSchedCreate）。 */}
+      <ScheduledSendModal
+        open={schedOpen}
+        draft={input}
+        value={schedAt}
+        submitting={schedSubmitting}
+        onChange={setSchedAt}
+        onCancel={() => {
+          setSchedOpen(false);
+        }}
+        onConfirm={() => {
+          void confirmSchedCreate();
+        }}
+      />
     </section>
   );
 }

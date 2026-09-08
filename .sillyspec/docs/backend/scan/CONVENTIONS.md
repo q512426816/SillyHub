@@ -31,7 +31,7 @@ generator: sillyspec-scan
 
 每个业务域在 `backend/app/modules/<域>/` 下固定拆分，文件名一致，禁止路由/持久化/契约混写。router 薄（只做鉴权注入 + 调 service + 返回 schema），业务与 DB 全在 service：
 
-- 路由层：一律 `router = APIRouter(prefix=..., tags=[...])` 挂载，如 `backend/app/modules/worktree/router.py:23`、`backend/app/modules/auth/router.py:40`、`backend/app/modules/daemon/router.py:482`、`backend/app/modules/llm_provider/router.py:35`（全量 grep 命中 15+ 处 `APIRouter(prefix="...")`，workspace 路径参数统一 `/workspaces/{workspace_id}` 前缀）。
+- 路由层：一律 `router = APIRouter(prefix=..., tags=[...])` 挂载，如 `backend/app/modules/worktree/router.py:23`、`backend/app/modules/auth/router.py:40`、`backend/app/modules/daemon/router.py:488`、`backend/app/modules/llm_provider/router.py:35`（全量 grep 命中 15+ 处 `APIRouter(prefix="...")`，workspace 路径参数统一 `/workspaces/{workspace_id}` 前缀）。
 - 服务层：`class XxxService:` 有状态类，如 `backend/app/modules/change/service.py:78-85`。
 - 契约层：`XxxRequest / XxxRead` DTO + `model_config = ConfigDict(from_attributes=True)`，如 `backend/app/modules/worktree/schema.py:20`；持久化模型 `class Change(BaseModel, table=True)`（`backend/app/modules/change/model.py:118`）。
 

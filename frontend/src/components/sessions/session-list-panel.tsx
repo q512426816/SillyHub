@@ -38,6 +38,16 @@
  *   一 + 删除）+ Modal.confirm 三处理 + 已归档徽标与整行降调；群分区随状态
  *   筛选「已归档会话」哨兵切数据源（queryKey 视图维度 + 分区头「＋」隐藏）。
  *
+ * task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~FR-03）：单聊
+ *   行置顶/重命名——hover 按钮区归档按钮左侧新增置顶（Pin）/取消置顶
+ *   （PinOff，按 session.pinned_at 二选一）+ 重命名（Pencil，行内编辑态：
+ *   标题位变输入框，Enter/blur 提交、Esc 取消、strip 非空 ≤255 空不提交）；
+ *   置顶行标题前 Pin 小徽标（brand 阶）。三回调可选（onPinSessions/
+ *   onUnpinSessions/onRenameSession，未传零按钮——悬浮助手 runtime 抽屉等
+ *   消费点零渲染变化）；置顶分组内最前语义靠服务端排序（pinned_at IS NULL
+ *   前置键，D-002），前端 byWs 桶保序插入不做本地重排；群行（GroupChatRow）
+ *   不加（群列表无 pinned 字段）。
+ *
  * 工作区树（全局/workspace 形态）结构：
  *   筛选区：
  *     - 标题搜索（回车应用，X-11 保留；树形态为纯视图过滤不进数据层）
@@ -83,7 +93,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Input, Modal, Select, Spin, Tag } from "antd";
+import { Button, Input, Modal, Popover, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import {
   Archive,
@@ -96,6 +106,9 @@ import {
   FolderOpen,
   ListChecks,
   Monitor,
+  Pencil,
+  Pin,
+  PinOff,
   Plus,
   Trash2,
   User,
@@ -120,6 +133,13 @@ import {
   type GroupChatListItemRead,
   type PpmItemKind,
 } from "@/lib/daemon";
+import type { AgentLogListItem } from "@/lib/agent-logs";
+import { LIVENESS_META, LivenessDot } from "@/components/agent-log/liveness-badge";
+import {
+  clearUnread,
+  isUnread,
+  useSessionLiveness,
+} from "@/hooks/use-session-liveness";
 import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
 import { listPersonalPlanTasks } from "@/lib/ppm/task";
 import { listProblems } from "@/lib/ppm/problem";
@@ -208,6 +228,13 @@ function confirmIcon(Icon: LucideIcon, colorCls: string) {
 
 /** 组内截断阈值 + 「显示全部」（R-03）。 */
 const GROUP_ITEM_LIMIT = 50;
+
+/**
+ * 重命名标题长度上限（task-07 / 2026-09-07-session-pin-rename-scheduled-send
+ * / FR-02）：与后端 rename 校验同源（strip 后非空 ≤255，超出 422）——输入框
+ * maxLength 拦截 + 提交前 slice 双保险。
+ */
+const SESSION_TITLE_MAX_LEN = 255;
 
 /** 「非工作区」固定末尾组 id（分组/展开集合用；区别于 workspace uuid）。 */
 const NO_WORKSPACE_GROUP_ID = "__no_workspace__";
@@ -332,6 +359,20 @@ export interface SessionListPanelProps {
   //（调用方 Promise.allSettled 口径），面板据此出成功/部分失败 toast。
   onArchiveSessions?: (_ids: string[]) => Promise<number>;
   onUnarchiveSessions?: (_ids: string[]) => Promise<number>;
+  /**
+   * task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01）：置顶/
+   * 取消置顶回调（可选，照 onArchiveSessions 模式——传入才启用行内按钮；
+   * 返回失败个数供面板 toast）。置顶 = 分组内最前，排序语义靠服务端
+   * （pinned_at IS NULL 前置键，D-002），前端不做本地重排。
+   */
+  onPinSessions?: (_ids: string[]) => Promise<number>;
+  onUnpinSessions?: (_ids: string[]) => Promise<number>;
+  /**
+   * task-07（FR-02）：重命名回调（单条；SessionRow 行内编辑态已 strip 非空
+   * ≤255 才提交到这里）。返回失败个数（0=成功）供面板 toast；调用方仅
+   * invalidate 列表，不动选中态与 ?session=。
+   */
+  onRenameSession?: (_id: string, _title: string) => Promise<number>;
   /**
    * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
    * 到工作区/变更级。D-003@v2：scope 仅给全局端点多传 workspace_id/change_id
@@ -589,6 +630,9 @@ function WorkspaceTreeList({
   onDeleteSessions,
   onArchiveSessions,
   onUnarchiveSessions,
+  onPinSessions,
+  onUnpinSessions,
+  onRenameSession,
   scope,
   onNewInGroup,
   defaultExpandedWorkspaceId,
@@ -819,6 +863,13 @@ function WorkspaceTreeList({
     [sessionsQuery.data],
   );
   const totalFromServer = sessionsQuery.data?.total ?? 0;
+
+  // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
+  // 行尾活性小灯数据源：useSessionLiveness 固定 all 槽 30s 轮询 + 客户端
+  // working/blocked→idle 转移检测（未读标记）。本面板调一次建 map，经
+  // WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未命
+  // 中不传 → 不渲染灯，fail-open 与无日志会话现状一致）。
+  const { bySessionId: livenessBySessionId } = useSessionLiveness();
 
   // ── task-07（2026-09-01-session-group-chat / FR-01）：群聊分区 ──────────
   // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——design §5.3 群列表
@@ -1278,6 +1329,55 @@ function WorkspaceTreeList({
     });
   };
 
+  // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：
+  // 置顶/重命名三处理——照 handleSingleArchive 模式（回调门控 + pinning/
+  // renaming 状态防重入 + useNotify toast 照 notifyArchiveResult 口径）。
+  // 置顶/取消置顶是轻量可逆开关，照原型直连不弹确认（对照归档的
+  // Modal.confirm：归档会从默认列表隐藏故需确认）；重命名行内编辑态归
+  // SessionRow 本地管理，本层只承接提交结果。
+  // ─────────────────────────────────────────────────────────────────
+
+  const [pinning, setPinning] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+
+  const handleSinglePin = async (id: string, title: string) => {
+    if (!onPinSessions || pinning) return;
+    setPinning(true);
+    try {
+      const failed = await onPinSessions([id]);
+      notifyArchiveResult(failed, `已置顶「${title}」（排分组内最前）`);
+    } finally {
+      setPinning(false);
+    }
+  };
+
+  const handleSingleUnpin = async (id: string, title: string) => {
+    if (!onUnpinSessions || pinning) return;
+    setPinning(true);
+    try {
+      const failed = await onUnpinSessions([id]);
+      notifyArchiveResult(failed, `已取消置顶「${title}」`);
+    } finally {
+      setPinning(false);
+    }
+  };
+
+  /** 重命名提交（SessionRow 已 strip 非空 ≤255 才回调到这里）。 */
+  const handleSingleRename = async (
+    id: string,
+    oldTitle: string,
+    newTitle: string,
+  ) => {
+    if (!onRenameSession || renaming) return;
+    setRenaming(true);
+    try {
+      const failed = await onRenameSession(id, newTitle);
+      notifyArchiveResult(failed, `「${oldTitle}」已重命名为「${newTitle}」`);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   // ── task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群收纳
   // 三处理——照 handleSingleArchive/handleSingleUnarchive/handleSingleDelete
   // 模式（Modal.confirm + confirmIcon + archiving/deleting 状态防重入 +
@@ -1608,6 +1708,24 @@ function WorkspaceTreeList({
                     ? (id, title) => handleSingleUnarchive(id, title)
                     : undefined
                 }
+                /* task-07（2026-09-07-session-pin-rename-scheduled-send）：置顶/
+                   重命名照 onArchive 透传路径（可选回调门控，未传零按钮）。 */
+                onPin={
+                  onPinSessions
+                    ? (id, title) => handleSinglePin(id, title)
+                    : undefined
+                }
+                onUnpin={
+                  onUnpinSessions
+                    ? (id, title) => handleSingleUnpin(id, title)
+                    : undefined
+                }
+                onRename={
+                  onRenameSession
+                    ? (id, oldTitle, newTitle) =>
+                        handleSingleRename(id, oldTitle, newTitle)
+                    : undefined
+                }
                 showAll={showAllGroupIds.has(group.id)}
                 onToggleShowAll={() =>
                   setShowAllGroupIds((prev) => {
@@ -1621,6 +1739,9 @@ function WorkspaceTreeList({
                 hideEngineChip={filterAgent !== ""}
                 runtimeToMachine={runtimeToMachine}
                 isArchivedView={isArchivedView}
+                /* 2026-09-08-session-list-liveness-dot task-02：liveness map
+                   组内行级命中（未命中 undefined → 行不渲染灯）。 */
+                livenessBySessionId={livenessBySessionId}
               />
             );
           })}
@@ -2028,6 +2149,9 @@ function WorkspaceGroupNode({
   onDelete,
   onArchive,
   onUnarchive,
+  onPin,
+  onUnpin,
+  onRename,
   showAll,
   onToggleShowAll,
   hideMachineTitles,
@@ -2036,6 +2160,9 @@ function WorkspaceGroupNode({
   isArchivedView,
   /** ql-20260829-010：归档工作区 id 集（组头「＋」置灰，后端 409 同款守卫）。 */
   archivedWorkspaceIds,
+  /** 2026-09-08-session-list-liveness-dot task-02：key=agent_session_id 的
+   * 活性条目映射（行级命中下发；未传/未命中 → 行不渲染小灯）。 */
+  livenessBySessionId,
 }: {
   group: TreeGroup;
   visibleSessions: AgentSessionRead[];
@@ -2062,6 +2189,12 @@ function WorkspaceGroupNode({
   onDelete?: (_id: string, _title: string) => void;
   onArchive?: (_id: string, _title: string) => void;
   onUnarchive?: (_id: string, _title: string) => void;
+  /** task-07（2026-09-07-session-pin-rename-scheduled-send）：置顶/取消置顶
+   *（照 onArchive 透传路径，未传零按钮）。 */
+  onPin?: (_id: string, _title: string) => void;
+  onUnpin?: (_id: string, _title: string) => void;
+  /** task-07：重命名提交（newTitle 已 strip 非空 ≤255）。 */
+  onRename?: (_id: string, _oldTitle: string, _newTitle: string) => void;
   showAll: boolean;
   onToggleShowAll: () => void;
   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
@@ -2072,6 +2205,7 @@ function WorkspaceGroupNode({
   /** 2026-08-24：归档视图判定（控制批量操作按钮显隐）。 */
   isArchivedView: boolean;
   archivedWorkspaceIds?: Set<string>;
+  livenessBySessionId?: Map<string, AgentLogListItem>;
 }) {
   // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
   const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
@@ -2457,6 +2591,9 @@ function WorkspaceGroupNode({
                     const parentOpen =
                       openParents.has(s.id) ||
                       Boolean(childSubs?.some((c) => c.id === selectedSessionId));
+                    // task-02（2026-09-08-session-list-liveness-dot）：行级 liveness
+                    // 命中（map 未命中 undefined → 行不渲染灯，fail-open）。
+                    const liveness = livenessBySessionId?.get(s.id);
                     return (
                       <div key={s.id}>
                         <SessionRow
@@ -2467,12 +2604,23 @@ function WorkspaceGroupNode({
                           runtimeToMachine={runtimeToMachine}
                           hideEngineChip={hideEngineChip}
                           onSelect={onSelect}
+                          liveness={liveness}
+                          livenessUnread={liveness ? isUnread(s.id) : undefined}
                           batchMode={batchActive}
                           checked={checkedIds.has(s.id)}
                           onToggleCheck={() => onToggleChecked(s.id)}
                           onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
                           onArchive={onArchive ? () => onArchive(s.id, title) : undefined}
                           onUnarchive={onUnarchive ? () => onUnarchive(s.id, title) : undefined}
+                          /* task-07（2026-09-07-session-pin-rename-scheduled-send）：
+                             置顶/重命名照 onArchive 绑定模式（id/title 渲染期闭包）。 */
+                          onPin={onPin ? () => onPin(s.id, title) : undefined}
+                          onUnpin={onUnpin ? () => onUnpin(s.id, title) : undefined}
+                          onRename={
+                            onRename
+                              ? (next: string) => onRename(s.id, title, next)
+                              : undefined
+                          }
                         />
                         {/* 2026-08-26-subsession-portal-grouping：父行附属分身
                             折叠组（组级 violet 徽标 + 子行缩进，design §4.B） */}
@@ -2513,12 +2661,28 @@ function WorkspaceGroupNode({
                                   runtimeToMachine={runtimeToMachine}
                                   hideEngineChip={hideEngineChip}
                                   onSelect={onSelect}
+                                  /* task-02：分身行照主行透传（map 命中才有值）。 */
+                                  liveness={livenessBySessionId?.get(c.id)}
+                                  livenessUnread={
+                                    livenessBySessionId?.get(c.id)
+                                      ? isUnread(c.id)
+                                      : undefined
+                                  }
                                   batchMode={batchActive}
                                   checked={checkedIds.has(c.id)}
                                   onToggleCheck={() => onToggleChecked(c.id)}
                                   onDelete={onDelete ? () => onDelete(c.id, c.title ?? "分身") : undefined}
                                   onArchive={onArchive ? () => onArchive(c.id, c.title ?? "分身") : undefined}
                                   onUnarchive={onUnarchive ? () => onUnarchive(c.id, c.title ?? "分身") : undefined}
+                                  /* task-07：分身行照主行透传（archive/delete 先例）。 */
+                                  onPin={onPin ? () => onPin(c.id, c.title ?? "分身") : undefined}
+                                  onUnpin={onUnpin ? () => onUnpin(c.id, c.title ?? "分身") : undefined}
+                                  onRename={
+                                    onRename
+                                      ? (next: string) =>
+                                          onRename(c.id, c.title ?? "分身", next)
+                                      : undefined
+                                  }
                                 />
                               ))}
                           </div>
@@ -2566,8 +2730,73 @@ interface SessionRowProps {
   // 2026-08-24：归档/取消归档回调。
   onArchive?: () => void;
   onUnarchive?: () => void;
+  /**
+   * task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：置顶/
+   * 取消置顶/重命名回调（可选，未传零按钮——悬浮助手 runtime 抽屉等消费点）。
+   * 置顶/取消置顶按行 pinned_at 二选一显隐（照归档按钮 archived_at 先例）；
+   * onRename 参数为 strip 后的新标题（非空 ≤255 由本组件校验后再回调）。
+   */
+  onPin?: () => void;
+  onUnpin?: () => void;
+  onRename?: (_newTitle: string) => void;
   /** ql-20260823-003：树形态筛选智能体后隐藏引擎 chip（全组同引擎冗余）。 */
   hideEngineChip?: boolean;
+  /**
+   * 2026-09-08-session-list-liveness-dot task-02（FR-01 / FR-02 / D-002@v1）：
+   * 关联 agent 日志的活性条目（liveness map 命中 session.id 才传；未传不渲染
+   * 行尾小灯——无关联日志会话行为与现状一致）。
+   */
+  liveness?: AgentLogListItem;
+  /** working/blocked→idle 新转移未读（isUnread 命中才传；selected 置真清除）。 */
+  livenessUnread?: boolean;
+}
+
+/** 悬停卡证据摘要截断上限（超出加省略号；title 悬浮看全文）。 */
+const LIVENESS_EVIDENCE_MAX_LEN = 80;
+
+/**
+ * 活性悬停卡内容（task-02 / FR-02 / D-002@v1）——组合渲染四项而非
+ * livenessTitle 单行字符串（Grill CC-04）：状态全名（LIVENESS_META 五态
+ * 色点 + label）/ 静默时长（last_event_at 相对时间，复用文件内
+ * formatRelativeTime）/ 证据摘要（state_evidence 截断）/ 推导时间
+ * （state_derived_at）。「关联」行不设——AgentLogListItem 无 change_key/
+ * quick_id 数据源。经 antd Popover portal 渲染（防行根 overflow-hidden 裁剪）。
+ */
+function SessionLivenessPopoverContent({ entry }: { entry: AgentLogListItem }) {
+  const meta = LIVENESS_META[entry.state];
+  const evidence = entry.state_evidence?.trim();
+  return (
+    <div className="w-64 space-y-1 text-xs" data-testid="liveness-hover-card">
+      <div className="flex items-center gap-1.5 font-medium">
+        <span
+          aria-hidden
+          className={cn(
+            "h-2 w-2 shrink-0 rounded-full",
+            meta.dotCls,
+            meta.pulse && "animate-pulse",
+          )}
+        />
+        {meta.label}（{entry.state}）
+      </div>
+      <div className="text-muted-foreground">
+        静默时长：{formatRelativeTime(entry.last_event_at)}
+      </div>
+      <div
+        className="truncate text-muted-foreground"
+        title={evidence ?? undefined}
+      >
+        证据摘要：
+        {evidence
+          ? evidence.length > LIVENESS_EVIDENCE_MAX_LEN
+            ? `${evidence.slice(0, LIVENESS_EVIDENCE_MAX_LEN)}…`
+            : evidence
+          : "—"}
+      </div>
+      <div className="text-muted-foreground">
+        推导时间：{formatRelativeTime(entry.state_derived_at)}
+      </div>
+    </div>
+  );
 }
 
 function SessionRow({
@@ -2586,8 +2815,49 @@ function SessionRow({
   onDelete,
   onArchive,
   onUnarchive,
+  onPin,
+  onUnpin,
+  onRename,
   hideEngineChip,
+  liveness,
+  livenessUnread,
 }: SessionRowProps) {
+  // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-02）：行内
+  // 重命名编辑态（标题位 ↔ 输入框，本地管理）：Enter/blur 提交、Esc 取消；
+  // renameCancelledRef 标记 Esc 路径，防 setEditing(false) 触发的 blur 再提交。
+  const [editing, setEditing] = useState(false);
+  const renameCancelledRef = useRef(false);
+  // ── 2026-09-08-session-list-liveness-dot task-02 / FR-03 / D-001@v2：selected
+  // prop false→true 边沿清除该会话 idle 未读标记——覆盖点击选中 / 行级 Enter /
+  // 深链 ?session= 三路入口（深链经 selected 初挂即 true，wasSelectedRef 初值
+  // false 首跑即清）；批量模式勾选走 onToggleCheck 不动 selected，不触发清除。
+  const wasSelectedRef = useRef(false);
+  // 未读红点本地显示态：真源是 localStorage（isUnread 经 props 每渲染期取值），
+  // 但 selected 边沿的 clearUnread 在 effect 里执行后需要本行即时重渲染红点才
+  // 消失（否则要等下一轮轮询重渲染，最长 30s 残影）——本地态跟随 props 同步、
+  // 边沿清除时立即置 false。
+  const [unreadVisible, setUnreadVisible] = useState(Boolean(livenessUnread));
+  useEffect(() => {
+    setUnreadVisible(Boolean(livenessUnread));
+  }, [livenessUnread]);
+  useEffect(() => {
+    if (selected && !wasSelectedRef.current) {
+      clearUnread(session.id);
+      setUnreadVisible(false);
+    }
+    wasSelectedRef.current = selected;
+  }, [selected, session.id]);
+  /** 提交（strip 非空 ≤255 且与当前标题不同才回调；空/未变静默退出不弹错）。 */
+  const finishRename = (raw: string) => {
+    setEditing(false);
+    if (renameCancelledRef.current) {
+      renameCancelledRef.current = false;
+      return;
+    }
+    const next = raw.trim().slice(0, SESSION_TITLE_MAX_LEN);
+    if (!next || next === title) return;
+    onRename?.(next);
+  };
   // chips 数据源：config_snapshot 直显免二次查询；快照缺省回退基础信息。
   const snapshot = session.config_snapshot;
   const machineHit = session.runtime_id
@@ -2680,16 +2950,51 @@ function SessionRow({
         {/* task-07：tool_report 标题旁 FileText「本地 Agent」徽标（原型
             .badge-tool：brand 阶，图标线性化 2026-08-24）。 */}
         <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span
-            className={cn(
-              "min-w-0 truncate text-[13px] font-medium",
-              variant === "tree" && selected
-                ? "text-brand-700"
-                : "text-foreground",
-            )}
-          >
-            {title}
-          </span>
+          {/* task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01）：
+              置顶徽标——标题前 Pin 小图标（原型 .row .pin 📌 位，brand 阶，
+              形态对齐「本地 Agent」徽标的圆角描边 chip；置顶排分组内最前靠
+              服务端排序，本行只做标识）。 */}
+          {session.pinned_at && (
+            <span
+              title={`已置顶（${formatRelativeTime(session.pinned_at)}）`}
+              className="inline-flex h-4 shrink-0 items-center justify-center rounded-full border border-brand-600 bg-brand-100 px-1 text-brand-700"
+            >
+              <Pin aria-hidden className="h-2.5 w-2.5" />
+            </span>
+          )}
+          {/* task-07（FR-02）：重命名编辑态——标题位变输入框（预填当前标题
+              派生值，Enter/blur 提交、Esc 取消；stopPropagation 防冒泡触发
+              行选中/行级 Enter）。 */}
+          {editing ? (
+            <input
+              aria-label={`重命名会话 ${title}`}
+              defaultValue={title}
+              maxLength={SESSION_TITLE_MAX_LEN}
+              autoFocus
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") finishRename(e.currentTarget.value);
+                else if (e.key === "Escape") {
+                  renameCancelledRef.current = true;
+                  setEditing(false);
+                }
+              }}
+              onBlur={(e) => finishRename(e.currentTarget.value)}
+              className="h-5 min-w-0 flex-1 rounded border border-brand-600 bg-card px-1.5 text-[13px] font-medium leading-5 text-foreground outline-none"
+            />
+          ) : (
+            <span
+              className={cn(
+                "min-w-0 truncate text-[13px] font-medium",
+                variant === "tree" && selected
+                  ? "text-brand-700"
+                  : "text-foreground",
+              )}
+            >
+              {title}
+            </span>
+          )}
           {/* ql-20260831-013：已归档徽标——归档视图内行与普通会话同貌、
               无法分辨（用户反馈）；中性 muted chip 不抢 brand 语义。 */}
           {session.archived_at && (
@@ -2715,9 +3020,81 @@ function SessionRow({
         <span className="shrink-0 text-[11px] text-muted-foreground">
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
+        {/* 2026-09-08-session-list-liveness-dot task-02 / FR-01~03：行尾活性
+            小灯（相对时间之后、hover 操作按钮之前；liveness map 命中才渲染，
+            行内 flex 尾部 flex-none 18px 节点，不新增列——R-01 布局零变化）。
+            antd Popover trigger hover 默认 portal 渲染到 body，防行根节点
+            overflow-hidden 裁剪（Grill BL-02）；悬停卡内容组合渲染见
+            SessionLivenessPopoverContent。 */}
+        {liveness && (
+          <Popover
+            trigger="hover"
+            placement="bottomRight"
+            content={<SessionLivenessPopoverContent entry={liveness} />}
+          >
+            <span
+              data-testid="liveness-dot"
+              className="relative inline-flex h-[18px] w-[18px] flex-none items-center justify-center"
+            >
+              <LivenessDot state={liveness.state} />
+              {unreadVisible && (
+                <span
+                  aria-label="有新的空闲状态未读"
+                  className="absolute right-0 top-0 h-[7px] w-[7px] rounded-full border-[1.5px] border-card bg-destructive"
+                />
+              )}
+            </span>
+          </Popover>
+        )}
         {/* 单条操作按钮：hover 显示，阻止行点击冒泡 */}
         {!batchMode && (
           <span className="ml-1 flex hidden items-center group-hover:flex">
+            {/* task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：
+                置顶/取消置顶（按行 pinned_at 二选一，照归档按钮 archived_at
+                先例）+ 重命名，排归档按钮左侧（原型 .ops 顺序：置顶 → 重命名
+                → 归档 → 删除）；hover 走 brand 语义阶（原型 .op:hover 主色）。
+                编辑态隐藏重命名按钮（防 blur 提交与重开编辑态竞态），置顶/归
+                档/删除保留——点击先 blur 提交重命名再执行原操作，语义自洽。 */}
+            {onPin && !session.pinned_at && (
+              <button
+                type="button"
+                aria-label={`置顶 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPin();
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700"
+              >
+                <Pin className="h-3 w-3" />
+              </button>
+            )}
+            {onUnpin && session.pinned_at && (
+              <button
+                type="button"
+                aria-label={`取消置顶 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUnpin();
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700"
+              >
+                <PinOff className="h-3 w-3" />
+              </button>
+            )}
+            {onRename && !editing && (
+              <button
+                type="button"
+                aria-label={`重命名 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  renameCancelledRef.current = false;
+                  setEditing(true);
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
             {/* 2026-08-24：归档/取消归档按钮（在删除按钮左侧）。
                 ql-20260831-013：按行 archived_at 二选一——原两按钮无条件齐显，
                 点错侧后端幂等静默无反馈（对齐批量栏 isArchivedView 显隐语义）。 */}

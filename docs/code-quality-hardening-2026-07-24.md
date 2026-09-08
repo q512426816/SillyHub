@@ -114,7 +114,7 @@
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
 | B-idx | `backend/app/modules/workspace/model.py:157` / `backend/app/modules/ppm/task/model.py:47` / `backend/app/modules/daemon/model.py:280` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
-| B2 | `backend/app/modules/daemon/router.py:1678` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
+| B2 | `backend/app/modules/daemon/router.py:1815` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
 | A1 | `backend/app/modules/daemon/permission_service.py:388` _resolve_daemon_id_for_runtime | 与 `backend/app/modules/daemon/session/service.py:83` 完全重复（docstring 自承 mirrors），演进漂移风险 | 委托 session.service 单一真相源（lazy import 避循环）|
 
 ### Wave E（续）— 前端 F2 useSession 选择器（安全子集）✅ 验证 1059 passed 零回归
@@ -204,7 +204,7 @@ DEFER（带原因）：
 | R5 | `backend/app/modules/agent/finalizer.py:469` converge_mission_for_completed_run | 两个 worker 同时 complete → 都 derive 出 done/degraded → 都跑 finalize（重复 GLM 合并 / 重复 merge artifact / 重复计费） | `AgentMission` 加 `converged_at` 列 + migration `202607251000`；finalize 前原子 `UPDATE...WHERE converged_at IS NULL` 抢占，`rowcount=0` 跳过 |
 
 > **为何用原子 UPDATE 而非 with_for_update 行锁**：`finalize_bootstrap_mission`/`finalize_execute_mission` 内部有 commit（会释放行锁），行锁挡不住"finalize commit 后、converged_at 置位前"的并发窗口；原子 `UPDATE...WHERE IS NULL` 是单 SQL，不受后续 commit 影响。
-> **为何守卫放 finalize 前而非 collect 前**：`collect_completed_artifacts` 幂等（backend/app/modules/agent/execution.py:305 注释 + 321 查重，已有 artifact 的 run 跳过），重复 collect 无害，守卫只需挡重的 finalize。
+> **为何守卫放 finalize 前而非 collect 前**：`collect_completed_artifacts` 幂等（backend/app/modules/agent/execution.py:830 `collect_completed_artifacts` docstring + 853 批量查重，已有 artifact 的 run 跳过），重复 collect 无害，守卫只需挡重的 finalize。
 > **不破坏重入**：`mcp_tools.converge_mission` 的冲突重入靠 `_finalize_merge_for_mission`（独立调 finalize_execute_mission，task-06 §5.2），不依赖 `converge_mission_for_completed_run` 内的 finalize；`test_converge_mission_reentrant` mock 了 `converge_mission_for_completed_run`，不触及守卫。
 
 ### Wave C — A6 缓存 token 聚合（DEFER）
@@ -345,7 +345,7 @@ DEFER（带原因）：
 |---|---|---|---|
 | F8 | `frontend/src/app/(dashboard)/runtimes/page.tsx` | 搜索框每按键改 `query` → listParams → react-query queryKey 变 → 重取（"project" 8 键 = 8 次重取） | 加 `debouncedQuery` state + 300ms setTimeout effect；输入框仍绑 `query`（即时回显），listParams 用 `debouncedQuery` |
 | F9 | `frontend/src/app/(dashboard)/workspaces/page.tsx` | 同上，且 reload 把 4 路请求（listWorkspaces + runtimes + instances + bindings）绑在 query 变化上，每键 4 请求 | 同款 `debouncedQuery`，reload deps + listWorkspaces `q` 改用 `debouncedQuery`（"project" 8 键 32 请求 → 4） |
-| F10 | `frontend/src/app/(dashboard)/workspaces/[id]frontend/src/app/page.tsx:90` | `fetchMyBinding` 串行排在 6 路 Promise.all 之后（独立于其它 6 路却不同发），白多一个 RTT | 并入 Promise.all（第 7 路，带 .catch 降级），与原 fetch 同源同语义 |
+| F10 | `frontend/src/app/(dashboard)/workspaces/[id]/page.tsx` | `fetchMyBinding` 串行排在 6 路 Promise.all 之后（独立于其它 6 路却不同发），白多一个 RTT | 并入 Promise.all（第 7 路，带 .catch 降级），与原 fetch 同源同语义 |
 
 ### 回归测试新增
 

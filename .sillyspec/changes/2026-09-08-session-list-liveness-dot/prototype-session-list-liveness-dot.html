@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 会话列表活性小灯（2026-09-08-session-list-liveness-dot）</title>
+<style>
+:root, [data-theme="ai-native"] {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --primary-soft: #EDE9FE;
+  --accent: #0891B2; --accent-soft: #CFFAFE; --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF;
+  --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --border: #DDD6FE; --border-weak: #EEE9F8;
+  --success: #059669; --warning: #D97706; --error: #DC2626;
+  --shadow-sm: 0 1px 2px rgba(30,27,75,.06); --shadow-md: 0 4px 14px rgba(30,27,75,.08);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+[data-theme="blue"] {
+  --primary: #1677FF; --primary-hover: #0958D9; --primary-soft: #E6F4FF;
+  --accent: #13C2C2; --accent-soft: #E6FFFB; --accent-text: #08979C;
+  --brand-gradient: linear-gradient(135deg, #1677FF 0%, #13C2C2 100%);
+  --bg: #F0F5FF; --fg: #10233F; --card: #FFFFFF;
+  --muted: #EEF2F8; --muted-fg: #45556C; --faint: #94A3B8;
+  --border: #B9D8FF; --border-weak: #E3EEFF;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); padding: 24px; font-size: 14px; }
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.header { display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand .logo { width: 34px; height: 34px; border-radius: 9px; background: var(--brand-gradient); display: grid; place-items: center; color: #fff; font-weight: 700; }
+.brand h1 { font-size: 17px; } .brand small { color: var(--muted-fg); font-weight: 400; display: block; margin-top: 2px; }
+.theme-toggle { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 6px 12px; cursor: pointer; color: var(--fg); font-size: 13px; box-shadow: var(--shadow-sm); }
+.card { background: var(--card); border: 1px solid var(--border-weak); border-radius: 12px; box-shadow: var(--shadow-md); padding: 18px 20px; }
+.card h2 { font-size: 15px; margin-bottom: 4px; }
+.card .desc { color: var(--muted-fg); font-size: 12.5px; margin-bottom: 14px; line-height: 1.6; }
+.note { background: var(--primary-soft); color: var(--primary-hover); border-radius: 8px; padding: 10px 14px; font-size: 12.5px; line-height: 1.6; margin-bottom: 14px; }
+
+/* 会话树面板 */
+.panel { border: 1px solid var(--border-weak); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); overflow: visible; padding: 8px; }
+.group-head { padding: 7px 8px; font-size: 12.5px; font-weight: 600; color: var(--muted-fg); }
+.row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; position: relative; }
+.row:hover { background: var(--muted); }
+.row .dot-status { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+.row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .time { font-size: 11px; color: var(--muted-fg); flex: none; }
+
+/* ★ 行尾活性小灯（~18px，本次新增） */
+.liveness { width: 18px; height: 18px; display: grid; place-items: center; flex: none; position: relative; cursor: help; }
+.liveness .ldot { width: 8px; height: 8px; border-radius: 50%; }
+.lv-working .ldot { background: var(--accent); animation: pulse 1.6s infinite; }
+.lv-blocked .ldot { background: var(--error); animation: pulse 1.6s infinite; }
+.lv-idle .ldot { background: var(--warning); }
+.lv-ended .ldot { background: var(--faint); }
+.lv-unknown .ldot { background: var(--faint); opacity: .45; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* ★ idle 未读小红点（D-006） */
+.unread-dot { position: absolute; top: 0; right: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--error); border: 1.5px solid var(--card); }
+
+/* ★ 悬停卡 */
+.hovercard { position: absolute; right: 0; top: 26px; z-index: 30; width: 280px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 12px 14px; font-size: 12.5px; display: none; }
+.row:hover .hovercard { display: block; }
+.hovercard .h-state { font-weight: 600; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.hovercard .h-state .ldot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.hovercard dl { display: grid; grid-template-columns: 64px 1fr; gap: 4px 10px; color: var(--muted-fg); }
+.hovercard dt { color: var(--faint); }
+.hovercard dd { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hint { color: var(--faint); font-size: 11.5px; margin-top: 8px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted-fg); margin-bottom: 12px; }
+.legend .it { display: inline-flex; align-items: center; gap: 5px; }
+.legend .ldot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="brand">
+      <div class="logo">S</div>
+      <h1>会话列表活性小灯 <small>2026-09-08-session-list-liveness-dot · 原型</small></h1>
+    </div>
+    <button class="theme-toggle" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='ai-native'?'blue':'ai-native'">切换主题（blue / ai-native）</button>
+  </div>
+
+  <div class="note">铁律（继承归档 D-004）：行尾只加 ~18px 小灯，<b>不新增列、不改布局</b>；完整信息只在悬停卡；无关联日志的会话不显示灯。idle 且有 working/blocked→idle 新转移的行加<b>未读小红点</b>（右上角），点开该会话后消失（localStorage 记已读）。</div>
+
+  <div class="card">
+    <h2>会话树行尾小灯</h2>
+    <div class="desc">hover 行查看悬停卡示例（第一行）；小灯复用 LivenessDot 既有视觉。</div>
+    <div class="legend">
+      <span class="it"><span class="ldot" style="background:var(--accent);animation:pulse 1.6s infinite"></span>working</span>
+      <span class="it"><span class="ldot" style="background:var(--error);animation:pulse 1.6s infinite"></span>blocked</span>
+      <span class="it"><span class="ldot" style="background:var(--warning)"></span>idle（+未读红点示例）</span>
+      <span class="it"><span class="ldot" style="background:var(--faint)"></span>ended</span>
+      <span class="it"><span class="ldot" style="background:var(--faint);opacity:.45"></span>unknown</span>
+    </div>
+    <div class="panel">
+      <div class="group-head">▾ multi-agent-platform</div>
+      <div class="row">
+        <span class="dot-status"></span>
+        <span class="title">Liveness 状态推导联调</span>
+        <span class="time">2 分钟前</span>
+        <span class="liveness lv-working" title="">
+          <span class="ldot"></span>
+          <span class="hovercard">
+            <span class="h-state"><span class="ldot" style="background:var(--accent)"></span>工作中（working）</span>
+            <dl>
+              <dt>静默时长</dt><dd>36s（last_event_at 距今）</dd>
+              <dt>关联</dt><dd>2026-09-08-session-list-liveness-dot</dd>
+              <dt>证据</dt><dd>tool_use 未配对 ×2（zcode）</dd>
+              <dt>推导时间</dt><dd>22:41:07（每 10s 刷新）</dd>
+            </dl>
+            <div class="hint">悬停卡内容 = livenessTitle 全量；数据 30s 轮询（与总览卡同 queryKey 共享缓存）</div>
+          </span>
+        </span>
+      </div>
+      <div class="row">
+        <span class="dot-status"></span>
+        <span class="title">conflict-diff-compare 验证</span>
+        <span class="time">18 分钟前</span>
+        <span class="liveness lv-blocked"><span class="ldot"></span></span>
+      </div>
+      <div class="row">
+        <span class="dot-status" style="background:var(--warning)"></span>
+        <span class="title">arch-large-file-split 拆分执行</span>
+        <span class="time">1 小时前</span>
+        <span class="liveness lv-idle">
+          <span class="ldot"></span>
+          <span class="unread-dot" title="working/blocked → idle 新转移，点开会话清除"></span>
+        </span>
+      </div>
+      <div class="row">
+        <span class="dot-status" style="background:var(--faint)"></span>
+        <span class="title">日常问答会话（无关联日志 → 不显示灯）</span>
+        <span class="time">昨天</span>
+      </div>
+      <div class="row">
+        <span class="dot-status" style="background:var(--faint)"></span>
+        <span class="title">pi-task-events 冒烟</span>
+        <span class="time">昨天</span>
+        <span class="liveness lv-ended"><span class="ldot"></span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>未读判定（D-003 / D-001@v2 客户端转移检测）</h2>
+    <div class="desc" style="margin-bottom:0">
+      显示条件：hook 每轮 30s 轮询做客户端转移检测——localStorage 记录的该会话「上次已知 state」∈ {working, blocked} 且当前 state = idle → 写未读标记（红点亮）。首见（无历史 state）不亮。<br>
+      清除时机：会话行被选中（selected 置真——覆盖点击 / Enter / 深链 ?session= 三路）。<br>
+      注：不使用 state_derived_at 与已读时间比较——该字段是 10s 心跳戳而非转移时刻（Grill BL-01 实证）。不往状态枚举加「未读」；不新建后端接口；悬停卡经 antd Popover portal 渲染（防行容器 overflow-hidden 裁剪）。
+    </div>
+  </div>
+</div>
+</body>
+</html>

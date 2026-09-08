@@ -672,3 +672,90 @@ export async function listSessionTasks(
     { signal: opts?.signal },
   );
 }
+
+/* 2026-09-07-session-pin-rename-scheduled-send task-05：会话置顶/重命名/定时消息
+ * 六 API——端点由 task-02/03 落地（backend/app/modules/daemon/router 包 session_crud
+ * 与 session_queue 子模块），照 archive/unarchive/ctx-window 模板（apiFetch +
+ * encodeURIComponent）。类型经 gen:types 从 openapi.json 生成
+ * （components["schemas"] 引用，禁止手写）；错误不在本 client 本地处理，统一由
+ * apiFetch 抛 ApiError（401 refresh + 403/404/409/422 业务码透传）。
+ * （D-010 第二回合移植注：main 单文件原锚在 updateSessionCtxWindow 之后——该
+ * 函数拆分后居 ./session-lists，本块按和解指示落 sessions.ts 会话域。）
+ */
+
+/** PATCH /api/daemon/sessions/{id}/pin — 置顶会话（置顶优先排序，幂等，204）。 */
+export async function pinAgentSession(sessionId: string): Promise<void> {
+  await apiFetch(`/api/daemon/sessions/${encodeURIComponent(sessionId)}/pin`, {
+    method: "PATCH",
+  });
+}
+
+/** PATCH /api/daemon/sessions/{id}/unpin — 取消置顶（回最近活动排序，幂等，204）。 */
+export async function unpinAgentSession(sessionId: string): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/unpin`,
+    { method: "PATCH" },
+  );
+}
+
+/**
+ * PATCH /api/daemon/sessions/{id}/title — 重命名会话（title strip 后非空
+ * ≤255，非法 422 不落库；成功 204 空响应）。
+ */
+export async function renameAgentSession(
+  sessionId: string,
+  title: string,
+): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/title`,
+    { method: "PATCH", json: { title } },
+  );
+}
+
+/** 定时消息读体（POST 201 响应 / GET 列表项；api-types 生成版，禁止手写）。 */
+export type ScheduledMessageRead =
+  components["schemas"]["ScheduledMessageRead"];
+/** 定时消息创建请求体（prompt + dispatch_at + 可选附件/配置快照，api-types 生成版）。 */
+export type ScheduledMessageCreateRequest =
+  components["schemas"]["ScheduledMessageCreateRequest"];
+
+/**
+ * POST /api/daemon/sessions/{id}/scheduled — 预约一条一次性定时消息（201 返回
+ * ScheduledMessageRead，status=pending）。空 prompt / dispatch_at 距今 <60s
+ * 422、终态或软删会话 409 均由后端 service 校验；到点派发归后端 sweeper。
+ */
+export async function createScheduledMessage(
+  sessionId: string,
+  body: ScheduledMessageCreateRequest,
+): Promise<ScheduledMessageRead> {
+  return apiFetch<ScheduledMessageRead>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/scheduled`,
+    { method: "POST", json: body },
+  );
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/scheduled — 列出该会话全部定时消息（全状态
+ * 审计留档，dispatch_at 升序）。
+ */
+export async function listScheduledMessages(
+  sessionId: string,
+): Promise<ScheduledMessageRead[]> {
+  return apiFetch<ScheduledMessageRead[]>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/scheduled`,
+  );
+}
+
+/**
+ * DELETE /api/daemon/sessions/{id}/scheduled/{message_id} — 取消一条 pending
+ * 定时消息（204；非 pending 409，终态不可回退）。
+ */
+export async function cancelScheduledMessage(
+  sessionId: string,
+  messageId: string,
+): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/scheduled/${encodeURIComponent(messageId)}`,
+    { method: "DELETE" },
+  );
+}

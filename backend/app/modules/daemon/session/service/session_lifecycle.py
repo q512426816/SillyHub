@@ -33,6 +33,7 @@ from .errors import (
     DaemonSessionNotActive,
     DaemonSessionNotFound,
     DaemonSessionResumeUnsupported,
+    DaemonSessionTitleInvalid,
 )
 from .helpers import _resolve_daemon_id_for_runtime
 
@@ -552,6 +553,125 @@ async def unarchive_session(
     await svc._session.commit()
     # task-02：取消归档已落库（行回到默认列表视图），发布列表变更信号——
     # 与 archive_session 对称，SSE 客户端秒级看到该行重新出现。
+    await _svc.publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
+
+
+# ── task-02（2026-09-07-session-pin-rename-scheduled-send）：置顶/取消置顶/
+# 重命名三操作——照 archive_session/unarchive_session 模板（行锁归属 404 不
+# 泄露、幂等早退 rollback 释放行锁、commit 后 publish_sessions_changed 广播
+# status_changed，FR-06 SSE 多端秒级同步）。
+# D-010 第二回合移植注：main 原定义于单文件 SessionService（unarchive 与
+# update_ctx_window 之间）；拆分包形态落本子模块，publish 经 _svc 延迟解析。
+
+
+async def pin_session(
+    svc,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> None:
+    """Pin an owned session (task-02 / FR-01：置顶，分组内置顶语义由列表
+    pinned 优先排序 + 前端分组桶保序插入天然实现，D-002@v1)。
+
+    写 ``pinned_at = now(UTC)``。幂等：已置顶早退（rollback 释放 FOR UPDATE
+    行锁），不刷新时间戳（FR-02）。
+    """
+    agent_session = (
+        await svc._session.execute(
+            select(AgentSession)
+            .where(
+                AgentSession.id == session_id,
+                AgentSession.user_id == user_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if agent_session is None:
+        raise DaemonSessionNotFound(
+            f"AgentSession '{session_id}' not found.",
+            details={"session_id": str(session_id)},
+        )
+    if agent_session.pinned_at is not None:
+        await svc._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+        return  # 幂等：已置顶，不刷新时间戳
+    agent_session.pinned_at = datetime.now(UTC)
+    await svc._session.commit()
+    # 置顶已落库（列表序变化），发布列表变更信号——SSE 客户端秒级重排。
+    await _svc.publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
+
+
+async def unpin_session(
+    svc,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> None:
+    """Unpin an owned session (task-02 / FR-02：取消置顶，回到既有最近活跃序).
+
+    清 ``pinned_at``。幂等：未置顶早退（rollback 释放行锁）。
+    """
+    agent_session = (
+        await svc._session.execute(
+            select(AgentSession)
+            .where(
+                AgentSession.id == session_id,
+                AgentSession.user_id == user_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if agent_session is None:
+        raise DaemonSessionNotFound(
+            f"AgentSession '{session_id}' not found.",
+            details={"session_id": str(session_id)},
+        )
+    if agent_session.pinned_at is None:
+        await svc._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+        return  # 幂等：未置顶
+    agent_session.pinned_at = None
+    await svc._session.commit()
+    # 取消置顶已落库（行回到最近活跃序），发布列表变更信号——与 pin 对称。
+    await _svc.publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
+
+
+async def rename_session(
+    svc,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    title: str,
+) -> None:
+    """Rename an owned session (task-02 / FR-03：写持久 ``title`` 列).
+
+    title 先 strip 再校验非空且 ≤255 字符（对齐列 String(255)），非法抛
+    :class:`DaemonSessionTitleInvalid`（422 语义，不落库）。列表标题派生
+    （router 层 title 优先、回退首条 user_input 摘要）零改动——重命名天然
+    优先生效。
+    """
+    stripped = title.strip()
+    if not stripped or len(stripped) > 255:
+        raise DaemonSessionTitleInvalid(
+            "会话标题不能为空且不超过 255 个字符。",
+            details={"session_id": str(session_id), "title_length": len(stripped)},
+        )
+    agent_session = (
+        await svc._session.execute(
+            select(AgentSession)
+            .where(
+                AgentSession.id == session_id,
+                AgentSession.user_id == user_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if agent_session is None:
+        raise DaemonSessionNotFound(
+            f"AgentSession '{session_id}' not found.",
+            details={"session_id": str(session_id)},
+        )
+    if agent_session.title == stripped:
+        await svc._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+        return  # 幂等：标题未变，免事务免广播
+    agent_session.title = stripped
+    await svc._session.commit()
+    # 标题已落库（列表行显示变化），发布列表变更信号——SSE 客户端秒级刷新。
     await _svc.publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
 
 

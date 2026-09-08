@@ -103,8 +103,8 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
 ## 注意事项
 - **容器断点陷阱（关键）**：`md:` 是视口断点非容器断点——侧栏 320px 内禁止内嵌带
   `md:grid-cols-*` 两栏的宽组件（ChangeSessionSection 的 `md:grid-cols-[230px_1fr]`、
-  ChangeFileTree 预览），一律走入口卡 + 宽 Dialog 模式（frontend/src/components/changes/change-sessions-card.tsx:20-21
-  代码注释为证；桌面视口下 320px 容器仍强制两栏 → 面板挤到 ~80px 不可用）。
+  ChangeFileTree 预览），一律走入口卡 + 宽 Dialog 模式（frontend/src/components/changes/detail/change-sessions-card.tsx
+  文件头注释为证；桌面视口下 320px 容器仍强制两栏 → 面板挤到 ~80px 不可用）。
 - Dialog 内容仅 open 时 mount（radix Portal 惰性），关闭即卸载——勿把数据请求/SSE
   提升到入口卡层，保持零空载请求。
 - `ChangeStageActions` 是唯一操作区：推进/重新派发/验证门禁/选档案/团队配置按钮已随

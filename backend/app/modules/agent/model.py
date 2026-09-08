@@ -631,6 +631,11 @@ class AgentSession(BaseModel, table=True):
         # list_agent_sessions 的 session_kind 谓词过滤查询键（task-02 消费；
         # 迁移 20260902010000 同步建，防 autogenerate 漂移）。
         Index("ix_agent_sessions_session_kind", "session_kind"),
+        # 2026-09-07-session-pin-rename-scheduled-send task-01（design §数据模型）：
+        # 置顶时间戳索引——会话列表 pinned 优先排序谓词（pinned_at IS NULL
+        # 前置谓词的查询键；置顶块内续排既有最近活跃序，D-002@v1——task-02
+        # 消费；迁移 20260907231000 同步建，防 autogenerate 漂移）。
+        Index("ix_agent_sessions_pinned_at", "pinned_at"),
     )
 
     id: uuid.UUID = Field(
@@ -844,6 +849,16 @@ class AgentSession(BaseModel, table=True):
             nullable=False,
             server_default=text("'chat'"),
         ),
+    )
+    # ── 会话置顶（2026-09-07-session-pin-rename-scheduled-send task-01，design
+    #    §数据模型 / FR-01）── 置顶时间戳。NULL = 未置顶（存量行零回归，排序
+    # 退化为既有 coalesce(last_active_at, created_at) DESC——pinned_at IS NULL
+    # 谓词恒真不影响序）；非 NULL = 已置顶（列表 pinned 优先块，值兼作置顶
+    # 先后排序键）。列形态照 archived_at（DateTime(timezone=True) nullable）；
+    # 纯加列不回填（FR-07），置顶/取消端点归 task-02。
+    pinned_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
     )
 
 
@@ -1121,6 +1136,120 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
         ),
     )
     updated_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+class AgentSessionScheduledMessage(BaseModel, table=True):
+    """会话定时消息（2026-09-07-session-pin-rename-scheduled-send task-01，design §数据模型）。
+
+    用户预约在未来某时刻（``dispatch_at``）发送的消息：后台 sweeper 周期扫描
+    ``status='pending' AND dispatch_at <= now`` 的到期条目，走 inject 管线派发
+    （sweeper 派发契约归 task-03 消费）。与 ``AgentSessionQueuedMessage``（忙轮
+    排队、run 终态后顺序派发）正交——定时是用户显式指定的未来时刻，排队是
+    「等当前轮结束」；定时到点撞忙轮时消息另落 queued_messages pending
+    （design §事件流 dispatch due message），两套机制不互斥。
+
+    - ``status``：pending（待派发）/ dispatched（已派发）/ cancelled（用户
+      取消）/ failed（派发失败终态，error_code 归类）；终态不回退。**派发成功
+      不删行**（区别于队列的删行语义）——dispatched_at/cancelled_at 审计
+      时间线留档。
+    - ``sender_user_id``：创建者（派发时作为归属/展示身份）。
+    - ``attachment_ids`` / ``agent_profile_id`` / ``llm_provider_id``：创建时的
+      参数快照，到点原样重放（快照语义对齐 AgentSessionQueuedMessage）。
+    - at-least-once 权衡（design R-02）：条目状态翻转与 inject 分两个事务——
+      先 inject 成功再单独事务写 dispatched；inject 后崩溃最多重复发送一次
+      （可接受），sweeper 重启后 dispatch_at 已过的 pending 条目立即补捞。
+    - 会话软删（``deleted_at``）不级联本表（FK CASCADE 只在硬删时生效）；到点
+      sweep 复核 deleted_at/终态置 failed，软删会话的余留定时条目自动收敛，
+      不需要删除钩子（design §数据模型）。
+    """
+
+    __tablename__ = "agent_session_scheduled_messages"
+    __table_args__ = (
+        # sweeper 到期捞取扫描键（status='pending' AND dispatch_at <= now）+
+        # 会话维度定时条目列表查询（前导列 agent_session_id 兼充查询索引）。
+        Index(
+            "ix_agent_ssm_session_status_dispatch",
+            "agent_session_id",
+            "status",
+            "dispatch_at",
+        ),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    # 会话硬删级联清定时条目；软删不触发（见类 docstring 收敛口径）。
+    agent_session_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # 创建者（用户删则随删，对齐 AgentSessionQueuedMessage.sender_user_id）。
+    sender_user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    prompt: str = Field(
+        sa_column=Column(Text, nullable=False),
+    )
+    # 附件引用快照（SessionAttachment id 的字符串列表；派发时转回 uuid 走
+    # 锁内附件校验兜底——附件可能已被删除，对齐 AgentSessionQueuedMessage
+    # .attachment_ids 语义）。
+    attachment_ids: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 切档案/切供应商快照（str 形态的 uuid；None = 创建时未携带，写法对齐
+    # AgentSessionQueuedMessage 同名列）。
+    agent_profile_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    llm_provider_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    # 计划派发时间（tz-aware；创建 API 必填，sweeper 按 <= now 捞取）。
+    dispatch_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    status: str = Field(
+        default="pending",
+        sa_column=Column(String(16), nullable=False, default="pending"),
+    )  # pending / dispatched / cancelled / failed
+    # failed 时归类（design §数据模型：session_inactive / inject_failed）。
+    error_code: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    error_message: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    # 审计时间线（design §数据模型）：dispatched_at / cancelled_at 分别在
+    # 派发成功 / 用户取消时置位，failed 无独立时间戳（沿用 updated 语义不建列）。
+    dispatched_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    cancelled_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )

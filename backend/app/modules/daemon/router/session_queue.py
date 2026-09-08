@@ -6,6 +6,10 @@ GET / DELETE / PATCH / reorder / retry / dispatch-now。路由注册顺序铁律
 FastAPI 按注册顺序匹配，否则字面量 reorder 被路径参数捕获 → 422。
 ``SessionQueueEntry`` / ``_queue_entry_dto`` / ``SessionQueueResponse`` /
 ``SessionQueueEntryUpdateResponse`` 随域同迁。
+
+D-010 第二回合（merge main 2ad590192）：定时消息三端点（2026-09-07-session-
+pin-rename-scheduled-send task-03）按域落位于此（非即时消息族：排队=忙轮
+缓冲、定时=到点派发，派发侧同走 inject/队列链路）。
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from app.modules.daemon.schema import (
     QueueDispatchNowResponse,
     QueueEntryUpdateRequest,
     QueueReorderRequest,
+    ScheduledMessageCreateRequest,
+    ScheduledMessageRead,
 )
 from app.modules.daemon.service import DaemonService
 
@@ -186,3 +192,49 @@ async def dispatch_now_session_queue_entry(
     svc = DaemonService(session)
     interrupted = await svc.dispatch_queued_message_now(session_id, entry_id, user.id)
     return QueueDispatchNowResponse(interrupted=interrupted)
+
+
+# task-03（2026-09-07-session-pin-rename-scheduled-send / FR-04 / D-001@v1）：
+# 定时消息三端点——创建（201）/列表/取消（204），TaskRunAgentUser 鉴权。三重
+# 校验（空 prompt 422 / dispatch_at 过近 422 / 终态或软删会话 409）与归属
+# 404 均归 SessionService；到点派发归 task-04 sweeper，端点不触发 inject。
+
+
+@router.post(
+    "/sessions/{session_id}/scheduled",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_scheduled_message(
+    session_id: uuid.UUID,
+    data: ScheduledMessageCreateRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> ScheduledMessageRead:
+    """Create a one-shot scheduled message for an owned session (status=pending)."""
+    row = await DaemonService(session).create_scheduled_message(session_id, user.id, data)
+    return ScheduledMessageRead.model_validate(row)
+
+
+@router.get("/sessions/{session_id}/scheduled")
+async def list_scheduled_messages(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> list[ScheduledMessageRead]:
+    """List all scheduled messages of an owned session (all statuses, dispatch_at asc)."""
+    rows = await DaemonService(session).list_scheduled_messages(session_id, user.id)
+    return [ScheduledMessageRead.model_validate(row) for row in rows]
+
+
+@router.delete(
+    "/sessions/{session_id}/scheduled/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def cancel_scheduled_message(
+    session_id: uuid.UUID,
+    message_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Cancel a pending scheduled message (non-pending → 409, terminal no-revert)."""
+    await DaemonService(session).cancel_scheduled_message(session_id, message_id, user.id)

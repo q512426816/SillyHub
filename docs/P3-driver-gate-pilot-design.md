@@ -41,7 +41,7 @@ revision_note: |
 ### 1.2 stage 完成唯一路径
 - `backend/app/modules/agent/placement.py:364`：`dispatch_to_daemon` lease kind 硬编码 `'interactive'`（bfaa9256）
 - `sillyhub-daemon/src/daemon.ts`：`kind==='interactive'` → `_startInteractiveSession` early-return
-- **stage 完成唯一出口是 `close_interactive_run`**（`backend/app/modules/daemon/router.py:1910` → `backend/app/modules/daemon/run_sync/service.py:464`）
+- **stage 完成唯一出口是 `close_interactive_run`**（`backend/app/modules/daemon/router.py:2047` → `backend/app/modules/daemon/run_sync/service.py:464`）
 - `complete_lease:541` 的 callback 对 stage 是死代码（lease:608 过时注释与 :802 task-05 矛盾，以 :802 为准）
 - **task-00 原始障碍**：`close_interactive_run`（`:684`）只更新 `last_dispatch.status`（`:806-842`），不触发 auto_dispatch
 

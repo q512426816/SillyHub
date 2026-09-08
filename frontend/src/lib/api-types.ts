@@ -5452,8 +5452,9 @@ export interface paths {
          * @description List the current user's AgentSessions (owner-scoped, stable paging).
          *
          *     task-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经
-         *     daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容
-         *     ilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。
+         *     daemon_runtimes 关联）/ provider / q（内容模糊，实现为 user_input 的内容
+         *     ilike，不匹配改过的 title 列，见 service 层 docstring——ISS-06）；全部可选，
+         *     不传时查询与现状一致（零回归）。
          *     过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset
          *     作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。
          *     2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /
@@ -5813,6 +5814,110 @@ export interface paths {
          * @description Set/clear the context window override for an owned session (display-only).
          */
         patch: operations["update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Pin Session
+         * @description Pin an owned session (pinned-first ordering, idempotent).
+         */
+        patch: operations["pin_session_api_daemon_sessions__session_id__pin_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/unpin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Unpin Session
+         * @description Unpin an owned session (restore to recent-activity ordering, idempotent).
+         */
+        patch: operations["unpin_session_api_daemon_sessions__session_id__unpin_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename Session
+         * @description Rename an owned session (title strip 后非空 ≤255，非法 422 不落库).
+         */
+        patch: operations["rename_session_api_daemon_sessions__session_id__title_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/scheduled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scheduled Messages
+         * @description List all scheduled messages of an owned session (all statuses, dispatch_at asc).
+         */
+        get: operations["list_scheduled_messages_api_daemon_sessions__session_id__scheduled_get"];
+        put?: never;
+        /**
+         * Create Scheduled Message
+         * @description Create a one-shot scheduled message for an owned session (status=pending).
+         */
+        post: operations["create_scheduled_message_api_daemon_sessions__session_id__scheduled_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/scheduled/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel Scheduled Message
+         * @description Cancel a pending scheduled message (non-pending → 409, terminal no-revert).
+         */
+        delete: operations["cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/daemon/sessions/{session_id}/stream": {
@@ -11201,6 +11306,8 @@ export interface components {
             deleted_at?: string | null;
             /** Archived At */
             archived_at?: string | null;
+            /** Pinned At */
+            pinned_at?: string | null;
             /** Current Run Id */
             current_run_id?: string | null;
             /** Terminating At */
@@ -20342,6 +20449,90 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * ScheduledMessageCreateRequest
+         * @description POST /api/daemon/sessions/{id}/scheduled 请求体（task-03 / FR-04）。
+         *
+         *     为会话预约一条**一次性**定时消息（D-002@v1，不做周期规则），到点由
+         *     task-04 sweeper 走 inject 管线派发。三重校验全部归 service 层
+         *     （create_scheduled_message，照 SessionTitleUpdateRequest 口径——schema
+         *     层不重复拦空 prompt，让「全空白拒绝」的中文文案与 SessionEmptyPrompt
+         *     同口径统一出口）：
+         *
+         *     - ``prompt`` strip 非空，或 ``attachment_ids`` 非空豁免（对齐 inject 的
+         *       D-7 看图说话口径）→ 否则 422；
+         *     - ``dispatch_at`` 必须 ≥ now(UTC)+60s（防「刚建即过期」竞态）→ 否则 422；
+         *     - 目标会话非终态（ended/failed）且未软删 → 否则 409。
+         *
+         *     ``prompt`` 无字段级 min_length（附件豁免轮合法携带空 prompt），max_length
+         *     对齐 SessionInjectRequest（8000）；``attachment_ids`` 上限 10 = 图 5 + 文 5
+         *     （DTO 层总量兜底，逐 kind 校验到点归 inject 链），落库时转 str 列表快照。
+         */
+        ScheduledMessageCreateRequest: {
+            /** Prompt */
+            prompt: string;
+            /**
+             * Dispatch At
+             * Format: date-time
+             */
+            dispatch_at: string;
+            /** Attachment Ids */
+            attachment_ids?: string[] | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+        };
+        /**
+         * ScheduledMessageRead
+         * @description 定时消息读侧 DTO（POST 201 响应 / GET 列表项，task-03 / FR-04）。
+         *
+         *     ``AgentSessionScheduledMessage`` ORM 行的 from_attributes 直映射——
+         *     ``status`` 为 pending / dispatched / cancelled / failed 四态字符串
+         *     （派发成功不删行，dispatched_at / cancelled_at / error_code 审计留档，
+         *     消费方=前端 scheduled-messages-bar 状态 tag 与失败原因展示，task-05）；
+         *     ``attachment_ids`` 为落库的 str 列表快照（派发时转回 uuid）。
+         */
+        ScheduledMessageRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Session Id
+             * Format: uuid
+             */
+            agent_session_id: string;
+            /** Prompt */
+            prompt: string;
+            /**
+             * Dispatch At
+             * Format: date-time
+             */
+            dispatch_at: string;
+            /** Status */
+            status: string;
+            /** Attachment Ids */
+            attachment_ids?: string[] | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dispatched At */
+            dispatched_at?: string | null;
+            /** Cancelled At */
+            cancelled_at?: string | null;
+        };
+        /**
          * ScopeWorkspaceStatus
          * @description scope 工作区状态条目（design §7 逐字）。
          *
@@ -20807,6 +20998,19 @@ export interface components {
              * @description daemon 本地 uuid（daemon_instances.id）
              */
             daemon_local_id: string;
+        };
+        /**
+         * SessionTitleUpdateRequest
+         * @description PATCH /api/daemon/sessions/{id}/title 请求体（task-02 / FR-03）。
+         *
+         *     会话重命名：``title`` strip 后非空且 ≤255 字符（对齐 AgentSession.title
+         *     列 String(255)）；校验归 service 层（rename_session 抛 422 语义 AppError，
+         *     不落库）——schema 层不写 min/max，让「全空白拒绝」的中文文案与
+         *     SessionEmptyPrompt 同口径从 service 统一出口。
+         */
+        SessionTitleUpdateRequest: {
+            /** Title */
+            title: string;
         };
         /**
          * SessionUsageModelItemRead
@@ -33866,6 +34070,193 @@ export interface operations {
                 "application/json": components["schemas"]["SessionCtxWindowUpdateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pin_session_api_daemon_sessions__session_id__pin_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_session_api_daemon_sessions__session_id__unpin_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_session_api_daemon_sessions__session_id__title_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionTitleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scheduled_messages_api_daemon_sessions__session_id__scheduled_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledMessageRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_scheduled_message_api_daemon_sessions__session_id__scheduled_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduledMessageCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledMessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             204: {

@@ -10,13 +10,19 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import (
+    AgentRun,
+    AgentRunLog,
+    AgentSession,
+    AgentSessionScheduledMessage,
+)
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.schema import (
     ModelUsageItemRead,
     PageContextCreateBlock,
+    ScheduledMessageCreateRequest,
     SessionReopenResponse,
     TeamMissionCreateBlock,
 )
@@ -995,6 +1001,55 @@ class DaemonService:
         user_id: uuid.UUID,
     ) -> None:
         await self._sess.unarchive_session(session_id, user_id)
+
+    # task-02（2026-09-07-session-pin-rename-scheduled-send）：置顶/取消置顶/
+    # 重命名三委托（一行委托，照 archive 模式；校验与 SSE 广播归 SessionService）。
+    async def pin_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        await self._sess.pin_session(session_id, user_id)
+
+    async def unpin_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        await self._sess.unpin_session(session_id, user_id)
+
+    async def rename_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        title: str,
+    ) -> None:
+        await self._sess.rename_session(session_id, user_id, title)
+
+    # task-03（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息
+    # 三委托（一行委托，照 archive 模式；三重校验与状态翻转归 SessionService）。
+    async def list_scheduled_messages(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> list[AgentSessionScheduledMessage]:
+        return await self._sess.list_scheduled_messages(session_id, user_id)
+
+    async def create_scheduled_message(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        data: ScheduledMessageCreateRequest,
+    ) -> AgentSessionScheduledMessage:
+        return await self._sess.create_scheduled_message(session_id, user_id, data)
+
+    async def cancel_scheduled_message(
+        self,
+        session_id: uuid.UUID,
+        message_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        await self._sess.cancel_scheduled_message(session_id, message_id, user_id)
 
     # ql-20260831-002：会话级上下文窗口覆盖（一行委托，照 archive 模式）。
     async def update_ctx_window(

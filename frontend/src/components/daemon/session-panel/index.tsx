@@ -70,6 +70,17 @@
  *     （onReorder/onEdit/onDispatchNow）透传 hook 的 reorderEntry/editEntry/
  *     dispatchNowEntry——队列 API 失败静默由 hook 内 catch 承担，panel 层不弹
  *     错误提示；page 与 dialog 双模式同批接线。
+ *   - task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04 / FR-05）：
+ *     定时发送——输入栏 ⏰（onSchedule 注入，仅已有 sessionId 的会话）开
+ *     ScheduledSendModal（草稿预览 + 分钟级 DatePicker + 快捷项 30 分钟后/1 小时
+ *     后/明早 9 点，本地时区计算）；确认 createScheduledMessage 成功 → 清草稿 +
+ *     聊天流插系统提示行（TurnTimeline streamFooter 注入口，ScheduledSysHints）+
+ *     递增 schedRefresh 驱动 ScheduledMessagesBar（MessageQueueBar 邻位双挂载：
+ *     page / dialog）刷新。ScheduledMessagesBar 自建局部 QueryClientProvider
+ *     （含 useScheduledMessages 30s 轮询）——R4 不变式不破：panel 层定时链路
+ *     零 useQuery/useQueryClient，dialog 弹窗测试无 Provider 也能挂。
+ *     （D-010 第二回合自 main 2ad590192 移植：弹窗/提示行在 ./scheduled-send，
+ *     状态与 handler 按原归属留在 page / dialog 组件内。）
  */
 //
 // 目录化说明（task-14 / 2026-09-07-arch-large-file-split design §5 Wave 3）：本文件为

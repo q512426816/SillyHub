@@ -139,3 +139,14 @@ created_at: 2026-09-07 07:57:33
 - normalized_requirement: 本变更内 backend 测试命令统一 -n 10；该测试失败不判拆分失败，判环境敏感。
 - impacts: [task-08, task-09, task-10, task-12, verify-*]
 - evidence: task-07 续做代理插桩报告（2026-09-07）
+
+## D-010@v1: 基线刷新——merge main 4e01d1d44 进拆分分支（用户指示重新评估影响面）
+- type: compatibility
+- priority: P0
+- status: accepted
+- source: user
+- question: 用户在 execute 期间推进了主仓（agent-liveness 全链路 + conflict-diff-compare 合入落地，112 文件 +16k 行），worktree 基线 00c4f644 过期；指示重新评估影响面并重执行。
+- answer: 影响面实测：8 目标文件仅 3 个被碰——router.py +185（heartbeat spec_cache 族 + machine 冲突对比端点，task-07 已删该文件须移植）、task-runner.ts +4（windowsHide，task-03 已重写须移植 spawn-stream.ts）、lib/daemon.ts +21（task-15 未做，随 merge 自然刷新）。其余 5 目标零改动，拆分成果全部有效。处置：merge main 进拆分分支（3efb3ec0b），7 个 baseline 快照类冲突全取 main 最终版，router 增量逐字节移植进包（heartbeat.py/runtimes.py/machines.py/__init__.py，ql_id 字段实落 DaemonHeartbeatSillySpecConflict 类），windowsHide 移植 spawn-stream.ts。openapi 与 main 逐字节一致（467 paths）；app.routes 577→579（+compare +platform_sync states）。
+- normalized_requirement: 拆分分支 HEAD 须包含 main 4e01d1d44 全部内容且 router 包/daemon 包行为与之等价；后续 task 在新基线上继续。
+- impacts: [task-07, task-03, task-10, task-12, task-15, verify-*]
+- evidence: merge commit 3efb3ec0b；openapi diff 为空；pytest 207+1891+23 全绿；endpoints.json 更新 84 条

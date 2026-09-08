@@ -20,7 +20,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_28_fields() -> None:
+def test_agent_session_has_all_29_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -62,12 +62,15 @@ def test_agent_session_has_all_28_fields() -> None:
         # 2026-09-01-session-group-chat task-01（design §3.1）：会话形态列
         # （chat 群 group 影子 group_member）。
         "session_kind",
+        # 2026-09-07-session-pin-rename-scheduled-send task-01：会话置顶时间戳列
+        # （NULL=未置顶，排序前置谓词消费）。
+        "pinned_at",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 28
+    assert len(AgentSession.model_fields) == 29
 
 
 def test_agent_session_defaults() -> None:

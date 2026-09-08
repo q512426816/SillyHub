@@ -125,8 +125,8 @@ from . import (  # noqa: E402, F401, I001
     lease,  # 首现 #24-30（leases ×7，#41-42）
     notify,  # 首现 #31-40（恢复/挂起 + notify_*×6，#45-48 权限/dialog）
     daemon_rpc,  # 首现 #43-44（fs list-dir/roots，#77-83 pending/controls/skills/mcp）
-    session_crud,  # 首现 #49-53（sessions 域，#60-66 reopen..ctx-window）
-    session_queue,  # 首现 #54-59（queue ×6）
+    session_crud,  # 首现 #49-53（sessions 域，#60-66 reopen..ctx-window）+ D-010 二回合 pin/unpin/rename
+    session_queue,  # 首现 #54-59（queue ×6）+ D-010 二回合 scheduled ×3
     session_insights,  # 首现 #67-71（stream/runs/tasks/logs/usage）
     session_team,  # 首现 #72-73（team-mission trigger/list）
     gateway_misc,  # 首现 #74-76（llm-proxy ×2 + ws）
@@ -224,6 +224,16 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "archive_session",
     "unarchive_session",
     "update_session_ctx_window",
+    # D-010 第二回合（merge main 2ad590192，2026-09-07-session-pin-rename-
+    # scheduled-send task-02/03）：原 router.py 在 update_session_ctx_window 与
+    # stream_session_logs 之间首现的六端点——pin/unpin/rename 落 session_crud，
+    # scheduled ×3 落 session_queue。
+    "pin_session",
+    "unpin_session",
+    "rename_session",
+    "create_scheduled_message",
+    "list_scheduled_messages",
+    "cancel_scheduled_message",
     # session_insights（拆前 #67-71：stream/runs/tasks/logs/usage）
     "stream_session_logs",
     "list_session_runs",
@@ -270,7 +280,18 @@ from .machines import (  # noqa: E402
 )
 from .notify import PermissionServiceDep  # noqa: E402
 from .runtimes import _derive_policy_version  # noqa: E402
-from .session_crud import _stream_sessions_events, stream_sessions_events  # noqa: E402
+from .session_crud import (  # noqa: E402
+    _stream_sessions_events,
+    pin_session,
+    rename_session,
+    stream_sessions_events,
+    unpin_session,
+)
+from .session_queue import (  # noqa: E402
+    cancel_scheduled_message,
+    create_scheduled_message,
+    list_scheduled_messages,
+)
 from .session_team import (  # noqa: E402
     _session_has_active_turn,
     _team_mission_summary,
@@ -299,14 +320,20 @@ __all__ = [
     "_session_has_active_turn",
     "_stream_sessions_events",
     "_team_mission_summary",
+    "cancel_scheduled_message",
     "close_llm_proxy_client",
+    "create_scheduled_message",
     "get_daemon_latest_version",
     "get_redis",
     "get_session_readiness",
+    "list_scheduled_messages",
     "log",
+    "pin_session",
+    "rename_session",
     "router",
     "stream_sessions_events",
     "trigger_session_team_mission",
+    "unpin_session",
     "upsert_agent_task",
     "validate_team_mission_block",
 ]

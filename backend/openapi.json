@@ -14469,7 +14469,7 @@
           "daemon"
         ],
         "summary": "List Sessions",
-        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容\nilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。\n2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /\nchange_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话\n门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。\n2026-08-25-session-spec-binding task-04 / FR-05（design §5.W3.3 / §9）：\nchange_id 语义从单 FK 精确匹配扩大为 change_session_links M:N 子查询\n命中（存量单 FK 已播种为 link 行，原命中集是新命中集子集，参数名/类型\n不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links\n按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传\n= 现状（零回归）。\ntask-02（2026-08-28-session-ppm-task-binding / FR-05 / §9）：新增可选\nppm_item_kind + ppm_item_id 成对筛选（ppm_item_session_links 子查询命中；\nkind Literal 校验非法值 422，只传其一 422——与 create/inject 通道同口径；\n不传 = 现状，零回归）。",
+        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（内容模糊，实现为 user_input 的内容\nilike，不匹配改过的 title 列，见 service 层 docstring——ISS-06）；全部可选，\n不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。\n2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /\nchange_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话\n门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。\n2026-08-25-session-spec-binding task-04 / FR-05（design §5.W3.3 / §9）：\nchange_id 语义从单 FK 精确匹配扩大为 change_session_links M:N 子查询\n命中（存量单 FK 已播种为 link 行，原命中集是新命中集子集，参数名/类型\n不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links\n按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传\n= 现状（零回归）。\ntask-02（2026-08-28-session-ppm-task-binding / FR-05 / §9）：新增可选\nppm_item_kind + ppm_item_id 成对筛选（ppm_item_session_links 子查询命中；\nkind Literal 校验非法值 422，只传其一 422——与 create/inject 通道同口径；\n不传 = 现状，零回归）。",
         "operationId": "list_sessions_api_daemon_sessions_get",
         "parameters": [
           {
@@ -15504,6 +15504,274 @@
             }
           }
         },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/pin": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Pin Session",
+        "description": "Pin an owned session (pinned-first ordering, idempotent).",
+        "operationId": "pin_session_api_daemon_sessions__session_id__pin_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/unpin": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Unpin Session",
+        "description": "Unpin an owned session (restore to recent-activity ordering, idempotent).",
+        "operationId": "unpin_session_api_daemon_sessions__session_id__unpin_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/title": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Rename Session",
+        "description": "Rename an owned session (title strip 后非空 ≤255，非法 422 不落库).",
+        "operationId": "rename_session_api_daemon_sessions__session_id__title_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionTitleUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/scheduled": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Create Scheduled Message",
+        "description": "Create a one-shot scheduled message for an owned session (status=pending).",
+        "operationId": "create_scheduled_message_api_daemon_sessions__session_id__scheduled_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledMessageCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledMessageRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "List Scheduled Messages",
+        "description": "List all scheduled messages of an owned session (all statuses, dispatch_at asc).",
+        "operationId": "list_scheduled_messages_api_daemon_sessions__session_id__scheduled_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduledMessageRead"
+                  },
+                  "title": "Response List Scheduled Messages Api Daemon Sessions  Session Id  Scheduled Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/scheduled/{message_id}": {
+      "delete": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Cancel Scheduled Message",
+        "description": "Cancel a pending scheduled message (non-pending → 409, terminal no-revert).",
+        "operationId": "cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -33753,6 +34021,18 @@
               }
             ],
             "title": "Archived At"
+          },
+          "pinned_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned At"
           },
           "current_run_id": {
             "anyOf": [
@@ -58515,6 +58795,190 @@
         ],
         "title": "ScanResponse"
       },
+      "ScheduledMessageCreateRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt"
+          },
+          "dispatch_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Dispatch At"
+          },
+          "attachment_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array",
+                "maxItems": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment Ids"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "dispatch_at"
+        ],
+        "title": "ScheduledMessageCreateRequest",
+        "description": "POST /api/daemon/sessions/{id}/scheduled 请求体（task-03 / FR-04）。\n\n为会话预约一条**一次性**定时消息（D-002@v1，不做周期规则），到点由\ntask-04 sweeper 走 inject 管线派发。三重校验全部归 service 层\n（create_scheduled_message，照 SessionTitleUpdateRequest 口径——schema\n层不重复拦空 prompt，让「全空白拒绝」的中文文案与 SessionEmptyPrompt\n同口径统一出口）：\n\n- ``prompt`` strip 非空，或 ``attachment_ids`` 非空豁免（对齐 inject 的\n  D-7 看图说话口径）→ 否则 422；\n- ``dispatch_at`` 必须 ≥ now(UTC)+60s（防「刚建即过期」竞态）→ 否则 422；\n- 目标会话非终态（ended/failed）且未软删 → 否则 409。\n\n``prompt`` 无字段级 min_length（附件豁免轮合法携带空 prompt），max_length\n对齐 SessionInjectRequest（8000）；``attachment_ids`` 上限 10 = 图 5 + 文 5\n（DTO 层总量兜底，逐 kind 校验到点归 inject 链），落库时转 str 列表快照。"
+      },
+      "ScheduledMessageRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "agent_session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Agent Session Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "dispatch_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Dispatch At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "attachment_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment Ids"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatched At"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_session_id",
+          "prompt",
+          "dispatch_at",
+          "status",
+          "created_at"
+        ],
+        "title": "ScheduledMessageRead",
+        "description": "定时消息读侧 DTO（POST 201 响应 / GET 列表项，task-03 / FR-04）。\n\n``AgentSessionScheduledMessage`` ORM 行的 from_attributes 直映射——\n``status`` 为 pending / dispatched / cancelled / failed 四态字符串\n（派发成功不删行，dispatched_at / cancelled_at / error_code 审计留档，\n消费方=前端 scheduled-messages-bar 状态 tag 与失败原因展示，task-05）；\n``attachment_ids`` 为落库的 str 列表快照（派发时转回 uuid）。"
+      },
       "ScopeWorkspaceStatus": {
         "properties": {
           "id": {
@@ -59609,6 +60073,20 @@
         ],
         "title": "SessionSuspendBatchRequest",
         "description": "Body for POST /sessions/suspend-batch（task-05）.\n\ndaemon ``stop()`` 在 markOffline 前上报自身标识；backend 按\n``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime\n名下的 active 会话做三步挂起收敛（daemon 侧调用方属 task-08）。"
+      },
+      "SessionTitleUpdateRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "SessionTitleUpdateRequest",
+        "description": "PATCH /api/daemon/sessions/{id}/title 请求体（task-02 / FR-03）。\n\n会话重命名：``title`` strip 后非空且 ≤255 字符（对齐 AgentSession.title\n列 String(255)）；校验归 service 层（rename_session 抛 422 语义 AppError，\n不落库）——schema 层不写 min/max，让「全空白拒绝」的中文文案与\nSessionEmptyPrompt 同口径从 service 统一出口。"
       },
       "SessionUsageModelItemRead": {
         "properties": {

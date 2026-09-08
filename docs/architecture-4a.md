@@ -49,7 +49,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | `/api/ppm/...` | `ppm_project/plan/task/problem/kanban/workbench_router` | `backend/app/main.py:877-882` | PPM（平台级，已上线） |
 | `/api/file` | `file_router` | `backend/app/main.py:821` | 平台文件中心 |
 | `/api/daemon-chat` | `_register_quick_chat(app)` | `backend/app/main.py:369` | 免 workspace 快速对话（固定路径，须先于参数化路由注册，`backend/app/main.py:369`） |
-| `/mcp` | `mount_mcp(app)` | `backend/app/main.py:910` | 对外 MCP server（物理隔离 `/api`，`backend/app/main.py:51`） |
+| `/mcp` | `mount_mcp(app)` | `backend/app/main.py` | 对外 MCP server（物理隔离 `/api`，`backend/app/main.py:51`） |
 | `/daemon/...`（无 `/api`、无认证） | `daemon_dist_router` | `backend/app/main.py:794` | daemon 分发（install.sh 等，`backend/app/modules/admin/router.py`） |
 
 > 注：`worktree` 的 `lease_router` 与 `worktree_router` 同在 `worktree/router.py`（前者 lease 维度无 workspace prefix，后者 workspace 维度），经 `backend/app/modules/worktree/__init__.py:2` 导出。`platform_sync_router` 故意不带 router 级 prefix 以规避 `GET /changes` 尾斜杠 307 重定向（`backend/app/modules/platform_sync/router.py`）。
@@ -84,7 +84,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | 变更创建（server-local/lease） | `POST /changes/create` | `backend/app/modules/change_writer/router.py` | 创建后 auto-dispatch brainstorm（未扫描 workspace 拒建，`backend/app/modules/change_writer/service.py:82-89`） |
 | 变更创建（daemon 代写） | `POST /changes/proxy-create` | `backend/app/modules/change_writer/router.py` | 占坑→下发 DaemonChangeWrite→轮询回执（`backend/app/core/proxy.py`） |
 | 文档生成/批量模板/触发执行 | `/changes/{cid}/documents/*` / `/execute` | `backend/app/modules/change_writer/router.py` | — |
-| 进度同步上行 | `POST /changes/{name}/progress` 等 3 端点 | `backend/app/modules/platform_sync/router.py:45-117` | base_ts 乐观锁（`backend/app/modules/platform_sync/service.py:174`） |
+| 进度同步上行 | `POST /changes/{name}/progress` 等 3 端点 | `backend/app/modules/platform_sync/router.py:45-117` | base_ts 乐观锁（`backend/app/modules/platform_sync/service.py:192`） |
 | workspace-scoped 同步 token 签发 | `/workspaces/{wid}/platform-sync-tokens` | `backend/app/modules/workspace/router.py` | 明文 `shpsync_` 仅返一次 |
 | worktree 租约（acquire/release/extend） | `/workspaces/{wid}/worktrees/*` / `/worktrees/{lease}/*` | `backend/app/modules/worktree/router.py:31-111` | 状态 `locked→released` |
 | 受控 git 操作 | `POST /worktrees/{lease}/git` | `backend/app/modules/git_gateway/router.py:28-40` | 白名单 + 黑名单 + 脱敏（`backend/app/modules/git_gateway/service.py:34-57,106-113`） |
@@ -290,7 +290,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 
 **越权防护**：
 
-- daemon WS payload 校验 `runtime_id` 必须属于当前连接的 daemon（`backend/app/modules/daemon/router.py:2388` `_validate_payload_runtime_belongs`）。
+- daemon WS payload 校验 `runtime_id` 必须属于当前连接的 daemon（`backend/app/modules/daemon/router.py:5222` `_validate_payload_runtime_belongs`）。
 - runtime/instance 级操作经 `_get_owned_runtime`/`_get_owned_instance`，越权返 404（不泄露存在性）。
 - `list_my_bindings` SQL 固定 `WHERE user_id = :user_id`（`backend/app/modules/member_runtimes/service.py`）。
 - AgentProfile `effective_allowed_roots` 只能收紧不能放宽（`backend/app/modules/profile/service.py`）。
@@ -481,7 +481,7 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 - `stored > base_ts`（字典序，不转 datetime）→ **409 冲突**，返回平台当前完整六表，**绝不 auto-merge**
 - 否则 → upsert
 
-`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:395`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:757`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
+`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:435`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:775`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
 
 ### 2.5 运行时数据与存储目录
 
@@ -534,7 +534,7 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 | 层 | 代表文件 | 职责 |
 |---|---|---|
 | **F1 路由 `app/`** | `(auth)/login/`、`(dashboard)/`（`workspaces/`、`admin/`、`ppm/`、`settings/`、`runtimes/`、`account/`、`agent-profiles/`）、`m/`（移动）、`page.tsx` | 路由组（auth）登录守卫、（dashboard）工作区守卫（`frontend/src/app/layout.tsx WORKSPACE_WHITELIST` + `:46` 客户端工作区守卫） |
-| **F2 API 代理 `app/api/`** | `daemon/sessions/[sessionId]/stream/route.ts`、`daemon-chat/[runId]/stream/route.ts`、`workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts` | Next.js Route Handler 作 **无缓冲 SSE 代理**，解决浏览器 EventSource 不能自定义 header（token 走 query → 转 `Authorization` header，`frontend/app/api/.../stream/route.ts:36-47`）+ `compress:false` 关 undici 缓冲（`:57`） |
+| **F2 API 代理 `app/api/`** | `daemon/sessions/[sessionId]/stream/route.ts`、`daemon-chat/[runId]/stream/route.ts`、`workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts` | Next.js Route Handler 作 **无缓冲 SSE 代理**，解决浏览器 EventSource 不能自定义 header（token 走 query → 转 `Authorization` header，`frontend/src/app/api/daemon/sessions/[sessionId]/stream/route.ts` 第 36-47 行）+ `compress:false` 关 undici 缓冲（`:64`） |
 | **F3 组件 `components/`** | `app-shell.tsx`、`agent/`、`agent-log/`、`agent-profile/`、`daemon/`、`workspace/`、`ppm/`、`changes/`、`charts/`、`ui/`（12 个基础组件）、`layout/`、`mobile/`、`permissions/` | 业务组件按域分目录，`ui/` 是设计系统基础组件（对标 style-system 总纲） |
 | **F4 API client `lib/`** | `api.ts`（fetch wrapper，`:46 ApiError`）、`api-types.ts`（**自动生成，禁止手写**，`:1-3`）、`auth/`（`route-guard.ts`）、按域的 `*.ts`（`agent.ts`/`daemon.ts`/`workspace.ts`/`changes.ts`/`ppm/`…）、`token-refresh.ts`、`query-client.ts`（React Query） | 每个后端域一个 client 文件，统一经 `api.ts` fetch 包装 |
 | **F5 状态 `stores/`** | `session.ts`（zustand+persist，token/user）、`workspace.ts`（**非 persist**，URL 为真相源，`frontend/src/lib/workspace.ts`）、`kanban.ts` | 客户端状态；session 持久化、workspace 仅缓存 |
@@ -631,7 +631,7 @@ Agent 编排是本平台 AA 的核心能力。**关键架构事实**：backend �
 |---|---|---|---|
 | **WebSocket（主）** | 双向 | 单 WS `/api/daemon/ws?daemon_local_id=...`（`sillyhub-daemon/src/protocol.ts:22 MSG`）。server→daemon 推 `task_available`/`session_*`/`permission_response`/`lease_cancel`/`provider_config_changed`/`self_update` + 双向 `heartbeat/ack` + `rpc/rpc_result`。5s 固定退避重连 + 30s ping keepalive | backend `backend/app/modules/daemon/ws_hub.py:227 DaemonWsHub`（`send_wakeup:254`/`send_session_control:313`/`send_permission_response:339`/`send_rpc:495`/`resolve_rpc:497`）；daemon `sillyhub-daemon/src/ws-client.ts:74`（`RECONNECT_BACKOFF_SCHEDULE_MS:40`/`WS_PING_INTERVAL_MS:62`） |
 | **HTTP REST（生命周期）** | daemon→server | `HubClient`（`sillyhub-daemon/src/hub-client.ts:566`）经 Node 原生 fetch（G-05 零 HTTP 库），`REST_PREFIX=/api/daemon`（`sillyhub-daemon/src/protocol.ts:598`）：`register:714`/`heartbeat:771`/`claimLease:893`/`startLease:908`/`leaseHeartbeat:923`/`submitMessages:945`/`completeLease:976`/`getPendingLeases:1017`（唯一 GET） | backend 对应 `LeaseService`（`backend/app/modules/daemon/lease/service.py:92`：`create_lease:113`/`claim_lease:146`/`complete_lease:362`/`expire_leases:922`） |
-| **轮询兜底** | daemon→server | WS 断线时 `_pollLoop`（`sillyhub-daemon/src/daemon.ts:4933`）周期拉 `getPendingLeases` | daemon 三循环并发：`_heartbeatLoop:4262`/`_pollLoop:4933`/`_wsLoop:5057` |
+| **轮询兜底** | daemon→server | WS 断线时 `_pollLoop`（`sillyhub-daemon/src/daemon.ts:4978`）周期拉 `getPendingLeases` | daemon 三循环并发：`_heartbeatLoop:4282`/`_pollLoop:4978`/`_wsLoop:5102` |
 | **宿主文件 RPC** | 双向 | backend→daemon 经 `DaemonWsHub.send_rpc`（`backend/app/modules/daemon/ws_hub.py:495`）发 `daemon:rpc`，daemon `sillyhub-daemon/src/ws-client.ts _dispatchRpc` 分发到 `file-rpc.ts`（list_dir/git_worktree_add/git_merge/git_rev_parse/...）回 `daemon:rpc_result` | backend `daemon/host_fs/delegate.py`（`HostFsDelegate`）+ `host_fs/ws_rpc.py` |
 
 > **lease 完成回写**（`complete_lease`，`backend/app/modules/daemon/lease/service.py:362`）是 batch 与 interactive lease 的**单一收口点**——mission 收敛（3.2.4）挂在这里。`_sync_stage_status_from_run`（`:683`）同步 stage 状态。
@@ -640,15 +640,15 @@ Agent 编排是本平台 AA 的核心能力。**关键架构事实**：backend �
 
 | MCP server | 位置 | transport | 消费者 | 工具数 |
 |---|---|---|---|---|
-| **对外 MCP（平台）** | `backend/app/modules/mcp_gateway/server.py:59 mcp`（FastMCP `streamable_http_path="/"`） | streamable HTTP，挂 `/mcp/`（尾斜杠，`backend/app/main.py:94 mount_mcp`） | 第三方 MCP client / 外部 agent（经 `McpToken` `shmcp_` 鉴权，`backend/app/modules/mcp_gateway/auth.py:7 McpAuthMiddleware`） | **12 个**（`tools.py`，`backend/app/main.py` 注释写“8”已过时）：`dispatch_worker`/`get_worker_result`/`list_workers`/`converge_mission`/`report_progress`/`list_agent_profiles`/`create_mission`/`get_run_logs`/`advance_change_stage`/`submit_stage_review`/`run_verify_gate`/`get_change_stage`（`backend/app/modules/agent/tools.py`），分 `read`/`dispatch`/`converge` 三 scope |
+| **对外 MCP（平台）** | `backend/app/modules/mcp_gateway/server.py:59 mcp`（FastMCP `streamable_http_path="/"`） | streamable HTTP，挂 `/mcp/`（尾斜杠，`backend/app/main.py mount_mcp`） | 第三方 MCP client / 外部 agent（经 `McpToken` `shmcp_` 鉴权，`backend/app/modules/mcp_gateway/auth.py:7 McpAuthMiddleware`） | **12 个**（`tools.py`，`backend/app/main.py` 注释写“8”已过时）：`dispatch_worker`/`get_worker_result`/`list_workers`/`converge_mission`/`report_progress`/`list_agent_profiles`/`create_mission`/`get_run_logs`/`advance_change_stage`/`submit_stage_review`/`run_verify_gate`/`get_change_stage`（`backend/app/modules/agent/tools.py`），分 `read`/`dispatch`/`converge` 三 scope |
 | **daemon 内置 MCP（注入主 agent）** | `sillyhub-daemon/src/mcp-server.ts:49 createMcpServer` | **stdio**（注入 agent 的 `--mcp-config`） | 主 agent（orchestrator） | 5 个（`sillyhub-daemon/src/mcp-server.ts:49`）：`dispatch_worker`/`get_worker_result`/`list_workers`/`converge_mission`/`report_progress`，经 `X-API-Key` 转发到 backend `agent/mcp_tools.py` 5 endpoint |
 
-两者工具重叠 5 个（team 编排），对外 MCP 多 7 个（stage 推进/profile/mission 创建）——前者给外部 agent，后者给平台 spawn 的主 agent。鉴权物理隔离（`backend/app/main.py:906` middleware 挂子 app，CC-06）。
+两者工具重叠 5 个（team 编排），对外 MCP 多 7 个（stage 推进/profile/mission 创建）——前者给外部 agent，后者给平台 spawn 的主 agent。鉴权物理隔离（`backend/app/main.py` middleware 挂子 app，CC-06）。
 
 #### 3.3.3 platform_sync 同步层（SillySpec 进度上行）
 
 `platform_sync/router.py` 4 端点（无 prefix，挂 `/api`）：
-- `POST /changes/{name}/progress`（`:45`）上行 + `base_ts` **字典序乐观锁**冲突检测（200 接受 / 409 冲突，`backend/app/modules/platform_sync/service.py:174 upsert_progress`，算法 `backend/app/modules/platform_sync/service.py:209-234`：base_ts 空无条件接受、stored>base_ts 字典序则 409 绝不 auto-merge）。读 3 个 `X-SillySpec-*` header（Base-Ts/Pushed-At/User）。
+- `POST /changes/{name}/progress`（`:45`）上行 + `base_ts` **字典序乐观锁**冲突检测（200 接受 / 409 冲突，`backend/app/modules/platform_sync/service.py:192 upsert_progress`，算法 `backend/app/modules/platform_sync/service.py:227-248`：base_ts 空无条件接受、stored>base_ts 字典序则 409 绝不 auto-merge）。读 3 个 `X-SillySpec-*` header（Base-Ts/Pushed-At/User）。
 - `GET /changes`（`:89`）轻量列表（裸数组）、`GET /changes/{name}/progress`（`:100`）完整六表 JSON、`GET /changes/{name}/approval`（`:120`）execute 审批门控。
 - workspace 隔离：`shpsync_` token 派生 workspace_id（`backend/app/modules/auth/token_service.py`，sha256 直存 O(1)），`require_platform_sync`（`backend/app/modules/platform_sync/auth.py:153`）Bearer 三分派（`shpsync_`/`shk_live_`/JWT）。
 
@@ -684,7 +684,7 @@ daemon 侧 `spec-sync.ts` 负责 spec bundle 的拉取（`pullSpecBundle:91` tar
 #### 3.5.2 SSE stream 契约（log/事件流）
 
 - **backend SSE 生成器** `AgentService.stream_run_logs`（`backend/app/modules/agent/service.py:1108`）：订阅 Redis Pub/Sub `agent_run:{run_id}` + `agent_session:{session_id}`（permission_request/turn_completed 事件），发 `data` / `done` / `: keepalive`（~30s）。**连接池安全**：用 `get_session_factory()` 短 session，不占请求级连接（`:1039-1043`）。
-- **前端代理** Route Handler（`app/api/.../stream/route.ts`）无缓冲转发：`compress:false` 关 undici 缓冲（`frontend/app/api/.../stream/route.ts:57`）、token 从 query 转 `Authorization` header（`:36-47`，不进 backend access log）、`X-Accel-Buffering:no`。
+- **前端代理** Route Handler（`frontend/src/app/api/daemon/sessions/[sessionId]/stream/route.ts`）无缓冲转发：`compress:false` 关 undici 缓冲（`:64`）、token 从 query 转 `Authorization` header（`:36-54`，不进 backend access log）、`X-Accel-Buffering:no`。
 - **mission SSE** `backend/app/modules/mcp_gateway/backend/app/modules/agent/sse.py stream_mission_events`：短轮询 AgentRun 每 2s 推 worker_status 帧 + 终态 done 帧。
 - **stream 端点清单**：`backend/app/modules/agent/router.py:482`（run 级）、`backend/app/main.py:643`（quick-chat run 级）、`backend/app/modules/mcp_gateway/backend/app/modules/agent/sse.py`（mission 级）、backend `daemon` 模块（session 级）。
 
@@ -731,7 +731,7 @@ SillyHub 是三进程异构栈：后端 Python（FastAPI）、前端 Node（Next
 | TypeScript | 5.5.4（前端 + daemon 统一） | `frontend/package.json:58`、`sillyhub-daemon/package.json:54` |
 | 包管理 | uv 0.4.18（后端）/ pnpm 9.6.0（前端 + daemon） | `backend/Dockerfile:29`、`backend-ci.yml:29`；`frontend/package.json:64`、`sillyhub-daemon/package.json:27` |
 
-> 后端进程入口为 `app.main:app`（`backend/app/main.py:915` `app = create_app()`），`create_app()` 组装 30+ 个业务 router（`backend/app/main.py`）并 `mount_mcp(app)` 挂载对外 MCP server（`backend/app/main.py:910`）。lifespan 内完成日志/遥测初始化、RBAC 种子、孤儿 gate 任务对账、对象存储单例初始化（`backend/app/main.py:94-170`）。
+> 后端进程入口为 `app.main:app`（`backend/app/main.py:915` `app = create_app()`），`create_app()` 组装 30+ 个业务 router（`backend/app/main.py`）并 `mount_mcp(app)` 挂载对外 MCP server（`backend/app/main.py`）。lifespan 内完成日志/遥测初始化、RBAC 种子、孤儿 gate 任务对账、对象存储单例初始化（`backend/app/main.py:94-170`）。
 
 ### 4.2 数据库与缓存
 

@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dayjs, { type Dayjs } from "dayjs";
 import {
   Ban, MessageSquareText, PauseCircle, Plus, RefreshCw, Square, TriangleAlert, Users,
 } from "lucide-react";
@@ -21,6 +22,14 @@ import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+// task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
+// （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
+// 不破，panel 层零 react-query）。
+import {
+  ScheduledMessagesBar,
+  formatScheduledTime,
+  summarizeScheduledPrompt,
+} from "@/components/daemon/scheduled-messages-bar";
 import { SessionUsageBar } from "@/components/daemon/session-usage-bar";
 import { QUEUE_MAX_PENDING, useMessageQueue } from "@/hooks/use-message-queue";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
@@ -35,7 +44,7 @@ import {
 } from "@/components/daemon/task-execution-panel";
 import { type PlanSummary } from "@/lib/daemon";
 import {
-  cancelTeamMission, createSession, endSession, fetchPendingDialogs, fetchSessionDialogHistory,
+  cancelTeamMission, createScheduledMessage, createSession, endSession, fetchPendingDialogs, fetchSessionDialogHistory,
   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
   triggerSessionTeamMission, maxLogTimestamp, streamSession, type InteractiveProvider,
   type SessionDialogRead, type SessionPermissionRequest, type SessionStreamConnection,
@@ -54,6 +63,7 @@ import {
   assembledViewOf, ATTACH_POLL_MAX_ATTEMPTS, ATTACH_POLL_MS, getProviderLabel,
   INITIAL_DIALOG_VIEW, SessionDialogView, toAssemblerLogInput, upsertDialogTurn,
 } from "./dialog-helpers";
+import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
 import { TeamTriggerRow } from "./team-trigger-row";
 import { WorkerSessionOverlay } from "./worker-session-overlay";
 import {
@@ -178,6 +188,53 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // 独立 state（零 react-query 铁律不引入 queryClient），onTurnCompleted 轮终态
   // 递增，驱动输入框上方 SessionUsageBar 重拉。
   const [usageRefresh, setUsageRefresh] = useState(0);
+  // ── task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时发送 ──
+  // 同 page 模式四件套（弹窗开合 / 选定时间 / 提交在途 / 定时条刷新信号）+ 系统
+  // 提示行；dialog 侧零 react-query 不变（ScheduledMessagesBar 自带局部 Provider，
+  // 创建走命令式 API 调用）。仅 attach 到会话（view.sessionId 非空）时入口可见。
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [schedAt, setSchedAt] = useState<Dayjs | null>(null);
+  const [schedSubmitting, setSchedSubmitting] = useState(false);
+  const [schedRefresh, setSchedRefresh] = useState(0);
+  const [schedHints, setSchedHints] = useState<string[]>([]);
+  // 会话切换（idle 首句创建成功 / attach 换目标）：关弹窗 + 清系统提示行。
+  useEffect(() => {
+    setSchedOpen(false);
+    setSchedHints([]);
+  }, [view.sessionId]);
+  // 打开弹窗：默认选「1 小时后」（同 page 模式 / 原型默认选中项）。
+  const openSchedModal = useCallback(() => {
+    setSchedAt(dayjs().add(1, "hour"));
+    setSchedOpen(true);
+  }, []);
+  /**
+   * 确认创建（同 page 模式口径）：成功 → 关弹窗 + 清草稿（trim 比对）+ 聊天流
+   * 系统提示行 + 递增刷新信号 + toast；失败保持弹窗开可重试。
+   */
+  const confirmSchedCreate = useCallback(async () => {
+    const sid = view.sessionId;
+    const prompt = input.trim();
+    if (!sid || !schedAt || !prompt || schedSubmitting) return;
+    setSchedSubmitting(true);
+    try {
+      await createScheduledMessage(sid, {
+        prompt,
+        dispatch_at: schedAt.toISOString(),
+      });
+      setSchedOpen(false);
+      setInput((prev) => (prev.trim() === prompt ? "" : prev));
+      setSchedHints((prev) => [
+        ...prev,
+        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(prompt)}」`,
+      ]);
+      setSchedRefresh((n) => n + 1);
+      notify.success("已创建定时消息");
+    } catch (err) {
+      notify.error(err, "创建定时消息失败");
+    } finally {
+      setSchedSubmitting(false);
+    }
+  }, [view.sessionId, input, schedAt, schedSubmitting, notify]);
 
   // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook；dialog 无
   // react-query——会话级对账不挂 invalidate，轮级终态经 resync 合成事件收敛）。──
@@ -1663,6 +1720,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         onSwitchProvider={handleSwitchProvider}
         hasOnlineProvider={hasOnlineProvider}
         emptyProviderLabel={getProviderLabel(provider)}
+        // task-08（FR-04）：定时发送系统提示行（streamFooter 注入口，同 page 模式）。
+        streamFooter={
+          schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : undefined
+        }
       />
 
       {/* task-11：会话团队任务块——ql-20260826-010 起收编进头部 ActivityCatalog
@@ -1726,6 +1787,15 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         onDispatchNow={(id) => {
           void dispatchNowEntry(id);
         }}
+      />
+      {/* task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息
+          展示条——MessageQueueBar 邻位挂载（Grill B-05 双挂载点之二：dialog 模式）。
+          组件自建局部 QueryClientProvider（dialog 渲染路径零 react-query 的 R4
+          不变式不破——弹窗测试无 QueryClientProvider 也能挂）；idle 未建会话时
+          sessionId 空串组件自守卫返回 null。 */}
+      <ScheduledMessagesBar
+        sessionId={view.sessionId ?? ""}
+        refreshSignal={schedRefresh}
       />
 
       {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
@@ -1801,6 +1871,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         onTeamTrigger={() => openTeamPopover(null)}
         teamTriggerDisabled={teamButtonDisabled}
         teamTriggerTitle={teamButtonTitle}
+        // task-08（FR-04）：⏰ 定时发送入口——仅 attach 到会话（view.sessionId
+        // 非空）注入；idle 未建会话不渲染入口（定时条目需既有会话承载）。
+        onSchedule={view.sessionId ? openSchedModal : undefined}
       />
 
       {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身
@@ -1813,6 +1886,21 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           }}
         />
       )}
+
+      {/* task-08（FR-04）：定时发送弹窗（同 page 模式，dialog 侧状态源 view.sessionId）。 */}
+      <ScheduledSendModal
+        open={schedOpen}
+        draft={input}
+        value={schedAt}
+        submitting={schedSubmitting}
+        onChange={setSchedAt}
+        onCancel={() => {
+          setSchedOpen(false);
+        }}
+        onConfirm={() => {
+          void confirmSchedCreate();
+        }}
+      />
     </section>
   );
 }

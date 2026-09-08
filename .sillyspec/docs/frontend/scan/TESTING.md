@@ -60,5 +60,5 @@ generator: sillyspec-scan
 ## 类型守护
 
 - `tsc --noEmit` 为 CI 硬门禁；`tsconfig.json` 开 `strict` + `noUncheckedIndexedAccess`，`types` 含 vitest/globals 与 jest-dom。
-- 类型逃逸口受控：全 src `@ts-ignore` 0 处，`@ts-expect-error` 仅 1 处（`frontend/app/api/agent/runs/[runId]/stream/route.ts:63`，undici compress 非标准 RequestInit 字段的注释性豁免）。
+- 类型逃逸口受控：全 src `@ts-ignore` 0 处，`@ts-expect-error` 仅 1 处（`frontend/src/app/api/daemon/sessions/[sessionId]/stream/route.ts` 第 63 行，undici compress 非标准 RequestInit 字段的注释性豁免）。
 - `frontend/src/lib/api-types.ts`（32857 行生成物）由 openapi-typescript ^7.13.0 从 `backend/openapi.json` 生成，禁止手写；nullable 字段需 `?? null` 兜底，`gen:types:check` 是发现此类回归的闸门。

@@ -171,6 +171,66 @@ class DaemonSessionAttachmentInvalid(AppError):
     http_status = 422
 
 
+class DaemonSessionTitleInvalid(AppError):
+    """rename 标题非法（task-02 / FR-03）：strip 后为空或超 255 字符，422 不落库。
+
+    长度上限对齐 ``AgentSession.title`` 列 String(255)；空标题拒绝口径与
+    :class:`SessionEmptyPrompt` 一致（422 + 中文文案，schema 层不拦、
+    service 层统一出口）。
+    """
+
+    code = "HTTP_422_DAEMON_SESSION_TITLE_INVALID"
+    http_status = 422
+
+
+# ── 定时消息错误（task-03 2026-09-07-session-pin-rename-scheduled-send / FR-04）──
+
+
+class DaemonScheduledMessageDispatchTooSoon(AppError):
+    """定时消息 ``dispatch_at`` 非未来时间（task-03 / FR-04）：早于
+    now(UTC)+60s（:data:`SCHEDULED_DISPATCH_MIN_LEAD_SEC`），422 不落库。
+
+    最小提前量防「刚建即过期」竞态（design §总体方案 Wave 2）——避免条目落库
+    瞬间即被 sweeper 到点捞走，用户还没看到列表条目就已派发。空 prompt 拒绝
+    不单设类：复用 :class:`SessionEmptyPrompt`（同 inject 中文口径）。
+    """
+
+    code = "HTTP_422_DAEMON_SCHEDULED_MESSAGE_DISPATCH_TOO_SOON"
+    http_status = 422
+
+
+class DaemonScheduledMessageSessionInactive(AppError):
+    """定时消息目标会话不可用（task-03 / FR-04）：终态（ended/failed）或已软删
+    （``deleted_at`` 非空），409 不落库。
+
+    不复用 :class:`DaemonSessionNotActive`（inject/reopen 流专用语义）——
+    独立 code 让前端（task-05）按定时上下文给文案；错误归类字符串对齐 task-04
+    sweeper 的 ``error_code='session_inactive'`` 归档口径。
+    """
+
+    code = "HTTP_409_DAEMON_SCHEDULED_MESSAGE_SESSION_INACTIVE"
+    http_status = 409
+
+
+class DaemonScheduledMessageNotFound(AppError):
+    """定时条目不存在 / 非该会话条目（task-03 / FR-04，404 不泄露存在性）。"""
+
+    code = "HTTP_404_DAEMON_SCHEDULED_MESSAGE_NOT_FOUND"
+    http_status = 404
+
+
+class DaemonScheduledMessageNotPending(AppError):
+    """非 pending 定时条目不可取消（task-03 / FR-04）。
+
+    dispatched / cancelled / failed 均为终态不回退（状态机单向往，对齐
+    ``AgentSessionScheduledMessage.status`` 契约）——取消已派发条目语义上
+    是「撤回已发消息」，超出本变更范围（非目标：不做编辑/撤回）。
+    """
+
+    code = "HTTP_409_DAEMON_SCHEDULED_MESSAGE_NOT_PENDING"
+    http_status = 409
+
+
 class DaemonSessionWorkspaceNotFound(AppError):
     """workspace_id 指向的工作区不存在 / 调用者无 WORKSPACE_READ 权限（404，不泄露存在性）。"""
 

@@ -70,11 +70,11 @@ async def list_agent_sessions(
     - ``machine_id``：经 ``daemon_runtimes.daemon_instance_id`` EXISTS 关联
       （runtime 缺失的旧会话不匹配任何 machine）。
     - ``provider``：``AgentSession.provider`` 精确匹配（router 层 Literal 校验）。
-    - ``q``：标题模糊搜索。title 非持久化列（router 层由首条 user_input
-      摘要派生），故按「会话存在 channel=user_input 且 content_redacted
-      ilike q 的日志」EXISTS 过滤——title 恒为某条 user_input 的前缀，
-      语义上为标题搜索的超集（无漏报）；``%``/``_``/反斜杠 按字面转义，
-      参数经 SQLAlchemy 绑定（防注入）。
+    - ``q``：内容模糊搜索。title 已是持久列（Grill P1-1 落列，rename 可
+      写），但本参数按「会话存在 channel=user_input 且 content_redacted
+      ilike q 的日志」EXISTS 过滤——即匹配首条/任一条用户输入内容，不
+      匹配改过的 title 列（ISS-06：如实描述口径，不改查询行为）；
+      ``%``/``_``/反斜杠 按字面转义，参数经 SQLAlchemy 绑定（防注入）。
 
     2026-08-22-workspace-sessions-portal / D-003@v2 新增（可选，零回归）：
 
@@ -189,11 +189,22 @@ async def list_agent_sessions(
     count_stmt = select(func.count()).select_from(AgentSession).where(*base_filters)
     total = int((await svc._session.execute(count_stmt)).scalar() or 0)
 
+    # task-02（2026-09-07-session-pin-rename-scheduled-send / D-002@v1）：
+    # 置顶优先排序——前置谓词 ``(pinned_at IS NULL) ASC``（IS NULL 为假=已置顶
+    # → 0/false 排前，aiosqlite（0/1）与 PG（boolean ASC false 先）双方言
+    # 同语义），多置顶之间按既有最近活跃续排（「多个置顶按最近活跃排」）；
+    # 未置顶行维持既有序。pinned_at 全 NULL 的存量数据谓词恒真（值序退化为
+    # 既有键），列表序与升级前一致（FR-07 / R-03）。仅动 order_by，不动
+    # base_filters 与分页。
     order_key = func.coalesce(AgentSession.last_active_at, AgentSession.created_at)
     list_stmt = (
         select(AgentSession)
         .where(*base_filters)
-        .order_by(order_key.desc(), AgentSession.id.desc())
+        .order_by(
+            AgentSession.pinned_at.is_(None).asc(),
+            order_key.desc(),
+            AgentSession.id.desc(),
+        )
         .limit(limit)
         .offset(offset)
     )

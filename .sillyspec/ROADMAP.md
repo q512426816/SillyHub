@@ -136,6 +136,10 @@ pm 候选（标准 Node.js 安装器布局，原仅覆盖 nvm-windows）。
 
 ---
 
+### 2026-09-07 · 变更中心冲突对比弹窗 + quick 条目 ql 编号
+
+- **conflict-diff-compare**（2026-09-07，四件套 + 11 task / 7 Wave；verify PASS WITH NOTES 含实机集成证据）：三端链——①daemon：sillyspec_conflict_snapshot RPC（explorer 先例 request/response 通道；双前缀冲突记录 spec-sync-conflict-/sync-conflict- 读取、realpath 防逃逸、单文件 256KB/路径 300/聚合 4MB 三道护栏 + 信噪比排序本变更目录优先 archive 沉底、progress 全局 envelope 自行过滤）+ collectStatusOnce 后处理对 quick-* 冲突条 best-effort 读 guard.json quicklogId 补 ql_id（buildSillySpecStatusSummary 保持纯函数）；②backend：GET /machines/{id}/sillyspec-conflicts/{change}/compare（RuntimeAdminUser + _get_owned_instance 越权 404 + workspace 成员校验 + change 白名单 + RPC 15s 显式超时 504 家族）+ sillyspec_compare.py 编排（平台侧 spec_root containment 拒 ../根外落点、difflib autojunk=False 服务端 diff 四分类 modified/local_only/platform_only/identical + dropped_paths、本地截断无 content 不出 diff_rows、5000 行/文件 + 2MB 响应双护栏、progress 六字段白名单 progress_rows「—」占位）+ DaemonHeartbeatSillySpecConflict 增量可选 ql_id 零改写透传；③前端：ConflictCompareModal（antd Modal 对齐 file-preview-modal 先例；时间条较旧侧橙色方向提示；spec 树=文件清单四徽章+只看差异切换+side-by-side 删红增绿语义 token；进度=三列对比表 differ 橙高亮；裁决条 STRATEGY_TEXT 唯一源收进弹窗 modal.confirm 二次确认）+ 冲突行改造（ql 标题【ql-xxx】快速修复+小字原 ID 兜底、发生时间、只留「查看对比」离线禁用无权限不渲染，D-002@v1 裁决收进弹窗）。实机验收发现并修复：compare gather 并发 asyncpg 同请求连接冲突（平台侧定位改 RPC 前顺序执行，单测 23 不回归）。已知边界：存量 quick 冲突 guard.json 已清理 ql_id 恒 null 兜底原 ID（D-004 已知限制）；本机 daemon sillyspec_status 采集 spawn 异常（node 子进程 3221225794/30s 超时，独立进程复现正常仅 daemon 进程内失败）为既有环境问题留待专项排查。QL 关联 ql-20260907-006-2972。
+
 ## 二、当前活跃变更（5 个）
 
 | 变更 | 状态 | 下一步 |

@@ -59,3 +59,17 @@ frontend 容器（3001）连主栈 backend（旧代码无 compare 端点），�
 - 隔离 daemon 实例 stop + 状态目录清理
 - 8100 uvicorn 停止；临时 Redis（6380）容器删除
 - 共享 DB 迁移漂移已复位（并行会话测试残留的 agent_liveness 四列 drop + alembic_version stamp 回主仓 head 20260905004300；主栈 backend 容器以 latest 镜像 recreate 后 healthy——镜像重建后容器未 recreate 的漂移是 crash 根因，非本变更）
+
+## 部署后人工验收补充记录（2026-09-07 23:20，apply 回 main 后）
+
+部署链完成：liveness 先提交（2e78d25b8）→ 本变更 3way apply 回 main（42a4590f1，QUICKLOG/pi-events 冲突已解）→ backend/frontend 镜像重建 + 容器 healthy → daemon bundle 更新（pnpm bundle + 自更新通道同款）→ 8001 compare 端点真实数据实测（183 文件 spec-tree，local_only 为平台镜像树真实缺失的 08 月归档，行为正确）。
+
+浏览器实测（localhost:3001，admin2 真实登录态）：
+- 平台同步卡 + 4 条冲突行渲染 ✓（单按钮「查看对比」/冲突发生于 X 前/活跃警示/ghost 区，与原型一致）
+- 机器离线时按钮禁用 / 在线时可点 ✓（两种状态均实测）
+- 「查看对比」点击开弹窗 ✓（实测点击成功、弹窗标题渲染）
+
+**遗留环境问题（非本变更缺陷，如实记录）**：
+1. 本机 daemon 的 sillyspec_status 采集 spawn 异常（node 子进程 30s 超时/退出码 3221225794 STATUS_DLL_INIT_FAILED）——独立进程同参数复现均成功、仅 daemon 进程内失败；老机器的历史冲突数据亦为早前会话落库。该问题导致心跳持续清空 sillyspec_status，实机弹窗完整数据演示需依赖注入窗口竞速，未能稳定截屏；弹窗数据链路已由 compare 端点真实响应（183 文件）+ 13 个组件测试覆盖。
+2. 本机 daemon 生态历史残留（多 daemon_local_id 身份/自更新 respawn 旧参数/e2e dummy token 实例/机器归属误绑）——已顺手修正归属与绑定；最终一次重启后 daemon_local_id 重新生成（bce4cc47），用户日常使用时重新绑定 workspace 即可恢复冲突监控。
+建议后续单独立一个环境修复任务：排查 daemon 进程内 spawn node 的 DLL 初始化失败（怀疑与长驻进程句柄/会话状态相关）。

@@ -237,6 +237,8 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         "ctx_window_tokens",
         # 2026-09-01-session-group-chat task-01：群聊会话类型列（chat/group/group_member）。
         "session_kind",
+        # 2026-09-07-session-pin-rename-scheduled-send task-01：会话置顶时间戳列。
+        "pinned_at",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 
