@@ -5,6 +5,7 @@ title_zh: '总验收——8 文件行数达标汇总 + 三端定向回归汇总 
 author: 'qinyi'
 created_at: 2026-09-07 08:48:02
 priority: P1
+low_risk: true
 depends_on: ['task-05', 'task-12', 'task-16']
 blocks: []
 requirement_ids: [FR-01, FR-04, FR-06]

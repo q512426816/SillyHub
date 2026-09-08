@@ -104,3 +104,13 @@ react-query: makeQueryClient() 每会话一实例；staleTime 15s 治焦点刷�
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 文件结构更新（2026-09-07-arch-large-file-split）
+
+`lib/daemon.ts`（4111 行，D-010 merge 后基线）→ `lib/daemon/` **14 文件目录**（原文件移除，bundler 目录导入；task-15，commit e7a9d166c，D-011 由设计 10 文件 execute 期细化为 14——session-sse/sessions 实测超行再拆）：
+
+- `index.ts`（16 行）——全量再导出（12 个 `export *`），`@/lib/daemon` 140 条 import 与 55 处 `vi.mock` 零改动；188 导出面 AST 逐语句比对零漂移（D-011）
+- 12 个域文件（全部 ≤800，max session-stream 750）：`runtimes` / `machines` / `shared-agents` / `dir` / `session-sse`（SSE 解析核心）/ `session-stream`（streamSession 单体）/ `group-shadow-stream`（群/影子流）/ `sessions` / `session-lists`（列表只读族）/ `session-queue` / `group-chat` / `team-missions`
+- `sse-internals.ts`（39 行）——模块私有共享件，**刻意不进 index 再导出**（防污染 188 导出面，D-011）
+
+群聊客户端 11 函数等契约内容随文件搬移归属 `group-chat.ts`，契约语义零变化（见上文「契约摘要」原条目）。

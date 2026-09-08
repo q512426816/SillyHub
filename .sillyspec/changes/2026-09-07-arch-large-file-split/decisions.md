@@ -150,3 +150,25 @@ created_at: 2026-09-07 07:57:33
 - normalized_requirement: 拆分分支 HEAD 须包含 main 4e01d1d44 全部内容且 router 包/daemon 包行为与之等价；后续 task 在新基线上继续。
 - impacts: [task-07, task-03, task-10, task-12, task-15, verify-*]
 - evidence: merge commit 3efb3ec0b；openapi diff 为空；pytest 207+1891+23 全绿；endpoints.json 更新 84 条
+
+## D-011@v1: lib/daemon 目录 10→14 文件（execute 期细化拆分）
+- type: architecture
+- priority: P2
+- status: accepted
+- source: code
+- question: 设计 Wave 3 lib/daemon 表无预计行数列（grill 复审漏查），执行实测 session-sse.ts 达 1815 行、sessions.ts 937 行，超 D-005@v3 ≤800。
+- answer: 按 D-005@v2「细化而非放宽」先例再拆：session-sse → session-sse（解析核心）+ session-stream（streamSession 490 行单体）+ group-shadow-stream（群/影子流）+ sse-internals（模块私有不进 index）；sessions → sessions + session-lists（列表只读族）。14 文件全部 ≤800；188 导出面 AST 双 NONE 零漂移。
+- normalized_requirement: sse-internals 私有符号不进 index（防污染 188 导出面）；纯搬移零行为变化。
+- impacts: [task-15, verify-*]
+- evidence: AST 逐语句比对（197 语句 CHANGED/LOST/ADDED 全 0）；commit e7a9d166c
+
+## D-012@v1: session-panel 目录 11→12 文件 + search 扩展名（execute 期细化）
+- type: architecture
+- priority: P2
+- status: accepted
+- source: code
+- question: SessionPanelPage 组件本体实测 3156 行超 3000 豁免线；search.ts 的 highlightSearchHit 返回 JSX 无法用 .ts 编译。
+- answer: 新增 page-helpers.tsx（742 行：page 纯派生 useMemo 体外提+page 专属常量+SessionPanelPageProps，依赖数组逐项保留，handler/闭包零触碰 R-03）；search.ts→search.tsx（代码 verbatim 仅改扩展名）。page 2967≤3000、dialog 1818≤2000 双豁免达标。
+- normalized_requirement: page-helpers 仅纯函数与常量；行为零变化由 verbatim 区间搬移+脚本断言唯一匹配保障。
+- impacts: [task-14, verify-*]
+- evidence: commit 7e0dbe040（-6620/+7115）

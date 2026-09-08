@@ -270,28 +270,33 @@ Wave 顺序：**Wave 1 daemon → Wave 2 backend → Wave 3 frontend**（D-003�
 | 新增 | backend/app/modules/daemon/tests/test_event_publish.py | [W2] 轻重构3/4/5 定向测试（新增文件不改既有测试） |
 | 新增 | backend/app/modules/daemon/tests/test_attachment_pipeline.py | [W2] 轻重构3/4/5 定向测试（新增文件不改既有测试） |
 | 删除 | frontend/src/components/daemon/session-panel.tsx | [W3] 被 session-panel/ 目录替代 |
-| 新增 | frontend/src/components/daemon/session-panel/index.tsx | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/team-trigger-row.tsx | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/worker-session-overlay.tsx | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/connection-banners.tsx | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/use-session-team-missions.ts | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/turn-state.ts | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/search.ts | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/dialog-helpers.ts | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
-| 新增 | frontend/src/components/daemon/session-panel/session-panel-dialog.tsx | [W3] 11 文件目录（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/index.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/team-trigger-row.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/worker-session-overlay.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/connection-banners.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/use-session-team-missions.ts | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/turn-state.ts | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/search.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/dialog-helpers.ts | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/page-helpers.tsx | [W3] execute 细化（page 纯派生+常量+Props 收敛，压 page 进 3000 豁免线） |
+| 新增 | frontend/src/components/daemon/session-panel/session-panel-dialog.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
 | 删除 | frontend/src/lib/daemon.ts | [W3] 被 lib/daemon/ 目录替代 |
-| 新增 | frontend/src/lib/daemon/index.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/runtimes.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/machines.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/shared-agents.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/dir.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/session-sse.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/sessions.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/session-queue.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/group-chat.ts | [W3] 10 文件目录 |
-| 新增 | frontend/src/lib/daemon/team-missions.ts | [W3] 10 文件目录 |
+| 新增 | frontend/src/lib/daemon/index.ts | [W3] 14 文件目录（execute 细化），导入路径不变 |
+| 新增 | frontend/src/lib/daemon/session-stream.ts | [W3] execute 细化（session-sse 1815 行超限拆出 streamSession 单体） |
+| 新增 | frontend/src/lib/daemon/group-shadow-stream.ts | [W3] execute 细化（群/影子流独立） |
+| 新增 | frontend/src/lib/daemon/sse-internals.ts | [W3] execute 细化（模块私有不进 index，保 188 导出面） |
+| 新增 | frontend/src/lib/daemon/session-lists.ts | [W3] execute 细化（sessions 937 行超限拆出列表只读族） |
+| 新增 | frontend/src/lib/daemon/runtimes.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/machines.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/shared-agents.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/dir.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/session-sse.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/sessions.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/session-queue.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/group-chat.ts | [W3] 14 文件目录（execute 细化） |
+| 新增 | frontend/src/lib/daemon/team-missions.ts | [W3] 14 文件目录（execute 细化） |
 
 > 纯代码组织重构：**无任何对外字段、接口、DTO、响应体、事件 payload、配置键的新增或变更**——producer/consumer 数据流零变化，故清单不标数据流。所有「新增」均为从原文件搬移代码；所有「删除」均被同名包/目录替代。
 

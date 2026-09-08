@@ -5,6 +5,7 @@ title_zh: 'Wave3 前置对账——session-panel 7 符号 + lib/daemon 全量导
 author: 'qinyi'
 created_at: 2026-09-07 08:48:02
 priority: P0
+low_risk: true
 depends_on: ['task-12']
 blocks: []
 requirement_ids: [FR-02]

@@ -488,3 +488,8 @@
 根因：spec pull 挂在会话创建关键路径：同工作区版本每被 agent 会话推进一次，下个会话就现场全量下载（实机 47MB 树压缩 15.9MB / ~0.4MB/s 公网 = 40s+，2057cde1/834486c1 的 spec_pull_ms 44408/42548），并发会话还各拉一份抢同一链路；缓存本是工作区×机器共享但版本恒流动使跳过路径从未触发（日志 0 次）
 方案：①daemon _pullSpecShared single-flight：同工作区并发创建/预取共享一次拉取；②心跳协议对答：请求 spec_cache（本机 specs 清单+版本）→ 响应 spec_versions（backend IN 批查权威版本）→ 本地落后且无活跃会话 → 后台预取+bump 版本对齐，创建时只消费缓存或等在途；③活跃会话门控+pull 上下文记账（防后台覆盖 agent 在途工作 / repo-native junction 降级）；④_.running 门控（未启动不上报，心跳位置参数旧形态零回归）；后端 additive 纯读，旧 daemon 零影响
 结果：backend 新 3 用例+回归 49 过、openapi 重导、两端 gen:types（frontend node_modules 先 --force 修复）；daemon 新 5 用例（并发一次下载/预取触发+版本对齐 9/活跃门控/版本不落后/旧 backend 兼容）+回归 6 套 97 + spec-sync 37 全过、tsc 0；部署验证待发版（预取生效需 backend+daemon 同升）
+
+## ql-20260907-011-14e0 | 2026-09-07 20:35:12 | pi 任务名升级：message_start(user) 携带的用户指令作 task_name 摘要（替代恒定'执行任务'）
+状态：进行中
+关联变更：2026-09-07-pi-task-events
+文件：sillyhub-daemon/src/interactive/pi-events.ts, sillyhub-daemon/tests/interactive/pi-events.test.ts

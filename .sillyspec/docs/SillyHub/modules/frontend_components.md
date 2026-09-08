@@ -170,3 +170,15 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 - 2026-08-19-sessions-workspace-selector | 新建会话工作区选择器：workspace-session-picker 组件 + new-session-form 接入（工作区→绑定机器联动、提交体 workspace_id）
 - ql-20260819-001-b742 | 会话列表和面板头部增加工作区信息显示（session-list-panel chips + session header badge）
 - 2026-08-19-session-stream-ux | 会话流结构化重构：共享装配器 session-log-assembler（分段/归属嵌套/override 撤回收敛两处副本）+ turn-segment-views 段渲染族 + turn-status-bar 轮级状态条 + subagent-catalog 子代理目录 + TurnTimeline v2 段模型渲染（FR-01..06）
+
+## 文件结构更新（2026-09-07-arch-large-file-split）
+
+`components/daemon/session-panel.tsx`（6620 行）→ `components/daemon/session-panel/` **12 文件目录**（原文件移除，bundler 目录导入；`@/components/daemon/session-panel` 导入路径与 7 个对外导出符号零变化——SessionPanel / SessionPanelProps / SessionPreContext / applyBashStatusEvent / appendBashChunk / BashProgressState / applyAgentTaskStatusEvent；task-14，commit 7e0dbe040，D-012）：
+
+- `index.tsx`（277 行）——目录入口：SessionPanel 分发器（page/dialog 双模式）+ 对外 7 符号导出面
+- `session-panel-page.tsx`（2967 行，显式豁免 ≤3000——R-03 闭包状态回归风险，handler 簇保持组件内）/ `session-panel-dialog.tsx`（1818 行，豁免 ≤2000，establishStream 闭包不动）
+- 纯派生与状态件：`page-helpers.tsx`（742，page 纯派生 useMemo 体外提+常量+SessionPanelPageProps）/ `dialog-helpers.ts`（179）/ `turn-state.ts`（415）/ `search.tsx`（40，D-012 由 .ts 改扩展名——highlightSearchHit 返回 JSX）
+- hooks：`use-session-team-missions.ts`（91）/ `use-stream-connection-guard.ts`（236）
+- 渲染小组件：`connection-banners.tsx`（84）/ `team-trigger-row.tsx`（183）/ `worker-session-overlay.tsx`（83）
+
+新子模块全部 ≤800（双豁免项除外）；既有测试文件与 24 处引用文件零改动，components/daemon/__tests__ 定向测试全绿（task-16 验收）。

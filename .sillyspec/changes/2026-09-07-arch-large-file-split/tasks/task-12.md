@@ -5,6 +5,7 @@ title_zh: 'Wave2 验收——backend 定向测试全绿（daemon/tests 相关子
 author: 'qinyi'
 created_at: 2026-09-07 08:48:02
 priority: P0
+low_risk: true
 depends_on: ['task-07', 'task-11']
 blocks: []
 requirement_ids: [FR-06, FR-03]

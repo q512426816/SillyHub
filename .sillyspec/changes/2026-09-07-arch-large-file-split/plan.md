@@ -78,7 +78,7 @@ change: 2026-09-07-arch-large-file-split
 | task-12 | backend 阶段验收：定向测试全绿 + ruff + openapi.json 零 diff + 行数核查 | W8 | P0 | task-07, task-11 | FR-06, D-006@v1 | daemon/tests 相关子集；openapi 前后 diff 是 router 拆分（task-07）的直接验收证据 |
 | task-13 | Wave3 前置对账：session-panel 7 符号 + lib/daemon 全量导出面清单 | W9 | P0 | task-12 | FR-02, D-004@v1 | index 再导出保底基线 |
 | task-14 | 拆分 session-panel.tsx → session-panel/ 11 文件目录 | W10 | P0 | task-13 | FR-02, FR-04, D-005@v3 | index 7 符号再导出；page ≤3000 / dialog ≤2000 豁免 |
-| task-15 | 拆分 lib/daemon.ts → lib/daemon/ 10 文件目录 | W10 | P0 | task-13 | FR-02, FR-04, D-004@v1 | 与 task-14 不同目录可并行 |
+| task-15 | 拆分 lib/daemon.ts → lib/daemon/ 14 文件目录（执行期细化，见任务卡落地记录） | W10 | P0 | task-13 | FR-02, FR-04, D-004@v1 | 与 task-14 不同目录可并行 |
 | task-16 | frontend 阶段验收：定向测试全绿 + tsc --noEmit + 行数核查 | W11 | P0 | task-14, task-15 | FR-06, D-006@v1 | components/daemon/__tests__ + lib/daemon mock 相关 |
 | task-17 | 总验收 + 模块文档同步 | W12 | P1 | task-05, task-12, task-16 | FR-01, FR-04, FR-06, D-001@v1 | 8 文件行数汇总 + 在途 8 文件零改动核查 + 文档更新：SillyHub/modules/daemon.md（backend 拆分）、SillyHub/modules/frontend_components.md + frontend_lib.md（前端拆分）、multi-agent-platform/modules/sillyhub-daemon.md（daemon 侧源文件结构段） |
 

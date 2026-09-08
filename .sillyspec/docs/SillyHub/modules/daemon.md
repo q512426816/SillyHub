@@ -96,3 +96,16 @@ submitWithRetry(退避) → 用尽 → FileOutbox 暂存 → 心跳健康 → dr
 <!-- MANUAL_NOTES_END -->
 - 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）
 - ql-20260824-018-ecf9（quick）：SESSION_SWITCH_CONFIG providerConfig null=切回本机语义修复（daemon.ts 路由 + reloadWithConfig 双层 ?? 塌缩）+ transcript 反向迁移 migrateClaudeTranscriptToHost
+
+## 文件结构更新（2026-09-07-arch-large-file-split）
+
+backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容层，对外 API/schema 零变化——openapi.json 拆分前后零 diff 验收）：
+
+- `router.py`（5468 行，D-010 merge 后 5649）→ `router/` **13 文件包**：`__init__.py`（312 行，_ENDPOINT_ORDER 表按原端点首现顺序 fail-fast 恢复注册顺序）+ 12 域文件——daemon_rpc / gateway_misc / heartbeat / lease / machines / notify / runtimes / session_crud / session_insights / session_queue / session_team / version（max session_crud 712，全部 ≤800，D-008@v2）。
+- `session/service.py`（7176 行）→ `session/service/` **14 文件包**：`__init__.py`（1023 行，SessionService 类壳同名方法一行委托，含 6 私有符号保位）+ 13 子模块——attachments / control / create / errors / helpers / inject / inject_gates / ppm_activation / queue / read_model / recovery / results / session_lifecycle（子模块 max control 801）。
+- `group/service.py`（4844 行）→ `group/service/` **10 文件包**：`__init__.py`（817 行类壳）+ 9 子模块——crud / helpers / members / mentions / messages / settings / shadow / timeline_reads / typing_presence（max crud 791）。
+- `run_sync/service.py`（4055 行）→ `run_sync/service/` **9 文件包**：`__init__.py`（555 行）+ 8 子模块——close_run_steps / gate / group_bridge / publish / sdk_pipeline / stage_team / submit_commit / submit_steps（max close_run_steps 774）。
+- 新增三个共享模块（task-11 轻重构白名单③④⑤）：`_background_tasks.py`（108 行，后台任务 mixin）、`event_publish.py`（51 行，Redis publish 统一）、`attachment_pipeline.py`（132 行，附件管线收敛）。
+- monkeypatch 命名空间兼容规则（D-007）：被 patch 符号在子模块内经原模块命名空间延迟解析调用，`__init__.py` 顶部保持原绑定——157 处既有 patch 目标零失效、既有测试文件零修改（D-006）。
+
+（本节只覆盖 backend 侧文件结构；Node 侧 sillyhub-daemon 的结构更新见项目级 modules/sillyhub-daemon.md 同名节。）
