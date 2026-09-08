@@ -35,24 +35,26 @@
  * 仅用 Node 原生依赖：node:child_process, node:readline, node:fs/promises,
  * node:path, node:timers, node:crypto。
  *
+ * task-03（2026-09-07-arch-large-file-split / D-004@v1 / D-005@v3）：本文件由原
+ * 3426 行瘦身为 facade——常量/类型/模块级纯函数与两个大方法体拆至
+ * ``./task-runner/`` 包 8 子模块（runner-types / payload / change-write /
+ * skill-prompt / render / spawn-stream / file-mcp / index），原导出面 27 符号经
+ * ``export * from './task-runner/index.js'`` 原样转发（零变化）；类内保留核心
+ * 编排（runLease 九步链 / init lease / 心跳循环 / 审批处理 / _eventToMessages /
+ * _finish / runChangeWrite），_spawnAndStream、_handleLine、_writeFileMcpTmpConfig
+ * 改一行委托到子模块函数——``this`` 经 ``_core()`` 类型桥（TaskRunnerCore）
+ * 显式传参，行为零变化。
+ *
  * @module task-runner
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import * as readline from 'node:readline';
-import { mkdir, writeFile, readdir, rm, stat } from 'node:fs/promises';
-import { writeFileSync, chmodSync } from 'node:fs';
-import { join, relative, isAbsolute, dirname } from 'node:path';
-import { tmpdir } from 'node:os';
-// task-07（2026-08-23-agent-file-upload-mcp / FR-02/FR-07 / D-009@v2）：worker spawn
-// 注入 sillyhub-file MCP——buildFileMcpServerConfig 构造 server 条目，凭证经
-// per-server env 写入 0600 tmpdir 临时 .mcp.json（唯一已验证可靠通道，spike-01）。
-import {
-  buildFileMcpServerConfig,
-  FILE_MCP_SERVER_NAME,
-  type DaemonMcpAuth,
-} from './mcp-config.js';
+// task-03（2026-09-07-arch-large-file-split / D-006@v1）：原路径兼容层——19 个
+// 测试文件与 cli.ts / daemon.ts 的 import 语句零改动（原 27 符号导出面不变）。
+export * from './task-runner/index.js';
 
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdir, writeFile, readdir, rm, stat } from 'node:fs/promises';
+import { join, relative, isAbsolute, dirname } from 'node:path';
 import {
   pullSpecBundle,
   postSpecSync,
@@ -68,19 +70,15 @@ import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
 import { applyClaudeSettings } from './claude-settings.js';
-import { resolveWindowsCmdShim } from './cmd-shim.js';
 // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 workDir/.claude/skills/。
 import { linkSkillsToWorkdir } from './skill-manager.js';
-import {
-  createTerminalObserver,
-  NOOP_TERMINAL_OBSERVER,
-  type TerminalObserver,
-} from './terminal-observer.js';
+// task-03：observer 创建 / cmd-shim 解析 / readline 消费随 _spawnAndStream、
+// _handleLine 方法体下沉到 ./task-runner/spawn-stream.js。
+import type { TerminalObserver } from './terminal-observer.js';
 import type { DaemonConfig } from './config.js';
 // 2026-06-24-daemon-network-resilience task-11/12：batch submit 重试 + 终态轻量重试。
 import type { ResilienceService } from './resilience/service.js';
-import type { Envelope } from './resilience/service.js';
-import { dedupKeyFor, toCauseInfo } from './resilience/error-classify.js';
+import { toCauseInfo } from './resilience/error-classify.js';
 // 2026-07-02-daemon-filesystem-policy task-16：per-runtime allowed_roots 快照数据源。
 // batch Claude spawn 时按 task.runtimeId 从 PolicyCache 取该 runtime 的 allowed_roots，
 // 替代全局 config.allowed_roots（D-002）。冻结语义见 runLease 内注释（D-003）。
@@ -94,245 +92,61 @@ import type { PolicyEngine } from './policy/filesystem-policy.js';
 import type { PendingServerRequest } from './adapters/json-rpc.js';
 // task-06：tool_use 分支推导工具种类（C-01 顶层 tool_kind 字段）。
 // 与 backend/app/modules/agent/tool_kind.py 同逻辑，修改须同步（R-05 防漂移）。
-import { classifyToolKind } from './tool-kind.js';
+// task-04 轻重构②：_eventToMessages 转换核心收敛至此（AgentEvent→wire dict 单一实现源）。
+import { eventToSubmitMessages } from './event-wire.js';
 import type {
   AgentEvent,
   LeaseCtx,
-  TaskResult,
 } from './types.js';
-
-// ── 常量（对齐 Python task_runner.py）────────────────────────────────────────
-
-/** 累积输出最大字符数（run 最终 output_redacted；ql-20260709-002 放宽 1万→5万）。 */
-const MAX_OUTPUT = 50_000;
-/** 错误信息最大字符数（对齐 Python _MAX_ERROR = 5000）。 */
-const MAX_ERROR = 5_000;
-/**
- * tool_result 预览最大字符数（ql-20260709-001：原 3000 → 100000）。
- * 对齐 backend run_sync/service.py TOOL_RESULT_MAX_CHARS。3000 会砍掉
- * scan / 构建 / 测试命令输出的关键尾部，100000（约 2000 行）覆盖绝大多数输出；
- * 超长追加中文标注。与 task-runner.ts:1928 已放宽的 result summary（50000）同向。
- */
-const TOOL_RESULT_PREVIEW_MAX = 100_000;
-/** ql-20260706-009：stderr 实时 forward 到 backend 的行数上限（防风暴）。 */
-const MAX_STDERR_FORWARD = 50;
-/** 超时 kill 优雅升级：SIGTERM 后 2 秒仍存活则 SIGKILL（对齐 Python stream_json.py:115）。 */
-const KILL_GRACE_MS = 2_000;
-
-// ── 类型定义 ──────────────────────────────────────────────────────────────────
-
-/**
- * 任务运行时状态（6 种，对齐蓝图 task-19.md §状态机）。
- * 比 BackendTaskResult 多 pending/running/cancelled 三个运行态。
- */
-export type TaskStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'timeout';
-
-/**
- * 子进程 spawn 选项透传（仅 TaskRunner 用到的子集）。
- * 与 node:child_process.SpawnOptions 字段一致，但显式列出避免误传。
- */
-interface SpawnOpts {
-  cwd: string;
-  // env 对齐 Node child_process.SpawnOptions.env 的类型（NodeJS.ProcessEnv，
-  // 即 Record<string, string | undefined>）：process.env 的值天然含 undefined，
-  // spawn 也接受。用 Record<string,string> 会让 { ...process.env } 合并报错。
-  env: NodeJS.ProcessEnv;
-}
-
-// ── 依赖契约（构造注入）──────────────────────────────────────────────────────
-
-/**
- * TaskRunner 需要的 HubClient 接口子集（鸭子类型，避免硬耦合 HubClient 类）。
- * 字段对齐 src/hub-client.ts 的方法签名。
- */
-export interface RunnerHubClient {
-  startLease(leaseId: string, claimToken: string): Promise<unknown>;
-  submitMessages(
-    leaseId: string,
-    claimToken: string,
-    agentRunId: string,
-    messages: Record<string, unknown>[],
-  ): Promise<unknown>;
-  leaseHeartbeat?(leaseId: string, claimToken: string): Promise<unknown>;
-  /**
-   * ql-20260616-006：上报 AgentRun 状态（cancel 时报 killed）。
-   * 端点 POST /api/daemon/leases/{leaseId}/sync。
-   */
-  syncStatus?(
-    leaseId: string,
-    claimToken: string,
-    status: string,
-    error?: string,
-  ): Promise<unknown>;
-  /**
-   * task-09 / D-006@v1：拉取 workspace spec bundle（tar 流）。
-   * 可选方法 —— 旧 mock client 未实现时，runLease 自动跳过 spec pull（server-local 模式已于 2026-07-10-remove-server-local-workspace-mode 移除，wsId 永远非空）。
-   * 实际实现见 HubClient.getSpecBundle。
-   */
-  getSpecBundle?(wsId: string): Promise<Buffer>;
-  /**
-   * task-09 / D-006@v1：回传 spec 整树（tar 流）。
-   * 可选方法 —— 同上，未实现时跳过 sync push。
-   */
-  postSpecSync?(
-    wsId: string,
-    tarBuf: Buffer,
-  ): Promise<{ ok: boolean; reparsed: number }>;
-  /**
-   * task-11 / FR-08 / D-004@v1：回执 change-write 执行结果。
-   * 实际实现见 HubClient.completeChangeWrite。可选（mock client 未实现时跳过）。
-   */
-  completeChangeWrite?(
-    changeWriteId: string,
-    claimToken: string,
-    payload: { ok: boolean; files?: unknown[]; error?: string },
-  ): Promise<unknown>;
-  /**
-   * ql-20260813-spec-sync-visibility task-08：上报同步进度计数（files_total/processed）。
-   * 可选——mock client 未实现时 daemon 跳过进度上报（不影响同步主流程）。
-   */
-  reportChangeWriteProgress?(
-    changeWriteId: string,
-    claimToken: string,
-    payload: { files_total?: number; files_processed?: number },
-  ): Promise<unknown>;
-}
-
-/**
- * TaskRunner 需要的 WorkspaceManager 接口子集。
- * 字段对齐 src/workspace.ts。
- */
-export interface RunnerWorkspaceManager {
-  prepareWorkspace(
-    name: string,
-    repoUrl?: string | null,
-    branch?: string,
-    options?: { rootPath?: string },
-  ): Promise<string>;
-  collectDiff(workspaceDir: string): Promise<{
-    patch: string;
-    files_changed: number;
-    insertions: number;
-    deletions: number;
-    stats: string;
-  }>;
-}
-
-/**
- * TaskRunner 需要的 CredentialManager 接口子集。
- * 字段对齐 src/credential.ts。
- *
- * buildEnv 签名与 CredentialManager.buildEnv 逐字一致（必传 config，
- * Record<string, unknown>），使 CredentialManager 实例可直接注入而无需
- * adapter 包装（G-04 类型安全）。调用点负责兜底 undefined（ctx.toolConfig ?? {}）。
- *
- * task-09：新增 get（读 credentials.json 顶层 token，供 buildSpawnEnv 注入
- * ANTHROPIC_API_KEY / CLAUDE_OAUTH_TOKEN）。CredentialManager 实例天然有 get，
- * 结构兼容 spawn-env.ts 的 SpawnCredentialManager（鸭子类型）。
- */
-export interface RunnerCredentialManager {
-  get(key: string): string | undefined;
-  buildEnv(config: Record<string, unknown>): Record<string, string>;
-}
-
-// ── TaskRunner ───────────────────────────────────────────────────────────────
-
-/**
- * sillyspec `--tool` 的合法值集（sillyspec CLI VALID_TOOLS，design §2 D-005@v1）。
- * 与 daemon agent-detector 12 provider 中的 6 个同名：claude/cursor/openclaw/codex/
- * gemini/opencode。集中一处便于扩展（CLI 新增工具时同步此表）。
- */
-export const SILLYSPEC_VALID_TOOLS: ReadonlySet<string> = new Set([
-  'claude',
-  'cursor',
-  'openclaw',
-  'codex',
-  'gemini',
-  'opencode',
-]);
-
-/**
- * agent-detector 探测结果 → sillyspec --tool 工具列表（task-06 / D-005@v1）。
- *
- * agent 名 → VALID_TOOLS **同名交集**过滤（12 provider 里 6 个同名，其余如 copilot/
- * hermes/pi/kimi/kiro/antigravity 非 sillyspec 工具名，剔除）。探测失败调用方传
- * undefined 即可（runSillyspecInit 兜底 ['claude']），本函数只做纯映射不兜底。
- */
-export function mapDetectedToSillyspecTools(detected: readonly string[]): string[] {
-  return detected.filter((name) => SILLYSPEC_VALID_TOOLS.has(name));
-}
-
-// ── task-07（2026-08-23-agent-file-upload-mcp / R-09 / D-009@v2）：worker .mcp.json ──
-
-/**
- * worker 临时 .mcp.json 文件名前缀（os.tmpdir() 下；清扫残留按此前缀匹配）。
- * 文件名形态：``sillyhub-file-mcp-<runId>.json``（含 runId 可辨识）。
- */
-export const FILE_MCP_TMP_PREFIX = 'sillyhub-file-mcp-';
-
-/**
- * 启动清扫的残留文件年龄阈值（1 小时）。tmpfile 在 run 终态 finally 删除，
- * 仅 daemon 崩溃才会残留；清扫跳过比阈值新的文件——防止误删**并发在跑** run
- *（同机多 daemon / 测试并行构造多个 TaskRunner）的活跃 tmpfile。
- */
-export const FILE_MCP_TMP_MAX_AGE_MS = 60 * 60 * 1000;
-
-/**
- * 构造 worker .mcp.json 在 os.tmpdir() 下的绝对路径（node:path join，三平台兼容）。
- * runId 做字符白名单清洗（UUID 天然安全；防 duck-typed payload 注入路径分隔符）。
- */
-export function fileMcpTmpPathFor(runId: string): string {
-  const safe = runId.replace(/[^A-Za-z0-9._-]/g, '_');
-  return join(tmpdir(), `${FILE_MCP_TMP_PREFIX}${safe}.json`);
-}
-
-/**
- * 进程级单次守卫：清扫每进程只跑一次（见 TaskRunner 构造器注释）。
- */
-let fileMcpSweepStarted = false;
-
-/**
- * 清扫 tmpdir 同前缀残留 .mcp.json（daemon 启动时 fire-and-forget 调用）。
- *
- * 三平台兼容：readdir/stat/rm 全走 node:fs/promises；单文件失败 / tmpdir 不可读
- * 静默继续（清扫是卫生动作，绝不让 daemon 启动失败）。跳过未超年龄阈值的文件
- * （并发保护，见 {@link FILE_MCP_TMP_MAX_AGE_MS}）。
- *
- * @returns 实际删除的文件数（测试断言用）。
- */
-export async function cleanupStaleFileMcpConfigs(
-  maxAgeMs: number = FILE_MCP_TMP_MAX_AGE_MS,
-): Promise<number> {
-  let removed = 0;
-  const dir = tmpdir();
-  let entries: string[];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    return 0;
-  }
-  const now = Date.now();
-  for (const name of entries) {
-    if (!name.startsWith(FILE_MCP_TMP_PREFIX) || !name.endsWith('.json')) continue;
-    const filePath = join(dir, name);
-    try {
-      const s = await stat(filePath);
-      if (!s.isFile()) continue;
-      if (now - s.mtimeMs < maxAgeMs) continue;
-      await rm(filePath, { force: true });
-      removed++;
-    } catch {
-      // 单文件 stat/rm 失败：继续下一个（清扫 best-effort）
-    }
-  }
-  return removed;
-}
+// task-03（2026-09-07-arch-large-file-split / D-004@v1）：原文件头部的常量/类型/
+// 依赖契约接口/鸭子读取器原样下沉到 ./task-runner/ 包（零改写），facade 经
+// import 引用；公共导出面 27 符号经上方 export * 原样转发。
+import {
+  MAX_ERROR,
+  MAX_OUTPUT,
+} from './task-runner/runner-types.js';
+import type {
+  RunnerCredentialManager,
+  RunnerHubClient,
+  RunnerWorkspaceManager,
+  TaskRunnerResult,
+  TaskStatus,
+} from './task-runner/runner-types.js';
+import {
+  intersectAllowedRoots,
+  pickBudgetUsageSnapshot,
+  pickNum,
+  pickStr,
+  pickStrList,
+} from './task-runner/payload.js';
+import {
+  EMPTY_DIFF,
+  buildSkillPrompt,
+  detectSkillInvoked,
+  extractBudgetUsageTokens,
+  isSpawnLevelFailure,
+  resolveMaxRetries,
+} from './task-runner/skill-prompt.js';
+import type { SpawnAttemptResult } from './task-runner/skill-prompt.js';
+import type { TaskRunnerCore } from './task-runner/runner-types.js';
+import {
+  startFileMcpSweepOnce,
+  writeFileMcpTmpConfig,
+} from './task-runner/file-mcp.js';
+import { renderAgentEvent } from './task-runner/render.js';
+import {
+  handleLine,
+  spawnAndStream,
+} from './task-runner/spawn-stream.js';
+import type {
+  HandleLineEnv,
+  SpawnStreamParams,
+} from './task-runner/spawn-stream.js';
+import { validateChangeWritePath } from './task-runner/change-write.js';
+import type {
+  ChangeWriteCtx,
+  ChangeWriteResult,
+} from './task-runner/change-write.js';
 
 /**
  * 任务编排器：执行一个 lease，把 agent 输出流式 submit 到 server，
@@ -411,10 +225,7 @@ export class TaskRunner {
     // 构造多个 TaskRunner 时避免重复全量 readdir 系统临时目录造成 IO 风暴，拖慢
     // spawn 前路径击穿 waitForSpawn 类轮询预算（回归修正，见 _writeFileMcpTmpConfig
     // 同步写注释）。
-    if (!fileMcpSweepStarted) {
-      fileMcpSweepStarted = true;
-      void cleanupStaleFileMcpConfigs().catch(() => {});
-    }
+    startFileMcpSweepOnce();
   }
 
   // ── 追踪与取消 ────────────────────────────────────────────────────────────
@@ -995,6 +806,17 @@ export class TaskRunner {
     }
   }
 
+  // ── task-03（2026-09-07-arch-large-file-split）：子模块下沉函数的类型桥 ──────
+
+  /**
+   * task-03：``this as unknown as TaskRunnerCore`` 类型桥——spawn-stream.ts /
+   * file-mcp.ts 的下沉函数经此拿原 ``this`` 的成员引用（对齐 task-02
+   * SessionManagerCore 先例），行为零变化。
+   */
+  private _core(): TaskRunnerCore {
+    return this as unknown as TaskRunnerCore;
+  }
+
   // ── task-07（2026-08-23-agent-file-upload-mcp）：worker sillyhub-file .mcp.json ──
 
   /**
@@ -1010,36 +832,10 @@ export class TaskRunner {
    *   （spike-01 验证 per-server env 是 MCP 子进程可靠投递通道）。
    *
    * 写盘异常由调用方 catch（warn 降级，不阻塞 worker 编排）。
+   * task-03：方法体下沉到 ./task-runner/file-mcp.js（this → runner 显式传参）。
    */
   private _writeFileMcpTmpConfig(leaseId: string, ctx: LeaseCtx, workDir: string): string {
-    const backendUrl = this.config?.server_url ?? '';
-    const auth: DaemonMcpAuth = {
-      // config 字段可空（null），Duck 类型归一为 undefined（守卫式不写键）。
-      token: this.config?.token ?? undefined,
-      apiKey: this.config?.api_key ?? undefined,
-    };
-    // runId 优先 AgentRun id（mcp-server 写日志行的锚）；缺失回落 leaseId 只求可辨识。
-    const runId = ctx.agentRunId && ctx.agentRunId.trim() ? ctx.agentRunId : leaseId;
-    const server = buildFileMcpServerConfig(backendUrl, auth, {
-      runId,
-      allowedRoot: workDir,
-    });
-    const path = fileMcpTmpPathFor(runId);
-    const payload =
-      JSON.stringify({ mcpServers: { [FILE_MCP_SERVER_NAME]: server } }, null, 2) + '\n';
-    // 同步写（task-07 回归修正）：spawn 前路径保持零真实异步 IO 间隙——异步写入曾
-    // 在并行测试负载下把 spawn 推迟到 waitForSpawn 轮询 / fake-timer 泵预算之外，
-    // 子进程事件在监听器注册前发出被丢，35 例既有测试挂死。文件仅数百字节、worker
-    // spawn 本就是重操作，同步写开销可忽略。
-    writeFileSync(path, payload, { mode: 0o600 });
-    // umask 可能把创建权限位收紧以外的位裁掉；显式 chmod 兜底回 0600。
-    // Windows chmod 仅映射只读位、不抛错——best-effort（三平台兼容）。
-    try {
-      chmodSync(path, 0o600);
-    } catch {
-      // best-effort：chmod 失败不影响功能（创建时已带 mode）
-    }
-    return path;
+    return writeFileMcpTmpConfig(this._core(), leaseId, ctx, workDir);
   }
 
   // ── init lease 轻量分支（task-07 / D-002/D-009，不启 agent）──────────────────
@@ -1276,437 +1072,12 @@ export class TaskRunner {
    * 超时（B-19-07）：setTimeout → SIGTERM → 2s 后 SIGKILL。
    *
    * 取消（B-19-06）：AbortSignal.aborted → SIGTERM → 同样优雅升级。
+   *
+   * task-03（2026-09-07-arch-large-file-split）：方法体下沉到
+   * ./task-runner/spawn-stream.js（this → runner 显式传参，行为零变化）。
    */
-  private async _spawnAndStream(params: {
-    cmdPath: string;
-    args: string[];
-    opts: SpawnOpts;
-    adapter: ProtocolAdapter;
-    prompt: string;
-    ctx: LeaseCtx;
-    signal: AbortSignal;
-    outputParts: string[];
-    onSessionId: (sid: string) => void;
-    leaseId: string;
-    claimToken: string;
-    /**
-     * task-08（D-006 / D-009）：stats 观察回调（每条 complete 事件 metadata.stats 触发，
-     * 同步调用，**不**阻塞 readline）。runLease 用于 budget 累计 + 软切断检查点。
-     * undefined / 未传 → 无外部观察（lastStats 仍内部更新，零回归）。
-     */
-    onStats?: (stats: Record<string, unknown>) => void;
-  }): Promise<SpawnAttemptResult> {
-    const {
-      cmdPath, args, opts, adapter, prompt, ctx, signal,
-      outputParts, onSessionId, leaseId, claimToken,
-    } = params;
-    // task-08：把外部 stats 观察回调解构出来（runLease 用于 budget 软切断检查点）。
-    const externalOnStats = params.onStats;
-
-    // ql-20260616-003：创建终端观察日志（写文件 + 可选弹独立终端）。
-    // 关键设计：observer 创建是异步的（mkdir + writeFile），但**绝不**在 spawn 之前
-    // 阻塞 —— 否则会让旧测试的「spawn 后单 setImmediate 等 listener 注册」断言失效
-    // （实际生产无影响，仅是测试时序脆弱性）。改为 fire-and-forget：
-    //   1. spawn 同步发生（spawn 必须先返回才能注册 listener）
-    //   2. observer promise 在后台创建，就绪后用 .then 替换 NOOP
-    //   3. 中间几条早期 stdout/stderr 可能丢（observer 仍是 NOOP 时 writeRaw 是 no-op）
-    //      —— 这是可接受的权衡：观察日志是辅助功能，绝不能改变 spawn 时序
-    let observer: TerminalObserver = NOOP_TERMINAL_OBSERVER;
-    createTerminalObserver({
-      leaseId,
-      cwd: opts.cwd,
-      cmdPath,
-      args,
-      config: this.config,
-    })
-      .then((obs) => {
-        observer = obs;
-      })
-      .catch((e) => {
-        console.warn('task_runner: observer_create_failed', e);
-      });
-
-    // 本地终端 echo + observer：开始边界，让用户看到 spawn 命令
-    // observer 此时可能还是 NOOP（promise 未 resolve）—— start 行可能错过 observer 日志，
-    // 但 echo 一定写到 stdout（用户本地能看到）。
-    const startLine = renderTaskBoundary(leaseId, 'start', { cmdPath, args });
-    observer.writeParsed(startLine);
-    echoTaskBoundary(leaseId, 'start', { cmdPath, args });
-
-    // 封装结束路径：echo + observer + return 一次性完成，避免漏写 close。
-    // 任务终态时 observer promise 通常已 resolve（spawn + readline + exit 流程比 mkdir 长）。
-    const finishAttempt = (result: SpawnAttemptResult): SpawnAttemptResult => {
-      const endLine = renderTaskBoundary(leaseId, 'end', {
-        status: result.status,
-        exitCode: result.exitCode,
-        error: result.error,
-      });
-      observer.writeParsed(endLine);
-      observer.close(endLine);
-      echoTaskBoundary(leaseId, 'end', {
-        status: result.status,
-        exitCode: result.exitCode,
-        error: result.error,
-      });
-      return result;
-    };
-
-    // spawn（stdio 全管道：stdin / stdout / stderr 都需要）
-    // ql-20260616-001：Windows .cmd/.bat/.ps1 npm wrapper 之前依赖 shell:true，
-    // 但实测在不同 shell 父进程下不稳定（git-bash → ENOENT，PowerShell → 可能吞 stdout）。
-    // ql-20260618-007：改用 resolveWindowsCmdShim 解析 .cmd 提取真实命令（node + codex.js
-    // 或 claude.exe），用 spawn(exe, [target, ...args]) 直接调，绕过 cmd.exe 包装层。
-    // 解析失败时回退 shell:true（兼容旧 .ps1 / 自定义 wrapper）。
-    const isWindowsWrapper =
-      process.platform === 'win32' &&
-      /\.(cmd|bat|ps1)$/i.test(cmdPath);
-    const isWindowsBareSh =
-      process.platform === 'win32' &&
-      !/\.[a-z0-9]+$/i.test(cmdPath);
-
-    let spawnCmdPath = cmdPath;
-    let spawnArgs = args;
-    let useShell = false;
-    if (process.platform === 'win32' && /\.cmd$/i.test(cmdPath)) {
-      const resolved = resolveWindowsCmdShim(cmdPath);
-      if (resolved) {
-        spawnCmdPath = resolved.exe;
-        spawnArgs = [...resolved.prependArgs, ...args];
-      } else {
-        // .cmd 解析失败，回退 shell:true（极少见，保留兜底）
-        useShell = true;
-      }
-    } else if (isWindowsWrapper || isWindowsBareSh) {
-      // .bat / .ps1 / 无扩展名 sh wrapper 仍走 shell（cmd-shim 解析仅覆盖 .cmd）
-      useShell = true;
-    }
-    // DA-1（2026-08-20 审计 P0）：shell:true 下 Node 不转义任何参数，直接拼接命令行。
-    // cursor provider 把用户完整 prompt、backend 下发的 model 作位置参数传入——
-    // 含 & | < > ^ % " 或空白的参数在 cmd.exe 下即命令注入/参数错切。shell 路径
-    // 只保留给「干净参数」的兜底，命中危险字符一律硬失败并给出修复指引，把
-    // 静默注入变成响亮的配置错误。
-    if (useShell) {
-      const RISKY = /[&|<>^%"\s]/;
-      const riskyArg = spawnArgs.find((a) => typeof a === 'string' && RISKY.test(a));
-      if (riskyArg !== undefined) {
-        throw new Error(
-          `拒绝以 shell 模式运行「${cmdPath}」：参数含 shell 元字符（注入/错切风险，DA-1）。` +
-            `请把 agent 包装器换成可被 cmd-shim 解析的 .cmd，或直接指向 .exe；` +
-            `问题参数前 40 字符: ${String(riskyArg).slice(0, 40)}`,
-        );
-      }
-    }
-
-    const child = spawn(spawnCmdPath, spawnArgs, {
-      cwd: opts.cwd,
-      env: opts.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      // ql-20260907-004：daemon 无自有控制台（IDE / VBS 隐藏自启形态）时，Windows
-      // 会给控制台子进程（node 跑 agent CLI）新开可见黑框。windowsHide=
-      // CREATE_NO_WINDOW，对齐仓内其余 spawn 点先例；stdio 管道不受影响。
-      windowsHide: true,
-      ...(useShell ? { shell: true } : {}),
-    }) as ChildProcess;
-
-    let exitCode = 0;
-    let exited = false;
-    // 用对象容器存 spawn 错误：TS 控制流分析对「在异步闭包内赋值的 let 变量」
-    // 会保守假定其类型恒为初始值（即 null），导致后续读取被收窄到 never。
-    // 对象属性（可变）不受此 narrowing 影响，TS 对属性读取保守保留联合类型。
-    const spawnErrorRef: { current: Error | null } = { current: null };
-    let timedOut = false;
-    let cancelled = false;
-    let stderrBuf = '';
-    // ql-20260706-009：已 forward 到 backend 的 stderr 行数（防风暴）。
-    let stderrForwarded = 0;
-    // ql-20260706-010：收集 fire-and-forget forward promise，claude exit 后 await，
-    // 防尾部消息（429 attempt/API Error/最后 tool_result）在 daemon 收尾时丢失。
-    const pendingForwards: Promise<unknown>[] = [];
-    // task-06：收集 complete 事件 metadata.stats（claude result 消息的 usage/cost）。
-    // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
-    let lastStats: Record<string, unknown> | undefined;
-    // task-07（2026-08-29-usage-by-provider-model / FR-01-4 / FR-02-2）：终态 stats
-    // 组装单点 = task-16 mergeAdapterUsage（ndjson getUsage 兜底）+ attachBatchModelStats
-    // 增补 model / api_requests（仅 stream-json adapter 暴露 messageStartCount）。
-    // cancelled / timeout / failed / completed 五个 finishAttempt 出口共用。
-    const finalStats = (): Record<string, unknown> | undefined =>
-      attachBatchModelStats(mergeAdapterUsage(adapter, lastStats), ctx, adapter);
-
-    // stderr 累积（用于失败诊断）+ observer raw 写入 + ql-20260706-009 实时 forward
-    child.stderr?.on('data', (chunk: Buffer | string) => {
-      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
-      stderrBuf += text;
-      // ql-20260616-003：把 stderr 实时投给 observer（mode=raw/both 时落日志）
-      // 按行切分写入，避免大块 chunk 一次性塞进去难读
-      const lines = text.split(/\r?\n/);
-      for (const ln of lines) {
-        if (ln.length === 0) continue;
-        observer.writeRawStderr(ln);
-        // ql-20260706-009：stderr 关键行实时 forward 到 backend agent_run_logs
-        // （channel='stderr'），让前端"错误警告"筛可见——修 claude 529/API Error
-        // 等只吐 stderr 不进 stdout stream-json 致前端只看 init 没下文的可见性 bug。
-        // fire-and-forget（同 stdout submitMessages 策略）；MAX_STDERR_FORWARD 防风暴。
-        if (claimToken && ctx.agentRunId && stderrForwarded < MAX_STDERR_FORWARD) {
-          stderrForwarded += 1;
-          pendingForwards.push(
-            this.client
-              .submitMessages(leaseId, claimToken, ctx.agentRunId, [
-                { event_type: 'stderr', content: ln.slice(0, 5000), channel: 'stderr' },
-              ])
-              .catch((e) => {
-                console.warn('task_runner: stderr_forward_failed', leaseId, e);
-              }),
-          );
-        }
-      }
-      // stderr 也算 error 文本上限保护（避免无限累积）
-      if (stderrBuf.length > MAX_ERROR * 4) {
-        stderrBuf = stderrBuf.slice(0, MAX_ERROR * 4);
-      }
-    });
-
-    // 'error' 事件：spawn ENOENT 等（B-19-05）
-    child.once('error', (err: Error) => {
-      spawnErrorRef.current = err;
-      if (!exited) {
-        exited = true;
-        exitCode = 127;
-      }
-    });
-
-    // 'exit' 事件
-    child.once('exit', (code: number | null, sig: string | null) => {
-      exitCode = code ?? (sig ? -1 : 0);
-      exited = true;
-    });
-
-    // ql-20260616-003：observer 创建是 fire-and-forget，但需要让一个 microtask
-    // 跑完让 promise 链启动（否则 observer promise 在本函数返回前都不会 resolve）。
-    // 这里的 await 是为了 .then 回调有机会被调度（实际不阻塞 spawn —— spawn 已同步执行）。
-    await Promise.resolve();
-
-    // 步骤 6b：写 prompt 到 stdin（不立即 end）
-    // ql-20260617-008：JSON-RPC 协议（adapter 实现 buildHandshake）的 prompt 走
-    // turn/start 的 instructions 字段（步骤 6c 握手 + _handleLine 触发的 buildTurnStart），
-    // 这里跳过 buildInput，避免 codex stdin 收到非法 JSON 文本导致 -32600。
-    if (!adapter.buildHandshake) {
-      try {
-        const inputData = adapter.buildInput
-          ? adapter.buildInput(prompt)
-          : `${prompt}\n`;
-        const buf = typeof inputData === 'string' ? Buffer.from(inputData, 'utf-8') : inputData;
-        if (buf.length > 0 && child.stdin && !child.stdin.destroyed) {
-          await new Promise<void>((resolve) => {
-            let done = false;
-            const finish = (): void => { if (!done) { done = true; resolve(); } };
-            const ok = child.stdin!.write(buf, (err?: Error | null) => {
-              if (err) console.warn('task_runner: stdin_write_failed', err);
-              finish();
-            });
-            if (!ok) {
-              child.stdin!.once('drain', finish);
-            } else {
-              // ok=true 时 callback 已同步触发或将在 flush 后触发；为保证不悬挂，
-              // 用 setImmediate 兜底 resolve（write 返回 true 表示已接受，无需等 drain）。
-              setImmediate(finish);
-            }
-          });
-        }
-      } catch (e) {
-        console.warn('task_runner: stdin_write_exception', e);
-      }
-    }
-
-    // 步骤 6c：json_rpc 协议握手序列（ql-20260617-008）
-    // codex app-server 是被动 server，必须主动发 initialize/initialized/thread.start
-    // 才会开始处理。turn/start 在 TaskRunner._handleLine 检测到 thread/start response
-    //（id=2）后用真实 threadId 触发（adapter.buildTurnStart）。
-    if (adapter.buildHandshake && child.stdin && !child.stdin.destroyed) {
-      try {
-        const handshake = adapter.buildHandshake({
-          cwd: opts.cwd,
-          prompt,
-          model: ctx.model,
-        });
-        for (const line of handshake) {
-          await new Promise<void>((resolve) => {
-            let done = false;
-            const finish = (): void => { if (!done) { done = true; resolve(); } };
-            const ok = child.stdin!.write(line + '\n', (err?: Error | null) => {
-              if (err) console.warn('task_runner: handshake_write_failed', err);
-              finish();
-            });
-            if (!ok) {
-              child.stdin!.once('drain', finish);
-            } else {
-              setImmediate(finish);
-            }
-          });
-          // ql-20260618-002：每条 handshake 之间加 300ms，让 codex.cmd 包装层稳定启动 + codex
-          // 主进程处理完上一条再发下一条。实测 100ms 间隔会导致 thread/start 后 codex.cmd
-          // exit 0（cmd.exe 包装层把 stdin 数据弄丢），300ms 是 probe 测试通过的稳定值。
-          await new Promise<void>((r) => setTimeout(r, 300));
-        }
-      } catch (e) {
-        console.warn('task_runner: handshake_write_exception', e);
-      }
-    }
-
-    // 超时看门狗（task-10 B2：resolveTimeout 优先级链
-    // ctx.timeoutSeconds > ctx.timeout > config.default_timeout_seconds > 1800；
-    // 返回 0 = 不限，不启动看门狗）
-    let watchdog: ReturnType<typeof setTimeout> | null = null;
-    let killTimer: ReturnType<typeof setTimeout> | null = null;
-    const timeoutSec = resolveTimeout(ctx, this.config);
-    if (timeoutSec > 0) {
-      watchdog = setTimeout(() => {
-        timedOut = true;
-        this._killChild(child);
-        // SIGTERM 后 2s 仍存活 → SIGKILL（优雅升级）
-        killTimer = setTimeout(() => {
-          this._killChild(child, 'SIGKILL');
-        }, KILL_GRACE_MS);
-      }, timeoutSec * 1000);
-    }
-
-    // 取消监听（AbortSignal）
-    const onAbort = (): void => {
-      if (signal.aborted && !exited) {
-        cancelled = true;
-        this._killChild(child);
-        killTimer = setTimeout(() => {
-          this._killChild(child, 'SIGKILL');
-        }, KILL_GRACE_MS);
-      }
-    };
-    if (signal.aborted) {
-      onAbort();
-    } else {
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-
-    // 步骤 7：readline 逐行读 stdout，parse + submitMessages + control_request
-    try {
-      if (child.stdout) {
-        const rl = readline.createInterface({
-          input: child.stdout,
-          crlfDelay: Infinity,
-        });
-        // 子进程退出（或已被 kill）→ 主动关闭 readline，让 for-await 跳出。
-        // 否则在 FakeChild / 某些真实 agent 不主动 close stdout 时会无限等待。
-        const exitCloser = (): void => {
-          try { rl.close(); } catch { /* 已关闭 */ }
-        };
-        child.once('exit', exitCloser);
-        // for await...of 天然具备背压（R-04）。
-        // 退出条件：readline 自然结束（stdout push(null)）或 exitCloser 触发 rl.close()。
-        // 不用 exited 标志 break —— exit listener 同步触发时 exited=true 但 rl 还能正常
-        // 吐完缓冲行（实现单测同步 emit 场景下，行已在 stdout 缓冲）。
-        for await (const line of rl) {
-          if (cancelled || timedOut) {
-            break;
-          }
-          // ql-20260616-003：原始 stdout 行投给 observer（mode=raw/both 时落日志）
-          observer.writeRawStdout(line);
-          await this._handleLine(line, adapter, child, {
-            outputParts,
-            onSessionId,
-            leaseId,
-            claimToken,
-            agentRunId: ctx.agentRunId ?? '',
-            // task-17：approval 决策需 runtimeId 隔离 PolicyEngine.canWrite（D-002）。
-            runtimeId: ctx.runtimeId,
-            observer,
-            onStats: (stats: Record<string, unknown>) => {
-              lastStats = stats;
-              // task-08：叠加外部 budget 观察回调（不阻塞 readline，同步调用）。
-              try {
-                externalOnStats?.(stats);
-              } catch (e) {
-                console.warn('task_runner: budget_onstats_error', leaseId, e);
-              }
-            },
-            prompt,
-            model: ctx.model,
-            pendingForwards,
-          });
-        }
-        child.off('exit', exitCloser);
-        rl.close();
-      }
-    } catch (e) {
-      // parse / control 异常已在 _handleLine 内 try/catch；此处兜底
-      console.warn('task_runner: stdout_consume_error', e);
-    }
-
-    // 等子进程 exit（spawn 'error' 已设 exited=true；正常情况 exit 已触发）
-    // Node 的 exit 事件可能在 stdout close 之前或之后，用 once 兜底等它。
-    if (!exited) {
-      await new Promise<void>((resolve) => {
-        const done = (): void => {
-          child.off('exit', done);
-          child.off('error', done);
-          resolve();
-        };
-        child.once('exit', done);
-        child.once('error', done);
-      });
-    }
-
-    // ql-20260706-010：await 所有 pending forward，确保 claude exit 前瞬间产生的
-    // 尾部消息（429 attempt / API Error / 最后 tool_result）发完再返回，防
-    // fire-and-forget 在 daemon 收尾时丢失（c76562cd 实证 10 条 429 attempt 全丢）。
-    if (pendingForwards.length > 0) {
-      await Promise.allSettled(pendingForwards);
-    }
-
-    // 清理定时器
-    if (watchdog) clearTimeout(watchdog);
-    if (killTimer) clearTimeout(killTimer);
-    signal.removeEventListener('abort', onAbort);
-
-    // 关闭 stdin（result 已收到或子进程退出）
-    try {
-      if (child.stdin && !child.stdin.destroyed) {
-        child.stdin.end();
-      }
-    } catch {
-      /* stdin 已关闭 */
-    }
-
-    // 计算最终状态
-    if (cancelled) {
-      return finishAttempt({ status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: finalStats() });
-    }
-    if (timedOut) {
-      return finishAttempt({ status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: finalStats() });
-    }
-    // spawnErrorRef.current：spawn 错误（'error' 事件异步赋值）。用对象容器
-    // 避免 TS 对闭包内赋值的 let 变量做错误 narrowing（详见声明处注释）。
-    if (spawnErrorRef.current) {
-      return finishAttempt({ status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: finalStats() });
-    }
-    if (exitCode !== 0) {
-      const errDetail = stderrBuf.trim();
-      // task-10 B3：判定是否业务错误（claude result is_error=true）。
-      // 鸭子类型调用 adapter.getLastResultInfo()（claude adapter 解析 result 消息时记录）。
-      // businessError=true → isSpawnLevelFailure 返回 false，不重试（R-10 side-effect 优先）。
-      const lastInfo = (adapter as {
-        getLastResultInfo?: () => { isError?: boolean } | undefined;
-      }).getLastResultInfo?.();
-      const businessError = lastInfo?.isError === true;
-      const errMsg = errDetail
-        ? `agent process exited with exit code ${exitCode}: ${errDetail}`
-        : `agent process exited with exit code ${exitCode}`;
-      return finishAttempt({
-        status: 'failed',
-        exitCode: 1, // 统一映射非零退出为 1（对齐 Python 把非零 exit 视为 failed）
-        error: errMsg,
-        stats: finalStats(),
-        businessError,
-      });
-    }
-    return finishAttempt({ status: 'completed', exitCode: 0, stats: finalStats() });
+  private async _spawnAndStream(params: SpawnStreamParams): Promise<SpawnAttemptResult> {
+    return spawnAndStream(this._core(), params);
   }
 
   /**
@@ -1714,207 +1085,19 @@ export class TaskRunner {
    *
    * 对齐 Python `_consume_stdout` 主循环 + `_handle_control_request`。
    * 内部全部 try/catch，避免单行异常中断整体（B-19-04）。
+   *
+   * task-03（2026-09-07-arch-large-file-split）：方法体下沉到
+   * ./task-runner/spawn-stream.js（this → runner 显式传参，行为零变化）。
    */
   private async _handleLine(
     line: string,
     adapter: ProtocolAdapter,
     child: ChildProcess,
-    env: {
-      outputParts: string[];
-      onSessionId: (sid: string) => void;
-      leaseId: string;
-      claimToken: string;
-      agentRunId: string;
-      /** task-17：approval 决策按 runtime_id 隔离 PolicyEngine.canWrite（D-002）。 */
-      runtimeId: string;
-      observer: TerminalObserver;
-      onStats?: (stats: Record<string, unknown>) => void;
-      prompt?: string;
-      model?: string;
-      /** ql-20260706-010：收集本行 forward promise，runLease exit 后统一 await。 */
-      pendingForwards: Promise<unknown>[];
-    },
+    env: HandleLineEnv,
   ): Promise<void> {
-    // R-03：control_request 行优先交给 adapter.onControl 应答
-    if (adapter.onControl && _looksLikeControlRequest(line)) {
-      try {
-        await adapter.onControl(line, child.stdin as NodeJS.WritableStream);
-      } catch (e) {
-        console.warn('task_runner: control_response_failed', e);
-      }
-      // control_request 行本身不产 submitMessages 事件，但仍允许 parse（多数 adapter 对该行返回 null）
-    }
-
-    // ql-20260617-008：json_rpc thread/start response 监听
-    // codex app-server 收到 thread/start（id=2）后回复含 result.thread.id 的 response。
-    // TaskRunner 检测到此 response 后，用真实 threadId 调 adapter.buildTurnStart 构造
-    // turn/start request 写 stdin，codex 才会开始处理用户 prompt。
-    if (adapter.buildTurnStart && child.stdin && !child.stdin.destroyed) {
-      try {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('{')) {
-          const msg = JSON.parse(trimmed) as {
-            id?: unknown;
-            result?: { thread?: { id?: unknown } };
-          };
-          if (msg.id === 2 && msg.result?.thread?.id) {
-            const threadId = String(msg.result.thread.id);
-            const turnStartLine = adapter.buildTurnStart({
-              threadId,
-              prompt: env.prompt ?? '',
-              model: env.model,
-            });
-            await new Promise<void>((resolve) => {
-              let done = false;
-              const finish = (): void => { if (!done) { done = true; resolve(); } };
-              const ok = child.stdin!.write(turnStartLine + '\n', (err?: Error | null) => {
-                if (err) console.warn('task_runner: turn_start_write_failed', err);
-                finish();
-              });
-              if (!ok) {
-                child.stdin!.once('drain', finish);
-              } else {
-                setImmediate(finish);
-              }
-            });
-          }
-        }
-      } catch (e) {
-        // 非 JSON 行忽略（codex 推送的 notification 也走此路径，正常）
-        if (!(e instanceof SyntaxError)) {
-          console.warn('task_runner: turn_start_trigger_exception', e);
-        }
-      }
-    }
-
-    // result / system 行：尝试提取 session_id（B-19-09：仅在显式标记 result 时关闭 stdin）
-    if (_looksLikeResult(line)) {
-      const sid = _extractSessionId(line);
-      if (sid) env.onSessionId(sid);
-      // result 行收到 → 安全关闭 stdin（避免子进程继续等待输入，R-03 关键点）
-      try {
-        if (child.stdin && !child.stdin.destroyed) {
-          child.stdin.end();
-        }
-      } catch {
-        /* 已关闭 */
-      }
-    }
-
-    // ql-20260618-003：codex/json-rpc 的 turn/completed → 安全关闭 stdin。
-    // codex 是被动 server，单 turn 完成后不主动退出；daemon 检测到 turn/completed
-    // notification 即关闭 stdin，让 codex 优雅退出，readline 收尾，task 完成。
-    // 与 claude 的 _looksLikeResult 等价的"单次 lease 收尾点"。
-    if (_looksLikeTurnCompleted(line)) {
-      try {
-        if (child.stdin && !child.stdin.destroyed) {
-          child.stdin.end();
-        }
-      } catch {
-        /* 已关闭 */
-      }
-    }
-
-    // parse
-    let events: AgentEvent[] | null = null;
-    try {
-      events = adapter.parse(line);
-    } catch (e) {
-      // 单行 parse 异常不中断整体（B-19-04）
-      console.warn('task_runner: parse_error', line.slice(0, 100), e);
-      return;
-    }
-    if (!events || events.length === 0) {
-      return;
-    }
-
-    // task-17 / R-06：Codex batch 带内审批决策。
-    // 扫描本轮 events 是否含 approval tool_use（json-rpc adapter parseServerRequest 产出）。
-    // 命中则对每个写路径调 policyEngine.canWrite 决策，写 accept/decline response 到 stdin。
-    // 必须在 _eventToMessages 之前处理：approval 是 server request 需 daemon 应答，
-    // 不应答会卡死 turn（codex 等 response 才继续）。仅 json-rpc adapter 的 batch 路径生效，
-    // stream-json / ndjson 无 server request 概念（无 PendingServerRequest）。
-    const approvalEv = events.find(
-      (e) => e.type === 'tool_use' && e.metadata?.kind === 'approval',
-    );
-    if (approvalEv) {
-      await this._handleApprovalDecision(adapter, child, env, approvalEv);
-    }
-
-    // 累积 output + 提交 submitMessages
-    const messages: Record<string, unknown>[] = [];
-    for (const ev of events) {
-      // 本地终端 echo + 观察日志：用同一份 render 渲染保证字节一致。
-      // echo 写 daemon 本地 stdout；observer.writeParsed 按配置 mode 决定是否落日志。
-      const rendered = renderAgentEvent(env.leaseId, ev);
-      env.observer.writeParsed(rendered);
-      try {
-        process.stdout.write(rendered + '\n');
-      } catch {
-        // stdout 关闭：忽略
-      }
-      // 提取 sessionId（complete / status 事件可能在 metadata.session_id 带）
-      const sid = ev.metadata?.session_id;
-      if (typeof sid === 'string' && sid) {
-        env.onSessionId(sid);
-      }
-      // task-06：complete 事件收集 metadata.stats（cost/tokens/turns）
-      if (ev.type === 'complete' && ev.metadata?.stats && env.onStats) {
-        const stats = ev.metadata.stats;
-        if (stats && typeof stats === 'object' && !Array.isArray(stats)) {
-          env.onStats(stats as Record<string, unknown>);
-        }
-      }
-      // output 累积：仅 text / error 事件进 output 缓冲
-      if (ev.type === 'text' || ev.type === 'error') {
-        if (ev.content) {
-          env.outputParts.push(ev.content);
-        }
-      }
-      // 转 submitMessages 负载
-      const msgs = this._eventToMessages(ev);
-      if (msgs && msgs.length > 0) {
-        messages.push(...msgs);
-      }
-    }
-
-    if (messages.length === 0) {
-      return;
-    }
-
-    // submitMessages：fire-and-forget，不阻塞 stdout readline（每条 await HTTP
-    // 会让 cursor/codex 执行慢一个数量级；失败仅 warn，对齐容错策略）。
-    // ql-004：空 agentRunId 不发 submitMessages，防空 agent_run_id 422 风暴。
-    // task-11（FR-10 / D-005@v1）：注入 resilience 时走 submitWithRetry（带退避重试 +
-    // dedup_key），保持非阻塞（void + catch）；未注入回退原 client.submitMessages。
-    if (env.claimToken && env.agentRunId) {
-      if (this.resilience) {
-        const envelopes: Envelope[] = messages.map((m, idx) => ({
-          message: m,
-          dedup_key: dedupKeyFor(m, env.agentRunId, 0, idx),
-        }));
-        env.pendingForwards.push(
-          this.resilience
-            .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
-            .catch((e) => {
-              console.warn(
-                'task_runner: event_forward_failed',
-                env.leaseId,
-                toCauseInfo(e),
-              );
-            }),
-        );
-      } else {
-        env.pendingForwards.push(
-          this.client
-            .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
-            .catch((e) => {
-              console.warn('task_runner: event_forward_failed', env.leaseId, e);
-            }),
-        );
-      }
-    }
+    return handleLine(this._core(), line, adapter, child, env);
   }
+
 
   // ── task-17 / R-06：batch Codex 带内审批决策 ───────────────────────────────
 
@@ -2094,11 +1277,13 @@ export class TaskRunner {
   /**
    * 把 AgentEvent IR 渲染成 server submit_messages 的 message dict 列表。
    *
-   * ql-20260616-005：1:1 复现老 SERVER 路径 _format_conversation_log 渲染规则
-   * （commit be5448b 删除前 backend/app/modules/agent/adapters/claude_code.py:306-388），
-   * 让前端 normalize.ts / agent-log-viewer.tsx 不动就能解析 [ASSISTANT]/[TOOL_USE]/
-   * [TOOL_RESULT]/[SYSTEM:xxx]/[RESULT:success] 前缀，tool_use 同时产 stdout 文本
-   * 行 + tool_call JSON 两类 message，前端 ToolCallCard 渲染照常工作。
+   * task-04 轻重构②（2026-09-07-arch-large-file-split）：转换核心原样搬移至
+   * src/event-wire.ts（与 session-manager eventToReportDict 共用 AgentEvent→wire
+   * dict 单一实现源），本方法保留为委托（TaskRunnerCore 接口签名不变，spawn-stream
+   * 调用点零改动），输出与搬移前逐字节等价（tests/event-wire.test.ts 断言）。
+   *
+   * 渲染规则（ql-20260616-005：1:1 复现老 SERVER 路径 _format_conversation_log，
+   * 详见 event-wire.ts eventToSubmitMessages 注释）：
    *
    * 1 个 event → 0/1/2 条 message：
    *   - text + status=running → 1 条 [SYSTEM:init] session started (stdout)
@@ -2115,264 +1300,7 @@ export class TaskRunner {
    * 返回 null：未知 event type 或所有 message 都被过滤。
    */
   private _eventToMessages(ev: AgentEvent): Record<string, unknown>[] | null {
-    const md = ev.metadata ?? {};
-    const rawContent = ev.content ?? '';
-    const messages: Record<string, unknown>[] = [];
-
-    switch (ev.type) {
-      case 'text': {
-        const status = typeof md.status === 'string' ? md.status : '';
-        const thinking = md.thinking === true;
-        const isLog = md.log === true;
-        const isStreaming = md.streaming === true;
-        // ql-20260618-005：codex item/agentMessage/delta 流式 token —— 不加 [ASSISTANT]
-        // 前缀，直接发原始 delta 文本。前端 chat 面板会逐字 append 拼"打字效果"。
-        // 若加 [ASSISTANT] 前缀，每个 delta 都带前缀 → "[ASSISTANT] 我[ASSISTANT]  Cod"。
-        // Agent 控制台日志会按原样展示每条 delta（无前缀），可读性也 OK（每条 = 一次推送）。
-        if (isStreaming && rawContent) {
-          messages.push({
-            event_type: ev.type,
-            content: rawContent,
-            channel: 'stdout',
-          });
-          break;
-        }
-        // ql-20260617-006：stream_event/message_delta 产的 status='usage_update' 事件
-        // content 为空但 metadata.usage 有真实累加值。透传给 backend submit_messages
-        // 实时更新 AgentRun.input_tokens/output_tokens（不写日志，仅 usage 回写）。
-        if (status === 'usage_update') {
-          messages.push({
-            event_type: ev.type,
-            content: '',
-            channel: 'stdout',
-          });
-          break;
-        }
-        // ql-20260617-008：parseSystem 把 init / status / api_retry 等所有 subtype 都
-        // 产成 status='system' + content='session=xxx cwd=xxx ...'，渲染成
-        // `[SYSTEM:<subtype>] <content>` 一行。日志完整性优先，不再丢弃任何 subtype。
-        if (status === 'system') {
-          const subtype = typeof md.subtype === 'string' && md.subtype ? md.subtype : 'unknown';
-          messages.push({
-            event_type: ev.type,
-            content: `[SYSTEM:${subtype}] ${rawContent}`.slice(0, 2000),
-            channel: 'stdout',
-          });
-          break;
-        }
-        // ql-20260617-008：parseLog 产 metadata.log=true + level + content=message。
-        // 渲染成 `[LOG:<level>] <message>`，stderr 级别（warn/error）走 stderr channel。
-        if (isLog) {
-          const level = typeof md.level === 'string' && md.level ? md.level : 'info';
-          const isErrLevel = level === 'error' || level === 'warn';
-          messages.push({
-            event_type: ev.type,
-            content: `[LOG:${level}] ${rawContent}`.slice(0, 5000),
-            channel: isErrLevel ? 'stderr' : 'stdout',
-          });
-          break;
-        }
-        // ql-20260616-005：空 content + 非 system/thinking 分支 → 丢弃（对齐老
-        // _eventToMessage L744 「空 content + 无 metadata 业务字段 → 返回 null」语义）
-        if (!rawContent && !thinking) {
-          return null;
-        }
-        let line: string;
-        if (thinking) {
-          const preview =
-            rawContent.length > 20000
-              ? rawContent.slice(0, 20000) + '...'
-              : rawContent;
-          line = `[THINKING] ${preview}`;
-        } else {
-          line = `[ASSISTANT] ${rawContent}`;
-        }
-        messages.push({
-          event_type: ev.type,
-          content: line,
-          channel: 'stdout',
-        });
-        break;
-      }
-      case 'tool_use': {
-        const name =
-          typeof md.tool_name === 'string' && md.tool_name
-            ? md.tool_name
-            : 'unknown';
-        // task-17 / R-06：审批 decline 事件 → stdout 直接写中文理由（不渲染 [TOOL_USE]
-        // 模板，让前端 / 日志一眼可见拒绝原因 + 越界路径）。accept 时 metadata 无 reason，
-        // 走下面的标准 tool_use 渲染（[TOOL_USE] Name: ...）。
-        if (md.approval_decision === 'decline') {
-          const reason =
-            typeof md.deny_reason === 'string' && md.deny_reason
-              ? md.deny_reason
-              : '审批拒绝（未知原因）';
-          messages.push({
-            event_type: ev.type,
-            content: `[APPROVAL:DECLINE] ${name}\n${reason}`.slice(0, 5000),
-            channel: 'stderr',
-          });
-          break;
-        }
-        const inputObj =
-          md.tool_input &&
-          typeof md.tool_input === 'object' &&
-          !Array.isArray(md.tool_input)
-            ? (md.tool_input as Record<string, unknown>)
-            : {};
-        // task-13 / D-002@v1：提取 tool_use_id（SDK tool_use block 的 id，toolu_xxx）。
-        // stream-json.ts:645-654 把 block.id 存到 metadata.call_id（命名待后续修正），
-        // 这里兼容三种字段名：
-        //   1. md.tool_use_id（未来 adapter 命名修正后的标准字段）
-        //   2. md.id（直接透传 SDK content_block.id）
-        //   3. md.call_id（当前 stream-json.ts 实际存储位置，旧字段名）
-        // 任一非空字符串即采用；全空 → ''（退化，前端 normalize 回退 ±3 窗口）。
-        // 注：只把 id 注入 tool_call JSON（submit_messages 仅存 content/channel/usage，
-        // 不保留 metadata 字段，故 stdout 不带 metadata，避免无效写入）。
-        const toolUseId =
-          (typeof md.tool_use_id === 'string' && md.tool_use_id) ||
-          (typeof md.id === 'string' && md.id) ||
-          (typeof md.call_id === 'string' && md.call_id) ||
-          '';
-        // stdout 文本行：[TOOL_USE] Name: <command> 或 [TOOL_USE] Name: {json}
-        // 对齐老 _format_conversation_log L333-337
-        const cmd = typeof inputObj.command === 'string' ? inputObj.command : '';
-        let argsLine: string;
-        if (cmd) {
-          argsLine = cmd;
-        } else {
-          try {
-            argsLine = JSON.stringify(inputObj);
-          } catch {
-            argsLine = '';
-          }
-        }
-        const stdoutContent = `[TOOL_USE] ${name}: ${argsLine}`.slice(0, 20000);
-        messages.push({
-          event_type: ev.type,
-          content: stdoutContent,
-          channel: 'stdout',
-        });
-        // task-06 / FR-03：推导工具种类。stdout 文本行（上方 SemanticCategory=log）
-        // 不带 tool_kind（C-02：log 不参与工具筛选维度）；仅 tool_call JSON 行带。
-        // toolName 缺失或为 unknown 时 classifyToolKind 返回 null，条件展开省略字段
-        // （C-01：tool_kind 与 event_type/content/channel 同级顶层，非 metadata）。
-        const toolKind = classifyToolKind(
-          typeof md.tool_name === 'string' && md.tool_name ? md.tool_name : null,
-          inputObj,
-        );
-        // 额外发一条 tool_call channel 的 JSON，前端 parseToolCallContent 解析为
-        // ToolCallCard。对齐老 _emit_stdout L749-757 的 tc_content 格式。
-        // task-13：补 tool_use_id 字段（snake_case，对齐 Anthropic API 命名 + 与
-        // backend run_sync/service.py 一致），让前端 normalize 全局配对（task-14）。
-        const ts = new Date().toISOString();
-        let tcContent: string;
-        try {
-          tcContent = JSON.stringify({
-            tool: name,
-            // tool_use_id 仅非空时携带（省略 vs null 均可让前端 hasOwnProperty
-            // 判断"无 id"分支）。这里用条件展开省略字段，退化路径保持原形状。
-            ...(toolUseId ? { tool_use_id: toolUseId } : {}),
-            args: inputObj,
-            timestamp: ts,
-            status: 'allowed',
-            success: true,
-          });
-        } catch {
-          tcContent = JSON.stringify({
-            tool: name,
-            ...(toolUseId ? { tool_use_id: toolUseId } : {}),
-            args: {},
-            timestamp: ts,
-            status: 'allowed',
-            success: true,
-          });
-        }
-        messages.push({
-          event_type: ev.type,
-          content: tcContent,
-          channel: 'tool_call',
-          ...(toolKind ? { tool_kind: toolKind } : {}),
-        });
-        break;
-      }
-      case 'tool_result': {
-        // ql-20260709-001：放宽截断（3000→TOOL_RESULT_PREVIEW_MAX），超长追加
-        // 中文标注，与 backend run_sync/service.py interactive 路径一致。
-        const preview =
-          rawContent.length > TOOL_RESULT_PREVIEW_MAX
-            ? rawContent.slice(0, TOOL_RESULT_PREVIEW_MAX) +
-              `\n...(输出过长，已截断，共 ${rawContent.length} 字符)`
-            : rawContent;
-        messages.push({
-          event_type: ev.type,
-          content: `[TOOL_RESULT] ${preview}`,
-          channel: 'stdout',
-        });
-        break;
-      }
-      case 'error': {
-        const level =
-          typeof md.level === 'string' && md.level ? md.level : 'error';
-        messages.push({
-          event_type: ev.type,
-          content: `[${level.toUpperCase()}] ${rawContent}`.slice(0, 5000),
-          channel: 'stderr',
-        });
-        break;
-      }
-      case 'complete': {
-        const stats =
-          md.stats &&
-          typeof md.stats === 'object' &&
-          !Array.isArray(md.stats)
-            ? (md.stats as Record<string, unknown>)
-            : {};
-        const durationMs =
-          typeof stats.total_duration_ms === 'number'
-            ? stats.total_duration_ms
-            : null;
-        const numTurns =
-          typeof stats.num_turns === 'number' ? stats.num_turns : null;
-        let line = '[RESULT:success]';
-        const body = rawContent.trim();
-        if (body) {
-          line += ` ${body.slice(0, 50000)}`; // ql-20260626-001 放宽（原 3000 截断完整 result 总结）
-        }
-        if (durationMs !== null) line += ` duration=${durationMs}ms`;
-        if (numTurns !== null) line += ` turns=${numTurns}`;
-        messages.push({
-          event_type: ev.type,
-          content: line,
-          channel: 'stdout',
-        });
-        break;
-      }
-      default: {
-        // 未知 event type：丢弃，避免污染日志
-        return null;
-      }
-    }
-
-    if (messages.length === 0) return null;
-
-    // 业务字段透传到首条 message（backend submit_messages 用于 usage 实时回写、
-    // session_id 索引等）。call_id 仅 tool_use 类型有意义，写第一条即可。
-    const first = messages[0]!;
-    if (typeof md.session_id === 'string' && md.session_id) {
-      first.session_id = md.session_id;
-    }
-    if (typeof md.call_id === 'string' && md.call_id) {
-      first.call_id = md.call_id;
-    }
-    if (
-      md.usage &&
-      typeof md.usage === 'object' &&
-      !Array.isArray(md.usage)
-    ) {
-      first.usage = { ...(md.usage as Record<string, unknown>) };
-    }
-    return messages;
+    return eventToSubmitMessages(ev);
   }
 
   // ── task-08（D-006 / D-009）：budget 软切断事件回传 ─────────────────────────
@@ -2690,194 +1618,7 @@ export class TaskRunner {
   }
 }
 
-/**
- * task-11：change-write 待写入的单个文件（design §7.5 ``files[]{path, content}``）。
- *
- * ``path`` 通常相对于 spec_root（``changes/<changeKey>/...``，由 backend
- * proxy 下发）；兼容相对于 ``changes/<changeKey>/`` 的短路径。两种形态都会归一
- * 到 change 目录内相对路径，traversal 由 ``validateChangeWritePath`` 拦截。
- */
-export interface ChangeWriteFile {
-  path: string;
-  content: string;
-  /**
-   * ql-20260816-002：kind=spec-sync 时 backend 透传的宿主仓库根（元信息，非待写文件）。
-   * task-runner 据 presence 分流打包 <root_path>/.sillyspec；create/edit 恒无此字段。
-   */
-  root_path?: string;
-}
-
-/**
- * task-11：runChangeWrite 执行上下文。
- *
- * 字段来源：task-09 ``ChangeWriteClaimResponse``（claim 后拿到 claim_token + files）
- * 透传 runtimeId（仅日志/上下文用，不进 complete body）。
- */
-export interface ChangeWriteCtx {
-  /** DaemonChangeWrite.id（task-09 task_id）。 */
-  taskId: string;
-  /** change 标识（落到 changes/<changeKey>/ 子目录）。 */
-  changeKey: string;
-  /** workspace id（定位本地 spec 根 + sync 回灌）。 */
-  workspaceId: string;
-  /** claimChangeWrite 颁发的令牌（complete 校验）。 */
-  claimToken: string;
-  /** 待写入文件清单（path 相对 changes/<key>/，content utf-8）。 */
-  files: ChangeWriteFile[];
-  /**
-   * 任务类型（2026-07-02-workspace-config-flow task-13 / D-012）：
-   *   - ``create`` / ``edit``（默认）：写 changes/<key>/ 文件 + sync 回灌。
-   *   - ``spec-sync``：整树回灌到服务器（postSpecSync），不写文件。
-   * 缺省 ``create`` 与 backend ``DaemonChangeWrite.kind`` server_default 对齐。
-   */
-  kind?: string;
-}
-
-/** task-11：runChangeWrite 返回值（含 ok / 实际写入相对路径清单）。 */
-export interface ChangeWriteResult {
-  taskId: string;
-  changeKey: string;
-  ok: boolean;
-  files: string[];
-}
-
-/**
- * task-11：change-write path traversal 四类校验（照搬 spec-sync.ts:230 范式）。
- *
- * 拒绝：
- *   1. ``path`` 含 ``..`` 段（防 ``foo/../../bar`` 越界）；
- *   2. ``path`` 是绝对路径（``/`` 开头）；
- *   3. ``path`` 含 Win 盘符（``[A-Za-z]:[\\/]``）；
- *   （第 4 类 join 后越界由调用方 ``relative`` 二次校验兜底。）
- *
- * 接受两种合法形态：
- *   - ``changes/<changeKey>/MASTER.md``（backend proxy 下发，path 相对 spec_root）
- *   - ``MASTER.md``（兼容旧测试/调用方，path 相对 changes/<changeKey>/）
- *
- * 其余 ``changes/<otherKey>/...``、绝对路径、Win 盘符、``..``/``.`` 段均拒绝。
- *
- * @returns 归一化后的 change 目录内相对路径（POSIX 分隔符，供写入和回执 files[]）
- */
-export function validateChangeWritePath(
-  filePath: string,
-  changeKey: string,
-): string {
-  if (
-    typeof filePath !== 'string' ||
-    filePath === '' ||
-    isAbsolute(filePath) ||
-    /^[A-Za-z]:[\\/]/.test(filePath)
-  ) {
-    throw new Error(`change-write path traversal blocked: ${String(filePath)}`);
-  }
-  const normalized = filePath.split('\\').join('/');
-  if (normalized.endsWith('/')) {
-    throw new Error(`change-write path traversal blocked: ${String(filePath)}`);
-  }
-  const parts = normalized.split('/').filter((part) => part.length > 0);
-  if (parts.length === 0 || parts.some((part) => part === '..' || part === '.')) {
-    throw new Error(`change-write path traversal blocked: ${String(filePath)}`);
-  }
-  if (parts[0] === 'changes') {
-    if (parts[1] !== changeKey || parts.length <= 2) {
-      throw new Error(`change-write path outside change dir: ${String(filePath)}`);
-    }
-    return parts.slice(2).join('/');
-  }
-  return parts.join('/');
-}
-
-// ── 公开类型 ──────────────────────────────────────────────────────────────────
-
-/**
- * TaskRunner.runLease 的返回结构。
- * TaskResult 扩展加 status（终态）+ sessionId（直接平铺，便于调用方）+ stats（透传）。
- */
-export interface TaskRunnerResult extends TaskResult {
-  /** 任务终态。 */
-  status: TaskStatus;
-  /** agent 会话 ID（可能为空）。 */
-  sessionId: string;
-  /**
-   * claude result 消息 stats（cost/tokens/turns），透传到 daemon completeLease payload。
-   * 失败路径 / claude 无 result 消息时可能为 undefined。
-   * task-06：adapter 解析 complete 事件 metadata.stats 收集。
-   */
-  stats?: Record<string, unknown>;
-}
-
 // ── 内部常量 & 辅助函数 ───────────────────────────────────────────────────────
-
-/**
- * task-07：从 lease payload 鸭子类型 Record 安全取 string / number 字段（多键名兜底）。
- *
- * init lease 的 platform_config 由 backend task-06 下发，字段名 camelCase / snake_case
- * 兼容；直接 `(typeof x === 'string' && x)` 会产出 `string | false` 污染类型，本辅助函数
- * 收敛为 `string | undefined` / `number | undefined`，避免 `||` 回退链的类型 widen。
- */
-function pickStr(
-  obj: Record<string, unknown>,
-  ...keys: string[]
-): string | undefined {
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === 'string' && v) return v;
-  }
-  return undefined;
-}
-
-function pickNum(
-  obj: Record<string, unknown>,
-  ...keys: string[]
-): number | undefined {
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-  }
-  return undefined;
-}
-
-/**
- * task-09：从 lease ctx 鸭子类型读 string[] 字段（camelCase + snake_case 兼容）。
- *
- * claim payload 经 context.py（task-07）透传 profile 字段（mcp_refs / skill_refs /
- * effective_allowed_roots），types.ts LeaseCtx 未声明这些字段，用 duck-typing 读取
- * （与 stage_meta / mode / platformConfig 等既有字段同模式）。非数组 / 空 → undefined。
- *
- * 纯函数，不修改入参。
- */
-function pickStrList(
-  ctx: LeaseCtx,
-  camel: string,
-  snake: string,
-): string[] | undefined {
-  const obj = ctx as unknown as Record<string, unknown>;
-  const raw = obj[camel] ?? obj[snake];
-  if (!Array.isArray(raw)) return undefined;
-  const arr = raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
-  return arr.length > 0 ? arr : undefined;
-}
-
-/**
- * task-09（D-013）：物理沙箱 ∩ profile effective 下推值（只能收紧）。
- *
- * effective 已是 daemon.allowed_roots ∩ agent.overlay（backend 算好），此处再 ∩ 物理
- * 上限是防御性兜底——backend 误算把 overlay 放宽出 daemon 范围时，交集仍不超物理。
- * physical 缺省（无 policyCache + 无 config.allowed_roots）→ 直接用 effective（已是
- * 可得的最严上界，无法与未知物理值取交集，保持收紧语义）。
- *
- * 结果 = physical 中同时出现在 effective 的路径（真交集，result ⊆ physical 且 ⊆ effective）。
- *
- * 纯函数，不修改入参。
- */
-function intersectAllowedRoots(
-  physical: string[] | undefined,
-  effective: string[],
-): string[] {
-  if (!physical || physical.length === 0) return effective;
-  const effSet = new Set(effective);
-  return physical.filter((p) => effSet.has(p));
-}
 
 /**
  * task-09（design §9）：link 全量 platform skills 后按 profile.skillRefs 子集裁剪。
@@ -2913,517 +1654,6 @@ async function pruneSkillsToSubset(
       );
     }
   }
-}
-
-const EMPTY_DIFF = {
-  patch: '',
-  files_changed: 0,
-  insertions: 0,
-  deletions: 0,
-  stats: '',
-} as const;
-
-// ── task-10 B2/B3：超时优先级链 + spawn 级失败重试（纯函数）─────────────────
-
-/** resolveMaxRetries 硬上限（防止 config 误配大值导致无限重试拖垮 daemon）。 */
-const MAX_RETRIES_HARD_CAP = 3;
-
-/** 兜底默认超时秒数（ctx + config 都未配时）。 */
-const DEFAULT_TIMEOUT_FALLBACK = 1800;
-
-/** 兜底默认重试次数（config 未配时）。 */
-const DEFAULT_MAX_RETRIES_FALLBACK = 1;
-
-/**
- * spawn 级失败关键字（stderr / error 命中即判定为 spawn 级，可重试）。
- * claude 业务非零退出（无这些关键字）→ 保守不重试（R-10 side-effect 优先）。
- */
-const SPAWN_FAILURE_PATTERNS = /spawn ENOENT|segfault|oom|killed/i;
-
-/**
- * _spawnAndStream 单次尝试的返回结构（task-10 B3：新增 businessError 区分业务错误）。
- */
-interface SpawnAttemptResult {
-  status: 'completed' | 'failed' | 'timeout' | 'cancelled';
-  exitCode: number;
-  error?: string;
-  stats?: Record<string, unknown>;
-  /** claude 业务报错（result is_error=true）置 true，retry 判定优先看此字段。 */
-  businessError?: boolean;
-}
-
-/**
- * 解析执行超时秒数（task-10 B2 优先级链）。
- *
- * 从高到低：ctx.timeoutSeconds > ctx.timeout（兼容旧字段）> config.default_timeout_seconds > 1800。
- *
- * 特殊语义：
- *   - timeoutSeconds/timeout = -1（负数）→ 返回 0（显式不限，看门狗不启动）
- *   - timeoutSeconds/timeout = 0 → 跳过（>0 判断），走 config/兜底
- *
- * 纯函数，不修改入参。
- */
-export function resolveTimeout(ctx: LeaseCtx, config?: DaemonConfig): number {
-  // 显式 -1（timeoutSeconds 或兼容 timeout）→ 不限
-  const explicit = ctx.timeoutSeconds ?? ctx.timeout;
-  if (typeof explicit === 'number' && explicit < 0) return 0;
-  // 优先级 1：ctx.timeoutSeconds（lease.metadata 透传）
-  if (typeof ctx.timeoutSeconds === 'number' && ctx.timeoutSeconds > 0) return ctx.timeoutSeconds;
-  // 优先级 1b：ctx.timeout（兼容旧字段，既有测试 makeLease({ timeout }) 仍生效）
-  if (typeof ctx.timeout === 'number' && ctx.timeout > 0) return ctx.timeout;
-  // 优先级 2：config.default_timeout_seconds
-  const cfg = config?.default_timeout_seconds;
-  if (typeof cfg === 'number' && cfg > 0) return cfg;
-  // 优先级 3：兜底 1800
-  return DEFAULT_TIMEOUT_FALLBACK;
-}
-
-/**
- * 解析最大重试次数（task-10 B3）。
- *
- * config.max_retries 缺失/非法 → 兜底 1；> 3 → 截断 3（log warn）；0 → 禁用重试。
- *
- * 纯函数，不修改入参。
- */
-export function resolveMaxRetries(config?: DaemonConfig): number {
-  const cfg = config?.max_retries;
-  if (typeof cfg !== 'number' || cfg < 0 || !Number.isFinite(cfg)) {
-    return DEFAULT_MAX_RETRIES_FALLBACK;
-  }
-  if (cfg > MAX_RETRIES_HARD_CAP) {
-    console.warn(
-      `task_runner: max_retries_truncated value=${cfg} cap=${MAX_RETRIES_HARD_CAP}`,
-    );
-    return MAX_RETRIES_HARD_CAP;
-  }
-  return cfg;
-}
-
-/**
- * 判定单次 spawn 尝试结果是否为「spawn 级失败」（可重试）。
- *
- * 可重试（true）：timeout / spawn ENOENT / OOM / segfault / killed。
- * 不重试（false）：cancelled / businessError（claude is_error）/ completed /
- *   业务非零退出（无 spawn 关键字，保守不重试，R-10 side-effect 优先）。
- *
- * 纯函数，不修改入参。
- */
-export function isSpawnLevelFailure(
-  r: { status: string; exitCode: number; error?: string; businessError?: boolean },
-): boolean {
-  // 业务错误（claude result is_error=true）→ 不重试（最优先，避免与 failed 分支歧义）
-  if (r.businessError) return false;
-  if (r.status === 'timeout') return true;
-  if (r.status === 'cancelled') return false;
-  if (r.status === 'completed') return false;
-  if (r.status === 'failed') {
-    // 仅 spawn 级关键字命中才重试；业务非零退出（如 claude 逻辑错误返回非 0）不重试
-    return SPAWN_FAILURE_PATTERNS.test(r.error ?? '');
-  }
-  return false;
-}
-
-/**
- * task-02 (2026-07-07-daemon-skill-execution): 构造 skill 调用 prompt。
- *
- * stage_dispatch 模式时，claude 不再收完整的 stage prompt（违反 D-005），
- * 改为简短 skill 指令 —— claude 启动后自动加载对应 skill 跑流程。
- *
- * 格式（设计 §5.1.1）：
- *   /{skill_name} --change {change_id} --stage {stage}
- *
- * stageMeta 缺 skill_name → 返回空串（无可用的 skill 指令）。
- * change_id / stage 缺 → 省略对应参数（不阻塞 skill 启动）。
- *
- * 纯函数，不修改入参。
- */
-export function buildSkillPrompt(
-  stageMeta?: Record<string, unknown>,
-): string {
-  if (!stageMeta) return '';
-  const skillName = typeof stageMeta.skill_name === 'string' && stageMeta.skill_name
-    ? stageMeta.skill_name
-    : '';
-  const changeId = typeof stageMeta.change_id === 'string' && stageMeta.change_id
-    ? stageMeta.change_id
-    : '';
-  const stage = typeof stageMeta.stage === 'string' && stageMeta.stage
-    ? stageMeta.stage
-    : '';
-  if (!skillName) return '';
-
-  let prompt = `/${skillName}`;
-  if (changeId) prompt += ` --change ${changeId}`;
-  if (stage) prompt += ` --stage ${stage}`;
-  return prompt;
-}
-
-/**
- * task-08（NFR-01 / design §5.1.1 gap 2）：检测 claude 是否成功调用了 skill。
- *
- * stage 投递（stageMeta.skill_name 非空）时，stage lease 收尾调用：
- *   - 输出含明确失败标记（skill not found / No skill named / unknown skill /
- *     skill 'x' not found）→ false（应标 failed）
- *   - 输出含 skill 调用痕迹（/<skill_name> 或 skill 名字符串）→ true
- *   - 灰区（无失败标记也无 skill 痕迹）→ 默认 true（不误杀，第①层 prompt 强指令是主保障）
- *
- * 非 stage lease（stageMeta 空 / 无 skill_name）→ true（不检测，零回归）。
- *
- * 纯函数，便于单测。
- */
-export function detectSkillInvoked(
-  output: string,
-  stageMeta?: Record<string, unknown>,
-): boolean {
-  if (!stageMeta) return true;
-  const skillName = typeof stageMeta.skill_name === 'string' ? stageMeta.skill_name : '';
-  if (!skillName) return true; // 无 skill_name 不检测
-  const lower = output.toLowerCase();
-  // 明确失败标记
-  const failMarkers = [
-    'skill not found',
-    'no skill named',
-    'unknown skill',
-    `skill '${skillName}' not found`,
-    `skill "${skillName}" not found`,
-  ];
-  if (failMarkers.some((m) => lower.includes(m.toLowerCase()))) return false;
-  // skill 调用痕迹
-  if (lower.includes(`/${skillName.toLowerCase()}`) || lower.includes(skillName.toLowerCase())) {
-    return true;
-  }
-  // 灰区 → 不误杀
-  return true;
-}
-
-// ── task-16 (2026-06-24-runtime-usage-stats)：batch usage 兜底合并 ───────────
-
-/**
- * ndjson adapter (task-03) 的 `getUsage()` 在 batch 路径原先无任何调用方：
- * stream-json 的 cache 走 `extractResultStats` 注入 complete 事件 metadata.stats
- * （→ lastStats → TaskResult.stats，cache 已就绪）；但 ndjson（opencode）**不产
- * complete stats 事件**，只通过 `getUsage()` 暴露 usage，导致 batch 路径
- * TaskResult.usage / cache 在 ndjson 下完全丢失（step9 符号影响面检查发现）。
- *
- * 本函数鸭子类型调用 `adapter.getUsage()`（仅 ndjson 实现；stream-json 用
- * extractResultStats，无 getUsage → 跳过，零回归），把 adapter 累积的 usage
- * 合并进 lastStats：
- *   - lastStats 已有的字段不覆盖（stream-json/codex 产 stats 时优先）。
- *   - lastStats 为空 → 整体用 getUsage()。
- *   - lastStats 缺 cache_read_tokens / cache_creation_tokens → 从 getUsage() 补。
- *   - getUsage() 缺失/抛错 → 原样返回 lastStats（不阻塞）。
- *
- * typeof === 'number' 守卫：非数字（含 undefined/NaN）不写，0 值合法不丢。
- *
- * @param adapter   ProtocolAdapter（鸭子类型，可能无 getUsage）
- * @param lastStats complete 事件 metadata.stats（可能 undefined）
- * @returns 合并后的 stats（可能 undefined —— 两处都无数据时）
- */
-export function mergeAdapterUsage(
-  adapter: ProtocolAdapter,
-  lastStats: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  // 鸭子类型：仅 ndjson 实现 getUsage；stream-json 无此方法 → 直接返回原 stats。
-  const getUsage = (adapter as { getUsage?: () => Record<string, unknown> }).getUsage;
-  if (typeof getUsage !== 'function') {
-    return lastStats;
-  }
-  let adapterUsage: Record<string, unknown> | undefined;
-  try {
-    adapterUsage = getUsage.call(adapter);
-  } catch {
-    // adapter getUsage 异常不阻塞主流程（对齐 _handleLine 单行容错策略）。
-    return lastStats;
-  }
-  if (!adapterUsage || typeof adapterUsage !== 'object') {
-    return lastStats;
-  }
-  // lastStats 为空 → 整体用 adapterUsage；否则合并缺失字段（lastStats 优先）。
-  const merged: Record<string, unknown> = lastStats
-    ? { ...lastStats }
-    : {};
-  // input/output / cache 两维 / num_turns / total_cost_usd 等所有 number 字段
-  // 逐个补缺（lastStats 已有的不覆盖）。
-  const FIELDS = [
-    'input_tokens',
-    'output_tokens',
-    'cache_read_tokens',
-    'cache_creation_tokens',
-    'num_turns',
-    'total_cost_usd',
-  ];
-  for (const key of FIELDS) {
-    if (merged[key] === undefined) {
-      const v = adapterUsage[key];
-      if (typeof v === 'number') {
-        merged[key] = v;
-      }
-    }
-  }
-  // 两处都无任何业务字段 → 返回 undefined（避免空对象污染下游）。
-  if (Object.keys(merged).length === 0) {
-    return lastStats;
-  }
-  return merged;
-}
-
-// ── task-07（2026-08-29-usage-by-provider-model）：batch stats 增补 model/api_requests ──
-
-/**
- * task-07（FR-01-4 / FR-02-2 / design §3.2）：batch 终态 stats 增补两字段——
- *   - model：lease ProviderConfig.model，空则 "unknown"（backend complete_lease
- *     据此落 agent_run_model_usage 单行明细 + run.model 填充，design §4.1）；
- *   - api_requests：adapter 的 message_start 计数（batch API 调用次数口径，
- *     claude CLI 2.1.216 实测 == num_turns，design §2）。
- *
- * 鸭子类型门禁（对齐 resetAccumulator / getUsage 先例，不改 ProtocolAdapter 契约）：
- * 仅 StreamJsonAdapter 暴露 messageStartCount getter；ndjson / opencode 等其它
- * provider 无 getter → **两字段都不加**（stats 形态不变，老链路零回归）。
- *
- * stats 为 undefined（cancelled / spawn 失败等无 complete stats 的路径）→ 原样
- * 返回 undefined，不为两字段凭空造 stats 对象（_finish 对 undefined 语义敏感）。
- *
- * 不修改入参 stats（浅拷贝后加键）——lastStats 同一引用还被 budget onStats 回调
- * 持有，原地写键会污染外部观察快照。
- *
- * @param stats   mergeAdapterUsage 合并后的终态 stats（可能 undefined）
- * @param ctx     lease 上下文（provider_config.model 取模型名）
- * @param adapter ProtocolAdapter（鸭子类型读 messageStartCount）
- * @returns 增补后的 stats 新对象（或原 undefined）
- */
-export function attachBatchModelStats(
-  stats: Record<string, unknown> | undefined,
-  ctx: LeaseCtx,
-  adapter: ProtocolAdapter,
-): Record<string, unknown> | undefined {
-  const count = (adapter as { messageStartCount?: unknown }).messageStartCount;
-  if (typeof count !== 'number' || stats === undefined) {
-    return stats;
-  }
-  return {
-    ...stats,
-    model: ctx.provider_config?.model || 'unknown',
-    api_requests: count,
-  };
-}
-
-// ── task-08（D-006 / D-009）：budget 累计 + 软切断检查点 ──────────────────────
-
-/**
- * task-08（D-009）：从 stats 提取 budget 累计口径 token 数。
- *
- * 口径**严格** = ``input_tokens + output_tokens``（**不含** cache_read /
- * cache_creation）。守卫：``undefined`` / ``NaN`` / 非数字均按 0，避免脏 stats
- * 误触发软切断。0 值合法（不丢）。
- *
- * @param stats adapter / complete 事件的 metadata.stats（可能 undefined）
- * @returns input_tokens + output_tokens 的有限数和
- */
-export function extractBudgetUsageTokens(
-  stats: Record<string, unknown> | undefined,
-): number {
-  if (!stats) return 0;
-  const inp =
-    typeof stats.input_tokens === 'number' && Number.isFinite(stats.input_tokens)
-      ? stats.input_tokens
-      : 0;
-  const out =
-    typeof stats.output_tokens === 'number' && Number.isFinite(stats.output_tokens)
-      ? stats.output_tokens
-      : 0;
-  return inp + out;
-}
-
-/**
- * task-08（D-009）：从 stats 拆出 budget 事件回传用的 usage 快照（仅 input+output，
- * 不含 cache，对齐累计口径）。
- */
-function pickBudgetUsageSnapshot(
-  stats: Record<string, unknown> | undefined,
-): { input_tokens: number; output_tokens: number } {
-  if (!stats) return { input_tokens: 0, output_tokens: 0 };
-  const inp =
-    typeof stats.input_tokens === 'number' && Number.isFinite(stats.input_tokens)
-      ? stats.input_tokens
-      : 0;
-  const out =
-    typeof stats.output_tokens === 'number' && Number.isFinite(stats.output_tokens)
-      ? stats.output_tokens
-      : 0;
-  return { input_tokens: inp, output_tokens: out };
-}
-
-/**
- * 粗判一行是否是 control_request（含 '"control_request"' 字样）。
- * 真正的解析在 adapter.onControl 内（不同协议 JSON 字段略有差异）。
- */
-function _looksLikeControlRequest(line: string): boolean {
-  return line.includes('"control_request"') || line.includes("'control_request'");
-}
-
-// ── 本地终端 echo（quick-chat 实时观察 agent 执行过程）──────────────────────────
-
-/** 单条 echo 最大长度（超长截断，避免大 tool_input 刷屏）。 */
-const ECHO_MAX_LEN = 2000;
-
-/**
- * 把 AgentEvent 渲染成单行文本写入 stdout，供启动 daemon 的本地终端实时观察。
- *
- * 设计要点：
- *   - 用 process.stdout.write 直接写，不走 logger（logger 受 log_level 过滤，
- *     debug 级别默认不显示，违背「随时能看到」的诉求）。
- *   - daemon 是前台进程，stdout 跟着终端或重定向目标走，不污染 daemon.log
- *     （cli.ts 的日志文件目前没有重定向 stdout，echo 只活在终端）。
- *   - 业务逻辑（outputParts 累积 / submitMessages）与 echo 解耦，互不影响。
- *   - 单条消息超长截断到 ECHO_MAX_LEN，防止超长 tool_input 刷屏。
- *
- * 不是 TaskRunner 成员方法：纯函数 + leaseId 入参，便于单测独立验证。
- */
-/**
- * 把 AgentEvent 渲染成单行文本（不含换行符）。
- *
- * ql-20260616-003：拆出纯函数 render，echo 和 terminal observer 写日志复用
- * 同一份渲染逻辑，保证本地 stdout 和观察日志文件内容字节一致。
- *
- * 渲染规则：
- *   - 前缀 `[task <leaseId前8位>]`，长 UUID 截短避免刷屏
- *   - text         → 直接拼 content（带可选 [status]）
- *   - tool_use     → [tool_use <name>] <input>
- *   - tool_result  → [tool_result <name>] <output>
- *   - error        → [<level>] <content>
- *   - complete     → [complete] usage=<json>（可选）
- *   - 单条超 ECHO_MAX_LEN 截断 + 标记
- */
-export function renderAgentEvent(leaseId: string, ev: AgentEvent): string {
-  const prefix = `[task ${shortLeaseId(leaseId)}]`;
-  let line: string;
-  switch (ev.type) {
-    case 'text': {
-      const status = typeof ev.metadata?.status === 'string' ? ev.metadata.status : '';
-      line = status ? `${prefix} [${status}] ${ev.content}` : `${prefix} ${ev.content}`;
-      break;
-    }
-    case 'tool_use': {
-      const name = typeof ev.metadata?.tool_name === 'string' ? ev.metadata.tool_name : '<unknown>';
-      const input = ev.content || '';
-      line = `${prefix} [tool_use ${name}] ${input}`;
-      break;
-    }
-    case 'tool_result': {
-      const name = typeof ev.metadata?.tool_name === 'string' ? ev.metadata.tool_name : '';
-      line = `${prefix} [tool_result${name ? ` ${name}` : ''}] ${ev.content}`;
-      break;
-    }
-    case 'error': {
-      const level = typeof ev.metadata?.level === 'string' ? ev.metadata.level : 'error';
-      line = `${prefix} [${level}] ${ev.content}`;
-      break;
-    }
-    case 'complete': {
-      const usage = ev.metadata?.usage;
-      const usageStr = usage && typeof usage === 'object'
-        ? ` usage=${JSON.stringify(usage)}`
-        : '';
-      line = `${prefix} [complete]${usageStr}`;
-      break;
-    }
-    default: {
-      line = `${prefix} [${(ev as { type: string }).type}] ${ev.content}`;
-    }
-  }
-  if (line.length > ECHO_MAX_LEN) {
-    line = line.slice(0, ECHO_MAX_LEN) + '…<truncated>';
-  }
-  return line;
-}
-
-/** leaseId 取短显示（前 8 位），用于 echo 前缀，避免长 UUID 刷屏。 */
-function shortLeaseId(leaseId: string): string {
-  return leaseId.length > 12 ? leaseId.slice(0, 8) : leaseId;
-}
-
-/**
- * 渲染任务开始/结束边界行（不含换行符）。ql-20260616-003 拆出纯函数。
- *
- * start：`[task xxx] spawn: <cmd> <args...>`
- * end：  `[task xxx] done: status=<status> exit=<exitCode> error=<error>`
- */
-export function renderTaskBoundary(
-  leaseId: string,
-  phase: 'start' | 'end',
-  kv: { cmdPath?: string; args?: string[]; status?: string; exitCode?: number; error?: string },
-): string {
-  const prefix = `[task ${shortLeaseId(leaseId)}]`;
-  if (phase === 'start') {
-    const argStr = (kv.args ?? []).join(' ');
-    const cmd = kv.cmdPath ?? '';
-    return `${prefix} spawn: ${cmd} ${argStr}`;
-  }
-  const parts = [`status=${kv.status ?? '?'}`, `exit=${kv.exitCode ?? '?'}`];
-  if (kv.error) {
-    const e = kv.error.length > ECHO_MAX_LEN ? kv.error.slice(0, ECHO_MAX_LEN) + '…<truncated>' : kv.error;
-    parts.push(`error=${e}`);
-  }
-  return `${prefix} done: ${parts.join(' ')}`;
-}
-
-/**
- * 任务边界写入 daemon 本地 stdout。包装 try/catch。
- */
-export function echoTaskBoundary(
-  leaseId: string,
-  phase: 'start' | 'end',
-  kv: { cmdPath?: string; args?: string[]; status?: string; exitCode?: number; error?: string },
-): void {
-  try {
-    process.stdout.write(renderTaskBoundary(leaseId, phase, kv) + '\n');
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * 粗判一行是否是 claude stream-json 的 result 事件。
- *
- * ql-20260618-003：之前用 `line.includes('"result"')` 兜底太宽，会误命中
- * codex/json-rpc 的 response（`{"id":2,"result":{"thread":...}}` 也含 "result"
- * key），导致 thread/start response 被误判为终结行 → 提前 stdin.end() →
- * 后续 turn/start 写触发 ERR_STREAM_WRITE_AFTER_END。
- *
- * 修复：用正则只匹配 `"type":"result"`（容忍冒号两侧空格）。codex 的
- * turn/completed 通过 _looksLikeTurnCompleted 单独检测。
- */
-function _looksLikeResult(line: string): boolean {
-  return /"type"\s*:\s*"result"/.test(line);
-}
-
-/**
- * ql-20260618-003：检测 codex/json-rpc 的 turn/completed 通知。
- *
- * codex 是被动 server，单 turn 完成后不会自动退出，需要 daemon 主动关闭
- * stdin 让其收尾。turn/completed notification 标志当前 turn 结束（含
- * status="completed" / "failed" / "cancelled"），是单次 lease 的安全收尾点。
- */
-function _looksLikeTurnCompleted(line: string): boolean {
-  return /"method"\s*:\s*"turn\/completed"/.test(line);
-}
-
-/**
- * 从一行 JSON 文本里提取 session_id（若存在）。
- * 失败返回空串。
- */
-function _extractSessionId(line: string): string {
-  // 优先 JSON.parse
-  try {
-    const obj = JSON.parse(line) as { session_id?: unknown; sessionId?: unknown };
-    if (typeof obj.session_id === 'string') return obj.session_id;
-    if (typeof obj.sessionId === 'string') return obj.sessionId;
-  } catch {
-    // 非 JSON 行，正则兜底
-    const m = /"session_id"\s*:\s*"([^"]+)"/.exec(line);
-    if (m && m[1]) return m[1];
-  }
-  return '';
 }
 
 // ── task-09 tar 工具（手工 ustar）已迁移到 ./spec-sync.ts utility
