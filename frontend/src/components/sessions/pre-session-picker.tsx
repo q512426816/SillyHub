@@ -35,17 +35,21 @@ import { Tag } from "antd";
 
 import {
   PROVIDER_META,
+  SESSION_SUPPORTED_PROVIDERS,
   type DaemonMachineRead,
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 
 /**
- * 支持交互式会话的引擎白名单（与 new-session-form 同源约束，D-107）；
- * 2026-09-04-provider-pi-onboarding task-05（B-02 / FR-04）：加 pi；
- * 2026-09-08-cursor-interactive-session task-08（FR-01 / FR-04）：加 cursor。
+ * 支持交互式会话的引擎白名单（ql-20260908-007 起单一源 lib/daemon/
+ * runtimes.ts，与 session-list-panel 智能体筛选下拉 / runtime 悬浮助手
+ * 共用；此处建 Set 供 .has 快查）；引擎变迁史见源注释（pi 2026-09-04 /
+ * cursor 2026-09-08）。
  */
-const SESSION_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi", "cursor"]);
+const SESSION_SUPPORTED_PROVIDER_SET = new Set<string>(
+  SESSION_SUPPORTED_PROVIDERS,
+);
 
 export interface PreSessionPickerProps {
   /**
@@ -120,13 +124,13 @@ export function PreSessionPicker({
     [onlineMachines, machineId],
   );
 
-  // ② 该机器可会话智能体：provider∈{claude,codex,pi} 且在线。
+  // ② 该机器可会话智能体：provider∈SESSION_SUPPORTED_PROVIDERS 且在线。
   const supportedRuntimes = useMemo(
     () =>
       (machine?.runtimes ?? []).filter(
         (r) =>
           r.status === "online" &&
-          SESSION_SUPPORTED_PROVIDERS.has(r.provider ?? ""),
+          SESSION_SUPPORTED_PROVIDER_SET.has(r.provider ?? ""),
       ),
     [machine],
   );

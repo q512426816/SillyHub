@@ -116,9 +116,15 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/daemon")>();
   return {
     maxLogTimestamp: actual.maxLogTimestamp,
+    // ql-20260908-007：智能体下拉选项单一源常量用真实实现（纯数据无副作用；
+    // SESSION_SUPPORTED_PROVIDERS 供 pre-session-picker 白名单）。
+    SESSION_ENGINE_OPTIONS: actual.SESSION_ENGINE_OPTIONS,
+    SESSION_SUPPORTED_PROVIDERS: actual.SESSION_SUPPORTED_PROVIDERS,
     PROVIDER_META: {
       claude: { label: "Claude Code", icon: "🟣", color: "" },
       codex: { label: "Codex", icon: "🟢", color: "" },
+      pi: { label: "Pi", icon: "🩷", color: "" },
+      cursor: { label: "Cursor", icon: "🟡", color: "" },
     },
     // task-07：task-05 树形态一次拉取常量（原 18 红基线根因即缺它）。
     AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,

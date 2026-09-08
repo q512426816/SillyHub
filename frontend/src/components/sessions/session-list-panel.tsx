@@ -54,10 +54,11 @@
  *     - 状态下拉（X-11 保留：组内过滤 = 视图过滤）
  *     - 两层筛选下拉（FR-02 / D-107；ql-20260908-005 胶囊 tab → 下拉，机器
  *       多时胶囊换行撑爆左栏）：第一层机器（含「全部机器」清空，可搜索），
- *       选中后出第二层智能体（Claude Code/Codex，含「全部智能体」）；纯视图
- *       过滤不进数据层；筛选态隐藏机器小节标题；筛选变化重置展开态除当前组（R-05）；
- *       筛选值 localStorage 记忆（刷新恢复用户选择），陈旧机器 id 待机器列表
- *       到位后兜底重置
+ *       选中后出第二层智能体（SESSION_ENGINE_OPTIONS 单一源全量引擎
+ *       claude/codex/pi/cursor，ql-20260908-007 补齐，含「全部智能体」）；
+ *       纯视图过滤不进数据层；筛选态隐藏机器小节标题；筛选变化重置展开态
+ *       除当前组（R-05）；筛选值 localStorage 记忆（刷新恢复用户选择），
+ *       陈旧机器 id 待机器列表到位后兜底重置
  *   树：
  *     - 工作区分组手风琴：组头 = 📂名称 + 会话数 + 「＋」新建 + 多选入口 +
  *       展开箭头；0 会话组仍显示（计数 0）；「非工作区」（workspace_id null）
@@ -129,6 +130,7 @@ import {
   AGENT_SESSIONS_TREE_FETCH_LIMIT,
   listAgentSessions,
   listGroupChats,
+  SESSION_ENGINE_OPTIONS,
   type AgentSessionListResponse,
   type AgentSessionRead,
   type AgentSessionStatus,
@@ -198,12 +200,12 @@ const STATUS_OPTIONS = [
   { label: "已归档会话", value: "__archived__" },
 ] as const;
 
-/** 第二层智能体下拉选项（D-107：claude/codex 固定两档；ql-20260908-005 起
- * 以 Select 选项形态消费——引擎图标随胶囊 tab 一并退役）。 */
-const AGENT_TABS = [
-  { label: "Claude Code", value: "claude" },
-  { label: "Codex", value: "codex" },
-] as const;
+/**
+ * 第二层智能体下拉选项（D-107）。ql-20260908-007：选项从单一源
+ * SESSION_ENGINE_OPTIONS 派生（claude/codex/pi/cursor 全量支持引擎，
+ * label 取 PROVIDER_META）——原硬编码两档漏 pi/cursor，与实际可选引擎不符。
+ */
+const AGENT_TABS = SESSION_ENGINE_OPTIONS.map((o) => ({ ...o }));
 
 /**
  * ql-20260831-016：Modal.confirm 功能图标（删除/归档/取消归档共用）。

@@ -20,6 +20,7 @@ import {
 } from "@/components/daemon/session-log-assembler";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
+  SESSION_SUPPORTED_PROVIDERS,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonRuntimeRead,
@@ -64,14 +65,16 @@ export function InteractiveSessionChatSection({
   // 2026-09-04-provider-pi-onboarding task-05（B-02 / FR-04）：白名单加 pi——
   // pi_rpc driver 同走 interactive SessionManager，与 claude/codex 同为在线会话引擎。
   // 2026-09-08-cursor-interactive-session task-08（FR-01 / FR-04）：白名单加 cursor。
+  // ql-20260908-007：白名单收敛单一源 SESSION_SUPPORTED_PROVIDERS（lib/daemon/
+  // runtimes.ts，与 session-list-panel 智能体筛选下拉 / pre-session-picker 共用）。
   const onlineProviders = useMemo(() => {
-    const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex", "pi", "cursor"];
+    const supported = SESSION_SUPPORTED_PROVIDERS as readonly string[];
     const list = runtimes
       .filter(
         (r) =>
           r.status === "online" &&
           r.provider &&
-          SUPPORTED_SESSION_PROVIDERS.includes(r.provider),
+          supported.includes(r.provider),
       )
       .map((r) => r.provider!);
     return [...new Set(list)];

@@ -118,7 +118,17 @@ vi.mock("@/lib/daemon", () => ({
   PROVIDER_META: {
     claude: { label: "Claude Code", icon: "🟣", color: "" },
     codex: { label: "Codex", icon: "🟢", color: "" },
+    pi: { label: "Pi", icon: "🩷", color: "" },
+    cursor: { label: "Cursor", icon: "🟡", color: "" },
   },
+  // ql-20260908-007：单一源常量随真实现同值 mock（智能体下拉选项派生用）。
+  SESSION_SUPPORTED_PROVIDERS: ["claude", "codex", "pi", "cursor"],
+  SESSION_ENGINE_OPTIONS: [
+    { value: "claude", label: "Claude Code" },
+    { value: "codex", label: "Codex" },
+    { value: "pi", label: "Pi" },
+    { value: "cursor", label: "Cursor" },
+  ],
   AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
 }));
 
@@ -725,6 +735,36 @@ describe("SessionListPanel 两层筛选下拉", () => {
     await waitFor(() => expect(sessionRows().length).toBe(3));
     expect(document.getElementById("slp-agent")).toBeNull();
     expect(machineSection("machine-1")).not.toBeNull(); // 小节标题恢复
+  });
+
+  it("智能体下拉含全部支持引擎（pi/cursor，单一源 ql-20260908-007）：pi/cursor 会话可筛选", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", runtime_id: "rt-m1", provider: "claude", title: "机器一Claude" }),
+        makeSession({ id: "s-4", runtime_id: "rt-m1", provider: "pi", title: "机器一Pi" }),
+        makeSession({ id: "s-5", runtime_id: "rt-m1", provider: "cursor", title: "机器一Cursor" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel selectedSessionId="s-1" />);
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+
+    // 选 machine-1 → 三条全在；选 Pi → 仅 pi 条目
+    await chooseAntdOptionByText("slp-machine", "machine-1");
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+    await chooseAntdOptionByText("slp-agent", "Pi");
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(
+      screen.getByRole("button", { name: "会话 机器一Pi" }),
+    ).toBeInTheDocument();
+
+    // 切 Cursor → 仅 cursor 条目
+    await chooseAntdOptionByText("slp-agent", "Cursor");
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(
+      screen.getByRole("button", { name: "会话 机器一Cursor" }),
+    ).toBeInTheDocument();
   });
 
   it("R-05：筛选切换重置展开态除当前组（selectedSessionId 所在组保持展开）", async () => {

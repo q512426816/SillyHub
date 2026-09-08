@@ -163,6 +163,22 @@ export async function triggerDaemonSelfUpdate(
 
 /* ---------- Provider display metadata ---------- */
 
+/**
+ * 支持交互式会话的引擎白名单（有序数组，单一源）：会话左栏智能体筛选下拉
+ * （session-list-panel）、预会话选择器（pre-session-picker）、runtime 悬浮
+ * 助手（runtime-session-helpers）三处共用——此前各自手写重复，2026-09-08
+ * 收敛（ql-20260908-007）。与后端 InteractiveProviderLiteral / daemon
+ * VALID_PROVIDERS 同值；新增引擎时四处一起改（此处 + 两端白名单）。
+ * 2026-09-04-provider-pi-onboarding task-05：加 pi；
+ * 2026-09-08-cursor-interactive-session task-08：加 cursor。
+ */
+export const SESSION_SUPPORTED_PROVIDERS = [
+  "claude",
+  "codex",
+  "pi",
+  "cursor",
+] as const;
+
 /** Provider display name, icon emoji, and Tailwind color classes. */
 export const PROVIDER_META: Record<
   string,
@@ -181,6 +197,11 @@ export const PROVIDER_META: Record<
   kiro: { label: "Kiro", icon: "🟩", color: "bg-emerald-100 text-emerald-800" },
   antigravity: { label: "Antigravity", icon: "⚫", color: "bg-slate-100 text-slate-800" },
 };
+
+/** 会话引擎下拉选项（value+label，label 取 PROVIDER_META 单源）。 */
+export const SESSION_ENGINE_OPTIONS = SESSION_SUPPORTED_PROVIDERS.map(
+  (p) => ({ value: p, label: PROVIDER_META[p]?.label ?? p }),
+);
 
 /** Frontend-known minimum version requirements (UI warning only). */
 export const MIN_VERSIONS: Record<string, string> = {

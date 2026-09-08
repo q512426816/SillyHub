@@ -174,7 +174,18 @@ vi.mock("@/lib/daemon", () => ({
   PROVIDER_META: {
     claude: { label: "Claude Code", icon: "🟣", color: "" },
     codex: { label: "Codex", icon: "🟢", color: "" },
+    pi: { label: "Pi", icon: "🩷", color: "" },
+    cursor: { label: "Cursor", icon: "🟡", color: "" },
   },
+  // ql-20260908-007：单一源常量随真实现同值 mock（智能体下拉选项派生用；
+  // pre-session-picker 白名单同源，缺省会变空 Set 静默筛掉全部引擎）。
+  SESSION_SUPPORTED_PROVIDERS: ["claude", "codex", "pi", "cursor"],
+  SESSION_ENGINE_OPTIONS: [
+    { value: "claude", label: "Claude Code" },
+    { value: "codex", label: "Codex" },
+    { value: "pi", label: "Pi" },
+    { value: "cursor", label: "Cursor" },
+  ],
   // task-05：SessionListPanel 树形态消费的一次拉取上限常量。
   AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
   listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
