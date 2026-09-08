@@ -1147,11 +1147,7 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
     await selectDefaultSession();
     await waitFor(() => expect(handlers.onLog).toBeTruthy());
     // 经 props 链无直接访问点——以 input 上传路径 mock 验证：上传 API 成功后
-    // chips 出现且发送带 ids。此处用 fetch mock 上传一张 1x1 png。
-    const png = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-      "base64",
-    );
+    // chips 出现且发送带 ids。fetch 拦截 /session-attachments 回固定 201 响应。
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: unknown) => {
       const url = String(input);
       if (url.includes("/session-attachments")) {

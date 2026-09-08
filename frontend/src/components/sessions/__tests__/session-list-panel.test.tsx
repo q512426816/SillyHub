@@ -420,20 +420,6 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
   });
 }
 
-/** 点引擎胶囊 tab（change 分支；chips 里也有引擎名，须在 .ant-segmented 内锚定）。 */
-function clickEngineTab(label: string) {
-  const seg = document.querySelector(".ant-segmented");
-  if (!seg) throw new Error(".ant-segmented not found");
-  const item = [...seg.querySelectorAll(".ant-segmented-item")].find(
-    (el) => el.textContent?.trim() === label,
-  );
-  if (!item) throw new Error(`engine tab "${label}" not found`);
-  fireEvent.click(item);
-  // Segmented 的 radio input 在 item 内，双保险点 label。
-  const labelEl = item.querySelector("label") ?? item;
-  fireEvent.click(labelEl);
-}
-
 /** 当前渲染的会话行（树内/平铺均为 role=button name=会话 …）。 */
 function sessionRows(): HTMLElement[] {
   return screen.queryAllByRole("button", { name: /^会话 / });
@@ -2737,7 +2723,8 @@ describe("SessionListPanel 群聊分区折叠（quick）", () => {
     mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
     renderPanel(<SessionListPanel onSelectGroup={vi.fn()} />);
 
-    const row = await screen.findByRole("button", {
+    // 等群行渲染出来（仅作锚点等待，后续断言经 query 重查不取引用）。
+    await screen.findByRole("button", {
       name: "群聊 前端攻坚小分队",
     });
     const header = screen.getByLabelText("群聊分区头");

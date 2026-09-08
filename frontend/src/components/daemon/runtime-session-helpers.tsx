@@ -25,7 +25,6 @@ import {
   type AgentSessionStatus,
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
-import { cn } from "@/lib/utils";
 import { getProviderCaps } from "@/lib/provider-caps";
 
 export function shortId(id: string): string {
