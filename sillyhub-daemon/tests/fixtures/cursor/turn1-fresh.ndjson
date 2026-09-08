@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"C:\\Users\\qinyi\\AppData\\Local\\Temp\\cursor-task01","session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"My secret code is Zebra-42. Remember it for later. Just reply: OK."}]},"session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f"}
+{"type":"thinking","subtype":"delta","text":"I'll store the secret","session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f","timestamp_ms":1788849782744}
+{"type":"thinking","subtype":"delta","text":" code Zebra-42 and reply","session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f","timestamp_ms":1788849783516}
+{"type":"thinking","subtype":"delta","text":" OK.","session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f","timestamp_ms":1788849783525}
+{"type":"thinking","subtype":"completed","session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f","timestamp_ms":1788849783525}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"OK."}]},"session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f"}
+{"type":"result","subtype":"success","duration_ms":9364,"duration_api_ms":9364,"is_error":false,"result":"OK.","session_id":"c482aaa1-d2c7-4ec8-816b-6157ef58800f","request_id":"9908bcc6-a0d1-4d56-95bf-a503ef01cf07","usage":{"inputTokens":6578,"outputTokens":78,"cacheReadTokens":8704,"cacheWriteTokens":0}}

@@ -55,6 +55,21 @@ PROVIDER_CAPS: dict[str, dict[str, bool]] = {
         "edit_patch": False,
         "model_select": True,
     },
+    # cursor（2026-09-08-cursor-interactive-session task-05 / design「注册
+    # （providers.ts）」节）：取值依据锚点见 daemon 侧 providers.ts 的
+    # PROVIDER_CAPS docblock cursor 段；thinking=True 为 task-01 实测修正
+    # （顶层 thinking 帧稳定存在且有 fixture，归一化器已映射 delta→thinking；
+    # 值变更只随 daemon 单源三端同步）。
+    "cursor": {
+        "resume": True,
+        "mcp": False,
+        "multimodal": False,
+        "thinking": True,
+        "subagent": False,
+        "permission_dialog": False,
+        "edit_patch": False,
+        "model_select": True,
+    },
 }
 
 # 键序取自镜像表首条目（claude）；8 键齐全与三端一致性由守护测试保证。

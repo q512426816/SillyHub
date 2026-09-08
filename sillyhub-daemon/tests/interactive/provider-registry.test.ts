@@ -23,6 +23,7 @@ import {
 } from '../../src/adapters/index.js';
 import { ClaudeSdkDriver } from '../../src/interactive/claude-sdk-driver.js';
 import { CodexAppServerDriver } from '../../src/interactive/codex-app-server-driver.js';
+import { CursorDriver } from '../../src/interactive/cursor-driver.js';
 import { PiRpcDriver } from '../../src/interactive/pi-rpc-driver.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type { SessionManagerDeps } from '../../src/interactive/types.js';
@@ -37,13 +38,14 @@ import type {
 // ── 编译层断言（tsc / IDE 报错即失败；先例：tests/interactive/driver.test.ts） ──
 
 /**
- * 键集 canary：InteractiveProvider 联合当前恰为 claude|codex|pi。
+ * 键集 canary：InteractiveProvider 联合当前恰为 claude|codex|cursor|pi。
  * 注册表新增 provider 而未更新此字面量 → 此处编译报错，强制同步确认联合扩展
  *（编译层守护：keyof 推导本身不会「漂移」，此 canary 防的是误删键 / 键改名）。
  */
 const _compileTimeKeySet: Record<InteractiveProvider, true> = {
   claude: true,
   codex: true,
+  cursor: true,
   pi: true,
 };
 void _compileTimeKeySet;
@@ -78,8 +80,8 @@ function makeFakeDriver(provider: 'claude' | 'codex'): InteractiveDriver {
 }
 
 describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', () => {
-  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/pi）', () => {
-    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex', 'pi']);
+  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi）', () => {
+    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex', 'cursor', 'pi']);
     // 编译层 canary 字面量与运行时注册表键两视角对齐（同集）。
     expect(Object.keys(_compileTimeKeySet).sort()).toEqual(
       Object.keys(INTERACTIVE_PROVIDERS).sort(),
@@ -112,9 +114,10 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
     }
     // 现值锚点（漂移可见）：PROTOCOL_PROVIDERS 中 claude∈stream_json、codex∈json_rpc、
-    // pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）。
+    // cursor∈stream_json、pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）。
     expect(INTERACTIVE_PROVIDERS.claude?.family).toBe('stream_json');
     expect(INTERACTIVE_PROVIDERS.codex?.family).toBe('json_rpc');
+    expect(INTERACTIVE_PROVIDERS.cursor?.family).toBe('stream_json');
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
@@ -140,7 +143,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     }
   });
 
-  it('5. createDriver 可实例化（mock deps）：claude→ClaudeSdkDriver / codex→CodexAppServerDriver / pi→PiRpcDriver', () => {
+  it('5. createDriver 可实例化（mock deps）：claude→ClaudeSdkDriver / codex→CodexAppServerDriver / cursor→CursorDriver / pi→PiRpcDriver', () => {
     // mock deps：预留占位入参（工厂现状零参构造不消费，传占位验证签名兼容）。
     const mockDeps = { env: { SILLYHUB_TEST: '1' } };
 
@@ -151,6 +154,10 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     const codexDriver = INTERACTIVE_PROVIDERS.codex?.createDriver(mockDeps);
     expect(codexDriver).toBeInstanceOf(CodexAppServerDriver);
     expect(codexDriver?.provider).toBe('codex');
+
+    const cursorDriver = INTERACTIVE_PROVIDERS.cursor?.createDriver(mockDeps);
+    expect(cursorDriver).toBeInstanceOf(CursorDriver);
+    expect(cursorDriver?.provider).toBe('cursor');
 
     // task-04：pi 当前为占位 driver（零参可构造即过；真实 rpc 实现归
     // task-02/06 替换 pi-rpc-driver.ts，本断言不依赖占位内部行为）。

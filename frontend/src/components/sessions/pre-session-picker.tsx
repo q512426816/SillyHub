@@ -42,9 +42,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * 支持交互式会话的引擎白名单（与 new-session-form 同源约束，D-107）；
- * 2026-09-04-provider-pi-onboarding task-05（B-02 / FR-04）：加 pi。
+ * 2026-09-04-provider-pi-onboarding task-05（B-02 / FR-04）：加 pi；
+ * 2026-09-08-cursor-interactive-session task-08（FR-01 / FR-04）：加 cursor。
  */
-const SESSION_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi"]);
+const SESSION_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi", "cursor"]);
 
 export interface PreSessionPickerProps {
   /**

@@ -63,8 +63,9 @@ export function InteractiveSessionChatSection({
   // 在线 interactive provider。
   // 2026-09-04-provider-pi-onboarding task-05（B-02 / FR-04）：白名单加 pi——
   // pi_rpc driver 同走 interactive SessionManager，与 claude/codex 同为在线会话引擎。
+  // 2026-09-08-cursor-interactive-session task-08（FR-01 / FR-04）：白名单加 cursor。
   const onlineProviders = useMemo(() => {
-    const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex", "pi"];
+    const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex", "pi", "cursor"];
     const list = runtimes
       .filter(
         (r) =>

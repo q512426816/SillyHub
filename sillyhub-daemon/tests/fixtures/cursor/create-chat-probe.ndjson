@@ -1,0 +1,12 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"C:\\Users\\qinyi\\AppData\\Local\\Temp\\cursor-task01","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly: pong"}]},"session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69"}
+{"type":"thinking","subtype":"delta","text":"The user requested a","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849891806}
+{"type":"thinking","subtype":"delta","text":" reply of exactly \"pong\".","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849892393}
+{"type":"thinking","subtype":"delta","text":"\n\nThe explicit instruction","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849893037}
+{"type":"thinking","subtype":"delta","text":" to reply with exactly","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849893037}
+{"type":"thinking","subtype":"delta","text":" \"pong\" overrides the","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849893037}
+{"type":"thinking","subtype":"delta","text":" general Chinese response","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849893037}
+{"type":"thinking","subtype":"delta","text":" rule.","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849893037}
+{"type":"thinking","subtype":"completed","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","timestamp_ms":1788849893037}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"pong"}]},"session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69"}
+{"type":"result","subtype":"success","duration_ms":8091,"duration_api_ms":8091,"is_error":false,"result":"pong","session_id":"4567240b-5393-4637-a5ee-f2f1a6f4ee69","request_id":"f8139336-b317-474f-8c37-ac4f1a6d47c5","usage":{"inputTokens":6566,"outputTokens":90,"cacheReadTokens":8704,"cacheWriteTokens":0}}

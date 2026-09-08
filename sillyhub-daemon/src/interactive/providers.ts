@@ -20,6 +20,7 @@ import type { ProtocolType } from '../adapters/index.js';
 import type { InteractiveDriver } from './driver.js';
 import { ClaudeSdkDriver } from './claude-sdk-driver.js';
 import { CodexAppServerDriver } from './codex-app-server-driver.js';
+import { CursorDriver } from './cursor-driver.js';
 import { PiRpcDriver } from './pi-rpc-driver.js';
 
 /** provider 能力矩阵（8 键全 boolean，缺省 false 默认拒绝）。 */
@@ -114,6 +115,20 @@ export interface ProviderCaps {
  *   前端 LCS 回退可用；
  * - model_select=true（原生）：set_model / cycle_model /
  *   get_available_models rpc 全套。
+ *
+ * cursor（2026-09-08-cursor-interactive-session task-05 / design「注册（providers.ts）」节；
+ * 3 项 true 5 项 false——resume / thinking / model_select 已验证，其余五键无通道或未验证，
+ * §6.2 先实现后翻 true）：
+ * - resume=true（原生）：driver `--resume` 通道（D-001@v1）+ CLI 实测，Wave 0 验证 B
+ *   （--resume 记忆连续性）已通过（spike-cursor-frames.md）；
+ * - mcp=false（暂缺）：CLI 无 per-session `--mcp-config`（D-008@v1）；
+ * - multimodal=false（暂缺）：附件 / blocks 无对应 CLI 通道；
+ * - thinking=true（task-01 实测修正）：顶层 thinking 帧稳定存在且有 fixture 样本，
+ *   归一化器已映射 delta→thinking 流式——不以过期任务卡 thinking=false 为准；
+ * - subagent=false（暂缺）：团队派工无对应 CLI 通道；
+ * - permission_dialog=false（暂缺）：审批桥无对应 CLI 通道（D-003@v2）；
+ * - edit_patch=false（暂缺）：structuredPatch 无对应通道；
+ * - model_select=true（原生）：driver `--model` 通道 + CLI 实测。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -142,6 +157,19 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     resume: true,
     mcp: false,
     multimodal: true,
+    thinking: true,
+    subagent: false,
+    permission_dialog: false,
+    edit_patch: false,
+    model_select: true,
+  },
+  // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
+  // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
+  // 归一化器已映射 delta→thinking）。
+  cursor: {
+    resume: true,
+    mcp: false,
+    multimodal: false,
     thinking: true,
     subagent: false,
     permission_dialog: false,
@@ -248,11 +276,11 @@ function capsOf(provider: string): ProviderCaps {
 }
 
 /**
- * interactive provider 注册表（design §5.2；claude / codex / pi 三键——pi 为
- * 2026-09-04-provider-pi-onboarding task-04 接入）。
+ * interactive provider 注册表（design §5.2；claude / codex / cursor / pi 四键——
+ * cursor 为 2026-09-08-cursor-interactive-session task-05 接入）。
  *
  * `satisfies` 手法：不 widen 键类型，`keyof typeof INTERACTIVE_PROVIDERS`
- * 保持 'claude' | 'codex' | 'pi' 字面量联合——InteractiveProvider 由此推导（单源）。
+ * 保持 'claude' | 'codex' | 'cursor' | 'pi' 字面量联合——InteractiveProvider 由此推导（单源）。
  * 新增 provider 在此加条目（caps 同步进上方 PROVIDER_CAPS + backend/frontend
  * 两端镜像），类型系统自动扩展，无需改 driver.ts / types.ts 的联合定义。
  */
@@ -272,6 +300,17 @@ export const INTERACTIVE_PROVIDERS = {
     displayName: 'Codex',
     createDriver: (): InteractiveDriver => new CodexAppServerDriver(),
     caps: capsOf('codex'),
+  },
+  // cursor：family='stream_json' 与批量层 PROVIDER_TO_PROTOCOL 反查一致
+  //（PROTOCOL_PROVIDERS.stream_json 含 cursor，守护测试断言）；displayName='Cursor'；
+  // 返回类型显式标注 InteractiveDriver，切断「注册表 → driver 类 → handle.provider:
+  // InteractiveProvider → keyof 注册表」类型推理环（同 claude 条目注释先例）。
+  cursor: {
+    provider: 'cursor',
+    family: 'stream_json',
+    displayName: 'Cursor',
+    createDriver: (): InteractiveDriver => new CursorDriver(),
+    caps: capsOf('cursor'),
   },
   // pi：family='pi_json' 与批量层 PROVIDER_TO_PROTOCOL 反查一致（守护测试断言）；
   // displayName='PI'；driver 当前为 task-04 占位（零参构造可实例化，契约方法

@@ -73,6 +73,20 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     edit_patch: false,
     model_select: true,
   },
+  // cursor（2026-09-08-cursor-interactive-session task-05 / design「注册（providers.ts）」节）：
+  // 取值依据锚点见 daemon 侧 providers.ts 的 PROVIDER_CAPS docblock cursor 段；
+  // thinking=true 为 task-01 实测修正（顶层 thinking 帧稳定存在且有 fixture，
+  // 归一化器已映射 delta→thinking）；值变更只随 daemon 单源三端同步。
+  cursor: {
+    resume: true,
+    mcp: false,
+    multimodal: false,
+    thinking: true,
+    subagent: false,
+    permission_dialog: false,
+    edit_patch: false,
+    model_select: true,
+  },
 };
 
 /**

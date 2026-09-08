@@ -72,6 +72,10 @@ import { CodexAppServerDriver } from './interactive/codex-app-server-driver.js';
 // 2026-09-04-provider-pi-onboarding task-04：PI rpc driver 装配（当前为占位
 // 实现，契约方法 NotImplemented；真实 rpc 实现归 task-02/06 替换文件）。
 import { PiRpcDriver } from './interactive/pi-rpc-driver.js';
+// 2026-09-08-cursor-interactive-session task-06：CursorDriver 装配（docs/agent-provider-onboarding.md
+// 档B 步骤 10 补充·三处硬编码必改点之一）。_getDriver 走 deps.drivers 注入，descriptor
+// createDriver 工厂不被消费——providers.ts 加键而不改此处则建会话 UnsupportedProviderError。
+import { CursorDriver } from './interactive/cursor-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
 import type { SessionEventForBackend } from './interactive/types.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
@@ -761,6 +765,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // _getDriver 走 deps.drivers 注入，此处是抽象层外的硬编码装配点）。零参构造
   // 与上两者同款；当前为占位实现（契约方法 NotImplemented，task-02/06 替换）。
   const piDriver = new PiRpcDriver();
+  // 2026-09-08-cursor-interactive-session task-06：cursor driver 装配。
+  // _getDriver 走 deps.drivers 注入，descriptor createDriver 工厂不被消费；
+  // 零参构造与 pi/codex 同款（无状态，句柄由 SessionManager 持有）。
+  const cursorDriver = new CursorDriver();
   // gap-8.3（design §11）：interactive session 持久化 + daemon 重启恢复。
   // JsonSessionPersistence 默认写 ~/.sillyhub/daemon/sessions.json；SessionManager
   // 状态变更排队 flush（_scheduleFlush），daemon 重启时 _recoverSessionsOnBoot
@@ -803,8 +811,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // 仍标 driver 必填（task-01 遗留，types.ts 不在本任务 allowed_paths），此处同时
       // 传 driver（=claude driver）满足类型 + drivers registry 覆盖各 provider。
       // 2026-09-04-provider-pi-onboarding task-04：registry 加 pi（design §5.4 B-01）。
+      // 2026-09-08-cursor-interactive-session task-06：registry 加 cursor。
+      // _getDriver 走 deps.drivers 注入，descriptor createDriver 工厂不被消费。
       driver,
-      drivers: { claude: driver, codex: codexDriver, pi: piDriver },
+      drivers: { claude: driver, codex: codexDriver, pi: piDriver, cursor: cursorDriver },
       persistence,
       // task-08（2026-09-03-agent-provider-abstraction / FR-02）：回调类型改
       // AgentEvent 事件轨。SessionManager 消费侧已收口 TurnMessageEnvelope——

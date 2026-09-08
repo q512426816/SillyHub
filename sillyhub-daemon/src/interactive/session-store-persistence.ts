@@ -80,9 +80,10 @@ export class SessionPersistenceError extends Error {
   }
 }
 
-// 2026-09-04-provider-pi-onboarding 冒烟 F-2：加 pi——载入白名单缺 pi 会静默丢弃 pi 会话记录，
+// 2026-09-04-provider-pi-onboarding 冒烟 F-2：载入白名单缺 provider 会静默丢弃会话记录，
 // daemon 本地重启恢复缺失（inject parked 60s 超时，靠 backend sweep 兜底）。
-const VALID_PROVIDERS = new Set(['claude', 'codex', 'pi']);
+// 2026-09-08-cursor-interactive-session task-06：加 cursor，同坑。
+const VALID_PROVIDERS = new Set(['claude', 'codex', 'pi', 'cursor']);
 
 /**
  * P0-1：字符串数组字段守卫（mcpRefs/skillRefs/effectiveAllowedRoots 用）。

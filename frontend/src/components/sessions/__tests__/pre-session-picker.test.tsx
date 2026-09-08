@@ -17,6 +17,9 @@
 //      门户路径 pi 出现在第二步选择器；对话框路径（runtime-session-helpers 白名单）
 //      以 SessionPanel 桩探针断言 providers 含 pi；pi 态 caps 门控锁查表前置事实
 //      （multimodal=true / subagent=false）。
+//   7. Cursor 引擎可选性（task-08，2026-09-08-cursor-interactive-session / FR-01 / FR-04）：
+//      门户路径 cursor 出现在第二步选择器；对话框路径 SessionPanel 桩探针含 cursor；
+//      cursor 态 caps 门控锁查表前置事实（model_select=true / mcp=false / thinking=true）。
 //
 // 纯展示受控组件零数据请求——无网络 mock，仅断言回调与渲染。
 
@@ -503,5 +506,144 @@ describe("pi 态 caps 门控前置事实（getProviderCaps 查表值）", () => 
 
   it("PROVIDER_META 含 pi（选择器「选择智能体 Pi」主显标签来源，零改动锚）", () => {
     expect(PROVIDER_META.pi?.label).toBe("Pi");
+  });
+});
+
+/* ───────── 8. Cursor 引擎可选性（task-08 / 2026-09-08-cursor-interactive-session / FR-01 / FR-04） ───────── */
+
+// cursor 机 fixture：在线 claude/codex/cursor + 白名单外 copilot + 离线 cursor——一步覆盖
+// 「白名单内在线入选 / 白名单外滤除 / 离线滤除」三条件。
+function makeCursorMachine(): DaemonMachineRead {
+  return makeMachine({
+    runtimes: [
+      makeRuntime("rt-claude", "claude"),
+      makeRuntime("rt-codex", "codex"),
+      makeRuntime("rt-cursor", "cursor"),
+      makeRuntime("rt-copilot", "copilot"),
+      makeRuntime("rt-cursor-off", "cursor", { status: "offline" }),
+    ],
+  });
+}
+
+describe("PreSessionPicker Cursor 引擎可选（门户主路径白名单加 cursor）", () => {
+  it("第二步列出在线 cursor 智能体（PROVIDER_META 主显「Cursor」）；点击立即 onPick(runtimeId)", () => {
+    const { onPick } = setupPicker({ machines: [makeCursorMachine()] });
+    fireEvent.click(screen.getByRole("button", { name: /选择机器 机器一/ }));
+
+    // getByRole 唯一性同时证明离线 cursor（rt-cursor-off）未重复出现；白名单外 copilot 不列出。
+    const cursor = screen.getByRole("button", { name: /选择智能体 Cursor/ });
+    expect(cursor).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Copilot/ })).not.toBeInTheDocument();
+
+    fireEvent.click(cursor);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick).toHaveBeenCalledWith("rt-cursor");
+  });
+
+  it("cursor 非默认引擎：不高亮（aria-pressed=false，「默认」Tag 仍仅 claude 一个）", () => {
+    setupPicker({ machines: [makeCursorMachine()] });
+    fireEvent.click(screen.getByRole("button", { name: /选择机器 机器一/ }));
+
+    const cursor = screen.getByRole("button", {
+      name: /选择智能体 Cursor/,
+    }) as HTMLButtonElement;
+    expect(cursor.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getAllByText("默认")).toHaveLength(1);
+  });
+
+  it("仅 cursor 在线：不落空态文案，cursor 可选出（cursor 独立成会话入口）", () => {
+    const { onPick } = setupPicker({
+      machines: [
+        makeMachine({
+          runtimes: [
+            makeRuntime("rt-claude-off", "claude", { status: "offline" }),
+            makeRuntime("rt-cursor-only", "cursor"),
+          ],
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /选择机器 机器一/ }));
+
+    expect(
+      screen.queryByText(/该机器暂无可会话智能体/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /选择智能体 Cursor/ }));
+    expect(onPick).toHaveBeenCalledWith("rt-cursor-only");
+  });
+});
+
+describe("对话框路径 Cursor 引擎可选（runtime-session-helpers 白名单加 cursor，SessionPanel 桩探针）", () => {
+  it("在线 cursor 进 providers 列表；离线 cursor 与白名单外引擎被滤除，顺序随 runtime 声明序", () => {
+    render(
+      <InteractiveSessionChatSection
+        runtimes={[
+          makeRuntime("rt-claude", "claude"),
+          makeRuntime("rt-codex", "codex"),
+          makeRuntime("rt-cursor", "cursor"),
+          makeRuntime("rt-cursor-off", "cursor", { status: "offline" }),
+          makeRuntime("rt-copilot", "copilot"),
+        ]}
+      />,
+    );
+
+    const stub = screen.getByTestId("session-panel-stub");
+    expect(stub.getAttribute("data-providers")).toBe("claude,codex,cursor");
+    // 默认引擎优先级不变：claude 在线时仍默认 claude（cursor 加入不改变默认链）。
+    expect(stub.getAttribute("data-default-provider")).toBe("claude");
+  });
+
+  it("仅 cursor 在线：cursor 进 providers 且成为默认引擎（claude 缺席时首个在线 provider 回退）", () => {
+    render(
+      <InteractiveSessionChatSection
+        runtimes={[
+          makeRuntime("rt-claude-off", "claude", { status: "offline" }),
+          makeRuntime("rt-cursor", "cursor"),
+        ]}
+      />,
+    );
+
+    const stub = screen.getByTestId("session-panel-stub");
+    expect(stub.getAttribute("data-providers")).toBe("cursor");
+    expect(stub.getAttribute("data-default-provider")).toBe("cursor");
+  });
+});
+
+/* ───────── 9. cursor 态 caps 门控（查表裁剪前置事实，FR-01 / FR-04） ───────── */
+
+// session-panel 模型选择（model_select）/ MCP / thinking 门控均为 getProviderCaps
+// 查表的 provider 无关通用代码——cursor 态 UI 随表值自动裁剪。本卡锁 cursor
+// 表值前置事实（与 daemon providers.ts PROVIDER_CAPS.cursor 一致；thinking=true
+// 为 Reverse Sync / design 真相，不以过期任务卡 thinking=false 为准）。
+describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", () => {
+  it("八键与 daemon 单源一致；未知 provider 全 false 不抛错", () => {
+    const caps = getProviderCaps("cursor");
+    expect(caps).toEqual({
+      resume: true,
+      mcp: false,
+      multimodal: false,
+      thinking: true,
+      subagent: false,
+      permission_dialog: false,
+      edit_patch: false,
+      model_select: true,
+    });
+    // 任务卡点名的门控前置事实（model_select / mcp / thinking）再显式锁一次。
+    expect(caps.model_select).toBe(true);
+    expect(caps.mcp).toBe(false);
+    expect(caps.thinking).toBe(true);
+    expect(getProviderCaps("unknown-engine")).toEqual({
+      resume: false,
+      mcp: false,
+      multimodal: false,
+      thinking: false,
+      subagent: false,
+      permission_dialog: false,
+      edit_patch: false,
+      model_select: false,
+    });
+  });
+
+  it("PROVIDER_META 含 cursor（选择器「选择智能体 Cursor」主显标签来源，零改动锚）", () => {
+    expect(PROVIDER_META.cursor?.label).toBe("Cursor");
   });
 });
