@@ -6,7 +6,9 @@
 //   1. 回归锚（FR-11 桌面零回归）：不传 variant（sessions 页/悬浮宿主等既有调用点
 //      形态）时面板根/头部 className 与改前字面量**逐字一致**（字面量硬编码在本
 //      文件，防源文件漂移自证）、#id 复制/后台目录等桌面 chrome 原位、无 ⋯ 菜单；
-//      显式 variant="desktop" 与不传渲染一致（默认值归一）；
+//      显式 variant="desktop" 与不传渲染一致（默认值归一）；会话主体父链锚随
+//      task-05（2026-09-08-session-turn-nav）刻度轨 flex 行**有意更新**（逐层
+//      精确断言，非放宽）；
 //   2. variant="mobile" 布局类生效：根容器满宽贴屏（去 rounded/border）+ 头部
 //      padding 收敛 + data-variant 标记 + 会话主体外包横向滚动容器（表格等横向
 //      内容不撑破竖屏视口）；
@@ -275,16 +277,34 @@ describe("SessionPanel variant 回归锚（不传 variant 与 desktop 一致）"
     ).toBeInTheDocument();
     // 无 mobile ⋯ 菜单。
     expect(screen.queryByLabelText("更多操作")).not.toBeInTheDocument();
-    // 会话主体直挂面板根（无样式外包层）——ql-20260902-009 起主体外包一层
-    // display:contents 挂载点（触顶自动加载滚动监听，布局零变化）；ql-20260903-023
-    // 起 TurnTimeline 内再包 relative 层（回到底部按钮定位上下文，flex 角色等价），
-    // 锚同步为「relative 层字面量 + 挂载点布局透明 + 直挂面板根」。
+    // 会话主体父链——ql-20260902-009 起主体外包一层 display:contents 挂载点
+    //（触顶自动加载滚动监听，布局零变化）；ql-20260903-023 起 TurnTimeline 内
+    // 再包 relative 层（回到底部按钮定位上下文）；task-05（2026-09-08-session-
+    // turn-nav D-007）起 desktop 主体外包「刻度轨 flex 行」（左 TurnCatalog
+    // ~30px 常驻轨 + 右聊天列 flex-1 min-w-0），锚按新层级**有意更新**、逐层
+    // 精确断言：relative 层字面量不变 → contents 挂载点 → 聊天列字面量 →
+    // flex 行字面量 → flex 行直挂面板根（层级 +2：聊天列 + flex 行）。
     const scroll = panel.querySelector("[data-testid='turn-timeline-scroll']");
     const timelineWrap = scroll?.parentElement as HTMLElement;
     expect(timelineWrap.className).toBe("relative flex min-h-0 flex-1 flex-col");
     const bodyWrap = timelineWrap.parentElement as HTMLElement;
     expect(bodyWrap.className).toBe("contents");
-    expect(bodyWrap.parentElement).toBe(panel);
+    // task-05：contents 挂载点父级 = 右聊天列（flex-1 min-w-0 占满刻度轨外剩余宽度，
+    // flex-col 保持原纵向滚动高度链）。
+    const chatCol = bodyWrap.parentElement as HTMLElement;
+    expect(chatCol.className).toBe("flex min-w-0 flex-1 flex-col");
+    // 聊天列父级 = 刻度轨 flex 行（min-h-0 接管面板剩余高度，行内不溢出）。
+    const flexRow = chatCol.parentElement as HTMLElement;
+    expect(flexRow.className).toBe("flex min-h-0 flex-1");
+    expect(flexRow.parentElement).toBe(panel);
+    // 行内序：首子 = 刻度轨根（左），聊天列为末子（右）；轨内 navigation 锚
+    // 证明 TurnCatalog desktop 常驻挂载（D-007：无折叠无头部 ~30px 轨）。
+    const railRoot = flexRow.firstElementChild as HTMLElement;
+    expect(railRoot.className).toBe("relative flex-shrink-0 flex");
+    expect(
+      within(railRoot).getByRole("navigation", { name: "轮次刻度导航" }),
+    ).toBeInTheDocument();
+    expect(flexRow.lastElementChild).toBe(chatCol);
   });
 
   it("显式 variant='desktop'：与不传渲染一致（分发函数默认值归一）", async () => {
@@ -312,7 +332,7 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
     expect(header.className).toBe(HEADER_CLS_MOBILE);
   });
 
-  it("会话主体外包横向滚动容器（表格横向内容不撑破竖屏视口，desktop 无外包层）", async () => {
+  it("会话主体外包横向滚动容器（表格横向内容不撑破竖屏视口；desktop 无此横向外包层，仅 task-05 刻度轨 flex 行）", async () => {
     setupPage("mobile");
     const panel = (await screen.findByLabelText("会话面板")) as HTMLElement;
     const scroll = panel.querySelector("[data-testid='turn-timeline-scroll']");

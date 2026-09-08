@@ -43,16 +43,19 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type * as React from "react";
 
 import SessionsPortalPage from "@/app/(dashboard)/sessions/page";
+import { SessionPanel } from "@/components/daemon/session-panel";
 import { ApiError } from "@/lib/api";
 import type {
   AgentSessionRead,
   DaemonMachineRead,
   DaemonRuntimeRead,
+  SessionRunRead,
 } from "@/lib/daemon";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
@@ -1771,5 +1774,356 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     fireEvent.click(screen.getByTestId("session-search-result-item"));
     expect(screen.queryByTestId("session-search-popover")).toBeNull();
     expect(screen.getByText("初始提问")).toBeTruthy();
+  });
+});
+
+// ── task-06（2026-09-08-session-turn-nav / FR-04 FR-06 / D-001@v1 D-007@v1 /
+//    AC-04 AC-06 AC-08）：轮次导航集成——desktop 刻度点击跳转链路（task-04
+//    handleJumpToTurn 的 UI 路径：已加载直跳 / 未加载循环翻页 / 页数上限 toast /
+//    suppress 触顶抑制）+ mobile ⋯ 菜单「轮次导航」入口与 Drawer 行式列表。
+//    mock 沿用本文件既有体系（@/lib/daemon 整模块 mock + getAgentSessionLogs
+//    mockResolvedValueOnce 翻页链 / notify 捕获）；desktop 用例经门户点选会话
+//    （门户恒渲染 desktop → 刻度轨常驻）；mobile 用例直挂 SessionPanel
+//    variant="mobile"（⋯ 菜单/Drawer 仅 mobile 渲染分支，形态对齐
+//    session-panel-variant.test 的 setupPage 模板）。 ──
+describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Drawer 入口）", () => {
+  /** 未加载目录刻度 aria-label 锚（turn-catalog buildAriaLabel：第N轮 · 状态 · 未加载）。
+   *  注：r-old 用 failed 态——completed run 会被 enrichDisplayTurns 孤儿静默轮
+   *  即时补建（ql-20260818-011）而恒为 loaded，只有非 completed run 保持未加载。 */
+  const UNLOADED_TICK_LABEL = /^第1轮 · 失败 · 未加载$/;
+
+  /** jump 命中定位参数（handleJumpToTurn 双 rAF 后 scrollIntoView）。 */
+  const SMOOTH_START = { behavior: "smooth", block: "start" };
+
+  /** jsdom 未实现 scrollIntoView（跳转定位 / TurnCatalog active 滚入轨）——
+   *  本 describe 期间统一替换为 spy，afterAll 删除还原。 */
+  const scrollIntoViewSpy = vi.fn();
+  beforeAll(() => {
+    Element.prototype.scrollIntoView = scrollIntoViewSpy;
+  });
+  afterAll(() => {
+    delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+  });
+
+  /** 「加载更早」before 请求计数（初始历史拉取不带 before，不计入）。 */
+  const beforeCallCount = () =>
+    mocks.getAgentSessionLogs.mock.calls.filter(
+      (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
+    ).length;
+
+  /** jump 定位断言：scrollIntoView 收到 smooth + block:start。 */
+  const expectJumpScrolled = () => {
+    const jump = scrollIntoViewSpy.mock.calls.find(
+      ([opts]) =>
+        (opts as ScrollIntoViewOptions | undefined)?.behavior === "smooth" &&
+        (opts as ScrollIntoViewOptions | undefined)?.block === "start",
+    );
+    expect(jump).toBeTruthy();
+  };
+
+  /** 会话日志条目固件（同上方 quickLog 形态）。 */
+  function navLog(
+    id: string,
+    runId: string,
+    channel: string,
+    content: string,
+    timestamp: string,
+  ) {
+    return {
+      id,
+      run_id: runId,
+      timestamp,
+      channel,
+      content_redacted: content,
+      parent_tool_use_id: null,
+      subagent_type: null,
+      depth: null,
+      tool_kind: null,
+    };
+  }
+
+  /** 满页日志（100 条 = HISTORY_PAGE_SIZE → hasEarlier=true 的最小构造）。 */
+  function fullPage(runId: string, prompt: string, timestamp: string) {
+    return [
+      navLog(`${runId}-in`, runId, "user_input", prompt, timestamp),
+      ...Array.from({ length: 99 }, (_, i) =>
+        navLog(`${runId}-out-${i}`, runId, "stdout", `输出 ${i}`, timestamp),
+      ),
+    ];
+  }
+
+  /** run 快照固件（SessionRunRead 最小集：catalogEntries 消费 id/status/started_at/sender_name）。 */
+  function makeRun(overrides: Partial<SessionRunRead> = {}): SessionRunRead {
+    return {
+      id: "r-1",
+      spec_strategy: null,
+      status: "completed",
+      error_code: null,
+      failure_summary: null,
+      error_detail: null,
+      started_at: "2026-08-15T08:00:00Z",
+      finished_at: "2026-08-15T08:00:10Z",
+      exit_code: 0,
+      agent_profile_snapshot: null,
+      llm_provider_id: null,
+      input_tokens: null,
+      output_tokens: null,
+      ctx_tokens: null,
+      user_id: "u-owner",
+      sender_name: null,
+      ...overrides,
+    };
+  }
+
+  /** desktop 跳转用例公共 runs 固件：r-old（更早、目录第1轮、未加载——failed
+   *  态防 enrichDisplayTurns 孤儿静默轮把它即时变 loaded，见 UNLOADED_TICK_LABEL 注）
+   *  + r-cur（当前窗口已加载）。 */
+  function mockTwoRuns() {
+    mocks.listSessionRuns.mockResolvedValue([
+      makeRun({ id: "r-old", status: "failed", started_at: "2026-08-15T06:30:00Z" }),
+      makeRun({ id: "r-cur", started_at: "2026-08-15T08:00:00Z" }),
+    ]);
+  }
+
+  /** task-06：mobile variant 面板直挂（⋯ 菜单/Drawer 仅 mobile 渲染分支；
+   *  复用本文件模块级 mocks，QueryClient 形态对齐 renderPage）。 */
+  function renderMobilePanel() {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0, refetchInterval: false },
+        mutations: { retry: false },
+      },
+    });
+    return render(
+      <QueryClientProvider client={client}>
+        <SessionPanel
+          mode="page"
+          variant="mobile"
+          sessionId="s-1"
+          machines={[makeMachine()]}
+          llmProviders={[]}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  /** mobile 用例公共步骤：⋯ 菜单 → 「轮次导航」项，返回 Drawer 行式列表 promise。 */
+  async function openTurnNavDrawer() {
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "轮次导航" }));
+    return screen.findByTestId("session-turn-nav-list");
+  }
+
+  it("desktop 已加载轮直跳：点刻度 → 目标行 scrollIntoView({behavior:\"smooth\", block:\"start\"}) + 刻度即时 aria-current，零翻页", async () => {
+    mocks.listSessionRuns.mockResolvedValue([
+      makeRun({ id: "r-1", started_at: "2026-08-15T08:00:00Z" }),
+    ]);
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      navLog("j-1", "r-1", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+      navLog("j-2", "r-1", "stdout", "答复正文", "2026-08-15T08:00:05Z"),
+    ]);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+
+    const tick = await screen.findByRole("button", { name: /^第1轮 · 完成/ });
+    scrollIntoViewSpy.mockClear();
+    fireEvent.click(tick);
+    // 命中（已加载）：双 rAF 后 scrollIntoView 定位（smooth + block:start）。
+    await waitFor(expectJumpScrolled);
+    // 即时置当前轮：刻度 aria-current=true（design §9 刻度即时 active）。
+    await waitFor(() => expect(tick).toHaveAttribute("aria-current", "true"));
+    // 直跳零翻页：未发起 before 请求、无兜底 toast。
+    expect(beforeCallCount()).toBe(0);
+    expect(mocks.notifyWarning).not.toHaveBeenCalled();
+    expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
+
+  it("desktop 未加载轮循环翻页：连续 loadEarlier 到命中即停（两页即止、不误报兜底 toast）", async () => {
+    mockTwoRuns();
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce(
+        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+      )
+      // 翻页第 1 页：满页中间轮（hasEarlier 保持 true），仍无目标轮。
+      .mockResolvedValueOnce(
+        fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z"),
+      )
+      // 翻页第 2 页：目标轮出现（不满页 → 到头）。
+      .mockResolvedValueOnce([
+        navLog("o-1", "r-old", "user_input", "最早轮提问", "2026-08-15T06:30:00Z"),
+        navLog("o-2", "r-old", "stdout", "最早轮答复", "2026-08-15T06:30:10Z"),
+      ])
+      .mockResolvedValue([]); // 兜底（命中即停，理论不达）
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
+    );
+    // 命中后 prepend 内容可见（翻页链真实落 DOM）。
+    expect(await screen.findByText("最早轮提问")).toBeTruthy();
+    // 两页 before 请求（游标链 08:00 → 07:30），命中即停不空转。
+    await waitFor(() => expect(beforeCallCount()).toBe(2));
+    expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
+      before: "2026-08-15T07:30:00Z",
+      limit: 100,
+      // ql-20260903-018：加载更早请求自带 AbortController。
+      signal: expect.any(AbortSignal),
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(beforeCallCount()).toBe(2);
+    expect(mocks.notifyWarning).not.toHaveBeenCalled();
+    expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
+
+  it("desktop 页数上限兜底：连续 8 页满页均未命中 → warning「已连续加载 8 页仍未到达，可再次点击继续加载」", async () => {
+    mockTwoRuns();
+    let fillerSeq = 0;
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce(
+        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+      )
+      // 翻页恒满页（hasEarlier 恒 true）且永不出现 r-old → 跳转循环 8 页达
+      // 上限；每页时间戳随序号递减（跨页 pageKey 唯一防 React 撞 key）。
+      .mockImplementation(() => {
+        fillerSeq += 1;
+        return fullPage(
+          `r-filler-${fillerSeq}`,
+          `填充页提问`,
+          `2026-08-15T07:${String(59 - fillerSeq).padStart(2, "0")}:00Z`,
+        );
+      });
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
+    );
+    await waitFor(
+      () =>
+        expect(mocks.notifyWarning).toHaveBeenCalledWith(
+          "已连续加载 8 页仍未到达，可再次点击继续加载",
+        ),
+      { timeout: 8000 },
+    );
+    expect(beforeCallCount()).toBe(8);
+  }, 20000);
+
+  it("desktop 跳转翻页期 suppress 触顶：循环进行中 scroll 不触发自动加载，跳完恢复", async () => {
+    let resolvePage1!: (v: unknown) => void;
+    let resolvePage2!: (v: unknown) => void;
+    const page1 = new Promise((r) => {
+      resolvePage1 = r;
+    });
+    const page2 = new Promise((r) => {
+      resolvePage2 = r;
+    });
+    mockTwoRuns();
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce(
+        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+      )
+      .mockReturnValueOnce(page1)
+      .mockReturnValueOnce(page2)
+      .mockResolvedValue([]);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
+    );
+    // 循环第 1 页在途：触顶 scroll 事件被 suppress 抑制，无额外请求。
+    const scroller = await screen.findByTestId("turn-timeline-scroll");
+    fireEvent.scroll(scroller);
+    fireEvent.scroll(scroller);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(beforeCallCount()).toBe(1);
+
+    // 第 1 页返回（满页中间轮）→ 循环发起第 2 页；在途期间继续抑制。
+    resolvePage1(fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z"));
+    await waitFor(() => expect(beforeCallCount()).toBe(2));
+    fireEvent.scroll(scroller);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(beforeCallCount()).toBe(2);
+
+    // 第 2 页返回（满页且含目标轮）→ 命中即停、suppress 解除。
+    resolvePage2(fullPage("r-old", "最早轮提问", "2026-08-15T06:30:00Z"));
+    expect(await screen.findByText("最早轮提问")).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(beforeCallCount()).toBe(2);
+    // 正向对照：suppress 解除后触顶恢复自动加载（第 3 页 → 兜底空页到头）。
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(beforeCallCount()).toBe(3));
+  });
+
+  it("mobile ⋯ 菜单含「轮次导航」项：点击打开 Drawer 行式列表（面板根内、宽 min(78vw,300px)、未加载行带元数据）", async () => {
+    mocks.listSessionRuns.mockResolvedValue([
+      // r-2 failed 态保持目录未加载（同 UNLOADED_TICK_LABEL 注）。
+      makeRun({ id: "r-2", status: "failed", started_at: "2026-08-15T07:00:00Z" }),
+      makeRun({ id: "r-1", started_at: "2026-08-15T08:00:00Z" }),
+    ]);
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      navLog("mv-1", "r-1", "user_input", "首问", "2026-08-15T08:00:00Z"),
+      navLog("mv-2", "r-1", "stdout", "首答", "2026-08-15T08:00:05Z"),
+    ]);
+    renderMobilePanel();
+    expect(await screen.findByText("首问")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "轮次导航" }));
+    const list = await screen.findByTestId("session-turn-nav-list");
+    // ⋯ 菜单随选中关闭；行式列表覆盖全部轮次——第1轮未加载（占位文案行），
+    // 第2轮已加载（提问摘要），触屏无 hover 的行式形态（非 TickRail 飞出卡）。
+    expect(screen.queryByTestId("session-mobile-more-menu")).toBeNull();
+    expect(within(list).getByText("第1轮")).toBeTruthy();
+    expect(within(list).getByText("未加载 — 点击加载该轮并定位")).toBeTruthy();
+    expect(within(list).getByText("第2轮")).toBeTruthy();
+    expect(within(list).getByText("首问")).toBeTruthy();
+
+    // R-05：Drawer 挂面板根内（getContainer=false 内联 + section relative
+    // 定位上下文），非 body 直挂全屏；宽 min(78vw, 300px)。
+    const panel = screen.getByLabelText("会话面板");
+    const drawerRoot = document.querySelector(
+      ".session-turn-nav-drawer-root",
+    ) as HTMLElement | null;
+    expect(drawerRoot).not.toBeNull();
+    expect(panel.contains(drawerRoot as Node)).toBe(true);
+    const wrapper = drawerRoot?.querySelector(
+      ".ant-drawer-content-wrapper",
+    ) as HTMLElement | null;
+    expect(wrapper?.style.width).toBe("min(78vw, 300px)");
+  });
+
+  it("mobile Drawer 行点击 → onJump 生效（scrollIntoView block:start）+ Drawer 自动关闭（选中即关）", async () => {
+    mocks.listSessionRuns.mockResolvedValue([
+      makeRun({ id: "r-2", started_at: "2026-08-15T07:00:00Z" }),
+      makeRun({ id: "r-1", started_at: "2026-08-15T08:00:00Z" }),
+    ]);
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      navLog("mv-1", "r-1", "user_input", "首问", "2026-08-15T08:00:00Z"),
+      navLog("mv-2", "r-1", "stdout", "首答", "2026-08-15T08:00:05Z"),
+    ]);
+    renderMobilePanel();
+    expect(await screen.findByText("首问")).toBeTruthy();
+
+    await openTurnNavDrawer();
+    const list = screen.getByTestId("session-turn-nav-list");
+    // 点已加载行（第2轮 = r-1，DOM 序第二个）：已加载 → 直跳定位。
+    const rows = within(list).getAllByTestId("session-turn-nav-item");
+    expect(rows).toHaveLength(2);
+    const loadedRow = rows[1] as HTMLElement;
+    scrollIntoViewSpy.mockClear();
+    fireEvent.click(loadedRow);
+    await waitFor(expectJumpScrolled);
+    expect(mocks.notifyError).not.toHaveBeenCalled();
+    // 选中即关（AC-06）：destroyOnHidden → 关闭动画 deadline 后内容卸载。
+    await waitFor(
+      () => expect(screen.queryByTestId("session-turn-nav-list")).toBeNull(),
+      { timeout: 3000 },
+    );
   });
 });

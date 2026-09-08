@@ -262,33 +262,58 @@ export interface TurnTimelineProps {
    * 已迁面板顶部折叠栏，本注入口保留备用（暂无消费方）。
    */
   streamFooter?: ReactNode;
+  /**
+   * task-01（2026-09-08-session-turn-nav / FR-07 / D-007@v1）：受控高亮轮 key
+   * （= realRunId ?? runId，与 data-turn-key 锚点同源）。命中行根节点渲染
+   * ring+浅底高亮（主题语义类随主题换肤），清除节奏由父层控制（~2.2s 自清，
+   * 本组件不做定时清除）。缺省 / null = 无高亮，dialog 等旧消费方零回归。
+   * 本 prop 不直接传入 memo 行 TurnRow——TurnTimeline 内先派生 per-row 布尔
+   * isHighlighted（R-07：字符串 prop 直传会在值变化时击穿全部行 memo）。
+   */
+  highlightTurnKey?: string | null;
 }
 
 /** ql-20260903-026：单轮行 memo 组件——配合 session-panel displayTurns 的引用
  *  稳定守卫（ql-20260903-025），流式 delta 只重渲染变化行；未变化行连同其
  *  段级/markdown 子树整体跳过（行 JSX 自 map 原文逐字搬入，分支 key 保留
  *  冗余无害）。props 稳定性：turn 引用（父级守卫）+ viewMode 字符串 +
- *  dialogHistory useState 数组 + onResend/onSwitchProvider 父级 useCallback 化。 */
+ *  dialogHistory useState 数组 + onResend/onSwitchProvider 父级 useCallback 化。
+ *  task-01（2026-09-08-session-turn-nav / FR-07 / D-007@v1）：新增 isHighlighted
+ *  布尔（父级按 highlightTurnKey 逐行派生后传入，字符串不进 memo 行，R-07）；
+ *  两分支根 DOM 元素挂 data-turn-key 跳转锚点（design §7）。 */
 const TurnRow = memo(function TurnRow({
   turn,
   viewMode,
+  isHighlighted,
   dialogHistory,
   onResend,
   onSwitchProvider,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
+  /** task-01：父级派生的 per-row 高亮布尔（命中行加 ring+浅底，R-07 防击穿）。 */
+  isHighlighted: boolean;
   dialogHistory: SessionDialogRead[];
   onResend: (prompt: string) => void;
   onSwitchProvider: () => void;
 }) {
   return (
     <>
+    {/* task-01（2026-09-08-session-turn-nav / FR-07 / D-007@v1）：轮次跳转 DOM 锚点
+        data-turn-key（值 = realRunId ?? runId，与刻度轨条目 key 同源）——两分支的
+        根 DOM 元素均挂（fragment 上放 data-* 无效），供跳转方
+        querySelector([data-turn-key]) 精确命中（design §7）。 */}
     {/* ql-20260818-011：静默切换轮（无 prompt/output，有 whoLine，已 完成）→ 渲染为紧凑一行配置变更标记，不占轮次气泡。 */}
     {!turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
               <div
                 key={turn.runId}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-70"
+                data-turn-key={turn.realRunId ?? turn.runId}
+                className={cn(
+                  "flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-70",
+                  // task-01：受控高亮（isHighlighted 命中行）——ring+浅底主题语义类
+                  // 随主题换肤；compact 行原本无圆角，高亮时补 rounded-md。
+                  isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
+                )}
               >
                 <Settings aria-hidden className="h-3 w-3" />
                 {turn.replyAt && <span>{formatTurnTime(turn.replyAt)}</span>}
@@ -296,7 +321,16 @@ const TurnRow = memo(function TurnRow({
                 <span>· {turn.whoLine!.agentName}</span>
                 <span>· <Cloud aria-hidden className="inline h-3 w-3 align-[-2px]" /> {turn.whoLine!.providerName ?? '本机默认'}</span>
               </div>
-            ) : <div key={turn.runId} className="space-y-2.5">
+            ) : <div
+                  key={turn.runId}
+                  data-turn-key={turn.realRunId ?? turn.runId}
+                  className={cn(
+                    "space-y-2.5",
+                    // task-01：受控高亮（isHighlighted 命中行）——ring+浅底主题语义
+                    // 类随主题换肤；容器原本无圆角，高亮时补 rounded-md。
+                    isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
+                  )}
+                >
               {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。
                   ql-20260817-007：与 agent 答复对称——[时间][气泡][发送者头像]；
                   头像无图时用用户名首字（同顶栏用户菜单 AvatarFallback 模式）。 */}
@@ -545,6 +579,7 @@ export function TurnTimeline({
   hasOnlineProvider,
   emptyProviderLabel,
   streamFooter,
+  highlightTurnKey,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -739,11 +774,15 @@ export function TurnTimeline({
         </div>
       ) : (
         <div className="space-y-5">
+          {/* task-01（FR-07 / D-007@v1 / R-07）：highlightTurnKey 在此逐行派生为
+              isHighlighted 布尔再进 memo 行（字符串 prop 直传会在值变化时击穿
+              全部行 memo）；data-turn-key 锚点在 TurnRow 两分支根元素上。 */}
           {turns.map((turn) => (
             <TurnRow
               key={turn.runId}
               turn={turn}
               viewMode={viewMode}
+              isHighlighted={highlightTurnKey === (turn.realRunId ?? turn.runId)}
               dialogHistory={dialogHistory}
               onResend={onResend}
               onSwitchProvider={onSwitchProvider}

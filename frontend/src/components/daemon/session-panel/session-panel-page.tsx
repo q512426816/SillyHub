@@ -6,13 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs, { type Dayjs } from "dayjs";
 import {
-  Ban, Bot, ClipboardList, FolderOpen, Lock, Monitor, MoreHorizontal, PauseCircle, Puzzle,
-  Search, TriangleAlert, Zap,
+  Ban, Bot, ClipboardList, FolderOpen, ListOrdered, Lock, Monitor, MoreHorizontal, PauseCircle,
+  Puzzle, Search, TriangleAlert, Zap,
 } from "lucide-react";
-import { Badge, Button, Input, Spin } from "antd";
+import { Badge, Button, Drawer, Input, Spin } from "antd";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import { extractPreambleText, finishTurn } from "@/components/daemon/session-log-assembler";
-import { TurnTimeline } from "@/components/daemon/turn-timeline";
+import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import {
   joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers,
@@ -36,6 +36,13 @@ import {
   SessionConfigBar, useActiveSharedAgents,
 } from "@/components/sessions/session-config-bar";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
+// task-03/05（2026-09-08-session-turn-nav / FR-01 FR-03 / D-002@v1 D-007@v1）：
+// 目录条目类型 + TurnCatalog 刻度轨组件（task-02 产出契约）——类型供下方
+// catalogEntries 派生；组件在 desktop page 分支常驻挂载（task-05 布局接线，
+// 见会话主体渲染处）。
+import TurnCatalog, {
+  type TurnCatalogEntry, type TurnCatalogEntryStatus,
+} from "@/components/sessions/turn-catalog";
 import { ApiError } from "@/lib/api";
 import {
   type AgentRunLogEntry, type MainAgentConfig, type WorkerPresetItem,
@@ -68,7 +75,7 @@ import {
   HISTORY_PAGE_SIZE, INITIAL_TURN_STATE, MAX_PROMPT_LEN,
   SUSPENDED_SESSION_REFETCH_MS, TERMINAL_TURN_STATUSES, TurnState, applyBashStatusEvent,
   appendBashChunk, applyEnvelopeToTurn, asAssembled, BashProgressState, deriveTurnTerminalStatus,
-  findSegmentById, mentionBindOptions, readPersistedViewMode,
+  findSegmentById, mentionBindOptions, parseRunStartedAt, readPersistedViewMode,
   readSessionDraft, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
 } from "./turn-state";
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
@@ -95,6 +102,110 @@ import {
   resolvePreChangeName, resolvePreQuicklogName, resolvePreWorkspaceName,
   resolveWorkspaceName, splitToolReportTurns, type SessionPanelPageProps,
 } from "./page-helpers";
+
+/* ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
+ *    轮次目录 catalogEntries 派生的局部纯工具（非导出，仅供下方 useMemo 消费；
+ *    TurnCatalog 挂载见 task-05 布局接线）。run 状态词表实证依据：backend AgentRun.status
+ *    列注释 pending/running/completed/failed/killed（app/modules/agent/model.py）
+ *    + ACTIVE_RUN_STATUSES（同文件，pending/running/pending_approval 为活跃轮）+
+ *    前端防御词 cancelled/interrupted（turn-state.deriveTurnTerminalStatus、
+ *    runtime-session-helpers 既有先例）；stopped/finished/error 为任务卡词表
+ *    防御性同义词，后端均不落库。 ────────────────────── */
+
+/** 目录飞出卡提问摘要截断长度（design §6：prompt 截 60 字，超出省略号收尾）。 */
+const CATALOG_PROMPT_SUMMARY_MAX = 60;
+/** 目录飞出卡正文摘要截断长度（design §6：首个 text 段 / output 截 120 字）。 */
+const CATALOG_ANSWER_SUMMARY_MAX = 120;
+
+/* ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
+ *    跳转链路 handleJumpToTurn + activeTurnKey 滚动联动的常量。 ────────────── */
+/** 跳转翻页单次上限（design §7：8 页 ≈ 800 条日志防死循环；到上限不报错，可再次点击续跳）。 */
+const JUMP_LOAD_EARLIER_MAX_PAGES = 8;
+/** 跳转命中高亮自清时长（design §9：ring+浅底 2.2s 后复原）。 */
+const HIGHLIGHT_TURN_CLEAR_MS = 2200;
+/** activeTurnKey 联动判定线：视口顶部往下 120px 内最靠近顶部的轮为当前轮（任务卡 §5）。 */
+const ACTIVE_TURN_TRIGGER_PX = 120;
+
+/**
+ * 轮次正文摘要取值（design §6）：首个 text 段；无 segments（旧回退路径 / 孤儿
+ * 构造）回退 output 整段；都无内容 → undefined。
+ */
+function firstTextSegment(turn: SessionTurnView): string | undefined {
+  const text = turn.segments?.find((s) => s.kind === "text")?.text;
+  return text ?? (turn.output || undefined);
+}
+
+/* ── task-06（2026-09-08-session-turn-nav / FR-04 / R-05 / AC-06）：
+ *    mobile 轮次导航 Drawer 行式列表的局部纯渲染工具（触屏无 hover，不复用
+ *    TickRail 飞出卡形态——design §8：Drawer 内为带摘要的行式列表，点击即跳）。
+ *    Drawer 挂载点在下方 mobile 渲染分支内；dialog 模式不经该分支自然不挂。 ── */
+
+/** 行 meta 状态文案（与 turn-catalog 内部 STATUS_LABEL 同词表；该映射未导出，局部镜像）。 */
+const TURN_NAV_STATUS_LABEL: Record<TurnCatalogEntryStatus, string> = {
+  completed: "完成",
+  failed: "失败",
+  running: "运行中",
+  stopped: "已停止",
+  pending: "已停止",
+};
+
+/** 未加载行占位文案（与 turn-catalog 飞出卡 meta 尾注同款语义）。 */
+const TURN_NAV_UNLOADED_HINT = "未加载 — 点击加载该轮并定位";
+
+/** Drawer 行 meta 文本：HH:mm · 状态 · 发送者（未加载追加尾注；格式照 turn-catalog flyoutMeta）。 */
+function turnNavRowMeta(entry: TurnCatalogEntry): string {
+  let time = "--:--";
+  if (entry.startedAt) {
+    const d = new Date(entry.startedAt);
+    if (!Number.isNaN(d.getTime())) {
+      time = d.toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    }
+  }
+  const base = `${time} · ${TURN_NAV_STATUS_LABEL[entry.status]} · ${
+    entry.senderName ?? "我"
+  }`;
+  return entry.loaded ? base : `${base} · 未加载`;
+}
+
+/** run / turn 状态字符串 → 目录刻度五档（词表依据见上方 task-03 注释块）。 */
+function mapRunStatus(status: string | null | undefined): TurnCatalogEntryStatus {
+  switch (status) {
+    case "completed":
+    case "finished":
+      return "completed";
+    case "failed":
+    case "error":
+      return "failed";
+    // pending_approval 属后端 ACTIVE_RUN_STATUSES 活跃词表（仍是当前轮）；
+    // interrupting 为前端展示态（后端不落库），语义仍是活跃轮 → 运行中。
+    case "running":
+    case "active":
+    case "pending_approval":
+    case "interrupting":
+      return "running";
+    // killed = 后端实际中断终态；stopped/interrupted/cancelled = 防御性同义词。
+    case "killed":
+    case "stopped":
+    case "interrupted":
+    case "cancelled":
+      return "stopped";
+    default: // pending 及未知值 → pending（默认刻度）
+      return "pending";
+  }
+}
+
+/** 摘要截断：空 / 缺省 → undefined（条目摘要缺省）；超长截断省略号收尾。 */
+function truncateForSummary(
+  text: string | null | undefined,
+  max: number,
+): string | undefined {
+  if (!text) return undefined;
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
 
 /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
 
@@ -412,6 +523,9 @@ export function SessionPanelPage({
   // task-14（design §5.4）：mobile 头部 ⋯ 菜单开关（次要 chrome 收纳容器）。
   // hook 无条件声明（desktop 渲染层不读它），variant 保持在渲染层。
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  // task-06（2026-09-08-session-turn-nav / FR-04 / AC-06）：mobile 轮次导航
+  // Drawer 开合（⋯ 菜单「轮次导航」项触发；点击行选中即关）。
+  const [turnNavOpen, setTurnNavOpen] = useState(false);
 
   const streamRef = useRef<SessionStreamConnection | null>(null);
   // 面板根 ref（task-09 / FR-04）：子代理目录跳转的 DOM 定位查询范围（限面板内）。
@@ -877,6 +991,15 @@ export function SessionPanelPage({
   const sessionEpochRef = useRef(0);
   /** 在途「加载更早」请求的取消器（换会话时 abort，省在途带宽）。 */
   const historyAbortRef = useRef<AbortController | null>(null);
+  // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / R-02）：跳转链路 refs ──
+  /** 跳转翻页期间抑制触顶自动加载（R-02：防跳转定位滚动与触顶加载竞争）。
+   *  仅 handleJumpToTurn 以 try/finally 置位/恢复——任何异常路径不得永久抑制。 */
+  const jumpSuppressLoadEarlierRef = useRef(false);
+  /** hasEarlier 镜像 ref：供跳转循环同步读取（规避 useCallback 闭包过期值）。
+   *  同步点两处——下方 useEffect 随 state 兜底 + handleLoadEarlier 满页判定处
+   *  直接刷新（await 间隙 passive effect 不保证已提交，仅靠 effect 循环内会读到
+   *  过期 true，空页后多空转甚至误判 toast 档位）。 */
+  const hasEarlierRef = useRef(false);
   const handleLoadEarlierRef = useRef<() => Promise<void>>(async () => {});
   const handleLoadEarlier = useCallback(async () => {
     if (!sessionId || historyLoadingRef.current || !hasEarlier) return;
@@ -903,6 +1026,9 @@ export function SessionPanelPage({
       if (scrollEl) pendingAnchorRef.current = scrollEl.scrollHeight;
       historyCursorRef.current = older[0]?.timestamp ?? null;
       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
+      // task-04：hasEarlierRef 同步刷新（跳转循环 await 间隙读它判档位；
+      // passive effect 提交晚于循环续延，仅靠 effect 镜像会读到过期值）。
+      hasEarlierRef.current = older.length >= HISTORY_PAGE_SIZE;
       chainedMore = older.length >= HISTORY_PAGE_SIZE;
       const olderTurns = logsToTurns(older);
       if (olderTurns.length > 0) {
@@ -941,6 +1067,22 @@ export function SessionPanelPage({
     }
   }, [sessionId, hasEarlier]);
   handleLoadEarlierRef.current = handleLoadEarlier;
+  // task-04：hasEarlierRef 镜像兜底（attach 初次回灌 / 换会话重置等其余
+  // setHasEarlier 写入路径随 state 同步；翻页路径已在回调内同步刷新）。
+  useEffect(() => {
+    hasEarlierRef.current = hasEarlier;
+  }, [hasEarlier]);
+
+  /** task-04：单页「加载更早」Promise 化复用（跳转循环每页 await 一次）。
+   *  返回本次是否真实加载了一页——handleLoadEarlier 本体返回 void 且多路
+   *  早退（到头 / 失败静默 / 在途锁 / 无游标），以翻页游标是否前进为准：
+   *  成功路径必写 historyCursorRef（含空页 → null 的到头写法），早退/异常
+   *  路径不动游标。 */
+  const loadEarlierOnce = useCallback(async (): Promise<boolean> => {
+    const cursorBefore = historyCursorRef.current;
+    await handleLoadEarlierRef.current();
+    return historyCursorRef.current !== cursorBefore;
+  }, []);
 
   /** 视口补拉（触顶补口）：内容不满视口且可能还有更早 → 自动续拉一页。
    *  守卫：容器存在且有布局高度（jsdom 无布局 scrollHeight=0 不触发）、
@@ -982,6 +1124,53 @@ export function SessionPanelPage({
   const scheduleAutoFillRef = useRef(scheduleAutoFill);
   scheduleAutoFillRef.current = scheduleAutoFill;
 
+  // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05）：跳转高亮 + 当前轮联动 ──
+  /** 跳转命中受控高亮（TurnTimeline highlightTurnKey → per-row isHighlighted，
+   *  task-01 承接）；命中后 HIGHLIGHT_TURN_CLEAR_MS 自清（design §9：2.2s）。 */
+  const [highlightTurnKey, setHighlightTurnKey] = useState<string | null>(null);
+  /** 高亮自清定时器 ref：连点跳转先 clear 旧的，防定时器堆积互相清掉新高亮。 */
+  const highlightTimerRef = useRef<number | null>(null);
+  /** 当前轮 key（滚动联动）：TickRail active 刻度消费（task-05 已接线挂载）。 */
+  const [activeTurnKey, setActiveTurnKey] = useState<string | null>(null);
+  /** 联动计算 rAF 节流句柄（scroll 高频，一帧至多算一次）。 */
+  const activeTurnRafRef = useRef<number | null>(null);
+  /** activeTurnKey / highlightTurnKey 随会话切换复位（本地会话作用域态）。 */
+  useEffect(() => {
+    setActiveTurnKey(null);
+    setHighlightTurnKey(null);
+  }, [sessionId]);
+  // 卸载清定时器（会话切换走上方复位即可，无需清——超时自清幂等）。
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current !== null) clearTimeout(highlightTimerRef.current);
+    },
+    [],
+  );
+
+  /** 视口顶部最近轮派生（任务卡 §5）：最后一个 top ≤ 容器顶 + 120px 的
+   *  data-turn-key 行即当前轮；值不变跳过 set（防高频 scroll 空渲染）。 */
+  const syncActiveTurnKey = useCallback((el: HTMLElement) => {
+    const line = el.getBoundingClientRect().top + ACTIVE_TURN_TRIGGER_PX;
+    let next: string | null = null;
+    for (const row of el.querySelectorAll<HTMLElement>("[data-turn-key]")) {
+      if (row.getBoundingClientRect().top <= line) {
+        next = row.getAttribute("data-turn-key");
+      }
+    }
+    setActiveTurnKey((prev) => (prev === next ? prev : next));
+  }, []);
+  /** 联动调度：rAF 节流（一帧至多一次；重复 scroll 事件合并）。 */
+  const scheduleActiveTurnSync = useCallback(
+    (el: HTMLElement) => {
+      if (activeTurnRafRef.current !== null) return;
+      activeTurnRafRef.current = requestAnimationFrame(() => {
+        activeTurnRafRef.current = null;
+        syncActiveTurnKey(el);
+      });
+    },
+    [syncActiveTurnKey],
+  );
+
   // ── quick（2026-09-02 触顶自动加载）：滚动接线 + prepend 滚动锚 ──
   // 捕获阶段监听 bodyWrap 内部滚动容器（native scroll 不冒泡，capture 命中
   // 全部后代；jsdom fireEvent 派发亦走捕获相位）；触顶（scrollTop ≤
@@ -1006,19 +1195,32 @@ export function SessionPanelPage({
       const el = e.target as HTMLElement | null;
       if (!el || el.getAttribute("data-testid") !== "turn-timeline-scroll") return;
       if (el.scrollTop <= LOAD_EARLIER_TRIGGER_PX) {
-        void handleLoadEarlierRef.current();
+        // task-04（R-02）：跳转翻页期间抑制触顶自动加载——跳转循环已在自旋
+        // 翻页，此处再触发会与循环竞争并打断定位滚动；守卫在判定阈值后、
+        // 调 loadEarlier 前（最小侵入），suppress 仅跳转 try/finally 期存在。
+        if (!jumpSuppressLoadEarlierRef.current) {
+          void handleLoadEarlierRef.current();
+        }
       }
+      // task-04：activeTurnKey 滚动联动（rAF 节流；跳转定位的 smooth 滚动
+      // 途中同样经此更新，终点自然落在目标轮）。
+      scheduleActiveTurnSync(el);
     };
     wrap.addEventListener("scroll", onScroll, { capture: true, passive: true });
-    return () =>
+    return () => {
       wrap.removeEventListener(
         "scroll",
         onScroll,
         { capture: true } as AddEventListenerOptions,
       );
+      if (activeTurnRafRef.current !== null) {
+        cancelAnimationFrame(activeTurnRafRef.current);
+        activeTurnRafRef.current = null;
+      }
+    };
     // 挂载维度：会话主体骨架（早退渲染）先于时间线出现——经 callback ref 的
     // state 镜像驱动主体挂载/卸载时重挂监听（sessionId 变化亦重挂）。
-  }, [sessionId, bodyWrapMounted]);
+  }, [sessionId, bodyWrapMounted, scheduleActiveTurnSync]);
   // prepend 滚动锚：turnState 变化且有待补锚时，按 scrollHeight 增量补回
   // 视口位置——正在读的内容不被新段顶走，向上滚动自然续读更早段。
   useEffect(() => {
@@ -1029,6 +1231,74 @@ export function SessionPanelPage({
     if (!el) return;
     el.scrollTop += el.scrollHeight - anchor;
   }, [turnState, timelineScrollEl]);
+
+  // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
+  //    目录刻度点击跳转链路（TickRail onJump 消费，task-05 已接线挂载）。已加载轮
+  //    直跳定位高亮；未加载轮循环翻页（≤8 页，suppress 触顶自动加载，R-02）到
+  //    命中或到头；两档 toast 兜底（对齐 design §7，定位节奏照 handleJumpToSubagent
+  //    先例双 rAF，但锚点按 data-turn-key 属性精确匹配——FR-07 禁类名匹配）。 ----
+  const handleJumpToTurn = useCallback(
+    async (entry: TurnCatalogEntry) => {
+      const container = timelineScrollEl();
+      const hit = () =>
+        container?.querySelector<HTMLElement>(
+          `[data-turn-key="${CSS.escape(entry.key)}"]`,
+        ) ?? null;
+      if (!hit()) {
+        // 未加载：循环翻页（≤ JUMP_LOAD_EARLIER_MAX_PAGES 页防死循环；到上限
+        // 不报错可再次点击续跳）。suppress 全程置位，finally 恢复——任何异常
+        // 路径不得永久抑制触顶自动加载（本卡硬约束）。
+        jumpSuppressLoadEarlierRef.current = true;
+        try {
+          for (
+            let i = 0;
+            i < JUMP_LOAD_EARLIER_MAX_PAGES && !hit() && hasEarlierRef.current;
+            i++
+          ) {
+            // 页未真实加载（到头空页 / 翻页失败 / 在途锁）即停，不空转。
+            if (!(await loadEarlierOnce())) break;
+            // 等一帧再进下一轮判定：并发模式下 setTurnState 的 DOM 提交走
+            // 调度器宏任务，而本循环的 await 续延是 microtask——即时响应
+            // （mock / 缓存命中）下不 yield 一帧的话，下一轮 hit() 与循环后
+            // 的兜底判定都会读到旧 DOM（目标已加载却继续翻页甚至误报兜底）。
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+        } finally {
+          jumpSuppressLoadEarlierRef.current = false;
+        }
+        if (!hit()) {
+          // 兜底两档 toast（可区分）：到头仍无 → 日志已不存在（终态）；
+          // 达页数上限（hasEarlier 仍 true）→ 提示可续点（非终态）。
+          if (!hasEarlierRef.current) {
+            notify.error("该轮次日志不存在（可能已被清理）");
+          } else {
+            notify.warning(
+              `已连续加载 ${JUMP_LOAD_EARLIER_MAX_PAGES} 页仍未到达，可再次点击继续加载`,
+            );
+          }
+          return;
+        }
+      }
+      // 命中：先即时置当前轮（design §9 刻度即时 active；smooth 滚动途中
+      // scroll 事件会经联动重算，终点仍落目标轮），双 rAF 等（循环路径的）
+      // prepend DOM 提交后定位 + 受控高亮 2.2s 自清（连点先清旧定时器防堆积）。
+      setActiveTurnKey(entry.key);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          hit()?.scrollIntoView({ behavior: "smooth", block: "start" });
+          setHighlightTurnKey(entry.key);
+          if (highlightTimerRef.current !== null) {
+            clearTimeout(highlightTimerRef.current);
+          }
+          highlightTimerRef.current = window.setTimeout(() => {
+            highlightTimerRef.current = null;
+            setHighlightTurnKey(null);
+          }, HIGHLIGHT_TURN_CLEAR_MS);
+        });
+      });
+    },
+    [timelineScrollEl, loadEarlierOnce, notify],
+  );
 
   /** quick 会话内搜索：q 全量查询（limit=100），结果浮层展示。 */
   const handleSessionSearch = useCallback(async () => {
@@ -1227,6 +1497,99 @@ export function SessionPanelPage({
       ),
     [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
   );
+
+  // ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
+  //    轮次目录数据 catalogEntries（TurnCatalogEntry[]；挂载见 task-05 布局接线）。
+  //    零新增后端调用（R-08）：runs 骨架复用既有 runsMeta（attach 期 + 每轮
+  //    turn_completed 后已全量拉刷），已加载轮摘要用 displayTurns 本地数据覆盖，
+  //    实现全量历史轮次覆盖（含未加载空心刻度数据源）。
+  // orderedRuns：runs 按 started_at 时间正序定序（parseRunStartedAt 缺失/非法 →
+  // null 排最后；Array.prototype.sort 稳定排序，同刻保持 Map 插入序）。
+  const orderedRuns = useMemo(
+    () =>
+      [...runsMeta.values()].sort((a, b) => {
+        const aMs = parseRunStartedAt(a.started_at);
+        const bMs = parseRunStartedAt(b.started_at);
+        if (aMs === null && bMs === null) return 0;
+        if (aMs === null) return 1;
+        if (bMs === null) return -1;
+        return aMs - bMs;
+      }),
+    [runsMeta],
+  );
+  const catalogEntries = useMemo<TurnCatalogEntry[]>(() => {
+    const buildEntry = (
+      key: string,
+      turnNo: number,
+      startedAt: string | null,
+      status: TurnCatalogEntryStatus,
+      senderName: string | null | undefined,
+      loaded: SessionTurnView | undefined,
+    ): TurnCatalogEntry => ({
+      key,
+      turnNo,
+      startedAt,
+      status,
+      senderName: senderName ?? null,
+      promptSummary: truncateForSummary(loaded?.prompt, CATALOG_PROMPT_SUMMARY_MAX),
+      answerSummary: truncateForSummary(
+        loaded ? firstTextSegment(loaded) : undefined,
+        CATALOG_ANSWER_SUMMARY_MAX,
+      ),
+      loaded: !!loaded,
+    });
+    // 降级（design §6）：runs 不可用（runsMeta 空 → orderedRuns 空，异常路径）
+    // 时仅由已加载轮次派生（全部 loaded=true），页面不崩不空。
+    if (orderedRuns.length === 0) {
+      return displayTurns.map((t, i) =>
+        buildEntry(
+          t.realRunId ?? t.runId,
+          i + 1,
+          t.sender?.at ?? null,
+          mapRunStatus(t.status),
+          t.sender?.name ?? null,
+          t,
+        ),
+      );
+    }
+    // 命中覆盖：displayTurns 按 realRunId ?? runId（与聊天区 data-turn-key 同源）
+    // 建索引，命中 run 的条目用本地 prompt / 首个 text 段摘要覆盖，loaded=true。
+    const loadedByKey = new Map(
+      displayTurns.map((t) => [t.realRunId ?? t.runId, t] as const),
+    );
+    const entries = orderedRuns.map((run, i) =>
+      buildEntry(
+        run.id,
+        i + 1,
+        run.started_at ?? null,
+        mapRunStatus(run.status),
+        run.sender_name,
+        loadedByKey.get(run.id),
+      ),
+    );
+    // 孤儿兜底（R-03）：displayTurns 中 key 不在 runs 的轮次（实时新轮 SSE 先到 /
+    // runs 刷新滞后、本地占位 runId）尾部追加，turnNo 接续编号、loaded=true；
+    // 同 key 多块（游标变体双块）只追加一次。
+    const seenKeys = new Set(orderedRuns.map((run) => run.id));
+    let orphanNo = entries.length;
+    for (const t of displayTurns) {
+      const key = t.realRunId ?? t.runId;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      orphanNo += 1;
+      entries.push(
+        buildEntry(
+          key,
+          orphanNo,
+          t.sender?.at ?? null,
+          mapRunStatus(t.status),
+          t.sender?.name ?? null,
+          t,
+        ),
+      );
+    }
+    return entries;
+  }, [orderedRuns, displayTurns]);
 
   /* quick（2026-09-02 本地 Agent 会话信息折叠）：tool_report 会话激活后
    *（turn_count>0），对话流里 CLI 上报的历史轮（run spec_strategy=
@@ -2403,6 +2766,9 @@ export function SessionPanelPage({
         turns={dialogTurns}
         viewMode={viewMode}
         errorMsg={errorMsg}
+        // task-04：目录跳转命中受控高亮（~2.2s 自清；TurnTimeline 内逐行派生
+        // isHighlighted 进 memo 行，R-07）。
+        highlightTurnKey={highlightTurnKey}
         sessionStatus={deriveTimelineSessionStatus(ended, session.status === "failed", restoring)}
         pendingRequests={pendingRequests}
         dialogHistory={dialogHistory}
@@ -2425,6 +2791,11 @@ export function SessionPanelPage({
     <section
       ref={panelRef}
       className={mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP}
+      // task-06（2026-09-08-session-turn-nav / R-05）：mobile 轮次导航 Drawer
+      // （getContainer=false 内联渲染）的定位上下文——仅 mobile 补
+      // position:relative，不进 className（mobile 根类字面量回归锚逐字不变，
+      // session-panel-variant 断言不回归）；desktop 不动。
+      style={mobile ? { position: "relative" } : undefined}
       aria-label="会话面板"
       data-variant={variant}
     >
@@ -2675,6 +3046,23 @@ export function SessionPanelPage({
                     </span>
                   )}
                   <div className="flex flex-col items-start gap-1 border-t border-border pt-2">
+                    {/* task-06（2026-09-08-session-turn-nav / FR-04 / R-05）：轮次导航
+                        入口——打开面板内 Drawer 行式列表（触屏无 hover，不复用
+                        TickRail 飞出卡形态；列表挂载见面板尾部 mobile 分支）。 */}
+                    <button
+                      type="button"
+                      aria-label="轮次导航"
+                      title="轮次导航：按轮次跳转会话历史"
+                      data-testid="session-turn-nav-trigger"
+                      onClick={() => {
+                        setMobileMoreOpen(false);
+                        setTurnNavOpen(true);
+                      }}
+                      className="flex w-full shrink-0 cursor-pointer items-center gap-2 rounded px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <ListOrdered aria-hidden className="h-3.5 w-3.5" />
+                      轮次导航
+                    </button>
                     <ActivityCatalog
                       bashProgress={bashProgress}
                       agentTasks={agentTasks}
@@ -2832,7 +3220,9 @@ export function SessionPanelPage({
             （task-13 共享子组件；弹窗与新页面同构复用。gap-fix：turns 用
             displayTurns）；关联本会话的日志改走顶部折叠栏（AgentLogCard，
             ql-20260904-021，见上方挂载；streamFooter 注入口保留但暂无消费方）。
-          - task-14：mobile 外包横向滚动容器（表格等横向内容不撑破竖屏视口）。 */}
+          - task-14：mobile 外包横向滚动容器（表格等横向内容不撑破竖屏视口）。
+          - task-05（2026-09-08-session-turn-nav）：desktop 外包「刻度轨 flex 行」
+            （左 TurnCatalog + 右聊天列 flex-1 min-w-0，见分支内注释）。 */}
       {mobile ? (
         <div className={PANEL_BODY_WRAP_CLS_MOBILE}>
           {/* contents 包裹保布局零变化（子元素仍直接参与外层 flex/scroll），
@@ -2842,8 +3232,28 @@ export function SessionPanelPage({
           </div>
         </div>
       ) : (
-        <div ref={bodyWrapCallbackRef} className="contents">
-          {sessionBody}
+        /* task-05（2026-09-08-session-turn-nav / FR-01 FR-05 FR-06 / D-006@v1 D-007@v1）：
+            desktop（含悬浮窗 host——不传 variant 默认 desktop，D-006 零改动自动
+            复用）主体外包「刻度轨 flex 行」：左 TurnCatalog 常驻 ~30px 轨
+            （D-007：无折叠 / 无 localStorage / 无头部），右聊天列 flex-1 min-w-0
+            占满剩余宽度；整行 min-h-0 flex-1 接管面板剩余高度，聊天列 flex-col
+            保持原纵向滚动高度链（AgentLogSessionBody / TurnTimeline 根均自带
+            min-h-0 flex-1，不受包裹影响）。contents 挂载点原样保留在聊天列内
+            ——触顶自动加载滚动监听与 task-04 跳转选择器（timelineScrollEl 按
+            data-testid 深查）依赖不变。mobile 分支不动（Drawer 入口属 task-06）；
+            dialog 模式不经本渲染分支自然不挂（FR-06）。 */
+        <div className="flex min-h-0 flex-1">
+          <TurnCatalog
+            entries={catalogEntries}
+            activeTurnKey={activeTurnKey}
+            loadingEarlier={historyLoading}
+            onJump={handleJumpToTurn}
+          />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div ref={bodyWrapCallbackRef} className="contents">
+              {sessionBody}
+            </div>
+          </div>
         </div>
       )}
 
@@ -3026,6 +3436,82 @@ export function SessionPanelPage({
           />
         </div>
       </div>
+
+      {/* task-06（2026-09-08-session-turn-nav / FR-04 FR-06 / R-05 / AC-06）：
+          mobile 轮次导航 Drawer——⋯ 菜单「轮次导航」项触发。getContainer=false
+          内联渲染于面板根（上方 section 已补 position:relative 定位上下文，
+          面板自身 overflow-hidden 兜底裁剪）→ 不占全屏、不与悬浮窗高度冲突
+          （悬浮窗走 desktop 分支不挂载；dialog 模式不经本渲染分支自然不挂）。
+          宽 min(78vw,300px) 左滑、遮罩可点关、destroyOnHidden（antd v6 API，
+          跟随 mobile-filter-drawer 既有用法）。内容为行式列表形态（触屏无
+          hover，不复用 TickRail 飞出卡）：轮号 + 提问摘要一行 + meta，active
+          行左侧品牌细线；点击行 → handleJumpToTurn（与 desktop 同一回调）+
+          自动关闭（选中即关）。主题色全部走语义类/主题变量，不写死色值。 */}
+      {mobile && (
+        <Drawer
+          open={turnNavOpen}
+          onClose={() => setTurnNavOpen(false)}
+          placement="left"
+          size="min(78vw, 300px)"
+          getContainer={false}
+          destroyOnHidden
+          rootClassName="session-turn-nav-drawer-root"
+          title={<span className="text-[14px] font-medium">轮次导航</span>}
+          styles={{ body: { padding: 4 } }}
+        >
+          <nav
+            aria-label="轮次导航列表"
+            data-testid="session-turn-nav-list"
+            className="flex flex-col gap-0.5"
+          >
+            {catalogEntries.map((entry) => {
+              const active = entry.key === activeTurnKey;
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  data-testid="session-turn-nav-item"
+                  aria-current={active ? "true" : undefined}
+                  onClick={() => {
+                    setTurnNavOpen(false);
+                    void handleJumpToTurn(entry);
+                  }}
+                  className={cn(
+                    "flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
+                    // active 行左侧品牌细线（inset 阴影承载，防布局位移；
+                    // 变量先例对齐 turn-catalog 未加载描边 var(--color-brand-600)）
+                    active
+                      ? "bg-muted/60 shadow-[inset_2px_0_0_0_var(--color-brand-600)]"
+                      : "hover:bg-muted/60",
+                  )}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span className="shrink-0 text-[12px] font-semibold text-foreground">
+                      第{entry.turnNo}轮
+                    </span>
+                    <span className="truncate text-[10px] text-muted-foreground">
+                      {turnNavRowMeta(entry)}
+                    </span>
+                  </span>
+                  <span className="line-clamp-1 text-[11px] leading-4 text-foreground/90">
+                    {entry.promptSummary ?? TURN_NAV_UNLOADED_HINT}
+                  </span>
+                  {entry.answerSummary && (
+                    <span className="line-clamp-1 text-[10.5px] leading-4 text-muted-foreground">
+                      {entry.answerSummary}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            {catalogEntries.length === 0 && (
+              <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                暂无轮次
+              </p>
+            )}
+          </nav>
+        </Drawer>
+      )}
 
       {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身
           子会话；引擎信息取主控会话（分身派发自同一 claude 主控，D-003 门控
