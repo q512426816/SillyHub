@@ -44,12 +44,12 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 ## 三、P0 详述
 
 ### P0-1 daemon WebSocket 零鉴权
-- **文件**:`backend/app/modules/daemon/router.py:1958-2023`
+- **文件**:`backend/app/modules/daemon/router/__init__.py`
 - **证据**:handler 仅校验 `daemon_local_id` 在 `DaemonInstance` 表存在即 `websocket.accept()`,**无 Bearer / X-API-Key / Origin 校验**;docstring 声称的"HTTP upgrade 阶段鉴权"未实现。daemon 侧 `sillyhub-daemon/src/ws-client.ts:435,355-357` 连接时不带任何认证头。
 - **修复**:WS 握手强制 `_extract_bearer`+`get_current_user`(失败 `close(4401)`),并比对连接方是注册 owner;daemon_local_id 不再当 bearer,改用已下发的长期 API key 做 WS 鉴权,改走 header(不入 access log)并支持轮换。
 
 ### P0-2 claim_lease IDOR 泄露明文 LLM api_key
-- **文件**:`backend/app/modules/daemon/router.py:949-968`、`backend/app/modules/daemon/lease/service.py:141-215`、`backend/app/modules/daemon/lease/context.py:138-151`
+- **文件**:`backend/app/modules/daemon/router/__init__.py`、`backend/app/modules/daemon/lease/service.py:141-215`、`backend/app/modules/daemon/lease/context.py:138-151`
 - **证据**:`POST /leases/{lease_id}/claim` 仅 `get_current_principal` + 校验 `status=="pending"`,**不校验调用方归属**;claim 成功返回的 payload 经 `_inject_provider_config` 解密 owner 的 LlmProvider api_key 明文落入 `provider_config.api_key`。任何登录用户知道一个 pending `lease_id`(会出现在 agent_run 详情/SSE/日志)即可拿走 lease 并得到明文 key。
 - **修复**:claim 时校验调用主体 = lease 绑定 runtime 的 owner;或改用 lease 级一次性 claim_token 替代"先到先得"。
 

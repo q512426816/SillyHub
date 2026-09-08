@@ -7,7 +7,7 @@ revision_note: |
   v1 错→v2 双路径→v3 单路径 daemon→v4 HostFsDelegate 同步→v5 异步化（close 快速 commit + 后台 gate 任务 + reconcile）。
 
   v6（子代理第 6 轮 review + 我核实，2026-07-10）：v5 架构对，但有 4 个"伪代码没贴合项目现有基础设施"的硬伤：
-  H1 gate 任务用 self._session_factory——RunSyncService 没这属性（backend/app/modules/daemon/run_sync/service.py:198-199 只有 self._session）；
+  H1 gate 任务用 self._session_factory——RunSyncService 没这属性（backend/app/modules/daemon/run_sync/service/__init__.py 只有 self._session）；
   H2 _trigger_stage_completion_callback 写死 self._session（:959/965/969/987），gate 任务复用会踩同坑；
   H3 migration down_revision 写死 419d34f8e33f——当前分支多 head，应开工时 alembic heads 确认；
   H4 裸 asyncio.create_task——GC 静默回收 + 异常静默丢失，项目有 _fire_background_task 范式（backend/app/modules/agent/service.py:358）。
@@ -41,7 +41,7 @@ revision_note: |
 ### 1.2 stage 完成唯一路径
 - `backend/app/modules/agent/placement.py:364`：`dispatch_to_daemon` lease kind 硬编码 `'interactive'`（bfaa9256）
 - `sillyhub-daemon/src/daemon.ts`：`kind==='interactive'` → `_startInteractiveSession` early-return
-- **stage 完成唯一出口是 `close_interactive_run`**（`backend/app/modules/daemon/router.py:2047` → `backend/app/modules/daemon/run_sync/service.py:464`）
+- **stage 完成唯一出口是 `close_interactive_run`**（`backend/app/modules/daemon/router/__init__.py` → `backend/app/modules/daemon/run_sync/service/__init__.py`）
 - `complete_lease:541` 的 callback 对 stage 是死代码（lease:608 过时注释与 :802 task-05 矛盾，以 :802 为准）
 - **task-00 原始障碍**：`close_interactive_run`（`:684`）只更新 `last_dispatch.status`（`:806-842`），不触发 auto_dispatch
 
@@ -75,7 +75,7 @@ revision_note: |
 
 ### 3b. close 快速返回 + gate 异步任务 + reconcile（v6 用项目范式）
 
-**close_interactive_run（`backend/app/modules/daemon/run_sync/service.py:684`）改动**：
+**close_interactive_run（`backend/app/modules/daemon/run_sync/service/__init__.py`）改动**：
 - 保留：agent_run 终态映射（`:783-800`）+ `gate_status='pending'`（**M2：在此区设，随 :876 commit**）+ last_dispatch.status（`:806-842`）+ usage（`:849-866`）+ `:876` commit + Redis publish（`:879-924`）
 - 🔴 **删 v4 R2**（末尾补 callback）
 - 🔴 **新增**：`commit :876` 后、`return :935` 前，`self._fire_background_task(self._run_gate_decision_task(agent_run.id, workspace_id, change_id))` → 快速返回。gate_status='pending' 已随 commit 持久化，gate 任务能读到
@@ -117,7 +117,7 @@ async def _run_gate_decision_task(self, agent_run_id, workspace_id, change_id):
             agent_run.gate_status = "decided"
             await gate_session.commit()
             # H2：内联 sync + auto_dispatch（用 gate_session，不调 self._trigger_stage_completion_callback
-            # 避免它写死 self._session 踩坑；逻辑对齐 backend/app/modules/daemon/run_sync/service.py:969-993）
+            # 避免它写死 self._session 踩坑；逻辑对齐 backend/app/modules/daemon/run_sync/service/__init__.py）
             from app.modules.change.dispatch import SillySpecStageDispatchService, auto_dispatch_next_step
             svc = SillySpecStageDispatchService(gate_session)
             sync_result = await svc.sync_stage_status(gate_session, change_id, agent_run_id)
@@ -187,7 +187,7 @@ agent turn 完成 → daemon notifyRunResult:1402 → backend close_interactive_
 
 | 侧 | 文件:行号 | 改动 |
 |---|---|---|
-| 🔴 close 改 enqueue | `backend/app/modules/daemon/run_sync/service.py:595`（commit `:876` 后、return `:935` 前） | 删 R2；加 `_fire_background_task(_run_gate_decision_task)`；gate_status='pending' 在 :784 区随 commit |
+| 🔴 close 改 enqueue | `backend/app/modules/daemon/run_sync/service/__init__.py`（commit `:876` 后、return `:935` 前） | 删 R2；加 `_fire_background_task(_run_gate_decision_task)`；gate_status='pending' 在 :784 区随 commit |
 | 🔴 H4 后台任务范式 | `backend/app/modules/daemon/run_sync/service.py` RunSyncService 类 | 加 `_background_tasks: set` + `_fire_background_task` + `_on_bg_task_done`（抄 backend/app/modules/agent/service.py:358-375） |
 | 🔴 H1+H2 gate 任务 | `backend/app/modules/daemon/run_sync/service.py` 新 `_run_gate_decision_task` | `get_session_factory()()` 独立 session + R3 cas + gate + 内联 sync/auto_dispatch（不调 callback） |
 | 🔴 M3 reconcile | `backend/app/modules/change/dispatch.py` 新 `reconcile_pending_gate_decisions` + 挂 `backend/app/main.py:150` lifespan | 启动扫 completed + gate_status in (pending, running) 全重置 pending + 重 enqueue（都是孤儿，无超时阈值） |
@@ -253,9 +253,9 @@ agent turn 完成 → daemon notifyRunResult:1402 → backend close_interactive_
 | `read_verify_result` | `backend/app/modules/agent/dispatch.py` | 被 gate verify 替代 |
 | `sync_stage_status` | `backend/app/modules/agent/dispatch.py` | gate 任务内联调（gate_session） |
 | `reconcile_stale_runs` | `backend/app/modules/agent/dispatch.py`（被 `_cleanup_before_dispatch:553` 同步调） | per-dispatch 非启动 cron；**reconcile_gate 不对齐它，挂 lifespan** |
-| `close_interactive_run` | `backend/app/modules/daemon/run_sync/service.py:595`（早返回 `:772-779` / commit `:876` / 末尾 `:935`） | v6：快速 commit + `_fire_background_task` enqueue |
-| `RunSyncService.__init__` | `backend/app/modules/daemon/run_sync/service.py:103`（仅 self._session + self._facade） | **无 session_factory** → H1 用 get_session_factory()() |
-| `_trigger_stage_completion_callback` | `backend/app/modules/daemon/run_sync/service.py:3126`（self._session `:959/965/969/987`） | **H2 gate 任务不调它，内联** |
+| `close_interactive_run` | `backend/app/modules/daemon/run_sync/service/__init__.py`（早返回 `:772-779` / commit `:876` / 末尾 `:935`） | v6：快速 commit + `_fire_background_task` enqueue |
+| `RunSyncService.__init__` | `backend/app/modules/daemon/run_sync/service/__init__.py`（仅 self._session + self._facade） | **无 session_factory** → H1 用 get_session_factory()() |
+| `_trigger_stage_completion_callback` | `backend/app/modules/daemon/run_sync/service/__init__.py`（self._session `:959/965/969/987`） | **H2 gate 任务不调它，内联** |
 | `get_session_factory` | `backend/app/core/db.py:87` | H1 独立 session（范式 backend/app/modules/agent/service.py:1126） |
 | `_fire_background_task` 范式 | `backend/app/modules/agent/service.py:358-375`、`backend/app/modules/agent/coordinator.py` | H4 复用（强引用 set + done_callback） |
 | `reconcile_pending_gate_decisions`（新） | 挂 `backend/app/main.py:150` lifespan | M3 启动扫孤儿 |

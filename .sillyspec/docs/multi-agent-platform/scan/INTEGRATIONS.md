@@ -31,8 +31,8 @@ generator: sillyspec-scan
   - backend 端点：`backend/app/modules/daemon/router.py` 中 `@router.websocket("/ws")`（路由前缀 `/api/daemon`，即 `/api/daemon/ws`），按 `runtime_id` 接入 `DaemonWsHub`（`hub.connect(rid, websocket)`），receive_json 驱动；无效 runtime 关闭码 4001。
   - daemon 侧：`sillyhub-daemon/src/ws-client.ts`（`import WebSocket from 'ws'`），内部把 http(s) URL 转 `ws://`/`wss://`，与 backend `_build_ws_url` 1:1；交互式会话远程人审（manualApproval）依赖该通道回传 resolver 信号（`sillyhub-daemon/src/interactive/session-manager.ts`）。
 - **REST 注册/心跳**（daemon → backend，启动时与兜底）：
-  - `/api/daemon/register`（`backend/app/modules/daemon/router.py:136`）：daemon 启动时在三个循环（heartbeat/poll/ws）前注册 runtime。
-  - `/api/daemon/heartbeat`（`backend/app/modules/daemon/router.py:168`）：HTTP 心跳，作为 WebSocket 不可用时的兜底。
+  - `/api/daemon/register`（`backend/app/modules/daemon/router/__init__.py`）：daemon 启动时在三个循环（heartbeat/poll/ws）前注册 runtime。
+  - `/api/daemon/heartbeat`（`backend/app/modules/daemon/router/__init__.py`）：HTTP 心跳，作为 WebSocket 不可用时的兜底。
   - lease 相关：`backend/app/modules/daemon/lease_service.py` 维护租约与取消信号（注释表明 WS Hub 取消信号在 Wave 2 接入）。
 - **daemon 侧心跳循环**：
   - `sillyhub-daemon/src/config.ts`：`heartbeat_interval=15`、`lease_heartbeat_interval=5`。

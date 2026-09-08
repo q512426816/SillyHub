@@ -43,7 +43,7 @@
 - `backend/app/modules/daemon/lease_service.py:281-340` `cancel_lease` —— 把 lease 置 cancelled + AgentRun 置 killed（给用户即时反馈），末尾调 `_ws_cancel_stub`
 - `backend/app/modules/daemon/lease_service.py` `_ws_cancel_stub` —— **只打一行日志，什么都不发**。注释仍写"Wave 2 实现 WS Hub 后替换"（陈旧）
 - daemon 端 interactive 路径 `sillyhub-daemon/src/daemon.ts:3234` `if (kind === 'interactive') { _startInteractiveSession(...); return; }` —— **直接 return，不进 TaskRunner，不启 lease 心跳循环**
-- 心跳循环 `sillyhub-daemon/src/task-runner.ts:1193` `_runLeaseHeartbeatLoop` 只在 batch `runLease`（sillyhub-daemon/src/task-runner.ts:512）内启动 → **interactive session 没有任何机制感知 backend 的 cancel**
+- 心跳循环 `sillyhub-daemon/src/task-runner/spawn-stream.ts:63` `_runLeaseHeartbeatLoop` 只在 batch `runLease`（sillyhub-daemon/src/task-runner/spawn-stream.ts:63）内启动 → **interactive session 没有任何机制感知 backend 的 cancel**
 
 **结果**：lease=cancelled + AgentRun=killed（DB 层"停了"），daemon 内存里 SDK 进程继续跑到自然结束 / idle expire。
 
@@ -51,10 +51,10 @@
 
 **事实**：`backend/app/modules/daemon/ws_hub.py:52` `DaemonWsHub` 完整，`send_session_control`（含 SESSION_INTERRUPT/END/INJECT/RESUME）现成可用。
 - backend 接收端：daemon WS 握手 → `connect()`
-- daemon 接收端：`sillyhub-daemon/src/daemon.ts` `case SESSION_INTERRUPT: _sessionManager.interrupt(sessionId)` → `sillyhub-daemon/src/interactive/session-manager.ts:3169` → `driver.interrupt` → `sillyhub-daemon/src/interactive/claude-sdk-driver.ts:512` `q.interrupt()`（turn 级 abort）
+- daemon 接收端：`sillyhub-daemon/src/daemon.ts` `case SESSION_INTERRUPT: _sessionManager.interrupt(sessionId)` → `sillyhub-daemon/src/interactive/session-manager/turn-control.ts:420` → `driver.interrupt` → `sillyhub-daemon/src/interactive/claude-sdk-driver.ts:512` `q.interrupt()`（turn 级 abort）
 - **有测试覆盖**：`test_ws_hub_session_control.py`、`ws-client-session-control.test.ts`
-- 现成模板：`backend/app/modules/daemon/session/service.py:830` `interrupt_session`（含 daemon_id 解析 `_resolve_daemon_id_for_runtime`）
-- 端点：`POST /api/daemon/sessions/{id}/interrupt`（`backend/app/modules/daemon/router.py:1781`）—— **目前无人调用**
+- 现成模板：`backend/app/modules/daemon/session/service/__init__.py` `interrupt_session`（含 daemon_id 解析 `_resolve_daemon_id_for_runtime`）
+- 端点：`POST /api/daemon/sessions/{id}/interrupt`（`backend/app/modules/daemon/router/__init__.py`）—— **目前无人调用**
 
 **含义**：修发现 1 的僵尸，**不需要补 WS Hub**，把 stub 换成已有 `send_session_control` 即可。
 
@@ -72,7 +72,7 @@
 
 **写代码 mission（impl worker）：断在 2 处** ❌
 - 断点 A：`finalize_execute_mission`（`backend/app/modules/agent/finalizer.py:244`）是 Wave 4 占位，**全代码无调用点**。grep 仅定义处 + dispatch.py 文档注释命中
-- 断点 B：daemon batch 其实**已经上报 patch**（`sillyhub-daemon/src/task-runner.ts:706` `_finish` 调 `workspace.collectDiff`；`sillyhub-daemon/src/daemon.ts` completeLease body 含 patch/files_changed/insertions/deletions），backend `_apply_patch_to_worktree`（`backend/app/modules/daemon/lease/service.py:370`）也消费它（单 agent 写代码已是完整闭环）—— **但 collect_completed_artifacts 没把 patch 存成 `AgentArtifact(kind='patch')`**，所以 finalize_execute_mission 的 `select kind='patch'`（finalizer.py）查不到东西
+- 断点 B：daemon batch 其实**已经上报 patch**（`sillyhub-daemon/src/task-runner/skill-prompt.ts:286` `_finish` 调 `workspace.collectDiff`；`sillyhub-daemon/src/daemon.ts` completeLease body 含 patch/files_changed/insertions/deletions），backend `_apply_patch_to_worktree`（`backend/app/modules/daemon/lease/service.py:370`）也消费它（单 agent 写代码已是完整闭环）—— **但 collect_completed_artifacts 没把 patch 存成 `AgentArtifact(kind='patch')`**，所以 finalize_execute_mission 的 `select kind='patch'`（finalizer.py）查不到东西
 - **硬阻塞 C**：`backend/app/modules/agent/execution.py:49` `dispatch_worker` 给每个 worker 传**同一个 `root_path`**（workspace 根目录，无 per-worker 后缀）→ v1 共享 worktree。多个 impl worker 并行写会互相覆盖文件 + patch 基线漂移。`backend/app/modules/agent/execution.py:755, 914-917` 注释明确："per-Worker 独立 worktree 隔离 = D-006 完整实现延后；v1 共享 worktree"
 
 **daemon 端子代理可见性（独立维度，已落地）**：
@@ -102,7 +102,7 @@
 
 #### P0-1 修 interactive kill 僵尸
 - **改动**：`backend/app/modules/daemon/lease_service.py` 把 `self._ws_cancel_stub(lease)` 替换为——当 `lease.kind == 'interactive'` 且 session 仍 active 时，调 `get_daemon_ws_hub().send_session_control(daemon_id, DAEMON_MSG_SESSION_INTERRUPT, {session_id, lease_id, runtime_id})`
-- **依据**：现成模板 `backend/app/modules/daemon/session/service.py:830` `interrupt_session`（含 `_resolve_daemon_id_for_runtime`）；WS Hub + daemon 接收端 + 测试全就位（发现 2）
+- **依据**：现成模板 `backend/app/modules/daemon/session/service/__init__.py` `interrupt_session`（含 `_resolve_daemon_id_for_runtime`）；WS Hub + daemon 接收端 + 测试全就位（发现 2）
 - **改动量**：小（一个分支调用 + helper 复用）
 - **风险**：低。WS 发送失败 best-effort（不阻塞 cancel_lease 主流程，与 `end_session` 一致）
 - **可选收尾**：把 `_ws_cancel_stub` 注释里"Wave 2"改掉（Hub 早已就位，注释误导）
@@ -134,7 +134,7 @@
 - **依据**：后端 `backend/app/modules/agent/coordinator.py:191` `resume_run`（token + 重置 pending）；interactive SESSION_RESUME 续上下文（claude/codex，`backend/app/modules/daemon/session/service.py`）；token 预生成（`backend/app/modules/agent/service.py`）
 - **改动量**：小
 - **注意**：batch 是整个重跑（retry_count+1），只有 interactive 真续上下文——UI 要标注
-- **限制**：interactive resume 仅 claude/codex，其他 provider 抛 `DaemonSessionResumeUnsupported`（`backend/app/modules/daemon/session/service.py:577`）
+- **限制**：interactive resume 仅 claude/codex，其他 provider 抛 `DaemonSessionResumeUnsupported`（`backend/app/modules/daemon/session/service/__init__.py`）
 
 #### P1-3 前端展示 diff_summary
 - **改动**：智能体控制台活跃卡/历史行加"改动"展开，渲染 `run.diff_summary`（最好 +/- 着色 diff 视图）

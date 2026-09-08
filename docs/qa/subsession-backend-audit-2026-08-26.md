@@ -54,7 +54,7 @@ created_at: 2026-08-26 05:56:48
 
 ### A.3 `_team_mission_summary` 查询量化（清单 3）
 
-backend/app/modules/daemon/router.py:2797-2961，单次调用：
+backend/app/modules/daemon/router/__init__.py，单次调用：
 
 | 步骤 | 查询数 |
 |---|---|
@@ -94,10 +94,10 @@ backend/app/modules/daemon/router.py:2797-2961，单次调用：
 
 ### A.7 run_sync 四闸（清单 7）
 
-`_is_gate_rejected_first_failure`（backend/app/modules/daemon/run_sync/service.py:1963）：
+`_is_gate_rejected_first_failure`（backend/app/modules/daemon/run_sync/service/__init__.py）：
 
 - **run_count==1 与 autoflush 时序【通过】**：调用点在 run/session 对象已 `session.add` 之后（:1337/:1383），count 查询触发 autoflush，本 run 计入；追问轮 count>1 不命中。正确。
-- **readiness 单例【P2-F11】**：`get_session_readiness()._ready` 是**进程内** set（backend/app/modules/daemon/session/service.py:1008）。多 worker/多副本部署下，daemon /ready 上报落在进程 A、run 终态收口落在进程 B 时，闸③「从未 ready」误判 → 首轮真实失败（如模型错误）的存活分身被误翻 failed 收口。单进程部署无碍；上生产扩副本前需改 Redis 共享或按 daemon WS 连接亲和路由。
+- **readiness 单例【P2-F11】**：`get_session_readiness()._ready` 是**进程内** set（backend/app/modules/daemon/session/service/__init__.py）。多 worker/多副本部署下，daemon /ready 上报落在进程 A、run 终态收口落在进程 B 时，闸③「从未 ready」误判 → 首轮真实失败（如模型错误）的存活分身被误翻 failed 收口。单进程部署无碍；上生产扩副本前需改 Redis 共享或按 daemon WS 连接亲和路由。
 
 ### A.8 converge 层 0 守卫（清单 8）
 
@@ -142,7 +142,7 @@ backend/app/modules/daemon/router.py:2797-2961，单次调用：
 |---|---|---|---|---|
 | F01 | **P1** | backend/app/modules/agent/mission.py:217-228 / backend/app/modules/agent/patrol.py:713-790 | 「ended 未 done 无标记」分身使 derive 恒 running，converge 永久 busy、awaiting_input 超时收敛永不触发，非预算 mission 无自动出口 | 孤儿扫描扩档：活跃 mission 下「会话 ended/failed 或 run 全终态 + 未 done + 超宽限期」→ 置通用 force_ended 标记键（虚拟映射即落 failed） |
 | F02 | **P1** | backend/app/modules/agent/patrol.py:747-758 | 终态 mission 名单 `created_at ASC LIMIT 100` 无水位，>100 后新终态 mission 的孤儿永远扫不到（零孤儿承诺失效）且每轮恒付 ~201 查询 | 加时间窗（如 `GREATEST(converged_at,cancelled_at) > now()-interval '7 days'`）或扫描水位；排序按终态时间 |
-| F03 | **P1(性能)** | backend/app/modules/daemon/router.py:4193 | `_team_mission_summary` 每 mission ≈14+Nd 查询，mission 行重复 get 4 次 | `mission_worker_sessions*` 加可选 `root_session_id` 参数；summary 内一次树结果喂三口径；done 判定批量 |
+| F03 | **P1(性能)** | backend/app/modules/daemon/router/__init__.py | `_team_mission_summary` 每 mission ≈14+Nd 查询，mission 行重复 get 4 次 | `mission_worker_sessions*` 加可选 `root_session_id` 参数；summary 内一次树结果喂三口径；done 判定批量 |
 | F04 | P2 | backend/app/modules/agent/mcp_tools.py:2141 / backend/app/modules/agent/mission_context.py:343 | worker_done 的 DEL→SETNX 非原子，同波双完成 → 主控双注入 | Lua 原子 DEL+SETNX，或 SETNX 失败后 GET 比较周期时间戳再决定 |
 | F05 | P2 | backend/app/modules/agent/patrol.py:879-899 / backend/app/modules/agent/mcp_tools.py:702-733 | constraints JSON 多写者 read-modify-write 互相丢键（conflict_attempts 被 budget 抢占覆盖等） | 抢占 UPDATE 改 `constraints = constraints \|\| :patch`（jsonb 合并） |
 | F06 | P2 | backend/app/modules/agent/mcp_tools.py:1175 | commit#1 与 lease 段 try 外异常/崩溃 → 「pending session+run 无 lease」半孤儿永久占 MAX_WORKERS 且阻塞 converge | commit#1 降 flush 实现真单事务；或 patrol 补 TTL 清理档 |
@@ -150,9 +150,9 @@ backend/app/modules/daemon/router.py:2797-2961，单次调用：
 | F08 | P2 | backend/app/modules/agent/model.py:877 | 树 CTE 最终 join 在 PG 走 Hash Join + Seq Scan agent_sessions，表大后每次 O(全表)（EXPLAIN 实证） | 末段改 `AgentSession.id.in_(select(tree.c.sid))` PK 驱动 |
 | F09 | P2 | backend/app/modules/agent/mcp_tools.py/1683/2114、backend/app/modules/agent/control.py、backend/app/modules/agent/finalizer.py、backend/app/modules/agent/mission_context.py、backend/app/modules/agent/patrol.py | is_worker_complete 循环 N+1（只在 done 分身上发生） | 提供 `is_workers_complete_batch`（批量活跃 turn + 纯函数），循环点替换 |
 | F10 | P2 | backend/app/modules/agent/mcp_tools.py:2664 | mission_status 每次 per-scope git probe RPC | 30-60s TTL 缓存探测结果 |
-| F11 | P2 | backend/app/modules/daemon/run_sync/service.py:1106 / backend/app/modules/daemon/session/service.py:615 | readiness 进程内单例，多副本部署四闸③误判 → 存活分身被误收口 | Redis 共享 readiness 或文档钉死单进程部署约束 |
+| F11 | P2 | backend/app/modules/daemon/run_sync/service/__init__.py / backend/app/modules/daemon/session/service/__init__.py | readiness 进程内单例，多副本部署四闸③误判 → 存活分身被误收口 | Redis 共享 readiness 或文档钉死单进程部署约束 |
 | F12 | P3 | backend/app/modules/agent/mission_schema.py:17 等 | budget_usd=0 合法但语义=永不能派工 | `ge=0`→`gt=0` 或前端禁 0 并文案说明 |
-| F13 | P3 | backend/app/modules/agent/mcp_tools.py / backend/app/modules/daemon/router.py:4300 | workers 行三值映射漏 budget_force_ended 分支（行 running vs mission degraded 展示不一致） | 对齐 `_virtual_status` 补该分支 |
+| F13 | P3 | backend/app/modules/agent/mcp_tools.py / backend/app/modules/daemon/router/__init__.py | workers 行三值映射漏 budget_force_ended 分支（行 running vs mission degraded 展示不一致） | 对齐 `_virtual_status` 补该分支 |
 | F14 | P3 | backend/app/modules/agent/patrol.py:654 | 职责④ `role != 'orchestrator'` 无 NULL 守卫，与全库 `or_(role IS NULL,...)` 口径不一致（当前首 run 恒有 role 难命中） | 补 NULL 守卫对齐 |
 | F15 | P3 | backend/app/modules/agent/mcp_tools.py:1582-1618 | 层 0 守卫「三 header 皆无放行」依赖外层 401 契约（当前不可达，脆弱） | 该分支也 403，注释改「防御性」 |
 | F16 | P3 | backend/app/modules/agent/mcp_tools.py:1758 | 层 0 判层按 tree_depth，脏数据 depth=0 分身可过守卫 | 可选改为 parent_session_id 判空或双判 |

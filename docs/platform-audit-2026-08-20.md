@@ -41,7 +41,7 @@
 | ID | 问题 | 位置 | 复核 | 状态 |
 |----|------|------|------|------|
 | DA-2 | `get_spec_bundle` RPC 无 allowed_roots 守卫，恶意/失陷 backend 可打包宿主任意路径 `.sillyspec` 整树外传（同文件其余 host_fs handler 均有校验） | sillyhub-daemon/src/daemon.ts | ✅ | 已修复（2026-08-20）|
-| DA-5 | shell:true 路径下 `_killChild` 只杀 cmd.exe 包装层，agent 孙进程成孤儿继续烧 token（runtime-handler 已有 taskkill /PID /T /F 范式未复用） | sillyhub-daemon/src/task-runner.ts:2456 | ✅ | 已修复（2026-08-20）|
+| DA-5 | shell:true 路径下 `_killChild` 只杀 cmd.exe 包装层，agent 孙进程成孤儿继续烧 token（runtime-handler 已有 taskkill /PID /T /F 范式未复用） | sillyhub-daemon/src/task-runner/runner-types.ts:218 | ✅ | 已修复（2026-08-20）|
 
 ### CI
 
@@ -84,7 +84,7 @@
 | DA-4 | host_fs 穿越校验只做词法 pathResolve 不解析 symlink/junction（path-utils 已有 resolveRealPath 未用） | sillyhub-daemon/src/host-fs-handler.ts 多处 | 已修复（2026-08-20）|
 | DA-6 | host_fs.run_command env 合并允许覆盖 PATH → 白名单命令可被解析到任意可执行文件 | sillyhub-daemon/src/host-fs-handler.ts:1015-1035 | ✅待修复（剔除 PATH/PATHEXT/SystemRoot） |
 | DA-7 | config.json 含 api_key/token 明文且无 0600（credentials.json 有） | sillyhub-daemon/src/config.ts:578-586 | 已修复（2026-08-20）|
-| DA-9 | codex close() fire-and-forget 未 await，终态上报先于进程清理 | sillyhub-daemon/src/interactive/session-manager.ts:2297 | 不修（低风险，另开变更顺手做） |
+| DA-9 | codex close() fire-and-forget 未 await，终态上报先于进程清理 | sillyhub-daemon/src/interactive/session-manager/lifecycle.ts:252 | 不修（低风险，另开变更顺手做） |
 | DA-10 | WS RPC 分发无在途上限，可被打满 | sillyhub-daemon/src/ws-client.ts:427 | 不修（需设计信号量策略，另开变更） |
 | DA-11 | src/index.ts W0 占位注释严重失实 + .gitkeep 残留 | sillyhub-daemon/src/index.ts | 已修复（2026-08-20）|
 | DA-12 | spikes/06-mcp-server 已结题吸收进 src 仍被跟踪 | sillyhub-daemon/spikes/06-mcp-server/ | 已修复（2026-08-20）|

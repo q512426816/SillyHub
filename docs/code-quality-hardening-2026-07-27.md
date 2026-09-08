@@ -31,7 +31,7 @@ created_at: 2026-07-27 00:50:00
 ## 1. 执行范围（按 Wave）
 
 ### Wave 1 — sillyhub-daemon 死代码清理
-- echoAgentEvent（`sillyhub-daemon/src/task-runner.ts:2668-2678`，零调用，事件循环已内联 renderAgentEvent）+ `sillyhub-daemon/src/config.ts:247` 注释 + 3 处文档
+- echoAgentEvent（原 `sillyhub-daemon/src/task-runner.ts`，零调用，事件循环已内联 renderAgentEvent；该函数现已随大文件拆分移除）+ `sillyhub-daemon/src/config.ts:247` 注释 + 3 处文档
 - releaseLock（`sillyhub-daemon/src/runtime-lock.ts:242-253`，被 releaseLockByKey 取代）
 - APPROVAL_METHODS（`sillyhub-daemon/src/adapters/json-rpc.ts:48-64` 含 JSDoc，审批匹配已改内联 string 比较）
 - `sillyhub-daemon/src/daemon.ts` 未用字段 _auditSink(629)/_policyEngine(631)/_wsReconnectDelay(681) + DaemonOptions + `sillyhub-daemon/src/cli.ts` 透传
@@ -44,7 +44,7 @@ created_at: 2026-07-27 00:50:00
 - `frontend/src/lib/use-daemon-runtimes.ts` hook + 自测（被 useDaemonMachines 取代）+ 清锚点注释
 - FormLayout（`frontend/src/components/layout/form-layout.tsx` + `frontend/src/components/layout/index.ts` 桶导出，零消费）+ 2 处文档
 - SessionsSidebar（`frontend/src/components/daemon/runtime-session-helpers.tsx:142-235` + 仅它用的 4 import）
-- QuickChat 死簇（`frontend/src/lib/daemon.ts:333-442`，含孤儿 _eventTypeFromChannel）+ 清两测试文件 streamQuickChat 幽灵 mock
+- QuickChat 死簇（`frontend/src/lib/daemon/index.ts`，含孤儿 _eventTypeFromChannel）+ 清两测试文件 streamQuickChat 幽灵 mock
 - `frontend/src/lib` ~30 个未用 wrapper 导出（ppm/task 8 个、kanban 4、plan 4、project 3、problem 2、admin 3、client-path 2、changes createChange、health 3 类型、spec-workspaces/aggregations/workday/workspaces/ppm-types 散点）— 逐个核实无未来接线计划再删
 
 ### Wave 3 — 后端死代码清理（low，逐个核实）

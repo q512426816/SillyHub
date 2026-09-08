@@ -66,8 +66,8 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | 工作区成员管理 | `/workspaces/{wid}/members/*` | `backend/app/modules/workspace/router.py:179-338` | 角色白名单 4 种（`backend/app/modules/workspace/service.py:46-48`） |
 | 成员运行时绑定（per-member） | `/workspaces/{wid}/my-binding` 等 | `backend/app/modules/member_runtimes/router.py` | 复合主键 `(workspace_id,user_id)`（`backend/app/modules/workspace/member_runtimes/model.py:40`） |
 | daemon 共享与借用 | `PUT /my-binding/shared` 等 | `backend/app/modules/member_runtimes/router.py` | 业务人员借用他人共享 daemon |
-| daemon 注册/心跳/在线 | `POST /daemon/register` / `heartbeat` / `WS /daemon/ws` | `backend/app/modules/daemon/router.py:300,343,2196` | stale 判定 45s（`backend/app/modules/runtime/service.py:25,826`） |
-| daemon lease 生命周期 | `/daemon/leases/{id}/claim\|start\|heartbeat\|complete` | `backend/app/modules/daemon/router.py:992-1096` | 状态机 `pending→claimed→completed/expired/cancelled`（`backend/app/modules/daemon/model.py:351`） |
+| daemon 注册/心跳/在线 | `POST /daemon/register` / `heartbeat` / `WS /daemon/ws` | `backend/app/modules/daemon/router/__init__.py,343,2196` | stale 判定 45s（`backend/app/modules/runtime/service.py:25,826`） |
+| daemon lease 生命周期 | `/daemon/leases/{id}/claim\|start\|heartbeat\|complete` | `backend/app/modules/daemon/router/__init__.py` | 状态机 `pending→claimed→completed/expired/cancelled`（`backend/app/modules/daemon/model.py:351`） |
 | spec 工作区同步（全量/增量） | `/workspaces/{wid}/spec-workspace/*` | `backend/app/modules/spec_workspace/router.py:107-350` | 增量带乐观锁（`backend/app/modules/spec_workspace/router.py:277`） |
 | 运行时只读视图 | `/workspaces/{wid}/runtime/*` | `backend/app/modules/runtime/router.py:24-72` | 读 `.sillyspec/.runtime/` |
 | 扫描文档 | `/workspaces/{wid}/scan-docs/*` | `backend/app/modules/scan_docs/router.py:31-114` | 含 reparse |
@@ -223,7 +223,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
         ▼
 ③ daemon 认领执行
    POST /daemon/leases/{id}/claim → start → heartbeat → complete
-   backend/app/modules/daemon/router.py:992-1077  (claim_token 鉴权 backend/app/modules/daemon/lease/service.py:975)
+   backend/app/modules/daemon/router/__init__.py  (claim_token 鉴权 backend/app/modules/daemon/lease/service.py:975)
    daemon 拉执行上下文: GET /agent-runs/{run_id}/execution-context (backend/app/modules/agent/router.py:149)
         │
         ▼
@@ -290,7 +290,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 
 **越权防护**：
 
-- daemon WS payload 校验 `runtime_id` 必须属于当前连接的 daemon（`backend/app/modules/daemon/router.py:5222` `_validate_payload_runtime_belongs`）。
+- daemon WS payload 校验 `runtime_id` 必须属于当前连接的 daemon（`backend/app/modules/daemon/router/__init__.py` `_validate_payload_runtime_belongs`）。
 - runtime/instance 级操作经 `_get_owned_runtime`/`_get_owned_instance`，越权返 404（不泄露存在性）。
 - `list_my_bindings` SQL 固定 `WHERE user_id = :user_id`（`backend/app/modules/member_runtimes/service.py`）。
 - AgentProfile `effective_allowed_roots` 只能收紧不能放宽（`backend/app/modules/profile/service.py`）。

@@ -40,7 +40,7 @@
 | P10 | `backend/app/modules/daemon/lease/service.py:735` handle_lease_expiry | 批处理已持 lease 对象却按 agent_run_id 重查（每 GC tick N 次冗余 SELECT）| 加 `lease` 参数直传 |
 | P14 | `backend/app/modules/daemon/lease/service.py:720` expire_leases | 无界 SELECT，后端宕机积压一次性入内存 | `.limit(200)` 分批 |
 
-> 统一修法两类：(a) check-then-modify 单行路径加 `with_for_update`（SQLite no-op / Postgres 行锁，对齐 `backend/app/modules/daemon/session/service.py:1082`）；(b) 唯一约束 commit/flush 路径加 `try/except IntegrityError`→领域 409（对齐 `backend/app/modules/tool_gateway/policy_router.py`）。
+> 统一修法两类：(a) check-then-modify 单行路径加 `with_for_update`（SQLite no-op / Postgres 行锁，对齐 `backend/app/modules/daemon/session/service/__init__.py`）；(b) 唯一约束 commit/flush 路径加 `try/except IntegrityError`→领域 409（对齐 `backend/app/modules/tool_gateway/policy_router.py`）。
 
 ### Wave C — 后端同步 I/O 移出事件循环 ✅ 验证 2955 passed 零回归
 
@@ -114,8 +114,8 @@
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
 | B-idx | `backend/app/modules/workspace/model.py:157` / `backend/app/modules/ppm/task/model.py:47` / `backend/app/modules/daemon/model.py:280` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
-| B2 | `backend/app/modules/daemon/router.py:1815` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
-| A1 | `backend/app/modules/daemon/permission_service.py:388` _resolve_daemon_id_for_runtime | 与 `backend/app/modules/daemon/session/service.py:83` 完全重复（docstring 自承 mirrors），演进漂移风险 | 委托 session.service 单一真相源（lazy import 避循环）|
+| B2 | `backend/app/modules/daemon/router/__init__.py` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
+| A1 | `backend/app/modules/daemon/permission_service.py:388` _resolve_daemon_id_for_runtime | 与 `backend/app/modules/daemon/session/service/__init__.py` 完全重复（docstring 自承 mirrors），演进漂移风险 | 委托 session.service 单一真相源（lazy import 避循环）|
 
 ### Wave E（续）— 前端 F2 useSession 选择器（安全子集）✅ 验证 1059 passed 零回归
 
@@ -239,11 +239,11 @@ DEFER（带原因）：
 |---|---|---|---|
 | F1 | `backend/app/modules/change/dispatch.py:840` | gate_retry_count 被 dispatch() 用新 dict 覆盖→**R12 死循环防护生产完全失效**（verify gate 失败无限重跑烧钱）；现有 test_gate_retry 全 mock dispatch 绕过覆盖点，单测全绿却掩盖 | :840 改 merge 保留 count + 跨 stage 重置；补不 mock dispatch 的 e2e（同 stage 保留 / 跨 stage 重置两条） |
 | F2 | `backend/app/modules/auth/service.py:309,330` | refresh token 校验循环内同步 bcrypt（cost-12，250-400ms/次 × N session 全表扫）**阻塞事件循环**；api_key 同模式已修（to_thread + Redis），refresh 漏修且每~20min 轮换更高频。R2 只修并发未修 blocking | `_consume_refresh_token` + `_find_revoked_session` 两处 verify 包 `asyncio.to_thread`（对齐 api_key_service:237） |
-| F3 | `backend/app/modules/daemon/session/service.py:1719` | session 日志 min_ts_subq 对最大表 agent_run_logs **全表 GROUP BY 无 session 过滤**，随日志增长线性恶化 | 子查询加 `WHERE run_id IN (该 session 的 runs)` 收敛聚合范围 |
+| F3 | `backend/app/modules/daemon/session/service/__init__.py` | session 日志 min_ts_subq 对最大表 agent_run_logs **全表 GROUP BY 无 session 过滤**，随日志增长线性恶化 | 子查询加 `WHERE run_id IN (该 session 的 runs)` 收敛聚合范围 |
 | F4 | `backend/app/modules/ppm/workbench/service.py:502,520` | 工作台"我的待办"①② 无 limit + concat 包裹 now_handle_user 致索引失效全表扫（含 Text 大列），首屏必跑；③ 已有 limit | ①② 各加 `.limit(_TODO_SOURCE_LIMIT)` 对齐③（止血全表实体化；根治 concat-LIKE 需拆关联子表 + migration，DEFER） |
 | F5 | `sillyhub-daemon/src/interactive/codex-app-server-driver.ts:669` | exit handler 仅 code!==0 才 finalize → codex 干净退出(0)/被信号杀(null) 时不置 finalized，consume 主循环永不退出、currentTurnPromise 永不 resolve → **交互式会话永久卡死**（主 agent lease 永不过期，卡到 daemon 重启）。现有测试都先 close() input 让 consume break 再 _emitExit，故未捕获 | exit handler 改任何 !h.closing 退出都 finalizeWithError（对称于 'error' handler，加 signal 参数）+ 补不 close input 的 fake child exit(0)/exit(null) 回归测试。finalizeWithError 幂等（finalized 守卫） |
 | F6 | `frontend/src/components/workspace-config-card.tsx` | MED-1: handleInit initPoll 无 5min deadline（daemon 卡住时无限轮询，handleSyncManual 已有 R-06 5min 兜底）；LOW-1: handleSyncManual 5min setTimeout 未存 ref，unmount 未 clearTimeout | handleInit 加 5min deadline（initDeadlineRef）对齐 R-06；setTimeout 存 syncDeadlineRef；unmount + 自停分支 clearTimeout |
-| F7 | `frontend/src/lib/daemon.ts:459` | streamQuickChat 死代码（无生产调用方，仅 2 个 test 的 vi.mock 字段 + 废弃注释） | 删除函数（test 用 vi.mock 独立 vi.fn()，零影响） |
+| F7 | `frontend/src/lib/daemon/index.ts` | streamQuickChat 死代码（无生产调用方，仅 2 个 test 的 vi.mock 字段 + 废弃注释） | 删除函数（test 用 vi.mock 独立 vi.fn()，零影响） |
 
 ### DEFER 复评结论（维持不做，附核验依据）
 
@@ -289,7 +289,7 @@ DEFER（带原因）：
 |---|---|---|---|
 | G1 | `backend/app/modules/file/service.py:114,122` | upload_file MinIO put 先于 DB commit 无补偿 → commit 失败留孤儿对象；soft_delete 仅置 deleted_at 不删存储本体（注释称"后续清理流程"但全仓不存在）→ MinIO 孤儿单调增长（账单泄漏） | upload commit 失败 best-effort 补偿 `delete_object`；soft_delete 同步删对象本体（先 commit DB 后删 MinIO，宁可孤儿不可损坏） |
 | G2 | `backend/app/modules/workspace/service.py:527` | soft_delete 仅置 deleted_at/status，**不取消该 workspace 下在跑 AgentRun** → daemon 继续 burn token / 向已删实体回写 | 复用 P0-2 链路：查 active runs（经 AgentRunWorkspace JOIN）逐个 `cancel_lease`（含 pending 兜底），best-effort 单 run 失败不中断 |
-| G3 | `frontend/src/lib/daemon.ts:398` | 第四批删 streamQuickChat 后注释仍提及（纯注释瑕疵） | 清理注释 |
+| G3 | `frontend/src/lib/daemon/index.ts` | 第四批删 streamQuickChat 后注释仍提及（纯注释瑕疵） | 清理注释 |
 
 ### DEFER 复评（修正 a4f18dab 判断 + 大工程留专项）
 
@@ -357,7 +357,7 @@ DEFER（带原因）：
 
 | 项 | 原因 |
 |---|---|
-| `sillyhub-daemon/src/interactive/session-manager.ts:1958` end/fail 不清 `_store`（MEDIUM 内存泄漏） | `_store.delete` 删除会与 `get()`(daemon 路由校验) / list `_store.values()` / 落盘 flush（"不复活 ended session"逻辑）/ restore 交织；需设计"哪些 session 可驱逐 + 与持久化协调"，非安全局部改 |
+| `sillyhub-daemon/src/interactive/session-manager/usage.ts:41` end/fail 不清 `_store`（MEDIUM 内存泄漏） | `_store.delete` 删除会与 `get()`(daemon 路由校验) / list `_store.values()` / 落盘 flush（"不复活 ended session"逻辑）/ restore 交织；需设计"哪些 session 可驱逐 + 与持久化协调"，非安全局部改 |
 | `frontend/src/components/workspace-binding-guard.tsx`（文件已删除） fetchMyBinding 走 react-query（LOW） | 验证者提示"零风险被高估，需补三项实现细节"——guard 内 check→redirect 逻辑改 react-query 需逐处反应性设计 |
 | `backend/app/modules/ppm/plan/service.py:192` + `backend/app/modules/ppm/problem/service.py:173` `_Crud[T]` 去重（LOW） | 两处已漂移（plan create 显式设 created_at，problem 不设依赖模型默认）；去重到 common/crud.py 需先定 created_at 哪个为准（LOW 维护性去重 + 漂移决策） |
 | `backend/app/modules/scan_docs/service.py:47` 列裁剪（LOW） | `list_` 返回完整 ORM 对象供 `ScanDocSummary.model_validate(d)` + conflict_counts 用 `.path`；列裁剪需同步改返回构造（pydantic 从 Row 校验会破），比 kanban 侵入大 |
