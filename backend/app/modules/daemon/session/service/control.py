@@ -134,8 +134,7 @@ async def _inject_mid_turn_into_run(
             },
         )
     try:
-        # 附件校验与组装与普通轮同管线（归属基准覆盖同传；校验失败整体
-        # 回滚零残留）。
+        # 附件校验与组装与普通轮同管线（归属基准覆盖同传；校验失败整体回滚零残留）。
         validated_attachments: list = []
         if attachment_ids:
             validated_attachments = await svc._validate_inject_attachment_rows(

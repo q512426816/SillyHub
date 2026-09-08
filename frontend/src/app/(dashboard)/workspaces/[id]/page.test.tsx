@@ -49,6 +49,15 @@ vi.mock("@/components/workspace/changes-overview-card", () => ({
 vi.mock("@/components/workspace-daemon-switcher", () => ({
   WorkspaceDaemonSwitcher: () => null,
 }));
+// 2026-09-07-arch-large-file-split 归档遗留测试债（agent-liveness merge 带入）：
+// page 段②′ 挂 <AgentLivenessOverviewCard>，其内部 useQuery 需 QueryClientProvider，
+// 本测试裸 render 无 Provider → 16 用例全挂。仿上方 ChangesOverviewCard 先例
+// data-testid 隔离（卡内行为由组件自身测试覆盖），仅断言挂载与 workspaceId 透传。
+vi.mock("@/components/agent-log/agent-liveness-overview-card", () => ({
+  AgentLivenessOverviewCard: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="agent-liveness-overview-card-mock" data-workspace-id={workspaceId} />
+  ),
+}));
 vi.mock("@/components/workspace-path-fields", () => ({
   WorkspacePathFields: () => null,
 }));
