@@ -8,7 +8,8 @@
  *   consume 对 input 单订阅（E4）→ 空文本跳过（E1）→ spawn headless →
  *   stdout LF 分帧（禁 Node readline，pi-rpc-driver LfLineFramer 同款）→
  *   JSON.parse → normalizeCursorFrame（task-03）→ envelope-only onTurnMessage →
- *   result 帧 + 进程退出双确认 → onTurnResult。
+ *   result 帧 + 进程退出 + stdout 排空（ql-20260908-007，宽限超时兜底）三确认 →
+ *   onTurnResult。
  *   后续轮自动追加 `--resume <chatId>`。
  *
  * 启动参数（D-003@v2 定版 + task-01 Free 计划实测）：
@@ -92,7 +93,7 @@ export interface CursorDriverStartOptions extends InteractiveDriverStartOptions 
   pathToAgentExecutable: string;
 }
 
-/** 单轮 result 帧缓存（等进程退出双确认后再 onTurnResult）。 */
+/** 单轮 result 帧缓存（等进程退出 + stdout 排空后再 onTurnResult，见 _runTurn）。 */
 interface TurnResultSnapshot {
   subtype?: string;
   is_error?: boolean;
@@ -436,6 +437,20 @@ export class CursorDriver implements InteractiveDriver {
         });
       },
     );
+    // ql-20260908-007（stdout/exit 竞态）：Node 的 exit 事件不保证 stdio 已排空
+    //（官方文档行为；Windows 管道/大输出下 exit 可先于残余字节送达）——exit 路径
+    // 收敛前等 stdout end/close，防最后一帧（常是 result 帧）丢失。close 兜底覆盖
+    // kill/僵流场景；已结束/已销毁立即过。
+    const stdoutDrainedP = new Promise<void>((resolve) => {
+      const out = child.stdout;
+      if (!out || out.readableEnded || out.destroyed) {
+        resolve();
+        return;
+      }
+      const done = (): void => resolve();
+      out.once('end', done);
+      out.once('close', done);
+    });
     const errorP = new Promise<Error>((resolve) => {
       child.once('error', (err: Error) => resolve(err));
     });
@@ -482,6 +497,15 @@ export class CursorDriver implements InteractiveDriver {
       this._clearChild(handle);
       return;
     }
+
+    // exit 路径：先等 stdout 排空（宽限 killGraceMs 防僵流挂死整轮；超时按已解析
+    // 内容收敛，行为同旧版）再读快照——迟到字节里的 result 帧不再丢。framer.end()
+    // 幂等（'end' handler 已调过则 no-op），兜底 flush close-without-end 场景的尾行。
+    await Promise.race([
+      stdoutDrainedP,
+      new Promise<void>((r) => setTimeout(r, this.killGraceMs).unref?.()),
+    ]);
+    framer.end();
 
     const snap = snapshotRef.current;
     const exitCode = outcome.code ?? 1;

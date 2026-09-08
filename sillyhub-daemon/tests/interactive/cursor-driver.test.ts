@@ -723,3 +723,54 @@ describe('close() 幂等且不动 input 队列（E4 / E7）', () => {
     close();
   });
 });
+
+describe('⑨ stdout/exit 竞态（ql-20260908-007）：exit 先到时等 stdout 排空再收敛', () => {
+  it('exit 先于数据到达：迟到 result 帧不丢（result/usage 完整上报）', async () => {
+    const driver = new CursorDriver({ killGraceMs: 2000 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = await driver.start(queue, makeOpts());
+    const consumeP = driver.consume(handle, cb);
+    push('race-turn');
+    await waitForAgentSpawnCount(1);
+
+    const child = agentChildren[0]!;
+    // 绕过 _emitExit（它先 push(null) 结束流，模拟的是理想时序）——直接发 exit
+    // 事件且保持流打开，复现「exit 到达时 stdout 尚有未送达字节」的乱序形态
+    //（Node 文档行为：exit 不保证 stdio 已排空，Windows 管道/大输出下可发生）。
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    await new Promise<void>((r) => setImmediate(r)); // 让实现层 race 解析到 exit outcome
+    child._emitLines([resultLine()]); // 迟到的 result 帧（真实场景为管道残余字节）
+    child._endStdout(); // 流排空结束
+
+    await waitUntil(() => results.length === 1);
+    expect(results[0]).toMatchObject({
+      subtype: 'success',
+      is_error: false,
+      result: 'OK.',
+    });
+    expect(results[0].usage).toMatchObject({ input_tokens: 10, output_tokens: 4 });
+    close();
+    await consumeP;
+  });
+
+  it('宽限兜底：exit 后流迟迟不 end，超时按已解析内容收敛不挂死整轮', async () => {
+    const driver = new CursorDriver({ killGraceMs: 60 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = await driver.start(queue, makeOpts());
+    const consumeP = driver.consume(handle, cb);
+    push('grace-turn');
+    await waitForAgentSpawnCount(1);
+
+    const child = agentChildren[0]!;
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    // 不 _endStdout——流保持打开（僵流形态），宽限超时后按已解析内容收敛。
+    await waitUntil(() => results.length === 1, 3000);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    close();
+    await consumeP;
+  });
+});
