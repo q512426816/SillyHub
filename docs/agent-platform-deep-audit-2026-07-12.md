@@ -53,7 +53,7 @@
 - backend 接收端：daemon WS 握手 → `connect()`
 - daemon 接收端：`sillyhub-daemon/src/daemon.ts` `case SESSION_INTERRUPT: _sessionManager.interrupt(sessionId)` → `sillyhub-daemon/src/interactive/session-manager.ts:3169` → `driver.interrupt` → `sillyhub-daemon/src/interactive/claude-sdk-driver.ts:512` `q.interrupt()`（turn 级 abort）
 - **有测试覆盖**：`test_ws_hub_session_control.py`、`ws-client-session-control.test.ts`
-- 现成模板：`backend/app/modules/daemon/session/service.py:707-784` `interrupt_session`（含 daemon_id 解析 `_resolve_daemon_id_for_runtime`）
+- 现成模板：`backend/app/modules/daemon/session/service.py:830` `interrupt_session`（含 daemon_id 解析 `_resolve_daemon_id_for_runtime`）
 - 端点：`POST /api/daemon/sessions/{id}/interrupt`（`backend/app/modules/daemon/router.py:1781`）—— **目前无人调用**
 
 **含义**：修发现 1 的僵尸，**不需要补 WS Hub**，把 stub 换成已有 `send_session_control` 即可。
@@ -86,7 +86,7 @@
 **证据**：
 - `backend/app/modules/agent/control.py:25` `can_dispatch_worker` —— **pre-dispatch 门**：`cost_so_far(mission.id) >= mission.budget_usd` 时拒绝派发**新** worker（reason=`budget_exceeded`）
 - 已派出去的 worker **不再检查**，烧穿预算继续跑
-- `budget_tokens` 字段（`backend/app/modules/agent/model.py:1549`）**全代码无任何强制点**
+- `budget_tokens` 字段（`backend/app/modules/agent/model.py:1678`）**全代码无任何强制点**
 - 单 run 级（AgentRun）**没有预算字段**，只在 Mission 维度
 - 默认预算硬编码 `budget_usd=4.0`（`backend/app/modules/spec_workspace/bootstrap.py:257`、`backend/app/modules/change/dispatch.py:943`）
 
@@ -102,7 +102,7 @@
 
 #### P0-1 修 interactive kill 僵尸
 - **改动**：`backend/app/modules/daemon/lease_service.py` 把 `self._ws_cancel_stub(lease)` 替换为——当 `lease.kind == 'interactive'` 且 session 仍 active 时，调 `get_daemon_ws_hub().send_session_control(daemon_id, DAEMON_MSG_SESSION_INTERRUPT, {session_id, lease_id, runtime_id})`
-- **依据**：现成模板 `backend/app/modules/daemon/session/service.py:707-784` `interrupt_session`（含 `_resolve_daemon_id_for_runtime`）；WS Hub + daemon 接收端 + 测试全就位（发现 2）
+- **依据**：现成模板 `backend/app/modules/daemon/session/service.py:830` `interrupt_session`（含 `_resolve_daemon_id_for_runtime`）；WS Hub + daemon 接收端 + 测试全就位（发现 2）
 - **改动量**：小（一个分支调用 + helper 复用）
 - **风险**：低。WS 发送失败 best-effort（不阻塞 cancel_lease 主流程，与 `end_session` 一致）
 - **可选收尾**：把 `_ws_cancel_stub` 注释里"Wave 2"改掉（Hub 早已就位，注释误导）
@@ -235,9 +235,9 @@ P2-3 Coordinator 模型配置 ──→ 独立小改
 - `AgentRun`（`backend/app/modules/agent/model.py:26-296`）：状态 pending/running/completed/failed/killed；含 idempotency_key/resume_token/checkpoint/usage（cost/tokens，claude 有 cache 列 codex 无）/gate_result/mission_id/parent_run_id/role
 - `AgentRunLog`（`backend/app/modules/agent/model.py:465`）：channel + dedup_key + 子代理归属三列 + tool_kind（14 枚举）
 - `AgentSession`（`backend/app/modules/agent/model.py:275`）：跨多 turn，agent_session_id ≠ AgentRun.session_id（刻意区分，前者 SDK 返回用于 resume）
-- `AgentMission`（`backend/app/modules/agent/model.py:1453`）：**status 不持久化**，由 derive_status 派生（`backend/app/modules/agent/mission.py:29-54`）；无 final/merged 字段
-- `AgentArtifact`（`backend/app/modules/agent/model.py:1636`）：kind ∈ summary/patch/test_result/evidence；content_ref 截断
-- `AgentRunDependency`（`backend/app/modules/agent/model.py:1601`）：DAG 边（v1 flat，无独立 wiring）
+- `AgentMission`（`backend/app/modules/agent/model.py:1582`）：**status 不持久化**，由 derive_status 派生（`backend/app/modules/agent/mission.py:29-54`）；无 final/merged 字段
+- `AgentArtifact`（`backend/app/modules/agent/model.py:1765`）：kind ∈ summary/patch/test_result/evidence；content_ref 截断
+- `AgentRunDependency`（`backend/app/modules/agent/model.py:1730`）：DAG 边（v1 flat，无独立 wiring）
 
 ### 5.4 管理与协作能力（成熟，列出备查）
 - **双层审批**：

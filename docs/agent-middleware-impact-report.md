@@ -15,7 +15,7 @@
 |---|---|---|
 | `AgentRun` | `backend/app/modules/agent/model.py:45` | 一次 AI 执行记录（如"某 workspace 某 task 下跑了一次 claude_code"） |
 | `AgentSession` | `backend/app/modules/agent/model.py:586` | 一个交互式会话（跨多个 AgentRun turn 的 1:N 容器） |
-| `AgentMission` | `backend/app/modules/agent/model.py:875` | 多 agent 协同的聚合根（多个 AgentRun 的父容器） |
+| `AgentMission` | `backend/app/modules/agent/model.py:890` | 多 agent 协同的聚合根（多个 AgentRun 的父容器） |
 | `agent_type` | `backend/app/modules/agent/model.py:103` | 执行器类型字符串（`"claude_code"`），本质是 adapter ID |
 | `provider` | `backend/app/modules/agent/model.py:85` | LLM 供应商字符串（`"claude"`, `"codex"`） |
 | `model` | `backend/app/modules/agent/model.py:89` | 模型名（如 `"claude-sonnet-4-20250514"`） |
@@ -412,7 +412,7 @@ frontend/src/lib/agent-profile.ts（新建）
 ### 7.2 中风险点
 
 4. **Mission worker_preset 和 AgentProfile 的关系**
-   - `backend/app/modules/agent/model.py:1560`：`worker_preset` 是 `list[dict]` JSON，每条含 `{agent_type, model, objective, role}`
+   - `backend/app/modules/agent/model.py:1689`：`worker_preset` 是 `list[dict]` JSON，每条含 `{agent_type, model, objective, role}`
    - 如果 agent_type 改为 agent_profile_id，前端必须保证 profile 存在
    - 建议：worker_preset 新增 `agent_profile_id` 可选字段，fallback 到 inline agent_type
 

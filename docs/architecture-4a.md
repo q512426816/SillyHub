@@ -42,15 +42,15 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 
 | 前缀 | 代表 router | 注册依据 | 业务域 |
 |---|---|---|---|
-| `/api`（无 router 级 prefix） | `auth_router` / `admin_router` / `settings_router` / `incident_router` / `knowledge_router` / `release_router` / `skills_router` / `tool_gateway_router` / `policy_crud_router` / `runtime_router` / `git_gateway_router` / `change_writer_router` / `workflow_router` / `scan_docs_router` / `task_router` / `git_identity_router` / `llm_provider_router` / `spec_workspace_router` | `backend/app/main.py:837` | 平台级 + workspace 内嵌（路径内含 `{workspace_id}`） |
-| `/api`（router 自带 workspace prefix） | `workspace_router` / `members_router` / `member_runtimes_router` / `ppm_project_link_router` / `change_router` / `agent_router` / `agent_profile_router` / `daemon_router` / `mcp_gateway_router` / `mcp_sse_router` / `platform_sync_workspace_router` | `backend/app/main.py:799` | workspace 隔离域 |
-| `/api/workspaces/{wid}/...`（lease 维度） | `worktree_router` / `lease_router` | `backend/app/main.py:866` | worktree 租约 |
-| `/api/changes/...`（无 workspace prefix） | `platform_sync_router` | `backend/app/main.py:897` | 进度同步层（token 派生 workspace） |
+| `/api`（无 router 级 prefix） | `auth_router` / `admin_router` / `settings_router` / `incident_router` / `knowledge_router` / `release_router` / `skills_router` / `tool_gateway_router` / `policy_crud_router` / `runtime_router` / `git_gateway_router` / `change_writer_router` / `workflow_router` / `scan_docs_router` / `task_router` / `git_identity_router` / `llm_provider_router` / `spec_workspace_router` | `backend/app/main.py:860` | 平台级 + workspace 内嵌（路径内含 `{workspace_id}`） |
+| `/api`（router 自带 workspace prefix） | `workspace_router` / `members_router` / `member_runtimes_router` / `ppm_project_link_router` / `change_router` / `agent_router` / `agent_profile_router` / `daemon_router` / `mcp_gateway_router` / `mcp_sse_router` / `platform_sync_workspace_router` | `backend/app/main.py:822` | workspace 隔离域 |
+| `/api/workspaces/{wid}/...`（lease 维度） | `worktree_router` / `lease_router` | `backend/app/main.py:889` | worktree 租约 |
+| `/api/changes/...`（无 workspace prefix） | `platform_sync_router` | `backend/app/main.py:920` | 进度同步层（token 派生 workspace） |
 | `/api/ppm/...` | `ppm_project/plan/task/problem/kanban/workbench_router` | `backend/app/main.py:877-882` | PPM（平台级，已上线） |
-| `/api/file` | `file_router` | `backend/app/main.py:821` | 平台文件中心 |
-| `/api/daemon-chat` | `_register_quick_chat(app)` | `backend/app/main.py:369` | 免 workspace 快速对话（固定路径，须先于参数化路由注册，`backend/app/main.py:369`） |
+| `/api/file` | `file_router` | `backend/app/main.py:839` | 平台文件中心 |
+| `/api/daemon-chat` | `_register_quick_chat(app)` | `backend/app/main.py:392` | 免 workspace 快速对话（固定路径，须先于参数化路由注册，`backend/app/main.py:392`） |
 | `/mcp` | `mount_mcp(app)` | `backend/app/main.py` | 对外 MCP server（物理隔离 `/api`，`backend/app/main.py:51`） |
-| `/daemon/...`（无 `/api`、无认证） | `daemon_dist_router` | `backend/app/main.py:794` | daemon 分发（install.sh 等，`backend/app/modules/admin/router.py`） |
+| `/daemon/...`（无 `/api`、无认证） | `daemon_dist_router` | `backend/app/main.py:817` | daemon 分发（install.sh 等，`backend/app/modules/admin/router.py`） |
 
 > 注：`worktree` 的 `lease_router` 与 `worktree_router` 同在 `worktree/router.py`（前者 lease 维度无 workspace prefix，后者 workspace 维度），经 `backend/app/modules/worktree/__init__.py:2` 导出。`platform_sync_router` 故意不带 router 级 prefix 以规避 `GET /changes` 尾斜杠 307 重定向（`backend/app/modules/platform_sync/router.py`）。
 
@@ -240,7 +240,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 
 **编排治理约束**：`MAX_WORKERS=5`（`backend/app/modules/agent/delegation.py`）；budget 硬截断强收标 degraded（`backend/app/modules/agent/orchestrator.py:326`）；主 agent 硬约束“禁止越权下场写代码”（`backend/app/modules/agent/orchestrator.py:102-111`）；`effective_allowed_roots = daemon.allowed_roots ∩ profile.overlay`，agent 只能收紧不能放宽（`backend/app/modules/profile/service.py`）。
 
-**spec_strategy 维度隔离**（`AgentRun.spec_strategy`，`backend/app/modules/agent/model.py:140`）：取值 `quick-chat` / `sillyspec` / `platform-managed` 等，用于区分 run 来源；quick-chat 端点查询强制 `WHERE spec_strategy='quick-chat'` 防越权（`backend/app/main.py:440`）。
+**spec_strategy 维度隔离**（`AgentRun.spec_strategy`，`backend/app/modules/agent/model.py:140`）：取值 `quick-chat` / `sillyspec` / `platform-managed` 等，用于区分 run 来源；quick-chat 端点查询强制 `WHERE spec_strategy='quick-chat'` 防越权（`backend/app/main.py:463`）。
 
 ### 1.3 校验点与审批
 
@@ -338,7 +338,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:468` |
 | `agent_sessions` | 交互式 SDK 驱动会话（跨多 run） | `agent_session_id`(SDK session) / `lease_id`(kind=interactive) / `change_id`/`workspace_id`(SET NULL) / `status` / `deleted_at`(软删) — `backend/app/modules/agent/model.py:371` |
 | `agent_missions` | 多 agent 委派聚合根（状态不落库，派生自子 run） | `objective` / `worker_preset`/`main_agent_config`(JSON) / `converged_at`(收敛守卫) — `backend/app/modules/agent/model.py:363` |
-| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1604,700` |
+| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1733,700` |
 | `daemon_borrow_audit` | 业务/管理人员借用开发人员 daemon 的审计行 | borrower/lender/workspace/agent_run 均 CASCADE；`daemon_instance_id` **RESTRICT**（审计红线） — `backend/app/modules/agent/model.py` |
 | `agent_profiles` | AgentProfile 配置层（人格+工具引用，增强非替代） | `visibility`(private/workspace/platform) / `llm_provider_id`(SET NULL) / `tool_policy_id`/`mcp_refs`/`skill_refs` / `allowed_roots_overlay`(只能收紧) / `is_system_default` — `backend/app/modules/agent/profile/model.py:59` |
 
@@ -509,12 +509,12 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 
 | 层 | 代表文件 | 职责 |
 |---|---|---|
-| **L0 入口装配** | `backend/app/main.py create_app` + `:94 lifespan` | FastAPI 实例、CORS、request-id / 慢请求中间件（`backend/app/main.py,207`）、异常处理注册（`backend/app/main.py`）、约 35 个 router 的 `include_router` 装配（`backend/app/main.py:789`）、MCP mount（`backend/app/main.py:902`）、lifespan 内的 bootstrap（RBAC seed `:100`、stale run 清理 `:102`、gate reconcile `:113`、profile seed `:131`、存储初始化 `:149`、MCP session_manager `:159`） |
+| **L0 入口装配** | `backend/app/main.py create_app` + `:94 lifespan` | FastAPI 实例、CORS、request-id / 慢请求中间件（`backend/app/main.py,207`）、异常处理注册（`backend/app/main.py`）、约 35 个 router 的 `include_router` 装配（`backend/app/main.py:812`）、MCP mount（`backend/app/main.py:902`）、lifespan 内的 bootstrap（RBAC seed `:100`、stale run 清理 `:102`、gate reconcile `:113`、profile seed `:131`、存储初始化 `:149`、MCP session_manager `:159`） |
 | **L1 横切层 `core/`** | `config.py`（`Settings` 11 组配置，`:42`）、`db.py`/`redis.py`、`auth_deps.py`（鉴权依赖，`:56/:86/:140`）、`security.py`（bcrypt+JWT，`:47/:91`）、`permission_cache.py`（Redis+熔断器，`:36`）、`audit_hooks.py`（SQLAlchemy event 审计，`:290`）、`ssrf.py`（`:34/:56`）、`errors.py`（`AppError`+`register_exception_handlers:363`）、`monitoring.py`（慢请求+事件循环看门狗，`:30/:74`）、`logging.py`、`telemetry.py`、`crypto.py` | 跨模块复用的非业务原语：配置、数据访问、鉴权、审计、安全、可观测性 |
 | **L2 业务模块 `modules/`** | 30 个子目录，每个遵循 `router.py`/`service.py`/`model.py`/`schema.py` 四件套 | 一个业务域一个模块，router 只做 HTTP 适配，service 持业务逻辑，model 持 ORM，schema 持 Pydantic |
 | **L3 工具/原语** | `core/paths.py`、`core/spec_paths.py`、各模块内 `*_service.py` 的 helper | 底层路径与纯函数 |
 
-> **router 不带 prefix 的约定**：多数 router 自带完整路径（如 `agent/router.py` 写 `/workspaces/{id}/agent/runs`），`main.py` 仅 `include_router(..., prefix="/api")` 落地 `/api/...`（`backend/app/main.py:789`）。`platform_sync/router.py` 刻意不自带 prefix 以规避 FastAPI 尾斜杠 307（`backend/app/modules/platform_sync/router.py`）。
+> **router 不带 prefix 的约定**：多数 router 自带完整路径（如 `agent/router.py` 写 `/workspaces/{id}/agent/runs`），`main.py` 仅 `include_router(..., prefix="/api")` 落地 `/api/...`（`backend/app/main.py:812`）。`platform_sync/router.py` 刻意不自带 prefix 以规避 FastAPI 尾斜杠 307（`backend/app/modules/platform_sync/router.py`）。
 
 **L2 的 30 个业务模块**（`ls backend/app/modules/`）按域分组：
 
@@ -731,7 +731,7 @@ SillyHub 是三进程异构栈：后端 Python（FastAPI）、前端 Node（Next
 | TypeScript | 5.5.4（前端 + daemon 统一） | `frontend/package.json:58`、`sillyhub-daemon/package.json:54` |
 | 包管理 | uv 0.4.18（后端）/ pnpm 9.6.0（前端 + daemon） | `backend/Dockerfile:29`、`backend-ci.yml:29`；`frontend/package.json:64`、`sillyhub-daemon/package.json:27` |
 
-> 后端进程入口为 `app.main:app`（`backend/app/main.py:915` `app = create_app()`），`create_app()` 组装 30+ 个业务 router（`backend/app/main.py`）并 `mount_mcp(app)` 挂载对外 MCP server（`backend/app/main.py`）。lifespan 内完成日志/遥测初始化、RBAC 种子、孤儿 gate 任务对账、对象存储单例初始化（`backend/app/main.py:94-170`）。
+> 后端进程入口为 `app.main:app`（`backend/app/main.py:938` `app = create_app()`），`create_app()` 组装 30+ 个业务 router（`backend/app/main.py`）并 `mount_mcp(app)` 挂载对外 MCP server（`backend/app/main.py`）。lifespan 内完成日志/遥测初始化、RBAC 种子、孤儿 gate 任务对账、对象存储单例初始化（`backend/app/main.py:94-170`）。
 
 ### 4.2 数据库与缓存
 

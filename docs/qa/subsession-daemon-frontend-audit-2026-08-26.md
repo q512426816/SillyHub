@@ -21,10 +21,10 @@ created_at: 2026-08-26 05:45:10
 | # | 等级 | 侧 | 摘要 | 位置 |
 | --- | --- | --- | --- | --- |
 | F1 | P2 | daemon | `SILLYHUB_MAX_ACTIVE_SESSIONS` 空串/纯空白被解析为 0 = 不限，闸静默失效 | sillyhub-daemon/src/interactive/session-manager.ts:803 |
-| F2 | P2 | 前端 | `shownSessions` 每渲染新数组（截断态 slice 未 memo）→ subGrouping/sections useMemo 恒重算 | frontend/src/components/sessions/session-list-panel.tsx:2080 |
+| F2 | P2 | 前端 | `shownSessions` 每渲染新数组（截断态 slice 未 memo）→ subGrouping/sections useMemo 恒重算 | frontend/src/components/sessions/session-list-panel.tsx:2214 |
 | F3 | P3 | daemon | `_destroyPartialBuffer` 早退在 budget 清理之前 → 无 partial buffer 会话的 `_sessionBudgetTokens`/`_overBudgetSessions` 永不回收（慢泄漏 + 注释与实现不符） | sillyhub-daemon/src/interactive/session-manager.ts |
 | F4 | P3 | daemon | daemon.ts 读 `rawExec.worker_depth` 未归一化：字符串形态运行期可被 normalize 救回，但落盘重启后 validateRecord 拒收 → 非叶静默降级叶档 | sillyhub-daemon/src/daemon.ts |
-| F5 | P3 | 前端 | `filterEpoch` 拼接串理论碰撞（筛选值含 `\|`）→ openParents 不重置；另截断边界漂移时已展开子折叠组会瞬时跳成孤儿小节（视觉） | frontend/src/components/sessions/session-list-panel.tsx:1369,1383 |
+| F5 | P3 | 前端 | `filterEpoch` 拼接串理论碰撞（筛选值含 `\|`）→ openParents 不重置；另截断边界漂移时已展开子折叠组会瞬时跳成孤儿小节（视觉） | frontend/src/components/sessions/session-list-panel.tsx:1469,1383 |
 | F6 | P3 | 前端 | 浮层打开期间主控 SSE 不关 + 浮层面板挂载即发 ~6 个并发请求（含对分身会话恒空的 team-missions 查询） | frontend/src/components/daemon/session-panel.tsx:2616-2626,2812 |
 | F7 | P3 | 前端 | 组内 >50 截断时「分身 N」徽标按 shownSessions 计数偏小；子会话被截掉时父行计数为 0 不渲染折叠组头 | frontend/src/components/sessions/session-list-panel.tsx:1372-1402,1775 |
 
@@ -71,7 +71,7 @@ const gateRaw = gateRawStr ? Number(gateRawStr) : Number.NaN;
 
 ### A4. 前端 subGrouping（byParent / orphans / openParents）—— 主逻辑正确，性能反模式一处
 
-**byParent / 孤儿小节逻辑正确**：`subGrouping` 以 shownSessions 中无 parent 的会话建 mainIds，子会话父在 mainIds → byParent 附属组，否则 → 孤儿小节（frontend/src/components/sessions/session-list-panel.tsx:2092）；sections 循环里子会话 `continue` 不进机器分桶，附属组渲染在父行下（:1726-1798）。有测试（默认折叠 / 展开 / 孤儿兜底 / 无子会话零变化 4 例）。
+**byParent / 孤儿小节逻辑正确**：`subGrouping` 以 shownSessions 中无 parent 的会话建 mainIds，子会话父在 mainIds → byParent 附属组，否则 → 孤儿小节（frontend/src/components/sessions/session-list-panel.tsx:2226）；sections 循环里子会话 `continue` 不进机器分桶，附属组渲染在父行下（:1726-1798）。有测试（默认折叠 / 展开 / 孤儿兜底 / 无子会话零变化 4 例）。
 
 **截断（GROUP_ITEM_LIMIT=50）交互**：
 - 父被截掉（50 名外）而子在 50 内 → 子正确落「团队分身」孤儿小节不丢行（兜底设计生效，无丢行）。
@@ -85,7 +85,7 @@ const gateRaw = gateRawStr ? Number(gateRawStr) : Number.NaN;
 
 ### A5. WorkerSessionOverlay（卸载关流 / 切换竞态 / mission 查询）—— 全部正确
 
-**卸载关流（三层防护）**：① `key={subSessionId}` 驱动整体 remount（frontend/src/components/daemon/session-panel.tsx:4733），关闭浮层 = 卸载 = dialog 面板 unmount cleanup 执行：先置 disposedRef 再 close streamConnRef + clearInterval attachPoll（:3341-3356）；② `establishStream` 在 prefetch await 返回后自查 `disposed / 已有连接 / 代际` 放弃建流（:2971-2975），杜绝「cleanup 先跑、close 落空、await 返回后新建僵尸流」（streamSession 内建退避重连 30s 封顶，僵尸流代价高，此处防护到位）；③ in-flight 复用 + streamEpoch 代际（:2947-2953, 2862-2872）。
+**卸载关流（三层防护）**：① `key={subSessionId}` 驱动整体 remount（frontend/src/components/daemon/session-panel.tsx:4835），关闭浮层 = 卸载 = dialog 面板 unmount cleanup 执行：先置 disposedRef 再 close streamConnRef + clearInterval attachPoll（:3341-3356）；② `establishStream` 在 prefetch await 返回后自查 `disposed / 已有连接 / 代际` 放弃建流（:2971-2975），杜绝「cleanup 先跑、close 落空、await 返回后新建僵尸流」（streamSession 内建退避重连 30s 封顶，僵尸流代价高，此处防护到位）；③ in-flight 复用 + streamEpoch 代际（:2947-2953, 2862-2872）。
 
 **连续快速切换**：A→B 切换触发 key 变化 remount，A 的 cleanup 与 B 的 mount 由 React 生命周期串行化；面板内部 establishingRef/epoch 防同 id 并发双连。**无竞态缺口。**
 
@@ -108,7 +108,7 @@ const gateRaw = gateRawStr ? Number(gateRawStr) : Number.NaN;
 
 | 项 | 结论 |
 | --- | --- |
-| subGrouping useMemo 依赖（F2, P2） | **确认反模式**：`shownSessions = truncated ? visibleSessions.slice(0,50) : visibleSessions`（frontend/src/components/sessions/session-list-panel.tsx:2092）在 render 内联计算，截断态（组 >50 条）每次渲染产出新数组引用 → `subGrouping`（:1383）与 `sections`（:1404）两个 useMemo deps 失稳**每次渲染重算**。未截断时引用稳定（复用 visibleByGroup 产物）无问题。触发源：10s 轮询数据更新、勾选/展开等任何父 state 变化。**最小修复**：`const shownSessions = useMemo(() => truncated ? visibleSessions.slice(0, GROUP_ITEM_LIMIT) : visibleSessions, [visibleSessions, showAll]);` |
+| subGrouping useMemo 依赖（F2, P2） | **确认反模式**：`shownSessions = truncated ? visibleSessions.slice(0,50) : visibleSessions`（frontend/src/components/sessions/session-list-panel.tsx:2226）在 render 内联计算，截断态（组 >50 条）每次渲染产出新数组引用 → `subGrouping`（:1383）与 `sections`（:1404）两个 useMemo deps 失稳**每次渲染重算**。未截断时引用稳定（复用 visibleByGroup 产物）无问题。触发源：10s 轮询数据更新、勾选/展开等任何父 state 变化。**最小修复**：`const shownSessions = useMemo(() => truncated ? visibleSessions.slice(0, GROUP_ITEM_LIMIT) : visibleSessions, [visibleSessions, showAll]);` |
 | 500 条 byParent 聚合复杂度 | O(n) 单遍 + Map 查找，且 n 被截断钳到 ≤50/组；无嵌套循环、无重复计算（除 F2 的 memo 失效）。算法层面可接受。 |
 | 上游 memo 链 | sessions/viewFiltered/visibleByGroup/groups 均 useMemo 且依赖引用稳定（react-query structuralSharing 保 sessions 引用）——健康。 |
 | 浮层 SessionPanel 初始查询集（F6, P3） | 挂载即发 ~6 并发：logs 预取（establishStream）+ attach 轮询 getAgentSession（1.5s，active 即停）+ fetchPendingDialogs + fetchSessionDialogHistory + queue GET + team-missions（对分身恒空）。量级可接受；可选优化：dialog 模式 attach 到子会话（parent_session_id 非空）时跳过 team-missions 查询。主控 SSE 双流并存是有意取舍（「关闭返回主控」验收），记录不判缺陷。 |

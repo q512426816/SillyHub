@@ -54,7 +54,7 @@ generator: sillyspec-scan
 
 - 基类契约：`backend/app/core/errors.py:28-56`——`code`/`http_status` 为类属性，`__init__` 可实例级覆盖 `code`/`http_status`/`details: dict | None`（只改实例不改类属性）。
 - 域内异常按事件命名 + `code` 用大写蛇形字符串：`backend/app/modules/release/service.py:68`（`ReleaseError(AppError)` → `ReleaseNotAllowed` `code="RELEASE_NOT_ALLOWED"` / `ReleaseNotFound`）；`backend/app/core/errors.py:62-74` 的 `HTTP_400_WORKSPACE_PATH_NOT_FOUND` 形态同款。
-- 全局注册：`backend/app/core/errors.py:380` `register_exception_handlers(app)`，在 `backend/app/main.py:365` 挂载，统一翻译成 `{code, message, request_id, details}` 响应体。**新错误继承 `AppError` 并给中文 message，不要在 router 里 `raise HTTPException`**（l10n 守护测试同时盯着这两类文案）。
+- 全局注册：`backend/app/core/errors.py:380` `register_exception_handlers(app)`，在 `backend/app/main.py:388` 挂载，统一翻译成 `{code, message, request_id, details}` 响应体。**新错误继承 `AppError` 并给中文 message，不要在 router 里 `raise HTTPException`**（l10n 守护测试同时盯着这两类文案）。
 
 ### 5. SSRF 防护：出网请求必过 `assert_public_hostname` / `core/ssrf.py`
 
