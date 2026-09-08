@@ -425,3 +425,12 @@
 根因：daemon 版本门信源是机器本地 npm 源（npm view sillyspec version），镜像/本地 HTTP 缓存滞后时返回旧 latest，与旧数据自身比较恒等——清 npm 缓存无效，旧数据在镜像服务器上（2026-09-07 早上 explore 会话结论）。
 方案：探测命令一律加 --prefer-online；版本门（requestManualUpgrade/checkAndUpgrade）经 _resolveLatestForGate 仲裁——本地源探测外新增 probeLatestOfficial 官方源直查（--registry+prefer-online），取较新者为 effective，官方较新时安装同带官方源 --registry（不自动回退镜像安装）、心跳缓存覆盖为官方值；手动触发 force 现探绕 10min 缓存；deferred 保留官方源 flag 复查时消费；preflight installSillySpec 加可选 registry 参数缺省零变化。
 结果：sillyspec-manager.test 51/51 绿（新增仲裁矩阵 8 用例）+ preflight.test 40 绿 + tsc 0；官方不可达机器静默回退现行为（runCmd 30s 超时封顶、每小时一次直查成本被接受）。
+
+## ql-20260908-001-96a2 | 2026-09-08 09:38:53 | /runtimes 页面去掉 1600px 限宽
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/runtimes/page.tsx
+需求：/runtimes 页面去掉 1600px 限宽，外层对齐 providers 改用 PageContainer size=full
+根因：页面外层自写 <main className="mx-auto ... max-w-[1600px] px-6 py-6"> 把内容限制在 1600px 宽，宽屏下两侧留白；FRONTEND_PAGE_STYLE.md 规定列表页外层一律共享 PageContainer（size=full 占满），禁止自写 max-w 容器。
+方案：frontend/src/app/(dashboard)/runtimes/page.tsx 外层 <main> 换成 <PageContainer size="full" className="gap-5">（/settings/providers 同款写法），新增 @/components/layout PageContainer import；模块变更索引追加到 frontend_app.changelog.md。
+结果：vitest run src/app/(dashboard)/runtimes 5 文件 66 用例全过；pnpm exec tsc --noEmit 0 错误；未跑全量测试（规则 0 留给 CI）。

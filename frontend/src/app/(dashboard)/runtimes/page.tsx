@@ -36,6 +36,10 @@ import {
   formatRelativeTime,
 } from "@/components/daemon/runtime-card-helpers";
 import { Button } from "@/components/ui/button";
+// ql-20260908-001-96a2：外层容器收敛为共享 PageContainer size="full"（对齐
+// /settings/providers 与 FRONTEND_PAGE_STYLE.md「列表页外层一律 PageContainer」，
+// 去掉自写 main + max-w-[1600px] 限宽）。
+import { PageContainer } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
   deleteDaemonMachine,
@@ -1150,7 +1154,7 @@ export default function RuntimesPage() {
   }, [sessions]);
 
   return (
-    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 px-6 py-6">
+    <PageContainer size="full" className="gap-5">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase text-muted-foreground">系统</p>
@@ -1509,6 +1513,6 @@ export default function RuntimesPage() {
           }}
         />
       ) : null}
-    </main>
+    </PageContainer>
   );
 }
