@@ -118,70 +118,46 @@ button { font-family: inherit; cursor: pointer; }
 .seg-toggle button { border: 0; background: var(--card); color: var(--muted-fg); font-size: 11.5px; padding: 4px 10px; }
 .seg-toggle button.active { background: var(--brand-600); color: #fff; }
 
-/* ★ 新增：主体区 = 左轮次导航栏 + 聊天区（D-001 常驻左栏） */
+/* ★ 新增：主体区 = 左刻度轨 + 聊天区（D-001 常驻 / D-007 刻度轨形态） */
 .panel-body { flex: 1; min-height: 0; display: flex; }
 
-/* ── 轮次导航栏（TurnCatalog） ── */
-.turn-catalog {
-  width: 232px; flex-shrink: 0; border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; background: var(--card); overflow: hidden;
-  transition: width .18s ease;
+/* ── 轮次刻度轨（ZCode 式：每轮一条 2px 细横杠，hover 飞出信息卡） ── */
+.tick-rail-wrap { position: relative; flex-shrink: 0; display: flex; }
+.tick-rail {
+  width: 30px; display: flex; flex-direction: column; align-items: center;
+  gap: 7px; padding: 8px 0; overflow-y: auto; scrollbar-width: none;
 }
-.panel-body.catalog-collapsed .turn-catalog { width: 0; border-right-width: 0; }
-.catalog-head {
-  display: flex; align-items: center; gap: 6px; padding: 8px 10px;
-  border-bottom: 1px solid var(--border); flex-shrink: 0;
+/* 垂直居中：伪元素上下撑开；刻度超高溢出时 spacers 收缩到 0，回落顶对齐可滚动 */
+.tick-rail::before, .tick-rail::after { content: ""; flex: 1 1 0; min-height: 0; }
+.tick-rail::-webkit-scrollbar { display: none; }
+.tick {
+  width: 14px; height: 2px; border-radius: 1px; padding: 0; border: 0; flex-shrink: 0;
+  background: var(--slate-400); opacity: .45; transition: all .15s ease; cursor: pointer;
 }
-.catalog-head .label { font-size: 11.5px; font-weight: 600; color: var(--muted-fg); }
-.catalog-head .count { font-size: 10.5px; background: var(--slate-100); border-radius: 999px; padding: 1px 7px; color: var(--muted-fg); }
-.catalog-head .collapse-btn {
-  margin-left: auto; border: 0; background: transparent; color: var(--muted-fg);
-  font-size: 11px; width: 22px; height: 22px; border-radius: 5px;
+.tick:hover, .tick:focus-visible { opacity: 1; background: var(--brand-600); width: 20px; outline: none; }
+.tick.active { opacity: 1; background: var(--brand-600); width: 20px; }
+.tick.failed { background: var(--error); opacity: .75; }
+.tick.failed:hover { opacity: 1; }
+.tick.running { background: var(--warning); opacity: 1; animation: pulse 1.2s infinite; }
+.tick.unloaded { background: transparent; box-shadow: inset 0 0 0 1px var(--slate-400); opacity: .55; }
+.tick.unloaded:hover { box-shadow: inset 0 0 0 1px var(--brand-600); opacity: 1; }
+/* hover 飞出信息卡（深色反转卡，对齐 ZCode 截图） */
+.tick-flyout {
+  position: absolute; left: 40px; width: 300px; pointer-events: none; z-index: 50;
+  background: var(--fg); color: var(--bg); border-radius: 10px; padding: 12px 14px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.28); font-size: 12px; line-height: 1.55;
+  opacity: 0; transform: translateY(-4px); transition: opacity .15s ease, transform .15s ease;
 }
-.catalog-head .collapse-btn:hover { background: var(--slate-100); color: var(--fg); }
-.catalog-body { flex: 1; overflow-y: auto; padding: 6px; }
-/* 展开恢复按钮（栏收起时贴在聊天区左上） */
-.catalog-expand-btn {
-  display: none; align-items: center; gap: 5px; margin: 8px 0 0 8px; flex-shrink: 0;
-  border: 1px solid var(--border); background: var(--card); color: var(--muted-fg);
-  font-size: 11px; padding: 4px 8px; border-radius: 6px;
-}
-.panel-body.catalog-collapsed .catalog-expand-btn { display: inline-flex; }
-.catalog-expand-btn:hover { color: var(--fg); background: var(--slate-100); }
-
-/* 未加载提示块（D-002：更早轮次用 runs 接口补全目录，标注未加载态） */
-.catalog-earlier-hint {
-  font-size: 10.5px; color: var(--muted-fg); text-align: center; padding: 6px 4px 2px;
-}
-.catalog-item {
-  width: 100%; text-align: left; border: 1px solid transparent; background: transparent;
-  border-radius: 8px; padding: 7px 9px; display: block; margin-bottom: 2px;
-}
-.catalog-item:hover { background: var(--slate-100); }
-.catalog-item.active { background: var(--brand-50); border-color: var(--brand-200); }
-.catalog-item.loading { opacity: .55; pointer-events: none; }
-.ci-top { display: flex; align-items: center; gap: 6px; }
-.ci-index {
-  font-size: 10px; font-weight: 700; color: var(--brand-700); background: var(--brand-100);
-  border-radius: 4px; padding: 1px 5px; flex-shrink: 0;
-}
-.ci-time { font-size: 10px; color: var(--muted-fg); }
-.ci-status { margin-left: auto; width: 7px; height: 7px; border-radius: 999px; background: var(--success); flex-shrink: 0; }
-.ci-status.failed { background: var(--error); }
-.ci-status.running { background: var(--warning); animation: pulse 1.2s infinite; }
-@keyframes pulse { 50% { opacity: .35; } }
-.ci-q {
-  font-size: 12px; font-weight: 500; margin-top: 4px; color: var(--fg);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.ci-a {
-  font-size: 11px; line-height: 1.45; margin-top: 2px; color: var(--muted-fg);
+.tick-flyout.show { opacity: 1; transform: translateY(0); }
+.tick-flyout .f-q {
+  font-weight: 600; font-size: 12.5px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.ci-tag {
-  display: inline-block; font-size: 9.5px; border: 1px dashed var(--slate-300);
-  color: var(--muted-fg); border-radius: 4px; padding: 0 4px; margin-top: 3px;
+.tick-flyout .f-a {
+  margin-top: 4px; opacity: .75;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
+.tick-flyout .f-m { margin-top: 7px; font-size: 10px; opacity: .55; }
 
 /* ── 聊天滚动区 ── */
 .chat-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -260,16 +236,8 @@ body.mobile-preview .page-header { display: none; }
 body.mobile-preview .main-grid { grid-template-columns: minmax(0,1fr); }
 body.mobile-preview .session-list { display: none; }
 body.mobile-preview .panel { border-radius: 0; border: 0; }
-body.mobile-preview .turn-catalog {
-  position: fixed; left: 0; top: 64px; bottom: 0; width: min(78vw, 300px); z-index: 95;
-  box-shadow: 4px 0 24px rgba(0,0,0,.18); background: var(--card);
-}
-body.mobile-preview .catalog-expand-btn { display: inline-flex; }
-body.mobile-preview.panel-body.catalog-collapsed .turn-catalog { width: 0; }
-.mobile-drawer-mask {
-  display: none; position: fixed; inset: 64px 0 0 0; background: rgba(0,0,0,.35); z-index: 94;
-}
-body.mobile-preview:not(.panel-body.catalog-collapsed) .mobile-drawer-mask { display: block; }
+/* 移动端：刻度轨隐藏（真实实现收进 ⋯ 菜单抽屉） */
+body.mobile-preview .tick-rail-wrap { display: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--slate-300); border-radius: 4px; }
 </style>
@@ -360,44 +328,32 @@ body.mobile-preview:not(.panel-body.catalog-collapsed) .mobile-drawer-mask { dis
         </div>
       </div>
 
-      <!-- ★ 新增：主体区左轮次导航栏（D-001/D-002/D-003） -->
+      <!-- ★ 新增：聊天主体 = 左刻度轨 + 聊天列（D-007 ZCode 刻度轨形态） -->
       <div class="panel-body" id="panelBody">
-        <div class="mobile-drawer-mask" id="drawerMask"></div>
-        <nav class="turn-catalog" aria-label="轮次导航">
-          <div class="catalog-head">
-            <span class="label">轮次导航</span>
-            <span class="count" id="turnCount">14</span>
-            <button class="collapse-btn" id="collapseBtn" title="收起轮次导航">⟨</button>
+        <div class="tick-rail-wrap">
+          <div class="tick-rail" id="tickRail" aria-label="轮次刻度导航">
+            <!-- 未加载轮次刻度（空心；runs 接口补全，点击加载并定位） -->
+            <button class="tick unloaded failed" data-no="T1" data-target="t-early"
+              data-q="先调研 sessions 页面的组件结构"
+              data-a="SessionsPortal → grid[320px|1fr]，右侧 SessionPanel 分发 page/dialog 两种模式，共用移动端与悬浮窗宿主…"
+              data-m="09:25 · 失败 · 未加载 — 点击加载该轮并定位"></button>
+            <button class="tick unloaded" data-no="T2" data-target="t-early"
+              data-q="看一下 TurnTimeline 组件的渲染方式"
+              data-a="turns.map 顺序渲染 TurnRow，行级 React.memo + 段级 memo，无虚拟滚动，历史走窗口化分页加载…"
+              data-m="09:28 · 完成 · 未加载 — 点击加载该轮并定位"></button>
+            <button class="tick unloaded" data-no="T3" data-target="t-early"
+              data-q="后端 agent 模块的日志端点支持分页吗？"
+              data-a="支持 after/before 游标和 limit，返回 AgentRunLogEntry[]，前端按 run_id 分组即是轮次…"
+              data-m="09:31 · 完成 · 未加载 — 点击加载该轮并定位"></button>
+            <!-- 已加载轮次刻度（JS 生成） -->
           </div>
-          <div class="catalog-body" id="catalogBody">
-            <div class="catalog-earlier-hint">↑ 更早 86 轮（点击自动加载并定位）</div>
-            <!-- 未加载轮次条目（runs 接口补全，灰态标注） -->
-            <button class="catalog-item" data-unloaded="1" data-target="t-early">
-              <span class="ci-top"><span class="ci-index">T3</span><span class="ci-time">09:31</span><span class="ci-status"></span></span>
-              <div class="ci-q">后端 agent 模块的日志端点支持分页吗？</div>
-              <div class="ci-a">支持 after/before 游标和 limit，返回 AgentRunLogEntry[]，按 run_id 分组就是轮次…</div>
-              <span class="ci-tag">未加载 · 点击加载</span>
-            </button>
-            <button class="catalog-item" data-unloaded="1" data-target="t-early">
-              <span class="ci-top"><span class="ci-index">T2</span><span class="ci-time">09:28</span><span class="ci-status"></span></span>
-              <div class="ci-q">看一下 TurnTimeline 组件的渲染方式</div>
-              <div class="ci-a">turns.map 顺序渲染 TurnRow，行级 React.memo + 段级 memo，无虚拟滚动，历史走窗口化…</div>
-              <span class="ci-tag">未加载 · 点击加载</span>
-            </button>
-            <button class="catalog-item" data-unloaded="1" data-target="t-early">
-              <span class="ci-top"><span class="ci-index">T1</span><span class="ci-time">09:25</span><span class="ci-status failed"></span></span>
-              <div class="ci-q">先调研 /sessions 页面的组件结构</div>
-              <div class="ci-a">SessionsPortal → grid[320px|1fr]，右侧 SessionPanel 分发 page/dialog 两种模式，共用移动端…</div>
-              <span class="ci-tag">未加载 · 点击加载</span>
-            </button>
-            <!-- 已加载轮次条目（displayTurns 派生，JS 生成） -->
-            <!-- catalog-items-injected-here -->
+          <div class="tick-flyout" id="tickFlyout">
+            <div class="f-q"></div><div class="f-a"></div><div class="f-m"></div>
           </div>
-        </nav>
+        </div>
 
         <!-- 聊天列 -->
         <div class="chat-col">
-          <button class="catalog-expand-btn" id="expandBtn">⟩ 轮次</button>
           <div class="chat-scroll" id="chatScroll">
             <div class="load-earlier" id="loadEarlier">↑ 已加载最近 100 条日志 · 更早轮次从左侧轮次导航跳转</div>
             <!-- turns-injected-here -->
@@ -417,7 +373,6 @@ body.mobile-preview:not(.panel-body.catalog-collapsed) .mobile-drawer-mask { dis
 </div>
 
 <div class="toast" id="toast"></div>
-<button class="mobile-fab" id="mobileFab" style="display:none">☰ 轮次</button>
 
 <script>
 /* ── Mock 轮次数据（模拟高轮次会话的最近 11 轮已加载 + 3 轮未加载） ── */
@@ -453,7 +408,7 @@ const turns = [
 
 /* ── 渲染聊天区 + 目录 ── */
 const chat = document.getElementById('chatScroll');
-const catalogBody = document.getElementById('catalogBody');
+const rail = document.getElementById('tickRail');
 const idxBase = 4; // 已加载轮次从 T4 开始（T1~T3 是未加载态）
 turns.forEach((t, i) => {
   const el = document.createElement('div');
@@ -471,16 +426,76 @@ turns.forEach((t, i) => {
     </div>`;
   chat.appendChild(el);
 
-  const item = document.createElement('button');
-  item.className = 'catalog-item'; item.dataset.target = t.id;
-  const st = t.status === 'running' ? 'running' : (t.status === 'failed' ? 'failed' : '');
-  item.innerHTML = `
-    <span class="ci-top"><span class="ci-index">T${idxBase + i}</span><span class="ci-time">${t.time}</span><span class="ci-status ${st}"></span></span>
-    <div class="ci-q">${t.q}</div>
-    <div class="ci-a">${t.a.slice(0, 90)}…</div>`;
-  catalogBody.appendChild(item);
+  const tick = document.createElement('button');
+  tick.className = 'tick' + (t.status === 'failed' ? ' failed' : '') + (t.status === 'running' ? ' running' : '');
+  tick.dataset.target = t.id;
+  tick.dataset.no = 'T' + (idxBase + i);
+  tick.dataset.q = t.q;
+  tick.dataset.a = t.a;
+  tick.dataset.m = `${t.time} · ${t.status === 'running' ? '运行中' : '完成'} · 我`;
+  tick.setAttribute('aria-label', `${tick.dataset.no} 轮 · ${tick.dataset.m} · ${t.q.slice(0, 30)}`);
+  rail.appendChild(tick);
 });
-document.getElementById('turnCount').textContent = turns.length + 3 + ' / 100';
+
+/* ── 刻度 hover：飞出信息卡（定位随刻度，上下钳制在轨范围内） ── */
+const flyout = document.getElementById('tickFlyout');
+const fq = flyout.querySelector('.f-q'), fa = flyout.querySelector('.f-a'), fm = flyout.querySelector('.f-m');
+rail.addEventListener('mouseover', (e) => {
+  const tick = e.target.closest('.tick');
+  if (!tick) return;
+  showFlyout(tick);
+});
+rail.addEventListener('focusin', (e) => {
+  const tick = e.target.closest('.tick');
+  if (!tick) return;
+  showFlyout(tick);
+});
+rail.addEventListener('mouseleave', () => flyout.classList.remove('show'));
+function showFlyout(tick) {
+  fq.textContent = `${tick.dataset.no} · ${tick.dataset.q}`;
+  fa.textContent = tick.dataset.a || '';
+  fa.style.display = tick.dataset.a ? '' : 'none';
+  fm.textContent = tick.dataset.m;
+  flyout.classList.add('show');
+  const half = flyout.offsetHeight / 2;
+  const top = Math.max(8, Math.min(tick.offsetTop - half, rail.clientHeight - flyout.offsetHeight - 8));
+  flyout.style.top = top + 'px';
+}
+
+/* ── 点击刻度 → 跳转 + 高亮（未加载刻度先模拟加载） ── */
+function setActiveTick(tick) {
+  rail.querySelectorAll('.tick.active').forEach(x => x.classList.remove('active'));
+  if (tick) tick.classList.add('active');
+}
+rail.addEventListener('click', (e) => {
+  const tick = e.target.closest('.tick');
+  if (!tick) return;
+  if (tick.classList.contains('unloaded')) {
+    tick.style.opacity = '.3';
+    showToast('正在加载历史日志并定位…');
+    setTimeout(() => {
+      // 模拟：顶部插入一条「加载出来的早期轮次」再跳过去
+      const early = document.createElement('div');
+      early.className = 'turn'; early.id = 't-early';
+      early.innerHTML = `
+        <div class="turn-inner">
+          <div class="turn-user"><span class="t">09:25</span><div class="bubble-user">${tick.dataset.q}</div><div class="avatar">W</div></div>
+          <div class="assistant-wrap"><div class="bubble-ai">${tick.dataset.a}<div class="t">完成于 09:26</div></div></div>
+        </div>`;
+      chat.insertBefore(early, chat.firstChild);
+      tick.classList.remove('unloaded');
+      tick.style.opacity = '';
+      tick.dataset.m = tick.dataset.m.replace('未加载 — 点击加载该轮并定位', '完成');
+      showToast('已加载 1 页历史（每页 100 条），已定位到目标轮次');
+      jumpTo('t-early');
+      setActiveTick(tick);
+      window.__syncActive?.();
+    }, 900);
+    return;
+  }
+  setActiveTick(tick);
+  jumpTo(tick.dataset.target);
+});
 
 /* ── 交互：点击目录条目 → 跳转 + 高亮（未加载条目先模拟加载） ── */
 const toast = document.getElementById('toast');
@@ -493,82 +508,44 @@ function jumpTo(targetId) {
   if (!target) return;
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   document.querySelectorAll('.turn.jump-highlight').forEach(x => x.classList.remove('jump-highlight'));
-  document.querySelectorAll('.catalog-item.active').forEach(x => x.classList.remove('active'));
   setTimeout(() => {
     target.classList.add('jump-highlight');
     setTimeout(() => target.classList.remove('jump-highlight'), 2200);
   }, 320);
 }
-catalogBody.addEventListener('click', (e) => {
-  const item = e.target.closest('.catalog-item');
-  if (!item) return;
-  if (item.dataset.unloaded) {
-    item.classList.add('loading');
-    item.querySelector('.ci-tag')?.remove();
-    showToast('正在加载历史日志并定位…');
-    setTimeout(() => {
-      // 模拟：顶部插入一条「加载出来的早期轮次」再跳过去
-      const early = document.createElement('div');
-      early.className = 'turn'; early.id = 't-early';
-      early.innerHTML = `
-        <div class="turn-inner">
-          <div class="turn-user"><span class="t">09:25</span><div class="bubble-user">${item.querySelector('.ci-q').textContent}</div><div class="avatar">W</div></div>
-          <div class="assistant-wrap"><div class="bubble-ai">${item.querySelector('.ci-a').textContent}<div class="t">完成于 09:26</div></div></div>
-        </div>`;
-      chat.insertBefore(early, chat.firstChild);
-      item.classList.remove('loading');
-      item.dataset.unloaded = '';
-      showToast('已加载 1 页历史（每页 100 条），已定位到目标轮次');
-      jumpTo('t-early');
-      window.__syncActive?.();
-    }, 900);
-    return;
-  }
-  document.querySelectorAll('.catalog-item.active').forEach(x => x.classList.remove('active'));
-  item.classList.add('active');
-  jumpTo(item.dataset.target);
-});
 
-/* ── 滚动联动：聊天滚到哪，目录高亮哪 ── */
+/* ── 滚动联动：聊天滚到哪，哪条刻度亮 ── */
 const chatScrollEl = chat;
 function syncActive() {
-  const items = [...catalogBody.querySelectorAll('.catalog-item')].filter(x => !x.dataset.unloaded);
-  if (!items.length) return;
-  let cur = items[0];
-  for (const it of items) {
-    const el = document.getElementById(it.dataset.target);
-    if (el && el.getBoundingClientRect().top < 200) cur = it;
+  const ticks = [...rail.querySelectorAll('.tick:not(.unloaded)')];
+  if (!ticks.length) return;
+  let cur = ticks[0];
+  for (const tk of ticks) {
+    const el = document.getElementById(tk.dataset.target);
+    if (el && el.getBoundingClientRect().top < 200) cur = tk;
   }
-  items.forEach(x => x.classList.toggle('active', x === cur));
+  ticks.forEach(x => x.classList.toggle('active', x === cur));
 }
 window.__syncActive = syncActive;
 chatScrollEl.addEventListener('scroll', () => requestAnimationFrame(syncActive));
 syncActive();
 
-/* ── 折叠 / 展开 ── */
-const panelBody = document.getElementById('panelBody');
-document.getElementById('collapseBtn').addEventListener('click', () => panelBody.classList.add('catalog-collapsed'));
-document.getElementById('expandBtn').addEventListener('click', () => panelBody.classList.remove('catalog-collapsed'));
-document.getElementById('drawerMask').addEventListener('click', () => panelBody.classList.add('catalog-collapsed'));
-
 /* ── 主题切换 ── */
 document.querySelectorAll('.theme-btn[data-t]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.documentElement.dataset.theme = btn.dataset.t;
+    document.documentElement.dataset.theme = btn.dataset.theme || btn.dataset.t;
     document.querySelectorAll('.theme-btn[data-t]').forEach(x => x.classList.toggle('active', x === btn));
   });
 });
 
-/* ── 移动端预览切换 ── */
+/* ── 移动端预览切换（刻度轨隐藏；真实实现收进 ⋯ 菜单抽屉） ── */
 const mobileToggle = document.getElementById('mobileToggle');
-const mobileFab = document.getElementById('mobileFab');
 mobileToggle.addEventListener('click', () => {
   const on = document.body.classList.toggle('mobile-preview');
   mobileToggle.classList.toggle('active', on);
-  mobileFab.style.display = on ? 'inline-block' : 'none';
-  if (on) { panelBody.classList.remove('catalog-collapsed'); showToast('移动端：轮次导航收进 ⋯ 菜单，以抽屉形式弹出'); }
+  if (on) showToast('移动端：刻度轨隐藏，轮次导航收进 ⋯ 菜单以抽屉弹出');
 });
-mobileFab.addEventListener('click', () => panelBody.classList.remove('catalog-collapsed'));
+
 </script>
 </body>
 </html>

@@ -12,18 +12,19 @@ risk_level: unit-sufficient
 
 ## 1. 背景与目标
 
-高轮次智能体会话中，用户无法快速回顾"之前问了什么、做了什么"：历史分窗加载（初始 `getAgentSessionLogs(limit=100)`，触顶翻页），只能手动滚；会话内搜索浮层只展示不跳转。本变更新增 ZCode 式左侧轮次导航：两段式条目（提问+正文摘要）+ 点击跳转定位 + 全量轮次覆盖。
+高轮次智能体会话中，用户无法快速回顾"之前问了什么、做了什么"：历史分窗加载（初始 `getAgentSessionLogs(limit=100)`，触顶翻页），只能手动滚；会话内搜索浮层只展示不跳转。本变更新增 ZCode 式左缘刻度轨（每轮一条细横杠刻度 + hover 飞出提问/正文摘要卡）+ 点击跳转定位 + 全量轮次覆盖。
 
 ## 2. 决策追踪
 
 | ID | 决策 | 来源 | 摘要 |
 |---|---|---|---|
-| D-001@v1 | 常驻左栏 + 移动端收菜单 | user | 桌面常驻可折叠；mobile/悬浮窗 ⋯ 菜单抽屉 |
+| D-001@v1 | 常驻左栏 + 移动端收菜单 | user | 桌面常驻可折叠；mobile ⋯ 菜单抽屉；悬浮窗修正见 D-006 |
 | D-002@v1 | 覆盖全部历史轮次 | user | runs 补全未加载轮次；点击自动加载后定位 |
-| D-003@v1 | 条目=提问+正文摘要 | user | ZCode 式两段 |
+| D-003@v2 | ZCode 横杠式条目 | user | 已被 D-007 取代（横杠列表仍不符用户预期） |
 | D-004@v1 | 方案 A 前端拼装零后端 | agent | B 违 D-002、C 引新契约 YAGNI |
 | D-005@v1 | 未加载条目摘要策略 | agent | v1 元数据+点击回填；可选增强=runs 加 prompt_preview 字段（轻后端），默认不做，用户原型确认时可改选 |
-| D-006@v1 | 悬浮窗归 desktop 常驻分支（默认折叠） | agent | Grill 修正：floating-session-host 不传 variant→实际为 desktop，⋯ 菜单（mobile 守卫）在其不渲染；悬浮窗宽度有限，走常驻可折叠分支但默认折叠（catalogDefaultCollapsed prop） |
+| D-006@v1 | 悬浮窗归 desktop 常驻分支（默认折叠） | agent | Grill 修正：floating-session-host 不传 variant→实际为 desktop；D-007 后刻度轨仅 ~30px 无需折叠，floating 零改动复用 |
+| D-007@v1 | 形态终版：刻度轨 tick + hover 飞出卡 | user | 每轮一条 2px 细横杠贴聊天区左缘（~30px 轨），hover 飞出深色信息卡，点击跳转；取消 232px 面板/折叠/localStorage |
 
 ## 3. 现状锚点（调研结论，行号为 2026-09-08 main 快照）
 
@@ -42,9 +43,9 @@ SessionPanelPage (mode=page, 真会话)
 ├─ header（现状不动；mobile ⋯ 菜单 +「轮次导航」项）
 ├─ SessionUsageBar / 横幅 / AgentLogCard / TaskExecutionPanel（不动）
 └─ ★ sessionBody 区外包 flex 行：
-   ├─ ★ <TurnCatalog>（desktop 常驻 232px / mobile=floating Drawer 内容）
-   │    entries[]（merge 产物）· activeTurnKey · collapsed · onJump · onToggle
-   └─ 聊天列（现状：load-earlier 提示 + TurnTimeline + 输入区）
+   ├─ ★ <TickRail>（~30px 刻度轨：每轮一条 2px 刻度 + hover 飞出卡；mobile=Drawer 内容）
+   │    entries[]（merge 产物）· activeTurnKey · onJump
+   └─ 聊天列（现状：load-earlier 提示 + TurnTimeline + 输入区，flex-1 占满剩余宽度）
         └─ TurnRow 新增 data-turn-key；highlightTurnKey 受控高亮
 ```
 
@@ -60,9 +61,9 @@ listSessionRuns(全量) ─┘                                      │ click
                                         └─ 未加载：循环 loadEarlier(≤N页) → 同上
 ```
 
-## 5. 组件设计：TurnCatalog（新文件）
+## 5. 组件设计：TickRail（新文件 turn-catalog.tsx）
 
-`frontend/src/components/sessions/turn-catalog.tsx`，仿 `subagent-catalog.tsx` 受控模式（props 进回调出，不碰 DOM）。
+`frontend/src/components/sessions/turn-catalog.tsx`，仿 `subagent-catalog.tsx` 受控模式（props 进回调出，不碰聊天区 DOM）。
 
 ```ts
 interface TurnCatalogEntry {
@@ -71,24 +72,24 @@ interface TurnCatalogEntry {
   startedAt: string | null;
   status: "completed" | "failed" | "running" | "stopped" | "pending";
   senderName?: string | null;
-  promptSummary?: string;   // 已加载/已回填：1 行省略；未加载：undefined
-  answerSummary?: string;   // 已加载/已回填：2 行钳制（首个 text 段截 ~120 字）
-  loaded: boolean;          // false → 「点击加载并定位」标记
+  promptSummary?: string;   // 已加载/已回填：飞出卡提问；未加载：undefined
+  answerSummary?: string;   // 已加载/已回填：飞出卡正文摘要（首个 text 段截 ~120 字）
+  loaded: boolean;          // false → 空心刻度
 }
-interface TurnCatalogProps {
+interface TickRailProps {
   entries: TurnCatalogEntry[];
   activeTurnKey: string | null;
-  collapsed: boolean;
   loadingEarlier?: boolean;
   onJump: (entry: TurnCatalogEntry) => void;
-  onToggleCollapse: () => void;
 }
 ```
 
-- 条目结构对齐原型 `.catalog-item`：`ci-top`（轮号徽标 brand-100/700 + 时间 + 状态点）+ `ci-q`（text-[12px] 1 行 ellipsis）+ `ci-a`（text-[11px] line-clamp-2 text-muted-foreground）+ 未加载 `ci-tag`（虚线边框小标）。
-- 全部颜色走主题语义类（brand-*、text-muted-foreground、bg-card、border-border），随 html data-theme 换肤，不硬编码。
-- active 条目：`bg-brand-50 border-brand-200`；active 变化时条目 `scrollIntoView({block:"nearest"})`（仅目录容器内，useEffect + ref 守卫首次渲染不滚）。
-- 折叠动画：`w-[232px]` ↔ `w-0`（transition-[width]），折叠后由父级渲染恢复按钮（`⟩ 轮次`）。
+- 渲染（D-007，对齐原型 v3）：宽 ~30px 垂直细条（`w-[30px]`，`flex-col items-center gap-[7px] py-2`，**刻度组垂直居中**——伪元素上下 `flex:1` 撑开，刻度超出面板高度时 spacers 收缩到 0 回落顶对齐 + 轨内 `overflow-y-auto` 隐藏滚动条）；每轮一条刻度 `button`（`w-[14px] h-[2px] rounded-full`，hover/active 放宽 `w-[20px]` + `bg-brand-600`）；失败 `bg-destructive/75`、运行中 `bg-warning animate-pulse`、未加载空心（`box-shadow inset 0 0 0 1px` 描边）；默认 `bg-muted-foreground opacity-45`。
+- hover 飞出卡：深色反转卡（`bg-foreground text-background`，宽 300px，圆角 10px，重投影）绝对定位于轨右侧 40px，内容=轮号+提问（semibold 2 行钳制）+正文摘要（3 行钳制）+meta（时间 · 状态 · 发送者，10px）；垂直位置=刻度 offsetTop 居中并钳制在面板可视范围（上下留 8px）；`@media (hover:none)` 不挂载（触屏点击直跳）。
+- 全部颜色走主题语义类（brand-*/destructive/warning/muted-foreground/foreground/background），随 html data-theme 换肤，不硬编码。
+- active 刻度变化时在轨内 `scrollIntoView({block:"nearest"})`（useEffect + ref 守卫首次渲染不滚）。
+- 无障碍：每条刻度 `button` 带 `aria-label="第N轮 · 状态 · 提问摘要（截断）"`；飞出卡由刻度 hover **或键盘 focus（focus-visible）** 触发（共用定位逻辑），键盘用户同样可达；`aria-pressed` 不用，active 态以 `aria-current="true"` 标注当前轮。
+- 组件名保留 turn-catalog.tsx / TurnCatalog 导出（历史一致），内部即刻度轨实现。
 
 ## 6. 数据派生（session-panel-page.tsx）
 
@@ -116,7 +117,7 @@ const catalogEntries = useMemo(() => {
 
 - 轮号基准：runs 全序的 1 基序号（与目录一致、与聊天流无强绑定，聊天区不加轮号显示）。
 - `firstTextSegment(turn)`：取 `turn.segments?.find(kind==="text")?.text ?? turn.output`（旧回退路径无 segments 用 output）。
-- 兼容 runs 不可用/失败：降级为仅已加载轮次条目（loaded=true），目录头计数显示 `n / 未知`。
+- 兼容 runs 不可用/失败：降级为仅已加载轮次刻度（loaded=true）；未加载刻度本身即状态标识（空心描边），无额外计数 UI（§9 不设头部）。
 - 实时性：SSE 新增轮经 displayTurns 更新自然进入 entries（runs 只提供骨架，不追求其即时刷新；新轮 turnNo 取 max+1 保守派生）。
 
 ## 7. 跳转链路：handleJumpToTurn（session-panel-page.tsx）
@@ -149,36 +150,36 @@ const handleJumpToTurn = useCallback(async (entry) => {
 
 ## 8. 布局挂载与多宿主
 
-- **desktop（mode=page）**：`sessionBody` 外包 `flex min-h-0`（左 TurnCatalog 232px + 右聊天列 flex-1 min-w-0）；collapsed 时左栏 w-0，聊天列左上角渲染恢复按钮（绝对定位，同原型）。**该包裹有意更新 `session-panel-variant.test.tsx` 的 desktop 父链断言**（timelineWrap.parentElement 链多一层 flex 行，见 §11）。
-- **mobile（variant=mobile）**：不常驻。header ⋯ 菜单（2634-2700）加「轮次导航」项 → antd Drawer（placement=left，宽 min(78vw,300px)）内渲染同一 TurnCatalog（collapsed 恒 false）；`onJump` 后自动关 Drawer。
-- **悬浮窗（floating-session-host）**：**实际走 desktop variant**（host 不传 variant，index.tsx:279 默认 desktop，Grill 修正 D-006）→ 落 desktop 常驻分支，但经新 prop `catalogDefaultCollapsed` 默认折叠（悬浮窗宽度有限，232px 栏占比过高）；用户可展开，行为同桌面。
-- **dialog 模式**：不挂载（TurnCatalog 挂载点仅在 page 模式渲染分支内，props 不传即不渲染）。
-- 折叠记忆：localStorage key `turn-nav-collapsed`（per-user 单键，不做 per-session 记忆）；悬浮窗的默认折叠只是初始值，用户展开后同键记忆。
+- **desktop（mode=page）**：`sessionBody` 外包 `flex min-h-0`（左 TickRail ~30px + 右聊天列 flex-1 min-w-0）；无折叠、无 localStorage 记忆（D-007 取消）。**该包裹有意更新 `session-panel-variant.test.tsx` 的 desktop 父链断言**（timelineWrap.parentElement 链多一层 flex 行，见 §11）。
+- **mobile（variant=mobile）**：不常驻。header ⋯ 菜单（2634-2700）加「轮次导航」项 → antd Drawer（placement=left，宽 min(78vw,300px)）内渲染 TickRail 的列表形态（触屏无 hover：Drawer 内为带摘要的行式列表，点击即跳）；`onJump` 后自动关 Drawer。
+- **悬浮窗（floating-session-host）**：**实际走 desktop variant**（host 不传 variant，index.tsx:279 默认 desktop，Grill 修正 D-006）→ 刻度轨仅 ~30px 宽，直接复用 desktop 形态，**floating-session-host 零改动**（D-007 后无需 catalogDefaultCollapsed）。
+- **dialog 模式**：不挂载（TickRail 挂载点仅在 page 模式渲染分支内，props 不传即不渲染）。
 
-## 9. UI 规格（对照原型）
+## 9. UI 规格（对照原型 v3 · ZCode 刻度轨）
 
-- 栏宽 232px；头部 `px-2.5 py-2`：「轮次导航」text-[11.5px] semibold muted + 计数 chip + ⟨ 折叠钮。
-- 条目 `px-2.25 py-1.75 rounded-lg hover:bg-muted/60`；轮号徽标 `bg-brand-100 text-brand-700 text-[10px] font-bold rounded px-1`；状态点 7px（failed=destructive、running=warning+animate-pulse、其余 success）。
-- 未加载条目：元数据行 + 「点击加载并定位」虚线 tag（`border-dashed border-slate-300 text-[9.5px]`）；**与原型差异**：原型未加载条目预置了摘要文案（演示回填后的观感），实现 v1 初始无摘要文本、点击回填后与已加载条目一致（D-005）。
-- 目录底部计数 `14 / 100`（已加载轮数 / runs 总轮数）。
+- 刻度轨：宽 30px，`py-2`，刻度间 gap 7px，刻度组垂直居中（超高溢出回落顶对齐轨内滚动）；不设头部/计数/折叠（D-007）。
+- 刻度（`.tick`）：14×2px 圆角横杠；默认 `bg-muted-foreground opacity-45`；hover → `w-20px bg-brand-600 opacity-100`；active（当前轮）→ 同 hover 常亮；failed → `bg-destructive opacity-75`；running → `bg-warning animate-pulse`；unloaded → 空心（inset 1px 描边，无底色）。
+- 飞出卡（`.tick-flyout`）：深色反转（bg=foreground、text=background），宽 300px，圆角 10px，投影，绝对定位于轨右 40px；内容：`f-q`（轮号+提问，semibold 12.5px 2 行钳制）、`f-a`（正文摘要 12px 75% 透明 3 行钳制）、`f-m`（meta 10px 55% 透明：时间 · 状态 · 发送者 / 未加载尾注）；淡入+4px 位移过渡 0.15s；垂直随刻度居中、钳制面板内 8px 边距；触发=hover 或刻度 focus-visible（键盘可达）。
+- 跳转命中：聊天区目标轮 ring+浅底 2.2s（不变）；对应刻度即时 active。
+- 触屏（hover:none）：飞出卡不挂载，点击刻度直接跳转；mobile Drawer 内为行式列表形态（带摘要，点击即跳）。
+- **与原型 v3 差异（同 D-005）**：原型未加载刻度的飞出卡预置了摘要文案（演示回填后观感），实现 v1 初始 meta 行只有「未加载 — 点击加载该轮并定位」，回填后才有提问/正文。
 
 ## 10. 文件变更清单 / File Changes
 
 | 文件 | 类型 | 内容 |
 |---|---|---|
-| `frontend/src/components/sessions/turn-catalog.tsx` | 新增 | TurnCatalog 受控纯组件 + TurnCatalogEntry 类型 + 摘要工具（firstTextSegment/截断） |
-| `frontend/src/components/sessions/__tests__/turn-catalog.test.tsx` | 新增 | 组件单测（渲染/回调/未加载态/active 高亮/折叠回调） |
+| `NEW:frontend/src/components/sessions/turn-catalog.tsx` | 新增 | TickRail 刻度轨组件（刻度渲染 + hover 飞出卡 + 定位钳制）+ TurnCatalogEntry 类型 + 摘要工具（firstTextSegment/截断） |
+| `NEW:frontend/src/components/sessions/__tests__/turn-catalog.test.tsx` | 新增 | 组件单测（刻度渲染/状态态/hover 飞出内容与钳制/点击回调/未加载空心/active） |
 | `frontend/src/components/daemon/turn-timeline.tsx` | 修改 | TurnRow **fragment 两分支根节点**均加 `data-turn-key`；TurnTimelineProps 加 `highlightTurnKey`（内派生 per-row 布尔，不击穿行 memo） |
-| `frontend/src/components/daemon/session-panel/session-panel-page.tsx` | 修改 | catalogEntries 派生（复用既有 runsMeta，不新增 useQuery）+ handleJumpToTurn + 触顶抑制/hasEarlier 镜像 ref + 布局包裹（desktop 常驻/mobile Drawer 入口）+ activeTurnKey 滚动联动 + 折叠记忆 |
+| `frontend/src/components/daemon/session-panel/session-panel-page.tsx` | 修改 | catalogEntries 派生（复用既有 runsMeta，不新增 useQuery）+ handleJumpToTurn + 触顶抑制/hasEarlier 镜像 ref + 布局包裹（desktop 常驻/mobile Drawer 入口）+ activeTurnKey 滚动联动 |
 | `frontend/src/components/daemon/session-panel/page-helpers.tsx` | 修改（如需） | 触顶自动加载 hook 接受 suppress ref 参数 |
 | `frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx` | 修改 | **有意更新** desktop 父链断言（timelineWrap.parentElement 层级 +1 flex 行）；mobile 分支断言保持不变 |
-| `frontend/src/components/floating/floating-session-host.tsx` | 修改 | 传 `catalogDefaultCollapsed`（悬浮窗默认折叠，D-006） |
 
 不动：后端全部、sessions-portal、session-list-panel、dialog 宿主渲染分支。
 
 ## 11. 测试策略
 
-1. `turn-catalog.test.tsx`（新增，~10 用例）：条目两段渲染与截断；未加载 tag 与无摘要；click 回调携带 entry；active 高亮类；onToggleCollapse；loadingEarlier 禁用态。
+1. `turn-catalog.test.tsx`（新增，~10 用例）：刻度渲染（数量/状态类）；hover 与 focus-visible 触发飞出卡（内容轮号+提问/正文摘要/meta、垂直钳制）；tick aria-label 与 active 的 aria-current；未加载空心态与 meta 尾注；click 回调携带 entry；触屏（hover:none 匹配）不挂飞出卡。
 2. `session-panel-page` 既有测试文件追加（~6 用例）：`handleJumpToTurn` 已加载直跳（mock scrollIntoView 断言）；未加载循环调用 loadEarlier 至命中；页数上限兜底 toast；suppress ref 生效期触顶不触发；data-turn-key 渲染断言；mobile ⋯ 菜单项存在。
 3. 回归锚（**有意更新**而非不变）：desktop 布局包裹后 `session-panel-variant.test.tsx:281-286` 的父链断言（`timelineWrap.parentElement.className === "contents"`、`bodyWrap.parentElement === panel`）随之更新为新层级；mobile 分支断言（321-324）保持不回归；runtimes/sessions 相关既有测试跑相关子集。
 
@@ -191,9 +192,11 @@ const handleJumpToTurn = useCallback(async (entry) => {
 | R-03 | runs 与 displayTurns 对不齐（realRunId 缺失/孤儿 run） | 以 runs 定序；displayTurns 未命中 runs 的尾部轮追加到末尾（key=runId）；跳转未命中 toast 兜底 |
 | R-04 | 高轮次目录渲染性能 | 条目轻 DOM（无 markdown），百级条目普通渲染；卡顿再议虚拟化（Non-Goal 先记录） |
 | R-05 | 移动端 Drawer 与悬浮窗高度冲突 | Drawer 挂 SessionPanelPage 局部（antd Drawer getContainer 指面板根），不占全屏 |
-| R-06 | 折叠记忆脏（多端不同步） | localStorage 单键 best-effort，不同步不视为缺陷 |
+| ~~R-06~~ | ~~折叠记忆脏~~ | 已随 D-007 取消折叠与 localStorage（刻度轨仅 ~30px 常驻无需折叠），保留编号防错位 |
 | R-07 | TurnRow memo 被 highlight 击穿 / fragment 双根漏锚点 | per-row 布尔派生进 memo 行；两分支根节点都加 data-turn-key（§7） |
 | R-08 | runs 双数据源（新 useQuery vs 既有 runsMeta）不一致 | 复用 runsMeta（attach/每轮完成已全量拉刷），不新增独立缓存（§6） |
+| R-09 | 飞出卡定位溢出（顶部/底部刻度 hover 出界） | 垂直钳制在面板可视范围 ±8px（§5/§9）；极端窄高面板降级贴边 |
+| R-10 | 超高轮次刻度 density（100+ 刻度超一屏） | 轨内 overflow-y-auto 隐藏滚动条；active 刻度自动滚入可见（FR-05） |
 
 ## 13. 生命周期契约
 
@@ -201,7 +204,8 @@ const handleJumpToTurn = useCallback(async (entry) => {
 
 ## 14. 自审 / Self-Review
 
-- FR-01~08 与 D-001~006 逐条对得上；文件变更清单覆盖全部 FR（FR-07 由 turn-timeline + jump 链路承载）。
-- Grill 修正已吸收：desktop 父链断言为**有意更新**（非不回归，§10/§11 与 requirements 措辞同步）；悬浮窗归 desktop 常驻分支默认折叠（D-006）；复用 runsMeta 免新增查询；TurnRow fragment 双根锚点 + per-row 布尔高亮。
-- 最大的不确定点 = D-005 未加载条目摘要观感（原型展示了回填后形态），已显式列为用户确认点。
-- 跳转链路与触顶加载的竞争（R-02）、runs 对齐（R-03）均有明确缓解与兜底。
+- FR-01~08 与 D-001~007 逐条对得上；文件变更清单覆盖全部 FR（FR-07 由 turn-timeline + jump 链路承载）。
+- Grill 修正已吸收：desktop 父链断言为**有意更新**（非不回归，§10/§11 与 requirements 措辞同步）；悬浮窗归 desktop 分支（D-006，D-007 后零改动复用刻度轨）；复用 runsMeta 免新增查询；TurnRow fragment 双根锚点 + per-row 布尔高亮。
+- 形态经用户两轮反馈定稿为刻度轨（D-007）：v1 卡片列表（繁琐）→ v2 横杠列表（仍不符）→ v3 tick+飞出卡（对齐 ZCode 截图）。
+- 最大的不确定点 = D-005 未加载刻度摘要观感（原型展示回填后形态），已显式列为用户确认点。
+- 跳转链路与触顶加载的竞争（R-02）、runs 对齐（R-03）、飞出卡定位（R-09）均有明确缓解与兜底。

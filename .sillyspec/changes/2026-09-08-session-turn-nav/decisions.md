@@ -5,6 +5,16 @@ created_at: 2026-09-08 10:38:12
 
 # 决策记录 — 2026-09-08-session-turn-nav
 
+## D-003@v2 条目形态改 ZCode 横杠式：默认细横线单行，hover 动画展开详情
+
+- type: ux
+- source: user
+- question: 目录条目视觉形态（v1 两段常驻摘要卡片 vs ZCode 横杠式）
+- answer: 用户看原型后反馈 v1「繁琐、装饰太多」，要求对齐 ZCode：每轮默认只是一条细横线行（轮号 + 一行提问省略 + 失败/运行小圆点 + 未加载小字，行间发丝分隔线）；鼠标移上该行平滑展开（max-height 过渡动画）显示完整信息（提问 2 行钳制 + 助手正文 3 行摘要 + 时间/状态 meta）；点击仍是跳转定位。当前轮高亮只保留左侧 2px 品牌细线 + 轮号着色，不加底色/边框卡片。移动端无 hover：点击直接跳转（小屏预览价值低，跳转即见内容）。
+- evidence: 用户 2026-09-08 原型反馈（「参考 zcode 的那个 ui 可以吗 现在这种的有点繁琐」「不是装饰太多 zcode 不是一个一条条横杠的那种 ui 然后鼠标移上去出现动画并展示对应的信息吗」）；原型 v2 目录横杠区（.ci/.bar/.detail hover max-height 过渡）。
+- 模块域: frontend_components
+- 覆盖: D-003@v1（「提问+正文摘要」的信息保留，改到 hover 展开区；两段常驻可见的形态被取代）
+
 ## D-001@v1 常驻左栏 + 移动端/悬浮窗收进菜单
 
 - type: architecture
@@ -58,3 +68,13 @@ created_at: 2026-09-08 10:38:12
 - answer: floating-session-host 不传 variant → session-panel/index.tsx:279 默认 desktop variant，mobile ⋯ 菜单守卫在其不渲染，「收进 ⋯ 菜单」无入口。修正：悬浮窗落 desktop 常驻可折叠分支，经新 prop catalogDefaultCollapsed 默认折叠（悬浮窗宽度有限，232px 栏占比过高），用户可展开，展开后与桌面同款。
 - evidence: Design Grill 交叉审查缺陷 2（floating-session-host.tsx 全文无 variant、index.tsx:279 默认值）；连带 floating-session-host.tsx 进文件变更清单。
 - 模块域: frontend_components, frontend_app
+
+## D-007@v1 形态终版：ZCode 刻度轨（tick rail + hover 飞出卡），取消 232px 面板与折叠
+
+- type: ux
+- source: user
+- question: 目录形态二稿反馈（v2 横杠列表仍「不对」）
+- answer: 用户贴 ZCode 实机截图纠正：不是一列横杠列表，而是聊天区左缘一条极窄「刻度轨」——每轮一条 2px 细横杠刻度（14px 宽，hover 放宽到 20px 并着品牌色），hover 刻度时从右侧飞出深色信息卡（轮号+提问加粗、正文摘要、时间/状态 meta），点击刻度跳转定位。v3 定稿：取消 232px 侧栏与折叠/计数头部（刻度轨仅 ~30px 宽常驻，无需折叠，localStorage 记忆一并取消）；失败刻度红色、运行中琥珀脉冲、未加载空心；滚动联动=当前轮刻度常亮。移动端仍 ⋯ 菜单抽屉（触屏无 hover，点击直接跳转）。悬浮窗因刻度轨极窄可直接用同款（D-006 的默认折叠需求随之消失，floating-session-host 零改动）。
+- evidence: 用户 ZCode 截图（左缘刻度轨 + hover 弹出「部署docker…」深色信息卡）；原型 v3 tick-rail/tick-flyout 实现。
+- 模块域: frontend_components
+- 覆盖: D-003@v2（横杠列表形态）与 D-001@v1 的折叠面板设计；「提问+正文摘要」信息承载不变（移入飞出卡）
