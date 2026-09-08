@@ -237,6 +237,7 @@ Wave 顺序：**Wave 1 daemon → Wave 2 backend → Wave 3 frontend**（D-003�
 | 新增 | backend/app/modules/daemon/session/service/ppm_activation.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |
 | 新增 | backend/app/modules/daemon/session/service/inject.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |
 | 新增 | backend/app/modules/daemon/session/service/inject_gates.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |
+| 新增 | backend/app/modules/daemon/session/service/scheduled_messages.py | [W2] D-013 和解新增（定时消息 CRUD，queue 超 800 触发独立） |
 | 新增 | backend/app/modules/daemon/session/service/queue.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |
 | 新增 | backend/app/modules/daemon/session/service/control.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |
 | 新增 | backend/app/modules/daemon/session/service/recovery.py | [W2] 14 文件包，__init__ 聚合导出含 6 私有符号+patch 规则（D-007） |
@@ -277,6 +278,7 @@ Wave 顺序：**Wave 1 daemon → Wave 2 backend → Wave 3 frontend**（D-003�
 | 新增 | frontend/src/components/daemon/session-panel/connection-banners.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
 | 新增 | frontend/src/components/daemon/session-panel/use-session-team-missions.ts | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
 | 新增 | frontend/src/components/daemon/session-panel/turn-state.ts | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
+| 新增 | frontend/src/components/daemon/session-panel/scheduled-send.tsx | [W3] D-013 和解新增（定时发送弹窗组件） |
 | 新增 | frontend/src/components/daemon/session-panel/search.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
 | 新增 | frontend/src/components/daemon/session-panel/dialog-helpers.ts | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |
 | 新增 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | [W3] 12 文件目录（execute 细化）（.ts/.tsx 划分见总体方案） |

@@ -172,3 +172,14 @@ created_at: 2026-09-07 07:57:33
 - normalized_requirement: page-helpers 仅纯函数与常量；行为零变化由 verbatim 区间搬移+脚本断言唯一匹配保障。
 - impacts: [task-14, verify-*]
 - evidence: commit 7e0dbe040（-6620/+7115）
+
+## D-013@v1: 基线二次刷新——merge main 2ad590192（pin/rename+定时消息增量移植）
+- type: compatibility
+- priority: P0
+- status: accepted
+- source: code
+- question: apply 回 main 前发现 main 又前进 3 commit（session-list-liveness-dot 等并行变更），且恰好在 4 个拆分目标上叠加 pin/rename+定时消息功能（router +97 / session service +390 / session-panel +314 / lib-daemon +85）。
+- answer: 第二回合和解（同 D-010 先例）：4 个 modify/delete 冲突保持删除，增量逐字移植进包——router 三端点入 session_crud、scheduled 三端点入 session_queue、_ENDPOINT_ORDER 六端点按首现序插位；service 新异常入 errors、pin/rename 入 session_lifecycle、scheduled CRUD 独立 scheduled_messages.py（queue 超 800）；前端增量落 sessions.ts/page/dialog/新 scheduled-send.tsx。merge commit bf9fefce2。
+- normalized_requirement: 路由 579→585、openapi 零 diff（472 paths）、daemon 全子集 1963 全绿、前端 870 全绿、三端 tsc 0 错；包形态与 main 单文件形态行为等价。
+- impacts: [task-07, task-08, task-12, task-14, task-15, verify-*]
+- evidence: merge bf9fefce2；pytest/vitest/tsc 实测（2026-09-08）
