@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型 · /sessions 会话轮次导航 — 2026-09-08-session-turn-nav</title>
+<style>
+/* ============================================================
+   SillyHub 会话轮次导航 原型（1:1 交互稿）
+   变更: 2026-09-08-session-turn-nav
+   主题取值单一源对齐 frontend/src/styles/themes.ts
+   （ai-native=默认 violet 阶 / blue=明亮蓝 / dark=zinc+cyan）
+   ============================================================ */
+:root, [data-theme="ai-native"] {
+  --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE;
+  --primary: #7C3AED; --primary-hover: #6D28D9; --primary-fg: #FFFFFF;
+  --accent: #0891B2;
+  --fg: #1E1B2E; --muted-fg: #6459A8;
+  --brand-50:#F5F3FF; --brand-100:#EDE9FE; --brand-200:#DDD6FE; --brand-300:#C4B5FD;
+  --brand-600:#7C3AED; --brand-700:#6D28D9;
+  --slate-100:#F1F5F9; --slate-200:#E2E8F0; --slate-300:#CBD5E1; --slate-400:#94A3B8; --slate-500:#64748B; --slate-700:#334155;
+  --success:#10B981; --warning:#F59E0B; --error:#EF4444;
+  --shadow-sm: 0 1px 2px rgba(124,58,237,.06);
+}
+[data-theme="blue"] {
+  --bg:#F8FAFC; --card:#FFFFFF; --border:#E2E8F0;
+  --primary:#2563EB; --primary-hover:#1D4ED8; --primary-fg:#FFFFFF;
+  --accent:#06B6D4;
+  --fg:#0F172A; --muted-fg:#64748B;
+  --brand-50:#EFF6FF; --brand-100:#DBEAFE; --brand-200:#BFDBFE; --brand-300:#93C5FD;
+  --brand-600:#2563EB; --brand-700:#1D4ED8;
+  --shadow-sm: 0 1px 2px rgba(37,99,235,.06);
+}
+[data-theme="dark"] {
+  --bg:#18181B; --card:#27272A; --border:#3F3F46;
+  --primary:#0891B2; --primary-hover:#06B6D4; --primary-fg:#FFFFFF;
+  --accent:#22D3EE;
+  --fg:#E4E4E7; --muted-fg:#A1A1AA;
+  --brand-50:#164E63; --brand-100:#155E75; --brand-200:#0E7490; --brand-300:#06B6D4;
+  --brand-600:#22D3EE; --brand-700:#67E8F9;
+  --slate-100:#27272A; --slate-200:#3F3F46; --slate-300:#52525B; --slate-400:#71717A; --slate-500:#A1A1AA; --slate-700:#D4D4D8;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--fg); font-size: 14px; overflow: hidden;
+}
+button { font-family: inherit; cursor: pointer; }
+
+/* ── 顶栏（TopBar h-16=64px） ── */
+.topbar {
+  height: 64px; display: flex; align-items: center; gap: 10px;
+  padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--card);
+}
+.topbar-logo { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, var(--brand-600), var(--accent)); }
+.topbar-title { font-weight: 600; font-size: 15px; }
+.topbar-sub { font-size: 12px; color: var(--muted-fg); }
+.topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.theme-btn {
+  border: 1px solid var(--border); background: var(--card); color: var(--muted-fg);
+  font-size: 11px; padding: 4px 10px; border-radius: 6px;
+}
+.theme-btn.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+/* ── 页面骨架：PageContainer + PageHeader + grid[320px|1fr] ── */
+.page { height: calc(100vh - 64px); display: flex; flex-direction: column; padding: 16px 24px; gap: 12px; }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; }
+.page-header h1 { font-size: 18px; font-weight: 600; }
+.page-header p { font-size: 12.5px; color: var(--muted-fg); margin-top: 2px; }
+.main-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 14px; }
+
+/* ── 会话列表（左 320px） ── */
+.session-list {
+  border: 1px solid var(--border); border-radius: 10px; background: var(--card);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.session-list-head { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--muted-fg); display:flex; justify-content:space-between; }
+.session-list-body { overflow-y: auto; flex: 1; }
+.session-group { padding: 8px 10px; font-size: 11px; font-weight: 600; color: var(--muted-fg); }
+.session-item { display: flex; gap: 10px; padding: 10px 12px; cursor: pointer; border-left: 2px solid transparent; }
+.session-item:hover { background: var(--slate-100); }
+.session-item.active { background: var(--brand-50); border-left-color: var(--brand-600); }
+.session-item .avatar {
+  width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+  display:flex; align-items:center; justify-content:center;
+  background: var(--brand-100); color: var(--brand-700); font-weight: 600; font-size: 13px;
+}
+.session-item .meta { min-width: 0; flex: 1; }
+.session-item .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-item .preview { font-size: 11.5px; color: var(--muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.session-item .time { font-size: 10.5px; color: var(--muted-fg); flex-shrink: 0; }
+
+/* ── 会话面板 ── */
+.panel {
+  border: 1px solid var(--border); border-radius: 10px; background: var(--card);
+  display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+}
+.panel-header {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.panel-header .title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--slate-100); color: var(--muted-fg); border: 1px solid var(--border);
+}
+.chip.online { background: rgba(16,185,129,.12); color: var(--success); border-color: transparent; }
+.chip.brand { background: var(--brand-50); color: var(--brand-700); border-color: var(--brand-200); }
+.header-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.icon-btn {
+  width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--card); color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+}
+.icon-btn:hover { background: var(--slate-100); color: var(--fg); }
+.seg-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg-toggle button { border: 0; background: var(--card); color: var(--muted-fg); font-size: 11.5px; padding: 4px 10px; }
+.seg-toggle button.active { background: var(--brand-600); color: #fff; }
+
+/* ★ 新增：主体区 = 左轮次导航栏 + 聊天区（D-001 常驻左栏） */
+.panel-body { flex: 1; min-height: 0; display: flex; }
+
+/* ── 轮次导航栏（TurnCatalog） ── */
+.turn-catalog {
+  width: 232px; flex-shrink: 0; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; background: var(--card); overflow: hidden;
+  transition: width .18s ease;
+}
+.panel-body.catalog-collapsed .turn-catalog { width: 0; border-right-width: 0; }
+.catalog-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.catalog-head .label { font-size: 11.5px; font-weight: 600; color: var(--muted-fg); }
+.catalog-head .count { font-size: 10.5px; background: var(--slate-100); border-radius: 999px; padding: 1px 7px; color: var(--muted-fg); }
+.catalog-head .collapse-btn {
+  margin-left: auto; border: 0; background: transparent; color: var(--muted-fg);
+  font-size: 11px; width: 22px; height: 22px; border-radius: 5px;
+}
+.catalog-head .collapse-btn:hover { background: var(--slate-100); color: var(--fg); }
+.catalog-body { flex: 1; overflow-y: auto; padding: 6px; }
+/* 展开恢复按钮（栏收起时贴在聊天区左上） */
+.catalog-expand-btn {
+  display: none; align-items: center; gap: 5px; margin: 8px 0 0 8px; flex-shrink: 0;
+  border: 1px solid var(--border); background: var(--card); color: var(--muted-fg);
+  font-size: 11px; padding: 4px 8px; border-radius: 6px;
+}
+.panel-body.catalog-collapsed .catalog-expand-btn { display: inline-flex; }
+.catalog-expand-btn:hover { color: var(--fg); background: var(--slate-100); }
+
+/* 未加载提示块（D-002：更早轮次用 runs 接口补全目录，标注未加载态） */
+.catalog-earlier-hint {
+  font-size: 10.5px; color: var(--muted-fg); text-align: center; padding: 6px 4px 2px;
+}
+.catalog-item {
+  width: 100%; text-align: left; border: 1px solid transparent; background: transparent;
+  border-radius: 8px; padding: 7px 9px; display: block; margin-bottom: 2px;
+}
+.catalog-item:hover { background: var(--slate-100); }
+.catalog-item.active { background: var(--brand-50); border-color: var(--brand-200); }
+.catalog-item.loading { opacity: .55; pointer-events: none; }
+.ci-top { display: flex; align-items: center; gap: 6px; }
+.ci-index {
+  font-size: 10px; font-weight: 700; color: var(--brand-700); background: var(--brand-100);
+  border-radius: 4px; padding: 1px 5px; flex-shrink: 0;
+}
+.ci-time { font-size: 10px; color: var(--muted-fg); }
+.ci-status { margin-left: auto; width: 7px; height: 7px; border-radius: 999px; background: var(--success); flex-shrink: 0; }
+.ci-status.failed { background: var(--error); }
+.ci-status.running { background: var(--warning); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.ci-q {
+  font-size: 12px; font-weight: 500; margin-top: 4px; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ci-a {
+  font-size: 11px; line-height: 1.45; margin-top: 2px; color: var(--muted-fg);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ci-tag {
+  display: inline-block; font-size: 9.5px; border: 1px dashed var(--slate-300);
+  color: var(--muted-fg); border-radius: 4px; padding: 0 4px; margin-top: 3px;
+}
+
+/* ── 聊天滚动区 ── */
+.chat-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-scroll {
+  flex: 1; overflow-y: auto; padding: 14px 18px; scroll-behavior: smooth;
+}
+.load-earlier {
+  text-align: center; font-size: 11px; color: var(--muted-fg);
+  padding: 6px 0 14px;
+}
+.turn { margin-bottom: 18px; border-radius: 10px; transition: background .5s ease, box-shadow .5s ease; }
+.turn.jump-highlight { background: var(--brand-50); box-shadow: 0 0 0 2px var(--brand-200); }
+.turn-inner { transition: .3s; }
+.turn.jump-highlight .turn-inner { transform: scale(1.006); }
+
+/* 用户气泡：右对齐 primary（1:1 turn-timeline TurnRow） */
+.turn-user { display: flex; align-items: flex-end; justify-content: flex-end; gap: 6px; }
+.turn-user .t { font-size: 10.5px; color: var(--muted-fg); padding-bottom: 4px; }
+.bubble-user {
+  max-width: 82%; background: var(--primary); color: var(--primary-fg);
+  border-radius: 16px; border-bottom-right-radius: 6px; padding: 10px 16px;
+  font-size: 14px; line-height: 1.55; box-shadow: var(--shadow-sm); white-space: pre-wrap;
+}
+.turn-user .avatar {
+  width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--slate-100); color: var(--muted-fg); font-size: 12px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+/* 助手气泡：左对齐 card 边框（1:1 seg-text-bubble ml-9） */
+.assistant-wrap { margin-left: 36px; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.bubble-ai {
+  max-width: 86%; align-self: flex-start; background: var(--card);
+  border: 1px solid var(--border); border-radius: 16px; border-top-left-radius: 6px;
+  padding: 10px 16px; font-size: 14px; line-height: 1.6; box-shadow: var(--shadow-sm);
+  white-space: pre-wrap;
+}
+.bubble-ai .t { font-size: 10.5px; color: var(--muted-fg); margin-top: 4px; white-space: nowrap; }
+.tool-card {
+  align-self: flex-start; border: 1px solid var(--border); border-radius: 10px;
+  padding: 7px 12px; font-size: 11.5px; color: var(--muted-fg);
+  background: var(--slate-100); display: flex; gap: 7px; align-items: center; max-width: 86%;
+}
+.tool-card .ok { color: var(--success); }
+
+/* 输入区 */
+.input-bar {
+  border-top: 1px solid var(--border); padding: 10px 14px; flex-shrink: 0; background: var(--card);
+}
+.input-box {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+  font-size: 13px; color: var(--muted-fg); background: var(--bg);
+}
+.input-foot { display: flex; align-items: center; margin-top: 8px; gap: 8px; }
+.input-foot .hint { font-size: 10.5px; color: var(--muted-fg); }
+.send-btn {
+  margin-left: auto; background: var(--primary); color: var(--primary-fg); border: 0;
+  border-radius: 7px; font-size: 12.5px; padding: 6px 16px;
+}
+
+/* ── toast（模拟未加载轮次点击后的加载反馈） ── */
+.toast {
+  position: fixed; left: 50%; top: 76px; transform: translateX(-50%) translateY(-8px);
+  background: var(--fg); color: var(--bg); font-size: 12px; padding: 8px 16px;
+  border-radius: 8px; opacity: 0; pointer-events: none; transition: .25s; z-index: 99;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── 移动端预览（D-001：mobile 收进 ⋯ 菜单 → 抽屉） ── */
+.mobile-fab {
+  position: fixed; right: 18px; bottom: 18px; z-index: 90; display: none;
+  background: var(--primary); color: var(--primary-fg); border: 0; border-radius: 999px;
+  padding: 10px 16px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,.22);
+}
+body.mobile-preview .page { padding: 0; }
+body.mobile-preview .page-header { display: none; }
+body.mobile-preview .main-grid { grid-template-columns: minmax(0,1fr); }
+body.mobile-preview .session-list { display: none; }
+body.mobile-preview .panel { border-radius: 0; border: 0; }
+body.mobile-preview .turn-catalog {
+  position: fixed; left: 0; top: 64px; bottom: 0; width: min(78vw, 300px); z-index: 95;
+  box-shadow: 4px 0 24px rgba(0,0,0,.18); background: var(--card);
+}
+body.mobile-preview .catalog-expand-btn { display: inline-flex; }
+body.mobile-preview.panel-body.catalog-collapsed .turn-catalog { width: 0; }
+.mobile-drawer-mask {
+  display: none; position: fixed; inset: 64px 0 0 0; background: rgba(0,0,0,.35); z-index: 94;
+}
+body.mobile-preview:not(.panel-body.catalog-collapsed) .mobile-drawer-mask { display: block; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--slate-300); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<!-- TopBar（h-16=64px） -->
+<div class="topbar">
+  <div class="topbar-logo"></div>
+  <div>
+    <div class="topbar-title">SillyHub</div>
+    <div class="topbar-sub">工作区 · SillyHub</div>
+  </div>
+  <div class="topbar-right">
+    <span style="font-size:11px;color:var(--muted-fg)">主题</span>
+    <button class="theme-btn" data-t="blue">明亮蓝</button>
+    <button class="theme-btn active" data-t="ai-native">AI 紫</button>
+    <button class="theme-btn" data-t="dark">暗夜</button>
+    <button class="theme-btn" id="mobileToggle" title="切换移动端预览">📱 移动端预览</button>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>会话</h1>
+      <p>跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建</p>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <!-- 左：会话列表（现状保留，不动） -->
+    <aside class="session-list">
+      <div class="session-list-head"><span>全部会话</span><span>3 个未读</span></div>
+      <div class="session-list-body">
+        <div class="session-group">今天</div>
+        <div class="session-item active">
+          <div class="avatar">轮</div>
+          <div class="meta">
+            <div class="name">轮次导航功能开发</div>
+            <div class="preview">参考 ZCode 的左侧轮次导航…</div>
+          </div>
+          <div class="time">10:24</div>
+        </div>
+        <div class="session-item">
+          <div class="avatar">署</div>
+          <div class="meta">
+            <div class="name">Docker 部署问题</div>
+            <div class="preview">前端镜像重建后容器没更新…</div>
+          </div>
+          <div class="time">09:41</div>
+        </div>
+        <div class="session-item">
+          <div class="avatar">宽</div>
+          <div class="meta">
+            <div class="name">runtimes 页面宽度调整</div>
+            <div class="preview">参考 settings/providers 对齐…</div>
+          </div>
+          <div class="time">09:12</div>
+        </div>
+        <div class="session-group">昨天</div>
+        <div class="session-item">
+          <div class="avatar">析</div>
+          <div class="meta">
+            <div class="name">会话架构调研</div>
+            <div class="preview">TurnTimeline 没有虚拟滚动…</div>
+          </div>
+          <div class="time">16:03</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右：会话面板 -->
+    <section class="panel">
+      <!-- 面板头（现状保留；移动端此处 ⋯ 菜单多一项「轮次导航」） -->
+      <div class="panel-header">
+        <span class="title">轮次导航功能开发</span>
+        <span class="chip online">Claude · 在线</span>
+        <span class="chip">本机 · WHALEFALL-PC</span>
+        <div class="header-actions">
+          <div class="seg-toggle">
+            <button class="active">对话</button>
+            <button>全部</button>
+          </div>
+          <button class="icon-btn" title="后台任务">⚡</button>
+          <button class="icon-btn" title="子代理目录">🧩</button>
+          <button class="icon-btn" title="更多">⋯</button>
+        </div>
+      </div>
+
+      <!-- ★ 新增：主体区左轮次导航栏（D-001/D-002/D-003） -->
+      <div class="panel-body" id="panelBody">
+        <div class="mobile-drawer-mask" id="drawerMask"></div>
+        <nav class="turn-catalog" aria-label="轮次导航">
+          <div class="catalog-head">
+            <span class="label">轮次导航</span>
+            <span class="count" id="turnCount">14</span>
+            <button class="collapse-btn" id="collapseBtn" title="收起轮次导航">⟨</button>
+          </div>
+          <div class="catalog-body" id="catalogBody">
+            <div class="catalog-earlier-hint">↑ 更早 86 轮（点击自动加载并定位）</div>
+            <!-- 未加载轮次条目（runs 接口补全，灰态标注） -->
+            <button class="catalog-item" data-unloaded="1" data-target="t-early">
+              <span class="ci-top"><span class="ci-index">T3</span><span class="ci-time">09:31</span><span class="ci-status"></span></span>
+              <div class="ci-q">后端 agent 模块的日志端点支持分页吗？</div>
+              <div class="ci-a">支持 after/before 游标和 limit，返回 AgentRunLogEntry[]，按 run_id 分组就是轮次…</div>
+              <span class="ci-tag">未加载 · 点击加载</span>
+            </button>
+            <button class="catalog-item" data-unloaded="1" data-target="t-early">
+              <span class="ci-top"><span class="ci-index">T2</span><span class="ci-time">09:28</span><span class="ci-status"></span></span>
+              <div class="ci-q">看一下 TurnTimeline 组件的渲染方式</div>
+              <div class="ci-a">turns.map 顺序渲染 TurnRow，行级 React.memo + 段级 memo，无虚拟滚动，历史走窗口化…</div>
+              <span class="ci-tag">未加载 · 点击加载</span>
+            </button>
+            <button class="catalog-item" data-unloaded="1" data-target="t-early">
+              <span class="ci-top"><span class="ci-index">T1</span><span class="ci-time">09:25</span><span class="ci-status failed"></span></span>
+              <div class="ci-q">先调研 /sessions 页面的组件结构</div>
+              <div class="ci-a">SessionsPortal → grid[320px|1fr]，右侧 SessionPanel 分发 page/dialog 两种模式，共用移动端…</div>
+              <span class="ci-tag">未加载 · 点击加载</span>
+            </button>
+            <!-- 已加载轮次条目（displayTurns 派生，JS 生成） -->
+            <!-- catalog-items-injected-here -->
+          </div>
+        </nav>
+
+        <!-- 聊天列 -->
+        <div class="chat-col">
+          <button class="catalog-expand-btn" id="expandBtn">⟩ 轮次</button>
+          <div class="chat-scroll" id="chatScroll">
+            <div class="load-earlier" id="loadEarlier">↑ 已加载最近 100 条日志 · 更早轮次从左侧轮次导航跳转</div>
+            <!-- turns-injected-here -->
+          </div>
+          <div class="input-bar">
+            <div class="input-box">输入消息，Enter 发送…</div>
+            <div class="input-foot">
+              <span class="hint">上下文 12.4k / 200k</span>
+              <span class="hint">· 队列 0</span>
+              <button class="send-btn">发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<button class="mobile-fab" id="mobileFab" style="display:none">☰ 轮次</button>
+
+<script>
+/* ── Mock 轮次数据（模拟高轮次会话的最近 11 轮已加载 + 3 轮未加载） ── */
+const turns = [
+  { id:'t4',  q:'调研结论汇总一下：轮次导航要动哪些文件？',
+    a:'共 3 处：turn-timeline.tsx 的 TurnRow 加 data-turn-id 锚点；session-panel-page.tsx 加 handleJumpToTurn（未加载时循环触发翻页链）+ 挂载左栏；新组件 turn-catalog.tsx 承载目录本体。零后端改动。',
+    time:'10:31', status:'ok',
+    tools:[{name:'Grep "data-testid" turn-timeline.tsx', ok:true}] },
+  { id:'t5',  q:'移动端 /m 页面和悬浮窗会受影响吗？',
+    a:'会。三处共用 SessionPanelPage：桌面 /sessions 常驻左栏；移动端和悬浮窗收进 ⋯ 菜单做成抽屉弹出，不占聊天宽度（D-001）。', time:'10:34', status:'ok' },
+  { id:'t6',  q:'未加载的更早轮次怎么进目录？',
+    a:'用现成的 GET /sessions/{id}/runs 接口，每次 run 就是一轮，含 started_at/status/sender。目录合并 displayTurns（已加载）和 runs（全量），点击未加载条目时自动连续加载历史日志到目标轮再 scrollIntoView 定位（D-002）。',
+    time:'10:37', status:'ok',
+    tools:[{name:'Read lib/daemon/sessions.ts:639', ok:true},{name:'Grep "handleLoadEarlierRef" session-panel-page.tsx', ok:true}] },
+  { id:'t7',  q:'目录条目显示什么内容？参考 ZCode 的样子',
+    a:'两段式：用户提问一行摘要 + 助手正文两行摘要（D-003）。提问不截断重点、正文用首个 text 段截 120 字，不点过去就能回顾每轮问了什么、答了什么。', time:'10:39', status:'ok' },
+  { id:'t8',  q:'跳转定位怎么实现？现在 TurnRow 没有锚点',
+    a:'TurnRow 根节点新增 data-turn-id={turn.realRunId ?? turn.runId}；跳转时在滚动容器内 querySelector 精确匹配 + scrollIntoView({block:"start"})，跳转后短暂高亮目标轮。吸取子代理目录类名匹配的教训，用 data 属性不脆弱。', time:'10:42', status:'ok' },
+  { id:'t9',  q:'正在运行的轮次在目录里怎么显示？',
+    a:'状态点区分：绿色=完成、红色=失败、琥珀色脉冲=运行中。运行中的轮次目录条目随 SSE 实时刷新摘要。', time:'10:45', status:'ok' },
+  { id:'t10', q:'触顶自动加载会不会和跳转滚动打架？',
+    a:'会，这是设计里的风险点 R-03：跳转期间临时抑制触顶加载（scrollTop≤48px 判定跳过），跳转完成即恢复，避免加载动画把定位顶走。', time:'10:47', status:'ok',
+    tools:[{name:'Read page-helpers.tsx:102 LOAD_EARLIER_TRIGGER_PX', ok:true}] },
+  { id:'t11', q:'目录栏能折叠吗？屏幕小的时候占地方',
+    a:'能。头部 ⟨ 按钮收起为 0 宽，聊天区左上浮出「⟩ 轮次」恢复按钮；宽度记忆存 localStorage。', time:'10:49', status:'ok' },
+  { id:'t12', q:'后端真的完全不用动？',
+    a:'是。runs 接口、logs 翻页游标、SSE 全部现成。方案 C（后端新摘要端点）被 YAGNI 拒绝——现有接口信息已足够拼目录。', time:'10:52', status:'ok' },
+  { id:'t13', q:'那测试怎么覆盖？',
+    a:'三层：turn-catalog 纯组件单测（条目渲染/摘要截断/回调）；handleJumpToTurn 逻辑测试（已加载直跳 / 未加载循环加载）；TurnRow data 属性回归断言（三宿主 className 不变）。', time:'10:55', status:'ok' },
+  { id:'t14', q:'好的，先出一版原型给我确认',
+    a:'这就是原型。目录在左侧，点击条目试试跳转；「未加载」条目会模拟加载历史再定位；右上角可切换主题和移动端预览。确认后进入开发和 plan 拆任务。', time:'10:58', status:'running' },
+];
+
+/* ── 渲染聊天区 + 目录 ── */
+const chat = document.getElementById('chatScroll');
+const catalogBody = document.getElementById('catalogBody');
+const idxBase = 4; // 已加载轮次从 T4 开始（T1~T3 是未加载态）
+turns.forEach((t, i) => {
+  const el = document.createElement('div');
+  el.className = 'turn'; el.id = t.id; el.dataset.turnId = t.id;
+  const tools = (t.tools||[]).map(x =>
+    `<div class="tool-card"><span>🔧</span><span>${x.name}</span><span class="ok">✔ ${x.ok?'完成':''}</span></div>`).join('');
+  const aTime = t.status === 'running' ? '运行中…' : `完成于 ${t.time}`;
+  el.innerHTML = `
+    <div class="turn-inner">
+      <div class="turn-user"><span class="t">${t.time}</span><div class="bubble-user">${t.q}</div><div class="avatar">W</div></div>
+      <div class="assistant-wrap">
+        <div class="bubble-ai">${t.a}<div class="t">${aTime}</div></div>
+        ${tools}
+      </div>
+    </div>`;
+  chat.appendChild(el);
+
+  const item = document.createElement('button');
+  item.className = 'catalog-item'; item.dataset.target = t.id;
+  const st = t.status === 'running' ? 'running' : (t.status === 'failed' ? 'failed' : '');
+  item.innerHTML = `
+    <span class="ci-top"><span class="ci-index">T${idxBase + i}</span><span class="ci-time">${t.time}</span><span class="ci-status ${st}"></span></span>
+    <div class="ci-q">${t.q}</div>
+    <div class="ci-a">${t.a.slice(0, 90)}…</div>`;
+  catalogBody.appendChild(item);
+});
+document.getElementById('turnCount').textContent = turns.length + 3 + ' / 100';
+
+/* ── 交互：点击目录条目 → 跳转 + 高亮（未加载条目先模拟加载） ── */
+const toast = document.getElementById('toast');
+function showToast(msg) {
+  toast.textContent = msg; toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 1800);
+}
+function jumpTo(targetId) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.querySelectorAll('.turn.jump-highlight').forEach(x => x.classList.remove('jump-highlight'));
+  document.querySelectorAll('.catalog-item.active').forEach(x => x.classList.remove('active'));
+  setTimeout(() => {
+    target.classList.add('jump-highlight');
+    setTimeout(() => target.classList.remove('jump-highlight'), 2200);
+  }, 320);
+}
+catalogBody.addEventListener('click', (e) => {
+  const item = e.target.closest('.catalog-item');
+  if (!item) return;
+  if (item.dataset.unloaded) {
+    item.classList.add('loading');
+    item.querySelector('.ci-tag')?.remove();
+    showToast('正在加载历史日志并定位…');
+    setTimeout(() => {
+      // 模拟：顶部插入一条「加载出来的早期轮次」再跳过去
+      const early = document.createElement('div');
+      early.className = 'turn'; early.id = 't-early';
+      early.innerHTML = `
+        <div class="turn-inner">
+          <div class="turn-user"><span class="t">09:25</span><div class="bubble-user">${item.querySelector('.ci-q').textContent}</div><div class="avatar">W</div></div>
+          <div class="assistant-wrap"><div class="bubble-ai">${item.querySelector('.ci-a').textContent}<div class="t">完成于 09:26</div></div></div>
+        </div>`;
+      chat.insertBefore(early, chat.firstChild);
+      item.classList.remove('loading');
+      item.dataset.unloaded = '';
+      showToast('已加载 1 页历史（每页 100 条），已定位到目标轮次');
+      jumpTo('t-early');
+      window.__syncActive?.();
+    }, 900);
+    return;
+  }
+  document.querySelectorAll('.catalog-item.active').forEach(x => x.classList.remove('active'));
+  item.classList.add('active');
+  jumpTo(item.dataset.target);
+});
+
+/* ── 滚动联动：聊天滚到哪，目录高亮哪 ── */
+const chatScrollEl = chat;
+function syncActive() {
+  const items = [...catalogBody.querySelectorAll('.catalog-item')].filter(x => !x.dataset.unloaded);
+  if (!items.length) return;
+  let cur = items[0];
+  for (const it of items) {
+    const el = document.getElementById(it.dataset.target);
+    if (el && el.getBoundingClientRect().top < 200) cur = it;
+  }
+  items.forEach(x => x.classList.toggle('active', x === cur));
+}
+window.__syncActive = syncActive;
+chatScrollEl.addEventListener('scroll', () => requestAnimationFrame(syncActive));
+syncActive();
+
+/* ── 折叠 / 展开 ── */
+const panelBody = document.getElementById('panelBody');
+document.getElementById('collapseBtn').addEventListener('click', () => panelBody.classList.add('catalog-collapsed'));
+document.getElementById('expandBtn').addEventListener('click', () => panelBody.classList.remove('catalog-collapsed'));
+document.getElementById('drawerMask').addEventListener('click', () => panelBody.classList.add('catalog-collapsed'));
+
+/* ── 主题切换 ── */
+document.querySelectorAll('.theme-btn[data-t]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.documentElement.dataset.theme = btn.dataset.t;
+    document.querySelectorAll('.theme-btn[data-t]').forEach(x => x.classList.toggle('active', x === btn));
+  });
+});
+
+/* ── 移动端预览切换 ── */
+const mobileToggle = document.getElementById('mobileToggle');
+const mobileFab = document.getElementById('mobileFab');
+mobileToggle.addEventListener('click', () => {
+  const on = document.body.classList.toggle('mobile-preview');
+  mobileToggle.classList.toggle('active', on);
+  mobileFab.style.display = on ? 'inline-block' : 'none';
+  if (on) { panelBody.classList.remove('catalog-collapsed'); showToast('移动端：轮次导航收进 ⋯ 菜单，以抽屉形式弹出'); }
+});
+mobileFab.addEventListener('click', () => panelBody.classList.remove('catalog-collapsed'));
+</script>
+</body>
+</html>
