@@ -1,7 +1,12 @@
-# 团队分身子会话系统（daemon + 前端）审计报告
-
+---
+# 历史审计快照：file:line 锚记录的是审计时点位置，不随后续代码演进追改
+#（ql-20260908-011——当日两轮行号漂移触发 docs gate 拦截，属噪声非信号）。
+doc_type: snapshot
 author: qinyi
 created_at: 2026-08-26 05:45:10
+---
+
+# 团队分身子会话系统（daemon + 前端）审计报告
 
 审计范围：2026-08-25/26 团队分身子会话相关改动（会话总数闸 / worker_depth 分层链路 / 分层工具集 / 前端 subGrouping / WorkerSessionOverlay）。只读代码 + 定向测试，未改任何源码。
 
