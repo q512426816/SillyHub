@@ -15,7 +15,6 @@ allowed_paths:
   - frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
 target_files:
   - frontend/src/components/daemon/session-panel/session-panel-page.tsx
-  - frontend/src/components/daemon/session-panel/page-helpers.tsx
 provides:
   - handleJumpToTurn(entry) 回调——已加载轮：双 rAF + scrollIntoView block:start + 高亮 ~2.2s；未加载轮：循环 loadEarlier ≤8 页到命中或 hasEarlier=false；期间 suppress 触顶自动加载；兜底两档 toast（可续点）
   - activeTurnKey state——滚动联动当前轮 key（聊天滚动时随视口顶部最近轮更新，供 TickRail active 刻度联动）
