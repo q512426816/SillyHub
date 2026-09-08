@@ -3,6 +3,12 @@
 // task-03（2026-09-07-agent-liveness-states / FR-01）：offset 差量读 / 轮转 reset /
 // ended 回收 / watch≤16 淘汰 / 4MB 预算 / R-02 fail-open。fs 与时钟全注入，
 // tick 手动驱动零真实等待（constraints）。
+// ql-20260908-006（审查修复）：R1 生产路径（默认 fs）tickAsync 回归——预读缓存
+// 后同步推导，不再「异步 readRange 进同步 tick」恒抛永久 unknown；R2 ended 路径
+// 不被 add 重加（registry-sync 每 60s 无条件重加的 unknown↔ended 震荡）。
+import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { LivenessTailer, type TailerFs } from '../../../src/agent-log/liveness/tailer.js';
@@ -152,5 +158,49 @@ describe('LivenessTailer（task-03）', () => {
     const at = seen.length;
     await new Promise((r) => setTimeout(r, 25));
     expect(seen.length).toBe(at);
+  });
+});
+
+describe('LivenessTailer 生产路径（默认 fs，ql-20260908-006 审查修复）', () => {
+  it('R1 tickAsync：非空文件正常推导（L0 working）且追加后增量续读，不落 async-in-sync 永久 unknown', async () => {
+    // 生产形态：不注入 fs（DefaultFs + node:fs/promises 异步原语），时钟注入固定 T0
+    //（真实 mtime 晚于 T0 → age 为负 → 恒 working，断言确定性）。
+    const dir = mkdtempSync(join(tmpdir(), 'liveness-r1-'));
+    const p = join(dir, 'a.jsonl');
+    writeFileSync(p, 'x'.repeat(100));
+    const t = new LivenessTailer({ now: () => T0 });
+    t.add(mkTarget(p));
+    let out = await t.tickAsync();
+    expect(out[0]!.state).toBe('working');
+    expect(out[0]!.evidence).not.toContain('fail_open');
+    // 追加新字节：预读缓存命中 offset 增量，不回退 unknown
+    appendFileSync(p, 'y'.repeat(50));
+    out = await t.tickAsync();
+    expect(out[0]!.state).toBe('working');
+    expect(out[0]!.evidence).not.toContain('fail_open');
+  });
+
+  it('R1 tickAsync：L1 注册 format 走 deriver（zcode toolcalls_pending → working）', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'liveness-r1-'));
+    const p = join(dir, 'z.jsonl');
+    const rec = JSON.stringify({ type: 'model_io', completedAt: new Date(T0 - 60_000).toISOString(), response: { toolCalls: [{ name: 'Bash' }] } });
+    writeFileSync(p, rec + '\n');
+    const t = new LivenessTailer({ now: () => T0 });
+    t.add(mkTarget(p, 'zcode-model-io-jsonl'));
+    const out = await t.tickAsync();
+    expect(out[0]!.state).toBe('working');
+    expect(out[0]!.evidence).toBe('toolcalls_pending');
+  });
+
+  it('R2 ended 路径不被 add 重加（registry-sync 震荡修复）', () => {
+    const fs = new FakeFs();
+    fs.files.set('a.jsonl', { content: 'd', mtimeMs: T0 - 20 * 60 * 1000 });
+    const t = new LivenessTailer({ fs, now: () => fs.now });
+    t.add(mkTarget());
+    expect(t.tick()[0]!.state).toBe('ended'); // mtime 超窗 → ended 回收
+    // registry-sync 60s 后重加同路径：被 ended 登记拦截，不再产出（无 15min unknown 震荡）
+    expect(t.add(mkTarget())).toBe(false);
+    expect(t.tick()).toHaveLength(0);
+    expect(t.watchCount()).toBe(0);
   });
 });

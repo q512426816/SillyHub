@@ -689,6 +689,27 @@ describe('⑧ Windows shim：.cmd prependArgs / .ps1 powershell 包装 / 解析�
     await consumeP;
     platformSpy.mockRestore();
   });
+
+  it('DA-1（ql-20260908-006）：shim 失败回退 shell=true 且 prompt 含元字符 → 拒绝 spawn、按轮次 error 收敛', async () => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.mocked(resolveWindowsCmdShim).mockReturnValue(null);
+    const cmdPath = 'C:\\nvm4w\\nodejs\\cursor-agent.cmd';
+    const driver = new CursorDriver();
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results, errors } = makeCallbacks();
+    const handle = await driver.start(queue, makeOpts({ pathToAgentExecutable: cmdPath }));
+    const consumeP = driver.consume(handle, cb);
+    push('echo hi & del /s C:\\');
+    await waitUntil(() => results.length === 1);
+
+    expect(agentSpawnCalls()).toHaveLength(0); // 未进入 spawn
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toContain('DA-1');
+    expect(results[0]).toMatchObject({ subtype: 'error_during_execution', is_error: true });
+    close();
+    await consumeP;
+    platformSpy.mockRestore();
+  });
 });
 
 describe('close() 幂等且不动 input 队列（E4 / E7）', () => {

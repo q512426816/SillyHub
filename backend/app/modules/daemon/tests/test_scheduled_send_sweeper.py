@@ -32,6 +32,8 @@ from sqlalchemy import select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.modules.daemon.scheduled_send as scheduled_send_module
+from app.core.db import get_session_factory
 from app.modules.agent.model import (
     AgentRun,
     AgentSession,
@@ -39,6 +41,7 @@ from app.modules.agent.model import (
     AgentSessionScheduledMessage,
 )
 from app.modules.daemon.model import DaemonRuntime
+from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.scheduled_send import (
     _dispatch_scheduled_entry,
     scheduled_send_sweep_once,
@@ -494,3 +497,183 @@ class TestSweepNotDue:
         assert status == "pending"
         assert dispatched_at is None
         assert await _active_runs(db_session, session_id) == []
+
+
+# ── ql-20260908-006 审查修复：R3 取消竞态 / R4 离线有界重试 / R5 毒丸上限与排序 ──
+
+
+class TestSweepReviewFixesR3R4R5:
+    async def test_r3_cancel_during_inject_window_not_overwritten(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R3：inject 内部 commit 释放行锁后、dispatched 写入前被并发取消 →
+        终态改条件 UPDATE（WHERE status='pending'），0 行命中即尊重 cancelled
+        不盲覆写（旧实现会把用户已取消（204 成功）的条目覆写成 dispatched）。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        entry = await _make_scheduled(db_session, session_id, uid)
+        real_inject = SessionService.inject_session_as_service
+
+        async def _cancel_during_inject(self, agent_session_id, **kwargs):
+            # 模拟 inject 的内部 commit（行锁随事务释放，条目此刻仍 pending）
+            await self._session.commit()
+            # 模拟并发 cancel 请求：独立 session 置 cancelled 并提交（返回 204）
+            async with get_session_factory()() as cancel_db:
+                row = await cancel_db.get(AgentSessionScheduledMessage, entry.id)
+                row.status = "cancelled"
+                row.cancelled_at = datetime.now(UTC)
+                await cancel_db.commit()
+            return await real_inject(self, agent_session_id, **kwargs)
+
+        monkeypatch.setattr(SessionService, "inject_session_as_service", _cancel_during_inject)
+        flipped = await _dispatch_scheduled_entry(db_session, entry.id)
+        assert flipped is True
+        status, _code, _msg, dispatched_at = await _entry_row(db_session, entry.id)
+        assert status == "cancelled"  # 不被覆写成 dispatched
+        assert dispatched_at is None
+
+    async def test_r4_offline_retries_then_fails_after_cap(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R4：DaemonRuntimeOffline 是瞬时态——有界延后重试（每次 +5min），
+        期间条目保持 pending 且 dispatch_at 前移；超上限（6 次）置 failed(daemon_offline)。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        entry = await _make_scheduled(db_session, session_id, uid)
+        entry_id = entry.id  # expire 后 ORM 属性懒加载不可用，先快照
+        scheduled_send_module._OFFLINE_RETRY_ATTEMPTS.clear()
+
+        async def _offline(self, *args, **kwargs):
+            raise DaemonRuntimeOffline("runtime offline")
+
+        monkeypatch.setattr(SessionService, "inject_session_as_service", _offline)
+
+        original_dispatch_at = entry.dispatch_at
+        for _ in range(scheduled_send_module.DAEMON_OFFLINE_RETRY_MAX):
+            flipped = await _dispatch_scheduled_entry(db_session, entry_id)
+            assert flipped is False  # 未翻转（重试排期，非终态）
+            status, code, _msg, dispatched_at = await _entry_row(db_session, entry_id)
+            assert status == "pending"
+            assert code is None
+            assert dispatched_at is None  # 未派发
+            rescheduled_at = (
+                await db_session.execute(
+                    select(AgentSessionScheduledMessage.dispatch_at).where(
+                        AgentSessionScheduledMessage.id == entry_id
+                    )
+                )
+            ).scalar_one()
+            # SQLite 方言存取丢 tzinfo，读回统一按 UTC 补齐再比较（写入口径）
+            assert rescheduled_at.replace(tzinfo=UTC) > original_dispatch_at
+
+        # 超上限 → 终态 failed(daemon_offline)，计数器清空
+        flipped = await _dispatch_scheduled_entry(db_session, entry_id)
+        assert flipped is True
+        status, code, _msg, _d = await _entry_row(db_session, entry_id)
+        assert status == "failed"
+        assert code == "daemon_offline"
+        assert scheduled_send_module._OFFLINE_RETRY_ATTEMPTS == {}
+        scheduled_send_module._OFFLINE_RETRY_ATTEMPTS.clear()
+
+    async def test_r4_offline_retry_counter_cleared_on_success(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R4 伴生：离线重试计数在派发成功后清空（同条目后续再离线从头计数）。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        entry = await _make_scheduled(db_session, session_id, uid)
+        entry_id = entry.id  # expire 后 ORM 属性懒加载不可用，先快照
+        scheduled_send_module._OFFLINE_RETRY_ATTEMPTS.clear()
+        real_inject = SessionService.inject_session_as_service
+        calls = {"n": 0}
+
+        async def _offline_then_ok(self, agent_session_id, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise DaemonRuntimeOffline("runtime offline")
+            return await real_inject(self, agent_session_id, **kwargs)
+
+        monkeypatch.setattr(SessionService, "inject_session_as_service", _offline_then_ok)
+        assert await _dispatch_scheduled_entry(db_session, entry_id) is False
+        assert scheduled_send_module._OFFLINE_RETRY_ATTEMPTS.get(entry_id) == 1
+        assert await _dispatch_scheduled_entry(db_session, entry_id) is True
+        status, _c, _m, _d = await _entry_row(db_session, entry_id)
+        assert status == "dispatched"
+        assert scheduled_send_module._OFFLINE_RETRY_ATTEMPTS == {}
+        scheduled_send_module._OFFLINE_RETRY_ATTEMPTS.clear()
+
+    async def test_r5_crash_poison_entry_capped_after_max_rounds(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R5：单条毒丸（每轮派发即崩 RuntimeError）连续 N 轮后置
+        failed(sweep_crash_retry_exhausted) 收口，不再无限重试。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        entry = await _make_scheduled(db_session, session_id, uid)
+        scheduled_send_module._CRASH_RETRY_ATTEMPTS.clear()
+
+        async def _explode(self, *args, **kwargs):
+            raise RuntimeError("poison")
+
+        monkeypatch.setattr(SessionService, "inject_session_as_service", _explode)
+
+        for _ in range(scheduled_send_module.SWEEP_CRASH_RETRY_MAX - 1):
+            await scheduled_send_sweep_once(db_session)
+            status, _c, _m, _d = await _entry_row(db_session, entry.id)
+            assert status == "pending"  # 窗口内留 pending 下轮重试
+
+        await scheduled_send_sweep_once(db_session)  # 达上限轮
+        status, code, msg, _d = await _entry_row(db_session, entry.id)
+        assert status == "failed"
+        assert code == "sweep_crash_retry_exhausted"
+        assert msg is not None
+        assert scheduled_send_module._CRASH_RETRY_ATTEMPTS == {}
+        scheduled_send_module._CRASH_RETRY_ATTEMPTS.clear()
+
+    async def test_r5_due_scan_ordered_by_dispatch_at(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R5：due 扫描按 dispatch_at 升序（id 兜底并列）——后插库但更早到期的
+        条目先派发，无排序截断 50 时同一批毒丸会常年占满扫描槽饿死其余。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        later = await _make_scheduled(
+            db_session,
+            session_id,
+            uid,
+            prompt="晚到",
+            dispatch_at=datetime.now(UTC) - timedelta(seconds=5),
+        )
+        earlier = await _make_scheduled(
+            db_session,
+            session_id,
+            uid,
+            prompt="早到",
+            dispatch_at=datetime.now(UTC) - timedelta(minutes=10),
+        )
+
+        seen: list[uuid.UUID] = []
+
+        async def _record(db, message_id):
+            seen.append(message_id)
+            return True
+
+        monkeypatch.setattr(scheduled_send_module, "_dispatch_scheduled_entry", _record)
+        processed = await scheduled_send_sweep_once(db_session)
+        assert processed == 2
+        assert seen == [earlier.id, later.id]

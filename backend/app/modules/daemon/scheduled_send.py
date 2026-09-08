@@ -18,25 +18,37 @@
 at-least-once 权衡（design R-02）：条目状态翻转与 inject 分两个事务——
 先 inject 成功再单独事务写 dispatched。inject 提交后、dispatched 落库前
 崩溃的极端窗口内条目仍 pending，下轮会重发一次（最多重复发送一次）；
-换取的是「先落 dispatched 再 inject」崩溃路径的静默丢消息不发生。取消
-竞态（R-01）：派发前在条目行 ``with_for_update`` 复核 pending，与
-``cancel_scheduled_message`` 的行锁串行化——取消先落则本轮回跳过；派发
-已开始后到达的取消按 409 拒绝，语义与「已履行定时义务」一致。
+换取的是「先落 dispatched 再 inject」崩溃路径的静默丢消息不发生。
+
+取消竞态（R-01 + ql-20260908-006 R3 修正）：派发前在条目行 ``with_for_update``
+复核 pending，与 ``cancel_scheduled_message`` 的行锁串行化——取消先落则本轮
+回跳过。行锁只保到 inject 的内部 commit 为止：此后条目仍 pending 的窗口内
+到达的取消会成功落库并向用户返回 204，终态写回因此用带谓词的条件 UPDATE
+（仅 ``status='pending'`` 可翻转）——被取消即 0 行命中，尊重用户取消语义
+不盲覆写（消息可能已实际发出，属 R-02 at-least-once 固有代价）。
+
+daemon 离线（ql-20260908-006 R4）：``DaemonRuntimeOffline`` 是瞬时态（关机/
+掉线/重启中），不落终态——每次失败把 ``dispatch_at`` 延后 5 分钟重试，至多
+6 次（≈30 分钟窗口，进程内计数，backend 重启清零重计）；超限置
+``failed(daemon_offline)``。毒丸上限（R5）：单条派发连续崩溃 5 轮（非
+AppError，每轮 30s）后置 ``failed(sweep_crash_retry_exhausted)`` 收口，
+配合 due 扫描按 ``dispatch_at`` 升序，防同一批毒丸常年占满批量槽饿死其余。
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session_factory
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession, AgentSessionScheduledMessage
+from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.session.service import (
     DaemonSessionQueueFull,
     SessionService,
@@ -51,6 +63,19 @@ SCHEDULED_SEND_SWEEP_INTERVAL_SEC = 30
 # 单轮批量上限（防长事务——每条独立 session 串行处理，50 条 × inject 秒级
 # 已是单轮 1-2 分钟量级；超量条目下轮自然续捞）。
 SCHEDULED_SEND_SWEEP_BATCH_LIMIT = 50
+# R4（ql-20260908-006）：daemon 离线有界重试——每次失败延后 5 分钟，至多 6 次
+# （≈30 分钟窗口覆盖常见关机/掉线/重启时段）。进程内计数：backend 重启清零
+# 重计（重启即弃计数的语义损失可接受，换来不动表结构）。
+DAEMON_OFFLINE_RETRY_DELAY = timedelta(minutes=5)
+DAEMON_OFFLINE_RETRY_MAX = 6
+# R5（ql-20260908-006）：单条毒丸（每轮派发即崩的非 AppError）连续崩溃轮数
+# 上限——达限置 failed 收口，不再无限重试（防「inject 提交后崩溃」形态的
+# 周期性重发无上界）。
+SWEEP_CRASH_RETRY_MAX = 5
+
+# R4/R5 进程内重试计数（key=条目 id；成功/终态即弹，见各分支）。
+_OFFLINE_RETRY_ATTEMPTS: dict[uuid.UUID, int] = {}
+_CRASH_RETRY_ATTEMPTS: dict[uuid.UUID, int] = {}
 
 # 会话终态判定（与 ACTIVE_SESSION_STATUSES {pending, active, reconnecting}
 # 互补的显式清单——suspended 非终态但不可 inject，走 inject_failed 兜底收敛，
@@ -86,6 +111,7 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) -> 
         entry.error_code = "session_inactive"
         entry.error_message = "会话已结束或已删除，定时消息不再派发。"
         await db.commit()
+        _OFFLINE_RETRY_ATTEMPTS.pop(message_id, None)
         log.warning(
             "scheduled_send_skipped_session_inactive",
             message_id=str(message_id),
@@ -121,19 +147,73 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) -> 
         # 与「以为已排队」的语义欺骗比显式失败更差）。
         await db.rollback()
         await _mark_entry_failed(db, entry_id, "queue_full", str(exc))
+        _OFFLINE_RETRY_ATTEMPTS.pop(entry_id, None)
         return True
     except AppError as exc:
+        # R4（ql-20260908-006）：daemon 离线是瞬时态（关机/掉线/重启中），不落
+        # 终态——有界延后重试（dispatch_at +5min，至多 6 次；进程内计数，重启清零）。
+        # 超限才置 failed(daemon_offline)。
+        if isinstance(exc, DaemonRuntimeOffline):
+            attempts = _OFFLINE_RETRY_ATTEMPTS.get(entry_id, 0) + 1
+            if attempts <= DAEMON_OFFLINE_RETRY_MAX:
+                _OFFLINE_RETRY_ATTEMPTS[entry_id] = attempts
+                await db.rollback()
+                await db.execute(
+                    update(AgentSessionScheduledMessage)
+                    .where(
+                        AgentSessionScheduledMessage.id == entry_id,
+                        AgentSessionScheduledMessage.status == "pending",
+                    )
+                    .values(dispatch_at=datetime.now(UTC) + DAEMON_OFFLINE_RETRY_DELAY)
+                )
+                await db.commit()
+                log.warning(
+                    "scheduled_send_offline_retry_scheduled",
+                    message_id=str(entry_id),
+                    attempt=attempts,
+                    max_attempts=DAEMON_OFFLINE_RETRY_MAX,
+                    retry_delay_sec=int(DAEMON_OFFLINE_RETRY_DELAY.total_seconds()),
+                )
+                return False
+            _OFFLINE_RETRY_ATTEMPTS.pop(entry_id, None)
+            await db.rollback()
+            await _mark_entry_failed(
+                db,
+                entry_id,
+                "daemon_offline",
+                f"daemon 持续离线（重试 {DAEMON_OFFLINE_RETRY_MAX} 次未恢复），"
+                "定时消息已停止派发，请 daemon 恢复后重新创建。",
+            )
+            return True
         # inject 域业务失败（含 suspended 会话、工作区归档守卫 409 等）——
         # 统一 failed(inject_failed)，失败原因用户可见（design FR-05 失败隔离）。
         await db.rollback()
         await _mark_entry_failed(db, entry_id, "inject_failed", str(exc))
+        _OFFLINE_RETRY_ATTEMPTS.pop(entry_id, None)
         return True
 
-    # inject 成功（或忙轮入队成功）——独立事务写终态；期间条目被并发取消的
-    # 极窄窗口按 dispatched 收口（消息实际已发出/已排队，如实记录，R-02）。
-    entry.status = "dispatched"
-    entry.dispatched_at = datetime.now(UTC)
+    # inject 成功（或忙轮入队成功）——独立事务条件写终态（R3，ql-20260908-006）：
+    # 开头的行锁已随 inject 的内部 commit 释放，条目仍 pending 的窗口内可能被
+    # 并发 cancel 置 cancelled 并向用户返回 204——用带谓词的条件 UPDATE（仅
+    # pending 可翻转），0 行命中即已被取消，尊重用户取消语义不盲覆写（消息
+    # 可能已实际发出，属 R-02 at-least-once 固有代价）。
+    result = await db.execute(
+        update(AgentSessionScheduledMessage)
+        .where(
+            AgentSessionScheduledMessage.id == entry_id,
+            AgentSessionScheduledMessage.status == "pending",
+        )
+        .values(status="dispatched", dispatched_at=datetime.now(UTC))
+    )
     await db.commit()
+    _OFFLINE_RETRY_ATTEMPTS.pop(entry_id, None)
+    if result.rowcount == 0:
+        log.info(
+            "scheduled_send_dispatch_lost_race_to_cancel",
+            message_id=str(entry_id),
+            session_id=str(agent_session_id),
+        )
+        return True
     log.info(
         "scheduled_send_dispatched",
         message_id=str(entry_id),
@@ -175,9 +255,16 @@ async def scheduled_send_sweep_once(db_session: AsyncSession) -> int:
     due_ids = list(
         (
             await db_session.execute(
-                select(AgentSessionScheduledMessage.id).where(
+                select(AgentSessionScheduledMessage.id)
+                .where(
                     AgentSessionScheduledMessage.status == "pending",
                     AgentSessionScheduledMessage.dispatch_at <= now,
+                )
+                # R5（ql-20260908-006）：到期升序（id 兜底并列）——无排序时截断
+                # [:50] 每轮可能捞到同一批，其余到期条目被无限饿死。
+                .order_by(
+                    AgentSessionScheduledMessage.dispatch_at.asc(),
+                    AgentSessionScheduledMessage.id.asc(),
                 )
             )
         )
@@ -194,13 +281,34 @@ async def scheduled_send_sweep_once(db_session: AsyncSession) -> int:
             async with session_factory() as entry_db:
                 if await _dispatch_scheduled_entry(entry_db, message_id):
                     processed += 1
+            _CRASH_RETRY_ATTEMPTS.pop(message_id, None)
         except Exception:
             # 失败隔离：单条异常（含 _mark_entry_failed 自身失败）不连坐
             # 同轮其它条目、不崩循环；条目保持 pending 由下轮重试。
+            # R5（ql-20260908-006）：重试有上限——连续 SWEEP_CRASH_RETRY_MAX 轮
+            # 崩溃（每轮 30s）即置 failed 收口，防毒丸条目无限重发/占满扫描槽。
+            attempts = _CRASH_RETRY_ATTEMPTS.get(message_id, 0) + 1
+            _CRASH_RETRY_ATTEMPTS[message_id] = attempts
             log.exception(
                 "scheduled_send_entry_crashed",
                 message_id=str(message_id),
+                attempt=attempts,
             )
+            if attempts >= SWEEP_CRASH_RETRY_MAX:
+                _CRASH_RETRY_ATTEMPTS.pop(message_id, None)
+                try:
+                    async with session_factory() as fail_db:
+                        await _mark_entry_failed(
+                            fail_db,
+                            message_id,
+                            "sweep_crash_retry_exhausted",
+                            f"连续 {SWEEP_CRASH_RETRY_MAX} 轮派发异常，已停止自动重试",
+                        )
+                except Exception:
+                    log.exception(
+                        "scheduled_send_poison_cap_mark_failed",
+                        message_id=str(message_id),
+                    )
     return processed
 
 

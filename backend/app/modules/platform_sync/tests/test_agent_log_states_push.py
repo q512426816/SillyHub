@@ -8,17 +8,25 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.platform_sync import service as platform_sync_service
 from app.modules.platform_sync.model import AgentSessionLogORM
-from app.modules.platform_sync.service import BLOCKED_SEGMENTS
+from app.modules.platform_sync.schema import AgentLogStateEntry
+from app.modules.platform_sync.service import (
+    _NOTIFIED_BLOCKED_SEGMENTS,
+    BLOCKED_SEGMENTS,
+    LAST_BLOCKED_SEGMENT_SEQ,
+    PlatformSyncService,
+)
 
 REG_ENTRY: dict[str, Any] = {
     "harness": "codex",
@@ -238,3 +246,83 @@ async def test_get_agent_logs_exposes_state_fields(
     assert entry["state_evidence"] == "last_event=model_io"
     assert entry["state_derived_at"] is not None
     assert entry["last_event_at"] is not None
+
+
+# ── ql-20260908-006 审查修复：R7 upsert 唯一键竞态自愈 / R9 段表有界 ──────────
+
+
+@pytest.mark.asyncio
+async def test_r7_integrity_error_retry_converges(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R7：states 写者与 CLI 登记写者并发首建同 (workspace, log_path) 行时，
+    后提交方撞 uq_platform_agent_logs_workspace_path——commit 抛 IntegrityError
+    后 rollback 重试一轮即收敛（重读见并发行 → 走 update 分支），不再整批 500。"""
+    ws = uuid.uuid4()
+    now = datetime.now(UTC)
+    entries = [
+        AgentLogStateEntry(
+            log_path=f"r7-{i}.jsonl",
+            state="working",
+            evidence="mtime_fresh",
+            derived_at=now,
+            harness="codex",
+        )
+        for i in range(3)
+    ]
+    svc = PlatformSyncService(db_session)
+
+    real_commit = db_session.commit
+    calls = {"n": 0}
+
+    async def _commit_boom_once() -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # 模拟并发 CLI 登记先提交占了唯一键，本事务 commit 撞 IntegrityError
+            raise IntegrityError("INSERT ... platform_agent_logs", None, Exception("UNIQUE"))
+        return await real_commit()
+
+    monkeypatch.setattr(db_session, "commit", _commit_boom_once)
+    updated, created, skipped = await svc.upsert_agent_log_states(ws, entries)
+    monkeypatch.undo()
+    assert (updated, created, skipped) == (0, 3, 0)
+    rows = (
+        (
+            await db_session.execute(
+                select(AgentSessionLogORM).where(AgentSessionLogORM.workspace_id == ws)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 3
+
+
+@pytest.mark.asyncio
+async def test_r9_blocked_maps_bounded(db_session: AsyncSession) -> None:
+    """R9：blocked 段三个内存 Map 只增不减（行删除/日志轮转后键永不消解）——
+    超上限丢最早一批，长跑不再无界。"""
+    ws = uuid.uuid4()
+    now = datetime.now(UTC)
+    entries = [
+        AgentLogStateEntry(
+            log_path=f"r9-{i}.jsonl",
+            state="blocked",
+            evidence="PERMISSION_REQUEST(pending)",
+            derived_at=now,  # 段龄 0 < 120s，不触发通知广播
+            harness="codex",
+        )
+        for i in range(platform_sync_service._BLOCKED_MAP_MAX + 500)
+    ]
+    BLOCKED_SEGMENTS.clear()
+    LAST_BLOCKED_SEGMENT_SEQ.clear()
+    _NOTIFIED_BLOCKED_SEGMENTS.clear()
+    try:
+        await PlatformSyncService(db_session).upsert_agent_log_states(ws, entries)
+        assert len(BLOCKED_SEGMENTS) <= platform_sync_service._BLOCKED_MAP_MAX
+        assert len(LAST_BLOCKED_SEGMENT_SEQ) <= platform_sync_service._BLOCKED_MAP_MAX
+        assert len(_NOTIFIED_BLOCKED_SEGMENTS) <= platform_sync_service._BLOCKED_MAP_MAX
+    finally:
+        BLOCKED_SEGMENTS.clear()
+        LAST_BLOCKED_SEGMENT_SEQ.clear()
+        _NOTIFIED_BLOCKED_SEGMENTS.clear()

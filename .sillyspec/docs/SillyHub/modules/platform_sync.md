@@ -71,4 +71,8 @@ get_spec_manifest / apply_spec_ops: 透调 SpecWorkspaceService（共享 session
 
 <!-- MANUAL_NOTES_START -->
 
+- 2026-09-08 ql-20260908-006-4ff6（只读审查风险修复 R7/R9）：
+  - R7 `upsert_agent_log_states` / `upsert_agent_log_entries` 增 IntegrityError 单轮重试——两写者同为 select-then-INSERT，daemon 10s 推 states 建行窗口与 CLI 全量重推并发首建同 `(workspace_id, log_path)` 行时后提交方撞 `uq_platform_agent_logs_workspace_path` 整批回滚 500；commit 撞唯一键 → rollback 重读（见并发行走 update 分支）一轮收敛。
+  - R9 blocked 段三个模块级内存 Map（`BLOCKED_SEGMENTS` / `LAST_BLOCKED_SEGMENT_SEQ` / `_NOTIFIED_BLOCKED_SEGMENTS`）增容量上限（4096 超限丢最早 1024，states upsert 尾部 `_trim_blocked_maps`）——行删除/日志轮转后键永不消解，长跑无界；丢旧段至多致段号回退多通知一次，notify_broadcast 幂等兜底。
+
 <!-- MANUAL_NOTES_END -->

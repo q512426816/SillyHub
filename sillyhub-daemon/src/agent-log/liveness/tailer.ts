@@ -45,6 +45,10 @@ export interface WatchTarget {
   harness?: string;
   agentSessionId?: string | null;
   source?: 'spawn-record' | 'sessions-json' | 'rescan' | 'registry-sync';
+  /** R6（ql-20260908-006）：产出该日志的会话 cwd——daemon 侧按它归属推送 root/workspace
+   *（harness 日志都在用户 home 下、claude 项目目录名还经 munge 抹掉分隔符，
+   * logPath.contains(root) 恒 miss）。 */
+  agentCwd?: string;
 }
 
 /** 单周期单路径的推导产出（上报 /api/agent-logs/states 的载荷来源）。 */
@@ -80,9 +84,12 @@ async function statSizeDefault(path: string): Promise<{ size: number; mtimeMs: n
   }
 }
 
-/** 默认 fs 实现（同步签名包装异步原语：tick 内 await 预取，见 _statCache）。 */
+/** 默认 fs 实现（同步签名包装异步原语：tickAsync 内 await 预取 stat + 预读字节，
+ * 见 _statCache / _rangeCache——同步 tick 内 readRangeFn 从缓存命中）。 */
 class DefaultFs implements TailerFs {
   private cache = new Map<string, { size: number; mtimeMs: number } | null>();
+  /** R1（ql-20260908-006）：tickAsync 预读的本轮新字节（path → 区间文本）。 */
+  private rangeCache = new Map<string, string>();
 
   async prefetch(path: string): Promise<void> {
     this.cache.set(path, await statSizeDefault(path));
@@ -93,7 +100,23 @@ class DefaultFs implements TailerFs {
     return this.cache.get(path) ?? null;
   }
 
-  private contentCache: { path: string; buf: Buffer } | null = null;
+  /** R1：预读 [start, end) 字节进同步缓存（tickAsync 在同步推导 pass 前调用）。 */
+  async prefetchRange(path: string, start: number, end: number): Promise<void> {
+    this.rangeCache.set(path, await this.readRangeAsync(path, start, end));
+  }
+
+  /** R1：同步读缓存（同步 tick 内 readRangeFn 走此命中；未预读即 fail-open unknown）。 */
+  readCachedRange(path: string): string {
+    const c = this.rangeCache.get(path);
+    if (c === undefined) throw new Error(`range not prefetched: ${path}`);
+    return c;
+  }
+
+  /** R9（ql-20260908-006）：路径终结/淘汰时清理缓存（防只增不减）。 */
+  forget(path: string): void {
+    this.cache.delete(path);
+    this.rangeCache.delete(path);
+  }
 
   readRange(path: string, start: number, end: number): string {
     throw new Error('DefaultFs.readRange 需经 tailer 异步路径调用');
@@ -106,7 +129,6 @@ class DefaultFs implements TailerFs {
       const len = end - start;
       const buf = Buffer.alloc(len);
       const { bytesRead } = await fh.read(buf, 0, len, start);
-      void this.contentCache;
       return buf.subarray(0, bytesRead).toString('utf8');
     } finally {
       await fh.close();
@@ -125,6 +147,11 @@ interface WatchEntry {
   evicted: boolean;
 }
 
+/** ended 路径登记上限（R2）：超限丢最早一批（Set 保插入序；日志文件名按会话唯一，
+ * ended 路径不会合法复活，淘汰只为防极长运行下的无界增长）。 */
+const ENDED_PATHS_MAX = 4096;
+const ENDED_PATHS_TRIM = 1024;
+
 /**
  * liveness tailer（周期 10s，可注入 interval/timer；tick 可手动驱动）。
  *
@@ -134,6 +161,10 @@ interface WatchEntry {
  */
 export class LivenessTailer {
   private readonly entries = new Map<string, WatchEntry>();
+  /** R2（ql-20260908-006）：已 ended 的 logPath——registry-sync 每 60s 无条件重加
+   * 会让死文件在「15min unknown → ended → 60s 后重加」间永久震荡，且挤占 16 个
+   * watch 槽位挤出活会话；ended 登记后在 add() 拦截。 */
+  private readonly endedPaths = new Set<string>();
   private readonly fs: TailerFs | DefaultFs;
   private readonly defaultFs: DefaultFs | null;
   private readonly now: () => number;
@@ -156,8 +187,10 @@ export class LivenessTailer {
     this.fs = injected ?? this.defaultFs!;
   }
 
-  /** 加入 watch；超上限淘汰 lastSeenAt 最旧条目（新者优先，design §5.2）。 */
+  /** 加入 watch；超上限淘汰 lastSeenAt 最旧条目（新者优先，design §5.2）。
+   * R2：已 ended 的路径直接拒绝（防 registry-sync 重加震荡）。 */
   add(target: WatchTarget): boolean {
+    if (this.endedPaths.has(target.logPath)) return false;
     if (this.entries.has(target.logPath)) return true;
     if (this.entries.size >= this.opts.maxWatch) {
       let oldest: WatchEntry | null = null;
@@ -167,6 +200,7 @@ export class LivenessTailer {
       if (oldest) {
         oldest.evicted = true;
         this.entries.delete(oldest.target.logPath);
+        this.defaultFs?.forget(oldest.target.logPath); // R9：淘汰即清缓存
       }
     }
     this.entries.set(target.logPath, {
@@ -182,6 +216,7 @@ export class LivenessTailer {
 
   remove(logPath: string): void {
     this.entries.delete(logPath);
+    this.defaultFs?.forget(logPath); // R9：显式移除即清缓存
   }
 
   watchCount(): number {
@@ -204,14 +239,61 @@ export class LivenessTailer {
 
   /** 单轮推导（同步接口，注入 fs 用）；生产异步路径走 tickAsync。 */
   tick(): TickResult[] {
+    return this.runPass([...this.entries.keys()]);
+  }
+
+  /** 异步单轮（默认 fs 场景）：预取 stat + 预读本轮新字节进同步缓存，再同步推导。 */
+  async tickAsync(): Promise<TickResult[]> {
+    if (!this.defaultFs) return this.tick();
+    // 快照驱动本轮 pass：refresh 协程在预读 await 间隙 add() 的新目标不顺带产出
+    //（下轮自然覆盖），避免「stat not prefetched」假 unknown 闪断。
+    const paths = [...this.entries.keys()];
+    for (const p of paths) {
+      await this.defaultFs.prefetch(p);
+    }
+    // R1（ql-20260908-006）修复核心：deriveOne 的待读区间在此全部 await 预读进
+    // rangeCache，随后同步 pass 内 readRangeFn 缓存命中——旧实现把异步 readRangeAsync
+    // 塞进 readRangeFn 后直接走同步 tick，readRangeSync 恒抛「async fs in sync tick」，
+    // 且 offset 不前进，生产路径任何非空日志永久 unknown。预算/轮转口径与 deriveOne
+    // 逐字对齐（同 paths 序、同 stat 缓存值），保证两遍算出的区间一致。
+    const budget = { left: this.opts.maxBytesPerTick };
+    for (const p of paths) {
+      const entry = this.entries.get(p);
+      if (!entry) continue;
+      const st = this.defaultFs.statSize(p);
+      if (st === null) continue; // 文件缺失 → deriveOne 走 file_missing 分支（无读）
+      const effective = st.size < entry.offset ? 0 : entry.offset; // 轮转 reset 同口径
+      const cap = Math.min(st.size, effective + Math.max(0, budget.left));
+      if (cap > effective) {
+        try {
+          await this.defaultFs.prefetchRange(p, effective, cap);
+          budget.left -= cap - effective;
+        } catch {
+          // 预读失败（读取间隙被删等）→ 不缓存，deriveOne fail_open unknown（R-02）
+        }
+      }
+    }
+    this.readRangeFn = (p2) => this.defaultFs!.readCachedRange(p2);
+    return this.runPass(paths);
+  }
+
+  /** 同步 readRange 源（注入 fs 直读；默认 fs 场景 = tickAsync 预读缓存）。 */
+  private readRangeFn: ((p: string, s: number, e: number) => string) | null = null;
+
+  /** 单轮推导（tick / tickAsync 共用；paths 为本轮参与的 logPath 快照）。 */
+  private runPass(paths: string[]): TickResult[] {
     const now = this.now();
     const results: TickResult[] = [];
     const budget = { left: this.opts.maxBytesPerTick };
-    for (const [logPath, entry] of [...this.entries]) {
+    for (const logPath of paths) {
+      const entry = this.entries.get(logPath);
+      if (!entry) continue;
       const out = this.deriveOne(entry, now, budget);
       results.push(out);
       if (out.state === 'ended') {
         this.entries.delete(logPath);
+        this.rememberEnded(logPath); // R2：登记防重加
+        this.defaultFs?.forget(logPath); // R9：终结即清缓存
       } else {
         entry.lastSeenAt = now;
       }
@@ -224,18 +306,18 @@ export class LivenessTailer {
     return results;
   }
 
-  /** 异步单轮（默认 fs 场景：预取 stat 后走同步推导）。 */
-  async tickAsync(): Promise<TickResult[]> {
-    if (this.defaultFs) {
-      for (const logPath of this.entries.keys()) {
-        await this.defaultFs.prefetch(logPath);
+  /** R2：登记 ended 路径（超限丢最早一批，防无界）。 */
+  private rememberEnded(logPath: string): void {
+    this.endedPaths.add(logPath);
+    if (this.endedPaths.size > ENDED_PATHS_MAX) {
+      const it = this.endedPaths.values();
+      for (let i = 0; i < ENDED_PATHS_TRIM; i++) {
+        const n = it.next();
+        if (n.done) break;
+        this.endedPaths.delete(n.value);
       }
-      this.readRangeFn = (p, s, e) => this.defaultFs!.readRangeAsync(p, s, e);
     }
-    return this.tick();
   }
-
-  private readRangeFn: ((p: string, s: number, e: number) => string | Promise<string>) | null = null;
 
   /** 单路径一轮推导（R-02 fail-open：任何异常 → unknown）。 */
   private deriveOne(entry: WatchEntry, now: number, budget: { left: number }): TickResult {
@@ -286,13 +368,9 @@ export class LivenessTailer {
     }
   }
 
-  /** 读区间（注入 fs 同步读；默认 fs 异步路径在 tickAsync 前置后可用同步缓存）。 */
+  /** 读区间（注入 fs 直读；默认 fs 场景命中 tickAsync 预读缓存）。 */
   private readRangeSync(path: string, start: number, end: number): string {
-    if (this.readRangeFn) {
-      const r = this.readRangeFn(path, start, end);
-      if (typeof r === 'string') return r;
-      throw new Error('async fs in sync tick（生产应走 tickAsync）');
-    }
+    if (this.readRangeFn) return this.readRangeFn(path, start, end);
     return this.fs.readRange(path, start, end);
   }
 }

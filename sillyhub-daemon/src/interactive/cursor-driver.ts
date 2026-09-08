@@ -56,6 +56,12 @@ const STDERR_MAX_BYTES = 20_000;
  */
 const MODEL_SAFE_RE = /^[A-Za-z0-9._:\/-]+$/;
 
+/**
+ * DA-1 shell 元字符（对齐批量层 task-runner/spawn-stream.ts:180 审计口径）：
+ * shell:true 下 Node 不转义任何参数直接拼接命令行，含任一字符即注入/错切面。
+ */
+const DA1_RISKY_RE = /[&|<>^%"\s]/;
+
 /** create-chat 兜底子命令超时（task-01 验证 C：stdout 裸 UUID 文本）。 */
 const DEFAULT_CREATE_CHAT_TIMEOUT_MS = 15_000;
 
@@ -195,6 +201,18 @@ function resolveSpawnInvocation(exePath: string, args: string[]): ResolvedSpawn 
         shell: false,
         detached: false,
       };
+    }
+    // DA-1（ql-20260908-006，对齐批量层 spawn-stream.ts:174-189）：shim 解析失败回退
+    // shell:true 时 Node 不转义任何参数——本驱动把用户完整 prompt 作位置参数拼入，
+    // 含 shell 元字符即命令注入/参数错切。命中危险字符一律硬失败并给修复指引，
+    // 把静默注入变成响亮的配置错误（与批量层同款守卫，勿单侧删除）。
+    const risky = args.find((a) => DA1_RISKY_RE.test(a));
+    if (risky !== undefined) {
+      throw new Error(
+        `拒绝以 shell 模式运行「${exePath}」：参数含 shell 元字符（注入/错切风险，DA-1）。` +
+          `请把 cursor 包装器换成可被 cmd-shim 解析的 .cmd，或直接指向 .exe；` +
+          `问题参数前 40 字符: ${risky.slice(0, 40)}`,
+      );
     }
     return { command: exePath, args, shell: true, detached: false };
   }
@@ -339,12 +357,15 @@ export class CursorDriver implements InteractiveDriver {
     }
 
     let args: string[];
+    let resolved: ResolvedSpawn;
     try {
       args = buildTurnArgs({
         chatId: handle.chatId,
         model: handle.options.model,
         prompt: turn.text,
       });
+      // DA-1 守卫在此 try 内（shim 失败 + 元字符 → 抛），按轮次错误收敛不杀会话。
+      resolved = resolveSpawnInvocation(handle.options.pathToAgentExecutable, args);
     } catch (err) {
       await this._reportError(callbacks, err);
       callbacks.onTurnResult({
@@ -355,7 +376,6 @@ export class CursorDriver implements InteractiveDriver {
       return;
     }
 
-    const resolved = resolveSpawnInvocation(handle.options.pathToAgentExecutable, args);
     const env = (handle.options.env ?? process.env) as NodeJS.ProcessEnv;
     const spawnOpts: SpawnOptions = {
       cwd: handle.options.cwd,

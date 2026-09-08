@@ -2455,17 +2455,17 @@ export async function fetchRegisteredAgentLogs(
   serverUrl: string,
   token: string,
   limit = 100,
-): Promise<Array<{ log_path: string; format: string | null; harness: string; session_id: string | null }>> {
+): Promise<Array<{ log_path: string; format: string | null; harness: string; session_id: string | null; agent_cwd: string | null }>> {
   try {
     const resp = await fetch(`${serverUrl.replace(/\/$/, '')}/api/agent-logs?limit=${limit}`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5_000),
     });
     if (!resp.ok) return [];
-    const body = (await resp.json()) as { items?: Array<{ log_path?: unknown; format?: unknown; harness?: unknown; session_id?: unknown }> };
+    const body = (await resp.json()) as { items?: Array<{ log_path?: unknown; format?: unknown; harness?: unknown; session_id?: unknown; agent_cwd?: unknown }> };
     return (body.items ?? []).flatMap((it) =>
       typeof it.log_path === 'string' && typeof it.harness === 'string'
-        ? [{ log_path: it.log_path, format: typeof it.format === 'string' ? it.format : null, harness: it.harness, session_id: typeof it.session_id === 'string' ? it.session_id : null }]
+        ? [{ log_path: it.log_path, format: typeof it.format === 'string' ? it.format : null, harness: it.harness, session_id: typeof it.session_id === 'string' ? it.session_id : null, agent_cwd: typeof it.agent_cwd === 'string' ? it.agent_cwd : null }]
         : [],
     );
   } catch {

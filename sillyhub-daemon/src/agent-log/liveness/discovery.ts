@@ -20,7 +20,7 @@
  * @module agent-log/liveness/discovery
  */
 
-import { openSync, readSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 import type { WatchTarget } from './tailer.js';
@@ -121,7 +121,7 @@ export function discoverLivenessWatchTargets(input: DiscoveryInput): WatchTarget
       const exact = `${projectDir}/${sessionId}.jsonl`;
       const st = fs.stat(exact);
       if (st && now - st.mtimeMs <= windowMs) {
-        push({ logPath: exact, format: 'claude-code-jsonl', workspace: resolveWorkspace(cwd), harness: 'claude-code', agentSessionId: sessionId, source });
+        push({ logPath: exact, format: 'claude-code-jsonl', workspace: resolveWorkspace(cwd), harness: 'claude-code', agentSessionId: sessionId, source, agentCwd: cwd });
       }
       return;
     }
@@ -131,7 +131,7 @@ export function discoverLivenessWatchTargets(input: DiscoveryInput): WatchTarget
       .filter((f) => f.name.endsWith('.jsonl') && now - f.mtimeMs <= windowMs)
       .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
     if (active) {
-      push({ logPath: `${projectDir}/${active.name}`, format: 'claude-code-jsonl', workspace: resolveWorkspace(cwd), harness: 'claude-code', agentSessionId: active.name.replace(/\.jsonl$/, ''), source });
+      push({ logPath: `${projectDir}/${active.name}`, format: 'claude-code-jsonl', workspace: resolveWorkspace(cwd), harness: 'claude-code', agentSessionId: active.name.replace(/\.jsonl$/, ''), source, agentCwd: cwd });
     }
   };
 
@@ -140,7 +140,7 @@ export function discoverLivenessWatchTargets(input: DiscoveryInput): WatchTarget
     const file = joinPosix(home, '.pi', 'agent', 'sessions', mungePiSafePath(cwd), 'session.jsonl');
     const st = fs.stat(file);
     if (st && now - st.mtimeMs <= windowMs) {
-      push({ logPath: file, format: 'pi-session-jsonl', workspace: resolveWorkspace(cwd), harness: 'pi', agentSessionId: null, source });
+      push({ logPath: file, format: 'pi-session-jsonl', workspace: resolveWorkspace(cwd), harness: 'pi', agentSessionId: null, source, agentCwd: cwd });
     }
   };
 
@@ -172,7 +172,7 @@ export function discoverLivenessWatchTargets(input: DiscoveryInput): WatchTarget
         try {
           const meta = JSON.parse(firstLine) as { type?: unknown; payload?: { cwd?: unknown } };
           if (meta?.type === 'session_meta' && meta.payload?.cwd === cwd) {
-            push({ logPath: full, format: 'codex-rollout-jsonl', workspace: resolveWorkspace(cwd), harness: 'codex', agentSessionId: null, source });
+            push({ logPath: full, format: 'codex-rollout-jsonl', workspace: resolveWorkspace(cwd), harness: 'codex', agentSessionId: null, source, agentCwd: cwd });
           }
         } catch {
           /* 首行非 JSON：跳过该候选 */
@@ -223,7 +223,7 @@ export function discoverLivenessWatchTargets(input: DiscoveryInput): WatchTarget
       if (!m) continue;
       const workdir = unescapeJsonFragment(head.slice(m.index + m[0].length));
       if (workdir === cwd) {
-        push({ logPath: full, format: 'zcode-model-io-jsonl', workspace: resolveWorkspace(cwd), harness: 'zcode', agentSessionId: f.name.replace(/^model-io-sess_/, '').replace(/\.jsonl$/, ''), source });
+        push({ logPath: full, format: 'zcode-model-io-jsonl', workspace: resolveWorkspace(cwd), harness: 'zcode', agentSessionId: f.name.replace(/^model-io-sess_/, '').replace(/\.jsonl$/, ''), source, agentCwd: cwd });
       }
     }
   };
@@ -293,12 +293,25 @@ function getDefaultDiscoveryFs(): DiscoveryFs {
       }
     },
     readHead(path: string, maxBytes: number): string | null {
+      // R8（ql-20260908-006）：fd 必须 close——旧实现把 openSync 返回值内联传给
+      // readSync 后即弃，每候选泄漏 1 fd（60s 一轮 discovery × 候选数，长跑 EMFILE，
+      // Windows 上还会卡住 rollout 文件无法删除/轮转）。
+      let fd: number | undefined;
       try {
+        fd = openSync(path, 'r');
         const buf = Buffer.alloc(maxBytes);
-        const n = readSync(openSync(path, 'r'), buf, 0, maxBytes, 0);
+        const n = readSync(fd, buf, 0, maxBytes, 0);
         return buf.subarray(0, n).toString('utf8');
       } catch {
         return null;
+      } finally {
+        if (fd !== undefined) {
+          try {
+            closeSync(fd);
+          } catch {
+            /* 已关闭/不可关闭：不掩盖主路径返回值 */
+          }
+        }
       }
     },
   };

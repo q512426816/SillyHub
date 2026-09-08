@@ -101,6 +101,8 @@ import { listRoots } from './roots-rpc.js';
 // 2026-09-07-agent-liveness-states task-06：liveness tailer 自发现/上报接线。
 import { LivenessTailer, type WatchTarget } from './agent-log/liveness/tailer.js';
 import { discoverLivenessWatchTargets } from './agent-log/liveness/discovery.js';
+// R6（ql-20260908-006）：liveness 推送 root/workspace 归属走 policy 层边界敏感判定。
+import { isPathUnderAnyRoot } from './policy/path-utils.js';
 import {
   buildAgentLogStatePushGroups,
   fetchRegisteredAgentLogs,
@@ -5222,6 +5224,8 @@ export class Daemon {
     const tailer = new LivenessTailer({
       intervalMs: 10_000,
       onResult: (r) => {
+        // R9（ql-20260908-006）：ended 即清推送元数据（该路径不再产出，防 Map 只增不减）。
+        if (r.state === 'ended') this._livenessMetaByPath.delete(r.logPath);
         void this._flushLivenessResults(serverUrl, [r]).catch(() => undefined);
       },
     });
@@ -5298,15 +5302,32 @@ export class Daemon {
           harness: it.harness,
           agentSessionId: it.session_id,
           source: 'registry-sync',
+          agentCwd: it.agent_cwd ?? undefined,
         });
       }
     }
     for (const t of targets) {
-      // 推送元数据：token 取 cwd 命中的 root（登记行按 agent_cwd 归属；无 cwd 用首个有 token 的 root）。
+      // R6（ql-20260908-006）修复：归属以 agent_cwd 命中 allowed root 为准（policy 层
+      // 边界敏感判定）。harness 日志都在用户 home 下、claude 项目目录名还经 munge 抹掉
+      // 分隔符，旧「logPath.includes(root)」恒 miss，全部落到「首个有 token 的 root」——
+      // 多 root 时把其它 workspace 的会话状态串写到第一个 workspace。cwd 无命中时仅
+      // 在「恰有一个 token root」才兜底（无歧义）；多 root 无命中则跳过并 warn（宁缺
+      // 勿串写，60s 后下轮重试）。
+      const cwd = t.agentCwd?.trim();
+      const tokenRoots = rootTokens.filter((rt) => rt.token);
       const root =
-        rootTokens.find((rt) => rt.token && t.logPath.includes(_posixRoot(rt.root)))?.root ??
-        rootTokens.find((rt) => rt.token)?.root;
-      const token = root ? await this._readRootPlatformToken(root) : undefined;
+        (cwd ? tokenRoots.find((rt) => isPathUnderAnyRoot(cwd, [rt.root]))?.root : undefined) ??
+        (tokenRoots.length === 1 ? tokenRoots[0]!.root : undefined);
+      if (!root) {
+        if (tokenRoots.length > 1) {
+          this._logger.warn('liveness_root_attribution_skipped', {
+            log_path: t.logPath,
+            agent_cwd: cwd ?? '',
+          });
+        }
+        continue;
+      }
+      const token = await this._readRootPlatformToken(root);
       if (!token) continue;
       this._livenessMetaByPath.set(t.logPath, {
         serverUrl,
@@ -5314,9 +5335,20 @@ export class Daemon {
         harness: t.harness,
         format: t.format,
         agentSessionId: t.agentSessionId ?? null,
-        agentCwd: undefined,
+        agentCwd: cwd,
       });
       this._livenessTailer?.add(t);
+    }
+    // R9（ql-20260908-006）：推送元数据 Map 有界——ended 路径在 onResult 即删，但目标
+    // 被挤占/daemon 长期运行的残余仍会累积；超限丢最早一批（Map 保插入序，旧路径
+    // 不再被 targets 引用即失效，语义无损）。
+    if (this._livenessMetaByPath.size > 4096) {
+      let dropped = 0;
+      for (const k of this._livenessMetaByPath.keys()) {
+        if (dropped >= 1024) break;
+        this._livenessMetaByPath.delete(k);
+        dropped += 1;
+      }
     }
   }
 
@@ -8336,9 +8368,4 @@ export class Daemon {
       this._sigintHandler = null;
     }
   }
-}
-
-/** root → POSIX 化（liveness 登记行按路径前缀归属 root 用，task-06）。 */
-function _posixRoot(root: string): string {
-  return root.replace(/\\/g, '/');
 }

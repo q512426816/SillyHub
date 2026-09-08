@@ -99,7 +99,7 @@ describe('pushAgentLogStates / fetchRegisteredAgentLogs（task-06，fetch stub�
         new Response(
           JSON.stringify({
             items: [
-              { log_path: 'a.jsonl', format: 'zcode-model-io-jsonl', harness: 'zcode', session_id: 's1' },
+              { log_path: 'a.jsonl', format: 'zcode-model-io-jsonl', harness: 'zcode', session_id: 's1', agent_cwd: 'C:/work/proj' },
               { harness: 'codex' },
             ],
           }),
@@ -107,7 +107,7 @@ describe('pushAgentLogStates / fetchRegisteredAgentLogs（task-06，fetch stub�
         )) as unknown as typeof fetch,
     );
     const rows = await fetchRegisteredAgentLogs('http://hub', 't');
-    expect(rows).toEqual([{ log_path: 'a.jsonl', format: 'zcode-model-io-jsonl', harness: 'zcode', session_id: 's1' }]);
+    expect(rows).toEqual([{ log_path: 'a.jsonl', format: 'zcode-model-io-jsonl', harness: 'zcode', session_id: 's1', agent_cwd: 'C:/work/proj' }]);
     vi.stubGlobal(
       'fetch',
       (() => Promise.reject(new Error('net'))) as unknown as typeof fetch,

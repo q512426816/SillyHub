@@ -72,6 +72,21 @@ BLOCKED_ALERT_SECONDS = 120
 #: 的 unresolved 幂等）。
 _NOTIFIED_BLOCKED_SEGMENTS: dict[tuple[uuid.UUID, str], int] = {}
 
+#: R9（ql-20260908-006）：blocked 段内存 Map 容量上限——行删除/日志轮转后键永不
+#: 消解，三个 Map 只增不减。超限丢最早一批（插入序）：丢的至多是旧段状态/段序号
+#:（段号回退 → 该段可能多通知一次，notify_broadcast 幂等兜底），fail-open 可接受。
+_BLOCKED_MAP_MAX = 4096
+_BLOCKED_MAP_TRIM = 1024
+
+
+def _trim_blocked_maps() -> None:
+    """R9：三个 blocked 段内存 Map 超限丢最早一批（见常量注释）。"""
+    for m in (BLOCKED_SEGMENTS, LAST_BLOCKED_SEGMENT_SEQ, _NOTIFIED_BLOCKED_SEGMENTS):
+        if len(m) > _BLOCKED_MAP_MAX:
+            for k in list(m.keys())[:_BLOCKED_MAP_TRIM]:
+                m.pop(k, None)
+
+
 # ── 2026-08-23-agent-activity-sessions task-04（design §3.3.3 / D-007）──
 #: harness → tool_report 会话 ``AgentSession.provider`` 映射：激活派发用默认引擎，
 #: harness 真实身份由 ``config_snapshot.harness`` 展示（创建时写入）。
@@ -1036,8 +1051,26 @@ class PlatformSyncService:
         递增——task-09 agent_blocked 通知的 dedupe_key/120s 阈值消费此状态，
         本方法只记不通知。
 
+        R7（ql-20260908-006）：本方法与 CLI 登记写者（``upsert_agent_log_entries``）
+        同为 select-then-INSERT——daemon 每 10s 推 states 建行窗口与 CLI 全量重推
+        并发时，双方 SELECT 都在对方 commit 前执行 → 双 INSERT → 后提交方
+        IntegrityError 整批回滚变 500。commit 撞 ``IntegrityError`` 时 rollback
+        重试一轮即收敛（重读已见并发行 → 走 update 分支）；仍失败按原异常上抛。
+
         返回 (updated, created, skipped)。
         """
+        try:
+            return await self._upsert_agent_log_states_once(workspace_id, entries)
+        except IntegrityError:
+            await self._session.rollback()
+            return await self._upsert_agent_log_states_once(workspace_id, entries)
+
+    async def _upsert_agent_log_states_once(
+        self,
+        workspace_id: uuid.UUID,
+        entries: list[AgentLogStateEntry],
+    ) -> tuple[int, int, int]:
+        """upsert_agent_log_states 单轮实现（R7 重试的每轮体，语义见公共方法 docstring）。"""
         deduped: dict[str, AgentLogStateEntry] = {entry.log_path: entry for entry in entries}
         existing_by_path: dict[str, AgentSessionLogORM] = {}
         if deduped:
@@ -1105,6 +1138,7 @@ class PlatformSyncService:
                     )
         await self._session.commit()
         await self._maybe_notify_blocked(workspace_id, blocked_candidates)
+        _trim_blocked_maps()  # R9：段表有界（见常量注释）
         return updated, created, skipped
 
     async def _maybe_notify_blocked(
@@ -1192,8 +1226,44 @@ class PlatformSyncService:
         绑定与归属同事务（本方法唯一一次 commit 前完成）且 best-effort，失败
         不影响上报主流程。
 
+        R7（ql-20260908-006）：本方法与 states 写者（``upsert_agent_log_states``）
+        同为 select-then-INSERT——daemon 10s 推 states 建行窗口与 CLI 全量重推
+        并发首建同 ``(workspace_id, log_path)`` 行时，后提交方 IntegrityError
+        整批回滚变 500。commit 撞 ``IntegrityError`` 时 rollback 重试一轮即收敛
+        （归属/绑定与插入同事务，随回滚一并重来，无半提交副作用）。
+
         返回落库行数（去重后）。
         """
+        try:
+            return await self._upsert_agent_log_entries_once(
+                workspace_id,
+                entries,
+                pushed_at,
+                scan_run_id,
+                user_id,
+                hub_session_id=hub_session_id,
+            )
+        except IntegrityError:
+            await self._session.rollback()
+            return await self._upsert_agent_log_entries_once(
+                workspace_id,
+                entries,
+                pushed_at,
+                scan_run_id,
+                user_id,
+                hub_session_id=hub_session_id,
+            )
+
+    async def _upsert_agent_log_entries_once(
+        self,
+        workspace_id: uuid.UUID,
+        entries: list[AgentLogEntry],
+        pushed_at: str | None,
+        scan_run_id: str | None,
+        user_id: uuid.UUID,
+        hub_session_id: uuid.UUID | None = None,
+    ) -> int:
+        """upsert_agent_log_entries 单轮实现（R7 重试的每轮体，语义见公共方法 docstring）。"""
         # dict 化去重：键保留首现顺序（保序），值被靠后条目覆盖（后者为准）。
         deduped: dict[str, AgentLogEntry] = {entry.log_path: entry for entry in entries}
         now = datetime.now(UTC)

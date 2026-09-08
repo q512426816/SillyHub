@@ -481,7 +481,7 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 - `stored > base_ts`（字典序，不转 datetime）→ **409 冲突**，返回平台当前完整六表，**绝不 auto-merge**
 - 否则 → upsert
 
-`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:435`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:775`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
+`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:428`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:775`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
 
 ### 2.5 运行时数据与存储目录
 
@@ -648,7 +648,7 @@ Agent 编排是本平台 AA 的核心能力。**关键架构事实**：backend �
 #### 3.3.3 platform_sync 同步层（SillySpec 进度上行）
 
 `platform_sync/router.py` 4 端点（无 prefix，挂 `/api`）：
-- `POST /changes/{name}/progress`（`:45`）上行 + `base_ts` **字典序乐观锁**冲突检测（200 接受 / 409 冲突，`backend/app/modules/platform_sync/service.py:192 upsert_progress`，算法 `backend/app/modules/platform_sync/service.py:227-248`：base_ts 空无条件接受、stored>base_ts 字典序则 409 绝不 auto-merge）。读 3 个 `X-SillySpec-*` header（Base-Ts/Pushed-At/User）。
+- `POST /changes/{name}/progress`（`:45`）上行 + `base_ts` **字典序乐观锁**冲突检测（200 接受 / 409 冲突，`backend/app/modules/platform_sync/service.py:212 upsert_progress`，算法 `backend/app/modules/platform_sync/service.py:227-248`：base_ts 空无条件接受、stored>base_ts 字典序则 409 绝不 auto-merge）。读 3 个 `X-SillySpec-*` header（Base-Ts/Pushed-At/User）。
 - `GET /changes`（`:89`）轻量列表（裸数组）、`GET /changes/{name}/progress`（`:100`）完整六表 JSON、`GET /changes/{name}/approval`（`:120`）execute 审批门控。
 - workspace 隔离：`shpsync_` token 派生 workspace_id（`backend/app/modules/auth/token_service.py`，sha256 直存 O(1)），`require_platform_sync`（`backend/app/modules/platform_sync/auth.py:153`）Bearer 三分派（`shpsync_`/`shk_live_`/JWT）。
 
