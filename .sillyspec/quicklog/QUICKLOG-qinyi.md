@@ -493,3 +493,14 @@
 状态：进行中
 关联变更：2026-09-07-pi-task-events
 文件：sillyhub-daemon/src/interactive/pi-events.ts, sillyhub-daemon/tests/interactive/pi-events.test.ts
+
+## ql-20260908-001-f864 | 2026-09-08 09:10:34 | 修三处 arch-large-file-split 归档遗留债
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx（补 AgentLivenessOverviewCard 组件级 mock（data-testid 隔离））
+- backend/app/modules/daemon/session/service/control.py（注释合并收敛 801→800）
+需求：修三处 arch-large-file-split 归档遗留债
+根因：workspaces/[id] 16 失败实为 AgentLivenessOverviewCard 内 useQuery 无 QueryClientProvider（agent-liveness 带入）；antd 6 unhandled 与 openapi 陈旧在 HEAD 已被近期变更消除；control.py 超 ≤800 上限 1 行。
+方案：page.test.tsx 仿 ChangesOverviewCard 先例补组件级 data-testid mock；control.py 注释合并收敛 801→800；债②③核实无需变更。
+结果：workspaces 16 失败归零（28/28 全绿）、antd 6 unhandled 实测零复现、openapi 与 HEAD 逐字节一致（472 paths 覆盖全 585 routes）、control.py 800 行达标（ruff+799 session 用例全绿）；commit e039f7e3f（2 文件 +10/-2）。

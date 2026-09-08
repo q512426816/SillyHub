@@ -4546,6 +4546,63 @@ export class Daemon {
   }
 
   /**
+   * quick-c1ac3c85（SWR）：specStep 旧缓存放行（interactive_spec_stale_serve）后
+   * 的后台再验证——把「下载 40s 全量 bundle 对齐服务器版本」挪出创建关键路径的
+   * 收口侧。触发时机=会话启动成功 + ready 通知之后（fire-and-forget）。
+   *
+   * 与心跳预取（_maybePrefetchSpecCaches）的差异：
+   *   ① 不查活跃会话门控——触发源就是刚创建的会话自身（create 入口已记账活跃），
+   *      查则恒拦；且内联 pull 时代同样会在其他会话活跃时覆盖缓存（pull 自带
+   *      push-before-pull D-008 保护未回灌改动），风险面不扩大；
+   *   ② 版本对齐目标 = lease 下发的 latest_spec_version 快照值——拉取期间服务器
+   *      再前进的增量由下一跳心跳预取自然收敛（bump 只前进不回退，见下）。
+   * 共享记账：single-flight（_pullSpecShared 内部去重，与心跳预取/并发创建共享
+   * 同一下载）；不触碰 _specPrefetchLastAttempt 冷却（再验证的天然节律 = 创建
+   * 频率，与内联 pull 时代等价，不挤占心跳预取的失败冷却窗口）。
+   */
+  private _revalidateSpecCacheInBackground(
+    req: { workspaceId: string; localVersion: number; targetVersion: number },
+    ctx: { strategy?: string; rootPath?: string },
+    leaseId: string,
+  ): void {
+    if (!this._running) return; // 停机竞态：stop() 后不起后台拉取（对齐心跳预取门控）
+    this._logger.info('spec_revalidate_started', {
+      workspace_id: req.workspaceId,
+      lease_id: leaseId,
+      local_version: req.localVersion,
+      server_version: req.targetVersion,
+    });
+    void (async () => {
+      try {
+        // single-flight 内部去重：并发创建的再验证 / 心跳预取在飞 → 共享同一 promise。
+        await this._pullSpecShared(req.workspaceId, ctx);
+        // 条件 bump（只前进不回退）：共享的在途拉取可能已被其对齐到更新版本
+        //（心跳预取 bump 服务器权威值）——旧快照值不倒扣版本号。
+        const cur = await readLocalSpecVersion(resolveSpecDir(req.workspaceId));
+        if (cur !== null && cur >= req.targetVersion) {
+          this._logger.info('spec_revalidate_skip_bump', {
+            workspace_id: req.workspaceId,
+            current_version: cur,
+            target_version: req.targetVersion,
+          });
+          return;
+        }
+        await bumpLocalSpecVersion(resolveSpecDir(req.workspaceId), req.targetVersion);
+        this._logger.info('spec_revalidate_done', {
+          workspace_id: req.workspaceId,
+          server_version: req.targetVersion,
+        });
+      } catch (e) {
+        this._logger.warn('spec_revalidate_failed', {
+          workspace_id: req.workspaceId,
+          lease_id: leaseId,
+          error: (e as Error)?.message ?? String(e),
+        });
+      }
+    })();
+  }
+
+  /**
    * task-06（design A1）：单拍心跳（心跳循环每拍 + 重连对账第 1 步共用）。
    *
    * 成功路径：清断连计数/告警标记 → 通知 resilience 健康 → 同步 allowed_roots
@@ -7414,6 +7471,14 @@ export class Daemon {
       endStep('skills_ms', skillsStart);
     };
 
+    // quick-c1ac3c85（SWR）：specStep 判定「本地有旧版本缓存」放行创建时挂起的
+    // 后台再验证请求；create 成功 + notifySessionReady 之后才 fire——~40s 全量
+    // 拉取全程不占创建/首响关键路径；create 失败路径（下方 catch）不 fire，
+    // 会话没起来无需刷新。
+    let pendingSpecRevalidate:
+      | { workspaceId: string; localVersion: number; targetVersion: number }
+      | undefined;
+
     // task-09：借用 session 跳过 spec pull（业务/管理人员读源码，不写 spec；沙箱 cwd 也
     // 非 spec 根）。非借用维持 tar/shared 原逻辑。计时覆盖整个分支（版本比对跳过路径
     // 的 ~0ms 本身即「跳过生效」的观测证据，ql-20260907-005）。
@@ -7436,6 +7501,7 @@ export class Daemon {
               (execPayload as { latestSpecVersion?: number }).latestSpecVersion ??
               (execPayload as { latest_spec_version?: number }).latest_spec_version;
             let skipPullDueToVersion = false;
+            let serveStaleSpec = false;
             if (leaseSpecVersion !== undefined) {
               const localVersion = await readLocalSpecVersion(resolveSpecDir(workspaceId));
               if (!shouldRefreshSpec(localVersion, leaseSpecVersion)) {
@@ -7444,6 +7510,29 @@ export class Daemon {
                   lease_id: leaseId,
                   workspace_id: workspaceId,
                   spec_version: localVersion,
+                });
+              } else if (localVersion !== null) {
+                // quick-c1ac3c85（SWR）：本地已有带版本记录的缓存（哪怕旧版）→
+                // 不再现场全量拉取阻塞创建。实机根因（会话 a982654f，41s 内联
+                // 下载）：心跳预取被活跃会话门控挡住后，版本一前进下一个新建会话
+                // 必吃内联下载。放行创建吃旧缓存，会话启动成功后由
+                // _revalidateSpecCacheInBackground 后台对齐服务器版本。安全性：
+                // postSpecSync 回灌是增量 ops（本地 manifest diff + 服务端
+                // base_version 冲突检测），旧基座不会整树覆盖冲掉他端改动；pull
+                // 自带 push-before-pull（D-008）保护未回灌本地改动。localVersion
+                // 为 null（首次 / D-001@v1 前旧缓存，无从判旧）→ 不放行，走下方
+                // 内联 pull 维持旧行为。
+                serveStaleSpec = true;
+                pendingSpecRevalidate = {
+                  workspaceId,
+                  localVersion,
+                  targetVersion: leaseSpecVersion,
+                };
+                this._logger.info('interactive_spec_stale_serve', {
+                  lease_id: leaseId,
+                  workspace_id: workspaceId,
+                  local_version: localVersion,
+                  server_version: leaseSpecVersion,
                 });
               }
             }
@@ -7456,6 +7545,15 @@ export class Daemon {
                 workspace_id: workspaceId,
                 spec_dir: resolveSpecDir(workspaceId),
                 skipped: 'version_fresh',
+              });
+            } else if (serveStaleSpec) {
+              // SWR 旧缓存放行：skipped 标记区分于 version_fresh（观测口径对齐
+              // 上方 fresh 路径；spec_pull_ms 记 ~0ms 即「放行生效」的证据）。
+              this._logger.info('interactive_spec_pulled', {
+                lease_id: leaseId,
+                workspace_id: workspaceId,
+                spec_dir: resolveSpecDir(workspaceId),
+                skipped: 'stale_while_revalidate',
               });
             } else {
           try {
@@ -7666,6 +7764,15 @@ export class Daemon {
       //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）改为
       // 主动回传 run failed（见下方 P2b），不再依赖 backend 兜底。
       await this._client.notifySessionReady(sessionId);
+      // quick-c1ac3c85（SWR）：specStep 挂起的旧缓存后台再验证在此 fire——
+      // 会话已确认启动、ready 通知已发（首响关键路径走完），~40s 拉取全程后台。
+      if (pendingSpecRevalidate) {
+        this._revalidateSpecCacheInBackground(
+          pendingSpecRevalidate,
+          { strategy: specStrategy, rootPath: specRootPath },
+          leaseId,
+        );
+      }
     } catch (e) {
       // create 抛错（ClaudeExecutableNotFoundError wrapper 解析失败等）：移除登记，
       // 让 WS 重放可重试；记录错误不崩。SessionManager create catch 只删 store 后

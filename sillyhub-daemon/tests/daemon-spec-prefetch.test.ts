@@ -10,11 +10,17 @@
 //   ③ 活跃会话门控：agent 正在读写 spec 目录时绝不后台动盘。
 //
 // 覆盖：
-//   A. 并发创建同工作区 → getSpecBundle 只调一次（single-flight）
+//   A. 并发创建同工作区 → getSpecBundle 只调一次（single-flight；本地无版本记录
+//      → 内联 pull 路径——quick-c1ac3c85 SWR 后带版本缓存的落后场景改走 F 的放行路径）
 //   B. 心跳对答：本地落后 + 无活跃会话 → 后台预取触发（getSpecBundle 调用）
 //   C. 活跃会话门控：该工作区有活跃会话 → 不预取
 //   D. 版本不落后（server <= local）→ 不预取
 //   E. 旧 backend 无 spec_versions 键 → 不预取（零依赖兼容）
+//   F. SWR：本地旧版本缓存 + lease 版本落后 → 创建不等下载直接放行，会话启动后
+//      后台再验证对齐服务器版本（quick-c1ac3c85）
+//   G. SWR：create 失败路径不 fire 后台再验证（会话没起来无需刷新）
+//   H. SWR：条件 bump 只前进不回退（共享在途拉取已对齐更新版本 → skip_bump）
+//   I. SWR：后台再验证失败仅 warn，不影响会话创建结果与本地版本
 //
 // 环境隔离：SILLYHUB_DAEMON_DIR 指向 tmp（daemonStateDir 运行时读 env），
 // specs/<ws>/.runtime/spec-version.json 种本地版本；getSpecBundle 用慢 mock
@@ -206,8 +212,10 @@ describe('daemon spec 拉取工作区级化（ql-20260907-010）', () => {
     const sm = createMockSessionManager();
     const daemon = buildDaemon(client, sm);
 
-    // 两个会话同时创建（不同 lease，同工作区）：本地 v5 / lease v6 → 都走 pull，
-    // single-flight 合并为一次下载。
+    // 本地无版本记录（首次）→ 内联 pull 路径（SWR 只放行带版本记录的旧缓存）。
+    // 两个会话同时创建（不同 lease，同工作区，lease v6）→ single-flight 合并
+    // 为一次下载。
+    await rm(join(resolveSpecDir(WS_ID), '.runtime', 'spec-version.json'), { force: true });
     await Promise.all([
       startSession(daemon, { leaseId: 'lease-a', sessionId: 'sess-a' }),
       startSession(daemon, { leaseId: 'lease-b', sessionId: 'sess-b' }),
@@ -216,6 +224,118 @@ describe('daemon spec 拉取工作区级化（ql-20260907-010）', () => {
     expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
     expect(sm.create).toHaveBeenCalledTimes(2);
     expect(await readLocalSpecVersion(resolveSpecDir(WS_ID))).toBe(6);
+  });
+
+  it('F. SWR：本地旧版本缓存 + lease 落后 → 创建放行不等下载，启动后后台对齐', async () => {
+    // getSpecBundle 用受控 deferred：不 resolve 时创建链必须已返回（放行证据）。
+    let resolveBundle!: (b: Buffer) => void;
+    const client = createMockClient();
+    client.getSpecBundle.mockImplementation(
+      () =>
+        new Promise<Buffer>((res) => {
+          resolveBundle = res;
+        }),
+    );
+    const sm = createMockSessionManager();
+    const daemon = buildDaemon(client, sm);
+    // 再验证有 _running 门控（对齐心跳预取前提注入惯例）。
+    (daemon as unknown as { _running: boolean })._running = true;
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    // 本地 v5 / lease v8（beforeEach 已种 v5）→ 旧缓存放行。
+    await startSession(daemon, { leaseId: 'lease-swr', sessionId: 'sess-swr', latestSpecVersion: 8 });
+
+    // 创建链已完整返回（含 sm.create + notifySessionReady）而 bundle 仍挂起 →
+    // 下载不在关键路径上。再验证 fire 后经数个文件 IO await 才调起 getSpecBundle
+    //（spec_revalidate_started → hasUnsynced 检查 → getSpecBundle），轮询等它被调。
+    expect(sm.create).toHaveBeenCalledTimes(1);
+    expect(client.notifySessionReady).toHaveBeenCalledTimes(1);
+    await waitUntil(() => client.getSpecBundle.mock.calls.length > 0);
+    expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
+    // daemon logger 输出形如 `[daemon.<event>] key=value`（前缀包含式匹配）。
+    const loggedEvents = infoSpy.mock.calls.map((c) => String(c[0]));
+    expect(loggedEvents.some((s) => s.includes('interactive_spec_stale_serve'))).toBe(true);
+    expect(loggedEvents.some((s) => s.includes('spec_revalidate_started'))).toBe(true);
+
+    // 放行后补齐下载 → 本地版本后台对齐 lease 快照值。
+    resolveBundle(Buffer.alloc(0));
+    await waitUntil(async () => (await readLocalSpecVersion(resolveSpecDir(WS_ID))) === 8);
+    expect(client.getSpecBundle).toHaveBeenCalledTimes(1); // single-flight 未重复下载
+    infoSpy.mockRestore();
+  });
+
+  it('G. SWR：create 失败路径不 fire 后台再验证', async () => {
+    const client = createMockClient();
+    const sm = createMockSessionManager();
+    sm.create = vi.fn(async () => {
+      throw new Error('spawn failed');
+    });
+    const daemon = buildDaemon(client, sm);
+    (daemon as unknown as { _running: boolean })._running = true;
+
+    // 本地 v5 / lease v8 → specStep 放行，但 create 抛错 → 不 fire 再验证。
+    await startSession(daemon, { leaseId: 'lease-fail', sessionId: 'sess-fail', latestSpecVersion: 8 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(client.getSpecBundle).not.toHaveBeenCalled();
+    expect(await readLocalSpecVersion(resolveSpecDir(WS_ID))).toBe(5);
+  });
+
+  it('H. SWR：共享在途拉取已对齐更新版本 → 条件 bump 只前进不回退', async () => {
+    const client = createMockClient();
+    const sm = createMockSessionManager();
+    const daemon = buildDaemon(client, sm);
+    (daemon as unknown as { _running: boolean })._running = true;
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    // 桩 _pullSpecShared：模拟「并入心跳预取在途拉取」——resolve 时另一路已把
+    // 本地对齐到权威 v9（新于 lease 快照 v8）。再验证须读 cur(9) >= 8 → skip_bump，
+    // 不倒扣版本号、不另起下载。
+    const internal = daemon as unknown as {
+      _pullSpecShared: (wsId: string, ctx: unknown) => Promise<string | null>;
+      _revalidateSpecCacheInBackground: (
+        req: { workspaceId: string; localVersion: number; targetVersion: number },
+        ctx: unknown,
+        leaseId: string,
+      ) => void;
+    };
+    internal._pullSpecShared = async () => {
+      await seedLocalSpecVersion(9, new Date().toISOString());
+      return resolveSpecDir(WS_ID);
+    };
+
+    internal._revalidateSpecCacheInBackground(
+      { workspaceId: WS_ID, localVersion: 5, targetVersion: 8 },
+      {},
+      'lease-h',
+    );
+    await waitUntil(() =>
+      infoSpy.mock.calls.some((c) => String(c[0]).includes('spec_revalidate_skip_bump')),
+    );
+
+    expect(await readLocalSpecVersion(resolveSpecDir(WS_ID))).toBe(9);
+    expect(client.getSpecBundle).not.toHaveBeenCalled(); // 并入在途拉取，未重复下载
+    infoSpy.mockRestore();
+  });
+
+  it('I. SWR：后台再验证失败仅 warn，不影响会话与本地版本', async () => {
+    const client = createMockClient();
+    client.getSpecBundle.mockRejectedValue(new Error('network down'));
+    const sm = createMockSessionManager();
+    const daemon = buildDaemon(client, sm);
+    (daemon as unknown as { _running: boolean })._running = true;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await startSession(daemon, { leaseId: 'lease-i', sessionId: 'sess-i', latestSpecVersion: 8 });
+    await waitUntil(() =>
+      warnSpy.mock.calls.some((c) => String(c[0]).includes('spec_revalidate_failed')),
+    );
+
+    // 会话创建成功（放行语义未受后台失败影响），本地版本维持旧值待下次自愈。
+    expect(sm.create).toHaveBeenCalledTimes(1);
+    expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
+    expect(await readLocalSpecVersion(resolveSpecDir(WS_ID))).toBe(5);
+    warnSpy.mockRestore();
   });
 
   it('B. 心跳对答：本地 5 / 服务器 9 + 无活跃会话 → 后台预取触发', async () => {
