@@ -71,7 +71,7 @@ const gateRaw = gateRawStr ? Number(gateRawStr) : Number.NaN;
 
 ### A4. 前端 subGrouping（byParent / orphans / openParents）—— 主逻辑正确，性能反模式一处
 
-**byParent / 孤儿小节逻辑正确**：`subGrouping` 以 shownSessions 中无 parent 的会话建 mainIds，子会话父在 mainIds → byParent 附属组，否则 → 孤儿小节（frontend/src/components/sessions/session-list-panel.tsx:2226）；sections 循环里子会话 `continue` 不进机器分桶，附属组渲染在父行下（:1726-1798）。有测试（默认折叠 / 展开 / 孤儿兜底 / 无子会话零变化 4 例）。
+**byParent / 孤儿小节逻辑正确**：`subGrouping` 以 shownSessions 中无 parent 的会话建 mainIds，子会话父在 mainIds → byParent 附属组，否则 → 孤儿小节（frontend/src/components/sessions/session-list-panel.tsx:2247）；sections 循环里子会话 `continue` 不进机器分桶，附属组渲染在父行下（:1726-1798）。有测试（默认折叠 / 展开 / 孤儿兜底 / 无子会话零变化 4 例）。
 
 **截断（GROUP_ITEM_LIMIT=50）交互**：
 - 父被截掉（50 名外）而子在 50 内 → 子正确落「团队分身」孤儿小节不丢行（兜底设计生效，无丢行）。
@@ -108,7 +108,7 @@ const gateRaw = gateRawStr ? Number(gateRawStr) : Number.NaN;
 
 | 项 | 结论 |
 | --- | --- |
-| subGrouping useMemo 依赖（F2, P2） | **确认反模式**：`shownSessions = truncated ? visibleSessions.slice(0,50) : visibleSessions`（frontend/src/components/sessions/session-list-panel.tsx:2226）在 render 内联计算，截断态（组 >50 条）每次渲染产出新数组引用 → `subGrouping`（:1383）与 `sections`（:1404）两个 useMemo deps 失稳**每次渲染重算**。未截断时引用稳定（复用 visibleByGroup 产物）无问题。触发源：10s 轮询数据更新、勾选/展开等任何父 state 变化。**最小修复**：`const shownSessions = useMemo(() => truncated ? visibleSessions.slice(0, GROUP_ITEM_LIMIT) : visibleSessions, [visibleSessions, showAll]);` |
+| subGrouping useMemo 依赖（F2, P2） | **确认反模式**：`shownSessions = truncated ? visibleSessions.slice(0,50) : visibleSessions`（frontend/src/components/sessions/session-list-panel.tsx:2235）在 render 内联计算，截断态（组 >50 条）每次渲染产出新数组引用 → `subGrouping`（:1383）与 `sections`（:1404）两个 useMemo deps 失稳**每次渲染重算**。未截断时引用稳定（复用 visibleByGroup 产物）无问题。触发源：10s 轮询数据更新、勾选/展开等任何父 state 变化。**最小修复**：`const shownSessions = useMemo(() => truncated ? visibleSessions.slice(0, GROUP_ITEM_LIMIT) : visibleSessions, [visibleSessions, showAll]);` |
 | 500 条 byParent 聚合复杂度 | O(n) 单遍 + Map 查找，且 n 被截断钳到 ≤50/组；无嵌套循环、无重复计算（除 F2 的 memo 失效）。算法层面可接受。 |
 | 上游 memo 链 | sessions/viewFiltered/visibleByGroup/groups 均 useMemo 且依赖引用稳定（react-query structuralSharing 保 sessions 引用）——健康。 |
 | 浮层 SessionPanel 初始查询集（F6, P3） | 挂载即发 ~6 并发：logs 预取（establishStream）+ attach 轮询 getAgentSession（1.5s，active 即停）+ fetchPendingDialogs + fetchSessionDialogHistory + queue GET + team-missions（对分身恒空）。量级可接受；可选优化：dialog 模式 attach 到子会话（parent_session_id 非空）时跳过 team-missions 查询。主控 SSE 双流并存是有意取舍（「关闭返回主控」验收），记录不判缺陷。 |
