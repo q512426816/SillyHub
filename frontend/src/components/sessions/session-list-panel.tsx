@@ -617,7 +617,10 @@ function useSessionListSharedData() {
   // quick（机器筛选接共享机器）：改喂融合候选（自有 + 共享给我的，180024 无自有
   // 机器时筛选 tab 此前只剩「全部」）；runtimeToMachine 同步覆盖共享会话归属。
   const { machineCandidates } = useDaemonMachines({ limit: 100 });
-  const machines = machineCandidates ?? [];
+  // ql-20260908-010：?? [] 兜底包 useMemo——缺省时每渲染新 [] 会让下游
+  // runtimeToMachine 等 memo 恒重算（react-hooks/exhaustive-deps warning）；
+  // 包住后 undefined 期间返回同一空数组引用。
+  const machines = useMemo(() => machineCandidates ?? [], [machineCandidates]);
 
   // 工作区列表（树分组 / chips 工作区名解析）。
   const workspacesQuery = useQuery({
