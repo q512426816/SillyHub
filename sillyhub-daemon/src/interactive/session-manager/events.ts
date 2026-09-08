@@ -282,12 +282,29 @@ export async function dispatchStatusEvent(
       const isSubagentInit =
         typeof ev.parent_tool_use_id === 'string' &&
         ev.parent_tool_use_id !== '';
+      // ql-20260909-004：cursor 换轨跟随——CursorDriver 每轮 respawn + --resume
+      // chatId，某轮 resume 失效时 cursor 会静默开新 chat，此后 init 帧携带新
+      // session_id；write-once 会让落盘 resume key 永停旧 chat，daemon 重启恢复
+      // 即与活会话上下文分叉。cursor 的 system/init 就是每轮 respawn 的主会话
+      // 起点（无子代理 init 形态），主流 sid 变化=真实换轨，允许跟随覆盖并记
+      // 日志。其它 provider 维持 write-once（D-003@v1 防误覆盖 resume key 的
+      // 保守语义不变，claude 子代理 init 仍走 parent_tool_use_id 守卫）。
+      const followLatestSessionId = state.provider === 'cursor';
       if (
         sid &&
         !isSubagentInit &&
         (state.agentSessionId === undefined ||
-          (state.forkedInitPending === true && sid !== state.agentSessionId))
+          (sid !== state.agentSessionId &&
+            (state.forkedInitPending === true || followLatestSessionId)))
       ) {
+        if (state.agentSessionId !== undefined && state.agentSessionId !== sid) {
+          // eslint-disable-next-line no-console
+          console.info('[session-manager] cursor chat switched; resume key follows', {
+            session_id: state.sessionId,
+            old_agent_session_id: state.agentSessionId,
+            new_agent_session_id: sid,
+          });
+        }
         state.agentSessionId = sid;
         state.forkedInitPending = false;
         // task-10：拿到 agentSessionId 后才可恢复 → 排队 flush。

@@ -123,6 +123,13 @@ class DefaultFs implements TailerFs {
     this.rangeCache.delete(path);
   }
 
+  /** ql-20260909-004：仅清 range 缓存（预读失败时用）——stat 缓存本轮仍有效，
+   * 清掉旧 range 条目让 readCachedRange 抛错走 fail_open unknown，而非把上一轮
+   * 旧字节当本轮新增量重复喂进 tail。 */
+  forgetRange(path: string): void {
+    this.rangeCache.delete(path);
+  }
+
   readRange(path: string, start: number, end: number): string {
     throw new Error('DefaultFs.readRange 需经 tailer 异步路径调用');
   }
@@ -297,7 +304,11 @@ export class LivenessTailer {
           await this.defaultFs.prefetchRange(p, effective, cap);
           budget.left -= cap - effective;
         } catch {
-          // 预读失败（读取间隙被删等）→ 不缓存，deriveOne fail_open unknown（R-02）
+          // 预读失败（读取间隙被删等）→ 不缓存 + 清掉上一轮残留旧条目
+          //（ql-20260909-004：旧实现只不写入，残留旧字节会被 readCachedRange
+          // 当本轮新增量重复喂进 tail——注释宣称的 fail_open unknown 实际不成立），
+          // deriveOne 走 readRangeSync 抛错 → fail_open unknown（R-02）。
+          this.defaultFs.forgetRange(p);
         }
       }
     }

@@ -569,7 +569,14 @@ export class CursorDriver implements InteractiveDriver {
       return;
     }
 
-    if (isRecord(parsed) && typeof parsed.session_id === 'string' && parsed.session_id) {
+    // ql-20260909-004：chatId 采纳补 UUID 校验（对齐 _tryCreateChat 的 UUID_RE
+    // 先例）——畸形 session_id 不进 handle.chatId，防下一轮 --resume 拼进坏值
+    //（resume 失败/静默新会话）。snapshot 的 session_id 透传不改（上报原样）。
+    if (
+      isRecord(parsed) &&
+      typeof parsed.session_id === 'string' &&
+      UUID_RE.test(parsed.session_id)
+    ) {
       handle.chatId = parsed.session_id;
     }
 

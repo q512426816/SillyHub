@@ -228,14 +228,33 @@ async def _mark_entry_failed(
     error_code: str,
     error_message: str,
 ) -> None:
-    """rollback 后以新事务把条目置 failed（幂等：仅 pending 可翻转）。"""
-    entry = await db.get(AgentSessionScheduledMessage, message_id)
-    if entry is None or entry.status != "pending":
-        return
-    entry.status = "failed"
-    entry.error_code = error_code
-    entry.error_message = error_message[:500]
+    """rollback 后以新事务把条目置 failed（幂等：仅 pending 可翻转）。
+
+    谓词 UPDATE（ql-20260909-004 补齐失败分支，对齐 R3 成功分支同款）：原
+    db.get 读-改-写在读到 pending 后、flush 前可被并发 cancel 置 cancelled 并
+    提交，无谓词 UPDATE 会把 cancelled 覆写回 failed（用户取消成功却看到
+    failed）。0 行命中即已被并发翻转成终态，尊重不再覆写。
+    """
+    result = await db.execute(
+        update(AgentSessionScheduledMessage)
+        .where(
+            AgentSessionScheduledMessage.id == message_id,
+            AgentSessionScheduledMessage.status == "pending",
+        )
+        .values(
+            status="failed",
+            error_code=error_code,
+            error_message=error_message[:500],
+        )
+    )
     await db.commit()
+    if result.rowcount == 0:
+        log.info(
+            "scheduled_send_failed_lost_race_to_final",
+            message_id=str(message_id),
+            error_code=error_code,
+        )
+        return
     log.warning(
         "scheduled_send_entry_failed",
         message_id=str(message_id),

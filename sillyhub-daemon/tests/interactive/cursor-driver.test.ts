@@ -410,6 +410,36 @@ describe('② 多轮 + chatId：第二轮 --resume；result+exit0 携 usage/sess
     close();
     await consumeP;
   });
+
+  it('ql-20260909-004 畸形 session_id 不采纳为 chatId——下一轮不拼 --resume 坏值', async () => {
+    // createChatTimeoutMs 调小：chatId 缺失时每轮先试 create-chat（此处让快速失败）。
+    const driver = new CursorDriver({ killGraceMs: 5, createChatTimeoutMs: 30 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = await driver.start(queue, makeOpts());
+    const consumeP = driver.consume(handle, cb);
+
+    push('turn-one');
+    await waitForAgentSpawnCount(1);
+    agentChildren[0]!._emitLines([
+      systemInitLine('not-a-uuid'), // 畸形 sid：不得进 handle.chatId
+      resultLine('not-a-uuid'),
+    ]);
+    agentChildren[0]!._emitExit(0);
+    await waitUntil(() => results.length === 1);
+
+    push('turn-two');
+    // 第 2 个 spawn = create-chat 尝试（无输出快速超时），第 3 个 = 本轮 turn spawn。
+    await waitForAgentSpawnCount(3, 5000);
+    const turnArgs = agentSpawnCalls()[2]![1] as string[];
+    expect(turnArgs).toContain('turn-two'); // 确认是 turn spawn（非 create-chat）
+    expect(turnArgs).not.toContain('--resume'); // 未采纳畸形 sid → 无 resume 可拼
+    agentChildren[2]!._emitLines([resultLine(SESSION_ID)]);
+    agentChildren[2]!._emitExit(0);
+    await waitUntil(() => results.length === 2);
+    close();
+    await consumeP;
+  });
 });
 
 describe('③ interrupt：进行中 kill → error_during_execution；无 child → false', () => {

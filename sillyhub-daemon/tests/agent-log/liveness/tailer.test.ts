@@ -244,4 +244,31 @@ describe('LivenessTailer 生产路径（默认 fs，ql-20260908-006 审查修复
     expect(t.add(mkTarget(p))).toBe(true); // mtime 新 → 复活
     expect((await t.tickAsync())[0]!.state).toBe('working');
   });
+
+  it('ql-20260909-004 预读失败清残留旧 range 缓存——fail_open unknown 而非旧字节重复入 tail', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'liveness-range-miss-'));
+    const p = join(dir, 'a.jsonl');
+    writeFileSync(p, 'x'.repeat(100));
+    const t = new LivenessTailer({ now: () => T0 });
+    t.add(mkTarget(p));
+    // 第 1 轮：预读成功进 rangeCache（evidence 正常）。
+    let out = await t.tickAsync();
+    expect(out[0]!.state).toBe('working');
+    expect(out[0]!.evidence).not.toContain('fail_open');
+    // 第 2 轮模拟「stat 成功后、读前文件被删/换」：readRangeAsync 抛错。修复前
+    // 上一轮旧条目残留，readCachedRange 返回旧字节当本轮新增量重复喂 tail；
+    // 修复后 forgetRange 清掉 → readCachedRange 抛 → fail_open unknown。
+    const inner = (
+      t as unknown as {
+        defaultFs: { readRangeAsync: () => Promise<string> };
+      }
+    ).defaultFs;
+    inner.readRangeAsync = async () => {
+      throw new Error('ENOENT (simulated read gap)');
+    };
+    appendFileSync(p, 'y'.repeat(50)); // 推进 offset 目标，触发预读
+    out = await t.tickAsync();
+    expect(out[0]!.state).toBe('unknown');
+    expect(out[0]!.evidence).toContain('fail_open');
+  });
 });

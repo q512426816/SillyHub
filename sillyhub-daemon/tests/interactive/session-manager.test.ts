@@ -21,6 +21,9 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { SessionManager } from '../../src/interactive/session-manager.js';
+// ql-20260909-004：换轨跟随守卫单测直调 events 子模块（不经 facade 转发，见
+// session-manager/index.ts 只转发 5 个非类符号的约定）。
+import { dispatchStatusEvent } from '../../src/interactive/session-manager/events.js';
 import { InputQueue } from '../../src/interactive/input-queue.js';
 import {
   SessionNotFoundError,
@@ -495,5 +498,78 @@ describe('SessionManager deferred first prompt（ql-20260825-002）', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── ql-20260909-004：cursor 换轨跟随（dispatchStatusEvent session_started）─────
+
+describe('cursor 换轨跟随 vs 其它 provider write-once（ql-20260909-004）', () => {
+  function mkState(provider: SessionState['provider']): SessionState {
+    return {
+      sessionId: 'sess-1',
+      leaseId: 'lease-1',
+      status: 'running',
+      currentRunId: null,
+      agentSessionId: undefined,
+      forkedInitPending: false,
+      provider,
+      cwd: 'C:\work',
+    } as unknown as SessionState;
+  }
+
+  function mkMgr(): { mgr: unknown; flush: ReturnType<typeof vi.fn> } {
+    const flush = vi.fn();
+    const mgr = {
+      deps: { onTurnMessage: vi.fn(async () => {}) },
+      _scheduleFlush: flush,
+    };
+    return { mgr, flush };
+  }
+
+  it('cursor：主流 init 携带不同 sid → agentSessionId 跟随覆盖（换轨不丢 resume key）', async () => {
+    const { mgr, flush } = mkMgr();
+    const state = mkState('cursor');
+    state.agentSessionId = 'chat-old';
+    await dispatchStatusEvent(
+      mgr as never,
+      state,
+      { type: 'status', subtype: 'session_started', content: '', session_id: 'chat-new' },
+      false,
+    );
+    expect(state.agentSessionId).toBe('chat-new');
+    expect(flush).toHaveBeenCalled();
+  });
+
+  it('claude/codex：主流 init 不同 sid 不覆盖（write-once，D-003@v1 语义保持）', async () => {
+    const { mgr, flush } = mkMgr();
+    const state = mkState('claude');
+    state.agentSessionId = 'first';
+    await dispatchStatusEvent(
+      mgr as never,
+      state,
+      { type: 'status', subtype: 'session_started', content: '', session_id: 'second' },
+      false,
+    );
+    expect(state.agentSessionId).toBe('first');
+    expect(flush).not.toHaveBeenCalled();
+  });
+
+  it('cursor 子代理形态（parent_tool_use_id 非空）也不覆盖', async () => {
+    const { mgr } = mkMgr();
+    const state = mkState('cursor');
+    state.agentSessionId = 'chat-old';
+    await dispatchStatusEvent(
+      mgr as never,
+      state,
+      {
+        type: 'status',
+        subtype: 'session_started',
+        content: '',
+        session_id: 'chat-sub',
+        parent_tool_use_id: 'ptu-1',
+      },
+      false,
+    );
+    expect(state.agentSessionId).toBe('chat-old');
   });
 });

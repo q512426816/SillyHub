@@ -1252,7 +1252,13 @@ export function SessionPanelPage({
         try {
           for (
             let i = 0;
-            i < JUMP_LOAD_EARLIER_MAX_PAGES && !hit() && hasEarlierRef.current;
+            i < JUMP_LOAD_EARLIER_MAX_PAGES &&
+            !hit() &&
+            hasEarlierRef.current &&
+            // ql-20260909-004：卸载即停——串台两道保护（epoch/abort）在 sessionId
+            // effect 体内，卸载不执行；已死实例的 epoch 校验恒过，循环会带着死游标
+            // 残留发完剩余页请求。
+            mountedRef.current;
             i++
           ) {
             // 页未真实加载（到头空页 / 翻页失败 / 在途锁）即停，不空转。
@@ -1266,6 +1272,8 @@ export function SessionPanelPage({
         } finally {
           jumpSuppressLoadEarlierRef.current = false;
         }
+        // 卸载后静默收尾：不再弹兜底 toast（对已离开页面的用户是幽灵提示）。
+        if (!mountedRef.current) return;
         if (!hit()) {
           // 兜底两档 toast（可区分）：到头仍无 → 日志已不存在（终态）；
           // 达页数上限（hasEarlier 仍 true）→ 提示可续点（非终态）。

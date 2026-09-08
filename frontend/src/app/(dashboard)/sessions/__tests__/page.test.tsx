@@ -2060,6 +2060,38 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     await waitFor(() => expect(beforeCallCount()).toBe(3));
   });
 
+  it("ql-20260909-004 翻页循环中整页卸载（路由离开）→ 停止后续翻页请求、不弹兜底 toast", async () => {
+    let releasePage1!: (v: ReturnType<typeof fullPage>) => void;
+    const page1 = new Promise((r) => {
+      releasePage1 = r;
+    });
+    mockTwoRuns();
+    mocks.getAgentSessionLogs
+      .mockResolvedValueOnce(
+        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+      )
+      .mockReturnValueOnce(page1)
+      // 守卫失效时的对照分支：满页填充页会驱动循环继续翻第 3 页（断言不达）。
+      .mockImplementation(() => fullPage("r-filler", "填充页提问", "2026-08-15T07:00:00Z"));
+    const view = renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: UNLOADED_TICK_LABEL }),
+    );
+    // 循环第 1 页在途时整页卸载（epoch/abort 在 sessionId effect 体内、卸载
+    // 不执行——守卫必须靠组件级 mountedRef）。
+    await waitFor(() => expect(beforeCallCount()).toBe(1));
+    view.unmount();
+    releasePage1(fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z"));
+    await new Promise((r) => setTimeout(r, 150));
+    // 卸载后循环即停：无第 2 个翻页请求、无幽灵 toast。
+    expect(beforeCallCount()).toBe(1);
+    expect(mocks.notifyWarning).not.toHaveBeenCalled();
+    expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
+
   it("mobile ⋯ 菜单含「轮次导航」项：点击打开 Drawer 行式列表（面板根内、宽 min(78vw,300px)、未加载行带元数据）", async () => {
     mocks.listSessionRuns.mockResolvedValue([
       // r-2 failed 态保持目录未加载（同 UNLOADED_TICK_LABEL 注）。

@@ -44,6 +44,7 @@ from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.scheduled_send import (
     _dispatch_scheduled_entry,
+    _mark_entry_failed,
     scheduled_send_sweep_once,
 )
 from app.modules.daemon.service import DaemonService
@@ -534,6 +535,38 @@ class TestSweepReviewFixesR3R4R5:
         status, _code, _msg, dispatched_at = await _entry_row(db_session, entry.id)
         assert status == "cancelled"  # 不被覆写成 dispatched
         assert dispatched_at is None
+
+    async def test_mark_failed_lost_race_to_cancel_keeps_cancelled(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """ql-20260909-004：_mark_entry_failed 改谓词 UPDATE——失败翻转与并发取消
+        竞速时 0 行命中即尊重 cancelled，不再无谓词覆写回 failed（旧 db.get
+        读-改-写窗口：读到 pending 后被并发 cancel 提交，随后无条件 UPDATE 覆写）。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        entry = await _make_scheduled(db_session, session_id, uid)
+        # 并发 cancel 先落终态（独立 session，同 R3 用例形态）。
+        async with get_session_factory()() as cancel_db:
+            row = await cancel_db.get(AgentSessionScheduledMessage, entry.id)
+            row.status = "cancelled"
+            row.cancelled_at = datetime.now(UTC)
+            await cancel_db.commit()
+
+        await _mark_entry_failed(db_session, entry.id, "inject_error", "boom")
+
+        status, code, _msg, _dispatched = await _entry_row(db_session, entry.id)
+        assert status == "cancelled"  # 不被覆写成 failed
+        assert code is None
+
+        # 对照：pending 条目正常翻转 failed（幂等语义保持）。
+        entry2 = await _make_scheduled(db_session, session_id, uid)
+        await _mark_entry_failed(db_session, entry2.id, "inject_error", "boom2")
+        status2, code2, msg2, _d2 = await _entry_row(db_session, entry2.id)
+        assert status2 == "failed"
+        assert code2 == "inject_error"
+        assert msg2 == "boom2"
 
     async def test_r4_offline_retries_then_fails_after_cap(
         self,
