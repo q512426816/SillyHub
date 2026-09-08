@@ -75,3 +75,9 @@ node test/spec-sync-abort-classification.test.mjs   # 16 断言全绿
 ```
 
 测试 A2 段即生产场景复现：本地 mock 服务器挂 8s 应答，外部 400ms abort（模拟熔断），断言 warn 走分类文案、不再露 "This operation was aborted"。
+
+## 处置记录（2026-09-08 定时收口，双侧闭环确认归档）
+
+- 生效前提已满足：npm latest = **3.28.2**（≥3.28.1；本文件遗留的「CLI 侧修复待发版」已消除）——CLI 侧 commit 6f17a56（warn 分类翻译 + SILLYSPEC_SYNC_TIMEOUT_MS 可调）已随版分发，daemon 侧缺省注入 20s（e0af8e3a0）对 3.28.2 全量生效。
+- 平台侧行动项终态：①注入已上架（阿里云分发 BUILD_ID 9a9bd881）；②端点观测经核对无需开发（慢请求/慢查询/pg_stat_activity 三件套 2026-07-27 已上线，commit 3a181291a）——§4.2（忙时慢点排查）为「按观测结果决定」的后续项，非本坑阻塞。
+- 验证：CLI 侧 16 断言测试全绿（sillyspec 仓 main）；npm view 确认 3.28.2。双侧闭环，归档。

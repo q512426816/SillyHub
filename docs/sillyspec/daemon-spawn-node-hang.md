@@ -47,3 +47,9 @@ daemon（`~/.sillyhub/daemon/bin/sillyhub-daemon.js` 单文件 bundle）长驻�
 - sillyspec_status 采集（09-02 变更建的链路）在本机不可用——平台同步卡/总览卡冲突区无数据源。
 - 本变更（conflict-diff-compare）的 compare 端点 spec-tree 弹窗不受影响（不 spawn）；
   progress 弹窗本地侧数据受影响（降级「—」占位）。
+
+## 巡检注记（2026-09-08 定时扫描）
+
+- 定性确认：环境级疑难（daemon 长驻进程内 spawn node 恒挂起 + STATUS_DLL_INIT_FAILED，独立进程不复现）——修复需活体诊断（文件「下一步排查方向」的 procdump/ETW 抓 loader、mini 长驻脚本对照实验、换机矩阵），超出定时巡检的盲改能力，本轮不动代码。
+- 影响面重申：仅 sillyspec_status 采集链路（spec-tree 分支不受影响，读文件不 spawn）；临时缓解路径（SILLYSPEC_BIN 包装器/采集降级）待原作者评估。
+- 保持活跃，等待活体排查进展；若后续确认某代 daemon 修复（如自更新后采集恢复），可凭 sillyspec_status 历史拍点验证后归档。

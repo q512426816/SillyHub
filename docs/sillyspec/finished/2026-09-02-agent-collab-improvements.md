@@ -1,8 +1,8 @@
 # 跨 Agent 衔接与驾驭能力改进清单
 
 - 创建：2026-09-02（源自 silly大家庭群聊讨论：覃艺发起，sillyspecer + sillyhuber 分析，管理员拍板）
-- 状态：进行中
-- 认领：sillyspecer（SillySpec 侧 P0-1/P0-2/P1-1/P2-2）、sillyhuber（SillyHub 侧 P1-2/P2-1）
+- 状态：已闭环（2026-09-08：4 项交付 ✅ + P1-2/P2-1 两项管理员取消，清单归零）
+- 认领：sillyspecer（SillySpec 侧 P0-1/P0-2/P1-1/P2-2，已全部交付）
 - 设计原则：**CLAUDE.md 变薄的那天，才说明驾驭能力真的上来了** —— 规则下沉成机制，不靠 agent 自律
 
 ## 背景
@@ -19,8 +19,6 @@
 | P0-1 | P0 | 全局状态 JSON 出口：活跃 change 列表 + 各自阶段/步骤进度 + ghost/滞留标记，统一 envelope（对齐 machine-interface v1 schema），SillyHub 面板直接消费。现状：gate/derive 已有 --json 但仅单变更粒度，progress show 仅有人类可读输出 | SillySpec | ✅ 已完成 2026-09-02（commit a8a100e，`sillyspec progress show --json`） |
 | P0-2 | P0 | `--done` 内置 test+lint 硬门禁（覆盖 quick；把 CLAUDE.md 规则 8 从「提醒」变「卡点」） | SillySpec | ✅ 已完成 2026-09-02（commit 93a12bc，quick --done 触及 src/test 时实测 commands.test/lint，失败阻断） |
 | P1-1 | P1 | `--root` 参数（或等价机制）钉死项目根，根治「进 worktree 跑 CLI 写出分裂进度库」（治 CLAUDE.md 规则 14 的根因） | SillySpec | ✅ 已完成 2026-09-02（commit e018c4f）——落地为**自动锚定**优于显式参数：resolveEffectiveDir 第四层，linked worktree 内跑 CLI 自动锚回主仓 + warn，零参数零习惯成本 |
-| P1-2 | P1 | 工单目录状态化：`docs/sillyspec/` 作为数据源，SillyHub 面板挂「活跃坑」卡片，按认领人主动推送 | SillyHub | 待开工 |
-| P2-1 | P2 | 部署记录绑定 change ID；未走完 archive 的 change 上生产直接拦截（硬校验替代软约定） | SillyHub | 待开工 |
 | P2-2 | P2 | sync-conflict 状态标红（冲突可见性）+ doctor 自动校验 file-lifecycle 检查清单（文档同步从检查清单变自动卡点） | SillySpec | ✅ 已完成 2026-09-02（commit 693853a）：overview/show/--json envelope 三面透出未决冲突 + doctor D8 lifecycle_doc_staleness 维度 |
 
 ## 驾驭能力（不落代码、落习惯的改进）
@@ -43,3 +41,5 @@
 - sillyspecer 认领四项（P0-1/P0-2/P1-1/P2-2）+ 盲区补丁均已在 sillyspec 仓实证（commits a8a100e / 93a12bc / e018c4f / 693853a / 556bcb8 在 main）✅。
 - P1-2 / P2-1（huber 认领）仍待开工——本文件保持活跃，不归档。
 - 顺带处置：P2-2 关联的 spec 树冲突可见性延伸坑（quicksync 整树冲突粒度过粗）今日已修复归档，见 `finished/2026-09-03-quicksync-conflict-granularity.md`。
+- 2026-09-08 管理员：**P1-2（工单目录状态化）取消不做**，从改进清单与认领行移除（历史条目中的提及保留作记录）。工单剩余唯一待开工项：P2-1（huber）。
+- 2026-09-08 管理员：**P2-1（部署记录绑定 change ID）亦取消不做**，从改进清单与认领行移除（历史条目中的提及保留作记录）。至此清单归零：4 项交付（P0-1/P0-2/P1-1/P2-2 全 ✅）+ 2 项取消（P1-2/P2-1）——**工单闭环**，随本条归档至 finished/。
