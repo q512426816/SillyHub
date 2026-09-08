@@ -537,8 +537,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           ) : undefined
         }
       />
-      {/* 原型 .main-grid：左 320px 列表 + 右面板 */}
-      <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-3.5">
+      {/* 原型 .main-grid：左 320px 列表 + 右面板；gap-3 与 PageContainer 卡片间距
+          统一（ql-20260908-016，原 3.5 与页头间距不一致）。 */}
+      <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-3">
         <SessionListPanel
           scope={scope}
           selectedSessionId={selectedSessionId}

@@ -509,7 +509,7 @@ function twoMachines() {
 // ── 1. 全局树初次渲染（D-103 一次拉取 + 客户端分组） ─────────────────────
 
 describe("SessionListPanel 全局树初次渲染", () => {
-  it("默认一次拉取 limit=500；按 workspace_id 分组（工作区列表序+非工作区固定末尾）；0 会话组仍显示计数 0", async () => {
+  it("默认一次拉取 limit=500；按 workspace_id 分组（可见会话数排序+构造序稳定，0 会话组沉底仍显示计数 0）", async () => {
     setMachines({ items: twoMachines() });
     setWorkspaces([
       makeWorkspace({ id: "ws-1", name: "SillyHub" }),
@@ -529,11 +529,13 @@ describe("SessionListPanel 全局树初次渲染", () => {
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
     expect(lastCallArgs()).toEqual({ limit: 500, archived: false });
 
-    // 分组顺序：工作区列表序 + 非工作区固定末尾（D-105）
+    // 分组顺序（ql-20260908-016）：有可见会话的组在前（保持构造序，非工作区
+    // 含 1 条随非空组），0 会话组（空工作区）稳定沉底——原工作区列表序让空组
+    // 霸占首屏。
     expect(groupHeadLabels()).toEqual([
       "工作区分组 SillyHub",
-      "工作区分组 空工作区",
       "工作区分组 非工作区",
+      "工作区分组 空工作区",
     ]);
     // 0 会话组仍显示（计数 0）；SillyHub 与非工作区各 1 条
     expect(screen.getByText("0 个会话")).toBeInTheDocument();

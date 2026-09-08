@@ -116,7 +116,6 @@ import {
   PinOff,
   Plus,
   Trash2,
-  User,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -1097,6 +1096,19 @@ function WorkspaceTreeList({
     );
   }, [groups, viewFiltered]);
 
+  /** ql-20260908-016（排版统一）：渲染序 = 有可见会话的组在前（保持构造序，
+   *  含「非工作区」），0 会话组稳定沉底——原工作区列表序让一串空分组霸占首屏、
+   *  有会话的组被挤到折叠线以下。仅影响树渲染序；分组/过滤/选中逻辑仍用
+   *  groups 构造序。 */
+  const orderedGroups = useMemo(() => {
+    const weight = (g: TreeGroup) =>
+      (visibleByGroup.get(g.id)?.length ?? 0) > 0 ? 0 : 1;
+    return groups
+      .map((g, i) => ({ g, i }))
+      .sort((a, b) => weight(a.g) - weight(b.g) || a.i - b.i)
+      .map(({ g }) => g);
+  }, [groups, visibleByGroup]);
+
   const groupIds = useMemo(() => groups.map((g) => g.id), [groups]);
 
   /** 当前组（R-05 展开态重置的豁免对象）：选中会话所在分组。 */
@@ -1643,7 +1655,7 @@ function WorkspaceTreeList({
           与行为零改动——仅把加载/错误分支收进同一滚动容器。 */}
       <div
         data-testid="session-tree"
-        className="min-h-0 flex-1 overflow-y-auto p-2"
+        className="min-h-0 flex-1 overflow-y-auto p-1.5"
       >
         {/* task-07：群聊分区（独立数据源，见 groupChatsQuery 注释）。
             task-06：随 isArchivedView 切数据源 + 群行收纳操作三回调透传。 */}
@@ -1695,7 +1707,8 @@ function WorkspaceTreeList({
           </div>
         ) : (
           <>
-          {groups.map((group) => {
+          {/* ql-20260908-016：渲染走 orderedGroups（0 会话组沉底），组内逻辑不变。 */}
+          {orderedGroups.map((group) => {
             const groupVisible = visibleByGroup.get(group.id) ?? [];
             const batchActive = batchGroupId === group.id;
             const groupCheckedIds = groupVisible.filter((s) =>
@@ -1881,26 +1894,26 @@ function GroupChatSection({
         onKeyDown={(e) => {
           if (e.key === "Enter") toggleCollapsed();
         }}
-        className="flex cursor-pointer select-none items-center gap-1.5 px-1.5 pb-1 pt-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+        className="flex cursor-pointer select-none items-center gap-2 px-2 py-1.5 text-[13px] font-semibold text-foreground transition-colors hover:bg-muted/40"
       >
         <span
           aria-hidden
-          className={`text-[10px] text-muted-foreground transition-transform ${
+          className={`w-3.5 shrink-0 text-center text-[10px] leading-none text-muted-foreground transition-transform ${
             collapsed ? "" : "rotate-90"
           }`}
         >
           ▶
         </span>
-        <Users aria-hidden className="h-3 w-3 shrink-0 text-brand-600" />
-        <span className="truncate">群聊</span>
-        <span className="shrink-0 font-normal text-muted-foreground/80">
+        <Users aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-600" />
+        <span className="min-w-0 truncate">群聊</span>
+        <span className="shrink-0 text-[11px] font-normal text-muted-foreground/80">
           {loading
             ? "加载中…"
             : // design §6.2：归档视图计数带「已归档」前缀（数据源已按视图
               // 过滤，计数值本身正确；验收审查 gap 修正）。
               isArchivedView
-              ? `已归档群 ${groups.length} 个`
-              : `${groups.length} 个`}
+                ? `已归档群 ${groups.length} 个`
+                : `${groups.length} 个`}
         </span>
         <span className="flex-1" />
         {/* task-06（design §6.2 群分区新增行为）：归档视图隐藏「＋」——收纳
@@ -1915,14 +1928,17 @@ function GroupChatSection({
               e.stopPropagation();
               onNew();
             }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary"
           >
-            <Plus aria-hidden className="h-3 w-3" />
+            <Plus aria-hidden className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
-      {!collapsed &&
-        (error ? (
+      {!collapsed && (
+        /* ql-20260908-016：群行左缘对齐会话行（px-1.5 ≈ 单聊小节包裹层），
+           原直接平铺比会话行左移一档。 */
+        <div className="px-1.5">
+        {error ? (
           <div className="mx-0.5 flex items-center gap-1.5 rounded border border-destructive/30 bg-red-50 px-2 py-1.5 text-[11px] text-destructive">
             加载群聊失败：{error}
             <Button size="small" onClick={onRetry}>
@@ -1949,7 +1965,9 @@ function GroupChatSection({
               onDelete={onDelete ? () => onDelete(g.id, g.title?.trim() || "未命名群聊") : undefined}
             />
           ))
-        ))}
+        )}
+        </div>
+      )}
     </section>
   );
 }
@@ -2400,21 +2418,34 @@ function WorkspaceGroupNode({
         onKeyDown={(e) => {
           if (e.key === "Enter") onToggleExpand();
         }}
-        className="group/g-head flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 hover:bg-muted/40"
+        className="group/g-head flex cursor-pointer select-none items-center gap-2 px-2 py-1.5 hover:bg-muted/40"
       >
         <span
           aria-hidden
-          className={`text-[10px] text-muted-foreground transition-transform ${
+          className={`w-3.5 shrink-0 text-center text-[10px] leading-none text-muted-foreground transition-transform ${
             expanded ? "rotate-90" : ""
           }`}
         >
           ▶
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold text-foreground">
+        <span
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold",
+            // ql-20260908-016：0 会话组沉底后整体降调（muted），与有内容的组拉开层级。
+            visibleSessions.length === 0
+              ? "text-muted-foreground/80"
+              : "text-foreground",
+          )}
+        >
           <Folder aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-600" />
           <span className="min-w-0 truncate">{group.name}</span>
         </span>
-        <span className="shrink-0 text-[11px] text-muted-foreground/80">
+        <span
+          className={cn(
+            "shrink-0 text-[11px] text-muted-foreground/80",
+            visibleSessions.length === 0 && "text-muted-foreground/60",
+          )}
+        >
           {visibleSessions.length} 个会话
         </span>
         {/* 组头操作（原型 .g-acts）：展开组常显，收起组 hover/聚焦浮现——
@@ -2473,7 +2504,9 @@ function WorkspaceGroupNode({
           )}
         </span>
       </div>
-      {expanded && (
+      {/* ql-20260908-016：0 会话组无正文可展开（原「（暂无会话）」占位行是噪音，
+          空组已沉底降调，组头「＋」仍可原地新建）。 */}
+      {expanded && visibleSessions.length > 0 && (
         <div className="pb-1">
           {/* 多选态操作条：全选本组 / 删除选中（ql-20260818-012 语义随组化） */}
           {batchActive && (
@@ -2516,7 +2549,7 @@ function WorkspaceGroupNode({
             <p className="px-3 py-2 text-xs text-muted-foreground">（暂无会话）</p>
           ) : (
             sections.map((sec) => (
-              <div key={sec.key} className="px-2 pb-1">
+              <div key={sec.key} className="px-1.5 pb-1">
                 {sec.isSubOrphan ? (
                   // 「团队分身」孤儿小节头（2026-08-26-subsession-portal-grouping）：
                   // 父不可见的分身子会话收纳，可折叠默认收起（tool_report 同款交互）。
@@ -2927,7 +2960,7 @@ function SessionRow({
           : undefined
       }
       className={cn(
-        "group flex cursor-pointer flex-col justify-center gap-1 overflow-hidden px-3 py-1.5 transition-colors",
+        "group flex cursor-pointer flex-col justify-center gap-1 overflow-hidden px-2.5 py-1.5 transition-colors",
         variant === "tree"
           ? // 树形态（原型 .s-row）：圆角行卡 + brand 选中态（brand-100 底 +
             // brand-600 竖条 + 标题 brand-700），无下边线。
@@ -3162,11 +3195,12 @@ function SessionRow({
       </div>
       {/* 第二行（树形态=2026-08-23 原型 .r2 降噪版）：引擎身份 chip
           （claude=warning 金 / codex=brand 紫 / tool_report harness=info 青）
-          + 创建人/档案/供应商/轮数纯文本 meta（title 悬停全量）；工作区/机器
-          由组头与机器小节承载不重复。平铺形态（退役路径）保留原 antd Tag 集。 */}
+          + 创建人/档案/供应商/轮数点分隔 meta（title 悬浮全量）；工作区/机器
+          由组头与机器小节承载不重复。pl-[22px] 对齐首行标题列（状态点 6px +
+          gap 6px + 内边距 10px）。平铺形态（退役路径）保留原 antd Tag 集。 */}
       <div
         className={cn(
-          "flex items-center gap-1.5 pl-3",
+          "flex items-center gap-1.5 pl-[22px]",
           variant === "tree"
             ? "min-w-0 overflow-hidden whitespace-nowrap"
             : "flex-wrap",
@@ -3211,8 +3245,11 @@ function SessionRow({
           </span>
         )}
         {variant === "tree" ? (
+          /* ql-20260908-016（排版降噪）：meta 改「创建人 · 档案 · 供应商 · N 轮」
+             点分隔纯文本——原三组 12px 图标（User/BookUser/Cloud）在 320px 左栏
+             内拥挤；全量信息仍在 title 悬浮。 */
           <span
-            className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-[10px] leading-4 text-muted-foreground/80"
+            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10px] leading-4 text-muted-foreground/80"
             title={[
               `${session.owner_name ?? "—"}`,
               snapshot?.profile_name ?? null,
@@ -3222,22 +3259,15 @@ function SessionRow({
               .filter(Boolean)
               .join(" · ")}
           >
-            <span className="inline-flex min-w-0 items-center gap-0.5">
-              <User aria-hidden className="h-3 w-3 shrink-0" />
-              <span className="truncate">{session.owner_name ?? "—"}</span>
+            <span className="min-w-0 truncate">
+              {[
+                session.owner_name ?? "—",
+                snapshot?.profile_name ?? null,
+                snapshot?.provider_name ?? null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
-            {snapshot?.profile_name && (
-              <span className="inline-flex min-w-0 items-center gap-0.5">
-                <BookUser aria-hidden className="h-3 w-3 shrink-0" />
-                <span className="truncate">{snapshot.profile_name}</span>
-              </span>
-            )}
-            {snapshot?.provider_name && (
-              <span className="inline-flex min-w-0 items-center gap-0.5">
-                <Cloud aria-hidden className="h-3 w-3 shrink-0" />
-                <span className="truncate">{snapshot.provider_name}</span>
-              </span>
-            )}
             <span className="shrink-0">{session.turn_count} 轮</span>
           </span>
         ) : (
