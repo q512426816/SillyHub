@@ -103,7 +103,12 @@ function FloatingDrawerBody({
     machineCandidates,
     sessions,
     isLoading: machinesLoading,
-  } = useDaemonMachines({ limit: 100 });
+  } = useDaemonMachines(
+    { limit: 100 },
+    // ql-20260910-002：轮询拆分（ql-20260909-013）漏传 includeSessions 致
+    // sessions 恒空——D-005 默认机器三级回退的第二级（最近会话所在机器）失效。
+    { includeSessions: true },
+  );
   // 仅机器选择器/Picker 与 SessionPanel 展示消费融合候选；下方 D-005 三级回退
   // 解析（handleNewSession）仍用自有 machines——D-004@v2 用户显式选择，共享
   // 机器不做任何自动回退/默认选中。

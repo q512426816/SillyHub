@@ -68,10 +68,28 @@
 方案：list_pending_dialogs ownership 404 时复用 _resolve_shadow_member_answer_session 影子成员分支（条件与答题侧同源），命中放行读否则 404；单聊/群会话语义零变化
 结果：test_session_permissions 40 passed（+3：成员拉取成功/外人+移除成员 404/单聊非属主仍 404）；ruff/mypy/格式全净；未部署
 
-## ql-20260910-002-dd6d | 2026-09-10 03:29:08 | 24h 审查风险修复第三批：群聊 pending 卡误关哨兵/pending_cache epoch 回填复用/sessions 门户 includeSessions 补齐/日志去重移出 updater/sillyspec 多目标失败掩蔽/…
-状态：进行中
+## ql-20260910-002-dd6d | 2026-09-10 03:29:08 | 24h 审查风险修复第三批：群聊 pending 卡误关/pending 缓存 epoch 中毒/门户会话数据源断供/StrictMode 丢日志/多目标失败掩…
+状态：已完成
 关联变更：（无）
-文件：frontend/src/components/group-chat/group-chat-panel.tsx, frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx, backend/app/modules/change/pending_cache.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_pending_cache.py, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/lib/use-agent-run-stream.ts, sillyhub-daemon/src/sillyspec-manager.ts
+文件：
+- backend/app/modules/change/pending_cache.py（get 返读时 epoch/set 纯盖章+NX 初始化）
+- backend/app/modules/change/service.py（调用方透传 epoch）
+- backend/app/modules/change/tests/test_pending_cache.py（防中毒回归 3 例+FakeRedis nx）
+- frontend/src/components/group-chat/group-chat-panel.tsx（失败哨兵+快照开放态）
+- frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx（拉取失败不关卡用例）
+- frontend/src/components/sessions/sessions-portal.tsx（补参+第七入口快照）
+- frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（includeSessions+续接快照用例，mock 透传参）
+- frontend/src/components/floating/floating-session-host.tsx（补 includeSessions:true）
+- frontend/src/lib/use-agent-run-stream.ts（去重移出 updater）
+- frontend/src/lib/__tests__/use-agent-run-stream.test.ts（StrictMode 双调用例，旧实现验证变红）
+- sillyhub-daemon/src/sillyspec-manager.ts（轮内聚合清空）
+- sillyhub-daemon/tests/sillyspec-manager.test.ts（多目标掩蔽 4 例+harness targets/outcomeByCwd）
+- .sillyspec/docs/SillyHub/modules/change.md / frontend_lib.md / frontend_components.changelog.md / .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.changelog.md（模块文档四处同步）
+需求：24h 审查风险修复第三批：群聊 pending 卡误关/pending 缓存 epoch 中毒/门户会话数据源断供/StrictMode 丢日志/多目标失败掩蔽/续接快照漏写六项
+根因：①拉取失败与无卡混同致已见卡永久转已答 ②set 重读 epoch 把旧集合盖新章中毒 5 分钟 ③轮询拆分漏传 includeSessions 致 sessions 恒空 ④Set.add 副作用在 updater 内被 StrictMode 双调丢条目 ⑤单槽位 statusError 被同轮后位成功清掉 ⑥第七个选中入口不写工作区快照致文件树串档
+方案：①queryFn 返回 failedShadowSessionIds+快照维持开放态 ②get 返读时 epoch/set 盖章不重读+NX 初始化 ③门户与悬浮宿主补 includeSessions:true ④去重移出 updater 纯追加 ⑤_collectOneTarget 返失败布尔+整轮聚合清空 ⑥onClick 补 setSelectedWorkspaceId(recentSession.workspace_id)
+结果：backend change 507 passed+ruff/format/mypy 0 问题；daemon sillyspec-manager 64 passed+tsc 0；前端 11+53+31+93 用例全绿+tsc 0+eslint 0 错误；StrictMode 用例旧实现验证变红后转绿
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, frontend/src/lib/__tests__/use-agent-run-stream.test.ts, sillyhub-daemon/tests/sillyspec-manager.test.ts
 
 ## ql-20260910-003-0d35 | 2026-09-10 03:33:09 | codex/pi/cursor 用量接按模型明细表——驱动带 modelUsage 会话累计快照
 状态：已完成
@@ -87,3 +105,8 @@
 方案：InteractiveDriverResult 增 modelUsage（driver.ts 公共类型+helpers）；codex=thread/started 模型+tokenUsage 净值快照覆盖、pi=model_change 模型+message_end 逐调用累加、cursor=init 帧模型+result 帧逐轮累加，失败轮统一附带；daemon.ts/backend 零改动复用既有管线
 结果：相关 5 套件 200 passed（新增 3 条）+ daemon-interactive 58 passed、tsc 0 错误；E2E 实机验证 agent_run_model_usage 行随后执行
 审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/lib/__tests__/use-agent-run-stream.test.ts, sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts, sillyhub-daemon/tests/interactive/cursor-driver.test.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts, sillyhub-daemon/tests/sillyspec-manager.test.ts
+
+## ql-20260910-004-db16 | 2026-09-10 03:55:23 | answered_by 透传链补全——读 DTO/409 details 携带实际答题人，前端 409 即时翻已答关闭态带人名（关闭他答人名缺失与 409 英文文案两限制）
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/daemon/permission_service.py, backend/app/modules/daemon/tests/test_session_permissions.py, frontend/src/components/group-chat/group-chat-panel.tsx, frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx

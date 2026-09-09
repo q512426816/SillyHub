@@ -261,7 +261,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     machineCandidates,
     sessions,
     isLoading: machinesLoading,
-  } = useDaemonMachines({ limit: 100 });
+  } = useDaemonMachines(
+    { limit: 100 },
+    // ql-20260910-002：轮询拆分（ql-20260909-013）漏传 includeSessions 致
+    // sessions 恒空——空门户「继续最近会话」入口消失 + D-005 默认机器第二级
+    // 回退失效。门户本就消费 sessions（recentSession / resolveDefaultMachineId），
+    // 与机器页同路拉取。
+    { includeSessions: true },
+  );
   // quick-a0458ac9：三处消费统一走融合候选（对齐 floating-session-host task-10 接法：
   // picker + 两处 SessionPanel；候选含共享机器的 runtimes，离线判定覆盖共享会话）。
   const pickerMachines = machineCandidates ?? machines;
@@ -926,6 +933,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                   onClick={() => {
                     setPreContext(null);
                     setSelectedSessionId(recentSession.id);
+                    // task-03（D-006 会话选中写入点·第七入口，ql-20260910-002
+                    // 补漏）：与列表 onSelect 同款行对象直取快照——不写则选中
+                    // 跨工作区会话后 selectedWorkspaceId 滞留旧值，📁 文件树
+                    // 串档；初始无选中时快照仍 null，📁 误置灰。
+                    setSelectedWorkspaceId(recentSession.workspace_id);
                     // ql-20260824-001：继续最近会话同样落 URL（刷新保持）。
                     syncSessionParam(recentSession.id);
                   }}

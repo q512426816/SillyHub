@@ -24,6 +24,7 @@ import {
   type MockInstance,
 } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import React from "react";
 
 import { useAgentRunStream } from "../use-agent-run-stream";
 
@@ -959,6 +960,48 @@ describe("useAgentRunStream — done / message", () => {
       });
     });
     expect(result.current.logs).toHaveLength(2);
+  });
+
+  it("ql-20260910-002 StrictMode double-invoke updater：实时消息去重副作用在 updater 外，不丢条目", async () => {
+    // 本项目 next.config.mjs 开 reactStrictMode（next dev 双调 setState updater）。
+    // 旧实现把 seenLogIdsRef.add 写在 updater 内：双调第二次命中首次已 add 的
+    // 集合误判重复 → 条目被丢且永久标记已见（session-log-assembler F7 同型）。
+    // 这里用 StrictMode wrapper 复现双调环境，锁「去重移出 updater」的修复。
+    installFetchMock(() => jsonResponse({ id: "run-1", session_id: null }));
+
+    const { result } = renderHook(
+      ({ workspaceId, runId, isActive }) =>
+        useAgentRunStream(workspaceId, runId, { isActive }),
+      {
+        wrapper: ({ children }: { children: React.ReactNode }) =>
+          React.createElement(React.StrictMode, null, children),
+        initialProps: {
+          workspaceId: "ws-1",
+          runId: "run-1",
+          isActive: true,
+        },
+      },
+    );
+
+    await waitFor(() => expect(currentFake).not.toBeNull());
+
+    for (let i = 1; i <= 3; i++) {
+      act(() => {
+        currentFake!.__emitMessage({
+          channel: "stdout",
+          content: `sm-line-${i}`,
+          timestamp: "2026-06-22T10:00:00Z",
+          log_id: `SM${i}`,
+        });
+      });
+    }
+    // 三条互异 log_id 的实时消息一条不丢。
+    expect(result.current.logs).toHaveLength(3);
+    expect(result.current.logs.map((l) => l.content_redacted)).toEqual([
+      "sm-line-1",
+      "sm-line-2",
+      "sm-line-3",
+    ]);
   });
 
   // task-13（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：SSE 转换层

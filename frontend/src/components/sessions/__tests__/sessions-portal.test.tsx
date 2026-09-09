@@ -267,7 +267,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
-  useDaemonMachines: () => mocks.machinesHook(),
+  // ql-20260910-002：透传 (params, opts)——includeSessions 断言需要看到调用参。
+  useDaemonMachines: (params: unknown, opts: unknown) =>
+    mocks.machinesHook(params, opts),
 }));
 
 vi.mock("@/lib/agent-profiles", async () => {
@@ -872,6 +874,55 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBeUndefined();
     // task-03：全局 scope 页头不挂 Git 状态条（CC-08：仅 workspace scope 挂载）
     expect(screen.queryByTestId("git-status-bar")).toBeNull();
+  });
+
+  it("ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照", async () => {
+    // 修复①（轮询拆分回归）：门户挂载必须传 includeSessions:true——漏传则
+    // hook sessions 恒 []，空门户「继续最近会话」入口消失（本用例后半段
+    // 直接依赖该入口的渲染，一并锁住）。
+    const recent = makeSession({
+      id: "s-recent",
+      title: "昨晚的调试会话",
+      workspace_id: "ws-9",
+    });
+    mocks.machinesHook.mockReturnValue({
+      items: [],
+      sharedToMe: [],
+      machineCandidates: [],
+      total: 0,
+      sessions: [recent],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPortal();
+    await waitFor(() => {
+      expect(mocks.machinesHook.mock.calls.length).toBeGreaterThan(0);
+    });
+    const calls = mocks.machinesHook.mock.calls as unknown as Array<
+      [unknown, { includeSessions?: boolean } | undefined]
+    >;
+    // 渲染树里 SessionListPanel 等也调该 hook（不带参，各自独立缓存）——断言
+    // 门户这一路带 includeSessions（some 即可，不约束他者）。
+    expect(calls.some(([, opts]) => opts?.includeSessions === true)).toBe(true);
+
+    // 修复②（D-006 第七入口）：入口渲染 + 直达选中 + 工作区快照。
+    const resumeBtn = await screen.findByRole("button", { name: /继续最近会话/ });
+    // 全局 scope 无选中：fileWorkspaceId=null → 左栏 📁 置灰。
+    expect(screen.getByTestId("sessions-left-files-toggle")).toBeDisabled();
+    fireEvent.click(resumeBtn);
+    // 直达选中：真会话面板挂载 + URL 落 ?session=。
+    await waitFor(() => {
+      expect(mocks.lastSessionPanelProps?.sessionId).toBe("s-recent");
+    });
+    expect(mocks.routerReplace).toHaveBeenCalledWith(
+      expect.stringContaining("session=s-recent"),
+      expect.anything(),
+    );
+    // 工作区快照补上：fileWorkspaceId 解析自 selectedWorkspaceId=ws-9 → 📁 恢复可点。
+    expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled();
   });
 
   it("workspace scope：列表走 listAgentSessions({limit, workspace_id})，标题「智能体会话 · 工作区」，空门户态 + defaultExpandedWorkspaceId 预展开传参（FR-06）", async () => {

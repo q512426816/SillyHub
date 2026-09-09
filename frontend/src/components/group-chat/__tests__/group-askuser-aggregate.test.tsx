@@ -560,6 +560,41 @@ describe("GroupChatPanel AskUser 聚合（task-11 / FR-05 / D-004@v2）", () => 
     ).toBeNull();
   });
 
+  it("成员拉取瞬时失败（ql-20260910-002）：已见 pending 卡不误转已答，快照维持开放态", async () => {
+    harness.logsJson = makePlainReplayLogs();
+    // 按 sid 确定性编排：sh-1 首轮有卡，第二轮起拉取失败（网络抖动/401）。
+    let failSh1 = false;
+    mocks.fetchPendingDialogs.mockImplementation(async (sid: string) => {
+      if (sid === "sh-1") {
+        if (failSh1) throw new Error("network blip");
+        return [makePendingDialog()];
+      }
+      return [];
+    });
+    renderPanel();
+    await waitForPanelReady();
+
+    await waitFor(() => {
+      expect(pendingCard("req-1")).toBeTruthy();
+    });
+    failSh1 = true;
+    // 下一拍轮询：sh-1 拉取失败——卡缺席是传输问题，不得误判「已答」转
+    // 关闭态（曾因此永久死路：resolvedDialogs 只增不减）。
+    await act(async () => {
+      await panelQc!.invalidateQueries({
+        queryKey: ["groupChat", "g-1", "askUserDialogs"],
+      });
+    });
+    await waitFor(() => {
+      expect(mocks.fetchPendingDialogs.mock.calls.length).toBeGreaterThanOrEqual(4);
+    });
+    await flushAsync();
+    const card = pendingCard("req-1");
+    expect(card.querySelector("article[data-answered='true']")).toBeNull();
+    // 快照维持开放态：提交入口仍在（群主仍可作答）。
+    expect(card.querySelector("button[title='提交回答']")).toBeTruthy();
+  });
+
   it("读侧 404（非群主视角）静默降级：无聚合卡、时间线正常渲染不崩", async () => {
     harness.logsJson = makePlainReplayLogs();
     // task-09 遗留：list_pending_dialogs 读侧 owner-only——非群主拉成员影子

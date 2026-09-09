@@ -38,8 +38,10 @@ class FakeRedis:
         self._check()
         return self.store.get(key)
 
-    async def set(self, key: str, value: str, ex: int | None = None) -> None:
+    async def set(self, key: str, value: str, ex: int | None = None, nx: bool = False) -> None:
         self._check()
+        if nx and key in self.store:
+            return
         self.store[key] = value
 
     async def incr(self, key: str) -> int:
@@ -179,3 +181,61 @@ async def test_location_dimensions_isolated(
     archive_set = await svc._resolve_pending_change_keys(ws, "archive")
     assert archive_set == set()
     assert await svc._resolve_pending_change_keys(ws, "active") == active_set
+
+
+async def test_set_reuses_read_time_epoch_no_poisoning(fake_redis: FakeRedis) -> None:
+    """ql-20260910-002：读侧捕获 epoch → 现算期间写入方 bump → 回填带旧 epoch。
+
+    set 若重读当前 epoch（旧实现），旧集合被盖上 bump 后的新值，下一位读者
+    校验通过 → 过期 pending 集最长存活 TTL 300s（中毒）。修复后条目按读时
+    epoch 盖章，下一位读者失配重算。
+    """
+    ws = uuid.uuid4()
+    # 播种 epoch 键（=0，无条目）后读侧捕获——读时未命中
+    fake_redis.store[f"change_pending_epoch:{ws}"] = "0"
+    epoch, cached = await pending_cache.get_cached_pending_keys(ws, None)
+    assert cached is None
+    assert epoch == 0
+
+    # 现算期间写入方 commit + bump（0 → 1），回填的集合是 bump 前的旧数据
+    await pending_cache.bump_pending_epoch(ws)
+    await pending_cache.set_cached_pending_keys(ws, None, {"stale-key"}, epoch=epoch)
+
+    # 下一位读者：条目 epoch 0 ≠ 当前 1 → 失配重算，无中毒
+    cur_epoch, cached2 = await pending_cache.get_cached_pending_keys(ws, None)
+    assert cached2 is None
+    assert cur_epoch == 1
+
+
+async def test_set_init_branch_does_not_roll_back_bumped_epoch(
+    fake_redis: FakeRedis,
+) -> None:
+    """ql-20260910-002：读时 epoch 键不存在（None）时回填走 NX 初始化。
+
+    若初始化用裸 SET 覆盖，会把现算期间写入方 INCR 出的 epoch 拉回 0——
+    已 stamp 0 的条目重新匹配（另一形态中毒）。NX 后条目 0 ≠ 当前 1，失配。
+    """
+    ws = uuid.uuid4()
+    epoch, cached = await pending_cache.get_cached_pending_keys(ws, None)
+    assert cached is None
+    assert epoch is None
+
+    # 现算期间写入方 bump（键 0→1），回填带 epoch=None 走初始化分支
+    await pending_cache.bump_pending_epoch(ws)
+    await pending_cache.set_cached_pending_keys(ws, None, {"stale-key"}, epoch=epoch)
+
+    # epoch 键不被拉回（仍 1）；条目 stamp 0 失配 → 下一位读者重算
+    assert fake_redis.store[f"change_pending_epoch:{ws}"] == "1"
+    cur_epoch, cached2 = await pending_cache.get_cached_pending_keys(ws, None)
+    assert cached2 is None
+    assert cur_epoch == 1
+
+
+async def test_read_hit_returns_same_epoch_roundtrip(fake_redis: FakeRedis) -> None:
+    """常规路径回归：无并发 bump 时读→写→读闭环命中（修复不破坏读穿）。"""
+    ws = uuid.uuid4()
+    epoch, _ = await pending_cache.get_cached_pending_keys(ws, None)
+    await pending_cache.set_cached_pending_keys(ws, None, {"a", "b"}, epoch=epoch)
+    cur_epoch, cached = await pending_cache.get_cached_pending_keys(ws, None)
+    assert cached == {"a", "b"}
+    assert cur_epoch == 0  # NX 初始化后的 0，条目同 0 匹配

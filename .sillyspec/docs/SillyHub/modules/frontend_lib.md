@@ -55,9 +55,9 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / permission / agent-profiles / custom-skills
   - spec 域：scan-docs / scan-docs-tree / spec-workspaces / knowledge / incidents / releases / health / git-identities / file/ / auth(+auth/ 子目录) / ppm/*（含 format / types / kanban）/ api/llm-providers（拆分客户端首例）
 - 取数 hooks：
-  - `use-agent-run-stream` — run 级 SSE 订阅（ql-20260909-019-4534：预取回放走 onMessagesBatch 整批一次 setLogs 追加——原逐条 emit 每条 O(n) 数组拷贝打开大 run 历史累计 O(n²)；log_id 去重改 seenLogIdsRef O(1) 查询——原 prev.some 每事件 O(n) 线性扫；两路径共享索引，effect 重跑/clear 时重置）
+  - `use-agent-run-stream` — run 级 SSE 订阅（ql-20260909-019-4534：预取回放走 onMessagesBatch 整批一次 setLogs 追加——原逐条 emit 每条 O(n) 数组拷贝打开大 run 历史累计 O(n²)；log_id 去重改 seenLogIdsRef O(1) 查询——原 prev.some 每事件 O(n) 线性扫；两路径共享索引，effect 重跑/clear 时重置；ql-20260910-002：onMessage 去重移出 setState updater——Set.add 副作用在 updater 内被 StrictMode 双调二次命中误判重复丢条目（session-log-assembler F7 同型），改「updater 外去重 + 纯追加」对齐批量路径）
   - `use-agent-runs` — Agent 运行列表 5s 条件轮询
-  - `use-daemon-machines` — 机器级列表，refetchInterval 15s；sessions（100 行级重列表）默认不拉、opts.includeSessions 才并发（ql-20260909-013-5c88：唯一消费方是机器页，其余挂载方 15s 白拉）——includeSessions 进 queryKey（daemonMachinesQueryKey 导出 helper，setQueryData 侧写必须同 key）
+  - `use-daemon-machines` — 机器级列表，refetchInterval 15s；sessions（100 行级重列表）默认不拉、opts.includeSessions 才并发（ql-20260909-013-5c88：其余挂载方 15s 白拉清零；ql-20260910-002：门户/悬浮宿主消费 sessions（继续最近会话/D-005 回退），拆分时漏传致入口消失——已补传 true，消费方=机器页+门户+悬浮宿主）——includeSessions 进 queryKey（daemonMachinesQueryKey 导出 helper，setQueryData 侧写必须同 key）
   - `use-session-tasks`（hooks/，2026-09-04-session-task-execution-panel）— 会话任务清单三链路：mount/sessionId 变化拉 `listSessionTasks` 快照（lib/daemon.ts 新函数，形态对齐 listSessionRuns，类型=api-types 生成 AgentSessionTaskRead）+applyEvent 按 task_id upsert 实时合并（复用 agent-task-store 归约，单元素数组过桥规避 slice(-6) 截断）+refreshSignal 重连对账重拉；纯 useState/useEffect 零 react-query（dialog 无 QueryClientProvider）；useNotify 经 ref 稳定化（其每渲染新对象会让 load useCallback 无限重拉——task-10 回归实证）；AgentSessionTaskView extends AgentTaskEntry 使 AgentTaskCard 零适配层直接渲染
   - `use-workspace-context` — 从 URL 重建工作区上下文写 workspace store
   - `agent-stream` — agent 事件流底层

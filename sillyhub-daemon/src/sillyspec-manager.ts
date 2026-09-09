@@ -655,8 +655,18 @@ export class SillySpecManager {
     // 映射未建立（空/未注入）回退 statusCwd 单槽位旧形态（legacy 字段语义不变）。
     const targets = this._statusTargets?.() ?? [];
     if (targets.length > 0) {
+      // ql-20260910-002：_statusError 是机器级单槽位，多目标下「后位成功清掉
+      // 前位失败」会掩蔽持续失败的工作区（心跳 sillyspec_status_error 恒 null、
+      // map 携带陈旧摘要）——改为轮内聚合：任一目标③失败即保留失败账，整轮
+      // 全成功才清（恢复语义不变：失败目标下一轮成功即参与全成功清空）。
+      let anyFailed = false;
       for (const t of targets) {
-        await this._collectOneTarget(t.workspaceId, t.rootPath);
+        const ok = await this._collectOneTarget(t.workspaceId, t.rootPath);
+        anyFailed = anyFailed || !ok;
+      }
+      if (!anyFailed) {
+        // 三态①成功：清失败状态（心跳 sillyspec_status_error 置 null，backend 清除）。
+        this._statusError = null;
       }
       // ql-20260909-002：目标集裁剪——daemon 侧 wsId→root 映射有 LRU 上限，被淘汰
       // 的 wsId 不再是采集目标，其摘要若滞留会随心跳 sillyspec_status_map 整包直发
@@ -677,18 +687,25 @@ export class SillySpecManager {
       this._log('debug', 'sillyspec_status_skip_no_root');
       return;
     }
-    await this._collectOneTarget(null, cwd);
+    // legacy 单槽位形态：①成功清失败（原 _collectOneTarget 内联语义不变）。
+    if (await this._collectOneTarget(null, cwd)) {
+      this._statusError = null;
+    }
   }
 
-  /** 单目标采集（原 collectStatusOnce 主体，参数化 workspaceId + cwd）。 */
+  /** 单目标采集（原 collectStatusOnce 主体，参数化 workspaceId + cwd）。
+   *
+   * 返回 false = 本目标记了一笔③瞬态失败（_recordStatusError 已落账）；true =
+   * ①成功或②能力缺失（②机器级终分级，自身已清失败状态与 map）。①成功的
+   * 失败状态清理由调用方按「整轮无③失败」聚合执行（见方法尾注）。 */
   private async _collectOneTarget(
     workspaceId: string | null,
     cwd: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const bin = this._resolveSillySpecBin();
     if (bin === null) {
       this._markStatusCapabilityMissing('bin_not_found', { cwd });
-      return;
+      return true;
     }
     let outcome: SillySpecProgressOutcome;
     try {
@@ -708,7 +725,7 @@ export class SillySpecManager {
         error: fmtErrorSnippet(e),
       });
       this._recordStatusError('runner_error', `error=${fmtErrorSnippet(e)}`);
-      return;
+      return false;
     }
     // 三态③：超时 / 非零退出 / spawn 其他错误 → 保留上次快照（不清除不上报 null），
     // 但失败状态经 sillyspec_status_error 上报（2026-09-08：区分「数据源查询失败」
@@ -719,12 +736,12 @@ export class SillySpecManager {
         timeout_ms: this._statusTimeoutMs,
       });
       this._recordStatusError('collect_timeout', `timeout_ms=${this._statusTimeoutMs}`);
-      return;
+      return false;
     }
     if (outcome.code === null) {
       if (outcome.errorCode === 'ENOENT') {
         this._markStatusCapabilityMissing('spawn_enoent', { cwd });
-        return;
+        return true;
       }
       this._log('warn', 'sillyspec_status_spawn_failed', {
         cwd,
@@ -734,7 +751,7 @@ export class SillySpecManager {
         'spawn_failed',
         `error_code=${outcome.errorCode ?? 'unknown'}`,
       );
-      return;
+      return false;
     }
     if (outcome.code !== 0) {
       this._log('warn', 'sillyspec_status_nonzero_exit', {
@@ -742,7 +759,7 @@ export class SillySpecManager {
         exit_code: outcome.code,
       });
       this._recordStatusError('nonzero_exit', `exit_code=${outcome.code}`);
-      return;
+      return false;
     }
     // 三态①/②分界：exit 0 后 stdout 必须是合法 JSON envelope；非 JSON=旧版本
     // 无 --json（人类可读输出）→ 能力缺失。
@@ -752,7 +769,7 @@ export class SillySpecManager {
       parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
     } catch {
       this._markStatusCapabilityMissing('bad_json', { cwd });
-      return;
+      return true;
     }
     const summary = buildSillySpecStatusSummary(parsed);
     // 2026-09-07-conflict-diff-compare task-02：心跳补报——buildSillySpecStatusSummary
@@ -765,8 +782,9 @@ export class SillySpecManager {
     if (workspaceId !== null) {
       this._statusSummariesByWs.set(workspaceId, summary);
     }
-    // 三态①成功：清失败状态（心跳 sillyspec_status_error 置 null，backend 清除）。
-    this._statusError = null;
+    // 三态①成功的失败状态清理由调用方 collectStatusOnce 轮内聚合（ql-20260910-002：
+    // _statusError 是机器级单槽位，此处直接清会被同轮后位目标的③失败→前位失败
+    // 掩蔽反序（后位成功清掉前位失败）——单槽位只在整轮无③失败时才清）。
     this._log('debug', 'sillyspec_status_collected', {
       cwd,
       workspace_id: workspaceId ?? undefined,
@@ -774,6 +792,7 @@ export class SillySpecManager {
       ghost_count: summary.ghost_count,
       conflict_count: summary.conflict_count,
     });
+    return true;
   }
 
   /**

@@ -2371,7 +2371,7 @@ class ChangeService:
         回填。epoch 失效挂在四个数据写入点 commit 后（progress 推送 / 平台删除 /
         归档投影 / reparse），Redis 不可用回退现算（零行为变化）。
         """
-        cached = await get_cached_pending_keys(workspace_id, location)
+        cached_epoch, cached = await get_cached_pending_keys(workspace_id, location)
         if cached is not None:
             return cached
         stmt = select(Change.change_key).where(col(Change.workspace_id) == workspace_id)
@@ -2394,7 +2394,9 @@ class ChangeService:
             stage, completed, _, _ = info
             if StageProjectionService._map(stage, completed) is not None:
                 pending.add(k)
-        await set_cached_pending_keys(workspace_id, location, pending)
+        # 回填复用读时 epoch（ql-20260910-002）：set 侧重读会把现算期间写入方
+        # bump 的新 epoch 盖到旧集合上（中毒缓存直至 TTL）。
+        await set_cached_pending_keys(workspace_id, location, pending, epoch=cached_epoch)
         return pending
 
     async def _project_current_stage(

@@ -13,9 +13,11 @@ workspace 全部 change 的 ``latest_progress`` 肥 JSON（serializeForSync 六�
 - best-effort：Redis 不可用一律返回 None / 静默吞异常，调用方回退现算
   （与 permission_cache 降级范式同款，零行为变化）。
 
-epoch 竞态：读侧先取 epoch 再查 DB——若中途写入方 commit+bump，条目带旧
-epoch 落缓存，下一位读者 epoch 不匹配即重算，无长期脏缓存；bump 必须在
-数据 commit **之后**调用（写入方约定），保证「epoch 已新 ⇒ 数据已新」。
+epoch 竞态：读侧先取 epoch 再查 DB，回填（set）**复用读时捕获的 epoch**——
+若中途写入方 commit+bump，条目带旧 epoch 落缓存，下一位读者 epoch 不匹配即
+重算，无长期脏缓存；bump 必须在数据 commit **之后**调用（写入方约定），
+保证「epoch 已新 ⇒ 数据已新」。set 决不重读当前 epoch：DB 现算之后才读会把
+旧集合配上新 epoch 盖章（中毒缓存直至 TTL），恰是上述不变量要防的反例。
 """
 
 from __future__ import annotations
@@ -62,41 +64,61 @@ async def bump_pending_epoch(workspace_id: uuid.UUID | None) -> None:
         )
 
 
-async def get_cached_pending_keys(workspace_id: uuid.UUID, location: str | None) -> set[str] | None:
-    """命中（epoch 匹配）返回缓存集；未命中/Redis 不可用返回 None（回退现算）。"""
+async def get_cached_pending_keys(
+    workspace_id: uuid.UUID, location: str | None
+) -> tuple[int | None, set[str] | None]:
+    """读侧入口：返回（读时 epoch, 命中集）。
+
+    - 命中 → ``(epoch, keys)``；未命中 → ``(epoch, None)``；Redis 不可用 /
+      epoch 键不存在 → ``(None, None)``（调用方回退现算）。
+    - 读时 epoch 必须透传给 ``set_cached_pending_keys`` 盖章（见模块 docstring
+      的 epoch 竞态段）——set 侧不再重读，防「现算后写入方 bump」的中毒窗口。
+    """
     try:
         redis = get_redis()
         epoch = await redis.get(_epoch_key(workspace_id))
         if epoch is None:
-            return None
+            return None, None
+        epoch_int = int(epoch)
         raw = await redis.get(_set_key(workspace_id, location))
         if raw is None:
-            return None
+            return epoch_int, None
         payload = json.loads(raw)
-        if not isinstance(payload, dict) or payload.get("epoch") != int(epoch):
-            return None
+        if not isinstance(payload, dict) or payload.get("epoch") != epoch_int:
+            return epoch_int, None
         keys = payload.get("keys")
         if not isinstance(keys, list):
-            return None
-        return {k for k in keys if isinstance(k, str)}
+            return epoch_int, None
+        return epoch_int, {k for k in keys if isinstance(k, str)}
     except Exception:
-        return None
+        return None, None
 
 
 async def set_cached_pending_keys(
-    workspace_id: uuid.UUID, location: str | None, keys: set[str]
+    workspace_id: uuid.UUID,
+    location: str | None,
+    keys: set[str],
+    *,
+    epoch: int | None = None,
 ) -> None:
-    """写入缓存条目（带当前 epoch；best-effort）。"""
+    """写入缓存条目（best-effort）。
+
+    ``epoch`` 传 :func:`get_cached_pending_keys` 返回的**读时值**——条目按它
+    盖章，本函数不重读当前 epoch（重读会把现算期间写入方 bump 后的新 epoch
+    盖到旧数据上，中毒缓存直至 TTL）。``epoch=None``（读时键不存在，或未传）
+    才走键缺失初始化分支：NX 初始化为 0——不用裸 SET 覆盖，防把期间他人
+    INCR 出的 epoch 拉回 0 使已盖章 0 的旧条目重新匹配；条目仍 stamp 0，
+    期间若有 bump 则 0 ≠ 当前值，下一位读者失配重算。
+    """
     try:
         redis = get_redis()
-        epoch = await redis.get(_epoch_key(workspace_id))
         if epoch is None:
-            # 尚无任何 bump（无写入过）：初始化为 0 并设 TTL，条目落同 epoch。
-            # 用 SET 而非 INCR——INCR 会把键置 1 而条目存 0，首次写入即自失配
-            # （读侧恒 miss，缓存形同虚设）。并发双初始化最坏互相覆盖回 0，
-            # 已有条目 epoch 不匹配 → 多一次重算，无害。
-            await redis.set(_epoch_key(workspace_id), "0", ex=_PENDING_EPOCH_TTL_SECONDS)
-            epoch = "0"
+            # 读时 epoch 键不存在：NX 初始化为 0——不覆盖期间他人的 INCR
+            # （覆盖会把 epoch 拉回 0，使已 stamp 0 的旧条目重新匹配）。
+            # 条目 stamp 0：期间若有 bump 则 0 ≠ 当前值，下一位读者失配重算。
+            # 本函数任何路径都不读当前 epoch（读了就是把新 epoch 盖到旧数据上）。
+            await redis.set(_epoch_key(workspace_id), "0", ex=_PENDING_EPOCH_TTL_SECONDS, nx=True)
+            epoch = 0
         payload = json.dumps({"epoch": int(epoch), "keys": sorted(keys)})
         await redis.set(_set_key(workspace_id, location), payload, ex=_PENDING_SET_TTL_SECONDS)
     except Exception as exc:

@@ -247,16 +247,18 @@ export function useAgentRunStream(
     });
 
     // (b) message：log 追加（按 log_id 去重；client 已去重，hook 侧再保险——
-    // ql-20260909-019：prev.some O(n) 线性扫改 seenLogIdsRef O(1) 查询）
+    // ql-20260909-019：prev.some O(n) 线性扫改 seenLogIdsRef O(1) 查询）。
+    // ql-20260910-002：去重移出 setState updater——updater 必须纯：Set.add
+    // 副作用在 updater 内会被 StrictMode（本项目已开）double-invoke 二次命中
+    // 误判重复而丢条目（session-log-assembler F7 同型事故），对齐批量路径
+    // onMessagesBatch 的「updater 外去重 + 纯追加」写法。
     client.onMessage((event) => {
       if (cancelled) return;
-      setLogs((prev) => {
-        if (event.log_id != null) {
-          if (seenLogIdsRef.current.has(event.log_id)) return prev;
-          seenLogIdsRef.current.add(event.log_id);
-        }
-        return [...prev, toEntry(event)];
-      });
+      if (event.log_id != null) {
+        if (seenLogIdsRef.current.has(event.log_id)) return;
+        seenLogIdsRef.current.add(event.log_id);
+      }
+      setLogs((prev) => [...prev, toEntry(event)]);
     });
 
     // (c) permission_request：perms 增（按 request_id 去重，FR-04）

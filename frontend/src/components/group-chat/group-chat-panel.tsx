@@ -1928,20 +1928,36 @@ export function GroupChatPanel({
     // 已答感知（拉取列表不再含该 request）都由该节拍兜。
     refetchInterval: GROUP_ASKUSER_POLL_MS,
     retry: false,
-    queryFn: async (): Promise<GroupAskUserDialogItem[]> => {
+    queryFn: async (): Promise<{
+      items: GroupAskUserDialogItem[];
+      /** 本轮拉取失败的成员影子会话（ql-20260910-002：缺席 ≠ 已答）。 */
+      failedShadowSessionIds: Set<string>;
+    }> => {
       const results = await Promise.all(
         askUserMembers.map(async (member) => {
           try {
             const requests = await fetchPendingDialogs(member.shadow_session_id!);
-            return requests.map((request) => ({ member, request }));
+            return {
+              failed: false,
+              items: requests.map((request) => ({ member, request })),
+            };
           } catch {
-            // 404（读侧 owner-only，task-09 遗留）/ 网络抖动：静默降级——
-            // 该成员本轮无卡可显，不阻断其余成员聚合。
-            return [];
+            // 404（读侧 owner-only，task-09 遗留）/ 网络抖动：静默降级——该
+            // 成员本轮无卡可显，不阻断其余成员聚合。但失败必须与「确实无卡」
+            // 区分（ql-20260910-002）：不区分会把拉取失败误判成已答，pending
+            // 卡被永久转关闭态且不可恢复（resolvedDialogs 只增不减）。
+            return { failed: true, items: [] as GroupAskUserDialogItem[] };
           }
         }),
       );
-      return results.flat();
+      return {
+        items: results.flatMap((r) => r.items),
+        failedShadowSessionIds: new Set(
+          askUserMembers
+            .filter((_, i) => results[i]!.failed)
+            .map((m) => m.shadow_session_id!),
+        ),
+      };
     },
   });
   /* 先到先得关闭态（幂等，R-03 前端不新增锁）：
@@ -1956,8 +1972,9 @@ export function GroupChatPanel({
   >({});
   const knownDialogsRef = useRef<Map<string, GroupAskUserDialogItem>>(new Map());
   useEffect(() => {
-    const items = memberDialogsQ.data;
-    if (!items) return;
+    const data = memberDialogsQ.data;
+    if (!data) return;
+    const { items, failedShadowSessionIds } = data;
     for (const item of items) {
       knownDialogsRef.current.set(item.request.request_id, item);
     }
@@ -1966,6 +1983,15 @@ export function GroupChatPanel({
       for (const id of knownDialogsRef.current.keys()) {
         if (prev[id]) continue;
         if (items.some((it) => it.request.request_id === id)) continue;
+        // 拉取失败 ≠ 已答（ql-20260910-002）：成员本轮 fetch 失败时其卡缺席是
+        // 传输问题，不收口（askUserDialogCards 用快照维持开放态，恢复自愈）。
+        const known = knownDialogsRef.current.get(id);
+        if (
+          known?.member.shadow_session_id != null &&
+          failedShadowSessionIds.has(known.member.shadow_session_id)
+        ) {
+          continue;
+        }
         // 先到先得：本面板见过的 pending 卡在最新拉取中消失（best-effort——
         // 已答 / 极少数孤儿清理不可区分，展示层按已答收口）。
         next = next ?? { ...prev };
@@ -1999,7 +2025,9 @@ export function GroupChatPanel({
   );
   /** 渲染卡列表 = 开放态（最新拉取）+ 关闭态（已答快照，含本端提交与他端先答）。 */
   const askUserDialogCards = useMemo(() => {
-    const openItems = memberDialogsQ.data ?? [];
+    const data = memberDialogsQ.data;
+    const openItems = data?.items ?? [];
+    const failedShadowSessionIds = data?.failedShadowSessionIds;
     const openIds = new Set(openItems.map((it) => it.request.request_id));
     const cards: Array<GroupAskUserDialogItem & { resolved?: GroupAskUserResolved }> =
       openItems.map((it) => ({
@@ -2010,6 +2038,18 @@ export function GroupChatPanel({
       if (openIds.has(id)) continue;
       const known = knownDialogsRef.current.get(id);
       if (known) cards.push({ ...known, resolved });
+    }
+    // 拉取失败成员的已见卡（ql-20260910-002）：不收口也不隐藏——用
+    // knownDialogsRef 最后快照维持开放态渲染（下一轮成功即回真值；期间提交
+    // 若命中他端已答得 409 自愈，卡内既有幂等处理）。
+    if (failedShadowSessionIds) {
+      for (const [id, known] of knownDialogsRef.current) {
+        if (openIds.has(id) || resolvedDialogs[id]) continue;
+        const sid = known.member.shadow_session_id;
+        if (sid != null && failedShadowSessionIds.has(sid)) {
+          cards.push({ ...known });
+        }
+      }
     }
     return cards;
   }, [memberDialogsQ.data, resolvedDialogs]);

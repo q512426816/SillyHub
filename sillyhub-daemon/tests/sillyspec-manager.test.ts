@@ -791,6 +791,10 @@ function makeStatusHarness(
     timeoutMs?: number;
     outcome?: SillySpecProgressOutcome;
     stdout?: string;
+    /** 多目标采集注入（ql-20260910-002：单槽位失败掩蔽用例）。 */
+    targets?: Array<{ workspaceId: string | null; rootPath: string }>;
+    /** 按 cwd 区分的 outcome（多目标下「一失败一成功」场景编程）。 */
+    outcomeByCwd?: Record<string, SillySpecProgressOutcome>;
   } = {},
 ) {
   const events: string[] = [];
@@ -811,6 +815,8 @@ function makeStatusHarness(
       options: { cwd: string; timeoutMs: number; maxBufferBytes: number },
     ): Promise<SillySpecProgressOutcome> => {
       calls.push({ file, args, options });
+      const perCwd = opts.outcomeByCwd?.[options.cwd];
+      if (perCwd !== undefined) return perCwd;
       if (opts.outcome !== undefined) return opts.outcome;
       return { code: 0, stdout: opts.stdout ?? JSON.stringify(ENVELOPE_OK), timedOut: false };
     },
@@ -825,6 +831,7 @@ function makeStatusHarness(
     resolveSillySpecBin: () => bin,
     statusCwd: () => cwd,
     statusTimeoutMs: opts.timeoutMs ?? 5,
+    statusTargets: opts.targets ? () => opts.targets! : undefined,
   });
   return {
     manager,
@@ -834,6 +841,10 @@ function makeStatusHarness(
     /** 翻转下一拍 outcome（三态流转 ①→③ 序列用）。 */
     setOutcome: (o: SillySpecProgressOutcome) => {
       opts.outcome = o;
+    },
+    /** 清/改按 cwd outcome（传 {} 清空覆盖 → 全目标回默认①成功）。 */
+    setOutcomeByCwd: (m: Record<string, SillySpecProgressOutcome>) => {
+      opts.outcomeByCwd = m;
     },
   };
 }
@@ -997,6 +1008,48 @@ describe('2026-09-08 三态③失败状态：getStatusError 记账与清除', ()
     h.setOutcome({ code: null, stdout: '', timedOut: false, errorCode: 'E'.repeat(500) });
     await h.manager.collectStatusOnce();
     expect(h.manager.getStatusError()?.detail.length).toBe(200);
+  });
+});
+
+// ── ql-20260910-002：多目标③失败不被同轮①成功掩蔽（机器级单槽位轮内聚合）───────
+
+describe('ql-20260910-002 多目标采集：单槽位失败状态轮内聚合', () => {
+  const T1 = { workspaceId: 'ws-1', rootPath: 'C:\\repo\\ws-one' };
+  const T2 = { workspaceId: 'ws-2', rootPath: 'C:\\repo\\ws-two' };
+
+  it('前位目标③失败 + 后位目标①成功 → 失败保留（后位成功不掩蔽前位失败）', async () => {
+    const h = makeStatusHarness({
+      targets: [T1, T2],
+      outcomeByCwd: { [T1.rootPath]: { code: 1, stdout: '', timedOut: false } },
+    });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()?.reason).toBe('nonzero_exit');
+    // 成功目标 map 槽位照常更新；失败目标缺席（无旧值即无槽位）。
+    expect(Object.keys(h.manager.getStatusMapSnapshot()!)).toEqual(['ws-2']);
+  });
+
+  it('后位目标③失败同样保留；整轮全①成功才清空（失败目标恢复即自愈）', async () => {
+    const h = makeStatusHarness({
+      targets: [T1, T2],
+      outcomeByCwd: { [T2.rootPath]: { code: null, stdout: '', timedOut: true } },
+    });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()?.reason).toBe('collect_timeout');
+
+    // 两目标都恢复①成功 → 整轮无③失败 → 清空。
+    h.setOutcomeByCwd({});
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).toBeNull();
+  });
+
+  it('legacy 单目标形态：①成功清失败（原内联语义回归保护）', async () => {
+    const h = makeStatusHarness();
+    h.setOutcome({ code: 1, stdout: '', timedOut: false });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).not.toBeNull();
+    h.setOutcome({ code: 0, stdout: JSON.stringify(ENVELOPE_OK), timedOut: false });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).toBeNull();
   });
 });
 
