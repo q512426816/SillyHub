@@ -38,7 +38,7 @@ def fast_throttle(monkeypatch: pytest.MonkeyPatch) -> float:
 
 async def _trigger(ws: uuid.UUID, change_dir: str) -> None:
     """走调度入口（scope 命中 changes/ 前缀）。"""
-    await SpecWorkspaceService(None)._trigger_change_reparse(  # type: ignore[arg-type]
+    await SpecWorkspaceService(None)._trigger_change_reparse(
         ws,
         [change_dir],
         [],
@@ -50,7 +50,7 @@ async def test_first_trigger_runs_once_and_throttle_skips(
 ) -> None:
     calls: list[tuple[uuid.UUID, list[str] | None]] = []
 
-    async def fake_reparse(self, workspace_id, scope=None):  # type: ignore[no-untyped-def]
+    async def fake_reparse(self, workspace_id, scope=None):
         calls.append((workspace_id, scope))
         return {"parsed": 0}, None
 
@@ -81,7 +81,7 @@ async def test_single_flight_skips_while_inflight(
     release = asyncio.Event()
     calls: list[uuid.UUID] = []
 
-    async def slow_reparse(self, workspace_id, scope=None):  # type: ignore[no-untyped-def]
+    async def slow_reparse(self, workspace_id, scope=None):
         calls.append(workspace_id)
         started.set()
         await release.wait()  # 挂住模拟长跑
@@ -108,7 +108,7 @@ async def test_workspaces_isolated(
 ) -> None:
     calls: list[uuid.UUID] = []
 
-    async def fake_reparse(self, workspace_id, scope=None):  # type: ignore[no-untyped-def]
+    async def fake_reparse(self, workspace_id, scope=None):
         calls.append(workspace_id)
         return {"parsed": 0}, None
 

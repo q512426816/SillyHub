@@ -94,7 +94,7 @@ async def test_read_through_cache_hits_on_second_call(
     calls = {"n": 0}
     orig = ChangeService._project_current_stage
 
-    async def counting(self, pairs):  # type: ignore[no-untyped-def]
+    async def counting(self, pairs):
         calls["n"] += 1
         return await orig(self, pairs)
 
