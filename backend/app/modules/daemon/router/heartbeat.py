@@ -238,16 +238,12 @@ class DaemonHeartbeatRequest(BaseModel):
     # sillyspec_status（None=清除）：daemon 采集三态③持续失败期间每跳携带对象
     # （{reason, detail, since}），恢复成功后携带 null 清除。旧 daemon 无该键
     # 心跳照常通过（default=None，兼容）。
-    sillyspec_status_error: DaemonHeartbeatSillySpecStatusError | None = Field(
-        default=None
-    )
+    sillyspec_status_error: DaemonHeartbeatSillySpecStatusError | None = Field(default=None)
     # 工作区级总览 map（2026-09-08 总览工作区级化）：{wsId: 摘要}，值复用
     # DaemonHeartbeatSillySpecStatus 同形校验（嵌套宽松，心跳通道宁宽勿断）。
     # 键不出现=daemon 未启用工作区级采集（保留旧值，旧 daemon 兼容）；对象
-    #（含空）整包直写。register 恒清。
-    sillyspec_status_map: dict[str, DaemonHeartbeatSillySpecStatus] | None = Field(
-        default=None
-    )
+    # （含空）整包直写。register 恒清。
+    sillyspec_status_map: dict[str, DaemonHeartbeatSillySpecStatus] | None = Field(default=None)
     # sillyspec 命令执行结果槽（2026-09-04-conflict-resolve-entry FR-05 /
     # D-004@v1）——语义同 sillyspec_update / sillyspec_status（None=清除）：键不
     # 出现即置 NULL（daemon 终态窗口过期后停发该键，无需显式 null，X-04 两态）；
@@ -356,10 +352,7 @@ async def daemon_heartbeat(
         # 的 None=清除 刻意不同——map 无清除终态，register 恒清收敛）。值逐项
         # model_dump 保形。
         sillyspec_status_map=(
-            {
-                ws: item.model_dump()
-                for ws, item in (data.sillyspec_status_map or {}).items()
-            }
+            {ws: item.model_dump() for ws, item in (data.sillyspec_status_map or {}).items()}
             if data.sillyspec_status_map is not None
             else None
         ),
