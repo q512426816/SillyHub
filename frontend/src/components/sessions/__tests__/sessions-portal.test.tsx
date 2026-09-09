@@ -63,6 +63,7 @@ import {
   fireEvent,
   waitFor,
   act,
+  createEvent,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -2363,6 +2364,46 @@ describe("SessionsPortal 文件预览列开关（task-03 FR-03）", () => {
     );
     expect(screen.queryByTestId("sessions-file-preview-resizer")).toBeNull();
     expect(screen.getByTestId("file-explorer-stub")).toBeInTheDocument();
+  });
+
+  // ql-20260909-007：右列把手在列左缘——拖拽方向镜像（拖左增宽、拖右收窄），
+  // 原复用左栏语义方向反了（用户实测反馈）。jsdom 无 PointerEvent，createEvent
+  // 补坐标派发（先例 explorer-page.test.tsx firePointer）。
+  it("右把手拖拽方向镜像：拖左 +120px 增宽、拖右收窄；键盘 ← 增宽 → 收窄", async () => {
+    renderPortal(WORKSPACE_SCOPE);
+    clickFilesToggle();
+    await stubPickFile();
+    const col = await screen.findByTestId("sessions-file-preview-column");
+    const grip = screen.getByTestId("sessions-file-preview-resizer");
+    expect(col.style.width).toBe("480px");
+
+    const firePointer = (
+      el: Element | Window,
+      name: "pointerDown" | "pointerMove" | "pointerUp",
+      clientX = 0,
+    ) => {
+      const ev = createEvent[name](el as Element, { clientX });
+      Object.defineProperty(ev, "clientX", { value: clientX });
+      fireEvent(el, ev);
+    };
+
+    // 拖左（clientX 减小）→ 列增宽 480 + 120 = 600。
+    firePointer(grip, "pointerDown", 1000);
+    firePointer(window, "pointerMove", 880);
+    firePointer(window, "pointerUp", 0);
+    expect(col.style.width).toBe("600px");
+
+    // 拖右（clientX 增大）→ 列收窄 600 - 150 = 450。
+    firePointer(grip, "pointerDown", 900);
+    firePointer(window, "pointerMove", 1050);
+    firePointer(window, "pointerUp", 0);
+    expect(col.style.width).toBe("450px");
+
+    // 键盘镜像：← 增宽 +16；→ 收窄 -16。
+    fireEvent.keyDown(grip, { key: "ArrowLeft" });
+    expect(col.style.width).toBe("466px");
+    fireEvent.keyDown(grip, { key: "ArrowRight" });
+    expect(col.style.width).toBe("450px");
   });
 });
 

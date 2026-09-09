@@ -70,7 +70,10 @@ export function usePanelWidth(options: PanelWidthOptions): [number, (_w: number)
 }
 
 /** 夹持把手：左右拖调宽、双击复位默认、←/→ 键微调。
- *  width/onWidthChange 一般接 usePanelWidth 的返回值。 */
+ *  width/onWidthChange 一般接 usePanelWidth 的返回值。
+ *  ql-20260909-007：side 镜像语义——left（默认）= 把手在栏右缘，拖右增宽（explorer/
+ *  scan-docs/会话左栏既有形态零变化）；right = 把手在栏左缘（如三分屏右列预览），
+ *  拖拽增量与方向键取反：拖左增宽、拖右收窄、← 键增宽、→ 键收窄。 */
 export function PanelResizer({
   width,
   onWidthChange,
@@ -79,6 +82,7 @@ export function PanelResizer({
   maxWidth = 640,
   ariaLabel,
   testId,
+  side = "left",
 }: {
   width: number;
   onWidthChange: (_w: number) => void;
@@ -89,6 +93,8 @@ export function PanelResizer({
   ariaLabel: string;
   /** 测试定位 testid。 */
   testId?: string;
+  /** 把手所在栏缘：left=右缘（拖右增宽，默认）；right=左缘（拖左增宽）。 */
+  side?: "left" | "right";
 }) {
   /** 拖拽中锚点 {按下时指针 x, 按下时栏宽}；null = 未在拖拽。 */
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -97,12 +103,19 @@ export function PanelResizer({
   useEffect(() => {
     onChangeRef.current = onWidthChange;
   }, [onWidthChange]);
+  /** side 变化不影响拖拽数学（读值即时），但箭头键与增量取反需最新值——经 ref 取。 */
+  const sideRef = useRef(side);
+  useEffect(() => {
+    sideRef.current = side;
+  }, [side]);
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const st = dragRef.current;
       if (!st) return;
-      onChangeRef.current(clampWidth(st.startW + e.clientX - st.startX, minWidth, maxWidth));
+      const delta = e.clientX - st.startX;
+      const signed = sideRef.current === "right" ? -delta : delta;
+      onChangeRef.current(clampWidth(st.startW + signed, minWidth, maxWidth));
     };
     const onUp = () => {
       if (!dragRef.current) return;
@@ -136,8 +149,11 @@ export function PanelResizer({
       }}
       onDoubleClick={() => onWidthChange(defaultWidth)}
       onKeyDown={(e) => {
-        if (e.key === "ArrowLeft") onWidthChange(clampWidth(width - KEYBOARD_STEP_PX, minWidth, maxWidth));
-        else if (e.key === "ArrowRight") onWidthChange(clampWidth(width + KEYBOARD_STEP_PX, minWidth, maxWidth));
+        // side=right 时方向键对调（拖拽镜像同口径：← 增宽、→ 收窄）。
+        const widenKey = sideRef.current === "right" ? "ArrowLeft" : "ArrowRight";
+        const narrowKey = sideRef.current === "right" ? "ArrowRight" : "ArrowLeft";
+        if (e.key === widenKey) onWidthChange(clampWidth(width + KEYBOARD_STEP_PX, minWidth, maxWidth));
+        else if (e.key === narrowKey) onWidthChange(clampWidth(width - KEYBOARD_STEP_PX, minWidth, maxWidth));
       }}
     />
   );

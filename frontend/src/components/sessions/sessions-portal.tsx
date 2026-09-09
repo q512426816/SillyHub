@@ -955,6 +955,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
               maxWidth={SESSIONS_FILE_PREVIEW_WIDTH_MAX}
               ariaLabel="调整文件预览宽度"
               testId="sessions-file-preview-resizer"
+              // ql-20260909-007：把手在预览列左缘——side=right 镜像（拖左增宽、
+              // 拖右收窄），原复用左栏语义方向反了（用户实测反馈）。
+              side="right"
             />
             <div
               className="min-w-0 shrink-0"
