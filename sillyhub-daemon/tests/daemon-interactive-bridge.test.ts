@@ -829,6 +829,37 @@ describe('task-06：onTurnResult model_usage 拆行 + api_requests 计数', () =
     expect(sonnet.api_requests + haiku.api_requests).toBe(payload.api_requests as number);
   });
 
+  it('ql-20260910-003：usage-only 空事件（type=text + content=""）不计入 api_requests', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    // 事件轨形态（event_type+type+seq 平铺）：2 条真实 assistant 文本 + 3 条
+    // usage_update 空事件（pi turn_end / codex tokenUsage 在途快照同款）→ 计 2。
+    const textEv = (seq: number, content: string, extra: Record<string, unknown> = {}) =>
+      ({ event_type: 'text', type: 'text', content, seq, ...extra }) as unknown as SDKMessage;
+    await daemon.onTurnMessage('sess-1', 'run-1', textEv(1, '先查一下'));
+    await daemon.onTurnMessage('sess-1', 'run-1', textEv(2, '', { usage: { input_tokens: 100 }, metadata: { status: 'usage_update' } }));
+    await daemon.onTurnMessage('sess-1', 'run-1', textEv(3, '', { usage: { input_tokens: 200 }, metadata: { status: 'usage_update' } }));
+    await daemon.onTurnMessage('sess-1', 'run-1', textEv(4, '查完了'));
+    await daemon.onTurnMessage('sess-1', 'run-1', textEv(5, '', { usage: { input_tokens: 350 }, metadata: { status: 'usage_update' } }));
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      modelUsage: {
+        'glm-5.3': { inputTokens: 350, outputTokens: 60, cacheReadInputTokens: 5000, cacheCreationInputTokens: 0 },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    // 修复前：3 条空事件误计 → 5；修复后：2（真实 assistant 消息数）
+    expect(payload.api_requests).toBe(2);
+  });
+
   it('分摊残差补给最大消耗行（四舍五入不均时 Σ行仍 == api_requests）', async () => {
     const { daemon, client } = buildDaemon();
     daemons.push(daemon);

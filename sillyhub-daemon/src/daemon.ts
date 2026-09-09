@@ -3992,8 +3992,15 @@ export class Daemon {
     // 天然计入；partial flush 不计）——legacy 开关两态同计（开关只切上报形态，
     // 不改本地统计口径）。旧 SDK 形态（type==='assistant'，测试替身）兜底保留；
     // Codex flat（event_type 无 type）不计——其 driver 本就无 modelUsage，口径自洽。
+    // ql-20260910-003：usage-only 空事件（type=text + content=''，pi turn_end /
+    // codex tokenUsage 在途快照 / claude flush 桶）不是 assistant 消息，排除——
+    // 实证 codex 3 调用被记 6（3 条 usage_update 误计）、pi 2 调用记 3。
     if (isAgentEventDict) {
-      if (fwdMsg['type'] === 'text' && fwdMsg['is_partial'] !== true) {
+      if (
+        fwdMsg['type'] === 'text' &&
+        fwdMsg['is_partial'] !== true &&
+        fwdMsg['content'] !== ''
+      ) {
         this._assistantMsgCountByRun.set(
           runId,
           (this._assistantMsgCountByRun.get(runId) ?? 0) + 1,
