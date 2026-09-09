@@ -439,7 +439,41 @@
 方案：pending_cache.py read-through 缓存+四处 commit 后 epoch bump+TTL 兜底+降级回退
 结果：4 用例全绿；change 域 504+platform_sync 213 passed；ruff/mypy 0 错；已提交
 
-## ql-20260909-018-ca2e | 2026-09-09 13:57:29 | patrol 巡检 N+1 批量化——run→lease→runtime→daemon 三段链路逐 run 3 查询改批量 IN 预取
+## ql-20260909-018-ca2e | 2026-09-09 13:57:29 | patrol 巡检 N+1 批量化
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/patrol.py（bulk+三循环）
+- backend/app/modules/agent/tests/test_patrol.py（3 用例）
+需求：patrol 巡检 N+1 批量化
+根因：三循环逐 run 3 次往返+复活段逐 run get mission
+方案：_resolve_run_daemons_bulk 三段各一次 IN+三循环批量+mission 批量
+结果：一致性 3 用例；test_patrol 54 passed；ruff/mypy 0 错；已提交 490556fc0
+
+## ql-20260909-019-4534 | 2026-09-09 14:04:46 | Agent Run 日志流管线优化——预取回放批量化+hook O(1) 去重
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/agent-stream.ts（_emitMessages+onMessagesBatch）
+- frontend/src/lib/use-agent-run-stream.ts（批量+O(1)）
+- frontend/src/lib/__tests__/use-agent-run-stream.test.ts（TC-21/22）
+需求：Agent Run 日志流管线优化——预取回放批量化+hook O(1) 去重
+根因：预取逐条 emit 每条 O(n) 拷贝累计 O(n²)；prev.some 每事件 O(n) 扫
+方案：client _emitMessages 整批+onMessagesBatch；hook 批量一次 setLogs+seenLogIdsRef O(1) 去重
+结果：30 passed（28 既有+2 新增）；panel 14 passed；tsc/lint 0 错；已提交 f1388b156
+
+## ql-20260909-020-8cf4 | 2026-09-09 14:12:14 | run 级 SSE 中继两处补 signal 透传+禁压缩缓冲
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/api/daemon-chat/[runId]/stream/route.ts（fetch 三参数）
+- frontend/src/app/api/workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts（同型）
+需求：run 级 SSE 中继两处补 signal 透传+禁压缩缓冲
+根因：上游流悬挂+undici 解压缓冲攒帧
+方案：对齐 sessions 标准写法三参数
+结果：tsc/lint 0 错；已提交 e4dc21a00
+
+## ql-20260909-021-4e19 | 2026-09-09 15:10:22 | reparse 根治三件套——push 路径摘出同步 await+120s 节流+尾随补发+single-flight
 状态：进行中
 关联变更：（无）
 文件：（见实际改动）

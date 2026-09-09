@@ -137,7 +137,7 @@ created_at: 2026-09-09 11:46:42
 - answer: status 改六态判别联合，着色映射：completed=success / failed+killed=error / running=info / pending+interrupting=neutral
 - normalized_requirement: 六态均有定义好的胶囊着色与文案；对话视图轮尾六态渲染无 undefined 分支
 - impacts: [FR-04, task-04, task-06]
-- evidence: brainstorm stage review 第 4 项 fail 第 2 条；turn-timeline.tsx:122 TurnUiStatus 六态现状
+- evidence: brainstorm stage review 第 4 项 fail 第 2 条；frontend/src/components/daemon/turn-timeline.tsx:122 TurnUiStatus 六态现状
 
 ## D-006@v3: 群聊 agent 成员无自定义头像时统一 Bot 渐变光环（取舍记录）
 - type: architecture

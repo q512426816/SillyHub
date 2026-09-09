@@ -164,7 +164,7 @@ token 轮换（~20min + 401 刷新）不再重渲染这些页（含 3000 行的 
 | C9 | `backend/app/modules/workspace/skills_view_service.py` list_skills/get_mcp_config | iterdir / read_text+json | 抽 `_list_skills_sync`/`_read_mcp_config_sync` + to_thread |
 | C10 | `backend/app/modules/agent/skills_bundle_service.py` _gather_all_files/build_skills_bundle | 经同步 helper（glob/rglob/read_bytes）/ tarfile 构建 | `_collect_skill_files` 调用点 to_thread + 抽 `_build_tar_gz` + to_thread |
 | C11 | `backend/app/modules/workspace/router.py:104` + `backend/app/modules/workspace/service.py:476` | scanner.scan（iterdir+parse）被 async 调用点同步调用 | 调用点 `asyncio.to_thread(service.scan, ...)` |
-| C12 | `backend/app/modules/spec_workspace/service.py:999` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
+| C12 | `backend/app/modules/spec_workspace/service.py:1034` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
 | C13 | `backend/app/modules/change/projection.py:45` compute_pending_review | sqlite3 直读 sillyspec.db（mode=ro）在 async 内 | 抽 `_read_stage_progress_sync` + to_thread（对齐 `backend/app/modules/runtime/service.py` 范式） |
 | D9 | `sillyhub-daemon/src/skill-manager.ts:171` extractSkillsBundle | gunzipSync（bundle 解压在 async 内） | `promisify(gunzip)` → `gunzipAsync` |
 
@@ -187,7 +187,7 @@ DEFER（带原因，非遗漏）：
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
 | B3 | `backend/app/modules/agent/router.py:730` list_missions | 每 mission 调 worker_runs + cost_so_far（**内部重复 worker_runs**）+ _load_mission_artifacts = 3 SELECT × N | 一次 runs `IN mission_ids` + 一次 artifacts `IN run_ids`；cost 复用 runs 聚合（sum total_cost_usd） |
-| B4 | `backend/app/modules/change/service.py:923` reparse → _sync_docs | 每 change 一次 `_fetch_existing_docs`（ChangeDocument WHERE change_id） | 循环前一次 `ChangeDocument WHERE change_id IN (...)` → dict 分组；_sync_docs 加 `existing_docs` 参数（None 兜底旧调用方） |
+| B4 | `backend/app/modules/change/service.py:933` reparse → _sync_docs | 每 change 一次 `_fetch_existing_docs`（ChangeDocument WHERE change_id） | 循环前一次 `ChangeDocument WHERE change_id IN (...)` → dict 分组；_sync_docs 加 `existing_docs` 参数（None 兜底旧调用方） |
 | B5 | `backend/app/modules/daemon/permission_service.py:578` list_pending_dialogs（chat 分支）| 每 chat 型 dialog 一次 `SELECT AgentRunLog LIMIT 1` | 预推导 session_type + 一次 `SELECT AgentRunLog WHERE run_id IN (...) ORDER BY timestamp DESC` → Python 端按 run_id 取首条 |
 
 DEFER（带原因）：
@@ -334,7 +334,7 @@ DEFER（带原因）：
 |---|---|---|---|
 | B6 | `backend/app/modules/agent/control.py:25`(cost_from_runs) + `backend/app/modules/agent/router.py:907/882/901/918` + `backend/app/modules/agent/orchestrator.py:846` | `cost_so_far(mission_id)` 内部再 `worker_runs` SELECT 一次；5 个调用点上一行已 fetch 同款 runs → 每 get_mission 轮询 / 每 worker 完成多跑一次冗余 SELECT | 加 `@staticmethod cost_from_runs(runs)`（与 cost_so_far 同公式），`cost_so_far` 复用它；5 调用点改用上文内存 runs（fresh/runs/all_runs）。`cost_so_far` 原签名不动（test_control 直测通过） |
 | B7 | `backend/app/modules/agent/execution.py:317`(collect_completed_artifacts) | 每 completed run 一次 `SELECT AgentArtifact WHERE run_id=? LIMIT 1` 探测是否已有 artifact（N worker = N 次，converge 每 worker 触发一次 = O(N²)） | 循环前一次 `SELECT run_id WHERE run_id IN(...)` → set，循环内 `if run.id in existing: continue`。语义等价（collect_artifact 本身幂等，R5 已接受并发重复 collect 无害） |
-| B8 | `backend/app/modules/change/service.py:884`(sync_documents) | 逐文档 `SELECT ChangeDocument WHERE change_id+doc_type` 探测 upsert（N 文档 = N 次） | `list(documents)` 物化 + 一次 `WHERE change_id+doc_type IN(...)` → dict，循环内 `existing_docs.get(filename)` |
+| B8 | `backend/app/modules/change/service.py:894`(sync_documents) | 逐文档 `SELECT ChangeDocument WHERE change_id+doc_type` 探测 upsert（N 文档 = N 次） | `list(documents)` 物化 + 一次 `WHERE change_id+doc_type IN(...)` → dict，循环内 `existing_docs.get(filename)` |
 | B9 | `backend/app/modules/ppm/plan/service.py:1345`(build_milestone_export_sections) | 每 has_module 里程碑一次 `list_modules_by_node`（N 里程碑 = N 次 SELECT PlanNodeModule） | 循环前一次 `WHERE plan_node_id IN(...)` → 按 node 分组 + 复用 `_no_sort_key` 排序，循环内 `modules_by_node.get(node.id,[])` |
 | B10 | `backend/app/modules/admin/roles_service.py:141`(list) + 新增 `_perms_by_roles`/`_count_users_by_roles`/`_to_read_many` | 角色列表每角色 3 查询（权限 + user_workspace_roles 计数 + user_roles 计数），20 行页=62 往返 | 新增批量 helper：perms 一次 `WHERE role_id IN(...)`、user 计数 fetch (role_id,user_id) 对后按角色 set-union（语义对齐 _count_users 跨表去重）；`list()` 改用 `_to_read_many`。单角色路径（get/create/update）仍走 `_to_read`（非 N+1，不动） |
 | B11 | `backend/app/modules/ppm/kanban/service.py:517`(_aggregate_task_stats) | `select(PlanTask)` 载入整行（含 task_description/content/remarks 等 Text 大列），循环只用 user_id/work_load/id 三字段 | `select(PlanTask.user_id, PlanTask.work_load, PlanTask.id)` 列裁剪，循环 `for user_id, work_load, task_id in result.all()` |

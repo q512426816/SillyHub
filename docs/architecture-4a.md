@@ -78,7 +78,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 |---|---|---|---|
 | 变更 CRUD/列表/详情/reparse | `/workspaces/{wid}/changes/*` | `backend/app/modules/change/router.py:119-273` | 列表支持 `pending_review_only` 过滤 |
 | 变更文件树/读写 | `/changes/{cid}/files/*` | `backend/app/modules/change/router.py` | 写文件建 pending `DaemonChangeWrite`（`backend/app/modules/change/service.py:652-720`） |
-| 阶段流转与派发 | `POST /changes/{cid}/transition` / `advance-stage` / `dispatch` | `backend/app/modules/change/router.py:703,554,908` | 共用 `transition_with_dispatch`（`backend/app/modules/change/service.py:1019`） |
+| 阶段流转与派发 | `POST /changes/{cid}/transition` / `advance-stage` / `dispatch` | `backend/app/modules/change/router.py:703,554,908` | 共用 `transition_with_dispatch`（`backend/app/modules/change/service.py:1029`） |
 | 4 审核面板 | `proposal-review` / `plan-review` / `human-test` / `archive-confirm` | `backend/app/modules/change/router.py:718-838` | approve→推进、revise→rerun |
 | 审批/驳回/反馈/归档门 | `/approval` / `/approve` / `/reject` / `/feedback` / `/archive-gate` | `backend/app/modules/change/router.py:436-712` | 归档门 6 项 check（`backend/app/modules/change/service.py:1198`） |
 | 变更创建（server-local/lease） | `POST /changes/create` | `backend/app/modules/change_writer/router.py` | 创建后 auto-dispatch brainstorm（未扫描 workspace 拒建，`backend/app/modules/change_writer/service.py:82-89`） |
@@ -199,8 +199,8 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
   1. 创建时初值（`backend/app/modules/change_writer/service.py:174`）
   2. `transition` 推进（`backend/app/modules/change/service.py:944`）
   3. CLI 进度回灌写 `change.current_stage`（`backend/app/modules/change/dispatch.py:1511`）
-  4. **只读投影**：列表/详情显示时 `_project_current_stage`（`backend/app/modules/change/service.py:2377`）read-only join `platform_change_progress` 表，用 CLI 上行的 `latest_progress` 覆盖显示值（D-002，不改 changes 表）。即“工具上行权威值”覆盖“平台字段”。
-- **源阶段完成度前置校验** `_check_source_stage_completion`（`backend/app/modules/change/service.py:3413`）：手动推进前强制用 sillyspec.db 客观进度证明“干完了”，堵住“没干活就推进”。
+  4. **只读投影**：列表/详情显示时 `_project_current_stage`（`backend/app/modules/change/service.py:2383`）read-only join `platform_change_progress` 表，用 CLI 上行的 `latest_progress` 覆盖显示值（D-002，不改 changes 表）。即“工具上行权威值”覆盖“平台字段”。
+- **源阶段完成度前置校验** `_check_source_stage_completion`（`backend/app/modules/change/service.py:3436`）：手动推进前强制用 sillyspec.db 客观进度证明“干完了”，堵住“没干活就推进”。
 
 > 关键设计：平台**不自动推进**状态机——形态 A（change db5d0ed3）砍掉 `auto_dispatch`，改为按需显式触发（`transition` / `advance-stage` / 对外 MCP `advance_change_stage`）。落库 `current_stage` 与投影值可能短暂不一致（change-stage-control-ownership 记忆）。
 
@@ -481,7 +481,7 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 - `stored > base_ts`（字典序，不转 datetime）→ **409 冲突**，返回平台当前完整六表，**绝不 auto-merge**
 - 否则 → upsert
 
-`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:428`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:775`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
+`latest_progress` 按裸 JSON 透传客户端 `serializeForSync` 六表（`platform_change_progress.latest_progress`，NG-6 不强类型化）。并发自愈（`backend/app/modules/platform_sync/service.py:428`）：客户端新建 change 首推并发双发撞复合唯一约束 → catch `IntegrityError` 回退 UPDATE（跨 SQLite/PG 方言一致，免 `ON CONFLICT` 分支）。`list_lightweight`（`backend/app/modules/platform_sync/service.py:788`）从裸 JSON 抽 `changes[0].current_stage` 供变更中心轻量列表。
 
 ### 2.5 运行时数据与存储目录
 
@@ -631,7 +631,7 @@ Agent 编排是本平台 AA 的核心能力。**关键架构事实**：backend �
 |---|---|---|---|
 | **WebSocket（主）** | 双向 | 单 WS `/api/daemon/ws?daemon_local_id=...`（`sillyhub-daemon/src/protocol.ts:22 MSG`）。server→daemon 推 `task_available`/`session_*`/`permission_response`/`lease_cancel`/`provider_config_changed`/`self_update` + 双向 `heartbeat/ack` + `rpc/rpc_result`。5s 固定退避重连 + 30s ping keepalive | backend `backend/app/modules/daemon/ws_hub.py:227 DaemonWsHub`（`send_wakeup:254`/`send_session_control:313`/`send_permission_response:339`/`send_rpc:495`/`resolve_rpc:497`）；daemon `sillyhub-daemon/src/ws-client.ts:74`（`RECONNECT_BACKOFF_SCHEDULE_MS:40`/`WS_PING_INTERVAL_MS:62`） |
 | **HTTP REST（生命周期）** | daemon→server | `HubClient`（`sillyhub-daemon/src/hub-client.ts:578`）经 Node 原生 fetch（G-05 零 HTTP 库），`REST_PREFIX=/api/daemon`（`sillyhub-daemon/src/protocol.ts:598`）：`register:714`/`heartbeat:771`/`claimLease:893`/`startLease:908`/`leaseHeartbeat:923`/`submitMessages:945`/`completeLease:976`/`getPendingLeases:1017`（唯一 GET） | backend 对应 `LeaseService`（`backend/app/modules/daemon/lease/service.py:92`：`create_lease:113`/`claim_lease:146`/`complete_lease:362`/`expire_leases:922`） |
-| **轮询兜底** | daemon→server | WS 断线时 `_pollLoop`（`sillyhub-daemon/src/daemon.ts:5230`）周期拉 `getPendingLeases` | daemon 三循环并发：`_heartbeatLoop:4282`/`_pollLoop:5035`/`_wsLoop:5102` |
+| **轮询兜底** | daemon→server | WS 断线时 `_pollLoop`（`sillyhub-daemon/src/daemon.ts:5490`）周期拉 `getPendingLeases` | daemon 三循环并发：`_heartbeatLoop:4282`/`_pollLoop:5035`/`_wsLoop:5102` |
 | **宿主文件 RPC** | 双向 | backend→daemon 经 `DaemonWsHub.send_rpc`（`backend/app/modules/daemon/ws_hub.py:495`）发 `daemon:rpc`，daemon `sillyhub-daemon/src/ws-client.ts _dispatchRpc` 分发到 `file-rpc.ts`（list_dir/git_worktree_add/git_merge/git_rev_parse/...）回 `daemon:rpc_result` | backend `daemon/host_fs/delegate.py`（`HostFsDelegate`）+ `host_fs/ws_rpc.py` |
 
 > **lease 完成回写**（`complete_lease`，`backend/app/modules/daemon/lease/service.py:362`）是 batch 与 interactive lease 的**单一收口点**——mission 收敛（3.2.4）挂在这里。`_sync_stage_status_from_run`（`:683`）同步 stage 状态。

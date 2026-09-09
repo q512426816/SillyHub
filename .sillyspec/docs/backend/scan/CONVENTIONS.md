@@ -47,7 +47,7 @@ generator: sillyspec-scan
 
 - 构造期接收 `AsyncSession`，字段命名 `self._session`：`backend/app/modules/change/service.py:140`。需要操作者身份时多带一个 actor 参数（`backend/app/modules/admin/users_service.py` 的 `def __init__(self, session, actor_id)` 同款）。
 - 查询统一 SQLAlchemy 2.x 形态：`(await self._session.execute(stmt)).scalar() or 0`、`.scalars().all()`、`.scalars().first()`（`backend/app/modules/change/service.py:184,192,204,224,241`）。
-- Service 间组合**复用同一 session**（不要各自开新事务）：`backend/app/modules/change/service.py:156` `SpecWorkspaceService(self._session).get(...)`。
+- Service 间组合**复用同一 session**（不要各自开新事务）：`backend/app/modules/change/service.py:163` `SpecWorkspaceService(self._session).get(...)`。
 - router 之外（后台任务/启动钩子）手动开 session 用 `async with get_session_factory()() as session:`，不要 `Depends(get_session)`（`backend/app/core/db.py` 的 `get_session_factory` 懒加载单例 + conftest `_redirect_session_factory` 印证）。
 
 ### 4. 异常分层：`AppError` 基类 + 中文 message + UPPER_SNAKE code，路由层不手写 `HTTPException`
@@ -88,7 +88,7 @@ generator: sillyspec-scan
 ## 典型模式速查
 
 1. **标准 CRUD 端点**：`backend/app/modules/worktree/router.py:23-68`——`APIRouter(prefix="/workspaces/{workspace_id}")` + `SessionDep`/`Annotated[User, Depends(require_permission(...))]` 注入 + `async def` handler 调 service。
-2. **service 组合复用同 session**：`backend/app/modules/change/service.py:156`——`SpecWorkspaceService(self._session).get(...)`，不新开事务。
+2. **service 组合复用同 session**：`backend/app/modules/change/service.py:163`——`SpecWorkspaceService(self._session).get(...)`，不新开事务。
 3. **出网 URL SSRF 校验**：`backend/app/modules/llm_provider/service.py:541-546`——解析 host → `await ToolPolicyService.assert_public_hostname(host)` → 再 httpx 请求。
 4. **新错误类**：`backend/app/modules/release/service.py:45-56`——事件名类 + `code = "RELEASE_NOT_ALLOWED"` + 中文 message，由全局 handler 翻译。
 5. **测试建库**：`backend/conftest.py:90`——in-memory engine + 全 model import 注册 + `expire_on_commit=False` session；env 相关测试用 `monkeypatch.setenv` + 直接 `Settings()`（`backend/tests/test_config.py:29-33`），**禁 reload**。

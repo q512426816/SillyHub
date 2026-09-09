@@ -155,7 +155,7 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 - `.env.example` SECRET_KEY 占位串易被原样提交(`deploy/.env.example:18`)
 - MinIO console 9001 暴露风险(`docker-compose.yml:44-46`)
 - tool_gateway run_tests 的 test_path 路径注入(影响有限,`backend/app/modules/tool_gateway/service.py:391-443`)
-- `require_permission` 误用致 `/releases/.../promote`、`/missions/.../cancel` 端点 422 不可用(`backend/app/modules/release/router.py:70`、`backend/app/modules/agent/router.py:938-946`)
+- `require_permission` 误用致 `/releases/.../promote`、`/missions/.../cancel` 端点 422 不可用(`backend/app/modules/release/router.py:70`、`backend/app/modules/agent/router.py:953`)
 - 后端 `python-jose[cryptography]>=3.3`(jose 3.3 有已知 CVE,代码硬编码 HS256 降低可利用性,建议迁 pyjwt)
 - 前端 `next 14.2.5`(14.2 早期版本,后续有安全补丁,建议升 14.2 最新补丁)
 

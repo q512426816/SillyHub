@@ -19,7 +19,7 @@ generator: sillyspec-scan
 ### 🟡 半成品 / 防护面窄
 
 - **CI flaky 债未根治** — `backend/pyproject.toml` dev 依赖注释 + `backend-ci.yml:54-57`：2 核下 xdist + async fixture + in-memory SQLite 偶发竞态（task/change/runtime reparse created=0 → StopIteration / 文件列表空），本机 20 核 3931 passed 复现不了；loadscope + `--reruns 2` 只是兜底。
-- **spec 同步 tar 解包 `filter="fully_trusted"`** — `backend/app/modules/spec_workspace/service.py:893`。安全性全靠手工预校验（绝对路径拒绝 L698、resolve+relative_to 越界拒绝 L703-710、成员白名单 + `SERVER_EXCLUDED_FILENAMES` 过滤 L713），tarfile 内建 data 过滤（symlink/特殊文件）被显式关闭；预校验只查路径字符串，符号链接成员的间接越界路径未覆盖。
+- **spec 同步 tar 解包 `filter="fully_trusted"`** — `backend/app/modules/spec_workspace/service.py:928`。安全性全靠手工预校验（绝对路径拒绝 L698、resolve+relative_to 越界拒绝 L703-710、成员白名单 + `SERVER_EXCLUDED_FILENAMES` 过滤 L713），tarfile 内建 data 过滤（symlink/特殊文件）被显式关闭；预校验只查路径字符串，符号链接成员的间接越界路径未覆盖。
 - **release 审批 reject 不阻断** — `backend/app/modules/release/service.py:193` 仅 verdict=="approve" 时查阈值；`_check_approval_threshold`（L253-268）与 `_require_approvals`（L274-281）计数只数 approve，reject 仅落记录（L160-167）。先被甲 reject、再被乙丙 approve 仍可达 min_approvers 置 approved，生产发布门语义存疑。
 - **spec_profile 骨架未收尾** — `backend/app/modules/spec_profile/policy.py:61`（stage 冲突检测）、`backend/app/modules/spec_profile/policy.py:97`（document 冲突检测）、`backend/app/modules/spec_profile/provider.py:75`（follow-up）三处 TODO 本轮 grep 确认仍在。
 - **spec_guardian 死代码** — `backend/app/modules/workflow/spec_guardian.py:193` `run_guard` 全 app 范围仅 `tests/test_spec_guardian.py` 调用，无任何生产调用点。
