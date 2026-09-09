@@ -69,6 +69,9 @@ class PpmProblemList(BaseModel, table=True):
         # 创建人/责任人 OR 分支过滤。
         Index("ix_ppm_problem_list_created_by", "created_by"),
         Index("ix_ppm_problem_list_duty_user", "duty_user_id"),
+        # 验证人分支(Wave 1 以"表基本为空"跳过,现已是 scope OR 分支之一;
+        # ql-20260909-010-a318 补齐,迁移 20260909120000 双写)。
+        Index("ix_ppm_problem_list_audit_user", "audit_user_id"),
     )
 
     id: uuid.UUID = Field(

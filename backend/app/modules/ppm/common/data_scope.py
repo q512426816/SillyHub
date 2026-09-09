@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -129,22 +129,35 @@ async def problem_scope_clause(session: AsyncSession, user: User):
     创建人也纳入可见范围:``can_operate_problem`` 放行创建人编辑/删除,若可见
     范围不含创建人,会出现"能编辑却在列表看不见自己创建的问题"的矛盾。
 
-    ``now_handle_user`` 是 UUID 逗号字符串,两侧补逗号后 ``like`` 精确匹配
-    ``%,uid,%``,避免 UUID 子串误匹配;NULL 经 ``coalesce``→空串不命中。
+    ``now_handle_user`` 是 UUID 逗号字符串,匹配 uid 的 4 种 CSV 位置
+    (唯一/开头/结尾/中间)——裸列 4 分支 OR,避免 UUID 子串误匹配;NULL/空串
+    天然不命中(``NULL LIKE`` 为假)。等价性由
+    ``tests/modules/ppm/test_problem_scope_visibility.py`` 锁定。
+
+    索引依据(ql-20260909-010-a318):原实现是对 ``concat(',', coalesce(col,''), ',')``
+    表达式做 ``%,uid,%``,表达式 LIKE 不可走列索引,OR 中存在不可索引分支导致
+    非超管问题列表全表顺序扫描。改写后 4 分支全部可走
+    ``ix_ppm_problem_list_now_handle_user_trgm``(pg_trgm GIN,迁移
+    20260909120000);``audit_user_id`` 同迁移补 btree 索引。
     """
     if await is_super_admin(session, user):
         return None
     manager_pids = await manager_project_ids(session, user)
     uid_str = str(user.id)
-    uid_csv = f"%,{uid_str},%"
-    wrapped = func.concat(",", func.coalesce(PpmProblemList.now_handle_user, ""), ",")
     clauses: list = []
     if manager_pids:
         clauses.append(PpmProblemList.project_id.in_(manager_pids))
     clauses.append(PpmProblemList.created_by == user.id)
     clauses.append(PpmProblemList.duty_user_id == user.id)
     clauses.append(PpmProblemList.audit_user_id == user.id)
-    clauses.append(wrapped.like(uid_csv))
+    clauses.append(
+        or_(
+            PpmProblemList.now_handle_user.like(f"%,{uid_str},%"),
+            PpmProblemList.now_handle_user.like(f"{uid_str},%"),
+            PpmProblemList.now_handle_user.like(f"%,{uid_str}"),
+            PpmProblemList.now_handle_user == uid_str,
+        )
+    )
     return or_(*clauses)
 
 

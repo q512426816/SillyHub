@@ -67,6 +67,7 @@ created_at: 2026-08-18 01:45:00
 ## 注意事项
 - 平台级无 workspace_id；通知走 audit_logs（无独立站内信），问题附件用 file_urls JSON（无独立上传服务）
 - `role_name` 是多角色逗号拼接存储，按角色过滤用 ilike 模糊匹配（精确匹配会漏多角色成员）
+- `data_scope` 的 `now_handle_user` 处置人匹配是裸列 4 分支 LIKE（`%,uid,%` / `uid,%` / `%,uid` / `==uid`），依赖 pg_trgm GIN 索引走索引扫描（ql-20260909-010-a318，迁移 20260909120000）；改动匹配形态须同步等价性测试 `tests/modules/ppm/test_problem_scope_visibility.py`
 - 项目计划列表/详情/导出的项目名 outerjoin 项目表实时取真名（单一可信源），冗余列 project_name 仅创建兜底用
 - FastAPI 路由按注册顺序匹配：字面量路径（如 export-excel）必须排在 `{item_id}` 参数路由前，否则 422
 - 列表默认 20 条、page_size 上限 200（后端 Query ge=1 le=200）；排序走白名单防注入，order_by 为空时回退 created_at desc

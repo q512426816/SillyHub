@@ -18,7 +18,7 @@ created_at: 2026-08-18 01:45:00
 - 白名单 `ALLOWED_OPERATIONS`（12 个）：status / diff / add / commit / push / pull / fetch / log / branch / checkout / merge / rebase。
 - 黑名单 `BLOCKED_PATTERNS`：`--force` / `--hard` / `clean ` / `reflog` / `--exec`；push 额外保护：目标为 `main`/`master` 拒绝、`-f` 拒绝。
 - `SHELL_INJECTION_PATTERNS`：`$(`、反引号、`;cmd`、`|cmd`、`&&cmd`、`> /path` 重定向。
-- `GitOperationLog`（git_operation_logs 表）：workspace_id / lease_id / user_id / operation / args_json / result_code / redacted_output / timestamp；索引 (lease_id,timestamp) 与 (workspace_id,timestamp)。
+- `GitOperationLog`（git_operation_logs 表）：workspace_id / lease_id / user_id / operation / args_json / result_code / redacted_output / timestamp；索引 (lease_id,timestamp) 与 (workspace_id,timestamp)，另有 (user_id,timestamp) 复合（ql-20260909-010-a318，`GET /api/git/operations` 固定 user_id 过滤 + timestamp 排序，迁移 20260909120000）。
 - 错误：`GitOperationForbidden`（403，白名单/黑名单/注入拦截）、`GitOperationFailed`（502，执行失败）。
 - 依赖 git_identity（作者署名）、worktree（lease 归属 + ExecEnvBuilder 隔离环境）。
 
