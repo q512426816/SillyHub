@@ -11,8 +11,9 @@ platform_sync 进度表），归一化成对比响应（§7.2）——router 只
   快照不够用）；离线/超时异常原样上抛（既有 504 家族形态，daemon/router.py
   机器级先例同款）。
 * spec-tree 文件清单顺序沿用 daemon 快照序（信噪比排序在 daemon 侧完成，平台
-  不重排）；四分类 modified/local_only/platform_only/identical；双侧均缺失路径
-  剔除并计数 ``dropped_paths``。
+  不重排）；四分类 modified/local_only/platform_only/identical（identical 判定
+  与行级 diff 同口径——行尾归一化后比较，仅 CRLF/LF/末尾换行差异不算 modified，
+  ql-20260909-025）；双侧均缺失路径剔除并计数 ``dropped_paths``。
 * containment（Grill B3，spec_workspace/service.py:1486-1504 同款范式）：daemon
   是半可信端，回报路径逐条校验（拒 ``..`` 段、resolve 落点必须在 spec_root
   内），越界按平台侧缺失处理不读取。
@@ -117,6 +118,19 @@ def _read_platform_file(
 
 
 # ── diff 计算（纯函数）──────────────────────────────────────────────────────
+
+
+def _lines_equal(local_text: str, platform_text: str) -> bool:
+    """行粒度内容相等判定——与 ``_aligned_diff_rows`` 渲染口径一致（ql-20260909-025）。
+
+    先原始全等短路（绝大多数 identical 文件零开销），否则 ``splitlines()`` 归一化
+    行尾后再比：本地 Windows 检出 CRLF vs 平台副本 LF（或仅差末尾换行符）的文件，
+    行级 diff 本就渲染为全 equal（没有任何 delete/insert 可高亮）；若仍按原始字符
+    串全等判 modified，会在「只看差异」清单里挂出肉眼完全相同的假差异文件。
+    """
+    if local_text == platform_text:
+        return True
+    return local_text.splitlines() == platform_text.splitlines()
 
 
 def _aligned_diff_rows(local_text: str, platform_text: str) -> list[dict[str, Any]]:
@@ -429,7 +443,8 @@ class SillySpecCompareService:
 
         清单顺序沿用 daemon 快照序（平台不重排）；双侧均缺失路径剔除并计数。
         本地 truncated/binary 无 content 的文件不出 diff_rows（status 仍按元信息
-        分类，避免全 insert 的方向信号失真——Grill 复审残留 gap）。
+        分类，避免全 insert 的方向信号失真——Grill 复审残留 gap）。identical 判定
+        与行级 diff 同口径（``_lines_equal``，行尾归一化）。
         """
         spec_root_resolved = spec_root.resolve()
         files_out: list[dict[str, Any]] = []
@@ -468,7 +483,8 @@ class SillySpecCompareService:
                 # 双侧都在但无法文本对比（本地截断/二进制、平台非 utf8）——按元
                 # 信息分类为 modified，不出 diff_rows。
                 status = "modified"
-            elif local_content == platform.content:
+            elif _lines_equal(local_content, platform.content):
+                # identical 判定与行级 diff 同口径（行尾归一化，ql-20260909-025）。
                 status = "identical"
             else:
                 status = "modified"

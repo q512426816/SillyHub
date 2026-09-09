@@ -748,6 +748,90 @@ async def test_compare_spec_tree_four_categories_and_dropped_paths(
 
 
 @pytest.mark.asyncio
+async def test_compare_spec_tree_eol_only_diff_classified_identical(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """仅行尾/末尾换行差异 → identical（ql-20260909-025）。
+
+    本地 Windows 检出 CRLF vs 平台副本 LF（以及仅差末尾换行符）的文件，行级
+    diff 本就渲染为全 equal、无 delete/insert 可高亮——若按原始字符串全等判
+    modified，会在「只看差异」里挂出肉眼相同的假差异。identical 判定须与
+    ``_aligned_diff_rows`` 的 splitlines 口径一致；真实内容差异仍照常 modified。
+    平台侧用 write_bytes 落盘（write_text 在 Windows 会把 \\n 翻译成 CRLF，
+    控制不了行尾）。
+    """
+    _owner, token, inst, ws, spec_root = await _seed_full_env(db_session, tmp_path, tag="eolonly")
+    eol_file = "changes/2026-09-07-demo/eol-crlf-vs-lf.md"
+    tail_file = "changes/2026-09-07-demo/eol-tail-newline.md"
+    real_file = "changes/2026-09-07-demo/eol-plus-real-change.md"
+
+    for rel, data in (
+        (eol_file, b"line-1\nline-2\n"),
+        (tail_file, b"tail"),  # 无末尾换行 vs 本地有
+        (real_file, b"line-1\nline-2-changed\n"),
+    ):
+        target = spec_root.joinpath(*rel.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    stub = _SnapshotRpcStub(
+        result=_snapshot(
+            files=[
+                _local_file(eol_file, "line-1\r\nline-2\r\n"),
+                _local_file(tail_file, "tail\n"),
+                _local_file(real_file, "line-1\r\nline-2\r\n"),
+            ],
+            ql_id=_QL_ID,
+        )
+    ).install(monkeypatch)
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE, workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    files = {f["path"]: f for f in resp.json()["files"]}
+
+    # 仅行尾差异 / 仅末尾换行差异 → identical，且不出 diff_rows。
+    assert files[eol_file]["status"] == "identical"
+    assert files[eol_file]["diff_rows"] == []
+    assert files[tail_file]["status"] == "identical"
+    assert files[tail_file]["diff_rows"] == []
+
+    # 行尾归一化不吞真实差异：内容确有改动仍 modified，diff 行文本走 splitlines
+    # 口径（不带 \r），changed 行 delete+insert 成对。
+    assert files[real_file]["status"] == "modified"
+    assert files[real_file]["diff_rows"] == [
+        {
+            "type": "equal",
+            "local_lineno": 1,
+            "local_text": "line-1",
+            "platform_lineno": 1,
+            "platform_text": "line-1",
+        },
+        {
+            "type": "delete",
+            "local_lineno": 2,
+            "local_text": "line-2",
+            "platform_lineno": None,
+            "platform_text": None,
+        },
+        {
+            "type": "insert",
+            "local_lineno": None,
+            "local_text": None,
+            "platform_lineno": 2,
+            "platform_text": "line-2-changed",
+        },
+    ]
+
+    assert len(stub.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_compare_spec_tree_truncated_and_binary_files_have_no_diff_rows(
     client: AsyncClient,
     db_session: AsyncSession,
