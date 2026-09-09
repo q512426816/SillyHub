@@ -20,9 +20,13 @@
  * 约定（session-panel 文件头明言），不能为其引入 Provider。刷新经 refreshSignal
  * prop：父层在轮次终态处理点递增该计数触发重取（数据本身轮次终态才落库）。
  *
- * 静默策略：首载 loading / 拉取失败 / 零用量（api_requests=0 的空会话，
- * ql-20260909-005 与 TaskExecutionPanel ql-20260909-003 空态收敛同口径）均不渲染
- * ——用量条是辅助信息，不阻断会话主流程；已有数据时刷新失败保持旧值。
+ * 静默策略：首载 loading / 拉取失败 / 零用量（空会话，ql-20260909-005 与
+ * TaskExecutionPanel ql-20260909-003 空态收敛同口径）均不渲染——用量条是
+ * 辅助信息，不阻断会话主流程；已有数据时刷新失败保持旧值。零用量判据
+ * （ql-20260909-022 修正）：五项原始指标（输入/输出/缓存读取/缓存写入/请求
+ * 次数，命中率为派生值不计）全 0 才隐藏——原「api_requests=0 即隐藏」误伤
+ * pi/cursor 等不上报按模型明细/请求计数的引擎会话（token 有真实数据、请求
+ * 次数恒 0，见 daemon onTurnResult 仅 modelUsage 存在才报两字段）。
  */
 
 import { useEffect, useState } from "react";
@@ -149,9 +153,21 @@ export function SessionUsageBar({ sessionId, refreshSignal }: SessionUsageBarPro
   // 首载 loading / 出错（无数据）→ 整体不渲染。
   if (!usage) return null;
   // ql-20260909-005（会话页整洁度二轮，对齐 TaskExecutionPanel ql-20260909-003
-  // 空态先例）：从未跑过轮次的会话（api_requests=0）汇总条全 0，渲染出来是
-  // 纯噪音——不渲染。有轮次后 refreshSignal 重拉，条随首个非零数据弹入。
-  if (usage.totals.api_requests === 0) return null;
+  // 空态先例）：零用量（从未跑过轮次）汇总条全 0，渲染出来是纯噪音——不渲染。
+  // 有轮次后 refreshSignal 重拉，条随首个非零数据弹入。ql-20260909-022 判据
+  // 修正：原「api_requests=0 即隐藏」误伤 pi/cursor 等不上报按模型明细/请求
+  // 计数的引擎会话（有真实 token、请求次数恒 0）——改为五项原始指标全 0 才
+  // 判空（命中率为派生值，分母 0 自然「—」，不计入判据）。
+  const { totals } = usage;
+  if (
+    totals.input_tokens === 0 &&
+    totals.output_tokens === 0 &&
+    totals.cache_read_tokens === 0 &&
+    totals.cache_creation_tokens === 0 &&
+    totals.api_requests === 0
+  ) {
+    return null;
+  }
 
   const hit = cacheHitRate(usage.totals);
   const hasDetail = usage.by_model.length > 0;

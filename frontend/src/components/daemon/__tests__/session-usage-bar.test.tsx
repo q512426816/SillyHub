@@ -6,7 +6,9 @@
 //     （ql-20260830-013-14b3 小型化改版后指标名收敛为悬浮提示；ql-20260830-014-74f5
 //     改 antd Tooltip，触发元素带 aria-label，标签断言走 getByLabelText/queryByLabelText，
 //     数值断言不变）；
-//   ② 命中率分母 0（全 0 会话）→「—」，by_model 空无明细切换按钮；
+//   ② 零用量判据（ql-20260909-005 隐藏，ql-20260909-022 修正判据）：全 0 空会话
+//     整条不渲染；有 token 但 api_requests=0（pi/cursor 等不上报按模型明细/
+//     请求计数的引擎）照常渲染，请求次数如实显示 0；
 //   ③ 折叠交互：初始明细表不渲染，点「按模型明细」后渲染模型行（含
 //     「未记录（旧轮次）」灰阶 tag）+ 口径脚注；
 //   ④ refreshSignal 递增触发重取（getSessionUsage 调用计数断言）；
@@ -145,10 +147,10 @@ describe("SessionUsageBar 摘要行（task-03 / FR-02 / D-003）", () => {
   });
 });
 
-/* ────────────────────── ② 零用量空会话（ql-20260909-005） ────────────────────── */
+/* ────────────────────── ② 零用量判据（ql-20260909-005 + 022 修正） ────────────────────── */
 
-describe("SessionUsageBar 零用量空会话（ql-20260909-005）", () => {
-  it("api_requests=0（从未跑过轮次）→ 整条不渲染，不报错", async () => {
+describe("SessionUsageBar 零用量判据（ql-20260909-005，判据修正 ql-20260909-022）", () => {
+  it("五项原始指标全 0（从未跑过轮次）→ 整条不渲染，不报错", async () => {
     daemonMock.getSessionUsage.mockResolvedValue(zeroUsage());
     const { container } = render(<SessionUsageBar sessionId="s-1" />);
     await flush();
@@ -160,6 +162,43 @@ describe("SessionUsageBar 零用量空会话（ql-20260909-005）", () => {
     expect(screen.queryByRole("button", { name: /按模型明细/ })).toBeNull();
     // 取数仍发生（有轮次后 refreshSignal 重拉弹入，数据面行为不变）
     expect(daemonMock.getSessionUsage).toHaveBeenCalledWith("s-1");
+  });
+
+  it("有 token 但 api_requests=0（pi/cursor 无按模型明细上报）→ 照常渲染，请求次数如实 0", async () => {
+    // 真实数据形态（pi/cursor 驱动只报四维 token，无 modelUsage → 无明细行，
+    // 请求次数恒 0）：api_requests 单指标为 0 但四维 token 有真实消耗。
+    daemonMock.getSessionUsage.mockResolvedValue({
+      totals: {
+        model: "totals",
+        input_tokens: 4_530,
+        output_tokens: 1_803,
+        cache_read_tokens: 26_688,
+        cache_creation_tokens: 0,
+        api_requests: 0,
+      },
+      by_model: [
+        {
+          model: "未记录",
+          input_tokens: 4_530,
+          output_tokens: 1_803,
+          cache_read_tokens: 26_688,
+          cache_creation_tokens: 0,
+          api_requests: 0,
+        },
+      ],
+    });
+    render(<SessionUsageBar sessionId="s-1" />);
+    await flush();
+
+    // 修复前（api_requests=0 即隐藏）整条被误杀——现在照常渲染
+    expect(screen.getByLabelText("输入")).toHaveTextContent("4.5K");
+    expect(screen.getByLabelText("输出")).toHaveTextContent("1.8K");
+    expect(screen.getByLabelText("缓存读取")).toHaveTextContent("26.7K");
+    expect(screen.getByLabelText("缓存写入")).toHaveTextContent("0");
+    // 请求次数无来源，如实显示 0（不编造计数）
+    expect(screen.getByLabelText("请求次数")).toHaveTextContent("0");
+    // 命中率 26,688 / (26,688 + 4,530) = 85.5%
+    expect(screen.getByLabelText("缓存命中率")).toHaveTextContent("85.5%");
   });
 });
 

@@ -473,7 +473,23 @@
 方案：对齐 sessions 标准写法三参数
 结果：tsc/lint 0 错；已提交 e4dc21a00
 
-## ql-20260909-021-4e19 | 2026-09-09 15:10:22 | reparse 根治三件套——push 路径摘出同步 await+120s 节流+尾随补发+single-flight
-状态：进行中
+## ql-20260909-021-4e19 | 2026-09-09 15:10:22 | reparse 根治三件套
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：.sillyspec/docs/SillyHub/modules/spec_workspace.md, backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py, backend/app/modules/spec_workspace/tests/test_reparse_scheduler.py, backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py, backend/app/modules/spec_workspace/tests/test_sync_incremental.py, backend/conftest.py
+需求：reparse 根治三件套
+根因：push 同步 await reparse 恶性循环
+方案：后台+节流尾随+single-flight+env 直通
+结果：147×3 稳定+717 回归；ruff/mypy 0 错；已提交
+
+## ql-20260909-022-a42b | 2026-09-09 20:33:36 | 会话用量条零用量判据修正——pi/cursor 等无请求计数上报引擎的用量条误隐藏
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-usage-bar.tsx（零用量判据 api_requests=0 改五项原始指标全 0（ql-20260909-022），头注/内联注释同步）
+- frontend/src/components/daemon/__tests__/session-usage-bar.test.tsx（新增 pi/cursor 形态（有 token 无请求计数）照常渲染用例，全 0 隐藏用例保留）
+需求：会话用量条零用量判据修正——pi/cursor 等无请求计数上报引擎的用量条误隐藏
+根因：ql-20260909-005 零用量隐藏选了 api_requests 单指标判据，而 daemon 仅 Claude SDK 驱动上报 modelUsage（才附带 model_usage/api_requests），pi/cursor 驱动只报四维 token，后端聚合「未记录」桶请求次数恒按 0 计，有真实 token 的会话条被整条误杀（DB 实证 pi 5 会话 11 轮、cursor 2 会话 5 轮全零明细行）
+方案：session-usage-bar.tsx 判据改五项原始指标（input/output/cache_read/cache_creation/api_requests）全 0 才隐藏，命中率派生值不计；头注与内联注释同步；测试新增「有 token 无请求计数照常渲染、请求次数如实 0」用例并保留全 0 隐藏用例；frontend.changelog.md 登记变更索引
+结果：session-usage-bar 6/6 绿，sessions-portal 随跑绿；eslint 0 error（1 warning 预存）；tsc --noEmit 0 错；sessions/page.test 12 例超时失败两轮复跑确认为存量环境债（mock 用量恒全 0，新旧判据 DOM 恒同，与本次无关）；未部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/conflict-compare-wrong-status-root.md
