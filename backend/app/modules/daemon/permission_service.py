@@ -706,7 +706,16 @@ class DaemonPermissionService:
         # 参与者制分支经 _get_owned_session_for_update 内部继承（成员表命中 →
         # workspace admin → 404 不泄露存在性）；群/影子会话 manual_approval 恒
         # 关（首期审批不进群，§9.1），本路径仅防漏兜底。
-        await self._svc._get_owned_session_for_update(session_id, user_id)
+        # ql-20260910-001（读侧放开）：群聊影子会话（session_kind='group_member'）
+        # 的 pending 提问卡对**该群成员**可读——404 时走 task-09 落地的影子成员
+        # 分支（群成员+未移除+软删群过滤，条件与答题侧同源）；其余维持 404。
+        # 关闭「非群主能答（respond 已放行）却看不见卡」的可见性缺口。
+        try:
+            await self._svc._get_owned_session_for_update(session_id, user_id)
+        except DaemonSessionNotFound:
+            shadow_session = await self._resolve_shadow_member_answer_session(session_id, user_id)
+            if shadow_session is None:
+                raise
         await self._svc._session.commit()
 
         rows = (

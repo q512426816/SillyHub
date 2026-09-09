@@ -1459,3 +1459,85 @@ class TestShadowDialogAnswerAuthorization:
                 "allow",
                 dialog_result={"answers": []},
             )
+
+    @pytest.mark.asyncio
+    async def test_group_member_lists_shadow_pending_dialogs(
+        self, db_session, mocked_redis
+    ) -> None:
+        """ql-20260910-001 读侧放开：群成员（非群主）可拉影子会话 pending 提问卡。
+
+        关闭「非群主能答（respond 已放行）却看不见卡」的可见性缺口——条件与
+        答题侧同源（group_member 影子 + 未移除群成员 + 软删群过滤）。
+        """
+        seed = await _seed_group_shadow(db_session)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-read-1")
+        perm, _ = self._make_perm(db_session)
+
+        pending = await perm.list_pending_dialogs(seed.member_uid, seed.shadow_id)
+        assert [d.request_id for d in pending] == ["sd-read-1"]
+
+    @pytest.mark.asyncio
+    async def test_outsider_and_removed_member_cannot_list_shadow_pending(
+        self, db_session, mocked_redis
+    ) -> None:
+        """读侧越权反例：非群成员 / 已移除成员拉影子 pending → 404 不泄露存在性。"""
+        seed = await _seed_group_shadow(db_session, user_member_removed=True)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-read-2")
+        perm, _ = self._make_perm(db_session)
+
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        for uid in (seed.outsider_uid, seed.member_uid):
+            with pytest.raises(DaemonSessionNotFound):
+                await perm.list_pending_dialogs(uid, seed.shadow_id)
+
+    @pytest.mark.asyncio
+    async def test_plain_session_non_owner_list_still_404(self, db_session, mocked_redis) -> None:
+        """普通单聊非属主拉 pending 仍 404（读侧放开仅限群聊影子，单聊语义零变化）。"""
+        from app.modules.agent.model import AgentRun, AgentSession
+        from app.modules.daemon.model import SessionDialogRequest
+
+        owner_uid = await _create_user(db_session)
+        other_uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, owner_uid)
+        sess = AgentSession(
+            id=uuid.uuid4(),
+            user_id=owner_uid,
+            runtime_id=rt.id,
+            provider="claude",
+            status="active",
+            turn_count=0,
+            created_at=datetime.now(UTC),
+            session_kind="chat",
+            config={"manual_approval": True},
+        )
+        db_session.add(sess)
+        await db_session.flush()
+        run = AgentRun(
+            id=uuid.uuid4(),
+            agent_session_id=sess.id,
+            status="running",
+            agent_type="interactive",
+            started_at=datetime.now(UTC),
+        )
+        db_session.add(run)
+        await db_session.flush()
+        db_session.add(
+            SessionDialogRequest(
+                request_id="plain-read-1",
+                session_id=sess.id,
+                run_id=run.id,
+                tool_name="AskUserQuestion",
+                dialog_kind="AskUserQuestion",
+                dialog_payload={"questions": [{"question": "q", "options": [{"label": "A"}]}]},
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await db_session.commit()
+
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        perm, _ = self._make_perm(db_session)
+        with pytest.raises(DaemonSessionNotFound):
+            await perm.list_pending_dialogs(other_uid, sess.id)
