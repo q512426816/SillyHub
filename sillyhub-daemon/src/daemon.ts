@@ -623,6 +623,24 @@ interface ModelUsageBaseline {
   totalCostUsd: number;
 }
 
+/**
+ * ql-20260909-011：interactive 上报微批队列条目（per leaseId:runId）。
+ * 保序 = 单 drain 协程（draining 标志互斥启动）+ flatSeq 在 onTurnMessage
+ * 入队前已取号（队列顺序即上报顺序）。
+ */
+interface InteractiveBatchEntry {
+  leaseId: string;
+  runId: string;
+  /** drain 提交时反查 SessionState 拿新鲜 claimToken（token 刷新后旧值失效）。 */
+  sessionId: string;
+  queue: { msg: Record<string, unknown>; dedupKey: string }[];
+  draining: boolean;
+  drainPromise: Promise<void> | null;
+}
+
+/** 微批单次提交条数上限（防单请求体积失控；交互流式速率远达不到，属保险丝）。 */
+const INTERACTIVE_BATCH_MAX = 256;
+
 /** 差分产物（camelCase 四维 Record）：直接喂 _aggregateModelUsage / _modelUsageRows。 */
 type ModelUsageDelta = Record<
   string,
@@ -1596,6 +1614,24 @@ export class Daemon {
    * 全量，不持久化不跨进程）。
    */
   private readonly _modelUsageBaselineBySession = new Map<string, ModelUsageBaseline>();
+  // ── ql-20260909-011（交互会话逐事件上报微批化）────────────────────────────
+  // 实机根因：interactive 路径每条事件一次串行 submitMessages HTTP 往返（onTurnMessage
+  // → events.ts 循环逐事件 await → consume 协程读完下一条 SDK 帧前必须等当前帧
+  // 每个事件的 RTT）。一个 turn 几百条流式事件 = 几百次串行 RTT（10-30ms/次 ≈
+  // 2-6s/turn 白加延迟），backend 慢时重试退避成倍放大，且背压回灌 claude 子进程
+  // stdout。batch 路径（task-runner/spawn-stream.ts）早已"帧内攒批 + fire-and-forget"
+  // 并留有注释警示，interactive 因需保序（flatSeq 取号 + 终态不超前）没跟上。
+  //
+  // 方案：提交段前移攒批——per leaseId:runId 队列 + 单 drain 协程（20ms 微批窗
+  // 吸收同窗事件，一次 HTTP 批量提交，串行 drain 天然保序）；终态钩子
+  // （onTurnResult/onSessionEnd 开头）强制 flush 保证事件先于终态到达。
+  // SILLYHUB_INTERACTIVE_BATCH_MS=0 旁路回同步直发（vitest 全局 0，既有逐条
+  // 断言语义不变；生产默认 20）。
+  /** 微批窗口毫秒数（env 可调；0=旁路）。 */
+
+  private readonly _interactiveBatchMs: number;
+  /** leaseId:runId → 微批队列（单 drain 协程保序）。 */
+  private readonly _interactiveBatches = new Map<string, InteractiveBatchEntry>();
   /**
    * task-06（D-003@v1 tar 模式）：interactive lease.id → spec 同步上下文。
    * _startInteractiveSession tar 模式 pull 时 set(leaseId, {workspaceId})；
@@ -1841,6 +1877,13 @@ export class Daemon {
     this._client = client;
     this._taskRunner = taskRunner ?? null;
     this._detector = options?.detector ?? new AgentDetector();
+    // ql-20260909-011：微批窗口毫秒（env 可调；0=旁路同步直发，vitest 全局 0）。
+    // NaN/负数兜底默认 20（Number('')==0 陷阱：env 未设/空串走默认而非 0）。
+    const batchMsRaw = process.env.SILLYHUB_INTERACTIVE_BATCH_MS;
+    const batchMsNum =
+      batchMsRaw === undefined || batchMsRaw === '' ? NaN : Number(batchMsRaw);
+    this._interactiveBatchMs =
+      Number.isFinite(batchMsNum) && batchMsNum >= 0 ? batchMsNum : 20;
     // task-01：进程启动时间注入存储（运行期恒定）。
     this._startedAt = options?.startedAt;
     this._wsClientFactory =
@@ -3620,6 +3663,9 @@ export class Daemon {
       });
       return;
     }
+    // ql-20260909-011：run 终态上报前冲掉该 lease 微批积压（不等微批窗），
+    // 保证 turn 内事件先于终态到达 backend（逐事件直发时代由 await 串行保证）。
+    await this.flushInteractiveBatches(state.leaseId);
     // payload 字段映射（snake_case 对齐 backend InteractiveRunResultRequest）。
     // SDKResultSuccess 含 total_cost_usd / num_turns / duration_ms / duration_api_ms /
     // usage.{input_tokens,output_tokens}（见 sdk.d.ts SDKResultSuccess 类型）；
@@ -4070,7 +4116,18 @@ export class Daemon {
       // resilience 对消息形态零感知——submitWithRetry 仅把 dedup_key 展开注入
       // message 顶层（`{...message, dedup_key}`，对 kind 包装是幂等覆盖），重试/
       // 入箱/drain 链路不变。
-      if (this._resilience) {
+      // ql-20260909-011：微批上报告——batchMs>0 入队返回（consume 协程不再逐事件
+      // 等 RTT，20ms 窗吸收同窗事件一次批量提交）；=0 旁路回同步直发（测试/回退）。
+      // flatSeq/dedup_key/kind 包装均在入队前完成（上方），队列顺序=上报顺序。
+      if (this._interactiveBatchMs > 0) {
+        this._enqueueInteractiveBatch(
+          state.leaseId,
+          runId,
+          sessionId,
+          reportMsg,
+          dedupKey,
+        );
+      } else if (this._resilience) {
         const envelope: Envelope = {
           message: reportMsg,
           dedup_key: dedupKey,
@@ -4100,6 +4157,151 @@ export class Daemon {
         cause: extractCause(e),
       });
     }
+  }
+
+  /**
+   * ql-20260909-011：interactive 上报微批队列入口（onTurnMessage 提交段调用）。
+   *
+   * 同步入队后启动（若未在跑）单 drain 协程：先等微批窗（吸收同窗后续事件），
+   * 再循环整批提交（单次上限 INTERACTIVE_BATCH_MAX）。draining 标志保证同 key
+   * 恒单协程 → 队列顺序即到达顺序（flatSeq 入队前已取号，保序天然成立）。
+   */
+  private _enqueueInteractiveBatch(
+    leaseId: string,
+    runId: string,
+    sessionId: string,
+    msg: Record<string, unknown>,
+    dedupKey: string,
+  ): void {
+    const key = `${leaseId}:${runId}`;
+    let entry = this._interactiveBatches.get(key);
+    if (!entry) {
+      entry = { leaseId, runId, sessionId, queue: [], draining: false, drainPromise: null };
+      this._interactiveBatches.set(key, entry);
+    }
+    entry.queue.push({ msg, dedupKey });
+    if (!entry.draining) {
+      entry.draining = true;
+      entry.drainPromise = this._drainInteractiveBatchLoop(
+        key,
+        entry,
+        this._interactiveBatchMs,
+      );
+    }
+  }
+
+  /**
+   * 微批 drain 协程主体：delayMs 微批窗 → drain-to-empty（每轮 ≤上限一批）。
+   *
+   * 单批提交失败 warn 后继续下一批（对齐旁路路径 submit 失败的容错语义：
+   * resilience 已重试/入箱，直发路径失败即弃）。finally 复位标志并回收空队列
+   * （终态 flush 后 Map 不残留）。
+   */
+  private async _drainInteractiveBatchLoop(
+    key: string,
+    entry: InteractiveBatchEntry,
+    delayMs: number,
+  ): Promise<void> {
+    try {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+      while (entry.queue.length > 0) {
+        const batch = entry.queue.splice(0, INTERACTIVE_BATCH_MAX);
+        try {
+          await this._submitInteractiveBatch(entry, batch);
+        } catch (e) {
+          this._logger.warn('interactive_batch_submit_failed', {
+            lease_id: entry.leaseId,
+            run_id: entry.runId,
+            count: batch.length,
+            message: (e as Error | undefined)?.message ?? String(e),
+            cause: extractCause(e),
+          });
+        }
+      }
+    } finally {
+      entry.draining = false;
+      entry.drainPromise = null;
+      if (entry.queue.length === 0) {
+        this._interactiveBatches.delete(key);
+      }
+    }
+  }
+
+  /**
+   * 微批整批提交。claimToken 提交时刻读新鲜值（SESSION_INJECT 刷新后旧 token
+   * 失效）；空窗（drain 延迟窗口内恰好失 token，罕见）→ resilience 入箱重放 /
+   * 无 resilience warn 丢弃，对齐 onTurnMessage 空窗分支语义。
+   */
+  private async _submitInteractiveBatch(
+    entry: InteractiveBatchEntry,
+    batch: { msg: Record<string, unknown>; dedupKey: string }[],
+  ): Promise<void> {
+    const claimToken = this._sessionManager?.get(entry.sessionId)?.claimToken ?? '';
+    if (!claimToken) {
+      this._logger.warn('interactive_batch_no_claim_token', {
+        lease_id: entry.leaseId,
+        run_id: entry.runId,
+        count: batch.length,
+      });
+      if (this._resilience) {
+        try {
+          await this._resilience.enqueuePendingToken(
+            entry.leaseId,
+            entry.runId,
+            batch.map((item) => ({
+              message: item.msg,
+              dedup_key: item.dedupKey,
+            })),
+          );
+        } catch {
+          // 落盘失败不向上抛（对齐旁路路径容错语义）。
+        }
+      }
+      return;
+    }
+    if (this._resilience) {
+      await this._resilience.submitWithRetry(
+        entry.leaseId,
+        claimToken,
+        entry.runId,
+        batch.map((item) => ({ message: item.msg, dedup_key: item.dedupKey })),
+      );
+    } else {
+      await this._client.submitMessages(
+        entry.leaseId,
+        claimToken,
+        entry.runId,
+        batch.map((item) => item.msg),
+      );
+    }
+  }
+
+  /**
+   * ql-20260909-011：终态钩子——立即冲掉微批积压（不等微批窗），保证事件先于
+   * 终态（onTurnResult 的 run 终态 / onSessionEnd 的会话终态）到达 backend。
+   *
+   * 在跑的 drain（含微批窗 sleep）等其自然完成（≤一个窗，20ms 级）；完成后仍
+   * 有积压（终态竞态）则 delay=0 再冲一轮。不指定 leaseId 时冲全部（onSessionEnd
+   * 场景，保守正确：跨 lease 的积压本来也该尽快上报）。
+   */
+  async flushInteractiveBatches(leaseId?: string): Promise<void> {
+    const targets = [...this._interactiveBatches.entries()].filter(
+      ([, entry]) => !leaseId || entry.leaseId === leaseId,
+    );
+    await Promise.all(
+      targets.map(async ([key, entry]) => {
+        if (entry.drainPromise) {
+          await entry.drainPromise.catch(() => {});
+        }
+        if (entry.queue.length > 0 && !entry.draining) {
+          entry.draining = true;
+          entry.drainPromise = this._drainInteractiveBatchLoop(key, entry, 0);
+          await entry.drainPromise.catch(() => {});
+        }
+      }),
+    );
   }
 
   /**
@@ -4138,6 +4340,9 @@ export class Daemon {
     // 防御性：非 ended/failed 的 status 视为 ended 兜底（backend 接受 SessionStatus）。
     const mappedStatus: 'ended' | 'failed' =
       status === 'failed' ? 'failed' : 'ended';
+    // ql-20260909-011：会话终态通知前冲掉全部微批积压（onSessionEnd 不依赖
+    // state——见下，故不按 lease 过滤，全量保守：量小且本就该尽快上报）。
+    await this.flushInteractiveBatches();
     const reason =
       mappedStatus === 'failed'
         ? 'driver_error'

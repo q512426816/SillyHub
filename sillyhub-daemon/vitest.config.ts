@@ -5,6 +5,11 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     globals: false,
+    // ql-20260909-011：交互上报微批默认旁路（=0 同步直发）——既有测试对
+    // "onTurnMessage 返回即 submitMessages 已调"的断言语义保持不变；微批攒批
+    // /保序/终态 flush 由 daemon-interactive-microbatch.test.ts 专项覆盖
+    // （该项测试内自行启用窗口）。生产默认 20ms（daemon.ts 构造器）。
+    env: { SILLYHUB_INTERACTIVE_BATCH_MS: '0' },
     // 套件含大量真实文件 I/O（tar 解包/打包、mkdtemp、spec sync 等），在并发 fork 池
     // （84 文件并行）下受磁盘争用 + Windows AV 扫描影响，vitest 默认 5s testTimeout
     // 偶发超时（task-09 pull/push 等用例在满载下轮流 flaky，单文件/隔离均 <100ms）。

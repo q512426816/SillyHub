@@ -5,6 +5,7 @@ created_at: 2026-08-27 14:32:24
 
 # daemon 模块变更索引
 
+- ql-20260909-011-8938 | 交互会话逐事件上报微批化——onTurnMessage 提交段改 per leaseId:runId 队列 20ms 窗攒批一次 HTTP（原每事件一次串行 RTT，一 turn 几百事件 ≈ 2-6s 白加延迟且背压回灌子进程 stdout；单 drain 协程保序，flatSeq 入队前取号）；onTurnResult/onSessionEnd 开头 flushInteractiveBatches 强制冲队保证事件先于终态；claimToken 空窗整批 enqueuePendingToken 入箱；SILLYHUB_INTERACTIVE_BATCH_MS=0 旁路（vitest 全局 0 保既有断言，生产默认 20）；测试三件套抽 tests/interactive-test-helpers.ts 共享；专项测试 5 用例 + 受影响面 160 + 全量 3811 passed（4 个心跳第 7 参断言预存失败与本改动无关，stash 验证）
 - ql-20260827-010-e472 | 会话附件 daemon 落盘改内容寻址命名 attachments/{sha256}.{白名单ext}（同内容复用、废弃同名 (n) 序号），注入清单注原文件名并明确无需浏览比对其他文件
 - ql-20260827-014-d438 | reopen 会话级供应商凭证链补全——backend 建 lease 补写 session_llm_provider_id + SESSION_RESUME 携解密 provider_config；daemon resume 路由透传 record.providerConfig（修 reopen 后 SDK 无凭证 "Not logged in" 秒退、会话约 2s 回 ended 死亡循环）
 - ql-20260827-015 | 排队消息「后台任务通知」同会话 pending 合并为一条（任务行追加+头/尾计数改写，`_merge_task_wakeup_prompt`）——修长轮期间通知排队只增不减、派发后逐条烧模型汇报的 treadmill
