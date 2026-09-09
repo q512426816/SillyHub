@@ -685,6 +685,121 @@ describe('turn 生命周期', () => {
     await consumeP;
   });
 
+  // ql-20260909-028：pi 每条 message.usage 是单次调用量，turn_end 只定格最后
+  // 一次调用——原 replace 语义丢轮内工具循环中间调用（实测全会话只记真实 2-9%）。
+  it('轮内多调用：result.usage = message_end 逐调用累加和（非 turn_end 定格值），usage 事件同步注入轮累计', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, events, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('跑两轮工具');
+    await tick();
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    // 调用 1（工具循环首轮）：message_end 携带该调用 usage
+    emitEvent(child, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '先查一下' }],
+        usage: { input: 100, output: 20, cacheRead: 1000, cacheWrite: 0 },
+      },
+    });
+    // 调用 2（终答）：message_end 携带该调用 usage
+    emitEvent(child, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '查完了' }],
+        usage: { input: 50, output: 10, cacheRead: 2000, cacheWrite: 30 },
+      },
+    });
+    // turn_end 定格 = 最后一次调用（50/10/2000/30），不得作为轮总量
+    emitEvent(child, {
+      type: 'turn_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'stop',
+        usage: { input: 50, output: 10, cacheRead: 2000, cacheWrite: 30 },
+      },
+    });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    // result.usage = 累加和（100+50 / 20+10 / 1000+2000 / 0+30）
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success' });
+    expect(results[0]!.usage).toEqual({
+      input_tokens: 150,
+      output_tokens: 30,
+      cache_read_tokens: 3000,
+      cache_creation_tokens: 30,
+    });
+    // 上报的 usage 快照事件同步注入轮累计（ledger replace 语义消费正确轮级值）
+    const usageEv = events.find((e) => e.type === 'text' && e.usage !== undefined);
+    expect(usageEv?.usage).toEqual({
+      input_tokens: 150,
+      output_tokens: 30,
+      cache_read_tokens: 3000,
+      cache_creation_tokens: 30,
+    });
+    expect(safeParseAgentEvent(usageEv!).success).toBe(true);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('message_end 无 usage（旧版 pi）→ 退回 turn_end 定格值，行为与修复前一致', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('hi');
+    await tick();
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    emitEvent(child, {
+      type: 'message_end',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    });
+    emitEvent(child, {
+      type: 'turn_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        usage: { input: 11, output: 7, cacheRead: 3, cacheWrite: 2 },
+      },
+    });
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.usage).toEqual({
+      input_tokens: 11,
+      output_tokens: 7,
+      cache_read_tokens: 3,
+      cache_creation_tokens: 2,
+    });
+
+    closeQueue();
+    await consumeP;
+  });
+
   it('多轮串行：第二条 prompt 仅在第一轮 agent_settled 后发出', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);

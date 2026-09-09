@@ -350,6 +350,36 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/**
+ * ql-20260909-028：pi 单次调用 usage（message.usage，字段 input/output/
+ * cacheRead/cacheWrite，口径同 pi-events buildUsageEvent）累加进轮累计。
+ */
+function accumulatePiUsage(
+  acc: AgentEventUsage | null,
+  raw: Record<string, unknown>,
+): AgentEventUsage {
+  const num = (v: unknown): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  return {
+    input_tokens: (acc?.input_tokens ?? 0) + num(raw.input),
+    output_tokens: (acc?.output_tokens ?? 0) + num(raw.output),
+    cache_read_tokens: (acc?.cache_read_tokens ?? 0) + num(raw.cacheRead),
+    cache_creation_tokens:
+      (acc?.cache_creation_tokens ?? 0) + num(raw.cacheWrite),
+  };
+}
+
+/** ql-20260909-028：任一字段 >0 视为有效累加（全 0 = 错误轮用量事实，退回定格值同义）。 */
+function hasPositiveUsage(u: AgentEventUsage | null): boolean {
+  return (
+    !!u &&
+    ((u.input_tokens ?? 0) > 0 ||
+      (u.output_tokens ?? 0) > 0 ||
+      (u.cache_read_tokens ?? 0) > 0 ||
+      (u.cache_creation_tokens ?? 0) > 0)
+  );
+}
+
 // ── PiRpcDriver ─────────────────────────────────────────────────────────────
 
 /**
@@ -626,9 +656,17 @@ export class PiRpcDriver implements InteractiveDriver {
     };
 
     // 本轮 turn 的 error/usage 缓存（error 事件 → is_error result；
-    // turn_end usage 事件（轮级累计 replace 语义）→ result.usage）。
+    // turn_end usage 事件 + message_end 逐调用累加（ql-20260909-028）→ result.usage）。
     let pendingTurnError: string | null = null;
     let turnUsage: AgentEventUsage | undefined;
+    // ql-20260909-028：轮内逐调用 usage 累加和。pi 每条 assistant message.usage
+    // 是**单次调用**量（会话 jsonl ground truth 实证：input 随调用起伏非单调），
+    // turn_end 只定格最后一次调用——原 replace 语义把轮内工具循环的中间调用
+    // 全部丢掉（实测全会话只记到真实消耗的 2-9%）。修：message_end 原始帧逐条
+    // 累加，turn_end 到达时以累加和为准（定格值与最后一条 message_end 是同一
+    // 调用，不得再计入）；累加值为空（pi 版本不带 message_end usage）退回定格
+    // 值，零回归兜底。
+    let turnUsageSum: AgentEventUsage | null = null;
     // 本轮 turn 是否已上报 result（防 agent_settled 与进程退出双触发重复）。
     let turnReported = false;
     // consume 是否已最终收敛（进程异常退出 / consume 抛错）。
@@ -851,6 +889,15 @@ export class PiRpcDriver implements InteractiveDriver {
           pendingTurnError = null;
         }
       }
+      // ql-20260909-028：message_end 原始帧逐调用 usage 累加（归一化器对
+      // message.usage 零产出，driver 侧是唯一消费点；assistant 消息每条对应
+      // 一次 API 调用，user/toolResult 不带 usage）。
+      if (msg.type === 'message_end') {
+        const endMsg = isRecord(msg.message) ? msg.message : {};
+        if (endMsg.role === 'assistant' && isRecord(endMsg.usage)) {
+          turnUsageSum = accumulatePiUsage(turnUsageSum, endMsg.usage);
+        }
+      }
       const events = normalizer.normalizeRpcLine(line);
       for (const ev of events) {
         if (ev.type === 'error' && ev.content) {
@@ -863,7 +910,17 @@ export class PiRpcDriver implements InteractiveDriver {
           pendingTurnError = null;
         }
         if (ev.usage) {
-          turnUsage = ev.usage; // 轮级累计 replace 语义（pi-events.ts 口径）
+          // ql-20260909-028：turn_end 定格值 = 最后一次调用量（与最后一条
+          // message_end 累加项重复，不得双计）。轮内有累加和以和为准；累加为空
+          // （pi 版本 message_end 不带 usage / 异常流）退回定格值。并把轮累计
+          // 注入事件本体——ledger（replace 语义消费轮级累计）与 live 显示一致。
+          turnUsage = hasPositiveUsage(turnUsageSum)
+            ? { ...turnUsageSum! }
+            : ev.usage;
+          ev.usage = turnUsage;
+          if (isRecord(ev.metadata)) {
+            ev.metadata.usage = turnUsage;
+          }
         }
         Promise.resolve(onMessage?.({ events: [ev] })).catch((err: unknown) => {
           // eslint-disable-next-line no-console
@@ -917,6 +974,7 @@ export class PiRpcDriver implements InteractiveDriver {
         // 本轮状态重置
         pendingTurnError = null;
         turnUsage = undefined;
+        turnUsageSum = null;
         turnReported = false;
         turnSawRun = false;
 
