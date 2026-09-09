@@ -529,6 +529,10 @@ function runCmd(
         cwd: opts.cwd,
         timeout: opts.timeout,
         maxBuffer: 10 * 1024 * 1024,
+        // daemon 常以无控制台形态运行（autostart/respawn windowsHide detached），
+        // 不加 CREATE_NO_WINDOW 则每次 git 调用都新开一个可见控制台窗，跑完即关
+        // （用户侧表现为「git bash 弹窗闪烁」）。对齐仓内其余 spawn 点。
+        windowsHide: true,
       },
       (err, stdout, stderr) => {
         const out = Buffer.isBuffer(stdout)
@@ -767,7 +771,7 @@ function runGitFetch(
     execFile(
       'git',
       ['-C', root, 'fetch', '--quiet'],
-      { timeout: GIT_FETCH_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
+      { timeout: GIT_FETCH_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
       (err, stdout, stderr) => {
         void stdout;
         void stderr; // 不外发（design §5.2：fetch 输出只判三态代号）
@@ -1887,6 +1891,8 @@ export class HostFsHandler {
           env: env as NodeJS.ProcessEnv,
           timeout: params.timeout > 0 ? params.timeout : undefined,
           maxBuffer: 10 * 1024 * 1024,
+          // 同 runCmd：无控制台 daemon 下不藏窗口则每次执行闪控制台窗。
+          windowsHide: true,
         },
         (err, stdout, stderr) => {
           const out = Buffer.isBuffer(stdout)

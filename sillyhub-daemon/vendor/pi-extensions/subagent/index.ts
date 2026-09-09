@@ -336,6 +336,9 @@ async function runSingleAgent(
 				cwd: cwd ?? defaultCwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
+				// pi 本体由 daemon 以 windowsHide 启动（无控制台），这里再 spawn pi
+				// 子进程若不加 CREATE_NO_WINDOW 会闪可见控制台窗（Windows）。
+				windowsHide: true,
 			});
 			let buffer = "";
 

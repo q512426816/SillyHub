@@ -79,6 +79,11 @@ git 命令: execFile(非 shell) + cwd:workdir（防注入）
 - 本地 toRpcError 与 file-rpc 的私有实现等价（后者未导出），保持字面对齐。
 - 权限走 daemon 实体级 allowed_roots（不做 per-runtime PolicyEngine 精细裁决，
   那是 list_dir 专属）；patch_id 去重本身在 backend（本 handler 只给 skipped 信号）。
+- 三个子进程执行器（runCmd / runGitFetch / run_command）execFile 均带
+  `windowsHide: true`（ql-20260909-023-049f）：daemon 常以无控制台形态运行
+  （autostart/respawn detached），不加 CREATE_NO_WINDOW 时每次 git 调用都会
+  闪一个可见控制台窗（用户侧表现为「git bash 弹窗闪烁」）；非 Windows 平台
+  该选项被忽略，零影响。
 
 ## 人工备注
 

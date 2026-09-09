@@ -62,6 +62,9 @@ runGit: execFileAsync（不经 shell，无注入面）timeout 60s / maxBuffer 10
   git 大版本升级需回归。
 - execFile 不支持 stdio 选项：capture=false 时仍捕获 stdout 但 return '' 丢弃，
   等价 Python DEVNULL；stderr 始终经 err.stderr 暴露以构造 GitError。
+- runGit execFile 带 `windowsHide: true`（ql-20260909-023-049f，Python 源无此
+  概念的 Windows 补充）：daemon 无控制台运行时不加 CREATE_NO_WINDOW，每次
+  git 调用都会闪一个可见控制台窗；非 Windows 平台该选项被忽略。
 
 ## 人工备注
 

@@ -285,6 +285,9 @@ async function runGit(
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_MAX_BUFFER,
       encoding: 'utf8',
+      // Windows 专属补充（Python 源无此概念）：daemon 无控制台运行时不加
+      // CREATE_NO_WINDOW，每次 git 调用都会闪一个可见控制台窗。
+      windowsHide: true,
     });
     return capture ? stdout : '';
   } catch (e) {
