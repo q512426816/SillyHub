@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-09-conflict-root-workspace-scoping",
+  "generatedAt": "2026-09-09T14:28:32.777Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-09-conflict-root-workspace-scoping",
+      "metrics": {
+        "matches": 1,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-09-conflict-root-workspace-scoping",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-09-conflict-root-workspace-scoping",
+      "metrics": {
+        "backendEndpoints": 2087,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-09-conflict-root-workspace-scoping",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "integration-critical 项以契约级证据覆盖（真实栈部署后冒烟列入发版 checklist——本机生产栈跑旧版代码，重启部署非 verify 范围）",
+      "command": "① cd backend && uv run pytest app/modules/daemon/tests/ -q --no-cov ② cd frontend && pnpm gen:types && git diff --exit-code 检查（已提交后）③ cd sillyhub-daemon && pnpm vitest run tests/sillyspec-conflict-snapshot.test.ts tests/sillyspec-platform-command.test.ts tests/daemon-status-root-persistence.test.ts",
+      "exitCode": 0,
+      "logPath": "会话记录（backend"
+    }
+  ]
+}
