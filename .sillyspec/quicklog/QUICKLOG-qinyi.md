@@ -409,3 +409,37 @@
 根因：原全量派生切片每翻页重跑三源全量整实体
 方案：三源 COUNT 真实 total+合并偏移窗口切片+列投影+defect_count 裸列对齐
 结果：分页测试 8 用例全绿；ppm 域 30 passed；ruff/mypy 0 错；已提交 16acdccac
+
+## ql-20260909-016-fa10 | 2026-09-09 13:39:40 | init lease 凭据静默断链补日志 + daemon 心跳工作区键 UUID 守卫
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/lease/context.py（init 注入分支补 else 降级 warning）
+- backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py（组 C 两用例补 capsys 断言）
+- sillyhub-daemon/src/task-runner.ts（跳过 writeLocalYaml 补 warn 带原因枚举）
+- sillyhub-daemon/src/daemon.ts（WORKSPACE_ID_RE 守卫三处接线）
+- sillyhub-daemon/tests/test_init_lease.test.ts（缺失 warn + 全凭据正问用例）
+- sillyhub-daemon/tests/daemon-status-root-persistence.test.ts（UUID 守卫三用例）
+需求：init lease 凭据静默断链补日志 + daemon 心跳工作区键 UUID 守卫
+根因：三层静默断链与心跳 422 两坑的代码修复（对应当日两份缺陷文档的修复建议）：降级/跳过合法但零提示使 local.yaml platform 段缺失无从发现；心跳协议字段由目录名/学习键宽松填充无校验，任一非 UUID 值整心跳被拒
+方案：backend context.py init 注入分支补 else 降级 warning（事件 init_claim_local_yaml_skipped + reason 枚举）；daemon task-runner 跳过 writeLocalYaml 时 console.warn 带原因枚举；daemon.ts WORKSPACE_ID_RE 单源守卫三处接线（spec_cache 目录扫描/claim 学习键/恢复存量键，非 UUID 跳过+warn 一次 Set 去重）
+结果：backend test_init_claim_tokens 8 passed + ruff/format/mypy 0；daemon 新增 4 用例共 36 passed + 心跳回归 4 文件 101 passed + tsc 0；模块文档三处变更索引已同步
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/patrol.py
+
+## ql-20260909-017-d2f1 | 2026-09-09 13:53:33 | 变更列表 pending 集 Redis 缓存+epoch 失效
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/pending_cache.py（缓存三函数）
+- backend/app/modules/change/service.py（读穿+三 bump）
+- backend/app/modules/platform_sync/service.py（两分支 bump）
+- backend/app/modules/change/tests/test_pending_cache.py（4 用例）
+需求：变更列表 pending 集 Redis 缓存+epoch 失效
+根因：聚焦模式每次翻页都拉全 workspace latest_progress 肥 JSON
+方案：pending_cache.py read-through 缓存+四处 commit 后 epoch bump+TTL 兜底+降级回退
+结果：4 用例全绿；change 域 504+platform_sync 213 passed；ruff/mypy 0 错；已提交
+
+## ql-20260909-018-ca2e | 2026-09-09 13:57:29 | patrol 巡检 N+1 批量化——run→lease→runtime→daemon 三段链路逐 run 3 查询改批量 IN 预取
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）

@@ -758,6 +758,23 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
                 "platform_token": _shpsync_plain,
                 "mcp_token": _shmcp_plain,
             }
+        else:
+            # 防御降级取证（docs/sillyspec/init-lease-silent-no-local-yaml.md，2026-09-09）：
+            # 降级本身合法（缺身份不签 token），但此前零提示——claim 照常成功、daemon 侧
+            # 跳过写盘也零提示，local.yaml platform 段缺失整链静默，同步断链无从发现。
+            _skip_reasons = [
+                name
+                for name, ok in (
+                    ("workspace_id", _init_ws is not None),
+                    ("actor_user_id", _init_actor is not None),
+                )
+                if not ok
+            ]
+            log.warning(
+                "init_claim_local_yaml_skipped",
+                lease_id=str(lease.id),
+                reason="missing_or_invalid:" + ",".join(_skip_reasons),
+            )
         _init_sv = lease_meta.get("latest_spec_version")
         if _init_sv is not None:
             payload["latest_spec_version"] = _init_sv

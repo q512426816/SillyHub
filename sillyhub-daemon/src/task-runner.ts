@@ -917,6 +917,22 @@ export class TaskRunner {
       localPlatformToken && localMcpToken
         ? { platform_token: localPlatformToken, mcp_token: localMcpToken }
         : undefined;
+    // init lease 凭据断链取证（docs/sillyspec/init-lease-silent-no-local-yaml.md，2026-09-09）：
+    // 跳过写盘本身是既有语义（向后兼容旧 lease / mock），但此前零提示——backend 降级不签发
+    // 或 lease 残缺时 local.yaml platform 段缺失整链静默，CLI 同步断链无从发现。warn 带
+    // 原因枚举，不改变行为。
+    if (!local_yaml) {
+      const localYamlSkipReason = !localYamlRaw
+        ? 'local_yaml_missing'
+        : !localYamlObj
+          ? 'local_yaml_not_object'
+          : 'token_empty_or_invalid';
+      console.warn(
+        'task_runner: init_lease_local_yaml_skipped',
+        leaseId,
+        localYamlSkipReason,
+      );
+    }
 
     const initParams: HandleInitLeaseParams = {
       workspaceId,

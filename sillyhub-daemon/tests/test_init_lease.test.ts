@@ -1039,6 +1039,53 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
       .find(Boolean);
     expect(initWithout).toContain('--tool claude');
   });
+
+  // ── 2026-09-09 init lease 凭据断链取证（docs/sillyspec/init-lease-silent-no-local-yaml.md）──
+  //
+  // _runInitLease 跳过 writeLocalYaml 此前零提示——backend 降级/lease 残缺时 local.yaml
+  // platform 段缺失整链静默。修复：跳过时 console.warn 带原因枚举（不改变跳过语义）。
+  it('lease 无 local_yaml → warn init_lease_local_yaml_skipped(local_yaml_missing)；带全凭据 → 不 warn', async () => {
+    vi.clearAllMocks();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      // 缺失：platformConfig 整段不带 local_yaml（backend 防御降级形态）。
+      const { runner } = setupRunner();
+      const leaseNoYaml = makeInitLease({
+        workspaceId: 'ws-init-1',
+        platformConfig: { strategy: 'repo-native' },
+      } as never);
+      await runner.runLease(leaseNoYaml);
+      const missHits = warnSpy.mock.calls.filter(
+        (c) => String(c?.[0]).includes('task_runner: init_lease_local_yaml_skipped'),
+      );
+      expect(missHits.length).toBe(1);
+      expect(String(missHits[0]?.[2])).toBe('local_yaml_missing');
+
+      // 完整：两 token 齐备 → 不 warn（writeLocalYaml 执行——模块级 mock 拦截，
+      // 免真实落盘污染，同时正问断言写盘确被调）。
+      warnSpy.mockClear();
+      vi.clearAllMocks();
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      localYamlWriterMock.mockImplementationOnce(async () => undefined);
+      const { runner: runner2 } = setupRunner();
+      const leaseFull = makeInitLease({
+        workspaceId: 'ws-init-1',
+        platformConfig: {
+          strategy: 'repo-native',
+          local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+        },
+      } as never);
+      await runner2.runLease(leaseFull);
+      expect(
+        warnSpy.mock.calls.filter((c) =>
+          String(c?.[0]).includes('init_lease_local_yaml_skipped'),
+        ).length,
+      ).toBe(0);
+      expect(localYamlWriterMock).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 // 防止 "homedir 未使用" lint（清理路径预留扩展用）

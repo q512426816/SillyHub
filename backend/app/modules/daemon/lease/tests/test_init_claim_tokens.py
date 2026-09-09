@@ -310,7 +310,7 @@ class TestInitClaimDefensiveDegrade:
 
     @pytest.mark.asyncio
     async def test_no_token_issued_when_actor_user_id_missing(
-        self, db_session: AsyncSession
+        self, db_session: AsyncSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """actor_user_id 缺失 → 两 service 不被调，payload.platform_config 无 local_yaml。"""
         _u, rt_id, ws, _actor = await _setup(db_session)
@@ -325,10 +325,16 @@ class TestInitClaimDefensiveDegrade:
         assert "local_yaml" not in pc
         # platform_config 透传维持 server_origin + strategy（未被 local_yaml 污染）
         assert set(pc.keys()) == {"server_origin", "strategy"}
+        # 降级不再静默（docs/sillyspec/init-lease-silent-no-local-yaml.md）：warning
+        # 带原因枚举，供平台侧排查「init 成功但 local.yaml platform 段缺失」。
+        # get_logger 是 structlog 控制台渲染（不进 stdlib caplog），按 stdout 文本断言。
+        out = capsys.readouterr().out
+        assert "init_claim_local_yaml_skipped" in out
+        assert "actor_user_id" in out
 
     @pytest.mark.asyncio
     async def test_no_token_issued_when_workspace_id_missing(
-        self, db_session: AsyncSession
+        self, db_session: AsyncSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """workspace_id 缺失 → 两 service 不被调（workspace 是 token 绑定键 + 隔离键）。"""
         _u, rt_id, _ws, actor = await _setup(db_session)
@@ -340,6 +346,9 @@ class TestInitClaimDefensiveDegrade:
         assert plat_mock.call_count == 0
         assert mcp_mock.call_count == 0
         assert "local_yaml" not in payload.get("platform_config", {})
+        out = capsys.readouterr().out
+        assert "init_claim_local_yaml_skipped" in out
+        assert "workspace_id" in out
 
 
 # ---------------------------------------------------------------------------

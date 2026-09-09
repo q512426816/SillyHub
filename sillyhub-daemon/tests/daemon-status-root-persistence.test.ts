@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -178,5 +178,92 @@ describe('2026-09-08 采集根落盘/恢复', () => {
     d._noteSillySpecStatusRoot(null, undefined);
     expect(d._sillyspecStatusRoot).toBeNull();
     restore();
+  });
+});
+
+describe('2026-09-09 心跳工作区键 UUID 守卫（daemon-heartbeat-workspace-key-no-uuid-guard）', () => {
+  const REAL_WS = 'b97f8231-9404-43bd-89de-38c281c4d875';
+
+  it('claim 学习：非 UUID workspaceId → 拒绝登记 + warn 一次（不进 sillyspec_status_map）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const daemon = await buildDaemon();
+      const d = daemon as unknown as {
+        _noteSillySpecStatusRoot(ws: string | null | undefined, p: string | undefined): void;
+        _sillyspecStatusRoots: Map<string, unknown>;
+      };
+      d._noteSillySpecStatusRoot('ws-b1', 'C:\\repo\\fake');
+      d._noteSillySpecStatusRoot('ws-b1', 'C:\\repo\\fake'); // 第二次不再 warn
+      expect(d._sillyspecStatusRoots.has('ws-b1')).toBe(false);
+      const hits = warnSpy.mock.calls.filter((c) =>
+        String(c[0]).includes('sillyspec_status_root_non_uuid_ws_rejected'),
+      );
+      expect(hits.length).toBe(1);
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('恢复：存量 status-roots.json 含非 UUID 键 → 过滤回填 + warn 带被拒键清单', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      writeFileSync(
+        join(stateDir, 'sillyspec-status-roots.json'),
+        JSON.stringify({
+          workspaces: {
+            [REAL_WS]: { root_path: 'C:\\repo\\real', last_claim_at: 1 },
+            'ws-b1': { root_path: 'C:\\Temp', last_claim_at: 1 },
+          },
+        }),
+        'utf-8',
+      );
+      const daemon = await buildDaemon();
+      const d = daemon as unknown as {
+        _restoreSillySpecStatusRoot(): Promise<void>;
+        _sillyspecStatusRoots: Map<string, unknown>;
+      };
+      await d._restoreSillySpecStatusRoot();
+      expect(d._sillyspecStatusRoots.has(REAL_WS)).toBe(true);
+      expect(d._sillyspecStatusRoots.has('ws-b1')).toBe(false);
+      expect(
+        warnSpy.mock.calls.some((c) =>
+          String(c[0]).includes('sillyspec_status_roots_non_uuid_keys_dropped'),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('spec_cache 扫描：specs 根非 UUID 目录（备份名）→ 跳过不进心跳 + warn 一次', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const specsRoot = join(stateDir, 'specs');
+      for (const dir of [REAL_WS, 'b97f8231.pre-junction-backup-20260909']) {
+        mkdirSync(join(specsRoot, dir, '.runtime'), { recursive: true });
+        writeFileSync(
+          join(specsRoot, dir, '.runtime', 'spec-version.json'),
+          JSON.stringify({ spec_version: 5 }),
+          'utf-8',
+        );
+      }
+      const daemon = await buildDaemon();
+      const d = daemon as unknown as {
+        _collectSpecCacheEntries(): Promise<{ workspace_id: string; spec_version: number }[]>;
+      };
+      const entries = await d._collectSpecCacheEntries();
+      expect(entries).toEqual([{ workspace_id: REAL_WS, spec_version: 5 }]);
+      expect(
+        warnSpy.mock.calls.some((c) => String(c[0]).includes('spec_cache_non_uuid_dir_skipped')),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
   });
 });

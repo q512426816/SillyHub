@@ -1217,6 +1217,19 @@ const SILLYSPEC_STATUS_ROOTS_FILE = 'sillyspec-status-roots.json';
 /** 映射 LRU 上限（防无界膨胀：spawn 数/心跳载荷随目标数线性增长）。 */
 const SILLYSPEC_STATUS_ROOTS_MAX = 8;
 
+/**
+ * 工作区 id 形状校验（36 位 8-4-4-4-12 连字符，docs/sillyspec/
+ * daemon-heartbeat-workspace-key-no-uuid-guard.md 2026-09-09）：心跳协议字段
+ * （spec_cache[].workspace_id / sillyspec_status_map 键）由宽松来源（specs 目录名 /
+ * claim 学习键 / status-roots.json 存量）填充，非 UUID 值会被 backend pydantic
+ * 整心跳 422（实证：备份目录名 / 测试残留 ws-b1 键）。写入与上报两侧统一守卫。
+ */
+const WORKSPACE_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isWorkspaceIdShape(v: unknown): v is string {
+  return typeof v === 'string' && WORKSPACE_ID_RE.test(v);
+}
+
 // ── perf-remediation task-09 / D-003@v1：_pollLoop 按通道拆分门控常量 ─────────
 //
 // lease 轮询跳过条件：WS isConnected 且距最后一条 WS 消息 < LEASE_POLL_SKIP_MS
@@ -1546,6 +1559,13 @@ export class Daemon {
     string,
     { rootPath: string; lastClaimAt: number }
   >();
+  /**
+   * UUID 守卫 warn 去重（WORKSPACE_ID_RE 同族，2026-09-09）：非 UUID 的 specs 目录名 /
+   * claim 学习键各 warn 一次即静默跳过——心跳每跳扫描、claim 频繁重入，不 dedup 会刷屏。
+   * Set 记名字（目录/键数量级有限，无淘汰）。
+   */
+  private readonly _nonUuidSpecDirsWarned = new Set<string>();
+  private readonly _nonUuidClaimWsWarned = new Set<string>();
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -4679,6 +4699,18 @@ export class Daemon {
       return;
     }
     if (workspaceId) {
+      // UUID 守卫（WORKSPACE_ID_RE 同族）：非 UUID 的 claim workspaceId（测试/联调残留键，
+      // 实证 ws-b1~b4）拒绝登记——登记后随 statusTargets 采集进 sillyspec_status_map 心跳，
+      // 非 UUID 键同样遭 backend pydantic 整心跳 422。warn 一次（claim 频繁重入）。
+      if (!isWorkspaceIdShape(workspaceId)) {
+        if (!this._nonUuidClaimWsWarned.has(workspaceId)) {
+          this._nonUuidClaimWsWarned.add(workspaceId);
+          this._logger.warn('sillyspec_status_root_non_uuid_ws_rejected', {
+            workspace_id: workspaceId,
+          });
+        }
+        return;
+      }
       const known = this._sillyspecStatusRoots.get(workspaceId);
       this._sillyspecStatusRoots.delete(workspaceId);
       this._sillyspecStatusRoots.set(workspaceId, {
@@ -4745,13 +4777,25 @@ export class Daemon {
         workspaces?: Record<string, { root_path?: unknown }>;
       };
       if (obj.workspaces && typeof obj.workspaces === 'object') {
+        const rejectedKeys: string[] = [];
         for (const [wsId, v] of Object.entries(obj.workspaces)) {
+          // UUID 守卫（WORKSPACE_ID_RE 同族）：存量文件可能已被测试/联调残留键污染
+          //（实证 ws-b1~b4），回填同样进心跳 map——读侧一并过滤，warn 一笔带被拒键清单。
+          if (!isWorkspaceIdShape(wsId)) {
+            rejectedKeys.push(wsId);
+            continue;
+          }
           if (typeof v?.root_path === 'string' && v.root_path) {
             this._sillyspecStatusRoots.set(wsId, {
               rootPath: v.root_path,
               lastClaimAt: 0,
             });
           }
+        }
+        if (rejectedKeys.length > 0) {
+          this._logger.warn('sillyspec_status_roots_non_uuid_keys_dropped', {
+            keys: rejectedKeys,
+          });
         }
         if (this._sillyspecStatusRoots.size > 0) {
           this._logger.info('sillyspec_status_roots_restored', {
@@ -4868,6 +4912,17 @@ export class Daemon {
     const out: { workspace_id: string; spec_version: number }[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      // UUID 守卫：specs 根下的非 UUID 目录（备份/临时/联调残留）不进心跳——
+      // 心跳 422 实证（见 WORKSPACE_ID_RE 注释）。warn 一次防目录每跳刷屏。
+      if (!isWorkspaceIdShape(entry.name)) {
+        if (!this._nonUuidSpecDirsWarned.has(entry.name)) {
+          this._nonUuidSpecDirsWarned.add(entry.name);
+          this._logger.warn('spec_cache_non_uuid_dir_skipped', {
+            dir: entry.name,
+          });
+        }
+        continue;
+      }
       const version = await readLocalSpecVersion(resolveSpecDir(entry.name));
       if (version !== null) {
         out.push({ workspace_id: entry.name, spec_version: version });
