@@ -5,6 +5,7 @@ created_at: 2026-08-27 14:32:24
 
 # daemon 模块变更索引
 
+- ql-20260909-012-f48b | backend 三处事件循环阻塞修复——①sillyspec_compare.compare 比对全程（同步 FS IO 逐文件 stat+read_text 全量读 + difflib 大文件 O(n²)）与 2MB 体积护栏（反复 json.dumps 测字节）asyncio.to_thread 化，spec 树几百文件时原单请求阻塞数百 ms-秒级拖垮全服务并发；②session logs gzip 回显 dumps+compress 纯 CPU 段 to_thread 化（几十 MB payload 压缩 100-300ms 原直接卡循环）；③MinioStorage client 惰性单例复用（原每次操作 create_client+async with 即建即毁重付 TCP+TLS 握手，docstring 自称复用与实现不符；双检+Lock 防并发首建、aclose 关闭后可重建、get_object_stream finally body.close 防连接泄漏）——补 tests/modules/storage/test_minio_client_reuse.py 三用例锁定复用/重建/并发首建；daemon 域 81+storage 3 passed，ruff/mypy 0 错
 - ql-20260909-011-8938 | 交互会话逐事件上报微批化——onTurnMessage 提交段改 per leaseId:runId 队列 20ms 窗攒批一次 HTTP（原每事件一次串行 RTT，一 turn 几百事件 ≈ 2-6s 白加延迟且背压回灌子进程 stdout；单 drain 协程保序，flatSeq 入队前取号）；onTurnResult/onSessionEnd 开头 flushInteractiveBatches 强制冲队保证事件先于终态；claimToken 空窗整批 enqueuePendingToken 入箱；SILLYHUB_INTERACTIVE_BATCH_MS=0 旁路（vitest 全局 0 保既有断言，生产默认 20）；测试三件套抽 tests/interactive-test-helpers.ts 共享；专项测试 5 用例 + 受影响面 160 + 全量 3811 passed（4 个心跳第 7 参断言预存失败与本改动无关，stash 验证）
 - ql-20260827-010-e472 | 会话附件 daemon 落盘改内容寻址命名 attachments/{sha256}.{白名单ext}（同内容复用、废弃同名 (n) 序号），注入清单注原文件名并明确无需浏览比对其他文件
 - ql-20260827-014-d438 | reopen 会话级供应商凭证链补全——backend 建 lease 补写 session_llm_provider_id + SESSION_RESUME 携解密 provider_config；daemon resume 路由透传 record.providerConfig（修 reopen 后 SDK 无凭证 "Not logged in" 秒退、会话约 2s 回 ended 死亡循环）

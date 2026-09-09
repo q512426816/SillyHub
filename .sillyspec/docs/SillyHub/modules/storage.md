@@ -28,10 +28,12 @@ created_at: 2026-08-18 01:45:00
 MinIO 实现（`MinioStorage`）：
 ```
 session = aiobotocore.get_session()          # 模块级复用（建 client 有开销）
-client = session.create_client("s3", endpoint/keys/bucket/region)
+client = 惰性单例（ql-20260909-012：_get_client 双检+Lock 防并发首建竞态；
+         原实现每次操作 create_client+async with 即建即毁，每次重付 TCP+TLS 握手）
 put_object:  先 _ensure_bucket()（create_bucket 失败一律吞 → 幂等，_bucket_ready 只跑一次）
-get_stream:  resp["Body"].iter_chunks(1MB) 异步产出
+get_stream:  resp["Body"].iter_chunks(1MB) 异步产出（finally body.close——单例不随生成器关）
 head:        ContentLength/ContentType → ObjectStat（ContentType 缺省 octet-stream）
+aclose:      关闭单例（lifespan shutdown；关闭后可重建，惰性可复活）
 ```
 
 ## 注意事项

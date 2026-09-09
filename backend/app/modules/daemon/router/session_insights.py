@@ -10,6 +10,7 @@ patch 兼容（D-007）：``_SESSION_RUNS_MAX`` 常量在包 ``__init__``（测�
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 import uuid
@@ -403,13 +404,18 @@ async def get_session_logs(
         limit=limit,
     )
     payload = [AgentRunLogEntry.model_validate(log) for log in logs]
-    raw = json.dumps([item.model_dump(mode="json") for item in payload], ensure_ascii=False).encode(
-        "utf-8"
+    # ql-20260909-012：json.dumps + gzip.compress 均为纯 CPU 同步调用——长会话
+    # 5000 行 × 大文本列 payload 可达几十 MB（gzip-6 压缩 10MB 约 100-300ms），
+    # 直接跑会把整个事件循环卡住，丢线程池解放并发请求。
+    raw = await asyncio.to_thread(
+        lambda: json.dumps(
+            [item.model_dump(mode="json") for item in payload], ensure_ascii=False
+        ).encode("utf-8")
     )
     # 小响应不值得压缩编码开销（阈值对齐常见 CDN 默认 1KB）。
     if len(raw) > 1024 and "gzip" in request.headers.get("accept-encoding", "").lower():
         return Response(
-            content=gzip.compress(raw, compresslevel=6),
+            content=await asyncio.to_thread(gzip.compress, raw, 6),
             media_type="application/json",
             headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
         )

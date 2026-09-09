@@ -25,6 +25,7 @@ platform_sync 进度表），归一化成对比响应（§7.2）——router 只
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -332,12 +333,20 @@ class SillySpecCompareService:
         if kind == "progress":
             platform_progress = await self._load_platform_progress(workspace_id, change)
             snapshot = await self._fetch_snapshot(instance_id, change, kind)
-            payload = self._build_progress_compare(change, snapshot, platform_progress)
+            payload = await asyncio.to_thread(
+                self._build_progress_compare, change, snapshot, platform_progress
+            )
         else:
             spec_root = await self._load_spec_root(workspace_id)
             snapshot = await self._fetch_snapshot(instance_id, change, kind)
-            payload = self._build_spec_tree_compare(change, snapshot, spec_root)
-        return _enforce_response_cap(payload)
+            # ql-20260909-012：比对全程同步 FS IO（逐文件 stat+read_text 全量读）+
+            # difflib（大文件最坏 O(n²)）——spec 树几百文件时阻塞事件循环数百 ms
+            # 至秒级，丢线程池解放并发请求（纯函数不改共享状态，线程安全）。
+            payload = await asyncio.to_thread(
+                self._build_spec_tree_compare, change, snapshot, spec_root
+            )
+        # 体积护栏对整个 payload 反复 json.dumps 测字节（上限 2MB+），同丢线程池。
+        return await asyncio.to_thread(_enforce_response_cap, payload)
 
     # ── 权限 / RPC / 平台侧定位 ─────────────────────────────────────────────
 
