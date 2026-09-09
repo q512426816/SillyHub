@@ -103,3 +103,38 @@ created_at: 2026-09-09 11:46:42
 - normalized_requirement: 落地 token 口径——shadow-primary 两主题降重取值随本决策；选中态描边走 --row-active-ring 语义 token；composer 聚焦环 3px/10% 品牌色
 - impacts: [FR-01, FR-03, FR-05, task-?]
 - evidence: 2026-09-09 用户贴 v3 双主题截图要求自审
+
+## D-006@v2: 共享头像构件口径修正——不丢自定义头像能力
+- type: architecture
+- priority: P0
+- status: accepted
+- source: code
+- supersedes: D-006@v1
+- question: 独立审查发现 ChatMessageAvatar 原接口（kind/name/size/title）无 avatar 图片入参，群聊同源替换会静默丢失已上线的成员自定义头像（GroupMemberAvatar 带 token 取 blob）
+- answer: 同源口径修正为「构件同源、能力不丢」——ChatMessageAvatar 增 avatar?: string | null 入参优先渲染图片；群聊成员自定义头像取数链（成员表 avatar 字段→blob）不变；渐变光环作 agent 侧外圈氛围，群聊 agent 成员保留首字/分色区分发送者
+- normalized_requirement: 群聊消息行有自定义头像时渲染图片（回归用例覆盖），无头像回退首字/分色；单聊 agent 气泡挂渐变光环头像
+- impacts: [FR-01, task-03, task-10]
+- evidence: brainstorm stage review（agent_08197c86）第 4 项 fail 第 1 条；frontend/src/components/group-chat/group-member-avatar.tsx 现状
+
+## D-002@v2: 品牌色派生 token 三主题分值（blue 不继承紫）
+- type: boundary
+- priority: P1
+- status: accepted
+- source: code
+- supersedes: D-002@v1
+- question: 独立审查发现「:root 浅色两主题共用」会让 blue 主题继承 ai-native 紫色极光/光晕/选中环——:root 即 ai-native
+- answer: 品牌色派生 token（--aurora-*/--row-active(-ring)/--shadow-glow/--shadow-primary）按既有 --shadow-primary 三主题分值惯例写满 :root/[data-theme="blue"]/[data-theme="dark"] 三块，blue 给蓝系取值
+- normalized_requirement: blue 主题下极光/选中态/投影为蓝系（#2563eb 系），零紫色成分；globals.css 三块各自完整取值
+- impacts: [FR-02, FR-03, task-01]
+- evidence: brainstorm stage review 第 5 项 gap；globals.css:107/192/281 既有三主题分值惯例
+
+## D-010@v1: RoundDivider 状态六态映射
+- type: boundary
+- priority: P1
+- status: accepted
+- source: code
+- question: 独立审查发现 RoundDivider.status 三态（completed/failed/running）覆盖不了轮尾 TurnUiStatus 实际六态（pending/running/interrupting/completed/failed/killed）
+- answer: status 改六态判别联合，着色映射：completed=success / failed+killed=error / running=info / pending+interrupting=neutral
+- normalized_requirement: 六态均有定义好的胶囊着色与文案；对话视图轮尾六态渲染无 undefined 分支
+- impacts: [FR-04, task-04, task-06]
+- evidence: brainstorm stage review 第 4 项 fail 第 2 条；turn-timeline.tsx:122 TurnUiStatus 六态现状
