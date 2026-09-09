@@ -249,39 +249,49 @@ async def list_sessions(
                 r.terminating_at = term_map[r.lease_id]
     # FR-08 / D-006: 复用 list_change_sessions 的首条 user_input 摘要逻辑（前 30 字）。
     # 逻辑与 change/router.py:list_change_sessions 保持同步（R-7），未来可抽共享 helper。
+    # 2026-09-09 阿里云 slow.query 实测（本查询 3.1s）：①只对 title 为空的会话查——
+    # 有 title 的会话走 session.title 派生（下方 get(r.id) or 不变），tool_report
+    # 会话已带自动标题，直接跳过整个摘要查询；②SQL 内 substr 截到 64 字符，免把
+    # 单行均值 33KB 的 TOAST 全文解压拉回（消费方 [:30]，substr 双方言语符语义，
+    # 64 > 30 保证派生零回归）。
     if items:
-        session_ids = [item.id for item in items]
-        # P5（2026-08-24 会话审查）：窗口函数分区取每会话首条 user_input——
-        # 原实现拉页内会话全部 user_input 行（50KB 文本）Python 取最早，
-        # 长会话下列表请求随轮数线性放大。PG/SQLite 双方言支持。
-        rn = (
-            sa_func.row_number()
-            .over(
-                partition_by=AgentRun.agent_session_id,
-                order_by=(AgentRunLog.timestamp.asc(), AgentRunLog.id.asc()),
+        session_ids = [item.id for item in items if not item.title]
+        if session_ids:
+            # P5（2026-08-24 会话审查）：窗口函数分区取每会话首条 user_input——
+            # 原实现拉页内会话全部 user_input 行（50KB 文本）Python 取最早，
+            # 长会话下列表请求随轮数线性放大。PG/SQLite 双方言支持。
+            rn = (
+                sa_func.row_number()
+                .over(
+                    partition_by=AgentRun.agent_session_id,
+                    order_by=(AgentRunLog.timestamp.asc(), AgentRunLog.id.asc()),
+                )
+                .label("rn")
             )
-            .label("rn")
-        )
-        title_subq = (
-            sa_select(
-                AgentRun.agent_session_id.label("session_id"),
-                AgentRunLog.content_redacted.label("content"),
-                rn,
+            title_subq = (
+                sa_select(
+                    AgentRun.agent_session_id.label("session_id"),
+                    sa_func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
+                    rn,
+                )
+                .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+                .where(
+                    AgentRun.agent_session_id.in_(session_ids),
+                    AgentRunLog.channel == "user_input",
+                )
+                .subquery()
             )
-            .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
-            .where(
-                AgentRun.agent_session_id.in_(session_ids),
-                AgentRunLog.channel == "user_input",
-            )
-            .subquery()
-        )
-        title_rows = (
-            await session.execute(
-                sa_select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
-            )
-        ).all()
-        content_by = {row.session_id: (row.content or "") for row in title_rows}
-        title_map = {sid: (content or "")[:30] or None for sid, content in content_by.items()}
+            title_rows = (
+                await session.execute(
+                    sa_select(title_subq.c.session_id, title_subq.c.content).where(
+                        title_subq.c.rn == 1
+                    )
+                )
+            ).all()
+            content_by = {row.session_id: (row.content or "") for row in title_rows}
+            title_map = {sid: (content or "")[:30] or None for sid, content in content_by.items()}
+        else:
+            title_map = {}
         # task-05（2026-08-23-agent-activity-sessions / design §3.3.4）：标题派生改
         # session.title（ORM 持久化列，tool_report 会话由 task-04 服务端写自动标题）
         # 优先，无标题回落既有首条 user_input 前 30 字派生——chat 会话 title 列恒

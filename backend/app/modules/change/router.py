@@ -391,7 +391,11 @@ async def _fetch_session_titles(
     title_subq = (
         select(
             AgentRun.agent_session_id.label("session_id"),
-            AgentRunLog.content_redacted.label("content"),
+            # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字（返回值 [:30]），
+            # SQL 内 substr 截到 64 字符，免把单行均值 33KB 的 TOAST 全文解压拉回
+            # （substr 双方言语符语义，64 > 30 保证派生零回归；与 agent/daemon
+            # router 同款优化三处同步）。
+            func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
             rn,
         )
         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)

@@ -662,6 +662,9 @@ async def _assemble_workspace_session_items(
     # 页内会话的**全部** user_input 行（每行上限 50KB 文本）在 Python 侧取最早，
     # 几百会话×上百轮时单次列表请求额外扫数万行大文本。窗口函数 PG/SQLite
     # 双方言支持（SQLite ≥3.25），每会话恒 1 行出参。
+    # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字（消费方 [:30]），
+    # SQL 内 substr 截到 64 字符，免把单行均值 33KB 的 TOAST 全文解压拉回——
+    # substr 双方言均为字符语义，64 > 30 保证截断后派生零回归。
     rn = (
         func.row_number()
         .over(
@@ -673,7 +676,7 @@ async def _assemble_workspace_session_items(
     title_subq = (
         select(
             AgentRun.agent_session_id.label("session_id"),
-            AgentRunLog.content_redacted.label("content"),
+            func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
             rn,
         )
         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
