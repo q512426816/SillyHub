@@ -4695,6 +4695,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare Machine Sillyspec Conflict
+         * @description 拉取单条 sillyspec 冲突的双侧对比（admin，task-04 / FR-06~09 / D-001@v1）.
+         *
+         *     权限同裁决端点（RuntimeAdminUser + ``_get_owned_instance`` 越权 404），
+         *     另校验当前用户是 ``workspace_id`` 成员（平台侧内容按工作区定位，Grill B1：
+         *     compare 数据与裁决同一权限集合）。RPC 腿走请求/响应式
+         *     ``sillyspec_conflict_snapshot``（explorer 先例，区别于一写即忘的裁决通道），
+         *     显式 15s 超时；机器离线/超时 → 504 既有异常形态原样上抛。编排/diff 计算在
+         *     ``sillyspec_compare.SillySpecCompareService``（service 层），本端点只做
+         *     校验/权限/响应组装。
+         */
+        get: operations["compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/disable": {
         parameters: {
             query?: never;
@@ -5424,8 +5452,9 @@ export interface paths {
          * @description List the current user's AgentSessions (owner-scoped, stable paging).
          *
          *     task-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经
-         *     daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容
-         *     ilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。
+         *     daemon_runtimes 关联）/ provider / q（内容模糊，实现为 user_input 的内容
+         *     ilike，不匹配改过的 title 列，见 service 层 docstring——ISS-06）；全部可选，
+         *     不传时查询与现状一致（零回归）。
          *     过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset
          *     作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。
          *     2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /
@@ -5785,6 +5814,110 @@ export interface paths {
          * @description Set/clear the context window override for an owned session (display-only).
          */
         patch: operations["update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Pin Session
+         * @description Pin an owned session (pinned-first ordering, idempotent).
+         */
+        patch: operations["pin_session_api_daemon_sessions__session_id__pin_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/unpin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Unpin Session
+         * @description Unpin an owned session (restore to recent-activity ordering, idempotent).
+         */
+        patch: operations["unpin_session_api_daemon_sessions__session_id__unpin_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename Session
+         * @description Rename an owned session (title strip 后非空 ≤255，非法 422 不落库).
+         */
+        patch: operations["rename_session_api_daemon_sessions__session_id__title_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/scheduled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scheduled Messages
+         * @description List all scheduled messages of an owned session (all statuses, dispatch_at asc).
+         */
+        get: operations["list_scheduled_messages_api_daemon_sessions__session_id__scheduled_get"];
+        put?: never;
+        /**
+         * Create Scheduled Message
+         * @description Create a one-shot scheduled message for an owned session (status=pending).
+         */
+        post: operations["create_scheduled_message_api_daemon_sessions__session_id__scheduled_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/scheduled/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel Scheduled Message
+         * @description Cancel a pending scheduled message (non-pending → 409, terminal no-revert).
+         */
+        delete: operations["cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/daemon/sessions/{session_id}/stream": {
@@ -10175,6 +10308,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-logs/states": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Agent Log States
+         * @description POST agent 会话活性状态批量上报（daemon liveness tailer 周期 10s）。
+         *
+         *     状态是派生数据不进 CLI 上报契约（D-005）：body 仅枚举级数据（log_path/
+         *     state/evidence 短摘要/derived_at/last_event_at），**日志内容不出本机**
+         *     （协议 §7 克制口径延伸）。鉴权与 ``/agent-logs`` 完全同源（shpsync_ token
+         *     派生 workspace，写通道唯一；无凭据 401 / shk_live_·JWT 403）——daemon 是
+         *     唯一合法上报方。
+         *
+         *     upsert-create 语义（X-001）：自发现裸会话可能尚无登记行（登记只在 CLI
+         *     调用入口），行不存在时按 entry 元信息 create（origin=liveness-discovered，
+         *     harness 必填否则 skipped 不建行）；既有行只更新状态四列，登记元信息不动。
+         *     blocked 段转移检测在 service 内（BLOCKED_SEGMENTS，task-09 消费）。
+         */
+        post: operations["push_agent_log_states_api_agent_logs_states_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agent-logs/{entry_id}/content": {
         parameters: {
             query?: never;
@@ -10456,6 +10620,18 @@ export interface components {
             /** Agent Session Id */
             agent_session_id?: string | null;
             /**
+             * State
+             * @default unknown
+             * @enum {string}
+             */
+            state: "working" | "blocked" | "idle" | "ended" | "unknown";
+            /** State Derived At */
+            state_derived_at?: string | null;
+            /** State Evidence */
+            state_evidence?: string | null;
+            /** Last Event At */
+            last_event_at?: string | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -10617,6 +10793,77 @@ export interface components {
             hub_session_id?: string | null;
             /** Entries */
             entries: components["schemas"]["AgentLogEntry"][];
+        };
+        /**
+         * AgentLogStateEntry
+         * @description POST /agent-logs/states 单条状态上报（daemon 鉴权通道，枚举级数据）。
+         *
+         *     状态是派生数据不进 CLI 上报契约（D-005）；``harness`` 等元信息仅在落库行
+         *     不存在时用于 create（X-001：自发现裸会话可能尚无登记行——登记只发生在
+         *     CLI 调用入口），缺省时该条 skipped 不建行（不猜 harness）。
+         */
+        AgentLogStateEntry: {
+            /** Log Path */
+            log_path: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "working" | "blocked" | "idle" | "ended" | "unknown";
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /**
+             * Derived At
+             * Format: date-time
+             */
+            derived_at: string;
+            /** Last Event At */
+            last_event_at?: string | null;
+            /** Harness */
+            harness?: string | null;
+            /** Format */
+            format?: string | null;
+            /** Agent Session Id */
+            agent_session_id?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+        };
+        /**
+         * AgentLogStatesOk
+         * @description POST /agent-logs/states 200 响应（daemon best-effort，任意 2xx 即成功）。
+         */
+        AgentLogStatesOk: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Updated
+             * @description 既有行状态更新数（登记元信息不动）
+             */
+            updated: number;
+            /**
+             * Created
+             * @description 自发现裸会话新建行数（origin=liveness-discovered）
+             */
+            created: number;
+            /**
+             * Skipped
+             * @description 行不存在且缺 harness 元信息被跳过数
+             */
+            skipped: number;
+        };
+        /**
+         * AgentLogStatesPush
+         * @description POST /agent-logs/states 请求体（批量 ≤64，daemon tailer 周期 10s 一批）。
+         */
+        AgentLogStatesPush: {
+            /** Entries */
+            entries: components["schemas"]["AgentLogStateEntry"][];
         };
         /**
          * AgentProfileAggregatedItem
@@ -11059,6 +11306,8 @@ export interface components {
             deleted_at?: string | null;
             /** Archived At */
             archived_at?: string | null;
+            /** Pinned At */
+            pinned_at?: string | null;
             /** Current Run Id */
             current_run_id?: string | null;
             /** Terminating At */
@@ -12669,6 +12918,11 @@ export interface components {
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["DaemonHeartbeatSillySpecUpdate"] | null;
             sillyspec_status?: components["schemas"]["DaemonHeartbeatSillySpecStatus"] | null;
+            sillyspec_status_error?: components["schemas"]["DaemonHeartbeatSillySpecStatusError"] | null;
+            /** Sillyspec Status Map */
+            sillyspec_status_map?: {
+                [key: string]: components["schemas"]["DaemonHeartbeatSillySpecStatus"];
+            } | null;
             sillyspec_command_result?: components["schemas"]["DaemonHeartbeatSillySpecCommandResult"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
@@ -12790,6 +13044,11 @@ export interface components {
          *     ``type`` 当前取值 ``spec-tree`` / ``progress``——不收紧成 Literal
          *     （DaemonHeartbeatSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条
          *     心跳 422）。
+         *
+         *     2026-09-07-conflict-diff-compare task-04（design §7.3）：新增可选 ``ql_id``
+         *     （QUICKLOG 块头编号，如 ``ql-20260907-006-2972``）——daemon 侧对 ``quick-*``
+         *     名冲突 best-effort 读 guard.json 补报，普通变更/读不到 → None。宽松可选
+         *     （零改写透传语义不变）：旧 daemon 不上报不影响心跳落库。
          */
         DaemonHeartbeatSillySpecConflict: {
             /** Change */
@@ -12798,6 +13057,8 @@ export interface components {
             created_at?: string | null;
             /** Type */
             type?: string | null;
+            /** Ql Id */
+            ql_id?: string | null;
         };
         /**
          * DaemonHeartbeatSillySpecStatus
@@ -12834,6 +13095,27 @@ export interface components {
             changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
             /** Pending Conflicts */
             pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecStatusError
+         * @description 心跳 sillyspec_status_error 载荷（2026-09-08，temp 投毒排障衍生）.
+         *
+         *     daemon 周期采集 ``progress show --json`` 三态③（超时/非零退出/spawn 失败）
+         *     持续发生时的错误快照：reason 当前取值 ``collect_timeout`` / ``nonzero_exit`` /
+         *     ``spawn_failed`` / ``runner_error``——不收紧 Literal（DaemonHeartbeat-
+         *     SillySpecUpdate.state 同决策：收紧会让未来新增取值的整条心跳 422，保活通道
+         *     宁宽勿断）；detail 为短描述（如 ``exit_code=1``，daemon 侧已截短）；since
+         *     为 daemon 侧首次失败时刻 ISO8601（恢复成功即清，内存态）。携带语义两态：
+         *     失败期间每跳携带对象（latest-wins），恢复后携带 null 清除——backend None=
+         *     置 NULL，非 None 整包直写（detail 落库前再截 200 双保险）。
+         */
+        DaemonHeartbeatSillySpecStatusError: {
+            /** Reason */
+            reason?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /** Since */
+            since?: string | null;
         };
         /**
          * DaemonHeartbeatSillySpecUpdate
@@ -13033,6 +13315,11 @@ export interface components {
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
             sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
+            sillyspec_status_error?: components["schemas"]["MachineSillySpecStatusErrorRead"] | null;
+            /** Sillyspec Status Map */
+            sillyspec_status_map?: {
+                [key: string]: components["schemas"]["MachineSillySpecStatusRead"];
+            } | null;
             sillyspec_command_result?: components["schemas"]["MachineSillySpecCommandResultRead"] | null;
         };
         /**
@@ -15925,6 +16212,26 @@ export interface components {
              * @enum {string}
              */
             strategy: "keep_local" | "take_platform";
+        };
+        /**
+         * MachineSillySpecStatusErrorRead
+         * @description 机器视图 sillyspec_status_error 嵌套（2026-09-08，temp 投毒排障衍生）。
+         *
+         *     即 daemon_instances.sillyspec_status_error JSON 列宽松透出：daemon 周期采集
+         *     三态③（超时/非零退出/spawn 失败）持续发生时的错误快照。与 sillyspec_status
+         *     同款零转换——backend 不补字段，落库形态=上报形态（复用心跳 DTO 三字段同形，
+         *     免三胞胎模型漂移）。NULL（采集正常/能力缺失②/register 恒清）→ 机器视图字段
+         *     为 null；since 为 daemon 本地钟 ISO8601 原样透传（跨机比较仅作辅助）。
+         *     前端消费：sillyspec_status 为 null 且本字段非 null → 渲染「数据源查询失败」
+         *     而非「sillyspec 未安装/版本过低」。
+         */
+        MachineSillySpecStatusErrorRead: {
+            /** Reason */
+            reason?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /** Since */
+            since?: string | null;
         };
         /**
          * MachineSillySpecStatusRead
@@ -20193,6 +20500,90 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * ScheduledMessageCreateRequest
+         * @description POST /api/daemon/sessions/{id}/scheduled 请求体（task-03 / FR-04）。
+         *
+         *     为会话预约一条**一次性**定时消息（D-002@v1，不做周期规则），到点由
+         *     task-04 sweeper 走 inject 管线派发。三重校验全部归 service 层
+         *     （create_scheduled_message，照 SessionTitleUpdateRequest 口径——schema
+         *     层不重复拦空 prompt，让「全空白拒绝」的中文文案与 SessionEmptyPrompt
+         *     同口径统一出口）：
+         *
+         *     - ``prompt`` strip 非空，或 ``attachment_ids`` 非空豁免（对齐 inject 的
+         *       D-7 看图说话口径）→ 否则 422；
+         *     - ``dispatch_at`` 必须 ≥ now(UTC)+60s（防「刚建即过期」竞态）→ 否则 422；
+         *     - 目标会话非终态（ended/failed）且未软删 → 否则 409。
+         *
+         *     ``prompt`` 无字段级 min_length（附件豁免轮合法携带空 prompt），max_length
+         *     对齐 SessionInjectRequest（8000）；``attachment_ids`` 上限 10 = 图 5 + 文 5
+         *     （DTO 层总量兜底，逐 kind 校验到点归 inject 链），落库时转 str 列表快照。
+         */
+        ScheduledMessageCreateRequest: {
+            /** Prompt */
+            prompt: string;
+            /**
+             * Dispatch At
+             * Format: date-time
+             */
+            dispatch_at: string;
+            /** Attachment Ids */
+            attachment_ids?: string[] | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+        };
+        /**
+         * ScheduledMessageRead
+         * @description 定时消息读侧 DTO（POST 201 响应 / GET 列表项，task-03 / FR-04）。
+         *
+         *     ``AgentSessionScheduledMessage`` ORM 行的 from_attributes 直映射——
+         *     ``status`` 为 pending / dispatched / cancelled / failed 四态字符串
+         *     （派发成功不删行，dispatched_at / cancelled_at / error_code 审计留档，
+         *     消费方=前端 scheduled-messages-bar 状态 tag 与失败原因展示，task-05）；
+         *     ``attachment_ids`` 为落库的 str 列表快照（派发时转回 uuid）。
+         */
+        ScheduledMessageRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Session Id
+             * Format: uuid
+             */
+            agent_session_id: string;
+            /** Prompt */
+            prompt: string;
+            /**
+             * Dispatch At
+             * Format: date-time
+             */
+            dispatch_at: string;
+            /** Status */
+            status: string;
+            /** Attachment Ids */
+            attachment_ids?: string[] | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dispatched At */
+            dispatched_at?: string | null;
+            /** Cancelled At */
+            cancelled_at?: string | null;
+        };
+        /**
          * ScopeWorkspaceStatus
          * @description scope 工作区状态条目（design §7 逐字）。
          *
@@ -20255,7 +20646,7 @@ export interface components {
             /** Runtime Id */
             runtime_id?: string | null;
             /** Provider */
-            provider?: ("claude" | "codex" | "pi") | null;
+            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Llm Provider Id */
@@ -20660,6 +21051,19 @@ export interface components {
             daemon_local_id: string;
         };
         /**
+         * SessionTitleUpdateRequest
+         * @description PATCH /api/daemon/sessions/{id}/title 请求体（task-02 / FR-03）。
+         *
+         *     会话重命名：``title`` strip 后非空且 ≤255 字符（对齐 AgentSession.title
+         *     列 String(255)）；校验归 service 层（rename_session 抛 422 语义 AppError，
+         *     不落库）——schema 层不写 min/max，让「全空白拒绝」的中文文案与
+         *     SessionEmptyPrompt 同口径从 service 统一出口。
+         */
+        SessionTitleUpdateRequest: {
+            /** Title */
+            title: string;
+        };
+        /**
          * SessionUsageModelItemRead
          * @description 会话用量的单模型桶（2026-08-29-session-usage-stats task-01 / D-002@v1）。
          *
@@ -20987,6 +21391,130 @@ export interface components {
             online: boolean;
             /** Runtimes */
             runtimes?: components["schemas"]["SharedMachineRuntimeView"][];
+        };
+        /**
+         * SillySpecConflictCompareFile
+         * @description spec-tree 比对的单文件结果（design §7.2 files[] 单项）。
+         *
+         *     ``status`` 四分类（Grill B4）：modified / local_only（本地有平台缺失或读取
+         *     被拒）/ platform_only / identical；双侧均缺失的路径不进本清单（计数在顶层
+         *     ``dropped_paths``）。本地 truncated/binary 无 content 的文件 ``diff_rows``
+         *     为空（不出全 insert 的失真信号）；单文件 diff 超 5000 行截断置
+         *     ``diff_truncated``。
+         */
+        SillySpecConflictCompareFile: {
+            /** Path */
+            path: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "modified" | "local_only" | "platform_only" | "identical";
+            /** Local Mtime */
+            local_mtime?: string | null;
+            /** Platform Mtime */
+            platform_mtime?: string | null;
+            /**
+             * Local Truncated
+             * @default false
+             */
+            local_truncated: boolean;
+            /**
+             * Local Missing
+             * @default false
+             */
+            local_missing: boolean;
+            /** Diff Rows */
+            diff_rows?: components["schemas"]["SillySpecConflictDiffRow"][];
+            /**
+             * Diff Truncated
+             * @default false
+             */
+            diff_truncated: boolean;
+            /**
+             * Binary
+             * @default false
+             */
+            binary: boolean;
+        };
+        /**
+         * SillySpecConflictCompareResponse
+         * @description GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。
+         *
+         *     kind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。
+         *     ``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。
+         *     ``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。
+         */
+        SillySpecConflictCompareResponse: {
+            /** Change */
+            change: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "spec-tree" | "progress";
+            /** Ql Id */
+            ql_id?: string | null;
+            /** Conflict Created At */
+            conflict_created_at?: string | null;
+            /** Local Updated At */
+            local_updated_at?: string | null;
+            /** Platform Updated At */
+            platform_updated_at?: string | null;
+            /**
+             * Response Truncated
+             * @default false
+             */
+            response_truncated: boolean;
+            /**
+             * Dropped Paths
+             * @default 0
+             */
+            dropped_paths: number;
+            /** Files */
+            files?: components["schemas"]["SillySpecConflictCompareFile"][];
+            /** Progress Rows */
+            progress_rows?: components["schemas"]["SillySpecConflictProgressRow"][];
+        };
+        /**
+         * SillySpecConflictDiffRow
+         * @description spec-tree 比对的对齐行（design §7.2 files[].diff_rows[] 单项）。
+         *
+         *     ``type`` = equal（双侧同）/ delete（本地删，platform_* 为 null）/ insert
+         *     （平台增，local_* 为 null）；replace 段在 service 侧展开为相邻 delete+insert。
+         *     lineno 双侧各自从 1 起。
+         */
+        SillySpecConflictDiffRow: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "equal" | "delete" | "insert";
+            /** Local Lineno */
+            local_lineno?: number | null;
+            /** Local Text */
+            local_text?: string | null;
+            /** Platform Lineno */
+            platform_lineno?: number | null;
+            /** Platform Text */
+            platform_text?: string | null;
+        };
+        /**
+         * SillySpecConflictProgressRow
+         * @description progress 比对行（design §7.2 progress_rows[] 单项，D-003@v1 对比表）。
+         *
+         *     字段白名单六项（当前阶段/阶段标签/步骤进度/最近活跃/ql_id/ghost），缺失侧
+         *     显式「—」；``differ`` 由两侧展示值不等判定。
+         */
+        SillySpecConflictProgressRow: {
+            /** Label */
+            label: string;
+            /** Local Value */
+            local_value: string;
+            /** Platform Value */
+            platform_value: string;
+            /** Differ */
+            differ: boolean;
         };
         /**
          * SkillCreateRequest
@@ -23277,6 +23805,7 @@ export interface components {
             objective?: string | null;
             /** Total Cost Usd */
             total_cost_usd?: number | null;
+            liveness?: components["schemas"]["WorkerLiveness"] | null;
         };
         /** WorkerListResponse */
         WorkerListResponse: {
@@ -23287,6 +23816,24 @@ export interface components {
             mission_id: string;
             /** Workers */
             workers: components["schemas"]["WorkerListItem"][];
+        };
+        /**
+         * WorkerLiveness
+         * @description worker 活性推导快照（design §7；state 五态与 daemon 侧一致）。
+         */
+        WorkerLiveness: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "working" | "blocked" | "idle" | "ended" | "unknown";
+            /** Evidence */
+            evidence?: string | null;
+            /**
+             * Derived At
+             * Format: date-time
+             */
+            derived_at: string;
         };
         /**
          * WorkerResultResponse
@@ -31980,6 +32527,43 @@ export interface operations {
             };
         };
     };
+    compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get: {
+        parameters: {
+            query: {
+                /** @description 冲突类型（心跳 type 字段） */
+                kind: "spec-tree" | "progress";
+                /** @description 平台侧 spec_root/progress 定位用工作区 */
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+                change: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SillySpecConflictCompareResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     disable_runtime_api_daemon_runtimes__runtime_id__disable_post: {
         parameters: {
             query?: never;
@@ -33537,6 +34121,193 @@ export interface operations {
                 "application/json": components["schemas"]["SessionCtxWindowUpdateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pin_session_api_daemon_sessions__session_id__pin_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_session_api_daemon_sessions__session_id__unpin_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_session_api_daemon_sessions__session_id__title_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionTitleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scheduled_messages_api_daemon_sessions__session_id__scheduled_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledMessageRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_scheduled_message_api_daemon_sessions__session_id__scheduled_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduledMessageCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledMessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             204: {
@@ -42392,6 +43163,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentLogPushOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_agent_log_states_api_agent_logs_states_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentLogStatesPush"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogStatesOk"];
                 };
             };
             /** @description Validation Error */

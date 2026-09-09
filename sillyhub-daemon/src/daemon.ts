@@ -132,6 +132,7 @@ import {
   fetchLatestBuildId,
   validateBundleOnDisk,
 } from './preflight.js';
+import { installConsoleTimestamps } from './console-timestamp.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
 import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
 // 2026-08-31-machine-sillyspec-version task-05：sillyspec 运行期版本管理与升级状态机
@@ -143,7 +144,7 @@ import { SillySpecManager, SILLYSPEC_COMMAND_TIMEOUT_MS } from './sillyspec-mana
 
 // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
 // 形状（progress 总览摘要），组装时从 manager.getStatusSnapshot() 取。
-import type { SillySpecStatusSummary } from './sillyspec-manager.js';
+import type { SillySpecStatusSummary, SillySpecStatusError } from './sillyspec-manager.js';
 // daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
 import { BUILD_ID } from './build-id.js';
 // 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
@@ -818,6 +819,17 @@ interface ClientLike {
      * 零感知），backend 响应 spec_versions 供后台预取判定。
      */
     specCache?: { workspace_id: string; spec_version: number }[],
+    /**
+     * 2026-09-08（temp 投毒排障衍生）：总览采集三态③失败状态（对齐 hub-client
+     * heartbeat 末位参数）。null=无失败/已恢复（backend 置 NULL 清除）；对象=
+     * 持续失败中（整包直写）；undefined=键不出现（语义同 null）。
+     */
+    sillyspecStatusError?: SillySpecStatusError | null,
+    /**
+     * 2026-09-08（总览工作区级化）：工作区级总览 map（对齐 hub-client heartbeat
+     * 末位参数）。undefined=未启用（键不出现，backend 保留）；对象=整包直写。
+     */
+    sillyspecStatusMap?: Record<string, SillySpecStatusSummary> | null,
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -1173,6 +1185,19 @@ interface PendingRecoveryEntry {
  * ``<workspace_dir>/borrow-sandboxes/<slug>`` 真实目录。
  */
 const BORROW_SANDBOX_MARKER = 'borrow-sandbox:';
+/**
+ * 总览采集根落盘文件名（2026-09-08 temp 投毒排障衍生）：daemonStateDir() 下
+ * {root_path, saved_at}——重启恢复采集锚点，免等下一次 claim。见
+ * _noteSillySpecStatusRoot / _restoreSillySpecStatusRoot。
+ */
+const SILLYSPEC_STATUS_ROOT_FILE = 'sillyspec-status-root.json';
+/**
+ * 工作区级采集根映射落盘文件名（2026-09-08 总览工作区级化）：
+ * {workspaces: {wsId: {root_path, last_claim_at}}}。
+ */
+const SILLYSPEC_STATUS_ROOTS_FILE = 'sillyspec-status-roots.json';
+/** 映射 LRU 上限（防无界膨胀：spawn 数/心跳载荷随目标数线性增长）。 */
+const SILLYSPEC_STATUS_ROOTS_MAX = 8;
 
 // ── perf-remediation task-09 / D-003@v1：_pollLoop 按通道拆分门控常量 ─────────
 //
@@ -1494,6 +1519,15 @@ export class Daemon {
    * statusCwd 回调读取。null=尚未观察到（采集跳过，心跳不带 sillyspec_status 键）。
    */
   private _sillyspecStatusRoot: string | null = null;
+  /**
+   * 工作区级采集根映射（2026-09-08 总览工作区级化）：wsId → {rootPath, lastClaimAt}。
+   * claim 学习（_noteSillySpecStatusRoot）+ 落盘恢复（_restoreSillySpecStatusRoot），
+   * LRU 上限 SILLYSPEC_STATUS_ROOTS_MAX。非空时 manager 走 statusTargets 多目标采集。
+   */
+  private readonly _sillyspecStatusRoots = new Map<
+    string,
+    { rootPath: string; lastClaimAt: number }
+  >();
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -1860,6 +1894,16 @@ export class Daemon {
         // 2026-09-02-changes-overview-card task-02：采集 cwd 注入——claim 观察到的
         // workspace 主仓根（闭包惰性求值，claim 后每拍取最新值）。
         statusCwd: () => this._sillyspecStatusRoot,
+        // 2026-09-08 总览工作区级化：wsId→root 映射非空时按目标逐个采集（心跳
+        // sillyspec_status_map）；空映射回退 statusCwd 单槽位（legacy 语义不变）。
+        statusTargets: () =>
+          Array.from(
+            this._sillyspecStatusRoots,
+            ([wsId, v]): { workspaceId: string; rootPath: string } => ({
+              workspaceId: wsId,
+              rootPath: v.rootPath,
+            }),
+          ),
         // 2026-09-04-conflict-resolve-entry task-06：平台命令执行超时（config 键
         // sillyspec_command_timeout_sec 默认 120s）。归一口径仿
         // _sillyspecStatusIntervalSec（Number() 容忍字符串/null 脏值），但超时无
@@ -1946,6 +1990,19 @@ export class Daemon {
       return;
     }
     this._running = true;
+    // console 时间戳包装（2026-09-08 temp 投毒排障衍生）：长驻进程全输出（logger
+    // `[daemon.*]` 主格式 + spec-sync/task-runner 等裸 console）前缀本地时间戳，
+    // 排障不再靠事件计数反推时间线。幂等；仅 start() 安装——CLI 一次性子命令与
+    // 测试直调路径不受影响（见模块头注释）。
+    installConsoleTimestamps();
+    // 2026-09-08（temp 投毒排障衍生）：恢复落盘的采集根——先于三循环（含
+    // _sillyspecStatusLoop）执行，重启后首拍即可采集上报，不再等下一次 claim。
+    // 失败/缺失静默回退旧路径（等 claim），零回归。
+    try {
+      await this._restoreSillySpecStatusRoot();
+    } catch {
+      // readFile 已内部 catch；此处防御意外抛错不阻断启动。
+    }
     this._logger.info('starting', { runtime_id: this._config.runtime_id });
 
     // preflight（2026-06-24）：启动前预检 sillyspec 版本 + daemon 自更新。
@@ -4395,8 +4452,20 @@ export class Daemon {
    * task-02（D-B3@v1 主仓根锚定）：claim 后观察 workspace 主仓根——非空且非借用
    * 沙箱 marker 的 rootPath 即工作区绑定根；变更时 info 一笔（首观察/切换可见）。
    * 规则 22：采集 CLI 只在此主仓根执行，永不进 worktree。
+   * 2026-09-08（temp 投毒排障衍生）：变更时落盘 sillyspec-status-root.json——
+   * 此前 root 仅内存态，daemon 每次重启后总览采集静默失联，直到下一次 claim 才
+   * 恢复，页面长期显「总览不可用」。持久化后 start() 经 _restoreSillySpecStatusRoot()
+   * 恢复，重启即采集无需等 claim。
+   * 2026-09-08（总览工作区级化第二段）：workspaceId 具名时维护 wsId→root 映射
+   * （_sillyspecStatusRoots，LRU 上限 8 防映射无界膨胀）落盘 sillyspec-status-
+   * roots.json，采集按工作区逐目标执行（statusTargets 注入），心跳携带
+   * sillyspec_status_map——修「多工作区串台」（所有工作台页面共享单槽位）。
+   * workspaceId=null（旧调用形态/未知）只更新单槽位，不进映射。
    */
-  private _noteSillySpecStatusRoot(rootPath: string | undefined): void {
+  private _noteSillySpecStatusRoot(
+    workspaceId: string | null | undefined,
+    rootPath: string | undefined,
+  ): void {
     if (
       typeof rootPath !== 'string' ||
       !rootPath ||
@@ -4404,11 +4473,133 @@ export class Daemon {
     ) {
       return;
     }
+    if (workspaceId) {
+      const known = this._sillyspecStatusRoots.get(workspaceId);
+      this._sillyspecStatusRoots.delete(workspaceId);
+      this._sillyspecStatusRoots.set(workspaceId, {
+        rootPath,
+        lastClaimAt: Date.now(),
+      });
+      // LRU 上限：超出淘汰最旧（Map 迭代序=插入序，首个即最久未 claim）。
+      while (this._sillyspecStatusRoots.size > SILLYSPEC_STATUS_ROOTS_MAX) {
+        const oldest = this._sillyspecStatusRoots.keys().next().value;
+        if (oldest === undefined) break;
+        this._sillyspecStatusRoots.delete(oldest);
+      }
+      if (known?.rootPath !== rootPath) {
+        this._logger.info('sillyspec_status_root_observed', {
+          workspace_id: workspaceId,
+          root_path: rootPath,
+        });
+      }
+      void this._persistSillySpecStatusRoots();
+    }
     if (this._sillyspecStatusRoot === rootPath) return;
     this._sillyspecStatusRoot = rootPath;
-    this._logger.info('sillyspec_status_root_observed', {
-      root_path: rootPath,
-    });
+    if (!workspaceId) {
+      this._logger.info('sillyspec_status_root_observed', { root_path: rootPath });
+    }
+    void this._persistSillySpecStatusRoot(rootPath);
+  }
+
+  /** root 落盘（best-effort：失败仅 warn 不影响内存态；文件= {root_path, saved_at}）。 */
+  private async _persistSillySpecStatusRoot(rootPath: string): Promise<void> {
+    try {
+      await writeFile(
+        join(daemonStateDir(), SILLYSPEC_STATUS_ROOT_FILE),
+        JSON.stringify(
+          { root_path: rootPath, saved_at: new Date().toISOString() },
+          null,
+          2,
+        ) + '\n',
+        'utf-8',
+      );
+    } catch (e) {
+      this._logger.warn('sillyspec_status_root_persist_failed', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  /**
+   * 启动恢复落盘 root（2026-09-08 temp 投毒排障衍生）：读 sillyspec-status-root.json，
+   * 合法即回填内存（info 可见），采集循环首拍即可执行。文件缺失/损坏/字段非法 →
+   * 静默跳过（debug）——回到旧的「等下一次 claim」路径，零回归。幂等：内存已有
+   * root（测试直调 start 多次）不覆盖。
+   * 2026-09-08（工作区级化第二段）：同时恢复 wsId→root 映射（sillyspec-status-
+   * roots.json，{workspaces:{wsId:{root_path,last_claim_at}}}，缺失/损坏静默跳过）。
+   */
+  private async _restoreSillySpecStatusRoot(): Promise<void> {
+    // 映射恢复（先做——statusTargets 由此而来）。
+    try {
+      const rawRoots = await readFile(
+        join(daemonStateDir(), SILLYSPEC_STATUS_ROOTS_FILE),
+        'utf-8',
+      );
+      const obj = JSON.parse(rawRoots) as {
+        workspaces?: Record<string, { root_path?: unknown }>;
+      };
+      if (obj.workspaces && typeof obj.workspaces === 'object') {
+        for (const [wsId, v] of Object.entries(obj.workspaces)) {
+          if (typeof v?.root_path === 'string' && v.root_path) {
+            this._sillyspecStatusRoots.set(wsId, {
+              rootPath: v.root_path,
+              lastClaimAt: 0,
+            });
+          }
+        }
+        if (this._sillyspecStatusRoots.size > 0) {
+          this._logger.info('sillyspec_status_roots_restored', {
+            count: this._sillyspecStatusRoots.size,
+          });
+        }
+      }
+    } catch {
+      // 不存在/损坏 → 空映射，等 claim 学习（行为同旧版）。
+    }
+    if (this._sillyspecStatusRoot !== null) return;
+    let raw: string;
+    try {
+      raw = await readFile(
+        join(daemonStateDir(), SILLYSPEC_STATUS_ROOT_FILE),
+        'utf-8',
+      );
+    } catch {
+      return; // 不存在（首次运行/旧版本升级）→ 等 claim，行为同旧版。
+    }
+    try {
+      const obj = JSON.parse(raw) as { root_path?: unknown };
+      if (typeof obj.root_path === 'string' && obj.root_path) {
+        this._sillyspecStatusRoot = obj.root_path;
+        this._logger.info('sillyspec_status_root_restored', {
+          root_path: obj.root_path,
+        });
+      }
+    } catch {
+      this._logger.debug('sillyspec_status_root_restore_bad_json');
+    }
+  }
+
+  /** 映射落盘（best-effort：失败仅 warn；LRU 已在内存收敛，落盘即镜像）。 */
+  private async _persistSillySpecStatusRoots(): Promise<void> {
+    try {
+      const workspaces: Record<string, { root_path: string; last_claim_at: number }> = {};
+      for (const [wsId, v] of this._sillyspecStatusRoots) {
+        workspaces[wsId] = {
+          root_path: v.rootPath,
+          last_claim_at: v.lastClaimAt,
+        };
+      }
+      await writeFile(
+        join(daemonStateDir(), SILLYSPEC_STATUS_ROOTS_FILE),
+        JSON.stringify({ workspaces }, null, 2) + '\n',
+        'utf-8',
+      );
+    } catch (e) {
+      this._logger.warn('sillyspec_status_roots_persist_failed', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   // ── ql-20260907-010：spec 拉取工作区级化（方法组）────────────────────────────
@@ -4652,38 +4843,43 @@ export class Daemon {
         this._sillyspecStatusIntervalSec() === null
           ? undefined
           : this._sillyspecManager.getStatusSnapshot();
-      const statusTail: (SillySpecStatusSummary | null)[] =
-        sillyspecStatus !== undefined ? [sillyspecStatus] : [];
       // 2026-09-04-conflict-resolve-entry task-06（FR-05 / D-004@v1 两态）：心跳
       // 透传最新一条平台命令结果（manager.getCommandResult 纯同步零 spawn，10min
-      // 终态窗惰性过期在 manager 内判定）。null=无结果/已过期 → 尾参不占位（键
-      // 不出现 = backend 置 NULL 清除，禁显式 null）。typeof 探测兜底：注入的假
+      // 终态窗惰性过期在 manager 内判定）。null=无结果/已过期 → 键不出现（=
+      // backend 置 NULL 清除，禁显式 null）。typeof 探测兜底：注入的假
       // manager（旧测试）缺该方法时跳过——同 _sillyspecCommandExecutor duck-type
       // 探测惯例，不破坏既有心跳断言。
       const sillyspecCommandResult: SillySpecCommandResult | null =
         typeof this._sillyspecManager.getCommandResult === 'function'
           ? this._sillyspecManager.getCommandResult()
           : null;
-      const commandResultTail: SillySpecCommandResult[] =
-        sillyspecCommandResult !== null ? [sillyspecCommandResult] : [];
       // ql-20260907-010：心跳前对齐会话活跃记账（自愈清账），随后上报本机
       // spec 缓存清单（best-effort；未枚举到/读失败 → 空数组 → 键不出现）。
-      // 位置参数末位（第 8 参）：在场时由下方扩展占位链保证 5/6/7 槽齐占位，
-      // 不滑入 sillyspec/status/commandResult 槽。
       this._reconcileSpecSessionActivity();
       // 运行态门控：spec 缓存上报属运行态心跳行为（未 start 的 daemon——含
-      // 直调 _sendHeartbeatOnce 的测试前置——不上报，心跳位置参数保持旧形态；
-      // 生产心跳循环/重连对账恒为运行态，零影响）。
+      // 直调 _sendHeartbeatOnce 的测试前置——不上报；生产心跳循环/重连对账恒为
+      // 运行态，零影响）。
       const specCacheEntries = this._running
         ? await this._collectSpecCacheEntries()
         : [];
-      const specCacheTail: { workspace_id: string; spec_version: number }[][] =
-        specCacheEntries.length > 0 ? [specCacheEntries] : [];
+      // 2026-09-08（temp 投毒排障衍生）：三态③采集失败状态——null（无失败/
+      // 已恢复/采集关闭）→ 键不出现（= backend 置 NULL 清除，下一跳即清）；
+      // 对象（持续失败中）→ 整包直写。typeof 探测兜底同 commandResult 惯例
+      //（注入的旧测试假 manager 缺该方法时按 null 处理）。
+      const sillyspecStatusError: SillySpecStatusError | null =
+        this._sillyspecStatusIntervalSec() === null
+          ? null
+          : typeof this._sillyspecManager.getStatusError === 'function'
+            ? this._sillyspecManager.getStatusError()
+            : null;
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
         // task-01：进程启动时间随心跳上报（位置参数第 3，对齐 hub-client task-02 签名）。
         this._startedAt,
+        // task-04（FR-03 / design S3）：pending 期心跳透传 pending_update（剥 since
+        // 只传三字段，backend 首次落库盖 since）。null/读失败 → undefined（body 无
+        // 该键 = backend 清除）。
         pending == null
           ? undefined
           : {
@@ -4691,41 +4887,38 @@ export class Daemon {
               current_version: pending.current_version,
               target_version: pending.target_version,
             },
-        ...sillyspecTail,
-        // 2026-09-02-changes-overview-card task-04 复核修正：sillyspec 缺席而
-        // status 存在时，第 5 参须显式 undefined 占位——否则 status 滑入
-        // sillyspec 槽位（位置参数陷阱），hub-client 把摘要当 sillyspec 参数读
-        //（version/latest/update 三键全无即静默忽略）→ sillyspec_status 键
-        // 不发出、快照被丢弃。task-06 扩展：commandResult 存在时同样触发第 5
-        // 参占位（status/commandResult 任一在场即需占位）。ql-20260907-010
-        // 再扩展：specCache 在场同样触发（spec_cache 必须落在第 8 参）。
-        ...(
-          sillyspecTail.length === 0 &&
-          (statusTail.length > 0 ||
-            commandResultTail.length > 0 ||
-            specCacheTail.length > 0)
-            ? [undefined]
-            : []
-        ),
-        // task-06 同坑：status 缺席而 commandResult 存在时，第 6 参须显式
-        // undefined 占位——否则 commandResult 滑入 status 槽位（status 参数
-        // 类型不含结果形状，hub-client 静默按 status 发错键）。ql-20260907-010
-        // 再扩展：specCache 在场同样触发。
-        ...(
-          statusTail.length === 0 &&
-          (commandResultTail.length > 0 || specCacheTail.length > 0)
-            ? [undefined]
-            : []
-        ),
-        // ql-20260907-010：commandResult 缺席而 specCache 存在时，第 7 参须
-        // 显式 undefined 占位——否则 specCache 数组滑入 commandResult 槽位
-        //（结构不含 workspace_id/spec_version，被静默按结果键发错）。
-        ...(commandResultTail.length === 0 && specCacheTail.length > 0
-          ? [undefined]
-          : []),
-        ...statusTail,
-        ...commandResultTail,
-        ...specCacheTail,
+        // 2026-09-08（temp 投毒排障衍生）：占位链重构——原实现用条件数组 spread +
+        // 前置 undefined 占位段表达「缺席尾参不占位」，三段占位堆在 tails 之前，
+        // ph7 的 undefined 在「status 在场 + commandResult 缺席 + specCache 在场」
+        // 组合下落到第 6 参、status 滑进 commandResult 槽（生产常态组合：版本
+        // 已知+采集成功+近期无命令+有 spec 缓存），且 TS 变长 spread 对齐无法
+        // 静态证明槽位正确。改为平铺传值——各槽位缺席时显式 undefined（接口
+        // 可选参数语义与键省略等价），位置正确性构造性成立，不再依赖组合枚举。
+        // 第 5 参：三键全无 → undefined（键不出现，backend 保留旧值）。
+        sillyspecTail.length > 0 ? sillyspecTail[0] : undefined,
+        // 第 6 参：undefined=采集未启动/未出终分级（键不出现）；null=能力缺失②
+        //（backend 置 NULL 清除）；摘要=最近快照（③瞬态失败保留旧值照常携带）。
+        sillyspecStatus,
+        // 第 7 参：null（无结果/终态窗过期）→ undefined（键不出现=backend 清除，
+        // 禁显式 null，X-04 两态）；对象=整包直写。
+        sillyspecCommandResult ?? undefined,
+        // 第 8 参：空清单 → undefined（键不出现，旧 backend 零感知）。
+        specCacheEntries.length > 0 ? specCacheEntries : undefined,
+        // 第 9 参（2026-09-08 temp 投毒排障衍生）：三态③采集失败状态。null（无
+        // 失败/已恢复/采集关闭）→ undefined（键不出现=backend 置 NULL 清除，下一
+        // 跳即收敛）；对象=持续失败中（整包直写）。与 status 的三态语义不同：本
+        // 字段无「采集未启动」概念，daemon 运行期恒知是否处于持续失败。
+        sillyspecStatusError ?? undefined,
+        // 第 10 参（2026-09-08 总览工作区级化）：工作区级 map（wsId→摘要）。
+        // undefined（未启用/映射空/采集关闭）→ 键不出现（backend 保留，旧 daemon
+        // 兼容）；对象（含空）→ 整包直写。ql-20260909-002：补采集关闭门控对齐第
+        // 6/9 参口径——interval=0 时不再发空 map 整包直写覆盖 backend 已存值。
+        // typeof 探测兜底同上惯例（旧测试假 manager 缺该方法时跳过）。
+        this._sillyspecStatusIntervalSec() === null
+          ? undefined
+          : typeof this._sillyspecManager.getStatusMapSnapshot === 'function'
+            ? this._sillyspecManager.getStatusMapSnapshot()
+            : undefined,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
@@ -8204,7 +8397,10 @@ export class Daemon {
 
     // 2026-09-02-changes-overview-card task-02（FR-02）：claim 后观察 workspace
     // 主仓根（batch 与 interactive 共用此 execPayload，一处观察两路覆盖）。
-    this._noteSillySpecStatusRoot(execPayload.rootPath);
+    this._noteSillySpecStatusRoot(
+      typeof execPayload.workspaceId === 'string' ? execPayload.workspaceId : null,
+      execPayload.rootPath,
+    );
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走
     // TaskRunner / startLease / completeLease（backend 已 startLease），独立由

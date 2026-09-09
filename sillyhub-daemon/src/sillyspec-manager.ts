@@ -219,6 +219,28 @@ export interface SillySpecStatusSummary {
   pending_conflicts: SillySpecStatusPendingConflict[];
 }
 
+/**
+ * 三态③采集失败状态（2026-09-08 temp 投毒排障衍生）：心跳 sillyspec_status_error
+ * 载荷形状。reason 取值与 collectStatusOnce 的四条③路径一一对应；detail 为短描述
+ * （≤200 字符，backend 落库前再截双保险）；since=同 reason 首败时刻 ISO（换
+ * reason 重置，①/②清空）。
+ */
+export interface SillySpecStatusError {
+  reason: 'collect_timeout' | 'nonzero_exit' | 'spawn_failed' | 'runner_error';
+  detail: string;
+  since: string;
+}
+
+/**
+ * 采集目标（2026-09-08 总览工作区级化）：workspaceId + 主仓根。workspaceId=null
+ * =旧单槽位形态（仅喂 legacy sillyspec_status，不进 per-workspace map）。daemon 侧
+ * 从 claim 学习映射（落盘 + 上限 LRU），经 statusTargets 回调注入。
+ */
+export interface SillySpecStatusTarget {
+  workspaceId: string | null;
+  rootPath: string;
+}
+
 /** 摘要 changes[] 单项（envelope 六字段投影，readable/stages 明细不透传）。 */
 export interface SillySpecStatusChangeItem {
   name: string;
@@ -391,6 +413,12 @@ export interface SillySpecManagerDeps {
    * claim 观察到的 rootPath 回调；返回 null = 本拍跳过（尚无已知主仓根）。
    */
   statusCwd?: () => string | null;
+  /**
+   * 工作区级采集目标提供者（2026-09-08 总览工作区级化）：daemon 从 claim 学习的
+   * wsId→主仓根映射（落盘 + LRU 上限）。返回空数组 = 回退 statusCwd 单槽位旧形态
+   *（兼容：映射未建立时 legacy 字段仍出数）。缺省 undefined 同样回退。
+   */
+  statusTargets?: () => SillySpecStatusTarget[];
   /** 采集超时（毫秒），默认 SILLYSPEC_STATUS_TIMEOUT_MS；测试注入调小。 */
   statusTimeoutMs?: number;
   /**
@@ -451,6 +479,8 @@ export class SillySpecManager {
   private readonly _resolveSillySpecBin: () => string | null;
   /** 采集 cwd 提供者（workspace 主仓根；null = 无已知根跳过）。 */
   private readonly _statusCwd: () => string | null;
+  /** 工作区级目标提供者（undefined=单槽位旧形态）。 */
+  private readonly _statusTargets: (() => SillySpecStatusTarget[]) | undefined;
   /** 采集超时毫秒。 */
   private readonly _statusTimeoutMs: number;
   /**
@@ -462,6 +492,20 @@ export class SillySpecManager {
   private _statusKnown = false;
   /** 三态②同类告警去重（warn 一次后同类静默：bin_not_found/spawn_enoent/bad_json）。 */
   private readonly _statusWarnedClasses = new Set<string>();
+  /**
+   * 三态③采集失败状态（2026-09-08 temp 投毒排障衍生）：超时/非零退出/spawn 失败
+   * 持续发生时经心跳上报 backend（sillyspec_status_error 列），前端据此把总览
+   * 占位区分成「数据源查询失败」而非误显「未安装/版本过低」。since=同 reason
+   * 首败时刻（换 reason 重置；①成功/②能力缺失清空——②是终分级非查询失败）。
+   * 内存态，进程重启即失（backend register 恒清对齐）。
+   */
+  private _statusError: SillySpecStatusError | null = null;
+  /**
+   * 工作区级成功快照（2026-09-08 总览工作区级化）：wsId → 最近一次①成功摘要。
+   * 刻意只存成功项——②能力缺失是 CLI 机器级（全目标同灭，清空 map）；③瞬态按
+   * 目标独立（该 ws 本拍失败=缺席，保留旧值不清除）。心跳 sillyspec_status_map。
+   */
+  private readonly _statusSummariesByWs = new Map<string, SillySpecStatusSummary>();
 
   // ── 2026-09-04-conflict-resolve-entry task-06：平台命令执行器与结果槽 ──────────
 
@@ -499,6 +543,7 @@ export class SillySpecManager {
     this._runProgressJson = deps.runProgressJson ?? runProgressJsonDefault;
     this._resolveSillySpecBin = deps.resolveSillySpecBin ?? resolveSillySpecBinDefault;
     this._statusCwd = deps.statusCwd ?? (() => null);
+    this._statusTargets = deps.statusTargets;
     this._statusTimeoutMs = deps.statusTimeoutMs ?? SILLYSPEC_STATUS_TIMEOUT_MS;
     // task-06：超时无关闭口——undefined/null/非有限/<=0 一律回退默认。
     this._commandTimeoutMs =
@@ -606,11 +651,40 @@ export class SillySpecManager {
    * 全路径自收敛不 reject；无已知主仓根（statusCwd→null）本拍跳过（debug）。
    */
   async collectStatusOnce(): Promise<void> {
+    // 2026-09-08 总览工作区级化：优先多目标（wsId→root 映射），逐目标采集；
+    // 映射未建立（空/未注入）回退 statusCwd 单槽位旧形态（legacy 字段语义不变）。
+    const targets = this._statusTargets?.() ?? [];
+    if (targets.length > 0) {
+      for (const t of targets) {
+        await this._collectOneTarget(t.workspaceId, t.rootPath);
+      }
+      // ql-20260909-002：目标集裁剪——daemon 侧 wsId→root 映射有 LRU 上限，被淘汰
+      // 的 wsId 不再是采集目标，其摘要若滞留会随心跳 sillyspec_status_map 整包直发
+      //（淘汰工作区永久脏数据 + map 随历史 ws 数无界增长）。本拍移除目标集之外的
+      // 槽位；仍在目标集内的 ws ③失败缺席仍保留旧值（既有语义不变）。
+      const live = new Set(
+        targets
+          .map((t) => t.workspaceId)
+          .filter((id): id is string => id !== null),
+      );
+      for (const wsId of this._statusSummariesByWs.keys()) {
+        if (!live.has(wsId)) this._statusSummariesByWs.delete(wsId);
+      }
+      return;
+    }
     const cwd = this._statusCwd();
     if (!cwd) {
       this._log('debug', 'sillyspec_status_skip_no_root');
       return;
     }
+    await this._collectOneTarget(null, cwd);
+  }
+
+  /** 单目标采集（原 collectStatusOnce 主体，参数化 workspaceId + cwd）。 */
+  private async _collectOneTarget(
+    workspaceId: string | null,
+    cwd: string,
+  ): Promise<void> {
     const bin = this._resolveSillySpecBin();
     if (bin === null) {
       this._markStatusCapabilityMissing('bin_not_found', { cwd });
@@ -633,14 +707,18 @@ export class SillySpecManager {
         cwd,
         error: fmtErrorSnippet(e),
       });
+      this._recordStatusError('runner_error', `error=${fmtErrorSnippet(e)}`);
       return;
     }
-    // 三态③：超时 / 非零退出 / spawn 其他错误 → 保留上次快照（不清除不上报 null）。
+    // 三态③：超时 / 非零退出 / spawn 其他错误 → 保留上次快照（不清除不上报 null），
+    // 但失败状态经 sillyspec_status_error 上报（2026-09-08：区分「数据源查询失败」
+    // 与「未安装/版本过低」——持续③叠加从未①成功时旧 UI 误显后者）。
     if (outcome.timedOut) {
       this._log('warn', 'sillyspec_status_collect_timeout', {
         cwd,
         timeout_ms: this._statusTimeoutMs,
       });
+      this._recordStatusError('collect_timeout', `timeout_ms=${this._statusTimeoutMs}`);
       return;
     }
     if (outcome.code === null) {
@@ -652,6 +730,10 @@ export class SillySpecManager {
         cwd,
         error_code: outcome.errorCode ?? 'unknown',
       });
+      this._recordStatusError(
+        'spawn_failed',
+        `error_code=${outcome.errorCode ?? 'unknown'}`,
+      );
       return;
     }
     if (outcome.code !== 0) {
@@ -659,6 +741,7 @@ export class SillySpecManager {
         cwd,
         exit_code: outcome.code,
       });
+      this._recordStatusError('nonzero_exit', `exit_code=${outcome.code}`);
       return;
     }
     // 三态①/②分界：exit 0 后 stdout 必须是合法 JSON envelope；非 JSON=旧版本
@@ -678,12 +761,48 @@ export class SillySpecManager {
     await this._attachPendingConflictQlIds(cwd, summary);
     this._statusSummary = summary;
     this._statusKnown = true;
+    // 工作区级化：具名目标成功 → 该 ws 的 map 槽位更新（③失败缺席保留旧值）。
+    if (workspaceId !== null) {
+      this._statusSummariesByWs.set(workspaceId, summary);
+    }
+    // 三态①成功：清失败状态（心跳 sillyspec_status_error 置 null，backend 清除）。
+    this._statusError = null;
     this._log('debug', 'sillyspec_status_collected', {
       cwd,
+      workspace_id: workspaceId ?? undefined,
       active_changes: summary.active_changes,
       ghost_count: summary.ghost_count,
       conflict_count: summary.conflict_count,
     });
+  }
+
+  /**
+   * 采集失败状态（纯同步零 spawn，_sendHeartbeatOnce 组装用）：null=无失败
+   * （①成功/②能力缺失/未采集），对象=三态③持续失败中（latest-wins 每跳携带，
+   * backend 非破坏直写）。
+   */
+  getStatusError(): SillySpecStatusError | null {
+    return this._statusError;
+  }
+
+  /**
+   * 三态③失败记账（2026-09-08 temp 投毒排障衍生）：同 reason 持续失败保留首败
+   * since（防退化成最后心跳时间）、刷新 detail；换 reason 重置 since（新失败
+   * 事件）；detail 截 200（backend 落库前再截双保险）。
+   */
+  private _recordStatusError(
+    reason: SillySpecStatusError['reason'],
+    detail: string,
+  ): void {
+    const capped = detail.slice(0, 200);
+    this._statusError = {
+      reason,
+      detail: capped,
+      since:
+        this._statusError?.reason === reason
+          ? this._statusError.since
+          : new Date(this._now()).toISOString(),
+    };
   }
 
   /**
@@ -696,6 +815,17 @@ export class SillySpecManager {
     return this._statusKnown ? this._statusSummary : undefined;
   }
 
+  /**
+   * 工作区级 map 快照（2026-09-08 总览工作区级化，心跳 sillyspec_status_map）：
+   * undefined = 未启用工作区级采集（statusTargets 未注入/映射空）→ 键不出现
+   * （backend 保留旧值，旧 daemon 兼容）；对象 = 已启用（含空对象=启用但全失败/
+   * 未成功过，空对象照发清 backend）。值仅含成功项（③缺席=保留旧值在 daemon 内存，
+   * ②清空——见 _statusSummariesByWs 注释）。
+   */
+  getStatusMapSnapshot(): Record<string, SillySpecStatusSummary> | undefined {
+    return this._statusTargets ? Object.fromEntries(this._statusSummariesByWs) : undefined;
+  }
+
   /** 三态②：置能力缺失（快照 null）+ warn 一次同类静默。 */
   private _markStatusCapabilityMissing(
     reason: 'bin_not_found' | 'spawn_enoent' | 'bad_json',
@@ -703,6 +833,11 @@ export class SillySpecManager {
   ): void {
     this._statusSummary = null;
     this._statusKnown = true;
+    // 三态②能力缺失是终分级（非查询失败）：清失败状态，前端走「未安装/版本过低」
+    // 占位而非「数据源查询失败」。②是 CLI 机器级（bin 缺失/旧版无 --json 对所有
+    // 目标同灭）——工作区级 map 一并清空（2026-09-08 工作区级化）。
+    this._statusError = null;
+    this._statusSummariesByWs.clear();
     if (this._statusWarnedClasses.has(reason)) {
       this._log('debug', 'sillyspec_status_capability_missing_repeat', {
         reason,

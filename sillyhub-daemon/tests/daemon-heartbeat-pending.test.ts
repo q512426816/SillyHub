@@ -195,7 +195,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 pending_update', () => {
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(4);
+    expect(call.length).toBe(10);
     // 剥掉 since 只传三字段（backend 首次落库盖 since，daemon 不上报）。
     expect(call[3]).toEqual({
       reason: 'server_command',

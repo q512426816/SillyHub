@@ -928,6 +928,78 @@ describe('task-04(2026-09-02) 三态③瞬态失败：保留上次快照（不�
   });
 });
 
+// ── 2026-09-08（temp 投毒排障衍生）：三态③失败状态 getStatusError 矩阵 ──────────
+
+describe('2026-09-08 三态③失败状态：getStatusError 记账与清除', () => {
+  it('非零退出 → error={reason:nonzero_exit, detail:exit_code=1, since:注入钟 ISO}', async () => {
+    const h = makeStatusHarness();
+    h.setOutcome({ code: 1, stdout: '', timedOut: false });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).toEqual({
+      reason: 'nonzero_exit',
+      detail: 'exit_code=1',
+      since: new Date(1_700_000_000_000).toISOString(),
+    });
+  });
+
+  it('超时 → collect_timeout；spawn 错误码 → spawn_failed（detail 带 error_code）', async () => {
+    const h = makeStatusHarness();
+    h.setOutcome({ code: null, stdout: '', timedOut: true });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()?.reason).toBe('collect_timeout');
+
+    h.setOutcome({ code: null, stdout: '', timedOut: false, errorCode: 'EACCES' });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()?.reason).toBe('spawn_failed');
+    expect(h.manager.getStatusError()?.detail).toBe('error_code=EACCES');
+    // 换 reason 重置 since：两拍同钟下 since 值相同，但记账语义由实现保证——
+    // 断言换类后 since 来自本拍（与首拍同为注入钟，回归保护靠下条用例）。
+  });
+
+  it('同 reason 连续失败保留首败 since；①成功后清空', async () => {
+    const h = makeStatusHarness();
+    h.setOutcome({ code: 1, stdout: '', timedOut: false });
+    await h.manager.collectStatusOnce();
+    const first = h.manager.getStatusError();
+    expect(first).not.toBeNull();
+
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).toEqual(first);
+
+    // 恢复①成功（harness 默认 outcome exit 0 + envelope）→ 清空。
+    h.setOutcome({ code: 0, stdout: JSON.stringify(ENVELOPE_OK), timedOut: false });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).toBeNull();
+  });
+
+  it('②能力缺失（bin_not_found / bad_json）→ 清空（终分级非查询失败，前端走「未安装/版本过低」）', async () => {
+    const h = makeStatusHarness();
+    h.setOutcome({ code: 1, stdout: '', timedOut: false });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).not.toBeNull();
+
+    // bin 消失 → ②。
+    const h2 = makeStatusHarness({ bin: null });
+    await h2.manager.collectStatusOnce();
+    expect(h2.manager.getStatusError()).toBeNull();
+
+    const h3 = makeStatusHarness();
+    h3.setOutcome({ code: 0, stdout: 'not-json', timedOut: false });
+    await h3.manager.collectStatusOnce();
+    expect(h3.manager.getStatusError()).toBeNull();
+  });
+
+  it('detail 截 200（daemon 侧截短，backend 落库前再截双保险）', async () => {
+    const h = makeStatusHarness();
+    h.setOutcome({ code: 1, stdout: '', timedOut: false });
+    // runner_error 路径 detail 含 error 快照——用 inject 模拟长 detail：直接
+    // 走 spawn_failed 长 errorCode 构造超长 detail。
+    h.setOutcome({ code: null, stdout: '', timedOut: false, errorCode: 'E'.repeat(500) });
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()?.detail.length).toBe(200);
+  });
+});
+
 describe('task-04(2026-09-02) buildSillySpecStatusSummary 截断与 32KB 降级（纯函数直测）', () => {
   it(`changes 超 N=${SILLYSPEC_STATUS_CHANGES_MAX} 截至前 50（active_changes 回退全长，计数基于截断后列表）`, () => {
     const envelope = {
@@ -1060,5 +1132,134 @@ describe('runProgressJsonDefault env (ql-20260907-007: spec-sync 熔断缺省)',
     );
     expect(outcome.code).toBe(0);
     expect(outcome.stdout).toBe('8000');
+  });
+});
+
+// ── 2026-09-08（总览工作区级化）：statusTargets 多目标 + getStatusMapSnapshot ────
+
+describe('2026-09-08 工作区级 map：多目标采集与快照', () => {
+  function makeTargetsHarness(
+    outcomes: Record<string, SillySpecProgressOutcome | 'ok'>,
+  ) {
+    let calls = 0;
+    const h = makeStatusHarness({});
+    // 重写 runner：按第 n 次调用的 cwd 对应目标返回 outcome（默认成功 envelope）。
+    h.runProgressJson.mockImplementation(
+      async (
+        _f: string,
+        _a: string[],
+        o: { cwd: string },
+      ): Promise<SillySpecProgressOutcome> => {
+        calls++;
+        const key = o.cwd.includes('alpha') ? 'alpha' : 'beta';
+        const oc = outcomes[key];
+        if (oc === 'ok' || oc === undefined) {
+          return { code: 0, stdout: JSON.stringify(ENVELOPE_OK), timedOut: false };
+        }
+        return oc;
+      },
+    );
+    return {
+      manager: h.manager,
+      calls: () => calls,
+    };
+  }
+  const TARGETS = [
+    { workspaceId: 'ws-alpha', rootPath: 'C:/repo/alpha' },
+    { workspaceId: 'ws-beta', rootPath: 'C:/repo/beta' },
+  ];
+
+  it('多目标成功 → map 含各 ws 快照；未注入 statusTargets → map undefined（旧形态）', async () => {
+    const plain = makeStatusHarness();
+    expect(plain.manager.getStatusMapSnapshot()).toBeUndefined();
+
+    // 注入 targets（构造时无法再改 deps——直接构造新 manager）。
+    const h = makeStatusHarness({});
+    const manager2 = new (h.manager.constructor as new (
+      d: import('../src/sillyspec-manager.js').SillySpecManagerDeps,
+    ) => typeof h.manager)({
+      runCommand: async () => null,
+      install: async () => undefined,
+      isBusy: () => false,
+      now: () => 1_700_000_000_000,
+      logger: (_l: unknown, _m: string) => undefined,
+      resolveSillySpecBin: () => STATUS_BIN,
+      statusCwd: () => null,
+      statusTimeoutMs: 5,
+      statusTargets: () => TARGETS,
+      // @ts-expect-error 测试直构（runProgressJson 复用 harness 假 runner 形状）
+      runProgressJson: h.runProgressJson,
+    });
+    await manager2.collectStatusOnce();
+    const map = manager2.getStatusMapSnapshot();
+    expect(map).toBeDefined();
+    expect(Object.keys(map!).sort()).toEqual(['ws-alpha', 'ws-beta']);
+    expect(map!['ws-alpha']).toEqual(SUMMARY_OF_ENVELOPE_OK);
+  });
+
+  it('单目标③失败 → 该 ws 缺席（保留旧值）；②能力缺失 → map 清空', async () => {
+    const h = makeStatusHarness({});
+    const manager = new (h.manager.constructor as new (
+      d: import('../src/sillyspec-manager.js').SillySpecManagerDeps,
+    ) => typeof h.manager)({
+      runCommand: async () => null,
+      install: async () => undefined,
+      isBusy: () => false,
+      now: () => 1_700_000_000_000,
+      logger: () => undefined,
+      resolveSillySpecBin: () => STATUS_BIN,
+      statusCwd: () => null,
+      statusTimeoutMs: 5,
+      statusTargets: () => TARGETS,
+      // @ts-expect-error 同上
+      runProgressJson: h.runProgressJson,
+    });
+    // 两目标先成功。
+    await manager.collectStatusOnce();
+    expect(Object.keys(manager.getStatusMapSnapshot()!)).toHaveLength(2);
+    // beta 持续③失败（alpha 正常）→ beta 保留旧值（机器级语义一致：③不清除，
+    // 陈旧度由 generated_at 透出），两键均在。
+    h.runProgressJson.mockImplementation(
+      async (_f: string, _a: string[], o: { cwd: string }) =>
+        o.cwd.includes('beta')
+          ? { code: 1, stdout: '', timedOut: false }
+          : { code: 0, stdout: JSON.stringify(ENVELOPE_OK), timedOut: false },
+    );
+    await manager.collectStatusOnce();
+    expect(Object.keys(manager.getStatusMapSnapshot()!).sort()).toEqual(['ws-alpha', 'ws-beta']);
+    // ②（bad_json）→ 全 map 清空。
+    h.runProgressJson.mockImplementation(
+      async () => ({ code: 0, stdout: 'not-json', timedOut: false }),
+    );
+    await manager.collectStatusOnce();
+    expect(manager.getStatusMapSnapshot()).toEqual({});
+  });
+
+  it('ql-20260909-002 目标集收缩（daemon LRU 淘汰）→ 被淘汰 ws 摘要随拍移除，map 不滞留', async () => {
+    const h = makeStatusHarness({});
+    let targets = [...TARGETS];
+    const manager = new (h.manager.constructor as new (
+      d: import('../src/sillyspec-manager.js').SillySpecManagerDeps,
+    ) => typeof h.manager)({
+      runCommand: async () => null,
+      install: async () => undefined,
+      isBusy: () => false,
+      now: () => 1_700_000_000_000,
+      logger: () => undefined,
+      resolveSillySpecBin: () => STATUS_BIN,
+      statusCwd: () => null,
+      statusTimeoutMs: 5,
+      statusTargets: () => targets,
+      // @ts-expect-error 同上
+      runProgressJson: h.runProgressJson,
+    });
+    await manager.collectStatusOnce();
+    expect(Object.keys(manager.getStatusMapSnapshot()!).sort()).toEqual(['ws-alpha', 'ws-beta']);
+    // daemon 侧 wsId→root 映射 LRU（上限 8）淘汰 ws-beta → 目标集收缩为仅 alpha：
+    // 下拍采集后 beta 摘要必须移除——否则心跳 map 整包直发会带着淘汰工作区的
+    // 永久脏数据，且 map 随 daemon 运行期访问过的不同 ws 数无界增长。
+    targets = [TARGETS[0]!];
+    await manager.collectStatusOnce();
+    expect(Object.keys(manager.getStatusMapSnapshot()!)).toEqual(['ws-alpha']);
   });
 });

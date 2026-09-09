@@ -43,7 +43,7 @@ import type { SillySpecUpdateState } from './sillyspec-manager.js';
 
 // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
 // 形状（progress show --json envelope 摘要），复用 manager 导出类型不重复声明。
-import type { SillySpecStatusSummary } from './sillyspec-manager.js';
+import type { SillySpecStatusSummary, SillySpecStatusError } from './sillyspec-manager.js';
 
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
@@ -184,6 +184,18 @@ export interface HeartbeatBody {
    *   - 摘要对象 = 最近快照（瞬态失败时 daemon 侧保留旧值照常携带）。
    */
   sillyspec_status?: SillySpecStatusSummary | null;
+  /**
+   * 2026-09-08（temp 投毒排障衍生）：总览采集三态③失败状态（{reason, detail,
+   * since}）。两态：null → 键出现携带 null = 无失败/已恢复（backend 置 NULL
+   * 清除）；对象 = 持续失败中（latest-wins 每跳携带，backend 整包直写）。
+   * 前端据此刻意区分「数据源查询失败」与「未安装/版本过低」。
+   */
+  sillyspec_status_error?: SillySpecStatusError | null;
+  /**
+   * 2026-09-08（总览工作区级化）：工作区级总览 map（wsId → 摘要，仅成功项）。
+   * 键不出现=未启用（backend 保留旧值）；对象（含空）整包直写（空=启用无成功项）。
+   */
+  sillyspec_status_map?: Record<string, SillySpecStatusSummary> | null;
   /**
    * 2026-09-04-conflict-resolve-entry task-06（FR-05 / 契约锚 task-02
    * DaemonHeartbeatSillySpecCommandResult）：sillyspec 平台命令（resolve /
@@ -812,6 +824,23 @@ export class HubClient {
      * 时请求体不含 spec_cache 键（旧 backend 零感知），既有 7 参调用零破坏。
      */
     specCache?: { workspace_id: string; spec_version: number }[],
+    /**
+     * 2026-09-08（temp 投毒排障衍生）：总览采集三态③失败状态（daemon.
+     * _sendHeartbeatOnce 从 manager.getStatusError() 读取）。可选追加末位——
+     * null（无失败/已恢复）显式携带清 backend 列；对象（持续失败中）整包直写；
+     * undefined 时请求体不含 sillyspec_status_error 键（语义同 null=清除）。
+     * 前端据此刻意区分「数据源查询失败」与「未安装/版本过低」。既有 8 参调用
+     * 请求体逐字段不变（零破坏）。
+     */
+    sillyspecStatusError?: SillySpecStatusError | null,
+    /**
+     * 2026-09-08（总览工作区级化）：工作区级总览 map（daemon._sendHeartbeatOnce
+     * 从 manager.getStatusMapSnapshot() 读取，wsId → 摘要，仅成功项）。可选追加
+     * 末位——undefined（未启用工作区级采集/旧 daemon）键不出现（backend 保留）；
+     * 对象（含空对象）整包直写（空=启用但暂无成功项，清除）。修「多工作区串台」：
+     * 前端按当前工作区取 map[wsId] 而非机器级单值。
+     */
+    sillyspecStatusMap?: Record<string, SillySpecStatusSummary> | null,
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -831,6 +860,17 @@ export class HubClient {
     // task-02：undefined → 键不出现（采集未启动）；null/摘要 → 显式携带。
     if (sillyspecStatus !== undefined) {
       body.sillyspec_status = sillyspecStatus;
+    }
+    // 2026-09-08：失败状态两态——null/对象均显式携带（null=清除）；undefined →
+    // 键不出现（等价清除，为既有调用零破坏保留）。与 sillyspec_status 的
+    // undefined 语义对齐。
+    if (sillyspecStatusError !== undefined) {
+      body.sillyspec_status_error = sillyspecStatusError;
+    }
+    // 2026-09-08（工作区级化）：undefined → 键不出现（未启用，backend 保留）；
+    // null/对象 → 显式携带（null 等价对象清除语义，daemon 侧不产 null）。
+    if (sillyspecStatusMap !== undefined) {
+      body.sillyspec_status_map = sillyspecStatusMap;
     }
     // task-06（D-004@v1 两态）：对象 → 整包直写；undefined → 键不出现（终态窗
     // 过期/无结果 = backend 置 NULL 清除）。参数类型不含 null，禁显式 null 写键。
