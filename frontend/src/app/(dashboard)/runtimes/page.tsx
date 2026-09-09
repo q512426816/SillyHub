@@ -68,7 +68,7 @@ import {
 // task-09：共享机器「来源工作区名」解析（listWorkspaces 建 id→name map）。
 import { listWorkspaces } from "@/lib/workspaces";
 // task-09：数据源 useDaemonMachines（机器级，D-005）。
-import { useDaemonMachines } from "@/lib/use-daemon-machines";
+import { daemonMachinesQueryKey, useDaemonMachines } from "@/lib/use-daemon-machines";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -595,7 +595,7 @@ export default function RuntimesPage() {
     }),
     [debouncedQuery, statusFilter, providerFilter, ownerUserId, page, isPlatformAdmin],
   );
-  const { items: machines, total, sessions, isLoading, error: listError, refetch } = useDaemonMachines(listParams);
+  const { items: machines, total, sessions, isLoading, error: listError, refetch } = useDaemonMachines(listParams, { includeSessions: true });
 
   // task-09 / FR-01：shared_to_me 取数路径——/machines 响应末位附带共享机器行
   //（task-07 后端装配），但 useDaemonMachines 的缓存是裁剪形 {items,total,sessions}
@@ -656,7 +656,7 @@ export default function RuntimesPage() {
    *  不变 machine 及其下其它 runtime（浅拷其它 runtime，保留嵌套引用稳定性）。 */
   const patchRuntimeInMachines = useCallback(
     (updater: (rt: DaemonRuntimeRead) => DaemonRuntimeRead, runtimeId: string) => {
-      queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => {
+      queryClient.setQueryData<MachinesCache>(daemonMachinesQueryKey(listParams, true), (old) => {
         if (!old) return old;
         const items = old.items.map((m) => {
           if (!m.runtimes.some((r) => r.id === runtimeId)) return m;
@@ -670,7 +670,7 @@ export default function RuntimesPage() {
 
   const patchSessions = useCallback(
     (updater: (prev: AgentSessionRead[]) => AgentSessionRead[]) => {
-      queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => ({
+      queryClient.setQueryData<MachinesCache>(daemonMachinesQueryKey(listParams, true), (old) => ({
         items: old?.items ?? [],
         total: old?.total ?? 0,
         sessions: updater(old?.sessions ?? []),
@@ -816,7 +816,7 @@ export default function RuntimesPage() {
             await deleteDaemonMachine(machine.id);
             // machines cache 就地移除该机器（嵌套 runtimes 随之消失）。
             queryClient.setQueryData<MachinesCache>(
-              queryKeys.daemonMachines.list(listParams),
+              daemonMachinesQueryKey(listParams, true),
               (old) => {
                 if (!old) return old;
                 return {
@@ -862,7 +862,7 @@ export default function RuntimesPage() {
           try {
             await deleteDaemonRuntime(runtime.id);
             // 嵌套移除 runtime + 重算 runtime_count/online_runtime_count（保守降 1/视状态）。
-            queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => {
+            queryClient.setQueryData<MachinesCache>(daemonMachinesQueryKey(listParams, true), (old) => {
               if (!old) return old;
               const items = old.items.map((m) => {
                 if (!m.runtimes.some((r) => r.id === runtime.id)) return m;
@@ -958,7 +958,7 @@ export default function RuntimesPage() {
         display_alias: aliasValue.trim() || null,
       });
       // patch machines cache：替换该 machine（保留其下 runtimes 嵌套引用，用 updated 整体替换）。
-      queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => {
+      queryClient.setQueryData<MachinesCache>(daemonMachinesQueryKey(listParams, true), (old) => {
         if (!old) return old;
         return { ...old, items: old.items.map((m) => (m.id === updated.id ? updated : m)) };
       });

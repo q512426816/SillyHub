@@ -1,11 +1,17 @@
 /**
- * useDaemonMachines — daemon 机器列表 + 会话组合查询（机器级，覆盖 FR-4,6）。
+ * useDaemonMachines — daemon 机器列表 + 可选会话组合查询（机器级，覆盖 FR-4,6）。
  *
- * 机器级数据 hook：Promise.all 并发 listDaemonMachines
- * + listAgentSessions（sessions 失败 .catch(null) 降级为 []，不阻塞列表渲染）。
+ * 机器级数据 hook：listDaemonMachines，opts.includeSessions 时并发
+ * listAgentSessions（sessions 失败 .catch(null) 降级为 []，不阻塞列表渲染）。
  * params 进 queryKey，过滤/分页变化即新查询（react-query 自动停旧启新 R-02）。
  * 15s 无条件轮询。用量（用量统计）不走本 hook，由 page 单独调
  * getRuntimesUsage(window) 管理（D-004，不内联 /machines）。
+ *
+ * ql-20260909-013（轮询瘦身）：sessions（100 行级重列表）默认不拉——唯一
+ * 消费方是机器页（会话分组），其余挂载方（工作区概览/移动聊天页/悬浮抽屉）
+ * 只用机器名单，却每 15s 顺带全量拉取且与 SessionListPanel 的会话查询 key
+ * 不同无法去重。includeSessions 进 queryKey（daemonMachinesQueryKey），防
+ * 带/不带 sessions 的两路缓存互相覆写 sessions 字段。
  *
  * task-10（2026-08-28-daemon-agent-share / FR-05 / D-004@v2）：machines 响应的
  * shared_to_me 共享机器块透传为 sharedToMe，并融合出 machineCandidates（自有 +
@@ -114,15 +120,33 @@ interface DaemonMachinesData {
   sharedToMe: SharedMachineView[];
 }
 
-export function useDaemonMachines(params: DaemonMachineListParams) {
+/**
+ * 机器列表缓存 key（includeSessions 进 key——两路缓存隔离，防 sessions 字段
+ * 互相覆写；runtimes 页的 setQueryData 侧写缓存必须用同一 helper 构造 key）。
+ */
+export function daemonMachinesQueryKey(
+  params: DaemonMachineListParams,
+  includeSessions: boolean,
+) {
+  return [...queryKeys.daemonMachines.list(params), { includeSessions }] as const;
+}
+
+export function useDaemonMachines(
+  params: DaemonMachineListParams,
+  opts: { includeSessions?: boolean } = {},
+) {
+  const includeSessions = opts.includeSessions ?? false;
   const q = useQuery<DaemonMachinesData, ApiError>({
-    queryKey: queryKeys.daemonMachines.list(params),
+    queryKey: daemonMachinesQueryKey(params, includeSessions),
     queryFn: async () => {
       const [resp, sessionsResp] = await Promise.all([
         listDaemonMachines(params) as Promise<MachinesResponseWithShared>,
         // ql-20260831-015：后端 HTTP 默认改三态（不传=全部含已归档）——机器
         // 分组/会话计数只统计未归档，显式 false 保持原语义。
-        listAgentSessions({ limit: 100, archived: false }).catch(() => null),
+        // ql-20260909-013：仅 includeSessions（机器页）拉取，其余挂载方省掉。
+        includeSessions
+          ? listAgentSessions({ limit: 100, archived: false }).catch(() => null)
+          : Promise.resolve(null),
       ]);
       return {
         items: resp.items,

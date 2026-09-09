@@ -12,15 +12,17 @@
  *
  * worker 从 /pdf.worker.min.mjs 静态取（webpack 对 node_modules 内 worker 的
  * URL 资源化不可靠）；升级 pdfjs-dist 时须同步重拷该文件到 public/。
+ *
+ * ql-20260909-013：pdfjs-dist 动态加载（约 130KB+ gzip）——静态 import 经
+ * 聊天文件卡片（file-message-card → file-preview-modal → PREVIEWER_MAP）
+ * 链路进最高频的会话页首屏 chunk，而 PDF 预览是低频操作（对齐 xlsx/docx
+ * 的 await import 先例）。workerSrc 随首次加载设置（幂等赋值）。
  */
 
 import { useEffect, useRef, useState } from "react";
-import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import type { PreviewerProps } from "./index";
-
-pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 /** 超过该页数只渲染前 N 页（防数百页大文档画布爆内存，完整内容走下载）。 */
 const MAX_RENDER_PAGES = 50;
@@ -39,9 +41,11 @@ export function PdfPreviewer({ url, fill }: PreviewerProps) {
     setDoc(null);
     setNumPages(0);
 
-    pdfjs
-      .getDocument({ url, isEvalSupported: false })
-      .promise.then((d) => {
+    (async () => {
+      try {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        const d = await pdfjs.getDocument({ url, isEvalSupported: false }).promise;
         if (cancelled) {
           void d.destroy();
           return;
@@ -49,10 +53,10 @@ export function PdfPreviewer({ url, fill }: PreviewerProps) {
         setDoc(d);
         setNumPages(d.numPages);
         setStatus("ok");
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setStatus("error");
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
