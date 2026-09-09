@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-08-cursor-interactive-session",
+  "generatedAt": "2026-09-08T08:55:57.665Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-08-cursor-interactive-session",
+      "metrics": {
+        "matches": 4,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-08-cursor-interactive-session",
+      "metrics": {
+        "tasks": 11,
+        "hasTest": 9
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-08-cursor-interactive-session",
+      "metrics": {
+        "backendEndpoints": 3800,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-08-cursor-interactive-session",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  }
+}

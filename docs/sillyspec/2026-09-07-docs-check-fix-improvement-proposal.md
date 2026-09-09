@@ -243,8 +243,24 @@ sillyspec docs migrate --from "modules/" --to "backend/app/modules/"
 - **元考量（YAGNI）**：自用工具 + agent 干活生态下，"50+ 轮交互"的 agent 消耗是弹性成本——第二次痛之前不建机器。已另核实：sillyspec 仓在途的 `src/docs-check.js` 改动是 known_failures 提取加固，与本提案 8 项无关，目前尚无认领。
 - **状态更新**：前四项可合开一个小 change（量级约一两天，不需单独立大设计）；本提案维持 backlog 活跃，重点跟踪 §一.1/§一.2 是否等到真实批量事件再启动。
 
+## 认领对账（2026-09-08，工具侧实施）
+
+评审结论五项已全部落地并归档（sillyspec change：`2026-09-08-docs-fix-capability`，commit 94c5eb0+6db00e8+归档提交，verify PASS）：
+
+| 评审项 | 实现 | 实证 |
+|--------|------|------|
+| ① 解析修复 | REF_RE 展开循环形支持括号路径（`app/(dashboard)/x.tsx:21` 全量提取、markdown 链接零回归）；`...` 模糊路径 skippedFuzzy 跳过；顿号拆分测试锚定 | 单测 16/16；evil 用例 0ms（初稿原子序列形被 Design Grill 实证 ReDoS n=30→73.8s 否决，落 D-006） |
+| ② docs migrate | `sillyspec docs migrate --from X --to Y [--apply]`：dry-run 默认零写盘、apply 复用 applyFixes、写盘后自动 docs check 复核、unverified 警示（防 from/to 写反） | 单测 6/6 + CLI 实测 |
+| ③ 豁免双通道 | 路径段 archive/finished + frontmatter `doc_type: snapshot`，skippedExempt 计数，`--no-exempt` 可关 | CLI 实测；dogfood gate 0=基线 0 |
+| ④ candidates JSON | `--json` fix 对象增 candidates（tie 歧义 {file,line}/带 / 路径文件不存在 {file}），机械数据无置信度 | --json 实测 |
+| ⑤ stdout 出口（添头） | 非 JSON 报告内容统一 stdout、stderr 仅 ⚠️ 诊断与用法错误；--json/exit code 不变 | CLI 实测 stderr 0 行 |
+
+未做项维持原判：§一.1/一.2（一站式+推断引擎）、§二.5（--delta-only）等第二次批量事件再认领。dogfood 附带实证：本变更自身引发 40 处行号漂移，`docs check --fix` 一把梭 39 处+人工 1 处——印证提案「--fix 是最大单一修复手段」判断。
+
 ## 巡检注记（2026-09-08 定时扫描）
 
 - 定性：改进提案（状态「待 sillyspec 工具侧评估」），P0-P3 共 8 项能力建设——属工具 roadmap 认领制工作，非缺陷修复，定时巡检不代位实现（P0 的 `docs fix` 一站式命令 + 路径推断引擎是量级不小的特性开发，需设计取舍：置信度阈值、交互模式、门控语义）。
 - 观察到 sillyspec 仓工作区当前有 `src/docs-check.js` 在途改动（另一会话）——可能与本提案部分项相关，待其提交后下轮巡检对账认领情况。
 - 保持活跃，作为工具侧 backlog 清单跟踪。
+
+- 2026-09-09 复核：认领对账已实证（sillyspec 仓 commit 94c5eb0 系列在 main，五项实现 + dogfood gate 0=基线 0 本轮再验证）；暂缓项（一站式 fix/推断引擎/--delta-only）维持「等第二次批量事件」裁决。本提案继续作为 backlog 跟踪文件活跃。

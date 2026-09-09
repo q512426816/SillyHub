@@ -9,3 +9,8 @@
   2. 校验基线取 `HEAD`（git show）而非工作区文件内容，或
   3. gate 支持 `--against HEAD` 模式，pre-push 默认用之。
 - **关联**：ql-20260908-011/012（snapshot 豁免是文档侧减敏，本坑是门槛侧机制问题，两者互补）。
+
+## 巡检注记（2026-09-09 定时扫描）
+
+- 定性：**门禁语义设计变更**（三选一：push range diff 驱动 / 校验基线取 git show HEAD / `--against HEAD` 模式 + pre-push 默认）——涉及 docs-check 读文件层重构与 pre-push 行为契约，属专项变更而非巡检级小修，本轮不代位实现。
+- 关联减敏已落地：docs-fix-capability 变更（2026-09-08）的 snapshot/archive 豁免双通道减少了活文档锚点面；本坑是门槛侧机制问题的剩余半边。保持活跃待专项认领。

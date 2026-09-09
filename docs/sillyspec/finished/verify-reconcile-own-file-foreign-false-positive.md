@@ -2,7 +2,7 @@
 
 - 发现日期：2026-09-09
 - 变更：2026-09-09-sessions-file-browser-three-pane（verify --done 被阻断）
-- 状态：**活跃坑**（待工具修复）
+- 状态：**已修复**（sillyspec ql-20260909-002-9920，2026-09-09——方案 A 落地，见文末修复记录）
 
 ## 现象
 
@@ -40,3 +40,14 @@ verify `--done` 的 target_files 对账报 `reconcile_missing_declared`（❌ �
 ## 关联
 
 - 坑 `verify-reconcile-foreign-wip`（foreign-declared.js 注释里自记的坑）只解决了「他者 WIP 混入本变更 module 命中」方向；本坑是它的对偶面：**本变更文件被他者声明反向误伤**。
+
+## 修复记录（2026-09-09）
+
+- 修复：sillyspec `ql-20260909-002-9920`——`splitOwnVsForeignDiffFiles` 改 **own 优先**（本缺陷文档建议 A）：文件在本变更 own 声明集（design §6 ∪ task allowed_paths/target_files；quick 会话 = guard.allowedFiles）内时永不判 foreign；仅他者声明的在途文件照旧剔除（语义不放松）。修在切分函数内，reconcile / verify 实测 / 探针 / contract-matrix 四个消费点自动受益。
+- 测试：`test/foreign-own-priority.test.mjs` 端到端复现本坑场景（双声明文件归 own、reconcile 不再 `reconcile_missing_declared`）。
+- **对被阻断变更的操作**：sillyspec 修复生效后（本仓安装的 sillyspec 更新到含 ql-20260909-002 的版本）直接重跑 `sillyspec run verify --done`——实质验证已全 PASS，对账将放行；随后正常归档本变更。旧变更（如 2026-09-03-group-chat-archive-delete）的归档收尾不再是被阻断变更的解阻前置条件，按属主节奏做即可（归档它仍值得：消除陈旧声明噪音源）。
+
+## 处置记录（2026-09-09 定时收口，验证归档）
+
+- 修复已入库验证：`splitOwnVsForeignDiffFiles` own 优先（ql-20260909-002-9920）在 sillyspec 仓已提交（foreign-declared.js + 配套测试均不在在途改动集），`test/foreign-own-priority.test.mjs` 复跑 1/1 绿；四个消费点（reconcile / verify 实测 / 探针 / contract-matrix）自动受益。
+- 文件内遗留操作指引（被阻断变更重跑 verify --done、旧变更按属主节奏归档）属变更属主侧动作，随文件归档备查。
