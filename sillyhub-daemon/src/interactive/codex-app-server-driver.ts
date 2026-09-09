@@ -1007,12 +1007,6 @@ export class CodexAppServerDriver implements InteractiveDriver {
         currentTurnResolve !== null ? onMessage : undefined,
       );
 
-      // ql-20260910-003：thread/started 通知携带线程模型名（modelUsage 明细行
-      // key；start 与 resume 都发本通知，实测 0.147）。
-      if (line.includes('"thread/started"')) {
-        this._extractThreadModel(h, line);
-      }
-
       // D2（健壮性修复，2026-07-24）：parse 包 try/catch——畸形行让 adapter.parse 抛
       // 异常时，readline 'line' 回调未捕获异常会被 cli.ts 全局处理器吞掉，但
       // currentTurnPromise 永不 resolve → 交互式会话永久卡死。对齐 task-runner.ts:1420：
@@ -1036,6 +1030,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
           if (tid && !h.threadId) {
             h.threadId = tid;
           }
+          // ql-20260910-003：线程模型名只在 start/resume 的 response（result.thread.
+          // model，实测 0.147；thread/started 通知不带 model 只有 modelProvider）
+          // ——本分支即该 response 的收敛点，从原始行提取。
+          this._extractThreadModel(h, line);
           // 上报 status/session_started 事件（映射表 #1；让 backend 对齐 agent_session_id）
           if (onMessage && h.threadId) {
             // task-08：envelope 包装（单事件成批）。
@@ -1234,17 +1232,21 @@ export class CodexAppServerDriver implements InteractiveDriver {
   }
 
   /**
-   * ql-20260910-003：thread/started 通知解析线程模型名（params.thread.model，
-   * 如 "glm-5.3"）。畸形行/缺 model 静默忽略（threadModel 保持原值）。
+   * ql-20260910-003：thread/start|resume response 解析线程模型名。实测 0.147
+   * 真实帧序（生产会话 02559587 重放实证）：model 在 **result.model**（thread
+   * 对象同级）；thread/started 通知与 result.thread 均只有 modelProvider 不带
+   * model（thread 路径留作防御兜底）。畸形行/缺 model 静默忽略。
    */
   private _extractThreadModel(h: CodexHandle, line: string): void {
-    let msg: { params?: { thread?: { model?: unknown } } };
+    let msg: {
+      result?: { model?: unknown; thread?: { model?: unknown } };
+    };
     try {
       msg = JSON.parse(line) as typeof msg;
     } catch {
       return;
     }
-    const model = msg.params?.thread?.model;
+    const model = msg.result?.model ?? msg.result?.thread?.model;
     if (typeof model === 'string' && model.trim() !== '') {
       h.threadModel = model;
     }

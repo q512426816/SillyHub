@@ -180,9 +180,14 @@ function emitLines(child: FakeChild, lines: string[]): void {
   for (const l of lines) child.stdout.push(l + '\n');
 }
 
-/** 解析出的 thread/start response 行（喂回 fake）。 */
-function threadStartResponse(threadId: string): string {
-  return JSON.stringify({ jsonrpc: '2.0', id: 2, result: { thread: { id: threadId } } });
+/** 解析出的 thread/start response 行（喂回 fake）。ql-20260910-003：真实形状
+ * model 在 result.model（thread 同级，生产会话 02559587 重放实证）。 */
+function threadStartResponse(threadId: string, model = 'glm-5.3'): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    id: 2,
+    result: { thread: { id: threadId, modelProvider: 'custom' }, model },
+  });
 }
 
 /** turn/started notification 行。 */
@@ -234,12 +239,12 @@ function tokenUsageNotif(
   });
 }
 
-/** ql-20260910-003：thread/started notification 行（带模型名）。 */
-function threadStartedNotif(threadId: string, model = 'glm-5.3'): string {
+/** ql-20260910-003：thread/started 通知行（真实形状不带 model——只有 modelProvider）。 */
+function threadStartedNotif(threadId: string): string {
   return JSON.stringify({
     jsonrpc: '2.0',
     method: 'thread/started',
-    params: { thread: { id: threadId, model } },
+    params: { thread: { id: threadId, modelProvider: 'custom' } },
   });
 }
 
@@ -785,8 +790,9 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
     const consumeP = driver.consume(handle, cb);
 
     await new Promise<void>((r) => setTimeout(r, 50));
-    // id=2 response（threadId 来源）+ thread/started 通知（模型名来源）
-    emitLines(child, [threadStartResponse('thr_mu'), threadStartedNotif('thr_mu', 'glm-5.3')]);
+    // id=2 response（threadId + 模型名唯一来源）+ thread/started 通知（真实形状
+    // 不带 model——防回归锚：模型提取不得依赖通知）
+    emitLines(child, [threadStartResponse('thr_mu'), threadStartedNotif('thr_mu')]);
     await new Promise<void>((r) => setTimeout(r, 50));
 
     push('hi');

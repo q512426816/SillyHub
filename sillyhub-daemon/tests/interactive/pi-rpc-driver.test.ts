@@ -273,7 +273,13 @@ async function makeDriver(
 /** get_state 成功应答（握手）。 */
 function handshakeOk(child: FakeChild, extra: Record<string, unknown> = {}): void {
   respond(child, 'get_state', {
-    data: { sessionId: 'sess_pi_1', isStreaming: false, ...extra },
+    // ql-20260910-003：真实 get_state 含 model 对象（{id, name, provider, ...}）
+    data: {
+      sessionId: 'sess_pi_1',
+      isStreaming: false,
+      model: { id: 'glm-5.3', name: 'GLM-5.3' },
+      ...extra,
+    },
   });
 }
 
@@ -768,9 +774,8 @@ describe('turn 生命周期', () => {
     await tick();
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
-    // ql-20260910-003：pi 启动即发 model_change 带活跃模型（明细行 key）
-    emitEvent(child, { type: 'model_change', modelId: 'glm-5.3' });
     // 调用 1（工具循环首轮）：message_end 携带该调用 usage
+    //（模型名来自 handshakeOk 的 get_state.model.id——RPC 流无 model_change 事件）
     emitEvent(child, {
       type: 'message_end',
       message: {

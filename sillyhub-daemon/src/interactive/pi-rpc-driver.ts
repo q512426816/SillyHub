@@ -1250,13 +1250,6 @@ export class PiRpcDriver implements InteractiveDriver {
           }
         }
       }
-      // ql-20260910-003：model_change 跟踪当前模型（明细行 key；启动即发一条）。
-      if (msg.type === 'model_change') {
-        const modelId = (msg as { modelId?: unknown }).modelId;
-        if (typeof modelId === 'string' && modelId.trim() !== '') {
-          currentModel = modelId;
-        }
-      }
       const events = normalizer.normalizeRpcLine(line);
       for (const ev of events) {
         if (ev.type === 'error' && ev.content) {
@@ -1312,6 +1305,10 @@ export class PiRpcDriver implements InteractiveDriver {
       if (hs.isStreaming && !sawAgentEvent) {
         isStreaming = true;
         h.isStreaming = true;
+      }
+      // ql-20260910-003：get_state 握手解析的模型名（明细行 key）。
+      if (hs.model) {
+        currentModel = hs.model;
       }
 
       // ── B. 多轮串行（InputQueue 单订阅：迭代器循环外建一次） ─────────────
@@ -1450,7 +1447,7 @@ export class PiRpcDriver implements InteractiveDriver {
     hooks: {
       onTurnMessage: (envelope: { events: AgentEvent[] }) => void | Promise<void>;
     },
-  ): Promise<{ sessionId: string | null; isStreaming: boolean }> {
+  ): Promise<{ sessionId: string | null; isStreaming: boolean; model: string | null }> {
     try {
       const data = await this._sendCommand(
         h,
@@ -1465,6 +1462,14 @@ export class PiRpcDriver implements InteractiveDriver {
       if (sessionId) {
         h.sessionId = sessionId;
       }
+      // ql-20260910-003：get_state 的 data.model.id 是模型名唯一可来源（RPC 流
+      // 无 model_change 事件——那是会话文件记录类型，get_state 实测含 model）。
+      // 会话中途 /model 切换不跟踪（文档标注限制）。
+      const modelObj = isRecord(data.model) ? data.model : null;
+      const modelId =
+        modelObj && typeof modelObj.id === 'string' && modelObj.id.trim() !== ''
+          ? modelObj.id
+          : null;
       const ev: AgentEvent = {
         type: 'status',
         subtype: 'session_started',
@@ -1473,7 +1478,7 @@ export class PiRpcDriver implements InteractiveDriver {
         metadata: { source: 'pi_get_state' },
       };
       await hooks.onTurnMessage({ events: [ev] });
-      return { sessionId, isStreaming: data.isStreaming === true };
+      return { sessionId, isStreaming: data.isStreaming === true, model: modelId };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       // eslint-disable-next-line no-console
@@ -1484,7 +1489,7 @@ export class PiRpcDriver implements InteractiveDriver {
         metadata: { kind: 'pi_handshake_failed' },
       };
       await hooks.onTurnMessage({ events: [ev] });
-      return { sessionId: null, isStreaming: false };
+      return { sessionId: null, isStreaming: false, model: null };
     }
   }
 
