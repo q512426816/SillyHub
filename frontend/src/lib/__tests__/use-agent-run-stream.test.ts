@@ -37,12 +37,14 @@ interface FakeClient {
   connect: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
   onMessage: ReturnType<typeof vi.fn>;
+  onMessagesBatch: ReturnType<typeof vi.fn>;
   onStatusChange: ReturnType<typeof vi.fn>;
   onDone: ReturnType<typeof vi.fn>;
   onPermissionRequest: ReturnType<typeof vi.fn>;
   onPermissionResolved: ReturnType<typeof vi.fn>;
   onGateStatusChanged: ReturnType<typeof vi.fn>;
   __emitMessage: (e: unknown) => void;
+  __emitMessageBatch: (events: unknown[]) => void;
   __emitStatus: (s: unknown) => void;
   __emitDone: (d: unknown) => void;
   __emitPermissionRequest: (r: unknown) => void;
@@ -50,6 +52,7 @@ interface FakeClient {
   __emitGateStatus: (e: unknown) => void;
   __registered: {
     message: Cb<unknown>[];
+    messageBatch: Cb<unknown[]>[];
     status: Cb<unknown>[];
     done: Cb<unknown>[];
     permReq: Cb<unknown>[];
@@ -94,6 +97,7 @@ vi.mock("@/stores/session", () => ({
 function makeFakeClient(): FakeClient {
   const registered: FakeClient["__registered"] = {
     message: [],
+    messageBatch: [],
     status: [],
     done: [],
     permReq: [],
@@ -107,6 +111,12 @@ function makeFakeClient(): FakeClient {
       registered.message.push(cb);
       return () => {
         registered.message = registered.message.filter((c) => c !== cb);
+      };
+    }),
+    onMessagesBatch: vi.fn((cb: Cb<unknown[]>) => {
+      registered.messageBatch.push(cb);
+      return () => {
+        registered.messageBatch = registered.messageBatch.filter((c) => c !== cb);
       };
     }),
     onStatusChange: vi.fn((cb: Cb<unknown>) => {
@@ -142,6 +152,9 @@ function makeFakeClient(): FakeClient {
     __registered: registered,
     __emitMessage: (e: unknown) => {
       for (const cb of [...registered.message]) cb(e);
+    },
+    __emitMessageBatch: (events: unknown[]) => {
+      for (const cb of [...registered.messageBatch]) cb(events);
     },
     __emitStatus: (s: unknown) => {
       for (const cb of [...registered.status]) cb(s);
@@ -1185,5 +1198,115 @@ describe("useAgentRunStream — 边界", () => {
     expect(
       seenUrls.some((u) => u.endsWith("/sessions/sess-active/dialogs")),
     ).toBe(true);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ql-20260909-019：批量预取回放路径（onMessagesBatch）
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("useAgentRunStream — 批量回放 (ql-20260909-019)", () => {
+  it("TC-21 批量事件一次追加整批 + 与单条路径共享去重索引", async () => {
+    installFetchMock(() => jsonResponse({ id: "run-1", session_id: null }));
+
+    const { result } = renderHook(
+      ({ workspaceId, runId, isActive }) =>
+        useAgentRunStream(workspaceId, runId, { isActive }),
+      {
+        initialProps: { workspaceId: "ws-1", runId: "run-1", isActive: true },
+      },
+    );
+
+    await waitFor(() => expect(currentFake).not.toBeNull());
+
+    // 一批 3 条（含 1 条重复 log_id）→ 一次追加 2 条
+    act(() => {
+      currentFake!.__emitMessageBatch([
+        {
+          channel: "stdout",
+          content: "h-1",
+          timestamp: "2026-06-22T10:00:00Z",
+          log_id: "B1",
+        },
+        {
+          channel: "stdout",
+          content: "h-1-dup",
+          timestamp: "2026-06-22T10:00:01Z",
+          log_id: "B1",
+        },
+        {
+          channel: "stderr",
+          content: "h-2",
+          timestamp: "2026-06-22T10:00:02Z",
+          log_id: "B2",
+        },
+      ]);
+    });
+    expect(result.current.logs).toHaveLength(2);
+    expect(result.current.logs[0]!.content_redacted).toBe("h-1");
+    expect(result.current.logs[1]!.content_redacted).toBe("h-2");
+
+    // 批量后同 log_id 单条到达 → 去重（两路径共享 seenLogIdsRef）
+    act(() => {
+      currentFake!.__emitMessage({
+        channel: "stdout",
+        content: "again-dup",
+        timestamp: "2026-06-22T10:00:03Z",
+        log_id: "B1",
+      });
+    });
+    expect(result.current.logs).toHaveLength(2);
+
+    // 新 log_id 单条正常累加
+    act(() => {
+      currentFake!.__emitMessage({
+        channel: "stdout",
+        content: "live-1",
+        timestamp: "2026-06-22T10:00:04Z",
+        log_id: "B3",
+      });
+    });
+    expect(result.current.logs).toHaveLength(3);
+  });
+
+  it("TC-22 runId 切换 → 去重索引重置（同 log_id 可再次接收）", async () => {
+    installFetchMock(() => jsonResponse({ id: "run-1", session_id: null }));
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId, runId, isActive }) =>
+        useAgentRunStream(workspaceId, runId, { isActive }),
+      {
+        initialProps: { workspaceId: "ws-1", runId: "run-1", isActive: true },
+      },
+    );
+
+    await waitFor(() => expect(currentFake).not.toBeNull());
+    act(() => {
+      currentFake!.__emitMessage({
+        channel: "stdout",
+        content: "run1-line",
+        timestamp: "2026-06-22T10:00:00Z",
+        log_id: "S1",
+      });
+    });
+    expect(result.current.logs).toHaveLength(1);
+
+    rerender({ workspaceId: "ws-1", runId: "run-2", isActive: true });
+    // 切 run 的清场归调用方（hook 契约：clear 由调用点切 runId 时调）
+    act(() => {
+      result.current.clear();
+    });
+    expect(result.current.logs).toHaveLength(0);
+    act(() => {
+      currentFake!.__emitMessage({
+        channel: "stdout",
+        content: "run2-line",
+        timestamp: "2026-06-22T10:01:00Z",
+        log_id: "S1",
+      });
+    });
+    // 新 run 的同 log_id 不被旧 run 索引拦截
+    expect(result.current.logs).toHaveLength(1);
+    expect(result.current.logs[0]!.content_redacted).toBe("run2-line");
   });
 });

@@ -10,6 +10,7 @@ import {
   getAgentRun,
   getAgentRunLogs,
   submitAgentRunInput,
+  type StreamLogEvent,
 } from "./agent";
 import { type SessionPermissionRequest, fetchPendingDialogs } from "./daemon";
 import { useSession } from "@/stores/session";
@@ -97,6 +98,9 @@ export function useAgentRunStream(
 
   // 底层客户端 ref：cleanup 时 disconnect
   const clientRef = useRef<AgentRunStreamClient | null>(null);
+  // ql-20260909-019：log_id 去重索引（O(1)）——原 onMessage 内 prev.some(l => l.id === …)
+  // 每事件 O(n) 线性扫，长 run 流式期间累计 O(n²)。effect 重跑（切 run）时重置。
+  const seenLogIdsRef = useRef<Set<string>>(new Set());
 
   // —— dismissPerm（D-003：仅本地 perms 移除，决策 API 由卡片自调）——
   const dismissPerm = useCallback((requestId: string) => {
@@ -147,6 +151,7 @@ export function useAgentRunStream(
 
   // —— clear（状态重置，调用点切 runId 时用）——
   const clear = useCallback(() => {
+    seenLogIdsRef.current = new Set();
     setLogs([]);
     setStatus(null);
     setStreaming(false);
@@ -196,41 +201,61 @@ export function useAgentRunStream(
       if (s === "connected") setLoading(false);
     });
 
-    // (b) message：log 追加（按 log_id 去重；client 已去重，hook 侧再保险）
+    // ql-20260909-019：切 run 重置去重索引（新 run 的 log_id 空间独立）。
+    seenLogIdsRef.current = new Set();
+
+    // 行对象构造（单条/批量两条路径共用，字段与原 onMessage 内联构造一致）。
+    const toEntry = (event: StreamLogEvent): AgentRunLogEntry => ({
+      id: event.log_id ?? _safeRuntimeId(),
+      run_id: runId,
+      timestamp: event.timestamp,
+      channel: event.channel,
+      content_redacted: event.content ?? "",
+      // 2026-06-28-daemon-subagent-transcript task-10 / FR-08：SSE 实时流归属
+      // 透传（backend published_logs / session payload 带，task-09）。让实时流
+      // log 与 DB 查询路径都有归属，viewer 统一渲染子代理徽标 + depth 缩进
+      //（task-11）。历史/主 agent → null（与 backend nullable 一致，design §9）。
+      parent_tool_use_id: event.parent_tool_use_id ?? null,
+      subagent_type: event.subagent_type ?? null,
+      depth: event.depth ?? null,
+      // task-13（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：
+      // SSE 转换层接线——补透传 agent_event（顶层字段，backend run/session
+      // 双通道 payload 带，service.py:1548/424）+ 顺带 tool_kind / segment_id /
+      // edit_patch（task-10 发现的既有缺口：onMessage 逐字段构造行时全丢，
+      // 实时流结构化渲染轨 / 工具徽标 / 半截行标识 / Edit 真实行号此前只在
+      // REST 回放可达）。缺席 → null（与 AgentRunLogEntry 可选列语义一致，
+      // normalize/渲染层自行兜底），其余字段构造保持原样。
+      agent_event: event.agent_event ?? null,
+      tool_kind: event.tool_kind ?? null,
+      segment_id: event.segment_id ?? null,
+      edit_patch: event.edit_patch ?? null,
+    });
+
+    // ql-20260909-019：预取回放整批追加——client connect/_doReconnect 的历史
+    // 日志一次 setLogs 追加（原逐条 emit 每条一次 O(n) 拷贝，打开大 run 历史
+    // 累计 O(n²)）；批内按 seenLogIdsRef 去重（与单条路径同索引）。
+    client.onMessagesBatch((events) => {
+      if (cancelled) return;
+      const fresh = events.filter((event) => {
+        if (event.log_id == null) return true;
+        if (seenLogIdsRef.current.has(event.log_id)) return false;
+        seenLogIdsRef.current.add(event.log_id);
+        return true;
+      });
+      if (fresh.length === 0) return;
+      setLogs((prev) => [...prev, ...fresh.map(toEntry)]);
+    });
+
+    // (b) message：log 追加（按 log_id 去重；client 已去重，hook 侧再保险——
+    // ql-20260909-019：prev.some O(n) 线性扫改 seenLogIdsRef O(1) 查询）
     client.onMessage((event) => {
       if (cancelled) return;
       setLogs((prev) => {
-        if (event.log_id != null && prev.some((l) => l.id === event.log_id)) {
-          return prev;
+        if (event.log_id != null) {
+          if (seenLogIdsRef.current.has(event.log_id)) return prev;
+          seenLogIdsRef.current.add(event.log_id);
         }
-        return [
-          ...prev,
-          {
-            id: event.log_id ?? _safeRuntimeId(),
-            run_id: runId,
-            timestamp: event.timestamp,
-            channel: event.channel,
-            content_redacted: event.content ?? "",
-            // 2026-06-28-daemon-subagent-transcript task-10 / FR-08：SSE 实时流归属
-            // 透传（backend published_logs / session payload 带，task-09）。让实时流
-            // log 与 DB 查询路径都有归属，viewer 统一渲染子代理徽标 + depth 缩进
-            //（task-11）。历史/主 agent → null（与 backend nullable 一致，design §9）。
-            parent_tool_use_id: event.parent_tool_use_id ?? null,
-            subagent_type: event.subagent_type ?? null,
-            depth: event.depth ?? null,
-            // task-13（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：
-            // SSE 转换层接线——补透传 agent_event（顶层字段，backend run/session
-            // 双通道 payload 带，service.py:1548/424）+ 顺带 tool_kind / segment_id /
-            // edit_patch（task-10 发现的既有缺口：onMessage 逐字段构造行时全丢，
-            // 实时流结构化渲染轨 / 工具徽标 / 半截行标识 / Edit 真实行号此前只在
-            // REST 回放可达）。缺席 → null（与 AgentRunLogEntry 可选列语义一致，
-            // normalize/渲染层自行兜底），其余字段构造保持原样。
-            agent_event: event.agent_event ?? null,
-            tool_kind: event.tool_kind ?? null,
-            segment_id: event.segment_id ?? null,
-            edit_patch: event.edit_patch ?? null,
-          },
-        ];
+        return [...prev, toEntry(event)];
       });
     });
 

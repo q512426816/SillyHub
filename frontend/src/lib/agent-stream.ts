@@ -41,6 +41,10 @@ export class AgentRunStreamClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   private messageCallbacks: Array<(event: StreamLogEvent) => void> = [];
+  // ql-20260909-019：批量回调（预取回放专用）——历史日志一次性整批交给 hook，
+  // 单次 setLogs 追加（原逐条 emit 每条一次 O(n) 数组拷贝，打开大 run 历史
+  // 累计 O(n²) 元素拷贝）。
+  private messageBatchCallbacks: Array<(events: StreamLogEvent[]) => void> = [];
   private statusCallbacks: Array<(status: StreamStatus) => void> = [];
   private doneCallbacks: Array<(data: StreamDoneData) => void> = [];
   // ql-20260621：permission_request / permission_resolved 走专用回调，不混入日志流
@@ -82,14 +86,16 @@ export class AgentRunStreamClient {
       // 注：`as StreamStatus` 绕过入口 guard 的控制流窄化 —— TS 不跨 _setStatus
       // 方法重置对 this.status 的窄化，断言恢复完整联合类型以允许此比较。
       if ((this.status as StreamStatus) !== "connecting") return;
-      for (const log of logs) {
-        this._emitMessage({
+      // ql-20260909-019：整批回放（原逐条 _emitMessage——每条触发 hook 一次
+      // O(n) 数组拷贝，大 run 历史累计 O(n²)）。
+      this._emitMessages(
+        logs.map((log) => ({
           channel: log.channel as StreamLogEvent["channel"],
           content: log.content_redacted ?? "",
           timestamp: log.timestamp,
           log_id: log.id,
-        });
-      }
+        })),
+      );
     } catch {
       /* prefetch 失败不阻断 SSE */
     }
@@ -194,6 +200,17 @@ export class AgentRunStreamClient {
     };
   }
 
+  /**
+   * ql-20260909-019：注册批量消息回调（connect/_doReconnect 预取回放整批触发）。
+   * 返回取消订阅函数。与 onMessage 正交：单条流式事件仍走 onMessage。
+   */
+  onMessagesBatch(cb: (events: StreamLogEvent[]) => void): () => void {
+    this.messageBatchCallbacks.push(cb);
+    return () => {
+      this.messageBatchCallbacks = this.messageBatchCallbacks.filter((c) => c !== cb);
+    };
+  }
+
   onStatusChange(cb: (status: StreamStatus) => void): () => void {
     this.statusCallbacks.push(cb);
     return () => {
@@ -263,6 +280,26 @@ export class AgentRunStreamClient {
     this.statusCallbacks.forEach((cb) => cb(s));
   }
 
+  /**
+   * ql-20260909-019：批量版 _emitMessage——预取回放整批过簿记（去重/lastLogId，
+   * 语义同单条版）后一次性触发批量回调；空批不触发。
+   */
+  private _emitMessages(events: StreamLogEvent[]): void {
+    const out: StreamLogEvent[] = [];
+    for (const event of events) {
+      if (typeof event.timestamp !== "string" || !event.timestamp) continue;
+      if (event.log_id != null) {
+        if (this.seenLogIds.has(event.log_id)) continue;
+        this.seenLogIds.add(event.log_id);
+        this.lastLogId = event.log_id;
+      }
+      out.push(event);
+    }
+    if (out.length > 0) {
+      this.messageBatchCallbacks.forEach((cb) => cb(out));
+    }
+  }
+
   private _emitMessage(event: StreamLogEvent): void {
     // ql-20260616-003：忽略非 log 类事件（status_changed / messages summary 等）。
     // 后端 SSE 频道复用，会推 status_changed、done、messages 聚合等事件，它们没
@@ -305,14 +342,15 @@ export class AgentRunStreamClient {
           this.runId,
           this.lastLogId,
         );
-        for (const log of logs) {
-          this._emitMessage({
+        // ql-20260909-019：断线补拉同样整批回放（同 connect 预取）。
+        this._emitMessages(
+          logs.map((log) => ({
             channel: log.channel as StreamLogEvent["channel"],
             content: log.content_redacted ?? "",
             timestamp: log.timestamp,
             log_id: log.id,
-          });
-        }
+          })),
+        );
       }
       this.connect(accessToken);
     } catch {
