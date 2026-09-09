@@ -12,8 +12,11 @@
  * displayName 等），本 task 只落 caps 表基座。
  *
  * 取值约定：caps 描述 provider 当前真实能力（以本仓现状硬编码门控为准，
- * 不臆断），缺省 false 默认拒绝（FR-06 / D-002@v1）；未知 provider 查询
- * 返回全 false 对象，不抛错。改取值先改本文件，再同步两端镜像。
+ * 不臆断），8 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
+ * 为 string 枚举键（'native' / 'marker' / 'none'，2026-09-09-askuser-pi-cursor
+ * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；未知 provider 查询
+ * 返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
+ * 改取值先改本文件，再同步两端镜像。
  */
 
 import type { ProtocolType } from '../adapters/index.js';
@@ -23,7 +26,7 @@ import { CodexAppServerDriver } from './codex-app-server-driver.js';
 import { CursorDriver } from './cursor-driver.js';
 import { PiRpcDriver } from './pi-rpc-driver.js';
 
-/** provider 能力矩阵（8 键全 boolean，缺省 false 默认拒绝）。 */
+/** provider 能力矩阵（9 键：8 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -37,6 +40,14 @@ export interface ProviderCaps {
   subagent: boolean;
   /** 远程人审对话框（permission dialog / user dialog 桥）。 */
   permission_dialog: boolean;
+  /**
+   * 向用户提问的对话框通道形态（string 枚举；FR-06，
+   * 2026-09-09-askuser-pi-cursor task-12 加入，打破「8 键全 boolean」旧约定）：
+   * 'native' = 走平台 dialog 管道（permission_dialog 桥，pending 行 + 答题端点）；
+   * 'marker' = 纯前端标记协议（消息尾部 askuser fenced 块，不经后端 dialog 管道）；
+   * 'none' = 无通道（未知 provider 回退值）。
+   */
+  dialog: 'native' | 'marker' | 'none';
   /** Edit 工具 structuredPatch（差异渲染数据源）。 */
   edit_patch: boolean;
   /** 模型选择（创建会话时的模型覆盖生效）。 */
@@ -48,7 +59,7 @@ export interface ProviderCaps {
  *
  * 每项取值依据（2026-09-03 task-02 实读现状硬编码门控，行号为当时锚点）：
  *
- * claude（8 项全 true）：
+ * claude（8 项全 true + dialog='native'）：
  * - resume：backend/app/modules/daemon/session/service.py:6335 reopen 门控
  *   `session.provider not in {"claude", "codex"}` 才拒——claude 在白名单；
  * - mcp：src/interactive/driver.ts:135-136 Claude driver 透传 SDK
@@ -63,18 +74,22 @@ export interface ProviderCaps {
  *   `=== "claude"`（D-003 一期 Claude 专属；2956 / 5395 /team 拦截同款）；
  * - permission_dialog：src/interactive/session-manager.ts:1762-1775
  *   approvalReady 时注入 canUseTool + onUserDialog/supportedDialogKinds；
+ * - dialog='native'：canUseTool / onUserDialog 双桥即平台 dialog 管道的
+ *   原生消费方（permission_dialog 同锚，2026-09-09-askuser-pi-cursor task-12）；
  * - edit_patch：backend daemon/run_sync/service.py:1476-1478 / 3679
  *   structuredPatch 取自 Claude SDK tool_use_result 形状；
  * - model_select：src/interactive/driver.ts:122-123 model「模型覆盖」
  *   provider-neutral；src/interactive/claude-sdk-driver.ts:383-384
  *   `options.model = opts.model`。
  *
- * codex（3 项 true）：
+ * codex（3 项 true + dialog='native'）：
  * - resume：backend service.py:6335 白名单 `{"claude", "codex"}` 含 codex
  *   （driver.ts:120-121 Codex threadId resume）；
  * - permission_dialog：src/interactive/session-manager.ts:1776-1790 codex 分支
  *   注入 sessionPermission{requestPermission, requestUserDialog}（同 approvalReady
  *   块，Claude 用 canUseTool/onUserDialog、codex 用 hooks——两桥等价支持）；
+ * - dialog='native'：sessionPermission 双桥即平台 dialog 管道的原生消费方
+ *   （permission_dialog 同锚，2026-09-09-askuser-pi-cursor task-12）；
  * - model_select：src/interactive/codex-app-server-driver.ts:1058
  *   `if (ctx.model) params.model = ctx.model`（frontend session-panel.tsx:5913-5921
  *   模型输入框不按 provider 门控）。
@@ -91,8 +106,9 @@ export interface ProviderCaps {
  *   codex flat message 契约无此字段。
  *
  * pi（2026-09-04-provider-pi-onboarding task-04 / design §5.3 能力矩阵，
- * 4 项 true 4 项 false——三态结论「原生 / 暂缺」依据，D-002@v1 桥接补齐+
- * 如实标记）：
+ * 5 项 true 3 项 false + dialog='native'——三态结论「原生 / 暂缺」依据，
+ * D-002@v1 桥接补齐+如实标记；permission_dialog / dialog 随
+ * 2026-09-09-askuser-pi-cursor Wave A 翻值）：
  * - resume=true（原生）：rpc --session-id / switch_session / fork + 隔离
  *   session-dir（design §5.1 resume 链路）；
  * - mcp=false（暂缺）：pi 无原生 MCP（自家 extension 生态另轨），桥接留后续
@@ -110,15 +126,21 @@ export interface ProviderCaps {
  *   聚合快照为 replace 语义、产出 per-child 流需跨行差分合成，超出无状态
  *   归一化「补映射」范畴）——团队派工 UI 依赖的归属链路不可落，如实 false
  *   （§6.2 纪律 / R-02 / D-002@v1；证据与复测步骤见 onboarding §5.3 PI 案例锚）；
- * - permission_dialog=false（暂缺）：rpc 无审批命令，pi 权限门在 extension 层；
+ * - permission_dialog=true（2026-09-09-askuser-pi-cursor Wave A 翻真，原「暂缺：
+ *   rpc 无审批命令，pi 权限门在 extension 层」）：extension_ui_request 的
+ *   dialog 类四方法（select / confirm / input / editor）已桥接
+ *   sessionPermission.requestUserDialog 上抛（pi-rpc-driver.ts 挂起表）；
+ *   权限类请求零桥接、继续自动拒绝（FR-02 红线）；
+ * - dialog='native'（随 Wave A，task-12 / FR-06）：pi 轮中提问走平台
+ *   dialog 管道（dialog_kind='pi_extension_ui'，永久等待不超时）；
  * - edit_patch=false（暂缺）：pi edit 工具结果为 diff 文本无结构化 patch，
  *   前端 LCS 回退可用；
  * - model_select=true（原生）：set_model / cycle_model /
  *   get_available_models rpc 全套。
  *
  * cursor（2026-09-08-cursor-interactive-session task-05 / design「注册（providers.ts）」节；
- * 3 项 true 5 项 false——resume / thinking / model_select 已验证，其余五键无通道或未验证，
- * §6.2 先实现后翻 true）：
+ * 3 项 true 4 项 false + dialog='marker'——resume / thinking / model_select 已验证，
+ * 其余键无通道或未验证，§6.2 先实现后翻 true）：
  * - resume=true（原生）：driver `--resume` 通道（D-001@v1）+ CLI 实测，Wave 0 验证 B
  *   （--resume 记忆连续性）已通过（spike-cursor-frames.md）；
  * - mcp=false（暂缺）：CLI 无 per-session `--mcp-config`（D-008@v1）；
@@ -127,6 +149,9 @@ export interface ProviderCaps {
  *   归一化器已映射 delta→thinking 流式——不以过期任务卡 thinking=false 为准；
  * - subagent=false（暂缺）：团队派工无对应 CLI 通道；
  * - permission_dialog=false（暂缺）：审批桥无对应 CLI 通道（D-003@v2）；
+ * - dialog='marker'（2026-09-09-askuser-pi-cursor task-12 初值，FR-06）：
+ *   纯前端标记协议（Wave B askuser fenced 块 + task-08 prompt 注入），
+ *   不经后端 dialog 管道——若 spike no-go，随 task-08 三端同步改 'none'；
  * - edit_patch=false（暂缺）：structuredPatch 无对应通道；
  * - model_select=true（原生）：driver `--model` 通道 + CLI 实测。
  */
@@ -138,6 +163,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     thinking: true,
     subagent: true,
     permission_dialog: true,
+    dialog: 'native',
     edit_patch: true,
     model_select: true,
   },
@@ -148,24 +174,28 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     thinking: false,
     subagent: false,
     permission_dialog: true,
+    dialog: 'native',
     edit_patch: false,
     model_select: true,
   },
   // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
-  // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3）。
+  // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
+  // permission_dialog / dialog 随 2026-09-09-askuser-pi-cursor Wave A 翻值）。
   pi: {
     resume: true,
     mcp: false,
     multimodal: true,
     thinking: true,
     subagent: false,
-    permission_dialog: false,
+    permission_dialog: true,
+    dialog: 'native',
     edit_patch: false,
     model_select: true,
   },
   // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
   // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
-  // 归一化器已映射 delta→thinking）。
+  // 归一化器已映射 delta→thinking；dialog='marker' 为 2026-09-09-askuser-pi-cursor
+  // task-12 初值，spike no-go 则随 task-08 三端改 'none'）。
   cursor: {
     resume: true,
     mcp: false,
@@ -173,16 +203,18 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     thinking: true,
     subagent: false,
     permission_dialog: false,
+    dialog: 'marker',
     edit_patch: false,
     model_select: true,
   },
 };
 
 /**
- * 查询 provider 能力；未知 provider 返回全 false 对象（默认拒绝），不抛错。
+ * 查询 provider 能力；未知 provider 返回默认拒绝对象，不抛错。
  *
  * 返回已知 provider 的表内对象（调用方只读，勿就地修改——表是模块级共享态）；
- * 未知 provider 每次返回新的全 false 字面量。
+ * 未知 provider 每次返回新的默认拒绝字面量（boolean 键全 false、dialog 取
+ * 'none'，R-09）。
  */
 export function getProviderCaps(provider: string): ProviderCaps {
   const caps = PROVIDER_CAPS[provider];
@@ -196,6 +228,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     thinking: false,
     subagent: false,
     permission_dialog: false,
+    dialog: 'none',
     edit_patch: false,
     model_select: false,
   };

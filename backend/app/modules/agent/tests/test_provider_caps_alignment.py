@@ -33,7 +33,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[5]
 _DAEMON_TABLE_PATH = _REPO_ROOT / "sillyhub-daemon" / "src" / "interactive" / "providers.ts"
 _FRONTEND_TABLE_PATH = _REPO_ROOT / "frontend" / "src" / "lib" / "provider-caps.ts"
 
-# 契约键（design §5.2 ProviderCaps 8 键；task-02 provides 契约字段）。
+# 契约键（design §5.2 ProviderCaps 8 个 boolean 键 + 2026-09-09-askuser-pi-cursor
+# task-12（FR-06）新增 dialog string 枚举键 = 9 键；task-02 provides 契约字段）。
 EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
     {
         "resume",
@@ -42,6 +43,7 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
         "thinking",
         "subagent",
         "permission_dialog",
+        "dialog",
         "edit_patch",
         "model_select",
     }
@@ -52,9 +54,15 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
 # cursor 由 2026-09-08-cursor-interactive-session task-07 接入）。
 EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi"})
 
-# TS 表源解析：provider 条目块（`claude: { ... }`）与块内布尔键值对。
+# TS 表源解析：provider 条目块（`claude: { ... }`）与块内键值对。
+# 值形态两代（R-09：解析器扩展与 caps 键同任务交付，防止 string 枚举键被
+# 静默丢弃后键集合断言哑绿）：
+# - 8 个 boolean 键：true / false 裸字面量；
+# - dialog string 枚举键（task-12 / FR-06）：带引号 'native' / 'marker' / 'none'。
 _TS_PROVIDER_BLOCK_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\{([^{}]*)\}")
-_TS_BOOL_PAIR_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(true|false)\b")
+_TS_BOOL_PAIR_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(true|false)\b|'(native|marker|none)')"
+)
 
 
 def _strip_ts_comments(text: str) -> str:
@@ -81,18 +89,29 @@ def _extract_ts_const_object_body(text: str, const_name: str) -> str:
     return text[start : i - 1]
 
 
-def _parse_ts_caps_table(path: Path) -> dict[str, dict[str, bool]]:
-    """解析 TS 表源为 {provider: {key: bool}}（手写解析，不引 TS 运行时依赖）。"""
+def _parse_ts_caps_table(path: Path) -> dict[str, dict[str, bool | str]]:
+    """解析 TS 表源为 {provider: {key: bool | str}}（手写解析，不引 TS 运行时依赖）。
+
+    boolean 键还原为 bool，dialog string 枚举键（带引号 'native' / 'marker' /
+    'none'）还原为 str（task-12 / FR-06）。
+    """
     text = _strip_ts_comments(path.read_text(encoding="utf-8"))
     body = _extract_ts_const_object_body(text, "PROVIDER_CAPS")
-    table: dict[str, dict[str, bool]] = {}
+    table: dict[str, dict[str, bool | str]] = {}
     for m in _TS_PROVIDER_BLOCK_RE.finditer(body):
         provider = m.group(1)
-        table[provider] = {k: v == "true" for k, v in _TS_BOOL_PAIR_RE.findall(m.group(2))}
+        values: dict[str, bool | str] = {}
+        for pair in _TS_BOOL_PAIR_RE.finditer(m.group(2)):
+            if pair.group(3) is not None:
+                # dialog string 枚举（带引号字面量）。
+                values[pair.group(1)] = pair.group(3)
+            else:
+                values[pair.group(1)] = pair.group(2) == "true"
+        table[provider] = values
     return table
 
 
-def _load_ts_table(path: Path, end_name: str) -> dict[str, dict[str, bool]]:
+def _load_ts_table(path: Path, end_name: str) -> dict[str, dict[str, bool | str]]:
     """读取并解析一端 TS 表源；文件缺失 / 解析为空都以失败信息点明（防哑绿）。"""
     if not path.is_file():
         pytest.fail(f"{end_name} 表源文件缺失: {path}（三端镜像守护前提）")
@@ -102,7 +121,7 @@ def _load_ts_table(path: Path, end_name: str) -> dict[str, dict[str, bool]]:
     return table
 
 
-def _all_ends() -> dict[str, dict[str, dict[str, bool]]]:
+def _all_ends() -> dict[str, dict[str, dict[str, bool | str]]]:
     """三端表汇总：daemon / frontend 读源解析，python 直接 import 本模块表。"""
     return {
         "daemon(sillyhub-daemon/src/interactive/providers.ts)": _load_ts_table(
@@ -117,9 +136,13 @@ def _all_ends() -> dict[str, dict[str, dict[str, bool]]]:
     }
 
 
-def test_caps_key_sets_identical_and_are_the_8_contract_keys() -> None:
-    """①三端每个 provider 条目的键集合一致，且恰为契约 8 键（多键少键都失败）。"""
-    assert len(EXPECTED_CAPS_KEYS) == 8
+def test_caps_key_sets_identical_and_are_the_9_contract_keys() -> None:
+    """①三端每个 provider 条目的键集合一致，且恰为契约 9 键（多键少键都失败）。
+
+    9 键 = 8 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
+    漏加 dialog 键即在此失败（R-09：解析器已扩 string 值支持，不会静默丢弃）。
+    """
+    assert len(EXPECTED_CAPS_KEYS) == 9
     for end_name, table in _all_ends().items():
         for provider, caps in table.items():
             assert set(caps) == EXPECTED_CAPS_KEYS, (
@@ -130,7 +153,7 @@ def test_caps_key_sets_identical_and_are_the_8_contract_keys() -> None:
 
 
 def test_provider_sets_identical() -> None:
-    """②三端 provider 集合一致，且覆盖契约 provider（claude / codex / pi）。"""
+    """②三端 provider 集合一致，且覆盖契约 provider（claude / codex / cursor / pi）。"""
     ends = _all_ends()
     for end_name, table in ends.items():
         assert set(table) == EXPECTED_PROVIDERS, (
@@ -139,7 +162,11 @@ def test_provider_sets_identical() -> None:
 
 
 def test_cap_values_identical_per_provider_per_key() -> None:
-    """③每个 provider 每键取值三端一致（逐键断言，漂移信息带端名与锚点）。"""
+    """③每个 provider 每键取值三端一致（逐键断言，漂移信息带端名与锚点）。
+
+    == 同时覆盖 bool 与 str 值形态——dialog string 枚举（'native' / 'marker' /
+    'none'）随 EXPECTED_CAPS_KEYS 一并逐端比对，三端值漂移即失败。
+    """
     ends = _all_ends()
     reference_name = next(iter(ends))
     reference = ends[reference_name]
@@ -155,12 +182,16 @@ def test_cap_values_identical_per_provider_per_key() -> None:
                 )
 
 
-def test_unknown_provider_returns_all_false_with_8_keys() -> None:
-    """④未知 provider 查询：不抛错 + 8 键齐全 + 全 False（默认拒绝，FR-06）。"""
+def test_unknown_provider_returns_default_deny_with_9_keys() -> None:
+    """④未知 provider 查询：不抛错 + 9 键齐全 + 默认拒绝（FR-06 / R-09）。
+
+    默认拒绝形态：8 个 boolean 键全 False + dialog string 枚举回退 'none'。
+    """
     caps = get_provider_caps("__definitely_unknown_provider__")
     assert set(caps) == EXPECTED_CAPS_KEYS
-    assert len(caps) == 8
-    assert all(value is False for value in caps.values())
+    assert len(caps) == 9
+    assert caps["dialog"] == "none"
+    assert all(value is False for key, value in caps.items() if key != "dialog")
     # 返回新 dict：调用方修改不污染模块级镜像表。
     caps["resume"] = True
     assert PROVIDER_CAPS["claude"]["resume"] is True

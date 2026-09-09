@@ -544,4 +544,165 @@ describe("AskUserDialogCard", () => {
     fireEvent.click(screen.getByText("B2"));
     expect(submit).not.toBeDisabled();
   });
+
+  /* ---- task-10（FR-05 / D-004@v2）：群聊推荐条 + 已答关闭态 ----
+   * 推荐条数据源 dialog_payload.recommendResponders（daemon 端头平铺透传，
+   * 自由 JSON 无 schema 变更）；已答关闭态数据源 answered prop（父组件消费
+   * SSE permission_resolved 的 answered_by_actual_user / dialogs_history 恢复
+   * 数据后传入展示名；卡片上下文无用户名映射）。两者均为纯展示层能力，
+   * 提交协议（respondSessionPermission + dialog_result）零变化。 */
+
+  it("task-10 recommendResponders 非空 → 问题区上方渲染推荐 @条", () => {
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest({
+          ...SINGLE_QUESTION_PAYLOAD,
+          recommendResponders: ["张三", "李四"],
+        })}
+      />,
+    );
+    expect(screen.getByText("@张三")).toBeInTheDocument();
+    expect(screen.getByText("@李四")).toBeInTheDocument();
+    // 推荐条位于问题区上方（DOM 顺序：推荐条先于问题文本）
+    const recommendBar = screen.getByText("推荐");
+    const question = screen.getByText("运行时目录设置在哪里？");
+    expect(
+      recommendBar.compareDocumentPosition(question),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("task-10 无 recommendResponders → 不渲染推荐条（单聊零变化）", () => {
+    render(
+      <AskUserDialogCard request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)} />,
+    );
+    expect(screen.queryByText(/推荐/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/@/)).not.toBeInTheDocument();
+  });
+
+  it("task-10 recommendResponders 类型不符 → 忽略该字段不渲染不崩", () => {
+    const { rerender } = render(
+      <AskUserDialogCard
+        request={makeDialogRequest({
+          ...SINGLE_QUESTION_PAYLOAD,
+          recommendResponders: "not-an-array",
+        })}
+      />,
+    );
+    expect(screen.queryByText(/推荐/)).not.toBeInTheDocument();
+    // 非字符串 / 空白条目被过滤，仅渲染有效项
+    rerender(
+      <AskUserDialogCard
+        request={makeDialogRequest({
+          ...SINGLE_QUESTION_PAYLOAD,
+          recommendResponders: ["张三", 42, null, "  "],
+        })}
+      />,
+    );
+    expect(screen.getByText("@张三")).toBeInTheDocument();
+    expect(screen.queryByText("@42")).not.toBeInTheDocument();
+  });
+
+  it("task-10 推荐条为软提示：不门控提交，dialog_result 结构零变化", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest({
+          ...SINGLE_QUESTION_PAYLOAD,
+          recommendResponders: ["张三"],
+        })}
+      />,
+    );
+    // 有推荐条时仍可直接作答提交（不被门控）
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as RequestInit).body as string,
+    );
+    // 提交协议零变化：dialog_result 不携带 recommendResponders，结构同现状
+    expect(body.decision).toBe("allow");
+    expect(body.dialog_result).toEqual({
+      answers: [
+        {
+          question: "运行时目录设置在哪里？",
+          header: "运行时目录",
+          answer: "使用项目本地目录",
+        },
+      ],
+    });
+  });
+
+  it("task-10 已答关闭态：显示实际答题人名，无作答交互", () => {
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)}
+        answered={{ answeredByName: "张三" }}
+      />,
+    );
+    // 「✓ 张三 已回答，本题已关闭」条
+    expect(screen.getByText("张三")).toBeInTheDocument();
+    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    // 问题文本只读保留，选项 / 手动输入 / 提交入口全部不渲染
+    expect(screen.getByText("运行时目录设置在哪里？")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /提交回答/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("使用项目本地目录")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("或手动输入（填写后以此内容作答）"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("task-10 答题人数据缺失 → 降级显示「已回答」不带名不崩", () => {
+    const { rerender } = render(
+      <AskUserDialogCard
+        request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)}
+        answered={{ answeredByName: null }}
+      />,
+    );
+    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    expect(screen.queryByText("张三")).not.toBeInTheDocument();
+
+    // 空对象 / 空白串同样走降级路径
+    rerender(
+      <AskUserDialogCard
+        request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)}
+        answered={{}}
+      />,
+    );
+    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    rerender(
+      <AskUserDialogCard
+        request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)}
+        answered={{ answeredByName: "  " }}
+      />,
+    );
+    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+  });
+
+  it("task-10 已答关闭态下多 question 全部只读展示", () => {
+    const multiQ = {
+      questions: [
+        { question: "问题一", options: [{ label: "A1" }, { label: "A2" }] },
+        { question: "问题二", options: [{ label: "B1" }, { label: "B2" }] },
+      ],
+    };
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(multiQ)}
+        answered={{ answeredByName: "李四" }}
+      />,
+    );
+    expect(screen.getByText("问题一")).toBeInTheDocument();
+    expect(screen.getByText("问题二")).toBeInTheDocument();
+    expect(screen.getByText("李四")).toBeInTheDocument();
+    expect(screen.queryByText("A1")).not.toBeInTheDocument();
+    expect(screen.queryByText("B2")).not.toBeInTheDocument();
+  });
 });

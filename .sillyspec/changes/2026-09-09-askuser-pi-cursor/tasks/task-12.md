@@ -16,6 +16,7 @@ allowed_paths:
   - frontend/src/lib/provider-caps.ts
   - backend/app/modules/agent/tests/test_provider_caps_alignment.py
   - frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx
+  - frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
 target_files:
   - sillyhub-daemon/src/interactive/providers.ts
   - backend/app/modules/agent/provider_caps.py

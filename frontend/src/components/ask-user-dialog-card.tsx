@@ -23,6 +23,18 @@
  * parseQuestions 只依赖通用 questions/options 字段，不识别 provider 原生 schema。
  * badge 直接显示后端传入的 kind 字符串（专业标识，不翻译）。复杂 MCP elicitation
  * 由 daemon fail-closed，前端不会收到不可渲染的卡片；若收到缺字段 payload，走兜底分支。
+ *
+ * task-10（FR-05 / D-004@v2，群聊增强——仅展示层，提交协议零变化）：
+ *   - dialog_payload.recommendResponders（string[]，daemon 端头平铺透传、
+ *     dialog_payload 自由 JSON 无 schema 变更）非空时，问题区上方渲染
+ *     「💡 推荐 @xx 回答」软提示条（原型场景二 .ask-recommend 浅青虚线形态），
+ *     仅提示不门控；单聊无该字段时渲染零变化。
+ *   - answered prop → 已答关闭态（群聊先到先得，后答者可见已被谁回答）：
+ *     只读问题文本 + 「✓ ×× 已回答，本题已关闭」条（原型 .answered-strip /
+ *     .takenover-strip）。人名数据源为 SSE permission_resolved 的
+ *     answered_by_actual_user（task-09 契约，user_id）/ dialogs_history 恢复数据，
+ *     卡片上下文无用户名映射，由父组件解析 user_id → 人名后传入；缺失降级为
+ *     「已回答」不带名，不崩。群聊聚合挂载归 task-11。
  */
 
 import { useMemo, useState } from "react";
@@ -112,6 +124,27 @@ function parseQuestions(
     .filter((q): q is DialogQuestion => q !== null);
 }
 
+/**
+ * task-10（FR-05 / D-004@v2）：从 dialog_payload 防御解析推荐回答人列表。
+ * string[] 平铺透传（自由 JSON，无 schema 变更）；非数组 / 非字符串 / 空白
+ * 条目被过滤并去重。返回空数组时卡片渲染零变化（单聊回归无影响）。
+ */
+function parseRecommendResponders(
+  payload: Record<string, unknown> | undefined,
+): string[] {
+  if (!payload || typeof payload !== "object") return [];
+  const raw = (payload as { recommendResponders?: unknown })
+    .recommendResponders;
+  if (!Array.isArray(raw)) return [];
+  return Array.from(
+    new Set(
+      raw.filter(
+        (v): v is string => typeof v === "string" && v.trim() !== "",
+      ),
+    ),
+  );
+}
+
 /* ---------- 组件内状态 ---------- */
 
 interface QuestionState {
@@ -127,6 +160,21 @@ function emptyState(): QuestionState {
 
 /* ---------- 组件 ---------- */
 
+/**
+ * task-10（FR-05 / D-004@v2）：已答关闭态载荷（群聊先到先得——后答者可见
+ * 本题已被谁回答）。父组件（task-11 群聊聚合）在收到 permission_resolved SSE
+ * / 重拉见 409 已答 / dialogs_history 恢复时置入本态。
+ */
+export interface AskUserDialogAnswered {
+  /**
+   * 实际答题人展示名（人名，非 user_id）。数据源：SSE permission_resolved 的
+   * answered_by_actual_user（task-09 契约，user_id 字符串）或 dialogs_history
+   * 恢复数据——卡片上下文无用户名映射，由父组件解析 user_id → 人名后传入。
+   * null / 缺失 / 空白串 → 降级显示「已回答」不带人名（数据缺失不崩）。
+   */
+  answeredByName?: string | null;
+}
+
 export interface AskUserDialogCardProps {
   request: SessionPermissionRequest;
   /** 卡片被移除时回调（permission_resolved SSE / 父组件清空时触发）。 */
@@ -139,6 +187,12 @@ export interface AskUserDialogCardProps {
   minimized?: boolean;
   /** 点击卡头最小化按钮时回调（缺省不渲染按钮，向后兼容旧用法）。 */
   onMinimize?: (requestId: string) => void;
+  /**
+   * task-10（FR-05 / D-004@v2）：已答关闭态。传入（非 undefined）时本卡渲染
+   * 关闭态：只读问题文本 + 「✓ ×× 已回答，本题已关闭」条，无作答交互；
+   * undefined = 现状开放态，渲染零变化（单聊回归无影响）。
+   */
+  answered?: AskUserDialogAnswered;
 }
 
 export function AskUserDialogCard({
@@ -146,9 +200,14 @@ export function AskUserDialogCard({
   onResolved,
   minimized,
   onMinimize,
+  answered,
 }: AskUserDialogCardProps) {
   const questions = useMemo(
     () => parseQuestions(request.dialog_payload),
+    [request.dialog_payload],
+  );
+  const recommendResponders = useMemo(
+    () => parseRecommendResponders(request.dialog_payload),
     [request.dialog_payload],
   );
 
@@ -287,6 +346,83 @@ export function AskUserDialogCard({
     );
   }
 
+  // task-10（FR-05 / D-004@v2）：已答关闭态（原型场景二关闭卡：问题只读 +
+  // 已答条，无选项 / 输入 / 提交交互；答题人名缺失时降级不带名）。
+  // 置入时机（父组件，task-11）：permission_resolved SSE（answered_by_actual_user）
+  // / 重拉见 409 已答 / dialogs_history 恢复。提交协议零变化（本分支无交互入口）。
+  if (answered) {
+    const answeredName =
+      typeof answered.answeredByName === "string"
+        ? answered.answeredByName.trim()
+        : "";
+    return (
+      <article
+        className="overflow-hidden rounded-md border bg-card opacity-80 shadow-sm"
+        data-request-id={request.request_id}
+        data-dialog-kind={request.dialog_kind ?? "ask_user"}
+        data-answered="true"
+      >
+        <header className="flex items-center gap-2 border-b bg-indigo-50/60 px-3 py-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-indigo-100 text-indigo-700">
+            <HelpCircle className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-foreground">
+                智能体提问 · 已回答
+              </span>
+              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                {request.dialog_kind ?? "ask_user"}
+              </Badge>
+            </div>
+            <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+              {request.request_id.slice(0, 12)}…
+            </p>
+          </div>
+          {onMinimize && (
+            <button
+              type="button"
+              onClick={() => onMinimize(request.request_id)}
+              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="最小化为右下角浮动胶囊"
+              aria-label="最小化提问卡片"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </header>
+        <div className="space-y-2 px-3 py-3">
+          {questions.map((q, idx) => (
+            <div
+              key={`${idx}-${q.question.slice(0, 16)}`}
+              className="flex flex-wrap items-baseline gap-1.5"
+            >
+              {q.header && (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
+                  {q.header}
+                </span>
+              )}
+              <p className="text-xs font-medium text-foreground">{q.question}</p>
+            </div>
+          ))}
+          {/* 已答条（原型 .answered-strip / .takenover-strip 绿色关闭态） */}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 rounded-md bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
+            <span aria-hidden>✓</span>
+            {answeredName ? (
+              <>
+                <span className="font-bold">{answeredName}</span>
+                <span>已回答，本题已关闭</span>
+              </>
+            ) : (
+              // 答题人数据缺失降级：显示「已回答」不带名，不崩。
+              <span>已回答，本题已关闭</span>
+            )}
+          </div>
+        </div>
+      </article>
+    );
+  }
+
   return (
     <article
       className="overflow-hidden rounded-md border bg-card shadow-sm"
@@ -324,6 +460,21 @@ export function AskUserDialogCard({
       </header>
 
       <div className="space-y-3 px-3 py-3">
+        {/* task-10（FR-05 / D-004@v2）：群聊推荐回答人软提示条（原型场景二
+            .ask-recommend 浅青虚线形态）。仅提示不门控——任何成员仍可作答；
+            无 recommendResponders 时不渲染（单聊渲染零变化）。 */}
+        {recommendResponders.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-md border border-dashed border-cyan-600/50 bg-cyan-50 px-2.5 py-1.5 text-xs text-cyan-800">
+            <span aria-hidden>💡</span>
+            <span>推荐</span>
+            {recommendResponders.map((name) => (
+              <span key={name} className="font-bold">
+                @{name}
+              </span>
+            ))}
+            <span>回答</span>
+          </div>
+        )}
         {questions.map((q, idx) => {
           const st = getQState(idx);
           return (

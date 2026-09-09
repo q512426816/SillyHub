@@ -26,9 +26,17 @@
  *      agent_start 跨 chunk 的竞态用「事件计数 + get_state 复核一次」补强
  *      （waitAgentSettled）。turn 内 error 事件 → is_error result。子进程非正常
  *      退出 → onError 会话级 fail（codex 同款）。
- *   7. extension_ui_request（task-03）：dialog 类（select/confirm/input/editor，
- *      阻塞至应答）自动回 cancelled:true（permission_dialog=false 不死锁，
- *      B-05）；fire-and-forget 类 warn 降级不回话；同步分流不阻塞事件流。
+ *   7. extension_ui_request（task-03 + task-01 桥接）：dialog 类（select/
+ *      confirm/input/editor，阻塞至应答）经注入的 sessionPermission.
+ *      requestUserDialog 上抛平台 dialog（dialog_kind=pi_extension_ui /
+ *      FR-01 / D-002@v1）——归一化 questions[]（映射表 design §总体方案①）+
+ *      挂起表 pendingDialogs 等答案；未注入 hook / 归一化失败 → fail-closed
+ *      自动回 cancelled:true（不死锁，B-05）；fire-and-forget 类 warn 降级
+ *      不回话；同步分流不阻塞事件流。应答回流（本变更 task-03 / Wave A.3）：
+ *      completed → denormalize 按方法组装真实应答（select/input/editor→
+ *      value、confirm→confirmed，rpc.md:1298-1316）；cancelled/rejected 及
+ *      close/exit/中止兜底 → 统一 cancelled:true 后清挂起表（reply 幂等，
+ *      竞态安全，_cancelAllPendingDialogs）。
  *   8. interrupt（task-03）：rpc abort 并等 response——成功 true / 失败或超时
  *      false；abort 后 pi 在 run 收尾发 agent_settled（agent-session.js:744-756
  *      _emitAgentSettled 在 finally 必发）→ waiter 自然释放、turn 正常收敛。
@@ -62,6 +70,9 @@ import type {
   InteractiveDriverStartOptions,
   UserTurnInput,
 } from './driver.js';
+// task-02（2026-09-09-askuser-pi-cursor / Wave A）：PiSessionPermissionHooks 的
+// requestPermission 返回值类型（与 codex driver 同源，见该接口注释）。
+import type { CanUseToolDecision } from './types.js';
 
 /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 codex driver KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
@@ -86,7 +97,9 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 30_000;
  * emit 后**阻塞至客户端回 extension_ui_response**（按 id 关联，rpc-mode.js:596-608
  * pendingExtensionRequests）。
  *
- * permission_dialog=false（design §5.3 如实标记）下 driver 统一自动回
+ * task-01（2026-09-09-askuser-pi-cursor / Wave A / FR-01 / D-002@v1）起：已注入
+ * sessionPermission 时经 requestUserDialog 桥接平台 dialog（dialog_kind=
+ * PI_EXTENSION_UI_DIALOG_KIND）；未注入 hook / 归一化失败时仍自动回
  * cancelled:true（rpc.md:1310-1315 取消应答形状）——不答会死锁 agent run
  * （dialog 类在 pi 侧是 await 的 Promise；仅带 timeout 字段的 dialog 有
  * agent 侧自动兜底，rpc.md:1135，不能依赖）。
@@ -97,6 +110,13 @@ const EXTENSION_UI_DIALOG_METHODS: ReadonlySet<string> = new Set([
   'input',
   'editor',
 ]);
+
+/**
+ * task-01（2026-09-09-askuser-pi-cursor / Wave A / FR-01）：pi 提问类 dialog 上抛
+ * 平台时的 dialog_kind 值。backend 无白名单（protocol.py:250 自由 str /
+ * SessionDialogRequest.dialog_kind String(64)），16 字符 < 64，直接可用。
+ */
+const PI_EXTENSION_UI_DIALOG_KIND = 'pi_extension_ui';
 
 /**
  * extension_ui_request 的 fire-and-forget 类方法（rpc.md:1133 / 1219-1292）：
@@ -266,6 +286,47 @@ export class LfLineFramer {
 // ── StartOptions / Handle 契约 ──────────────────────────────────────────────
 
 /**
+ * task-02（2026-09-09-askuser-pi-cursor / Wave A / D-002@v1）：pi driver 拿到的
+ * SessionManager 审批/dialog 入口（鸭子类型，便于测试 mock）。
+ *
+ * 两个方法签名与 SessionManager.requestPermission / requestUserDialog public 入口
+ * 逐字对齐、去掉 sessionId 由 driver-factory 注入闭包绑定——形态对齐 codex 的
+ * CodexSessionPermissionHooks（D-008@V1），但 pi 文件内独立定义（避免跨 driver
+ * 模块导入形成耦合）。
+ *
+ * task-01 起消费：extension_ui_request 提问类四方法经 requestUserDialog 上抛
+ * （dialog_kind=pi_extension_ui）+ 挂起表等答案；未注入时维持现状自动回
+ * cancelled（fail-closed 不回归）。pi 权限类 extension 请求零桥接红线（D-002）
+ * 由分派逻辑保证——仅放行四方法，权限类/未知 method 自动取消路径不动。
+ */
+export interface PiSessionPermissionHooks {
+  /**
+   * 普通审批（返回 allow/deny）。内部已处理：ask_user_only=true 且非用户输入类 →
+   * allow-through；session 非 running → deny；send 失败/超时/abort → deny
+   *（fail-closed）。
+   */
+  requestPermission(input: {
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    signal?: AbortSignal;
+    toolUseId?: string;
+    isUserInputKind?: boolean;
+  }): Promise<CanUseToolDecision>;
+  /**
+   * 用户对话（dialog 类提问上抛）。返回 completed（携带 dialogResult）或
+   * cancelled（deny/超时/abort）。
+   */
+  requestUserDialog(input: {
+    dialogKind: string;
+    dialogPayload: Record<string, unknown>;
+    toolUseId?: string;
+    signal?: AbortSignal;
+  }): Promise<
+    { behavior: 'completed'; result: unknown } | { behavior: 'cancelled' }
+  >;
+}
+
+/**
  * pi 专属启动选项。extends provider-neutral `InteractiveDriverStartOptions`。
  *
  * 与 codex 同源：daemon `_buildDriverOptions` 对所有 provider 填
@@ -275,6 +336,15 @@ export class LfLineFramer {
 export interface PiStartOptions extends InteractiveDriverStartOptions {
   /** pi 可执行路径（必需；Windows 下通常为 pi.cmd npm shim）。 */
   pathToAgentExecutable: string;
+  /**
+   * task-02（2026-09-09-askuser-pi-cursor / Wave A / D-002@v1）：SessionManager
+   * 审批/dialog 入口注入（requestPermission / requestUserDialog 两方法引用，形态
+   * 对齐 codex 的 CodexStartOptions.sessionPermission）。approvalReady=true 时由
+   * driver-factory 注入。task-01 起消费：start 暂存引用（consume 侧 `_ctx` 镜像
+   * 类型同步带出），extension_ui_request 提问类四方法桥接平台 dialog（应答
+   * denormalize 回流 task-03）；未注入时同现状（fail-closed 自动 cancelled）。
+   */
+  sessionPermission?: PiSessionPermissionHooks;
 }
 
 /** pending 命令条目（response 关联用）。 */
@@ -282,6 +352,26 @@ export interface PiPendingRequest {
   resolve: (data: unknown) => void;
   reject: (err: Error) => void;
   timer: NodeJS.Timeout;
+}
+
+/**
+ * task-01（2026-09-09-askuser-pi-cursor / Wave A / FR-01 / R-02）：挂起 dialog
+ * 条目（design §接口定义 PendingDialog 的 pi 落地——rpcRequestId 即
+ * extension_ui_request 的 id，pi 侧恒 string uuid）。
+ *
+ * - reply：写 extension_ui_response（入参 spread 进 `{type,id,...}`）——幂等
+ *   （首次调用自摘挂起表，之后静默）。答案回流（task-03 denormalize 真实
+ *   应答）与 close/abortAll 兜底（统一 cancelled:true）共用此入口，竞态不双写。
+ * - method：登记提问方法（四方法之一），denormalize（task-03）按方法组装 reply
+ *   形态（rpc.md:1298-1316：select/input/editor→value、confirm→confirmed）。
+ */
+export interface PiPendingDialog {
+  /** extension_ui_request 的 id（与 reply 写回应答的 id 一致，按其关联挂起表）。 */
+  rpcRequestId: string;
+  /** 提问方法（select/confirm/input/editor；task-03 denormalize 用）。 */
+  method: string;
+  /** 幂等写 extension_ui_response（参数 spread 进应答体）。 */
+  reply: (r: Record<string, unknown>) => void;
 }
 
 /**
@@ -305,6 +395,13 @@ export interface PiRpcHandle extends InteractiveDriverHandle {
   closing: boolean;
   /** 已发出未应答的命令（response 按 id 关联；exit/close 时全量 reject）。 */
   pending: Map<string, PiPendingRequest>;
+  /**
+   * task-01（Wave A / FR-01 / R-02）：已上抛平台未作答的 extension dialog
+   * （按 extension_ui_request 的 id 关联；dialog 应答到达 / 取消时自摘）。
+   * close/abortAll/exit 统一兜底回 cancelled 后清表（task-03，见
+   * _cancelAllPendingDialogs）。
+   */
+  pendingDialogs: Map<string, PiPendingDialog>;
   /** 释放底层资源（关 stdin + kill child）。幂等。 */
   close(): Promise<void>;
 }
@@ -348,6 +445,161 @@ function buildPiInjectPayload(turn: UserTurnInput): PiInjectPayload {
 /** 类型守卫：非 null 非数组 plain object。 */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+// ── extension_ui_request 提问类归一化（task-01 / Wave A / FR-01） ────────────
+
+/**
+ * task-01（2026-09-09-askuser-pi-cursor / Wave A / FR-01 / D-002@v1）：pi
+ * extension_ui_request 提问类四方法参数 → AskUserDialogCard 契约的
+ * dialog_payload.questions[] 归一化（映射表 design §总体方案①；形态对齐 codex
+ * normalizeCodexRequestUserInput 先例）。
+ *
+ * 注意 pi 的请求字段在**顶层**（rpc.md:1153-1217：title/options/message/
+ * placeholder/prefill 直接挂在 extension_ui_request 上，无 params 嵌套）——
+ * 调用方直接把请求对象作 params 传入。
+ *
+ * 映射规则：
+ *   select  → { questions:[{ question:title, options:[{label}...] }] }（单问题，
+ *             options 为 string[] 逐项包装；pi 参数带布尔 allowCustom 时平铺）；
+ *   confirm → 合成「是/否」两选项（question=title，message 非空时追加一行——
+ *             confirm 的风险说明不能丢）；
+ *   input / editor → 合成占位选项「由我输入」+ allowCustom:true（卡片渲染前置
+ *             要求每问题 ≥1 选项——ask-user-dialog-card.tsx parseQuestions 守卫
+ *             会丢弃无选项问题；自定义输入框在问题渲染后常驻可用，卡片零改动）。
+ * recommendResponders：pi 现版本无此字段，若请求带上（string[]）则平铺进
+ * dialog_payload 透传（自由 JSON，仅群聊卡渲染推荐条用）。
+ *
+ * 宽松校验（schema 漂移 fail-closed，对齐 codex 先例）：
+ *   - 非四方法 / title 缺失或空白 → supported:false；
+ *   - select 的 options 非数组 / 无有效非空 string 项 → supported:false
+ *   （空 question 或无选项的问题会被卡片 parseQuestions 守卫丢弃 → 整卡空转）。
+ * 调用方对 supported:false 走既有自动 cancelled 路径（不死锁）。
+ */
+export function normalizePiExtensionDialog(
+  method: string,
+  params: Record<string, unknown>,
+):
+  | { supported: true; dialogPayload: Record<string, unknown> }
+  | { supported: false; reason: string } {
+  const title = typeof params.title === 'string' ? params.title : '';
+  if (title.trim() === '') {
+    return {
+      supported: false,
+      reason: 'dialog request missing non-empty string title',
+    };
+  }
+  let question = title;
+  let options: Array<{ label: string }>;
+  let allowCustom: boolean | undefined;
+  if (method === 'select') {
+    const rawOptions = params.options;
+    if (!Array.isArray(rawOptions)) {
+      return { supported: false, reason: 'select requires an options array' };
+    }
+    const labels = rawOptions.filter(
+      (o): o is string => typeof o === 'string' && o.trim() !== '',
+    );
+    if (labels.length === 0) {
+      return { supported: false, reason: 'select has no valid string options' };
+    }
+    options = labels.map((label) => ({ label }));
+    // select 的 allowCustom 透传（pi 现版本 select 无此字段，防御未来版本扩展）。
+    if (typeof params.allowCustom === 'boolean') allowCustom = params.allowCustom;
+  } else if (method === 'confirm') {
+    const message =
+      typeof params.message === 'string' && params.message.trim() !== ''
+        ? params.message
+        : null;
+    if (message !== null) question = `${title}\n${message}`;
+    options = [{ label: '是' }, { label: '否' }];
+  } else if (method === 'input' || method === 'editor') {
+    // 占位选项 + 自定义输入常开（allowCustom:true）——答案走卡片常驻输入框。
+    options = [{ label: '由我输入' }];
+    allowCustom = true;
+  } else {
+    return {
+      supported: false,
+      reason: `method "${method}" is not a bridgeable dialog method`,
+    };
+  }
+  const dialogPayload: Record<string, unknown> = {
+    questions: [{ question, options }],
+    ...(allowCustom !== undefined ? { allowCustom } : {}),
+  };
+  if (
+    Array.isArray(params.recommendResponders) &&
+    params.recommendResponders.every((r) => typeof r === 'string')
+  ) {
+    dialogPayload.recommendResponders = params.recommendResponders;
+  }
+  return { supported: true, dialogPayload };
+}
+
+/**
+ * task-03（2026-09-09-askuser-pi-cursor / Wave A.3 / FR-02）：requestUserDialog
+ * completed 应答 → pi 各方法 extension_ui_response 形态（denormalize，
+ * normalizePiExtensionDialog 的出口侧逆映射，design §接口定义）。
+ *
+ * reply 形态依据：pi 包 docs/rpc.md:1298-1316——本仓已核实不可达（node_modules
+ * 无 pi 包、vendor 仅 pi-extensions），fallback 依据 = 本文件头既有引证
+ * （rpc.md:1126-1335 子协议 / :1310-1315 取消应答形状 cancelled:true）+
+ * task-01 占位先例（cancelled:true 形状已被 pi 接受收尾）：
+ *   select / input / editor → reply({ value: string })
+ *   confirm                → reply({ confirmed: boolean })
+ *
+ * answers 取值（SessionManager requestUserDialog 的 dialogResult 契约：单问题
+ * 卡 result.answers[0].answer，string=单选 label / 自定义文本 / 自由文本，
+ * string[]=多选）：
+ *   - string → 直接透传（select 的所选 label（含自定义文本）即此形态）；
+ *   - string[]（卡片多选）→ 按方法保守处理：select/confirm 取首个——pi 的
+ *     select 是单值语义（value: string），拼接会造出 pi 侧不存在的复合选项，
+ *     取首个即一个合法单选；input/editor 换行拼接（自由文本多段合一段，
+ *     信息无损方向）；
+ *   - answers 缺失 / answer 不可解析 / select 空白值 → 无法组装有效应答，
+ *     统一退回 cancelled:true（fail-closed：等价用户未作答，pi 侧 dialog
+ *     await 正常收尾不死锁）。
+ * confirm 的肯定判定：answer.trim() === '是'（normalizePiExtensionDialog 合成
+ * 的两选项 label，「是」→ true）；「否」/自定义文本/空 → confirmed:false
+ * （fail-closed：确认类对话的不可识别应答不能默认放行）。
+ */
+export function denormalizePiDialogReply(
+  method: string,
+  dialogResult: unknown,
+): Record<string, unknown> {
+  const answers: unknown[] =
+    isRecord(dialogResult) && Array.isArray(dialogResult.answers)
+      ? dialogResult.answers
+      : [];
+  const first = answers.length > 0 && isRecord(answers[0]) ? answers[0] : null;
+  const raw = first !== null ? first.answer : undefined;
+  let text: string | null = null;
+  if (typeof raw === 'string') {
+    text = raw;
+  } else if (Array.isArray(raw)) {
+    const parts = raw.filter((p): p is string => typeof p === 'string');
+    const [firstPart] = parts;
+    if (firstPart !== undefined) {
+      // 多选保守分流：单值方法取首个（pi select 单选语义）；自由文本拼接。
+      text =
+        method === 'input' || method === 'editor'
+          ? parts.join('\n')
+          : firstPart;
+    }
+  }
+  if (text === null) {
+    // 无可解析答案（answers 缺失/空、answer 非字符串且非字符串数组）。
+    return { cancelled: true };
+  }
+  if (method === 'confirm') {
+    return { confirmed: text.trim() === '是' };
+  }
+  if (method === 'select' && text.trim() === '') {
+    // 空白值不对应任何 option（卡片契约不应产出；防御 fail-closed）。
+    // input/editor 的空文本是合法自由输入，原样透传不在此列。
+    return { cancelled: true };
+  }
+  return { value: text };
 }
 
 /**
@@ -505,10 +757,13 @@ export class PiRpcDriver implements InteractiveDriver {
     });
 
     // 闭包存 start options 供 consume 读（codex 同款，不污染公共契约）。
+    // task-02（Wave A / D-002@v1）暂存 sessionPermission 引用，task-01 起 consume
+    // 侧消费（extension_ui_request 提问类四方法桥接）。
     const ctx = {
       input,
       model: opts.model,
       resume: opts.resume,
+      sessionPermission: opts.sessionPermission,
     };
 
     const handle: PiRpcHandle = {
@@ -521,6 +776,7 @@ export class PiRpcDriver implements InteractiveDriver {
       nextRequestId: 1,
       closing: false,
       pending: new Map<string, PiPendingRequest>(),
+      pendingDialogs: new Map<string, PiPendingDialog>(),
       close: (): Promise<void> => this._close(handle),
       ...({ _ctx: ctx } as object),
     };
@@ -538,7 +794,12 @@ export class PiRpcDriver implements InteractiveDriver {
   ): Promise<void> {
     const h = handle as PiRpcHandle;
     const ctx = (h as unknown as {
-      _ctx: { input: AsyncIterable<UserTurnInput>; model?: string; resume?: string };
+      _ctx: {
+        input: AsyncIterable<UserTurnInput>;
+        model?: string;
+        resume?: string;
+        sessionPermission?: PiSessionPermissionHooks;
+      };
     })._ctx;
     const child = h.child;
     const onMessage = callbacks.onTurnMessage;
@@ -816,9 +1077,10 @@ export class PiRpcDriver implements InteractiveDriver {
         return;
       }
 
-      // extension_ui_request 分流（task-03，B-05）：pi extension 的 UI 子协议，
-      // **不是** AgentSessionEvent（不带 run 语义，不进归一化器——归一化器会
-      // 落未知事件降级桶污染事件流）。同步分流 + 异步写应答，不阻塞事件流。
+      // extension_ui_request 分流（task-03 + task-01 桥接，B-05）：pi extension
+      // 的 UI 子协议，**不是** AgentSessionEvent（不带 run 语义，不进归一化器——
+      // 归一化器会落未知事件降级桶污染事件流）。同步分流 + 异步写应答，不阻塞
+      // 事件流。
       if (msg.type === 'extension_ui_request') {
         const method = typeof msg.method === 'string' ? msg.method : '';
         const uiId = typeof msg.id === 'string' ? msg.id : '';
@@ -831,29 +1093,100 @@ export class PiRpcDriver implements InteractiveDriver {
             line.slice(0, 120),
           );
         } else if (uiId !== '') {
-          // dialog 类（select/confirm/input/editor）+ 未知 method 防御性同路：
-          // 回 cancelled:true（rpc.md:1310-1315）。已知 dialog warn 记录自动取消
-          // （可见性）；未知 method 若实为 fire-and-forget，pi 侧按 id 无主应答
-          // 静默丢弃（rpc-mode.js:601-607）无副作用；若实为 dialog 则避免死锁。
-          if (!EXTENSION_UI_DIALOG_METHODS.has(method)) {
-            // eslint-disable-next-line no-console
-            console.warn(
-              `pi_driver: unknown extension_ui_request method "${method}" treated as dialog (auto-cancelled)`,
-            );
+          // task-01（2026-09-09-askuser-pi-cursor / Wave A / FR-01 / D-002@v1）：
+          // 提问类四方法 + 已注入 sessionPermission + 归一化成功 → 桥接平台
+          // dialog；其余（未注入 hook / 归一化失败 / 权限类 / 未知 method）一律
+          // 落回原自动取消路径（D-002 红线：仅放行四方法，零桥接权限类）。
+          if (EXTENSION_UI_DIALOG_METHODS.has(method) && ctx.sessionPermission) {
+            const normalized = normalizePiExtensionDialog(method, msg);
+            if (normalized.supported) {
+              // 挂起表登记（handle 级，R-02）：reply 幂等（首次调用自摘条目，
+              // 之后静默）——task-03 答案回流 denormalize 与 close/abortAll 兜底
+              // （统一 cancelled:true）共用此入口，竞态不双写。
+              let settled = false;
+              const entry: PiPendingDialog = {
+                rpcRequestId: uiId,
+                method,
+                reply: (r) => {
+                  if (settled) return;
+                  settled = true;
+                  h.pendingDialogs.delete(uiId);
+                  void this._writeLine(
+                    h,
+                    JSON.stringify({
+                      type: 'extension_ui_response',
+                      id: uiId,
+                      ...r,
+                    }),
+                  );
+                },
+              };
+              h.pendingDialogs.set(uiId, entry);
+              // 上抛平台 dialog：永久等待不超时（D-002，不引入定时器）；中止/
+              // close 兜底由 _cancelAllPendingDialogs 在生命周期锚点统一回收。
+              // 应答回流（task-03 / Wave A.3 / FR-02）：completed →
+              // denormalizePiDialogReply 按 entry.method 组装真实应答
+              // （select/input/editor→value、confirm→confirmed，rpc.md:1298-1316
+              // ——rpc.md 本仓不可达，引证链见该函数注释）；cancelled /
+              // rejected（hook 异常/超时/abort）/ 无法组装有效应答 → 一律
+              // cancelled:true（reply 幂等，与兜底回收竞态不双写）。
+              void ctx.sessionPermission
+                .requestUserDialog({
+                  dialogKind: PI_EXTENSION_UI_DIALOG_KIND,
+                  dialogPayload: normalized.dialogPayload,
+                  toolUseId: uiId,
+                })
+                .then(
+                  (outcome) => {
+                    entry.reply(
+                      outcome && outcome.behavior === 'completed'
+                        ? denormalizePiDialogReply(entry.method, outcome.result)
+                        : { cancelled: true },
+                    );
+                  },
+                  () => entry.reply({ cancelled: true }),
+                );
+            } else {
+              // 归一化失败（schema 漂移）：fail-closed 自动取消（同原路径不死锁）。
+              // eslint-disable-next-line no-console
+              console.warn(
+                `pi_driver: extension_ui_request dialog "${method}" normalize failed (${normalized.reason}) auto-cancelled`,
+              );
+              void this._writeLine(
+                h,
+                JSON.stringify({
+                  type: 'extension_ui_response',
+                  id: uiId,
+                  cancelled: true,
+                }),
+              );
+            }
           } else {
-            // eslint-disable-next-line no-console
-            console.warn(
-              `pi_driver: extension_ui_request dialog "${method}" auto-cancelled (permission_dialog=false)`,
+            // 现状 fail-closed 路径（零改动）：dialog 类（select/confirm/input/
+            // editor）+ 未知 method 防御性同路：回 cancelled:true（rpc.md:
+            // 1310-1315）。已知 dialog warn 记录自动取消（可见性）；未知 method
+            // 若实为 fire-and-forget，pi 侧按 id 无主应答静默丢弃
+            // （rpc-mode.js:601-607）无副作用；若实为 dialog 则避免死锁。
+            if (!EXTENSION_UI_DIALOG_METHODS.has(method)) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `pi_driver: unknown extension_ui_request method "${method}" treated as dialog (auto-cancelled)`,
+              );
+            } else {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `pi_driver: extension_ui_request dialog "${method}" auto-cancelled (permission_dialog=false)`,
+              );
+            }
+            void this._writeLine(
+              h,
+              JSON.stringify({
+                type: 'extension_ui_response',
+                id: uiId,
+                cancelled: true,
+              }),
             );
           }
-          void this._writeLine(
-            h,
-            JSON.stringify({
-              type: 'extension_ui_response',
-              id: uiId,
-              cancelled: true,
-            }),
-          );
         } else {
           // 无 id 的畸形请求无法应答：warn（pi 侧 dialog 自带 timeout 的有
           // agent 端兜底，rpc.md:1135）。
@@ -1282,6 +1615,32 @@ export class PiRpcDriver implements InteractiveDriver {
       pending.reject(err);
     }
     h.pending.clear();
+    // task-03（2026-09-09-askuser-pi-cursor / Wave A.3 / FR-02 / R-06）：
+    // 终态兜底汇点——未决挂起 dialog 统一回 cancelled:true 后清表。consume
+    // finally / 子进程 exit|error（finalizeWithError）/ _close 的命令 reject
+    // 全部经本方法，一处调用即覆盖任务卡列明的全部生命周期锚点（_close 另在
+    // closing=true 前先行直调一次，见 _cancelAllPendingDialogs 注释）。
+    this._cancelAllPendingDialogs(h);
+  }
+
+  /**
+   * task-03（2026-09-09-askuser-pi-cursor / Wave A.3 / FR-02 / R-06）：兜底取消
+   * 全部挂起 dialog——逐条 reply({cancelled:true})（reply 首次调用自摘挂起表，
+   * 迟到的用户答案 / 重复调用静默不双写）后清空挂起表。
+   *
+   * 锚点覆盖（任务卡：_close / _rejectAllPending / consume finally / exit
+   * handler）：consume finally 与 exit|error（finalizeWithError）均汇入
+   * _rejectAllPending（其内统一调用本方法）；_close 在 closing=true 前另行
+   * 直调一次——争取 cancelled 应答赶在 stdin.end/SIGTERM 前落给 pi（pi 侧
+   * dialog await 优雅收尾；赶不上也无害，进程死后 pi 自行 reject 挂起请求）。
+   * 进程已亡 / closing 置位后的写出失败由 _writeLine 静默降级，无副作用；
+   * 清表本身即防泄漏与迟到答案双写。
+   */
+  private _cancelAllPendingDialogs(h: PiRpcHandle): void {
+    for (const [, entry] of h.pendingDialogs) {
+      entry.reply({ cancelled: true });
+    }
+    h.pendingDialogs.clear();
   }
 
   /**
@@ -1290,6 +1649,11 @@ export class PiRpcDriver implements InteractiveDriver {
    */
   private _close(h: PiRpcHandle): Promise<void> {
     if (h.closing) return Promise.resolve();
+    // task-03（Wave A.3 / FR-02 / R-06）：close 兜底——closing=true 之前先
+    // 回 cancelled:true，应答有机会赶在 stdin.end/SIGTERM 前落给 pi（design
+    // 生命周期契约「pi 收到取消收尾」的尽力而为面）；reply 幂等，与并发到达
+    // 的用户答案 / 随后 _rejectAllPending 内的兜底不双写。
+    this._cancelAllPendingDialogs(h);
     h.closing = true;
 
     this._rejectAllPending(h, new Error('pi rpc handle closed'));

@@ -13,6 +13,8 @@ allowed_paths:
   - frontend/src/components/group-chat/group-chat-panel.tsx
   - frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
   - frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
+  - frontend/src/lib/daemon/session-sse.ts
+  - frontend/src/lib/daemon/sessions.ts
 target_files:
   - frontend/src/components/group-chat/group-chat-panel.tsx
   - frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx

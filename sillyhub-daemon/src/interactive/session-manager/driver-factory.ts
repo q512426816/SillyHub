@@ -293,8 +293,14 @@ export function buildDriverOptions(
     // approval/user-input/elicitation 映射）。绑定到当前 session 的 SessionManager
     // public 入口（requestPermission/requestUserDialog，签名与 CodexSessionPermissionHooks
     // 一致）。manualApproval=true 时注入；未注入时 driver 走 fail-closed 占位（task-05
-    // 既有测试语义）。仅 codex provider 走此分支（Claude 用 canUseTool/onUserDialog）。
-    if (state.provider === 'codex') {
+    // 既有测试语义）。
+    // task-02（2026-09-09-askuser-pi-cursor / Wave A / D-002@v1）：pi 分支共用本注入
+    // 块——pi driver 经 PiStartOptions.sessionPermission（PiSessionPermissionHooks，
+    // 形态对齐 CodexSessionPermissionHooks）拿同一对闭包引用，为 pi
+    // extension_ui_request dialog 桥接（task-01）打开注入通道；桥接本体归 task-01，
+    // 未消费前 extension_ui_request 维持自动 cancelled（fail-closed）。claude 仍走
+    // canUseTool/onUserDialog 不变；cursor 无对话/审批通道不注入。
+    if (state.provider === 'codex' || state.provider === 'pi') {
       // 参数类型与 CodexSessionPermissionHooks 契约一致（与 SessionManager public
       // requestPermission/requestUserDialog 入参同形，去掉 sessionId 由闭包绑定）。
       driverOpts.sessionPermission = {

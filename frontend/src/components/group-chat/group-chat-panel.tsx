@@ -72,6 +72,23 @@
  *   - 回到底部悬浮按钮——离开底部后出现（上滚读历史不再只能手动划回），离开
  *     期间到达的消息计入「N 条新消息」，滚回底部或点击按钮清零。
  *
+ * 2026-09-09-askuser-pi-cursor task-11（FR-05 / D-004@v2，群聊聚合）：
+ *   - 成员 pending 原生提问聚合——群 agent 成员（shadow_session_id 非空，口径
+ *     对齐 member-panel L475 影子来源判定）的影子会话并行拉 fetchPendingDialogs
+ *     （既有 REST 端点，节拍对齐平台 dialog 轮询 10s 惯例），pending 卡复用
+ *     AskUserDialogCard 嵌消息流末尾 + 来源成员标注（头像/昵称/引擎标签）；
+ *     答题提交走卡内既有 respondSessionPermission（群成员授权已由 task-09
+ *     放开）；读侧 list_pending_dialogs 仍 owner-only（task-09 遗留），非群主
+ *     拉成员影子会话 404——逐成员静默降级（known limitation，见组件内注释）；
+ *   - 先到先得关闭态——自己提交成功（onResolved）→「×× 已回答」关闭态（人名
+ *     = 当前用户群内昵称）；轮询拉取中该 request 不再 pending（先到者已答）→
+ *     同样转关闭态（群频道 SSE 不携带 permission_* 事件——答题人 user_id 不可
+ *     得，降级「已回答」不带名）；幂等（R-03 前端不新增锁）；
+ *   - 群消息行 marker 卡——agent 气泡文本经 parseAskUserMarker 命中 → 正文换
+ *     textBefore（标记原文隐藏）+ AskUserMarkerCard 原位渲染（engineLabel=成员
+ *     名）；作答组装答案走既有 sendGroupMessage（发消息即答案，天然先到先得，
+ *     无后端 dialog 事件）；已答态 best-effort（该行之后已存在用户消息）。
+ *
  * 数据流关键点：
  *   - 回放身份还原：投影行 metadata.member_id/member_name（task-05 落库形态）
  *     ——2026-09-01-session-group-chat 收口：后端 /logs DTO 已暴露 metadata/
@@ -101,6 +118,12 @@ import { MemberPanel } from "@/components/group-chat/member-panel";
 import { GroupMemberAvatar } from "@/components/group-chat/group-member-avatar";
 // 2026-09-09-sessions-visual-refresh task-10（D-006@v2）：消息行头像统一共享构件
 import { ChatMessageAvatar } from "@/components/chat";
+// 2026-09-09-askuser-pi-cursor task-11（FR-05 / D-004@v2）：群聊聚合复用
+// AskUserDialogCard（成员 pending 原生提问）与 AskUserMarkerCard（cursor 标记），
+// 不在群聊内再造卡片（D-007 无新抽象层）。
+import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+import { AskUserMarkerCard } from "@/components/ask-user-marker-card";
+import { parseAskUserMarker, type AskUserMarkerPayload } from "@/lib/askuser-marker";
 import {
   SessionMentionPopover,
   buildMemberMentionItems,
@@ -121,6 +144,7 @@ import {
 } from "@/lib/api/session-attachments";
 import {
   PROVIDER_META,
+  fetchPendingDialogs,
   getAgentSessionLogs,
   getGroupChat,
   listGroupChats,
@@ -133,9 +157,11 @@ import {
   unpinGroupMessage,
   type GroupChatListItemRead,
   type GroupChatStreamEnvelope,
+  type GroupMemberRead,
   type GroupMessageAttachmentSummary,
   type GroupMessageReplySnapshot,
   type GroupReplayLogEntry,
+  type SessionPermissionRequest,
 } from "@/lib/daemon";
 import { useSession } from "@/stores/session";
 import { cn } from "@/lib/utils";
@@ -162,6 +188,85 @@ const GROUP_REPLAY_PAGE_SIZE = 200;
 
 /** 单次批量上传附件上限（超出部分忽略并 toast 告知；单聊 session-input-bar 同值）。 */
 const MAX_ATTACHMENTS_PER_BATCH = 10;
+
+/* ── 2026-09-09-askuser-pi-cursor task-11（FR-05 / D-004@v2）：群聊 AskUser 聚合 ── */
+
+/**
+ * 成员影子会话 pending 提问轮询节拍。对齐平台 dialog 轮询既定惯例
+ * （workspaces approvals 页 DIALOGS_REFETCH_MS = 10s——dialog 无超时永久等待，
+ * SSE 只推实时新事件，REST 轮询兜刷新/漏推），群聊面板自身无轮询通道，此处
+ * 是首个也是唯一的群内轮询查询（不新建 SSE/WS 通道，D-004@v2）。
+ */
+const GROUP_ASKUSER_POLL_MS = 10_000;
+
+/** 聚合 pending 卡条目：来源成员 + 既有 SessionPermissionRequest（pending 态）。 */
+export interface GroupAskUserDialogItem {
+  /** 来源 agent 成员（头像/昵称标注 + 影子会话 id 提交锚点都在 request 上）。 */
+  member: GroupMemberRead;
+  request: SessionPermissionRequest;
+}
+
+/** 先到先得关闭态数据（task-10 answered 契约；人名缺失降级不带名）。 */
+export interface GroupAskUserResolved {
+  answeredByName: string | null;
+}
+
+/** 群消息行 marker 卡渲染信息（agent 气泡文本 parseAskUserMarker 命中产物）。 */
+export interface GroupAskUserMarkerInfo {
+  payload: AskUserMarkerPayload;
+  /** 标记之前的正文（标记原文隐藏——标记随文本原样持久化，仅展示层替换）。 */
+  textBefore: string;
+  /** best-effort 已答态：该行之后已存在用户消息（发消息即答案）。 */
+  answered: boolean;
+}
+
+/**
+ * parseAskUserMarker 单槽缓存（turn-timeline parseAskUserMarkerCached 同款）：
+ * 流式期间 entries 每次 token 变化都触发 markerByEntryId 重算，多数行文本
+ * 未变——同一文本二次解析直接命中缓存（尾部 8KB 窗口扫描 + 正则去尾随空白
+ * 均省），槽位一换即失效，无内存累积。
+ */
+const askUserMarkerParseCache: {
+  key: string;
+  hit: ReturnType<typeof parseAskUserMarker>;
+} = { key: "", hit: null };
+
+function parseAskUserMarkerCached(text: string): ReturnType<typeof parseAskUserMarker> {
+  if (askUserMarkerParseCache.key === text) return askUserMarkerParseCache.hit;
+  askUserMarkerParseCache.key = text;
+  askUserMarkerParseCache.hit = parseAskUserMarker(text);
+  return askUserMarkerParseCache.hit;
+}
+
+/**
+ * 时间线 → marker 卡信息表（纯函数，单测推理面）：倒序单遍扫描——agent 行
+ * 文本尾部 askuser 标记命中即记录（answered=其后已存在任何用户消息，发消息
+ * 即答案的 best-effort 判定）；user 行向后翻转 laterUser 标志。只对命中行
+ * 建表（普通群消息渲染零回归——未命中行不进 map）。
+ */
+export function collectAskUserMarkers(
+  entries: GroupTimelineEntry[],
+): Map<string, GroupAskUserMarkerInfo> {
+  const map = new Map<string, GroupAskUserMarkerInfo>();
+  let laterUser = false;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.kind === "user") {
+      laterUser = true;
+      continue;
+    }
+    if (e.kind !== "agent") continue;
+    const hit = parseAskUserMarkerCached(e.content);
+    if (hit) {
+      map.set(e.id, {
+        payload: hit.payload,
+        textBefore: hit.textBefore,
+        answered: laterUser,
+      });
+    }
+  }
+  return map;
+}
 
 /* ── ql-20260903-022：群输入草稿按群持久化（切群/刷新不丢）——照单聊
  *    ql-20260825-011 readSessionDraft 模式。面板按 key={groupId} 重挂载，
@@ -1797,6 +1902,139 @@ export function GroupChatPanel({
     return map;
   }, [members]);
 
+  /* ── task-11（FR-05 / D-004@v2）：成员 pending 原生提问聚合 + marker 卡 ──
+   *
+   * 数据源：群详情 agent 成员（shadow_session_id 非空，口径对齐 member-panel
+   * 影子会话来源判定）逐个并行 fetchPendingDialogs（既有 REST 端点，≤5 成员，
+   * Promise.all 并行）。已知限制（task-09 遗留，读侧 owner-only）：非群主群
+   * 成员拉成员影子会话 404——逐成员 catch 静默降级（无卡可显，答题放行的
+   * response 端点仍闭环；读侧放开可后续另卡）。群频道 SSE 不携带 permission_*
+   * 事件（§9.1 群不进审批），pending 到达/已答感知都靠本查询轮询（10s 平台
+   * dialog 轮询惯例节拍）。 */
+  const askUserMembers = useMemo(
+    () => members.filter((m) => m.member_type === "agent" && m.shadow_session_id != null),
+    [members],
+  );
+  const memberDialogsQ = useQuery({
+    queryKey: [
+      "groupChat",
+      groupId,
+      "askUserDialogs",
+      askUserMembers.map((m) => m.shadow_session_id),
+    ],
+    enabled: askUserMembers.length > 0,
+    // 轮询节拍对齐平台 dialog 轮询惯例（approvals 页 DIALOGS_REFETCH_MS=10s，
+    // 见 GROUP_ASKUSER_POLL_MS 注释）；refresh 后 pending 恢复 + 先到先得
+    // 已答感知（拉取列表不再含该 request）都由该节拍兜。
+    refetchInterval: GROUP_ASKUSER_POLL_MS,
+    retry: false,
+    queryFn: async (): Promise<GroupAskUserDialogItem[]> => {
+      const results = await Promise.all(
+        askUserMembers.map(async (member) => {
+          try {
+            const requests = await fetchPendingDialogs(member.shadow_session_id!);
+            return requests.map((request) => ({ member, request }));
+          } catch {
+            // 404（读侧 owner-only，task-09 遗留）/ 网络抖动：静默降级——
+            // 该成员本轮无卡可显，不阻断其余成员聚合。
+            return [];
+          }
+        }),
+      );
+      return results.flat();
+    },
+  });
+  /* 先到先得关闭态（幂等，R-03 前端不新增锁）：
+   *   - 本端提交成功（onResolved）→ answeredByName=当前用户群内昵称；
+   *   - 轮询列表中该 request 不再 pending（先到者已答）→ 同样转关闭态；答题
+   *     人 user_id 不可得（群频道无 permission_resolved SSE，task-09 契约字段
+   *     answered_by_actual_user 不达本面板）→ 降级「已回答」不带名。
+   * knownDialogsRef 保留每条 pending 卡最后快照（关闭态渲染只读问题文本需要
+   * request 对象——拉取列表已无该行）。 */
+  const [resolvedDialogs, setResolvedDialogs] = useState<
+    Record<string, GroupAskUserResolved>
+  >({});
+  const knownDialogsRef = useRef<Map<string, GroupAskUserDialogItem>>(new Map());
+  useEffect(() => {
+    const items = memberDialogsQ.data;
+    if (!items) return;
+    for (const item of items) {
+      knownDialogsRef.current.set(item.request.request_id, item);
+    }
+    setResolvedDialogs((prev) => {
+      let next: Record<string, GroupAskUserResolved> | null = null;
+      for (const id of knownDialogsRef.current.keys()) {
+        if (prev[id]) continue;
+        if (items.some((it) => it.request.request_id === id)) continue;
+        // 先到先得：本面板见过的 pending 卡在最新拉取中消失（best-effort——
+        // 已答 / 极少数孤儿清理不可区分，展示层按已答收口）。
+        next = next ?? { ...prev };
+        next[id] = { answeredByName: null };
+      }
+      return next ?? prev;
+    });
+  }, [memberDialogsQ.data]);
+  /** 当前用户群内展示名（自己提交成功时的关闭态人名；非群成员回退登录名）。 */
+  const selfDisplayName = useMemo(() => {
+    if (currentUserId == null) return null;
+    return (
+      members.find((m) => m.user_id === currentUserId)?.display_name ??
+      user?.displayName ??
+      null
+    );
+  }, [members, currentUserId, user]);
+  /** 卡内提交成功回调（AskUserDialogCard 内部走既有 respondSessionPermission，
+   *  群成员授权已由 task-09 放行）——置本端已答态 + 立即对账一次收口他端。 */
+  const { refetch: refetchMemberDialogs } = memberDialogsQ;
+  const handleAskUserDialogResolved = useCallback(
+    (requestId: string) => {
+      setResolvedDialogs((prev) =>
+        prev[requestId]
+          ? prev
+          : { ...prev, [requestId]: { answeredByName: selfDisplayName } },
+      );
+      void refetchMemberDialogs();
+    },
+    [selfDisplayName, refetchMemberDialogs],
+  );
+  /** 渲染卡列表 = 开放态（最新拉取）+ 关闭态（已答快照，含本端提交与他端先答）。 */
+  const askUserDialogCards = useMemo(() => {
+    const openItems = memberDialogsQ.data ?? [];
+    const openIds = new Set(openItems.map((it) => it.request.request_id));
+    const cards: Array<GroupAskUserDialogItem & { resolved?: GroupAskUserResolved }> =
+      openItems.map((it) => ({
+        ...it,
+        resolved: resolvedDialogs[it.request.request_id],
+      }));
+    for (const [id, resolved] of Object.entries(resolvedDialogs)) {
+      if (openIds.has(id)) continue;
+      const known = knownDialogsRef.current.get(id);
+      if (known) cards.push({ ...known, resolved });
+    }
+    return cards;
+  }, [memberDialogsQ.data, resolvedDialogs]);
+  /* 群消息行 marker 卡（cursor 标记协议，D-003@v2）：agent 气泡文本尾部
+   * askuser 标记命中处原位渲染 AskUserMarkerCard（标记原文隐藏）；作答组装
+   * 答案文本走既有 sendGroupMessage（发消息即答案，天然先到先得，无后端
+   * dialog 事件）。spike 降级（caps=none）时无标记产出——解析不命中即普通
+   * 文本，无需配置开关。 */
+  const markerByEntryId = useMemo(() => collectAskUserMarkers(entries), [entries]);
+  const handleAskUserMarkerSubmit = useCallback(
+    (answer: string) => {
+      void sendGroupMessage(groupId, answer)
+        .then((res) => {
+          // 触发失败透传（performSend 同口径；消息本身已落时间线）。
+          for (const t of res.triggered ?? []) {
+            if (t.error) notify.warning(`${t.member_name} 未能触发：${t.error}`);
+          }
+        })
+        .catch((err) => {
+          notify.error(err, "发送失败，请稍后重试");
+        });
+    },
+    [groupId, notify],
+  );
+
   return (
     <div
       data-testid="group-chat-panel-mount"
@@ -2165,9 +2403,56 @@ export function GroupChatPanel({
                 isPinned={pinned?.log_id === entry.id}
                 pinPending={pinMutation.isPending}
                 onPin={handlePin}
+                marker={entry.kind === "agent" ? (markerByEntryId.get(entry.id) ?? null) : null}
+                onMarkerSubmit={handleAskUserMarkerSubmit}
               />
             </Fragment>
           ))}
+          {/* ── task-11（FR-05 / D-004@v2）：成员 agent pending 原生提问聚合卡
+              （消息流末尾；来源成员标注 + 推荐回答人条由卡内渲染；先到先得，
+              已答转关闭态人名缺失降级）——原型场景二 ask-card 形态。 ── */}
+          {askUserDialogCards.map(({ member, request, resolved }) => {
+            const providerLabel =
+              providerLabelByMemberKey.get(member.id) ??
+              providerLabelByMemberKey.get(member.display_name) ??
+              null;
+            return (
+              <div
+                key={request.request_id}
+                data-testid="group-askuser-pending"
+                data-request-id={request.request_id}
+                data-member-id={member.id}
+                data-resolved={resolved ? "true" : undefined}
+                className="my-2.5 flex items-start gap-2.5"
+              >
+                <ChatMessageAvatar
+                  kind="agent"
+                  name={member.display_name}
+                  avatar={member.avatar ?? null}
+                  size={28}
+                  title={member.display_name}
+                />
+                <div className="min-w-0 max-w-[82%]">
+                  <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">
+                      {member.display_name}
+                    </span>
+                    {providerLabel && (
+                      <span className="font-mono text-[10px] text-muted-foreground/70">
+                        {providerLabel}
+                      </span>
+                    )}
+                    <span className="text-[10.5px]">提问 · 任何成员可答，先到先得</span>
+                  </div>
+                  <AskUserDialogCard
+                    request={request}
+                    answered={resolved}
+                    onResolved={handleAskUserDialogResolved}
+                  />
+                </div>
+              </div>
+            );
+          })}
           </div>
           {/* 回到底部悬浮按钮（群 P3 quick）：离开底部出现；离开期间有新消息
               显示「N 条新消息」，否则只显示「回到底部」。 */}
@@ -2582,6 +2867,8 @@ function GroupTimelineRowInner({
   pinPending,
   onPin,
   onQuote,
+  marker,
+  onMarkerSubmit,
 }: {
   entry: GroupTimelineEntry;
   memberNames: readonly string[];
@@ -2600,6 +2887,14 @@ function GroupTimelineRowInner({
   onPin: (logId: string) => void;
   /** 引用回复入口（群 P2：全员可用；目标=本行摘要）。 */
   onQuote: (target: GroupQuoteTarget) => void;
+  /**
+   * task-11（FR-05 / D-004@v2）：agent 气泡文本尾部 askuser 标记命中信息
+   * （null=未命中普通行，渲染零变化）——正文换 textBefore（标记原文隐藏），
+   * AskUserMarkerCard 随气泡原位渲染。
+   */
+  marker: GroupAskUserMarkerInfo | null;
+  /** marker 卡提交回调（组装好的答案文本 → 既有 sendGroupMessage 发送）。 */
+  onMarkerSubmit: (answer: string) => void;
 }) {
   // 已置顶行高亮：浅 brand 底 + 等宽外扩（-mx-2 px-2 不改变行宽，仅底色外延）。
   const pinnedRowClass = isPinned
@@ -2607,6 +2902,7 @@ function GroupTimelineRowInner({
     : "";
 
   // 引用回复目标摘要（群 P2：本行内容现算，口径对齐后端 content_head(60)）。
+  // task-11：marker 命中行引用摘要用 textBefore——标记原文不在引用条泄露。
   const quoteTarget: GroupQuoteTarget | null =
     entry.kind === "user"
       ? {
@@ -2618,7 +2914,9 @@ function GroupTimelineRowInner({
         ? {
             logId: entry.id,
             memberName: entry.memberName ?? "Agent 成员",
-            contentHead: quoteHeadOf(entry.content),
+            contentHead: quoteHeadOf(
+              marker ? marker.textBefore : entry.content,
+            ),
           }
         : null;
 
@@ -2761,17 +3059,35 @@ function GroupTimelineRowInner({
         </div>
         {/* 群聊体验 quick（2026-09-02）：agent 回复走 MarkdownText（content 已经
             classifySessionLog 剥 [ASSISTANT] 等前缀；流式 partial 同容器容错渲染），
-            @提及高亮仅在用户消息纯文本路径保留（md 气泡内 @ 自然显示，从简）。 */}
-        <div className="break-words rounded-2xl rounded-tl-md border border-border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
-          <MarkdownText content={entry.content} />
-          {streaming && (
-            <span
-              data-testid="group-stream-cursor"
-              aria-hidden
-              className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-[1px] bg-brand-600 align-text-bottom"
+            @提及高亮仅在用户消息纯文本路径保留（md 气泡内 @ 自然显示，从简）。
+            task-11（FR-05 / D-004@v2）：marker 命中行正文换 textBefore（标记
+            原文不显示，标记随文本原样持久化——标记即数据）；textBefore 为空
+            （整条消息即提问）时气泡不渲染，提问卡独占该行。 */}
+        {(marker === null || marker.textBefore !== "") && (
+          <div className="break-words rounded-2xl rounded-tl-md border border-border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+            <MarkdownText content={marker ? marker.textBefore : entry.content} />
+            {streaming && (
+              <span
+                data-testid="group-stream-cursor"
+                aria-hidden
+                className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-[1px] bg-brand-600 align-text-bottom"
+              />
+            )}
+          </div>
+        )}
+        {/* task-11（FR-05 / D-004@v2）：cursor 标记提问卡——提交经既有
+            sendGroupMessage 作为下一条群消息发出（发消息即答案，天然先到先得）；
+            engineLabel=来源成员名；已答态 best-effort（该行之后已存在用户消息）。 */}
+        {marker && (
+          <div data-testid="group-askuser-marker" data-log-id={entry.id} className="mt-1.5">
+            <AskUserMarkerCard
+              payload={marker.payload}
+              answered={marker.answered}
+              engineLabel={entry.memberName ?? "Agent 成员"}
+              onSubmit={onMarkerSubmit}
             />
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -29,17 +29,29 @@
  * 三点改 .sh-typing-dots、旧路径 output 气泡运行中尾挂 .sh-stream-caret 流式光标
  * （utility 与 reduced-motion 降级均在 globals.css；v2 路径流式光标由
  * TextSegmentView 的 .seg-caret 承担，双路径语义一致）。数据逻辑 / SSE 零改动。
+ *
+ * task-07（2026-09-09-askuser-pi-cursor / FR-03 / D-003@v2）：cursor marker 型
+ * 提问卡文本段接入（双路径）——旧路径 turn.output 气泡与 v2 SegmentedTurnBody
+ * 对话视图 text 段均先过 parseAskUserMarker，命中则正文换 textBefore（标记原文
+ * 不显示，标记随文本原样持久化——标记即数据）并原位渲染 AskUserMarkerCard；
+ * 解析返回 null 按普通文本渲染零变化。已答态 best-effort：marker 轮之后已存在
+ * 用户消息（displayTurns 本地判定，无后端状态）。提交经既有 onResend 发送链路
+ * 作下一条用户消息（cursor --resume 续轮天然生效）。
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+// task-07（2026-09-09-askuser-pi-cursor / FR-03）：cursor marker 型提问卡 +
+// 标记解析器（文本段命中处原位渲染卡并隐藏标记原文）。
+import { AskUserMarkerCard } from "@/components/ask-user-marker-card";
+import { parseAskUserMarker } from "@/lib/askuser-marker";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
 import type { ErrorLogItem } from "@/components/agent-log/normalize";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
-import { SegmentView } from "@/components/daemon/turn-segment-views";
+import { SegmentView, TextSegmentView } from "@/components/daemon/turn-segment-views";
 // 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
 import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
@@ -71,6 +83,32 @@ function parseAttachmentMarkersCached(prompt: string) {
 }
 import { AttachmentChips } from "@/components/daemon/attachment-chips";
 import { CopyButton } from "@/components/daemon/copy-button";
+
+/* ── task-07（2026-09-09-askuser-pi-cursor）：askuser 标记解析缓存——同上方
+ *    附件标记缓存哲学（ql-20260903-025），流式期间每次渲染对 output/text 段
+ *    重复尾部 8KB 窗口扫描 + JSON.parse，按内容字符串缓存（FIFO 上限防泄漏）。
+ *    注意解析结果可为 null（多数普通文本），须用 has() 区分「已缓存 null」与
+ *    「未缓存」（parseAttachmentMarkers 恒非 null 无此问题，这里不能照抄 !hit）。 ── */
+const ASKUSER_MARKER_CACHE = new Map<
+  string,
+  ReturnType<typeof parseAskUserMarker>
+>();
+const ASKUSER_MARKER_CACHE_MAX = 500;
+
+function parseAskUserMarkerCached(text: string) {
+  let hit: ReturnType<typeof parseAskUserMarker>;
+  if (ASKUSER_MARKER_CACHE.has(text)) {
+    hit = ASKUSER_MARKER_CACHE.get(text)!;
+    return hit;
+  }
+  hit = parseAskUserMarker(text);
+  if (ASKUSER_MARKER_CACHE.size >= ASKUSER_MARKER_CACHE_MAX) {
+    const oldest = ASKUSER_MARKER_CACHE.keys().next().value;
+    if (oldest !== undefined) ASKUSER_MARKER_CACHE.delete(oldest);
+  }
+  ASKUSER_MARKER_CACHE.set(text, hit);
+  return hit;
+}
 
 /** ql-20260817-003：轮次发送时间格式化（今天只显 HH:mm，跨天带 MM-DD HH:mm）。 */
 function formatTurnTime(iso: string): string {
@@ -282,11 +320,15 @@ export interface TurnTimelineProps {
  *  dialogHistory useState 数组 + onResend/onSwitchProvider 父级 useCallback 化。
  *  task-01（2026-09-08-session-turn-nav / FR-07 / D-007@v1）：新增 isHighlighted
  *  布尔（父级按 highlightTurnKey 逐行派生后传入，字符串不进 memo 行，R-07）；
- *  两分支根 DOM 元素挂 data-turn-key 跳转锚点（design §7）。 */
+ *  两分支根 DOM 元素挂 data-turn-key 跳转锚点（design §7）。
+ *  task-07（2026-09-09-askuser-pi-cursor / FR-03）：新增 hasLaterUserMessage
+ *  布尔（父级逆序扫描派生，同 isHighlighted 的 per-row 布尔法）——marker 提问卡
+ *  已答态 best-effort 判定数据源（该轮之后已存在用户消息，displayTurns 本地判定）。 */
 const TurnRow = memo(function TurnRow({
   turn,
   viewMode,
   isHighlighted,
+  hasLaterUserMessage,
   dialogHistory,
   onResend,
   onSwitchProvider,
@@ -295,10 +337,16 @@ const TurnRow = memo(function TurnRow({
   viewMode: SessionViewMode;
   /** task-01：父级派生的 per-row 高亮布尔（命中行加 ring+浅底，R-07 防击穿）。 */
   isHighlighted: boolean;
+  /** task-07：该轮之后是否已存在用户消息（marker 提问卡已答态 best-effort 判定）。 */
+  hasLaterUserMessage: boolean;
   dialogHistory: SessionDialogRead[];
   onResend: (prompt: string) => void;
   onSwitchProvider: () => void;
 }) {
+  // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
+  // 气泡正文换 textBefore（标记原文不显示），提问卡随气泡原位渲染（下方 ml-9）；
+  // 未命中（null）output 原样渲染，零变化。
+  const outputMarker = turn.output ? parseAskUserMarkerCached(turn.output) : null;
   return (
     <>
     {/* task-01（2026-09-08-session-turn-nav / FR-07 / D-007@v1）：轮次跳转 DOM 锚点
@@ -474,35 +522,55 @@ const TurnRow = memo(function TurnRow({
                   replyAt={turn.replyAt}
                   runKey={turn.realRunId ?? turn.runId}
                   dialogHistory={dialogHistory}
+                  markerAnswered={hasLaterUserMessage}
+                  onMarkerSubmit={onResend}
                 />
               ) : (
                 <>
-                  {/* 旧路径（回退）：agent 答复单气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
+                  {/* 旧路径（回退）：agent 答复单气泡（左，带助手图标）。运行中尚无答复时显示思考占位。
+                      task-07（FR-03）：output 尾部 askuser 标记命中 → 气泡正文换 textBefore；
+                      纯标记消息（textBefore 空）不渲染气泡行，仅下方提问卡。 */}
                   {turn.output ? (
-                    <div className="flex items-start gap-2.5">
-                      <ChatMessageAvatar kind="agent" title="智能体" />
-                      <div className="flex items-end gap-1.5">
-                        <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
-                          <MarkdownText content={turn.output} />
-                          {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
-                              气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转
-                              false 移除；与 v2 路径 TextSegmentView 的 .seg-caret 同
-                              语义（双路径一致）。utility/降级见 globals.css
-                              .sh-stream-caret。 */}
-                          {isLiveTurn(turn.status) && (
-                            <span aria-hidden className="sh-stream-caret" />
+                    outputMarker && !outputMarker.textBefore.trim() ? null : (
+                      <div className="flex items-start gap-2.5">
+                        <ChatMessageAvatar kind="agent" title="智能体" />
+                        <div className="flex items-end gap-1.5">
+                          <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+                            <MarkdownText
+                              content={outputMarker ? outputMarker.textBefore : turn.output}
+                            />
+                            {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
+                                气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转
+                                false 移除；与 v2 路径 TextSegmentView 的 .seg-caret 同
+                                语义（双路径一致）。utility/降级见 globals.css
+                                .sh-stream-caret。 */}
+                            {isLiveTurn(turn.status) && (
+                              <span aria-hidden className="sh-stream-caret" />
+                            )}
+                          </div>
+                          {/* ql-20260817-004：答复完成时间（run.finished_at，缺省不渲染）。 */}
+                          {turn.replyAt && (
+                            <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
+                              {formatTurnTime(turn.replyAt)}
+                            </span>
                           )}
                         </div>
-                        {/* ql-20260817-004：答复完成时间（run.finished_at，缺省不渲染）。 */}
-                        {turn.replyAt && (
-                          <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
-                            {formatTurnTime(turn.replyAt)}
-                          </span>
-                        )}
                       </div>
-                    </div>
+                    )
                   ) : (
                     isLiveTurn(turn.status) && <ThinkingPlaceholder viewMode={viewMode} />
+                  )}
+                  {/* task-07（FR-03 / D-003@v2）：旧路径 marker 提问卡——output 尾块
+                      命中处原位渲染（对齐 agent 气泡列 ml-9）；提交经 onResend 发送
+                      链路作下一条用户消息，已答态 best-effort（hasLaterUserMessage）。 */}
+                  {outputMarker && (
+                    <div className="ml-9">
+                      <AskUserMarkerCard
+                        payload={outputMarker.payload}
+                        answered={hasLaterUserMessage}
+                        onSubmit={onResend}
+                      />
+                    </div>
                   )}
                   {/* agent-file-upload-mcp（FR-01）：旧路径对话视图的文件卡片——file
                       过程项是面向用户的交付物，答复气泡之后渲染（与 v2 段路径
@@ -643,6 +711,22 @@ export function TurnTimeline({
     count: number;
     lastIdentity: string | null;
   } | null>(null);
+
+  // ── task-07（2026-09-09-askuser-pi-cursor / FR-03 / design §Wave B.3）：
+  //    marker 提问卡已答态 best-effort 判定——该轮之后已存在用户消息（后续 turn
+  //    有 prompt；displayTurns 本地数据，无后端状态；启发式不区分「回答」与
+  //    「无关插话」，仅展示层语义）。一次逆序扫描派生 per-row 布尔进 memo 行
+  //    （与 isHighlighted 同法，R-07：布尔值变化只重渲染受影响行）。 ──
+  const hasUserMessageAfter = useMemo(() => {
+    const flags = new Array<boolean>(turns.length);
+    let seen = false;
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      flags[i] = seen;
+      if ((turns[i]?.prompt ?? "").trim().length > 0) seen = true;
+    }
+    return flags;
+  }, [turns]);
+
   const lastTurnIdentity = (() => {
     const last = turns[turns.length - 1];
     return last ? `${last.runId}:${last.turn ?? "-"}` : null;
@@ -819,13 +903,16 @@ export function TurnTimeline({
         <div className="space-y-5">
           {/* task-01（FR-07 / D-007@v1 / R-07）：highlightTurnKey 在此逐行派生为
               isHighlighted 布尔再进 memo 行（字符串 prop 直传会在值变化时击穿
-              全部行 memo）；data-turn-key 锚点在 TurnRow 两分支根元素上。 */}
-          {turns.map((turn) => (
+              全部行 memo）；data-turn-key 锚点在 TurnRow 两分支根元素上。
+              task-07（FR-03）：hasUserMessageAfter 同法逐行派生布尔（marker 卡
+              已答态 best-effort 判定数据源）。 */}
+          {turns.map((turn, idx) => (
             <TurnRow
               key={turn.runId}
               turn={turn}
               viewMode={viewMode}
               isHighlighted={highlightTurnKey === (turn.realRunId ?? turn.runId)}
+              hasLaterUserMessage={hasUserMessageAfter[idx] ?? false}
               dialogHistory={dialogHistory}
               onResend={onResend}
               onSwitchProvider={onSwitchProvider}
@@ -967,6 +1054,8 @@ function SegmentedTurnBody({
   replyAt,
   runKey,
   dialogHistory,
+  markerAnswered,
+  onMarkerSubmit,
 }: {
   segments: TurnSegment[];
   turnStatus: TurnUiStatus;
@@ -976,6 +1065,10 @@ function SegmentedTurnBody({
   /** AskUser 提问历史按 run_id 过滤键（realRunId ?? runId，同旧路径）。 */
   runKey: string;
   dialogHistory: SessionDialogRead[];
+  /** task-07：marker 提问卡已答态 best-effort（该轮之后已存在用户消息）。 */
+  markerAnswered: boolean;
+  /** task-07：marker 提问卡提交回调（答案作下一条用户消息，父级传 onResend）。 */
+  onMarkerSubmit: (prompt: string) => void;
 }) {
   const turnDialogs = useMemo(
     () => dialogHistory.filter((d) => d.run_id === runKey),
@@ -1034,9 +1127,29 @@ function SegmentedTurnBody({
         <div className="flex items-start gap-2.5">
           <ChatMessageAvatar kind="agent" title="智能体" />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            {textSegments.map((s) => (
-              <SegmentView key={s.id} segment={s} />
-            ))}
+            {/* task-07（2026-09-09-askuser-pi-cursor / FR-03 / D-003@v2）：对话视图
+                text 段先过 parseAskUserMarker——命中则该段原位渲染提问卡（AskUserMarkerCard）
+                并以 textBefore 作正文（复用 TextSegmentView 气泡，标记原文不显示；
+                纯标记段无正文气泡）；未命中走 SegmentView 零变化。 */}
+            {textSegments.map((s) => {
+              if (s.kind !== "text") return <SegmentView key={s.id} segment={s} />;
+              const marker = parseAskUserMarkerCached(s.text);
+              if (!marker) return <SegmentView key={s.id} segment={s} />;
+              return (
+                <Fragment key={s.id}>
+                  {marker.textBefore.trim() ? (
+                    <TextSegmentView segment={{ ...s, text: marker.textBefore }} />
+                  ) : null}
+                  <div className="pt-0.5">
+                    <AskUserMarkerCard
+                      payload={marker.payload}
+                      answered={markerAnswered}
+                      onSubmit={onMarkerSubmit}
+                    />
+                  </div>
+                </Fragment>
+              );
+            })}
           </div>
         </div>
       )}

@@ -58,6 +58,12 @@ export function parseSessionPermissionEvent(
       request_id: String(evt.request_id ?? ""),
       decision,
       ...(typeof evt.reason === "string" ? { reason: evt.reason } : {}),
+      // 2026-09-09-askuser-pi-cursor task-11：透传实际答题人 user_id（backend
+      // task-09 契约；群聊答题卡关闭态「×× 已回答」人名数据源）。事件缺省时
+      // 不带键，消费方降级不带名。
+      ...(typeof evt.answered_by_actual_user === "string"
+        ? { answered_by_actual_user: evt.answered_by_actual_user }
+        : {}),
     };
   }
   return null;

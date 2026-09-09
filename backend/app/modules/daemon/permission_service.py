@@ -62,6 +62,7 @@ from app.modules.daemon.service import (
 )
 
 if TYPE_CHECKING:
+    from app.modules.agent.model import AgentSession
     from app.modules.daemon.ws_hub import DaemonWsHub
 
 log = get_logger(__name__)
@@ -945,18 +946,66 @@ class DaemonPermissionService:
           3. current run exists;
           4. resolve request_id → dialog row OR pending timer (404 otherwise);
           5. send WS downlink (504 if runtime offline), publish permission_resolved SSE.
+
+        task-09（2026-09-09-askuser-pi-cursor / D-004@v2 / D-006@v2）：群聊影子
+        会话（session_kind='group_member'）的 ask_user 类 dialog 答题对该群
+        **未移除用户成员**放开（先到先得）。两道守卫各带影子分支：
+
+        - 授权门（守卫一）：``_get_owned_session_for_update`` 404 之前先解析
+          dialog 行；「目标会话为影子会话 + 答题者为该群未移除用户成员」
+          （``resolve_shadow_member`` + ``get_active_user_membership``）双条件
+          满足时放行取影子会话；不满足维持 404 不泄露存在性（R-08）。
+        - manual_approval 守卫（守卫二）：影子会话的 **dialog 行应答**
+          （dialog_kind 非空）豁免——群聊影子 manual_approval 恒关是历史现状；
+          无 dialog_kind 的 canUseTool 权限审批不豁免，普通单聊授权/审批语义
+          零变化（D-006@v2 唯一例外边界）。
         """
-        session_obj = await self._svc._get_owned_session_for_update(session_id, user_id)
-        # 2026-09-01-session-group-chat task-02 / design §5.3：群会话参与者制
-        # 分支同经 _get_owned_session_for_update 继承（见 list_pending_dialogs
-        # 注释）；群/影子会话 manual_approval 恒关，下方守卫天然兜底拒答。
+        # ── Resolve request_id → dialog row OR plain-approval timer ────────
+        # A dialog response is signalled either by the caller passing
+        # ``dialog_result`` explicitly, or by a matching pending DB row. We
+        # check the DB first because dialogs are the persistent case; a plain
+        # approval has no row and falls through to the timer lookup.
+        # task-09：本 SELECT 提前到两道守卫之前（纯读、无副作用）——影子分支
+        # 的判定（守卫一放行条件 / 守卫二豁免条件）需要先知道 request_id 是否
+        # 解析到本会话 dialog_kind 非空的 dialog 行；非影子路径错误优先级不变。
+        dialog_row = (
+            await self._svc._session.execute(
+                select(SessionDialogRequest).where(SessionDialogRequest.request_id == request_id)
+            )
+        ).scalar_one_or_none()
+        # task-09：「dialog 行应答」判定——行存在、归属本会话（防跨会话
+        # request_id 借道，R-08）、dialog_kind 非空（ask_user 类提问）。
+        is_dialog_answer = (
+            dialog_row is not None
+            and dialog_row.session_id == session_id
+            and bool(dialog_row.dialog_kind)
+        )
+
+        # ── Guard 1: ownership（owner / 群参与者 / 影子成员 dialog 放行）────
+        try:
+            session_obj = await self._svc._get_owned_session_for_update(session_id, user_id)
+        except DaemonSessionNotFound:
+            # 2026-09-01-session-group-chat task-02 / design §5.3：群会话
+            # （kind='group'）参与者制分支已由 _get_owned_session_for_update
+            # 内部继承（见 list_pending_dialogs 注释）——上方正常路径已覆盖。
+            # task-09（D-004@v2）：群聊影子会话 dialog 答题放行——仅 dialog 行
+            # 应答尝试影子成员分支；其余（含普通单聊非属主）维持 404（R-08）。
+            session_obj = None
+            if is_dialog_answer:
+                session_obj = await self._resolve_shadow_member_answer_session(session_id, user_id)
+            if session_obj is None:
+                raise
         if (session_obj.status or "") not in ACTIVE_SESSION_STATUSES:
             raise DaemonSessionNotActive(
                 f"AgentSession '{session_id}' is not active (status={session_obj.status}).",
                 details={"session_id": str(session_id), "status": session_obj.status},
             )
+        # ── Guard 2: manual_approval（影子 dialog 应答豁免，D-006@v2）────────
         config = session_obj.config or {}
-        if config.get("manual_approval") is not True:
+        shadow_dialog_answer = (
+            session_obj.session_kind or ""
+        ) == "group_member" and is_dialog_answer
+        if config.get("manual_approval") is not True and not shadow_dialog_answer:
             raise DaemonPermissionManualDisabled(
                 f"AgentSession '{session_id}' does not have manual_approval enabled.",
                 details={"session_id": str(session_id)},
@@ -964,16 +1013,6 @@ class DaemonPermissionService:
         # Release the row lock ASAP — WS send / SSE publish are not DB work.
         await self._svc._session.commit()
 
-        # ── Resolve request_id → dialog row OR plain-approval timer ────────
-        # A dialog response is signalled either by the caller passing
-        # ``dialog_result`` explicitly, or by a matching pending DB row. We
-        # check the DB first because dialogs are the persistent case; a plain
-        # approval has no row and falls through to the timer lookup.
-        dialog_row = (
-            await self._svc._session.execute(
-                select(SessionDialogRequest).where(SessionDialogRequest.request_id == request_id)
-            )
-        ).scalar_one_or_none()
         if dialog_row is not None and dialog_row.status != "pending":
             # ql-20260815-003：终态（answered/cancelled）dialog 先于 current_run
             # 检查返回——run 已死时点孤儿卡给用户明确的 409/404 语义，而不是
@@ -984,6 +1023,7 @@ class DaemonPermissionService:
                 decision=decision,
                 message=message,
                 dialog_result=dialog_result,
+                actor_user_id=user_id,
             )
 
         current_run = await self._svc._get_current_run(session_id)
@@ -1000,6 +1040,7 @@ class DaemonPermissionService:
                 decision=decision,
                 message=message,
                 dialog_result=dialog_result,
+                actor_user_id=user_id,
             )
 
         # Plain canUseTool approval: request_id lifecycle via the in-memory timer.
@@ -1103,6 +1144,68 @@ class DaemonPermissionService:
             accepted=True,
         )
 
+    async def _resolve_shadow_member_answer_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> "AgentSession | None":
+        """task-09（D-004@v2 / R-08）：群聊影子会话 dialog 答题的成员放行判定。
+
+        双条件（design §Wave C.1 / R-08）：
+
+        1. 目标会话 ``session_kind == 'group_member'``（群聊影子会话）；
+        2. 答题者是该影子所属群的**未移除用户成员**——经
+           ``resolve_shadow_member``（成员表反向指针定位 agent 成员行与所属
+           群）→ ``get_active_user_membership`` 校验 ``user_id`` 的用户成员行。
+
+        命中返回加行锁的影子会话（与属主路径同等 FOR UPDATE 语义）；任一条件
+        不满足返回 None（调用方维持 404 不泄露存在性）。**仅 respond_permission
+        授权门使用**——inject/end 等写路径的影子会话成员不放行口径不变
+        （helpers ``allow_shadow_member_read`` 的 ``not for_update`` 双保险）。
+        """
+        from app.modules.agent.model import AgentGroupChat, AgentSession
+        from app.modules.daemon.group.service.helpers import (
+            get_active_user_membership,
+            resolve_shadow_member,
+        )
+
+        kind = (
+            await self._svc._session.execute(
+                select(AgentSession.session_kind).where(AgentSession.id == session_id)
+            )
+        ).scalar_one_or_none()
+        if kind != "group_member":
+            return None
+        shadow_member = await resolve_shadow_member(
+            self._svc._session, shadow_session_id=session_id
+        )
+        if shadow_member is None:
+            return None
+        # 软删群不放行（照 get_group_accessible_session §5.2 Grill X2 先例：
+        # 裸 db.get 不过滤 deleted_at——删群后成员仍可借影子会话答题的越权口）。
+        shadow_group = (
+            await self._svc._session.execute(
+                select(AgentGroupChat).where(
+                    AgentGroupChat.id == shadow_member.group_id,
+                    AgentGroupChat.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if shadow_group is None:
+            return None
+        if (
+            await get_active_user_membership(
+                self._svc._session, group_id=shadow_group.id, user_id=user_id
+            )
+            is None
+        ):
+            return None
+        return (
+            await self._svc._session.execute(
+                select(AgentSession).where(AgentSession.id == session_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+
     async def _respond_dialog(
         self,
         *,
@@ -1111,6 +1214,7 @@ class DaemonPermissionService:
         decision: Literal["allow", "deny"],
         message: str | None,
         dialog_result: dict | None,
+        actor_user_id: uuid.UUID,
     ) -> PermissionResponseRead:
         """Dialog branch of ``respond_permission`` (persisted, no timer)."""
         session_id = dialog_row.session_id
@@ -1180,10 +1284,11 @@ class DaemonPermissionService:
         dialog_row.status = "answered"
         dialog_row.answer = dialog_result
         dialog_row.answered_at = datetime.now(UTC)
-        # answered_by is set by the caller via the user_id; threaded through
-        # session_obj would require an extra param, so we read it off the
-        # owned session's user_id (already validated upstream).
-        dialog_row.answered_by = session_obj.user_id
+        # task-09（D-004@v2）：answered_by 记**实际答题人**（REST 调用者
+        # user_id，respond_permission 透传）。影子会话答题者常为群成员而非
+        # 影子属主（群主），沿旧读 session_obj.user_id 会把成员答案记到群主
+        # 名下（归属失真）；普通单聊两值恒等，行为不变。
+        dialog_row.answered_by = actor_user_id
         await self._svc._session.commit()
 
         await self._svc._publish_session_event(
@@ -1195,6 +1300,10 @@ class DaemonPermissionService:
                 "decision": decision,
                 "reason": "manual",
                 "dialog_kind": dialog_row.dialog_kind,
+                # task-09：实际答题人标识（契约字段 answered_by_actual_user，
+                # 与前端 task-10 对齐——答题卡关闭态渲染「×× 答」的数据源；
+                # 普通单聊=会话属主，影子会话=答题群成员 user_id）。
+                "answered_by_actual_user": str(actor_user_id),
             },
         )
         log.info(

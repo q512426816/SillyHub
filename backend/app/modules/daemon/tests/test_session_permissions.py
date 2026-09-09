@@ -10,7 +10,12 @@ Covers:
     manual-disabled + non-active-session branches;
   - 5min timeout (fake-clock) auto-denies via ws_hub + publishes
     permission_resolved{reason:timeout};
-  - duplicate response after timeout → 404 (timer already gone).
+  - duplicate response after timeout → 404 (timer already gone);
+  - task-09（2026-09-09-askuser-pi-cursor / D-004@v2 / D-006@v2 / R-08）：群聊
+    影子会话（kind='group_member'）ask_user dialog 答题授权放开——群成员可答
+    （answered_by=实际答题人 + SSE answered_by_actual_user）、manual_approval
+    守卫对 dialog 应答豁免（普通权限审批不豁免）、越权反例（非群成员/已移除
+    成员/普通单聊非属主/跨会话 request_id 借道一律 404，已答 409 幂等）。
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1051,3 +1057,405 @@ class TestOrphanDialogCancellation:
         assert [d.request_id for d in history] == ["cap-2", "cap-3", "cap-4"], (
             "只返回最新 3 条且按创建序（旧 → 新）"
         )
+
+
+# ── task-09（2026-09-09-askuser-pi-cursor）：影子会话 dialog 答题授权放开 ──────
+
+
+async def _seed_group_shadow(
+    db_session: AsyncSession,
+    *,
+    shadow_manual_approval: bool = True,
+    user_member_removed: bool = False,
+    with_user_member: bool = True,
+) -> SimpleNamespace:
+    """种一套群聊影子答题底座：workspace + 群会话（kind='group'）+ 群行 +
+    agent 成员（影子反向指针）+ 影子会话（kind='group_member'，manual_approval
+    可控）+ 影子 run + 用户成员行（答题人，可移除/缺省）。
+
+    答题链路：影子会话（弹 ask_user dialog）→ 用户成员（``member_uid``）经
+    respond_permission 影子放行分支作答；``outsider_uid`` 是无任何成员关系的
+    路人（越权反例用）。影子会话 user_id=群主（``owner_uid``，归属同源）。
+    """
+    from app.modules.agent.model import AgentGroupChat, AgentGroupMember
+    from app.modules.workspace.model import Workspace
+
+    owner_uid = await _create_user(db_session)
+    member_uid = await _create_user(db_session)
+    outsider_uid = await _create_user(db_session)
+    rt = await _create_runtime(db_session, owner_uid)
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="shadow-answer-ws",
+        slug=f"shadow-ws-{uuid.uuid4().hex[:8]}",
+        root_path="C:/tmp/shadow-ws",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.flush()
+
+    now = datetime.now(UTC)
+    group_session_id = uuid.uuid4()
+    db_session.add(
+        AgentSession(
+            id=group_session_id,
+            user_id=owner_uid,
+            provider="group",
+            status="active",
+            turn_count=0,
+            created_at=now,
+            session_kind="group",
+        )
+    )
+    await db_session.flush()
+    db_session.add(
+        AgentGroupChat(
+            id=group_session_id,
+            session_id=group_session_id,
+            workspace_id=ws.id,
+            title="影子答题测试群",
+            created_by=owner_uid,
+        )
+    )
+
+    # 影子会话：user_id=群主；manual_approval 可控——False 模拟「恒关」历史
+    # 现状（守卫二豁免的对象），True 为现行懒建口径（shadow.py config）。
+    shadow_id = uuid.uuid4()
+    db_session.add(
+        AgentSession(
+            id=shadow_id,
+            user_id=owner_uid,
+            runtime_id=rt.id,
+            provider="claude",
+            status="active",
+            config={"manual_approval": shadow_manual_approval, "ask_user_only": True},
+            turn_count=1,
+            created_at=now,
+            session_kind="group_member",
+            workspace_id=ws.id,
+        )
+    )
+    await db_session.flush()
+
+    # agent 成员行（影子反向指针——resolve_shadow_member 的入口）。
+    db_session.add(
+        AgentGroupMember(
+            group_id=group_session_id,
+            member_type="agent",
+            display_name="小码",
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            provider="claude",
+            shadow_status="active",
+            shadow_session_id=shadow_id,
+            invited_by=owner_uid,
+            joined_at=now,
+        )
+    )
+    # 用户成员行（答题人；removed_at 非空=已移除，不该再放行）。
+    if with_user_member:
+        db_session.add(
+            AgentGroupMember(
+                group_id=group_session_id,
+                member_type="user",
+                display_name="答题人",
+                user_id=member_uid,
+                invited_by=owner_uid,
+                joined_at=now,
+                removed_at=now if user_member_removed else None,
+            )
+        )
+
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_type="claude_code",
+        provider="claude",
+        status="running",
+        spec_strategy="interactive",
+        agent_session_id=shadow_id,
+        user_id=owner_uid,
+    )
+    db_session.add(run)
+    await db_session.commit()
+    return SimpleNamespace(
+        owner_uid=owner_uid,
+        member_uid=member_uid,
+        outsider_uid=outsider_uid,
+        runtime_id=rt.id,
+        group_session_id=group_session_id,
+        shadow_id=shadow_id,
+        shadow_run_id=run.id,
+    )
+
+
+async def _insert_pending_dialog_row(
+    db_session: AsyncSession,
+    seed: SimpleNamespace,
+    *,
+    request_id: str = "sd-1",
+) -> None:
+    """直插 pending dialog 行——绕过 handle_permission_request 的 manual 门
+    （影子 manual_approval=False 时上行不落行，这里模拟存量/待自愈行，正是
+    守卫二豁免要兜住的形态）。"""
+    from app.modules.daemon.model import SessionDialogRequest
+
+    db_session.add(
+        SessionDialogRequest(
+            session_id=seed.shadow_id,
+            run_id=seed.shadow_run_id,
+            request_id=request_id,
+            tool_name="AskUserQuestion",
+            dialog_kind="ask_user_question",
+            dialog_payload={"question": "选哪个方案？", "options": []},
+            status="pending",
+        )
+    )
+    await db_session.commit()
+
+
+class TestShadowDialogAnswerAuthorization:
+    """task-09 / D-004@v2 / D-006@v2 / R-08：群聊影子会话 dialog 答题授权。
+
+    - 放行：该群未移除用户成员可答影子会话 pending ask_user dialog，
+      answered_by=实际答题成员（修正原先记群主的归属失真），SSE
+      permission_resolved 携带 answered_by_actual_user；manual_approval 守卫
+      对影子 dialog 应答豁免（True/False 两形态，False=「恒关」历史现状）；
+    - 越权反例（R-08）：非群成员 / 已移除成员 404；普通单聊非属主 404；
+      跨会话 request_id 借道 404；已答 409 幂等（:1119 既有语义覆盖影子路径）；
+    - 边界（D-006@v2 唯一例外）：影子会话普通权限审批（无 dialog 行）不豁免
+      manual_approval 守卫，普通单聊授权语义零变化。
+    """
+
+    @staticmethod
+    def _make_perm(db_session: AsyncSession) -> tuple[DaemonPermissionService, MagicMock]:
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        return DaemonPermissionService(svc, hub, timeout_sec=30.0), hub
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("shadow_manual_approval", [True, False])
+    async def test_group_member_answers_shadow_dialog(
+        self, db_session, mocked_redis, shadow_manual_approval: bool
+    ) -> None:
+        """群成员（非群主）答影子会话 pending dialog：两道守卫双放行
+        （manual=False 形态同时证明守卫二豁免），answered_by=答题成员，
+        SSE 携带 answered_by_actual_user（前端「×× 答」渲染数据源）。"""
+        from sqlalchemy import select
+
+        from app.modules.daemon.model import SessionDialogRequest
+
+        seed = await _seed_group_shadow(db_session, shadow_manual_approval=shadow_manual_approval)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-1")
+        perm, hub = self._make_perm(db_session)
+
+        result = await perm.respond_permission(
+            seed.member_uid,
+            seed.shadow_id,
+            "sd-1",
+            "allow",
+            dialog_result={"answers": [{"question": "选哪个方案？", "answer": "A"}]},
+        )
+        assert result.accepted is True
+
+        # 行翻 answered；answered_by=实际答题成员（非影子属主/群主——修正失真）。
+        row = (
+            await db_session.execute(
+                select(SessionDialogRequest).where(SessionDialogRequest.request_id == "sd-1")
+            )
+        ).scalar_one()
+        assert row.status == "answered"
+        assert row.answered_by == seed.member_uid
+        assert row.answered_by != seed.owner_uid
+
+        # WS 下发照走（dialog_result 透传 daemon，payload 形状不变）。
+        hub.send_permission_response.assert_awaited_once()
+        ws_arg = hub.send_permission_response.await_args
+        assert ws_arg.args[1]["dialog_result"] == {
+            "answers": [{"question": "选哪个方案？", "answer": "A"}]
+        }
+        assert ws_arg.args[1]["runtime_id"] == str(seed.runtime_id)
+
+        # SSE permission_resolved 携带实际答题人标识（契约 answered_by_actual_user）。
+        resolved = [
+            c.args[1]
+            for c in mocked_redis.publish.await_args_list
+            if c.args[0] == f"agent_session:{seed.shadow_id}" and "permission_resolved" in c.args[1]
+        ]
+        assert resolved, "expected permission_resolved SSE on shadow session channel"
+        assert "answered_by_actual_user" in resolved[0]
+        assert str(seed.member_uid) in resolved[0]
+        assert str(seed.owner_uid) not in resolved[0]
+
+    @pytest.mark.asyncio
+    async def test_owner_answers_shadow_dialog_manual_off_exempt(
+        self, db_session, mocked_redis
+    ) -> None:
+        """守卫二豁免与答题人身份无关：群主（影子属主，过守卫一首查）答
+        manual_approval=False 影子会话的 dialog 同样放行（「恒关」现状对
+        dialog 提问类不再一律拒答），answered_by=群主本人。"""
+        from sqlalchemy import select
+
+        from app.modules.daemon.model import SessionDialogRequest
+
+        seed = await _seed_group_shadow(db_session, shadow_manual_approval=False)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-owner-1")
+        perm, _hub = self._make_perm(db_session)
+
+        result = await perm.respond_permission(
+            seed.owner_uid, seed.shadow_id, "sd-owner-1", "allow", dialog_result={"answers": []}
+        )
+        assert result.accepted is True
+        row = (
+            await db_session.execute(
+                select(SessionDialogRequest).where(SessionDialogRequest.request_id == "sd-owner-1")
+            )
+        ).scalar_one()
+        assert row.status == "answered"
+        assert row.answered_by == seed.owner_uid
+
+    @pytest.mark.asyncio
+    async def test_non_member_answer_shadow_dialog_404(self, db_session, mocked_redis) -> None:
+        """R-08 越权反例：非群成员（路人）答影子会话 dialog → 404 不放行
+        （也不泄露影子会话存在性）。"""
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        seed = await _seed_group_shadow(db_session)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-out-1")
+        perm, hub = self._make_perm(db_session)
+
+        with pytest.raises(DaemonSessionNotFound):
+            await perm.respond_permission(
+                seed.outsider_uid,
+                seed.shadow_id,
+                "sd-out-1",
+                "allow",
+                dialog_result={"answers": []},
+            )
+        hub.send_permission_response.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_removed_member_answer_shadow_dialog_404(self, db_session, mocked_redis) -> None:
+        """R-08 越权反例：已移除成员（removed_at 置位）不再算「未移除用户
+        成员」→ 404。"""
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        seed = await _seed_group_shadow(db_session, user_member_removed=True)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-rm-1")
+        perm, _hub = self._make_perm(db_session)
+
+        with pytest.raises(DaemonSessionNotFound):
+            await perm.respond_permission(
+                seed.member_uid,
+                seed.shadow_id,
+                "sd-rm-1",
+                "allow",
+                dialog_result={"answers": []},
+            )
+
+    @pytest.mark.asyncio
+    async def test_plain_chat_non_owner_dialog_answer_404(self, db_session, mocked_redis) -> None:
+        """普通单聊授权语义不变：非属主答单聊 dialog（kind='chat'，影子分支
+        不适用）→ 404。"""
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        other_uid = await _create_user(db_session)
+
+        perm, _hub = self._make_perm(db_session)
+        # 经正规上行落 pending dialog 行（manual=True 单聊）。
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="chat-dlg-1")
+        )
+
+        with pytest.raises(DaemonSessionNotFound):
+            await perm.respond_permission(
+                other_uid,
+                sess.id,
+                "chat-dlg-1",
+                "allow",
+                dialog_result={"answers": []},
+            )
+
+    @pytest.mark.asyncio
+    async def test_shadow_plain_approval_still_manual_disabled(
+        self, db_session, mocked_redis
+    ) -> None:
+        """D-006@v2 唯一例外边界：影子会话普通权限审批（无 dialog 行）不豁免
+        manual_approval 守卫——群主（守卫一首查命中）对 canUseTool 审批仍被
+        DaemonPermissionManualDisabled 拒。"""
+        seed = await _seed_group_shadow(db_session, shadow_manual_approval=False)
+        perm, _hub = self._make_perm(db_session)
+
+        with pytest.raises(DaemonPermissionManualDisabled):
+            await perm.respond_permission(
+                seed.owner_uid,
+                seed.shadow_id,
+                "req-no-dialog",
+                "allow",
+            )
+
+    @pytest.mark.asyncio
+    async def test_shadow_dialog_already_answered_409_idempotent(
+        self, db_session, mocked_redis
+    ) -> None:
+        """已答 409 幂等（:1119 既有语义）覆盖影子路径：成员重复应答第二枪
+        DaemonDialogAlreadyResolved，行保持 answered/answered_by 不被改写。"""
+        from sqlalchemy import select
+
+        from app.modules.daemon.model import SessionDialogRequest
+        from app.modules.daemon.permission_service import DaemonDialogAlreadyResolved
+
+        seed = await _seed_group_shadow(db_session, shadow_manual_approval=False)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-409-1")
+        perm, _hub = self._make_perm(db_session)
+
+        first = await perm.respond_permission(
+            seed.member_uid, seed.shadow_id, "sd-409-1", "allow", dialog_result={"answers": []}
+        )
+        assert first.accepted is True
+
+        with pytest.raises(DaemonDialogAlreadyResolved):
+            await perm.respond_permission(
+                seed.member_uid,
+                seed.shadow_id,
+                "sd-409-1",
+                "allow",
+                dialog_result={"answers": []},
+            )
+        row = (
+            await db_session.execute(
+                select(SessionDialogRequest).where(SessionDialogRequest.request_id == "sd-409-1")
+            )
+        ).scalar_one()
+        assert row.status == "answered"
+        assert row.answered_by == seed.member_uid
+
+    @pytest.mark.asyncio
+    async def test_cross_session_request_id_not_allowed(self, db_session, mocked_redis) -> None:
+        """R-08 借道反例：群成员持**别会话**的 request_id 打影子会话——
+        is_dialog_answer 判定要求行归属本会话，影子分支不触发 → 404，
+        不能借成员身份翻别会话的 dialog。"""
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        seed = await _seed_group_shadow(db_session)
+        # 别会话（普通单聊）的 pending dialog 行。
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        perm, _hub = self._make_perm(db_session)
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="foreign-dlg-1")
+        )
+
+        with pytest.raises(DaemonSessionNotFound):
+            await perm.respond_permission(
+                seed.member_uid,
+                seed.shadow_id,
+                "foreign-dlg-1",
+                "allow",
+                dialog_result={"answers": []},
+            )

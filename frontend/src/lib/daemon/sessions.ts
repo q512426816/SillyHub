@@ -81,6 +81,12 @@ export interface SessionPermissionResolved {
   request_id: string;
   decision: "allow" | "deny";
   reason?: string;
+  /**
+   * 2026-09-09-askuser-pi-cursor task-11：实际答题人 user_id（backend task-09
+   * 契约字段——影子会话=答题群成员，普通单聊=会话属主）。SSE 事件缺省时无此键
+   * （旧后端/普通审批），消费方缺失降级（答题卡关闭态不带名）。
+   */
+  answered_by_actual_user?: string;
 }
 
 /**

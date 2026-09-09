@@ -1,6 +1,8 @@
 // tests/interactive/pi-rpc-driver.test.ts
 // 2026-09-04-provider-pi-onboarding task-02（核心生命周期）+ task-03（高级语义）
-// + task-06（vendored subagent 扩展装载 / R-02）。
+// + task-06（vendored subagent 扩展装载 / R-02）
+// + 2026-09-09-askuser-pi-cursor task-04（pi 桥接四态：上抛/应答回流/中止兜底/
+//   权限类拒绝，FR-01/FR-02 / D-002@v1 / R-06）。
 //
 // 依据：tasks/task-02.md / tasks/task-03.md、design.md §5.1（B-03/B-05）、
 // pi 包 docs/rpc.md（分帧:30-37 / prompt:43-78 / steer:80-100 / follow_up:102-122
@@ -43,8 +45,17 @@
 //  13. U+2028 全链路（分帧 + 归一化）：含 U+2028 的 text_delta → 单条 text 事件；
 //  14. task-06 vendored subagent 扩展装载：默认候选命中 → --extension 绝对路径；
 //       env off → 不装载；env 显式路径 → 透传（解析器单元 + spawn 参数面）。
+//   15. 2026-09-09-askuser-pi-cursor task-04 pi 桥接四态（注入 sessionPermission）：
+//       上抛（select/confirm/input/editor → requestUserDialog dialogKind=
+//       pi_extension_ui + questions[] 映射，挂起表登记，子协议不进事件流）/
+//       应答回流（completed answers → extension_ui_response 四类 denormalize
+//       形态 R-06；cancelled/reject → cancelled:true）/ 中止兜底（close / 子进程
+//       exit → 挂起表清空回 cancelled，reply 幂等不双写）/ 权限类拒绝（权限类 /
+//       未知 method / 归一化失败 / 未注入 hook → 零桥接红线，自动取消）+ 两个
+//       导出纯函数（normalizePiExtensionDialog / denormalizePiDialogReply）的
+//       映射细节与反例直测。
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,9 +82,12 @@ import {
   PI_SUBAGENT_EXTENSION_ENV,
   PiExecutableNotFoundError,
   PiRpcDriver,
+  denormalizePiDialogReply,
+  normalizePiExtensionDialog,
   piRpcSessionDir,
   piVendoredSubagentExtensionPath,
   type PiRpcHandle,
+  type PiSessionPermissionHooks,
   type PiStartOptions,
 } from '../../src/interactive/pi-rpc-driver.js';
 import { safeParseAgentEvent } from '../../src/agent-event-schema.js';
@@ -261,6 +275,57 @@ function handshakeOk(child: FakeChild, extra: Record<string, unknown> = {}): voi
   respond(child, 'get_state', {
     data: { sessionId: 'sess_pi_1', isStreaming: false, ...extra },
   });
+}
+
+/**
+ * task-04：桥接用 sessionPermission stub——requestUserDialog 逐笔挂起（deferred
+ * 登记进 dialogs，测试在任意时点手动 resolve completed/cancelled 或 reject），
+ * 返回的 spy 供零桥接红线断言（权限类/未知 method 不得上抛）。
+ * requestPermission 在桥接链路零消费（D-002 红线），占位 fail-closed。
+ */
+function makeDialogHooks(): {
+  hooks: PiSessionPermissionHooks;
+  /** 每笔上抛的入参（dialogKind/dialogPayload/toolUseId）+ 手动结算句柄。 */
+  dialogs: Array<{
+    input: {
+      dialogKind: string;
+      dialogPayload: Record<string, unknown>;
+      toolUseId?: string;
+    };
+    resolve: (
+      outcome: { behavior: 'completed'; result: unknown } | { behavior: 'cancelled' },
+    ) => void;
+    reject: (err: unknown) => void;
+  }>;
+  requestUserDialog: Mock;
+} {
+  const dialogs: Array<{
+    input: {
+      dialogKind: string;
+      dialogPayload: Record<string, unknown>;
+      toolUseId?: string;
+    };
+    resolve: (
+      outcome: { behavior: 'completed'; result: unknown } | { behavior: 'cancelled' },
+    ) => void;
+    reject: (err: unknown) => void;
+  }> = [];
+  const requestUserDialog = vi.fn(
+    (
+      input: Parameters<PiSessionPermissionHooks['requestUserDialog']>[0],
+    ): ReturnType<PiSessionPermissionHooks['requestUserDialog']> =>
+      new Promise((resolve, reject) => {
+        dialogs.push({ input, resolve, reject });
+      }),
+  );
+  const hooks: PiSessionPermissionHooks = {
+    // 权限审批入口零消费占位（deny fail-closed；桥接链路永不触达）。
+    requestPermission: vi.fn(
+      async () => ({ behavior: 'deny' as const }),
+    ),
+    requestUserDialog,
+  };
+  return { hooks, dialogs, requestUserDialog };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1627,6 +1692,854 @@ describe('extension_ui_request 自动取消（rpc.md:1126-1335）', () => {
     });
     await tick();
     expect(events.find((e) => e.type === 'text' && e.content === '流')).toBeDefined();
+
+    closeQueue();
+    await consumeP;
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5e. 2026-09-09-askuser-pi-cursor task-04：pi 桥接四态
+//     （上抛 / 应答回流 / 中止兜底 / 权限类拒绝，FR-01/FR-02 / D-002@v1 / R-06）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('pi 桥接纯函数映射（normalize / denormalize 直测，R-06）', () => {
+  describe('normalizePiExtensionDialog：四方法映射 + 反例', () => {
+    it('select：options 逐项包 label、空白项剔除；无 allowCustom 键', () => {
+      expect(
+        normalizePiExtensionDialog('select', {
+          title: '选择执行方案',
+          options: ['方案A', '方案B', '  ', ''],
+        }),
+      ).toEqual({
+        supported: true,
+        dialogPayload: {
+          questions: [
+            {
+              question: '选择执行方案',
+              options: [{ label: '方案A' }, { label: '方案B' }],
+            },
+          ],
+        },
+      });
+    });
+
+    it('select：allowCustom 布尔平铺 + recommendResponders[] 透传', () => {
+      expect(
+        normalizePiExtensionDialog('select', {
+          title: '选',
+          options: ['A'],
+          allowCustom: true,
+          recommendResponders: ['user-1', 'user-2'],
+        }),
+      ).toEqual({
+        supported: true,
+        dialogPayload: {
+          questions: [{ question: '选', options: [{ label: 'A' }] }],
+          allowCustom: true,
+          recommendResponders: ['user-1', 'user-2'],
+        },
+      });
+    });
+
+    it('confirm：合成是/否两选项；message 非空时追加为问题第二行（风险说明不丢）', () => {
+      expect(
+        normalizePiExtensionDialog('confirm', { title: '允许执行？', message: '该命令不可逆' }),
+      ).toEqual({
+        supported: true,
+        dialogPayload: {
+          questions: [
+            { question: '允许执行？\n该命令不可逆', options: [{ label: '是' }, { label: '否' }] },
+          ],
+        },
+      });
+      // 无 message：question 保持 title 原文
+      expect(normalizePiExtensionDialog('confirm', { title: '继续？' })).toEqual({
+        supported: true,
+        dialogPayload: {
+          questions: [{ question: '继续？', options: [{ label: '是' }, { label: '否' }] }],
+        },
+      });
+    });
+
+    it('input/editor：占位选项「由我输入」+ allowCustom:true（答案走卡片常驻输入框）', () => {
+      const expected = {
+        supported: true,
+        dialogPayload: {
+          questions: [{ question: '提供内容', options: [{ label: '由我输入' }] }],
+          allowCustom: true,
+        },
+      };
+      // pi 的 placeholder/prefill 字段不映射（卡片无对应渲染位，仅占位选项兜底）
+      expect(
+        normalizePiExtensionDialog('input', { title: '提供内容', placeholder: '提示' }),
+      ).toEqual(expected);
+      expect(
+        normalizePiExtensionDialog('editor', { title: '提供内容', prefill: '预填' }),
+      ).toEqual(expected);
+    });
+
+    it('反例（schema 漂移 fail-closed）：权限类 method / 未知 method / title 缺失或空白 / select 无有效选项 → supported:false', () => {
+      // 权限类 method 不在四方法白名单（D-002 红线的入口侧表现）
+      expect(normalizePiExtensionDialog('request_permission', { title: '允许？' })).toEqual({
+        supported: false,
+        reason: 'method "request_permission" is not a bridgeable dialog method',
+      });
+      expect(normalizePiExtensionDialog('mystery_dialog', { title: 'x' }).supported).toBe(false);
+      // title 缺失 / 空白
+      expect(normalizePiExtensionDialog('select', {}).supported).toBe(false);
+      expect(normalizePiExtensionDialog('select', { title: '   ' }).supported).toBe(false);
+      // select options 非数组 / 全空白
+      expect(
+        normalizePiExtensionDialog('select', { title: 'x', options: 'not-array' }).supported,
+      ).toBe(false);
+      expect(
+        normalizePiExtensionDialog('select', { title: 'x', options: ['', '  '] }).supported,
+      ).toBe(false);
+    });
+  });
+
+  describe('denormalizePiDialogReply：四类应答形态 + fail-closed', () => {
+    it('select/input/editor：string answer → {value} 原样透传', () => {
+      expect(
+        denormalizePiDialogReply('select', { answers: [{ answer: '方案A' }] }),
+      ).toEqual({ value: '方案A' });
+      expect(
+        denormalizePiDialogReply('input', { answers: [{ answer: '关键词：pi rpc' }] }),
+      ).toEqual({ value: '关键词：pi rpc' });
+      expect(
+        denormalizePiDialogReply('editor', { answers: [{ answer: '第一行\n第二行' }] }),
+      ).toEqual({ value: '第一行\n第二行' });
+    });
+
+    it('confirm：「是」→ confirmed:true（含首尾空白）；「否」/自定义文本/空 → confirmed:false（fail-closed）', () => {
+      expect(denormalizePiDialogReply('confirm', { answers: [{ answer: '是' }] })).toEqual({
+        confirmed: true,
+      });
+      expect(denormalizePiDialogReply('confirm', { answers: [{ answer: ' 是 ' }] })).toEqual({
+        confirmed: true,
+      });
+      expect(denormalizePiDialogReply('confirm', { answers: [{ answer: '否' }] })).toEqual({
+        confirmed: false,
+      });
+      expect(denormalizePiDialogReply('confirm', { answers: [{ answer: '随便' }] })).toEqual({
+        confirmed: false,
+      });
+      expect(denormalizePiDialogReply('confirm', { answers: [{ answer: '' }] })).toEqual({
+        confirmed: false,
+      });
+    });
+
+    it('多选 string[]：select/confirm 取首个（单值语义）；input/editor 换行拼接（信息无损）', () => {
+      expect(
+        denormalizePiDialogReply('select', { answers: [{ answer: ['甲', '乙'] }] }),
+      ).toEqual({ value: '甲' });
+      expect(
+        denormalizePiDialogReply('confirm', { answers: [{ answer: ['是', '否'] }] }),
+      ).toEqual({ confirmed: true });
+      expect(
+        denormalizePiDialogReply('input', { answers: [{ answer: ['第一段', '第二段'] }] }),
+      ).toEqual({ value: '第一段\n第二段' });
+      expect(
+        denormalizePiDialogReply('editor', { answers: [{ answer: ['a', 'b'] }] }),
+      ).toEqual({ value: 'a\nb' });
+    });
+
+    it('异常 answers → cancelled:true（answers 缺失/空、answer 非字符串、select 空白值；input 空白值除外）', () => {
+      expect(denormalizePiDialogReply('select', undefined)).toEqual({ cancelled: true });
+      expect(denormalizePiDialogReply('select', {})).toEqual({ cancelled: true });
+      expect(denormalizePiDialogReply('select', { answers: [] })).toEqual({ cancelled: true });
+      expect(denormalizePiDialogReply('select', { answers: [{ answer: 42 }] })).toEqual({
+        cancelled: true,
+      });
+      // select 空白值不对应任何 option → cancelled；input 空白是合法自由输入 → 透传
+      expect(denormalizePiDialogReply('select', { answers: [{ answer: '   ' }] })).toEqual({
+        cancelled: true,
+      });
+      expect(denormalizePiDialogReply('input', { answers: [{ answer: '   ' }] })).toEqual({
+        value: '   ',
+      });
+    });
+  });
+});
+
+describe('pi 桥接态1：提问四方法上抛平台（requestUserDialog，FR-01）', () => {
+  it('select → stub 收 dialogKind=pi_extension_ui + options 逐项 label；挂起表登记，stdin 暂无应答', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length;
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-sel-1',
+      method: 'select',
+      title: '选择执行方案',
+      options: ['方案A', '方案B'],
+    });
+    await tick();
+
+    // 先断言上抛（requestUserDialog 被调 + 入参映射），再看 stdin
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]!.input).toEqual({
+      dialogKind: 'pi_extension_ui',
+      dialogPayload: {
+        questions: [
+          { question: '选择执行方案', options: [{ label: '方案A' }, { label: '方案B' }] },
+        ],
+      },
+      toolUseId: 'ui-sel-1',
+    });
+    // 挂起等用户作答：与未注入 hook 的立即自动取消相反，stdin 无应答
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(0);
+    expect(handle.pendingDialogs.size).toBe(1);
+    expect(handle.pendingDialogs.get('ui-sel-1')!.method).toBe('select');
+    // 子协议不进事件流
+    expect(events.slice(baseline)).toHaveLength(0);
+
+    // 收尾：stub 以 cancelled 结算（回 cancelled:true）+ consume 自然退出
+    dialogs[0]!.resolve({ behavior: 'cancelled' });
+    await tick();
+    closeQueue();
+    await consumeP;
+  });
+
+  it('confirm → 合成是/否两选项，message 追加为问题第二行', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length;
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-conf-1',
+      method: 'confirm',
+      title: '允许执行 rm -rf？',
+      message: '该命令不可逆',
+    });
+    await tick();
+
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]!.input).toEqual({
+      dialogKind: 'pi_extension_ui',
+      dialogPayload: {
+        questions: [
+          {
+            question: '允许执行 rm -rf？\n该命令不可逆',
+            options: [{ label: '是' }, { label: '否' }],
+          },
+        ],
+      },
+      toolUseId: 'ui-conf-1',
+    });
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(0);
+    expect(handle.pendingDialogs.size).toBe(1);
+    expect(events.slice(baseline)).toHaveLength(0);
+
+    dialogs[0]!.resolve({ behavior: 'cancelled' });
+    await tick();
+    closeQueue();
+    await consumeP;
+  });
+
+  it('input → 占位选项「由我输入」+ allowCustom:true', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length;
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-in-1',
+      method: 'input',
+      title: '提供搜索关键词',
+      placeholder: '关键词',
+    });
+    await tick();
+
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]!.input).toEqual({
+      dialogKind: 'pi_extension_ui',
+      dialogPayload: {
+        questions: [{ question: '提供搜索关键词', options: [{ label: '由我输入' }] }],
+        allowCustom: true,
+      },
+      toolUseId: 'ui-in-1',
+    });
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(0);
+    expect(handle.pendingDialogs.size).toBe(1);
+    expect(events.slice(baseline)).toHaveLength(0);
+
+    dialogs[0]!.resolve({ behavior: 'cancelled' });
+    await tick();
+    closeQueue();
+    await consumeP;
+  });
+
+  it('editor → 与 input 同形（占位选项 + allowCustom:true）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length;
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-ed-1',
+      method: 'editor',
+      title: '编辑补丁内容',
+      prefill: 'diff --git',
+    });
+    await tick();
+
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]!.input).toEqual({
+      dialogKind: 'pi_extension_ui',
+      dialogPayload: {
+        questions: [{ question: '编辑补丁内容', options: [{ label: '由我输入' }] }],
+        allowCustom: true,
+      },
+      toolUseId: 'ui-ed-1',
+    });
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(0);
+    expect(handle.pendingDialogs.size).toBe(1);
+    expect(events.slice(baseline)).toHaveLength(0);
+
+    dialogs[0]!.resolve({ behavior: 'cancelled' });
+    await tick();
+    closeQueue();
+    await consumeP;
+  });
+});
+
+describe('pi 桥接态2：应答回流（completed → extension_ui_response 按 id 关联，R-06）', () => {
+  it('select completed answers → {value} 应答按 id 关联；挂起表自摘', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-sel',
+      method: 'select',
+      title: '选择执行方案',
+      options: ['方案A', '方案B'],
+    });
+    await tick();
+    expect(dialogs).toHaveLength(1);
+
+    dialogs[0]!.resolve({
+      behavior: 'completed',
+      result: { answers: [{ answer: '方案A' }] },
+    });
+    await tick();
+
+    // reply 精确形态（R-06）：{type,id,value}，无多余键
+    expect(
+      readStdinJson(child).find(
+        (l) => l.type === 'extension_ui_response' && l.id === 'ui-q-sel',
+      ),
+    ).toEqual({ type: 'extension_ui_response', id: 'ui-q-sel', value: '方案A' });
+    expect(handle.pendingDialogs.size).toBe(0);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('confirm completed：answers[0].answer=是 → confirmed:true；否 → confirmed:false', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-conf-yes',
+      method: 'confirm',
+      title: '允许执行？',
+    });
+    await tick();
+    dialogs[0]!.resolve({
+      behavior: 'completed',
+      result: { answers: [{ answer: '是' }] },
+    });
+    await tick();
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-conf-no',
+      method: 'confirm',
+      title: '再次确认？',
+    });
+    await tick();
+    dialogs[1]!.resolve({
+      behavior: 'completed',
+      result: { answers: [{ answer: '否' }] },
+    });
+    await tick();
+
+    const responses = readStdinJson(child).filter((l) => l.type === 'extension_ui_response');
+    expect(responses.find((l) => l.id === 'ui-q-conf-yes')).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-q-conf-yes',
+      confirmed: true,
+    });
+    expect(responses.find((l) => l.id === 'ui-q-conf-no')).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-q-conf-no',
+      confirmed: false,
+    });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('input/editor completed 自由文本 → {value} 原样透传（含换行）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-in',
+      method: 'input',
+      title: '提供搜索关键词',
+    });
+    await tick();
+    dialogs[0]!.resolve({
+      behavior: 'completed',
+      result: { answers: [{ answer: '关键词：pi rpc' }] },
+    });
+    await tick();
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-ed',
+      method: 'editor',
+      title: '编辑补丁内容',
+    });
+    await tick();
+    dialogs[1]!.resolve({
+      behavior: 'completed',
+      result: { answers: [{ answer: '第一行\n第二行' }] },
+    });
+    await tick();
+
+    const responses = readStdinJson(child).filter((l) => l.type === 'extension_ui_response');
+    expect(responses.find((l) => l.id === 'ui-q-in')).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-q-in',
+      value: '关键词：pi rpc',
+    });
+    expect(responses.find((l) => l.id === 'ui-q-ed')).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-q-ed',
+      value: '第一行\n第二行',
+    });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('completed 但 answers 不可解析 → cancelled:true（fail-closed，pi 侧 dialog await 收尾不死锁）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-bad',
+      method: 'editor',
+      title: '编辑内容',
+    });
+    await tick();
+    // completed 但 result 无 answers（契约漂移）：无法组装有效应答
+    dialogs[0]!.resolve({ behavior: 'completed', result: { reason: 'no answers' } });
+    await tick();
+
+    expect(
+      readStdinJson(child).find(
+        (l) => l.type === 'extension_ui_response' && l.id === 'ui-q-bad',
+      ),
+    ).toEqual({ type: 'extension_ui_response', id: 'ui-q-bad', cancelled: true });
+    expect(handle.pendingDialogs.size).toBe(0);
+    // fail-closed 是应答层收敛，不是会话错误
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('stub resolve cancelled / reject → cancelled:true（不产 error 事件）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-cancel',
+      method: 'select',
+      title: '选择',
+      options: ['A', 'B'],
+    });
+    await tick();
+    dialogs[0]!.resolve({ behavior: 'cancelled' });
+    await tick();
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-q-reject',
+      method: 'select',
+      title: '再选',
+      options: ['C', 'D'],
+    });
+    await tick();
+    dialogs[1]!.reject(new Error('SSE 断开'));
+    await tick();
+
+    const responses = readStdinJson(child).filter((l) => l.type === 'extension_ui_response');
+    expect(responses.find((l) => l.id === 'ui-q-cancel')).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-q-cancel',
+      cancelled: true,
+    });
+    expect(responses.find((l) => l.id === 'ui-q-reject')).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-q-reject',
+      cancelled: true,
+    });
+    // hook 异常/取消是对话层收敛，不冒泡为会话 error 事件
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+
+    closeQueue();
+    await consumeP;
+  });
+});
+
+describe('pi 桥接态3：中止兜底（close / 子进程 exit → cancelled，reply 幂等）', () => {
+  it('挂起中 handle.close() → stdin 收 cancelled:true、挂起表清空；迟到 completed 答案不双写', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-abort-1',
+      method: 'select',
+      title: '选择执行方案',
+      options: ['方案A', '方案B'],
+    });
+    await tick();
+    expect(handle.pendingDialogs.size).toBe(1);
+
+    // 用户结束会话：close 兜底在 closing=true 前直调取消（应答赶在 stdin.end 前落给 pi）
+    await handle.close();
+    await tick();
+
+    const responses = readStdinJson(child).filter((l) => l.type === 'extension_ui_response');
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-abort-1',
+      cancelled: true,
+    });
+    expect(handle.pendingDialogs.size).toBe(0);
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+
+    // 迟到的用户答案（close 后 stub 才 resolve）→ reply 已 settled，幂等不双写
+    dialogs[0]!.resolve({
+      behavior: 'completed',
+      result: { answers: [{ answer: '方案A' }] },
+    });
+    await tick(50);
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(1);
+
+    // consume 不挂死收尾（对齐 L1676 close 收尾手法：race 超时兜底防回归挂死）
+    closeQueue();
+    await Promise.race([
+      consumeP,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error('consume hung after close during pending dialog')), 3000),
+      ),
+    ]);
+  });
+
+  it('挂起中子进程 exit → _rejectAllPending 汇点兜底 cancelled:true，同样幂等不双写', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, dialogs } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-abort-2',
+      method: 'input',
+      title: '提供关键词',
+    });
+    await tick();
+    expect(handle.pendingDialogs.size).toBe(1);
+
+    // pi 进程崩溃退出：finalizeWithError → _rejectAllPending → _cancelAllPendingDialogs
+    child.stderr.push(Buffer.from('pi crashed: OOM', 'utf8'));
+    await tick();
+    child._emitExit(1);
+    await tick();
+
+    const responses = readStdinJson(child).filter((l) => l.type === 'extension_ui_response');
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-abort-2',
+      cancelled: true,
+    });
+    expect(handle.pendingDialogs.size).toBe(0);
+
+    // 迟到答案 + consume finally 的再次 _cancelAllPendingDialogs（空表）均不双写
+    dialogs[0]!.resolve({
+      behavior: 'completed',
+      result: { answers: [{ answer: '关键词' }] },
+    });
+    await tick(50);
+
+    closeQueue();
+    await Promise.race([
+      consumeP,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error('consume hung after exit during pending dialog')), 3000),
+      ),
+    ]);
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(1);
+  });
+});
+
+describe('pi 桥接态4：权限类/未知/归一化失败/未注入 → 零桥接红线（自动取消）', () => {
+  it('hook 已注入：权限类 method / 未知 method / 归一化失败 → 自动 cancelled:true 且 stub 零调用', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { hooks, requestUserDialog } = makeDialogHooks();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ sessionPermission: hooks }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length;
+
+    // 权限类 method（不在四方法白名单，D-002 红线：永不桥接平台 dialog）
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-perm-1',
+      method: 'request_permission',
+      title: '允许执行危险命令？',
+      options: ['允许', '拒绝'],
+    });
+    // 未知 method（未来版本新增 UI 方法，防御性同路）
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-unk-1',
+      method: 'mystery_dialog',
+      title: 'x',
+    });
+    // 归一化失败（select 无有效选项——schema 漂移 fail-closed）
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-bad-1',
+      method: 'select',
+      title: '选择',
+      options: [],
+    });
+    await tick();
+
+    // 红线断言：requestUserDialog 零调用，挂起表零登记
+    expect(requestUserDialog).not.toHaveBeenCalled();
+    expect(handle.pendingDialogs.size).toBe(0);
+    const responses = readStdinJson(child).filter((l) => l.type === 'extension_ui_response');
+    expect(responses).toHaveLength(3);
+    expect(responses[0]).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-perm-1',
+      cancelled: true,
+    });
+    expect(responses[1]).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-unk-1',
+      cancelled: true,
+    });
+    expect(responses[2]).toEqual({
+      type: 'extension_ui_response',
+      id: 'ui-bad-1',
+      cancelled: true,
+    });
+    // 子协议不进事件流
+    expect(events.slice(baseline)).toHaveLength(0);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('未注入 sessionPermission → 提问四方法维持既有自动取消（fail-closed 不回归）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    // makeOpts() 不带 sessionPermission——对齐线上未开 approvalReady 的注入路径
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb, events } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    const baseline = events.length;
+
+    emitEvent(child, {
+      type: 'extension_ui_request',
+      id: 'ui-noinj-1',
+      method: 'select',
+      title: '选择执行方案',
+      options: ['方案A', '方案B'],
+    });
+    await tick();
+
+    expect(handle.pendingDialogs.size).toBe(0);
+    expect(
+      readStdinJson(child).filter((l) => l.type === 'extension_ui_response'),
+    ).toHaveLength(1);
+    expect(
+      readStdinJson(child).find((l) => l.type === 'extension_ui_response'),
+    ).toEqual({ type: 'extension_ui_response', id: 'ui-noinj-1', cancelled: true });
+    expect(events.slice(baseline)).toHaveLength(0);
 
     closeQueue();
     await consumeP;

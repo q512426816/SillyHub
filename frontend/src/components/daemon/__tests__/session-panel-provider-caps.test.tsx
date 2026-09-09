@@ -298,6 +298,19 @@ describe("ProviderCaps 表值（两态对照的前置事实，task-02 镜像）"
     expect(getProviderCaps("").multimodal).toBe(false);
     expect(getProviderCaps("").subagent).toBe(false);
   });
+
+  // 2026-09-09-askuser-pi-cursor task-12（FR-06）：dialog string 枚举键两态对照
+  // ——native 走平台 dialog 管道（渲染 AskUserDialogCard）、marker 走纯前端
+  // 标记协议（AskUserMarkerCard，不经后端管道）；未知 provider 回退 'none'
+  //（R-09）。pi permission_dialog 同波随 Wave A 桥接翻真。
+  it("dialog 键两态对照：pi=native / cursor=marker；claude/codex=native；未知回退 none；pi permission_dialog=true", () => {
+    expect(getProviderCaps("pi").dialog).toBe("native");
+    expect(getProviderCaps("cursor").dialog).toBe("marker");
+    expect(getProviderCaps("claude").dialog).toBe("native");
+    expect(getProviderCaps("codex").dialog).toBe("native");
+    expect(getProviderCaps("").dialog).toBe("none");
+    expect(getProviderCaps("pi").permission_dialog).toBe(true);
+  });
 });
 
 /* ───────── 1. dialog 模式（provider state 信息源） ───────── */

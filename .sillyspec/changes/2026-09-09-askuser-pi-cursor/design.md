@@ -117,6 +117,9 @@ editor   → 同 input（大文本；占位选项 + 自定义输入）
 | 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 聚合成员影子会话 pending 原生提问 + 群消息行 marker 卡渲染；先到先得关闭态；成员来源标注 |
 | 新增 | NEW:frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | 聚合卡渲染/推荐条/已被回答态/授权放开后成员可答用例 |
 | 新增 | NEW:frontend/src/lib/__tests__/askuser-marker.test.ts | 解析正反例（多形态/非法 JSON/超长/非尾部/语言标注变体） |
+| 修改 | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | 连带适配（task-12，CLAUDE 规则 8 惯例）：caps 表值全对象断言补 dialog 键（8 键→9 键），两处 |
+| 修改 | frontend/src/lib/daemon/session-sse.ts | 连带接线（task-11）：parseSessionPermissionEvent resolved 分支透传 answered_by_actual_user（task-09 契约字段前端出口，task-10 遗留缺口闭合） |
+| 修改 | frontend/src/lib/daemon/sessions.ts | 连带接线（task-11）：SessionPermissionResolved 接口增可选 answered_by_actual_user?: string（session-sse 返回类型锚定） |
 
 后端表结构零变更（dialog_kind 无白名单：protocol.py:250 自由 str、model.py:334 String(64)——R-07 已关闭；新值 pi_extension_ui 16 字符 < 64）。
 
