@@ -18,3 +18,4 @@ created_at: 2026-09-05 00:02:21
 - [x] task-09: 类型同步——pnpm gen:types（api-types.ts + openapi.json，先验 node_modules 健康）
 - [ ] task-10: 前端测试——面板三页签/折叠摘要/空态用例 + useSessionTasks 用例 + session-panel 既有测试全绿回归
 - [x] ql-20260907-001-e373 修复任务执行面板轮次历史懒加载——恢复挂载即取数，session-panel-connection 看门狗测试改为增量计数断言
+- [x] ql-20260909-003-8a54 会话右栏收纳：TaskExecutionPanel 空数据不再常驻 0 计数折叠条（FR-01 决策演进——全零即隐藏返回 null，对齐 AgentLogCard 空态先例）
