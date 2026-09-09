@@ -193,6 +193,12 @@ export interface AskUserDialogCardProps {
    * undefined = 现状开放态，渲染零变化（单聊回归无影响）。
    */
   answered?: AskUserDialogAnswered;
+  /**
+   * ql-20260910-004：提交撞「已被他人回答」409 的回调（先到先得第二答题端）。
+   * answeredByUserId=后端 details.answered_by（user_id 字符串，可能 null）——
+   * 人名解析归父组件（群成员映射）；卡片同时本地翻已答关闭态（降级不带名）。
+   */
+  onAlreadyResolved?: (requestId: string, answeredByUserId: string | null) => void;
 }
 
 export function AskUserDialogCard({
@@ -201,6 +207,7 @@ export function AskUserDialogCard({
   minimized,
   onMinimize,
   answered,
+  onAlreadyResolved,
 }: AskUserDialogCardProps) {
   const questions = useMemo(
     () => parseQuestions(request.dialog_payload),
@@ -215,6 +222,9 @@ export function AskUserDialogCard({
   const [states, setStates] = useState<Record<number, QuestionState>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ql-20260910-004：409 已被他人回答时的本地关闭态（父组件 answered prop 带
+  // 人名重渲染后优先生效——answerInfo 合并取 prop 优先）。
+  const [alreadyAnswered, setAlreadyAnswered] = useState<AskUserDialogAnswered | null>(null);
 
   const getQState = (idx: number): QuestionState => states[idx] ?? emptyState();
 
@@ -298,6 +308,21 @@ export function AskUserDialogCard({
       // 成功送达 backend；permission_resolved SSE 到达后父组件移除本卡。
       onResolved?.(request.request_id, "allow");
     } catch (err) {
+      // ql-20260910-004：409 已被他人回答（先到先得第二答题端）——不是错误：
+      // 本地翻已答关闭态 + 回调父组件解析人名（details.answered_by），不再
+      // 直出后端英文报错文案。
+      if (
+        err instanceof ApiError &&
+        err.code === "HTTP_409_DAEMON_DIALOG_ALREADY_RESOLVED"
+      ) {
+        const details = (err.details ?? {}) as { answered_by?: unknown };
+        const answeredBy =
+          typeof details.answered_by === "string" ? details.answered_by : null;
+        setAlreadyAnswered({ answeredByName: null });
+        onAlreadyResolved?.(request.request_id, answeredBy);
+        setSubmitting(false);
+        return;
+      }
       const msg =
         err instanceof ApiError ? err.message : "提交失败，请重试";
       setError(msg);
@@ -350,10 +375,11 @@ export function AskUserDialogCard({
   // 已答条，无选项 / 输入 / 提交交互；答题人名缺失时降级不带名）。
   // 置入时机（父组件，task-11）：permission_resolved SSE（answered_by_actual_user）
   // / 重拉见 409 已答 / dialogs_history 恢复。提交协议零变化（本分支无交互入口）。
-  if (answered) {
+  const answerInfo = answered ?? alreadyAnswered;
+  if (answerInfo) {
     const answeredName =
-      typeof answered.answeredByName === "string"
-        ? answered.answeredByName.trim()
+      typeof answerInfo.answeredByName === "string"
+        ? answerInfo.answeredByName.trim()
         : "";
     return (
       <article

@@ -1,0 +1,51 @@
+# verify-integration.log — integration-critical 真实栈验证运行时证据
+# 时间：2026-09-10 03:29 ~ 03:37（本地）；环境：docker postgres 独立库 verify_crws + uvicorn 127.0.0.1:18000 + daemon（worktree 构建，隔离 SILLYHUB_DAEMON_DIR=/tmp/crws-daemon）
+# exit: 0（全部验证完成，证据矩阵 6/6 通过；验证后环境已清理）
+
+[backend] INFO: Uvicorn running on http://127.0.0.1:18000 — Application startup complete.
+[backend] {"status":"ok","db":"ok","redis":"ok","version":"0.1.0"} (GET /api/health)
+[daemon ] [daemon.sillyspec_status_roots_restored] count=1   ← 工作区映射恢复（真实恢复路径）
+[daemon ] [daemon.daemon_registered] daemon_local_id=5d21c81a-4761-4bc7-8756-5052671b564d providers=[claude,codex,opencode,openclaw,pi,cursor,kimi]
+[backend] {"daemon_id": "5d21c81a-4761-4bc7-8756-5052671b564d", "total_connected": 1, "event": "ws_daemon_connected"}
+[daemon ] 机器视图 status=online（GET /api/daemon/machines）
+
+预置状态：sillyspec-status-roots.json 映射 11111111-…→/tmp/crws-root；sillyspec-status-root.json 单槽位=Temp（投毒态）。
+
+=== ① GET compare?workspace_id=11111111-…（映射命中 + 单槽位投毒 Temp）===
+HTTP 200
+{"change":"quick-verify01","kind":"spec-tree","conflict_created_at":"2026-09-09T19:00:00+00:00",
+ "files":[{"path":"changes/quick-verify01/design.md","status":"local_only",
+ "local_mtime":"2026-09-09T19:29:20.472Z","local_missing":false,"local_truncated":false,"binary":false}]}
+→ daemon 在映射根真实读到冲突记录与文件（local_mtime 有值/local_missing=false）；
+  单槽位为 Temp 不影响新路径。FR-02 核心命题成立。
+
+=== ② GET compare?workspace_id=99999999-…（成员但映射未命中）===
+HTTP 502
+{"code":"HTTP_502_DAEMON_RPC_REMOTE","message":"该工作区尚未被本机认领，请先在该工作区发起一次会话后重试。",
+ "details":{"method":"sillyspec_conflict_snapshot","daemon_code":"workspace_root_unknown",
+ "daemon_message":"该工作区尚未被本机会话认领，请先在该工作区发起一次会话"}}
+→ 未命中明确报错不回退单槽位（FR-02）；文案分叉真实生效（FR-06）。
+
+=== 附 GET compare?workspace_id=<非成员 ws> ===
+HTTP 403 {"code":"HTTP_403_PERMISSION_DENIED","message":"仅工作区成员可查看该冲突对比。"}
+→ 成员校验真实生效（FR-05）。
+
+=== ③a POST resolve {workspace_id=99999999-…}（未命中）===
+{"sent":true} HTTP 200 →（20s 后心跳回传，GET /api/daemon/machines 嵌套）
+{"action":"resolve","change":"quick-verify01","strategy":"keep_local","state":"failed",
+ "exit_code":null,"error":"该工作区尚未被本机会话认领，无法执行 sillyspec 命令",
+ "executed_at":"2026-09-09T19:36:33.900Z"}
+→ 裁决臂未命中记 failed 不 spawn（无 CLI 执行记录），fire-and-forget 心跳回传链完整。
+
+=== ③b POST resolve（缺 workspace_id）===
+HTTP 422 {"errors":[{"type":"missing","loc":["body","workspace_id"],"msg":"Field required"}]}
+→ 请求体必填契约真实生效（FR-01）。
+
+=== ③c POST resolve {workspace_id=11111111-…}（命中）===
+{"sent":true} HTTP 200 → 心跳回传
+{"action":"resolve","change":"quick-verify01","strategy":"keep_local","state":"success","exit_code":0}
+→ sillyspec CLI 真实 spawn 于映射根 /tmp/crws-root（Temp 下无 .sillyspec 结构必失败；
+  exit 0 恰证明 cwd=映射根正确），全链 WS 下发→daemon 执行→心跳回传打通。
+
+清理：backend 停止（PID killed）、DROP DATABASE verify_crws、隔离目录删除；生产栈（容器
+backend/运行中 daemon）全程零接触。exit=0。

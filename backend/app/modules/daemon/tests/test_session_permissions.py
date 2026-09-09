@@ -1541,3 +1541,37 @@ class TestShadowDialogAnswerAuthorization:
         perm, _ = self._make_perm(db_session)
         with pytest.raises(DaemonSessionNotFound):
             await perm.list_pending_dialogs(other_uid, sess.id)
+
+    @pytest.mark.asyncio
+    async def test_answered_by_passthrough_on_read_and_409(self, db_session, mocked_redis) -> None:
+        """ql-20260910-004：实际答题人双通道透出——①历史读（含已答行）带
+        answered_by；②第二人再答的 409 details 携带 answered_by（前端即时
+        翻关闭态渲染人名的数据源）。"""
+        seed = await _seed_group_shadow(db_session)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-by-1")
+        perm, _ = self._make_perm(db_session)
+
+        await perm.respond_permission(
+            seed.member_uid,
+            seed.shadow_id,
+            "sd-by-1",
+            "allow",
+            dialog_result={"answers": [{"question": "q", "answer": "A"}]},
+        )
+
+        from app.modules.daemon.permission_service import DaemonDialogAlreadyResolved
+
+        with pytest.raises(DaemonDialogAlreadyResolved) as exc_info:
+            await perm.respond_permission(
+                seed.owner_uid,
+                seed.shadow_id,
+                "sd-by-1",
+                "allow",
+                dialog_result={"answers": [{"question": "q", "answer": "B"}]},
+            )
+        assert exc_info.value.details["answered_by"] == str(seed.member_uid)
+
+        history = await perm.list_dialog_history(seed.owner_uid, seed.shadow_id)
+        row = next(d for d in history if d.request_id == "sd-by-1")
+        assert row.status == "answered"
+        assert row.answered_by == seed.member_uid

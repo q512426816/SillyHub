@@ -2,10 +2,10 @@
 
 ## 结论 [层：人工判断]
 
-结论枚举：`PASS WITH NOTES`
-理由：FR-01~06 全部落地且三端测试全绿、静态检查全过、探针全过；唯一注记为 AC-5
-真实栈冒烟属部署后动作（本机运行栈为旧版代码），以契约级三重证据替代并列入
-发版 checklist（见集成验证回执）。
+结论枚举：`PASS`
+理由：FR-01~06 全部落地且三端测试全绿、静态检查全过、探针全过；integration-critical
+真实栈两态验证完成（独立 verify_crws 库 + 独立 18000 端口 + 隔离 daemon 目录，
+验证后已清理，生产栈零影响）——见集成验证回执。
 
 ## 证据账（cannot_verify 任务） [层：人工判断——CLI 核验]
 
@@ -13,18 +13,15 @@
 
 ## 集成验证回执 [层：自述声明——CLI 一致性校验]
 
-- claim: integration-critical 项以契约级证据覆盖（真实栈部署后冒烟列入发版 checklist——本机生产栈跑旧版代码，重启部署非 verify 范围） | command: ① cd backend && uv run pytest app/modules/daemon/tests/ -q --no-cov ② cd frontend && pnpm gen:types && git diff --exit-code 检查（已提交后）③ cd sillyhub-daemon && pnpm vitest run tests/sillyspec-conflict-snapshot.test.ts tests/sillyspec-platform-command.test.ts tests/daemon-status-root-persistence.test.ts | exit: 0 | log: 会话记录（backend daemon 模块 1988 passed / daemon 156 passed / gen:types 三端产物一致）
+- claim: integration-critical 真实集成验证（跨进程联调）——独立库 verify_crws（docker postgres）+ worktree backend（uvicorn :18000）+ 真实 daemon 进程（worktree 构建、隔离 SILLYHUB_DAEMON_DIR、X-API-Key 认证、WS 真实连接 ws_daemon_connected），预写工作区映射与投毒单槽位，6 项证据全过，验证后清理（backend 停/库删/目录清，生产栈零影响） | command: ① uvicorn app.main:app --port 18000（DATABASE_URL=verify_crws） ② node dist/cli.js start --server http://127.0.0.1:18000 --api-key shk_live_…（隔离 env） ③ curl GET compare（命中/未命中/非成员）④ curl POST resolve（缺 ws/未命中/命中） | exit: 0 | log: .sillyspec/changes/2026-09-09-conflict-root-workspace-scoping/verify-integration.log
 
-契约级证据三重锚定：① OpenAPI 生成的 `MachineSillySpecResolveRequest` 三端同源
-（frontend/src/lib/api-types.ts + sillyhub-daemon/src/api-types.ts + backend/openapi.json
-均含必填 workspace_id）；② backend pytest 断言 RPC params 含 workspace_id +
-resolve 422/403/payload 透传（test_sillyspec_compare.py / test_sillyspec_platform_commands.py）；
-③ daemon 单测锚定两态语义（映射命中用映射根、未命中 workspace_root_unknown
-不回退、单槽位投毒不影响新路径——conflict-snapshot.test.ts 3 用例 +
-platform-command.test.ts 3 用例 + persistence.test.ts 2 用例）。
-真实栈冒烟两态验证（起 daemon+backend：命中出快照/未命中报 workspace_root_unknown/
-单槽位投毒后不受影响）列入部署后 checklist，与根因文档「根治发版并验证后移
-finished」约定一致。
+真实栈证据矩阵：
+① **映射命中+单槽位投毒（Temp）**：GET compare?workspace_id=1111… → HTTP 200，返回 change=quick-verify01、files[0]（path=changes/quick-verify01/design.md、local_mtime 有值、local_missing=false）——daemon 在映射根真实读到记录与文件，单槽位被投毒为 Temp 也不受影响（FR-02 核心命题）。
+② **成员但映射未命中**：GET compare?workspace_id=9999… → HTTP 502，daemon_code=workspace_root_unknown，message=「该工作区尚未被本机认领，请先在该工作区发起一次会话后重试。」（FR-02 错误语义 + FR-06 文案分叉真实栈生效）。
+③a **resolve 未命中 ws**：POST resolve（workspace_id=9999…）→ sent:true；心跳回传 sillyspec_command_result={state:failed, error:"该工作区尚未被本机会话认领，无法执行 sillyspec 命令"}（FR-02 裁决臂 + fire-and-forget 心跳回传链）。
+③b **resolve 缺 workspace_id**：→ HTTP 422 validation_error（body.workspace_id Field required）（FR-01 契约必填）。
+③c **resolve 命中 ws**：POST resolve（workspace_id=1111…）→ sent:true；心跳回传 state:success/exit_code:0——sillyspec CLI 真实 spawn 于映射根（Temp 下无 .sillyspec 结构必失败，success 恰证明 cwd=映射根正确）。
+另：非成员 ws 请求 → 403「仅工作区成员可查看该冲突对比。」（FR-05 成员校验真实生效，附带验证）。
 
 ## 任务完成度 [层：人工判断]
 
@@ -66,7 +63,7 @@ finished」约定一致。
 - ✅ task-02: 同 task-01 12 个测试文件
 - ✅ task-05: 同 task-03 22 个测试文件
 - ✅ task-06: 模块目录（frontend/src/lib、backend、frontend/src/components/changes）找到 76 个测试文件
-- 集成盲区标注（语义）：AC-5 真实栈两态验证——契约级证据已覆盖（见集成验证回执），真实栈冒烟留部署后 checklist ⚠️→已注记
+- 集成盲区标注（语义）：已补真实栈验证（见集成验证回执 ①②③a/b/c + 附带 403），AC-5 全部覆盖，无盲区
 
 #### 探针 4：决策追踪覆盖
 D-001@v1 → FR-01/02/03/04/05（+可选 FR-06）→ task-01/02/03/04/06（+05）→ 证据回指

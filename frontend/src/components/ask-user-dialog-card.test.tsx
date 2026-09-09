@@ -706,3 +706,69 @@ describe("AskUserDialogCard", () => {
     expect(screen.queryByText("B2")).not.toBeInTheDocument();
   });
 });
+
+  // ── ql-20260910-004：409 已被他人回答 → 即时关闭态 + 人名回调（非错误） ──
+  it("提交撞 409 已被他人回答：翻已答关闭态、回调 onAlreadyResolved 携 answered_by、不直出英文报错", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "HTTP_409_DAEMON_DIALOG_ALREADY_RESOLVED",
+          message: "Dialog request 'x' was already answered.",
+          request_id: "req-1",
+          details: { session_id: "s-1", request_id: "req-1", answered_by: "u-member-1" },
+        }),
+        { status: 409 },
+      ),
+    );
+
+    const onResolved = vi.fn();
+    const onAlreadyResolved = vi.fn();
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)}
+        onResolved={onResolved}
+        onAlreadyResolved={onAlreadyResolved}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+
+    await waitFor(() => {
+      expect(onAlreadyResolved).toHaveBeenCalledWith("req-1", "u-member-1");
+    });
+    expect(onResolved).not.toHaveBeenCalled();
+    // 立即翻已答关闭态（本地兜底，无英文名）。
+    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    // 不直出后端英文报错。
+    expect(screen.queryByText(/was already answered/)).toBeNull();
+    fetchMock.mockRestore();
+  });
+
+  it("409 details 缺 answered_by：回调携 null，关闭态降级不带名", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "HTTP_409_DAEMON_DIALOG_ALREADY_RESOLVED",
+          message: "already answered",
+          request_id: "req-1",
+          details: { session_id: "s-1", request_id: "req-1" },
+        }),
+        { status: 409 },
+      ),
+    );
+    const onAlreadyResolved = vi.fn();
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)}
+        onAlreadyResolved={onAlreadyResolved}
+      />,
+    );
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+    await waitFor(() => {
+      expect(onAlreadyResolved).toHaveBeenCalledWith("req-1", null);
+    });
+    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    fetchMock.mockRestore();
+  });

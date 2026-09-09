@@ -742,3 +742,41 @@ describe("collectAskUserMarkers（纯函数）", () => {
   });
 });
 
+
+  // ── ql-20260910-004：提交撞 409 已被他人回答 → 即时关闭态带他答成员人名 ──
+  it("他端先答后本端提交撞 409：立即翻「林一 已回答」关闭态（answered_by 经成员表映射人名）", async () => {
+    harness.logsJson = makePlainReplayLogs();
+    mocks.fetchPendingDialogs.mockImplementation(async (sid: string) =>
+      sid === "sh-1" ? [makePendingDialog()] : [],
+    );
+    renderPanel();
+    await waitForPanelReady();
+
+    await waitFor(() => {
+      expect(pendingCard("req-1")).toBeTruthy();
+    });
+
+    // 后端 409：已被他人回答（details.answered_by=另一用户成员 u-lin）。
+    const { ApiError } = await import("@/lib/api");
+    mocks.respondSessionPermission.mockRejectedValue(
+      new ApiError(409, {
+        code: "HTTP_409_DAEMON_DIALOG_ALREADY_RESOLVED",
+        message: "Dialog request 'req-1' was already answered.",
+        request_id: "req-9",
+        details: { session_id: "sh-1", request_id: "req-1", answered_by: "u-lin" },
+      }),
+    );
+
+    fireEvent.click(screen.getByText("v1.3.0-rc2"));
+    fireEvent.click(screen.getByTitle("提交回答"));
+
+    // 即时翻关闭态：不直出英文报错，人名=成员表映射（林一）。
+    await waitFor(() => {
+      expect(
+        pendingCard("req-1").querySelector("article[data-answered='true']"),
+      ).toBeTruthy();
+    });
+    expect(pendingCard("req-1").textContent).toContain("林一");
+    expect(pendingCard("req-1").textContent).toContain("已回答，本题已关闭");
+    expect(screen.queryByText(/was already answered/)).toBeNull();
+  });

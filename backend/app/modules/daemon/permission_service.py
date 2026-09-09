@@ -203,6 +203,9 @@ class SessionDialogRead:
     answer: dict | None
     created_at: datetime
     answered_at: datetime | None
+    # ql-20260910-004：实际答题人（task-09 起记录；读路径透出供前端「已被 ××
+    # 回答」关闭态渲染人名——SSE 实时通道之外的恢复/第二人视角数据源）。
+    answered_by: uuid.UUID | None = None
 
     @classmethod
     def from_model(cls, row: SessionDialogRequest) -> "SessionDialogRead":
@@ -218,6 +221,7 @@ class SessionDialogRead:
             answer=row.answer,
             created_at=row.created_at,
             answered_at=row.answered_at,
+            answered_by=getattr(row, "answered_by", None),
         )
 
 
@@ -243,6 +247,8 @@ class WorkspaceDialogRead:
     answer: dict | None
     created_at: datetime
     answered_at: datetime | None
+    # ql-20260910-004：与 SessionDialogRead 同步（from_model 透传）。
+    answered_by: uuid.UUID | None = None
     # ── D-002/D-003 来源上下文字段（全可选，可空）──
     workspace_id: uuid.UUID | None = None
     workspace_name: str | None = None
@@ -272,6 +278,7 @@ class WorkspaceDialogRead:
             answer=row.answer,
             created_at=row.created_at,
             answered_at=row.answered_at,
+            answered_by=getattr(row, "answered_by", None),
             workspace_id=workspace_id,
             workspace_name=workspace_name,
             session_type=session_type,
@@ -1232,7 +1239,15 @@ class DaemonPermissionService:
         if dialog_row.status == "answered":
             raise DaemonDialogAlreadyResolved(
                 f"Dialog request '{request_id}' was already answered.",
-                details={"session_id": str(session_id), "request_id": request_id},
+                details={
+                    "session_id": str(session_id),
+                    "request_id": request_id,
+                    # ql-20260910-004：携带实际答题人——第二答题端 409 即时翻
+                    # 已答关闭态并渲染人名（群聊先到先得 UX 收口）。
+                    "answered_by": (
+                        str(dialog_row.answered_by) if dialog_row.answered_by else None
+                    ),
+                },
             )
         if dialog_row.status == "cancelled":
             raise DaemonDialogNotFound(

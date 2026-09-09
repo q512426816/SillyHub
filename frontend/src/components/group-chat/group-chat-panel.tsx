@@ -2023,6 +2023,24 @@ export function GroupChatPanel({
     },
     [selfDisplayName, refetchMemberDialogs],
   );
+  /** ql-20260910-004：提交撞 409 已被他人回答——立即翻关闭态；answered_by
+   *  （后端 details 透出）经成员表映射人名，缺失降级不带名（他答人名缺口收口：
+   *  原先需等 ≤10s 轮询且永远无人名）。 */
+  const handleAskUserDialogAlreadyResolved = useCallback(
+    (requestId: string, answeredByUserId: string | null) => {
+      const answeredByName = answeredByUserId
+        ? (members.find((m) => m.user_id === answeredByUserId)?.display_name ??
+          null)
+        : null;
+      setResolvedDialogs((prev) =>
+        prev[requestId]
+          ? prev
+          : { ...prev, [requestId]: { answeredByName } },
+      );
+      void refetchMemberDialogs();
+    },
+    [members, refetchMemberDialogs],
+  );
   /** 渲染卡列表 = 开放态（最新拉取）+ 关闭态（已答快照，含本端提交与他端先答）。 */
   const askUserDialogCards = useMemo(() => {
     const data = memberDialogsQ.data;
@@ -2488,6 +2506,7 @@ export function GroupChatPanel({
                     request={request}
                     answered={resolved}
                     onResolved={handleAskUserDialogResolved}
+                    onAlreadyResolved={handleAskUserDialogAlreadyResolved}
                   />
                 </div>
               </div>
