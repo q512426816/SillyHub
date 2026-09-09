@@ -22,7 +22,7 @@ created_at: 2026-08-18 01:45:00
   - change_key = `日期-slug-uuid6`（slug 取标题小写归一截 40 字符）。
   - 门禁：workspace 必须已扫描（last_scanned_at 非空，未扫描拒绝并引导先扫描）；lease 归属与 workspace 匹配校验。
 - **代写路径**（proxy.proxy_create_change，无 lease 分支）：
-  - daemon-client 架构下 backend 无可达文件系统，经 lease-polling 代写队列下发：校验 runtime（binding + workspace 默认 agent 现算、online + 心跳新鲜）→ 占坑 Change + 全部 ChangeDocument 行先 commit（钉住 changes/change_documents 双表唯一键，防与 reparse 并发撞键 500）→ 建 DaemonChangeWrite(pending) 行（files 用扁平 `changes/<key>/` 相对路径，无 .sillyspec 包裹层）→ 轮询回执（周期 ≤1s）。
+  - daemon-client 架构下 backend 无可达文件系统，经 lease-polling 代写队列下发：校验 runtime（binding + workspace 默认 agent 现算、online + 心跳新鲜）→ 占坑 Change + 全部 ChangeDocument 行先 commit（钉住 changes/change_documents 双表唯一键，防与 reparse 并发撞键 500）→ 建 DaemonChangeWrite(pending) 行（files 用扁平 `changes/<key>/` 相对路径，无 .sillyspec 包裹层）→ 等回执：Redis pubsub `change_write:{id}` 即时唤醒（daemon complete 端点 commit 后 publish）+ 2s 短会话 DB 兜底轮询（ql-20260909-014——原 0.5s×120 次请求 session refresh 长轮询把连接池槽占满 60s）。
   - 回执 done → 占坑行已就绪直接返回；failed / 60s 超时 → 独立 session 回滚占坑行（显式删 docs 兼容 SQLite FK 关闭场景）并抛 ChangeWriteError。
   - runtime 解析失败抛 `DaemonClientNoActiveSession`（结构化 code 供前端 toast）。
 
@@ -43,7 +43,7 @@ runtime 现算(online+心跳新鲜) → 占坑 Change+Documents 先 commit → D
 - 占坑-回滚顺序是并发正确性的关键：占坑行先 commit 钉唯一键，失败回滚须删 docs——勿改为单事务（daemon 回执是异步跨请求的）。
 - 文档文件名严格遵循 SpecPathResolver 约定（proposal.md/design.md/plan.md/tasks.md 等），勿自创文件名。
 - quick 类型 initial_stage=quick 是独立阶段语义，与 change 模块的 gate/面板判定耦合。
-- 代写等待超时（60s）与轮询周期（0.5s）是模块常量，调整需评估 daemon claim 窗口。
+- 代写等待超时（60s）与兜底轮询周期（2s，PROXY_RECEIPT_DB_CHECK_SECONDS）是模块常量；回执即时性靠 pubsub（publish best-effort，失败落 DB 兜底），调整需评估 daemon claim 窗口。
 
 ## 人工备注
 

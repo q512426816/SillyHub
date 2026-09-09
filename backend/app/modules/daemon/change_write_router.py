@@ -34,6 +34,10 @@ from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.auth.model import User
+
+# ql-20260909-014：回执事件发布（proxy 等待方 pubsub 唤醒）。无环——proxy 只
+# import daemon.model（表模型），不回引本 router。
+from app.modules.change_writer.proxy import publish_change_write_receipt
 from app.modules.daemon.model import DaemonChangeWrite
 from app.modules.daemon.schema import (
     ChangeWriteClaimResponse,
@@ -336,6 +340,10 @@ async def complete_change_write(
         cw.error = data.error or "change write failed"
     session.add(cw)
     await session.commit()
+
+    # ql-20260909-014：commit 后发布回执事件，proxy 等待方 pubsub 即时唤醒
+    # （publish best-effort 失败仅 warn——等待侧有 DB 兜底轮询）。
+    await publish_change_write_receipt(change_write_id, cw.status)
 
     log.info(
         "daemon_change_write_completed",

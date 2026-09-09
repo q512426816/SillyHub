@@ -22,6 +22,7 @@ workspace 绑定到远程 daemon 宿主，backend 无可达文件系统）：
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -30,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, WorkspaceNotFound
 from app.core.logging import get_logger
+from app.core.redis import get_redis
 from app.modules.change.model import Change, ChangeDocument
 from app.modules.change_writer.classifier import classify_change_type
 from app.modules.change_writer.markdown_builder import build_master_md
@@ -41,8 +43,36 @@ log = get_logger(__name__)
 
 # NFR-03：daemon 回执等待超时（秒）。超时后翻 failed 并抛 ChangeWriteError。
 PROXY_CHANGE_WRITE_TIMEOUT_SECONDS = 60
-# 轮询周期（秒）—— ≤1s，daemon claim/complete 在该窗口内完成。
-PROXY_POLL_INTERVAL_SECONDS = 0.5
+# ql-20260909-014：回执等待改 Redis pubsub 即时唤醒（daemon complete 端点 commit 后
+# publish change_write:{id}）；本常量为 pubsub 静默窗口的 DB 兜底轮询周期（秒）——
+# 兼顾 publish 丢失/Redis 故障（publish 是 best-effort）与请求级连接占用（短会话
+# 读、读完即还，不再 0.5s×120 次长轮询把请求 session 的连接槽占满 60s）。
+PROXY_RECEIPT_DB_CHECK_SECONDS = 2.0
+# pubsub get_message 单窗超时（秒）——与 DB 兜底周期同量级，消息到达即醒。
+PROXY_RECEIPT_PUBSUB_WINDOW_SECONDS = 2.0
+
+
+def change_write_receipt_channel(change_write_id: uuid.UUID) -> str:
+    """回执 pubsub 频道名（complete 端点发布 / proxy 等待订阅，单一来源）。"""
+    return f"change_write:{change_write_id}"
+
+
+async def publish_change_write_receipt(change_write_id: uuid.UUID, status: str) -> None:
+    """发布回执到达事件（complete 端点 commit 后调用；best-effort，失败仅 warn）。
+
+    publish 失败不阻断回执端点——proxy 侧有 DB 兜底轮询，最坏多等一个窗口。
+    """
+    try:
+        await get_redis().publish(
+            change_write_receipt_channel(change_write_id),
+            json.dumps({"event": "receipt", "status": status}),
+        )
+    except Exception as exc:
+        log.warning(
+            "change_write_receipt_publish_failed",
+            change_write_id=str(change_write_id),
+            error=str(exc),
+        )
 
 
 def _runtime_heartbeat_is_fresh(runtime: object) -> bool:
@@ -138,40 +168,89 @@ async def _await_change_write_receipt(
     session: AsyncSession,
     change_write_id: uuid.UUID,
 ) -> DaemonChangeWrite:
-    """轮询 DaemonChangeWrite.status，回执 done/failed 返回，超时抛 ChangeWriteError。
+    """等待 daemon 回执，终态（done/failed）返回，超时抛 ChangeWriteError。
+
+    ql-20260909-014：原实现 0.5s×120 次用请求注入的 session ``refresh`` 长轮询
+    ——每次 refresh 都在请求事务里，等待全程连接池槽被占最长 60s，并发创建变更
+    时空转等待可把池占满。改 Redis pubsub 即时唤醒（daemon complete 端点 commit
+    后 publish ``change_write:{id}``）+ 每 ``PROXY_RECEIPT_DB_CHECK_SECONDS`` 秒
+    短会话 DB 兜底检查（publish 丢失/Redis 故障时最坏多等一个窗口，连接读完即还）。
+    请求 session 在等待期间不再执行任何语句（不占连接槽）。
 
     超时 NFR-03 60s → 翻 ``status='failed'`` + ``error='timeout'`` + 抛
     ``ChangeWriteError``（调用方据 http_status 400 返前端）。
+
+    返回值经短会话读出（factory ``expire_on_commit=False``，detached 属性可读）。
     """
-    deadline = datetime.now(UTC).timestamp() + PROXY_CHANGE_WRITE_TIMEOUT_SECONDS
-    while True:
-        cw = await session.get(DaemonChangeWrite, change_write_id)
-        if cw is None:
-            # 行不应消失（FK + 无级联删除路径），防御性抛错。
-            raise ChangeWriteError(
-                "变更写入任务记录丢失，请重新创建变更。",
-                details={"change_write_id": str(change_write_id)},
-            )
-        # SessionFactory uses expire_on_commit=False. daemon complete runs in a
-        # different request/session, so force a DB refresh instead of reading the
-        # identity-map copy forever.
-        await session.refresh(cw)
-        if cw.status in ("done", "failed"):
-            return cw
-        if datetime.now(UTC).timestamp() >= deadline:
+    from app.core.db import get_session_factory
+
+    channel = change_write_receipt_channel(change_write_id)
+    pubsub = None
+    try:
+        pubsub = get_redis().pubsub()
+        await pubsub.subscribe(channel)
+    except Exception as exc:
+        log.warning(
+            "change_write_receipt_subscribe_failed",
+            change_write_id=str(change_write_id),
+            error=str(exc),
+        )
+        pubsub = None
+
+    async def _read_cw() -> DaemonChangeWrite | None:
+        async with get_session_factory()() as db:
+            return await db.get(DaemonChangeWrite, change_write_id)
+
+    async def _flip_timeout_failed() -> None:
+        async with get_session_factory()() as db:
+            cw = await db.get(DaemonChangeWrite, change_write_id)
+            if cw is None or cw.status in ("done", "failed"):
+                return
             cw.status = "failed"
             cw.error = "proxy await timeout"
             cw.completed_at = datetime.now(UTC)
-            session.add(cw)
-            await session.commit()
-            raise ChangeWriteError(
-                "daemon 未在超时阈值内回执 change-write。",
-                details={
-                    "change_write_id": str(change_write_id),
-                    "timeout_seconds": PROXY_CHANGE_WRITE_TIMEOUT_SECONDS,
-                },
-            )
-        await asyncio.sleep(PROXY_POLL_INTERVAL_SECONDS)
+            db.add(cw)
+            await db.commit()
+
+    try:
+        deadline = datetime.now(UTC).timestamp() + PROXY_CHANGE_WRITE_TIMEOUT_SECONDS
+        while True:
+            cw = await _read_cw()
+            if cw is None:
+                # 行不应消失（FK + 无级联删除路径），防御性抛错。
+                raise ChangeWriteError(
+                    "变更写入任务记录丢失，请重新创建变更。",
+                    details={"change_write_id": str(change_write_id)},
+                )
+            if cw.status in ("done", "failed"):
+                return cw
+            if datetime.now(UTC).timestamp() >= deadline:
+                await _flip_timeout_failed()
+                raise ChangeWriteError(
+                    "daemon 未在超时阈值内回执 change-write。",
+                    details={
+                        "change_write_id": str(change_write_id),
+                        "timeout_seconds": PROXY_CHANGE_WRITE_TIMEOUT_SECONDS,
+                    },
+                )
+            # pubsub 等待窗（无 pubsub 时退化为纯 sleep）——窗口即兜底轮询周期。
+            if pubsub is not None:
+                try:
+                    await pubsub.get_message(
+                        timeout=PROXY_RECEIPT_PUBSUB_WINDOW_SECONDS,
+                        ignore_subscribe_messages=True,
+                    )
+                except Exception:
+                    pubsub = None
+                    await asyncio.sleep(PROXY_RECEIPT_DB_CHECK_SECONDS)
+            else:
+                await asyncio.sleep(PROXY_RECEIPT_DB_CHECK_SECONDS)
+    finally:
+        if pubsub is not None:
+            try:
+                await pubsub.aclose()
+            except Exception:
+                pass
 
 
 async def _rollback_preempted_change(change_id: uuid.UUID) -> None:
