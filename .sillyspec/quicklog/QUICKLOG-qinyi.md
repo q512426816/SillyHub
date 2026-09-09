@@ -56,3 +56,19 @@
 根因：pi 每条 message.usage 是单次调用量（jsonl ground truth 实证），turn_end 只定格最后一次调用，driver replace 语义丢轮内工具循环中间调用——实测全会话只记到真实 in 5.7%/out 8.5%/cacheRead 1.9%
 方案：pi-rpc-driver.ts：handleLine 对 message_end assistant message.usage 逐条累加（turnUsageSum，轮 start 重置）；turn_end usage 事件以累加和为准（防定格值双计）并注入事件本体供 ledger/live；累加为空退回定格值零回归
 结果：vitest pi 套件 79 passed（新增 2 条：多调用累加+注入、无 usage 回退）；tsc 0 错误；E2E 实机对账随后执行
+
+## ql-20260910-001-4560 | 2026-09-10 03:27:52 | 影子会话 pending 提问读侧放开——群成员可见成员提问卡
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/permission_service.py（list_pending_dialogs 读侧影子分支（复用答题侧助手））
+- backend/app/modules/daemon/tests/test_session_permissions.py（+3 读侧用例）
+需求：影子会话 pending 提问读侧放开——群成员可见成员提问卡
+根因：task-09 只放开答题端点，读侧 list_pending_dialogs 仍 owner/admin-only——非群主能答却看不见卡（askuser-pi-cursor 已知限制①）
+方案：list_pending_dialogs ownership 404 时复用 _resolve_shadow_member_answer_session 影子成员分支（条件与答题侧同源），命中放行读否则 404；单聊/群会话语义零变化
+结果：test_session_permissions 40 passed（+3：成员拉取成功/外人+移除成员 404/单聊非属主仍 404）；ruff/mypy/格式全净；未部署
+
+## ql-20260910-002-dd6d | 2026-09-10 03:29:08 | 24h 审查风险修复第三批：群聊 pending 卡误关哨兵/pending_cache epoch 回填复用/sessions 门户 includeSessions 补齐/日志去重移出 updater/sillyspec 多目标失败掩蔽/…
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/group-chat/group-chat-panel.tsx, frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx, backend/app/modules/change/pending_cache.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_pending_cache.py, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/lib/use-agent-run-stream.ts, sillyhub-daemon/src/sillyspec-manager.ts

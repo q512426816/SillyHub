@@ -24,3 +24,5 @@
 2. **task-08（daemon prompt 注入）挂起**，补测条件：Cursor 免费额度恢复（预计次日窗口）后重跑脚本（%TEMP%/askuser-spike.mjs，path.join 直连形态已验证可用）；补测 ≥8/10 → task-08 执行 + cursor caps 保持 marker；<8/10 → task-08 取消 + 三端 caps cursor 改 none（task-12 已预留联动锚点）。
 3. task-06（解析器）/task-07（marker 卡）/task-11（群聊 marker 分支）不受影响照常交付（协议资产）；真机冒烟 task-13 的 cursor 场景同样受额度约束，届时视额度状态执行或记录受阻。
 4. 环境事实沉淀：cursor-agent 免费档 Agent 用量约 2 次/窗口即触顶——**生产使用 cursor 会话本身就会频繁撞墙**，这是比标记遵守率更先暴露的现实约束（用户可考虑 Pro 或知悉现状）。
+
+> **补测第 2 轮（2026-09-10 01:30）**：额度仍未恢复（10/10 全部 ActionRequiredError usage limit）——窗口疑为每日制。task-08 继续挂起，下一补测窗口建议次日。
