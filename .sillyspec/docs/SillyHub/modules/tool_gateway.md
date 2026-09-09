@@ -65,6 +65,7 @@ result = _dispatch(tool_type, params, lease_root, allowed_paths, limits, isolate
 - `validate_path`：路径必须在 allowed_paths 内并限 lease_root，防遍历
 
 ## 注意事项
+- http_get 每调用新建 httpx.AsyncClient 是 SSRF 加固有意的（2026-09-09 性能排查批4 评估后保留）：连接池会把连接钉在校验时的旧解析 IP，逐请求 assert_public_url 的 DNS 重绑定防护被削弱；同理由适用于 mcp_gateway webhook 投递。其余每调用新建点（agent finalizer/delegation 的 GLM planner、litellm_client 管理面）是低频路径（延迟被秒级 LLM 推理支配）；高频出站热路径 llm-proxy 透传已是进程级共享单例（daemon/router _LLM_PROXY_CLIENT）
 - **策略 CRUD 与执行链路未接线**：router 的 execute 调
   `service.execute(..., policy=None)` → 恒用 `default_policy()`
   （全工具允许、无黑名单、30s/64000 上限）；ToolPolicy 表有完整 CRUD 但没有

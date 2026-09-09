@@ -77,6 +77,7 @@ submitWithRetry(退避) → 用尽 → FileOutbox 暂存 → 心跳健康 → dr
 ```
 
 ## 注意事项
+- 群未读计数 get_group_unread_counts 的无界 count（2026-09-09 性能排查批4 评估后保留）：真有界方案 LATERAL+LIMIT 1 是 PG-only（SQLite 不支持，跨方言窗口函数版 O(U log U) 反劣于纯 count 的索引范围扫 O(U)）；现实规模下带阈值过滤的 count 走索引范围扫描毫秒级，未读规模实际可感知时再考虑 PG-only 分支
 - lease 与 session 是两套执行模型：lease 无状态批处理（task_id 关联），session 有状态长交互（current_run、turn 冲突错误）；interactive lease 永不过期是不变量。
 - daemon 重启后会话收敛是关键不变量：backend recover + Node 端恢复 + confirm-reconnected/mark-recovery-failed 三方配合，勿单侧改动握手顺序。
 - llm-proxy 白名单/转发行为与 daemon 侧 credential-injector 的注入约定是双侧契约；master key 永不出 hub 进程。
