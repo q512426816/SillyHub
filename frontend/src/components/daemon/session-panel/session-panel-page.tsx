@@ -2822,45 +2822,54 @@ export function SessionPanelPage({
             </span>
           )}
           {/* 会话 id 短码：点击复制完整 id（排障/引用入口），notify 反馈。
-              mobile 收纳进 ⋯ 菜单（见头部右侧）。 */}
+              mobile 收纳进 ⋯ 菜单（见头部右侧）。
+              2026-09-09-sessions-visual-refresh task-07（FR-07）：id/机器/工作区
+              三个平铺 chip 收敛为面包屑式一行（id chip · 机器 · 工作区粗体），
+              「·」muted 分隔——头部降噪。 */}
           {!mobile && (
-            <button
-              type="button"
-              aria-label="复制会话 ID"
-              title={`点击复制会话 ID：${session.id}`}
-              onClick={() => {
-                void navigator.clipboard
-                  ?.writeText(session.id)
-                  .then(() => notify.success("已复制会话 ID"))
-                  .catch(() => notify.error(new Error("复制失败")));
-              }}
-              className="shrink-0 cursor-pointer rounded px-1 py-0.5 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              #{session.id.slice(0, 8)}
-            </button>
-          )}
-          <Badge status={statusBadge.status} text={statusBadge.text} />
-          {/* task-10（FR-05 / D-002@v2）：平台共享会话徽标——会话档案 ∈ active
-              共享智能体生效列表时显示（仅显示不改行为；文案「平台共享」非「只读」）。 */}
-          {isPlatformSharedSession && (
-            <span
-              data-testid="session-platform-shared-badge"
-              title="本会话使用平台共享智能体——读平台源码不受限，写操作限制在共享输出目录"
-              className="inline-flex shrink-0 items-center rounded-full border border-brand-300 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
-            >
-              平台共享
-            </span>
-          )}
-          {!mobile && machineName && (
-            <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
-              <Monitor aria-hidden className="h-3 w-3" />
-              {machineName}
-            </span>
-          )}
-          {!mobile && workspaceName && (
-            <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
-              <FolderOpen aria-hidden className="h-3 w-3" />
-              {workspaceName}
+            <span className="hidden min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground sm:flex">
+              <button
+                type="button"
+                aria-label="复制会话 ID"
+                title={`点击复制会话 ID：${session.id}`}
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(session.id)
+                    .then(() => notify.success("已复制会话 ID"))
+                    .catch(() => notify.error(new Error("复制失败")));
+                }}
+                className="shrink-0 cursor-pointer rounded bg-muted px-1.5 py-px font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+              >
+                #{session.id.slice(0, 8)}
+              </button>
+              <Badge status={statusBadge.status} text={statusBadge.text} />
+              {isPlatformSharedSession && (
+                <span
+                  data-testid="session-platform-shared-badge"
+                  title="本会话使用平台共享智能体——读平台源码不受限，写操作限制在共享输出目录"
+                  className="inline-flex shrink-0 items-center rounded-full border border-brand-300 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+                >
+                  平台共享
+                </span>
+              )}
+              {machineName && (
+                <>
+                  <span aria-hidden className="opacity-50">·</span>
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <Monitor aria-hidden className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{machineName}</span>
+                  </span>
+                </>
+              )}
+              {workspaceName && (
+                <>
+                  <span aria-hidden className="opacity-50">·</span>
+                  <span className="inline-flex min-w-0 items-center gap-1 font-semibold text-foreground">
+                    <FolderOpen aria-hidden className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{workspaceName}</span>
+                  </span>
+                </>
+              )}
             </span>
           )}
         </div>

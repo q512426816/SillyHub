@@ -247,7 +247,7 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
     expect(themes.dark.color.primary).toBe("#0891b2");
     expect(themes.dark.color.primaryHover).toBe("#06b6d4");
     expect(themes.dark.color.accent).toBe("#22d3ee");
-    expect(themes.dark.color.bg).toBe("#18181b");
+    expect(themes.dark.color.bg).toBe("#09090b"); // 2026-09-09-sessions-visual-refresh D-005@v1 zinc-950
     expect(themes.dark.color.card).toBe("#27272a");
     expect(themes.dark.color.border).toBe("#3f3f46");
     expect(themes.dark.color.semantic).toEqual({

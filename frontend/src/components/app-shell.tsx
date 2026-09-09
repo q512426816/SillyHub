@@ -363,10 +363,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="flex min-h-screen bg-background">
+    /* 2026-09-09-sessions-visual-refresh task-09（FR-02/D-007@v1/D-008@v1）：
+       应用壳挂环境极光（--aurora-* 三团品牌色径向光晕，background-attachment
+       fixed 铺满视口不随滚动——玻璃面板底下有色彩可透，玻璃拟态才可读；
+       取值三主题分值 D-002@v2：ai-native 紫系 / blue 蓝系 / dark 青系）。
+       极光只挂壳层，滚动内容区不挂 blur（R-02 性能）。 */
+    <div
+      className="flex min-h-screen bg-background"
+      style={{
+        backgroundImage:
+          "var(--aurora-1), var(--aurora-2), var(--aurora-4)",
+        backgroundAttachment: "fixed",
+      }}
+    >
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r bg-card transition-all duration-200 ${
+        /* task-09：侧栏玻璃化（半透 + blur + saturate，极光透出）。 */
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border/60 bg-card/60 backdrop-blur-xl backdrop-saturate-150 transition-all duration-200 ${
           collapsed ? "w-[60px]" : "w-[260px]"
         }`}
       >

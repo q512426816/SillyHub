@@ -78,10 +78,9 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
     setupTimeline();
     expect(screen.getByText("用户提问")).toBeInTheDocument();
     expect(screen.getByText("agent 答复")).toBeInTheDocument();
-    // 与原 panel 渲染同口径：第 N 轮 · 状态 + ↑in ↓out。task-03 TurnStatusBadge
-    // antd 化后状态文本进 Badge status 的 text 节点（dot+text），与「第 N 轮 ·」
-    // 分属不同文本节点，按文本分别断言语义不变。
-    expect(screen.getByText(/第 1 轮 ·/)).toBeInTheDocument();
+    // 2026-09-09-sessions-visual-refresh task-06：对话视图轮尾改共享
+    // RoundDivider 胶囊（label/状态/meta 分节点），断言按节点文本适配。
+    expect(screen.getByText("第 1 轮")).toBeInTheDocument();
     expect(screen.getByText("已完成")).toBeInTheDocument();
     expect(screen.getByText(/↑10/)).toBeInTheDocument();
     expect(screen.getByText(/↓20/)).toBeInTheDocument();
@@ -95,13 +94,14 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
   });
 
   it("运行中输入未收到（null）：徽标显示「↑执行中…」不显示假「↑0」（ql-20260831-010）", () => {
-    // GLM 流式期间 message_start 不携带 input——daemon 只从该事件取输入，
+    // GLM 流式期间 message_start 不携带输入——daemon 只从该事件取输入，
     // 轮内 inputTokens 常为 null 而输出已实时累加（真实场景：↑执行中… ↓7,081）。
+    // 2026-09-09-sessions-visual-refresh task-06：对话视图轮尾 RoundDivider 胶囊，
+    // meta 为整段文本节点——↑执行中… 与 ↓7,081 同节点按正则断言。
     setupTimeline({
       turns: [makeTurn({ status: "running", inputTokens: null, outputTokens: 7081 })],
     });
-    expect(screen.getByText(/↑执行中…/)).toBeInTheDocument();
-    expect(screen.getByText(/↓7,081/)).toBeInTheDocument();
+    expect(screen.getByText(/↑执行中… ↓7,081/)).toBeInTheDocument();
     // 假 0 不再出现（旧实现 null 硬编码「↑0」误导）
     expect(screen.queryByText(/↑0/)).toBeNull();
   });

@@ -129,16 +129,18 @@ vi.mock("@/lib/api/llm-providers", async () => {
   return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
 });
 
-/* ----- 回归锚字面量（task-14 改动前的 desktop 原文，硬编码防源文件漂移自证） ----- */
+/* ----- 回归锚字面量（硬编码防源文件漂移自证；2026-09-09-sessions-visual-refresh
+   task-07 玻璃化后按新常量更新——面板根/头 bg-card→bg-card/80+backdrop-blur、
+   边框降透明 border-border/60） ----- */
 
 const ROOT_CLS_DESKTOP =
-  "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card";
+  "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-card/80 backdrop-blur-xl";
 const HEADER_CLS_DESKTOP =
-  "flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2";
+  "flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/60 px-4 py-2 backdrop-blur-md";
 const ROOT_CLS_MOBILE =
-  "flex h-full min-h-0 w-full flex-col overflow-hidden bg-card";
+  "flex h-full min-h-0 w-full flex-col overflow-hidden bg-card/80 backdrop-blur-xl";
 const HEADER_CLS_MOBILE =
-  "flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2";
+  "flex shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-md";
 
 /* ----- fixture ----- */
 
@@ -297,14 +299,12 @@ describe("SessionPanel variant 回归锚（不传 variant 与 desktop 一致）"
     const flexRow = chatCol.parentElement as HTMLElement;
     expect(flexRow.className).toBe("flex min-h-0 flex-1");
     expect(flexRow.parentElement).toBe(panel);
-    // 行内序：首子 = 刻度轨根（左），聊天列为末子（右）；轨内 navigation 锚
-    // 证明 TurnCatalog desktop 常驻挂载（D-007：无折叠无头部 ~30px 轨）。
-    const railRoot = flexRow.firstElementChild as HTMLElement;
-    expect(railRoot.className).toBe("relative flex-shrink-0 flex");
+    // ql-20260909-005：轮次 <3 刻度轨整条隐藏（短会话回收 30px 占位）——本
+    // fixture 仅 1 轮，断言轨道不渲染（常驻断言随行为翻转；≥3 轮形态由
+    // turn-catalog 组件测试覆盖）。
     expect(
-      within(railRoot).getByRole("navigation", { name: "轮次刻度导航" }),
-    ).toBeInTheDocument();
-    expect(flexRow.lastElementChild).toBe(chatCol);
+      within(flexRow).queryByRole("navigation", { name: "轮次刻度导航" }),
+    ).not.toBeInTheDocument();
   });
 
   it("显式 variant='desktop'：与不传渲染一致（分发函数默认值归一）", async () => {

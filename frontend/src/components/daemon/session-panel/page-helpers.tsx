@@ -45,17 +45,20 @@ type QuicklogData = Awaited<ReturnType<typeof getQuicklogDetail>>;
  * 断言不传 variant 时 className 不变）；mobile 仅满宽贴屏（去圆角/边框）+ padding
  * 收敛——逻辑零分叉，variant 只出现在 JSX className/显隐条件。 */
 
-/** 面板根容器（page 模式真会话/预会话两个渲染点共用）。 */
+/** 面板根容器（page 模式真会话/预会话两个渲染点共用）。
+ *  2026-09-09-sessions-visual-refresh task-07（FR-07/D-008@v1）：bg-card 改
+ *  var(--glass-heavy) + backdrop-blur 玻璃化（配合 task-09 壳层极光透出，
+ *  边框降透明 --border-soft）——mobile 同步。 */
 export const PANEL_ROOT_CLS_DESKTOP =
-  "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card";
+  "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-card/80 backdrop-blur-xl";
 export const PANEL_ROOT_CLS_MOBILE =
-  "flex h-full min-h-0 w-full flex-col overflow-hidden bg-card";
+  "flex h-full min-h-0 w-full flex-col overflow-hidden bg-card/80 backdrop-blur-xl";
 
-/** 面板头（两渲染点共用）。 */
+/** 面板头（两渲染点共用）。task-07：玻璃头（半透 + blur，滚动内容从下方穿过）。 */
 export const PANEL_HEADER_CLS_DESKTOP =
-  "flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2";
+  "flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/60 px-4 py-2 backdrop-blur-md";
 export const PANEL_HEADER_CLS_MOBILE =
-  "flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2";
+  "flex shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-md";
 
 /**
  * mobile 会话主体外包层：TurnTimeline / AgentLogSessionBody 自带纵向滚动容器

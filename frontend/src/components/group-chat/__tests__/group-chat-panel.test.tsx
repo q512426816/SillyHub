@@ -1646,13 +1646,15 @@ describe("GroupChatPanel 成员头像（quick）", () => {  it("avatar 有值 �
     });
 
     // agent 气泡（小码）：头像 img（fetchFileBlob → objectURL）渲染。
+    // 2026-09-09-sessions-visual-refresh task-10：头像换共享 ChatMessageAvatar，
+    // 图片态 testid=chat-message-avatar-img（agent/user 同 pool）。
     const agentBubble = screen
       .getByTestId("group-chat-timeline")
       .querySelector('[data-member-name="小码"]');
     expect(agentBubble).toBeTruthy();
     await waitFor(() => {
       const img = agentBubble!.querySelector(
-        '[data-testid="group-member-avatar-img"] img',
+        '[data-testid="chat-message-avatar-img"] img',
       );
       expect(img).toBeTruthy();
       expect(img!.getAttribute("src")).toMatch(/^blob:/);
@@ -1666,7 +1668,7 @@ describe("GroupChatPanel 成员头像（quick）", () => {  it("avatar 有值 �
     await waitFor(() => {
       expect(
         selfBubble!.querySelector(
-          '[data-testid="group-member-avatar-img"] img',
+          '[data-testid="chat-message-avatar-img"] img',
         ),
       ).toBeTruthy();
     });
@@ -1677,7 +1679,7 @@ describe("GroupChatPanel 成员头像（quick）", () => {  it("avatar 有值 �
       .querySelector('[data-sender="林一"]');
     expect(otherBubble).toBeTruthy();
     expect(
-      otherBubble!.querySelector('[data-testid="group-member-avatar-initial"]'),
+      otherBubble!.querySelector('[data-testid="chat-message-avatar-user"]'),
     ).toBeTruthy();
     expect(otherBubble!.querySelector("img")).toBeNull();
   });

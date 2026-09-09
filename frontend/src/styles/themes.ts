@@ -157,7 +157,9 @@ const darkTheme: ThemeDef = {
     primary: '#0891b2', // cyan-600 (ql-20260824-014 去紫改青;白字按钮对比 3.5:1)
     primaryHover: '#06b6d4', // cyan-500 (hover 提亮一档)
     accent: '#22d3ee', // cyan-400
-    bg: '#18181b', // zinc-900 中性黑(去蓝调,与青/灰均不振动)
+    // 2026-09-09-sessions-visual-refresh D-005@v1:bg zinc-900→zinc-950 拉大与卡片
+    // 反差(card 保持 zinc-800);globals.css dark 块 --color-bg/--background 同步
+    bg: '#09090b', // zinc-950
     card: '#27272a', // zinc-800
     border: '#3f3f46', // zinc-700
     // cyan 阶翻转 (50↔950、100↔900、200↔800、300↔700、400↔600、500 自映):

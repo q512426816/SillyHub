@@ -122,6 +122,8 @@ import {
 import { ApiError } from "@/lib/api";
 import { listChanges } from "@/lib/changes";
 import { useNotify } from "@/lib/errors";
+// 2026-09-09-sessions-visual-refresh task-08：引擎色点单一源（PROVIDER_META）
+import { PROVIDER_META } from "@/lib/daemon/runtimes";
 import { listQuicklogEntries } from "@/lib/quicklog";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
@@ -1555,7 +1557,9 @@ function WorkspaceTreeList({
   return (
     <div
       aria-label="会话列表"
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
+      /* 2026-09-09-sessions-visual-refresh task-08（FR-02/D-008@v1）：列表列玻璃
+         化——bg-card 改半透 + backdrop-blur（壳层极光透出，v4 原型 .list-col）。 */
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-card/70 backdrop-blur-xl"
     >
       {/* 头部：标题 + 总数（视图过滤后计数；无筛选时 = 拉取条数）。
           右侧 flex 组：计数徽章 + headerExtra 插槽（task-02 / D-002，portal
@@ -2049,14 +2053,14 @@ function GroupChatRow({
       data-group-id={group.id}
       data-mention-unread={mentionUnread ? "true" : undefined}
       className={cn(
-        "group mb-0.5 flex cursor-pointer items-center gap-2 rounded-lg border-l-[3px] px-2.5 py-1.5 transition-colors",
+        // 2026-09-09-sessions-visual-refresh task-08：群行选中态同会话行 token 化
+        // （--row-active 渐变底 + --row-active-ring 内描边，去硬竖条）。
+        "group mb-0.5 flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors",
         selected
-          ? "border-l-brand-600 bg-brand-100"
-          : // task-06：已归档群行整行降调（照会话行先例：opacity-60 与活跃群
-            // 拉开「收纳 vs 在用」层级，hover 恢复全不透明便于瞄准行内操作）。
-            group.archived_at
-              ? "border-l-transparent opacity-60 hover:bg-muted/25 hover:opacity-100"
-              : "border-l-transparent hover:bg-muted/50",
+          ? "bg-[image:var(--row-active)] shadow-[inset_0_0_0_1px_var(--row-active-ring)] shadow-sm"
+          : group.archived_at
+            ? "opacity-60 hover:bg-muted/25 hover:opacity-100"
+            : "hover:bg-muted/50",
       )}
     >
       {/* @我未读行首红点（微信式；红点=destructive 语义阶）。 */}
@@ -2980,17 +2984,18 @@ function SessionRow({
       className={cn(
         "group flex cursor-pointer flex-col justify-center gap-1 overflow-hidden px-2.5 py-1.5 transition-colors",
         variant === "tree"
-          ? // 树形态（原型 .s-row）：圆角行卡 + brand 选中态（brand-100 底 +
-            // brand-600 竖条 + 标题 brand-700），无下边线。
-            // ql-20260831-013：已归档行整行降调（opacity-60）与活跃行拉开
-            // 「收纳 vs 在用」层级，hover 恢复全不透明便于瞄准行内操作。
+          ? // 树形态（原型 .s-row）：圆角行卡。
+          //   2026-09-09-sessions-visual-refresh task-08（FR-05/D-009@v1）：选中态
+          //   改 token——硬竖条 border-l-[3px] 去除，换 var(--row-active) 渐变底 +
+          //   var(--row-active-ring) 内描边（D-002@v2 三主题分值，blue 蓝系/dark
+          //   青系各归各色）；ql-20260831-013 归档降调语义保持。
             cn(
-              "mb-0.5 rounded-lg border-l-[3px]",
+              "mb-0.5 rounded-lg",
               selected
-                ? "border-l-brand-600 bg-brand-100"
+                ? "bg-[image:var(--row-active)] shadow-[inset_0_0_0_1px_var(--row-active-ring)] shadow-sm"
                 : session.archived_at
-                  ? "border-l-transparent opacity-60 hover:bg-muted/25 hover:opacity-100"
-                  : "border-l-transparent hover:bg-muted/50",
+                  ? "opacity-60 hover:bg-muted/25 hover:opacity-100"
+                  : "hover:bg-muted/50",
             )
           : // 平铺形态（退役路径，原样式保留）。
             cn(
@@ -3088,7 +3093,7 @@ function SessionRow({
             </span>
           )}
         </span>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
+        <span className="shrink-0 text-[10.5px] text-muted-foreground/85 tabular-nums">
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
         {/* 2026-09-08-session-list-liveness-dot task-02 / FR-01~03：行尾活性
@@ -3249,9 +3254,13 @@ function SessionRow({
           </Tag>
         )}
         {!hideEngineChip && (
+          /* 2026-09-09-sessions-visual-refresh task-08（FR-05）：引擎 chip 收敛为
+             色点 + 短名（v4 原型 .engine）——色点从 PROVIDER_META 单一源派生
+             （plan 审查修正：不新写 hex；色点背景取该引擎 bg-*-100 阶，文字色
+             维持既有语义档着色）。 */
           <span
             className={cn(
-              "inline-flex h-4 shrink-0 items-center rounded px-1.5 text-[10px] font-semibold leading-none",
+              "inline-flex h-4 shrink-0 items-center gap-1 rounded px-1.5 text-[10px] font-semibold leading-none",
               isToolReport
                 ? "bg-info/10 text-info"
                 : engineValue === "codex"
@@ -3259,6 +3268,16 @@ function SessionRow({
                   : "bg-warning/15 text-warning",
             )}
           >
+            <span
+              aria-hidden
+              className={cn(
+                "h-[5px] w-[5px] shrink-0 rounded-full",
+                isToolReport
+                  ? "bg-info"
+                  : PROVIDER_META[engineValue ?? ""]?.color.split(" ")[0] ??
+                    "bg-muted-foreground/50",
+              )}
+            />
             {isToolReport ? harnessName : engineLabel(engineValue)}
           </span>
         )}

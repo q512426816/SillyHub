@@ -99,6 +99,8 @@ import { ArrowDown, CheckCircle2, FileText, Image as ImageIcon, Paperclip, Pin, 
 import { Drawer, Modal } from "antd";
 import { MemberPanel } from "@/components/group-chat/member-panel";
 import { GroupMemberAvatar } from "@/components/group-chat/group-member-avatar";
+// 2026-09-09-sessions-visual-refresh task-10（D-006@v2）：消息行头像统一共享构件
+import { ChatMessageAvatar } from "@/components/chat";
 import {
   SessionMentionPopover,
   buildMemberMentionItems,
@@ -2667,15 +2669,16 @@ function GroupTimelineRowInner({
             )}
             <ReplyingTags replying={replying} />
           </div>
-          <GroupMemberAvatar
-            avatar={avatar}
+          {/* 2026-09-09-sessions-visual-refresh task-10（D-006@v2）：共享头像构件
+              （自定义图片保留 avatar 入参优先；无图首字回退，isSelf 沿用 brand 底
+              区分自己 vs 他人）。 */}
+          <ChatMessageAvatar
+            kind="user"
             name={entry.senderName}
+            avatar={avatar}
             size={28}
-            className="rounded-full"
-            fallbackClassName={cn(
-              "h-7 w-7 text-xs",
-              entry.isSelf ? "bg-brand-600" : "bg-muted-foreground/70",
-            )}
+            className={cn(entry.isSelf && "bg-brand-600! text-white!")}
+            title={entry.senderName}
           />
         </div>
       );
@@ -2688,16 +2691,17 @@ function GroupTimelineRowInner({
         data-log-id={entry.id}
         className={cn("group my-2.5 flex items-start gap-2.5", pinnedRowClass)}
       >
-        <GroupMemberAvatar
-          avatar={avatar}
-          name={entry.senderName}
-          size={28}
-          className="mt-0.5 rounded-full"
-          fallbackClassName="h-7 w-7 bg-muted-foreground/70 text-xs"
-        />
-        <div className="min-w-0 max-w-[82%]">
-          <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="font-semibold text-foreground">{entry.senderName}</span>
+      {/* task-10（D-006@v2）：他人用户消息——共享头像构件（自定义图片优先）。 */}
+      <ChatMessageAvatar
+        kind="user"
+        name={entry.senderName}
+        avatar={avatar}
+        size={28}
+        title={entry.senderName}
+      />
+      <div className="min-w-0 max-w-[82%]">
+        <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">{entry.senderName}</span>
             <span className="text-[10.5px]">{formatTime(entry.timestamp)}</span>
             {canPin && (
               <PinMessageButton logId={entry.id} onPin={onPin} disabled={pinPending} />
@@ -2729,15 +2733,15 @@ function GroupTimelineRowInner({
       data-log-id={entry.id}
       className={cn("group my-2.5 flex items-start gap-2.5", pinnedRowClass)}
     >
-      <GroupMemberAvatar
-        avatar={avatar}
+      {/* 2026-09-09-sessions-visual-refresh task-10（FR-01/D-006@v2）：agent 消息
+          头像换共享 ChatMessageAvatar(kind=agent)——品牌渐变光环（成员身份区分
+          仍由成员名行承担，光环仅外圈氛围）；自定义头像保留（avatar 入参优先）。 */}
+      <ChatMessageAvatar
+        kind="agent"
         name={entry.memberName ?? "Agent"}
+        avatar={avatar}
         size={28}
-        className="mt-0.5 rounded-full"
-        fallbackClassName={cn(
-          "h-7 w-7 text-xs",
-          agentAvatarColor(entry.memberId, entry.memberName),
-        )}
+        title={entry.memberName ?? "Agent 成员"}
       />
       <div className="min-w-0 max-w-[82%]">
         <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">

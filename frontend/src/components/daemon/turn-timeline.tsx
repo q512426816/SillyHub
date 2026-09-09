@@ -40,6 +40,8 @@ import { RunErrorItem } from "@/components/agent-log/run-error-item";
 import type { ErrorLogItem } from "@/components/agent-log/normalize";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
 import { SegmentView } from "@/components/daemon/turn-segment-views";
+// 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
+import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
 // agent-file-upload-mcp：历史回放过程项渲染 agent 上传文件卡片（TurnDetailsList）
 import { FileMessageCard } from "@/components/daemon/file-message-card";
@@ -370,13 +372,16 @@ const TurnRow = memo(function TurnRow({
                     })()}
                   </div>
                   {turn.sender && (
-                    <span
-                      title={turn.sender.me ? `我（${turn.sender.name}）` : turn.sender.name}
-                      aria-label={`发送者 ${turn.sender.me ? "我" : turn.sender.name}`}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-xs font-medium text-muted-foreground"
-                    >
-                      {(turn.sender.name.trim()[0] ?? "?").toUpperCase()}
-                    </span>
+                    <ChatMessageAvatar
+                      kind="user"
+                      name={turn.sender.name}
+                      size={28}
+                      title={
+                        turn.sender.me
+                          ? `我（${turn.sender.name}）`
+                          : turn.sender.name
+                      }
+                    />
                   )}
                 </div>
               )}
@@ -475,9 +480,7 @@ const TurnRow = memo(function TurnRow({
                   {/* 旧路径（回退）：agent 答复单气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
                   {turn.output ? (
                     <div className="flex items-start gap-2.5">
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
-                        <Bot className="h-3.5 w-3.5" aria-hidden />
-                      </span>
+                      <ChatMessageAvatar kind="agent" title="智能体" />
                       <div className="flex items-end gap-1.5">
                         <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
                           <MarkdownText content={turn.output} />
@@ -554,14 +557,52 @@ const TurnRow = memo(function TurnRow({
                   </div>
                 </div>
               )}
-              <div className="flex items-center gap-1.5 pl-9 text-[10px] text-muted-foreground">
-                <TurnStatusBadge
-                  status={turn.status}
-                  turn={turn.turn}
-                  inputTokens={turn.inputTokens}
-                  outputTokens={turn.outputTokens}
-                />
-              </div>
+              {/* 2026-09-09-sessions-visual-refresh task-06（FR-04/D-010@v1）：
+                  对话视图轮尾改共享 RoundDivider 胶囊分隔（细线+居中胶囊，六态着色）；
+                  「全部」视图保留原 TurnStatusBadge 小字（进度视图信息密度优先，Grill G-03）。 */}
+              {viewMode !== "all" ? (
+                <div className="pl-9 pr-2">
+                  <RoundDivider
+                    label={turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
+                    status={turn.status}
+                    meta={
+                      // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
+                      // 不显示假 ↑0；终态 null（旧 daemon 无数据）按 ↑0 降级（与
+                      // TurnStatusBadge 同口径）。
+                      turn.inputTokens != null || turn.outputTokens != null
+                        ? (() => {
+                            const live =
+                              turn.status === "running" ||
+                              turn.status === "pending" ||
+                              turn.status === "interrupting";
+                            const inTxt =
+                              turn.inputTokens != null
+                                ? `↑${turn.inputTokens.toLocaleString("zh-CN")}`
+                                : live
+                                  ? "↑执行中…"
+                                  : "↑0";
+                            const outTxt =
+                              turn.outputTokens != null
+                                ? `↓${turn.outputTokens.toLocaleString("zh-CN")}`
+                                : live
+                                  ? "↓执行中…"
+                                  : "↓0";
+                            return `${inTxt} ${outTxt}`;
+                          })()
+                        : undefined
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 pl-9 text-[10px] text-muted-foreground">
+                  <TurnStatusBadge
+                    status={turn.status}
+                    turn={turn.turn}
+                    inputTokens={turn.inputTokens}
+                    outputTokens={turn.outputTokens}
+                  />
+                </div>
+              )}
             </div>
     }
     </>
@@ -985,14 +1026,18 @@ function SegmentedTurnBody({
           )}
         </div>
       )}
-      {/* 「对话」：渲染 text 段与 file 段（file 是面向用户的交付物，agent-file-upload-mcp
-          FR-01 聊天流呈现；其余思考/工具段仍只在「全部」视图，渲染经济 FR-06），每段独立
-          气泡。 */}
+      {/* 「对话」视图（2026-09-09-sessions-visual-refresh task-05 / D-003@v1）：
+          agent 侧挂共享渐变光环头像（ChatMessageAvatar），text/file 段气泡行与
+          头像横排；「全部」视图不挂头像（Grill G-03——进度时间线保持 ml-9 竖线
+          容器原样式）。 */}
       {textSegments != null && textSegments.length > 0 && (
-        <div className="ml-9 flex flex-col gap-1.5">
-          {textSegments.map((s) => (
-            <SegmentView key={s.id} segment={s} />
-          ))}
+        <div className="flex items-start gap-2.5">
+          <ChatMessageAvatar kind="agent" title="智能体" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {textSegments.map((s) => (
+              <SegmentView key={s.id} segment={s} />
+            ))}
+          </div>
         </div>
       )}
       {/* 运行中尚无 text 段（两视图同规则）：思考占位。 */}

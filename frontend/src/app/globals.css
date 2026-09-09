@@ -104,9 +104,23 @@
     --shadow-sm: 0 1px 2px 0 rgba(30, 27, 75, 0.06);
     --shadow-md: 0 4px 14px rgba(30, 27, 75, 0.08);
     --shadow-lg: 0 16px 40px rgba(109, 40, 217, 0.16);
-    --shadow-primary: 0 4px 14px rgba(124, 58, 237, 0.32);
+    /* 2026-09-09-sessions-visual-refresh D-009@v1:shadow-primary 全站降重——
+       原单层 4px 14px 32% 在浅色下"糊一片紫",改双层弥散(近细影+远柔影) */
+    --shadow-primary: 0 1px 3px rgba(124, 58, 237, 0.16), 0 8px 20px -10px rgba(124, 58, 237, 0.28);
     --font-sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     --spacing-base: 4px;
+
+    /* ---- 2026-09-09-sessions-visual-refresh 氛围/玻璃 token(D-002@v2 三主题分值;
+       本块=ai-native 紫系。品牌色派生 token 不允许 blue 继承 :root——blue/dark
+       块各自写满同键取值;主题中性 token(glass/border-soft)三主题结构一致) ---- */
+    /* 柔化边框:替代 1px 实 border 的低透明描边(高级感=边框退、阴影进) */
+    /* 列表/导航激活态:渐变底 + 品牌色内描边(D-009@v1 选中态加档) */
+    --row-active: linear-gradient(90deg, rgba(124, 58, 237, 0.14), rgba(8, 145, 178, 0.08));
+    --row-active-ring: rgba(124, 58, 237, 0.22);
+    /* 环境极光:应用壳背景 fixed 铺满(v4 原型 :root 段取值;右上降浓 D-009@v1) */
+    --aurora-1: radial-gradient(720px 340px at 78% -8%, rgba(124, 58, 237, 0.09), transparent 62%);
+    --aurora-2: radial-gradient(620px 320px at 6% 108%, rgba(8, 145, 178, 0.12), transparent 60%);
+    --aurora-4: radial-gradient(480px 260px at 12% -6%, rgba(196, 181, 253, 0.12), transparent 60%);
 
     /* ---- task-11 动效 token(统一时长 150–200ms,fast=100ms 仅用于微反馈) ----
        cubic-bezier(0.4,0,0.2,1) 即 Tailwind ease-in-out 量级,克制不弹。 */
@@ -189,7 +203,14 @@
     --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
     --shadow-md: 0 2px 8px -1px rgba(15, 23, 42, 0.08), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
     --shadow-lg: 0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
-    --shadow-primary: 0 4px 14px rgba(37, 99, 235, 0.32);
+    /* 2026-09-09-sessions-visual-refresh D-009@v1:shadow-primary 降重(双层弥散) */
+    --shadow-primary: 0 1px 3px rgba(37, 99, 235, 0.16), 0 8px 20px -10px rgba(37, 99, 235, 0.28);
+    /* 氛围/玻璃 token(D-002@v2 blue 蓝系分值——零紫成分,取值=品牌蓝 #2563eb 系) */
+    --row-active: linear-gradient(90deg, rgba(37, 99, 235, 0.14), rgba(6, 182, 212, 0.08));
+    --row-active-ring: rgba(37, 99, 235, 0.22);
+    --aurora-1: radial-gradient(720px 340px at 78% -8%, rgba(37, 99, 235, 0.09), transparent 62%);
+    --aurora-2: radial-gradient(620px 320px at 6% 108%, rgba(6, 182, 212, 0.12), transparent 60%);
+    --aurora-4: radial-gradient(480px 260px at 12% -6%, rgba(147, 197, 253, 0.14), transparent 60%);
   }
 
   /* 暗色主题覆盖块(2026-08-23-frontend-dark-theme / FR-01 / D-001@v1):
@@ -204,7 +225,7 @@
      共享 token(radius/font/spacing/动效)不在此重复声明;
      改动须与 themes.ts 同步,禁止自行调色。 */
   [data-theme="dark"] {
-    --background: 240 6% 10%; /* =#18181b zinc-900 中性黑 */
+    --background: 240 10% 4%; /* =#09090b zinc-950(2026-09-09-sessions-visual-refresh D-005@v1 提深拉层级) */
     --foreground: 240 0% 96%; /* =#f4f4f5 zinc-100 */
 
     --card: 240 4% 16%; /* =#27272a zinc-800 */
@@ -261,7 +282,9 @@
     --color-slate-700: #d4d4d8;
     --color-slate-800: #e4e4e7;
     --color-slate-900: #f4f4f5;
-    --color-bg: #18181b;
+    /* 2026-09-09-sessions-visual-refresh D-005@v1:bg zinc-900→zinc-950 拉大与卡片
+       反差(7%→16% 亮度差,层级可读);card 保持 zinc-800(Grill G-06) */
+    --color-bg: #09090b;
     --color-card: #27272a;
     --color-border: #3f3f46;
     --color-success: #10b981;
@@ -274,11 +297,17 @@
     --muted-fg: #a1a1aa;
     --color-loading-track: rgba(255, 255, 255, 0.12);
     /* 阴影:黑基调加深(暗色下阴影需更深才有层次,design §5.1),
-       primary 投影随青主色取 rgba(8,145,178,0.28) */
+       primary 投影随青主色(D-009@v1 降重双层) */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
     --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
-    --shadow-primary: 0 4px 14px rgba(8, 145, 178, 0.28);
+    --shadow-primary: 0 1px 3px rgba(8, 145, 178, 0.20), 0 8px 20px -10px rgba(34, 211, 238, 0.30);
+    /* 氛围/玻璃 token(D-002@v2 dark 青系分值;极光加浓治死黑——D-009@v1 v4 自审) */
+    --row-active: linear-gradient(90deg, rgba(34, 211, 238, 0.18), rgba(14, 116, 144, 0.10));
+    --row-active-ring: rgba(34, 211, 238, 0.30);
+    --aurora-1: radial-gradient(720px 340px at 78% -8%, rgba(34, 211, 238, 0.17), transparent 62%);
+    --aurora-2: radial-gradient(620px 320px at 6% 108%, rgba(14, 116, 144, 0.22), transparent 60%);
+    --aurora-4: radial-gradient(480px 260px at 12% -6%, rgba(8, 145, 178, 0.16), transparent 60%);
     /* @uiw/react-markdown-preview markdown.css 库内 GitHub 变量覆盖:
        库用 prefers-color-scheme 媒体查询切变量,不认 data-theme;
        手动切 dark+系统浅色时变量解析为浅色值→白底白字。

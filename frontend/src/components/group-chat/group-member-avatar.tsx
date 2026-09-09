@@ -20,12 +20,13 @@
  * 后端 None=不改、空串=清除）。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Avatar, Button } from "antd";
 import { Image as ImageIcon, RotateCcw, Upload } from "lucide-react";
 
 import { errMessage, useNotify } from "@/lib/errors";
-import { fetchFileBlob, getFileDownloadUrl, uploadFile } from "@/lib/file/api";
+import { getFileDownloadUrl, uploadFile } from "@/lib/file/api";
+import { avatarFileId, useAvatarSrc } from "@/components/chat";
 import { cn } from "@/lib/utils";
 
 /* ────────────────────── 常量与纯辅助 ────────────────────── */
@@ -33,48 +34,13 @@ import { cn } from "@/lib/utils";
 /** 头像文件上传归属类型（文件中心 owner 维度，列表/审计按此归组）。 */
 export const GROUP_MEMBER_AVATAR_OWNER_TYPE = "group_member_avatar";
 
-/**
- * 文件中心 URL（/api/file/{id}）→ 文件 id；其余（http 外链 / 空 / 非法）→
- * null（null = 非 blob 拉取路径，外链可直接作 src）。
- */
-export function avatarFileId(avatar: string | null | undefined): string | null {
-  if (!avatar) return null;
-  if (!avatar.includes("/api/file/")) return null;
-  const m = avatar.match(/\/api\/file\/([\w-]+)/);
-  return m?.[1] ?? null;
-}
+// 2026-09-09-sessions-visual-refresh task-03（D-006@v2）：avatarFileId /
+// useAvatarSrc 平移至 components/chat/use-avatar-src.ts（逻辑单份），此处
+// re-export 维持既有 import 面不变（消费方零改动）。
+export { avatarFileId };
 
 /* ────────────────────── 渲染组件 ────────────────────── */
 
-/** 头像 src 解析（文件中心 URL → blob objectURL；外链 → 原值直用）。 */
-function useAvatarSrc(avatar: string | null | undefined): string | null {
-  const fileId = avatarFileId(avatar);
-  const directSrc = fileId == null && avatar ? avatar : null;
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    if (fileId == null) {
-      setSrc(null);
-      return;
-    }
-    let cancelled = false;
-    let url: string | null = null;
-    setSrc(null);
-    fetchFileBlob(fileId)
-      .then((blob) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setSrc(url);
-      })
-      .catch(() => {
-        /* 拉取失败静默回退首字（过期/无权限头像不阻断消息流渲染）。 */
-      });
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [fileId]);
-  return fileId != null ? src : directSrc;
-}
 
 export interface GroupMemberAvatarProps {
   /** 头像 URL（文件中心 /api/file/{id} 或外链）；空 = 首字回退。 */
