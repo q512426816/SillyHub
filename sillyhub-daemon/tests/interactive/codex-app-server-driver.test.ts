@@ -234,6 +234,15 @@ function tokenUsageNotif(
   });
 }
 
+/** ql-20260910-003：thread/started notification 行（带模型名）。 */
+function threadStartedNotif(threadId: string, model = 'glm-5.3'): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'thread/started',
+    params: { thread: { id: threadId, model } },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -759,6 +768,59 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
 
     expect(results).toHaveLength(1);
     expect(results[0]!.usage).toBeUndefined();
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('ql-20260910-003：thread/started 模型 + tokenUsage 累计 → result 带 modelUsage 快照（净输入分桶）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    // id=2 response（threadId 来源）+ thread/started 通知（模型名来源）
+    emitLines(child, [threadStartResponse('thr_mu'), threadStartedNotif('thr_mu', 'glm-5.3')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [
+      tokenUsageNotif('thr_mu', {
+        inputTokens: 20000,
+        cachedInputTokens: 19000,
+        cacheWriteInputTokens: 100,
+        outputTokens: 120,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(1);
+    // 快照 = 线程累计净值化（20000-19000-100=900 净输入），daemon 差分后与
+    // result.usage 增量恒一致
+    expect(results[0]!.modelUsage).toEqual({
+      'glm-5.3': {
+        inputTokens: 900,
+        outputTokens: 120,
+        cacheReadInputTokens: 19000,
+        cacheCreationInputTokens: 100,
+      },
+    });
+    // result.usage（轮差值）同值——两条路径口径一致
+    expect(results[0]!.usage).toMatchObject({
+      input_tokens: 900,
+      output_tokens: 120,
+      cache_read_tokens: 19000,
+      cache_creation_tokens: 100,
+    });
 
     close();
     child._emitExit(0);

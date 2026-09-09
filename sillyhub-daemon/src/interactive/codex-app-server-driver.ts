@@ -69,6 +69,7 @@ import type {
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
+import { setModelUsageSnapshot, type DriverModelUsage } from './driver.js';
 
 /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 task-runner.ts KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
@@ -452,6 +453,16 @@ export interface CodexHandle extends InteractiveDriverHandle {
    * （threadUsageTotal - usageBaseline）= 本轮真实增量。null = 0 基线（新线程）。
    */
   usageBaseline: CodexUsageTotal | null;
+  /**
+   * ql-20260910-003：thread/started 通知携带的线程模型名（如 glm-5.3），
+   * modelUsage 明细行的 key；null = 未见过（快照不记，行为同修复前）。
+   */
+  threadModel: string | null;
+  /**
+   * ql-20260910-003：按模型累计用量快照（净输入分桶，daemon 差分拆明细行）。
+   * null = 尚无可记条目（threadModel 未知或未见 tokenUsage 通知）。
+   */
+  modelUsageSnapshot: DriverModelUsage | null;
   /** 释放底层资源（关 stdin + kill child）。幂等。 */
   close(): Promise<void>;
 }
@@ -759,6 +770,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // ql-20260909-027：用量差值记账双基线（见 CodexHandle 字段注释）。
       threadUsageTotal: null,
       usageBaseline: null,
+      // ql-20260910-003：按模型明细快照（见 CodexHandle 字段注释）。
+      threadModel: null,
+      modelUsageSnapshot: null,
       close: (): Promise<void> => this._close(handle),
       // 扩展槽（非 CodexHandle 公共字段，consume 内部用）
       ...({ _ctx: ctx } as object),
@@ -993,6 +1007,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
         currentTurnResolve !== null ? onMessage : undefined,
       );
 
+      // ql-20260910-003：thread/started 通知携带线程模型名（modelUsage 明细行
+      // key；start 与 resume 都发本通知，实测 0.147）。
+      if (line.includes('"thread/started"')) {
+        this._extractThreadModel(h, line);
+      }
+
       // D2（健壮性修复，2026-07-24）：parse 包 try/catch——畸形行让 adapter.parse 抛
       // 异常时，readline 'line' 回调未捕获异常会被 cli.ts 全局处理器吞掉，但
       // currentTurnPromise 永不 resolve → 交互式会话永久卡死。对齐 task-runner.ts:1420：
@@ -1144,7 +1164,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         // 来源；success/failed 轮统一覆盖——失败的轮同样真实消耗了 token）。
         this._applyTurnUsageDelta(h, outcome);
         // 上报本轮 result
-        this._reportOutcome(outcome, pendingTurnError, reportResult);
+        this._reportOutcome(outcome, pendingTurnError, reportResult, h.modelUsageSnapshot ?? undefined);
         pendingTurnError = null;
         if (finalized) break;
       }
@@ -1213,6 +1233,23 @@ export class CodexAppServerDriver implements InteractiveDriver {
     return out;
   }
 
+  /**
+   * ql-20260910-003：thread/started 通知解析线程模型名（params.thread.model，
+   * 如 "glm-5.3"）。畸形行/缺 model 静默忽略（threadModel 保持原值）。
+   */
+  private _extractThreadModel(h: CodexHandle, line: string): void {
+    let msg: { params?: { thread?: { model?: unknown } } };
+    try {
+      msg = JSON.parse(line) as typeof msg;
+    } catch {
+      return;
+    }
+    const model = msg.params?.thread?.model;
+    if (typeof model === 'string' && model.trim() !== '') {
+      h.threadModel = model;
+    }
+  }
+
   /** 把 outcome 映射成 onTurnResult 调用。 */
   private _reportOutcome(
     outcome: {
@@ -1226,11 +1263,15 @@ export class CodexAppServerDriver implements InteractiveDriver {
     },
     pendingErrorMsg: string | null,
     report: (r: Parameters<NonNullable<InteractiveDriverCallbacks['onTurnResult']>>[0]) => void,
+    // ql-20260910-003：modelUsage 快照来源（codex handle）；success/failed 统一
+    // 附带——失败轮同样真实消耗了 token，明细表不因轮失败缺行。
+    modelUsage?: DriverModelUsage,
   ): void {
     if (outcome.kind === 'success') {
       const r: Parameters<NonNullable<InteractiveDriverCallbacks['onTurnResult']>>[0] = {
         subtype: 'success',
         is_error: false,
+        ...(modelUsage ? { modelUsage } : {}),
       };
       if (outcome.usage) r.usage = outcome.usage;
       report(r);
@@ -1239,6 +1280,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         subtype: 'error_during_execution',
         is_error: true,
         result: pendingErrorMsg ?? 'turn failed',
+        ...(modelUsage ? { modelUsage } : {}),
       });
     } else if (outcome.kind === 'cancelled') {
       report({
@@ -1363,6 +1405,18 @@ export class CodexAppServerDriver implements InteractiveDriver {
       cacheWriteInputTokens: num(total.cacheWriteInputTokens),
       outputTokens: num(total.outputTokens),
     };
+    // ql-20260910-003：同步维护按模型累计快照（净输入分桶，毛值拆桶口径同
+    // _usageDelta——daemon 差分后与 result.usage 增量恒一致）。模型未知时不记
+    // （快照为 null 时 result 不带 modelUsage，行为同修复前）。
+    if (h.threadModel) {
+      const t = h.threadUsageTotal;
+      h.modelUsageSnapshot = setModelUsageSnapshot(h.modelUsageSnapshot, h.threadModel, {
+        inputTokens: t.inputTokens - t.cachedInputTokens - t.cacheWriteInputTokens,
+        outputTokens: t.outputTokens,
+        cacheReadInputTokens: t.cachedInputTokens,
+        cacheCreationInputTokens: t.cacheWriteInputTokens,
+      });
+    }
     if (!onMessage || !h.threadId) return;
     const delta = this._usageDelta(h);
     if (!delta) return;

@@ -70,6 +70,7 @@ import type {
   InteractiveDriverStartOptions,
   UserTurnInput,
 } from './driver.js';
+import { addToModelUsage, type DriverModelUsage } from './driver.js';
 // task-02（2026-09-09-askuser-pi-cursor / Wave A）：PiSessionPermissionHooks 的
 // requestPermission 返回值类型（与 codex driver 同源，见该接口注释）。
 import type { CanUseToolDecision } from './types.js';
@@ -928,6 +929,12 @@ export class PiRpcDriver implements InteractiveDriver {
     // 调用，不得再计入）；累加值为空（pi 版本不带 message_end usage）退回定格
     // 值，零回归兜底。
     let turnUsageSum: AgentEventUsage | null = null;
+    // ql-20260910-003：当前模型名（model_change 帧 modelId——pi 会话启动即发
+    // 一条带活跃模型）+ 按模型**会话累计**用量快照（result 带 modelUsage →
+    // daemon _deltaModelUsage 差分拆 model_usage 明细行 + api_requests）。
+    // 模型未知时不记快照（result 不带 modelUsage，行为同修复前）。
+    let currentModel: string | null = null;
+    let modelUsageSnapshot: DriverModelUsage | null = null;
     // 本轮 turn 是否已上报 result（防 agent_settled 与进程退出双触发重复）。
     let turnReported = false;
     // consume 是否已最终收敛（进程异常退出 / consume 抛错）。
@@ -1229,6 +1236,25 @@ export class PiRpcDriver implements InteractiveDriver {
         const endMsg = isRecord(msg.message) ? msg.message : {};
         if (endMsg.role === 'assistant' && isRecord(endMsg.usage)) {
           turnUsageSum = accumulatePiUsage(turnUsageSum, endMsg.usage);
+          // ql-20260910-003：同步累计按模型快照（pi 的 input/cacheRead/cacheWrite
+          // 本就是 Anthropic 分桶语义的净输入，直接累加）。
+          if (currentModel) {
+            const num = (v: unknown): number =>
+              typeof v === 'number' && Number.isFinite(v) ? v : 0;
+            modelUsageSnapshot = addToModelUsage(modelUsageSnapshot, currentModel, {
+              inputTokens: num(endMsg.usage.input),
+              outputTokens: num(endMsg.usage.output),
+              cacheReadInputTokens: num(endMsg.usage.cacheRead),
+              cacheCreationInputTokens: num(endMsg.usage.cacheWrite),
+            });
+          }
+        }
+      }
+      // ql-20260910-003：model_change 跟踪当前模型（明细行 key；启动即发一条）。
+      if (msg.type === 'model_change') {
+        const modelId = (msg as { modelId?: unknown }).modelId;
+        if (typeof modelId === 'string' && modelId.trim() !== '') {
+          currentModel = modelId;
         }
       }
       const events = normalizer.normalizeRpcLine(line);
@@ -1344,6 +1370,8 @@ export class PiRpcDriver implements InteractiveDriver {
             is_error: true,
             result: pendingTurnError,
             ...(h.sessionId ? { session_id: h.sessionId } : {}),
+            // ql-20260910-003：失败轮同样真实消耗了 token，明细表不因轮失败缺行
+            ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
           });
         } else {
           reportTurnResult({
@@ -1351,6 +1379,7 @@ export class PiRpcDriver implements InteractiveDriver {
             is_error: false,
             ...(h.sessionId ? { session_id: h.sessionId } : {}),
             ...(turnUsage ? { usage: turnUsage } : {}),
+            ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
           });
         }
       }

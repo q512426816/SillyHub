@@ -44,6 +44,7 @@ import type {
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
+import { addToModelUsage, type DriverModelUsage } from './driver.js';
 
 /** close 时 SIGTERM→SIGKILL 升级宽限（pi-rpc-driver.ts L67 / codex 同款）。 */
 const KILL_GRACE_MS = 2_000;
@@ -118,6 +119,13 @@ interface CursorHandle extends InteractiveDriverHandle {
   chatId?: string;
   sawFirstTurn: boolean;
   thinkingCtx: CursorNormalizeCtx;
+  /**
+   * ql-20260910-003：system/init 帧携带的模型名（每轮进程启动都重发 init，
+   * 持续刷新）。modelUsage 明细行 key；null = 未见 init（快照不记）。
+   */
+  model: string | null;
+  /** ql-20260910-003：按模型会话累计用量快照（daemon 差分拆明细行）。 */
+  modelUsageSnapshot: DriverModelUsage | null;
 }
 
 function isCursorHandle(handle: InteractiveDriverHandle | null): handle is CursorHandle {
@@ -293,6 +301,9 @@ export class CursorDriver implements InteractiveDriver {
       chatId: options.resume,
       sawFirstTurn: false,
       thinkingCtx: { thinkingSegment: 0 },
+      // ql-20260910-003：按模型明细（见 CursorHandle 字段注释）。
+      model: null,
+      modelUsageSnapshot: null,
       close: (): Promise<void> => this._close(handle),
     };
     return handle;
@@ -534,6 +545,11 @@ export class CursorDriver implements InteractiveDriver {
         usage: snap.usage,
         session_id: snap.session_id ?? handle.chatId,
         result: snap.result,
+        // ql-20260910-003：按模型累计快照（daemon 差分拆 model_usage 明细行；
+        // 失败轮同样真实消耗了 token，isError 路径统一附带）。
+        ...(handle.modelUsageSnapshot
+          ? { modelUsage: handle.modelUsageSnapshot }
+          : {}),
       });
     } else if (exitCode !== 0) {
       callbacks.onTurnResult({
@@ -581,6 +597,13 @@ export class CursorDriver implements InteractiveDriver {
     }
 
     const events: AgentEvent[] = normalizeCursorFrame(parsed, handle.thinkingCtx);
+    // ql-20260910-003：system/init 帧带模型名（每轮进程启动都发，持续刷新）。
+    if (isRecord(parsed) && parsed.type === 'system' && parsed.subtype === 'init') {
+      const m = (parsed as { model?: unknown }).model;
+      if (typeof m === 'string' && m.trim() !== '') {
+        handle.model = m;
+      }
+    }
     if (isRecord(parsed) && parsed.type === 'result') {
       const turnResult = events.find((e) => e.type === 'turn_result');
       snapshotRef.current = {
@@ -593,6 +616,20 @@ export class CursorDriver implements InteractiveDriver {
           ?? handle.chatId,
         result: parsed.result,
       };
+      // ql-20260910-003：result 帧 usage 为整轮聚合值（缓存读可超单请求上下文
+      // 实证），逐轮累进按模型会话累计快照（cursor inputTokens 不含 cache，分桶
+      // 语义对齐）。模型未知（未见 init）不记。
+      const u = isRecord(parsed.usage) ? parsed.usage : undefined;
+      if (u && handle.model) {
+        const num = (v: unknown): number =>
+          typeof v === 'number' && Number.isFinite(v) ? v : 0;
+        handle.modelUsageSnapshot = addToModelUsage(handle.modelUsageSnapshot, handle.model, {
+          inputTokens: num(u.inputTokens),
+          outputTokens: num(u.outputTokens),
+          cacheReadInputTokens: num(u.cacheReadTokens),
+          cacheCreationInputTokens: num(u.cacheWriteTokens),
+        });
+      }
     }
 
     const rawOn = debugRawEnabled();

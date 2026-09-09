@@ -123,6 +123,77 @@ export interface InteractiveDriverResult {
    * 供 SessionManager/backend resume 指针消费。
    */
   session_id?: string;
+  /**
+   * 按模型累计用量快照（Claude SDK modelUsage 形状：Record<model, camelCase
+   * 四维>，会话生命周期**累计**——daemon `_deltaModelUsage` 差分为本轮增量后
+   * 经 `_modelUsageRows` 拆 model_usage 明细行 + run 级 api_requests）。
+   *
+   * ql-20260910-003：claude driver 原有透传；codex / pi / cursor driver 起各自
+   * 维护快照上报（codex=thread/tokenUsage/updated total 净值化，pi=message_end
+   * 逐调用累加，cursor=result 帧逐轮累加），四维语义对齐 Anthropic 分桶
+   * （inputTokens 为不含 cache 的净输入，cache 两维单列）。
+   */
+  modelUsage?: DriverModelUsage;
+}
+
+/** ql-20260910-003：按模型累计用量快照条目（Claude SDK modelUsage 形状）。 */
+export interface DriverModelUsageSnapshot {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+}
+
+/** ql-20260910-003：Record<model, 累计快照>——daemon 差分管线的输入形状。 */
+export type DriverModelUsage = Record<string, DriverModelUsageSnapshot>;
+
+/**
+ * ql-20260910-003：增量式累计（pi 逐调用 / cursor 逐轮）——把 delta 加进指定
+ * model 桶。纯函数返回新对象（不 mutate 入参，driver 侧句柄字段直接赋值）。
+ */
+export function addToModelUsage(
+  acc: DriverModelUsage | null,
+  model: string,
+  delta: DriverModelUsageSnapshot,
+): DriverModelUsage {
+  const cur = acc?.[model] ?? {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
+  return {
+    ...(acc ?? {}),
+    [model]: {
+      inputTokens: Math.max(0, cur.inputTokens + delta.inputTokens),
+      outputTokens: Math.max(0, cur.outputTokens + delta.outputTokens),
+      cacheReadInputTokens: Math.max(0, cur.cacheReadInputTokens + delta.cacheReadInputTokens),
+      cacheCreationInputTokens: Math.max(
+        0,
+        cur.cacheCreationInputTokens + delta.cacheCreationInputTokens,
+      ),
+    },
+  };
+}
+
+/**
+ * ql-20260910-003：绝对值式覆盖（codex）——桶值直接置为引擎线程累计快照的
+ * 净值化结果（daemon 差分负责轮增量），不与旧值相加。
+ */
+export function setModelUsageSnapshot(
+  acc: DriverModelUsage | null,
+  model: string,
+  abs: DriverModelUsageSnapshot,
+): DriverModelUsage {
+  return {
+    ...(acc ?? {}),
+    [model]: {
+      inputTokens: Math.max(0, abs.inputTokens),
+      outputTokens: Math.max(0, abs.outputTokens),
+      cacheReadInputTokens: Math.max(0, abs.cacheReadInputTokens),
+      cacheCreationInputTokens: Math.max(0, abs.cacheCreationInputTokens),
+    },
+  };
 }
 
 /**

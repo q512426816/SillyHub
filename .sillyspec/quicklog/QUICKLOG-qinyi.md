@@ -72,3 +72,18 @@
 状态：进行中
 关联变更：（无）
 文件：frontend/src/components/group-chat/group-chat-panel.tsx, frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx, backend/app/modules/change/pending_cache.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_pending_cache.py, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/lib/use-agent-run-stream.ts, sillyhub-daemon/src/sillyspec-manager.ts
+
+## ql-20260910-003-0d35 | 2026-09-10 03:33:09 | codex/pi/cursor 用量接按模型明细表——驱动带 modelUsage 会话累计快照
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/driver.ts（DriverModelUsage 类型+helpers）
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（threadModel+快照+result 附带）
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（model_change+快照+result 附带）
+- sillyhub-daemon/src/interactive/cursor-driver.ts（init 模型+快照+result 附带）
+- .sillyspec/docs/sillyhub-daemon/modules/interactive.md（人工备注条目）
+需求：codex/pi/cursor 用量接按模型明细表——驱动带 modelUsage 会话累计快照
+根因：daemon 的 model_usage 差分拆行管线只服务 claude（SDK modelUsage 透传），其余三家 result 无该字段 → agent_run_model_usage 无行、按模型统计页空、api_requests 不写
+方案：InteractiveDriverResult 增 modelUsage（driver.ts 公共类型+helpers）；codex=thread/started 模型+tokenUsage 净值快照覆盖、pi=model_change 模型+message_end 逐调用累加、cursor=init 帧模型+result 帧逐轮累加，失败轮统一附带；daemon.ts/backend 零改动复用既有管线
+结果：相关 5 套件 200 passed（新增 3 条）+ daemon-interactive 58 passed、tsc 0 错误；E2E 实机验证 agent_run_model_usage 行随后执行
+审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/lib/__tests__/use-agent-run-stream.test.ts, sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts, sillyhub-daemon/tests/interactive/cursor-driver.test.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts, sillyhub-daemon/tests/sillyspec-manager.test.ts

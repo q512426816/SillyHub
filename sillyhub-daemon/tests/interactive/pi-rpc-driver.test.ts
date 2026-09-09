@@ -768,6 +768,8 @@ describe('turn 生命周期', () => {
     await tick();
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
+    // ql-20260910-003：pi 启动即发 model_change 带活跃模型（明细行 key）
+    emitEvent(child, { type: 'model_change', modelId: 'glm-5.3' });
     // 调用 1（工具循环首轮）：message_end 携带该调用 usage
     emitEvent(child, {
       type: 'message_end',
@@ -807,6 +809,15 @@ describe('turn 生命周期', () => {
       output_tokens: 30,
       cache_read_tokens: 3000,
       cache_creation_tokens: 30,
+    });
+    // ql-20260910-003：modelUsage 会话累计快照（daemon 差分拆 model_usage 明细行）
+    expect(results[0]!.modelUsage).toEqual({
+      'glm-5.3': {
+        inputTokens: 150,
+        outputTokens: 30,
+        cacheReadInputTokens: 3000,
+        cacheCreationInputTokens: 30,
+      },
     });
     // 上报的 usage 快照事件同步注入轮累计（ledger replace 语义消费正确轮级值）
     const usageEv = events.find((e) => e.type === 'text' && e.usage !== undefined);

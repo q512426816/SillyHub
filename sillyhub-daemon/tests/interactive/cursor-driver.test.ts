@@ -411,6 +411,57 @@ describe('② 多轮 + chatId：第二轮 --resume；result+exit0 携 usage/sess
     await consumeP;
   });
 
+  it('ql-20260910-003：system/init 模型 + result usage 逐轮累进 modelUsage 会话累计快照', async () => {
+    const driver = new CursorDriver();
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = await driver.start(queue, makeOpts());
+    const consumeP = driver.consume(handle, cb);
+
+    // 第 1 轮：init 带 model=Auto，result usage 10/4/2/1
+    push('t1');
+    await waitForAgentSpawnCount(1);
+    agentChildren[0]!._emitLines([
+      systemInitLine(SESSION_ID),
+      assistantLine('a'),
+      resultLine(SESSION_ID),
+    ]);
+    agentChildren[0]!._emitExit(0);
+    await waitUntil(() => results.length === 1);
+    expect(results[0]!.modelUsage).toEqual({
+      Auto: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadInputTokens: 2,
+        cacheCreationInputTokens: 1,
+      },
+    });
+
+    // 第 2 轮：无 init 帧（模型沿用 handle.model），result usage 7/3/5/0 → 累计
+    push('t2');
+    await waitForAgentSpawnCount(2);
+    agentChildren[1]!._emitLines([
+      resultLine(SESSION_ID, {
+        inputTokens: 7,
+        outputTokens: 3,
+        cacheReadTokens: 5,
+        cacheWriteTokens: 0,
+      }),
+    ]);
+    agentChildren[1]!._emitExit(0);
+    await waitUntil(() => results.length === 2);
+    expect(results[1]!.modelUsage).toEqual({
+      Auto: {
+        inputTokens: 17,
+        outputTokens: 7,
+        cacheReadInputTokens: 7,
+        cacheCreationInputTokens: 1,
+      },
+    });
+    close();
+    await consumeP;
+  });
+
   it('ql-20260909-004 畸形 session_id 不采纳为 chatId——下一轮不拼 --resume 坏值', async () => {
     // createChatTimeoutMs 调小：chatId 缺失时每轮先试 create-chat（此处让快速失败）。
     const driver = new CursorDriver({ killGraceMs: 5, createChatTimeoutMs: 30 });
