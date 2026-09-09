@@ -22,7 +22,7 @@ created_at: 2026-08-18 01:45:00
   - task（25，ppm-task）：任务计划（PlanTask）/ 执行（TaskExecute）/ 工时
   - problem（22，ppm-problem）：问题清单 + 问题变更流（4 节点审批）/ 批量导入
   - kanban（13，ppm-kanban）：看板任务 / 评论 / 子任务 / reorder
-  - workbench（5，ppm-workbench）：工作台聚合 profile / summary / calendar / todos（支持切换查看目标用户）
+  - workbench（5，ppm-workbench）：工作台聚合 profile / summary / calendar / todos（支持切换查看目标用户；todos 三源合并分页——问题→变更→任务，COUNT+合并偏移窗口切片+列投影，total 真实值，ql-20260909-015）
 - 数据范围（`data_scope.py`，2026-07-22 权限统一）：
   - 单一可信源 = 项目成员角色：`PpmProjectMember.role_name` 逗号拆分后**精确匹配** 部门经理/项目经理/开发经理/业务经理
   - 超管（is_platform_admin 或 super_admin 角色）→ 看全部

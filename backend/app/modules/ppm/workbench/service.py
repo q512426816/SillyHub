@@ -38,9 +38,9 @@ from app.modules.ppm.workbench.schema import (
     WorkbenchTodoItem,
 )
 
-# 分页待办单源保护上限 (Grill F2):移除 top20 后防极端用户单源膨胀。
-_TODO_SOURCE_LIMIT = 200
 # 默认每页条数 (FR-1 待办分页默认 10 条/页)。
+# ql-20260909-015:单源 200 上限(_TODO_SOURCE_LIMIT)随全量派生切片一并移除——
+# 分页改为三源 COUNT+窗口切片后天然有界,total 也回归真实值(不再 200/源截断)。
 _TODO_DEFAULT_PAGE_SIZE = 10
 
 # 可见用户口径常量 (D-002@v1):复用 data_scope.MANAGER_ROLE_NAMES 避免硬编码漂移。
@@ -416,21 +416,23 @@ class WorkbenchService:
         # (now_handle_user 逗号分隔含我) 任一即算"我的缺陷",与待办列表口径对齐
         # (原仅 duty_user_id=我,审批人/处理人非责任人时漏统计,致"缺陷数量"偏少)。
         # now_handle_user 精确 token 匹配 (性能优化 Wave 2 / E5-6:原裸 like
-        # "%{uid}%" 有 UUID 前缀碰撞过计风险——改 concat(',',..,',') like '%,uid,%'
-        # 精确匹配,与 data_scope.problem_scope_clause 口径一致)。
-        defect_handle = func.concat(",", func.coalesce(PpmProblemList.now_handle_user, ""), ",")
-        defect_stmt = (
-            select(PpmProblemList)
+        # "%{uid}%" 有 UUID 前缀碰撞过计风险)。ql-20260909-015:改裸列 4 分支
+        # LIKE(唯一/开头/结尾/中间),与 data_scope.problem_scope_clause 现口径
+        # 一致——原 concat 包裹形态表达式不可索引(data_scope 同因已改,此处对齐;
+        # 裸列可走 20260909120000 trgm 索引)。
+        defect_count = await self._session.scalar(
+            select(func.count())
+            .select_from(PpmProblemList)
             .where(PpmProblemList.status != "已完成")
             .where(
                 or_(
                     PpmProblemList.duty_user_id == target.id,
-                    defect_handle.like(f"%,{target.id},%"),
+                    PpmProblemList.now_handle_user.like(f"%,{target.id},%"),
+                    PpmProblemList.now_handle_user.like(f"{target.id},%"),
+                    PpmProblemList.now_handle_user.like(f"%,{target.id}"),
+                    PpmProblemList.now_handle_user == str(target.id),
                 )
             )
-        )
-        defect_count = await self._session.scalar(
-            select(func.count()).select_from(defect_stmt.subquery())
         )
         defect_count = int(defect_count or 0)
 
@@ -445,99 +447,152 @@ class WorkbenchService:
         # 待办已移至独立分页端点 GET /workbench/todos (D-003@v1 职责瘦身)。
         return WorkbenchSummary(metrics=metrics)
 
-    async def _derive_todos(self, target: User) -> list[WorkbenchTodoItem]:
-        """派生待办列表(全量有序,供 get_todos 分页切片):① 问题在办
-        (now_handle_user split 匹配);② 问题变更待审批 (status="1" 审核中 且
-        now_handle_user 含我);③ 任务待办 (非已完成的 PlanTask)。
-
-        顺序稳定:问题 → 变更 → 任务(任务内按 start_time 升序)。
-        """
-        todos: list[WorkbenchTodoItem] = []
-        uid_str = str(target.id)
-
-        # ① 问题待办:当前处理人(now_handle_user)含我即显示,不限责任人 duty_user_id
-        # (duty 是责任人,审批人非责任人时也需看到待办)。
-        # 性能优化 Wave 2 / E5-1:原 select(PpmProblemList) 无 where 全表拉取后
-        # Python 过滤,改 SQL where 下推(status != 已完成 + now_handle_user 精确
-        # token 含我),走索引消除全表扫描。精确 token 用 concat(',',..,',')
-        # like '%,uid,%',与原 Python split 语义一致(防 UUID 子串误匹配)。
-        uid_csv = f"%,{uid_str},%"
-        problem_handle = func.concat(",", func.coalesce(PpmProblemList.now_handle_user, ""), ",")
-        problem_stmt = (
-            select(PpmProblemList)
-            .where(PpmProblemList.status != "已完成")
-            .where(problem_handle.like(uid_csv))
-            # 第四批 code-quality：止血全表实体化（now_handle_user 被 concat 包裹致
-            # LIKE 索引失效，无 limit 时全表加载含 pro_desc/remarks 等 Text 大列）。
-            # 对齐 ③ 任务待办。total = 三源 limit 内合并数（待办 200/源足够展示近期）。
-            .limit(_TODO_SOURCE_LIMIT)
-        )
-        for p in (await self._session.execute(problem_stmt)).scalars().all():
-            todos.append(
-                WorkbenchTodoItem(
-                    id=str(p.id),
-                    name=p.pro_desc or p.project_name or "问题待处理",
-                    type="缺陷",
-                    source="problem_audit",
-                )
-            )
-
-        # ② 问题变更待审批:status="1" 审核中 (ProblemChangeStatus.AUDITING,
-        # problem/fsm.py) 且 now_handle_user 含我。同 ① 下推 SQL where。
-        change_handle = func.concat(",", func.coalesce(PpmProblemChange.now_handle_user, ""), ",")
-        change_stmt = (
-            select(PpmProblemChange)
-            .where(PpmProblemChange.status == "1")
-            .where(change_handle.like(uid_csv))
-            .limit(_TODO_SOURCE_LIMIT)  # 第四批 code-quality：止血全表实体化（同 ①）
-        )
-        for c in (await self._session.execute(change_stmt)).scalars().all():
-            todos.append(
-                WorkbenchTodoItem(
-                    id=str(c.id),
-                    name=c.pro_desc or c.project_name or "问题变更待审批",
-                    type="缺陷",
-                    source="problem_change",
-                )
-            )
-
-        # ③ 任务待办:非已完成,按 start_time 升序(保护上限 _TODO_SOURCE_LIMIT)
-        task_stmt = (
-            select(PlanTask)
-            .where(PlanTask.user_id == target.id)
-            .where(PlanTask.status != "已完成")
-            .order_by(PlanTask.start_time.asc())
-            .limit(_TODO_SOURCE_LIMIT)
-        )
-        task_rows = (await self._session.execute(task_stmt)).scalars().all()
-        for t in task_rows:
-            todos.append(
-                WorkbenchTodoItem(
-                    id=str(t.id),
-                    name=t.content or t.project_name or "任务待办",
-                    type="任务",
-                    source="plan_task",
-                )
-            )
-
-        return todos
-
     async def get_todos(
         self,
         target: User,
         page: int = 1,
         page_size: int = _TODO_DEFAULT_PAGE_SIZE,
     ) -> Page[WorkbenchTodoItem]:
-        """分页待办(FR-1 / D-001@v1):全量派生后按 (page, page_size) 切片。
+        """分页待办(FR-1 / D-001@v1):三源合并有序分页。
 
-        total = 全量长度(三源合并),items = 切片。page<1 兜底为 1。
+        三源(合并次序固定):① 问题在办(now_handle_user 含我,status!=已完成);
+        ② 问题变更待审批(status="1" 审核中且 now_handle_user 含我);③ 任务待办
+        (user_id=我,status!=已完成,源内按 start_time 升序)。①②源内按
+        created_at 升序(原为 DB 不定序,显式化保翻页稳定)。
+
+        ql-20260909-015:原「全量派生(三源各 ≤200 行整实体,含 pro_desc/
+        remarks 等 Text 大列)后内存切片」,每翻一页(默认 10 条)都重跑三源
+        全量查询。改:三源轻量 COUNT(真实 total,替代原 200/源截断语义) +
+        按合并偏移逐源窗口切片(每页只物化涉及行) + 列投影(仅 id/名称列,
+        不拉 remarks/file_urls 等大列)。now_handle_user 匹配为裸列 4 分支
+        LIKE(与 data_scope 现口径一致,可走 trgm 索引)。
         """
-        all_todos = await self._derive_todos(target)
-        total = len(all_todos)
+        uid_str = str(target.id)
+
+        def _handle_match(col: object) -> object:
+            """now_handle_user 精确 token 含我(裸列 4 分支,防 UUID 子串误匹配)。"""
+            return or_(
+                col.like(f"%,{uid_str},%"),
+                col.like(f"{uid_str},%"),
+                col.like(f"%,{uid_str}"),
+                col == uid_str,
+            )
+
+        problem_where = [
+            PpmProblemList.status != "已完成",
+            _handle_match(PpmProblemList.now_handle_user),
+        ]
+        change_where = [
+            PpmProblemChange.status == "1",
+            _handle_match(PpmProblemChange.now_handle_user),
+        ]
+        task_where = [
+            PlanTask.user_id == target.id,
+            PlanTask.status != "已完成",
+        ]
+
+        # 三源 COUNT(索引扫;PG 走 status/trgm/复合索引,量级毫秒)→ 真实 total。
+        problem_count = int(
+            await self._session.scalar(
+                select(func.count()).select_from(PpmProblemList).where(*problem_where)
+            )
+            or 0
+        )
+        change_count = int(
+            await self._session.scalar(
+                select(func.count()).select_from(PpmProblemChange).where(*change_where)
+            )
+            or 0
+        )
+        task_count = int(
+            await self._session.scalar(
+                select(func.count()).select_from(PlanTask).where(*task_where)
+            )
+            or 0
+        )
+        total = problem_count + change_count + task_count
+
         page = max(page, 1)
         page_size = max(page_size, 1)
         offset = (page - 1) * page_size
-        items = all_todos[offset : offset + page_size]
+        limit = page_size
+
+        items: list[WorkbenchTodoItem] = []
+
+        # 合并偏移 [offset, offset+limit) 与源区间 [base, base+count) 的交集窗口
+        # → 源内相对 (rel_offset, rel_limit);无交集跳过该源(零查询)。
+        def _window(base: int, count: int) -> tuple[int, int] | None:
+            start = max(offset, base)
+            end = min(offset + limit, base + count)
+            if start >= end:
+                return None
+            return start - base, end - start
+
+        problem_window = _window(0, problem_count)
+        if problem_window is not None:
+            stmt = (
+                select(
+                    PpmProblemList.id,
+                    PpmProblemList.pro_desc,
+                    PpmProblemList.project_name,
+                )
+                .where(*problem_where)
+                .order_by(PpmProblemList.created_at.asc(), PpmProblemList.id.asc())
+                .offset(problem_window[0])
+                .limit(problem_window[1])
+            )
+            for row in (await self._session.execute(stmt)).all():
+                items.append(
+                    WorkbenchTodoItem(
+                        id=str(row.id),
+                        name=row.pro_desc or row.project_name or "问题待处理",
+                        type="缺陷",
+                        source="problem_audit",
+                    )
+                )
+
+        change_window = _window(problem_count, change_count)
+        if change_window is not None:
+            stmt = (
+                select(
+                    PpmProblemChange.id,
+                    PpmProblemChange.pro_desc,
+                    PpmProblemChange.project_name,
+                )
+                .where(*change_where)
+                .order_by(PpmProblemChange.created_at.asc(), PpmProblemChange.id.asc())
+                .offset(change_window[0])
+                .limit(change_window[1])
+            )
+            for row in (await self._session.execute(stmt)).all():
+                items.append(
+                    WorkbenchTodoItem(
+                        id=str(row.id),
+                        name=row.pro_desc or row.project_name or "问题变更待审批",
+                        type="缺陷",
+                        source="problem_change",
+                    )
+                )
+
+        task_window = _window(problem_count + change_count, task_count)
+        if task_window is not None:
+            stmt = (
+                select(PlanTask.id, PlanTask.content, PlanTask.project_name)
+                .where(*task_where)
+                .order_by(PlanTask.start_time.asc(), PlanTask.id.asc())
+                .offset(task_window[0])
+                .limit(task_window[1])
+            )
+            for row in (await self._session.execute(stmt)).all():
+                items.append(
+                    WorkbenchTodoItem(
+                        id=str(row.id),
+                        name=row.content or row.project_name or "任务待办",
+                        type="任务",
+                        source="plan_task",
+                    )
+                )
+
         return Page[WorkbenchTodoItem](
             items=items,
             total=total,
