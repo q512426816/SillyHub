@@ -2564,16 +2564,9 @@ export function SessionPanelPage({
           </div>
         </div>
 
-        {/* 输入区（同构）：ctx 用量行 + 完整输入（含附件，引擎门控同构 D-6）。 */}
-        <div className="flex shrink-0 flex-col bg-card">
-          <div className="px-5 pt-3">
-            <CtxUsageBar
-              usedTokens={null}
-              roleMapping={null}
-              fallbackModel={null}
-              providerId={preProviderId || null}
-            />
-          </div>
+        {/* 输入区（同构）：输入框 + 配置条（ql-20260909-006：ctx 用量行收进
+            配置条行尾插槽，输入区顶部间距由容器 pt-3 保持）。 */}
+        <div className="flex shrink-0 flex-col bg-card pt-3">
           {/* task-13（FR-05/D-009@v2）：预会话团队触发行解禁——门控与真会话
               同构（claude 引擎 + 所选机器在线）；弹层确认后 payload 暂存
               （handlePreTeamTrigger，含主 agent 选择器的 orchestrator_workspace_id），
@@ -2663,6 +2656,15 @@ export function SessionPanelPage({
               }}
               // D-002@v1：模型暂存专用回调（onProvisionalSwitch 二分收值会误写档案）。
               onProvisionalModelSwitch={setPreModelId}
+              // ql-20260909-006：ctx 用量（未知态圆环+额度胶囊）同样收进行尾插槽。
+              trailing={
+                <CtxUsageBar
+                  usedTokens={null}
+                  roleMapping={null}
+                  fallbackModel={null}
+                  providerId={preProviderId || null}
+                />
+              }
             />
           </div>
           {/* R-02：创建失败内联错误（输入保留在上框，点发送即重试）。 */}
@@ -3291,18 +3293,10 @@ export function SessionPanelPage({
         </p>
       )}
 
-      {/* 输入区：ctx 用量行 + 输入框 + 配置控件条（原型 .input-zone） */}
-      <div className="flex shrink-0 flex-col bg-card">
-        <div className="px-5 pt-3">
-          <CtxUsageBar
-            usedTokens={usedTokens}
-            roleMapping={ctxRoleMapping}
-            fallbackModel={ctxFallbackModel}
-            windowOverride={session?.ctx_window_tokens ?? null}
-            onWindowOverrideChange={handleCtxWindowOverrideChange}
-            providerId={session.llm_provider_id ?? null}
-          />
-        </div>
+      {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：
+          ctx 用量行（圆环+额度胶囊）自输入框上方独占行收进配置条行尾插槽
+          （trailing），不再独占一行；输入区顶部间距由容器 pt-3 保持。 */}
+      <div className="flex shrink-0 flex-col bg-card pt-3">
         {/* task-03（design §3.2）：排队消息条——输入框上方水平 chips（空队列组件
             自返回 null 不占位）。onRemove 顺带清理附件元数据镜像（D-004），防
             删除条目后残留；onRetry 仅用户触发（D-003，hook 内 failed→pending 后
@@ -3426,6 +3420,18 @@ export function SessionPanelPage({
             engine={session.provider ?? null}
             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
             providerOpenSignal={configProviderSignal}
+            // ql-20260909-006：ctx 用量圆环+额度胶囊收进配置条行尾插槽（原输入框
+            // 上方独占行——孤零零一整行很突兀）。
+            trailing={
+              <CtxUsageBar
+                usedTokens={usedTokens}
+                roleMapping={ctxRoleMapping}
+                fallbackModel={ctxFallbackModel}
+                windowOverride={session?.ctx_window_tokens ?? null}
+                onWindowOverrideChange={handleCtxWindowOverrideChange}
+                providerId={session.llm_provider_id ?? null}
+              />
+            }
             onSwitched={() => {
               // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips + runsMeta
               // （立即显示新 whoLine，不等重进页面）。F7：mountedRef 守卫——

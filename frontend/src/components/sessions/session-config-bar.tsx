@@ -163,6 +163,12 @@ export interface SessionConfigBarProps {
    * （running/ended/Codex）时不响应。0/不传 = 无动作（零回归）。
    */
   providerOpenSignal?: number;
+  /**
+   * ql-20260909-006：行最右侧插槽（缺省 null 零占位）——会话面板挂
+   * CtxUsageBar（上下文用量圆环 + 额度胶囊，自输入框上方独占行收进本行；
+   * 与 running 解锁提示同行，running 提示优先占位时插槽仍在其右）。
+   */
+  trailing?: React.ReactNode;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -203,6 +209,7 @@ export function SessionConfigBar({
   provisional,
   onProvisionalSwitch,
   onProvisionalModelSwitch,
+  trailing,
   providerOpenSignal = 0,
 }: SessionConfigBarProps) {
   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
@@ -595,6 +602,10 @@ export function SessionConfigBar({
             本轮完成后解锁切换
           </span>
         )}
+        {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。 */}
+        {trailing != null ? (
+          <span className="inline-flex shrink-0 items-center">{trailing}</span>
+        ) : null}
       </div>
     </div>
   );

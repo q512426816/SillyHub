@@ -250,6 +250,24 @@ describe("SessionConfigBar 状态置灰", () => {
       screen.getByRole("button", { name: "配置-供应商 本机默认" }),
     ).toHaveAttribute("title", "供应商（不选=本机默认配置）");
   });
+  // ql-20260909-006：trailing 行尾插槽（会话面板挂 ctx 用量圆环）——
+  // 传入渲染在配置条行最右；不传零占位。
+  it("trailing 插槽：传入内容渲染在行尾（running 提示之右），不传零占位", () => {
+    renderBar({
+      running: true,
+      trailing: <span data-testid="trailing-slot-content">用量 12%</span>,
+    });
+    const slot = screen.getByTestId("trailing-slot-content");
+    expect(slot).toBeInTheDocument();
+    // 与 running 解锁提示同行——共享同一行容器（flex 行）。
+    expect(
+      slot.closest("div")?.contains(screen.getByText("本轮完成后解锁切换")),
+    ).toBe(true);
+
+    cleanup();
+    renderBar();
+    expect(screen.queryByTestId("trailing-slot-content")).toBeNull();
+  });
 });
 
 // ── 4. 供应商切换（含「不指定」空串语义，task-16 契约） ───────────────────

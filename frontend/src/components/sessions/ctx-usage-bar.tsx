@@ -412,7 +412,8 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
   );
 }
 
-// ── CtxUsageBar：组装（输入框上方一行，原型 .ctx-bar）────────────────────
+// ── CtxUsageBar：组装（ql-20260909-006：自输入框上方独占行收进配置条行最右侧
+// trailing 插槽——圆环+额度胶囊与会话配置行语义同属状态信息，独占行突兀）────
 
 export interface CtxUsageBarProps extends CtxUsageRingProps {
   /** 传给 QuotaPill 的当前供应商 id（null=本机默认，胶囊不渲染）。 */
@@ -424,7 +425,7 @@ export function CtxUsageBar({
   ...ringProps
 }: CtxUsageBarProps) {
   return (
-    <div className="mb-1.5 flex min-h-7 items-center gap-2.5">
+    <div className="flex items-center gap-2.5">
       <CtxUsageRing {...ringProps} />
       <QuotaPill providerId={providerId} />
     </div>
