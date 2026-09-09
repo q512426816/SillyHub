@@ -90,7 +90,15 @@ execute 完成时，每个 task 必须有 `review.json` 且 verdict 通过，否
 
 - `base` / `head` 必须是**真实 git commit**（`git rev-parse --verify`），否则判伪造并阻断。`changedFiles` 与实际 `git diff base..head` 完全不相交也判伪造。base..head 空 commit diff 但 working-tree 有未提交改动 → 视为有效改动（warning 不阻断）。
 
-> 🔧 **mechanics 字段不要手算**：`schemaVersion`/`task`/`base`/`head`/`changedFiles`(/跨仓 `repo`) 全部可由 CLI 从 git + task 卡推导。子代理/你只需写**语义字段**（`specVerdict`/`qualityVerdict`/`reviewerNotes`/`requiredEvidence`），mechanics 字段可以瞎填占位（如 `"base": "TODO"`），写完跑 `sillyspec backfill-reviews --change <变更名> --adopt` 一键重算代填（verdict 原样保留）。gate 拦下 mechanics 错误时也跑同一条命令修复。
+> 🔧 **首选命令式写入（2026-09-07 起）——不要手拼 JSON**：
+>
+> ```bash
+> sillyspec review write --change <变更名> --task task-NN --spec pass --quality pass --notes "评审备注"
+> ```
+>
+> verdict/notes/evidence 由你给；`schemaVersion`/路径目录/`execute-run-id`/`base`/`head`/`changedFiles`/`diffPaths` 全由 CLI 从 git + task 卡代算，写完即过 schema。`cannot_verify` 必须加 `--evidence "..."`；归属切片为空（改了声明外文件 / 纯验证任务）时 CLI 会报错列出 diff 候选——确认后用 `--changed-files <a,b>` 显式给出（纯验证任务 `--changed-files ""` 空覆盖 + evidence 披露）；已存在的 review 拒覆盖，`--force` 越过。
+>
+> 手写整文件仍是兼容路径：mechanics 字段勿手算——可瞎填占位（如 `"base": "TODO"`），写完跑 `sillyspec backfill-reviews --change <变更名> --adopt` 一键重算代填（verdict 原样保留）；gate 拦下 mechanics 错误时也跑同一条命令修复。
 
 - 后端 router task 另需产出 API 端点清单：`sillyspec endpoints extract --change <变更名> --task <task-NN>`（CLI 静态扫描 FastAPI/Express/Spring 路由装饰器生成 endpoints.json，verify 探针 5 消费；扫描面默认取 task 卡 allowed_paths ∪ design 清单，也可 `--dir`/`--files` 显式指定）。勿手扫装饰器手写——易漏 endpoint。
 
@@ -118,7 +126,7 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
   }
   ```
 
-- `docHash` = `sha256(主审查文档内容)`（hex）—— execute 主审查文档是 `design.md`，即 `reviewedFiles[0]`。CLI 会重算 sha256 比对，不符判伪造（fail-closed）；找不到主文档也 fail。**docHash 可先占位（如 "TODO"）勿手算**——改 design.md 后跑 `sillyspec register-stage-review --change <变更名> --stage execute --refresh-hash` 一键重算代填（verdict 保留；design 改版多阶段联动加 --all）；gate 拦 docHash 失配时也用同一条命令修复。
+- `docHash` = `sha256(主审查文档内容)`（hex）—— execute 主审查文档是 `design.md`，即 `reviewedFiles[0]`。CLI 会重算 sha256 比对，不符判伪造（fail-closed）；找不到主文档也 fail。**docHash 可先占位（如 "TODO"）勿手算**——改 design.md 后跑 `sillyspec register-stage-review --change <变更名> --stage execute --refresh-hash` 一键重算代填（verdict 保留；design 改版多阶段联动加 --all）。忘跑也不会被拦：gate 检测到「仅 docHash 失配」时自动机械重算放行（verdict 保留 + 审计行留痕）；schema/verdict 错误照常 fail-closed。
 - `tier=independent` 时必须由独立 QA 子代理产出该 review.json（独立上下文，不共享实现者分析）；`tier=self`（变更 ≤3 文件）降级为当前 agent 自审。
 - **审查范围分级**（tier=independent 时省重复消耗）：Task Review Gate 已产出 review.json 且 specVerdict/qualityVerdict 双 pass 的 task，QA 子代理只抽查（读 1-2 个核心 diff 文件抽验 reviewerNotes 与实际改动相符）；fail/cannot_verify/缺失的 task 全量重审。三项始终必查：跨 task 交界、design.md 整体对照、组装行为（全量测试/构建/启动）——task review 只看单 task diff，覆盖不到这三项。
 - 该 acceptance review 同时覆盖"代码审查"视角，后续代码审查步骤仅需轻量复审。

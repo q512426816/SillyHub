@@ -5,66 +5,17 @@ description: 恢复工作 — 从中断处继续
 
 ## 交互规范
 
-**当需要用户从多个选项中做出选择时，必须使用 Claude Code 内置的 AskUserQuestion 工具，将选项传入。**
-
-不要用编号列表让用户手动输入数字。
-如果需要自由输入，在 AskUserQuestion 的选项中加入"Other（自定义输入）"。
-
----
-
-你现在是 SillySpec 的恢复管理器。
+**当需要用户从多个选项中做出选择时，必须使用 Claude Code 内置的 AskUserQuestion 工具，将选项传入。** 不要用编号列表让用户手动输入数字。需要自由输入时在选项中加入"Other（自定义输入）"。
 
 ## 流程
 
-### 1. 读取进度
+1. **读进度**：跑 `sillyspec progress show`。
+2. **有活跃变更**：把当前状态（变更/阶段/步骤）转述给用户，用 AskUserQuestion 问「直接继续执行下一步 / 查看更多细节」。
+3. **无活跃变更**：跑 `sillyspec next`——CLI 已内置全套探测（文件存在性 → 推断阶段 → 建议命令 + 依据），按输出转述并执行建议命令。勿自行 ls/cat 重算（输出与实际不符时才手工核对）。
 
-```bash
-sillyspec progress show
-```
+## 关键原则
 
-### 2. 如果有活跃变更
+- 进度存 SQLite（`.sillyspec/.runtime/sillyspec.db`），随 `sillyspec run <stage> --done` 自动更新，不需要手动保存、不需要从中途状态"恢复文件"——直接续跑即可。
 
-从 `sillyspec progress show` 输出中提取并展示当前状态。
-
-然后问用户：
-   1. 直接继续执行下一步
-   2. 查看更多细节
-
-### 3. 如果没有活跃变更
-
-> 🔧 优先跑 `sillyspec next`——CLI 已内置下方探测表，直接输出「状态 + 下一步命令 + 依据」，按输出执行；异常时才按下方手工探测兜底。
-
-自动探测项目状态：
-
-```bash
-# 检查活跃变更
-ls -d .sillyspec/changes/*/ | grep -v archive 2>/dev/null
-
-# 检查大需求拆分
-ls .sillyspec/changes/*/MASTER.md 2>/dev/null
-
-# 检查扫描文档
-ls .sillyspec/docs/*/scan/ 2>/dev/null | wc -l
-
-# 检查需求/路线图
-cat .sillyspec/REQUIREMENTS.md 2>/dev/null
-cat .sillyspec/ROADMAP.md 2>/dev/null
-```
-
-根据探测结果推断：
-
-| 探测到的文件 | 推断阶段 | 建议操作 |
-|---|---|---|
-| 无任何 .sillyspec/ 内容 | 未开始 | `/sillyspec:init` 或 `/sillyspec:scan` |
-| 有 docs/ 但缺失文档 | 扫描中断 | `/sillyspec:scan`（断点续扫） |
-| 有 docs/ 7 份齐全但无 changes/ | 已扫描，未开始需求 | `/sillyspec:brainstorm "想法"` |
-| 有 REQUIREMENTS.md 但无 changes/ | 绿地项目，已有需求 | `/sillyspec:brainstorm "想法"` |
-| changes/ 下有 proposal + design，无 plan.md | 已有规范，待计划 | `/sillyspec:plan` |
-| changes/ 下有 plan.md，tasks 有未完成项 | 执行中 | `/sillyspec:execute` |
-| tasks.md / plan.md 全部 checkbox 已勾选 | 待验证 | `/sillyspec:verify` |
-| 已验证通过 | 待归档 | `/sillyspec:archive` |
-
-### 4. 关键原则
-
-- 进度数据存储在 SQLite 数据库中（`.sillyspec/.runtime/sillyspec.db`），通过 `sillyspec progress show` 命令查看
-- 进度随 `sillyspec run <stage> --done` 自动更新，不需要手动保存
+## 用户指令
+$ARGUMENTS

@@ -69,7 +69,7 @@ plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_
   }
   ```
 
-- `docHash` = `sha256(主审查文档内容)`（hex）—— plan 主文档是 `plan.md`（`reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。docHash 可先占位（如 "TODO"）；改 plan.md 后勿手算 sha256——跑 `sillyspec register-stage-review --change <变更名> --stage plan --refresh-hash` 一键重算代填（verdict 保留；多阶段联动加 --all）。`tier=self`（≤3 文件）降级为当前 agent 自审。
+- `docHash` = `sha256(主审查文档内容)`（hex）—— plan 主文档是 `plan.md`（`reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。docHash 可先占位（如 "TODO"）；改 plan.md 后勿手算 sha256——跑 `sillyspec register-stage-review --change <变更名> --stage plan --refresh-hash` 一键重算代填（verdict 保留；多阶段联动加 --all）。忘跑也不会被拦：gate 检测到「仅 docHash 失配」时自动机械重算放行（verdict 保留 + 审计行留痕）；schema/verdict 错误照常 fail-closed。`tier=self`（≤3 文件）降级为当前 agent 自审。
 - 运行时 CLI 会把精确 schema 表 + 完整 JSON 示例 + docHash 算法注入到该步 prompt，以你实际收到的注入版契约为权威逐字模板。
 
 ### 契约门控（阻断完成）
