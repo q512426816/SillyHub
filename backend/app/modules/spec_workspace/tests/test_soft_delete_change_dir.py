@@ -319,6 +319,12 @@ class TestCliTombstoneWiring:
         ):
             await svc.apply_ops(ws.id, [_op("add", path, content=_b64(text))])
 
+        # ql-20260909-021：apply_ops 自动触发的后台 reparse 先排空——防与下方墓碑
+        # 收敛（soft_delete_change_dir）并发互踩（并行跑下偶发 flaky）。
+        from app.modules.spec_workspace.service import drain_reparse_workers
+
+        await drain_reparse_workers()
+
         result = await PlatformSyncService(db_session).upsert_progress(
             ws.id,
             "tomb_change",

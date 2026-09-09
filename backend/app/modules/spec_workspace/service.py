@@ -49,6 +49,48 @@ from app.modules.spec_workspace.schema import (
 
 log = get_logger(__name__)
 
+# ── reparse 调度器状态（ql-20260909-021 根治三件套，见 _trigger_change_reparse）──
+# 进程内模块级：节流窗（workspace → 上次启动单调时刻）+ single-flight 集合 +
+# 尾随累积（workspace → 合并 (change_dirs, ops)）+ 后台任务强引用集合（防 GC）。
+# 测试用 drain_reparse_workers 排空；_REPARSE_MIN_INTERVAL_SECONDS 可 monkeypatch。
+_REPARSE_MIN_INTERVAL_SECONDS = 120.0
+_reparse_last_run: dict[uuid.UUID, float] = {}
+_reparse_inflight: set[uuid.UUID] = set()
+_reparse_pending: dict[uuid.UUID, tuple[list[str], list[FileOp]]] = {}
+_reparse_trailing_timers: set[uuid.UUID] = set()
+_reparse_bg_tasks: set["asyncio.Task[object]"] = set()
+
+
+# 测试直通开关（ql-20260909-021）：True 时 _trigger_change_reparse 同步 await
+# 执行（旧语义）——既有 140+ 用例的"push 后立即可见"断言零竞态；生产（不设
+# env）恒 False 走后台调度。backend/conftest.py 顶部统一 setdefault，不用
+# autouse fixture（实测会干扰 pytest-asyncio 异步 fixture 的 teardown 时序）。
+_REPARSE_INLINE = os.environ.get("SILLYHUB_TEST_REPARSE_INLINE") == "1"
+
+
+def reset_reparse_scheduler() -> None:
+    """清空调度器全部模块级状态（测试隔离用；生产勿调）。
+
+    清态前不等待在飞任务——调用方（测试 fixture）应在 teardown/setup 边界
+    使用：setup 清态保证本用例不被前用例的节流窗/尾随定时器串扰。
+    """
+    _reparse_last_run.clear()
+    _reparse_inflight.clear()
+    _reparse_pending.clear()
+    _reparse_trailing_timers.clear()
+
+
+async def drain_reparse_workers() -> None:
+    """排空后台 reparse / 尾随定时器任务（测试断言前调用；停机钩子亦可复用）。
+
+    尾随定时器 sleep 的是节流间隔——测试侧先 ``monkeypatch`` 缩短
+    ``_REPARSE_MIN_INTERVAL_SECONDS`` 再 drain，否则会等满一个窗。
+    循环 drain：尾随 fire 可能再起 reparse 任务（合并补发），直到集合清空。
+    """
+    while _reparse_bg_tasks:
+        await asyncio.gather(*list(_reparse_bg_tasks), return_exceptions=True)
+
+
 # Error code for invalid sync tar payloads (path traversal, corrupt tar, etc.).
 # Reused via AppError instances to avoid extending errors.py (task allowed_paths).
 SPEC_BUNDLE_INVALID_CODE = "HTTP_422_SPEC_BUNDLE_INVALID"
@@ -2485,16 +2527,73 @@ class SpecWorkspaceService:
         change_dirs: list[str],
         ops: list[FileOp],
     ) -> None:
-        """事务外 best-effort 触发 change reparse（R-04 / D-005）。
+        """调度 change reparse（R-04 / D-005；ql-20260909-021 根治改造）。
 
-        独立 ``get_session_factory()`` 短生命周期 session（不动 apply 主事务，对齐
-        ``_bump_files_processed`` 范式）。scope 计算见 ``_compute_reparse_scope``。
-        无 changes 相关路径 → 零触发（R-01：避免增量同步频繁空转 reparse）。
+        生产实证（2026-09-09 阿里云 4 小时全站 30s 超时）：原实现把 reparse
+        同步 await 在 push 应用路径上——agent 长会话期间 daemon 每 60-90s push
+        一次 spec 进度，每次都触发 scoped reparse（读目录 + 解析 + DB 写回），
+        2 核/1.6G 机器上被拖到几十秒，push 响应超时 → daemon 重试 → 更高频触发
+        的恶性循环；叠加 to_thread 扫描线程的 GIL 争抢把事件循环饿出 500ms-18s
+        blocked，全站请求排队超时。
+
+        三件套（正交）：
+        - **摘出关键路径**：reparse 一律后台任务（create_task 全异常自包），
+          push 响应毫秒级返回，恶性循环源消灭；
+        - **120s 节流 + 尾随补发**：同 workspace 窗内触发跳过并累积
+          (change_dirs, ops)，窗到点补一发合并 scoped reparse——执行频率从
+          每 60-90s 降到每 ~interval 一次，末次变更的新鲜度最多延迟一个窗
+          （变更中心列表晚 2 分钟可见，无感知）；
+        - **single-flight**：上次 reparse 未完成时新触发同样跳过 + 尾随，
+          防重入堆积。
+
+        scope 计算见 ``_compute_reparse_scope``；无 changes 相关路径零触发
+        （R-01）。测试确定性见 :func:`drain_reparse_workers`（断言前排空
+        后台任务；节流间隔模块常量可 monkeypatch）。
         """
         scope, archive_hit = self._compute_reparse_scope(change_dirs, ops)
         if not archive_hit and not scope:
             return  # 零触发
 
+        if _REPARSE_INLINE:
+            await self._run_reparse_once(workspace_id, archive_hit, scope)
+            return
+
+        now = time.monotonic()
+        last = _reparse_last_run.get(workspace_id)
+        if workspace_id in _reparse_inflight or (
+            last is not None and now - last < _REPARSE_MIN_INTERVAL_SECONDS
+        ):
+            self._enqueue_trailing_reparse(workspace_id, change_dirs, ops)
+            return
+        _reparse_last_run[workspace_id] = now
+        self._spawn_bg_reparse(workspace_id, archive_hit, scope)
+
+    def _spawn_bg_reparse(
+        self, workspace_id: uuid.UUID, archive_hit: bool, scope: list[str]
+    ) -> None:
+        """起后台 reparse 任务（single-flight 标记在 finally 复位）。"""
+
+        async def _runner() -> None:
+            try:
+                await self._run_reparse_once(workspace_id, archive_hit, scope)
+            except Exception as exc:
+                log.warning(
+                    "spec_workspace.reparse_bg_failed",
+                    workspace_id=str(workspace_id),
+                    error=str(exc),
+                )
+            finally:
+                _reparse_inflight.discard(workspace_id)
+
+        _reparse_inflight.add(workspace_id)
+        task = asyncio.create_task(_runner())
+        _reparse_bg_tasks.add(task)
+        task.add_done_callback(_reparse_bg_tasks.discard)
+
+    async def _run_reparse_once(
+        self, workspace_id: uuid.UUID, archive_hit: bool, scope: list[str]
+    ) -> None:
+        """单次 reparse 执行体（inline 直通 / 后台 runner 共用）。"""
         from app.core.db import get_session_factory
         from app.modules.change.service import ChangeService
 
@@ -2509,4 +2608,35 @@ class SpecWorkspaceService:
             scoped=not archive_hit,
             scope=scope,
             stats=stats,
+            deferred=not _REPARSE_INLINE,
         )
+
+    def _enqueue_trailing_reparse(
+        self, workspace_id: uuid.UUID, change_dirs: list[str], ops: list[FileOp]
+    ) -> None:
+        """节流窗内/single-flight 跳过时的尾随登记：合并累积，窗到点补一发。
+
+        每 workspace 至多一个尾随定时器（fire 前 pop 累积输入递归走调度入口
+        ——届时窗已过直接执行；若恰逢 inflight 则再次登记，无死循环）。
+        """
+        dirs, merged_ops = _reparse_pending.get(workspace_id, ([], []))
+        _reparse_pending[workspace_id] = (
+            dirs + list(change_dirs),
+            merged_ops + list(ops),
+        )
+        if workspace_id in _reparse_trailing_timers:
+            return
+        _reparse_trailing_timers.add(workspace_id)
+
+        async def _fire() -> None:
+            try:
+                await asyncio.sleep(_REPARSE_MIN_INTERVAL_SECONDS)
+            finally:
+                _reparse_trailing_timers.discard(workspace_id)
+            pending = _reparse_pending.pop(workspace_id, None)
+            if pending is not None:
+                await self._trigger_change_reparse(workspace_id, pending[0], pending[1])
+
+        task = asyncio.create_task(_fire())
+        _reparse_bg_tasks.add(task)
+        task.add_done_callback(_reparse_bg_tasks.discard)

@@ -65,6 +65,13 @@ delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False（30 天机会式
 落盘 commit 后（事务外 best-effort）触发 change reparse：
   change_dirs 标注 → scoped；无标注扫 changes/ 前缀兜底；
   含 archive 路径 → 全量；零 changes 路径零触发（R-01 防空转）
+  ql-20260909-021 根治三件套（生产实证 2026-09-09 阿里云 4h 全站超时）：
+  ①reparse 一律后台任务（push 响应毫秒级返回——原同步 await 在 push 路径，
+  agent 长会话 60-90s/次 push 全跑 reparse，慢机器上恶性循环）②同 workspace
+  120s 节流+尾随补发（窗内跳过累积，到点合并补一发，末次变更最多延迟一个窗
+  可见）③single-flight（inflight 跳过+尾随）。测试直通开关
+  SILLYHUB_TEST_REPARSE_INLINE=1（backend/conftest 顶部 setdefault，生产不设）
+  保持旧同步语义；调度行为由 test_reparse_scheduler.py 专测。
 ```
 - 全量路径 `_write_spec_root` / `apply_sync`：tar 解包 staging →
   逐文件 read+sha256 校验落盘 → 两阶段 reparse（scan_docs + change）

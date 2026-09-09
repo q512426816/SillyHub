@@ -31,6 +31,7 @@ from sqlalchemy import select
 from app.modules.change.model import Change
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.spec_workspace.schema import FileOp
+from app.modules.spec_workspace.service import drain_reparse_workers
 from app.modules.workspace.model import Workspace
 
 
@@ -135,6 +136,10 @@ class TestAnnotatedScopedTrigger:
         assert resp.status_code == 200, resp.text
         assert resp.json()["ok"] is True
 
+        await drain_reparse_workers()
+
+        await drain_reparse_workers()
+
         change = await _fetch_change(db_session, ws.id, "2026-08-15-foo")
         assert change is not None
         assert change.title == "Foo"
@@ -179,6 +184,7 @@ class TestAnnotatedScopedTrigger:
             },
         )
         assert resp.status_code == 200, resp.text
+        await drain_reparse_workers()
 
         # B 行保留（scoped 零删除红线）；A 行更新
         assert await _fetch_change(db_session, ws.id, "2026-08-14-remove") is not None
@@ -217,6 +223,7 @@ class TestFallbackPathDetection:
         )
         assert resp.status_code == 200, resp.text
 
+        await drain_reparse_workers()
         change = await _fetch_change(db_session, ws.id, "2026-08-16-bar")
         assert change is not None
         assert change.title == "Bar"
@@ -241,6 +248,8 @@ class TestFallbackPathDetection:
         )
         assert resp.status_code == 200, resp.text
         mock.assert_not_awaited()
+
+        await drain_reparse_workers()
 
 
 # ===========================================================================
@@ -278,6 +287,8 @@ class TestArchivePathScoping:
         )
         assert resp.status_code == 200, resp.text
         mock.assert_awaited_once()
+
+        await drain_reparse_workers()
         # scoped：scope 为归档 name 列表，非 None（全量）
         assert mock.await_args.kwargs.get("scope") == ["2026-08-13-old"]
 
@@ -311,6 +322,8 @@ class TestArchivePathScoping:
         )
         assert resp.status_code == 200, resp.text
         mock.assert_awaited_once()
+
+        await drain_reparse_workers()
         assert mock.await_args.kwargs.get("scope") is None
 
     async def test_archive_delete_op_triggers_full_reparse(
@@ -341,6 +354,8 @@ class TestArchivePathScoping:
         )
         assert resp.status_code == 200, resp.text
         mock.assert_awaited_once()
+
+        await drain_reparse_workers()
         assert mock.await_args.kwargs.get("scope") is None
 
     async def test_archive_change_dirs_entry_goes_scoped(
@@ -374,6 +389,8 @@ class TestArchivePathScoping:
         )
         assert resp.status_code == 200, resp.text
         mock.assert_awaited_once()
+
+        await drain_reparse_workers()
         assert mock.await_args.kwargs.get("scope") == ["2026-08-13-old", "2026-08-14-live"]
 
     async def test_archive_full_reparse_still_deletes(
@@ -409,7 +426,9 @@ class TestArchivePathScoping:
             },
         )
         assert resp.status_code == 200, resp.text
+        await drain_reparse_workers()
         assert await _fetch_change(db_session, ws.id, "2026-08-14-gone") is None
+
         # 归档变更经全量 reparse 落行
         assert await _fetch_change(db_session, ws.id, "2026-08-13-old") is not None
 
@@ -450,6 +469,10 @@ class TestReparseFailureBestEffort:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["ok"] is True
+
+        await drain_reparse_workers()
+
+        await drain_reparse_workers()
         # 文件已落盘（同步主流程完成）
         assert (spec_root / "changes" / "2026-08-17-fail" / "proposal.md").exists()
 

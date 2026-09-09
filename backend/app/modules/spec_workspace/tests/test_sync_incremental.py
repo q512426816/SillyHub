@@ -212,6 +212,10 @@ class TestAddUpdate:
         assert resp.status_code == 200, resp.text
 
         # reparse 扫镜像目录 mtime → 建/更新 change，updated_at 取 max(mtimes)
+        # ql-20260909-021：先排空 push 自动触发的后台 reparse，防与手动全量撞唯一键。
+        from app.modules.spec_workspace.service import drain_reparse_workers
+
+        await drain_reparse_workers()
         stats, _ = await ChangeService(db_session).reparse(ws.id)
         assert stats["parsed"] >= 1
 

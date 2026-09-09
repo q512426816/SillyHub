@@ -10,6 +10,14 @@ Tests must not require a live Postgres / Redis. ``conftest`` therefore:
 
 from __future__ import annotations
 
+# ql-20260909-021：reparse 调度器测试直通（同步旧语义）——生产不设此 env。
+# 进程加载期 setdefault（零 fixture 介入——autouse fixture 实测会干扰
+# pytest-asyncio 异步 fixture 的 teardown 时序）；须在 app 模块 import 前
+# 生效（service.py 读 env 在 import 时）。
+import os as _os
+
+_os.environ.setdefault("SILLYHUB_TEST_REPARSE_INLINE", "1")
+
 import asyncio
 import atexit
 import os
