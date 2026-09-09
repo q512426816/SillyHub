@@ -102,7 +102,9 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快�
   写宿主机 `~/.claude/projects/...`。resume/reload 用 claude-transcript-dir 探测
   实际在哪侧再设/删 CLAUDE_CONFIG_DIR（ql-20260822-009，见「关键逻辑」）。
 - codex driver 常量：KILL_GRACE_MS=2000（SIGTERM→SIGKILL 升级）、stderr 上限
-  20KB、握手间隔 300ms（codex.cmd 包装层 100ms 会丢 stdin）。
+  20KB、握手间隔 300ms（codex.cmd 包装层 100ms 会丢 stdin）、turn/start 前
+  threadId 等待上限 30s + 50ms 轮询（ql-20260909-026 早到 inject 竞态，测试可
+  注入极小超时值）。
 - manualApproval=true 才注入 canUseTool/onUserDialog；supportedDialogKinds 缺省
   ['AskUserQuestion']——AskUserQuestion 需回传用户选择，只能走 onUserDialog
   （canUseTool 只有 allow/deny）。
@@ -121,4 +123,5 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快�
 - ql-20260831-011-2d44：message_delta 差分补读 input_tokens（轮内输入实时显示）。背景：GLM 兼容端点 message_start 不带 input（实证：会话轮内徽标 ↑0、终态才有 4.8 万），daemon 原只从 message_start 取 input、message_delta 只读 output/cache——若 GLM 在 delta 携带 cumulative input 也被丢弃。修法：_bufferPartial 的 delta 分支补 input 差分累加（lastCallInputTokens 基线在 message_start 设为 startUsage 值：官方 Claude delta 无 input 零影响 / start 带 input 时差分 0 不翻倍 / start 无 input 基线 0 全额计入），main 桶 ctx 同步加 input 差量。pendingUsage→flush→SSE tokens 链路既有，前端徽标已改「↑执行中…」占位（ql-20260831-010）。生效条件：GLM delta 是否真带 input 待下次会话实测（带则轮内实时显示输入，不带则维持现状等终态）。
 - ql-20260907-002-b595：修复 PiRpcDriver「pi 轮内 API 重试恢复后 turn 仍报失败」（会话 33f958d2 实机案：前 2 次 attempt 超时的 ame.error 写满 pendingTurnError，第 3 次成功出完整答案仍被粘滞旧值翻成 error_during_execution——该值轮内只在下一轮 inject 前清一次）。修法（pi-rpc-driver.ts handleLine）：两个轮内恢复信号到达即置 null——① 归一化事件 text+override 全文（message_end 的 assistant 完整产出终态）；② 原始帧 turn_end 且 stopReason≠'error'（清在归一化之前，真实失败轮 stopReason='error' 仍由归一化器产 error 事件重新写入，防过清）。codex driver 不动（beginTurn+上报后双清、成败权威在 turn/completed turn_status，success 路径本就忽略 stale 值，无此问题）。
 - ql-20260908-007（stdout/exit 竞态，2026-09-08 审查低置信项修复）：CursorDriver `_runTurn` 原在 exit 事件后立即读 result 快照——Node 的 exit 不保证 stdio 已排空（官方文档行为，Windows 管道/大输出下 exit 可先于残余字节送达），迟到字节里若正是 result 帧，本轮被报成「成功但无正文无 usage」（exit 0）或丢 result 细节（非 0）。修法：exit 路径收敛前等 stdout end/close（`stdoutDrainedP`，close 兜底 kill/僵流；已结束/已销毁立即过），宽限 killGraceMs 超时按已解析内容收敛防挂死，`framer.end()` 幂等 flush 兜底 close-without-end 尾行。测试侧注意：fake-child `_emitExit` 先 push(null) 再发 exit，模拟的是理想时序——竞态用例须直接 `child.emit('exit')` 保持流打开来复现乱序。
+- ql-20260909-026-ff18（早到 inject 竞态，2026-09-09 生产实机案会话 e05addf7）：修复 CodexAppServerDriver「新建 codex 会话首句发出后永久无响应、run 永久 running、零日志」。根因：backend 建会话即派发首句，inject 经 inject_wait parked 路径在 create 完成后立即入队，consume 循环握手写完（三条 300ms 间隔、不等响应）即取到输入，此刻 codex 的 thread/start 响应尚未到达（h.threadId=null），_writeTurnStart 静默 return → currentTurnPromise 永不 resolve，消息丢失 + 会话卡死（用户侧 codex 会话必现不可用）。修法（codex-app-server-driver.ts）：consume 循环 beginTurn 后先 `_awaitThreadId`（check-first 50ms 轮询，已就绪零延迟，thread/start|resume 响应都能解）再写 turn/start；超时（默认 30s，构造参数 threadIdWaitTimeoutMs 可注入，测试传毫秒级）按 turn failed 收敛（error_during_execution + 超时摘要 + console.warn thread_id_wait_timeout），循环继续消费后续 inject，不再静默挂死。诊断工具：runs/codex-interactive/<sessionId>.log（ql-20260624-007）+ 手动 codex app-server 探针验证（codex 本身健康、MCP node_repl 启动失败不阻塞 turn）。同型隐患：claude/pi/cursor driver 若也有「握手不等响应就消费输入 + 静默守卫」组合需各自排查。
 <!-- MANUAL_NOTES_END -->

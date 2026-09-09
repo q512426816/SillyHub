@@ -83,6 +83,18 @@ const STDERR_MAX_BYTES = 20_000;
 const DEFAULT_HANDSHAKE_INTERVAL_MS = 300;
 
 /**
+ * ql-20260909-026：写 turn/start 前等 threadId（thread/start|resume 响应）就绪的
+ * 上限。实机案（生产会话 e05addf7）：早到 inject 竞态——thread/start 响应未到时
+ * _writeTurnStart 因 !h.threadId 静默跳过，turn 永久挂起。正常就绪 <2s，30s 上限
+ * 留足冷启动余量；超时按 turn failed 收敛（可见失败，不静默挂死）。测试可经构造
+ * 函数注入极小值加速超时分支。
+ */
+const DEFAULT_THREAD_ID_WAIT_TIMEOUT_MS = 30_000;
+
+/** ql-20260909-026：threadId 等待轮询间隔（check-first，已就绪零延迟）。 */
+const THREAD_ID_WAIT_POLL_MS = 50;
+
+/**
  * codex 交互 stdout 日志目录：`<daemonStateDir()>/runs/codex-interactive`。
  *
  * quick 风险审查修（2026-09-01）：SILLYHUB_DAEMON_DIR 隔离收口漏项——原直拼
@@ -635,9 +647,16 @@ export class CodexAppServerDriver implements InteractiveDriver {
   /** 握手每条间隔（默认 300ms 对齐 task-runner.ts；测试注入 0 加速）。 */
   private readonly handshakeIntervalMs: number;
 
-  constructor(opts: { handshakeIntervalMs?: number } = {}) {
+  /** ql-20260909-026：turn/start 前等 threadId 上限（默认 30s；测试注入极小值加速）。 */
+  private readonly threadIdWaitTimeoutMs: number;
+
+  constructor(
+    opts: { handshakeIntervalMs?: number; threadIdWaitTimeoutMs?: number } = {},
+  ) {
     this.handshakeIntervalMs =
       opts.handshakeIntervalMs ?? DEFAULT_HANDSHAKE_INTERVAL_MS;
+    this.threadIdWaitTimeoutMs =
+      opts.threadIdWaitTimeoutMs ?? DEFAULT_THREAD_ID_WAIT_TIMEOUT_MS;
   }
 
   /**
@@ -1058,7 +1077,23 @@ export class CodexAppServerDriver implements InteractiveDriver {
 
         // 开始一轮 turn（设置 promise/resolver）
         beginTurn();
-        await this._writeTurnStart(h, ctx, turn.text);
+        // ql-20260909-026：threadId 就绪才写 turn/start（早到 inject 竞态，见
+        // _awaitThreadId 注释）。超时按 failed 收敛——消息可见失败而非静默挂死，
+        // 后续 inject 在循环下一轮正常消费（此时 threadId 已到则照常派发）。
+        const threadIdReady = await this._awaitThreadId(h);
+        if (!threadIdReady && !h.closing && !finalized) {
+          pendingTurnError =
+            `codex thread/start 响应超时（${this.threadIdWaitTimeoutMs}ms 未拿到 threadId），` +
+            'turn 未派发';
+          // eslint-disable-next-line no-console
+          console.warn('[codex-app-server-driver] thread_id_wait_timeout', {
+            sessionId: ctx.sessionId,
+            waitedMs: this.threadIdWaitTimeoutMs,
+          });
+          finishTurn({ kind: 'failed' });
+        } else {
+          await this._writeTurnStart(h, ctx, turn.text);
+        }
         // 等本轮 turn/completed（或进程退出 / error）
         const outcome = await currentTurnPromise!;
         // ql-20260906-004（审计 #9）：close 释放的轮次（cancelled outcome）不上报
@@ -1231,6 +1266,24 @@ export class CodexAppServerDriver implements InteractiveDriver {
     const res = await input.next();
     if (res.done) return null;
     return res.value;
+  }
+
+  /**
+   * ql-20260909-026：等 threadId（thread/start | thread/resume 响应）就绪。
+   *
+   * 实机案（生产会话 e05addf7，2026-09-09）：inject 经 inject_wait parked 路径在
+   * create 完成后立即入队（backend 建会话即派发首句），consume 循环握手写完即取到
+   * 输入，此刻 thread/start 响应尚未到达（h.threadId=null），_writeTurnStart 静默
+   * return → currentTurnPromise 永不 resolve，消息丢失、run 永久 running、零日志。
+   * 修：写 turn/start 前先等 threadId（check-first 轮询，已就绪零延迟）；超时或
+   * closing/finalized 返回 false，由调用方按 failed 收敛或退出，不再静默挂死。
+   */
+  private async _awaitThreadId(h: CodexHandle): Promise<boolean> {
+    const deadline = Date.now() + this.threadIdWaitTimeoutMs;
+    while (!h.threadId && !h.closing && Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, THREAD_ID_WAIT_POLL_MS));
+    }
+    return !!h.threadId;
   }
 
   /** 写 turn/start request（递增 id）。 */

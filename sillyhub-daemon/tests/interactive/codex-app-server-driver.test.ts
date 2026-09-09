@@ -475,6 +475,100 @@ describe('TDD-3：首轮 turn 生命周期', () => {
   });
 });
 
+// ── ql-20260909-026：早到 inject 竞态——turn/start 前等 threadId 就绪 ──────────
+//
+// 实机案（生产会话 e05addf7，2026-09-09）：inject 经 inject_wait parked 路径在
+// create 完成后立即入队（backend 建会话即派发首句），consume 循环握手写完即取到
+// 输入，此刻 thread/start 响应尚未到达（threadId=null），_writeTurnStart 静默
+// return → currentTurnPromise 永不 resolve——turn/start 从未发出、消息丢失、run
+// 永久 running、零日志。修：写 turn/start 前先等 threadId（check-first 轮询），
+// 超时按 failed 收敛。本组用例不喂 thread/start 响应就先 push，复现竞态窗口。
+
+describe('ql-20260909-026：早到 inject 竞态——turn/start 前等 threadId 就绪', () => {
+  it('inject 早到于 thread/start 响应：等 threadId 就绪后 turn/start 照常发出（不丢不挂）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    // 握手写完
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 竞态窗口：thread/start 响应未到（threadId=null）时首句已入队并被取走。
+    // 修复前 turn/start 此刻被静默跳过且永不再发；修复后在 _awaitThreadId 轮询等。
+    push('early hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(readStdinJson(child).some((m) => m.method === 'turn/start')).toBe(
+      false,
+    );
+
+    // thread/start 响应到达（≤50ms 轮询间隔后）→ turn/start 应随后发出
+    emitLines(child, [threadStartResponse('thr_race')]);
+    await new Promise<void>((r) => setTimeout(r, 250));
+    const turnStart = readStdinJson(child).find(
+      (m) => m.method === 'turn/start',
+    )!;
+    expect(turnStart).toBeDefined();
+    expect((turnStart.params as { threadId: string }).threadId).toBe('thr_race');
+    expect((turnStart.params as { input: unknown[] }).input).toEqual([
+      { type: 'text', text: 'early hi' },
+    ]);
+
+    // 收尾：turn/completed(success) → 正常 result
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('threadId 等待超时：turn 按 failed 收敛（含超时摘要），consume 不挂死', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    // 注入极小超时（80ms）加速超时分支；thread/start 响应全程不发
+    const driver = new CodexAppServerDriver({
+      handshakeIntervalMs: 0,
+      threadIdWaitTimeoutMs: 80,
+    });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    push('doomed');
+    await new Promise<void>((r) => setTimeout(r, 400));
+
+    // 修复前：无 turn/start、无 result、consume 永挂；修复后：可见 failed result
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+    });
+    expect(
+      String((results[0] as { result?: string }).result),
+    ).toContain('threadId');
+
+    close();
+    child._emitExit(0);
+    // 超时兜底：挂死即测试失败而非进程悬挂
+    await Promise.race([
+      consumeP,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error('consume hung after threadId timeout')), 3000),
+      ),
+    ]);
+  });
+});
+
 // ── 第四批 code-quality：子进程非主动退出对称收敛（exit handler 回归）─────────
 //
 // 修前 exit handler 仅 code!==0 才 finalizeWithError → codex 干净退出(code=0) 或
