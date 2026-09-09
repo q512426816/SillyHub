@@ -125,6 +125,26 @@ export interface DaemonMachineRead {
    */
   sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
   /**
+   * sillyspec 总览采集失败状态嵌套（2026-09-08，temp 投毒排障衍生）：daemon 周期
+   * 采集 ``progress show --json`` 三态③（超时/非零退出/spawn 失败）持续发生时的
+   * 错误快照（reason/detail/since）。sillyspec_status 为 null 且本字段非 null →
+   * 总览卡片显「数据源查询失败」而非「未安装/版本过低」；null=无失败/已恢复/
+   * register 恒清；undefined=旧后端缺该字段（按无失败消费）。嵌套类型引用
+   * api-types 生成版 MachineSillySpecStatusErrorRead（宽松透出，宁宽勿断）。
+   */
+  sillyspec_status_error?: components["schemas"]["MachineSillySpecStatusErrorRead"] | null;
+  /**
+   * 工作区级总览 map（2026-09-08 总览工作区级化）：wsId → ``progress show --json``
+   * 摘要（仅成功项，daemon 按 wsId→主仓根映射逐目标采集）。null=该机器未启用
+   * 工作作区级采集（旧 daemon，卡片回退机器级 sillyspec_status）；非 null 时卡片
+   * 取 map[当前工作区ID]，缺席=「本工作区尚未被采集」而非串台显示其他工作区数据。
+   * 值类型复用 api-types 生成版 MachineSillySpecStatusRead（宽松透出）。
+   */
+  sillyspec_status_map?: Record<
+    string,
+    components["schemas"]["MachineSillySpecStatusRead"]
+  > | null;
+  /**
    * sillyspec 命令结果槽嵌套（2026-09-04-conflict-resolve-entry task-08 / FR-05）：
    * daemon 侧冲突裁决 / ghost 清理命令执行器的最新结果（action/change/strategy/
    * state/exit_code/error/executed_at 七字段），经心跳落库后在终态展示窗口（约

@@ -47,6 +47,21 @@ import { cn } from "@/lib/utils";
 
 /** task-05 产物：机器视图 sillyspec_status 嵌套（api-types 生成版，禁止手写）。 */
 type SillySpecStatus = components["schemas"]["MachineSillySpecStatusRead"];
+type SillySpecStatusError = components["schemas"]["MachineSillySpecStatusErrorRead"];
+
+// 采集失败 reason → 中文短标签（2026-09-08 temp 投毒排障衍生）。未收录 reason
+// 兜底透传原值——后端/daemon 新增取值时不 422、不吞错，宁宽勿断。
+const STATUS_ERROR_LABELS: Record<string, string> = {
+  nonzero_exit: "progress 查询非零退出",
+  collect_timeout: "查询超时",
+  spawn_failed: "查询进程启动失败",
+  runner_error: "查询执行器异常",
+};
+
+function describeStatusError(error: SillySpecStatusError): string {
+  const label = STATUS_ERROR_LABELS[error.reason ?? ""] ?? error.reason ?? "未知原因";
+  return error.detail ? `${label}，${error.detail}` : label;
+}
 /** changes[] 单项（宽松全 nullable，宁宽勿断）。 */
 type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
 
@@ -306,7 +321,18 @@ export function ChangesOverviewCard({ workspaceId, className }: ChangesOverviewC
     daemonId !== null
       ? (machinesQ.data?.items.find((m) => m.id === daemonId) ?? null)
       : null;
-  const status: SillySpecStatus | null = machine?.sillyspec_status ?? null;
+  // 采集失败状态（2026-09-08 temp 投毒排障衍生）：区分「数据源查询失败」与
+  // 「未安装/版本过低」——status 为 null 且本字段非 null 时，总览缺失源于
+  // daemon 采集三态③（超时/非零退出/spawn 失败）持续失败，而非能力缺失。
+  const statusError = machine?.sillyspec_status_error ?? null;
+  // 工作区级取数（2026-09-08 总览工作区级化）：机器上报 map 时按当前工作区取
+  // （缺席=该工作区未被采集，显式提示而非串台他区数据）；map 为 null（旧 daemon
+  // 未启用）回退机器级 sillyspec_status 单槽位。
+  const statusMap = machine?.sillyspec_status_map ?? null;
+  const statusMapEnabled = statusMap !== null;
+  const status: SillySpecStatus | null = statusMapEnabled
+    ? (statusMap[workspaceId] ?? null)
+    : (machine?.sillyspec_status ?? null);
 
   // 占位/降级三态判定（优先级：加载 → 错误 → 未绑定 → 机器缺失 → 总览不可用）。
   let placeholder: string | null = null;
@@ -319,7 +345,16 @@ export function ChangesOverviewCard({ workspaceId, className }: ChangesOverviewC
   } else if (machine === null) {
     placeholder = "绑定的守护进程机器不在列表中（可能已离线），无法读取总览";
   } else if (status === null) {
-    placeholder = "总览不可用（sillyspec 未安装/版本过低）";
+    // 工作区级模式（map 非 null）下缺席=该工作区未被采集（本机尚未在其上跑过
+    // 任务，映射未建立/未成功）——刻意不回退机器级数据（那正是「串台」来源）。
+    if (statusMapEnabled) {
+      placeholder = "本工作区尚未被采集——在此工作区跑一次任务后生效";
+    } else {
+      placeholder =
+        statusError !== null
+          ? `总览不可用（数据源查询失败：${describeStatusError(statusError)}）`
+          : "总览不可用（sillyspec 未安装/版本过低）";
+    }
   }
 
   // 超限降级（design §4：32KB 预算计数模式——changes 缺失但计数在）。

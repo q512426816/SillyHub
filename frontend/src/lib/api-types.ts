@@ -12918,6 +12918,11 @@ export interface components {
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["DaemonHeartbeatSillySpecUpdate"] | null;
             sillyspec_status?: components["schemas"]["DaemonHeartbeatSillySpecStatus"] | null;
+            sillyspec_status_error?: components["schemas"]["DaemonHeartbeatSillySpecStatusError"] | null;
+            /** Sillyspec Status Map */
+            sillyspec_status_map?: {
+                [key: string]: components["schemas"]["DaemonHeartbeatSillySpecStatus"];
+            } | null;
             sillyspec_command_result?: components["schemas"]["DaemonHeartbeatSillySpecCommandResult"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
@@ -13090,6 +13095,27 @@ export interface components {
             changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
             /** Pending Conflicts */
             pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
+        };
+        /**
+         * DaemonHeartbeatSillySpecStatusError
+         * @description 心跳 sillyspec_status_error 载荷（2026-09-08，temp 投毒排障衍生）.
+         *
+         *     daemon 周期采集 ``progress show --json`` 三态③（超时/非零退出/spawn 失败）
+         *     持续发生时的错误快照：reason 当前取值 ``collect_timeout`` / ``nonzero_exit`` /
+         *     ``spawn_failed`` / ``runner_error``——不收紧 Literal（DaemonHeartbeat-
+         *     SillySpecUpdate.state 同决策：收紧会让未来新增取值的整条心跳 422，保活通道
+         *     宁宽勿断）；detail 为短描述（如 ``exit_code=1``，daemon 侧已截短）；since
+         *     为 daemon 侧首次失败时刻 ISO8601（恢复成功即清，内存态）。携带语义两态：
+         *     失败期间每跳携带对象（latest-wins），恢复后携带 null 清除——backend None=
+         *     置 NULL，非 None 整包直写（detail 落库前再截 200 双保险）。
+         */
+        DaemonHeartbeatSillySpecStatusError: {
+            /** Reason */
+            reason?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /** Since */
+            since?: string | null;
         };
         /**
          * DaemonHeartbeatSillySpecUpdate
@@ -13289,6 +13315,11 @@ export interface components {
             sillyspec_latest_version?: string | null;
             sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
             sillyspec_status?: components["schemas"]["MachineSillySpecStatusRead"] | null;
+            sillyspec_status_error?: components["schemas"]["MachineSillySpecStatusErrorRead"] | null;
+            /** Sillyspec Status Map */
+            sillyspec_status_map?: {
+                [key: string]: components["schemas"]["MachineSillySpecStatusRead"];
+            } | null;
             sillyspec_command_result?: components["schemas"]["MachineSillySpecCommandResultRead"] | null;
         };
         /**
@@ -16181,6 +16212,26 @@ export interface components {
              * @enum {string}
              */
             strategy: "keep_local" | "take_platform";
+        };
+        /**
+         * MachineSillySpecStatusErrorRead
+         * @description 机器视图 sillyspec_status_error 嵌套（2026-09-08，temp 投毒排障衍生）。
+         *
+         *     即 daemon_instances.sillyspec_status_error JSON 列宽松透出：daemon 周期采集
+         *     三态③（超时/非零退出/spawn 失败）持续发生时的错误快照。与 sillyspec_status
+         *     同款零转换——backend 不补字段，落库形态=上报形态（复用心跳 DTO 三字段同形，
+         *     免三胞胎模型漂移）。NULL（采集正常/能力缺失②/register 恒清）→ 机器视图字段
+         *     为 null；since 为 daemon 本地钟 ISO8601 原样透传（跨机比较仅作辅助）。
+         *     前端消费：sillyspec_status 为 null 且本字段非 null → 渲染「数据源查询失败」
+         *     而非「sillyspec 未安装/版本过低」。
+         */
+        MachineSillySpecStatusErrorRead: {
+            /** Reason */
+            reason?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /** Since */
+            since?: string | null;
         };
         /**
          * MachineSillySpecStatusRead
@@ -20595,7 +20646,7 @@ export interface components {
             /** Runtime Id */
             runtime_id?: string | null;
             /** Provider */
-            provider?: ("claude" | "codex" | "pi") | null;
+            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Llm Provider Id */

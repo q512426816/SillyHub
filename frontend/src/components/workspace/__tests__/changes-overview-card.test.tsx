@@ -87,11 +87,17 @@ function makeStatus(overrides: Partial<StatusFixture> = {}): StatusFixture {
   } as unknown as StatusFixture;
 }
 
-function makeMachine(status: StatusFixture | null): DaemonMachineRead {
+function makeMachine(
+  status: StatusFixture | null,
+  statusError?: { reason?: string | null; detail?: string | null; since?: string | null },
+  statusMap?: Record<string, StatusFixture> | null,
+): DaemonMachineRead {
   return {
     id: "machine-1",
     hostname: "dev-host",
     sillyspec_status: status,
+    sillyspec_status_error: statusError ?? null,
+    sillyspec_status_map: statusMap ?? null,
   } as unknown as DaemonMachineRead;
 }
 
@@ -105,6 +111,25 @@ function mockHappyPath(status: StatusFixture | null) {
   } as unknown as MemberBindingView);
   mocks.listDaemonMachines.mockResolvedValue({
     items: [makeMachine(status)],
+    total: 1,
+    limit: 100,
+    offset: 0,
+  });
+}
+
+/** 2026-09-08（temp 投毒排障衍生）：happy path 变体——机器带 sillyspec_status_error。 */
+function mockMachinesWithStatusError(
+  status: StatusFixture | null,
+  statusError: { reason?: string | null; detail?: string | null; since?: string | null },
+) {
+  mocks.fetchMyBinding.mockResolvedValue({
+    workspace_id: "ws-1",
+    user_id: "u-1",
+    daemon_id: "machine-1",
+    runtime_id: null,
+  } as unknown as MemberBindingView);
+  mocks.listDaemonMachines.mockResolvedValue({
+    items: [makeMachine(status, statusError)],
     total: 1,
     limit: 100,
     offset: 0,
@@ -364,6 +389,102 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /全部/ })).toBeNull();
     expect(screen.queryByText(/活跃 \d/)).toBeNull();
+  });
+
+  // ── 2026-09-08（temp 投毒排障衍生）：status null + 采集失败状态 → 区分渲染 ──
+
+  it("null 占位态 + status_error 在场 → 显「数据源查询失败」（含 reason 标签与 detail）", async () => {
+    mockMachinesWithStatusError(null, {
+      reason: "nonzero_exit",
+      detail: "exit_code=1",
+      since: "2026-09-08T12:00:00.000Z",
+    });
+
+    renderCard();
+
+    expect(
+      await screen.findByText(
+        "总览不可用（数据源查询失败：progress 查询非零退出，exit_code=1）",
+      ),
+    ).toBeInTheDocument();
+    // 旧误导文案不再出现。
+    expect(
+      screen.queryByText("总览不可用（sillyspec 未安装/版本过低）"),
+    ).toBeNull();
+  });
+
+  it("null 占位态 + status_error 为 null（未安装/已恢复/旧后端）→ 仍显「未安装/版本过低」", async () => {
+    mockHappyPath(null);
+
+    renderCard();
+
+    expect(
+      await screen.findByText("总览不可用（sillyspec 未安装/版本过低）"),
+    ).toBeInTheDocument();
+  });
+
+  it("status_error 未知 reason → 兜底透传原值不吞错（宁宽勿断）", async () => {
+    mockMachinesWithStatusError(null, {
+      reason: "future_reason",
+      detail: null,
+      since: null,
+    });
+
+    renderCard();
+
+    expect(
+      await screen.findByText("总览不可用（数据源查询失败：future_reason）"),
+    ).toBeInTheDocument();
+  });
+
+  // ── 2026-09-08（总览工作区级化）：map 优先按工作区取数 ──────────────────────
+
+  it("map 在场且含当前工作区 → 按工作区取数（机器级单槽位不再串台）", async () => {
+    const mine = makeStatus({ changes: [makeChange({ name: "chg-mine" })] });
+    const other = makeStatus({ changes: [makeChange({ name: "chg-other-ws" })] });
+    mocks.fetchMyBinding.mockResolvedValue({
+      workspace_id: "ws-1",
+      user_id: "u-1",
+      daemon_id: "machine-1",
+      runtime_id: null,
+    } as unknown as MemberBindingView);
+    mocks.listDaemonMachines.mockResolvedValue({
+      // 机器级单槽位是“别的”工作区的数据——map 模式下必须被忽略。
+      // （statusError 可选参传 undefined；内部 ?? null 归一，与 null 语义等价——
+      //   tsc 收紧可选参类型后 null 不再可赋。）
+      items: [makeMachine(other, undefined, { "ws-1": mine, "ws-other": other })],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    renderCard();
+
+    expect(await screen.findByText("chg-mine")).toBeInTheDocument();
+    expect(screen.queryByText("chg-other-ws")).toBeNull();
+  });
+
+  it("map 在场但缺当前工作区 → 显「本工作区尚未被采集」，不回退机器级数据", async () => {
+    const other = makeStatus({ changes: [makeChange({ name: "chg-other-ws" })] });
+    mocks.fetchMyBinding.mockResolvedValue({
+      workspace_id: "ws-1",
+      user_id: "u-1",
+      daemon_id: "machine-1",
+      runtime_id: null,
+    } as unknown as MemberBindingView);
+    mocks.listDaemonMachines.mockResolvedValue({
+      items: [makeMachine(other, undefined, { "ws-other": other })],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    renderCard();
+
+    expect(
+      await screen.findByText("本工作区尚未被采集——在此工作区跑一次任务后生效"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("chg-other-ws")).toBeNull();
   });
 
   it("generated_at 陈旧——健康条显示「数据可能过期」标记", async () => {
