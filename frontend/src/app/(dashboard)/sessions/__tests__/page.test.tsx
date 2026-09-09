@@ -401,6 +401,12 @@ beforeEach(() => {
     offset: 0,
   });
   mocks.getAgentSession.mockResolvedValue(makeSession());
+  // ql-20260909-024：此处必须 mockReset 而非依赖上方 clearAllMocks——后者只清
+  // 调用记录，不清 mockResolvedValueOnce 队列；断言中途失败的用例会把未消费
+  // 的 once 队列泄漏给后继用例，首次 attach 拉到前用例的页（「当前窗口提问/
+  // 首问」凭空消失的连锁污染源）。本 mock 实现均在 it 内设置（无 describe 级
+  // 持久实现），reset 后下一行立即回填默认值，安全。
+  mocks.getAgentSessionLogs.mockReset();
   mocks.getAgentSessionLogs.mockResolvedValue([]);
   mocks.createSession.mockResolvedValue({
     session_id: "s-new",
@@ -805,11 +811,13 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     // ql-20260817-007：用户侧=[时间][气泡][头像首字]，agent 侧=[头像][气泡][时间]。
     await screen.findByText("属主发言"); // 等 attach 历史回灌
     const timePat = "(?:\\d{2}:\\d{2}|\\d{2}-\\d{2} \\d{2}:\\d{2})";
-    // 发送者头像（首字）：属主 WhaleFall→W、他人 张三→张
+    // 发送者头像（首字）：属主 WhaleFall→W、他人 张三→张。
+    // 2026-09-09-sessions-visual-refresh 后头像换 ChatMessageAvatar——不再有
+    // 「发送者 X」aria-label，可达锚点改 title（我（名字）/ 他人名字）。
     await waitFor(() => {
-      expect(screen.getByLabelText("发送者 我")).toHaveTextContent("W");
+      expect(screen.getByTitle("我（WhaleFall）")).toHaveTextContent("W");
     });
-    expect(screen.getByLabelText("发送者 张三")).toHaveTextContent("张");
+    expect(screen.getByTitle("张三")).toHaveTextContent("张");
     // 裸时间元素：用户侧 2 + agent 答复侧 2
     expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(4);
   });
@@ -933,9 +941,9 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
     expect(await screen.findByText("答复完成。")).toBeTruthy();
     expect(screen.queryByText("不该出现在答复区")).toBeNull();
     // 终态徽标（deriveTurnTerminalStatus + token 写入）：第 4 轮 · 已完成 · ↑100 ↓20。
-    // task-03 antd 化后状态文本进 Badge status 的 text 节点，与「第 4 轮 ·」
-    // 分属不同文本节点，按文本分别断言语义不变。
-    expect(screen.getByText(/第 4 轮 ·/)).toBeTruthy();
+    // 2026-09-09-sessions-visual-refresh 后轮尾换 RoundDivider 胶囊——「第 4 轮」
+    // 标签 / 状态 / meta 是兄弟文本节点，跨节点「·」正则匹配不上，按节点分别断言。
+    expect(screen.getByText("第 4 轮")).toBeTruthy();
     expect(screen.getByText("已完成")).toBeTruthy();
     expect(screen.getByText(/↑100/)).toBeTruthy();
   });
@@ -1031,7 +1039,7 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
     });
 
     expect(await screen.findByText("运行中")).toBeTruthy();
-    expect(screen.getByText(/第 1 轮 ·/)).toBeTruthy();
+    expect(screen.getByText("第 1 轮")).toBeTruthy();
     // TurnStatusBar 恢复挂载（修复前轮卡 completed 不渲染状态条）。
     expect(screen.getByText("执行中")).toBeTruthy();
     expect(screen.queryByText(/已完成/)).toBeNull();
@@ -1065,7 +1073,7 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
 
     // detail 后到 → 修正 effect 兜底翻回 running（logs-first 顺序回归保护）。
     expect(await screen.findByText("帮我分析一下这个页面")).toBeTruthy();
-    expect(screen.getByText(/第 1 轮 ·/)).toBeTruthy();
+    expect(screen.getByText("第 1 轮")).toBeTruthy();
     expect(screen.getByText("运行中")).toBeTruthy();
     expect(screen.queryByText(/已完成/)).toBeNull();
   });
@@ -1120,7 +1128,7 @@ describe("SessionPanel 轮后对账回放（ql-20260820-010）", () => {
       ),
     );
     expect(await screen.findByText("已完成")).toBeTruthy();
-    expect(screen.getByText(/第 4 轮 ·/)).toBeTruthy();
+    expect(screen.getByText("第 4 轮")).toBeTruthy();
     expect(await screen.findByText("工具阶段可见。")).toBeTruthy();
 
     // 对账回放：turn_completed 后 1.5s，streamSession 重拉 logs 逐条 onLog
@@ -1789,8 +1797,10 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
 describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Drawer 入口）", () => {
   /** 未加载目录刻度 aria-label 锚（turn-catalog buildAriaLabel：第N轮 · 状态 · 未加载）。
    *  注：r-old 用 failed 态——completed run 会被 enrichDisplayTurns 孤儿静默轮
-   *  即时补建（ql-20260818-011）而恒为 loaded，只有非 completed run 保持未加载。 */
-  const UNLOADED_TICK_LABEL = /^第1轮 · 失败 · 未加载$/;
+   *  即时补建（ql-20260818-011）而恒为 loaded，只有非 completed run 保持未加载。
+   *  ql-20260909-024：刻度轨有 <3 轮整条隐藏阈值（ql-20260909-005），夹具补最旧
+   *  r-ancient（completed → 孤儿补建为已加载第1轮）后，跳转目标 r-old 顺位第2轮。 */
+  const UNLOADED_TICK_LABEL = /^第2轮 · 失败 · 未加载$/;
 
   /** jump 命中定位参数（handleJumpToTurn 双 rAF 后 scrollIntoView）。 */
   const SMOOTH_START = { behavior: "smooth", block: "start" };
@@ -1875,11 +1885,15 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     };
   }
 
-  /** desktop 跳转用例公共 runs 固件：r-old（更早、目录第1轮、未加载——failed
-   *  态防 enrichDisplayTurns 孤儿静默轮把它即时变 loaded，见 UNLOADED_TICK_LABEL 注）
-   *  + r-cur（当前窗口已加载）。 */
-  function mockTwoRuns() {
+  /** desktop 跳转用例公共 runs 固件（ql-20260909-024 由 2 轮补至 3 轮——
+   *  ql-20260909-005 起刻度轨 <3 轮整条隐藏，2 轮夹具点不到刻度）：
+   *  - r-ancient（最旧、completed 无日志 → 孤儿静默轮即时补建为已加载第1轮，
+   *    仅撑起轨可见阈值，时间线上渲染为空轮）；
+   *  - r-old（目录第2轮、未加载——failed 态防孤儿补建即时变 loaded，跳转目标）；
+   *  - r-cur（当前窗口已加载，第3轮）。 */
+  function mockThreeRuns() {
     mocks.listSessionRuns.mockResolvedValue([
+      makeRun({ id: "r-ancient", started_at: "2026-08-15T06:00:00Z" }),
       makeRun({ id: "r-old", status: "failed", started_at: "2026-08-15T06:30:00Z" }),
       makeRun({ id: "r-cur", started_at: "2026-08-15T08:00:00Z" }),
     ]);
@@ -1915,8 +1929,12 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
   }
 
   it("desktop 已加载轮直跳：点刻度 → 目标行 scrollIntoView({behavior:\"smooth\", block:\"start\"}) + 刻度即时 aria-current，零翻页", async () => {
+    // ql-20260909-024：刻度轨 <3 轮隐藏（ql-20260909-005），单轮夹具点不到刻度
+    // ——补两个更新 failed run（保持未加载、无孤儿轮 DOM 噪声），r-1 仍为第1轮。
     mocks.listSessionRuns.mockResolvedValue([
       makeRun({ id: "r-1", started_at: "2026-08-15T08:00:00Z" }),
+      makeRun({ id: "r-2", status: "failed", started_at: "2026-08-15T08:30:00Z" }),
+      makeRun({ id: "r-3", status: "failed", started_at: "2026-08-15T09:00:00Z" }),
     ]);
     mocks.getAgentSessionLogs.mockResolvedValue([
       navLog("j-1", "r-1", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
@@ -1940,7 +1958,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
   });
 
   it("desktop 未加载轮循环翻页：连续 loadEarlier 到命中即停（两页即止、不误报兜底 toast）", async () => {
-    mockTwoRuns();
+    mockThreeRuns();
     mocks.getAgentSessionLogs
       .mockResolvedValueOnce(
         fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
@@ -1979,7 +1997,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
   });
 
   it("desktop 页数上限兜底：连续 8 页满页均未命中 → warning「已连续加载 8 页仍未到达，可再次点击继续加载」", async () => {
-    mockTwoRuns();
+    mockThreeRuns();
     let fillerSeq = 0;
     mocks.getAgentSessionLogs
       .mockResolvedValueOnce(
@@ -2021,7 +2039,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     const page2 = new Promise((r) => {
       resolvePage2 = r;
     });
-    mockTwoRuns();
+    mockThreeRuns();
     mocks.getAgentSessionLogs
       .mockResolvedValueOnce(
         fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
@@ -2065,7 +2083,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     const page1 = new Promise((r) => {
       releasePage1 = r;
     });
-    mockTwoRuns();
+    mockThreeRuns();
     mocks.getAgentSessionLogs
       .mockResolvedValueOnce(
         fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
