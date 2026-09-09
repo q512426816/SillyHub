@@ -10,7 +10,7 @@ scale: large
 
 会话页（/sessions 三入口门户 + 群聊）功能密度高，但视觉是"灰盒套灰盒"的管理后台语言：气泡顶满无层级、边框硬、无氛围、深色主题底/卡反差小。用户三连反馈：「不够高级、视觉效果太差」→「还是没有高级感」→「玻璃拟态没看出来、流光条丑」。P0 止血已落地（ql-20260909-009：气泡收窄 80%、深色代码块、composer 阴影），本变更做完整焕新，目标观感对齐现代 AI 聊天产品（ChatGPT/Claude/Cursor 级别），三主题一致。
 
-设计基准：变更目录下 `prototype-sessions-visual-refresh.html`（v4，用户已确认），四轮迭代的取舍全部沉淀在 decisions.md（D-001~D-009）。
+设计基准：变更目录下 `prototype-sessions-visual-refresh.html`（v4，用户已确认），四轮迭代的取舍全部沉淀在 decisions.md（D-001~D-010 当前版本）。
 
 ## 设计目标
 
@@ -56,9 +56,11 @@ group-chat-panel 消息行接 ChatMessageAvatar + token 化选中/hover；sessio
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 新增 | NEW:frontend/src/components/chat/chat-message-avatar.tsx | 共享消息头像（agent 渐变光环/user muted 首字） |
+| 新增 | NEW:frontend/src/components/chat/use-avatar-src.ts | useAvatarSrc 平移自 group-member-avatar.tsx（blob 解析单份，D-006@v2） |
 | 新增 | NEW:frontend/src/components/chat/round-divider.tsx | 轮次分隔胶囊构件 |
 | 新增 | NEW:frontend/src/components/chat/index.ts | 桶导出 |
-| 新增 | NEW:frontend/src/components/chat/__tests__/chat-message-avatar.test.tsx 等 | 构件单测 |
+| 新增 | NEW:frontend/src/components/chat/__tests__/chat-message-avatar.test.tsx | 头像构件单测（task-03） |
+| 新增 | NEW:frontend/src/components/chat/__tests__/round-divider.test.tsx | 轮次胶囊单测（task-04） |
 | 修改 | frontend/src/app/globals.css | 新增 --border-soft/--row-active(-ring)/--shadow-glow/--glass(-heavy)/--aurora-* 三主题 token；dark --color-bg/--background→zinc-950；--shadow-primary 降重 |
 | 修改 | frontend/src/styles/themes.ts | darkTheme.color.bg #18181b→#09090b（zinc-950，Tailwind 默认值） |
 | 修改 | frontend/src/components/daemon/turn-segment-views.tsx | TextSegmentView 接 ChatMessageAvatar |
@@ -66,6 +68,10 @@ group-chat-panel 消息行接 ChatMessageAvatar + token 化选中/hover；sessio
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 面板头面包屑降噪 + 玻璃化 |
 | 修改 | frontend/src/components/sessions/session-list-panel.tsx | 列表行两行化 + 引擎色点 + 选中态 token |
 | 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 群聊消息行接头像构件 + token 化 |
+| 修改 | frontend/src/components/group-chat/group-member-avatar.tsx | useAvatarSrc 平移到 components/chat/ 后改 import（逻辑单份，D-006@v2） |
+| 修改 | frontend/src/components/daemon/session-panel/page-helpers.tsx | PANEL_HEADER_CLS_* 玻璃化（面板头类常量所在，plan 审查补） |
+| 修改 | frontend/src/components/app-shell.tsx | 侧栏玻璃化（plan 审查补：侧栏实体在此非 layout） |
+| 修改 | frontend/src/components/top-bar.tsx | 顶栏玻璃化（plan 审查补） |
 | 修改 | frontend/src/components/daemon/session-input-bar.tsx | 聚焦环 3px/10% 柔化 |
 | 修改 | frontend/src/app/(dashboard)/layout.tsx | 应用壳挂极光背景（fixed） |
 | 修改 | 上述组件既有测试 | 适配类名/结构断言（行为不变） |
@@ -153,7 +159,7 @@ export interface RoundDividerProps {
 
 - [x] 章节齐全（背景/设计目标/非目标/总体方案/文件变更清单/接口定义/风险登记）
 - [x] frontmatter 字段齐全（author/created_at/scale=large）
-- [x] 引用所有当前版本 D-001@v1~D-009@v1（决策追踪表逐行覆盖点）
+- [x] 引用所有当前版本 D-001@v1~D-010@v1（含 v2 修订，决策追踪表逐行覆盖点）
 - [x] 生命周期契约：无/N/A（豁免短语紧邻章节标题）
 - [x] UI 原型：prototype-sessions-visual-refresh.html（v4 用户确认版）在变更目录
 - [x] 无 ⚠️ 自审存疑项
