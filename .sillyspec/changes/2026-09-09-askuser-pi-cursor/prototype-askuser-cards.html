@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AskUser 通道原型 — pi/cursor/群聊提问卡</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+:root {
+  --primary: #7C3AED; --primary-hover: #6D28D9;
+  --primary-soft: #EDE9FE; --primary-soft-2: #F5F3FF;
+  --secondary: #A78BFA; --accent: #0891B2; --accent-soft: #CFFAFE; --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF;
+  --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --border: #DDD6FE; --border-weak: #EEE9F8;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --error: #DC2626; --error-soft: #FEE2E2; --error-text: #991B1B;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgba(30,27,75,.06);
+  --shadow-md: 0 4px 12px rgba(30,27,75,.08);
+  --shadow-lg: 0 12px 32px rgba(30,27,75,.12);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter','PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--fg); padding:32px 24px; }
+.section { max-width:760px; margin:0 auto 48px; }
+.section-title { font-size:13px; font-weight:700; color:var(--faint); letter-spacing:.12em; text-transform:uppercase; margin-bottom:14px; }
+.panel { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-xl); box-shadow:var(--shadow-md); padding:20px; }
+
+/* 对话流通用 */
+.chat { display:flex; flex-direction:column; gap:14px; }
+.msg-user { align-self:flex-end; max-width:78%; background:var(--primary); color:#fff; padding:10px 14px; border-radius:16px 16px 4px 16px; font-size:13px; line-height:1.6; box-shadow:var(--shadow-sm); }
+.msg-agent { align-self:flex-start; max-width:86%; background:var(--muted); padding:10px 14px; border-radius:16px 16px 16px 4px; font-size:13px; line-height:1.6; color:var(--fg); }
+.agent-row { display:flex; gap:10px; align-items:flex-end; align-self:flex-start; max-width:86%; }
+.avatar { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:700; flex-shrink:0; }
+.avatar.ai { background:var(--brand-gradient); }
+
+/* 提问卡 */
+.ask-card { align-self:stretch; border:1px solid var(--border); background:var(--primary-soft-2); border-radius:var(--radius-lg); padding:16px; box-shadow:var(--shadow-sm); }
+.ask-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.ask-badge { font-size:11px; font-weight:700; color:var(--primary); background:var(--primary-soft); border-radius:999px; padding:3px 10px; }
+.ask-engine { font-size:11px; color:var(--faint); font-weight:500; }
+.ask-question { font-size:14px; font-weight:600; margin-bottom:12px; line-height:1.5; }
+.ask-recommend { display:flex; align-items:center; gap:6px; flex-wrap:wrap; background:var(--accent-soft); border:1px dashed var(--accent); border-radius:var(--radius-md); padding:6px 10px; margin-bottom:12px; font-size:12px; color:var(--accent-text); }
+.ask-recommend .at { font-weight:700; }
+.options { display:flex; flex-direction:column; gap:8px; }
+.opt { display:flex; align-items:center; gap:10px; border:1.5px solid var(--border); background:var(--card); border-radius:var(--radius-md); padding:9px 12px; font-size:13px; cursor:pointer; transition:all .15s; }
+.opt:hover { border-color:var(--primary); background:var(--primary-soft-2); }
+.opt.selected { border-color:var(--primary); background:var(--primary-soft); font-weight:600; }
+.radio { width:16px; height:16px; border-radius:50%; border:2px solid var(--border); flex-shrink:0; position:relative; }
+.opt.selected .radio { border-color:var(--primary); }
+.opt.selected .radio::after { content:''; position:absolute; inset:3px; border-radius:50%; background:var(--primary); }
+.ask-input { border:1.5px solid var(--border); border-radius:var(--radius-md); padding:9px 12px; font-size:13px; background:var(--card); color:var(--muted-fg); margin-top:8px; }
+.ask-actions { display:flex; justify-content:flex-end; margin-top:12px; }
+.btn-primary { background:var(--primary); color:#fff; border:none; border-radius:var(--radius-md); padding:8px 18px; font-size:13px; font-weight:600; cursor:pointer; }
+.btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+
+/* 已回答态 */
+.answered-strip { display:flex; align-items:center; gap:8px; background:var(--success-soft); color:var(--success-text); border-radius:var(--radius-md); padding:8px 12px; font-size:12px; font-weight:500; margin-top:10px; }
+.answered-strip .who { font-weight:700; }
+.takenover-strip { display:flex; align-items:center; gap:8px; background:var(--warning-soft); color:var(--warning-text); border-radius:var(--radius-md); padding:8px 12px; font-size:12px; margin-top:10px; }
+
+/* 群聊成员行 */
+.member-row { display:flex; gap:8px; align-items:center; margin-bottom:12px; font-size:12px; color:var(--muted-fg); }
+.member-chip { display:inline-flex; align-items:center; gap:4px; background:var(--muted); border-radius:999px; padding:2px 8px; font-size:11px; }
+
+/* 轮次胶囊 */
+.round-pill { align-self:center; display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--faint); background:transparent; margin:2px 0; }
+.round-pill::before, .round-pill::after { content:''; height:1px; width:80px; background:var(--border); }
+.waiting-pill { color:var(--accent-text); font-weight:600; }
+
+.note { font-size:11px; color:var(--faint); line-height:1.7; margin-top:10px; border-top:1px dashed var(--border-weak); padding-top:8px; }
+.kbd { font-family:ui-monospace,monospace; font-size:10.5px; background:var(--muted); border-radius:4px; padding:1px 5px; border:1px solid var(--border-weak); }
+</style>
+</head>
+<body>
+
+<!-- ══════════ 场景一：pi 单聊（轮中阻塞）══════════ -->
+<div class="section">
+  <div class="section-title">场景一 · pi 单聊 · 轮中阻塞提问（select）</div>
+  <div class="panel">
+    <div class="chat">
+      <div class="msg-user">把登录页的按钮样式改一下</div>
+      <div class="agent-row">
+        <div class="avatar ai">Pi</div>
+        <div class="msg-agent">好的，我发现登录页有两个按钮方案在用，需要先确认采用哪个再动手。</div>
+      </div>
+      <!-- 提问卡：agent 挂起中，等用户答 -->
+      <div class="ask-card">
+        <div class="ask-head">
+          <span class="ask-badge">提问</span>
+          <span class="ask-engine">pi · 会话进行中，等待你的回答后继续</span>
+        </div>
+        <div class="ask-question">登录按钮采用哪个方案？</div>
+        <div class="options">
+          <div class="opt selected"><span class="radio"></span>方案 A：品牌渐变实心按钮（当前设计系统主推）</div>
+          <div class="opt"><span class="radio"></span>方案 B：描边幽灵按钮（更轻量）</div>
+        </div>
+        <div class="ask-actions"><button class="btn-primary">提交回答</button></div>
+      </div>
+      <!-- 已回答态（提交后） -->
+      <div class="ask-card" style="opacity:.75">
+        <div class="ask-head">
+          <span class="ask-badge" style="background:var(--muted);color:var(--muted-fg)">提问 · 已回答</span>
+          <span class="ask-engine">pi</span>
+        </div>
+        <div class="ask-question">登录按钮采用哪个方案？</div>
+        <div class="answered-strip">✓ <span class="who">我</span> 选择了「方案 A」· pi 已继续执行</div>
+      </div>
+      <div class="agent-row">
+        <div class="avatar ai">Pi</div>
+        <div class="msg-agent">收到，按方案 A 改造登录按钮…</div>
+      </div>
+    </div>
+    <div class="note">pi 轮中阻塞：卡片出现时 agent 进程挂起等 RPC 应答；提交后答案 denormalize 回 pi，同轮继续。<span class="kbd">extension_ui_request → dialog_kind=pi_extension_ui</span></div>
+  </div>
+</div>
+
+<!-- ══════════ 场景二：群聊聚合 ══════════ -->
+<div class="section">
+  <div class="section-title">场景二 · 群聊 · 成员提问聚合 + 推荐艾特 + 先到先得</div>
+  <div class="panel">
+    <div class="member-row">
+      <span class="member-chip">🤖 Pi</span><span class="member-chip">🤖 Cursor</span><span class="member-chip">👤 你</span><span class="member-chip">👤 张三</span>
+    </div>
+    <div class="chat">
+      <div class="msg-user">大家一起把这个 bug 排了</div>
+      <div class="agent-row">
+        <div class="avatar ai" style="background:#0891B2">Cu</div>
+        <div class="msg-agent">我定位到两个可疑提交，需要确认线上版本号才能继续。</div>
+      </div>
+      <!-- 群聊提问卡：推荐回答人 -->
+      <div class="ask-card">
+        <div class="ask-head">
+          <span class="ask-badge">提问</span>
+          <span class="ask-engine">Cursor · 任何成员可答，先到先得</span>
+        </div>
+        <div class="ask-question">当前线上部署的是哪个版本？</div>
+        <div class="ask-recommend">💡 agent 推荐 <span class="at">@你</span> <span class="at">@张三</span> 回答（部署负责人）</div>
+        <div class="options">
+          <div class="opt"><span class="radio"></span>v1.2.0（上周四发）</div>
+          <div class="opt selected"><span class="radio"></span>v1.3.0-rc2</div>
+        </div>
+        <div class="ask-actions"><button class="btn-primary">提交回答</button></div>
+      </div>
+      <!-- 被别人答了 -->
+      <div class="ask-card" style="opacity:.7">
+        <div class="ask-head">
+          <span class="ask-badge" style="background:var(--muted);color:var(--muted-fg)">提问 · 已回答</span>
+          <span class="ask-engine">Cursor</span>
+        </div>
+        <div class="takenover-strip">⏱ <span class="who" style="font-weight:700">张三</span> 已回答「v1.3.0-rc2」，本题已关闭</div>
+      </div>
+    </div>
+    <div class="note">群聊流内聚合成员会话的 pending 提问；推荐回答人是 agent 经提示词给出的软提示（非硬门控）；先到先得，后答者看到已关闭态。</div>
+  </div>
+</div>
+
+<!-- ══════════ 场景三：cursor 轮界协议 ══════════ -->
+<div class="section">
+  <div class="section-title">场景三 · cursor 单聊 · 轮界标记提问（本轮结束 → 答案续轮）</div>
+  <div class="panel">
+    <div class="chat">
+      <div class="msg-user">帮我重构 utils 目录</div>
+      <div class="round-pill">第 1 轮</div>
+      <div class="agent-row">
+        <div class="avatar ai" style="background:#0891B2">Cu</div>
+        <div class="msg-agent">utils 下有 3 个模块耦合较深，全量重构 vs 只拆文件，我需要你确认范围。</div>
+      </div>
+      <!-- 轮界提问卡：本轮已结束，进程已退 -->
+      <div class="ask-card">
+        <div class="ask-head">
+          <span class="ask-badge">提问</span>
+          <span class="ask-engine">cursor · 本轮结束，你的回答将作为下一条消息自动发送</span>
+        </div>
+        <div class="ask-question">重构范围选哪个？</div>
+        <div class="options">
+          <div class="opt selected"><span class="radio"></span>全量重构（含调用方适配，约 2 天）</div>
+          <div class="opt"><span class="radio"></span>只拆文件不动逻辑（半天）</div>
+        </div>
+        <div class="ask-actions"><button class="btn-primary">提交并发送</button></div>
+      </div>
+      <div class="round-pill waiting-pill">等待你的选择…</div>
+      <!-- 用户答 → 自动成为下一条消息 -->
+      <div class="msg-user">全量重构（含调用方适配）</div>
+      <div class="round-pill">第 2 轮</div>
+      <div class="agent-row">
+        <div class="avatar ai" style="background:#0891B2">Cu</div>
+        <div class="msg-agent">收到，开始全量重构…（--resume chatId 带上下文续跑）</div>
+      </div>
+    </div>
+    <div class="note">轮尾解析 <span class="kbd">```askuser {"kind":"select",...}```</span> 标记 → 剥离显示提交平台；答案自动组装为下一条用户消息，cursor 经 <span class="kbd">--resume chatId</span> 续轮。标记格式坏 → 当普通文本显示（降级不炸）。</div>
+  </div>
+</div>
+
+</body>
+</html>
