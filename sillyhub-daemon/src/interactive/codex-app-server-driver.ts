@@ -441,8 +441,31 @@ export interface CodexHandle extends InteractiveDriverHandle {
   closing: boolean;
   /** task-05 消费的待审批 server request 队列；task-04 仅登记 + fail-closed 应答。 */
   pendingServerRequests: PendingServerRequest[];
+  /**
+   * ql-20260909-027：线程累计用量快照（thread/tokenUsage/updated 的
+   * tokenUsage.total）。codex 0.147 实测 turn/completed 不带 usage，用量唯一
+   * 真源是本通知；null = 尚未见过（视为 0 基线）。
+   */
+  threadUsageTotal: CodexUsageTotal | null;
+  /**
+   * ql-20260909-027：本轮 turn/start 写入前的累计基线；轮末差值
+   * （threadUsageTotal - usageBaseline）= 本轮真实增量。null = 0 基线（新线程）。
+   */
+  usageBaseline: CodexUsageTotal | null;
   /** 释放底层资源（关 stdin + kill child）。幂等。 */
   close(): Promise<void>;
+}
+
+/**
+ * ql-20260909-027：codex thread/tokenUsage/updated 的 tokenUsage.total 形状
+ * （0.147 实测：totalTokens = inputTokens + outputTokens，inputTokens 为含
+ * cached/cacheWrite 的毛值，四增量字段是差值记账的输入）。
+ */
+export interface CodexUsageTotal {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
 }
 
 // ── task-04（2026-09-03-agent-provider-abstraction）：flat message → AgentEvent v2 映射 ──
@@ -733,6 +756,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
       nextRpcId: 3,
       closing: false,
       pendingServerRequests: [],
+      // ql-20260909-027：用量差值记账双基线（见 CodexHandle 字段注释）。
+      threadUsageTotal: null,
+      usageBaseline: null,
       close: (): Promise<void> => this._close(handle),
       // 扩展槽（非 CodexHandle 公共字段，consume 内部用）
       ...({ _ctx: ctx } as object),
@@ -957,6 +983,16 @@ export class CodexAppServerDriver implements InteractiveDriver {
         sessionPermission: ctx.sessionPermission,
       });
 
+      // ql-20260909-027：codex 用量真源解析（thread/tokenUsage/updated，total
+      // 线程累计）。turn 在途时同步发「本轮累计差值」usage_update 事件（ledger
+      // replace 语义消费者拿到单调递增轮累计）；非在途（轮间迟到的 stray 通知）
+      // 只更新快照不发事件（基线竞态见 _usageDelta 注释）。
+      this._extractTokenUsage(
+        h,
+        line,
+        currentTurnResolve !== null ? onMessage : undefined,
+      );
+
       // D2（健壮性修复，2026-07-24）：parse 包 try/catch——畸形行让 adapter.parse 抛
       // 异常时，readline 'line' 回调未捕获异常会被 cli.ts 全局处理器吞掉，但
       // currentTurnPromise 永不 resolve → 交互式会话永久卡死。对齐 task-runner.ts:1420：
@@ -1081,6 +1117,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
         // _awaitThreadId 注释）。超时按 failed 收敛——消息可见失败而非静默挂死，
         // 后续 inject 在循环下一轮正常消费（此时 threadId 已到则照常派发）。
         const threadIdReady = await this._awaitThreadId(h);
+        // ql-20260909-027：轮开始基线快照（写 turn/start 前最后已知 total）。
+        // codex 的调用只在收到 turn/start 后发生，通知不会早于本点 → 基线干净。
+        h.usageBaseline = h.threadUsageTotal ? { ...h.threadUsageTotal } : null;
         if (!threadIdReady && !h.closing && !finalized) {
           pendingTurnError =
             `codex thread/start 响应超时（${this.threadIdWaitTimeoutMs}ms 未拿到 threadId），` +
@@ -1096,11 +1135,14 @@ export class CodexAppServerDriver implements InteractiveDriver {
         }
         // 等本轮 turn/completed（或进程退出 / error）
         const outcome = await currentTurnPromise!;
-        // ql-20260906-004（审计 #9）：close 释放的轮次（cancelled outcome）不上报
+        // ql-20260909-026（审计 #9）：close 释放的轮次（cancelled outcome）不上报
         // ——会话正在被终止，终态归 _terminateSession；对齐 pi 驱动 waiter 之后的
         // closing 守卫（此处也顺带覆盖「turn 恰好完成后、上报前 close」的竞态，
         // 该窗口跳过上报无害——reportResult 本有 finalized 幂等守卫）。
         if (h.closing || finalized) break;
+        // ql-20260909-027：轮结果补差值用量（turn/completed 无 usage 时的唯一
+        // 来源；success/failed 轮统一覆盖——失败的轮同样真实消耗了 token）。
+        this._applyTurnUsageDelta(h, outcome);
         // 上报本轮 result
         this._reportOutcome(outcome, pendingTurnError, reportResult);
         pendingTurnError = null;
@@ -1284,6 +1326,123 @@ export class CodexAppServerDriver implements InteractiveDriver {
       await new Promise<void>((r) => setTimeout(r, THREAD_ID_WAIT_POLL_MS));
     }
     return !!h.threadId;
+  }
+
+  /**
+   * ql-20260909-027：解析 thread/tokenUsage/updated 通知（codex 用量唯一真源）。
+   *
+   * 实测（codex 0.147）：turn/completed 不带 usage；每次 API 调用后发本通知，
+   * params.tokenUsage.total 为线程累计、last 为单调用。此处取 total 存
+   * h.threadUsageTotal；turn 在途时向 onMessage 发「本轮累计差值」usage_update
+   * 事件（text + content='' 载体，session-manager _liftSessionUsage 按 replace
+   * 语义消费单调递增轮累计，口径与 pi turn_end 快照一致）。
+   */
+  private _extractTokenUsage(
+    h: CodexHandle,
+    line: string,
+    onMessage:
+      | ((envelope: TurnMessageEnvelope) => void | Promise<void>)
+      | undefined,
+  ): void {
+    if (!line.includes('"thread/tokenUsage/updated"')) return;
+    let msg: {
+      params?: { tokenUsage?: { total?: Record<string, unknown> } };
+    };
+    try {
+      msg = JSON.parse(line) as typeof msg;
+    } catch {
+      return;
+    }
+    const total = msg.params?.tokenUsage?.total;
+    if (!total || typeof total !== 'object') return;
+    const num = (v: unknown): number =>
+      typeof v === 'number' && Number.isFinite(v) ? v : 0;
+    h.threadUsageTotal = {
+      inputTokens: num(total.inputTokens),
+      cachedInputTokens: num(total.cachedInputTokens),
+      cacheWriteInputTokens: num(total.cacheWriteInputTokens),
+      outputTokens: num(total.outputTokens),
+    };
+    if (!onMessage || !h.threadId) return;
+    const delta = this._usageDelta(h);
+    if (!delta) return;
+    onMessage({
+      events: [
+        toAgentEvent(
+          {
+            type: 'text',
+            content: '',
+            metadata: {
+              status: 'usage_update',
+              source: 'token_usage_updated',
+              usage: delta,
+            },
+          },
+          h.threadId,
+        ),
+      ],
+    });
+  }
+
+  /**
+   * ql-20260909-027：本轮差值用量（threadUsageTotal - usageBaseline）。
+   *
+   * 映射（对齐 pi/cursor/claude 的分桶口径）：inputTokens 为含 cached/cacheWrite
+   * 的毛值（实测 totalTokens = inputTokens + outputTokens），故
+   * input_tokens = Δinput - Δcached - Δwrite（未命中缓存的净输入，clamp ≥0）、
+   * cache_read_tokens = Δcached、cache_creation_tokens = Δwrite、
+   * output_tokens = Δoutput。全字段 Δ≤0（通知未到 / total 回退）→ null。
+   */
+  private _usageDelta(h: CodexHandle): AgentEventUsage | null {
+    if (!h.threadUsageTotal) return null;
+    const b = h.usageBaseline;
+    const dInput =
+      h.threadUsageTotal.inputTokens - (b?.inputTokens ?? 0);
+    const dCached =
+      h.threadUsageTotal.cachedInputTokens - (b?.cachedInputTokens ?? 0);
+    const dWrite =
+      h.threadUsageTotal.cacheWriteInputTokens -
+      (b?.cacheWriteInputTokens ?? 0);
+    const dOut = h.threadUsageTotal.outputTokens - (b?.outputTokens ?? 0);
+    if (dInput <= 0 && dCached <= 0 && dWrite <= 0 && dOut <= 0) return null;
+    return {
+      input_tokens: Math.max(0, dInput - dCached - dWrite),
+      output_tokens: Math.max(0, dOut),
+      cache_read_tokens: Math.max(0, dCached),
+      cache_creation_tokens: Math.max(0, dWrite),
+    };
+  }
+
+  /**
+   * ql-20260909-027：轮结果补差值用量。outcome 已带 usage（未来 codex 若恢复在
+   * turn/completed 携带则优先）不动；差值可算则填。total 回退（进程重建线程累计
+   * 归零等）时顺带重置基线，避免后续轮长期负差值漏记。
+   */
+  private _applyTurnUsageDelta(
+    h: CodexHandle,
+    outcome: {
+      kind: 'success' | 'failed' | 'cancelled' | 'unknown';
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_tokens?: number;
+        cache_creation_tokens?: number;
+      };
+    },
+  ): void {
+    if (outcome.usage) return;
+    const delta = this._usageDelta(h);
+    if (delta) {
+      outcome.usage = delta;
+      return;
+    }
+    if (
+      h.threadUsageTotal &&
+      h.usageBaseline &&
+      h.threadUsageTotal !== h.usageBaseline
+    ) {
+      h.usageBaseline = { ...h.threadUsageTotal };
+    }
   }
 
   /** 写 turn/start request（递增 id）。 */

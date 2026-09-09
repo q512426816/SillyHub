@@ -206,6 +206,34 @@ function turnCompletedNotif(
   });
 }
 
+/** ql-20260909-027：thread/tokenUsage/updated notification 行（total 线程累计）。 */
+function tokenUsageNotif(
+  threadId: string,
+  total: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteInputTokens: number;
+    outputTokens: number;
+  },
+): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'thread/tokenUsage/updated',
+    params: {
+      threadId,
+      tokenUsage: {
+        total: {
+          totalTokens: total.inputTokens + total.outputTokens,
+          ...total,
+          reasoningOutputTokens: 0,
+        },
+        last: { ...total },
+        modelContextWindow: 950000,
+      },
+    },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -566,6 +594,175 @@ describe('ql-20260909-026：早到 inject 竞态——turn/start 前等 threadId
         setTimeout(() => rej(new Error('consume hung after threadId timeout')), 3000),
       ),
     ]);
+  });
+});
+
+// ── ql-20260909-027：用量差值记账——thread/tokenUsage/updated 为唯一真源 ───────
+//
+// 实机案（2026-09-09 审计）：codex 0.147 的 turn/completed 不带 usage（adapter
+// 旧提取点 turn.usage/token_usage/tokens 恒空）→ codex run 的 token 全 NULL。
+// 真源是每次 API 调用后的 thread/tokenUsage/updated（tokenUsage.total 线程累计）。
+// 修：driver 解析该通知，轮 start 快照基线、轮末差值=本轮真实增量；映射口径
+// input = ΔinputTokens-Δcached-Δwrite（毛值拆桶）。
+
+describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', () => {
+  it('轮内多次调用：result.usage = 全轮差值（毛值拆桶），轮中发 usage_update 递增事件', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_usage')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 两次 API 调用，各发一次 total 累计通知（线程累计 0→10000/9000/0/50→20000/19000/100/120）
+    emitLines(child, [
+      tokenUsageNotif('thr_usage', {
+        inputTokens: 10000,
+        cachedInputTokens: 9000,
+        cacheWriteInputTokens: 0,
+        outputTokens: 50,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    emitLines(child, [
+      tokenUsageNotif('thr_usage', {
+        inputTokens: 20000,
+        cachedInputTokens: 19000,
+        cacheWriteInputTokens: 100,
+        outputTokens: 120,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+
+    // 轮中的 live usage_update 事件：短名四字段 + 递增（第 2 次 = 全轮差值）
+    const usageMsgs = messages.filter(
+      (m) => (m.metadata as { status?: string })?.status === 'usage_update',
+    );
+    expect(usageMsgs).toHaveLength(2);
+    expect(usageMsgs[0]!.usage).toMatchObject({
+      input_tokens: 1000,
+      output_tokens: 50,
+      cache_read_tokens: 9000,
+      cache_creation_tokens: 0,
+    });
+    expect(usageMsgs[1]!.usage).toMatchObject({
+      input_tokens: 900,
+      output_tokens: 120,
+      cache_read_tokens: 19000,
+      cache_creation_tokens: 100,
+    });
+    expect(safeParseAgentEvent(usageMsgs[1]!).success).toBe(true);
+
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // result.usage = 末次差值（基线 0）：20000-19000-100=900 净输入
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success' });
+    expect(results[0]!.usage).toMatchObject({
+      input_tokens: 900,
+      output_tokens: 120,
+      cache_read_tokens: 19000,
+      cache_creation_tokens: 100,
+    });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('跨轮基线：第二轮 result.usage 只记本轮增量', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_usage2')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 第 1 轮：累计到 30000/28000/0/200
+    push('t1');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [
+      tokenUsageNotif('thr_usage2', {
+        inputTokens: 30000,
+        cachedInputTokens: 28000,
+        cacheWriteInputTokens: 0,
+        outputTokens: 200,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(results).toHaveLength(1);
+
+    // 第 2 轮：累计到 35000/32000/500/600 → 本轮增量 5000/4000/500/400
+    push('t2');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [
+      tokenUsageNotif('thr_usage2', {
+        inputTokens: 35000,
+        cachedInputTokens: 32000,
+        cacheWriteInputTokens: 500,
+        outputTokens: 600,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(2);
+    // Δgross_input(5000) - Δcached(4000) - Δwrite(500) = 500 净输入
+    expect(results[1]!.usage).toMatchObject({
+      input_tokens: 500,
+      output_tokens: 400,
+      cache_read_tokens: 4000,
+      cache_creation_tokens: 500,
+    });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('无 tokenUsage 通知（旧版 codex）：result 无 usage，行为与修复前一致', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_nousage')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.usage).toBeUndefined();
+
+    close();
+    child._emitExit(0);
+    await consumeP;
   });
 });
 
