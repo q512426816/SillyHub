@@ -44,6 +44,13 @@ from app.modules.change.model import (
     StageEnum,
 )
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange, _safe_mtime
+
+# ql-20260909-016：pending 集缓存（pending_cache）读穿 + epoch bump 挂点。
+from app.modules.change.pending_cache import (
+    bump_pending_epoch,
+    get_cached_pending_keys,
+    set_cached_pending_keys,
+)
 from app.modules.change.projection import StageProjectionService
 from app.modules.change.schema import (
     ArchiveCheckItem,
@@ -390,6 +397,9 @@ class ChangeService:
             )
             await self._session.flush()
         await self._session.commit()
+        # ql-20260909-016：pending 集缓存失效（progress 行删除 + location 翻 deleted
+        # 均影响 pending 集/位置过滤键集；commit 后 bump 保「epoch 已新⇒数据已新」）。
+        await bump_pending_epoch(workspace_id)
         log.info(
             "change.deleted",
             workspace_id=str(workspace_id),
@@ -1576,6 +1586,9 @@ class ChangeService:
         # 通道键集不相交，先后顺序无影响。
         if renamed_pairs:
             await self._rename_progress_rows(workspace_id, renamed_pairs)
+        # ql-20260909-016：reparse 建/删/迁 Change 行 + 联动 progress 行——主 commit
+        # 与两条短事务全部落定后再 bump（中间 bump 会有「epoch 新数据旧」缓存钉死窗）。
+        await bump_pending_epoch(workspace_id)
         return stats, result
 
     async def _progress_reported_active_keys(
@@ -2351,7 +2364,16 @@ class ChangeService:
         latest_progress → ``StageProjectionService._map`` 算 pending_review 非空集合。
         复用 ``_map``（不翻译 SQL、不碰 JSON 数组展开语法），跨库稳定（PG/SQLite 均可）。
         返回全局真实待处理集合；空集合由调用方 ``list_`` 短路 ``([], 0)``。
+
+        ql-20260909-016：read-through 缓存（``pending_cache``）——「进行中+聚焦」
+        模式每次翻页/自动重取都触发本函数，原每次都拉全 workspace 的
+        latest_progress 肥 JSON。缓存命中（epoch 匹配）直接返回；未命中现算后
+        回填。epoch 失效挂在四个数据写入点 commit 后（progress 推送 / 平台删除 /
+        归档投影 / reparse），Redis 不可用回退现算（零行为变化）。
         """
+        cached = await get_cached_pending_keys(workspace_id, location)
+        if cached is not None:
+            return cached
         stmt = select(Change.change_key).where(col(Change.workspace_id) == workspace_id)
         if location:
             stmt = stmt.where(col(Change.location) == location)
@@ -2372,6 +2394,7 @@ class ChangeService:
             stage, completed, _, _ = info
             if StageProjectionService._map(stage, completed) is not None:
                 pending.add(k)
+        await set_cached_pending_keys(workspace_id, location, pending)
         return pending
 
     async def _project_current_stage(
@@ -3548,6 +3571,9 @@ class ChangeService:
         self._session.add(audit)
         self._session.add(change)
         await self._session.commit()
+        # ql-20260909-016：archived 投影会翻 location=archive（影响位置过滤键集）；
+        # 非 archive 完成的 bump 无害（仅缓存 miss 一次）。
+        await bump_pending_epoch(change.workspace_id)
 
         return CompleteStageResult(
             change=change,

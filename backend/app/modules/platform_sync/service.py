@@ -40,6 +40,9 @@ from sqlmodel import col
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
 from app.modules.change.binding import bind_session_to_change, bind_session_to_quicklog
+
+# ql-20260909-016：pending 集缓存失效挂点（change.pending_cache 只依赖 redis，无环）。
+from app.modules.change.pending_cache import bump_pending_epoch
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.platform_sync.model import (
     AgentSessionLogORM,
@@ -249,6 +252,8 @@ class PlatformSyncService:
             # 钩子——进度落库 commit 后广播 approval_pending（best-effort，见
             # ``_broadcast_pending_approval`` docstring）。
             await self._broadcast_pending_approval(workspace_id, name, body)
+            # ql-20260909-016：pending 集缓存失效（同分支 3）。
+            await bump_pending_epoch(workspace_id)
             return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
         # 分支 2：stored 存在 AND stored > base_ts（字符串字典序 §7）→ 冲突
@@ -267,6 +272,9 @@ class PlatformSyncService:
         await self._apply_cli_tombstone(workspace_id, name, body)
         # task-04（design §7.3①）：接受分支同款待办产生钩子（分支 1 / 3 尾部各一处）。
         await self._broadcast_pending_approval(workspace_id, name, body)
+        # ql-20260909-016：pending 集缓存失效（latest_progress 落库 + 占位行建出都
+        # 改变 pending 集/键集；commit 后 bump，None workspace 跳过）。
+        await bump_pending_epoch(workspace_id)
         return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
     # ── Change 2026-08-29-approval-notify-push task-04（design §7.3① 触发点①）──
