@@ -5,6 +5,14 @@ created_at: 2026-09-09T13:35:00
 
 # init lease 静默不下发 platform 凭据——三层断链全部零提示
 
+> **修复状态（2026-09-09 当日，commit ef5b3c76a + sillyspec 仓 6eea47b）**：
+> - ✅ daemon 跳过写盘 warn（`task_runner: init_lease_local_yaml_skipped` + 原因枚举）已实施；
+> - ✅ backend 防御降级 warning（`init_claim_local_yaml_skipped` + reason）已实施；
+> - ✅ sillyspec 三处「daemon 注入通道」注释已纠偏为「预留通道，daemon 未实现注入」（仓内
+>   quick ql-20260909-009-bb26）；
+> - ⏳ daemon 发版部署后本条移 finished/（warn 要随 daemon-dist 上架 + 存量 daemon 自更新
+>   拉新才在生产可见）。
+
 ## 现象（2026-09-09 实证）
 
 `.sillyspec/local.yaml` 的 `platform` 段整体缺失（284-292 行只剩说明注释），CLI 内置 sync 静默跳过（合法降级），本地 quicklog / 四件套 / 模块文档长期不上平台。用户以为「平台初始化会配好」，实际从未配上。

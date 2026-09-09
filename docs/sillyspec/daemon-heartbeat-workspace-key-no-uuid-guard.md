@@ -5,6 +5,13 @@ created_at: 2026-09-09T13:38:00
 
 # daemon 心跳两键的工作区标识无 UUID 校验——任一非 UUID 键即 422 全心跳被拒
 
+> **修复状态（2026-09-09 当日，commit ef5b3c76a）**：
+> - ✅ `_collectSpecCacheEntries` 目录名 UUID 校验（非 UUID 跳过 + warn 一次）已实施；
+> - ✅ status-roots.json 写入侧（claim 学习键）+ 读侧（存量污染键过滤）UUID 校验已实施；
+> - ⏳ 心跳 422 日志提升 `loc` 到 warn 摘要行——未实施（守卫落地后 422 不再发生，收益归零，
+>   建议留档）；
+> - ⏳ daemon 发版部署后本条移 finished/。
+
 ## 现象（2026-09-09 实证）
 
 daemon 心跳连续 422：`spec_cache[2].workspace_id` uuid_parsing 失败，远程平台拒绝整次
