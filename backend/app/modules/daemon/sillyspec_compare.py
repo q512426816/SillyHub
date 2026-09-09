@@ -120,29 +120,43 @@ def _read_platform_file(
 # ── diff 计算（纯函数）──────────────────────────────────────────────────────
 
 
+def _normalized_lines(text: str) -> list[str]:
+    """行拆分口径单一源（ql-20260910-005，``_lines_equal`` 与 ``_aligned_diff_rows``
+    共用）：``splitlines(keepends=True)`` 后逐行 ``rstrip("\\r\\n")``——只归一
+    ``\\r\\n`` / ``\\n`` / ``\\r`` 三种真行尾差异（本地 Windows 检出 CRLF vs 平台
+    LF 的目标场景，含仅差末尾换行）。原裸 ``splitlines()`` 会把 ``\\v`` / ``\\f`` /
+    ``\\x1c``-``\\x1e`` / ``\\x85`` / ``\\u2028`` / ``\\u2029`` 也当行边界吞掉，
+    字节不同的两文件被判 identical，超出 ql-20260909-025 声称的「仅行尾差异」
+    范围；收紧后罕见分隔符差异在相等判定与 diff 渲染**两处一致**判 different
+    （差异清单可见且高亮真实，不产生「modified 但点开无差异」的假差异回归）。
+    """
+    return [line.rstrip("\r\n") for line in text.splitlines(keepends=True)]
+
+
 def _lines_equal(local_text: str, platform_text: str) -> bool:
     """行粒度内容相等判定——与 ``_aligned_diff_rows`` 渲染口径一致（ql-20260909-025）。
 
-    先原始全等短路（绝大多数 identical 文件零开销），否则 ``splitlines()`` 归一化
-    行尾后再比：本地 Windows 检出 CRLF vs 平台副本 LF（或仅差末尾换行符）的文件，
-    行级 diff 本就渲染为全 equal（没有任何 delete/insert 可高亮）；若仍按原始字符
-    串全等判 modified，会在「只看差异」清单里挂出肉眼完全相同的假差异文件。
+    先原始全等短路（绝大多数 identical 文件零开销），否则 ``_normalized_lines``
+    归一化行尾后再比：本地 Windows 检出 CRLF vs 平台副本 LF（或仅差末尾换行符）
+    的文件，行级 diff 本就渲染为全 equal（没有任何 delete/insert 可高亮）；若仍
+    按原始字符串全等判 modified，会在「只看差异」清单里挂出肉眼完全相同的假
+    差异文件。
     """
     if local_text == platform_text:
         return True
-    return local_text.splitlines() == platform_text.splitlines()
+    return _normalized_lines(local_text) == _normalized_lines(platform_text)
 
 
 def _aligned_diff_rows(local_text: str, platform_text: str) -> list[dict[str, Any]]:
     """difflib.SequenceMatcher 出对齐行（design §5 Phase 2 / §7.2）。
 
-    行粒度（``splitlines`` 去行尾），replace 段展开为相邻 delete+insert（delete
-    在前）；双侧 lineno 从 1 起，对侧缺失为 null。``autojunk=False``——行 diff
-    语义下不希望 SequenceMatcher 把高频行当 junk 吞掉（大文件截断护栏测试的
-    6000 行全异场景依赖诚实对齐）。
+    行粒度（``_normalized_lines`` 去行尾，与 ``_lines_equal`` 同口径），replace 段
+    展开为相邻 delete+insert（delete 在前）；双侧 lineno 从 1 起，对侧缺失为
+    null。``autojunk=False``——行 diff 语义下不希望 SequenceMatcher 把高频行当
+    junk 吞掉（大文件截断护栏测试的 6000 行全异场景依赖诚实对齐）。
     """
-    local_lines = local_text.splitlines()
-    platform_lines = platform_text.splitlines()
+    local_lines = _normalized_lines(local_text)
+    platform_lines = _normalized_lines(platform_text)
     matcher = SequenceMatcher(a=local_lines, b=platform_lines, autojunk=False)
     rows: list[dict[str, Any]] = []
 

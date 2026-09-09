@@ -1435,6 +1435,117 @@ class TestShadowDialogAnswerAuthorization:
         assert row.answered_by == seed.member_uid
 
     @pytest.mark.asyncio
+    async def test_shadow_dialog_concurrent_race_first_answer_wins(
+        self, db_session, mocked_redis
+    ) -> None:
+        """ql-20260910-005：并发双答先到先得原子化（竞态窗口模拟）。
+
+        守卫段 dialog_row 是无锁快照且行锁已随守卫 commit 释放——两名成员在
+        A 翻转前各自拿到 pending 快照时，旧「ORM 直写」会让 B 覆写
+        answered_by/answer。条件 UPDATE 后 B 翻 0 行 → 409 带先到者
+        answered_by，DB 与 SSE 只归先到者。此处用「窗口期 pending 快照」
+        （游离 ORM 实例）直入 _respond_dialog 翻转段复现该交错。
+        """
+        from sqlalchemy import select
+
+        from app.modules.daemon.model import SessionDialogRequest
+        from app.modules.daemon.permission_service import DaemonDialogAlreadyResolved
+
+        seed = await _seed_group_shadow(db_session, shadow_manual_approval=False)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-race-1")
+        real = (
+            await db_session.execute(
+                select(SessionDialogRequest).where(SessionDialogRequest.request_id == "sd-race-1")
+            )
+        ).scalar_one()
+        perm, _hub = self._make_perm(db_session)
+
+        # A（成员）先答——全链路成功。
+        first = await perm.respond_permission(
+            seed.member_uid,
+            seed.shadow_id,
+            "sd-race-1",
+            "allow",
+            dialog_result={"answers": [{"question": "选哪个方案？", "answer": "甲"}]},
+        )
+        assert first.accepted is True
+
+        # B（群主，另一答题端）持守卫段读到的 pending 快照（竞态窗口：行已在
+        # DB 翻 answered，但 B 的内存快照不知道）直入翻转段。
+        stale = SessionDialogRequest(
+            id=real.id,
+            session_id=seed.shadow_id,
+            request_id="sd-race-1",
+            status="pending",
+            dialog_kind="ask_user_question",
+        )
+        session_obj = (
+            await db_session.execute(select(AgentSession).where(AgentSession.id == seed.shadow_id))
+        ).scalar_one()
+        with pytest.raises(DaemonDialogAlreadyResolved) as ei:
+            await perm._respond_dialog(
+                session_obj=session_obj,
+                dialog_row=stale,
+                decision="allow",
+                message=None,
+                dialog_result={"answers": [{"question": "选哪个方案？", "answer": "乙"}]},
+                actor_user_id=seed.owner_uid,
+            )
+        # 409 details 携带先到者（成员）——前端即时翻已答关闭态渲染人名。
+        assert ei.value.details["answered_by"] == str(seed.member_uid)
+
+        # DB 不被后到者覆写：answered_by/answer 保持 A 的。
+        fresh = (
+            await db_session.execute(
+                select(SessionDialogRequest)
+                .where(SessionDialogRequest.request_id == "sd-race-1")
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+        assert fresh.status == "answered"
+        assert fresh.answered_by == seed.member_uid
+        assert fresh.answer == {"answers": [{"question": "选哪个方案？", "answer": "甲"}]}
+
+    @pytest.mark.asyncio
+    async def test_soft_deleted_group_member_answer_404(self, db_session, mocked_redis) -> None:
+        """ql-20260910-005（审查 1.2 测试缺口补位）：软删群后成员答题 404。
+
+        _resolve_shadow_member_answer_session 的 deleted_at.is_(None) 过滤
+        （§5.2 Grill X2 先例：删群后成员不得借影子会话答题）此前无反例覆盖。
+        """
+        from sqlalchemy import select
+
+        from app.modules.agent.model import AgentGroupChat
+        from app.modules.daemon.model import SessionDialogRequest
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        seed = await _seed_group_shadow(db_session, shadow_manual_approval=False)
+        await _insert_pending_dialog_row(db_session, seed, request_id="sd-del-1")
+        await db_session.execute(
+            AgentGroupChat.__table__.update()
+            .where(AgentGroupChat.id == seed.group_session_id)
+            .values(deleted_at=datetime.now(UTC))
+        )
+        await db_session.commit()
+        perm, _hub = self._make_perm(db_session)
+
+        with pytest.raises(DaemonSessionNotFound):
+            await perm.respond_permission(
+                seed.member_uid,
+                seed.shadow_id,
+                "sd-del-1",
+                "allow",
+                dialog_result={"answers": []},
+            )
+        # 行保持 pending（未被软删群外的任何路径触碰）。
+        row = (
+            await db_session.execute(
+                select(SessionDialogRequest).where(SessionDialogRequest.request_id == "sd-del-1")
+            )
+        ).scalar_one()
+        assert row.status == "pending"
+
+    @pytest.mark.asyncio
     async def test_cross_session_request_id_not_allowed(self, db_session, mocked_redis) -> None:
         """R-08 借道反例：群成员持**别会话**的 request_id 打影子会话——
         is_dialog_answer 判定要求行归属本会话，影子分支不触发 → 404，

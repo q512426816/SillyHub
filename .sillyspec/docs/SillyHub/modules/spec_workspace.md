@@ -72,6 +72,10 @@ delete = move 到 spec-backups/{ws}/{ts}/{path} + exists=False（30 天机会式
   可见）③single-flight（inflight 跳过+尾随）。测试直通开关
   SILLYHUB_TEST_REPARSE_INLINE=1（backend/conftest 顶部 setdefault，生产不设）
   保持旧同步语义；调度行为由 test_reparse_scheduler.py 专测。
+  停机排空（ql-20260910-005）：app lifespan shutdown finally 在巡检类协程
+  cancel 后 await drain_reparse_workers()（测试排空同款）——在飞 reparse 是
+  毫秒级独立短事务，排空防进程退出截断写投影；尾随节流窗输入丢失最坏延迟
+  投影到 daemon 下轮 push 60-90s 兜底。
 ```
 - 全量路径 `_write_spec_root` / `apply_sync`：tar 解包 staging →
   逐文件 read+sha256 校验落盘 → 两阶段 reparse（scan_docs + change）

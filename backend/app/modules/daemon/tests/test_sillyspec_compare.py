@@ -747,6 +747,26 @@ async def test_compare_spec_tree_four_categories_and_dropped_paths(
     assert len(stub.calls) == 1
 
 
+def test_normalized_lines_line_ending_matrix() -> None:
+    """行归一化口径矩阵（ql-20260910-005）：只归一三种真行尾，罕见分隔符不吞。"""
+    from app.modules.daemon.sillyspec_compare import _lines_equal, _normalized_lines
+
+    # CRLF vs LF / 裸 CR / 仅末尾换行差异 → 归一 identical（ql-20260909-025
+    # 原目标保持）。
+    assert _lines_equal("a\r\nb\r\n", "a\nb\n") is True
+    assert _lines_equal("a\rb", "a\nb") is True
+    assert _lines_equal("a\nb", "a\nb\n") is True
+    # 罕见分隔符（\v \f \u2028 \x85 …）不是行尾——裸 splitlines() 会把它们当
+    # 行边界吞掉判 identical，收紧后字节不同即 different。
+    for rare in ("a\vb", "a\fb", "a\u2028b", "a\x85b"):
+        assert _lines_equal(rare, "a\nb") is False, repr(rare)
+    # 罕见分隔符保留为行内容尾部（keepends 不吞、rstrip("\r\n") 不去 \x0b）——
+    # 与 \n 分行侧的行列表不同 → different，diff 高亮可见真实差异（不产生
+    # 「modified 但点开无差异」的假差异回归）。
+    assert _normalized_lines("a\vb") == ["a\x0b", "b"]
+    assert _normalized_lines("a\r\nb\n") == ["a", "b"]
+
+
 @pytest.mark.asyncio
 async def test_compare_spec_tree_eol_only_diff_classified_identical(
     client: AsyncClient,
@@ -827,6 +847,49 @@ async def test_compare_spec_tree_eol_only_diff_classified_identical(
             "platform_text": "line-2-changed",
         },
     ]
+
+    assert len(stub.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_compare_spec_tree_rare_separator_diff_not_identical(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """罕见分隔符差异不判 identical（ql-20260910-005 口径收紧的管线回归）。
+
+    本地含 \\v（垂直制表）vs 平台 \\n 分行的两文件：裸 splitlines() 会把 \\v
+    当行边界吞掉——字节不同却判 identical（超出 ql-20260909-025「仅行尾差异」
+    的声称范围）。收紧后 modified 且 diff 高亮真实（行文本携带 \\v 可见）。
+    """
+    _owner, token, inst, ws, spec_root = await _seed_full_env(db_session, tmp_path, tag="raresep")
+    rare_file = "changes/2026-09-07-demo/rare-vt-sep.md"
+    target = spec_root.joinpath(*rare_file.split("/"))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"a\nb")
+
+    stub = _SnapshotRpcStub(
+        result=_snapshot(
+            files=[_local_file(rare_file, "a\vb")],
+            ql_id=_QL_ID,
+        )
+    ).install(monkeypatch)
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE, workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    files = {f["path"]: f for f in resp.json()["files"]}
+
+    assert files[rare_file]["status"] == "modified"
+    rows = files[rare_file]["diff_rows"]
+    assert [r["type"] for r in rows] == ["delete", "insert", "equal"]
+    # 高亮真实可见：本地行文本携带 \v（不再被口径吞掉）。
+    assert rows[0]["local_text"] == "a\x0b"
+    assert rows[1]["platform_text"] == "a"
 
     assert len(stub.calls) == 1
 

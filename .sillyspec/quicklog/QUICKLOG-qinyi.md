@@ -106,7 +106,33 @@
 结果：相关 5 套件 200 passed（新增 3 条）+ daemon-interactive 58 passed、tsc 0 错误；E2E 实机验证 agent_run_model_usage 行随后执行
 审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/lib/__tests__/use-agent-run-stream.test.ts, sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts, sillyhub-daemon/tests/interactive/cursor-driver.test.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts, sillyhub-daemon/tests/sillyspec-manager.test.ts
 
-## ql-20260910-004-db16 | 2026-09-10 03:55:23 | answered_by 透传链补全——读 DTO/409 details 携带实际答题人，前端 409 即时翻已答关闭态带人名（关闭他答人名缺失与 409 英文文案两限制）
-状态：进行中
+## ql-20260910-004-db16 | 2026-09-10 03:55:23 | AskUser answered_by 透传链补全——他答人名缺失与 409 英文文案双收口
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/daemon/permission_service.py, backend/app/modules/daemon/tests/test_session_permissions.py, frontend/src/components/group-chat/group-chat-panel.tsx, frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
+文件：
+- backend/app/modules/daemon/permission_service.py（DTO 双层 answered_by + 409 details 透传）
+- backend/app/modules/daemon/tests/test_session_permissions.py（+1 透传双通道用例）
+- frontend/src/components/ask-user-dialog-card.tsx（onAlreadyResolved 回调 + 409 本地关闭态）
+- frontend/src/components/group-chat/group-chat-panel.tsx（409 接线成员表映射人名）
+- frontend/src/components/ask-user-dialog-card.test.tsx（+2 409 用例）
+- frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx（+1 他答 409 带名用例）
+需求：AskUser answered_by 透传链补全——他答人名缺失与 409 英文文案双收口
+根因：SessionDialogRead 无 answered_by 字段：历史/恢复读无法渲染答题人；409 已答抬错 details 也不带——第二答题端只能干等 ≤10s 轮询且永远无人名，并直出英文报错
+方案：backend：SessionDialogRead/WorkspaceDialogRead 增 answered_by（from_model 透传）+ DaemonDialogAlreadyResolved details 携带 answered_by；frontend：ask-user-dialog-card 增 onAlreadyResolved 回调（409 即时本地翻已答关闭态，不直出英文），group-chat-panel 接线经成员表映射人名
+结果：backend 41 passed（+1 双通道断言）+ workspace dialogs 9 不回归；frontend dialog-card 31（+2）+聚合 12（+1）全绿、tsc 0、eslint 0 error；双端生产构建 exit 0；dev 库验证数据已清零
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/interactive/replay-real-log.test.ts
+
+## ql-20260910-005-ea38 | 2026-09-10 04:17:44 | 24h 审查风险修复第四批：并发答题先到先得原子化+软删群反例+reparse 停机排空+compare 行边界口径收紧
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/permission_service.py（条件 UPDATE 先到先得）
+- backend/app/modules/daemon/sillyspec_compare.py（_normalized_lines 单一源）
+- backend/app/main.py（停机排空 reparse）
+- backend/app/modules/daemon/tests/test_session_permissions.py（竞态+软删群两用例）
+- backend/app/modules/daemon/tests/test_sillyspec_compare.py（口径矩阵+管线用例）
+需求：24h 审查风险修复第四批：并发答题先到先得原子化+软删群反例+reparse 停机排空+compare 行边界口径收紧
+根因：①守卫段 dialog 行无锁快照且行锁随守卫 commit 释放，并发双答后到者覆写 answered_by/answer 且 SSE 双发，影子答题放开后可达性放大 ②软删群答题反例无测试覆盖（审查 1.2 缺口）③停机 finally 不排空在飞 reparse 短事务 ④裸 splitlines 把 \v 等罕见分隔符当行边界吞掉，字节不同判 identical 超出原声称范围
+方案：①条件 UPDATE 仅 pending 可翻+0 行重读按终态抛 409 携先到者 ②软删群 404 用例+竞态窗口模拟用例 ③shutdown finally 补 drain_reparse_workers ④两处共用 _normalized_lines 单一源只归一三种真行尾
+结果：test_session_permissions 43+test_sillyspec_compare 26 全绿（竞态用例旧实现验证变红）；daemon+spec_workspace 全量 2144 passed 1 skipped（平台存量跳过）；ruff/format/mypy 0 问题
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/src/interactive/driver.ts

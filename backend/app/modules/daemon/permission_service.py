@@ -1305,14 +1305,53 @@ class DaemonPermissionService:
 
         # Flip the row to answered only after the WS send succeeded — a 504
         # must leave the dialog pending so the user can retry.
-        dialog_row.status = "answered"
-        dialog_row.answer = dialog_result
-        dialog_row.answered_at = datetime.now(UTC)
-        # task-09（D-004@v2）：answered_by 记**实际答题人**（REST 调用者
-        # user_id，respond_permission 透传）。影子会话答题者常为群成员而非
-        # 影子属主（群主），沿旧读 session_obj.user_id 会把成员答案记到群主
-        # 名下（归属失真）；普通单聊两值恒等，行为不变。
-        dialog_row.answered_by = actor_user_id
+        # ql-20260910-005：先到先得原子化——守卫段的 dialog_row 是无锁快照且
+        # session 行锁已随守卫 commit 释放，两名成员毫秒窗内并发应答同一
+        # pending dialog 时，旧「ORM 属性直写 + commit」是无条件翻转：后到者
+        # 覆写 answered_by/answer，且双双走到下方 publish（SSE 发两次）。
+        # 改条件 UPDATE（仅 pending 可翻）：0 行 = 先到者已翻终态，重读行按
+        # 既有终态语义抛 409（details 带先到者 answered_by，前端 409 即时翻
+        # 已答关闭态）/ 404——DB 不被覆写、SSE 只发一次（后到者在 publish 前
+        # 抛出）。WS 重复下行对 daemon 幂等（pi 桥接 reply settled 布尔）。
+        flip = await self._svc._session.execute(
+            update(SessionDialogRequest)
+            .where(
+                SessionDialogRequest.id == dialog_row.id,
+                SessionDialogRequest.status == "pending",
+            )
+            .values(
+                status="answered",
+                answer=dialog_result,
+                answered_at=datetime.now(UTC),
+                # task-09（D-004@v2）：answered_by 记**实际答题人**（REST 调用者
+                # user_id，respond_permission 透传）。影子会话答题者常为群成员而非
+                # 影子属主（群主），沿旧读 session_obj.user_id 会把成员答案记到群主
+                # 名下（归属失真）；普通单聊两值恒等，行为不变。
+                answered_by=actor_user_id,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if flip.rowcount == 0:
+            fresh = (
+                await self._svc._session.execute(
+                    select(SessionDialogRequest)
+                    .where(SessionDialogRequest.id == dialog_row.id)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if fresh is not None and fresh.status == "answered":
+                raise DaemonDialogAlreadyResolved(
+                    f"Dialog request '{request_id}' was already answered.",
+                    details={
+                        "session_id": str(session_id),
+                        "request_id": request_id,
+                        "answered_by": (str(fresh.answered_by) if fresh.answered_by else None),
+                    },
+                )
+            raise DaemonDialogNotFound(
+                f"Dialog request '{request_id}' was cancelled.",
+                details={"session_id": str(session_id), "request_id": request_id},
+            )
         await self._svc._session.commit()
 
         await self._svc._publish_session_event(
