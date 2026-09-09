@@ -13,9 +13,9 @@ created_at: 2026-09-09 22:50:18
 - [x] task-05: cursor spike——真机 10 次澄清场景遵守率判定（≥8/10 门槛，go/no-go）
 - [x] task-06: 前端 askuser-marker 解析器（宽容边界清单）+ 单测
 - [x] task-07: AskUserMarkerCard + turn-timeline 渲染接入 + 已答态 best-effort 判定 + 单测 (depends_on: task-06)
-- [ ] task-08: daemon marker prompt 注入（caps 分派）+ 单测 (depends_on: task-05, task-12)
+- [x] task-08: daemon marker prompt 注入（caps 分派）+ 单测 (depends_on: task-05, task-12)
 - [x] task-09: backend 影子会话答题授权放开（授权门 :949 + manual_approval 第二道守卫 L959-963 影子分支豁免 ask_user 类；session_kind='group_member' + 群成员校验）+ answered_by 实际答题人 + 越权反例测试
 - [x] task-10: AskUserDialogCard 群聊推荐条 + 已答关闭态实际答题人 + 单测 (depends_on: task-09)
 - [x] task-11: 群聊聚合渲染（pending 原生卡 + marker 卡 + 先到先得关闭态 + 成员来源标注）+ 单测 (depends_on: task-07, task-09, task-10)
 - [x] task-12: caps 三端 dialog 键 + 对齐测试解析器扩展 string 枚举 + pi permission_dialog 翻真
-- [ ] task-13: 三波真机冒烟验收（pi 一问一答同轮 / cursor 标记全流程 / 群聊聚合答题） (depends_on: task-04, task-07, task-08, task-11)
+- [x] task-13: 三波真机冒烟验收（pi 一问一答同轮 / cursor 标记全流程 / 群聊聚合答题） (depends_on: task-04, task-07, task-08, task-11)

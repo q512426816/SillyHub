@@ -12,7 +12,6 @@ decision_ids: [D-002@v1, D-003@v2, D-004@v2]
 allowed_paths:
   - .sillyspec/changes/2026-09-09-askuser-pi-cursor/smoke-result.md
 target_files:
-  - NEW:.sillyspec/changes/2026-09-09-askuser-pi-cursor/smoke-result.md
 goal: >
   按 plan.md 全局验收标准对三波（pi 桥接 / cursor 标记 / 群聊聚合）做真机冒烟与
   相关套件回归，逐项记录验收结果到 smoke-result.md，作为变更收口证据（不改产品代码）。

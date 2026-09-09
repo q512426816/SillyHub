@@ -13,7 +13,6 @@ provides: 'spike go/no-go 结论（spike-cursor-marker.md 内 10 场景判定明
 allowed_paths:
   - NEW:.sillyspec/changes/2026-09-09-askuser-pi-cursor/spike-cursor-marker.md
 target_files:
-  - NEW:.sillyspec/changes/2026-09-09-askuser-pi-cursor/spike-cursor-marker.md
 goal: >
   真机 cursor 无头会话（同生产形态 -p --trust --force）构造 10 次互不重复的需澄清场景，以等效未来 prompt 前缀的协议说明驱动模型输出 askuser 标记，统计合法标记遵守率，≥8/10 判 go（task-08 启用注入），否则 no-go（cursor 降级自然语言提问、caps=none），结论落盘 spike 记录文件（FR-04）。
 implementation:

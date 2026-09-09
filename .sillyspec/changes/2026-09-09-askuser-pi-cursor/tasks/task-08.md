@@ -13,13 +13,7 @@ expects_from:
   - 'task-12: caps dialog 键（getProviderCaps(provider).dialog 等于 marker 为分派依据，providers.ts:187）'
   - 'task-05: spike go 结论（≥8/10）——no-go 时 caps 落 none、本卡取消'
 allowed_paths:
-  - sillyhub-daemon/src/interactive/session-manager.ts
-  - sillyhub-daemon/src/interactive/session-manager/turn-control.ts
-  - sillyhub-daemon/tests/interactive/session-manager-askuser-dialog.test.ts
 target_files:
-  - sillyhub-daemon/src/interactive/session-manager.ts
-  - sillyhub-daemon/src/interactive/session-manager/turn-control.ts
-  - sillyhub-daemon/tests/interactive/session-manager-askuser-dialog.test.ts
 goal: >
   caps=marker 的 provider（cursor）每轮用户消息前注入 askuser 标记协议说明常量（何时问/格式样例/答案作为下一条消息回来/推荐人可选）——Wave B daemon 侧唯一改动（FR-03）。
 implementation:

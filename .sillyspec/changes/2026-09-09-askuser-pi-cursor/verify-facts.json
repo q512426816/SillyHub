@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-09-askuser-pi-cursor",
+  "generatedAt": "2026-09-09T16:46:26.168Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-09-askuser-pi-cursor",
+      "metrics": {
+        "matches": 3,
+        "skippedFiles": 4,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-09-askuser-pi-cursor",
+      "metrics": {
+        "tasks": 13,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-09-askuser-pi-cursor",
+      "metrics": {
+        "backendEndpoints": 2087,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-09-askuser-pi-cursor",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "requiredEvidence": [
+    {
+      "task": "task-01",
+      "status": "missing",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+        "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：73 项 daemon 单测四态全绿覆盖桥接逻辑；真机 pi 一问一答转人工清单 smoke-result §3，非代码缺陷）"
+    },
+    {
+      "task": "task-02",
+      "status": "missing",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：tsc 0 + 77 用例绿，commit 99a228add；已提交态文件级复验不适用）"
+    },
+    {
+      "task": "task-03",
+      "status": "missing",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/interactive/pi-rpc-driver.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：51→73 用例绿含 denormalize 回流与三锚点兜底，commit 99a228add）"
+    },
+    {
+      "task": "task-04",
+      "status": "missing",
+      "verifiedFiles": [
+        "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：73 passed 两轮稳定（含 22 新增四态）"
+    },
+    {
+      "task": "task-05",
+      "status": "missing",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-09-09-askuser-pi-cursor/spike-cursor-marker.md"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：spike 判定 INCONCLUSIVE 完整落盘（判定口径/证据/挂起决定）"
+    },
+    {
+      "task": "task-06",
+      "status": "missing",
+      "verifiedFiles": [
+        "frontend/src/lib/askuser-marker.ts",
+        "frontend/src/lib/__tests__/askuser-marker.test.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：31 用例绿，verify 窗口内实测，commit 99a228add）"
+    },
+    {
+      "task": "task-07",
+      "status": "missing",
+      "verifiedFiles": [
+        "frontend/src/components/ask-user-marker-card.tsx",
+        "frontend/src/components/daemon/turn-timeline.tsx"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：18 新用例+43 既有全绿零适配，verify 窗口内实测）"
+    },
+    {
+      "task": "task-08",
+      "status": "missing",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-09-09-askuser-pi-cursor/spike-cursor-marker.md"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：挂起未实现——Cursor 免费额度致 spike INCONCLUSIVE，补测 go 后执行；无代码产出属预期）"
+    },
+    {
+      "task": "task-09",
+      "status": "missing",
+      "verifiedFiles": [
+        "backend/app/modules/daemon/permission_service.py",
+        "backend/app/modules/daemon/tests/test_session_permissions.py"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：41 用例绿含 9 越权反例 + 真实 HTTP 集成断言（外人 404/成员过全门禁）"
+    },
+    {
+      "task": "task-10",
+      "status": "missing",
+      "verifiedFiles": [
+        "frontend/src/components/ask-user-dialog-card.tsx"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：29 用例绿含降级路径，verify 窗口内实测）"
+    },
+    {
+      "task": "task-11",
+      "status": "missing",
+      "verifiedFiles": [
+        "frontend/src/components/group-chat/group-chat-panel.tsx",
+        "frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：110 用例绿（10 新增+100 既有）"
+    },
+    {
+      "task": "task-12",
+      "status": "missing",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/interactive/providers.ts",
+        "backend/app/modules/agent/provider_caps.py",
+        "frontend/src/lib/provider-caps.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：三端 9 键对齐测试 4+44 用例绿，verify 窗口内实测）"
+    },
+    {
+      "task": "task-13",
+      "status": "missing",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-09-09-askuser-pi-cursor/smoke-result.md",
+        ".sillyspec/changes/2026-09-09-askuser-pi-cursor/verify-integration.log"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：自动化验收面全过（backend 41/frontend 245/daemon 73/集成断言 exit 0）"
+    }
+  ],
+  "runtimeEvidence": [
+    {
+      "claim": "影子会话答题授权真实 HTTP 集成：外人 404（R-08 resource-hiding）+ 群成员通过全部授权门禁（影子归属/群成员/manual_approval 豁免）到达 WS 投递步（504=daemon 未连 verify 实例的正确 fail-safe，行保持 pending 不落假 answered）",
+      "command": "bash /tmp/askuser-verify-evidence.sh（种子：uv run python %TEMP%/askuser-verify-seed.py；服务：uv run uvicorn app.main:app --port 8100）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-09-askuser-pi-cursor/verify-integration.log"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe3"
+    ],
+    "verdict": "mismatch",
+    "detail": [
+      {
+        "probe": "probe3",
+        "snapshot": 8,
+        "rerun": 7,
+        "severity": "warning",
+        "note": "facts 快照 hasTest 数与重跑不符（测试布局环境敏感，WARNING）"
+      }
+    ]
+  }
+}

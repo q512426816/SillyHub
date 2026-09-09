@@ -1,0 +1,5 @@
+[assert-1] outsider answer -> HTTP 404 (expect 404, resource-hiding R-08)
+[assert-2] group-member answer -> HTTP 504 (504=授权门全过到达 WS 投递步，daemon 未连 8100 实例故投递 fail-safe；200=投递成功)
+[assert-2b] member passed ALL auth gates (shadow ownership + group membership + manual_approval exemption) - reached delivery step
+[assert-3] sd-verify-1 row status=pending (pending=投递失败不落假 answered，fail-safe)
+RESULT: ALL ASSERTIONS PASSED
