@@ -116,9 +116,13 @@ const COMPACT_CLASS = cn(
   "[&_.wmde-markdown_ol]:!my-1.5 [&_.wmde-markdown_ol]:!pl-4",
   "[&_.wmde-markdown_li]:!my-0",
   "[&_.wmde-markdown_blockquote]:!my-1.5 [&_.wmde-markdown_blockquote]:!border-l-2 [&_.wmde-markdown_blockquote]:!pl-2 [&_.wmde-markdown_blockquote]:!text-muted-foreground [&_.wmde-markdown_blockquote]:!not-italic",
-  "[&_.wmde-markdown_pre]:!my-1.5 [&_.wmde-markdown_pre]:!overflow-x-auto [&_.wmde-markdown_pre]:!rounded-md [&_.wmde-markdown_pre]:!bg-muted/60 [&_.wmde-markdown_pre]:!p-2",
-  "[&_.wmde-markdown_pre_code]:!bg-transparent [&_.wmde-markdown_pre_code]:!p-0",
-  "[&_.wmde-markdown_code]:!font-mono [&_.wmde-markdown_code]:!text-[11px]",
+  // ql-20260909-009：pre 底色从 !bg-muted/60 灰块改为 globals.css 元素级深色代码块
+  // （三主题一致的 slate-900 底 + GitHub dark 语法色板，token 见 --codeblock-*）；
+  // 本侧只管间距/圆角/内边距，背景交给元素级规则（!important 会压死它）。
+  "[&_.wmde-markdown_pre]:!my-2 [&_.wmde-markdown_pre]:!overflow-x-auto [&_.wmde-markdown_pre]:!rounded-lg [&_.wmde-markdown_pre]:!px-3 [&_.wmde-markdown_pre]:!py-2.5",
+  "[&_.wmde-markdown_pre_code]:!bg-transparent [&_.wmde-markdown_pre_code]:!p-0 [&_.wmde-markdown_pre_code]:!text-xs",
+  // 行内 code 衬浅底小胶囊（pre 内 code 由上方 pre_code 规则压回透明/零边距，特异度更高不冲突）
+  "[&_.wmde-markdown_code]:!font-mono [&_.wmde-markdown_code]:!text-[11px] [&_.wmde-markdown_code]:!rounded [&_.wmde-markdown_code]:!bg-muted/70 [&_.wmde-markdown_code]:!px-1 [&_.wmde-markdown_code]:!py-0.5",
   "[&_a]:!text-primary [&_a]:!underline [&_a]:!underline-offset-2",
 );
 
@@ -137,9 +141,9 @@ const READING_CLASS = cn(
   "[&_.wmde-markdown_ol]:!my-2 [&_.wmde-markdown_ol]:!pl-5",
   "[&_.wmde-markdown_li]:!my-0.5",
   "[&_.wmde-markdown_blockquote]:!my-3 [&_.wmde-markdown_blockquote]:!border-l-2 [&_.wmde-markdown_blockquote]:!pl-3 [&_.wmde-markdown_blockquote]:!text-muted-foreground [&_.wmde-markdown_blockquote]:!not-italic",
-  "[&_.wmde-markdown_pre]:!my-3 [&_.wmde-markdown_pre]:!overflow-x-auto [&_.wmde-markdown_pre]:!rounded-md [&_.wmde-markdown_pre]:!bg-muted/60 [&_.wmde-markdown_pre]:!p-3",
+  "[&_.wmde-markdown_pre]:!my-3 [&_.wmde-markdown_pre]:!overflow-x-auto [&_.wmde-markdown_pre]:!rounded-lg [&_.wmde-markdown_pre]:!px-3.5 [&_.wmde-markdown_pre]:!py-3",
   "[&_.wmde-markdown_pre_code]:!bg-transparent [&_.wmde-markdown_pre_code]:!p-0 [&_.wmde-markdown_pre_code]:!text-xs",
-  "[&_.wmde-markdown_code]:!font-mono [&_.wmde-markdown_code]:!text-xs",
+  "[&_.wmde-markdown_code]:!font-mono [&_.wmde-markdown_code]:!text-xs [&_.wmde-markdown_code]:!rounded [&_.wmde-markdown_code]:!bg-muted/70 [&_.wmde-markdown_code]:!px-1 [&_.wmde-markdown_code]:!py-0.5",
   "[&_a]:!text-primary [&_a]:!underline [&_a]:!underline-offset-2",
 );
 

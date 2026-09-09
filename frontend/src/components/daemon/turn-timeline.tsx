@@ -341,8 +341,10 @@ const TurnRow = memo(function TurnRow({
                       {formatTurnTime(turn.sender.at)}
                     </span>
                   )}
-                  {/* task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出。 */}
-                  <div className="group relative max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
+                  {/* task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出。
+                      ql-20260909-009：shadow-sm→shadow-primary 品牌投影（与发送按钮同
+                      token），用户气泡从纯色块浮出时间线底。 */}
+                  <div className="group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
                     {(() => {
                       const parsed = parseAttachmentMarkersCached(turn.prompt);

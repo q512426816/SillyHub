@@ -657,8 +657,10 @@ export function SessionInputBar({
       {/* 胶囊输入区（2026-08-23-sessions-page-style 原型 .input-row）：圆角容器
           聚焦光环 + 附件按钮内嵌 + 渐变圆形发送按钮；Enter/附件/disabled 交互
           契约原样（task-13 / D-7）。task-03 加 relative 作联想浮层锚区
-          （absolute bottom-full，与 TeamTriggerPopover 同锚区同层族，R-5）。 */}
-      <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 py-2 transition-all focus-within:border-primary focus-within:bg-card focus-within:ring-4 focus-within:ring-brand-100">
+          （absolute bottom-full，与 TeamTriggerPopover 同锚区同层族，R-5）。
+          ql-20260909-009：常态 shadow-sm 微浮、聚焦升 shadow-md——从"灰底凹槽"
+          改为"悬浮输入条"（阴影走主题 token，dark 块已加深定义）。 */}
+      <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 py-2 shadow-sm transition-all focus-within:border-primary focus-within:bg-card focus-within:shadow-md focus-within:ring-4 focus-within:ring-brand-100">
         {/* task-03：联想数据桥（首次聚焦挂载，见 MentionSourcesBridge 注释；
             task-06：ppmScope 状态口径透传——切开关换键重拉 PPM 两分组）。 */}
         {mentionSourcesMounted && (

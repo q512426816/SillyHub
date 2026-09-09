@@ -392,7 +392,9 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
   useSegmentAnimations();
   return (
     // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
-    <div className="seg-text-bubble group relative max-w-[86%] self-start rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+    // ql-20260909-009：86%→80% 收窄 + border-border/60——气泡不再顶满成"文档块"，
+    // 与时间线底色（bg-background）拉开前后层级。
+    <div className="seg-text-bubble group relative max-w-[80%] self-start rounded-2xl rounded-tl-md border border-border/60 bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
       <MarkdownText content={segment.text} />
       {segment.streaming && (
         <span

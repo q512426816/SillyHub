@@ -113,6 +113,14 @@
     --transition-fast: 100ms cubic-bezier(0.4, 0, 0.2, 1);
     --transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
     --transition-slow: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* ---- 代码块 token(ql-20260909-009,三主题共享不在 themes.ts——主题不变量,
+       深色代码块是跨主题设计决策:ChatGPT/GitHub 式深底在浅色界面同样成立);
+       取值=Tailwind v3 slate 阶默认值(900/700/200),消费方=下方 .markdown-text
+       元素级代码块规则 */
+    --codeblock-bg: #0f172a;
+    --codeblock-border: #334155;
+    --codeblock-fg: #e2e8f0;
   }
 
   /* 旧蓝主题覆盖块(task-02):html[data-theme="blue"] 时生效,现版取值原样平移。
@@ -709,6 +717,42 @@
 [data-theme="dark"] .markdown-text .wmde-markdown table th,
 [data-theme="dark"] .markdown-text .wmde-markdown table td {
   border-color: var(--color-border);
+}
+
+/* ---- 代码块深色化(ql-20260909-009,三主题统一) ----
+   根因:库 token 色板走 prefers-color-scheme 媒体查询——跟 OS 不跟 html
+   data-theme(系统浅色+手动 dark 主题时语法色是浅色深调,压暗底即低对比);
+   且 MarkdownText 原 !bg-muted/60 把 pre 压成灰块,与气泡/页面同色系无层级。
+   修法:经 .markdown-text 元素级规则(特异度 (0,2,1) 压库 .wmde-markdown pre,
+   与加载顺序无关——同上方表格修法)把 pre 统一为深色块(slate-900 底,token
+   --codeblock-*),GitHub dark 语法色板在 pre 上局部重定义,三主题观感一致。
+   行内 code 不受影响(样式在 MarkdownText Tailwind 侧,pre code 已压回透明)。 */
+.markdown-text .wmde-markdown pre {
+  background-color: var(--codeblock-bg);
+  border: 1px solid var(--codeblock-border);
+  /* GitHub dark prettylights 语法色板(pre 局部覆盖,库 token 类全部走这些变量) */
+  --color-prettylights-syntax-comment: #8b949e;
+  --color-prettylights-syntax-constant: #79c0ff;
+  --color-prettylights-syntax-entity: #d2a8ff;
+  --color-prettylights-syntax-storage-modifier-import: #c9d1d9;
+  --color-prettylights-syntax-entity-tag: #7ee787;
+  --color-prettylights-syntax-keyword: #ff7b72;
+  --color-prettylights-syntax-string: #a5d6ff;
+  --color-prettylights-syntax-variable: #ffa657;
+  --color-prettylights-syntax-brackethighlighter-unmatched: #f85149;
+  --color-prettylights-syntax-invalid-illegal-text: #f0f6fc;
+  --color-prettylights-syntax-string-regexp: #7ee787;
+  --color-prettylights-syntax-markup-list: #f2cc60;
+  --color-prettylights-syntax-markup-heading: #1f6feb;
+  --color-prettylights-syntax-markup-italic: #c9d1d9;
+  --color-prettylights-syntax-markup-bold: #c9d1d9;
+  --color-prettylights-syntax-meta-diff-range: #d2a8ff;
+  --color-prettylights-syntax-constant-other-reference-link: #a5d6ff;
+  /* pre 内复制按钮/滚动条用色(库引用 fg-muted) */
+  --color-fg-muted: #8b949e;
+}
+.markdown-text .wmde-markdown pre > code {
+  color: var(--codeblock-fg);
 }
 
 /* ---- 品牌大面板渐变(ql-20260824-017,用户反馈工作区标题偏白) ----
