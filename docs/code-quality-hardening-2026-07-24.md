@@ -113,7 +113,7 @@
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| B-idx | `backend/app/modules/workspace/model.py:157` / `backend/app/modules/ppm/task/model.py:47` / `backend/app/modules/daemon/model.py:280` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
+| B-idx | `backend/app/modules/workspace/model.py:157` / `backend/app/modules/ppm/task/model.py:47` / `backend/app/modules/daemon/model.py:380` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
 | B2 | `backend/app/modules/daemon/router/__init__.py` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
 | A1 | `backend/app/modules/daemon/permission_service.py:388` _resolve_daemon_id_for_runtime | 与 `backend/app/modules/daemon/session/service/__init__.py` 完全重复（docstring 自承 mirrors），演进漂移风险 | 委托 session.service 单一真相源（lazy import 避循环）|
 

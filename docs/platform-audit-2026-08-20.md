@@ -1,3 +1,9 @@
+---
+author: qinyi
+created_at: 2026-08-20T00:00:00
+doc_type: snapshot
+---
+
 # 平台全量审计问题清单（2026-08-20）
 
 > 审查方式：6 个子代理并行交叉审查（后端安全 / 后端质量性能 / 前端 / sillyhub-daemon / SillySpec 契合度 / 仓库卫生部署），主代理对 P0/P1 逐条人工复核（读源码确认）。

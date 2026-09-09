@@ -348,9 +348,9 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 |---|---|---|
 | `daemon_instances` | 物理守护进程实体（一台机一用户一后端） | `id`=daemon 上报的 `daemon_local_id`（后端不自生成） / `user_id`+`hostname`+`server_url` / `build_id` / `allowed_roots`(机器级沙箱) — `backend/app/modules/daemon/model.py:33` |
 | `daemon_runtimes` | 实体下的一种 provider（claude/codex/…） | `daemon_instance_id`(过渡 nullable) / `provider` / `allowed_roots`(per-runtime 下沉) — `backend/app/modules/daemon/model.py` |
-| `daemon_task_leases` | daemon 认领的任务租约 | `kind`(batch/interactive) / `status`(pending/claimed/completed/expired/cancelled) / `terminating_at`(终态观测窗口) / 复合索引 `runtime_status_created` 覆盖轮询热路径 — `backend/app/modules/daemon/model.py:356` |
-| `daemon_change_writes` | daemon 代写 changes 文件队列（不启动 agent） | `kind`(create/edit) / `files`(JSON) / `claim_token` / `files_total`+`files_processed`(同步进度计数) — `backend/app/modules/daemon/model.py:465` |
-| `session_dialog_requests` | AskUserQuestion 式持久化对话请求 | `request_id`(session 内唯一) / `dialog_payload`(JSON) / `status`(pending/answered/cancelled) — `backend/app/modules/daemon/model.py:268` |
+| `daemon_task_leases` | daemon 认领的任务租约 | `kind`(batch/interactive) / `status`(pending/claimed/completed/expired/cancelled) / `terminating_at`(终态观测窗口) / 复合索引 `runtime_status_created` 覆盖轮询热路径 — `backend/app/modules/daemon/model.py:379` |
+| `daemon_change_writes` | daemon 代写 changes 文件队列（不启动 agent） | `kind`(create/edit) / `files`(JSON) / `claim_token` / `files_total`+`files_processed`(同步进度计数) — `backend/app/modules/daemon/model.py:488` |
+| `session_dialog_requests` | AskUserQuestion 式持久化对话请求 | `request_id`(session 内唯一) / `dialog_payload`(JSON) / `status`(pending/answered/cancelled) — `backend/app/modules/daemon/model.py:302` |
 | `policy_audit_log` | daemon 文件系统策略 ALLOW/DENY 审计 | `decision` / `provider`/`tool`/`path`/`reason` / 复合索引 `runtime_created_desc` — `backend/app/modules/daemon/audit/model.py:37` |
 
 #### 2.1.5 变更流程域（SillySpec change/task 的结构化镜像 + 审批/审计）
@@ -630,8 +630,8 @@ Agent 编排是本平台 AA 的核心能力。**关键架构事实**：backend �
 | 通道 | 方向 | 机制 | 依据 |
 |---|---|---|---|
 | **WebSocket（主）** | 双向 | 单 WS `/api/daemon/ws?daemon_local_id=...`（`sillyhub-daemon/src/protocol.ts:22 MSG`）。server→daemon 推 `task_available`/`session_*`/`permission_response`/`lease_cancel`/`provider_config_changed`/`self_update` + 双向 `heartbeat/ack` + `rpc/rpc_result`。5s 固定退避重连 + 30s ping keepalive | backend `backend/app/modules/daemon/ws_hub.py:227 DaemonWsHub`（`send_wakeup:254`/`send_session_control:313`/`send_permission_response:339`/`send_rpc:495`/`resolve_rpc:497`）；daemon `sillyhub-daemon/src/ws-client.ts:74`（`RECONNECT_BACKOFF_SCHEDULE_MS:40`/`WS_PING_INTERVAL_MS:62`） |
-| **HTTP REST（生命周期）** | daemon→server | `HubClient`（`sillyhub-daemon/src/hub-client.ts:566`）经 Node 原生 fetch（G-05 零 HTTP 库），`REST_PREFIX=/api/daemon`（`sillyhub-daemon/src/protocol.ts:598`）：`register:714`/`heartbeat:771`/`claimLease:893`/`startLease:908`/`leaseHeartbeat:923`/`submitMessages:945`/`completeLease:976`/`getPendingLeases:1017`（唯一 GET） | backend 对应 `LeaseService`（`backend/app/modules/daemon/lease/service.py:92`：`create_lease:113`/`claim_lease:146`/`complete_lease:362`/`expire_leases:922`） |
-| **轮询兜底** | daemon→server | WS 断线时 `_pollLoop`（`sillyhub-daemon/src/daemon.ts:5035`）周期拉 `getPendingLeases` | daemon 三循环并发：`_heartbeatLoop:4282`/`_pollLoop:5035`/`_wsLoop:5102` |
+| **HTTP REST（生命周期）** | daemon→server | `HubClient`（`sillyhub-daemon/src/hub-client.ts:578`）经 Node 原生 fetch（G-05 零 HTTP 库），`REST_PREFIX=/api/daemon`（`sillyhub-daemon/src/protocol.ts:598`）：`register:714`/`heartbeat:771`/`claimLease:893`/`startLease:908`/`leaseHeartbeat:923`/`submitMessages:945`/`completeLease:976`/`getPendingLeases:1017`（唯一 GET） | backend 对应 `LeaseService`（`backend/app/modules/daemon/lease/service.py:92`：`create_lease:113`/`claim_lease:146`/`complete_lease:362`/`expire_leases:922`） |
+| **轮询兜底** | daemon→server | WS 断线时 `_pollLoop`（`sillyhub-daemon/src/daemon.ts:5230`）周期拉 `getPendingLeases` | daemon 三循环并发：`_heartbeatLoop:4282`/`_pollLoop:5035`/`_wsLoop:5102` |
 | **宿主文件 RPC** | 双向 | backend→daemon 经 `DaemonWsHub.send_rpc`（`backend/app/modules/daemon/ws_hub.py:495`）发 `daemon:rpc`，daemon `sillyhub-daemon/src/ws-client.ts _dispatchRpc` 分发到 `file-rpc.ts`（list_dir/git_worktree_add/git_merge/git_rev_parse/...）回 `daemon:rpc_result` | backend `daemon/host_fs/delegate.py`（`HostFsDelegate`）+ `host_fs/ws_rpc.py` |
 
 > **lease 完成回写**（`complete_lease`，`backend/app/modules/daemon/lease/service.py:362`）是 batch 与 interactive lease 的**单一收口点**——mission 收敛（3.2.4）挂在这里。`_sync_stage_status_from_run`（`:683`）同步 stage 状态。
@@ -779,7 +779,7 @@ SillyHub 是三进程异构栈：后端 Python（FastAPI）、前端 Node（Next
 
 **① workspace 隔离（业务顶层边界）**
 
-`workspaces` 是多数业务表的外键根。RBAC 权限强制在 `{workspace_id}` 路径参数内判定（`backend/app/core/auth_deps.py:86-107` `require_permission` 把 `workspace_id` 作为鉴权维度）。派发队列、文件中心、变更代写等均带 `workspace_id`（如 `backend/app/modules/worktree/model.py:26`、`backend/app/modules/daemon/model.py:469`）。
+`workspaces` 是多数业务表的外键根。RBAC 权限强制在 `{workspace_id}` 路径参数内判定（`backend/app/core/auth_deps.py:86-107` `require_permission` 把 `workspace_id` 作为鉴权维度）。派发队列、文件中心、变更代写等均带 `workspace_id`（如 `backend/app/modules/worktree/model.py:26`、`backend/app/modules/daemon/model.py:500`）。
 
 **② daemon 远程运行时隔离（机器 + 用户 + provider 三维）**
 

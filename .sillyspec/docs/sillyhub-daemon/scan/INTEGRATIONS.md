@@ -33,7 +33,7 @@ generator: sillyspec-scan
 - sillyhub-daemon/src/spec-sync.ts：pullSpecBundle（含 404 容错 + Tar Slip 防护解包）/ packSpecDir（手动 tar 头打包）/ hasUnsyncedLocalChanges（pull 前回灌检查）。
 
 ### 1.5 spec 增量同步（manifest + 增量 ops）
-- `sillyhub-daemon/src/hub-client.ts:1771`：`postSpecSyncIncremental` → `POST /api/workspaces/{wsId}/spec-workspace/sync-incremental`（spec-file-incremental-sync 变更新的端点；URL 必须 `/api` 前缀，用 REST_PREFIX 恒 404）。
+- `sillyhub-daemon/src/hub-client.ts:1811`：`postSpecSyncIncremental` → `POST /api/workspaces/{wsId}/spec-workspace/sync-incremental`（spec-file-incremental-sync 变更新的端点；URL 必须 `/api` 前缀，用 REST_PREFIX 恒 404）。
 - sillyhub-daemon/src/spec-sync.ts：`syncSpecTreeIfNeeded` 编排、`resolveManifestCachePath` 本地 manifest 缓存（hash/版本对账）、`extractChangeDirs`（ops → change 目录）、`shouldRefreshSpec` / `bumpLocalSpecVersion`（spec_version 保鲜）。
 
 ### 1.6 变更写回 + 同步进度（change-writes）
