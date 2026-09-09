@@ -827,6 +827,8 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
       cache_read_tokens: 19000,
       cache_creation_tokens: 100,
     });
+    // 精确调用数（tokenUsage 通知计数）优先于事件计数启发式
+    expect(results[0]!.api_request_count).toBe(1);
 
     close();
     child._emitExit(0);

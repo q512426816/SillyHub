@@ -935,6 +935,9 @@ export class PiRpcDriver implements InteractiveDriver {
     // 模型未知时不记快照（result 不带 modelUsage，行为同修复前）。
     let currentModel: string | null = null;
     let modelUsageSnapshot: DriverModelUsage | null = null;
+    // ql-20260910-003：本轮精确 API 调用数（message_end 带 usage 的 assistant
+    // 消息数——每条对应一次调用）；daemon 优先于 text 事件计数启发式。
+    let turnApiCallCount = 0;
     // 本轮 turn 是否已上报 result（防 agent_settled 与进程退出双触发重复）。
     let turnReported = false;
     // consume 是否已最终收敛（进程异常退出 / consume 抛错）。
@@ -1236,6 +1239,7 @@ export class PiRpcDriver implements InteractiveDriver {
         const endMsg = isRecord(msg.message) ? msg.message : {};
         if (endMsg.role === 'assistant' && isRecord(endMsg.usage)) {
           turnUsageSum = accumulatePiUsage(turnUsageSum, endMsg.usage);
+          turnApiCallCount += 1;
           // ql-20260910-003：同步累计按模型快照（pi 的 input/cacheRead/cacheWrite
           // 本就是 Anthropic 分桶语义的净输入，直接累加）。
           if (currentModel) {
@@ -1331,6 +1335,7 @@ export class PiRpcDriver implements InteractiveDriver {
         pendingTurnError = null;
         turnUsage = undefined;
         turnUsageSum = null;
+        turnApiCallCount = 0;
         turnReported = false;
         turnSawRun = false;
 
@@ -1377,6 +1382,7 @@ export class PiRpcDriver implements InteractiveDriver {
             ...(h.sessionId ? { session_id: h.sessionId } : {}),
             ...(turnUsage ? { usage: turnUsage } : {}),
             ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
+            ...(turnApiCallCount > 0 ? { api_request_count: turnApiCallCount } : {}),
           });
         }
       }

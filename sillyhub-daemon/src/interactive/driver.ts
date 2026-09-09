@@ -134,6 +134,12 @@ export interface InteractiveDriverResult {
    * （inputTokens 为不含 cache 的净输入，cache 两维单列）。
    */
   modelUsage?: DriverModelUsage;
+  /**
+   * ql-20260910-003：driver 侧精确 API 调用次数（pi=message_end 带 usage 的
+   * assistant 消息数、codex=thread/tokenUsage/updated 通知数）。daemon 组装
+   * payload 时优先本值，缺省回落 assistant text 事件计数启发式（claude/cursor）。
+   */
+  api_request_count?: number;
 }
 
 /** ql-20260910-003：按模型累计用量快照条目（Claude SDK modelUsage 形状）。 */

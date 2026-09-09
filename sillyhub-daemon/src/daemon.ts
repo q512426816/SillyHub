@@ -3783,7 +3783,14 @@ export class Daemon {
     // task-06（FR-02-1 / D-01）：run 级 assistant 计数读出 + 清理。读出即删
     //（retryTerminal 重试闭包已捕获 payload 值，计数不因重发重复累计；run 未
     // 达终态的残留条目由 onSessionEnd 兜底回收）。
-    const apiRequests = this._assistantMsgCountByRun.get(runId) ?? 0;
+    // ql-20260910-003：driver 侧精确调用数（pi message_end 计数 / codex
+    // tokenUsage 通知计数）优先；缺省回落事件计数启发式（claude/cursor）。
+    const exactApiRequests = (resultMeta as { api_request_count?: unknown })
+      .api_request_count;
+    const apiRequests =
+      typeof exactApiRequests === 'number' && Number.isFinite(exactApiRequests)
+        ? Math.max(0, Math.round(exactApiRequests))
+        : (this._assistantMsgCountByRun.get(runId) ?? 0);
     this._assistantMsgCountByRun.delete(runId);
     // ql-20260831-009：快照差分（_deltaModelUsage 头注释）。无效快照（老 CLI /
     // Codex driver 无 modelUsage）→ null：基线不动，下方回落 result.usage 旧路径。

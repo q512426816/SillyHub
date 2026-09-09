@@ -860,6 +860,34 @@ describe('task-06：onTurnResult model_usage 拆行 + api_requests 计数', () =
     expect(payload.api_requests).toBe(2);
   });
 
+  it('ql-20260910-003：result 带 api_request_count（pi/codex 精确计数）优先于事件计数', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    // 事件计数 3（旧启发式），driver 精确值 2 → payload 取 2
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      api_request_count: 2,
+      modelUsage: {
+        'glm-5.3': { inputTokens: 200, outputTokens: 40, cacheReadInputTokens: 3000, cacheCreationInputTokens: 0 },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.api_requests).toBe(2);
+    const rows = payload.model_usage as Array<Record<string, number>>;
+    expect(rows[0]!.api_requests).toBe(2);
+  });
+
   it('分摊残差补给最大消耗行（四舍五入不均时 Σ行仍 == api_requests）', async () => {
     const { daemon, client } = buildDaemon();
     daemons.push(daemon);

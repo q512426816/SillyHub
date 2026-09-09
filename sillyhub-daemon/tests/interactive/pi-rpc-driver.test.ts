@@ -824,6 +824,8 @@ describe('turn 生命周期', () => {
         cacheCreationInputTokens: 30,
       },
     });
+    // 精确调用数（message_end 带 usage 计数）优先于事件计数启发式
+    expect(results[0]!.api_request_count).toBe(2);
     // 上报的 usage 快照事件同步注入轮累计（ledger replace 语义消费正确轮级值）
     const usageEv = events.find((e) => e.type === 'text' && e.usage !== undefined);
     expect(usageEv?.usage).toEqual({

@@ -463,6 +463,11 @@ export interface CodexHandle extends InteractiveDriverHandle {
    * null = 尚无可记条目（threadModel 未知或未见 tokenUsage 通知）。
    */
   modelUsageSnapshot: DriverModelUsage | null;
+  /**
+   * ql-20260910-003：本轮 tokenUsage 通知数（= 精确 API 调用数，daemon 优先于
+   * text 事件计数启发式）；轮 start 快照基线时清零。
+   */
+  turnApiCallCount: number;
   /** 释放底层资源（关 stdin + kill child）。幂等。 */
   close(): Promise<void>;
 }
@@ -773,6 +778,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // ql-20260910-003：按模型明细快照（见 CodexHandle 字段注释）。
       threadModel: null,
       modelUsageSnapshot: null,
+      turnApiCallCount: 0,
       close: (): Promise<void> => this._close(handle),
       // 扩展槽（非 CodexHandle 公共字段，consume 内部用）
       ...({ _ctx: ctx } as object),
@@ -1138,6 +1144,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
         // ql-20260909-027：轮开始基线快照（写 turn/start 前最后已知 total）。
         // codex 的调用只在收到 turn/start 后发生，通知不会早于本点 → 基线干净。
         h.usageBaseline = h.threadUsageTotal ? { ...h.threadUsageTotal } : null;
+        // ql-20260910-003：本轮调用计数清零（同基线时点）。
+        h.turnApiCallCount = 0;
         if (!threadIdReady && !h.closing && !finalized) {
           pendingTurnError =
             `codex thread/start 响应超时（${this.threadIdWaitTimeoutMs}ms 未拿到 threadId），` +
@@ -1162,7 +1170,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         // 来源；success/failed 轮统一覆盖——失败的轮同样真实消耗了 token）。
         this._applyTurnUsageDelta(h, outcome);
         // 上报本轮 result
-        this._reportOutcome(outcome, pendingTurnError, reportResult, h.modelUsageSnapshot ?? undefined);
+        this._reportOutcome(outcome, pendingTurnError, reportResult, h);
         pendingTurnError = null;
         if (finalized) break;
       }
@@ -1265,15 +1273,21 @@ export class CodexAppServerDriver implements InteractiveDriver {
     },
     pendingErrorMsg: string | null,
     report: (r: Parameters<NonNullable<InteractiveDriverCallbacks['onTurnResult']>>[0]) => void,
-    // ql-20260910-003：modelUsage 快照来源（codex handle）；success/failed 统一
-    // 附带——失败轮同样真实消耗了 token，明细表不因轮失败缺行。
-    modelUsage?: DriverModelUsage,
+    // ql-20260910-003：handle（modelUsage 快照 + 精确调用数来源）；success/failed
+    // 统一附带——失败轮同样真实消耗了 token，明细表不因轮失败缺行。
+    h?: CodexHandle,
   ): void {
+    const modelUsage = h?.modelUsageSnapshot ?? undefined;
+    const apiRequestCount = h?.turnApiCallCount ?? 0;
+    const extras = {
+      ...(modelUsage ? { modelUsage } : {}),
+      ...(apiRequestCount > 0 ? { api_request_count: apiRequestCount } : {}),
+    };
     if (outcome.kind === 'success') {
       const r: Parameters<NonNullable<InteractiveDriverCallbacks['onTurnResult']>>[0] = {
         subtype: 'success',
         is_error: false,
-        ...(modelUsage ? { modelUsage } : {}),
+        ...extras,
       };
       if (outcome.usage) r.usage = outcome.usage;
       report(r);
@@ -1282,7 +1296,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         subtype: 'error_during_execution',
         is_error: true,
         result: pendingErrorMsg ?? 'turn failed',
-        ...(modelUsage ? { modelUsage } : {}),
+        ...extras,
       });
     } else if (outcome.kind === 'cancelled') {
       report({
@@ -1407,6 +1421,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
       cacheWriteInputTokens: num(total.cacheWriteInputTokens),
       outputTokens: num(total.outputTokens),
     };
+    // ql-20260910-003：每条通知 = 一次 API 调用（精确计数，daemon 优先采用）。
+    h.turnApiCallCount += 1;
     // ql-20260910-003：同步维护按模型累计快照（净输入分桶，毛值拆桶口径同
     // _usageDelta——daemon 差分后与 result.usage 增量恒一致）。模型未知时不记
     // （快照为 null 时 result 不带 modelUsage，行为同修复前）。
