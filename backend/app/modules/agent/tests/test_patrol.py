@@ -1831,3 +1831,120 @@ class TestWorkerRecoveryNullTokenGuard:
 
         assert recovered == 1
         assert calls == [(run.id, "tok-123")]
+
+
+class TestResolveRunDaemonsBulk:
+    """ql-20260909-018：批量链路解析与单条版语义一致性。"""
+
+    @pytest.mark.asyncio
+    async def test_bulk_matches_single_on_latest_lease(self, db_session: AsyncSession) -> None:
+        """最新 lease（updated_at 倒序）胜出——多 lease 取最新；与单条版逐 run 一致。"""
+        user_id = await _make_user(db_session)
+        daemon_id, runtime_new = await _make_daemon_chain(
+            db_session, user_id, daemon_status="offline", last_heartbeat_at=None
+        )
+        _, runtime_old = await _make_daemon_chain(
+            db_session, user_id, daemon_status="online", last_heartbeat_at=None
+        )
+        run_a = await _make_orchestrator_run(db_session, uuid.uuid4())
+        run_b = await _make_orchestrator_run(db_session, uuid.uuid4())
+        base = datetime.now(UTC) - timedelta(hours=2)
+        # run_a：两条 lease，新（offline daemon 的 runtime）旧（online）各一
+        db_session.add(
+            DaemonTaskLease(
+                agent_run_id=run_a.id,
+                runtime_id=runtime_old,
+                kind="interactive",
+                status="claimed",
+                updated_at=base,
+            )
+        )
+        db_session.add(
+            DaemonTaskLease(
+                agent_run_id=run_a.id,
+                runtime_id=runtime_new,
+                kind="interactive",
+                status="claimed",
+                updated_at=base + timedelta(minutes=30),
+            )
+        )
+        # run_b：单 lease 指向 old（online daemon）
+        db_session.add(
+            DaemonTaskLease(
+                agent_run_id=run_b.id,
+                runtime_id=runtime_old,
+                kind="interactive",
+                status="claimed",
+                updated_at=base,
+            )
+        )
+        await db_session.commit()
+
+        svc = MissionPatrolService(db_session)
+        bulk = await svc._resolve_run_daemons_bulk([run_a.id, run_b.id])
+
+        assert bulk[run_a.id] is not None
+        assert bulk[run_a.id].id == daemon_id  # 最新 lease 指向 offline 那条链
+        assert bulk[run_b.id] is not None
+        # 单条版逐 run 对照（语义一致性）
+        single_a = await svc._resolve_run_daemon(run_a.id)
+        single_b = await svc._resolve_run_daemon(run_b.id)
+        assert single_a is not None and single_a.id == bulk[run_a.id].id
+        assert single_b is not None and single_b.id == bulk[run_b.id].id
+
+    @pytest.mark.asyncio
+    async def test_latest_lease_null_runtime_is_broken_not_fallback(
+        self, db_session: AsyncSession
+    ) -> None:
+        """最新 lease 无 runtime_id → 断链 None（不回退老 lease），同单条版。"""
+        user_id = await _make_user(db_session)
+        _, runtime_old = await _make_daemon_chain(
+            db_session, user_id, daemon_status="online", last_heartbeat_at=None
+        )
+        run = await _make_orchestrator_run(db_session, uuid.uuid4())
+        base = datetime.now(UTC) - timedelta(hours=1)
+        db_session.add(
+            DaemonTaskLease(
+                agent_run_id=run.id,
+                runtime_id=runtime_old,
+                kind="interactive",
+                status="claimed",
+                updated_at=base,
+            )
+        )
+        db_session.add(
+            DaemonTaskLease(
+                agent_run_id=run.id,
+                runtime_id=None,
+                kind="interactive",
+                status="claimed",
+                updated_at=base + timedelta(minutes=10),
+            )
+        )
+        await db_session.commit()
+
+        svc = MissionPatrolService(db_session)
+        bulk = await svc._resolve_run_daemons_bulk([run.id])
+        assert bulk[run.id] is None
+        assert await svc._resolve_run_daemon(run.id) is None
+
+    @pytest.mark.asyncio
+    async def test_broken_chain_and_missing(self, db_session: AsyncSession) -> None:
+        """无 lease / runtime 行缺失 → None；空入参 → 空映射。"""
+        run_no_lease = await _make_orchestrator_run(db_session, uuid.uuid4())
+        run_orphan = await _make_orchestrator_run(db_session, uuid.uuid4())
+        db_session.add(
+            DaemonTaskLease(
+                agent_run_id=run_orphan.id,
+                runtime_id=uuid.uuid4(),  # 不存在的 runtime → 断链
+                kind="interactive",
+                status="claimed",
+            )
+        )
+        await db_session.commit()
+
+        svc = MissionPatrolService(db_session)
+        bulk = await svc._resolve_run_daemons_bulk([run_no_lease.id, run_orphan.id])
+        assert bulk[run_no_lease.id] is None
+        assert bulk[run_orphan.id] is None
+        assert await svc._resolve_run_daemons_bulk([]) == {}

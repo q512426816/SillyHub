@@ -546,8 +546,10 @@ class MissionPatrolService:
         runs = (await self._session.execute(stmt)).scalars().all()
 
         zombie_marked = 0
+        # ql-20260909-018：批量预取 run→daemon 链路（原逐 run 3 次往返）。
+        daemon_by_run = await self._resolve_run_daemons_bulk([r.id for r in runs])
         for run in runs:
-            daemon = await self._resolve_run_daemon(run.id)
+            daemon = daemon_by_run.get(run.id)
             if daemon is None:
                 # 链路断链：log debug 跳过不判死，不猜不崩（Grill P2-2）。
                 continue
@@ -603,8 +605,10 @@ class MissionPatrolService:
 
         # 同 mission 多分身共享「会话活跃 turn」判定，逐 mission 查一次缓存复用。
         session_active_cache: dict[uuid.UUID, bool] = {}
+        # ql-20260909-018：批量预取（同存量段）。
+        session_daemon_by_run = await self._resolve_run_daemons_bulk([r.id for r in session_runs])
         for run in session_runs:
-            daemon = await self._resolve_run_daemon(run.id)
+            daemon = session_daemon_by_run.get(run.id)
             if daemon is None:
                 continue
             if daemon.status == "online" or daemon.last_heartbeat_at is None:
@@ -659,8 +663,24 @@ class MissionPatrolService:
 
         zombie_revived = 0
         exempt_released = 0
+        # ql-20260909-018：mission 与 run→daemon 链路双双批量预取（原逐 run
+        # 1+3 次往返；mission 在 marked_at 判窗前就要用，无法靠后置过滤省掉）。
+        zombie_mission_ids = {r.mission_id for r in zombie_runs}
+        zombie_missions: dict[uuid.UUID, AgentMission] = {}
+        if zombie_mission_ids:
+            zombie_missions = {
+                m.id: m
+                for m in (
+                    await self._session.execute(
+                        select(AgentMission).where(AgentMission.id.in_(zombie_mission_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            }
+        zombie_daemon_by_run = await self._resolve_run_daemons_bulk([r.id for r in zombie_runs])
         for run in zombie_runs:
-            mission = await self._session.get(AgentMission, run.mission_id)
+            mission = zombie_missions.get(run.mission_id)
             if mission is None:
                 continue
             marked_at = _zombie_marked_at(mission)
@@ -672,7 +692,7 @@ class MissionPatrolService:
                     run_id=str(run.id),
                 )
                 continue
-            daemon = await self._resolve_run_daemon(run.id)
+            daemon = zombie_daemon_by_run.get(run.id)
             if daemon is None:
                 continue
             if now - marked_at < revive_window:
@@ -1280,6 +1300,75 @@ class MissionPatrolService:
             )
             return None
         return daemon
+
+    async def _resolve_run_daemons_bulk(
+        self, agent_run_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, DaemonInstance | None]:
+        """批量版 :meth:`_resolve_run_daemon`（ql-20260909-018，R-03 禁 N+1）。
+
+        巡检三循环（判死存量段/会话分身段/复活段）原逐 run 调单条版——每 run
+        3 次往返（lease + runtime + instance），候选积压（大量卡死 run）时线性
+        放大挤占连接池。本方法三段链路各一次 IN 查询完成：lease 全量取回后
+        ``updated_at`` 倒序**首见即定**（同单条版 ``.first()`` 语义——最新 lease
+        无 runtime_id 即断链，不回退老 lease）；断链 run 保持 None（调用方跳过
+        语义不变；批量场景逐条 debug 日志噪声大，省略）。
+        """
+        result: dict[uuid.UUID, DaemonInstance | None] = {rid: None for rid in agent_run_ids}
+        if not agent_run_ids:
+            return result
+        lease_rows = (
+            await self._session.execute(
+                select(DaemonTaskLease.agent_run_id, DaemonTaskLease.runtime_id)
+                .where(DaemonTaskLease.agent_run_id.in_(agent_run_ids))
+                .order_by(DaemonTaskLease.updated_at.desc())
+            )
+        ).all()
+        latest_runtime_by_run: dict[uuid.UUID, uuid.UUID] = {}
+        decided: set[uuid.UUID] = set()
+        for run_id, runtime_id in lease_rows:
+            if run_id in decided:
+                continue  # 倒序首见已定最新
+            decided.add(run_id)
+            if runtime_id is not None:
+                latest_runtime_by_run[run_id] = runtime_id
+            # 最新 lease 无 runtime_id → 断链（decided 已记，不回退老 lease）
+        if not latest_runtime_by_run:
+            return result
+        runtimes = {
+            r.id: r
+            for r in (
+                await self._session.execute(
+                    select(DaemonRuntime).where(
+                        DaemonRuntime.id.in_(latest_runtime_by_run.values())
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        }
+        instance_ids = {
+            r.daemon_instance_id for r in runtimes.values() if r.daemon_instance_id is not None
+        }
+        daemons: dict[uuid.UUID, DaemonInstance] = {}
+        if instance_ids:
+            daemons = {
+                d.id: d
+                for d in (
+                    await self._session.execute(
+                        select(DaemonInstance).where(DaemonInstance.id.in_(instance_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            }
+        for run_id, runtime_id in latest_runtime_by_run.items():
+            runtime = runtimes.get(runtime_id)
+            if runtime is None or runtime.daemon_instance_id is None:
+                continue
+            daemon = daemons.get(runtime.daemon_instance_id)
+            if daemon is not None:
+                result[run_id] = daemon
+        return result
 
     async def _revive_zombie_run(
         self,

@@ -72,4 +72,5 @@ _dispatch_execute_team → 多 worker 并行 → 全员收敛 → daemon run_syn
 
 <!-- MANUAL_NOTES_END -->
 - 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）
+- ql-20260909-018-ca2e：patrol 巡检 N+1 批量化——判死存量段/会话分身段/复活段三循环原逐 run 调 _resolve_run_daemon（lease+runtime+instance 每 run 3 次往返）+ 复活段逐 run get mission，候选积压时线性放大挤占连接池；新增 _resolve_run_daemons_bulk（三段链路各一次 IN 查询，updated_at 倒序首见即定——最新 lease 无 runtime_id 即断链不回退老 lease，同单条版 .first() 语义）+ 复活段 mission 批量 IN 预取；批量 vs 单条一致性 3 用例锁定（多 lease 取最新/NULL runtime 断链不回退/孤儿链路），test_patrol 54 passed
 - ql-20260903-003-3e1a：分身终态失败收链修复（唤醒统计计入首 run failed/killed 形态 + patrol 职责④ NULL token 跳过），详见 QUICKLOG 与「注意事项」末条
