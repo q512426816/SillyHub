@@ -99,6 +99,32 @@ function getTicks(container: HTMLElement): HTMLElement[] {
   return within(getNav(container)).getAllByRole("button");
 }
 
+// ── 0. 短会话隐藏（ql-20260909-005） ──────────────────────────────────────
+
+describe("TurnCatalog 短会话隐藏（ql-20260909-005）", () => {
+  it("entries < 3 → 整条轨道不渲染（0/1/2 条均隐藏）；3 条起出现", () => {
+    const { container } = renderCatalog([]);
+    expect(container.textContent).toBe("");
+
+    const two = renderCatalog(FIXTURES.slice(0, 2));
+    expect(two.container.textContent).toBe("");
+    two.unmount();
+
+    const three = renderCatalog(FIXTURES);
+    expect(within(three.container).getByRole("navigation")).toBeTruthy();
+  });
+
+  it("隐藏→增长跨阈值自动出现（entries 1 → 3）", () => {
+    const { container, rerender } = renderCatalog(FIXTURES.slice(0, 1));
+    expect(within(container).queryByRole("navigation")).toBeNull();
+    rerender(
+      <TurnCatalog entries={FIXTURES} activeTurnKey={null} onJump={vi.fn()} />,
+    );
+    expect(within(container).getByRole("navigation")).toBeTruthy();
+    expect(within(container).getAllByRole("button")).toHaveLength(3);
+  });
+});
+
 // ── 1. 刻度渲染（数量/状态类） ────────────────────────────────────────────
 
 describe("TurnCatalog 刻度渲染", () => {
@@ -121,9 +147,12 @@ describe("TurnCatalog 刻度渲染", () => {
   });
 
   it("failed → bg-destructive/75；running → bg-warning 脉冲", () => {
+    // ql-20260909-005：<3 条轨道隐藏——本用例补第三条凑齐显隐阈值（状态色断言
+    // 与前两条刻度相关，第三条目纯占位）。
     const { container } = renderCatalog([
       { ...ENTRY_FAILED, key: "run-f", turnNo: 1 },
       { ...ENTRY_COMPLETED, key: "run-r", turnNo: 2, status: "running" },
+      { ...ENTRY_COMPLETED, key: "run-c", turnNo: 3 },
     ]);
     const [failedCls, runningCls] = getTicks(container).map((t) => t.className);
     expect(failedCls).toContain("bg-destructive");
@@ -273,11 +302,10 @@ describe("TurnCatalog 交互与联动", () => {
     expect(ticks[1]).not.toHaveAttribute("aria-current");
   });
 
-  it("空 entries 渲染不崩：轨只有上下两个撑块、零刻度", () => {
+  it("空 entries 渲染不崩：整条轨道不渲染（ql-20260909-005 短会话隐藏同口径）", () => {
     const { container } = renderCatalog([]);
-    const nav = getNav(container);
-    expect(within(nav).queryAllByRole("button")).toHaveLength(0);
-    expect(nav.querySelectorAll("span[aria-hidden='true']")).toHaveLength(2);
+    expect(container.textContent).toBe("");
+    expect(within(container).queryByRole("navigation")).toBeNull();
   });
 
   it("loadingEarlier → 轨标注 aria-busy（跳转加载进行中）", () => {

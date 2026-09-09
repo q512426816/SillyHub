@@ -440,13 +440,19 @@ export function SessionConfigBar({
             模型子下拉仅选中具体供应商且非 Codex 锁定时渲染：「不指定（本机默认）」
             / providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
         <span className="inline-flex items-center gap-0.5">
-          {ctrlButton(
-            "provider",
-            <Cloud aria-hidden className="h-3.5 w-3.5" />,
-            providerLabel,
-            providerLocked
-              ? "Codex 引擎暂不支持会话级供应商"
-              : "供应商（不选=本机默认配置）",
+            {ctrlButton(
+              "provider",
+              <Cloud aria-hidden className="h-3.5 w-3.5" />,
+              providerLabel,
+              // ql-20260909-005：禁用态 title 按原因说明（原恒「供应商（不选=…）」，
+              // 结束/离线时点了没反应且提示误导）。priority：锁定 > 已结束/离线 > 运行中。
+              providerLocked
+                ? "Codex 引擎暂不支持会话级供应商"
+                : ended
+                  ? "会话已结束或机器离线，不可切换供应商"
+                  : running
+                    ? "会话运行中，本轮结束后可切换供应商"
+                    : "供应商（不选=本机默认配置）",
             <ConfigDropdown
               testId="config-dd-provider"
               title="切换供应商 · 只影响本会话"
@@ -492,7 +498,15 @@ export function SessionConfigBar({
               data-testid="config-model-select"
               value={currentModel}
               disabled={!canSwitch}
-              title="模型（默认=跟随供应商配置）"
+              // ql-20260909-005：禁用态 title 说明原因（原恒默认说明，离线/结束
+              // 时点了没反应零解释）。
+              title={
+                !canSwitch
+                  ? ended
+                    ? "会话已结束或机器离线，不可切换模型"
+                    : "会话运行中，本轮结束后可切换模型"
+                  : "模型（默认=跟随供应商配置）"
+              }
               onChange={(e) => {
                 const v = e.target.value;
                 executeSwitch({ field: "model", value: v, label: v || "默认" });
@@ -518,7 +532,12 @@ export function SessionConfigBar({
           "profile",
           <User aria-hidden className="h-3.5 w-3.5" />,
           profileLabel,
-          "智能体档案",
+          // ql-20260909-005：同供应商按钮——禁用态 title 说明原因。
+          ended
+            ? "会话已结束或机器离线，不可切换档案"
+            : running
+              ? "会话运行中，本轮结束后可切换档案"
+              : "智能体档案",
           <ConfigDropdown
             testId="config-dd-profile"
             title="切换档案 · 只影响本会话"

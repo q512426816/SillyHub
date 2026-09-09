@@ -145,19 +145,21 @@ describe("SessionUsageBar 摘要行（task-03 / FR-02 / D-003）", () => {
   });
 });
 
-/* ────────────────────── ② 分母 0 ────────────────────── */
+/* ────────────────────── ② 零用量空会话（ql-20260909-005） ────────────────────── */
 
-describe("SessionUsageBar 命中率分母 0（task-03 / D-003）", () => {
-  it("全 0 会话：命中率「—」、五指标 0、by_model 空不渲染切换按钮", async () => {
+describe("SessionUsageBar 零用量空会话（ql-20260909-005）", () => {
+  it("api_requests=0（从未跑过轮次）→ 整条不渲染，不报错", async () => {
     daemonMock.getSessionUsage.mockResolvedValue(zeroUsage());
-    render(<SessionUsageBar sessionId="s-1" />);
+    const { container } = render(<SessionUsageBar sessionId="s-1" />);
     await flush();
 
-    expect(screen.getByText("—")).toBeInTheDocument();
-    // 五项数值全 0（输入/输出/缓存读取/缓存写入/请求次数）
-    expect(screen.getAllByText("0")).toHaveLength(5);
-    // by_model 空 → 无「按模型明细」切换按钮
+    // 零用量条是纯噪音（会话页整洁度二轮：与 TaskExecutionPanel 空态同口径）——
+    // 六个指标一个都不渲染，by_model 空态切换按钮亦缺席。
+    expect(container.textContent).toBe("");
+    expect(screen.queryByLabelText("输入")).toBeNull();
     expect(screen.queryByRole("button", { name: /按模型明细/ })).toBeNull();
+    // 取数仍发生（有轮次后 refreshSignal 重拉弹入，数据面行为不变）
+    expect(daemonMock.getSessionUsage).toHaveBeenCalledWith("s-1");
   });
 });
 

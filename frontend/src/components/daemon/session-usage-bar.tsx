@@ -20,8 +20,9 @@
  * 约定（session-panel 文件头明言），不能为其引入 Provider。刷新经 refreshSignal
  * prop：父层在轮次终态处理点递增该计数触发重取（数据本身轮次终态才落库）。
  *
- * 静默策略：首载 loading / 拉取失败均不渲染（用量条是辅助信息，不阻断会话主
- * 流程）；已有数据时刷新失败保持旧值。
+ * 静默策略：首载 loading / 拉取失败 / 零用量（api_requests=0 的空会话，
+ * ql-20260909-005 与 TaskExecutionPanel ql-20260909-003 空态收敛同口径）均不渲染
+ * ——用量条是辅助信息，不阻断会话主流程；已有数据时刷新失败保持旧值。
  */
 
 import { useEffect, useState } from "react";
@@ -147,6 +148,10 @@ export function SessionUsageBar({ sessionId, refreshSignal }: SessionUsageBarPro
 
   // 首载 loading / 出错（无数据）→ 整体不渲染。
   if (!usage) return null;
+  // ql-20260909-005（会话页整洁度二轮，对齐 TaskExecutionPanel ql-20260909-003
+  // 空态先例）：从未跑过轮次的会话（api_requests=0）汇总条全 0，渲染出来是
+  // 纯噪音——不渲染。有轮次后 refreshSignal 重拉，条随首个非零数据弹入。
+  if (usage.totals.api_requests === 0) return null;
 
   const hit = cacheHitRate(usage.totals);
   const hasDetail = usage.by_model.length > 0;

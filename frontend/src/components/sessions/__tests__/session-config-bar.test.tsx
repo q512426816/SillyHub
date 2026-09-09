@@ -227,6 +227,29 @@ describe("SessionConfigBar 状态置灰", () => {
       screen.queryByText("本轮完成后解锁切换"),
     ).not.toBeInTheDocument();
   });
+
+  // ql-20260909-005：禁用态 title 按原因说明（原恒静态说明，点了没反应零解释）。
+  it("禁用态 title 说明原因：ended→已结束或机器离线；running→本轮后可切换；idle→原默认说明", () => {
+    const { unmount: u1 } = renderBar({ ended: true });
+    expect(
+      screen.getByRole("button", { name: "配置-供应商 本机默认" }),
+    ).toHaveAttribute("title", "会话已结束或机器离线，不可切换供应商");
+    expect(
+      screen.getByRole("button", { name: "配置-档案 未指定" }),
+    ).toHaveAttribute("title", "会话已结束或机器离线，不可切换档案");
+    u1();
+
+    const { unmount: u2 } = renderBar({ running: true });
+    expect(
+      screen.getByRole("button", { name: "配置-供应商 本机默认" }),
+    ).toHaveAttribute("title", "会话运行中，本轮结束后可切换供应商");
+    u2();
+
+    renderBar();
+    expect(
+      screen.getByRole("button", { name: "配置-供应商 本机默认" }),
+    ).toHaveAttribute("title", "供应商（不选=本机默认配置）");
+  });
 });
 
 // ── 4. 供应商切换（含「不指定」空串语义，task-16 契约） ───────────────────

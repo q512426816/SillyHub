@@ -97,8 +97,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Button } from "antd";
 
-import { Clock, FolderOpen, Plus, Sparkles } from "lucide-react";
+import { FolderOpen, Sparkles } from "lucide-react";
 
 import {
   SessionPanel,
@@ -903,8 +904,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                   : "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即创建会话；也可以从列表选择一个既有会话继续对话。"}
             </p>
             <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
+              {/* ql-20260909-005：按钮统一 antd Button（品牌主按钮 + 次级），原
+                  手写 rounded-full 胶囊与页面方角卡片语言不一致。 */}
+              <Button
+                type="primary"
                 disabled={scopedWorkspaceArchived}
                 title={
                   scopedWorkspaceArchived
@@ -915,14 +918,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                   setPickerWorkspaceId(scopedPickerWorkspaceId());
                   setPickerOpen(true);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-brand-700 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted-foreground disabled:hover:shadow-none"
               >
-                <Plus aria-hidden className="h-3.5 w-3.5 text-brand-600" />
                 新建会话
-              </button>
+              </Button>
               {recentSession && (
-                <button
-                  type="button"
+                <Button
                   onClick={() => {
                     setPreContext(null);
                     setSelectedSessionId(recentSession.id);
@@ -930,14 +930,13 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                     syncSessionParam(recentSession.id);
                   }}
                   title={`继续会话「${recentSession.title?.trim() || "未命名会话"}」`}
-                  className="inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-brand-700 hover:shadow-sm"
+                  className="max-w-[280px]"
                 >
-                  <Clock aria-hidden className="h-3.5 w-3.5 text-brand-600" />
                   <span className="truncate">
                     继续最近会话「
                     {recentSession.title?.trim() || "未命名会话"}」
                   </span>
-                </button>
+                </Button>
               )}
             </div>
           </div>

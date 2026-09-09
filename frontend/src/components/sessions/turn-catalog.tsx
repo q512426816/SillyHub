@@ -142,7 +142,7 @@ export default function TurnCatalog({
   activeTurnKey,
   loadingEarlier,
   onJump,
-}: TurnCatalogProps): JSX.Element {
+}: TurnCatalogProps): JSX.Element | null {
   /** 是否存在 hover 能力（非触屏）：飞出卡仅在此挂载。 */
   const [hasHover] = useState(detectHasHover);
   /** 当前飞出卡条目 + 刻度序号（null = 隐藏）。 */
@@ -192,6 +192,11 @@ export default function TurnCatalog({
     const entry = entries[index];
     if (entry) setFlyout({ entry, index });
   };
+
+  // ql-20260909-005（会话页整洁度二轮）：轮次 < 3 轨道无导航价值，整条隐藏
+  // （短会话左侧 30px 占位回收给聊天区）；轮次增长后自动出现。early return 在
+  // 全部 hooks 之后（React 规则）。
+  if (entries.length < 3) return null;
 
   return (
     <div className="relative flex-shrink-0 flex">

@@ -1586,26 +1586,18 @@ function WorkspaceTreeList({
           （X-009，仅 workspace scope）+ 两层筛选下拉（D-107；ql-20260908-005
           由胶囊 tab 改下拉——机器多时胶囊换行撑爆 320px 左栏） */}
       <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <Input
-            size="small"
-            allowClear
-            prefix={<SearchOutlined />}
-            placeholder="搜索会话标题…（回车搜索）"
-            aria-label="搜索会话标题"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onPressEnter={() => setAppliedQuery(searchInput.trim())}
-          />
-          <Select
-            id="slp-status"
-            size="small"
-            className="w-28 shrink-0"
-            value={status}
-            onChange={(v) => setStatus(v ?? "")}
-            options={STATUS_OPTIONS.map((o) => ({ ...o }))}
-          />
-        </div>
+        {/* ql-20260909-005：第一行搜索独占整宽（原与状态下拉同行被压窄，320px
+            左栏里输入/光标难瞄准）；筛选控件统一在第二行。 */}
+        <Input
+          size="small"
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索会话标题…（回车搜索）"
+          aria-label="搜索会话标题"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onPressEnter={() => setAppliedQuery(searchInput.trim())}
+        />
         {/* X-009：「关联」筛选下拉（task-10 / FR-05）——服务端过滤（与上方
             状态/机器层的纯视图过滤不同，选中即换查询键重拉）；选项分组
             「变更」（活跃未归档）/「快速修复」（非占位）/「PPM 任务」「PPM
@@ -1627,7 +1619,9 @@ function WorkspaceTreeList({
         )}
         {/* 两层筛选下拉（ql-20260908-005：胶囊 tab → 下拉，防机器多撑爆）。
             第一层机器（「全部机器」清空，showSearch 机器多时可搜）；第二层
-            智能体仅选中机器后出现（依赖语义不变），随选随占一行尾部宽度。 */}
+            智能体仅选中机器后出现（依赖语义不变），随选随占一行尾部宽度。
+            ql-20260909-005：状态下拉自搜索行挪入本行尾部（w-24），筛选控件
+            聚一行。 */}
         <div className="flex items-center gap-1.5">
           <Select
             id="slp-machine"
@@ -1650,7 +1644,7 @@ function WorkspaceTreeList({
             <Select
               id="slp-agent"
               size="small"
-              className="w-28 shrink-0"
+              className="w-24 shrink-0"
               aria-label="智能体筛选"
               value={filterAgent}
               onChange={(v) => pickAgentTab(v ?? "")}
@@ -1660,6 +1654,14 @@ function WorkspaceTreeList({
               ]}
             />
           )}
+          <Select
+            id="slp-status"
+            size="small"
+            className="w-24 shrink-0"
+            value={status}
+            onChange={(v) => setStatus(v ?? "")}
+            options={STATUS_OPTIONS.map((o) => ({ ...o }))}
+          />
         </div>
       </div>
 
@@ -2113,13 +2115,16 @@ function GroupChatRow({
         </span>
       </div>
       {/* 未读数徽标（群 P2 第二波，2026-09-02）：unread_count>0 → 群名右侧数字
-          徽标（后端 cap 99 → 显示「99+」；brand 底）；与 @我红点并存（@我 红点
-          视觉优先，徽标只是计数）。进入群聊面板挂载即 PUT /read 清零。 */}
+          徽标（后端 cap 99 → 显示「99+」）；与 @我红点并存（@我 红点
+          视觉优先，徽标只是计数）。进入群聊面板挂载即 PUT /read 清零。
+          ql-20260909-005：尺寸/色降档——原 h-[18px] bg-brand-600 实心大圆标在
+          行列表中视觉权重过重（扫列表时注意力全被未读数抢走），收敛为小号
+          浅色阶（brand-100/700）；@我 场景的强提示由行首红点承担。 */}
       {group.unread_count > 0 && (
         <span
           data-testid="group-unread-badge"
           aria-label={`${group.unread_count >= 99 ? "99+" : group.unread_count} 条未读`}
-          className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand-600 px-1 text-[10.5px] font-semibold leading-none text-white"
+          className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-100 px-1 text-[10px] font-semibold leading-none text-brand-700"
         >
           {group.unread_count >= 99 ? "99+" : group.unread_count}
         </span>
