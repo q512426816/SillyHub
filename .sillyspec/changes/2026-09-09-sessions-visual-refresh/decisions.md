@@ -138,3 +138,26 @@ created_at: 2026-09-09 11:46:42
 - normalized_requirement: 六态均有定义好的胶囊着色与文案；对话视图轮尾六态渲染无 undefined 分支
 - impacts: [FR-04, task-04, task-06]
 - evidence: brainstorm stage review 第 4 项 fail 第 2 条；turn-timeline.tsx:122 TurnUiStatus 六态现状
+
+## D-006@v3: 群聊 agent 成员无自定义头像时统一 Bot 渐变光环（取舍记录）
+- type: architecture
+- priority: P2
+- status: accepted
+- source: code
+- supersedes: D-006@v2
+- question: execute 审查发现 v2 字面要求「agent 成员保留首字/分色」未执行——无自定义头像的 agent 成员统一 Bot 渐变光环，agentAvatarColor 分色对消息行失效
+- answer: 取舍为维持统一光环——发送者区分由消息行成员名行承担且群聊本就渲染成员名；统一 agent 视觉锚点（与单聊一致）价值大于分色辨识（分色仍保留在成员面板/facepile 等非消息行场景）；自定义头像（avatar 入参）优先级不变
+- normalized_requirement: 群聊消息行 agent 无 avatar → Bot 渐变光环（不分色）；成员名行为发送者区分主载体
+- impacts: [task-10]
+- evidence: execute stage review gap 1（review-2026-09-09-151452）
+
+## D-011@v1: 死 token 删除 + G-02 43px 悬空口径修正
+- type: boundary
+- priority: P2
+- status: accepted
+- source: code
+- question: execute 审查 gap 2/3——--glass(-heavy)/--border-soft/--shadow-glow 四 token 三主题写满但零消费（玻璃面实际走 Tailwind bg-card/60~80 阶）；G-02 43px 过程行缩进无落地对象（对话视图本就不渲染过程段）
+- answer: ①四 token 全删（消费面 Tailwind 阶已达成同观感，留死定义徒增维护面）；②G-02 作废——task-05 的 43px 对齐要求删除（对话视图无过程行，全部视图按 G-03 不动，turn-segment-views 零改动是正确实现）；③design 文件清单 layout.tsx 行改指 app-shell.tsx（极光实际落点）
+- normalized_requirement: globals.css 不含四死 token；后续玻璃面统一用 Tailwind 透明阶（bg-card/60~80 + backdrop-blur-*）
+- impacts: [task-01, task-05, task-07, task-08]
+- evidence: execute stage review gap 2/3 + 文档漂移项（review-2026-09-09-151452）
