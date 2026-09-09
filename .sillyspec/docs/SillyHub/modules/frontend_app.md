@@ -34,7 +34,7 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
 - 移动端 `m/`：`login` / `account` / `workspaces`（列表；2026-08-26-mobile-workspace-page 起点卡片直进工作区，`workspaces/[id]/**` 变更/会话全功能移动页；ql-20260827-012：钻取裸容器 fixed inset-0 锁死整页滚动）
   （workspaces 筛选换词表+未分类、创建提交体补 type:other，最小收口）
   - `ppm/{workbench, project-plans, milestone-details, task-plans, problem-list}` — ppm 移动五页。
-- `app/api/` 三个 SSE 透传 route handler（防 Next.js 代理缓冲）：
+- `app/api/` 三个 SSE 透传 route handler（防 Next.js 代理缓冲；三个均已带客户端中断透传 `signal: request.signal` + `Accept-Encoding: identity` + undici `compress:false` 禁解压缓冲——run 级两处 ql-20260909-020 补齐，对齐 sessions 先例）：
   - `api/daemon/sessions/[sessionId]/stream` — 交互会话事件流
   - `api/daemon-chat/[runId]/stream` — quick-chat 流
   - `api/workspaces/[workspaceId]/agent/runs/[runId]/stream` — workspace 维度 agent run 日志流

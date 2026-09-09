@@ -37,7 +37,17 @@ export async function GET(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const backendResp = await fetch(backendUrl.toString(), { headers });
+  // ql-20260909-020：对齐 sessions/[sessionId]/stream 标准写法——①signal 透传
+  // 客户端中断（关面板/切 run 后上游流不再悬挂到自然结束）；②Accept-Encoding
+  // identity + compress:false 禁 undici 自动解压缓冲（否则 SSE data 帧被攒在
+  // buffer 里，浏览器看到 200 OK 但实时事件迟到成块）。
+  const backendResp = await fetch(backendUrl.toString(), {
+    headers: { ...headers, "Accept-Encoding": "identity" },
+    signal: request.signal,
+    // compress 是 undici 扩展属性（DOM RequestInit 无此字段），ts-expect-error 绕过。
+    // @ts-expect-error undici compress 不在标准 RequestInit 类型
+    compress: false,
+  });
 
   if (!backendResp.ok || !backendResp.body) {
     return new Response(
