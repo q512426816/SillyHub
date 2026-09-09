@@ -140,6 +140,24 @@ class DaemonHeartbeatSillySpecStatus(BaseModel):
     pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
 
 
+class DaemonHeartbeatSillySpecStatusError(BaseModel):
+    """心跳 sillyspec_status_error 载荷（2026-09-08，temp 投毒排障衍生）.
+
+    daemon 周期采集 ``progress show --json`` 三态③（超时/非零退出/spawn 失败）
+    持续发生时的错误快照：reason 当前取值 ``collect_timeout`` / ``nonzero_exit`` /
+    ``spawn_failed`` / ``runner_error``——不收紧 Literal（DaemonHeartbeat-
+    SillySpecUpdate.state 同决策：收紧会让未来新增取值的整条心跳 422，保活通道
+    宁宽勿断）；detail 为短描述（如 ``exit_code=1``，daemon 侧已截短）；since
+    为 daemon 侧首次失败时刻 ISO8601（恢复成功即清，内存态）。携带语义两态：
+    失败期间每跳携带对象（latest-wins），恢复后携带 null 清除——backend None=
+    置 NULL，非 None 整包直写（detail 落库前再截 200 双保险）。
+    """
+
+    reason: str | None = None
+    detail: str | None = None
+    since: str | None = None
+
+
 class DaemonHeartbeatSillySpecCommandResult(BaseModel):
     """心跳 sillyspec_command_result 载荷（2026-09-04-conflict-resolve-entry FR-05）.
 
@@ -216,6 +234,20 @@ class DaemonHeartbeatRequest(BaseModel):
     # 不清除，三态矩阵 design §5）。旧 daemon 无该键心跳照常通过（default=None，
     # NFR-01）。
     sillyspec_status: DaemonHeartbeatSillySpecStatus | None = Field(default=None)
+    # sillyspec 总览采集失败状态（2026-09-08，temp 投毒排障衍生）——语义同
+    # sillyspec_status（None=清除）：daemon 采集三态③持续失败期间每跳携带对象
+    # （{reason, detail, since}），恢复成功后携带 null 清除。旧 daemon 无该键
+    # 心跳照常通过（default=None，兼容）。
+    sillyspec_status_error: DaemonHeartbeatSillySpecStatusError | None = Field(
+        default=None
+    )
+    # 工作区级总览 map（2026-09-08 总览工作区级化）：{wsId: 摘要}，值复用
+    # DaemonHeartbeatSillySpecStatus 同形校验（嵌套宽松，心跳通道宁宽勿断）。
+    # 键不出现=daemon 未启用工作区级采集（保留旧值，旧 daemon 兼容）；对象
+    #（含空）整包直写。register 恒清。
+    sillyspec_status_map: dict[str, DaemonHeartbeatSillySpecStatus] | None = Field(
+        default=None
+    )
     # sillyspec 命令执行结果槽（2026-09-04-conflict-resolve-entry FR-05 /
     # D-004@v1）——语义同 sillyspec_update / sillyspec_status（None=清除）：键不
     # 出现即置 NULL（daemon 终态窗口过期后停发该键，无需显式 null，X-04 两态）；
@@ -311,6 +343,25 @@ async def daemon_heartbeat(
         # upsert 概念，dict 契约同 providers/pending_update 先例）。
         sillyspec_status=(
             data.sillyspec_status.model_dump() if data.sillyspec_status is not None else None
+        ),
+        # 2026-09-08（temp 投毒排障衍生）：采集失败状态走 sillyspec_status 同款
+        # 语义（None=清除置 NULL）。model_dump 后交服务层整包直写（detail 截断
+        # 在服务层一处实现）。
+        sillyspec_status_error=(
+            data.sillyspec_status_error.model_dump()
+            if data.sillyspec_status_error is not None
+            else None
+        ),
+        # 2026-09-08（总览工作区级化）：map 走键不出现=保留语义（与 status_error
+        # 的 None=清除 刻意不同——map 无清除终态，register 恒清收敛）。值逐项
+        # model_dump 保形。
+        sillyspec_status_map=(
+            {
+                ws: item.model_dump()
+                for ws, item in (data.sillyspec_status_map or {}).items()
+            }
+            if data.sillyspec_status_map is not None
+            else None
         ),
         # 2026-09-04-conflict-resolve-entry task-03 / FR-05（D-004@v1）：命令结果
         # 槽走 sillyspec_update 同款语义（None=清除置 NULL——daemon 终态窗口过期

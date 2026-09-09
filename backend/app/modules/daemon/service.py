@@ -196,6 +196,8 @@ class DaemonService:
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
         sillyspec_status: dict | None = None,
+        sillyspec_status_error: dict | None = None,
+        sillyspec_status_map: dict | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -211,6 +213,8 @@ class DaemonService:
         2026-09-02-changes-overview-card task-03（FR-05）：透传 sillyspec_status
         （None=清除置 NULL，语义同 RuntimeService 层注释；HTTP 端点现直调
         RuntimeService，本 facade 形参与实现层同步防漂移）。
+        2026-09-08（temp 投毒排障衍生）：透传 sillyspec_status_error（采集失败
+        状态，None=清除，语义同上）。
         """
         return await self._rt.heartbeat_daemon(
             daemon_local_id,
@@ -219,6 +223,8 @@ class DaemonService:
             daemon_build_id=daemon_build_id,
             started_at=started_at,
             sillyspec_status=sillyspec_status,
+            sillyspec_status_error=sillyspec_status_error,
+            sillyspec_status_map=sillyspec_status_map,
             actor_user_id=actor_user_id,
         )
 

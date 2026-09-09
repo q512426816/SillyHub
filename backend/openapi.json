@@ -37786,6 +37786,30 @@
               }
             ]
           },
+          "sillyspec_status_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DaemonHeartbeatSillySpecStatusError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sillyspec_status_map": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/DaemonHeartbeatSillySpecStatus"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Status Map"
+          },
           "sillyspec_command_result": {
             "anyOf": [
               {
@@ -38252,6 +38276,46 @@
         "type": "object",
         "title": "DaemonHeartbeatSillySpecStatus",
         "description": "心跳 sillyspec_status 载荷（2026-09-02-changes-overview-card FR-05 / Grill B1）.\n\ndaemon 周期采集 ``progress show --json`` envelope 的摘要投影（design §4）：\nenvelope 全量或超 32KB 预算的计数降级版（截断/降级在 daemon 侧执行，backend\n原样落库）。全字段宽松可选——与 DaemonHeartbeatSillySpecUpdate 同理（心跳是\n保活通道，字段缺失或类型演进均不应 422）：不收紧 Literal、不加 max_length，\n时间字段为 ISO8601 字符串原样承载。"
+      },
+      "DaemonHeartbeatSillySpecStatusError": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "type": "object",
+        "title": "DaemonHeartbeatSillySpecStatusError",
+        "description": "心跳 sillyspec_status_error 载荷（2026-09-08，temp 投毒排障衍生）.\n\ndaemon 周期采集 ``progress show --json`` 三态③（超时/非零退出/spawn 失败）\n持续发生时的错误快照：reason 当前取值 ``collect_timeout`` / ``nonzero_exit`` /\n``spawn_failed`` / ``runner_error``——不收紧 Literal（DaemonHeartbeat-\nSillySpecUpdate.state 同决策：收紧会让未来新增取值的整条心跳 422，保活通道\n宁宽勿断）；detail 为短描述（如 ``exit_code=1``，daemon 侧已截短）；since\n为 daemon 侧首次失败时刻 ISO8601（恢复成功即清，内存态）。携带语义两态：\n失败期间每跳携带对象（latest-wins），恢复后携带 null 清除——backend None=\n置 NULL，非 None 整包直写（detail 落库前再截 200 双保险）。"
       },
       "DaemonHeartbeatSillySpecUpdate": {
         "properties": {
@@ -38788,6 +38852,30 @@
                 "type": "null"
               }
             ]
+          },
+          "sillyspec_status_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MachineSillySpecStatusErrorRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sillyspec_status_map": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/MachineSillySpecStatusRead"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Status Map"
           },
           "sillyspec_command_result": {
             "anyOf": [
@@ -45597,6 +45685,46 @@
         ],
         "title": "MachineSillySpecResolveRequest",
         "description": "Body for POST /machines/{instance_id}/sillyspec-resolve（task-02 / FR-02）。\n\n``strategy`` 用 Literal 限定 keep_local / take_platform（非法值 422）；\n``change`` 走白名单正则（首字符字母数字，其余字母数字/./-/_，长度 1-128）\n且显式拒绝含 ``..``（防路径穿越；daemon 侧 CLI ``assertSafeChangeName``\nSEC-05 双保险，backend 只做格式校验不查存在性——机器才是事实源）。"
+      },
+      "MachineSillySpecStatusErrorRead": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "type": "object",
+        "title": "MachineSillySpecStatusErrorRead",
+        "description": "机器视图 sillyspec_status_error 嵌套（2026-09-08，temp 投毒排障衍生）。\n\n即 daemon_instances.sillyspec_status_error JSON 列宽松透出：daemon 周期采集\n三态③（超时/非零退出/spawn 失败）持续发生时的错误快照。与 sillyspec_status\n同款零转换——backend 不补字段，落库形态=上报形态（复用心跳 DTO 三字段同形，\n免三胞胎模型漂移）。NULL（采集正常/能力缺失②/register 恒清）→ 机器视图字段\n为 null；since 为 daemon 本地钟 ISO8601 原样透传（跨机比较仅作辅助）。\n前端消费：sillyspec_status 为 null 且本字段非 null → 渲染「数据源查询失败」\n而非「sillyspec 未安装/版本过低」。"
       },
       "MachineSillySpecStatusRead": {
         "properties": {
@@ -59112,6 +59240,7 @@
                 "enum": [
                   "claude",
                   "codex",
+                  "cursor",
                   "pi"
                 ]
               },

@@ -127,6 +127,29 @@ class DaemonInstance(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # 心跳上报的 sillyspec 总览采集失败状态（2026-09-08，temp 投毒排障衍生）：
+    # daemon 周期采集 ``progress show --json`` 的三态③（超时/非零退出/spawn 失败）持续发生时的
+    # 错误快照 {reason, detail, since}——since=daemon 侧首次失败时刻（恢复成功
+    # 即清，内存态）。语义同 sillyspec_status——心跳该键为 null 即置 NULL（采集
+    # 正常/能力缺失②均清），非 None 整包直写（detail 落库前截 200）；register
+    # 恒清（daemon 内存态，进程重启即失）。用途：区分「数据源查询失败」与
+    # 「sillyspec 未安装/版本过低」——NULL 且 sillyspec_status 亦 NULL 才是后者
+    # （三态②），本列非 NULL 说明总览缺失源于查询失败（三态③，2026-09-08
+    # temp 投毒实证：残留声明令 exit 1 持续，旧 UI 误显「未安装/版本过低」）。
+    sillyspec_status_error: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 心跳上报的工作区级总览 map（2026-09-08 总览工作区级化）：daemon 按
+    # wsId→主仓根映射逐目标采集 ``progress show --json``（仅成功项），心跳
+    # ``sillyspec_status_map`` 整包直写（{wsId: 摘要}）。键不出现=daemon 未启用
+    # 工作区级采集（保留旧值，旧 daemon 兼容）；register 恒清。用途：工作台总览
+    # 卡片按当前工作区取数，修「多工作区串台」（机器级 sillyspec_status 单槽位
+    # 是最近一次采集，所有工作台页面共享同一份数据）。
+    sillyspec_status_map: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     # 心跳上报的 sillyspec 命令执行结果槽（2026-09-04-conflict-resolve-entry
     # FR-05 / D-004@v1）：daemon 侧 resolve / ghost_cleanup 执行器的最新结果
     # （{action, change, strategy, state, exit_code, error, executed_at}，

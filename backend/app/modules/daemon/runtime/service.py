@@ -236,6 +236,12 @@ class RuntimeService:
                 # 2026-09-02-changes-overview-card task-03：status 同款恒清——
                 # 进度快照随 daemon 进程重启失效（同 update 收敛理由）。
                 sillyspec_status=None,
+                # 2026-09-08（temp 投毒排障衍生）：status_error 同款恒清——
+                # 采集失败状态在内存，进程重启即失（同 status 收敛理由）。
+                sillyspec_status_error=None,
+                # 2026-09-08（总览工作区级化）：map 同款恒清（重启后未启用/
+                # 空映射，等 claim 学习重建；None 保留语义只对心跳生效）。
+                sillyspec_status_map=None,
                 # 2026-09-04-conflict-resolve-entry task-03：command_result 同款
                 # 恒清——命令结果槽在内存，进程重启即失（同 status 收敛理由）。
                 sillyspec_command_result=None,
@@ -273,6 +279,10 @@ class RuntimeService:
             instance.sillyspec_update = None
             # 2026-09-02-changes-overview-card task-03：status 同款恒清（else 分支）。
             instance.sillyspec_status = None
+            # 2026-09-08（temp 投毒排障衍生）：status_error 同款恒清（else 分支）。
+            instance.sillyspec_status_error = None
+            # 2026-09-08（总览工作区级化）：map 同款恒清（else 分支）。
+            instance.sillyspec_status_map = None
             # 2026-09-04-conflict-resolve-entry task-03：command_result 同款恒清
             # （else 分支，同 status 收敛理由）。
             instance.sillyspec_command_result = None
@@ -395,6 +405,8 @@ class RuntimeService:
         sillyspec_latest_version: str | None = None,
         sillyspec_update: dict | None = None,
         sillyspec_status: dict | None = None,
+        sillyspec_status_error: dict | None = None,
+        sillyspec_status_map: dict | None = None,
         sillyspec_command_result: dict | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
@@ -434,6 +446,14 @@ class RuntimeService:
         三态矩阵 design §5）；非 None 时 **dict 整包直写**（progress 快照非状态
         机，无 since/upsert 概念——backend 不补字段不改写，32KB 预算与 N=50
         截断在 daemon 侧执行，design §4「落库形态=上报形态」）。
+
+        2026-09-08（temp 投毒排障衍生）：``sillyspec_status_error``
+        （``{reason, detail, since}`` 三键 dict，router 层 DTO 已校验）语义同
+        ``sillyspec_status`` 的两态——``None`` 即置 NULL 清除（采集成功/能力缺失
+        ②均清）；非 None 时 dict 整包直写（detail 在本层截断至 200 后落库）。
+        since 为 daemon 侧三态③首败时刻随载荷携带（daemon 内存态，恢复即清），
+        backend 不补不改。用途：机器视图区分「总览不可用（数据源查询失败）」
+        与「sillyspec 未安装/版本过低」（后者=本列 NULL 且 status 亦 NULL）。
 
         2026-09-04-conflict-resolve-entry task-03（FR-05 / D-004@v1）：
         ``sillyspec_command_result``（sillyspec 命令执行器最新结果槽七键 dict，
@@ -559,6 +579,28 @@ class RuntimeService:
         # 整包直写（非状态机无 since/upsert，backend 不增删改写；32KB 预算与
         # N=50 截断在 daemon 侧执行，design §4）。
         instance.sillyspec_status = sillyspec_status
+        # sillyspec_status_error（2026-09-08，temp 投毒排障衍生）：语义同
+        # sillyspec_status 两态——None 即置 NULL 清除（采集正常/能力缺失②均清）；
+        # 非 None dict 整包直写，detail 截 200 双保险（截断与 sillyspec_update.error
+        # 同款在本层一处实现）。since 是 daemon 侧首败时刻随载荷携带，backend
+        # 不补不改（落库形态=上报形态）。
+        if sillyspec_status_error is None:
+            instance.sillyspec_status_error = None
+        else:
+            raw_detail = sillyspec_status_error.get("detail")
+            detail = raw_detail[:200] if isinstance(raw_detail, str) else raw_detail
+            instance.sillyspec_status_error = {
+                "reason": sillyspec_status_error.get("reason"),
+                "detail": detail,
+                "since": sillyspec_status_error.get("since"),
+            }
+        # sillyspec_status_map（2026-09-08 总览工作区级化）：与 sillyspec_status
+        # 两态不同——**None=保留旧值**（daemon 未启用工作区级采集/旧 daemon 不发
+        # 该键，pydantic 缺省与显式 null 不可区分，二者均保留；map 无「清除」
+        # 终态，收敛靠 register 恒清）；非 None dict 整包直写（含空对象=启用但
+        # 暂无成功项，backend 不增删改写，落库形态=上报形态）。
+        if sillyspec_status_map is not None:
+            instance.sillyspec_status_map = sillyspec_status_map
         # sillyspec_command_result（2026-09-04-conflict-resolve-entry task-03 /
         # FR-05 / D-004@v1）：语义同 sillyspec_status 两态——None 即置 NULL 清除
         # （daemon 终态窗口过期后停发该键，无「保持旧值」三态分支，X-04）；非

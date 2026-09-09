@@ -597,6 +597,8 @@ async def _create_machine(
     sillyspec_latest_version: str | None = None,
     sillyspec_update: dict | None = None,
     sillyspec_status: dict | None = None,
+    sillyspec_status_error: dict | None = None,
+    sillyspec_status_map: dict | None = None,
 ) -> DaemonInstance:
     """直插 daemon_instance 行（task-03 视图/端点断言用，仿 test_machines_router
     _create_instance，额外带 sillyspec 四列——不走 register，锁定读视图直读列）。"""
@@ -611,6 +613,8 @@ async def _create_machine(
         sillyspec_latest_version=sillyspec_latest_version,
         sillyspec_update=sillyspec_update,
         sillyspec_status=sillyspec_status,
+        sillyspec_status_error=sillyspec_status_error,
+        sillyspec_status_map=sillyspec_status_map,
     )
     db_session.add(inst)
     await db_session.commit()
@@ -1005,3 +1009,232 @@ def test_openapi_contains_machine_sillyspec_status_field() -> None:
     )
     # 心跳载荷模型同入 components（DaemonHeartbeatRequest 引用链完整）。
     assert "DaemonHeartbeatSillySpecStatus" in spec["components"]["schemas"]
+
+
+# ── 2026-09-08（temp 投毒排障衍生）：sillyspec_status_error 采集失败状态 ─────────
+
+_STATUS_ERROR_FULL: dict = {
+    "reason": "nonzero_exit",
+    "detail": "exit_code=1",
+    "since": "2026-09-08T12:00:00.000Z",
+}
+
+
+@pytest.mark.asyncio
+async def test_status_error_heartbeat_writes_dict_verbatim(db_session: AsyncSession) -> None:
+    """三态③失败落库（服务层直调）：非 None dict 整包直写（reason/detail/since
+    齐落库，since 为 daemon 侧首败时刻原样透传，backend 不补不改）。"""
+    user, _token = await _seed_user(db_session, name="u-se1")
+    daemon_local_id = await _register_daemon(db_session, user.id)
+
+    await RuntimeService(db_session).heartbeat_daemon(
+        daemon_local_id, sillyspec_status_error=_STATUS_ERROR_FULL
+    )
+    row = await _reload_instance(db_session, daemon_local_id)
+    assert row.sillyspec_status_error == _STATUS_ERROR_FULL, "dict 原样落库"
+
+
+@pytest.mark.asyncio
+async def test_status_error_detail_truncated_to_200_at_service_layer(
+    db_session: AsyncSession,
+) -> None:
+    """detail 截 200：服务层一处截断（与 sillyspec_update.error 同款），DTO 不
+    重复做；截断后 reason/since 原样。"""
+    user, _token = await _seed_user(db_session, name="u-se2")
+    daemon_local_id = await _register_daemon(db_session, user.id)
+
+    payload = {**_STATUS_ERROR_FULL, "detail": "x" * 500}
+    await RuntimeService(db_session).heartbeat_daemon(
+        daemon_local_id, sillyspec_status_error=payload
+    )
+    row = await _reload_instance(db_session, daemon_local_id)
+    assert row.sillyspec_status_error is not None
+    assert len(row.sillyspec_status_error["detail"]) == 200
+    assert row.sillyspec_status_error["reason"] == "nonzero_exit"
+
+
+@pytest.mark.asyncio
+async def test_status_error_heartbeat_without_field_clears(db_session: AsyncSession) -> None:
+    """None=清除：心跳缺省该参 → 置 NULL（daemon 侧恢复成功/能力缺失②均停发，
+    下一跳即收敛；语义同 sillyspec_status 的 None=清除）。"""
+    user, _token = await _seed_user(db_session, name="u-se3")
+    daemon_local_id = await _register_daemon(db_session, user.id)
+    svc = RuntimeService(db_session)
+
+    await svc.heartbeat_daemon(daemon_local_id, sillyspec_status_error=_STATUS_ERROR_FULL)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_error is not None
+
+    await svc.heartbeat_daemon(daemon_local_id)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_error is None
+
+
+@pytest.mark.asyncio
+async def test_register_clears_stale_sillyspec_status_error(db_session: AsyncSession) -> None:
+    """register 恒清：daemon 重启 register → 置 NULL（失败状态在 daemon 内存，
+    进程重启即失，同 status 收敛理由）。"""
+    user, _token = await _seed_user(db_session, name="u-se4")
+    user_id = user.id
+    daemon_local_id = await _register_daemon(db_session, user_id)
+    svc = RuntimeService(db_session)
+
+    await svc.heartbeat_daemon(daemon_local_id, sillyspec_status_error=_STATUS_ERROR_FULL)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_error is not None
+
+    await svc.register_daemon(
+        user_id,
+        daemon_local_id=daemon_local_id,
+        server_url="http://localhost:8001",
+        hostname="sillyspec-host",
+        providers=[{"provider": "claude", "status": "online", "version": "1.0"}],
+    )
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_error is None
+
+
+@pytest.mark.asyncio
+async def test_http_heartbeat_accepts_and_clears_sillyspec_status_error(
+    db_session: AsyncSession,
+    client: AsyncClient,
+) -> None:
+    """HTTP 全链路：带对象 → DTO model_dump 落库（三键齐）；显式 null / 缺省
+    （旧 daemon 无字段）→ 均置 NULL（pydantic 缺省与显式 null 不可区分）。"""
+    owner, token = await _seed_user(db_session, name="owner-se")
+    daemon_local_id = await _register_daemon(db_session, owner.id)
+    headers = _headers(token)
+
+    resp = await client.post(
+        "/api/daemon/heartbeat",
+        json={
+            "daemon_local_id": str(daemon_local_id),
+            "sillyspec_status_error": _STATUS_ERROR_FULL,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    row = await _reload_instance(db_session, daemon_local_id)
+    assert row.sillyspec_status_error == _STATUS_ERROR_FULL
+
+    resp2 = await client.post(
+        "/api/daemon/heartbeat",
+        json={"daemon_local_id": str(daemon_local_id), "sillyspec_status_error": None},
+        headers=headers,
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_error is None
+
+
+@pytest.mark.asyncio
+async def test_machines_view_exposes_sillyspec_status_error_typed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """GET /machines items[] 含 sillyspec_status_error——上报机为三键形态；NULL 机
+    （无失败/旧后端）为 null。与 sillyspec_status 并存：status NULL + error 非
+    NULL 即前端渲染「数据源查询失败」的判定输入。"""
+    admin, token = await _seed_user(db_session, name="view-se-admin", is_platform_admin=True)
+    await _create_machine(
+        db_session,
+        admin.id,
+        hostname="ss-se-host",
+        sillyspec_status_error=_STATUS_ERROR_FULL,
+    )
+    await _create_machine(db_session, admin.id, hostname="ss-se-legacy-host")
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(token))
+    assert resp.status_code == 200, resp.text
+    items = {it["hostname"]: it for it in resp.json()["items"]}
+
+    error = items["ss-se-host"]["sillyspec_status_error"]
+    assert set(error) == {"reason", "detail", "since"}
+    assert error["reason"] == "nonzero_exit"
+    assert error["detail"] == "exit_code=1"
+
+    assert items["ss-se-legacy-host"]["sillyspec_status_error"] is None
+
+
+def test_openapi_contains_machine_sillyspec_status_error_field() -> None:
+    """验收：OpenAPI schema DaemonMachineReadWithPending 含 sillyspec_status_error
+    嵌套引用 + 心跳载荷模型入 components（gen:types 的输入可再生产）。"""
+    from app.main import app
+
+    spec = app.openapi()
+    machine_schema = spec["components"]["schemas"]["DaemonMachineReadWithPending"]
+    assert "sillyspec_status_error" in machine_schema["properties"]
+    assert (
+        machine_schema["properties"]["sillyspec_status_error"]["anyOf"][0]["$ref"]
+        == "#/components/schemas/MachineSillySpecStatusErrorRead"
+    )
+    assert "DaemonHeartbeatSillySpecStatusError" in spec["components"]["schemas"]
+
+
+# ── 2026-09-08（总览工作区级化）：sillyspec_status_map 三态 ──────────────────────
+
+_MAP_FULL: dict = {"ws-1": {**_STATUS_FULL}, "ws-2": {**_STATUS_FULL, "active_changes": 3}}
+
+
+@pytest.mark.asyncio
+async def test_status_map_heartbeat_writes_dict_verbatim(db_session: AsyncSession) -> None:
+    """对象（含空）整包直写；键不出现=保留旧值（与 status_error 的 None=清除
+    刻意不同——map 无清除终态，收敛靠 register 恒清）。"""
+    user, _token = await _seed_user(db_session, name="u-sm1")
+    daemon_local_id = await _register_daemon(db_session, user.id)
+    svc = RuntimeService(db_session)
+
+    await svc.heartbeat_daemon(daemon_local_id, sillyspec_status_map=_MAP_FULL)
+    row = await _reload_instance(db_session, daemon_local_id)
+    assert row.sillyspec_status_map == _MAP_FULL
+
+    # 心跳不带该键（旧 daemon/未启用）→ 保留旧值。
+    await svc.heartbeat_daemon(daemon_local_id)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_map == _MAP_FULL
+
+    # 空对象 → 整包直写（启用但暂无成功项）。
+    await svc.heartbeat_daemon(daemon_local_id, sillyspec_status_map={})
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_map == {}
+
+
+@pytest.mark.asyncio
+async def test_register_clears_stale_sillyspec_status_map(db_session: AsyncSession) -> None:
+    """register 恒清：重启后映射重建前不残留旧 map（None 保留语义只对心跳生效）。"""
+    user, _token = await _seed_user(db_session, name="u-sm2")
+    user_id = user.id
+    daemon_local_id = await _register_daemon(db_session, user_id)
+    svc = RuntimeService(db_session)
+
+    await svc.heartbeat_daemon(daemon_local_id, sillyspec_status_map=_MAP_FULL)
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_map is not None
+
+    await svc.register_daemon(
+        user_id,
+        daemon_local_id=daemon_local_id,
+        server_url="http://localhost:8001",
+        hostname="sillyspec-host",
+        providers=[{"provider": "claude", "status": "online", "version": "1.0"}],
+    )
+    assert (await _reload_instance(db_session, daemon_local_id)).sillyspec_status_map is None
+
+
+@pytest.mark.asyncio
+async def test_machines_view_exposes_sillyspec_status_map_typed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """GET /machines items[] 含 sillyspec_status_map（逐 ws 嵌套类型化）；NULL（未
+    启用/register 恒清）为 null——前端按当前工作区取 map[wsId]。"""
+    admin, token = await _seed_user(db_session, name="view-sm-admin", is_platform_admin=True)
+    await _create_machine(
+        db_session,
+        admin.id,
+        hostname="ss-sm-host",
+        sillyspec_status_map=_MAP_FULL,
+    )
+    await _create_machine(db_session, admin.id, hostname="ss-sm-legacy-host")
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(token))
+    assert resp.status_code == 200, resp.text
+    items = {it["hostname"]: it for it in resp.json()["items"]}
+
+    m = items["ss-sm-host"]["sillyspec_status_map"]
+    assert set(m) == {"ws-1", "ws-2"}
+    assert set(m["ws-1"]) == _STATUS_KEYS
+    assert m["ws-2"]["active_changes"] == 3
+    assert items["ss-sm-legacy-host"]["sillyspec_status_map"] is None

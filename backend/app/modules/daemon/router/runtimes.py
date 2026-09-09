@@ -171,6 +171,23 @@ class MachineSillySpecStatusRead(BaseModel):
     pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
 
 
+class MachineSillySpecStatusErrorRead(BaseModel):
+    """机器视图 sillyspec_status_error 嵌套（2026-09-08，temp 投毒排障衍生）。
+
+    即 daemon_instances.sillyspec_status_error JSON 列宽松透出：daemon 周期采集
+    三态③（超时/非零退出/spawn 失败）持续发生时的错误快照。与 sillyspec_status
+    同款零转换——backend 不补字段，落库形态=上报形态（复用心跳 DTO 三字段同形，
+    免三胞胎模型漂移）。NULL（采集正常/能力缺失②/register 恒清）→ 机器视图字段
+    为 null；since 为 daemon 本地钟 ISO8601 原样透传（跨机比较仅作辅助）。
+    前端消费：sillyspec_status 为 null 且本字段非 null → 渲染「数据源查询失败」
+    而非「sillyspec 未安装/版本过低」。
+    """
+
+    reason: str | None = None
+    detail: str | None = None
+    since: str | None = None
+
+
 class MachineSillySpecCommandResultRead(BaseModel):
     """机器视图 sillyspec_command_result 嵌套（2026-09-04-conflict-resolve-entry FR-05）。
 
@@ -208,6 +225,14 @@ class DaemonMachineReadWithPending(DaemonMachineRead):
     # sillyspec 三字段同款子类扩展；组装接线（_build_machine_read 逐字段构造）
     # 归 task-03，本卡仅定义读取模型进 OpenAPI（供 task-05 gen:types）。
     sillyspec_status: MachineSillySpecStatusRead | None = None
+    # 2026-09-08（temp 投毒排障衍生）：采集失败状态同款子类扩展跟随 sillyspec
+    # 五字段（组装接线在 _build_machine_read 逐字段构造，供前端总览卡片区分
+    # 「数据源查询失败」与「未安装/版本过低」）。
+    sillyspec_status_error: MachineSillySpecStatusErrorRead | None = None
+    # 2026-09-08（总览工作区级化）：工作区级总览 map（wsId → 摘要同形）。键值
+    # 复用 MachineSillySpecStatusRead 宽松校验（零转换投影）；NULL（未启用/
+    # register 恒清）→ 机器视图字段为 null。前端总览卡片优先 map[当前工作区ID]。
+    sillyspec_status_map: dict[str, MachineSillySpecStatusRead] | None = None
     # 2026-09-04-conflict-resolve-entry task-03 / FR-05：命令结果槽同款子类扩展
     # 跟随 sillyspec 四字段（组装接线在 _build_machine_read 逐字段构造，供前端
     # PlatformSyncSection 回显与 task-02 端点共享读视图）。
@@ -330,6 +355,24 @@ def _build_machine_read(
         sillyspec_status=(
             MachineSillySpecStatusRead.model_validate(instance.sillyspec_status)
             if instance.sillyspec_status is not None
+            else None
+        ),
+        # 2026-09-08（temp 投毒排障衍生）：status_error 同款显式构造（Design
+        # Grill F2 教训——逐字段构造漏传即静默丢字段）。JSON dict→宽松同形 Read
+        # 校验（零转换投影）；NULL（采集正常/能力缺失/register 恒清）→ None。
+        sillyspec_status_error=(
+            MachineSillySpecStatusErrorRead.model_validate(instance.sillyspec_status_error)
+            if instance.sillyspec_status_error is not None
+            else None
+        ),
+        # 2026-09-08（总览工作区级化）：map 逐项宽松校验（F2 教训——漏传即静默
+        # 丢字段）。NULL（未启用/register 恒清）→ None。
+        sillyspec_status_map=(
+            {
+                ws: MachineSillySpecStatusRead.model_validate(item)
+                for ws, item in instance.sillyspec_status_map.items()
+            }
+            if instance.sillyspec_status_map is not None
             else None
         ),
         # 2026-09-04-conflict-resolve-entry task-03 / FR-05：command_result 同款
