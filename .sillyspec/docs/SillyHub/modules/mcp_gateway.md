@@ -48,6 +48,7 @@ WebhookDispatcher: worker 终态 → events 匹配的 webhook → POST url + sec
 ```
 
 ## 注意事项
+- mission SSE 每 2s 轮询 _fetch_worker_runs 的成本已最小化（短 session + 4 列窄投影 + ix_agent_runs_mission_id 索引，2026-09-09 性能排查批2 评估）：pubsub 化需在全部 AgentRun 状态翻转点插发布（claim/start/complete/patrol 多处跨切面），收益不抵风险；多客户端同看场景出现明显 QPS 再启动
 - 五个 spike 锁定的写法坑（server.py 注释是权威，改装配先读它）：
   - ① SDK 是官方 `mcp>=1.29,<2`，方法名 `streamable_http_app()`，**不存在 `http_app()`**（那是第三方 fastmcp 库，两套文档勿混看）
   - ② lifespan 必须手动合并，否则 session manager 不启动、initialize 挂死

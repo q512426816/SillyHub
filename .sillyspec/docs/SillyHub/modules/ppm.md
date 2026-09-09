@@ -67,6 +67,7 @@ created_at: 2026-08-18 01:45:00
 ## 注意事项
 - 平台级无 workspace_id；通知走 audit_logs（无独立站内信），问题附件用 file_urls JSON（无独立上传服务）
 - `role_name` 是多角色逗号拼接存储，按角色过滤用 ilike 模糊匹配（精确匹配会漏多角色成员）
+- list_weekly_plan 的 6 表 JOIN 链各键已全部有索引（detail.plan_node_id/status、node.plan、plan.project、module.plan_node、task.detail）；剩余成本是 OFFSET 分页对跨表 coalesce 排序键的固有 count+filesort（2026-09-09 性能排查批2 评估）——keyset 分页/物化属架构级改动，明细数据量增长到可感知再启动
 - `data_scope` 的 `now_handle_user` 处置人匹配是裸列 4 分支 LIKE（`%,uid,%` / `uid,%` / `%,uid` / `==uid`），依赖 pg_trgm GIN 索引走索引扫描（ql-20260909-010-a318，迁移 20260909120000）；改动匹配形态须同步等价性测试 `tests/modules/ppm/test_problem_scope_visibility.py`
 - 项目计划列表/详情/导出的项目名 outerjoin 项目表实时取真名（单一可信源），冗余列 project_name 仅创建兜底用
 - FastAPI 路由按注册顺序匹配：字面量路径（如 export-excel）必须排在 `{item_id}` 参数路由前，否则 422
