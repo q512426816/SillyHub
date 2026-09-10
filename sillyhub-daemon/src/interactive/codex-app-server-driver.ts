@@ -716,6 +716,15 @@ export class CodexAppServerDriver implements InteractiveDriver {
 
     const adapter = new JsonRpcAdapter('codex');
     const args = adapter.buildArgs();
+    // ql-20260910-007（AskUser 修复）：codex 的 request_user_input 工具默认仅
+    // Plan 模式可用（app-server 无法以 plan 模式建线程——ThreadStartParams 无
+    // mode 字段；experimentalFeature/enablement/set 对 underDevelopment 特性
+    // 返回空不生效，0.147/0.154 双版本实测）。官方解锁开关 = features.
+    // default_mode_request_user_input（config.toml [features] 段 / CLI -c 覆盖，
+    // GitHub openai/codex#24750/#29104）。此处经 spawn 参数内置，用户无需手改
+    // ~/.codex/config.toml；-c 须在 app-server 子命令之前。旧版 codex 对未知
+    // -c 键非 strict 下仅告警不失败（实测），向前兼容安全。
+    args.unshift('-c', 'features.default_mode_request_user_input=true');
     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
 
     // ql-20260624-002 R-exe（修复 Windows spawn EINVAL）：agent-detector 在 Windows 给的

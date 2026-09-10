@@ -282,6 +282,8 @@ describe('ql-20260624-002：Windows codex.cmd wrapper 解析（R-exe，规避 sp
         'C:\\nvm4w\\nodejs\\node.exe',
         [
           'C:\\nvm4w\\nodejs\\node_modules\\@openai\\codex\\bin\\codex.js',
+          '-c',
+          'features.default_mode_request_user_input=true',
           'app-server',
           '--listen',
           'stdio://',
@@ -305,7 +307,7 @@ describe('ql-20260624-002：Windows codex.cmd wrapper 解析（R-exe，规避 sp
 
       expect(spawn).toHaveBeenCalledWith(
         'C:\\nvm4w\\nodejs\\codex.cmd',
-        ['app-server', '--listen', 'stdio://'],
+        ['-c', 'features.default_mode_request_user_input=true', 'app-server', '--listen', 'stdio://'],
         expect.objectContaining({ shell: true }),
       );
     },
@@ -321,9 +323,24 @@ describe('ql-20260624-002：Windows codex.cmd wrapper 解析（R-exe，规避 sp
     expect(resolveWindowsCmdShim).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledWith(
       '/usr/local/bin/codex',
-      ['app-server', '--listen', 'stdio://'],
+      ['-c', 'features.default_mode_request_user_input=true', 'app-server', '--listen', 'stdio://'],
       expect.objectContaining({ shell: false }),
     );
+  });
+
+  it('spawn 参数内置 AskUser 特性开关——-c features.default_mode_request_user_input=true 在 app-server 子命令之前（ql-20260910-007）', async () => {
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    const args = vi.mocked(spawn).mock.calls[0]![1] as string[];
+    const flagIdx = args.indexOf('-c');
+    expect(flagIdx).toBeGreaterThanOrEqual(0);
+    expect(args[flagIdx + 1]).toBe('features.default_mode_request_user_input=true');
+    // -c 覆盖必须在 app-server 子命令之前（codex CLI 全局参数先于子命令）。
+    expect(args.indexOf('app-server')).toBeGreaterThan(flagIdx + 1);
   });
 
   it('windowsHide: true——daemon 无自有控制台时 Windows 不为 codex 新开黑框（ql-20260907-004）', async () => {

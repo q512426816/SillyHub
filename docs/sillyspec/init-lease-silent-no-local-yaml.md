@@ -67,3 +67,4 @@ daemon 的 api_key 不是用户级凭证会被 401）→ 明文写回 local.yaml
 
 - docs/sillyspec/finished/init-revokes-persistent-local-yaml-tokens.md（init 吊销坑，已修）
 - docs/sillyspec/finished/坑8-repo-native平台指针锁死CLI上行断链.md（断链同族，指针侧已修）
+- 2026-09-10 定时复核：双层修复已验证在 main（平台 ef5b3c76a + sillyspec 6eea47b）；待 daemon 发版部署后归档。

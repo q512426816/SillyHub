@@ -51,3 +51,4 @@ daemon 心跳连续 422：`spec_cache[2].workspace_id` uuid_parsing 失败，远
 ## 关联
 
 - junction 治理实操：docs/sillyspec/init-lease-silent-no-local-yaml.md（同日另一坑）
+- 2026-09-10 定时复核：修复 commit ef5b3c76a 已验证在 main（UUID 双侧校验两项 ✅；422 日志 loc 提升项按本文件裁决留档不做）；待 daemon 发版部署后归档。

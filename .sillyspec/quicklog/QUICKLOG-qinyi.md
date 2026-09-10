@@ -148,3 +148,14 @@
 根因：2026-09-09-sessions-visual-refresh task-07 给面板头部加 backdrop-blur-md 玻璃头，backdrop-filter 使头部自成层叠上下文，头部内 absolute z-30 弹层 z 值被困其中，被树序在后的消息流 relative 外包层（bg-background 不透明背景）整体覆盖
 方案：page-helpers.tsx 的 PANEL_HEADER_CLS_DESKTOP/MOBILE 补 relative z-20 抬升头部层叠层级（一并救活同头部子代理目录/搜索/mobile ⋯ 菜单弹层），同步更新 session-panel-variant.test.tsx 字面量回归锚与 frontend.changelog.md 变更索引
 结果：session-panel-variant 7 + activity-catalog 5 + session-panel-ctx-tokens 4 + session-panel-team 18 共 34 用例全绿，eslint 两改动文件 0 告警
+
+## ql-20260910-007-ce62 | 2026-09-10 08:58:37 | codex 会话 AskUser 不弹选择的根因修复——spawn 内置官方特性开关
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（spawn args 内置 AskUser 特性开关）
+- sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts（+1 spawn 断言 + 3 旧 args 断言适配）
+需求：codex 会话 AskUser 不弹选择的根因修复——spawn 内置官方特性开关
+根因：codex 官方将 request_user_input 工具锁 Plan 模式（生产案会话 118406c3 模型自证），平台 app-server 无以 plan 建线程、运行时特性开关对 underDevelopment 不生效——工具从未被调用，桥接无从触发
+方案：daemon codex spawn 参数 unshift -c features.default_mode_request_user_input=true（app-server 子命令前；旧版未知键非 strict 仅告警向前兼容）；本机 ~/.codex/config.toml [features] 同步加键立即生效
+结果：0.147/0.154 双版本端到端探针验证工具真弹出（GOT requestUserInput + questions 载荷）；codex 驱动两套件 77 passed（+1 断言）；tsc 0；生产待用户重启 daemon/新开会话验证
