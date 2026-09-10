@@ -16261,7 +16261,7 @@ export interface components {
              * @default claude
              * @enum {string}
              */
-            agent_kind: "claude" | "pi";
+            agent_kind: "claude" | "pi" | "codex";
             /** Base Url */
             base_url?: string | null;
             /** Api Key */

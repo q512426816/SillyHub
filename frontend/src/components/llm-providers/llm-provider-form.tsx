@@ -24,8 +24,10 @@ import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch
  * 供应商新建/编辑表单（task-11）。
  *
  * 字段对齐 cc-switch 核心可用集（D-010），无预设选择器（D-003 纯自定义）：
- *   名称 / agent 种类（claude / pi 可选，codex/gemini disabled 占位；pi 于
- *   review-dispatch task-07 放开，D-002@v1 独立凭证池入口）/
+ *   名称 / agent 种类（claude / codex / pi 可选，gemini disabled 占位；pi 于
+ *   review-dispatch task-07 放开，D-002@v1 独立凭证池入口；codex 于
+ *   multi-provider-injection task-06 放开——凭证经 daemon per-session
+ *   CODEX_HOME 文件注入，无需 env auth_field，D-005/D-006）/
  *   备注 / 官网链接 / base_url / api_key 密码框（编辑时不填=保持原密钥）。
  *
  * 高级项默认折叠：<details> 承载：
@@ -54,14 +56,19 @@ const ROLE_ROWS: { key: string; label: string; placeholder: string }[] = [
   { key: "haiku", label: "Haiku", placeholder: "如 kimi-k2（后台子任务也走中转）" },
 ];
 
-/** agent 种类下拉选项；codex/gemini disabled 占位（D-006），pi 已启用（task-07 / D-002@v1）。 */
+/**
+ * agent 种类下拉选项；gemini disabled 占位（D-006），pi 已启用（task-07 /
+ * D-002@v1），codex 已启用（task-06 / D-005/D-006）——凭证经 daemon
+ * per-session CODEX_HOME 文件注入（config.toml/auth.json 落盘），不经 env
+ * auth_field，故 codex 无需配置认证字段。
+ */
 const AGENT_KIND_OPTIONS: {
   value: string;
   label: string;
   disabled?: boolean;
 }[] = [
   { value: "claude", label: "Claude Code" },
-  { value: "codex", label: "Codex（即将支持）", disabled: true },
+  { value: "codex", label: "Codex" },
   { value: "gemini", label: "Gemini（即将支持）", disabled: true },
   { value: "pi", label: "Pi" },
 ];
@@ -215,10 +222,13 @@ export function LlmProviderForm({
   const isEdit = mode === "edit";
 
   const [name, setName] = useState(initial?.name ?? "");
-  // task-07（D-002@v1）：agent 种类可选——编辑态初值取 initial（pi 行回填 pi），
-  // 新建缺省 claude；其余未知值归一为 claude（下拉可选项只有 claude/pi）。
+  // task-07（D-002@v1）：agent 种类可选——编辑态初值取 initial（pi 行回填 pi，
+  // task-06 起 codex 行回填 codex），新建缺省 claude；其余未知值归一为 claude
+  // （下拉可选项只有 claude/codex/pi）。
   const [agentKind, setAgentKind] = useState<LlmProviderAgentKind>(
-    initial?.agent_kind === "pi" ? "pi" : "claude",
+    initial?.agent_kind === "pi" || initial?.agent_kind === "codex"
+      ? initial.agent_kind
+      : "claude",
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [websiteUrl, setWebsiteUrl] = useState(initial?.website_url ?? "");
@@ -669,8 +679,24 @@ export function LlmProviderForm({
     }
     return null;
   })();
+  /**
+   * pi × openai_chat 禁配兜底（task-06 / FR-05 / D-012 连带声明）：该组合两层
+   * 注入均不生效（pi env 层不带端点、文件层仅 anthropic 形态直连），后端
+   * Create/Update 均已 422。表单侧下拉对 pi 禁用 openai_chat 选项 + 切 pi 时
+   * 归一 api_format（见 agentKind onChange），此处提交前再拦一道，兜住绕过
+   * 下拉的路径（如禁配上线前的存量 pi×openai_chat 行进编辑态）。文案与后端
+   * 422 逐字对齐（schema._forbid_pi_openai_chat）。
+   */
+  const piOpenaiChatError: string | null =
+    agentKind === "pi" && apiFormat === "openai_chat"
+      ? "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），请改用 anthropic 格式或选择 codex/claude 供应商"
+      : null;
   const submitDisabled =
-    submitting || nameMissing || apiKeyMissing || piAuthFieldError !== null;
+    submitting ||
+    nameMissing ||
+    apiKeyMissing ||
+    piAuthFieldError !== null ||
+    piOpenaiChatError !== null;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
@@ -754,12 +780,19 @@ export function LlmProviderForm({
               const next = e.target.value as LlmProviderAgentKind;
               setAgentKind(next);
               // task-07：切回 claude 时若 auth_field 是 pi 自由输入的 env 名（不在
-              // 两选项下拉内）→ 归一回缺省，避免下拉出现无匹配空值。
+              // 两选项下拉内）→ 归一回缺省，避免下拉出现无匹配空值。task-06：codex
+              // 认证字段同 claude 形态渲染（codex 不消费 auth_field），归一一并覆盖。
               if (
-                next === "claude" &&
+                next !== "pi" &&
                 !AUTH_FIELD_OPTIONS.some((o) => o.value === authField)
               ) {
                 setAuthField("ANTHROPIC_AUTH_TOKEN");
+              }
+              // task-06（FR-05 / D-012）：pi 时 openai_chat 禁配——从 openai_chat
+              // 切到 pi 即归一回 anthropic（照上方 authField 归一先例），提交侧
+              // piOpenaiChatError 另兜存量/绕过路径。
+              if (next === "pi" && apiFormat === "openai_chat") {
+                setApiFormat("anthropic");
               }
             }}
             className={`mt-0.5 ${inputCls}`}
@@ -771,7 +804,8 @@ export function LlmProviderForm({
             ))}
           </select>
           <p className={hintCls}>
-            Claude Code 走默认凭证链；Pi 使用独立凭证池（认证字段可配专属 env 名）。codex/gemini 预留。
+            Claude Code 走默认凭证链；Pi 使用独立凭证池（认证字段可配专属 env 名）；Codex
+            凭证由 daemon 在会话级 CODEX_HOME 目录写入文件（无需认证字段）。gemini 预留。
           </p>
         </div>
       </div>
@@ -831,7 +865,11 @@ export function LlmProviderForm({
           className={`mt-0.5 ${inputCls}`}
         >
           {API_FORMAT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option
+              key={o.value}
+              value={o.value}
+              disabled={agentKind === "pi" && o.value === "openai_chat"}
+            >
               {o.label}
             </option>
           ))}
@@ -841,6 +879,17 @@ export function LlmProviderForm({
             ? "OpenAI 格式：Bearer 鉴权，可粘贴完整 .../v1/chat/completions 地址；经 LiteLLM 网关让 Claude Code 消费（端到端 Wave2 上线后可用）。"
             : "Anthropic 格式：ANTHROPIC_* 鉴权，兼容 Claude API 端点（官方/中转站）。"}
         </p>
+        {agentKind === "pi" && (
+          <p className={hintCls}>
+            pi 供应商不支持 openai_chat API 格式（两层注入均不生效），该选项已禁用——请保持
+            Anthropic 格式，或改选 codex/claude 供应商。
+          </p>
+        )}
+        {piOpenaiChatError !== null && (
+          <p role="alert" className="text-xs text-destructive">
+            {piOpenaiChatError}
+          </p>
+        )}
       </div>
 
       <div>
@@ -863,6 +912,13 @@ export function LlmProviderForm({
         <p className={hintCls}>
           Anthropic 格式填 base（如 <code className="text-xs">https://api.anthropic.com</code>）；OpenAI 格式可粘完整地址（如 <code className="text-xs">https://opencode.ai/zen/v1/chat/completions</code>），后端自动剥 /chat/completions。
         </p>
+        {agentKind === "pi" && (
+          <p className={hintCls}>
+            Pi 自定义端点语义（task-06 / D-008 分层）：填写=自定义端点——daemon 在会话级
+            pi 目录写 auth.json / models.json / settings.json 三文件把请求路由到该端点；
+            留空=官方端点——凭证仅经 env 层注入（daemon 不写文件）。
+          </p>
+        )}
       </div>
 
       <div>
@@ -893,8 +949,10 @@ export function LlmProviderForm({
         <div className="mt-3 space-y-3">
           {/* 认证字段（task-07 / D-002@v1）：claude 保持两选项下拉与 env 改名联动
               （零回归）；pi 泛化为可输入 env 名（datalist 建议 + pattern 即时校验拦
-              提交）。pi 时与 api_format 无关——daemon PiCredentialInjector 恒按
-              auth_field 注 key，故 pi 不折叠进 anthropic 格式块。 */}
+              提交）。task-06 起 pi × openai_chat 禁配（pi 恒 anthropic），但 pi 分支
+              不折叠进 `apiFormat === "anthropic"` 条件——pi 凭证走 env 层按
+              auth_field 注 key 与格式无关，显式 `|| agentKind === "pi"` 防将来
+              词表/条件变动时 pi 认证字段凭空消失。 */}
           {(apiFormat === "anthropic" || agentKind === "pi") && (
           <div>
             <label className={lblCls}>认证字段</label>

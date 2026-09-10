@@ -45662,7 +45662,8 @@
             "type": "string",
             "enum": [
               "claude",
-              "pi"
+              "pi",
+              "codex"
             ],
             "title": "Agent Kind",
             "default": "claude"

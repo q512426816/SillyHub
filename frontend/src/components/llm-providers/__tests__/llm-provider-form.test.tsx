@@ -10,6 +10,11 @@
  *   5. agent_kind=pi（task-07 / D-002@v1）：pi 选项可选且提交透传、认证字段泛化为
  *      可输入 env 名（ZAI_API_KEY）+ pattern 即时校验拦非法值、claude 路径零回归；
  *      另经 formToCreate 断言 lib 组装层产出的 POST body（pi/claude 两侧）。
+ *   6. agent_kind=codex（task-06 / FR-05）：选项放开可提交、编辑态回填、
+ *      pi→codex 切换 auth_field 归一。
+ *   7. pi × openai_chat 禁选（task-06 / D-012 连带声明）：pi 时 openai_chat
+ *      disabled + 提示、切 pi 归一 api_format、存量行兜底报错文案与后端 422
+ *      逐字一致、codex×openai_chat 不受限、pi baseUrl 自定义端点语义提示。
  *
  * 纯组件测，不调真实 API（onSubmit 是 mock）；无 next/dynamic，无需 vi.mock markdown。
  */
@@ -496,7 +501,7 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("claude 路径零回归：认证字段仍是既有两选项下拉，codex/gemini 仍 disabled 占位", () => {
+  it("claude 路径零回归：认证字段仍是既有两选项下拉，gemini 仍 disabled 占位（codex 已启用）", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
     // 固定下拉仍在且缺省 ANTHROPIC_AUTH_TOKEN
@@ -507,13 +512,221 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
     expect(screen.queryByPlaceholderText(/ZAI_API_KEY/)).toBeNull();
 
     const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
+    // task-06 起 codex 启用（凭证走 daemon CODEX_HOME 文件注入）；仅 gemini 占位。
     expect(
       (kindSelect.querySelector('option[value="codex"]') as HTMLOptionElement)
         .disabled,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       (kindSelect.querySelector('option[value="gemini"]') as HTMLOptionElement)
         .disabled,
     ).toBe(true);
+  });
+});
+
+// ── agent_kind=codex 启用（multi-provider-injection task-06 / FR-05）────────
+// D-005/D-006：codex 凭证经 daemon per-session CODEX_HOME 文件注入（写盘器
+// task-01），不经 env auth_field；agent_kind 词表 backend task-05 已增 codex
+// （仅 Create），前端表单跟进放开选项。
+describe("LlmProviderForm — agent_kind=codex（task-06 / FR-05）", () => {
+  /** 把 Agent 种类下拉切到 codex（新建缺省 claude → codex）。 */
+  const switchToCodex = (): void => {
+    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+      target: { value: "codex" },
+    });
+  };
+
+  it("codex 选项不再 disabled（标签无「即将支持」后缀），切换后提交 values.agent_kind='codex'", async () => {
+    const onSubmit = vi.fn();
+    render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
+    const codexOption = kindSelect.querySelector(
+      'option[value="codex"]',
+    ) as HTMLOptionElement;
+    expect(codexOption.disabled).toBe(false);
+    expect(codexOption.textContent).toBe("Codex"); // 照 pi 先例：启用后不带后缀
+
+    fireEvent.change(kindSelect, { target: { value: "codex" } });
+    expect(kindSelect.value).toBe("codex");
+
+    fireEvent.change(
+      screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
+      { target: { value: "Codex 官方号" } },
+    );
+    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
+      target: { value: "sk-codex-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const values = onSubmit.mock.calls[0]![0]!;
+    expect(values.agent_kind).toBe("codex");
+    // lib 组装层：formToCreate 产出的 POST body agent_kind 透传 codex
+    const body = formToCreate(values);
+    expect(body.agent_kind).toBe("codex");
+  });
+
+  it("编辑态 initial.agent_kind='codex' 回填 codex（未知值仍归一 claude 的边界不回归）", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <LlmProviderForm
+        mode="edit"
+        initial={{ ...INITIAL, agent_kind: "codex", name: "Codex 行" }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const kindSelect = screen.getByDisplayValue("Codex") as HTMLSelectElement;
+    expect(kindSelect.value).toBe("codex");
+
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]!.agent_kind).toBe("codex");
+  });
+
+  it("从 pi（自由 env 名）切到 codex → auth_field 归一回缺省（下拉不出无匹配空值）", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    // 先切 pi 填自由 env 名
+    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+      target: { value: "pi" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/ZAI_API_KEY/), {
+      target: { value: "ZAI_API_KEY" },
+    });
+    // 切 codex：认证字段块按 claude 形态渲染（codex 不消费 auth_field），
+    // pi 自由输入值不在两选项内 → 归一回缺省（照切 claude 同款先例）。
+    fireEvent.change(screen.getByDisplayValue("Pi"), {
+      target: { value: "codex" },
+    });
+    expect(
+      screen.getByDisplayValue("ANTHROPIC_AUTH_TOKEN（默认，中转站常用）"),
+    ).toBeTruthy();
+  });
+});
+
+// ── pi × openai_chat 禁选（task-06 / FR-05 / D-012 连带声明）────────────────
+// 与 backend 422 逐字对齐（schema._forbid_pi_openai_chat / service.update）：
+// pi env 层不带端点、文件层 models.json 仅 anthropic 形态直连，openai_chat
+// 通道对 pi 无消费方。codex/claude × openai_chat 不受限。
+describe("LlmProviderForm — pi × openai_chat 禁选（task-06 / FR-05）", () => {
+  it("pi 选中时 openai_chat 选项 disabled + 禁配提示可见；anthropic 仍可选", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+      target: { value: "pi" },
+    });
+
+    const formatSelect = screen.getAllByRole("combobox").find(
+      (s) => (s as HTMLSelectElement).value === "anthropic",
+    ) as HTMLSelectElement;
+    const openaiOption = formatSelect.querySelector(
+      'option[value="openai_chat"]',
+    ) as HTMLOptionElement;
+    const anthropicOption = formatSelect.querySelector(
+      'option[value="anthropic"]',
+    ) as HTMLOptionElement;
+    expect(openaiOption.disabled).toBe(true);
+    expect(anthropicOption.disabled).toBe(false);
+    // 禁配说明（与后端 422 文案对齐的原因部分）
+    expect(
+      screen.getByText(/pi 供应商不支持 openai_chat API 格式（两层注入均不生效）/),
+    ).toBeTruthy();
+  });
+
+  it("openai_chat 状态下切到 pi → api_format 归一回 anthropic（照 authField 归一先例）", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    // 先切 OpenAI Chat（claude 允许）
+    const formatSelect = screen.getAllByRole("combobox").find(
+      (s) => (s as HTMLSelectElement).value === "anthropic",
+    ) as HTMLSelectElement;
+    fireEvent.change(formatSelect, { target: { value: "openai_chat" } });
+
+    // 切 pi → 归一回 anthropic，不出「选中着 disabled 项」的悬挂态
+    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+      target: { value: "pi" },
+    });
+    const after = screen.getAllByRole("combobox").find(
+      (s) => (s as HTMLSelectElement).value === "anthropic",
+    ) as HTMLSelectElement;
+    expect(after).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull(); // 归一后无报错态
+  });
+
+  it("存量 pi×openai_chat 行进编辑态（绕过下拉的路径）→ 报错文案与后端 422 逐字一致且提交被拦", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <LlmProviderForm
+        mode="edit"
+        initial={{ ...INITIAL, agent_kind: "pi", api_format: "openai_chat" }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    // 兜底报错可见（提交前校验拦绕过）
+    expect(screen.getByRole("alert").textContent).toBe(
+      "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），请改用 anthropic 格式或选择 codex/claude 供应商",
+    );
+    // 名称已预填（编辑态 api_key 非必填）→ 禁配才是唯一拦截项
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeDisabled();
+
+    // 切回 anthropic → 恢复可提交，payload api_format=anthropic
+    const formatSelect = screen.getAllByRole("combobox").find(
+      (s) => (s as HTMLSelectElement).value === "openai_chat",
+    ) as HTMLSelectElement;
+    fireEvent.change(formatSelect, { target: { value: "anthropic" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]!.api_format).toBe("anthropic");
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("claude/codex × openai_chat 不受限：openai_chat 选项可正常选择与提交", async () => {
+    const onSubmit = vi.fn();
+    render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+      target: { value: "codex" },
+    });
+    const formatSelect = screen.getAllByRole("combobox").find(
+      (s) => (s as HTMLSelectElement).value === "anthropic",
+    ) as HTMLSelectElement;
+    const openaiOption = formatSelect.querySelector(
+      'option[value="openai_chat"]',
+    ) as HTMLOptionElement;
+    expect(openaiOption.disabled).toBe(false);
+    expect(screen.queryByText(/pi 供应商不支持/)).toBeNull(); // pi 禁配提示不出现在 codex 下
+
+    fireEvent.change(formatSelect, { target: { value: "openai_chat" } });
+    fireEvent.change(
+      screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
+      { target: { value: "Codex LiteLLM 通道" } },
+    );
+    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
+      target: { value: "sk-x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const values = onSubmit.mock.calls[0]![0]!;
+    expect(values.agent_kind).toBe("codex");
+    expect(values.api_format).toBe("openai_chat");
+  });
+
+  it("pi 时 baseUrl 提示明示自定义端点语义（填=文件层三文件，空=官方端点 env 层）", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    // claude 下不出现 pi 专属提示
+    expect(screen.queryByText(/自定义端点/)).toBeNull();
+
+    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+      target: { value: "pi" },
+    });
+    expect(
+      screen.getByText(/auth\.json \/ models\.json \/ settings\.json 三文件/),
+    ).toBeTruthy();
+    expect(screen.getByText(/留空=官方端点/)).toBeTruthy();
   });
 });

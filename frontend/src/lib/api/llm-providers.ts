@@ -38,8 +38,13 @@ export interface LlmProviderRoleMapping {
  */
 export type LlmProviderAuthField = string;
 
-/** agent 种类（D-006 预留 codex/gemini）；task-07 / D-002@v1 放开 pi。 */
-export type LlmProviderAgentKind = "claude" | "pi";
+/**
+ * agent 种类（D-006 预留 gemini）；task-07 / D-002@v1 放开 pi；
+ * task-06（2026-09-10-multi-provider-injection）放开 codex——凭证经 daemon
+ * per-session CODEX_HOME 文件注入（不消费 env auth_field），与 backend Create
+ * 词表 Literal["claude","pi","codex"] 对齐（pi × openai_chat 禁配见表单侧）。
+ */
+export type LlmProviderAgentKind = "claude" | "pi" | "codex";
 
 /**
  * API 协议格式（2026-08-08-llm-provider-openai-format / D-001@v1）。
