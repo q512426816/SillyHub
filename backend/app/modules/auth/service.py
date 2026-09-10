@@ -260,6 +260,28 @@ class AuthService:
         await self._db.commit()
         log.info("auth.password_change", user_id=str(user_id))
 
+    async def update_my_avatar(self, *, user_id: uuid.UUID, avatar: str | None) -> User:
+        """用户自助设置头像（PATCH /api/auth/me/avatar，2026-09-10-account-avatar-upload）。
+
+        ``avatar`` 三态分派：有值=写入、空串=清除**置 NULL**（users.avatar 永不存空串，
+        审查 C-08——与群成员 PATCH 原样存 '' 行为不同，可见语义一致）、None=跳过不改
+        （不写库、不动 updated_at，原样返回）。写入路径刷新 updated_at 后统一
+        commit + refresh 返回，风格对齐 :meth:`change_password`（用户不存在防御同样
+        复用 ``AuthUserInactive``，不新增错误类型）。
+        """
+        user = await self._db.get(User, user_id)
+        if user is None or user.deleted_at is not None:
+            raise AuthUserInactive("账号不存在。")
+        if avatar is None:
+            return user
+        # '' → None（清除置 NULL）；非空值原样写入（文件中心 /api/file/{id} 或外链）。
+        user.avatar = avatar or None
+        user.updated_at = _utc_now()
+        await self._db.commit()
+        await self._db.refresh(user)
+        log.info("auth.avatar_update", user_id=str(user_id), cleared=avatar == "")
+        return user
+
     # ── Helpers ───────────────────────────────────────────────────────────
 
     async def _lookup_active_user_by_username(self, username: str) -> User | None:

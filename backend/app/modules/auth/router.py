@@ -32,6 +32,7 @@ from app.modules.auth.schema import (
     MeResponse,
     RefreshRequest,
     TokenPair,
+    UpdateMyAvatarRequest,
     UserRead,
     WorkspaceRoleAssignment,
 )
@@ -167,6 +168,21 @@ async def change_password(
         old_password=payload.old_password,
         new_password=payload.new_password,
     )
+
+
+@router.patch("/me/avatar", response_model=UserRead)
+async def update_my_avatar(
+    payload: UpdateMyAvatarRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: SessionDep,
+    settings: SettingsDep,
+) -> UserRead:
+    """用户自助设置头像：body 三态语义（值=设置、''=清除置 NULL、None=不改），返回更新后 UserRead。"""
+    updated = await AuthService(session, settings=settings).update_my_avatar(
+        user_id=user.id,
+        avatar=payload.avatar,
+    )
+    return UserRead.model_validate(updated)
 
 
 @router.get("/me", response_model=MeResponse)
