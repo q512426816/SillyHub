@@ -450,10 +450,16 @@ async def get_skill_content(
 # ---------------------------------------------------------------------------
 # 2026-07-07-skills-mcp-management-ui task-05：daemon 拉 MCP 平台配置端点。
 # daemon skill-manager / mcp-config 启动时拉平台默认 mcpServers + 白名单，
-# 注入 claude 启动 env（design D-004）。与 task-04 admin GET（/api/platform-
-# settings/mcp）的区别：本端点给 daemon 用，**返回原值不脱敏**（daemon 需
-# 真实 env 才能注入 claude），admin GET 返回遮蔽值（D-008）。
+# 注入 claude 启动 env（design D-004）。与 admin 视图（/api/mcp-servers*
+# 详情脱敏）的区别：本端点给 daemon 用，**返回原值不脱敏**（daemon 需
+# 真实 env 才能注入 claude）。
 # 认证走 get_current_principal（daemon X-API-Key，同 skills/latest/* 端点）。
+#
+# 2026-09-10-mcp-central-registry task-05：platform 位数据源从 KV
+# ``mcp.platform_default`` 切到 registry 渲染（``render_injection_set``，
+# task-04；D-003 KV 弃用不读不清理），加可选 query ``user_id``——带值时
+# platform ∪ user 注入集 + lease 归属授权校验（D-010）；渲染抛错返 503
+# 保 daemon 本地 mcp.json 回落链可达（兼容策略 CC-04/CC-14）。
 # ---------------------------------------------------------------------------
 
 
@@ -513,44 +519,84 @@ def _read_mcp_json_sync(mcp_path: Path) -> dict[str, Any]:
     return {"mcpServers": mcp_servers}
 
 
+_ACTIVE_LEASE_STATUSES = ("pending", "claimed")
+
+
+async def _lease_covers_user(
+    session: AsyncSession, *, principal_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
+    """D-010 user_id 授权校验：认证主体是否持有归属该 user 的活跃 lease。
+
+    归属链（design「接口定义」授权规则段 / lease→user 关联链）：``lease.runtime_id
+    → DaemonRuntime.user_id``，活跃态取 pending/claimed（现行 partial index
+    ``idx_daemon_task_leases_expires_at`` 同口径，model.py）。匹配条件 =
+    ``runtime.user_id == principal.id`` 且 ``runtime.user_id == 请求 user_id``
+    ——get_current_principal 双路径（daemon X-API-Key / Bearer）统一解析为
+    User principal，"daemon principal" 判定即由该归属链承担：把"泄漏 daemon
+    token 可读任意用户 env"压回"只能读该 daemon 正在服务的用户"（R-08）。
+    无匹配由调用方返 404（不泄露 user 存在性）。
+    """
+    stmt = (
+        select(DaemonTaskLease.id)
+        .join(DaemonRuntime, DaemonTaskLease.runtime_id == DaemonRuntime.id)
+        .where(
+            DaemonTaskLease.status.in_(_ACTIVE_LEASE_STATUSES),
+            DaemonRuntime.user_id == principal_id,
+            DaemonRuntime.user_id == user_id,
+        )
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalars().first() is not None
+
+
 @router.get("/mcp/config")
 async def get_daemon_mcp_config(
     session: SessionDep,
-    user: Annotated[Any, Depends(get_current_principal)],
+    user: Annotated[User, Depends(get_current_principal)],
     workspace_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
-    """返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。
+    """返回 MCP 注入集 + server 白名单（**原值不脱敏**，design D-004）。
 
     daemon 启动 skill-manager / mcp-config 时拉取，用于：
       * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，
-        secret 类 env key 不遮蔽，区别 admin GET D-008）；
+        ``encrypted_env`` 经 render 解密回填，secret 类 env key 不遮蔽）；
       * ``whitelist`` → 仅放行白名单内的 server。
 
-    无配置时返回空结构 ``{"platform_default": {"mcpServers": {}}, "whitelist": []}``，
-    不报错（daemon 按"无平台默认"处理）。
+    2026-09-10-mcp-central-registry task-05：platform 位数据源 = registry 渲染
+    （``render_injection_set(session, user_id)``，task-04）——不带 ``user_id``
+    仅 platform binding（等同旧 KV platform_default 语义，旧 daemon 零感知）；
+    带 ``user_id`` = platform ∪ user 注入集，且先做 lease 归属双校验（D-010：
+    认证主体持有归属该 user 的活跃 lease，无匹配 404 不泄露存在性）。
+    ``mcp.platform_default`` KV 不再读（D-003 弃用，残留无害）。
 
-    2026-08-26-workspace-mcp-edit task-03：可选 query ``workspace_id``（UUID），
-    提供时响应追加 ``"workspace": {"mcpServers": {...}}``（读该工作区
-    ``specDir/.mcp.json`` 明文，见 ``_read_mcp_config_raw``）；不传时响应
-    结构与旧版完全一致（R-07 向后兼容，旧 daemon 忽略新字段）。非法 UUID
-    → 422（全局校验处理器中文报错）。
+    registry 空库 → 200 + ``{"platform_default": {"mcpServers": {}}, ...}``
+    （对齐旧 KV 缺失回落语义）；渲染抛错 → 503（中文 detail）——daemon 侧
+    fetch 非 200 回落本地 ``~/.sillyhub/daemon/mcp.json`` 的既有链路保持
+    可达（空集 200 与故障 503 语义分开，兼容策略 CC-14）。
+
+    可选 query ``workspace_id``（2026-08-26-workspace-mcp-edit task-03）：提供时
+    响应追加 ``"workspace": {"mcpServers": {...}}``（读该工作区 ``specDir/.mcp.json``
+    明文，见 ``_read_mcp_config_raw``，读取逻辑不动）；非法 UUID → 422（全局
+    校验处理器中文报错）。
     """
-    from app.modules.settings.router import (
-        MCP_PLATFORM_DEFAULT_KEY,
-        MCP_WHITELIST_KEY,
-        _read_setting_json,
-    )
+    from app.modules.mcp_registry.render import render_injection_set
+    from app.modules.settings.router import MCP_WHITELIST_KEY, _read_setting_json
 
-    del user  # 仅做认证（daemon X-API-Key），不使用
-    platform_default = await _read_setting_json(
-        session, MCP_PLATFORM_DEFAULT_KEY, {"mcpServers": {}}
-    )
-    # 防御：DB 里若是非 dict 脏数据，归一为空结构而非原样透传。
-    if not isinstance(platform_default, dict):
-        platform_default = {"mcpServers": {}}
-    if not isinstance(platform_default.get("mcpServers"), dict):
-        platform_default = {**platform_default, "mcpServers": {}}
+    # D-010：user_id 有值 → lease 归属双校验，无匹配 404（不泄露 user 存在性）。
+    if user_id is not None and not await _lease_covers_user(
+        session, principal_id=user.id, user_id=user_id
+    ):
+        raise HTTPException(status_code=404, detail="未找到匹配的活跃任务租约。")
 
+    # 换源 registry 渲染（task-04）；render 自身全程容错（解密失败降级/空库空集），
+    # 此处只兜非预期故障（DB 异常等）→ 503，daemon 回落链保持可达。
+    try:
+        platform_default = await render_injection_set(session, user_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="MCP 注入集渲染暂不可用，请稍后重试。") from exc
+
+    # whitelist 读取不动（D-007 白名单留 settings）；脏数据归一为 []。
     raw_whitelist = await _read_setting_json(session, MCP_WHITELIST_KEY, [])
     whitelist = [str(x) for x in raw_whitelist] if isinstance(raw_whitelist, list) else []
 
