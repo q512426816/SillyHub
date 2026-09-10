@@ -3,8 +3,13 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  GroupMemberAvatarUpload,
+  USER_AVATAR_OWNER_TYPE,
+} from "@/components/group-chat/group-member-avatar";
 import { ApiError } from "@/lib/api";
-import { changePassword } from "@/lib/auth";
+import { changePassword, updateMyAvatar } from "@/lib/auth";
+import { useSession } from "@/stores/session";
 
 const inputCls =
   "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
@@ -12,6 +17,7 @@ const inputCls =
 const MIN_NEW_LENGTH = 8;
 
 export default function AccountPage() {
+  const user = useSession((s) => s.user);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -19,6 +25,26 @@ export default function AccountPage() {
   const [oldError, setOldError] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+
+  // 个人资料卡片展示名（预览首字回退）：displayName → email → "?"（与
+  // GroupMemberAvatar 空名回退一致）。
+  const avatarName = user?.displayName || user?.email || "?";
+
+  // 头像写回（2026-09-10-account-avatar-upload task-07）：上传成功/恢复默认
+  // 均经 updateMyAvatar 写后端并重跑 fetchMe 刷新 store——页面不自管 avatar
+  // 副本，user.avatar 即真相源。上传环节的失败提示由控件内 notify 承担。
+  const handleAvatarChange = (avatar: string | null) => {
+    setAvatarError(null);
+    void (async () => {
+      try {
+        await updateMyAvatar(avatar);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        setAvatarError(msg || "头像保存失败，请稍后重试");
+      }
+    })();
+  };
 
   const oldTouched = oldPassword.length > 0;
   const newTouched = newPassword.length > 0;
@@ -70,6 +96,22 @@ export default function AccountPage() {
         <h1 className="mt-0.5">个人中心</h1>
         <p className="text-xs text-muted-foreground">账户信息与安全设置</p>
       </header>
+
+      <div className="max-w-lg rounded-md border bg-card p-4">
+        <h3 className="text-xs font-medium text-muted-foreground">个人资料</h3>
+        <div className="mt-3 flex items-center gap-3">
+          <GroupMemberAvatarUpload
+            value={user?.avatar ?? null}
+            onChange={handleAvatarChange}
+            label="我的头像"
+            name={avatarName}
+            ownerType={USER_AVATAR_OWNER_TYPE}
+          />
+          {avatarError && (
+            <span className="text-xs text-destructive">{avatarError}</span>
+          )}
+        </div>
+      </div>
 
       <div className="max-w-lg rounded-md border bg-card p-4">
         <h3 className="text-xs font-medium text-muted-foreground">修改密码</h3>
