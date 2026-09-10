@@ -39,7 +39,7 @@
 import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 // stat：2026-08-28-fix-cross-machine-worker-dispatch task-06——认领段 cwd 存在性
 // 预检（FR-05/D-004@v1，正确机器上 worktree 必已存在，存在性即「对机」试金石）。
-import { mkdir, stat, readFile, writeFile, rename, unlink, chmod, readdir } from 'node:fs/promises';
+import { mkdir, stat, readFile, writeFile, rename, unlink, chmod, readdir, rm } from 'node:fs/promises';
 
 import { join, dirname } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -188,6 +188,7 @@ import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
 import { SessionBusyError } from './interactive/types.js';
 import type {
   PersistedSessionRecord,
+  SessionState,
   SessionStatus,
   SessionStorePersistence,
   SessionSwitchConfigPayload,
@@ -1722,6 +1723,22 @@ export class Daemon {
   private readonly _mcpBundleBySession: Map<string, McpBundle>;
 
   /**
+   * task-04（2026-09-10-multi-provider-injection / FR-03 / D-011）：sessionId →
+   * per-session provider 文件目录登记（interactive spawn 写盘成功时登记、热切换
+   * 重写成功时补登记；onSessionEnd / create 失败 catch delete——生命周期=会话，
+   * ``_mcpBundleBySession`` 同款 Map 模式）。
+   *
+   * 仅作记账（可观测 + 泄漏排查定位）；目录路径本身由 sessionKey 确定性派生
+   * （``<daemonStateDir()>/codex|pi/<sessionId>``），终态清理按确定性路径 rm——
+   * 不依赖登记（覆盖 daemon 重启 recover 后未重登记的窗口），此处 Map 与清理
+   * 双轨幂等互不冲突。
+   */
+  private readonly _providerFileDirsBySession = new Map<
+    string,
+    { codexHome?: string; piDir?: string }
+  >();
+
+  /**
    * P1-1（2026-06-18）：恢复成功（markReconnected + confirm）后正在 active 运行的
    * session 集合。用于把恢复后**异步**的 driver onError → SessionManager.fail 路径
    * 桥接到 backend markRecoveryFailed（否则 backend session 卡 reconnecting）。
@@ -2178,6 +2195,16 @@ export class Daemon {
     // task-05（2026-08-30-daemon-self-heal）：提取为 _recoverPersistedSessions(trigger)，
     // boot 调用点改传 'boot'，行为零变化（heartbeat_recover 触发归 task-06）。
     await this._recoverPersistedSessions('boot');
+
+    // task-04（2026-09-10-multi-provider-injection / FR-03 / D-011 轻量收尾）：
+    // 启动清扫孤儿 per-session provider 目录（上次运行崩溃/被杀残留）。必须在
+    // recover 完成后跑（存活会话已回 store / 待重试已入队，判据才可靠）；失败
+    // 不阻断启动（残留下次启动再清）。
+    try {
+      await this._sweepOrphanProviderFileDirs();
+    } catch (e) {
+      this._logger.warn('provider_file_dir_sweep_error', { error: e });
+    }
 
     // task-03（2026-07-07-daemon-skill-execution）：同步平台 sillyspec skills。
     // 在 agent 探测之后、三循环启动之前。skills 版本比对 + bundle 拉取 + 解压。
@@ -4512,6 +4539,13 @@ export class Daemon {
     // SESSION_END WS 路径均经 SessionManager 终态走到这里），幂等 delete。
     this._mcpBundleBySession.delete(sessionId);
 
+    // task-04（2026-09-10-multi-provider-injection / FR-03 / D-011）：per-session
+    // provider 文件目录终态删除（<root>/codex/<sid>/ 与 <root>/pi/<sid>/——D-011
+    // 生命周期「spawn 前创建 → 活跃期重写 → 终态删除」的收口段）。尽力语义：
+    // helper 内部逐目录 catch，失败仅 warn 不向上抛——绝不阻断会话终态流
+    //（notifySessionEnd 已先行上报，清理滞后不改变终态语义）。
+    await this._cleanupProviderFileDirs(sessionId);
+
     // ql-20260831-009：回收 modelUsage 差分基线（生命周期=会话；会话结束后同 id
     // 重建的会话是新流式 query，快照从零起，残留基线会误触发复位检测多报全量）。
     this._modelUsageBaselineBySession.delete(sessionId);
@@ -4526,6 +4560,109 @@ export class Daemon {
         this._interactiveFlatSeqOwner.delete(rid);
         this._interactiveFlatSeq.delete(rid);
         this._assistantMsgCountByRun.delete(rid);
+      }
+    }
+  }
+
+  /**
+   * task-04（2026-09-10-multi-provider-injection / D-011）：per-session provider
+   * 文件目录登记（写盘成功侧调用）。仅记录 applyProviderFileSettings 返回的 env
+   * 指针（CODEX_HOME / PI_CODING_AGENT_DIR）；零文件层 env（claude kind / 门槛缺 /
+   * 官方端点）→ 不登记（无目录可清）。幂等：重复登记覆盖合并（热切换重写补登）。
+   */
+  private _noteProviderFileDirs(sessionId: string, env: Record<string, string>): void {
+    const codexHome = env['CODEX_HOME'];
+    const piDir = env['PI_CODING_AGENT_DIR'];
+    if (!codexHome && !piDir) return;
+    const prev = this._providerFileDirsBySession.get(sessionId) ?? {};
+    this._providerFileDirsBySession.set(sessionId, {
+      ...prev,
+      ...(codexHome ? { codexHome } : {}),
+      ...(piDir ? { piDir } : {}),
+    });
+  }
+
+  /**
+   * task-04（2026-09-10-multi-provider-injection / FR-03 / D-011）：删除会话的
+   * per-session provider 文件目录并清映射条目（会话终态统一收口 / create 失败
+   * catch 两处调用）。
+   *
+   * 按确定性路径 rm（不依赖 _providerFileDirsBySession 登记——daemon 重启
+   * recover 重建的会话无登记但目录仍在；登记条目照删防 Map 泄漏）：
+   * ``<daemonStateDir()>/codex/<sessionId>/`` 与 ``<daemonStateDir()>/pi/
+   * <sessionId>/``。``recursive+force``（rimraf 风格）：force 容忍目录不存在
+   *（零 provider 会话 / 已清过），幂等零泄漏。
+   *
+   * 尽力语义：逐目录 try/catch，失败仅 warn **不抛**——调用点（onSessionEnd
+   * 终态流 / create catch）绝不被清理失败阻断；残留目录由下次启动
+   * ``_sweepOrphanProviderFileDirs`` 孤儿清扫兜底。日志只含 session_id/dir/
+   * error message，不含凭证（R-02）。
+   */
+  private async _cleanupProviderFileDirs(sessionId: string): Promise<void> {
+    const root = daemonStateDir();
+    for (const kindDir of [
+      join(root, 'codex', sessionId),
+      join(root, 'pi', sessionId),
+    ]) {
+      try {
+        await rm(kindDir, { recursive: true, force: true });
+      } catch (e) {
+        this._logger.warn('provider_file_dir_cleanup_failed', {
+          session_id: sessionId,
+          dir: kindDir,
+          error: (e as Error)?.message ?? String(e),
+        });
+      }
+    }
+    this._providerFileDirsBySession.delete(sessionId);
+  }
+
+  /**
+   * task-04（2026-09-10-multi-provider-injection / FR-03 / D-011 轻量收尾）：
+   * daemon 启动清扫孤儿 per-session provider 目录（上次运行崩溃/被杀时终态清理
+   * 未跑的残留）。
+   *
+   * 调用时机：``_recoverPersistedSessions('boot')`` **之后**（recover 完成后，
+   * 存活会话已回 store、网络失败待重试会话已在 _pendingRecovery——两者目录须
+   * 保留；batch lease 目录段=leaseId 永不在会话表，重启后必为孤儿，照删）。
+   *
+   * 判据：目录名（sessionKey）既不在 SessionManager store（get 返回 undefined）
+   * 也不在 recover 重试队列 → 孤儿 → rm recursive+force。sessionManager 未注入
+   * （会话表不可得，AC-14 过渡期）→ **跳过仅日志**——分不清孤儿/活跃时宁留
+   * 勿删。失败逐目录 warn 不阻断启动（残留下次启动再清）。
+   */
+  private async _sweepOrphanProviderFileDirs(): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.info('provider_file_dir_sweep_skipped_no_manager');
+      return;
+    }
+    const root = daemonStateDir();
+    for (const kind of ['codex', 'pi'] as const) {
+      const kindRoot = join(root, kind);
+      let entries: string[];
+      try {
+        entries = await readdir(kindRoot);
+      } catch {
+        continue; // 目录不存在（该 kind 从未用过）→ 无孤儿可清。
+      }
+      for (const sessionKey of entries) {
+        try {
+          const live =
+            this._sessionManager.get(sessionKey) !== undefined ||
+            this._pendingRecovery.has(sessionKey);
+          if (live) continue;
+          await rm(join(kindRoot, sessionKey), { recursive: true, force: true });
+          this._logger.info('provider_file_dir_orphan_swept', {
+            kind,
+            session_key: sessionKey,
+          });
+        } catch (e) {
+          this._logger.warn('provider_file_dir_sweep_failed', {
+            kind,
+            session_key: sessionKey,
+            error: (e as Error)?.message ?? String(e),
+          });
+        }
       }
     }
   }
@@ -7450,8 +7587,13 @@ export class Daemon {
    *   - session 不存在（迟到/WS 重放/SessionStore 已清）→ markPendingSwitch 抛
    *     SessionNotFoundError，此处 catch 收敛为 warn（best-effort，不崩 WS 主循环）。
    *
-   * markPendingSwitch 同步返回 void（内部 reload 走 fire-and-forget），故本方法
-   * 不 await 异步副作用——非阻塞分发契约由调用点 ``void ... .catch`` 保证。
+   * markPendingSwitch 同步返回 void（内部 reload 走 fire-and-forget）。
+   *
+   * task-04（2026-09-10-multi-provider-injection / FR-03 / D-009+D-011）：markPendingSwitch
+   * 成功后对活跃会话按新 provider.agent_kind（codex/pi）复用 applyProviderFileSettings
+   * 重写 per-session 目录（尽力语义——CLI 进程内是否重读不保证；null/claude kind/
+   * 终态会话零动作）；重写 await 但内部失败全收口 warn，不破坏非阻塞分发契约
+   *（调用点 ``void ... .catch`` 保证）。
    */
   private async _routeProviderConfigChanged(
     raw: Record<string, unknown>,
@@ -7485,6 +7627,68 @@ export class Daemon {
       this._logger.warn('provider_config_changed_session_error', {
         session_id: sessionId,
         error: e,
+      });
+      // task-04（D-009）：session 不存在 → 无活跃会话可重写，一并返回（既有
+      // warn 丢弃路径零回归）。
+      return;
+    }
+
+    // task-04（2026-09-10-multi-provider-injection / FR-03 / D-009+D-011）：活跃
+    // 会话 per-session 目录精准重写——markPendingSwitch 旁路，复用 task-03
+    // applyProviderFileSettings **同一函数**（热切换重写产物与新会话 spawn 前产物
+    // 逐字一致）。尽力语义（D-009）：daemon 侧重写文件，CLI 进程内是否重读不
+    // 保证；失败 warn 不影响推送流（markPendingSwitch 已先行完成）。
+    if (!providerConfig) {
+      // null（停止→回退本机凭证，D-004@v1）：不重写仅记日志（目录留待会话终态
+      // 统一清理，运行中 CLI 的 CODEX_HOME/PI_CODING_AGENT_DIR env 不受影响）。
+      this._logger.info('hot_switch_rewrite_skipped_no_provider', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    const agentKind = providerConfig.agent_kind;
+    if (agentKind !== 'codex' && agentKind !== 'pi') {
+      // claude / 缺省 kind：无 per-session 文件目录（applyProviderFileSettings
+      // 同判），零动作——claude settings.json 热切换归 markPendingSwitch reload 链。
+      return;
+    }
+    // 活跃门控：终态会话（ended/failed，end/fail 不从 store 移除——markPendingSwitch
+    // 不抛）不重写——否则会为死会话重建目录（其 onSessionEnd 清理已跑过）成孤儿。
+    let state: Readonly<SessionState> | undefined;
+    try {
+      state = this._sessionManager.get(sessionId);
+    } catch {
+      state = undefined;
+    }
+    if (!state || state.status === 'ended' || state.status === 'failed') {
+      this._logger.debug('hot_switch_rewrite_skipped_session_not_active', {
+        session_id: sessionId,
+        status: state?.status ?? 'not_found',
+      });
+      return;
+    }
+    try {
+      const env = await applyProviderFileSettings({
+        sessionKey: sessionId,
+        provider: providerConfig,
+        daemonApiKey: this._config.api_key,
+      });
+      // 可观测日志（R-05 尽力语义——文案不含「已切换」确定性承诺）：只含
+      // session/kind/是否落盘，永不含 api_key 明文（R-02）。rewritten=false =
+      // 分派函数门槛缺 warn 跳过（零 mkdir）或 pi 官方端点 env 层形态。
+      this._logger.info('hot_switch_rewrite', {
+        session_id: sessionId,
+        agent_kind: agentKind,
+        rewritten: Object.keys(env).length > 0,
+      });
+      this._noteProviderFileDirs(sessionId, env);
+    } catch (e) {
+      // applyProviderFileSettings 自身不抛（task-03 失败语义唯一化收口）；此处
+      // 仅防御性兜底意外异常——warn 吞，绝不影响推送流。
+      this._logger.warn('hot_switch_rewrite_failed', {
+        session_id: sessionId,
+        agent_kind: agentKind,
+        error: (e as Error)?.message ?? String(e),
       });
     }
   }
@@ -8019,6 +8223,9 @@ export class Daemon {
       provider: execPayload.provider_config,
       daemonApiKey: this._config.api_key,
     });
+    // task-04（D-011）：per-session 目录映射登记（终态清理防泄漏记账；路径本身
+    // 确定性派生，清理不依赖此 Map——见 _providerFileDirsBySession 声明注释）。
+    this._noteProviderFileDirs(sessionId, providerFileEnv);
 
     const interactiveEnv = buildSpawnEnv(
       {
@@ -8419,6 +8626,11 @@ export class Daemon {
       // task-07（D-007@v2）：create 失败路径不经 onSessionEnd，显式清会话级 MCP
       // bundle 缓存（防泄漏；WS 重放重试时会重新预取，幂等安全）。
       this._mcpBundleBySession.delete(sessionId);
+      // task-04（D-011）：per-session provider 目录同理——create 失败不经
+      // onSessionEnd（会话从未真正起来），显式清理防泄漏；WS 重放重试时
+      // _startInteractiveSession 会重新写盘，幂等安全。尽力语义：helper 内部
+      // catch，不吞掉下方 create_failed 错误上报。
+      await this._cleanupProviderFileDirs(sessionId);
       const code =
         (e as Error & { code?: string })?.code ??
         (e instanceof Error ? e.name : 'UNKNOWN');

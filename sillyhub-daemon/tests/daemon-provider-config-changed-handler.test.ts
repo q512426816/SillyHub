@@ -17,8 +17,14 @@
 //
 // task-02 的字符串契约（MSG.PROVIDER_CONFIG_CHANGED === 'daemon:provider_config_changed'）
 // 由 tests/protocol.contract.test.ts 覆盖——本文件不重复。
+//
+// task-04（2026-09-10-multi-provider-injection / FR-03 / D-009+D-011）：下方第二
+// 个 describe 扩展「热切换按会话重写」——markPendingSwitch 成功后对活跃 codex/pi
+// 会话复用 applyProviderFileSettings 重写 per-session 目录（复用同函数 = 产物与
+// 新会话 spawn 前逐字一致）；claude/absent 零动作；null 仅记日志；终态/不存在
+// 会话零重写（防死会话重建目录孤儿）；hot_switch_rewrite 可观测日志不含 key。
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { Daemon } from '../src/daemon.js';
 import { MSG } from '../src/protocol.js';
 import type { DaemonConfig } from '../src/config.js';
@@ -26,6 +32,12 @@ import type { DetectedAgent } from '../src/agent-detector.js';
 import type { WsClientCallbacks } from '../src/ws-client.js';
 import type { DaemonMessage, ProviderConfig } from '../src/types.js';
 import type { SessionManager } from '../src/interactive/session-manager.js';
+import type { SessionState } from '../src/interactive/types.js';
+// task-04：热切换重写产物断言（复用 task-03 同一函数对照「逐字一致」）。
+import { applyProviderFileSettings } from '../src/task-runner.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 // ── 共用 mock 基础设施（风格对齐 daemon-lease-cancel-handler.test.ts）──────────
 
@@ -94,11 +106,14 @@ function createMockTaskRunner() {
   };
 }
 
-/** mock SessionManager，markPendingSwitch 是 spy，断言调用次数 + 参数。 */
+/** mock SessionManager，markPendingSwitch 是 spy，断言调用次数 + 参数。
+ * task-04：getState 可注入 get() 返回值（热切换重写的活跃门控用）。 */
 function createMockSessionManager(
   markImpl?: (sessionId: string, cfg: ProviderConfig | null) => void,
+  getState?: (sessionId: string) => Readonly<SessionState> | undefined,
 ): SessionManager & {
   markPendingSwitch: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
 } {
   const sm = {
     create: vi.fn(async () => {}),
@@ -106,7 +121,7 @@ function createMockSessionManager(
     interrupt: vi.fn(async () => false),
     end: vi.fn(async () => {}),
     fail: vi.fn(async () => {}),
-    get: vi.fn(() => undefined),
+    get: vi.fn(getState ?? (() => undefined)),
     start: vi.fn(() => {}),
     stop: vi.fn(() => {}),
     // 默认 no-op；测试可覆盖为抛 SessionNotFoundError 模拟迟到/重放场景。
@@ -114,6 +129,7 @@ function createMockSessionManager(
   };
   return sm as unknown as SessionManager & {
     markPendingSwitch: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -360,5 +376,265 @@ describe('task-06 / FR-04 / D-002@v1: daemon PROVIDER_CONFIG_CHANGED WS handler 
 
     // markPendingSwitch 绝不应被未知类型触发
     expect(sessionManager.markPendingSwitch).not.toHaveBeenCalled();
+  });
+});
+
+// ── task-04（2026-09-10-multi-provider-injection / FR-03 / D-009+D-011）──────────
+// 热切换按会话重写：markPendingSwitch 成功后，活跃 codex/pi 会话的 per-session
+// 目录由 _routeProviderConfigChanged 复用 applyProviderFileSettings 重写（与
+// spawn 前产物同函数）；隔离照搬 daemon-provider-file-dispatch.test.ts——
+// vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot)，零触碰真实 ~/.sillyhub。
+
+describe('task-04 / D-009+D-011: PROVIDER_CONFIG_CHANGED 热切换按会话重写 per-session 目录', () => {
+  let daemons: Daemon[] = [];
+  let tmpRoot: string;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+
+  function stubbedRoot(): string {
+    return tmpRoot;
+  }
+
+  /** 活跃会话状态（active 无在跑 turn）——热切换重写的活跃门控取值。 */
+  function activeState(sessionId: string): Readonly<SessionState> {
+    return { sessionId, leaseId: `lease-${sessionId}`, status: 'active' } as Readonly<SessionState>;
+  }
+
+  function codexSwitchConfig(): ProviderConfig {
+    return {
+      agent_kind: 'codex',
+      api_key: 'sk-codex-hot-new',
+      base_url: 'https://hot-new.example/v1',
+      model: 'glm-4.8',
+    };
+  }
+
+  function piSwitchConfig(): ProviderConfig {
+    return {
+      agent_kind: 'pi',
+      api_key: 'sk-pi-hot-new',
+      base_url: 'https://pi-hot.example/v1',
+      model: 'kimi-k3',
+    };
+  }
+
+  /** 轮询等待条件成立（重写是 handler 内异步 FS 写，microtask 不够）。 */
+  async function waitForCond(
+    cond: () => boolean,
+    { timeout = 3000, interval = 15 }: { timeout?: number; interval?: number } = {},
+  ): Promise<void> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (cond()) return;
+      await new Promise<void>((r) => setTimeout(r, interval));
+    }
+    throw new Error(`waitForCond: 条件在 ${timeout}ms 内未成立`);
+  }
+
+  /** console.info 是否出现过 [daemon.<event>] 且携带全部期望 kv 片段。 */
+  function sawLog(event: string, kvContains: string[]): boolean {
+    return infoSpy.mock.calls.some(
+      (call) =>
+        call[0] === `[daemon.${event}]` &&
+        kvContains.every((kv) => (call as unknown[]).includes(kv)),
+    );
+  }
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'hs-'));
+    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
+    // daemon createLogger 走 console.info；时间戳包装在 spy 下游，记录原始实参。
+    infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+    vi.unstubAllEnvs();
+    rmSync(tmpRoot, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('codex 活跃会话 → per-session 目录按新供应商重写 + hot_switch_rewrite 日志（含 session/kind 不含 key）', async () => {
+    // 预置「旧供应商」目录产物（模拟会话 spawn 前已写入）。
+    const codexHome = join(stubbedRoot(), 'codex', SESSION_ID);
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-codex-old"}');
+    writeFileSync(join(codexHome, 'config.toml'), 'model = "old-model"');
+
+    const sm = createMockSessionManager(undefined, () => activeState(SESSION_ID));
+    const built = buildDaemon({ sessionManager: sm });
+    daemons.push(built.daemon);
+    await built.daemon.start();
+    await waitForWsInit(built.captured);
+    built.captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: codexSwitchConfig() },
+    } as DaemonMessage);
+    await waitForCond(() =>
+      existsSync(join(codexHome, 'auth.json')) &&
+      readFileSync(join(codexHome, 'auth.json'), 'utf-8').includes('sk-codex-hot-new'),
+    );
+
+    // 产物按新供应商重写（auth key + config.toml 端点/模型）。
+    expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toContain('sk-codex-hot-new');
+    const toml = readFileSync(join(codexHome, 'config.toml'), 'utf-8');
+    expect(toml).toContain('base_url = "https://hot-new.example/v1"');
+    expect(toml).toContain('model = "glm-4.8"');
+    expect(toml).not.toContain('old-model');
+    // 可观测日志：session/kind 齐、key 明文绝不出现（R-02/R-05）。
+    expect(sawLog('hot_switch_rewrite', ['session_id=' + SESSION_ID, 'agent_kind=codex', 'rewritten=true'])).toBe(true);
+    const logged = infoSpy.mock.calls
+      .filter((c) => c[0] === '[daemon.hot_switch_rewrite]')
+      .flat()
+      .join(' ');
+    expect(logged).not.toContain('sk-codex-hot-new');
+    // 推送流不受影响：markPendingSwitch 照常被调（D-009 尽力语义旁路）。
+    expect(sm.markPendingSwitch).toHaveBeenCalledTimes(1);
+  });
+
+  it('重写产物与新会话 spawn 前产物逐字一致（复用同一 applyProviderFileSettings）', async () => {
+    const codexHome = join(stubbedRoot(), 'codex', SESSION_ID);
+    mkdirSync(codexHome, { recursive: true });
+
+    const sm = createMockSessionManager(undefined, () => activeState(SESSION_ID));
+    const built = buildDaemon({ sessionManager: sm });
+    daemons.push(built.daemon);
+    await built.daemon.start();
+    await waitForWsInit(built.captured);
+    built.captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: codexSwitchConfig() },
+    } as DaemonMessage);
+    await waitForCond(() => existsSync(join(codexHome, 'config.toml')));
+
+    // 对照组：同输入走 spawn 前同一函数（anthropic 形态 daemonApiKey 不参与）。
+    await applyProviderFileSettings({
+      sessionKey: 'fresh-ref',
+      provider: codexSwitchConfig(),
+      daemonApiKey: null,
+    });
+    expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toBe(
+      readFileSync(join(stubbedRoot(), 'codex', 'fresh-ref', 'auth.json'), 'utf-8'),
+    );
+    expect(readFileSync(join(codexHome, 'config.toml'), 'utf-8')).toBe(
+      readFileSync(join(stubbedRoot(), 'codex', 'fresh-ref', 'config.toml'), 'utf-8'),
+    );
+  });
+
+  it('pi 活跃会话 → pi 目录三文件按新供应商重写 + agent_kind=pi 日志', async () => {
+    const piDir = join(stubbedRoot(), 'pi', SESSION_ID);
+    mkdirSync(piDir, { recursive: true });
+    writeFileSync(join(piDir, 'settings.json'), '{"defaultModel":"old-m"}');
+
+    const sm = createMockSessionManager(undefined, () => activeState(SESSION_ID));
+    const built = buildDaemon({ sessionManager: sm });
+    daemons.push(built.daemon);
+    await built.daemon.start();
+    await waitForWsInit(built.captured);
+    built.captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: piSwitchConfig() },
+    } as DaemonMessage);
+    await waitForCond(() =>
+      existsSync(join(piDir, 'settings.json')) &&
+      readFileSync(join(piDir, 'settings.json'), 'utf-8').includes('kimi-k3'),
+    );
+
+    const settings = JSON.parse(readFileSync(join(piDir, 'settings.json'), 'utf-8')) as Record<string, unknown>;
+    expect(settings['defaultModel']).toBe('kimi-k3');
+    expect(settings['defaultProvider']).toBe('sillyhub');
+    const auth = JSON.parse(readFileSync(join(piDir, 'auth.json'), 'utf-8')) as Record<string, unknown>;
+    expect(auth['sillyhub']).toEqual({ type: 'api_key', key: 'sk-pi-hot-new' });
+    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
+    expect(sawLog('hot_switch_rewrite', ['session_id=' + SESSION_ID, 'agent_kind=pi', 'rewritten=true'])).toBe(true);
+  });
+
+  it('claude kind 活跃会话 → 零动作（无目录创建、无 hot_switch_rewrite 日志；markPendingSwitch 照常）', async () => {
+    const sm = createMockSessionManager(undefined, () => activeState(SESSION_ID));
+    const built = buildDaemon({ sessionManager: sm });
+    daemons.push(built.daemon);
+    await built.daemon.start();
+    await waitForWsInit(built.captured);
+    built.captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: SAMPLE_PROVIDER_CONFIG },
+    } as DaemonMessage);
+    // 留拍给潜在异步写盘（不应发生——断言的是「零动作」）。
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(existsSync(join(stubbedRoot(), 'codex'))).toBe(false);
+    expect(existsSync(join(stubbedRoot(), 'pi'))).toBe(false);
+    expect(infoSpy.mock.calls.some((c) => c[0] === '[daemon.hot_switch_rewrite]')).toBe(false);
+    expect(sm.markPendingSwitch).toHaveBeenCalledTimes(1);
+  });
+
+  it('provider_config=null → 不重写仅记日志（skipped_no_provider），预置目录内容不变', async () => {
+    const codexHome = join(stubbedRoot(), 'codex', SESSION_ID);
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-keep-me"}');
+
+    const sm = createMockSessionManager(undefined, () => activeState(SESSION_ID));
+    const built = buildDaemon({ sessionManager: sm });
+    daemons.push(built.daemon);
+    await built.daemon.start();
+    await waitForWsInit(built.captured);
+    built.captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: null },
+    } as DaemonMessage);
+    await flushMicro();
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(sm.markPendingSwitch).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(sawLog('hot_switch_rewrite_skipped_no_provider', ['session_id=' + SESSION_ID])).toBe(true);
+    // 不重写：旧产物逐字保留（null = 停止/回退本机凭证，目录留待终态清理）。
+    expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toBe(
+      '{"OPENAI_API_KEY":"sk-keep-me"}',
+    );
+    expect(infoSpy.mock.calls.some((c) => c[0] === '[daemon.hot_switch_rewrite]')).toBe(false);
+  });
+
+  it('markPendingSwitch 抛（session 不存在/迟到）→ 既有 warn 丢弃路径零回归，零重写', async () => {
+    const sm = createMockSessionManager(() => {
+      throw new Error('SessionNotFoundError: not in store');
+    });
+    const built = buildDaemon({ sessionManager: sm });
+    daemons.push(built.daemon);
+    await built.daemon.start();
+    await waitForWsInit(built.captured);
+    built.captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: codexSwitchConfig() },
+    } as DaemonMessage);
+    await flushMicro();
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(sm.markPendingSwitch).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(stubbedRoot(), 'codex'))).toBe(false);
+    expect(infoSpy.mock.calls.some((c) => c[0] === '[daemon.hot_switch_rewrite]')).toBe(false);
+  });
+
+  it('会话终态（ended，store 仍在但 status 非活跃）→ 不重写（防死会话重建目录孤儿）', async () => {
+    const sm = createMockSessionManager(undefined, (sid) => ({
+      ...activeState(sid),
+      status: 'ended',
+    }));
+    const built = buildDaemon({ sessionManager: sm });
+    daemons.push(built.daemon);
+    await built.daemon.start();
+    await waitForWsInit(built.captured);
+    built.captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: codexSwitchConfig() },
+    } as DaemonMessage);
+    await flushMicro();
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(existsSync(join(stubbedRoot(), 'codex'))).toBe(false);
+    expect(infoSpy.mock.calls.some((c) => c[0] === '[daemon.hot_switch_rewrite]')).toBe(false);
   });
 });

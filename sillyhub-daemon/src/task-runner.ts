@@ -982,6 +982,20 @@ export class TaskRunner {
       if (fileMcpTmpPath) {
         await rm(fileMcpTmpPath, { force: true }).catch(() => {});
       }
+      // task-04（2026-09-10-multi-provider-injection / FR-03 / D-011）：批任务收尾
+      // 删除 per-session provider 文件目录（<root>/codex/<leaseId>/ 与 <root>/pi/
+      // <leaseId>/——目录段=leaseId，与 task-03 spawn 前创建对偶；凭证生命周期
+      // 收敛为单 run，同 fileMcpTmpPath 模式）。尽力语义：force 容忍零 provider
+      // 任务（目录从未创建）；失败仅 warn 吞——此处已过 _finish 汇总，任何异常
+      // 都不得改写 TaskResult / 阻断终态回执；残留由 daemon 启动孤儿清扫兜底。
+      for (const kindDir of [
+        join(daemonStateDir(), 'codex', leaseId),
+        join(daemonStateDir(), 'pi', leaseId),
+      ]) {
+        await rm(kindDir, { recursive: true, force: true }).catch((e) => {
+          console.warn('task_runner: provider_file_dir_cleanup_failed', leaseId, kindDir, e);
+        });
+      }
     }
   }
 

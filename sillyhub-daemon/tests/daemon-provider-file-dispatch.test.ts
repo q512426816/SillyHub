@@ -9,6 +9,8 @@
 //   2. batch 接线（TaskRunner.runLease + mock spawn）：codex/pi provider_config →
 //      spawn opts.env 注入 per-session CODEX_HOME / PI_CODING_AGENT_DIR（目录段 =
 //      leaseId）+ 文件落盘；IO 失败 → 跳 env 仍 spawn 仍完成；
+//      （task-04 起 runLease 终态 finally 删 per-session 目录——文件断言移入
+//      spawn 窗口内做，终态删除断言归 tests/daemon-provider-session-dir-lifecycle.test.ts）
 //   3. interactive 接线（Daemon + ws TASK_AVAILABLE 驱动 _startInteractiveSession，
 //      模式照搬 daemon-budget-wiring / daemon-interactive-codex）：codex 会话
 //      SessionManager.create env.CODEX_HOME 指向 per-session 目录（段 = agent_sessions.id）；
@@ -335,18 +337,21 @@ describe('batch 接线：runLease → per-session 写盘 + spawn env 注入（�
       makeCred() as never,
     );
 
+    const codexHome = join(stubbedRoot(), 'codex', 'lease-pfd');
     const p = runner.runLease(makeLease({ provider_config: codexAnthropicConfig() }));
     await waitForSpawn();
+    // task-04（D-011 收尾）：文件断言移入 spawn 窗口——runLease 终态 finally 会删
+    // per-session 目录（终态后 existsSync 恒 false，生命周期断言见
+    // daemon-provider-session-dir-lifecycle.test.ts）。
+    expect(existsSync(join(codexHome, 'auth.json'))).toBe(true);
+    expect(existsSync(join(codexHome, 'config.toml'))).toBe(true);
     child._emitExit(0);
     const result = await p;
 
     const spawnCall = vi.mocked(spawn).mock.calls[0]!;
     const opts = spawnCall[2] as { env: NodeJS.ProcessEnv };
-    const codexHome = join(stubbedRoot(), 'codex', 'lease-pfd');
     expect(opts.env['CODEX_HOME']).toBe(codexHome);
     expect(opts.env['PI_CODING_AGENT_DIR']).toBeUndefined();
-    expect(existsSync(join(codexHome, 'auth.json'))).toBe(true);
-    expect(existsSync(join(codexHome, 'config.toml'))).toBe(true);
     // 失败语义：写盘失败跳 env 才跳 env——本例写盘成功，任务照常完成。
     expect(result.success).toBe(true);
     // kind 守卫（Grill P2）：codex kind 不调 applyClaudeSettings。
@@ -362,19 +367,20 @@ describe('batch 接线：runLease → per-session 写盘 + spawn env 注入（�
       makeCred() as never,
     );
 
+    const piDir = join(stubbedRoot(), 'pi', 'lease-pfd');
     const p = runner.runLease(makeLease({ provider_config: piCustomConfig() }));
     await waitForSpawn();
+    // task-04（D-011 收尾）：同上——文件断言移入 spawn 窗口（终态 finally 删目录）。
+    expect(existsSync(join(piDir, 'auth.json'))).toBe(true);
+    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
+    expect(existsSync(join(piDir, 'settings.json'))).toBe(true);
     child._emitExit(0);
     await p;
 
     const spawnCall = vi.mocked(spawn).mock.calls[0]!;
     const opts = spawnCall[2] as { env: NodeJS.ProcessEnv };
-    const piDir = join(stubbedRoot(), 'pi', 'lease-pfd');
     expect(opts.env['PI_CODING_AGENT_DIR']).toBe(piDir);
     expect(opts.env['CODEX_HOME']).toBeUndefined();
-    expect(existsSync(join(piDir, 'auth.json'))).toBe(true);
-    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
-    expect(existsSync(join(piDir, 'settings.json'))).toBe(true);
     expect(applyClaudeSettings).not.toHaveBeenCalled();
   });
 
