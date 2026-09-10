@@ -19,6 +19,8 @@ export async function fetchMe(): Promise<MeResponse> {
       me.user.display_name ?? me.user.email ?? me.user.username ?? "",
     is_platform_admin: me.user.is_platform_admin,
     permissions: me.permissions ?? [],
+    // 头像（2026-09-10-account-avatar-upload）：UserRead.avatar 本就可空可选，原样透传。
+    avatar: me.user.avatar,
   });
   return me;
 }
@@ -73,6 +75,24 @@ export async function changePassword(
     method: "POST",
     json: { old_password: oldPassword, new_password: newPassword },
   });
+}
+
+/**
+ * 用户自助更新头像（PATCH /api/auth/me/avatar，2026-09-10-account-avatar-upload）。
+ *
+ * 前端契约：avatar 传新 URL（设置）或 null（清除）。后端 body 三态语义为
+ * 值=设置、空串 ''=清除置 NULL、null/缺省=不改——因此清除时映射为空串下发，
+ * 发字面 null 会被后端当「不改」静默忽略。
+ *
+ * 成功后重跑 fetchMe() 写回 store：PATCH 响应是 snake_case 的 UserRead，禁止
+ * 直接 setUser——复用 fetchMe 既有的 snake→camel 降级合并，防映射逻辑双份漂移。
+ */
+export async function updateMyAvatar(avatar: string | null): Promise<void> {
+  await apiFetch<void>("/api/auth/me/avatar", {
+    method: "PATCH",
+    json: { avatar: avatar ?? "" },
+  });
+  await fetchMe();
 }
 
 // 点按式人机确认(登录爆破防护;原拖拉滑块已下线)。类型复用 OpenAPI 生成类型
