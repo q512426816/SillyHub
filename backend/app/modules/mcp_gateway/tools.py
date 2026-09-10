@@ -1028,17 +1028,28 @@ async def get_daemon_status(
       仍显示 online（假在线窗口），``ws_connected`` 才是「此刻能收任务」的最强
       信号。两者都在才算真可派发。
     - ``heartbeat_age_seconds``：最近心跳距今秒数（调用方据此自判新鲜度）。
+    - ``providers``（task-06 / 2026-09-10-review-dispatch-platform-fixes /
+      FR-04）：daemon 下 ``[{provider, status, version}]`` 清单——对 bindings 涉及
+      的 daemon_id 集合一条批量 ``in`` 查询按 daemon 分组，**只聚合
+      ``status=='online'`` 的 runtime 行**（version 可 None）。
+    - ``default_agent`` / ``effective_agent``（task-06 / D-003@v1）：前者为
+      workspace 配置原值透传（可 None）；后者 = 非空 ``default_agent`` 即它，
+      否则取 ``daemons`` 返回序首个 online 项 ``providers[0].provider``（该
+      online 项无 provider 即 None）——「调用方可判」信号**非权威解析**，
+      顺序 = bindings 返回序（无额外 ORDER BY），权威以派发时 placement
+      实算为准。
 
     返回 ``{workspace_id, daemon_online, daemon_name, stale_threshold_seconds,
-    daemons:[{daemon_id, daemon_name, user_id, shared, status, last_heartbeat_at,
-    heartbeat_age_seconds, ws_connected, online}]}``。无任何 binding →
+    default_agent, effective_agent, daemons:[{daemon_id, daemon_name, user_id,
+    shared, status, last_heartbeat_at, heartbeat_age_seconds, ws_connected,
+    online, providers:[{provider, status, version}]}]}``。无任何 binding →
     ``daemon_online=False`` / ``daemons=[]``（此时派发必失败
     ``no_online_daemon``）。``workspace_id`` 由 middleware 注入，不进 inputSchema。
     """
     auth = _auth_from_ctx(ctx)
     require_mcp_scope(auth, MCP_SCOPE_READ)
 
-    from app.modules.daemon.model import DaemonInstance
+    from app.modules.daemon.model import DaemonInstance, DaemonRuntime
     from app.modules.daemon.runtime.service import DEFAULT_RUNTIME_STALE_SECONDS
     from app.modules.daemon.ws_hub import get_daemon_ws_hub
     from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
@@ -1064,8 +1075,39 @@ async def get_daemon_status(
             .scalars()
             .all()
         )
+        # task-06（FR-04 / D-003@v1）：每 daemon 的 online provider 清单——一条批量
+        # in 查询覆盖 bindings 涉及的 daemon_id 集合（不进 per-binding 循环），按
+        # daemon 分组挂到各 entry（providers[0] 即 effective_agent 回退来源）。
+        runtime_rows = (
+            (
+                await session.execute(
+                    select(DaemonRuntime).where(
+                        DaemonRuntime.daemon_instance_id.in_({b.daemon_id for b in bindings}),
+                        DaemonRuntime.status == "online",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        providers_by_daemon: dict[uuid.UUID, list[dict[str, object]]] = {}
+        for runtime in runtime_rows:
+            if runtime.daemon_instance_id is None:
+                continue
+            providers_by_daemon.setdefault(runtime.daemon_instance_id, []).append(
+                {
+                    "provider": runtime.provider,
+                    "status": runtime.status,
+                    "version": runtime.version,
+                }
+            )
         hub = get_daemon_ws_hub()
         now = datetime.now(UTC)
+        # effective_agent：default_agent 非空即它（空串视同未配置）；否则首个
+        # online 项 providers[0].provider——首个 online 项无 provider 即 None，
+        # 不扫后续（非权威解析，见 docstring 口径）。
+        effective_agent: str | None = workspace.default_agent or None
+        effective_resolved = effective_agent is not None
         entries: list[dict[str, object]] = []
         for binding in bindings:
             daemon = await session.get(DaemonInstance, binding.daemon_id)
@@ -1080,6 +1122,7 @@ async def get_daemon_status(
                 and hb_age is not None
                 and hb_age <= DEFAULT_RUNTIME_STALE_SECONDS
             )
+            entry_providers = providers_by_daemon.get(daemon.id, [])
             entries.append(
                 {
                     "daemon_id": str(daemon.id),
@@ -1091,8 +1134,12 @@ async def get_daemon_status(
                     "heartbeat_age_seconds": hb_age,
                     "ws_connected": hub.is_connected(daemon.id),
                     "online": online,
+                    "providers": entry_providers,
                 }
             )
+            if online and not effective_resolved:
+                effective_resolved = True
+                effective_agent = entry_providers[0]["provider"] if entry_providers else None
         online_entries = [e for e in entries if e["online"]]
         first_name = entries[0]["daemon_name"] if entries else None
         return {
@@ -1100,6 +1147,8 @@ async def get_daemon_status(
             "daemon_online": bool(online_entries),
             "daemon_name": (online_entries[0]["daemon_name"] if online_entries else first_name),
             "stale_threshold_seconds": DEFAULT_RUNTIME_STALE_SECONDS,
+            "default_agent": workspace.default_agent,
+            "effective_agent": effective_agent,
             "daemons": entries,
         }
 

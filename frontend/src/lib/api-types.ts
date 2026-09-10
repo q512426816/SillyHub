@@ -13258,6 +13258,12 @@ export interface components {
          *     envelope 变更行六字段投影（``stages``/``readable``/``command`` 不透传，
          *     design §4）；``last_active`` 为 ISO8601 字符串原样透传（不收紧成 datetime——
          *     daemon 侧格式演进不应 422 整条心跳，前端自行解析展示）。
+         *
+         *     ql-20260910-014-6c29：新增可选 ``ql_id``（QUICKLOG 块头编号，如
+         *     ``ql-20260910-014-6c29``）——daemon 侧对 ``quick-*`` 名变更条 best-effort 读
+         *     guard.json 补报，普通变更/读不到 → None。宽松可选（零改写透传语义不变）：
+         *     旧 daemon 不上报不影响心跳落库；前端变更中心快速修复抽屉据此把 ql_id 反查
+         *     成会话名，代入 scope-audit --change quick-<8hex> 命令。
          */
         DaemonHeartbeatSillySpecChange: {
             /** Name */
@@ -13271,6 +13277,8 @@ export interface components {
             /** Last Active */
             last_active?: string | null;
             steps?: components["schemas"]["DaemonHeartbeatSillySpecChangeSteps"] | null;
+            /** Ql Id */
+            ql_id?: string | null;
         };
         /**
          * DaemonHeartbeatSillySpecChangeSteps
@@ -14297,7 +14305,7 @@ export interface components {
             /** Api Key */
             api_key?: string | null;
             /** Auth Field */
-            auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+            auth_field?: string | null;
             /** Api Format */
             api_format?: ("anthropic" | "openai_chat") | null;
         };
@@ -16225,9 +16233,9 @@ export interface components {
             /**
              * Agent Kind
              * @default claude
-             * @constant
+             * @enum {string}
              */
-            agent_kind: "claude";
+            agent_kind: "claude" | "pi";
             /** Base Url */
             base_url?: string | null;
             /** Api Key */
@@ -16241,9 +16249,8 @@ export interface components {
             /**
              * Auth Field
              * @default ANTHROPIC_AUTH_TOKEN
-             * @enum {string}
              */
-            auth_field: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
+            auth_field: string;
             /**
              * Api Format
              * @default anthropic
@@ -16395,7 +16402,7 @@ export interface components {
             /** Website Url */
             website_url?: string | null;
             /** Auth Field */
-            auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+            auth_field?: string | null;
             /** Api Format */
             api_format?: ("anthropic" | "openai_chat") | null;
             /** Model Role Mappings */

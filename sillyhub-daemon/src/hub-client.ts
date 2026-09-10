@@ -2132,11 +2132,18 @@ signal: AbortSignal.timeout(SPEC_BUNDLE_TIMEOUT_MS),
    * worker_done_at, all_workers_done, orchestrator_notified }``。非 2xx 抛
    * HubHttpError（迟到 mission 终态 409 / 非分身会话 422 等，由 mcp-server
    * ``errorContent`` 转结构化回执）；网络/超时透传 fetch 原始异常（同既有方法）。
+   *
+   * 2026-09-10-review-dispatch-platform-fixes task-02（FR-01）：第 4 参
+   * ``opts.sessionId`` ——**一次性** X-Session-Id 覆盖（daemon 代报形态：daemon
+   * 主 hubClient 无实例级会话头，onTurnResult mission_worker 兜底代报分身
+   * worker_done 时以分身会话身份单跳传递；存在时覆盖实例级 ``auth.sessionId``
+   * 同名头，空串/缺省不覆盖——未传 opts 行为与改前逐字一致，design §5.1）。
    */
   async workerDone(
     workspaceId: string | undefined,
     missionId: string | undefined,
     body: { summary: string },
+    opts?: { sessionId?: string },
   ): Promise<Record<string, unknown>> {
     const payload: Record<string, unknown> = { summary: body.summary };
     // 显式参数作越权校验锚：undefined / 空串不写入 body（守卫风格，零回归）。
@@ -2150,7 +2157,12 @@ signal: AbortSignal.timeout(SPEC_BUNDLE_TIMEOUT_MS),
       'POST',
       this._missionActionPath(workspaceId, missionId, 'worker_done'),
       payload,
-      this._sessionIdHeaders(),
+      {
+        // task-02：实例级会话头打底，opts.sessionId 一次性覆盖同名头（空串/缺省
+        // 不覆盖——未传 opts 时空展开零差，行为与改前逐字一致）。
+        ...(this._sessionIdHeaders() ?? {}),
+        ...(opts?.sessionId ? { [X_SESSION_ID_HEADER]: opts.sessionId } : {}),
+      },
     );
   }
 

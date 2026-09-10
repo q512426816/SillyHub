@@ -938,6 +938,12 @@ export class PiRpcDriver implements InteractiveDriver {
     // ql-20260910-003：本轮精确 API 调用数（message_end 带 usage 的 assistant
     // 消息数——每条对应一次调用）；daemon 优先于 text 事件计数启发式。
     let turnApiCallCount = 0;
+    // 2026-09-10-review-dispatch-platform-fixes task-01（FR-02）：轮终 assistant
+    // 全文缓存（message_end 的 override text 事件逐条覆盖，最后一条胜出）——
+    // success 轮 result 字段数据源（backend result_summary / output_redacted
+    // 与 task-03 mission_worker 代报 summary 两跳消费，design §5.1）。流式
+    // text_delta partial 不带 override 不计入；每轮开始重置 null。
+    let turnFinalText: string | null = null;
     // 本轮 turn 是否已上报 result（防 agent_settled 与进程退出双触发重复）。
     let turnReported = false;
     // consume 是否已最终收敛（进程异常退出 / consume 抛错）。
@@ -1262,8 +1268,15 @@ export class PiRpcDriver implements InteractiveDriver {
         // ql-20260907-002（续）：message_end 的 override 全文（assistant 完整
         // 产出终态，pi-events.ts handleMessageEnd）同为轮内恢复信号——api
         // 重试成功后先于 turn_end 到达，提前清粘滞 error。
+        // 2026-09-10-review-dispatch-platform-fixes task-01：同一分支旁截获轮终
+        // assistant 全文 turnFinalText（success 轮 result 字段数据源；轮内多条
+        // override 逐条覆盖、最后一条胜出——text_delta partial 不带 override
+        // 不计入）。
         if (ev.type === 'text' && ev.override === true) {
           pendingTurnError = null;
+          if (typeof ev.content === 'string') {
+            turnFinalText = ev.content;
+          }
         }
         if (ev.usage) {
           // ql-20260909-028：turn_end 定格值 = 最后一次调用量（与最后一条
@@ -1333,6 +1346,7 @@ export class PiRpcDriver implements InteractiveDriver {
 
         // 本轮状态重置
         pendingTurnError = null;
+        turnFinalText = null;
         turnUsage = undefined;
         turnUsageSum = null;
         turnApiCallCount = 0;
@@ -1380,6 +1394,10 @@ export class PiRpcDriver implements InteractiveDriver {
             subtype: 'success',
             is_error: false,
             ...(h.sessionId ? { session_id: h.sessionId } : {}),
+            // 2026-09-10-review-dispatch-platform-fixes task-01：轮终 assistant
+            // 全文（轮内出现 override text 才带；error 轮上方已有 result=错误
+            // 信息，不掺全文）。
+            ...(turnFinalText !== null ? { result: turnFinalText } : {}),
             ...(turnUsage ? { usage: turnUsage } : {}),
             ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
             ...(turnApiCallCount > 0 ? { api_request_count: turnApiCallCount } : {}),

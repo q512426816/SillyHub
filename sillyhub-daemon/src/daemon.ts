@@ -162,6 +162,10 @@ import type { PolicyCache } from './policy/runtime-policy.js';
 // task-09（D-007@v2 候选 B）：借用 session 沙箱目录创建（mirror by slug，复用 WorkspaceManager）。
 import { WorkspaceManager } from './workspace.js';
 import type { SessionManager } from './interactive/session-manager.js';
+// 2026-09-10-review-dispatch-platform-fixes task-03（FR-01）：provider 能力单源
+// 查询——onTurnResult mission_worker 兜底代报门控用 caps.mcp===false
+//（pi/codex/cursor 无原生 MCP，无法经 worker_done 工具自报终态产出）。
+import { getProviderCaps } from './interactive/providers.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
 // 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
 // interactive 无 TaskRunner 实例也能直接调用。
@@ -938,6 +942,22 @@ interface ClientLike {
     status: 'ended' | 'failed',
     reason: string,
   ): Promise<unknown>;
+  /**
+   * 2026-09-10-review-dispatch-platform-fixes task-03（FR-01 / D-001@v1）：
+   * mission_worker 分身 worker_done 兜底代报（onTurnResult 成功终态后
+   * fire-and-forget）。可选——真实 HubClient 已实现（task-02 补 opts.sessionId）；
+   * 旧测试 mock 未实现时代报分支跳过（debug 日志，不影响终态上报）。
+   * workspaceId/missionId 恒 undefined：backend 沿 X-Session-Id 定位的分身会话
+   * 爬 parent 链解析归属（header-only 是既有主形态）；opts.sessionId 承载分身
+   * 身份（daemon 主 hubClient 无会话头，一次性 X-Session-Id 覆盖）。
+   * 与 hub-client.ts workerDone 实际签名对齐。
+   */
+  workerDone?(
+    workspaceId: string | undefined,
+    missionId: string | undefined,
+    body: { summary: string },
+    opts?: { sessionId?: string },
+  ): Promise<Record<string, unknown>>;
   /**
    * 2026-08-29-daemon-platform-resilience task-07（design A3）：PERMISSION_REQUEST
    * 的 HTTP 上行兜底（WS 不通时 sendToHub 改走）。可选——真实 HubClient 已实现；
@@ -3929,6 +3949,51 @@ export class Daemon {
       });
     }
 
+    // 2026-09-10-review-dispatch-platform-fixes task-03（FR-01 / D-001@v1，design
+    // §5.1）：mission_worker 分身兜底代报 worker_done。pi/codex/cursor 无原生 MCP
+    //（getProviderCaps(provider).mcp === false），物理上无法经 worker_prompt 约定
+    // 的 worker_done 工具自报，get_worker_result 的 artifacts 恒空——daemon 在终态
+    // 落库（上方 notifyRunResult）之后用轮终 assistant 全文代报，backend
+    // _worker_done_core 沉淀 kind=summary artifact 并在全员收敛后唤醒主控。
+    // 门控依据（三重，缺一不可）：
+    //   - stage==='mission_worker'：主控（orchestrator）/普通会话零打扰；
+    //   - caps.mcp===false：claude（mcp=true）走 worker_prompt 自报路径，daemon
+    //     不代报——_worker_done_core 每调用 INSERT artifact 无去重，双通道会双写；
+    //   - !isError 且 result 为非空白 string：失败轮 / 空产出不代报（防空 summary
+    //     噪声行）。
+    if (
+      state.stage === 'mission_worker' &&
+      getProviderCaps(state.provider).mcp === false &&
+      !isError &&
+      typeof resultMeta.result === 'string' &&
+      resultMeta.result.trim() !== ''
+    ) {
+      const autoDone = this._client.workerDone?.(
+        undefined,
+        undefined,
+        { summary: resultMeta.result },
+        { sessionId },
+      );
+      if (autoDone !== undefined) {
+        // fire-and-forget：不 await（不阻塞 onTurnResult 返回 / 后续 spec 同步）、
+        // 不重试——artifact 是兜底通道，失败时消费方仍有 sillyspec 侧日志兜底。
+        // 409（mission 已收敛的迟到代报）/ 422（非分身会话）/ 网络错误一律 warn
+        // 收敛。多轮会话每轮成功各代报一次（backend worker_done_at 可重复置位取
+        // 最新，消费方按序取末条 summary），daemon 侧无需去重状态。
+        void Promise.resolve(autoDone).catch((err: unknown) => {
+          this._logger.warn('worker_auto_done_failed', {
+            session_id: sessionId,
+            error: String(err),
+          });
+        });
+      } else {
+        // 旧 mock client 未实现 workerDone（可选成员）：跳过代报，终态上报不受影响。
+        this._logger.debug('worker_auto_done_unavailable', {
+          session_id: sessionId,
+        });
+      }
+    }
+
     // task-06（FR-05 / D-002@v1）：scan run 终态额外触发 spec 树回灌（独立于 session end）。
     // scan/stage 跑在长生命周期 interactive session（scan 期 session 永不 end），仅靠
     // onSessionEnd 兜底会导致 scan-docs/knowledge/.runtime 一直不可见；此处终态点立即回灌。
@@ -6350,6 +6415,18 @@ export class Daemon {
       const workspaceId =
         typeof params.workspace_id === 'string' ? params.workspace_id : '';
       return this._sillyspecManager.conflictSnapshot(change, kind, workspaceId);
+    });
+    // ql-20260910-017-2006：单文件变化比对（变更中心点击文件看 diff）——业务全在
+    // SillySpecManager.fileDiff（spawn sillyspec scope-audit --file --json，锚点
+    // 同源解析）；RpcError code 语义化上抛（invalid_params / no_spec_root /
+    // sillyspec_capability_missing 旧版本门 / scope_audit_failed / timeout），
+    // params 归一同上（conflict_snapshot 同款约定）。
+    ws.registerRpcHandler('sillyspec_file_diff', async (params) => {
+      const change = typeof params.change === 'string' ? params.change : '';
+      const file = typeof params.file === 'string' ? params.file : '';
+      const workspaceId =
+        typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      return this._sillyspecManager.fileDiff(change, file, workspaceId);
     });
   }
 

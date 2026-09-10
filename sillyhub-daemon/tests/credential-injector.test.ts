@@ -11,7 +11,8 @@
 //   - 4 角色映射（sonnet/opus/fable/haiku）→ ANTHROPIC_DEFAULT_{ROLE}_MODEL（D-011）
 //   - one_m 后缀 [1m]（X-12）
 //   - extra_env 注入 + 覆盖角色 env
-//   - getInjector 注册表（claude / 未知 / undefined / 空串）
+//   - getInjector 注册表（claude / 未知 / undefined / 空串；pi 注册断言在
+//     credential-injector-pi.test.ts，task-05）
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
@@ -592,9 +593,10 @@ describe('getInjector 注册表', () => {
   });
 
   it('未知 agentKind 返回 undefined（不抛）', () => {
+    // pi 已注册（task-05 / 2026-09-10-review-dispatch-platform-fixes / D-002@v1，
+    // 断言移至 tests/credential-injector-pi.test.ts）
     expect(getInjector('codex')).toBeUndefined();
     expect(getInjector('gemini')).toBeUndefined();
-    expect(getInjector('pi')).toBeUndefined();
     expect(getInjector('unknown-xyz')).toBeUndefined();
   });
 

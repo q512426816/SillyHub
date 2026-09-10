@@ -2,8 +2,9 @@
  * credential-injector —— provider-neutral 凭证注入器（task-08 / Wave3）。
  *
  * 把后端 lease 下发的 ProviderConfig（中性 snake_case 结构）翻译成各 agent 认得的
- * env 字典。第一版只实现 claude（ClaudeCredentialInjector），接口最小化预留 codex /
- * gemini / pi 扩展（D-006 抽象边界，对齐 adapters/index.ts:52 协议抽象风格）。
+ * env 字典。已实现 claude（ClaudeCredentialInjector）与 pi（PiCredentialInjector，
+ * task-05 / 2026-09-10-review-dispatch-platform-fixes / D-002@v1），接口最小化预留
+ * codex / gemini 扩展（D-006 抽象边界，对齐 adapters/index.ts:52 协议抽象风格）。
  *
  * design §7（注入器 TS 块 6 条映射规则）/ §5 架构（spawn-env 第 0 层注入最高优先级）。
  *
@@ -50,7 +51,7 @@ export function _resetDaemonApiKeyForTest(): void {
 /**
  * provider-neutral 凭证注入器接口（D-006 抽象边界，最小化）。
  *
- * 加新 agent（codex / gemini / pi）时：新增 XxxCredentialInjector 实现本接口 +
+ * 加新 agent（codex / gemini）时：新增 XxxCredentialInjector 实现本接口 +
  * 在 getInjector 注册表登记，后端 / lease 协议 / spawn-env 不变（D-006）。
  * 接口不得加 provider 专属字段（task-08 constraints）。
  */
@@ -206,16 +207,58 @@ export class ClaudeCredentialInjector implements CredentialInjector {
 }
 
 /**
+ * pi（pi-coding-agent）专属注入器（agentKind='pi'）。
+ *
+ * task-05（2026-09-10-review-dispatch-platform-fixes / D-002@v1，design §5.2 缺口2）：
+ * pi 执行器独立凭证链——REGISTRY 注册 pi 条目后 spawn-env 第 0 层 getInjector('pi')
+ * 命中，pi worker 的 provider_config 不再被跳过、不用独立 key（与本地 claude 子代理
+ * 配额池物理隔离）。
+ *
+ * v1 边界（pi 实测约定，design §5.2/§3）：
+ *   1. api_key → env[auth_field || 'ANTHROPIC_API_KEY']（凭证走 provider 专属 env，
+ *      如 ZAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY；auth_field 空串视同
+ *      缺省——backend task 放宽 auth_field 为自由 env 名后可能下发空串）。
+ *   2. extra_env → 透传（空串值跳过，复用 assignSkippingEmptyStrings——空占位视为
+ *      未配置，对齐 ql-20260823-007 先例）。
+ *   3. litellm_proxy / api_format 不支持，忽略（pi 不走 hub 代理形态，v1 边界）。
+ *   4. base_url / model / default_fallback_model / model_role_mappings /
+ *      settings_config 一律不映射——pi 不读任何 BASE_URL 类 env（自定义端点需宿主
+ *      ~/.pi/agent/models.json 配置），model 经 --model spawn 旗标不走 env，
+ *      settings_config 是 claude 专属 settings.json 链路。
+ *
+ * toEnv 纯函数（R-02 不泄漏铁律：返回值仅进 spawn env，不入日志 / 序列化）。
+ */
+export class PiCredentialInjector implements CredentialInjector {
+  readonly agentKind = 'pi';
+
+  toEnv(c: ProviderConfig): Record<string, string> {
+    const env: Record<string, string> = {};
+
+    // 1. api_key 非空 → auth_field 指定的 env（缺省/空串 → ANTHROPIC_API_KEY）
+    if (c.api_key) {
+      const authField = c.auth_field || 'ANTHROPIC_API_KEY';
+      env[authField] = c.api_key;
+    }
+
+    // 2. extra_env 透传（空串值跳过，见类头注释 v1 边界 2）
+    assignSkippingEmptyStrings(env, c.extra_env);
+
+    return env;
+  }
+}
+
+/**
  * 注入器注册表（agent_kind → injector 单例）。
  *
- * 第一版只认 claude；未知 agentKind 返回 undefined（task-09 buildSpawnEnv 第 0 层
+ * 已注册 claude / pi；未知 agentKind 返回 undefined（task-09 buildSpawnEnv 第 0 层
  * 据此判跳过，零回归 D-007）。
  *
- * 加 codex 时：新增 CodexCredentialInjector（toEnv → OPENAI_API_KEY 等）+ 在此登记，
+ * 加 codex / gemini 时：新增对应 Injector + 在此登记，
  * 后端表 / lease 协议 / spawn-env 不变（D-006 抽象边界）。
  */
 const REGISTRY: Readonly<Record<string, CredentialInjector>> = Object.freeze({
   claude: new ClaudeCredentialInjector(),
+  pi: new PiCredentialInjector(),
 });
 
 /**

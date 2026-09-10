@@ -7,6 +7,9 @@
  *   2. 编辑模式：initial 预填名称 / base_url / 角色映射；api_key 密码框为空（不明文回显）。
  *   3. 编辑模式 api_key 留空 → onSubmit values.api_key === ""（交给 formToUpdate 决定不进 body）。
  *   4. 角色映射表格 + env 编辑器输入落到 values。
+ *   5. agent_kind=pi（task-07 / D-002@v1）：pi 选项可选且提交透传、认证字段泛化为
+ *      可输入 env 名（ZAI_API_KEY）+ pattern 即时校验拦非法值、claude 路径零回归；
+ *      另经 formToCreate 断言 lib 组装层产出的 POST body（pi/claude 两侧）。
  *
  * 纯组件测，不调真实 API（onSubmit 是 mock）；无 next/dynamic，无需 vi.mock markdown。
  */
@@ -14,7 +17,10 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { LlmProviderForm } from "@/components/llm-providers/llm-provider-form";
-import type { LlmProviderRead } from "@/lib/api/llm-providers";
+import {
+  formToCreate,
+  type LlmProviderRead,
+} from "@/lib/api/llm-providers";
 
 const INITIAL: LlmProviderRead = {
   id: "p-1",
@@ -40,7 +46,7 @@ const INITIAL: LlmProviderRead = {
 };
 
 describe("LlmProviderForm — 新建模式", () => {
-  it("填必填项提交 → onSubmit 收到正确表单值（agent_kind 固定 claude）", async () => {
+  it("填必填项提交 → onSubmit 收到正确表单值（agent_kind 缺省 claude）", async () => {
     const onSubmit = vi.fn();
     render(
       <LlmProviderForm
@@ -77,6 +83,11 @@ describe("LlmProviderForm — 新建模式", () => {
     expect(values.model_role_mappings).toHaveProperty("fable");
     expect(values.model_role_mappings).toHaveProperty("haiku");
     expect(values.extra_env).toEqual({});
+    // lib 组装层零回归（task-07 扩 allowed_paths 后补）：缺省 claude 经 formToCreate
+    // 产出的 POST body agent_kind 仍为 "claude"、auth_field 为缺省两选项之一。
+    const body = formToCreate(values);
+    expect(body.agent_kind).toBe("claude");
+    expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
   });
 
   it("名称或 api_key 未填 → 提交按钮 disabled", () => {
@@ -369,5 +380,140 @@ describe("LlmProviderForm — 字段 ↔ settings_config.env 联动（ql-2026082
       { target: { value: "https://y.example.com" } },
     );
     expect(getJson()).toBe("{ not valid json");
+  });
+});
+
+// ── agent_kind=pi 启用 + 认证字段泛化输入（task-07 / D-002@v1）──────────────
+// design §5.2：pi 凭证行的 auth_field 为任意合法 env 变量名（pattern
+// ^[A-Z][A-Z0-9_]*$，与 backend task-04 同款）；claude 侧两选项下拉与 env 改名
+// 联动零回归。
+describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
+  /** 把 Agent 种类下拉切到 pi（新建缺省 claude → pi）。 */
+  const switchToPi = (): void => {
+    fireEvent.change(screen.getByDisplayValue("Claude Code"), {
+      target: { value: "pi" },
+    });
+  };
+
+  it("pi 选项不再 disabled，切换后提交 values.agent_kind='pi'", async () => {
+    const onSubmit = vi.fn();
+    render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
+    const piOption = kindSelect.querySelector(
+      'option[value="pi"]',
+    ) as HTMLOptionElement;
+    expect(piOption.disabled).toBe(false);
+    expect(piOption.textContent).toBe("Pi"); // 不再带「（即将支持）」后缀
+
+    fireEvent.change(kindSelect, { target: { value: "pi" } });
+    expect(kindSelect.value).toBe("pi");
+
+    fireEvent.change(
+      screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
+      { target: { value: "Pi 独立凭证" } },
+    );
+    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
+      target: { value: "sk-pi-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const values = onSubmit.mock.calls[0]![0]!;
+    expect(values.agent_kind).toBe("pi");
+  });
+
+  it("pi 时认证字段泛化为可输入 env 名，ZAI_API_KEY 随 payload 透传", async () => {
+    const onSubmit = vi.fn();
+    render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    switchToPi();
+    // claude 固定两选项下拉不再渲染
+    expect(
+      screen.queryByDisplayValue("ANTHROPIC_AUTH_TOKEN（默认，中转站常用）"),
+    ).toBeNull();
+
+    const authInput = screen.getByPlaceholderText(/ZAI_API_KEY/) as HTMLInputElement;
+    expect(authInput.value).toBe("ANTHROPIC_AUTH_TOKEN"); // 承接 claude 缺省
+    fireEvent.change(authInput, { target: { value: "ZAI_API_KEY" } });
+
+    fireEvent.change(
+      screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
+      { target: { value: "Pi 独立凭证" } },
+    );
+    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
+      target: { value: "sk-pi-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建供应商" }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const values = onSubmit.mock.calls[0]![0]!;
+    expect(values.agent_kind).toBe("pi");
+    expect(values.auth_field).toBe("ZAI_API_KEY");
+    // lib 组装层（design §6 llm-providers.ts 行，execute 期曾在此吞 pi）：pi 表单经
+    // formToCreate 产出的 POST body agent_kind==='pi' 且 auth_field 为所填 env 名
+    // （backend task-04 已放开 env 名 pattern；createProvider 把该 body 原样 json 透传）。
+    const body = formToCreate(values);
+    expect(body.agent_kind).toBe("pi");
+    expect(body.auth_field).toBe("ZAI_API_KEY");
+  });
+
+  it("pi 非法 env 名（小写 / 含空格）被即时校验拦下且不可提交", () => {
+    const onSubmit = vi.fn();
+    render(<LlmProviderForm mode="create" onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    switchToPi();
+    fireEvent.change(
+      screen.getByPlaceholderText(/Kimi 中转 \/ 公司专用账号/),
+      { target: { value: "Pi 独立凭证" } },
+    );
+    fireEvent.change(screen.getByPlaceholderText("sk-***"), {
+      target: { value: "sk-pi-key" },
+    });
+    // 必填齐 → 提交本可用；认证字段非法才是唯一拦截项
+    expect(screen.getByRole("button", { name: "创建供应商" })).toBeEnabled();
+
+    // 小写开头非法
+    fireEvent.change(screen.getByPlaceholderText(/ZAI_API_KEY/), {
+      target: { value: "zai_api_key" },
+    });
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "创建供应商" })).toBeDisabled();
+
+    // 含空格同样非法（不吞值，用户可见可改）
+    fireEvent.change(screen.getByPlaceholderText(/ZAI_API_KEY/), {
+      target: { value: "ZAI API_KEY" },
+    });
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "创建供应商" })).toBeDisabled();
+
+    // 修正为合法值后恢复可提交
+    fireEvent.change(screen.getByPlaceholderText(/ZAI_API_KEY/), {
+      target: { value: "ZAI_API_KEY" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "创建供应商" })).toBeEnabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("claude 路径零回归：认证字段仍是既有两选项下拉，codex/gemini 仍 disabled 占位", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    // 固定下拉仍在且缺省 ANTHROPIC_AUTH_TOKEN
+    expect(
+      screen.getByDisplayValue("ANTHROPIC_AUTH_TOKEN（默认，中转站常用）"),
+    ).toBeTruthy();
+    // pi 自由输入不渲染
+    expect(screen.queryByPlaceholderText(/ZAI_API_KEY/)).toBeNull();
+
+    const kindSelect = screen.getByDisplayValue("Claude Code") as HTMLSelectElement;
+    expect(
+      (kindSelect.querySelector('option[value="codex"]') as HTMLOptionElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (kindSelect.querySelector('option[value="gemini"]') as HTMLOptionElement)
+        .disabled,
+    ).toBe(true);
   });
 });

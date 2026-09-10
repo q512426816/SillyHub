@@ -462,6 +462,34 @@ async def _make_daemon(
     return daemon_id
 
 
+async def _make_runtime(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    daemon_instance_id: uuid.UUID,
+    provider: str,
+    status: str = "online",
+    version: str | None = None,
+) -> None:
+    """task-06（2026-09-10-review-dispatch-platform-fixes）：daemon 下挂一条 runtime 行。
+
+    DaemonRuntime 一行 = 某 daemon 实体下的一种 provider（model.py:200）；
+    get_daemon_status 的 ``providers`` 聚合只收 ``status=='online'`` 的行。
+    """
+    from app.modules.daemon.model import DaemonRuntime
+
+    session.add(
+        DaemonRuntime(
+            user_id=user_id,
+            daemon_instance_id=daemon_instance_id,
+            provider=provider,
+            status=status,
+            version=version,
+        )
+    )
+    await session.commit()
+
+
 @pytest.mark.asyncio
 async def test_get_daemon_status_registered_without_workspace_id() -> None:
     registered = {t.name: t for t in await mcp.list_tools()}
@@ -483,6 +511,9 @@ async def test_get_daemon_status_no_bindings_reports_offline(db_session: AsyncSe
     assert result["daemon_online"] is False
     assert result["daemons"] == []
     assert result["daemon_name"] is None
+    # task-06（FR-04 / D-003@v1）：无 binding → 无 daemon 也无 provider 可判。
+    assert result["default_agent"] is None
+    assert result["effective_agent"] is None
 
 
 @pytest.mark.asyncio
@@ -511,6 +542,11 @@ async def test_get_daemon_status_online_binding_aggregates_true(
     assert entry["ws_connected"] is True
     assert entry["status"] == "online"
     assert entry["heartbeat_age_seconds"] is not None and entry["heartbeat_age_seconds"] <= 45
+    # task-06 纯增量键：default_agent 原值透传（未配置 None）；daemon 在线但无
+    # runtime 行 → providers 空、effective_agent 无 provider 可判回 None。
+    assert result["default_agent"] is None
+    assert entry["providers"] == []
+    assert result["effective_agent"] is None
 
 
 @pytest.mark.asyncio
@@ -541,6 +577,10 @@ async def test_get_daemon_status_stale_or_offline_not_online(db_session: AsyncSe
     assert all(e["online"] is False for e in result["daemons"])
     # 明细仍透出（调用方可看 status / heartbeat_age 自判）。
     assert {e["status"] for e in result["daemons"]} == {"online", "offline"}
+    # task-06 纯增量键：无 online 项 → effective_agent None（default_agent 未配置）。
+    assert result["default_agent"] is None
+    assert result["effective_agent"] is None
+    assert all(e["providers"] == [] for e in result["daemons"])
 
 
 @pytest.mark.asyncio
@@ -554,6 +594,156 @@ async def test_get_daemon_status_rejects_without_read_scope(db_session: AsyncSes
 
     with pytest.raises(PermissionDenied):
         await tools.get_daemon_status(ctx=ctx)
+
+
+# ── get_daemon_status task-06 新键：default_agent / effective_agent / providers ─
+#
+# change 2026-09-10-review-dispatch-platform-fixes（FR-04 / D-003@v1）：派发前一次
+# 查询即可判「会用哪个执行器、哪些机器在线」。三键口径见 tools.py docstring——
+# providers 仅聚合 online runtime；effective_agent 是「调用方可判」信号非权威解析
+# （权威以派发时 placement 实算为准），顺序 = daemons 返回序（无额外 ORDER BY）。
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_default_agent_set_passthrough(
+    db_session: AsyncSession,
+) -> None:
+    """workspace.default_agent 已设：原值透传，effective_agent 直取它（不回退）。"""
+    ws = await _make_workspace(db_session)
+    ws.default_agent = "pi"
+    user = await _make_user(db_session)
+    daemon_id = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon_id)
+    # 即便首个 online provider 是 claude，default_agent 已设即直传（口径：非空即它）。
+    await _make_runtime(
+        db_session, user_id=user.id, daemon_instance_id=daemon_id, provider="claude"
+    )
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["default_agent"] == "pi"
+    assert result["effective_agent"] == "pi"
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_effective_agent_first_online_provider(
+    db_session: AsyncSession,
+) -> None:
+    """default_agent 为空：effective_agent 取返回序首个 online 项的首个 provider。
+
+    两台 daemon 都 online：首个绑定（SQLite rowid 序 = 插入序）挂 pi 在前，
+    effective_agent 必须是 pi 而非第二台的 claude——固化「首个 online 项」口径。
+    """
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    daemon1 = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_runtime(db_session, user_id=user.id, daemon_instance_id=daemon1, provider="pi")
+    await _make_runtime(db_session, user_id=user.id, daemon_instance_id=daemon1, provider="claude")
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon1)
+
+    user2 = await _make_user(db_session)
+    daemon2 = await _make_daemon(db_session, user_id=user2.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_runtime(db_session, user_id=user2.id, daemon_instance_id=daemon2, provider="claude")
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user2.id, daemon_id=daemon2)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["default_agent"] is None
+    assert result["effective_agent"] == "pi"
+    # 首个 online 项两 provider 都透出（providers[0] 即 effective 来源）。
+    first_entry = result["daemons"][0]
+    assert [p["provider"] for p in first_entry["providers"]] == ["pi", "claude"]
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_providers_grouped_and_online_only(
+    db_session: AsyncSession,
+) -> None:
+    """providers 按 daemon 分组、只含 online runtime；version 透传（可 None）。
+
+    daemon1 挂 pi(online)+codex(offline)：offline 被过滤；daemon2 挂
+    claude(online, version None)：跨 daemon 不串组。
+    """
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    daemon1 = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_runtime(
+        db_session,
+        user_id=user.id,
+        daemon_instance_id=daemon1,
+        provider="pi",
+        version="1.42.0",
+    )
+    await _make_runtime(
+        db_session,
+        user_id=user.id,
+        daemon_instance_id=daemon1,
+        provider="codex",
+        status="offline",
+        version="0.9.0",
+    )
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon1)
+
+    user2 = await _make_user(db_session)
+    daemon2 = await _make_daemon(db_session, user_id=user2.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_runtime(db_session, user_id=user2.id, daemon_instance_id=daemon2, provider="claude")
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user2.id, daemon_id=daemon2)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    entries = {e["daemon_id"]: e for e in result["daemons"]}
+    entry1 = entries[str(daemon1)]
+    entry2 = entries[str(daemon2)]
+    # 分组正确：各 daemon 只含自己的 runtime；offline codex 被过滤；元素三键齐全。
+    assert [p["provider"] for p in entry1["providers"]] == ["pi"]
+    assert entry1["providers"][0]["status"] == "online"
+    assert entry1["providers"][0]["version"] == "1.42.0"
+    assert [p["provider"] for p in entry2["providers"]] == ["claude"]
+    assert entry2["providers"][0]["version"] is None
+    assert set(entry1["providers"][0]) == {"provider", "status", "version"}
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_online_daemon_without_online_runtimes(
+    db_session: AsyncSession,
+) -> None:
+    """daemon 实体 online 但无 online runtime：providers 空、effective_agent None。
+
+    固化口径（task-06 acceptance）：effective_agent 取「首个 online 项 providers[0]
+    的 provider」——该 online 项 providers 为空即 None（不扫后续 online 项，
+    非权威解析见 docstring）。
+    """
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    daemon_id = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    # runtime 行 status=offline：daemon 实体 online 但无可用 provider。
+    await _make_runtime(
+        db_session, user_id=user.id, daemon_instance_id=daemon_id, provider="pi", status="offline"
+    )
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon_id)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["daemons"][0]["online"] is True
+    assert result["daemons"][0]["providers"] == []
+    assert result["default_agent"] is None
+    assert result["effective_agent"] is None
 
 
 # ── no-creator 报错（spike P1-4）：文案必须自带修复动作 ────────────────────────

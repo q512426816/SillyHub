@@ -30,11 +30,16 @@ export interface LlmProviderRoleMapping {
   one_m?: boolean;
 }
 
-/** 认证环境变量名（D-010）；决定 api_key 写入 ANTHROPIC_AUTH_TOKEN 还是 ANTHROPIC_API_KEY。 */
-export type LlmProviderAuthField = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
+/**
+ * 认证环境变量名（D-010）。2026-09-10-review-dispatch-platform-fixes task-07 扩：
+ * backend task-04 已把 auth_field 泛化为 env 名 pattern ^[A-Z][A-Z0-9_]*$（pi 凭证
+ * 可配任意合法 env 名，如 ZAI_API_KEY），本别名随之放宽为 string——claude 旧双字面量
+ * （ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY）为其天然子集，两选项下拉行为不变。
+ */
+export type LlmProviderAuthField = string;
 
-/** 第一版固定 claude（D-006 预留 codex/gemini/pi）。 */
-export type LlmProviderAgentKind = "claude";
+/** agent 种类（D-006 预留 codex/gemini）；task-07 / D-002@v1 放开 pi。 */
+export type LlmProviderAgentKind = "claude" | "pi";
 
 /**
  * API 协议格式（2026-08-08-llm-provider-openai-format / D-001@v1）。
@@ -429,7 +434,7 @@ export function cleanSettingsConfig(
 export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
   return {
     name: v.name.trim(),
-    agent_kind: "claude",
+    agent_kind: v.agent_kind,
     api_format: v.api_format,
     base_url: clean(v.base_url) ?? null,
     api_key: clean(v.api_key) ?? null,

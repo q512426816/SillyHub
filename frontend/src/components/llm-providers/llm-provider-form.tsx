@@ -24,11 +24,13 @@ import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch
  * 供应商新建/编辑表单（task-11）。
  *
  * 字段对齐 cc-switch 核心可用集（D-010），无预设选择器（D-003 纯自定义）：
- *   名称 / agent 种类（固定 Claude Code，codex/gemini/pi disabled 占位，D-006）/
+ *   名称 / agent 种类（claude / pi 可选，codex/gemini disabled 占位；pi 于
+ *   review-dispatch task-07 放开，D-002@v1 独立凭证池入口）/
  *   备注 / 官网链接 / base_url / api_key 密码框（编辑时不填=保持原密钥）。
  *
  * 高级项默认折叠：<details> 承载：
- *   认证字段下拉 / 4 行模型角色映射（sonnet/opus/fable/haiku × display/model/one_m）/
+ *   认证字段（claude 两选项下拉；pi 泛化为可输入 env 名 + pattern 即时校验，
+ *   task-07 / D-002@v1）/ 4 行模型角色映射（sonnet/opus/fable/haiku × display/model/one_m）/
  *   默认兜底模型 / 自定义 env 键值编辑器（增删行 → extra_env）。
  *
  * api_key 全程不明文回显：编辑模式密码框留空占位 "保持原密钥不变"。
@@ -52,21 +54,34 @@ const ROLE_ROWS: { key: string; label: string; placeholder: string }[] = [
   { key: "haiku", label: "Haiku", placeholder: "如 kimi-k2（后台子任务也走中转）" },
 ];
 
-/** agent 种类下拉选项；非 claude 一律 disabled 占位（D-006 预留）。 */
+/** agent 种类下拉选项；codex/gemini disabled 占位（D-006），pi 已启用（task-07 / D-002@v1）。 */
 const AGENT_KIND_OPTIONS: {
-  value: LlmProviderAgentKind | string;
+  value: string;
   label: string;
   disabled?: boolean;
 }[] = [
   { value: "claude", label: "Claude Code" },
   { value: "codex", label: "Codex（即将支持）", disabled: true },
   { value: "gemini", label: "Gemini（即将支持）", disabled: true },
-  { value: "pi", label: "Pi（即将支持）", disabled: true },
+  { value: "pi", label: "Pi" },
 ];
 
 const AUTH_FIELD_OPTIONS: { value: LlmProviderAuthField; label: string }[] = [
   { value: "ANTHROPIC_AUTH_TOKEN", label: "ANTHROPIC_AUTH_TOKEN（默认，中转站常用）" },
   { value: "ANTHROPIC_API_KEY", label: "ANTHROPIC_API_KEY（官方 API key）" },
+];
+
+/**
+ * pi 认证字段 env 名 pattern（task-07，与 backend schema task-04 同款）：
+ * 大写字母开头，仅大写字母 / 数字 / 下划线。
+ */
+const AUTH_FIELD_ENV_PATTERN = /^[A-Z][A-Z0-9_]*$/;
+
+/** pi 认证字段输入建议（datalist；design §5.2 示例）。 */
+const PI_AUTH_FIELD_SUGGESTIONS = [
+  "ZAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "OPENROUTER_API_KEY",
 ];
 
 /** API 协议格式下拉选项（D-001@v1）。 */
@@ -200,13 +215,18 @@ export function LlmProviderForm({
   const isEdit = mode === "edit";
 
   const [name, setName] = useState(initial?.name ?? "");
-  const [agentKind] = useState<LlmProviderAgentKind>("claude");
+  // task-07（D-002@v1）：agent 种类可选——编辑态初值取 initial（pi 行回填 pi），
+  // 新建缺省 claude；其余未知值归一为 claude（下拉可选项只有 claude/pi）。
+  const [agentKind, setAgentKind] = useState<LlmProviderAgentKind>(
+    initial?.agent_kind === "pi" ? "pi" : "claude",
+  );
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [websiteUrl, setWebsiteUrl] = useState(initial?.website_url ?? "");
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? "");
   const [apiKey, setApiKey] = useState("");
-  const [authField, setAuthField] = useState<LlmProviderAuthField>(
-    (initial?.auth_field as LlmProviderAuthField) ?? "ANTHROPIC_AUTH_TOKEN",
+  // task-07（D-002@v1）：claude 为两选项下拉值，pi 为自由输入 env 名 → state 放宽为 string。
+  const [authField, setAuthField] = useState<string>(
+    initial?.auth_field ?? "ANTHROPIC_AUTH_TOKEN",
   );
   const [apiFormat, setApiFormat] = useState<LlmProviderApiFormat>(
     initial?.api_format ?? "anthropic",
@@ -347,8 +367,8 @@ export function LlmProviderForm({
       settings_config: settingsConfig,
       // task-12：multimodal 三态随 values 透传（lib 层 PATCH/POST 组装见下）。
       multimodal,
-    } as never;
-    void onSubmit(values as never);
+    };
+    void onSubmit(values);
   };
 
   /**
@@ -375,7 +395,14 @@ export function LlmProviderForm({
         });
         return;
       }
-      req = { base_url: url, api_key: key, auth_field: authField, api_format: apiFormat };
+      // auth_field 为 env 名 string（lib 别名已随 backend task-04 放宽），运行时
+      // 原样透传（pi 时如 ZAI_API_KEY）。
+      req = {
+        base_url: url,
+        api_key: key,
+        auth_field: authField,
+        api_format: apiFormat,
+      };
     }
     setIsFetching(true);
     setNotice({ kind: "loading", msg: "正在获取模型列表…" });
@@ -626,7 +653,24 @@ export function LlmProviderForm({
   // 新建：必须填名称 + api_key；编辑：必须填名称，api_key 可空（保持原密钥）。
   const nameMissing = name.trim() === "";
   const apiKeyMissing = !isEdit && apiKey.trim() === "";
-  const submitDisabled = submitting || nameMissing || apiKeyMissing;
+  /**
+   * pi 认证字段即时校验（task-07）：空 / 不匹配 env 名 pattern → 报错文案 + 拦提交。
+   * 只报错不吞值（constraints：不静默改写用户输入），修复权交给用户；
+   * claude 路径不受影响（两选项下拉值恒合法）。
+   */
+  const piAuthFieldError: string | null = (() => {
+    if (agentKind !== "pi") return null;
+    const v = authField.trim();
+    if (v === "") {
+      return "认证字段不能为空：pi 凭证需要一个 env 变量名（如 ZAI_API_KEY）。";
+    }
+    if (!AUTH_FIELD_ENV_PATTERN.test(v)) {
+      return "认证字段须为合法 env 变量名（大写字母开头，仅含大写字母 / 数字 / 下划线），如 ZAI_API_KEY。";
+    }
+    return null;
+  })();
+  const submitDisabled =
+    submitting || nameMissing || apiKeyMissing || piAuthFieldError !== null;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
@@ -706,8 +750,17 @@ export function LlmProviderForm({
           </label>
           <select
             value={agentKind}
-            onChange={() => {
-              /* 第一版固定 claude，下拉预留其他 agent（D-006）。 */
+            onChange={(e) => {
+              const next = e.target.value as LlmProviderAgentKind;
+              setAgentKind(next);
+              // task-07：切回 claude 时若 auth_field 是 pi 自由输入的 env 名（不在
+              // 两选项下拉内）→ 归一回缺省，避免下拉出现无匹配空值。
+              if (
+                next === "claude" &&
+                !AUTH_FIELD_OPTIONS.some((o) => o.value === authField)
+              ) {
+                setAuthField("ANTHROPIC_AUTH_TOKEN");
+              }
             }}
             className={`mt-0.5 ${inputCls}`}
           >
@@ -717,7 +770,9 @@ export function LlmProviderForm({
               </option>
             ))}
           </select>
-          <p className={hintCls}>第一版固定 Claude Code；下拉预留其他 agent。</p>
+          <p className={hintCls}>
+            Claude Code 走默认凭证链；Pi 使用独立凭证池（认证字段可配专属 env 名）。codex/gemini 预留。
+          </p>
         </div>
       </div>
 
@@ -836,33 +891,74 @@ export function LlmProviderForm({
         </summary>
 
         <div className="mt-3 space-y-3">
-          {apiFormat === "anthropic" && (
-          <>
+          {/* 认证字段（task-07 / D-002@v1）：claude 保持两选项下拉与 env 改名联动
+              （零回归）；pi 泛化为可输入 env 名（datalist 建议 + pattern 即时校验拦
+              提交）。pi 时与 api_format 无关——daemon PiCredentialInjector 恒按
+              auth_field 注 key，故 pi 不折叠进 anthropic 格式块。 */}
+          {(apiFormat === "anthropic" || agentKind === "pi") && (
           <div>
             <label className={lblCls}>认证字段</label>
-            <select
-              value={authField}
-              onChange={(e) => {
-                const next = e.target.value as LlmProviderAuthField;
-                setAuthField(next);
-                // 联动（ql-20260823-007）：认证键改名——env 旧键空占位删除、有值迁移。
-                setSettingsConfigJson((prev) =>
-                  renameSettingsEnvAuthKey(prev, authField, next),
-                );
-              }}
-              className={`mt-0.5 ${inputCls}`}
-            >
-              {AUTH_FIELD_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <p className={hintCls}>
-              选择把 API Key 写入哪个环境变量。中转站一般用 AUTH_TOKEN，官方用 API_KEY。
-            </p>
+            {agentKind === "pi" ? (
+              <>
+                <input
+                  list="pi-auth-field-suggestions"
+                  value={authField}
+                  onChange={(e) => setAuthField(e.target.value)}
+                  className={cn(
+                    "mt-0.5",
+                    inputCls,
+                    piAuthFieldError !== null &&
+                      "border-destructive focus:border-destructive",
+                  )}
+                  placeholder="如 ZAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY"
+                  aria-invalid={piAuthFieldError !== null}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <datalist id="pi-auth-field-suggestions">
+                  {PI_AUTH_FIELD_SUGGESTIONS.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
+                {piAuthFieldError !== null && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {piAuthFieldError}
+                  </p>
+                )}
+                <p className={hintCls}>
+                  pi 凭证注入的 env 变量名（API Key 写进这个变量），须大写字母开头、仅含大写字母 / 数字 / 下划线。
+                </p>
+              </>
+            ) : (
+              <>
+                <select
+                  value={authField}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setAuthField(next);
+                    // 联动（ql-20260823-007）：认证键改名——env 旧键空占位删除、有值迁移。
+                    setSettingsConfigJson((prev) =>
+                      renameSettingsEnvAuthKey(prev, authField, next),
+                    );
+                  }}
+                  className={`mt-0.5 ${inputCls}`}
+                >
+                  {AUTH_FIELD_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <p className={hintCls}>
+                  选择把 API Key 写入哪个环境变量。中转站一般用 AUTH_TOKEN，官方用 API_KEY。
+                </p>
+              </>
+            )}
           </div>
+          )}
 
+          {apiFormat === "anthropic" && (
+          <>
           <div>
             <label className={lblCls}>模型角色映射</label>
             <p className={hintCls}>

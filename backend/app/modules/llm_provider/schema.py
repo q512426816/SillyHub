@@ -14,13 +14,20 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class LlmProviderCreate(BaseModel):
     name: str
-    agent_kind: Literal["claude"] = "claude"
+    # task-04（2026-09-10-review-dispatch-platform-fixes / D-002@v1）：放开 pi——
+    # 平台 worker 走独立配额池凭证（daemon 侧 PiCredentialInjector 消费）。
+    # agent_kind 仅 Create 有该字段，Update/FetchModelsRequest 不新增。
+    agent_kind: Literal["claude", "pi"] = "claude"
     base_url: str | None = None
     api_key: str | None = None
     model: str | None = None
     notes: str | None = None
     website_url: str | None = None
-    auth_field: Literal["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] = "ANTHROPIC_AUTH_TOKEN"
+    # task-04（2026-09-10-review-dispatch-platform-fixes / D-002@v1）：auth_field 由
+    # 双字面量泛化为 env 变量名形状（大写字母开头，仅大写/数字/下划线）——pi 凭证行
+    # 用独立配额池 env 名（如 ZAI_API_KEY / OPENROUTER_API_KEY）；claude 旧双字面量
+    # 天然命中本 pattern，缺省值不变（零回归）。
+    auth_field: str = Field(default="ANTHROPIC_AUTH_TOKEN", pattern=r"^[A-Z][A-Z0-9_]*$")
     api_format: Literal["anthropic", "openai_chat"] = "anthropic"
     model_role_mappings: dict[str, Any] | None = None
     default_fallback_model: str | None = None
@@ -38,7 +45,9 @@ class LlmProviderUpdate(BaseModel):
     model: str | None = None
     notes: str | None = None
     website_url: str | None = None
-    auth_field: Literal["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] | None = None
+    # task-04（2026-09-10-review-dispatch-platform-fixes）：与 Create 同款 env 名
+    # pattern（见 Create.auth_field 注释）；None=不动原值语义不变。
+    auth_field: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
     api_format: Literal["anthropic", "openai_chat"] | None = None
     model_role_mappings: dict[str, Any] | None = None
     default_fallback_model: str | None = None
@@ -101,7 +110,9 @@ class FetchModelsRequest(BaseModel):
     provider_id: uuid.UUID | None = None
     base_url: str | None = None
     api_key: str | None = None  # 仅新建态；明文永不落库（NFR-02）
-    auth_field: Literal["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] | None = None
+    # task-04（2026-09-10-review-dispatch-platform-fixes）：与 Create 同款 env 名
+    # pattern（见 Create.auth_field 注释）；None=缺省语义不变（编辑态从行读）。
+    auth_field: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
     # API 格式（task-02 / FR-01/FR-03）：编辑态从 provider 行读，新建态从请求体读；
     # 缺省 anthropic（NFR-02 零回归）。openai_chat 时 service 忽略 auth_field（D-002@v1）。
     api_format: Literal["anthropic", "openai_chat"] | None = None
