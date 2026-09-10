@@ -19,6 +19,13 @@ KV 弃用不读），七个 KV-seed 用例改 registry-seed（McpServer + bindin
   无活跃 lease / 跨 daemon 归属不匹配 → 404（不泄露存在性）
 * 渲染抛错 → 503（daemon 本地 mcp.json 回落链保持可达；空集 200 与故障 503 分开）
 
+2026-09-10-mcp-central-registry task-07 契约测试追加：
+* golden 整包精确 ``==``（非子集匹配）——seed platform binding（含 encrypted_env
+  解密回填）后无 user_id 调用，两键（不带 workspace_id）/三键（带）两形态
+  逐字段锁死响应形状（AC-4；render 恒输出 env 键，无 env server 也锁 ``"env": {}``）
+* user binding 可见性边界——无 user_id 调用不见 user binding 注入集（旧 daemon
+  语义锁定，user 私有配置须 lease 背书才可见）
+
 2026-08-26-workspace-mcp-edit task-03 扩展（design §7.2）：可选 query
 ``workspace_id`` 追加 workspace 维度——
 * 带 workspace_id 且 specDir/.mcp.json 存在 → ``workspace.mcpServers`` 明文不脱敏
@@ -606,3 +613,147 @@ async def test_workspace_param_invalid_uuid_422(
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert "请求参数校验失败" in body["message"]
+
+
+# ── task-07 契约 golden（2026-09-10-mcp-central-registry，AC-4）───────────────
+#
+# golden 用整包精确 ``==`` 对照（非子集匹配）：锁死顶层键集、mcpServers 键集与
+# 每 server 的 {command, args, env} 值形状——render 恒输出 env 键，无 env 的
+# server 也锁 ``"env": {}``，防换源后响应形状漂移破坏 daemon 注入链（R-01/R-08）。
+# 与 test_returns_unredacted_env 的分工：那边逐字段语义断言（解密回填/不遮蔽），
+# 这里整包形状锁死 + user binding 可见性边界。
+
+
+async def _seed_golden_platform_registry(db_session: AsyncSession) -> None:
+    """golden 共用 seed：两个 platform binding server + whitelist KV。
+
+    github 含 secret env（写路径真 CredentialCipher 抽列加密，渲染解密回填）；
+    time 无 env（锁 render 恒输出 ``"env": {}`` 的形状）。
+    """
+    admin = await _create_user(db_session, label="golden-adm", admin=True)
+    await _seed_platform_server(
+        db_session,
+        admin,
+        name="github",
+        server_config={
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env": {"GITHUB_TOKEN": "ghp_golden_secret", "NORMAL_VAR": "plain-visible"},
+        },
+    )
+    await _seed_platform_server(
+        db_session,
+        admin,
+        name="time",
+        server_config={"command": "uvx", "args": ["mcp-server-time"]},
+    )
+    await _put_setting(db_session, "mcp.whitelist", ["github", "time"])
+
+
+_GOLDEN_PLATFORM_DEFAULT: dict[str, Any] = {
+    "mcpServers": {
+        "github": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env": {"NORMAL_VAR": "plain-visible", "GITHUB_TOKEN": "ghp_golden_secret"},
+        },
+        "time": {"command": "uvx", "args": ["mcp-server-time"], "env": {}},
+    }
+}
+
+
+async def test_golden_no_user_id_two_key_response(
+    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+) -> None:
+    """golden（不带 workspace_id）：seed platform binding（含 encrypted_env 解密
+    回填）后无 user_id 调用 → 两键形态整包逐字段精确对照（AC-4，对照旧版响应
+    形状——顶层无 workspace key）。"""
+    await _seed_golden_platform_registry(db_session)
+
+    resp = await client.get("/api/daemon/mcp/config", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "platform_default": _GOLDEN_PLATFORM_DEFAULT,
+        "whitelist": ["github", "time"],
+    }
+
+
+async def test_golden_no_user_id_with_workspace_three_key_response(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """golden（带 workspace_id）：同 seed + specDir/.mcp.json 存在 → 三键形态
+    整包精确对照（workspace 位 = 文件 mcpServers 原样；platform/whitelist 与
+    两键形态共用同一基线，两形态互为形状锁定）。"""
+    await _seed_golden_platform_registry(db_session)
+    spec_root = tmp_path / "spec-golden"
+    spec_root.mkdir()
+    (spec_root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "db_local": {
+                        "command": "postgres",
+                        "args": ["--port", "5433"],
+                        "env": {"DB_PASSWORD": "plain-golden-secret"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    ws = await _create_workspace_row(db_session, root_path=str(spec_root))
+    await _create_spec_workspace_row(db_session, workspace_id=ws.id, spec_root=str(spec_root))
+
+    resp = await client.get(
+        "/api/daemon/mcp/config", headers=auth_headers, params={"workspace_id": str(ws.id)}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "platform_default": _GOLDEN_PLATFORM_DEFAULT,
+        "whitelist": ["github", "time"],
+        "workspace": {
+            "mcpServers": {
+                "db_local": {
+                    "command": "postgres",
+                    "args": ["--port", "5433"],
+                    "env": {"DB_PASSWORD": "plain-golden-secret"},
+                }
+            }
+        },
+    }
+
+
+async def test_no_user_id_hides_user_binding_servers(
+    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+) -> None:
+    """user binding 可见性边界：无 user_id 调用不见 user binding 注入集——
+    platform 位只含 platform binding server（旧 daemon 语义锁定；user 私有
+    server 及其 secret env 须带 user_id + lease 背书才可见，D-008@v2/D-010）。"""
+    admin = await _create_user(db_session, label="adm", admin=True)
+    await _seed_platform_server(
+        db_session,
+        admin,
+        name="plat-time",
+        server_config={"command": "uvx", "args": ["mcp-server-time"]},
+    )
+    owner = await _create_user(db_session, label="private-owner")
+    await _seed_user_server(
+        db_session,
+        owner,
+        name="user-private-github",
+        server_config={
+            "command": "npx",
+            "args": ["-y", "server-github"],
+            "env": {"API_TOKEN": "user-private-golden-token"},
+        },
+    )
+
+    resp = await client.get("/api/daemon/mcp/config", headers=auth_headers)
+    assert resp.status_code == 200
+    servers = resp.json()["platform_default"]["mcpServers"]
+    # 精确键集：只有 platform binding，user 私有 server 不进无 user_id 视图。
+    assert set(servers.keys()) == {"plat-time"}
+    assert "user-private-github" not in servers

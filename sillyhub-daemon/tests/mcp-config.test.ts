@@ -548,6 +548,29 @@ describe('mcp-config: fetchMcpBundle（task-05 三件套拉取）', () => {
     vi.spyOn(globalThis, 'fetch').mockRestore();
   });
 
+  it('回落②b（task-07 契约）：503（backend render_injection_set 故障态）→ fallbackMcpBundle 本地文件回落', async () => {
+    // backend 渲染故障（render_injection_set 抛错）返 503——非 200 分支走
+    // fallbackMcpBundle：platform → 本地 ~/.sillyhub/daemon/mcp.json、whitelist=[]、
+    // workspace 空，仅 warn 不阻塞会话创建（R-03；空集 200 与故障 503 分开，CC-14）。
+    const logs: { level: string; msg: string; data?: Record<string, unknown> }[] = [];
+    const logger: McpConfigLogger = (level, msg, data) =>
+      logs.push({ level, msg, data });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('MCP 注入集渲染暂不可用', { status: 503 }),
+    );
+    const bundle = await fetchMcpBundle('http://hub:8000', 'tok', 'ws-1', logger);
+    // 回落三态
+    expect(bundle.platform.mcpServers).toBeDefined();
+    expect(bundle.whitelist).toEqual([]);
+    expect(bundle.workspace.mcpServers).toEqual({});
+    // 链路断言：503 状态码记入 mcp_bundle_fetch_failed，且确实走了本地文件回落
+    const failLog = logs.find((l) => l.msg === 'mcp_bundle_fetch_failed');
+    expect(failLog?.data?.status).toBe(503);
+    expect(logs.some((l) => l.msg === 'mcp_bundle_fallback_local')).toBe(true);
+    expect(logs.every((l) => l.level !== 'error')).toBe(true);
+    vi.spyOn(globalThis, 'fetch').mockRestore();
+  });
+
   it('回落③：非法 JSON → 解析失败被吞，同回落三态', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('not-json{{', { status: 200 }),
