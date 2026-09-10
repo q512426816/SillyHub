@@ -68,9 +68,10 @@
   .frame-topbar .dot { width:10px; height:10px; border-radius:50%; }
   .frame-topbar .url { margin-left:12px; background:rgba(255,255,255,.1); color:var(--slate-300); font-size:11px; padding:2px 14px; border-radius:6px; font-family:Consolas,monospace; }
   .frame-body { display:flex; min-height:520px; }
-  .frame-side { width:170px; background:var(--slate-900); color:var(--slate-300); padding:14px 10px; font-size:12px; flex-shrink:0; }
-  .frame-side .brand { color:#fff; font-weight:600; padding:0 10px 12px; font-size:13px; border-bottom:1px solid var(--slate-800); margin-bottom:10px; }
-  .frame-side .nav { padding:7px 10px; border-radius:6px; margin-bottom:2px; display:block; color:var(--slate-400); }
+  .frame-side { width:180px; background:var(--slate-900); color:var(--slate-300); padding:14px 10px; font-size:12px; flex-shrink:0; }
+  .frame-side .brand { color:#fff; font-weight:600; padding:0 10px 12px; font-size:13px; border-bottom:1px solid var(--slate-800); margin-bottom:8px; }
+  .frame-side .group { font-size:10.5px; color:var(--slate-500); padding:8px 10px 4px; letter-spacing:.05em; }
+  .frame-side .nav { padding:6px 10px; border-radius:6px; margin-bottom:2px; display:block; color:var(--slate-400); }
   .frame-side .nav.active { background:rgba(124,58,237,.25); color:#fff; }
   .frame-main { flex:1; padding:18px 22px; background:#fff; }
 
@@ -247,7 +248,7 @@
   <!-- ═══ ③ 管理页 UI 原型 ═══ -->
   <div class="section" id="ui">
     <h2>③ 管理页原型（settings/mcp 升级）<span class="tag-ref">FR-01</span><span class="tag-ref tag-fr">FR-06/07/09</span></h2>
-    <p class="desc">双 tab = 双层可见性；卡片右下开关 = user binding；右上角按钮组 = 六项能力的入口。布局按 FRONTEND_PAGE_STYLE.md（PageHeader + SectionCard，antd 组件形态）。</p>
+    <p class="desc">双 tab = 双层可见性；卡片右下开关 = user binding；右上角按钮组 = 六项能力的入口。侧栏按真实导航结构（menu-permissions.ts）：本页菜单归「智能体」组（URL 为历史路径 /settings/mcp 不变）；「我的供应商」在「配置中心」组。布局按 FRONTEND_PAGE_STYLE.md（PageHeader + SectionCard，antd 组件形态）。</p>
     <div class="frame">
       <div class="frame-topbar">
         <span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span>
@@ -256,12 +257,17 @@
       <div class="frame-body">
         <div class="frame-side">
           <div class="brand">SillyHub</div>
-          <span class="nav">仪表盘</span>
-          <span class="nav">工作区</span>
-          <span class="nav">会话</span>
-          <span class="nav active">设置 · MCP 资产库</span>
-          <span class="nav">设置 · 供应商</span>
-          <span class="nav">设置 · 技能</span>
+          <div class="group">工作区</div>
+          <span class="nav">🏠 工作区首页</span>
+          <div class="group">智能体</div>
+          <span class="nav">💬 智能体会话</span>
+          <span class="nav">🤖 智能体档案</span>
+          <span class="nav">🧩 技能管理</span>
+          <span class="nav active">🔗 MCP 资产库</span>
+          <div class="group">配置中心</div>
+          <span class="nav">☁️ 我的供应商</span>
+          <span class="nav">🔑 API 密钥</span>
+          <span class="nav">🖥 守护进程运行时</span>
         </div>
         <div class="frame-main">
           <div class="ph">

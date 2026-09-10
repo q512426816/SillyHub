@@ -82,7 +82,7 @@ scale: large
 | 修改 | backend/app/modules/daemon/tests/test_mcp_config_endpoint.py（:253 现有 golden） | 契约测试更新：无 user_id 行为 golden 对照 + user_id 路径新用例（Grill CC-16 补漏） |
 | 修改 | backend/app/main.py（router 注册，include_router 处约 :824-840） | 注册 mcp_registry router |
 | 修改 | sillyhub-daemon/src/mcp-config.ts | 仅请求 URL 加 user_id 查询参数（fetch 函数签名扩展）；缓存/合并/预净化逻辑不动（Grill CC-01 修正：此前误述"60s TTL 进程级缓存"，实际缓存在 daemon.ts 会话级 Map） |
-| 修改 | frontend/src/app/(dashboard)/settings/mcp/page.tsx | 升级为管理页（双 tab/搜索标签/binding 开关/导入/诊断，照 FRONTEND_PAGE_STYLE.md） |
+| 修改 | frontend/src/app/(dashboard)/settings/mcp/page.tsx | 升级为管理页（双 tab/搜索标签/binding 开关/导入/诊断，照 FRONTEND_PAGE_STYLE.md）。菜单归「智能体」组（menu-permissions.ts agent section，menuKey=mcp 的 menuLabel"MCP 管理"同步改"MCP 资产库"），URL 保持历史路径 /settings/mcp 不迁移 |
 | 新增 | NEW:frontend/src/components/mcp-registry/（组件目录，按现有页面组织惯例） | 卡片/表单/导入弹窗/诊断面板组件 |
 | 修改 | frontend/src/lib/api-types.ts | `pnpm gen:types` 生成（CLAUDE.md 规则 21） |
 | 修改 | backend/openapi.json | gen:types 联动提交 |
