@@ -1413,6 +1413,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/me/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update My Avatar
+         * @description 用户自助设置头像：body 三态语义（值=设置、''=清除置 NULL、None=不改），返回更新后 UserRead。
+         */
+        patch: operations["update_my_avatar_api_auth_me_avatar_patch"];
+        trace?: never;
+    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -10391,11 +10411,18 @@ export interface paths {
          *     1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
          *     2. 定位 daemon_id：会话 runtime→daemon_instance 优先；workspace 绑定回落；
          *        都无 → 404 中文。
-         *     3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
+         *     3. zcode 分支（2026-09-10-zcode-session-sqlite-read task-04，design Phase 3
+         *        / D-001@v1）：format=zcode-model-io-jsonl 先发 ``read_agent_log_messages``
+         *        RPC（args 与 messages 端点同构、不带 beforeSeq 取最新窗口），status=
+         *        parsed → messages 合成伪 jsonl 全量返回不截断（D-002@v1/D-007@v1，
+         *        ``truncated`` 透传 RPC 窗口语义）；status 非 parsed 或该跳 RPC 抛错
+         *        （含 not_found/method_not_found 老 daemon/离线/超时，捕获吞掉不透传）→
+         *        回落 4 的 read_file 文件灾备。
+         *     4. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
          *        409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
          *        错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
          *        既有 ``DaemonRpcTimeout``（504）。
-         *     4. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
+         *     5. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
          *        ``{content, truncated, size_bytes}``。
          */
         get: operations["read_agent_log_content_api_agent_logs__entry_id__content_get"];
@@ -13010,6 +13037,12 @@ export interface components {
          *     envelope 变更行六字段投影（``stages``/``readable``/``command`` 不透传，
          *     design §4）；``last_active`` 为 ISO8601 字符串原样透传（不收紧成 datetime——
          *     daemon 侧格式演进不应 422 整条心跳，前端自行解析展示）。
+         *
+         *     ql-20260910-014-6c29：新增可选 ``ql_id``（QUICKLOG 块头编号，如
+         *     ``ql-20260910-014-6c29``）——daemon 侧对 ``quick-*`` 名变更条 best-effort 读
+         *     guard.json 补报，普通变更/读不到 → None。宽松可选（零改写透传语义不变）：
+         *     旧 daemon 不上报不影响心跳落库；前端变更中心快速修复抽屉据此把 ql_id 反查
+         *     成会话名，代入 scope-audit --change quick-<8hex> 命令。
          */
         DaemonHeartbeatSillySpecChange: {
             /** Name */
@@ -13023,6 +13056,8 @@ export interface components {
             /** Last Active */
             last_active?: string | null;
             steps?: components["schemas"]["DaemonHeartbeatSillySpecChangeSteps"] | null;
+            /** Ql Id */
+            ql_id?: string | null;
         };
         /**
          * DaemonHeartbeatSillySpecChangeSteps
@@ -23169,6 +23204,21 @@ export interface components {
             count: number;
         };
         /**
+         * UpdateMyAvatarRequest
+         * @description Body of ``PATCH /api/auth/me/avatar``（用户自助设置头像，2026-09-10-account-avatar-upload / D-001@v1）。
+         *
+         *     ``avatar`` 三态语义：有值=设置（文件中心 ``/api/file/{id}`` 或 http(s) 外链）、
+         *     空串 ``''``=清除（端点置 NULL，users.avatar 永不存空串）、``None``/缺省=不改。
+         *     ``max_length=512`` 与 ``users.avatar`` 列宽一致；``extra="forbid"`` 拒绝多余字段。
+         */
+        UpdateMyAvatarRequest: {
+            /**
+             * Avatar
+             * @description 头像 URL（文件中心 /api/file/{id}）；值=设置，''=清除，None=不改
+             */
+            avatar?: string | null;
+        };
+        /**
          * UsageByModelItemRead
          * @description 分模型用量明细项（ChangeUsageRead.by_model 列表行）。
          *
@@ -24553,6 +24603,8 @@ export interface components {
             display_name: string | null;
             /** Employee No */
             employee_no: string | null;
+            /** Avatar */
+            avatar?: string | null;
             /** Status */
             status: string;
             /** Is Platform Admin */
@@ -27041,6 +27093,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_my_avatar_api_auth_me_avatar_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMyAvatarRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__modules__auth__schema__UserRead"];
+                };
             };
             /** @description Validation Error */
             422: {
