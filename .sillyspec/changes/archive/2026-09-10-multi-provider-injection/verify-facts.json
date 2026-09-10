@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-10-multi-provider-injection",
+  "generatedAt": "2026-09-10T17:20:48.227Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-10-multi-provider-injection",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 7,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-10-multi-provider-injection",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-10-multi-provider-injection",
+      "metrics": {
+        "backendEndpoints": 2726,
+        "frontendCalls": 3
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-10-multi-provider-injection",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "真实 CLI 全链冒烟——applyProviderFileSettings 产物对 spike golden 逐字段一致后，真跑 codex-cli 0.147.0 exec 与 pi 0.81.1 各一条，mock 端点分别收到 POST /v1/responses 与 POST /v1/chat/completions 且 Authorization Bearer 命中测试 key（+热切换重写/absent 边界/litellm 产物级断言）",
+      "command": "cd worktree/sillyhub-daemon && pnpm vitest run tests/provider-injection-smoke.integ.test.ts",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/mpi-smoke-verify.log"
+    }
+  ],
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,llm_provider]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-10T17:46:13.729Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

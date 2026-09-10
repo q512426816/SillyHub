@@ -10,6 +10,10 @@
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
 
+### 2026-09-11 · 多供应商注入（codex 完整凭证注入 + pi 自定义端点文件层，cursor spike 排除）
+
+- **multi-provider-injection**（2026-09-10 立项/2026-09-11 归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，7 task/7 Wave 串行，分支 7 提交待合并）：平台供应商热切换能力补齐到 codex/pi——daemon 三层注入栈（env 层零改动 + NEW codex-settings/pi-settings 两写盘器照 claude-settings 模式 + litellm_proxy 通道满足 codex Responses-only）。**spike 前置于 design（24 条 mock 日志）**：codex env 路不通（二进制无 OPENAI_BASE_URL）/CODEX_HOME 写盘与 -c 全链通但 wire_api=chat 已被 0.147 移除/pi 三文件闭环（官方 auth 形状 {"type":"api_key"} 与 ai-toolbox 文档有出入实测修正）/cursor 私有 ConnectRPC 云协议无 BYO 面排除。per-session 目录（D-011 用户裁决，偏离 claude 单共享先例）+ per-form 写盘门槛（D-012 两轮 Grill 修正：openai_chat 形态 payload 无 api_key/base_url）+ pi×openai_chat 三层禁配 + 热切换 byte-equal 重写（D-009 尽力语义）。Grill 三轮（B-1~B-8 全清）+ plan-review/postcheck 多轮收敛。测试：daemon 182/backend 237/frontend 74 相关全绿 + **真实 CLI 冒烟**（真跑 codex 0.147/pi 0.81 打 mock，/v1/responses 与 /v1/chat/completions Bearer 命中）；key 不入 argv/env/日志断言齐。与并行变更 review-dispatch-platform-fixes 分层互补（其 pi env 层先落 main 4726893a5，本变更文件层衔接 D-008）。NOTES：litellm 通道产物级验证（R-02 留档）/daemon 真机 E2E 留部署后。
+
 ### 2026-09-10 · 个人中心头像替换（桌面+移动，五处展示）
 
 - **account-avatar-upload**（2026-09-10，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，11 task/5 Wave，分支 sillyspec/2026-09-10-account-avatar-upload 10 提交待合并）：平台用户接入既有头像体系——users.avatar VARCHAR(512) NULL 存文件中心 URL（/api/file/{id}，owner_type=user_avatar，与 agent/群成员头像同构，D-001）；新端点 PATCH /api/auth/me/avatar 三态（值=设置、''=清除置 NULL 永不存空串、缺省=不改）+ /me 带出；群聊用户成员后端回落解析（member.avatar or user.avatar 群内自定义优先，_to_read 保持同步经 crud 批量预取免 N+1，前端零改动即生效，D-002）；前端桌面 /account「个人资料」卡片 + 移动 /m/account 头像整块可点上传（相机角标/恢复默认/触控 ≥44px）+ TopBar/1:1 会话自己气泡同步展示，复用 GroupMemberAvatarUpload（扩 ownerType prop）与 useAvatarSrc blob 管线；gen:types 同批提交。未设头像全部首字回退老数据零影响；PPM 工作台维持首字（D-003 非目标）。新增后端 23 用例（四态+回落矩阵含 N+1 断言）+ 前端 13 用例，回归 57+300+ 零失败；全量测试/lint/API parity CLI 门通过。NOTES：双主题真机目检留部署后人工；3 条新测试文件 eslint warning（存量水平）；与并行变更迁移合流时需 merge-heads 收敛双 head。

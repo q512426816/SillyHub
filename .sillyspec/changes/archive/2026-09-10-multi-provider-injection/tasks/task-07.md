@@ -14,9 +14,6 @@ allowed_paths:
   - .sillyspec/docs/sillyhub-daemon/modules/
 target_files:
   - NEW:sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
-  - NEW:.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md
-  - NEW:.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
-  - .sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml
 provides:
   - 冒烟证据——mock 端点三条端到端（codex /v1/responses 含 Bearer；pi /v1/chat/completions；litellm 通道一条）+ 写盘器模块文档（CLI 版本基线入档）
 expects_from:
@@ -47,6 +44,7 @@ acceptance:
   - 本机有 CLI 环境下三条冒烟全绿；无 CLI 环境动态跳过不红（CI 不因缺席挂）
   - 写盘产物与 spike golden 逐字段一致；litellm 通道残差如有——文档如实标注降级路径不隐瞒
   - 模块文档两卡落盘且 module-map 登记；双仓 gen:types:check 零漂移
+# 模块文档三件（codex-settings.md/pi-settings.md/_module-map.yaml）按「spec 产物写主仓」规则落主仓（execute review changedFiles 已列），不属 worktree 交付物故不入 target_files；随归档提交。
 verify:
   - cd sillyhub-daemon && pnpm vitest run tests/provider-injection-smoke.integ.test.ts && pnpm gen:types:check
   - cd frontend && pnpm gen:types:check
