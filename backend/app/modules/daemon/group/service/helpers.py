@@ -21,7 +21,7 @@ D-007：``_gsvc`` 为包命名空间别名——被 patch 或定义于 ``__init_
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from pydantic import BaseModel, Field, ValidationError
@@ -696,9 +696,52 @@ async def _get_member(svc, group_id: uuid.UUID, member_id: uuid.UUID) -> AgentGr
     return member
 
 
-def _to_read(svc, group: AgentGroupChat, members: list[AgentGroupMember]) -> GroupChatRead:
+def _apply_user_avatar_fallback(
+    read_members: Sequence[GroupMemberRead],
+    avatar_by_user_id: Mapping[uuid.UUID, str | None],
+) -> None:
+    """user 成员读取体平台头像回落（2026-09-10-account-avatar-upload D-002）。
+
+    语义：``read.avatar = read.avatar or avatar_by_user_id[read.user_id]``——
+    群内自定义优先（NULL/空串都视为未自定义回落平台头像），两者皆空 → None；
+    agent 成员一律不动（回落只针对 user 成员）。映射缺 user 行（硬删退化，
+    FK 正常不可达）按 None 归一。原地修改不返回；``GroupMemberAddRead`` 是
+    ``GroupMemberRead`` 子类，同样适用。
+    """
+    for read in read_members:
+        if read.member_type != "user" or read.user_id is None:
+            continue
+        read.avatar = read.avatar or avatar_by_user_id.get(read.user_id)
+
+
+async def _user_avatar_map(svc, members: Sequence[AgentGroupMember]) -> dict[uuid.UUID, str | None]:
+    """批量预取 user 成员的平台头像映射（``user_id → users.avatar``）。
+
+    ``_to_read`` 为同步函数不能直查 users 表（R-03）——异步调用侧先经本
+    helper 一次 ``select in`` 取映射再传入。无 user 成员时零查询直接空映射。
+    """
+    user_ids = {m.user_id for m in members if m.member_type == "user" and m.user_id is not None}
+    if not user_ids:
+        return {}
+    rows = (
+        await svc._session.execute(select(User.id, User.avatar).where(User.id.in_(user_ids)))
+    ).all()
+    return {user_id: avatar for user_id, avatar in rows}
+
+
+def _to_read(
+    svc,
+    group: AgentGroupChat,
+    members: list[AgentGroupMember],
+    *,
+    avatar_by_user_id: Mapping[uuid.UUID, str | None] | None = None,
+) -> GroupChatRead:
     read = GroupChatRead.model_validate(group)
     read.members = [GroupMemberRead.model_validate(m) for m in members]
+    # user 成员平台头像回落（D-002）：映射由异步调用侧预取传入（_to_read
+    # 保持同步不直查 DB）；缺省 None = 调用方未接回落（旧行为原样透出）。
+    if avatar_by_user_id is not None:
+        _apply_user_avatar_fallback(read.members, avatar_by_user_id)
     # quick 群 P2：置顶快照透出（GroupChatRead.pinned 为 dict 形态，router
     # 层子类读体再收窄为 typed GroupChatPinnedRead）。
     pinned = _group_pinned_snapshot(group)

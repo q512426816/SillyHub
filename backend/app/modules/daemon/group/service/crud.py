@@ -41,6 +41,7 @@ from .helpers import (
     GroupMessageNotFound,
     _build_config_snapshot,
     _build_llm_provider_warnings,
+    _user_avatar_map,
     _user_display_name,
     _validate_display_name,
 )
@@ -365,12 +366,16 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
     await svc._session.commit()
     await svc._session.refresh(group)
     refreshed = await svc._list_members(group.id)
+    # user 成员平台头像回落（D-002）：建群响应成员同样回落（一次 select-in）。
+    avatar_by_user_id = await _user_avatar_map(svc, refreshed)
     # task-06（§5.3 audience）：建群信号带全部用户成员 id（邀请者即时收到
     # 列表刷新——群会话不进其 /sessions 列表，刷新信号是唯一入口）。
     await svc._publish_group_sessions_changed(group, "created")
     return GroupChatCreateRead.model_validate(
         {
-            **svc._to_read(group, refreshed).model_dump(mode="json"),
+            **svc._to_read(group, refreshed, avatar_by_user_id=avatar_by_user_id).model_dump(
+                mode="json"
+            ),
             # quick 群 P1 llm_provider 预检：非阻断提示（不拦截建群）。
             "warnings": _build_llm_provider_warnings(payload.agent_members),
         }
@@ -429,7 +434,11 @@ async def list_groups(svc, user: User, *, archived: bool | None = False) -> list
     by_group: dict[uuid.UUID, list[AgentGroupMember]] = {}
     for row in member_rows:
         by_group.setdefault(row.group_id, []).append(row)
-    return [svc._to_read(g, by_group.get(g.id, [])) for g in groups]
+    # user 成员平台头像回落（D-002）：跨群一次批量预取（免逐群 N+1）。
+    avatar_by_user_id = await _user_avatar_map(svc, member_rows)
+    return [
+        svc._to_read(g, by_group.get(g.id, []), avatar_by_user_id=avatar_by_user_id) for g in groups
+    ]
 
 
 async def get_group(svc, group_id: uuid.UUID, user: User) -> GroupChatRead:
@@ -437,7 +446,7 @@ async def get_group(svc, group_id: uuid.UUID, user: User) -> GroupChatRead:
     group = await svc._get_group(group_id)
     await svc._require_group_member(group, user)
     members = await svc._list_members(group.id)
-    return svc._to_read(group, members)
+    return svc._to_read(group, members, avatar_by_user_id=await _user_avatar_map(svc, members))
 
 
 async def get_member_shadow_running(svc, group_id: uuid.UUID) -> dict[uuid.UUID, bool]:
@@ -492,7 +501,7 @@ async def update_group(
     members = await svc._list_members(group.id)
     # task-06（§5.3 audience）：设置变更信号（群列表标题/开关投影刷新）。
     await svc._publish_group_sessions_changed(group, "status_changed")
-    return svc._to_read(group, members)
+    return svc._to_read(group, members, avatar_by_user_id=await _user_avatar_map(svc, members))
 
 
 async def end_group(svc, group_id: uuid.UUID, user: User) -> GroupChatRead:
@@ -518,7 +527,7 @@ async def end_group(svc, group_id: uuid.UUID, user: User) -> GroupChatRead:
         await svc._session.rollback()
         group = await svc._get_group(group_id)
         members = await svc._list_members(group.id)
-        return svc._to_read(group, members)
+        return svc._to_read(group, members, avatar_by_user_id=await _user_avatar_map(svc, members))
 
     active_members = await svc._list_active_member_rows(group.id)
     ended_member_ids: set[uuid.UUID] = set()
@@ -564,7 +573,7 @@ async def end_group(svc, group_id: uuid.UUID, user: User) -> GroupChatRead:
     # task-06（§5.3 audience / §8 group.ended）：解散信号全员可见（列表把
     # 已解散群折叠/移出）。
     await svc._publish_group_sessions_changed(group, "status_changed")
-    return svc._to_read(group, members)
+    return svc._to_read(group, members, avatar_by_user_id=await _user_avatar_map(svc, members))
 
 
 # ── 归档/取消归档/删除（2026-09-03-group-chat-archive-delete design §5.1/§5.2）──
