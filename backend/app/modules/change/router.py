@@ -61,11 +61,17 @@ from app.modules.change.schema import (
     QuicklogFileItem,
     RejectRequest,
     ReviewResponse,
+    ScopeFileDiffResponse,
     StageProfileUpdate,
     TransitionDispatchResponse,
     TransitionRequest,
     TransitionResponse,
     VerifyGateResponse,
+)
+from app.modules.change.scope_audit import (
+    ScopeFileDiffService,
+    normalize_scope_file_path,
+    validate_scope_change,
 )
 from app.modules.change.service import ChangeService
 from app.modules.change.usage_service import ChangeUsageQueryService
@@ -1391,3 +1397,39 @@ async def list_quicklog_sessions(
         reverse=True,
     )
     return items
+
+
+# ── 单文件变化比对（ql-20260910-017-2006，scope-audit --file 平台入口）────────
+
+
+@router.get("/sillyspec/file-diff", response_model=ScopeFileDiffResponse)
+async def get_change_scope_file_diff(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    change: str = Query(
+        min_length=1,
+        max_length=128,
+        description="变更名或 quick-<8hex> 会话名（scope-audit --change 同参）",
+    ),
+    file: str = Query(
+        min_length=1,
+        max_length=512,
+        description="仓库内文件相对路径（反斜杠自动归一为 POSIX）",
+    ),
+) -> ScopeFileDiffResponse:
+    """单文件内容变化比对：对账同源锚点的 git diff（变更中心点击文件入口）。
+
+    链路：绑定解析（成员自己行）→ daemon RPC ``sillyspec_file_diff`` → 本机
+    ``sillyspec scope-audit --change <c> --file <f> --json``（锚点与行数表格
+    同源：quick=HEAD 未提交窗口 / 归档=快照基点 / 活跃=worktree 锚）。advisory
+    只读。错误族见 change/scope_audit.py（422 升级引导 / 502 离线远端 / 504
+    超时 / 404 未绑定）。
+    """
+    service = ScopeFileDiffService(session)
+    return await service.get_file_diff(
+        workspace_id,
+        user.id,
+        change=validate_scope_change(change),
+        file=normalize_scope_file_path(file),
+    )

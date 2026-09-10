@@ -197,6 +197,13 @@ export interface SillySpecProgressOutcome {
   stdout: string;
   timedOut: boolean;
   errorCode?: string;
+  /**
+   * stderr 原文（ql-20260910-017-2006 补，可选——既有 DI 假 runner 不带不受
+   * 影响）：sillyspec CLI 的用法/错误横幅走 console.error（stderr），能力检测
+   * （旧版本「未知命令: scope-audit」）与失败摘要需要它；progress show 链路
+   * 不消费（JSON 面恒在 stdout）。
+   */
+  stderr?: string;
 }
 
 /**
@@ -249,6 +256,14 @@ export interface SillySpecStatusChangeItem {
   stage_label: string;
   last_active: string;
   steps: { total: number; completed: number };
+  /**
+   * quick 会话映射到的 QUICKLOG 编号（如 ql-20260910-014-6c29）；普通变更/读
+   * 不到为 null 或缺省——collectStatusOnce 后处理对 quick-* 名 best-effort 读
+   * guard.json 填充（同 pending_conflicts[].ql_id 的 _attachPendingConflictQlIds
+   * 先例，buildSillySpecStatusSummary 纯函数不落 fs）。前端快速修复抽屉据此把
+   * ql_id 反查成会话名，代入 scope-audit --change quick-<8hex> 命令。
+   */
+  ql_id?: string | null;
 }
 
 /**
@@ -310,6 +325,37 @@ export interface SillySpecConflictSnapshot {
   /** kind=progress 时非空（envelope 条目原样）；其余 null。 */
   progress: Record<string, unknown> | null;
 }
+
+// ── ql-20260910-017-2006：sillyspec_file_diff 契约类型（变更中心单文件变化比对）──
+
+/**
+ * sillyspec_file_diff RPC result：`scope-audit --change <c> --file <f> --json`
+ * stdout 信封的字段投影（camelCase→snake_case 对齐 backend DTO）+ diff 截断
+ * 护栏。锚点解析与表格行数同源（工具单一源，daemon 零自研）。
+ */
+export interface SillySpecFileDiff {
+  /** 对账目标（普通变更名或 quick-<8hex> 会话名，原样回显）。 */
+  change: string;
+  /** 仓库内文件相对路径（POSIX，原样回显）。 */
+  file: string;
+  /** scope-audit --file 是否成功产出（false 时 note 带原因）。 */
+  ok: boolean;
+  /** 对账模式：'quick' | 'full-flow'。 */
+  mode: string;
+  /** 对账同源锚点（commit 短 hash 或 'HEAD'）；缺省 null。 */
+  base_ref: string | null;
+  /** 锚点人类可读标签（表头同款，如「HEAD 未提交窗口」）；缺省 null。 */
+  anchor_label: string | null;
+  /** git 原生 unified diff 文本；untracked/无改动时 null 或空串（看 note）。 */
+  diff: string | null;
+  /** 三态说明：untracked 新文件提示 / 窗口内无改动 / 失败原因。 */
+  note: string | null;
+  /** diff 超长被截断（256KB 护栏命中）。 */
+  truncated: boolean;
+}
+
+/** sillyspec_file_diff 的 diff 文本截断护栏（字符口径，防大 diff 撑爆 RPC 载荷）。 */
+export const SILLYSPEC_FILE_DIFF_MAX_CHARS = 256 * 1024;
 
 // ── 类型（task-05 心跳/注册接线将复用）─────────────────────────────────────────
 
@@ -788,6 +834,9 @@ export class SillySpecManager {
     // 是纯函数不落 fs，ql_id 在此处后处理填充（quick-* 名读 guard.json，单条失败仅
     // 缺省该条不阻断心跳，design §5 Phase 1 第 3 条）。
     await this._attachPendingConflictQlIds(cwd, summary);
+    // ql-20260910-014-6c29：changes[] 同款补报（quick-* 名读 guard.json）——前端
+    // 快速修复抽屉按 ql_id 反查会话名，代入 scope-audit 命令（变更中心展示）。
+    await this._attachChangeQlIds(cwd, summary);
     this._statusSummary = summary;
     this._statusKnown = true;
     // 工作区级化：具名目标成功 → 该 ws 的 map 槽位更新（③失败缺席保留旧值）。
@@ -1356,6 +1405,94 @@ export class SillySpecManager {
   }
 
   /**
+   * 单文件变化比对（ql-20260910-017-2006，变更中心点击文件看 diff）：spawn 本机
+   * sillyspec CLI 跑 `scope-audit --change <c> --file <f> --json`——锚点解析与
+   * 表格行数同源（quick=HEAD 未提交窗口 / 归档=快照基点 / 活跃=worktree 或
+   * post-apply 锚），daemon 不自研任何锚点/git 逻辑（D-003 同源）。只读不写。
+   *
+   * 能力门（旧 sillyspec 无 scope-audit 子命令）：exit 非零且 stdout+stderr 含
+   * 「未知命令 / unknown command」→ RpcError('sillyspec_capability_missing')
+   * （前端出升级提示）；其余非零 / stdout 非 JSON → RpcError('scope_audit_failed')
+   * 带 exit code 与输出尾段摘要。diff 超 256KB 截断置 truncated（信封其余字段
+   * 原样透传）。
+   *
+   * @throws {RpcError} invalid_params（change/file 空）/ no_spec_root（无已知根）/
+   *   sillyspec_bin_missing（bin 解析失败）/ scope_audit_timeout（执行超时）/
+   *   sillyspec_capability_missing（旧 sillyspec 无 scope-audit）/ scope_audit_failed。
+   */
+  async fileDiff(
+    change: string,
+    filePath: string,
+    workspaceId?: string,
+  ): Promise<SillySpecFileDiff> {
+    if (!change || !filePath) {
+      throw new RpcError('invalid_params', 'change 与 file 均必填（非空字符串）');
+    }
+    const root = this._resolveWorkspaceRoot(workspaceId);
+    if (!root) {
+      throw new RpcError('no_spec_root', workspaceId
+        ? '该工作区尚未被本机认领，请先在该工作区发起一次会话后重试'
+        : '未观察到 workspace 主仓根，无法执行 sillyspec 命令');
+    }
+    const bin = this._resolveSillySpecBin();
+    if (bin === null) {
+      throw new RpcError('sillyspec_bin_missing', '未找到 sillyspec CLI（bin 解析失败），请先安装 sillyspec');
+    }
+    const outcome = await this._execSillySpecCli(
+      bin,
+      ['scope-audit', '--change', change, '--file', filePath, '--json'],
+      root,
+    );
+    if (outcome.timedOut) {
+      throw new RpcError(
+        'scope_audit_timeout',
+        `scope-audit --file 执行超时（${Math.round(this._commandTimeoutMs / 1000)}s）被终止`,
+      );
+    }
+    if (outcome.code === null) {
+      throw new RpcError('scope_audit_failed', `进程启动失败（${outcome.errorCode ?? 'unknown'}）`);
+    }
+    const combined = `${outcome.stdout}\n${outcome.stderr ?? ''}`;
+    if (outcome.code !== 0) {
+      if (/未知命令|unknown command/i.test(combined)) {
+        throw new RpcError(
+          'sillyspec_capability_missing',
+          '本机 sillyspec 版本不支持 scope-audit 命令，请升级 sillyspec 后重试',
+        );
+      }
+      throw new RpcError(
+        'scope_audit_failed',
+        `执行失败（exit ${outcome.code}）${cliOutputSnippet(combined)}`,
+      );
+    }
+    let parsed: unknown;
+    try {
+      const text = outcome.stdout;
+      parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+    } catch {
+      throw new RpcError('scope_audit_failed', `stdout 非法 JSON（旧版本无 --json 面？）${cliOutputSnippet(outcome.stdout)}`);
+    }
+    if (!isRecord(parsed) || typeof parsed.ok !== 'boolean') {
+      throw new RpcError('scope_audit_failed', 'stdout JSON 缺 ok 字段（信封形态不符）');
+    }
+    const asStr = (v: unknown): string | null =>
+      typeof v === 'string' && v !== '' ? v : null;
+    const rawDiff = typeof parsed.diff === 'string' ? parsed.diff : null;
+    const truncated = rawDiff !== null && rawDiff.length > SILLYSPEC_FILE_DIFF_MAX_CHARS;
+    return {
+      change: typeof parsed.change === 'string' ? parsed.change : change,
+      file: typeof parsed.file === 'string' ? parsed.file : filePath,
+      ok: parsed.ok,
+      mode: asStr(parsed.mode) ?? 'full-flow',
+      base_ref: asStr(parsed.baseRef),
+      anchor_label: asStr(parsed.anchorLabel),
+      diff: truncated ? rawDiff!.slice(0, SILLYSPEC_FILE_DIFF_MAX_CHARS) : rawDiff,
+      note: asStr(parsed.note),
+      truncated,
+    };
+  }
+
+  /**
    * 心跳补报后处理（design §5 Phase 1 第 3 条）：对 summary.pending_conflicts 的
    * quick-* 条同步读 guard.json 补 ql_id。best-effort——readQuickSessionQuicklogId
    * 内部全收敛回 null，此处再兜一层 try/catch 保证单条意外（防御注入 fs 异常）仅
@@ -1373,6 +1510,30 @@ export class SillySpecManager {
         entry.ql_id = null;
         this._log('debug', 'sillyspec_conflict_ql_id_read_failed', {
           change: entry.change,
+          error: fmtErrorSnippet(e),
+        });
+      }
+    }
+  }
+
+  /**
+   * 心跳补报后处理（ql-20260910-014-6c29）：对 summary.changes 的 quick-* 条
+   * 同步读 guard.json 补 ql_id——变更中心快速修复抽屉按 ql_id 反查会话名，代入
+   * scope-audit --change quick-<8hex> 命令。best-effort 同 _attachPendingConflictQlIds
+   * ——单条意外（防御注入 fs 异常）仅缺省该条，绝不阻断其余条与整拍心跳快照。
+   */
+  private async _attachChangeQlIds(
+    root: string,
+    summary: SillySpecStatusSummary,
+  ): Promise<void> {
+    for (const entry of summary.changes) {
+      if (!entry.name.startsWith('quick-')) continue;
+      try {
+        entry.ql_id = await readQuickSessionQuicklogId(root, entry.name);
+      } catch (e) {
+        entry.ql_id = null;
+        this._log('debug', 'sillyspec_change_ql_id_read_failed', {
+          change: entry.name,
           error: fmtErrorSnippet(e),
         });
       }
@@ -1924,9 +2085,9 @@ export function runProgressJsonDefault(
           ...process.env,
         },
       },
-      (err, stdout) => {
+      (err, stdout, stderr) => {
         if (err === null) {
-          resolve({ code: 0, stdout: String(stdout ?? ''), timedOut: false });
+          resolve({ code: 0, stdout: String(stdout ?? ''), timedOut: false, stderr: String(stderr ?? '') });
           return;
         }
         const e = err as NodeJS.ErrnoException & { killed?: boolean };
@@ -1935,6 +2096,7 @@ export function runProgressJsonDefault(
           stdout: String(stdout ?? ''),
           timedOut: e.killed === true,
           errorCode: typeof e.code === 'string' ? e.code : undefined,
+          stderr: String(stderr ?? ''),
         });
       },
     );

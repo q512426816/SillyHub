@@ -5869,6 +5869,76 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/sillyspec/file-diff": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Change Scope File Diff",
+        "description": "单文件内容变化比对：对账同源锚点的 git diff（变更中心点击文件入口）。\n\n链路：绑定解析（成员自己行）→ daemon RPC ``sillyspec_file_diff`` → 本机\n``sillyspec scope-audit --change <c> --file <f> --json``（锚点与行数表格\n同源：quick=HEAD 未提交窗口 / 归档=快照基点 / 活跃=worktree 锚）。advisory\n只读。错误族见 change/scope_audit.py（422 升级引导 / 502 离线远端 / 504\n超时 / 404 未绑定）。",
+        "operationId": "get_change_scope_file_diff_api_workspaces__workspace_id__sillyspec_file_diff_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "变更名或 quick-<8hex> 会话名（scope-audit --change 同参）",
+              "title": "Change"
+            },
+            "description": "变更名或 quick-<8hex> 会话名（scope-audit --change 同参）"
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "description": "仓库内文件相对路径（反斜杠自动归一为 POSIX）",
+              "title": "File"
+            },
+            "description": "仓库内文件相对路径（反斜杠自动归一为 POSIX）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeFileDiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/scan-docs": {
       "get": {
         "tags": [
@@ -60423,6 +60493,84 @@
         ],
         "title": "ScheduledMessageRead",
         "description": "定时消息读侧 DTO（POST 201 响应 / GET 列表项，task-03 / FR-04）。\n\n``AgentSessionScheduledMessage`` ORM 行的 from_attributes 直映射——\n``status`` 为 pending / dispatched / cancelled / failed 四态字符串\n（派发成功不删行，dispatched_at / cancelled_at / error_code 审计留档，\n消费方=前端 scheduled-messages-bar 状态 tag 与失败原因展示，task-05）；\n``attachment_ids`` 为落库的 str 列表快照（派发时转回 uuid）。"
+      },
+      "ScopeFileDiffResponse": {
+        "properties": {
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "file": {
+            "type": "string",
+            "title": "File"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "full-flow"
+          },
+          "base_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Ref"
+          },
+          "anchor_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Label"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "change",
+          "file",
+          "ok"
+        ],
+        "title": "ScopeFileDiffResponse",
+        "description": "单文件 unified diff（daemon sillyspec_file_diff RPC 透传投影）。\n\n锚点解析与对账行数同源（sillyspec scope-audit --file --json，工具单一\n源）：``base_ref`` 为 commit 短 hash 或 'HEAD'，``anchor_label`` 为表头\n同款人类可读标签。``diff`` 为 git 原生 unified diff 文本；untracked 新\n文件 / 窗口内无改动时为 null 或空串（看 ``note`` 说明）。\n``truncated``：diff 超 256KB 被 daemon 侧截断。"
       },
       "ScopeWorkspaceStatus": {
         "properties": {

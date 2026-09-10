@@ -115,6 +115,30 @@ export function getChange(workspaceId: string, changeId: string) {
   );
 }
 
+// ── 单文件变化比对（ql-20260910-017-2006，scope-audit --file 平台入口）─────
+
+/** 单文件 diff 响应。对齐后端 schema（components.schemas.ScopeFileDiffResponse）。 */
+export type ScopeFileDiffResponse = components["schemas"]["ScopeFileDiffResponse"];
+
+/**
+ * 单文件内容变化比对 — GET /api/workspaces/{wid}/sillyspec/file-diff
+ *
+ * 对账同源锚点的 git diff（quick=HEAD 未提交窗口 / 归档=快照基点 / 活跃=
+ * worktree 锚，锚点解析单一源在 sillyspec 工具）。change 传变更名或
+ * quick-<8hex> 会话名。错误族：422（daemon/sillyspec 版本过旧升级引导）、
+ * 404（未绑定）、502（离线/远端失败）、504（超时）——经 apiFetch 抛 ApiError。
+ */
+export function getScopeFileDiff(
+  workspaceId: string,
+  change: string,
+  file: string,
+) {
+  const qs = new URLSearchParams({ change, file });
+  return apiFetch<ScopeFileDiffResponse>(
+    `/api/workspaces/${workspaceId}/sillyspec/file-diff?${qs.toString()}`,
+  );
+}
+
 // ── 执行用量统计（2026-08-30-change-center-usage-stats task-06，FR-03/D-005）──
 
 /** 变更完整用量。对齐后端 schema（components.schemas.ChangeUsageRead，gen:types 生成）。 */

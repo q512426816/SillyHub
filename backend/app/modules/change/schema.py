@@ -660,3 +660,27 @@ class QuicklogEntryRead(QuicklogEntryListItem):
     body_sections: dict[str, str] = {}
     raw_block: str | None = None
     truncated: bool = False
+
+
+# ── 单文件变化比对 DTO（ql-20260910-017-2006，端点 /sillyspec/file-diff）─────
+
+
+class ScopeFileDiffResponse(BaseModel):
+    """单文件 unified diff（daemon sillyspec_file_diff RPC 透传投影）。
+
+    锚点解析与对账行数同源（sillyspec scope-audit --file --json，工具单一
+    源）：``base_ref`` 为 commit 短 hash 或 'HEAD'，``anchor_label`` 为表头
+    同款人类可读标签。``diff`` 为 git 原生 unified diff 文本；untracked 新
+    文件 / 窗口内无改动时为 null 或空串（看 ``note`` 说明）。
+    ``truncated``：diff 超 256KB 被 daemon 侧截断。
+    """
+
+    change: str
+    file: str
+    ok: bool
+    mode: str = "full-flow"
+    base_ref: str | None = None
+    anchor_label: str | None = None
+    diff: str | None = None
+    note: str | None = None
+    truncated: bool = False

@@ -2140,6 +2140,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/sillyspec/file-diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Scope File Diff
+         * @description 单文件内容变化比对：对账同源锚点的 git diff（变更中心点击文件入口）。
+         *
+         *     链路：绑定解析（成员自己行）→ daemon RPC ``sillyspec_file_diff`` → 本机
+         *     ``sillyspec scope-audit --change <c> --file <f> --json``（锚点与行数表格
+         *     同源：quick=HEAD 未提交窗口 / 归档=快照基点 / 活跃=worktree 锚）。advisory
+         *     只读。错误族见 change/scope_audit.py（422 升级引导 / 502 离线远端 / 504
+         *     超时 / 404 未绑定）。
+         */
+        get: operations["get_change_scope_file_diff_api_workspaces__workspace_id__sillyspec_file_diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/scan-docs": {
         parameters: {
             query?: never;
@@ -21197,6 +21223,42 @@ export interface components {
             cancelled_at?: string | null;
         };
         /**
+         * ScopeFileDiffResponse
+         * @description 单文件 unified diff（daemon sillyspec_file_diff RPC 透传投影）。
+         *
+         *     锚点解析与对账行数同源（sillyspec scope-audit --file --json，工具单一
+         *     源）：``base_ref`` 为 commit 短 hash 或 'HEAD'，``anchor_label`` 为表头
+         *     同款人类可读标签。``diff`` 为 git 原生 unified diff 文本；untracked 新
+         *     文件 / 窗口内无改动时为 null 或空串（看 ``note`` 说明）。
+         *     ``truncated``：diff 超 256KB 被 daemon 侧截断。
+         */
+        ScopeFileDiffResponse: {
+            /** Change */
+            change: string;
+            /** File */
+            file: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Mode
+             * @default full-flow
+             */
+            mode: string;
+            /** Base Ref */
+            base_ref?: string | null;
+            /** Anchor Label */
+            anchor_label?: string | null;
+            /** Diff */
+            diff?: string | null;
+            /** Note */
+            note?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
          * ScopeWorkspaceStatus
          * @description scope 工作区状态条目（design §7 逐字）。
          *
@@ -28890,6 +28952,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentSessionListItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_scope_file_diff_api_workspaces__workspace_id__sillyspec_file_diff_get: {
+        parameters: {
+            query: {
+                /** @description 变更名或 quick-<8hex> 会话名（scope-audit --change 同参） */
+                change: string;
+                /** @description 仓库内文件相对路径（反斜杠自动归一为 POSIX） */
+                file: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeFileDiffResponse"];
                 };
             };
             /** @description Validation Error */

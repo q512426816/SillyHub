@@ -847,7 +847,18 @@ _STATUS_FULL = {
             "stage_label": "执行",
             "last_active": "2026-09-02T12:50:59+00:00",
             "steps": {"total": 8, "completed": 3},
-        }
+        },
+        # ql-20260910-014-6c29：quick-* 名变更条带 ql_id（daemon best-effort 读
+        # guard.json 补报）；首条保持旧 daemon 形态（不带 ql_id）覆盖缺省路径。
+        {
+            "name": "quick-34a84841",
+            "ghost": False,
+            "current_stage": "quick",
+            "stage_label": "快速任务",
+            "last_active": "2026-09-02T12:50:59+00:00",
+            "steps": {"total": 3, "completed": 1},
+            "ql_id": "ql-20260910-014-6c29",
+        },
     ],
     "pending_conflicts": [
         {
@@ -960,8 +971,8 @@ async def test_machines_view_exposes_sillyspec_status_typed(
     db_session: AsyncSession,
 ) -> None:
     """FR-01：GET /machines items[] 含 sillyspec_status——上报机为嵌套类型化 11 键
-    形态（changes[] 六字段 + steps 投影原样，非裸 dict）；NULL 机（旧 daemon/
-    总览不可用）为 null。"""
+    形态（changes[] 七字段含可选 ql_id + steps 投影原样，非裸 dict）；NULL 机
+    （旧 daemon/总览不可用）为 null。"""
     admin, token = await _seed_user(db_session, name="view-status-admin", is_platform_admin=True)
     await _create_machine(
         db_session,
@@ -987,8 +998,13 @@ async def test_machines_view_exposes_sillyspec_status_typed(
         "stage_label",
         "last_active",
         "steps",
+        "ql_id",
     }
     assert change["steps"] == {"total": 8, "completed": 3}
+    # ql-20260910-014-6c29：旧 daemon 形态条（未上报 ql_id）→ DTO 缺省 None
+    # 补齐；quick-* 条带值原样透传（前端 scope-audit 命令代入数据源）。
+    assert change["ql_id"] is None
+    assert status["changes"][1]["ql_id"] == "ql-20260910-014-6c29"
     assert status["pending_conflicts"][0]["type"] == "spec-tree"
 
     assert items["ss-status-legacy-host"]["sillyspec_status"] is None

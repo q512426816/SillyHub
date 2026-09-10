@@ -28,6 +28,7 @@ import {
 } from "@/components/changes/change-activity-badge";
 import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
 import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
+import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-card";
 import { ApiError } from "@/lib/api";
 import {
   deleteChange,
@@ -413,14 +414,23 @@ export default function ChangeDetailPage({ params }: Props) {
           />
         </main>
 
-        {/* 次线：变更文件 / 关联快速任务 / 会话调试 */}
+        {/* 次线：变更文件 / 关联快速任务 / 会话调试 / 范围对账命令 */}
         <aside className="space-y-3">
-          <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
+          <ChangeFilesCard
+            workspaceId={workspaceId}
+            changeId={changeId}
+            changeKey={change.change_key}
+          />
           <QuicklogLinkedCard
             workspaceId={workspaceId}
             changeKey={change.change_key}
           />
           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
+          {/* ql-20260910-014-6c29：scope-audit 范围对账命令卡（表格版 + --json
+              版可复制；identifier=change_key，已归档变更也可查） */}
+          <ScopeAuditCommandCard
+            target={{ kind: "change", changeKey: change.change_key }}
+          />
         </aside>
       </div>
     </PageContainer>

@@ -7,6 +7,11 @@ import { Drawer, Switch } from "antd";
 
 import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
 import { QuicklogSessionsCard } from "@/components/changes/quicklog-sessions-card";
+import {
+  ScopeAuditCommandCard,
+  useQuickSessionName,
+} from "@/components/changes/scope-audit-command-card";
+import { ScopeFileDiffModal } from "@/components/changes/scope-file-diff-modal";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import { getQuicklogDetail, type QuicklogEntryListItem } from "@/lib/quicklog";
@@ -43,6 +48,14 @@ export function QuicklogDrawer({
   onClose,
 }: QuicklogDrawerProps) {
   const [showRaw, setShowRaw] = useState(false);
+  // ql-20260910-017-2006：文件行点击打开单文件变化比对弹窗（identifier=反查的
+  // quick-<8hex> 会话名；解析不到时行不可点 + 脚注说明）。
+  const [diffFile, setDiffFile] = useState<string | null>(null);
+  const quickName = useQuickSessionName(
+    workspaceId,
+    entry?.ql_id ?? "",
+    Boolean(entry),
+  );
 
   const detailQuery = useQuery({
     queryKey: ["quicklogDetail", workspaceId, entry?.ql_id],
@@ -174,7 +187,7 @@ export function QuicklogDrawer({
                 </p>
               )}
 
-              {/* 文件清单（path + 括注） */}
+              {/* 文件清单（path + 括注）；ql-20260910-017-2006：行点击开文件变化比对 */}
               <section>
                 <h3 className="mb-1 text-xs font-medium text-foreground">
                   变更文件
@@ -182,14 +195,30 @@ export function QuicklogDrawer({
                 {detail.files.length > 0 ? (
                   <ul className="flex flex-col gap-1">
                     {detail.files.map((f) => (
-                      <li
-                        key={f.path}
-                        className="font-mono text-[11px] leading-5 break-all text-foreground"
-                      >
-                        {f.path}
-                        {f.note && (
-                          <span className="ml-1 font-sans text-[11px] text-muted-foreground">
-                            （{f.note}）
+                      <li key={f.path}>
+                        {quickName ? (
+                          <button
+                            type="button"
+                            data-testid={`quicklog-file-diff-${f.path}`}
+                            onClick={() => setDiffFile(f.path)}
+                            title="点击查看该文件的变化比对（对账同源锚点 diff）"
+                            className="w-full rounded-sm px-1 py-0.5 text-left font-mono text-[11px] leading-5 break-all text-foreground transition-colors hover:bg-muted"
+                          >
+                            {f.path}
+                            {f.note && (
+                              <span className="ml-1 font-sans text-[11px] text-muted-foreground">
+                                （{f.note}）
+                              </span>
+                            )}
+                          </button>
+                        ) : (
+                          <span className="block px-1 py-0.5 font-mono text-[11px] leading-5 break-all text-foreground">
+                            {f.path}
+                            {f.note && (
+                              <span className="ml-1 font-sans text-[11px] text-muted-foreground">
+                                （{f.note}）
+                              </span>
+                            )}
                           </span>
                         )}
                       </li>
@@ -197,6 +226,12 @@ export function QuicklogDrawer({
                   </ul>
                 ) : (
                   <p className="text-xs text-muted-foreground">（无）</p>
+                )}
+                {detail.files.length > 0 && !quickName && (
+                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                    未解析到本条的 quick 会话 ID（旧 daemon / 会话已结束），
+                    文件行暂不能点击比对。
+                  </p>
                 )}
               </section>
 
@@ -243,6 +278,13 @@ export function QuicklogDrawer({
                 refKey={entry.ql_id}
               />
 
+              {/* ql-20260910-014-6c29：scope-audit 范围对账命令卡（表格版 + --json
+                  版可复制；identifier=机器快照按 ql_id 反查的 quick-<8hex> 会话名，
+                  查不到回退占位符 + 手动替换提示） */}
+              <ScopeAuditCommandCard
+                target={{ kind: "quick", workspaceId, qlId: entry.ql_id }}
+              />
+
               {detail.truncated && (
                 <p className="text-[11px] text-muted-foreground">
                   原始文件超出读取上限，以上内容为节选。
@@ -252,6 +294,15 @@ export function QuicklogDrawer({
           )}
         </div>
       )}
+
+      {/* ql-20260910-017-2006：单文件变化比对弹窗（change=反查的 quick 会话名） */}
+      <ScopeFileDiffModal
+        open={diffFile !== null && quickName !== null}
+        onClose={() => setDiffFile(null)}
+        workspaceId={workspaceId}
+        change={quickName}
+        filePath={diffFile}
+      />
     </Drawer>
   );
 }

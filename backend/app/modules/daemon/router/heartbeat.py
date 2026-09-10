@@ -85,6 +85,12 @@ class DaemonHeartbeatSillySpecChange(BaseModel):
     envelope 变更行六字段投影（``stages``/``readable``/``command`` 不透传，
     design §4）；``last_active`` 为 ISO8601 字符串原样透传（不收紧成 datetime——
     daemon 侧格式演进不应 422 整条心跳，前端自行解析展示）。
+
+    ql-20260910-014-6c29：新增可选 ``ql_id``（QUICKLOG 块头编号，如
+    ``ql-20260910-014-6c29``）——daemon 侧对 ``quick-*`` 名变更条 best-effort 读
+    guard.json 补报，普通变更/读不到 → None。宽松可选（零改写透传语义不变）：
+    旧 daemon 不上报不影响心跳落库；前端变更中心快速修复抽屉据此把 ql_id 反查
+    成会话名，代入 scope-audit --change quick-<8hex> 命令。
     """
 
     name: str | None = None
@@ -93,6 +99,7 @@ class DaemonHeartbeatSillySpecChange(BaseModel):
     stage_label: str | None = None
     last_active: str | None = None
     steps: DaemonHeartbeatSillySpecChangeSteps | None = None
+    ql_id: str | None = None
 
 
 class DaemonHeartbeatSillySpecConflict(BaseModel):

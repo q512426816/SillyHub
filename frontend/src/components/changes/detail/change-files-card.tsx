@@ -26,9 +26,18 @@ import {
 export interface ChangeFilesCardProps {
   workspaceId: string;
   changeId: string;
+  /**
+   * 变更名（change_key，ql-20260910-017-2006）：透传给 ChangeFileTree 挂
+   * 「变化比对」按钮（scope-audit --file 同源锚点 diff）；缺省无按钮零回归。
+   */
+  changeKey?: string | null;
 }
 
-export function ChangeFilesCard({ workspaceId, changeId }: ChangeFilesCardProps) {
+export function ChangeFilesCard({
+  workspaceId,
+  changeId,
+  changeKey = null,
+}: ChangeFilesCardProps) {
   const [open, setOpen] = useState(false);
   return (
     <section className="rounded-md border bg-card px-3 py-2.5">
@@ -52,7 +61,11 @@ export function ChangeFilesCard({ workspaceId, changeId }: ChangeFilesCardProps)
             </DialogDescription>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
-            <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
+            <ChangeFileTree
+              workspaceId={workspaceId}
+              changeId={changeId}
+              changeKey={changeKey}
+            />
           </div>
         </DialogContent>
       </Dialog>

@@ -28,6 +28,7 @@
 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -42,7 +43,9 @@ import type {
   SillySpecSnapshot,
   SillySpecStatusSummary,
   SillySpecStatusError,
+  SillySpecProgressOutcome,
 } from '../src/sillyspec-manager.js';
+import { SillySpecManager } from '../src/sillyspec-manager.js';
 
 // ── fetch mock 工具（照 daemon-heartbeat-pending.test.ts）─────────────────────
 
@@ -785,5 +788,95 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     expect(h.manager.getStatusMapSnapshot).not.toHaveBeenCalled();
     expect(h.heartbeatMock.mock.calls[0]![9]).toBeUndefined();
+  });
+});
+
+// ── ql-20260910-014-6c29：changes[] quick 条 ql_id 补报（scope-audit 命令代入）──
+
+/**
+ * 变更中心 scope-audit 命令展示的数据源：collectStatusOnce 后处理对
+ * summary.changes 的 quick-* 条 best-effort 读 guard.json 补 ql_id（镜像
+ * pending_conflicts[].ql_id 的 _attachPendingConflictQlIds 先例）。前端快速
+ * 修复抽屉按 ql_id 反查会话名（quick-<8hex>）代入命令。
+ *
+ * 本组用真实 SillySpecManager（DI 假 runProgressJson + 真实临时 spec 根），
+ * 守卫读取走真实 fs——上方 fetch/假 manager 惯例覆盖的是心跳载荷契约，此处
+ * 覆盖的是采集后处理本体，fs 是被测行为的一部分。
+ */
+describe('ql-20260910-014-6c29 心跳补报：changes[] 的 quick 条带 ql_id', () => {
+  it('quick 条 guard.json 存在 → changes[].ql_id 补入；guard 缺失 → null；非 quick 变更条不带（不影响六字段投影）', async () => {
+    // 临时 spec 根：quick-aaaa1111 有 guard，quick-bbbb2222 无（会话已结束/已清理）。
+    const root = await mkdtemp(join(tmpdir(), 'sillyhub-status-qlid-'));
+    try {
+      const guardDir = join(root, '.sillyspec', '.runtime', 'quick-sessions', 'quick-aaaa1111');
+      await mkdir(guardDir, { recursive: true });
+      await writeFile(join(guardDir, 'guard.json'), JSON.stringify({ quicklogId: 'ql-20260910-014-6c29' }));
+
+      const envelope = {
+        schema_version: 1,
+        ok: true,
+        generated_at: '2026-09-10T12:00:00+00:00',
+        data: {
+          active_changes: 3,
+          changes: [
+            {
+              name: '2026-09-10-mcp-central-registry',
+              ghost: false,
+              current_stage: 'execute',
+              stage_label: '执行',
+              last_active: '2026-09-10T11:59:00+00:00',
+              steps: { total: 8, completed: 3 },
+            },
+            {
+              name: 'quick-aaaa1111',
+              ghost: false,
+              current_stage: 'quick',
+              stage_label: '快速任务',
+              last_active: '2026-09-10T11:58:00+00:00',
+              steps: { total: 3, completed: 1 },
+            },
+            {
+              name: 'quick-bbbb2222',
+              ghost: false,
+              current_stage: 'quick',
+              stage_label: '快速任务',
+              last_active: '2026-09-10T11:57:00+00:00',
+              steps: { total: 3, completed: 3 },
+            },
+          ],
+          pending_conflicts: [],
+        },
+      };
+      const manager = new SillySpecManager({
+        runCommand: async () => null,
+        install: async () => undefined,
+        isBusy: () => false,
+        now: () => 1_700_000_000_000,
+        runProgressJson: vi.fn(
+          async (): Promise<SillySpecProgressOutcome> => ({
+            code: 0,
+            stdout: JSON.stringify(envelope),
+            timedOut: false,
+          }),
+        ),
+        resolveSillySpecBin: () => 'C:\sillyspec\bin\sillyspec.js',
+        statusCwd: () => root,
+        statusTimeoutMs: 5,
+      });
+
+      await expect(manager.collectStatusOnce()).resolves.toBeUndefined();
+      const snap = manager.getStatusSnapshot();
+      expect(snap).not.toBeNull();
+      const byName = new Map(snap!.changes.map((c) => [c.name, c]));
+      // quick 条 guard 存在 → ql_id 补入（前端据此反查会话名代入 scope-audit）。
+      expect(byName.get('quick-aaaa1111')!.ql_id).toBe('ql-20260910-014-6c29');
+      // guard 缺失 → null（DTO 可选字段两态皆可，?? null 收敛）。
+      expect(byName.get('quick-bbbb2222')!.ql_id ?? null).toBeNull();
+      // 非 quick 变更条不带 ql_id，六字段投影不受补报影响。
+      expect(byName.get('2026-09-10-mcp-central-registry')!.ql_id ?? null).toBeNull();
+      expect(byName.get('2026-09-10-mcp-central-registry')!.current_stage).toBe('execute');
+    } finally {
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
+    }
   });
 });
