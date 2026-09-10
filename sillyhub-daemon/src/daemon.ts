@@ -7619,8 +7619,10 @@ export class Daemon {
   private async _startInteractiveSession(
     leaseId: string,
     // task-04：交叉类型承载 worker_depth（execPayload 归一化产物；LeaseCtx 未
-    // 声明该字段，见 _runLeaseStateMachine 注释）。
-    execPayload: LeasePayload & { worker_depth?: number },
+    // 声明该字段，见 _runLeaseStateMachine 注释）。task-06（2026-09-10-mcp-
+    // central-registry / D-008@v2）：同款追加 userId（lease 归属用户，MCP 预取
+    // 消费——见 _runLeaseStateMachine 归一化注释）。
+    execPayload: LeasePayload & { worker_depth?: number; userId?: string },
   ): Promise<void> {
     // AC-09：重复 task_available（WS 重连/重放）→ 跳过，driver 只启动一次。
     if (this._interactiveSessionsByLease.has(leaseId)) {
@@ -8146,6 +8148,11 @@ export class Daemon {
       try {
         if (workspaceId) {
           try {
+            // task-06（D-008@v2 / FR-05）：透传 execPayload.userId（lease 归属
+            // 用户，_runLeaseStateMachine 归一化产物）——backend 端点按
+            // platform ∪ user 渲染注入集（lease 归属强校验，D-010）。
+            // undefined（旧 backend / 归属无法解析）→ 不带参数，端点回落
+            // platform only，行为与现状一致（向后兼容）。
             const bundle = await fetchMcpBundle(
               this._config.server_url,
               this._config.token,
@@ -8154,11 +8161,13 @@ export class Daemon {
                 this._logger[level](msg, data);
               },
               this._config.api_key ?? undefined,
+              execPayload.userId,
             );
             this._mcpBundleBySession.set(sessionId, bundle);
             this._logger.debug('mcp_bundle_prefetched', {
               session_id: sessionId,
               workspace_id: workspaceId,
+              user_id: execPayload.userId ?? null,
               platform_servers: Object.keys(bundle.platform.mcpServers).length,
               workspace_servers: Object.keys(bundle.workspace.mcpServers).length,
               whitelist_size: bundle.whitelist.length,
@@ -8518,8 +8527,10 @@ export class Daemon {
       ? { ...(nestedPayload as object), ...(flatClaimResp as object) }
       : { ...(flatClaimResp as object) };
     // task-04：交叉类型承载 worker_depth（LeaseCtx 未声明本字段——src/types.ts 不在
-    // 本卡 allowed_paths；读取 + 透传见下方归一化注释）。
-    const execPayload: LeasePayload & { worker_depth?: number } = {
+    // 本卡 allowed_paths；读取 + 透传见下方归一化注释）。task-06（2026-09-10-
+    // mcp-central-registry / D-008@v2）同款交叉类型追加 userId（lease 归属用户 id
+    // 透传，MCP 预取消费）。
+    const execPayload: LeasePayload & { worker_depth?: number; userId?: string } = {
       ...payload,
       leaseId: (rawExec.leaseId as string | undefined) ?? (rawExec.lease_id as string | undefined) ?? payload.leaseId,
       runtimeId: (rawExec.runtimeId as string | undefined) ?? (rawExec.runtime_id as string | undefined) ?? runtimeId,
@@ -8689,6 +8700,19 @@ export class Daemon {
         (rawExec.budget_tokens as number | undefined) ??
         (rawExec.budgetTokens as number | undefined) ??
         payload.budget_tokens,
+      // task-06（2026-09-10-mcp-central-registry / D-008@v2 / FR-05）：lease 归属
+      // 用户 id 归一化。backend context.py task-06 双写 user_id(snake)+userId(camel)
+      // 进 claim payload（lease.runtime_id → DaemonRuntime.user_id 主路径，runtime
+      // 缺失 interactive 兜底 session）。snake 优先 camel 兜底 + 初始 payload 防御
+      // 兜底（对齐 budget_tokens / worker_depth 惯例）。undefined（旧 backend /
+      // 无法解析归属）→ 全链穿透不伪造默认值（零回归）——MCP 预取不带 user_id
+      // 查询参数，端点回落 platform only（D-008@v2 向后兼容）。
+      // 注：LeaseCtx（src/types.ts）不在本卡 allowed_paths，以交叉类型随
+      // execPayload 承载，_startInteractiveSession MCP 预取消费。
+      userId:
+        (rawExec.user_id as string | undefined) ??
+        (rawExec.userId as string | undefined) ??
+        (payload as { userId?: string }).userId,
     };
 
     // 2026-09-02-changes-overview-card task-02（FR-02）：claim 后观察 workspace

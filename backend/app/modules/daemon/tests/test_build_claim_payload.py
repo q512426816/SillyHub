@@ -37,6 +37,11 @@ SpecWorkspace.strategy（latestSpecVersion 同一查询带出，零新增查询�
   - S2: metadata.spec_strategy 显式（scan 形态）→ 优先于 DB 行值；
   - S3: metadata 带 workspace_id 但无 SpecWorkspace 行 → 不下发任一策略键
     （daemon 维持 platform-managed 兜底，防御不伪造默认值）。
+
+2026-09-10-mcp-central-registry task-06（D-008@v2 / FR-05）追加：claim payload
+user_id/userId 双键下发守护——daemon 会话创建预取 MCP 三件套时作 user_id
+查询参数（platform ∪ user 注入集，端点 task-05）。断言矩阵 U1-U4（runtime
+主路径 / session 兜底 / 两路皆失不下发键 / batch 路同样携带）。
 """
 
 from __future__ import annotations
@@ -48,7 +53,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.daemon.lease.context import build_claim_payload
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.tests.test_lease_service import (
@@ -605,3 +610,157 @@ class TestBuildClaimPayloadSpecStrategyFallback:
         assert "specStrategy" not in payload
         assert "spec_strategy" not in payload
         assert payload["latestSpecVersion"] == 0
+
+
+# ---------------------------------------------------------------------------
+# task-06（2026-09-10-mcp-central-registry / D-008@v2 / FR-05）：user_id 双键下发
+# ---------------------------------------------------------------------------
+
+
+async def _create_agent_session(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+) -> AgentSession:
+    """构造 AgentSession 行（interactive 兜底解析的 user 来源）。
+
+    provider/status 皆有默认或非空占位，user_id 为唯一关键列（nullable=False）。
+    """
+    sess = AgentSession(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        provider="claude_code",
+    )
+    session.add(sess)
+    await session.commit()
+    await session.refresh(sess)
+    return sess
+
+
+class TestBuildClaimPayloadUserId:
+    """claim payload user_id/userId 双写守护单测（2026-09-10-mcp-central-registry）。
+
+    daemon 会话创建预取 MCP 三件套时把 user_id 作
+    ``GET /api/daemon/mcp/config`` 查询参数（platform ∪ user 注入集，端点 task-05）。
+    断言矩阵：
+      - U1: runtime 在（主路径 ``lease.runtime_id → DaemonRuntime.user_id``）→
+        payload 双写 user_id/userId（str 形态，与 workspaceId 惯例一致）；
+      - U2: runtime 缺失 + interactive 兜底 session（``lease_meta.session_id →
+        AgentSession.user_id``）→ 双写命中 session 归属用户；
+      - U3: runtime 缺失 + 无 session_id → 两键均不下发（None 不下发键，
+        daemon 全链 undefined 穿透，旧 lease 零回归）；
+      - U4: batch lease 同样携带（注入点在所有 kind 分支之前，batch 回归补断言）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_u1_runtime_main_path_double_write(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """U1: 主路径命中——payload 双写 user_id/userId == str(runtime.user_id)。"""
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(run.id),
+                "prompt": "hi",
+                "provider": "claude_code",
+                "claim_token": "tok",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["user_id"] == str(user_id)
+        assert payload["userId"] == str(user_id)
+
+    @pytest.mark.asyncio
+    async def test_u2_runtime_missing_session_fallback(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """U2: runtime 缺失 → 兜底 lease_meta.session_id → AgentSession.user_id。"""
+        _patch_transport(monkeypatch, "tar")
+        sess_user_id = await _create_user(db_session)
+        sess = await _create_agent_session(db_session, sess_user_id)
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            None,  # runtime 缺失（防御形态）→ 走 interactive session 兜底
+            run.id,
+            metadata={
+                "session_id": str(sess.id),
+                "run_id": str(run.id),
+                "prompt": "hi",
+                "provider": "claude_code",
+                "claim_token": "tok",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["user_id"] == str(sess_user_id)
+        assert payload["userId"] == str(sess_user_id)
+
+    @pytest.mark.asyncio
+    async def test_u3_unresolvable_no_keys(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """U3: runtime 缺失 + 无 session_id → 两键均不下发（不伪造默认值）。"""
+        _patch_transport(monkeypatch, "tar")
+        await _create_user(db_session)  # 无 runtime / 无 session 关联
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            None,
+            run.id,
+            metadata={
+                "run_id": str(run.id),
+                "prompt": "hi",
+                "provider": "claude_code",
+                "claim_token": "tok",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert "user_id" not in payload
+        assert "userId" not in payload
+
+    @pytest.mark.asyncio
+    async def test_u4_batch_lease_carries_user_id(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """U4: batch 路同样携带（注入点在 kind 分支之前，全路径覆盖）。"""
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            kind="batch",
+            metadata={
+                "run_id": str(run.id),
+                "prompt": "batch job",
+                "claim_token": "tok",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["kind"] == "batch"
+        assert payload["user_id"] == str(user_id)
+        assert payload["userId"] == str(user_id)

@@ -585,3 +585,57 @@ describe('mcp-config: fetchMcpBundle（task-05 三件套拉取）', () => {
     vi.spyOn(globalThis, 'fetch').mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// task-06（2026-09-10-mcp-central-registry / D-008@v2）：fetchMcpBundle user_id
+// 查询参数组装（URL 两态 + 双参数拼接）。
+// ---------------------------------------------------------------------------
+
+describe('mcp-config: fetchMcpBundle user_id 查询参数（task-06 / D-008@v2）', () => {
+  const okBody = {
+    platform_default: { mcpServers: { web: { command: 'w', args: [] } } },
+    whitelist: ['web'],
+    workspace: { mcpServers: {} },
+  };
+
+  it('workspaceId + userId → URL 双 query 参数拼接', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(okBody), { status: 200 }),
+    );
+    const bundle = await fetchMcpBundle(
+      'http://hub:8000',
+      'tok',
+      '11111111-2222-3333-4444-555555555555',
+      undefined,
+      undefined,
+      '99999999-8888-7777-6666-555555555555',
+    );
+    const calledUrl = String(spy.mock.calls[0]?.[0]);
+    expect(calledUrl).toContain('workspace_id=11111111-2222-3333-4444-555555555555');
+    expect(calledUrl).toContain('user_id=99999999-8888-7777-6666-555555555555');
+    expect(calledUrl.startsWith('http://hub:8000/api/daemon/mcp/config?')).toBe(true);
+    expect(bundle.platform.mcpServers.web).toBeDefined();
+    spy.mockRestore();
+  });
+
+  it('无 userId → URL 仅 workspace_id（向后兼容，platform only）', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(okBody), { status: 200 }),
+    );
+    await fetchMcpBundle('http://hub:8000', 'tok', 'ws-uuid-1');
+    const calledUrl = String(spy.mock.calls[0]?.[0]);
+    expect(calledUrl).toContain('workspace_id=ws-uuid-1');
+    expect(calledUrl).not.toContain('user_id=');
+    spy.mockRestore();
+  });
+
+  it('无 workspaceId 无 userId → 裸路径无 query', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(okBody), { status: 200 }),
+    );
+    await fetchMcpBundle('http://hub:8000/', 'tok');
+    const calledUrl = String(spy.mock.calls[0]?.[0]);
+    expect(calledUrl).toBe('http://hub:8000/api/daemon/mcp/config');
+    spy.mockRestore();
+  });
+});

@@ -182,6 +182,11 @@ export interface McpBundle {
  * @param token       daemon Bearer token（与 lease/heartbeat 同源）
  * @param workspaceId 可选工作区 UUID；缺省不带 query 参数
  * @param logger      可选结构化日志（事件名蛇形）
+ * @param apiKey      daemon 长期凭证（X-API-Key，优先于 token）
+ * @param userId      可选 lease 归属用户 UUID（2026-09-10-mcp-central-registry
+ *                    task-06 / D-008@v2）——backend 端点按 platform ∪ user 渲染
+ *                    注入集（lease 归属强校验，D-010）；缺省不带参数 = platform
+ *                    only（旧 backend / 归属未解析，向后兼容）。
  */
 export async function fetchMcpBundle(
   serverUrl: string,
@@ -189,10 +194,16 @@ export async function fetchMcpBundle(
   workspaceId?: string,
   logger?: McpConfigLogger,
   apiKey?: string,
+  userId?: string,
 ): Promise<McpBundle> {
   const base = serverUrl.replace(/\/$/, '');
-  const url = workspaceId
-    ? `${base}/api/daemon/mcp/config?workspace_id=${encodeURIComponent(workspaceId)}`
+  // task-06（D-008@v2）：query 参数逐个拼接——workspace_id 与 user_id 各自独立
+  // 可选（encodeURIComponent 防注入；user_id 单独出现时同样合法）。
+  const queryParts: string[] = [];
+  if (workspaceId) queryParts.push(`workspace_id=${encodeURIComponent(workspaceId)}`);
+  if (userId) queryParts.push(`user_id=${encodeURIComponent(userId)}`);
+  const url = queryParts.length > 0
+    ? `${base}/api/daemon/mcp/config?${queryParts.join('&')}`
     : `${base}/api/daemon/mcp/config`;
   try {
     const headers: Record<string, string> = {};

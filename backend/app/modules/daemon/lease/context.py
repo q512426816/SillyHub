@@ -417,6 +417,45 @@ async def _inject_mission_budget(
         payload["budgetTokens"] = mission.budget_tokens
 
 
+async def _resolve_lease_user_id(
+    session: AsyncSession,
+    lease: DaemonTaskLease,
+    lease_meta: dict,
+) -> uuid.UUID | None:
+    """task-06（2026-09-10-mcp-central-registry / D-008@v2 / FR-05）：解析 lease 归属用户 id。
+
+    解析链照 ``_inject_provider_config`` 的 user_id 解析先例（R-01 口径）逐字同链：
+
+    * 主路径 ``lease.runtime_id → DaemonRuntime.user_id``（daemon/model.py:144，
+      nullable=False，claim 阶段 runtime 必在，全 lease kind 适用）；
+    * runtime 缺失时 interactive 兜底 ``lease_meta.session_id →
+      AgentSession.user_id``（session_id 是 AgentSession.id 的 str 形式，
+      placement 写入）——防御性，正常 claim 不会触发；
+    * 两路均无法解析 → None（调用方不下发键，不伪造默认值）。
+
+    刻意不提取共用 ``_inject_provider_config``（其内联逻辑有测试守护），复制
+    口径避免回归风险——同款取舍先例见 ``resolve_bound_provider_config`` docstring。
+    """
+    if lease.runtime_id is not None:
+        runtime = await session.get(DaemonRuntime, lease.runtime_id)
+        if runtime is not None:
+            return runtime.user_id
+    # interactive 兜底：lease_meta.session_id（AgentSession.id 的 str）→ AgentSession.user_id
+    sess_raw = lease_meta.get("session_id")
+    sess_uuid: uuid.UUID | None = None
+    if sess_raw:
+        try:
+            sess_uuid = uuid.UUID(sess_raw) if isinstance(sess_raw, str) else sess_raw
+        except (ValueError, AttributeError, TypeError):
+            sess_uuid = None
+    if sess_uuid is not None:
+        from app.modules.agent.model import AgentSession
+
+        uid_stmt = select(AgentSession.user_id).where(AgentSession.id == sess_uuid).limit(1)
+        return (await session.execute(uid_stmt)).scalar()
+    return None
+
+
 async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> dict:
     """Build execution context payload for a claimed lease.
 
@@ -441,6 +480,20 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
     # 提前到此处，interactive + batch 都能透传 lease metadata 的 tool_config（governance）。
     if lease_meta.get("tool_config"):
         payload["tool_config"] = lease_meta["tool_config"]
+    # task-06（2026-09-10-mcp-central-registry / D-008@v2 / FR-05）：lease 归属用户
+    # user_id 下发进 claim payload——daemon 会话创建预取 MCP 三件套时作
+    # ``GET /api/daemon/mcp/config`` 的 user_id 查询参数（platform ∪ user 注入集，
+    # 端点已由 task-05 支持可选 query）。置于所有 kind 分支之前：interactive
+    # （tar/shared 两路 return）/ init / batch 全路径携带。解析链同
+    # ``_inject_provider_config`` 先例（runtime_id → DaemonRuntime.user_id 主路径，
+    # runtime 缺失 interactive 兜底 session）；**None 不下发键**——daemon 全链
+    # undefined 穿透（旧 lease 零回归），新键被旧 daemon 忽略（双向兼容，D-008@v2
+    # 约束）。双写 snake_case + camelCase 对齐 budget_tokens/workspaceId 惯例；
+    # str 形态与 workspaceId 一致（claim payload 经 JSON 序列化下发）。
+    claim_user_id = await _resolve_lease_user_id(session, lease, lease_meta)
+    if claim_user_id is not None:
+        payload["user_id"] = str(claim_user_id)
+        payload["userId"] = str(claim_user_id)
     # gap-5：interactive lease agent_run_id=NULL（D-005），不走 agent_run 提取分支，
     # 从 lease metadata 取首 turn 参数（prepare_interactive_dispatch 写入），
     # 供 daemon _startInteractiveSession 构造 SessionManager.create 输入。
