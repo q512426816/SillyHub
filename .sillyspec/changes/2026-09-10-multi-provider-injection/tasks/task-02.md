@@ -1,30 +1,42 @@
 ---
 id: task-02
-title: 'pi-settings.ts——per-session PI_CODING_AGENT_DIR 三文件写盘器'
+title: implement-pi-dir-writer-for-custom-endpoints
 title_zh: 'pi-settings.ts——per-session PI_CODING_AGENT_DIR 三文件写盘器'
 author: 'qinyi'
 created_at: 2026-09-10 23:27:51
 priority: P0
 depends_on: ['task-01']
-blocks: []
-requirement_ids: [FR-XX]
-decision_ids: [D-XXX@vN]
+blocks: ['task-03']
+requirement_ids: [FR-02]
+decision_ids: [D-004, D-005, D-008, D-011]
 allowed_paths:
-  - src/example/file.ts
-target_files: []  # 可选：本 task 计划改动的文件（对账用精确路径清单，格式见下方注释；不填保留 []）
+  - sillyhub-daemon/src/pi-settings.ts
+  - sillyhub-daemon/tests/pi-settings.test.ts
+target_files:
+  - NEW:sillyhub-daemon/src/pi-settings.ts
+  - NEW:sillyhub-daemon/tests/pi-settings.test.ts
+provides:
+  - contract: pi-settings.writePiDir
+    fields: [writePiDir, PiDirWriteInput]
+expects_from:
+  task-01:
+    - contract: settings-writer-failure-convention
+      needs: [failure_convention]
 goal: >
-  一句话说明这个 task 要做什么、为什么。
+  新增 pi-settings.ts 写盘器，仅自定义端点形态（provider.base_url 非空）时向 per-session PI_CODING_AGENT_DIR 写三文件（auth.json/models.json/settings.json，golden=spike b1 系证据），补齐并行变更 punt 的 pi 自定义端点注入缺口（FR-02 / D-004 / D-008 分层 / D-011）。
 implementation:
-  - 具体步骤 1
-  - 具体步骤 2
+  - 新建 sillyhub-daemon/src/pi-settings.ts，导出 PiDirWriteInput（piDir/provider 两字段）与 writePiDir 返回 Promise<void>（Plan 约束 1——三文件先读后写与 writeCodexHome 对称）；门控=provider.base_url 非空才写，官方端点形态三文件全不写（env 层负责，D-008 分层），pi × openai_chat 因 base_url 缺省天然不触发（禁配校验归 task-05/06）；写 IO 失败记 error 后抛出交调用方处置（调用方跳过 PI_CODING_AGENT_DIR env 注入仍 spawn，design Plan 约束 3 双覆盖），不静默吞错
+  - auth.json 按 pi 0.81.1 官方形状写 sillyhub 条目（type=api_key、key=provider.api_key，golden=spike b1b-auth.json；b1 的 apiKey 形状实测被拒不采用），JSON 先读后写保留未知兄弟键
+  - models.json 写 providers.sillyhub（api 固定值 openai-completions——golden=b1-models.json、baseUrl=provider.base_url、models 数组含 id=裸 model id 条目）；settings.json 写 defaultProvider=sillyhub 与 defaultModel=裸 model id（default_fallback_model 缺省回退 model）；两文件 preserve unknown 顶层与兄弟键
+  - 新建 sillyhub-daemon/tests/pi-settings.test.ts 覆盖三文件 golden 形状、preserve unknown、base_url 门控正反例、写失败抛出、env 层共存（auth.json 值压制 env 同键值，spike Pi-3 实证，R-04）
 acceptance:
-  - 可验证的验收条件 1
-  - 可验证的验收条件 2
+  - base_url 非空时写出的三文件与 spike b1 系 golden 逐字段一致（auth 条目官方形状 type=api_key、api=openai-completions、defaultProvider=sillyhub），已有内容未知键重写后原样保留
+  - base_url 为空（官方端点形态）时三文件全不写且不抛错，对既有 env 层注入零干扰；共存用例验证 auth.json 值压制 env 同键值（R-04）
+  - 写 IO 失败（mock EACCES）记 error 并 reject 供调用方连带跳过 PI env 注入
 verify:
-  - cd frontend && pnpm exec tsc --noEmit
+  - cd sillyhub-daemon && pnpm vitest run tests/pi-settings.test.ts && pnpm typecheck
 constraints:
-  - 边界约束 1（如：不加测试）
-  - 边界约束 2（如：不修改传入参数）
+  - 不做 spawn 接线/热切换/目录生命周期（归 task-03/04）；不改 PiCredentialInjector 与 env 层（并行变更产物，D-008 分层）；不实现 pi × openai_chat 禁配校验（后端 422 与前端禁选归 task-05/06）；provider 键名固定 sillyhub 与 api 值固定 openai-completions 以 golden 为准（D-010）；key 不入日志；不新增 package.json 依赖；不改 ProviderConfig 形状
 ---
 
 <!-- 骨架由 sillyspec taskcard 生成（LF 行尾 + frontmatter 已闭合 + 硬校验 9 字段齐全）。

@@ -22,17 +22,23 @@ plan_level: full
 
 - task-02
 
-## Wave 3（接线与热切换，共享 daemon.ts 与前序串行）
+## Wave 3（接线分派，独占 daemon.ts/task-runner.ts）
 
 - task-03
+
+## Wave 4（热切换，共享 daemon.ts 与 W3 串行）
+
 - task-04
 
-## Wave 4（backend 词表与前端）
+## Wave 5（backend 词表与禁配）
 
 - task-05
+
+## Wave 6（前端表单 + gen:types）
+
 - task-06
 
-## Wave 5（冒烟收尾）
+## Wave 7（冒烟收尾）
 
 - task-07
 
@@ -43,14 +49,14 @@ plan_level: full
 | task-01 | codex-settings.ts 写盘器 + 单测 | W1 | P0 | — | FR-01, D-003/D-005/D-011/D-012 | per-form 映射两形态/保守合并/wire_api=responses/失败跳过含 env（Plan 约束 3）；golden=spike a2b |
 | task-02 | pi-settings.ts 写盘器 + 单测 | W2 | P0 | task-01 | FR-02, D-004/D-008/D-011 | 三文件官方形状/api="openai-completions"/preserve unknown/base_url 门控；Promise<void>（Plan 约束 1）；失败策略同 task-01（记 error 跳过含 PI env 注入，design 约束 3 双覆盖）；golden=spike b1 |
 | task-03 | 两接线点分派 + applyClaudeSettings 守卫 | W3 | P0 | task-01, task-02 | FR-01, FR-02 | daemon.ts:7920 一带 + task-runner.ts:526-533；kind 守卫（design 接口段） |
-| task-04 | 热切换按会话重写 + per-session 目录生命周期 | W3 | P0 | task-03 | FR-03, D-009/D-011 | PROVIDER_CONFIG_CHANGED 处理器扩展 + 目录创建/清理接入既有会话清理 |
-| task-05 | schema codex 词表 + pi×openai_chat 禁配 | W4 | P0 | — | FR-04, D-012 | 仅 Create 一处 + Update 侧 service 层（Plan 约束 2，文件清单补 service.py）；**连带翻转 test_llm_provider_pi_kind.py:54-56 既有用例**（现断言 codex 抛 ValidationError，加词表后翻转为接受） |
-| task-06 | 前端表单 + gen:types 联动 | W4 | P1 | task-05 | FR-05 | codex 选项/pi 端点字段/openai_chat 禁选（Plan 约束 4） |
-| task-07 | 真实 CLI 冒烟 + 模块文档 | W5 | P0 | task-03, task-04, task-05, task-06 | FR-06, R-02 | mock 端点三条（codex/pi/litellm 通道）+ api-types 零漂移 + 文档 |
+| task-04 | 热切换按会话重写 + per-session 目录生命周期 | W4 | P0 | task-03 | FR-03, D-009/D-011 | PROVIDER_CONFIG_CHANGED 处理器扩展 + 目录创建/清理接入既有会话清理 |
+| task-05 | schema codex 词表 + pi×openai_chat 禁配 | W5 | P0 | — | FR-04, D-012 | 仅 Create 一处 + Update 侧 service 层（Plan 约束 2，文件清单补 service.py）；**连带翻转 test_llm_provider_pi_kind.py:54-56 既有用例**（现断言 codex 抛 ValidationError，加词表后翻转为接受） |
+| task-06 | 前端表单 + gen:types 联动 | W6 | P1 | task-05 | FR-05 | codex 选项/pi 端点字段/openai_chat 禁选（Plan 约束 4） |
+| task-07 | 真实 CLI 冒烟 + 模块文档 | W7 | P0 | task-03, task-04, task-05, task-06 | FR-06, R-02 | mock 端点三条（codex/pi/litellm 通道）+ api-types 零漂移 + 文档 |
 
 ## 关键路径
 
-task-01 → task-02 → task-03 → task-04 → task-07（写盘器→接线→冒烟主链）；task-05/06 支链与 W3 并行可行但共享 gen:types 产物在 task-06 收口。
+task-01 → task-02 → task-03 → task-04 → task-07（写盘器→接线→热切换→冒烟主链，全串行防 daemon.ts/task-runner.ts 并行覆盖）；task-05/06 支链（W5/W6），gen:types 收口在 task-06。
 
 ## 全局验收标准
 
