@@ -64,7 +64,8 @@ ProviderConfig（lease 下发，协议零改动）
 | 新增 | NEW:sillyhub-daemon/tests/codex-settings.test.ts | 文件形状 golden（spike 证据）/保守合并/缺省不写盘/TEMP 告警规避 |
 | 新增 | NEW:sillyhub-daemon/tests/pi-settings.test.ts | 三文件形状/preserve unknown/仅自定义端点写/env 层共存 |
 | 修改 | backend/app/modules/llm_provider/schema.py | agent_kind 词表增 codex（**仅 Create 一处**——worktree schema.py:19-20 实证 Update/FetchModelsRequest 无该字段，Grill B-4 修正；plan 前重核并行分支合并后形态） |
-| 修改 | backend/app/modules/llm_provider/tests/（schema 相关测试文件） | codex 词表用例 |
+| 修改 | backend/app/modules/llm_provider/tests/（schema 相关测试文件） | codex 词表用例 + test_llm_provider_pi_kind.py:54-56 既有 codex 拒绝用例翻转为接受 |
+| 修改 | backend/app/modules/llm_provider/service.py | Update 侧 pi×openai_chat 禁配取行后判（Plan 约束 2） |
 | 修改 | frontend/src/components/llm-providers/（表单组件） | codex 选项 + pi 自定义端点字段（baseUrl/models，仅 pi 显示） |
 | 修改 | frontend/src/lib/api-types.ts | pnpm gen:types 生成 |
 | 修改 | backend/openapi.json | gen:types 联动 |
