@@ -11,11 +11,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlmodel import col
 
 import app.modules.daemon.session.service as _svc
 from app.core.errors import AppError
+from app.core.logging import get_logger
 from app.modules.agent.model import (
     SESSION_QUEUE_MAX_PENDING,
     AgentRun,
@@ -23,6 +24,9 @@ from app.modules.agent.model import (
     AgentSessionQueuedMessage,
 )
 from app.modules.daemon.schema import PageContextCreateBlock
+from app.modules.daemon.session.service.auto_resume import (
+    parse_auto_resume_origin,
+)
 
 from .errors import (
     DaemonSessionNotActive,
@@ -39,6 +43,8 @@ from .helpers import (
     _split_group_chain_marker,
 )
 from .results import SessionDispatchResult
+
+log = get_logger(__name__)
 
 
 async def _handle_busy_turn(
@@ -393,6 +399,15 @@ async def reorder_queued_messages(
             f"排队条目集合与会话 '{session_id}' 现有条目不一致（reorder 需全量上传）。",
             details=mismatch_details,
         )
+    # 2026-09-10-auto-resume-interrupted-turn：续跑条目 position 是队首语义
+    # （恢复原执行顺序，D-012）——reorder 会破坏该语义，照 edit 的 409 口径
+    # 拒绝含续跑条目的重排（用户可 delete 该条目后再重排其余）。
+    if any(row.origin is not None and row.origin.startswith("auto_resume:") for row in rows):
+        await svc._session.rollback()
+        raise DaemonSessionQueueEntryNotEditable(
+            f"会话 '{session_id}' 队列含自动续跑条目，不支持重排（可删除该条目后重排）。",
+            details={"session_id": str(session_id)},
+        )
     by_id = {row.id: row for row in rows}
     now = datetime.now(UTC)
     for position, entry_id in enumerate(entry_ids):
@@ -447,6 +462,14 @@ async def update_queued_message(
         await svc._session.rollback()
         raise DaemonSessionQueueEntryNotEditable(
             f"系统通知条目 '{entry_id}' 不支持编辑。",
+            details={"session_id": str(session_id), "entry_id": str(entry_id)},
+        )
+    # 2026-09-10-auto-resume-interrupted-turn：续跑条目包装头是系统模板（改坏
+    # 会让续跑语义失真）——照 TASK_WAKEUP 先例 409。
+    if entry.origin is not None and entry.origin.startswith("auto_resume:"):
+        await svc._session.rollback()
+        raise DaemonSessionQueueEntryNotEditable(
+            f"自动续跑条目 '{entry_id}' 不支持编辑。",
             details={"session_id": str(session_id), "entry_id": str(entry_id)},
         )
     entry.prompt = prompt
@@ -622,6 +645,45 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
             await svc._session.rollback()
             return
 
+        # 2026-09-10-auto-resume-interrupted-turn（D-002@v2 / G10）：派发时守卫——
+        # 续跑条目（origin=auto_resume:<源 run id>）在入队后被用户手动重发/新
+        # 发言超越时（source run 之后存在更新 run），重放原任务会执行两遍——
+        # 静默删行跳过记日志，等待中的其它 pending 条目照常派发。入队时 G4 只
+        # 挡「入队前已重发」，本守卫挡「入队后、派发前重发」（Grill P1-2）。
+        auto_resume_source = parse_auto_resume_origin(entry.origin)
+        if auto_resume_source is not None:
+            src_run = await svc._session.get(AgentRun, auto_resume_source)
+            if src_run is not None:
+                newer_run_id = (
+                    await svc._session.execute(
+                        select(AgentRun.id)
+                        .where(
+                            AgentRun.agent_session_id == session.id,
+                            AgentRun.id != auto_resume_source,
+                            or_(
+                                col(AgentRun.created_at) > src_run.created_at,
+                                and_(
+                                    col(AgentRun.created_at) == src_run.created_at,
+                                    col(AgentRun.id) > auto_resume_source,
+                                ),
+                            ),
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if newer_run_id is not None:
+                    fresh_skip = await svc._session.get(AgentSessionQueuedMessage, entry.id)
+                    if fresh_skip is not None:
+                        await svc._session.delete(fresh_skip)
+                        await svc._session.commit()
+                    log.info(
+                        "auto_resume_dispatch_skipped_superseded",
+                        session_id=str(session.id),
+                        source_run_id=str(auto_resume_source),
+                        newer_run_id=str(newer_run_id),
+                    )
+                    continue
+
         page_context: PageContextCreateBlock | None = None
         if entry.page_context is not None:
             try:
@@ -655,6 +717,7 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
             await svc._inject_into_session(
                 session,
                 prompt=dispatch_prompt,
+                auto_resume_of=auto_resume_source,
                 run_sender_user_id=entry.sender_user_id,
                 agent_profile_id=entry.agent_profile_id,
                 llm_provider_id=entry.llm_provider_id,

@@ -714,3 +714,53 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
     expect(screen.getByText("已完成")).toBeInTheDocument();
   });
 });
+
+
+// ── 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关 ──────────
+
+describe("SessionConfigBar 中断自动续跑开关（autoResume 可选控件）", () => {
+  it("不传 autoResume 不渲染（存量调用方零回归）", () => {
+    renderBar();
+    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
+  });
+
+  it("传入渲染开关：默认开 + 点击触发 onToggle(false) + 禁用态不可点", async () => {
+    const onToggle = vi.fn();
+    const { rerender } = renderBar({ autoResume: { enabled: true, onToggle } });
+    const sw = screen.getByTestId("config-auto-resume-switch");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(sw);
+    await waitFor(() => {
+      expect(onToggle).toHaveBeenCalledWith(false);
+    });
+
+    // 关态回显。
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionConfigBar
+          {...({ ...BASE_PROPS, autoResume: { enabled: false, onToggle } } as any)}
+        />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId("config-auto-resume-switch").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+
+    // 禁用态：点击不触发。
+    const onToggle2 = vi.fn();
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionConfigBar
+          {...({
+            ...BASE_PROPS,
+            autoResume: { enabled: true, disabled: true, onToggle: onToggle2 },
+          } as any)}
+        />
+      </QueryClientProvider>,
+    );
+    const disabledSw = screen.getByTestId("config-auto-resume-switch");
+    expect(disabledSw.classList.contains("ant-switch-disabled")).toBe(true);
+    fireEvent.click(disabledSw);
+    expect(onToggle2).not.toHaveBeenCalled();
+  });
+});

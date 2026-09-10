@@ -39,6 +39,7 @@ from app.modules.daemon.schema import (
     AgentSessionListResponse,
     AgentSessionRead,
     PpmItemKindLiteral,
+    SessionAutoResumeUpdateRequest,
     SessionCreateRequest,
     SessionCtxWindowUpdateRequest,
     SessionInjectRequest,
@@ -722,6 +723,23 @@ async def update_session_ctx_window(
 ) -> None:
     """Set/clear the context window override for an owned session (display-only)."""
     await DaemonService(session).update_ctx_window(session_id, user.id, data.ctx_window_tokens)
+
+
+# 2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2：会话级「daemon 重启
+# 自动续跑」开关——照 ctx-window 先例（owner 校验归 service、204）。存储走
+# session.config merge（control.py 先例），恢复链守卫 G2 直读该键。
+@router.patch(
+    "/sessions/{session_id}/auto-resume",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def update_session_auto_resume(
+    session_id: uuid.UUID,
+    data: SessionAutoResumeUpdateRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Enable/disable daemon-restart auto-resume for an owned session (default on)."""
+    await DaemonService(session).update_auto_resume_pref(session_id, user.id, data.enabled)
 
 
 # task-02（2026-09-07-session-pin-rename-scheduled-send / FR-01~FR-03 / FR-06）：

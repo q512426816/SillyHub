@@ -15521,6 +15521,53 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/auto-resume": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Update Session Auto Resume",
+        "description": "Enable/disable daemon-restart auto-resume for an owned session (default on).",
+        "operationId": "update_session_auto_resume_api_daemon_sessions__session_id__auto_resume_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionAutoResumeUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/pin": {
       "patch": {
         "tags": [
@@ -59189,6 +59236,20 @@
         "title": "ScopeWorkspaceStatus",
         "description": "scope 工作区状态条目（design §7 逐字）。\n\n组装源：``orchestrator.collect_scope_workspace_statuses``（task-01）——\n``daemon_name`` 取任一成员 binding 的 ``display_alias||hostname``（不限本人，\nUB-2 口径）；``git_mode`` 为 task-02 ``probe_workspace_git_mode`` 实时探测\n三态。"
       },
+      "SessionAutoResumeUpdateRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "SessionAutoResumeUpdateRequest",
+        "description": "PATCH /api/daemon/sessions/{id}/auto-resume 请求体（2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2）。\n\n会话级「daemon 重启自动续跑」开关（缺省开）：enabled=False 显式关闭\n（recover 守卫 G2 不再自动入队）；enabled=True 恢复默认开。"
+      },
       "SessionControlResponse": {
         "properties": {
           "session_id": {
@@ -59536,6 +59597,18 @@
               }
             ],
             "title": "Answered At"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
           }
         },
         "type": "object",
@@ -59980,6 +60053,18 @@
             "type": "string",
             "format": "uuid",
             "title": "Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
           },
           "spec_strategy": {
             "anyOf": [
@@ -67090,6 +67175,18 @@
               }
             ],
             "title": "Answered At"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
           },
           "workspace_id": {
             "anyOf": [

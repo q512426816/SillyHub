@@ -1058,6 +1058,14 @@ class DaemonService:
         await self._sess.cancel_scheduled_message(session_id, message_id, user_id)
 
     # ql-20260831-002：会话级上下文窗口覆盖（一行委托，照 archive 模式）。
+    async def update_auto_resume_pref(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        enabled: bool,
+    ) -> None:
+        await self._sess.update_auto_resume_pref(session_id, user_id, enabled)
+
     async def update_ctx_window(
         self,
         session_id: uuid.UUID,

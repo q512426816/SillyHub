@@ -166,6 +166,43 @@ describe("task-09: 标题 / message / hint / code 渲染", () => {
     expect(screen.getByText(MODEL_ERROR_META.timeout.defaultHint)).toBeInTheDocument();
   });
 
+  // 2026-09-10-auto-resume-interrupted-turn / FR-07：fallbackHint（父级场景化
+  // 兜底，daemon_restarted 不在 8 类映射）。
+  it("fallbackHint：hint 缺失且类型 unknown 时优先于 defaultHint（daemon_restarted 两态）", () => {
+    // 开——自动续跑文案。
+    const { rerender } = render(
+      <RunErrorItem
+        item={makeItem({ type: null, code: "daemon_restarted" })}
+        fallbackHint="服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"
+      />,
+    );
+    expect(screen.getByText(/会话恢复后将自动续跑/)).toBeInTheDocument();
+    // 关——手动重发文案。
+    rerender(
+      <RunErrorItem
+        item={makeItem({ type: null, code: "daemon_restarted" })}
+        fallbackHint="服务重启中断本轮，会话已保留，可手动重发"
+      />,
+    );
+    expect(screen.getByText(/可手动重发/)).toBeInTheDocument();
+  });
+
+  it("fallbackHint：item.hint 存在时不覆盖（后端 hint 优先）", () => {
+    render(
+      <RunErrorItem
+        item={makeItem({ type: "auth_failed", hint: "前往设置更新凭证。" })}
+        fallbackHint="场景化兜底文案"
+      />,
+    );
+    expect(screen.getByText(/前往设置更新凭证。/)).toBeInTheDocument();
+    expect(screen.queryByText(/场景化兜底文案/)).toBeNull();
+  });
+
+  it("fallbackHint：不传保持 defaultHint 现行为", () => {
+    render(<RunErrorItem item={makeItem({ type: "timeout", hint: null })} />);
+    expect(screen.getByText(MODEL_ERROR_META.timeout.defaultHint)).toBeInTheDocument();
+  });
+
   it("code 有值 → 显示 code 徽标", () => {
     render(
       <RunErrorItem item={makeItem({ type: "quota_exceeded", code: "1310" })} />,

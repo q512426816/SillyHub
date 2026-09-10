@@ -404,6 +404,15 @@ class AgentRun(BaseModel, table=True):
         default=0,
         sa_column=Column(Integer, nullable=False, default=0),
     )
+    # 2026-09-10-auto-resume-interrupted-turn / D-009@v2：续跑轮审计标记——
+    # 自动续跑派发落地的 run 写 {"auto_resume_of": "<源 run id>"}（链上限计数
+    # （G7 沿链回溯）+ 前端「自动续跑」徽标数据源）。ORM 属性名 metadata_
+    # （metadata 是 SQLAlchemy 保留属性直写报错，照 AgentRunLog 先例），DB 列名
+    # metadata（迁移 20260910120000）。NULL = 非续跑轮（存量）。
+    metadata_: dict | None = Field(
+        default=None,
+        sa_column=Column("metadata", JSON, nullable=True),
+    )
 
 
 class AgentRunModelUsage(BaseModel, table=True):
@@ -1124,6 +1133,14 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
         sa_column=Column(Integer, nullable=False, default=0),
     )
     error_msg: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    # 2026-09-10-auto-resume-interrupted-turn / D-009@v2：条目来源标记——
+    # 'auto_resume:<源 run uuid>' = daemon 重启自动续跑条目（G8 幂等去重键 +
+    # 派发打标锚，uuid 无冒号 split(':',1) 解析安全）；NULL = 用户排队（存量）。
+    # 派发成功即删行（既有语义），持久审计锚在 agent_runs.metadata_。
+    origin: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),
     )

@@ -43,7 +43,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Tag } from "antd";
+import { Switch, Tag } from "antd";
 import { ChevronDown, Cloud, Lock, User } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
@@ -145,6 +145,17 @@ export interface SessionConfigBarProps {
    * injectSession（会话尚未创建），父层经 onProvisionalSwitch 收值并入首句
    * createSession（llm_provider_id/agent_profile_id）。running/ended 传 false 即可。
    */
+  /**
+   * 2026-09-10-auto-resume-interrupted-turn / FR-06：会话级「daemon 重启自动
+   * 续跑」开关控件（不传不渲染，存量调用方零回归）。enabled=当前生效态
+   * （缺省开由父层归一——config.auto_resume_interrupted 仅显式 false 为关）；
+   * onToggle 由父层接 PATCH /sessions/{id}/auto-resume + 会话态刷新。
+   */
+  autoResume?: {
+    enabled: boolean;
+    disabled?: boolean;
+    onToggle: (next: boolean) => void | Promise<void>;
+  };
   provisional?: boolean;
   onProvisionalSwitch?: (
     field: Exclude<SessionConfigSwitchField, "model">,
@@ -210,6 +221,7 @@ export function SessionConfigBar({
   onProvisionalSwitch,
   onProvisionalModelSwitch,
   trailing,
+  autoResume,
   providerOpenSignal = 0,
 }: SessionConfigBarProps) {
   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
@@ -596,6 +608,28 @@ export function SessionConfigBar({
           </ConfigDropdown>,
         )}
         <span className="flex-1" />
+        {/* 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关——
+            daemon 重启恢复后被中断轮自动续跑（默认开）。 */}
+        {autoResume != null && (
+          <label
+            className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+            title={
+              autoResume.enabled
+                ? "已开启：daemon 重启恢复后，被中断的一轮自动继续执行（续跑提示词包装，最多自动续跑 2 次）"
+                : "已关闭：daemon 重启后不自动续跑，中断轮保留手动「重新发送」"
+            }
+          >
+            <Switch
+              size="small"
+              checked={autoResume.enabled}
+              disabled={autoResume.disabled}
+              onChange={(next) => void autoResume.onToggle(next)}
+              aria-label="中断自动续跑"
+              data-testid="config-auto-resume-switch"
+            />
+            中断自动续跑
+          </label>
+        )}
         {running && (
           <span className="inline-flex items-center gap-1 text-[10.5px] text-warning">
             <Lock aria-hidden className="h-3 w-3" />

@@ -520,3 +520,132 @@ class TestRetrySuccessPath:
         assert result.id == rows[0].id
         assert result.status == "dispatched"
         assert result.prompt == "重试我"
+
+
+# ── 2026-09-10-auto-resume-interrupted-turn：派发 G10 + 打标 + 队列 UI 语义 ──────
+
+
+class TestAutoResumeDispatch:
+    """续跑条目派发（G10 派发时守卫 / metadata 打标 / edit·reorder 409）。"""
+
+    async def _seed_with_source_run(self, db_session):
+        """会话 + 已完结源 run（= 被中断轮的替身）→ 返回 (svc, uid, session_id, src_run)。"""
+        svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
+        await _finish_run(db_session, busy_run)
+        return svc, uid, session_id, busy_run
+
+    async def _insert_auto_resume_entry(self, db_session, session_id, uid, src_run_id, position=0):
+        db_session.add(
+            AgentSessionQueuedMessage(
+                agent_session_id=session_id,
+                sender_user_id=uid,
+                prompt="[系统续跑提示] 平台服务重启中断了上一轮执行。\n\n继续任务",
+                status="pending",
+                position=position,
+                origin=f"auto_resume:{src_run_id}",
+            )
+        )
+        await db_session.commit()
+
+    @pytest.mark.asyncio
+    async def test_g10_superseded_deletes_entry_without_dispatch(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """G10 命中：source 后已有更新 run（用户手动重发过）→ 删行跳过不派发。"""
+        svc, uid, session_id, src_run = await self._seed_with_source_run(db_session)
+        await self._insert_auto_resume_entry(db_session, session_id, uid, src_run.id)
+        # 入队后用户手动重发（更新 run，已完结）。
+        newer = await svc.inject_session(session_id, uid, prompt="手动重发")
+        await _finish_run(db_session, newer.agent_run)
+
+        await svc.dispatch_queued_messages(session_id)
+
+        assert await _queue_rows(db_session, session_id) == []
+        runs = list(
+            (
+                await db_session.execute(
+                    select(AgentRun).where(AgentRun.agent_session_id == session_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # 仍是 3 个 run（first/src/newer）——续跑条目未派生成第 4 轮。
+        assert len(runs) == 3
+
+    @pytest.mark.asyncio
+    async def test_dispatch_marks_new_run_metadata(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """G10 通过：派发生成新 run 且 metadata_.auto_resume_of=源 run id。"""
+        svc, uid, session_id, src_run = await self._seed_with_source_run(db_session)
+        await self._insert_auto_resume_entry(db_session, session_id, uid, src_run.id)
+
+        await svc.dispatch_queued_messages(session_id)
+
+        assert await _queue_rows(db_session, session_id) == []
+        runs = list(
+            (
+                await db_session.execute(
+                    select(AgentRun).where(AgentRun.agent_session_id == session_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        resumed = [r for r in runs if r.id != src_run.id and r.status == "pending"]
+        assert len(resumed) == 1
+        assert resumed[0].metadata_ == {"auto_resume_of": str(src_run.id)}
+
+    @pytest.mark.asyncio
+    async def test_edit_auto_resume_entry_409(self, db_session, mocked_hub, mocked_redis) -> None:
+        """续跑条目 edit 409（包装头是系统模板，照 TASK_WAKEUP 先例）。"""
+        from app.modules.daemon.session.service import DaemonSessionQueueEntryNotEditable
+
+        svc, uid, session_id, src_run = await self._seed_with_source_run(db_session)
+        await self._insert_auto_resume_entry(db_session, session_id, uid, src_run.id)
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 1
+
+        with pytest.raises(DaemonSessionQueueEntryNotEditable):
+            await svc.update_queued_message(session_id, rows[0].id, "改坏包装头", uid)
+
+    @pytest.mark.asyncio
+    async def test_reorder_with_auto_resume_entry_409(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """队列含续跑条目时 reorder 409（队首语义固定）。"""
+        from app.modules.daemon.session.service import DaemonSessionQueueEntryNotEditable
+
+        svc, uid, session_id, src_run = await self._seed_with_source_run(db_session)
+        # 普通条目 0 + 续跑条目 -1（队首）。
+        await svc.inject_session(
+            session_id, uid, prompt="普通排队", queue_when_busy=True
+        ) if False else None
+        db_session.add(
+            AgentSessionQueuedMessage(
+                agent_session_id=session_id,
+                sender_user_id=uid,
+                prompt="普通排队",
+                status="pending",
+                position=0,
+            )
+        )
+        await self._insert_auto_resume_entry(db_session, session_id, uid, src_run.id, position=-1)
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 2
+
+        with pytest.raises(DaemonSessionQueueEntryNotEditable):
+            await svc.reorder_queued_messages(session_id, [rows[1].id, rows[0].id], uid)
+
+    @pytest.mark.asyncio
+    async def test_delete_auto_resume_entry_allowed(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """delete 允许（=用户手动取消自动续跑）。"""
+        svc, uid, session_id, src_run = await self._seed_with_source_run(db_session)
+        await self._insert_auto_resume_entry(db_session, session_id, uid, src_run.id)
+        rows = await _queue_rows(db_session, session_id)
+
+        await svc.delete_queued_message(session_id, rows[0].id, uid)
+        assert await _queue_rows(db_session, session_id) == []

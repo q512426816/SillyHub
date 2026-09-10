@@ -157,6 +157,17 @@ async def recover_session_after_daemon_restart(
             excluded_run_id=interrupted_run_id,
         )
 
+        # 2026-09-10-auto-resume-interrupted-turn（D-001/D-011）：自动续跑入队——
+        # 与 run 收敛同事务（SAVEPOINT 包裹：DB 失败弃续跑保恢复主链，进程崩溃
+        # 全有或全无）。守卫/模板见 auto_resume.py；派发归 confirm 的 D-008 钩子
+        # （reconnect 后翻 active 时发现有 pending 即走既有排队派发）。
+        if interrupted_run_id is not None:
+            from app.modules.daemon.session.service.auto_resume import (
+                maybe_enqueue_auto_resume,
+            )
+
+            await maybe_enqueue_auto_resume(svc, session, interrupted_run_id)
+
         # Write reconnecting + rotate token.
         now = datetime.now(UTC)
         session.status = "reconnecting"

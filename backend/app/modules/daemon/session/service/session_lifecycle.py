@@ -706,3 +706,41 @@ async def update_ctx_window(
         return
     agent_session.ctx_window_tokens = ctx_window_tokens
     await svc._session.commit()
+
+
+async def update_auto_resume_pref(
+    svc,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    enabled: bool,
+) -> None:
+    """Set/clear 会话级「daemon 重启自动续跑」开关（2026-09-10-auto-resume-interrupted-turn / FR-06）。
+
+    写 ``session.config.auto_resume_interrupted``（缺省=开，False=显式关——
+    recover 守卫 G2 的读点）。存储照 control.py plan_response 先例：config
+    dict 复制后整体赋值（新 dict 引用天然注册变更，无需 flag_modified），保留
+    既有键。幂等：同值重复写无副作用。不发列表变更信号（列表视图不消费该键）。
+    """
+    agent_session = (
+        await svc._session.execute(
+            select(AgentSession)
+            .where(
+                AgentSession.id == session_id,
+                AgentSession.user_id == user_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if agent_session is None:
+        raise DaemonSessionNotFound(
+            f"AgentSession '{session_id}' not found.",
+            details={"session_id": str(session_id)},
+        )
+    cfg = dict(agent_session.config) if isinstance(agent_session.config, dict) else {}
+    # 幂等归一：开态 = True 或缺省（缺省=开），关态 = 显式 False。
+    if (cfg.get("auto_resume_interrupted") is False) == (not enabled):
+        await svc._session.rollback()  # 释放行锁（幂等早退不悬挂事务）
+        return
+    cfg["auto_resume_interrupted"] = enabled
+    agent_session.config = cfg
+    await svc._session.commit()

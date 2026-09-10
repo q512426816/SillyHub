@@ -203,6 +203,12 @@ export interface SessionTurnView {
    */
   errorDetail?: ErrorLogItem | null;
   /**
+   * 2026-09-10-auto-resume-interrupted-turn：自动续跑轮标记（源 run id，取
+   * run.metadata.auto_resume_of）——非空时轮次行渲染「自动续跑」徽标；缺省
+   * undefined = 普通轮（enrichDisplayTurns 回填，实时轮不填）。
+   */
+  autoResumeOf?: string | null;
+  /**
    * ql-20260730-003：回合过程项（思考/工具/stderr/文件），按真实到达顺序累积。
    * 「对话」视图渲染 prompt + output（答复正文）+ file 过程项（agent 上传文件卡片，
    * agent-file-upload-mcp FR-01 交付物）；切「全部」后在答复气泡前按序渲染——连续
@@ -277,6 +283,12 @@ export interface TurnTimelineProps {
   viewMode: SessionViewMode;
   errorMsg: string | null;
   /**
+   * 2026-09-10-auto-resume-interrupted-turn / FR-07：daemon_restarted 失败卡的
+   * 场景化兜底建议（该错误码不在 8 类映射、无现 hint）——父级（会话页）按
+   * 「中断自动续跑」开关状态传两态文案；不传保持现行为（类型表 defaultHint）。
+   */
+  daemonRestartedHint?: string | null;
+  /**
    * pending 待答卡渲染门控：ended/failed 会话不回显（ql-20260623 改动三，死卡防护）。
    */
   sessionStatus: SessionUiStatus;
@@ -332,6 +344,7 @@ const TurnRow = memo(function TurnRow({
   dialogHistory,
   onResend,
   onSwitchProvider,
+  daemonRestartedHint,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
@@ -342,6 +355,8 @@ const TurnRow = memo(function TurnRow({
   dialogHistory: SessionDialogRead[];
   onResend: (prompt: string) => void;
   onSwitchProvider: () => void;
+  /** 2026-09-10-auto-resume-interrupted-turn：daemon_restarted 场景化兜底建议。 */
+  daemonRestartedHint?: string | null;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
   // 气泡正文换 textBefore（标记原文不显示），提问卡随气泡原位渲染（下方 ml-9）；
@@ -612,6 +627,11 @@ const TurnRow = memo(function TurnRow({
                           = 底部配置条）。 */}
                       <RunErrorItem
                         item={turn.errorDetail}
+                        fallbackHint={
+                          turn.errorDetail.code === "daemon_restarted"
+                            ? (daemonRestartedHint ?? undefined)
+                            : undefined
+                        }
                         onResend={
                           turn.prompt.trim()
                             ? () => {
@@ -669,6 +689,15 @@ const TurnRow = memo(function TurnRow({
                     inputTokens={turn.inputTokens}
                     outputTokens={turn.outputTokens}
                   />
+                  {turn.autoResumeOf != null && (
+                    <span
+                      className="rounded-full border border-brand-300 bg-brand-100 px-1.5 py-px text-[9.5px] text-brand-700"
+                      title={`自动续跑：daemon 重启中断后自动继续的轮次（源轮 ${turn.autoResumeOf.slice(0, 8)}…）`}
+                      data-testid="turn-auto-resume-badge"
+                    >
+                      自动续跑
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -681,6 +710,7 @@ export function TurnTimeline({
   turns,
   viewMode,
   errorMsg,
+  daemonRestartedHint,
   sessionStatus,
   pendingRequests,
   dialogHistory,
@@ -916,6 +946,7 @@ export function TurnTimeline({
               dialogHistory={dialogHistory}
               onResend={onResend}
               onSwitchProvider={onSwitchProvider}
+              daemonRestartedHint={daemonRestartedHint}
             />
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——

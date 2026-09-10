@@ -265,6 +265,20 @@ export async function unarchiveAgentSession(sessionId: string): Promise<void> {
 // ql-20260831-002：会话级上下文窗口覆盖（上下文环分母可编辑；null = 清除覆盖
 // 回自动派生链：供应商 one_m → 模型常量表 → 1M 兜底）。
 
+// 2026-09-10-auto-resume-interrupted-turn / FR-06：会话级「daemon 重启自动
+// 续跑」开关（缺省开；false = recover 守卫 G2 不再自动入队续跑）。
+
+/** PATCH /api/daemon/sessions/{id}/auto-resume — 开/关自动续跑。 */
+export async function updateSessionAutoResume(
+  sessionId: string,
+  enabled: boolean,
+): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/auto-resume`,
+    { method: "PATCH", json: { enabled } },
+  );
+}
+
 /** PATCH /api/daemon/sessions/{id}/ctx-window — 设置/清除上下文窗口覆盖。 */
 export async function updateSessionCtxWindow(
   sessionId: string,

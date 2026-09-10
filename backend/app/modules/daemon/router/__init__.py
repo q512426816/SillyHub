@@ -226,6 +226,8 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "archive_session",
     "unarchive_session",
     "update_session_ctx_window",
+    # 2026-09-10-auto-resume-interrupted-turn：会话级自动续跑开关（紧跟 ctx-window）。
+    "update_session_auto_resume",
     # D-010 第二回合（merge main 2ad590192，2026-09-07-session-pin-rename-
     # scheduled-send task-02/03）：原 router.py 在 update_session_ctx_window 与
     # stream_session_logs 之间首现的六端点——pin/unpin/rename 落 session_crud，

@@ -58,6 +58,12 @@ class SessionRunRead(BaseModel):
     """
 
     id: uuid.UUID
+    # 2026-09-10-auto-resume-interrupted-turn（plan 审查 P0-1）：续跑轮标记——
+    # 自动续跑派发落地的 run 为 {"auto_resume_of": "<源 run id>"}（前端「自动
+    # 续跑」徽标数据源）；普通轮 / 存量行为 None。显式字段 DTO 不自动携带
+    # model 新列，必须在此显式声明（validation_alias 直映 ORM 属性 metadata_，
+    # 本文件 :84 同款先例）。
+    metadata: dict | None = Field(default=None, validation_alias="metadata_")
     # quick（2026-09-02 本地会话信息折叠）：CLI 上报轮（platform-managed）与
     # 用户交互轮的区分锚——tool_report 激活会话前端据此折叠前者。
     spec_strategy: str | None = None

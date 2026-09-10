@@ -379,6 +379,11 @@ async def _inject_into_session(
     # 2026-08-20-session-multimodal-attachments task-05：附件引用（None → 零
     # 回归）。校验（引擎门控/归属/数量）在本方法事务内；组装下发归 task-06。
     attachment_ids: list[uuid.UUID] | None = None,
+    # 2026-09-10-auto-resume-interrupted-turn（D-002@v2）：自动续跑轮源标记——
+    # 排队派发链（queue.dispatch_queued_messages 解析 origin 传入）；新 run 落
+    # metadata_.auto_resume_of（链上限计数 G7 + 前端徽标数据源）。None = 普通
+    # 注入轮（既有调用点零改动）。
+    auto_resume_of: uuid.UUID | None = None,
     # 群聊附件（FR-05 补遗）：归属校验基准覆盖——群影子会话属主恒为群主，
     # 附件上传者可能是普通群成员；None = 既有语义（按 session.user_id）。
     attachment_owner_user_id: uuid.UUID | None = None,
@@ -585,6 +590,10 @@ async def _inject_into_session(
             status="pending",
             spec_strategy="interactive",
             agent_session_id=session.id,
+            # 2026-09-10-auto-resume-interrupted-turn：续跑轮审计标记（源 run id）。
+            metadata_=(
+                {"auto_resume_of": str(auto_resume_of)} if auto_resume_of is not None else None
+            ),
             # ql-20260817-003：轮次发送者=本轮注入者（_inject_into_session 的
             # 调用方注入：inject_session=实际 user；service 路径=会话属主）。
             user_id=run_sender_user_id,
