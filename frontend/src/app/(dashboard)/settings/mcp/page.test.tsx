@@ -19,7 +19,7 @@
  *   8. 白名单编辑器不回归（admin 仍可增删保存）
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App as AntApp } from "antd";
@@ -49,6 +49,15 @@ const registry = vi.hoisted(() => ({
   useCreate: vi.fn(),
   useUpdate: vi.fn(),
   useDelete: vi.fn(),
+}));
+
+// task-12（导入三入口 + 诊断）hooks mock（文件级——第二个 vi.mock 工厂引用）。
+const task12 = vi.hoisted(() => ({
+  useImportJson: vi.fn(),
+  useScan: vi.fn(),
+  useApplyImport: vi.fn(),
+  useTemplates: vi.fn(),
+  useDiagnostics: vi.fn(),
 }));
 
 vi.mock("@/lib/api/mcp-registry", async () => {
@@ -182,6 +191,13 @@ beforeEach(() => {
     mutateAsync: vi.fn().mockResolvedValue(undefined),
     isPending: false,
   });
+
+  // task-12 hooks 默认空态（弹窗常驻挂载即调用；vi.mock 文件级提升对全部 describe 生效）
+  task12.useImportJson.mockReturnValue({ mutate: vi.fn(), isPending: false, reset: vi.fn() });
+  task12.useScan.mockReturnValue({ mutate: vi.fn(), isPending: false, data: undefined, isError: false, reset: vi.fn() });
+  task12.useApplyImport.mockReturnValue({ mutate: vi.fn(), isPending: false });
+  task12.useTemplates.mockReturnValue({ templates: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+  task12.useDiagnostics.mockReturnValue({ diagnostics: [], isLoading: false, isFetching: false, isError: false, error: null, refetch: vi.fn() });
 
   whitelistHooks.useWhitelist.mockReturnValue({
     whitelist: [...ADMIN_WHITELIST],
@@ -382,5 +398,139 @@ describe("MCP 资产库页 task-11", () => {
     const update = whitelistHooks.useUpdateWhitelist.mock.results[0]!.value;
     await waitFor(() => expect(update.mutateAsync).toHaveBeenCalledTimes(1));
     expect(update.mutateAsync).toHaveBeenCalledWith(["github-server", "fs-server"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// task-12（2026-09-10-mcp-central-registry / FR-06~09）：导入三入口 + 诊断面板
+// ---------------------------------------------------------------------------
+
+describe("MCP 资产库页 task-12：导入入口 + 诊断面板", () => {
+  // task12 mock 对象声明在文件顶部（vi.hoisted 提升后此处直接引用）。
+  vi.mock("@/lib/api/mcp-registry", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/api/mcp-registry")>(
+      "@/lib/api/mcp-registry",
+    );
+    return {
+      ...actual,
+      useMcpServers: registry.useServers,
+      useToggleMcpBinding: registry.useToggleBinding,
+      useCreateMcpServer: registry.useCreate,
+      useUpdateMcpServer: registry.useUpdate,
+      useDeleteMcpServer: registry.useDelete,
+      useImportMcpJson: task12.useImportJson,
+      useScanMcpWorkspaces: task12.useScan,
+      useApplyMcpWorkspaceImport: task12.useApplyImport,
+      useMcpTemplates: task12.useTemplates,
+      useMcpDiagnostics: task12.useDiagnostics,
+    };
+  });
+
+  // vi.mock 是文件级提升——直接跑 describe 需重建页面级 mock 状态（复用上层
+  // registry mock 的 beforeEach）。task-12 用例只验入口/面板渲染，不深验弹窗
+  // 内部交互（各弹窗组件自身的单测空间留后续；本页接线断言到位即可）。
+
+  it("工具栏三导入入口 + admin 诊断按钮渲染（FR-06/07/08/09 接线）", async () => {
+    // task-12 hooks 默认态（页面渲染即调用）
+    task12.useImportJson.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    });
+    task12.useScan.mockReturnValue({ mutate: vi.fn(), isPending: false, data: undefined, isError: false, reset: vi.fn() });
+    task12.useApplyImport.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    task12.useTemplates.mockReturnValue({ templates: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+    task12.useDiagnostics.mockReturnValue({ diagnostics: [], isLoading: false, isFetching: false, isError: false, error: null, refetch: vi.fn() });
+
+    renderPage(<McpRegistryPage />);
+    expect(
+      await screen.findByTestId("mcp-import-json-btn"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("mcp-scan-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("mcp-template-btn")).toBeInTheDocument();
+    // admin 可见诊断入口；非 admin 不渲染
+    expect(screen.getByTestId("mcp-diagnostics-btn")).toBeInTheDocument();
+
+    session.user = { id: "u2", is_platform_admin: false };
+    cleanup();
+    renderPage(<McpRegistryPage />);
+    await waitFor(() =>
+      expect(screen.queryByTestId("mcp-diagnostics-btn")).not.toBeInTheDocument(),
+    );
+    session.user = { id: "u1", is_platform_admin: true };
+  });
+
+  it("admin 点「注入诊断」→ 诊断面板打开并渲染五类项中的命中项（FR-08）", async () => {
+    task12.useImportJson.mockReturnValue({ mutate: vi.fn(), isPending: false, reset: vi.fn() });
+    task12.useScan.mockReturnValue({ mutate: vi.fn(), isPending: false, data: undefined, isError: false, reset: vi.fn() });
+    task12.useApplyImport.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    task12.useTemplates.mockReturnValue({ templates: [], isLoading: false, isError: false, error: null, refetch: vi.fn() });
+    task12.useDiagnostics.mockReturnValue({
+      diagnostics: [
+        {
+          code: "platform_name_shadow",
+          server_id: "s1",
+          server_name: "playwright",
+          detail: "workspace「demo」的 .mcp.json 存在同名 server，workspace 位优先",
+        },
+        {
+          code: "workspace_blocked_by_whitelist",
+          server_id: null,
+          server_name: null,
+          detail: "internal-tools",
+        },
+      ],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderPage(<McpRegistryPage />);
+    fireEvent.click(await screen.findByTestId("mcp-diagnostics-btn"));
+
+    expect(
+      await screen.findByTestId("mcp-diagnostics-panel"),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("同名遮蔽")).toBeInTheDocument();
+    expect(screen.getByText(/playwright/)).toBeInTheDocument();
+    expect(screen.getByText("白名单拦截")).toBeInTheDocument();
+  });
+
+  it("「从模板新建」→ 模板列表渲染，选中后预填新建表单（FR-09）", async () => {
+    task12.useImportJson.mockReturnValue({ mutate: vi.fn(), isPending: false, reset: vi.fn() });
+    task12.useScan.mockReturnValue({ mutate: vi.fn(), isPending: false, data: undefined, isError: false, reset: vi.fn() });
+    task12.useApplyImport.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    task12.useDiagnostics.mockReturnValue({ diagnostics: [], isLoading: false, isFetching: false, isError: false, error: null, refetch: vi.fn() });
+    task12.useTemplates.mockReturnValue({
+      templates: [
+        {
+          id: "t1",
+          name: "memory",
+          server_config: { type: "stdio", command: "npx -y @modelcontextprotocol/server-memory", args: [], env: {} },
+          is_preset: true,
+          owner_user_id: null,
+          created_at: "2026-09-10T00:00:00",
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderPage(<McpRegistryPage />);
+    fireEvent.click(await screen.findByTestId("mcp-template-btn"));
+
+    // 模板列表渲染（预置标识 + 命令）
+    expect(await screen.findByTestId("mcp-template-list")).toBeInTheDocument();
+    expect(screen.getByText("memory")).toBeInTheDocument();
+
+    // 选中 → 弹窗关、新建表单打开且预填模板名
+    fireEvent.click(screen.getByTestId("mcp-template-row"));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("memory")).toBeInTheDocument(),
+    );
   });
 });

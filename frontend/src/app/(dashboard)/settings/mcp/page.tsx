@@ -34,6 +34,13 @@ import {
   McpServerFormModal,
   type McpServerFormSubmitPayload,
 } from "@/components/mcp-registry/server-form-modal";
+import { McpImportJsonModal } from "@/components/mcp-registry/import-json-modal";
+import { McpWorkspaceScanModal } from "@/components/mcp-registry/workspace-scan-modal";
+import {
+  McpTemplatePickerModal,
+  type McpTemplatePick,
+} from "@/components/mcp-registry/template-picker-modal";
+import { McpDiagnosticsPanel } from "@/components/mcp-registry/diagnostics-panel";
 import { errMessage, useNotify } from "@/lib/errors";
 import {
   saveMcpTemplate,
@@ -212,7 +219,7 @@ function McpWhitelistEditor() {
 type ScopeTab = "platform" | "mine";
 
 type FormState =
-  | { mode: "create" }
+  | { mode: "create"; template?: McpTemplatePick }
   | { mode: "edit" | "copy"; server: McpServerRead }
   | null;
 
@@ -243,6 +250,11 @@ export default function McpRegistryPage() {
 
   const [formState, setFormState] = useState<FormState>(null);
   const [confirmDelete, setConfirmDelete] = useState<McpServerRead | null>(null);
+  // task-12：三导入入口 + 诊断面板开关。
+  const [importJsonOpen, setImportJsonOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
 
   // 标签筛选选项：当前 tab 列表 tags 去重派生（平台库标签供全员复用）。
   const tagOptions = useMemo(() => {
@@ -352,15 +364,22 @@ export default function McpRegistryPage() {
           </span>
         }
         actions={
-          <Button
-            onClick={handleRefresh}
-            disabled={isFetching}
-            icon={
-              <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
-            }
-          >
-            刷新
-          </Button>
+          <div className="flex items-center gap-2">
+            {isAdmin && (
+              <Button onClick={() => setDiagOpen(true)} data-testid="mcp-diagnostics-btn">
+                🩺 注入诊断
+              </Button>
+            )}
+            <Button
+              onClick={handleRefresh}
+              disabled={isFetching}
+              icon={
+                <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+              }
+            >
+              刷新
+            </Button>
+          </div>
         }
       />
 
@@ -426,14 +445,14 @@ export default function McpRegistryPage() {
           >
             ＋ 新建 Server
           </Button>
-          {/* 三导入入口归 task-12（此处仅预留按钮位，不实现弹窗）。 */}
-          <Button disabled title="导入能力将在后续版本开放">
+          {/* task-12 三导入入口（FR-06/07/09）。 */}
+          <Button onClick={() => setImportJsonOpen(true)} data-testid="mcp-import-json-btn">
             📥 导入 JSON
           </Button>
-          <Button disabled title="导入能力将在后续版本开放">
+          <Button onClick={() => setScanOpen(true)} data-testid="mcp-scan-btn">
             📂 从 Workspace 扫描
           </Button>
-          <Button disabled title="模板能力将在后续版本开放">
+          <Button onClick={() => setTemplatePickerOpen(true)} data-testid="mcp-template-btn">
             ⭐ 从模板新建
           </Button>
         </div>
@@ -496,6 +515,7 @@ export default function McpRegistryPage() {
         <McpServerFormModal
           open
           mode={formState.mode}
+          template={formState.mode === "create" ? (formState.template ?? null) : null}
           server={formState.mode === "create" ? null : formState.server}
           defaultScope={isAdmin ? scopeTab : "mine"}
           isAdmin={isAdmin}
@@ -503,6 +523,34 @@ export default function McpRegistryPage() {
           onClose={() => setFormState(null)}
           onSubmit={(payload) => void handleFormSubmit(payload)}
         />
+      )}
+
+      {/* task-12 三导入弹窗 + 诊断面板（FR-06/07/08/09）。 */}
+      <McpImportJsonModal
+        open={importJsonOpen}
+        isAdmin={isAdmin}
+        defaultScope={isAdmin ? (scopeTab === "platform" ? "platform" : "mine") : "mine"}
+        onClose={() => setImportJsonOpen(false)}
+      />
+      <McpWorkspaceScanModal
+        open={scanOpen}
+        isAdmin={isAdmin}
+        onClose={() => setScanOpen(false)}
+      />
+      <McpTemplatePickerModal
+        open={templatePickerOpen}
+        onClose={() => setTemplatePickerOpen(false)}
+        onPick={(pick) => setFormState({ mode: "create", template: pick })}
+      />
+      {diagOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setDiagOpen(false)}>
+          <div
+            className="h-full w-[420px] overflow-y-auto bg-background p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <McpDiagnosticsPanel open onClose={() => setDiagOpen(false)} />
+          </div>
+        </div>
       )}
 
       <Modal

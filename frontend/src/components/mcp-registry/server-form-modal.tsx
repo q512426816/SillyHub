@@ -56,6 +56,11 @@ export interface McpServerFormModalProps {
   mode: "create" | "copy" | "edit";
   /** edit/copy 的源 server（create 态忽略）。 */
   server: McpServerRead | null;
+  /**
+   * create 态的模板预填（task-12「从模板新建」）：name/command/args/env 预填，
+   * 用户可改。模板为明文无 secret——secret 由用户在 env 区自行补充。
+   */
+  template?: { name: string; command: string; args: string[]; env: Record<string, string> } | null;
   /** 新建缺省保存位置（随当前 tab）。 */
   defaultScope: "platform" | "mine";
   /** 平台管理员判定（非 admin「保存到」无平台共享库选项）。 */
@@ -81,6 +86,7 @@ function buildInitialValues(
   mode: McpServerFormModalProps["mode"],
   server: McpServerRead | null,
   defaultScope: "platform" | "mine",
+  template: McpServerFormModalProps["template"],
 ): FormShape {
   if ((mode === "edit" || mode === "copy") && server) {
     const { command, args, env } = readStdioEntry(server.server_config);
@@ -93,6 +99,16 @@ function buildInitialValues(
       tags: [...server.tags],
     };
   }
+  if (mode === "create" && template) {
+    return {
+      name: template.name,
+      scope: defaultScope,
+      command: template.command,
+      args: template.args.join("\n"),
+      env: Object.entries(template.env).map(([key, value]) => ({ key, value })),
+      tags: [],
+    };
+  }
   return { name: "", scope: defaultScope, command: "", args: "", env: [], tags: [] };
 }
 
@@ -100,6 +116,7 @@ export function McpServerFormModal({
   open,
   mode,
   server,
+  template,
   defaultScope,
   isAdmin,
   submitting,
@@ -114,9 +131,9 @@ export function McpServerFormModal({
   useEffect(() => {
     if (open) {
       form.resetFields();
-      form.setFieldsValue(buildInitialValues(mode, server, defaultScope));
+      form.setFieldsValue(buildInitialValues(mode, server, defaultScope, template));
     }
-  }, [open, mode, server, defaultScope, form]);
+  }, [open, mode, server, template, defaultScope, form]);
 
   const handleOk = async () => {
     const values = await form.validateFields();
