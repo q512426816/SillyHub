@@ -766,3 +766,34 @@ modules:
     concerns: []
     review_reasons: []
     notes: "运行期 sillyspec 探测（latest 10min 缓存）+ npm 升级（复用 preflight installSillySpec）+ 内存状态机 idle→running→success|failed / deferred 30s 复查 / 终态 10min 惰性过期；isBusy 由 daemon 注入 _isBusyForUpdate；client 仅 type-only import（SillySpecUpdateState）"
+
+  # ---- 2026-09-10 新增（2026-09-10-multi-provider-injection task-01/02，task-07 登记入档）----
+  codex-settings:
+    status: active
+    doc: modules/codex-settings.md
+    paths: ["sillyhub-daemon/src/codex-settings.ts"]
+    tags: [codex, settings, config, 写盘, 供应商注入]
+    aliases: []
+    entrypoints: [writeCodexHome]
+    main_symbols: [writeCodexHome, CodexHomeWriteInput]
+    depends_on: [types]
+    used_by: [task-runner]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+    notes: "写 per-session CODEX_HOME/{auth.json, config.toml}（task-runner.applyProviderFileSettings 按 agent_kind='codex' 分派）；wire_api 恒 responses（codex 0.147.0 基线 R-03，'chat' 已移除）；openai_chat 形态 auth key=daemonApiKey 走 litellm_proxy 通道（D-006）；保守合并保留非托管段；golden=change spike/a2b-config.toml+a2-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts"
+
+  pi-settings:
+    status: active
+    doc: modules/pi-settings.md
+    paths: ["sillyhub-daemon/src/pi-settings.ts"]
+    tags: [pi, settings, config, 写盘, 供应商注入]
+    aliases: []
+    entrypoints: [writePiDir]
+    main_symbols: [writePiDir, PiDirWriteInput]
+    depends_on: [types]
+    used_by: [task-runner]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+    notes: "写 per-session PI_CODING_AGENT_DIR/{auth.json, models.json, settings.json}（applyProviderFileSettings 按 agent_kind='pi' 分派）；providers.sillyhub.api 恒 openai-completions 打 /chat/completions（pi 0.81.1 基线 R-03）；auth 官方形状 {type:'api_key', key}；官方端点（base_url 空）零写入归 env 层（D-008/R-04）；golden=change spike/b1-models.json+b1b-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts"
