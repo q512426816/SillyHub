@@ -16565,7 +16565,7 @@
           "daemon"
         ],
         "summary": "Get Daemon Mcp Config",
-        "description": "返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。\n\ndaemon 启动 skill-manager / mcp-config 时拉取，用于：\n  * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，\n    secret 类 env key 不遮蔽，区别 admin GET D-008）；\n  * ``whitelist`` → 仅放行白名单内的 server。\n\n无配置时返回空结构 ``{\"platform_default\": {\"mcpServers\": {}}, \"whitelist\": []}``，\n不报错（daemon 按\"无平台默认\"处理）。\n\n2026-08-26-workspace-mcp-edit task-03：可选 query ``workspace_id``（UUID），\n提供时响应追加 ``\"workspace\": {\"mcpServers\": {...}}``（读该工作区\n``specDir/.mcp.json`` 明文，见 ``_read_mcp_config_raw``）；不传时响应\n结构与旧版完全一致（R-07 向后兼容，旧 daemon 忽略新字段）。非法 UUID\n→ 422（全局校验处理器中文报错）。",
+        "description": "返回 MCP 注入集 + server 白名单（**原值不脱敏**，design D-004）。\n\ndaemon 启动 skill-manager / mcp-config 时拉取，用于：\n  * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，\n    ``encrypted_env`` 经 render 解密回填，secret 类 env key 不遮蔽）；\n  * ``whitelist`` → 仅放行白名单内的 server。\n\n2026-09-10-mcp-central-registry task-05：platform 位数据源 = registry 渲染\n（``render_injection_set(session, user_id)``，task-04）——不带 ``user_id``\n仅 platform binding（等同旧 KV platform_default 语义，旧 daemon 零感知）；\n带 ``user_id`` = platform ∪ user 注入集，且先做 lease 归属双校验（D-010：\n认证主体持有归属该 user 的活跃 lease，无匹配 404 不泄露存在性）。\n``mcp.platform_default`` KV 不再读（D-003 弃用，残留无害）。\n\nregistry 空库 → 200 + ``{\"platform_default\": {\"mcpServers\": {}}, ...}``\n（对齐旧 KV 缺失回落语义）；渲染抛错 → 503（中文 detail）——daemon 侧\nfetch 非 200 回落本地 ``~/.sillyhub/daemon/mcp.json`` 的既有链路保持\n可达（空集 200 与故障 503 语义分开，兼容策略 CC-14）。\n\n可选 query ``workspace_id``（2026-08-26-workspace-mcp-edit task-03）：提供时\n响应追加 ``\"workspace\": {\"mcpServers\": {...}}``（读该工作区 ``specDir/.mcp.json``\n明文，见 ``_read_mcp_config_raw``，读取逻辑不动）；非法 UUID → 422（全局\n校验处理器中文报错）。",
         "operationId": "get_daemon_mcp_config_api_daemon_mcp_config_get",
         "parameters": [
           {
@@ -16583,6 +16583,23 @@
                 }
               ],
               "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
             }
           }
         ],
@@ -16926,6 +16943,625 @@
               "type": "string",
               "format": "uuid",
               "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/import-json": {
+      "post": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Import Servers From Json",
+        "description": "JSON 粘贴导入：``{json_text, scope} → {imported, skipped, renamed}``。\n\n惰性委托 ``importer.import_from_json(session, json_text, scope, user)``（task-08\n落地；签名以 task-08 卡为准）。",
+        "operationId": "import_servers_from_json_api_mcp_servers_import_json_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpImportResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/workspace-scan": {
+      "post": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Scan Workspaces For Import",
+        "description": "workspace 扫描（只读候选列表，含去重判定；``{workspace_id?}`` 缺省=全部）。\n\n惰性委托 ``importer.scan_workspaces(session, workspace_id, user)``（task-09\n落地；签名以 task-09 卡为准）。",
+        "operationId": "scan_workspaces_for_import_api_mcp_servers_workspace_scan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpWorkspaceScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/McpWorkspaceCandidate"
+                  },
+                  "type": "array",
+                  "title": "Response Scan Workspaces For Import Api Mcp Servers Workspace Scan Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/workspace-import-apply": {
+      "post": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Apply Workspace Import",
+        "description": "应用扫描候选（``{candidates, scope}`` → 应用结果；apply 才落库）。\n\n惰性委托 ``importer.apply_workspace_import(session, candidates, scope, user)``\n（task-09 落地；签名以 task-09 卡为准）。",
+        "operationId": "apply_workspace_import_api_mcp_servers_workspace_import_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpWorkspaceImportApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpImportResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/templates": {
+      "get": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "List Templates",
+        "description": "模板列表（平台预置 + 本人自存；跨用户自存不出现）。\n\n惰性委托 ``templates.list_templates(session, user)``（task-10 落地）。",
+        "operationId": "list_templates_api_mcp_servers_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTemplateList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Save Template",
+        "description": "存为模板：``{name, from_server_id | server_config}``（双形态互斥）。\n\n惰性委托 ``templates.save_template(session, payload, user)``（task-10 落地）。",
+        "operationId": "save_template_api_mcp_servers_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpTemplateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTemplateRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/diagnostics": {
+      "get": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Get Diagnostics",
+        "description": "平台注入集预检结果（D-011 五项；读全平台绑定态与 workspace .mcp.json，\n平台全局视图挂 SETTINGS_ADMIN）。\n\n惰性委托 ``render.precheck_diagnostics(session)``（task-04 落地）。",
+        "operationId": "get_diagnostics_api_mcp_servers_diagnostics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/McpDiagnostic"
+                  },
+                  "type": "array",
+                  "title": "Response Get Diagnostics Api Mcp Servers Diagnostics Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers": {
+      "get": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "List Servers",
+        "description": "列表（env 脱敏 + 绑定态 + 诊断徽标；``?scope=platform|mine|visible``）。",
+        "operationId": "list_servers_api_mcp_servers_get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "platform",
+                "mine",
+                "visible"
+              ],
+              "type": "string",
+              "default": "visible",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Create Server",
+        "description": "创建（``scope=platform`` 需 admin、stdio-only、secret 键抽列加密——service 层）。",
+        "operationId": "create_server_api_mcp_servers_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/{server_id}": {
+      "get": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Get Server",
+        "description": "详情（env 脱敏 + encrypted_env ct 遮蔽；跨用户私有 404 由 service 保证）。\n\nservice 六方法契约（task-02 provides）无公开 detail getter——此处组合\n``_get_server``（读可见性守卫，跨用户私有 404 防枚举）与 ``_to_detail``\n（DTO 组装 + 绑定态注入），两者均为 task-02 已单测能力，router 不重查表。",
+        "operationId": "get_server_api_mcp_servers__server_id__get",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Server Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Update Server",
+        "description": "部分更新（平台 server 需 admin、换 server_config 重加密——service 层）。",
+        "operationId": "update_server_api_mcp_servers__server_id__patch",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Server Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Delete Server",
+        "description": "删除（平台 server 需 admin；binding 级联删靠 FK CASCADE——service 层）。",
+        "operationId": "delete_server_api_mcp_servers__server_id__delete",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Server Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/{server_id}/bindings": {
+      "post": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Add Binding",
+        "description": "加绑定 ``{scope_type}``（platform 需 admin；user 校验归属——service 层）。",
+        "operationId": "add_binding_api_mcp_servers__server_id__bindings_post",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Server Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpBindingCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/{server_id}/bindings/{scope_type}": {
+      "delete": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Remove Binding",
+        "description": "解绑（platform 需 admin——service 层；design ``/bindings/{scope_type}`` 形态）。",
+        "operationId": "remove_binding_api_mcp_servers__server_id__bindings__scope_type__delete",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Server Id"
+            }
+          },
+          {
+            "name": "scope_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Type"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/{server_id}/bindings/{scope_type}/{scope_ref}": {
+      "delete": {
+        "tags": [
+          "mcp-registry"
+        ],
+        "summary": "Remove Binding With Ref",
+        "description": "解绑（带 scope_ref 精确删——design ``/bindings/{scope_type}[/scope_ref]``\n的可选尾段形态；user 解绑 scope_ref=本人即可，解他人的需 admin——service 层）。",
+        "operationId": "remove_binding_with_ref_api_mcp_servers__server_id__bindings__scope_type___scope_ref__delete",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Server Id"
+            }
+          },
+          {
+            "name": "scope_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Type"
+            }
+          },
+          {
+            "name": "scope_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scope Ref"
             }
           }
         ],
@@ -45990,6 +46626,24 @@
         "title": "MachineSillySpecUpdateRead",
         "description": "机器视图 sillyspec_update 嵌套（2026-08-31-machine-sillyspec-version FR-05）。\n\n即 daemon_instances.sillyspec_update JSON 列原样透出（design §接口定义）：\ndaemon 侧 sillyspec-manager 状态机投影五字段（state 取值 running/deferred/\nsuccess/failed/up_to_date——后者为手动指令已最新的明确反馈终态\n（ql-20260904-019），trigger 取值 server_command/auto）+ backend 首落库时盖的\n``since``（同内容重放心跳保留原 since，MachinePendingUpdateRead 同款语义）。\nNULL（无升级进行中 / 终态展示窗口已过）→ 机器视图字段为 null。\n\n五上报字段全 nullable 对齐 daemon 上报形态：running/deferred 可无 to_version、\n非 failed 无 error（success 必带 to_version 由 daemon 侧保证，后端不收紧）。"
       },
+      "McpBindingCreate": {
+        "properties": {
+          "scope_type": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "user"
+            ],
+            "title": "Scope Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope_type"
+        ],
+        "title": "McpBindingCreate",
+        "description": "``POST /api/mcp-servers/{id}/bindings`` 请求体。\n\nplatform 需 admin；user binding 校验 scope_ref=owner 或 server 为平台共享\n（service 层，design 接口定义）。"
+      },
       "McpConfigUpdateRequest": {
         "properties": {
           "mcpServers": {
@@ -46016,6 +46670,294 @@
         "type": "object",
         "title": "McpConfigViewResponse",
         "description": "``GET /api/workspaces/{id}/mcp-config`` 响应（env secret 已脱敏）。\n\n无 ``.mcp.json`` 或解析失败时返回空 ``{mcpServers: {}}``，不抛错。"
+      },
+      "McpDiagnostic": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "decrypt_failed",
+              "bound_but_disabled",
+              "platform_name_shadow",
+              "workspace_blocked_by_whitelist",
+              "invalid_type_defensive"
+            ],
+            "title": "Code"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Id"
+          },
+          "server_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Name"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "McpDiagnostic",
+        "description": "平台注入集预检单项（Grill B-03 五项重定义，design 接口定义）。"
+      },
+      "McpImportRequest": {
+        "properties": {
+          "json_text": {
+            "type": "string",
+            "title": "Json Text"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "mine"
+            ],
+            "title": "Scope",
+            "default": "mine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "json_text"
+        ],
+        "title": "McpImportRequest",
+        "description": "``POST /api/mcp-servers/import-json``：{json_text, scope}（task provides 契约）。"
+      },
+      "McpImportResult": {
+        "properties": {
+          "imported": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Imported",
+            "default": []
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped",
+            "default": []
+          },
+          "renamed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Renamed",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "McpImportResult",
+        "description": "导入结果 {imported, skipped, renamed}（design REST 响应形状）。"
+      },
+      "McpServerCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,99}$",
+            "title": "Name"
+          },
+          "server_config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Server Config"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "mine"
+            ],
+            "title": "Scope",
+            "default": "mine"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "imported_json",
+              "imported_workspace"
+            ],
+            "title": "Source",
+            "default": "manual"
+          },
+          "dedup_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedup Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "server_config"
+        ],
+        "title": "McpServerCreate",
+        "description": "``POST /api/mcp-servers`` 请求体。\n\n``server_config`` 的 env 中 secret 键由 service 抽列加密进 encrypted_env\n（task-02）；scope=platform 需 SETTINGS_ADMIN（router 层权限矩阵）。"
+      },
+      "McpServerDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "server_type": {
+            "type": "string",
+            "title": "Server Type"
+          },
+          "server_config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Server Config"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "dedup_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedup Key"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "platform_bound": {
+            "type": "boolean",
+            "title": "Platform Bound",
+            "default": false
+          },
+          "user_bound": {
+            "type": "boolean",
+            "title": "User Bound",
+            "default": false
+          },
+          "diagnostic_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diagnostic Codes",
+            "default": []
+          },
+          "encrypted_env": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encrypted Env"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "owner_user_id",
+          "name",
+          "server_type",
+          "server_config",
+          "tags",
+          "note",
+          "enabled",
+          "source",
+          "dedup_key",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "McpServerDetail",
+        "description": "详情输出：额外带 encrypted_env 的脱敏形态（ct 遮蔽，key_id 保留）。"
       },
       "McpServerEntry": {
         "properties": {
@@ -46095,6 +47037,204 @@
         "title": "McpServerEntryPut",
         "description": "PUT mcp-config 单个 server 条目（仅 stdio，D-005@v2 安全边界）。\n\n``type`` 缺省 ``\"stdio\"``；未知字段拒绝（``extra=\"forbid\"``，防拼写错键静默落盘）。"
       },
+      "McpServerList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "McpServerList"
+      },
+      "McpServerRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "server_type": {
+            "type": "string",
+            "title": "Server Type"
+          },
+          "server_config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Server Config"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "dedup_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedup Key"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "platform_bound": {
+            "type": "boolean",
+            "title": "Platform Bound",
+            "default": false
+          },
+          "user_bound": {
+            "type": "boolean",
+            "title": "User Bound",
+            "default": false
+          },
+          "diagnostic_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diagnostic Codes",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "owner_user_id",
+          "name",
+          "server_type",
+          "server_config",
+          "tags",
+          "note",
+          "enabled",
+          "source",
+          "dedup_key",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "McpServerRead",
+        "description": "列表项（env 脱敏 + 绑定态 + 诊断徽标，design REST 列表行）。\n\n绑定态/诊断徽标由 service 注入；缺省 False/空为安全方向（绝不虚报已绑定）。"
+      },
+      "McpServerUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[a-z0-9][a-z0-9-]{1,99}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "server_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Config"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "McpServerUpdate",
+        "description": "``PATCH /api/mcp-servers/{id}`` 请求体（None=不动该字段）。"
+      },
       "McpServersSchema": {
         "properties": {
           "mcpServers": {
@@ -46108,6 +47248,112 @@
         "type": "object",
         "title": "McpServersSchema",
         "description": "``PUT /api/platform-settings/mcp`` 请求体。"
+      },
+      "McpTemplateCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,99}$",
+            "title": "Name"
+          },
+          "from_server_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Server Id"
+          },
+          "server_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "McpTemplateCreate",
+        "description": "``POST /api/mcp-servers/templates`` 双形态请求体（对齐 FetchModelsRequest 先例）。\n\n形态① ``from_server_id``：从既有 server 存为模板（service 只取非 secret env）；\n形态② ``server_config``：直接给配置。二者互斥（``_enforce_dual_form``）。"
+      },
+      "McpTemplateList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/McpTemplateRead"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "McpTemplateList"
+      },
+      "McpTemplateRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "server_config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Server Config"
+          },
+          "is_preset": {
+            "type": "boolean",
+            "title": "Is Preset"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "server_config",
+          "is_preset",
+          "owner_user_id",
+          "created_at"
+        ],
+        "title": "McpTemplateRead",
+        "description": "模板列表项（明文本无 secret，输出仍走脱敏兜底——防御纵深）。"
       },
       "McpTokenCreateRequest": {
         "properties": {
@@ -46359,6 +47605,87 @@
         ],
         "title": "McpWebhookRead",
         "description": "webhook 列表/详情行——绝不包含 ``secret``（明文或密文都不回显）。"
+      },
+      "McpWorkspaceCandidate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "server_config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Server Config"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "dedup_verdict": {
+            "type": "string",
+            "enum": [
+              "new",
+              "duplicate",
+              "renamed"
+            ],
+            "title": "Dedup Verdict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "server_config",
+          "workspace_id",
+          "dedup_verdict"
+        ],
+        "title": "McpWorkspaceCandidate",
+        "description": "扫描候选（task provides 契约：name/server_config/workspace_id/dedup_verdict）。\n\nserver_config 输出脱敏（apply 时 service 按 workspace_id+name 重读原文件取\n明文，脱敏展示不阻断应用）。"
+      },
+      "McpWorkspaceImportApplyRequest": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/McpWorkspaceCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "mine"
+            ],
+            "title": "Scope",
+            "default": "mine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidates"
+        ],
+        "title": "McpWorkspaceImportApplyRequest",
+        "description": "``POST /api/mcp-servers/workspace-import-apply``：{candidates, scope}。"
+      },
+      "McpWorkspaceScanRequest": {
+        "properties": {
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          }
+        },
+        "type": "object",
+        "title": "McpWorkspaceScanRequest",
+        "description": "``POST /api/mcp-servers/workspace-scan``：workspace_id 缺省=扫描全部。"
       },
       "MeResponse": {
         "properties": {

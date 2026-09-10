@@ -6334,21 +6334,29 @@ export interface paths {
         };
         /**
          * Get Daemon Mcp Config
-         * @description 返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。
+         * @description 返回 MCP 注入集 + server 白名单（**原值不脱敏**，design D-004）。
          *
          *     daemon 启动 skill-manager / mcp-config 时拉取，用于：
          *       * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，
-         *         secret 类 env key 不遮蔽，区别 admin GET D-008）；
+         *         ``encrypted_env`` 经 render 解密回填，secret 类 env key 不遮蔽）；
          *       * ``whitelist`` → 仅放行白名单内的 server。
          *
-         *     无配置时返回空结构 ``{"platform_default": {"mcpServers": {}}, "whitelist": []}``，
-         *     不报错（daemon 按"无平台默认"处理）。
+         *     2026-09-10-mcp-central-registry task-05：platform 位数据源 = registry 渲染
+         *     （``render_injection_set(session, user_id)``，task-04）——不带 ``user_id``
+         *     仅 platform binding（等同旧 KV platform_default 语义，旧 daemon 零感知）；
+         *     带 ``user_id`` = platform ∪ user 注入集，且先做 lease 归属双校验（D-010：
+         *     认证主体持有归属该 user 的活跃 lease，无匹配 404 不泄露存在性）。
+         *     ``mcp.platform_default`` KV 不再读（D-003 弃用，残留无害）。
          *
-         *     2026-08-26-workspace-mcp-edit task-03：可选 query ``workspace_id``（UUID），
-         *     提供时响应追加 ``"workspace": {"mcpServers": {...}}``（读该工作区
-         *     ``specDir/.mcp.json`` 明文，见 ``_read_mcp_config_raw``）；不传时响应
-         *     结构与旧版完全一致（R-07 向后兼容，旧 daemon 忽略新字段）。非法 UUID
-         *     → 422（全局校验处理器中文报错）。
+         *     registry 空库 → 200 + ``{"platform_default": {"mcpServers": {}}, ...}``
+         *     （对齐旧 KV 缺失回落语义）；渲染抛错 → 503（中文 detail）——daemon 侧
+         *     fetch 非 200 回落本地 ``~/.sillyhub/daemon/mcp.json`` 的既有链路保持
+         *     可达（空集 200 与故障 503 语义分开，兼容策略 CC-14）。
+         *
+         *     可选 query ``workspace_id``（2026-08-26-workspace-mcp-edit task-03）：提供时
+         *     响应追加 ``"workspace": {"mcpServers": {...}}``（读该工作区 ``specDir/.mcp.json``
+         *     明文，见 ``_read_mcp_config_raw``，读取逻辑不动）；非法 UUID → 422（全局
+         *     校验处理器中文报错）。
          */
         get: operations["get_daemon_mcp_config_api_daemon_mcp_config_get"];
         put?: never;
@@ -6474,6 +6482,243 @@ export interface paths {
          * @description 删除 CustomSkill（service 校验归属，非本人 404）。
          */
         delete: operations["delete_custom_skill_api_custom_skills__skill_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/import-json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Servers From Json
+         * @description JSON 粘贴导入：``{json_text, scope} → {imported, skipped, renamed}``。
+         *
+         *     惰性委托 ``importer.import_from_json(session, json_text, scope, user)``（task-08
+         *     落地；签名以 task-08 卡为准）。
+         */
+        post: operations["import_servers_from_json_api_mcp_servers_import_json_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/workspace-scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scan Workspaces For Import
+         * @description workspace 扫描（只读候选列表，含去重判定；``{workspace_id?}`` 缺省=全部）。
+         *
+         *     惰性委托 ``importer.scan_workspaces(session, workspace_id, user)``（task-09
+         *     落地；签名以 task-09 卡为准）。
+         */
+        post: operations["scan_workspaces_for_import_api_mcp_servers_workspace_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/workspace-import-apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Workspace Import
+         * @description 应用扫描候选（``{candidates, scope}`` → 应用结果；apply 才落库）。
+         *
+         *     惰性委托 ``importer.apply_workspace_import(session, candidates, scope, user)``
+         *     （task-09 落地；签名以 task-09 卡为准）。
+         */
+        post: operations["apply_workspace_import_api_mcp_servers_workspace_import_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Templates
+         * @description 模板列表（平台预置 + 本人自存；跨用户自存不出现）。
+         *
+         *     惰性委托 ``templates.list_templates(session, user)``（task-10 落地）。
+         */
+        get: operations["list_templates_api_mcp_servers_templates_get"];
+        put?: never;
+        /**
+         * Save Template
+         * @description 存为模板：``{name, from_server_id | server_config}``（双形态互斥）。
+         *
+         *     惰性委托 ``templates.save_template(session, payload, user)``（task-10 落地）。
+         */
+        post: operations["save_template_api_mcp_servers_templates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Diagnostics
+         * @description 平台注入集预检结果（D-011 五项；读全平台绑定态与 workspace .mcp.json，
+         *     平台全局视图挂 SETTINGS_ADMIN）。
+         *
+         *     惰性委托 ``render.precheck_diagnostics(session)``（task-04 落地）。
+         */
+        get: operations["get_diagnostics_api_mcp_servers_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Servers
+         * @description 列表（env 脱敏 + 绑定态 + 诊断徽标；``?scope=platform|mine|visible``）。
+         */
+        get: operations["list_servers_api_mcp_servers_get"];
+        put?: never;
+        /**
+         * Create Server
+         * @description 创建（``scope=platform`` 需 admin、stdio-only、secret 键抽列加密——service 层）。
+         */
+        post: operations["create_server_api_mcp_servers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Server
+         * @description 详情（env 脱敏 + encrypted_env ct 遮蔽；跨用户私有 404 由 service 保证）。
+         *
+         *     service 六方法契约（task-02 provides）无公开 detail getter——此处组合
+         *     ``_get_server``（读可见性守卫，跨用户私有 404 防枚举）与 ``_to_detail``
+         *     （DTO 组装 + 绑定态注入），两者均为 task-02 已单测能力，router 不重查表。
+         */
+        get: operations["get_server_api_mcp_servers__server_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Server
+         * @description 删除（平台 server 需 admin；binding 级联删靠 FK CASCADE——service 层）。
+         */
+        delete: operations["delete_server_api_mcp_servers__server_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Server
+         * @description 部分更新（平台 server 需 admin、换 server_config 重加密——service 层）。
+         */
+        patch: operations["update_server_api_mcp_servers__server_id__patch"];
+        trace?: never;
+    };
+    "/api/mcp-servers/{server_id}/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Binding
+         * @description 加绑定 ``{scope_type}``（platform 需 admin；user 校验归属——service 层）。
+         */
+        post: operations["add_binding_api_mcp_servers__server_id__bindings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/{server_id}/bindings/{scope_type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Binding
+         * @description 解绑（platform 需 admin——service 层；design ``/bindings/{scope_type}`` 形态）。
+         */
+        delete: operations["remove_binding_api_mcp_servers__server_id__bindings__scope_type__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp-servers/{server_id}/bindings/{scope_type}/{scope_ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Binding With Ref
+         * @description 解绑（带 scope_ref 精确删——design ``/bindings/{scope_type}[/scope_ref]``
+         *     的可选尾段形态；user 解绑 scope_ref=本人即可，解他人的需 admin——service 层）。
+         */
+        delete: operations["remove_binding_with_ref_api_mcp_servers__server_id__bindings__scope_type___scope_ref__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -16332,6 +16577,20 @@ export interface components {
             since?: string | null;
         };
         /**
+         * McpBindingCreate
+         * @description ``POST /api/mcp-servers/{id}/bindings`` 请求体。
+         *
+         *     platform 需 admin；user binding 校验 scope_ref=owner 或 server 为平台共享
+         *     （service 层，design 接口定义）。
+         */
+        McpBindingCreate: {
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "platform" | "user";
+        };
+        /**
          * McpConfigUpdateRequest
          * @description ``PUT /api/workspaces/{id}/mcp-config`` 请求体（wire 格式同 claude .mcp.json）。
          */
@@ -16352,6 +16611,149 @@ export interface components {
             mcpServers?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * McpDiagnostic
+         * @description 平台注入集预检单项（Grill B-03 五项重定义，design 接口定义）。
+         */
+        McpDiagnostic: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "decrypt_failed" | "bound_but_disabled" | "platform_name_shadow" | "workspace_blocked_by_whitelist" | "invalid_type_defensive";
+            /** Server Id */
+            server_id?: string | null;
+            /** Server Name */
+            server_name?: string | null;
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * McpImportRequest
+         * @description ``POST /api/mcp-servers/import-json``：{json_text, scope}（task provides 契约）。
+         */
+        McpImportRequest: {
+            /** Json Text */
+            json_text: string;
+            /**
+             * Scope
+             * @default mine
+             * @enum {string}
+             */
+            scope: "platform" | "mine";
+        };
+        /**
+         * McpImportResult
+         * @description 导入结果 {imported, skipped, renamed}（design REST 响应形状）。
+         */
+        McpImportResult: {
+            /**
+             * Imported
+             * @default []
+             */
+            imported: string[];
+            /**
+             * Skipped
+             * @default []
+             */
+            skipped: string[];
+            /**
+             * Renamed
+             * @default []
+             */
+            renamed: string[];
+        };
+        /**
+         * McpServerCreate
+         * @description ``POST /api/mcp-servers`` 请求体。
+         *
+         *     ``server_config`` 的 env 中 secret 键由 service 抽列加密进 encrypted_env
+         *     （task-02）；scope=platform 需 SETTINGS_ADMIN（router 层权限矩阵）。
+         */
+        McpServerCreate: {
+            /** Name */
+            name: string;
+            /** Server Config */
+            server_config: {
+                [key: string]: unknown;
+            };
+            /**
+             * Scope
+             * @default mine
+             * @enum {string}
+             */
+            scope: "platform" | "mine";
+            /**
+             * Source
+             * @default manual
+             * @enum {string}
+             */
+            source: "manual" | "imported_json" | "imported_workspace";
+            /** Dedup Key */
+            dedup_key?: string | null;
+        };
+        /**
+         * McpServerDetail
+         * @description 详情输出：额外带 encrypted_env 的脱敏形态（ct 遮蔽，key_id 保留）。
+         */
+        McpServerDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Owner User Id */
+            owner_user_id: string | null;
+            /** Name */
+            name: string;
+            /** Server Type */
+            server_type: string;
+            /** Server Config */
+            server_config: {
+                [key: string]: unknown;
+            };
+            /** Tags */
+            tags: string[];
+            /** Note */
+            note: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Source */
+            source: string;
+            /** Dedup Key */
+            dedup_key: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Platform Bound
+             * @default false
+             */
+            platform_bound: boolean;
+            /**
+             * User Bound
+             * @default false
+             */
+            user_bound: boolean;
+            /**
+             * Diagnostic Codes
+             * @default []
+             */
+            diagnostic_codes: string[];
+            /** Encrypted Env */
+            encrypted_env?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            } | null;
         };
         /**
          * McpServerEntry
@@ -16388,6 +16790,89 @@ export interface components {
                 [key: string]: string;
             } | null;
         };
+        /** McpServerList */
+        McpServerList: {
+            /** Items */
+            items: components["schemas"]["McpServerRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * McpServerRead
+         * @description 列表项（env 脱敏 + 绑定态 + 诊断徽标，design REST 列表行）。
+         *
+         *     绑定态/诊断徽标由 service 注入；缺省 False/空为安全方向（绝不虚报已绑定）。
+         */
+        McpServerRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Owner User Id */
+            owner_user_id: string | null;
+            /** Name */
+            name: string;
+            /** Server Type */
+            server_type: string;
+            /** Server Config */
+            server_config: {
+                [key: string]: unknown;
+            };
+            /** Tags */
+            tags: string[];
+            /** Note */
+            note: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Source */
+            source: string;
+            /** Dedup Key */
+            dedup_key: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Platform Bound
+             * @default false
+             */
+            platform_bound: boolean;
+            /**
+             * User Bound
+             * @default false
+             */
+            user_bound: boolean;
+            /**
+             * Diagnostic Codes
+             * @default []
+             */
+            diagnostic_codes: string[];
+        };
+        /**
+         * McpServerUpdate
+         * @description ``PATCH /api/mcp-servers/{id}`` 请求体（None=不动该字段）。
+         */
+        McpServerUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Server Config */
+            server_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Tags */
+            tags?: string[] | null;
+            /** Note */
+            note?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
         /**
          * McpServersSchema
          * @description ``PUT /api/platform-settings/mcp`` 请求体。
@@ -16397,6 +16882,54 @@ export interface components {
             mcpServers?: {
                 [key: string]: components["schemas"]["McpServerEntry"];
             };
+        };
+        /**
+         * McpTemplateCreate
+         * @description ``POST /api/mcp-servers/templates`` 双形态请求体（对齐 FetchModelsRequest 先例）。
+         *
+         *     形态① ``from_server_id``：从既有 server 存为模板（service 只取非 secret env）；
+         *     形态② ``server_config``：直接给配置。二者互斥（``_enforce_dual_form``）。
+         */
+        McpTemplateCreate: {
+            /** Name */
+            name: string;
+            /** From Server Id */
+            from_server_id?: string | null;
+            /** Server Config */
+            server_config?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** McpTemplateList */
+        McpTemplateList: {
+            /** Items */
+            items: components["schemas"]["McpTemplateRead"][];
+        };
+        /**
+         * McpTemplateRead
+         * @description 模板列表项（明文本无 secret，输出仍走脱敏兜底——防御纵深）。
+         */
+        McpTemplateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Server Config */
+            server_config: {
+                [key: string]: unknown;
+            };
+            /** Is Preset */
+            is_preset: boolean;
+            /** Owner User Id */
+            owner_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * McpTokenCreateRequest
@@ -16517,6 +17050,53 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * McpWorkspaceCandidate
+         * @description 扫描候选（task provides 契约：name/server_config/workspace_id/dedup_verdict）。
+         *
+         *     server_config 输出脱敏（apply 时 service 按 workspace_id+name 重读原文件取
+         *     明文，脱敏展示不阻断应用）。
+         */
+        McpWorkspaceCandidate: {
+            /** Name */
+            name: string;
+            /** Server Config */
+            server_config: {
+                [key: string]: unknown;
+            };
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Dedup Verdict
+             * @enum {string}
+             */
+            dedup_verdict: "new" | "duplicate" | "renamed";
+        };
+        /**
+         * McpWorkspaceImportApplyRequest
+         * @description ``POST /api/mcp-servers/workspace-import-apply``：{candidates, scope}。
+         */
+        McpWorkspaceImportApplyRequest: {
+            /** Candidates */
+            candidates: components["schemas"]["McpWorkspaceCandidate"][];
+            /**
+             * Scope
+             * @default mine
+             * @enum {string}
+             */
+            scope: "platform" | "mine";
+        };
+        /**
+         * McpWorkspaceScanRequest
+         * @description ``POST /api/mcp-servers/workspace-scan``：workspace_id 缺省=扫描全部。
+         */
+        McpWorkspaceScanRequest: {
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /** MeResponse */
         MeResponse: {
@@ -34880,6 +35460,7 @@ export interface operations {
         parameters: {
             query?: {
                 workspace_id?: string | null;
+                user_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -35129,6 +35710,433 @@ export interface operations {
             header?: never;
             path: {
                 skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_servers_from_json_api_mcp_servers_import_json_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpImportResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_workspaces_for_import_api_mcp_servers_workspace_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpWorkspaceScanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpWorkspaceCandidate"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_workspace_import_api_mcp_servers_workspace_import_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpWorkspaceImportApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpImportResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_templates_api_mcp_servers_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTemplateList"];
+                };
+            };
+        };
+    };
+    save_template_api_mcp_servers_templates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpTemplateCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_diagnostics_api_mcp_servers_diagnostics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpDiagnostic"][];
+                };
+            };
+        };
+    };
+    list_servers_api_mcp_servers_get: {
+        parameters: {
+            query?: {
+                scope?: "platform" | "mine" | "visible";
+                search?: string | null;
+                tag?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_server_api_mcp_servers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_server_api_mcp_servers__server_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_server_api_mcp_servers__server_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_server_api_mcp_servers__server_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_binding_api_mcp_servers__server_id__bindings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpBindingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_binding_api_mcp_servers__server_id__bindings__scope_type__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+                scope_type: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_binding_with_ref_api_mcp_servers__server_id__bindings__scope_type___scope_ref__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+                scope_type: string;
+                scope_ref: string;
             };
             cookie?: never;
         };

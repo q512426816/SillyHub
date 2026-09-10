@@ -11,6 +11,7 @@ import type {
   DaemonMachineListParams,
   DaemonRuntimeListParams,
 } from "@/lib/daemon";
+import type { McpRegistryListParams } from "@/lib/api/mcp-registry";
 import type { NotificationListParams } from "@/lib/notifications";
 
 export const queryKeys = {
@@ -104,6 +105,14 @@ export const queryKeys = {
       ["mentionSources", "ppmTasks", scope] as const,
     ppmProblems: (scope: "ongoing" | "all") =>
       ["mentionSources", "ppmProblems", scope] as const,
+  },
+  // 2026-09-10-mcp-central-registry task-11：MCP 中央资产库列表缓存键。
+  // scope/search/tag 全部进 key（影响查询结果的全部变量——本文件头规则）；
+  // CRUD/binding mutation 成功后 invalidate all 一次刷新双 tab 两个 scope 桶。
+  mcpRegistry: {
+    all: ["mcpRegistry"] as const,
+    list: (params: McpRegistryListParams) =>
+      ["mcpRegistry", "list", params] as const,
   },
   // 2026-08-29-approval-notify-push task-10：站内通知缓存键（铃铛数据源）。
   // list 与 unreadCount 共用 "notifications" 前缀——SSE notification 事件 / 重连

@@ -212,6 +212,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
         expect(g.permissions).toEqual([]);
         return;
       }
+      if (g.menuKey === "mcp") {
+        // 2026-09-10-mcp-central-registry task-11 主代理裁决：MCP 资产库全员可见
+        // （D-001 双层可见性，私有库入口；写权限由 API 层控制，对齐 skills 先例）
+        expect(g.permissions).toEqual([]);
+        return;
+      }
       expect(g.permissions.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -231,6 +237,11 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
       if (g.menuKey === "skills") {
         // 2026-07-31-custom-skill-per-user D-003：skills 无独立权限（permissions:[]），pickerHidden 屏蔽空卡
+        expect(g.pickerHidden).toBe(true);
+        return;
+      }
+      if (g.menuKey === "mcp") {
+        // 2026-09-10-mcp-central-registry task-11：同 skills 形态（permissions:[] 无独立权限可配）
         expect(g.pickerHidden).toBe(true);
         return;
       }
@@ -350,15 +361,18 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.pickerHidden).toBe(true);
   });
 
-  it("新增 mcp 菜单：agent 组 /settings/mcp + settings:admin（design §7.1）", () => {
+  it("新增 mcp 菜单：agent 组 /settings/mcp + permissions:[] 全员可见（2026-09-10-mcp-central-registry task-11 更名+主代理裁决放开）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "mcp");
     expect(g).toBeDefined();
     expect(g!.section).toBe("agent");
-    expect(g!.menuLabel).toBe("MCP 管理");
+    expect(g!.menuLabel).toBe("MCP 资产库");
     expect(g!.href).toBe("/settings/mcp");
     expect(g!.absolute).toBe(true);
     expect(g!.matchPattern).toBe("/settings/mcp");
-    expect(g!.permissions).toEqual([{ key: "settings:admin", name: "平台设置管理" }]);
+    // D-001 双层可见性：普通用户进页面管理自己的私有库（FR-01），写权限由 API 层
+    // 权限矩阵控制（对齐 skills D-003 放开先例）
+    expect(g!.permissions).toEqual([]);
+    expect(g!.pickerHidden).toBe(true);
   });
 
   it("新增 agent-profiles 菜单：agent 组 /agent-profiles + permissions:[] 对所有登录用户可见（task-05 / D-001/D-007）", () => {

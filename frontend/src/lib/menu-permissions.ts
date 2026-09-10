@@ -192,14 +192,20 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   {
     // 2026-07-29-sidebar-menu-restructure 新增（D-003）：MCP 管理提为独立菜单，
     // 指向平台级 /settings/mcp。
+    // 2026-09-10-mcp-central-registry task-11：菜单名改「MCP 资产库」（页面重构为
+    // 平台共享库/我的库双 tab 资产管理）。主代理裁决：permissions 放开为 []
+    // （对齐 skills D-003 先例）——D-001 双层可见性要求普通用户能进页面管理自己
+    // 的私有库（FR-01），菜单只是入口可见性，写权限由 API 层权限矩阵全权控制
+    // （非 admin 平台库写 403）。URL 不变。
     section: "agent",
     menuKey: "mcp",
-    menuLabel: "MCP 管理",
+    menuLabel: "MCP 资产库",
     icon: "\u{1F517}",
     href: "/settings/mcp",
     absolute: true,
     matchPattern: "/settings/mcp",
-    permissions: [{ key: "settings:admin", name: "平台设置管理" }],
+    permissions: [],
+    pickerHidden: true,
   },
   {
     // 2026-08-04-agent-profile-ui-redesign task-05 新增（D-001/D-007）：智能体档案

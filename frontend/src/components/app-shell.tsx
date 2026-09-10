@@ -90,7 +90,7 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   "/settings": Settings,
   "/workspaces": Home,
   // 2026-07-29-sidebar-menu-restructure 新增 3 菜单(D-002/D-003/D-005):
-  // 技能管理 / MCP 管理(agent 组,平台级)+ 我的供应商(config 组)。
+  // 技能管理 / MCP 资产库(agent 组,平台级)+ 我的供应商(config 组)。
   // 图标语义:技能=Puzzle(能力拼块),MCP=PlugZap(协议接入),供应商=Cloud(云端服务,
   // 避开与 /admin/roles 重复的 KeyRound)。
   "/settings/skills": Puzzle,
