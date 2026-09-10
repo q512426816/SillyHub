@@ -154,3 +154,15 @@
 锚点：未记录
 最近确认：c0f16019a
 理由：NormalizedLogMessage 九字段（seq/kind/text/tool_name/tool_use_id/tool_input/tool_result/is_error/ts）逐行全量 JSON，封闭列举；content 回落捕获范围含 not_found/method_not_found（老 daemon）/离线/超时。
+
+## D-001@v1 : 平台用户头像存文件中心（users.avatar URL 列）
+状态：implemented
+锚点：`backend/app/modules/auth/model.py:53`
+最近确认：41c3b37
+理由：2026-09-10-account-avatar-upload——users.avatar VARCHAR(512) NULL 存 /api/file/{id} 或外链（与 agent/群成员头像同构）；上传走既有文件中心端点（owner_type=user_avatar），渲染复用 useAvatarSrc blob 管线，零新存储设施；否决独立公开头像服务（隐私面大）与 base64 存 DB（膨胀）。
+
+## D-002@v1 : 群聊用户成员头像后端回落解析（member.avatar or user.avatar）
+状态：implemented
+锚点：`backend/app/modules/daemon/group/service/helpers.py:699`
+最近确认：41c3b37
+理由：2026-09-10-account-avatar-upload——读取路径对 user 成员做平台头像回落（群内自定义优先，NULL/'' 均回落；agent 成员不动），前端零改动即生效；_to_read 同步函数不直查 users 表，crud 调用点批量预取 select in 免 N+1；读取端解析非快照，平台头像更新群读实时取新值。

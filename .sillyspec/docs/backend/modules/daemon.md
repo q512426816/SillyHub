@@ -76,6 +76,11 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   群 CRUD（POST 建/GET 列表含成员摘要 chips/GET 详情/PATCH 改名开关/POST end 解散）、
   成员（POST 添加用户或 agent 成员/PATCH 六要素热切换/DELETE 移除/POST reset-memory）、
   POST `/{id}/messages` 群消息 @路由、POST `/{id}/typing` 心跳。核心机制：
+  - 用户成员平台头像回落（2026-09-10-account-avatar-upload D-002）：读取路径
+    GroupMemberRead.avatar = `member.avatar or user.avatar`（群内自定义优先，
+    NULL/'' 均回落平台头像；agent 成员不动）。`_to_read` 保持同步不直查 users 表
+    ——crud 各调用点经 `_user_avatar_map` 批量预取（select in 一次查询免 N+1），
+    members 加/改成员返回单查目标 user；读取端解析非快照，平台头像更新后群读实时取新值。
   - @路由：`_parse_group_mentions`（全/半角 @ 昵称精确命中成员表 display_name，
     @全体/@all 广播全部 agent 成员）；未@仅落时间线进群背景摘要（context_window
     默认 20 条、单条 500 字/总长 6000 字，含 agent 回复）。

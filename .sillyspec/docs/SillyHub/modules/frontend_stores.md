@@ -14,7 +14,7 @@ SillyHub 前端全局客户端状态层（frontend/src/stores/**，Zustand）。
 ## 契约摘要
 - `stores/session.ts`：`useSession`
   - State：`hydrated` / `user: SessionUser | null` / `accessToken` / `refreshToken`
-  - `SessionUser`：id / email / displayName / `is_platform_admin?` / `permissions?: string[]`（权限渲染与菜单过滤用）
+  - `SessionUser`：id / email / displayName / `is_platform_admin?` / `permissions?: string[]`（权限渲染与菜单过滤用）/ `avatar?: string | null`（头像 URL——文件中心 /api/file/{id} 或外链，2026-09-10-account-avatar-upload；可选字段旧 persist 形状按 undefined 兼容，version 不 bump）
   - Actions：`setUser` / `setTokens` / `clear` / `markHydrated`
   - persist → localStorage，key `multi-agent-platform.session`，version 1，partialize 四字段，`onRehydrateStorage` 回调 `markHydrated()` 让守卫判定确定化
 - `stores/workspace.ts`：`useWorkspaceStore`（**非 persist**）
