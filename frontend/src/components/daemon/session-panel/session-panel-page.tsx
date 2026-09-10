@@ -64,7 +64,7 @@ import {
   cancelTeamMission, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory,
   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
   triggerSessionTeamMission, maxLogTimestamp, reopenSession, streamSession,
-  updateSessionCtxWindow, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest,
+  updateSessionAutoResume, updateSessionCtxWindow, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest,
   type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest,
   type PlanSummary,
 } from "@/lib/daemon";
@@ -2316,6 +2316,22 @@ export function SessionPanelPage({
 
   // ql-20260903-026：行级 memo props 稳定化——内联箭头每次渲染新引用会击穿
   // TurnTimeline 内 TurnRow 的 memo（流式 delta 期间父树每次重渲染）。
+  // 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关——PATCH
+  // 后乐观刷新本地 session.config（config 条与失败卡 hint 同源）。
+  const handleAutoResumeToggle = useCallback(
+    async (next: boolean) => {
+      if (!sessionId) return;
+      try {
+        await updateSessionAutoResume(sessionId, next);
+        // config 条/失败卡 hint 同源 detailQuery——refetch 拉新 config 生效。
+        await detailQuery.refetch();
+        notify.success(next ? "已开启中断自动续跑" : "已关闭中断自动续跑");
+      } catch (err) {
+        notify.error(err, "设置失败，请重试");
+      }
+    },
+    [sessionId, notify, detailQuery],
+  );
   const timelineOnResend = useCallback(
     (prompt: string) => {
       void handleResend(prompt);
@@ -2776,6 +2792,14 @@ export function SessionPanelPage({
         turns={dialogTurns}
         viewMode={viewMode}
         errorMsg={errorMsg}
+        // 2026-09-10-auto-resume-interrupted-turn / FR-07：daemon_restarted 失败卡
+        // 场景化兜底（该码不在 8 类错误映射）——按开关状态两态文案。
+        daemonRestartedHint={
+          (session.config as Record<string, unknown> | null)?.auto_resume_interrupted
+          === false
+            ? "服务重启中断本轮，会话已保留，可手动重发"
+            : "服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"
+        }
         // task-04：目录跳转命中受控高亮（~2.2s 自清；TurnTimeline 内逐行派生
         // isHighlighted 进 memo 行，R-07）。
         highlightTurnKey={highlightTurnKey}
@@ -3427,6 +3451,14 @@ export function SessionPanelPage({
             llmProviderId={session.llm_provider_id ?? null}
             configSnapshot={session.config_snapshot ?? null}
             engine={session.provider ?? null}
+            // 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关
+            //（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
+            autoResume={{
+              enabled: (session.config as Record<string, unknown> | null)
+                ?.auto_resume_interrupted !== false,
+              disabled: ended || !machineOnline,
+              onToggle: handleAutoResumeToggle,
+            }}
             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
             providerOpenSignal={configProviderSignal}
             // ql-20260909-006：ctx 用量圆环+额度胶囊收进配置条行尾插槽（原输入框

@@ -94,6 +94,21 @@ async def _seed_session_with_runs(
 
 class TestListSessionRuns:
     @pytest.mark.asyncio
+    async def test_returns_auto_resume_metadata(self, client, auth_headers, db_session) -> None:
+        """2026-09-10-auto-resume-interrupted-turn：run metadata（auto_resume_of）
+        经 SessionRunRead 透传（validation_alias=metadata_；普通轮为 null）。"""
+        admin = await _admin_id(db_session)
+        sid, failed_run, completed_run = await _seed_session_with_runs(db_session, owner_id=admin)
+        failed_run.metadata_ = {"auto_resume_of": str(completed_run.id)}
+        db_session.add(failed_run)
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sid}/runs", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        by_id = {item["id"]: item for item in resp.json()}
+        assert by_id[str(failed_run.id)]["metadata"] == {"auto_resume_of": str(completed_run.id)}
+        assert by_id[str(completed_run.id)]["metadata"] is None
+
     async def test_returns_runs_with_error_detail(self, client, auth_headers, db_session) -> None:
         """失败 run 的 error_detail 完整透传；完成 run 的 error_detail 为 null。"""
         admin = await _admin_id(db_session)

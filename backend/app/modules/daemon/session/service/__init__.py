@@ -597,11 +597,13 @@ class SessionService(BackgroundTaskMixin):
         busy_strategy: Literal["queue", "inject"] | None = None,
         queue_sender_user_id: uuid.UUID | None = None,
         turn_metadata: dict | None = None,
+        auto_resume_of: uuid.UUID | None = None,
     ) -> SessionDispatchResult:
         return await _inject._inject_into_session(
             self,
             session=session,
             prompt=prompt,
+            auto_resume_of=auto_resume_of,
             run_sender_user_id=run_sender_user_id,
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
@@ -1067,6 +1069,19 @@ class SessionService(BackgroundTaskMixin):
             session_id=session_id,
             message_id=message_id,
             user_id=user_id,
+        )
+
+    async def update_auto_resume_pref(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        enabled: bool,
+    ) -> None:
+        return await _session_lifecycle.update_auto_resume_pref(
+            self,
+            session_id=session_id,
+            user_id=user_id,
+            enabled=enabled,
         )
 
     async def update_ctx_window(

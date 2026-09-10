@@ -623,6 +623,13 @@ export interface SessionRunRead {
   input_tokens: number | null;
   output_tokens: number | null;
   /**
+   * 2026-09-10-auto-resume-interrupted-turn：续跑轮标记——自动续跑派发落地的
+   * run 为 { auto_resume_of: <源 run id> }（「自动续跑」徽标数据源）；普通轮
+   * / 存量行为 null。与后端 SessionRunRead.metadata（validation_alias=
+   * metadata_）对齐，手工维护（本 interface 惯例）。
+   */
+  metadata?: { auto_resume_of?: string; [key: string]: unknown } | null;
+  /**
    * 2026-08-27-session-token-usage-fix task-07 补录 / FR-01：该 run 期间最近
    * 一次 API 调用的提示词大小（input+cache_read+cache_creation，REST 历史
    * 回填路径：AgentRun.ctx_tokens 列 → GET /sessions/{id}/runs → 前端

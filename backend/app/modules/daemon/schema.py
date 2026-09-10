@@ -331,6 +331,16 @@ class SessionInjectRequest(BaseModel):
         return self
 
 
+class SessionAutoResumeUpdateRequest(BaseModel):
+    """PATCH /api/daemon/sessions/{id}/auto-resume 请求体（2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2）。
+
+    会话级「daemon 重启自动续跑」开关（缺省开）：enabled=False 显式关闭
+    （recover 守卫 G2 不再自动入队）；enabled=True 恢复默认开。
+    """
+
+    enabled: bool
+
+
 class SessionCtxWindowUpdateRequest(BaseModel):
     """PATCH /api/daemon/sessions/{id}/ctx-window 请求体（ql-20260831-002）。
 

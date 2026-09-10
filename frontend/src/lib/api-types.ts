@@ -5822,6 +5822,26 @@ export interface paths {
         patch: operations["update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch"];
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/auto-resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Session Auto Resume
+         * @description Enable/disable daemon-restart auto-resume for an owned session (default on).
+         */
+        patch: operations["update_session_auto_resume_api_daemon_sessions__session_id__auto_resume_patch"];
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/pin": {
         parameters: {
             query?: never;
@@ -20621,6 +20641,17 @@ export interface components {
             /** Git Mode */
             git_mode: string;
         };
+        /**
+         * SessionAutoResumeUpdateRequest
+         * @description PATCH /api/daemon/sessions/{id}/auto-resume 请求体（2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2）。
+         *
+         *     会话级「daemon 重启自动续跑」开关（缺省开）：enabled=False 显式关闭
+         *     （recover 守卫 G2 不再自动入队）；enabled=True 恢复默认开。
+         */
+        SessionAutoResumeUpdateRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** SessionControlResponse */
         SessionControlResponse: {
             /**
@@ -20768,6 +20799,8 @@ export interface components {
             created_at: string;
             /** Answered At */
             answered_at: string | null;
+            /** Answered By */
+            answered_by?: string | null;
         };
         /**
          * SessionEndRequest
@@ -20991,6 +21024,10 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
             /** Spec Strategy */
             spec_strategy?: string | null;
             /** Status */
@@ -24070,6 +24107,8 @@ export interface components {
             created_at: string;
             /** Answered At */
             answered_at: string | null;
+            /** Answered By */
+            answered_by?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
             /** Workspace Name */
@@ -34130,6 +34169,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SessionCtxWindowUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_session_auto_resume_api_daemon_sessions__session_id__auto_resume_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionAutoResumeUpdateRequest"];
             };
         };
         responses: {

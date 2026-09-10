@@ -189,6 +189,9 @@ export function enrichDisplayTurns(
                 at: meta.started_at ?? null,
               }
             : undefined),
+        // 2026-09-10-auto-resume-interrupted-turn：续跑轮标记（run.metadata.
+        // auto_resume_of →「自动续跑」徽标）；?? 链只补缺。
+        autoResumeOf: t.autoResumeOf ?? meta.metadata?.auto_resume_of ?? null,
         whoLine: t.whoLine ?? {
           // 快照缺 name / 无快照 = 该轮未指定档案 → null（TurnTimeline 显「未指定」）
           profileName: meta.agent_profile_snapshot?.name ?? null,

@@ -151,6 +151,13 @@ export interface RunErrorItemProps {
   /** task-08 结构化错误载荷（type/code/message/retryable/hint/raw）。 */
   item: ErrorLogItem;
   /**
+   * 2026-09-10-auto-resume-interrupted-turn / FR-07：父级注入的场景化兜底建议——
+   * item.hint 与类型表 defaultHint 都缺席（如 daemon_restarted 不在 8 类映射，
+   * hint 为空）时生效。会话页按「中断自动续跑」开关状态传两态文案；不传保持
+   * 现行为（类型表 defaultHint）。
+   */
+  fallbackHint?: string;
+  /**
    * 重新发送回调；传入即渲染按钮。ql-20260904-010：不再按 item.retryable 门控
    * （原 D-006 的 quota/auth 隐藏逻辑废除——用户决策所有失败卡都提供重试入口，
    * 重试守卫由父级提交链路承担）；turn 无 prompt 时父级不传（无可重放内容）。
@@ -173,13 +180,14 @@ export interface RunErrorItemProps {
  */
 export function RunErrorItem({
   item,
+  fallbackHint,
   onResend,
   onSwitchProvider,
   onViewDetail,
 }: RunErrorItemProps) {
   const meta = modelErrorMeta(item.type);
   const { Icon } = meta;
-  const hint = item.hint ?? meta.defaultHint;
+  const hint = item.hint ?? fallbackHint ?? meta.defaultHint;
   const hasRaw = item.raw != null && item.raw.trim().length > 0;
   const [showDetail, setShowDetail] = useState(false);
 
