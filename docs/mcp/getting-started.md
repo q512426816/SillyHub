@@ -1,7 +1,7 @@
 # 接入指南（Getting Started）
 
 本篇带你从零把第三方 MCP client 接到 SillyHub 对外 MCP 服务。完成后你就能在 client 里
-直接调 8 个 tool。
+直接调 9 个 tool。
 
 ## 前置：URL 与 token
 
@@ -36,14 +36,36 @@ Content-Type: application/json
 {
   "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "token": "shmcp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "gateway_url": "https://<host>/mcp/",
   "name": "my-orchestrator",
   "scope": ["read", "dispatch", "converge"],
   "created_at": "2026-08-06T14:00:00Z"
 }
 ```
 
+### 凭据与通道成对原则（重要）
+
+`token` 与 `gateway_url` **成对**签发：token 只在签发它的那个部署上有效。把两者
+原样一起保存 / 写入调用方配置，**不要混搭不同部署的 url 和 token**——
+
+- token 指向部署 A 时拿去连部署 B → 401（token 在 B 上不存在）；
+- `mcp.url` 指向某部署前，先确认**该部署确实暴露了 MCP gateway**（`POST
+  {origin}/mcp/` 返回 401 JSON 即已暴露；返回 HTML / 404 / 308 重定向说明反代没路由
+  `/mcp`，此时不要把 `mcp.url` 指向它）；
+- 需要程序化接入的调用方（如 CLI connect 流程）：直接用签发响应里的
+  `gateway_url`（完整端点，带尾斜杠）。若你的 client 自己拼 `/mcp/` 路径（如
+  sillyspec 的 `mcp.url` 语义 = 平台根地址、客户端追加 `/mcp/`），取 `gateway_url`
+  去掉 `/mcp/` 尾缀作根地址即可。
+
+`gateway_url` 的解析优先级：部署显式配置 `MCP_GATEWAY_PUBLIC_BASE_URL`（env，多入口 /
+反代抹掉外部 scheme 时由运维钉死）→ 签发请求的 `X-Forwarded-Proto` / `X-Forwarded-Host`
+推导（在哪签发就下发哪的接入地址）。
+
 `scope` 决定这个 token 能调哪些 tool（对应关系见 [security.md](security.md)）。按需
-最小授权：只看不派就只给 `read`。
+最小授权：只看不派就只给 `read`。另注意：**派发类 tool 的 actor 是 token 的签发
+用户**（`created_by`），务必经上面的 API 由真实用户签发——无归属 token 调
+`create_mission` / `dispatch_worker` 会报
+`MCP_400_MCP_TOKEN_NO_CREATOR`。
 
 ## 三端配置示例
 
@@ -118,7 +140,7 @@ claude mcp add --transport http sillyhub https://<host>/mcp/ \
 ## 验证连通
 
 配好后，client 会做 MCP `initialize` 握手（协议版本 `2025-11-25`）。成功即可在
-tools 列表看到 8 个 tool：
+tools 列表看到 9 个 tool：
 
 `list_agent_profiles` / `create_mission` / `dispatch_worker` / `list_workers` /
 `get_worker_result` / `get_run_logs` / `converge_mission` / `report_progress`

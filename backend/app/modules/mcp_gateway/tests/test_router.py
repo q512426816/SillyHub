@@ -179,3 +179,55 @@ async def test_create_rejects_invalid_scope(client: AsyncClient, db_session: Asy
         json={"name": "bad", "scope": ["read", "admin"]},  # 'admin' 非法
     )
     assert resp.status_code == 422
+
+
+# ── gateway_url 成对下发（spike P0-2，2026-09-10）──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_returns_gateway_url_derived_from_forwarded_headers(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """gateway_url 与 token 成对返回：无显式配置时从请求转发头推导（+ /mcp/ 尾斜杠）。
+
+    反代场景外部 scheme/host 只在 X-Forwarded-* 头里（uvicorn 未开
+    --proxy-headers 时 request.url 是容器内视角），推导必须看转发头。
+    """
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+
+    resp = await client.post(
+        f"/api/workspaces/{ws.id}/mcp-tokens",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "crrcdt.ppdmq.top",
+        },
+        json={"name": "ci", "scope": ["read"]},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["gateway_url"] == "https://crrcdt.ppdmq.top/mcp/"
+
+
+@pytest.mark.asyncio
+async def test_create_gateway_url_settings_override_wins(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MCP_GATEWAY_PUBLIC_BASE_URL 显式配置优先于请求头推导（多入口/头不可信场景）。"""
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    monkeypatch.setattr(get_settings(), "mcp_gateway_public_base_url", "https://mcp.example.com/")
+
+    resp = await client.post(
+        f"/api/workspaces/{ws.id}/mcp-tokens",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "x-forwarded-proto": "http",
+            "x-forwarded-host": "ignored.example.com",
+        },
+        json={"name": "ci", "scope": ["read"]},
+    )
+    assert resp.status_code == 201, resp.text
+    # 尾斜杠归一后拼 /mcp/，不产生双斜杠。
+    assert resp.json()["gateway_url"] == "https://mcp.example.com/mcp/"

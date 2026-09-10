@@ -181,3 +181,13 @@
 根因：卡片恒渲染 id.slice(0,8) 短码，后端列表端点早已注入 title（首条 user_input 摘要前 30 字）未被使用
 方案：条目名称 title 优先、null 回退短码（回退保留 font-mono，标题 truncate 防溢出）+ 测试补 title 优先与回退断言 + 模块文档同步入口卡现状
 结果：change-sessions-card vitest 3 用例全绿
+
+## ql-20260910-010-7626 | 2026-09-10 11:44:03 | MCP gateway 部署与派发链路实测缺陷修复（spike P2 六项）
+状态：已完成
+关联变更：（无）
+文件：backend/app/core/config.py, backend/app/modules/mcp_gateway/router.py, backend/app/modules/mcp_gateway/tools.py, docs/mcp/getting-started.md, docs/mcp/tools-reference.md
+需求：MCP gateway 部署与派发链路实测缺陷修复（spike P2 六项）
+根因：远端 nginx 未路由 /mcp 且 SDK DNS rebinding 防护默认只放行 localhost 系 Host（反代域名过鉴权后 421）；token 签发不回接入地址致 url/token 三头分裂；派发前无 daemon 在线性查询面；no-creator 报错无修复动作；参数文档缺口；agent_type 硬编码默认与实际执行器不一致
+方案：nginx 加 /mcp 路由 + mount_mcp 按部署配置重建 TransportSecuritySettings 白名单（MCP_GATEWAY_PUBLIC_BASE_URL/MCP_ALLOWED_HOSTS）；McpTokenCreated 成对下发 gateway_url（配置优先/转发头推导）；新增 get_daemon_status 工具（binding 明细+45s 阈值+ws_hub 实时态）；no-creator 文案与 hint 指明修复动作；dispatch_worker agent_type 默认改 ws.default_agent 驱动；tools-reference/getting-started/deploy SKILL 文档化全参数与成对原则；远端部署新 backend 镜像
+结果：mcp_gateway 126 passed + agent dispatch_worker 3 passed，ruff/format/mypy 0，gen:types 同步；远端实测回归（sillyspec client.js 直连公网）initialize/tools/list/get_daemon_status（daemon_online=true ws_connected=true）/create_mission external（workers=[] 零 orchestrator）/dispatch_worker read_only 真派发 completed（$0.65）/get_run_logs 全通；mcp_tokens 无 spike 残留、回归数据已清理
+审计：⚖️ 归属切分：7 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.zcode/skills/deploy-to-server/SKILL.md, backend/app/modules/mcp_gateway/server.py, backend/app/modules/mcp_gateway/tests/test_router.py, backend/app/modules/mcp_gateway/tests/test_tools_new.py, backend/openapi.json, docs/mcp/README.md, frontend/src/lib/api-types.ts

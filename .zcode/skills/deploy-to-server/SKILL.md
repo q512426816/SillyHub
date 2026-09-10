@@ -171,9 +171,17 @@ TOKEN=$(ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'curl -fsS -H "Content-T
 ```
 > 账号按 `deploy/.env` 的 `PLATFORM_BOOTSTRAP_ADMIN_EMAIL` / `PLATFORM_BOOTSTRAP_ADMIN_PASSWORD`（部署前务必改为强口令）。登录用 username 非 email（见 memory `login-by-username-not-email`）。
 
-## nginx 与 daemon 分发（/daemon/* 必须走后端，禁止静态 alias）
+## nginx 路由（/daemon/* 与 /mcp 必须走后端）
 
-对外域名（如 `crrcdt.ppdmq.top`）前面有一层宿主机 nginx 反代。**`/daemon/` 下所有文件
+对外域名（如 `crrcdt.ppdmq.top`）前面有一层宿主机 nginx 反代，默认只把 `/api/` 与
+`/daemon/` 代理到后端，其余走前端 Next.js——**`/mcp` 不加 location 会落到前端**：
+MCP client `POST /mcp/` 收到 Next.js 的 308 去尾斜杠重定向 → HTML，表现为「远端未暴露
+MCP gateway」（2026-09-10 spike P0-1 实测）。规范接入端点是 `https://<域名>/mcp/`
+（带尾斜杠，MCP client 的 POST 不跟随重定向）。
+
+### /daemon/*（禁止静态 alias）
+
+**`/daemon/` 下所有文件
 （install.sh / install.ps1 / latest.json / *.js bundle）都必须由后端 dist_router 从镜像
 `/app/daemon-dist/` 吐最新版**，绝不能让 nginx 用 `alias` 指向宿主机某个手动维护的静态目录
 （如 `/var/www/sillyhub/daemon/`）——那种静态副本**不会随后端镜像更新**，会和服务端脱节，
@@ -199,6 +207,51 @@ location /daemon/ {
     proxy_set_header X-Forwarded-Host $host;
 }
 ```
+
+### /mcp（对外 MCP gateway，2026-09-10 起必须配）
+
+后端在 `/mcp/`（FastMCP streamable HTTP，尾斜杠必需）挂了对外 MCP gateway。nginx 必须把
+`/mcp` 前缀代理到后端，并关 buffering + 拉长 read timeout（streamable HTTP 的 GET SSE
+长连接会被默认 60s read timeout 掐断）：
+
+```nginx
+# MCP gateway（规范端点 /mcp/ 带尾斜杠）。POST 不跟随重定向，务必带尾斜杠访问。
+# SSE 长连接需要 buffering off + 长 read timeout（对齐 /api/daemon/ws 的 3600s）。
+location /mcp {
+    proxy_pass http://127.0.0.1:8001;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+```
+
+**验证**（公网无 token 打 initialize，401 JSON 即通；308/HTML/404 = 没路由到后端）：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<域名>/mcp/ \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+# 预期 401，body 是 {"code":"HTTP_401_MCP_TOKEN_MISSING",...}
+```
+
+另：后端 mcp-tokens 签发响应会下发 `gateway_url`（与 token 成对）。它的 scheme 从
+`X-Forwarded-Proto` 推导（上面配置已带）；若部署有多入口 / 转发头不可信，在 compose
+`.env` 里配 `MCP_GATEWAY_PUBLIC_BASE_URL=https://<域名>` 显式钉死。
+
+### /mcp 与 /daemon/ 改 nginx 的操作纪律
+
+- 改前备份用 `cp <conf> /etc/nginx/backups/<conf>.bak.$(date +%Y%m%d-%H%M%S)`——
+  **备份绝不能留在 `sites-enabled/` 里**：nginx include 该目录全部文件，`.bak` 里的
+  重复 `default_server` 会直接 `nginx -t` 失败（2026-09-10 实测踩坑）。
+- 改后 `nginx -t` 通过再 `systemctl reload nginx`（reload 无中断）。
+- 小 JSON 易被缓存，验证时加 `-H "Cache-Control: no-cache"` 或换 query 串。
 
 **部署/排障时怎么发现脱节**：对比「公网经 nginx」与「后端容器直出」是否一致——
 
@@ -229,4 +282,6 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
 - **daemon bundle**：backend 镜像依赖 `sillyhub-daemon/build/bundle/`。daemon 的 `src/` 改过必须 `pnpm bundle` 再打包；只改 `scripts/install.*` 不影响 bundle JS（随 rebuild 自动 COPY 最新源）。
 - **不要碰 ppdmq-\***：服务器另有 `ppdmq-app/redis/mysql` 是别的项目，部署只动 `multi-agent-platform-*` 容器。
 - **容器端口用 127.0.0.1**：本机 curl 验证服务器映射端口用 `127.0.0.1`（在服务器上 ssh 内执行），不要用 `localhost`（IPv6 解析问题）。
-- **`/daemon/` 别让 nginx 静态 alias**：宿主机 `/var/www/sillyhub/daemon/` 这类静态副本不随镜像更新，会吐旧 bundle/旧 install.ps1（无 BOM、`{{SERVER_URL}}` 未替换）。整段 `location /daemon/` 必须 `proxy_pass` 到后端。排障/部署后对比公网与后端 latest.json 版本是否一致。详见上方「nginx 与 daemon 分发」。
+- **`/daemon/` 别让 nginx 静态 alias**：宿主机 `/var/www/sillyhub/daemon/` 这类静态副本不随镜像更新，会吐旧 bundle/旧 install.ps1（无 BOM、`{{SERVER_URL}}` 未替换）。整段 `location /daemon/` 必须 `proxy_pass` 到后端。排障/部署后对比公网与后端 latest.json 版本是否一致。详见上方「nginx 路由」。
+- **`/mcp` 必须显式加 nginx location**：不配会落到前端 Next.js（308 → HTML），表现为远端 MCP gateway 未暴露；SSE 长连接还需 `proxy_buffering off` + 长 read timeout。详见上方「/mcp」节。
+- **nginx 备份别留在 `sites-enabled/`**：nginx include 目录内全部文件，`.bak` 里的重复 `default_server` 会让 `nginx -t` 直接失败；备份放 `/etc/nginx/backups/`。

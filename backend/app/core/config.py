@@ -400,6 +400,30 @@ class Settings(BaseSettings):
             "provider_config.litellm_base_url = 该值 + /api/daemon/llm-proxy。"
         ),
     )
+    # 2026-09-10-mcp-gateway-dispatch-fixes（spike P0-2 凭据与通道成对）：mcp-tokens
+    # 签发响应把 gateway_url 与 token 成对下发，url 指哪 token 就在哪生效。gateway
+    # 的对外 origin 优先取本配置（MCP_GATEWAY_PUBLIC_BASE_URL env），未配置时从签发
+    # 请求的 X-Forwarded-Proto / X-Forwarded-Host 推导。反代场景外部 scheme 是 https
+    # 而容器内请求是 http（uvicorn 未开 --proxy-headers）时推导会拿到 http://<host>，
+    # 部署侧应显式配置本值（部署文档 deploy 节有说明）。
+    mcp_gateway_public_base_url: str = Field(
+        default="",
+        description=(
+            "对外 MCP gateway 公网 origin（如 https://crrcdt.ppdmq.top）。"
+            "mcp-tokens 签发响应的 gateway_url = 该值 + /mcp/；留空则从请求头推导。"
+            "同时该 host 自动进 MCP SDK 的 DNS rebinding 防护 Host 白名单"
+            "（不配则反代域名请求会被 421 Invalid Host header）。"
+        ),
+    )
+    # MCP_ALLOWED_HOSTS：DNS rebinding 防护 Host 白名单的额外条目（逗号分隔，
+    # 多入口 / 别名场景，如 "crrcdt.ppdmq.top,10.0.0.5:8001"）。
+    mcp_allowed_hosts: str = Field(
+        default="",
+        description=(
+            "MCP gateway Host 校验白名单额外条目（逗号分隔）。"
+            "与 mcp_gateway_public_base_url 的 host 并集生效；localhost 三件套恒在白名单。"
+        ),
+    )
 
     @property
     def file_allowed_type_set(self) -> frozenset[str]:

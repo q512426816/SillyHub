@@ -401,3 +401,287 @@ async def test_dispatch_worker_binds_profile_and_writes_read_only(
     assert run.agent_profile_snapshot is not None
     assert run.agent_profile_snapshot["id"] == str(profile.id)
     assert run.agent_profile_snapshot["version"] == 7
+
+
+# ── get_daemon_status（spike P1-3，2026-09-10）：派发前在线性轻量查询 ────────────
+
+
+class _StubWsHub:
+    """ws_hub 替身：只实现 is_connected（tool 消费面），按预置集合返回。"""
+
+    def __init__(self, connected: set[uuid.UUID]) -> None:
+        self._connected = connected
+
+    def is_connected(self, daemon_id: uuid.UUID) -> bool:
+        return daemon_id in self._connected
+
+
+async def _make_binding(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    daemon_id: uuid.UUID,
+) -> None:
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+    session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            daemon_id=daemon_id,
+            root_path="/tmp/ws",
+            path_source="manual",
+        )
+    )
+    await session.commit()
+
+
+async def _make_daemon(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    status: str = "online",
+    last_heartbeat_at: datetime | None = None,
+) -> uuid.UUID:
+    from app.modules.daemon.model import DaemonInstance
+
+    daemon_id = uuid.uuid4()
+    session.add(
+        DaemonInstance(
+            id=daemon_id,
+            user_id=user_id,
+            hostname="dev-box",
+            display_alias="开发机",
+            server_url="http://127.0.0.1:8001",
+            status=status,
+            last_heartbeat_at=last_heartbeat_at,
+        )
+    )
+    await session.commit()
+    return daemon_id
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_registered_without_workspace_id() -> None:
+    registered = {t.name: t for t in await mcp.list_tools()}
+    assert "get_daemon_status" in registered, "get_daemon_status 未注册进 mcp 实例"
+    assert "workspace_id" not in registered["get_daemon_status"].inputSchema.get("properties", {})
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_no_bindings_reports_offline(db_session: AsyncSession) -> None:
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["workspace_id"] == str(ws.id)
+    assert result["daemon_online"] is False
+    assert result["daemons"] == []
+    assert result["daemon_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_online_binding_aggregates_true(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    daemon_id = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon_id)
+    monkeypatch.setattr(
+        "app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: _StubWsHub({daemon_id})
+    )
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["daemon_online"] is True
+    assert result["daemon_name"] == "开发机"
+    assert result["stale_threshold_seconds"] == 45
+    entry = result["daemons"][0]
+    assert entry["online"] is True
+    assert entry["ws_connected"] is True
+    assert entry["status"] == "online"
+    assert entry["heartbeat_age_seconds"] is not None and entry["heartbeat_age_seconds"] <= 45
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_stale_or_offline_not_online(db_session: AsyncSession) -> None:
+    from datetime import timedelta
+
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    user2 = await _make_user(db_session)
+    # 心跳过期（status 仍 online）：DB 假在线窗口，online 判 False。
+    stale_id = await _make_daemon(
+        db_session,
+        user_id=user.id,
+        last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=stale_id)
+    # status=offline：明确离线（binding PK 是 (ws,user)，用第二个成员挂第二条）。
+    offline_id = await _make_daemon(db_session, user_id=user2.id, status="offline")
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user2.id, daemon_id=offline_id)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["daemon_online"] is False
+    assert all(e["online"] is False for e in result["daemons"])
+    # 明细仍透出（调用方可看 status / heartbeat_age 自判）。
+    assert {e["status"] for e in result["daemons"]} == {"online", "offline"}
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_rejects_without_read_scope(db_session: AsyncSession) -> None:
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_DISPATCH]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_DISPATCH})))
+
+    with pytest.raises(PermissionDenied):
+        await tools.get_daemon_status(ctx=ctx)
+
+
+# ── no-creator 报错（spike P1-4）：文案必须自带修复动作 ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_no_creator_error_message_includes_remediation(db_session: AsyncSession) -> None:
+    from app.core.errors import AppError
+
+    ws = await _make_workspace(db_session)
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=None, scope=[MCP_SCOPE_DISPATCH]
+    )
+    auth = _auth(token, frozenset({MCP_SCOPE_DISPATCH}))
+
+    with pytest.raises(AppError) as exc_info:
+        await tools._resolve_actor_user_id(db_session, auth)
+    # 文案指明修复动作：经签发 API 重签（带用户归属）或补 created_by。
+    assert "POST /api/workspaces" in str(exc_info.value.message)
+    assert "created_by" in str(exc_info.value.message)
+    assert "hint" in (exc_info.value.details or {})
+
+
+# ── agent_type 默认（spike P2-6）：不传时跟随 workspace.default_agent ──────────
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_agent_type_defaults_to_workspace_default(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import select as _select
+
+    from app.modules.agent.control import MissionControlService
+
+    # 部署配置驱动：workspace.default_agent=pi（实际执行器），不传 agent_type 时
+    # 标签应跟随 pi 而非硬编码 claude_code。
+    ws = await _make_workspace(db_session)
+    ws.default_agent = "pi"
+    user = await _make_user(db_session)
+    await db_session.commit()
+    mission = await _make_mission(db_session, ws.id)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_DISPATCH]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_DISPATCH})))
+
+    async def _allow(self: MissionControlService, mission: AgentMission) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(MissionControlService, "can_dispatch_worker", _allow)
+
+    async def _no_exec(self, run, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.tools.MissionExecutionService.dispatch_worker", _no_exec
+    )
+
+    # ① 不传 → workspace 默认 pi。
+    r1 = await tools.dispatch_worker(mission_id=mission.id, objective="a", ctx=ctx)
+    run1 = (
+        await db_session.execute(_select(AgentRun).where(AgentRun.id == uuid.UUID(r1["id"])))
+    ).scalar_one()
+    assert run1.agent_type == "pi"
+
+    # ② 显式传值优先于 workspace 默认。
+    r2 = await tools.dispatch_worker(
+        mission_id=mission.id, objective="b", agent_type="codex", ctx=ctx
+    )
+    run2 = (
+        await db_session.execute(_select(AgentRun).where(AgentRun.id == uuid.UUID(r2["id"])))
+    ).scalar_one()
+    assert run2.agent_type == "codex"
+
+    # ③ workspace 未配置 default_agent → 回退 claude_code（零回归）。
+    ws.default_agent = None
+    await db_session.commit()
+    r3 = await tools.dispatch_worker(mission_id=mission.id, objective="c", ctx=ctx)
+    run3 = (
+        await db_session.execute(_select(AgentRun).where(AgentRun.id == uuid.UUID(r3["id"])))
+    ).scalar_one()
+    assert run3.agent_type == "claude_code"
+
+
+# ── DNS rebinding Host 白名单（spike P0-1 坑 6：反代域名 421 修复）─────────────
+
+
+def test_transport_security_default_keeps_localhost_trio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未配公网 origin / 额外 host：白名单仍是 localhost 三件套（本地 dev 零回归）。"""
+    from app.core.config import get_settings
+    from app.modules.mcp_gateway.server import _build_transport_security
+
+    monkeypatch.setattr(get_settings(), "mcp_gateway_public_base_url", "")
+    monkeypatch.setattr(get_settings(), "mcp_allowed_hosts", "")
+    sec = _build_transport_security()
+    assert sec.enable_dns_rebinding_protection is True
+    for host in ("127.0.0.1", "localhost", "[::1]"):
+        assert host in sec.allowed_hosts
+
+
+def test_transport_security_public_base_url_whitelists_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """配了公网 origin：其 host 进白名单（裸 host + 端口通配双形态）。"""
+    from app.core.config import get_settings
+    from app.modules.mcp_gateway.server import _build_transport_security
+
+    monkeypatch.setattr(get_settings(), "mcp_gateway_public_base_url", "https://crrcdt.ppdmq.top")
+    sec = _build_transport_security()
+    # 443 反代域名的 Host 头不带端口（精确匹配），必须登记裸 host；
+    # :* 形态覆盖非标准端口入口。
+    assert "crrcdt.ppdmq.top" in sec.allowed_hosts
+    assert "crrcdt.ppdmq.top:*" in sec.allowed_hosts
+
+
+def test_transport_security_extra_allowed_hosts_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP_ALLOWED_HOSTS 逗号分隔条目按形态归一（裸 host / 通配 / 显式端口）。"""
+    from app.core.config import get_settings
+    from app.modules.mcp_gateway.server import _build_transport_security
+
+    monkeypatch.setattr(get_settings(), "mcp_gateway_public_base_url", "")
+    monkeypatch.setattr(get_settings(), "mcp_allowed_hosts", "alias.example.com,10.0.0.5:8001")
+    sec = _build_transport_security()
+    assert "alias.example.com" in sec.allowed_hosts
+    assert "alias.example.com:*" in sec.allowed_hosts
+    assert "10.0.0.5:8001" in sec.allowed_hosts
