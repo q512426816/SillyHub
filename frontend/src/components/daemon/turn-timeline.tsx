@@ -60,6 +60,9 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
 // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+// task-10（2026-09-10-account-avatar-upload / FR-05）：自己（sender.me）的气泡
+// 头像取 useSession user.avatar（选择器订阅仅 avatar 切片）。
+import { useSession } from "@/stores/session";
 
 /* ── ql-20260903-025：prompt 附件标记解析缓存——流式期间每次渲染对每一轮
  *    prompt 逐行正则拆分重复计算，按内容字符串缓存（FIFO 上限防泄漏）。 ── */
@@ -359,9 +362,13 @@ const TurnRow = memo(function TurnRow({
   daemonRestartedHint?: string | null;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
-  // 气泡正文换 textBefore（标记原文不显示），提问卡随气泡原位渲染（下方 ml-9）；
+  // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
   // 未命中（null）output 原样渲染，零变化。
   const outputMarker = turn.output ? parseAskUserMarkerCached(turn.output) : null;
+  // task-10（2026-09-10-account-avatar-upload / FR-05）：当前用户平台头像——
+  // 选择器订阅仅 avatar 切片（避免整 store 订阅引发无关重渲），仅 sender.me
+  // 气泡消费；null/undefined 时 ChatMessageAvatar 首字回退现状不动。
+  const myAvatar = useSession((s) => s.user?.avatar ?? null);
   return (
     <>
     {/* task-01（2026-09-08-session-turn-nav / FR-07 / D-007@v1）：轮次跳转 DOM 锚点
@@ -438,6 +445,10 @@ const TurnRow = memo(function TurnRow({
                     <ChatMessageAvatar
                       kind="user"
                       name={turn.sender.name}
+                      // task-10（FR-05）：仅自己（sender.me）的气泡接平台头像
+                      // （ChatMessageAvatar 内部走 useAvatarSrc）；非 me 发送者
+                      // 不传（undefined）——他人首字回退语义不动。
+                      avatar={turn.sender.me ? myAvatar : undefined}
                       size={28}
                       title={
                         turn.sender.me
