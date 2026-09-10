@@ -19,6 +19,7 @@ target_files:
   - backend/app/modules/daemon/group/service/helpers.py
   - backend/app/modules/daemon/group/service/members.py
   - backend/app/modules/daemon/group/service/crud.py
+  - backend/app/modules/daemon/group/service/__init__.py
   - NEW:backend/tests/modules/daemon/test_group_member_avatar_fallback.py
 goal: >
   GroupMemberRead 读取路径对 user 成员做平台头像回落（D-002@v1），avatar 取

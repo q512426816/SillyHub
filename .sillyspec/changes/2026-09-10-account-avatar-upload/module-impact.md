@@ -8,35 +8,20 @@
 
 | 模块 | 变更文件 | 影响类型 | 需 review |
 |---|---|---|---|
+| backend:auth | backend/app/modules/auth/{model,schema,router,service}.py | 数据结构变更（users.avatar 列+迁移）+ 接口变更（PATCH /api/auth/me/avatar + UserRead.avatar）+ 逻辑变更（update_my_avatar 三态） | 否（review.json pass + 7 用例） |
+| backend:daemon(group 子域) | backend/app/modules/daemon/group/service/{helpers,members,crud,__init__}.py | 逻辑变更（user 成员 avatar 回落解析，读取端语义增强） | 否（16 用例 + 50 既有零回归） |
+| frontend:stores | frontend/src/stores/session.ts | 数据结构变更（SessionUser.avatar 可选字段，向后兼容） | 否 |
+| frontend:lib | frontend/src/lib/auth.ts、frontend/src/lib/api-types.ts、backend/openapi.json | 接口变更（updateMyAvatar 新函数 + fetchMe 映射补字段 + gen:types 产物） | 否（tsc+11 用例） |
+| frontend:components | group-member-avatar.tsx、app-shell.tsx、top-bar.tsx、turn-timeline.tsx | 接口变更（ownerType/avatar 可选 prop，默认行为不变）+ 逻辑变更（blob 头像渲染/气泡接线） | 否（74+9+241 用例零回归） |
+| frontend:app | (dashboard)/account/page.tsx、m/account/page.tsx | 新增（个人资料卡片/移动头像上传） | 否（9+5 用例） |
 
 ## 未匹配文件
 
 以下变更文件未命中 _module-map.yaml 任何模块 paths——确认是模块索引过期（该跑 `sillyspec modules rebuild`）还是真的游离文件：
 
-- `backend/app/modules/auth/model.py` <!--TODO: 归属判定-->
-- `NEW:backend/migrations/versions/2026xxxx_users_avatar.py` <!--TODO: 归属判定-->
-- `backend/app/modules/auth/schema.py` <!--TODO: 归属判定-->
-- `backend/app/modules/auth/router.py` <!--TODO: 归属判定-->
-- `backend/app/modules/auth/service.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/group/service/helpers.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/group/service/members.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/group/service/crud.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/group/service/__init__.py` <!--TODO: 归属判定-->
-- `frontend/src/stores/session.ts` <!--TODO: 归属判定-->
-- `frontend/src/lib/auth.ts` <!--TODO: 归属判定-->
-- `frontend/src/components/group-chat/group-member-avatar.tsx` <!--TODO: 归属判定-->
-- `frontend/src/app/(dashboard)/account/page.tsx` <!--TODO: 归属判定-->
-- `frontend/src/app/m/account/page.tsx` <!--TODO: 归属判定-->
-- `frontend/src/components/app-shell.tsx` <!--TODO: 归属判定-->
-- `frontend/src/components/top-bar.tsx` <!--TODO: 归属判定-->
-- `frontend/src/components/daemon/turn-timeline.tsx` <!--TODO: 归属判定-->
-- `frontend/src/lib/api-types.ts` <!--TODO: 归属判定-->
-- `backend/openapi.json` <!--TODO: 归属判定-->
-- `NEW:backend/tests/modules/auth/test_my_avatar.py` <!--TODO: 归属判定-->
-- `NEW:backend/tests/modules/daemon/test_group_member_avatar_fallback.py` <!--TODO: 归属判定-->
-- `frontend/src/app/(dashboard)/account/page.test.tsx` <!--TODO: 归属判定-->
-- `NEW:frontend/src/app/m/account/page.test.tsx` <!--TODO: 归属判定-->
-- `NEW:frontend/src/components/__tests__/top-bar-avatar.test.tsx` <!--TODO: 归属判定-->
+- `backend/migrations/versions/20260910160000_users_avatar.py` —— 游离归因：migrations 目录不在 module-map paths（auth 模块卡覆盖 app/modules/auth，迁移目录历史游离）；语义归属 backend:auth，无需 rebuild（与既有 190+ 迁移同状态）
+- `backend/tests/modules/auth/test_my_avatar.py` / `backend/tests/modules/daemon/test_group_member_avatar_fallback.py` —— tests 目录游离（同上惯例）；语义归属对应模块
+- `frontend/src/app/(dashboard)/account/page.test.tsx`、`NEW:frontend/src/app/m/account/page.test.tsx`、`NEW:frontend/src/components/__tests__/top-bar-avatar.test.tsx` —— 测试文件游离惯例；语义归属 frontend:app/components
 
 ## 影响类型说明
 
@@ -46,6 +31,4 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
-
-规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。
+| `_module-map.yaml` | 无需 rebuild：未匹配文件均为 migrations/tests 历史游离惯例，语义归属已在上表判明 | skipped（有据） |

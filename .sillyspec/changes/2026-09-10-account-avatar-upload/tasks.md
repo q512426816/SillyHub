@@ -16,4 +16,4 @@ change: 2026-09-10-account-avatar-upload
 - [x] task-08: 移动 /m/account 头像上传
 - [x] task-09: TopBar avatar prop 接线
 - [x] task-10: 会话气泡 sender.me 头像接线
-- [ ] task-11: verify 验收（对照 design/requirements + 相关测试全绿）
+- [x] task-11: verify 验收（对照 design/requirements + 相关测试全绿）
