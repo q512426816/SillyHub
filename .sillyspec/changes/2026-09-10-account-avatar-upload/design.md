@@ -45,7 +45,7 @@ risk_level: unit-sufficient
 1. `users.avatar` 列（String(512) nullable）+ alembic 迁移。
 2. `UserRead` 增加 `avatar: str | None` → `GET /api/auth/me` 自动带出（from_attributes）。
 3. 新端点 `PATCH /api/auth/me/avatar`（登录态，body `UpdateMyAvatarRequest{avatar: str | None}`，语义对齐群成员惯例：值=设置、空串=清除置 NULL、None=不改；返回更新后 `UserRead`）。更新逻辑写入 `auth/service.py`（与 change_password 同层）。
-4. 群聊回落解析（D-002）：`daemon/group` 模块构造 `GroupMemberRead` 的读取路径上，user 成员 `avatar = member.avatar or user.avatar`（群内自定义优先；NULL/空串回落平台头像）。真实构造点（已核对源码）：`daemon/group/service/helpers.py:701` `_to_read`（群读主路径，批量）、`daemon/group/service/members.py:512/673`（加成员/改成员返回）。实现约束：`_to_read` 为同步函数不能直查 users 表——在异步调用方批量预取 `user_id → avatar` 映射后传入（或对 `read.members` 后处理），select in (user 成员 id 集)，一次查询。`daemon/group/router.py:379/407` 两个端点返回值来自上述 service 构造，无需单独改。
+4. 群聊回落解析（D-002）：`daemon/group` 模块构造 `GroupMemberRead` 的读取路径上，user 成员 `avatar = member.avatar or user.avatar`（群内自定义优先；NULL/空串回落平台头像）。真实构造点（plan 审查复核修正）：`daemon/group/service/helpers.py:701` `_to_read`（群读主路径，批量）、`daemon/group/service/members.py:203/219`（加用户成员返回，GroupMemberAddRead）、`members.py:512`（改成员返回）。`members.py:673` 为重置记忆返回（仅 agent 成员）无需回落。实现约束：`_to_read` 为同步函数不能直查 users 表——在异步调用方批量预取 `user_id → avatar` 映射后传入（或对 `read.members` 后处理），select in (user 成员 id 集)，一次查询；加/改成员单点构造处可单查目标 user。`daemon/group/router.py:379/407` 两个端点返回值来自上述 service 构造，无需单独改。
 
 ### Wave 2：前端
 
@@ -66,12 +66,14 @@ risk_level: unit-sufficient
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | backend/app/modules/auth/model.py | User 增加 avatar 列（String 512 nullable） |
-| 新增 | NEW:backend/migrations/versions/2026xxxx_users_avatar.py | alembic 加列迁移（revision 执行时按链头生成） |
+| 新增 | NEW:backend/migrations/versions/20260910160000_users_avatar.py | alembic 加列迁移（revision=20260910160000，down_revision=20260910120000 链头） |
 | 修改 | backend/app/modules/auth/schema.py | UserRead.avatar；新增 UpdateMyAvatarRequest |
 | 修改 | backend/app/modules/auth/router.py | PATCH /api/auth/me/avatar 端点 |
 | 修改 | backend/app/modules/auth/service.py | update_my_avatar 业务逻辑（producer：写 users.avatar） |
 | 修改 | backend/app/modules/daemon/group/service/helpers.py | `_to_read` 群读主路径：user 成员 avatar 回落解析（消费预取映射） |
-| 修改 | backend/app/modules/daemon/group/service/members.py | 加/改成员返回构造点：user 成员 avatar 回落解析 |
+| 修改 | backend/app/modules/daemon/group/service/members.py | 加用户成员（203/219）/改成员（512）返回构造点：user 成员 avatar 回落解析 |
+| 修改 | backend/app/modules/daemon/group/service/crud.py | 异步调用侧批量预取 user_id→avatar 映射接线（_to_read 同步不能直查 users 表） |
+| 修改 | backend/app/modules/daemon/group/service/__init__.py | 群读包装层调用点适配（预取映射传入路径，按实现落点裁剪） |
 | 修改 | frontend/src/stores/session.ts | SessionUser.avatar 字段 |
 | 修改 | frontend/src/lib/auth.ts | updateMyAvatar() 封装 + store 写回 |
 | 修改 | frontend/src/components/group-chat/group-member-avatar.tsx | GroupMemberAvatarUpload 增加可选 ownerType prop |
