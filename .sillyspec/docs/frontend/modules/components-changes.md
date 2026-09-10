@@ -43,8 +43,11 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
     `{action, stage, comment, at}`，经 `normalizeReviewHistory` 归一为
     ReviewHistoryItem（kind/label/tone/comment/at）后消费。
   - 替代读已废弃 change_reviews 死表的旧卡（旧卡对新变更永远空）。
-- `ChangeSessionsCard`（change-sessions-card.tsx）：侧栏紧凑入口卡 → 宽 Dialog
-  （max-w-6xl × 85vh）内渲染完整 ChangeSessionSection；Dialog 仅 open 时 mount。
+- `ChangeSessionsCard`（change-sessions-card.tsx）：侧栏「会话调试」入口卡
+  （2026-08-22-workspace-sessions-portal 后 Dialog 形态退役）：listChangeSessions
+  仅本人过滤取前 3 条预览（条目名称 = 后端注入 title 首条 user_input 摘要，空回
+  退 id 短码）+ 状态/相对时间，?session= 深链直达变更级门户选中态，卡尾按钮跳
+  `/workspaces/[id]/changes/[cid]/sessions`。
 - `ChangeFilesCard`（change-files-card.tsx）：同上模式包 ChangeFileTree。
 - `ChangeAgentRunLog`（change-agent-run-log.tsx）：智能体运行状态简化视图
   （AgentStepProgress 内嵌）+ TeamProgress 组合；ql-20260816-001 后 steps 链路退役，

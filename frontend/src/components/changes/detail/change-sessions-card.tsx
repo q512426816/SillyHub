@@ -27,7 +27,8 @@ import { useSession } from "@/stores/session";
  *     客户端按 author 仅本人过滤（author 缺失视为本人保留，同旧
  *     workspace-session-section 过滤口径：logs/stream owner-only，他人会话
  *     attach 必 404，展示只会误导点击）→ last_active_at 倒序 → 前 3 条；
- *   - 每条渲染 id 短码（# + slice(0,8)，同 session-panel 面板头口径）/状态
+ *   - 每条渲染会话名称（后端注入的 title：首条 user_input 摘要前 30 字，null
+ *     回退 id 短码 # + slice(0,8)，同 session-panel 面板头口径）/状态
  *     中文/相对时间（复用 session-list-panel 导出的 formatRelativeTime）；
  *   - 卡尾「打开会话工作台」Link 至变更级门户路由（task-03 新建，不带参数）。
  */
@@ -83,7 +84,7 @@ export function ChangeSessionsCard({
         </div>
       </div>
 
-      {/* 最近会话预览：id 短码 / 状态中文 / 相对时间 */}
+      {/* 最近会话预览：会话名称（title 空 → id 短码）/ 状态中文 / 相对时间 */}
       <ul className="mt-2 space-y-0.5" data-testid="change-session-previews">
         {previews.map((s) => (
           <li key={s.id}>
@@ -91,7 +92,9 @@ export function ChangeSessionsCard({
               href={`${portalHref}?session=${encodeURIComponent(s.id)}`}
               className="flex items-center justify-between gap-2 rounded-sm px-1.5 py-1 text-[11px] hover:bg-muted"
             >
-              <span className="font-mono">#{s.id.slice(0, 8)}</span>
+              <span className={cn("min-w-0 truncate", !s.title && "font-mono")}>
+                {s.title ?? `#${s.id.slice(0, 8)}`}
+              </span>
               <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                 <span className="shrink-0">
                   {SESSION_STATUS_LABELS[s.status] ?? s.status}

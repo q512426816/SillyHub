@@ -31,6 +31,7 @@ function sessionOf(
   userId: string | null,
   lastActiveAt: string,
   status = "active",
+  title: string | null = null,
 ): AgentSessionListItem {
   return {
     id,
@@ -40,7 +41,7 @@ function sessionOf(
     mode: null,
     author: userId === null ? null : { user_id: userId, display_name: "作者" },
     last_active_at: lastActiveAt,
-    title: null,
+    title,
   } as unknown as AgentSessionListItem;
 }
 
@@ -101,16 +102,22 @@ describe("ChangeSessionsCard 入口形态（task-06）", () => {
     );
   });
 
-  it("渲染本人最近前 3 条预览：短码/状态中文/相对时间，链接带 ?session= 深链", async () => {
+  it("渲染本人最近前 3 条预览：名称优先（空回退短码）/状态中文/相对时间，链接带 ?session= 深链", async () => {
     setCurrentUser(ME);
     // 乱序喂入：客户端按 last_active_at 倒序 → me1 > me2 > me3（me4 第 4 条截断，
-    // other1 他人过滤）。
+    // other1 他人过滤）；me1 带 title 验证名称优先展示。
     mocks.listChangeSessions.mockResolvedValue([
       sessionOf("dddddddd-0000-0000-0000-000000000004", ME, "2026-01-02T00:00:00Z"),
       sessionOf("eeeeeeee-0000-0000-0000-000000000005", OTHER, "2026-01-06T00:00:00Z"),
       sessionOf("bbbbbbbb-0000-0000-0000-000000000002", ME, "2026-01-04T00:00:00Z", "ended"),
       sessionOf("cccccccc-0000-0000-0000-000000000003", null, "2026-01-03T00:00:00Z"),
-      sessionOf("aaaaaaaa-0000-0000-0000-000000000001", ME, "2026-01-05T00:00:00Z"),
+      sessionOf(
+        "aaaaaaaa-0000-0000-0000-000000000001",
+        ME,
+        "2026-01-05T00:00:00Z",
+        "active",
+        "修复登录超时问题",
+      ),
     ]);
     renderCard();
 
@@ -119,7 +126,8 @@ describe("ChangeSessionsCard 入口形态（task-06）", () => {
       expect(mocks.listChangeSessions).toHaveBeenCalledWith("ws-1", "ch-2"),
     );
 
-    // 前 3 条按倒序渲染：id 短码 + 状态中文 + 相对时间（≥7 天回退日期格式）。
+    // 前 3 条按倒序渲染：会话名称优先（title 非空），空 title 回退 id 短码
+    // （#bbbbbbbb / #cccccccc）+ 状态中文 + 相对时间（≥7 天回退日期格式）。
     const links = await waitFor(() => {
       const items = screen
         .getAllByRole("link")
@@ -139,7 +147,9 @@ describe("ChangeSessionsCard 入口形态（task-06）", () => {
       "href",
       `${PORTAL}?session=cccccccc-0000-0000-0000-000000000003`,
     );
-    expect(screen.getByText("#aaaaaaaa")).toBeInTheDocument();
+    expect(screen.getByText("修复登录超时问题")).toBeInTheDocument(); // title 优先
+    expect(screen.queryByText("#aaaaaaaa")).not.toBeInTheDocument();
+    expect(screen.getByText("#bbbbbbbb")).toBeInTheDocument(); // 空 title 回退短码
     // me1 与 me3 均 active（缺 author 项默认 active）→ 两处「进行中」。
     expect(screen.getAllByText("进行中")).toHaveLength(2);
     expect(screen.getByText("已结束")).toBeInTheDocument(); // me2 ended

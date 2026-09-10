@@ -159,3 +159,20 @@
 根因：codex 官方将 request_user_input 工具锁 Plan 模式（生产案会话 118406c3 模型自证），平台 app-server 无以 plan 建线程、运行时特性开关对 underDevelopment 不生效——工具从未被调用，桥接无从触发
 方案：daemon codex spawn 参数 unshift -c features.default_mode_request_user_input=true（app-server 子命令前；旧版未知键非 strict 仅告警向前兼容）；本机 ~/.codex/config.toml [features] 同步加键立即生效
 结果：0.147/0.154 双版本端到端探针验证工具真弹出（GOT requestUserInput + questions 载荷）；codex 驱动两套件 77 passed（+1 断言）；tsc 0；生产待用户重启 daemon/新开会话验证
+
+## ql-20260910-008-415c | 2026-09-10 10:42:27 | run-error-item 系统错误码映射补齐——daemon_restarted/daemon_stopped/daemon_interrupted 三码进映射表（code 命中优先于 type 查表），『运行失败·unknown』兜底…
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/agent-log/run-error-item.tsx, frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+
+## ql-20260910-009-14b6 | 2026-09-10 10:43:59 | 变更详情会话调试卡显示会话名称（title 优先空回退 id 短码）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/detail/change-sessions-card.tsx（名称 title 优先/空回退短码）
+- frontend/src/components/changes/detail/__tests__/change-sessions-card.test.tsx（fixture 增 title 参数+两断言）
+- .sillyspec/docs/frontend/modules/components-changes.md（卡片形态描述刷新）
+需求：变更详情会话调试卡显示会话名称（title 优先空回退 id 短码）
+根因：卡片恒渲染 id.slice(0,8) 短码，后端列表端点早已注入 title（首条 user_input 摘要前 30 字）未被使用
+方案：条目名称 title 优先、null 回退短码（回退保留 font-mono，标题 truncate 防溢出）+ 测试补 title 优先与回退断言 + 模块文档同步入口卡现状
+结果：change-sessions-card vitest 3 用例全绿
