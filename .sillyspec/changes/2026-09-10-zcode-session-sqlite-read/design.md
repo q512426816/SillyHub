@@ -2,6 +2,7 @@
 author: qinyi
 created_at: 2026-09-10 11:25:56
 scale: large
+risk_level: integration-critical
 ---
 
 # 设计文档（Design）— zcode 会话读取恒走本地 SQLite（zcode-session-sqlite-read）
@@ -24,9 +25,10 @@ RPC 读文件 + `parse-zcode-model-io.ts` 解析）。该文件生命周期极�
   timeline / file）构成完整对话内容；
 - 被清掉的死会话在库中完整存在（抽样 de7e1282：676 条消息 + 标题 + cwd）。
 
-用户决策（三轮确认）：本仓改（sillyspec 仓零改动）；zcode 会话**恒读 SQLite**（文件存在
-也不读文件）；原文视图同样从库合成；库读失败保留文件兜底；前端不标注数据来源；DB 路径
-**不做 256KB 截断**（按会话查询天然有界，用户明确修正），仅文件回落路径保留原截断。
+用户决策（三轮确认）：本仓改（sillyspec 仓零改动）；zcode 会话**恒读 SQLite**
+（D-001@v1，文件存在也不读文件）；原文视图同样从库合成；库读失败保留文件兜底；
+前端不标注数据来源；DB 路径**不做 256KB 截断**（D-002@v1，按会话查询天然有界，
+用户明确修正），仅文件回落路径保留原截断。
 
 ## 设计目标
 
@@ -71,8 +73,9 @@ RPC 读文件 + `parse-zcode-model-io.ts` 解析）。该文件生命周期极�
   `node:sqlite` 导入失败（Node <22.5）或库文件缺失 → 抛读取器不可用 → 调用方走
   文件回落。**engines 不 bump**：旧 Node 环境自动降级文件路径，非瘫痪。
 - **归一化**（双层遍历 `message`（按 sequence）×`part`（按 message_id + sequence）→
-  `NormalizedLogMessage[]`）。映射表字段已经独立审查代理对本机真实库只读实证（X-Grill
-  DB-01/X13/X14/X16，抽样 5000 tool part + 400 user 消息）：
+  `NormalizedLogMessage[]`）。映射表字段已经独立审查代理对本机真实库只读实证，含
+  隐藏过滤判据（D-003@v1，X-Grill X13）与 tool 单 part 两段映射（D-004@v1，X-Grill
+  X12；抽样 5000 tool part + 400 user 消息）：
 
   | SQLite 侧 | NormalizedLogMessage |
   |---|---|
@@ -89,12 +92,12 @@ RPC 读文件 + `parse-zcode-model-io.ts` 解析）。该文件生命周期极�
   更早」翻页不受影响）；段窗口/预算口径对齐现有 parser（truncated + totalSegments）；
   坏行（data 非法 JSON / 字段缺失）跳过计数 skippedLines，不中断。
 
-- **node:sqlite 生效版本**：≥22.13.0 或 ≥23.4.0（官方去 flag 版本带；22.5–22.12 /
+- **node:sqlite 生效版本**（D-006@v1）：≥22.13.0 或 ≥23.4.0（官方去 flag 版本带；22.5–22.12 /
   23.0–23.3 虽有模块但带实验 flag，导入即抛错 → 走文件回落）。engines 不 bump 决策
   不变：旧环境自动降级。TS 侧 `@types/node`（现 20.14，无 node:sqlite 声明）需 bump
   至 22.13+ 或加本地 .d.ts 声明（devDep 变更，不影响运行时分发）。
 
-### Phase 2 — daemon：分派接线（host-fs-handler）
+### Phase 2 — daemon：分派接线（host-fs-handler，D-005@v1）
 
 `readAgentLogMessages`（host-fs-handler.ts）现流程：**allowed_roots 守卫
 （assertWithinAllowedRoots）→ registry 按 format 查 parser（未注册→unsupported 不读
@@ -110,10 +113,10 @@ registry 分派，避免把"文件内容解析"注册表语义扩成"数据源�
 `read_agent_log_content`（platform_sync/router.py）：`entry.format=zcode-model-io-jsonl`
 时，先发既有 `host_fs.read_agent_log_messages` RPC（同 `_send_agent_log_rpc` 通路，
 rpc_args 已含 format/beforeSeq，通路现成）：
-- `status=parsed` → 将 messages 序列化为伪 jsonl 文本：**固定九字段逐行全量 JSON**
-  （seq/kind/text/tool_name/tool_use_id/tool_input/tool_result/is_error/ts，封闭列举，
-  不加省略号），返回 `{content, truncated=resp.truncated, size_bytes=len(content)}`——
-  **不截断**（按会话查询天然有界，窗口即上界）；
+- `status=parsed` → 将 messages 序列化为伪 jsonl 文本（D-007@v1）：**固定九字段逐行
+  全量 JSON**（seq/kind/text/tool_name/tool_use_id/tool_input/tool_result/is_error/ts，
+  封闭列举，不加省略号），返回 `{content, truncated=resp.truncated,
+  size_bytes=len(content)}`——**不截断**（按会话查询天然有界，窗口即上界）；
 - `status=unsupported/parse_error/too_large`（即库+文件双失败后的文件解析降级）或
   RPC 抛错（含 not_found 404、**method_not_found 422 老 daemon**、离线/超时类）→
   回落现有 `read_file` 路径（离线/超时类双跳延迟可接受），该路径保留原 256KB 尾部
@@ -148,6 +151,20 @@ frontend agent-log-card「已截断」提示。响应 shape 不变，仅 zcode �
 3. 库读失败回落：模拟库缺失 + 文件在 → 走文件解析成功；库+文件双缺 → 现状错误语义
 4. claude/codex 会话查看行为逐字节不变（回归）
 5. Node <22.5 环境（node:sqlite 不可用）：自动全走文件路径，不崩
+
+## 自审（Self-Review）
+
+- **生命周期契约：无/N/A**——本变更仅改只读读取路径（messages/content 端点数据源
+  切换），不新增/修改任何 session/lease/run 状态转移、事件或生命周期行为。
+- **映射表实测性**：全部字段（tool 单 part 形态 / hidden 判据 / time 对象 / part 类型
+  全集）经独立审查代理对本机真实库只读抽查实证，无"留待 execute"的开放前提。
+- **兜底矩阵完备**：库成功 / 库失败+文件在 / 双失败 / node:sqlite 不可用四态在
+  messages 与 content 两端点均有定义（FR-03 + 验收 3/5）。
+- **零改动面可达**：分派收敛于 handler 单点 if 分支，claude/codex 路径不经过；backend
+  仅 content 端点内加 zcode 分支；无协议/schema/UI 变更。
+- **风险已定价**：zcode schema 漂移 → 自动文件回落（活跃会话无感）；大会话体积 →
+  窗口即上界；@types/node 缺声明 → devDep bump。判级 integration-critical 属实
+  （动 daemon 读取链路），verify 需真实集成证据（task-05 真实库冒烟已列）。
 
 ## 风险与对策
 
