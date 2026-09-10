@@ -13,6 +13,7 @@ allowed_paths:
   - sillyhub-daemon/package.json
 target_files:
   - sillyhub-daemon/package.json
+  - sillyhub-daemon/pnpm-lock.yaml
 goal: >
   devDep @types/node 由 20.14.0 bump 至 ≥22.13（仅类型层，engines 不动，D-006@v1），让 task-02 读取器的
   node:sqlite 类型声明可用；随后按 CLAUDE.md 规则 0 跑相关套件回归，并对本机真实 db.sqlite 只读冒烟落 integration-critical 验证证据。

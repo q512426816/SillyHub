@@ -33,5 +33,31 @@
         "unavailable": false
       }
     }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "verify 窗口内实跑 E2E：readZcodeSqliteMessages 直读真实库（readOnly）死会话 de7e1282（rollout 文件已清）→ parsed totalSegments=1784（窗口 truncated=true, skipped=1207 计边界行）；叠加 execute 期冒烟：user_input 三判据零泄漏（7=7）、文件对照偏差 1.0%、tool 配对 is_error、beforeSeq 翻页逐 seq 相等",
+      "command": "cd worktree sillyhub-daemon && pnpm vitest run tests/agent-log/zcode-e2e-smoke.verify.test.ts（临时用例，跑完已删，零残留）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/verify-logs/zcode-e2e-final.log"
+    }
+  ],
+  "tests": {
+    "command": "module[sillyhub-daemon,platform_sync]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-10T05:41:25.492Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
   }
 }
