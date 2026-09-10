@@ -5,12 +5,19 @@
  * task-01（2026-09-10-zcode-session-sqlite-read / FR-01，依据模块文档 daemon.md
  * 「契约摘要（sillyhub-daemon Node 侧）」agent-log/ 节）：「本地活动」zcode 会话
  * 读取恒走 `~/.zcode/cli/db/db.sqlite`（design Phase 1，D-001@v1），rollout 短命
- * 文件仅作扫描上报发现。本文件现阶段只含：
+ * 文件仅作扫描上报发现。本文件含：
  *   - extractZcodeSessId(path)：纯函数，上报 log_path 文件名 → session.id；
  *   - createZcodeFixtureDb(options)：测试 helper，node:sqlite DatabaseSync 按
- *     真实 schema 建三表造场景全集（供 task-02 归一化读取器注入式测试复用）。
- * 开库（惰性只读 DatabaseSync + URI mode=ro）与 message×part 归一化由 task-02
- * 在本文件续写，本 task 不实现。
+ *     真实 schema 建三表造场景全集（读取器注入式测试复用）。
+ *
+ * task-02（同变更 / FR-01 + D-003@v1 + D-004@v1 + D-006@v1）：readZcodeSqliteMessages
+ * 读取器主体——惰性 node:sqlite 只读开库（默认库路径 `~/.zcode/cli/db/db.sqlite`，
+ * opts.dbPath / 模块级工厂可覆写）、message（按 sequence）×part（按
+ * message_id+sequence）双层遍历归一化为 NormalizedLogMessage[]（映射表见
+ * design Phase 1 实证表）、beforeSeq 切片 + 200 段窗口与 truncated/totalSegments
+ * 语义逐字对齐 parse-zcode-model-io。错误不吞：node:sqlite 不可导入 / 库文件
+ * 缺失 → 抛「读取器不可用」；会话不在库 / 查询异常 → 原样抛出（调用方回落，
+ * 不伪造空结果）。
  *
  * session id 形态实证（2026-09-10 对本机真实库 `file:...?mode=ro` 只读核对 +
  * rollout 目录文件名交叉比对）：
@@ -35,9 +42,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { DEFAULT_MAX_SEGMENTS, type NormalizedLogMessage } from './parse-zcode-model-io.js';
+import type { AgentLogMessagesResult } from './registry.js';
 
 // ── sess id 提取（纯函数）─────────────────────────────────────────────────────
 
@@ -107,8 +118,11 @@ function loadNodeSqliteDatabaseSync(): NodeSqliteModuleLike['DatabaseSync'] {
 
 // ── fixture 造库构造器（测试 helper，供 task-02 复用）──────────────────────────
 
-/** fixture 造数时间基准（毫秒，取自真实库抽样 message.data.time.created）。 */
-const FIXTURE_TIME_BASE = 1787149622901;
+/**
+ * fixture 造数时间基准（毫秒，取自真实库抽样 message.data.time.created）。
+ * task-02 起导出：读取器测试断言 ts（毫秒 → ISO）与期望值同源，免测试侧硬编码。
+ */
+export const FIXTURE_TIME_BASE = 1787149622901;
 
 /** 坏 JSON 行：截断的 JSON 文本（供 task-02 归一化 skippedLines 容错计数）。 */
 const BAD_PART_DATA = '{"type":"text","text":"这条 part.data 是非法 JSON';
@@ -401,4 +415,333 @@ export async function createZcodeFixtureDb(options: ZcodeFixtureDbOptions = {}):
       }
     },
   };
+}
+
+// ── 读取器主体（task-02）──────────────────────────────────────────────────────
+
+/** tool_input 摘要截断：JSON.stringify 后首 2KB（与 parse-zcode-model-io 同口径）。 */
+const ZCODE_TOOL_INPUT_MAX_CHARS = 2048;
+
+/** tool_result 摘要截断：首 4KB（与 parse-zcode-model-io 同口径）。 */
+const ZCODE_TOOL_RESULT_MAX_CHARS = 4096;
+
+/** 「读取器不可用」错误文案（含此前缀的错误 = 开库层失败，调用方回落文件路径）。 */
+const ZCODE_READER_UNAVAILABLE_PREFIX = 'zcode SQLite 读取器不可用';
+
+/** 默认库路径：~/.zcode/cli/db/db.sqlite（design Phase 1 实证位置，join 免 URI 转义）。 */
+function defaultZcodeDbPath(): string {
+  return join(homedir(), '.zcode', 'cli', 'db', 'db.sqlite');
+}
+
+/** 模块级库路径工厂（测试覆写注入 fixture 路径；还原传 null）。 */
+let zcodeDbPathFactory: () => string = defaultZcodeDbPath;
+
+/**
+ * 覆写读取器默认库路径工厂（模块级）；传 null 还原默认 ~/.zcode/cli/db/db.sqlite。
+ * 测试注入 fixture 路径用，生产不触碰。
+ */
+export function setZcodeSqliteDbPathFactory(factory: (() => string) | null): void {
+  zcodeDbPathFactory = factory ?? defaultZcodeDbPath;
+}
+
+/** 读取选项。 */
+export interface ZcodeSqliteReadOptions {
+  /** 库文件绝对路径（本次调用覆写默认工厂；测试注入 fixture 路径用）。 */
+  dbPath?: string;
+}
+
+/** message×part LEFT JOIN 遍历的行形状（列名即 SELECT 别名）。 */
+interface ZcodeJoinedRow {
+  message_id: string;
+  message_data: string | null;
+  part_data: string | null;
+}
+
+/** 未编号段（seq 在全量产段完成后统一重编号）。 */
+type UnnumberedSegment = Omit<NormalizedLogMessage, 'seq'>;
+
+/** 「读取器不可用」错误（node:sqlite 不可导入 / 库文件缺失或打不开）。 */
+function zcodeReaderUnavailableError(detail: string): Error {
+  return new Error(`${ZCODE_READER_UNAVAILABLE_PREFIX}：${detail}`);
+}
+
+/** 未知错误对象转消息文本（抛错兜底拼接用）。 */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 读取 zcode 本地 SQLite 库中的会话对话（read_agent_log_messages 的 zcode 数据源，
+ * design Phase 1）。
+ *
+ * 开库只读（DatabaseSync `{ readOnly: true }`——task-01 fixture 用例验证过的形态，
+ * 等价 file URI mode=ro，WAL 并发读安全），message（按 sequence）×part（按
+ * message_id+sequence）双层遍历归一化：隐藏消息整条跳过（D-003@v1 三判据）、
+ * tool 单 part 产两段（D-004@v1，running/pending 只产 tool_use）、边界/未知
+ * part 类型与坏行计数 skippedLines 不中断；seq 全局重编号 1 起，beforeSeq 切片
+ * + 200 段窗口（最新在尾、窗口取尾部）与 parse-zcode-model-io 逐字对齐。
+ *
+ * 错误语义（不伪造空结果，回落归调用方）：
+ *   - node:sqlite 不可导入（D-006@v1 生效版本 ≥22.13.0 / ≥23.4.0）/ 库文件缺失
+ *     或打不开 → 抛「zcode SQLite 读取器不可用」；
+ *   - 会话不在库 / 查询异常（zcode 升级改 schema 等）→ 原样抛出。
+ */
+export async function readZcodeSqliteMessages(
+  sessId: string,
+  beforeSeq: number | null,
+  opts: ZcodeSqliteReadOptions = {},
+): Promise<AgentLogMessagesResult> {
+  const dbPath = opts.dbPath ?? zcodeDbPathFactory();
+
+  // 惰性加载 node:sqlite（不可导入 = 读取器不可用，D-006@v1）。
+  let DatabaseSync: NodeSqliteModuleLike['DatabaseSync'];
+  try {
+    DatabaseSync = loadNodeSqliteDatabaseSync();
+  } catch (error) {
+    throw zcodeReaderUnavailableError(`node:sqlite 模块不可导入（${errorMessage(error)}）`);
+  }
+  if (!existsSync(dbPath)) {
+    throw zcodeReaderUnavailableError(`库文件不存在（${dbPath}）`);
+  }
+  let db: SqliteDatabaseLike;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+  } catch (error) {
+    throw zcodeReaderUnavailableError(`库文件打开失败（${dbPath}：${errorMessage(error)}）`);
+  }
+
+  try {
+    // 会话存在性前置（sessId 参数绑定防注入——来自上报文件名解析）：不在库直接抛。
+    const sessionRow = db.prepare('SELECT id FROM session WHERE id = ?').get(sessId);
+    if (sessionRow === undefined || sessionRow === null) {
+      throw new Error(`zcode 会话不在库中：session.id=${sessId}`);
+    }
+
+    // 双层遍历单查询化：message 左连接 part（无 part 的消息补 null 行，不丢消息），
+    // ORDER BY m.sequence, p.sequence 即「message 按 sequence × part 按序」。
+    const rows = db
+      .prepare(
+        `SELECT m.id AS message_id, m.data AS message_data, p.data AS part_data
+         FROM message AS m LEFT JOIN part AS p ON p.message_id = m.id
+         WHERE m.session_id = ?
+         ORDER BY m.sequence, p.sequence`,
+      )
+      .all(sessId) as ZcodeJoinedRow[];
+
+    const segments: UnnumberedSegment[] = [];
+    let skippedLines = 0;
+    // 当前 message 分组状态（rows 按 message 聚簇，message_id 变更即切组）。
+    let currentMessageId: string | null = null;
+    let messageSkipParts = false;
+    let messageRole: string | null = null;
+    let messageTs: string | null = null;
+
+    for (const row of rows) {
+      if (row.message_id !== currentMessageId) {
+        currentMessageId = row.message_id;
+        const messageData = parseJsonObject(row.message_data);
+        if (messageData === null) {
+          // 坏 message 行（data 非法 JSON / 非对象）：计 1，其 part 随消息一并
+          // 丢弃不计（part 无 role/ts 不可归一化，坏在 message 不重复记 part）。
+          skippedLines++;
+          messageSkipParts = true;
+          messageRole = null;
+          messageTs = null;
+        } else if (isHiddenZcodeMessage(messageData)) {
+          // 隐藏三判据任一命中（D-003@v1）：整条跳过，不计坏行（对齐文件 parser
+          // 剥 <system-reminder> 不计数的同语义）。
+          messageSkipParts = true;
+        } else {
+          messageSkipParts = false;
+          messageRole = typeof messageData.role === 'string' ? messageData.role : null;
+          messageTs = zcodeMessageTimestamp(messageData);
+        }
+      }
+      if (row.part_data === null || messageSkipParts) continue;
+      const part = parseJsonObject(row.part_data);
+      if (part === null) {
+        skippedLines++;
+        continue;
+      }
+      const produced = normalizeZcodePart(part, messageRole, messageTs);
+      skippedLines += produced.skipped;
+      segments.push(...produced.segments);
+    }
+
+    // seq 重编号（1 起全局序；隐藏/忽略段跳过后连续编号）。
+    const numbered: NormalizedLogMessage[] = segments.map((segment, index) => ({ seq: index + 1, ...segment }));
+
+    // beforeSeq 切片（「加载更早」翻页）→ 段窗口（最近 200 段，最新在尾）——与
+    // parse-zcode-model-io 主函数收尾逐字对齐：truncated = 切片后段数超窗口，
+    // 超窗截尾（保留最新段），totalSegments 恒为窗口前全量总数。
+    const sliced = beforeSeq !== null ? numbered.filter((m) => m.seq < beforeSeq) : numbered;
+    const truncated = sliced.length > DEFAULT_MAX_SEGMENTS;
+    const messages = truncated ? sliced.slice(sliced.length - DEFAULT_MAX_SEGMENTS) : sliced;
+
+    return { status: 'parsed', messages, truncated, totalSegments: numbered.length, skippedLines };
+  } finally {
+    db.close();
+  }
+}
+
+// ── 归一化内部（映射表见模块头 + design Phase 1 实证表）───────────────────────
+
+/** JSON 文本 → 对象（非法 JSON / 非对象 → null，调用方计数跳过不中断）。 */
+function parseJsonObject(raw: string | null): Record<string, unknown> | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 隐藏判据（D-003@v1）：data.semantics.uiVisibility=='hidden' ||
+ * semantics.transcriptVisibility=='hidden' || 顶层 visibility=='model-only'
+ * 任一命中即整条 message 隐藏（实测 user 侧大量系统注入，不过滤会产生假用户气泡）。
+ */
+function isHiddenZcodeMessage(data: Record<string, unknown>): boolean {
+  const semantics = data.semantics;
+  if (isRecord(semantics)) {
+    if (semantics.uiVisibility === 'hidden') return true;
+    if (semantics.transcriptVisibility === 'hidden') return true;
+  }
+  return data.visibility === 'model-only';
+}
+
+/** ts 提取：message.data.time.created（毫秒 → ISO）；缺失/非法 → null（不算坏行）。 */
+function zcodeMessageTimestamp(data: Record<string, unknown>): string | null {
+  const time = data.time;
+  if (!isRecord(time)) return null;
+  const created = time.created;
+  if (typeof created !== 'number' || !Number.isFinite(created)) return null;
+  return new Date(created).toISOString();
+}
+
+/** 单条 part 归一化结果：产段 + 坏行/忽略计数增量。 */
+interface ZcodePartNormalization {
+  segments: UnnumberedSegment[];
+  skipped: number;
+}
+
+/**
+ * 单条 part → 段（design Phase 1 实证映射表）：
+ *   - text：所属 message.role=user → user_input、assistant → reply（其它/缺失
+ *     role 不产段，对齐文件 parser 未知 role 处理）；
+ *   - reasoning → thinking（与 role 无关）；
+ *   - tool → 两段（D-004@v1）：tool_use（tool_name/callID/state.input 2KB 摘要）
+ *     + tool_result（state.status=='error' 取 state.error 文本，否则 state.output
+ *     4KB 摘要；is_error=(status=='error')；status ∈ running/pending 只产 use 段）；
+ *   - step-start/step-finish/timeline/file/compaction 与任何未知 type：防御式
+ *     忽略（计数 skippedLines，未来新增类型不炸）；
+ *   - 结构字段缺失/非法（text/tool/callID/state 非法形状）→ 计 1 跳过不中断。
+ */
+function normalizeZcodePart(
+  part: Record<string, unknown>,
+  role: string | null,
+  ts: string | null,
+): ZcodePartNormalization {
+  switch (part.type) {
+    case 'text': {
+      if (typeof part.text !== 'string') return { segments: [], skipped: 1 };
+      if (part.text.trim() === '') return { segments: [], skipped: 0 }; // 空文本不产段（对齐文件 parser 空气泡防御）
+      if (role === 'user') {
+        return { segments: [makeSegment('user_input', ts, { text: part.text })], skipped: 0 };
+      }
+      if (role === 'assistant') {
+        return { segments: [makeSegment('reply', ts, { text: part.text })], skipped: 0 };
+      }
+      return { segments: [], skipped: 0 };
+    }
+    case 'reasoning': {
+      if (typeof part.text !== 'string') return { segments: [], skipped: 1 };
+      if (part.text.trim() === '') return { segments: [], skipped: 0 };
+      return { segments: [makeSegment('thinking', ts, { text: part.text })], skipped: 0 };
+    }
+    case 'tool': {
+      // 结构三要素（tool/callID/state）任一缺失/非法 → 坏行。
+      const state = part.state;
+      if (typeof part.tool !== 'string' || typeof part.callID !== 'string' || !isRecord(state)) {
+        return { segments: [], skipped: 1 };
+      }
+      const segments: UnnumberedSegment[] = [
+        makeSegment('tool_use', ts, {
+          tool_name: part.tool,
+          tool_use_id: part.callID,
+          tool_input: summarizeZcodeToolInput(state.input),
+        }),
+      ];
+      const status = state.status;
+      if (status !== 'running' && status !== 'pending') {
+        const isError = status === 'error';
+        segments.push(
+          makeSegment('tool_result', ts, {
+            tool_name: part.tool,
+            tool_use_id: part.callID,
+            tool_result: summarizeZcodeToolResult(isError ? state.error : state.output),
+            is_error: isError,
+          }),
+        );
+      }
+      return { segments, skipped: 0 };
+    }
+    case 'step-start':
+    case 'step-finish':
+    case 'timeline':
+    case 'file':
+    case 'compaction':
+      // 边界/元数据段：防御式忽略（计数）。
+      return { segments: [], skipped: 1 };
+    default:
+      // 未知 type（含缺失）：防御式忽略（计数），未来新增类型不炸。
+      return { segments: [], skipped: 1 };
+  }
+}
+
+/** 构造未编号段：未显式给出的字段一律 null（九字段齐全 snake_case，对齐文件 parser）。 */
+function makeSegment(
+  kind: NormalizedLogMessage['kind'],
+  ts: string | null,
+  fields: Partial<
+    Pick<UnnumberedSegment, 'text' | 'tool_name' | 'tool_use_id' | 'tool_input' | 'tool_result' | 'is_error'>
+  > = {},
+): UnnumberedSegment {
+  return {
+    kind,
+    text: fields.text ?? null,
+    tool_name: fields.tool_name ?? null,
+    tool_use_id: fields.tool_use_id ?? null,
+    tool_input: fields.tool_input ?? null,
+    tool_result: fields.tool_result ?? null,
+    is_error: fields.is_error ?? null,
+    ts,
+  };
+}
+
+/** tool input 摘要：JSON.stringify 后首 2KB 截断（与 parse-zcode-model-io 同口径）。 */
+function summarizeZcodeToolInput(input: unknown): string {
+  try {
+    return (JSON.stringify(input) ?? '').slice(0, ZCODE_TOOL_INPUT_MAX_CHARS);
+  } catch {
+    // 循环引用等异常形状兜底（DB 来源理论上不会出现，防御式不抛）。
+    return String(input).slice(0, ZCODE_TOOL_INPUT_MAX_CHARS);
+  }
+}
+
+/** tool result 摘要：字符串首 4KB 截断；缺失 → ''；非字符串形状 JSON 序列化兜底（同口径）。 */
+function summarizeZcodeToolResult(content: unknown): string {
+  if (typeof content === 'string') return content.slice(0, ZCODE_TOOL_RESULT_MAX_CHARS);
+  if (content === null || content === undefined) return '';
+  try {
+    return (JSON.stringify(content) ?? '').slice(0, ZCODE_TOOL_RESULT_MAX_CHARS);
+  } catch {
+    return String(content).slice(0, ZCODE_TOOL_RESULT_MAX_CHARS);
+  }
+}
+
+/** unknown 收窄为 Record（行/块结构校验基础）。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
