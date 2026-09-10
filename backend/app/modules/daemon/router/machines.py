@@ -241,6 +241,7 @@ class MachineSillySpecResolveRequest(BaseModel):
 
     change: str
     strategy: Literal["keep_local", "take_platform"]
+    workspace_id: uuid.UUID
 
     @field_validator("change")
     @classmethod
@@ -272,14 +273,28 @@ async def trigger_machine_sillyspec_resolve(
     先 ``_get_owned_instance`` 做归属校验（越权/不存在 404，普通用户非本机防
     存在性泄漏，owner 与平台管理员放行），离线或 WS 发送失败 → 504
     ``DaemonRuntimeOffline``（与机器级 sillyspec-update 先例同款文案与 details）。
+
+    2026-09-09-conflict-root-workspace-scoping task-04（FR-01/FR-05）：请求体
+    必填 ``workspace_id`` 随 payload 透传（daemon 按工作区映射取根，未命中
+    workspace_root_unknown 不回退单槽位）；另校验当前用户是该 workspace 成员
+    （写操作防越权，复用 compare 侧 ``ensure_workspace_member`` 同一权限集合，
+    action=「对」文案动作词）。
     """
     svc = DaemonService(session)
     await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
 
+    from app.modules.daemon.sillyspec_compare import SillySpecCompareService
+
+    await SillySpecCompareService(session).ensure_workspace_member(
+        user.id, data.workspace_id, action="对"
+    )
+
     from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
     hub = get_daemon_ws_hub()
-    sent = await hub.send_sillyspec_resolve(instance_id, data.change, data.strategy)
+    sent = await hub.send_sillyspec_resolve(
+        instance_id, data.change, data.strategy, data.workspace_id
+    )
     if not sent:
         from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 

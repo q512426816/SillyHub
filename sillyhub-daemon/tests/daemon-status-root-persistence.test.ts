@@ -92,7 +92,7 @@ describe('2026-09-08 采集根落盘/恢复', () => {
       _noteSillySpecStatusRoot(ws: string | null | undefined, p: string | undefined): void;
       _sillyspecStatusRoot: string | null;
     };
-    d._noteSillySpecStatusRoot(null, 'C:\\repo\\alpha');
+    d._noteSillySpecStatusRoot('b97f8231-9404-43bd-89de-38c281c4d875', 'C:\\repo\\alpha');
     expect(d._sillyspecStatusRoot).toBe('C:\\repo\\alpha');
     const raw = await waitFileJson<{ root_path: string; saved_at: string }>(
       join(stateDir, 'sillyspec-status-root.json'),
@@ -120,8 +120,8 @@ describe('2026-09-08 采集根落盘/恢复', () => {
     const d = daemon as unknown as {
       _noteSillySpecStatusRoot(ws: string | null | undefined, p: string | undefined): void;
     };
-    d._noteSillySpecStatusRoot(null, 'C:\\repo\\alpha');
-    d._noteSillySpecStatusRoot(null, 'C:\\repo\\beta');
+    d._noteSillySpecStatusRoot('b97f8231-9404-43bd-89de-38c281c4d875', 'C:\\repo\\alpha');
+    d._noteSillySpecStatusRoot('b97f8231-9404-43bd-89de-38c281c4d875', 'C:\\repo\\beta');
     // 覆盖写是异步的：轮询直到值为 beta（或超时抛出）。
     const t0 = Date.now();
     let raw: { root_path: string } | null = null;
@@ -265,5 +265,45 @@ describe('2026-09-09 心跳工作区键 UUID 守卫（daemon-heartbeat-workspace
       warnSpy.mockRestore();
       infoSpy.mockRestore();
     }
+  });
+});
+
+
+describe('2026-09-09 FR-04 单槽位防投毒（conflict-root-workspace-scoping task-02）', () => {
+  it('无 workspaceId 的 claim（rootPath=Temp）→ 单槽位值不变、不落盘（投毒入口封死）', async () => {
+    const restore = silenceConsole();
+    const daemon = await buildDaemon();
+    const d = daemon as unknown as {
+      _noteSillySpecStatusRoot(ws: string | null | undefined, p: string | undefined): void;
+      _sillyspecStatusRoot: string | null;
+    };
+    // 先用合法 UUID claim 建立「正确」单槽位（洗白机制基线）。
+    d._noteSillySpecStatusRoot('b97f8231-9404-43bd-89de-38c281c4d875', 'C:\\repo\\good');
+    expect(d._sillyspecStatusRoot).toBe('C:\\repo\\good');
+    // 无 workspaceId 的 claim 带 Temp rootPath → 不得覆盖单槽位（FR-04）。
+    d._noteSillySpecStatusRoot(null, 'C:\\Users\\qinyi\\AppData\\Local\\Temp');
+    d._noteSillySpecStatusRoot(undefined, '/tmp/poison');
+    expect(d._sillyspecStatusRoot).toBe('C:\\repo\\good');
+    const raw = await waitFileJson<{ root_path: string }>(
+      join(stateDir, 'sillyspec-status-root.json'),
+    );
+    expect(raw.root_path).toBe('C:\\repo\\good');
+    restore();
+  });
+
+  it('合法 UUID claim 仍双写（映射 + 单槽位，洗白机制保留）', async () => {
+    const restore = silenceConsole();
+    const daemon = await buildDaemon();
+    const d = daemon as unknown as {
+      _noteSillySpecStatusRoot(ws: string | null | undefined, p: string | undefined): void;
+      _sillyspecStatusRoot: string | null;
+      _sillyspecStatusRoots: Map<string, { rootPath: string }>;
+    };
+    d._noteSillySpecStatusRoot('11111111-2222-3333-4444-555555555555', 'C:\\repo\\ws-a');
+    expect(d._sillyspecStatusRoots.get('11111111-2222-3333-4444-555555555555')?.rootPath).toBe(
+      'C:\\repo\\ws-a',
+    );
+    expect(d._sillyspecStatusRoot).toBe('C:\\repo\\ws-a');
+    restore();
   });
 });

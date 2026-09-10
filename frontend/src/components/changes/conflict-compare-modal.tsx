@@ -225,7 +225,14 @@ export function ConflictCompareModal({
       cancelText: "取消",
       onOk: async () => {
         try {
-          await triggerMachineSillySpecResolve(instanceId, { change, strategy });
+          await triggerMachineSillySpecResolve(instanceId, {
+            change,
+            strategy,
+            // 2026-09-09-conflict-root-workspace-scoping task-06（FR-01）：裁决
+            // 请求携带 workspace_id——daemon 按工作区映射取根，不再依赖单槽位
+            //（prop 早已存在 L61，本 change 前未下传）。
+            workspace_id: workspaceId,
+          });
           // 下发成功：父级回显登记回调 + 关闭弹窗（回显走既有链路，§5 3.3）。
           onDispatched?.(change, strategy);
           onClose();

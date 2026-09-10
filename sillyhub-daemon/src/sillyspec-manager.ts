@@ -414,6 +414,15 @@ export interface SillySpecManagerDeps {
    */
   statusCwd?: () => string | null;
   /**
+   * workspace 级根解析器（2026-09-09-conflict-root-workspace-scoping task-01 /
+   * FR-02）：按 wsId 查 claim 学习的映射根（daemon 接线为
+   * _sillyspecStatusRoots.get(wsId)?.rootPath）。未命中返回 null——由调用方
+   * （conflictSnapshot/runResolve）决定报错语义，本解析器**不回退单槽位**
+   *（回退等于保留单槽位投毒 bug，D-001@v1）。缺省返回 null（未注入=永远
+   * 未命中，带 ws 调用一律 workspace_root_unknown）。
+   */
+  statusRootFor?: (workspaceId: string) => string | null;
+  /**
    * 工作区级采集目标提供者（2026-09-08 总览工作区级化）：daemon 从 claim 学习的
    * wsId→主仓根映射（落盘 + LRU 上限）。返回空数组 = 回退 statusCwd 单槽位旧形态
    *（兼容：映射未建立时 legacy 字段仍出数）。缺省 undefined 同样回退。
@@ -479,6 +488,8 @@ export class SillySpecManager {
   private readonly _resolveSillySpecBin: () => string | null;
   /** 采集 cwd 提供者（workspace 主仓根；null = 无已知根跳过）。 */
   private readonly _statusCwd: () => string | null;
+  /** workspace 级根解析器（2026-09-09-conflict-root-workspace-scoping task-01）：未注入恒 null。 */
+  private readonly _statusRootFor: (workspaceId: string) => string | null;
   /** 工作区级目标提供者（undefined=单槽位旧形态）。 */
   private readonly _statusTargets: (() => SillySpecStatusTarget[]) | undefined;
   /** 采集超时毫秒。 */
@@ -543,6 +554,7 @@ export class SillySpecManager {
     this._runProgressJson = deps.runProgressJson ?? runProgressJsonDefault;
     this._resolveSillySpecBin = deps.resolveSillySpecBin ?? resolveSillySpecBinDefault;
     this._statusCwd = deps.statusCwd ?? (() => null);
+    this._statusRootFor = deps.statusRootFor ?? (() => null);
     this._statusTargets = deps.statusTargets;
     this._statusTimeoutMs = deps.statusTimeoutMs ?? SILLYSPEC_STATUS_TIMEOUT_MS;
     // task-06：超时无关闭口——undefined/null/非有限/<=0 一律回退默认。
@@ -889,9 +901,10 @@ export class SillySpecManager {
   async runResolve(
     change: string,
     strategy: 'keep_local' | 'take_platform',
+    workspaceId?: string,
   ): Promise<void> {
     const identify: SillySpecCommandIdentify = { change, strategy };
-    this._log('info', 'sillyspec_resolve_started', { change, strategy });
+    this._log('info', 'sillyspec_resolve_started', { change, strategy, workspace_id: workspaceId ?? null });
     try {
       const flag = RESOLVE_STRATEGY_FLAG[strategy as string];
       if (flag === undefined) {
@@ -903,7 +916,7 @@ export class SillySpecManager {
         });
         return;
       }
-      const pre = this._requireCommandPrecondition('resolve', identify);
+      const pre = this._requireCommandPrecondition('resolve', identify, workspaceId);
       if (pre === null) return;
       const outcome = await this._execSillySpecCli(
         pre.bin,
@@ -1010,6 +1023,19 @@ export class SillySpecManager {
   }
 
   /**
+   * 根解析统一入口（2026-09-09-conflict-root-workspace-scoping task-01 /
+   * FR-02/FR-03）：workspaceId 非空 → statusRootFor 查映射（null=未命中，
+   * **不回退单槽位**——回退等于保留单槽位投毒 bug）；空/undefined →
+   * _statusCwd() 单槽位（legacy 语义不变，含 ghost_cleanup 无 ws 路径）。
+   */
+  private _resolveWorkspaceRoot(workspaceId?: string): string | null {
+    if (workspaceId) {
+      return this._statusRootFor(workspaceId);
+    }
+    return this._statusCwd();
+  }
+
+  /**
    * 执行前置校验：cwd（statusCwd 回调根）与 sillyspec bin 双就绪才返回
    * {cwd, bin}；任一缺失记 failed（不 spawn——无根/无 CLI 时起进程必错，还
    * 浪费超时窗）并返回 null。change 名不再重复校验：daemon.ts 入口已验非空、
@@ -1018,14 +1044,21 @@ export class SillySpecManager {
   private _requireCommandPrecondition(
     action: 'resolve' | 'ghost_cleanup',
     identify: SillySpecCommandIdentify,
+    workspaceId?: string,
   ): { cwd: string; bin: string } | null {
-    const cwd = this._statusCwd();
+    const cwd = this._resolveWorkspaceRoot(workspaceId);
     if (!cwd) {
+      // 2026-09-09-conflict-root-workspace-scoping task-01（FR-02/FR-03 两态）：带
+      // ws 且映射未命中 → 「尚未认领」文案（不回退单槽位，不 spawn——错根下执行
+      // 写命令正是本 bug 的危害模式）；不带 ws（legacy，含 ghost_cleanup）→
+      // 既有「未观察到主仓根」语义不变。
       this.recordCommandResult({
         action,
         ...identify,
         state: 'failed',
-        error: '未观察到 workspace 主仓根，无法执行 sillyspec 命令',
+        error: workspaceId
+          ? '该工作区尚未被本机会话认领，无法执行 sillyspec 命令'
+          : '未观察到 workspace 主仓根，无法执行 sillyspec 命令',
       });
       return null;
     }
@@ -1150,10 +1183,19 @@ export class SillySpecManager {
   async conflictSnapshot(
     change: string,
     kind: string,
+    workspaceId?: string,
   ): Promise<SillySpecConflictSnapshot> {
-    const root = this._statusCwd();
+    const root = this._resolveWorkspaceRoot(workspaceId);
     if (!root) {
-      throw new RpcError('no_spec_root', '未观察到 workspace 主仓根，无法生成冲突快照');
+      // 2026-09-09-conflict-root-workspace-scoping task-01（FR-02/FR-03 两态）：带
+      // ws 且映射未命中 → workspace_root_unknown（不回退单槽位，D-001@v1）；不带
+      // ws（legacy）→ 既有 no_spec_root 语义不变。
+      throw new RpcError(
+        workspaceId ? 'workspace_root_unknown' : 'no_spec_root',
+        workspaceId
+          ? '该工作区尚未被本机会话认领，请先在该工作区发起一次会话'
+          : '未观察到 workspace 主仓根，无法生成冲突快照',
+      );
     }
     if (typeof change !== 'string' || change === '') {
       throw new RpcError('invalid_params', 'change 名为空，无法生成冲突快照');

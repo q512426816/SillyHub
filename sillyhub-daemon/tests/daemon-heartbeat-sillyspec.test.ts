@@ -26,6 +26,9 @@
  * @module daemon-heartbeat-sillyspec.test
  */
 
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { HubClient } from '../src/hub-client.js';
@@ -156,7 +159,14 @@ function makeHeartbeatHarness(
     makeConfig(configOverrides),
     { heartbeat: heartbeatMock } as never,
     null as never,
-    { sessionManager: null, sillyspecManager: manager as never },
+    {
+      sessionManager: null,
+      sillyspecManager: manager as never,
+      // ql-20260909（顺手修存量债）：隔离本机真实 ~/.sillyhub/daemon/
+      // pending-update.json（server_poll 态会污染第 4 参 pendingUpdate 断言，
+      // 本机状态依赖导致必红）——指向不存在的临时路径，读取恒无 pending。
+      pendingUpdatePath: join(tmpdir(), 'sillyhub-test-no-pending-update.json'),
+    },
   );
   (daemon as unknown as { _registeredRuntimes: Map<string, string> })._registeredRuntimes.set(
     'claude',

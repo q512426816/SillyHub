@@ -32,7 +32,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.auth.model import Role, RolePermission, User
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon import ws_hub as ws_hub_module
 from app.modules.daemon.model import DaemonInstance
@@ -226,9 +226,18 @@ class _SendRecorder:
             daemon_id: uuid.UUID,
             change: str,
             strategy: str,
+            workspace_id: uuid.UUID,
         ) -> bool:
             recorder.calls.append(
-                ("resolve", {"daemon_id": daemon_id, "change": change, "strategy": strategy})
+                (
+                    "resolve",
+                    {
+                        "daemon_id": daemon_id,
+                        "change": change,
+                        "strategy": strategy,
+                        "workspace_id": workspace_id,
+                    },
+                )
             )
             return recorder.result
 
@@ -259,15 +268,54 @@ def _endpoint_url(kind: str, instance_id: uuid.UUID) -> str:
 
 
 async def _post_endpoint(
-    client: AsyncClient, kind: str, instance_id: uuid.UUID, headers: dict[str, str]
+    client: AsyncClient,
+    kind: str,
+    instance_id: uuid.UUID,
+    headers: dict[str, str],
+    workspace_id: uuid.UUID | None = None,
 ):
-    """两端点统一 POST——resolve 携带合法 body，ghost-cleanup 无 body。"""
+    """两端点统一 POST——resolve 携带合法 body（2026-09-09-conflict-root-workspace-
+    scoping task-04 起必含 workspace_id），ghost-cleanup 无 body。"""
     url = _endpoint_url(kind, instance_id)
     if kind == "resolve":
         return await client.post(
-            url, json={"change": _VALID_CHANGE, "strategy": "keep_local"}, headers=headers
+            url,
+            json={
+                "change": _VALID_CHANGE,
+                "strategy": "keep_local",
+                **({"workspace_id": str(workspace_id)} if workspace_id else {}),
+            },
+            headers=headers,
         )
     return await client.post(url, headers=headers)
+
+
+async def _seed_ws_member(db_session: AsyncSession, user_id: uuid.UUID) -> uuid.UUID:
+    """建 workspace + 成员绑定，返回 workspace_id（resolve 端点成员校验用，
+    2026-09-09-conflict-root-workspace-scoping task-04 / FR-05）。"""
+    from sqlalchemy import select as sa_select
+
+    from app.modules.workspace.model import Workspace
+
+    role = (
+        await db_session.execute(sa_select(Role).where(Role.key == "member"))
+    ).scalar_one_or_none()
+    if role is None:
+        role = Role(id=uuid.uuid4(), key="member", name="member")
+        db_session.add(role)
+        await db_session.flush()
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"sscmd-ws-{uuid.uuid4().hex[:6]}",
+        slug=f"sscmd-{uuid.uuid4().hex[:8]}",
+        root_path="/tmp/sscmd-test",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add(UserWorkspaceRole(user_id=user_id, workspace_id=ws.id, role_id=role.id))
+    await db_session.commit()
+    return ws.id
 
 
 # ── WS 通道契约：消息封包（protocol 常量 + payload 原样，design §7）──────────
@@ -281,12 +329,19 @@ async def test_ws_hub_send_sillyspec_resolve_envelope(fresh_ws_hub: DaemonWsHub)
     fake_ws = _FakeWs()
     await fresh_ws_hub.connect(daemon_id, fake_ws)
 
-    sent = await fresh_ws_hub.send_sillyspec_resolve(daemon_id, _VALID_CHANGE, "take_platform")
+    ws_id = uuid.uuid4()
+    sent = await fresh_ws_hub.send_sillyspec_resolve(
+        daemon_id, _VALID_CHANGE, "take_platform", ws_id
+    )
     assert sent is True
     assert fake_ws.messages == [
         {
             "type": DAEMON_MSG_SILLYSPEC_RESOLVE,
-            "payload": {"change": _VALID_CHANGE, "strategy": "take_platform"},
+            "payload": {
+                "change": _VALID_CHANGE,
+                "strategy": "take_platform",
+                "workspace_id": str(ws_id),
+            },
         }
     ]
 
@@ -307,7 +362,9 @@ async def test_ws_hub_send_sillyspec_ghost_cleanup_envelope(fresh_ws_hub: Daemon
 async def test_ws_hub_send_without_connection_returns_false(fresh_ws_hub: DaemonWsHub) -> None:
     """无连接（daemon 离线）→ 两 send 均返回 False（调用方端点转 504，不在 hub 抛）。"""
     assert (
-        await fresh_ws_hub.send_sillyspec_resolve(uuid.uuid4(), _VALID_CHANGE, "keep_local")
+        await fresh_ws_hub.send_sillyspec_resolve(
+            uuid.uuid4(), _VALID_CHANGE, "keep_local", uuid.uuid4()
+        )
         is False
     )
     assert await fresh_ws_hub.send_sillyspec_ghost_cleanup(uuid.uuid4()) is False
@@ -330,16 +387,19 @@ async def test_endpoint_owner_returns_200(
     owner, owner_token = await _seed_user(db_session, name=f"owner-{kind}")
     await _grant_runtime_admin(db_session, owner.id)
     inst = await _create_machine(db_session, owner.id, hostname=f"sscmd-owner-{kind}")
+    ws_id = await _seed_ws_member(db_session, owner.id)
     recorder = _SendRecorder(result=True)
     recorder.install(monkeypatch)
 
-    resp = await _post_endpoint(client, kind, inst.id, _headers(owner_token))
+    resp = await _post_endpoint(client, kind, inst.id, _headers(owner_token), workspace_id=ws_id)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"sent": True}
     assert len(recorder.calls) == 1
     sent_kind, call = recorder.calls[0]
     assert sent_kind == kind
     assert call["daemon_id"] == inst.id
+    if kind == "resolve":
+        assert call["workspace_id"] == ws_id
 
 
 @pytest.mark.parametrize("kind", _ENDPOINT_IDS)
@@ -357,10 +417,11 @@ async def test_endpoint_platform_admin_returns_200(
         db_session, name=f"pa-admin-{kind}", is_platform_admin=True
     )
     inst = await _create_machine(db_session, owner.id, hostname=f"sscmd-pa-{kind}")
+    ws_id = await _seed_ws_member(db_session, _admin.id)
     recorder = _SendRecorder(result=True)
     recorder.install(monkeypatch)
 
-    resp = await _post_endpoint(client, kind, inst.id, _headers(admin_token))
+    resp = await _post_endpoint(client, kind, inst.id, _headers(admin_token), workspace_id=ws_id)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"sent": True}
     assert len(recorder.calls) == 1
@@ -384,7 +445,10 @@ async def test_endpoint_runtime_admin_stranger_returns_404(
     recorder = _SendRecorder(result=True)
     recorder.install(monkeypatch)
 
-    resp = await _post_endpoint(client, kind, inst.id, _headers(stranger_token))
+    stranger_ws = await _seed_ws_member(db_session, stranger.id)
+    resp = await _post_endpoint(
+        client, kind, inst.id, _headers(stranger_token), workspace_id=stranger_ws
+    )
     assert resp.status_code == 404, resp.text
     body = resp.json()
     assert body["code"] == "HTTP_404_DAEMON_RUNTIME_NOT_FOUND"
@@ -404,10 +468,13 @@ async def test_endpoint_plain_user_returns_403(
     owner, _owner_token = await _seed_user(db_session, name=f"plain-owner-{kind}")
     _nobody, nobody_token = await _seed_user(db_session, name=f"plain-nobody-{kind}")
     inst = await _create_machine(db_session, owner.id, hostname=f"sscmd-plain-{kind}")
+    plain_ws = uuid.uuid4()  # 权限闸早退，body 仅需合法 UUID 形态
     recorder = _SendRecorder(result=True)
     recorder.install(monkeypatch)
 
-    resp = await _post_endpoint(client, kind, inst.id, _headers(nobody_token))
+    resp = await _post_endpoint(
+        client, kind, inst.id, _headers(nobody_token), workspace_id=plain_ws
+    )
     assert resp.status_code == 403, resp.text
     assert recorder.calls == []
 
@@ -425,10 +492,13 @@ async def test_endpoint_nonexistent_instance_returns_404(
     _admin, admin_token = await _seed_user(
         db_session, name=f"miss-admin-{kind}", is_platform_admin=True
     )
+    miss_ws = await _seed_ws_member(db_session, _admin.id)
     recorder = _SendRecorder(result=True)
     recorder.install(monkeypatch)
 
-    resp = await _post_endpoint(client, kind, uuid.uuid4(), _headers(admin_token))
+    resp = await _post_endpoint(
+        client, kind, uuid.uuid4(), _headers(admin_token), workspace_id=miss_ws
+    )
     assert resp.status_code == 404, resp.text
     assert recorder.calls == []
 
@@ -465,7 +535,11 @@ async def test_resolve_rejects_bad_change_without_touching_hub(
 
     resp = await client.post(
         _resolve_url(inst.id),
-        json={"change": bad_change, "strategy": "keep_local"},
+        json={
+            "change": bad_change,
+            "strategy": "keep_local",
+            "workspace_id": str(uuid.uuid4()),
+        },
         headers=_headers(admin_token),
     )
     assert resp.status_code == 422, resp.text
@@ -494,7 +568,11 @@ async def test_resolve_rejects_bad_strategy_without_touching_hub(
 
     resp = await client.post(
         _resolve_url(inst.id),
-        json={"change": _VALID_CHANGE, "strategy": bad_strategy},
+        json={
+            "change": _VALID_CHANGE,
+            "strategy": bad_strategy,
+            "workspace_id": str(uuid.uuid4()),
+        },
         headers=_headers(admin_token),
     )
     assert resp.status_code == 422, resp.text
@@ -512,12 +590,17 @@ async def test_resolve_accepts_128_char_change_boundary(
     钉住边界，防白名单被误收紧成 127。"""
     admin, admin_token = await _seed_user(db_session, name="b128-admin", is_platform_admin=True)
     inst = await _create_machine(db_session, admin.id, hostname="sscmd-b128-host")
+    b128_ws = await _seed_ws_member(db_session, admin.id)
     recorder = _SendRecorder(result=True)
     recorder.install(monkeypatch)
 
     resp = await client.post(
         _resolve_url(inst.id),
-        json={"change": "a" * 128, "strategy": "keep_local"},
+        json={
+            "change": "a" * 128,
+            "strategy": "keep_local",
+            "workspace_id": str(b128_ws),
+        },
         headers=_headers(admin_token),
     )
     assert resp.status_code == 200, resp.text
@@ -538,12 +621,17 @@ async def test_resolve_passes_both_strategies_verbatim(
     admin, admin_token = await _seed_user(db_session, name=f"st2-admin-{strategy}")
     await _grant_runtime_admin(db_session, admin.id)
     inst = await _create_machine(db_session, admin.id, hostname=f"sscmd-st2-{strategy}")
+    st2_ws = await _seed_ws_member(db_session, admin.id)
     recorder = _SendRecorder(result=True)
     recorder.install(monkeypatch)
 
     resp = await client.post(
         _resolve_url(inst.id),
-        json={"change": _VALID_CHANGE, "strategy": strategy},
+        json={
+            "change": _VALID_CHANGE,
+            "strategy": strategy,
+            "workspace_id": str(st2_ws),
+        },
         headers=_headers(admin_token),
     )
     assert resp.status_code == 200, resp.text
@@ -551,6 +639,7 @@ async def test_resolve_passes_both_strategies_verbatim(
     _kind, call = recorder.calls[0]
     assert call["change"] == _VALID_CHANGE
     assert call["strategy"] == strategy
+    assert call["workspace_id"] == st2_ws
 
 
 # ── 离线 / 发送失败 → 504（与机器级 self-update/cleanup/sillyspec-update 同款）──
@@ -571,9 +660,10 @@ async def test_endpoint_send_returns_false_yields_504(
         db_session, name=f"off-admin-{kind}", is_platform_admin=True
     )
     inst = await _create_machine(db_session, admin.id, hostname=f"sscmd-off-{kind}")
+    off_ws = await _seed_ws_member(db_session, admin.id)
     _SendRecorder(result=False).install(monkeypatch)
 
-    resp = await _post_endpoint(client, kind, inst.id, _headers(admin_token))
+    resp = await _post_endpoint(client, kind, inst.id, _headers(admin_token), workspace_id=off_ws)
     assert resp.status_code == 504, resp.text
     body = resp.json()
     assert body["code"] == "HTTP_504_DAEMON_RUNTIME_OFFLINE"
@@ -594,9 +684,10 @@ async def test_endpoint_ws_send_raises_yields_504(
         db_session, name=f"brk-admin-{kind}", is_platform_admin=True
     )
     inst = await _create_machine(db_session, admin.id, hostname=f"sscmd-brk-{kind}")
+    brk_ws = await _seed_ws_member(db_session, admin.id)
     await fresh_ws_hub.connect(inst.id, _FakeWs(raise_on_send=True))
 
-    resp = await _post_endpoint(client, kind, inst.id, _headers(admin_token))
+    resp = await _post_endpoint(client, kind, inst.id, _headers(admin_token), workspace_id=brk_ws)
     assert resp.status_code == 504, resp.text
     body = resp.json()
     assert body["code"] == "HTTP_504_DAEMON_RUNTIME_OFFLINE"
@@ -821,3 +912,65 @@ def test_openapi_contains_endpoints_and_command_result_refs() -> None:
     # 心跳载荷模型同入 components（DaemonHeartbeatRequest 引用链完整）。
     assert "DaemonHeartbeatSillySpecCommandResult" in spec["components"]["schemas"]
     assert "MachineSillySpecCommandResultRead" in spec["components"]["schemas"]
+
+
+# ── workspace_id 契约（2026-09-09-conflict-root-workspace-scoping task-04 /
+#    FR-01/FR-05：请求体必填 + 非成员 403）────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_resolve_requires_workspace_id_yields_422(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fresh_ws_hub: DaemonWsHub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """请求体缺 workspace_id → 422（pydantic 必填），不触达 ws_hub。"""
+    admin, admin_token = await _seed_user(db_session, name="wsreq-admin", is_platform_admin=True)
+    inst = await _create_machine(db_session, admin.id, hostname="sscmd-wsreq-host")
+    recorder = _SendRecorder(result=True)
+    recorder.install(monkeypatch)
+
+    resp = await client.post(
+        _resolve_url(inst.id),
+        json={"change": _VALID_CHANGE, "strategy": "keep_local"},
+        headers=_headers(admin_token),
+    )
+    assert resp.status_code == 422, resp.text
+    assert recorder.calls == [], "422 请求不得触达 ws_hub"
+
+
+@pytest.mark.asyncio
+async def test_resolve_non_workspace_member_yields_403(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fresh_ws_hub: DaemonWsHub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """机器归属通过但非 workspace 成员 → 403（写操作防越权，FR-05；
+    文案动作词「对…下发裁决」与 compare「查看」分叉）。"""
+    owner, _owner_token = await _seed_user(db_session, name="wsm-owner")
+    # 平台 admin 过机器归属闸（_get_owned_instance 放行），但非 workspace 成员——
+    # 才能触达成员校验分支（RUNTIME_ADMIN 非 owner 会先 404 归属早退）。
+    _stranger, stranger_token = await _seed_user(
+        db_session, name="wsm-stranger", is_platform_admin=True
+    )
+    inst = await _create_machine(db_session, owner.id, hostname="sscmd-wsm-host")
+    member_ws = await _seed_ws_member(db_session, owner.id)  # 只有 owner 是成员
+    recorder = _SendRecorder(result=True)
+    recorder.install(monkeypatch)
+
+    resp = await client.post(
+        _resolve_url(inst.id),
+        json={
+            "change": _VALID_CHANGE,
+            "strategy": "keep_local",
+            "workspace_id": str(member_ws),
+        },
+        headers=_headers(stranger_token),
+    )
+    assert resp.status_code == 403, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_403_PERMISSION_DENIED"
+    assert "仅工作区成员可对该冲突对比" in body["message"]
+    assert recorder.calls == [], "403 请求不得触达 ws_hub"

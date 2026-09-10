@@ -215,20 +215,24 @@ function snapshot(
   manager: SillySpecManager,
   change: string,
   kind: 'spec-tree' | 'progress',
+  workspaceId?: string,
 ): Promise<ConflictSnapshotResult> {
   const m = manager as unknown as {
     conflictSnapshot: (
       change: string,
       kind: 'spec-tree' | 'progress',
+      workspaceId?: string,
     ) => Promise<ConflictSnapshotResult>;
   };
-  return m.conflictSnapshot(change, kind);
+  return m.conflictSnapshot(change, kind, workspaceId);
 }
 
 /** 采集 harness：statusCwd 指向临时 spec 根（或 null=无根），runProgressJson 可编程。 */
 function makeSnapshotHarness(opts: {
   root: string | null;
   envelope?: { data: { changes: ProgressEnvelopeChange[] } };
+  /** workspace 级根解析器（2026-09-09-conflict-root-workspace-scoping task-01）：按 wsId 查映射根。 */
+  rootFor?: (workspaceId: string) => string | null;
 }) {
   const calls: {
     file: string;
@@ -264,6 +268,7 @@ function makeSnapshotHarness(opts: {
     runProgressJson,
     resolveSillySpecBin: () => BIN,
     statusCwd: () => opts.root,
+    statusRootFor: opts.rootFor,
     statusTimeoutMs: 5,
   });
   return { manager, calls, runProgressJson };
@@ -609,6 +614,55 @@ describe('task-01 无 spec 根', () => {
   });
 });
 
+// ── workspace_id 取根（2026-09-09-conflict-root-workspace-scoping task-01 / FR-02/FR-03）──
+
+const WS_ID = 'b97f8231-9404-43bd-89de-38c281c4d875';
+
+describe('task-01 workspace_id 取根：映射查根，未命中不回退单槽位', () => {
+  it('带 ws 且映射命中 → 用映射根出快照（statusCwd=null 也不受单槽位影响）', async () => {
+    const root = await makeSpecRoot();
+    const change = 'quick-77aa11bb';
+    await writeSpecFile(root, `changes/${change}/design.md`, '工作区根内容');
+    await writeSpecTreeConflictRecord(root, change, [`changes/${change}/design.md`]);
+    // 单槽位被投毒为 null（statusCwd 不可用），仅映射根可解析。
+    const h = makeSnapshotHarness({ root: null, rootFor: () => root });
+
+    const result = await snapshot(h.manager, change, 'spec-tree', WS_ID);
+
+    expect(result.change).toBe(change);
+    expect(result.files[0]!.content).toBe('工作区根内容');
+  });
+
+  it('带 ws 且映射未命中 → workspace_root_unknown（单槽位有值也不回退，FR-02 铁律）', async () => {
+    const root = await makeSpecRoot();
+    const change = 'quick-88bb22cc';
+    await writeSpecFile(root, `changes/${change}/design.md`, '单槽位内容');
+    await writeSpecTreeConflictRecord(root, change, [`changes/${change}/design.md`]);
+    // 单槽位合法（root），但映射未命中 → 必须报错而非退回单槽位。
+    const h = makeSnapshotHarness({ root, rootFor: () => null });
+
+    const err = await snapshot(h.manager, change, 'spec-tree', WS_ID).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(RpcError);
+    expect((err as RpcError).code).toBe('workspace_root_unknown');
+  });
+
+  it('不带 ws → legacy 单槽位照常（statusRootFor 有值也不参与，FR-03 回归）', async () => {
+    const root = await makeSpecRoot();
+    const change = 'quick-99cc33dd';
+    await writeSpecFile(root, `changes/${change}/design.md`, '单槽位路径内容');
+    await writeSpecTreeConflictRecord(root, change, [`changes/${change}/design.md`]);
+    const h = makeSnapshotHarness({ root, rootFor: () => '/nonexistent-root' });
+
+    const result = await snapshot(h.manager, change, 'spec-tree');
+
+    expect(result.files[0]!.content).toBe('单槽位路径内容');
+  });
+});
+
 // ── 心跳 ql_id 补报（collectStatusOnce 后处理，best-effort）──────────────────
 
 describe('task-01 心跳补报：pending_conflicts 的 quick 条带 ql_id', () => {
@@ -686,7 +740,7 @@ describe('task-01 RPC 分发：sillyspec_conflict_snapshot 注册与透传', () 
       isUpgradeInFlight: vi.fn(() => false),
       recordCommandResult: vi.fn(),
       getCommandResult: vi.fn((): null => null),
-      conflictSnapshot: vi.fn(async (_change: string, _kind: string) => ({
+      conflictSnapshot: vi.fn(async (_change: string, _kind: string, _ws?: string) => ({
         change: _change,
         kind: _kind,
         ql_id: null,
@@ -713,11 +767,18 @@ describe('task-01 RPC 分发：sillyspec_conflict_snapshot 注册与透传', () 
     return { manager, handler };
   }
 
-  it('注册后 params（change/kind）原样透传 manager.conflictSnapshot，result 直回', async () => {
+  it('注册后 params（change/kind/workspace_id）原样透传 manager.conflictSnapshot，result 直回', async () => {
     const { manager, handler } = makeRegistrationHarness();
-    const result = await handler({ change: 'quick-62e1d5fb', kind: 'spec-tree' });
+    const result = await handler({
+      change: 'quick-62e1d5fb',
+      kind: 'spec-tree',
+      workspace_id: WS_ID,
+    });
     expect(manager.conflictSnapshot).toHaveBeenCalledTimes(1);
-    expect(manager.conflictSnapshot).toHaveBeenCalledWith('quick-62e1d5fb', 'spec-tree');
+    expect(manager.conflictSnapshot).toHaveBeenCalledWith('quick-62e1d5fb', 'spec-tree', WS_ID);
+    // 无 workspace_id（旧客户端）→ 归一空串 = legacy 单槽位（FR-03）。
+    await handler({ change: 'quick-62e1d5fb', kind: 'spec-tree' });
+    expect(manager.conflictSnapshot).toHaveBeenLastCalledWith('quick-62e1d5fb', 'spec-tree', '');
     expect(result).toMatchObject({
       change: 'quick-62e1d5fb',
       kind: 'spec-tree',
@@ -760,6 +821,6 @@ describe('task-01 RPC 分发：sillyspec_conflict_snapshot 注册与透传', () 
     expect(out.payload.error?.code).toBe('no_spec_root');
     expect(out.payload.result).toBeUndefined();
     // kind=progress 同样透传（与上一用例合证 params 不丢不改）。
-    expect(manager.conflictSnapshot).toHaveBeenCalledWith('c1', 'progress');
+    expect(manager.conflictSnapshot).toHaveBeenCalledWith('c1', 'progress', '');
   });
 });

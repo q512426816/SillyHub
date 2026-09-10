@@ -1451,7 +1451,11 @@ export interface SillySpecCommandExecutor {
    * --take-platform`（strategy→flag 单点映射、cwd 取主仓根、超时 config 化均归
    * task-06）。结果全收敛写结果槽不 reject（同 runProgressJsonDefault 风格）。
    */
-  runResolve(change: string, strategy: 'keep_local' | 'take_platform'): Promise<void>;
+  runResolve(
+    change: string,
+    strategy: 'keep_local' | 'take_platform',
+    workspaceId?: string,
+  ): Promise<void>;
   /**
    * 执行 ghost 清理：`doctor --cleanup-ghosts --confirm` + `platform sync` 平台侧
    * 收敛（闭环依据 design §5 Phase2 第2条）。结果全收敛写结果槽不 reject。
@@ -1957,6 +1961,11 @@ export class Daemon {
         // 2026-09-02-changes-overview-card task-02：采集 cwd 注入——claim 观察到的
         // workspace 主仓根（闭包惰性求值，claim 后每拍取最新值）。
         statusCwd: () => this._sillyspecStatusRoot,
+        // 2026-09-09-conflict-root-workspace-scoping task-02（FR-02）：工作区级根
+        // 解析器——conflictSnapshot/runResolve 带 workspaceId 时按映射查根，
+        // 未命中由 manager 报 workspace_root_unknown（不在解析器内回退单槽位）。
+        statusRootFor: (workspaceId) =>
+          this._sillyspecStatusRoots.get(workspaceId)?.rootPath ?? null,
         // 2026-09-08 总览工作区级化：wsId→root 映射非空时按目标逐个采集（心跳
         // sillyspec_status_map）；空映射回退 statusCwd 单槽位（legacy 语义不变）。
         statusTargets: () =>
@@ -4712,6 +4721,13 @@ export class Daemon {
     ) {
       return;
     }
+    // 2026-09-09-conflict-root-workspace-scoping task-02（FR-04 防投毒）：无
+    // workspaceId 的 claim 不再覆盖单槽位（含落盘）——历史实证「rootPath=Temp 的
+    // 无身份 claim」投毒单槽位致对比 502/裁决错根；合法 UUID 的 claim 仍双写
+    //（映射 + 单槽位，「正确 claim 洗白单槽位」的临时绕过机制保留）。
+    if (!workspaceId) {
+      return;
+    }
     if (workspaceId) {
       // UUID 守卫（WORKSPACE_ID_RE 同族）：非 UUID 的 claim workspaceId（测试/联调残留键，
       // 实证 ws-b1~b4）拒绝登记——登记后随 statusTargets 采集进 sillyspec_status_map 心跳，
@@ -4747,9 +4763,6 @@ export class Daemon {
     }
     if (this._sillyspecStatusRoot === rootPath) return;
     this._sillyspecStatusRoot = rootPath;
-    if (!workspaceId) {
-      this._logger.info('sillyspec_status_root_observed', { root_path: rootPath });
-    }
     void this._persistSillySpecStatusRoot(rootPath);
   }
 
@@ -6332,7 +6345,11 @@ export class Daemon {
     ws.registerRpcHandler('sillyspec_conflict_snapshot', async (params) => {
       const change = typeof params.change === 'string' ? params.change : '';
       const kind = typeof params.kind === 'string' ? params.kind : '';
-      return this._sillyspecManager.conflictSnapshot(change, kind);
+      // 2026-09-09-conflict-root-workspace-scoping task-02（FR-01/FR-03）：透传
+      // workspace_id（runtime.* 同款归一——非字符串/缺省 → 空串 = legacy 单槽位）。
+      const workspaceId =
+        typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      return this._sillyspecManager.conflictSnapshot(change, kind, workspaceId);
     });
   }
 
@@ -6629,9 +6646,13 @@ export class Daemon {
       case MSG.SILLYSPEC_RESOLVE: {
         // payload: SillySpecResolvePayload（backend 白名单已校验；入口仍做缺字段/
         // 值域校验——缺 change 或 strategy 不在 keep_local/take_platform 值域 →
-        // warn 丢弃不崩，同 lease_cancel_no_lease_id 惯例）。
+        // warn 丢弃不崩，同 lease_cancel_no_lease_id 惯例）。workspace_id 可缺
+        // （旧 backend，2026-09-09-conflict-root-workspace-scoping task-02 / FR-03）
+        // ——非字符串归一空串 = legacy 单槽位，新 backend 恒携带。
         const change = typeof rawPayload.change === 'string' ? rawPayload.change : '';
         const strategy = rawPayload.strategy;
+        const workspaceId =
+          typeof rawPayload.workspace_id === 'string' ? rawPayload.workspace_id : '';
         if (!change || (strategy !== 'keep_local' && strategy !== 'take_platform')) {
           this._logger.warn('sillyspec_resolve_missing_fields', {
             change,
@@ -6639,9 +6660,9 @@ export class Daemon {
           });
           break;
         }
-        this._logger.info('sillyspec_resolve_received', { change, strategy });
+        this._logger.info('sillyspec_resolve_received', { change, strategy, workspace_id: workspaceId || null });
         // 非阻塞分发（同 SILLYSPEC_UPDATE 风格，不阻塞 WS 接收）。
-        void this._routeSillySpecResolve(change, strategy);
+        void this._routeSillySpecResolve(change, strategy, workspaceId);
         break;
       }
       case MSG.SILLYSPEC_GHOST_CLEANUP: {
@@ -6737,11 +6758,12 @@ export class Daemon {
   private _routeSillySpecResolve(
     change: string,
     strategy: 'keep_local' | 'take_platform',
+    workspaceId: string,
   ): Promise<void> {
     return this._runSillySpecCommand(
       'resolve',
       { change, strategy },
-      (executor) => executor.runResolve(change, strategy),
+      (executor) => executor.runResolve(change, strategy, workspaceId),
     );
   }
 

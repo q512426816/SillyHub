@@ -385,10 +385,13 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
       });
 
       // 心跳携带：第 4 参恰三字段（剥 since——backend 首落库盖 since，daemon 不上报）。
+      // ql-20260909（顺手修存量债，同 platform-command/heartbeat-sillyspec 同款）：心跳
+      // 已演进到 10 参（第 8 specCache / 9 statusError / 10 status_map）——length 断言
+      // 从 4 时代更新；pendingUpdate 仍第 4 参（index 3）。
       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
       expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
       const first = h.heartbeatMock.mock.calls[0]!;
-      expect(first.length).toBe(4);
+      expect(first.length).toBe(10);
       expect(first[3]).toEqual({
         reason: 'disk_change',
         current_version: 'cur-p4',
@@ -405,7 +408,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
       expect(await h.daemon.readPendingUpdate()).toBeNull();
       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
       const second = h.heartbeatMock.mock.calls[1]!;
-      expect(second.length).toBe(4);
+      expect(second.length).toBe(10); // ql-20260909：心跳 10 参平铺形态（同上注）
       expect(second[3]).toBeUndefined();
     });
   });

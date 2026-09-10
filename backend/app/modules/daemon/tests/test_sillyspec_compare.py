@@ -384,7 +384,13 @@ async def test_compare_owner_returns_200_and_rpc_contract(
     call = stub.calls[0]
     assert call["daemon_id"] == inst.id
     assert call["method"] == "sillyspec_conflict_snapshot"
-    assert call["params"] == {"change": _CHANGE, "kind": "spec-tree"}
+    # 2026-09-09-conflict-root-workspace-scoping task-03（FR-01）：params 携带
+    # workspace_id（daemon 按工作区映射取根，不再依赖单槽位）。
+    assert call["params"] == {
+        "change": _CHANGE,
+        "kind": "spec-tree",
+        "workspace_id": str(ws.id),
+    }
     assert call["timeout"] == 15, "必须显式传 15s（send_rpc 默认 10s 不够）"
 
 
@@ -1189,3 +1195,124 @@ async def test_compare_progress_local_missing_field_shows_placeholder(
 
     assert by_label["阶段标签"]["local_value"] == "—"
     assert by_label["阶段标签"]["differ"] is True
+
+
+# ── ensure_workspace_member 公开化 + action 文案分叉（2026-09-09-conflict-
+#    root-workspace-scoping task-03 / FR-05 前置：resolve 端点复用）─────────────
+
+
+@pytest.mark.asyncio
+async def test_ensure_workspace_member_member_passes(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """成员 → 无异常返回（UserWorkspaceRole 行即成员资格，角色零权限亦可）。"""
+    from app.modules.daemon.sillyspec_compare import SillySpecCompareService
+
+    user, _token = await _seed_user(db_session, name="sscmp-mbr-ok")
+    ws = await _make_workspace(db_session, name="sscmp-mbr-ok-ws")
+    await _grant_workspace_member(db_session, user.id, ws.id)
+
+    await SillySpecCompareService(db_session).ensure_workspace_member(user.id, ws.id)
+
+
+@pytest.mark.asyncio
+async def test_ensure_workspace_member_non_member_default_action(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """非成员 → PermissionDenied，默认 action=「查看」文案（compare 语义不变）。"""
+    from app.core.errors import PermissionDenied
+    from app.modules.daemon.sillyspec_compare import SillySpecCompareService
+
+    user, _token = await _seed_user(db_session, name="sscmp-mbr-no")
+    other, _t2 = await _seed_user(db_session, name="sscmp-mbr-owner")
+    ws = await _make_workspace(db_session, name="sscmp-mbr-no-ws")
+    await _grant_workspace_member(db_session, other.id, ws.id)
+
+    with pytest.raises(PermissionDenied) as exc_info:
+        await SillySpecCompareService(db_session).ensure_workspace_member(user.id, ws.id)
+    assert "仅工作区成员可查看该冲突对比" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_ensure_workspace_member_action_parameter_forks_message(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """action 参数化 → 403 文案动作词分叉（resolve 传「对」→「可对该冲突对比」）。"""
+    from app.core.errors import PermissionDenied
+    from app.modules.daemon.sillyspec_compare import SillySpecCompareService
+
+    user, _token = await _seed_user(db_session, name="sscmp-act-no")
+    other, _t2 = await _seed_user(db_session, name="sscmp-act-owner")
+    ws = await _make_workspace(db_session, name="sscmp-act-ws")
+    await _grant_workspace_member(db_session, other.id, ws.id)
+
+    with pytest.raises(PermissionDenied) as exc_info:
+        await SillySpecCompareService(db_session).ensure_workspace_member(
+            user.id, ws.id, action="对"
+        )
+    assert "仅工作区成员可对该冲突对比" in str(exc_info.value)
+
+
+# ── 502 网关文案按 daemon_code 分叉（2026-09-09-conflict-root-workspace-scoping
+#    task-05 / FR-06：可行动提示替代误导性「请稍后重试」）───────────────────────
+
+
+@pytest.mark.parametrize(
+    ("daemon_code", "expected_fragment"),
+    [
+        ("workspace_root_unknown", "尚未被本机认领"),
+        ("conflict_record_missing", "冲突记录已失效"),
+    ],
+    ids=["workspace-root-unknown", "conflict-record-missing"],
+)
+@pytest.mark.asyncio
+async def test_compare_gateway_message_forks_by_daemon_code(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    daemon_code: str,
+    expected_fragment: str,
+) -> None:
+    """daemon 业务错误 → 502 message 按 code 分叉（details 仍透传原始码/消息）。"""
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    _owner, token, inst, ws, _root = await _seed_full_env(
+        db_session, tmp_path, tag=f"gw-{daemon_code[:8]}"
+    )
+    _SnapshotRpcStub(
+        error=DaemonRpcRemoteError({"code": daemon_code, "message": "daemon 侧原始消息"})
+    ).install(monkeypatch)
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+    body = resp.json()
+    assert expected_fragment in body["message"]
+    assert body["details"]["daemon_code"] == daemon_code
+    assert body["details"]["daemon_message"] == "daemon 侧原始消息"
+
+
+@pytest.mark.asyncio
+async def test_compare_gateway_message_keeps_default_for_unknown_code(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未登记的 daemon_code → 维持现状文案「请稍后重试」（回归）。"""
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="gw-unk")
+    _SnapshotRpcStub(error=DaemonRpcRemoteError({"code": "some_new_code", "message": "x"})).install(
+        monkeypatch
+    )
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+    assert "请稍后重试" in resp.json()["message"]

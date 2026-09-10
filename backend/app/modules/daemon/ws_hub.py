@@ -430,6 +430,7 @@ class DaemonWsHub:
         daemon_id: uuid.UUID,
         change: str,
         strategy: Literal["keep_local", "take_platform"],
+        workspace_id: uuid.UUID,
     ) -> bool:
         """推送 sillyspec 冲突裁决指令（Server → Daemon，task-01 / D-001@v1）。
 
@@ -440,8 +441,14 @@ class DaemonWsHub:
         语义）。``change`` 格式与 ``strategy`` 值域校验归调用方端点（task-02），
         本方法只透传不重复校验。返回 True 表示已下发；False 表示 daemon 离线或
         发送失败，由调用方（REST 端点，task-02）转 504 DaemonRuntimeOffline。
+        2026-09-09-conflict-root-workspace-scoping task-04（FR-01）：payload 携带
+        workspace_id（str 化）——daemon 据此按工作区映射取根，不再依赖单槽位。
         """
-        payload = {"change": change, "strategy": strategy}
+        payload = {
+            "change": change,
+            "strategy": strategy,
+            "workspace_id": str(workspace_id),
+        }
         message = {"type": DAEMON_MSG_SILLYSPEC_RESOLVE, "payload": payload}
         return await self.send_to_runtime(daemon_id, message)
 

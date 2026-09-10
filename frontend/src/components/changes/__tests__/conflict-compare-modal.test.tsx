@@ -411,9 +411,12 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () => 
       within(confirmRoot).getByRole("button", { name: /确\s*认\s*·\s*保\s*本\s*地/ }),
     );
     await waitFor(() =>
+      // 2026-09-09-conflict-root-workspace-scoping task-06（FR-01）：裁决请求
+      // 体内传 workspace_id（renderModal 缺省 ws-1）。
       expect(mocks.triggerResolve).toHaveBeenCalledWith("machine-1", {
         change: "quick-62e1d5fb",
         strategy: "keep_local",
+        workspace_id: "ws-1",
       }),
     );
     // 下发成功：父级回显登记回调 + 弹窗关闭（§5 3.3）
@@ -441,6 +444,7 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () => 
       expect(mocks.triggerResolve).toHaveBeenCalledWith("machine-1", {
         change: "quick-62e1d5fb",
         strategy: "take_platform",
+        workspace_id: "ws-1",
       }),
     );
   });

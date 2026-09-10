@@ -162,13 +162,18 @@ describe('task-07 case 分发：SILLYSPEC_RESOLVE / SILLYSPEC_GHOST_CLEANUP 直�
     await expect(
       h.handleWsMessage({
         type: MSG.SILLYSPEC_RESOLVE,
-        payload: { change: '2026-09-02-changes-overview-card', strategy: 'keep_local' },
+        payload: {
+          change: '2026-09-02-changes-overview-card',
+          strategy: 'keep_local',
+          workspace_id: 'b97f8231-9404-43bd-89de-38c281c4d875',
+        },
       }),
     ).resolves.toBeUndefined();
     expect(h.manager.runResolve).toHaveBeenCalledTimes(1);
     expect(h.manager.runResolve).toHaveBeenCalledWith(
       '2026-09-02-changes-overview-card',
       'keep_local',
+      'b97f8231-9404-43bd-89de-38c281c4d875',
     );
     expect(h.manager.runGhostCleanup).not.toHaveBeenCalled();
   });
@@ -179,7 +184,8 @@ describe('task-07 case 分发：SILLYSPEC_RESOLVE / SILLYSPEC_GHOST_CLEANUP 直�
       type: MSG.SILLYSPEC_RESOLVE,
       payload: { change: 'demo-change', strategy: 'take_platform' },
     });
-    expect(h.manager.runResolve).toHaveBeenCalledWith('demo-change', 'take_platform');
+    // 无 workspace_id（旧 backend）→ 归一空串 = legacy 单槽位（FR-03）。
+    expect(h.manager.runResolve).toHaveBeenCalledWith('demo-change', 'take_platform', '');
   });
 
   it('缺 change / 缺 strategy / strategy 值域外 / 非法类型 → warn 丢弃：不调执行方法、不记结果', async () => {
@@ -398,6 +404,8 @@ function makeCommandHarness(
     timeoutMs?: number;
     /** 逐次执行的 outcome 序列（ghost 两步用 [doctor, sync]）。 */
     outcomes?: SillySpecProgressOutcome[];
+    /** workspace 级根解析器（2026-09-09-conflict-root-workspace-scoping task-01）：按 wsId 查映射根。 */
+    rootFor?: (workspaceId: string) => string | null;
   } = {},
 ) {
   const bin = opts.bin === undefined ? BIN : opts.bin;
@@ -430,6 +438,7 @@ function makeCommandHarness(
     runProgressJson,
     resolveSillySpecBin: () => bin,
     statusCwd: () => cwd,
+    statusRootFor: opts.rootFor,
     statusTimeoutMs: 5,
     commandTimeoutMs: opts.timeoutMs,
   };
@@ -443,6 +452,43 @@ function makeCommandHarness(
     },
   };
 }
+
+// ── workspace_id 取根（2026-09-09-conflict-root-workspace-scoping task-01 / FR-02/FR-03）──
+
+const WS_ID = 'b97f8231-9404-43bd-89de-38c281c4d875';
+const MAPPED_CWD = 'C:\\Users\\qinyi\\Idea Projects\\mapped-repo';
+
+describe('task-01 runResolve workspace_id 取根：未命中 failed 不 spawn，命中用映射根', () => {
+  it('带 ws 且映射未命中 → 记 failed（尚未认领）且不 spawn（FR-02 铁律：不回退单槽位）', async () => {
+    // 单槽位有合法值（cwd），但映射未命中 → 必须失败而非在单槽位执行。
+    const h = makeCommandHarness({ cwd: CWD, rootFor: () => null });
+
+    await h.manager.runResolve('demo-change', 'keep_local', WS_ID);
+
+    expect(h.calls).toHaveLength(0);
+    const result = h.manager.getCommandResult();
+    expect(result?.state).toBe('failed');
+    expect(result?.error).toContain('尚未被本机会话认领');
+  });
+
+  it('带 ws 且映射命中 → spawn cwd=映射根（单槽位不参与）', async () => {
+    const h = makeCommandHarness({ cwd: CWD, rootFor: () => MAPPED_CWD });
+
+    await h.manager.runResolve('demo-change', 'keep_local', WS_ID);
+
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]!.options.cwd).toBe(MAPPED_CWD);
+  });
+
+  it('不带 ws → cwd=单槽位（FR-03 legacy 回归）', async () => {
+    const h = makeCommandHarness({ cwd: CWD, rootFor: () => MAPPED_CWD });
+
+    await h.manager.runResolve('demo-change', 'keep_local');
+
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]!.options.cwd).toBe(CWD);
+  });
+});
 
 // ── flag 映射与执行形态（strategy→CLI flag 单点映射，NFR 数组形参不经 shell）──
 
@@ -752,10 +798,13 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不�
       executed_at: expect.any(String),
     };
     expect(h.heartbeatMock).toHaveBeenCalledTimes(2);
-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(7);
+    // ql-20260909（顺手修存量债）：心跳已演进到 10 参（第 8 specCache / 9
+    // statusError / 10 status_map，2026-09-08 总览工作区级化）——length 断言
+    // 从 7/4 时代更新；commandResult 仍第 7 参（index 6）。
+    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(10);
     expect(h.heartbeatMock.mock.calls[0]![6]).toEqual(expected);
     // 窗口内每跳都携带（latest-wins 单槽重复发送）。
-    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(7);
+    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(10);
     expect(h.heartbeatMock.mock.calls[1]![6]).toEqual(expected);
   });
 
@@ -763,11 +812,11 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不�
     const h = makeHeartbeatCommandHarness();
     await h.manager.runGhostCleanup();
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(7);
+    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(10);
     h.advance(SILLYSPEC_TERMINAL_WINDOW_MS); // 时钟注入过 10min（不真等）
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[1]!;
-    expect(call.length).toBe(4);
+    expect(call.length).toBe(10);
     expect(call[4]).toBeUndefined();
     expect(call[5]).toBeUndefined();
     expect(call[6]).toBeUndefined();
@@ -777,7 +826,7 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不�
     const h = makeHeartbeatCommandHarness();
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(4);
+    expect(call.length).toBe(10);
     expect(call[6]).toBeUndefined();
   });
 });

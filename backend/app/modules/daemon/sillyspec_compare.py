@@ -55,6 +55,13 @@ log = get_logger(__name__)
 SNAPSHOT_RPC_METHOD = "sillyspec_conflict_snapshot"
 SNAPSHOT_RPC_TIMEOUT_SECONDS = 15
 
+# 2026-09-09-conflict-root-workspace-scoping task-05（FR-06）：daemon 业务错误码
+# → 可行动的用户文案（其余维持「请稍后重试」现状；details 仍透传原始码/消息）。
+_GATEWAY_MESSAGE_BY_CODE: dict[str, str] = {
+    "workspace_root_unknown": "该工作区尚未被本机认领，请先在该工作区发起一次会话后重试。",
+    "conflict_record_missing": "冲突记录已失效，请刷新冲突列表。",
+}
+
 # 双截断护栏（design §5 Phase 2 / §8）。
 DIFF_ROW_CAP_PER_FILE = 5000
 RESPONSE_BYTE_CAP = 2 * 1024 * 1024
@@ -357,16 +364,16 @@ class SillySpecCompareService:
         平台侧定位是单行主键查询（毫秒级），并行收益可忽略，顺序化彻底消除
         同请求 session 并发面。
         """
-        await self._ensure_workspace_member(user_id, workspace_id)
+        await self.ensure_workspace_member(user_id, workspace_id)
         if kind == "progress":
             platform_progress = await self._load_platform_progress(workspace_id, change)
-            snapshot = await self._fetch_snapshot(instance_id, change, kind)
+            snapshot = await self._fetch_snapshot(instance_id, change, kind, workspace_id)
             payload = await asyncio.to_thread(
                 self._build_progress_compare, change, snapshot, platform_progress
             )
         else:
             spec_root = await self._load_spec_root(workspace_id)
-            snapshot = await self._fetch_snapshot(instance_id, change, kind)
+            snapshot = await self._fetch_snapshot(instance_id, change, kind, workspace_id)
             # ql-20260909-012：比对全程同步 FS IO（逐文件 stat+read_text 全量读）+
             # difflib（大文件最坏 O(n²)）——spec 树几百文件时阻塞事件循环数百 ms
             # 至秒级，丢线程池解放并发请求（纯函数不改共享状态，线程安全）。
@@ -378,12 +385,16 @@ class SillySpecCompareService:
 
     # ── 权限 / RPC / 平台侧定位 ─────────────────────────────────────────────
 
-    async def _ensure_workspace_member(self, user_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
-        """校验当前用户是该 workspace 成员（design §5 Phase 2.1）。
+    async def ensure_workspace_member(
+        self, user_id: uuid.UUID, workspace_id: uuid.UUID, action: str = "查看"
+    ) -> None:
+        """校验当前用户是该 workspace 成员（design §5 Phase 2.1；2026-09-09-
+        conflict-root-workspace-scoping task-03 公开供 resolve 端点复用）。
 
         平台侧 spec_root / platform_sync 行按 workspace 定位，非成员不得经
         compare 侧读其内容。UserWorkspaceRole 行即成员资格（角色零权限亦可，
-        test_sillyspec_compare 同款判定）。
+        test_sillyspec_compare 同款判定）。``action`` 参数化 403 文案动作词
+        （compare 缺省「查看」，resolve 传「对…下发裁决」）。
         """
         stmt = select(col(UserWorkspaceRole.user_id)).where(
             col(UserWorkspaceRole.user_id) == user_id,
@@ -392,14 +403,22 @@ class SillySpecCompareService:
         row = (await self._session.execute(stmt)).first()
         if row is None:
             raise PermissionDenied(
-                "仅工作区成员可查看该冲突对比。",
+                f"仅工作区成员可{action}该冲突对比。",
                 details={"workspace_id": str(workspace_id)},
             )
 
     async def _fetch_snapshot(
-        self, instance_id: uuid.UUID, change: str, kind: CompareKind
+        self,
+        instance_id: uuid.UUID,
+        change: str,
+        kind: CompareKind,
+        workspace_id: uuid.UUID,
     ) -> dict[str, Any]:
         """RPC 拉取 daemon 侧冲突快照（§7.1；机器级以 instance_id 作 daemon_id 路由）。
+
+        2026-09-09-conflict-root-workspace-scoping task-03（FR-01）：params 携带
+        workspace_id——daemon 据此按工作区映射取根（未命中 workspace_root_unknown，
+        不回退单槽位）。
 
         ``get_daemon_ws_hub`` 懒导入（explorer/_send_explorer_rpc:288 同款理由：
         测试按单例访问器/类级 patch，模块顶层 import 会绑死陈旧引用）。
@@ -414,12 +433,18 @@ class SillySpecCompareService:
             return await hub.send_rpc(
                 instance_id,
                 SNAPSHOT_RPC_METHOD,
-                {"change": change, "kind": kind},
+                {"change": change, "kind": kind, "workspace_id": str(workspace_id)},
                 timeout=SNAPSHOT_RPC_TIMEOUT_SECONDS,
             )
         except DaemonRpcRemoteError as exc:
+            # 2026-09-09-conflict-root-workspace-scoping task-05（FR-06，可选）：按
+            # daemon_code 分叉文案——workspace_root_unknown / conflict_record_missing
+            # 的失败原因可行动（认领工作区 / 刷新列表），「请稍后重试」误导重试。
+            message = (
+                _GATEWAY_MESSAGE_BY_CODE.get(exc.code) or "读取机器侧冲突快照失败，请稍后重试。"
+            )
             raise DaemonRpcRemoteGatewayError(
-                "读取机器侧冲突快照失败，请稍后重试。",
+                message,
                 details={
                     "daemon_instance_id": str(instance_id),
                     "method": SNAPSHOT_RPC_METHOD,

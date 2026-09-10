@@ -12740,7 +12740,7 @@
           "daemon"
         ],
         "summary": "Trigger Machine Sillyspec Resolve",
-        "description": "推送 sillyspec 冲突裁决指令到指定机器（admin，task-02 / FR-02 / D-001@v1）。\n\n机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送\n``daemon:sillyspec_resolve``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE\n语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 执行裁决（strategy\n下划线字面量 → --keep-local / --take-platform flag 的映射归 daemon 侧单点），\n结果经心跳 sillyspec_command_result 字段回传（终态窗口内，不走本消息）。\n先 ``_get_owned_instance`` 做归属校验（越权/不存在 404，普通用户非本机防\n存在性泄漏，owner 与平台管理员放行），离线或 WS 发送失败 → 504\n``DaemonRuntimeOffline``（与机器级 sillyspec-update 先例同款文案与 details）。",
+        "description": "推送 sillyspec 冲突裁决指令到指定机器（admin，task-02 / FR-02 / D-001@v1）。\n\n机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送\n``daemon:sillyspec_resolve``（fire-and-forget，无回执，同 SILLYSPEC_UPDATE\n语义，不排队不落库）；daemon 收到后调本机 sillyspec CLI 执行裁决（strategy\n下划线字面量 → --keep-local / --take-platform flag 的映射归 daemon 侧单点），\n结果经心跳 sillyspec_command_result 字段回传（终态窗口内，不走本消息）。\n先 ``_get_owned_instance`` 做归属校验（越权/不存在 404，普通用户非本机防\n存在性泄漏，owner 与平台管理员放行），离线或 WS 发送失败 → 504\n``DaemonRuntimeOffline``（与机器级 sillyspec-update 先例同款文案与 details）。\n\n2026-09-09-conflict-root-workspace-scoping task-04（FR-01/FR-05）：请求体\n必填 ``workspace_id`` 随 payload 透传（daemon 按工作区映射取根，未命中\nworkspace_root_unknown 不回退单槽位）；另校验当前用户是该 workspace 成员\n（写操作防越权，复用 compare 侧 ``ensure_workspace_member`` 同一权限集合，\naction=「对」文案动作词）。",
         "operationId": "trigger_machine_sillyspec_resolve_api_daemon_machines__instance_id__sillyspec_resolve_post",
         "parameters": [
           {
@@ -45676,12 +45676,18 @@
               "take_platform"
             ],
             "title": "Strategy"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
           }
         },
         "type": "object",
         "required": [
           "change",
-          "strategy"
+          "strategy",
+          "workspace_id"
         ],
         "title": "MachineSillySpecResolveRequest",
         "description": "Body for POST /machines/{instance_id}/sillyspec-resolve（task-02 / FR-02）。\n\n``strategy`` 用 Literal 限定 keep_local / take_platform（非法值 422）；\n``change`` 走白名单正则（首字符字母数字，其余字母数字/./-/_，长度 1-128）\n且显式拒绝含 ``..``（防路径穿越；daemon 侧 CLI ``assertSafeChangeName``\nSEC-05 双保险，backend 只做格式校验不查存在性——机器才是事实源）。"
