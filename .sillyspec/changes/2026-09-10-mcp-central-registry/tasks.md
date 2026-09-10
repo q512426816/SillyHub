@@ -40,20 +40,20 @@ created_at: 2026-09-10 10:50:06
 
 ## Wave 9：workspace 扫描导入
 
-- [ ] task-09: importer——workspace 扫描 + 去重 + cmd 归一化 (depends_on: task-08)
+- [x] task-09: importer——workspace 扫描 + 去重 + cmd 归一化 (depends_on: task-08)
 
 ## Wave 10：模板
 
-- [ ] task-10: 模板——seed 预置 + 存为模板 (depends_on: task-02)
+- [x] task-10: 模板——seed 预置 + 存为模板 (depends_on: task-02)
 
 ## Wave 11：前端框架
 
-- [ ] task-11: 前端——api 层 + 页面框架 (depends_on: task-03)
+- [x] task-11: 前端——api 层 + 页面框架 (depends_on: task-03)
 
 ## Wave 12：前端导入与诊断
 
-- [ ] task-12: 前端——导入入口 + 诊断面板 (depends_on: task-11, task-08, task-09, task-10)
+- [x] task-12: 前端——导入入口 + 诊断面板 (depends_on: task-11, task-08, task-09, task-10)
 
 ## Wave 13：收尾
 
-- [ ] task-13: 收尾——旧端点移除 + 旧调用切换 + 文档 (depends_on: task-03, task-04, task-05, task-06, task-07, task-08, task-09, task-10, task-11, task-12)
+- [x] task-13: 收尾——旧端点移除 + 旧调用切换 + 文档 (depends_on: task-03, task-04, task-05, task-06, task-07, task-08, task-09, task-10, task-11, task-12)

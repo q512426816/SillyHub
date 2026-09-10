@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-10-mcp-central-registry",
+  "generatedAt": "2026-09-10T11:30:38.700Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-10-mcp-central-registry",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 14,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-10-mcp-central-registry",
+      "metrics": {
+        "tasks": 13,
+        "hasTest": 13
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-10-mcp-central-registry",
+      "metrics": {
+        "backendEndpoints": 7975,
+        "frontendCalls": 11
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-10-mcp-central-registry",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "真实 PG 种子行→registry 渲染→真实 uvicorn HTTP 三案取证（无 user_id 200 三键形状含种子 server / 伪造 user_id 404 lease 归属拦截 D-010 / 管理列表 200），种子清理无残留，ALL_PASS",
+      "command": "uv run python .sillyspec/.runtime/verify-integration-mcp-registry.py（worktree backend，真实 dev PG + uvicorn 127.0.0.1:8907 + Bearer JWT）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/verify-integration-stdout.log"
+    }
+  ],
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,daemon]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-10T12:09:04.259Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
