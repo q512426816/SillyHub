@@ -72,19 +72,31 @@ scale: large
 | 新增 | NEW:backend/app/modules/mcp_registry/router.py | /api/mcp-servers* 端点（见接口定义） |
 | 新增 | NEW:backend/app/modules/mcp_registry/render.py | render_injection_set / precheck_diagnostics（daemon 端点与诊断端点共用） |
 | 新增 | NEW:backend/app/modules/mcp_registry/importer.py | JSON 导入解析 + workspace 扫描 + 去重 + cmd 归一化 |
+| 新增 | NEW:backend/app/modules/mcp_registry/templates.py | 模板 seed 预置 + 存为模板 |
 | 新增 | NEW:backend/app/modules/mcp_registry/tests/ | 单测：service 权限矩阵 / render golden / importer 去重归一化 / 端点契约 |
-| 新增 | NEW:backend/alembic/versions/xxxx_add_mcp_registry_tables.py | 三表迁移（含 partial unique index；xxxx 为迁移哈希） |
+| 新增 | NEW:backend/migrations/versions/20260910140000_add_mcp_registry_tables.py | 三表迁移（含 partial unique index + COALESCE sentinel；Grill 后实证路径为 migrations/versions 非 alembic/versions；down_revision 对齐执行时 head） |
 | 修改 | backend/app/modules/daemon/router/daemon_rpc.py（端点定义约 :516，:451 为注释块） | GET /api/daemon/mcp/config 换源 registry 渲染；加可选 user_id 参数 + 授权校验（见接口定义）；whitelist 读取不变 |
 | 修改 | backend/app/modules/daemon/lease/context.py（build_claim_payload，约 :420-482） | claim payload 新增 user_id 下发（Grill CC-02：daemon 侧现无 user 上下文，DB 侧 lease→user 关联已存在） |
 | 修改 | sillyhub-daemon/src/daemon.ts（execPayload 归一化，约 :8522-8640；会话创建预取，约 :8144-8165） | 归一化字段加 user 透传；会话创建拉 MCP 时带 user_id；会话级缓存 `_mcpBundleBySession` 结构不动（Grill CC-01：实际缓存是会话级 Map，非进程级 TTL——天然适配 per-user） |
 | 修改 | backend/app/modules/settings/router.py | 移除 GET/PUT /api/platform-settings/mcp 两端点与 McpServersSchema（D-003 零兼容负担同删）；whitelist 两端点保留 |
-| 修改 | frontend/src/lib/mcp-settings.ts（:60-67 调用将删端点） | 改调 /api/mcp-servers（Grill CC-16 补漏） |
-| 修改 | backend/app/modules/daemon/tests/test_mcp_config_endpoint.py（:253 现有 golden） | 契约测试更新：无 user_id 行为 golden 对照 + user_id 路径新用例（Grill CC-16 补漏） |
+| 修改 | frontend/src/lib/mcp-settings.ts（:60-67 调用将删端点） | 改调 /api/mcp-servers（Grill CC-16 补漏；whitelist 客户端保留） |
+| 新增 | NEW:frontend/src/lib/api/mcp-registry.ts | 新 api 客户端（范式对齐 llm-providers.ts） |
+| 修改 | frontend/src/lib/menu-permissions.ts | menuKey=mcp 的 menuLabel"MCP 管理"改"MCP 资产库"（agent 组归属不变，D-009 补记） |
+| 修改 | frontend/src/app/(dashboard)/settings/mcp/page.test.tsx | 7 用例重写（页面重构后旧断言失效） |
+| 修改 | backend/app/modules/settings/schema.py | 移除 McpServersSchema（随旧端点删除） |
+| 修改 | backend/app/modules/daemon/tests/test_mcp_config_endpoint.py | 契约测试更新：:109-:227 七个 KV-seed 用例重写 + user_id 路径新用例（Grill CC-16/plan-review 补漏） |
+| 修改 | backend/app/modules/daemon/tests/test_build_claim_payload.py | claim payload user_id 下发用例（task-06） |
+| 修改 | sillyhub-daemon/tests/mcp-config.test.ts | URL 加 user_id 参数用例（task-06/07） |
+| 新增 | NEW:sillyhub-daemon/tests/daemon-mcp-user-id-wiring.test.ts | daemon.ts 透传 wiring 用例（task-06） |
 | 修改 | backend/app/main.py（router 注册，include_router 处约 :824-840） | 注册 mcp_registry router |
 | 修改 | sillyhub-daemon/src/mcp-config.ts | 仅请求 URL 加 user_id 查询参数（fetch 函数签名扩展）；缓存/合并/预净化逻辑不动（Grill CC-01 修正：此前误述"60s TTL 进程级缓存"，实际缓存在 daemon.ts 会话级 Map） |
 | 修改 | frontend/src/app/(dashboard)/settings/mcp/page.tsx | 升级为管理页（双 tab/搜索标签/binding 开关/导入/诊断，照 FRONTEND_PAGE_STYLE.md）。菜单归「智能体」组（menu-permissions.ts agent section，menuKey=mcp 的 menuLabel"MCP 管理"同步改"MCP 资产库"），URL 保持历史路径 /settings/mcp 不迁移 |
 | 新增 | NEW:frontend/src/components/mcp-registry/（组件目录，按现有页面组织惯例） | 卡片/表单/导入弹窗/诊断面板组件 |
 | 修改 | frontend/src/lib/api-types.ts | `pnpm gen:types` 生成（CLAUDE.md 规则 21） |
+| 新增 | NEW:.sillyspec/docs/backend/modules/mcp_registry.md | 模块卡片（archive 前收尾） |
+| 修改 | .sillyspec/docs/backend/modules/settings.md | 模块文档同步（task-13） |
+| 修改 | .sillyspec/docs/backend/modules/daemon.md | 模块文档同步（task-13） |
+| 修改 | .sillyspec/docs/backend/modules/_module-map.yaml | 模块映射同步（task-13） |
 | 修改 | backend/openapi.json | gen:types 联动提交 |
 
 ## 接口定义
