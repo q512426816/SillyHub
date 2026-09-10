@@ -37,7 +37,9 @@ workspace 任务（task card）读侧 API 客户端：任务详情、看板视�
   读侧消费者忽略即可）；`TaskParseWarning.task_key` 在 schema 中为可选。
 - 旧卡的 `listTasks(workspaceId, params?)` 已不存在——列表需求统一走
   `getTaskBoard`（按 change 分组），别按旧卡引用。
-- 消费方为 workspace 页面域（任务看板页 / 任务详情页）。
+- 消费方为 workspace 页面域（任务看板页 / 任务详情页）；变更详情页侧栏摘要卡
+  ql-20260910-013 已删，`getTaskBoard` 不再被详情页调用（数据须任务页手动
+  reparse 才更新，摘要会过期，故撤）。
 
 ## 人工备注
 

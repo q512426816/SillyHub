@@ -28,7 +28,6 @@ const mocks = vi.hoisted(() => ({
   getAgentStatus: vi.fn(),
   submitStageReview: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
-  getTaskBoard: vi.fn(),
   listQuicklogEntries: vi.fn(),
 }));
 
@@ -42,10 +41,6 @@ vi.mock("@/lib/daemon", () => ({
   listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
 }));
 
-vi.mock("@/lib/tasks", () => ({
-  getTaskBoard: mocks.getTaskBoard,
-}));
-
 vi.mock("@/lib/quicklog", () => ({
   listQuicklogEntries: mocks.listQuicklogEntries,
 }));
@@ -57,15 +52,8 @@ vi.mock("@/components/changes/detail/change-agent-run-log", () => ({
 vi.mock("@/components/changes/detail/change-files-card", () => ({
   ChangeFilesCard: () => <div data-testid="change-files-card" />,
 }));
-vi.mock("@/components/changes/detail/change-review-history-card", () => ({
-  ChangeReviewHistoryCard: () => <div data-testid="change-review-history-card" />,
-  normalizeReviewHistory: () => [],
-}));
 vi.mock("@/components/changes/detail/change-sessions-card", () => ({
   ChangeSessionsCard: () => <div data-testid="change-sessions-card" />,
-}));
-vi.mock("@/components/changes/detail/change-task-board-card", () => ({
-  ChangeTaskBoardCard: () => <div data-testid="change-task-board-card" />,
 }));
 vi.mock("@/components/changes/detail/change-step-timeline", () => ({
   ChangeStepTimeline: () => <div data-testid="change-step-timeline" />,
@@ -126,7 +114,6 @@ function setup(opts: { change?: ChangeRead } = {}) {
     last_dispatch: null,
   } as unknown as DispatchResponse);
   mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
-  mocks.getTaskBoard.mockResolvedValue(null);
   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
 }
 
@@ -232,7 +219,7 @@ describe("详情页头部「最后信号」（task-12 / design §8.1）", () => 
     );
   });
 
-  it("零新增网络请求：仅既有 getChange/getAgentStatus/getTaskBoard/会话/quicklog 拉取", async () => {
+  it("零新增网络请求：仅既有 getChange/getAgentStatus/会话/quicklog 拉取", async () => {
     setup({ change: makeChange({ steps: null }) });
     await renderPage();
     // 「最后信号」为纯前端派生（steps 最大 completed_at），不引入任何新 lib 调用；

@@ -38,7 +38,6 @@ const mocks = vi.hoisted(() => ({
   getAgentStatus: vi.fn(),
   submitStageReview: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
-  getTaskBoard: vi.fn(),
   listQuicklogEntries: vi.fn(),
   getWorkspace: vi.fn(),
   fetchMe: vi.fn(),
@@ -98,13 +97,13 @@ vi.mock("@/lib/quicklog", async () => {
   return { ...actual, listQuicklogEntries: mocks.listQuicklogEntries };
 });
 
-vi.mock("@/lib/daemon", () => ({
-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
-}));
-
-vi.mock("@/lib/tasks", () => ({
-  getTaskBoard: mocks.getTaskBoard,
-}));
+// @/lib/daemon 部分 mock（原整模块 mock 缺 SESSION_ENGINE_OPTIONS 等导出——页面
+// 真实导入链 ChangeUsageCard→quicklog-sessions-card→session-list-panel 顶层消费，
+// 收集期即炸；改为 importActual 透传，仅替换 listWorkspaceAgentSessions）。
+vi.mock("@/lib/daemon", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
+  return { ...actual, listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions };
+});
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.routerPush, replace: vi.fn() }),
@@ -128,15 +127,8 @@ vi.mock("@/components/changes/detail/change-agent-run-log", () => ({
 vi.mock("@/components/changes/detail/change-files-card", () => ({
   ChangeFilesCard: () => <div data-testid="change-files-card" />,
 }));
-vi.mock("@/components/changes/detail/change-review-history-card", () => ({
-  ChangeReviewHistoryCard: () => <div data-testid="change-review-history-card" />,
-  normalizeReviewHistory: () => [],
-}));
 vi.mock("@/components/changes/detail/change-sessions-card", () => ({
   ChangeSessionsCard: () => <div data-testid="change-sessions-card" />,
-}));
-vi.mock("@/components/changes/detail/change-task-board-card", () => ({
-  ChangeTaskBoardCard: () => <div data-testid="change-task-board-card" />,
 }));
 vi.mock("@/components/changes/detail/change-step-timeline", () => ({
   ChangeStepTimeline: () => <div data-testid="change-step-timeline" />,
@@ -594,7 +586,6 @@ describe("详情页危险按钮（PageHeader actions）", () => {
       last_dispatch: null,
     });
     mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
-    mocks.getTaskBoard.mockResolvedValue(null);
     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
     mocks.getWorkspace.mockResolvedValue(makeWorkspace());
     const client = new QueryClient({

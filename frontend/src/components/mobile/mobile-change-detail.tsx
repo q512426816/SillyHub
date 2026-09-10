@@ -31,9 +31,10 @@
  *     props.onOpenSession 回调）——数据层复用 listChangeSessions + 同 key
  *     ["agentSessions", "changeSessionsCard", wid, cid]（与桌面卡共享缓存）。
  *  7. change-task-board-card：**不复刻**（D-002 变更中心核心版裁剪，任务区渲染
- *     桌面引导条替代）。
- *  8. change-review-history-card：**不移植**（本卡区块清单未含审核历史；task-09
- *     装配详情页壳如需再评估，normalizeReviewHistory 已导出可直接复用）。
+ *     桌面引导条替代；桌面侧栏摘要卡已删 ql-20260910-013）。
+ *  8. change-review-history-card：**不移植**（本卡区块清单未含审核历史；桌面
+ *     卡连同组件已删 ql-20260910-013——平台审批链路零使用，后端 review_history
+ *     写入保留不受影响）。
  *  9. quicklog-linked-card：**重绘内容**（条目 Link 指向桌面 changes?tab=quicklog
  *     路由）——数据层复用 listQuicklogEntries + 同 key ["quicklogLinked", wid,
  *     changeKey]（与桌面卡共享缓存），状态徽标 4 态映射就地内联（模块私有）。

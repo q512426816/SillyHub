@@ -10,15 +10,16 @@ created_at: 2026-08-18 01:45:00
 
 ## 定位
 变更中心组件群：`frontend/components/changes/` 顶层 4 件（会话区块 / quicklog 表 / quicklog 抽屉 / 列表徽章）+
-`frontend/components/changes/detail/` 9 张详情页卡片（左主右辅布局的拆分产物）+ 根级 3 件（change-file-tree /
+`frontend/components/changes/detail/` 7 张详情页卡片（左主右辅布局的拆分产物）+ 根级 3 件（change-file-tree /
 stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-layout-rework
 （详情页重做，page.tsx 1119→484 行拆 8 组件）、ql-20260811-002（侧栏宽内容卡挤崩修复）、
 2026-08-14-change-center-conversation-driven（会话驱动化翻转：详情页退化成展示板+审批）、
-2026-08-15-change-step-visibility（step 级可见性）。执行控制按钮已全删，变更由 agent 在
+2026-08-15-change-step-visibility（step 级可见性）、ql-20260910-013（删 ChangeTaskBoardCard /
+ChangeReviewHistoryCard 两卡——平台审批链路零使用恒空、看板摘要数据手动 reparse 才更新）。执行控制按钮已全删，变更由 agent 在
 会话里经 sillyspec 驱动。
 
 ## 契约摘要
-### changes/detail/（9 卡，左主右辅）
+### changes/detail/（7 卡，左主右辅）
 - `ChangeStageHeader`（change-stage-header.tsx）：主线顶部 5 阶段步骤条
   （brainstorm/plan/execute/verify/archive）；导出 `WORKFLOW_STAGES` /
   `WORKFLOW_STAGE_LABELS`（中文标签，多处复用）；非线性三态（quick/blocked/archived）
@@ -35,14 +36,6 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
   - 走 `submitStageReview` 单端点透传 notify_session；据响应 notified_session /
     notify_error 展示三类降级提示（turn_conflict / session_inactive / 其它）。
   - 纯受控组件：不调 lib API，state/handler 由 page.tsx 注入。
-- `ChangeTaskBoardCard`（change-task-board-card.tsx）：任务看板摘要（总进度条 + 各状态
-  计数 + 「查看看板」Link）；taskBoard 为空或 columns 空 → 返回 null 自动隐藏（快速修复类）。
-- `ChangeReviewHistoryCard`（change-review-history-card.tsx）：读
-  `change.stages.review_history`（后端四个 gate 端点 + rerun_stage 真实写入处）。
-  - 两种异构形状：gate `{decision, comment, submitted_at, ...}` 与 rerun
-    `{action, stage, comment, at}`，经 `normalizeReviewHistory` 归一为
-    ReviewHistoryItem（kind/label/tone/comment/at）后消费。
-  - 替代读已废弃 change_reviews 死表的旧卡（旧卡对新变更永远空）。
 - `ChangeSessionsCard`（change-sessions-card.tsx）：侧栏「会话调试」入口卡
   （2026-08-22-workspace-sessions-portal 后 Dialog 形态退役）：listChangeSessions
   仅本人过滤取前 3 条预览（条目名称 = 后端注入 title 首条 user_input 摘要，空回

@@ -15,10 +15,6 @@ import {
 } from "@/components/delete-change-confirm";
 import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
 import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
-import {
-  ChangeReviewHistoryCard,
-  normalizeReviewHistory,
-} from "@/components/changes/detail/change-review-history-card";
 import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
 import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
 import {
@@ -30,7 +26,6 @@ import {
   ChangeLastSignal,
   lastSignalFromSteps,
 } from "@/components/changes/change-activity-badge";
-import { ChangeTaskBoardCard } from "@/components/changes/detail/change-task-board-card";
 import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
 import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
 import { ApiError } from "@/lib/api";
@@ -47,7 +42,6 @@ import {
   listWorkspaceAgentSessions,
   type AgentSessionListItem,
 } from "@/lib/daemon";
-import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 
 interface Props {
   params: { id: string; cid: string };
@@ -114,7 +108,6 @@ export default function ChangeDetailPage({ params }: Props) {
 
   const [pageError, setPageError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
 
   // ── 删除入口（task-07 / design §6.3 / FR-05d）──────────────────────────
   // PageHeader 右侧独立危险按钮（不混入审批卡）。可见性启发式（owner/平台
@@ -146,20 +139,18 @@ export default function ChangeDetailPage({ params }: Props) {
   // 入口自然缺席，focusStage 恒为 null 无副作用。
   const [focusStage, setFocusStage] = useState<string | null>(null);
 
-  // ── 辅助数据（任务看板 / agent 状态 / 绑定会话近似）：一次性加载，不随详情轮询 ──
+  // ── 辅助数据（agent 状态 / 绑定会话近似）：一次性加载，不随详情轮询 ──
   useEffect(() => {
     let cancelled = false;
     setPageError(null);
     const loadSide = async () => {
-      const [tb, as, sessions] = await Promise.all([
-        getTaskBoard(workspaceId, changeId).catch(() => null),
+      const [as, sessions] = await Promise.all([
         getAgentStatus(workspaceId, changeId).catch(() => null),
         listWorkspaceAgentSessions(workspaceId, { include_ended: true }).catch(
           () => [],
         ),
       ]);
       if (cancelled) return;
-      setTaskBoard(tb);
       setAgentStatus(as);
       // §8 绑定查询语义 = 工作区最近活跃会话（coalesce(last_active_at, created_at) desc）
       setBoundSession(sessions?.[0] ?? null);
@@ -247,11 +238,6 @@ export default function ChangeDetailPage({ params }: Props) {
       </PageContainer>
     );
   }
-
-  // 审核历史派生（从 change.stages.review_history，归一化 gate/rerun 双形状）
-  const reviewHistory = normalizeReviewHistory(
-    (change.stages as Record<string, unknown> | null)?.review_history,
-  );
 
   // 执行日志流派生（只读：无 dispatch 后不再有 localRunId 兜底）
   const panelRunId = agentStatus?.last_dispatch?.run_id ?? null;
@@ -427,7 +413,7 @@ export default function ChangeDetailPage({ params }: Props) {
           />
         </main>
 
-        {/* 次线：变更文件 / 会话调试 / 审核历史 / 任务看板 / 关联快速任务 */}
+        {/* 次线：变更文件 / 关联快速任务 / 会话调试 */}
         <aside className="space-y-3">
           <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
           <QuicklogLinkedCard
@@ -435,12 +421,6 @@ export default function ChangeDetailPage({ params }: Props) {
             changeKey={change.change_key}
           />
           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
-          <ChangeReviewHistoryCard reviewHistory={reviewHistory} />
-          <ChangeTaskBoardCard
-            workspaceId={workspaceId}
-            changeId={changeId}
-            taskBoard={taskBoard}
-          />
         </aside>
       </div>
     </PageContainer>

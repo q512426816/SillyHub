@@ -221,3 +221,23 @@
 根因：platform-sync-section.tsx 仍读机器级 sillyspec_status 单槽位；daemon 工作区级化后每轮采集逐目标覆盖单槽位，多工作区绑定时变更中心显示别区数据（总览卡 14a50351d 已改 map 优先，本组件漏改），用户实证总览卡 3 条冲突而变更中心不可见、无法在平台裁决
 方案：取数对齐 changes-overview-card 同款：sillyspec_status_map 非空按当前 workspaceId 取（缺席=整卡不渲染，不回退单槽位防串台）；map 为 null（旧 daemon）回退机器级单槽位；组件头注释与 frontend.md 模块文档同步（含总览卡数据源描述纠正 map 优先）
 结果：vitest 组件套件 14/14 passed（含新增 2 用例：map 优先不串台 / map 缺席整卡不渲染）；tsc --noEmit 零错；未重部署（阿里云需另行 deploy）
+
+## ql-20260910-013-3b38 | 2026-09-10 15:42:50 | 变更详情页删除「任务看板」摘要卡与「审核历史」卡（用户裁定方案 A）。根因：平台审批链路零使用——本地 PG 341 变更 stages 带 review_hi…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx（删两卡挂载/导入/taskBoard 取数/reviewHistory 派生，513→492 行）
+- frontend/src/components/changes/detail/change-task-board-card.tsx（删除（连同测试））
+- frontend/src/components/changes/detail/change-review-history-card.tsx（删除（连同测试，normalizeReviewHistory 一并退役））
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx（清两卡 vi.mock，保留只读展示区断言收窄）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx（清两卡 vi.mock 与 getTaskBoard mock）
+- frontend/src/components/__tests__/delete-change-confirm.test.tsx（清两卡 vi.mock + daemon mock 改 importActual 部分 mock（修 SESSION_ENGINE_OPTIONS 收集期炸旧债））
+- frontend/src/components/mobile/mobile-change-detail.tsx（X-03 落位清单 7/8 条注释标注桌面卡已删）
+- .sillyspec/docs/frontend/modules/components-changes.md（detail 卡 9→7、定位段记录 ql-20260910-013）
+- .sillyspec/docs/frontend/modules/app-workspace-pages.md（ChangeDetailPage 行数/右辅构成更新）
+- .sillyspec/docs/frontend/modules/lib-tasks.md（getTaskBoard 消费方变更记录）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引追加 ql-20260910-013-3b38）
+需求：变更详情页删除「任务看板」摘要卡与「审核历史」卡（用户裁定方案 A）。
+根因：平台审批链路零使用——本地 PG 341 变更 stages 带 review_history 为 0 条、写入代码 2026-08-14 上线而平台内审批最后一次 2026-08-12（CLI 驱动工作流审批不落平台表），审核历史卡恒空；任务看板摘要须手动 reparse 才更新、状态英文裸显，与步骤条/时间线三重展示进度，均无消费价值。
+方案：page.tsx 删两卡挂载/导入/taskBoard 取数/reviewHistory 派生；删两组件及测试 4 文件；三个页面级测试清 vi.mock 并收窄断言；mobile-change-detail 复用清单注释同步；顺手修 delete-change-confirm.test 的 @/lib/daemon 整模块 mock 缺 SESSION_ENGINE_OPTIONS 旧债（改 importActual 部分 mock）；后端 review_history 写入端点与 lib/tasks getTaskBoard 保留。
+结果：4 个受影响测试文件 47 用例全绿、tsc --noEmit 0 错、eslint 零新增、docs check 824 处引用全过。
