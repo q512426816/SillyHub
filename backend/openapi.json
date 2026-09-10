@@ -28735,72 +28735,6 @@
         }
       }
     },
-    "/api/platform-settings/mcp": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Get Mcp Platform Config",
-        "description": "读平台默认 MCP 配置，env secret 已遮蔽（admin 视图，D-008）。",
-        "operationId": "get_mcp_platform_config_api_platform_settings_mcp_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Get Mcp Platform Config Api Platform Settings Mcp Get"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Put Mcp Platform Config",
-        "description": "写平台默认 MCP 配置（接收原值存储，不脱敏；D-008）。",
-        "operationId": "put_mcp_platform_config_api_platform_settings_mcp_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/McpServersSchema"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Put Mcp Platform Config Api Platform Settings Mcp Put"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/platform-settings/mcp-whitelist": {
       "get": {
         "tags": [
@@ -46959,42 +46893,6 @@
         "title": "McpServerDetail",
         "description": "详情输出：额外带 encrypted_env 的脱敏形态（ct 遮蔽，key_id 保留）。"
       },
-      "McpServerEntry": {
-        "properties": {
-          "command": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Command"
-          },
-          "args": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Args"
-          },
-          "env": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Env"
-          }
-        },
-        "type": "object",
-        "required": [
-          "command"
-        ],
-        "title": "McpServerEntry",
-        "description": "单个 MCP server 定义（仿 claude ``.mcp.json`` 结构）。"
-      },
       "McpServerEntryPut": {
         "properties": {
           "type": {
@@ -47234,20 +47132,6 @@
         "type": "object",
         "title": "McpServerUpdate",
         "description": "``PATCH /api/mcp-servers/{id}`` 请求体（None=不动该字段）。"
-      },
-      "McpServersSchema": {
-        "properties": {
-          "mcpServers": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/McpServerEntry"
-            },
-            "type": "object",
-            "title": "Mcpservers"
-          }
-        },
-        "type": "object",
-        "title": "McpServersSchema",
-        "description": "``PUT /api/platform-settings/mcp`` 请求体。"
       },
       "McpTemplateCreate": {
         "properties": {

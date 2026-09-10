@@ -42,6 +42,7 @@ from app.modules.git_identity import model as _gi_model  # noqa: F401
 from app.modules.incident import model as _incident_model  # noqa: F401
 from app.modules.llm_provider import model as _llm_model  # noqa: F401
 from app.modules.mcp_gateway import model as _mcp_gateway_model  # noqa: F401
+from app.modules.mcp_registry import model as _mcp_registry_model  # noqa: F401
 
 # 2026-08-29-approval-notify-push task-01：站内通知表登记（漏登记 =
 # autogenerate 不生成该表，Grill X-16）。

@@ -524,6 +524,7 @@ modules:
       - git_gateway
       - llm_provider
       - mcp_gateway
+      - mcp_registry  # daemon_rpc mcp/config 换源渲染（函数体内惰性 import）
       - platform_sync
       - settings
       - spec_workspace
@@ -962,14 +963,13 @@ modules:
     aliases: [platform-settings]
     entrypoints:
       - /api/settings
-      - /api/platform-settings/mcp
-      - /api/platform-settings/mcp-whitelist
+      - /api/platform-settings/mcp-whitelist  # 旧 /mcp 两端点已移除（2026-09-10-mcp-central-registry task-13，D-003）
       - /api/users
     main_symbols:
       - PlatformSetting
-      - McpServersSchema
       - SettingsBulkRead
       - settings_router
+      - _redact_mcp_env  # workspace/skills_view_service 跨模块复用（env secret 遮蔽）
     depends_on:
       - core
       - models
@@ -977,8 +977,51 @@ modules:
       - auth
       - workflow
     used_by:
-      - daemon
+      - daemon  # mcp/config 端点读 mcp.whitelist KV
+      - mcp_registry  # render 诊断读 mcp.whitelist（D-007 白名单治理留 settings）
       - workspace
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  mcp_registry:
+    status: active
+    doc: modules/mcp_registry.md
+    paths:
+      - app/modules/mcp_registry/**
+    tags: [mcp, model-context-protocol, registry, crud, binding, encryption, import, template, diagnostics, 中央资产库]
+    aliases: [mcp-servers, mcp-registry]
+    entrypoints:
+      - /api/mcp-servers  # 列表（?scope=platform|mine|visible）+ 创建（201，stdio-only）
+      - /api/mcp-servers/{server_id}  # 详情/部分更新/删除（跨用户私有 404 防枚举）
+      - /api/mcp-servers/{server_id}/bindings  # POST 加绑定 + DELETE {scope_type}[/{scope_ref}] 解绑
+      - /api/mcp-servers/import-json  # JSON 粘贴导入（三包装探测 + 逐条容错 skipped）
+      - /api/mcp-servers/workspace-scan  # 只读扫描候选（dedup_key 三态 new/duplicate/renamed，零写库）
+      - /api/mcp-servers/workspace-import-apply  # apply 落库（按 workspace 重读明文，幂等）
+      - /api/mcp-servers/templates  # GET（6 预置惰性 seed）+ POST 存为模板（双形态互斥）
+      - /api/mcp-servers/diagnostics  # 平台注入集预检五项（SETTINGS_ADMIN）
+    main_symbols:
+      - McpRegistryService  # service.py：CRUD/双层可见性/binding 约束/CredentialCipher 逐键加密
+      - render_injection_set  # render.py：注入集渲染（platform ∪ user binding，daemon mcp/config 换源）
+      - precheck_diagnostics  # render.py：D-011 五项诊断
+      - import_from_json
+      - scan_workspaces
+      - apply_workspace_import
+      - ensure_preset_templates
+      - McpServer
+      - McpServerBinding
+      - McpTemplate
+      - mcp_registry_router
+    depends_on:
+      - core
+      - models
+      - auth
+      - daemon  # importer 惰性复用 daemon_rpc._read_mcp_config_raw 读 workspace .mcp.json
+      - settings  # render 诊断读 mcp.whitelist KV
+      - spec_workspace
+      - workspace
+    used_by:
+      - daemon  # daemon_rpc mcp/config platform 位换源 render_injection_set（函数体内惰性 import，双向懒加载不成环）
     needs_review: false
     concerns: []
     review_reasons: []

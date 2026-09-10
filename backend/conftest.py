@@ -213,6 +213,12 @@ async def db_engine() -> AsyncIterator[Any]:
     # 测试债（CLAUDE.md 规则 20），让 platform_sync 子模块测试可跑。
     from app.modules.llm_provider import model as _llm_provider_model  # noqa: F401
 
+    # 2026-09-10-mcp-central-registry task-13：MCP 资产库三表（mcp_servers/
+    # mcp_server_bindings/mcp_templates）注册——daemon 端点换源后其他模块的
+    # db_engine 测试会话创建该模块行的 fixture 需要表存在；mcp_registry 自身
+    # 测试已自行 import（task-03 注释），此处补根注册消除对 import 顺序的依赖。
+    from app.modules.mcp_registry import model as _mcp_registry_model  # noqa: F401
+
     # ppm project 子域 4 表(maintenance/customer/member/stakeholder)。workspace.model 的
     # ppm_project_workspace 外键→ppm_project_maintenance.id,必须一并注册,否则 create_all 报
     # NoReferencedTableError(ppm_project_maintenance),连带所有 DB 测试 collection ERROR。

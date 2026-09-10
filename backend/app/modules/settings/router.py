@@ -24,7 +24,6 @@ from app.modules.auth.permissions import Permission
 from app.modules.settings.model import PlatformSetting
 from app.modules.settings.schema import (
     AuditLogRead,
-    McpServersSchema,
     ResetPasswordRequest,
     ResetPasswordResponse,
     RevokeAllResponse,
@@ -147,17 +146,18 @@ async def update_settings(
     return SettingsUpdateResponse(updated=updated)
 
 
-# ── MCP 平台配置 / 白名单（change 2026-07-07-skills-mcp-management-ui task-04）──
-# 存储（D-003）：复用 PlatformSetting。
-#   key=mcp.platform_default → value=JSON {"mcpServers": {...}}
-#   key=mcp.whitelist        → value=JSON ["server_name", ...]
+# ── MCP 白名单（change 2026-07-07-skills-mcp-management-ui task-04）──
+# 存储（D-003）：复用 PlatformSetting，key=mcp.whitelist → value=JSON
+# ["server_name", ...]。旧 ``mcp.platform_default`` KV 与其 GET/PUT
+# /api/platform-settings/mcp 两端点已随中央资产库上线移除（change
+# 2026-09-10-mcp-central-registry task-13 / D-003 零兼容负担；平台默认
+# 配置改存 mcp_registry 三表，见该模块卡）。
 # 权限：design §5.4 / D-005 写 ``MANAGE_PLATFORM``，但 ``Permission`` 枚举中
 # 不存在该权限点（系统 settings 子菜单专用 admin 权限为 ``SETTINGS_ADMIN``，
 # 见 permissions.py:45 注释）。本任务扩展的是 settings/router，沿用该文件
 # 现有的 ``SettingsAdminUser``（``require_permission_any(SETTINGS_ADMIN)``），
 # 零迁移风险且语义自洽（MCP 配置即 platform settings 子项）。
 
-MCP_PLATFORM_DEFAULT_KEY = "mcp.platform_default"
 MCP_WHITELIST_KEY = "mcp.whitelist"
 
 # env 中含以下子串（大小写不敏感）的 key 视为 secret，admin GET 时遮蔽（D-008）。
@@ -170,8 +170,10 @@ def _redact_mcp_env(mcp_servers: dict) -> dict:
 
     仅按 env key 名判断（含 token/key/secret/password 子串，大小写不敏感），
     与 git_gateway.redact_output 的正则文本扫描不同——后者针对 diff 输出，
-    这里是结构化字段按名规则遮蔽。daemon 拉取端点（``GET /api/daemon/mcp/config``，
-    task-05）返回原始值，本 admin GET 返回遮蔽值（D-008）。
+    这里是结构化字段按名规则遮蔽。旧 admin GET /platform-settings/mcp 已移除
+    （2026-09-10-mcp-central-registry task-13），本函数仅剩跨模块复用方
+    workspace/skills_view_service（workspace mcp-config 脱敏视图，D-008 同源
+    规则；mcp_registry/schema 的 DTO 脱敏与之双向一致）。
     """
     redacted: dict[str, dict] = {}
     for name, server in (mcp_servers or {}).items():
@@ -230,29 +232,6 @@ async def _write_setting_json(session: AsyncSession, key: str, value, actor_id: 
         session, key=key, old_value=old_value, new_value=payload, actor_id=actor_id
     )
     await session.commit()
-
-
-@router.get("/platform-settings/mcp")
-async def get_mcp_platform_config(
-    session: SessionDep,
-    _user: SettingsAdminUser,
-) -> dict:
-    """读平台默认 MCP 配置，env secret 已遮蔽（admin 视图，D-008）。"""
-    data = await _read_setting_json(session, MCP_PLATFORM_DEFAULT_KEY, {"mcpServers": {}})
-    mcp_servers = (data or {}).get("mcpServers", {}) if isinstance(data, dict) else {}
-    return {"mcpServers": _redact_mcp_env(mcp_servers)}
-
-
-@router.put("/platform-settings/mcp")
-async def put_mcp_platform_config(
-    payload: McpServersSchema,
-    session: SessionDep,
-    user: SettingsAdminUser,
-) -> dict:
-    """写平台默认 MCP 配置（接收原值存储，不脱敏；D-008）。"""
-    raw = payload.model_dump()
-    await _write_setting_json(session, MCP_PLATFORM_DEFAULT_KEY, raw, user.id)
-    return {"mcpServers": _redact_mcp_env(raw["mcpServers"])}
 
 
 @router.get("/platform-settings/mcp-whitelist")

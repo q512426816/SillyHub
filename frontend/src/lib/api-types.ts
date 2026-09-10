@@ -9496,30 +9496,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/platform-settings/mcp": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Mcp Platform Config
-         * @description 读平台默认 MCP 配置，env secret 已遮蔽（admin 视图，D-008）。
-         */
-        get: operations["get_mcp_platform_config_api_platform_settings_mcp_get"];
-        /**
-         * Put Mcp Platform Config
-         * @description 写平台默认 MCP 配置（接收原值存储，不脱敏；D-008）。
-         */
-        put: operations["put_mcp_platform_config_api_platform_settings_mcp_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/platform-settings/mcp-whitelist": {
         parameters: {
             query?: never;
@@ -16756,20 +16732,6 @@ export interface components {
             } | null;
         };
         /**
-         * McpServerEntry
-         * @description 单个 MCP server 定义（仿 claude ``.mcp.json`` 结构）。
-         */
-        McpServerEntry: {
-            /** Command */
-            command: string;
-            /** Args */
-            args?: string[];
-            /** Env */
-            env?: {
-                [key: string]: string;
-            } | null;
-        };
-        /**
          * McpServerEntryPut
          * @description PUT mcp-config 单个 server 条目（仅 stdio，D-005@v2 安全边界）。
          *
@@ -16872,16 +16834,6 @@ export interface components {
             note?: string | null;
             /** Enabled */
             enabled?: boolean | null;
-        };
-        /**
-         * McpServersSchema
-         * @description ``PUT /api/platform-settings/mcp`` 请求体。
-         */
-        McpServersSchema: {
-            /** Mcpservers */
-            mcpServers?: {
-                [key: string]: components["schemas"]["McpServerEntry"];
-            };
         };
         /**
          * McpTemplateCreate
@@ -42191,63 +42143,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsUpdateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_mcp_platform_config_api_platform_settings_mcp_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    put_mcp_platform_config_api_platform_settings_mcp_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["McpServersSchema"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */

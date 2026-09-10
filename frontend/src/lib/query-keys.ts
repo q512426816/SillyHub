@@ -73,8 +73,9 @@ export const queryKeys = {
   },
   // 2026-07-07-skills-mcp-management-ui task-09：MCP 平台默认配置（admin GET
     // 遮蔽 env secret）+ 白名单（server 名列表）。两个独立端点，独立缓存。
+  // 2026-09-10-mcp-central-registry task-13：config 键随平台默认配置端点删除移除
+  //（中央库查询走 mcpRegistry 键组）；whitelist 键保留（编辑器仍在）。
   mcpSettings: {
-    config: ["mcpSettings", "config"] as const,
     whitelist: ["mcpSettings", "whitelist"] as const,
   },
   // 2026-08-23-platform-agent-log-ingest task-04：本地 agent 日志列表缓存 key
