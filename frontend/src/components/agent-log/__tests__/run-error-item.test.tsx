@@ -198,6 +198,58 @@ describe("task-09: 标题 / message / hint / code 渲染", () => {
     expect(screen.queryByText(/场景化兜底文案/)).toBeNull();
   });
 
+  // ql-20260910-008：系统错误码映射（code 优先于 type，修「运行失败·unknown」吓人兜底）。
+  it("daemon_restarted → 「服务重启中断」标签 + 友好 defaultHint（不再 unknown）", () => {
+    render(
+      <RunErrorItem item={makeItem({ code: "daemon_restarted" })} />,
+    );
+    expect(screen.getByText(/服务重启中断 · daemon_restarted/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/平台服务重启中断了本轮，会话与上下文已保留，可重新发送继续。/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("unknown")).toBeNull();
+  });
+
+  it("daemon_stopped / daemon_interrupted 同族映射", () => {
+    const { unmount } = render(
+      <RunErrorItem item={makeItem({ code: "daemon_stopped" })} />,
+    );
+    expect(screen.getAllByText(/服务停止中断 · daemon_stopped/).length).toBeGreaterThan(0);
+    unmount();
+    render(
+      <RunErrorItem item={makeItem({ code: "daemon_interrupted" })} />,
+    );
+    expect(screen.getAllByText(/任务中断 · daemon_interrupted/).length).toBeGreaterThan(0);
+  });
+
+  it("code 优先于 type：系统码 + 模型 type 并存时走系统映射；非系统码回落 type 表", () => {
+    render(
+      <RunErrorItem
+        item={makeItem({ type: "timeout", code: "daemon_restarted" })}
+      />,
+    );
+    expect(screen.getAllByText(/服务重启中断/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/响应超时 · timeout/)).toBeNull();
+  });
+
+  it("系统码与 fallbackHint 共存：父级注入（自动续跑态）仍优先于 defaultHint", () => {
+    render(
+      <RunErrorItem
+        item={makeItem({ code: "daemon_restarted" })}
+        fallbackHint="服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"
+      />,
+    );
+    expect(screen.getByText(/会话恢复后将自动续跑/)).toBeInTheDocument();
+    expect(screen.queryByText(/上下文已保留，可重新发送继续/)).toBeNull();
+    // 标签仍系统映射（提示与标签正交）。
+    expect(screen.getAllByText(/服务重启中断/).length).toBeGreaterThan(0);
+  });
+
+  it("非系统 code（如 1310）不受影响：仍走 type 表", () => {
+    render(<RunErrorItem item={makeItem({ type: "quota_exceeded", code: "1310" })} />);
+    expect(screen.getByText("额度耗尽 · quota_exceeded")).toBeInTheDocument();
+  });
+
   it("fallbackHint：不传保持 defaultHint 现行为", () => {
     render(<RunErrorItem item={makeItem({ type: "timeout", hint: null })} />);
     expect(screen.getByText(MODEL_ERROR_META.timeout.defaultHint)).toBeInTheDocument();

@@ -160,10 +160,15 @@
 方案：daemon codex spawn 参数 unshift -c features.default_mode_request_user_input=true（app-server 子命令前；旧版未知键非 strict 仅告警向前兼容）；本机 ~/.codex/config.toml [features] 同步加键立即生效
 结果：0.147/0.154 双版本端到端探针验证工具真弹出（GOT requestUserInput + questions 载荷）；codex 驱动两套件 77 passed（+1 断言）；tsc 0；生产待用户重启 daemon/新开会话验证
 
-## ql-20260910-008-415c | 2026-09-10 10:42:27 | run-error-item 系统错误码映射补齐——daemon_restarted/daemon_stopped/daemon_interrupted 三码进映射表（code 命中优先于 type 查表），『运行失败·unknown』兜底…
-状态：进行中
+## ql-20260910-008-415c | 2026-09-10 10:42:27 | run-error-item 系统错误码映射补齐——daemon_restarted 等三码进映射表，修「运行失败 · unknown」吓人兜底
+状态：已完成
 关联变更：（无）
-文件：frontend/src/components/agent-log/run-error-item.tsx, frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+文件：
+- frontend/src/components/agent-log/run-error-item.tsx（三码映射+errorMetaFor+徽标键）
+需求：run-error-item 系统错误码映射补齐——daemon_restarted 等三码进映射表，修「运行失败 · unknown」吓人兜底
+根因：MODEL_ERROR_META 仅按模型错误 type 查表，调度层系统码走 item.code 落 unknown 兜底，且徽标固定拼 item.type 露「… · unknown」
+方案：SYSTEM_ERROR_CODE_META 三码（服务重启中断/服务停止中断/任务中断，友好 defaultHint）+ errorMetaFor 统一入口（code 命中优先 type）+ 徽标键系统码命中显示 code；hint 链序不变
+结果：42 用例全绿（新增 5）；tsc/eslint 0；模块 changelog 已记
 
 ## ql-20260910-009-14b6 | 2026-09-10 10:43:59 | 变更详情会话调试卡显示会话名称（title 优先空回退 id 短码）
 状态：已完成

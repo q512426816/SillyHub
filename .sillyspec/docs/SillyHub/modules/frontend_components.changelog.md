@@ -5,6 +5,8 @@ created_at: 2026-08-30 22:23:33
 
 # frontend_components 模块变更索引
 
+- ql-20260910-008-415c | run-error-item 系统错误码映射补齐——新增 SYSTEM_ERROR_CODE_META（daemon_restarted=服务重启中断/daemon_stopped=服务停止中断/daemon_interrupted=任务中断，中性 slate 族+PowerOff+友好 defaultHint）+ errorMetaFor 统一入口（code 命中优先于 type 查表）；type 徽标键同步修（系统码命中显示 code，原固定拼 item.type 会露「… · unknown」——正是用户实测「运行失败 · unknown」吓人兜底的根因）；hint 链序不变（item.hint > fallbackHint（auto-resume 注入）> defaultHint），系统码与自动续跑提示共存时父级注入仍优先；模型错误 8 类映射与非系统 code（如 1310）零变化。测试 42 用例（新增 5：三码映射/code 优先/共存优先级/非系统码回归）
+
 - 2026-09-10-auto-resume-interrupted-turn | 中断自动续跑前端三件——①session-config-bar 增 autoResume 可选控件（antd Switch 小号「中断自动续跑」，title 两态说明，不传零渲染）；②run-error-item 增 fallbackHint（item.hint > fallbackHint > defaultHint 链，daemon_restarted 不在 8 类映射由父级注入两态文案），turn-timeline daemonRestartedHint 透传（仅 code=daemon_restarted 命中）；③续跑轮徽标：SessionTurnView.autoResumeOf + page-helpers enrichDisplayTurns 回填 run.metadata.auto_resume_of + 轮次行「自动续跑」brand 徽标；session-panel-page 接线（开关 PATCH+detailQuery refetch 同源、hint 按开关态）。测试：error-item+徽标 39+config-bar 30+panel 回归 19 全绿
 
 - ql-20260910-002-dd6d | 24h 审查风险修复第三批（三件）——①群聊聚合 pending 卡误关根治：group-chat-panel memberDialogsQ 的成员级 fetchPendingDialogs catch 原把「拉取失败」与「无卡」混同返回 []，收口判定把缺席一律标已答且 resolvedDialogs 只增不减——一次网络抖动/401 即永久关闭卡（agent 侧提问无超时跟着挂死）；改 queryFn 返回 {items, failedShadowSessionIds}，失败成员的已见卡不收口、用 knownDialogsRef 最后快照维持开放态渲染（下一轮恢复自愈，期间提交命中已答得 409 幂等）。②sessions-portal/floating-session-host 补 useDaemonMachines includeSessions:true——ql-20260909-013 轮询拆分漏了这两个消费方（sessions 恒空：空门户「继续最近会话」入口消失 + D-005 默认机器第二级回退失效）。③「继续最近会话」onClick 补 setSelectedWorkspaceId(recentSession.workspace_id)——D-006 第七个选中入口漏快照，跨工作区续接后 📁 文件树串档/初始误置灰。测试：群聊聚合 11（新增失败不关卡用例）、sessions-portal 53（新增 includeSessions+续接快照用例）全绿

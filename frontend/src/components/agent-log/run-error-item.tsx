@@ -20,6 +20,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   AlertOctagon,
   AlertTriangle,
+  PowerOff,
   ArrowRightLeft,
   ChevronDown,
   ChevronRight,
@@ -144,6 +145,59 @@ export function modelErrorMeta(
 }
 
 /* ------------------------------------------------------------------ */
+/*  系统错误码（调度层）→ 元数据（ql-20260910-008）                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 调度层系统错误码 → 元数据。这些码走 ``item.code``（daemon/backend 写入
+ * run.error_code），模型错误分类器（type）对它们恒 unknown——此前落到
+ * unknown 兜底显示「运行失败 · unknown」，比实际吓人（生产实例：daemon 重启
+ * 中断轮）。配色中性蓝灰（非模型侧故障，重试/续跑可恢复），PowerOff 图标。
+ *
+ * hint 链序不变（item.hint > fallbackHint（auto-resume 父级注入）> 本表
+ * defaultHint）——fallbackHint 存在时（如「会话恢复后将自动续跑」）仍优先。
+ */
+export const SYSTEM_ERROR_CODE_META: Record<string, ModelErrorMeta> = {
+  daemon_restarted: {
+    label: "服务重启中断",
+    Icon: PowerOff,
+    containerClass: "border-l-slate-400 bg-slate-50",
+    titleClass: "text-slate-700",
+    badgeClass: "border-slate-200 bg-card text-slate-700",
+    defaultHint: "平台服务重启中断了本轮，会话与上下文已保留，可重新发送继续。",
+  },
+  daemon_stopped: {
+    label: "服务停止中断",
+    Icon: PowerOff,
+    containerClass: "border-l-slate-400 bg-slate-50",
+    titleClass: "text-slate-700",
+    badgeClass: "border-slate-200 bg-card text-slate-700",
+    defaultHint: "服务停止中断了本轮，会话已保留，可重新发送继续。",
+  },
+  daemon_interrupted: {
+    label: "任务中断",
+    Icon: PowerOff,
+    containerClass: "border-l-slate-400 bg-slate-50",
+    titleClass: "text-slate-700",
+    badgeClass: "border-slate-200 bg-card text-slate-700",
+    defaultHint: "执行环境中断了本轮任务，如需继续可重新发送。",
+  },
+};
+
+/**
+ * 错误元数据统一入口（ql-20260910-008）：系统错误码（code）优先于模型错误
+ * 类型（type）——调度层码（daemon_restarted 等）先查 SYSTEM_ERROR_CODE_META，
+ * 未命中回落 modelErrorMeta（8 类 + unknown 兜底语义不变）。
+ */
+export function errorMetaFor(item: {
+  type?: ModelErrorType | string | null;
+  code?: string | null;
+}): ModelErrorMeta {
+  const byCode = item.code ? SYSTEM_ERROR_CODE_META[item.code] : undefined;
+  return byCode ?? modelErrorMeta(item.type);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -185,7 +239,7 @@ export function RunErrorItem({
   onSwitchProvider,
   onViewDetail,
 }: RunErrorItemProps) {
-  const meta = modelErrorMeta(item.type);
+  const meta = errorMetaFor(item);
   const { Icon } = meta;
   const hint = item.hint ?? fallbackHint ?? meta.defaultHint;
   const hasRaw = item.raw != null && item.raw.trim().length > 0;
@@ -241,7 +295,11 @@ export function RunErrorItem({
             meta.badgeClass,
           )}
         >
-          {meta.label} · {item.type}
+          {/* ql-20260910-008：徽标键——系统错误码命中（errorMetaFor 走 code 表）时
+              显示 code（type 对调度层码恒 unknown，原样拼会露「… · unknown」）；
+              模型错误照旧显示 type。 */}
+          {meta.label} ·{" "}
+          {item.code && SYSTEM_ERROR_CODE_META[item.code] ? item.code : item.type}
         </span>
         {item.code && (
           <span className="inline-flex items-center rounded border border-zinc-200 bg-card px-1.5 py-0.5 font-mono text-[10px] text-zinc-600">
