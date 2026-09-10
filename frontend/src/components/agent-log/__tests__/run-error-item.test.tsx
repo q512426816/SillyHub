@@ -172,7 +172,7 @@ describe("task-09: 标题 / message / hint / code 渲染", () => {
     // 开——自动续跑文案。
     const { rerender } = render(
       <RunErrorItem
-        item={makeItem({ type: null, code: "daemon_restarted" })}
+        item={makeItem({ code: "daemon_restarted" })}
         fallbackHint="服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"
       />,
     );
@@ -180,7 +180,7 @@ describe("task-09: 标题 / message / hint / code 渲染", () => {
     // 关——手动重发文案。
     rerender(
       <RunErrorItem
-        item={makeItem({ type: null, code: "daemon_restarted" })}
+        item={makeItem({ code: "daemon_restarted" })}
         fallbackHint="服务重启中断本轮，会话已保留，可手动重发"
       />,
     );

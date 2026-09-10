@@ -1,0 +1,3 @@
+WARNING  app.core.config:config.py:497 test 环境使用 MinIO 默认凭证（测试不连真实 S3，仅提醒）。
+WARNING  app.core.config:config.py:497 test 环境使用 MinIO 默认凭证（测试不连真实 S3，仅提醒）。
+WARNING  app.core.config:config.py:497 test 环境使用 MinIO 默认凭证（测试不连真实 S3，仅提醒）。

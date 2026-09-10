@@ -43,6 +43,9 @@ function renderTimeline(turns: SessionTurnView[]) {
       dialogHistory={[]}
       onResend={vi.fn()}
       onSwitchProvider={vi.fn()}
+      onDialogResolved={vi.fn()}
+      hasOnlineProvider
+      emptyProviderLabel="Claude"
     />,
   );
 }

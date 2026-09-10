@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-10-auto-resume-interrupted-turn",
+  "generatedAt": "2026-09-10T02:18:54.476Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-10-auto-resume-interrupted-turn",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 3,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-10-auto-resume-interrupted-turn",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-10-auto-resume-interrupted-turn",
+      "metrics": {
+        "backendEndpoints": 568,
+        "frontendCalls": 5
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-10-auto-resume-interrupted-turn",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "recover→入队→confirm→派发→metadata 打标→链上限→G10→失败收敛 全链 integration test 端到端（真实 DB 事务，daemon 侧零改动故集成面为 backend 恢复链）",
+      "command": "cd backend && uv run pytest --no-cov app/modules/daemon/tests/test_auto_resume_integration.py --log-file=<changeDir>/integration-run.log --log-file-level=INFO",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-10-auto-resume-interrupted-turn/integration-run.log"
+    }
+  ],
+  "tests": {
+    "command": "module[frontend,daemon,agent]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-10T02:36:35.111Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
