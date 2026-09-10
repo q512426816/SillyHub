@@ -1492,7 +1492,7 @@ class TestShadowDialogAnswerAuthorization:
                 actor_user_id=seed.owner_uid,
             )
         # 409 details 携带先到者（成员）——前端即时翻已答关闭态渲染人名。
-        assert ei.value.details["answered_by"] == str(seed.member_uid)
+        assert (ei.value.details or {}).get("answered_by") == str(seed.member_uid)
 
         # DB 不被后到者覆写：answered_by/answer 保持 A 的。
         fresh = (
@@ -1680,7 +1680,7 @@ class TestShadowDialogAnswerAuthorization:
                 "allow",
                 dialog_result={"answers": [{"question": "q", "answer": "B"}]},
             )
-        assert exc_info.value.details["answered_by"] == str(seed.member_uid)
+        assert (exc_info.value.details or {}).get("answered_by") == str(seed.member_uid)
 
         history = await perm.list_dialog_history(seed.owner_uid, seed.shadow_id)
         row = next(d for d in history if d.request_id == "sd-by-1")
