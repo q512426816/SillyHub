@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-09-08
+最近更新：2026-09-10
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-09-10 · zcode 会话读取恒走本地 SQLite（「本地活动」历史会话可回看）
+
+- **zcode-session-sqlite-read**（2026-09-10，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，5 task/4 Wave，实现 cherry-pick 5 提交落 main）：「本地活动」zcode 会话的对话化/原文查看从短命 rollout 文件（zcode 客户端分钟级清理，隔天点开即报"文件不存在"）切换为**恒读本机 `~/.zcode/cli/db/db.sqlite`**（session/message/part 三表 1473 会话全量实证，含已清文件死会话）——①daemon 新增 read-zcode-sqlite 读取器（sess id 从上报文件名提取 `model-io-sess_<rest>.jsonl→sess_<rest>`、单查询双层遍历归一化：tool 单 part 产 use+result 两段/系统注入三判据过滤（实测 77% user 行为 synthetic）/未知类型防御忽略、200 段窗口与 parse-zcode-model-io 单源对齐）；②host-fs-handler 守卫后 registry 前先库后文件分派，库读失败（schema 漂移/库损坏/不可用）自动回落文件路径；③backend content 端点 zcode 分支从库合成九字段伪 jsonl **不截断**（按会话天然有界），失败回落 read_file 原 256KB。claude/codex/上报协议/前端/sillyspec CLI 零触碰。integration-critical 证据：真实库 E2E 死会话 1784 段零泄漏/与文件解析器对照偏差 1.0%/tool 配对/翻页全达标；冒烟期间 rollout 两次轮转驱逐现场实证"文件短命库权威"。新增 37 用例（daemon 26+backend 11），回归 109+224 绿，@types/node 精确 pin 22.13.0。顺手清偿 auto-resume 变更 5 处 mypy 红（lint gate 解阻）。
 
 ### 2026-09-08 · 会话轮次刻度轨导航（高轮次会话一眼回顾 + 点击定位）
 

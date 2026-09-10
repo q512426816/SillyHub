@@ -36,7 +36,7 @@ created_at: 2026-09-10 10:50:06
 
 ## Wave 8：JSON 导入
 
-- [ ] task-08: importer——JSON 粘贴导入 (depends_on: task-02)
+- [x] task-08: importer——JSON 粘贴导入 (depends_on: task-02)
 
 ## Wave 9：workspace 扫描导入
 
