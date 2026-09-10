@@ -22,7 +22,7 @@ agent 框架）连上后，可以列 agent 档案、建 mission、派 worker、�
 | 文档 | 内容 |
 | --- | --- |
 | [getting-started.md](getting-started.md) | 接入指南：拿到 URL + token，Claude Desktop / Claude Code / Cursor 三端可复制配置示例 |
-| [tools-reference.md](tools-reference.md) | 8 个 MCP tool 的 input / output schema、调用示例、错误码 |
+| [tools-reference.md](tools-reference.md) | 9 个 MCP tool 的 input / output schema、调用示例、错误码 |
 | [webhooks.md](webhooks.md) | 注册 webhook 收 worker 终态推送，HMAC-SHA256 签名校验（Python + Node），指数退避重试 |
 | [sse.md](sse.md) | mission 级 SSE 订阅 worker 状态变更，重连 / 事件补发策略 |
 | [security.md](security.md) | scope 模型、token 吊销、本地开发隧道（ngrok / cloudflare tunnel）、不存明文等注意事项 |
@@ -42,7 +42,7 @@ agent 框架）连上后，可以列 agent 档案、建 mission、派 worker、�
 
 | 通道 | 路径 | 鉴权 | 用途 |
 | --- | --- | --- | --- |
-| MCP tool 通道 | `/mcp/`（streamable HTTP） | `Bearer <McpToken>` | 第三方调 8 个 tool（本目录主要讲这个） |
+| MCP tool 通道 | `/mcp/`（streamable HTTP） | `Bearer <McpToken>` | 第三方调 9 个 tool（本目录主要讲这个） |
 | 管理 / 推送 API | `/api/...` | 平台用户 JWT / X-API-Key | token / webhook 的 CRUD、mission SSE |
 
 token 与 webhook 的**管理端点**（签发 / 列表 / 吊销 / 注册 webhook）走 `/api`，要平台

@@ -70,3 +70,24 @@
 锚点：sillyhub-daemon/src/sillyspec-manager.ts
 最近确认：b690c91e
 理由：版本与升级状态随 register/heartbeat 心跳上报（仿 pending_update 模式）；手动升级走 WS 即时消息 daemon:sillyspec_update（仿 daemon:self_update，fire-and-forget）；自动定期升级由 daemon 本机定时器执行（默认 1h，忙时推迟）。三套环节均有既有先例，风险最低。
+
+## D-001@v1 : 恒读 SQLite，文件仅作失败兜底
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：c0f16019a
+理由：恒读 SQLite（文件存在也不读文件）；库读失败（schema 漂移/库损坏/会话不在库/node:sqlite 不可用）才回落文件路径。
+
+## D-005@v1 : 分派插入点在 allowed_roots 守卫之后、registry 之前
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：c0f16019a
+理由：assertWithinAllowedRoots(path) 守卫先行（安全铁律，分派不得绕过越界检查），守卫通过且 format=zcode 时先走读取器，失败落回 registry→lstat→文件解析现流程。
+
+## D-006@v1 : node:sqlite 生效版本带与类型声明
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：c0f16019a
+理由：运行时生效版本 ≥22.13.0 / ≥23.4.0（22.5–22.12、23.0–23.3 带 flag 导入即抛错 → 自动文件回落），engines 不 bump；devDep @types/node bump 至 22.13+ 或本地 .d.ts。

@@ -27,7 +27,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ from app.core.auth_deps import require_permission
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.mcp_gateway.server import resolve_gateway_url
 from app.modules.mcp_gateway.service import (
     McpTokenNotFound,
     McpTokenService,
@@ -87,10 +88,22 @@ class McpTokenCreated(BaseModel):
     不继承 ``McpTokenRead``：明文字段 ``token`` 语义独立（不可重复获取），单独建模
     让"明文只出现一次"的契约在类型上显眼。字段精简到 design §7.2 要求的
     ``{id, token, scope, created_at}``。
+
+    2026-09-10-mcp-gateway-dispatch-fixes（spike P0-2）增补 ``gateway_url``：token
+    与该部署的 MCP gateway 接入地址**成对**下发——token 只在签发它的那个部署上有效，
+    调用方把 ``gateway_url`` 与 ``token`` 原样一起落盘（写 local.yaml 时 ``mcp.url``
+    取 origin 去掉 ``/mcp/`` 尾缀，或直接用 ``gateway_url``），杜绝 url/token 指向
+    不同部署的三头分裂。解析见 :func:`app.modules.mcp_gateway.server.resolve_gateway_url`。
     """
 
     id: uuid.UUID
     token: str = Field(description="明文 token，仅本次响应返回，此后不可恢复（请立即保存）")
+    gateway_url: str = Field(
+        description=(
+            "本部署的 MCP gateway 接入端点（形如 https://<host>/mcp/，带尾斜杠）。"
+            "token 只在这个 URL 上有效，两者必须成对保存使用。"
+        )
+    )
     name: str
     scope: list[str]
     created_at: datetime
@@ -121,11 +134,17 @@ async def create_mcp_token(
     payload: McpTokenCreateRequest,
     session: SessionDep,
     user: WorkspaceWriter,
+    request: Request,
 ) -> McpTokenCreated:
     """签发新 McpToken（明文 token 仅本次响应返回一次）。
 
     DB 只存 ``sha256(明文)``（``token_hash`` 唯一索引），不存明文（R-06 / design §8.1）。
-    ``created_by`` 记当前操作 user（审计），token 本身无关 user 身份。
+    ``created_by`` 记当前操作 user（审计），token 本身无关 user 身份——但派发类
+    tool 用 ``created_by`` 作 dispatch actor，无归属 token 派发会被拒（spike P1-4）。
+
+    ``gateway_url``（spike P0-2）与 token 成对返回：解析优先
+    ``MCP_GATEWAY_PUBLIC_BASE_URL`` 配置，缺省从本请求的转发头推导——在哪签发
+    就下发哪的接入地址。
     """
     svc = _service(session)
     row, plaintext = await svc.create(
@@ -137,6 +156,7 @@ async def create_mcp_token(
     return McpTokenCreated(
         id=row.id,
         token=plaintext,
+        gateway_url=resolve_gateway_url(request),
         name=row.name,
         scope=list(row.scope or []),
         created_at=row.created_at,

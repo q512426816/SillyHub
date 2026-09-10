@@ -10,7 +10,7 @@
 对照 ai-toolbox 调研结论，平台在"配置资产管理"上有三个实际缺口：
 
 1. **MCP 无资产沉淀**：平台 MCP 配置只是 settings 表两个 KV（`backend/app/modules/settings/router.py:160`，`mcp.platform_default` + `mcp.whitelist`），无独立实体、无分组/标签/收藏、无导入能力、无注入诊断回显。用户想复用一个 MCP 定义（比如 context7）只能手抄 JSON。
-2. **Codex 供应商注入断层**：`llm_provider` 表是 agent_kind 中性设计，但 daemon 注入器注册表只有 claude（`sillyhub-daemon/src/credential-injector.ts:217`，注释明确预留 codex 扩展点）；codex 会话靠 CLI `-c` 参数覆盖，供应商切换（平台已有的 WS 热切换能力）对 codex 不生效。
+2. **Codex 供应商注入断层**：后端供应商表（llm provider）是 agent_kind 中性设计，但 daemon 注入器注册表只有 claude（`sillyhub-daemon/src/credential-injector.ts:53`，注释明确预留 codex 扩展点）；codex 会话靠 CLI `-c` 参数覆盖，供应商切换（平台已有的 WS 热切换能力）对 codex 不生效。
 3. **技能无版本与来源管理**：现有链路（`backend/app/modules/agent/skills_bundle_service.py`：sillyspec-* 扫描 + CustomSkill DB → tar.gz → daemon 复制）没有 git 源、没有版本更新、没有 per-workspace 启用粒度。
 
 目标：补齐这三块，同时**不破坏平台既有优势**（会话隔离配置目录、密钥不出 backend、供应商热切换、stdio-only 防护）。
@@ -58,7 +58,7 @@ McpBinding（作用域绑定，或 McpServer 上的 JSON 字段，brainstorm 定
 
 要点：
 
-- **加密**：`server_config.env` 中 secret 类键复用 `llm_provider` 的加密设施（key_id 体系）；读取端点沿用 `_redact_mcp_env` 的遮蔽语义（`settings/router.py:168`）
+- **加密**：`server_config.env` 中 secret 类键复用 `llm_provider` 的加密设施（key_id 体系）；读取端点沿用 `_redact_mcp_env` 的遮蔽语义（`backend/app/modules/settings/router.py:168`）
 - **workspace 维度不动**：workspace 级继续用现有 `.mcp.json`（`workspace/skills_view_service.py` 直读直写 + 审计），registry 通过"导入 workspace 配置"吸收它，不替代
 - **白名单保留**：`mcp.whitelist` 继续作为平台治理层（哪些 server 名允许注入），registry 是资产层，两层分离
 

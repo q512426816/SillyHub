@@ -133,3 +133,24 @@
 锚点：`backend/app/modules/daemon/group/service.py`
 最近确认：9531f7228
 理由：影子 manual_approval=False（审批不进群）；计量归群主（影子 user_id=群主）；排队消息按入队时刻摘要快照派发；群不消费 run 级视图；typing/presence 纯 ephemeral（Redis TTL，不落库不进上下文）；群不绑 change_id。
+
+## D-001@v1 : 恒读 SQLite，文件仅作失败兜底
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：c0f16019a
+理由：恒读 SQLite（文件存在也不读文件）；库读失败（schema 漂移/库损坏/会话不在库/node:sqlite 不可用）才回落文件路径。
+
+## D-002@v1 : DB 路径不截断，仅文件回落路径保留 256KB
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：c0f16019a
+理由：不截断——按会话查询天然有界，对话窗口即上界；仅 read_file 回落路径保留原 256KB 截断语义。
+
+## D-007@v1 : 伪 jsonl 固定九字段封闭序列化
+状态：implemented
+变更：2026-09-10-zcode-session-sqlite-read
+锚点：未记录
+最近确认：c0f16019a
+理由：NormalizedLogMessage 九字段（seq/kind/text/tool_name/tool_use_id/tool_input/tool_result/is_error/ts）逐行全量 JSON，封闭列举；content 回落捕获范围含 not_found/method_not_found（老 daemon）/离线/超时。

@@ -181,3 +181,63 @@
 根因：卡片恒渲染 id.slice(0,8) 短码，后端列表端点早已注入 title（首条 user_input 摘要前 30 字）未被使用
 方案：条目名称 title 优先、null 回退短码（回退保留 font-mono，标题 truncate 防溢出）+ 测试补 title 优先与回退断言 + 模块文档同步入口卡现状
 结果：change-sessions-card vitest 3 用例全绿
+
+## ql-20260910-010-7626 | 2026-09-10 11:44:03 | MCP gateway 部署与派发链路实测缺陷修复（spike P2 六项）
+状态：已完成
+关联变更：（无）
+文件：backend/app/core/config.py, backend/app/modules/mcp_gateway/router.py, backend/app/modules/mcp_gateway/tools.py, docs/mcp/getting-started.md, docs/mcp/tools-reference.md
+需求：MCP gateway 部署与派发链路实测缺陷修复（spike P2 六项）
+根因：远端 nginx 未路由 /mcp 且 SDK DNS rebinding 防护默认只放行 localhost 系 Host（反代域名过鉴权后 421）；token 签发不回接入地址致 url/token 三头分裂；派发前无 daemon 在线性查询面；no-creator 报错无修复动作；参数文档缺口；agent_type 硬编码默认与实际执行器不一致
+方案：nginx 加 /mcp 路由 + mount_mcp 按部署配置重建 TransportSecuritySettings 白名单（MCP_GATEWAY_PUBLIC_BASE_URL/MCP_ALLOWED_HOSTS）；McpTokenCreated 成对下发 gateway_url（配置优先/转发头推导）；新增 get_daemon_status 工具（binding 明细+45s 阈值+ws_hub 实时态）；no-creator 文案与 hint 指明修复动作；dispatch_worker agent_type 默认改 ws.default_agent 驱动；tools-reference/getting-started/deploy SKILL 文档化全参数与成对原则；远端部署新 backend 镜像
+结果：mcp_gateway 126 passed + agent dispatch_worker 3 passed，ruff/format/mypy 0，gen:types 同步；远端实测回归（sillyspec client.js 直连公网）initialize/tools/list/get_daemon_status（daemon_online=true ws_connected=true）/create_mission external（workers=[] 零 orchestrator）/dispatch_worker read_only 真派发 completed（$0.65）/get_run_logs 全通；mcp_tokens 无 spike 残留、回归数据已清理
+审计：⚖️ 归属切分：7 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.zcode/skills/deploy-to-server/SKILL.md, backend/app/modules/mcp_gateway/server.py, backend/app/modules/mcp_gateway/tests/test_router.py, backend/app/modules/mcp_gateway/tests/test_tools_new.py, backend/openapi.json, docs/mcp/README.md, frontend/src/lib/api-types.ts
+
+## ql-20260910-011-3d92 | 2026-09-10 12:49:33 | 修复会话轮次排序错位:派发失败轮 started_at 为空被甩队尾
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/router/session_insights.py（排序 created_at + DTO created_at）
+- backend/app/modules/daemon/router/session_crud.py（current_run 排序统一）
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（orderedRuns 空值兜底）
+- frontend/src/lib/daemon/sessions.ts（interface 补 created_at）
+- frontend/src/lib/api-types.ts+backend/openapi.json（gen:types 重生成）
+- backend/app/modules/daemon/tests/test_session_runs_endpoint.py（新增 NULL started_at 定序用例）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（新增派发失败轮用例+fixture 补字段）
+- frontend/src/components/daemon/__tests__/*.test.tsx（2 个 fixture 补 created_at）
+需求：修复会话轮次排序错位:派发失败轮 started_at 为空被甩队尾
+根因：派发失败轮(daemon 离线 inject 发送失败即收敛 failed)的 started_at 永远为空(run_sync 首事件才写),而 list_session_runs 按 started_at.desc() 排序(PG DESC 默认 NULLS FIRST 排首位)且前端轮次刻度 orderedRuns 按 started_at 正序把空值排队尾,导致线上会话 e3d7ddfa 第 8 轮被排到第 11 位、第 8~11 轮轮号与对话流时间线全体错位
+方案：后端排序统一改 created_at.desc()(轮次真实语义=run 创建序,对齐 agent 模块仓库惯例),SessionRunRead DTO/interface 透出 created_at;前端 orderedRuns 空值 fallback created_at(与对话流 user_input 日志时间轴一致);session_crud current_run 查询同款统一
+结果：后端 test_session_runs_endpoint 13 passed(新增 NULL started_at 用例)+session_router/service 71 passed;前端 page.test 53 passed(新增回真实轮位用例)+variant 7 passed;tsc 0 错误;gen:types 已重生成;待部署阿里云验证
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/session-panel-ctx-tokens.test.tsx, frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx
+
+## ql-20260910-012-392f | 2026-09-10 15:14:09 | 平台同步区串台修复——变更中心改读工作区级 sillyspec 快照
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/platform-sync-section.tsx（取数 map 优先 + 注释同步）
+- frontend/src/components/changes/__tests__/platform-sync-section.test.tsx（+2 工作区级取数用例）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 +ql-20260910-012；总览卡数据源描述纠正）
+需求：平台同步区串台修复——变更中心改读工作区级 sillyspec 快照
+根因：platform-sync-section.tsx 仍读机器级 sillyspec_status 单槽位；daemon 工作区级化后每轮采集逐目标覆盖单槽位，多工作区绑定时变更中心显示别区数据（总览卡 14a50351d 已改 map 优先，本组件漏改），用户实证总览卡 3 条冲突而变更中心不可见、无法在平台裁决
+方案：取数对齐 changes-overview-card 同款：sillyspec_status_map 非空按当前 workspaceId 取（缺席=整卡不渲染，不回退单槽位防串台）；map 为 null（旧 daemon）回退机器级单槽位；组件头注释与 frontend.md 模块文档同步（含总览卡数据源描述纠正 map 优先）
+结果：vitest 组件套件 14/14 passed（含新增 2 用例：map 优先不串台 / map 缺席整卡不渲染）；tsc --noEmit 零错；未重部署（阿里云需另行 deploy）
+
+## ql-20260910-013-3b38 | 2026-09-10 15:42:50 | 变更详情页删除「任务看板」摘要卡与「审核历史」卡（用户裁定方案 A）。根因：平台审批链路零使用——本地 PG 341 变更 stages 带 review_hi…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx（删两卡挂载/导入/taskBoard 取数/reviewHistory 派生，513→492 行）
+- frontend/src/components/changes/detail/change-task-board-card.tsx（删除（连同测试））
+- frontend/src/components/changes/detail/change-review-history-card.tsx（删除（连同测试，normalizeReviewHistory 一并退役））
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx（清两卡 vi.mock，保留只读展示区断言收窄）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx（清两卡 vi.mock 与 getTaskBoard mock）
+- frontend/src/components/__tests__/delete-change-confirm.test.tsx（清两卡 vi.mock + daemon mock 改 importActual 部分 mock（修 SESSION_ENGINE_OPTIONS 收集期炸旧债））
+- frontend/src/components/mobile/mobile-change-detail.tsx（X-03 落位清单 7/8 条注释标注桌面卡已删）
+- .sillyspec/docs/frontend/modules/components-changes.md（detail 卡 9→7、定位段记录 ql-20260910-013）
+- .sillyspec/docs/frontend/modules/app-workspace-pages.md（ChangeDetailPage 行数/右辅构成更新）
+- .sillyspec/docs/frontend/modules/lib-tasks.md（getTaskBoard 消费方变更记录）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引追加 ql-20260910-013-3b38）
+需求：变更详情页删除「任务看板」摘要卡与「审核历史」卡（用户裁定方案 A）。
+根因：平台审批链路零使用——本地 PG 341 变更 stages 带 review_history 为 0 条、写入代码 2026-08-14 上线而平台内审批最后一次 2026-08-12（CLI 驱动工作流审批不落平台表），审核历史卡恒空；任务看板摘要须手动 reparse 才更新、状态英文裸显，与步骤条/时间线三重展示进度，均无消费价值。
+方案：page.tsx 删两卡挂载/导入/taskBoard 取数/reviewHistory 派生；删两组件及测试 4 文件；三个页面级测试清 vi.mock 并收窄断言；mobile-change-detail 复用清单注释同步；顺手修 delete-change-confirm.test 的 @/lib/daemon 整模块 mock 缺 SESSION_ENGINE_OPTIONS 旧债（改 importActual 部分 mock）；后端 review_history 写入端点与 lib/tasks getTaskBoard 保留。
+结果：4 个受影响测试文件 47 用例全绿、tsc --noEmit 0 错、eslint 零新增、docs check 824 处引用全过。

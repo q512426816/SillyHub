@@ -236,6 +236,7 @@ function makeDetail() {
 function makeRun(overrides: Partial<SessionRunRead> = {}): SessionRunRead {
   return {
     id: "r-1",
+    created_at: "2026-08-27T10:00:00Z",
     status: "completed",
     error_code: null,
     // ql-20260831-004：SessionRunRead 新增（失败原因透出），夹具同步补齐。

@@ -1513,14 +1513,19 @@ export function SessionPanelPage({
   //    实现全量历史轮次覆盖（含未加载空心刻度数据源）。
   // orderedRuns：runs 按 started_at 时间正序定序（parseRunStartedAt 缺失/非法 →
   // null 排最后；Array.prototype.sort 稳定排序，同刻保持 Map 插入序）。
+  // quick（ql-20260910-011-3d92）：started_at 为空时 fallback created_at——
+  // 派发失败轮（daemon 离线 inject 发送失败即收敛 failed）started_at 永远为
+  // NULL，原排序把它甩到队尾，轮号与对话流时间线错位；created_at（run 创建
+  // 时刻，恒非空）与对话流 user_input 日志时间轴一致，兜底后失败轮回到真实
+  // 轮次位置。
   const orderedRuns = useMemo(
     () =>
       [...runsMeta.values()].sort((a, b) => {
-        const aMs = parseRunStartedAt(a.started_at);
-        const bMs = parseRunStartedAt(b.started_at);
-        if (aMs === null && bMs === null) return 0;
-        if (aMs === null) return 1;
-        if (bMs === null) return -1;
+        const aMs = parseRunStartedAt(a.started_at) ?? Date.parse(a.created_at);
+        const bMs = parseRunStartedAt(b.started_at) ?? Date.parse(b.created_at);
+        if (!Number.isFinite(aMs) && !Number.isFinite(bMs)) return 0;
+        if (!Number.isFinite(aMs)) return 1;
+        if (!Number.isFinite(bMs)) return -1;
         return aMs - bMs;
       }),
     [runsMeta],

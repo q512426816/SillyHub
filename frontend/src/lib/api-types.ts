@@ -3601,7 +3601,12 @@ export interface paths {
          * @description 签发新 McpToken（明文 token 仅本次响应返回一次）。
          *
          *     DB 只存 ``sha256(明文)``（``token_hash`` 唯一索引），不存明文（R-06 / design §8.1）。
-         *     ``created_by`` 记当前操作 user（审计），token 本身无关 user 身份。
+         *     ``created_by`` 记当前操作 user（审计），token 本身无关 user 身份——但派发类
+         *     tool 用 ``created_by`` 作 dispatch actor，无归属 token 派发会被拒（spike P1-4）。
+         *
+         *     ``gateway_url``（spike P0-2）与 token 成对返回：解析优先
+         *     ``MCP_GATEWAY_PUBLIC_BASE_URL`` 配置，缺省从本请求的转发头推导——在哪签发
+         *     就下发哪的接入地址。
          */
         post: operations["create_mcp_token_api_workspaces__workspace_id__mcp_tokens_post"];
         delete?: never;
@@ -16900,6 +16905,12 @@ export interface components {
          *     不继承 ``McpTokenRead``：明文字段 ``token`` 语义独立（不可重复获取），单独建模
          *     让"明文只出现一次"的契约在类型上显眼。字段精简到 design §7.2 要求的
          *     ``{id, token, scope, created_at}``。
+         *
+         *     2026-09-10-mcp-gateway-dispatch-fixes（spike P0-2）增补 ``gateway_url``：token
+         *     与该部署的 MCP gateway 接入地址**成对**下发——token 只在签发它的那个部署上有效，
+         *     调用方把 ``gateway_url`` 与 ``token`` 原样一起落盘（写 local.yaml 时 ``mcp.url``
+         *     取 origin 去掉 ``/mcp/`` 尾缀，或直接用 ``gateway_url``），杜绝 url/token 指向
+         *     不同部署的三头分裂。解析见 :func:`app.modules.mcp_gateway.server.resolve_gateway_url`。
          */
         McpTokenCreated: {
             /**
@@ -16912,6 +16923,11 @@ export interface components {
              * @description 明文 token，仅本次响应返回，此后不可恢复（请立即保存）
              */
             token: string;
+            /**
+             * Gateway Url
+             * @description 本部署的 MCP gateway 接入端点（形如 https://<host>/mcp/，带尾斜杠）。token 只在这个 URL 上有效，两者必须成对保存使用。
+             */
+            gateway_url: string;
             /** Name */
             name: string;
             /** Scope */
@@ -21556,6 +21572,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;

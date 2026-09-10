@@ -58,6 +58,10 @@ class SessionRunRead(BaseModel):
     """
 
     id: uuid.UUID
+    # quick（ql-20260910-011-3d92）：轮次定序锚点——run 创建时刻恒非空（列默认
+    # now()）。派发失败轮（daemon 离线 inject 发送失败，control.py 收敛 failed）
+    # started_at 永远为 NULL，前端刻度排序以其兜底，修复失败轮被甩到队尾的轮号错位。
+    created_at: datetime
     # 2026-09-10-auto-resume-interrupted-turn（plan 审查 P0-1）：续跑轮标记——
     # 自动续跑派发落地的 run 为 {"auto_resume_of": "<源 run id>"}（前端「自动
     # 续跑」徽标数据源）；普通轮 / 存量行为 None。显式字段 DTO 不自动携带
@@ -290,9 +294,13 @@ async def list_session_runs(
             .join(AuthUser, AuthUser.id == AgentRun.user_id, isouter=True)
             .where(AgentRun.agent_session_id == session_id)
             # ql-20260826-012：长生命周期交互会话每 turn 一条 run 无限增长，
-            # 原全量加载——固定取最新 _SESSION_RUNS_MAX 条（已按 started_at
-            # desc，前端 error_detail 按最近 turn 映射，旧 turn 裁剪无损）。
-            .order_by(AgentRun.started_at.desc())
+            # 原全量加载——固定取最新 _SESSION_RUNS_MAX 条，旧 turn 裁剪无损。
+            # quick（ql-20260910-011-3d92）：排序键 started_at → created_at——
+            # 派发失败轮 started_at 为 NULL，PostgreSQL DESC 默认 NULLS FIRST 会
+            # 把它排响应首位（且最新 N 截断语义失真）；轮次序的真实语义是用户
+            # 发话序（= run 创建序），对齐 agent 模块按 created_at 排 run 的仓库
+            # 惯例（finalizer / mcp_tools / patrol 等）。
+            .order_by(AgentRun.created_at.desc())
             .limit(_router._SESSION_RUNS_MAX)
         )
     ).all()

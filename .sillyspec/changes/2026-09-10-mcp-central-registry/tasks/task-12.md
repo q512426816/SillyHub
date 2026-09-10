@@ -18,7 +18,7 @@ target_files:
   - NEW:frontend/src/lib/api/mcp-registry.ts
   - NEW:frontend/src/components/mcp-registry/import-json-modal.tsx
   - NEW:frontend/src/components/mcp-registry/workspace-scan-modal.tsx
-  - NEW:frontend/src/components/mcp-registry/template-panel.tsx
+  - NEW:frontend/src/components/mcp-registry/template-picker-modal.tsx
   - NEW:frontend/src/components/mcp-registry/diagnostics-panel.tsx
 expects_from:
   task-11:

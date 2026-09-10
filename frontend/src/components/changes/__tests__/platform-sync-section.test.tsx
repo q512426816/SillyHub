@@ -380,6 +380,50 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
     expect(screen.queryByText("平台同步")).toBeNull();
   });
 
+  // ── 1b. 工作区级取数（ql-20260910-012-392f：map 优先，对齐总览卡 14a50351d）──
+
+  it("取数——sillyspec_status_map 非空时按当前工作区取，不串台机器级单槽位", async () => {
+    // 机器级单槽位 = 别的工作区快照（daemon 每轮采集互相覆盖的「最后一位」）；
+    // ws-1 的 map 槽位才是本工作区数据（默认 fixture：2 冲突）
+    const otherWsStatus = makeStatus({
+      active_changes: 1,
+      healthy_count: 1,
+      ghost_count: 0,
+      conflict_count: 1,
+      conflict_types: { "spec-tree": 1 },
+      changes: [makeChange({ name: "other-ws-change" })],
+      pending_conflicts: [
+        {
+          change: "quick-other-ws",
+          created_at: isoAgo(3 * MIN),
+          type: "spec-tree",
+        },
+      ],
+    });
+    setupMachine(
+      makeMachine(otherWsStatus, {
+        sillyspec_status_map: { "ws-1": makeStatus() },
+      }),
+    );
+    renderSection();
+
+    expect(await screen.findByText("quick-x")).toBeInTheDocument();
+    expect(screen.getByText("2026-09-04-active-change")).toBeInTheDocument();
+    // 串台防御：机器级单槽位携带的别区冲突/变更一概不出现
+    expect(screen.queryByText("quick-other-ws")).toBeNull();
+    expect(screen.queryByText("other-ws-change")).toBeNull();
+  });
+
+  it("取数——map 已启用但当前工作区缺席（未被采集）→ 整卡不渲染（不回退单槽位）", async () => {
+    setupMachine(makeMachine(makeStatus(), { sillyspec_status_map: {} }));
+    renderSection();
+    await waitFor(() => expect(mocks.listDaemonMachines).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("平台同步")).toBeNull();
+  });
+
   // ── 2. 权限 gating（D-003@v1 + Grill B1：compare 与裁决同权限集合）────────
 
   it("权限——非所有者非平台管理员只读：无查看对比/清理按钮，清单与计数保留 + 只读说明", async () => {

@@ -35,8 +35,11 @@ task-06/13 消费 :data:`mcp` 注册 tool，消费 :data:`mount_path` 知道对�
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from urllib.parse import urlparse
+
+from fastapi import FastAPI, Request
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from app.modules.mcp_gateway.auth import McpAuthMiddleware
 
@@ -59,11 +62,72 @@ mount_path: str = "/mcp"
 mcp: FastMCP = FastMCP("sillyhub-public", streamable_http_path="/")
 
 
+def _build_transport_security() -> TransportSecuritySettings:
+    """按部署配置构建 SDK 的 DNS rebinding 防护白名单（2026-09-10 spike P0-1 坑 6）。
+
+    FastMCP 构造时 ``host`` 落在 localhost 形态会**自动启用**
+    ``TransportSecuritySettings``，白名单只有 ``127.0.0.1/localhost/[::1]``——
+    经反代以公网域名访问时，过完 Bearer 鉴权的请求会被 SDK 的 Host 校验拦成
+    ``421 Invalid Host header``（本地 localhost 联调不触发，远端必现）。
+
+    白名单来源（并集）：
+
+    1. localhost 三件套（本地 dev 零回归，含端口通配）；
+    2. ``MCP_GATEWAY_PUBLIC_BASE_URL`` 的 host（钉死了对外 origin 的部署自动放行）；
+    3. ``MCP_ALLOWED_HOSTS``（逗号分隔，任意多入口/别名场景，如
+       ``crrcdt.ppdmq.top,10.0.0.5:8001``）。
+
+    每个条目同时登记裸 host 与 ``host:*``（SDK 只对 ``:*`` 结尾模式做端口前缀
+    匹配，无端口的 Host 头是精确匹配——443 默认端口的反代域名不带端口）。
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    hosts: list[str] = ["127.0.0.1", "localhost", "[::1]"]
+    origins: list[str] = [
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+    ]
+
+    def _allow(entry: str) -> None:
+        raw = entry.strip()
+        if not raw:
+            return
+        if raw.endswith(":*"):
+            # 已是端口通配形态：登记原样 + 裸 host（无端口 Host 头是精确匹配）。
+            hosts.extend([raw, raw[:-2]])
+        elif raw.count(":") == 1 and not raw.startswith("["):
+            # 显式端口（如 10.0.0.5:8001）：只登记原样（精确匹配）。
+            hosts.append(raw)
+        else:
+            # 裸 host：登记原样 + 端口通配（443 反代域名 Host 不带端口）。
+            hosts.extend([raw, f"{raw}:*"])
+
+    public = settings.mcp_gateway_public_base_url.strip()
+    if public:
+        parsed = urlparse(public if "://" in public else f"https://{public}")
+        _allow((parsed.hostname or "").strip("[]"))
+        origins.append(f"{parsed.scheme}://{parsed.netloc}:*")
+    for extra in settings.mcp_allowed_hosts.split(","):
+        _allow(extra)
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+    )
+
+
 def mount_mcp(app: FastAPI) -> None:
     """把 MCP server 挂到父 FastAPI 的 :data:`mount_path` 上。
 
-    三步装配（spike-A 验证写法）：
+    装配步骤（spike-A 验证写法 + 2026-09-10 坑 6）：
 
+    0. ``mcp.settings.transport_security = _build_transport_security()``——在
+      ``streamable_http_app()`` 惰性创建 session manager（构造时读取该 settings）
+      **之前**替换掉 SDK 对 localhost 形态自动生成的默认白名单（否则公网域名
+      过鉴权后被 SDK Host 校验 421，坑 6）。
     1. ``mcp.streamable_http_app()`` 拿 Starlette 子 app（坑 1：非 ``http_app()``）。
     2. ``add_middleware(McpAuthMiddleware)`` 把 task-03 鉴权中间件挂到**子 app**
       （坑 4 / CC-06：物理隔离 ``/api`` 的鉴权通道，子 app middleware 只对
@@ -80,9 +144,56 @@ def mount_mcp(app: FastAPI) -> None:
     Args:
         app: 父 FastAPI 实例（``create_app()`` 里新建的那个）。
     """
+    mcp.settings.transport_security = _build_transport_security()
     mcp_app = mcp.streamable_http_app()
     mcp_app.add_middleware(McpAuthMiddleware)
     app.mount(mount_path, mcp_app)
+
+
+def resolve_gateway_url(request: Request | None = None) -> str:
+    """解析对外 MCP 接入 URL（规范端点 ``{origin}/mcp/``，带尾斜杠）。
+
+    2026-09-10-mcp-gateway-dispatch-fixes（spike P0-2）：mcp-tokens 签发响应把
+    ``gateway_url`` 与 token **成对**下发——url 指哪、token 就在哪生效，调用方
+    （如 sillyspec connect 流程）把两者原样一起落盘即可，杜绝「url 指远端、token
+    是本地签发」的三头分裂。解析优先级：
+
+    1. ``Settings.mcp_gateway_public_base_url``（env ``MCP_GATEWAY_PUBLIC_BASE_URL``）
+       ——反代后请求头不可信 / 多入口部署时由运维显式钉死；
+    2. 请求头推导：``X-Forwarded-Proto`` → ``X-Forwarded-Host`` → ``Host``
+       （取首个值防逗号串）。uvicorn 未开 ``--proxy-headers`` 时 Starlette 的
+       ``request.url`` 只有容器内视角（http://backend:8000），故必须看转发头；
+    3. 兜底 ``http://localhost:8000``（无请求上下文的极端场景，仅占位）。
+
+    Args:
+        request: 签发请求（FastAPI ``Request``）；None 时跳过请求头推导。
+
+    Returns:
+        形如 ``https://crrcdt.ppdmq.top/mcp/`` 的完整端点（尾斜杠必需，坑 3）。
+    """
+    from app.core.config import get_settings
+
+    configured = get_settings().mcp_gateway_public_base_url.strip()
+    if configured:
+        return f"{configured.rstrip('/')}{mount_path}/"
+
+    if request is not None:
+        scheme = (
+            (request.headers.get("x-forwarded-proto") or request.url.scheme).split(",")[0].strip()
+        )
+        host = (
+            (
+                request.headers.get("x-forwarded-host")
+                or request.headers.get("host")
+                or request.url.netloc
+            )
+            .split(",")[0]
+            .strip()
+        )
+        if scheme and host:
+            return f"{scheme}://{host}{mount_path}/"
+
+    return f"http://localhost:8000{mount_path}/"
 
 
 # 装配副作用 import（task-06 协调）：import tools 触发 @mcp.tool() 注册 12 个 tool，
@@ -91,4 +202,4 @@ def mount_mcp(app: FastAPI) -> None:
 # 下方 import 仅为副作用（注册 5 个 tool），名字不被引用，故行尾标 noqa: F401。
 from app.modules.mcp_gateway import tools  # noqa: F401,E402
 
-__all__ = ["mcp", "mount_mcp", "mount_path"]
+__all__ = ["mcp", "mount_mcp", "mount_path", "resolve_gateway_url"]

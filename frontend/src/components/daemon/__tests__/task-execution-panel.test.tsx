@@ -117,6 +117,7 @@ function taskRow(overrides: Partial<AgentSessionTaskRead> = {}): AgentSessionTas
 function runRow(overrides: Partial<SessionRunRead> = {}): SessionRunRead {
   return {
     id: "run-a",
+    created_at: "2026-09-04T09:59:30Z",
     status: "completed",
     error_code: null,
     failure_summary: null,

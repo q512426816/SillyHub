@@ -86,7 +86,7 @@
 **证据**：
 - `backend/app/modules/agent/control.py:25` `can_dispatch_worker` —— **pre-dispatch 门**：`cost_so_far(mission.id) >= mission.budget_usd` 时拒绝派发**新** worker（reason=`budget_exceeded`）
 - 已派出去的 worker **不再检查**，烧穿预算继续跑
-- `budget_tokens` 字段（`backend/app/modules/agent/model.py:1678`）**全代码无任何强制点**
+- `budget_tokens` 字段（`backend/app/modules/agent/model.py:1695`）**全代码无任何强制点**
 - 单 run 级（AgentRun）**没有预算字段**，只在 Mission 维度
 - 默认预算硬编码 `budget_usd=4.0`（`backend/app/modules/spec_workspace/bootstrap.py:257`、`backend/app/modules/change/dispatch.py:943`）
 
@@ -233,11 +233,11 @@ P2-3 Coordinator 模型配置 ──→ 独立小改
 
 ### 5.3 核心数据模型
 - `AgentRun`（`backend/app/modules/agent/model.py:26-296`）：状态 pending/running/completed/failed/killed；含 idempotency_key/resume_token/checkpoint/usage（cost/tokens，claude 有 cache 列 codex 无）/gate_result/mission_id/parent_run_id/role
-- `AgentRunLog`（`backend/app/modules/agent/model.py:465`）：channel + dedup_key + 子代理归属三列 + tool_kind（14 枚举）
+- `AgentRunLog`（`backend/app/modules/agent/model.py:474`）：channel + dedup_key + 子代理归属三列 + tool_kind（14 枚举）
 - `AgentSession`（`backend/app/modules/agent/model.py:275`）：跨多 turn，agent_session_id ≠ AgentRun.session_id（刻意区分，前者 SDK 返回用于 resume）
-- `AgentMission`（`backend/app/modules/agent/model.py:1582`）：**status 不持久化**，由 derive_status 派生（`backend/app/modules/agent/mission.py:29-54`）；无 final/merged 字段
-- `AgentArtifact`（`backend/app/modules/agent/model.py:1765`）：kind ∈ summary/patch/test_result/evidence；content_ref 截断
-- `AgentRunDependency`（`backend/app/modules/agent/model.py:1730`）：DAG 边（v1 flat，无独立 wiring）
+- `AgentMission`（`backend/app/modules/agent/model.py:1599`）：**status 不持久化**，由 derive_status 派生（`backend/app/modules/agent/mission.py:29-54`）；无 final/merged 字段
+- `AgentArtifact`（`backend/app/modules/agent/model.py:1782`）：kind ∈ summary/patch/test_result/evidence；content_ref 截断
+- `AgentRunDependency`（`backend/app/modules/agent/model.py:1747`）：DAG 边（v1 flat，无独立 wiring）
 
 ### 5.4 管理与协作能力（成熟，列出备查）
 - **双层审批**：

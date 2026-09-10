@@ -10,9 +10,13 @@
  *     弹窗文案/回显状态流）；
  *   - design.md §5 Phase 3：数据链复刻 changes-overview-card——
  *     fetchMyBinding(workspaceId).daemon_id → listDaemonMachines（15s 心跳级
- *     轮询，对齐 useDaemonMachines cadence）按 id 匹配 → 读 machine.
- *     sillyspec_status（冲突/ghost 快照）+ machine.sillyspec_command_result
- *     （task-08 命令结果槽，回显来源）；
+ *     轮询，对齐 useDaemonMachines cadence）按 id 匹配 → 读机器 sillyspec 快照
+ *     （冲突/ghost）+ machine.sillyspec_command_result（task-08 命令结果槽，
+ *     回显来源）。ql-20260910-012-392f：快照取数对齐总览卡 14a50351d 的
+ *     工作区级化——sillyspec_status_map 非空时按当前工作区取（缺席=该工作区
+ *     未被采集，整卡不渲染而非串台他区数据——多工作区下机器级单槽位每轮被
+ *     最后采集的工作区覆盖，正是本 quick 修的串台根因）；map 为 null（旧
+ *     daemon 未启用工作区级采集）回退机器级 sillyspec_status 单槽位；
  *   - 无绑定 / 机器缺失 / sillyspec_status 缺失（含加载中）→ 整卡不渲染
  *     （return null，页面行为与现状一致，design §9 兼容策略）。
  *
@@ -238,7 +242,15 @@ export function PlatformSyncSection({
     daemonId !== null
       ? (machinesQ.data?.items.find((m) => m.id === daemonId) ?? null)
       : null;
-  const status: SillySpecStatus | null = machine?.sillyspec_status ?? null;
+  // 工作区级快照取数（ql-20260910-012-392f，对齐 changes-overview-card 同款）：
+  // map 非空时按当前工作区取——缺席=该工作区未被采集，status=null 整卡不渲染
+  // （刻意不回退机器级单槽位，那正是多工作区串台来源）；map 为 null（旧 daemon
+  // 未启用）回退机器级 sillyspec_status。
+  const statusMap = machine?.sillyspec_status_map ?? null;
+  const status: SillySpecStatus | null =
+    statusMap !== null
+      ? (statusMap[workspaceId] ?? null)
+      : (machine?.sillyspec_status ?? null);
   const commandResult: CommandResult | null =
     machine?.sillyspec_command_result ?? null;
   const currentResultKey = commandResultKeyOf(commandResult);

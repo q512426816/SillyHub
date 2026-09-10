@@ -8,7 +8,7 @@
 // （数据源 change.steps，steps 缺失降级不渲染，D-003@v1）。
 //
 // 本测试为整页回归：渲染 [cid]/page.tsx，断言
-//   1. 只读展示区保留（文件卡/会话卡/审核历史/任务看板/执行日志）
+//   1. 只读展示区保留（文件卡/会话卡/执行日志；审核历史/任务看板卡已删 ql-20260910-013）
 //   2. 无任何执行控制按钮（触发智能体 / 推进到 / 运行验证门禁 / 团队 switch）
 //   3. 审批卡「通过/打回并通知绑定会话」→ submitStageReview(action, undefined, notify_session=true)
 //   4. 三类降级提示（session_inactive / turn_conflict）随响应渲染
@@ -38,7 +38,6 @@ const mocks = vi.hoisted(() => ({
   getAgentStatus: vi.fn(),
   submitStageReview: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
-  getTaskBoard: vi.fn(),
   listQuicklogEntries: vi.fn(),
 }));
 
@@ -50,10 +49,6 @@ vi.mock("@/lib/changes", () => ({
 
 vi.mock("@/lib/daemon", () => ({
   listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
-}));
-
-vi.mock("@/lib/tasks", () => ({
-  getTaskBoard: mocks.getTaskBoard,
 }));
 
 // task-10（FR-07）：关联快速任务卡 mock（默认空列表——卡片渲染「暂无关联快速任务」）
@@ -68,15 +63,8 @@ vi.mock("@/components/changes/detail/change-agent-run-log", () => ({
 vi.mock("@/components/changes/detail/change-files-card", () => ({
   ChangeFilesCard: () => <div data-testid="change-files-card" />,
 }));
-vi.mock("@/components/changes/detail/change-review-history-card", () => ({
-  ChangeReviewHistoryCard: () => <div data-testid="change-review-history-card" />,
-  normalizeReviewHistory: () => [],
-}));
 vi.mock("@/components/changes/detail/change-sessions-card", () => ({
   ChangeSessionsCard: () => <div data-testid="change-sessions-card" />,
-}));
-vi.mock("@/components/changes/detail/change-task-board-card", () => ({
-  ChangeTaskBoardCard: () => <div data-testid="change-task-board-card" />,
 }));
 // 步骤时间线只读卡片 stub（task-07 范式同上；空态降级语义在组件自身测试覆盖，
 // 此处只验页面挂载/降级门控）
@@ -171,7 +159,6 @@ function setup(opts: {
     last_dispatch: null,
   } as unknown as DispatchResponse);
   mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
-  mocks.getTaskBoard.mockResolvedValue(null);
   // task-10：关联快速任务默认空
   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
   mocks.submitStageReview.mockResolvedValue({
@@ -205,14 +192,12 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
     cleanup();
   });
 
-  it("保留只读展示区：阶段步骤条 / 执行日志 / 文件卡 / 会话卡 / 审核历史 / 任务看板", async () => {
+  it("保留只读展示区：阶段步骤条 / 执行日志 / 文件卡 / 会话卡", async () => {
     setup();
     await renderPage();
     expect(screen.getByTestId("change-agent-run-log")).toBeInTheDocument();
     expect(screen.getByTestId("change-files-card")).toBeInTheDocument();
     expect(screen.getByTestId("change-sessions-card")).toBeInTheDocument();
-    expect(screen.getByTestId("change-review-history-card")).toBeInTheDocument();
-    expect(screen.getByTestId("change-task-board-card")).toBeInTheDocument();
     // 阶段步骤条（主线宏观进度，ChangeStageHeader 真实渲染；页头徽标同文案 → 用 getAllByText）
     expect(screen.getAllByText("需求分析").length).toBeGreaterThan(0);
   });

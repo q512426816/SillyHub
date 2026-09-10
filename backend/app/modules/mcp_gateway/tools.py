@@ -117,14 +117,29 @@ async def _resolve_actor_user_id(session: AsyncSession, auth: McpAuthContext) ->
     daemon binding（``WorkspaceMemberRuntime``）解析目标 runtime；McpToken 无独立
     user（design §8.1），actor 用签发该 token 的 user。creator 被删（SET NULL）则
     无法派发，抛 400 明确报错（不误导成 daemon 离线 / 静默 failed）。
+
+    spike P1-4（2026-09-10）：报错必须自带**修复动作**——手工/运维场景下裸抛
+    "no creator user" 不可理解。文案指明两条出路：用带用户归属的 token（经
+    ``POST /api/workspaces/{id}/mcp-tokens`` 签发，自动记录签发人），或给存量
+    token 补 ``mcp_tokens.created_by``。
     """
     token = await session.get(McpTokenORM, auth.token_id)
     if token is None or token.created_by is None:
         raise AppError(
-            "MCP token has no creator user to act as the dispatch actor.",
+            "MCP token has no creator user to act as the dispatch actor "
+            "(mcp_tokens.created_by is NULL). Fix: use a token issued via "
+            "POST /api/workspaces/{workspace_id}/mcp-tokens (it records the "
+            "issuing user), or backfill created_by on this token. Tokens "
+            "without a creator cannot dispatch.",
             code="MCP_400_MCP_TOKEN_NO_CREATOR",
             http_status=400,
-            details={"token_id": str(auth.token_id)},
+            details={
+                "token_id": str(auth.token_id),
+                "hint": (
+                    "用带用户归属的 token（经 POST /api/workspaces/{id}/mcp-tokens "
+                    "由真实用户签发），或为该 token 补 created_by 后再派发。"
+                ),
+            },
         )
     return token.created_by
 
@@ -387,6 +402,11 @@ async def dispatch_worker(
     并冻结 snapshot（FR-04，对齐内部 endpoint，visibility + workspace 归属校验，
     不可用/跨 workspace 返 400）。``workspace_id`` 由 middleware 从 McpToken 注入。
 
+    ``agent_type`` 默认值（spike P2-6）：不传时取目标 workspace 的
+    ``default_agent``（部署级默认执行器配置，如 ``pi``），未配置才回退
+    ``claude_code``——与 provider 解析（execution.py 同读 ``ws.default_agent``）
+    同源，标签与实际执行器一致。
+
     task-04 路径A 三参（design §7.3，默认 None → team 模式字节不变）：
     ``worktree_path`` caller 自带 worktree 绝对路径（非空 → execution 跳过
     git_worktree_add，作 daemon root_path）；``branch`` caller worktree 分支
@@ -486,7 +506,13 @@ async def dispatch_worker(
         run = AgentRun(
             mission_id=mission.id,
             change_id=mission.change_id,
-            agent_type=agent_type or "claude_code",
+            # spike P2-6（2026-09-10）：agent_type 标签默认跟随目标 workspace 的
+            # default_agent（部署级执行器配置，如 pi），而非硬编码 claude_code——
+            # 调用方不传时标签与实际执行器（execution.py 同样读 ws.default_agent 解
+            # provider）保持一致。workspace 行缺失/未配置才回退 claude_code。
+            agent_type=agent_type
+            or (guard_ws.default_agent if guard_ws is not None and guard_ws.default_agent else None)
+            or "claude_code",
             provider=None,
             model=model,
             status="pending",
@@ -968,6 +994,116 @@ async def get_run_logs(
         }
 
 
+# ── spike P1-3 新增 tool：daemon 在线性轻量查询（2026-09-10）───────────────────
+
+
+def _as_utc_or_none(dt: datetime | None) -> datetime | None:
+    """datetime 归一 UTC（SQLite 测试库丢 tzinfo 时补 UTC），None 透传。"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+@mcp.tool()
+async def get_daemon_status(
+    ctx: Context | None = None,
+) -> dict:
+    """查 token 绑定 workspace 的 daemon 在线状态（需要 read scope，轻量无副作用）。
+
+    spike P1-3（2026-09-10）：此前调用方只能真派发一次（worker 0.2s 失败 +
+    ``no_online_daemon``）才能发现没人认领。本 tool 提供派发前探查面——列
+    workspace 全部成员 daemon binding 及心跳/WS 连接状态，聚合 ``daemon_online``
+    回答「现在派发会不会有 daemon 认领」。
+
+    口径：
+
+    - ``daemon_online``：任一 binding 的 daemon 满足 ``status=='online'`` 且
+      心跳在 ``DEFAULT_RUNTIME_STALE_SECONDS``（45s，与 runtime 清扫阈值同源）
+      内且属主匹配 binding user（对齐 ``_workspace_status_entry`` / probe 端点
+      的「任一成员 binding」口径）。
+    - ``ws_connected``：backend 进程内 WS Hub 的**实时**连接态（派发侧
+      ``_runtime_row_ws_alive`` 双重校验同源）——DB status 在 WS 断后最长 45s
+      仍显示 online（假在线窗口），``ws_connected`` 才是「此刻能收任务」的最强
+      信号。两者都在才算真可派发。
+    - ``heartbeat_age_seconds``：最近心跳距今秒数（调用方据此自判新鲜度）。
+
+    返回 ``{workspace_id, daemon_online, daemon_name, stale_threshold_seconds,
+    daemons:[{daemon_id, daemon_name, user_id, shared, status, last_heartbeat_at,
+    heartbeat_age_seconds, ws_connected, online}]}``。无任何 binding →
+    ``daemon_online=False`` / ``daemons=[]``（此时派发必失败
+    ``no_online_daemon``）。``workspace_id`` 由 middleware 注入，不进 inputSchema。
+    """
+    auth = _auth_from_ctx(ctx)
+    require_mcp_scope(auth, MCP_SCOPE_READ)
+
+    from app.modules.daemon.model import DaemonInstance
+    from app.modules.daemon.runtime.service import DEFAULT_RUNTIME_STALE_SECONDS
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+    async with get_session_factory()() as session:
+        workspace = await session.get(Workspace, auth.workspace_id)
+        if workspace is None:
+            raise AppError(
+                "workspace not found",
+                code="MCP_404_WORKSPACE_NOT_FOUND",
+                http_status=404,
+                details={"workspace_id": str(auth.workspace_id)},
+            )
+        bindings = list(
+            (
+                await session.execute(
+                    select(WorkspaceMemberRuntime).where(
+                        WorkspaceMemberRuntime.workspace_id == auth.workspace_id,
+                        WorkspaceMemberRuntime.daemon_id.isnot(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        hub = get_daemon_ws_hub()
+        now = datetime.now(UTC)
+        entries: list[dict[str, object]] = []
+        for binding in bindings:
+            daemon = await session.get(DaemonInstance, binding.daemon_id)
+            if daemon is None:
+                continue
+            hb = _as_utc_or_none(daemon.last_heartbeat_at)
+            hb_age = max(0, int((now - hb).total_seconds())) if hb is not None else None
+            # 属主匹配 binding user（对齐 _workspace_status_entry 的 BE-P1-5 口径）。
+            online = bool(
+                daemon.status == "online"
+                and daemon.user_id == binding.user_id
+                and hb_age is not None
+                and hb_age <= DEFAULT_RUNTIME_STALE_SECONDS
+            )
+            entries.append(
+                {
+                    "daemon_id": str(daemon.id),
+                    "daemon_name": daemon.display_alias or daemon.hostname,
+                    "user_id": str(binding.user_id),
+                    "shared": bool(binding.shared),
+                    "status": daemon.status,
+                    "last_heartbeat_at": hb.isoformat() if hb is not None else None,
+                    "heartbeat_age_seconds": hb_age,
+                    "ws_connected": hub.is_connected(daemon.id),
+                    "online": online,
+                }
+            )
+        online_entries = [e for e in entries if e["online"]]
+        first_name = entries[0]["daemon_name"] if entries else None
+        return {
+            "workspace_id": str(auth.workspace_id),
+            "daemon_online": bool(online_entries),
+            "daemon_name": (online_entries[0]["daemon_name"] if online_entries else first_name),
+            "stale_threshold_seconds": DEFAULT_RUNTIME_STALE_SECONDS,
+            "daemons": entries,
+        }
+
+
 # ── 形态A change 阶层 tool（task-07/08/09/10，design §6.1 / §6.2）─────────────
 #
 # 4 个按需触发 change 阶层的 MCP tool，全部包装 ChangeService / dispatch 现有方法
@@ -1340,6 +1476,7 @@ __all__ = [
     "create_mission",
     "dispatch_worker",
     "get_change_stage",
+    "get_daemon_status",
     "get_run_logs",
     "get_worker_result",
     "list_agent_profiles",

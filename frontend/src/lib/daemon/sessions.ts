@@ -600,6 +600,12 @@ export function maxLogTimestamp(logs: AgentRunLogEntry[]): string | undefined {
  */
 export interface SessionRunRead {
   id: string;
+  /**
+   * quick（ql-20260910-011-3d92）：run 创建时刻（恒非空）——轮次定序锚点。
+   * 派发失败轮 started_at 永远为 null，轮次刻度排序以其兜底（见
+   * session-panel-page orderedRuns）。
+   */
+  created_at: string;
   /** quick（2026-09-02 本地会话信息折叠）：CLI 上报轮 platform-managed / 用户交互 interactive。 */
   spec_strategy?: string | null;
   status: string | null;

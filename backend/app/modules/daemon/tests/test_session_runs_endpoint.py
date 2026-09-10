@@ -540,8 +540,10 @@ class TestStreamRunErrorEvent:
     ) -> None:
         """ql-20260826-012：run 列表固定取最新 N 条（原无界全量）。
 
-        常量降到 5，种 8 个 run（started_at 递增）→ 只返回最新 5 个且按
-        started_at desc 排序（第一个是最新）。
+        常量降到 5，种 8 个 run（created_at 递增，显式设值防同批 default now()
+        同刻顺序不稳）→ 只返回最新 5 个且按 created_at desc 排序（第一个是最新）。
+        quick（ql-20260910-011-3d92）：排序键 started_at → created_at——派发
+        失败轮 started_at 为 NULL，PG DESC 默认 NULLS FIRST 会把它排首位。
         """
         from app.modules.daemon import router as daemon_router
 
@@ -566,6 +568,7 @@ class TestStreamRunErrorEvent:
                     status="completed",
                     agent_session_id=sid,
                     started_at=base + timedelta(seconds=i),
+                    created_at=base + timedelta(seconds=i),
                 )
             )
         await db_session.commit()
@@ -574,5 +577,89 @@ class TestStreamRunErrorEvent:
         assert resp.status_code == 200, resp.text
         items = resp.json()
         assert len(items) == 5
-        started = [it["started_at"] for it in items]
-        assert started == sorted(started, reverse=True), "按 started_at desc 排序"
+        created = [it["created_at"] for it in items]
+        assert created == sorted(created, reverse=True), "按 created_at desc 排序"
+
+    @pytest.mark.asyncio
+    async def test_runs_dispatch_failed_null_started_at_ordered_by_created_at(
+        self, client, auth_headers, db_session
+    ) -> None:
+        """quick（ql-20260910-011-3d92）：派发失败轮 started_at NULL 不再错位。
+
+        复刻线上会话 e3d7ddfa 形态：第 8 轮 daemon 离线 inject 发送失败收敛
+        failed（started_at 永远 NULL，control.py 只设 finished_at）。断言：
+        - 响应按 created_at desc，NULL started_at 轮按其创建位排序（不排首位、
+          不被 limit 截断语义甩出），created_at 字段透出（前端排序兜底数据源）；
+        - 派发失败轮保持 started_at=None（不造假启动时间）。
+        """
+        admin = await _admin_id(db_session)
+        sid = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=sid,
+                user_id=admin,
+                provider="claude",
+                status="active",
+            )
+        )
+        base = datetime.now(UTC) - timedelta(minutes=10)
+        run_ids: dict[int, uuid.UUID] = {}
+        for i in range(4):
+            run_ids[i] = uuid.uuid4()
+            at = base + timedelta(seconds=i)
+            db_session.add(
+                AgentRun(
+                    id=run_ids[i],
+                    agent_type="claude_code",
+                    status="completed",
+                    agent_session_id=sid,
+                    started_at=at,
+                    created_at=at,
+                )
+            )
+        # 第 3 位（0 基）之后插入派发失败轮：created_at 晚于它、早于第 4 轮。
+        dispatch_failed_id = uuid.uuid4()
+        failed_at = base + timedelta(seconds=3, milliseconds=500)
+        db_session.add(
+            AgentRun(
+                id=dispatch_failed_id,
+                agent_type="claude_code",
+                status="failed",
+                agent_session_id=sid,
+                started_at=None,
+                created_at=failed_at,
+                finished_at=failed_at,
+                error_code="interactive_inject_send_failed",
+            )
+        )
+        last_id = uuid.uuid4()
+        last_at = base + timedelta(seconds=4)
+        db_session.add(
+            AgentRun(
+                id=last_id,
+                agent_type="claude_code",
+                status="completed",
+                agent_session_id=sid,
+                started_at=last_at,
+                created_at=last_at,
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sid}/runs", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = resp.json()
+        assert len(items) == 6
+        # created_at desc：最新（last）在前，NULL started_at 的派发失败轮按创建位
+        # 排第 2（0 基），不是首位（NULLS FIRST 旧疾）也不是队尾。
+        assert [it["id"] for it in items] == [
+            str(last_id),
+            str(dispatch_failed_id),
+            str(run_ids[3]),
+            str(run_ids[2]),
+            str(run_ids[1]),
+            str(run_ids[0]),
+        ]
+        failed_item = items[1]
+        assert failed_item["started_at"] is None
+        assert failed_item["created_at"] is not None

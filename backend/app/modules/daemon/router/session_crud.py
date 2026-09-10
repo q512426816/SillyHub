@@ -458,7 +458,10 @@ async def get_session_detail(
                     AgentRun.agent_session_id == session_id,
                     AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
                 )
-                .order_by(AgentRun.started_at.desc())
+                # quick（ql-20260910-011-3d92）：与 list_session_runs 同款改
+                # created_at——pending 未认领 run 的 started_at 为 NULL，PG DESC
+                # 默认 NULLS FIRST，多活跃 run 并存时挑出的不是最新创建的那条。
+                .order_by(AgentRun.created_at.desc())
                 .limit(1)
             )
         )

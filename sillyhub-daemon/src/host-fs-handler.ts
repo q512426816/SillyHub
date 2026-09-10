@@ -78,6 +78,7 @@ import {
 } from './file-rpc.js';
 import { getAgentLogParser, type AgentLogMessagesResult } from './agent-log/registry.js';
 import { DEFAULT_MAX_CONTENT_BYTES } from './agent-log/parse-zcode-model-io.js';
+import { extractZcodeSessId, readZcodeSqliteMessages } from './agent-log/read-zcode-sqlite.js';
 
 // ── 类型定义（与 backend HostFsDelegate / design §7 三端对齐）─────────────────
 
@@ -1947,7 +1948,8 @@ export class HostFsHandler {
     };
   }
 
-  // ── read_agent_log_messages（task-02 / 2026-08-23-agent-log-conversation-view）──
+  // ── read_agent_log_messages（task-02 / 2026-08-23-agent-log-conversation-view
+  //    + task-03 / 2026-09-10-zcode-session-sqlite-read：zcode 先库后文件分派）──
 
   /**
    * `read_agent_log_messages(path, format, beforeSeq?) → { status, messages,
@@ -1966,9 +1968,14 @@ export class HostFsHandler {
    *     兜底）；超 20MB → `too_large`（lstat 预判，不读全文入内存）；其余
    *     parsed / parse_error 由解析器产出（task-01 契约）。
    *
-   * 处理顺序：白名单守卫（不论 format 注册与否都先过，安全铁律）→ 注册表分发
-   * （null → unsupported，避免无谓文件 IO）→ lstat 预判大小 → readFile utf8 全量
-   * 交解析器（透传 content + beforeSeq；解析器内部 20MB 预算为兜底，task-01 契约）。
+   * 处理顺序（task-03 / 2026-09-10-zcode-session-sqlite-read 起加 zcode 库分派）：
+   * 白名单守卫（不论 format 注册与否都先过，安全铁律——SQLite 分派不得绕过越界
+   * 检查，D-005@v1）→ zcode SQLite 分派（仅 format=zcode-model-io-jsonl 且文件名
+   * 可提取 sess id：先读本地库，成功原样回传不触文件 IO；读取器抛错原样落回文件
+   * 流程兜底——恒库 + 文件兜底，D-001@v1；claude/codex format 不进此分支，FR-04）
+   * → 注册表分发（null → unsupported，避免无谓文件 IO）→ lstat 预判大小 →
+   * readFile utf8 全量交解析器（透传 content + beforeSeq；解析器内部 20MB 预算
+   * 为兜底，task-01 契约）。
    */
   async readAgentLogMessages(
     path: string,
@@ -1978,6 +1985,30 @@ export class HostFsHandler {
     // 1. 白名单守卫（与 readFile 同款）：越界抛 forbidden RpcError。
     assertWithinAllowedRoots(path, this._rootsProvider());
     const abs = pathResolve(path);
+
+    // 1.5 zcode SQLite 先库后文件分派（task-03 /
+    //     2026-09-10-zcode-session-sqlite-read / FR-03 + D-001@v1 + D-005@v1）：
+    //     插在守卫之后、registry 之前——库数据源不得绕过越界检查（守卫先行
+    //     铁律），读取器也不经 registry 分派（注册表保持纯「文件内容解析」职责）。
+    //     文件名不可提取 sess id（非 zcode 命名）不进读取器，原样落回文件流程。
+    if (format === 'zcode-model-io-jsonl') {
+      const sessId = extractZcodeSessId(path);
+      if (sessId !== null) {
+        try {
+          // beforeSeq 透传读取器（null = 不切片，与文件解析器同语义）。
+          return await readZcodeSqliteMessages(sessId, beforeSeq ?? null);
+        } catch (error) {
+          // 仅吞 Error 家族（读取器三种抛错：不可用 / 会话不在库 / 查询异常），
+          // 原样落回下方现文件流程兜底（D-001@v1）；非 Error 契约外抛出不吞，
+          // 上抛走 internal 通道。回落打一条 debug 日志（事件名 + 错误摘要单行，
+          // 与 credential.ts console.debug 同风格，不刷屏）。
+          if (!(error instanceof Error)) throw error;
+          console.debug(
+            `agent_log: zcode_sqlite_fallback_to_file sess=${sessId} error=${error.message}`,
+          );
+        }
+      }
+    }
 
     // 2. 注册表分发：未注册 format → unsupported（不进解析器、不读文件；
     //    含二进制格式串透传到达时的 daemon 侧兜底，D-002）。
