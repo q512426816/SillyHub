@@ -335,10 +335,10 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | 表 | 用途 | 关键列 / 依据 |
 |---|---|---|
 | `agent_runs` | 单次 agent 执行（核心状态机表，列最多） | `status`(pending/running/completed/failed/killed) / `task_id`/`lease_id`/`change_id`/`mission_id`/`parent_run_id`(FK) / `agent_profile_id`+`agent_profile_snapshot`(快照) / `idempotency_key`(部分唯一) / `gate_status`/`gate_result`(Driver Gate) / token 用量+cost 列 / `read_only` / `worktree_branch` — `backend/app/modules/agent/model.py:48` |
-| `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:468` |
+| `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:477` |
 | `agent_sessions` | 交互式 SDK 驱动会话（跨多 run） | `agent_session_id`(SDK session) / `lease_id`(kind=interactive) / `change_id`/`workspace_id`(SET NULL) / `status` / `deleted_at`(软删) — `backend/app/modules/agent/model.py:371` |
 | `agent_missions` | 多 agent 委派聚合根（状态不落库，派生自子 run） | `objective` / `worker_preset`/`main_agent_config`(JSON) / `converged_at`(收敛守卫) — `backend/app/modules/agent/model.py:363` |
-| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1733,700` |
+| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1750,700` |
 | `daemon_borrow_audit` | 业务/管理人员借用开发人员 daemon 的审计行 | borrower/lender/workspace/agent_run 均 CASCADE；`daemon_instance_id` **RESTRICT**（审计红线） — `backend/app/modules/agent/model.py` |
 | `agent_profiles` | AgentProfile 配置层（人格+工具引用，增强非替代） | `visibility`(private/workspace/platform) / `llm_provider_id`(SET NULL) / `tool_policy_id`/`mcp_refs`/`skill_refs` / `allowed_roots_overlay`(只能收紧) / `is_system_default` — `backend/app/modules/agent/profile/model.py:59` |
 
@@ -475,7 +475,7 @@ Redis 缓存 `rbac.has_permission` 与 PPM `data_scope` 热路径。**三键分�
 | local.yaml | `.sillyspec/local.yaml` | daemon 本地配置（platform 段 + mcp 段） | 双独立段：`platform:` 同步 url+token / `mcp:` 派发 url+token |
 | knowledge / workflows / ROADMAP | `.sillyspec/knowledge/` `.sillyspec/workflows/` `.sillyspec/ROADMAP.md` | 知识库、流程模板、路线图 | 架构资产库 |
 
-**platform_sync 同步层**（把 SillySpec CLI 进度落库的缝合层）——3 端点（`backend/app/modules/platform_sync/router.py:45,89,100,120`），双鉴权：`shpsync_` token（workspace 隔离，`require_platform_sync` 派生 `(user,workspace_id)`）或 `shk_live_`/JWT（过渡全局）。核心算法 `PlatformSyncService.upsert_progress`（`backend/app/modules/platform_sync/service.py:21`）按跨仓契约 §4.2 的 **base_ts ISO 8601 UTC 字符串字典序**乐观锁冲突检测：
+**platform_sync 同步层**（把 SillySpec CLI 进度落库的缝合层）——3 端点（`backend/app/modules/platform_sync/router.py:52,89,100,120`），双鉴权：`shpsync_` token（workspace 隔离，`require_platform_sync` 派生 `(user,workspace_id)`）或 `shk_live_`/JWT（过渡全局）。核心算法 `PlatformSyncService.upsert_progress`（`backend/app/modules/platform_sync/service.py:21`）按跨仓契约 §4.2 的 **base_ts ISO 8601 UTC 字符串字典序**乐观锁冲突检测：
 
 - `base_ts` 空/缺失 → 无条件接受（首次同步）
 - `stored > base_ts`（字典序，不转 datetime）→ **409 冲突**，返回平台当前完整六表，**绝不 auto-merge**
@@ -811,7 +811,7 @@ SillyHub 是三进程异构栈：后端 Python（FastAPI）、前端 Node（Next
 |---|---|---|
 | 平台相关默认路径 | `sys.platform == "win32"` 三分支：`worktree_base_dir`（win32→`C:/data/sillyspec-workspaces`，else→`/data/...`）、`spec_data_root`、`spec_data_host_dir` | `backend/app/core/config.py:219,192-196,202-206` |
 | daemon 跨平台二进制 | pnpm `overrides` 把 `@anthropic-ai/claude-agent-sdk` 的 **6 个平台三元组**（win32/linux/darwin × x64/arm64，含 linux-x64-musl / linux-arm64-musl）统一解析到同一 SDK 版本 | `sillyhub-daemon/package.json:36-46` |
-| 容器内路径重写 | `host_path_prefix` ↔ `container_path_prefix` 把宿主机风格路径重写为容器挂载路径 | `backend/app/core/config.py:413`；compose 卷 `${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects`（`deploy/docker-compose.yml:90`） |
+| 容器内路径重写 | `host_path_prefix` ↔ `container_path_prefix` 把宿主机风格路径重写为容器挂载路径 | `backend/app/core/config.py:437`；compose 卷 `${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects`（`deploy/docker-compose.yml:90`） |
 | spec 目录宿主/容器共享 | bind mount 让宿主 daemon 与 backend 容器共享同一物理目录 | `deploy/docker-compose.yml:96` `${SPEC_DATA_HOST_DIR:-C:/data/spec-workspaces}:/data/spec-workspaces` |
 | 国内构建兼容 | Dockerfile 用 npmmirror（`backend/Dockerfile:16`）+ 清华 PyPI 镜像（`backend/Dockerfile:25-26`），规避海外网络抖动 |
 | Python 路径处理 | `pathlib.Path` + `resolve_spec_data_root`（`backend/app/core/config.py:281`）相对仓库根解析 |

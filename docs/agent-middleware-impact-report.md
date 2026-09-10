@@ -14,8 +14,8 @@
 | 术语 | 文件名:行 | 实际语义 |
 |---|---|---|
 | `AgentRun` | `backend/app/modules/agent/model.py:45` | 一次 AI 执行记录（如"某 workspace 某 task 下跑了一次 claude_code"） |
-| `AgentSession` | `backend/app/modules/agent/model.py:586` | 一个交互式会话（跨多个 AgentRun turn 的 1:N 容器） |
-| `AgentMission` | `backend/app/modules/agent/model.py:890` | 多 agent 协同的聚合根（多个 AgentRun 的父容器） |
+| `AgentSession` | `backend/app/modules/agent/model.py:595` | 一个交互式会话（跨多个 AgentRun turn 的 1:N 容器） |
+| `AgentMission` | `backend/app/modules/agent/model.py:899` | 多 agent 协同的聚合根（多个 AgentRun 的父容器） |
 | `agent_type` | `backend/app/modules/agent/model.py:103` | 执行器类型字符串（`"claude_code"`），本质是 adapter ID |
 | `provider` | `backend/app/modules/agent/model.py:85` | LLM 供应商字符串（`"claude"`, `"codex"`） |
 | `model` | `backend/app/modules/agent/model.py:89` | 模型名（如 `"claude-sonnet-4-20250514"`） |
@@ -180,8 +180,8 @@ CREATE INDEX ix_agent_profiles_workspace ON agent_profiles(workspace_id);
 | 表名 | 文件:行 | 当前字段 | 改动 |
 |---|---|---|---|
 | `agent_runs` | `backend/app/modules/agent/model.py:80` | `agent_type VARCHAR(30)`, `provider VARCHAR(64)`, `model VARCHAR(128)` | 新增 `agent_profile_id UUID FK→agent_profiles(id)`；保留旧字段兼容 |
-| `agent_sessions` | `backend/app/modules/agent/model.py:606` | `provider VARCHAR(30)` | 新增 `agent_profile_id UUID FK` |
-| `agent_missions` | `backend/app/modules/agent/model.py:694` | `main_agent_config JSON`, `worker_preset JSON` | worker_preset 条目新增 `agent_profile_id` 替代 inline agent_type |
+| `agent_sessions` | `backend/app/modules/agent/model.py:615` | `provider VARCHAR(30)` | 新增 `agent_profile_id UUID FK` |
+| `agent_missions` | `backend/app/modules/agent/model.py:708` | `main_agent_config JSON`, `worker_preset JSON` | worker_preset 条目新增 `agent_profile_id` 替代 inline agent_type |
 | `workspaces` | 需确认 | `default_agent VARCHAR`, `default_model VARCHAR` | 新增 `default_agent_profile_id UUID FK` |
 | `workspace_member_runtimes` | `backend/app/modules/agent/model.py:152` | 无 | 可选新增 `agent_profile_id`（成员级 agent 配置覆盖） |
 
@@ -412,7 +412,7 @@ frontend/src/lib/agent-profile.ts（新建）
 ### 7.2 中风险点
 
 4. **Mission worker_preset 和 AgentProfile 的关系**
-   - `backend/app/modules/agent/model.py:1689`：`worker_preset` 是 `list[dict]` JSON，每条含 `{agent_type, model, objective, role}`
+   - `backend/app/modules/agent/model.py:1706`：`worker_preset` 是 `list[dict]` JSON，每条含 `{agent_type, model, objective, role}`
    - 如果 agent_type 改为 agent_profile_id，前端必须保证 profile 存在
    - 建议：worker_preset 新增 `agent_profile_id` 可选字段，fallback 到 inline agent_type
 
