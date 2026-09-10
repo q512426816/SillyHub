@@ -169,13 +169,20 @@ class McpRegistryService:
         cipher: CredentialCipher | None = None,
     ) -> None:
         self._session = session
-        self._cipher = cipher or self._default_cipher()
+        # verify NOTES ②②（ql-20260910-014）：懒初始化——cipher 只在真正加解密时
+        # 才需要（纯读路径 list/detail 不碰密文），饿汉式会把纯读路径也扣死在
+        # master key 配置上（畸形 key 时列表直接 503，集成实测发现）。显式注入
+        # cipher 的测试路径不受影响。
+        self._cipher = cipher
 
-    @staticmethod
-    def _default_cipher() -> CredentialCipher:
-        from app.core.crypto import get_cipher
+    @property
+    def cipher(self) -> CredentialCipher:
+        """首次使用时解析默认 cipher（get_cipher 抛 MasterKeyMissing 留给写/解密路径）。"""
+        if self._cipher is None:
+            from app.core.crypto import get_cipher
 
-        return get_cipher()
+            self._cipher = get_cipher()
+        return self._cipher
 
     # ── 查询 ──────────────────────────────────────────────────────────
 
@@ -425,7 +432,7 @@ class McpRegistryService:
             env.update(cfg_env)
         for key, envelope in (server.encrypted_env or {}).items():
             entry = McpEnvCiphertext.model_validate(envelope)
-            plaintext = self._cipher.decrypt(base64.b64decode(entry.ct), entry.key_id)
+            plaintext = self.cipher.decrypt(base64.b64decode(entry.ct), entry.key_id)
             env[key] = plaintext
         return env
 
@@ -435,7 +442,7 @@ class McpRegistryService:
             return None
         encrypted: dict[str, dict[str, str]] = {}
         for key, value in secret_env.items():
-            ciphertext, key_id = self._cipher.encrypt(str(value))
+            ciphertext, key_id = self.cipher.encrypt(str(value))
             encrypted[key] = McpEnvCiphertext.of(ciphertext, key_id).model_dump()
         return encrypted
 

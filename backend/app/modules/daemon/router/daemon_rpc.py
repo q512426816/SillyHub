@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal
+from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.router import SessionDep, router
@@ -42,6 +43,8 @@ from app.modules.daemon.service import (
     DaemonRuntimeOffline,
     DaemonService,
 )
+
+log = get_logger(__name__)
 
 
 @router.post(
@@ -594,6 +597,15 @@ async def get_daemon_mcp_config(
     try:
         platform_default = await render_injection_set(session, user_id)
     except Exception as exc:
+        # verify NOTES ③（ql-20260910-014）：异常细节只进 HTTPException from 链
+        # （结构化日志缺位——排障只能复现），补 warn 落盘（错误类名+摘要，不泄密文）。
+        log.warning(
+            "daemon_mcp_render_failed",
+            error_type=type(exc).__name__,
+            error=str(exc)[:200],
+            user_id=str(user_id) if user_id is not None else None,
+            workspace_id=str(workspace_id) if workspace_id is not None else None,
+        )
         raise HTTPException(status_code=503, detail="MCP 注入集渲染暂不可用，请稍后重试。") from exc
 
     # whitelist 读取不动（D-007 白名单留 settings）；脏数据归一为 []。
