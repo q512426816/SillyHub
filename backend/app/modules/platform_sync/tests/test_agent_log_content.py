@@ -12,6 +12,11 @@
 - daemon 错误映射：forbidden → 409 中文（含 allowed_roots 指引）；
   not_found → 404 中文；离线 → 既有 DaemonRuntimeOffline（504）；RPC 超时 →
   既有 DaemonRpcTimeout（504）。
+- zcode 分支（2026-09-10-zcode-session-sqlite-read task-04，design Phase 3）：
+  format=zcode-model-io-jsonl + messages RPC parsed → 伪 jsonl 九字段合成全量
+  返回（不截断，D-002@v1/D-007@v1）；messages 抛错（not_found/method_not_found/
+  离线/超时）或 status 非 parsed → 回落 read_file（256KB 尾部截断语义不变）；
+  claude format 首跳即 read_file 不进新分支。
 
 RPC 层 mock：patch ``app.modules.daemon.host_fs.ws_rpc.send_host_fs_rpc``（端点
 函数级 import，调用时解析 → patch 源模块生效）。夹具范式照
@@ -20,6 +25,7 @@ RPC 层 mock：patch ``app.modules.daemon.host_fs.ws_rpc.send_host_fs_rpc``（�
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -48,6 +54,7 @@ async def _make_entry(
     ws_id: uuid.UUID,
     *,
     fmt: str | None = "claude-code-transcript-jsonl",
+    harness: str = "claude-code",
     agent_session_id: uuid.UUID | None = None,
     log_path: str = "C:/Users/x/.claude/projects/p/abc.jsonl",
 ) -> AgentSessionLogORM:
@@ -55,7 +62,7 @@ async def _make_entry(
         id=uuid.uuid4(),
         workspace_id=ws_id,
         log_path=log_path,
-        harness="claude-code",
+        harness=harness,
         format=fmt,
         exists=True,
         agent_session_id=agent_session_id,
@@ -531,3 +538,312 @@ class TestDaemonErrorMapping:
 
         assert resp.status_code == 504, resp.text
         assert resp.json()["code"] == "HTTP_504_DAEMON_RPC_TIMEOUT"
+
+
+# ── 6. zcode 分支：messages RPC 合成伪 jsonl / 失败回落 / claude 直走 ────────
+# （2026-09-10-zcode-session-sqlite-read task-04，design Phase 3，D-001/D-002/D-007）
+
+
+#: 伪 jsonl 固定九字段键序（D-007@v1 封闭列举，断言用）。
+_NINE_FIELDS = [
+    "seq",
+    "kind",
+    "text",
+    "tool_name",
+    "tool_use_id",
+    "tool_input",
+    "tool_result",
+    "is_error",
+    "ts",
+]
+
+#: zcode parsed 形状样例（messages 内层与 NormalizedLogMessage 逐字对齐，design
+#: §7.1）：首条 text 带换行 → 断言 JSON 转义保持单行；末条故意缺字段 → 断言
+#: 缺省键按 null 原样输出（.get 兜底，不 KeyError 不补省略号）。
+_ZCODE_PARSED_MESSAGES: list[dict[str, Any]] = [
+    {
+        "seq": 1,
+        "kind": "user_input",
+        "text": "帮我修个 bug\n第二行",
+        "tool_name": None,
+        "tool_use_id": None,
+        "tool_input": None,
+        "tool_result": None,
+        "is_error": None,
+        "ts": "2026-09-10T10:00:00.000Z",
+    },
+    {
+        "seq": 2,
+        "kind": "tool_use",
+        "text": None,
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_01",
+        "tool_input": '{"command": "ls"}',
+        "tool_result": None,
+        "is_error": None,
+        "ts": "2026-09-10T10:00:01.000Z",
+    },
+    {
+        "seq": 3,
+        "kind": "tool_result",
+        "text": None,
+        "tool_name": None,
+        "tool_use_id": "toolu_01",
+        "tool_input": None,
+        "tool_result": "a.py\nb.py",
+        "is_error": False,
+        "ts": "2026-09-10T10:00:02.000Z",
+    },
+    # 契约外缺字段条目（防御样例）。
+    {"seq": 4, "kind": "user_input", "ts": "2026-09-10T10:00:03.000Z"},
+]
+
+
+async def _make_zcode_entry(
+    db_session: AsyncSession,
+    ws_id: uuid.UUID,
+) -> AgentSessionLogORM:
+    """建一个绑定 runtime 会话的 zcode format entry（daemon 定位走优先路径）。"""
+    uid = uuid.uuid4()
+    _inst, rt_id = await _make_instance_and_runtime(db_session, uid)
+    sess = await _make_session(db_session, uid, rt_id, ws_id)
+    return await _make_entry(
+        db_session,
+        ws_id,
+        fmt="zcode-model-io-jsonl",
+        harness="zcode",
+        agent_session_id=sess.id,
+        log_path="C:/Users/x/.zcode/model-io/abc.jsonl",
+    )
+
+
+class TestZcodeParsedSynthesis:
+    """zcode + messages RPC status=parsed → 伪 jsonl 合成全量返回（不截断）。"""
+
+    @pytest.mark.asyncio
+    async def test_parsed_synthesizes_nine_field_jsonl_lines(
+        self,
+        client: AsyncClient,
+        shpsync_headers: tuple[Any, dict[str, str]],
+        db_session: AsyncSession,
+    ) -> None:
+        """逐行 JSON：行数=len(messages)、每行 loads 回九字段固定键序封闭（无
+        多余字段）、null 原样、换行转义单行；truncated 透传 RPC 窗口语义、
+        size_bytes=合成文本字节数；首跳唯一一跳 read_agent_log_messages
+        （args 与 messages 端点同构，不带 beforeSeq）。"""
+        ws_id, headers = shpsync_headers
+        entry = await _make_zcode_entry(db_session, ws_id)
+
+        parsed = {
+            "status": "parsed",
+            "messages": _ZCODE_PARSED_MESSAGES,
+            "truncated": True,
+            "totalSegments": 9,
+            "skippedLines": 0,
+        }
+        rpc = _rpc_mock(parsed)
+        with patch(_RPC, rpc):
+            resp = await client.get(f"/api/agent-logs/{entry.id}/content", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert rpc.await_count == 1  # 单跳，不发 read_file
+        assert rpc.await_args.args[2] == "read_agent_log_messages"
+        assert rpc.await_args.args[4] == {
+            "path": entry.log_path,
+            "format": "zcode-model-io-jsonl",
+        }
+        lines = body["content"].split("\n")
+        assert len(lines) == len(_ZCODE_PARSED_MESSAGES)  # 换行被转义 → 不多行
+        for line in lines:
+            obj = json.loads(line)
+            assert list(obj.keys()) == _NINE_FIELDS  # 固定键序封闭
+        first = json.loads(lines[0])
+        assert (first["seq"], first["kind"]) == (1, "user_input")
+        assert first["text"] == "帮我修个 bug\n第二行"  # 换行回解还原
+        assert "\\n" in lines[0]  # 行内是转义序列（单行保证）
+        second = json.loads(lines[1])
+        assert second["tool_name"] == "Bash"
+        assert second["tool_input"] == '{"command": "ls"}'
+        third = json.loads(lines[2])
+        assert third["tool_result"] == "a.py\nb.py"
+        assert third["is_error"] is False
+        fourth = json.loads(lines[3])
+        assert fourth["text"] is None and fourth["tool_use_id"] is None  # 缺键→null
+        # truncated 透传 RPC 窗口语义（此处远小于 256KB，非尺寸判定）。
+        assert body["truncated"] is True
+        assert body["size_bytes"] == len(body["content"].encode("utf-8"))
+
+    @pytest.mark.asyncio
+    async def test_parsed_large_payload_not_truncated(
+        self,
+        client: AsyncClient,
+        shpsync_headers: tuple[Any, dict[str, str]],
+        db_session: AsyncSession,
+    ) -> None:
+        """合成文本超 262144 字节也不截断（D-002@v1：按会话查询天然有界，
+        窗口即上界；256KB 截断仅 read_file 回落路径保留）。"""
+        ws_id, headers = shpsync_headers
+        entry = await _make_zcode_entry(db_session, ws_id)
+
+        big_text = "汉" * 100_000  # 单条合成行 ~300KB UTF-8
+        parsed = {
+            "status": "parsed",
+            "messages": [
+                {
+                    "seq": 1,
+                    "kind": "user_input",
+                    "text": big_text,
+                    "tool_name": None,
+                    "tool_use_id": None,
+                    "tool_input": None,
+                    "tool_result": None,
+                    "is_error": None,
+                    "ts": "2026-09-10T10:00:00.000Z",
+                }
+            ],
+            "truncated": False,
+            "totalSegments": 1,
+            "skippedLines": 0,
+        }
+        with patch(_RPC, _rpc_mock(parsed)):
+            resp = await client.get(f"/api/agent-logs/{entry.id}/content", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["size_bytes"] == len(body["content"].encode("utf-8"))
+        assert body["size_bytes"] > 262_144  # 超限仍全量返回
+        assert body["truncated"] is False  # 透传 RPC 窗口语义，非尺寸判定
+        assert json.loads(body["content"])["text"] == big_text  # 全量无截断
+
+
+class TestZcodeMessagesFallback:
+    """zcode + messages RPC 抛错或 status 非 parsed → 回落 read_file 原路径
+    （256KB 尾部截断语义一字不改）；read_file 自身失败按现状语义冒出。"""
+
+    @staticmethod
+    def _first_hop(kind: str) -> Any:
+        """构造首跳结果：异常实例（抛错族）或非 parsed 状态响应（降级族）。"""
+        from app.modules.daemon.runtime.service import (
+            DaemonRpcRemoteError,
+            DaemonRpcTimeout,
+            DaemonRuntimeOffline,
+        )
+
+        if kind == "not_found":
+            return DaemonRpcRemoteError({"code": "not_found", "message": "ENOENT"})
+        if kind == "method_not_found":
+            return DaemonRpcRemoteError({"code": "method_not_found", "message": "old daemon"})
+        if kind == "offline":
+            return DaemonRuntimeOffline("daemon offline", details={"daemon_id": str(uuid.uuid4())})
+        if kind == "timeout":
+            return DaemonRpcTimeout("rpc timeout")
+        # unsupported / parse_error / too_large（D-007@v1 捕获范围 + 三降级状态）。
+        return {
+            "status": kind,
+            "messages": [],
+            "truncated": False,
+            "totalSegments": 0,
+            "skippedLines": 0,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "not_found",
+            "method_not_found",
+            "offline",
+            "timeout",
+            "unsupported",
+            "parse_error",
+            "too_large",
+        ],
+    )
+    async def test_fallback_to_read_file_tail_truncation_intact(
+        self,
+        client: AsyncClient,
+        shpsync_headers: tuple[Any, dict[str, str]],
+        db_session: AsyncSession,
+        kind: str,
+    ) -> None:
+        """首跳失败（抛错/非 parsed，AppError 家族吞掉不透传）→ 第二跳
+        read_file {path}，走原尾部 262144 截断（300008 字节大文件断言不变）。"""
+        ws_id, headers = shpsync_headers
+        entry = await _make_zcode_entry(db_session, ws_id)
+
+        big = "y" * 300_000 + "fallback-tail"
+        rpc = AsyncMock(side_effect=[self._first_hop(kind), {"content": big}])
+        with patch(_RPC, rpc):
+            resp = await client.get(f"/api/agent-logs/{entry.id}/content", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert len(rpc.await_args_list) == 2  # 恰两跳
+        assert rpc.await_args_list[0].args[2] == "read_agent_log_messages"
+        assert rpc.await_args_list[0].args[4] == {
+            "path": entry.log_path,
+            "format": "zcode-model-io-jsonl",
+        }
+        assert rpc.await_args_list[1].args[2] == "read_file"
+        assert rpc.await_args_list[1].args[4] == {"path": entry.log_path}
+        # 原截断语义一字不改：truncated=True、size_bytes=总长、content=尾部切片。
+        assert body["truncated"] is True
+        assert body["size_bytes"] == len(big.encode("utf-8"))  # 300012
+        assert body["content"] == big[-262144:]
+        assert body["content"].endswith("fallback-tail")
+
+    @pytest.mark.asyncio
+    async def test_double_failure_reraises_read_file_error(
+        self,
+        client: AsyncClient,
+        shpsync_headers: tuple[Any, dict[str, str]],
+        db_session: AsyncSession,
+    ) -> None:
+        """双失败：回落 read_file 自身也抛 not_found → 按现状 404 语义冒出
+        （首跳 messages 的 AppError 被吞，末跳错误才是对外语义）。"""
+        from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+        ws_id, headers = shpsync_headers
+        entry = await _make_zcode_entry(db_session, ws_id)
+
+        enoent = DaemonRpcRemoteError({"code": "not_found", "message": "ENOENT"})
+        rpc = AsyncMock(side_effect=[enoent, enoent])
+        with patch(_RPC, rpc):
+            resp = await client.get(f"/api/agent-logs/{entry.id}/content", headers=headers)
+
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "HTTP_404_AGENT_LOG_FILE_NOT_FOUND"
+
+
+class TestClaudeFormatSkipsZcodeBranch:
+    """claude format 不进 zcode 分支：首跳即 read_file，零改动。"""
+
+    @pytest.mark.asyncio
+    async def test_claude_format_first_hop_is_read_file(
+        self,
+        client: AsyncClient,
+        shpsync_headers: tuple[Any, dict[str, str]],
+        db_session: AsyncSession,
+    ) -> None:
+        """默认 claude format：单跳 read_file（不发 read_agent_log_messages），
+        响应走既有透传。"""
+        ws_id, headers = shpsync_headers
+        uid = uuid.uuid4()
+        _inst, rt_id = await _make_instance_and_runtime(db_session, uid)
+        sess = await _make_session(db_session, uid, rt_id, ws_id)
+        entry = await _make_entry(db_session, ws_id, agent_session_id=sess.id)
+
+        rpc = _rpc_mock({"content": "claude raw jsonl"})
+        with patch(_RPC, rpc):
+            resp = await client.get(f"/api/agent-logs/{entry.id}/content", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {
+            "content": "claude raw jsonl",
+            "truncated": False,
+            "size_bytes": 16,
+        }
+        assert rpc.await_count == 1  # 单跳
+        assert rpc.await_args.args[2] == "read_file"
+        assert rpc.await_args.args[4] == {"path": entry.log_path}

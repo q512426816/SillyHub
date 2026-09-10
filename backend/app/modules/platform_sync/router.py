@@ -14,7 +14,9 @@
   task-02，协议 docs/platform-agent-log-protocol.md §1，仅 shpsync_）
 - GET /agent-logs：agent 会话日志列表（读 scope 过滤 + last_seen_at 倒序，同上 task-02）
 - GET /agent-logs/{entry_id}/content：单条日志原文尾部查看（2026-08-23-agent-activity-sessions
-  task-05；读取前置/错误映射自 agent-log-conversation-view task-03 起抽共享 helper）
+  task-05；读取前置/错误映射自 agent-log-conversation-view task-03 起抽共享 helper；
+  zcode format 先 messages RPC 合成伪 jsonl、失败回落 read_file——2026-09-10-zcode-session-
+  sqlite-read task-04，design Phase 3）
 - GET /agent-logs/{entry_id}/messages：单条日志对话化归一化消息（2026-08-23-agent-log-
   conversation-view task-03，design §7.2；status 四值一律 200 分层、老 daemon 422）
 
@@ -35,6 +37,7 @@ workspace 并集 + NULL 桶聚合（service ``allowed_workspace_ids`` 参数）�
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -567,6 +570,25 @@ _AGENT_LOG_BINARY_FORMAT_TOKENS: frozenset[str] = frozenset({"sqlite", "zstd"})
 #: （256 KiB，最新内容在尾部）；回解 ``errors="ignore"`` 防多字节字符被切。
 _AGENT_LOG_CONTENT_MAX_BYTES = 262144
 
+#: zcode model-io 日志 format 键（2026-09-10-zcode-session-sqlite-read task-04，
+#: design Phase 3 / D-001@v1）：content 端点 zcode 分支判定键，取小写与上方
+#: 黑名单 fmt 口径一致（daemon 侧 SQLite 读取器同串分派）。
+_AGENT_LOG_ZCODE_FORMAT = "zcode-model-io-jsonl"
+
+#: 伪 jsonl 固定九字段键序（D-007@v1 封闭列举）：与 NormalizedLogMessage
+#: 逐字对齐，键序固定、缺省键输出 null 原样，不加省略号/额外字段。
+_AGENT_LOG_MESSAGE_FIELDS: tuple[str, ...] = (
+    "seq",
+    "kind",
+    "text",
+    "tool_name",
+    "tool_use_id",
+    "tool_input",
+    "tool_result",
+    "is_error",
+    "ts",
+)
+
 
 async def _resolve_agent_log_read_target(
     session: AsyncSession,
@@ -721,6 +743,24 @@ async def _send_agent_log_rpc(
         ) from exc
 
 
+def _synthesize_pseudo_jsonl(messages: list[dict[str, Any]]) -> str:
+    """归一化 messages → 伪 jsonl 文本（纯函数，D-007@v1 / design Phase 3）。
+
+    每条消息一行 JSON：九字段固定键序（``_AGENT_LOG_MESSAGE_FIELDS``）封闭
+    列举，值取自归一化条目（缺省键输出 null 原样，不加省略号/额外字段）；文本
+    含换行由 ``json.dumps`` 转义为 ``\\n`` 保证每条一行。``\\n`` 连接全量序列化，
+    **不做 256KB 截断**（D-002@v1：按会话查询天然有界，对话窗口即上界；截断
+    仅 read_file 回落路径保留）。
+    """
+    return "\n".join(
+        json.dumps(
+            {field: message.get(field) for field in _AGENT_LOG_MESSAGE_FIELDS},
+            ensure_ascii=False,
+        )
+        for message in messages
+    )
+
+
 @router.get("/agent-logs/{entry_id}/content", response_model=AgentLogContentResponse)
 async def read_agent_log_content(
     entry_id: uuid.UUID,
@@ -739,19 +779,58 @@ async def read_agent_log_content(
     1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
     2. 定位 daemon_id：会话 runtime→daemon_instance 优先；workspace 绑定回落；
        都无 → 404 中文。
-    3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
+    3. zcode 分支（2026-09-10-zcode-session-sqlite-read task-04，design Phase 3
+       / D-001@v1）：format=zcode-model-io-jsonl 先发 ``read_agent_log_messages``
+       RPC（args 与 messages 端点同构、不带 beforeSeq 取最新窗口），status=
+       parsed → messages 合成伪 jsonl 全量返回不截断（D-002@v1/D-007@v1，
+       ``truncated`` 透传 RPC 窗口语义）；status 非 parsed 或该跳 RPC 抛错
+       （含 not_found/method_not_found 老 daemon/离线/超时，捕获吞掉不透传）→
+       回落 4 的 read_file 文件灾备。
+    4. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
        409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
        错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
        既有 ``DaemonRpcTimeout``（504）。
-    4. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
+    5. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
        ``{content, truncated, size_bytes}``。
     """
     _user, scope = auth
     entry, daemon_id = await _resolve_agent_log_read_target(session, entry_id, scope)
+
+    # ── 3. zcode 分支：原文视图同样恒读 SQLite（短命 rollout 文件只是灾备）──
+    # 小写判定与黑名单 fmt 口径一致；claude/codex 及其它 format 零改动直走 4。
+    if (entry.format or "").lower() == _AGENT_LOG_ZCODE_FORMAT:
+        try:
+            messages_result = await _send_agent_log_rpc(
+                entry,
+                daemon_id,
+                "read_agent_log_messages",
+                {"path": entry.log_path, "format": entry.format or ""},
+                unsupported_on_method_not_found=True,
+            )
+        except Exception:
+            # messages RPC 抛错（not_found 404 / method_not_found 422 老 daemon /
+            # 离线·超时等全部 AppError 与远端错，D-007@v1 捕获范围）→ 回落下方
+            # read_file 文件灾备；回落优先，此跳错误吞掉不透传（离线/超时双跳
+            # 延迟可接受，design Phase 3）。
+            messages_result = None
+        if isinstance(messages_result, dict) and messages_result.get("status") == "parsed":
+            # 伪 jsonl 合成不截断（D-002@v1）；truncated 透传 messages RPC 的
+            # 窗口截断语义（≠文件尾 256KB 截断，design「数据流」节），size_bytes
+            # 同步为合成文本字节数。
+            synthesized = _synthesize_pseudo_jsonl(messages_result.get("messages") or [])
+            return AgentLogContentResponse(
+                content=synthesized,
+                truncated=bool(messages_result.get("truncated", False)),
+                size_bytes=len(synthesized.encode("utf-8")),
+            )
+        # status ∈ unsupported/parse_error/too_large（库+文件双失败后的降级）或
+        # 上方抛错 → 落到既有 read_file 路径（D-001@v1 文件灾备）。
+
+    # ── 4. 既有 read_file 主路径（零改动；zcode 回落也走这里）。──
     result = await _send_agent_log_rpc(entry, daemon_id, "read_file", {"path": entry.log_path})
 
     content = str(result.get("content", "")) if isinstance(result, dict) else ""
-    # ── 4. 尾部 262144 字节截断（多字节字符被切由 errors=ignore 吞掉）。──
+    # ── 5. 尾部 262144 字节截断（多字节字符被切由 errors=ignore 吞掉）。──
     raw = content.encode("utf-8")
     size_bytes = len(raw)
     truncated = size_bytes > _AGENT_LOG_CONTENT_MAX_BYTES
