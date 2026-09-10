@@ -60060,6 +60060,11 @@
             "format": "uuid",
             "title": "Id"
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
           "metadata": {
             "anyOf": [
               {
@@ -60240,6 +60245,7 @@
         "type": "object",
         "required": [
           "id",
+          "created_at",
           "status"
         ],
         "title": "SessionRunRead",

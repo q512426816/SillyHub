@@ -1866,6 +1866,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
   function makeRun(overrides: Partial<SessionRunRead> = {}): SessionRunRead {
     return {
       id: "r-1",
+      created_at: "2026-08-15T08:00:00Z",
       spec_strategy: null,
       status: "completed",
       error_code: null,
@@ -1955,6 +1956,54 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     expect(beforeCallCount()).toBe(0);
     expect(mocks.notifyWarning).not.toHaveBeenCalled();
     expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
+
+  it("desktop 派发失败轮 started_at 空不落队尾：按 created_at 回真实轮位（ql-20260910-011）", async () => {
+    // 复刻线上会话 e3d7ddfa 形态：第 2 轮 daemon 离线 inject 发送失败即收敛
+    // failed，started_at 永远为空（run_sync 首事件才写 started_at）；修复前
+    // orderedRuns 把空值轮甩到队尾，第 2~4 轮轮号全体错位。
+    mocks.listSessionRuns.mockResolvedValue([
+      makeRun({
+        id: "r-1",
+        started_at: "2026-08-15T06:00:00Z",
+        created_at: "2026-08-15T06:00:00Z",
+      }),
+      makeRun({
+        id: "r-dispatch",
+        status: "failed",
+        started_at: null,
+        created_at: "2026-08-15T06:30:00Z",
+      }),
+      makeRun({
+        id: "r-2",
+        started_at: "2026-08-15T07:00:00Z",
+        created_at: "2026-08-15T07:00:00Z",
+      }),
+      makeRun({
+        id: "r-cur",
+        started_at: "2026-08-15T08:00:00Z",
+        created_at: "2026-08-15T08:00:00Z",
+      }),
+    ]);
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      navLog("j-1", "r-cur", "user_input", "当前窗口提问", "2026-08-15T08:00:00Z"),
+      navLog("j-2", "r-cur", "stdout", "答复正文", "2026-08-15T08:00:05Z"),
+    ]);
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("当前窗口提问")).toBeTruthy();
+
+    // 派发失败轮按 created_at 排第 2 位（failed 无孤儿补建 → 未加载），
+    // 其后两轮顺位不后移（修复前：失败轮第 4、r-2 第 3、r-cur 第 2 前移）。
+    expect(
+      await screen.findByRole("button", { name: /^第2轮 · 失败 · 未加载$/ }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /^第3轮 · 完成/ }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /^第4轮 · 完成/ }),
+    ).toBeTruthy();
   });
 
   it("desktop 未加载轮循环翻页：连续 loadEarlier 到命中即停（两页即止、不误报兜底 toast）", async () => {

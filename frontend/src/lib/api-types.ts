@@ -21040,6 +21040,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
