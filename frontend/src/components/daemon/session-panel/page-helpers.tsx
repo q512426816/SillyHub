@@ -54,11 +54,16 @@ export const PANEL_ROOT_CLS_DESKTOP =
 export const PANEL_ROOT_CLS_MOBILE =
   "flex h-full min-h-0 w-full flex-col overflow-hidden bg-card/80 backdrop-blur-xl";
 
-/** 面板头（两渲染点共用）。task-07：玻璃头（半透 + blur，滚动内容从下方穿过）。 */
+/** 面板头（两渲染点共用）。task-07：玻璃头（半透 + blur，滚动内容从下方穿过）。
+ *  ql-20260910-006：backdrop-blur 使头部自成层叠上下文，头部内下拉弹层（后台/
+ *  子代理目录、搜索、mobile ⋯ 菜单，均 absolute z-30）的 z 值被困在头部之内，
+ *  被树序在后的消息流 relative 外包层（turn-timeline 滚动区，bg-background）
+ *  整体盖住——头部 relative z-20 抬到消息流之上（流内最高 z-10，弹层恢复可见；
+ *  流内更高 z 的悬浮件不受影响，仍按各自 z 值参与根上下文比较）。 */
 export const PANEL_HEADER_CLS_DESKTOP =
-  "flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/60 px-4 py-2 backdrop-blur-md";
+  "relative z-20 flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/60 px-4 py-2 backdrop-blur-md";
 export const PANEL_HEADER_CLS_MOBILE =
-  "flex shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-md";
+  "relative z-20 flex shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-md";
 
 /**
  * mobile 会话主体外包层：TurnTimeline / AgentLogSessionBody 自带纵向滚动容器
