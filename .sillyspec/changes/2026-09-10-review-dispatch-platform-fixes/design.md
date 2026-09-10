@@ -3,6 +3,7 @@ author: qinyi
 created_at: 2026-09-10 19:30:00
 updated_at: 2026-09-10 19:30:00
 scale: large
+risk_level: unit-sufficient
 ---
 
 # 设计文档（Design）— review-dispatch 平台侧三问题修复（worker artifacts 承接 / pi 独立配额池 / 生效执行器暴露）
@@ -121,18 +122,21 @@ pi 子进程 stdout（message_end assistant 全文）
 |---|---|---|
 | 修改 | sillyhub-daemon/src/interactive/pi-rpc-driver.ts | 轮状态区新增 turnFinalText（与 pendingTurnError 同点重置）；事件循环截获 `type=text && override` 存值；success turn result 补 `result` 字段。数据流：producer=pi message_end（pi-events 归一化 override 全文）→ driver turnFinalText → consumer=reportTurnResult result 字段（下游 result_summary/workerDone summary 两跳消费） |
 | 修改 | sillyhub-daemon/src/hub-client.ts | `workerDone` 增加第 4 参 `opts?: { sessionId?: string }`：sessionId 存在时合并 X-Session-Id 头（与 `_sessionIdHeaders()` 同 key，覆盖实例级）。数据流：producer=daemon.onTurnResult → 本方法 extraHeaders → consumer=backend `_request_session_id`（header 优先） |
+| 新增 | NEW:sillyhub-daemon/tests/hub-client-worker-done-session.test.ts | workerDone sessionId 覆盖参数单测（覆盖/不覆盖/空串守卫三态） |
 | 修改 | sillyhub-daemon/src/daemon.ts | `onTurnResult` 新增 mission_worker 兜底代报分支（门控 stage + caps.mcp===false + 非 error + result 文本非空）；fire-and-forget + catch warn。数据流：producer=driver result → consumer=backend worker_done 端点（AgentArtifact kind=summary + worker_done_at + 唤醒） |
 | 修改 | sillyhub-daemon/src/credential-injector.ts | 新增 `PiCredentialInjector`（agentKind='pi'，映射见 §5.2）+ REGISTRY 注册。数据流：producer=backend claim payload provider_config（agent_kind=pi）→ spawn-env 第 0 层 `getInjector('pi')` 命中 → consumer=pi 子进程 env（如 ZAI_API_KEY） |
 | 修改 | backend/app/modules/llm_provider/schema.py | `agent_kind` 放开 pi；`auth_field` 三处（Create/Update/FetchModels）泛化为 env 名 pattern。数据流：producer=前端表单/API 调用方 → pydantic 校验 → consumer=LlmProvider 行（列本为 String(32) 无需 DDL）→ claim 解析链既有消费 |
 | 修改 | backend/app/modules/mcp_gateway/tools.py | `get_daemon_status` 响应增 `default_agent`/`effective_agent`/`daemons[].providers`。数据流：producer=Workspace.default_agent + DaemonRuntime 行 → 本 tool 聚合 → consumer=MCP 调用方（review-dispatch 派发前探查） |
 | 修改 | frontend/src/components/llm-providers/llm-provider-form.tsx | agentKind state 可变 + 启用 pi 选项；pi 时 auth_field 输入泛化（datalist/输入框 + pattern 校验）。数据流：producer=用户表单 → consumer=LlmProviderCreate（api-types 再生成后类型同步） |
+| 修改 | frontend/src/lib/api/llm-providers.ts | 手写别名放宽（LlmProviderAgentKind +pi、LlmProviderAuthField → string）+ formToCreate 撤硬编码 `agent_kind:"claude"` 改透传 `v.agent_kind`（execute 期发现：lib 组装层吞 pi，task-07 验收「表单可建 pi 凭证」端到端依赖此点）。数据流：producer=表单 values.agent_kind → formToCreate → consumer=POST /api/llm-providers（backend task-04 已放开） |
 | 再生成 | backend/openapi.json | schema 枚举/pattern 变更同步（生成脚本，禁手写） |
 | 再生成 | frontend/src/lib/api-types.ts | `pnpm gen:types`（CLAUDE.md 规则 21） |
 | 再生成 | sillyhub-daemon/src/api-types.ts | `pnpm gen:types`（同上，daemon 侧门禁 gen:types:check） |
-| 新增 | sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts | PI driver turnFinalText→result 字段（override 事件驱动、轮重置、error 轮不带） |
-| 新增 | sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts | daemon.onTurnResult mission_worker 分支：门控（stage/caps/is_error/空文本）、置于 notifyRunResult 之后、workerDone 调用参数（sessionId 头 + summary 全文）、失败仅 warn（含 HubHttpError 捕获）、非 mission_worker 零调用 |
-| 新增 | sillyhub-daemon/tests/credential-injector-pi.test.ts | Pi injector 映射（auth_field 缺省/显式、空 key 跳过、extra_env、litellm_proxy 忽略）+ REGISTRY 注册 |
-| 新增 | backend/app/modules/llm_provider/tests/test_llm_provider_pi_kind.py | schema 放开（pi 可建、auth_field pattern 拒非法、claude 旧值零回归） |
+| 新增 | NEW:sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts | PI driver turnFinalText→result 字段（override 事件驱动、轮重置、error 轮不带） |
+| 新增 | NEW:sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts | daemon.onTurnResult mission_worker 分支：门控（stage/caps/is_error/空文本）、置于 notifyRunResult 之后、workerDone 调用参数（sessionId 头 + summary 全文）、失败仅 warn（含 HubHttpError 捕获）、非 mission_worker 零调用 |
+| 新增 | NEW:sillyhub-daemon/tests/credential-injector-pi.test.ts | Pi injector 映射（auth_field 缺省/显式、空 key 跳过、extra_env、litellm_proxy 忽略）+ REGISTRY 注册 |
+| 修改 | sillyhub-daemon/tests/credential-injector.test.ts | 注册表用例连带更新：pi 注册后移出「未知 agentKind 返回 undefined」断言（保留 codex/gemini/未知项），plan-review 连带测试债 |
+| 新增 | NEW:backend/app/modules/llm_provider/tests/test_llm_provider_pi_kind.py | schema 放开（pi 可建、auth_field pattern 拒非法、claude 旧值零回归） |
 | 修改 | backend/app/modules/mcp_gateway/tests/test_tools_new.py | get_daemon_status 断言新增三字段（default_agent/effective_agent/providers 分组与 online 过滤） |
 | 修改 | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | pi 选项可选、pi 时 auth_field 可输入 env 名、claude 路径零回归 |
 

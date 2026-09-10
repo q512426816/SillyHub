@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-10-review-dispatch-platform-fixes",
+  "generatedAt": "2026-09-10T14:39:37.457Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-10-review-dispatch-platform-fixes",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 5,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-10-review-dispatch-platform-fixes",
+      "metrics": {
+        "tasks": 9,
+        "hasTest": 9
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-10-review-dispatch-platform-fixes",
+      "metrics": {
+        "backendEndpoints": 4476,
+        "frontendCalls": 5
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-10-review-dispatch-platform-fixes",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,llm_provider,mcp_gateway]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-10T14:53:06.451Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
