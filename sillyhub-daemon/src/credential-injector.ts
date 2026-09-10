@@ -51,8 +51,10 @@ export function _resetDaemonApiKeyForTest(): void {
 /**
  * provider-neutral 凭证注入器接口（D-006 抽象边界，最小化）。
  *
- * 加新 agent（codex / gemini）时：新增 XxxCredentialInjector 实现本接口 +
- * 在 getInjector 注册表登记，后端 / lease 协议 / spawn-env 不变（D-006）。
+ * 加新 agent（gemini）时：新增 XxxCredentialInjector 实现本接口 + 在 getInjector
+ * 注册表登记，后端 / lease 协议 / spawn-env 不变（D-006）。**codex 例外**：无 env
+ * 注入面（spike A1），凭证走文件层 per-session CODEX_HOME（见下方 REGISTRY 注释），
+ * 不实现本接口不注册。
  * 接口不得加 provider 专属字段（task-08 constraints）。
  */
 export interface CredentialInjector {
@@ -253,8 +255,12 @@ export class PiCredentialInjector implements CredentialInjector {
  * 已注册 claude / pi；未知 agentKind 返回 undefined（task-09 buildSpawnEnv 第 0 层
  * 据此判跳过，零回归 D-007）。
  *
- * 加 codex / gemini 时：新增对应 Injector + 在此登记，
- * 后端表 / lease 协议 / spawn-env 不变（D-006 抽象边界）。
+ * **codex 刻意不注册 env 注入器**（2026-09-10-multi-provider-injection / D-003 /
+ * D-005）：codex 0.147.0 二进制无任何 base_url/key 类 env 注入面（spike A1 实测），
+ * 凭证注入走文件层——task-runner.ts applyProviderFileSettings 按 agent_kind='codex'
+ * 分派 writeCodexHome 写 per-session CODEX_HOME/{auth.json, config.toml} 并注入
+ * CODEX_HOME env（config.toml [model_providers.sillyhub].base_url 重定向端点）。
+ * 故本表登记 codex 也不会被 spawn-env 第 0 层消费；gemini 仍预留后续变更。
  */
 const REGISTRY: Readonly<Record<string, CredentialInjector>> = Object.freeze({
   claude: new ClaudeCredentialInjector(),

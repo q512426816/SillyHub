@@ -119,6 +119,10 @@ import { checkWorkspaceBoundCwd } from './interactive-cwd-guard.js';
 import { HostFsHandler } from './host-fs-handler.js';
 import { buildSpawnEnv, type SpawnCredentialManager } from './spawn-env.js';
 import { applyClaudeSettings } from './claude-settings.js';
+// task-03（2026-09-10-multi-provider-injection / FR-01/FR-02）：codex/pi 配置写盘层
+// 分派 helper——单点定义在 task-runner.ts（daemon→task-runner 单向 import，反向会
+// 让 task-runner 单测拖起整个 daemon 模块），interactive 与 batch 两接线点共用。
+import { applyProviderFileSettings } from './task-runner.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 // task-04（S1）：编排器静态引入自更新三件套——runDaemonSelfUpdate（下载原子替换）、
 // respawnDaemonAndExit（交接拉起）、fetchLatestBuildId（推迟路径目标版本回传，
@@ -7994,7 +7998,27 @@ export class Daemon {
     // 顶层键写进 $CLAUDE_CONFIG_DIR/settings.json（attribution 等无 env 等价物项）。
     // 与 batch（task-runner.ts buildSpawnEnv 前）对齐，interactive 也走同一 helper。
     // absent / null / 仅 env → 不写文件（零回归）；写盘失败 best-effort 不阻断 session create。
-    await applyClaudeSettings(execPayload.provider_config);
+    // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
+    // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
+    // settings_config 白名单键写穿 claude 目录并残留（claude-settings.ts 本体不动；
+    // provider_config 为 null/undefined 时照旧调用，helper 内部零写入零回归）。
+    if (
+      !execPayload.provider_config ||
+      execPayload.provider_config.agent_kind === 'claude' ||
+      execPayload.provider_config.agent_kind === undefined
+    ) {
+      await applyClaudeSettings(execPayload.provider_config);
+    }
+
+    // task-03（FR-01/FR-02 / D-005/D-011/D-012）：codex/pi 配置写盘层分派——
+    // per-session 目录段 = sessionId（agent_sessions.id，:7717 取出且 :7842 已验
+    // 非空）；daemonApiKey 从 config.api_key 取值（cli.ts:683 setDaemonApiKey 同源）。
+    // 写盘失败 helper 内收口（零 env 正常返回），session create 主路径不阻断。
+    const providerFileEnv = await applyProviderFileSettings({
+      sessionKey: sessionId,
+      provider: execPayload.provider_config,
+      daemonApiKey: this._config.api_key,
+    });
 
     const interactiveEnv = buildSpawnEnv(
       {
@@ -8009,6 +8033,10 @@ export class Daemon {
       },
       { credential: this._credentialManager ?? noopCredential },
     );
+    // task-03（2026-09-10-multi-provider-injection）：文件层 env（CODEX_HOME /
+    // PI_CODING_AGENT_DIR）最后合并（与 batch task-runner 同模式）——per-session
+    // 隔离目录是平台更高意志，盖过 process.env / injector 层同键残留（正常流无同键）。
+    Object.assign(interactiveEnv, providerFileEnv);
 
     // 先登记 lease→session（即使 create 抛错也登记，防 create 失败后 WS 重放反复重试；
     // SessionManager.create 抛 SessionAlreadyExistsError 时 store 已无此 session，安全）。

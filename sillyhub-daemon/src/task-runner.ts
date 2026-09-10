@@ -75,7 +75,10 @@ import { linkSkillsToWorkdir } from './skill-manager.js';
 // task-03：observer 创建 / cmd-shim 解析 / readline 消费随 _spawnAndStream、
 // _handleLine 方法体下沉到 ./task-runner/spawn-stream.js。
 import type { TerminalObserver } from './terminal-observer.js';
-import type { DaemonConfig } from './config.js';
+// task-03（2026-09-10-multi-provider-injection）：daemonStateDir 懒求值（每次调用
+// 现读 SILLYHUB_DAEMON_DIR env）——per-session codex/pi 目录挂其下，测试可 stub
+// env 隔离（对齐 daemonBinDir 同款懒求值理由）。
+import { daemonStateDir, type DaemonConfig } from './config.js';
 // 2026-06-24-daemon-network-resilience task-11/12：batch submit 重试 + 终态轻量重试。
 import type { ResilienceService } from './resilience/service.js';
 import { toCauseInfo } from './resilience/error-classify.js';
@@ -97,6 +100,7 @@ import { eventToSubmitMessages } from './event-wire.js';
 import type {
   AgentEvent,
   LeaseCtx,
+  ProviderConfig,
 } from './types.js';
 // task-03（2026-09-07-arch-large-file-split / D-004@v1）：原文件头部的常量/类型/
 // 依赖契约接口/鸭子读取器原样下沉到 ./task-runner/ 包（零改写），facade 经
@@ -147,6 +151,158 @@ import type {
   ChangeWriteCtx,
   ChangeWriteResult,
 } from './task-runner/change-write.js';
+// task-03（2026-09-10-multi-provider-injection / FR-01 FR-02 / D-005 / D-011 / D-012）：
+// 配置写盘层两写盘器——按 provider.agent_kind 分派进 per-session 隔离目录（见下方
+// applyProviderFileSettings）。
+import { writeCodexHome } from './codex-settings.js';
+import { writePiDir } from './pi-settings.js';
+
+// ── provider 文件层分派（task-03 / 2026-09-10-multi-provider-injection）──────────
+
+/** 空串 / null / undefined 一律视为未设置（对齐 codex/pi-settings 同名判式）。 */
+function nonEmptyStr(v: string | null | undefined): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+/**
+ * codex 写盘门槛判定（与 codex-settings.ts resolveCodexForm 的 sufficient 判据
+ * 同步内联——task-03 allowed_paths 不含 codex-settings.ts，无法导出共享 helper；
+ * **判据变更须两处同步**）：
+ *   openai_chat：litellm_base_url / litellm_model_name 至少一项；
+ *   anthropic（缺省）：api_key / base_url 至少一项。
+ */
+function isCodexFormSufficient(provider: ProviderConfig): boolean {
+  if (provider.api_format === 'openai_chat') {
+    return (
+      nonEmptyStr(provider.litellm_base_url) !== undefined ||
+      nonEmptyStr(provider.litellm_model_name) !== undefined
+    );
+  }
+  return (
+    nonEmptyStr(provider.api_key) !== undefined ||
+    nonEmptyStr(provider.base_url) !== undefined
+  );
+}
+
+/**
+ * pi 写盘门槛判定（与 pi-settings.ts writePiDir 内部 gate 同步内联——同上，
+ * **判据变更须两处同步**）：非 openai_chat 禁配形态 + base_url 非空（自定义端点，
+ * 官方端点归 env 层 D-008）+ api_key 非空 + 裸 model id（default_fallback_model ??
+ * model）非空。不足则零 mkdir 零 env（半写/空目录被 pi 读到 ≠ 按宿主现状运行，
+ * design Plan 约束 3 同源理由）。
+ */
+function isPiFormSufficient(provider: ProviderConfig): boolean {
+  return (
+    provider.api_format !== 'openai_chat' &&
+    nonEmptyStr(provider.base_url) !== undefined &&
+    nonEmptyStr(provider.api_key) !== undefined &&
+    (nonEmptyStr(provider.default_fallback_model) ?? nonEmptyStr(provider.model)) !==
+      undefined
+  );
+}
+
+/** applyProviderFileSettings 入参（design 接线段；两接线点同构调用）。 */
+export interface ProviderFileSettingsInput {
+  /**
+   * per-session 目录段（D-011）：interactive = agent_sessions.id、
+   * batch = leaseId（batch 无会话 id，lease 是唯一稳定执行粒度）。
+   */
+  sessionKey: string;
+  /** lease 下发 provider_config；整体缺省（D-012 absent 边界）→ 不写不注入。 */
+  provider: ProviderConfig | null | undefined;
+  /** daemon 进程自身 apiKey（config.api_key，cli.ts setDaemonApiKey 同源）；codex openai_chat 形态作 auth key。 */
+  daemonApiKey: string | null;
+}
+
+/**
+ * 按 provider.agent_kind 分派配置写盘层 + 产待注入 env（task-03 单点定义，
+ * daemon.ts interactive / task-runner.ts batch 两接线点共用）：
+ *
+ *   - codex：门槛前置判定（isCodexFormSufficient，与 writeCodexHome 同判据）通过
+ *     → mkdir per-session 目录 → writeCodexHome（auth.json + config.toml）→
+ *     返回 `{CODEX_HOME: <dir>}`；门槛缺 → warn 跳过（零 mkdir 零写入零 env）；
+ *   - pi：base_url 非空（自定义端点）且必需字段齐（isPiFormSufficient）→
+ *     mkdir → writePiDir（三文件）→ 返回 `{PI_CODING_AGENT_DIR: <dir>}`；
+ *     官方端点（base_url 空）静默跳过（env 层负责，D-008 分层）；
+ *   - claude / 缺省 / 未知 kind → 返回 {}（claude settings.json 归调用侧
+ *     applyClaudeSettings kind 守卫，不在此处）。
+ *
+ * per-session 目录（D-011）：`<daemonStateDir()>/codex/<sessionKey>/` 与
+ * `<daemonStateDir()>/pi/<sessionKey>/`——与 CLAUDE_CONFIG_DIR 同根（平台管理的
+ * 会话配置根旁挂 per-session 子目录，非 TEMP，R-06）。
+ *
+ * 失败语义（design Plan 约束 3「失败语义唯一化」）：mkdir / 写盘 IO 失败（含
+ * writeCodexHome/writePiDir reject）→ 记 error 后该 kind 的 env 注入一并跳过、
+ * 正常返回 {}，**绝不抛**——调用方 spawn 主路径不阻断（子进程按宿主 ~/.codex、
+ * ~/.pi 现状运行 = 行为等同未配置，log 可归因）。终态清理与热切换重写归 task-04。
+ *
+ * 日志安全：warn/error 载荷只含 sessionKey / kind / 字段名 / 错误 message，
+ * 永不含 api_key / daemonApiKey 明文（对齐两写盘器约束）。
+ */
+export async function applyProviderFileSettings(
+  input: ProviderFileSettingsInput,
+): Promise<Record<string, string>> {
+  const { sessionKey, provider, daemonApiKey } = input;
+
+  // D-012 absent 边界：provider_config 整体缺省 → 不写不注入（与现状逐字一致）。
+  if (!provider) return {};
+
+  if (provider.agent_kind === 'codex') {
+    // 门槛前置判定先于 mkdir：门槛缺 → 零 mkdir 零写入零 env（可诊断不静默）。
+    if (!isCodexFormSufficient(provider)) {
+      console.warn('provider_file_dispatch_codex_skipped_missing_fields', {
+        session_key: sessionKey,
+        api_format: provider.api_format ?? 'anthropic',
+      });
+      return {};
+    }
+    const codexHome = join(daemonStateDir(), 'codex', sessionKey);
+    try {
+      // spawn 前创建 per-session 目录（写盘器不自建，目录缺失走 IO 失败路径）。
+      await mkdir(codexHome, { recursive: true });
+      await writeCodexHome({ codexHome, provider, daemonApiKey });
+      return { CODEX_HOME: codexHome };
+    } catch (e) {
+      // writeCodexHome 已记 codex_home_write_failed；此处收口 mkdir 失败 + 统一
+      // 跳过 env（失败语义唯一化：半写目录被 CLI 读到 ≠ 按宿主现状运行）。
+      console.error('provider_file_dispatch_codex_failed', {
+        session_key: sessionKey,
+        error: (e as Error)?.message ?? String(e),
+      });
+      return {};
+    }
+  }
+
+  if (provider.agent_kind === 'pi') {
+    // 官方端点形态（base_url 空）：零写盘零 env 静默跳过——凭证注入归 env 层
+    //（并行变更产物，D-008 分层，这是设计内分派而非异常）。
+    if (nonEmptyStr(provider.base_url) === undefined) return {};
+    if (!isPiFormSufficient(provider)) {
+      console.warn('provider_file_dispatch_pi_skipped_missing_fields', {
+        session_key: sessionKey,
+        api_format: provider.api_format ?? 'anthropic',
+      });
+      return {};
+    }
+    const piDir = join(daemonStateDir(), 'pi', sessionKey);
+    try {
+      await mkdir(piDir, { recursive: true });
+      await writePiDir({ piDir, provider });
+      return { PI_CODING_AGENT_DIR: piDir };
+    } catch (e) {
+      // writePiDir 已记 pi_dir_write_failed；此处收口 mkdir 失败 + 统一跳过 env。
+      console.error('provider_file_dispatch_pi_failed', {
+        session_key: sessionKey,
+        error: (e as Error)?.message ?? String(e),
+      });
+      return {};
+    }
+  }
+
+  // claude / 缺省 / 未知 kind：无文件层 env（claude settings.json 由调用侧
+  // applyClaudeSettings kind 守卫处理）。
+  return {};
+}
 
 /**
  * 任务编排器：执行一个 lease，把 agent 输出流式 submit 到 server，
@@ -528,9 +684,32 @@ export class TaskRunner {
       // 写进 $CLAUDE_CONFIG_DIR/settings.json，让无 env 等价物的开关（attribution）生效。
       // absent / null / 仅 env → helper 内 return 不写文件（零回归）；写盘失败 best-effort
       // 不阻断 spawn。单 lease 内只写一次（retry 循环在下方，同一 settings.json 重写幂等）。
-      await applyClaudeSettings(ctx.provider_config);
+      // task-03（2026-09-10-multi-provider-injection / Grill P2）：kind 守卫——仅
+      // agent_kind='claude' 或缺省才调 applyClaudeSettings，堵 codex/pi kind 的
+      // settings_config 白名单键写穿 claude 目录并残留（claude-settings.ts 本体不动；
+      // provider_config 为 null/undefined 时照旧调用，helper 内部零写入零回归）。
+      if (
+        !ctx.provider_config ||
+        ctx.provider_config.agent_kind === 'claude' ||
+        ctx.provider_config.agent_kind === undefined
+      ) {
+        await applyClaudeSettings(ctx.provider_config);
+      }
+
+      // task-03（FR-01/FR-02 / D-005/D-011/D-012）：codex/pi 配置写盘层分派。
+      // per-session 目录段 = leaseId（batch 无会话 id，lease 是唯一稳定执行粒度）；
+      // 写盘失败 helper 内收口（零 env 正常返回），spawn 主路径不阻断。
+      const providerFileEnv = await applyProviderFileSettings({
+        sessionKey: leaseId,
+        provider: ctx.provider_config,
+        daemonApiKey: this.config?.api_key ?? null,
+      });
 
       const spawnEnv = buildSpawnEnv(ctx, { credential: this.credential });
+
+      // task-03：文件层 env（CODEX_HOME / PI_CODING_AGENT_DIR）最后合并——per-session
+      // 隔离目录是平台更高意志，盖过 process.env / injector 层同键残留（正常流无同键）。
+      Object.assign(spawnEnv, providerFileEnv);
 
       // task-02 (2026-07-07-daemon-skill-execution): stage_dispatch 分支
       // backend 拼 stage prompt 已废弃，改为传 stage_meta（StageDispatchMeta）。
