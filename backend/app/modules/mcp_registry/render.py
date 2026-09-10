@@ -127,9 +127,16 @@ async def _injection_rows(session: AsyncSession, user_id: uuid.UUID | None) -> l
         .join(McpServerBinding, McpServerBinding.server_id == McpServer.id)
         .where(col(McpServer.enabled).is_(True), scope)
         .order_by(col(McpServer.name))
-        .distinct()
     )
-    return list((await session.execute(stmt)).scalars().all())
+    # verify 集成实测（真实 PG）发现：SELECT DISTINCT 整行（含 json 列）在 PG 报
+    # ``could not identify an equality operator for type json``（SQLite 把 json 当
+    # 文本可比，单测不暴露）。DISTINCT ON(id) 是 PG 方言 SQLite 不支持——改 Python
+    # 侧按 id 去重（name 排序已定，dict 保序先到先得），两方言同语义。
+    rows = (await session.execute(stmt)).scalars().all()
+    dedup: dict[uuid.UUID, McpServer] = {}
+    for row in rows:
+        dedup.setdefault(row.id, row)
+    return list(dedup.values())
 
 
 # ── 诊断预检五项（D-011 现行定义，design「接口定义」注释逐字对照）─────────────
@@ -243,9 +250,15 @@ async def _platform_bound_rows(session: AsyncSession) -> list[McpServer]:
         .join(McpServerBinding, McpServerBinding.server_id == McpServer.id)
         .where(col(McpServerBinding.scope_type) == "platform")
         .order_by(col(McpServer.name))
-        .distinct()
     )
-    return list((await session.execute(stmt)).scalars().all())
+    # 同 _injection_rows：PG json 列无等值算子，禁用 SQL DISTINCT，Python 按 id
+    # 去重（platform binding 每 server 至多一行——partial unique 保证，此处去重
+    # 仅为防御性，语义与原 distinct 等价）。
+    rows = (await session.execute(stmt)).scalars().all()
+    dedup: dict[uuid.UUID, McpServer] = {}
+    for row in rows:
+        dedup.setdefault(row.id, row)
+    return list(dedup.values())
 
 
 async def _read_whitelist(session: AsyncSession) -> set[str]:
