@@ -37,7 +37,7 @@ scale: large
 
 ```
 skill_source 模块（新）                skills_bundle_service（扩展第三源）
-├─ SkillSource 表（admin CRUD）         _collect_skill_files:
+├─ SkillSource 表（admin CRUD）         _gather_all_files（真正合并点 :250-264）:
 ├─ git 拉取器（subprocess+SSRF+上限）     ├─ sillyspec-*（不动）
 ├─ 缓存根 skills_git_cache/<src_id>/      ├─ CustomSkill（不动）
 └─ 技能发现（扫 SKILL.md 目录）           └─ user_skill_enables 命中的缓存技能（新）
@@ -59,7 +59,7 @@ user_skill_enables 表（新）            （收编砍 D-011）
 | 新增 | NEW:backend/app/modules/skill_source/tests/ | 模型/CRUD 权限/拉取器（本地 git init 假仓）/发现上限/收集第三源/同名优先级矩阵 |
 | 新增 | NEW:backend/migrations/versions/xxxx_add_skill_source_tables.py | 两表迁移（down_revision 对齐执行时 head，注意并行双 head 先 merge） |
 | 修改 | backend/app/modules/agent/skills_bundle_service.py | _collect 增第三源（启用绑定命中收集）+ manifest source 标记 |
-| 修改 | backend/app/modules/agent/tests/（bundle 相关测试） | 第三源/零回归用例 |
+| 修改 | backend/app/modules/daemon/tests/test_skills_bundle.py | 第三源/零回归用例（version 现状断言 :92-99/CustomSkill 合并 :194-275/version 锁定 :298-319 既有基地——plan-review 修正定位） |
 | 修改 | backend/app/main.py | router 注册 |
 | 修改 | frontend/src/app/(dashboard)/settings/skills/page.tsx | 升级两新区块（源管理 admin 卡/技能库启用开关；我的技能现状不动） |
 | 新增 | NEW:frontend/src/components/skills-library/（按现有目录惯例） | 源卡/技能列表组件 |
@@ -85,8 +85,8 @@ class SkillSourceService:
     async def refresh_source(id, user) -> SourceRead                    # admin
     async def list_library(user) -> LibraryView                          # 三源聚合+我的启用态
     async def toggle_enable(skill_key, user, enabled)                    # 本人
-# collect 第三源（skills_bundle_service 扩展）
-def _collect_enabled_git_skills(session, user_id) -> list[tuple[Path, bytes]]
+# 第三源（skills_bundle_service 扩展；经 _gather_all_files :250-264 并入——plan-review 修正点名）
+async def _collect_enabled_git_skills(session, user_id) -> list[tuple[Path, bytes]]
   # user_skill_enables 命中 → 缓存根目录文件集（排除 .git）
 ```
 
