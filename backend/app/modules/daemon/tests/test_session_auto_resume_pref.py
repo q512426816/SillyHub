@@ -98,9 +98,9 @@ class TestUpdateAutoResumePref:
         await DaemonService(db_session).update_auto_resume_pref(sess.id, uid, enabled=False)
 
         await db_session.refresh(sess)
-        assert sess.config["auto_resume_interrupted"] is False
-        assert sess.config["manual_approval"] is True
-        assert sess.config["model"] == "glm-5"
+        assert (sess.config or {})["auto_resume_interrupted"] is False
+        assert (sess.config or {})["manual_approval"] is True
+        assert (sess.config or {})["model"] == "glm-5"
 
     @pytest.mark.asyncio
     async def test_reenable_writes_true_and_idempotent(self, db_session, mocked_redis) -> None:
@@ -118,11 +118,11 @@ class TestUpdateAutoResumePref:
         await svc.update_auto_resume_pref(sess.id, uid, enabled=False)
         await svc.update_auto_resume_pref(sess.id, uid, enabled=False)  # 幂等
         await db_session.refresh(sess)
-        assert sess.config["auto_resume_interrupted"] is False
+        assert (sess.config or {})["auto_resume_interrupted"] is False
 
         await svc.update_auto_resume_pref(sess.id, uid, enabled=True)
         await db_session.refresh(sess)
-        assert sess.config["auto_resume_interrupted"] is True
+        assert (sess.config or {})["auto_resume_interrupted"] is True
 
     @pytest.mark.asyncio
     async def test_non_owner_404(self, db_session, mocked_redis) -> None:

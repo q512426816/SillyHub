@@ -27,7 +27,7 @@ SillySpec CLI 直跑时的跨仓上行通道（进度 / 文档 / 审批 / quickl
   - agent 日志会话化（2026-08-23-agent-activity-sessions，协议 sillyspec 仓 §1 v1.1）：
     - `POST` 增 body 级 `hub_session_id`（daemon env 注入，命中且同 ws → entries 关联该会话；未命中静默降级）与 entry 级 `change_key`/`quick_id`（随 entry 持久化，D-009）；无 hub → 按 `(workspace, harness, ctx)` find-or-create `origin='tool_report'` 会话（agent_sessions 加 origin/aggregation_key/title 列）。
     - `GET /api/agent-logs?session_id=`（读）：会话关联条目（普通会话尾部折叠条目 + tool_report 会话主体）。
-    - `GET /api/agent-logs/{id}/content`（读）：daemon `host_fs.read_file` 直连（不走 delegate degrade）、format 黑名单 409、尾部 256KB 字节截断、404/409/504 错误族。
+    - `GET /api/agent-logs/{id}/content`（读）：daemon `host_fs.read_file` 直连（不走 delegate degrade）、format 黑名单 409、尾部 256KB 字节截断、404/409/504 错误族。2026-09-10-zcode-session-sqlite-read：format=zcode-model-io-jsonl 先发 `read_agent_log_messages` RPC，status=parsed 时九字段伪 jsonl 合成全量返回不截断（truncated 透传窗口语义），非 parsed/抛错回落 read_file 原 256KB 路径（D-002/D-007@v1）。
 - workspace 面（`platform_sync_workspace_router`，prefix=/workspaces）：`/api/workspaces/{workspace_id}/platform-sync-tokens` 签发；`POST /api/workspaces/resolve-by-root-path` connect 换发（含手动 `has_permission(WORKSPACE_WRITE)` 403/404 闭环）。
 
 ## 关键逻辑

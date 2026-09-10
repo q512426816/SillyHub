@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-10-zcode-session-sqlite-read",
+  "generatedAt": "2026-09-10T05:01:47.401Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-10-zcode-session-sqlite-read",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 3,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-10-zcode-session-sqlite-read",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-10-zcode-session-sqlite-read",
+      "metrics": {
+        "backendEndpoints": 2091,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-10-zcode-session-sqlite-read",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  }
+}
