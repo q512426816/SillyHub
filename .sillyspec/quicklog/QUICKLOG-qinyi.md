@@ -209,3 +209,15 @@
 方案：后端排序统一改 created_at.desc()(轮次真实语义=run 创建序,对齐 agent 模块仓库惯例),SessionRunRead DTO/interface 透出 created_at;前端 orderedRuns 空值 fallback created_at(与对话流 user_input 日志时间轴一致);session_crud current_run 查询同款统一
 结果：后端 test_session_runs_endpoint 13 passed(新增 NULL started_at 用例)+session_router/service 71 passed;前端 page.test 53 passed(新增回真实轮位用例)+variant 7 passed;tsc 0 错误;gen:types 已重生成;待部署阿里云验证
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/session-panel-ctx-tokens.test.tsx, frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx
+
+## ql-20260910-012-392f | 2026-09-10 15:14:09 | 平台同步区串台修复——变更中心改读工作区级 sillyspec 快照
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/platform-sync-section.tsx（取数 map 优先 + 注释同步）
+- frontend/src/components/changes/__tests__/platform-sync-section.test.tsx（+2 工作区级取数用例）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 +ql-20260910-012；总览卡数据源描述纠正）
+需求：平台同步区串台修复——变更中心改读工作区级 sillyspec 快照
+根因：platform-sync-section.tsx 仍读机器级 sillyspec_status 单槽位；daemon 工作区级化后每轮采集逐目标覆盖单槽位，多工作区绑定时变更中心显示别区数据（总览卡 14a50351d 已改 map 优先，本组件漏改），用户实证总览卡 3 条冲突而变更中心不可见、无法在平台裁决
+方案：取数对齐 changes-overview-card 同款：sillyspec_status_map 非空按当前 workspaceId 取（缺席=整卡不渲染，不回退单槽位防串台）；map 为 null（旧 daemon）回退机器级单槽位；组件头注释与 frontend.md 模块文档同步（含总览卡数据源描述纠正 map 优先）
+结果：vitest 组件套件 14/14 passed（含新增 2 用例：map 优先不串台 / map 缺席整卡不渲染）；tsc --noEmit 零错；未重部署（阿里云需另行 deploy）
