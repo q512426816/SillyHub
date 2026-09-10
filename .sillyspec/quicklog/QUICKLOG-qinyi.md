@@ -241,3 +241,27 @@
 根因：平台审批链路零使用——本地 PG 341 变更 stages 带 review_history 为 0 条、写入代码 2026-08-14 上线而平台内审批最后一次 2026-08-12（CLI 驱动工作流审批不落平台表），审核历史卡恒空；任务看板摘要须手动 reparse 才更新、状态英文裸显，与步骤条/时间线三重展示进度，均无消费价值。
 方案：page.tsx 删两卡挂载/导入/taskBoard 取数/reviewHistory 派生；删两组件及测试 4 文件；三个页面级测试清 vi.mock 并收窄断言；mobile-change-detail 复用清单注释同步；顺手修 delete-change-confirm.test 的 @/lib/daemon 整模块 mock 缺 SESSION_ENGINE_OPTIONS 旧债（改 importActual 部分 mock）；后端 review_history 写入端点与 lib/tasks getTaskBoard 保留。
 结果：4 个受影响测试文件 47 用例全绿、tsc --noEmit 0 错、eslint 零新增、docs check 824 处引用全过。
+
+## ql-20260910-014-6c29 | 2026-09-10 19:03:51 | 变更中心展示 scope-audit 范围对账命令（变更详情页与快速修复抽屉各挂可复制命令卡，表格版+--json 版）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/sillyspec-manager.ts（SillySpecStatusChangeItem 可选 ql_id + _attachChangeQlIds 后处理）
+- backend/app/modules/daemon/router/heartbeat.py（DaemonHeartbeatSillySpecChange 可选 ql_id）
+- frontend/src/components/changes/scope-audit-command-card.tsx（新组件，命令前缀单一取值点）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx（右辅侧栏尾挂载（与并行会话删卡改动同文件，行不重叠））
+- frontend/src/components/changes/quicklog-drawer.tsx（结构化视图底部挂载）
+- backend/openapi.json（gen:types 重导出（含追平此前已提交后端改动））
+需求：变更中心展示 scope-audit 范围对账命令（变更详情页与快速修复抽屉各挂可复制命令卡，表格版+--json 版）
+根因：sillyspec 工具新增 scope-audit 命令（对账计划改动×实际改动），用户要求在变更中心可复制执行；快速修复条目平台侧只有 ql_id 而 scope-audit 只认 quick-<8hex> 会话名，缺一条 daemon→前端映射链
+方案：daemon 心跳 sillyspec_status.changes[] 对 quick-* 名 best-effort 读 guard.json 补可选 ql_id（镜像 pending_conflicts 同款先例）+ backend 心跳 DTO 宽松可选字段透传 + gen:types 三端同步；前端新组件 scope-audit-command-card（前缀单一取值点 node src/index.js，工具发版后改 sillyspec 只动一处），变更详情页代入 change_key、快速修复抽屉经机器快照按 ql_id 反查会话名（查不到回退占位符+手动替换提示）
+结果：daemon vitest 两套件 50 passed + tsc 0；backend pytest 39 passed + ruff 0；前端组件 6 + drawer 5 + 变更中心 6 相关套件 97 passed、tsc 0、eslint 定向 0 告警；docs check 无新增；未部署（daemon 升级+后端重启后生效）
+
+## ql-20260910-014-0a5d | 2026-09-10 20:52:00 | MCP 资产库 verify NOTES ②③ 两项优化——cipher 懒加载 + daemon 端点 503 补结构化日志（mcp-central-registry 归档后收尾，用户 AskUserQuestion 裁决"现在做"）
+状态：已完成（分支 sillyspec/2026-09-10-mcp-central-registry 提交 83932255e，待随分支 ff 合并）
+关联变更：2026-09-10-mcp-central-registry（archive）
+文件：
+- backend/app/modules/mcp_registry/service.py（__init__ 饿汉 cipher → 懒 property：纯读路径 list/detail 不再被 master key 配置扣死——畸形 key 时列表 503 的根因，集成实测发现；显式注入 cipher 的测试路径不受影响）
+- backend/app/modules/daemon/router/daemon_rpc.py（渲染 503 except 补 log.warning daemon_mcp_render_failed：error_type/摘要 200 截断/user_id/workspace_id——原异常细节只进 HTTPException from 链，排障只能复现；补 get_logger 导入）
+验证：backend 176 passed（mcp_registry 153 + daemon mcp 端点 23）+ ruff/mypy clean
+备注：master key v2 重生成同窗口执行（backend/.env，用户裁决；dev 库 9 行 llm_provider 旧 v1 密文需重录）
