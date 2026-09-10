@@ -3,8 +3,9 @@
 FR-01 / design §4.1、§5、§13；decisions D-001@v1、D-005@v1。
 
 回看一致性：首 turn 和后续 turn 各插一条 channel="user_input" 的
-AgentRunLog，挂在对应 run 上，prompt 经 content_redacted 脱敏（与
-submit_messages 一致的 ``prompt[:5000]`` 截断），user_input channel 显式写、
+AgentRunLog，挂在对应 run 上，prompt 经 content_redacted 脱敏（统一
+USER_INPUT_LOG_MAX_CHARS 截断，ql-20260910-016 由 5000 放宽到 50000），
+user_input channel 显式写、
 不经 _channel_from_event_type。get_agent_session_logs 的 SQL 不变，user_input
 log 随 JOIN 天然按 run 分组、anchor_ts 排序返回。
 """
@@ -19,7 +20,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentRun, AgentRunLog
+from app.modules.agent.model import USER_INPUT_LOG_MAX_CHARS, AgentRun, AgentRunLog
 from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.service import (
     DaemonRuntimeOffline,
@@ -129,19 +130,19 @@ class TestCreateSessionUserLog:
         assert log_row.timestamp is not None
 
     @pytest.mark.asyncio
-    async def test_user_log_is_truncated_to_5000(
+    async def test_user_log_is_truncated_to_max_chars(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
         uid = await _create_user(db_session)
         await _create_runtime(db_session, uid)
         svc = DaemonService(db_session)
 
-        long_prompt = "x" * 6000
+        long_prompt = "x" * (USER_INPUT_LOG_MAX_CHARS + 1000)
         result = await svc.create_session(uid, provider="claude", prompt=long_prompt)
 
         logs = await _user_logs_for_run(db_session, result.agent_run.id)
         assert len(logs) == 1
-        assert logs[0].content_redacted == "x" * 5000
+        assert logs[0].content_redacted == "x" * USER_INPUT_LOG_MAX_CHARS
 
     @pytest.mark.asyncio
     async def test_offline_daemon_keeps_user_log_with_failed_run(

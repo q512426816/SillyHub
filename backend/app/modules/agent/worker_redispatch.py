@@ -49,6 +49,7 @@ from app.core.logging import get_logger
 from app.modules.agent.execution import MISSION_WORKER_STAGE, worker_tool_config
 from app.modules.agent.mission_context import build_worker_briefing
 from app.modules.agent.model import (
+    USER_INPUT_LOG_MAX_CHARS,
     AgentMission,
     AgentRun,
     AgentRunLog,
@@ -336,7 +337,7 @@ async def redispatch_worker_session(
             AgentRunLog(
                 run_id=new_run.id,
                 channel="user_input",
-                content_redacted=prompt[:5000],
+                content_redacted=prompt[:USER_INPUT_LOG_MAX_CHARS],
                 timestamp=now,
             )
         )

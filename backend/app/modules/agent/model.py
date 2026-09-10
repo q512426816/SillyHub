@@ -471,6 +471,17 @@ class AgentRunModelUsage(BaseModel, table=True):
     )
 
 
+# ql-20260910-016：user_input 日志行（AgentRunLog.channel="user_input"）内容截断
+# 上限的单一取值源。原 5000 散落各写点硬编码，长输入在会话页显示与「重新发送」
+# 都吃截断副本（生产实例：多条 user_input 行 len=5000）；放宽到 50000 对齐
+# run_sync submit 链既有口径（submit_steps content[:50000]，ql-20260626-001 同 DB
+# 放宽）。DB 列为 Text 无上限，此值防极端粘贴撑爆 SSE / 日志拉取 payload。
+# 消费方：daemon.session.service（create/inject/control/ppm_activation）、
+# daemon.group.service（messages/shadow）、agent（worker_redispatch/mcp_tools）、
+# spec_workspace.bootstrap、auto_resume 截断检测。
+USER_INPUT_LOG_MAX_CHARS = 50_000
+
+
 class AgentRunLog(BaseModel, table=True):
     """Individual log lines from an agent run."""
 

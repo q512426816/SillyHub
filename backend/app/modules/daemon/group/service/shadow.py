@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.modules.daemon.group.service as _gsvc
 from app.modules.agent.model import (
     ACTIVE_RUN_STATUSES,
+    USER_INPUT_LOG_MAX_CHARS,
     AgentGroupChat,
     AgentGroupMember,
     AgentRun,
@@ -529,7 +530,7 @@ async def _ensure_shadow_session(
             id=uuid.uuid4(),
             run_id=first_run.id,
             channel="user_input",
-            content_redacted=first_prompt[:5000],
+            content_redacted=first_prompt[:USER_INPUT_LOG_MAX_CHARS],
             timestamp=now,
             metadata_=dict(first_turn_metadata),
         )

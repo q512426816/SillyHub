@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.modules.daemon.group.service as _gsvc
 from app.core.errors import AppError
 from app.modules.agent.model import (
+    USER_INPUT_LOG_MAX_CHARS,
     AgentGroupChat,
     AgentGroupMember,
     AgentRun,
@@ -252,7 +253,9 @@ async def send_group_message(
         id=uuid.uuid4(),
         run_id=carrier.id,
         channel="user_input",
-        content_redacted=content[:5000],  # 沿用 user_input 既有截断口径
+        content_redacted=content[
+            :USER_INPUT_LOG_MAX_CHARS
+        ],  # user_input 统一截断口径（ql-20260910-016）
         timestamp=now,
         metadata_=user_input_metadata,
     )

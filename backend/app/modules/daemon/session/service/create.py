@@ -14,7 +14,12 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 import app.modules.daemon.session.service as _svc
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import (
+    USER_INPUT_LOG_MAX_CHARS,
+    AgentRun,
+    AgentRunLog,
+    AgentSession,
+)
 from app.modules.change.model import ChangeSessionLink
 from app.modules.daemon.control_commands import KIND_SESSION_INJECT, ControlCommandService
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
@@ -614,7 +619,7 @@ async def create_session(
         # task-01 / FR-01 / D-005@v1：首 turn 落一条 channel="user_input" 的
         # AgentRunLog，让历史回看能看到用户发的首 prompt（与 agent 输出
         # stdout/stderr/tool_call 并列）。prompt 经 content_redacted 脱敏
-        # （与 submit_messages 一致的 ``[:5000]`` 截断），user_input channel
+        # （统一 USER_INPUT_LOG_MAX_CHARS 截断，ql-20260910-016 由 5000 放宽），user_input channel
         # 显式写、不经 _channel_from_event_type（与 agent service 的
         # USER_INPUT_CHANNEL 标准保持一致）。
         # ql-20260825-001：附件标记行插头部（对齐 inject 路径 task-06 D-3，
@@ -631,7 +636,7 @@ async def create_session(
             AgentRunLog(
                 run_id=run.id,
                 channel="user_input",
-                content_redacted=_user_input_content[:5000],
+                content_redacted=_user_input_content[:USER_INPUT_LOG_MAX_CHARS],
                 timestamp=now,
             )
         )

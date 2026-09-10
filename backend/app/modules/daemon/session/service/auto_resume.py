@@ -39,6 +39,7 @@ from sqlmodel import col
 from app.core.logging import get_logger
 from app.modules.agent.model import (
     SESSION_QUEUE_MAX_PENDING,
+    USER_INPUT_LOG_MAX_CHARS,
     AgentRun,
     AgentRunLog,
     AgentSession,
@@ -66,7 +67,9 @@ AUTO_RESUME_MAX_CHAIN = 2
 
 # inject 落库 user_input 的截断上限（inject.py :657 同口径）——长度恰为该值的
 # 原文视为已截断，不自动续跑（G5，Grill P2-7）。
-USER_INPUT_TRUNCATION_LIMIT = 5000
+# ql-20260910-016：与 user_input 写入侧共用单一截断口径（agent.model
+# USER_INPUT_LOG_MAX_CHARS，5000→50000），本值随写入口径联动。
+USER_INPUT_TRUNCATION_LIMIT = USER_INPUT_LOG_MAX_CHARS
 
 # 附件标记行宽松前缀（G6）：uuid36 + '|'——kind 取 DB 原始值不硬编码 image|file
 # 词表（attachment_marker_line 生成器同源，前端 parseAttachmentMarkers 另有严格

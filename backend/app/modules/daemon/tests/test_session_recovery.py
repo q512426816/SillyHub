@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.agent.model import USER_INPUT_LOG_MAX_CHARS, AgentRun, AgentSession
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import (
     DaemonService,
@@ -643,13 +643,13 @@ class TestAutoResumeEnqueue:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "content",
-        ["", "x" * 5000],
+        ["", "x" * USER_INPUT_LOG_MAX_CHARS],
         ids=["no-input", "truncated-at-limit"],
     )
     async def test_g5_missing_or_truncated_input_skip(
         self, db_session, mocked_redis, content: str
     ) -> None:
-        """反例：无 user_input / 长度触 5000 截断上限（二次包装退化）不入队。"""
+        """反例：无 user_input / 长度触截断上限（二次包装退化）不入队。"""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         session, run, lease = await _make_active_session(db_session, user_id=uid, runtime=rt)

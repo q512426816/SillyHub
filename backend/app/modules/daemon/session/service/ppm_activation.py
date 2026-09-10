@@ -16,7 +16,12 @@ from sqlmodel import col
 
 import app.modules.daemon.session.service as _svc
 from app.core.errors import AppError
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import (
+    USER_INPUT_LOG_MAX_CHARS,
+    AgentRun,
+    AgentRunLog,
+    AgentSession,
+)
 from app.modules.agent.provider_caps import get_provider_caps
 from app.modules.daemon.control_commands import KIND_SESSION_INJECT, ControlCommandService
 from app.modules.daemon.model import DaemonTaskLease
@@ -565,7 +570,7 @@ async def _activate_tool_report_session(
             AgentRunLog(
                 run_id=run.id,
                 channel="user_input",
-                content_redacted=user_input_content[:5000],
+                content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
                 timestamp=now,
             )
         )

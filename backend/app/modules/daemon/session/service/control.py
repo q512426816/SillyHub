@@ -23,7 +23,12 @@ from sqlalchemy.orm.attributes import flag_modified
 
 import app.modules.daemon.session.service as _svc
 from app.core.errors import AppError
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import (
+    USER_INPUT_LOG_MAX_CHARS,
+    AgentRun,
+    AgentRunLog,
+    AgentSession,
+)
 from app.modules.daemon.control_commands import (
     INJECT_SEND_FAILED_ERROR_CODE,
     KIND_SESSION_INJECT,
@@ -176,7 +181,7 @@ async def _inject_mid_turn_into_run(
             AgentRunLog(
                 run_id=current_run.id,
                 channel="user_input",
-                content_redacted=user_input_content[:5000],
+                content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
                 timestamp=now,
                 metadata_=dict(turn_metadata) if turn_metadata is not None else None,
             )

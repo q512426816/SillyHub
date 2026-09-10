@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import SpecWorkspaceNotFound
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun, AgentRunLog
+from app.modules.agent.model import USER_INPUT_LOG_MAX_CHARS, AgentRun, AgentRunLog
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workflow.model import AuditLog
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
@@ -558,7 +558,7 @@ async def _execute_bootstrap_agent_run(
                 AgentRunLog(
                     run_id=run.id,
                     channel="user_input",
-                    content_redacted=(bundle.step_prompt or "")[:5000],
+                    content_redacted=(bundle.step_prompt or "")[:USER_INPUT_LOG_MAX_CHARS],
                     timestamp=now,
                 )
             )

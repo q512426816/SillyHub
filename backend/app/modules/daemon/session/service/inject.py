@@ -20,7 +20,12 @@ from typing import Literal
 from sqlalchemy import select
 
 from app.core.errors import AppError
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import (
+    USER_INPUT_LOG_MAX_CHARS,
+    AgentRun,
+    AgentRunLog,
+    AgentSession,
+)
 from app.modules.daemon.schema import PageContextCreateBlock
 from app.modules.ppm.common.session_binding import PpmItemKind
 
@@ -650,7 +655,7 @@ async def _inject_into_session(
         # AgentRunLog，挂在新建 run 上（首 turn 在 create_session 已落）。
         # 2026-08-20 task-06（D-3）：附件标记行插头部——[附件:id|kind|name]
         # 逐附件一行，换行后接原 prompt；kind 取 DB 原始值（前端回显缩略图
-        # 数据源）；沿用既有 5000 截断口径。
+        # 数据源）；统一 USER_INPUT_LOG_MAX_CHARS 截断（ql-20260910-016 由 5000 放宽）。
         user_input_content = prompt
         if validated_attachments:
             from app.modules.session_attachment.service import (
@@ -663,7 +668,7 @@ async def _inject_into_session(
             AgentRunLog(
                 run_id=run.id,
                 channel="user_input",
-                content_redacted=user_input_content[:5000],
+                content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
                 timestamp=now,
                 # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
                 # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。

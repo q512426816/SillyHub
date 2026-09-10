@@ -277,3 +277,31 @@
 根因：daemon 分类器非 claude 引擎一律兜底 unknown（D-001 扩展点未覆盖 cursor/codex），claude 规则 quota 判定又被 has429 前置——Cursor 的 usage limit 报错无 429 两条路都认不出，页面只剩兜底文案（生产实例会话 7fb5022f）
 方案：normalize.ts buildErrorLogItem 增 isUsageLimitRaw 特征识别（usage limit / insufficient[_ ]quota / exceeded your current quota / 中文额度·使用上限），type 未识别（unknown）且 raw 命中时升 quota_exceeded + 中文 message「供应商额度或用量已达上限」+ 切换/升级套餐 hint，raw 原样保留供查看详情；历史已落库 run 不改数据即修好显示（三消费点 turn-timeline/session-panel page/dialog 都走该函数）；后端已明确分类的不覆盖。照 isCliAuthTransient（ql-20260903-011）同款先例
 结果：normalize.test.ts +4 用例共 91 全绿；下游 session-panel-dialog + turn-timeline-auto-resume-badge + run-error-item 102 用例绿；tsc 我方 0 错误（scope-audit-command-card 2 个为并行会话在途预存）；未部署，需重新打包前端镜像后生效
+
+## ql-20260910-016-e8e0 | 2026-09-10 22:43:49 | user_input 日志行 5000 截断放宽到 50000 单一常量，会话页长输入不再截断
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/model.py（USER_INPUT_LOG_MAX_CHARS 常量定义）
+- backend/app/modules/daemon/session/service/create.py（首 turn 写点）
+- backend/app/modules/daemon/session/service/inject.py（后续 turn 写点）
+- backend/app/modules/daemon/session/service/control.py（活跃 run 中途注入写点）
+- backend/app/modules/daemon/session/service/ppm_activation.py（PPM 激活写点）
+- backend/app/modules/daemon/group/service/messages.py（群聊消息写点）
+- backend/app/modules/daemon/group/service/shadow.py（群聊影子首句写点）
+- backend/app/modules/agent/worker_redispatch.py（worker 重派写点）
+- backend/app/modules/agent/mcp_tools.py（MCP 工具建会话写点）
+- backend/app/modules/spec_workspace/bootstrap.py（scan step_prompt 写点）
+- backend/app/modules/daemon/session/service/auto_resume.py（G5 截断检测改引单一源）
+- backend/app/modules/daemon/tests/test_session_user_log.py（截断断言 5000→常量）
+- backend/app/modules/daemon/tests/test_session_recovery.py（G5 反例夹具随口径）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引加 ql-20260910-016 条目）
+需求：user_input 日志行 5000 截断放宽到 50000 单一常量，会话页长输入不再截断
+根因：后端 9 个写点硬编码 content[:5000] 落 AgentRunLog(channel=user_input)，长输入的展示与「重新发送」都吃截断副本（生产库多条 user_input 行 len=5000 实证）；agent 实收的 SESSION_INJECT prompt 本就是全文，纯展示层截断
+方案：agent/model.py 新增 USER_INPUT_LOG_MAX_CHARS=50_000 单一取值源（模型层无服务依赖不成环），9 写点统一引用；auto_resume 截断检测常量改别名同值；对齐 run_sync submit 50k 既有口径，DB 列 Text 无上限；两处测试断言随口径适配
+结果：test_session_user_log + test_session_recovery + test_auto_resume_integration 34 passed；group_direct/group_mention_pipeline/mcp_tools/bootstrap_provider_model 115 passed；worker 派发 14 passed；ruff 全过 mypy 0 issue；未部署，需重发后端镜像生效
+
+## ql-20260910-017-2006 | 2026-09-10 22:49:24 | 变更中心点击文件看内容变化比对——daemon 新增 sillyspec_file_diff RPC（spawn sillyspec scope-audit --file --json，锚点同源解析）+ backend change 模块工…
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/sillyspec-manager.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/sillyspec-file-diff.test.ts, backend/app/modules/change/scope_audit.py, backend/app/modules/change/schema.py, backend/app/modules/change/router.py, backend/app/modules/change/tests/test_scope_file_diff.py, backend/openapi.json, frontend/src/lib/api-types.ts, frontend/src/lib/changes.ts, frontend/src/components/changes/scope-file-diff-modal.tsx, frontend/src/components/changes/__tests__/scope-file-diff-modal.test.tsx, frontend/src/components/changes/scope-audit-command-card.tsx, frontend/src/components/changes/quicklog-drawer.tsx, frontend/src/components/changes/__tests__/quicklog-drawer.test.tsx, frontend/src/components/change-file-tree.tsx, frontend/src/components/__tests__/change-file-tree.test.tsx, frontend/src/components/changes/detail/change-files-card.tsx, frontend/src/components/changes/detail/__tests__/change-files-card.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, .sillyspec/docs/multi-agent-platform/modules/frontend.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md, .sillyspec/docs/multi-agent-platform/modules/backend.md

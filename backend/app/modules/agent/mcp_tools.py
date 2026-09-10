@@ -84,6 +84,7 @@ from app.modules.agent.execution import (
 )
 from app.modules.agent.model import (
     ACTIVE_RUN_STATUSES,
+    USER_INPUT_LOG_MAX_CHARS,
     AgentArtifact,
     AgentMission,
     AgentRun,
@@ -1414,7 +1415,7 @@ async def _dispatch_worker_core(
             AgentRunLog(
                 run_id=first_run.id,
                 channel="user_input",
-                content_redacted=prompt[:5000],
+                content_redacted=prompt[:USER_INPUT_LOG_MAX_CHARS],
                 timestamp=now,
             )
         )
