@@ -1038,11 +1038,22 @@ async def get_daemon_status(
       online 项无 provider 即 None）——「调用方可判」信号**非权威解析**，
       顺序 = bindings 返回序（无额外 ORDER BY），权威以派发时 placement
       实算为准。
+    - ``quota_pool`` / ``effective_quota_pool``（ql-20260910-018，关联
+      2026-09-10-review-dispatch-platform-fixes P0-2 增补）：worker 执行器
+      配额池标识——per-daemon ``quota_pool`` = 该 binding 属主在 effective
+      agent_kind 下的**用户默认** LlmProvider 身份（``{llm_provider_id, name,
+      agent_kind, api_format, is_default}``，只出身份不出 key 材料）。这是
+      claim 三级解析（session > profile 绑定 > 用户默认）的第三级预判：无
+      session/profile 绑定时即生效值；``null`` = 属主未配该 kind 平台凭证
+      → worker 落 daemon 本机凭证池（与本地 agent 同池，独立兜底不成立）。
+      顶层 ``effective_quota_pool`` = 返回序首个 online 项的池（镜像
+      effective_agent 来源口径，同为可判信号非权威解析）。
 
     返回 ``{workspace_id, daemon_online, daemon_name, stale_threshold_seconds,
-    default_agent, effective_agent, daemons:[{daemon_id, daemon_name, user_id,
-    shared, status, last_heartbeat_at, heartbeat_age_seconds, ws_connected,
-    online, providers:[{provider, status, version}]}]}``。无任何 binding →
+    default_agent, effective_agent, effective_quota_pool, daemons:[{daemon_id,
+    daemon_name, user_id, shared, status, last_heartbeat_at,
+    heartbeat_age_seconds, ws_connected, online, providers:[{provider, status,
+    version}], quota_pool}]}``。无任何 binding →
     ``daemon_online=False`` / ``daemons=[]``（此时派发必失败
     ``no_online_daemon``）。``workspace_id`` 由 middleware 注入，不进 inputSchema。
     """
@@ -1142,6 +1153,39 @@ async def get_daemon_status(
                 effective_agent = entry_providers[0]["provider"] if entry_providers else None
         online_entries = [e for e in entries if e["online"]]
         first_name = entries[0]["daemon_name"] if entries else None
+        # ql-20260910-018（P0-2 预判面）：worker 执行器配额池标识——binding 属主在
+        # effective agent_kind 下的用户默认 LlmProvider 身份（claim 三级解析第三级；
+        # session/profile 绑定优先于它，实算以 claim 时为准）。一条批量 in 查询覆盖
+        # bindings 属主集合（不进 per-binding 循环）；只出身份（id/name/agent_kind/
+        # api_format/is_default），不 decrypt 不泄漏 key 材料（R-02 口径）。
+        # effective_agent 为 None（无执行器可判）时不查池，quota_pool 恒 None。
+        pool_by_user: dict[uuid.UUID, dict[str, object]] = {}
+        if effective_agent is not None:
+            from app.modules.llm_provider.model import LlmProvider
+
+            pool_rows = (
+                (
+                    await session.execute(
+                        select(LlmProvider).where(
+                            LlmProvider.user_id.in_({b.user_id for b in bindings}),
+                            LlmProvider.agent_kind == effective_agent,
+                            LlmProvider.is_default.is_(True),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for pool_row in pool_rows:
+                pool_by_user[pool_row.user_id] = {
+                    "llm_provider_id": str(pool_row.id),
+                    "name": pool_row.name,
+                    "agent_kind": pool_row.agent_kind,
+                    "api_format": pool_row.api_format,
+                    "is_default": True,
+                }
+        for entry in entries:
+            entry["quota_pool"] = pool_by_user.get(uuid.UUID(str(entry["user_id"])))
         return {
             "workspace_id": str(auth.workspace_id),
             "daemon_online": bool(online_entries),
@@ -1149,6 +1193,8 @@ async def get_daemon_status(
             "stale_threshold_seconds": DEFAULT_RUNTIME_STALE_SECONDS,
             "default_agent": workspace.default_agent,
             "effective_agent": effective_agent,
+            # 顶层镜像：返回序首个 online 项的池（与 effective_agent 来源口径一致）。
+            "effective_quota_pool": (online_entries[0]["quota_pool"] if online_entries else None),
             "daemons": entries,
         }
 

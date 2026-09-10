@@ -490,6 +490,39 @@ async def _make_runtime(
     await session.commit()
 
 
+async def _make_llm_provider(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    agent_kind: str,
+    name: str,
+    is_default: bool = True,
+    api_format: str = "anthropic",
+) -> uuid.UUID:
+    """ql-20260910-018：造一行用户级 LLM 供应商凭证（quota_pool 探测数据源）。
+
+    encrypted_api_key 列 NOT NULL——quota_pool 只读身份不 decrypt，占位 bytes 即可。
+    """
+    from app.modules.llm_provider.model import LlmProvider
+
+    provider_id = uuid.uuid4()
+    session.add(
+        LlmProvider(
+            id=provider_id,
+            user_id=user_id,
+            agent_kind=agent_kind,
+            name=name,
+            api_format=api_format,
+            is_default=is_default,
+            encrypted_api_key=b"test-placeholder",
+            key_id="test-key",
+            auth_field="ANTHROPIC_API_KEY",
+        )
+    )
+    await session.commit()
+    return provider_id
+
+
 @pytest.mark.asyncio
 async def test_get_daemon_status_registered_without_workspace_id() -> None:
     registered = {t.name: t for t in await mcp.list_tools()}
@@ -744,6 +777,117 @@ async def test_get_daemon_status_online_daemon_without_online_runtimes(
     assert result["daemons"][0]["providers"] == []
     assert result["default_agent"] is None
     assert result["effective_agent"] is None
+
+
+# ql-20260910-018（关联 2026-09-10-review-dispatch-platform-fixes P0-2 增补）：worker
+# 执行器配额池标识——per-daemon quota_pool = binding 属主在 effective agent_kind 下的
+# 用户默认 LlmProvider 身份（claim 三级解析第三级）；null = 未配该 kind 平台凭证 →
+# worker 落本机凭证池（与本地 agent 同池，兜底不成立）。
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_quota_pool_resolved_from_owner_default(
+    db_session: AsyncSession,
+) -> None:
+    """effective kind 下属主有默认凭证：entry 带 quota_pool 身份五键，顶层镜像取首 online 项。
+
+    同属主的 claude 默认凭证（kind 不同）不串池——quota_pool 按 effective_agent='pi'
+    过滤；第二台 daemon 属主未配 pi 凭证 → 其 entry quota_pool 为 None（落本机同池）。
+    """
+    ws = await _make_workspace(db_session)
+    ws.default_agent = "pi"
+    user = await _make_user(db_session)
+    pool_id = await _make_llm_provider(
+        db_session, user_id=user.id, agent_kind="pi", name="GLM 独立池"
+    )
+    # 干扰项：同属主 claude kind 默认凭证（不命中 effective kind）。
+    await _make_llm_provider(
+        db_session, user_id=user.id, agent_kind="claude", name="本地 claude 池"
+    )
+    daemon1 = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_runtime(db_session, user_id=user.id, daemon_instance_id=daemon1, provider="pi")
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon1)
+
+    user2 = await _make_user(db_session)
+    daemon2 = await _make_daemon(db_session, user_id=user2.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_runtime(db_session, user_id=user2.id, daemon_instance_id=daemon2, provider="pi")
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user2.id, daemon_id=daemon2)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["effective_agent"] == "pi"
+    entries = {e["daemon_id"]: e for e in result["daemons"]}
+    pool1 = entries[str(daemon1)]["quota_pool"]
+    assert pool1 == {
+        "llm_provider_id": str(pool_id),
+        "name": "GLM 独立池",
+        "agent_kind": "pi",
+        "api_format": "anthropic",
+        "is_default": True,
+    }
+    # 未配 pi 凭证的属主：quota_pool None（本机同池信号）。
+    assert entries[str(daemon2)]["quota_pool"] is None
+    # 顶层镜像 = 返回序首个 online 项的池。
+    assert result["effective_quota_pool"] == pool1
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_quota_pool_null_without_matching_default(
+    db_session: AsyncSession,
+) -> None:
+    """无 effective kind 默认凭证（只有非默认行）：quota_pool / effective_quota_pool 均 None。"""
+    ws = await _make_workspace(db_session)
+    ws.default_agent = "pi"
+    user = await _make_user(db_session)
+    # 只有 is_default=False 的 pi 行：不构成用户默认池。
+    await _make_llm_provider(
+        db_session, user_id=user.id, agent_kind="pi", name="备用（非默认）", is_default=False
+    )
+    daemon_id = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_runtime(db_session, user_id=user.id, daemon_instance_id=daemon_id, provider="pi")
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon_id)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["effective_agent"] == "pi"
+    assert result["daemons"][0]["quota_pool"] is None
+    assert result["effective_quota_pool"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_daemon_status_quota_pool_none_without_effective_agent(
+    db_session: AsyncSession,
+) -> None:
+    """effective_agent 为 None（无执行器可判）：不查池，quota_pool 恒 None。
+
+    属主即便配了默认凭证（claude kind）也不透出——池探测绑定 effective kind，
+    无执行器 = 无预判意义。
+    """
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    await _make_llm_provider(
+        db_session, user_id=user.id, agent_kind="claude", name="本地 claude 池"
+    )
+    daemon_id = await _make_daemon(db_session, user_id=user.id, last_heartbeat_at=datetime.now(UTC))
+    await _make_binding(db_session, workspace_id=ws.id, user_id=user.id, daemon_id=daemon_id)
+
+    token = await _make_token(
+        db_session, workspace_id=ws.id, created_by=user.id, scope=[MCP_SCOPE_READ]
+    )
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_READ})))
+
+    result = await tools.get_daemon_status(ctx=ctx)
+    assert result["effective_agent"] is None
+    assert result["daemons"][0]["quota_pool"] is None
+    assert result["effective_quota_pool"] is None
 
 
 # ── no-creator 报错（spike P1-4）：文案必须自带修复动作 ────────────────────────

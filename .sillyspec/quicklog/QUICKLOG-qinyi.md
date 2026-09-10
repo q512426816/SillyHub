@@ -301,7 +301,32 @@
 方案：agent/model.py 新增 USER_INPUT_LOG_MAX_CHARS=50_000 单一取值源（模型层无服务依赖不成环），9 写点统一引用；auto_resume 截断检测常量改别名同值；对齐 run_sync submit 50k 既有口径，DB 列 Text 无上限；两处测试断言随口径适配
 结果：test_session_user_log + test_session_recovery + test_auto_resume_integration 34 passed；group_direct/group_mention_pipeline/mcp_tools/bootstrap_provider_model 115 passed；worker 派发 14 passed；ruff 全过 mypy 0 issue；未部署，需重发后端镜像生效
 
-## ql-20260910-017-2006 | 2026-09-10 22:49:24 | 变更中心点击文件看内容变化比对——daemon 新增 sillyspec_file_diff RPC（spawn sillyspec scope-audit --file --json，锚点同源解析）+ backend change 模块工…
-状态：进行中
+## ql-20260910-017-2006 | 2026-09-10 22:49:24 | 变更中心点击具体文件展示内容变化比对（红绿高亮弹窗，参考冲突比对弹窗视觉；快速修复抽屉与变更文件树两入口）
+状态：已完成
 关联变更：（无）
-文件：sillyhub-daemon/src/sillyspec-manager.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/sillyspec-file-diff.test.ts, backend/app/modules/change/scope_audit.py, backend/app/modules/change/schema.py, backend/app/modules/change/router.py, backend/app/modules/change/tests/test_scope_file_diff.py, backend/openapi.json, frontend/src/lib/api-types.ts, frontend/src/lib/changes.ts, frontend/src/components/changes/scope-file-diff-modal.tsx, frontend/src/components/changes/__tests__/scope-file-diff-modal.test.tsx, frontend/src/components/changes/scope-audit-command-card.tsx, frontend/src/components/changes/quicklog-drawer.tsx, frontend/src/components/changes/__tests__/quicklog-drawer.test.tsx, frontend/src/components/change-file-tree.tsx, frontend/src/components/__tests__/change-file-tree.test.tsx, frontend/src/components/changes/detail/change-files-card.tsx, frontend/src/components/changes/detail/__tests__/change-files-card.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, .sillyspec/docs/multi-agent-platform/modules/frontend.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md, .sillyspec/docs/multi-agent-platform/modules/backend.md
+文件：
+- sillyhub-daemon/src/sillyspec-manager.ts（fileDiff 方法 + Outcome 可选 stderr + 256KB 护栏）
+- sillyhub-daemon/src/daemon.ts（sillyspec_file_diff RPC 注册）
+- backend/app/modules/change/scope_audit.py（新 service（git_log 范式））
+- backend/app/modules/change/router.py（/sillyspec/file-diff 端点）
+- frontend/src/components/changes/scope-file-diff-modal.tsx（新弹窗（复用 parseUnifiedDiff））
+- frontend/src/components/changes/scope-audit-command-card.tsx（useQuickSessionName 抽出共用）
+- frontend/src/components/changes/quicklog-drawer.tsx（文件行点击入口）
+- frontend/src/components/change-file-tree.tsx（变化比对按钮（changeKey 可选 prop））
+需求：变更中心点击具体文件展示内容变化比对（红绿高亮弹窗，参考冲突比对弹窗视觉；快速修复抽屉与变更文件树两入口）
+根因：scope-audit --file 已能在本地看单文件 diff，但平台侧无入口——用户要求在查看变化时可直接点击文件比对；锚点解析逻辑在工具（quick=HEAD 窗口/归档=快照基点），平台三端需一条 daemon RPC + 工作区级端点 + 弹窗的透传链
+方案：daemon 新 sillyspec_file_diff RPC：spawn 本机 sillyspec 跑 scope-audit --change --file --json（锚点同源零自研，256KB 截断，未知命令→能力缺失错误码；Outcome 补可选 stderr 支撑能力检测）；backend change 模块 scope_audit.py service（git_log 范式绑定解析+RPC 转发+AppError 错误族）+ GET /workspaces/{ws}/sillyspec/file-diff（避开 /changes/{uuid} 段匹配坑）；前端新 scope-file-diff-modal（复用 git-log parseUnifiedDiff 红绿行渲染，note 态/422 升级引导/重试态分型）+ useQuickSessionName 抽出共用，抽屉文件行与变更文件树「变化比对」按钮两入口
+结果：daemon 4 套件 122 passed + tsc 0；backend 7 passed + mypy 0 + ruff 0；前端弹窗 5 + 抽屉 7 + 变更中心 14 套件 164 passed、tsc 0、eslint 零新增；gen:types 三端重生成；docs check 无新增；未部署（daemon 升级 + sillyspec 新版发布后端到端可用，版本门弹窗有分型引导）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/src/api-types.ts
+
+## ql-20260910-018-d305 | 2026-09-10 23:13:27 | get_daemon_status 暴露 worker 执行器配额池标识，review-dispatch 消费方派发前预判独立兜底是否成立（P0-2 增补…
+状态：已完成
+关联变更：2026-09-10-review-dispatch-platform-fixes
+文件：
+- backend/app/modules/mcp_gateway/tools.py（quota_pool 探测+docstring 口径）
+- backend/app/modules/mcp_gateway/tests/test_tools_new.py（3 新用例+_make_llm_provider fixture）
+- .sillyspec/docs/backend/modules/mcp_gateway.md（13 tool 校正+quota_pool 行）
+需求：get_daemon_status 暴露 worker 执行器配额池标识，review-dispatch 消费方派发前预判独立兜底是否成立（P0-2 增补，关联 2026-09-10-review-dispatch-platform-fixes）。
+根因：该 tool 此前只有执行器（effective_agent）与在线性，无凭证池归属信息——worker 实际落在哪个配额池（独立 key 还是 daemon 本机凭证同池）派发前不可判，P0-2 的「本地耗尽平台兜底」价值无法预验证。
+方案：per-daemon quota_pool = binding 属主在 effective agent_kind 下的用户默认 LlmProvider 身份（claim 三级解析第三级；五键 {llm_provider_id,name,agent_kind,api_format,is_default}，不 decrypt 不出 key 材料）+ 顶层 effective_quota_pool 镜像首个 online 项；一条批量 in 查询不进循环；effective_agent 为 None 不查池。
+结果：test_tools_new.py 24 passed（3 新用例覆盖池命中/kind 过滤/跨属主映射、非默认行不构成池、无执行器不查池），ruff check+format 过；模块卡同步（13 个 tool 校正 + quota_pool 口径）；待部署远端后消费方即可预判。
