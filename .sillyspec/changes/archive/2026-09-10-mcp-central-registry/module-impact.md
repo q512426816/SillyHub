@@ -1,4 +1,4 @@
-# 模块影响分析（骨架由 plan --done CLI（design 声明清单 × module-map 前缀匹配） 生成）
+# 模块影响分析（Module Impact）— MCP 中央资产库
 
 > 文件×模块归属由 CLI 按 _module-map.yaml paths 前缀匹配预填；
 > **影响类型**（逻辑变更/数据结构变更/接口变更/调用关系变更/配置变更/新增）与 review 标记是语义判断，
@@ -21,7 +21,7 @@
 以下变更文件未命中 _module-map.yaml 任何模块 paths——确认是模块索引过期（该跑 `sillyspec modules rebuild`）还是真的游离文件：
 
 - `NEW:backend/app/modules/mcp_registry/**` → 新模块，task-13 已在 _module-map.yaml 增 mcp_registry 条目（索引已补）
-- `NEW:backend/alembic/versions/xxxx_add_mcp_registry_tables.py` → design 笔误路径；实际为 backend/migrations/versions/20260910140000_*（migrations 模块 paths 前缀 `migrations/**` 未含 `backend/migrations` 前缀写法——归 migrations 模块，索引路径写法待 rebuild 归一）
+- ~~`NEW:backend/alembic/versions/xxxx_add_mcp_registry_tables.py`~~ → design 笔误路径（归档裁决：非真实文件）；实际交付为 `backend/migrations/versions/20260910140000_add_mcp_registry_tables.py`，已列模块影响矩阵 migrations 行
 - `backend/app/main.py` → 游离装配文件（router 注册区），非模块 paths 覆盖——正常（main.py 历来无模块归属）
 - `frontend/src/app/(dashboard)/settings/mcp/page.tsx`、`frontend/src/components/mcp-registry`、`frontend/src/lib/api-types.ts`、`backend/openapi.json`、`sillyhub-daemon/src/*`、`backend/app/modules/{daemon,settings}/**` → 子项目级模块图（docs/frontend|sillyhub-daemon 各自 _module-map）覆盖；backend 侧 daemon/settings 文件未命中系本骨架只按主项目 module-map 匹配——非游离，各子项目模块卡（task-13 已更新 settings.md/daemon.md/mcp_registry.md）覆盖
 
@@ -33,6 +33,6 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | 已增 mcp_registry 条目（paths/tags/entrypoints/main_symbols/depends_on/used_by，照 skills 格式）+ settings 条目去旧端点 + daemon depends_on 补 mcp_registry（task-13 实改，git diff 可证）；backend/migrations 路径写法归一留 modules rebuild（归档阶段顺跑） | done |
+| `.sillyspec/docs/backend/modules/_module-map.yaml` | 已增 mcp_registry 条目（paths/tags/entrypoints/main_symbols/depends_on/used_by，照 skills 格式）+ settings 条目去旧端点 + daemon depends_on 补 mcp_registry（task-13 实改，git diff 可证）；backend/migrations 路径写法归一留 modules rebuild（归档阶段顺跑） | done |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

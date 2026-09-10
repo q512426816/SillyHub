@@ -155,6 +155,15 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   会话钉定校验 owner 短路 → `authorize_pinned_runtime`（workspace grant 放行写借用审计含
   grant_id；platform grant 的 runtime 直传钉定 404——共享唯一入口=档案检测分支，D-012）。
 `POST /api/daemon/audit/batch`（daemon 批量审计上行）+ 查询端点。
+- MCP 拉取端点：`GET /api/daemon/mcp/config`（daemon_rpc.py；认证 `get_current_principal`
+  即 daemon X-API-Key，同 skills/latest/* 端点）。**原值不脱敏**（daemon 需真实 env 注入
+  agent）。platform 位数据源已换 mcp_registry 渲染（`render_injection_set`，change
+  2026-09-10-mcp-central-registry task-05 / D-003——旧 `mcp.platform_default` KV 不再读，
+  残留无害）；带可选 query `user_id` = platform ∪ user 注入集且先做 lease 归属双校验
+  （认证主体持有归属该 user 的活跃 lease，无匹配 404 不泄露存在性，D-010）；空库 200
+  空集（旧 KV 缺失回落语义），渲染故障 503 保 daemon 本地 mcp.json 回落链（CC-14）；
+  whitelist 位仍读 settings KV `mcp.whitelist`（D-007）；可选 `workspace_id` 追加读该
+  工作区 `specDir/.mcp.json` 明文（`_read_mcp_config_raw`）。
 - 其它：`GET|POST /llm-proxy/{path:path}`（daemon 侧 LLM 网关转发）、
   `GET /skills/latest/manifest`（skills bundle 分发，agent 模块消费）。
 - host_fs：delegate.py + ws_rpc.py——经 WS RPC 读客户端文件系统
