@@ -9,7 +9,12 @@
 
 ## 证据账（cannot_verify 任务） [层：人工判断——CLI 核验]
 
-无（6/6 任务均为 satisfied，无 cannot_verify）。
+- task-01: missing（豁免：改动已随主仓提交 28b758edc 落地（apply→commit 先于本步，working diff 已空致 diffHit=false；mtime 核验过、文件在提交 28b758edc 内、per-task review changedFiles 已声明——TDD 测试锚定 102 用例绿） | verifiedFiles: sillyhub-daemon/src/sillyspec-manager.ts, sillyhub-daemon/tests/sillyspec-conflict-snapshot.test.ts, sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+- task-02: missing（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；daemon 全量 214 文件/3830 用例绿） | verifiedFiles: sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-status-root-persistence.test.ts, sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+- task-03: missing（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；compare 30 用例绿） | verifiedFiles: backend/app/modules/daemon/sillyspec_compare.py, backend/app/modules/daemon/tests/test_sillyspec_compare.py
+- task-04: missing（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；platform-commands 42 用例绿） | verifiedFiles: backend/app/modules/daemon/router/machines.py, backend/app/modules/daemon/ws_hub.py, backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py
+- task-05: missing（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；文案分叉 3 用例绿） | verifiedFiles: backend/app/modules/daemon/sillyspec_compare.py, backend/app/modules/daemon/tests/test_sillyspec_compare.py
+- task-06: missing（豁免：改动已随主仓提交 28b758edc 落地（含 sillyhub-daemon/src/api-types.ts 同源产物），同 task-01 diff 通道说明；modal 13 用例绿+lint exit0） | verifiedFiles: frontend/src/lib/api-types.ts, backend/openapi.json, frontend/src/components/changes/conflict-compare-modal.tsx, frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx
 
 ## 集成验证回执 [层：自述声明——CLI 一致性校验]
 

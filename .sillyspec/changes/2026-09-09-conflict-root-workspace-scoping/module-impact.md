@@ -8,25 +8,19 @@
 
 | 模块 | 变更文件 | 影响类型 | 需 review |
 |---|---|---|---|
+| sillyhub-daemon | sillyhub-daemon/src/sillyspec-manager.ts | 接口变更（conflictSnapshot/runResolve 尾参）+ 逻辑变更（workspace_root_unknown 两态） | 否（156 用例锚定） |
+| sillyhub-daemon | sillyhub-daemon/src/daemon.ts | 逻辑变更（透传接线）+ 逻辑变更（防投毒提前 return） | 否 |
+| sillyhub-daemon | sillyhub-daemon/tests/*.test.ts ×5 | 测试（新增断言+修存量债） | 否 |
+| daemon | backend/app/modules/daemon/sillyspec_compare.py | 接口变更（RPC params+方法公开）+ 配置变更（文案分叉表） | 否（72 用例锚定） |
+| daemon | backend/app/modules/daemon/ws_hub.py | 接口变更（payload 三键） | 否 |
+| daemon | backend/app/modules/daemon/router/machines.py | 接口变更（请求体必填）+ 逻辑变更（成员校验） | 否 |
+| daemon | backend/app/modules/daemon/tests/*.py ×2 | 测试（新增断言） | 否 |
+| frontend | frontend/src/components/changes/conflict-compare-modal.tsx | 调用关系变更（body 下传） | 否 |
+| frontend | frontend/src/lib/api-types.ts + backend/openapi.json | 数据结构变更（gen:types 产物） | 否 |
 
 ## 未匹配文件
 
-以下变更文件未命中 _module-map.yaml 任何模块 paths——确认是模块索引过期（该跑 `sillyspec modules rebuild`）还是真的游离文件：
-
-- `sillyhub-daemon/src/sillyspec-manager.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/src/daemon.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/tests/sillyspec-conflict-snapshot.test.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/tests/sillyspec-platform-command.test.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/sillyspec_compare.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/ws_hub.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/router/machines.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/tests/test_sillyspec_compare.py` <!--TODO: 归属判定-->
-- `backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py` <!--TODO: 归属判定-->
-- `backend/openapi.json` <!--TODO: 归属判定-->
-- `frontend/src/components/changes/conflict-compare-modal.tsx` <!--TODO: 归属判定-->
-- `frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx` <!--TODO: 归属判定-->
-- `frontend/src/lib/api-types.ts` <!--TODO: 归属判定-->
+无（14 个文件均已归入上方矩阵——首版 CLI 前缀匹配未命中的 sillyhub-daemon src/tests 与 backend daemon 模块文件，语义归位）。
 
 ## 影响类型说明
 
@@ -36,6 +30,6 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
+| `_module-map.yaml` | 无需增改——未匹配为 CLI 前缀匹配粒度问题（文件实际均在已注册模块路径下），非模块索引过期 | done |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

@@ -5,10 +5,13 @@ created_at: 2026-09-09T20:32:00
 
 # 冲突对比读错工作区根——单槽位 `_sillyspecStatusRoot` 被 Temp 投毒，列表对、对比错
 
-> **修复状态（2026-09-09）**：
-> - ❌ 根治未实施（对比 RPC / 裁决指令尚未按 workspace 取根）；
-> - ⏳ 建议开完整流程 change（勿 quick）：例如 `2026-09-09-conflict-root-workspace-scoping`；
-> - ⏳ 根治发版并验证后移 `docs/sillyspec/finished/`。
+> **修复状态（2026-09-10 更新）**：
+> - ✅ 根治已实施并合入 main（commit `28b758edc`，change
+>    `2026-09-09-conflict-root-workspace-scoping` 全流程 verify PASS）：对比/裁决全链携带
+>    workspace_id、daemon 映射查根未命中报 workspace_root_unknown 不回退、无 ws claim
+>    不再覆盖单槽位、resolve 补成员校验、502 文案分叉；真实栈集成验证 6 项证据
+>    （`.sillyspec/changes/2026-09-09-conflict-root-workspace-scoping/verify-integration.log`）。
+> - ⏳ 待发版部署后验证平台实际场景，再移 `docs/sillyspec/finished/`。
 
 ## 现象（2026-09-09 实证）
 
@@ -109,3 +112,7 @@ ghost_cleanup 不进本 change。先 brainstorm。
 - 总览工作区级化 / temp 投毒注释：`sillyhub-daemon/src/daemon.ts`（2026-09-08）
 - 冲突对比三端：`.sillyspec/changes/archive/2026-09-07-conflict-diff-compare/`
 - 心跳 UUID 守卫：`docs/sillyspec/daemon-heartbeat-workspace-key-no-uuid-guard.md`
+
+## 巡检注记（2026-09-09 定时扫描）
+
+- 根治 change `2026-09-09-conflict-root-workspace-scoping` **已开且正在进行中**（本仓 .sillyspec/changes/ 下有实体，verify-facts.json 处于活跃编辑）——按本文件口径走完整流程，定时巡检不抢跑。待其 verify/archive 后本文件随验归档。

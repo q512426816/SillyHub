@@ -45,9 +45,86 @@
   ],
   "tests": {
     "command": "module[frontend,sillyhub-daemon,daemon]",
-    "exitCode": 1,
+    "exitCode": 0,
     "strategy": "module-subset",
     "failedRemaining": [],
-    "passedAt": "2026-09-09T19:44:25.415Z"
+    "passedAt": "2026-09-10T00:50:54.802Z"
+  },
+  "requiredEvidence": [
+    {
+      "task": "task-01",
+      "status": "missing",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/sillyspec-manager.ts",
+        "sillyhub-daemon/tests/sillyspec-conflict-snapshot.test.ts",
+        "sillyhub-daemon/tests/sillyspec-platform-command.test.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：改动已随主仓提交 28b758edc 落地（apply→commit 先于本步，working diff 已空致 diffHit=false；mtime 核验过、文件在提交 28b758edc 内、per-task review changedFiles 已声明——TDD 测试锚定 102 用例绿）"
+    },
+    {
+      "task": "task-02",
+      "status": "missing",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/daemon.ts",
+        "sillyhub-daemon/tests/daemon-status-root-persistence.test.ts",
+        "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；daemon 全量 214 文件/3830 用例绿）"
+    },
+    {
+      "task": "task-03",
+      "status": "missing",
+      "verifiedFiles": [
+        "backend/app/modules/daemon/sillyspec_compare.py",
+        "backend/app/modules/daemon/tests/test_sillyspec_compare.py"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；compare 30 用例绿）"
+    },
+    {
+      "task": "task-04",
+      "status": "missing",
+      "verifiedFiles": [
+        "backend/app/modules/daemon/router/machines.py",
+        "backend/app/modules/daemon/ws_hub.py",
+        "backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；platform-commands 42 用例绿）"
+    },
+    {
+      "task": "task-05",
+      "status": "missing",
+      "verifiedFiles": [
+        "backend/app/modules/daemon/sillyspec_compare.py",
+        "backend/app/modules/daemon/tests/test_sillyspec_compare.py"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：改动已随主仓提交 28b758edc 落地，同 task-01 diff 通道说明；文案分叉 3 用例绿）"
+    },
+    {
+      "task": "task-06",
+      "status": "missing",
+      "verifiedFiles": [
+        "frontend/src/lib/api-types.ts",
+        "backend/openapi.json",
+        "frontend/src/components/changes/conflict-compare-modal.tsx",
+        "frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx"
+      ],
+      "exempt": true,
+      "exemptionReason": "（豁免：改动已随主仓提交 28b758edc 落地（含 sillyhub-daemon/src/api-types.ts 同源产物）"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
   }
 }
