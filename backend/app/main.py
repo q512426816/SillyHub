@@ -51,6 +51,10 @@ from app.modules.mcp_gateway.router import router as mcp_gateway_router
 from app.modules.mcp_gateway.server import mcp, mount_mcp
 from app.modules.mcp_gateway.sse import router as mcp_sse_router
 
+# 2026-09-10-mcp-central-registry task-03：MCP 中央资产库 /api/mcp-servers* 13 端点
+# （CRUD/binding/导入/模板/诊断，双层权限矩阵在 router + service）。
+from app.modules.mcp_registry.router import router as mcp_registry_router
+
 # 2026-08-29-approval-notify-push task-07：站内通知 REST 四端点
 # （列表/未读数/单条已读/全部已读；SSE events 端点归 task-08）。
 from app.modules.notification.router import router as notification_router
@@ -898,6 +902,9 @@ def create_app() -> FastAPI:
     app.include_router(session_attachment_router, prefix="/api")
     # 2026-07-07-skills-mcp-management-ui task-02：平台 CustomSkill admin CRUD。
     app.include_router(skills_router, prefix="/api")
+    # 2026-09-10-mcp-central-registry task-03：MCP 中央资产库（/api/mcp-servers*
+    # 13 端点；router 内静态段子路由先于 /{server_id} 声明，防 templates 被吞）。
+    app.include_router(mcp_registry_router, prefix="/api")
     app.include_router(worktree_router, prefix="/api")
     app.include_router(lease_router, prefix="/api")
     app.include_router(git_gateway_router, prefix="/api")
