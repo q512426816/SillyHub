@@ -10,6 +10,13 @@
 - claude 旧值/缺省零回归（缺省 ANTHROPIC_AUTH_TOKEN、旧两字面量照常可传，
   Update/FetchModels 的 None=不动语义不变）。
 
+task-05（change 2026-09-10-multi-provider-injection / FR-04 / D-008 / D-012）追加：
+
+- ``agent_kind`` 词表增 ``codex``（daemon 文件层注入，仅 Create 一处）——
+  原「codex 仍被拒」用例翻转为接受，改用真未知字面量（gemini）保留拒绝；
+- Create 侧 pi × openai_chat 禁配（两层注入均不生效 → 422），codex/claude ×
+  openai_chat 不受限（Update 侧禁配 DB 用例见 test_llm_provider.py TestCrudFlow）。
+
 纯 pydantic 校验用例，不触 DB / service / router（schema 层单测即可裁决）。
 """
 
@@ -51,9 +58,60 @@ class TestPiKindCreatable:
         assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
 
     def test_unknown_kind_still_rejected(self) -> None:
-        """值域只放开 pi：其余字面量（如 codex）仍被 Literal 拒。"""
+        """值域只放开 pi/codex：真未知字面量（如 gemini）仍被 Literal 拒。"""
         with pytest.raises(ValidationError):
-            LlmProviderCreate(name=_NAME, agent_kind="codex")
+            LlmProviderCreate(name=_NAME, agent_kind="gemini")
+
+
+# ── 1b. codex 词表（task-05 / FR-04，D-008 衔接并行 pi 基础上增补）───────────
+
+
+class TestCodexVocab:
+    def test_codex_kind_accepted(self) -> None:
+        """task-05 翻转：codex 进词表（daemon 文件层注入），Create 校验通过。"""
+        dto = LlmProviderCreate(name=_NAME, agent_kind="codex")
+        assert dto.agent_kind == "codex"
+
+    def test_codex_with_env_auth_field_valid(self) -> None:
+        """codex + env 名 auth_field 同样可建（auth_field pattern 与 kind 正交）。"""
+        dto = LlmProviderCreate(name=_NAME, agent_kind="codex", auth_field="OPENAI_API_KEY")
+        assert dto.agent_kind == "codex"
+        assert dto.auth_field == "OPENAI_API_KEY"
+
+    def test_codex_without_auth_field_keeps_default(self) -> None:
+        """codex 不传 auth_field → 缺省 ANTHROPIC_AUTH_TOKEN（缺省语义不变）。"""
+        dto = LlmProviderCreate(name=_NAME, agent_kind="codex")
+        assert dto.auth_field == "ANTHROPIC_AUTH_TOKEN"
+
+
+# ── 1c. pi × openai_chat 禁配（task-05 / FR-04 / D-012，Create 侧 422）────────
+
+
+class TestPiOpenaiChatForbidden:
+    def test_pi_with_openai_chat_rejected(self) -> None:
+        """pi × openai_chat 两层注入均不生效 → ValidationError（FastAPI 422）。"""
+        with pytest.raises(ValidationError):
+            LlmProviderCreate(name=_NAME, agent_kind="pi", api_format="openai_chat")
+
+    def test_pi_with_anthropic_passes(self) -> None:
+        """pi × anthropic 是唯一合法组合（env 层注入消费）。"""
+        dto = LlmProviderCreate(name=_NAME, agent_kind="pi", api_format="anthropic")
+        assert dto.api_format == "anthropic"
+
+    def test_pi_default_format_passes(self) -> None:
+        """pi 不传 api_format → 缺省 anthropic，不受禁配影响。"""
+        dto = LlmProviderCreate(name=_NAME, agent_kind="pi")
+        assert dto.api_format == "anthropic"
+
+    def test_codex_with_openai_chat_passes(self) -> None:
+        """codex × openai_chat 不禁（litellm_proxy 通道，D-006）。"""
+        dto = LlmProviderCreate(name=_NAME, agent_kind="codex", api_format="openai_chat")
+        assert dto.api_format == "openai_chat"
+
+    def test_claude_with_openai_chat_passes(self) -> None:
+        """claude × openai_chat 不禁（既有 litellm_proxy 用例零回归）。"""
+        dto = LlmProviderCreate(name=_NAME, agent_kind="claude", api_format="openai_chat")
+        assert dto.api_format == "openai_chat"
 
 
 # ── 2. auth_field pattern（Create：非法 env 名拒绝清单）───────────────────────

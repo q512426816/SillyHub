@@ -33,7 +33,11 @@ from app.core.errors import PermissionDenied
 from app.modules.llm_provider.model import LlmProvider
 from app.modules.llm_provider.probe import ProviderProbeResult
 from app.modules.llm_provider.schema import LlmProviderCreate, LlmProviderUpdate
-from app.modules.llm_provider.service import LlmProviderNotFound, LlmProviderService
+from app.modules.llm_provider.service import (
+    LlmProviderKindFormatForbidden,
+    LlmProviderNotFound,
+    LlmProviderService,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -244,6 +248,78 @@ class TestCrudFlow:
             await svc.get(created.id, user_id)
         # DB 行确实没了
         assert await db_session.get(LlmProvider, created.id) is None
+
+    # ── task-05（2026-09-10-multi-provider-injection / FR-04）：codex 建/读 +
+    # pi × openai_chat Update 侧禁配（service 取行后判，Plan 约束 2）───────────
+
+    @pytest.mark.asyncio
+    async def test_create_and_get_codex_provider_roundtrip(self, db_session: AsyncSession) -> None:
+        """codex 完整建/读：agent_kind=codex + openai_chat 合法落库再取回。"""
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+
+        created = await svc.create(
+            user_id,
+            _create_payload(name="codex-pool", agent_kind="codex", api_format="openai_chat"),
+        )
+        fetched = await svc.get(created.id, user_id)
+
+        assert fetched.agent_kind == "codex"
+        assert fetched.api_format == "openai_chat"
+        assert fetched.auth_field == "ANTHROPIC_AUTH_TOKEN"  # 缺省语义不变
+
+    @pytest.mark.asyncio
+    async def test_patch_pi_row_to_openai_chat_raises_422(self, db_session: AsyncSession) -> None:
+        """pi 行 patch api_format=openai_chat → 422 拒绝且行未变（D-012 禁配）。"""
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        created = await svc.create(user_id, _create_payload(name="pi-pool", agent_kind="pi"))
+
+        with pytest.raises(LlmProviderKindFormatForbidden) as exc_info:
+            await svc.update(created.id, user_id, LlmProviderUpdate(api_format="openai_chat"))
+
+        assert exc_info.value.http_status == 422
+        # 行未被改动：api_format 保持创建时的 anthropic
+        fresh = await db_session.get(LlmProvider, created.id)
+        assert fresh is not None
+        assert fresh.api_format == "anthropic"
+        assert fresh.agent_kind == "pi"
+
+    @pytest.mark.asyncio
+    async def test_patch_pi_row_other_fields_still_allowed(self, db_session: AsyncSession) -> None:
+        """禁配只拦 pi×openai_chat 组合：pi 行改其它字段（含 anthropic 显式回写）照常。"""
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        created = await svc.create(user_id, _create_payload(name="pi-rename", agent_kind="pi"))
+
+        patched = await svc.update(
+            created.id,
+            user_id,
+            LlmProviderUpdate(name="pi-renamed", api_format="anthropic"),
+        )
+
+        assert patched.name == "pi-renamed"
+        assert patched.api_format == "anthropic"
+
+    @pytest.mark.asyncio
+    async def test_patch_claude_and_codex_rows_to_openai_chat_allowed(
+        self, db_session: AsyncSession
+    ) -> None:
+        """对照组：claude/codex 行 patch openai_chat 均合法（codex 不禁，D-006）。"""
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        claude_row = await svc.create(user_id, _create_payload(name="claude-x"))
+        codex_row = await svc.create(user_id, _create_payload(name="codex-x", agent_kind="codex"))
+
+        patched_claude = await svc.update(
+            claude_row.id, user_id, LlmProviderUpdate(api_format="openai_chat")
+        )
+        patched_codex = await svc.update(
+            codex_row.id, user_id, LlmProviderUpdate(api_format="openai_chat")
+        )
+
+        assert patched_claude.api_format == "openai_chat"
+        assert patched_codex.api_format == "openai_chat"
 
 
 # ── 加密落盘（D-001）────────────────────────────────────────────────────────

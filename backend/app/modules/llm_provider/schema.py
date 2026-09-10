@@ -16,8 +16,10 @@ class LlmProviderCreate(BaseModel):
     name: str
     # task-04（2026-09-10-review-dispatch-platform-fixes / D-002@v1）：放开 pi——
     # 平台 worker 走独立配额池凭证（daemon 侧 PiCredentialInjector 消费）。
+    # task-05（2026-09-10-multi-provider-injection / FR-04）：词表增 codex——
+    # codex 不走 env 注入器，凭证经 daemon 文件层（会话隔离 CODEX_HOME，D-012）注入。
     # agent_kind 仅 Create 有该字段，Update/FetchModelsRequest 不新增。
-    agent_kind: Literal["claude", "pi"] = "claude"
+    agent_kind: Literal["claude", "pi", "codex"] = "claude"
     base_url: str | None = None
     api_key: str | None = None
     model: str | None = None
@@ -36,6 +38,23 @@ class LlmProviderCreate(BaseModel):
     is_default: bool = False
     # 2026-08-20 task-12（D-9）：多模态三态；None=不动（更新）/auto（创建默认走列默认）。
     multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
+
+    @model_validator(mode="after")
+    def _forbid_pi_openai_chat(self) -> LlmProviderCreate:
+        """pi × openai_chat 禁配（task-05 / FR-04 / D-012 连带声明）。
+
+        该组合两层注入均不生效：pi env 层不带端点（不读 BASE_URL）、文件层
+        models.json 仅 anthropic 形态直连，openai_chat 通道对 pi 无消费方。
+        Create 侧在此 422（ValidationError 自然冒泡）；Update 侧无 agent_kind
+        字段（Grill B-4），组合校验落 service 层取行后判（Plan 约束 2）。
+        codex/claude × openai_chat 不受限（codex 走 litellm_proxy 通道，D-006）。
+        """
+        if self.agent_kind == "pi" and self.api_format == "openai_chat":
+            raise ValueError(
+                "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），"
+                "请改用 anthropic 格式或选择 codex/claude 供应商"
+            )
+        return self
 
 
 class LlmProviderUpdate(BaseModel):

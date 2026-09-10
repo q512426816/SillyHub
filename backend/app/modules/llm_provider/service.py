@@ -51,6 +51,18 @@ class LlmProviderNotFound(AppError):
     http_status = 404
 
 
+class LlmProviderKindFormatForbidden(AppError):
+    """pi × openai_chat 禁配 Update 侧兜底（task-05 / FR-04 / D-012 连带声明）。
+
+    ``LlmProviderUpdate`` 无 ``agent_kind`` 字段（Grill B-4），组合校验只能在
+    ``update`` 取行后判（Plan 约束 2）；Create 侧由 schema ``model_validator``
+    先行 422。code 循既有 ``HTTP_<status>_<EVENT>`` 命名范式（N818 ignore）。
+    """
+
+    code = "HTTP_422_LLM_PROVIDER_KIND_FORMAT_FORBIDDEN"
+    http_status = 422
+
+
 # ── fetch-models 错误分类（task-02 / D-006）──────────────────────────────────
 # 4 类事件码遵循既有 AppError ``HTTP_<status>_<EVENT>`` 命名范式（N818 ignore）。
 
@@ -235,6 +247,16 @@ class LlmProviderService:
     ) -> LlmProvider:
         row = await self.get(provider_id, user_id)
         updates = data.model_dump(exclude_unset=True)
+
+        # task-05（FR-04 / D-012）：pi × openai_chat 禁配 Update 侧取行后判——
+        # Update DTO 无 agent_kind，只有拿到行才知道组合；仅当本次显式把
+        # api_format 置为 openai_chat 且行是 pi 时拒绝（codex/claude 不受限）。
+        if updates.get("api_format") == "openai_chat" and row.agent_kind == "pi":
+            raise LlmProviderKindFormatForbidden(
+                "pi 供应商不支持 openai_chat API 格式（两层注入均不生效），"
+                "请改用 anthropic 格式或选择 codex/claude 供应商",
+                details={"provider_id": str(provider_id), "agent_kind": row.agent_kind},
+            )
 
         # api_key 单独处理：None = 不动原密钥；非 None 才重新加密
         new_api_key = updates.pop("api_key", None)
