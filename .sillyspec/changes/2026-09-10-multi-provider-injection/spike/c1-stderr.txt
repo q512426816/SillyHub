@@ -1,2 +1,0 @@
-[33m⚠ Warning: The provided API key is invalid.[0m
-Please check you have the right key, create a new one, or authenticate without it.

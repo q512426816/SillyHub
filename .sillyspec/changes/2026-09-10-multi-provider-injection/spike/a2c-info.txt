@@ -1,2 +1,0 @@
-CODEX_HOME_A2c=/tmp/tmp.Y771prXv8x
-exit=0

@@ -1,2 +1,0 @@
-CODEX_HOME_A2=/tmp/tmp.dA1VkmBHfq
-exit=1
