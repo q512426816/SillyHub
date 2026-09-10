@@ -15,7 +15,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
 ## 契约摘要
 - 全局骨架：
   - `app-shell.tsx` — 侧栏按 SECTION_ORDER 渲染分组；菜单隔离（/ppm/* 只渲染 ppm section，其它路径只渲染非 ppm section）；条目经 `visibleMenusBySection(user, section)` 权限过滤；菜单高亮为最长匹配独占（见「关键逻辑」；ql-20260903-011）；本文件仅管图标映射（MENU_ICON_MAP），菜单条目数据来自 menu-permissions。
-  - `top-bar.tsx` — 顶栏（平台切换 / 菜单 section 隔离与 AppShell 一致）
+  - `top-bar.tsx` — 顶栏（平台切换 / 菜单 section 隔离与 AppShell 一致）；可选 avatar prop 用户区头像（useAvatarSrc blob → AvatarImage，无图/失败首字回退，app-shell 传 user.avatar，2026-09-10-account-avatar-upload）
   - `antd-providers.tsx` — ConfigProvider（zhCN locale + token + Table 主题，dayjs zh-cn 双保险）
   - `error-boundary.tsx` / `logout-confirm-dialog.tsx`
 - 会话域（daemon/ + sessions/，两处共享子组件）：
@@ -53,7 +53,9 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `create-group-wizard.tsx` — 建群向导三步：群名→邀请用户→配置 agent 成员
     （六要素表单可添加多个，不内置角色模板）
   - `member-panel.tsx` — 成员面板：用户成员 presence 绿点/移除；agent 成员六要素
-    展示+热切换弹窗（引擎/模型/方案下轮生效；机器/工作区切换提示记忆重置）+重置记忆
+    展示+热切换弹窗（引擎/模型/方案下轮生效；机器/工作区切换提示记忆重置）+重置记忆；
+    `group-member-avatar.tsx` 头像上传件 2026-09-10-account-avatar-upload 起支持可选
+    ownerType prop（默认群成员维度不变，个人中心两页传 USER_AVATAR_OWNER_TYPE 复用）
   - sessions portal 群聊分区（数据统一走 GET /api/daemon/group-chats 按成员过滤；
     群视图>真会话>预会话优先级；建群与 agent_sessions 变更信号 invalidate
     ["groupChats"]）；session-mention-popover 判别联合加 `{kind:'member'}`

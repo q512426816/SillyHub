@@ -14,8 +14,9 @@
  *     既有配色阶——agent=brand 紫 / 用户=info 青 / member_id 哈希分色等）。
  *
  * 上传管线（GroupMemberAvatarUpload）：POST /api/file/upload（multipart +
- * owner_type="group_member_avatar"，lib/file/api uploadFile 现成封装）→
- * FileUploadResp.id → avatar 值 = getFileDownloadUrl(id)（/api/file/{id}）。
+ * owner_type 默认 "group_member_avatar"、可经 ownerType prop 参数化——个人中心
+ * 复用时传 USER_AVATAR_OWNER_TYPE "user_avatar"，lib/file/api uploadFile 现成
+ * 封装）→ FileUploadResp.id → avatar 值 = getFileDownloadUrl(id)（/api/file/{id}）。
  * onChange(null) = 恢复默认（建群侧清本地值；成员面板侧调 PATCH avatar=""——
  * 后端 None=不改、空串=清除）。
  */
@@ -33,6 +34,13 @@ import { cn } from "@/lib/utils";
 
 /** 头像文件上传归属类型（文件中心 owner 维度，列表/审计按此归组）。 */
 export const GROUP_MEMBER_AVATAR_OWNER_TYPE = "group_member_avatar";
+
+/**
+ * 用户头像上传归属类型（文件中心 owner 维度新取值，2026-09-10-account-avatar-upload）。
+ * 个人中心（桌面/移动 account 页）复用 GroupMemberAvatarUpload 上传头像时传此值，
+ * 把文件归到「用户头像」维度（字符串维度无枚举约束，后端文件中心零改动）。
+ */
+export const USER_AVATAR_OWNER_TYPE = "user_avatar";
 
 // 2026-09-09-sessions-visual-refresh task-03（D-006@v2）：avatarFileId /
 // useAvatarSrc 平移至 components/chat/use-avatar-src.ts（逻辑单份），此处
@@ -111,12 +119,18 @@ export interface GroupMemberAvatarUploadProps {
   name: string;
   /** 紧凑形态（成员面板行内）：图标按钮；默认整态（建群向导）：文字按钮。 */
   compact?: boolean;
+  /**
+   * 上传归属类型（文件中心 owner 维度）：默认群成员头像 group_member_avatar
+   * （既有建群向导/成员面板零改动）；个人中心传 USER_AVATAR_OWNER_TYPE。
+   */
+  ownerType?: string;
 }
 
 /**
  * 群成员头像上传控件：预览 + 上传（POST /api/file/upload，
- * owner_type="group_member_avatar"）+ 可清除恢复默认。建群向导（本地值）与
- * 成员面板（onChange 直调 PATCH）共用同一上传管线。
+ * owner_type 默认 "group_member_avatar"，可经 ownerType prop 参数化）+
+ * 可清除恢复默认。建群向导（本地值）与成员面板（onChange 直调 PATCH）共用
+ * 同一上传管线。
  */
 export function GroupMemberAvatarUpload({
   value,
@@ -124,6 +138,7 @@ export function GroupMemberAvatarUpload({
   label,
   name,
   compact = false,
+  ownerType = GROUP_MEMBER_AVATAR_OWNER_TYPE,
 }: GroupMemberAvatarUploadProps) {
   const notify = useNotify();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -142,7 +157,7 @@ export function GroupMemberAvatarUpload({
     setUploading(true);
     try {
       const resp = await uploadFile(file, {
-        owner_type: GROUP_MEMBER_AVATAR_OWNER_TYPE,
+        owner_type: ownerType,
       });
       onChange(getFileDownloadUrl(resp.id));
     } catch (err) {

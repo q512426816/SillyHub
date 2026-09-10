@@ -50,6 +50,9 @@ class User(BaseModel, table=True):
     display_name: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
     # 工号(PPM 个人工作台 FR-02 / D-002@v1):nullable,不加唯一约束/索引,本任务不回填值。
     employee_no: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
+    # 头像 URL(2026-09-10-account-avatar-upload / D-001@v1):存文件中心 /api/file/{id}
+    # 或 http(s) 外链;nullable,本列永不存空串,NULL=未设置(前端回退首字),清除置 NULL。
+    avatar: str | None = Field(default=None, sa_column=Column(String(512), nullable=True))
     status: str = Field(default="active", sa_column=Column(String(20), nullable=False))
     is_platform_admin: bool = Field(
         default=False,

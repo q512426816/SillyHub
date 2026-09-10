@@ -37,6 +37,7 @@ from .helpers import (
     GROUP_USER_MEMBER_LIMIT,
     GroupChatInvalid,
     GroupMemberAddRead,
+    _apply_user_avatar_fallback,
     _build_config_snapshot,
     _build_llm_provider_warnings,
     _ensure_display_name_available,
@@ -200,7 +201,10 @@ async def add_member(
             await svc._session.refresh(revived)
             # task-06（§5.3 audience / §8 group.member.added）。
             await svc._publish_group_sessions_changed(group, "status_changed")
-            return GroupMemberAddRead.model_validate(revived)
+            revived_read = GroupMemberAddRead.model_validate(revived)
+            # user 成员平台头像回落（D-002）：target 已在作用域，免额外查询。
+            _apply_user_avatar_fallback([revived_read], {target.id: target.avatar})
+            return revived_read
         member = AgentGroupMember(
             group_id=group.id,
             member_type="user",
@@ -216,7 +220,10 @@ async def add_member(
         # task-06（§5.3 audience / §8 group.member.added）：新成员即时进
         # 自己的刷新受众（否则要等下一次任意群事件才看到群）。
         await svc._publish_group_sessions_changed(group, "status_changed")
-        return GroupMemberAddRead.model_validate(member)
+        member_read = GroupMemberAddRead.model_validate(member)
+        # user 成员平台头像回落（D-002）：target 已在作用域，免额外查询。
+        _apply_user_avatar_fallback([member_read], {target.id: target.avatar})
+        return member_read
 
     assert payload.agent is not None
     cfg = payload.agent
@@ -509,7 +516,14 @@ async def update_member(
     group = await svc._get_group(group_id_val)
     # task-06（§5.3 audience）：昵称/六要素变更 → 成员 chips 快照刷新。
     await svc._publish_group_sessions_changed(group, "status_changed")
-    return GroupMemberRead.model_validate(member)
+    member_read = GroupMemberRead.model_validate(member)
+    # user 成员平台头像回落（D-002）：单成员返回按 user_id 单查目标 user
+    # （agent 成员不查不动）。
+    if member.member_type == "user" and member.user_id is not None:
+        target_user = await svc._session.get(User, member.user_id)
+        if target_user is not None:
+            _apply_user_avatar_fallback([member_read], {member.user_id: target_user.avatar})
+    return member_read
 
 
 async def _hot_switch_shadow_config(

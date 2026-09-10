@@ -5,6 +5,7 @@ title_zh: 'verify 验收（对照 design/requirements + 相关测试全绿）'
 author: 'qinyi'
 created_at: 2026-09-10 19:10:51
 priority: P0
+task_type: verification
 depends_on: ['task-01', 'task-02', 'task-03', 'task-04', 'task-05', 'task-06', 'task-07', 'task-08', 'task-09', 'task-10']
 blocks: []
 requirement_ids: [FR-01, FR-02, FR-03, FR-04, FR-05, FR-06]

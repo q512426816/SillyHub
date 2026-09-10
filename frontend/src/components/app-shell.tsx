@@ -470,7 +470,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           collapsed ? "ml-[60px]" : "ml-[260px]"
         }`}
       >
-        <TopBar onLogout={requestLogout} displayName={displayName} />
+        {/* task-09（2026-09-10-account-avatar-upload / FR-05）：顶栏接入平台头像
+            （useSession user.avatar，无头像 null → TopBar 首字回退现状不动）。 */}
+        <TopBar
+          onLogout={requestLogout}
+          displayName={displayName}
+          avatar={user?.avatar ?? null}
+        />
         <div className="min-w-0 flex-1">{children}</div>
         <LogoutConfirmDialog
           open={logoutOpen}

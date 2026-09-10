@@ -58,6 +58,23 @@ class ChangePasswordRequest(BaseModel):
         return assert_password_strength(v)
 
 
+class UpdateMyAvatarRequest(BaseModel):
+    """Body of ``PATCH /api/auth/me/avatar``（用户自助设置头像，2026-09-10-account-avatar-upload / D-001@v1）。
+
+    ``avatar`` 三态语义：有值=设置（文件中心 ``/api/file/{id}`` 或 http(s) 外链）、
+    空串 ``''``=清除（端点置 NULL，users.avatar 永不存空串）、``None``/缺省=不改。
+    ``max_length=512`` 与 ``users.avatar`` 列宽一致；``extra="forbid"`` 拒绝多余字段。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    avatar: str | None = Field(
+        default=None,
+        max_length=512,
+        description="头像 URL（文件中心 /api/file/{id}）；值=设置，''=清除，None=不改",
+    )
+
+
 class TokenPair(BaseModel):
     """Issued on login + refresh."""
 
@@ -76,6 +93,9 @@ class UserRead(BaseModel):
     username: str | None
     display_name: str | None
     employee_no: str | None
+    # 头像 URL(文件中心 /api/file/{id} 或外链);None=未设置(前端回退首字)。
+    # default=None 兼容不传 avatar 的既有 mock fixture;from_attributes 由 /me 自动带出。
+    avatar: str | None = None
     status: str
     is_platform_admin: bool
     last_login_at: datetime | None

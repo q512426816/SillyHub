@@ -21,6 +21,12 @@ export interface SessionUser {
   displayName: string;
   is_platform_admin?: boolean;
   permissions?: string[];
+  /**
+   * 头像 URL（文件中心 /api/file/{id} 或外链）；null/undefined = 未设置（首字回退）。
+   * 可选字段（2026-09-10-account-avatar-upload）：旧 localStorage user 缺该字段按
+   * undefined 兼容，persist version 不 bump，storage 回放只回放存在的字段不误清。
+   */
+  avatar?: string | null;
 }
 
 export interface SessionTokens {

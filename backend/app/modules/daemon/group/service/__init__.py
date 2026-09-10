@@ -159,6 +159,7 @@ patch("app.modules.daemon.group.service.<sym>") 全部继续拦截。
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -466,8 +467,16 @@ class GroupChatService:
     async def _get_member(self, group_id: uuid.UUID, member_id: uuid.UUID) -> AgentGroupMember:
         return await _helpers._get_member(self, group_id=group_id, member_id=member_id)
 
-    def _to_read(self, group: AgentGroupChat, members: list[AgentGroupMember]) -> GroupChatRead:
-        return _helpers._to_read(self, group=group, members=members)
+    def _to_read(
+        self,
+        group: AgentGroupChat,
+        members: list[AgentGroupMember],
+        *,
+        avatar_by_user_id: Mapping[uuid.UUID, str | None] | None = None,
+    ) -> GroupChatRead:
+        return _helpers._to_read(
+            self, group=group, members=members, avatar_by_user_id=avatar_by_user_id
+        )
 
     # ── 项目口径 helper（quick 群 PPM 项目化）────────────────────────────────
 
