@@ -79,6 +79,10 @@ from app.modules.release.router import router as release_router
 from app.modules.runtime.router import router as runtime_router
 from app.modules.scan_docs.router import router as scan_docs_router
 from app.modules.settings.router import router as settings_router
+
+# 2026-09-11-skills-central-library task-01：git 技能源管理 /api/skill-sources* 五端点
+# （admin 门在 router 内 SETTINGS_ADMIN；SSRF+git 探测在 service）。
+from app.modules.skill_source.router import router as skill_source_router
 from app.modules.skills.router import router as skills_router
 from app.modules.spec_workspace.router import router as spec_workspace_router
 from app.modules.task import task_router
@@ -902,6 +906,9 @@ def create_app() -> FastAPI:
     app.include_router(session_attachment_router, prefix="/api")
     # 2026-07-07-skills-mcp-management-ui task-02：平台 CustomSkill admin CRUD。
     app.include_router(skills_router, prefix="/api")
+    # 2026-09-11-skills-central-library task-01：git 技能源管理（GET/POST
+    # /api/skill-sources + PATCH/DELETE /{id} + POST /{id}/refresh，均 admin）。
+    app.include_router(skill_source_router, prefix="/api")
     # 2026-09-10-mcp-central-registry task-03：MCP 中央资产库（/api/mcp-servers*
     # 13 端点；router 内静态段子路由先于 /{server_id} 声明，防 templates 被吞）。
     app.include_router(mcp_registry_router, prefix="/api")
