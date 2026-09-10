@@ -265,3 +265,15 @@
 - backend/app/modules/daemon/router/daemon_rpc.py（渲染 503 except 补 log.warning daemon_mcp_render_failed：error_type/摘要 200 截断/user_id/workspace_id——原异常细节只进 HTTPException from 链，排障只能复现；补 get_logger 导入）
 验证：backend 176 passed（mcp_registry 153 + daemon mcp 端点 23）+ ruff/mypy clean
 备注：master key v2 重生成同窗口执行（backend/.env，用户裁决；dev 库 9 行 llm_provider 旧 v1 密文需重录）
+
+## ql-20260910-015-8e1b | 2026-09-10 22:30:53 | 用量上限类报错前端升级分类，Cursor usage limit 失败卡不再显「运行失败 · unknown」
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/agent-log/normalize.ts（buildErrorLogItem 增 isUsageLimitRaw + unknown 升级 quota_exceeded 分支）
+- frontend/src/components/agent-log/__tests__/normalize.test.ts（ql-20260910-015 describe +4 用例）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引加 ql-20260910-015 条目）
+需求：用量上限类报错前端升级分类，Cursor usage limit 失败卡不再显「运行失败 · unknown」
+根因：daemon 分类器非 claude 引擎一律兜底 unknown（D-001 扩展点未覆盖 cursor/codex），claude 规则 quota 判定又被 has429 前置——Cursor 的 usage limit 报错无 429 两条路都认不出，页面只剩兜底文案（生产实例会话 7fb5022f）
+方案：normalize.ts buildErrorLogItem 增 isUsageLimitRaw 特征识别（usage limit / insufficient[_ ]quota / exceeded your current quota / 中文额度·使用上限），type 未识别（unknown）且 raw 命中时升 quota_exceeded + 中文 message「供应商额度或用量已达上限」+ 切换/升级套餐 hint，raw 原样保留供查看详情；历史已落库 run 不改数据即修好显示（三消费点 turn-timeline/session-panel page/dialog 都走该函数）；后端已明确分类的不覆盖。照 isCliAuthTransient（ql-20260903-011）同款先例
+结果：normalize.test.ts +4 用例共 91 全绿；下游 session-panel-dialog + turn-timeline-auto-resume-badge + run-error-item 102 用例绿；tsc 我方 0 错误（scope-audit-command-card 2 个为并行会话在途预存）；未部署，需重新打包前端镜像后生效

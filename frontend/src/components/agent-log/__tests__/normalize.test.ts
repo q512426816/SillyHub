@@ -808,6 +808,65 @@ describe("ql-20260903-011：CLI 合成鉴权错误（远端 401 误报 Not logge
   });
 });
 
+describe("ql-20260910-015：用量上限报错升级（Cursor usage limit 显示「运行失败 · unknown」）", () => {
+  it("buildErrorLogItem：raw 命中 Cursor usage limit 签名且 type=unknown → 升级 quota_exceeded + 中文文案", () => {
+    // 2026-09-10 会话 7fb5022f 生产实例：daemon 分类器非 claude 兜底 unknown，
+    // error_detail 仅 raw 携带原文。
+    const item = buildErrorLogItem({
+      type: "unknown",
+      code: null,
+      message: "运行失败",
+      retryable: false,
+      hint: null,
+      raw: "ActionRequiredError: You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more.",
+    });
+    expect(item).not.toBeNull();
+    expect(item!.type).toBe("quota_exceeded");
+    expect(item!.retryable).toBe(false);
+    expect(item!.message).toContain("上限");
+    expect(item!.hint).toContain("切换");
+    // raw 原样保留供「查看详情」排查。
+    expect(item!.raw).toContain("usage limit");
+  });
+
+  it("buildErrorLogItem：其它供应商用量/配额文案同升级（OpenAI / 中文额度）", () => {
+    expect(
+      buildErrorLogItem({ type: "unknown", raw: "You exceeded your current quota" })?.type,
+    ).toBe("quota_exceeded");
+    expect(
+      buildErrorLogItem({ type: "unknown", raw: "insufficient_quota: quota exceeded" })?.type,
+    ).toBe("quota_exceeded");
+    expect(
+      buildErrorLogItem({ type: "unknown", raw: "您的本月使用上限已到" })?.type,
+    ).toBe("quota_exceeded");
+  });
+
+  it("buildErrorLogItem：已有明确分类不覆盖（后端正确归类优先）", () => {
+    const item = buildErrorLogItem({
+      type: "rate_limited",
+      code: "429",
+      message: "请求被限流",
+      retryable: true,
+      hint: "请稍候重试",
+      raw: "API Error: Request rejected (429) · usage limit window",
+    });
+    expect(item!.type).toBe("rate_limited");
+    expect(item!.message).toBe("请求被限流");
+  });
+
+  it("buildErrorLogItem：普通 unknown 错误（无用量特征）不受影响", () => {
+    const item = buildErrorLogItem({
+      type: "unknown",
+      message: "运行失败",
+      retryable: false,
+      hint: null,
+      raw: "some other failure text",
+    });
+    expect(item!.type).toBe("unknown");
+    expect(item!.message).toBe("运行失败");
+  });
+});
+
 // ============================================================================
 // task-10（2026-09-03-agent-provider-abstraction / FR-04 / D-001@v1）：
 // agent_event 结构化轨（fromAgentEvent 双轨）。

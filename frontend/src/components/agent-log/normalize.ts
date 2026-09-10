@@ -370,6 +370,25 @@ function asStringOrDefault(value: unknown, fallback: string): string {
 }
 
 /**
+ * ql-20260910-015：用量/额度上限类报错的 raw 特征。
+ *
+ * daemon 分类器对非 claude 引擎一律兜底 unknown（classifier.ts D-001 扩展点，
+ * cursor/codex 未实现），且 claude 规则的 quota 判定被 has429 前置——Cursor 的
+ * `You've hit your usage limit`（无 429）两条路都认不出，页面显示
+ * 「运行失败 · unknown」（2026-09-10 会话 7fb5022f 生产实例）。覆盖 Cursor /
+ * OpenAI / Gemini 的常见用量上限文案 + 中文额度关键词。
+ */
+function isUsageLimitRaw(raw: string | null): boolean {
+  if (raw === null) return false;
+  return (
+    /usage\s*limit/i.test(raw) ||
+    /insufficien(?:t|cy)[\s_-]*quota/i.test(raw) ||
+    /exceeded\s+your\s+current\s+quota/i.test(raw) ||
+    /额度已耗尽|用量已达上限|使用上限/.test(raw)
+  );
+}
+
+/**
  * task-08：从 run.error_detail（task-07 透传的 OpenAPI 宽松字典
  * `{ [key: string]: unknown } | null`）安全提取结构化 ErrorLogItem。
  *
@@ -384,6 +403,10 @@ function asStringOrDefault(value: unknown, fallback: string): string {
  * 升 type=auth_failed + retryable=true（引导出「重新发送」操作），message/hint
  * 换成事实性中文文案（后端已自动重投一次，见 run_sync
  * _maybe_autoretry_auth_transient_turn）；raw 原样保留供「查看详情」排查。
+ *
+ * ql-20260910-015：用量上限报错升级——type 未识别（unknown）且 raw 命中用量
+ * 上限特征（isUsageLimitRaw）时升 quota_exceeded + 中文文案。仅动 unknown：
+ * 后端已给出明确分类（rate_limited 等）不覆盖。raw 原样保留。
  */
 export function buildErrorLogItem(
   errorDetail: { [key: string]: unknown } | null | undefined,
@@ -403,8 +426,19 @@ export function buildErrorLogItem(
       raw,
     };
   }
+  const type = isModelErrorType(errorDetail["type"]) ? errorDetail["type"] : "unknown";
+  if (type === "unknown" && isUsageLimitRaw(raw)) {
+    return {
+      type: "quota_exceeded",
+      code: asStringOrNull(errorDetail["code"]),
+      message: "供应商额度或用量已达上限",
+      retryable: false,
+      hint: "等待用量重置或升级套餐（如 Cursor Pro），也可切换供应商后重新发送",
+      raw,
+    };
+  }
   return {
-    type: isModelErrorType(errorDetail["type"]) ? errorDetail["type"] : "unknown",
+    type,
     code: asStringOrNull(errorDetail["code"]),
     message: asStringOrDefault(errorDetail["message"], "运行失败"),
     retryable: errorDetail["retryable"] === true,
