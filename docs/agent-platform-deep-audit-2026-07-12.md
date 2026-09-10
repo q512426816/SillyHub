@@ -130,7 +130,7 @@
 - **价值**：立刻让你"真正用上 agent 团队"做并行分析
 
 #### P1-2 前端补 resume 按钮
-- **改动**：`frontend/src/lib/agent.ts` 加 `resumeRun`（后端 `resume_agent_run` API 已有，sillyhub-daemon/src/api-types.ts:29303）；智能体控制台失败/中断 run 加"续跑"按钮
+- **改动**：`frontend/src/lib/agent.ts` 加 `resumeRun`（后端 `resume_agent_run` API 已有，sillyhub-daemon/src/api-types.ts:2724）；智能体控制台失败/中断 run 加"续跑"按钮
 - **依据**：后端 `backend/app/modules/agent/coordinator.py:191` `resume_run`（token + 重置 pending）；interactive SESSION_RESUME 续上下文（claude/codex，`backend/app/modules/daemon/session/service.py`）；token 预生成（`backend/app/modules/agent/service.py`）
 - **改动量**：小
 - **注意**：batch 是整个重跑（retry_count+1），只有 interactive 真续上下文——UI 要标注

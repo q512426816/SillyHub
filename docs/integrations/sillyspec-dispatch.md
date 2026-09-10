@@ -211,5 +211,5 @@ node scripts/check-dispatch-allowed-roots.mjs --server-url http://localhost:8000
 | 守卫一默认：`[homedir()]` | `sillyhub-daemon/src/config.ts:352` |
 | per-server 配置文件定位 `configPathForServer` / `serverHash` | `sillyhub-daemon/src/config.ts:94-114` |
 | 守卫二：`PolicyEngine.judgeWrite` → `isPathUnderAnyRoot` | `sillyhub-daemon/src/policy/filesystem-policy.ts:201`、`sillyhub-daemon/src/policy/path-utils.ts:149-175` |
-| 守卫二下发：WS 推 `allowed_roots` 到 daemon | `backend/app/modules/daemon/ws_hub.py:466` |
+| 守卫二下发：WS 推 `allowed_roots` 到 daemon | `backend/app/modules/daemon/ws_hub.py:473` |
 | 守卫二 effective 计算：`daemon ∩ profile.overlay` | `backend/app/modules/agent/service.py:648-658,697-720` |
