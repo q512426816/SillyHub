@@ -1,7 +1,7 @@
 ---
 id: task-05
-title: 'Wave 5a 前端：gen:types + PATCH 客户端 + 手写 interface 同步 + SessionConfigBar 开关'
-title_zh: 'Wave 5a 前端：gen:types + PATCH 客户端 + 手写 interface 同步 + SessionConfigBar 开关'
+title: 'Wave 5 前端：gen:types + PATCH 客户端 + 手写 interface 同步 + SessionConfigBar 开关'
+title_zh: 'Wave 5 前端：gen:types + PATCH 客户端 + 手写 interface 同步 + SessionConfigBar 开关'
 author: 'qinyi'
 created_at: 2026-09-10 09:30:00
 priority: P1

@@ -1,7 +1,7 @@
 ---
 id: task-06
-title: 'Wave 5b 前端：失败卡 hint 注入 + 续跑轮徽标'
-title_zh: 'Wave 5b 前端：失败卡 hint 注入 + 续跑轮徽标'
+title: 'Wave 6 前端：失败卡 hint 注入 + 续跑轮徽标'
+title_zh: 'Wave 6 前端：失败卡 hint 注入 + 续跑轮徽标'
 author: 'qinyi'
 created_at: 2026-09-10 09:30:00
 priority: P1

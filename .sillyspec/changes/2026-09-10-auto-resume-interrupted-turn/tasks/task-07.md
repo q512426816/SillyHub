@@ -1,7 +1,7 @@
 ---
 id: task-07
-title: 'Wave 6 收尾：模块文档 + 全链集成验证'
-title_zh: 'Wave 6 收尾：模块文档 + 全链集成验证'
+title: 'Wave 7 收尾：模块文档 + 全链集成验证'
+title_zh: 'Wave 7 收尾：模块文档 + 全链集成验证'
 author: 'qinyi'
 created_at: 2026-09-10 09:30:00
 priority: P1
