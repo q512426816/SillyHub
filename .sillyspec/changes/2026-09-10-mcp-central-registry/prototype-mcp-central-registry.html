@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP 中央资产库 — 原型走读（2026-09-10-mcp-central-registry）</title>
+<style>
+  /* ── AI-Native 主题 token（对齐 frontend/src/styles/themes.ts：violet 品牌阶 × cyan accent × slate 中性） ── */
+  :root {
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-200:#ddd6fe; --brand-300:#c4b5fd;
+    --brand-400:#a78bfa; --brand-500:#8b5cf6; --brand-600:#7c3aed; --brand-700:#6d28d9;
+    --brand-800:#5b21b6; --brand-900:#4c1d95;
+    --accent:#0891b2; --accent-light:#cffafe;
+    --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0; --slate-300:#cbd5e1;
+    --slate-400:#94a3b8; --slate-500:#64748b; --slate-600:#475569; --slate-700:#334155;
+    --slate-800:#1e293b; --slate-900:#0f172a;
+    --success:#16a34a; --warning:#d97706; --error:#dc2626; --info:#0891b2;
+    --radius:8px; --shadow-sm:0 1px 2px rgba(15,23,42,.06); --shadow-md:0 4px 6px -1px rgba(15,23,42,.08),0 2px 4px -2px rgba(15,23,42,.06);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; background:var(--slate-100); color:var(--slate-800); font-size:13px; line-height:1.6; }
+  .page { max-width:1180px; margin:0 auto; padding:24px 20px 60px; }
+
+  /* 走读页头部 */
+  .doc-header { background:linear-gradient(135deg,var(--brand-700),var(--brand-900)); color:#fff; border-radius:12px; padding:22px 26px; margin-bottom:20px; }
+  .doc-header h1 { font-size:20px; font-weight:600; }
+  .doc-header p { opacity:.85; margin-top:6px; font-size:13px; }
+  .doc-toc { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+  .doc-toc a { color:#fff; text-decoration:none; background:rgba(255,255,255,.14); padding:3px 12px; border-radius:999px; font-size:12px; }
+  .doc-toc a:hover { background:rgba(255,255,255,.25); }
+
+  .section { background:#fff; border:1px solid var(--slate-200); border-radius:12px; padding:20px 24px; margin-bottom:20px; box-shadow:var(--shadow-sm); }
+  .section > h2 { font-size:15px; font-weight:600; color:var(--slate-900); margin-bottom:4px; display:flex; align-items:center; gap:8px; }
+  .section > p.desc { color:var(--slate-500); font-size:12px; margin-bottom:14px; }
+  .tag-ref { display:inline-block; font-size:10px; font-weight:600; color:var(--brand-700); background:var(--brand-100); border:1px solid var(--brand-200); border-radius:4px; padding:0 6px; line-height:18px; vertical-align:1px; }
+  .tag-fr { color:var(--accent); background:var(--accent-light); border-color:#a5f3fc; }
+
+  /* 架构图 */
+  .arch { display:grid; grid-template-columns:260px 300px 1fr; gap:14px; align-items:stretch; }
+  .arch-col { display:flex; flex-direction:column; gap:10px; }
+  .arch-col-title { font-size:11px; font-weight:600; color:var(--slate-500); text-transform:uppercase; letter-spacing:.05em; text-align:center; }
+  .box { border:1.5px solid var(--slate-200); border-radius:var(--radius); padding:10px 12px; background:var(--slate-50); position:relative; }
+  .box.db { border-color:var(--brand-300); background:var(--brand-50); }
+  .box.hl { border-color:var(--accent); background:var(--accent-light); }
+  .box b { font-size:12.5px; display:block; color:var(--slate-900); }
+  .box small { color:var(--slate-500); font-size:11px; display:block; margin-top:2px; }
+  .arrow-v { text-align:center; color:var(--slate-400); font-size:15px; line-height:1; padding:1px 0; }
+  .chip-row { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+  .chip { font-size:10px; padding:1px 7px; border-radius:999px; background:#fff; border:1px solid var(--slate-300); color:var(--slate-600); }
+  .chip.purple { border-color:var(--brand-300); color:var(--brand-700); background:var(--brand-50); }
+  .chip.cyan { border-color:var(--accent); color:var(--accent); background:#fff; }
+  .merge-stack { display:flex; flex-direction:column; gap:6px; }
+  .merge-layer { border:1px dashed var(--slate-300); border-radius:6px; padding:6px 10px; background:#fff; font-size:11.5px; color:var(--slate-700); display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .merge-layer .prio { font-size:10px; color:var(--slate-400); white-space:nowrap; }
+  .merge-layer.win { border-color:var(--accent); background:var(--accent-light); }
+
+  /* binding 语义图 */
+  .binding-flow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .bf-node { border:1.5px solid var(--brand-300); background:var(--brand-50); border-radius:var(--radius); padding:8px 14px; text-align:center; }
+  .bf-node small { display:block; font-size:10.5px; color:var(--slate-500); }
+  .bf-op { font-size:18px; font-weight:700; color:var(--brand-600); }
+  .bf-result { border:1.5px solid var(--accent); background:var(--accent-light); border-radius:var(--radius); padding:8px 14px; }
+  .note { background:var(--slate-50); border-left:3px solid var(--brand-400); padding:8px 12px; border-radius:0 6px 6px 0; font-size:12px; color:var(--slate-600); margin-top:12px; }
+
+  /* ═══ UI 原型（模拟 settings/mcp 管理页） ═══ */
+  .frame { border:1px solid var(--slate-300); border-radius:10px; overflow:hidden; box-shadow:var(--shadow-md); background:var(--slate-50); }
+  .frame-topbar { height:40px; background:var(--slate-900); display:flex; align-items:center; gap:6px; padding:0 14px; }
+  .frame-topbar .dot { width:10px; height:10px; border-radius:50%; }
+  .frame-topbar .url { margin-left:12px; background:rgba(255,255,255,.1); color:var(--slate-300); font-size:11px; padding:2px 14px; border-radius:6px; font-family:Consolas,monospace; }
+  .frame-body { display:flex; min-height:520px; }
+  .frame-side { width:170px; background:var(--slate-900); color:var(--slate-300); padding:14px 10px; font-size:12px; flex-shrink:0; }
+  .frame-side .brand { color:#fff; font-weight:600; padding:0 10px 12px; font-size:13px; border-bottom:1px solid var(--slate-800); margin-bottom:10px; }
+  .frame-side .nav { padding:7px 10px; border-radius:6px; margin-bottom:2px; display:block; color:var(--slate-400); }
+  .frame-side .nav.active { background:rgba(124,58,237,.25); color:#fff; }
+  .frame-main { flex:1; padding:18px 22px; background:#fff; }
+
+  /* PageHeader + Tab */
+  .ph { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; }
+  .ph h3 { font-size:17px; font-weight:600; color:var(--slate-900); }
+  .ph .sub { font-size:12px; color:var(--slate-500); margin-top:2px; }
+  .tabs { display:flex; gap:2px; border-bottom:1.5px solid var(--slate-200); margin-bottom:14px; }
+  .tab { padding:8px 18px; font-size:13px; color:var(--slate-500); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1.5px; }
+  .tab.active { color:var(--brand-700); border-bottom-color:var(--brand-600); font-weight:600; }
+  .tab .cnt { font-size:10px; background:var(--slate-100); border-radius:999px; padding:0 6px; margin-left:4px; color:var(--slate-500); }
+
+  /* 工具栏 */
+  .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  .input { border:1px solid var(--slate-300); border-radius:6px; padding:5px 10px; font-size:12px; color:var(--slate-400); background:#fff; min-width:180px; }
+  .select { border:1px solid var(--slate-300); border-radius:6px; padding:5px 8px; font-size:12px; background:#fff; color:var(--slate-600); }
+  .btn { border:1px solid var(--slate-300); border-radius:6px; padding:5px 12px; font-size:12px; background:#fff; color:var(--slate-700); cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+  .btn:hover { border-color:var(--brand-400); color:var(--brand-700); }
+  .btn-primary { background:var(--brand-600); border-color:var(--brand-600); color:#fff; }
+  .btn-primary:hover { background:var(--brand-700); color:#fff; }
+  .btn-diag { background:var(--accent-light); border-color:var(--accent); color:var(--accent); }
+  .vsep { width:1px; height:20px; background:var(--slate-200); margin:0 2px; }
+
+  /* 卡片网格 */
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+  .mcp-card { border:1px solid var(--slate-200); border-radius:10px; padding:14px 16px; background:#fff; box-shadow:var(--shadow-sm); position:relative; }
+  .mcp-card:hover { border-color:var(--brand-300); }
+  .mcp-card.locked-note { border-style:dashed; }
+  .card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .card-ico { width:30px; height:30px; border-radius:8px; background:var(--brand-100); color:var(--brand-700); display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+  .card-title { font-weight:600; font-size:13.5px; color:var(--slate-900); }
+  .badge { font-size:10px; padding:1px 7px; border-radius:4px; font-weight:600; }
+  .badge-stdio { background:var(--slate-100); color:var(--slate-600); border:1px solid var(--slate-300); }
+  .badge-platform { background:var(--brand-100); color:var(--brand-700); border:1px solid var(--brand-300); }
+  .badge-mine { background:var(--accent-light); color:var(--accent); border:1px solid #a5f3fc; }
+  .badge-warn { background:#fffbeb; color:var(--warning); border:1px solid #fcd34d; }
+  .cmd-line { font-family:Consolas,monospace; font-size:11px; color:var(--slate-500); background:var(--slate-50); border-radius:5px; padding:4px 8px; margin:7px 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card-meta { display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--slate-400); margin-bottom:9px; align-items:center; }
+  .lock { color:var(--slate-400); }
+  .card-foot { display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--slate-100); padding-top:9px; }
+  .switch-wrap { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--slate-600); }
+  .switch { width:32px; height:18px; border-radius:999px; background:var(--slate-300); position:relative; cursor:pointer; }
+  .switch::after { content:''; position:absolute; width:14px; height:14px; border-radius:50%; background:#fff; top:2px; left:2px; transition:.15s; }
+  .switch.on { background:var(--brand-600); }
+  .switch.on::after { left:16px; }
+  .card-ops { display:flex; gap:2px; }
+  .op-btn { border:none; background:none; color:var(--slate-400); font-size:13px; cursor:pointer; padding:3px 6px; border-radius:4px; }
+  .op-btn:hover { background:var(--slate-100); color:var(--slate-700); }
+  .footnote { text-align:center; color:var(--slate-400); font-size:11px; padding:10px 0 2px; }
+
+  /* 诊断面板（抽屉态示意） */
+  .diag-item { display:flex; gap:10px; padding:9px 12px; border:1px solid var(--slate-200); border-radius:8px; margin-bottom:8px; background:#fff; }
+  .diag-item .lv { font-size:10px; font-weight:700; border-radius:4px; padding:1px 7px; height:fit-content; white-space:nowrap; }
+  .lv-err { background:#fef2f2; color:var(--error); border:1px solid #fecaca; }
+  .lv-warn { background:#fffbeb; color:var(--warning); border:1px solid #fde68a; }
+  .lv-info { background:var(--accent-light); color:var(--accent); border:1px solid #a5f3fc; }
+  .diag-item b { font-size:12.5px; display:block; }
+  .diag-item small { color:var(--slate-500); font-size:11.5px; }
+
+  /* 弹窗 */
+  .modal-mask { background:rgba(15,23,42,.45); border-radius:8px; padding:26px 20px; display:flex; justify-content:center; align-items:flex-start; }
+  .modal { background:#fff; border-radius:10px; width:560px; box-shadow:0 20px 40px rgba(15,23,42,.25); overflow:hidden; }
+  .modal-head { padding:13px 18px; border-bottom:1px solid var(--slate-200); font-weight:600; font-size:14px; display:flex; justify-content:space-between; }
+  .modal-body { padding:16px 18px; }
+  .modal-foot { padding:11px 18px; border-top:1px solid var(--slate-200); display:flex; justify-content:flex-end; gap:8px; background:var(--slate-50); }
+  .frow { display:grid; grid-template-columns:110px 1fr; gap:10px; align-items:center; margin-bottom:10px; font-size:12.5px; }
+  .frow label { color:var(--slate-600); text-align:right; }
+  .frow .ipt { border:1px solid var(--slate-300); border-radius:6px; padding:6px 10px; font-size:12.5px; color:var(--slate-800); background:#fff; }
+  .frow .ipt.mono { font-family:Consolas,monospace; font-size:11.5px; }
+  .env-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .env-table th { text-align:left; color:var(--slate-500); font-weight:500; padding:4px 8px; border-bottom:1px solid var(--slate-200); font-size:11px; }
+  .env-table td { padding:5px 8px; border-bottom:1px solid var(--slate-100); }
+  .pill-secret { font-size:10px; background:#fef2f2; color:var(--error); border:1px solid #fecaca; border-radius:4px; padding:0 6px; }
+  .pill-plain { font-size:10px; background:var(--slate-100); color:var(--slate-500); border:1px solid var(--slate-200); border-radius:4px; padding:0 6px; }
+  .hint { font-size:11px; color:var(--slate-400); margin-top:6px; }
+
+  /* 扫描导入行 */
+  .scan-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--slate-200); border-radius:8px; margin-bottom:6px; background:#fff; font-size:12.5px; }
+  .checkbox { width:15px; height:15px; border:1.5px solid var(--slate-300); border-radius:4px; flex-shrink:0; }
+  .checkbox.on { background:var(--brand-600); border-color:var(--brand-600); position:relative; }
+  .checkbox.on::after { content:'✓'; color:#fff; position:absolute; font-size:11px; top:-1px; left:1.5px; }
+  .verdict { font-size:10px; padding:1px 8px; border-radius:999px; white-space:nowrap; }
+  .v-import { background:#ecfdf5; color:var(--success); border:1px solid #a7f3d0; }
+  .v-skip { background:var(--slate-100); color:var(--slate-500); border:1px solid var(--slate-300); }
+  .v-rename { background:#fffbeb; color:var(--warning); border:1px solid #fde68a; }
+
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--slate-500); margin-top:10px; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ═══ 走读页头 ═══ -->
+  <div class="doc-header">
+    <h1>MCP 中央资产库 · 原型走读</h1>
+    <p>变更 2026-09-10-mcp-central-registry ｜ 本页上半部是架构与语义图（帮你理解设计），下半部是管理页 UI 原型（对应 design.md 文件清单的前端部分）。角标标注对应的决策 / 功能需求编号。</p>
+    <div class="doc-toc">
+      <a href="#arch">① 架构与数据流</a>
+      <a href="#binding">② 双层库与绑定语义</a>
+      <a href="#ui">③ 管理页原型</a>
+      <a href="#diag">④ 诊断面板</a>
+      <a href="#modal">⑤ 弹窗三件</a>
+    </div>
+  </div>
+
+  <!-- ═══ ① 架构与数据流 ═══ -->
+  <div class="section" id="arch">
+    <h2>① 架构与数据流 <span class="tag-ref">design 总体方案</span><span class="tag-ref tag-fr">FR-04</span></h2>
+    <p class="desc">读法：左＝中央主数据（新），中＝渲染与授权（新），右＝daemon 既有注入链（不动，只换数据源）。</p>
+    <div class="arch">
+      <div class="arch-col">
+        <div class="arch-col-title">中央资产库（新增 · mcp_registry）</div>
+        <div class="box db"><b>平台共享库</b><small>owner = NULL，admin 管理，全员可见</small>
+          <div class="chip-row"><span class="chip purple">context7</span><span class="chip purple">fetch</span><span class="chip purple">playwright</span></div>
+        </div>
+        <div class="box db"><b>用户私有库</b><small>owner = 当前用户，个人 token 不外泄</small>
+          <div class="chip-row"><span class="chip">mysql-dev（🔒 密码加密）</span></div>
+        </div>
+        <div class="box"><b>mcp_templates 模板表</b><small>预置 5-7 个 + 自存，快速创建</small></div>
+        <div class="arrow-v">▼</div>
+        <div class="box db"><b>McpBinding 绑定表</b><small>platform = 进全员默认集<br>user = 进某用户的个人启用集</small></div>
+      </div>
+      <div class="arch-col">
+        <div class="arch-col-title">渲染与授权（新增 · render.py）</div>
+        <div class="box hl"><b>render_injection_set(user_id?)</b>
+          <small>注入集 = platform 绑定全集 ∪ 该 user 绑定（enabled 过滤）<br>encrypted_env 解密回填（仅此一处出明文）</small>
+        </div>
+        <div class="box"><b>授权双校验 <span class="tag-ref">D-010</span></b>
+          <small>① daemon principal 认证<br>② user_id 必须匹配该 daemon 的活跃 lease 归属<br>无匹配 → 404（防枚举）</small>
+        </div>
+        <div class="box"><b>诊断预检 precheck <span class="tag-ref tag-fr">FR-08</span></b>
+          <small>五项：解密失败 / 绑定未启用 / 同名遮蔽 / 白名单拒绝 / 类型非法</small>
+        </div>
+        <div class="arrow-v">▼</div>
+        <div class="box hl"><b>GET /api/daemon/mcp/config<br>?workspace_id=&amp;user_id=</b>
+          <small>响应形状三键不变：platform_default / whitelist / workspace<br>渲染失败 → 503 → daemon 走本地回落（不阻塞会话）</small>
+        </div>
+      </div>
+      <div class="arch-col">
+        <div class="arch-col-title">daemon 既有注入链（不动）</div>
+        <div class="box"><b>claim payload 透传 <span class="tag-ref">D-008@v2</span></b>
+          <small>backend lease 下发 user_id（新增字段，旧 daemon 忽略）→ 会话创建拉取时带参；会话级缓存结构不变</small>
+        </div>
+        <div class="arrow-v">▼</div>
+        <div class="merge-stack">
+          <div class="merge-layer"><span>builtin（daemon 自带 sillyhub-file）</span><span class="prio">优先级最高</span></div>
+          <div class="merge-layer"><span>workspace（specDir/.mcp.json，同名遮蔽 platform）</span><span class="prio">次之</span></div>
+          <div class="merge-layer win"><span>platform（registry 渲染，本次换源）</span><span class="prio">基础层</span></div>
+        </div>
+        <div class="box" style="margin-top:8px"><b>白名单过滤 + stdio 预净化</b><small>whitelist 只过滤 workspace 位；platform 位 server 名自动放行 —— 诊断方向据此定义 <span class="tag-ref">D-011</span></small></div>
+        <div class="box"><b>AgentProfile.mcp_refs（正交，不碰）</b><small>profile 决定"这次会话用池子的哪个子集"；binding 决定"池子里有什么"</small></div>
+      </div>
+    </div>
+    <div class="note">关键兼容保证：不带 <code>user_id</code> 的旧调用 = platform only，行为与今天完全一致（golden 契约测试守护）；旧 <code>GET/PUT /api/platform-settings/mcp</code> 直接删除（存量 KV 无真实数据，零迁移）。<span class="tag-ref">D-003</span><span class="tag-ref">D-006</span></div>
+  </div>
+
+  <!-- ═══ ② 双层库与绑定语义 ═══ -->
+  <div class="section" id="binding">
+    <h2>② 双层库与绑定语义 <span class="tag-ref">D-001</span><span class="tag-ref">D-002</span><span class="tag-ref tag-fr">FR-03</span></h2>
+    <p class="desc">一个 server 可以同时被"平台绑定"（全员默认注入）和"用户绑定"（个人追加启用）；注入时取并集。</p>
+    <div class="binding-flow">
+      <div class="bf-node"><b>platform 绑定的 server</b><small>admin 设置，例如 context7、fetch</small></div>
+      <div class="bf-op">∪</div>
+      <div class="bf-node"><b>我 user 绑定的 server</b><small>我启用：playwright + 我的私有 mysql-dev</small></div>
+      <div class="bf-op">=</div>
+      <div class="bf-result"><b>我的会话注入集</b><small>context7 · fetch · playwright · mysql-dev</small></div>
+      <div class="bf-op" style="font-size:13px">再经</div>
+      <div class="bf-node" style="border-color:var(--slate-300);background:var(--slate-50)"><b>profile.mcp_refs 过滤</b><small>正交机制，本变更不碰</small></div>
+    </div>
+    <div class="note">别人（没做任何 user 绑定）的会话注入集 = platform 绑定集（context7 · fetch）——私有库对他不可见（404 防存在性枚举，同 skills 模块先例）。</div>
+  </div>
+
+  <!-- ═══ ③ 管理页 UI 原型 ═══ -->
+  <div class="section" id="ui">
+    <h2>③ 管理页原型（settings/mcp 升级）<span class="tag-ref">FR-01</span><span class="tag-ref tag-fr">FR-06/07/09</span></h2>
+    <p class="desc">双 tab = 双层可见性；卡片右下开关 = user binding；右上角按钮组 = 六项能力的入口。布局按 FRONTEND_PAGE_STYLE.md（PageHeader + SectionCard，antd 组件形态）。</p>
+    <div class="frame">
+      <div class="frame-topbar">
+        <span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span>
+        <span class="url">sillyhub.local/settings/mcp</span>
+      </div>
+      <div class="frame-body">
+        <div class="frame-side">
+          <div class="brand">SillyHub</div>
+          <span class="nav">仪表盘</span>
+          <span class="nav">工作区</span>
+          <span class="nav">会话</span>
+          <span class="nav active">设置 · MCP 资产库</span>
+          <span class="nav">设置 · 供应商</span>
+          <span class="nav">设置 · 技能</span>
+        </div>
+        <div class="frame-main">
+          <div class="ph">
+            <div>
+              <h3>MCP 资产库</h3>
+              <div class="sub">集中管理 MCP server 定义，一键启用到平台默认集或个人会话</div>
+            </div>
+            <button class="btn btn-diag">🩺 注入诊断 <span class="badge" style="background:#fffbeb;color:var(--warning)">2</span></button>
+          </div>
+          <div class="tabs">
+            <div class="tab active">平台共享库 <span class="cnt">3</span></div>
+            <div class="tab">我的库 <span class="cnt">2</span></div>
+            <div class="tab">模板 <span class="cnt">6</span></div>
+          </div>
+          <div class="toolbar">
+            <span class="input">🔍 搜索名称 / 命令 / 标签…</span>
+            <span class="select">标签：全部 ▾</span>
+            <span class="vsep"></span>
+            <button class="btn btn-primary">＋ 新建 Server</button>
+            <button class="btn">📥 导入 JSON</button>
+            <button class="btn">📂 从 Workspace 扫描</button>
+            <button class="btn">⭐ 从模板新建</button>
+          </div>
+          <div class="cards">
+            <div class="mcp-card">
+              <div class="card-head">
+                <div class="card-ico">📚</div>
+                <span class="card-title">context7</span>
+                <span class="badge badge-stdio">stdio</span>
+                <span class="badge badge-platform">平台默认</span>
+              </div>
+              <div class="cmd-line">npx -y @upstash/context7-mcp</div>
+              <div class="card-meta"><span>#文档</span><span>#检索</span><span class="lock">🔒 0 个密钥</span></div>
+              <div class="card-foot">
+                <div class="switch-wrap"><span class="switch on"></span>对我启用</div>
+                <div class="card-ops"><button class="op-btn">✎</button><button class="op-btn">⧉</button><button class="op-btn">⭐</button><button class="op-btn">🗑</button></div>
+              </div>
+            </div>
+            <div class="mcp-card">
+              <div class="card-head">
+                <div class="card-ico">🌐</div>
+                <span class="card-title">fetch</span>
+                <span class="badge badge-stdio">stdio</span>
+                <span class="badge badge-platform">平台默认</span>
+              </div>
+              <div class="cmd-line">uvx mcp-server-fetch</div>
+              <div class="card-meta"><span>#网络</span><span class="lock">🔒 0 个密钥</span></div>
+              <div class="card-foot">
+                <div class="switch-wrap"><span class="switch on"></span>对我启用</div>
+                <div class="card-ops"><button class="op-btn">✎</button><button class="op-btn">⧉</button><button class="op-btn">⭐</button><button class="op-btn">🗑</button></div>
+              </div>
+            </div>
+            <div class="mcp-card">
+              <div class="card-head">
+                <div class="card-ico">🎭</div>
+                <span class="card-title">playwright</span>
+                <span class="badge badge-stdio">stdio</span>
+                <span class="badge badge-warn">⚠ 同名遮蔽</span>
+              </div>
+              <div class="cmd-line">npx -y @playwright/mcp@latest</div>
+              <div class="card-meta"><span>#浏览器</span><span>#E2E</span><span class="lock">🔒 0 个密钥</span></div>
+              <div class="card-foot">
+                <div class="switch-wrap"><span class="switch on"></span>对我启用</div>
+                <div class="card-ops"><button class="op-btn">✎</button><button class="op-btn">⧉</button><button class="op-btn">⭐</button><button class="op-btn">🗑</button></div>
+              </div>
+            </div>
+            <div class="mcp-card locked-note">
+              <div class="card-head">
+                <div class="card-ico">🗄</div>
+                <span class="card-title">mysql-dev</span>
+                <span class="badge badge-stdio">stdio</span>
+                <span class="badge badge-mine">我的私有</span>
+              </div>
+              <div class="cmd-line">npx -y @benborla29/mcp-server-mysql</div>
+              <div class="card-meta"><span>#数据库</span><span class="lock">🔒 2 个密钥已加密（MYSQL_KEY）</span></div>
+              <div class="card-foot">
+                <div class="switch-wrap"><span class="switch on"></span>对我启用</div>
+                <div class="card-ops"><button class="op-btn">✎</button><button class="op-btn">⧉</button><button class="op-btn">⭐</button><button class="op-btn">🗑</button></div>
+              </div>
+            </div>
+            <div class="mcp-card locked-note">
+              <div class="card-head">
+                <div class="card-ico">🔎</div>
+                <span class="card-title">brave-search</span>
+                <span class="badge badge-stdio">stdio</span>
+                <span class="badge badge-mine">我的私有</span>
+              </div>
+              <div class="cmd-line">npx -y @brave/brave-search-mcp-server</div>
+              <div class="card-meta"><span>#搜索</span><span class="lock">🔒 1 个密钥已加密（token）</span></div>
+              <div class="card-foot">
+                <div class="switch-wrap"><span class="switch"></span>对我启用</div>
+                <div class="card-ops"><button class="op-btn">✎</button><button class="op-btn">⧉</button><button class="op-btn">⭐</button><button class="op-btn">🗑</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="footnote">平台库 tab 下：admin 看到"＋设为平台默认"操作，普通用户平台库只读（卡片无编辑入口）；我的库 tab 仅自己可见。</div>
+          <div class="legend">
+            <span><span class="badge badge-platform">平台默认</span> = 有 platform binding（admin 设置）</span>
+            <span><span class="badge badge-mine">我的私有</span> = owner 是我</span>
+            <span><span class="switch on" style="transform:scale(.8)"></span>对我启用 = user binding 开关</span>
+            <span><span class="badge badge-warn">⚠</span> = 诊断徽标（点开看 ④）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ④ 诊断面板 ═══ -->
+  <div class="section" id="diag">
+    <h2>④ 注入诊断面板（抽屉）<span class="tag-ref">D-011</span><span class="tag-ref tag-fr">FR-08</span></h2>
+    <p class="desc">点右上"注入诊断"展开。五项诊断在 backend 渲染时预检（不是 daemon 事后上报），所以看到的就是将要发生的。</p>
+    <div class="diag-item"><span class="lv lv-warn">遮蔽</span><div><b>platform_name_shadow · playwright</b><small>workspace「multi-agent-platform」的 .mcp.json 里也有同名 server —— 三层合并时 workspace 优先，平台库这份配置实际没生效。建议改名或删 workspace 里那份。</small></div></div>
+    <div class="diag-item"><span class="lv lv-info">白名单</span><div><b>workspace_blocked_by_whitelist · internal-tools</b><small>workspace「内部工具」的 .mcp.json 里 server「internal-tools」不在白名单 mcp.whitelist 内，注入时会被剔除。</small></div></div>
+    <div class="diag-item" style="opacity:.55"><span class="lv lv-err">解密</span><div><b>decrypt_failed ·（示例）legacy-db</b><small>密钥轮换后失配：该 server 渲染时降级为无 secret 形态并跳过注入。去编辑页重新保存密钥即可。</small></div></div>
+    <div class="diag-item" style="opacity:.55"><span class="lv lv-warn">死角</span><div><b>bound_but_disabled ·（示例）fetch</b><small>有 platform 绑定但 enabled=false —— 配置了却没生效，确认是否有意为之。</small></div></div>
+    <div class="diag-item" style="opacity:.55"><span class="lv lv-err">类型</span><div><b>invalid_type_defensive ·（示例）—</b><small>防御项：写路径已限制 stdio，若历史数据混入 http/sse 会在 platform 位整包回落，此项应为空。</small></div></div>
+  </div>
+
+  <!-- ═══ ⑤ 弹窗三件 ═══ -->
+  <div class="section" id="modal">
+    <h2>⑤ 弹窗：新建 / 扫描导入 / JSON 导入 <span class="tag-ref tag-fr">FR-02</span><span class="tag-ref tag-fr">FR-06/07</span></h2>
+    <p class="desc">新建弹窗里 env 键的"将加密"标识是 secret 规则的可视化（键名含 token/key/secret/password）；扫描导入的三色判定 = 去重规则。</p>
+
+    <div class="modal-mask" style="margin-bottom:16px">
+      <div class="modal">
+        <div class="modal-head"><span>新建 MCP Server（stdio）</span><span style="color:var(--slate-300)">✕</span></div>
+        <div class="modal-body">
+          <div class="frow"><label>名称</label><span class="ipt mono">mysql-dev</span></div>
+          <div class="frow"><label>保存到</label><span class="select" style="width:fit-content">我的库（私有）▾</span></div>
+          <div class="frow"><label>command</label><span class="ipt mono">npx -y @benborla29/mcp-server-mysql</span></div>
+          <div class="frow"><label>args</label><span class="ipt mono" style="color:var(--slate-400)">--readonly（每行一个，可空）</span></div>
+          <div class="frow"><label>env 键值</label>
+            <table class="env-table">
+              <tr><th style="width:38%">键</th><th>值</th><th style="width:90px">处理</th></tr>
+              <tr><td class="ipt mono" style="border:none">MYSQL_HOST</td><td class="ipt mono" style="border:none">127.0.0.1</td><td><span class="pill-plain">明文</span></td></tr>
+              <tr><td class="ipt mono" style="border:none">MYSQL_USER</td><td class="ipt mono" style="border:none">root</td><td><span class="pill-plain">明文</span></td></tr>
+              <tr><td class="ipt mono" style="border:none">MYSQL_KEY</td><td class="ipt mono" style="border:none;color:var(--slate-400)">••••••••••</td><td><span class="pill-secret">🔒 将加密</span></td></tr>
+            </table>
+          </div>
+          <div class="hint">🔒 键名含 token / key / secret / password 的值将逐键加密落库（encrypted_env），任何管理界面只见 <code>&lt;set&gt;</code>，仅 daemon 注入链解密。<span class="tag-ref">FR-02</span><span class="tag-ref">R-05/R-09</span></div>
+        </div>
+        <div class="modal-foot"><button class="btn">取消</button><button class="btn btn-primary">保存</button></div>
+      </div>
+    </div>
+
+    <div class="modal-mask">
+      <div class="modal">
+        <div class="modal-head"><span>从 Workspace 扫描导入</span><span style="color:var(--slate-300)">✕</span></div>
+        <div class="modal-body">
+          <div class="hint" style="margin:0 0 10px">扫描 4 个 workspace 的 .mcp.json，发现 4 个 server；与现有库比对后给出判定。勾选后导入到 <b>我的库</b>。</div>
+          <div class="scan-row"><span class="checkbox on"></span><b style="width:110px">mysql</b><span style="color:var(--slate-400);font-size:11px">来自 multi-agent-platform</span><span style="flex:1"></span><span class="verdict v-import">导入</span></div>
+          <div class="scan-row"><span class="checkbox on"></span><b style="width:110px">context7</b><span style="color:var(--slate-400);font-size:11px">来自 demo-workspace</span><span style="flex:1"></span><span class="verdict v-skip">跳过 · 与库中同名同配置</span></div>
+          <div class="scan-row"><span class="checkbox on"></span><b style="width:110px">fetch <span style="color:var(--warning)">→ fetch-demo</span></b><span style="color:var(--slate-400);font-size:11px">来自 demo-workspace</span><span style="flex:1"></span><span class="verdict v-rename">改名 · 同名不同配置</span></div>
+          <div class="scan-row" style="opacity:.5"><span class="checkbox"></span><b style="width:110px">internal-tools</b><span style="color:var(--slate-400);font-size:11px">来自 内部工具</span><span style="flex:1"></span><span class="verdict v-import">导入</span></div>
+          <div class="hint">比对在 cmd 归一化（剥 <code>cmd /c</code> 包装）之后进行——同一 server 在不同机器上带不带包装会被识别为同配置。<span class="tag-ref">FR-07</span></div>
+        </div>
+        <div class="modal-foot"><button class="btn">取消</button><button class="btn btn-primary">导入所选（2）</button></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+  // 轻交互：tab 切换示意 + 开关点按
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+  }));
+  document.querySelectorAll('.switch').forEach(s => s.addEventListener('click', () => s.classList.toggle('on')));
+  document.querySelectorAll('.checkbox').forEach(c => c.addEventListener('click', () => c.classList.toggle('on')));
+</script>
+</body>
+</html>

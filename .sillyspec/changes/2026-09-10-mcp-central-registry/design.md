@@ -221,7 +221,7 @@ mcp_templates
 | R-03 | 渲染端点从读 KV 变为查表+解密+渲染，延迟上升 | P2 | 单查询 join binding（索引齐备）；daemon 会话级缓存每会话一次拉取吸收；必要时 render 结果进程内短缓存（v1 不做，观察） |
 | R-04 | 扫描导入遍历 workspace 文件 IO 的耗时与并发 | P2 | 逐 workspace 串行 + 每文件超时；候选列表只读不写，apply 才落库；workspace 数量当前规模小（内测） |
 | R-05 | secret 键名规则误判（非 secret 键被加密 / secret 键漏加密） | P1 | 沿用 `_redact_mcp_env` 既有键名规则保持双向一致；单测覆盖边界键名；创建/更新时前端明示哪些键会被加密 |
-| R-06 | UI 原型跳过（管理页为标准 CRUD 形态） | P2 | 照 FRONTEND_PAGE_STYLE.md 实现；如实现期发现交互复杂度超预期再补原型（用户已知情未否决） |
+| R-06 | UI 原型（管理页交互形态） | P2 | 已补原型 `prototype-mcp-central-registry.html`（架构数据流图 + 双 tab 卡片管理页 + 诊断面板 + 新建/扫描导入弹窗，AI-Native 主题 token，区块角标标注 FR/D-xxx）；实现按原型 + FRONTEND_PAGE_STYLE.md |
 | R-07 | name 字符集约束与存量 workspace .mcp.json 中 server 名不兼容（扫描导入改名） | P2 | 导入时非法名自动归一化（小写/连字符替换）+ 提示；dedup_key 保留原名可追溯 |
 | R-08 | daemon 端点 user_id 越权（Grill B-01 P0：任意认证主体可解密他人私有 env） | P1 | 接口定义已补授权规则：daemon principal 认证 + lease 归属匹配校验（无匹配 404）；单测覆盖"合法 lease 通过 / 无 lease 拒绝 / 跨 daemon 拒绝"三态 |
 | R-09 | secret 键名规则漏判（Grill CC-09 实证：MYSQL_PASS 不含任何 marker，真实口令漏加密） | P1 | 短期：R-05 前端明示 + 创建/导入时对 env 键做"含大写且值像凭证"的启发式提醒（不强制）；长期：模板与导入路径预置常见键名清单扩充（MYSQL_PASS/PASSWORD 变体），独立 quick 跟进 |
@@ -248,5 +248,5 @@ mcp_templates
 - [x] frontmatter 字段齐全（author/created_at/scale=large）
 - [x] 引用所有当前版本 D-xxx@vN（D-001~D-011 全部进决策追踪表；D-006/D-008@v1 为 @superseded 状态如实标注，现行版本为 D-008@v2）
 - [x] 生命周期关键词（session/daemon）出现处已评估——均为既有机制的引用说明，无状态迁移设计，紧邻豁免短语已写
-- [x] UI 原型分级核对：跳过（标准 CRUD 管理页，无新颖交互），理由记入 R-06，用户已知情未否决（D-009）
+- [x] UI 原型分级核对：brainstorm 阶段曾跳过（用户后补要求），已补 `prototype-mcp-central-registry.html`（见 R-06）
 - [x] 无「⚠️ 自审存疑」遗留——两个实现期才定的细节（router 注册机制的确切位置、模板 seed 定稿清单）已在文件变更清单与数据模型内标注，属 plan 阶段任务粒度非设计歧义

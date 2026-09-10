@@ -125,7 +125,7 @@ created_at: 2026-09-10 10:52:30
   status: accepted
   source: user
   question: 设计方案整体确认（含原型跳过声明）
-  answer: 用户确认整体设计：mcp_registry 新模块四件+render.py+importer.py；McpServer/McpBinding/McpTemplate 三表（encrypted_env 抽列加密复用 CredentialCipher）；诊断回显走 backend 渲染预检（非 daemon 事件上行）；cmd 归一化仅用于去重比对与展示、渲染透传存储形态；与 AgentProfile.mcp_refs 正交（binding 管池子、mcp_refs 管消费过滤）。HTML 原型跳过（标准 CRUD UI 形态，照 FRONTEND_PAGE_STYLE.md，用户未否决）。
+  answer: 用户确认整体设计：mcp_registry 新模块四件+render.py+importer.py；McpServer/McpBinding/McpTemplate 三表（encrypted_env 抽列加密复用 CredentialCipher）；诊断回显走 backend 渲染预检（非 daemon 事件上行）；cmd 归一化仅用于去重比对与展示、渲染透传存储形态；与 AgentProfile.mcp_refs 正交（binding 管池子、mcp_refs 管消费过滤）。HTML 原型跳过（标准 CRUD UI 形态，照 FRONTEND_PAGE_STYLE.md，用户未否决）。【2026-09-10 补记：用户要求后补原型，已产出 prototype-mcp-central-registry.html（架构数据流图+管理页 UI+诊断面板+弹窗），design.md R-06 同步更新】
   normalized_requirement: design.md 按本决策落盘；前端页面按 FRONTEND_PAGE_STYLE.md 实现；DTO 走 pnpm gen:types。
   impacts: [FR-1..FR-8]
   evidence: 用户 AskUserQuestion 第 4 轮设计确认（2026-09-10）
