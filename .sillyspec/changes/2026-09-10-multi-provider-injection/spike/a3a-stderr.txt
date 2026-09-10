@@ -1,0 +1,20 @@
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "C:\\Users\\qinyi\\AppData\\Local\\Temp\\tmp.Hkx1ghpXAU\\" (codex_home: AbsolutePathBuf("C:\\Users\\qinyi\\AppData\\Local\\Temp\\tmp.Hkx1ghpXAU"))
+Reading additional input from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: C:\Users\qinyi\AppData\Local\Temp\tmp.Hkx1ghpXAU
+model: mock-model
+provider: mockprov
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 01a08bae-6660-71d2-8e92-5b6aa1d734b5
+--------
+user
+say hi
+warning: Model metadata for `mock-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.
+codex
+mock says hi
+tokens used
+2

@@ -1,0 +1,2 @@
+CWA_DIR_C1=/tmp/tmp.HIBei5Fv0N
+exit=1

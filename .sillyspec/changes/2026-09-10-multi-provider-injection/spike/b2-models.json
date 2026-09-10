@@ -1,0 +1,11 @@
+{
+  "providers": {
+    "mockprov": {
+      "name": "MockProv",
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:18999/v1",
+      "apiKey": "sk-mock-inline-222",
+      "models": [{"id": "mock-model"}]
+    }
+  }
+}

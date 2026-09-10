@@ -1,0 +1,7 @@
+model = "mock-model"
+model_provider = "mockprov"
+
+[model_providers.mockprov]
+name = "mock"
+base_url = "http://127.0.0.1:18999/v1"
+wire_api = "chat"

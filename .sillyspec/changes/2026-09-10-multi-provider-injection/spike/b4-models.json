@@ -1,0 +1,9 @@
+{
+  "providers": {
+    "openai": {
+      "baseUrl": "http://127.0.0.1:18999/v1",
+      "api": "openai-completions",
+      "models": [{"id": "mock-model"}]
+    }
+  }
+}
