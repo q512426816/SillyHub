@@ -1,0 +1,13 @@
+PI_DIR_B1=/tmp/tmp.rWoipamNv7
+exit=1
+PI_DIR_B1b=/tmp/tmp.FPVkyzokxc
+exit=1
+PI_DIR_B1c=/tmp/tmp.WJvmZYy2at
+exit=0
+PI_DIR_B2=/tmp/tmp.zmvn8MctsU
+exit=0
+PI_DIR_B3=/tmp/tmp.EvVZIaZmwM
+exit=1
+exit=0
+PI_DIR_B4=/tmp/tmp.lilRc73XtG
+exit=0

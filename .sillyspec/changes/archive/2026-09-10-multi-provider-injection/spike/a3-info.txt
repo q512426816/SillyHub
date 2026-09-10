@@ -1,0 +1,8 @@
+CODEX_HOME_A3a=/tmp/tmp.Hkx1ghpXAU
+exit=0
+CODEX_HOME_A3b=/tmp/tmp.lzIYxOp717
+exit=0
+CODEX_HOME_A3c=/tmp/tmp.zrxQzZQleq
+exit=0
+CODEX_HOME_A3d=/tmp/tmp.BSAdKZemgV
+exit=0
