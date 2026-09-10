@@ -5,9 +5,13 @@ import { ArrowLeftRight, ChevronRight, LogOut, Search, UserRound } from "lucide-
 
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
+// task-09（2026-09-10-account-avatar-upload / FR-05）：平台头像 src 解析
+// （文件中心 URL 带 token 取 blob / 外链直用 / 空回退首字），与 ChatMessageAvatar 同源。
+import { useAvatarSrc } from "@/components/chat/use-avatar-src";
 import {
   Avatar,
   AvatarFallback,
+  AvatarImage,
 } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -79,14 +83,23 @@ export function resolvePlatformSwitch(pathname: string): {
 export interface TopBarProps {
   displayName: string;
   onLogout: () => void;
+  /**
+   * task-09（2026-09-10-account-avatar-upload / FR-05）：平台头像 URL
+   * （文件中心 /api/file/{id} 或 http 外链）。可选——不传/为 null 行为与现状
+   * 一致（AvatarFallback 首字回退，既有调用方零改动）。
+   */
+  avatar?: string | null;
 }
 
-export function TopBar({ displayName, onLogout }: TopBarProps) {
+export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const crumbs = buildBreadcrumbs(pathname);
   const initial = (displayName?.trim()?.[0] ?? "?").toUpperCase();
   const { label: switchLabel, href: switchHref } = resolvePlatformSwitch(pathname);
+  // task-09（FR-05）：头像 src 解析走 useAvatarSrc 共享管线——文件中心 URL 带
+  // token 取 blob、外链直用、空/拉取失败为 null（Radix src 为空自动走 Fallback）。
+  const avatarSrc = useAvatarSrc(avatar);
 
   return (
     /* 2026-09-09-sessions-visual-refresh task-09（FR-02/D-008@v1）：玻璃顶栏——
@@ -151,7 +164,11 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
               className="flex items-center gap-2 rounded-md p-1 transition-colors hover:bg-slate-100"
               aria-label="用户菜单"
             >
+              {/* task-09（FR-05）：有头像时渲染图片（src 由 useAvatarSrc 解析）；
+                  无图 src 为 undefined，Radix Avatar 自动走下方 AvatarFallback
+                  首字分支——既有首字逻辑与类名零改动。 */}
               <Avatar className="h-8 w-8">
+                <AvatarImage src={avatarSrc ?? undefined} alt={displayName} />
                 <AvatarFallback className="bg-brand-600 text-xs font-medium text-white">
                   {initial}
                 </AvatarFallback>
