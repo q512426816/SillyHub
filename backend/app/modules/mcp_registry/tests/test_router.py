@@ -15,9 +15,10 @@ Change: 2026-09-10-mcp-central-registry（task-03 / TDD 先行）
 - **CRUD/binding 主路径**：创建（env 脱敏透传不拼装明文）→ 列表（scope/
   search/tag）→ 详情 → 更新 → 删除 → 404；user binding 加/解回环与绑定态注入。
 
-未实现端点（importer/templates/render 归 task-08/09/10/04）只测权限门与
-501 桩行为，业务用例留给对应 task。错误断言用真实 HTTP 状态码
-（skills/tests/test_router.py 同惯例），不断 service 内部异常类型。
+未实现端点（workspace 导入归 task-09、templates 归 task-10、诊断归 task-04）
+只测权限门与 501 桩行为，业务用例留给对应 task；import-json 已随 task-08
+落地转正（真实 importer，见 test_importer_json.py）。错误断言用真实 HTTP
+状态码（skills/tests/test_router.py 同惯例），不断 service 内部异常类型。
 """
 
 from __future__ import annotations
@@ -310,12 +311,13 @@ class TestPermissionMatrix:
         passed_gate = await client.get(f"{BASE}/diagnostics", headers=_headers(admin_token))
         assert passed_gate.status_code != 403, passed_gate.text
 
-    async def test_import_json_platform_scope_admin_gate_before_stub(
+    async def test_import_json_platform_scope_admin_gate(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """import-json 的平台库 admin 门先于 501 桩生效（router 层收敛，不依赖 importer）。
+        """import-json 的平台库 admin 门在委托 importer 前生效（router 层收敛）。
 
-        scope=mine 不设门 → 直达 501 桩（importer 归 task-08）。
+        task-08 落地后端点已委托真实 importer：scope=mine 不设门 → 直达
+        importer，"{}" 三包装未命中 → 400 中文提示（不再是 501 桩）。
         """
         _, plain_token = await _make_user(db_session, admin=False, label="plain")
 
@@ -326,12 +328,12 @@ class TestPermissionMatrix:
         )
         assert denied.status_code == 403, denied.text
 
-        stub = await client.post(
+        passed_gate = await client.post(
             f"{BASE}/import-json",
             json={"json_text": "{}", "scope": "mine"},
             headers=_headers(plain_token),
         )
-        assert stub.status_code == 501, stub.text
+        assert passed_gate.status_code == 400, passed_gate.text
 
     async def test_workspace_import_apply_platform_scope_admin_gate(
         self, client: AsyncClient, db_session: AsyncSession
