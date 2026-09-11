@@ -11,6 +11,13 @@
  * （垂直随刻度居中、钳制面板上下各 8px，R-09）；点击刻度 onJump 跳转（跳转/加载
  * 链路在父层，task-03/04）。
  *
+ * ql-20260911-001-c07c：刻度命中区从 14×2px 视觉本体扩大为整格刻度带——button
+ * 本体改 9px 高（= 原 2px 杠 + 7px 间隙的视觉 pitch）× 轨道全宽 30px，轨 gap 归零
+ * 让刻度带无缝铺满整列（对齐 ZCode 刻度轨带状命中手感：hover/点击不再要求鼠标
+ * 精确压中 2px 细杠）；视觉细杠改由 ::before 伪元素绘制（before: 前缀类），14×2px
+ * 观感与状态色不变。飞出卡垂直锚点随改用刻度带中心（offsetTop + offsetHeight/2，
+ * 带中心 = 杠中心）。
+ *
  * 受控纯组件（仿 subagent-catalog.tsx 先例）：props 进回调出，不直接操作聊天区
  * DOM / 滚动，不发起网络请求；目录数据由 session-panel-page 派生传入（entries 合并
  * displayTurns + runs，key = realRunId ?? runId 与 data-turn-key 同源）。
@@ -160,7 +167,15 @@ export default function TurnCatalog({
     if (!flyout || !rail || !card) return;
     const tick = rail.querySelector<HTMLElement>(`[data-tick-index="${flyout.index}"]`);
     if (!tick) return;
-    setFlyoutTop(computeFlyoutTop(tick.offsetTop, rail.clientHeight, card.offsetHeight));
+    // ql-20260911-001-c07c：刻度 button 本体已是 9px 命中带，锚点取带中心
+    // （= 视觉杠中心），飞出卡仍垂直随刻度居中。
+    setFlyoutTop(
+      computeFlyoutTop(
+        tick.offsetTop + tick.offsetHeight / 2,
+        rail.clientHeight,
+        card.offsetHeight,
+      ),
+    );
   }, [flyout]);
 
   // active 刻度变化时滚入轨内可视区（R-10/FR-05）；ref 守卫首次渲染不滚（design §5）。
@@ -207,7 +222,7 @@ export default function TurnCatalog({
         aria-busy={loadingEarlier || undefined}
         onMouseOver={handleRailOver}
         onMouseLeave={() => setFlyout(null)}
-        className="w-[30px] flex flex-col items-center gap-[7px] py-2 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="w-[30px] flex flex-col items-center gap-0 py-2 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {/* 上下伪弹性撑块：刻度组垂直居中；刻度超高溢出时收缩到 0 回落顶对齐可滚动 */}
         <span aria-hidden className="flex-1 min-h-0" />
@@ -224,23 +239,27 @@ export default function TurnCatalog({
               onClick={() => onJump(entry)}
               onFocus={() => setFlyout({ entry, index: i })}
               className={cn(
-                // 基础：14×2px 细横杠（原型 .tick）
-                "h-[2px] w-[14px] shrink-0 rounded-full transition-all outline-none",
+                // 命中区（ql-20260911-001-c07c）：button 本体 = 整格刻度带——9px 高
+                // （2px 杠 + 上下 3.5px = 原 2px+7px gap 的视觉 pitch）× 轨道全宽
+                // 30px，配合轨 gap-0 刻度带无缝铺满整列；视觉细杠改由 ::before 绘制。
+                "flex h-[9px] w-full shrink-0 cursor-pointer items-center justify-center outline-none",
+                // 视觉细杠（原型 .tick）：14×2px 圆角横杠（before: 前缀 = 杠的样式）
+                "before:block before:h-[2px] before:w-[14px] before:rounded-full before:transition-all",
                 // hover / 键盘 focus-visible：放宽 + 品牌色常亮（原型 .tick:hover/:focus-visible）
-                "hover:w-[20px] hover:bg-brand-600 hover:opacity-100",
-                "focus-visible:w-[20px] focus-visible:bg-brand-600 focus-visible:opacity-100",
+                "hover:before:w-[20px] hover:before:bg-brand-600 hover:before:opacity-100",
+                "focus-visible:before:w-[20px] focus-visible:before:bg-brand-600 focus-visible:before:opacity-100",
                 // 状态底色：active > running > failed > 默认（对齐原型 CSS 级联顺序）
                 isActive
-                  ? "w-[20px] bg-brand-600 opacity-100"
+                  ? "before:w-[20px] before:bg-brand-600 before:opacity-100"
                   : entry.status === "running"
-                    ? "bg-warning opacity-100 animate-pulse"
+                    ? "before:bg-warning before:opacity-100 before:animate-pulse"
                     : entry.status === "failed"
-                      ? "bg-destructive opacity-75"
-                      : "bg-muted-foreground opacity-45",
+                      ? "before:bg-destructive before:opacity-75"
+                      : "before:bg-muted-foreground before:opacity-45",
                 // 未加载空心（原型 .tick.unloaded：inset 1px 描边无底色，hover 描边转品牌色）
                 !entry.loaded &&
                   !isActive &&
-                  "bg-transparent shadow-[inset_0_0_0_1px_hsl(var(--muted-foreground)/0.6)] hover:bg-transparent hover:shadow-[inset_0_0_0_1px_var(--color-brand-600)]",
+                  "before:bg-transparent before:shadow-[inset_0_0_0_1px_hsl(var(--muted-foreground)/0.6)] hover:before:bg-transparent hover:before:shadow-[inset_0_0_0_1px_var(--color-brand-600)]",
               )}
             />
           );

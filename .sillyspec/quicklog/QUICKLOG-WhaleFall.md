@@ -434,3 +434,14 @@
 根因：页面外层自写 <main className="mx-auto ... max-w-[1600px] px-6 py-6"> 把内容限制在 1600px 宽，宽屏下两侧留白；FRONTEND_PAGE_STYLE.md 规定列表页外层一律共享 PageContainer（size=full 占满），禁止自写 max-w 容器。
 方案：frontend/src/app/(dashboard)/runtimes/page.tsx 外层 <main> 换成 <PageContainer size="full" className="gap-5">（/settings/providers 同款写法），新增 @/components/layout PageContainer import；模块变更索引追加到 frontend_app.changelog.md。
 结果：vitest run src/app/(dashboard)/runtimes 5 文件 66 用例全过；pnpm exec tsc --noEmit 0 错误；未跑全量测试（规则 0 留给 CI）。
+
+## ql-20260911-001-c07c | 2026-09-11 10:51:40 | 会话页轮次刻度轨命中范围带状化（对齐 ZCode 手感）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/turn-catalog.tsx（刻度命中带状化+伪元素细杠+飞出卡带中心锚点）
+- .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md（模块变更索引补 ql-20260911-001-c07c 条目）
+需求：会话页轮次刻度轨命中范围带状化（对齐 ZCode 手感）
+根因：刻度 button 的视觉本体 14x2px 细杠即命中区，7px 间隙与轨道非刻度位置均不可命中，hover/点击必须精确压中细杠（原型 .tick 规格忠实还原连命中难点一起继承）
+方案：button 本体改整格刻度带（9px 高=原视觉 pitch x 轨道全宽 30px，轨 gap 归零刻度带无缝铺满），视觉细杠改 ::before 伪元素绘制（状态色类全加 before: 前缀，观感与 twMerge 冲突语义不变）+ cursor-pointer，飞出卡垂直锚点改刻度带中心
+结果：浏览器实机验证全通（命中带 30x9 无缝、细杠外悬停触发正确轮次飞出卡+杠放宽、杠外点击跳转高亮生效）；turn-catalog 15 + sessions 页 44 测试全绿，tsc 0 错，eslint 1 warning 预存（HEAD 同款非本次引入）
