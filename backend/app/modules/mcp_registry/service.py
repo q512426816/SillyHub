@@ -60,6 +60,7 @@ from app.modules.mcp_registry.schema import (
     McpEnvCiphertext,
     McpServerCreate,
     McpServerDetail,
+    McpServerImportView,
     McpServerList,
     McpServerRead,
     McpServerUpdate,
@@ -249,6 +250,41 @@ class McpRegistryService:
             items = [i for i in items if tag in i.tags]
         await self._annotate_binding_states(items, user)
         return McpServerList(items=items, total=len(items))
+
+    async def get_server_for_import(self, server_id: uuid.UUID, user: User) -> McpServerImportView:
+        """读「选入 workspace」导入视图（2026-09-11-workspace-asset-bridges 桥③）。
+
+        D-004/D-009：
+
+        - 可见性复用 ``_get_server``（跨用户私有同 404 防枚举，与 detail 同口径）；
+        - env 经 ``decrypt_server_env`` 还原完整明文——解密只发生在导入内容
+          构造期（调用方写入 workspace ``.mcp.json`` 即与手工编辑等价），密文
+          绝不直接透传；``CipherKeyMismatch`` 原样上抛，由 workspace import
+          端点转 422（中文文案，D-009 三态之一）；
+        - ``enabled=false`` / 无 binding **不阻断**导入（导入的是配置定义，
+          ``.mcp.json`` 写入即生效，与平台绑定态无关），仅置 ``warning``；
+        - 零写库：registry 侧 server/binding 状态零变化（D-009）。
+        """
+        row = await self._get_server(server_id, user)
+        config = dict(row.server_config) if isinstance(row.server_config, dict) else {}
+        env = self.decrypt_server_env(row)
+        if env:
+            config["env"] = env
+        has_binding = await self._has_any_binding(server_id)
+        warnings: list[str] = []
+        if not row.enabled:
+            warnings.append("该 server 在资产库中已停用")
+        if not has_binding:
+            warnings.append("该 server 未绑定任何用户或平台")
+        if warnings:
+            warnings.append("导入的是配置定义，写入 .mcp.json 后即生效，与平台启用/绑定状态无关。")
+        return McpServerImportView(
+            name=row.name,
+            server_config=config,
+            enabled=row.enabled,
+            has_binding=has_binding,
+            warning="；".join(warnings) or None,
+        )
 
     # ── CRUD ──────────────────────────────────────────────────────────
 
@@ -706,6 +742,11 @@ class McpRegistryService:
         for item in items:
             item.platform_bound = item.id in platform_bound_ids
             item.user_bound = item.id in user_bound_ids
+
+    async def _has_any_binding(self, server_id: uuid.UUID) -> bool:
+        """server 是否存在任一 binding 行（platform ∪ 任意 user，D-009 warning 判据）。"""
+        stmt = select(McpServerBinding.id).where(McpServerBinding.server_id == server_id).limit(1)
+        return (await self._session.execute(stmt)).scalars().first() is not None
 
     async def _get_binding(
         self,

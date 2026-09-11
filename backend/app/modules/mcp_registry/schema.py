@@ -290,6 +290,26 @@ class McpTemplateList(BaseModel):
     items: list[McpTemplateRead]
 
 
+# ── workspace 桥③导入视图（2026-09-11-workspace-asset-bridges D-004/D-009）──
+
+
+class McpServerImportView(BaseModel):
+    """``get_server_for_import`` 输出：导入构造期一次性明文形态。
+
+    ``server_config.env`` 为解密后的完整明文 env——明文仅存在于导入内容构造
+    期间（调用方写入 workspace ``.mcp.json`` 后即与手工编辑等价，D-004），本
+    视图只经 service 内部调用链传递，绝不接 REST 展示端点。``warning``：
+    enabled=false 或无 binding 时不阻断导入，仅提示「写入 .mcp.json 即生效、
+    与平台启用/绑定状态无关」（D-009 三态）。
+    """
+
+    name: str
+    server_config: dict[str, Any]
+    enabled: bool
+    has_binding: bool
+    warning: str | None = None
+
+
 # ── 诊断（render.precheck_diagnostics 输出，W2 消费）────────────────
 
 

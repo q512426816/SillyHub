@@ -13,6 +13,9 @@ Change: 2026-09-10-mcp-central-registry（task-02 / TDD 先行）
   非 secret 键 + encrypted_env 逐键信封）、decrypt_server_env 回读一致、update
   重抽列重加密 / 不传 server_config 密文不动、key 失配抛 CipherKeyMismatch
   上抛不吞错；
+- get_server_for_import（2026-09-11-workspace-asset-bridges 桥③ / D-009 三态）：
+  可见性跨用户私有 404、env 解密为完整明文、key 失配原样上抛、停用/无绑定
+  带 warning、启用+有绑定无 warning、registry 侧零变化。
 - 写路径校验（D-005 + design name 正则）：非 stdio 422、非法 name 422、同
   owner 维度同名 409 / 跨维度同名放行；
 - delete 级联 binding 靠 FK CASCADE（SQLite 侧 PRAGMA foreign_keys=ON 验证）。
@@ -957,3 +960,145 @@ class TestSecretDesignation:
         assert sorted(listing.items[0].secret_env_keys) == sorted(_ALL_SECRET_KEYS)
         # 密钥键不出现在 env 视图（值在密文列）
         assert set(listing.items[0].server_config["env"]) == {"CACHE_DIR"}
+
+
+# ── get_server_for_import（2026-09-11-workspace-asset-bridges 桥③ / D-004/D-009）──
+
+
+class TestGetServerForImport:
+    async def test_cross_user_private_404_no_leak(self, db_session: AsyncSession) -> None:
+        """可见性与 detail 同口径：跨用户私有 404，与完全不存在的 id 同错误码。"""
+        owner = await _create_user(db_session, label="own")
+        stranger = await _create_user(db_session, label="str")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(_payload(name="imp-private"), owner)
+
+        with pytest.raises(McpServerNotFound) as exc_info:
+            await svc.get_server_for_import(created.id, stranger)
+        with pytest.raises(McpServerNotFound):
+            await svc.get_server_for_import(uuid.uuid4(), stranger)
+
+        assert exc_info.value.http_status == 404
+
+    async def test_admin_passes_others_private(self, db_session: AsyncSession) -> None:
+        """admin 可读他人私有 server 的导入视图（可见性豁免同 detail）。"""
+        owner = await _create_user(db_session, label="own")
+        admin = await _create_user(db_session, label="adm", admin=True)
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(_payload(name="imp-admin-view"), owner)
+
+        view = await svc.get_server_for_import(created.id, admin)
+
+        assert view.name == "imp-admin-view"
+
+    async def test_view_contains_decrypted_env(self, db_session: AsyncSession) -> None:
+        """server_config.env 为解密后的完整明文（导入构造期一次性形态，D-004）。"""
+        user = await _create_user(db_session, label="a")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="imp-plain",
+                server_config=dict(_SECRET_CONFIG),
+                secret_env_keys=list(_ALL_SECRET_KEYS),
+            ),
+            user,
+        )
+
+        view = await svc.get_server_for_import(created.id, user)
+
+        assert view.name == "imp-plain"
+        assert view.server_config["command"] == "npx"
+        assert view.server_config["args"] == ["-y", "server"]
+        assert view.server_config["env"] == _SECRET_ENV  # 密钥键已解密回明文
+
+    async def test_key_mismatch_propagates_not_swallowed(self, db_session: AsyncSession) -> None:
+        """key 失配：CipherKeyMismatch 原样上抛（端点转 422，service 不吞错）。"""
+        user = await _create_user(db_session, label="a")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="imp-stale-key",
+                server_config={"command": "npx", "args": [], "env": {"API_KEY": "v1-value"}},
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+
+        stale_service = McpRegistryService(
+            db_session, cipher=CredentialCipher(bytes.fromhex("bb" * 32), "v2")
+        )
+        with pytest.raises(CipherKeyMismatch):
+            await stale_service.get_server_for_import(created.id, user)
+
+    async def test_disabled_or_unbound_importable_with_warning(
+        self, db_session: AsyncSession
+    ) -> None:
+        """D-009 三态：停用/无绑定不阻断导入，warning 说明写入即生效与绑定态无关。"""
+        user = await _create_user(db_session, label="a")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(_payload(name="imp-warn"), user)
+
+        # 无绑定 + 启用：warning 提示未绑定
+        view = await svc.get_server_for_import(created.id, user)
+        assert view.enabled is True
+        assert view.has_binding is False
+        assert view.warning is not None
+        assert "未绑定" in view.warning
+        assert "写入 .mcp.json 后即生效" in view.warning
+
+        # 停用 + 有绑定：warning 提示已停用
+        await svc.add_binding(created.id, "user", user)
+        await svc.update_server(created.id, McpServerUpdate(enabled=False), user)
+        view = await svc.get_server_for_import(created.id, user)
+        assert view.enabled is False
+        assert view.has_binding is True
+        assert view.warning is not None
+        assert "已停用" in view.warning
+        assert "未绑定" not in view.warning
+
+        # 停用 + 无绑定：两个提示并存
+        await svc.remove_binding(created.id, "user", user.id, user)
+        view = await svc.get_server_for_import(created.id, user)
+        assert view.warning is not None
+        assert "已停用" in view.warning
+        assert "未绑定" in view.warning
+
+    async def test_enabled_and_bound_no_warning(self, db_session: AsyncSession) -> None:
+        """启用 + 有绑定：干净导入，无 warning。"""
+        admin = await _create_user(db_session, label="adm", admin=True)
+        user = await _create_user(db_session, label="a")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(_payload(name="imp-clean", scope="platform"), admin)
+        await svc.add_binding(created.id, "platform", admin)
+
+        view = await svc.get_server_for_import(created.id, user)
+
+        assert view.enabled is True
+        assert view.has_binding is True
+        assert view.warning is None
+
+    async def test_registry_side_zero_mutation(self, db_session: AsyncSession) -> None:
+        """导入视图是纯读：server 行与 binding 集合零变化（D-009）。"""
+        user = await _create_user(db_session, label="a")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="imp-frozen",
+                server_config=dict(_SECRET_CONFIG),
+                secret_env_keys=list(_ALL_SECRET_KEYS),
+            ),
+            user,
+        )
+        row = await db_session.get(McpServer, created.id)
+        assert row is not None
+        frozen_config = json.dumps(row.server_config, sort_keys=True)
+        frozen_encrypted = json.dumps(row.encrypted_env, sort_keys=True)
+        frozen_updated_at = row.updated_at
+
+        await svc.get_server_for_import(created.id, user)
+
+        await db_session.refresh(row)
+        assert json.dumps(row.server_config, sort_keys=True) == frozen_config
+        assert json.dumps(row.encrypted_env, sort_keys=True) == frozen_encrypted
+        assert row.updated_at == frozen_updated_at
+        assert await _bindings_of(db_session, created.id) == []

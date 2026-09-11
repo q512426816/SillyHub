@@ -47,6 +47,8 @@ from app.modules.workspace.service import WorkspaceService
 from app.modules.workspace.skills_view_service import (
     McpConfigUpdateRequest,
     McpConfigViewResponse,
+    McpImportFromRegistryRequest,
+    McpImportFromRegistryResponse,
     SkillCreateRequest,
     SkillFileContentResponse,
     SkillFileWriteRequest,
@@ -512,6 +514,31 @@ async def update_workspace_mcp_config(
     """
     service = SkillsViewService(session)
     return await service.update_mcp_config(workspace_id, payload, actor=user)
+
+
+@router.post(
+    "/{workspace_id}/mcp/import-from-registry",
+    response_model=McpImportFromRegistryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_mcp_from_registry(
+    workspace_id: uuid.UUID,
+    payload: McpImportFromRegistryRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> McpImportFromRegistryResponse:
+    """从 MCP 资产库选入 server 定义到 ``.mcp.json``（桥③ / D-004 / D-009）。
+
+    2026-09-11-workspace-asset-bridges task-02 / FR-02。鉴权同 mcp-config PUT
+    先例（``require_permission(WORKSPACE_WRITE)`` 自动取路径 ``{workspace_id}``
+    做成员校验，非成员 403）。service 层完成：registry 可见性（跨用户私有
+    404 防枚举）+ env 解密（失败 422 中文文案，D-009 三态）→ 条目校验（与
+    手工 PUT 同口径）→ 同名改名 ``-registry`` 循环避撞（D-004）→ 读-合并-
+    原子写 + 审计；server 停用/无绑定不阻断导入（响应带 ``warning``——写入
+    即生效，与平台绑定态无关）。registry 侧 server/binding 状态零变化。
+    """
+    service = SkillsViewService(session)
+    return await service.import_from_registry(workspace_id, payload, actor=user)
 
 
 @router.post("/{workspace_id}/rescan", response_model=ScanResponse)

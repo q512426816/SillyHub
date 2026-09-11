@@ -11,6 +11,9 @@ backend 容器路径，RPC 打到 daemon 宿主会读不到——daemon 宿主�
 ``<set>`` 服务端还原 + 原子写 + 审计）。
 2026-08-26-workspace-skill-edit task-01：新增 skills 写路径（skill 建删 + 文件读/写/
 删，路径穿越 fail-closed + 文本/大小约束 + SKILL.md 入口保护 + 手工审计）。
+2026-09-11-workspace-asset-bridges task-02：新增 ``import_from_registry``（桥③）——
+从 MCP 资产库选入 server 定义，读-合并-整包提交写 ``.mcp.json``（解密 env + 同名
+改名 ``-registry`` + 复用原子写与审计，D-004/D-009）。
 
 参考：
 - daemon skill-manager.ts：workspace 自定义 skills 源 = ``specDir/skills/``
@@ -28,13 +31,15 @@ import uuid
 from pathlib import Path
 
 from fastapi import status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from app.core.crypto import CipherKeyMismatch
 from app.core.errors import AppError, SpecWorkspaceNotFound
 from app.core.spec_paths import SpecPathResolver
 from app.modules.auth.model import User
+from app.modules.mcp_registry.service import McpRegistryService
 from app.modules.settings.router import (
     _SECRET_REDACTED_PLACEHOLDER as _SET_PLACEHOLDER,
 )
@@ -115,6 +120,64 @@ class McpConfigSecretUnresolvable(AppError):
             f"密钥占位符无法还原：server {server} 的 env {env_key}，请重新输入明文",
             details={"server": server, "env_key": env_key},
         )
+
+
+# ── 从资产库选入（2026-09-11-workspace-asset-bridges 桥③ / D-004/D-009）─────────
+
+_REGISTRY_IMPORT_SUFFIX = "-registry"
+"""同名冲突改名后缀（D-004：workspace 已有同名则循环追加，方向与资产库导入相反）。"""
+
+
+class McpRegistryEnvUndecryptable(AppError):
+    """资产库密文无法解密（key 失配）——导入中止（D-009 三态之一，422）。
+
+    ``CipherKeyMismatch`` 本是 5xx 语义（密钥轮换故障），但发生在导入语境时
+    用户可自助处置（去资产库修复密钥后重导），故 import 端点转为 422 + 中文
+    文案（design D-009「明确密文无法解密」）。
+    """
+
+    code = "HTTP_422_MCP_REGISTRY_ENV_UNDECRYPTABLE"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def __init__(self, *, server_id: uuid.UUID) -> None:
+        super().__init__(
+            "资产库 server 的密文无法解密（加密密钥可能已轮换），请先在 MCP 资产库修复后再导入。",
+            details={"server_id": str(server_id)},
+        )
+
+
+class McpRegistryEntryInvalid(AppError):
+    """资产库 server 定义无法映射为 ``.mcp.json`` 合法条目（形状/键非法，422）。"""
+
+    code = "HTTP_422_MCP_REGISTRY_ENTRY_INVALID"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def __init__(self, *, server_name: str, reason: str) -> None:
+        super().__init__(
+            f"资产库 server {server_name} 的定义无法写入 .mcp.json（{reason}）。",
+            details={"server": server_name, "reason": reason[:200]},
+        )
+
+
+class McpImportFromRegistryRequest(BaseModel):
+    """``POST /api/workspaces/{id}/mcp/import-from-registry`` 请求体（D-004）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    server_id: uuid.UUID
+
+
+class McpImportFromRegistryResponse(BaseModel):
+    """导入响应：写入结果 + 改名标记 + 三态 warning（D-004/D-009）。
+
+    ``written_name``：实际写入 ``.mcp.json`` 的 server 名（同名冲突改名后的
+    最终名）；``renamed``：是否发生改名；``warning``：server 停用/无绑定时
+    的提示（仍可导入——写入即生效，与平台绑定态无关）。
+    """
+
+    written_name: str
+    renamed: bool
+    warning: str | None = None
 
 
 # ── skills 编辑（2026-08-26-workspace-skill-edit task-01 / D-003@v1 安全约束）──
@@ -374,6 +437,94 @@ class SkillsViewService:
         await self._session.commit()
 
         return McpConfigViewResponse(mcpServers=_redact_mcp_env(data["mcpServers"]))
+
+    async def import_from_registry(
+        self,
+        workspace_id: uuid.UUID,
+        payload: McpImportFromRegistryRequest,
+        actor: User,
+    ) -> McpImportFromRegistryResponse:
+        """从 MCP 资产库选入 server 定义，读-合并-整包提交写 ``.mcp.json``（桥③）。
+
+        2026-09-11-workspace-asset-bridges task-02 / FR-02 / D-004 / D-009：
+
+        - registry 侧 ``get_server_for_import`` 读导入视图：可见性 404 防枚举；
+          env 解密为完整明文——**解密仅发生在导入内容构造期**（D-004），密文
+          绝不直接写盘；``CipherKeyMismatch`` 在此转 422 中文文案（D-009）；
+        - 导入条目经 ``McpServerEntryPut`` 校验（与手工 PUT 完全同口径：仅
+          stdio + 形状一致，D-005@v2 防 SSRF 边界不因导入旁路），失败不落盘；
+        - 同名冲突改名：workspace 已有同名 server → 后缀 ``-registry`` 循环
+          避撞（资产库导入 skip-or-rename 的反向语义，D-004），其余既有条目
+          逐字不变；
+        - 复用既有原子写（同目录临时文件 + ``os.replace``）与手工审计模式
+          （details 记 server_id 与改名结果，不含 env 值）；
+        - server 停用/无绑定**不阻断**导入（``.mcp.json`` 写入即生效，与平台
+          绑定态无关），响应透传 ``warning``（D-009 三态）；registry 侧
+          server/binding 状态零变化。
+        """
+        registry_svc = McpRegistryService(self._session)
+        try:
+            view = await registry_svc.get_server_for_import(payload.server_id, actor)
+        except CipherKeyMismatch as exc:
+            raise McpRegistryEnvUndecryptable(server_id=payload.server_id) from exc
+
+        try:
+            entry = McpServerEntryPut.model_validate(view.server_config)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            reason = f"{'.'.join(str(loc) for loc in first.get('loc', ()))}: {first.get('msg', '')}"
+            raise McpRegistryEntryInvalid(server_name=view.name, reason=reason) from exc
+        if entry.type != "stdio":
+            raise McpConfigTypeNotStdio(server=view.name, entry_type=entry.type)
+
+        ws, spec_ws = await self._get_base(workspace_id)
+        # 归档区禁写（同 update_mcp_config：import 同属 .mcp.json 归档区文件写）。
+        WorkspaceService.ensure_writable(ws)
+        resolver = self._resolver_for(ws, spec_ws)
+        if resolver is None:
+            raise SpecWorkspaceNotFound(
+                "未找到该工作区对应的 spec 工作区。",
+                details={"workspace_id": str(workspace_id)},
+            )
+        mcp_path = resolver._spec_root() / ".mcp.json"
+
+        existing = await asyncio.to_thread(self._read_existing_mcp_servers_sync, mcp_path)
+        written_name = view.name
+        renamed = False
+        while written_name in existing:
+            written_name = f"{written_name}{_REGISTRY_IMPORT_SUFFIX}"
+            renamed = True
+        merged = dict(existing)
+        merged[written_name] = entry.model_dump(exclude_none=True)
+
+        await asyncio.to_thread(self._write_mcp_config_sync, mcp_path, {"mcpServers": merged})
+
+        # 审计（update_mcp_config 同款手工插行：纯文件写不触发 audit_hooks；
+        # details 记 server_id 与改名结果，env 明文只落 .mcp.json 不进审计）。
+        self._session.add(
+            AuditLog(
+                action="workspace_mcp_config.import_from_registry",
+                resource_type="workspace_mcp_config",
+                resource_id=AUDIT_PLACEHOLDER_ID,
+                workspace_id=workspace_id,
+                actor_id=actor.id,
+                details_json=json.dumps(
+                    {
+                        "server_id": str(payload.server_id),
+                        "written_name": written_name,
+                        "renamed": renamed,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        await self._session.commit()
+
+        return McpImportFromRegistryResponse(
+            written_name=written_name,
+            renamed=renamed,
+            warning=view.warning,
+        )
 
     # ── 文件清单 helper（本地）──────────────────────────────────────────────
 
