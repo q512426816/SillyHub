@@ -111,3 +111,7 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 - monkeypatch 命名空间兼容规则（D-007）：被 patch 符号在子模块内经原模块命名空间延迟解析调用，`__init__.py` 顶部保持原绑定——157 处既有 patch 目标零失效、既有测试文件零修改（D-006）。
 
 （本节只覆盖 backend 侧文件结构；Node 侧 sillyhub-daemon 的结构更新见项目级 modules/sillyhub-daemon.md 同名节。）
+
+## worker_done 代报链（2026-09-10-review-dispatch-platform-fixes 系）
+- 立即代报（task-03/ql-20260910-003）：onTurnResult 对 stage=mission_worker 且 caps.mcp===false 的成功轮，在 notifyRunResult 之后 fire-and-forget 代报 worker_done（summary=轮终全文，X-Session-Id 承载分身身份）；409/422 仅 warn。
+- ql-20260911-028 延迟兜底：一切 mission_worker 成功轮 +90s 探测 getMissionStatus（session-scoped，opts.sessionId 一次性覆盖）——本 run artifacts 仍空且 mission 活跃 → 用 result/会话级最后全文（_lastAssistantTextBySession，onTurnMessage 完整 text 事件 + result 双写源，FIFO 500 上限）兜底代报；覆盖 mcp=true 分身不自报（活体 mission c4731a06：claude worker 未调工具）与 override 晚到空白 result 两形态；已自报/不活跃/无文本/探测失败均跳过仅日志。
