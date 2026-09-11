@@ -132,3 +132,27 @@ export function getProviderCaps(provider: string): ProviderCaps {
     model_select: false,
   };
 }
+
+/**
+ * 会话级供应商切换已解锁的引擎白名单（2026-09-11-session-provider-switch-codex-pi
+ * task-05 / design Wave 3 / FR-03）。消费方两处门禁：SessionConfigBar 的
+ * providerLocked（配置条供应商下拉锁定）与 session-panel 错误卡
+ * timelineOnSwitchProvider——白名单外引擎（cursor / 未知）仍锁，提示用引擎
+ * 中性文案「当前引擎不支持会话级供应商切换」。
+ *
+ * 取值依据（钉死，R-04）：daemon 注入面并集——env REGISTRY（claude/pi，
+ * sillyhub-daemon/src/credential-injector.ts）∪ 文件层（codex/pi，
+ * sillyhub-daemon/src/provider-file-settings.ts，codex 走 per-session
+ * CODEX_HOME / pi 自定义端点走 PI_CODING_AGENT_DIR）。新引擎接入 daemon
+ * 注入面（reload 链路含文件层合并）时必须同步本白名单，否则前端会继续锁死。
+ *
+ * 注意：本常量**不是** ProviderCaps 9 键矩阵成员，不参与三端同步（本变更
+ * design 非目标：不改三端同步的 9 键矩阵）——纯前端本地常量，勿并入
+ * PROVIDER_CAPS；与矩阵取值语义正交（矩阵描述 provider 能力，本白名单描述
+ * 引擎是否解锁会话级供应商切换）。
+ */
+export const PROVIDER_SWITCH_ENGINES: ReadonlySet<string> = new Set([
+  'claude',
+  'codex',
+  'pi',
+]);

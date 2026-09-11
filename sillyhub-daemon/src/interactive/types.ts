@@ -562,6 +562,20 @@ export interface SessionManagerDeps {
    * daemon.start 在构造时注入生产实例 JsonSessionPersistence）。
    */
   persistence?: SessionStorePersistence;
+  /**
+   * task-03（2026-09-11-session-provider-switch-codex-pi / D-003@v1）：daemon 自身
+   * apiKey（config.api_key）——reload / restore 的文件层写盘
+   * （applyProviderFileSettingsForReload）对 codex openai_chat 形态作 litellm
+   * 代理 auth key（同 spawn 缺省语义）。
+   *
+   * producer = cli.ts SessionManager 构造 deps 装配（daemon.ts 仅经 DaemonOptions
+   * 接收成品、不新增通道）；consumer = session-manager `_reloadSessionNow` /
+   * persistence restore（task-04）传 ForReload，与 daemon.ts spawn 路径
+   * `this._config.api_key` 同源。进程内注入不出 daemon 边界（不落日志/持久化）。
+   * 缺省 null 仅影响 codex openai_chat 形态 litellm key（token 模式退化不注，
+   * 与 spawn 路径 setDaemonApiKey(config.api_key) 同口径）。
+   */
+  daemonApiKey?: string | null;
 }
 
 // ── 错误类（稳定 code 供 daemon / backend / 测试识别）──────────────────────────

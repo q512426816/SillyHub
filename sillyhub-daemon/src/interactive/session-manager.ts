@@ -79,6 +79,15 @@ import type { AgentEvent, ProviderConfig } from '../types.js';
 // → 回退本机凭证，spawn-env.ts:140-164 已支持）。SpawnCredentialManager 鸭子类型，
 // daemon 生产路径注入 daemon._credentialManager，测试 / 未注入时用 noopCredential fallback。
 import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
+// task-03（2026-09-11-session-provider-switch-codex-pi / FR-01 / FR-04 / D-003@v1）：
+// reload 内核接入 codex/pi 文件层配置——ForReload 写盘 + env 合并（失败兜底内聚在
+// 返回值矩阵，R-05）与 codex thread 迁移钩子（FR-05，helper 在 codex-settings.ts）。
+// join / daemonStateDir 派生确定性 per-session 路径 `<daemonStateDir()>/codex/<sessionId>`
+//（与 task-runner.ts spawn 侧同口径）。
+import { join } from 'node:path';
+import { daemonStateDir } from '../config.js';
+import { migrateCodexThreadFromHost } from '../codex-settings.js';
+import { applyProviderFileSettingsForReload } from '../provider-file-settings.js';
 // ql-20260822-009：resume / reload 的 CLAUDE_CONFIG_DIR 按 transcript 实际位置判定
 // （隔离目录命中 → 隔离，保 ql-20260807-002 停供应商语义；仅宿主机 ~/.claude 命中 →
 // 不隔离，修复未配供应商会话重开被 fail 打回 ended）。
@@ -1440,7 +1449,11 @@ export class SessionManager {
 
   /**
    * task-07（provider-switch-live-session / D-002@v1）：用新供应商凭证受控重启
-   * claude 子进程并 resume 对话历史（保留完整上下文，design G1/G2）。
+   * driver 子进程并 resume 对话历史（保留完整上下文，design G1/G2）。
+   * task-03（2026-09-11-session-provider-switch-codex-pi）：解锁 codex / pi——
+   * 删除原「仅 claude」守卫，热切换对 codex/pi 走共享 reload 内核确定性生效
+   * （FR-04，D-003@v1；codex/pi 的文件层配置写盘 + env 合并 + codex thread
+   * 迁移钩子见 ``_reloadSessionNow`` 内 task-03 块）。
    *
    * 真实方法体由 **task-08 实现**（参考现有 ``restoreAndReconnect``：close 旧 query
    * → buildSpawnEnv(providerConfig) 构造新 env（null 时第 0 层跳过 → 本机凭证）→
@@ -1467,8 +1480,8 @@ export class SessionManager {
    *   ⑤ ``await driver.start(state.inputQueue, driverOpts)`` —— SDK spawn 新 claude 子进程
    *      并从 ``~/.claude/projects/<encoded-cwd>/<sid>.jsonl`` 重载完整对话历史。复用
    *      ``state.inputQueue``（reload 不 close 队列，新 query 订阅同一队列吃后续 inject）。
-   *   ⑥ 替换 ``state.query``（claude）/ ``state.driverHandle``（codex，本任务未支持）+
-   *      ``state.env``，重启 ``_runConsume`` 协程，清 ``state.pendingSwitch``（幂等兜底：
+   *   ⑥ 替换 ``state.query``（claude）/ ``state.driverHandle``（codex/pi 等非 claude
+   *      provider）+ ``state.env``，重启 ``_runConsume`` 协程，清 ``state.pendingSwitch``（幂等兜底：
    *      markPendingSwitch 空闲路径不写标记 / _onResult 路径已清，此处防状态机遗漏）。
    *   ⑦ reload 失败（spawn 失败 / jsonl 缺失 / cwd 不一致）→ catch 回滚保留旧 query/env
    *      + ``console.error`` 上报 + **重新抛**（调用方 markPendingSwitch / _onResult 的
@@ -1485,8 +1498,9 @@ export class SessionManager {
    * @param sessionId 目标会话
    * @param providerConfig 新供应商配置；null 表示停止（回退本机凭证，第 0 层 env 跳过）
    * @throws {SessionNotFoundError} session 不存在
-   * @throws {Error} provider 非 claude（codex reload 未支持）/ agentSessionId 缺失 /
-   *         spawn 失败 / jsonl 缺失 / cwd 不一致（catch 回滚保留旧 query 后重新抛）
+   * @throws {Error} agentSessionId 缺失 / spawn 失败 / jsonl 缺失 / cwd 不一致
+   *         （catch 回滚保留旧 query 后重新抛；task-03 起对任意已注册 provider
+   *         provider-generic，不再有「非 claude 不支持」分支）
    */
   async reloadWithProvider(
     sessionId: string,
@@ -1496,16 +1510,12 @@ export class SessionManager {
     if (!state) {
       throw new SessionNotFoundError(sessionId);
     }
-    // task-08：仅 claude provider 支持（既有契约零语义漂移，回归测试锁死）。
-    // codex 的配置切换走 reloadWithConfig（内核支持 codex，只切配置不注人格）。
-    // 不抛 UnsupportedProviderError（那是 driver 注册缺失语义）；用普通 Error 上报。
-    if (state.provider !== 'claude') {
-      throw new Error(
-        `reloadWithProvider: provider ${state.provider} not yet supported (session ${sessionId})`,
-      );
-    }
     // 共享 reload 内核：行为与重构前内联实现逐字节等价（provider_config null/非 null
     // env 构造、agentSessionId 守卫、resetForResubscribe、close 后置、失败回滚）。
+    // task-03（2026-09-11-session-provider-switch-codex-pi）：删除原 task-08 的
+    // claude-only 守卫（provider !== 'claude' 抛 not yet supported）——内核已
+    // provider-generic，codex/pi 同走（文件层配置接入见 _reloadSessionNow 内
+    // task-03 块）；claude 路径零漂移。
     await this._reloadSession(sessionId, { providerConfig });
   }
 
@@ -1808,6 +1818,43 @@ export class SessionManager {
         state.agentSessionId,
         this._resumeDirs,
       );
+
+      // ── task-03（2026-09-11-session-provider-switch-codex-pi）：codex/pi 文件层配置 ──
+      // 写盘 + env 合并。claude 跳过（settings.json 链路仍归 daemon.ts spawn 侧
+      // applyClaudeSettings + 上方既有 env 逻辑，零漂移，design Wave 2 步骤 5）。
+      if (state.provider === 'codex' || state.provider === 'pi') {
+        // codex 迁移钩子（FR-05，仅 codex）：宿主凭证起步会话（oldEnv 无 CODEX_HOME）
+        // 首次切平台供应商 → 迁移 thread rollout 历史到 per-session 目录，否则新
+        // CODEX_HOME 下 resume 找不到 thread 必断（对齐 claude
+        // migrateClaudeTranscriptToIsolated 语义）。三联条件缺一不触发；失败 warn
+        // 不阻断 reload（helper 自身返 false 已收口，对齐 claude 迁移失败降级 R-01）。
+        if (
+          state.provider === 'codex' &&
+          providerConfig != null &&
+          !oldEnv?.['CODEX_HOME'] &&
+          state.agentSessionId
+        ) {
+          await migrateCodexThreadFromHost(
+            state.agentSessionId,
+            join(daemonStateDir(), 'codex', state.sessionId),
+          );
+        }
+        // 写盘 + env 合并：文件层键（CODEX_HOME / PI_CODING_AGENT_DIR）最后合并盖过
+        // 下层，与 daemon.ts spawn 路径 Object.assign(interactiveEnv, providerFileEnv)
+        // 同模式——per-session 隔离目录是平台更高意志，盖过下层同键残留。失败兜底
+        // 已内聚在 ForReload 返回值（IO 失败/门槛缺返 priorEnv 对应键 = 等同未切，
+        // R-05），本处只做 Object.assign、不包 try/catch 不重试。
+        // priorEnv 断言：state.env 是 NodeJS.ProcessEnv（索引值 string | undefined），
+        // 但 env 快照实际由 buildSpawnEnv 产出（值恒为 string）；ForReload 内部经
+        // nonEmptyStr 逐键判空，undefined 值与缺键同义，断言仅对齐声明类型。
+        const fileEnv = await applyProviderFileSettingsForReload({
+          sessionKey: state.sessionId,
+          provider: providerConfig,
+          daemonApiKey: this.deps.daemonApiKey ?? null,
+          priorEnv: oldEnv as Record<string, string> | undefined,
+        });
+        Object.assign(newEnv, fileEnv);
+      }
 
       // ── ③ 校验 resume key 必需 ──
       // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），

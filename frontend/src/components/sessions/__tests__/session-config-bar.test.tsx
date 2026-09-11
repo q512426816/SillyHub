@@ -13,6 +13,13 @@
  *   - 同变更 task-10：供应商+模型级联——供应商 Ctrl 内嵌模型子下拉（候选三来源
  *     去重保序 + 首项「默认」）；切模型 injectSession 同请求带 llm_provider_id +
  *     model；切供应商级联重置 model=""；providerLocked/「不指定」两态隐藏。
+ *   2026-09-11-session-provider-switch-codex-pi task-07（FR-03 / D-002@v1）：
+ *     codex/pi 随 task-05 白名单（PROVIDER_SWITCH_ENGINES）解锁——原 D-010
+ *     「engine≠claude 锁供应商」三用例改写为门禁矩阵（claude/codex/pi 放行、
+ *     cursor/未知引擎锁定 + title 引擎中性「当前引擎不支持会话级供应商切换」）；
+ *     补供应商下拉 agent_kind 按引擎过滤用例（engine null 全量，「不指定（本机
+ *     默认）」全引擎保留）；fixture 补 agent_kind（LlmProviderRead 恒有值，
+ *     缺省会被 claude 会话的 kind 过滤滤掉——task-05 实测 :276/:334 红的根因）。
  *
  * mock 策略（对齐 new-session-form.test.tsx）：直接 mock 组件消费的 hook/函数模块
  * （useMineAgentProfiles / listProviders / injectSession），
@@ -151,9 +158,11 @@ beforeEach(() => {
     error: null,
     refetch: vi.fn(),
   });
+  // task-07：fixture 补 agent_kind（真实后端 LlmProviderRead 恒有该字段；缺省
+  // 项会被 kind 过滤滤掉——默认两供应商按 BASE_PROPS 引擎语境给 claude kind）。
   mocks.listProviders.mockReset().mockResolvedValue([
-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2" },
-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7" },
+    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
+    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
   ]);
   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
   // task-10：active 共享智能体默认空列表（用例内按需覆盖）。
@@ -312,23 +321,60 @@ describe("SessionConfigBar 切换供应商", () => {
     expect(firstCall?.[2]?.model).toBe("");
   });
 
-  it("Codex 引擎（engine≠claude）→ 供应商控件禁用（D-010）", () => {
-    renderBar({
-      engine: "codex",
-      configSnapshot: {
-        machine_name: "machine-1",
-        agent_name: "Codex",
-        engine: "codex",
-      },
-    });
-    expect(
-      (screen.getByRole("button", { name: "配置-供应商 本机默认" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "配置-档案 未指定" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
+  // task-07（2026-09-11-session-provider-switch-codex-pi / FR-03）：原「Codex 引擎
+  // （engine≠claude）→ 供应商控件禁用（D-010）」随 task-05 白名单化解锁，改写为
+  // 门禁矩阵——白名单外引擎只剩 cursor/未知。
+  it("claude/codex/pi 引擎解锁：供应商控件可用 + 可选「不指定（本机默认）」（档案控件不受影响）", () => {
+    for (const engine of ["claude", "codex", "pi"] as const) {
+      cleanup();
+      renderBar({
+        engine,
+        configSnapshot: {
+          machine_name: "machine-1",
+          agent_name: engine,
+          engine,
+        },
+      });
+      expect(
+        (screen.getByRole("button", { name: "配置-供应商 本机默认" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "配置-档案 未指定" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+      // 解锁即可开下拉，「不指定（本机默认）」项全引擎保留（D-002）
+      openCtrl("配置-供应商");
+      expect(
+        screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("cursor/未知引擎锁定：供应商控件禁用 + title 引擎中性「当前引擎不支持会话级供应商切换」（档案控件不受影响）", () => {
+    for (const engine of ["cursor", "future-engine"] as const) {
+      cleanup();
+      renderBar({
+        engine,
+        configSnapshot: {
+          machine_name: "machine-1",
+          agent_name: engine,
+          engine,
+        },
+      });
+      const providerCtrl = screen.getByRole("button", {
+        name: "配置-供应商 本机默认",
+      });
+      expect((providerCtrl as HTMLButtonElement).disabled).toBe(true);
+      expect(providerCtrl).toHaveAttribute(
+        "title",
+        "当前引擎不支持会话级供应商切换",
+      );
+      expect(
+        (screen.getByRole("button", { name: "配置-档案 未指定" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    }
   });
 
   it("切换失败 → message.error（点选即切换无确认行，可再点重试）", async () => {
@@ -337,6 +383,100 @@ describe("SessionConfigBar 切换供应商", () => {
     openCtrl("配置-供应商");
     fireEvent.click(await screen.findByRole("button", { name: "选择 Kimi 中转" }));
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalled());
+  });
+});
+
+// ── 4.1 task-07：供应商下拉 agent_kind 按引擎过滤（FR-03 / D-002@v1） ─────
+
+describe("SessionConfigBar 供应商下拉 kind 过滤（task-07 / FR-03 / D-002@v1）", () => {
+  /** 三 kind 混合列表——断言各引擎只列同 kind 项 + 「不指定（本机默认）」保留。 */
+  const MIXED_PROVIDERS = [
+    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
+    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
+    { id: "prov-codex-1", name: "Codex 专供", model: "gpt-5.2", agent_kind: "codex" },
+    { id: "prov-pi-1", name: "Pi 专供", model: "glm-4.7-air", agent_kind: "pi" },
+  ];
+
+  /** 按引擎渲染并打开供应商下拉（engine null = provisional 悬浮助手形态）。 */
+  function renderWithEngine(engine: string | null) {
+    if (engine == null) {
+      renderBar({ engine: null, configSnapshot: null });
+    } else {
+      renderBar({
+        engine,
+        configSnapshot: { machine_name: "machine-1", agent_name: engine, engine },
+      });
+    }
+    openCtrl("配置-供应商");
+  }
+
+  it("codex 会话只列 agent_kind=codex 供应商（混入 claude/pi kind 项不出现）+「不指定（本机默认）」保留", async () => {
+    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
+    renderWithEngine("codex");
+    expect(
+      await screen.findByRole("button", { name: "选择 Codex 专供" }),
+    ).toBeInTheDocument();
+    for (const absent of [
+      "选择 Kimi 中转",
+      "选择 GLM 平台",
+      "选择 Pi 专供",
+    ]) {
+      expect(screen.queryByRole("button", { name: absent })).not.toBeInTheDocument();
+    }
+    // 「不指定（本机默认）」全引擎保留（D-002）
+    expect(
+      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
+    ).toBeInTheDocument();
+  });
+
+  it("claude 会话只列 claude kind；pi 会话只列 pi kind（各自保留「不指定」）", async () => {
+    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
+    renderWithEngine("claude");
+    expect(
+      await screen.findByRole("button", { name: "选择 Kimi 中转" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "选择 GLM 平台" }),
+    ).toBeInTheDocument();
+    for (const absent of ["选择 Codex 专供", "选择 Pi 专供"]) {
+      expect(screen.queryByRole("button", { name: absent })).not.toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
+    ).toBeInTheDocument();
+
+    cleanup();
+    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
+    renderWithEngine("pi");
+    expect(
+      await screen.findByRole("button", { name: "选择 Pi 专供" }),
+    ).toBeInTheDocument();
+    for (const absent of [
+      "选择 Kimi 中转",
+      "选择 GLM 平台",
+      "选择 Codex 专供",
+    ]) {
+      expect(screen.queryByRole("button", { name: absent })).not.toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
+    ).toBeInTheDocument();
+  });
+
+  it("engine null（provisional 悬浮助手）→ 全量列出（创建时才定引擎）", async () => {
+    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
+    renderWithEngine(null);
+    for (const label of [
+      "选择 Kimi 中转",
+      "选择 GLM 平台",
+      "选择 Codex 专供",
+      "选择 Pi 专供",
+    ]) {
+      expect(await screen.findByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -402,7 +542,8 @@ describe("SessionConfigBar providerOpenSignal（ql-20260904-010）", () => {
     expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
   });
 
-  it("Codex 引擎锁定（D-010）→ 信号不开下拉", () => {
+  // task-07：codex 解锁——错误卡信号照常开下拉；锁定负例换 cursor（白名单外）。
+  it("codex 引擎解锁 → 信号打开供应商下拉（config-dd-provider 出现）", () => {
     renderSignalBar({
       engine: "codex",
       providerOpenSignal: 1,
@@ -410,6 +551,19 @@ describe("SessionConfigBar providerOpenSignal（ql-20260904-010）", () => {
         machine_name: "machine-1",
         agent_name: "Codex",
         engine: "codex",
+      },
+    });
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+  });
+
+  it("cursor 引擎锁定 → 信号被吞不开下拉（白名单外负例承接）", () => {
+    renderSignalBar({
+      engine: "cursor",
+      providerOpenSignal: 1,
+      configSnapshot: {
+        machine_name: "machine-1",
+        agent_name: "Cursor",
+        engine: "cursor",
       },
     });
     expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
@@ -426,6 +580,8 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     id: "prov-glm",
     name: "GLM 平台",
     model: "glm-4.7",
+    // task-07：kind 字段补齐（本组用例默认 claude 引擎语境；codex 分支内覆盖）。
+    agent_kind: "claude",
     default_fallback_model: "glm-4.6",
     model_role_mappings: {
       sonnet: { model: "glm-4.7" }, // 与 model 重复 → 去重
@@ -486,15 +642,20 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     expect(call?.[2]?.model).toBe("");
   });
 
-  it("providerLocked（Codex）/「不指定」两态 → 模型子下拉不渲染", async () => {
+  // task-07 语义翻转：原 Codex 锁定分支（D-010）改为 codex 解锁后选中供应商即
+  // 渲染子下拉；「不指定」隐藏分支保留；锁定负例换 cursor，并等供应商列表到达
+  // 再断言（原同步断言在 react-query resolve 前执行，碰巧空洞绿）。
+  it("「不指定」/cursor 锁定两态隐藏模型子下拉；codex 解锁选中供应商后渲染", async () => {
     // 「不指定（本机默认）」：无具体供应商 → 隐藏
     renderBar({ llmProviderId: null });
     expect(
       screen.queryByRole("combobox", { name: "配置-模型" }),
     ).not.toBeInTheDocument();
     cleanup();
-    // Codex 锁定：供应商+模型整块锁定（D-010），子下拉同锁不渲染
-    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    // codex 解锁：选中供应商 → 模型子下拉渲染（与 claude 同构，级联候选不变）
+    mocks.listProviders.mockResolvedValue([
+      { ...GLM_PROVIDER, agent_kind: "codex" },
+    ] as never);
     renderBar({
       llmProviderId: "prov-glm",
       engine: "codex",
@@ -504,6 +665,28 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
         engine: "codex",
       },
     });
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    // 候选照常三来源去重保序（首项「默认」）
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
+    cleanup();
+    // cursor 锁定：供应商+模型整块锁定，子下拉同锁不渲染（白名单外负例承接）
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    renderBar({
+      llmProviderId: "prov-glm",
+      engine: "cursor",
+      configSnapshot: {
+        machine_name: "machine-1",
+        agent_name: "Cursor",
+        engine: "cursor",
+      },
+    });
+    // 等供应商名解析（列表已 resolve）后再断言，杜绝碰巧空洞绿
+    expect(
+      await screen.findByRole("button", { name: "配置-供应商 GLM 平台" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("combobox", { name: "配置-模型" }),
     ).not.toBeInTheDocument();

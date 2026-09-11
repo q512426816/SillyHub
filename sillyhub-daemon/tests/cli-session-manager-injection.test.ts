@@ -231,6 +231,29 @@ describe('Wave2 task-04 gap-1 cli.startAction 注入 SessionManager', () => {
     expect(typeof deps.onSessionEnd).toBe('function');
   });
 
+  // ── task-03（2026-09-11-session-provider-switch-codex-pi / D-003@v1）：daemonApiKey
+  // 注入锚定——cli 装配处（生产构造点）传 daemon 侧 config.api_key，供 reload/restore
+  // 文件层写盘（ForReload）对 codex openai_chat 形态作 litellm 代理 auth key。
+  // 取值口径 = config.api_key ?? null（与 spawn 路径 daemon.ts / task-runner 同源）。
+
+  it('deps.daemonApiKey = config.api_key ?? null（api_key 缺省 → null，spawn 同源口径）', async () => {
+    await cli.startAction({ token: 'test-token' });
+
+    // 本文件 config mock 固定 api_key: null → deps.daemonApiKey 收敛 null（非
+    // undefined——SessionManagerDeps 类型 string | null）。
+    const deps = captured.sessionManagerInstances[0]!.deps;
+    expect(deps.daemonApiKey).toBeNull();
+  });
+
+  it('deps.daemonApiKey = config.api_key（api_key 非空透传，litellm auth key 接线）', async () => {
+    // 语义核对（step 1-2 CLI 覆盖）：opts.token 会清掉 api_key（token↔api_key 互斥
+    // 互清）——非空 api_key 形态用 --api-key 入口覆盖（与持久化文件 api_key 同字段）。
+    await cli.startAction({ apiKey: 'sk-daemon-master-key' });
+
+    const deps = captured.sessionManagerInstances[0]!.deps;
+    expect(deps.daemonApiKey).toBe('sk-daemon-master-key');
+  });
+
   it('deps.onTurnResult 是闭包，调用时 forward 到 daemon.onTurnResult（延迟绑定生效）', async () => {
     await cli.startAction({ token: 'test-token' });
 

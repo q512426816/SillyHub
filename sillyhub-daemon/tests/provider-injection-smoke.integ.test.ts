@@ -41,7 +41,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 // 分派单点（task-03）：与 daemon interactive / task-runner batch 两接线点共用同一函数。
-import { applyProviderFileSettings } from '../src/task-runner.js';
+// 2026-09-11-session-provider-switch-codex-pi task-01 起单点定义在 provider-file-settings.ts。
+import { applyProviderFileSettings } from '../src/provider-file-settings.js';
 import type { ProviderConfig } from '../src/types.js';
 
 // ── 测试常量（编造凭证，无真实 key）────────────────────────────────────────────

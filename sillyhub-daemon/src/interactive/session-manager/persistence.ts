@@ -36,6 +36,16 @@ import {
 // daemon 生产路径注入 daemon._credentialManager，测试 / 未注入时用 noopCredential fallback。
 import { buildSpawnEnv } from '../../spawn-env.js';
 import type { SpawnCredentialManager } from '../../spawn-env.js';
+// task-04（2026-09-11-session-provider-switch-codex-pi / FR-01 FR-02 / D-001@v1）：
+// restore 自愈——恢复路径 codex/pi 注文件层 env（ForReload 写盘 + codex null
+// 目录探测后镜像，helper 在 provider-file-settings.ts / codex-settings.ts）。
+// stat / join / daemonStateDir 用于探测确定性 per-session 目录
+// `<daemonStateDir()>/codex/<sessionId>/`（与 spawn/reload 同口径派生路径）。
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { daemonStateDir } from '../../config.js';
+import { mirrorCodexHostAuth } from '../../codex-settings.js';
+import { applyProviderFileSettingsForReload } from '../../provider-file-settings.js';
 import type { SessionManagerCore } from './types.js';
 
 /**
@@ -316,6 +326,58 @@ export async function restoreAndReconnect(
       state.agentSessionId,
       mgr._resumeDirs,
     );
+
+    // ── task-04（2026-09-11-session-provider-switch-codex-pi / design Wave 2 步骤 4，
+    //    Grill 附带发现收编）：restore 自愈——恢复路径 codex/pi 注文件层 env ──
+    // 不修则「切换供应商后 daemon 重启 → 恢复会话丢 CODEX_HOME / PI_CODING_AGENT_DIR
+    // → 静默回宿主凭证」，直接击穿 FR-01 的生效承诺。claude 跳过（settings.json
+    // 链路仍归 daemon.ts spawn 侧 applyClaudeSettings + 上方既有 env 逻辑，零漂移，
+    // design Wave 2 步骤 5）。插入位置对齐 task-03 在 _reloadSessionNow 的合并块
+    //（applyTranscriptConfigDir 之后、driver.start 之前——文件层键最后合并盖过下层）。
+    if (state.provider === 'codex' || state.provider === 'pi') {
+      // providerConfig 非 null（持久化供应商快照恢复）：经 ForReload 重写
+      // per-session 目录 + 注文件层 env（与 _reloadSessionNow task-03 同模式，
+      // 失败兜底内聚在返回值矩阵 R-05）。priorEnv 传 undefined = 恢复时无旧 env
+      //（restore 从零重建 env、不回放 state.env，D-008）——失败兜底取不到 prior
+      // 键 → 返 {} 降级（按宿主现状运行，error 可归因，Grill 复审 P2-2）。
+      // ForReload 绝不抛，本块不进下方 driver.start 的既有 catch（恢复主路径
+      // 不因文件层降级而 fail）。
+      if (state.providerConfig != null) {
+        const fileEnv = await applyProviderFileSettingsForReload({
+          sessionKey: state.sessionId,
+          provider: state.providerConfig,
+          daemonApiKey: mgr.deps.daemonApiKey ?? null,
+          priorEnv: undefined,
+        });
+        Object.assign(restoreEnv, fileEnv);
+      } else if (state.provider === 'codex') {
+        // codex null 目录探测（Grill 复审 P2-3）= 切换后重启不丢 thread：
+        // persistence 仅落盘非 null providerConfig（snapshotPersistable task-08），
+        // null 切换（切回本机）会话的恢复记录天然无该字段——若按无供应商处理会
+        // 回宿主 CODEX_HOME → thread 在 per-session 目录找不到 → resume 必断。
+        // 修法：stat 探测确定性 per-session 目录，存在 = 此前在平台供应商上 →
+        // 按 null 切换语义处理（宿主凭证幂等重镜像 + 注 CODEX_HOME，镜像失败 =
+        // 目录留旧供应商产物 = 等同未切、env 仍保住）；不存在 → 零动作（行为与
+        // 现状逐字一致）。pi 不适用（null = 回宿主即语义本身，pi 历史在 daemon
+        // 自管 --session-dir 不丢）。
+        const codexHome = join(daemonStateDir(), 'codex', state.sessionId);
+        try {
+          if ((await stat(codexHome)).isDirectory()) {
+            // mirrorCodexHostAuth 自身绝不抛；防御 catch 兜底（镜像成败不影响
+            // 下方 env 注入）。
+            try {
+              await mirrorCodexHostAuth(codexHome);
+            } catch {
+              // 防御性兜底：零动作，不阻断恢复。
+            }
+            Object.assign(restoreEnv, { CODEX_HOME: codexHome });
+          }
+        } catch {
+          // stat ENOENT / IO 异常 = 目录不存在 → 零动作。
+        }
+      }
+    }
+
     const driverOpts = mgr._buildDriverOptions(state, {
       exePath: exe,
       model: record.model,

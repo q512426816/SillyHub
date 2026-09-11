@@ -120,9 +120,10 @@ import { HostFsHandler } from './host-fs-handler.js';
 import { buildSpawnEnv, type SpawnCredentialManager } from './spawn-env.js';
 import { applyClaudeSettings } from './claude-settings.js';
 // task-03（2026-09-10-multi-provider-injection / FR-01/FR-02）：codex/pi 配置写盘层
-// 分派 helper——单点定义在 task-runner.ts（daemon→task-runner 单向 import，反向会
-// 让 task-runner 单测拖起整个 daemon 模块），interactive 与 batch 两接线点共用。
-import { applyProviderFileSettings } from './task-runner.js';
+// 分派 helper——2026-09-11-session-provider-switch-codex-pi task-01 起单点定义在
+// ./provider-file-settings.ts 共享模块（纯移动自 task-runner.ts），interactive 与
+// batch 两接线点共用。
+import { applyProviderFileSettings } from './provider-file-settings.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 // task-04（S1）：编排器静态引入自更新三件套——runDaemonSelfUpdate（下载原子替换）、
 // respawnDaemonAndExit（交接拉起）、fetchLatestBuildId（推迟路径目标版本回传，

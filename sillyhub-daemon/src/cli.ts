@@ -816,6 +816,12 @@ export async function startAction(opts: StartOptions): Promise<number> {
       driver,
       drivers: { claude: driver, codex: codexDriver, pi: piDriver, cursor: cursorDriver },
       persistence,
+      // task-03（2026-09-11-session-provider-switch-codex-pi / D-003@v1）：daemon 自身
+      // apiKey 注入 SessionManager——reload/restore 文件层写盘（ForReload）对 codex
+      // openai_chat 形态作 litellm 代理 auth key。取值口径与 spawn 路径同源：
+      // daemon.ts this._config.api_key / task-runner.ts this.config?.api_key ?? null
+      //（本函数 :683 setDaemonApiKey(config.api_key) 同一 config 对象）。
+      daemonApiKey: config.api_key ?? null,
       // task-08（2026-09-03-agent-provider-abstraction / FR-02）：回调类型改
       // AgentEvent 事件轨。SessionManager 消费侧已收口 TurnMessageEnvelope——
       // deps.onTurnMessage 收到的 msg 是归一化事件平铺的消息 dict

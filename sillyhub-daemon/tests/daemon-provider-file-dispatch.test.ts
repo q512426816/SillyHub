@@ -2,7 +2,9 @@
 // change 2026-09-10-multi-provider-injection / task-03（FR-01/FR-02 / D-005 / D-011 /
 // D-012 / Grill P2）。锁「两接线点分派 + applyClaudeSettings kind 守卫」：
 //
-//   1. 分派函数直测（applyProviderFileSettings，task-runner.ts 单点定义）：
+//   1. 分派函数直测（applyProviderFileSettings，provider-file-settings.ts 单点
+//      定义——2026-09-11-session-provider-switch-codex-pi task-01 自 task-runner.ts
+//      平移）：
 //      codex anthropic/openai_chat 形态产物 + env / pi 自定义端点三文件 + env /
 //      门槛缺零 mkdir 零 env / pi 官方端点零写盘 / provider absent / claude kind
 //      零文件层 env / mkdir·写盘 IO 失败 → 零 env 不抛；
@@ -60,7 +62,10 @@ import {
 } from 'node:fs';
 // vi.mock 已 hoist，import 拿到 mock 版本。
 import { applyClaudeSettings } from '../src/claude-settings.js';
-import { TaskRunner, applyProviderFileSettings } from '../src/task-runner.js';
+import { TaskRunner } from '../src/task-runner.js';
+// 2026-09-11-session-provider-switch-codex-pi task-01：分派函数平移至共享模块
+//（纯移动自 task-runner.ts，断言与用例零改动）。
+import { applyProviderFileSettings } from '../src/provider-file-settings.js';
 import { Daemon } from '../src/daemon.js';
 import { MSG } from '../src/protocol.js';
 import type { DaemonConfig } from '../src/config.js';

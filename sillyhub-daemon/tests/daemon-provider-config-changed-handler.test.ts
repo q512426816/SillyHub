@@ -23,6 +23,14 @@
 // 会话复用 applyProviderFileSettings 重写 per-session 目录（复用同函数 = 产物与
 // 新会话 spawn 前逐字一致）；claude/absent 零动作；null 仅记日志；终态/不存在
 // 会话零重写（防死会话重建目录孤儿）；hot_switch_rewrite 可观测日志不含 key。
+//
+// task-06（2026-09-11-session-provider-switch-codex-pi / FR-04 / D-003@v1）：热切换
+// 语义升级——task-03 删 reloadWithProvider claude-only 守卫后，PROVIDER_CONFIG_
+// CHANGED 对 codex/pi 从「尽力重写」升级为确定性 reload（与 claude 同语义）；既有
+// task-04 重写断言按「reload 前幂等预写」语义保留（design 非目标：不动 daemon.ts
+// 重写块），下方补 handler → markPendingSwitch → reloadWithProvider 接线断言
+// （codex 配置全程不撞 not-yet-supported——真实内核走通证据归
+// session-manager-config-switch REG-4 / reload-provider 边界-2 改写）。
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { Daemon } from '../src/daemon.js';
@@ -33,8 +41,9 @@ import type { WsClientCallbacks } from '../src/ws-client.js';
 import type { DaemonMessage, ProviderConfig } from '../src/types.js';
 import type { SessionManager } from '../src/interactive/session-manager.js';
 import type { SessionState } from '../src/interactive/types.js';
-// task-04：热切换重写产物断言（复用 task-03 同一函数对照「逐字一致」）。
-import { applyProviderFileSettings } from '../src/task-runner.js';
+// task-04：热切换重写产物断言（复用 task-03 同一函数对照「逐字一致」；
+// 2026-09-11-session-provider-switch-codex-pi task-01 起单点定义在 provider-file-settings.ts）。
+import { applyProviderFileSettings } from '../src/provider-file-settings.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -260,6 +269,47 @@ describe('task-06 / FR-04 / D-002@v1: daemon PROVIDER_CONFIG_CHANGED WS handler 
       SESSION_ID,
       SAMPLE_PROVIDER_CONFIG,
     );
+  });
+
+  it('task-06/D-003: codex 配置经 markPendingSwitch 空闲路径直达 reloadWithProvider（不撞 not-yet-supported）', async () => {
+    // task-03 删守卫后热切换接线为确定性 reload：handler → markPendingSwitch（空闲
+    // 会话）→ reloadWithProvider。markPendingSwitch 用真实形状实现（mock sm 上自
+    // 路由到 reloadWithProvider spy）——锁 daemon 分发对 codex 配置零拦截；真实
+    // 内核 codex 走通断言归 session-manager 系列测试（REG-4 / 边界-2 改写）。
+    const reloadSpy = vi.fn(async () => {});
+    const sm = createMockSessionManager(function (
+      this: { reloadWithProvider: typeof reloadSpy },
+      sessionId: string,
+      cfg: ProviderConfig | null,
+    ) {
+      // 真实 markPendingSwitch 空闲分支形状（session-manager.ts）：fire-and-forget
+      // reload，不写标记。
+      void this.reloadWithProvider(sessionId, cfg);
+    });
+    (sm as unknown as { reloadWithProvider: typeof reloadSpy }).reloadWithProvider =
+      reloadSpy;
+    const { daemon, captured } = buildDaemon({ sessionManager: sm });
+    daemons.push(daemon);
+    await daemon.start();
+    await waitForWsInit(captured);
+
+    const codexCfg: ProviderConfig = {
+      agent_kind: 'codex',
+      api_key: 'sk-hot-codex',
+      base_url: 'https://hot.example/v1',
+      model: 'glm-4.8',
+    };
+    captured.callbacks.onMessage!({
+      type: MSG.PROVIDER_CONFIG_CHANGED,
+      payload: { session_id: SESSION_ID, provider_config: codexCfg },
+    } as DaemonMessage);
+    await flushMicro();
+    await flushMicro();
+
+    // 接线断言：codex 配置直达 reloadWithProvider（守卫删除前此链对 codex 终止于
+    // not-yet-supported 抛错——markPendingSwitch 的 .catch 吞错，reload 永不发生）。
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+    expect(reloadSpy).toHaveBeenCalledWith(SESSION_ID, codexCfg);
   });
 
   it('provider_config=null（停止）→ 透传 null 给 markPendingSwitch（D-004@v1 回退本机凭证）', async () => {

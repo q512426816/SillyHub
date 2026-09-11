@@ -57,6 +57,7 @@ import type {
   SessionInjectOptions,
   SessionInjectResponse,
 } from "@/lib/daemon";
+import { PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
 
 /** 供应商下拉「不指定（本机默认）」项的值（→ injectSession llm_provider_id: ""）。 */
@@ -130,7 +131,12 @@ export interface SessionConfigBarProps {
   llmProviderId: string | null;
   /** 会话当前生效配置摘要（agent_sessions.config_snapshot，engine 与档案/供应商名兜底来源）。 */
   configSnapshot: AgentSessionConfigSnapshot | null;
-  /** 引擎（claude/codex；缺省回退 config_snapshot.engine）。engine≠claude 锁供应商（D-010）。 */
+  /**
+   * 引擎（claude/codex/pi/cursor；缺省回退 config_snapshot.engine）。引擎不在
+   * PROVIDER_SWITCH_ENGINES 白名单（cursor/未知）时锁供应商（原 D-010
+   * claude-only 口径，2026-09-11-session-provider-switch-codex-pi task-05
+   * 白名单化）。
+   */
   engine?: string | null;
   /** 切换轮提示消息默认值（不传用组件内置按目标名生成的文案）。 */
   switchPrompt?: string;
@@ -171,7 +177,7 @@ export interface SessionConfigBarProps {
   /**
    * ql-20260904-010：外部请求打开供应商下拉的信号（每次递增触发一次）。运行失败
    * 卡「切换供应商」定位到会话底部配置条时由父级递增；锁定/不可切
-   * （running/ended/Codex）时不响应。0/不传 = 无动作（零回归）。
+   * （running/ended/引擎在白名单外）时不响应。0/不传 = 无动作（零回归）。
    */
   providerOpenSignal?: number;
   /**
@@ -265,9 +271,12 @@ export function SessionConfigBar({
 
   const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
   const canSwitch = !running && !ended;
-  // D-010：Codex 引擎无会话级供应商 → 控件锁定（下拉不可开；task-10 起模型
-  // 子下拉同锁——直接不渲染）。
-  const providerLocked = effectiveEngine != null && effectiveEngine !== "claude";
+  // 2026-09-11-session-provider-switch-codex-pi task-05（FR-03 / D-002@v1）：
+  // PROVIDER_SWITCH_ENGINES 白名单外引擎（cursor/未知）无会话级供应商 →
+  // 控件锁定（下拉不可开；task-10 起模型子下拉同锁——直接不渲染）；原 D-010
+  // claude-only 口径已废，claude/codex/pi 解锁。
+  const providerLocked =
+    effectiveEngine != null && !PROVIDER_SWITCH_ENGINES.has(effectiveEngine);
 
   // ql-20260904-010：外部信号打开供应商下拉（运行失败卡「切换供应商」定位本条）。
   // ref 记已消费的信号值——canSwitch/providerLocked 后续翻转不重放旧信号（避免
@@ -287,6 +296,22 @@ export function SessionConfigBar({
   const selectedProvider = useMemo(
     () => providers.find((p) => p.id === llmProviderId) ?? null,
     [providers, llmProviderId],
+  );
+
+  /**
+   * 2026-09-11-session-provider-switch-codex-pi task-05（FR-03 / D-002@v1）：
+   * 供应商下拉候选按会话引擎过滤 agent_kind（agent_kind 词表
+   * "claude"|"pi"|"codex" 与引擎字符串同源，llm-providers.ts 的
+   * LlmProviderAgentKind）——防选错 kind 的供应商被 backend inject 422 拒绝。
+   * effectiveEngine 为 null（provisional 悬浮助手形态，创建时才定引擎）维持
+   * 全量；「不指定（本机默认）」项在渲染处固定，不受此过滤影响。
+   */
+  const providerCandidates = useMemo(
+    () =>
+      effectiveEngine == null
+        ? providers
+        : providers.filter((p) => p.agent_kind === effectiveEngine),
+    [providers, effectiveEngine],
   );
 
   /**
@@ -456,8 +481,8 @@ export function SessionConfigBar({
       <div className="flex flex-wrap items-center gap-0.5">
         {/* task-10（FR-03-2 / 原型 .cascade）：供应商+模型级联——两「select」并排
             在供应商 Ctrl 内（供应商=既有按钮+上弹下拉，模型=紧凑原生 select）。
-            模型子下拉仅选中具体供应商且非 Codex 锁定时渲染：「不指定（本机默认）」
-            / providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
+            模型子下拉仅选中具体供应商且引擎未锁供应商时渲染——「不指定（本机
+            默认）」与 providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
         <span className="inline-flex items-center gap-0.5">
             {ctrlButton(
               "provider",
@@ -465,8 +490,10 @@ export function SessionConfigBar({
               providerLabel,
               // ql-20260909-005：禁用态 title 按原因说明（原恒「供应商（不选=…）」，
               // 结束/离线时点了没反应且提示误导）。priority：锁定 > 已结束/离线 > 运行中。
+              // 2026-09-11-session-provider-switch-codex-pi task-05：锁定文案引擎
+              // 中性化——剩余锁定对象是 cursor/未知引擎，不再点名 Codex。
               providerLocked
-                ? "Codex 引擎暂不支持会话级供应商"
+                ? "当前引擎不支持会话级供应商切换"
                 : ended
                   ? "会话已结束或机器离线，不可切换供应商"
                   : running
@@ -488,7 +515,7 @@ export function SessionConfigBar({
                   })
                 }
               />
-              {providers.map((p) => (
+              {providerCandidates.map((p) => (
                 <SwitchItem
                   key={p.id}
                   icon={<Cloud aria-hidden className="h-3 w-3" />}
@@ -504,7 +531,7 @@ export function SessionConfigBar({
                   }
                 />
               ))}
-              {providers.length === 0 && (
+              {providerCandidates.length === 0 && (
                 <p className="px-2 py-1.5 text-xs text-muted-foreground">
                   暂无自定义供应商
                 </p>

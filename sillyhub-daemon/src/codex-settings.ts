@@ -2,6 +2,12 @@
  * codex-settings —— 写 per-session `CODEX_HOME/{auth.json, config.toml}`。
  *
  * change 2026-09-10-multi-provider-injection task-01（FR-01 / D-003 / D-005 / D-011 / D-012）。
+ * change 2026-09-11-session-provider-switch-codex-pi task-02：新增宿主凭证镜像
+ * mirrorCodexHostAuth（null 切换镜像，FR-02）与 thread 历史迁移
+ * migrateCodexThreadFromHost（宿主起步会话首次切平台供应商时迁 rollout，
+ * FR-05 / R-01）——两 helper 对宿主 ~/.codex 只读拷贝、删除/写入动作只发生在
+ * 平台 per-session 目录内，IO 失败一律日志收口绝不抛（失败兜底由调用方
+ * ForReload 返回值矩阵承接）。
  *
  * 背景（design + spike 实测事实，golden = spike/a2b-config.toml + a2-auth.json）：
  *   - codex 0.147.0 无 base_url env 注入面（spike A1：二进制无 OPENAI_BASE_URL），
@@ -66,8 +72,9 @@
  * @module codex-settings
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { copyFile, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
 import type { ProviderConfig } from './types.js';
 
 /** 写盘器入参（design 接口定义；风格对齐 claude-settings.ts 纯函数 + 显式路径入参）。 */
@@ -364,4 +371,206 @@ export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void> 
     });
     throw e;
   }
+}
+
+// ── 宿主镜像 / thread 迁移（2026-09-11-session-provider-switch-codex-pi task-02）──
+
+/** 宿主 codex 配置根（~/.codex；os.homedir() 读 USERPROFILE，Windows 行为一致）。 */
+function hostCodexHome(): string {
+  return join(homedir(), '.codex');
+}
+
+/** 统一错误 message 提取（日志安全：只进 message，不进文件内容/凭证）。 */
+function errMessage(e: unknown): string {
+  return (e as Error)?.message ?? String(e);
+}
+
+/**
+ * null 切换镜像（FR-02 / D-001）：把宿主 `~/.codex/{auth.json, config.toml}`
+ * 的登录态如实反映进 per-session codexHome——
+ *   - 宿主文件存在 → 拷入覆盖（平台供应商产物被宿主登录态替换）；
+ *   - 宿主文件不存在 → 删除 codexHome 同名文件（宿主未登录 = 镜像后同样未登录，
+ *     残留平台供应商 auth.json 会顶掉「回本机」语义）。
+ *
+ * 逐文件独立 best-effort：单文件 IO 失败 console.error 后继续另一文件，**绝不
+ * 抛**（调用方 ForReload 分支四无论镜像成败都返回 prior CODEX_HOME——失败 =
+ * 目录里旧供应商凭证仍在 = 等同未切，thread 历史保住）。
+ *
+ * 宿主侧只读（copyFile 单向），删除/写入动作只发生在平台 per-session 目录内。
+ * 日志载荷只含文件名 / 路径 / 错误 message，不含凭证内容。
+ */
+export async function mirrorCodexHostAuth(codexHome: string): Promise<void> {
+  const hostHome = hostCodexHome();
+  // 拷入分支前置建目录（restore 探测路径 / 镜像目标尚未建的防御；rm 分支无需）。
+  try {
+    await mkdir(codexHome, { recursive: true });
+  } catch (e) {
+    console.error('codex_host_mirror_mkdir_failed', {
+      codexHome,
+      error: errMessage(e),
+    });
+  }
+  for (const filename of [AUTH_FILENAME, CONFIG_FILENAME]) {
+    const src = join(hostHome, filename);
+    const dest = join(codexHome, filename);
+    try {
+      await copyFile(src, dest);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        // 宿主无该文件：删 per-session 同名文件（force 容忍本就不存在）。
+        try {
+          await rm(dest, { force: true });
+        } catch (e2) {
+          console.error('codex_host_mirror_delete_failed', {
+            file: filename,
+            codexHome,
+            error: errMessage(e2),
+          });
+        }
+      } else {
+        console.error('codex_host_mirror_copy_failed', {
+          file: filename,
+          codexHome,
+          error: errMessage(e),
+        });
+      }
+    }
+  }
+}
+
+/**
+ * 单文件首行读取上限：宿主 rollout 首行为 session_meta（含 base_instructions
+ * 全文，本机实测 13-22KB），1MB 上限留足余量；超限无换行按整行处理（JSON.parse
+ * 失败即跳过该候选）。不全文件读取——控制宿主大目录扫描成本（R-01）。
+ */
+const ROLLOUT_FIRST_LINE_MAX_BYTES = 1024 * 1024;
+/** 首行分块读取粒度（64KB 一次读齐典型首行，避免逐字节 sysctl 开销）。 */
+const ROLLOUT_FIRST_LINE_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * 只读文件首行（遇首个 `\n` 截断；EOF/超上限仍无换行则返回已读全文）。
+ * 不抛——打开/读取失败交调用方逐文件 try/catch 收口。
+ */
+async function readFirstLine(path: string): Promise<string> {
+  const handle = await open(path, 'r');
+  try {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total < ROLLOUT_FIRST_LINE_MAX_BYTES) {
+      const buf = Buffer.alloc(
+        Math.min(ROLLOUT_FIRST_LINE_CHUNK_BYTES, ROLLOUT_FIRST_LINE_MAX_BYTES - total),
+      );
+      const { bytesRead } = await handle.read(buf, 0, buf.length, total);
+      if (bytesRead === 0) break; // EOF
+      const view = buf.subarray(0, bytesRead);
+      const nl = view.indexOf(0x0a);
+      if (nl >= 0) {
+        chunks.push(view.subarray(0, nl));
+        return Buffer.concat(chunks).toString('utf-8');
+      }
+      chunks.push(view);
+      total += bytesRead;
+    }
+    return Buffer.concat(chunks).toString('utf-8');
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * 从 rollout 首行解析会话 id：`payload.session_id` 优先（TaskCard fixture 锚），
+ * 兼容 `session_meta.id`——本机实际 rollout 首行为
+ * `{"type":"session_meta","payload":{"id":"<uuid>",...}}`（codex 0.121.0+ 实测，
+ * 「以实际 rollout 首行为准」），故兼容读 payload.id 与顶层 id 双形态。
+ */
+function extractRolloutSessionId(lineObj: unknown): string | undefined {
+  if (lineObj === null || typeof lineObj !== 'object') return undefined;
+  const payload = (lineObj as { payload?: unknown }).payload;
+  if (payload !== null && typeof payload === 'object') {
+    const p = payload as { session_id?: unknown; id?: unknown };
+    if (typeof p.session_id === 'string' && p.session_id.length > 0) return p.session_id;
+    if (typeof p.id === 'string' && p.id.length > 0) return p.id;
+  }
+  const topId = (lineObj as { id?: unknown }).id;
+  return typeof topId === 'string' && topId.length > 0 ? topId : undefined;
+}
+
+/** 递归收集 dir 下全部 .jsonl 文件（相对路径随收集保留）；子目录不可读静默跳过。 */
+async function collectJsonlFiles(dir: string, out: string[]): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return; // 宿主目录缺/无权限：跳过（只读宿主，不阻断）
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectJsonlFiles(full, out); // 符号链接不入 isDirectory，天然防环
+    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      out.push(full);
+    }
+  }
+}
+
+/**
+ * thread 历史迁移（FR-05 / R-01，对齐 claude migrateClaudeTranscriptToIsolated
+ * 降级语义）：递归扫描宿主 `~/.codex/sessions` 下 .jsonl rollout，仅读**首行**
+ * 解析会话 id（见 extractRolloutSessionId）匹配 threadId，命中文件按 sessions/
+ * 下相对路径拷入 `$codexHome/sessions/`（宿主日期分层结构原样保留）。
+ *
+ * 返回是否迁到 ≥1 个文件。宿主目录不存在 / 无命中 → console.warn 返 false
+ * （reload 不阻断；不迁则新 CODEX_HOME 下 resume 找不到 thread 由 codex 真实
+ * 报错收敛，对齐 R-01）。**绝不抛**：逐文件 IO 失败 console.error 后继续。
+ *
+ * 宿主文件只读不删（copyFile 单向）；写入只发生在平台 per-session 目录内。
+ */
+export async function migrateCodexThreadFromHost(
+  threadId: string,
+  codexHome: string,
+): Promise<boolean> {
+  const hostSessionsDir = join(hostCodexHome(), 'sessions');
+  const candidates: string[] = [];
+  await collectJsonlFiles(hostSessionsDir, candidates);
+  if (candidates.length === 0) {
+    // 宿主目录缺 / 空：宿主起步前提不成立（或宿主从未跑过 codex 会话）。
+    console.warn('codex_thread_migrate_no_match', {
+      thread_id: threadId,
+      host_sessions_dir: hostSessionsDir,
+      scanned: 0,
+    });
+    return false;
+  }
+  let migrated = 0;
+  for (const src of candidates) {
+    try {
+      const firstLine = await readFirstLine(src);
+      let lineObj: unknown;
+      try {
+        lineObj = JSON.parse(firstLine);
+      } catch {
+        continue; // 首行非 JSON / 超限截断：非 rollout 常规形态，跳过
+      }
+      if (extractRolloutSessionId(lineObj) !== threadId) continue;
+      // 命中：按 sessions/ 下相对路径拷入（宿主 YYYY/MM/DD 分层原样保留）。
+      const dest = join(codexHome, 'sessions', relative(hostSessionsDir, src));
+      await mkdir(dirname(dest), { recursive: true });
+      await copyFile(src, dest);
+      migrated += 1;
+    } catch (e) {
+      console.error('codex_thread_migrate_file_failed', {
+        path: src,
+        error: errMessage(e),
+      });
+    }
+  }
+  if (migrated === 0) {
+    console.warn('codex_thread_migrate_no_match', {
+      thread_id: threadId,
+      host_sessions_dir: hostSessionsDir,
+      scanned: candidates.length,
+    });
+    return false;
+  }
+  return true;
 }

@@ -98,6 +98,8 @@ scale: large
 | 修改 | sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts | reloadWithProvider 守卫删除后的热切换语义更新 |
 | 修改 | sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts | REG-4「codex not yet supported」断言改写为 codex 走通（task-03 删守卫后必红，plan 审查发现） |
 | 修改 | sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts | 同款 claude-only 抛错断言改写（plan 审查发现） |
+| 修改 | sillyhub-daemon/tests/interactive/session-recovery.test.ts | restore 四态用例落点（execute 验收 QA 对账补列） |
+| 修改 | sillyhub-daemon/tests/cli-session-manager-injection.test.ts | cli daemonApiKey 注入锚定落点（execute 验收 QA 对账补列） |
 | 修改 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | codex providerLocked 三用例（:315/:405/:489）改写为解锁矩阵（plan 审查发现） |
 | 修改 | frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx | 解锁矩阵 + kind 过滤用例 |
 

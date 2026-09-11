@@ -16,9 +16,18 @@
 // mock 结构沿用 session-panel-team.test.tsx（lib/daemon 会话 API + workspaces
 // /ppm 数据源 + page chrome hook），断言口径同源（menuitem / placeholder 正则，
 // 避开 antd 中文 autoLetterSpacing 拆分坑）。
+//
+// 2026-09-11-session-provider-switch-codex-pi task-07（FR-03 / D-002@v1）：补
+// 错误卡「切换供应商」按钮门禁矩阵——page 模式失败轮（logs 建 turn + runs 快照
+// 回补 errorDetail）上点 RunErrorItem 主操作，断言 timelineOnSwitchProvider 的
+// PROVIDER_SWITCH_ENGINES 白名单行为：claude/codex/pi 放行（定位配置条打开供应
+// 商下拉 config-dd-provider）；cursor/未知 provider 弹引擎中性文案「当前引擎不
+// 支持会话级供应商切换」；provider 空（null 前置语义）不拦截。toast 走 useNotify
+// （App.useApp 上下文，测试环境无 antd App 包裹）——partial mock useNotify 断言
+// warning（先例 session-panel-pre-session.test.tsx）。
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { SessionPanel } from "../session-panel";
@@ -133,12 +142,27 @@ vi.mock("@/lib/api/llm-providers", async () => {
   return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
 });
 
+// task-07：门禁矩阵的「弹警告」断言出口——useNotify 走 App.useApp 上下文，
+// 测试环境无 antd App 包裹，partial mock 成可断言 vi.fn（errMessage 等其余导出
+// 保留真实，先例 session-panel-pre-session.test.tsx）。
+const notifyMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+}));
+vi.mock("@/lib/errors", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/errors")>(
+    "@/lib/errors",
+  );
+  return { ...actual, useNotify: () => notifyMock };
+});
+
 /* ----- fixture ----- */
 
 const OBJECTIVE = "收敛门控两态对照目标文本";
 
 /** attach 详情（dialog 轮询 / page detailQuery 共用形状，同 team 测试）。 */
-function makeDetail(provider: string) {
+function makeDetail(provider: string | null) {
   return {
     id: "sess-caps",
     runtime_id: null,
@@ -471,5 +495,101 @@ describe("page 预会话门控两态对照（task-11 收敛点：preAttachmentsD
     const team = await findTeamItem();
     expect(team.disabled).toBe(true);
     expect(team.title).toBe("团队需要 Claude 引擎");
+  });
+});
+
+/* ───────── 4. 错误卡「切换供应商」门禁矩阵（task-07 / FR-03 / D-002@v1） ─────────
+   page 模式失败轮：logs（logsToTurns 建轮）+ listSessionRuns 快照（failed +
+   error_detail）→ enrichDisplayTurns 回补 errorDetail → RunErrorItem 渲染主操作
+   「切换供应商」。点击经 timelineOnSwitchProvider 门禁（PROVIDER_SWITCH_ENGINES
+   白名单 + session?.provider && 前置）：放行 = 递增 providerOpenSignal 定位配置
+   条（SessionConfigBar 打开 config-dd-provider）；锁定 = 引擎中性警告文案。 */
+
+describe("错误卡「切换供应商」门禁矩阵（task-07 / FR-03 / D-002@v1）", () => {
+  beforeAll(() => {
+    // jsdom 未实现 scrollIntoView——放行路径会滚动定位配置条（configBarWrapRef），
+    // 挂 stub 防崩（不改 src，测试侧垫片）。
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+  afterAll(() => {
+    delete (Element.prototype as Partial<Element>).scrollIntoView;
+  });
+
+  /** page 模式挂载：provider 引擎会话 + 一条失败轮（错误卡可见）。 */
+  function setupFailedPage(provider: string | null) {
+    sessionApi.getAgentSession.mockResolvedValue(makeDetail(provider));
+    sessionApi.getAgentSessionLogs.mockResolvedValue([
+      {
+        id: "log-1",
+        run_id: "run-fail-1",
+        timestamp: "2026-09-11T10:00:00Z",
+        channel: "user_input",
+        content_redacted: "帮我看下报错",
+      },
+    ]);
+    // runs 快照：failed + error_detail（buildErrorLogItem）→ 失败轮错误卡。
+    sessionApi.listSessionRuns.mockResolvedValue([
+      {
+        id: "run-fail-1",
+        created_at: "2026-09-11T10:00:00Z",
+        status: "failed",
+        error_detail: {
+          type: "timeout",
+          code: null,
+          message: "上游超时",
+          retryable: true,
+          hint: null,
+          raw: null,
+        },
+      },
+    ]);
+    workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={qc}>
+        <SessionPanel mode="page" sessionId="sess-caps" machines={[]} llmProviders={[]} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("claude/codex/pi 放行：点错误卡「切换供应商」→ 定位配置条打开供应商下拉（config-dd-provider）", async () => {
+    for (const provider of ["claude", "codex", "pi"] as const) {
+      cleanup();
+      setupFailedPage(provider);
+      // 失败轮错误卡（logs + runs 快照异步到达）
+      expect(await screen.findByText("运行失败")).toBeInTheDocument();
+      fireEvent.click(
+        screen.getByRole("button", { name: "切换供应商" }),
+      );
+      expect(await screen.findByTestId("config-dd-provider")).toBeInTheDocument();
+      expect(notifyMock.warning).not.toHaveBeenCalled();
+    }
+  });
+
+  it("cursor/未知 provider 锁定：点错误卡 → 弹「当前引擎不支持会话级供应商切换」，不开下拉", async () => {
+    for (const provider of ["cursor", "gemini-x"] as const) {
+      cleanup();
+      setupFailedPage(provider);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "切换供应商" }),
+      );
+      await waitFor(() =>
+        expect(notifyMock.warning).toHaveBeenCalledWith(
+          "当前引擎不支持会话级供应商切换",
+        ),
+      );
+      expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+    }
+  });
+
+  it("provider 空（未下发）不拦截：null 前置语义——点错误卡照常定位配置条开下拉", async () => {
+    // provider null：门禁的 session?.provider && 前置直接放行；配置条引擎随
+    // session.provider ?? null 为 null（provisional 同构）→ 不锁。
+    setupFailedPage(null);
+    fireEvent.click(await screen.findByRole("button", { name: "切换供应商" }));
+    expect(await screen.findByTestId("config-dd-provider")).toBeInTheDocument();
+    expect(notifyMock.warning).not.toHaveBeenCalled();
   });
 });

@@ -10,7 +10,10 @@
 //   - 恢复后 inject：新 runId，InputQueue.push 被调（resume Query 续 turn）。
 //   - persist timing：create 完成 + agentSessionId 写入后 → flush；end/fail → 记录从落盘集合移除。
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   Query,
   SDKMessage,
@@ -24,12 +27,28 @@ import {
   type PersistedSessionRecord,
   type SessionStorePersistence,
 } from '../../src/interactive/types.js';
+// vi.mock 已 hoist，import 拿到 mock 版本（mirrorCodexHostAuth 断言载体）。
+import { mirrorCodexHostAuth } from '../../src/codex-settings.js';
 import type {
   ClaudeSdkDriver,
   InteractiveDriverCallbacks,
   StartOptions,
 } from '../../src/interactive/claude-sdk-driver.js';
 import { ClaudeExecutableNotFoundError } from '../../src/interactive/claude-sdk-driver.js';
+import type { InteractiveDriver } from '../../src/interactive/driver.js';
+
+// task-06（2026-09-11-session-provider-switch-codex-pi）：mock codex null 镜像——
+// mirrorCodexHostAuth 读宿主 ~/.codex（os.homedir），restore 探测用例不得依赖宿主
+// 真状态；镜像文件级行为由 tests/provider-file-settings-reload.test.ts 直测锁定，
+// 此处只断言「restore 探测目录存在 → 调镜像 + 注 CODEX_HOME」接线。其余导出保留
+// actual（writeCodexHome 真写盘——ForReload happy path 产物断言不受影响）。
+vi.mock('../../src/codex-settings.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/codex-settings.js')>();
+  return {
+    ...actual,
+    mirrorCodexHostAuth: vi.fn(async () => {}),
+  };
+});
 
 // ── 辅助 ──────────────────────────────────────────────────────────────────────
 
@@ -438,5 +457,211 @@ describe('task-08：恢复保留语义锚点（lastActiveAt + reconnecting 不�
     // store 有条目（reconnecting 中间态），但可恢复快照不含它。
     expect(sm.get('sess-9')).toBeDefined();
     expect(sm.snapshotPersistable()).toEqual([]);
+  });
+});
+
+// ── task-04（2026-09-11-session-provider-switch-codex-pi / FR-01 FR-02）：restore 自愈 ──
+//
+// 恢复路径 codex/pi 注文件层 env（design Wave 2 步骤 4，Grill 附带发现收编）：
+// 不修则「切换供应商后 daemon 重启 → 恢复会话丢 CODEX_HOME / PI_CODING_AGENT_DIR
+// → 静默回宿主凭证」。四态矩阵：
+//   1. providerConfig 非 null happy（codex + pi）——ForReload 重写 per-session 目录
+//      + 注文件层 env（priorEnv=undefined，恢复时无旧 env）；
+//   2. ForReload IO 失败 → 返 {} 降级（env 无文件层键，恢复主路径不 fail）；
+//   3. codex null + 确定性目录存在 —— mirrorCodexHostAuth 幂等重镜像 + 注
+//      CODEX_HOME（thread 历史保住，Grill 复审 P2-3）；
+//   4. 目录不存在 → 零动作（行为与现状逐字一致）。
+// 隔离：SILLYHUB_DAEMON_DIR → tmpRoot（ForReload 写盘零触碰真实 ~/.sillyhub）；
+// mirrorCodexHostAuth mock（宿主 ~/.codex 零依赖，接线断言 + 文件级归新测试文件）。
+
+describe('task-04 / restore 自愈：codex·pi 恢复注文件层 env（FR-01 / FR-02）', () => {
+  let tmpRoot: string;
+
+  /** codex/pi 通用 mock driver（InteractiveDriver 形态：start 返回 {close} 句柄）。 */
+  function makeMockAgentDriver() {
+    const startCalls: Array<{ input: unknown; opts: Record<string, unknown> }> = [];
+    const driver = {
+      start: vi.fn(async (input: AsyncIterable<unknown>, opts: Record<string, unknown>) => {
+        startCalls.push({ input, opts });
+        return { close: vi.fn(() => {}) };
+      }),
+      consume: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => true),
+    } as unknown as InteractiveDriver;
+    return { driver, startCalls };
+  }
+
+  function codexRestoreRecord(): PersistedSessionRecord {
+    return {
+      sessionId: 'sess-rc',
+      leaseId: 'lease-rc',
+      agentSessionId: 'thread-rc',
+      cwd: 'C:\\proj',
+      provider: 'codex',
+      turnCount: 2,
+      lastActiveAt: 1_700_000_000_000,
+      pathToAgentExecutable: 'C:\\bin\\codex.cmd',
+      providerConfig: {
+        agent_kind: 'codex',
+        api_key: 'sk-codex-restore',
+        base_url: 'https://restore.example/v1',
+        model: 'glm-4.7',
+      },
+    };
+  }
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-restore-'));
+    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
+    vi.mocked(mirrorCodexHostAuth).mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('RESTORE-1: codex providerConfig 非 null → 重写 per-session 目录 + env 注 CODEX_HOME', async () => {
+    const codex = makeMockAgentDriver();
+    const claude = makeMockDriver();
+    const sm = new SessionManager({
+      driver: claude.driver,
+      drivers: { codex: codex.driver },
+      ...makeDeps(),
+    });
+
+    await sm.restoreAndReconnect(codexRestoreRecord());
+
+    // 恢复 driver.start 带 resume key + 文件层 env（确定性派生路径）。
+    expect(codex.startCalls).toHaveLength(1);
+    expect(codex.startCalls[0].opts['resume']).toBe('thread-rc');
+    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+    const codexHome = join(tmpRoot, 'codex', 'sess-rc');
+    expect(env['CODEX_HOME']).toBe(codexHome);
+    // 目录重写：供应商凭证产物落盘（重启后不静默回宿主凭证）。
+    expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toContain(
+      'sk-codex-restore',
+    );
+    // 恢复不因文件层写盘改变状态机。
+    expect(sm.get('sess-rc')?.status).toBe('reconnecting');
+  });
+
+  it('RESTORE-2: pi providerConfig 非 null → 重写 pi 目录三文件 + env 注 PI_CODING_AGENT_DIR', async () => {
+    const pi = makeMockAgentDriver();
+    const claude = makeMockDriver();
+    const sm = new SessionManager({
+      driver: claude.driver,
+      drivers: { pi: pi.driver },
+      ...makeDeps(),
+    });
+
+    await sm.restoreAndReconnect({
+      sessionId: 'sess-rp',
+      leaseId: 'lease-rp',
+      agentSessionId: 'thread-rp',
+      cwd: 'C:\\proj',
+      provider: 'pi',
+      turnCount: 1,
+      lastActiveAt: 1_700_000_000_000,
+      providerConfig: {
+        agent_kind: 'pi',
+        api_key: 'sk-pi-restore',
+        base_url: 'https://pi-restore.example/v1',
+        model: 'kimi-k2',
+      },
+    });
+
+    expect(pi.startCalls).toHaveLength(1);
+    const env = pi.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+    const piDir = join(tmpRoot, 'pi', 'sess-rp');
+    expect(env['PI_CODING_AGENT_DIR']).toBe(piDir);
+    expect(readFileSync(join(piDir, 'settings.json'), 'utf-8')).toContain('kimi-k2');
+    expect(existsSync(join(piDir, 'auth.json'))).toBe(true);
+    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
+    expect(sm.get('sess-rp')?.status).toBe('reconnecting');
+  });
+
+  it('RESTORE-3: ForReload IO 失败（codex 段被文件占用）→ 返 {} 降级，恢复主路径不 fail（Grill P2-2）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // priorEnv=undefined（restore 无旧 env）取不到 prior 键 → 返 {} 降级。
+    writeFileSync(join(tmpRoot, 'codex'), 'not-a-dir');
+    const codex = makeMockAgentDriver();
+    const claude = makeMockDriver();
+    const sm = new SessionManager({
+      driver: claude.driver,
+      drivers: { codex: codex.driver },
+      ...makeDeps(),
+    });
+
+    await sm.restoreAndReconnect(codexRestoreRecord());
+
+    // 降级：env 无文件层键（按宿主现状运行，error 可归因），但恢复照常完成。
+    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+    expect(env['CODEX_HOME']).toBeUndefined();
+    expect(sm.get('sess-rc')?.status).toBe('reconnecting');
+    expect(errSpy).toHaveBeenCalledWith(
+      'provider_file_reload_codex_failed',
+      expect.objectContaining({ session_key: 'sess-rc' }),
+    );
+  });
+
+  it('RESTORE-4: codex null + 确定性目录存在 → mirrorCodexHostAuth 幂等重镜像 + 注 CODEX_HOME（Grill P2-3）', async () => {
+    // 切回本机的会话：persistence 仅落盘非 null providerConfig → 记录无该字段，
+    // 但 per-session 目录存在 = 此前在平台供应商上（thread 历史在其中）。
+    const codexHome = join(tmpRoot, 'codex', 'sess-rn');
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-provider-era"}');
+    const codex = makeMockAgentDriver();
+    const claude = makeMockDriver();
+    const sm = new SessionManager({
+      driver: claude.driver,
+      drivers: { codex: codex.driver },
+      ...makeDeps(),
+    });
+
+    await sm.restoreAndReconnect({
+      sessionId: 'sess-rn',
+      leaseId: 'lease-rn',
+      agentSessionId: 'thread-rn',
+      cwd: 'C:\\proj',
+      provider: 'codex',
+      turnCount: 2,
+      lastActiveAt: 1_700_000_000_000,
+      // 无 providerConfig（null 切换后的落盘形态）。
+    });
+
+    // null 切换语义：宿主凭证重镜像（幂等）+ env 保住旧目录（thread 历史保住）。
+    expect(mirrorCodexHostAuth).toHaveBeenCalledTimes(1);
+    expect(mirrorCodexHostAuth).toHaveBeenCalledWith(codexHome);
+    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+    expect(env['CODEX_HOME']).toBe(codexHome);
+    expect(sm.get('sess-rn')?.status).toBe('reconnecting');
+  });
+
+  it('RESTORE-5: codex null + 目录不存在 → 零动作（行为与现状逐字一致）', async () => {
+    const codex = makeMockAgentDriver();
+    const claude = makeMockDriver();
+    const sm = new SessionManager({
+      driver: claude.driver,
+      drivers: { codex: codex.driver },
+      ...makeDeps(),
+    });
+
+    await sm.restoreAndReconnect({
+      sessionId: 'sess-rx',
+      leaseId: 'lease-rx',
+      agentSessionId: 'thread-rx',
+      cwd: 'C:\\proj',
+      provider: 'codex',
+      turnCount: 1,
+      lastActiveAt: 1_700_000_000_000,
+    });
+
+    // 不镜像、不注 env、不建目录（宿主起步会话恢复 = 回宿主 ~/.codex 现状）。
+    expect(mirrorCodexHostAuth).not.toHaveBeenCalled();
+    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+    expect(env['CODEX_HOME']).toBeUndefined();
+    expect(existsSync(join(tmpRoot, 'codex'))).toBe(false);
+    expect(sm.get('sess-rx')?.status).toBe('reconnecting');
   });
 });

@@ -257,7 +257,7 @@ export class PiCredentialInjector implements CredentialInjector {
  *
  * **codex 刻意不注册 env 注入器**（2026-09-10-multi-provider-injection / D-003 /
  * D-005）：codex 0.147.0 二进制无任何 base_url/key 类 env 注入面（spike A1 实测），
- * 凭证注入走文件层——task-runner.ts applyProviderFileSettings 按 agent_kind='codex'
+ * 凭证注入走文件层——provider-file-settings.ts applyProviderFileSettings 按 agent_kind='codex'
  * 分派 writeCodexHome 写 per-session CODEX_HOME/{auth.json, config.toml} 并注入
  * CODEX_HOME env（config.toml [model_providers.sillyhub].base_url 重定向端点）。
  * 故本表登记 codex 也不会被 spawn-env 第 0 层消费；gemini 仍预留后续变更。

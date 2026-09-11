@@ -1,0 +1,3032 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx
+index 72b9d81ec..415571cef 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx
+@@ -16,9 +16,18 @@
+ // mock 结构沿用 session-panel-team.test.tsx（lib/daemon 会话 API + workspaces
+ // /ppm 数据源 + page chrome hook），断言口径同源（menuitem / placeholder 正则，
+ // 避开 antd 中文 autoLetterSpacing 拆分坑）。
+-
+-import { describe, it, expect, beforeEach, vi } from "vitest";
+-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
++//
++// 2026-09-11-session-provider-switch-codex-pi task-07（FR-03 / D-002@v1）：补
++// 错误卡「切换供应商」按钮门禁矩阵——page 模式失败轮（logs 建 turn + runs 快照
++// 回补 errorDetail）上点 RunErrorItem 主操作，断言 timelineOnSwitchProvider 的
++// PROVIDER_SWITCH_ENGINES 白名单行为：claude/codex/pi 放行（定位配置条打开供应
++// 商下拉 config-dd-provider）；cursor/未知 provider 弹引擎中性文案「当前引擎不
++// 支持会话级供应商切换」；provider 空（null 前置语义）不拦截。toast 走 useNotify
++// （App.useApp 上下文，测试环境无 antd App 包裹）——partial mock useNotify 断言
++// warning（先例 session-panel-pre-session.test.tsx）。
++
++import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from "vitest";
++import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ 
+ import { SessionPanel } from "../session-panel";
+@@ -133,12 +142,27 @@ vi.mock("@/lib/api/llm-providers", async () => {
+   return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
+ });
+ 
++// task-07：门禁矩阵的「弹警告」断言出口——useNotify 走 App.useApp 上下文，
++// 测试环境无 antd App 包裹，partial mock 成可断言 vi.fn（errMessage 等其余导出
++// 保留真实，先例 session-panel-pre-session.test.tsx）。
++const notifyMock = vi.hoisted(() => ({
++  success: vi.fn(),
++  error: vi.fn(),
++  warning: vi.fn(),
++}));
++vi.mock("@/lib/errors", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/errors")>(
++    "@/lib/errors",
++  );
++  return { ...actual, useNotify: () => notifyMock };
++});
++
+ /* ----- fixture ----- */
+ 
+ const OBJECTIVE = "收敛门控两态对照目标文本";
+ 
+ /** attach 详情（dialog 轮询 / page detailQuery 共用形状，同 team 测试）。 */
+-function makeDetail(provider: string) {
++function makeDetail(provider: string | null) {
+   return {
+     id: "sess-caps",
+     runtime_id: null,
+@@ -473,3 +497,99 @@ describe("page 预会话门控两态对照（task-11 收敛点：preAttachmentsD
+     expect(team.title).toBe("团队需要 Claude 引擎");
+   });
+ });
++
++/* ───────── 4. 错误卡「切换供应商」门禁矩阵（task-07 / FR-03 / D-002@v1） ─────────
++   page 模式失败轮：logs（logsToTurns 建轮）+ listSessionRuns 快照（failed +
++   error_detail）→ enrichDisplayTurns 回补 errorDetail → RunErrorItem 渲染主操作
++   「切换供应商」。点击经 timelineOnSwitchProvider 门禁（PROVIDER_SWITCH_ENGINES
++   白名单 + session?.provider && 前置）：放行 = 递增 providerOpenSignal 定位配置
++   条（SessionConfigBar 打开 config-dd-provider）；锁定 = 引擎中性警告文案。 */
++
++describe("错误卡「切换供应商」门禁矩阵（task-07 / FR-03 / D-002@v1）", () => {
++  beforeAll(() => {
++    // jsdom 未实现 scrollIntoView——放行路径会滚动定位配置条（configBarWrapRef），
++    // 挂 stub 防崩（不改 src，测试侧垫片）。
++    Element.prototype.scrollIntoView = vi.fn();
++  });
++  afterAll(() => {
++    delete (Element.prototype as Partial<Element>).scrollIntoView;
++  });
++
++  /** page 模式挂载：provider 引擎会话 + 一条失败轮（错误卡可见）。 */
++  function setupFailedPage(provider: string | null) {
++    sessionApi.getAgentSession.mockResolvedValue(makeDetail(provider));
++    sessionApi.getAgentSessionLogs.mockResolvedValue([
++      {
++        id: "log-1",
++        run_id: "run-fail-1",
++        timestamp: "2026-09-11T10:00:00Z",
++        channel: "user_input",
++        content_redacted: "帮我看下报错",
++      },
++    ]);
++    // runs 快照：failed + error_detail（buildErrorLogItem）→ 失败轮错误卡。
++    sessionApi.listSessionRuns.mockResolvedValue([
++      {
++        id: "run-fail-1",
++        created_at: "2026-09-11T10:00:00Z",
++        status: "failed",
++        error_detail: {
++          type: "timeout",
++          code: null,
++          message: "上游超时",
++          retryable: true,
++          hint: null,
++          raw: null,
++        },
++      },
++    ]);
++    workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
++    const qc = new QueryClient({
++      defaultOptions: { queries: { retry: false } },
++    });
++    return render(
++      <QueryClientProvider client={qc}>
++        <SessionPanel mode="page" sessionId="sess-caps" machines={[]} llmProviders={[]} />
++      </QueryClientProvider>,
++    );
++  }
++
++  it("claude/codex/pi 放行：点错误卡「切换供应商」→ 定位配置条打开供应商下拉（config-dd-provider）", async () => {
++    for (const provider of ["claude", "codex", "pi"] as const) {
++      cleanup();
++      setupFailedPage(provider);
++      // 失败轮错误卡（logs + runs 快照异步到达）
++      expect(await screen.findByText("运行失败")).toBeInTheDocument();
++      fireEvent.click(
++        screen.getByRole("button", { name: "切换供应商" }),
++      );
++      expect(await screen.findByTestId("config-dd-provider")).toBeInTheDocument();
++      expect(notifyMock.warning).not.toHaveBeenCalled();
++    }
++  });
++
++  it("cursor/未知 provider 锁定：点错误卡 → 弹「当前引擎不支持会话级供应商切换」，不开下拉", async () => {
++    for (const provider of ["cursor", "gemini-x"] as const) {
++      cleanup();
++      setupFailedPage(provider);
++      fireEvent.click(
++        await screen.findByRole("button", { name: "切换供应商" }),
++      );
++      await waitFor(() =>
++        expect(notifyMock.warning).toHaveBeenCalledWith(
++          "当前引擎不支持会话级供应商切换",
++        ),
++      );
++      expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
++    }
++  });
++
++  it("provider 空（未下发）不拦截：null 前置语义——点错误卡照常定位配置条开下拉", async () => {
++    // provider null：门禁的 session?.provider && 前置直接放行；配置条引擎随
++    // session.provider ?? null 为 null（provisional 同构）→ 不锁。
++    setupFailedPage(null);
++    fireEvent.click(await screen.findByRole("button", { name: "切换供应商" }));
++    expect(await screen.findByTestId("config-dd-provider")).toBeInTheDocument();
++    expect(notifyMock.warning).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 428590502..fbaee3180 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -68,7 +68,7 @@ import {
+   type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest,
+   type PlanSummary,
+ } from "@/lib/daemon";
+-import { getProviderCaps } from "@/lib/provider-caps";
++import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
+ import { cn } from "@/lib/utils";
+ 
+ import {
+@@ -2355,7 +2355,10 @@ export function SessionPanelPage({
+       notify.warning("会话已结束或机器离线，无法切换供应商");
+       return;
+     }
+-    if (session?.provider && session.provider !== "claude") {
++    // 2026-09-11-session-provider-switch-codex-pi task-05：门禁白名单化——保留
++    // session?.provider && 前置（provider 空/未下发 = 不拦截，现状语义），仅把
++    // !== "claude" 换 PROVIDER_SWITCH_ENGINES 白名单（cursor/未知引擎仍拦）。
++    if (session?.provider && !PROVIDER_SWITCH_ENGINES.has(session.provider)) {
+       notify.warning("当前引擎不支持会话级供应商切换");
+       return;
+     }
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 254b1a0fe..4c19bbefe 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -13,6 +13,13 @@
+  *   - 同变更 task-10：供应商+模型级联——供应商 Ctrl 内嵌模型子下拉（候选三来源
+  *     去重保序 + 首项「默认」）；切模型 injectSession 同请求带 llm_provider_id +
+  *     model；切供应商级联重置 model=""；providerLocked/「不指定」两态隐藏。
++ *   2026-09-11-session-provider-switch-codex-pi task-07（FR-03 / D-002@v1）：
++ *     codex/pi 随 task-05 白名单（PROVIDER_SWITCH_ENGINES）解锁——原 D-010
++ *     「engine≠claude 锁供应商」三用例改写为门禁矩阵（claude/codex/pi 放行、
++ *     cursor/未知引擎锁定 + title 引擎中性「当前引擎不支持会话级供应商切换」）；
++ *     补供应商下拉 agent_kind 按引擎过滤用例（engine null 全量，「不指定（本机
++ *     默认）」全引擎保留）；fixture 补 agent_kind（LlmProviderRead 恒有值，
++ *     缺省会被 claude 会话的 kind 过滤滤掉——task-05 实测 :276/:334 红的根因）。
+  *
+  * mock 策略（对齐 new-session-form.test.tsx）：直接 mock 组件消费的 hook/函数模块
+  * （useMineAgentProfiles / listProviders / injectSession），
+@@ -151,9 +158,11 @@ beforeEach(() => {
+     error: null,
+     refetch: vi.fn(),
+   });
++  // task-07：fixture 补 agent_kind（真实后端 LlmProviderRead 恒有该字段；缺省
++  // 项会被 kind 过滤滤掉——默认两供应商按 BASE_PROPS 引擎语境给 claude kind）。
+   mocks.listProviders.mockReset().mockResolvedValue([
+-    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2" },
+-    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7" },
++    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
++    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
+   ]);
+   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
+   // task-10：active 共享智能体默认空列表（用例内按需覆盖）。
+@@ -312,23 +321,60 @@ describe("SessionConfigBar 切换供应商", () => {
+     expect(firstCall?.[2]?.model).toBe("");
+   });
+ 
+-  it("Codex 引擎（engine≠claude）→ 供应商控件禁用（D-010）", () => {
+-    renderBar({
+-      engine: "codex",
+-      configSnapshot: {
+-        machine_name: "machine-1",
+-        agent_name: "Codex",
+-        engine: "codex",
+-      },
+-    });
+-    expect(
+-      (screen.getByRole("button", { name: "配置-供应商 本机默认" }) as HTMLButtonElement)
+-        .disabled,
+-    ).toBe(true);
+-    expect(
+-      (screen.getByRole("button", { name: "配置-档案 未指定" }) as HTMLButtonElement)
+-        .disabled,
+-    ).toBe(false);
++  // task-07（2026-09-11-session-provider-switch-codex-pi / FR-03）：原「Codex 引擎
++  // （engine≠claude）→ 供应商控件禁用（D-010）」随 task-05 白名单化解锁，改写为
++  // 门禁矩阵——白名单外引擎只剩 cursor/未知。
++  it("claude/codex/pi 引擎解锁：供应商控件可用 + 可选「不指定（本机默认）」（档案控件不受影响）", () => {
++    for (const engine of ["claude", "codex", "pi"] as const) {
++      cleanup();
++      renderBar({
++        engine,
++        configSnapshot: {
++          machine_name: "machine-1",
++          agent_name: engine,
++          engine,
++        },
++      });
++      expect(
++        (screen.getByRole("button", { name: "配置-供应商 本机默认" }) as HTMLButtonElement)
++          .disabled,
++      ).toBe(false);
++      expect(
++        (screen.getByRole("button", { name: "配置-档案 未指定" }) as HTMLButtonElement)
++          .disabled,
++      ).toBe(false);
++      // 解锁即可开下拉，「不指定（本机默认）」项全引擎保留（D-002）
++      openCtrl("配置-供应商");
++      expect(
++        screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
++      ).toBeInTheDocument();
++    }
++  });
++
++  it("cursor/未知引擎锁定：供应商控件禁用 + title 引擎中性「当前引擎不支持会话级供应商切换」（档案控件不受影响）", () => {
++    for (const engine of ["cursor", "future-engine"] as const) {
++      cleanup();
++      renderBar({
++        engine,
++        configSnapshot: {
++          machine_name: "machine-1",
++          agent_name: engine,
++          engine,
++        },
++      });
++      const providerCtrl = screen.getByRole("button", {
++        name: "配置-供应商 本机默认",
++      });
++      expect((providerCtrl as HTMLButtonElement).disabled).toBe(true);
++      expect(providerCtrl).toHaveAttribute(
++        "title",
++        "当前引擎不支持会话级供应商切换",
++      );
++      expect(
++        (screen.getByRole("button", { name: "配置-档案 未指定" }) as HTMLButtonElement)
++          .disabled,
++      ).toBe(false);
++    }
+   });
+ 
+   it("切换失败 → message.error（点选即切换无确认行，可再点重试）", async () => {
+@@ -340,6 +386,100 @@ describe("SessionConfigBar 切换供应商", () => {
+   });
+ });
+ 
++// ── 4.1 task-07：供应商下拉 agent_kind 按引擎过滤（FR-03 / D-002@v1） ─────
++
++describe("SessionConfigBar 供应商下拉 kind 过滤（task-07 / FR-03 / D-002@v1）", () => {
++  /** 三 kind 混合列表——断言各引擎只列同 kind 项 + 「不指定（本机默认）」保留。 */
++  const MIXED_PROVIDERS = [
++    { id: "prov-kimi", name: "Kimi 中转", model: "kimi-k2", agent_kind: "claude" },
++    { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
++    { id: "prov-codex-1", name: "Codex 专供", model: "gpt-5.2", agent_kind: "codex" },
++    { id: "prov-pi-1", name: "Pi 专供", model: "glm-4.7-air", agent_kind: "pi" },
++  ];
++
++  /** 按引擎渲染并打开供应商下拉（engine null = provisional 悬浮助手形态）。 */
++  function renderWithEngine(engine: string | null) {
++    if (engine == null) {
++      renderBar({ engine: null, configSnapshot: null });
++    } else {
++      renderBar({
++        engine,
++        configSnapshot: { machine_name: "machine-1", agent_name: engine, engine },
++      });
++    }
++    openCtrl("配置-供应商");
++  }
++
++  it("codex 会话只列 agent_kind=codex 供应商（混入 claude/pi kind 项不出现）+「不指定（本机默认）」保留", async () => {
++    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
++    renderWithEngine("codex");
++    expect(
++      await screen.findByRole("button", { name: "选择 Codex 专供" }),
++    ).toBeInTheDocument();
++    for (const absent of [
++      "选择 Kimi 中转",
++      "选择 GLM 平台",
++      "选择 Pi 专供",
++    ]) {
++      expect(screen.queryByRole("button", { name: absent })).not.toBeInTheDocument();
++    }
++    // 「不指定（本机默认）」全引擎保留（D-002）
++    expect(
++      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
++    ).toBeInTheDocument();
++  });
++
++  it("claude 会话只列 claude kind；pi 会话只列 pi kind（各自保留「不指定」）", async () => {
++    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
++    renderWithEngine("claude");
++    expect(
++      await screen.findByRole("button", { name: "选择 Kimi 中转" }),
++    ).toBeInTheDocument();
++    expect(
++      screen.getByRole("button", { name: "选择 GLM 平台" }),
++    ).toBeInTheDocument();
++    for (const absent of ["选择 Codex 专供", "选择 Pi 专供"]) {
++      expect(screen.queryByRole("button", { name: absent })).not.toBeInTheDocument();
++    }
++    expect(
++      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
++    ).toBeInTheDocument();
++
++    cleanup();
++    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
++    renderWithEngine("pi");
++    expect(
++      await screen.findByRole("button", { name: "选择 Pi 专供" }),
++    ).toBeInTheDocument();
++    for (const absent of [
++      "选择 Kimi 中转",
++      "选择 GLM 平台",
++      "选择 Codex 专供",
++    ]) {
++      expect(screen.queryByRole("button", { name: absent })).not.toBeInTheDocument();
++    }
++    expect(
++      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
++    ).toBeInTheDocument();
++  });
++
++  it("engine null（provisional 悬浮助手）→ 全量列出（创建时才定引擎）", async () => {
++    mocks.listProviders.mockResolvedValue(MIXED_PROVIDERS as never);
++    renderWithEngine(null);
++    for (const label of [
++      "选择 Kimi 中转",
++      "选择 GLM 平台",
++      "选择 Codex 专供",
++      "选择 Pi 专供",
++    ]) {
++      expect(await screen.findByRole("button", { name: label })).toBeInTheDocument();
++    }
++    expect(
++      screen.getByRole("button", { name: "选择 不指定（本机默认）" }),
++    ).toBeInTheDocument();
++  });
++});
++
+ // ── 4.2 ql-20260904-010：外部信号打开供应商下拉（运行失败卡「切换供应商」
+ //      定位本配置条） ─────────────────────────────────────────────────────────
+ 
+@@ -402,7 +542,8 @@ describe("SessionConfigBar providerOpenSignal（ql-20260904-010）", () => {
+     expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+   });
+ 
+-  it("Codex 引擎锁定（D-010）→ 信号不开下拉", () => {
++  // task-07：codex 解锁——错误卡信号照常开下拉；锁定负例换 cursor（白名单外）。
++  it("codex 引擎解锁 → 信号打开供应商下拉（config-dd-provider 出现）", () => {
+     renderSignalBar({
+       engine: "codex",
+       providerOpenSignal: 1,
+@@ -412,6 +553,19 @@ describe("SessionConfigBar providerOpenSignal（ql-20260904-010）", () => {
+         engine: "codex",
+       },
+     });
++    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
++  });
++
++  it("cursor 引擎锁定 → 信号被吞不开下拉（白名单外负例承接）", () => {
++    renderSignalBar({
++      engine: "cursor",
++      providerOpenSignal: 1,
++      configSnapshot: {
++        machine_name: "machine-1",
++        agent_name: "Cursor",
++        engine: "cursor",
++      },
++    });
+     expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
+   });
+ });
+@@ -426,6 +580,8 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     id: "prov-glm",
+     name: "GLM 平台",
+     model: "glm-4.7",
++    // task-07：kind 字段补齐（本组用例默认 claude 引擎语境；codex 分支内覆盖）。
++    agent_kind: "claude",
+     default_fallback_model: "glm-4.6",
+     model_role_mappings: {
+       sonnet: { model: "glm-4.7" }, // 与 model 重复 → 去重
+@@ -486,15 +642,20 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     expect(call?.[2]?.model).toBe("");
+   });
+ 
+-  it("providerLocked（Codex）/「不指定」两态 → 模型子下拉不渲染", async () => {
++  // task-07 语义翻转：原 Codex 锁定分支（D-010）改为 codex 解锁后选中供应商即
++  // 渲染子下拉；「不指定」隐藏分支保留；锁定负例换 cursor，并等供应商列表到达
++  // 再断言（原同步断言在 react-query resolve 前执行，碰巧空洞绿）。
++  it("「不指定」/cursor 锁定两态隐藏模型子下拉；codex 解锁选中供应商后渲染", async () => {
+     // 「不指定（本机默认）」：无具体供应商 → 隐藏
+     renderBar({ llmProviderId: null });
+     expect(
+       screen.queryByRole("combobox", { name: "配置-模型" }),
+     ).not.toBeInTheDocument();
+     cleanup();
+-    // Codex 锁定：供应商+模型整块锁定（D-010），子下拉同锁不渲染
+-    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
++    // codex 解锁：选中供应商 → 模型子下拉渲染（与 claude 同构，级联候选不变）
++    mocks.listProviders.mockResolvedValue([
++      { ...GLM_PROVIDER, agent_kind: "codex" },
++    ] as never);
+     renderBar({
+       llmProviderId: "prov-glm",
+       engine: "codex",
+@@ -504,6 +665,28 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+         engine: "codex",
+       },
+     });
++    const select = (await screen.findByRole("combobox", {
++      name: "配置-模型",
++    })) as HTMLSelectElement;
++    // 候选照常三来源去重保序（首项「默认」）
++    const values = Array.from(select.options).map((o) => o.value);
++    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
++    cleanup();
++    // cursor 锁定：供应商+模型整块锁定，子下拉同锁不渲染（白名单外负例承接）
++    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
++    renderBar({
++      llmProviderId: "prov-glm",
++      engine: "cursor",
++      configSnapshot: {
++        machine_name: "machine-1",
++        agent_name: "Cursor",
++        engine: "cursor",
++      },
++    });
++    // 等供应商名解析（列表已 resolve）后再断言，杜绝碰巧空洞绿
++    expect(
++      await screen.findByRole("button", { name: "配置-供应商 GLM 平台" }),
++    ).toBeInTheDocument();
+     expect(
+       screen.queryByRole("combobox", { name: "配置-模型" }),
+     ).not.toBeInTheDocument();
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 45017840e..c21c3526f 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -57,6 +57,7 @@ import type {
+   SessionInjectOptions,
+   SessionInjectResponse,
+ } from "@/lib/daemon";
++import { PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
+ import { cn } from "@/lib/utils";
+ 
+ /** 供应商下拉「不指定（本机默认）」项的值（→ injectSession llm_provider_id: ""）。 */
+@@ -130,7 +131,12 @@ export interface SessionConfigBarProps {
+   llmProviderId: string | null;
+   /** 会话当前生效配置摘要（agent_sessions.config_snapshot，engine 与档案/供应商名兜底来源）。 */
+   configSnapshot: AgentSessionConfigSnapshot | null;
+-  /** 引擎（claude/codex；缺省回退 config_snapshot.engine）。engine≠claude 锁供应商（D-010）。 */
++  /**
++   * 引擎（claude/codex/pi/cursor；缺省回退 config_snapshot.engine）。引擎不在
++   * PROVIDER_SWITCH_ENGINES 白名单（cursor/未知）时锁供应商（原 D-010
++   * claude-only 口径，2026-09-11-session-provider-switch-codex-pi task-05
++   * 白名单化）。
++   */
+   engine?: string | null;
+   /** 切换轮提示消息默认值（不传用组件内置按目标名生成的文案）。 */
+   switchPrompt?: string;
+@@ -171,7 +177,7 @@ export interface SessionConfigBarProps {
+   /**
+    * ql-20260904-010：外部请求打开供应商下拉的信号（每次递增触发一次）。运行失败
+    * 卡「切换供应商」定位到会话底部配置条时由父级递增；锁定/不可切
+-   * （running/ended/Codex）时不响应。0/不传 = 无动作（零回归）。
++   * （running/ended/引擎在白名单外）时不响应。0/不传 = 无动作（零回归）。
+    */
+   providerOpenSignal?: number;
+   /**
+@@ -265,9 +271,12 @@ export function SessionConfigBar({
+ 
+   const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
+   const canSwitch = !running && !ended;
+-  // D-010：Codex 引擎无会话级供应商 → 控件锁定（下拉不可开；task-10 起模型
+-  // 子下拉同锁——直接不渲染）。
+-  const providerLocked = effectiveEngine != null && effectiveEngine !== "claude";
++  // 2026-09-11-session-provider-switch-codex-pi task-05（FR-03 / D-002@v1）：
++  // PROVIDER_SWITCH_ENGINES 白名单外引擎（cursor/未知）无会话级供应商 →
++  // 控件锁定（下拉不可开；task-10 起模型子下拉同锁——直接不渲染）；原 D-010
++  // claude-only 口径已废，claude/codex/pi 解锁。
++  const providerLocked =
++    effectiveEngine != null && !PROVIDER_SWITCH_ENGINES.has(effectiveEngine);
+ 
+   // ql-20260904-010：外部信号打开供应商下拉（运行失败卡「切换供应商」定位本条）。
+   // ref 记已消费的信号值——canSwitch/providerLocked 后续翻转不重放旧信号（避免
+@@ -289,6 +298,22 @@ export function SessionConfigBar({
+     [providers, llmProviderId],
+   );
+ 
++  /**
++   * 2026-09-11-session-provider-switch-codex-pi task-05（FR-03 / D-002@v1）：
++   * 供应商下拉候选按会话引擎过滤 agent_kind（agent_kind 词表
++   * "claude"|"pi"|"codex" 与引擎字符串同源，llm-providers.ts 的
++   * LlmProviderAgentKind）——防选错 kind 的供应商被 backend inject 422 拒绝。
++   * effectiveEngine 为 null（provisional 悬浮助手形态，创建时才定引擎）维持
++   * 全量；「不指定（本机默认）」项在渲染处固定，不受此过滤影响。
++   */
++  const providerCandidates = useMemo(
++    () =>
++      effectiveEngine == null
++        ? providers
++        : providers.filter((p) => p.agent_kind === effectiveEngine),
++    [providers, effectiveEngine],
++  );
++
+   /**
+    * 模型候选 = provider.model → default_fallback_model → model_role_mappings
+    * 各角色 model **去重保序**（空串/缺键过滤；不做上游 /v1/models 实时拉取，
+@@ -456,8 +481,8 @@ export function SessionConfigBar({
+       <div className="flex flex-wrap items-center gap-0.5">
+         {/* task-10（FR-03-2 / 原型 .cascade）：供应商+模型级联——两「select」并排
+             在供应商 Ctrl 内（供应商=既有按钮+上弹下拉，模型=紧凑原生 select）。
+-            模型子下拉仅选中具体供应商且非 Codex 锁定时渲染：「不指定（本机默认）」
+-            / providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
++            模型子下拉仅选中具体供应商且引擎未锁供应商时渲染——「不指定（本机
++            默认）」与 providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
+         <span className="inline-flex items-center gap-0.5">
+             {ctrlButton(
+               "provider",
+@@ -465,8 +490,10 @@ export function SessionConfigBar({
+               providerLabel,
+               // ql-20260909-005：禁用态 title 按原因说明（原恒「供应商（不选=…）」，
+               // 结束/离线时点了没反应且提示误导）。priority：锁定 > 已结束/离线 > 运行中。
++              // 2026-09-11-session-provider-switch-codex-pi task-05：锁定文案引擎
++              // 中性化——剩余锁定对象是 cursor/未知引擎，不再点名 Codex。
+               providerLocked
+-                ? "Codex 引擎暂不支持会话级供应商"
++                ? "当前引擎不支持会话级供应商切换"
+                 : ended
+                   ? "会话已结束或机器离线，不可切换供应商"
+                   : running
+@@ -488,7 +515,7 @@ export function SessionConfigBar({
+                   })
+                 }
+               />
+-              {providers.map((p) => (
++              {providerCandidates.map((p) => (
+                 <SwitchItem
+                   key={p.id}
+                   icon={<Cloud aria-hidden className="h-3 w-3" />}
+@@ -504,7 +531,7 @@ export function SessionConfigBar({
+                   }
+                 />
+               ))}
+-              {providers.length === 0 && (
++              {providerCandidates.length === 0 && (
+                 <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                   暂无自定义供应商
+                 </p>
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index 0073d3732..4c115d972 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -132,3 +132,27 @@ export function getProviderCaps(provider: string): ProviderCaps {
+     model_select: false,
+   };
+ }
++
++/**
++ * 会话级供应商切换已解锁的引擎白名单（2026-09-11-session-provider-switch-codex-pi
++ * task-05 / design Wave 3 / FR-03）。消费方两处门禁：SessionConfigBar 的
++ * providerLocked（配置条供应商下拉锁定）与 session-panel 错误卡
++ * timelineOnSwitchProvider——白名单外引擎（cursor / 未知）仍锁，提示用引擎
++ * 中性文案「当前引擎不支持会话级供应商切换」。
++ *
++ * 取值依据（钉死，R-04）：daemon 注入面并集——env REGISTRY（claude/pi，
++ * sillyhub-daemon/src/credential-injector.ts）∪ 文件层（codex/pi，
++ * sillyhub-daemon/src/provider-file-settings.ts，codex 走 per-session
++ * CODEX_HOME / pi 自定义端点走 PI_CODING_AGENT_DIR）。新引擎接入 daemon
++ * 注入面（reload 链路含文件层合并）时必须同步本白名单，否则前端会继续锁死。
++ *
++ * 注意：本常量**不是** ProviderCaps 9 键矩阵成员，不参与三端同步（本变更
++ * design 非目标：不改三端同步的 9 键矩阵）——纯前端本地常量，勿并入
++ * PROVIDER_CAPS；与矩阵取值语义正交（矩阵描述 provider 能力，本白名单描述
++ * 引擎是否解锁会话级供应商切换）。
++ */
++export const PROVIDER_SWITCH_ENGINES: ReadonlySet<string> = new Set([
++  'claude',
++  'codex',
++  'pi',
++]);
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index 03b374f42..a864edc46 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -816,6 +816,12 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       driver,
+       drivers: { claude: driver, codex: codexDriver, pi: piDriver, cursor: cursorDriver },
+       persistence,
++      // task-03（2026-09-11-session-provider-switch-codex-pi / D-003@v1）：daemon 自身
++      // apiKey 注入 SessionManager——reload/restore 文件层写盘（ForReload）对 codex
++      // openai_chat 形态作 litellm 代理 auth key。取值口径与 spawn 路径同源：
++      // daemon.ts this._config.api_key / task-runner.ts this.config?.api_key ?? null
++      //（本函数 :683 setDaemonApiKey(config.api_key) 同一 config 对象）。
++      daemonApiKey: config.api_key ?? null,
+       // task-08（2026-09-03-agent-provider-abstraction / FR-02）：回调类型改
+       // AgentEvent 事件轨。SessionManager 消费侧已收口 TurnMessageEnvelope——
+       // deps.onTurnMessage 收到的 msg 是归一化事件平铺的消息 dict
+diff --git a/sillyhub-daemon/src/codex-settings.ts b/sillyhub-daemon/src/codex-settings.ts
+index 2af39a2a3..0fd0cd4ac 100644
+--- a/sillyhub-daemon/src/codex-settings.ts
++++ b/sillyhub-daemon/src/codex-settings.ts
+@@ -2,6 +2,12 @@
+  * codex-settings —— 写 per-session `CODEX_HOME/{auth.json, config.toml}`。
+  *
+  * change 2026-09-10-multi-provider-injection task-01（FR-01 / D-003 / D-005 / D-011 / D-012）。
++ * change 2026-09-11-session-provider-switch-codex-pi task-02：新增宿主凭证镜像
++ * mirrorCodexHostAuth（null 切换镜像，FR-02）与 thread 历史迁移
++ * migrateCodexThreadFromHost（宿主起步会话首次切平台供应商时迁 rollout，
++ * FR-05 / R-01）——两 helper 对宿主 ~/.codex 只读拷贝、删除/写入动作只发生在
++ * 平台 per-session 目录内，IO 失败一律日志收口绝不抛（失败兜底由调用方
++ * ForReload 返回值矩阵承接）。
+  *
+  * 背景（design + spike 实测事实，golden = spike/a2b-config.toml + a2-auth.json）：
+  *   - codex 0.147.0 无 base_url env 注入面（spike A1：二进制无 OPENAI_BASE_URL），
+@@ -66,8 +72,9 @@
+  * @module codex-settings
+  */
+ 
+-import { readFile, writeFile } from 'node:fs/promises';
+-import { join } from 'node:path';
++import { copyFile, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
++import { homedir } from 'node:os';
++import { dirname, join, relative } from 'node:path';
+ import type { ProviderConfig } from './types.js';
+ 
+ /** 写盘器入参（design 接口定义；风格对齐 claude-settings.ts 纯函数 + 显式路径入参）。 */
+@@ -365,3 +372,205 @@ export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void>
+     throw e;
+   }
+ }
++
++// ── 宿主镜像 / thread 迁移（2026-09-11-session-provider-switch-codex-pi task-02）──
++
++/** 宿主 codex 配置根（~/.codex；os.homedir() 读 USERPROFILE，Windows 行为一致）。 */
++function hostCodexHome(): string {
++  return join(homedir(), '.codex');
++}
++
++/** 统一错误 message 提取（日志安全：只进 message，不进文件内容/凭证）。 */
++function errMessage(e: unknown): string {
++  return (e as Error)?.message ?? String(e);
++}
++
++/**
++ * null 切换镜像（FR-02 / D-001）：把宿主 `~/.codex/{auth.json, config.toml}`
++ * 的登录态如实反映进 per-session codexHome——
++ *   - 宿主文件存在 → 拷入覆盖（平台供应商产物被宿主登录态替换）；
++ *   - 宿主文件不存在 → 删除 codexHome 同名文件（宿主未登录 = 镜像后同样未登录，
++ *     残留平台供应商 auth.json 会顶掉「回本机」语义）。
++ *
++ * 逐文件独立 best-effort：单文件 IO 失败 console.error 后继续另一文件，**绝不
++ * 抛**（调用方 ForReload 分支四无论镜像成败都返回 prior CODEX_HOME——失败 =
++ * 目录里旧供应商凭证仍在 = 等同未切，thread 历史保住）。
++ *
++ * 宿主侧只读（copyFile 单向），删除/写入动作只发生在平台 per-session 目录内。
++ * 日志载荷只含文件名 / 路径 / 错误 message，不含凭证内容。
++ */
++export async function mirrorCodexHostAuth(codexHome: string): Promise<void> {
++  const hostHome = hostCodexHome();
++  // 拷入分支前置建目录（restore 探测路径 / 镜像目标尚未建的防御；rm 分支无需）。
++  try {
++    await mkdir(codexHome, { recursive: true });
++  } catch (e) {
++    console.error('codex_host_mirror_mkdir_failed', {
++      codexHome,
++      error: errMessage(e),
++    });
++  }
++  for (const filename of [AUTH_FILENAME, CONFIG_FILENAME]) {
++    const src = join(hostHome, filename);
++    const dest = join(codexHome, filename);
++    try {
++      await copyFile(src, dest);
++    } catch (e) {
++      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
++        // 宿主无该文件：删 per-session 同名文件（force 容忍本就不存在）。
++        try {
++          await rm(dest, { force: true });
++        } catch (e2) {
++          console.error('codex_host_mirror_delete_failed', {
++            file: filename,
++            codexHome,
++            error: errMessage(e2),
++          });
++        }
++      } else {
++        console.error('codex_host_mirror_copy_failed', {
++          file: filename,
++          codexHome,
++          error: errMessage(e),
++        });
++      }
++    }
++  }
++}
++
++/**
++ * 单文件首行读取上限：宿主 rollout 首行为 session_meta（含 base_instructions
++ * 全文，本机实测 13-22KB），1MB 上限留足余量；超限无换行按整行处理（JSON.parse
++ * 失败即跳过该候选）。不全文件读取——控制宿主大目录扫描成本（R-01）。
++ */
++const ROLLOUT_FIRST_LINE_MAX_BYTES = 1024 * 1024;
++/** 首行分块读取粒度（64KB 一次读齐典型首行，避免逐字节 sysctl 开销）。 */
++const ROLLOUT_FIRST_LINE_CHUNK_BYTES = 64 * 1024;
++
++/**
++ * 只读文件首行（遇首个 `\n` 截断；EOF/超上限仍无换行则返回已读全文）。
++ * 不抛——打开/读取失败交调用方逐文件 try/catch 收口。
++ */
++async function readFirstLine(path: string): Promise<string> {
++  const handle = await open(path, 'r');
++  try {
++    const chunks: Buffer[] = [];
++    let total = 0;
++    while (total < ROLLOUT_FIRST_LINE_MAX_BYTES) {
++      const buf = Buffer.alloc(
++        Math.min(ROLLOUT_FIRST_LINE_CHUNK_BYTES, ROLLOUT_FIRST_LINE_MAX_BYTES - total),
++      );
++      const { bytesRead } = await handle.read(buf, 0, buf.length, total);
++      if (bytesRead === 0) break; // EOF
++      const view = buf.subarray(0, bytesRead);
++      const nl = view.indexOf(0x0a);
++      if (nl >= 0) {
++        chunks.push(view.subarray(0, nl));
++        return Buffer.concat(chunks).toString('utf-8');
++      }
++      chunks.push(view);
++      total += bytesRead;
++    }
++    return Buffer.concat(chunks).toString('utf-8');
++  } finally {
++    await handle.close();
++  }
++}
++
++/**
++ * 从 rollout 首行解析会话 id：`payload.session_id` 优先（TaskCard fixture 锚），
++ * 兼容 `session_meta.id`——本机实际 rollout 首行为
++ * `{"type":"session_meta","payload":{"id":"<uuid>",...}}`（codex 0.121.0+ 实测，
++ * 「以实际 rollout 首行为准」），故兼容读 payload.id 与顶层 id 双形态。
++ */
++function extractRolloutSessionId(lineObj: unknown): string | undefined {
++  if (lineObj === null || typeof lineObj !== 'object') return undefined;
++  const payload = (lineObj as { payload?: unknown }).payload;
++  if (payload !== null && typeof payload === 'object') {
++    const p = payload as { session_id?: unknown; id?: unknown };
++    if (typeof p.session_id === 'string' && p.session_id.length > 0) return p.session_id;
++    if (typeof p.id === 'string' && p.id.length > 0) return p.id;
++  }
++  const topId = (lineObj as { id?: unknown }).id;
++  return typeof topId === 'string' && topId.length > 0 ? topId : undefined;
++}
++
++/** 递归收集 dir 下全部 .jsonl 文件（相对路径随收集保留）；子目录不可读静默跳过。 */
++async function collectJsonlFiles(dir: string, out: string[]): Promise<void> {
++  let entries;
++  try {
++    entries = await readdir(dir, { withFileTypes: true });
++  } catch {
++    return; // 宿主目录缺/无权限：跳过（只读宿主，不阻断）
++  }
++  for (const entry of entries) {
++    const full = join(dir, entry.name);
++    if (entry.isDirectory()) {
++      await collectJsonlFiles(full, out); // 符号链接不入 isDirectory，天然防环
++    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
++      out.push(full);
++    }
++  }
++}
++
++/**
++ * thread 历史迁移（FR-05 / R-01，对齐 claude migrateClaudeTranscriptToIsolated
++ * 降级语义）：递归扫描宿主 `~/.codex/sessions` 下 .jsonl rollout，仅读**首行**
++ * 解析会话 id（见 extractRolloutSessionId）匹配 threadId，命中文件按 sessions/
++ * 下相对路径拷入 `$codexHome/sessions/`（宿主日期分层结构原样保留）。
++ *
++ * 返回是否迁到 ≥1 个文件。宿主目录不存在 / 无命中 → console.warn 返 false
++ * （reload 不阻断；不迁则新 CODEX_HOME 下 resume 找不到 thread 由 codex 真实
++ * 报错收敛，对齐 R-01）。**绝不抛**：逐文件 IO 失败 console.error 后继续。
++ *
++ * 宿主文件只读不删（copyFile 单向）；写入只发生在平台 per-session 目录内。
++ */
++export async function migrateCodexThreadFromHost(
++  threadId: string,
++  codexHome: string,
++): Promise<boolean> {
++  const hostSessionsDir = join(hostCodexHome(), 'sessions');
++  const candidates: string[] = [];
++  await collectJsonlFiles(hostSessionsDir, candidates);
++  if (candidates.length === 0) {
++    // 宿主目录缺 / 空：宿主起步前提不成立（或宿主从未跑过 codex 会话）。
++    console.warn('codex_thread_migrate_no_match', {
++      thread_id: threadId,
++      host_sessions_dir: hostSessionsDir,
++      scanned: 0,
++    });
++    return false;
++  }
++  let migrated = 0;
++  for (const src of candidates) {
++    try {
++      const firstLine = await readFirstLine(src);
++      let lineObj: unknown;
++      try {
++        lineObj = JSON.parse(firstLine);
++      } catch {
++        continue; // 首行非 JSON / 超限截断：非 rollout 常规形态，跳过
++      }
++      if (extractRolloutSessionId(lineObj) !== threadId) continue;
++      // 命中：按 sessions/ 下相对路径拷入（宿主 YYYY/MM/DD 分层原样保留）。
++      const dest = join(codexHome, 'sessions', relative(hostSessionsDir, src));
++      await mkdir(dirname(dest), { recursive: true });
++      await copyFile(src, dest);
++      migrated += 1;
++    } catch (e) {
++      console.error('codex_thread_migrate_file_failed', {
++        path: src,
++        error: errMessage(e),
++      });
++    }
++  }
++  if (migrated === 0) {
++    console.warn('codex_thread_migrate_no_match', {
++      thread_id: threadId,
++      host_sessions_dir: hostSessionsDir,
++      scanned: candidates.length,
++    });
++    return false;
++  }
++  return true;
++}
+diff --git a/sillyhub-daemon/src/credential-injector.ts b/sillyhub-daemon/src/credential-injector.ts
+index 8f8b27b87..4baf05ea9 100644
+--- a/sillyhub-daemon/src/credential-injector.ts
++++ b/sillyhub-daemon/src/credential-injector.ts
+@@ -257,7 +257,7 @@ export class PiCredentialInjector implements CredentialInjector {
+  *
+  * **codex 刻意不注册 env 注入器**（2026-09-10-multi-provider-injection / D-003 /
+  * D-005）：codex 0.147.0 二进制无任何 base_url/key 类 env 注入面（spike A1 实测），
+- * 凭证注入走文件层——task-runner.ts applyProviderFileSettings 按 agent_kind='codex'
++ * 凭证注入走文件层——provider-file-settings.ts applyProviderFileSettings 按 agent_kind='codex'
+  * 分派 writeCodexHome 写 per-session CODEX_HOME/{auth.json, config.toml} 并注入
+  * CODEX_HOME env（config.toml [model_providers.sillyhub].base_url 重定向端点）。
+  * 故本表登记 codex 也不会被 spawn-env 第 0 层消费；gemini 仍预留后续变更。
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 005c461e7..790baea58 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -120,9 +120,10 @@ import { HostFsHandler } from './host-fs-handler.js';
+ import { buildSpawnEnv, type SpawnCredentialManager } from './spawn-env.js';
+ import { applyClaudeSettings } from './claude-settings.js';
+ // task-03（2026-09-10-multi-provider-injection / FR-01/FR-02）：codex/pi 配置写盘层
+-// 分派 helper——单点定义在 task-runner.ts（daemon→task-runner 单向 import，反向会
+-// 让 task-runner 单测拖起整个 daemon 模块），interactive 与 batch 两接线点共用。
+-import { applyProviderFileSettings } from './task-runner.js';
++// 分派 helper——2026-09-11-session-provider-switch-codex-pi task-01 起单点定义在
++// ./provider-file-settings.ts 共享模块（纯移动自 task-runner.ts），interactive 与
++// batch 两接线点共用。
++import { applyProviderFileSettings } from './provider-file-settings.js';
+ // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
+ // task-04（S1）：编排器静态引入自更新三件套——runDaemonSelfUpdate（下载原子替换）、
+ // respawnDaemonAndExit（交接拉起）、fetchLatestBuildId（推迟路径目标版本回传，
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 4a6b6a85c..5dbf5c892 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -79,6 +79,15 @@ import type { AgentEvent, ProviderConfig } from '../types.js';
+ // → 回退本机凭证，spawn-env.ts:140-164 已支持）。SpawnCredentialManager 鸭子类型，
+ // daemon 生产路径注入 daemon._credentialManager，测试 / 未注入时用 noopCredential fallback。
+ import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
++// task-03（2026-09-11-session-provider-switch-codex-pi / FR-01 / FR-04 / D-003@v1）：
++// reload 内核接入 codex/pi 文件层配置——ForReload 写盘 + env 合并（失败兜底内聚在
++// 返回值矩阵，R-05）与 codex thread 迁移钩子（FR-05，helper 在 codex-settings.ts）。
++// join / daemonStateDir 派生确定性 per-session 路径 `<daemonStateDir()>/codex/<sessionId>`
++//（与 task-runner.ts spawn 侧同口径）。
++import { join } from 'node:path';
++import { daemonStateDir } from '../config.js';
++import { migrateCodexThreadFromHost } from '../codex-settings.js';
++import { applyProviderFileSettingsForReload } from '../provider-file-settings.js';
+ // ql-20260822-009：resume / reload 的 CLAUDE_CONFIG_DIR 按 transcript 实际位置判定
+ // （隔离目录命中 → 隔离，保 ql-20260807-002 停供应商语义；仅宿主机 ~/.claude 命中 →
+ // 不隔离，修复未配供应商会话重开被 fail 打回 ended）。
+@@ -1440,7 +1449,11 @@ export class SessionManager {
+ 
+   /**
+    * task-07（provider-switch-live-session / D-002@v1）：用新供应商凭证受控重启
+-   * claude 子进程并 resume 对话历史（保留完整上下文，design G1/G2）。
++   * driver 子进程并 resume 对话历史（保留完整上下文，design G1/G2）。
++   * task-03（2026-09-11-session-provider-switch-codex-pi）：解锁 codex / pi——
++   * 删除原「仅 claude」守卫，热切换对 codex/pi 走共享 reload 内核确定性生效
++   * （FR-04，D-003@v1；codex/pi 的文件层配置写盘 + env 合并 + codex thread
++   * 迁移钩子见 ``_reloadSessionNow`` 内 task-03 块）。
+    *
+    * 真实方法体由 **task-08 实现**（参考现有 ``restoreAndReconnect``：close 旧 query
+    * → buildSpawnEnv(providerConfig) 构造新 env（null 时第 0 层跳过 → 本机凭证）→
+@@ -1467,8 +1480,8 @@ export class SessionManager {
+    *   ⑤ ``await driver.start(state.inputQueue, driverOpts)`` —— SDK spawn 新 claude 子进程
+    *      并从 ``~/.claude/projects/<encoded-cwd>/<sid>.jsonl`` 重载完整对话历史。复用
+    *      ``state.inputQueue``（reload 不 close 队列，新 query 订阅同一队列吃后续 inject）。
+-   *   ⑥ 替换 ``state.query``（claude）/ ``state.driverHandle``（codex，本任务未支持）+
+-   *      ``state.env``，重启 ``_runConsume`` 协程，清 ``state.pendingSwitch``（幂等兜底：
++   *   ⑥ 替换 ``state.query``（claude）/ ``state.driverHandle``（codex/pi 等非 claude
++   *      provider）+ ``state.env``，重启 ``_runConsume`` 协程，清 ``state.pendingSwitch``（幂等兜底：
+    *      markPendingSwitch 空闲路径不写标记 / _onResult 路径已清，此处防状态机遗漏）。
+    *   ⑦ reload 失败（spawn 失败 / jsonl 缺失 / cwd 不一致）→ catch 回滚保留旧 query/env
+    *      + ``console.error`` 上报 + **重新抛**（调用方 markPendingSwitch / _onResult 的
+@@ -1485,8 +1498,9 @@ export class SessionManager {
+    * @param sessionId 目标会话
+    * @param providerConfig 新供应商配置；null 表示停止（回退本机凭证，第 0 层 env 跳过）
+    * @throws {SessionNotFoundError} session 不存在
+-   * @throws {Error} provider 非 claude（codex reload 未支持）/ agentSessionId 缺失 /
+-   *         spawn 失败 / jsonl 缺失 / cwd 不一致（catch 回滚保留旧 query 后重新抛）
++   * @throws {Error} agentSessionId 缺失 / spawn 失败 / jsonl 缺失 / cwd 不一致
++   *         （catch 回滚保留旧 query 后重新抛；task-03 起对任意已注册 provider
++   *         provider-generic，不再有「非 claude 不支持」分支）
+    */
+   async reloadWithProvider(
+     sessionId: string,
+@@ -1496,16 +1510,12 @@ export class SessionManager {
+     if (!state) {
+       throw new SessionNotFoundError(sessionId);
+     }
+-    // task-08：仅 claude provider 支持（既有契约零语义漂移，回归测试锁死）。
+-    // codex 的配置切换走 reloadWithConfig（内核支持 codex，只切配置不注人格）。
+-    // 不抛 UnsupportedProviderError（那是 driver 注册缺失语义）；用普通 Error 上报。
+-    if (state.provider !== 'claude') {
+-      throw new Error(
+-        `reloadWithProvider: provider ${state.provider} not yet supported (session ${sessionId})`,
+-      );
+-    }
+     // 共享 reload 内核：行为与重构前内联实现逐字节等价（provider_config null/非 null
+     // env 构造、agentSessionId 守卫、resetForResubscribe、close 后置、失败回滚）。
++    // task-03（2026-09-11-session-provider-switch-codex-pi）：删除原 task-08 的
++    // claude-only 守卫（provider !== 'claude' 抛 not yet supported）——内核已
++    // provider-generic，codex/pi 同走（文件层配置接入见 _reloadSessionNow 内
++    // task-03 块）；claude 路径零漂移。
+     await this._reloadSession(sessionId, { providerConfig });
+   }
+ 
+@@ -1809,6 +1819,43 @@ export class SessionManager {
+         this._resumeDirs,
+       );
+ 
++      // ── task-03（2026-09-11-session-provider-switch-codex-pi）：codex/pi 文件层配置 ──
++      // 写盘 + env 合并。claude 跳过（settings.json 链路仍归 daemon.ts spawn 侧
++      // applyClaudeSettings + 上方既有 env 逻辑，零漂移，design Wave 2 步骤 5）。
++      if (state.provider === 'codex' || state.provider === 'pi') {
++        // codex 迁移钩子（FR-05，仅 codex）：宿主凭证起步会话（oldEnv 无 CODEX_HOME）
++        // 首次切平台供应商 → 迁移 thread rollout 历史到 per-session 目录，否则新
++        // CODEX_HOME 下 resume 找不到 thread 必断（对齐 claude
++        // migrateClaudeTranscriptToIsolated 语义）。三联条件缺一不触发；失败 warn
++        // 不阻断 reload（helper 自身返 false 已收口，对齐 claude 迁移失败降级 R-01）。
++        if (
++          state.provider === 'codex' &&
++          providerConfig != null &&
++          !oldEnv?.['CODEX_HOME'] &&
++          state.agentSessionId
++        ) {
++          await migrateCodexThreadFromHost(
++            state.agentSessionId,
++            join(daemonStateDir(), 'codex', state.sessionId),
++          );
++        }
++        // 写盘 + env 合并：文件层键（CODEX_HOME / PI_CODING_AGENT_DIR）最后合并盖过
++        // 下层，与 daemon.ts spawn 路径 Object.assign(interactiveEnv, providerFileEnv)
++        // 同模式——per-session 隔离目录是平台更高意志，盖过下层同键残留。失败兜底
++        // 已内聚在 ForReload 返回值（IO 失败/门槛缺返 priorEnv 对应键 = 等同未切，
++        // R-05），本处只做 Object.assign、不包 try/catch 不重试。
++        // priorEnv 断言：state.env 是 NodeJS.ProcessEnv（索引值 string | undefined），
++        // 但 env 快照实际由 buildSpawnEnv 产出（值恒为 string）；ForReload 内部经
++        // nonEmptyStr 逐键判空，undefined 值与缺键同义，断言仅对齐声明类型。
++        const fileEnv = await applyProviderFileSettingsForReload({
++          sessionKey: state.sessionId,
++          provider: providerConfig,
++          daemonApiKey: this.deps.daemonApiKey ?? null,
++          priorEnv: oldEnv as Record<string, string> | undefined,
++        });
++        Object.assign(newEnv, fileEnv);
++      }
++
+       // ── ③ 校验 resume key 必需 ──
+       // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
+       // 是 SDK jsonl 恢复 key。缺失说明首 turn 未完成，无可恢复 jsonl → 拒绝 reload
+diff --git a/sillyhub-daemon/src/interactive/session-manager/persistence.ts b/sillyhub-daemon/src/interactive/session-manager/persistence.ts
+index c7cda1ba0..c1983ee8c 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/persistence.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/persistence.ts
+@@ -36,6 +36,16 @@ import {
+ // daemon 生产路径注入 daemon._credentialManager，测试 / 未注入时用 noopCredential fallback。
+ import { buildSpawnEnv } from '../../spawn-env.js';
+ import type { SpawnCredentialManager } from '../../spawn-env.js';
++// task-04（2026-09-11-session-provider-switch-codex-pi / FR-01 FR-02 / D-001@v1）：
++// restore 自愈——恢复路径 codex/pi 注文件层 env（ForReload 写盘 + codex null
++// 目录探测后镜像，helper 在 provider-file-settings.ts / codex-settings.ts）。
++// stat / join / daemonStateDir 用于探测确定性 per-session 目录
++// `<daemonStateDir()>/codex/<sessionId>/`（与 spawn/reload 同口径派生路径）。
++import { stat } from 'node:fs/promises';
++import { join } from 'node:path';
++import { daemonStateDir } from '../../config.js';
++import { mirrorCodexHostAuth } from '../../codex-settings.js';
++import { applyProviderFileSettingsForReload } from '../../provider-file-settings.js';
+ import type { SessionManagerCore } from './types.js';
+ 
+ /**
+@@ -316,6 +326,58 @@ export async function restoreAndReconnect(
+       state.agentSessionId,
+       mgr._resumeDirs,
+     );
++
++    // ── task-04（2026-09-11-session-provider-switch-codex-pi / design Wave 2 步骤 4，
++    //    Grill 附带发现收编）：restore 自愈——恢复路径 codex/pi 注文件层 env ──
++    // 不修则「切换供应商后 daemon 重启 → 恢复会话丢 CODEX_HOME / PI_CODING_AGENT_DIR
++    // → 静默回宿主凭证」，直接击穿 FR-01 的生效承诺。claude 跳过（settings.json
++    // 链路仍归 daemon.ts spawn 侧 applyClaudeSettings + 上方既有 env 逻辑，零漂移，
++    // design Wave 2 步骤 5）。插入位置对齐 task-03 在 _reloadSessionNow 的合并块
++    //（applyTranscriptConfigDir 之后、driver.start 之前——文件层键最后合并盖过下层）。
++    if (state.provider === 'codex' || state.provider === 'pi') {
++      // providerConfig 非 null（持久化供应商快照恢复）：经 ForReload 重写
++      // per-session 目录 + 注文件层 env（与 _reloadSessionNow task-03 同模式，
++      // 失败兜底内聚在返回值矩阵 R-05）。priorEnv 传 undefined = 恢复时无旧 env
++      //（restore 从零重建 env、不回放 state.env，D-008）——失败兜底取不到 prior
++      // 键 → 返 {} 降级（按宿主现状运行，error 可归因，Grill 复审 P2-2）。
++      // ForReload 绝不抛，本块不进下方 driver.start 的既有 catch（恢复主路径
++      // 不因文件层降级而 fail）。
++      if (state.providerConfig != null) {
++        const fileEnv = await applyProviderFileSettingsForReload({
++          sessionKey: state.sessionId,
++          provider: state.providerConfig,
++          daemonApiKey: mgr.deps.daemonApiKey ?? null,
++          priorEnv: undefined,
++        });
++        Object.assign(restoreEnv, fileEnv);
++      } else if (state.provider === 'codex') {
++        // codex null 目录探测（Grill 复审 P2-3）= 切换后重启不丢 thread：
++        // persistence 仅落盘非 null providerConfig（snapshotPersistable task-08），
++        // null 切换（切回本机）会话的恢复记录天然无该字段——若按无供应商处理会
++        // 回宿主 CODEX_HOME → thread 在 per-session 目录找不到 → resume 必断。
++        // 修法：stat 探测确定性 per-session 目录，存在 = 此前在平台供应商上 →
++        // 按 null 切换语义处理（宿主凭证幂等重镜像 + 注 CODEX_HOME，镜像失败 =
++        // 目录留旧供应商产物 = 等同未切、env 仍保住）；不存在 → 零动作（行为与
++        // 现状逐字一致）。pi 不适用（null = 回宿主即语义本身，pi 历史在 daemon
++        // 自管 --session-dir 不丢）。
++        const codexHome = join(daemonStateDir(), 'codex', state.sessionId);
++        try {
++          if ((await stat(codexHome)).isDirectory()) {
++            // mirrorCodexHostAuth 自身绝不抛；防御 catch 兜底（镜像成败不影响
++            // 下方 env 注入）。
++            try {
++              await mirrorCodexHostAuth(codexHome);
++            } catch {
++              // 防御性兜底：零动作，不阻断恢复。
++            }
++            Object.assign(restoreEnv, { CODEX_HOME: codexHome });
++          }
++        } catch {
++          // stat ENOENT / IO 异常 = 目录不存在 → 零动作。
++        }
++      }
++    }
++
+     const driverOpts = mgr._buildDriverOptions(state, {
+       exePath: exe,
+       model: record.model,
+diff --git a/sillyhub-daemon/src/interactive/types.ts b/sillyhub-daemon/src/interactive/types.ts
+index 22df3fd99..189340322 100644
+--- a/sillyhub-daemon/src/interactive/types.ts
++++ b/sillyhub-daemon/src/interactive/types.ts
+@@ -562,6 +562,20 @@ export interface SessionManagerDeps {
+    * daemon.start 在构造时注入生产实例 JsonSessionPersistence）。
+    */
+   persistence?: SessionStorePersistence;
++  /**
++   * task-03（2026-09-11-session-provider-switch-codex-pi / D-003@v1）：daemon 自身
++   * apiKey（config.api_key）——reload / restore 的文件层写盘
++   * （applyProviderFileSettingsForReload）对 codex openai_chat 形态作 litellm
++   * 代理 auth key（同 spawn 缺省语义）。
++   *
++   * producer = cli.ts SessionManager 构造 deps 装配（daemon.ts 仅经 DaemonOptions
++   * 接收成品、不新增通道）；consumer = session-manager `_reloadSessionNow` /
++   * persistence restore（task-04）传 ForReload，与 daemon.ts spawn 路径
++   * `this._config.api_key` 同源。进程内注入不出 daemon 边界（不落日志/持久化）。
++   * 缺省 null 仅影响 codex openai_chat 形态 litellm key（token 模式退化不注，
++   * 与 spawn 路径 setDaemonApiKey(config.api_key) 同口径）。
++   */
++  daemonApiKey?: string | null;
+ }
+ 
+ // ── 错误类（稳定 code 供 daemon / backend / 测试识别）──────────────────────────
+diff --git a/sillyhub-daemon/src/provider-file-settings.ts b/sillyhub-daemon/src/provider-file-settings.ts
+new file mode 100644
+index 000000000..b7eb346c7
+--- /dev/null
++++ b/sillyhub-daemon/src/provider-file-settings.ts
+@@ -0,0 +1,308 @@
++/**
++ * provider 文件层分派共享模块。
++ *
++ * 2026-09-11-session-provider-switch-codex-pi task-01：本模块自 task-runner.ts
++ * （原 :160-305 段）逐字平移——纯移动，行为零变化（函数体/注释/日志标签一字
++ * 未改）；原模块私有的三个伴生判定（nonEmptyStr / isCodexFormSufficient /
++ * isPiFormSufficient）平移后升为导出（供后续 ForReload 变体复用）。
++ * 消费方：daemon.ts（interactive 接线）与 task-runner.ts（batch 接线）。
++ * task-02：新增 reload 专用变体 applyProviderFileSettingsForReload（失败兜底
++ * 语义完全内聚在返回值矩阵，R-05 落地点）——spawn 版分派零改动、并行导出。
++ *
++ * @module provider-file-settings
++ */
++
++import { mkdir } from 'node:fs/promises';
++import { join } from 'node:path';
++import { daemonStateDir } from './config.js';
++import { mirrorCodexHostAuth, writeCodexHome } from './codex-settings.js';
++import { writePiDir } from './pi-settings.js';
++import type { ProviderConfig } from './types.js';
++
++// ── provider 文件层分派（task-03 / 2026-09-10-multi-provider-injection）──────────
++
++/** 空串 / null / undefined 一律视为未设置（对齐 codex/pi-settings 同名判式）。 */
++export function nonEmptyStr(v: string | null | undefined): string | undefined {
++  return typeof v === 'string' && v.length > 0 ? v : undefined;
++}
++
++/**
++ * codex 写盘门槛判定（与 codex-settings.ts resolveCodexForm 的 sufficient 判据
++ * 同步内联——task-03 allowed_paths 不含 codex-settings.ts，无法导出共享 helper；
++ * **判据变更须两处同步**）：
++ *   openai_chat：litellm_base_url / litellm_model_name 至少一项；
++ *   anthropic（缺省）：api_key / base_url 至少一项。
++ */
++export function isCodexFormSufficient(provider: ProviderConfig): boolean {
++  if (provider.api_format === 'openai_chat') {
++    return (
++      nonEmptyStr(provider.litellm_base_url) !== undefined ||
++      nonEmptyStr(provider.litellm_model_name) !== undefined
++    );
++  }
++  return (
++    nonEmptyStr(provider.api_key) !== undefined ||
++    nonEmptyStr(provider.base_url) !== undefined
++  );
++}
++
++/**
++ * pi 写盘门槛判定（与 pi-settings.ts writePiDir 内部 gate 同步内联——同上，
++ * **判据变更须两处同步**）：非 openai_chat 禁配形态 + base_url 非空（自定义端点，
++ * 官方端点归 env 层 D-008）+ api_key 非空 + 裸 model id（default_fallback_model ??
++ * model）非空。不足则零 mkdir 零 env（半写/空目录被 pi 读到 ≠ 按宿主现状运行，
++ * design Plan 约束 3 同源理由）。
++ */
++export function isPiFormSufficient(provider: ProviderConfig): boolean {
++  return (
++    provider.api_format !== 'openai_chat' &&
++    nonEmptyStr(provider.base_url) !== undefined &&
++    nonEmptyStr(provider.api_key) !== undefined &&
++    (nonEmptyStr(provider.default_fallback_model) ?? nonEmptyStr(provider.model)) !==
++      undefined
++  );
++}
++
++/** applyProviderFileSettings 入参（design 接线段；两接线点同构调用）。 */
++export interface ProviderFileSettingsInput {
++  /**
++   * per-session 目录段（D-011）：interactive = agent_sessions.id、
++   * batch = leaseId（batch 无会话 id，lease 是唯一稳定执行粒度）。
++   */
++  sessionKey: string;
++  /** lease 下发 provider_config；整体缺省（D-012 absent 边界）→ 不写不注入。 */
++  provider: ProviderConfig | null | undefined;
++  /** daemon 进程自身 apiKey（config.api_key，cli.ts setDaemonApiKey 同源）；codex openai_chat 形态作 auth key。 */
++  daemonApiKey: string | null;
++}
++
++/**
++ * 按 provider.agent_kind 分派配置写盘层 + 产待注入 env（task-03 单点定义，
++ * daemon.ts interactive / task-runner.ts batch 两接线点共用）：
++ *
++ *   - codex：门槛前置判定（isCodexFormSufficient，与 writeCodexHome 同判据）通过
++ *     → mkdir per-session 目录 → writeCodexHome（auth.json + config.toml）→
++ *     返回 `{CODEX_HOME: <dir>}`；门槛缺 → warn 跳过（零 mkdir 零写入零 env）；
++ *   - pi：base_url 非空（自定义端点）且必需字段齐（isPiFormSufficient）→
++ *     mkdir → writePiDir（三文件）→ 返回 `{PI_CODING_AGENT_DIR: <dir>}`；
++ *     官方端点（base_url 空）静默跳过（env 层负责，D-008 分层）；
++ *   - claude / 缺省 / 未知 kind → 返回 {}（claude settings.json 归调用侧
++ *     applyClaudeSettings kind 守卫，不在此处）。
++ *
++ * per-session 目录（D-011）：`<daemonStateDir()>/codex/<sessionKey>/` 与
++ * `<daemonStateDir()>/pi/<sessionKey>/`——与 CLAUDE_CONFIG_DIR 同根（平台管理的
++ * 会话配置根旁挂 per-session 子目录，非 TEMP，R-06）。
++ *
++ * 失败语义（design Plan 约束 3「失败语义唯一化」）：mkdir / 写盘 IO 失败（含
++ * writeCodexHome/writePiDir reject）→ 记 error 后该 kind 的 env 注入一并跳过、
++ * 正常返回 {}，**绝不抛**——调用方 spawn 主路径不阻断（子进程按宿主 ~/.codex、
++ * ~/.pi 现状运行 = 行为等同未配置，log 可归因）。终态清理与热切换重写归 task-04。
++ *
++ * 日志安全：warn/error 载荷只含 sessionKey / kind / 字段名 / 错误 message，
++ * 永不含 api_key / daemonApiKey 明文（对齐两写盘器约束）。
++ */
++export async function applyProviderFileSettings(
++  input: ProviderFileSettingsInput,
++): Promise<Record<string, string>> {
++  const { sessionKey, provider, daemonApiKey } = input;
++
++  // D-012 absent 边界：provider_config 整体缺省 → 不写不注入（与现状逐字一致）。
++  if (!provider) return {};
++
++  if (provider.agent_kind === 'codex') {
++    // 门槛前置判定先于 mkdir：门槛缺 → 零 mkdir 零写入零 env（可诊断不静默）。
++    if (!isCodexFormSufficient(provider)) {
++      console.warn('provider_file_dispatch_codex_skipped_missing_fields', {
++        session_key: sessionKey,
++        api_format: provider.api_format ?? 'anthropic',
++      });
++      return {};
++    }
++    const codexHome = join(daemonStateDir(), 'codex', sessionKey);
++    try {
++      // spawn 前创建 per-session 目录（写盘器不自建，目录缺失走 IO 失败路径）。
++      await mkdir(codexHome, { recursive: true });
++      await writeCodexHome({ codexHome, provider, daemonApiKey });
++      return { CODEX_HOME: codexHome };
++    } catch (e) {
++      // writeCodexHome 已记 codex_home_write_failed；此处收口 mkdir 失败 + 统一
++      // 跳过 env（失败语义唯一化：半写目录被 CLI 读到 ≠ 按宿主现状运行）。
++      console.error('provider_file_dispatch_codex_failed', {
++        session_key: sessionKey,
++        error: (e as Error)?.message ?? String(e),
++      });
++      return {};
++    }
++  }
++
++  if (provider.agent_kind === 'pi') {
++    // 官方端点形态（base_url 空）：零写盘零 env 静默跳过——凭证注入归 env 层
++    //（并行变更产物，D-008 分层，这是设计内分派而非异常）。
++    if (nonEmptyStr(provider.base_url) === undefined) return {};
++    if (!isPiFormSufficient(provider)) {
++      console.warn('provider_file_dispatch_pi_skipped_missing_fields', {
++        session_key: sessionKey,
++        api_format: provider.api_format ?? 'anthropic',
++      });
++      return {};
++    }
++    const piDir = join(daemonStateDir(), 'pi', sessionKey);
++    try {
++      await mkdir(piDir, { recursive: true });
++      await writePiDir({ piDir, provider });
++      return { PI_CODING_AGENT_DIR: piDir };
++    } catch (e) {
++      // writePiDir 已记 pi_dir_write_failed；此处收口 mkdir 失败 + 统一跳过 env。
++      console.error('provider_file_dispatch_pi_failed', {
++        session_key: sessionKey,
++        error: (e as Error)?.message ?? String(e),
++      });
++      return {};
++    }
++  }
++
++  // claude / 缺省 / 未知 kind：无文件层 env（claude settings.json 由调用侧
++  // applyClaudeSettings kind 守卫处理）。
++  return {};
++}
++
++// ── reload 变体（2026-09-11-session-provider-switch-codex-pi task-02，R-05）────
++
++/** applyProviderFileSettingsForReload 入参（design 接口定义）。 */
++export interface ProviderFileSettingsReloadInput extends ProviderFileSettingsInput {
++  /**
++   * reload 前会话 env 快照（取 CODEX_HOME / PI_CODING_AGENT_DIR 判「此前是否
++   * 平台供应商」+ 失败兜底键来源）。restore 路径传 undefined（恢复时无旧 env）。
++   */
++  priorEnv: Record<string, string> | undefined;
++}
++
++/**
++ * reload/restore 专用的 provider 文件层分派（task-03 reload 内核 / task-04
++ * restore 自愈接线；spawn 版 applyProviderFileSettings 零改动，并行导出）。
++ *
++ * **失败兜底语义与 spawn 版刻意不同**（Grill P1-1）：spawn 版失败一律返 {}（新
++ * 进程按宿主现状起步 = 等同未配置）；reload 版失败返 priorEnv 对应文件层键
++ * （新进程沿用旧供应商目录 = 等同未切，可归因）——失败语义完全内聚在本函数
++ * 返回值，调用方只管 `Object.assign(newEnv, fileEnv)`，reload 主路径不阻断。
++ *
++ * 返回值矩阵（task-02 TaskCard implementation 分支一~五）：
++ *   分支一（非 null 成功）——与 spawn 版同分派同产物：
++ *     codex 门槛足 → 写盘返 {CODEX_HOME}；pi 自定义端点且门槛足 → {PI_CODING_AGENT_DIR}；
++ *     pi 官方端点（base_url 空）→ {}（env 层负责，D-008）；claude/缺省/未知 kind → {}；
++ *   分支二（非 null 且 mkdir/写盘 IO 失败）——返 priorEnv 对应文件层键（codex 回
++ *     CODEX_HOME、pi 回 PI_CODING_AGENT_DIR；priorEnv undefined 取不到键 → {}，
++ *     restore 路径按宿主现状降级，与 create 失败语义对齐——Grill 复审 P2-2）；
++ *   分支三（非 null 且 codex 门槛缺）——warn 跳过写盘但返 priorEnv 的 CODEX_HOME
++ *     键（若有，无则 {}）——异常配置场景等同未切而非丢文件层 env（Grill 复审 P2-1）；
++ *     pi 门槛缺同口径返 priorEnv 的 PI_CODING_AGENT_DIR 键（同 P2-1 理由）；
++ *   分支四（provider 显式 null 切回本机且 priorEnv 带 CODEX_HOME）——调
++ *     mirrorCodexHostAuth 镜像宿主凭证，**无论镜像成败都返 {CODEX_HOME: <prior>}**
++ *     （镜像失败则目录里旧供应商凭证仍在 = 等同未切，env 保住 = thread 历史保住）；
++ *   分支五（null 且无 prior CODEX_HOME——含 pi kind，或 provider undefined
++ *     absent）——返 {}（env 不带文件层键 = 回宿主 ~/.pi / 宿主起步 ~/.codex）。
++ *
++ * null/undefined 口径与 daemon 路由「缺席不归一为 null」同源：显式 null 才是
++ * 切回本机（触发镜像分支）；undefined = D-012 absent 边界，零动作返 {}。
++ *
++ * 全矩阵任何分支均不抛（IO 异常一律捕获转返回值）。日志铁律：warn/error 载荷
++ * 只含 sessionKey / kind / 字段名 / 错误 message，永不含 api_key / daemonApiKey
++ * 明文。
++ */
++export async function applyProviderFileSettingsForReload(
++  input: ProviderFileSettingsReloadInput,
++): Promise<Record<string, string>> {
++  const { sessionKey, provider, daemonApiKey, priorEnv } = input;
++
++  /** priorEnv 文件层键兜底：取得到非空值返单键对象，否则返 {}（分支二/三/五共用）。 */
++  const priorFileEnv = (
++    key: 'CODEX_HOME' | 'PI_CODING_AGENT_DIR',
++  ): Record<string, string> => {
++    const prior = nonEmptyStr(priorEnv?.[key]);
++    return prior !== undefined ? { [key]: prior } : {};
++  };
++
++  // 分支四 / 五：provider 显式 null = 切回本机（D-001）。undefined absent 不入
++  // 此列（见函数注释 null/undefined 口径段）。
++  if (provider === null) {
++    const priorCodexHome = nonEmptyStr(priorEnv?.CODEX_HOME);
++    if (priorCodexHome !== undefined) {
++      // 分支四：此前在平台供应商上——镜像宿主凭证进 per-session 目录（目标 =
++      // 与 spawn 版同口径的确定性派生路径；prior 值正常流即同一路径）。
++      // mirrorCodexHostAuth 自身绝不抛；防御性兜底保证本函数铁律。
++      try {
++        await mirrorCodexHostAuth(join(daemonStateDir(), 'codex', sessionKey));
++      } catch (e) {
++        console.error('provider_file_reload_codex_mirror_failed', {
++          session_key: sessionKey,
++          error: (e as Error)?.message ?? String(e),
++        });
++      }
++      // 无论镜像成败：env 保住旧目录（失败=目录留旧供应商产物=等同未切）。
++      return { CODEX_HOME: priorCodexHome };
++    }
++    // 分支五：宿主起步会话（无 prior CODEX_HOME）或 pi kind（prior 只带
++    // PI_CODING_AGENT_DIR）——回宿主 ~/.codex / ~/.pi。
++    return {};
++  }
++
++  // D-012 absent 边界：provider 整体缺省 → 不写不注入（与 spawn 版逐字一致）。
++  if (provider === undefined) return {};
++
++  if (provider.agent_kind === 'codex') {
++    // 分支三：门槛缺 → warn 跳过写盘但保 prior CODEX_HOME（P2-1：异常配置
++    // 等同未切而非丢文件层 env——reload 已在途，丢 env = 静默回宿主凭证）。
++    if (!isCodexFormSufficient(provider)) {
++      console.warn('provider_file_reload_codex_skipped_missing_fields', {
++        session_key: sessionKey,
++        api_format: provider.api_format ?? 'anthropic',
++      });
++      return priorFileEnv('CODEX_HOME');
++    }
++    const codexHome = join(daemonStateDir(), 'codex', sessionKey);
++    try {
++      // 分支一：与 spawn 版同分派同产物（mkdir → writeCodexHome → 单键 env）。
++      await mkdir(codexHome, { recursive: true });
++      await writeCodexHome({ codexHome, provider, daemonApiKey });
++      return { CODEX_HOME: codexHome };
++    } catch (e) {
++      // 分支二：目录里旧供应商产物未动 = 新进程沿用旧供应商，行为等同未切。
++      console.error('provider_file_reload_codex_failed', {
++        session_key: sessionKey,
++        error: (e as Error)?.message ?? String(e),
++      });
++      return priorFileEnv('CODEX_HOME');
++    }
++  }
++
++  if (provider.agent_kind === 'pi') {
++    // 官方端点（base_url 空）：设计内分派而非失败——返 {} 走 env 层（D-008），
++    // 无 prior 键兜底（切换语义本身 = 丢文件层凭证回 env 注入接管，R-06）。
++    if (nonEmptyStr(provider.base_url) === undefined) return {};
++    // pi 门槛缺：同分支三口径（P2-1 理由对 pi 同构）。
++    if (!isPiFormSufficient(provider)) {
++      console.warn('provider_file_reload_pi_skipped_missing_fields', {
++        session_key: sessionKey,
++        api_format: provider.api_format ?? 'anthropic',
++      });
++      return priorFileEnv('PI_CODING_AGENT_DIR');
++    }
++    const piDir = join(daemonStateDir(), 'pi', sessionKey);
++    try {
++      // 分支一：与 spawn 版同分派同产物。
++      await mkdir(piDir, { recursive: true });
++      await writePiDir({ piDir, provider });
++      return { PI_CODING_AGENT_DIR: piDir };
++    } catch (e) {
++      // 分支二。
++      console.error('provider_file_reload_pi_failed', {
++        session_key: sessionKey,
++        error: (e as Error)?.message ?? String(e),
++      });
++      return priorFileEnv('PI_CODING_AGENT_DIR');
++    }
++  }
++
++  // claude / 缺省 / 未知 kind：分支一内空对象（同 spawn 版）。
++  return {};
++}
+diff --git a/sillyhub-daemon/src/task-runner.ts b/sillyhub-daemon/src/task-runner.ts
+index 09340f1f4..75b986324 100644
+--- a/sillyhub-daemon/src/task-runner.ts
++++ b/sillyhub-daemon/src/task-runner.ts
+@@ -100,7 +100,6 @@ import { eventToSubmitMessages } from './event-wire.js';
+ import type {
+   AgentEvent,
+   LeaseCtx,
+-  ProviderConfig,
+ } from './types.js';
+ // task-03（2026-09-07-arch-large-file-split / D-004@v1）：原文件头部的常量/类型/
+ // 依赖契约接口/鸭子读取器原样下沉到 ./task-runner/ 包（零改写），facade 经
+@@ -151,158 +150,12 @@ import type {
+   ChangeWriteCtx,
+   ChangeWriteResult,
+ } from './task-runner/change-write.js';
+-// task-03（2026-09-10-multi-provider-injection / FR-01 FR-02 / D-005 / D-011 / D-012）：
+-// 配置写盘层两写盘器——按 provider.agent_kind 分派进 per-session 隔离目录（见下方
+-// applyProviderFileSettings）。
+-import { writeCodexHome } from './codex-settings.js';
+-import { writePiDir } from './pi-settings.js';
+-
+-// ── provider 文件层分派（task-03 / 2026-09-10-multi-provider-injection）──────────
+-
+-/** 空串 / null / undefined 一律视为未设置（对齐 codex/pi-settings 同名判式）。 */
+-function nonEmptyStr(v: string | null | undefined): string | undefined {
+-  return typeof v === 'string' && v.length > 0 ? v : undefined;
+-}
+-
+-/**
+- * codex 写盘门槛判定（与 codex-settings.ts resolveCodexForm 的 sufficient 判据
+- * 同步内联——task-03 allowed_paths 不含 codex-settings.ts，无法导出共享 helper；
+- * **判据变更须两处同步**）：
+- *   openai_chat：litellm_base_url / litellm_model_name 至少一项；
+- *   anthropic（缺省）：api_key / base_url 至少一项。
+- */
+-function isCodexFormSufficient(provider: ProviderConfig): boolean {
+-  if (provider.api_format === 'openai_chat') {
+-    return (
+-      nonEmptyStr(provider.litellm_base_url) !== undefined ||
+-      nonEmptyStr(provider.litellm_model_name) !== undefined
+-    );
+-  }
+-  return (
+-    nonEmptyStr(provider.api_key) !== undefined ||
+-    nonEmptyStr(provider.base_url) !== undefined
+-  );
+-}
+-
+-/**
+- * pi 写盘门槛判定（与 pi-settings.ts writePiDir 内部 gate 同步内联——同上，
+- * **判据变更须两处同步**）：非 openai_chat 禁配形态 + base_url 非空（自定义端点，
+- * 官方端点归 env 层 D-008）+ api_key 非空 + 裸 model id（default_fallback_model ??
+- * model）非空。不足则零 mkdir 零 env（半写/空目录被 pi 读到 ≠ 按宿主现状运行，
+- * design Plan 约束 3 同源理由）。
+- */
+-function isPiFormSufficient(provider: ProviderConfig): boolean {
+-  return (
+-    provider.api_format !== 'openai_chat' &&
+-    nonEmptyStr(provider.base_url) !== undefined &&
+-    nonEmptyStr(provider.api_key) !== undefined &&
+-    (nonEmptyStr(provider.default_fallback_model) ?? nonEmptyStr(provider.model)) !==
+-      undefined
+-  );
+-}
+-
+-/** applyProviderFileSettings 入参（design 接线段；两接线点同构调用）。 */
+-export interface ProviderFileSettingsInput {
+-  /**
+-   * per-session 目录段（D-011）：interactive = agent_sessions.id、
+-   * batch = leaseId（batch 无会话 id，lease 是唯一稳定执行粒度）。
+-   */
+-  sessionKey: string;
+-  /** lease 下发 provider_config；整体缺省（D-012 absent 边界）→ 不写不注入。 */
+-  provider: ProviderConfig | null | undefined;
+-  /** daemon 进程自身 apiKey（config.api_key，cli.ts setDaemonApiKey 同源）；codex openai_chat 形态作 auth key。 */
+-  daemonApiKey: string | null;
+-}
+-
+-/**
+- * 按 provider.agent_kind 分派配置写盘层 + 产待注入 env（task-03 单点定义，
+- * daemon.ts interactive / task-runner.ts batch 两接线点共用）：
+- *
+- *   - codex：门槛前置判定（isCodexFormSufficient，与 writeCodexHome 同判据）通过
+- *     → mkdir per-session 目录 → writeCodexHome（auth.json + config.toml）→
+- *     返回 `{CODEX_HOME: <dir>}`；门槛缺 → warn 跳过（零 mkdir 零写入零 env）；
+- *   - pi：base_url 非空（自定义端点）且必需字段齐（isPiFormSufficient）→
+- *     mkdir → writePiDir（三文件）→ 返回 `{PI_CODING_AGENT_DIR: <dir>}`；
+- *     官方端点（base_url 空）静默跳过（env 层负责，D-008 分层）；
+- *   - claude / 缺省 / 未知 kind → 返回 {}（claude settings.json 归调用侧
+- *     applyClaudeSettings kind 守卫，不在此处）。
+- *
+- * per-session 目录（D-011）：`<daemonStateDir()>/codex/<sessionKey>/` 与
+- * `<daemonStateDir()>/pi/<sessionKey>/`——与 CLAUDE_CONFIG_DIR 同根（平台管理的
+- * 会话配置根旁挂 per-session 子目录，非 TEMP，R-06）。
+- *
+- * 失败语义（design Plan 约束 3「失败语义唯一化」）：mkdir / 写盘 IO 失败（含
+- * writeCodexHome/writePiDir reject）→ 记 error 后该 kind 的 env 注入一并跳过、
+- * 正常返回 {}，**绝不抛**——调用方 spawn 主路径不阻断（子进程按宿主 ~/.codex、
+- * ~/.pi 现状运行 = 行为等同未配置，log 可归因）。终态清理与热切换重写归 task-04。
+- *
+- * 日志安全：warn/error 载荷只含 sessionKey / kind / 字段名 / 错误 message，
+- * 永不含 api_key / daemonApiKey 明文（对齐两写盘器约束）。
+- */
+-export async function applyProviderFileSettings(
+-  input: ProviderFileSettingsInput,
+-): Promise<Record<string, string>> {
+-  const { sessionKey, provider, daemonApiKey } = input;
+-
+-  // D-012 absent 边界：provider_config 整体缺省 → 不写不注入（与现状逐字一致）。
+-  if (!provider) return {};
+-
+-  if (provider.agent_kind === 'codex') {
+-    // 门槛前置判定先于 mkdir：门槛缺 → 零 mkdir 零写入零 env（可诊断不静默）。
+-    if (!isCodexFormSufficient(provider)) {
+-      console.warn('provider_file_dispatch_codex_skipped_missing_fields', {
+-        session_key: sessionKey,
+-        api_format: provider.api_format ?? 'anthropic',
+-      });
+-      return {};
+-    }
+-    const codexHome = join(daemonStateDir(), 'codex', sessionKey);
+-    try {
+-      // spawn 前创建 per-session 目录（写盘器不自建，目录缺失走 IO 失败路径）。
+-      await mkdir(codexHome, { recursive: true });
+-      await writeCodexHome({ codexHome, provider, daemonApiKey });
+-      return { CODEX_HOME: codexHome };
+-    } catch (e) {
+-      // writeCodexHome 已记 codex_home_write_failed；此处收口 mkdir 失败 + 统一
+-      // 跳过 env（失败语义唯一化：半写目录被 CLI 读到 ≠ 按宿主现状运行）。
+-      console.error('provider_file_dispatch_codex_failed', {
+-        session_key: sessionKey,
+-        error: (e as Error)?.message ?? String(e),
+-      });
+-      return {};
+-    }
+-  }
+-
+-  if (provider.agent_kind === 'pi') {
+-    // 官方端点形态（base_url 空）：零写盘零 env 静默跳过——凭证注入归 env 层
+-    //（并行变更产物，D-008 分层，这是设计内分派而非异常）。
+-    if (nonEmptyStr(provider.base_url) === undefined) return {};
+-    if (!isPiFormSufficient(provider)) {
+-      console.warn('provider_file_dispatch_pi_skipped_missing_fields', {
+-        session_key: sessionKey,
+-        api_format: provider.api_format ?? 'anthropic',
+-      });
+-      return {};
+-    }
+-    const piDir = join(daemonStateDir(), 'pi', sessionKey);
+-    try {
+-      await mkdir(piDir, { recursive: true });
+-      await writePiDir({ piDir, provider });
+-      return { PI_CODING_AGENT_DIR: piDir };
+-    } catch (e) {
+-      // writePiDir 已记 pi_dir_write_failed；此处收口 mkdir 失败 + 统一跳过 env。
+-      console.error('provider_file_dispatch_pi_failed', {
+-        session_key: sessionKey,
+-        error: (e as Error)?.message ?? String(e),
+-      });
+-      return {};
+-    }
+-  }
+-
+-  // claude / 缺省 / 未知 kind：无文件层 env（claude settings.json 由调用侧
+-  // applyClaudeSettings kind 守卫处理）。
+-  return {};
+-}
++// task-01（2026-09-11-session-provider-switch-codex-pi）：applyProviderFileSettings
++// 及伴生符号（ProviderFileSettingsInput / isCodexFormSufficient / isPiFormSufficient /
++// nonEmptyStr）平移至 ./provider-file-settings.js 共享模块（纯移动零行为），本文件
++// batch 接线点（runLease）改 import 消费；原写盘器 import（writeCodexHome /
++// writePiDir，仅被该函数使用）随平移移除。
++import { applyProviderFileSettings } from './provider-file-settings.js';
+ 
+ /**
+  * 任务编排器：执行一个 lease，把 agent 输出流式 submit 到 server，
+diff --git a/sillyhub-daemon/tests/cli-session-manager-injection.test.ts b/sillyhub-daemon/tests/cli-session-manager-injection.test.ts
+index cd6bb6c52..21b39f555 100644
+--- a/sillyhub-daemon/tests/cli-session-manager-injection.test.ts
++++ b/sillyhub-daemon/tests/cli-session-manager-injection.test.ts
+@@ -231,6 +231,29 @@ describe('Wave2 task-04 gap-1 cli.startAction 注入 SessionManager', () => {
+     expect(typeof deps.onSessionEnd).toBe('function');
+   });
+ 
++  // ── task-03（2026-09-11-session-provider-switch-codex-pi / D-003@v1）：daemonApiKey
++  // 注入锚定——cli 装配处（生产构造点）传 daemon 侧 config.api_key，供 reload/restore
++  // 文件层写盘（ForReload）对 codex openai_chat 形态作 litellm 代理 auth key。
++  // 取值口径 = config.api_key ?? null（与 spawn 路径 daemon.ts / task-runner 同源）。
++
++  it('deps.daemonApiKey = config.api_key ?? null（api_key 缺省 → null，spawn 同源口径）', async () => {
++    await cli.startAction({ token: 'test-token' });
++
++    // 本文件 config mock 固定 api_key: null → deps.daemonApiKey 收敛 null（非
++    // undefined——SessionManagerDeps 类型 string | null）。
++    const deps = captured.sessionManagerInstances[0]!.deps;
++    expect(deps.daemonApiKey).toBeNull();
++  });
++
++  it('deps.daemonApiKey = config.api_key（api_key 非空透传，litellm auth key 接线）', async () => {
++    // 语义核对（step 1-2 CLI 覆盖）：opts.token 会清掉 api_key（token↔api_key 互斥
++    // 互清）——非空 api_key 形态用 --api-key 入口覆盖（与持久化文件 api_key 同字段）。
++    await cli.startAction({ apiKey: 'sk-daemon-master-key' });
++
++    const deps = captured.sessionManagerInstances[0]!.deps;
++    expect(deps.daemonApiKey).toBe('sk-daemon-master-key');
++  });
++
+   it('deps.onTurnResult 是闭包，调用时 forward 到 daemon.onTurnResult（延迟绑定生效）', async () => {
+     await cli.startAction({ token: 'test-token' });
+ 
+diff --git a/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts b/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts
+index 73b359f6d..ab76b2dfe 100644
+--- a/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts
++++ b/sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts
+@@ -23,6 +23,14 @@
+ // 会话复用 applyProviderFileSettings 重写 per-session 目录（复用同函数 = 产物与
+ // 新会话 spawn 前逐字一致）；claude/absent 零动作；null 仅记日志；终态/不存在
+ // 会话零重写（防死会话重建目录孤儿）；hot_switch_rewrite 可观测日志不含 key。
++//
++// task-06（2026-09-11-session-provider-switch-codex-pi / FR-04 / D-003@v1）：热切换
++// 语义升级——task-03 删 reloadWithProvider claude-only 守卫后，PROVIDER_CONFIG_
++// CHANGED 对 codex/pi 从「尽力重写」升级为确定性 reload（与 claude 同语义）；既有
++// task-04 重写断言按「reload 前幂等预写」语义保留（design 非目标：不动 daemon.ts
++// 重写块），下方补 handler → markPendingSwitch → reloadWithProvider 接线断言
++// （codex 配置全程不撞 not-yet-supported——真实内核走通证据归
++// session-manager-config-switch REG-4 / reload-provider 边界-2 改写）。
+ 
+ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+ import { Daemon } from '../src/daemon.js';
+@@ -33,8 +41,9 @@ import type { WsClientCallbacks } from '../src/ws-client.js';
+ import type { DaemonMessage, ProviderConfig } from '../src/types.js';
+ import type { SessionManager } from '../src/interactive/session-manager.js';
+ import type { SessionState } from '../src/interactive/types.js';
+-// task-04：热切换重写产物断言（复用 task-03 同一函数对照「逐字一致」）。
+-import { applyProviderFileSettings } from '../src/task-runner.js';
++// task-04：热切换重写产物断言（复用 task-03 同一函数对照「逐字一致」；
++// 2026-09-11-session-provider-switch-codex-pi task-01 起单点定义在 provider-file-settings.ts）。
++import { applyProviderFileSettings } from '../src/provider-file-settings.js';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+@@ -262,6 +271,47 @@ describe('task-06 / FR-04 / D-002@v1: daemon PROVIDER_CONFIG_CHANGED WS handler
+     );
+   });
+ 
++  it('task-06/D-003: codex 配置经 markPendingSwitch 空闲路径直达 reloadWithProvider（不撞 not-yet-supported）', async () => {
++    // task-03 删守卫后热切换接线为确定性 reload：handler → markPendingSwitch（空闲
++    // 会话）→ reloadWithProvider。markPendingSwitch 用真实形状实现（mock sm 上自
++    // 路由到 reloadWithProvider spy）——锁 daemon 分发对 codex 配置零拦截；真实
++    // 内核 codex 走通断言归 session-manager 系列测试（REG-4 / 边界-2 改写）。
++    const reloadSpy = vi.fn(async () => {});
++    const sm = createMockSessionManager(function (
++      this: { reloadWithProvider: typeof reloadSpy },
++      sessionId: string,
++      cfg: ProviderConfig | null,
++    ) {
++      // 真实 markPendingSwitch 空闲分支形状（session-manager.ts）：fire-and-forget
++      // reload，不写标记。
++      void this.reloadWithProvider(sessionId, cfg);
++    });
++    (sm as unknown as { reloadWithProvider: typeof reloadSpy }).reloadWithProvider =
++      reloadSpy;
++    const { daemon, captured } = buildDaemon({ sessionManager: sm });
++    daemons.push(daemon);
++    await daemon.start();
++    await waitForWsInit(captured);
++
++    const codexCfg: ProviderConfig = {
++      agent_kind: 'codex',
++      api_key: 'sk-hot-codex',
++      base_url: 'https://hot.example/v1',
++      model: 'glm-4.8',
++    };
++    captured.callbacks.onMessage!({
++      type: MSG.PROVIDER_CONFIG_CHANGED,
++      payload: { session_id: SESSION_ID, provider_config: codexCfg },
++    } as DaemonMessage);
++    await flushMicro();
++    await flushMicro();
++
++    // 接线断言：codex 配置直达 reloadWithProvider（守卫删除前此链对 codex 终止于
++    // not-yet-supported 抛错——markPendingSwitch 的 .catch 吞错，reload 永不发生）。
++    expect(reloadSpy).toHaveBeenCalledTimes(1);
++    expect(reloadSpy).toHaveBeenCalledWith(SESSION_ID, codexCfg);
++  });
++
+   it('provider_config=null（停止）→ 透传 null 给 markPendingSwitch（D-004@v1 回退本机凭证）', async () => {
+     const { daemon, sessionManager, captured } = buildDaemon();
+     daemons.push(daemon);
+diff --git a/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts b/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts
+index cee9fc763..29cb3387c 100644
+--- a/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts
++++ b/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts
+@@ -2,7 +2,9 @@
+ // change 2026-09-10-multi-provider-injection / task-03（FR-01/FR-02 / D-005 / D-011 /
+ // D-012 / Grill P2）。锁「两接线点分派 + applyClaudeSettings kind 守卫」：
+ //
+-//   1. 分派函数直测（applyProviderFileSettings，task-runner.ts 单点定义）：
++//   1. 分派函数直测（applyProviderFileSettings，provider-file-settings.ts 单点
++//      定义——2026-09-11-session-provider-switch-codex-pi task-01 自 task-runner.ts
++//      平移）：
+ //      codex anthropic/openai_chat 形态产物 + env / pi 自定义端点三文件 + env /
+ //      门槛缺零 mkdir 零 env / pi 官方端点零写盘 / provider absent / claude kind
+ //      零文件层 env / mkdir·写盘 IO 失败 → 零 env 不抛；
+@@ -60,7 +62,10 @@ import {
+ } from 'node:fs';
+ // vi.mock 已 hoist，import 拿到 mock 版本。
+ import { applyClaudeSettings } from '../src/claude-settings.js';
+-import { TaskRunner, applyProviderFileSettings } from '../src/task-runner.js';
++import { TaskRunner } from '../src/task-runner.js';
++// 2026-09-11-session-provider-switch-codex-pi task-01：分派函数平移至共享模块
++//（纯移动自 task-runner.ts，断言与用例零改动）。
++import { applyProviderFileSettings } from '../src/provider-file-settings.js';
+ import { Daemon } from '../src/daemon.js';
+ import { MSG } from '../src/protocol.js';
+ import type { DaemonConfig } from '../src/config.js';
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+index 15817c9d8..2609ea2e8 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+@@ -6,7 +6,8 @@
+ // 覆盖（蓝图 implementation / acceptance）：
+ //   (1) reload 内核抽取后 reloadWithProvider 行为回归不变（零语义漂移）：
+ //       close 旧 query / driver.start resume / env 替换（CLAUDE_CONFIG_DIR 隔离）/
+-//       失败回滚 / codex 仍抛 not-yet-supported / SessionNotFoundError。
++//       失败回滚 / codex 走通 reload（task-03 删守卫后 REG-4 改写，
++//       2026-09-11-session-provider-switch-codex-pi / FR-01）/ SessionNotFoundError。
+ //   (2) reloadWithConfig：resume + 新 systemPrompt（preset+append）+ 新 providerConfig
+ //       （layer 0 env 注入）+ 切换轮 prompt 喂入（status/currentRunId/claimToken）；
+ //       profile=null / providerConfig=null = 保持现状；切到无人格清空；失败回滚。
+@@ -17,6 +18,9 @@
+ //   (5) 持久化：reload 后 snapshotPersistable 带 systemPrompt/providerConfig 快照；
+ //       restoreAndReconnect 用快照重建 env + systemPrompt；旧 sessions.json 无 config
+ //       字段缺省容错（design §9）。
++//   (6) task-03（2026-09-11-session-provider-switch-codex-pi / FR-01 / FR-05）：
++//       codex/pi reload 文件层内核——ForReload 写盘 + env 合并 + codex 迁移钩子
++//       三联触发条件矩阵（详见下方 describe 头注释）。
+ //
+ // 策略（对齐 session-manager-reload-provider.test.ts）：
+ //   - mock driver（start 每次返回新 fake 句柄便于断言替换；consume 捕获回调注入
+@@ -26,8 +30,11 @@
+ //   - AAA 结构；断言真实副作用（state 替换 / start 调用参数 / close 调用），
+ //     不 mock 被测方法自身（markPendingConfigSwitch 状态机用 spy 替身 reloadWithConfig
+ //     ——被测对象是标记路由本身）。
++//   - codex reload 用例（task-06）：vi.mock codex-settings 的 migrateCodexThreadFromHost
++//     （钩子会扫宿主 ~/.codex/sessions——本机实测 155 rollout，task-03 观察项 CODEX-1，
++//     用例不得依赖宿主真状态）+ vi.stubEnv SILLYHUB_DAEMON_DIR 隔离 ForReload 写盘。
+ 
+-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
++import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+@@ -44,6 +51,8 @@ import {
+   SessionNotActiveError,
+   SessionNotFoundError,
+ } from '../../src/interactive/types.js';
++// vi.mock 已 hoist，import 拿到 mock 版本（migrateCodexThreadFromHost 断言载体）。
++import { migrateCodexThreadFromHost } from '../../src/codex-settings.js';
+ import type { ProviderConfig } from '../../src/types.js';
+ import type {
+   ClaudeSdkDriver,
+@@ -52,6 +61,20 @@ import type {
+ } from '../../src/interactive/claude-sdk-driver.js';
+ import type { InteractiveDriver } from '../../src/interactive/driver.js';
+ 
++// task-06（2026-09-11-session-provider-switch-codex-pi）：mock codex 迁移钩子——
++// migrateCodexThreadFromHost 扫宿主 ~/.codex/sessions（真实只读扫描，本机 155
++// rollout），用例不得依赖宿主真状态（TaskCard task-03 观察项）。默认返 false
++// （无命中降级语义，R-01）；命中分支断言调用参数（threadId + 确定性派生路径）。
++// 其余导出保留 actual（writeCodexHome / mirrorCodexHostAuth 不受影响——ForReload
++// 仍走真实写盘）。
++vi.mock('../../src/codex-settings.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../src/codex-settings.js')>();
++  return {
++    ...actual,
++    migrateCodexThreadFromHost: vi.fn(async () => false),
++  };
++});
++
+ // ── 辅助构造（对齐 session-manager-reload-provider.test.ts）────────────────────
+ 
+ /** claude mock driver：每次 start 返回新 fakeQuery；consume 捕获回调供事件注入。 */
+@@ -218,6 +241,26 @@ function newProviderConfig(baseUrl = 'https://new.example.com'): ProviderConfig
+   };
+ }
+ 
++/** codex 供应商 fixture（task-06：codex 走通 reload 用，anthropic 直连形态门槛足）。 */
++function codexProviderConfig(): ProviderConfig {
++  return {
++    agent_kind: 'codex',
++    api_key: 'sk-codex-rl',
++    base_url: 'https://codex-rl.example/v1',
++    model: 'glm-4.7',
++  };
++}
++
++/** pi 自定义端点 fixture（task-06：pi 走通 reload 用）。 */
++function piProviderConfig(): ProviderConfig {
++  return {
++    agent_kind: 'pi',
++    api_key: 'sk-pi-rl',
++    base_url: 'https://pi-rl.example/v1',
++    model: 'kimi-k2',
++  };
++}
++
+ /** 切换 payload fixture（design §7.2 SessionSwitchConfigPayload）。 */
+ function switchPayload(overrides: Partial<{
+   runId: string;
+@@ -379,18 +422,50 @@ describe('task-08 / reload 内核抽取回归（reloadWithProvider 零语义漂
+     expect(mock.closeSpyAt(0)).toHaveBeenCalledTimes(0);
+   });
+ 
+-  it('REG-4: provider 非 claude → reloadWithProvider 仍抛 not-yet-supported（既有契约保留）', async () => {
+-    // Arrange
+-    const mock = makeMockClaudeDriver();
+-    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+-    await sm.create({ ...BASE_INPUT });
+-    const state = readState(sm, BASE_INPUT.sessionId)!;
+-    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
+-
+-    // Act + Assert
+-    await expect(
+-      sm.reloadWithProvider(BASE_INPUT.sessionId, null),
+-    ).rejects.toThrow(/provider codex not yet supported/);
++  it('REG-4: provider=codex → reload 走通（task-03 删 claude-only 守卫，FR-01 / D-003@v1）', async () => {
++    // Arrange：codex 会话（白盒改 provider，state.driver 仍是 claude mock——内核经
++    // state.driver 路由，驱动形态对断言无影响）。task-06 改写：原「非 claude 抛
++    // not-yet-supported」守卫已删，断言强度升级为 codex 走通全链（env 合并 + 迁移
++    // 钩子 + 会话不破坏），不低于原抛错断言。
++    const tmpRoot = mkdtempSync(join(tmpdir(), 'sm-reg4-'));
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
++    vi.mocked(migrateCodexThreadFromHost).mockClear();
++    try {
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++      await sm.create({ ...BASE_INPUT });
++      // 内核必需态：agentSessionId（thread id）+ 首 turn 收尾（active）。
++      mock.emitMessage(systemInitMessage('thread-reg4'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++      const state = readState(sm, BASE_INPUT.sessionId)!;
++      (state as { provider: 'claude' | 'codex' }).provider = 'codex';
++
++      // Act：切到 codex 平台供应商（宿主起步——oldEnv 无 CODEX_HOME，触发迁移钩子）。
++      await sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig());
++
++      // Assert —— reload 走通：start 二次 + resume=threadId。
++      expect(mock.driver.start).toHaveBeenCalledTimes(2);
++      expect(mock.startCalls[1].opts['resume']).toBe('thread-reg4');
++      // 文件层 env 合并生效：ForReload 写盘 + CODEX_HOME 注入 start env。
++      const reloadEnv = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
++      const codexHome = join(tmpRoot, 'codex', BASE_INPUT.sessionId);
++      expect(reloadEnv['CODEX_HOME']).toBe(codexHome);
++      expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toContain('sk-codex-rl');
++      expect(readFileSync(join(codexHome, 'config.toml'), 'utf-8')).toContain(
++        'base_url = "https://codex-rl.example/v1"',
++      );
++      // 迁移钩子触发：threadId + 确定性派生路径（FR-05 三联条件全满足）。
++      expect(migrateCodexThreadFromHost).toHaveBeenCalledWith('thread-reg4', codexHome);
++      // 会话不破坏：active + providerConfig 更新为 codex 供应商。
++      const after = readState(sm, BASE_INPUT.sessionId)!;
++      expect(after.status).toBe('active');
++      expect(after.providerConfig?.agent_kind).toBe('codex');
++    } finally {
++      vi.unstubAllEnvs();
++      rmSync(tmpRoot, { recursive: true, force: true });
++    }
+   });
+ 
+   it('REG-5: session 不存在 → SessionNotFoundError', async () => {
+@@ -824,6 +899,134 @@ describe('task-08 / reloadWithConfig Codex 路径（NG-02：人格不注入）',
+   });
+ });
+ 
++// ── (6) task-03（2026-09-11-session-provider-switch-codex-pi）：codex/pi reload 文件层内核 ──
++//
++// 迁移钩子三联触发条件矩阵（FR-05）：state.provider==='codex' && providerConfig!=null
++// && !oldEnv['CODEX_HOME'] && state.agentSessionId——REG-4 已锁全满足态（触发），
++// 此处锁三个反例（任一缺不触发）+ pi 无钩子但 env 合并照走。写盘落点经
++// SILLYHUB_DAEMON_DIR 隔离（ForReload 真 IO）；迁移钩子 mock（宿主 ~/.codex 零依赖）。
++
++describe('task-03 / codex 迁移钩子三联触发条件 + pi 文件层 reload（FR-01 / FR-05）', () => {
++  let tmpRoot: string;
++
++  beforeEach(() => {
++    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-rl-kernel-'));
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
++    vi.mocked(migrateCodexThreadFromHost).mockClear();
++  });
++
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    rmSync(tmpRoot, { recursive: true, force: true });
++  });
++
++  /** 白盒构造 codex 会话（claude mock driver + provider 改 codex + 首 turn 完成）。 */
++  async function setupCodexSession(
++    mock: ReturnType<typeof makeMockClaudeDriver>,
++    sm: SessionManager,
++    threadId: string,
++  ): Promise<void> {
++    await sm.create({ ...BASE_INPUT });
++    mock.emitMessage(systemInitMessage(threadId));
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
++  }
++
++  it('HOOK-2: oldEnv 已带 CODEX_HOME（此前已在平台供应商上）→ 不迁移，ForReload 写盘换新目录', async () => {
++    // Arrange
++    const mock = makeMockClaudeDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await setupCodexSession(mock, sm, 'thread-h2');
++    // 模拟「已在平台供应商上」：reload 前 env 快照带 CODEX_HOME（宿主起步前提不成立）。
++    // （create 未传 env → state.env undefined，此处白盒整体注入 env 快照。）
++    readState(sm, BASE_INPUT.sessionId)!.env = { CODEX_HOME: '/prior/codex-h2' };
++
++    // Act：供应商→供应商切换。
++    await sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig());
++
++    // Assert —— 钩子不触发（宿主迁移只为「宿主起步首次切供应商」）。
++    expect(migrateCodexThreadFromHost).not.toHaveBeenCalled();
++    // 文件层照走：分支一写盘成功 → env CODEX_HOME 换到新确定性目录（非 prior 值）。
++    const reloadEnv = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
++    const codexHome = join(tmpRoot, 'codex', BASE_INPUT.sessionId);
++    expect(reloadEnv['CODEX_HOME']).toBe(codexHome);
++    expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
++  });
++
++  it('HOOK-3: providerConfig=null 切回本机 → 不迁移 + env 无 CODEX_HOME（分支五，宿主起步）', async () => {
++    // Arrange
++    const mock = makeMockClaudeDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await setupCodexSession(mock, sm, 'thread-h3');
++
++    // Act：切回本机默认。
++    await sm.reloadWithProvider(BASE_INPUT.sessionId, null);
++
++    // Assert —— 钩子只在「切到平台供应商」时触发（providerConfig != null）。
++    expect(migrateCodexThreadFromHost).not.toHaveBeenCalled();
++    // ForReload 分支五：宿主起步（无 prior CODEX_HOME）→ {} → env 不带文件层键。
++    const reloadEnv = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
++    expect(reloadEnv['CODEX_HOME']).toBeUndefined();
++    expect(existsSync(join(tmpRoot, 'codex'))).toBe(false);
++    expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
++    expect(readState(sm, BASE_INPUT.sessionId)!.providerConfig).toBeNull();
++  });
++
++  it('HOOK-4: agentSessionId 缺失（首 turn 未完成）→ 不迁移 + reload 抛 missing agentSessionId', async () => {
++    // Arrange
++    const mock = makeMockClaudeDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await sm.create({ ...BASE_INPUT });
++    // 不 emit system/init → agentSessionId undefined（钩子在守卫之前执行——若三联
++    // 条件不含 agentSessionId，此刻就会被调，断言即失败）。
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
++
++    // Act + Assert：内核守卫抛错（无 jsonl 可 resume），钩子未触发。
++    await expect(
++      sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig()),
++    ).rejects.toThrow(/missing agentSessionId/);
++    expect(migrateCodexThreadFromHost).not.toHaveBeenCalled();
++    // R-01：会话不破坏。
++    expect(sm.get(BASE_INPUT.sessionId)?.status).toBe('active');
++  });
++
++  it('PI-K1: pi 会话切自定义端点 → PI_CODING_AGENT_DIR 合并 + 三文件落盘 + codex 钩子不触发（codex-only）', async () => {
++    // Arrange：白盒构造 pi 会话（pi 历史在 daemon 自管 --session-dir，无迁移钩子）。
++    const mock = makeMockClaudeDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await sm.create({ ...BASE_INPUT });
++    mock.emitMessage(systemInitMessage('thread-pi-k1'));
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: 'claude' | 'codex' | 'pi' }).provider = 'pi';
++
++    // Act
++    await sm.reloadWithProvider(BASE_INPUT.sessionId, piProviderConfig());
++
++    // Assert —— pi 无迁移钩子（FR-05 仅 codex；pi 会话历史不受 PI_CODING_AGENT_DIR 影响）。
++    expect(migrateCodexThreadFromHost).not.toHaveBeenCalled();
++    // 文件层 env 合并：ForReload 分支一 → PI_CODING_AGENT_DIR 指向确定性目录。
++    const reloadEnv = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
++    const piDir = join(tmpRoot, 'pi', BASE_INPUT.sessionId);
++    expect(reloadEnv['PI_CODING_AGENT_DIR']).toBe(piDir);
++    expect(readFileSync(join(piDir, 'settings.json'), 'utf-8')).toContain('kimi-k2');
++    expect(existsSync(join(piDir, 'auth.json'))).toBe(true);
++    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
++    // 会话不破坏。
++    const after = readState(sm, BASE_INPUT.sessionId)!;
++    expect(after.status).toBe('active');
++    expect(after.providerConfig?.agent_kind).toBe('pi');
++  });
++});
++
+ // ── (5) 持久化恢复：config 快照落盘 + 旧 sessions.json 容错 ────────────────────
+ 
+ describe('task-08 / 持久化 config 快照（design §5 Wave2 / §9）', () => {
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts b/sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts
+index 7f59cc1c6..aa03c0735 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts
+@@ -15,6 +15,10 @@
+ //   (5) reload 期间 inject 并发：driver.start await 窗口内 inject 不抛
+ //       SessionNotActiveError，消息 push 进 state.inputQueue 不丢（_pendingInjectCount
+ //       排队语义不引入新锁）。
++//   (6) task-06（2026-09-11-session-provider-switch-codex-pi / FR-01）：codex/pi
++//       走通 reload（边界-2 改写——task-03 删 claude-only 守卫后内核 provider-generic，
++//       文件层 env 合并经 ForReload 真写盘，SILLYHUB_DAEMON_DIR 隔离；迁移钩子
++//       mock——宿主 ~/.codex/sessions 零依赖，TaskCard task-03 观察项）。
+ //
+ // 与既有测试分工（不重复）：
+ //   - session-manager-pending-switch.test.ts：task-07 markPendingSwitch 三分支 +
+@@ -31,7 +35,10 @@
+ //     与测试环境无关（buildSpawnEnv 内硬编码赋值）。
+ //   - 用 flushMicrotasks（setImmediate）让 fire-and-forget 的 _runConsume 微任务跑完。
+ 
+-import { describe, it, expect, vi } from 'vitest';
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
+ import type {
+   Query,
+   SDKMessage,
+@@ -40,6 +47,8 @@ import type {
+ } from '@anthropic-ai/claude-agent-sdk';
+ import { SessionManager } from '../../src/interactive/session-manager.js';
+ import { SessionNotFoundError } from '../../src/interactive/types.js';
++// vi.mock 已 hoist，import 拿到 mock 版本（migrateCodexThreadFromHost 断言载体）。
++import { migrateCodexThreadFromHost } from '../../src/codex-settings.js';
+ import type { ProviderConfig } from '../../src/types.js';
+ import type {
+   ClaudeSdkDriver,
+@@ -47,6 +56,18 @@ import type {
+   StartOptions,
+ } from '../../src/interactive/claude-sdk-driver.js';
+ 
++// task-06（2026-09-11-session-provider-switch-codex-pi）：mock codex 迁移钩子——
++// migrateCodexThreadFromHost 扫宿主 ~/.codex/sessions（本机实测 155 rollout，TaskCard
++// task-03 观察项 CODEX-1），用例不得依赖宿主真状态。默认返 false（R-01 降级语义）；
++// 其余导出保留 actual（ForReload 仍走真实写盘）。
++vi.mock('../../src/codex-settings.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../src/codex-settings.js')>();
++  return {
++    ...actual,
++    migrateCodexThreadFromHost: vi.fn(async () => false),
++  };
++});
++
+ // ── 辅助构造 ─────────────────────────────────────────────────────────────────
+ 
+ /**
+@@ -245,14 +266,36 @@ function readState(sm: SessionManager, sessionId: string) {
+   return store.get(sessionId) as
+     | {
+         query?: Query;
++        driverHandle?: { close?: () => void };
+         env?: NodeJS.ProcessEnv;
+         agentSessionId?: string;
+         pendingSwitch?: { providerConfig: ProviderConfig | null };
++        providerConfig?: ProviderConfig | null;
+         status: string;
+       }
+     | undefined;
+ }
+ 
++/** codex 供应商 fixture（task-06：codex 走通 reload 用，anthropic 直连形态门槛足）。 */
++function codexProviderConfig(): ProviderConfig {
++  return {
++    agent_kind: 'codex',
++    api_key: 'sk-codex-rp',
++    base_url: 'https://codex-rp.example/v1',
++    model: 'glm-4.7',
++  };
++}
++
++/** pi 自定义端点 fixture（task-06：pi 走通 reload 用）。 */
++function piProviderConfig(): ProviderConfig {
++  return {
++    agent_kind: 'pi',
++    api_key: 'sk-pi-rp',
++    base_url: 'https://pi-rp.example/v1',
++    model: 'kimi-k2',
++  };
++}
++
+ // ── AC-1：成功 reload（close + start + 替换 state + 重启 consume + 清 pendingSwitch）──
+ 
+ describe('task-08 / reloadWithProvider 成功路径（FR-05 / D-002@v1）', () => {
+@@ -584,6 +627,21 @@ describe('task-08 / reloadWithProvider 成功路径（FR-05 / D-002@v1）', () =
+ // ── 边界场景 ─────────────────────────────────────────────────────────────────
+ 
+ describe('task-08 / reloadWithProvider 边界场景', () => {
++  let tmpRoot: string;
++
++  beforeEach(() => {
++    // task-06：codex/pi 走通用例的 ForReload 写盘隔离（config.ts daemonStateDir 懒
++    // 求值，per-session codex/pi 目录挂 tmpRoot 下，零触碰真实 ~/.sillyhub）。
++    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-rp-'));
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
++    vi.mocked(migrateCodexThreadFromHost).mockClear();
++  });
++
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    rmSync(tmpRoot, { recursive: true, force: true });
++  });
++
+   it('边界-1: session 不存在 → 抛 SessionNotFoundError', async () => {
+     const mock = makeMockDriver();
+     const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+@@ -593,18 +651,76 @@ describe('task-08 / reloadWithProvider 边界场景', () => {
+     );
+   });
+ 
+-  it('边界-2: provider 非 claude → 抛错（codex reload 未支持）', async () => {
++  it('边界-2: provider=codex → reload 走通（task-03 删 claude-only 守卫，FR-01 / D-003@v1）', async () => {
++    // Arrange：白盒改 provider（绕过 create 的 driver 路由，内核经 state.driver
++    // 路由到 claude mock，驱动形态对断言无影响）。task-06 改写：原「非 claude 抛
++    // not-yet-supported」守卫已删，断言升级为 codex 走通全链（文件层 env 合并 +
++    // 迁移钩子触发 + resume + 会话不破坏），强度不低于原抛错断言。
+     const mock = makeMockDriver();
+     const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+ 
+-    await sm.create({ ...BASE_INPUT, provider: 'claude' as const });
+-    // 白盒把 provider 改成 codex（绕过 create 的 driver 路由，单独测 reload 守卫）。
++    await sm.create({ ...BASE_INPUT });
++    // 内核必需态：agentSessionId（thread id，resume key）+ 首 turn 收尾（active）。
++    mock.emitMessage(systemInitMessage('thread-b2'));
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
+     const state = readState(sm, BASE_INPUT.sessionId)!;
+     (state as { provider: 'claude' | 'codex' }).provider = 'codex';
+ 
+-    await expect(
+-      sm.reloadWithProvider(BASE_INPUT.sessionId, null),
+-    ).rejects.toThrow(/provider codex not yet supported/);
++    // Act：切到 codex 平台供应商（宿主起步——oldEnv 无 CODEX_HOME，触发迁移钩子）。
++    await sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig());
++
++    // Assert —— reload 走通：start 二次 + resume=threadId + 句柄替换（非 claude 走
++    // driverHandle 承载）。
++    expect(mock.driver.start).toHaveBeenCalledTimes(2);
++    expect(mock.startCalls[1].opts.resume).toBe('thread-b2');
++    // 文件层 env 合并：ForReload 写盘 + CODEX_HOME 注入 start env（确定性派生路径）。
++    const reloadEnv = mock.startCalls[1].opts.env as NodeJS.ProcessEnv;
++    const codexHome = join(tmpRoot, 'codex', BASE_INPUT.sessionId);
++    expect(reloadEnv['CODEX_HOME']).toBe(codexHome);
++    expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toContain('sk-codex-rp');
++    expect(readFileSync(join(codexHome, 'config.toml'), 'utf-8')).toContain(
++      'base_url = "https://codex-rp.example/v1"',
++    );
++    // 迁移钩子触发（FR-05 三联条件全满足：codex + 非 null + 宿主起步 + threadId）。
++    expect(migrateCodexThreadFromHost).toHaveBeenCalledWith('thread-b2', codexHome);
++    // 会话不破坏：active + providerConfig 更新。
++    const after = readState(sm, BASE_INPUT.sessionId)!;
++    expect(after.status).toBe('active');
++    expect(after.driverHandle).toBeDefined();
++    expect(after.providerConfig?.agent_kind).toBe('codex');
++  });
++
++  it('边界-2b: provider=pi 切自定义端点 → reload 走通（PI_CODING_AGENT_DIR 合并 + 无迁移钩子）', async () => {
++    const mock = makeMockDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++
++    await sm.create({ ...BASE_INPUT });
++    mock.emitMessage(systemInitMessage('thread-b2b'));
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: 'claude' | 'codex' | 'pi' }).provider = 'pi';
++
++    // Act
++    await sm.reloadWithProvider(BASE_INPUT.sessionId, piProviderConfig());
++
++    // Assert —— pi 走通 + 文件层 env 合并（三文件真写盘）。
++    expect(mock.driver.start).toHaveBeenCalledTimes(2);
++    const reloadEnv = mock.startCalls[1].opts.env as NodeJS.ProcessEnv;
++    const piDir = join(tmpRoot, 'pi', BASE_INPUT.sessionId);
++    expect(reloadEnv['PI_CODING_AGENT_DIR']).toBe(piDir);
++    expect(readFileSync(join(piDir, 'settings.json'), 'utf-8')).toContain('kimi-k2');
++    expect(existsSync(join(piDir, 'auth.json'))).toBe(true);
++    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
++    // 迁移钩子 codex-only（pi 历史在 daemon 自管 --session-dir，不迁）。
++    expect(migrateCodexThreadFromHost).not.toHaveBeenCalled();
++    // 会话不破坏。
++    const after = readState(sm, BASE_INPUT.sessionId)!;
++    expect(after.status).toBe('active');
++    expect(after.providerConfig?.agent_kind).toBe('pi');
+   });
+ 
+   it('边界-3: agentSessionId 缺失（首 turn system/init 未到达）→ 抛错不破坏会话', async () => {
+diff --git a/sillyhub-daemon/tests/interactive/session-recovery.test.ts b/sillyhub-daemon/tests/interactive/session-recovery.test.ts
+index d54bbaba5..519010184 100644
+--- a/sillyhub-daemon/tests/interactive/session-recovery.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-recovery.test.ts
+@@ -10,7 +10,10 @@
+ //   - 恢复后 inject：新 runId，InputQueue.push 被调（resume Query 续 turn）。
+ //   - persist timing：create 完成 + agentSessionId 写入后 → flush；end/fail → 记录从落盘集合移除。
+ 
+-import { describe, it, expect, vi } from 'vitest';
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
+ import type {
+   Query,
+   SDKMessage,
+@@ -24,12 +27,28 @@ import {
+   type PersistedSessionRecord,
+   type SessionStorePersistence,
+ } from '../../src/interactive/types.js';
++// vi.mock 已 hoist，import 拿到 mock 版本（mirrorCodexHostAuth 断言载体）。
++import { mirrorCodexHostAuth } from '../../src/codex-settings.js';
+ import type {
+   ClaudeSdkDriver,
+   InteractiveDriverCallbacks,
+   StartOptions,
+ } from '../../src/interactive/claude-sdk-driver.js';
+ import { ClaudeExecutableNotFoundError } from '../../src/interactive/claude-sdk-driver.js';
++import type { InteractiveDriver } from '../../src/interactive/driver.js';
++
++// task-06（2026-09-11-session-provider-switch-codex-pi）：mock codex null 镜像——
++// mirrorCodexHostAuth 读宿主 ~/.codex（os.homedir），restore 探测用例不得依赖宿主
++// 真状态；镜像文件级行为由 tests/provider-file-settings-reload.test.ts 直测锁定，
++// 此处只断言「restore 探测目录存在 → 调镜像 + 注 CODEX_HOME」接线。其余导出保留
++// actual（writeCodexHome 真写盘——ForReload happy path 产物断言不受影响）。
++vi.mock('../../src/codex-settings.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../src/codex-settings.js')>();
++  return {
++    ...actual,
++    mirrorCodexHostAuth: vi.fn(async () => {}),
++  };
++});
+ 
+ // ── 辅助 ──────────────────────────────────────────────────────────────────────
+ 
+@@ -440,3 +459,209 @@ describe('task-08：恢复保留语义锚点（lastActiveAt + reconnecting 不
+     expect(sm.snapshotPersistable()).toEqual([]);
+   });
+ });
++
++// ── task-04（2026-09-11-session-provider-switch-codex-pi / FR-01 FR-02）：restore 自愈 ──
++//
++// 恢复路径 codex/pi 注文件层 env（design Wave 2 步骤 4，Grill 附带发现收编）：
++// 不修则「切换供应商后 daemon 重启 → 恢复会话丢 CODEX_HOME / PI_CODING_AGENT_DIR
++// → 静默回宿主凭证」。四态矩阵：
++//   1. providerConfig 非 null happy（codex + pi）——ForReload 重写 per-session 目录
++//      + 注文件层 env（priorEnv=undefined，恢复时无旧 env）；
++//   2. ForReload IO 失败 → 返 {} 降级（env 无文件层键，恢复主路径不 fail）；
++//   3. codex null + 确定性目录存在 —— mirrorCodexHostAuth 幂等重镜像 + 注
++//      CODEX_HOME（thread 历史保住，Grill 复审 P2-3）；
++//   4. 目录不存在 → 零动作（行为与现状逐字一致）。
++// 隔离：SILLYHUB_DAEMON_DIR → tmpRoot（ForReload 写盘零触碰真实 ~/.sillyhub）；
++// mirrorCodexHostAuth mock（宿主 ~/.codex 零依赖，接线断言 + 文件级归新测试文件）。
++
++describe('task-04 / restore 自愈：codex·pi 恢复注文件层 env（FR-01 / FR-02）', () => {
++  let tmpRoot: string;
++
++  /** codex/pi 通用 mock driver（InteractiveDriver 形态：start 返回 {close} 句柄）。 */
++  function makeMockAgentDriver() {
++    const startCalls: Array<{ input: unknown; opts: Record<string, unknown> }> = [];
++    const driver = {
++      start: vi.fn(async (input: AsyncIterable<unknown>, opts: Record<string, unknown>) => {
++        startCalls.push({ input, opts });
++        return { close: vi.fn(() => {}) };
++      }),
++      consume: vi.fn(async () => {}),
++      interrupt: vi.fn(async () => true),
++    } as unknown as InteractiveDriver;
++    return { driver, startCalls };
++  }
++
++  function codexRestoreRecord(): PersistedSessionRecord {
++    return {
++      sessionId: 'sess-rc',
++      leaseId: 'lease-rc',
++      agentSessionId: 'thread-rc',
++      cwd: 'C:\\proj',
++      provider: 'codex',
++      turnCount: 2,
++      lastActiveAt: 1_700_000_000_000,
++      pathToAgentExecutable: 'C:\\bin\\codex.cmd',
++      providerConfig: {
++        agent_kind: 'codex',
++        api_key: 'sk-codex-restore',
++        base_url: 'https://restore.example/v1',
++        model: 'glm-4.7',
++      },
++    };
++  }
++
++  beforeEach(() => {
++    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-restore-'));
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
++    vi.mocked(mirrorCodexHostAuth).mockClear();
++  });
++
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    rmSync(tmpRoot, { recursive: true, force: true });
++  });
++
++  it('RESTORE-1: codex providerConfig 非 null → 重写 per-session 目录 + env 注 CODEX_HOME', async () => {
++    const codex = makeMockAgentDriver();
++    const claude = makeMockDriver();
++    const sm = new SessionManager({
++      driver: claude.driver,
++      drivers: { codex: codex.driver },
++      ...makeDeps(),
++    });
++
++    await sm.restoreAndReconnect(codexRestoreRecord());
++
++    // 恢复 driver.start 带 resume key + 文件层 env（确定性派生路径）。
++    expect(codex.startCalls).toHaveLength(1);
++    expect(codex.startCalls[0].opts['resume']).toBe('thread-rc');
++    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
++    const codexHome = join(tmpRoot, 'codex', 'sess-rc');
++    expect(env['CODEX_HOME']).toBe(codexHome);
++    // 目录重写：供应商凭证产物落盘（重启后不静默回宿主凭证）。
++    expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toContain(
++      'sk-codex-restore',
++    );
++    // 恢复不因文件层写盘改变状态机。
++    expect(sm.get('sess-rc')?.status).toBe('reconnecting');
++  });
++
++  it('RESTORE-2: pi providerConfig 非 null → 重写 pi 目录三文件 + env 注 PI_CODING_AGENT_DIR', async () => {
++    const pi = makeMockAgentDriver();
++    const claude = makeMockDriver();
++    const sm = new SessionManager({
++      driver: claude.driver,
++      drivers: { pi: pi.driver },
++      ...makeDeps(),
++    });
++
++    await sm.restoreAndReconnect({
++      sessionId: 'sess-rp',
++      leaseId: 'lease-rp',
++      agentSessionId: 'thread-rp',
++      cwd: 'C:\\proj',
++      provider: 'pi',
++      turnCount: 1,
++      lastActiveAt: 1_700_000_000_000,
++      providerConfig: {
++        agent_kind: 'pi',
++        api_key: 'sk-pi-restore',
++        base_url: 'https://pi-restore.example/v1',
++        model: 'kimi-k2',
++      },
++    });
++
++    expect(pi.startCalls).toHaveLength(1);
++    const env = pi.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
++    const piDir = join(tmpRoot, 'pi', 'sess-rp');
++    expect(env['PI_CODING_AGENT_DIR']).toBe(piDir);
++    expect(readFileSync(join(piDir, 'settings.json'), 'utf-8')).toContain('kimi-k2');
++    expect(existsSync(join(piDir, 'auth.json'))).toBe(true);
++    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
++    expect(sm.get('sess-rp')?.status).toBe('reconnecting');
++  });
++
++  it('RESTORE-3: ForReload IO 失败（codex 段被文件占用）→ 返 {} 降级，恢复主路径不 fail（Grill P2-2）', async () => {
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    // priorEnv=undefined（restore 无旧 env）取不到 prior 键 → 返 {} 降级。
++    writeFileSync(join(tmpRoot, 'codex'), 'not-a-dir');
++    const codex = makeMockAgentDriver();
++    const claude = makeMockDriver();
++    const sm = new SessionManager({
++      driver: claude.driver,
++      drivers: { codex: codex.driver },
++      ...makeDeps(),
++    });
++
++    await sm.restoreAndReconnect(codexRestoreRecord());
++
++    // 降级：env 无文件层键（按宿主现状运行，error 可归因），但恢复照常完成。
++    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
++    expect(env['CODEX_HOME']).toBeUndefined();
++    expect(sm.get('sess-rc')?.status).toBe('reconnecting');
++    expect(errSpy).toHaveBeenCalledWith(
++      'provider_file_reload_codex_failed',
++      expect.objectContaining({ session_key: 'sess-rc' }),
++    );
++  });
++
++  it('RESTORE-4: codex null + 确定性目录存在 → mirrorCodexHostAuth 幂等重镜像 + 注 CODEX_HOME（Grill P2-3）', async () => {
++    // 切回本机的会话：persistence 仅落盘非 null providerConfig → 记录无该字段，
++    // 但 per-session 目录存在 = 此前在平台供应商上（thread 历史在其中）。
++    const codexHome = join(tmpRoot, 'codex', 'sess-rn');
++    mkdirSync(codexHome, { recursive: true });
++    writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-provider-era"}');
++    const codex = makeMockAgentDriver();
++    const claude = makeMockDriver();
++    const sm = new SessionManager({
++      driver: claude.driver,
++      drivers: { codex: codex.driver },
++      ...makeDeps(),
++    });
++
++    await sm.restoreAndReconnect({
++      sessionId: 'sess-rn',
++      leaseId: 'lease-rn',
++      agentSessionId: 'thread-rn',
++      cwd: 'C:\\proj',
++      provider: 'codex',
++      turnCount: 2,
++      lastActiveAt: 1_700_000_000_000,
++      // 无 providerConfig（null 切换后的落盘形态）。
++    });
++
++    // null 切换语义：宿主凭证重镜像（幂等）+ env 保住旧目录（thread 历史保住）。
++    expect(mirrorCodexHostAuth).toHaveBeenCalledTimes(1);
++    expect(mirrorCodexHostAuth).toHaveBeenCalledWith(codexHome);
++    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
++    expect(env['CODEX_HOME']).toBe(codexHome);
++    expect(sm.get('sess-rn')?.status).toBe('reconnecting');
++  });
++
++  it('RESTORE-5: codex null + 目录不存在 → 零动作（行为与现状逐字一致）', async () => {
++    const codex = makeMockAgentDriver();
++    const claude = makeMockDriver();
++    const sm = new SessionManager({
++      driver: claude.driver,
++      drivers: { codex: codex.driver },
++      ...makeDeps(),
++    });
++
++    await sm.restoreAndReconnect({
++      sessionId: 'sess-rx',
++      leaseId: 'lease-rx',
++      agentSessionId: 'thread-rx',
++      cwd: 'C:\\proj',
++      provider: 'codex',
++      turnCount: 1,
++      lastActiveAt: 1_700_000_000_000,
++    });
++
++    // 不镜像、不注 env、不建目录（宿主起步会话恢复 = 回宿主 ~/.codex 现状）。
++    expect(mirrorCodexHostAuth).not.toHaveBeenCalled();
++    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
++    expect(env['CODEX_HOME']).toBeUndefined();
++    expect(existsSync(join(tmpRoot, 'codex'))).toBe(false);
++    expect(sm.get('sess-rx')?.status).toBe('reconnecting');
++  });
++});
+diff --git a/sillyhub-daemon/tests/provider-file-settings-reload.test.ts b/sillyhub-daemon/tests/provider-file-settings-reload.test.ts
+new file mode 100644
+index 000000000..f940ac53d
+--- /dev/null
++++ b/sillyhub-daemon/tests/provider-file-settings-reload.test.ts
+@@ -0,0 +1,495 @@
++// tests/provider-file-settings-reload.test.ts
++// change 2026-09-11-session-provider-switch-codex-pi / task-06（FR-01 / FR-02 / FR-05 /
++// D-001@v1 / R-05）。锁 task-02 三件产物（sillyhub-daemon/src）：
++//
++//   1. applyProviderFileSettingsForReload 全分派矩阵（R-05 失败兜底内聚在返回值）：
++//      分支一（非 null 成功）——codex 门槛足写盘返 {CODEX_HOME} 单键 / pi 自定义端点
++//      返 {PI_CODING_AGENT_DIR} / pi 官方端点返 {}（D-008 env 层接管，prior 键不兜）/
++//      claude·未知 kind 返 {}；
++//      分支二（IO 失败）——codex/pi 返 priorEnv 对应文件层键（等同未切）；priorEnv
++//      undefined（restore 路径）取不到键 → {} 降级（Grill 复审 P2-2）；
++//      分支三（门槛缺）——codex/pi 返 priorEnv 对应键（P2-1：异常配置等同未切而非
++//      丢文件层 env）；无 prior 键 → {}；
++//      分支四（显式 null 切回本机 + prior CODEX_HOME）——调 mirrorCodexHostAuth，
++//      无论镜像成败都返 {CODEX_HOME: prior}（thread 历史保住，镜像失败=目录留旧
++//      供应商产物=等同未切）；
++//      分支五（null 无 prior CODEX_HOME / pi kind null / undefined absent）——返 {}。
++//      全矩阵任何分支不抛。
++//   2. mirrorCodexHostAuth 三态（FR-02 null 切换镜像）：宿主两文件存在 → 拷入覆盖
++//      per-session 产物 / 宿主无 → 删 per-session 同名两文件 / IO 失败 → error 不抛。
++//   3. migrateCodexThreadFromHost 三态（FR-05 / R-01）：rollout 首行会话 id 命中 →
++//      按 sessions/ 相对路径拷入返 true（payload.id 实测形态 + payload.session_id
++//      TaskCard 锚形态双兼容锁）/ 无命中 → false / 宿主缺目录 → false。
++//
++// 隔离（TaskCard task-03 观察项 CODEX-1 教训——勿依赖宿主真状态）：
++//   - SILLYHUB_DAEMON_DIR → tmpRoot（config.ts daemonStateDir 懒求值，per-session
++//     codex/pi 目录挂其下，零触碰真实 ~/.sillyhub）；
++//   - vi.mock('node:os') 覆写 homedir → fakeHome（codex-settings.ts hostCodexHome 经
++//     os.homedir() 读 ~/.codex，宿主路径唯一入口，最小侵入；tmpdir 等其余导出保留
++//     actual）。fakeHome 每用例换新 tmp 目录，宿主 ~/.codex 真实 155 rollout 永不
++//     被扫描/读取。
++
++import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import {
++  existsSync,
++  mkdirSync,
++  mkdtempSync,
++  readFileSync,
++  rmSync,
++  writeFileSync,
++} from 'node:fs';
++
++// homedir 覆写锚：vi.mock 工厂 hoist 到 import 前，经 hoisted 可变 holder 让
++// beforeEach 换目录（工厂闭包读 holder.dir）。
++const hostHome = vi.hoisted(() => ({ dir: '' }));
++vi.mock('node:os', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:os')>();
++  return {
++    ...actual,
++    homedir: () => hostHome.dir,
++  };
++});
++
++// vi.mock 已 hoist，import 拿到 homedir 覆写后的模块图。
++import {
++  applyProviderFileSettingsForReload,
++  type ProviderFileSettingsReloadInput,
++} from '../src/provider-file-settings.js';
++import {
++  mirrorCodexHostAuth,
++  migrateCodexThreadFromHost,
++} from '../src/codex-settings.js';
++import type { ProviderConfig } from '../src/types.js';
++
++// ── 共用 fixture ──────────────────────────────────────────────────────────────
++
++/** 每用例独立的 daemon 状态根（vi.stubEnv 进 daemonStateDir 懒求值）。 */
++let tmpRoot: string;
++
++function stubbedRoot(): string {
++  return tmpRoot;
++}
++
++/** 宿主 codex 目录（fakeHome/.codex——homedir 覆写后的隔离宿主）。 */
++function hostCodex(): string {
++  return join(hostHome.dir, '.codex');
++}
++
++/** codex anthropic 直连形态（门槛满足：api_key/base_url 至少一项）。 */
++function codexAnthropicConfig(): ProviderConfig {
++  return {
++    agent_kind: 'codex',
++    api_key: 'sk-codex-reload',
++    base_url: 'https://reload.example/v1',
++    model: 'glm-4.7',
++  };
++}
++
++/** pi 自定义端点形态（base_url + api_key + model 齐）。 */
++function piCustomConfig(): ProviderConfig {
++  return {
++    agent_kind: 'pi',
++    api_key: 'sk-pi-reload',
++    base_url: 'https://pi-reload.example/v1',
++    model: 'kimi-k2',
++  };
++}
++
++function readJson(path: string): Record<string, unknown> {
++  return JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
++}
++
++/** ForReload 调用薄封装（默认 priorEnv=undefined 同 restore 路径）。 */
++function forReload(
++  overrides: Partial<ProviderFileSettingsReloadInput>,
++): Promise<Record<string, string>> {
++  return applyProviderFileSettingsForReload({
++    sessionKey: 'sess-rl',
++    provider: codexAnthropicConfig(),
++    daemonApiKey: null,
++    priorEnv: undefined,
++    ...overrides,
++  });
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  tmpRoot = mkdtempSync(join(tmpdir(), 'pfr-'));
++  hostHome.dir = mkdtempSync(join(tmpdir(), 'pfr-host-'));
++  vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
++});
++
++afterEach(() => {
++  vi.unstubAllEnvs();
++  rmSync(tmpRoot, { recursive: true, force: true });
++  rmSync(hostHome.dir, { recursive: true, force: true });
++});
++
++// ── 1. ForReload 分支一：非 null 成功（与 spawn 版同分派同产物）────────────────
++
++describe('ForReload 分支一：非 null 成功分派', () => {
++  it('codex 门槛足 → 写盘返 {CODEX_HOME: <root>/codex/<sessionKey>} 单键（产物=spawn 版）', async () => {
++    const env = await forReload({ sessionKey: 'sess-ok1' });
++
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-ok1');
++    expect(env).toEqual({ CODEX_HOME: codexHome });
++    const auth = readJson(join(codexHome, 'auth.json'));
++    expect(auth['OPENAI_API_KEY']).toBe('sk-codex-reload');
++    const toml = readFileSync(join(codexHome, 'config.toml'), 'utf-8');
++    expect(toml).toContain('base_url = "https://reload.example/v1"');
++    expect(toml).toContain('model_provider = "sillyhub"');
++  });
++
++  it('pi 自定义端点 → 写三文件返 {PI_CODING_AGENT_DIR: <root>/pi/<sessionKey>}', async () => {
++    const env = await forReload({
++      sessionKey: 'sess-okp',
++      provider: piCustomConfig(),
++    });
++
++    const piDir = join(stubbedRoot(), 'pi', 'sess-okp');
++    expect(env).toEqual({ PI_CODING_AGENT_DIR: piDir });
++    const settings = readJson(join(piDir, 'settings.json'));
++    expect(settings['defaultProvider']).toBe('sillyhub');
++    expect(settings['defaultModel']).toBe('kimi-k2');
++    expect(existsSync(join(piDir, 'auth.json'))).toBe(true);
++    expect(existsSync(join(piDir, 'models.json'))).toBe(true);
++  });
++
++  it('pi 官方端点（base_url 空）→ 返 {}（env 层接管，prior PI 键不兜底——R-06 切换语义）', async () => {
++    const env = await forReload({
++      sessionKey: 'sess-okp2',
++      provider: { agent_kind: 'pi', api_key: 'sk-official', model: 'm1' },
++      // 切官方端点 = 丢文件层凭证回 env 注入接管：prior PI 键不保留（否则旧
++      // auth.json 文件凭证会压过 env 层——spike B1 压制方向）。
++      priorEnv: { PI_CODING_AGENT_DIR: '/prior/pi-official' },
++    });
++
++    expect(env).toEqual({});
++    expect(existsSync(join(stubbedRoot(), 'pi'))).toBe(false);
++  });
++
++  it('claude / 缺省 / 未知 kind → 返 {}（claude settings.json 链路不在此处）', async () => {
++    for (const provider of [
++      { agent_kind: 'claude', api_key: 'k', base_url: 'u' },
++      { api_key: 'k', base_url: 'u' },
++      { agent_kind: 'cursor', api_key: 'k' },
++    ] as ProviderConfig[]) {
++      expect(
++        await forReload({ sessionKey: 'sess-kind', provider, priorEnv: { CODEX_HOME: '/prior-c' } }),
++      ).toEqual({});
++    }
++    expect(existsSync(join(stubbedRoot(), 'codex'))).toBe(false);
++    expect(existsSync(join(stubbedRoot(), 'pi'))).toBe(false);
++  });
++});
++
++// ── 2. ForReload 分支二/三：非 null 失败兜底（R-05 核心）───────────────────────
++
++describe('ForReload 分支二：写盘 IO 失败 → 返 priorEnv 文件层键（等同未切）', () => {
++  it('codex mkdir IO 失败（codex 段被同名文件占用）+ priorEnv 有 CODEX_HOME → 返 prior 键 + error 日志', async () => {
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    writeFileSync(join(stubbedRoot(), 'codex'), 'not-a-dir');
++
++    const env = await forReload({
++      sessionKey: 'sess-io1',
++      priorEnv: { CODEX_HOME: '/prior/codex-io1', OTHER: 'x' },
++    });
++
++    // 只返 prior 的 CODEX_HOME 键（非整个 priorEnv）。
++    expect(env).toEqual({ CODEX_HOME: '/prior/codex-io1' });
++    expect(errSpy).toHaveBeenCalledWith(
++      'provider_file_reload_codex_failed',
++      expect.objectContaining({ session_key: 'sess-io1' }),
++    );
++  });
++
++  it('pi 写盘 IO 失败（auth.json 被同名目录占用）+ priorEnv 有 PI_CODING_AGENT_DIR → 返 prior 键', async () => {
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    mkdirSync(join(stubbedRoot(), 'pi', 'sess-io2', 'auth.json'), { recursive: true });
++
++    const env = await forReload({
++      sessionKey: 'sess-io2',
++      provider: piCustomConfig(),
++      priorEnv: { PI_CODING_AGENT_DIR: '/prior/pi-io2' },
++    });
++
++    expect(env).toEqual({ PI_CODING_AGENT_DIR: '/prior/pi-io2' });
++    expect(errSpy).toHaveBeenCalledWith(
++      'provider_file_reload_pi_failed',
++      expect.objectContaining({ session_key: 'sess-io2' }),
++    );
++  });
++
++  it('IO 失败 + priorEnv undefined（restore 路径）→ 返 {}（按宿主现状降级，Grill P2-2）', async () => {
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    writeFileSync(join(stubbedRoot(), 'codex'), 'not-a-dir');
++
++    const env = await forReload({ sessionKey: 'sess-io3', priorEnv: undefined });
++
++    expect(env).toEqual({});
++    expect(errSpy).toHaveBeenCalledWith(
++      'provider_file_reload_codex_failed',
++      expect.objectContaining({ session_key: 'sess-io3' }),
++    );
++  });
++});
++
++describe('ForReload 分支三：门槛缺 → 返 priorEnv 对应键（P2-1 异常配置=等同未切）', () => {
++  it('codex 门槛缺（api_key/base_url 全空）+ priorEnv 有 CODEX_HOME → 返 prior 键 + warn 跳过', async () => {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++
++    const env = await forReload({
++      sessionKey: 'sess-gate1',
++      provider: { agent_kind: 'codex' },
++      priorEnv: { CODEX_HOME: '/prior/codex-gate1' },
++    });
++
++    expect(env).toEqual({ CODEX_HOME: '/prior/codex-gate1' });
++    // 门槛缺 = 零 mkdir 零写入（可诊断不静默）。
++    expect(existsSync(join(stubbedRoot(), 'codex'))).toBe(false);
++    expect(warnSpy).toHaveBeenCalledWith(
++      'provider_file_reload_codex_skipped_missing_fields',
++      expect.objectContaining({ session_key: 'sess-gate1' }),
++    );
++  });
++
++  it('codex 门槛缺 + priorEnv 无 CODEX_HOME（undefined）→ 返 {}', async () => {
++    vi.spyOn(console, 'warn').mockImplementation(() => {});
++
++    expect(
++      await forReload({
++        sessionKey: 'sess-gate2',
++        provider: { agent_kind: 'codex' },
++        priorEnv: undefined,
++      }),
++    ).toEqual({});
++    // 有 priorEnv 但无该键同样返 {}（nonEmptyStr 判空口径）。
++    expect(
++      await forReload({
++        sessionKey: 'sess-gate2',
++        provider: { agent_kind: 'codex' },
++        priorEnv: { PI_CODING_AGENT_DIR: '/prior/pi-gate2' },
++      }),
++    ).toEqual({});
++  });
++
++  it('pi 门槛缺（base_url 有但 api_key 空）+ priorEnv 有 PI_CODING_AGENT_DIR → 返 prior 键（同 P2-1 口径）', async () => {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++
++    const env = await forReload({
++      sessionKey: 'sess-gate3',
++      provider: { agent_kind: 'pi', base_url: 'https://gate.example/v1', model: 'm' },
++      priorEnv: { PI_CODING_AGENT_DIR: '/prior/pi-gate3' },
++    });
++
++    expect(env).toEqual({ PI_CODING_AGENT_DIR: '/prior/pi-gate3' });
++    expect(existsSync(join(stubbedRoot(), 'pi'))).toBe(false);
++    expect(warnSpy).toHaveBeenCalledWith(
++      'provider_file_reload_pi_skipped_missing_fields',
++      expect.objectContaining({ session_key: 'sess-gate3' }),
++    );
++  });
++});
++
++// ── 3. ForReload 分支四/五：null 切回本机（D-001）─────────────────────────────
++
++describe('ForReload 分支四：null + prior CODEX_HOME → 镜像成败均返 prior 键', () => {
++  it('镜像成功（宿主两文件存在）→ 拷入 per-session 目录 + 返 {CODEX_HOME: prior}', async () => {
++    // 宿主登录态：两文件存在。
++    mkdirSync(hostCodex(), { recursive: true });
++    writeFileSync(join(hostCodex(), 'auth.json'), '{"OPENAI_API_KEY":"sk-host-login"}');
++    writeFileSync(join(hostCodex(), 'config.toml'), 'model = "host-model"\n');
++
++    const env = await forReload({
++      sessionKey: 'sess-null1',
++      provider: null,
++      priorEnv: { CODEX_HOME: join(stubbedRoot(), 'codex', 'sess-null1') },
++    });
++
++    // 返回值 = prior 键（镜像目标与 prior 同为确定性派生路径）。
++    expect(env).toEqual({ CODEX_HOME: join(stubbedRoot(), 'codex', 'sess-null1') });
++    // 镜像副作用：宿主登录态拷入 per-session 目录（平台供应商产物被替换）。
++    expect(readFileSync(join(stubbedRoot(), 'codex', 'sess-null1', 'auth.json'), 'utf-8')).toContain(
++      'sk-host-login',
++    );
++  });
++
++  it('镜像 IO 失败（codexHome 路径被同名文件占用）→ 仍返 prior 键不抛（目录留旧产物=等同未切）', async () => {
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    // 阻断镜像：目标目录段被普通文件占用 → mkdir/copyFile 全失败。
++    writeFileSync(join(stubbedRoot(), 'codex'), 'not-a-dir');
++
++    const env = await forReload({
++      sessionKey: 'sess-null2',
++      provider: null,
++      priorEnv: { CODEX_HOME: '/prior/codex-null2' },
++    });
++
++    // 铁律：镜像失败不抛、env 仍保住旧目录（thread 历史保住）。
++    expect(env).toEqual({ CODEX_HOME: '/prior/codex-null2' });
++    expect(errSpy).toHaveBeenCalled();
++  });
++});
++
++describe('ForReload 分支五：null 无 prior CODEX_HOME / pi kind / undefined absent → 返 {}', () => {
++  it('null + priorEnv undefined（宿主起步会话）→ 返 {}', async () => {
++    expect(await forReload({ sessionKey: 'sess-null3', provider: null })).toEqual({});
++  });
++
++  it('null + priorEnv 只带 PI 键（pi kind 会话切回本机）→ 返 {}（pi 历史在 --session-dir 不丢）', async () => {
++    expect(
++      await forReload({
++        sessionKey: 'sess-null4',
++        provider: null,
++        priorEnv: { PI_CODING_AGENT_DIR: '/prior/pi-null4' },
++      }),
++    ).toEqual({});
++    // 不为 pi 触发 codex 镜像（无 codex 目录产生）。
++    expect(existsSync(join(stubbedRoot(), 'codex'))).toBe(false);
++  });
++
++  it('provider undefined（D-012 absent 边界）→ 返 {}（零动作，与 spawn 版逐字一致）', async () => {
++    expect(
++      await forReload({
++        sessionKey: 'sess-null5',
++        provider: undefined,
++        priorEnv: { CODEX_HOME: '/prior/absent' },
++      }),
++    ).toEqual({});
++  });
++});
++
++// ── 4. mirrorCodexHostAuth 三态（FR-02）───────────────────────────────────────
++
++describe('mirrorCodexHostAuth 三态', () => {
++  it('宿主两文件存在 → 拷入覆盖 per-session 产物（平台供应商凭证被宿主登录态替换）', async () => {
++    mkdirSync(hostCodex(), { recursive: true });
++    writeFileSync(join(hostCodex(), 'auth.json'), '{"OPENAI_API_KEY":"sk-host-m"}');
++    writeFileSync(join(hostCodex(), 'config.toml'), 'model = "host-toml"\n');
++    // per-session 目录预置平台供应商产物（旧供应商凭证）。
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-mirror1');
++    mkdirSync(codexHome, { recursive: true });
++    writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-platform-old"}');
++    writeFileSync(join(codexHome, 'config.toml'), 'model = "platform-old"\n');
++
++    await mirrorCodexHostAuth(codexHome);
++
++    expect(readFileSync(join(codexHome, 'auth.json'), 'utf-8')).toContain('sk-host-m');
++    expect(readFileSync(join(codexHome, 'config.toml'), 'utf-8')).toContain('host-toml');
++    // 宿主侧只读（原件不动）。
++    expect(readFileSync(join(hostCodex(), 'auth.json'), 'utf-8')).toContain('sk-host-m');
++  });
++
++  it('宿主无两文件（未登录）→ 删 per-session 同名两文件（残留平台凭证会顶掉「回本机」语义）', async () => {
++    // fakeHome 无 .codex —— 宿主未登录形态。
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-mirror2');
++    mkdirSync(codexHome, { recursive: true });
++    writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-platform-leftover"}');
++    writeFileSync(join(codexHome, 'config.toml'), 'model = "leftover"\n');
++
++    await mirrorCodexHostAuth(codexHome);
++
++    expect(existsSync(join(codexHome, 'auth.json'))).toBe(false);
++    expect(existsSync(join(codexHome, 'config.toml'))).toBe(false);
++    // 目录本身保留（thread 历史在 sessions/ 下不受影响）。
++    expect(existsSync(codexHome)).toBe(true);
++  });
++
++  it('IO 失败（auth.json 目标位被同名目录占用 → copyFile EISDIR）→ error 不抛（调用方 ForReload 兜底）', async () => {
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    mkdirSync(hostCodex(), { recursive: true });
++    writeFileSync(join(hostCodex(), 'auth.json'), '{"OPENAI_API_KEY":"sk-host-x"}');
++    writeFileSync(join(hostCodex(), 'config.toml'), 'model = "host-t"\n');
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-mirror3');
++    // auth.json 目标位是目录 → copyFile EISDIR（非 ENOENT）→ copy 失败分支。
++    mkdirSync(join(codexHome, 'auth.json'), { recursive: true });
++
++    await expect(mirrorCodexHostAuth(codexHome)).resolves.toBeUndefined();
++    expect(errSpy).toHaveBeenCalledWith(
++      'codex_host_mirror_copy_failed',
++      expect.objectContaining({ file: 'auth.json' }),
++    );
++    // 逐文件独立 best-effort：config.toml 照常拷入。
++    expect(readFileSync(join(codexHome, 'config.toml'), 'utf-8')).toContain('host-t');
++  });
++});
++
++// ── 5. migrateCodexThreadFromHost 三态（FR-05 / R-01）─────────────────────────
++
++describe('migrateCodexThreadFromHost 三态', () => {
++  /** 宿主 rollout fixture：首行 session_meta（实际形态 payload.id + TaskCard 锚 payload.session_id 由 firstLine 决定）。 */
++  function writeHostRollout(relPath: string, firstLine: string): void {
++    const dest = join(hostCodex(), 'sessions', relPath);
++    mkdirSync(join(dest, '..'), { recursive: true });
++    writeFileSync(dest, `${firstLine}\n{"type":"event","payload":{}}\n`);
++  }
++
++  it('首行命中（payload.id 实测形态 + payload.session_id 锚形态双兼容）→ 按相对路径拷入返 true', async () => {
++    // 实际 rollout 首行形态（codex 0.121.0+ 实测：{"type":"session_meta","payload":{"id":...}}）。
++    writeHostRollout(
++      join('2026', '09', '10', 'rollout-a.jsonl'),
++      '{"type":"session_meta","payload":{"id":"thread-payload-id"}}',
++    );
++    // TaskCard fixture 锚形态（payload.session_id 优先读）。
++    writeHostRollout(
++      join('2026', '09', '11', 'rollout-b.jsonl'),
++      '{"type":"session_meta","payload":{"session_id":"thread-session-id"}}',
++    );
++    // 干扰项：id 不匹配 + 首行非 JSON。
++    writeHostRollout(join('2026', '09', '10', 'rollout-decoy.jsonl'), '{"payload":{"id":"other"}}');
++    writeHostRollout(join('2026', '09', '10', 'not-json.jsonl'), 'not json at all');
++
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-mig');
++
++    // 命中形态一（payload.id）。
++    expect(await migrateCodexThreadFromHost('thread-payload-id', codexHome)).toBe(true);
++    expect(
++      readFileSync(
++        join(codexHome, 'sessions', '2026', '09', '10', 'rollout-a.jsonl'),
++        'utf-8',
++      ),
++    ).toContain('thread-payload-id');
++    // 命中形态二（payload.session_id 兼容读）。
++    expect(await migrateCodexThreadFromHost('thread-session-id', codexHome)).toBe(true);
++    expect(
++      existsSync(join(codexHome, 'sessions', '2026', '09', '11', 'rollout-b.jsonl')),
++    ).toBe(true);
++    // 干扰项不拷入；宿主原件保留（只读单向）。
++    expect(
++      existsSync(join(codexHome, 'sessions', '2026', '09', '10', 'rollout-decoy.jsonl')),
++    ).toBe(false);
++    expect(
++      existsSync(join(hostCodex(), 'sessions', '2026', '09', '10', 'rollout-a.jsonl')),
++    ).toBe(true);
++  });
++
++  it('无命中（宿主有 rollout 但 id 全不匹配）→ 返 false 零拷入（warn 不阻断）', async () => {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    writeHostRollout(
++      join('2026', '09', '10', 'rollout-x.jsonl'),
++      '{"type":"session_meta","payload":{"id":"someone-else"}}',
++    );
++
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-mig2');
++    expect(await migrateCodexThreadFromHost('thread-missing', codexHome)).toBe(false);
++    expect(existsSync(join(codexHome, 'sessions'))).toBe(false);
++    expect(warnSpy).toHaveBeenCalledWith(
++      'codex_thread_migrate_no_match',
++      expect.objectContaining({ thread_id: 'thread-missing', scanned: 1 }),
++    );
++  });
++
++  it('宿主缺 sessions 目录（从未跑过 codex）→ 返 false 零动作', async () => {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-mig3');
++    expect(await migrateCodexThreadFromHost('thread-any', codexHome)).toBe(false);
++    expect(existsSync(codexHome)).toBe(false);
++    expect(warnSpy).toHaveBeenCalledWith(
++      'codex_thread_migrate_no_match',
++      expect.objectContaining({ thread_id: 'thread-any', scanned: 0 }),
++    );
++  });
++});
+diff --git a/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts b/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
+index 31a5a51a6..e8c3a959b 100644
+--- a/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
++++ b/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
+@@ -41,7 +41,8 @@ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+ // 分派单点（task-03）：与 daemon interactive / task-runner batch 两接线点共用同一函数。
+-import { applyProviderFileSettings } from '../src/task-runner.js';
++// 2026-09-11-session-provider-switch-codex-pi task-01 起单点定义在 provider-file-settings.ts。
++import { applyProviderFileSettings } from '../src/provider-file-settings.js';
+ import type { ProviderConfig } from '../src/types.js';
+ 
+ // ── 测试常量（编造凭证，无真实 key）────────────────────────────────────────────
+diff --git a/deploy/backend-only.tar.gz b/deploy/backend-only.tar.gz
+new file mode 100644
+Binary file deploy/backend-only.tar.gz differs

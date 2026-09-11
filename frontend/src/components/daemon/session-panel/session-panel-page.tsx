@@ -68,7 +68,7 @@ import {
   type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest,
   type PlanSummary,
 } from "@/lib/daemon";
-import { getProviderCaps } from "@/lib/provider-caps";
+import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
 
 import {
@@ -2355,7 +2355,10 @@ export function SessionPanelPage({
       notify.warning("会话已结束或机器离线，无法切换供应商");
       return;
     }
-    if (session?.provider && session.provider !== "claude") {
+    // 2026-09-11-session-provider-switch-codex-pi task-05：门禁白名单化——保留
+    // session?.provider && 前置（provider 空/未下发 = 不拦截，现状语义），仅把
+    // !== "claude" 换 PROVIDER_SWITCH_ENGINES 白名单（cursor/未知引擎仍拦）。
+    if (session?.provider && !PROVIDER_SWITCH_ENGINES.has(session.provider)) {
       notify.warning("当前引擎不支持会话级供应商切换");
       return;
     }
