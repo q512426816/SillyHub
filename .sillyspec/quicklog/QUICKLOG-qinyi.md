@@ -437,3 +437,13 @@
 文件：
 - frontend/src/components/__tests__/delete-change-confirm.test.tsx（+ScopeAuditCommandCard mock+useQuickSessionName 空实现）
 验证：19 passed
+
+## ql-20260911-021-89c3 | 2026-09-11 12:52:50 | 修复 zcode SQLite 分派存在性门功能回归——lstat 文件存在门换 rollout 目录门（安全语义保留：自登记任意路径仍被拦；死会话回看恢复）
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts
+
+## ql-20260911-022-1614 | 2026-09-11 13:06:33 | 移动端账号页测试 mock 缺 tryReclaimOrphanAvatarFile 导出——d95130926 头像兜底回收首次进 CI 暴露未捕获错误打挂 vitest
+状态：进行中
+关联变更：（无）
+文件：frontend/src/app/m/account/page.test.tsx
