@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-11-session-provider-switch-codex-pi",
+  "generatedAt": "2026-09-11T12:34:22.928Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-11-session-provider-switch-codex-pi",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 2,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-11-session-provider-switch-codex-pi",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-11-session-provider-switch-codex-pi",
+      "metrics": {
+        "backendEndpoints": 2768,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-11-session-provider-switch-codex-pi",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "真实集成/跨进程凭证注入链——真 codex（0.147.0）/pi（0.81.1）CLI 子进程 × mock 端点，Bearer key 断言命中，Tests 5 passed",
+      "command": "`pnpm exec vitest run tests/provider-injection-smoke.integ.test.ts`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-11-session-provider-switch-codex-pi/verify-logs/smoke-integ.log"
+    },
+    {
+      "claim": "reload/restore 文件层链路真实集成——writeCodexHome/writePiDir 落盘产物逐字段断言 + mirror 真拷贝/删除 + restore stat 探测 + REG-4 codex 走通全链，Test Files 3 passed / Tests 81 passed",
+      "command": "`pnpm exec vitest run tests/provider-file-settings-reload.test.ts tests/interactive/session-recovery.test.ts tests/interactive/session-manager-config-switch.test.ts`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-11-session-provider-switch-codex-pi/verify-logs/reload-restore-integ.log"
+    },
+    {
+      "claim": "真实启动一次（real startup）本变更触及的 daemon 启动入口（cli.ts start → Daemon 装配含本变更 daemonApiKey 注入链）——隔离 SILLYHUB_DAEMON_DIR 起进程，PID 已登记，[daemon.started] 20:42:52，启动验证达成后受控停止",
+      "command": "`SILLYHUB_DAEMON_DIR=<temp> node dist/cli.js start --api-key <verify dummy>`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-11-session-provider-switch-codex-pi/verify-logs/daemon-start.log"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

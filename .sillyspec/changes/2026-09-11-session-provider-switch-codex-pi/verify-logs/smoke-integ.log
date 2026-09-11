@@ -1,0 +1,21 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon[39m
+
+[90mstdout[2m | tests/provider-injection-smoke.integ.test.ts[2m > [22m[2mtask-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 热切换产物）
+[22m[39m[task-07 smoke] mock=127.0.0.1:54741 codex=codex-cli 0.147.0 pi=0.81.1
+
+[90mstdout[2m | tests/provider-injection-smoke.integ.test.ts[2m > [22m[2mtask-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 热切换产物）[2m > [22m[2mA. codex：applyProviderFileSettings 产物对 spike golden 逐字段一致，真跑 codex exec 打 mock /v1/responses 且 Bearer=测试 key
+[22m[39m[task-07 smoke A] codex exit=0 timedOut=false stdout="mock says hi\n" stderr="WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir \"C:\\\\Users\\\\qinyi\\\\AppData\\\\Local\\\\Temp\\\\\" (codex_home: AbsolutePathBuf(\"C:\\\\Users\\\\qinyi\\\\AppData\\\\Local\\\\Temp\\\\pis-X9zhNx\\\\codex\\\\smoke-codex\"))\nReading additional input from s"
+
+[90mstdout[2m | tests/provider-injection-smoke.integ.test.ts[2m > [22m[2mtask-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 热切换产物）[2m > [22m[2mB. pi：applyProviderFileSettings 三文件对 spike golden 逐字段一致，真跑 pi 打 mock /v1/chat/completions 且 Bearer=测试 key
+[22m[39m[task-07 smoke B] pi exit=0 timedOut=false stdout="mock says hi\n" stderr=""
+
+ [32m✓[39m tests/provider-injection-smoke.integ.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 3311[2mms[22m[39m
+   [33m[2m✓[22m[39m task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 热切换产物）[2m > [22mA. codex：applyProviderFileSettings 产物对 spike golden 逐字段一致，真跑 codex exec 打 mock /v1/responses 且 Bearer=测试 key [33m1292[2mms[22m[39m
+   [33m[2m✓[22m[39m task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 热切换产物）[2m > [22mB. pi：applyProviderFileSettings 三文件对 spike golden 逐字段一致，真跑 pi 打 mock /v1/chat/completions 且 Bearer=测试 key [33m1046[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m   Start at [22m 20:43:13
+[2m   Duration [22m 3.65s[2m (transform 73ms, setup 0ms, collect 87ms, tests 3.31s, environment 0ms, prepare 96ms)[22m
+

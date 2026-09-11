@@ -1,0 +1,40 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon[39m
+
+[90mstderr[2m | tests/provider-file-settings-reload.test.ts[2m > [22m[2mForReload 分支二：写盘 IO 失败 → 返 priorEnv 文件层键（等同未切）[2m > [22m[2mpi 写盘 IO 失败（auth.json 被同名目录占用）+ priorEnv 有 PI_CODING_AGENT_DIR → 返 prior 键
+[22m[39mpi_settings_read_failed {
+  path: [32m'C:\\Users\\qinyi\\AppData\\Local\\Temp\\pfr-Un7jfw\\pi\\sess-io2\\auth.json'[39m,
+  code: [32m'EISDIR'[39m
+}
+
+ [32m✓[39m tests/provider-file-settings-reload.test.ts [2m([22m[2m21 tests[22m[2m)[22m[90m 62[2mms[22m[39m
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-08 / reload 内核抽取回归（reloadWithProvider 零语义漂移）[2m > [22m[2mREG-3: driver.start 抛错 → 回滚旧 query/env + session 不破坏 + 错误重抛
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: simulated spawn EINVAL
+    at Object.<anonymous> [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39mtests\interactive\session-manager-config-switch.test.ts:402:15[90m)[39m
+    at Object.mockCall [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/@vitest+spy@2.1.9/node_modules/[4m@vitest/spy[24m/dist/index.js:61:17[90m)[39m
+    at Object.spy [as start] [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/tinyspy@3.0.2/node_modules/[4mtinyspy[24m/dist/index.js:45:80[90m)[39m
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1925:43[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-08 / reloadWithConfig（FR-05 / D-012@v1，claude）[2m > [22m[2mCFG-4: driver.start 抛错 → 回滚 query/env/systemPrompt/providerConfig + 不喂 prompt
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: simulated jsonl missing
+    at Object.<anonymous> [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39mtests\interactive\session-manager-config-switch.test.ts:679:15[90m)[39m
+    at Object.mockCall [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/@vitest+spy@2.1.9/node_modules/[4m@vitest/spy[24m/dist/index.js:61:17[90m)[39m
+    at Object.spy [as start] [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/tinyspy@3.0.2/node_modules/[4mtinyspy[24m/dist/index.js:45:80[90m)[39m
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1925:43[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-08 / reloadWithConfig（FR-05 / D-012@v1，claude）[2m > [22m[2mCFG-5: agentSessionId 缺失 → 抛错不破坏会话（内核守卫透传）
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-cfg 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1864:15[90m)[39m
+
+ [32m✓[39m tests/interactive/session-recovery.test.ts [2m([22m[2m27 tests[22m[2m)[22m[90m 260[2mms[22m[39m
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-03 / codex 迁移钩子三联触发条件 + pi 文件层 reload（FR-01 / FR-05）[2m > [22m[2mHOOK-4: agentSessionId 缺失（首 turn 未完成）→ 不迁移 + reload 抛 missing agentSessionId
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-cfg 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1864:15[90m)[39m
+
+ [32m✓[39m tests/interactive/session-manager-config-switch.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 391[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m81 passed[39m[22m[90m (81)[39m
+[2m   Start at [22m 20:43:18
+[2m   Duration [22m 1.25s[2m (transform 522ms, setup 0ms, collect 1.38s, tests 713ms, environment 0ms, prepare 186ms)[22m
+
