@@ -109,6 +109,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, CheckCircle2, FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, TriangleAlert, Users, X } from "lucide-react";
@@ -188,6 +189,28 @@ const GROUP_REPLAY_PAGE_SIZE = 200;
 
 /** 单次批量上传附件上限（超出部分忽略并 toast 告知；单聊 session-input-bar 同值）。 */
 const MAX_ATTACHMENTS_PER_BATCH = 10;
+
+/* ── ql-20260911-030：输入框高度拖拽（对齐单聊 session-input-bar
+ *    ql-20260826-010 的全局偏好）——localStorage 键与单聊同一把，群聊/单聊
+ *    共享同一份高度偏好（单聊侧注释明示「高度是全局偏好不分会话」，此处
+ *    延展到群聊）。改键值/上下限须两处同步。 */
+const INPUT_HEIGHT_LS_KEY = "sillyhub.sessions.inputBarHeight";
+const INPUT_HEIGHT_MIN = 44;
+const INPUT_HEIGHT_MAX = 480;
+
+/** 回读持久化高度（SSR / 无值 / 非法值 → null 走默认单行自适应）。 */
+function readPersistedInputHeight(): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(INPUT_HEIGHT_LS_KEY);
+    const n = raw == null ? Number.NaN : Number(raw);
+    return Number.isFinite(n)
+      ? Math.min(INPUT_HEIGHT_MAX, Math.max(INPUT_HEIGHT_MIN, Math.round(n)))
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 /* ── 2026-09-09-askuser-pi-cursor task-11（FR-05 / D-004@v2）：群聊 AskUser 聚合 ── */
 
@@ -1550,6 +1573,51 @@ export function GroupChatPanel({
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /* ql-20260911-030：用户拖拽调节的输入框高度（null = 默认单行；单聊
+   * session-input-bar 同款——拖拽实时生效、effect 落盘、双击手柄恢复默认清键；
+   * 上限 min(480, 视口 60%) 拖拽时按当次视口动态算）。 */
+  const [inputHeight, setInputHeight] = useState<number | null>(readPersistedInputHeight);
+  useEffect(() => {
+    if (inputHeight == null) return;
+    try {
+      window.localStorage.setItem(INPUT_HEIGHT_LS_KEY, String(inputHeight));
+    } catch {
+      /* 隐私模式等写入失败静默 */
+    }
+  }, [inputHeight]);
+  const inputDragStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const handleHeightDragStart = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    // 实测高度兜底：jsdom / 未布局时 offsetHeight 为 0，按默认下限起步。
+    const measured = inputRef.current?.offsetHeight ?? 0;
+    const current = inputHeight ?? (measured > 0 ? measured : INPUT_HEIGHT_MIN);
+    inputDragStateRef.current = { startY: e.clientY, startHeight: current };
+    const onMove = (ev: MouseEvent) => {
+      const d = inputDragStateRef.current;
+      if (!d) return;
+      const max = Math.min(INPUT_HEIGHT_MAX, Math.round(window.innerHeight * 0.6));
+      const next = Math.min(
+        Math.max(INPUT_HEIGHT_MIN, d.startHeight + (d.startY - ev.clientY)),
+        max,
+      );
+      setInputHeight(next);
+    };
+    const onUp = () => {
+      inputDragStateRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+  const handleHeightReset = () => {
+    setInputHeight(null);
+    try {
+      window.localStorage.removeItem(INPUT_HEIGHT_LS_KEY);
+    } catch {
+      /* 静默容错 */
+    }
+  };
   /* 附件流（照单聊 session-input-bar task-12 管线）：📎 选文件即传（复用
    * 上传端点产出 AttachmentRead）、chips 预览可删、发送随消息提交、成功后
    * 仅清本地列表（附件已随载体绑定群会话，服务端不删）。 */
@@ -2105,13 +2173,18 @@ export function GroupChatPanel({
         className,
       )}
     >
-      {/* ── 左列：群聊主区（顶栏 + 时间线 + typing + 输入区） ── */}
+      {/* ── 左列：群聊主区（顶栏 + 时间线 + typing + 输入区） ──
+          ql-20260911-030：根容器玻璃化对齐常规会话面板（session-panel
+          page-helpers PANEL_ROOT_CLS_DESKTOP——rounded-lg + border/60 +
+          bg-card/80 + backdrop-blur-xl，壳层极光透出；原平铺 bg-card 卡片弃）。 */}
       <section
         aria-label="群聊时间线区"
-        className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+        className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-card/80 backdrop-blur-xl"
       >
-        {/* 顶栏：群名 + 成员摘要 + facepile（原型 .chat-head）。 */}
-        <header className="flex flex-none items-center gap-3 border-b border-border px-4 py-3">
+        {/* 顶栏：群名 + 成员摘要 + facepile（原型 .chat-head）。
+            ql-20260911-030：玻璃头对齐会话 PANEL_HEADER_CLS（bg-card/60 半透
+            + blur，边框降透明 /60）；z-20 抬层防消息流盖头部内浮层。 */}
+        <header className="relative z-20 flex flex-none items-center gap-3 border-b border-border/60 bg-card/60 px-4 py-2.5 backdrop-blur-md">
           <span
             aria-hidden
             className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-gradient-to-br from-brand-600 to-info text-xs font-bold text-white shadow-primary"
@@ -2343,7 +2416,7 @@ export function GroupChatPanel({
             data-testid="group-chat-timeline"
             role="log"
             aria-label="群消息时间线"
-            className="h-full overflow-y-auto px-5 py-5"
+            className="h-full overflow-y-auto bg-background px-5 py-5"
           >
             {/* 向上翻页入口（群 P3 分页 quick）：初始拉满一页才出现；点击按
                 before 游标拉更早一页（视口位置保持，见 loadMoreHistory）。 */}
@@ -2528,12 +2601,14 @@ export function GroupChatPanel({
           )}
         </div>
 
-        {/* typing 指示器（原型 .typing-bar：谁正在输入 + 三点动画 + 草稿预览）。 */}
+        {/* typing 指示器（原型 .typing-bar：谁正在输入 + 三点动画 + 草稿预览）。
+            ql-20260911-030：随时间线 bg-background——指示条收起/展开均保持
+            「聊天背景 → 输入区 bg-card」一条分界线，不露出玻璃根底色。 */}
         <div
           data-testid="group-typing-bar"
           aria-live="polite"
           className={cn(
-            "min-h-0 overflow-hidden px-5 transition-all",
+            "min-h-0 overflow-hidden bg-background px-5 transition-all",
             typingIndicators.length > 0 ? "max-h-10 py-1.5" : "max-h-0",
           )}
         >
@@ -2564,8 +2639,10 @@ export function GroupChatPanel({
           ))}
         </div>
 
-        {/* 输入区（原型 .composer：@补全浮层 + textarea + 工具条）。 */}
-        <div className="relative flex-none px-4 pb-4 pt-3">
+        {/* 输入区（原型 .composer：@补全浮层 + textarea + 工具条）。
+            ql-20260911-030：底色/padding 对齐单聊输入区（session-input-bar
+            footer——bg-card + px-5 pb-4 pt-1，原 px-4 pt-3 弃）。 */}
+        <div className="relative flex-none bg-card px-5 pb-4 pt-1">
           {mentionOpen && (
             <SessionMentionPopover
               trigger="@"
@@ -2584,7 +2661,24 @@ export function GroupChatPanel({
               }}
             />
           )}
-          <div className="rounded-xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-primary focus-within:shadow-primary">
+          {/* 高度拖拽手柄（ql-20260911-030，单聊 ql-20260826-010 同款）：胶囊
+              上缘细条——按下沿竖向拖动增减高度（实时生效 + 落盘），双击恢复默认。 */}
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="拖动调节输入框高度（双击恢复默认）"
+            title="拖动调节输入框高度，双击恢复默认"
+            onMouseDown={handleHeightDragStart}
+            onDoubleClick={handleHeightReset}
+            className="group -mb-0.5 flex h-3 cursor-ns-resize touch-none items-center justify-center"
+          >
+            <span className="h-[3px] w-10 rounded-full bg-muted-foreground/30 transition-colors group-hover:bg-brand-500" />
+          </div>
+          {/* 输入胶囊：单聊 session-input-bar 胶囊同款语义类（rounded-2xl +
+              bg-muted/40 常态 + 聚焦 bg-card + brand 3px 柔环，原 rounded-xl
+              bg-card + primary 边框阴影弃）。引用条/附件 chips/工具条结构不变，
+              各自带内距。 */}
+          <div className="rounded-2xl border border-border bg-muted/40 shadow-sm transition-all focus-within:border-brand-400/45 focus-within:bg-card focus-within:shadow-md focus-within:ring-[3px] focus-within:ring-brand-500/10">
             {/* 群 P2 引用条：被引用消息摘要一行 + 取消（发送随 body 带
                 reply_to_log_id；X 清空回到普通发送）。 */}
             {replyTarget && (
@@ -2685,7 +2779,11 @@ export function GroupChatPanel({
                 e.preventDefault();
                 void handleFiles(files);
               }}
-              className="max-h-[120px] min-h-[44px] w-full resize-none border-none bg-transparent px-3.5 py-2.5 text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70"
+              // ql-20260911-030：原 max-h-[120px] 钳制会截断拖拽高度（拖拽高度
+              // 直接内联 style，min-h 下限与拖拽钳制同值 44px）；无拖拽值时
+              // rows=1 单行自适应与原行为一致。
+              className="min-h-[44px] w-full resize-none border-none bg-transparent px-3.5 py-2.5 text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70"
+              style={inputHeight != null ? { height: inputHeight } : undefined}
             />
             <div className="flex items-center gap-2 px-2.5 pb-2 pt-1">
               <button
@@ -2736,7 +2834,7 @@ export function GroupChatPanel({
         <aside
           data-testid="group-member-panel-loading"
           aria-label={detailQ.isError ? "群成员面板加载失败" : "群成员面板加载中"}
-          className="flex h-full min-h-0 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-dashed border-border bg-card px-6 text-center shadow-sm"
+          className="flex h-full min-h-0 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-lg border border-dashed border-border/60 bg-card/70 px-6 text-center backdrop-blur-xl"
         >
           <Users aria-hidden className="h-6 w-6 text-brand-600" />
           {detailQ.isError ? (

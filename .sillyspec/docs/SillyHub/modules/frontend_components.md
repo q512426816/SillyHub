@@ -49,7 +49,13 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
     entry 不可变归并引用、空 replying 模块常量、onPin/onQuote useCallback，流式期间
     仅变化行重渲染）；回放分页（初始 limit 200 取代全量拉回，顶部「加载更早消息」
     before 游标向上翻页、归并同 applyGroupTimelineEvent、scrollTop 增量保持视口）；
-    回到底部悬浮按钮（离开底部出现，离开期间新消息计「N 条新消息」，回底清零）
+    回到底部悬浮按钮（离开底部出现，离开期间新消息计「N 条新消息」，回底清零）；
+    样式对齐常规会话（ql-20260911-030）：面板根/头部/时间线/输入区抄
+    session-panel 玻璃语义类（rounded-lg border/60 bg-card/80 backdrop-blur-xl
+    + 时间线/typing 条 bg-background + 输入区 bg-card），输入胶囊
+    rounded-2xl bg-muted/40 + brand 聚焦环，输入框高度拖拽手柄与单聊
+    session-input-bar ql-20260826-010 同款（同一 localStorage 键全局共享）；
+    member-panel 根同步玻璃化对齐会话列表旁栏
   - `create-group-wizard.tsx` — 建群向导三步：群名→邀请用户→配置 agent 成员
     （六要素表单可添加多个，不内置角色模板）
   - `member-panel.tsx` — 成员面板：用户成员 presence 绿点/移除；agent 成员六要素

@@ -495,8 +495,11 @@ export function MemberPanel({
         /* 高度契约：h-full 吃满挂载列高（宽屏右列是 grid 拉伸项 / 窄屏是
          * Drawer body，均有定高），成员多时根节点 overflow-y-auto 内部滚动
          * ——面板与群聊会话列同高，不被内容撑破（session-list-panel 根
-         * h-full 同惯例）。 */
-        "flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-xl border border-border bg-card shadow-sm",
+         * h-full 同惯例）。
+         * ql-20260911-030：旁栏卡片玻璃化对齐会话列表面板根类
+         * （rounded-lg + border/60 + bg-card/70 + backdrop-blur-xl，
+         * 原平铺 bg-card 卡片弃——群聊视图与 /sessions 玻璃卡片族一致）。 */
+        "flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-lg border border-border/60 bg-card/70 backdrop-blur-xl",
         className,
       )}
     >
