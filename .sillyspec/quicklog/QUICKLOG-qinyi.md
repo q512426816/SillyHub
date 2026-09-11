@@ -471,3 +471,19 @@
 根因：console-timestamp 只包四通道，console.debug 独立属性漏包即绕过；zcode 回落日志恰走 debug 生产无痕（ql-20260911-005）
 方案：包装器五通道补 debug+注释修正；回落日志 debug→info；debug 通道回归断言+ZD3 日志断言；daemon.md 同步
 结果：console-timestamp 5 用例+agent-log+console-timestamp 12 文件 116 用例全绿；typecheck 零错
+
+## ql-20260911-024-9098 | 2026-09-11 14:40:02 | 变更中心平台同步处理区（冲突裁决 + ghost 清理）
+状态：进行中
+关联变更：2026-09-04-conflict-resolve-entry
+文件：sillyhub-daemon/src/sillyspec-manager.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/cli.ts, sillyhub-daemon/tests/sillyspec-platform-command.test.ts, frontend/src/components/changes/platform-sync-section.tsx, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+
+## ql-20260911-025-244d | 2026-09-11 14:47:11 | pre-commit 提交钩 auto-fix 改 check-only（吞提交坑修复落地）+ 坑文档实测修正
+状态：已完成
+关联变更：（无）
+文件：
+- backend/.pre-commit-config.yaml（check-only）
+- docs/sillyspec/pre-commit-autofix-swallows-commit.md（实测修正+修复落地）
+需求：pre-commit 提交钩 auto-fix 改 check-only（吞提交坑修复落地）+ 坑文档实测修正
+根因：auto-fix hook 在工作树有未暂存改动时触发 stash↔修复冲突回滚循环（exit 1 被管道掩码感知为静默吞提交，alembic 迁移曾因此只进镜像未进 git）
+方案：backend/.pre-commit-config.yaml 两 hook 改 ruff format --check / ruff check（去 --fix）；坑文档更新（状态已修复/实测修正节 exit 1 真相/修复落地节含 --no-stash 否决理由与 agent 习惯项）
+结果：临时分支三段验证（改前回滚循环→改后响亮 Would reformat→格式化后 exit 0）+ 主仓实测零冲突；全仓 format --check 1241 过；提交 d1d472795 推送
