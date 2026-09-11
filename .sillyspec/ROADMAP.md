@@ -10,6 +10,10 @@
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
 
+### 2026-09-12 · 工作区↔平台资产桥（四桥：workspace 技能启用/MCP 选入/specDir 收编/daemon per-workspace 分发）
+
+- **workspace-asset-bridges**（2026-09-11 立项/09-12 归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，6 task/6 Wave，分支 6 提交待合并）：补齐管理面四座桥（用户在 workspace skills 页发现资产库无关联而立）——①user_skill_enables 单表双 scope（workspace_id 列+双 partial；D-003）+bundle 第三源并集 user∪workspace（D-002，None 显式 IS NULL 保 user 维度 version hash 零变化 D-010 四处谓词）②MCP import-from-registry（get_server_for_import 可见性 404/解密 422/停用 warning 三态 D-009；读-合并-.mcp.json 原子写+审计+同名 -registry 循环避撞）③specDir 收编（差集三源排除+名归一化镜像 CustomSkill 正则 D-008+frontmatter 原样或拼装+不删源）④daemon per-workspace 分发（manifest ?workspace_id 授权门两态+skills-workspaces/<ws>/ 独立槽 sha256 原子提升+interactive/batch 选槽序 D-007——Grill B-01 实证 manifest 是唯一注入通道故 daemon 最小改造入本变更）。测试：backend 547+1skip/daemon 50/前端 48+三零 version hash 显式断言+并集端点两态。顺手清偿 ql-020（session-panel mock 补 agent_kind）。NOTES：verify 门新隔离快照功能对 monorepo 子目录依赖结构性盲区（快照只 junction 根 node_modules，backend/.venv 与 frontend/node_modules 缺失致门内必红）——用 SILLYSPEC_VERIFY_GATE_SNAPSHOT_OFF 逃生阀主仓口径通过，工具改进待提。
+
 ### 2026-09-11 · 技能库（git 技能源 + user 启用绑定；收编经 Grill 实证砍除）
 
 - **skills-central-library**（2026-09-11 立项/归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，4 task/4 Wave 串行，分支 4 提交待合并）：平台技能链第三源——backend 新模块 skill_source（skill_sources+user_skill_enables 两表 + admin 源 CRUD[SSRF await+git 探测 422] + subprocess git 浅克隆拉取器[--depth 1 --filter=blob:none/300s/半成品清理/≤200 文件 ≤10MB 双上限] + 技能发现 frontmatter 复用）；bundle 组装 _gather_all_files 第三源（D-010 同名优先级 sillyspec-*>custom>git 源序 origin 粒度去重；version 算法零改动 D-005；manifest source 标记）；library 三源聚合+enable 端点（skill_key URL 编码冒号）；前端技能页两新区块（admin 源管理卡+技能库启用开关，我的技能零改动）。**收编 onboarding 经 Grill 实证砍除**（D-011：散技能真身在 daemon 宿主侧 worktree，backend 容器不可直读——做收编需 daemon RPC 独立变更）。测试：backend 77+邻接 127/frontend 22 全绿+真实 PG 迁移往返+file:// 本地假仓真 git clone 全链。verify 过程顺手清偿三件并行预存债（ql-017 registry 第 9 键 dialog/ql-018 includeSessions opt-in/ql-019 scope-audit mock——多会话协作 debt 实录入 verify-result）。
