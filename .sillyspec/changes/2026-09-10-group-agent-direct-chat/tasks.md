@@ -3,7 +3,7 @@
 > 注册表唯一真相（execute 从本文件解析任务清单）；实现细节见 tasks/task-NN.md（TaskCard）。
 
 - [ ] task-01: 数据模型与迁移（AgentGroupChat 两列 + agent_group_consensus_tasks 表 + alembic） (depends_on: —)
-- [ ] task-02: schema 与设置链路（Create/Update/Read + 触发响应 DTO + 角色 prompt 常量） (depends_on: —)
+- [ ] task-02: schema 与设置链路（Create/Update/Read + 触发响应 DTO + 角色 prompt 常量 + crud 透传） (depends_on: —)
 - [ ] task-03: @解析 split_broadcast + 发送侧汇总分支（汇总人选择/建任务+状态卡/fan-out 标记/失败 aborted） (depends_on: task-01,02,04)
 - [ ] task-04: 触发原语扩展（_trigger_group_member role_prompt/turn_overrides + 角色段常量） (depends_on: —)
 - [ ] task-05: 投影层硬拦截（ctx 扩展 + submit_steps 双写/兜底行拦截，converge 放行） (depends_on: task-04)
@@ -24,7 +24,7 @@
 ## task-02 schema 与设置链路
 
 - `GroupChatCreate`/`GroupChatUpdate`/`GroupChatRead` 扩展两字段（60~3600 校验）；`GroupMessageSendRead.consensus_task_id`、`GroupMemberTriggerRead.consensus_role`；建群/改群透传。角色 prompt 段常量（design §5.8 五段）+ `CONSENSUS_OPINION_MAX_CHARS=4000` 一并落 helpers.py（避免与 task-04 同 Wave 共享文件）。
-- target_files: backend/app/modules/agent/schema.py, backend/app/modules/daemon/group/service/helpers.py
+- target_files: backend/app/modules/agent/schema.py, backend/app/modules/daemon/group/service/helpers.py, backend/app/modules/daemon/group/service/crud.py
 - provides: consensus 两设置字段 schema；两个触发响应 DTO 字段；ROLE_PROMPT_* 常量
 - 验收：create/update 端到端测试；非法值 400 中文。（注：GroupMessageSendRead/GroupMemberTriggerRead 落 helpers.py 非 schema.py）
 

@@ -1,6 +1,6 @@
 ---
 id: task-02
-title: 'consensus schema, trigger DTOs and role prompt constants'
+title: 'consensus schema, trigger DTOs, role prompt constants and crud passthrough'
 title_zh: 'schema 与设置链路（含角色 prompt 常量）'
 author: 'qinyi'
 generated_by: sillyspec-taskcard
@@ -13,9 +13,11 @@ decision_ids: [D-002@v1, D-006@v1]
 allowed_paths:
   - backend/app/modules/agent/schema.py
   - backend/app/modules/daemon/group/service/helpers.py
+  - backend/app/modules/daemon/group/service/crud.py
 target_files:
   - backend/app/modules/agent/schema.py
   - backend/app/modules/daemon/group/service/helpers.py
+  - backend/app/modules/daemon/group/service/crud.py
 provides: "GroupChatCreate/Update/Read.consent 两字段; GroupMessageSendRead.consensus_task_id; GroupMemberTriggerRead.consensus_role; helpers ROLE_PROMPT_* 常量与 CONSENSUS_OPINION_MAX_CHARS"
 goal: >
   打通设置与响应链路：群 Create/Update/Read 扩展两字段（60~3600 校验），触发响应 DTO 加 consensus_task_id/consensus_role，角色 prompt 五段常量与意见截断常量落 helpers.py。

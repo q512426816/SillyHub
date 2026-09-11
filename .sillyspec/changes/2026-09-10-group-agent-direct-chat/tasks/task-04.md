@@ -12,8 +12,10 @@ requirement_ids: [FR-1.3]
 decision_ids: [D-007@v1]
 allowed_paths:
   - backend/app/modules/daemon/group/service/shadow.py
+  - backend/app/modules/daemon/group/service/__init__.py
 target_files:
   - backend/app/modules/daemon/group/service/shadow.py
+  - backend/app/modules/daemon/group/service/__init__.py
 provides: "_trigger_group_member(role_prompt=None, turn_overrides=None) 扩展签名，懒建/复用双分支一致写 metadata"
 goal: >
   让群成员触发原语支持协作角色：role_prompt 注入 prompt 头部角色段，turn_overrides 附加写入影子 user_input 的 turn_metadata（懒建/复用两分支一致）。

@@ -142,14 +142,24 @@ per-harness 锚定规则与回退、会话化上下文段落改写（双向互�
 
 ## 文件变更清单
 
+<!-- 跨仓协议：sillyspec 仓库根 = C:/Users/qinyi/IdeaProjects/sillyspec（local.yaml repos.sillyspec），下段路径相对该仓根 -->
+
+### sillyspec 仓变更
+
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 修改 | ../sillyspec/src/agent-session-log.js | 跨仓（sillyspec 仓库根 = C:/Users/qinyi/IdeaProjects/sillyspec）：锚定器 + own 过滤 + 双向互斥 + push 收敛 |
-| 修改 | ../sillyspec/docs/platform-agent-log-protocol.md | 跨仓：§1/§3/会话化上下文改写 |
-| 修改 | ../sillyspec/test/agent-session-log.test.mjs | 跨仓：锚定/own/互斥/推送范围用例 |
+| 修改 | src/agent-session-log.js | 锚定器 + own 过滤 + 双向互斥 + push 收敛 |
+| 修改 | docs/platform-agent-log-protocol.md | §1/§3/会话化上下文改写 |
+| 修改 | test/agent-session-log.test.mjs | 锚定/own/互斥/推送范围用例 |
+
+### main 仓变更
+
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
 | 修改 | backend/app/modules/platform_sync/service.py | 归属段重写（ctx-owner 两级解析 + quick 优先分组） |
-| 新增 | NEW:backend/migrations/versions/20260912xxxxxx_agent_log_attribution_reset.py | D-004@v2 数据迁移（四条清理，downgrade no-op） |
-| 修改 | backend/app/modules/platform_sync/tests/test_agent_log_push.py | 归属解析用例（execute 阶段按实际测试文件归位，可拆 test_agent_log_attribution.py） |
+| 新增 | NEW:backend/migrations/versions/20260912050000_agent_log_attribution_reset.py | D-004@v2 数据迁移（四条清理，downgrade no-op） |
+| 修改 | backend/app/modules/platform_sync/tests/test_agent_log_push.py | 既有断言更新（分组/归属语义变化回归） |
+| 新增 | NEW:backend/app/modules/platform_sync/tests/test_agent_log_attribution.py | 归属解析新用例（两级 find/跨 harness 挂接/旧双键过渡期等） |
 
 ## 接口定义
 

@@ -140,7 +140,8 @@ scale: large
 | 修改 | backend/app/modules/agent/model.py | `AgentGroupChat` +`consensus_mode`/`consensus_timeout_seconds` 两列；新表 `AgentGroupConsensusTask`。数据流：producer=PATCH 群设置/建群 → DB 列 → consumer=send_group_message 判定与 deadline 计算 |
 | 新增 | NEW:backend/app/migrations/versions/20260910_group_consensus.py | 两列 + 新表 + 三索引 |
 | 修改 | backend/app/modules/agent/schema.py | Create/Update/Read/GroupMessageSendRead/GroupMemberTriggerRead 扩展。数据流：producer=后端 DTO → OpenAPI → `pnpm gen:types` → consumer=前端表单与响应处理 |
-| 修改 | backend/app/modules/daemon/group/service/helpers.py | DTO 字段（consensus_role）；协作轮常量（CONSENSUS_OPINION_MAX_CHARS） |
+| 修改 | backend/app/modules/daemon/group/service/helpers.py | DTO 字段（consensus_role/consensus_task_id）；协作角色段常量 + CONSENSUS_OPINION_MAX_CHARS |
+| 修改 | backend/app/modules/daemon/group/service/crud.py | 建群/改群透传 consensus_mode/consensus_timeout_seconds 两顶层列 |
 | 修改 | backend/app/modules/daemon/group/service/messages.py | `send_group_message` 汇总分支（判定/汇总人选择/建任务/fan-out 标记/失败登记）。数据流：producer=本分支写 `turn_metadata.consensus_task_id/consensus_role/dm_target_member_id` → 影子 run user_input 日志 → consumer=group_bridge 投影拦截与收口钩子 |
 | 修改 | backend/app/modules/daemon/group/service/mentions.py | `_parse_group_mentions` split_broadcast 模式；`run_cross_mention_detection` 触发加 dm 标记（互@私聊） |
 | 修改 | backend/app/modules/daemon/group/service/shadow.py | `_trigger_group_member` +`role_prompt`/`turn_overrides` 参数（协作角色段 + metadata 附加键） |
