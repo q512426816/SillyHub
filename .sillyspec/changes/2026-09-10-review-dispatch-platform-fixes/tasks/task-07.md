@@ -28,7 +28,7 @@ goal: >
   agent_kind=pi 时认证字段由固定两选项下拉泛化为可输入 env 变量名（pattern 同
   backend），打通用户从入口创建 agent_kind=pi 独立凭证的前端段（D-002@v1）。
 implementation:
-  - AGENT_KIND_OPTIONS（llm-provider-form.tsx:56-65）去掉 pi 项的 disabled 与「即将支持」label 后缀，codex/gemini 占位项保持 disabled 不动
+  - AGENT_KIND_OPTIONS（frontend/src/components/llm-providers/llm-provider-form.tsx:56-65）去掉 pi 项的 disabled 与「即将支持」label 后缀，codex/gemini 占位项保持 disabled 不动
   - agentKind state（:203 固定解构）改为可变——编辑态初值取 initial?.agent_kind、新建缺省 claude，Agent 种类 select onChange（:709-711 空实现）接 setAgentKind，hint 文案（:720）同步更新为 pi 可选语义
   - agent_kind=pi 时认证字段控件（:841-864 固定下拉 AUTH_FIELD_OPTIONS）泛化为可输入（输入框或 datalist），按 ^[A-Z][A-Z0-9_]*$ 同款 pattern 即时校验非法输入并提示，占位示例 ZAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY；agent_kind=claude 保持既有两选项下拉与 renameSettingsEnvAuthKey 联动零变化
   - handleSubmit（:335-350）payload 的 agent_kind/auth_field 按当前表单值透传（既有透传链不动，仅解除固定值）

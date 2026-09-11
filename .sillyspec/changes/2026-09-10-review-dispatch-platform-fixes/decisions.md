@@ -14,11 +14,11 @@ created_at: 2026-09-10 21:08:00
 - supersedes:
 - source: user
 - question: worker 结论未沉淀为 artifacts，daemon 侧承接面选哪条通道、artifact kind 用什么？
-- answer: 用户原话「daemon 在 worker 终态时把最终 assistant 消息（或 worker 按约定标记的结构化段）落为 kind=summary/kind=final_output 的 artifact」。实现取：复用 backend worker_done 端点现成语义（AgentArtifact kind=summary 挂分身首 run，可重复置位取最新），kind 沿用 summary——mcp-server.ts:542-547 已向调用方声明该契约，final_output 全仓不存在，新值徒增消费方分支。
+- answer: 用户原话「daemon 在 worker 终态时把最终 assistant 消息（或 worker 按约定标记的结构化段）落为 kind=summary/kind=final_output 的 artifact」。实现取：复用 backend worker_done 端点现成语义（AgentArtifact kind=summary 挂分身首 run，可重复置位取最新），kind 沿用 summary——sillyhub-daemon/src/mcp-server.ts:542-547 已向调用方声明该契约，final_output 全仓不存在，新值徒增消费方分支。
 - normalized_requirement: FR-01/FR-02（门控、时序、容错、多轮幂等见 requirements）。
 - 模块域: [sillyhub-daemon]
 - impacts: [FR-01, FR-02, task-01, task-02, task-03, task-09]
-- evidence: 任务派发原文 P0-1 段 + mcp_tools.py:2286 既有写入点 + mcp-server.ts:542-547 契约描述。
+- evidence: 任务派发原文 P0-1 段 + backend/app/modules/agent/mcp_tools.py:2286 既有写入点 + sillyhub-daemon/src/mcp-server.ts:542-547 契约描述。
 
 ## D-002@v1: P0-2 独立配额池的作用域与实现层次
 - type: architecture
@@ -31,7 +31,7 @@ created_at: 2026-09-10 21:08:00
 - normalized_requirement: FR-03（schema 放开、injector 映射、缺省零回归、auth_field pattern）。
 - 模块域: [backend, sillyhub-daemon, frontend]
 - impacts: [FR-03, task-04, task-05, task-07, task-08, task-09]
-- evidence: 任务派发原文 P0-2 段 + llm_provider/schema.py:17 + credential-injector.ts:217-233 + lease/context.py:284-343 + spawn-env.ts:205-211。
+- evidence: 任务派发原文 P0-2 段 + backend/app/modules/llm_provider/schema.py:17 + sillyhub-daemon/src/credential-injector.ts:217-233 + backend/app/modules/daemon/lease/context.py:284-343 + sillyhub-daemon/src/spawn-env.ts:205-211。
 
 ## D-003@v1: P1-3 生效执行器暴露位置
 - type: architecture
@@ -44,4 +44,4 @@ created_at: 2026-09-10 21:08:00
 - normalized_requirement: FR-04（三新字段 + online 过滤 + 顺序口径）。
 - 模块域: [backend]
 - impacts: [FR-04, task-06, task-09]
-- evidence: 任务派发原文 P1-3 段 + mcp_gateway/tools.py:1009-1104 + hub-client.ts:74/:158 + workspace/model.py:95-98。
+- evidence: 任务派发原文 P1-3 段 + backend/app/modules/mcp_gateway/tools.py:1009-1104 + sillyhub-daemon/src/hub-client.ts:74/:158 + backend/app/modules/workspace/model.py:95-98。

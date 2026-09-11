@@ -16,7 +16,7 @@ target_files:
   - backend/app/modules/mcp_gateway/tools.py
   - backend/app/modules/mcp_gateway/tests/test_tools_new.py
 goal: >
-  get_daemon_status（tools.py:1009-1104）纯增量暴露执行器信息（FR-04/D-003@v1）：
+  get_daemon_status（backend/app/modules/mcp_gateway/tools.py:1009-1104）纯增量暴露执行器信息（FR-04/D-003@v1）：
   顶层 default_agent/effective_agent + daemons[] 每项 providers 列表，让
   review-dispatch 派发前一次查询即可判「会用哪个执行器、哪些机器在线」。
 implementation:

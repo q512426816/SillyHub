@@ -25,7 +25,7 @@ expects_from:
 goal: >
   onTurnResult 对 mission_worker 且 provider 无原生 MCP 的成功轮终态，用轮终全文 fire-and-forget 代报 worker_done，使 pi/codex/cursor 分身沉淀 kind=summary artifact（design §5.1 / FR-01）。
 implementation:
-  - onTurnResult（daemon.ts:3675 起）既有 await notifyRunResult 块（约:3897-3906）之后新增代报分支（Grill B-02——终态先落库、唤醒随后），门控 state.stage==='mission_worker'（types.ts:261）&& getProviderCaps(state.provider).mcp===false（providers.ts:219）&& !isError && resultMeta.result 为非空非空白 string
+  - onTurnResult（sillyhub-daemon/src/daemon.ts:3675 起）既有 await notifyRunResult 块（约:3897-3906）之后新增代报分支（Grill B-02——终态先落库、唤醒随后），门控 state.stage==='mission_worker'（sillyhub-daemon/src/types.ts:261）&& getProviderCaps(state.provider).mcp===false（sillyhub-daemon/src/interactive/providers.ts:219）&& !isError && resultMeta.result 为非空非空白 string
   - ClientLike 补可选 workerDone 声明（签名对齐 task-02 后的 hub-client），命中时 this._client.workerDone(undefined, undefined, {summary:全文}, {sessionId}) fire-and-forget——不 await 不重试，Promise.catch 只 warn worker_auto_done_failed（409/422/网络错同敛，记 session_id）
   - 新增 tests/daemon-mission-worker-artifact.test.ts 覆盖门控矩阵（stage/caps/is_error/空文本/非 string）、调用顺序在 notifyRunResult 之后、workerDone 参数、失败仅 warn、非 mission_worker 零调用
 acceptance:
