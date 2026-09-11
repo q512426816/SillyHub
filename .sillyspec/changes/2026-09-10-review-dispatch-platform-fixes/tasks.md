@@ -16,3 +16,4 @@ created_at: 2026-09-10 21:21:00
 - [x] task-09: 相关测试与类型门禁全量收口（定向测试 + typecheck + 零漂移门禁）(depends_on: task-01,02,03,04,05,06,07,08)
 - [x] ql-20260910-018-d305 dispatch 平台侧三问题修复（worker artifacts 承接 / pi 独立配额池 / 生效执行器暴露）
 - [x] ql-20260911-002-4755 dispatch 平台侧三问题修复（worker artifacts 承接 / pi 独立配额池 / 生效执行器暴露）
+- [x] ql-20260911-004-70fc dispatch 平台侧三问题修复（worker artifacts 承接 / pi 独立配额池 / 生效执行器暴露）

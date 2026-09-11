@@ -668,8 +668,9 @@ async def test_get_daemon_status_effective_agent_first_online_provider(
 ) -> None:
     """default_agent 为空：effective_agent 取返回序首个 online 项的首个 provider。
 
-    两台 daemon 都 online：首个绑定（SQLite rowid 序 = 插入序）挂 pi 在前，
-    effective_agent 必须是 pi 而非第二台的 claude——固化「首个 online 项」口径。
+    确定序（ql-20260911-003-355a P2）：bindings 按 created_at 插入序、daemon 内
+    providers 按名字典序——首个 online 项 = daemon1，providers[0] = claude
+    （字母序），跨执行/跨方言稳定，不随 PG 计划或 uuid 随机序抖动。
     """
     ws = await _make_workspace(db_session)
     user = await _make_user(db_session)
@@ -690,10 +691,10 @@ async def test_get_daemon_status_effective_agent_first_online_provider(
 
     result = await tools.get_daemon_status(ctx=ctx)
     assert result["default_agent"] is None
-    assert result["effective_agent"] == "pi"
-    # 首个 online 项两 provider 都透出（providers[0] 即 effective 来源）。
+    assert result["effective_agent"] == "claude"  # 首个 online 项 providers[0]（字典序）
+    # 首个 online 项两 provider 都透出且字典序稳定（providers[0] 即 effective 来源）。
     first_entry = result["daemons"][0]
-    assert [p["provider"] for p in first_entry["providers"]] == ["pi", "claude"]
+    assert [p["provider"] for p in first_entry["providers"]] == ["claude", "pi"]
 
 
 @pytest.mark.asyncio
@@ -823,14 +824,16 @@ async def test_get_daemon_status_quota_pool_resolved_from_owner_default(
     entries = {e["daemon_id"]: e for e in result["daemons"]}
     pool1 = entries[str(daemon1)]["quota_pool"]
     assert pool1 == {
+        "pool_kind": "independent",
         "llm_provider_id": str(pool_id),
         "name": "GLM 独立池",
         "agent_kind": "pi",
         "api_format": "anthropic",
-        "is_default": True,
     }
-    # 未配 pi 凭证的属主：quota_pool None（本机同池信号）。
-    assert entries[str(daemon2)]["quota_pool"] is None
+    # 未配 pi 凭证的属主：显式 local_shared（本机同池信号，非 null 歧义）。
+    pool2 = entries[str(daemon2)]["quota_pool"]
+    assert pool2["pool_kind"] == "local_shared"
+    assert pool2["agent_kind"] == "pi"
     # 顶层镜像 = 返回序首个 online 项的池。
     assert result["effective_quota_pool"] == pool1
 
@@ -858,8 +861,10 @@ async def test_get_daemon_status_quota_pool_null_without_matching_default(
 
     result = await tools.get_daemon_status(ctx=ctx)
     assert result["effective_agent"] == "pi"
-    assert result["daemons"][0]["quota_pool"] is None
-    assert result["effective_quota_pool"] is None
+    # 只有非默认行 → 不构成平台池：显式 local_shared。
+    pool = result["daemons"][0]["quota_pool"]
+    assert pool["pool_kind"] == "local_shared"
+    assert result["effective_quota_pool"]["pool_kind"] == "local_shared"
 
 
 @pytest.mark.asyncio
@@ -886,8 +891,11 @@ async def test_get_daemon_status_quota_pool_none_without_effective_agent(
 
     result = await tools.get_daemon_status(ctx=ctx)
     assert result["effective_agent"] is None
-    assert result["daemons"][0]["quota_pool"] is None
-    assert result["effective_quota_pool"] is None
+    # 无执行器可判：显式 undetermined（不透出属主 claude 凭证——池探测绑定
+    # effective kind）。
+    pool = result["daemons"][0]["quota_pool"]
+    assert pool["pool_kind"] == "undetermined"
+    assert result["effective_quota_pool"]["pool_kind"] == "undetermined"
 
 
 # ── no-creator 报错（spike P1-4）：文案必须自带修复动作 ────────────────────────

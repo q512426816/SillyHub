@@ -365,10 +365,18 @@
 关联变更：（无）
 文件：（见实际改动）
 
-## ql-20260911-004-70fc | 2026-09-11 09:32:22 | dispatch 平台侧三问题修复（worker artifacts 承接 / pi 独立配额池 / 生效执行器暴露）
-状态：进行中
+## ql-20260911-004-70fc | 2026-09-11 09:32:22 | get_daemon_status.effective_quota_pool 空值不可判——消费方无法预判本地配额耗尽时平台兜底是否成立（活体回执…
+状态：已完成
 关联变更：2026-09-10-review-dispatch-platform-fixes
-文件：backend/app/modules/mcp_gateway/tools.py, backend/app/modules/mcp_gateway/tests/test_tools_new.py, .sillyspec/docs/backend/modules/mcp_gateway.md
+文件：
+- backend/app/modules/mcp_gateway/tools.py（_quota_pool_entry 三态 + 预填覆盖）
+- backend/app/modules/mcp_gateway/tests/test_tools_new.py（三态断言）
+- .sillyspec/docs/backend/modules/mcp_gateway.md（三态口径）
+需求：get_daemon_status.effective_quota_pool 空值不可判——消费方无法预判本地配额耗尽时平台兜底是否成立（活体回执：字段在值没填）。
+根因：远端 llm_providers 全为 claude 且无一 is_default=true（DB 实证），属主未配 pi 平台凭证时 probe 按设计返回 null，但 null 无法区分「同池（预期坏态）」与「未实现」。
+方案：quota_pool 改显式三态 pool_kind——independent（平台默认凭证命中，附 llm_provider_id/name/agent_kind/api_format）/ local_shared（未配→worker 落 daemon 本机凭证与本地同池，独立兜底不成立，附 hint）/ undetermined（无执行器可判）；随带并行会话的 default_agent 归一化（claude_code→claude 等）使 kind 匹配更稳。
+结果：test_tools_new.py 24 passed（三态断言），ruff/mypy 过；远端部署后 effective_quota_pool 将显式返回 local_shared——建 pi 独立凭证并设默认即翻 independent（运维动作，消费方一句可判）。
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/main.py, backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_reparse_scheduler.py
 
 ## ql-20260911-017-a3c2 | 2026-09-11 09:05:00 | provider-registry 守护测试同步第 9 键 dialog（主仓预存红顺手修）
 状态：已完成
