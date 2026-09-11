@@ -33,6 +33,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - **构建发布**：`tsc` 出 `dist/`，`scripts/build-bundle.sh`（bundle 脚本）用 ncc 打成单文件便于分发；engines 锁 Node ≥20。
 
 ## 注意事项
+- **pi 扩展禁止在 session_start 等启动期事件里同步 await dialog**（ql-20260911-027-13b6 实测）：pi 0.81.1 RPC 模式的 stdin 读取器（rpc-mode.js 末尾 `attachJsonlLineReader`）在启动序列完成后才挂接——session_start handler 里 `await ctx.ui.select(...)` 会永远卡住启动，stdin 全冻（get_state 都不响应），表现为「进程活着烧 CPU、零日志」。dialog 只能在 turn 进行中发起（工具 execute 内 / 延时回调），此时读取器已挂接、extension_ui_response 立即回流（端到端已实测：request 冒出 → 回 value → 同轮拿到 answer）。vendored ask-user 扩展即按此约束实现（仅工具 execute 路径调 dialog）。
 - 写守卫 session 级 overlay（2026-08-28-daemon-agent-share / D-011）：`_judgeWriteViaPolicyEngine`
   在 `_borrowSandboxRoots` 之后增加 `_sessionOverlayRoots` 交集收紧——claim payload 的
   `effectiveAllowedRoots` 非空时写路径须同时落于 session roots 与 PolicyCache（机器级），
