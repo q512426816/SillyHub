@@ -18,7 +18,7 @@ allowed_paths:
 target_files:
   - backend/app/modules/skill_source/service.py
   - backend/app/modules/agent/skills_bundle_service.py
-  - NEW:backend/migrations/versions/xxxx_add_workspace_scope_enables.py
+  - NEW:backend/migrations/versions/20260911220000_add_workspace_scope_enables.py
 provides:
   - user_skill_enables 增 workspace_id 列与双 partial unique 迁移（D-003 单表双 scope）
   - toggle_enable 双 scope 签名（可选 workspace_id 参数，缺省 None 为 user 维度；library 与 enable 端点 HTTP 侧同名可选参数）

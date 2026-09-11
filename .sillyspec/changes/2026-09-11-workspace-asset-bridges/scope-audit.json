@@ -1,0 +1,300 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "a40fdc7c724d61dc955d372c77311773b1c89df3",
+  "totals": {
+    "files": 35,
+    "additions": 1074165,
+    "deletions": 180
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/skills_bundle_service.py",
+      "additions": 39,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/daemon_rpc.py",
+      "additions": 55,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_skills_bundle.py",
+      "additions": 283,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/mcp_registry/schema.py",
+      "additions": 20,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/mcp_registry/service.py",
+      "additions": 41,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/mcp_registry/tests/test_service.py",
+      "additions": 145,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/skill_source/model.py",
+      "additions": 52,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/skill_source/router.py",
+      "additions": 28,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/skill_source/service.py",
+      "additions": 173,
+      "deletions": 31,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/skill_source/tests/test_library_enable.py",
+      "additions": 202,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/skill_source/tests/test_model.py",
+      "additions": 81,
+      "deletions": 14,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/workspace/router.py",
+      "additions": 68,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/skills_view_service.py",
+      "additions": 434,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_mcp_import_registry.py",
+      "additions": 694,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_skills_adopt.py",
+      "additions": 707,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/migrations/versions/20260911220000_add_workspace_scope_enables.py",
+      "additions": 84,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 483,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "deploy/backend-only.tar.gz",
+      "additions": 1067622,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/mcp/__tests__/page.test.tsx",
+      "additions": 253,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/mcp/page.tsx",
+      "additions": 289,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/skills/__tests__/page.test.tsx",
+      "additions": 423,
+      "deletions": 12,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/skills/page.tsx",
+      "additions": 282,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/skills-library/__tests__/library-enable-list.test.tsx",
+      "additions": 134,
+      "deletions": 11,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/skills-library/library-enable-list.tsx",
+      "additions": 50,
+      "deletions": 16,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/skills-library/skill-source-api.ts",
+      "additions": 167,
+      "deletions": 35,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 337,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "additions": 337,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "additions": 16,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/skill-manager.ts",
+      "additions": 276,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/task-runner.ts",
+      "additions": 16,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/skill-manager.test.ts",
+      "additions": 224,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/task-runner-file-mcp.test.ts",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/task-runner-skill-detect.test.ts",
+      "additions": 141,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/task-runner.test.ts",
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "NEW:backend/migrations/versions/xxxx_add_workspace_scope_enables.py",
+      "planned": "新增",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "4aaff428f12bd0927e1eb2724201b86c997efb9b7a281e63067e08a2cf382366",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-11T16:13:06.725Z"
+}
