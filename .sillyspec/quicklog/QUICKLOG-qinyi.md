@@ -54,3 +54,9 @@
 根因：群聊面板视觉独立演进——根容器平铺 bg-card 不透明全卡（会话为玻璃 bg-card/80 backdrop-blur + 时间线 bg-background 分层）、输入胶囊 rounded-xl bg-card + primary 聚焦（会话 rounded-2xl bg-muted/40 + brand 柔环）、无输入框高度拖拽能力（会话 ql-20260826-010 已有）
 方案：group-chat-panel 根/头/时间线/typing/输入区逐层抄 session-panel 语义类；拖拽逻辑原样移植并与单聊共享同一 localStorage 键（sillyhub.sessions.inputBarHeight 全局高度偏好）；textarea 去掉 max-h-[120px] 钳制挂受控高度；member-panel 根玻璃化对齐会话列表面板旁栏口径
 结果：群聊 113 用例 + sessions-portal/m-sessions 64 用例全绿、tsc 0 错；dev server 真浏览器实测拖拽 44→144px 落盘 + 双击恢复清键、群聊与会话两面板渲染类名 1:1 对齐（玻璃 blur 24px / bg-background / 胶囊 16px 圆角）
+
+## ql-20260911-020-c7e2 | 2026-09-11 22:50:00 | session-panel-pre-session mock 补 agent_kind（预存债顺手修）
+状态：已完成
+关联变更：2026-09-11-workspace-asset-bridges（verify 门暴露；债务源 1e4bb818f/2026-09-11-session-provider-switch-codex-pi）
+文件：frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（mock provider 补 agent_kind: claude）
+验证：36 passed
