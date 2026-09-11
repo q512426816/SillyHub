@@ -395,3 +395,22 @@
 文件：
 - frontend/src/lib/__tests__/use-daemon-machines.test.ts（sessions 联动用例显式 { includeSessions: true }）
 验证：4 passed；head-check 干净 worktree 复核：本例 HEAD 即红（真债务）、delete-change-confirm HEAD 绿（并行 WIP 污染）
+
+## ql-20260911-019-1f01 | 2026-09-11 10:27:55 | 头像孤儿文件清理：换绑/清除/上传失败三路径遗留文件回收
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/file/service.py（reclaim_orphaned_file_by_url 共享回收入口）
+- backend/app/modules/auth/service.py（update_my_avatar 提交后回收旧值）
+- backend/app/modules/daemon/group/service/members.py（update_member 成员表提交后回收）
+- frontend/src/lib/file/api.ts（deleteFile+tryReclaimOrphanAvatarFile）
+- frontend/src/app/(dashboard)/account/page.tsx+src/app/m/account/page.tsx（保存失败回收新文件）
+- frontend/src/components/group-chat/member-panel.tsx（avatarMutation onError 回收）
+- frontend/src/app/(dashboard)/account/page.test.tsx（软归属·同模块测试，未声明）
+- frontend/src/components/group-chat/__tests__/member-panel.test.tsx（软归属·同模块测试，未声明）
+需求：头像孤儿文件清理：换绑/清除/上传失败三路径遗留文件回收
+根因：头像链路三路径漏回收：换绑与清除后旧文件中心文件失引用、上传成功但保存（PATCH）失败时新文件即刻孤儿，file 模块有 soft delete 能力但本链从不调用，MinIO 孤儿单调增长
+方案：后端 file/service.py 模块级 reclaim_orphaned_file_by_url（/api/file/{uuid} 形态 best-effort 软删，归属 uploaded_by 本人，异常静默不影响主写路径）+ 两写点接线（auth update_my_avatar 提交后回收旧值、group update_member 成员表提交后回收旧 avatar）；前端 lib/file/api.ts 增 deleteFile/tryReclaimOrphanAvatarFile，桌面+移动个人中心与 member-panel 三处在「上传成功但保存失败」catch 里回收新文件（恢复默认空串不触发）
+结果：backend 定向 87 passed（auth 13+group 35+file 39，含换绑/清除/外链/他人文件回收反例），ruff/mypy/format 0；frontend account 15+member-panel 44 passed，tsc 0；模块文档六卡同步+2 处预存引用债顺手修（daemon.md 裸文件名、code-quality 文档缺仓根前缀）
+审计：⚖️ 归属切分：12 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/docs/SillyHub/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONVENTIONS.md, .sillyspec/docs/frontend/scan/CONVENTIONS.md, .sillyspec/docs/multi-agent-platform/scan/CONCERNS.md, backend/app/modules/daemon/tests/test_group_chat_management.py, backend/tests/modules/auth/test_my_avatar.py, docs/architecture-4a.md, docs/code-quality-hardening-2026-07-24.md, docs/research-ai-toolbox-config-management-2026-09-10.md, frontend/src/app/(dashboard)/account/page.tsx, frontend/src/app/m/account/page.tsx
+审计：🔍 软归属：2 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：frontend/src/app/(dashboard)/account/page.test.tsx（+51/-1）, frontend/src/components/group-chat/__tests__/member-panel.test.tsx（+44/-0）

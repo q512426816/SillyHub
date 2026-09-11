@@ -153,6 +153,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 
 ## 变更索引
 
+- ql-20260911-019-1f01 | member-panel 头像 PATCH 失败（onError 携 vars）→ tryReclaimOrphanAvatarFile(vars.avatar) best-effort 回收本次上传的新文件（恢复默认空串不触发）；建群向导本地值路径无服务端写不受影响。
 - ql-20260911-003-355a | group-member-avatar 增可选 disabled prop（外部忙碌门：个人中心 PATCH 在途禁用上传/恢复默认）；mcp-registry/server-form-modal 重构 env 表——「加密」列改用户逐键 Switch 开关（显式指定优先，未触碰行按键名 token/key/secret/password 缺省建议勾选可改，不再自动判定）；编辑态密钥行值固定 <set> 占位（保留提交=不改密钥）、copy 态置空待重填；底部提示文案同步新语义。
 - ql-20260904-028-3cb5 | 工作区 spec 策略支持修改：后端 PATCH /spec-workspace 早已存在但前端无入口——lib/spec-workspaces.ts 补 updateSpecWorkspace（PATCH + 三字段透传）；workspace-config-card 策略行加 owner 门禁「修改」入口（antd Modal 三选、同值禁存、repo-native 写源项目警告、成功 toast 提示点「初始化」重建本地缓存）；生效语义：claim payload 实时读库下发（lease_meta 显式值 > SpecWorkspace.strategy 回退，普通会话缺口由 ql-20260904-030-45d1 补齐），daemon 缓存布局等无条件 pull（=初始化按钮）重建，详见 spec_workspace.md 注意事项
 - ql-20260903-001-4d6e | 视口补拉时序修复（ql-010 部署后实测未解决）：初始/翻页触发原 setTimeout(0) 早于 React DOM 提交与布局——scrollHeight=0 被守卫拦下且无重试，补拉链断在首跳（偶发成功属时序竞争）；scheduleAutoFill 双 rAF 等提交+布局，布局不可读继续 rAF 重试至多 10 帧（~160ms）后放弃，两处触发统一走调度；新增布局延迟就绪用例（前 2 读 0 后可读）

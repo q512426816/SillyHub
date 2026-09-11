@@ -133,6 +133,20 @@ vi.mock("@/lib/file/api", () => ({
   uploadFile: (...args: unknown[]) => mocks.uploadFile(...args),
   getFileDownloadUrl: (id: string) => `/api/file/${id}`,
   fetchFileBlob: vi.fn(async () => new Blob(["x"], { type: "image/png" })),
+  // ql-20260911-019-1f01：删除走 mocks.apiFetch（与真实实现同语义——
+  // /api/file/{36} 形态 fire-and-forget DELETE，吞错）。
+  deleteFile: async (id: string) => {
+    await mocks.apiFetch(`/api/file/${id}`, { method: "DELETE" });
+  },
+  tryReclaimOrphanAvatarFile: (url: string | null | undefined): boolean => {
+    if (!url || !url.startsWith("/api/file/")) return false;
+    const id = url.slice("/api/file/".length);
+    if (!/^[0-9a-fA-F-]{36}$/.test(id)) return false;
+    void mocks
+      .apiFetch(`/api/file/${id}`, { method: "DELETE" })
+      .catch(() => {});
+    return true;
+  },
 }));
 
 vi.mock("@/lib/errors", () => ({
@@ -963,6 +977,36 @@ describe("MemberPanel 成员头像（quick 群成员头像自定义）", () => {
       expect(mocks.apiFetch).toHaveBeenCalledWith(
         "/api/daemon/group-chats/g-1/members/mem-1",
         { method: "PATCH", json: { avatar: "" } },
+      ),
+    );
+  });
+
+  it("上传成功但 PATCH 失败 → 新文件 best-effort 回收（DELETE /api/file/{id}，ql-20260911-019-1f01）", async () => {
+    const group = makeGroup();
+    (group.members![0] as Record<string, unknown>).avatar =
+      "/api/file/f-av-0";
+    renderPanel(
+      <MemberPanel group={group} currentUserId="u-me" />,
+    );
+    const card = await screen.findByTestId("agent-member-card-mem-1");
+    const uploadInput = within(card).getByLabelText(
+      "Agent 成员 小码 头像（选择图片）",
+    );
+    mocks.uploadFile.mockResolvedValue({
+      id: "0e2b4d8e-1111-4222-8333-444455556666",
+      original_name: "a.png",
+      mime_type: "image/png",
+      size: 10,
+    });
+    // PATCH 拒绝（保存失败）→ 上传的新文件被回收
+    mocks.apiFetch.mockRejectedValueOnce(new Error("PATCH failed"));
+    fireEvent.change(uploadInput, {
+      target: { files: [new File(["x"], "a.png", { type: "image/png" })] },
+    });
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        "/api/file/0e2b4d8e-1111-4222-8333-444455556666",
+        { method: "DELETE" },
       ),
     );
   });

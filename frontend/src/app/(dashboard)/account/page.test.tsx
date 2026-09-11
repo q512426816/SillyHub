@@ -14,16 +14,34 @@ vi.mock("@/lib/file/api", () => ({
   uploadFile: vi.fn(),
   getFileDownloadUrl: (id: string) => `/api/file/${id}`,
   fetchFileBlob: vi.fn(async () => new Blob(["x"], { type: "image/png" })),
+  // ql-20260911-019-1f01：删除 + 孤儿回收（与真实实现同语义——/api/file/{36}
+  // 形态才触发，fire-and-forget 吞错）。
+  deleteFile: vi.fn(async () => {}),
+  tryReclaimOrphanAvatarFile: (url: string | null | undefined): boolean => {
+    if (!url || !url.startsWith("/api/file/")) return false;
+    const id = url.slice("/api/file/".length);
+    if (!/^[0-9a-fA-F-]{36}$/.test(id)) return false;
+    void (globalThis as { __reclaimMockDeleter?: (id: string) => void })
+      .__reclaimMockDeleter?.(id);
+    return true;
+  },
 }));
 
 import { changePassword, updateMyAvatar } from "@/lib/auth";
-import { uploadFile } from "@/lib/file/api";
+import { deleteFile, uploadFile } from "@/lib/file/api";
 import { useSession } from "@/stores/session";
 import AccountPage from "@/app/(dashboard)/account/page";
 
 const mockedChangePassword = vi.mocked(changePassword);
 const mockedUpdateMyAvatar = vi.mocked(updateMyAvatar);
 const mockedUploadFile = vi.mocked(uploadFile);
+const mockedDeleteFile = vi.mocked(deleteFile);
+// mock 版 tryReclaimOrphanAvatarFile 的删除落点（绕开模块内闭包，可断言）。
+(globalThis as { __reclaimMockDeleter?: (id: string) => void }).__reclaimMockDeleter = (
+  id: string,
+) => {
+  void mockedDeleteFile(id);
+};
 
 function fillValidForm() {
   fireEvent.change(screen.getByLabelText("旧密码"), {
@@ -194,5 +212,37 @@ describe("AccountPage 个人资料卡片（头像上传，task-07）", () => {
       target: { files: [new File(["x"], "b.png", { type: "image/png" })] },
     });
     expect(await screen.findByText("头像保存失败")).toBeInTheDocument();
+  });
+
+  it("上传成功但保存失败 → 新文件 best-effort 回收（deleteFile 收到新 id，ql-20260911-019-1f01）", async () => {
+    render(<AccountPage />);
+    mockedUploadFile.mockResolvedValue({
+      id: "0e2b4d8e-1111-4222-8333-444455556666",
+      original_name: "c.png",
+      mime_type: "image/png",
+      size: 10,
+    });
+    mockedUpdateMyAvatar.mockRejectedValue(new Error("头像保存失败"));
+    fireEvent.change(screen.getByLabelText("我的头像（选择图片）"), {
+      target: { files: [new File(["x"], "c.png", { type: "image/png" })] },
+    });
+    expect(await screen.findByText("头像保存失败")).toBeInTheDocument();
+    // 上传的文件即刻回收；恢复默认（avatar=null）失败路径不触发删除
+    await waitFor(() =>
+      expect(mockedDeleteFile).toHaveBeenCalledWith(
+        "0e2b4d8e-1111-4222-8333-444455556666",
+      ),
+    );
+    mockedDeleteFile.mockClear();
+    // 恢复默认按钮仅在有自定义头像时渲染——置 store 头像后再触发
+    useSession.setState({
+      user: { ...baseUser, avatar: "/api/file/0e2b4d8e-1111-4222-8333-444455556666" },
+    });
+    const resetBtn = await screen.findByRole("button", { name: "恢复默认" });
+    fireEvent.click(resetBtn);
+    await waitFor(() =>
+      expect(mockedUpdateMyAvatar).toHaveBeenLastCalledWith(null),
+    );
+    expect(mockedDeleteFile).not.toHaveBeenCalled();
   });
 });

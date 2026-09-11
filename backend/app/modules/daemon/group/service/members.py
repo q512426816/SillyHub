@@ -352,7 +352,12 @@ async def update_member(
         )
 
     # quick 成员头像：用户与 agent 成员共用（None=不改，非六要素维度）。
+    # 换绑/清除时旧文件中心文件失引用——落库成功后 best-effort 回收
+    # （ql-20260911-019-1f01；old 在赋值前捕获，成功提交后才回收）。
+    old_member_avatar = member.avatar
+    avatar_replaced = False
     if payload.avatar is not None:
+        avatar_replaced = payload.avatar != member.avatar
         member.avatar = payload.avatar
 
     # task-04（design §4.5）：六要素 diff 基线——变更前的三组维度值
@@ -474,6 +479,13 @@ async def update_member(
     svc._session.add(member)
     await svc._session.commit()
     await svc._session.refresh(member)
+
+    # 头像换绑/清除：成员表已提交 → 旧文件中心文件 best-effort 回收
+    # （ql-20260911-019-1f01；回收失败不影响 PATCH 结果）。
+    if avatar_replaced and old_member_avatar:
+        from app.modules.file.service import reclaim_orphaned_file_by_url
+
+        await reclaim_orphaned_file_by_url(svc._session, old_member_avatar, user=user)
 
     # ── task-04（design §4.5 / §8 member.config.switched）：六要素热切换──
     # 成员表已提交（六要素真相源）；影子存在时按 diff 分组执行 daemon 侧。

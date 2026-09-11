@@ -72,6 +72,7 @@ import {
   type GroupMemberRead,
   type GroupMemberUpdate,
 } from "@/lib/daemon";
+import { tryReclaimOrphanAvatarFile } from "@/lib/file/api";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
 import {
@@ -342,8 +343,11 @@ export function MemberPanel({
     onSuccess: (member) => {
       refreshAnd(`已更新「${member.display_name}」的头像`);
     },
-    onError: (err) => {
+    onError: (err, vars) => {
       notify.error(err, "更新头像失败，请稍后重试");
+      // 上传成功但 PATCH 失败 → 新文件即刻孤儿，best-effort 回收
+      //（ql-20260911-019-1f01；换绑/清除的旧文件由后端落库后回收）。
+      tryReclaimOrphanAvatarFile(vars.avatar);
     },
   });
 

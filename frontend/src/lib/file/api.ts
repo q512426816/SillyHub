@@ -166,6 +166,26 @@ export function getFileDownloadUrl(id: string): string {
   return `/api/file/${id}`;
 }
 
+/** 软删文件（DELETE /api/file/{id} → 204；归属断言在后端，非本人文件 404）。 */
+export async function deleteFile(id: string): Promise<void> {
+  await apiFetch<void>(`/api/file/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/**
+ * best-effort 回收孤儿头像文件（ql-20260911-019-1f01）：URL 为 /api/file/{uuid}
+ * 形态时 fire-and-forget 软删——「上传成功但保存（PATCH）失败」路径的新文件即刻
+ * 兜底回收；其余形态（外链/清除空串/null）不动。返回是否触发了删除。
+ */
+export function tryReclaimOrphanAvatarFile(url: string | null | undefined): boolean {
+  if (!url || !url.startsWith("/api/file/")) return false;
+  const id = url.slice("/api/file/".length);
+  if (!/^[0-9a-fA-F-]{36}$/.test(id)) return false;
+  void deleteFile(id).catch(() => {
+    /* best-effort：失败留孤儿可接受（服务端换绑回收为主路径）。 */
+  });
+  return true;
+}
+
 /**
  * 取文件二进制（Blob）—— 带 Authorization 头，401 单飞刷新重试一次。
  *

@@ -300,11 +300,18 @@ class AuthService:
                 "头像地址仅支持文件中心路径或 http(s) 链接。",
                 details={"reason": "invalid_avatar_value"},
             )
+        old_avatar = user.avatar
         user.avatar = normalized or None
         user.updated_at = _utc_now()
         await self._db.commit()
         await self._db.refresh(user)
         log.info("auth.avatar_update", user_id=str(user_id), cleared=avatar == "")
+        # 换绑/清除后旧文件中心文件失引用 → 服务端 best-effort 回收（本端点是
+        # users.avatar 全仓唯一写点，兜底全部调用方；ql-20260911-019-1f01）。
+        if old_avatar and old_avatar != user.avatar:
+            from app.modules.file.service import reclaim_orphaned_file_by_url
+
+            await reclaim_orphaned_file_by_url(self._db, old_avatar, user=user)
         return user
 
     # ── Helpers ───────────────────────────────────────────────────────────

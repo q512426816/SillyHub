@@ -1998,3 +1998,79 @@ class TestArchiveDeleteSseSignals:
         ]
         assert len(ended_events) == 1
         assert ended_events[0]["status"] == "ended"
+
+
+class TestMemberAvatarOrphanReclaim:
+    """群成员头像换绑/清除的孤儿文件回收（ql-20260911-019-1f01）。"""
+
+    @staticmethod
+    async def _insert_file(db_session: AsyncSession, *, uploaded_by: uuid.UUID) -> uuid.UUID:
+        from datetime import UTC, datetime
+
+        from app.modules.file.model import File
+
+        file_id = uuid.uuid4()
+        db_session.add(
+            File(
+                id=file_id,
+                owner_type="user_avatar",
+                owner_id=None,
+                original_name="m.png",
+                stored_key=f"avatars/{file_id}.png",
+                mime_type="image/png",
+                size=64,
+                uploaded_by=uploaded_by,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await db_session.commit()
+        return file_id
+
+    async def test_replace_and_clear_reclaim_old_avatar_file(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        from app.modules.file.model import File
+
+        env = await _make_env(db_session, owner_name="av-owner")
+        data = await _create_group(
+            client,
+            env.owner_token,
+            project_id=env.project.id,
+            agent_members=[_agent_config(env.runtime.id)],
+        )
+        group_id = data["id"]
+        member_id = next(m["id"] for m in data["members"] if m["member_type"] == "agent")
+
+        old_id = await self._insert_file(db_session, uploaded_by=env.owner.id)
+        new_id = await self._insert_file(db_session, uploaded_by=env.owner.id)
+
+        # 设旧头像 → 换绑新文件 URL：旧 File 软删、新存活
+        resp = await client.patch(
+            f"/api/daemon/group-chats/{group_id}/members/{member_id}",
+            json={"avatar": f"/api/file/{old_id}"},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 200, resp.text
+        resp = await client.patch(
+            f"/api/daemon/group-chats/{group_id}/members/{member_id}",
+            json={"avatar": f"/api/file/{new_id}"},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 200, resp.text
+        old_row = await db_session.get(File, old_id)
+        new_row = await db_session.get(File, new_id)
+        assert old_row is not None and new_row is not None
+        await db_session.refresh(old_row)
+        await db_session.refresh(new_row)
+        assert old_row.deleted_at is not None
+        assert new_row.deleted_at is None
+
+        # 清除（''）：当前头像文件同样回收
+        resp = await client.patch(
+            f"/api/daemon/group-chats/{group_id}/members/{member_id}",
+            json={"avatar": ""},
+            headers=_headers(env.owner_token),
+        )
+        assert resp.status_code == 200, resp.text
+        await db_session.refresh(new_row)
+        assert new_row.deleted_at is not None

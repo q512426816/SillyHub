@@ -9,6 +9,7 @@ import {
 } from "@/components/group-chat/group-member-avatar";
 import { ApiError } from "@/lib/api";
 import { changePassword, updateMyAvatar } from "@/lib/auth";
+import { tryReclaimOrphanAvatarFile } from "@/lib/file/api";
 import { useSession } from "@/stores/session";
 
 const inputCls =
@@ -48,6 +49,9 @@ export default function AccountPage() {
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
         setAvatarError(msg || "头像保存失败，请稍后重试");
+        // 上传成功但保存失败 → 新文件即刻孤儿，best-effort 回收
+        //（ql-20260911-019-1f01；换绑/清除的旧文件由后端落库后回收）。
+        tryReclaimOrphanAvatarFile(avatar);
       } finally {
         setAvatarBusy(false);
       }

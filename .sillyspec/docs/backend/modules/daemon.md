@@ -79,7 +79,10 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   - 用户成员平台头像回落（2026-09-10-account-avatar-upload D-002）：读取路径
     GroupMemberRead.avatar = `member.avatar or user.avatar`（群内自定义优先，
     NULL/'' 均回落平台头像；agent 成员不动）。`_to_read` 保持同步不直查 users 表
-    ——crud 各调用点经 `_user_avatar_map` 批量预取（select in 一次查询免 N+1），
+    - 群成员头像换绑/清除的孤儿回收（ql-20260911-019-1f01）：update_member 提交
+    成功后旧 avatar 若为 /api/file/{id} 形态经 file 模块 reclaim_orphaned_file_by_url
+    best-effort 软删（归属 uploaded_by=操作者；失败不影响 PATCH 结果）；
+  ——crud 各调用点经 `_user_avatar_map` 批量预取（select in 一次查询免 N+1），
     members 加/改成员返回单查目标 user；读取端解析非快照，平台头像更新后群读实时取新值。
   - @路由：`_parse_group_mentions`（全/半角 @ 昵称精确命中成员表 display_name，
     @全体/@all 广播全部 agent 成员）；未@仅落时间线进群背景摘要（context_window
@@ -142,7 +145,7 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
     第 4-6 字节 ≠ EF BB BF，违反即构建失败）。dist_router 用 `read_text(utf-8-sig)` 读模板
     以**剥掉 BOM**（防 `\ufeff` 污染 `irm | iex` 管道——残留 BOM 会让用户首行注释被当
     代码执行，报"无法将 Windows 项识别为 cmdlet"），响应
-    `application/x-powershell; charset=utf-8`；测试锚点 `test_daemon_dist.py::test_install_ps1`
+    `application/x-powershell; charset=utf-8`；测试锚点 `backend/tests/test_daemon_dist.py::test_install_ps1`
     （fixture 模板带单 BOM + 断言响应体不以 `\ufeff` 开头）。
   - nginx 部署契约（2026-08-26 修复）：宿主机 nginx（`/etc/nginx/sites-enabled/crrcdt`）
     把整个 `location /daemon/` **代理到后端 8001**（install.sh / install.ps1 / latest.json /
