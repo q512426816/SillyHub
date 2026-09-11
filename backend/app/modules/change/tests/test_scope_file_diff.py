@@ -271,7 +271,7 @@ async def test_file_diff_200_rpc_contract_and_dto(client: AsyncClient, setup_env
         "change": "2026-09-10-mcp-central-registry",
         "file": "src/a.ts",
     }
-    assert call["timeout"] == 35.0
+    assert call["timeout"] == 135.0  # ≥ daemon 命令超时 120s + 余量
     assert call["daemon_id"] == env.daemon_id
 
 

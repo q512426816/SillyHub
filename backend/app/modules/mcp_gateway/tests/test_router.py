@@ -185,14 +185,11 @@ async def test_create_rejects_invalid_scope(client: AsyncClient, db_session: Asy
 
 
 @pytest.mark.asyncio
-async def test_create_returns_gateway_url_derived_from_forwarded_headers(
+async def test_create_gateway_url_null_when_unconfigured_despite_forwarded_headers(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """gateway_url 与 token 成对返回：无显式配置时从请求转发头推导（+ /mcp/ 尾斜杠）。
-
-    反代场景外部 scheme/host 只在 X-Forwarded-* 头里（uvicorn 未开
-    --proxy-headers 时 request.url 是容器内视角），推导必须看转发头。
-    """
+    """ql-20260911-003-355a P2：未显式配置时 gateway_url=null——不信任可被请求方
+    影响的 X-Forwarded-* / Host 头（token 成对落盘约定下会被引向第三方主机）。"""
     ws = await _make_workspace(db_session)
     _, token = await _make_user(db_session, admin=True)
 
@@ -201,13 +198,12 @@ async def test_create_returns_gateway_url_derived_from_forwarded_headers(
         headers={
             "Authorization": f"Bearer {token}",
             "x-forwarded-proto": "https",
-            "x-forwarded-host": "crrcdt.ppdmq.top",
+            "x-forwarded-host": "attacker.example.com",
         },
         json={"name": "ci", "scope": ["read"]},
     )
     assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["gateway_url"] == "https://crrcdt.ppdmq.top/mcp/"
+    assert resp.json()["gateway_url"] is None
 
 
 @pytest.mark.asyncio

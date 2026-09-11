@@ -220,6 +220,13 @@ class AuthUserInactive(AppError):
     http_status = status.HTTP_401_UNAUTHORIZED
 
 
+class AuthAvatarInvalid(AppError):
+    """头像值形态非法（ql-20260911-003-355a P2：仅允许文件中心路径或 http(s) 外链）。"""
+
+    code = "HTTP_422_AUTH_AVATAR_INVALID"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
 class PermissionDenied(AppError):
     code = "HTTP_403_PERMISSION_DENIED"
     http_status = status.HTTP_403_FORBIDDEN

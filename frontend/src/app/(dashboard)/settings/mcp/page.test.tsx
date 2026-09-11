@@ -15,7 +15,7 @@
  *   4. 「对我启用」开关 → user binding mutate（FR-03）
  *   5. admin 平台库 tab「设为平台默认」→ platform binding mutate
  *   6. 非 admin 平台库只读：无编辑/删除入口 + 只读提示（D-001）
- *   7. 新建弹窗：secret 键「🔒 将加密」预判 + 保存调 POST 形状（R-05）
+ *   7. 新建弹窗：加密开关用户逐键指定（缺省按键名建议）+ 保存调 POST 形状
  *   8. 白名单编辑器不回归（admin 仍可增删保存）
  */
 
@@ -117,6 +117,7 @@ function makeServer(over: Partial<McpServerRead> & { id: string; name: string })
   return {
     owner_user_id: null,
     server_type: "stdio",
+    secret_env_keys: [],
     server_config: {
       command: "npx",
       args: ["-y", `${over.name}-mcp`],
@@ -331,7 +332,7 @@ describe("MCP 资产库页 task-11", () => {
     expect(screen.queryByText("MCP server 白名单")).not.toBeInTheDocument();
   });
 
-  it("新建弹窗：secret 键「🔒 将加密」预判 + 保存调 POST 形状", async () => {
+  it("新建弹窗：加密开关用户逐键指定 + 保存调 POST 形状（ql-20260911-003-355a）", async () => {
     renderPage(<McpRegistryPage />);
     await screen.findByText("context7");
 
@@ -340,19 +341,15 @@ describe("MCP 资产库页 task-11", () => {
       await screen.findByText("新建 MCP Server（stdio）"),
     ).toBeInTheDocument();
 
-    // 加两行 env：明文键 + secret 键
+    // 加两行 env：明文键 + 键名含 KEY 的键（缺省建议加密——用户可改）
     fireEvent.click(screen.getByRole("button", { name: "+ 添加 env 键值" }));
     fireEvent.click(screen.getByRole("button", { name: "+ 添加 env 键值" }));
     const keyInputs = screen.getAllByPlaceholderText("MYSQL_HOST");
-    const valueInputs = screen.getAllByPlaceholderText(/值（保留/);
     fireEvent.change(keyInputs[0]!, { target: { value: "MYSQL_HOST" } });
     fireEvent.change(keyInputs[1]!, { target: { value: "MYSQL_KEY" } });
+    const valueInputs = screen.getAllByPlaceholderText(/^(值|值（编辑保留)/);
     fireEvent.change(valueInputs[0]!, { target: { value: "127.0.0.1" } });
     fireEvent.change(valueInputs[1]!, { target: { value: "p@ss" } });
-
-    // secret 键（含 KEY 子串）→ 🔒 将加密 pill；普通键 → 明文
-    expect(await screen.findByText("🔒 将加密")).toBeInTheDocument();
-    expect(screen.getByText("明文")).toBeInTheDocument();
 
     // 名称 + command 必填
     fireEvent.change(screen.getByPlaceholderText("如 mysql-dev"), {
@@ -375,6 +372,8 @@ describe("MCP 资产库页 task-11", () => {
         args: [],
         env: { MYSQL_HOST: "127.0.0.1", MYSQL_KEY: "p@ss" },
       },
+      // MYSQL_KEY 未显式触碰开关 → 按键名缺省建议进指定清单（用户自定义可改）
+      secret_env_keys: ["MYSQL_KEY"],
       scope: "platform", // admin 当前在平台 tab，保存到缺省平台共享库
       source: "manual",
     });
@@ -509,6 +508,7 @@ describe("MCP 资产库页 task-12：导入入口 + 诊断面板", () => {
           id: "t1",
           name: "memory",
           server_config: { type: "stdio", command: "npx -y @modelcontextprotocol/server-memory", args: [], env: {} },
+          secret_env_keys: [],
           is_preset: true,
           owner_user_id: null,
           created_at: "2026-09-10T00:00:00",

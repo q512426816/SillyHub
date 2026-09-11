@@ -846,6 +846,9 @@ export async function startAction(opts: StartOptions): Promise<number> {
         );
       },
       onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
+      // ql-20260911-003-355a P2：受控 reload 成功 → 回收 modelUsage 差分基线
+      //（pi/cursor 句柄重建后快照归零，残留基线致恢复首轮少记）。
+      onSessionReloaded: (sessionId) => daemon.onSessionReloaded(sessionId),
       // task-04（FR-01~03）：session 反馈事件桥接 → HubClient 对应 notify 方法。
       // 失败仅日志不阻塞；字段从 camelCase event 映射为 snake_case body。
       // ql-20260827-007：后台任务终态自动唤醒——session-manager debounce 合并后

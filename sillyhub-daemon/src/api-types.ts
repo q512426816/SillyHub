@@ -2166,6 +2166,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/sillyspec/scope-audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Scope Audit
+         * @description 对账表：计划×实际三态全表 + 行数（变更中心结果卡数据源）。
+         *
+         *     daemon 在本机跑 ``sillyspec scope-audit --change <c> --json``（锚点与
+         *     --file/行数同源）。full-flow 行 verdict=计划内/计划外/计划未动，quick 行
+         *     attribution=已声明/软归属/未声明。错误族与 file-diff 端点同源（422 升级
+         *     引导 / 404 未绑定 / 502 离线远端 / 504 超时）。
+         */
+        get: operations["get_change_scope_audit_api_workspaces__workspace_id__sillyspec_scope_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/scan-docs": {
         parameters: {
             query?: never;
@@ -3650,9 +3675,9 @@ export interface paths {
          *     ``created_by`` 记当前操作 user（审计），token 本身无关 user 身份——但派发类
          *     tool 用 ``created_by`` 作 dispatch actor，无归属 token 派发会被拒（spike P1-4）。
          *
-         *     ``gateway_url``（spike P0-2）与 token 成对返回：解析优先
-         *     ``MCP_GATEWAY_PUBLIC_BASE_URL`` 配置，缺省从本请求的转发头推导——在哪签发
-         *     就下发哪的接入地址。
+         *     ``gateway_url``（spike P0-2）与 token 成对返回：仅取
+         *     ``MCP_GATEWAY_PUBLIC_BASE_URL`` 显式配置（ql-20260911-003-355a P2：转发头
+         *     可被请求方影响，不再作推导源）；未配置 → null（调用方按部署文档配置后重签）。
          */
         post: operations["create_mcp_token_api_workspaces__workspace_id__mcp_tokens_post"];
         delete?: never;
@@ -16709,8 +16734,11 @@ export interface components {
          * McpServerCreate
          * @description ``POST /api/mcp-servers`` 请求体。
          *
-         *     ``server_config`` 的 env 中 secret 键由 service 抽列加密进 encrypted_env
-         *     （task-02）；scope=platform 需 SETTINGS_ADMIN（router 层权限矩阵）。
+         *     ``secret_env_keys``：用户指定的密钥键名清单（ql-20260911-003-355a 用户自定义
+         *     密钥类型）——清单内键值由 service 抽列加密进 encrypted_env，其余 env 键按
+         *     明文留在 server_config；缺省 None=全部明文。清单键必须存在于 env（422），
+         *     值一律不接受 ``<set>`` 占位符（创建无既有密文可保留）。scope=platform 需
+         *     SETTINGS_ADMIN（router 层权限矩阵）。
          */
         McpServerCreate: {
             /** Name */
@@ -16719,6 +16747,8 @@ export interface components {
             server_config: {
                 [key: string]: unknown;
             };
+            /** Secret Env Keys */
+            secret_env_keys?: string[] | null;
             /**
              * Scope
              * @default mine
@@ -16754,6 +16784,11 @@ export interface components {
             server_config: {
                 [key: string]: unknown;
             };
+            /**
+             * Secret Env Keys
+             * @default []
+             */
+            secret_env_keys: string[];
             /** Tags */
             tags: string[];
             /** Note */
@@ -16826,8 +16861,10 @@ export interface components {
         };
         /**
          * McpServerRead
-         * @description 列表项（env 脱敏 + 绑定态 + 诊断徽标，design REST 列表行）。
+         * @description 列表项（密钥键集回显 + 绑定态 + 诊断徽标，design REST 列表行）。
          *
+         *     ``secret_env_keys``：service 注入的密钥键名清单（= encrypted_env 键集）；
+         *     ``server_config.env`` 只含明文键（密钥键不出现，值永不回明文）。
          *     绑定态/诊断徽标由 service 注入；缺省 False/空为安全方向（绝不虚报已绑定）。
          */
         McpServerRead: {
@@ -16846,6 +16883,11 @@ export interface components {
             server_config: {
                 [key: string]: unknown;
             };
+            /**
+             * Secret Env Keys
+             * @default []
+             */
+            secret_env_keys: string[];
             /** Tags */
             tags: string[];
             /** Note */
@@ -16885,6 +16927,12 @@ export interface components {
         /**
          * McpServerUpdate
          * @description ``PATCH /api/mcp-servers/{id}`` 请求体（None=不动该字段）。
+         *
+         *     换 ``server_config`` 时：``secret_env_keys`` 同给则为其权威指定态；缺省则
+         *     沿用既有密钥键集（与提交 env 的交集）。密钥键值 = ``<set>`` 占位符 = 保留
+         *     既有密文（service 占位语义）；从密钥改明文的键必须提交新值（占位符 422）。
+         *     只改 ``secret_env_keys``（不动 server_config）也支持：升级键值由明文加密，
+         *     降级键解密回明文 env。
          */
         McpServerUpdate: {
             /** Name */
@@ -16893,6 +16941,8 @@ export interface components {
             server_config?: {
                 [key: string]: unknown;
             } | null;
+            /** Secret Env Keys */
+            secret_env_keys?: string[] | null;
             /** Tags */
             tags?: string[] | null;
             /** Note */
@@ -16904,8 +16954,10 @@ export interface components {
          * McpTemplateCreate
          * @description ``POST /api/mcp-servers/templates`` 双形态请求体（对齐 FetchModelsRequest 先例）。
          *
-         *     形态① ``from_server_id``：从既有 server 存为模板（service 只取非 secret env）；
-         *     形态② ``server_config``：直接给配置。二者互斥（``_enforce_dual_form``）。
+         *     形态① ``from_server_id``：从既有 server 存为模板（service 只取明文 env，
+         *     密钥键名随 ``secret_env_keys`` 保留——模板只记「哪些键要加密」不记值）；
+         *     形态② ``server_config`` + ``secret_env_keys``：直接给配置与指定态。二者互斥
+         *     （``_enforce_dual_form``）。
          */
         McpTemplateCreate: {
             /** Name */
@@ -16916,6 +16968,11 @@ export interface components {
             server_config?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Secret Env Keys
+             * @default []
+             */
+            secret_env_keys: string[];
         };
         /** McpTemplateList */
         McpTemplateList: {
@@ -16924,7 +16981,7 @@ export interface components {
         };
         /**
          * McpTemplateRead
-         * @description 模板列表项（明文本无 secret，输出仍走脱敏兜底——防御纵深）。
+         * @description 模板列表项（明文 env 无密钥值 + ``secret_env_keys`` 指定态回显）。
          */
         McpTemplateRead: {
             /**
@@ -16938,6 +16995,11 @@ export interface components {
             server_config: {
                 [key: string]: unknown;
             };
+            /**
+             * Secret Env Keys
+             * @default []
+             */
+            secret_env_keys: string[];
             /** Is Preset */
             is_preset: boolean;
             /** Owner User Id */
@@ -16985,9 +17047,9 @@ export interface components {
             token: string;
             /**
              * Gateway Url
-             * @description 本部署的 MCP gateway 接入端点（形如 https://<host>/mcp/，带尾斜杠）。token 只在这个 URL 上有效，两者必须成对保存使用。
+             * @description 本部署的 MCP gateway 接入端点（形如 https://<host>/mcp/，带尾斜杠）。token 只在这个 URL 上有效，两者必须成对保存使用。null=部署未配置 MCP_GATEWAY_PUBLIC_BASE_URL（不从未经钉死的请求头推导，防 token 被 引向第三方主机）——请配置后重新签发。
              */
-            gateway_url: string;
+            gateway_url?: string | null;
             /** Name */
             name: string;
             /** Scope */
@@ -21221,6 +21283,81 @@ export interface components {
             dispatched_at?: string | null;
             /** Cancelled At */
             cancelled_at?: string | null;
+        };
+        /**
+         * ScopeAuditResponse
+         * @description 对账表（daemon sillyspec_scope_audit RPC 透传投影）。
+         *
+         *     ok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。
+         *     truncated：rows 超 500 被 daemon 侧截断。
+         */
+        ScopeAuditResponse: {
+            /** Change */
+            change: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Mode
+             * @default full-flow
+             */
+            mode: string;
+            /** Base Ref */
+            base_ref?: string | null;
+            /** Anchor Label */
+            anchor_label?: string | null;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+            totals?: components["schemas"]["ScopeAuditTotals"];
+            /** Rows */
+            rows?: components["schemas"]["ScopeAuditRow"][];
+            /** Excluded Foreign Declared */
+            excluded_foreign_declared?: string[];
+            /** Note */
+            note?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * ScopeAuditRow
+         * @description 对账表单行：full-flow 带 verdict（planned/unplanned/untouched）+ planned
+         *     （design 文件清单原话），quick 带 attribution（declared/soft/undeclared）+
+         *     declared——两组字段按 mode 互斥取用。二进制文件行数 null。
+         */
+        ScopeAuditRow: {
+            /** Path */
+            path: string;
+            /** Additions */
+            additions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /**
+             * Kind
+             * @default modified
+             */
+            kind: string;
+            /** Planned */
+            planned?: string | null;
+            /** Verdict */
+            verdict?: string | null;
+            /** Declared */
+            declared?: boolean | null;
+            /** Attribution */
+            attribution?: string | null;
+        };
+        /** ScopeAuditTotals */
+        ScopeAuditTotals: {
+            /**
+             * Files
+             * @default 0
+             */
+            files: number;
+            /** Additions */
+            additions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
         };
         /**
          * ScopeFileDiffResponse
@@ -28988,6 +29125,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScopeFileDiffResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_scope_audit_api_workspaces__workspace_id__sillyspec_scope_audit_get: {
+        parameters: {
+            query: {
+                /** @description 变更名或 quick-<8hex> 会话名（scope-audit --change 同参） */
+                change: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeAuditResponse"];
                 };
             };
             /** @description Validation Error */

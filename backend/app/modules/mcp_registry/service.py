@@ -20,12 +20,15 @@ binding 约束（D-002，DB partial unique 之外的 service 层业务约束）�
   或 server 为平台共享（owner NULL）——否则 422 ``McpBindingScopeInvalid``；
 - 重复 binding 先友好预检（409），``IntegrityError`` 兜底并发（skills 先例）。
 
-加密读写（Grill CC-03 / R-04）：
-- secret 键判定与 schema 脱敏同源——直接 import ``schema._SECRET_KEY_MARKERS``
-  （token/key/secret/password 子串，大小写不敏感，settings/router.py:164 同款）；
-- 写：env 逐键抽列，``CredentialCipher.encrypt(str)->(bytes, key_id)`` 循环调用
+加密读写（Grill CC-03 / R-04 / ql-20260911-003-355a 用户自定义密钥类型）：
+- 密钥键集由用户显式指定（``McpServerCreate/Update.secret_env_keys``），不再按
+  键名子串（token/key/secret/password）自动判定；落库后权威键集 =
+  ``encrypted_env`` 的键集，读侧 ``secret_env_keys`` 由其派生回显；
+- 写：指定键逐键抽列，``CredentialCipher.encrypt(str)->(bytes, key_id)`` 循环调用
   → ``McpEnvCiphertext.of`` 信封化（base64 ct + key_id）入 ``encrypted_env``，
-  ``server_config.env`` 只留非 secret 明文键（明文永不入 ORM）；
+  ``server_config.env`` 只留明文键（明文永不入 ORM 密文列）；
+- 编辑占位语义（P0-2 修复）：更新时密钥键值 == ``<set>`` 占位符 = 保留既有
+  密文；创建一律拒绝占位符；从密钥改明文必须提交新值；
 - 读：``decrypt_server_env`` 逐键还原完整 env；key 失配抛 ``CipherKeyMismatch``
   不在本层吞错（留给 task-04 诊断降级 decrypt_failed）。
 
@@ -53,7 +56,7 @@ from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
 from app.modules.mcp_registry.model import McpServer, McpServerBinding
 from app.modules.mcp_registry.schema import (
-    _SECRET_KEY_MARKERS,
+    _SECRET_REDACTED_PLACEHOLDER,
     McpEnvCiphertext,
     McpServerCreate,
     McpServerDetail,
@@ -127,22 +130,38 @@ class McpBindingNotFound(AppError):
     http_status = 404
 
 
-# ── secret env 切分（与 schema 脱敏同源：_SECRET_KEY_MARKERS）────────────────
+class McpServerSecretEnvInvalid(AppError):
+    """密钥键指定态非法（422）：键不存在于 env、创建/新键用了 ``<set>`` 占位符、
+    或明文键值是占位符（ql-20260911-003-355a 用户自定义密钥类型 + P0-2）。"""
+
+    code = "HTTP_422_MCP_SERVER_SECRET_ENV_INVALID"
+    http_status = 422
 
 
-def _is_secret_env_key(key: str) -> bool:
-    """键名含 token/key/secret/password 子串（大小写不敏感）→ secret（R-05 双向一致）。"""
-    lowered = str(key).lower()
-    return any(marker in lowered for marker in _SECRET_KEY_MARKERS)
+# ── secret env 切分（用户显式指定键集，ql-20260911-003-355a）──────────────────
+
+
+def _normalize_secret_keys(secret_keys: list[str] | None) -> list[str]:
+    """指定清单去重保序（None → 空清单）。"""
+    if not secret_keys:
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for key in secret_keys:
+        if key not in seen:
+            seen.add(key)
+            ordered.append(key)
+    return ordered
 
 
 def _split_secret_env(
     server_config: dict[str, Any],
+    secret_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """server_config 浅拷贝为「env 仅剩非 secret 键」形态。
+    """server_config 浅拷贝为「env 仅剩明文键」形态（指定键集抽列）。
 
-    返回 ``(净化后 server_config, secret 键明文映射)``；无 env 或 env 非 dict 时
-    原样返回空 secret 映射。secret 值统一 ``str()`` 归一后加密（解密回读为 str）。
+    返回 ``(净化后 server_config, 密钥明文映射)``；无 env 或 env 非 dict 时原样
+    返回空密钥映射。密钥值统一 ``str()`` 归一后加密（解密回读为 str）。
     """
     sanitized = dict(server_config)
     env = sanitized.get("env")
@@ -151,12 +170,18 @@ def _split_secret_env(
     plain: dict[str, Any] = {}
     secret: dict[str, Any] = {}
     for k, v in env.items():
-        if _is_secret_env_key(k):
+        if k in secret_keys:
             secret[k] = v
         else:
             plain[k] = v
     sanitized["env"] = plain
     return sanitized, secret
+
+
+def _env_keys(server_config: dict[str, Any]) -> set[str]:
+    """server_config.env 的键集（env 非 dict 时空集）。"""
+    env = server_config.get("env")
+    return set(env) if isinstance(env, dict) else set()
 
 
 class McpRegistryService:
@@ -215,6 +240,8 @@ class McpRegistryService:
         stmt = stmt.order_by(col(McpServer.created_at).desc())
         rows = list((await self._session.execute(stmt)).scalars().all())
         items = [McpServerRead.model_validate(row) for row in rows]
+        for item, row in zip(items, rows, strict=True):
+            item.secret_env_keys = list(row.encrypted_env or {})
         if search:
             needle = search.strip().lower()
             items = [i for i in items if needle in i.name.lower() or needle in i.note.lower()]
@@ -226,7 +253,11 @@ class McpRegistryService:
     # ── CRUD ──────────────────────────────────────────────────────────
 
     async def create_server(self, inp: McpServerCreate, user: User) -> McpServerDetail:
-        """创建 server（design：scope=platform 需 admin；stdio-only；secret 抽列加密）。"""
+        """创建 server（design：scope=platform 需 admin；stdio-only；指定密钥键抽列加密）。
+
+        密钥键集 = ``inp.secret_env_keys``（用户显式指定）；键必须存在于 env，
+        且值一律不接受 ``<set>`` 占位符（创建无既有密文可保留）。
+        """
         self._validate_name(inp.name)
         self._validate_server_type(inp.server_config)
         owner: uuid.UUID | None
@@ -237,7 +268,9 @@ class McpRegistryService:
             owner = user.id
         await self._require_name_available(inp.name, owner)
 
-        sanitized, secret_env = _split_secret_env(inp.server_config)
+        secret_keys = _normalize_secret_keys(inp.secret_env_keys)
+        self._validate_secret_keys(inp.server_config, secret_keys, allow_placeholder=False)
+        sanitized, secret_env = _split_secret_env(inp.server_config, secret_keys)
         row = McpServer(
             name=inp.name,
             owner_user_id=owner,
@@ -273,7 +306,13 @@ class McpRegistryService:
         inp: McpServerUpdate,
         user: User,
     ) -> McpServerDetail:
-        """部分更新（None=不动；换 server_config 时重抽列重加密整份 env）。"""
+        """部分更新（None=不动；换 server_config 时按指定键集重抽列，占位符保留旧密文）。
+
+        占位语义（P0-2 修复）：提交的密钥键值 == ``<set>`` 且该键已有密文 → 保留
+        既有信封不重加密；新密钥键用占位符、或明文键值是占位符 → 422。只改
+        ``secret_env_keys``（不动 server_config）同样支持：升级键值明文加密、
+        降级键解密回明文 env。
+        """
         row = await self._get_server_for_write(server_id, user)
         updates = inp.model_dump(exclude_unset=True)
 
@@ -284,11 +323,34 @@ class McpRegistryService:
             row.name = new_name
 
         new_config = updates.pop("server_config", None)
+        new_secret_keys = updates.pop("secret_env_keys", None)
         if new_config is not None:
             self._validate_server_type(new_config)
-            sanitized, secret_env = _split_secret_env(new_config)
+            existing_env = row.encrypted_env or {}
+            if new_secret_keys is None:
+                # 指定态未随提交：沿用既有密钥键集与提交 env 的交集（保底不改密文）。
+                secret_keys = [k for k in existing_env if k in _env_keys(new_config)]
+            else:
+                secret_keys = _normalize_secret_keys(new_secret_keys)
+            self._validate_secret_keys(new_config, secret_keys, allow_placeholder=True)
+            sanitized, secret_env = _split_secret_env(new_config, secret_keys)
+            self._validate_plain_placeholder(sanitized)
+            encrypted: dict[str, dict[str, str]] = {}
+            for key, value in secret_env.items():
+                if isinstance(value, str) and value == _SECRET_REDACTED_PLACEHOLDER:
+                    if key not in existing_env:
+                        raise McpServerSecretEnvInvalid(
+                            f"密钥 {key!r} 无既有密文，不能提交占位符——请输入真实值。",
+                            details={"key": key, "reason": "placeholder_without_existing"},
+                        )
+                    encrypted[key] = existing_env[key]
+                else:
+                    ciphertext, key_id = self.cipher.encrypt(str(value))
+                    encrypted[key] = McpEnvCiphertext.of(ciphertext, key_id).model_dump()
             row.server_config = sanitized
-            row.encrypted_env = self._encrypt_secret_env(secret_env)
+            row.encrypted_env = encrypted or None
+        elif new_secret_keys is not None:
+            self._redesignate_secret_keys(row, _normalize_secret_keys(new_secret_keys))
 
         for field in ("tags", "note", "enabled"):
             if field in updates:
@@ -541,11 +603,88 @@ class McpRegistryService:
                 details={"type": str(declared)},
             )
 
+    @staticmethod
+    def _validate_secret_keys(
+        server_config: dict[str, Any],
+        secret_keys: list[str],
+        *,
+        allow_placeholder: bool,
+    ) -> None:
+        """密钥键指定态校验：键必须存在于 env；占位符值按调用语境拦截。
+
+        - 键不存在于 env → 422（指定态与提交配置脱节，通常是前端丢行）；
+        - ``allow_placeholder=False``（创建）：任何 env 值 == ``<set>`` → 422
+          （创建无既有密文可保留，占位符只能是误回传）；
+        - ``allow_placeholder=True``（更新）：占位符仅对指定密钥键合法（新键占位
+          的拦截在调用方逐键处理——需知既有键集）。
+        """
+        env_keys = _env_keys(server_config)
+        missing = [k for k in secret_keys if k not in env_keys]
+        if missing:
+            raise McpServerSecretEnvInvalid(
+                f"密钥键不存在于提交的 env 中：{missing!r}",
+                details={"missing_keys": missing, "reason": "key_not_in_env"},
+            )
+        env = server_config.get("env")
+        if isinstance(env, dict) and not allow_placeholder:
+            for key, value in env.items():
+                if isinstance(value, str) and value == _SECRET_REDACTED_PLACEHOLDER:
+                    raise McpServerSecretEnvInvalid(
+                        f"env 键 {key!r} 的值是占位符——创建时请输入真实值。",
+                        details={"key": key, "reason": "placeholder_on_create"},
+                    )
+
+    @staticmethod
+    def _validate_plain_placeholder(sanitized_config: dict[str, Any]) -> None:
+        """净化后配置的明文 env 不允许残留占位符（用户把明文行留成 <set>）。"""
+        env = sanitized_config.get("env")
+        if not isinstance(env, dict):
+            return
+        for key, value in env.items():
+            if isinstance(value, str) and value == _SECRET_REDACTED_PLACEHOLDER:
+                raise McpServerSecretEnvInvalid(
+                    f"明文 env 键 {key!r} 的值不能是占位符——请输入真实值或将其设为密钥。",
+                    details={"key": key, "reason": "placeholder_on_plain_key"},
+                )
+
+    def _redesignate_secret_keys(self, row: McpServer, secret_keys: list[str]) -> None:
+        """只改指定态（不动 server_config）：升级键明文加密、降级键解密回明文 env。
+
+        键必须存在于当前 env（明文位）或 encrypted_env（密钥位）——其余 422。
+        降级解密失败（CipherKeyMismatch 等）原样上抛（与读路径同口径，不吞错）。
+        """
+        config = dict(row.server_config) if isinstance(row.server_config, dict) else {}
+        env = dict(config.get("env")) if isinstance(config.get("env"), dict) else {}
+        existing_env = row.encrypted_env or {}
+        known = set(env) | set(existing_env)
+        missing = [k for k in secret_keys if k not in known]
+        if missing:
+            raise McpServerSecretEnvInvalid(
+                f"密钥键不存在于当前配置中：{missing!r}",
+                details={"missing_keys": missing, "reason": "key_not_in_env"},
+            )
+        encrypted: dict[str, dict[str, str]] = {}
+        for key in secret_keys:
+            if key in existing_env:
+                encrypted[key] = existing_env[key]
+            else:
+                ciphertext, key_id = self.cipher.encrypt(str(env.pop(key)))
+                encrypted[key] = McpEnvCiphertext.of(ciphertext, key_id).model_dump()
+        for key, envelope in existing_env.items():
+            if key in secret_keys:
+                continue
+            entry = McpEnvCiphertext.model_validate(envelope)
+            env[key] = self.cipher.decrypt(base64.b64decode(entry.ct), entry.key_id)
+        config["env"] = env
+        row.server_config = config
+        row.encrypted_env = encrypted or None
+
     # ── DTO 组装与 binding 态注入 ─────────────────────────────────────
 
     async def _to_detail(self, row: McpServer, user: User) -> McpServerDetail:
-        """ORM 行 → 详情 DTO（env 脱敏 + encrypted_env ct 遮蔽由 schema validator 强制）。"""
+        """ORM 行 → 详情 DTO（密钥键集回显 + encrypted_env ct 遮蔽由 schema 强制）。"""
         detail = McpServerDetail.model_validate(row)
+        detail.secret_env_keys = list(row.encrypted_env or {})
         await self._annotate_binding_states([detail], user)
         return detail
 

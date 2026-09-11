@@ -4,10 +4,18 @@ Change: 2026-09-10-mcp-central-registry（task-08 / FR-06、D-004、D-005 +
 task-09 / FR-07、D-004）。两路径共享本模块与 ``service.create_server`` 落库
 链路，行为互不干扰：JSON 路径无 dedup_key，workspace 路径有去重锚。
 
-分层铁律：落库一律经 ``McpRegistryService.create_server``（task-02）——secret
-键判定（``_SECRET_KEY_MARKERS`` 键名规则）与 CredentialCipher 抽列加密全部在
-service 完成，本模块禁止直接触碰 get_cipher / CredentialCipher；scope 语义
-（platform → owner NULL 需 admin / mine → owner=操作者）同样由 service 承载。
+分层铁律：落库一律经 ``McpRegistryService.create_server``（task-02）——密钥键
+指定（ql-20260911-003-355a：导入文件无用户指定态，按键名子串规则给出**缺省
+建议**并物化为显式 ``secret_env_keys``，用户可再编辑）与 CredentialCipher 抽列
+加密全部在 service 完成，本模块禁止直接触碰 get_cipher / CredentialCipher；
+scope 语义（platform → owner NULL 需 admin / mine → owner=操作者）同样由
+service 承载。
+
+工作区访问门（P0-1 修复，ql-20260911-003-355a）：scan/apply 对被扫描的
+workspace 强制成员校验——非平台 admin 的可见集 =
+``rbac.allowed_workspace_ids(WORKSPACE_READ)``（与 workspace 模块端点同权限点）；
+平台 admin（SETTINGS_ADMIN）放行全部。指定 workspace_id 非可见 → 403；apply
+候选夹带非可见 workspace → 403 fail-fast（逐条容错只覆盖数据形态，不覆盖越权）。
 
 JSON 粘贴路径（task-08）——包装探测（ai-toolbox 粘贴导入兼容思路）：顶层 dict
 依次探测 ``mcpServers``、``servers``、``mcp`` 三键取首个 dict 值（Claude Code /
@@ -53,11 +61,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.errors import AppError
+from app.core.errors import AppError, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
+from app.modules.auth.rbac import allowed_workspace_ids, has_permission
 from app.modules.mcp_registry.model import McpServer
 from app.modules.mcp_registry.schema import (
+    _SECRET_KEY_MARKERS,
     McpImportResult,
     McpServerCreate,
     McpWorkspaceCandidate,
@@ -99,6 +110,38 @@ class McpImportPayloadInvalid(AppError):
 
     code = "HTTP_400_MCP_IMPORT_PAYLOAD_INVALID"
     http_status = 400
+
+
+def _suggest_secret_keys(server_config: dict[str, Any]) -> list[str]:
+    """导入缺省建议：键名含 token/key/secret/password 子串的键（物化为显式指定态）。
+
+    原始文件（.mcp.json / 粘贴 JSON）没有用户指定态——导入时按键名规则给出
+    缺省建议并落库为 ``secret_env_keys``；用户可在资产库编辑弹窗里逐键改指定。
+    """
+    env = server_config.get("env")
+    if not isinstance(env, dict):
+        return []
+    suggested: list[str] = []
+    for key in env:
+        lowered = str(key).lower()
+        if any(marker in lowered for marker in _SECRET_KEY_MARKERS):
+            suggested.append(key)
+    return suggested
+
+
+async def _visible_workspace_ids(session: AsyncSession, user: User) -> set[uuid.UUID] | None:
+    """当前用户可访问的 workspace 键集；平台 admin（SETTINGS_ADMIN）→ None=全部。
+
+    非 admin 可见集 = ``rbac.allowed_workspace_ids(WORKSPACE_READ)``（与
+    workspace 模块端点 ``require_permission(WORKSPACE_READ)`` 同权限点同判定链）。
+    """
+    if await has_permission(
+        session, user=user, permission=Permission.SETTINGS_ADMIN, workspace_id=None
+    ):
+        return None
+    return set(
+        await allowed_workspace_ids(session, user_id=user.id, permission=Permission.WORKSPACE_READ)
+    )
 
 
 def _extract_server_map(json_text: str) -> dict[str, Any]:
@@ -170,11 +213,13 @@ async def import_from_json(
             skipped.append(f"{raw_name}: name 归一化后仍非法（{name!r}）")
             continue
         try:
-            # env 明文整体放入 server_config——secret 抽列与加密全在 service。
+            # env 明文整体放入 server_config——密钥指定态走导入缺省建议，
+            # 抽列与加密全在 service。
             await service.create_server(
                 McpServerCreate(
                     name=name,
                     server_config=dict(entry),
+                    secret_env_keys=_suggest_secret_keys(entry),
                     scope=scope,
                     source=_SOURCE_IMPORTED_JSON,
                 ),
@@ -354,8 +399,10 @@ async def scan_workspaces(
     """workspace 扫描（只读阶段）：读各 workspace ``specDir/.mcp.json`` 出候选 +
     三态去重判定，**零写库**（无新行、不碰 service、不动 workspace 文件）。
 
-    ``workspace_id`` 缺省遍历全部未软删 workspace（按名排序，输出确定）；
-    指定时不存在 / 已软删 → ``WorkspaceNotFound``（404，与
+    工作区访问门（P0-1）：非平台 admin 只扫本人有 ``WORKSPACE_READ`` 的
+    workspace；admin 放行全部。指定 workspace_id 非可见 → 403（不泄露他人
+    workspace 内容）。``workspace_id`` 缺省遍历可见未软删 workspace（按名排序，
+    输出确定）；指定时不存在 / 已软删 → ``WorkspaceNotFound``（404，与
     ``daemon_rpc._read_mcp_config_raw`` 同语义）。文件读取复用该函数（容错
     空集一致：无 spec_ws / spec_root 缺失 / 文件缺失 / 坏 JSON → 空集），
     文件 IO 走 ``asyncio.to_thread`` 且逐 workspace 串行（R-04）。坏条目
@@ -367,8 +414,16 @@ async def scan_workspaces(
     from app.modules.workspace.model import Workspace as WorkspaceModel
     from app.modules.workspace.service import WorkspaceService
 
+    visible = await _visible_workspace_ids(session, user)
     if workspace_id is not None:
+        # 先存在性（保持 WorkspaceNotFound 404 语义）再成员门（403）——与
+        # workspace 模块端点「非成员 403 / 不存在 404」同口径。
         workspaces = [await WorkspaceService(session).get(workspace_id)]
+        if visible is not None and workspace_id not in visible:
+            raise PermissionDenied(
+                "无权访问该工作区（需要工作区成员权限）。",
+                details={"workspace_id": str(workspace_id)},
+            )
     else:
         stmt = (
             select(WorkspaceModel)
@@ -376,6 +431,8 @@ async def scan_workspaces(
             .order_by(col(WorkspaceModel.name))
         )
         workspaces = list((await session.execute(stmt)).scalars().all())
+        if visible is not None:
+            workspaces = [ws for ws in workspaces if ws.id in visible]
 
     lineage = await _dedup_lineage(session)
     candidates: list[McpWorkspaceCandidate] = []
@@ -439,6 +496,17 @@ async def apply_workspace_import(
     from app.modules.daemon.router.daemon_rpc import _read_mcp_config_raw
     from app.modules.workspace.model import Workspace as WorkspaceModel
 
+    # 工作区访问门（P0-1）：候选体可手写任意 workspace_id——非可见 workspace
+    # 403 fail-fast，不进逐条容错（越权不是数据形态问题）。
+    visible = await _visible_workspace_ids(session, user)
+    if visible is not None:
+        for candidate in candidates:
+            if candidate.workspace_id not in visible:
+                raise PermissionDenied(
+                    "无权访问候选引用的工作区（需要工作区成员权限）。",
+                    details={"workspace_id": str(candidate.workspace_id), "name": candidate.name},
+                )
+
     service = McpRegistryService(session)
     imported: list[str] = []
     skipped: list[str] = []
@@ -480,6 +548,7 @@ async def apply_workspace_import(
                 McpServerCreate(
                     name=name,
                     server_config=dict(entry_config),
+                    secret_env_keys=_suggest_secret_keys(entry_config),
                     scope=scope,
                     source=_SOURCE_IMPORTED_WORKSPACE,
                     dedup_key=dedup_key,

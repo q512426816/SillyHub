@@ -12,8 +12,10 @@ created_at: 2026-09-10 12:00:00
 
 MCP server 定义的**中央资产库**：取代旧 `PlatformSetting(key=mcp.platform_default)`
 KV 存储（D-003 零迁移，旧 KV/端点已移除），三表建模平台共享库（owner=NULL，admin
-管理、全员可见）与用户私有库（owner=user，个人 token 不外泄，D-001）。secret 类
-env 键逐键 `CredentialCipher` 加密入 `encrypted_env`（明文永不入 ORM）；注入集渲染
+管理、全员可见）与用户私有库（owner=user，个人 token 不外泄，D-001）。env 键是否
+加密由**用户逐键显式指定**（`secret_env_keys`，ql-20260911-003-355a 用户裁决——
+不再按键名子串自动判定），指定键逐键 `CredentialCipher` 加密入 `encrypted_env`
+（明文永不入 ORM）；注入集渲染
 （platform binding 全集 ∪ 该用户 user binding）供 daemon 拉取端点换源消费；附
 JSON 粘贴 / workspace 扫描两路导入、模板（6 预置惰性 seed + 存为模板）、平台注入
 集诊断预检五项。白名单治理仍留 settings 模块（D-007），不在本模块。
@@ -40,8 +42,11 @@ JSON 粘贴 / workspace 扫描两路导入、模板（6 预置惰性 seed + 存�
   /api/mcp-servers/import-json`（`{json_text, scope}→{imported, skipped, renamed}`；
   mcpServers/servers/mcp 三包装探测，未命中 400，逐条容错 skipped）、`POST
   /api/mcp-servers/workspace-scan`（只读候选 + 三态判定 new/duplicate/renamed，
-  零写库）、`POST /api/mcp-servers/workspace-import-apply`（apply 才落库，重读
-  workspace 原文件取明文，幂等）
+  零写库；**被扫 workspace 强制成员门**——非平台 admin 仅见本人有
+  `WORKSPACE_READ` 的 workspace，指定他人 workspace 403，P0-1 修复
+  ql-20260911-003-355a）、`POST /api/mcp-servers/workspace-import-apply`（apply
+  才落库，重读 workspace 原文件取明文，幂等；候选引用非可见 workspace 403
+  fail-fast 不进逐条容错）
 - 模板：`GET /api/mcp-servers/templates`（平台预置 + 本人自存；首调惰性幂等 seed
   6 个公知 stdio 预置——fetch/context7/playwright/sequentialthinking/memory/git）、
   `POST /api/mcp-servers/templates`（201，`from_server_id | server_config` 双形态
@@ -53,7 +58,9 @@ JSON 粘贴 / workspace 扫描两路导入、模板（6 预置惰性 seed + 存�
   ——平台位同名互斥、跨 owner 放行；`encrypted_env` 为
   `{键: {ct: base64密文, key_id}}` 信封）、`mcp_server_bindings`（partial unique
   ×2：platform 按 server_id / user 按 (server_id, scope_ref)；FK CASCADE）、
-  `mcp_templates`（is_preset + owner_user_id NULL=预置）
+  `mcp_templates`（is_preset + owner_user_id NULL=预置；`secret_env_keys` 键名
+  清单列 + 预置位 name 部分唯一索引 `uq_mcp_templates_preset_name`——并发首调双
+  seed 由 DB 拒绝，ql-20260911-003-355a）
 
 ## 关键逻辑
 
@@ -61,16 +68,21 @@ JSON 粘贴 / workspace 扫描两路导入、模板（6 预置惰性 seed + 存�
 注入集渲染 render_injection_set(session, user_id):
   platform binding 全集 ∪ user binding(scope_ref=user_id) → enabled 过滤
   → 非 stdio 条目剔除 → encrypted_env 逐键解密回填 env
+  同名条目(平台位 vs 用户私有, 唯一索引刻意允许)确定性覆盖: platform 先处理、
+    user 后处理——用户私有覆盖同名平台配置(ql-20260911-003-355a P2)
   解密失败不炸渲染: 该 server 降级为无 secret 形态继续输出
   (标记走日志 + 诊断 decrypt_failed; 输出形状钉死 {"mcpServers": {...}})
 user_id=None 时仅 platform 位 == 旧 KV platform_default 语义（旧 daemon 零感知）
 ```
 
-- 加密读写（Grill CC-03/R-04）：secret 键判定与 schema 脱敏同源
-  （`schema._SECRET_KEY_MARKERS`——token/key/secret/password 子串，与 settings 旧
-  `_redact_mcp_env` 双向一致）；写路径 env 逐键 `encrypt(str)→(ct, key_id)` 入
-  `encrypted_env`、`server_config.env` 只留非 secret 明文键；读路径
-  `decrypt_server_env` 逐键还原，key 失配抛 `CipherKeyMismatch` 留给渲染/诊断降级
+- 加密读写（Grill CC-03/R-04 + ql-20260911-003-355a 用户自定义密钥类型）：密钥
+  键集 = create/update 显式 `secret_env_keys`（落库后权威 = `encrypted_env` 键集，
+  读侧 `secret_env_keys` 回显；导入路径按键名子串给**缺省建议**并物化为显式清单，
+  用户可再编辑）；写路径指定键逐键 `encrypt(str)→(ct, key_id)` 入 `encrypted_env`、
+  `server_config.env` 只留明文键；**编辑占位语义（P0-2）**：更新时密钥键值 ==
+  `<set>` = 保留既有密文（创建/新键/明文行用占位符 422），只改 `secret_env_keys`
+  （不动 server_config）支持升级加密/降级解密；读路径 `decrypt_server_env` 逐键
+  还原，key 失配抛 `CipherKeyMismatch` 留给渲染/诊断降级
 - stdio-only（D-005）：Create/Update 无 server_type 字段，类型取
   `server_config["type"]`（缺省 stdio），声明非 stdio 422；http/sse 仅建模预留
 - 导入分层铁律：importer/templates **禁止**触碰 get_cipher/CredentialCipher，落库
@@ -97,11 +109,15 @@ user_id=None 时仅 platform 位 == 旧 KV platform_default 语义（旧 daemon 
 - `McpServerCreate`/`McpServerUpdate` 的 name 合法性 `^[a-z0-9][a-z0-9-]{1,99}$`
   在 schema 层，DB 只管长度；导入路径 name 归一化（小写 + 非 [a-z0-9-] 合并连字符）
 - 模板 seed 惰性幂等：库内无任何 is_preset 行才 bootstrap 一次，删单个预置不复
-  活、全清空才随下次 GET 重建；触发点收敛 `list_templates` 首调，不动 main.py
+  活、全清空才随下次 GET 重建；并发首调败者 `IntegrityError` 回滚静默退出（
+  `uq_mcp_templates_preset_name` 兜底）；触发点收敛 `list_templates` 首调，不动
+  main.py
 - 密钥轮换依赖每键自带 `key_id`（信封格式）；换 key 后旧行解密失败走
   decrypt_failed 诊断不炸渲染——存量密文重加密无批量工具（未上线无此需求）
 - 旧 `mcp.platform_default` KV 行残留无害不清（D-003）；旧 GET/PUT
   `/api/platform-settings/mcp` 端点与前端旧客户端已移除（本 change task-13）
+- 前端解绑契约（P1-1 修复）：user 解绑必须 `DELETE /bindings/user/{本人 user_id}`
+  带尾段——无尾段形态后端恒 422（`useToggleMcpBinding` 已自动携带当前用户 id）
 
 ## 人工备注
 

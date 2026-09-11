@@ -357,6 +357,22 @@ export interface SillySpecFileDiff {
 /** sillyspec_file_diff 的 diff 文本截断护栏（字符口径，防大 diff 撑爆 RPC 载荷）。 */
 export const SILLYSPEC_FILE_DIFF_MAX_CHARS = 256 * 1024;
 
+/**
+ * 按 UTF-16 code unit 截断并保证不产生孤立代理对（ql-20260911-003-355a P2）：
+ * String.slice 恰好切在代理对中间时尾字符是 lone surrogate，backend Python 侧
+ * JSON 还原后 ensure_ascii=False 的 UTF-8 编码会抛 UnicodeEncodeError → HTTP 500
+ * （星面字符 diff 边界约半概率）。截在高代理项（U+D800-D7FF 区间首项）时丢弃该项。
+ */
+export function truncateUtf16Safe(str: string, maxChars: number): string {
+  if (str.length <= maxChars) return str;
+  const sliced = str.slice(0, maxChars);
+  const last = sliced.charCodeAt(sliced.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    return sliced.slice(0, -1);
+  }
+  return sliced;
+}
+
 // ── 类型（task-05 心跳/注册接线将复用）─────────────────────────────────────────
 
 /** 升级触发来源：server_command（WS 指令）/ auto（定时自动检查）。 */
@@ -1486,7 +1502,9 @@ export class SillySpecManager {
       mode: asStr(parsed.mode) ?? 'full-flow',
       base_ref: asStr(parsed.baseRef),
       anchor_label: asStr(parsed.anchorLabel),
-      diff: truncated ? rawDiff!.slice(0, SILLYSPEC_FILE_DIFF_MAX_CHARS) : rawDiff,
+      diff: truncated
+        ? truncateUtf16Safe(rawDiff!, SILLYSPEC_FILE_DIFF_MAX_CHARS)
+        : rawDiff,
       note: asStr(parsed.note),
       truncated,
     };

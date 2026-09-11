@@ -74,13 +74,18 @@ async def render_injection_set(session: AsyncSession, user_id: uuid.UUID | None)
     platform binding 全集 ∪ user binding（scope_ref=user_id）；enabled=false
     过滤；encrypted_env 解密回填 env（与 server_config 明文键合并）；非 stdio
     条目剔除不输出；解密失败该 server 降级为无 secret 形态继续输出（标记走
-    结构化日志 + precheck_diagnostics 的 decrypt_failed）。只产出 mcpServers
-    内容——三键响应外壳（platform_default/whitelist/workspace）由 task-05
-    端点组装（task constraints）。
+    结构化日志 + precheck_diagnostics 的 decrypt_failed）。同名条目（平台位与
+    用户私有同名，唯一索引刻意允许）按「platform 先、user 后」确定性覆盖——
+    用户私有配置覆盖同名平台配置（P2-10：仅按 name 排序的平局次序在 PG 上
+    不稳定）。只产出 mcpServers 内容——三键响应外壳（platform_default/
+    whitelist/workspace）由 task-05 端点组装（task constraints）。
     """
     svc = McpRegistryService(session)
     mcp_servers: dict[str, Any] = {}
-    for row in await _injection_rows(session, user_id):
+    rows = await _injection_rows(session, user_id)
+    # 同名确定性：platform（owner NULL）先处理、user 私有后处理——后者覆盖前者。
+    rows = sorted(rows, key=lambda r: (r.name, 0 if r.owner_user_id is None else 1))
+    for row in rows:
         if row.server_type != "stdio":
             # 防御性剔除（invalid_type_defensive）：platform 位若混入非 stdio，
             # daemon 侧会整包回落 builtin-only——宁缺勿坏（task implementation）。

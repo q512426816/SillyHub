@@ -124,9 +124,9 @@ async def test_avatar_too_long_rejected(client: AsyncClient, user_with_token):
 
 @pytest.mark.asyncio
 async def test_avatar_boundary_512_ok(client: AsyncClient, db_session, user_with_token):
-    """边界：恰好 512 字符（列宽上限）→ 200 落库。"""
+    """边界：恰好 512 字符（列宽上限）→ 200 落库（合法 http 链接形态）。"""
     user, token = user_with_token
-    url = "y" * 512
+    url = "https://example.com/" + "y" * (512 - len("https://example.com/"))
     resp = await client.patch(
         "/api/auth/me/avatar",
         json={"avatar": url},
@@ -135,6 +135,39 @@ async def test_avatar_boundary_512_ok(client: AsyncClient, db_session, user_with
     assert resp.status_code == 200, resp.text
     assert resp.json()["avatar"] == url
     assert await _avatar_col(db_session, user.id) == url
+
+
+async def test_avatar_rejects_non_http_schemes(client: AsyncClient, db_session, user_with_token):
+    """ql-20260911-003-355a P2：javascript:/data:/file: 与裸串 → 422 不落库。"""
+    user, token = user_with_token
+    for bad in (
+        "javascript:alert(1)",
+        "data:image/svg+xml;base64,PHN2Zy8+",
+        "file:///C:/win.ini",
+        "not-a-url",
+    ):
+        resp = await client.patch(
+            "/api/auth/me/avatar",
+            json={"avatar": bad},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 422, f"{bad!r} 应被拒绝：{resp.text}"
+        assert await _avatar_col(db_session, user.id) is None
+
+
+async def test_avatar_accepts_file_center_path_and_https(
+    client: AsyncClient, db_session, user_with_token
+):
+    """合法形态：文件中心 /api/file/{id} 与 http(s) 外链 → 200。"""
+    user, token = user_with_token
+    for good in ("/api/file/0e2b4d8e-1111-4222-8333-444455556666", "https://cdn.example.com/a.png"):
+        resp = await client.patch(
+            "/api/auth/me/avatar",
+            json={"avatar": good},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 200, f"{good!r} 应被接受：{resp.text}"
+        assert await _avatar_col(db_session, user.id) == good
 
 
 @pytest.mark.asyncio

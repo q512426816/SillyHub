@@ -150,50 +150,34 @@ def mount_mcp(app: FastAPI) -> None:
     app.mount(mount_path, mcp_app)
 
 
-def resolve_gateway_url(request: Request | None = None) -> str:
+def resolve_gateway_url(request: Request | None = None) -> str | None:
     """解析对外 MCP 接入 URL（规范端点 ``{origin}/mcp/``，带尾斜杠）。
 
     2026-09-10-mcp-gateway-dispatch-fixes（spike P0-2）：mcp-tokens 签发响应把
     ``gateway_url`` 与 token **成对**下发——url 指哪、token 就在哪生效，调用方
     （如 sillyspec connect 流程）把两者原样一起落盘即可，杜绝「url 指远端、token
-    是本地签发」的三头分裂。解析优先级：
+    是本地签发」的三头分裂。
 
-    1. ``Settings.mcp_gateway_public_base_url``（env ``MCP_GATEWAY_PUBLIC_BASE_URL``）
-       ——反代后请求头不可信 / 多入口部署时由运维显式钉死；
-    2. 请求头推导：``X-Forwarded-Proto`` → ``X-Forwarded-Host`` → ``Host``
-       （取首个值防逗号串）。uvicorn 未开 ``--proxy-headers`` 时 Starlette 的
-       ``request.url`` 只有容器内视角（http://backend:8000），故必须看转发头；
-    3. 兜底 ``http://localhost:8000``（无请求上下文的极端场景，仅占位）。
+    ql-20260911-003-355a P2 修正：**只信显式配置**——``Settings.
+    mcp_gateway_public_base_url``（env ``MCP_GATEWAY_PUBLIC_BASE_URL``）。
+    未配置时返回 ``None``（响应 gateway_url 置 null），不再从 ``X-Forwarded-*`` /
+    ``Host`` 头推导：这些头可被签发请求方影响（反代 ``$host`` 取自客户端 Host），
+    token 按「成对落盘」约定会被发往头指定的任意主机（自伤/钓鱼面）。调用方见
+    null 即知部署未配置，应参照部署文档显式配置后重签。
 
     Args:
-        request: 签发请求（FastAPI ``Request``）；None 时跳过请求头推导。
+        request: 签发请求（保留参数兼容既有调用方；未配置路径不消费）。
 
     Returns:
-        形如 ``https://crrcdt.ppdmq.top/mcp/`` 的完整端点（尾斜杠必需，坑 3）。
+        形如 ``https://crrcdt.ppdmq.top/mcp/`` 的完整端点（尾斜杠必需，坑 3）；
+        未显式配置 → ``None``。
     """
     from app.core.config import get_settings
 
     configured = get_settings().mcp_gateway_public_base_url.strip()
     if configured:
         return f"{configured.rstrip('/')}{mount_path}/"
-
-    if request is not None:
-        scheme = (
-            (request.headers.get("x-forwarded-proto") or request.url.scheme).split(",")[0].strip()
-        )
-        host = (
-            (
-                request.headers.get("x-forwarded-host")
-                or request.headers.get("host")
-                or request.url.netloc
-            )
-            .split(",")[0]
-            .strip()
-        )
-        if scheme and host:
-            return f"{scheme}://{host}{mount_path}/"
-
-    return f"http://localhost:8000{mount_path}/"
+    return None
 
 
 # 装配副作用 import（task-06 协调）：import tools 触发 @mcp.tool() 注册 12 个 tool，

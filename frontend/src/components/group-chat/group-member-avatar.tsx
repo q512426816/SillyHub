@@ -124,6 +124,9 @@ export interface GroupMemberAvatarUploadProps {
    * （既有建群向导/成员面板零改动）；个人中心传 USER_AVATAR_OWNER_TYPE。
    */
   ownerType?: string;
+  /** 外部忙碌门（ql-20260911-003-355a）：true 时禁用上传/恢复默认（个人中心
+   * PATCH 在途串行化——拦截 RTT 窗口内的第二次操作）。 */
+  disabled?: boolean;
 }
 
 /**
@@ -139,6 +142,7 @@ export function GroupMemberAvatarUpload({
   name,
   compact = false,
   ownerType = GROUP_MEMBER_AVATAR_OWNER_TYPE,
+  disabled = false,
 }: GroupMemberAvatarUploadProps) {
   const notify = useNotify();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -189,7 +193,7 @@ export function GroupMemberAvatarUpload({
           type="button"
           aria-label={`${label}上传`}
           title={uploading ? "上传中…" : value ? "更换头像" : "上传头像"}
-          disabled={uploading}
+          disabled={uploading || disabled}
           onClick={() => inputRef.current?.click()}
           className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -200,7 +204,7 @@ export function GroupMemberAvatarUpload({
             type="button"
             aria-label={`${label}恢复默认`}
             title="清除自定义头像，恢复首字默认"
-            disabled={uploading}
+            disabled={uploading || disabled}
             onClick={() => onChange(null)}
             className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40"
           >

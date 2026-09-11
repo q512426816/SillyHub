@@ -280,6 +280,26 @@ describe('ql-20260910-017-2006 manager.fileDiff：256KB 截断护栏', () => {
     expect(result.truncated).toBe(true);
     expect(result.diff).toHaveLength(SILLYSPEC_FILE_DIFF_MAX_CHARS);
   });
+
+  it('代理对边界（ql-20260911-003-355a P2）：截断点落在代理对中间 → 丢高代理项不产生 lone surrogate', async () => {
+    // MAX_CHARS 为偶数：1 个 ASCII 前缀 + N 个星面字符（每字符 2 code unit）使裸
+    // slice 的截断点恰好落在最后一个字符的代理对中间（高代理项悬挂在结尾）。
+    const emojiCount = Math.floor(SILLYSPEC_FILE_DIFF_MAX_CHARS / 2);
+    const big = 'x' + '😀'.repeat(emojiCount) + 'x'.repeat(10);
+    const h = makeFileDiffHarness({
+      outcome: {
+        code: 0,
+        stdout: JSON.stringify({ ok: true, mode: 'full-flow', diff: big }),
+        timedOut: false,
+      },
+    });
+    const result = await h.manager.fileDiff('c', 'src/a.ts');
+    expect(result.truncated).toBe(true);
+    // 安全截断：不超过上限，且不以高代理项（lone surrogate）结尾
+    expect(result.diff.length).toBeLessThanOrEqual(SILLYSPEC_FILE_DIFF_MAX_CHARS);
+    const lastUnit = result.diff.charCodeAt(result.diff.length - 1);
+    expect(lastUnit >= 0xdc00 && lastUnit <= 0xdfff).toBe(true); // 结尾是低代理=成对完整
+  });
 });
 
 describe('ql-20260910-017-2006 daemon RPC 注册：sillyspec_file_diff', () => {

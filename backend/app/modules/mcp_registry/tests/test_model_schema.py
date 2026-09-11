@@ -269,8 +269,10 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def test_read_redacts_secret_env_keys() -> None:
-    """列表 DTO：secret 键 → <set>，非 secret 键与其它顶层键原样。"""
+def test_read_env_view_follows_stored_designation() -> None:
+    """列表 DTO env 视图 = 存储态原样（ql-20260911-003-355a：脱敏不再按键名猜——
+    密钥键在 service 落库时已整体抽进 encrypted_env，不会出现在 server_config；
+    未指定的明文键——哪怕键名含 token——按用户选择原样透出）。"""
     cfg = _config_with_secrets()
     read = McpServerRead(
         id=uuid.uuid4(),
@@ -286,25 +288,23 @@ def test_read_redacts_secret_env_keys() -> None:
         created_at=_now(),
         updated_at=_now(),
     )
-    env = read.server_config["env"]
-    for secret_key in ("GITHUB_TOKEN", "API_KEY", "DB_SECRET", "MYSQL_PASSWORD"):
-        assert env[secret_key] == "<set>", f"{secret_key} 应被脱敏"
-    assert env["CACHE_DIR"] == "/tmp"
-    assert env["COUNT"] == "1"
+    # env 原样透出（不做键名脱敏）——密钥键的隔离由存储层保证（根本不在此列）
+    assert read.server_config["env"] == cfg["env"]
     assert read.server_config["command"] == "npx"
     # 原始 dict 不被原地改写（调用方数据不被 DTO 构造污染）。
     assert cfg["env"]["GITHUB_TOKEN"] == "ghp_secret"
-    # service 注入字段缺省安全方向。
+    # 指定态/绑定态/诊断徽标缺省安全方向（service 注入字段）。
+    assert read.secret_env_keys == []
     assert read.platform_bound is False
     assert read.user_bound is False
     assert read.diagnostic_codes == []
 
 
 def test_read_from_attributes_with_orm_object() -> None:
-    """from_attributes 直接吃 ORM 行也走脱敏（安全由构造保证）。"""
+    """from_attributes 直接吃 ORM 行（存储态即视图，安全由存储层保证）。"""
     server = McpServer(name="srv2", server_config=_config_with_secrets(), tags=["x"])
     read = McpServerRead.model_validate(server)
-    assert read.server_config["env"]["API_KEY"] == "<set>"
+    assert read.server_config["env"] == server.server_config["env"]  # 存储态原样
     assert read.name == "srv2"
 
 
@@ -421,18 +421,21 @@ def test_template_create_dual_form() -> None:
         McpTemplateCreate(name="tpl-d")
 
 
-def test_template_read_redacts_env() -> None:
-    """模板 server_config 明文本无 secret，输出仍走脱敏兜底（防御纵深）。"""
+def test_template_read_echoes_designation() -> None:
+    """模板读侧：env 存储态原样 + secret_env_keys 指定态回显（值永不入模板）。"""
     read = McpTemplateRead(
         id=uuid.uuid4(),
         name="tpl",
         server_config=_config_with_secrets(),
+        secret_env_keys=["DB_SECRET"],
         is_preset=True,
         owner_user_id=None,
         created_at=_now(),
     )
     assert read.is_preset is True
-    assert read.server_config["env"]["DB_SECRET"] == "<set>"
+    assert read.secret_env_keys == ["DB_SECRET"]
+    # 值层面：模板存储由 save_template 剥除指定键——DTO 不再按键名二次脱敏
+    assert read.server_config["env"]["CACHE_DIR"] == "/tmp"
 
 
 def test_diagnostic_code_literal() -> None:

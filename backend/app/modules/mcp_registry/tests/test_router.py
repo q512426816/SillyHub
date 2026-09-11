@@ -99,8 +99,10 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _payload(name: str = "fetch", scope: str = "mine") -> dict[str, Any]:
-    return {
+def _payload(
+    name: str = "fetch", scope: str = "mine", *, secret_env_keys: list[str] | None = None
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
         "name": name,
         "server_config": {
             "command": "uvx",
@@ -109,13 +111,23 @@ def _payload(name: str = "fetch", scope: str = "mine") -> dict[str, Any]:
         },
         "scope": scope,
     }
+    if secret_env_keys is not None:
+        body["secret_env_keys"] = secret_env_keys
+    return body
 
 
 async def _create(
-    client: AsyncClient, token: str, *, name: str = "fetch", scope: str = "mine"
+    client: AsyncClient,
+    token: str,
+    *,
+    name: str = "fetch",
+    scope: str = "mine",
+    secret_env_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """用给定 token POST 创建 server，断言 201 并返回 detail JSON。"""
-    resp = await client.post(BASE, json=_payload(name, scope), headers=_headers(token))
+    resp = await client.post(
+        BASE, json=_payload(name, scope, secret_env_keys=secret_env_keys), headers=_headers(token)
+    )
     assert resp.status_code == 201, resp.text
     return resp.json()
 
@@ -357,9 +369,16 @@ class TestCrudHappyPath:
     ) -> None:
         _, admin_token = await _make_user(db_session, admin=True, label="adm")
 
-        # 创建：201 + secret 键整体抽离（service 存量 server_config.env 本就无
-        # secret 键——比脱敏更强；明文 secret 绝不出现在响应）
-        created = await _create(client, admin_token, name="plat-roundtrip", scope="platform")
+        # 创建：201 + 指定密钥键整体抽离（service 存量 server_config.env 本就无
+        # 密钥键——比脱敏更强；明文 secret 绝不出现在响应）
+        created = await _create(
+            client,
+            admin_token,
+            name="plat-roundtrip",
+            scope="platform",
+            secret_env_keys=["GITHUB_TOKEN"],
+        )
+        assert created["secret_env_keys"] == ["GITHUB_TOKEN"]
         assert created["server_config"]["env"] == {"CACHE_DIR": "/tmp"}
         assert "ghp-plainsecret" not in str(created)
         assert created["encrypted_env"]["GITHUB_TOKEN"]["ct"] == "<set>"

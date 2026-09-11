@@ -37,7 +37,7 @@ from app.core.crypto import CredentialCipher
 from app.modules.auth.model import User
 from app.modules.mcp_registry.model import McpServer, McpServerBinding
 from app.modules.mcp_registry.render import precheck_diagnostics, render_injection_set
-from app.modules.mcp_registry.schema import McpDiagnostic
+from app.modules.mcp_registry.schema import McpDiagnostic, McpServerCreate
 from app.modules.mcp_registry.service import McpRegistryService
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,6 +73,7 @@ async def _create_platform_server(
     name: str,
     server_config: dict[str, Any] | None = None,
     cipher: CredentialCipher | None = None,
+    secret_env_keys: list[str] | None = None,
 ) -> McpServer:
     """经 service 真实写路径建平台共享 server 并绑 platform（返回 ORM 行）。"""
     from app.modules.mcp_registry.schema import McpServerCreate
@@ -84,7 +85,10 @@ async def _create_platform_server(
     )
     detail = await svc.create_server(
         McpServerCreate(
-            name=name, server_config=dict(server_config or _PLAIN_CONFIG), scope="platform"
+            name=name,
+            server_config=dict(server_config or _PLAIN_CONFIG),
+            secret_env_keys=secret_env_keys,
+            scope="platform",
         ),
         admin,
     )
@@ -251,7 +255,11 @@ class TestRenderInjectionSet:
         """encrypted_env 解密回填 env，与 server_config 明文键合并输出。"""
         admin = await _create_user(db_session, label="adm", admin=True)
         await _create_platform_server(
-            db_session, admin, name="with-secrets", server_config=dict(_SECRET_CONFIG)
+            db_session,
+            admin,
+            name="with-secrets",
+            server_config=dict(_SECRET_CONFIG),
+            secret_env_keys=["GITHUB_TOKEN"],
         )
 
         rendered = (await render_injection_set(db_session, None))["mcpServers"]
@@ -276,6 +284,7 @@ class TestRenderInjectionSet:
             name="stale-secret",
             server_config=dict(_SECRET_CONFIG),
             cipher=stale_cipher,
+            secret_env_keys=["GITHUB_TOKEN"],
         )
         await _create_platform_server(db_session, admin, name="healthy")  # 同批对照
 
@@ -287,6 +296,36 @@ class TestRenderInjectionSet:
             "env": {"CACHE_DIR": "/tmp"},  # secret 键整体丢弃（无 secret 形态）
         }
         assert rendered["healthy"]["env"] == {"CACHE_DIR": "/tmp"}
+
+    async def test_same_name_user_overrides_platform_deterministically(
+        self, db_session: AsyncSession
+    ) -> None:
+        """P2-10（ql-20260911-003-355a）：同名 platform/user 条目——用户私有确定性
+        覆盖平台位（platform 先处理、user 后处理；platform 视角不受影响）。"""
+        admin = await _create_user(db_session, label="adm", admin=True)
+        user = await _create_user(db_session, label="u")
+        await _create_platform_server(
+            db_session,
+            admin,
+            name="dupe",
+            server_config={"command": "plat-cmd", "args": [], "env": {}},
+        )
+        svc = McpRegistryService(db_session)
+        mine = await svc.create_server(
+            McpServerCreate(
+                name="dupe",
+                server_config={"command": "user-cmd", "args": [], "env": {}},
+                scope="mine",
+            ),
+            user,
+        )
+        await svc.add_binding(mine.id, "user", user)
+
+        user_view = (await render_injection_set(db_session, user.id))["mcpServers"]
+        platform_view = (await render_injection_set(db_session, None))["mcpServers"]
+
+        assert user_view["dupe"]["command"] == "user-cmd"  # 用户私有覆盖
+        assert platform_view["dupe"]["command"] == "plat-cmd"  # 平台视角不变
 
     async def test_empty_registry_renders_empty_structure(self, db_session: AsyncSession) -> None:
         """空库输出空 mcpServers 结构不抛错（对齐 KV 缺失回落语义）。"""
@@ -323,13 +362,19 @@ class TestPrecheckDiagnostics:
             name="plat-stale",
             server_config=dict(_SECRET_CONFIG),
             cipher=stale_cipher,
+            secret_env_keys=["GITHUB_TOKEN"],
         )
         # user 位错版密文（私有 + user binding）：平台预检不查 user 位
         svc = McpRegistryService(db_session)
         from app.modules.mcp_registry.schema import McpServerCreate
 
         mine_stale = await McpRegistryService(db_session, cipher=stale_cipher).create_server(
-            McpServerCreate(name="mine-stale", server_config=dict(_SECRET_CONFIG)), user
+            McpServerCreate(
+                name="mine-stale",
+                server_config=dict(_SECRET_CONFIG),
+                secret_env_keys=["GITHUB_TOKEN"],
+            ),
+            user,
         )
         await svc.add_binding(mine_stale.id, "user", user)
 

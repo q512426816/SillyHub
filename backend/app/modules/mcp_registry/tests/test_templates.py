@@ -124,11 +124,20 @@ async def _template_rows(db_session: AsyncSession) -> list[McpTemplate]:
 
 
 async def _create_server(
-    db_session: AsyncSession, user: User, *, name: str, server_config: dict[str, Any], scope: str
+    db_session: AsyncSession,
+    user: User,
+    *,
+    name: str,
+    server_config: dict[str, Any],
+    scope: str,
+    secret_env_keys: list[str] | None = None,
 ) -> McpServer:
-    """经 service 创建 server（secret 抽列加密链路与生产一致，不绕行 ORM）。"""
+    """经 service 创建 server（指定态抽列加密链路与生产一致，不绕行 ORM）。"""
     detail = await McpRegistryService(db_session).create_server(
-        McpServerCreate(name=name, server_config=server_config, scope=scope), user
+        McpServerCreate(
+            name=name, server_config=server_config, scope=scope, secret_env_keys=secret_env_keys
+        ),
+        user,
     )
     row = await db_session.get(McpServer, detail.id)
     assert row is not None
@@ -338,7 +347,12 @@ class TestSecretDropping:
 
         user = await _create_user(db_session, label="s1")
         server = await _create_server(
-            db_session, user, name="secret-srv", server_config=dict(_SECRET_CONFIG), scope="mine"
+            db_session,
+            user,
+            name="secret-srv",
+            server_config=dict(_SECRET_CONFIG),
+            scope="mine",
+            secret_env_keys=["GITHUB_TOKEN", "API_KEY"],
         )
         assert server.encrypted_env is not None  # 前置：server 侧确有密文信封
         ciphertexts = [env["ct"] for env in server.encrypted_env.values()]
@@ -347,7 +361,8 @@ class TestSecretDropping:
             db_session, McpTemplateCreate(name="safe-tpl", from_server_id=server.id), user
         )
 
-        assert saved.server_config["env"] == {"CACHE_DIR": "/tmp"}  # 只剩非 secret 明文
+        assert saved.server_config["env"] == {"CACHE_DIR": "/tmp"}  # 只剩明文键
+        assert sorted(saved.secret_env_keys) == ["API_KEY", "GITHUB_TOKEN"]  # 指定态键名回显
         row = await db_session.get(McpTemplate, saved.id)
         assert row is not None
         dumped = json.dumps(
@@ -377,12 +392,15 @@ class TestSecretDropping:
         saved = await save_template(
             db_session,
             McpTemplateCreate(
-                name="direct-secret-tpl", server_config=json.loads(json.dumps(_SECRET_CONFIG))
+                name="direct-secret-tpl",
+                server_config=json.loads(json.dumps(_SECRET_CONFIG)),
+                secret_env_keys=["GITHUB_TOKEN", "API_KEY"],
             ),
             user,
         )
 
         assert saved.server_config["env"] == {"CACHE_DIR": "/tmp"}
+        assert sorted(saved.secret_env_keys) == ["API_KEY", "GITHUB_TOKEN"]
         dumped = json.dumps(saved.server_config, default=str)
         for plaintext in ("ghp_plainsecret", "sk-plain-1234"):
             assert plaintext not in dumped

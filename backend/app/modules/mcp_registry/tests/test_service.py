@@ -49,6 +49,7 @@ from app.modules.mcp_registry.service import (
     McpServerNameConflict,
     McpServerNameInvalid,
     McpServerNotFound,
+    McpServerSecretEnvInvalid,
     McpServerTypeInvalid,
 )
 
@@ -61,10 +62,13 @@ _SECRET_ENV = {
     "API_KEY": "sk-plain-1234",  # key
     "DB_SECRET": "plain-secret",  # secret
     "MYSQL_PASSWORD": "plain-pass",  # password（大小写不敏感）
-    "CACHE_DIR": "/tmp",  # 非 secret 明文留存
+    "CACHE_DIR": "/tmp",  # 明文留存
 }
 
 _SECRET_CONFIG = {"command": "npx", "args": ["-y", "server"], "env": dict(_SECRET_ENV)}
+
+# 全部密钥键的显式指定态（用户自定义密钥类型——不再按键名自动判定）。
+_ALL_SECRET_KEYS = ["GITHUB_TOKEN", "API_KEY", "DB_SECRET", "MYSQL_PASSWORD"]
 
 
 async def _create_user(db_session: AsyncSession, *, label: str = "", admin: bool = False) -> User:
@@ -455,7 +459,12 @@ class TestCryptoRoundtrip:
         svc = McpRegistryService(db_session)
 
         await svc.create_server(
-            _payload(name="secret-srv", server_config=dict(_SECRET_CONFIG)), user
+            _payload(
+                name="secret-srv",
+                server_config=dict(_SECRET_CONFIG),
+                secret_env_keys=list(_ALL_SECRET_KEYS),
+            ),
+            user,
         )
 
         row = (await _all_servers(db_session))[0]
@@ -482,7 +491,12 @@ class TestCryptoRoundtrip:
         user = await _create_user(db_session, label="a")
         svc = McpRegistryService(db_session)
         created = await svc.create_server(
-            _payload(name="roundtrip", server_config=dict(_SECRET_CONFIG)), user
+            _payload(
+                name="roundtrip",
+                server_config=dict(_SECRET_CONFIG),
+                secret_env_keys=list(_ALL_SECRET_KEYS),
+            ),
+            user,
         )
         row = await db_session.get(McpServer, created.id)
         assert row is not None
@@ -513,6 +527,7 @@ class TestCryptoRoundtrip:
             _payload(
                 name="rekey",
                 server_config={"command": "npx", "args": [], "env": {"API_KEY": "old-key"}},
+                secret_env_keys=["API_KEY"],
             ),
             user,
         )
@@ -524,7 +539,8 @@ class TestCryptoRoundtrip:
         await svc.update_server(
             created.id,
             McpServerUpdate(
-                server_config={"command": "npx", "args": [], "env": {"API_KEY": "new-key"}}
+                server_config={"command": "npx", "args": [], "env": {"API_KEY": "new-key"}},
+                secret_env_keys=["API_KEY"],
             ),
             user,
         )
@@ -543,6 +559,7 @@ class TestCryptoRoundtrip:
             _payload(
                 name="clear-sec",
                 server_config={"command": "npx", "args": [], "env": {"API_KEY": "to-be-dropped"}},
+                secret_env_keys=["API_KEY"],
             ),
             user,
         )
@@ -566,6 +583,7 @@ class TestCryptoRoundtrip:
             _payload(
                 name="keep-sec",
                 server_config={"command": "npx", "args": [], "env": {"API_KEY": "stable"}},
+                secret_env_keys=["API_KEY"],
             ),
             user,
         )
@@ -586,6 +604,7 @@ class TestCryptoRoundtrip:
             _payload(
                 name="stale-key",
                 server_config={"command": "npx", "args": [], "env": {"API_KEY": "v1-value"}},
+                secret_env_keys=["API_KEY"],
             ),
             user,
         )
@@ -608,6 +627,7 @@ class TestCryptoRoundtrip:
             _payload(
                 name="num-secret",
                 server_config={"command": "npx", "args": [], "env": {"PORT_TOKEN": 8080}},
+                secret_env_keys=["PORT_TOKEN"],
             ),
             user,
         )
@@ -719,3 +739,221 @@ class TestWriteValidation:
         unchanged = await svc.update_server(second.id, McpServerUpdate(name="second-name"), user)
         assert unchanged.name == "second-name"
         assert first.name == "first-name"
+
+
+# ── 密钥指定态 + 编辑占位语义（ql-20260911-003-355a P0-2 / 用户自定义密钥类型）──
+
+
+class TestSecretDesignation:
+    async def test_marker_named_key_without_designation_stays_plaintext(
+        self, db_session: AsyncSession
+    ) -> None:
+        """用户自定义密钥类型：未指定的键（哪怕键名含 token）按明文留存。"""
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+
+        created = await svc.create_server(
+            _payload(
+                name="user-choice",
+                server_config={
+                    "command": "npx",
+                    "args": [],
+                    "env": {"API_TOKEN": "plain-by-choice"},
+                },
+            ),
+            user,
+        )
+
+        row = await db_session.get(McpServer, created.id)
+        assert row is not None
+        assert row.encrypted_env is None  # 未指定 → 不加密
+        assert row.server_config["env"]["API_TOKEN"] == "plain-by-choice"
+        assert created.secret_env_keys == []
+
+    async def test_create_rejects_unknown_secret_key(self, db_session: AsyncSession) -> None:
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+
+        with pytest.raises(McpServerSecretEnvInvalid) as exc_info:
+            await svc.create_server(
+                _payload(
+                    name="ghost-key",
+                    server_config=dict(_PLAIN_CONFIG),
+                    secret_env_keys=["NOT_IN_ENV"],
+                ),
+                user,
+            )
+
+        assert exc_info.value.http_status == 422
+        assert await _all_servers(db_session) == []
+
+    async def test_create_rejects_placeholder_value(self, db_session: AsyncSession) -> None:
+        """创建不接受 <set> 占位符（无既有密文可保留——占位符只能是误回传）。"""
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+
+        with pytest.raises(McpServerSecretEnvInvalid):
+            await svc.create_server(
+                _payload(
+                    name="ph-create",
+                    server_config={"command": "npx", "args": [], "env": {"API_KEY": "<set>"}},
+                    secret_env_keys=["API_KEY"],
+                ),
+                user,
+            )
+        # 占位符在明文键上同样拒绝（创建路径全 env 拦截）
+        with pytest.raises(McpServerSecretEnvInvalid):
+            await svc.create_server(
+                _payload(
+                    name="ph-plain",
+                    server_config={"command": "npx", "args": [], "env": {"CACHE_DIR": "<set>"}},
+                ),
+                user,
+            )
+
+    async def test_update_placeholder_keeps_existing_ciphertext(
+        self, db_session: AsyncSession
+    ) -> None:
+        """P0-2 核心：编辑回传 <set> = 保留既有密文（原值不被覆盖毁坏）。"""
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="ph-keep",
+                server_config={
+                    "command": "npx",
+                    "args": [],
+                    "env": {"API_KEY": "real-secret", "CACHE_DIR": "/tmp"},
+                },
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+        row = await db_session.get(McpServer, created.id)
+        assert row is not None
+        assert row.encrypted_env is not None
+        frozen_ct = row.encrypted_env["API_KEY"]["ct"]
+
+        updated = await svc.update_server(
+            created.id,
+            McpServerUpdate(
+                name="ph-keep-renamed",  # 只改名——顺带全量回传占位形态 env
+                server_config={
+                    "command": "npx",
+                    "args": [],
+                    "env": {"API_KEY": "<set>", "CACHE_DIR": "/tmp"},
+                },
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+
+        assert updated.name == "ph-keep-renamed"
+        assert updated.secret_env_keys == ["API_KEY"]
+        assert row.encrypted_env is not None
+        assert row.encrypted_env["API_KEY"]["ct"] == frozen_ct  # 密文未动
+        assert svc.decrypt_server_env(row) == {"API_KEY": "real-secret", "CACHE_DIR": "/tmp"}
+
+    async def test_update_placeholder_on_new_secret_key_rejected(
+        self, db_session: AsyncSession
+    ) -> None:
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="ph-new",
+                server_config={"command": "npx", "args": [], "env": {"API_KEY": "v1"}},
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+
+        with pytest.raises(McpServerSecretEnvInvalid):
+            await svc.update_server(
+                created.id,
+                McpServerUpdate(
+                    server_config={
+                        "command": "npx",
+                        "args": [],
+                        "env": {"API_KEY": "<set>", "NEW_TOKEN": "<set>"},
+                    },
+                    secret_env_keys=["API_KEY", "NEW_TOKEN"],
+                ),
+                user,
+            )
+
+    async def test_update_placeholder_on_plain_key_rejected(self, db_session: AsyncSession) -> None:
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="ph-plainkey",
+                server_config={"command": "npx", "args": [], "env": {"API_KEY": "v1"}},
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+
+        # API_KEY 降级为明文（secret_env_keys=[] 显式表达）但值仍是占位符 → 422
+        with pytest.raises(McpServerSecretEnvInvalid):
+            await svc.update_server(
+                created.id,
+                McpServerUpdate(
+                    server_config={"command": "npx", "args": [], "env": {"API_KEY": "<set>"}},
+                    secret_env_keys=[],
+                ),
+                user,
+            )
+
+    async def test_update_secret_env_keys_alone_remodels(self, db_session: AsyncSession) -> None:
+        """只改指定态（不动 server_config）：明文键升级加密、密钥键降级解密回明文。"""
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="redesignate",
+                server_config={
+                    "command": "npx",
+                    "args": [],
+                    "env": {"API_KEY": "stays", "CACHE_DIR": "/tmp"},
+                },
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+
+        # 升级：CACHE_DIR 也设为密钥
+        await svc.update_server(
+            created.id, McpServerUpdate(secret_env_keys=["API_KEY", "CACHE_DIR"]), user
+        )
+        row = await db_session.get(McpServer, created.id)
+        assert row is not None
+        assert set(row.encrypted_env) == {"API_KEY", "CACHE_DIR"}
+        assert row.server_config["env"] == {}
+
+        # 降级：CACHE_DIR 回明文（解密回填）
+        await svc.update_server(created.id, McpServerUpdate(secret_env_keys=["API_KEY"]), user)
+        await db_session.refresh(row)
+        assert set(row.encrypted_env) == {"API_KEY"}
+        assert row.server_config["env"] == {"CACHE_DIR": "/tmp"}
+        assert svc.decrypt_server_env(row) == {"API_KEY": "stays", "CACHE_DIR": "/tmp"}
+
+    async def test_list_detail_echo_secret_env_keys(self, db_session: AsyncSession) -> None:
+        """列表/详情回显密钥键名清单（前端回显指定态的唯一依据）。"""
+        user = await _create_user(db_session, label="d")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="echo-keys",
+                server_config=dict(_SECRET_CONFIG),
+                secret_env_keys=list(_ALL_SECRET_KEYS),
+            ),
+            user,
+        )
+
+        detail = await svc._to_detail(await db_session.get(McpServer, created.id), user)
+        assert sorted(detail.secret_env_keys) == sorted(_ALL_SECRET_KEYS)
+        listing = await svc.list_servers("mine", user)
+        assert sorted(listing.items[0].secret_env_keys) == sorted(_ALL_SECRET_KEYS)
+        # 密钥键不出现在 env 视图（值在密文列）
+        assert set(listing.items[0].server_config["env"]) == {"CACHE_DIR"}

@@ -17,9 +17,9 @@
 //     please'）：断言结果文本即证明数据来自哪一侧（分派方向的强证据）。
 //
 // 覆盖 task-03 acceptance 全项（四态 + 守卫先行）：
-//   ZD1 库成功：parsed 原样回传（status/messages/truncated/totalSegments）+ 零
-//      lstat/readFile 调用（且日志文件根本不存在——若误触文件 IO 必 ENOENT 抛
-//      not_found，双保险）+ beforeSeq 透传读取器
+//   ZD1 库成功：parsed 原样回传（status/messages/truncated/totalSegments）+
+//      存在性门 lstat 恰一次 + 零 readFile（ql-20260911-003-355a：文件存在是
+//      进库读取器的前提）+ beforeSeq 透传读取器
 //   ZD2a 库失败（读取器不可用：库文件缺失）+ 文件在 → 回落 parse-zcode-model-io
 //      文件解析成功（readFile 被调）
 //   ZD2b 库失败（会话不在库）+ 文件在 → 同上回落文件解析成功
@@ -164,11 +164,13 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     });
   }
 
-  it('ZD1: 库成功 → 原样回传读取器结果（零 lstat/readFile，beforeSeq 透传）', async () => {
+  it('ZD1: 库成功 → 原样回传读取器结果（存在性门 lstat 一次、零 readFile，beforeSeq 透传）', async () => {
     pointFactoryAt(fixture.dbPath);
-    // 日志文件故意不存在：库命中路径若误触文件 IO 必 ENOENT → not_found 抛错，
-    // 与下方 spy 断言互为双保险。
+    // 存在性门（ql-20260911-003-355a）：上报文件必须真实存在才进库读取器。
     const logPath = pathOf(zcodeFilenameOf(MAIN));
+    writeFileSync(logPath, FILE_FIXTURE_LINES, 'utf8');
+    lstatSpy.mockClear();
+    readFileSpy.mockClear();
 
     const result = await handler.readAgentLogMessages(logPath, ZCODE_FORMAT);
 
@@ -185,8 +187,8 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     ]);
     expect(result.messages[0]?.text).toBe('帮我排查这个构建失败');
 
-    // 库成功不触文件 IO（D-005@v1：成功即返回，不进 lstat/readFile）。
-    expect(lstatSpy).not.toHaveBeenCalled();
+    // 库成功不读文件内容（D-005@v1）：存在性门 lstat 恰一次，readFile 零调用。
+    expect(lstatSpy).toHaveBeenCalledTimes(1);
     expect(readFileSpy).not.toHaveBeenCalled();
 
     // beforeSeq 透传读取器（seq < 5 切片；totalSegments 仍是全量 9）。
@@ -197,6 +199,18 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     expect(sliced.totalSegments).toBe(9);
     expect(factoryCalls).toBe(1);
     expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it('ZD6: 文件不存在 + 会话在库 → 存在性门拦截（不进库读取器，not_found）', async () => {
+    pointFactoryAt(fixture.dbPath);
+    // MAIN 会话在 fixture 库中，但上报文件不存在——存在性门先拦（不咨询库工厂），
+    // 回落文件流程后 lstat ENOENT → not_found（与未上报路径同语义）。
+    const logPath = pathOf(zcodeFilenameOf(MAIN));
+
+    await expect(handler.readAgentLogMessages(logPath, ZCODE_FORMAT)).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    expect(factoryCalls).toBe(0); // 库读取器未被咨询（门在分派前）
   });
 
   it('ZD2a: 读取器不可用（库文件缺失）+ 文件在 → 回落文件解析成功', async () => {
@@ -237,12 +251,12 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     pointFactoryAt(fixture.dbPath); // 会话不在库
     const logPath = pathOf(zcodeFilenameOf(NOT_IN_DB)); // 文件也缺
 
-    // 现状语义：回落流程 lstat ENOENT → toRpcError 抛 not_found（与 readFile
-    // 同通道，读取器错误不冒泡不伪造结果）。
+    // 现状语义：存在性门 lstat ENOENT（库未咨询）→ 回落文件流程 lstat 再 ENOENT
+    // → toRpcError 抛 not_found（与 readFile 同通道，读取器错误不冒泡不伪造结果）。
     await expectRpcError(handler.readAgentLogMessages(logPath, ZCODE_FORMAT), 'not_found');
 
-    expect(factoryCalls).toBe(1); // 分派确实先试过库
-    expect(lstatSpy).toHaveBeenCalledTimes(1); // 回落到文件流程（lstat 后 ENOENT）
+    expect(factoryCalls).toBe(0); // 存在性门先拦（文件缺不进库读取器）
+    expect(lstatSpy).toHaveBeenCalledTimes(2); // 门一次 + 回落文件流程一次
     expect(readFileSpy).not.toHaveBeenCalled(); // lstat 已抛，未进 readFile
   });
 

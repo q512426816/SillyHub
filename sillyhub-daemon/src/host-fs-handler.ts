@@ -1995,6 +1995,12 @@ export class HostFsHandler {
       const sessId = extractZcodeSessId(path);
       if (sessId !== null) {
         try {
+          // 存在性门（ql-20260911-003-355a P2）：上报的 rollout 文件必须真实存在
+          // 才进库读取器——log_path 可经 platform_sync 自登记任意路径，缺该门时
+          // 只要知道目标 sess id（无该工作区文件佐证）即可读库（同机越权面收敛）。
+          // 文件不存在 → 抛 Error 走下方 catch 落回文件流程（最终 not_found，
+          // 与未上报路径同语义）。
+          await lstat(abs);
           // beforeSeq 透传读取器（null = 不切片，与文件解析器同语义）。
           return await readZcodeSqliteMessages(sessId, beforeSeq ?? null);
         } catch (error) {

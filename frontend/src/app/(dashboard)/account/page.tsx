@@ -26,6 +26,10 @@ export default function AccountPage() {
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  // 头像操作串行化（ql-20260911-003-355a P2，对齐移动端 avatarBusy 先例）：
+  // PATCH+fetchMe RTT 窗口内连点两次（换头像→立即恢复默认）会并发两个 PATCH，
+  // 终值取决于到达序且 fetchMe 交错可让 store 落后于库——busy 门拦住第二次操作。
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   // 个人资料卡片展示名（预览首字回退）：displayName → email → "?"（与
   // GroupMemberAvatar 空名回退一致）。
@@ -35,13 +39,17 @@ export default function AccountPage() {
   // 均经 updateMyAvatar 写后端并重跑 fetchMe 刷新 store——页面不自管 avatar
   // 副本，user.avatar 即真相源。上传环节的失败提示由控件内 notify 承担。
   const handleAvatarChange = (avatar: string | null) => {
+    if (avatarBusy) return;
     setAvatarError(null);
+    setAvatarBusy(true);
     void (async () => {
       try {
         await updateMyAvatar(avatar);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
         setAvatarError(msg || "头像保存失败，请稍后重试");
+      } finally {
+        setAvatarBusy(false);
       }
     })();
   };
@@ -106,6 +114,7 @@ export default function AccountPage() {
             label="我的头像"
             name={avatarName}
             ownerType={USER_AVATAR_OWNER_TYPE}
+            disabled={avatarBusy}
           />
           {avatarError && (
             <span className="text-xs text-destructive">{avatarError}</span>

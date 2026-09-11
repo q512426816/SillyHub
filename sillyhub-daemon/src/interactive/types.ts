@@ -526,6 +526,16 @@ export interface SessionManagerDeps {
     status: SessionStatus,
   ) => void | Promise<void>;
   /**
+   * 会话受控 reload 成功通知（ql-20260911-003-355a P2，可选）。
+   *
+   * ``_reloadSession`` 重建 driver 句柄成功后触发（失败路径不触发）。daemon 侧
+   * 借此回收 modelUsage 差分基线：pi/cursor 的 modelUsage 快照是 per-handle 从 0
+   * 累计，句柄重建后快照归零而 daemon 基线不清会少记（codex resume 后首轮多记
+   * 的对称面）——与 onSessionEnd 的基线回收（ql-20260831-009）同族，生命周期锚点
+   * 不同（句柄重建 vs 会话终态）。
+   */
+  onSessionReloaded?: (sessionId: string) => void | Promise<void>;
+  /**
    * task-04（FR-01~03）：会话反馈事件上报回调（plan/Bash/agent_task）。
    *
    * additive-optional：未注入时 session-manager 内部识别逻辑照常运行，但不上报 backend，

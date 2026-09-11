@@ -27,6 +27,7 @@ from sqlmodel import col
 
 from app.core.config import Settings
 from app.core.errors import (
+    AuthAvatarInvalid,
     AuthInvalidCredentials,
     AuthRefreshReused,
     AuthTokenInvalid,
@@ -73,6 +74,21 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
+
+
+# 头像值白名单形态（ql-20260911-003-355a P2）：文件中心相对路径 /api/file/{id}
+# 或 http(s) 外链。相对路径限定 /api/file/ 前缀（既有 UI 上传唯一写入口）；
+# 外链过 urlsplit 校验 scheme 与 netloc（拒 javascript:/data:/file: 等）。
+def _is_allowed_avatar_value(value: str) -> bool:
+    if value.startswith("/api/file/"):
+        return True
+    try:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
 
 
 class AuthService:
@@ -274,8 +290,17 @@ class AuthService:
             raise AuthUserInactive("账号不存在。")
         if avatar is None:
             return user
-        # '' → None（清除置 NULL）；非空值原样写入（文件中心 /api/file/{id} 或外链）。
-        user.avatar = avatar or None
+        # '' → None（清除置 NULL）；非空值须通过 scheme/形态校验后写入（文件中心
+        # /api/file/{id} 相对路径或 http(s) 外链——ql-20260911-003-355a P2：原样
+        # 入库可存 javascript:/data: 等任意串，跨群渲染为 <img src> 造成盲 GET/
+        # tracking beacon 与渲染破坏）。
+        normalized = avatar.strip()
+        if normalized and not _is_allowed_avatar_value(normalized):
+            raise AuthAvatarInvalid(
+                "头像地址仅支持文件中心路径或 http(s) 链接。",
+                details={"reason": "invalid_avatar_value"},
+            )
+        user.avatar = normalized or None
         user.updated_at = _utc_now()
         await self._db.commit()
         await self._db.refresh(user)

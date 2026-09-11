@@ -32,8 +32,10 @@ from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 log = get_logger(__name__)
 
 # RPC 显式超时（send_rpc 默认 RPC_DEFAULT_TIMEOUT=10s 不够用；scope-audit
-# 需先算对账锚点再跑 git diff，daemon 侧命令超时 120s，这里给 35s 余量）。
-_FILE_DIFF_RPC_TIMEOUT_SECONDS: float = 35.0
+# 需先算对账锚点再跑 git diff，daemon 侧命令超时 120s（sillyspec-manager
+# SILLYSPEC_COMMAND_TIMEOUT_MS）——backend 必须 ≥ daemon 超时，否则后端已 504
+# 而 daemon 子进程还在白跑（ql-20260911-003-355a P2：原 35s < 120s 写反了）。
+_FILE_DIFF_RPC_TIMEOUT_SECONDS: float = 135.0
 
 
 # ── 参数校验 helper（router 层调用；machines.py compare 端点/git_log 同款风格）──
@@ -275,12 +277,20 @@ class ScopeFileDiffService:
                     "守护进程版本过旧，不支持单文件比对；请升级 daemon 后重试。",
                     details={"daemon_id": str(daemon_id), **context},
                 ) from exc
+            # P2（ql-20260911-003-355a）：daemon 原始消息可含 stderr 尾段/本机
+            # 路径——只进服务端结构化日志（排障可查），不随 details 下发客户端。
+            log.warning(
+                "scope_file_diff_unmapped_remote_error",
+                daemon_id=str(daemon_id),
+                remote_code=str(exc.code),
+                remote_message=str(exc.message)[:200],
+                **context,
+            )
             raise ScopeFileDiffDaemonRemoteError(
                 "守护进程执行单文件比对失败，请稍后重试。",
                 details={
                     "daemon_id": str(daemon_id),
                     "remote_code": str(exc.code),
-                    "remote_message": str(exc.message)[:200],
                     **context,
                 },
             ) from exc
