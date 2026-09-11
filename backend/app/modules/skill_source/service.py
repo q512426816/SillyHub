@@ -24,10 +24,15 @@ Change: 2026-09-11-skills-central-library (task-01 + task-02 接线 + task-03)
   + 我的 CustomSkill + 全部 enabled 源的 discover_skills 实时发现（带我的
   启用态与源信息；git 技能默认关，D-003）；user 视图启用态显式 IS NULL
   过滤（D-010），可选 ``workspace_id`` 取 user ∪ workspace 并集（D-002）。
+- 收编差集 helper（bridges task-03 / D-008）：``normalize_adopt_name`` 名
+  归一化（目录名 → CustomSkill 合规名）+ ``platform_skill_names`` 平台库名
+  全集（CustomSkill 全体名 ∪ sillyspec-* ∪ enabled git 源 discover——
+  workspace 侧 adoptable 差集排除用，本模块只供数据不加端点）。
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -57,6 +62,40 @@ SKILLS_GIT_CACHE_DIRNAME = "skills_git_cache"
 
 # skill_key 列宽（user_skill_enables.skill_key String(200)）——超长即格式非法。
 SKILL_KEY_MAX_LENGTH = 200
+
+# 收编名归一化（bridges task-03 / D-008）——与 skills/service.py:35 的 CustomSkill
+# name 规则逐字对齐（^[a-z0-9-]{2,40}$ + 禁 sillyspec- 前缀）。不直接 import
+# skills/service 的私有符号：本模块只镜像规则，skills 模块零改动（蓝图约束）。
+_ADOPT_NAME_RE = re.compile(r"^[a-z0-9-]{2,40}$")
+_ADOPT_NAME_MAX_LENGTH = 40  # CustomSkill.name String(40) 同宽
+_ADOPT_RESERVED_PREFIX = "sillyspec-"
+
+
+def normalize_adopt_name(raw: str) -> tuple[str, str | None]:
+    """收编名归一化（D-008）：目录名 → ``(normalized_name, invalid_reason)``。
+
+    步骤：小写 → 非 ``[a-z0-9-]`` 字符转连字符 → 压连续连字符 → 去首尾连字符 →
+    超 40 截断（截断可能新引入尾连字符，再去一次）。结果仍不满足 CustomSkill
+    name 规则（空 / 单字符 / 命中保留前缀 ``sillyspec-``）时返回中文
+    ``invalid_reason``（此时 ``normalized_name`` 为归一化产物，可能为空串，仅供
+    响应展示，**不可落库**）；合规时 ``invalid_reason`` 为 ``None``。
+
+    validity 与 :func:`app.modules.skills.service._validate_name` 完全同口径——
+    invalid 项在 adopt 落库前必被跳过，绝不触发 422 炸整批（D-008）。
+    """
+    normalized = re.sub(r"[^a-z0-9-]+", "-", raw.lower())
+    normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
+    normalized = normalized[:_ADOPT_NAME_MAX_LENGTH].strip("-")
+    if not normalized:
+        return normalized, "名称归一化后为空（目录名仅含非法字符），无法收编"
+    if not _ADOPT_NAME_RE.match(normalized):
+        return normalized, f"名称归一化后仍不满足 [a-z0-9-]{{2,40}}：{normalized!r}"
+    if normalized.startswith(_ADOPT_RESERVED_PREFIX):
+        return (
+            normalized,
+            f"归一化后命中保留前缀 {_ADOPT_RESERVED_PREFIX!r}，与平台内置技能命名空间冲突",
+        )
+    return normalized, None
 
 
 def skills_git_cache_root() -> Path:
@@ -482,6 +521,29 @@ class SkillSourceService:
             sources=[SourceRead.model_validate(s) for s in sources],
             skills=skills,
         )
+
+    async def platform_skill_names(self) -> set[str]:
+        """平台技能库名全集（bridges task-03 / D-008 差集三源排除用）。
+
+        = CustomSkill **全体名**（DB 不限 owner——任何用户已建/已收编的同名技能
+        都要让位，防止跨用户重复收编同名）∪ sillyspec-*（``skills_bundle_dir``
+        文件扫描）∪ 全部 **enabled** 源的 discover_skills 实时发现（管理员视角
+        不带 user，与 ``list_library`` 第三源同口径；disabled 源不参与，R-05）。
+
+        消费方：workspace ``list_adoptable`` 差集（specDir 目录名 − 本集合 −
+        ``sillyspec-`` 前缀）。纯读（DB 名列 + 文件系统扫描），不落任何状态。
+        """
+        names: set[str] = set(
+            (await self._session.execute(select(CustomSkill.name))).scalars().all()
+        )
+        names.update(
+            p.name for p in get_settings().skills_bundle_dir.glob(SKILLS_GLOB) if p.is_dir()
+        )
+        for source in await self.list_():
+            if not source.enabled:
+                continue
+            names.update(d.name for d in git_fetcher.discover_skills(_discovery_root(source)))
+        return names
 
     async def delete(self, source_id: uuid.UUID) -> None:
         """删除源——连带清该源 user_skill_enables（前缀匹配）+ 缓存目录 best-effort。

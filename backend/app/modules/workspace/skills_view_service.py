@@ -14,10 +14,15 @@ backend 容器路径，RPC 打到 daemon 宿主会读不到——daemon 宿主�
 2026-09-11-workspace-asset-bridges task-02：新增 ``import_from_registry``（桥③）——
 从 MCP 资产库选入 server 定义，读-合并-整包提交写 ``.mcp.json``（解密 env + 同名
 改名 ``-registry`` + 复用原子写与审计，D-004/D-009）。
+2026-09-11-workspace-asset-bridges task-03：新增 ``list_adoptable`` / ``adopt``
+（桥④）——specDir/skills 反向收编为 CustomSkill（差集三源排除 D-008 + 名归一化
++ frontmatter 原样/缺则拼装对齐打包层防双拼 D-005；specDir 只读不删源）。
 
 参考：
 - daemon skill-manager.ts：workspace 自定义 skills 源 = ``specDir/skills/``
 - settings/router.py 的 ``_redact_mcp_env``（env secret 遮蔽，复用）
+- agent/skills_bundle_service.py 的 ``_build_skill_md``（拼装口径，防双拼）
+- skill_source/service.py 的 ``normalize_adopt_name`` / ``platform_skill_names``
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ import re
 import shutil
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from fastapi import status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -38,12 +44,14 @@ from sqlmodel import select
 from app.core.crypto import CipherKeyMismatch
 from app.core.errors import AppError, SpecWorkspaceNotFound
 from app.core.spec_paths import SpecPathResolver
+from app.modules.agent.skills_bundle_service import _parse_skill_frontmatter
 from app.modules.auth.model import User
 from app.modules.mcp_registry.service import McpRegistryService
 from app.modules.settings.router import (
     _SECRET_REDACTED_PLACEHOLDER as _SET_PLACEHOLDER,
 )
 from app.modules.settings.router import _redact_mcp_env
+from app.modules.skill_source.service import SkillSourceService, normalize_adopt_name
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workflow.model import AUDIT_PLACEHOLDER_ID, AuditLog
 from app.modules.workspace.model import Workspace
@@ -178,6 +186,69 @@ class McpImportFromRegistryResponse(BaseModel):
     written_name: str
     renamed: bool
     warning: str | None = None
+
+
+# ── skills 反向收编（2026-09-11-workspace-asset-bridges 桥④ / D-005/D-008）────
+
+_ADOPT_DESCRIPTION_MAX_LENGTH = 200
+"""收编 description 截断长度（CustomSkill.description String(200) 同宽）。"""
+
+_ADOPT_DESCRIPTION_FALLBACK = "从 workspace 收编"
+"""SKILL.md 无 frontmatter description 时的中文兜底（非空，满足 min_length=1）。"""
+
+
+class AdoptableSkill(BaseModel):
+    """单个可收编候选（``GET /skills/adoptable`` 条目，D-005 两阶段之列表）。
+
+    ``name``：specDir/skills/ 目录名原样（确认落库时回传该名）；``valid``：
+    归一化后是否满足 CustomSkill name 规则（False → adopt 侧跳过并带
+    ``invalid_reason``，不炸整批）；``has_extra_files``：除 SKILL.md 外还有
+    辅助文件——CustomSkill 单文件模型不收编辅助文件，前端提示手动合并。
+    """
+
+    name: str
+    description: str
+    normalized_name: str
+    valid: bool
+    invalid_reason: str | None = None
+    has_extra_files: bool
+
+
+class AdoptableSkillsResponse(BaseModel):
+    """``GET /api/workspaces/{id}/skills/adoptable`` 响应（差集候选，只读）。"""
+
+    skills: list[AdoptableSkill]
+
+
+class SkillAdoptRequest(BaseModel):
+    """``POST /api/workspaces/{id}/skills/adopt`` 请求体（确认落库阶段）。
+
+    ``names`` 为 adoptable 列表回传的目录名数组（原样 name，非归一化名）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    names: list[str] = Field(min_length=1, max_length=100)
+
+
+AdoptItemStatus = Literal["adopted", "invalid", "missing", "conflict"]
+"""逐名结果状态：成功 / 归一化非法跳过 / 目录或 SKILL.md 不存在 / 重名 409。"""
+
+
+class SkillAdoptItemResult(BaseModel):
+    """单个 name 的收编结果（整批逐名独立，单名失败不影响其余，D-005）。"""
+
+    name: str
+    status: AdoptItemStatus
+    normalized_name: str | None = None
+    skill_id: uuid.UUID | None = None
+    reason: str | None = None
+
+
+class SkillAdoptResponse(BaseModel):
+    """``POST /api/workspaces/{id}/skills/adopt`` 响应（逐名结果数组）。"""
+
+    results: list[SkillAdoptItemResult]
 
 
 # ── skills 编辑（2026-08-26-workspace-skill-edit task-01 / D-003@v1 安全约束）──
@@ -526,6 +597,189 @@ class SkillsViewService:
             warning=view.warning,
         )
 
+    # ── skills 反向收编（桥④ / D-005/D-008，specDir 只读不删源）────────────────
+
+    async def list_adoptable(self, workspace_id: uuid.UUID, actor: User) -> AdoptableSkillsResponse:
+        """列 specDir/skills/ 可收编候选（差集扫描，只读，D-005 两阶段之列表）。
+
+        2026-09-11-workspace-asset-bridges task-03 / FR-03 / D-008：
+
+        - 扫描复用 ``list_skills`` 同源 resolver 与目录遍历（``_scan_adoptable_sync``
+          平铺列文件 + 读各 SKILL.md frontmatter，容错降级——坏文件不炸清单）；
+        - 差集排除：specDir 目录名 − 平台库名全集（
+          :meth:`SkillSourceService.platform_skill_names`：CustomSkill 全体名
+          ∪ sillyspec-* ∪ enabled git 源 discover）− ``sillyspec-`` 前缀目录；
+        - 候选字段：``description`` 取 frontmatter 截 200（缺省中文兜底）；
+          ``normalized_name``/``valid``/``invalid_reason`` 来自
+          :func:`normalize_adopt_name`（D-008 归一化）；``has_extra_files``
+          标记多文件技能（辅助文件不收编，提示手动合并）；
+        - ``actor`` 仅为 D-008 签名稳定保留——差集口径是**全体名**（不限
+          owner），WORKSPACE_WRITE 已由端点保证，此处不再过滤。
+
+        specDir 只读：不写不删任何源文件（D-005：收编后源文件由用户自清）。
+        无 spec 工作区 / 无 skills 子目录 → 空列表（与 ``list_skills`` 同口径）。
+        """
+        ws, spec_ws = await self._get_base(workspace_id)
+        resolver = self._resolver_for(ws, spec_ws)
+        if resolver is None:
+            return AdoptableSkillsResponse(skills=[])
+
+        skills_dir = resolver._spec_root() / "skills"
+        platform_names = await SkillSourceService(self._session).platform_skill_names()
+        scanned = await asyncio.to_thread(self._scan_adoptable_sync, skills_dir)
+
+        skills: list[AdoptableSkill] = []
+        for name, files, description in scanned:
+            if name in platform_names or name.startswith("sillyspec-"):
+                continue  # 差集排除：平台库名全集 + sillyspec- 前缀目录（D-008）
+            normalized, invalid_reason = normalize_adopt_name(name)
+            has_skill_md = _SKILL_ENTRY_FILENAME in files
+            if not has_skill_md:
+                invalid_reason = "缺少 SKILL.md 入口文件，无法收编"
+            skills.append(
+                AdoptableSkill(
+                    name=name,
+                    description=(description or _ADOPT_DESCRIPTION_FALLBACK)[
+                        :_ADOPT_DESCRIPTION_MAX_LENGTH
+                    ],
+                    normalized_name=normalized,
+                    valid=has_skill_md and invalid_reason is None,
+                    invalid_reason=invalid_reason,
+                    has_extra_files=any(f != _SKILL_ENTRY_FILENAME for f in files),
+                )
+            )
+        return AdoptableSkillsResponse(skills=skills)
+
+    async def adopt(
+        self, workspace_id: uuid.UUID, names: list[str], actor: User
+    ) -> SkillAdoptResponse:
+        """逐个读 specDir SKILL.md 原文写 CustomSkill（D-005 两阶段之确认落库）。
+
+        - **不删源文件**（specDir 只读语义保持——用户确认收编成功后自清）；
+        - 逐名独立结果（单名失败不炸整批）：``invalid``（归一化非法/名段非法/
+          非 UTF-8 文本，带原因跳过）、``missing``（目录或 SKILL.md 不存在）、
+          ``conflict``（重名走 ``CustomSkillService.create`` 既有 409 语义，
+          逐名呈现）、``adopted``（成功，附 skill_id）；
+        - CustomSkill 归属操作者本人（``created_by=actor.id``，D-005）；落库走
+          skills 模块 ``CustomSkillService.create``（延迟导入——skills 模块
+          零改动，函数内 import 同 ``_collect_enabled_git_skills`` 先例）；
+        - 内容口径（D-005）：SKILL.md 已带 frontmatter → **原文逐字落库**
+          （打包层 ``_build_skill_md`` 检测围栏直通，防双拼）；缺 frontmatter
+          → 按打包层同款格式拼装头（name/description + 原文 body）。
+
+        无 spec 工作区 → :class:`SpecWorkspaceNotFound`（落库语义路径不静默）。
+        """
+        # 延迟导入：skills.service 落库通道（不改 skills 模块；模块级 import 交
+        # 错路由加载顺序，函数内 import 是本仓处理跨模块写通道的既有先例）。
+        from app.modules.skills.service import CustomSkillService, SkillNameConflict
+
+        ws, spec_ws = await self._get_base(workspace_id)
+        resolver = self._resolver_for(ws, spec_ws)
+        if resolver is None:
+            raise SpecWorkspaceNotFound(
+                "未找到该工作区对应的 spec 工作区。",
+                details={"workspace_id": str(workspace_id)},
+            )
+        skills_root = resolver._spec_root() / "skills"
+
+        results: list[SkillAdoptItemResult] = []
+        for name in names:
+            try:
+                segment = self._validate_segment(name)
+            except SkillNameInvalid:
+                results.append(
+                    SkillAdoptItemResult(
+                        name=name,
+                        status="invalid",
+                        reason="名称仅允许字母、数字、点、下划线和连字符，且不能是 ..",
+                    )
+                )
+                continue
+
+            skill_dir = skills_root / segment
+            skill_md = skill_dir / _SKILL_ENTRY_FILENAME
+            if not skill_dir.is_dir() or not skill_md.is_file():
+                results.append(
+                    SkillAdoptItemResult(
+                        name=name,
+                        status="missing",
+                        reason=f"skill {segment} 不存在或缺少 SKILL.md 入口文件",
+                    )
+                )
+                continue
+
+            normalized, invalid_reason = normalize_adopt_name(segment)
+            if invalid_reason is not None:
+                results.append(
+                    SkillAdoptItemResult(
+                        name=name,
+                        status="invalid",
+                        normalized_name=normalized,
+                        reason=invalid_reason,
+                    )
+                )
+                continue
+
+            try:
+                raw = await asyncio.to_thread(skill_md.read_bytes)
+                body_text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                results.append(
+                    SkillAdoptItemResult(
+                        name=name,
+                        normalized_name=normalized,
+                        status="invalid",
+                        reason="SKILL.md 不是 UTF-8 文本，无法收编",
+                    )
+                )
+                continue
+            except OSError:
+                results.append(
+                    SkillAdoptItemResult(
+                        name=name,
+                        normalized_name=normalized,
+                        status="missing",
+                        reason=f"SKILL.md 读取失败：{segment}",
+                    )
+                )
+                continue
+
+            description = (_parse_skill_frontmatter(raw).get("description") or "")[
+                :_ADOPT_DESCRIPTION_MAX_LENGTH
+            ] or _ADOPT_DESCRIPTION_FALLBACK
+            # D-005 内容口径：原文已带 frontmatter 围栏 → 逐字原样（打包层
+            # _build_skill_md 同检测直通）；缺 → 按打包层同款格式拼装（防双拼）。
+            content = body_text
+            if not body_text.lstrip().startswith("---"):
+                content = f"---\nname: {normalized}\ndescription: {description}\n---\n\n{body_text}"
+
+            try:
+                skill = await CustomSkillService(self._session).create(
+                    name=normalized,
+                    description=description,
+                    content=content,
+                    created_by=actor.id,
+                )
+            except SkillNameConflict:
+                results.append(
+                    SkillAdoptItemResult(
+                        name=name,
+                        normalized_name=normalized,
+                        status="conflict",
+                        reason=f"name 已存在（409）：{normalized}",
+                    )
+                )
+                continue
+            results.append(
+                SkillAdoptItemResult(
+                    name=name,
+                    status="adopted",
+                    normalized_name=normalized,
+                    skill_id=skill.id,
+                )
+            )
+        return SkillAdoptResponse(results=results)
+
     # ── 文件清单 helper（本地）──────────────────────────────────────────────
 
     @staticmethod
@@ -562,6 +816,34 @@ class SkillsViewService:
         except (OSError, PermissionError):
             return SkillsViewResponse(skills=[])
         return SkillsViewResponse(skills=skills)
+
+    @staticmethod
+    def _scan_adoptable_sync(skills_dir: Path) -> list[tuple[str, list[str], str]]:
+        """``list_adoptable`` 同步扫描段（桥④，移出事件循环）。
+
+        复用 ``_list_skills_sync`` 同款遍历（子目录 + 平铺文件清单），额外读各
+        目录 SKILL.md 的 frontmatter description（坏文件容错空串，不炸清单——
+        与 ``_parse_skill_frontmatter`` 容错口径一致）。返回
+        ``(目录名, 文件清单, description)`` 列表（按目录名排序，确定序）。
+        """
+        if not skills_dir.is_dir():
+            return []
+        scanned: list[tuple[str, list[str], str]] = []
+        try:
+            for entry in sorted(skills_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                files = SkillsViewService._list_files_local(entry)
+                try:
+                    frontmatter = _parse_skill_frontmatter(
+                        (entry / _SKILL_ENTRY_FILENAME).read_bytes()
+                    )
+                except OSError:
+                    frontmatter = {}
+                scanned.append((entry.name, files, frontmatter.get("description", "")))
+        except (OSError, PermissionError):
+            return scanned
+        return scanned
 
     @staticmethod
     def _read_mcp_config_sync(mcp_path: Path) -> McpConfigViewResponse:

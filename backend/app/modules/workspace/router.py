@@ -45,10 +45,13 @@ from app.modules.workspace.schema import (
 )
 from app.modules.workspace.service import WorkspaceService
 from app.modules.workspace.skills_view_service import (
+    AdoptableSkillsResponse,
     McpConfigUpdateRequest,
     McpConfigViewResponse,
     McpImportFromRegistryRequest,
     McpImportFromRegistryResponse,
+    SkillAdoptRequest,
+    SkillAdoptResponse,
     SkillCreateRequest,
     SkillFileContentResponse,
     SkillFileWriteRequest,
@@ -478,6 +481,44 @@ async def delete_workspace_skill_file(
     """删 skill 内文件（SKILL.md 入口保护 409 + 审计）。"""
     service = SkillsViewService(session)
     return await service.delete_skill_file(workspace_id, skill_name, file_path, actor=user)
+
+
+@router.get("/{workspace_id}/skills/adoptable", response_model=AdoptableSkillsResponse)
+async def list_adoptable_workspace_skills(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> AdoptableSkillsResponse:
+    """列 specDir/skills 可收编候选（桥④ / FR-03 / D-005 / D-008，只读差集）。
+
+    2026-09-11-workspace-asset-bridges task-03。鉴权 WORKSPACE_WRITE（收编入口
+    与确认落库同级权限，``require_permission`` 自动取路径 ``{workspace_id}`` 做
+    成员校验，非成员 403）。service 层完成：specDir/skills 目录扫描（复用
+    list_skills 同源 resolver 与防穿越遍历）→ 差集排除平台库名全集
+    （CustomSkill 全体名 ∪ sillyspec-* ∪ enabled git 源 discover，D-008）→
+    候选含归一化名与 valid/invalid_reason（多文件技能标 has_extra_files）。
+    无 spec 工作区返回空列表（与 GET skills 同口径）。
+    """
+    service = SkillsViewService(session)
+    return await service.list_adoptable(workspace_id, actor=user)
+
+
+@router.post("/{workspace_id}/skills/adopt", response_model=SkillAdoptResponse)
+async def adopt_workspace_skills(
+    workspace_id: uuid.UUID,
+    payload: SkillAdoptRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> SkillAdoptResponse:
+    """收编 specDir/skills 技能为操作者的 CustomSkill（桥④ / D-005 两阶段之确认落库）。
+
+    逐名独立结果（单名失败不炸整批）：adopted / invalid（带原因跳过）/
+    missing / conflict（重名 409 既有语义逐名呈现）。内容口径：SKILL.md
+    frontmatter 原样落库、缺失按打包层口径拼装（防双拼）；**不删 specDir 源
+    文件**（用户自清）；CustomSkill 归属操作者本人。
+    """
+    service = SkillsViewService(session)
+    return await service.adopt(workspace_id, payload.names, actor=user)
 
 
 @router.get("/{workspace_id}/mcp-config", response_model=McpConfigViewResponse)
