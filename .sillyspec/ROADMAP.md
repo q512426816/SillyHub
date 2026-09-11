@@ -10,6 +10,10 @@
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
 
+### 2026-09-11 · 技能库（git 技能源 + user 启用绑定；收编经 Grill 实证砍除）
+
+- **skills-central-library**（2026-09-11 立项/归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，4 task/4 Wave 串行，分支 4 提交待合并）：平台技能链第三源——backend 新模块 skill_source（skill_sources+user_skill_enables 两表 + admin 源 CRUD[SSRF await+git 探测 422] + subprocess git 浅克隆拉取器[--depth 1 --filter=blob:none/300s/半成品清理/≤200 文件 ≤10MB 双上限] + 技能发现 frontmatter 复用）；bundle 组装 _gather_all_files 第三源（D-010 同名优先级 sillyspec-*>custom>git 源序 origin 粒度去重；version 算法零改动 D-005；manifest source 标记）；library 三源聚合+enable 端点（skill_key URL 编码冒号）；前端技能页两新区块（admin 源管理卡+技能库启用开关，我的技能零改动）。**收编 onboarding 经 Grill 实证砍除**（D-011：散技能真身在 daemon 宿主侧 worktree，backend 容器不可直读——做收编需 daemon RPC 独立变更）。测试：backend 77+邻接 127/frontend 22 全绿+真实 PG 迁移往返+file:// 本地假仓真 git clone 全链。verify 过程顺手清偿三件并行预存债（ql-017 registry 第 9 键 dialog/ql-018 includeSessions opt-in/ql-019 scope-audit mock——多会话协作 debt 实录入 verify-result）。
+
 ### 2026-09-11 · 多供应商注入（codex 完整凭证注入 + pi 自定义端点文件层，cursor spike 排除）
 
 - **multi-provider-injection**（2026-09-10 立项/2026-09-11 归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，7 task/7 Wave 串行，分支 7 提交待合并）：平台供应商热切换能力补齐到 codex/pi——daemon 三层注入栈（env 层零改动 + NEW codex-settings/pi-settings 两写盘器照 claude-settings 模式 + litellm_proxy 通道满足 codex Responses-only）。**spike 前置于 design（24 条 mock 日志）**：codex env 路不通（二进制无 OPENAI_BASE_URL）/CODEX_HOME 写盘与 -c 全链通但 wire_api=chat 已被 0.147 移除/pi 三文件闭环（官方 auth 形状 {"type":"api_key"} 与 ai-toolbox 文档有出入实测修正）/cursor 私有 ConnectRPC 云协议无 BYO 面排除。per-session 目录（D-011 用户裁决，偏离 claude 单共享先例）+ per-form 写盘门槛（D-012 两轮 Grill 修正：openai_chat 形态 payload 无 api_key/base_url）+ pi×openai_chat 三层禁配 + 热切换 byte-equal 重写（D-009 尽力语义）。Grill 三轮（B-1~B-8 全清）+ plan-review/postcheck 多轮收敛。测试：daemon 182/backend 237/frontend 74 相关全绿 + **真实 CLI 冒烟**（真跑 codex 0.147/pi 0.81 打 mock，/v1/responses 与 /v1/chat/completions Bearer 命中）；key 不入 argv/env/日志断言齐。与并行变更 review-dispatch-platform-fixes 分层互补（其 pi env 层先落 main 4726893a5，本变更文件层衔接 D-008）。NOTES：litellm 通道产物级验证（R-02 留档）/daemon 真机 E2E 留部署后。

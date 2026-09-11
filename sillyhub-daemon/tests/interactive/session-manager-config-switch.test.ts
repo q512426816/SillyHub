@@ -145,6 +145,7 @@ function makeMockCodexDriver() {
 
 function makeDeps() {
   return {
+    onSessionReloaded: vi.fn(async (_s: string) => {}),
     onTurnResult: vi.fn(
       async (_s: string, _r: string, _res: SDKResultMessage) => {},
     ),
@@ -410,7 +411,8 @@ describe('task-08 / reloadWithConfig（FR-05 / D-012@v1，claude）', () => {
   it('CFG-1: 切档案+供应商 —— resume + 新 systemPrompt preset+append + provider env + 喂切换轮 prompt', async () => {
     // Arrange
     const mock = makeMockClaudeDriver();
-    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    const deps = makeDeps();
+    const sm = new SessionManager({ driver: mock.driver, ...deps });
     await sm.create({ ...BASE_INPUT });
     mock.emitMessage(systemInitMessage('sdk-sess-cfg1'));
     await flushMicrotasks();
@@ -428,6 +430,11 @@ describe('task-08 / reloadWithConfig（FR-05 / D-012@v1，claude）', () => {
       profile: { systemPrompt: '你是新档案人格', mcpRefs: ['mcp-a'], skillRefs: ['skill-x'] },
       providerConfig: cfg,
     });
+
+    // ql-20260911-003-355a P2：reload 成功 → onSessionReloaded 恰一次（daemon 回收
+    // modelUsage 差分基线的锚点）；失败路径不触发（下方失败用例反证）。
+    expect(deps.onSessionReloaded).toHaveBeenCalledTimes(1);
+    expect(deps.onSessionReloaded).toHaveBeenCalledWith(BASE_INPUT.sessionId);
 
     // Assert —— reload 内核：resume + close 旧句柄 + 新配置 driverOpts。
     expect(mock.driver.start).toHaveBeenCalledTimes(2);

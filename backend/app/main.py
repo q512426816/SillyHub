@@ -342,13 +342,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # ql-20260910-005：spec_workspace reparse 后台任务排空——巡检类协程
         # 是「取消即走」，reparse 任务不同：每步是独立短事务（取消会回滚到
         # 上一致投影，但截断中的事务退出路径不可控），且尾随节流窗内的补发
-        # 输入在 cancel 语义下直接丢失。停机前 drain（循环等到集合清空，
-        # 单任务毫秒级；_reparse_pending 短事务原子，最坏延迟投影到 daemon
-        # 下轮 push 60-90s 兜底）。函数为测试排空同款（spec_workspace/service）。
+        # 输入在 cancel 语义下直接丢失。停机前 drain 有界等待（单任务毫秒级，
+        # 但尾随定时器 sleep 的是 120s 节流窗——ql-20260911-003-355a 修正原
+        # 「单任务毫秒级」误判：无界等待会把停机挂住 ≥120s，Docker 10s SIGKILL
+        # 直接落空；超时只记日志，daemon 下轮 push 60-90s 兜底投影）。
         try:
             from app.modules.spec_workspace.service import drain_reparse_workers
 
-            await drain_reparse_workers()
+            await drain_reparse_workers(timeout_seconds=15.0)
         except Exception:
             log.exception("spec_workspace.reparse_drain_failed")
         try:

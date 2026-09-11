@@ -88,6 +88,8 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 
 ## 变更索引
 
+- ql-20260911-019-1f01 | 头像孤儿文件回收（前端半）：桌面/移动个人中心「上传成功但保存失败」→ tryReclaimOrphanAvatarFile best-effort 删新文件（移动端 handleAvatarFile 持 uploadedUrl 后置回收）；换绑/清除的旧文件由后端 update_my_avatar 落库后回收。
+- ql-20260911-003-355a（24h 审查修复批·MCP 资产库/个人中心）| ① settings/mcp 页编辑/复制/新建提交链全量携带 secret_env_keys（用户逐键指定密钥类型——P0-2 修复：编辑保留 <set> 占位=后端保留既有密文，创建/复制占位符被本地校验拦下）；「对我启用」user 解绑自动带本人 user_id 尾段（P1-1：无尾段恒 422）。② 桌面个人中心头像操作串行化（avatarBusy 门，对齐移动端先例——PATCH+fetchMe RTT 窗口内连点两次终值可能非最后所选）。③ 模板预填携带 secret_env_keys 预勾加密行（模板只记键名，值待用户补）。api-types 已 gen:types 再生。
 - ql-20260828-012-4425 | 派团队标签点击编辑回显当前配置——后端 summary 补 project_id/worker_preset/main_agent_config + 弹层 initialConfig 六项回显（mount 首跑不清回显 scope；未展开预设确认原样回传）；预会话待生效 chip 同样回显暂存 payload
 - ql-20260828-011-1ec7 | 预会话派团队配置后补待生效标签——弹层确认后 preTeamMission 暂存期间零反馈的 UX 缺口（虚线 chip「团队已配置 · 随首句创建生效」，点击可改、× 放弃并清 /team 回填）
 - ql-20260828-009-4a13 | 派团队状态标签四问题修复——mission 迟到轮询盲区（hasRunningTurn 纳入轮询）/chip ×改真取消（cancelTeamMission，收起记忆下线）/chip 可点击更新指派（前置取消重派+弹层提示）/＋菜单图标对齐灰黑；顺手修 ux-fixes 按钮迁＋菜单后既有测试债

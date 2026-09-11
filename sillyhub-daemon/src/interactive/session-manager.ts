@@ -1921,6 +1921,13 @@ export class SessionManager {
       void this._runConsume(state);
       // 排队 flush（snapshotPersistable 落盘；env / providerConfig / systemPrompt 已替换）。
       this._scheduleFlush();
+      // reload 成功通知（ql-20260911-003-355a：daemon 回收 modelUsage 差分基线——
+      // pi/cursor 快照 per-handle 从 0 累计，句柄重建后残留基线会让恢复首轮少记）。
+      try {
+        await this.deps.onSessionReloaded?.(sessionId);
+      } catch {
+        /* 通知失败不影响 reload 结果（尽力语义）。 */
+      }
     } catch (err) {
       // ── ⑦ reload 失败保留旧句柄 + 上报错误，不破坏会话（R-01 降级）──
       // ql-20260806-002：driver.start 失败时 oldHandle 尚未 close（close 已移到替换

@@ -299,6 +299,7 @@ export default function McpRegistryPage() {
           req: {
             name: payload.name,
             server_config: payload.serverConfig,
+            secret_env_keys: payload.secretEnvKeys,
             tags: payload.tags,
           },
         });
@@ -307,6 +308,7 @@ export default function McpRegistryPage() {
         const created = await createServer.mutateAsync({
           name: payload.name,
           server_config: payload.serverConfig,
+          secret_env_keys: payload.secretEnvKeys,
           scope: payload.scope,
           source: "manual",
         });

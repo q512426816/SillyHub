@@ -21,9 +21,9 @@ related_tests:
   - sillyhub-daemon/tests/credential-injector.test.ts
 goal: >
   打通 pi 执行器凭证注入最后一环（FR-03/D-002@v1）：新增 PiCredentialInjector 并登记
-  REGISTRY，spawn-env 第 0 层（spawn-env.ts:205-211）不再跳过 pi，worker 用独立 key。
+  REGISTRY，spawn-env 第 0 层（sillyhub-daemon/src/spawn-env.ts:205-211）不再跳过 pi，worker 用独立 key。
 implementation:
-  - 'credential-injector.ts 新增 PiCredentialInjector implements CredentialInjector（agentKind="pi"）；REGISTRY（:217-219）增 pi 条目，spawn-env 第 0 层零改动即命中；类头注释写明 v1 边界与依据：pi 实测凭证走 provider 专属 env、不读任何 BASE_URL env、model 经 --model 旗标不走 env（design §5.2/§3）'
+  - 'sillyhub-daemon/src/credential-injector.ts 新增 PiCredentialInjector implements CredentialInjector（agentKind="pi"）；REGISTRY（:217-219）增 pi 条目，spawn-env 第 0 层零改动即命中；类头注释写明 v1 边界与依据：pi 实测凭证走 provider 专属 env、不读任何 BASE_URL env、model 经 --model 旗标不走 env（design §5.2/§3）'
   - 'toEnv 映射：api_key 非空 → env[config.auth_field ?? "ANTHROPIC_API_KEY"]；extra_env 透传（空串值跳过，复用 assignSkippingEmptyStrings，未导出则同款内联）；litellm_proxy/base_url/model/model_role_mappings/default_fallback_model 一律不映射'
   - '更新 tests/credential-injector.test.ts：注册表用例把 pi 移出「未知 agentKind 返回 undefined」断言（保留 codex/gemini/unknown-xyz）'
   - '新增 tests/credential-injector-pi.test.ts：auth_field 缺省/显式、api_key 空串跳过、extra_env 空串值跳过、其余字段不产键、REGISTRY 注册与单例'

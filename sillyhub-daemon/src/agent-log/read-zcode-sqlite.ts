@@ -47,7 +47,11 @@ import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { DEFAULT_MAX_SEGMENTS, type NormalizedLogMessage } from './parse-zcode-model-io.js';
+import {
+  DEFAULT_MAX_CONTENT_BYTES,
+  DEFAULT_MAX_SEGMENTS,
+  type NormalizedLogMessage,
+} from './parse-zcode-model-io.js';
 import type { AgentLogMessagesResult } from './registry.js';
 
 // ── sess id 提取（纯函数）─────────────────────────────────────────────────────
@@ -448,6 +452,8 @@ export function setZcodeSqliteDbPathFactory(factory: (() => string) | null): voi
 export interface ZcodeSqliteReadOptions {
   /** 库文件绝对路径（本次调用覆写默认工厂；测试注入 fixture 路径用）。 */
   dbPath?: string;
+  /** 内存预算上限（UTF-16 code unit 口径；测试注入小值，生产默认 20MB）。 */
+  maxContentUnits?: number;
 }
 
 /** message×part LEFT JOIN 遍历的行形状（列名即 SELECT 别名）。 */
@@ -530,6 +536,12 @@ export async function readZcodeSqliteMessages(
 
     const segments: UnnumberedSegment[] = [];
     let skippedLines = 0;
+    // 内存预算（ql-20260911-003-355a P2）：文件路径有 lstat 20MB 预检（DEFAULT_
+    // MAX_CONTENT_BYTES），SQLite 路径无文件大小可查——按行 data 的 code unit 累计
+    // 近似计（message_data 在 join 行重复计属保守方向）；超限与文件路径同口径返
+    // too_large（不物化全量段、不截半份 diff）。
+    let budgetUnits = 0;
+    const budgetLimit = opts.maxContentUnits ?? DEFAULT_MAX_CONTENT_BYTES;
     // 当前 message 分组状态（rows 按 message 聚簇，message_id 变更即切组）。
     let currentMessageId: string | null = null;
     let messageSkipParts = false;
@@ -537,6 +549,16 @@ export async function readZcodeSqliteMessages(
     let messageTs: string | null = null;
 
     for (const row of rows) {
+      budgetUnits += (row.message_data?.length ?? 0) + (row.part_data?.length ?? 0);
+      if (budgetUnits > budgetLimit) {
+        return {
+          status: 'too_large',
+          messages: [],
+          truncated: false,
+          totalSegments: 0,
+          skippedLines: 0,
+        };
+      }
       if (row.message_id !== currentMessageId) {
         currentMessageId = row.message_id;
         const messageData = parseJsonObject(row.message_data);

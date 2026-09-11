@@ -357,6 +357,60 @@ export interface SillySpecFileDiff {
 /** sillyspec_file_diff 的 diff 文本截断护栏（字符口径，防大 diff 撑爆 RPC 载荷）。 */
 export const SILLYSPEC_FILE_DIFF_MAX_CHARS = 256 * 1024;
 
+/**
+ * 按 UTF-16 code unit 截断并保证不产生孤立代理对（ql-20260911-003-355a P2）：
+ * String.slice 恰好切在代理对中间时尾字符是 lone surrogate，backend Python 侧
+ * JSON 还原后 ensure_ascii=False 的 UTF-8 编码会抛 UnicodeEncodeError → HTTP 500
+ * （CJK diff 边界约半概率）。截在高代理项（U+D800-D7FF 区间首项）时丢弃该项。
+ */
+export function truncateUtf16Safe(str: string, maxChars: number): string {
+  if (str.length <= maxChars) return str;
+  const sliced = str.slice(0, maxChars);
+  const last = sliced.charCodeAt(sliced.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    return sliced.slice(0, -1);
+  }
+  return sliced;
+}
+
+// ── ql-20260911-001-c0be：sillyspec_scope_audit 契约类型（变更中心结果卡）─────
+
+/** 对账表行数截断护栏（防大仓全表撑爆 RPC 载荷；超限截断置 truncated）。 */
+export const SILLYSPEC_AUDIT_ROWS_MAX = 500;
+
+/** 对账表单行：full-flow 带 verdict（planned/unplanned/untouched）+ planned（design
+ * 文件清单原话，如「修改」），quick 带 attribution（declared/soft/undeclared）+
+ * declared——两组字段互斥（按 mode 取用），行数 additions/deletions 二进制为 null。 */
+export interface SillySpecAuditRow {
+  path: string;
+  additions: number | null;
+  deletions: number | null;
+  kind: string;
+  planned?: string | null;
+  verdict?: string | null;
+  declared?: boolean | null;
+  attribution?: string | null;
+}
+
+/** sillyspec_scope_audit RPC result（表模式信封投影 + rows 截断护栏）。 */
+export interface SillySpecAuditTable {
+  change: string;
+  ok: boolean;
+  mode: string;
+  /** 对账锚点完整 hash（quick 无锚为 null）。 */
+  base_ref: string | null;
+  /** 锚点短化标签（表头同款 7 位短 hash；quick=HEAD 窗口语义时为 null）。 */
+  anchor_label: string | null;
+  /** ok=false 时的原因（quick 会话不存在 / 实际侧失败等）。 */
+  degraded_reason: string | null;
+  totals: { files: number; additions: number | null; deletions: number | null };
+  rows: SillySpecAuditRow[];
+  /** 他者已声明文件（quick 窗口剔除清单）。 */
+  excluded_foreign_declared: string[];
+  note: string | null;
+  truncated: boolean;
+}
+
 // ── 类型（task-05 心跳/注册接线将复用）─────────────────────────────────────────
 
 /** 升级触发来源：server_command（WS 指令）/ auto（定时自动检查）。 */
@@ -1438,15 +1492,129 @@ export class SillySpecManager {
     if (bin === null) {
       throw new RpcError('sillyspec_bin_missing', '未找到 sillyspec CLI（bin 解析失败），请先安装 sillyspec');
     }
-    const outcome = await this._execSillySpecCli(
+    const parsed = await this._runScopeAuditJson(
       bin,
-      ['scope-audit', '--change', change, '--file', filePath, '--json'],
+      ['--change', change, '--file', filePath, '--json'],
       root,
     );
+    const asStr = (v: unknown): string | null =>
+      typeof v === 'string' && v !== '' ? v : null;
+    const rawDiff = typeof parsed.diff === 'string' ? parsed.diff : null;
+    const truncated = rawDiff !== null && rawDiff.length > SILLYSPEC_FILE_DIFF_MAX_CHARS;
+    return {
+      change: typeof parsed.change === 'string' ? parsed.change : change,
+      file: typeof parsed.file === 'string' ? parsed.file : filePath,
+      ok: parsed.ok,
+      mode: asStr(parsed.mode) ?? 'full-flow',
+      base_ref: asStr(parsed.baseRef),
+      anchor_label: asStr(parsed.anchorLabel),
+      diff: truncated
+        ? truncateUtf16Safe(rawDiff!, SILLYSPEC_FILE_DIFF_MAX_CHARS)
+        : rawDiff,
+      note: asStr(parsed.note),
+      truncated,
+    };
+  }
+
+  /**
+   * 对账表（ql-20260911-001-c0be，变更中心结果卡数据源）：spawn 本机 sillyspec
+   * CLI 跑 `scope-audit --change <c> --json` 表模式——三态全表（full-flow：
+   * verdict 计划内/计划外/计划未动；quick：attribution 已声明/软归属/未声明）
+   * + 行数，锚点与 --file 同源。锚点短化（表头同款 7 位短 hash）；rows 超
+   * 护栏截断置 truncated（totals 仍为工具原值，截断信息见 truncated）。
+   *
+   * @throws {RpcError} invalid_params / no_spec_root / sillyspec_bin_missing /
+   *   scope_audit_timeout / sillyspec_capability_missing / scope_audit_failed
+   *   （同 fileDiff，经 _runScopeAuditJson 共享执行器）。
+   */
+  async auditTable(
+    change: string,
+    workspaceId?: string,
+  ): Promise<SillySpecAuditTable> {
+    if (!change) {
+      throw new RpcError('invalid_params', 'change 必填（非空字符串）');
+    }
+    const root = this._resolveWorkspaceRoot(workspaceId);
+    if (!root) {
+      throw new RpcError('no_spec_root', workspaceId
+        ? '该工作区尚未被本机认领，请先在该工作区发起一次会话后重试'
+        : '未观察到 workspace 主仓根，无法执行 sillyspec 命令');
+    }
+    const bin = this._resolveSillySpecBin();
+    if (bin === null) {
+      throw new RpcError('sillyspec_bin_missing', '未找到 sillyspec CLI（bin 解析失败），请先安装 sillyspec');
+    }
+    const parsed = await this._runScopeAuditJson(
+      bin,
+      ['--change', change, '--json'],
+      root,
+    );
+    const asStr = (v: unknown): string | null =>
+      typeof v === 'string' && v !== '' ? v : null;
+    const asCount = (v: unknown): number | null =>
+      typeof v === 'number' && Number.isFinite(v) ? v : null;
+    const rawRows = Array.isArray(parsed.rows) ? parsed.rows : [];
+    const rows: SillySpecAuditRow[] = [];
+    for (const raw of rawRows) {
+      if (!isRecord(raw) || typeof raw.path !== 'string') continue;
+      rows.push({
+        path: raw.path,
+        additions: asCount(raw.additions),
+        deletions: asCount(raw.deletions),
+        kind: asStr(raw.kind) ?? 'modified',
+        planned: asStr(raw.planned),
+        verdict: asStr(raw.verdict),
+        declared: typeof raw.declared === 'boolean' ? raw.declared : null,
+        attribution: asStr(raw.attribution),
+      });
+      if (rows.length >= SILLYSPEC_AUDIT_ROWS_MAX) break;
+    }
+    const excluded = isRecord(parsed.excluded) && Array.isArray(parsed.excluded.foreignDeclared)
+      ? parsed.excluded.foreignDeclared.filter((p): p is string => typeof p === 'string')
+      : [];
+    const baseRef = asStr(parsed.baseAnchor);
+    return {
+      change: typeof parsed.change === 'string' ? parsed.change : change,
+      ok: parsed.ok,
+      mode: asStr(parsed.mode) ?? 'full-flow',
+      base_ref: baseRef,
+      // hash 锚短化 7 位（表头同款）；语义锚（quick-window:* / HEAD 窗口）原样
+      anchor_label:
+        baseRef === null
+          ? null
+          : /^[0-9a-f]{7,40}$/.test(baseRef)
+            ? baseRef.slice(0, 7)
+            : baseRef,
+      degraded_reason: asStr(parsed.degradedReason),
+      totals: {
+        files: asCount((isRecord(parsed.totals) ? parsed.totals.files : null)) ?? rows.length,
+        additions: asCount((isRecord(parsed.totals) ? parsed.totals.additions : null)),
+        deletions: asCount((isRecord(parsed.totals) ? parsed.totals.deletions : null)),
+      },
+      rows,
+      excluded_foreign_declared: excluded,
+      note: asStr(parsed.note),
+      truncated: rows.length >= SILLYSPEC_AUDIT_ROWS_MAX && rawRows.length > rows.length,
+    };
+  }
+
+  /**
+   * scope-audit CLI JSON 执行共享器（fileDiff / auditTable 共用，ql-20260911-001-c0be
+   * 抽出防双实现）：spawn（node+bin 数组形参）→ 超时 / 能力门（exit 非零且输出含
+   * 「未知命令 / unknown command」→ sillyspec_capability_missing）/ 其余非零 →
+   * scope_audit_failed → stdout JSON 解析 + ok 字段契约校验。返回解析后的 envelope
+   * （Record；字段取值由调用方各自投影）。
+   */
+  private async _runScopeAuditJson(
+    bin: string,
+    args: string[],
+    root: string,
+  ): Promise<Record<string, unknown> & { ok: boolean }> {
+    const outcome = await this._execSillySpecCli(bin, ['scope-audit', ...args], root);
     if (outcome.timedOut) {
       throw new RpcError(
         'scope_audit_timeout',
-        `scope-audit --file 执行超时（${Math.round(this._commandTimeoutMs / 1000)}s）被终止`,
+        `scope-audit 执行超时（${Math.round(this._commandTimeoutMs / 1000)}s）被终止`,
       );
     }
     if (outcome.code === null) {
@@ -1475,21 +1643,8 @@ export class SillySpecManager {
     if (!isRecord(parsed) || typeof parsed.ok !== 'boolean') {
       throw new RpcError('scope_audit_failed', 'stdout JSON 缺 ok 字段（信封形态不符）');
     }
-    const asStr = (v: unknown): string | null =>
-      typeof v === 'string' && v !== '' ? v : null;
-    const rawDiff = typeof parsed.diff === 'string' ? parsed.diff : null;
-    const truncated = rawDiff !== null && rawDiff.length > SILLYSPEC_FILE_DIFF_MAX_CHARS;
-    return {
-      change: typeof parsed.change === 'string' ? parsed.change : change,
-      file: typeof parsed.file === 'string' ? parsed.file : filePath,
-      ok: parsed.ok,
-      mode: asStr(parsed.mode) ?? 'full-flow',
-      base_ref: asStr(parsed.baseRef),
-      anchor_label: asStr(parsed.anchorLabel),
-      diff: truncated ? rawDiff!.slice(0, SILLYSPEC_FILE_DIFF_MAX_CHARS) : rawDiff,
-      note: asStr(parsed.note),
-      truncated,
-    };
+    // ok 经上面 typeof 窄化，cast 到交叉返回型（调用方免重复窄化）
+    return parsed as Record<string, unknown> & { ok: boolean };
   }
 
   /**

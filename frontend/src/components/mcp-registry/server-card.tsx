@@ -23,9 +23,7 @@ import { Button, Switch, Tag, Tooltip } from "antd";
 import { Copy, Pencil, Star, Trash2 } from "lucide-react";
 
 import {
-  countSecretEnvKeys,
   formatCmdLine,
-  isSecretEnvKey,
   type McpServerRead,
 } from "@/lib/api/mcp-registry";
 import { cn } from "@/lib/utils";
@@ -72,10 +70,8 @@ export function McpServerCard({
   bindingPending = false,
 }: McpServerCardProps) {
   const isMine = server.owner_user_id !== null;
-  const secretCount = countSecretEnvKeys(server.server_config);
-  const secretKeyNames = Object.keys(
-    (server.server_config?.env as Record<string, unknown> | undefined) ?? {},
-  ).filter(isSecretEnvKey);
+  const secretKeyNames = server.secret_env_keys ?? [];
+  const secretCount = secretKeyNames.length;
   const canManage = scopeTab === "mine" || isAdmin;
 
   return (

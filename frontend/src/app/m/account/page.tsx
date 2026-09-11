@@ -32,7 +32,7 @@ import { USER_AVATAR_OWNER_TYPE } from "@/components/group-chat/group-member-ava
 import { useAvatarSrc } from "@/components/chat/use-avatar-src";
 import { changePassword, logout, updateMyAvatar } from "@/lib/auth";
 import { errMessage } from "@/lib/errors";
-import { getFileDownloadUrl, uploadFile } from "@/lib/file/api";
+import { getFileDownloadUrl, uploadFile, tryReclaimOrphanAvatarFile } from "@/lib/file/api";
 import { useSession } from "@/stores/session";
 
 export default function MobileAccountPage() {
@@ -79,13 +79,18 @@ export default function MobileAccountPage() {
     }
     setAvatarBusy(true);
     setAvatarError(null);
+    let uploadedUrl: string | null = null;
     try {
       const resp = await uploadFile(file, {
         owner_type: USER_AVATAR_OWNER_TYPE,
       });
-      await updateMyAvatar(getFileDownloadUrl(resp.id));
+      uploadedUrl = getFileDownloadUrl(resp.id);
+      await updateMyAvatar(uploadedUrl);
     } catch (err) {
       setAvatarError(errMessage(err, "头像上传失败，请稍后重试"));
+      // 上传成功但保存失败 → 新文件即刻孤儿，best-effort 回收
+      //（ql-20260911-019-1f01；换绑/清除的旧文件由后端落库后回收）。
+      tryReclaimOrphanAvatarFile(uploadedUrl);
     } finally {
       setAvatarBusy(false);
     }

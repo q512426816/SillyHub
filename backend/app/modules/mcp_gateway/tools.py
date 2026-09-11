@@ -61,6 +61,7 @@ from app.modules.agent.service import _build_agent_profile_snapshot
 from app.modules.auth.model import User
 from app.modules.daemon.host_fs import new_host_fs_delegate
 from app.modules.daemon.host_fs.delegate import HostFsDelegateUnavailable
+from app.modules.daemon.lease.context import _normalize_lease_provider
 from app.modules.mcp_gateway.auth import (
     MCP_SCOPE_CONVERGE,
     MCP_SCOPE_DISPATCH,
@@ -1006,6 +1007,45 @@ def _as_utc_or_none(dt: datetime | None) -> datetime | None:
     return dt.astimezone(UTC)
 
 
+def _quota_pool_entry(
+    pool_kind: str,
+    agent_kind: str | None,
+    *,
+    pool_row: "object | None" = None,
+) -> dict[str, object]:
+    """quota_pool 三态载荷（ql-20260911-004）。
+
+    - ``independent``：属主配了 agent_kind 平台默认凭证（``pool_row`` 必填）——
+      独立池，兜底成立；附身份五键（不含 key 材料）。
+    - ``local_shared``：未配该 kind 平台凭证——worker 落 daemon 本机凭证池，
+      与本地 agent 同池（429 同锁，独立兜底不成立）；附 hint 说明。
+    - ``undetermined``：无执行器可判（effective_agent None）。
+    """
+    if pool_kind == "independent":
+        row = pool_row  # LlmProvider 行（延迟类型，避免模块顶层 import 循环）
+        return {
+            "pool_kind": "independent",
+            "llm_provider_id": str(row.id),
+            "name": row.name,
+            "agent_kind": row.agent_kind,
+            "api_format": row.api_format,
+        }
+    if pool_kind == "local_shared":
+        return {
+            "pool_kind": "local_shared",
+            "agent_kind": agent_kind,
+            "hint": (
+                f"属主未配置 agent_kind={agent_kind} 的平台默认凭证——worker 落 daemon"
+                " 本机凭证池（与本地 agent 同池，独立兜底不成立）"
+            ),
+        }
+    return {
+        "pool_kind": "undetermined",
+        "agent_kind": agent_kind,
+        "hint": "无执行器可判（effective_agent 为 None），池未知",
+    }
+
+
 @mcp.tool()
 async def get_daemon_status(
     ctx: Context | None = None,
@@ -1038,14 +1078,16 @@ async def get_daemon_status(
       online 项无 provider 即 None）——「调用方可判」信号**非权威解析**，
       顺序 = bindings 返回序（无额外 ORDER BY），权威以派发时 placement
       实算为准。
-    - ``quota_pool`` / ``effective_quota_pool``（ql-20260910-018，关联
-      2026-09-10-review-dispatch-platform-fixes P0-2 增补）：worker 执行器
-      配额池标识——per-daemon ``quota_pool`` = 该 binding 属主在 effective
-      agent_kind 下的**用户默认** LlmProvider 身份（``{llm_provider_id, name,
-      agent_kind, api_format, is_default}``，只出身份不出 key 材料）。这是
-      claim 三级解析（session > profile 绑定 > 用户默认）的第三级预判：无
-      session/profile 绑定时即生效值；``null`` = 属主未配该 kind 平台凭证
-      → worker 落 daemon 本机凭证池（与本地 agent 同池，独立兜底不成立）。
+    - ``quota_pool`` / ``effective_quota_pool``（ql-20260910-018 + ql-20260911-004
+      显式三态，关联 2026-09-10-review-dispatch-platform-fixes P0-2 增补）：worker
+      执行器配额池标识——per-daemon ``quota_pool`` = 该 binding 属主在 effective
+      agent_kind 下的**用户默认** LlmProvider 归属（claim 三级解析第三级预判：
+      session > profile 绑定 > 用户默认；无 session/profile 绑定时即生效值）。
+      **三态**（``pool_kind``，消费方一句可判「本地配额耗尽时平台兜底是否成立」）：
+      ``independent``（配了该 kind 平台默认凭证，附 llm_provider_id/name/
+      agent_kind/api_format，不出 key 材料）；``local_shared``（未配 → worker 落
+      daemon 本机凭证池，与本地 agent 同池 429 同锁，独立兜底**不成立**，附 hint）；
+      ``undetermined``（effective_agent None，无执行器可判）。
       顶层 ``effective_quota_pool`` = 返回序首个 online 项的池（镜像
       effective_agent 来源口径，同为可判信号非权威解析）。
 
@@ -1077,10 +1119,16 @@ async def get_daemon_status(
         bindings = list(
             (
                 await session.execute(
-                    select(WorkspaceMemberRuntime).where(
+                    select(WorkspaceMemberRuntime)
+                    .where(
                         WorkspaceMemberRuntime.workspace_id == auth.workspace_id,
                         WorkspaceMemberRuntime.daemon_id.isnot(None),
                     )
+                    # P2（ql-20260911-003-355a）：确定序钉死「首个 online 项」与
+                    # daemons 数组顺序（无 ORDER BY 时 PG 计划变化会让
+                    # effective_agent/effective_quota_pool 抖动）；锚 created_at
+                    # 插入序（uuid 主键排序是随机的，不构成稳定序）。
+                    .order_by(WorkspaceMemberRuntime.created_at, WorkspaceMemberRuntime.daemon_id)
                 )
             )
             .scalars()
@@ -1092,10 +1140,12 @@ async def get_daemon_status(
         runtime_rows = (
             (
                 await session.execute(
-                    select(DaemonRuntime).where(
+                    select(DaemonRuntime)
+                    .where(
                         DaemonRuntime.daemon_instance_id.in_({b.daemon_id for b in bindings}),
                         DaemonRuntime.status == "online",
                     )
+                    .order_by(DaemonRuntime.daemon_instance_id, DaemonRuntime.provider)
                 )
             )
             .scalars()
@@ -1116,8 +1166,13 @@ async def get_daemon_status(
         now = datetime.now(UTC)
         # effective_agent：default_agent 非空即它（空串视同未配置）；否则首个
         # online 项 providers[0].provider——首个 online 项无 provider 即 None，
-        # 不扫后续（非权威解析，见 docstring 口径）。
-        effective_agent: str | None = workspace.default_agent or None
+        # 不扫后续（非权威解析，见 docstring 口径）。default_agent 形态与 claim 链
+        # 同源归一（claude_code/claude-code → claude，lease/context.py:49 同款——
+        # P2 修复：不归一时 default_agent="claude_code" 恒 miss agent_kind 词表，
+        # quota_pool 误报 null）。
+        effective_agent: str | None = (
+            _normalize_lease_provider(workspace.default_agent) if workspace.default_agent else None
+        )
         effective_resolved = effective_agent is not None
         entries: list[dict[str, object]] = []
         for binding in bindings:
@@ -1153,39 +1208,47 @@ async def get_daemon_status(
                 effective_agent = entry_providers[0]["provider"] if entry_providers else None
         online_entries = [e for e in entries if e["online"]]
         first_name = entries[0]["daemon_name"] if entries else None
-        # ql-20260910-018（P0-2 预判面）：worker 执行器配额池标识——binding 属主在
-        # effective agent_kind 下的用户默认 LlmProvider 身份（claim 三级解析第三级；
-        # session/profile 绑定优先于它，实算以 claim 时为准）。一条批量 in 查询覆盖
-        # bindings 属主集合（不进 per-binding 循环）；只出身份（id/name/agent_kind/
-        # api_format/is_default），不 decrypt 不泄漏 key 材料（R-02 口径）。
-        # effective_agent 为 None（无执行器可判）时不查池，quota_pool 恒 None。
+        # ql-20260910-018（P0-2 预判面）+ ql-20260911-004 显式三态：worker 执行器
+        # 配额池标识——binding 属主在 effective agent_kind 下的用户默认 LlmProvider
+        # （claim 三级解析第三级；session/profile 绑定优先于它，实算以 claim 时为准）。
+        # 一条批量 in 查询覆盖 bindings 属主集合（不进 per-binding 循环）；只出身份
+        # （id/name/agent_kind/api_format），不 decrypt 不泄漏 key 材料（R-02 口径）。
+        # 三态（消费方一句可判「本地配额耗尽时平台兜底是否成立」）：
+        #   independent  = 属主配了该 kind 平台默认凭证 → 独立池，兜底成立（附身份）；
+        #   local_shared = 未配 → worker 落 daemon 本机凭证池，与本地 agent 同池
+        #                  （429 同锁，独立兜底**不成立**）——活体实证远端现状即此态；
+        #   undetermined = effective_agent 为 None（无执行器可判），不查池。
         pool_by_user: dict[uuid.UUID, dict[str, object]] = {}
+        effective_agent_kind = effective_agent
+        for binding_user_id in {b.user_id for b in bindings}:
+            pool_by_user[binding_user_id] = _quota_pool_entry("local_shared", effective_agent_kind)
         if effective_agent is not None:
             from app.modules.llm_provider.model import LlmProvider
 
             pool_rows = (
                 (
                     await session.execute(
-                        select(LlmProvider).where(
+                        select(LlmProvider)
+                        .where(
                             LlmProvider.user_id.in_({b.user_id for b in bindings}),
                             LlmProvider.agent_kind == effective_agent,
                             LlmProvider.is_default.is_(True),
                         )
+                        # 确定序：多默认行（数据异常态）时池归属稳定不抖动。
+                        .order_by(LlmProvider.user_id, LlmProvider.name)
                     )
                 )
                 .scalars()
                 .all()
             )
             for pool_row in pool_rows:
-                pool_by_user[pool_row.user_id] = {
-                    "llm_provider_id": str(pool_row.id),
-                    "name": pool_row.name,
-                    "agent_kind": pool_row.agent_kind,
-                    "api_format": pool_row.api_format,
-                    "is_default": True,
-                }
+                pool_by_user[pool_row.user_id] = _quota_pool_entry(
+                    "independent", effective_agent_kind, pool_row=pool_row
+                )
+        undetermined_pool = _quota_pool_entry("undetermined", None)
         for entry in entries:
-            entry["quota_pool"] = pool_by_user.get(uuid.UUID(str(entry["user_id"])))
+            user_pool = pool_by_user.get(uuid.UUID(str(entry["user_id"])))
+            entry["quota_pool"] = undetermined_pool if effective_agent is None else user_pool
         return {
             "workspace_id": str(auth.workspace_id),
             "daemon_online": bool(online_entries),

@@ -98,11 +98,14 @@ class McpTokenCreated(BaseModel):
 
     id: uuid.UUID
     token: str = Field(description="明文 token，仅本次响应返回，此后不可恢复（请立即保存）")
-    gateway_url: str = Field(
+    gateway_url: str | None = Field(
+        default=None,
         description=(
             "本部署的 MCP gateway 接入端点（形如 https://<host>/mcp/，带尾斜杠）。"
-            "token 只在这个 URL 上有效，两者必须成对保存使用。"
-        )
+            "token 只在这个 URL 上有效，两者必须成对保存使用。null=部署未配置"
+            " MCP_GATEWAY_PUBLIC_BASE_URL（不从未经钉死的请求头推导，防 token 被"
+            " 引向第三方主机）——请配置后重新签发。"
+        ),
     )
     name: str
     scope: list[str]
@@ -142,9 +145,9 @@ async def create_mcp_token(
     ``created_by`` 记当前操作 user（审计），token 本身无关 user 身份——但派发类
     tool 用 ``created_by`` 作 dispatch actor，无归属 token 派发会被拒（spike P1-4）。
 
-    ``gateway_url``（spike P0-2）与 token 成对返回：解析优先
-    ``MCP_GATEWAY_PUBLIC_BASE_URL`` 配置，缺省从本请求的转发头推导——在哪签发
-    就下发哪的接入地址。
+    ``gateway_url``（spike P0-2）与 token 成对返回：仅取
+    ``MCP_GATEWAY_PUBLIC_BASE_URL`` 显式配置（ql-20260911-003-355a P2：转发头
+    可被请求方影响，不再作推导源）；未配置 → null（调用方按部署文档配置后重签）。
     """
     svc = _service(session)
     row, plaintext = await svc.create(

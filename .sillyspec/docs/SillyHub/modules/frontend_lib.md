@@ -115,3 +115,5 @@ react-query: makeQueryClient() 每会话一实例；staleTime 15s 治焦点刷�
 - `sse-internals.ts`（39 行）——模块私有共享件，**刻意不进 index 再导出**（防污染 188 导出面，D-011）
 
 群聊客户端 11 函数等契约内容随文件搬移归属 `group-chat.ts`，契约语义零变化（见上文「契约摘要」原条目）。
+
+- ql-20260911-019-1f01 | lib/file/api.ts 增 `deleteFile(id)`（DELETE /api/file/{id} 软删，走 apiFetch 401 刷新）与 `tryReclaimOrphanAvatarFile(url)`（`/api/file/{uuid36}` 形态才触发，fire-and-forget 吞错 best-effort）——头像「上传成功但保存失败」路径的新文件即刻兜底回收；换绑/清除的旧文件由后端 update_my_avatar / update_member 落库后服务端回收。

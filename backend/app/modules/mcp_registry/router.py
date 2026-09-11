@@ -7,8 +7,11 @@ Change: 2026-09-10-mcp-central-registry（task-03 / design「接口定义」节 
 委托（先例 ``settings/router.py:89``），内部逻辑分别归 task-08/09/10/04——
 对应模块尚未落地时捕获 ImportError 转 501（落地后移除该回退）。
 
-权限矩阵（design REST 端点注释）：
+权限矩阵（design REST 端点注释 + ql-20260911-003-355a P0-1 增补）：
 - 读与我的库操作：任意登录用户（``CurrentUser`` = ``get_current_user``）；
+- workspace 扫描/导入两端点（workspace-scan / workspace-import-apply）：被扫描
+  workspace 强制成员校验（importer 层 ``WORKSPACE_READ`` 可见集；平台 admin
+  放行全部——与 workspace 模块端点同权限点）；
 - 平台库写：创建 ``scope=platform``、平台 server 的更新删除、platform 绑定
   解绑由 service 层 ``_require_admin`` 抛 ``PermissionDenied`` 403（与
   ``require_permission_any(SETTINGS_ADMIN)`` 同权限点同判定链，task-02 已单测）；

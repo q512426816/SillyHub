@@ -515,6 +515,7 @@ modules:
       - GroupChatService  # daemon/group/service.py（@路由/影子懒建/互@护栏/typing+presence，2026-09-01-session-group-chat）
       - group_router  # daemon/group/router.py（/api/daemon/group-chats 端点族）
       - daemon_router
+      - authorize_pinned_runtime  # daemon/grants/queries.py（会话钉定授权判定 owner/工作区 grant/platform 直传 404[D-012]，2026-08-28-daemon-agent-share；2026-09-11-skills-central-library task-04 自文件尾误植位归位——该行原本游离在 build 模块后致整文件 YAML 不可解析）
     depends_on:
       - core
       - models
@@ -1259,6 +1260,43 @@ modules:
     concerns: []
     review_reasons: []
 
+  # 2026-09-11-skills-central-library task-04：git 技能源 + 用户启用绑定 + 技能库聚合。
+  skill_source:
+    status: active
+    doc: modules/skill_source.md
+    paths:
+      - app/modules/skill_source/**
+    tags: [skills, git-source, shallow-clone, enable-binding, library, ssrf, 技能源]
+    aliases: [skill-sources, skills-library]
+    entrypoints:
+      - /api/skill-sources  # GET 列表 + POST 创建（均 SETTINGS_ADMIN）
+      - /api/skill-sources/{source_id}  # PATCH 部分更新 + DELETE 删除（连带清绑定+缓存目录）
+      - /api/skill-sources/{source_id}/refresh  # 手动刷新（admin）
+      - /api/skills/library  # 技能库三源聚合 + 我的启用态（登录即可）
+      - /api/skills/{skill_key}/enable  # POST/DELETE 本人启用绑定（skill_key=<source_id>:<目录名> 含冒号）
+    main_symbols:
+      - SkillSourceService  # 源 CRUD/拉取接线/技能库聚合/启用绑定
+      - SkillSource
+      - UserSkillEnable  # UNIQUE(user_id, skill_key)；skill_key 刻意不做 FK（删源按前缀连带清）
+      - LibraryView
+      - LibrarySkillItem
+      - EnableOp
+      - parse_skill_key  # <source_id>:<目录名> 解析（422）
+      - skills_git_cache_root  # <spec_data_root>/skills_git_cache
+      - source_cache_dir  # skills_git_cache/<source_id>/
+      - skill_source_router
+    depends_on:
+      - core
+      - models
+      - auth
+      - skills  # list_library 三源聚合读 CustomSkill
+      - agent  # 顶层复用 skills_bundle_service._parse_skill_frontmatter/SKILLS_GLOB（收集侧反向惰性 import 本模块，不成环）
+    used_by:
+      - agent  # skills_bundle_service._collect_enabled_git_skills 函数体内惰性 import（bundle 第三源，D-010）
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
   # ── infra 模块 ─────────────────────────────────────────────
 
   migrations:
@@ -1293,4 +1331,4 @@ modules:
     needs_review: false
     concerns: []
     review_reasons: []
-      - authorize_pinned_runtime (backend/app/modules/daemon/grants/queries.py, 会话钉定授权判定 owner/工作区 grant/platform 直传 404[D-012]，2026-08-28-daemon-agent-share)
+

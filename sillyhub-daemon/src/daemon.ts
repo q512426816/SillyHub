@@ -4471,6 +4471,17 @@ export class Daemon {
    * @param sessionId  AgentSession.id
    * @param status  'ended'（正常 / idle）/ 'failed'（driver error）
    */
+  /**
+   * 会话受控 reload 成功通知（ql-20260911-003-355a P2）：cli.ts 经
+   * SessionManagerDeps.onSessionReloaded 桥接。回收 modelUsage 差分基线——
+   * pi/cursor 的 modelUsage 快照 per-handle 从 0 累计，_reloadSession 重建句柄后
+   * 快照归零，残留基线会让恢复首轮差分少记（复位检测只拦 cur < base 的形态）；
+   * 与 onSessionEnd 的基线回收（ql-20260831-009）同族，锚点是句柄重建。
+   */
+  onSessionReloaded(sessionId: string): void {
+    this._modelUsageBaselineBySession.delete(sessionId);
+  }
+
   async onSessionEnd(
     sessionId: string,
     status: SessionStatus,
@@ -6568,6 +6579,14 @@ export class Daemon {
       const workspaceId =
         typeof params.workspace_id === 'string' ? params.workspace_id : '';
       return this._sillyspecManager.fileDiff(change, file, workspaceId);
+    });
+    // ql-20260911-001-c0be：对账表（变更中心结果卡）——spawn sillyspec
+    // scope-audit --json 表模式（三态全表 + 行数，锚点同源）；错误码族同上。
+    ws.registerRpcHandler('sillyspec_scope_audit', async (params) => {
+      const change = typeof params.change === 'string' ? params.change : '';
+      const workspaceId =
+        typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      return this._sillyspecManager.auditTable(change, workspaceId);
     });
   }
 

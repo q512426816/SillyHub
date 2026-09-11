@@ -21,7 +21,7 @@ provides:
 goal: >
   PI driver 成功轮 turn result 补 result 字段（轮终 assistant 全文 turnFinalText），修复 backend result_summary 与 AgentRun.output_redacted 空洞，并为 task-03 mission_worker 代报提供 summary 全文（design §5.1 / FR-02）。
 implementation:
-  - 轮状态重置区（pi-rpc-driver.ts:1334-1340，与 pendingTurnError 同点）新增轮级 let turnFinalText（string|null）并每轮置 null
+  - 轮状态重置区（sillyhub-daemon/src/interactive/pi-rpc-driver.ts:1334-1340，与 pendingTurnError 同点）新增轮级 let turnFinalText（string|null）并每轮置 null
   - 事件循环 override 截获点（:1258-1267）命中 ev.type==='text' && ev.override===true && typeof ev.content==='string' 时 turnFinalText=ev.content，轮内最后一条 override 全文胜出
   - success reportTurnResult（:1379-1386）追加 ...(turnFinalText!==null?{result:turnFinalText}:{})；error 轮（:1369-1377）不动，已有 result=错误信息
   - 新增 tests/interactive/pi-rpc-driver-turn-result.test.ts 覆盖 override 事件驱动、轮重置、error 轮不带全文、无 override 成功轮缺 result 键

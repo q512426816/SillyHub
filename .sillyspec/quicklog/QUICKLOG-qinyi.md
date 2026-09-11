@@ -330,3 +330,125 @@
 根因：该 tool 此前只有执行器（effective_agent）与在线性，无凭证池归属信息——worker 实际落在哪个配额池（独立 key 还是 daemon 本机凭证同池）派发前不可判，P0-2 的「本地耗尽平台兜底」价值无法预验证。
 方案：per-daemon quota_pool = binding 属主在 effective agent_kind 下的用户默认 LlmProvider 身份（claim 三级解析第三级；五键 {llm_provider_id,name,agent_kind,api_format,is_default}，不 decrypt 不出 key 材料）+ 顶层 effective_quota_pool 镜像首个 online 项；一条批量 in 查询不进循环；effective_agent 为 None 不查池。
 结果：test_tools_new.py 24 passed（3 新用例覆盖池命中/kind 过滤/跨属主映射、非默认行不构成池、无执行器不查池），ruff check+format 过；模块卡同步（13 个 tool 校正 + quota_pool 口径）；待部署远端后消费方即可预判。
+
+## ql-20260911-001-c0be | 2026-09-11 08:28:41 | scope-audit 命令卡升级为结果卡——对账结果（三态表+行数）在页面内直接跑出来渲染，不再只展示可复制命令
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/sillyspec-manager.ts（auditTable + _runScopeAuditJson 共享执行器）
+- sillyhub-daemon/src/daemon.ts（sillyspec_scope_audit RPC）
+- backend/app/modules/change/scope_audit.py（_send_scope_rpc 共享 helper + get_scope_audit）
+- backend/app/modules/change/router.py（/sillyspec/scope-audit 端点）
+- frontend/src/components/changes/scope-audit-command-card.tsx（结果卡重构（摘要+明细弹窗+行联动 diff+命令折叠））
+- frontend/src/lib/changes.ts（getScopeAudit 取数）
+需求：scope-audit 命令卡升级为结果卡——对账结果（三态表+行数）在页面内直接跑出来渲染，不再只展示可复制命令
+根因：用户反馈命令卡只是展示命令不够——命令不是目的，看对账结果才是；daemon→backend→前端透传链已由单文件比对（ql-20260910-017-2006）建好，缺表模式一跳与结果渲染
+方案：daemon 新 sillyspec_scope_audit RPC（auditTable 方法跑 CLI 表模式 --json，信封投影：锚点短化/rows 500 护栏/totals 透传；执行器抽 _runScopeAuditJson 与 fileDiff 共享）+ backend 同族端点 GET /sillyspec/scope-audit（_send_scope_rpc 错误族抽共享 helper）+ 前端命令卡重构：挂载即取数出锚点+合计+三态计数 chips（full-flow verdict / quick attribution），查看明细弹窗渲染三态全表且行点击联动单文件 diff 弹窗，本地命令折叠为卡尾兜底
+结果：daemon 12 用例+回归 76 passed、tsc 0；backend 9 passed、mypy/ruff 0；前端卡 7 用例重写+变更中心 21 套件 237 passed、tsc 0、eslint 0；gen:types 三端重生成；docs check 无新增；未部署（daemon 升级+sillyspec 新版后端到端可用，降级态有命令兜底）
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, sillyhub-daemon/src/api-types.ts
+
+## ql-20260911-002-4755 | 2026-09-11 08:51:11 | external 模式（orchestration_mode=external…
+状态：已完成
+关联变更：2026-09-10-review-dispatch-platform-fixes
+文件：
+- backend/app/modules/agent/model.py（resolve 回退 _mission_from_session_runs）
+- backend/app/modules/agent/mcp_tools.py（_worker_done_core external 成员资格）
+- backend/app/modules/agent/tests/test_worker_subsession_done.py（TestExternalModeWorkerDone 三例）
+- .sillyspec/docs/backend/modules/agent.md（external 打通条目）
+需求：external 模式（orchestration_mode=external，review-dispatch 经 MCP gateway 派发）worker 的 artifacts 恒空——daemon 代报 worker_done 被 404。
+根因：resolve_mission_for_session 沿 parent 链爬根（external worker parent=NULL 爬到自身）按 mission.session_id 匹配（external=NULL）必 miss；mission_worker_sessions_tree 对 external 恒 [] 会再 422。活体证据：backend 日志 POST /api/missions/worker_done 404 + lease metadata 已有 stage=mission_worker（①②③全非断点：stage 打标正常、caps.mcp=false 代报路径已走、pi override 提取正常 output_redacted=503 字符）。
+方案：resolve 爬根 miss 后按 run 归属回退（会话下最早带 mission_id 的 run 反查 mission，active/terminal 双形态）；_worker_done_core 成员资格对 external 以首 run 锚代替空树（session 模式树 422 判定序原样）。
+结果：test_worker_subsession_done.py 23 passed（external 三例：200+artifact+零唤醒/终态 409/无归属 404），广域 550 passed，ruff/mypy 过；daemon 侧零改动（代报本就工作）。
+
+## ql-20260911-003-355a | 2026-09-11 09:00:58 | 24h 审查风险修复批：MCP 资产库 P0 越权+P0 密钥毁坏（密钥类型改用户逐键自定义）+P1 解绑 422+P2 十一件
+状态：已完成
+关联变更：（无）
+文件：.sillyspec/docs/SillyHub/modules/frontend_app.md（+1/-0）, .sillyspec/docs/SillyHub/modules/frontend_components.md（+1/-0）, .sillyspec/docs/backend/modules/auth.md（+3/-1）, .sillyspec/docs/backend/modules/mcp_gateway.md（+1/-1）, .sillyspec/docs/backend/modules/mcp_registry.md（+27/-11）, .sillyspec/docs/multi-agent-platform/modules/backend.md（+1/-0）, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（+1/-0）, .sillyspec/docs/sillyhub-daemon/modules/interactive.md（+1/-0）, backend/app/core/errors.py（+7/-0）, backend/app/main.py（+5/-4）, backend/app/modules/auth/service.py（+27/-2）, backend/app/modules/mcp_gateway/router.py（+9/-6）, backend/app/modules/mcp_gateway/server.py（+12/-28）, backend/app/modules/mcp_gateway/tests/test_router.py（+5/-9）, backend/app/modules/mcp_registry/importer.py（+77/-8）, backend/app/modules/mcp_registry/model.py（+21/-3）, backend/app/modules/mcp_registry/render.py（+9/-4）, backend/app/modules/mcp_registry/router.py（+4/-1）, backend/app/modules/mcp_registry/schema.py（+37/-22）, backend/app/modules/mcp_registry/service.py（+160/-21）, backend/app/modules/mcp_registry/templates.py（+54/-47）, backend/app/modules/mcp_registry/tests/test_importer_workspace.py（+106/-4）, backend/app/modules/mcp_registry/tests/test_model_schema.py（+16/-13）, backend/app/modules/mcp_registry/tests/test_render.py（+49/-4）, backend/app/modules/mcp_registry/tests/test_router.py（+26/-7）, backend/app/modules/mcp_registry/tests/test_service.py（+242/-4）, backend/app/modules/mcp_registry/tests/test_templates.py（+24/-6）, backend/app/modules/spec_workspace/service.py（+29/-5）, backend/app/modules/spec_workspace/tests/test_reparse_scheduler.py（+27/-0）, backend/migrations/versions/20260911010000_mcp_template_secret_keys_unique.py（+48/-0）, backend/tests/modules/auth/test_my_avatar.py（+33/-2）, frontend/src/app/(dashboard)/account/page.tsx（+9/-0）, frontend/src/app/(dashboard)/settings/mcp/page.test.tsx（+8/-8）, frontend/src/app/(dashboard)/settings/mcp/page.tsx（+2/-0）, frontend/src/components/group-chat/group-member-avatar.tsx（+6/-2）, frontend/src/components/mcp-registry/server-card.tsx（+2/-6）, frontend/src/components/mcp-registry/server-form-modal.tsx（+108/-30）, frontend/src/components/mcp-registry/template-picker-modal.tsx（+5/-2）, frontend/src/lib/api/mcp-registry.ts（+35/-18）, sillyhub-daemon/src/agent-log/read-zcode-sqlite.ts（+23/-1）, sillyhub-daemon/src/cli.ts（+3/-0）, sillyhub-daemon/src/host-fs-handler.ts（+6/-0）, sillyhub-daemon/src/interactive/session-manager.ts（+7/-0）, sillyhub-daemon/src/interactive/types.ts（+10/-0）, sillyhub-daemon/tests/agent-log/read-zcode-sqlite.test.ts（+21/-0）, sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts（+26/-12）, sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts（+8/-1）
+需求：24h 审查风险修复批：MCP 资产库 P0 越权+P0 密钥毁坏（密钥类型改用户逐键自定义）+P1 解绑 422+P2 十一件
+根因：P0-1 scan/apply 两端点无工作区成员校验可枚举并收编他人 .mcp.json（含 secret）；P0-2 前端回传脱敏占位 <set> 而后端无占位语义、整份重加密毁坏真实密钥不可恢复，且用户裁决密钥判定不得按键名子串自动猜（应为用户自定义类型）；P1-1 user 解绑 URL 缺 scope_ref 尾段后端恒 422；P2 批为 quota_pool 归一化缺失/无序抖动、file-diff 消息泄漏+超时写反、停机 drain 无界、代理对截断 500、SQLite 无预算、分派无存在性门、reload 基线残留、avatar 无 scheme 校验、gateway_url 信任转发头、桌面头像竞态、模板双 seed、渲染同名不确定
+方案：后端：importer _visible_workspace_ids 成员门（admin 放行+WORKSPACE_READ 可见集，越权 403 fail-fast）；McpServerCreate/Update.secret_env_keys 显式指定态+service 占位语义（<set>=保留密文/创建与新键 422/单改指定态升降级）+templates 键名列+预置名唯一索引迁移 20260911010000+render 同名 platform 先 user 后+读侧回显；前端：useToggleMcpBinding 带本人 uid 尾段、表单加密 Switch 逐键指定（缺省按键名建议）、edit <set>/copy 置空；P2：_normalize_lease_provider 归一+三查询 ORDER BY、RPC 135s+remote_message 仅日志、drain 15s 有界、truncateUtf16Safe、SQLite 20MB 预算+lstat 存在性门、onSessionReloaded 基线回收、avatar 422 校验、gateway_url 未配置 null、avatarBusy 串行化
+结果：backend mcp_registry 166+change 516+mcp_gateway 133+spec_workspace 4+auth 9 passed，ruff/mypy/format 0；daemon 定向 99 passed+tsc 0；frontend 25+43 passed+tsc 0；openapi+两份 api-types gen:types 两轮零漂移
+
+## ql-20260911-004-70fc | 2026-09-11 09:32:22 | get_daemon_status.effective_quota_pool 空值不可判——消费方无法预判本地配额耗尽时平台兜底是否成立（活体回执…
+状态：已完成
+关联变更：2026-09-10-review-dispatch-platform-fixes
+文件：
+- backend/app/modules/mcp_gateway/tools.py（_quota_pool_entry 三态 + 预填覆盖）
+- backend/app/modules/mcp_gateway/tests/test_tools_new.py（三态断言）
+- .sillyspec/docs/backend/modules/mcp_gateway.md（三态口径）
+需求：get_daemon_status.effective_quota_pool 空值不可判——消费方无法预判本地配额耗尽时平台兜底是否成立（活体回执：字段在值没填）。
+根因：远端 llm_providers 全为 claude 且无一 is_default=true（DB 实证），属主未配 pi 平台凭证时 probe 按设计返回 null，但 null 无法区分「同池（预期坏态）」与「未实现」。
+方案：quota_pool 改显式三态 pool_kind——independent（平台默认凭证命中，附 llm_provider_id/name/agent_kind/api_format）/ local_shared（未配→worker 落 daemon 本机凭证与本地同池，独立兜底不成立，附 hint）/ undetermined（无执行器可判）；随带并行会话的 default_agent 归一化（claude_code→claude 等）使 kind 匹配更稳。
+结果：test_tools_new.py 24 passed（三态断言），ruff/mypy 过；远端部署后 effective_quota_pool 将显式返回 local_shared——建 pi 独立凭证并设默认即翻 independent（运维动作，消费方一句可判）。
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/main.py, backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_reparse_scheduler.py
+
+## ql-20260911-017-a3c2 | 2026-09-11 09:05:00 | provider-registry 守护测试同步第 9 键 dialog（主仓预存红顺手修）
+状态：已完成
+关联变更：2026-09-11-skills-central-library（verify 门实测暴露；债务源 99a228add/2026-09-09-askuser-pi-cursor）
+文件：
+- sillyhub-daemon/tests/interactive/provider-registry.test.ts（8 键→9 键 + dialog 三态类型断言 string|boolean）
+验证：provider-registry 6 passed + typecheck 0
+
+## ql-20260911-018-5f6e | 2026-09-11 09:20:00 | use-daemon-machines 测试同步 includeSessions opt-in（预存红顺手修，HEAD 副本验证归属）
+状态：已完成
+关联变更：2026-09-11-skills-central-library（verify 门暴露；债务源 a1d7ffba4/ql-20260909-013）
+文件：
+- frontend/src/lib/__tests__/use-daemon-machines.test.ts（sessions 联动用例显式 { includeSessions: true }）
+验证：4 passed；head-check 干净 worktree 复核：本例 HEAD 即红（真债务）、delete-change-confirm HEAD 绿（并行 WIP 污染）
+
+## ql-20260911-019-1f01 | 2026-09-11 10:27:55 | 头像孤儿文件清理：换绑/清除/上传失败三路径遗留文件回收
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/file/service.py（reclaim_orphaned_file_by_url 共享回收入口）
+- backend/app/modules/auth/service.py（update_my_avatar 提交后回收旧值）
+- backend/app/modules/daemon/group/service/members.py（update_member 成员表提交后回收）
+- frontend/src/lib/file/api.ts（deleteFile+tryReclaimOrphanAvatarFile）
+- frontend/src/app/(dashboard)/account/page.tsx+src/app/m/account/page.tsx（保存失败回收新文件）
+- frontend/src/components/group-chat/member-panel.tsx（avatarMutation onError 回收）
+- frontend/src/app/(dashboard)/account/page.test.tsx（软归属·同模块测试，未声明）
+- frontend/src/components/group-chat/__tests__/member-panel.test.tsx（软归属·同模块测试，未声明）
+需求：头像孤儿文件清理：换绑/清除/上传失败三路径遗留文件回收
+根因：头像链路三路径漏回收：换绑与清除后旧文件中心文件失引用、上传成功但保存（PATCH）失败时新文件即刻孤儿，file 模块有 soft delete 能力但本链从不调用，MinIO 孤儿单调增长
+方案：后端 file/service.py 模块级 reclaim_orphaned_file_by_url（/api/file/{uuid} 形态 best-effort 软删，归属 uploaded_by 本人，异常静默不影响主写路径）+ 两写点接线（auth update_my_avatar 提交后回收旧值、group update_member 成员表提交后回收旧 avatar）；前端 lib/file/api.ts 增 deleteFile/tryReclaimOrphanAvatarFile，桌面+移动个人中心与 member-panel 三处在「上传成功但保存失败」catch 里回收新文件（恢复默认空串不触发）
+结果：backend 定向 87 passed（auth 13+group 35+file 39，含换绑/清除/外链/他人文件回收反例），ruff/mypy/format 0；frontend account 15+member-panel 44 passed，tsc 0；模块文档六卡同步+2 处预存引用债顺手修（daemon.md 裸文件名、code-quality 文档缺仓根前缀）
+审计：⚖️ 归属切分：12 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/docs/SillyHub/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONVENTIONS.md, .sillyspec/docs/frontend/scan/CONVENTIONS.md, .sillyspec/docs/multi-agent-platform/scan/CONCERNS.md, backend/app/modules/daemon/tests/test_group_chat_management.py, backend/tests/modules/auth/test_my_avatar.py, docs/architecture-4a.md, docs/code-quality-hardening-2026-07-24.md, docs/research-ai-toolbox-config-management-2026-09-10.md, frontend/src/app/(dashboard)/account/page.tsx, frontend/src/app/m/account/page.tsx
+审计：🔍 软归属：2 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：frontend/src/app/(dashboard)/account/page.test.tsx（+51/-1）, frontend/src/components/group-chat/__tests__/member-panel.test.tsx（+44/-0）
+
+## ql-20260911-020-1da6 | 2026-09-11 12:38:20 | CI 失败与不稳定测试修复批：6 处测试自身缺陷（常量改名未同步、密钥模型未跟上、缺渲染等待、mock 被覆盖、sessions 未等待、心跳断言过严）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change_writer/tests/test_proxy.py（PROXY_POLL_INTERVAL_SECONDS 改 patch PROXY_RECEIPT_DB_CHECK_SECONDS/PUBSUB_WINDOW_SECONDS）
+- backend/app/modules/daemon/tests/test_mcp_config_endpoint.py（种子助手增 secret_env_keys 参数，admin 脱敏对照与解密回填两用例显式传键）
+- frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx（嵌套路径用例补 waitFor 子节点渲染）
+- frontend/src/components/changes/__tests__/platform-sync-section.test.tsx（renderSection 增 bindingOverride，隐藏用例改参数注入）
+- frontend/src/lib/__tests__/use-daemon-machines.test.ts（sessions 断言包 waitFor）
+- sillyhub-daemon/tests/daemon.test.ts（AC-05 心跳计数改稳定化断言）
+需求：CI 失败与不稳定测试修复批：6 处测试自身缺陷（常量改名未同步、密钥模型未跟上、缺渲染等待、mock 被覆盖、sessions 未等待、心跳断言过严）
+根因：c04ec8478 把回执轮询改 Redis pubsub 后常量改名测试未同步；e1492300d 密钥改用户逐键显式 secret_env_keys 后测试种子仍按旧子串自动抽列假设；portal-file-panels 新用例只等 fetchTree 调用没等子节点渲染（file-explorer 原版有等待）；platform-sync-section 隐藏用例的 null 绑定 mock 被 renderSection 内部默认值整体覆盖成断言竞态；use-daemon-machines 在 items 就绪后裸断言并行查询 sessions；daemon AC-05 断言停机瞬间零增长而实现允许在途一拍落账
+方案：test_proxy patch 改新常量并加注释；mcp 种子助手增 secret_env_keys 参数、两用例显式传键并修过期注释；portal-file-panels 补 waitFor 子节点文本；renderSection 增 bindingOverride 参数、隐藏用例改参数注入；sessions 断言包 waitFor；AC-05 改停后先收敛记基数再验证计数稳定
+结果：backend pytest 28 passed（test_proxy+test_mcp_config_endpoint）；frontend vitest 25 passed（3 文件）；daemon vitest 33 passed（daemon.test.ts 含 AC-05）；ruff 两文件 check+format 通过；eslint 0 error（2 条预存 warning）；daemon tsc --noEmit 通过
+审计：📝 文档欠账（D-8）：6 个源码文件改动未同步任何模块文档（涉及模块：backend · frontend）
+
+## ql-20260911-019-9d31 | 2026-09-11 11:40:00 | delete-change-confirm 补 scope-audit mock（32d311934 提交后成为正式预存债）
+状态：已完成
+关联变更：2026-09-11-skills-central-library（verify 门暴露；债务源 32d311934）
+文件：
+- frontend/src/components/__tests__/delete-change-confirm.test.tsx（+ScopeAuditCommandCard mock+useQuickSessionName 空实现）
+验证：19 passed
+
+## ql-20260911-021-89c3 | 2026-09-11 12:52:50 | 修复 zcode SQLite 分派存在性门功能回归——lstat 文件存在门换 rollout 目录门（安全语义保留：自登记任意路径仍被拦；死会话回看恢复）
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts
+
+## ql-20260911-022-1614 | 2026-09-11 13:06:33 | 移动端账号页测试 mock 补 tryReclaimOrphanAvatarFile 导出（d9519026 头像兜底回收首次进 CI 暴露）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/m/account/page.test.tsx（vi.mock 工厂补 tryReclaimOrphanAvatarFile 导出）
+需求：移动端账号页测试 mock 补 tryReclaimOrphanAvatarFile 导出（d9519026 头像兜底回收首次进 CI 暴露）
+根因：d95130926 给 handleAvatarFile catch 路径新增孤儿文件兜底回收调用，三个调用点中桌面账号页与 member-panel 的测试 mock 都补了导出，唯移动端 page.test.tsx 遗漏；上传失败用例断言通过后异步 handler 访问缺失导出抛未捕获错误，经定时器浮出把 vitest 进程打挂（3658 用例全过仍 exit 1）
+方案：移动端测试的 vi.mock 工厂补 tryReclaimOrphanAvatarFile 桩（fire-and-forget 语义返回 false 即可，移动端用例无需断言回收）并加注释说明来源
+结果：vitest 单文件 5 passed；eslint 0 error 0 warning

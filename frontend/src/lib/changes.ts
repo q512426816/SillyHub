@@ -139,6 +139,24 @@ export function getScopeFileDiff(
   );
 }
 
+/** 对账表响应与行。对齐后端 schema（ScopeAuditResponse / ScopeAuditRow）。 */
+export type ScopeAuditResponse = components["schemas"]["ScopeAuditResponse"];
+export type ScopeAuditRow = components["schemas"]["ScopeAuditRow"];
+
+/**
+ * scope-audit 对账表 — GET /api/workspaces/{wid}/sillyspec/scope-audit
+ *
+ * 计划×实际三态全表 + 行数（daemon 在本机跑 scope-audit --change --json 表
+ * 模式，锚点同源）。full-flow 行 verdict=planned/unplanned/untouched，quick
+ * 行 attribution=declared/soft/undeclared。ok=false 时 degraded_reason 带原因。
+ */
+export function getScopeAudit(workspaceId: string, change: string) {
+  const qs = new URLSearchParams({ change });
+  return apiFetch<ScopeAuditResponse>(
+    `/api/workspaces/${workspaceId}/sillyspec/scope-audit?${qs.toString()}`,
+  );
+}
+
 // ── 执行用量统计（2026-08-30-change-center-usage-stats task-06，FR-03/D-005）──
 
 /** 变更完整用量。对齐后端 schema（components.schemas.ChangeUsageRead，gen:types 生成）。 */

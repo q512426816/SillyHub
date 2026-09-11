@@ -17,9 +17,9 @@
 //     please'）：断言结果文本即证明数据来自哪一侧（分派方向的强证据）。
 //
 // 覆盖 task-03 acceptance 全项（四态 + 守卫先行）：
-//   ZD1 库成功：parsed 原样回传（status/messages/truncated/totalSegments）+ 零
-//      lstat/readFile 调用（且日志文件根本不存在——若误触文件 IO 必 ENOENT 抛
-//      not_found，双保险）+ beforeSeq 透传读取器
+//   ZD1 库成功：parsed 原样回传（status/messages/truncated/totalSegments）+
+//      零 lstat/readFile（文件死活与库读取无关——D-001@v1 恒库；含「文件不存在
+//      的历史会话」核心回归态）+ beforeSeq 透传读取器
 //   ZD2a 库失败（读取器不可用：库文件缺失）+ 文件在 → 回落 parse-zcode-model-io
 //      文件解析成功（readFile 被调）
 //   ZD2b 库失败（会话不在库）+ 文件在 → 同上回落文件解析成功
@@ -31,7 +31,7 @@
 //      forbidden（工厂零调用 = 分派未发生，守卫先于分派）
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -44,6 +44,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     lstat: vi.fn(actual.lstat),
     readFile: vi.fn(actual.readFile),
   };
+});
+
+// homedir mock（目录门修订配套）：handler 的 zcode rollout 目录门用 homedir()
+// 定位 ~/.zcode/cli/rollout——测试指向 mkdtemp root（用例路径造进其 rollout/
+// 子目录内过门；ZD6 用 root 下 rollout 外路径验门拦截）。tmpdir 等其余导出保真
+// （fixture 造库路径依赖）。
+const osMocks = vi.hoisted(() => ({ homedir: vi.fn() }));
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, homedir: osMocks.homedir };
 });
 
 import { lstat, readFile } from 'node:fs/promises';
@@ -138,11 +148,16 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
   let fixture: ZcodeFixtureDb;
   /** 工厂调用计数（readZcodeSqliteMessages 每次被调咨询一次 = 分派发生的证据）。 */
   let factoryCalls: number;
-  const pathOf = (rel: string): string => join(root, rel);
+  /** rollout 目录（目录门放行域；上报路径造在其内，ZD6 用 rollout 外路径验拦截）。 */
+  let rolloutDir: string;
+  const pathOf = (rel: string): string => join(rolloutDir, rel);
 
   beforeEach(async () => {
     vi.clearAllMocks(); // 清 spy 调用计数（vi.fn(真实现) 的实现保留）
     root = mkdtempSync(join(tmpdir(), 'sillyhub-zcode-dispatch-'));
+    osMocks.homedir.mockReturnValue(root);
+    rolloutDir = join(root, '.zcode', 'cli', 'rollout');
+    mkdirSync(rolloutDir, { recursive: true });
     handler = new HostFsHandler({ rootsProvider: () => [root] });
     fixture = await createZcodeFixtureDb();
     factoryCalls = 0;
@@ -164,11 +179,14 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     });
   }
 
-  it('ZD1: 库成功 → 原样回传读取器结果（零 lstat/readFile，beforeSeq 透传）', async () => {
+  it('ZD1: 库成功 → 原样回传读取器结果（零文件 IO；含文件不存在的历史会话核心回归态）', async () => {
     pointFactoryAt(fixture.dbPath);
-    // 日志文件故意不存在：库命中路径若误触文件 IO 必 ENOENT → not_found 抛错，
-    // 与下方 spy 断言互为双保险。
+    // 核心回归态（目录门修订的直接动因）：rollout 文件已被 zcode 清理（不造文件），
+    // 历史会话照样从库读取——原 lstat 存在性门（ql-20260911-003-355a）正是死在
+    // 这里（文件不存在 → 门拦 → 回落 → not_found）。
     const logPath = pathOf(zcodeFilenameOf(MAIN));
+    lstatSpy.mockClear();
+    readFileSpy.mockClear();
 
     const result = await handler.readAgentLogMessages(logPath, ZCODE_FORMAT);
 
@@ -185,7 +203,15 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     ]);
     expect(result.messages[0]?.text).toBe('帮我排查这个构建失败');
 
-    // 库成功不触文件 IO（D-005@v1：成功即返回，不进 lstat/readFile）。
+    // 库成功零文件 IO（D-005@v1 + D-001@v1 恒库）：门已不再 lstat。
+    expect(lstatSpy).not.toHaveBeenCalled();
+    expect(readFileSpy).not.toHaveBeenCalled();
+
+    // 文件恰好存在时同样走库（恒库语义：文件在也不读文件）。
+    writeFileSync(logPath, FILE_FIXTURE_LINES, 'utf8');
+    lstatSpy.mockClear();
+    await handler.readAgentLogMessages(logPath, ZCODE_FORMAT);
+    expect(factoryCalls).toBe(2);
     expect(lstatSpy).not.toHaveBeenCalled();
     expect(readFileSpy).not.toHaveBeenCalled();
 
@@ -197,6 +223,20 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     expect(sliced.totalSegments).toBe(9);
     expect(factoryCalls).toBe(1);
     expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it('ZD6: rollout 目录外路径 + zcode format → 目录门拦截（不进库读取器，not_found）', async () => {
+    pointFactoryAt(fixture.dbPath);
+    // MAIN 会话在 fixture 库中，但上报路径位于 allowed_roots 内、rollout 目录外
+    // （自登记任意路径的越权面）——目录门先拦（不咨询库工厂），回落文件流程后
+    // lstat ENOENT → not_found（与未上报路径同语义；安全语义保留）。
+    const outside = join(root, 'outside');
+    mkdirSync(outside, { recursive: true });
+    const logPath = join(outside, zcodeFilenameOf(MAIN));
+
+    await expectRpcError(handler.readAgentLogMessages(logPath, ZCODE_FORMAT), 'not_found');
+    expect(factoryCalls).toBe(0); // 库读取器未被咨询（门在分派前）
+    expect(lstatSpy).toHaveBeenCalledTimes(1); // 回落文件流程的 lstat（门本身零 IO）
   });
 
   it('ZD2a: 读取器不可用（库文件缺失）+ 文件在 → 回落文件解析成功', async () => {
@@ -237,12 +277,12 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     pointFactoryAt(fixture.dbPath); // 会话不在库
     const logPath = pathOf(zcodeFilenameOf(NOT_IN_DB)); // 文件也缺
 
-    // 现状语义：回落流程 lstat ENOENT → toRpcError 抛 not_found（与 readFile
-    // 同通道，读取器错误不冒泡不伪造结果）。
+    // 现状语义：路径在 rollout 内过目录门 → 读取器抛「会话不在库」→ 回落文件
+    // 流程 lstat ENOENT → toRpcError 抛 not_found（读取器错误不冒泡不伪造结果）。
     await expectRpcError(handler.readAgentLogMessages(logPath, ZCODE_FORMAT), 'not_found');
 
-    expect(factoryCalls).toBe(1); // 分派确实先试过库
-    expect(lstatSpy).toHaveBeenCalledTimes(1); // 回落到文件流程（lstat 后 ENOENT）
+    expect(factoryCalls).toBe(1); // 目录门放行，读取器被咨询后抛「不在库」
+    expect(lstatSpy).toHaveBeenCalledTimes(1); // 回落文件流程一次（门零 IO）
     expect(readFileSpy).not.toHaveBeenCalled(); // lstat 已抛，未进 readFile
   });
 

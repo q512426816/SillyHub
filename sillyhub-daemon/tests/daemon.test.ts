@@ -535,15 +535,20 @@ describe('Daemon', () => {
 
     await daemon.start();
     await sleep(40);
-    const hbBefore = client.heartbeat.mock.calls.length;
     await daemon.stop();
 
     expect(daemon.isRunning).toBe(false);
     expect(client.close).toHaveBeenCalledOnce();
     expect(wsClientMock.close).toHaveBeenCalledOnce();
-    // 等一拍，心跳不再递增
+    // 心跳停止语义 = 计数最终稳定，而非「stop 返回瞬间起零增长」：abort 前已在途
+    // 的一拍（_sendHeartbeatOnce 已越过 abortableSleep）会落在 stop 等待窗内落账，
+    // 20ms 间隔下与 stop 碰撞时曾多记一拍（CI 间歇 expected 3 to be 2）。先等一拍
+    // 让在途拍收敛记下基数，再等一拍验证不再增长——若三循环真未停，20ms 间隔下
+    // 第二窗必增。
     await sleep(50);
-    expect(client.heartbeat.mock.calls.length).toBe(hbBefore);
+    const hbSettled = client.heartbeat.mock.calls.length;
+    await sleep(50);
+    expect(client.heartbeat.mock.calls.length).toBe(hbSettled);
   });
 
   it('AC-05b: stop 幂等（连续调多次不报错）', async () => {

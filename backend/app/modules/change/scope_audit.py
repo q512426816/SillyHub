@@ -21,7 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.modules.change.schema import ScopeFileDiffResponse
+from app.modules.change.schema import (
+    ScopeAuditResponse,
+    ScopeAuditRow,
+    ScopeAuditTotals,
+    ScopeFileDiffResponse,
+)
 from app.modules.daemon.runtime.service import (
     DaemonRpcRemoteError,
     DaemonRpcTimeout,
@@ -32,8 +37,10 @@ from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 log = get_logger(__name__)
 
 # RPC 显式超时（send_rpc 默认 RPC_DEFAULT_TIMEOUT=10s 不够用；scope-audit
-# 需先算对账锚点再跑 git diff，daemon 侧命令超时 120s，这里给 35s 余量）。
-_FILE_DIFF_RPC_TIMEOUT_SECONDS: float = 35.0
+# 需先算对账锚点再跑 git diff，daemon 侧命令超时 120s（sillyspec-manager
+# SILLYSPEC_COMMAND_TIMEOUT_MS）——backend 必须 ≥ daemon 超时，否则后端已 504
+# 而 daemon 子进程还在白跑（ql-20260911-003-355a P2：原 35s < 120s 写反了）。
+_FILE_DIFF_RPC_TIMEOUT_SECONDS: float = 135.0
 
 
 # ── 参数校验 helper（router 层调用；machines.py compare 端点/git_log 同款风格）──
@@ -182,7 +189,9 @@ _REMOTE_ERROR_MAP: dict[str, tuple[type[AppError], str]] = {
 
 
 class ScopeFileDiffService:
-    """单文件变化比对 service（端点见 router.py ``/sillyspec/file-diff``）。"""
+    """scope-audit 平台编排 service（端点见 router.py：``/sillyspec/file-diff``
+    单文件 diff 与 ``/sillyspec/scope-audit`` 对账表，ql-20260911-001-c0be 起
+    两方法共用绑定解析与 RPC 错误映射）。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -207,39 +216,36 @@ class ScopeFileDiffService:
             raise ScopeFileDiffNotBound("当前账号未绑定本机守护进程，请先在成员页完成绑定。")
         return daemon_id
 
-    async def get_file_diff(
+    async def _send_scope_rpc(
         self,
-        workspace_id: uuid.UUID,
-        user_id: uuid.UUID,
+        daemon_id: uuid.UUID,
+        method: str,
+        params: dict[str, Any],
+        context: dict[str, Any],
         *,
-        change: str,
-        file: str,
-    ) -> ScopeFileDiffResponse:
-        """单文件 unified diff（daemon 侧锚点同源解析，本层零 git 逻辑）。"""
-        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        offline_hint: str,
+        remote_hint: str,
+        timeout_hint: str,
+    ) -> dict[str, Any]:
+        """scope-audit 系 RPC 转发 + 错误族统一映射（file-diff / scope-audit 共用）。
+
+        offline/timeout/remote（含能力门 422 与 method_not_found 旧 daemon 422）
+        映射与 ``_REMOTE_ERROR_MAP`` 同源；``*_hint`` 为各端点场景化中文文案。
+        """
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
         hub = get_daemon_ws_hub()
-        context: dict[str, Any] = {
-            "workspace_id": str(workspace_id),
-            "change": change,
-            "file": file,
-        }
         try:
-            result = await hub.send_rpc(
+            return await hub.send_rpc(
                 daemon_id,
-                "sillyspec_file_diff",
-                {
-                    "workspace_id": str(workspace_id),
-                    "change": change,
-                    "file": file,
-                },
+                method,
+                params,
                 timeout=_FILE_DIFF_RPC_TIMEOUT_SECONDS,
             )
         except DaemonRuntimeOffline as exc:
             details: dict[str, Any] = {
                 "daemon_id": str(daemon_id),
-                "method": "sillyspec_file_diff",
+                "method": method,
                 **(exc.details or {}),
                 **context,
             }
@@ -249,15 +255,15 @@ class ScopeFileDiffService:
                     details={**details, "reason": "disconnected_mid_rpc"},
                 ) from exc
             raise ScopeFileDiffDaemonOffline(
-                "本机守护进程当前离线，无法执行单文件比对；请确认守护进程在线后重试。",
+                offline_hint,
                 details={**details, "reason": "offline_or_send_failed"},
             ) from exc
         except DaemonRpcTimeout as exc:
             raise ScopeFileDiffTimeout(
-                "单文件比对查询超时，请稍后重试。",
+                timeout_hint,
                 details={
                     "daemon_id": str(daemon_id),
-                    "method": "sillyspec_file_diff",
+                    "method": method,
                     **(exc.details or {}),
                     **context,
                 },
@@ -272,24 +278,34 @@ class ScopeFileDiffService:
                 ) from exc
             if str(exc.code) == "method_not_found":
                 raise ScopeFileDiffDaemonTooOld(
-                    "守护进程版本过旧，不支持单文件比对；请升级 daemon 后重试。",
+                    "守护进程版本过旧，不支持该查询；请升级 daemon 后重试。",
                     details={"daemon_id": str(daemon_id), **context},
                 ) from exc
+            # P2（ql-20260911-003-355a）：daemon 原始消息可含 stderr 尾段/本机
+            # 路径——只进服务端结构化日志（排障可查），不随 details 下发客户端。
+            log.warning(
+                "scope_file_diff_unmapped_remote_error",
+                daemon_id=str(daemon_id),
+                remote_code=str(exc.code),
+                remote_message=str(exc.message)[:200],
+                **context,
+            )
             raise ScopeFileDiffDaemonRemoteError(
-                "守护进程执行单文件比对失败，请稍后重试。",
+                remote_hint,
                 details={
                     "daemon_id": str(daemon_id),
                     "remote_code": str(exc.code),
-                    "remote_message": str(exc.message)[:200],
                     **context,
                 },
             ) from exc
 
-        # 契约校验：daemon 投影必有 change/file/ok/truncated（git_log
-        # _validate_result 同款防御——畸形结构 502 契约缺口而非 500）。
-        if not isinstance(result, dict) or not isinstance(result.get("ok"), bool):
+    def _require_ok_envelope(
+        self, result: dict[str, Any], *, daemon_id: uuid.UUID, context: dict[str, Any]
+    ) -> None:
+        """契约校验：daemon 投影必含布尔 ok（畸形 → 502 契约缺口而非 500）。"""
+        if not isinstance(result.get("ok"), bool):
             log.warning(
-                "scope_file_diff_contract_gap",
+                "scope_rpc_contract_gap",
                 daemon_id=str(daemon_id),
                 **context,
             )
@@ -297,6 +313,36 @@ class ScopeFileDiffService:
                 "守护进程返回结构异常（缺 ok 字段），请升级 daemon 后重试。",
                 details={"daemon_id": str(daemon_id), **context},
             )
+
+    async def get_file_diff(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        change: str,
+        file: str,
+    ) -> ScopeFileDiffResponse:
+        """单文件 unified diff（daemon 侧锚点同源解析，本层零 git 逻辑）。"""
+        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        context: dict[str, Any] = {
+            "workspace_id": str(workspace_id),
+            "change": change,
+            "file": file,
+        }
+        result = await self._send_scope_rpc(
+            daemon_id,
+            "sillyspec_file_diff",
+            {
+                "workspace_id": str(workspace_id),
+                "change": change,
+                "file": file,
+            },
+            context,
+            offline_hint="本机守护进程当前离线，无法执行单文件比对；请确认守护进程在线后重试。",
+            remote_hint="守护进程执行单文件比对失败，请稍后重试。",
+            timeout_hint="单文件比对查询超时，请稍后重试。",
+        )
+        self._require_ok_envelope(result, daemon_id=daemon_id, context=context)
         return ScopeFileDiffResponse(
             change=str(result.get("change") or change),
             file=str(result.get("file") or file),
@@ -306,5 +352,85 @@ class ScopeFileDiffService:
             anchor_label=result.get("anchor_label"),
             diff=result.get("diff"),
             note=result.get("note"),
+            truncated=result.get("truncated") is True,
+        )
+
+    async def get_scope_audit(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        change: str,
+    ) -> ScopeAuditResponse:
+        """对账表（三态全表 + 行数，daemon 表模式透传投影，ql-20260911-001-c0be）。"""
+        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        context: dict[str, Any] = {
+            "workspace_id": str(workspace_id),
+            "change": change,
+        }
+        result = await self._send_scope_rpc(
+            daemon_id,
+            "sillyspec_scope_audit",
+            {"workspace_id": str(workspace_id), "change": change},
+            context,
+            offline_hint="本机守护进程当前离线，无法执行对账；请确认守护进程在线后重试。",
+            remote_hint="守护进程执行对账失败，请稍后重试。",
+            timeout_hint="对账查询超时，请稍后重试。",
+        )
+        self._require_ok_envelope(result, daemon_id=daemon_id, context=context)
+
+        def _count(v: Any) -> int | None:
+            return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+        raw_rows = result.get("rows")
+        rows: list[ScopeAuditRow] = []
+        if isinstance(raw_rows, list):
+            for raw in raw_rows:
+                if not isinstance(raw, dict) or not isinstance(raw.get("path"), str):
+                    continue
+                rows.append(
+                    ScopeAuditRow(
+                        path=raw["path"],
+                        additions=_count(raw.get("additions")),
+                        deletions=_count(raw.get("deletions")),
+                        kind=str(raw.get("kind") or "modified"),
+                        planned=raw.get("planned") if isinstance(raw.get("planned"), str) else None,
+                        verdict=raw.get("verdict") if isinstance(raw.get("verdict"), str) else None,
+                        declared=raw.get("declared")
+                        if isinstance(raw.get("declared"), bool)
+                        else None,
+                        attribution=(
+                            raw.get("attribution")
+                            if isinstance(raw.get("attribution"), str)
+                            else None
+                        ),
+                    )
+                )
+        raw_totals = result.get("totals") if isinstance(result.get("totals"), dict) else {}
+        # daemon 投影为扁平 excluded_foreign_declared（SillySpecAuditTable 契约）
+        foreign = result.get("excluded_foreign_declared")
+        return ScopeAuditResponse(
+            change=str(result.get("change") or change),
+            ok=result["ok"],
+            mode=str(result.get("mode") or "full-flow"),
+            base_ref=result.get("base_ref") if isinstance(result.get("base_ref"), str) else None,
+            anchor_label=(
+                result.get("anchor_label") if isinstance(result.get("anchor_label"), str) else None
+            ),
+            degraded_reason=(
+                result.get("degraded_reason")
+                if isinstance(result.get("degraded_reason"), str)
+                else None
+            ),
+            totals=ScopeAuditTotals(
+                files=_count(raw_totals.get("files")) or len(rows),
+                additions=_count(raw_totals.get("additions")),
+                deletions=_count(raw_totals.get("deletions")),
+            ),
+            rows=rows,
+            excluded_foreign_declared=[
+                p for p in (foreign if isinstance(foreign, list) else []) if isinstance(p, str)
+            ],
+            note=result.get("note") if isinstance(result.get("note"), str) else None,
             truncated=result.get("truncated") is True,
         )

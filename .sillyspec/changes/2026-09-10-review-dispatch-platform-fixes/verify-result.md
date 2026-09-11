@@ -30,7 +30,7 @@
 
 #### 探针 2：设计关键词覆盖
 
-设计能力关键词逐个 grep（worktree 实现）确认：turnFinalText（pi-rpc-driver.ts 5 处）/ workerDone opts.sessionId（hub-client.ts + daemon.ts ClientLike）/ mission_worker 门控（daemon.ts getProviderCaps(state.provider).mcp === false）/ kind=summary 复用（mcp-server.ts 契约描述未改，backend 零改动即复用 _worker_done_core）/ agent_kind pi（schema.py Literal + REGISTRY + openapi + 两份 api-types）/ auth_field pattern（schema.py 三处 ^[A-Z][A-Z0-9_]*$ + 前端同 pattern）/ ANTHROPIC_API_KEY 缺省（injector）/ default_agent + effective_agent + providers（tools.py 8 处）/ formToCreate 透传（lib/api/llm-providers.ts）。全部命中，无设计声明未落地项。
+设计能力关键词逐个 grep（worktree 实现）确认：turnFinalText（sillyhub-daemon/src/interactive/pi-rpc-driver.ts 5 处）/ workerDone opts.sessionId（sillyhub-daemon/src/hub-client.ts + sillyhub-daemon/src/daemon.ts ClientLike）/ mission_worker 门控（sillyhub-daemon/src/daemon.ts getProviderCaps(state.provider).mcp === false）/ kind=summary 复用（sillyhub-daemon/src/mcp-server.ts 契约描述未改，backend 零改动即复用 _worker_done_core）/ agent_kind pi（schema.py Literal + REGISTRY + openapi + 两份 api-types）/ auth_field pattern（schema.py 三处 ^[A-Z][A-Z0-9_]*$ + 前端同 pattern）/ ANTHROPIC_API_KEY 缺省（injector）/ default_agent + effective_agent + providers（tools.py 8 处）/ formToCreate 透传（lib/api/llm-providers.ts）。全部命中，无设计声明未落地项。
 
 #### 探针 3：验收标准测试覆盖
 - ✅ task-01: 模块目录（sillyhub-daemon/src/interactive、sillyhub-daemon/tests/interactive）找到 10 个测试文件（sillyhub-daemon/tests/interactive/claude-driver-close-contract.test.ts、sillyhub-daemon/tests/interactive/claude-events.test.ts、sillyhub-daemon/tests/interactive/claude-sdk-driver-canuse.test.ts、sillyhub-daemon/tests/interactive/claude-sdk-driver-content-blocks.test.ts、sillyhub-daemon/tests/interactive/claude-sdk-driver-glm-passthrough.test.ts …）
@@ -55,8 +55,8 @@
 
 | 状态 | 前端调用 | 后端端点 | 文件 |
 |---|---|---|---|
-| ❌ missing | POST ${serverUrl.replace(/\/$/,  | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-10-review-dispatch-platform-fixes\sillyhub-daemon\src\hub-client.ts:2493 |
-| ❌ missing | GET ${serverUrl.replace(/\/$/,  | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-10-review-dispatch-platform-fixes\sillyhub-daemon\src\hub-client.ts:2512 |
+| ❌ missing | POST ${serverUrl.replace(/\/$/,  | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-10-review-dispatch-platform-fixes\sillyhub-daemon\src\sillyhub-daemon/src/hub-client.ts:2493 |
+| ❌ missing | GET ${serverUrl.replace(/\/$/,  | — | C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-10-review-dispatch-platform-fixes\sillyhub-daemon\src\sillyhub-daemon/src/hub-client.ts:2512 |
 
 - ❌ contract gap 是真实集成缺陷——诚实判 FAIL 并回 execute 补端点（CLI 仅 advisory 不硬阻断）
 - ⚠️ 1414 个后端端点前端未调用（warning 不阻断）：GET /admin/roles、POST /admin/roles、GET /admin/organizations、POST /admin/organizations、GET /admin/users …
@@ -73,7 +73,7 @@
 
 | 决策 ID | FR | Task | Evidence | 状态 |
 |---|---|---|---|---|
-| D-001@v1 | FR-01, FR-02 | task-01,02,03 | daemon.ts 代报分支（diff hunk）+ worker_done 端点复用（backend 零改动）+ pi driver result 字段；12+6+6 用例 | accepted/闭环 |
+| D-001@v1 | FR-01, FR-02 | task-01,02,03 | sillyhub-daemon/src/daemon.ts 代报分支（diff hunk）+ worker_done 端点复用（backend 零改动）+ pi driver result 字段；12+6+6 用例 | accepted/闭环 |
 | D-002@v1 | FR-03 | task-04,05,07,08 | schema.py Literal+pi / REGISTRY pi / 表单+lib 透传 / 三份生成物；29+20+18 用例 + gen:types:check 0 | accepted/闭环 |
 | D-003@v1 | FR-04 | task-06 | tools.py 三新键 + 批量 in 查询；21 用例（4 新增 + 既有零破坏） | accepted/闭环 |
 
@@ -82,7 +82,7 @@
 - **lint 门 advisory 裁定（2026-09-10 22:50）**：CLI verify lint 实测失败于 `backend/app/modules/daemon/group/service/messages.py`（ruff format `Would reformat`）——该文件是主仓**另一并行会话的未提交改动**（worktree 内干净、不在本变更 19 文件清单、本变更 4 个 backend 文件 ruff check+format --check 全绿）。按工具审计通道 `SILLYSPEC_VERIFY_LINT_GATE=advisory` 放行（非本变更失败，不代跑他人文件的 formatter 以免动并行会话在途工作）。
 
 - 探针 1 命中：0（变更文件无 TODO/FIXME/HACK/XXX 新增）。
-- 既有债（非本次引入）：llm-provider-form.tsx 一处 no-unused-vars warning（基线 188 行=现 203 行，eslint exit 0）。
+- 既有债（非本次引入）：frontend/src/components/llm-providers/llm-provider-form.tsx 一处 no-unused-vars warning（基线 188 行=现 203 行，eslint exit 0）。
 - 已文档化的 v1 边界（design §3/R-03）：pi 不支持 litellm_proxy/自定义 baseUrl env 形态（pi 不读 BASE_URL env，自定义端点走宿主 ~/.pi/agent/models.json）——消费指引见交付说明。
 - 待用户侧动作（R-07/P1-3 运维半边）：远端工作区 PATCH default_agent=pi 或前端工作区详情页设置；活体回归口径见交付说明。
 
@@ -93,7 +93,7 @@ risk_level 由 design frontmatter 显式声明 = unit-sufficient（覆盖关键�
 ## Runtime Evidence [层：人工判断]
 
 - 长驻进程启动命令：不涉及（unit-sufficient，未启动 uvicorn/daemon 常驻进程；无 PID 需登记回收）。
-- 触碰的服务端点：不涉及本机实流量。worker_done 端点行为依据既有 backend 测试契约 + 源码核读（mcp_tools.py _worker_done_core :2171-2300），未本机起服务打真请求。
+- 触碰的服务端点：不涉及本机实流量。worker_done 端点行为依据既有 backend 测试契约 + 源码核读（backend/app/modules/agent/mcp_tools.py _worker_done_core :2171-2300），未本机起服务打真请求。
 - 触发核心路径的请求：不涉及（由 vitest/pytest 以假件等价驱动：daemon-mission-worker-artifact.test.ts 以 fake client 断言 workerDone 实参与时序；credential-injector-pi.test.ts 以纯函数断言 env 产出）。
 - 进程日志关键片段：不涉及。
 - 生命周期终态断言：单测层覆盖（turn 收敛→result 携带全文→代报恰一次于 notifyRunResult 之后→失败仅 warn 不阻塞）。

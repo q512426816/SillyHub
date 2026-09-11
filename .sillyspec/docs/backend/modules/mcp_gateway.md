@@ -17,8 +17,8 @@ created_at: 2026-08-18 01:45:00
 - **13 个 `@mcp.tool()`（tools.py）**：
   - mission 层 8 个：`dispatch_worker`（派发 worker，含 conflict attempts 上限→needs_manual 收敛）/ `get_worker_result` / `list_workers` / `converge_mission`（合并清理）/ `report_progress` / `list_agent_profiles` / `create_mission` / `get_run_logs`。
   - change 阶层 4 个：`advance_change_stage` / `submit_stage_review`（会话驱动审批，审批不再派发）/ `run_verify_gate`（三态软调用：gate_result/gate_cmd/unavailable，不硬阻塞）/ `get_change_stage`。
-  - 派发前探查 1 个：`get_daemon_status`（read scope；spike P1-3 起 daemon 在线性/WS 连接态 + `default_agent`/`effective_agent`/每 daemon `providers`；ql-20260910-018 增 `quota_pool`/`effective_quota_pool`——binding 属主在 effective kind 下的用户默认 LlmProvider 身份预判，null=落本机同池，消费方预判独立兜底是否成立）。
-- token 管理（`/api/workspaces/{workspace_id}/mcp-tokens`，三端点均 `require_permission(WORKSPACE_WRITE)`）：签发（明文 `shmcp_` + 32 字节 url-safe，只在响应出现一次，库存 sha256）/ 列表 / 吊销；`get_or_issue` 供 init claim 复用签发。
+  - 派发前探查 1 个：`get_daemon_status`（read scope；spike P1-3 起 daemon 在线性/WS 连接态 + `default_agent`/`effective_agent`/每 daemon `providers`；ql-20260910-018 增 `quota_pool`/`effective_quota_pool`——binding 属主在 effective kind（default_agent 经 _normalize_lease_provider 归一）下的用户默认 LlmProvider 归属；ql-20260911-004 显式三态 `pool_kind`：`independent`（配了平台默认凭证附身份）/`local_shared`（未配→落本机凭证与本地同池，独立兜底不成立，附 hint）/`undetermined`（无执行器可判）——消费方一句可判兜底是否成立）。
+- token 管理（`/api/workspaces/{workspace_id}/mcp-tokens`，三端点均 `require_permission(WORKSPACE_WRITE)`）：签发（明文 `shmcp_` + 32 字节 url-safe，只在响应出现一次，库存 sha256；`gateway_url` 仅取 `MCP_GATEWAY_PUBLIC_BASE_URL` 显式配置，未配置为 null——ql-20260911-003-355a：不从未经钉死的 X-Forwarded-*/Host 头推导，防 token 被引向第三方主机）/ 列表 / 吊销；`get_or_issue` 供 init claim 复用签发。
 - webhook（`/api/workspaces/{workspace_id}/mcp-webhooks`）：create / list / delete；`WebhookDispatcher` 事件分发。
 - SSE：`GET /api/workspaces/{workspace_id}/missions/{mission_id}/events` → `text/event-stream`，推 mission 下 worker run 状态变更帧，全部终态后发 `done` 收尾帧。
 

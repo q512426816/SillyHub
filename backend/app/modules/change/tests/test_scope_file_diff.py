@@ -271,7 +271,7 @@ async def test_file_diff_200_rpc_contract_and_dto(client: AsyncClient, setup_env
         "change": "2026-09-10-mcp-central-registry",
         "file": "src/a.ts",
     }
-    assert call["timeout"] == 35.0
+    assert call["timeout"] == 135.0  # ≥ daemon 命令超时 120s + 余量
     assert call["daemon_id"] == env.daemon_id
 
 
@@ -387,3 +387,96 @@ async def test_file_diff_not_bound_404(client: AsyncClient, setup_env):
         headers=_bearer(env.token),
     )
     assert resp.status_code == 404, resp.text
+
+
+# ── 对账表端点（ql-20260911-001-c0be）─────────────────────────────────────────
+
+_AUDIT_OK = {
+    "change": "2026-09-11-skills-central-library",
+    "ok": True,
+    "mode": "full-flow",
+    "base_ref": "3f22d6b9b6d1f85415be416c5086e29cfd9998a4",
+    "anchor_label": "3f22d6b",
+    "degraded_reason": None,
+    "totals": {"files": 17, "additions": 2196, "deletions": 254},
+    "rows": [
+        {
+            "path": "src/index.js",
+            "additions": 426,
+            "deletions": 17,
+            "kind": "modified",
+            "planned": "修改",
+            "verdict": "planned",
+            "declared": None,
+            "attribution": None,
+        },
+        {
+            "path": "logo.png",
+            "additions": None,
+            "deletions": None,
+            "kind": "binary",
+            "planned": None,
+            "verdict": "unplanned",
+            "declared": None,
+            "attribution": None,
+        },
+    ],
+    "excluded_foreign_declared": ["frontend/src/x.ts"],
+    "note": None,
+    "truncated": False,
+}
+
+
+@pytest.mark.asyncio
+async def test_scope_audit_200_rpc_contract_and_dto(client: AsyncClient, setup_env):
+    """对账表成功路径：RPC 方法/参数契约 + DTO 逐字段（三态行/totals/excluded）。"""
+    env = await setup_env()
+    env.hub.on("sillyspec_scope_audit", result=_AUDIT_OK)
+
+    resp = await client.get(
+        f"/api/workspaces/{env.workspace_id}/sillyspec/scope-audit",
+        params={"change": "2026-09-11-skills-central-library"},
+        headers=_bearer(env.token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["mode"] == "full-flow"
+    assert body["anchor_label"] == "3f22d6b"
+    assert body["totals"] == {"files": 17, "additions": 2196, "deletions": 254}
+    assert body["rows"][0]["verdict"] == "planned"
+    assert body["rows"][0]["planned"] == "修改"
+    assert body["rows"][1]["additions"] is None  # 二进制行数 null 原样
+    assert body["excluded_foreign_declared"] == ["frontend/src/x.ts"]
+    assert body["truncated"] is False
+
+    call = env.hub.calls[0]
+    assert call["method"] == "sillyspec_scope_audit"
+    assert call["params"] == {
+        "workspace_id": str(env.workspace_id),
+        "change": "2026-09-11-skills-central-library",
+    }
+
+
+@pytest.mark.asyncio
+async def test_scope_audit_capability_422_and_not_bound_404(client: AsyncClient, setup_env):
+    """对账表能力门（旧 sillyspec）→ 422；未绑定 → 404（错误族与 file-diff 同源）。"""
+    env = await setup_env()
+    env.hub.on(
+        "sillyspec_scope_audit",
+        exc=DaemonRpcRemoteError({"code": "sillyspec_capability_missing", "message": "old"}),
+    )
+    resp = await client.get(
+        f"/api/workspaces/{env.workspace_id}/sillyspec/scope-audit",
+        params={"change": "c1"},
+        headers=_bearer(env.token),
+    )
+    assert resp.status_code == 422, resp.text
+
+    env2 = await setup_env(with_binding=False)
+    resp2 = await client.get(
+        f"/api/workspaces/{env2.workspace_id}/sillyspec/scope-audit",
+        params={"change": "c1"},
+        headers=_bearer(env2.token),
+    )
+    assert resp2.status_code == 404, resp2.text

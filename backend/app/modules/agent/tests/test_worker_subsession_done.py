@@ -888,3 +888,140 @@ class TestNestedChildWake:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── external 模式（orchestration_mode=external，无主控根会话）─────────────────
+# ql-20260911-002（关联 2026-09-10-review-dispatch-platform-fixes 活体回执）：
+# review-dispatch 经 MCP gateway external mission 派发的 worker——子会话
+# parent_session_id=NULL（无主控可挂）、mission.session_id=NULL（无根），
+# parent 链爬根解析必 miss → worker_done 404、daemon 代报被拒、artifacts 恒空
+# （backend 日志实证 POST /api/missions/worker_done 404）。修复口径：
+# resolve_mission_for_session 爬根 miss 后按 run 归属回退（分身首 run 带
+# mission_id+agent_session_id 双标记）；_worker_done_core 对 external mission
+# 以首 run 锚作成员资格（session 模式树检查原样）。
+
+
+class TestExternalModeWorkerDone:
+    async def _seed_external(
+        self, db: AsyncSession, *, converged: datetime | None = None
+    ) -> tuple[Workspace, AgentSession, AgentMission, AgentRun]:
+        """external 形态：无根会话、mission.session_id=NULL、worker 挂 NULL parent。"""
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name=f"ws-{uuid.uuid4().hex[:8]}",
+            slug=f"ws-{uuid.uuid4().hex[:8]}",
+            root_path=f"/tmp/{uuid.uuid4().hex}",
+        )
+        db.add(ws)
+        await db.commit()
+
+        mission = AgentMission(
+            workspace_id=ws.id,
+            objective="external 目标",
+            session_id=None,
+            converged_at=converged,
+        )
+        db.add(mission)
+        await db.commit()
+        await db.refresh(mission)
+
+        worker = AgentSession(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            provider="pi",
+            status="active",
+            workspace_id=ws.id,
+            parent_session_id=None,
+        )
+        db.add(worker)
+        await db.commit()
+        await db.refresh(worker)
+
+        first_run = await _add_run(
+            db,
+            status="completed",
+            agent_session_id=worker.id,
+            mission_id=mission.id,
+            role="worker",
+        )
+        return ws, worker, mission, first_run
+
+    @pytest.mark.asyncio
+    async def test_external_worker_done_200_writes_artifact_without_notify(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """external worker_done：200 + artifact 挂首 run + 不唤醒（无主控）。"""
+        _fake_redis, injected = notify_env
+        _ws, worker, mission, first_run = await self._seed_external(db_session)
+
+        resp = await client.post(
+            f"/api/sessions/{worker.id}/missions/worker_done",
+            json={"summary": "外部 worker 结论全文"},
+            headers={**auth_headers, "X-Session-Id": str(worker.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["mission_id"] == str(mission.id)
+        assert body["run_id"] == str(first_run.id)
+        assert uuid.UUID(body["artifact_id"])
+        assert body["orchestrator_notified"] is False
+
+        await db_session.refresh(worker)
+        assert worker.worker_done_at is not None
+        arts = list(
+            (
+                await db_session.execute(
+                    select(AgentArtifact).where(AgentArtifact.run_id == first_run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(arts) == 1
+        assert arts[0].kind == "summary"
+        assert arts[0].content_ref == "外部 worker 结论全文"
+        # external 无主控 → 零注入
+        assert injected == []
+
+    @pytest.mark.asyncio
+    async def test_external_converged_mission_late_done_409(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """external mission 已 converged：迟到 worker_done 409 零写入（run 归属
+        回退的 include_terminal 路径同样可达终态 mission，区分 409/404 语义保留）。"""
+        _fake_redis, _injected = notify_env
+        _ws, worker, _mission, _run = await self._seed_external(
+            db_session, converged=datetime.now(UTC)
+        )
+
+        resp = await client.post(
+            f"/api/sessions/{worker.id}/missions/worker_done",
+            json={"summary": "迟到"},
+            headers={**auth_headers, "X-Session-Id": str(worker.id)},
+        )
+        assert resp.status_code == 409, resp.text
+        await db_session.refresh(worker)
+        assert worker.worker_done_at is None
+
+    @pytest.mark.asyncio
+    async def test_external_worker_without_mission_run_404(
+        self, client, db_session, auth_headers, notify_env
+    ) -> None:
+        """会话无任何 mission 归属 run（普通会话误调）：404 零写入——run 回退
+        不放宽到无归属会话。"""
+        _fake_redis, _injected = notify_env
+        _ws, worker, _mission, first_run = await self._seed_external(db_session)
+        # 抹掉首 run 的 mission 归属（模拟普通会话）
+        await db_session.execute(
+            update(AgentRun).where(AgentRun.id == first_run.id).values(mission_id=None)
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/sessions/{worker.id}/missions/worker_done",
+            json={"summary": "x"},
+            headers={**auth_headers, "X-Session-Id": str(worker.id)},
+        )
+        assert resp.status_code == 404, resp.text
+        await db_session.refresh(worker)
+        assert worker.worker_done_at is None

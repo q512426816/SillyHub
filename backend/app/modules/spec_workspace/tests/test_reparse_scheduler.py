@@ -118,3 +118,30 @@ async def test_workspaces_isolated(
     await _trigger(ws_b, "2026-09-09-b")  # 不同 workspace 不受 A 的节流影响
     await drain_reparse_workers()
     assert sorted(calls) == sorted([ws_a, ws_b])
+
+
+async def test_drain_reparse_workers_times_out_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """drain 超时有界（ql-20260911-003-355a）：挂起任务不清空时按 timeout 返回
+    False 且不 cancel（停机语义——进程退出等价回滚，daemon 下轮 push 兜底）。"""
+    import contextlib
+
+    sw_service.reset_reparse_scheduler()
+
+    async def _stuck() -> None:
+        await asyncio.sleep(30)
+
+    task = asyncio.create_task(_stuck())
+    sw_service._reparse_bg_tasks.add(task)
+    task.add_done_callback(sw_service._reparse_bg_tasks.discard)
+    try:
+        drained = await drain_reparse_workers(timeout_seconds=0.05)
+        assert drained is False
+        assert not task.done()  # 超时路径不 cancel 任务
+        assert task in sw_service._reparse_bg_tasks  # 集合原样（交由进程退出收尾）
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        sw_service.reset_reparse_scheduler()

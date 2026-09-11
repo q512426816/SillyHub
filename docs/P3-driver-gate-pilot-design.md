@@ -190,7 +190,7 @@ agent turn 完成 → daemon notifyRunResult:1402 → backend close_interactive_
 | 🔴 close 改 enqueue | `backend/app/modules/daemon/run_sync/service/__init__.py`（commit `:876` 后、return `:935` 前） | 删 R2；加 `_fire_background_task(_run_gate_decision_task)`；gate_status='pending' 在 :784 区随 commit |
 | 🔴 H4 后台任务范式 | `backend/app/modules/daemon/run_sync/service.py` RunSyncService 类 | 加 `_background_tasks: set` + `_fire_background_task` + `_on_bg_task_done`（抄 backend/app/modules/agent/service.py:358-375） |
 | 🔴 H1+H2 gate 任务 | `backend/app/modules/daemon/run_sync/service.py` 新 `_run_gate_decision_task` | `get_session_factory()()` 独立 session + R3 cas + gate + 内联 sync/auto_dispatch（不调 callback） |
-| 🔴 M3 reconcile | `backend/app/modules/change/dispatch.py` 新 `reconcile_pending_gate_decisions` + 挂 `backend/app/main.py:150` lifespan | 启动扫 completed + gate_status in (pending, running) 全重置 pending + 重 enqueue（都是孤儿，无超时阈值） |
+| 🔴 M3 reconcile | `backend/app/modules/change/dispatch.py` 新 `reconcile_pending_gate_decisions` + 挂 `backend/app/main.py:158` lifespan | 启动扫 completed + gate_status in (pending, running) 全重置 pending + 重 enqueue（都是孤儿，无超时阈值） |
 | HostFsDelegate 新方法 | `backend/app/modules/daemon/host_fs/delegate.py:131`（破 `:13-15`）+ `:117-125` send_rpc | 加 `run_command` + **M5 send_rpc 协议加 timeout 参数** |
 | daemon handler | `sillyhub-daemon/src/host-fs-handler.ts:334` + `sillyhub-daemon/src/daemon.ts:_registerHostFsRpcHandler` | 加 `run_command`（命令白名单 + execFile）+ 注册 |
 | backend 决策 | `backend/app/modules/agent/dispatch.py`（def `:145`）+ `:221-222` | M4：读 gate_result 替代 read_verify_result（三态分支） |
@@ -258,7 +258,7 @@ agent turn 完成 → daemon notifyRunResult:1402 → backend close_interactive_
 | `_trigger_stage_completion_callback` | `backend/app/modules/daemon/run_sync/service/__init__.py`（self._session `:959/965/969/987`） | **H2 gate 任务不调它，内联** |
 | `get_session_factory` | `backend/app/core/db.py:87` | H1 独立 session（范式 backend/app/modules/agent/service.py:1126） |
 | `_fire_background_task` 范式 | `backend/app/modules/agent/service.py:358-375`、`backend/app/modules/agent/coordinator.py` | H4 复用（强引用 set + done_callback） |
-| `reconcile_pending_gate_decisions`（新） | 挂 `backend/app/main.py:150` lifespan | M3 启动扫孤儿 |
+| `reconcile_pending_gate_decisions`（新） | 挂 `backend/app/main.py:158` lifespan | M3 启动扫孤儿 |
 | `HostFsDelegate` | `backend/app/modules/daemon/host_fs/delegate.py:152`（锁死 `:13-15`）+ `send_rpc:117-125` | v6 加 run_command + M5 send_rpc timeout |
 | `HostFsHandler` | `sillyhub-daemon/src/host-fs-handler.ts:352`（白名单 `:298`） | v6 加 run_command + 命令白名单 |
 | `HOST_FS_RPC_TIMEOUT` | `backend/app/modules/daemon/host_fs/ws_rpc.py:49`（30s） | run_command per-call 传 12min（经 M5 send_rpc） |

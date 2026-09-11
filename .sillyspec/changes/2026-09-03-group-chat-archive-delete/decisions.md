@@ -24,4 +24,4 @@ created_at: 2026-09-03 16:51:16
 
 ### 覆盖/违反的既有决策
 
-- 无违反。`AgentGroupChat` 模型注释（`backend/app/modules/agent/model.py:1223-1232`）明确「软删（deleted_at）与之正交（对齐 AgentSession.ended_at/deleted_at 语义）」——本方案是该预留语义的首次消费，非新造口径。
+- 无违反。`AgentGroupChat` 模型注释（`backend/app/modules/agent/model.py:1330`）明确「软删（deleted_at）与之正交（对齐 AgentSession.ended_at/deleted_at 语义）」——本方案是该预留语义的首次消费，非新造口径。

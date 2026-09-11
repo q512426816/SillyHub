@@ -121,8 +121,12 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
-  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、8 契约键齐全', () => {
-    const eightKeys = [
+  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、9 契约键齐全', () => {
+    // ql-20260911-017：99a228add（askuser-pi-cursor）给 caps 增第 9 键 dialog
+    // （值 'native' 字符串非 boolean），守护测试未同步——主仓预存债务顺手修
+    // （skills-central-library verify 门实测暴露，与本变更无关）。
+    const nineKeys = [
+      'dialog',
       'edit_patch',
       'mcp',
       'model_select',
@@ -135,10 +139,15 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     for (const [key, d] of Object.entries(INTERACTIVE_PROVIDERS)) {
       // 单源引用（非复制值）：descriptor.caps 必须就是 PROVIDER_CAPS 的表项对象。
       expect(d.caps).toBe(PROVIDER_CAPS[key]);
-      expect(Object.keys(d.caps).slice().sort()).toEqual(eightKeys);
+      expect(Object.keys(d.caps).slice().sort()).toEqual(nineKeys);
       for (const [capKey, capValue] of Object.entries(d.caps)) {
         expect(capValue).toBe(PROVIDER_CAPS[key]?.[capKey as keyof typeof d.caps]);
-        expect(typeof capValue).toBe('boolean');
+        // dialog 为三态标记（'native' | false | …字符串/布尔），其余八键恒 boolean
+        if (capKey === 'dialog') {
+          expect(['string', 'boolean']).toContain(typeof capValue);
+        } else {
+          expect(typeof capValue).toBe('boolean');
+        }
       }
     }
   });

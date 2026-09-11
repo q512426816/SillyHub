@@ -200,8 +200,14 @@ describe("portal-file-panels（task-01）", () => {
 
     await waitForRoot();
     expandRow("backend");
+    // fetchTree 发起 ≠ 子节点已渲染（promise 解析 + 树重渲染还差一拍）——
+    // 先等子文件文本出现再点，对齐 file-explorer.test 同款（CI 上曾只等 fetch
+    // 调用就 getByText，子级未渲染即点导致 "Unable to find pyproject.toml"）。
     await waitFor(() =>
       expect(mockFetchTree).toHaveBeenCalledWith("ws1", "backend"),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("pyproject.toml")).toBeInTheDocument(),
     );
     clickNode("pyproject.toml");
     expect(onSelectFile).toHaveBeenCalledWith("backend/pyproject.toml");

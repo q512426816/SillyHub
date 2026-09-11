@@ -24,7 +24,6 @@ target_files:
   - frontend/src/lib/api-types.ts
   - backend/openapi.json
   - sillyhub-daemon/src/api-types.ts
-  - NEW:.sillyspec/docs/backend/modules/skill_source.md
 library/enable 端点 + bundle 第三源收集
       needs: [GET /api/skills/library LibraryView, 'POST+DELETE /api/skills/{skill_key}/enable 本人写']
 goal: >
@@ -42,6 +41,7 @@ acceptance:
   - '启用开关正确调 POST/DELETE enable、乐观更新失败回滚；「我的技能」既有用例零回归'
   - 'pnpm gen:types:check 双仓零漂移，api-types.ts/openapi.json 无手写改动痕迹'
   - 'skill_source.md 模块卡落盘并登记 _module-map.yaml'
+# 模块卡 skill_source.md/_module-map 按主仓 spec 产物规则落位（main 仓 aff2b3c7f 已提交），非 worktree 交付物不入 target_files。
 verify:
   - 'pnpm -C frontend exec tsc --noEmit'
   - 'pnpm -C frontend exec vitest run "src/app/(dashboard)/settings/skills" src/components/skills-library（新增+既有全绿，不跑全量）'

@@ -46,7 +46,7 @@ SSE：publish_sessions_changed("status_changed"/"deleted", 群时间线会话id,
       群主, audience=全部用户成员) → 前端 invalidate ["groupChats"]
 ```
 
-**口径对齐依据**：`AgentGroupChat` 模型注释（`backend/app/modules/agent/model.py:1223-1232`）
+**口径对齐依据**：`AgentGroupChat` 模型注释（`backend/app/modules/agent/model.py:1330`）
 已预告「解散（ended_at）置位；软删（deleted_at）与之正交（对齐
 AgentSession.ended_at/deleted_at 语义）」——本变更是该预留语义的首次消费。
 

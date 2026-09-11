@@ -98,11 +98,12 @@ class McpServer(BaseModel, table=True):
         max_length=10,
         sa_column=Column(String(10), nullable=False),
     )
-    # {command, args, env}；env 仅含非 secret 明文键（secret 键 service 抽列加密）。
+    # {command, args, env}；env 仅含明文键（密键由用户显式指定、service 抽列加密，
+    # ql-20260911-003-355a 用户自定义密钥类型）。
     server_config: dict[str, Any] = Field(
         sa_column=Column(JSON, nullable=False),
     )
-    # secret 键的密文映射（Grill CC-03 信封）：
+    # 密钥键的密文映射（Grill CC-03 信封；键集=用户指定的 secret_env_keys）：
     #   {SECRET_KEY: {"ct": "<base64(密文 bytes)>", "key_id": "<版本标签，如 v1>"}}
     # 逐键独立加密（每键自带 key_id 支持密钥轮换）；解密失配 → 诊断项 decrypt_failed。
     encrypted_env: dict[str, Any] | None = Field(
@@ -218,6 +219,17 @@ class McpTemplate(BaseModel, table=True):
     """收藏模板：平台预置 seed（owner NULL + is_preset）+ 用户自存（design W3）。"""
 
     __tablename__ = "mcp_templates"
+    __table_args__ = (
+        # 预置位 name 唯一（P2-11：并发首调双 seed 的 check-then-insert 竞态由本
+        # 索引拒绝；自存模板不限名——跨用户同名 + 本人改名复用均合法）。
+        Index(
+            "uq_mcp_templates_preset_name",
+            "name",
+            unique=True,
+            postgresql_where=text("is_preset"),
+            sqlite_where=text("is_preset"),
+        ),
+    )
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
@@ -227,8 +239,14 @@ class McpTemplate(BaseModel, table=True):
         max_length=100,
         sa_column=Column(String(100), nullable=False),
     )
-    # 明文模板（无 secret——secret 不进模板，存为模板时 service 只取非 secret env）。
+    # 明文模板（密钥值不进模板——只随 secret_env_keys 记键名）。
     server_config: dict[str, Any] = Field(
+        sa_column=Column(JSON, nullable=False),
+    )
+    # 密钥键名清单（ql-20260911-003-355a 用户自定义密钥类型）：「从模板新建」
+    # 预勾加密开关的依据；值由用户在表单里补。
+    secret_env_keys: list[str] = Field(
+        default_factory=list,
         sa_column=Column(JSON, nullable=False),
     )
     is_preset: bool = Field(

@@ -426,10 +426,15 @@ export default function ChangeDetailPage({ params }: Props) {
             changeKey={change.change_key}
           />
           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
-          {/* ql-20260910-014-6c29：scope-audit 范围对账命令卡（表格版 + --json
-              版可复制；identifier=change_key，已归档变更也可查） */}
+          {/* ql-20260910-014-6c29：scope-audit 范围对账结果卡（ql-20260911-001-c0be
+              升级：本机跑对账出三态计数+明细表，本地命令折叠为兜底；identifier=
+              change_key，已归档变更也可查） */}
           <ScopeAuditCommandCard
-            target={{ kind: "change", changeKey: change.change_key }}
+            target={{
+              kind: "change",
+              workspaceId,
+              changeKey: change.change_key,
+            }}
           />
         </aside>
       </div>

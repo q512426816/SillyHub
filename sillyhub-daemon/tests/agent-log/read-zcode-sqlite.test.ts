@@ -502,6 +502,27 @@ describe('readZcodeSqliteMessages — SQLite 会话读取器', () => {
     });
   });
 
+  it('R7b 内存预算命中（ql-20260911-003-355a P2）：累计行 data 超限 → too_large 不物化全量段', async () => {
+    await withFixtureDb(async (fixture) => {
+      const result = await readZcodeSqliteMessages(MAIN, null, {
+        dbPath: fixture.dbPath,
+        maxContentUnits: 10, // 远小于 fixture 主会话任意一行 data
+      });
+      expect(result.status).toBe('too_large');
+      expect(result.messages).toEqual([]);
+      expect(result.totalSegments).toBe(0);
+    });
+    // 预算充足时同库正常解析（对照——预算不误伤正常路径）
+    await withFixtureDb(async (fixture) => {
+      const result = await readZcodeSqliteMessages(MAIN, null, {
+        dbPath: fixture.dbPath,
+        maxContentUnits: 20 * 1024 * 1024,
+      });
+      expect(result.status).toBe('parsed');
+      expect(result.totalSegments).toBeGreaterThan(0);
+    });
+  });
+
   it('R8 模块级默认库路径工厂覆写与还原', async () => {
     await withFixtureDb(async (fixture) => {
       setZcodeSqliteDbPathFactory(() => fixture.dbPath);

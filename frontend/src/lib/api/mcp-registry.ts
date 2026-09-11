@@ -24,15 +24,18 @@
  *
  * 类型一律取 api-types.ts 生成 schema（pnpm gen:types 产出，禁止手写同名 DTO）。
  *
- * 安全：env secret 键（键名含 token/key/secret/password 子串，与后端
- * schema.py `_SECRET_KEY_MARKERS` 逐字一致）在 GET 响应里已被后端遮蔽为
- * `<set>`；编辑态保留 `<set>` 提交=后端不动该 secret（service 侧占位语义）。
+ * 安全（ql-20260911-003-355a 用户自定义密钥类型）：env 键是否加密由用户逐键指定
+ * （create/update 显式 `secret_env_keys`），不再按键名子串自动判定。指定键以密文
+ * 落库（encrypted_env），读侧 `secret_env_keys` 回显指定态、`server_config.env`
+ * 只含明文键（密钥键不出现）。编辑态密钥行值固定为 `<set>` 占位——保留提交 =
+ * 后端保留既有密文不改（service 占位语义）；新键/明文行不接受占位符。
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApiError, apiFetch } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { queryKeys } from "../query-keys";
+import { useSession } from "@/stores/session";
 
 // ── 生成类型再导出（页面/组件消费口） ────────────────────────────────────────
 
@@ -62,30 +65,28 @@ export interface McpRegistryListParams {
   tag?: string;
 }
 
-// ── secret 键判定（与后端 _SECRET_KEY_MARKERS / _SECRET_REDACTED_PLACEHOLDER 一致） ──
+// ── secret 键判定（导入/新建行的缺省建议——用户可在表单逐键改指定） ────────────
 
 export const MCP_SECRET_KEY_MARKERS = ["token", "key", "secret", "password"] as const;
 
-/** env 遮蔽占位符（后端 schema.py `_SECRET_REDACTED_PLACEHOLDER`；保留提交=不改该 secret）。 */
+/** env 遮蔽占位符（后端 schema.py `_SECRET_REDACTED_PLACEHOLDER`；编辑态保留提交=不改该密钥）。 */
 export const MCP_SECRET_ENV_PLACEHOLDER = "<set>";
 
-/** 键名含 token/key/secret/password 子串（大小写不敏感）→ 视为 secret（R-05 前端预判同规则）。 */
+/**
+ * 键名含 token/key/secret/password 子串（大小写不敏感）→ 新增行的**缺省建议**
+ * 勾选加密（用户可改）；权威指定态是 create/update 的 `secret_env_keys` 与读侧
+ * 回显，本函数仅用于表单初始建议（ql-20260911-003-355a）。
+ */
 export function isSecretEnvKey(k: string): boolean {
   const lowered = k.toLowerCase();
   return MCP_SECRET_KEY_MARKERS.some((m) => lowered.includes(m));
 }
 
-/** server_config.env 里的 secret 键数量（卡片「🔒 N 个密钥」徽标用）。 */
+/** server 的密钥键数量（卡片「🔒 N 个密钥」徽标用——读侧 secret_env_keys 回显）。 */
 export function countSecretEnvKeys(
-  serverConfig: Record<string, unknown> | null | undefined,
+  secretEnvKeys: readonly string[] | null | undefined,
 ): number {
-  const env = serverConfig?.env;
-  if (!env || typeof env !== "object" || Array.isArray(env)) return 0;
-  let n = 0;
-  for (const k of Object.keys(env as Record<string, unknown>)) {
-    if (isSecretEnvKey(k)) n += 1;
-  }
-  return n;
+  return Array.isArray(secretEnvKeys) ? secretEnvKeys.length : 0;
 }
 
 /**
@@ -214,13 +215,21 @@ export async function addMcpBinding(
   });
 }
 
-/** 解绑（DELETE /bindings/{scope_type}；user 解绑 scope_ref=本人由后端补全）。 */
+/**
+ * 解绑（DELETE /bindings/{scope_type}[/{scope_ref}]）。
+ *
+ * P1-1 修复：user 解绑必须带 scope_ref（本人 user id）走
+ * `/bindings/user/{uid}`——后端对 user 解绑强制要求 scope_ref（无尾段恒 422）；
+ * platform 解绑 scope_ref 恒 NULL，不带尾段。
+ */
 export async function removeMcpBinding(
   serverId: string,
   scopeType: McpBindingScopeType,
+  scopeRef?: string,
 ): Promise<void> {
+  const suffix = scopeRef ? `/${encodeURIComponent(scopeRef)}` : "";
   await apiFetch<void>(
-    `/api/mcp-servers/${encodeURIComponent(serverId)}/bindings/${scopeType}`,
+    `/api/mcp-servers/${encodeURIComponent(serverId)}/bindings/${scopeType}${suffix}`,
     { method: "DELETE" },
   );
 }
@@ -352,9 +361,13 @@ export function useDeleteMcpServer() {
 /**
  * binding 开关（「对我启用」user binding / admin 平台库 tab 的 platform binding
  * 共用；enabled=true 走 POST，false 走 DELETE——FR-03 加解绑同一 hook）。
+ *
+ * user 解绑自动携带当前用户 id 作 scope_ref（P1-1：后端 user 解绑强制
+ * scope_ref，`/bindings/user/{uid}` 形态）。
  */
 export function useToggleMcpBinding() {
   const qc = useQueryClient();
+  const sessionUser = useSession((s) => s.user);
   return useMutation<
     void,
     ApiError,
@@ -363,7 +376,11 @@ export function useToggleMcpBinding() {
     mutationFn: ({ serverId, scopeType, enabled }) =>
       enabled
         ? addMcpBinding(serverId, scopeType)
-        : removeMcpBinding(serverId, scopeType),
+        : removeMcpBinding(
+            serverId,
+            scopeType,
+            scopeType === "user" ? sessionUser?.id : undefined,
+          ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.mcpRegistry.all });
     },

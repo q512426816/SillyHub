@@ -54,7 +54,7 @@ generator: sillyspec-scan
 
 - 基类契约：`backend/app/core/errors.py:28-56`——`code`/`http_status` 为类属性，`__init__` 可实例级覆盖 `code`/`http_status`/`details: dict | None`（只改实例不改类属性）。
 - 域内异常按事件命名 + `code` 用大写蛇形字符串：`backend/app/modules/release/service.py:68`（`ReleaseError(AppError)` → `ReleaseNotAllowed` `code="RELEASE_NOT_ALLOWED"` / `ReleaseNotFound`）；`backend/app/core/errors.py:62-74` 的 `HTTP_400_WORKSPACE_PATH_NOT_FOUND` 形态同款。
-- 全局注册：`backend/app/core/errors.py:380` `register_exception_handlers(app)`，在 `backend/app/main.py:20` 挂载，统一翻译成 `{code, message, request_id, details}` 响应体。**新错误继承 `AppError` 并给中文 message，不要在 router 里 `raise HTTPException`**（l10n 守护测试同时盯着这两类文案）。
+- 全局注册：`backend/app/core/errors.py:387` `register_exception_handlers(app)`，在 `backend/app/main.py:20` 挂载，统一翻译成 `{code, message, request_id, details}` 响应体。**新错误继承 `AppError` 并给中文 message，不要在 router 里 `raise HTTPException`**（l10n 守护测试同时盯着这两类文案）。
 
 ### 5. SSRF 防护：出网请求必过 `assert_public_hostname` / `core/ssrf.py`
 
@@ -63,7 +63,7 @@ generator: sillyspec-scan
 
 ### 6. 日志：`structlog` + 模块级 `get_logger(__name__)`，事件名点分蛇形
 
-不在业务代码用 `print` 或裸 `logging`。配置见 `backend/app/core/logging.py:13-46`（`merge_contextvars`、ISO UTC 时间戳、`format_exc_info`、JSONRenderer、`configure_logging` 在 `backend/app/main.py:96` 启动时调用）。各 service/router 顶部 `log = get_logger(__name__)`（如 `backend/app/core/errors.py:436`）。异常统一 `log.exception("<event>", ...)`，事件名点分蛇形（`app.start` 类风格）。
+不在业务代码用 `print` 或裸 `logging`。配置见 `backend/app/core/logging.py:13-46`（`merge_contextvars`、ISO UTC 时间戳、`format_exc_info`、JSONRenderer、`configure_logging` 在 `backend/app/main.py:96` 启动时调用）。各 service/router 顶部 `log = get_logger(__name__)`（如 `backend/app/core/errors.py:443`）。异常统一 `log.exception("<event>", ...)`，事件名点分蛇形（`app.start` 类风格）。
 
 ### 7. 权限/归属校验放 service 层（PPM 范式）
 

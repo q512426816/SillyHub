@@ -20,7 +20,7 @@ goal: >
   （D-002@v1 独立配额池的 backend 前提）：agent_kind 扩员 + auth_field 三处
   泛化为 env 变量名 pattern，为 daemon 侧 PiCredentialInjector（task-05）供合法输入。
 implementation:
-  - 'LlmProviderCreate.agent_kind（schema.py:17）由 Literal["claude"] 改 Literal["claude", "pi"]；agent_kind 仅 Create 有该字段，Update/FetchModelsRequest 不新增'
+  - 'LlmProviderCreate.agent_kind（backend/app/modules/llm_provider/schema.py:17）由 Literal["claude"] 改 Literal["claude", "pi"]；agent_kind 仅 Create 有该字段，Update/FetchModelsRequest 不新增'
   - 'auth_field 三处泛化（pattern=r"^[A-Z][A-Z0-9_]*$"）：Create（:23）str = Field(default="ANTHROPIC_AUTH_TOKEN", pattern=...)；Update（:41）str | None = Field(default=None, pattern=...)；FetchModelsRequest（:104）str | None = Field(default=None, pattern=...)，均保持原缺省/None 语义'
   - 'docstring 补注：auth_field 形状=env 变量名（大写字母开头，仅大写/数字/下划线）；pi 用途=平台 worker 独立配额池凭证（D-002@v1），如 ZAI_API_KEY/OPENROUTER_API_KEY'
   - '新增 tests/test_llm_provider_pi_kind.py：pi 可建、非法 auth_field（小写/含空格/空串）被 pattern 拒、claude 旧值与缺省零回归'

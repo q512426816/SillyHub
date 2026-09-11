@@ -113,9 +113,12 @@ async def test_await_change_write_receipt_refreshes_external_update(db_session):
         other_session.add(external)
         await other_session.commit()
 
+    # ql-20260909-014：原 PROXY_POLL_INTERVAL_SECONDS 轮询已改 Redis pubsub 即时
+    # 唤醒 + 短会话 DB 兜底，常量拆成 pubsub 窗口 / 兜底周期两个。
     with (
         patch.object(proxy_mod, "PROXY_CHANGE_WRITE_TIMEOUT_SECONDS", 1.0),
-        patch.object(proxy_mod, "PROXY_POLL_INTERVAL_SECONDS", 0.0),
+        patch.object(proxy_mod, "PROXY_RECEIPT_DB_CHECK_SECONDS", 0.0),
+        patch.object(proxy_mod, "PROXY_RECEIPT_PUBSUB_WINDOW_SECONDS", 0.0),
     ):
         result = await asyncio.wait_for(
             proxy_mod._await_change_write_receipt(db_session, cw.id),

@@ -15,10 +15,15 @@ Change: 2026-09-10-mcp-central-registry（task-09 / TDD 先行）
 - apply 重读文件取明文：脱敏候选（secret 值 ``<set>``）不阻断应用，secret 键
   只进 encrypted_env；
 - 指定单 workspace 扫描（缺省=全部；不存在 → WorkspaceNotFound）；容错（无
-  .mcp.json / 坏 JSON / 软删 workspace 不抛错不误报）。
+  .mcp.json / 坏 JSON / 软删 workspace 不抛错不误报）；
+- 工作区访问门（ql-20260911-003-355a P0-1）：非成员扫描被过滤 / 指定他人
+  workspace → 403；apply 夹带非可见 workspace 候选 → 403 fail-fast；平台
+  admin 放行全部。
 
 范式参考 ``tests/test_render.py``（Workspace + SpecWorkspace 直插行 + tmp_path
 落 .mcp.json）与 ``tests/test_importer_json.py``（真实 CredentialCipher 不 mock）。
+成员授权 seed（Role + RolePermission + UserWorkspaceRole）照
+``tests/modules/test_permission_cache.py:314-330`` 先例。
 """
 
 from __future__ import annotations
@@ -33,8 +38,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import WorkspaceNotFound
-from app.modules.auth.model import User
+from app.core.errors import PermissionDenied, WorkspaceNotFound
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
+from app.modules.auth.permissions import Permission
 from app.modules.mcp_registry.importer import apply_workspace_import, scan_workspaces
 from app.modules.mcp_registry.model import McpServer
 from app.modules.mcp_registry.schema import McpWorkspaceCandidate
@@ -47,7 +53,9 @@ def _entry(command: str = "uvx", args: list[str] | None = None) -> dict[str, Any
     return {"command": command, "args": args or ["mcp-server-fetch"]}
 
 
-async def _create_user(db_session: AsyncSession, *, label: str = "") -> User:
+async def _create_user(
+    db_session: AsyncSession, *, label: str = "", is_platform_admin: bool = False
+) -> User:
     uid = uuid.uuid4()
     user = User(
         id=uid,
@@ -55,10 +63,23 @@ async def _create_user(db_session: AsyncSession, *, label: str = "") -> User:
         username=f"mcp-ws-{uid.hex[:8]}",
         password_hash="irrelevant",
         status="active",
+        is_platform_admin=is_platform_admin,
     )
     db_session.add(user)
     await db_session.commit()
     return user
+
+
+async def _grant_workspace_read(
+    db_session: AsyncSession, *, user_id: uuid.UUID, workspace_id: uuid.UUID
+) -> None:
+    """seed WORKSPACE_READ 成员授权（Role + RolePermission + UserWorkspaceRole 直插）。"""
+    role = Role(id=uuid.uuid4(), key=f"r{uuid.uuid4().hex[:6]}", name="R")
+    db_session.add(role)
+    await db_session.flush()
+    db_session.add(RolePermission(role_id=role.id, permission=Permission.WORKSPACE_READ.value))
+    db_session.add(UserWorkspaceRole(user_id=user_id, workspace_id=workspace_id, role_id=role.id))
+    await db_session.commit()
 
 
 async def _rows(db_session: AsyncSession) -> list[McpServer]:
@@ -103,6 +124,9 @@ async def _create_workspace(
     if mcp_servers is not None:
         _write_mcp_json(ws, mcp_servers)
     await db_session.commit()
+    # P0-1 成员授权：创建者默认拿到该 workspace 的 WORKSPACE_READ（与平台
+    # workspace 创建链路同语义），保证既有用例走「成员」路径。
+    await _grant_workspace_read(db_session, user_id=created_by, workspace_id=ws.id)
     return ws
 
 
@@ -192,6 +216,84 @@ class TestScanReadOnly:
 
         with pytest.raises(WorkspaceNotFound):
             await scan_workspaces(db_session, uuid.uuid4(), user)
+
+
+# ── 工作区访问门（P0-1，ql-20260911-003-355a）─────────────────────────────────
+
+
+class TestWorkspaceMembershipGate:
+    async def test_scan_all_filters_non_member_workspaces(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """非成员的 workspace 不进候选（他人 .mcp.json 内容不泄露给非成员）。"""
+        owner = await _create_user(db_session, label="g1")
+        outsider = await _create_user(db_session, label="g1o")
+        await _create_workspace(
+            db_session,
+            tmp_path,
+            created_by=owner.id,
+            name="ws-others",
+            mcp_servers={"fetch": _entry()},
+        )
+
+        assert await scan_workspaces(db_session, None, outsider) == []
+        assert len(await _rows(db_session)) == 0  # 不落库也不留痕
+
+    async def test_scan_specified_non_member_denied(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """指定他人 workspace_id 扫描 → PermissionDenied 403。"""
+        owner = await _create_user(db_session, label="g2")
+        outsider = await _create_user(db_session, label="g2o")
+        ws = await _create_workspace(
+            db_session,
+            tmp_path,
+            created_by=owner.id,
+            name="ws-private",
+            mcp_servers={"fetch": _entry()},
+        )
+
+        with pytest.raises(PermissionDenied):
+            await scan_workspaces(db_session, ws.id, outsider)
+
+    async def test_apply_non_member_candidate_denied(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """apply 候选引用非可见 workspace → 403 fail-fast（候选体可手写，不进容错）。"""
+        owner = await _create_user(db_session, label="g3")
+        outsider = await _create_user(db_session, label="g3o")
+        ws = await _create_workspace(
+            db_session,
+            tmp_path,
+            created_by=owner.id,
+            name="ws-apply",
+            mcp_servers={"fetch": _entry()},
+        )
+        forged = McpWorkspaceCandidate(
+            name="fetch",
+            server_config={"command": "uvx", "args": ["mcp-server-fetch"]},
+            workspace_id=ws.id,
+            dedup_verdict="new",
+        )
+
+        with pytest.raises(PermissionDenied):
+            await apply_workspace_import(db_session, [forged], "mine", outsider)
+        assert await _rows(db_session) == []  # 越权候选零落库
+
+    async def test_platform_admin_scans_all(self, db_session: AsyncSession, tmp_path: Path) -> None:
+        """平台 admin（SETTINGS_ADMIN 短路）放行全部 workspace 扫描。"""
+        owner = await _create_user(db_session, label="g4")
+        admin = await _create_user(db_session, label="g4a", is_platform_admin=True)
+        await _create_workspace(
+            db_session,
+            tmp_path,
+            created_by=owner.id,
+            name="ws-admin-view",
+            mcp_servers={"fetch": _entry()},
+        )
+
+        candidates = await scan_workspaces(db_session, None, admin)
+        assert [c.name for c in candidates] == ["fetch"]
 
 
 # ── 三态判定（new / duplicate / renamed）──────────────────────────────────────

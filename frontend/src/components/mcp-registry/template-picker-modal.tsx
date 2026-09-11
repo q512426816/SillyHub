@@ -32,15 +32,18 @@ export interface McpTemplatePick {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /** 密钥键名清单（模板只记键名不记值——表单预勾加密行待用户补值）。 */
+  secretEnvKeys: string[];
 }
 
 export function McpTemplatePickerModal({ open, onClose, onPick }: McpTemplatePickerModalProps) {
   const { templates, isLoading, isError, error, refetch } = useMcpTemplates();
 
   const handlePick = (t: McpTemplateRead) => {
-    // server_config 为 stdio 形态 {type,command,args,env}；容错取值与表单一致。
+    // server_config 为 stdio 形态 {type,command,args,env}；容错取值与表单一致
+    // （secret_env_keys 防御性 ?? —— 旧缓存/劣化响应无该字段不炸）。
     const { command, args, env } = readStdioEntry(t.server_config);
-    onPick({ name: t.name, command, args, env });
+    onPick({ name: t.name, command, args, env, secretEnvKeys: [...(t.secret_env_keys ?? [])] });
     onClose();
   };
 

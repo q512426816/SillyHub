@@ -32,6 +32,42 @@ from app.modules.task.model import Task
 
 log = get_logger(__name__)
 
+# 文件中心下载路径前缀（router GET /api/file/{file_id} 生成、前端 avatar 等
+# 引用方存的就是该形态——回收入口按前缀+uuid 解析回 file id）。
+FILE_URL_PREFIX = "/api/file/"
+
+
+async def reclaim_orphaned_file_by_url(
+    session: AsyncSession, url: str | None, *, user: User
+) -> bool:
+    """best-effort 回收文件中心 URL 指向的文件（ql-20260911-019-1f01 头像孤儿清理）。
+
+    头像换绑/清除后旧值失引用——调用方在**新值落库成功后**以旧 URL 调本函数：
+    形态为 ``/api/file/{uuid}`` 且行存在、归属通过（uploaded_by 本人）→
+    ``FileService.soft_delete``（置 deleted_at + best-effort 删存储对象）；其余
+    情况（外链 / 非 uuid / 不存在或已删 / 无权 / 存储抖动）一律 False 静默——
+    回收是兜底语义，绝不影响主写路径的成功返回。
+    """
+    if not url or not url.startswith(FILE_URL_PREFIX):
+        return False
+    try:
+        file_id = uuid.UUID(url[len(FILE_URL_PREFIX) :])
+    except ValueError:
+        return False
+    from app.core.config import get_settings
+    from app.modules.storage.factory import get_storage_backend
+
+    try:
+        service = FileService(session, get_storage_backend(), get_settings())
+        await service.soft_delete(file_id, user=user)
+    except AppError:
+        return False
+    except Exception:
+        log.warning("file.reclaim_by_url_failed", file_id=str(file_id))
+        return False
+    log.info("file.reclaimed_by_url", file_id=str(file_id), user_id=str(user.id))
+    return True
+
 
 def _safe_ext(original_name: str) -> str:
     """取扩展名（小写，仅字母数字，≤10 字符），防注入；无则空串。"""

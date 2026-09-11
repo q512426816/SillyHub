@@ -21,7 +21,7 @@ provides:
 goal: >
   workerDone 增第 4 参 opts.sessionId，一次性覆盖实例级 X-Session-Id 头，供 daemon 主客户端（无会话头）代报分身 worker_done（design §5.1 / FR-01）。
 implementation:
-  - workerDone（hub-client.ts:2136-2155）签名加第 4 参 opts?: { sessionId?: string }
+  - workerDone（sillyhub-daemon/src/hub-client.ts:2136-2155）签名加第 4 参 opts?: { sessionId?: string }
   - _request 第 4 参改为合并头——先展开 _sessionIdHeaders()（:650），opts.sessionId 存在时再以 X_SESSION_ID_HEADER（:569）键覆盖同名头
   - JSDoc 补 2026-09-10-review-dispatch-platform-fixes 注记（daemon 代报用一次性分身会话头，可覆盖实例级 auth.sessionId）
   - 新增 tests/hub-client-worker-done-session.test.ts 覆盖传 sessionId 带头、未传 opts 零变化、与实例级 sessionId 并存时前者胜

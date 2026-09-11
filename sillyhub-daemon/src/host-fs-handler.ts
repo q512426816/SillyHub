@@ -68,8 +68,10 @@ import type { Dirent, Stats } from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { join, resolve as pathResolve } from 'node:path';
+import { homedir } from 'node:os';
 import yaml from 'js-yaml';
 import { RpcError } from './ws-client.js';
+import { isPathUnderAnyRoot } from './policy/path-utils.js';
 import {
   assertWithinAllowedRoots,
   listDir,
@@ -1995,6 +1997,15 @@ export class HostFsHandler {
       const sessId = extractZcodeSessId(path);
       if (sessId !== null) {
         try {
+          // 目录门（ql-20260911-003-355a P2 修订：原 lstat 存在性门以「文件存在」
+          // 为授权凭证，误杀文件已被 zcode 清理的历史会话回看——D-001@v1 恒库
+          // 读取的核心场景；安全语义保留为「log_path 必须位于 zcode rollout
+          // 目录内」：自登记的 rollout 外任意路径仍进不了读取器，且与文件死活
+          // 无关——isPathUnderAnyRoot 的 resolveRealPath 对不存在路径有 fallback，
+          // 死会话路径照常通过）。
+          if (!isPathUnderAnyRoot(abs, [join(homedir(), '.zcode', 'cli', 'rollout')])) {
+            throw new Error(`log_path 不在 zcode rollout 目录内: ${abs}`);
+          }
           // beforeSeq 透传读取器（null = 不切片，与文件解析器同语义）。
           return await readZcodeSqliteMessages(sessId, beforeSeq ?? null);
         } catch (error) {

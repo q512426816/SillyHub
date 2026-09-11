@@ -17,7 +17,10 @@ created_at: 2026-08-18 01:45:00
 - `GET /api/file/list` — 按 owner 维度列文件（登录用户按 workspace 读权限过滤：`allowed_workspace_ids(user, WORKSPACE_READ)` 集合内 owner_id）。
 - `GET /api/file/{id}/meta` / `POST /api/file/batch-meta`（body ids，上限 200，跳过软删项）— 元数据回显。
 - `DELETE /api/file/{id}` — 软删（204），删除后再访问 404。
-- `FileService(session, storage, settings)`：`validate_upload`（超限 413 `file_too_large` / 类型不在白名单 415 `file_type_not_allowed`）/ `upload_file`（2026-08-23-agent-file-upload-mcp 起带可选 keyword-only `description`，落库截断 255）/ `get_stream` → (File, AsyncIterator[bytes]) / `get_meta` / `batch_meta` / `list_files` / `soft_delete`；访问校验 `_can_access`（属主或工作区成员；agent_session/agent_run 归属按 D-004@v2 解析链锚 workspace 后 WORKSPACE_READ，锚 NULL/孤儿 run 兜底 deny——锚**绝不传 None 进 has_permission**，其 None 分支会按任意 ws 放行）。
+- `FileService(session, storage, settings)`：`validate_upload`（超限 413 `file_too_large` / 类型不在白名单 415 `file_type_not_allowed`）/ `upload_file`（2026-08-23-agent-file-upload-mcp 起带可选 keyword-only `description`，落库截断 255）/ `get_stream` → (File, AsyncIterator[bytes]) / `get_meta` / `batch_meta` / `list_files` / `soft_delete`；访问校验 `_can_access`（属主或工作区成员；agent_session/agent_run 归属按 D-004@v2 解析链锚 workspace 后 WORKSPACE_READ，锚 NULL/孤儿 run 兜底 deny——锚**绝不传 None 进 has_permission**，其 None 分支会按任意 ws 放行）。模块级
+  `reclaim_orphaned_file_by_url(session, url, *, user)`（ql-20260911-019-1f01）：
+  `/api/file/{uuid}` 形态 best-effort 软删（头像换绑/清除后旧文件回收入口；外链/
+  坏 uuid/不存在/无权/存储抖动一律 False 静默，不影响调用方主写路径）。
 - `File` 模型：id / owner_type（自由字符串，新增取值 agent_session/agent_run）/ owner_id（可空）/ original_name / stored_key（唯一）/ mime_type / size（BigInteger）/ description（String(255) nullable，2026-08-23-agent-file-upload-mcp）/ uploaded_by / created_at / deleted_at；FileMetaResp 含 description+created_at。
 - 表名 `file`（单数）。
 

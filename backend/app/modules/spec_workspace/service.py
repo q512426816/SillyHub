@@ -80,15 +80,39 @@ def reset_reparse_scheduler() -> None:
     _reparse_trailing_timers.clear()
 
 
-async def drain_reparse_workers() -> None:
+async def drain_reparse_workers(*, timeout_seconds: float = 15.0) -> bool:
     """排空后台 reparse / 尾随定时器任务（测试断言前调用；停机钩子亦可复用）。
 
-    尾随定时器 sleep 的是节流间隔——测试侧先 ``monkeypatch`` 缩短
-    ``_REPARSE_MIN_INTERVAL_SECONDS`` 再 drain，否则会等满一个窗。
-    循环 drain：尾随 fire 可能再起 reparse 任务（合并补发），直到集合清空。
+    尾随定时器 sleep 的是节流间隔（``_REPARSE_MIN_INTERVAL_SECONDS``=120s）且
+    注册进同一集合——drain 可能要等满一个窗。测试侧先 ``monkeypatch`` 缩短间隔
+    再 drain；停机路径带 ``timeout_seconds`` 有界等待（ql-20260911-003-355a P2：
+    裸 while 循环会把进程挂住 ≥120s，Docker 默认 10s 后 SIGKILL 直接落空）。
+    循环 drain：尾随 fire 可能再起 reparse 任务（合并补发），直到集合清空或超时
+    （超时只记日志不 cancel——reparse 每步是独立短事务，进程退出等价回滚到上一
+    致投影，daemon 下轮 push 60-90s 兜底）。
+
+    返回是否在超时内排空（True=集合清空）。
     """
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
     while _reparse_bg_tasks:
-        await asyncio.gather(*list(_reparse_bg_tasks), return_exceptions=True)
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            log.warning(
+                "spec_workspace.reparse_drain_timeout",
+                pending_tasks=len(_reparse_bg_tasks),
+                timeout_seconds=timeout_seconds,
+            )
+            return False
+        done, _pending = await asyncio.wait(
+            set(_reparse_bg_tasks), timeout=remaining, return_when=asyncio.ALL_COMPLETED
+        )
+        for task in done:
+            if not task.cancelled() and task.exception() is not None:
+                log.error(
+                    "spec_workspace.reparse_drain_task_failed",
+                    error=repr(task.exception()),
+                )
+    return True
 
 
 # Error code for invalid sync tar payloads (path traversal, corrupt tar, etc.).

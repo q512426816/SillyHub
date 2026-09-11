@@ -23,12 +23,16 @@ core.auth_deps 承接；平台同步 `shpsync_`（platform_sync）与 MCP token�
 - `POST /api/auth/logout`（204）：按 refresh 注销单个 session。
 - `POST /api/auth/change-password`（204）；`GET /api/auth/me` → 当前用户 + 各 workspace 角色。
 - `PATCH /api/auth/me/avatar` → `UserRead`（2026-09-10-account-avatar-upload）：用户自助头像，
-  body `avatar` 三态——值=设置（文件中心 `/api/file/{id}` 或外链）、`''`=清除、缺省=不改；
+  body `avatar` 三态——值=设置（仅允许文件中心 `/api/file/{id}` 相对路径或 http(s) 外链，
+  其它形态 422 `HTTP_422_AUTH_AVATAR_INVALID`——ql-20260911-003-355a：原样入库可存
+  javascript:/data: 等任意串跨群渲染）、`''`=清除、缺省=不改；
   `UserRead.avatar` 由 `/me` 自动带出，未设置为 null。
 - API Key：`POST /api/auth/api-keys` 创建（`shk_live_` 前缀明文仅创建响应返回一次）、
   `GET /api/auth/api-keys` 列表、`DELETE /api/auth/api-keys/{id}` 吊销。
 - `AuthService`（service.py）：login / refresh / logout_session_by_refresh /
-  revoke_all_user_sessions / update_my_avatar（users.avatar 永不存空串——清除即置 NULL）。
+  revoke_all_user_sessions / update_my_avatar（users.avatar 永不存空串——清除即置 NULL；
+  换绑/清除成功后旧值若为 /api/file/{id} 形态经 file 模块 reclaim_orphaned_file_by_url
+  best-effort 回收，ql-20260911-019-1f01）。
 - `ApiKeyService`（api_key_service.py）：key 生命周期与校验；Redis 正/负缓存节流
   （命中负缓存直接拒，避免高频无效 key 打库）。
 - `CaptchaService`（captcha_service.py）：`check_rate_limit`（IP 速率限制）、

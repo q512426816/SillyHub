@@ -55,8 +55,9 @@ from app.modules.settings.model import PlatformSetting
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
 
-# secret 类 env key（token/key/secret/password 子串，_SECRET_KEY_MARKERS 同源）
-# ——service 写路径抽列进 encrypted_env，daemon 视图解密回填真值不遮蔽。
+# secret 类 env key 样例（ql-20260911-003-355a 起键是否加密由用户经 secret_env_keys
+# 逐键显式指定，不再按键名子串自动抽列）——用例须把要加密的键名显式传给种子助手，
+# service 写路径才抽列进 encrypted_env，daemon 视图解密回填真值不遮蔽。
 _SECRET_ENV = {
     "GITHUB_TOKEN": "ghp_super_secret_value",
     "API_KEY": "sk-real-key-123",
@@ -64,6 +65,7 @@ _SECRET_ENV = {
     "CLIENT_SECRET": "secret-xyz",
     "NORMAL_VAR": "visible-anyway",
 }
+_SECRET_ENV_KEYS = ["GITHUB_TOKEN", "API_KEY", "DB_PASSWORD", "CLIENT_SECRET"]
 
 
 async def _put_setting(db_session: AsyncSession, key: str, value: Any) -> None:
@@ -122,11 +124,21 @@ async def _seed_platform_server(
     name: str,
     server_config: dict[str, Any],
     bind: bool = True,
+    secret_env_keys: list[str] | None = None,
 ) -> McpServer:
-    """经 service 真实写路径建平台共享 server（secret env 走真 CredentialCipher）。"""
+    """经 service 真实写路径建平台共享 server（secret env 走真 CredentialCipher）。
+
+    ql-20260911-003-355a 起密钥键集由 ``secret_env_keys`` 显式指定——要验证
+    加密/解密回填链路的用例必须传键名清单，缺省 None=全部按明文 env 落库。
+    """
     svc = McpRegistryService(db_session)
     detail = await svc.create_server(
-        McpServerCreate(name=name, server_config=dict(server_config), scope="platform"),
+        McpServerCreate(
+            name=name,
+            server_config=dict(server_config),
+            scope="platform",
+            secret_env_keys=secret_env_keys,
+        ),
         admin,
     )
     if bind:
@@ -275,6 +287,7 @@ async def test_returns_unredacted_env(
             "args": ["-y", "@modelcontextprotocol/server-github"],
             "env": dict(_SECRET_ENV),
         },
+        secret_env_keys=_SECRET_ENV_KEYS,
     )
     await _seed_platform_server(
         db_session,
@@ -393,6 +406,10 @@ async def test_admin_view_redacts_but_daemon_view_does_not(
         admin,
         name="secret-server",
         server_config={"command": "run", "env": {"API_TOKEN": "real-token-xyz"}},
+        # ql-20260911-003-355a：API_TOKEN 须显式声明为密钥键才会被写路径抽列
+        # 加密（server_config.env 不留明文）——缺省不传则视为普通明文 env，
+        # admin 详情原样回显，本对照断言失效。
+        secret_env_keys=["API_TOKEN"],
     )
 
     # daemon 视图（本端点）：解密真值

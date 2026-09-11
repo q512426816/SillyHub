@@ -164,7 +164,7 @@ token 轮换（~20min + 401 刷新）不再重渲染这些页（含 3000 行的 
 | C9 | `backend/app/modules/workspace/skills_view_service.py` list_skills/get_mcp_config | iterdir / read_text+json | 抽 `_list_skills_sync`/`_read_mcp_config_sync` + to_thread |
 | C10 | `backend/app/modules/agent/skills_bundle_service.py` _gather_all_files/build_skills_bundle | 经同步 helper（glob/rglob/read_bytes）/ tarfile 构建 | `_collect_skill_files` 调用点 to_thread + 抽 `_build_tar_gz` + to_thread |
 | C11 | `backend/app/modules/workspace/router.py:104` + `backend/app/modules/workspace/service.py:476` | scanner.scan（iterdir+parse）被 async 调用点同步调用 | 调用点 `asyncio.to_thread(service.scan, ...)` |
-| C12 | `backend/app/modules/spec_workspace/service.py:1041` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
+| C12 | `backend/app/modules/spec_workspace/service.py:1065` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
 | C13 | `backend/app/modules/change/projection.py:45` compute_pending_review | sqlite3 直读 sillyspec.db（mode=ro）在 async 内 | 抽 `_read_stage_progress_sync` + to_thread（对齐 `backend/app/modules/runtime/service.py` 范式） |
 | D9 | `sillyhub-daemon/src/skill-manager.ts:171` extractSkillsBundle | gunzipSync（bundle 解压在 async 内） | `promisify(gunzip)` → `gunzipAsync` |
 
@@ -238,7 +238,7 @@ DEFER（带原因）：
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
 | F1 | `backend/app/modules/change/dispatch.py:840` | gate_retry_count 被 dispatch() 用新 dict 覆盖→**R12 死循环防护生产完全失效**（verify gate 失败无限重跑烧钱）；现有 test_gate_retry 全 mock dispatch 绕过覆盖点，单测全绿却掩盖 | :840 改 merge 保留 count + 跨 stage 重置；补不 mock dispatch 的 e2e（同 stage 保留 / 跨 stage 重置两条） |
-| F2 | `backend/app/modules/auth/service.py:309,330` | refresh token 校验循环内同步 bcrypt（cost-12，250-400ms/次 × N session 全表扫）**阻塞事件循环**；api_key 同模式已修（to_thread + Redis），refresh 漏修且每~20min 轮换更高频。R2 只修并发未修 blocking | `_consume_refresh_token` + `_find_revoked_session` 两处 verify 包 `asyncio.to_thread`（对齐 api_key_service:237） |
+| F2 | `backend/app/modules/auth/service.py:363,330` | refresh token 校验循环内同步 bcrypt（cost-12，250-400ms/次 × N session 全表扫）**阻塞事件循环**；api_key 同模式已修（to_thread + Redis），refresh 漏修且每~20min 轮换更高频。R2 只修并发未修 blocking | `_consume_refresh_token` + `_find_revoked_session` 两处 verify 包 `asyncio.to_thread`（对齐 api_key_service:237） |
 | F3 | `backend/app/modules/daemon/session/service/__init__.py` | session 日志 min_ts_subq 对最大表 agent_run_logs **全表 GROUP BY 无 session 过滤**，随日志增长线性恶化 | 子查询加 `WHERE run_id IN (该 session 的 runs)` 收敛聚合范围 |
 | F4 | `backend/app/modules/ppm/workbench/service.py:502,520` | 工作台"我的待办"①② 无 limit + concat 包裹 now_handle_user 致索引失效全表扫（含 Text 大列），首屏必跑；③ 已有 limit | ①② 各加 `.limit(_TODO_SOURCE_LIMIT)` 对齐③（止血全表实体化；根治 concat-LIKE 需拆关联子表 + migration，DEFER） |
 | F5 | `sillyhub-daemon/src/interactive/codex-app-server-driver.ts:669` | exit handler 仅 code!==0 才 finalize → codex 干净退出(0)/被信号杀(null) 时不置 finalized，consume 主循环永不退出、currentTurnPromise 永不 resolve → **交互式会话永久卡死**（主 agent lease 永不过期，卡到 daemon 重启）。现有测试都先 close() input 让 consume break 再 _emitExit，故未捕获 | exit handler 改任何 !h.closing 退出都 finalizeWithError（对称于 'error' handler，加 signal 参数）+ 补不 close input 的 fake child exit(0)/exit(null) 回归测试。finalizeWithError 幂等（finalized 守卫） |
@@ -251,7 +251,7 @@ DEFER（带原因）：
 |---|---|
 | 后端新增索引 | **无需**：性能 agent 逐一核实候选（AgentRunLog.channel/subagent_type、DaemonTaskLease.kind、ChangeDocument.last_modified_at 等），leading filter 已被既有索引覆盖或仅写入无查询；剩余 LOW 遵循 Wave1 YAGNI |
 | daemon D3/D5/D6/D7 | 维持不做：D3 回调实际安全（fire-and-forget 不 reject）；D5 重连 5s 对齐 Python parity；D6 30s 超时够；D7 背压 parity |
-| **daemon D8 `_fire` 一次性任务重用** | **确认是前批误判**：sillyhub-daemon/src/daemon.ts:1714-1769 每次 crash 后 .catch 内递归调 _fire 新建 AbortController + promise（_controllers finally 删旧），非重用 one-shot controller。代码实际正确 |
+| **daemon D8 `_fire` 一次性任务重用** | **确认是前批误判**：sillyhub-daemon/src/daemon.ts:1800 每次 crash 后 .catch 内递归调 _fire 新建 AbortController + promise（_controllers finally 删旧），非重用 one-shot controller。代码实际正确 |
 | daemon ND-2 codex _close 不等 exit | 维持 DEFER：仅 daemon 异常 shutdown 时 codex 子进程可能孤儿，待 shutdown 链路专项 |
 | daemon god 文件拆分 | 维持不做：高耦合 lease payload 鸭子类型几十处，无低风险切片 |
 | import_commit N+1（_build_module_maps/两段循环） | 维持 DEFER：手动 Excel 导入低频，N 小；批量化需重写 kanban per-user 计数器 |
@@ -287,7 +287,7 @@ DEFER（带原因）：
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| G1 | `backend/app/modules/file/service.py:114,122` | upload_file MinIO put 先于 DB commit 无补偿 → commit 失败留孤儿对象；soft_delete 仅置 deleted_at 不删存储本体（注释称"后续清理流程"但全仓不存在）→ MinIO 孤儿单调增长（账单泄漏） | upload commit 失败 best-effort 补偿 `delete_object`；soft_delete 同步删对象本体（先 commit DB 后删 MinIO，宁可孤儿不可损坏） |
+| G1 | `backend/app/modules/file/service.py:150,122` | upload_file MinIO put 先于 DB commit 无补偿 → commit 失败留孤儿对象；soft_delete 仅置 deleted_at 不删存储本体（注释称"后续清理流程"但全仓不存在）→ MinIO 孤儿单调增长（账单泄漏） | upload commit 失败 best-effort 补偿 `delete_object`；soft_delete 同步删对象本体（先 commit DB 后删 MinIO，宁可孤儿不可损坏） |
 | G2 | `backend/app/modules/workspace/service.py:527` | soft_delete 仅置 deleted_at/status，**不取消该 workspace 下在跑 AgentRun** → daemon 继续 burn token / 向已删实体回写 | 复用 P0-2 链路：查 active runs（经 AgentRunWorkspace JOIN）逐个 `cancel_lease`（含 pending 兜底），best-effort 单 run 失败不中断 |
 | G3 | `frontend/src/lib/daemon/index.ts` | 第四批删 streamQuickChat 后注释仍提及（纯注释瑕疵） | 清理注释 |
 
@@ -351,7 +351,7 @@ DEFER（带原因）：
 
 | ID | 文件 | 内容 |
 |---|---|---|
-| T-H2 | `daemon/host_fs/tests/test_delegate_run_command.py::TestReleaseTransaction` | H2 关键分支（`release_transaction=True` 时 commit 先于 send_rpc；默认 False 不 commit）。**必要**：`test_run_sync_gate_decision_task` 把 `_run_gate_via_delegate` 整个 AsyncMock 掉（memory「过度 mock 遮蔽」模式），H2 的 RPC 前提交分支原本零覆盖；本测试用 _SpySession + 包装 send_rpc 钉死「先 commit 后 send」 ordering |
+| T-H2 | `backend/app/modules/daemon/host_fs/tests/test_delegate_run_command.py::TestReleaseTransaction` | H2 关键分支（`release_transaction=True` 时 commit 先于 send_rpc；默认 False 不 commit）。**必要**：`test_run_sync_gate_decision_task` 把 `_run_gate_via_delegate` 整个 AsyncMock 掉（memory「过度 mock 遮蔽」模式），H2 的 RPC 前提交分支原本零覆盖；本测试用 _SpySession + 包装 send_rpc 钉死「先 commit 后 send」 ordering |
 
 ### DEFER（REAL-noZR 或需设计，附原因，非遗漏）
 
