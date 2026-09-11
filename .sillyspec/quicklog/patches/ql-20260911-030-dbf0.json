@@ -1,0 +1,38 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-09fb6f43",
+  "totals": {
+    "files": 2,
+    "additions": 115,
+    "deletions": 14
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "declared": true,
+      "additions": 110,
+      "deletions": 12,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/group-chat/member-panel.tsx",
+      "declared": true,
+      "additions": 5,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260911-030-dbf0",
+  "sessionId": "quick-09fb6f43",
+  "savedAt": "2026-09-11T14:35:25.145Z",
+  "patchSha256": "26c37f47f554d5c793d6c01a2a442ac20e193c4ebe78959f1bf8cc1c30b41c00",
+  "patchStatus": "ok"
+}
