@@ -148,6 +148,14 @@ patrol 职责⑦②僵尸等待形态(回叫漏叫兜底): active+未done+无活
   worker_done 端点（mcp_tools 四路由族）写 worker_done_at + summary 挂首 run + DEL→SETNX
   重开工唤醒 + 迟到 409；converge 成功后沿树批量 end_session（冲突/needs_manual 不收口），
   patrol 职责⑤孤儿扫描兜底；存量 batch 分身双判据兼容（is_worker_complete 内置 AgentRun 形态）。
+- external 模式 worker_done 打通（ql-20260911-002，关联 2026-09-10-review-dispatch-platform-fixes 活体回执）：
+  external mission（MCP gateway orchestration_mode=external，session_id=NULL 无主控根）的 worker 子会话
+  parent=NULL——resolve_mission_for_session 爬根必 miss（活体实证 daemon 代报 POST /api/missions/worker_done
+  404、artifacts 恒空）。修：resolve 爬根 miss 后按 run 归属回退（_mission_from_session_runs——会话下最早带
+  mission_id 的 run 反查，active/terminal 双形态；普通会话无 mission run 仍 None 零放宽）；_worker_done_core
+  成员资格对 external 以首 run 锚代替空树（session 模式树 422 判定序原样，主控根调用仍 422）；唤醒段既有
+  mission.session_id is not None 守卫天然跳过 external 主控注入。测试 test_worker_subsession_done.py 增
+  TestExternalModeWorkerDone 三例（200+artifact+零唤醒 / 终态 409 / 无归属 404）。
 - 分身递归开闸（2026-08-26-team-subsession-recursion）：tree_depth 列（NOT NULL DEFAULT 0，主控 0/分身 1/孙 2）
   + mission_worker_sessions_tree 递归 CTE 全树枚举（治理口径单一真相源，UNION 去重+深度 4 截断）；
   五端点统一调用方解析（parent 非空爬根禁懒建 miss=404，防分身误锚新 mission）；递归派发

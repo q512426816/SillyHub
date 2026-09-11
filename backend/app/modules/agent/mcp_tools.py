@@ -2263,16 +2263,20 @@ async def _worker_done_core(
     if enforce_workspace_permission:
         await _check_workspace_write(session, user, mission.workspace_id)
 
-    # ── 调用会话必须是本 mission 的分身子会话（全树枚举单一真相源，task-02 /
-    # Grill B3：孙层同样 ∈ 树——一层枚举会让孙调 422、mission 永不可收敛）──
+    # ── 调用会话必须是本 mission 的分身子会话 ──
+    # session 模式：全树枚举单一真相源（task-02 / Grill B3：孙层同样 ∈ 树），
+    # 主控根/普通会话调用 → 422（既有语义与错误码原样，判定序不可后移）。
+    # ql-20260911-002 external 模式（mission.session_id NULL，无主控根）：树恒
+    # 空，成员资格以首 run 锚（mission_id+role 双标记）代替，跳过 422。
     workers = await mission_worker_sessions_tree(session, mission.id)
-    if all(w.id != sid for w in workers):
+    if mission.session_id is not None and all(w.id != sid for w in workers):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "该会话不是本团队任务的分身子会话，无法调用 worker_done",
         )
 
     # ── 首 run 锚（缺失 = 派发链路异常，fail-loud 零写入）──
+    # external 模式下同时是成员资格判定（上方已跳过 422）。
     first_run = await _worker_first_run(session, sid, mission.id)
     if first_run is None:
         raise HTTPException(

@@ -330,3 +330,32 @@
 根因：该 tool 此前只有执行器（effective_agent）与在线性，无凭证池归属信息——worker 实际落在哪个配额池（独立 key 还是 daemon 本机凭证同池）派发前不可判，P0-2 的「本地耗尽平台兜底」价值无法预验证。
 方案：per-daemon quota_pool = binding 属主在 effective agent_kind 下的用户默认 LlmProvider 身份（claim 三级解析第三级；五键 {llm_provider_id,name,agent_kind,api_format,is_default}，不 decrypt 不出 key 材料）+ 顶层 effective_quota_pool 镜像首个 online 项；一条批量 in 查询不进循环；effective_agent 为 None 不查池。
 结果：test_tools_new.py 24 passed（3 新用例覆盖池命中/kind 过滤/跨属主映射、非默认行不构成池、无执行器不查池），ruff check+format 过；模块卡同步（13 个 tool 校正 + quota_pool 口径）；待部署远端后消费方即可预判。
+
+## ql-20260911-001-c0be | 2026-09-11 08:28:41 | scope-audit 命令卡升级为结果卡——对账结果（三态表+行数）在页面内直接跑出来渲染，不再只展示可复制命令
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/sillyspec-manager.ts（auditTable + _runScopeAuditJson 共享执行器）
+- sillyhub-daemon/src/daemon.ts（sillyspec_scope_audit RPC）
+- backend/app/modules/change/scope_audit.py（_send_scope_rpc 共享 helper + get_scope_audit）
+- backend/app/modules/change/router.py（/sillyspec/scope-audit 端点）
+- frontend/src/components/changes/scope-audit-command-card.tsx（结果卡重构（摘要+明细弹窗+行联动 diff+命令折叠））
+- frontend/src/lib/changes.ts（getScopeAudit 取数）
+需求：scope-audit 命令卡升级为结果卡——对账结果（三态表+行数）在页面内直接跑出来渲染，不再只展示可复制命令
+根因：用户反馈命令卡只是展示命令不够——命令不是目的，看对账结果才是；daemon→backend→前端透传链已由单文件比对（ql-20260910-017-2006）建好，缺表模式一跳与结果渲染
+方案：daemon 新 sillyspec_scope_audit RPC（auditTable 方法跑 CLI 表模式 --json，信封投影：锚点短化/rows 500 护栏/totals 透传；执行器抽 _runScopeAuditJson 与 fileDiff 共享）+ backend 同族端点 GET /sillyspec/scope-audit（_send_scope_rpc 错误族抽共享 helper）+ 前端命令卡重构：挂载即取数出锚点+合计+三态计数 chips（full-flow verdict / quick attribution），查看明细弹窗渲染三态全表且行点击联动单文件 diff 弹窗，本地命令折叠为卡尾兜底
+结果：daemon 12 用例+回归 76 passed、tsc 0；backend 9 passed、mypy/ruff 0；前端卡 7 用例重写+变更中心 21 套件 237 passed、tsc 0、eslint 0；gen:types 三端重生成；docs check 无新增；未部署（daemon 升级+sillyspec 新版后端到端可用，降级态有命令兜底）
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, sillyhub-daemon/src/api-types.ts
+
+## ql-20260911-002-4755 | 2026-09-11 08:51:11 | external 模式（orchestration_mode=external…
+状态：已完成
+关联变更：2026-09-10-review-dispatch-platform-fixes
+文件：
+- backend/app/modules/agent/model.py（resolve 回退 _mission_from_session_runs）
+- backend/app/modules/agent/mcp_tools.py（_worker_done_core external 成员资格）
+- backend/app/modules/agent/tests/test_worker_subsession_done.py（TestExternalModeWorkerDone 三例）
+- .sillyspec/docs/backend/modules/agent.md（external 打通条目）
+需求：external 模式（orchestration_mode=external，review-dispatch 经 MCP gateway 派发）worker 的 artifacts 恒空——daemon 代报 worker_done 被 404。
+根因：resolve_mission_for_session 沿 parent 链爬根（external worker parent=NULL 爬到自身）按 mission.session_id 匹配（external=NULL）必 miss；mission_worker_sessions_tree 对 external 恒 [] 会再 422。活体证据：backend 日志 POST /api/missions/worker_done 404 + lease metadata 已有 stage=mission_worker（①②③全非断点：stage 打标正常、caps.mcp=false 代报路径已走、pi override 提取正常 output_redacted=503 字符）。
+方案：resolve 爬根 miss 后按 run 归属回退（会话下最早带 mission_id 的 run 反查 mission，active/terminal 双形态）；_worker_done_core 成员资格对 external 以首 run 锚代替空树（session 模式树 422 判定序原样）。
+结果：test_worker_subsession_done.py 23 passed（external 三例：200+artifact+零唤醒/终态 409/无归属 404），广域 550 passed，ruff/mypy 过；daemon 侧零改动（代报本就工作）。

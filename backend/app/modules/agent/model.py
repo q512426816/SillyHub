@@ -1021,7 +1021,11 @@ async def resolve_mission_for_session(
       不动 get_active_mission_for_session 签名与语义）；``include_terminal=True``：
       含已终态 mission（取根上最新一条）——task-07 worker_done 迟到调用用
       于区分 404（无 mission）与 409（mission 已终态）；
-    - 传入会话即根（parent NULL）时等价 get_active_mission_for_session 直查。
+    - 传入会话即根（parent NULL）时等价 get_active_mission_for_session 直查；
+    - ql-20260911-002：爬根 miss 后按 **run 归属回退**（会话下最早带 mission_id
+      的 run 反查 mission，见 :func:`_mission_from_session_runs`）——external
+      模式分身（parent=NULL、mission.session_id=NULL）的唯一解析路径；普通
+      会话无 mission run 仍 None（404 语义不放宽）。
     """
     # 延迟 import 避免循环（model 是叶子，mission.py 顶层 import 本模块）
     from app.modules.agent.mission import get_active_mission_for_session
@@ -1045,13 +1049,46 @@ async def resolve_mission_for_session(
         current = session.parent_session_id
 
     if not include_terminal:
-        return await get_active_mission_for_session(db, root_id)
+        mission = await get_active_mission_for_session(db, root_id)
+        if mission is not None:
+            return mission
+        return await _mission_from_session_runs(db, session_id, active_only=True)
     stmt = (
         select(AgentMission)
         .where(col(AgentMission.session_id) == root_id)
         .order_by(col(AgentMission.created_at).desc())
         .limit(1)
     )
+    mission = (await db.execute(stmt)).scalars().first()
+    if mission is not None:
+        return mission
+    return await _mission_from_session_runs(db, session_id, active_only=False)
+
+
+async def _mission_from_session_runs(
+    db: AsyncSession, session_id: uuid.UUID, *, active_only: bool
+) -> AgentMission | None:
+    """run 归属回退（ql-20260911-002，external 模式 mission 解析）。
+
+    external mission（``orchestration_mode=external``，经 MCP gateway 派发）无
+    主控根会话：mission.session_id=NULL、worker 子会话 parent_session_id=NULL
+    ——爬根解析必 miss。分身首 run 带 ``mission_id + agent_session_id`` 双标记
+    （design §5.A），按会话下最早带 mission 归属的 run 反查 mission。仅服务于
+    无根形态（爬根命中时本函数不可达），普通会话无 mission run → None（404
+    语义不放宽）。
+    """
+    stmt = (
+        select(AgentMission)
+        .join(AgentRun, col(AgentRun.mission_id) == col(AgentMission.id))
+        .where(col(AgentRun.agent_session_id) == session_id)
+        .order_by(col(AgentRun.created_at))
+        .limit(1)
+    )
+    if active_only:
+        stmt = stmt.where(
+            col(AgentMission.converged_at).is_(None),
+            col(AgentMission.cancelled_at).is_(None),
+        )
     return (await db.execute(stmt)).scalars().first()
 
 
