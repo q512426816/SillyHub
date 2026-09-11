@@ -489,10 +489,17 @@
 方案：①daemon _pullSpecShared single-flight：同工作区并发创建/预取共享一次拉取；②心跳协议对答：请求 spec_cache（本机 specs 清单+版本）→ 响应 spec_versions（backend IN 批查权威版本）→ 本地落后且无活跃会话 → 后台预取+bump 版本对齐，创建时只消费缓存或等在途；③活跃会话门控+pull 上下文记账（防后台覆盖 agent 在途工作 / repo-native junction 降级）；④_.running 门控（未启动不上报，心跳位置参数旧形态零回归）；后端 additive 纯读，旧 daemon 零影响
 结果：backend 新 3 用例+回归 49 过、openapi 重导、两端 gen:types（frontend node_modules 先 --force 修复）；daemon 新 5 用例（并发一次下载/预取触发+版本对齐 9/活跃门控/版本不落后/旧 backend 兼容）+回归 6 套 97 + spec-sync 37 全过、tsc 0；部署验证待发版（预取生效需 backend+daemon 同升）
 
-## ql-20260907-011-14e0 | 2026-09-07 20:35:12 | pi 任务名升级：message_start(user) 携带的用户指令作 task_name 摘要（替代恒定'执行任务'）
-状态：进行中
+## ql-20260907-011-14e0 | 2026-09-07 20:35:12 | zcode SQLite 分派存在性门功能回归修复——换 rollout 目录门
+状态：已完成
 关联变更：2026-09-07-pi-task-events
-文件：sillyhub-daemon/src/interactive/pi-events.ts, sillyhub-daemon/tests/interactive/pi-events.test.ts
+文件：
+- sillyhub-daemon/src/host-fs-handler.ts（lstat 门→rollout 目录门）
+- sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts（homedir mock+ZD1/ZD6/ZD3 改造）
+- .sillyspec/docs/SillyHub/modules/daemon.md（目录门语义同步）
+需求：zcode SQLite 分派存在性门功能回归修复——换 rollout 目录门
+根因：ql-20260911-003-355a 安全批的 lstat 存在性门以文件存在为授权凭证，而 rollout 文件被 zcode 分钟级清理，历史会话（文件没了）全被门拦回落 not_found——恒读 SQLite 救活死会话的 D-001@v1 核心场景被误杀（生产实证：5706f6cb 会话在库 44 条消息仍报文件不存在）
+方案：门替换为路径白名单语义：log_path 须位于 ~/.zcode/cli/rollout 目录内才进读取器（isPathUnderAnyRoot，resolveRealPath 对不存在路径 fallback、死会话路径照常过门）；安全语义保留（自登记 rollout 外任意路径仍拦）；ZD1 恢复零文件 IO 并增文件不存在核心回归态、ZD6 重写为目录门用例、ZD3 断言修正；daemon.md 同步
+结果：dispatch 7 用例绿 + tests/agent-log 全目录 111 用例绿 + typecheck 零错
 
 ## ql-20260908-001-f864 | 2026-09-08 09:10:34 | 修三处 arch-large-file-split 归档遗留债
 状态：已完成
