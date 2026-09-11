@@ -5,7 +5,7 @@ created_at: 2026-09-11 14:35:00
 
 # pre-commit「auto-fix 与 stash 冲突」会静默吞掉整次 git commit
 
-> 状态：活跃（2026-09-11 两连实证：alembic 合并迁移提交、session-task-panel 残留清理提交，均被吞）。
+> 状态：**已修复**（2026-09-11 ql-20260911-006 落 check-only 方案，见文末「修复落地」；原文保留作坑史）——修复验证后应迁 `finished/`。
 > 注：坑主是 pre-commit 框架行为（非 sillyspec CLI），但本仓所有提交都过这套 hook，按工具坑同规格记录。
 
 ## 现象
@@ -28,6 +28,14 @@ Found 4 errors (4 fixed, 0 remaining).
 
 典型序列：第一次 commit → hook auto-fix 改文件 → 吞提交但修复留在工作树（文件呈 `AM`/`MM` 态）→ 第二次 commit 又因同一冲突再吞（循环）。
 
+## 实测修正（2026-09-11 临时分支复现）
+
+pre-commit 4.6.1 下该路径 **exit code = 1（git 层面是响亮失败，非静默成功）**——
+"吞提交"的感知帮凶是**管道掩码退出码**（`git commit … | tail -1` 管道出口恒 0，
+后续 `&& git push` 照跑 + 输出 `Everything up-to-date`，与"我以为已提交"的预期
+互相印证）。真实危害=退出码被掩码 + 回滚后 AM 态重试循环（不 `git add` hook 的
+修复就永远重试失败）。
+
 ## 实际危害
 
 - **提交静默丢失，工作树文件还在**：代码照样能被本地构建/部署用到（镜像从工作树打包），形成「已部署但 git 里没有」的隐性分叉——2026-09-11 实证：alembic 双 head 合并迁移 `5e295549e20f` 只存在于工作树与已部署镜像、远端仓库缺失，直到次日用例行清理提交才补上；期间任何人从远端拉代码重部署都会复现双 head 崩溃。
@@ -39,7 +47,15 @@ Found 4 errors (4 fixed, 0 remaining).
 - 命中循环时：`git add` 把 hook 的修复一并暂存（消除「未暂存改动」条件）再 commit。
 - 高风险提交（迁移/部署前置）前后 `git status --short` 确认暂存面与 `git log` 确认落库。
 
-## 待工具修复
+## 修复落地（2026-09-11 ql-20260911-006）
 
-- pre-commit 层：`--no-stash`（跳过 stash，要求干净工作树）或升级新版（已知对 stash-restore 冲突处理有改进）；至少把「rolling back fixes + 提交未创建」以非零退出码显式失败，而非静默成功。
-- 仓配层（可选）：`pre-commit run` 换 `pre-commit run --hook-stage manual` 手动跑修复类 hook、提交钩只留只读检查，auto-fix 类放 `make fmt` 显式执行。
+- **方案**：仓配层 check-only——`backend/.pre-commit-config.yaml` 两个 hook 改
+  `ruff format --check` / `ruff check`（去掉 `--fix`）。hook 不再修改文件 →
+  stash↔auto-fix 冲突类从根上消失；格式问题以 `Would reformat` 响亮失败。
+  格式化改为提交前手动：`uv run ruff format && uv run ruff check --fix` 后再 add。
+- **实测**（临时分支 AM 场景三段验证）：改前=Failed+回滚循环；改后失败态=响亮
+  `Would reformat` exit 1 无回滚；格式化+add 后=正常提交 exit 0。
+- **否决项**：`--no-stash` 不被 `hook-impl` 子命令接受（仅 `pre-commit run` 参数），
+  编辑生成 hook 脚本又会被 `pre-commit install` 覆盖——不可持久，弃。
+- **习惯项（对 agent 尤其）**：`git commit` 不接管道掩码退出码（或用
+  `set -o pipefail`）；提交后核对 `git log -1` 真有新提交。

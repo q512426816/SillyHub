@@ -4,16 +4,21 @@ default_language_version:
 repos:
   - repo: local
     hooks:
+# 2026-09-11 ql-20260911-006（坑 docs/sillyspec/pre-commit-autofix-swallows-commit.md）：
+# 提交钩只检查不修复（--check / 去掉 --fix）——auto-fix 型 hook 在工作树有未暂存
+# 改动时会触发 pre-commit stash↔auto-fix 冲突回滚（提交失败 + AM 态重试循环）；
+# 改 check-only 后 hook 不再修改文件，冲突类从根上消失。格式化改为提交前手动：
+#   uv run ruff format && uv run ruff check --fix（或修完再 add）
       - id: ruff-format
-        name: ruff format
-        entry: uv run ruff format
+        name: ruff format --check
+        entry: uv run ruff format --check
         language: system
         types: [python]
         pass_filenames: true
 
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check --fix
+        entry: uv run ruff check
         language: system
         types: [python]
         pass_filenames: true
