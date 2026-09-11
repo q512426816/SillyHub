@@ -75,9 +75,12 @@ describe("useDaemonMachines", () => {
   it("returns combined items/total/sessions", async () => {
     listMock.mockResolvedValue({ items: [mach("m1")], total: 1, limit: 20, offset: 0 });
     sessMock.mockResolvedValue({ items: [ss("s1")], total: 1, limit: 100, offset: 0 });
-    const { result } = renderHook(() => useDaemonMachines({ limit: 20 }), {
-      wrapper: w(mc()),
-    });
+    // ql-20260911-018：ql-20260909-013 起 sessions 默认不拉（includeSessions??false），
+    // 本用例断言 sessions 联动——显式 opt in；主仓预存红顺手修（a1d7ffba4 漏同步）。
+    const { result } = renderHook(
+      () => useDaemonMachines({ limit: 20 }, { includeSessions: true }),
+      { wrapper: w(mc()) },
+    );
     await waitFor(() => expect(result.current.items.length).toBe(1));
     expect(result.current.total).toBe(1);
     expect(result.current.sessions.length).toBe(1);
