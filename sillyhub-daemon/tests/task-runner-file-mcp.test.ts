@@ -28,8 +28,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// bridges task-04：factory 补 syncWorkspaceGitSkills（task-runner.ts 新增 import；本文件
+// ctx 无 workspaceId 不会触发，补 no-op 防 undefined 绑定）。
 vi.mock('../src/skill-manager.js', () => ({
   linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+  syncWorkspaceGitSkills: vi.fn(async () => ({ synced: false, skipped: false, linked: 0 })),
 }));
 
 let mockAdapter: Record<string, unknown> = {};

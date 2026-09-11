@@ -10,6 +10,14 @@
  *   时从 specDir 的 skills/ 拉到 worktree `.claude/skills/workspace/`（命名隔离，不覆盖
  *   平台 skills）。复用 daemon-client spec sync 框架（specDir 已 pull 到本地）。
  *
+ * bridges task-04（2026-09-11-workspace-asset-bridges / FR-01 / D-007）：per-workspace
+ *   git skills 分发槽。fetchRemoteManifest/fetchSkillsBundle 增可选 workspaceId（URL 拼
+ *   `?workspace_id=` 拉 user ∪ workspace 并集）；per-workspace 槽
+ *   `<daemonStateDir>/skills-workspaces/<wsId>/`（manifest.json + 解包目录）与全局槽
+ *   `<daemonStateDir>/skills/` 并存互不覆盖；syncWorkspaceGitSkills 按槽版本比对 →
+ *   拉 bundle → 解包进槽 → link 槽内 skills 到 workdir `.claude/skills/`（会话/任务
+ *   带 workspace 绑定时在全局 link 之后调用，并集内容覆盖同名目录 = 注入集语义）。
+ *
  * 所有网络/IO 操作失败不抛错（返回 null/false），daemon 启动不阻塞。
  *
  * @module skill-manager
@@ -36,9 +44,24 @@ const gunzipAsync = promisify(gunzip);
 function skillsDir(): string {
   return join(daemonStateDir(), 'skills');
 }
-/** 本地已同步版本记录。 */
+/** 本地已同步版本记录（全局 user-only 槽）。 */
 function localManifestPath(): string {
   return join(skillsDir(), 'manifest.json');
+}
+
+/**
+ * per-workspace 槽目录（bridges task-04 / D-007）：`<daemonStateDir>/skills-workspaces/<wsId>/`。
+ *
+ * 刻意放 skillsDir() 的**兄弟**目录而非子目录——全局 syncSkills 提升阶段会清
+ * skillsDir() 下除 manifest.json/.tmp-extract 外的全部条目、linkSkillsToWorkdir 会
+ * 把 skillsDir() 下全部子目录当 skill 拷走，子目录形态会被全局路径误清/误拷。
+ */
+function workspaceSkillsDir(workspaceId: string): string {
+  return join(daemonStateDir(), 'skills-workspaces', workspaceId);
+}
+/** per-workspace 槽本地版本记录。 */
+function workspaceLocalManifestPath(workspaceId: string): string {
+  return join(workspaceSkillsDir(workspaceId), 'manifest.json');
 }
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
@@ -98,18 +121,43 @@ export async function getLocalSkillsVersion(): Promise<string | null> {
   }
 }
 
+/**
+ * 读 per-workspace 槽已同步版本（bridges task-04 / D-007）。
+ * 槽 manifest 不存在/解析失败 → null（视为未同步，触发首次拉取）；与全局槽
+ * （getLocalSkillsVersion）互不读写，天然隔离。
+ */
+export async function getLocalWorkspaceSkillsVersion(
+  workspaceId: string,
+): Promise<string | null> {
+  try {
+    const content = await readFile(workspaceLocalManifestPath(workspaceId), 'utf-8');
+    const manifest = JSON.parse(content) as LocalManifest;
+    return manifest.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── 远程 manifest ─────────────────────────────────────────────────────────────
 
 /**
  * 从 backend 拉 skills manifest（`GET /api/daemon/skills/latest/manifest`）。
  * 网络错误/非 200 → null（不抛）。
+ *
+ * 可选 workspaceId（bridges task-04 / D-007）：带值时 URL 拼 `?workspace_id=`
+ * 查询串，backend 按授权后的 user ∪ workspace 并集渲染（含该 ws 启用的 git
+ * 技能）；缺省 = user-only（旧行为逐字不变）。
  */
 export async function fetchRemoteManifest(
   serverUrl: string,
   auth?: SkillAuth,
   logger?: SkillManagerLogger,
+  workspaceId?: string,
 ): Promise<SkillsManifest | null> {
-  const url = `${serverUrl.replace(/\/$/, '')}/api/daemon/skills/latest/manifest`;
+  const url = withWorkspaceQueryParam(
+    `${serverUrl.replace(/\/$/, '')}/api/daemon/skills/latest/manifest`,
+    workspaceId,
+  );
   try {
     const resp = await fetch(url, { headers: skillAuthHeaders(auth) });
     if (!resp.ok) {
@@ -123,18 +171,31 @@ export async function fetchRemoteManifest(
   }
 }
 
+/** 拼 `?workspace_id=` 查询串（workspaceId 空/未传 → 原样返回，零参数不变）。 */
+function withWorkspaceQueryParam(base: string, workspaceId?: string): string {
+  if (!workspaceId) return base;
+  return `${base}?${new URLSearchParams({ workspace_id: workspaceId }).toString()}`;
+}
+
 // ── bundle 拉取 ───────────────────────────────────────────────────────────────
 
 /**
  * 从 backend 拉 skills bundle（`GET /api/daemon/skills/latest/bundle`）。
  * 返回 ArrayBuffer（tar.gz）。网络错误/非 200 → null。
+ *
+ * 可选 workspaceId（bridges task-04 / D-007）：语义同 fetchRemoteManifest——
+ * 带 `?workspace_id=` 拉并集 bundle；缺省 = user-only（旧行为逐字不变）。
  */
 export async function fetchSkillsBundle(
   serverUrl: string,
   auth?: SkillAuth,
   logger?: SkillManagerLogger,
+  workspaceId?: string,
 ): Promise<ArrayBuffer | null> {
-  const url = `${serverUrl.replace(/\/$/, '')}/api/daemon/skills/latest/bundle`;
+  const url = withWorkspaceQueryParam(
+    `${serverUrl.replace(/\/$/, '')}/api/daemon/skills/latest/bundle`,
+    workspaceId,
+  );
   try {
     const resp = await fetch(url, { headers: skillAuthHeaders(auth) });
     if (!resp.ok) {
@@ -318,6 +379,218 @@ export async function syncSkills(
     log('error', 'skill_local_manifest_write_failed', { error: String(e) });
     return { synced: false, skipped: false };
   }
+}
+
+// ── workspace git skills 按槽分发（bridges task-04 / D-007）─────────────────
+
+/**
+ * workspace 绑定的会话/任务 spawn 前按槽分发其 git 技能（bridges task-04 / FR-01）。
+ *
+ * 调用时机：全局 linkSkillsToWorkdir **之后**（全局 user skills 先落 workdir，
+ * 并集槽内容随后覆盖同名目录 = user ∪ workspace 注入集）；profile skillRefs
+ * 裁剪（pruneSkillsToSubset，batch 路径）在更外层之后跑，本函数不感知。
+ *
+ * 流程（照 syncSkills 既有「manifest 比对 → 拉 bundle → tmp 解包 → 原子提升
+ * → 写槽版本」路径模式）：
+ *   1. `?workspace_id=` 拉该 workspace 的并集 manifest
+ *   2. 比对 per-workspace 槽版本（skills-workspaces/<wsId>/manifest.json，
+ *      与全局槽互不读写）；一致且槽目录仍在 → 跳过拉取
+ *   3. 版本新 → 拉并集 bundle + sha256 校验 + 解包进槽（清旧提升）
+ *   4. link：槽内 skill 目录拷到 <workdir>/.claude/skills/（版本缓存照
+ *      ql-20260907-006 模式，键 `<wsId>::<workdir>`——UUID 前缀天然无歧义）
+ *
+ * 全程失败不抛（返回 synced=false），不阻塞 spawn。
+ */
+export async function syncWorkspaceGitSkills(
+  serverUrl: string,
+  auth: SkillAuth,
+  workspaceId: string,
+  workdir: string,
+  logger?: SkillManagerLogger,
+): Promise<{ synced: boolean; skipped: boolean; linked: number }> {
+  const log = logger ?? (() => undefined);
+
+  // 1. 拉该 workspace 的并集 manifest（403 非成员/网络错 → null 静默降级）
+  const remote = await fetchRemoteManifest(serverUrl, auth, log, workspaceId);
+  if (!remote) {
+    return { synced: false, skipped: false, linked: 0 };
+  }
+
+  // 2. 比对该槽版本（槽目录被外部清空时视为未同步强制重拉，自愈）
+  const local = await getLocalWorkspaceSkillsVersion(workspaceId);
+  const slotDir = workspaceSkillsDir(workspaceId);
+  const slotReady = local !== null && (await pathExists(slotDir));
+  let synced = false;
+  if (slotReady && local === remote.version) {
+    log('info', 'ws_skill_version_unchanged_skip_pull', {
+      workspace_id: workspaceId,
+      version: local,
+    });
+  } else {
+    // 3. 拉 bundle（同 workspace_id 并集形态）
+    const bundle = await fetchSkillsBundle(serverUrl, auth, log, workspaceId);
+    if (!bundle) {
+      return { synced: false, skipped: false, linked: 0 };
+    }
+    const bundleBytes = new Uint8Array(bundle);
+    if (remote.sha256 && !checkSha256(bundleBytes, remote.sha256)) {
+      log('error', 'ws_skill_bundle_sha256_mismatch', { workspace_id: workspaceId });
+      return { synced: false, skipped: false, linked: 0 };
+    }
+
+    // 3.5 解包到槽 tmp，成功后原子提升（照 syncSkills 步骤 5/5.5 的既有模式）
+    const tmpDir = join(slotDir, '.tmp-extract');
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    const ok = await extractSkillsBundle(bundleBytes, tmpDir, log);
+    if (!ok) {
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      return { synced: false, skipped: false, linked: 0 };
+    }
+    try {
+      await mkdir(slotDir, { recursive: true });
+      // 清槽内旧 skill 子目录（保留 manifest.json + .tmp-extract）
+      const existing = await readdir(slotDir, { withFileTypes: true }).catch(() => []);
+      for (const entry of existing) {
+        if (entry.name === '.tmp-extract' || entry.name === 'manifest.json') continue;
+        await rm(join(slotDir, entry.name), { recursive: true, force: true }).catch(
+          () => undefined,
+        );
+      }
+      // 移 tmpDir/* → slotDir/
+      const extracted = await readdir(tmpDir, { withFileTypes: true }).catch(() => []);
+      for (const entry of extracted) {
+        await rename(join(tmpDir, entry.name), join(slotDir, entry.name));
+      }
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    } catch (e) {
+      log('error', 'ws_skill_promote_failed', {
+        workspace_id: workspaceId,
+        error: String(e),
+      });
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      return { synced: false, skipped: false, linked: 0 };
+    }
+
+    // 3.6 写槽 manifest（记录该槽版本——per-workspace 独立演进，不碰全局槽）
+    try {
+      await mkdir(slotDir, { recursive: true });
+      await writeFile(
+        workspaceLocalManifestPath(workspaceId),
+        JSON.stringify({ version: remote.version } satisfies LocalManifest),
+        'utf-8',
+      );
+      log('info', 'ws_skill_sync_completed', {
+        workspace_id: workspaceId,
+        version: remote.version,
+      });
+      synced = true;
+    } catch (e) {
+      log('error', 'ws_skill_local_manifest_write_failed', {
+        workspace_id: workspaceId,
+        error: String(e),
+      });
+      return { synced: false, skipped: false, linked: 0 };
+    }
+  }
+
+  // 4. link：槽内 skill 目录 → <workdir>/.claude/skills/（失败仅 warn）
+  const linked = await linkWorkspaceSlotToWorkdir(workspaceId, workdir, log);
+  return { synced, skipped: slotReady && local === remote.version, linked };
+}
+
+/** 槽 link 版本缓存（ql-20260907-006 同模式，键 `<wsId>::<workdir>`）。 */
+const linkedWorkdirWsVersions = new Map<string, string>();
+
+/** 清空 workspace 槽 link 版本缓存（测试隔离用；生产无调用点）。 */
+export function resetLinkedWorkdirWsVersionsForTest(): void {
+  linkedWorkdirWsVersions.clear();
+}
+
+/**
+ * 把 per-workspace 槽内同步好的并集 skills 拷到 `<workdir>/.claude/skills/`。
+ *
+ * - 源：槽目录下每个 skill 目录（排除 manifest.json / .tmp-extract / 隐藏项）
+ * - 目标：<workdir>/.claude/skills/<name> 覆盖（并集渲染为权威源——同名目录
+ *   覆盖全局 link 的 user-only 拷贝 = D-002 注入集语义）
+ * - 版本缓存跳过 / 存在性守卫 / 部分失败不自愈记版本：均照 linkSkillsToWorkdir
+ *   同款（ql-20260907-006）
+ * - 槽不存在（从未同步）/ workdir 空 → 静默返回 0
+ */
+async function linkWorkspaceSlotToWorkdir(
+  workspaceId: string,
+  workdir: string,
+  logger: SkillManagerLogger,
+): Promise<number> {
+  if (!workdir) {
+    logger('debug', 'link_ws_skills_no_workdir');
+    return 0;
+  }
+  const srcDir = workspaceSkillsDir(workspaceId);
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await readdir(srcDir, { withFileTypes: true });
+  } catch {
+    logger('debug', 'link_ws_skills_src_missing', { src: srcDir });
+    return 0;
+  }
+  const targetBase = join(workdir, '.claude', 'skills');
+  await mkdir(targetBase, { recursive: true }).catch(() => undefined);
+  const version = await getLocalWorkspaceSkillsVersion(workspaceId);
+  const cacheKey = `${workspaceId}::${workdir}`;
+  const versionFresh = version !== null && linkedWorkdirWsVersions.get(cacheKey) === version;
+  let linked = 0;
+  let freshSkipped = 0;
+  let passClean = true;
+  for (const entry of entries) {
+    // 仅拷 skill 目录（排除 manifest.json / .tmp-extract / 隐藏）
+    if (!entry.isDirectory()) continue;
+    if (entry.name === '.tmp-extract' || entry.name.startsWith('.')) continue;
+    const src = join(srcDir, entry.name);
+    const dest = join(targetBase, entry.name);
+    if (versionFresh) {
+      // 存在性守卫：worktree 重建/外部删除的单个 skill 目录 → 该 skill 重拷
+      let destOk = false;
+      try {
+        const s = await stat(dest);
+        destOk = s.isDirectory();
+      } catch {
+        destOk = false;
+      }
+      if (destOk) {
+        freshSkipped += 1;
+        continue;
+      }
+    }
+    try {
+      await rm(dest, { recursive: true, force: true }).catch(() => undefined);
+      await mkdir(dest, { recursive: true });
+      linked += await copyDirBestEffort(src, dest, logger);
+    } catch (e) {
+      passClean = false;
+      logger('warn', 'link_ws_skill_failed', {
+        workspace_id: workspaceId,
+        skill: entry.name,
+        error: String(e),
+      });
+    }
+  }
+  if (version !== null && passClean) {
+    linkedWorkdirWsVersions.set(cacheKey, version);
+  }
+  if (freshSkipped > 0) {
+    logger('info', 'link_ws_skills_version_fresh_skip', {
+      workspace_id: workspaceId,
+      workdir,
+      skills_skipped: freshSkipped,
+      skills_copied: linked,
+    });
+  }
+  logger('info', 'link_ws_skills_to_workdir_done', {
+    workspace_id: workspaceId,
+    workdir,
+    files: linked,
+  });
+  return linked;
 }
 
 // ── workspace 自定义 skills 同步（task-04）──────────────────────────────────

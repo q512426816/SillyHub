@@ -139,7 +139,7 @@ import {
 } from './preflight.js';
 import { installConsoleTimestamps } from './console-timestamp.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
-import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
+import { syncSkills, linkSkillsToWorkdir, syncWorkspaceGitSkills } from './skill-manager.js';
 // 2026-08-31-machine-sillyspec-version task-05：sillyspec 运行期版本管理与升级状态机
 //（task-04 核心模块）。daemon 侧接线三处：_sillyspecLoop 第四自动循环（auto 触发）、
 // 心跳/注册快照透传、WS SILLYSPEC_UPDATE 指令入口（server_command 触发）。
@@ -8465,6 +8465,21 @@ export class Daemon {
         await linkSkillsToWorkdir(cwd, (level, msg, data) => {
           this._logger[level](msg, data);
         });
+        // bridges task-04（D-007）：会话带 workspace 绑定 → 全局 link 之后按该
+        // workspace 的槽拉取并解包其 git 技能（?workspace_id= 并集 manifest 比对
+        // per-workspace 槽版本，槽内容覆盖 workdir 同名目录 = user ∪ ws 注入集）。
+        // 未绑定走既有全局路径（零感知）。失败仅 warn（skill 缺失不阻塞 spawn）。
+        if (workspaceId) {
+          await syncWorkspaceGitSkills(
+            this._serverOrigin(),
+            { apiKey: this._config.api_key, token: this._config.token },
+            workspaceId,
+            cwd,
+            (level, msg, data) => {
+              this._logger[level](msg, data);
+            },
+          );
+        }
       } catch (e) {
         this._logger.warn('interactive_link_skills_failed', { lease_id: leaseId, error: String(e) });
       }

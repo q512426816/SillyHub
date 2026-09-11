@@ -1095,3 +1095,140 @@ async def test_union_manifest_includes_user_and_workspace_scopes(
     for entry in union["files"]:
         if entry["path"].startswith(("user-scope-git/", "ws-scope-git/")):
             assert entry["source"] == "git"
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-11-workspace-asset-bridges task-04（D-007）：daemon 端点 ?workspace_id
+# 两态。缺省 = user-only（上方全部既有用例即回归面，行为逐字不变）；带参 =
+# 授权（workspace 不存在 404 / 非成员 403）后 user ∪ workspace 并集渲染。
+# ---------------------------------------------------------------------------
+
+
+async def _make_member(db_session: AsyncSession, ws: Workspace, user_id: uuid.UUID) -> None:
+    """给 user 授 ws 成员角色（Role + UserWorkspaceRole；任意角色行即成员——
+    skill_source tests ``_make_member`` 同款）。"""
+    from app.modules.auth.model import Role, UserWorkspaceRole
+
+    role = Role(id=uuid.uuid4(), key=f"developer-{uuid.uuid4().hex[:6]}", name="Developer")
+    db_session.add(role)
+    await db_session.flush()
+    db_session.add(UserWorkspaceRole(user_id=user_id, workspace_id=ws.id, role_id=role.id))
+    await db_session.commit()
+
+
+async def test_manifest_workspace_id_two_states_and_auth(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端点两态一体的主用例：授权门（404/403）→ 并集 → 缺省 user-only 不变。
+
+    * workspace 不存在 → 404（存在性校验，对齐 _read_mcp_config_raw 拒绝形态）
+    * 非成员带参 → 403（RBAC 存在性，防越权拉他人并集）
+    * 成员带参 → user ∪ workspace 并集（他操作者建的 ws 行也进），version ≠
+      user-only 基线
+    * 不带参 → ws 技能缺席（缺省兼容语义，与 task-01 零回归断言同口径）
+    """
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    ws = await _add_workspace(db_session)
+
+    user_source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        user_source.id,
+        "user-scope-git",
+        {"SKILL.md": b"---\nname: user-scope-git\ndescription: u\n---\n\nbody"},
+    )
+    await _add_enable(db_session, default_user_id, f"{user_source.id}:user-scope-git")
+
+    # ws 维度行：操作者是另一个用户（并集 OR 分支不限 user_id 的对照）
+    other_operator = uuid.uuid4()
+    ws_source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        ws_source.id,
+        "ws-scope-git",
+        {"SKILL.md": b"---\nname: ws-scope-git\ndescription: w\n---\n\nbody"},
+    )
+    await _add_enable(
+        db_session, other_operator, f"{ws_source.id}:ws-scope-git", workspace_id=ws.id
+    )
+
+    # 授权门 1：workspace 不存在 → 404
+    resp = await client.get(
+        f"/api/daemon/skills/latest/manifest?workspace_id={uuid.uuid4()}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text
+
+    # 授权门 2：存在但非成员 → 403
+    resp = await client.get(
+        f"/api/daemon/skills/latest/manifest?workspace_id={ws.id}", headers=auth_headers
+    )
+    assert resp.status_code == 403, resp.text
+
+    # 成员后带参 → 并集
+    await _make_member(db_session, ws, default_user_id)
+    resp = await client.get(
+        f"/api/daemon/skills/latest/manifest?workspace_id={ws.id}", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    union = resp.json()
+    union_paths = {f["path"] for f in union["files"]}
+    assert "user-scope-git/SKILL.md" in union_paths, "并集须含 user 维度启用"
+    assert "ws-scope-git/SKILL.md" in union_paths, "并集须含 ws 维度启用"
+
+    # 缺省：同一数据面不带参 → user-only（ws 技能缺席）
+    plain = await _get_manifest(client, auth_headers)
+    plain_paths = {f["path"] for f in plain["files"]}
+    assert "user-scope-git/SKILL.md" in plain_paths
+    assert "ws-scope-git/SKILL.md" not in plain_paths
+    assert union["version"] != plain["version"], "并集 version 必须区别于 user-only"
+
+
+async def test_bundle_workspace_id_union_and_auth(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bundle 端点同款两态：非成员 403；成员带参 tar 含 ws git 技能、缺省不含。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    ws = await _add_workspace(db_session)
+
+    other_operator = uuid.uuid4()
+    ws_source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        ws_source.id,
+        "ws-scope-git",
+        {"SKILL.md": b"---\nname: ws-scope-git\ndescription: w\n---\n\nbody"},
+    )
+    await _add_enable(
+        db_session, other_operator, f"{ws_source.id}:ws-scope-git", workspace_id=ws.id
+    )
+
+    # 非成员 → 403
+    resp = await client.get(
+        f"/api/daemon/skills/latest/bundle?workspace_id={ws.id}", headers=auth_headers
+    )
+    assert resp.status_code == 403, resp.text
+
+    await _make_member(db_session, ws, default_user_id)
+    # 成员带参 → tar 含 ws 技能
+    resp = await client.get(
+        f"/api/daemon/skills/latest/bundle?workspace_id={ws.id}", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    union_files = _extract_tar_files(resp.content)
+    assert any(p.startswith("ws-scope-git/") for p in union_files)
+
+    # 缺省 → 不含（user-only）
+    resp = await client.get("/api/daemon/skills/latest/bundle", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    plain_files = _extract_tar_files(resp.content)
+    assert not any(p.startswith("ws-scope-git/") for p in plain_files)

@@ -6,6 +6,9 @@
 //   sha256 校验失败 / manifest 不可达）。
 // task-04（workspace 同步）：覆盖 syncWorkspaceSkills（有自定义 skills 同步 / 无 skills 跳过 /
 //   与平台 skills 命名隔离共存 / specDir 不存在不抛 / 重复同步覆盖）。
+// bridges task-04（2026-09-11-workspace-asset-bridges / D-007）：覆盖 fetch URL 的
+//   workspace_id 组装（带/不带）、per-workspace 槽（skills-workspaces/<wsId>/）版本比对
+//   与全局槽/双 ws 槽互不覆盖、syncWorkspaceGitSkills 解包进槽 + link 到 workdir。
 //
 // @module skill-manager.test
 
@@ -17,14 +20,17 @@ import * as zlib from 'node:zlib';
 
 import {
   getLocalSkillsVersion,
+  getLocalWorkspaceSkillsVersion,
   fetchRemoteManifest,
   fetchSkillsBundle,
   checkSha256,
   extractSkillsBundle,
   syncSkills,
   syncWorkspaceSkills,
+  syncWorkspaceGitSkills,
   linkSkillsToWorkdir,
   resetLinkedWorkdirVersionsForTest,
+  resetLinkedWorkdirWsVersionsForTest,
   pathExists,
 } from '../src/skill-manager.js';
 
@@ -445,5 +451,223 @@ describe('skill-manager: fetch 带 auth header', () => {
     expect((opts?.headers as Record<string, string>)?.['X-API-Key']).toBe('k');
     expect((opts?.headers as Record<string, string>)?.['Authorization']).toBeUndefined();
     spy.mockRestore();
+  });
+});
+
+// ── bridges task-04（D-007）：workspace_id URL 组装 + per-workspace 槽 ─────────
+
+describe('skill-manager: fetch URL workspace_id 组装（bridges task-04）', () => {
+  it('fetchRemoteManifest 带 workspaceId → URL 拼 ?workspace_id=', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ version: 'v1' }), { status: 200 }));
+    await fetchRemoteManifest('http://hub/', undefined, undefined, 'ws-uuid-1');
+    expect(spy.mock.calls[0]?.[0]).toBe(
+      'http://hub/api/daemon/skills/latest/manifest?workspace_id=ws-uuid-1',
+    );
+    spy.mockRestore();
+  });
+
+  it('fetchRemoteManifest 不带 workspaceId → URL 无查询串（旧行为）', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ version: 'v1' }), { status: 200 }));
+    await fetchRemoteManifest('http://hub');
+    expect(spy.mock.calls[0]?.[0]).toBe('http://hub/api/daemon/skills/latest/manifest');
+    spy.mockRestore();
+  });
+
+  it('fetchSkillsBundle 带 workspaceId → URL 拼 ?workspace_id=', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(Buffer.from('tar'), { status: 200 }));
+    await fetchSkillsBundle('http://hub', undefined, undefined, 'ws-uuid-2');
+    expect(spy.mock.calls[0]?.[0]).toBe(
+      'http://hub/api/daemon/skills/latest/bundle?workspace_id=ws-uuid-2',
+    );
+    spy.mockRestore();
+  });
+
+  it('workspaceId 含特殊字符 → URLSearchParams 正确编码', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ version: 'v1' }), { status: 200 }));
+    await fetchRemoteManifest('http://hub', undefined, undefined, 'ws uuid&x');
+    expect(spy.mock.calls[0]?.[0]).toBe(
+      'http://hub/api/daemon/skills/latest/manifest?workspace_id=ws+uuid%26x',
+    );
+    spy.mockRestore();
+  });
+});
+
+describe('skill-manager: syncWorkspaceGitSkills（bridges task-04 / D-007）', () => {
+  let tmpHome: string;
+  let origHome: string | undefined;
+  let workdir: string;
+
+  beforeEach(async () => {
+    resetLinkedWorkdirVersionsForTest();
+    resetLinkedWorkdirWsVersionsForTest();
+    tmpHome = await mkdtemp(join(tmpdir(), 'ws-skill-home-'));
+    origHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+    workdir = await mkdtemp(join(tmpdir(), 'ws-skill-wt-'));
+  });
+  afterEach(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await Promise.all([
+      rm(tmpHome, { recursive: true, force: true }),
+      rm(workdir, { recursive: true, force: true }),
+    ]);
+  });
+
+  /** 槽目录：~/.sillyhub/daemon/skills-workspaces/<wsId>/。 */
+  const slotDir = (wsId: string): string =>
+    join(tmpHome, '.sillyhub', 'daemon', 'skills-workspaces', wsId);
+
+  it('版本新 → 拉 bundle 解包进槽 + link 到 workdir/.claude/skills/', async () => {
+    const tarGz = makeTarGz([
+      { name: 'ws-git-a/SKILL.md', content: Buffer.from('# ws-git-a') },
+      { name: 'ws-git-a/helper.py', content: Buffer.from('x = 1\n') },
+      { name: 'user-git-b/SKILL.md', content: Buffer.from('# user-git-b') },
+    ]);
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: 'wsv1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(tarGz, { status: 200 }));
+
+    const r = await syncWorkspaceGitSkills(
+      'http://test.invalid',
+      { apiKey: 'k' },
+      '11111111-1114-4111-8111-111111111111',
+      workdir,
+    );
+
+    expect(r.synced).toBe(true);
+    expect(r.skipped).toBe(false);
+    // 两次请求都带 workspace_id
+    expect(fetchSpy.mock.calls[0]?.[0]).toContain('workspace_id=11111111-1114-4111-8111-111111111111');
+    expect(fetchSpy.mock.calls[1]?.[0]).toContain('workspace_id=11111111-1114-4111-8111-111111111111');
+    // 槽内解包 + 槽版本记录
+    expect(await readFile(join(slotDir('11111111-1114-4111-8111-111111111111'), 'ws-git-a', 'SKILL.md'), 'utf-8')).toBe('# ws-git-a');
+    const slotManifest = JSON.parse(
+      await readFile(join(slotDir('11111111-1114-4111-8111-111111111111'), 'manifest.json'), 'utf-8'),
+    ) as { version: string };
+    expect(slotManifest.version).toBe('wsv1');
+    expect(await getLocalWorkspaceSkillsVersion('11111111-1114-4111-8111-111111111111')).toBe('wsv1');
+    // workdir 接线（并集内容直接落 .claude/skills/<name>）
+    expect(await readFile(join(workdir, '.claude', 'skills', 'ws-git-a', 'SKILL.md'), 'utf-8')).toBe('# ws-git-a');
+    expect(await readFile(join(workdir, '.claude', 'skills', 'user-git-b', 'SKILL.md'), 'utf-8')).toBe('# user-git-b');
+    // manifest.json 不拷
+    expect(await pathExists(join(workdir, '.claude', 'skills', 'manifest.json'))).toBe(false);
+    fetchSpy.mockRestore();
+  });
+
+  it('槽版本相同 → skipped=true 不拉 bundle，但槽内容仍 link 到 workdir', async () => {
+    // 预置槽：版本 wsv1 + 一个已解包 skill
+    await mkdir(join(slotDir('22222222-2224-4222-8222-222222222222'), 'kept-skill'), { recursive: true });
+    await writeFile(
+      join(slotDir('22222222-2224-4222-8222-222222222222'), 'kept-skill', 'SKILL.md'),
+      'kept',
+    );
+    await writeFile(
+      join(slotDir('22222222-2224-4222-8222-222222222222'), 'manifest.json'),
+      JSON.stringify({ version: 'wsv1' }),
+    );
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ version: 'wsv1' }), { status: 200 }));
+
+    const r = await syncWorkspaceGitSkills(
+      'http://test.invalid',
+      { apiKey: 'k' },
+      '22222222-2224-4222-8222-222222222222',
+      workdir,
+    );
+
+    expect(r.skipped).toBe(true);
+    expect(r.synced).toBe(false);
+    // 只调 manifest，不拉 bundle
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // 槽内容照样接线（复用槽 = 跨会话缓存语义）
+    expect(await readFile(join(workdir, '.claude', 'skills', 'kept-skill', 'SKILL.md'), 'utf-8')).toBe('kept');
+    fetchSpy.mockRestore();
+  });
+
+  it('槽 manifest 不可达 → synced=false 不抛、不写槽', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network'));
+    const r = await syncWorkspaceGitSkills(
+      'http://test.invalid',
+      { apiKey: 'k' },
+      '33333333-3334-4333-8333-333333333333',
+      workdir,
+    );
+    expect(r.synced).toBe(false);
+    expect(await pathExists(slotDir('33333333-3334-4333-8333-333333333333'))).toBe(false);
+    fetchSpy.mockRestore();
+  });
+
+  it('槽隔离：ws 槽版本不覆盖全局槽，也不覆盖另一 ws 槽', async () => {
+    const tarA = makeTarGz([{ name: 'skill-a/SKILL.md', content: Buffer.from('a') }]);
+    const tarB = makeTarGz([{ name: 'skill-b/SKILL.md', content: Buffer.from('b') }]);
+
+    // 全局槽先有版本 gv1（模拟 daemon 启动 syncSkills 产物）
+    const globalSkillsDir = join(tmpHome, '.sillyhub', 'daemon', 'skills');
+    await mkdir(globalSkillsDir, { recursive: true });
+    await writeFile(join(globalSkillsDir, 'manifest.json'), JSON.stringify({ version: 'gv1' }));
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      // ws-A：manifest v1 + bundle
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: 'wsAv1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(tarA, { status: 200 }))
+      // ws-B：manifest v2 + bundle
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: 'wsBv1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(tarB, { status: 200 }));
+
+    const workdirA = await mkdtemp(join(tmpdir(), 'ws-skill-wt-a-'));
+    const workdirB = await mkdtemp(join(tmpdir(), 'ws-skill-wt-b-'));
+    try {
+      await syncWorkspaceGitSkills('http://test.invalid', { apiKey: 'k' }, 'aaaaaaaa-0000-4000-8000-00000000000a', workdirA);
+      await syncWorkspaceGitSkills('http://test.invalid', { apiKey: 'k' }, 'bbbbbbbb-0000-4000-8000-00000000000b', workdirB);
+
+      // 三个版本槽各自独立：全局 gv1 / ws-A wsAv1 / ws-B wsBv1
+      expect(await getLocalSkillsVersion()).toBe('gv1');
+      expect(await getLocalWorkspaceSkillsVersion('aaaaaaaa-0000-4000-8000-00000000000a')).toBe('wsAv1');
+      expect(await getLocalWorkspaceSkillsVersion('bbbbbbbb-0000-4000-8000-00000000000b')).toBe('wsBv1');
+      // 内容也隔离：A 槽只有 skill-a，B 槽只有 skill-b
+      expect(await pathExists(join(slotDir('aaaaaaaa-0000-4000-8000-00000000000a'), 'skill-a'))).toBe(true);
+      expect(await pathExists(join(slotDir('aaaaaaaa-0000-4000-8000-00000000000a'), 'skill-b'))).toBe(false);
+      expect(await pathExists(join(slotDir('bbbbbbbb-0000-4000-8000-00000000000b'), 'skill-b'))).toBe(true);
+      expect(await pathExists(join(slotDir('bbbbbbbb-0000-4000-8000-00000000000b'), 'skill-a'))).toBe(false);
+      // 全局槽目录未被 ws 同步污染
+      const globalEntries = await (await import('node:fs/promises')).readdir(globalSkillsDir);
+      expect(globalEntries).toEqual(['manifest.json']);
+    } finally {
+      await Promise.all([
+        rm(workdirA, { recursive: true, force: true }),
+        rm(workdirB, { recursive: true, force: true }),
+      ]);
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('并集覆盖语义：槽 link 覆盖全局 link 的同名目录（D-002 注入集）', async () => {
+    // 全局 link 先落 user-only 内容（同 skill 名旧内容）
+    await mkdir(join(workdir, '.claude', 'skills', 'clash-git'), { recursive: true });
+    await writeFile(join(workdir, '.claude', 'skills', 'clash-git', 'SKILL.md'), 'user-only-old');
+
+    const tarGz = makeTarGz([{ name: 'clash-git/SKILL.md', content: Buffer.from('union-new') }]);
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: 'wsv9' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(tarGz, { status: 200 }));
+
+    await syncWorkspaceGitSkills('http://test.invalid', { apiKey: 'k' }, 'cccccccc-0000-4000-8000-00000000000c', workdir);
+
+    expect(await readFile(join(workdir, '.claude', 'skills', 'clash-git', 'SKILL.md'), 'utf-8')).toBe('union-new');
+    fetchSpy.mockRestore();
   });
 });

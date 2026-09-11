@@ -71,7 +71,7 @@ import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
 import { applyClaudeSettings } from './claude-settings.js';
 // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 workDir/.claude/skills/。
-import { linkSkillsToWorkdir } from './skill-manager.js';
+import { linkSkillsToWorkdir, syncWorkspaceGitSkills } from './skill-manager.js';
 // task-03：observer 创建 / cmd-shim 解析 / readline 消费随 _spawnAndStream、
 // _handleLine 方法体下沉到 ./task-runner/spawn-stream.js。
 import type { TerminalObserver } from './terminal-observer.js';
@@ -445,10 +445,24 @@ export class TaskRunner {
       // ——不接线则 batch 会话看不到 sillyspec/custom skills。失败仅 warn（skill 缺失不阻塞 spawn）。
       try {
         await linkSkillsToWorkdir(workDir);
+        // bridges task-04（D-007）：任务带 workspace 绑定（claim payload 透传
+        // workspaceId，同步骤 1.5 的鸭子读取口径）→ 全局 link 之后按该 workspace
+        // 槽拉取并解包其 git 技能（复用 skill-manager 入口，不复制实现）。
+        // config 缺失（旧测试场景）/ 未绑定 → 走既有全局路径（零感知）。
+        const taskWsId = (ctx as { workspaceId?: string }).workspaceId;
+        if (taskWsId && this.config) {
+          await syncWorkspaceGitSkills(
+            this.config.server_url,
+            { apiKey: this.config.api_key, token: this.config.token },
+            taskWsId,
+            workDir,
+          );
+        }
         // task-09（design §9 / D-017）：profile.skill_refs 子集过滤。claim payload
         //（context.py task-07 透传）带 skillRefs 时，link 全量后按子集裁剪
         // <workDir>/.claude/skills/，只保留引用的 skill 目录，其余删除（profile 只能收紧）。
-        // skillRefs 缺省/空 → 不裁剪（全量，向后兼容 FR-15）。
+        // skillRefs 缺省/空 → 不裁剪（全量，向后兼容 FR-15）。顺序：全局 link →
+        // ws git 解包（上方）→ prune 按 refs（profile 对并集注入集只能收紧）。
         const skillRefs = pickStrList(ctx, 'skillRefs', 'skill_refs');
         if (skillRefs) {
           await pruneSkillsToSubset(workDir, skillRefs, leaseId);

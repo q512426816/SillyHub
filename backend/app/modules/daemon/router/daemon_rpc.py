@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal
+from app.core.errors import WorkspacePermissionDenied
 from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
@@ -377,24 +378,68 @@ async def ack_controls(
 # 2026-07-07-daemon-skill-execution task-06：platform sillyspec skills 分发端点。
 # daemon skill-manager（task-03）启动时查 manifest 比对版本，新则拉 bundle 解压。
 # 仿 daemon install bundle 分发：tar.gz + manifest（version=内容 sha256 前缀 + 文件 sha256）。
+#
+# 2026-09-11-workspace-asset-bridges task-04（D-007）：两端点增可选 query
+# ``workspace_id``——带值先过授权校验再透传并集渲染（user ∪ workspace，
+# build_skills_manifest/build_skills_bundle 由 task-01 接好参）；缺省 =
+# user-only，行为逐字不变（旧 daemon 零感知，向后兼容硬底线）。
 # ---------------------------------------------------------------------------
+
+
+async def _require_workspace_member_scope(
+    session: AsyncSession, user: User, workspace_id: uuid.UUID
+) -> None:
+    """skills 分发端点 workspace 维度授权（bridges task-04 / R-02）。
+
+    存在性 → 404：``WorkspaceService.get``（不存在/已软删同语义，对齐本模块
+    ``_read_mcp_config_raw`` 的拒绝形态——「workspace 存在性校验 404」）。
+    成员 → 403：RBAC 表 ``user_workspace_roles`` 存在性查询（skill_source
+    ``_require_workspace_member`` 同口径——任意角色行即成员，不关心权限粒度；
+    防越权拉他人 workspace 的技能并集）。
+    """
+    from app.modules.auth.model import UserWorkspaceRole
+    from app.modules.workspace.service import WorkspaceService
+
+    await WorkspaceService(session).get(workspace_id)
+    stmt = (
+        select(UserWorkspaceRole.user_id)
+        .where(UserWorkspaceRole.user_id == user.id)
+        .where(UserWorkspaceRole.workspace_id == workspace_id)
+        .limit(1)
+    )
+    if (await session.execute(stmt)).scalars().first() is None:
+        raise WorkspacePermissionDenied(
+            f"当前用户不是该 workspace 成员：{workspace_id}",
+            details={"workspace_id": str(workspace_id)},
+        )
 
 
 @router.get("/skills/latest/manifest")
 async def get_skills_manifest(
     user: Annotated[Any, Depends(get_current_principal)],
     session: SessionDep,
+    workspace_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Return sillyspec skills manifest (version + file list + sha256 per file).
 
     daemon skill-manager 用来判定是否需重新拉取 bundle（版本漂移）。
     合并代码库 ``sillyspec-*`` + DB ``CustomSkill``（task-03，每个 → ``<name>/SKILL.md``）。
     源目录无 skills 时返回 404。
+
+    可选 query ``workspace_id``（bridges task-04 / D-007）：带值时经
+    ``_require_workspace_member_scope`` 授权后透传，manifest 按 user ∪
+    workspace 并集渲染（workspace 启用的 git 技能一并入集）；缺省 = user-only
+    （行为逐字不变）。非法 UUID → 422（全局校验处理器中文报错）。
     """
     from app.modules.agent.skills_bundle_service import build_skills_manifest
 
     # task-07 D-004：透传 user.id，让 manifest 按 user 维度合并代码库 sillyspec-* + 该用户私有 CustomSkill。
-    manifest = await build_skills_manifest(session=session, user_id=user.id)
+    # bridges task-04 D-007：带 workspace_id → 先授权再并集渲染；缺省 None = 旧 user-only 行为。
+    if workspace_id is not None:
+        await _require_workspace_member_scope(session, user, workspace_id)
+    manifest = await build_skills_manifest(
+        session=session, user_id=user.id, workspace_id=workspace_id
+    )
     if not manifest.get("files"):
         raise HTTPException(status_code=404, detail="当前没有任何可用的技能包。")
     return manifest
@@ -404,16 +449,24 @@ async def get_skills_manifest(
 async def get_skills_bundle(
     user: Annotated[Any, Depends(get_current_principal)],
     session: SessionDep,
+    workspace_id: uuid.UUID | None = None,
 ) -> StreamingResponse:
     """Return sillyspec-skills.tar.gz binary stream for daemon download.
 
     bundle 含代码库 ``sillyspec-*`` skill 目录 + DB ``CustomSkill``，打包为 gzip tar。
     无 skills 时返回 404。
+
+    可选 query ``workspace_id``（bridges task-04 / D-007）：语义同 manifest
+    端点——带值时授权后按 user ∪ workspace 并集打包；缺省 = user-only
+    （行为逐字不变）。
     """
     from app.modules.agent.skills_bundle_service import build_skills_bundle
 
     # task-07 D-004：透传 user.id，让 bundle 按 user 维度打包代码库 sillyspec-* + 该用户私有 CustomSkill。
-    bundle = await build_skills_bundle(session=session, user_id=user.id)
+    # bridges task-04 D-007：带 workspace_id → 先授权再并集打包；缺省 None = 旧 user-only 行为。
+    if workspace_id is not None:
+        await _require_workspace_member_scope(session, user, workspace_id)
+    bundle = await build_skills_bundle(session=session, user_id=user.id, workspace_id=workspace_id)
     if not bundle:
         raise HTTPException(status_code=404, detail="当前没有任何可用的技能包。")
     return StreamingResponse(
