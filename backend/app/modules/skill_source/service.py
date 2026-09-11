@@ -16,11 +16,14 @@ Change: 2026-09-11-skills-central-library (task-01 + task-02 接线 + task-03)
   整体 best-effort **永不抛**，不阻塞保存请求（HTTP 仍 2xx）。
 - delete：连带清该源 user_skill_enables（skill_key 前缀 ``<source_id>:``
   匹配）+ 缓存目录 best-effort（目录可不存在）。
-- toggle_enable（task-03，本人写）：``skill_key`` 格式校验（422）→ 须命中
-  **启用源**的 discover_skills 结果（404）→ 绑定表 upsert/delete 幂等。
+- toggle_enable（task-03 本人写；bridges task-01 双 scope）：``skill_key`` 格式
+  校验（422）→ 须命中 **启用源**的 discover_skills 结果（404）→ 绑定表
+  upsert/delete 幂等；可选 ``workspace_id`` 切 workspace 维度（成员校验 403，
+  谓词带 scope 不互删，D-010）。
 - list_library（task-03）：三源聚合——平台 sillyspec-*（扫描 skills_bundle_dir）
   + 我的 CustomSkill + 全部 enabled 源的 discover_skills 实时发现（带我的
-  启用态与源信息；git 技能默认关，D-003）。
+  启用态与源信息；git 技能默认关，D-003）；user 视图启用态显式 IS NULL
+  过滤（D-010），可选 ``workspace_id`` 取 user ∪ workspace 并集（D-002）。
 """
 
 from __future__ import annotations
@@ -38,11 +41,12 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.agent.skills_bundle_service import SKILLS_GLOB, _parse_skill_frontmatter
-from app.modules.auth.model import User
+from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.skill_source import git_fetcher
 from app.modules.skill_source.model import SkillSource, UserSkillEnable
 from app.modules.skill_source.schema import LibrarySkillItem, LibraryView, SourceRead
 from app.modules.skills.model import CustomSkill
+from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
 
@@ -135,6 +139,17 @@ class SkillNotDiscoverable(AppError):
 
     code = "skill_source.skill_not_discoverable"
     http_status = 404
+
+
+class WorkspaceScopeForbidden(AppError):
+    """workspace 维度操作越权（403，R-02 service 二次校验）。
+
+    涵盖：workspace 不存在 / 当前用户非该 workspace 成员——统一按「无权以
+    workspace 维度操作」处理（存在性细节不外泄，与成员不足同口径）。
+    """
+
+    code = "skill_source.workspace_scope_forbidden"
+    http_status = 403
 
 
 def parse_skill_key(skill_key: str) -> tuple[uuid.UUID, str]:
@@ -293,27 +308,55 @@ class SkillSourceService:
         await _trigger_fetch(self._session, source)
         return source
 
-    # ── 技能库 + 启用绑定（task-03）──────────────────────────────────
+    # ── 技能库 + 启用绑定（task-03；workspace 双 scope 归 bridges task-01）──
 
-    async def toggle_enable(self, skill_key: str, user: User, *, enabled: bool) -> None:
-        """本人启用/停用一个 git 技能（``user_skill_enables`` upsert/delete，幂等）。
+    async def toggle_enable(
+        self,
+        skill_key: str,
+        user: User,
+        *,
+        enabled: bool,
+        workspace_id: uuid.UUID | None = None,
+    ) -> None:
+        """启用/停用一个 git 技能（``user_skill_enables`` upsert/delete，幂等）。
+
+        双 scope（D-003 单表双 scope，缺省 ``workspace_id=None`` = user 维度）：
+
+        - **user 维度**（旧行为逐字不变）：删除/查重谓词显式带
+          ``workspace_id IS NULL``（D-010——ws 行不混入，删 user 维度不误删
+          ws 绑定，反之亦然）；``user_id`` 为本人。
+        - **workspace 维度**：先校验 workspace 表存在 + 当前用户是成员
+          （R-02 二次校验，403），删除/查重谓词按 ``workspace_id == :w``
+          （共享绑定，任何成员可停用）；upsert 行 ``user_id`` 填操作者审计。
 
         - 格式校验（:func:`parse_skill_key`）→ 422；
         - ``enabled=True``：skill_key 须命中**启用源**的 discover_skills 结果
-          （taskcard 权威——防手拼垃圾 key；源不存在/停用/目录消失统一 404）；
-          绑定已存在则幂等返回（UNIQUE(user_id, skill_key) 兜底并发）；
+          （防手拼垃圾 key；源不存在/停用/目录消失统一 404）；绑定已存在则
+          幂等返回（双 partial unique 兜底并发）；
         - ``enabled=False``：删绑定，无绑定也幂等成功（悬空语义归收集层，
           停用不校验技能存在性——技能已消失也允许收回启用态）。
         """
         source_id, dir_name = parse_skill_key(skill_key)
 
-        if not enabled:
-            await self._session.execute(
-                delete(UserSkillEnable).where(
-                    UserSkillEnable.user_id == user.id,
-                    UserSkillEnable.skill_key == skill_key,
-                )
+        if workspace_id is not None:
+            await self._require_workspace_member(user, workspace_id)
+
+        # D-010 删除/查重谓词带 scope：user 维度 IS NULL（不误删 ws 行），
+        # workspace 维度按 :w（user_id 不入谓词——共享绑定任意成员可停）。
+        if workspace_id is None:
+            scope_predicate = (
+                UserSkillEnable.user_id == user.id,
+                UserSkillEnable.skill_key == skill_key,
+                UserSkillEnable.workspace_id.is_(None),
             )
+        else:
+            scope_predicate = (
+                UserSkillEnable.skill_key == skill_key,
+                UserSkillEnable.workspace_id == workspace_id,
+            )
+
+        if not enabled:
+            await self._session.execute(delete(UserSkillEnable).where(*scope_predicate))
             await self._session.commit()
             return
 
@@ -330,39 +373,51 @@ class SkillSourceService:
                 details={"skill_key": skill_key, "source_id": str(source_id)},
             )
 
-        existing = await self._session.execute(
-            select(UserSkillEnable).where(
-                UserSkillEnable.user_id == user.id,
-                UserSkillEnable.skill_key == skill_key,
-            )
-        )
+        existing = await self._session.execute(select(UserSkillEnable).where(*scope_predicate))
         if existing.scalars().first() is not None:
             return  # 幂等：重复启用为 no-op
 
-        self._session.add(UserSkillEnable(user_id=user.id, skill_key=skill_key))
+        # workspace 行 user_id 填操作者（审计）；user 维度 workspace_id=None。
+        self._session.add(
+            UserSkillEnable(user_id=user.id, skill_key=skill_key, workspace_id=workspace_id)
+        )
         try:
             await self._session.commit()
         except IntegrityError:
-            # 并发重复启用：UNIQUE(user_id, skill_key) 兜底，视为已启用。
+            # 并发重复启用：scope partial unique 兜底，视为已启用。
             await self._session.rollback()
 
-    async def list_library(self, user: User) -> LibraryView:
-        """技能库三源聚合 + 我的启用态（design §接口定义 list_library）。
+    async def list_library(
+        self,
+        user: User,
+        *,
+        workspace_id: uuid.UUID | None = None,
+    ) -> LibraryView:
+        """技能库三源聚合 + 启用态（design §接口定义 list_library）。
 
         1. 平台内置 sillyspec-*——扫 ``skills_bundle_dir`` 下 ``sillyspec-*``
            目录（name + SKILL.md description），恒启用不可 toggle；
         2. 我的 CustomSkill——本人 ``created_by`` 行（name + description），恒启用；
         3. git 技能——全部 **enabled** 源的 discover_skills **实时发现**（结果不
-           落库，D-006 保存/刷新即拉取），带我的启用态（默认 False，D-003）与
+           落库，D-006 保存/刷新即拉取），带启用态（默认 False，D-003）与
            源信息；disabled 源不参与（R-05）。
+
+        启用态口径（D-010）：缺省 user 视图只看 ``user_id=本人 AND
+        workspace_id IS NULL``（ws 行不污染）；传 ``workspace_id`` 时校验
+        成员后取并集（user 绑定 ∪ 该 workspace 绑定，D-002 注入同口径）。
         """
         sources = await self.list_()
+
+        # D-010：显式 IS NULL——workspace 维度行不混入 user 视图启用态。
+        enable_filter = (UserSkillEnable.user_id == user.id) & (
+            UserSkillEnable.workspace_id.is_(None)
+        )
+        if workspace_id is not None:
+            await self._require_workspace_member(user, workspace_id)
+            # D-002 并集：user 绑定 ∪ 该 workspace 绑定（ws 行不限 user_id）。
+            enable_filter = enable_filter | (UserSkillEnable.workspace_id == workspace_id)
         enabled_keys = set(
-            (
-                await self._session.execute(
-                    select(UserSkillEnable.skill_key).where(UserSkillEnable.user_id == user.id)
-                )
-            )
+            (await self._session.execute(select(UserSkillEnable.skill_key).where(enable_filter)))
             .scalars()
             .all()
         )
@@ -447,6 +502,31 @@ class SkillSourceService:
         shutil.rmtree(source_cache_dir(source.id), ignore_errors=True)
 
     # ── helpers ───────────────────────────────────────────────────────
+
+    async def _require_workspace_member(self, user: User, workspace_id: uuid.UUID) -> None:
+        """workspace 维度二次校验（R-02）：表存在 + 当前用户是成员，否则 403。
+
+        成员判定走 RBAC 表 ``user_workspace_roles`` 存在性查询（profile service
+        ``_is_workspace_member`` 同款——任意角色行即视为 member，不关心权限粒度；
+        细粒度 WORKSPACE_WRITE 域门在后续 workspace 端点卡片）。
+        """
+        workspace = await self._session.get(Workspace, workspace_id)
+        if workspace is None:
+            raise WorkspaceScopeForbidden(
+                f"workspace 不存在或无权访问：{workspace_id}",
+                details={"workspace_id": str(workspace_id)},
+            )
+        stmt = (
+            select(UserWorkspaceRole.user_id)
+            .where(UserWorkspaceRole.user_id == user.id)
+            .where(UserWorkspaceRole.workspace_id == workspace_id)
+            .limit(1)
+        )
+        if (await self._session.execute(stmt)).scalars().first() is None:
+            raise WorkspaceScopeForbidden(
+                f"当前用户不是该 workspace 成员：{workspace_id}",
+                details={"workspace_id": str(workspace_id)},
+            )
 
     async def _get_by_url(self, url: str) -> SkillSource | None:
         stmt = select(SkillSource).where(SkillSource.url == url)

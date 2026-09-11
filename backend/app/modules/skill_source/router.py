@@ -16,9 +16,12 @@ Change: 2026-09-11-skills-central-library (task-01 + task-03)
 - PATCH  /api/skill-sources/{id}             → update（admin）
 - DELETE /api/skill-sources/{id}             → 204（连带清绑定+缓存目录在 service）
 - POST   /api/skill-sources/{id}/refresh     → refresh（admin；git 缺 422）
-- GET    /api/skills/library                 → LibraryView 三源聚合（登录即可）
-- POST   /api/skills/{skill_key}/enable      → 204（body EnableOp；格式 422/未命中 404）
-- DELETE /api/skills/{skill_key}/enable      → 204（幂等停用）
+- GET    /api/skills/library                 → LibraryView 三源聚合（登录即可；
+  可选 ``?workspace_id=`` 并集启用态，bridges task-01）
+- POST   /api/skills/{skill_key}/enable      → 204（body EnableOp；格式 422/未命中 404；
+  可选 ``?workspace_id=`` 切 workspace 维度，成员校验 403 在 service）
+- DELETE /api/skills/{skill_key}/enable      → 204（幂等停用；可选 ``?workspace_id=``
+  同上；user 维度谓词显式 IS NULL 不误删 ws 行——D-010）
 
 ``skill_key`` 含冒号（``<source_id>:<目录名>``）：冒号是 RFC 3986 路径合法
 字符，路径参数原样可达；客户端 %-encoding（``%3A``）亦被 ASGI 规范解码。
@@ -127,9 +130,14 @@ async def refresh_skill_source(
 async def get_skills_library(
     session: SessionDep,
     user: CurrentUser,
+    workspace_id: uuid.UUID | None = None,
 ) -> LibraryView:
-    """技能库三源聚合 + 我的启用态（登录即可；git 技能默认关，D-003）。"""
-    return await SkillSourceService(session).list_library(user)
+    """技能库三源聚合 + 启用态（登录即可；git 技能默认关，D-003）。
+
+    可选 ``?workspace_id=``：带上看 user ∪ workspace 并集启用态（成员校验
+    403 在 service）；不带 = user 视图（显式 IS NULL，D-010——不传行为不变）。
+    """
+    return await SkillSourceService(session).list_library(user, workspace_id=workspace_id)
 
 
 @router.post("/skills/{skill_key}/enable", status_code=status.HTTP_204_NO_CONTENT)
@@ -138,12 +146,17 @@ async def enable_skill(
     payload: EnableOp,
     session: SessionDep,
     user: CurrentUser,
+    workspace_id: uuid.UUID | None = None,
 ) -> None:
     """启用/停用一个 git 技能（本人；body ``enabled``，幂等）。
 
     ``skill_key`` 格式非法 → 422；未命中启用源的发现结果 → 404（service 层）。
+    可选 ``?workspace_id=``：切 workspace 维度（成员校验 403、谓词带 scope
+    在 service；不传 = user 维度旧行为不变）。
     """
-    await SkillSourceService(session).toggle_enable(skill_key, user, enabled=payload.enabled)
+    await SkillSourceService(session).toggle_enable(
+        skill_key, user, enabled=payload.enabled, workspace_id=workspace_id
+    )
 
 
 @router.delete("/skills/{skill_key}/enable", status_code=status.HTTP_204_NO_CONTENT)
@@ -151,6 +164,13 @@ async def disable_skill(
     skill_key: str,
     session: SessionDep,
     user: CurrentUser,
+    workspace_id: uuid.UUID | None = None,
 ) -> None:
-    """停用一个 git 技能（本人；幂等——无绑定也 204）。"""
-    await SkillSourceService(session).toggle_enable(skill_key, user, enabled=False)
+    """停用一个 git 技能（本人；幂等——无绑定也 204）。
+
+    可选 ``?workspace_id=``：停 workspace 维度绑定（成员校验 403 在 service；
+    user 维度删除谓词显式 IS NULL，不误删 ws 行——D-010）。
+    """
+    await SkillSourceService(session).toggle_enable(
+        skill_key, user, enabled=False, workspace_id=workspace_id
+    )

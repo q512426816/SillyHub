@@ -1,6 +1,7 @@
 """Tests for ``GET /api/skills/library`` + ``POST/DELETE /api/skills/{key}/enable``（task-03）。
 
-Change: 2026-09-11-skills-central-library
+Change: 2026-09-11-skills-central-library + 2026-09-11-workspace-asset-bridges
+task-01（workspace 双 scope toggle + D-010 谓词）
 
 Covers（taskcard acceptance）:
 - enable 回环：POST 建（204）幂等（重复 POST 仍 204 且仅一行）；DELETE 删幂等
@@ -12,6 +13,9 @@ Covers（taskcard acceptance）:
   （D-003）；启用态 per-user 隔离（A 启用不影响 B 视图）。
 - 权限：三端点任意登录用户（非 admin 可 enable，无 admin 代写面）；未登录 401。
 - 源删除连带：enable 后删除源 → 绑定连带清（task-01 delete 路径联动回环）。
+- workspace 维度（bridges task-01）：``?workspace_id=`` toggle CRUD 幂等 + 成员
+  校验 403（ws 不存在/非成员）；user/ws 两维度删除谓词互不误删（D-010）；
+  user 视图 library 不被 ws 行污染（显式 IS NULL）、带参并集（D-002）。
 
 离线性：SkillSource 行直插 DB + 缓存目录手工构造（tmp spec_data_root），全程
 不触 git 二进制/外网（enable 只消费 discover_skills 的文件系统扫描）。
@@ -29,10 +33,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, password_hasher
-from app.modules.auth.model import User
+from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.skill_source.model import SkillSource, UserSkillEnable
 from app.modules.skill_source.service import source_cache_dir
 from app.modules.skills.model import CustomSkill
+from app.modules.workspace.model import Workspace
 
 LIBRARY_PATH = "/api/skills/library"
 SOURCES_PATH = "/api/skill-sources"
@@ -106,6 +111,201 @@ def _make_cached_skill(source_id: uuid.UUID, dir_name: str, *, subdir: str | Non
 async def _enable_rows(db_session: AsyncSession) -> set[tuple[uuid.UUID, str]]:
     rows = (await db_session.execute(select(UserSkillEnable))).scalars().all()
     return {(row.user_id, row.skill_key) for row in rows}
+
+
+async def _enable_rows_scoped(
+    db_session: AsyncSession,
+) -> set[tuple[uuid.UUID, str, uuid.UUID | None]]:
+    """带 scope 的绑定行全集：(user_id, skill_key, workspace_id)。"""
+    rows = (await db_session.execute(select(UserSkillEnable))).scalars().all()
+    return {(row.user_id, row.skill_key, row.workspace_id) for row in rows}
+
+
+# ─── workspace 维度 toggle（bridges task-01：双 scope + 成员校验）────────
+
+
+async def _make_workspace(db_session: AsyncSession) -> Workspace:
+    """直插 workspace 行（test_profile_service.py:50 同款最小字段）。"""
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"ws-{uuid.uuid4().hex[:6]}",
+        slug=f"slug-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+    return ws
+
+
+async def _make_member(db_session: AsyncSession, ws: Workspace, user: User) -> None:
+    """给 user 授 ws 成员角色（Role + UserWorkspaceRole，任意角色行即成员）。"""
+    role = Role(id=uuid.uuid4(), key=f"developer-{uuid.uuid4().hex[:6]}", name="Developer")
+    db_session.add(role)
+    await db_session.flush()
+    db_session.add(UserWorkspaceRole(user_id=user.id, workspace_id=ws.id, role_id=role.id))
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_workspace_toggle_crud_and_member_check(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch
+):
+    """workspace 维度 CRUD：成员可启用（幂等一行）/停用；非成员与幽灵 ws 403。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    user, token = await _make_user(db_session)
+    outsider, outsider_token = await _make_user(db_session)
+    h = _headers(token)
+    ws = await _make_workspace(db_session)
+    await _make_member(db_session, ws, user)
+    source = await _add_source(db_session)
+    _make_cached_skill(source.id, "ws-skill")
+    key = f"{source.id}:ws-skill"
+
+    # 成员启用（workspace 维度）→ 204，行 workspace_id=ws、user_id=操作者（审计）
+    resp = await client.post(
+        f"/api/skills/{key}/enable",
+        json={"enabled": True},
+        headers=h,
+        params={"workspace_id": str(ws.id)},
+    )
+    assert resp.status_code == 204, resp.text
+    assert await _enable_rows_scoped(db_session) == {(user.id, key, ws.id)}
+
+    # 重复启用 → 仍 204 幂等一行（ws 维度 partial unique）
+    resp = await client.post(
+        f"/api/skills/{key}/enable",
+        json={"enabled": True},
+        headers=h,
+        params={"workspace_id": str(ws.id)},
+    )
+    assert resp.status_code == 204
+    assert await _enable_rows_scoped(db_session) == {(user.id, key, ws.id)}
+
+    # 另一成员（同 ws 不同 user）也可停用——ws 绑定共享，删除谓词不含 user_id
+    other_member, other_token = await _make_user(db_session)
+    await _make_member(db_session, ws, other_member)
+    resp = await client.post(
+        f"/api/skills/{key}/enable",
+        json={"enabled": False},
+        headers=_headers(other_token),
+        params={"workspace_id": str(ws.id)},
+    )
+    assert resp.status_code == 204, resp.text
+    assert await _enable_rows_scoped(db_session) == set()
+
+    # 非成员（无论启用/停用）→ 403
+    resp = await client.post(
+        f"/api/skills/{key}/enable",
+        json={"enabled": True},
+        headers=_headers(outsider_token),
+        params={"workspace_id": str(ws.id)},
+    )
+    assert resp.status_code == 403
+    resp = await client.delete(
+        f"/api/skills/{key}/enable",
+        headers=_headers(outsider_token),
+        params={"workspace_id": str(ws.id)},
+    )
+    assert resp.status_code == 403
+
+    # 幽灵 workspace（不存在）→ 403（存在性不外泄，与成员不足同口径）
+    ghost = uuid.uuid4()
+    resp = await client.post(
+        f"/api/skills/{key}/enable",
+        json={"enabled": True},
+        headers=h,
+        params={"workspace_id": str(ghost)},
+    )
+    assert resp.status_code == 403
+    assert await _enable_rows_scoped(db_session) == set()
+
+    # user 维度不受牵连（未登录语义对照组在既有用例；此处确认 outsider 未被建行）
+    assert all(row[0] != outsider.id for row in await _enable_rows_scoped(db_session))
+
+
+@pytest.mark.asyncio
+async def test_toggle_delete_scope_isolation(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch
+):
+    """D-010 删除谓词 scope 隔离：user 维度删不删 ws 行；ws 维度删不删 user 行。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    user, token = await _make_user(db_session)
+    h = _headers(token)
+    ws = await _make_workspace(db_session)
+    await _make_member(db_session, ws, user)
+    source = await _add_source(db_session)
+    _make_cached_skill(source.id, "iso-skill")
+    key = f"{source.id}:iso-skill"
+
+    # 两维度各建一行（同 user 同 skill_key——partial 互不挡）
+    resp = await client.post(f"/api/skills/{key}/enable", json={"enabled": True}, headers=h)
+    assert resp.status_code == 204
+    resp = await client.post(
+        f"/api/skills/{key}/enable",
+        json={"enabled": True},
+        headers=h,
+        params={"workspace_id": str(ws.id)},
+    )
+    assert resp.status_code == 204
+    assert await _enable_rows_scoped(db_session) == {(user.id, key, None), (user.id, key, ws.id)}
+
+    # user 维度 DELETE（不带参）→ 只删 IS NULL 行，ws 行保留
+    resp = await client.delete(f"/api/skills/{key}/enable", headers=h)
+    assert resp.status_code == 204
+    assert await _enable_rows_scoped(db_session) == {(user.id, key, ws.id)}
+
+    # ws 维度 DELETE → 只删该 ws 行，user 行（重建对照组）保留
+    resp = await client.post(f"/api/skills/{key}/enable", json={"enabled": True}, headers=h)
+    assert resp.status_code == 204
+    resp = await client.delete(
+        f"/api/skills/{key}/enable", headers=h, params={"workspace_id": str(ws.id)}
+    )
+    assert resp.status_code == 204
+    assert await _enable_rows_scoped(db_session) == {(user.id, key, None)}
+
+
+@pytest.mark.asyncio
+async def test_library_user_view_not_polluted_by_ws_rows(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch
+):
+    """D-010：user 视图 library 显式 IS NULL（ws 行不算启用）；带参并集；非成员 403。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    user, token = await _make_user(db_session)
+    _outsider, outsider_token = await _make_user(db_session)
+    h = _headers(token)
+    ws = await _make_workspace(db_session)
+    await _make_member(db_session, ws, user)
+    source = await _add_source(db_session)
+    _make_cached_skill(source.id, "view-skill")
+    key = f"{source.id}:view-skill"
+
+    # 只建 ws 维度绑定
+    resp = await client.post(
+        f"/api/skills/{key}/enable",
+        json={"enabled": True},
+        headers=h,
+        params={"workspace_id": str(ws.id)},
+    )
+    assert resp.status_code == 204
+
+    # user 视图（不带参）：ws 行不污染——git 技能仍默认关
+    resp = await client.get(LIBRARY_PATH, headers=h)
+    item = next(s for s in resp.json()["skills"] if s["skill_key"] == key)
+    assert item["enabled"] is False
+
+    # 带参（成员）：user ∪ workspace 并集 → enabled True
+    resp = await client.get(LIBRARY_PATH, headers=h, params={"workspace_id": str(ws.id)})
+    assert resp.status_code == 200
+    item = next(s for s in resp.json()["skills"] if s["skill_key"] == key)
+    assert item["enabled"] is True
+
+    # 带参（非成员）→ 403
+    resp = await client.get(
+        LIBRARY_PATH, headers=_headers(outsider_token), params={"workspace_id": str(ws.id)}
+    )
+    assert resp.status_code == 403
 
 
 # ─── enable 回环（幂等建/删）────────────────────────────────────────────

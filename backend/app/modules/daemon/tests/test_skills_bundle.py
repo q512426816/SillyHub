@@ -27,8 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # skill_source 两表须在本模块 import 期注册进 BaseModel.metadata——根 conftest 的
 # db_engine 建表清单未含 skill_source（task-03 不能改 conftest，allowed_paths 限），
 # 函数内延迟 import 会晚于 create_all 导致 no such table。test_source_crud.py:35 同款。
+# Workspace 同理（bridges task-01 直插 ws 行；根 conftest 的 _ws_model 亦已注册）。
 from app.modules.skill_source.model import SkillSource, UserSkillEnable
 from app.modules.skill_source.service import source_cache_dir
+from app.modules.workspace.model import Workspace
 
 
 def _patch_skills_dir(monkeypatch: pytest.MonkeyPatch, src: Path) -> None:
@@ -673,10 +675,35 @@ def _make_cached_skill(
     return skill_dir
 
 
-async def _add_enable(db_session: AsyncSession, user_id: uuid.UUID, skill_key: str) -> None:
-    """直插启用绑定行（收集链路只读绑定表，无须走 enable 端点）。"""
-    db_session.add(UserSkillEnable(user_id=user_id, skill_key=skill_key))
+async def _add_enable(
+    db_session: AsyncSession,
+    user_id: uuid.UUID,
+    skill_key: str,
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> None:
+    """直插启用绑定行（收集链路只读绑定表，无须走 enable 端点）。
+
+    ``workspace_id=None`` = user 维度行；非 None = workspace 维度行（user_id
+    此时仅操作者审计，bridges task-01 单表双 scope）。
+    """
+    db_session.add(UserSkillEnable(user_id=user_id, skill_key=skill_key, workspace_id=workspace_id))
     await db_session.commit()
+
+
+async def _add_workspace(db_session: AsyncSession) -> Workspace:
+    """直插 workspace 行（test_profile_service.py:50 同款最小字段）。"""
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"ws-{uuid.uuid4().hex[:6]}",
+        slug=f"slug-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+    return ws
 
 
 async def _get_manifest(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
@@ -952,3 +979,119 @@ async def test_name_priority_matrix(
     clash_content = _extract_tar_files(resp.content)
     assert clash_content["clash-gg/SKILL.md"] == b"gg from low"
     assert clash_content["sillyspec-clash/who.txt"] == fs_content
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-11-workspace-asset-bridges task-01：user_skill_enables 单表双 scope。
+# D-010 None 谓词零回归（ws 行不进 user-only manifest——version hash 显式断言）
+# + D-002 并集直测（user ∪ workspace 双边启用都入 manifest）。
+# 注：daemon 端点接 workspace_id 参数归 task-04——本段用 service 层直测并集，
+# 端点零改（不带参 = user-only，行为逐字不变）。
+# ---------------------------------------------------------------------------
+
+
+async def test_ws_rows_do_not_leak_into_user_only_manifest(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-010 None 谓词零回归：ws 维度行存在时，不带参 manifest 逐字不变。
+
+    基线 = 仅有 user 维度绑定的 version hash；随后直插 ws 维度绑定（另一
+    workspace、另一技能）→ 端点 manifest（不带 workspace 上下文）version
+    hash 必须不变、ws 技能文件缺席——显式 ``workspace_id IS NULL`` 谓词的
+    直接效果（user bundle version hash 零变化）。
+    """
+    _patch_spec_data_root(monkeypatch, tmp_path)
+
+    user_source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        user_source.id,
+        "user-scope-git",
+        {"SKILL.md": b"---\nname: user-scope-git\ndescription: u\n---\n\nbody"},
+    )
+    await _add_enable(db_session, default_user_id, f"{user_source.id}:user-scope-git")
+
+    baseline = await _get_manifest(client, auth_headers)
+    assert "user-scope-git/SKILL.md" in _manifest_entries(baseline)
+
+    # 直插 ws 维度行（操作者同为 default_user，但 scope 是 workspace）
+    ws = await _add_workspace(db_session)
+    ws_source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        ws_source.id,
+        "ws-scope-git",
+        {"SKILL.md": b"---\nname: ws-scope-git\ndescription: w\n---\n\nbody"},
+    )
+    await _add_enable(
+        db_session, default_user_id, f"{ws_source.id}:ws-scope-git", workspace_id=ws.id
+    )
+
+    after = await _get_manifest(client, auth_headers)
+    assert after["version"] == baseline["version"], "ws 维度行不得改变 user-only version hash"
+    assert [f["path"] for f in after["files"]] == [f["path"] for f in baseline["files"]]
+    assert [f["sha256"] for f in after["files"]] == [f["sha256"] for f in baseline["files"]]
+    assert not any(p.startswith("ws-scope-git/") for p in _manifest_entries(after))
+
+
+async def test_union_manifest_includes_user_and_workspace_scopes(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-002 并集直测：``workspace_id`` 传参时 user 与 ws 双边启用都入 manifest。
+
+    service 层直调 ``build_skills_manifest(session, user_id, workspace_id=ws)``
+    （端点接参归 task-04）：user 维度技能（user-scope-git）与 ws 维度技能
+    （ws-scope-git）同时出现；version 严格大于（≠）user-only 基线。并集 OR
+    分支不限 user_id——他操作者建的 ws 行也进（shared 绑定语义）。
+    """
+    from app.modules.agent.skills_bundle_service import build_skills_manifest
+
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    ws = await _add_workspace(db_session)
+
+    user_source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        user_source.id,
+        "user-scope-git",
+        {"SKILL.md": b"---\nname: user-scope-git\ndescription: u\n---\n\nbody"},
+    )
+    await _add_enable(db_session, default_user_id, f"{user_source.id}:user-scope-git")
+
+    # ws 维度行：操作者是另一个用户（并集 OR 分支不限 user_id 的对照）
+    other_operator = uuid.uuid4()
+    ws_source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        ws_source.id,
+        "ws-scope-git",
+        {"SKILL.md": b"---\nname: ws-scope-git\ndescription: w\n---\n\nbody"},
+    )
+    await _add_enable(
+        db_session, other_operator, f"{ws_source.id}:ws-scope-git", workspace_id=ws.id
+    )
+
+    user_only = await build_skills_manifest(session=db_session, user_id=default_user_id)
+    union = await build_skills_manifest(
+        session=db_session, user_id=default_user_id, workspace_id=ws.id
+    )
+
+    user_only_paths = {f["path"] for f in user_only["files"]}
+    union_paths = {f["path"] for f in union["files"]}
+    assert "user-scope-git/SKILL.md" in user_only_paths
+    assert "ws-scope-git/SKILL.md" not in user_only_paths, "user-only 基线不含 ws 行"
+
+    assert "user-scope-git/SKILL.md" in union_paths, "并集须含 user 维度启用"
+    assert "ws-scope-git/SKILL.md" in union_paths, "并集须含 ws 维度启用（他操作者行也进）"
+    assert union["version"] != user_only["version"]
+    for entry in union["files"]:
+        if entry["path"].startswith(("user-scope-git/", "ws-scope-git/")):
+            assert entry["source"] == "git"

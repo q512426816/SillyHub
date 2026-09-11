@@ -6,8 +6,10 @@ Change: 2026-09-11-skills-central-library (task-01)
 - D-002（平台共享源）: ``skill_sources`` 平台级 admin 配置表——url 全局
   UNIQUE（同一仓库配一份）；branch/subdir 支持一仓多技能子目录；
   last_commit/last_fetched_at/last_error 为 task-02 拉取器回写字段，本卡先备好。
-- D-003（默认关启用）: ``user_skill_enables`` 按用户启用绑定——git 技能默认
-  不进 bundle，用户逐个启用；UNIQUE(user_id, skill_key) 防重复启用。
+- D-003（默认关启用）: ``user_skill_enables`` 启用绑定——git 技能默认
+  不进 bundle，用户/workspace 逐个启用；单表双 scope（2026-09-11
+  -workspace-asset-bridges task-01）：workspace_id NULL=user 个人绑定、
+  非 NULL=workspace 绑定，双 partial unique index 防重复（见 UserSkillEnable）。
 - skill_key 编码 ``<source_id>:<技能目录名>``（String(200)）——刻意**不**做
   FK 到 skill_sources（源已删仍可保留悬空绑定，技能回来自动恢复，见 design
   兼容策略；源删除的连带清理在 service 层按前缀匹配完成）。
@@ -19,7 +21,18 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -82,15 +95,36 @@ class SkillSource(BaseModel, table=True):
 
 
 class UserSkillEnable(BaseModel, table=True):
-    """用户对某 git 技能的启用绑定（D-003：默认关，逐个启用进 bundle）。
+    """技能启用绑定（D-003：默认关，逐个启用进 bundle）——单表双 scope。
 
-    skill_key = ``<source_id>:<技能目录名>``；UNIQUE(user_id, skill_key) 防重复。
-    本卡只建模型+迁移，enable 端点归 task-03。
+    Change 2026-09-11-workspace-asset-bridges task-01（design §数据模型）：
+    ``workspace_id`` NULL = user 个人绑定（旧行为）；非 NULL = workspace 维度
+    绑定（该行 ``user_id`` 仅作操作者审计，不入唯一键）。skill_key =
+    ``<source_id>:<技能目录名>``；唯一性由双 partial unique index 承担
+    （user 维度 (user_id, skill_key) WHERE workspace_id IS NULL 与旧表级
+    UNIQUE 语义逐字等价；workspace 维度 (workspace_id, skill_key) WHERE
+    workspace_id IS NOT NULL）。双方言 where 声明见 workspaces 模型
+    ``ux_workspaces_*_active`` 先例；迁移 20260911220000 同口径。
     """
 
     __tablename__ = "user_skill_enables"
     __table_args__ = (
-        UniqueConstraint("user_id", "skill_key", name="uq_user_skill_enables_user_skill_key"),
+        Index(
+            "ux_user_skill_enables_user_scope",
+            "user_id",
+            "skill_key",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+            sqlite_where=text("workspace_id IS NULL"),
+        ),
+        Index(
+            "ux_user_skill_enables_workspace_scope",
+            "workspace_id",
+            "skill_key",
+            unique=True,
+            postgresql_where=text("workspace_id IS NOT NULL"),
+            sqlite_where=text("workspace_id IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(
@@ -102,6 +136,16 @@ class UserSkillEnable(BaseModel, table=True):
             Uuid(as_uuid=True),
             ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
+        ),
+    )
+    # workspace 维度 scope：NULL = user 个人绑定；非 NULL = workspace 绑定
+    # （D-003 单表双 scope；workspace 删除级联清其全部技能绑定）。
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=True,
         ),
     )
     # <source_id>:<技能目录名>——见模块 docstring（刻意不做 FK，悬空绑定保留）。
