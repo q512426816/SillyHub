@@ -359,3 +359,20 @@
 根因：resolve_mission_for_session 沿 parent 链爬根（external worker parent=NULL 爬到自身）按 mission.session_id 匹配（external=NULL）必 miss；mission_worker_sessions_tree 对 external 恒 [] 会再 422。活体证据：backend 日志 POST /api/missions/worker_done 404 + lease metadata 已有 stage=mission_worker（①②③全非断点：stage 打标正常、caps.mcp=false 代报路径已走、pi override 提取正常 output_redacted=503 字符）。
 方案：resolve 爬根 miss 后按 run 归属回退（会话下最早带 mission_id 的 run 反查 mission，active/terminal 双形态）；_worker_done_core 成员资格对 external 以首 run 锚代替空树（session 模式树 422 判定序原样）。
 结果：test_worker_subsession_done.py 23 passed（external 三例：200+artifact+零唤醒/终态 409/无归属 404），广域 550 passed，ruff/mypy 过；daemon 侧零改动（代报本就工作）。
+
+## ql-20260911-003-355a | 2026-09-11 09:00:58 | 24h审查风险修复批次：MCP资产库P0越权(P0-1)+密钥毁坏与用户自定义密钥类型(P0-2)+user解绑422(P1-1)+P2批
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260911-004-70fc | 2026-09-11 09:32:22 | dispatch 平台侧三问题修复（worker artifacts 承接 / pi 独立配额池 / 生效执行器暴露）
+状态：进行中
+关联变更：2026-09-10-review-dispatch-platform-fixes
+文件：backend/app/modules/mcp_gateway/tools.py, backend/app/modules/mcp_gateway/tests/test_tools_new.py, .sillyspec/docs/backend/modules/mcp_gateway.md
+
+## ql-20260911-017-a3c2 | 2026-09-11 09:05:00 | provider-registry 守护测试同步第 9 键 dialog（主仓预存红顺手修）
+状态：已完成
+关联变更：2026-09-11-skills-central-library（verify 门实测暴露；债务源 99a228add/2026-09-09-askuser-pi-cursor）
+文件：
+- sillyhub-daemon/tests/interactive/provider-registry.test.ts（8 键→9 键 + dialog 三态类型断言 string|boolean）
+验证：provider-registry 6 passed + typecheck 0
