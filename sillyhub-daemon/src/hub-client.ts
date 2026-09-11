@@ -2102,12 +2102,18 @@ signal: AbortSignal.timeout(SPEC_BUNDLE_TIMEOUT_MS),
   async getMissionStatus(
     workspaceId: string | undefined,
     missionId: string | undefined,
+    opts?: { sessionId?: string },
   ): Promise<Record<string, unknown>> {
+    // ql-20260911-028：opts.sessionId 一次性 X-Session-Id 覆盖（workerDone 同款
+    // 先例）——daemon 延迟兜底代报的分身身份探测（session-scoped status 形态）。
     return this._request<Record<string, unknown>>(
       'GET',
       this._missionActionPath(workspaceId, missionId, 'status'),
       undefined,
-      this._sessionIdHeaders(),
+      {
+        ...(this._sessionIdHeaders() ?? {}),
+        ...(opts?.sessionId ? { [X_SESSION_ID_HEADER]: opts.sessionId } : {}),
+      },
     );
   }
 

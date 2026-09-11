@@ -439,3 +439,171 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
     );
   });
 });
+
+// ── ql-20260911-028：延迟兜底代报（+90s 探测自报缺失再报）──────────────────────
+// 活体回执（mission c4731a06 / worker 4ca98b77）：claude_code 分身（mcp=true）
+// 走 worker_prompt 自报路径但实测未调 worker_done 工具（终态全文在、artifacts 恒空）；
+// pi 的空白 result 也可能因 override 晚到。修：turn 成功后 +90s 探测
+// getMissionStatus（session-scoped）——本 run 仍无 artifacts 且 mission 活跃 →
+// 用 result/会话级最后全文兜底代报；已自报 / 不活跃 / 无文本 / 探测失败均跳过仅记日志。
+
+describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白 result 晚到全文）', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    for (const d of daemons) {
+      if (d.isRunning) await d.stop().catch(() => undefined);
+    }
+    daemons = [];
+    vi.restoreAllMocks();
+  });
+
+  /** harness 扩展：client 带 getMissionStatus（返回体可注入）。 */
+  function buildFallbackHarness(
+    state: Partial<SessionState>,
+    statusImpl: () => Promise<Record<string, unknown>>,
+  ) {
+    const base = buildHarness(state);
+    base.client['getMissionStatus'] = vi.fn(statusImpl);
+    return base;
+  }
+
+  it('claude(mcp=true) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（summary=result 全文 + sessionId）', async () => {
+    vi.useFakeTimers();
+    const { daemon, client } = buildFallbackHarness(
+      { stage: 'mission_worker', provider: 'claude' },
+      async () => ({
+        active: true,
+        workers: [{ id: 'run-mw-1', artifacts: [] }],
+      }),
+    );
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
+    await vi.advanceTimersByTimeAsync(0);
+    // 立即路径：mcp=true 不代报（防双写语义保留）。
+    expect(client['workerDone']).not.toHaveBeenCalled();
+    expect(client['getMissionStatus']).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(client['getMissionStatus']).toHaveBeenCalledWith(undefined, undefined, {
+      sessionId: 'sess-mw-1',
+    });
+    expect(client['workerDone']).toHaveBeenCalledTimes(1);
+    expect(client['workerDone']).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      { summary: FULL_TEXT },
+      { sessionId: 'sess-mw-1' },
+    );
+  });
+
+  it('已自报（探测到 artifacts 非空）→ 不兜底（防双写）', async () => {
+    vi.useFakeTimers();
+    const { daemon, client } = buildFallbackHarness(
+      { stage: 'mission_worker', provider: 'claude' },
+      async () => ({
+        active: true,
+        workers: [{ id: 'run-mw-1', artifacts: [{ kind: 'summary' }] }],
+      }),
+    );
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(client['getMissionStatus']).toHaveBeenCalledTimes(1);
+    expect(client['workerDone']).not.toHaveBeenCalled();
+  });
+
+  it('mission 不活跃（active=false，已收敛/无 mission）→ 跳过', async () => {
+    vi.useFakeTimers();
+    const { daemon, client } = buildFallbackHarness(
+      { stage: 'mission_worker', provider: 'claude' },
+      async () => ({ active: false }),
+    );
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(client['workerDone']).not.toHaveBeenCalled();
+  });
+
+  it('pi 立即代报成功后 +90s：探测 artifacts 已存在 → 不二次代报', async () => {
+    vi.useFakeTimers();
+    const { daemon, client } = buildFallbackHarness(
+      { stage: 'mission_worker', provider: 'pi' },
+      async () => ({
+        active: true,
+        workers: [{ id: 'run-mw-1', artifacts: [{ kind: 'summary' }] }],
+      }),
+    );
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client['workerDone']).toHaveBeenCalledTimes(1); // 立即路径
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(client['workerDone']).toHaveBeenCalledTimes(1); // 兜底跳过
+  });
+
+  it('result 空白 + 晚到完整 text 事件（onTurnMessage）→ 兜底用会话级最后全文', async () => {
+    vi.useFakeTimers();
+    const { daemon, client } = buildFallbackHarness(
+      { stage: 'mission_worker', provider: 'pi' },
+      async () => ({
+        active: true,
+        workers: [{ id: 'run-mw-1', artifacts: [] }],
+      }),
+    );
+    daemons.push(daemon);
+
+    // 空白 result：立即路径被门控③拦（零调用）。
+    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult('   '));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client['workerDone']).not.toHaveBeenCalled();
+    // 晚到的完整 assistant 全文（override 后到场景）经 onTurnMessage 进会话级缓存。
+    await daemon.onTurnMessage('sess-mw-1', 'run-mw-1', {
+      event_type: 'text',
+      type: 'text',
+      seq: 7,
+      content: '晚到的轮终全文（override 后到）',
+      is_partial: false,
+    });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(client['workerDone']).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      { summary: '晚到的轮终全文（override 后到）' },
+      { sessionId: 'sess-mw-1' },
+    );
+  });
+
+  it('探测失败（getMissionStatus reject / 缺失）→ 仅 warn 不抛、不代报', async () => {
+    vi.useFakeTimers();
+    const rejectHarness = buildHarness({ stage: 'mission_worker', provider: 'claude' });
+    rejectHarness.client['getMissionStatus'] = vi.fn(async () => {
+      throw new HubHttpError(502, 'bad gateway', 'POST', '/api/missions/status');
+    });
+    daemons.push(rejectHarness.daemon);
+
+    await rejectHarness.daemon.onTurnResult(
+      'sess-mw-1',
+      'run-mw-1',
+      successResult(FULL_TEXT),
+    );
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(rejectHarness.client['workerDone']).not.toHaveBeenCalled();
+
+    // client 未实现 getMissionStatus（旧 mock 形态）→ 可选链跳过，零副作用。
+    const omitHarness = buildHarness({ stage: 'mission_worker', provider: 'claude' });
+    daemons.push(omitHarness.daemon);
+    await omitHarness.daemon.onTurnResult(
+      'sess-mw-1',
+      'run-mw-1',
+      successResult(FULL_TEXT),
+    );
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(omitHarness.client['workerDone']).not.toHaveBeenCalled();
+  });
+});

@@ -964,6 +964,16 @@ interface ClientLike {
     opts?: { sessionId?: string },
   ): Promise<Record<string, unknown>>;
   /**
+   * ql-20260911-028：mission 状态查询（延迟兜底代报的未自报探测）。可选——
+   * 真实 HubClient 已实现（含 opts.sessionId 一次性覆盖）；旧 mock 未实现时
+   * 兜底跳过（debug 日志）。
+   */
+  getMissionStatus?(
+    workspaceId: string | undefined,
+    missionId: string | undefined,
+    opts?: { sessionId?: string },
+  ): Promise<Record<string, unknown>>;
+  /**
    * 2026-08-29-daemon-platform-resilience task-07（design A3）：PERMISSION_REQUEST
    * 的 HTTP 上行兜底（WS 不通时 sendToHub 改走）。可选——真实 HubClient 已实现；
    * 旧测试 mock 未实现且 WS 不通时保持既有 fail-closed deny 语义。
@@ -1655,6 +1665,15 @@ export class Daemon {
    * Map 跟随 daemon 实例生命周期（重启即清零，只影响本次终态上报，不落盘）。
    */
   private readonly _assistantMsgCountByRun = new Map<string, number>();
+  /**
+   * ql-20260911-028：会话级最后一条完整 assistant 全文（延迟兜底代报数据源）。
+   * 写入点两处：onTurnMessage 完整 text 事件（override 晚到场景的唯一来源）+
+   * onTurnResult result 非空白时（claude 等带 result 轮的主来源）。消费点：
+   * _fallbackWorkerDone（turn 成功 +90s 探测到分身未自报时兜底 worker_done）。
+   * 不随 onSessionEnd 清理——worker 会话常在兜底窗口内结束，清理会丢全文；
+   * 容量上限 FIFO 驱逐（_FALLBACK_TEXT_CAP），重启即清零不落盘。
+   */
+  private readonly _lastAssistantTextBySession = new Map<string, string>();
   /**
    * ql-20260831-009：modelUsage / total_cost_usd 快照差分基线（sessionId → 基线）。
    * SDK 在 streaming-input 会话跨轮报累计快照，onTurnResult 用它差分出本轮增量
@@ -4025,6 +4044,28 @@ export class Daemon {
       }
     }
 
+    // ql-20260911-028：延迟兜底代报（+90s 探测自报缺失再报）。活体回执
+    //（mission c4731a06 / worker 4ca98b77）：claude_code 分身（mcp=true）走
+    // worker_prompt 自报路径但实测未调 worker_done 工具——终态全文在、artifacts
+    // 恒空；pi 的空白 result 也可能因 override 晚到（终态时 turnFinalText 尚空）。
+    // 对**一切** mission_worker 成功轮排一个 +90s 探测：getMissionStatus
+    //（session-scoped，X-Session-Id 一次性覆盖）里本 run 的 artifacts 仍空且
+    // mission 活跃 → 用 result/会话级最后全文兜底代报；已自报（立即路径成功或
+    // worker 自己调了工具）探测即跳过，无双写。fire-and-forget，失败仅 warn。
+    if (state.stage === 'mission_worker' && !isError) {
+      // result 非空白时先入会话级缓存（claude 主来源；空白时缓存由晚到的
+      // onTurnMessage 完整 text 事件填充）。
+      if (typeof resultMeta.result === 'string' && resultMeta.result.trim() !== '') {
+        this._rememberAssistantText(sessionId, resultMeta.result);
+      }
+      const fallbackTimer = setTimeout(
+        () => void this._fallbackWorkerDone(sessionId, runId),
+        90_000,
+      );
+      // unref：兜底定时器不阻止进程退出（daemon stop 后残留触发只多一次探测）。
+      fallbackTimer.unref?.();
+    }
+
     // task-06（FR-05 / D-002@v1）：scan run 终态额外触发 spec 树回灌（独立于 session end）。
     // scan/stage 跑在长生命周期 interactive session（scan 期 session 永不 end），仅靠
     // onSessionEnd 兜底会导致 scan-docs/knowledge/.runtime 一直不可见；此处终态点立即回灌。
@@ -4062,6 +4103,82 @@ export class Daemon {
    * @param runId  当前 turn 的 AgentRun.id
    * @param msg  上报消息 dict（事件轨或 legacy flat，见上）
    */
+
+  /** ql-20260911-028：会话级最后全文写入 + 容量上限 FIFO 驱逐（Map 插入序）。 */
+  private _rememberAssistantText(sessionId: string, text: string): void {
+    const CAP = 500;
+    this._lastAssistantTextBySession.delete(sessionId);
+    this._lastAssistantTextBySession.set(sessionId, text);
+    while (this._lastAssistantTextBySession.size > CAP) {
+      const oldest = this._lastAssistantTextBySession.keys().next().value;
+      if (oldest === undefined) break;
+      this._lastAssistantTextBySession.delete(oldest);
+    }
+  }
+
+  /**
+   * ql-20260911-028：延迟兜底 worker_done——探测本 run 是否已自报（立即代报或
+   * worker 自己调工具），未报且 mission 活跃且有全文时补报。全部失败路径仅记
+   * 日志；getMissionStatus 缺失（旧 client 形态）或返回异常形状一律跳过。
+   */
+  private async _fallbackWorkerDone(sessionId: string, runId: string): Promise<void> {
+    try {
+      const status = await this._client.getMissionStatus?.(undefined, undefined, {
+        sessionId,
+      });
+      if (
+        status === undefined ||
+        (status as { active?: unknown }).active !== true ||
+        !Array.isArray((status as { workers?: unknown }).workers)
+      ) {
+        // mission 不活跃 / 旧 client / 异常形状：无兜底意义。
+        this._logger.debug('worker_auto_done_fallback_skip', {
+          session_id: sessionId,
+          run_id: runId,
+        });
+        return;
+      }
+      const workers = (status as {
+        workers: Array<{ id?: unknown; artifacts?: unknown[] }>;
+      }).workers;
+      const mine = workers.find((w) => w.id === runId);
+      if (!mine) {
+        this._logger.debug('worker_auto_done_fallback_run_missing', {
+          session_id: sessionId,
+          run_id: runId,
+        });
+        return;
+      }
+      if ((mine.artifacts?.length ?? 0) > 0) {
+        // 已自报（worker_done 工具或立即代报已落 artifacts）——防双写跳过。
+        this._logger.debug('worker_auto_done_fallback_already_reported', {
+          session_id: sessionId,
+          run_id: runId,
+        });
+        return;
+      }
+      const summary = this._lastAssistantTextBySession.get(sessionId)?.trim();
+      if (!summary) {
+        this._logger.warn('worker_auto_done_fallback_no_text', {
+          session_id: sessionId,
+          run_id: runId,
+        });
+        return;
+      }
+      await this._client.workerDone?.(undefined, undefined, { summary }, { sessionId });
+      this._logger.info('worker_auto_done_fallback_fired', {
+        session_id: sessionId,
+        run_id: runId,
+      });
+    } catch (err: unknown) {
+      this._logger.warn('worker_auto_done_fallback_failed', {
+        session_id: sessionId,
+        run_id: runId,
+        error: String(err),
+      });
+    }
+  }
+
   async onTurnMessage(
     sessionId: string,
     runId: string,
@@ -4117,6 +4234,11 @@ export class Daemon {
           runId,
           (this._assistantMsgCountByRun.get(runId) ?? 0) + 1,
         );
+        // ql-20260911-028：会话级最后完整 assistant 全文（延迟兜底代报数据源，
+        // override 晚到场景的唯一来源；末条胜出对齐 driver turnFinalText 口径）。
+        if (typeof fwdMsg['content'] === 'string') {
+          this._rememberAssistantText(sessionId, fwdMsg['content']);
+        }
       }
     } else if (fwdMsg['type'] === 'assistant') {
       this._assistantMsgCountByRun.set(
