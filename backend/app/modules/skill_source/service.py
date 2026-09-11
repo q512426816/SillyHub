@@ -1,8 +1,8 @@
-"""SkillSource CRUD 业务逻辑 + SSRF/git 探测门 + 拉取接线 + 删除连带清理。
+"""SkillSource CRUD + 技能库聚合/启用绑定（task-03）+ SSRF/git 探测门 + 拉取接线。
 
-Change: 2026-09-11-skills-central-library (task-01 + task-02 接线)
+Change: 2026-09-11-skills-central-library (task-01 + task-02 接线 + task-03)
 
-职责（design §接口定义 / task-02 implementation）:
+职责（design §接口定义 / task-03 taskcard）:
 - create/update 改 url：``await git_fetcher.assert_source_url(url)``（SSRF
   首防线封装，委托 core/ssrf 的 **async** ``assert_public_url``——必须显式
   await，漏 await 只建 coroutine 不校验；私网/非法 scheme →
@@ -16,6 +16,11 @@ Change: 2026-09-11-skills-central-library (task-01 + task-02 接线)
   整体 best-effort **永不抛**，不阻塞保存请求（HTTP 仍 2xx）。
 - delete：连带清该源 user_skill_enables（skill_key 前缀 ``<source_id>:``
   匹配）+ 缓存目录 best-effort（目录可不存在）。
+- toggle_enable（task-03，本人写）：``skill_key`` 格式校验（422）→ 须命中
+  **启用源**的 discover_skills 结果（404）→ 绑定表 upsert/delete 幂等。
+- list_library（task-03）：三源聚合——平台 sillyspec-*（扫描 skills_bundle_dir）
+  + 我的 CustomSkill + 全部 enabled 源的 discover_skills 实时发现（带我的
+  启用态与源信息；git 技能默认关，D-003）。
 """
 
 from __future__ import annotations
@@ -32,8 +37,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.agent.skills_bundle_service import SKILLS_GLOB, _parse_skill_frontmatter
+from app.modules.auth.model import User
 from app.modules.skill_source import git_fetcher
 from app.modules.skill_source.model import SkillSource, UserSkillEnable
+from app.modules.skill_source.schema import LibrarySkillItem, LibraryView, SourceRead
+from app.modules.skills.model import CustomSkill
 
 log = get_logger(__name__)
 
@@ -41,6 +50,9 @@ log = get_logger(__name__)
 # spec_data_root 下现有占用均为 ``{ws_id}``（UUID）子目录，固定名 skills_git_cache
 # 不会与之冲突；跨平台路径一律 pathlib（CLAUDE.md 规则 13）。
 SKILLS_GIT_CACHE_DIRNAME = "skills_git_cache"
+
+# skill_key 列宽（user_skill_enables.skill_key String(200)）——超长即格式非法。
+SKILL_KEY_MAX_LENGTH = 200
 
 
 def skills_git_cache_root() -> Path:
@@ -107,8 +119,70 @@ class GitBinaryMissing(AppError):
     http_status = 422
 
 
+class InvalidSkillKey(AppError):
+    """skill_key 格式非法（422，task-03：须为 ``<source_id>:<目录名>``）。"""
+
+    code = "skill_source.invalid_skill_key"
+    http_status = 422
+
+
+class SkillNotDiscoverable(AppError):
+    """skill_key 未命中启用源的 discover_skills 结果（404，task-03）。
+
+    涵盖：源不存在 / 源已停用 / 缓存目录未拉取或技能目录已消失——统一按
+    「当前不可启用」处理（enable 侧防手拼垃圾 key；悬空绑定跳过在收集层）。
+    """
+
+    code = "skill_source.skill_not_discoverable"
+    http_status = 404
+
+
+def parse_skill_key(skill_key: str) -> tuple[uuid.UUID, str]:
+    """解析 ``<source_id>:<目录名>`` → ``(source_id, 目录名)``；非法抛 422。
+
+    格式契约（model.py 模块 docstring / task-03 taskcard）：恰好一个冒号分隔，
+    source_id 须为 UUID、目录名非空且不含路径分隔符（防穿越）。
+    """
+    source_part, sep, dir_part = skill_key.partition(":")
+    if (
+        not sep
+        or not source_part
+        or not dir_part
+        or len(skill_key) > SKILL_KEY_MAX_LENGTH
+        or "/" in dir_part
+        or "\\" in dir_part
+    ):
+        raise InvalidSkillKey(
+            f"skill_key 格式非法：{skill_key!r}（应为 <source_id>:<目录名>）",
+            details={"skill_key": skill_key},
+        )
+    try:
+        source_id = uuid.UUID(source_part)
+    except ValueError as exc:
+        raise InvalidSkillKey(
+            f"skill_key 的 source_id 段不是合法 UUID：{skill_key!r}",
+            details={"skill_key": skill_key},
+        ) from exc
+    return source_id, dir_part
+
+
+def _discovery_root(source: SkillSource) -> Path:
+    """源的技能发现根：``缓存根/[subdir]``（task-02 _trigger_fetch 同口径）。"""
+    cache_dir = source_cache_dir(source.id)
+    return cache_dir / source.subdir if source.subdir else cache_dir
+
+
+def _sillyspec_description(skill_dir: Path) -> str:
+    """平台 sillyspec-* 技能目录的 description（SKILL.md frontmatter，容错空串）。"""
+    try:
+        frontmatter = _parse_skill_frontmatter((skill_dir / "SKILL.md").read_bytes())
+    except OSError:
+        return ""
+    return frontmatter.get("description", "")
+
+
 class SkillSourceService:
-    """skill_sources 的 admin CRUD 业务层（router 薄封装转调，权限门在 router）。"""
+    """skill_sources admin CRUD + 技能库/启用绑定业务层（router 薄封装转调，权限门在 router）。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -218,6 +292,141 @@ class SkillSourceService:
         await self._require_git_binary()
         await _trigger_fetch(self._session, source)
         return source
+
+    # ── 技能库 + 启用绑定（task-03）──────────────────────────────────
+
+    async def toggle_enable(self, skill_key: str, user: User, *, enabled: bool) -> None:
+        """本人启用/停用一个 git 技能（``user_skill_enables`` upsert/delete，幂等）。
+
+        - 格式校验（:func:`parse_skill_key`）→ 422；
+        - ``enabled=True``：skill_key 须命中**启用源**的 discover_skills 结果
+          （taskcard 权威——防手拼垃圾 key；源不存在/停用/目录消失统一 404）；
+          绑定已存在则幂等返回（UNIQUE(user_id, skill_key) 兜底并发）；
+        - ``enabled=False``：删绑定，无绑定也幂等成功（悬空语义归收集层，
+          停用不校验技能存在性——技能已消失也允许收回启用态）。
+        """
+        source_id, dir_name = parse_skill_key(skill_key)
+
+        if not enabled:
+            await self._session.execute(
+                delete(UserSkillEnable).where(
+                    UserSkillEnable.user_id == user.id,
+                    UserSkillEnable.skill_key == skill_key,
+                )
+            )
+            await self._session.commit()
+            return
+
+        source = await self._session.get(SkillSource, source_id)
+        if source is None or not source.enabled:
+            raise SkillNotDiscoverable(
+                f"技能不可启用（源不存在或已停用）：{skill_key!r}",
+                details={"skill_key": skill_key},
+            )
+        discovered_names = {d.name for d in git_fetcher.discover_skills(_discovery_root(source))}
+        if dir_name not in discovered_names:
+            raise SkillNotDiscoverable(
+                f"技能不存在于该源当前发现结果：{skill_key!r}",
+                details={"skill_key": skill_key, "source_id": str(source_id)},
+            )
+
+        existing = await self._session.execute(
+            select(UserSkillEnable).where(
+                UserSkillEnable.user_id == user.id,
+                UserSkillEnable.skill_key == skill_key,
+            )
+        )
+        if existing.scalars().first() is not None:
+            return  # 幂等：重复启用为 no-op
+
+        self._session.add(UserSkillEnable(user_id=user.id, skill_key=skill_key))
+        try:
+            await self._session.commit()
+        except IntegrityError:
+            # 并发重复启用：UNIQUE(user_id, skill_key) 兜底，视为已启用。
+            await self._session.rollback()
+
+    async def list_library(self, user: User) -> LibraryView:
+        """技能库三源聚合 + 我的启用态（design §接口定义 list_library）。
+
+        1. 平台内置 sillyspec-*——扫 ``skills_bundle_dir`` 下 ``sillyspec-*``
+           目录（name + SKILL.md description），恒启用不可 toggle；
+        2. 我的 CustomSkill——本人 ``created_by`` 行（name + description），恒启用；
+        3. git 技能——全部 **enabled** 源的 discover_skills **实时发现**（结果不
+           落库，D-006 保存/刷新即拉取），带我的启用态（默认 False，D-003）与
+           源信息；disabled 源不参与（R-05）。
+        """
+        sources = await self.list_()
+        enabled_keys = set(
+            (
+                await self._session.execute(
+                    select(UserSkillEnable.skill_key).where(UserSkillEnable.user_id == user.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        skills: list[LibrarySkillItem] = []
+
+        # 1. 平台内置 sillyspec-*（文件系统扫描，全局共享与 user 无关）
+        for skill_dir in sorted(get_settings().skills_bundle_dir.glob(SKILLS_GLOB)):
+            if not skill_dir.is_dir():
+                continue
+            skills.append(
+                LibrarySkillItem(
+                    skill_key=skill_dir.name,
+                    name=skill_dir.name,
+                    description=_sillyspec_description(skill_dir),
+                    source="sillyspec",
+                    enabled=True,
+                )
+            )
+
+        # 2. 我的 CustomSkill（per-user，恒在本人 bundle 内）
+        custom_rows = (
+            (
+                await self._session.execute(
+                    select(CustomSkill)
+                    .where(CustomSkill.created_by == user.id)
+                    .order_by(CustomSkill.name)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in custom_rows:
+            skills.append(
+                LibrarySkillItem(
+                    skill_key=row.name,
+                    name=row.name,
+                    description=row.description or "",
+                    source="custom",
+                    enabled=True,
+                )
+            )
+
+        # 3. git 技能（enabled 源实时发现；顺序=list_ 的 created_at asc 稳定序）
+        for source in sources:
+            if not source.enabled:
+                continue
+            for discovered in git_fetcher.discover_skills(_discovery_root(source)):
+                skill_key = f"{source.id}:{discovered.name}"
+                skills.append(
+                    LibrarySkillItem(
+                        skill_key=skill_key,
+                        name=discovered.name,
+                        description=discovered.description,
+                        source="git",
+                        enabled=skill_key in enabled_keys,
+                        source_id=source.id,
+                    )
+                )
+
+        return LibraryView(
+            sources=[SourceRead.model_validate(s) for s in sources],
+            skills=skills,
+        )
 
     async def delete(self, source_id: uuid.UUID) -> None:
         """删除源——连带清该源 user_skill_enables（前缀匹配）+ 缓存目录 best-effort。

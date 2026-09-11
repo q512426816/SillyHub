@@ -16,6 +16,14 @@ Change 2026-07-31-custom-skill-per-user (task-06, D-004/D-006): manifest/bundle
 ``created_by`` 的自定义技能。``user_id`` 为 ``None`` 时不返回任何自定义技能（向后
 兼容纯代码库调用）。系统 sillyspec-* 文件系统扫描（``_collect_skill_files``）全局
 共享不变（D-006）。
+
+Change 2026-09-11-skills-central-library (task-03, D-005/D-010): ``_gather_all_files``
+追加第三源——``user_skill_enables`` 命中的 git 缓存技能（``skills_git_cache/<source_id>/``
+文件系统为源，本体不进 DB）。同名优先级 sillyspec-* > CustomSkill > git 源
+（source_id 升序），先到先得、后到跳过 + log warn（D-010，skill-manager 扁平解压
+同名静默覆盖实证）。manifest ``files`` 条目增可选 ``source`` 标记
+（sillyspec/custom/git），daemon 只消费 version/sha256 向后兼容（D-005：version
+算法不动）。
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import os
 import tarfile
 import uuid
 from pathlib import Path
@@ -32,7 +41,10 @@ import yaml
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.modules.skills.model import CustomSkill
+
+log = get_logger(__name__)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,6 +158,139 @@ async def _collect_custom_skills(
     return out
 
 
+def _read_skill_dir_files(skill_dir: Path, top_name: str) -> list[tuple[Path, bytes]]:
+    """同步收集单个 git 技能目录的文件集（排除 ``.git``，D-010/D-007）。
+
+    ``rel_path`` 以技能目录名原样为顶层（D-010：与 CustomSkill 的 ``<name>/SKILL.md``
+    同层，daemon 扁平解压后同名会静默覆盖——去重交由 :func:`_dedup_by_top_dir`）。
+    目录不存在返回空列表（悬空绑定跳过语义）。按路径排序保证确定性。
+    """
+    if not skill_dir.is_dir():
+        return []
+    paths: list[Path] = []
+    for root, dirs, file_names in os.walk(skill_dir):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for fname in file_names:
+            paths.append(Path(root) / fname)
+    files: list[tuple[Path, bytes]] = []
+    for fpath in sorted(paths):
+        rel_path = Path(top_name) / fpath.relative_to(skill_dir)
+        files.append((rel_path, fpath.read_bytes()))
+    return files
+
+
+async def _collect_enabled_git_skills(
+    session: "AsyncSession | None",
+    user_id: uuid.UUID | None,
+) -> list[tuple[Path, bytes, str]]:
+    """第三源（task-03）：``user_skill_enables`` 命中的 git 缓存技能文件集。
+
+    链路（taskcard 权威）：查当前用户的启用绑定 → skill_key 解析
+    ``<source_id>:<目录名>`` → 源须存在且 enabled → 映射缓存根
+    ``skills_git_cache/<source_id>/[subdir/]<目录名>``（与 task-02 发现根同口径）
+    → 目录不存在跳过（**悬空绑定保留**，刷新后技能回来即自动恢复）→ 收集目录
+    文件集（排除 ``.git``，rel_path=目录名原样，D-010）。
+
+    每条附 origin 标签 ``git:<source_id>``——供 :func:`_dedup_by_top_dir` 区分
+    git 源之间的同源/异源（同源重复保留旧语义、异源同名先到先得）。遍历顺序
+    按 ``(str(source_id), skill_key)`` 升序——D-010 同名优先级里 git 源之间的
+    次序依据。``session`` 或 ``user_id`` 为 ``None`` 时返回空列表（向后兼容纯
+    代码库调用）。仅遍历启用命中的目录（R-05）。
+    """
+    if session is None or user_id is None:
+        return []
+    # 延迟导入：skill_source.git_fetcher 顶层 import 本模块的 _parse_skill_frontmatter，
+    # 模块级反向 import 会成环（daemon_rpc.py 函数内 import 同款先例）。
+    from app.modules.skill_source.model import SkillSource, UserSkillEnable
+    from app.modules.skill_source.service import source_cache_dir
+
+    enables = list(
+        (await session.execute(select(UserSkillEnable).where(UserSkillEnable.user_id == user_id)))
+        .scalars()
+        .all()
+    )
+    if not enables:
+        return []
+    sources = (
+        (await session.execute(select(SkillSource).where(SkillSource.enabled.is_(True))))
+        .scalars()
+        .all()
+    )
+    source_map = {source.id: source for source in sources}
+
+    out: list[tuple[Path, bytes, str]] = []
+    # source_id 升序（str 比较确定序）→ skill_key 次序稳定；键本身序无关紧要。
+    for enable in sorted(enables, key=lambda e: (_skill_key_source_part(e.skill_key), e.skill_key)):
+        source_id_str, sep, dir_name = enable.skill_key.partition(":")
+        if not sep or not dir_name:
+            log.warning("skill_bundle_invalid_skill_key_skipped", skill_key=enable.skill_key)
+            continue
+        try:
+            source_id = uuid.UUID(source_id_str)
+        except ValueError:
+            log.warning("skill_bundle_invalid_skill_key_skipped", skill_key=enable.skill_key)
+            continue
+        source = source_map.get(source_id)
+        if source is None:
+            # 源已删除（绑定本应被 service 删源连带清理，容错）或已停用——跳过。
+            continue
+        cache_dir = source_cache_dir(source.id)
+        discovery_root = cache_dir / source.subdir if source.subdir else cache_dir
+        skill_dir = discovery_root / dir_name
+        if not await asyncio.to_thread(skill_dir.is_dir):
+            # 悬空绑定：目录不存在（刷新后技能目录消失）——跳过但绑定保留。
+            log.warning("skill_bundle_dangling_binding_skipped", skill_key=enable.skill_key)
+            continue
+        origin = f"git:{source.id}"
+        out.extend(
+            (rel_path, content, origin)
+            for rel_path, content in await asyncio.to_thread(
+                _read_skill_dir_files, skill_dir, dir_name
+            )
+        )
+    return out
+
+
+def _skill_key_source_part(skill_key: str) -> str:
+    """skill_key 的 source_id 段（无冒号/坏格式返回原串，排序容错不抛）。"""
+    return skill_key.partition(":")[0]
+
+
+def _dedup_by_top_dir(
+    files: list[tuple[Path, bytes, str]],
+) -> list[tuple[Path, bytes, str]]:
+    """D-010 同名去重：按 rel_path 顶层目录先到先得，后到跳过 + log warn。
+
+    入参顺序即优先级序（sillyspec-* → CustomSkill → git 源 source_id 升序，
+    由 :func:`_gather_all_files` 拼接保证）；输出保序（首次出现位次）。同名
+    静默覆盖的实证来自 skill-manager 扁平解压（Grill B-2），故后到者必须显式
+    跳过并留痕。每个撞名顶层目录只 warn 一次。
+
+    origin 标签区分来源粒度（``sillyspec`` / ``custom`` / ``git:<source_id>``）：
+    仅当顶层目录已被**不同 origin** 占用时跳过——同一 origin 内的同名重复
+    （如历史 CustomSkill 同名行）维持旧透传语义不动，零回归。
+    """
+    seen: dict[str, str] = {}
+    warned: set[str] = set()
+    out: list[tuple[Path, bytes, str]] = []
+    for rel_path, content, origin in files:
+        top = str(rel_path).replace("\\", "/").split("/")[0]
+        prev_origin = seen.get(top)
+        if prev_origin is not None and prev_origin != origin:
+            if top not in warned:
+                log.warning(
+                    "skill_bundle_name_conflict_skipped",
+                    skill=top,
+                    kept_origin=prev_origin,
+                    skipped_origin=origin,
+                )
+                warned.add(top)
+            continue
+        seen[top] = origin
+        out.append((rel_path, content, origin))
+    return out
+
+
 def _compute_version(
     files: list[tuple[Path, bytes]],
     skills_dir: Path,
@@ -251,17 +396,27 @@ async def _gather_all_files(
     skills_dir: Path,
     session: "AsyncSession | None",
     user_id: uuid.UUID | None = None,
-) -> list[tuple[Path, bytes]]:
-    """Combine codebase sillyspec-* files + DB custom skills (deterministic order).
+) -> list[tuple[Path, bytes, str]]:
+    """Combine three skill sources (deterministic order + D-010 name dedup).
 
-    Both lists are individually sorted; codebase files first, then DB custom
-    skills (so a codebase-only caller with ``session=None`` gets the original
-    ordering unchanged). ``user_id`` 透传给 :func:`_collect_custom_skills`
-    做 per-user 过滤（D-004）。
+    收集顺序即同名优先级（D-010）：codebase sillyspec-* → DB CustomSkill →
+    user 启用的 git 缓存技能（source_id 升序）。各段内部已排序；拼接后经
+    :func:`_dedup_by_top_dir` 按 rel_path 顶层目录先到先得去重（后到跳过 +
+    log warn）。每个条目附带来源标记（sillyspec/custom/git，供 manifest 展示）。
+
+    兼容保证：``session=None``（纯代码库）或无启用绑定时，git 段为空、DB 段
+    为空/不变，输出与两源时代的 ``(rel_path, content)`` 序列逐字一致（version
+    hash 不变，D-005）。
     """
     fs_files = await asyncio.to_thread(_collect_skill_files, skills_dir)
     db_files = await _collect_custom_skills(session, user_id)
-    return fs_files + db_files
+    git_files = await _collect_enabled_git_skills(session, user_id)
+    combined: list[tuple[Path, bytes, str]] = (
+        [(rel_path, content, "sillyspec") for rel_path, content in fs_files]
+        + [(rel_path, content, "custom") for rel_path, content in db_files]
+        + git_files  # 已带 git:<source_id> origin 标签
+    )
+    return _dedup_by_top_dir(combined)
 
 
 async def build_skills_manifest(
@@ -275,7 +430,8 @@ async def build_skills_manifest(
 
     * ``version`` — content-derived SHA-256 prefix (12 hex chars); empty string
       when no skills are found.
-    * ``files`` — list of ``{path, sha256}`` entries, one per file.
+    * ``files`` — list of ``{path, sha256, source}`` entries, one per file
+      (``source`` 为可选来源标记 sillyspec/custom/git，task-03；daemon 不消费)。
     * ``message`` — informational string (only present on error/empty states).
     * ``skills`` — list of ``{name, description, invoke_name, file_count}`` summaries
       for the platform skills list UI（展示用：解析每个顶层 skill 目录下 ``SKILL.md``
@@ -291,6 +447,9 @@ async def build_skills_manifest(
     ``user_id`` 透传到 :func:`_collect_custom_skills`，manifest 只含系统
     sillyspec-* 技能 + 该 user ``created_by`` 的自定义技能。``user_id`` 为
     ``None`` 时不含任何自定义技能（仅系统技能）。
+
+    task-03（D-010）：追加该 user ``user_skill_enables`` 命中的 git 缓存技能
+    （第三源）；同名去重优先级 sillyspec-* > CustomSkill > git 源。
     """
     if skills_dir is None:
         skills_dir = get_settings().skills_bundle_dir
@@ -308,18 +467,24 @@ async def build_skills_manifest(
     if not files:
         return {"version": "", "files": [], "message": "未找到任何 sillyspec 技能"}
 
+    # 兼容层：_compute_version / _summarize_skills 维持两元组形态（D-005 算法不动）。
+    pair_files = [(rel_path, content) for rel_path, content, _origin in files]
     file_entries: list[dict[str, str]] = []
-    for rel_path, content in files:
+    for rel_path, content, origin in files:
         file_hash = hashlib.sha256(content).hexdigest()
         file_entries.append(
             {
                 "path": str(rel_path).replace("\\", "/"),
                 "sha256": file_hash,
+                # task-03：可选来源标记（sillyspec/custom/git；git 的 origin 还带
+                # source_id 后缀，对外统一截断成 "git"）——daemon 只消费
+                # version/sha256，未知字段向后兼容零改动（design 兼容策略）。
+                "source": origin.split(":", 1)[0],
             }
         )
 
-    version = _compute_version(files, skills_dir)
-    skill_summaries = _summarize_skills(files)
+    version = _compute_version(pair_files, skills_dir)
+    skill_summaries = _summarize_skills(pair_files)
     return {"version": version, "files": file_entries, "skills": skill_summaries}
 
 
@@ -339,6 +504,9 @@ async def build_skills_bundle(
     ``user_id`` 透传到 :func:`_collect_custom_skills`，tar 内只含系统技能 +
     该 user ``created_by`` 的自定义技能 ``<name>/SKILL.md``。``user_id`` 为
     ``None`` 时不含任何自定义技能（仅系统技能）。
+
+    task-03（D-010）：追加该 user 启用的 git 缓存技能；tar 内顶层目录经
+    同名去重后唯一。
     """
     if skills_dir is None:
         skills_dir = get_settings().skills_bundle_dir
@@ -350,7 +518,9 @@ async def build_skills_bundle(
     if not files:
         return b""
 
-    return await asyncio.to_thread(_build_tar_gz, files)
+    # 兼容层：_build_tar_gz 维持两元组形态；去重已在 _gather_all_files 完成。
+    pair_files = [(rel_path, content) for rel_path, content, _origin in files]
+    return await asyncio.to_thread(_build_tar_gz, pair_files)
 
 
 def _build_tar_gz(files: list[tuple[Path, bytes]]) -> bytes:

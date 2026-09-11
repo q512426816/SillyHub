@@ -24,6 +24,12 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# skill_source 两表须在本模块 import 期注册进 BaseModel.metadata——根 conftest 的
+# db_engine 建表清单未含 skill_source（task-03 不能改 conftest，allowed_paths 限），
+# 函数内延迟 import 会晚于 create_all 导致 no such table。test_source_crud.py:35 同款。
+from app.modules.skill_source.model import SkillSource, UserSkillEnable
+from app.modules.skill_source.service import source_cache_dir
+
 
 def _patch_skills_dir(monkeypatch: pytest.MonkeyPatch, src: Path) -> None:
     """Patch the skills_bundle_service module's get_settings to return a fake
@@ -603,3 +609,346 @@ async def test_manifest_filters_custom_skills_per_user(
     assert "skill-b/SKILL.md" in paths_b
     assert "skill-a/SKILL.md" not in paths_b
     assert any(p.startswith("sillyspec-verify/") for p in paths_b)
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-11-skills-central-library task-03：第三源（user_skill_enables 命中的
+# git 缓存技能）+ D-010 同名优先级去重 + 三零回归。
+#
+# 零回归断言口径（taskcard constraints）：version hash + files 集合比对，不逐
+# 字节比 tar（gzip mtime，Grill 修正）；既有用例断言禁改，本段只追加。
+# log warn 断言不可行：structlog 直写 stderr，caplog 抓不到（本文件
+# test_terminating_at_lifecycle 注释同款结论）——跳过行为以「输家条目缺席」断言。
+# ---------------------------------------------------------------------------
+
+
+def _patch_spec_data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """把 spec_data_root 指到 tmp（git 缓存根 skills_git_cache 落测试沙箱）。
+
+    对缓存实例 setattr（test_source_crud.py:346 / daemon host_fs 先例）；
+    skill_source.service 的 get_settings 与本测试共用该缓存实例。
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "spec_data_root", str(tmp_path))
+
+
+async def _add_skill_source(
+    db_session: AsyncSession,
+    *,
+    enabled: bool = True,
+    subdir: str | None = None,
+    source_id: uuid.UUID | None = None,
+) -> SkillSource:
+    """直插 SkillSource 行（绕过 create 端点——无须 git mock/网络）。"""
+    source = SkillSource(
+        id=source_id if source_id is not None else uuid.uuid4(),
+        url=f"https://8.8.8.8/{uuid.uuid4().hex}.git",
+        branch="main",
+        subdir=subdir,
+        enabled=enabled,
+    )
+    db_session.add(source)
+    await db_session.commit()
+    await db_session.refresh(source)
+    return source
+
+
+def _make_cached_skill(
+    source_id: uuid.UUID,
+    dir_name: str,
+    files: dict[str, bytes],
+    *,
+    subdir: str | None = None,
+) -> Path:
+    """在缓存根造一个技能目录：``skills_git_cache/<src>/[subdir/]<dir>/<files>``。"""
+    root = source_cache_dir(source_id)
+    skill_dir = root / subdir if subdir else root
+    skill_dir = skill_dir / dir_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    for rel, content in files.items():
+        target = skill_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return skill_dir
+
+
+async def _add_enable(db_session: AsyncSession, user_id: uuid.UUID, skill_key: str) -> None:
+    """直插启用绑定行（收集链路只读绑定表，无须走 enable 端点）。"""
+    db_session.add(UserSkillEnable(user_id=user_id, skill_key=skill_key))
+    await db_session.commit()
+
+
+async def _get_manifest(client: AsyncClient, auth_headers: dict[str, str]) -> dict:
+    resp = await client.get("/api/daemon/skills/latest/manifest", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _manifest_entries(manifest: dict) -> dict[str, dict]:
+    return {f["path"]: f for f in manifest["files"]}
+
+
+def _extract_tar_files(bundle: bytes) -> dict[str, bytes]:
+    """解 tar.gz → {member_name: content}（只取文件成员）。"""
+    extracted: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(bundle), mode="r:gz") as tar:
+        for member in tar.getmembers():
+            f = tar.extractfile(member)
+            if f is not None:
+                extracted[member.name] = f.read()
+    return extracted
+
+
+async def test_zero_regression_no_source_no_binding(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """三零回归 1：无源/无绑定时 version hash 与 files 与现状（纯代码库）一致。"""
+    from app.modules.agent.skills_bundle_service import build_skills_manifest
+
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    endpoint_manifest = await _get_manifest(client, auth_headers)
+    # 「现状」基准 = session=None 的纯代码库扫描（task-03 前行为，D-005）
+    pure = await build_skills_manifest()
+
+    assert endpoint_manifest["version"] == pure["version"]
+    assert [f["path"] for f in endpoint_manifest["files"]] == [f["path"] for f in pure["files"]]
+    assert [f["sha256"] for f in endpoint_manifest["files"]] == [f["sha256"] for f in pure["files"]]
+    # 新增 source 标记：无源无绑定时全量为 sillyspec
+    assert {f["source"] for f in endpoint_manifest["files"]} == {"sillyspec"}
+
+
+async def test_not_enabled_git_skill_zero_collection(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """三零回归 2：源已配置、缓存已有技能，但用户未启用 → 零入 manifest/bundle。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    baseline = await _get_manifest(client, auth_headers)
+
+    source = await _add_skill_source(db_session)
+    _make_cached_skill(
+        source.id,
+        "alpha-git",
+        {"SKILL.md": b"---\nname: alpha-git\ndescription: a\n---\n\nbody"},
+    )
+
+    after = await _get_manifest(client, auth_headers)
+    assert after["version"] == baseline["version"], "未启用的 git 技能不得改变 version"
+    paths = {f["path"] for f in after["files"]}
+    assert not any(p.startswith("alpha-git/") for p in paths)
+
+
+async def test_enabled_git_skill_collected_into_bundle(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """启用命中后：文件全集（排除 .git）入 tar、version 变化、source=git 标记。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    baseline = await _get_manifest(client, auth_headers)
+
+    source = await _add_skill_source(db_session)
+    skill_files = {
+        "SKILL.md": b"---\nname: alpha-git\ndescription: Alpha git skill\n---\n\n# alpha",
+        "helper.py": b"x = 1\n",
+        "templates/tpl.txt": b"template\n",
+    }
+    skill_dir = _make_cached_skill(source.id, "alpha-git", skill_files)
+    # .git 目录必须被收集排除（浅克隆缓存含 .git）
+    git_dir = skill_dir / ".git"
+    git_dir.mkdir()
+    (git_dir / "HEAD").write_bytes(b"ref: refs/heads/main\n")
+    await _add_enable(db_session, default_user_id, f"{source.id}:alpha-git")
+
+    manifest = await _get_manifest(client, auth_headers)
+    assert manifest["version"] != baseline["version"]
+
+    entries = _manifest_entries(manifest)
+    for rel in skill_files:
+        path = f"alpha-git/{rel}"
+        assert path in entries, f"{path} 应入 manifest"
+        assert entries[path]["sha256"] == hashlib.sha256(skill_files[rel]).hexdigest()
+        assert entries[path]["source"] == "git"
+    assert not any(p.startswith("alpha-git/.git/") for p in entries)
+
+    # skills 摘要含 git 技能（description 从 SKILL.md frontmatter 解析）
+    summary = {s["name"]: s for s in manifest["skills"]}
+    assert summary["alpha-git"]["description"] == "Alpha git skill"
+
+    # tar 同步：文件齐全、.git 排除、成员路径唯一
+    resp = await client.get("/api/daemon/skills/latest/bundle", headers=auth_headers)
+    assert resp.status_code == 200
+    member_names: list[str] = []
+    with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:gz") as tar:
+        member_names = [m.name for m in tar.getmembers() if m.isfile()]
+    extracted = set(member_names)
+    assert {f"alpha-git/{rel}" for rel in skill_files} <= extracted
+    assert not any(p.startswith("alpha-git/.git/") for p in extracted)
+    # tar 成员路径唯一（同一文件不被多源重复打包；同目录多文件共享顶层名属正常）
+    assert len(member_names) == len(extracted), "tar 成员路径必须唯一（D-010）"
+
+
+async def test_subdir_source_skill_collected(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """subdir 源的技能：发现根=缓存根/<subdir>，启用后照常收集（D-006 同口径）。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    source = await _add_skill_source(db_session, subdir="agent-skills")
+    _make_cached_skill(
+        source.id,
+        "beta-git",
+        {"SKILL.md": b"---\nname: beta-git\ndescription: b\n---\n\nbody"},
+        subdir="agent-skills",
+    )
+    await _add_enable(db_session, default_user_id, f"{source.id}:beta-git")
+
+    manifest = await _get_manifest(client, auth_headers)
+    entries = _manifest_entries(manifest)
+    assert "beta-git/SKILL.md" in entries
+    assert entries["beta-git/SKILL.md"]["source"] == "git"
+
+
+async def test_dangling_binding_and_disabled_source_skipped(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """悬空绑定（目录不存在）与停用源的绑定：收集跳过，version 不变，绑定行保留。"""
+    _patch_spec_data_root(monkeypatch, tmp_path)
+    baseline = await _get_manifest(client, auth_headers)
+
+    # 悬空：源启用但技能目录不存在（刷新后技能目录消失的等价态）
+    dangling_source = await _add_skill_source(db_session)
+    await _add_enable(db_session, default_user_id, f"{dangling_source.id}:vanished-skill")
+    # 停用源：目录在、绑定在，但 source.enabled=False（收集只认启用源）
+    disabled_source = await _add_skill_source(db_session, enabled=False)
+    _make_cached_skill(
+        disabled_source.id,
+        "off-skill",
+        {"SKILL.md": b"---\nname: off-skill\n---\n\nbody"},
+    )
+    await _add_enable(db_session, default_user_id, f"{disabled_source.id}:off-skill")
+
+    after = await _get_manifest(client, auth_headers)
+    assert after["version"] == baseline["version"]
+    paths = {f["path"] for f in after["files"]}
+    assert not any(p.startswith(("vanished-skill/", "off-skill/")) for p in paths)
+
+    # 绑定行保留（悬空不清理——技能回来自动恢复，design 兼容策略）
+    keys = {
+        row.skill_key for row in (await db_session.execute(select(UserSkillEnable))).scalars().all()
+    }
+    assert f"{dangling_source.id}:vanished-skill" in keys
+    assert f"{disabled_source.id}:off-skill" in keys
+
+
+async def test_name_priority_matrix(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-010 同名优先级矩阵：sillyspec-* > CustomSkill > git 源（source_id 升序）。
+
+    后到者整目录跳过（先到先得）；warn 日志不可 caplog 断言（structlog 直写
+    stderr，见本文件上方注释），以输家条目缺席断言。
+    """
+    _patch_spec_data_root(monkeypatch, tmp_path)
+
+    # 固定 source_id 保证 git 源间次序确定（str 升序：…0001 < …0002）
+    src_low = await _add_skill_source(
+        db_session, source_id=uuid.UUID("00000000-0000-0000-0000-000000000001")
+    )
+    src_high = await _add_skill_source(
+        db_session, source_id=uuid.UUID("00000000-0000-0000-0000-000000000002")
+    )
+
+    # (a) sillyspec-* vs CustomSkill vs git 三方撞名（名字须带 sillyspec- 前缀）
+    clash = skills_dir / "sillyspec-clash"
+    clash.mkdir()
+    fs_content = b"fs wins\n"
+    (clash / "who.txt").write_bytes(fs_content)
+    _add_custom_skill(db_session, "sillyspec-clash", "# custom body", default_user_id)
+    _make_cached_skill(src_low.id, "sillyspec-clash", {"SKILL.md": b"---\n---\n\ngit body"})
+    await _add_enable(db_session, default_user_id, f"{src_low.id}:sillyspec-clash")
+
+    # (b) CustomSkill vs git 撞名（无 sillyspec- 前缀，业务层合法名空间）
+    _add_custom_skill(db_session, "clash-cg", "# custom wins", default_user_id)
+    _make_cached_skill(
+        src_low.id, "clash-cg", {"SKILL.md": b"---\n---\n\ngit loses", "extra.txt": b"extra"}
+    )
+    await _add_enable(db_session, default_user_id, f"{src_low.id}:clash-cg")
+
+    # (c) git × git 两源撞名：source_id 升序，低者胜
+    _make_cached_skill(src_low.id, "clash-gg", {"SKILL.md": b"gg from low"})
+    _make_cached_skill(src_high.id, "clash-gg", {"SKILL.md": b"gg from high"})
+    await _add_enable(db_session, default_user_id, f"{src_low.id}:clash-gg")
+    await _add_enable(db_session, default_user_id, f"{src_high.id}:clash-gg")
+    await db_session.commit()
+
+    manifest = await _get_manifest(client, auth_headers)
+    entries = _manifest_entries(manifest)
+    paths = set(entries)
+
+    # (a) sillyspec-* 胜：fs 文件在，custom/git 的 SKILL.md 均缺席
+    assert entries["sillyspec-clash/who.txt"]["sha256"] == hashlib.sha256(fs_content).hexdigest()
+    assert entries["sillyspec-clash/who.txt"]["source"] == "sillyspec"
+    assert "sillyspec-clash/SKILL.md" not in paths
+
+    # (b) CustomSkill 胜：拼装 frontmatter 的 SKILL.md 在，git 文件缺席
+    expected_custom = (
+        "---\nname: clash-cg\ndescription: custom skill clash-cg\n---\n\n# custom wins"
+    )
+    assert (
+        entries["clash-cg/SKILL.md"]["sha256"]
+        == hashlib.sha256(expected_custom.encode()).hexdigest()
+    )
+    assert entries["clash-cg/SKILL.md"]["source"] == "custom"
+    assert "clash-cg/extra.txt" not in paths
+
+    # (c) git 低 source_id 胜：内容可区分（高者的 sha256 不出现）
+    assert entries["clash-gg/SKILL.md"]["sha256"] == hashlib.sha256(b"gg from low").hexdigest()
+    assert entries["clash-gg/SKILL.md"]["source"] == "git"
+    assert entries["clash-gg/SKILL.md"]["sha256"] != hashlib.sha256(b"gg from high").hexdigest()
+
+    # tar 成员路径唯一 + 撞名目录单源（输家整目录缺席，赢家内容唯一）
+    resp = await client.get("/api/daemon/skills/latest/bundle", headers=auth_headers)
+    assert resp.status_code == 200
+    with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:gz") as tar:
+        member_paths = [m.name for m in tar.getmembers() if m.isfile()]
+    assert len(member_paths) == len(set(member_paths)), "tar 成员路径必须唯一（D-010）"
+    # 撞名目录的文件全部来自单一赢家（同目录多文件共享顶层名属正常）
+    clash_files = [
+        p for p in member_paths if p.split("/")[0] in ("sillyspec-clash", "clash-cg", "clash-gg")
+    ]
+    assert clash_files, "撞名目录应有赢家文件存在"
+    clash_content = _extract_tar_files(resp.content)
+    assert clash_content["clash-gg/SKILL.md"] == b"gg from low"
+    assert clash_content["sillyspec-clash/who.txt"] == fs_content
