@@ -2,11 +2,14 @@
 
 原实现每次操作 ``create_client`` + ``async with`` 即建即毁（每次 put/get/
 head/delete 重付 TCP+TLS 握手，docstring 却自称"模块级复用"）。改惰性单例后
-本测试锁定三点：
+本测试锁定四点：
 
 - 连续操作复用同一 client 实例（create_client 仅一次）；
 - ``aclose`` 关闭后可重建（惰性单例可复活，lifespan 语义）；
-- 并发首建无竞态（Lock 双检——gather 多操作仍只建一个）。
+- 并发首建无竞态（Lock 双检——gather 多操作仍只建一个）；
+- 单例存的是 ``ctx.__aenter__()`` 返回的 client 本体，不是上下文对象
+  （替身按真实契约建模：``create_client()`` 返回 ClientCreatorContext，
+  ql-20260911-026 线上 500 回归）。
 """
 
 from __future__ import annotations
@@ -44,14 +47,33 @@ class _FakeS3Client:
         return {"ContentLength": 1, "ContentType": "text/plain"}
 
 
+class _FakeCreatorContext:
+    """aiobotocore ClientCreatorContext 替身——契约对齐真实实现（3.8.0 实测）：
+
+    ``create_client()`` 返回本上下文对象，``__aenter__()`` 的**返回值**才是
+    client 本体；上下文自身不暴露 put_object 等操作方法（也无 ``__getattr__``
+    代理）。此前替身直接返回 client，掩盖了「存 ctx 本体当单例」的线上
+    500 回归（ql-20260911-026）——替身必须按真实契约建模。
+    """
+
+    def __init__(self, client: _FakeS3Client) -> None:
+        self._client = client
+
+    async def __aenter__(self) -> _FakeS3Client:
+        return await self._client.__aenter__()
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self._client.__aexit__(*exc)
+
+
 class _FakeSession:
     def __init__(self) -> None:
         self.clients: list[_FakeS3Client] = []
 
-    def create_client(self, *args: object, **kw: object) -> _FakeS3Client:
+    def create_client(self, *args: object, **kw: object) -> _FakeCreatorContext:
         client = _FakeS3Client()
         self.clients.append(client)
-        return client
+        return _FakeCreatorContext(client)
 
 
 @pytest.fixture()
@@ -98,3 +120,14 @@ async def test_concurrent_first_build_single_client(fake_session: _FakeSession) 
     await asyncio.gather(*(backend.put_object(f"k{i}", b"x", "text/plain") for i in range(10)))
     assert len(fake_session.clients) == 1
     assert fake_session.clients[0].put_calls == 10
+
+
+async def test_get_client_stores_entered_client_not_context(fake_session: _FakeSession) -> None:
+    """回归锁定（ql-20260911-026）：单例存的必须是 ``ctx.__aenter__()`` 的
+    返回值（AioBaseClient），不是 ClientCreatorContext 本体——后者没有
+    put_object 等操作方法，线上文件中心上传/下载全量 500 即此因。
+    """
+    backend = _backend()
+    client = await backend._get_client()
+    assert client is fake_session.clients[0]
+    assert client.entered == 1

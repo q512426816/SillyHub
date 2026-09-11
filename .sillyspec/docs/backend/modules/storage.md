@@ -51,6 +51,13 @@ MinioStorage: 模块级 aiobotocore session 复用（建 client 有开销）
   勿改回 `async def`
 - aiobotocore 版本与 botocore 需对齐（spike-01 2026-07-22 实测组合：aiobotocore
   3.8.0 + botocore 1.43.46 + aiohttp 3.14.2 无冲突）
+- **client 单例必须存 `ctx.__aenter__()` 的返回值**（ql-20260911-026）：aiobotocore
+  `session.create_client()` 返回的是 `ClientCreatorContext`（异步上下文管理器，无
+  `__getattr__` 代理），`__aenter__()` 的返回值才是 `AioBaseClient`。丢弃返回值把
+  ctx 本体存单例 → `put_object` 等 AttributeError → 文件中心上传/下载全量 500
+  （9/9 单例改造实测上线即炸，替身建模错误致单测未拦）。测试替身必须按此契约建模
+  （`create_client()` 返回 ctx、ctx.__aenter__() 返回 client），见
+  `tests/modules/storage/test_minio_client_reuse.py`
 - 凭证全部走 settings（env 注入），代码零硬编码
 
 ## 人工备注

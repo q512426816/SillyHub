@@ -495,3 +495,15 @@
 根因：auto-fix hook 在工作树有未暂存改动时触发 stash↔修复冲突回滚循环（exit 1 被管道掩码感知为静默吞提交，alembic 迁移曾因此只进镜像未进 git）
 方案：backend/.pre-commit-config.yaml 两 hook 改 ruff format --check / ruff check（去 --fix）；坑文档更新（状态已修复/实测修正节 exit 1 真相/修复落地节含 --no-stash 否决理由与 agent 习惯项）
 结果：临时分支三段验证（改前回滚循环→改后响亮 Would reformat→格式化后 exit 0）+ 主仓实测零冲突；全仓 format --check 1241 过；提交 d1d472795 推送
+
+## ql-20260911-026-094e | 2026-09-11 15:54:30 | 修复 MinIO client 单例存错对象致线上文件上传 500
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/storage/minio_backend.py（_get_client 捕获 ctx.__aenter__() 返回值存单例）
+- backend/tests/modules/storage/test_minio_client_reuse.py（替身按真实契约建模+回归锁定测试）
+- .sillyspec/docs/backend/modules/storage.md（注意事项补记 ClientCreatorContext 契约陷阱）
+需求：修复 MinIO client 单例存错对象致线上文件上传 500
+根因：9/9 ql-20260909-012 client 惰性单例改造丢了 ctx.__aenter__() 返回值，把 ClientCreatorContext 本体存进单例，该对象无 put_object 等方法且无 __getattr__ 代理，文件中心上传/下载/删除全量 AttributeError→500；测试替身 create_client 直接返回 client（错误契约）掩盖了回归
+方案：minio_backend._get_client 捕获 __aenter__() 返回值（AioBaseClient）存单例；测试替身按真实契约建模（create_client 返回 _FakeCreatorContext，__aenter__ 返回 client 本体）+ 新增回归锁定测试；storage.md 补记契约陷阱
+结果：tests/modules/storage 4 passed（换回坏实现复跑 4 failed 证明可拦回归）；ruff format/check 通过；线上待重新打包 backend 镜像部署后实测

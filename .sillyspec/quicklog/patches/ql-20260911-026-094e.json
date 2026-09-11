@@ -1,0 +1,44 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-aeb295ca",
+  "totals": {
+    "files": 3,
+    "additions": 50,
+    "deletions": 7
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/storage.md",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/storage/minio_backend.py",
+      "declared": true,
+      "additions": 6,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/tests/modules/storage/test_minio_client_reuse.py",
+      "declared": true,
+      "additions": 37,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": null,
+  "qlId": "ql-20260911-026-094e",
+  "sessionId": "quick-aeb295ca",
+  "savedAt": "2026-09-11T07:59:31.300Z"
+}

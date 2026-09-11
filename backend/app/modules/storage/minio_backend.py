@@ -55,15 +55,18 @@ class MinioStorage(StorageBackend):
             return self._client
         async with self._client_lock:
             if self._client is None:
-                client = self._session.create_client(
+                ctx = self._session.create_client(
                     "s3",
                     endpoint_url=self._endpoint,
                     aws_access_key_id=self._access_key,
                     aws_secret_access_key=self._secret_key,
                     region_name=self._region,
                 )
-                await client.__aenter__()
-                self._client = client
+                # create_client() 返回的是 ClientCreatorContext（异步上下文
+                # 管理器），__aenter__() 的**返回值**才是 AioBaseClient——必须
+                # 捕获返回值存单例；存 ctx 本体会 AttributeError（ctx 无
+                # put_object 等操作方法，线上文件中心全量 500，ql-20260911-026）。
+                self._client = await ctx.__aenter__()
         return self._client
 
     async def aclose(self) -> None:
