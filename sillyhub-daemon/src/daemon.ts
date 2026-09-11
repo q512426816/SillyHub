@@ -7025,6 +7025,8 @@ export class Daemon {
    *   不排队，让页面可见可重试（D-001 拒排队语义）；结果写入走与转发同一最小
    *   接口（recordCommandResult，结果槽实现归 task-06）；
    * - guard 置位同步先于执行、finally 复位（仿 _cleanupInFlight 模式）；
+   * - ql-20260911-024（回显提速第一级）：忙拒落槽与执行完成（finally）均立即
+   *   补发一次心跳（_nudgeHeartbeatAfterCommandResult），结果不等 15s 节拍；
    * - executor 未接线（task-06 未落地 / 测试未注入实现）→ warn 丢弃不崩
    *   （同 plan_response_no_manager 惯例，tsc 独立编译不依赖 task-06）。
    */
@@ -7047,6 +7049,7 @@ export class Daemon {
         error: SILLYSPEC_COMMAND_BUSY_ERROR,
         executed_at: new Date().toISOString(),
       });
+      this._nudgeHeartbeatAfterCommandResult(action, 'busy');
       return;
     }
     this._sillyspecCommandInFlight = true;
@@ -7058,7 +7061,27 @@ export class Daemon {
       this._logger.error('sillyspec_command_route_failed', { action, error: e });
     } finally {
       this._sillyspecCommandInFlight = false;
+      // ql-20260911-024（回显提速第一级）：finally 统一补发——成功/防御 reject
+      // 两出口结果均已落槽（executor 终判先于 return 落槽）。
+      this._nudgeHeartbeatAfterCommandResult(action, 'done');
     }
+  }
+
+  /**
+   * ql-20260911-024（回显提速第一级）：命令结果落槽后立即补发一次心跳。
+   *
+   * 此前结果要等下一个 15s 心跳节拍才捎给平台，叠加前端 15s 轮询后回显平均
+   * ~15s、最差 ~30s（命令本体实测秒级）——补发把第一级等待压成一次 HTTP
+   * 往返。fire-and-forget 不阻塞 WS 接收（_sendHeartbeatOnce 全路径 catch 不
+   * reject）；未注册 runtime 时其内部 return false 静默跳过；与 15s 循环短暂
+   * 重叠无害——心跳是无状态全量上报，backend 侧字段级 last-write-wins。
+   */
+  private _nudgeHeartbeatAfterCommandResult(
+    action: 'resolve' | 'ghost_cleanup',
+    phase: 'busy' | 'done',
+  ): void {
+    this._logger.debug('sillyspec_command_heartbeat_nudge', { action, phase });
+    void this._sendHeartbeatOnce();
   }
 
   /**

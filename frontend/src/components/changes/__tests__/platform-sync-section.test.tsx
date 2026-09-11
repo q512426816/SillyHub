@@ -679,4 +679,54 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
       vi.useRealTimers();
     }
   });
+
+  it("下发后短窗加速轮询（ql-20260911-024）——窗内 5s 间隔，窗口过后回退 15s 常规节拍", async () => {
+    vi.useFakeTimers();
+    try {
+      renderSection();
+      for (let i = 0; i < 8; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+      }
+      const row = rowOf("2026-09-04-active-change");
+      fireEvent.click(within(row).getByRole("button", { name: "查看对比" }));
+      const stub = screen.getByTestId("conflict-compare-modal-stub");
+      fireEvent.click(within(stub).getByTestId("stub-keep-local"));
+      for (let i = 0; i < 4; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+      }
+      expect(screen.getByText("已下发 · 等待机器回报")).toBeInTheDocument();
+
+      // 加速窗内（下发后 15s）：每 5s 一拉
+      const callsAtDispatch = mocks.listDaemonMachines.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mocks.listDaemonMachines.mock.calls.length).toBe(callsAtDispatch + 1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mocks.listDaemonMachines.mock.calls.length).toBe(callsAtDispatch + 2);
+
+      // 推过窗口尾（T+30s，途中 15s 处最后一次加速拉 + 窗口过期）后回退常规
+      // 节拍——本段不钉具体次数（同刻 timer 顺序不敏感），只钉稳态节拍
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      const callsAtSteady = mocks.listDaemonMachines.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mocks.listDaemonMachines.mock.calls.length).toBe(callsAtSteady);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(mocks.listDaemonMachines.mock.calls.length).toBe(callsAtSteady + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -94,6 +94,14 @@ const QUERY_KEY_ROOT = ["platform-sync-section"] as const;
  */
 export const ECHO_TIMEOUT_MS = 150_000;
 
+/**
+ * 下发后短窗加速轮询（ql-20260911-024 回显提速第二级）：daemon 侧结果已落槽
+ * 即补发心跳（秒级到 backend），前端 15s 常规轮询成为剩余瓶颈——下发后 15s
+ * 窗内以 5s 间隔加速拉取（≈5s×3 次），窗口过后回退常规节拍。
+ */
+export const ECHO_FAST_POLL_MS = 5_000;
+export const ECHO_FAST_WINDOW_MS = 15_000;
+
 // 裁决确认弹窗文案（STRATEGY_TEXT）与下发动作已按 D-002@v1 收进对比弹窗
 // （conflict-compare-modal.tsx，2026-09-07-conflict-diff-compare task-07 产物），
 // 本文件不再持有行内裁决入口；ACTIVE_WARN_TEXT 活跃警示徽章仍归本文件（行上展示）。
@@ -223,6 +231,19 @@ export function PlatformSyncSection({
   const [compareTarget, setCompareTarget] = useState<CompareConflictTarget | null>(
     null,
   );
+  // 下发后加速轮询窗口截止时刻（epoch ms；0=未加速，ql-20260911-024）。
+  const [pollBoostUntil, setPollBoostUntil] = useState(0);
+
+  // 窗口到期回退常规节拍：到期 setTimeout 清 0 触发重渲染，让 machines 查询的
+  // refetchInterval 选项从 5s 切回 15s（react-query 随选项值变化重排轮询定时器）。
+  useEffect(() => {
+    if (pollBoostUntil <= Date.now()) return;
+    const timer = window.setTimeout(
+      () => setPollBoostUntil(0),
+      pollBoostUntil - Date.now(),
+    );
+    return () => window.clearTimeout(timer);
+  }, [pollBoostUntil]);
 
   // 数据链（复刻 changes-overview-card）：fetchMyBinding 内部 catch → null。
   const bindingQ = useQuery({
@@ -235,7 +256,9 @@ export function PlatformSyncSection({
     queryKey: [...QUERY_KEY_ROOT, "machines"],
     queryFn: () => listDaemonMachines({ limit: 100 }),
     enabled: daemonId !== null,
-    refetchInterval: MACHINES_POLL_MS,
+    // 下发后加速窗内切 5s 短间隔（ql-20260911-024 第二级），窗外常规 15s。
+    refetchInterval:
+      Date.now() < pollBoostUntil ? ECHO_FAST_POLL_MS : MACHINES_POLL_MS,
   });
 
   const machine =
@@ -376,6 +399,9 @@ export function PlatformSyncSection({
         errorText: null,
       },
     }));
+    // 回显提速第二级：daemon 侧结果落槽即补发心跳（秒级到 backend），前端
+    // 开 15s 加速窗以 5s 间隔拉取回报（ql-20260911-024）。
+    setPollBoostUntil(Date.now() + ECHO_FAST_WINDOW_MS);
     notify.success(
       `指令已下发：${change} → ${
         strategy === "keep_local" ? "保本地" : "取平台"
@@ -423,6 +449,8 @@ export function PlatformSyncSection({
               errorText: null,
             },
           }));
+          // 回显提速第二级：同 resolve 下发点开 15s 加速窗（ql-20260911-024）。
+          setPollBoostUntil(Date.now() + ECHO_FAST_WINDOW_MS);
           notify.success("指令已下发：ghost 清理（等待机器回报）");
         } catch (err) {
           notify.error(err, "下发清理指令失败");

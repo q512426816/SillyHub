@@ -833,6 +833,129 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不�
 
 // ── HubClient heartbeat 第 7 参 body 契约（fetch stub，照 hub-client 惯例）────
 
+// ── ql-20260911-024：结果落槽即补发心跳（回显提速第一级）──────────────────────
+
+/**
+ * nudge 集成 harness：真 manager（执行器依赖全假）+ 已注册 runtime + 心跳 mock +
+ * WS 直达口——覆盖「WS 下发 → 命令完成 → 结果落槽 → 立即补发心跳携带第 7 参」
+ * 全链（区别于 makeHeartbeatCommandHarness 的手动调 sendHeartbeatOnce——本
+ * harness 断言的是 daemon 在结果落槽后主动补发，不依赖 15s 节拍）。
+ */
+function makeNudgeHarness() {
+  const heartbeatMock = vi.fn(async (..._args: unknown[]) => ({}));
+  const inner = makeCommandHarness({ timeoutMs: 7000 });
+  const daemon = new Daemon(makeConfig(), { heartbeat: heartbeatMock } as never, null as never, {
+    sessionManager: null,
+    sillyspecManager: inner.manager,
+  });
+  (daemon as unknown as { _registeredRuntimes: Map<string, string> })._registeredRuntimes.set(
+    'claude',
+    'rt-ql024-1',
+  );
+  const handleWsMessage = (msg: DaemonMessage): Promise<void> =>
+    (daemon as unknown as { _handleWsMessage: (m: DaemonMessage) => Promise<void> })
+      ._handleWsMessage(msg);
+  return {
+    daemon,
+    manager: inner.manager,
+    heartbeatMock,
+    runProgressJson: inner.runProgressJson,
+    handleWsMessage,
+  };
+}
+
+describe('ql-20260911-024 结果落槽即补发心跳：命令完成/忙拒后不等 15s 节拍', () => {
+  let restoreConsole: () => void;
+
+  beforeEach(() => {
+    restoreConsole = silenceConsole();
+  });
+  afterEach(() => {
+    restoreConsole();
+    vi.restoreAllMocks();
+  });
+
+  it('WS 下发 resolve 完成 → 立即补发一次心跳，第 7 参携带新结果（fire-and-forget 秒级回显）', async () => {
+    const h = makeNudgeHarness();
+    await h.handleWsMessage({
+      type: MSG.SILLYSPEC_RESOLVE,
+      payload: { change: 'c1', strategy: 'keep_local' },
+    });
+    // nudge 为 void fire-and-forget（内部含 readPendingUpdate 真实 await 链）——
+    // waitFor 收敛微任务链后心跳恰一次（15s 循环在测试 config 拉满下不会掺入）。
+    await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
+    const call = h.heartbeatMock.mock.calls[0]!;
+    expect(call.length).toBe(10);
+    expect(call[6]).toEqual({
+      action: 'resolve',
+      change: 'c1',
+      strategy: 'keep_local',
+      state: 'success',
+      exit_code: 0,
+      executed_at: expect.any(String),
+    });
+  });
+
+  it('guard 忙拒 → failed busy 结果同样立即补发；放行后首条完成再补发（共两次）', async () => {
+    const h = makeNudgeHarness();
+    let release!: (v: SillySpecProgressOutcome) => void;
+    const gate = new Promise<SillySpecProgressOutcome>((r) => (release = r));
+    h.runProgressJson.mockImplementationOnce(() => gate);
+    await h.handleWsMessage({
+      type: MSG.SILLYSPEC_RESOLVE,
+      payload: { change: 'c1', strategy: 'keep_local' },
+    });
+    // 第一条挂起占住 guard 期间第二条到达 → 忙拒落槽 → nudge 补发（第一次）。
+    await h.handleWsMessage({
+      type: MSG.SILLYSPEC_RESOLVE,
+      payload: { change: 'c2', strategy: 'take_platform' },
+    });
+    await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
+    expect(h.heartbeatMock.mock.calls[0]![6]).toEqual({
+      action: 'resolve',
+      change: 'c2',
+      strategy: 'take_platform',
+      state: 'failed',
+      error: 'another sillyspec command is running',
+      executed_at: expect.any(String),
+    });
+    // 放行首条 → 命令完成落槽 → finally nudge 补发（第二次，携带 c1 success）。
+    release({ code: 0, stdout: '', timedOut: false });
+    await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(2));
+    expect(h.heartbeatMock.mock.calls[1]![6]).toEqual({
+      action: 'resolve',
+      change: 'c1',
+      strategy: 'keep_local',
+      state: 'success',
+      exit_code: 0,
+      executed_at: expect.any(String),
+    });
+  });
+
+  it('未注册 runtime（provider 空）→ nudge 静默 no-op：心跳不补发、命令链路照常收敛', async () => {
+    const heartbeatMock = vi.fn(async (..._args: unknown[]) => ({}));
+    const inner = makeCommandHarness({ timeoutMs: 7000 });
+    const daemon = new Daemon(makeConfig(), { heartbeat: heartbeatMock } as never, null as never, {
+      sessionManager: null,
+      sillyspecManager: inner.manager,
+    });
+    const handleWsMessage = (msg: DaemonMessage): Promise<void> =>
+      (daemon as unknown as { _handleWsMessage: (m: DaemonMessage) => Promise<void> })
+        ._handleWsMessage(msg);
+    await expect(
+      handleWsMessage({
+        type: MSG.SILLYSPEC_RESOLVE,
+        payload: { change: 'c1', strategy: 'keep_local' },
+      }),
+    ).resolves.toBeUndefined();
+    await flushAsync();
+    await flushAsync();
+    expect(heartbeatMock).not.toHaveBeenCalled();
+    // 命令本体不受影响（结果照常落槽）。
+    expect(inner.manager.getCommandResult()?.state).toBe('success');
+  });
+});
+
 let lastCall: { url: string; init: RequestInit } | null = null;
 
 /** 构造返回 2xx JSON 的 fetch 替身（照 daemon-heartbeat-sillyspec.test.ts）。 */

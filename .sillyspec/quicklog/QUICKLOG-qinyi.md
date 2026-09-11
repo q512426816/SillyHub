@@ -472,10 +472,18 @@
 方案：包装器五通道补 debug+注释修正；回落日志 debug→info；debug 通道回归断言+ZD3 日志断言；daemon.md 同步
 结果：console-timestamp 5 用例+agent-log+console-timestamp 12 文件 116 用例全绿；typecheck 零错
 
-## ql-20260911-024-9098 | 2026-09-11 14:40:02 | 变更中心平台同步处理区（冲突裁决 + ghost 清理）
-状态：进行中
+## ql-20260911-024-9098 | 2026-09-11 14:40:02 | sillyspec 平台命令结果回显提速两级（daemon 补发心跳 + 前端加速轮询）
+状态：已完成
 关联变更：2026-09-04-conflict-resolve-entry
-文件：sillyhub-daemon/src/sillyspec-manager.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/cli.ts, sillyhub-daemon/tests/sillyspec-platform-command.test.ts, frontend/src/components/changes/platform-sync-section.tsx, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+文件：
+- sillyhub-daemon/src/daemon.ts（_runSillySpecCommand 忙拒/finally 两出口调 _nudgeHeartbeatAfterCommandResult（新私有方法，void _sendHeartbeatOnce + debug 日志））
+- sillyhub-daemon/tests/sillyspec-platform-command.test.ts（新增 ql-024 describe 三用例 + makeNudgeHarness（真 manager+已注册 runtime+心跳 mock+WS 直达口））
+- frontend/src/components/changes/platform-sync-section.tsx（ECHO_FAST_POLL_MS/ECHO_FAST_WINDOW_MS 导出常量 + pollBoostUntil 状态与到期回退 effect + machines 查询动态 refetchInterval + 裁决/ghost 两下发点开窗）
+- frontend/src/components/changes/__tests__/platform-sync-section.test.tsx（fake timers 加速轮询节拍用例（窗内 5s×2 拉取/窗外回退 15s））
+需求：sillyspec 平台命令结果回显提速两级（daemon 补发心跳 + 前端加速轮询）
+根因：用户反馈裁决/清理回显基本都要十秒以上，实测命令本体仅 0.2-0.7s，大头是结果回显两级 15s 定时器叠加（daemon 心跳捎带平均等 7.5s + 前端 15s 轮询平均等 7.5s），与命令执行时长无关
+方案：daemon.ts _runSillySpecCommand 忙拒落槽与执行完成 finally 两出口均调新私有方法 _nudgeHeartbeatAfterCommandResult（void _sendHeartbeatOnce fire-and-forget，不阻塞 WS 接收、未注册静默跳过、与 15s 循环重叠无害——心跳无状态全量上报 last-write-wins）；前端 platform-sync-section.tsx 下发后开 15s 加速窗（ECHO_FAST_WINDOW_MS）内 machines 查询 refetchInterval 从 15s 切 5s（ECHO_FAST_POLL_MS≈5s×3 次），到期 setTimeout 清 pollBoostUntil 回退常规节拍；协议零改动不动 backend
+结果：daemon 侧 sillyspec-platform-command 41 用例全绿（含新增 3：WS 下发完成即补发且第 7 参携带新结果/忙拒路径同补发+放行后再补发/未注册 runtime 静默 no-op）+ 近邻 daemon-heartbeat-sillyspec 与 sillyspec-conflict-snapshot 49 用例回归绿，daemon tsc 0；前端 platform-sync-section 15 用例绿（含新增 1：fake timers 钉窗内 5s 节拍/窗外回退 15s），前端 tsc 0，eslint 仅 2 条存量 warning（HEAD 同报非本次引入）；模块文档 sillyhub-daemon.md/frontend.md 变更索引各补 ql-20260911-024-9098 条目；预期回显从平均 ~15s 压到 ~5-10s
 
 ## ql-20260911-025-244d | 2026-09-11 14:47:11 | pre-commit 提交钩 auto-fix 改 check-only（吞提交坑修复落地）+ 坑文档实测修正
 状态：已完成

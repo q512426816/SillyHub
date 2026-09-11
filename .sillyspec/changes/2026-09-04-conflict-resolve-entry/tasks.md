@@ -18,3 +18,4 @@ created_at: 2026-09-04 22:06:01
 - [x] task-09: 前端平台同步卡片（platform-sync-section + 权限 hook + 桌面/移动挂载 + 回显/150s 恢复 + 组件测试 + 桌面/移动两页面既有测试零回归）
 - [x] task-10: 前端总览卡收口（changes-overview-card CLI 指引改跳转变更中心）
 - [x] task-11: 模块文档更新（backend.md / sillyhub-daemon.md / frontend.md 变更索引条目）
+- [x] ql-20260911-024-9098 变更中心平台同步处理区（冲突裁决 + ghost 清理）
