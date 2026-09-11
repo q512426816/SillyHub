@@ -34,7 +34,9 @@ _DAEMON_TABLE_PATH = _REPO_ROOT / "sillyhub-daemon" / "src" / "interactive" / "p
 _FRONTEND_TABLE_PATH = _REPO_ROOT / "frontend" / "src" / "lib" / "provider-caps.ts"
 
 # 契约键（design §5.2 ProviderCaps 8 个 boolean 键 + 2026-09-09-askuser-pi-cursor
-# task-12（FR-06）新增 dialog string 枚举键 = 9 键；task-02 provides 契约字段）。
+# task-12（FR-06）新增 dialog string 枚举键 + 2026-09-11-provider-adapter-registry
+# task-04 新增 provider_switch boolean 键（FR-04 会话级供应商切换，三端生成产物
+# 由 sillyhub-daemon/scripts/gen-provider-caps.mjs 产出）= 10 键。
 EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
     {
         "resume",
@@ -46,6 +48,7 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
         "dialog",
         "edit_patch",
         "model_select",
+        "provider_switch",
     }
 )
 
@@ -142,7 +145,7 @@ def test_caps_key_sets_identical_and_are_the_9_contract_keys() -> None:
     9 键 = 8 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
     漏加 dialog 键即在此失败（R-09：解析器已扩 string 值支持，不会静默丢弃）。
     """
-    assert len(EXPECTED_CAPS_KEYS) == 9
+    assert len(EXPECTED_CAPS_KEYS) == 10
     for end_name, table in _all_ends().items():
         for provider, caps in table.items():
             assert set(caps) == EXPECTED_CAPS_KEYS, (
@@ -189,7 +192,7 @@ def test_unknown_provider_returns_default_deny_with_9_keys() -> None:
     """
     caps = get_provider_caps("__definitely_unknown_provider__")
     assert set(caps) == EXPECTED_CAPS_KEYS
-    assert len(caps) == 9
+    assert len(caps) == 10
     assert caps["dialog"] == "none"
     assert all(value is False for key, value in caps.items() if key != "dialog")
     # 返回新 dict：调用方修改不污染模块级镜像表。

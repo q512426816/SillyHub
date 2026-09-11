@@ -574,3 +574,24 @@ export async function migrateCodexThreadFromHost(
   }
   return true;
 }
+
+/**
+ * codex 写盘门槛判定（2026-09-11-provider-adapter-registry task-02 自
+ * provider-file-settings.ts 迁入——与 writeCodexHome 同文件更内聚，且打断
+ * providers.ts ↔ provider-file-settings.ts import 环；聚合表 codex writer 的
+ * isSufficient 与 spawn/reload 分派共用本判据）：
+ *   openai_chat：litellm_base_url / litellm_model_name 至少一项；
+ *   anthropic（缺省）：api_key / base_url 至少一项。
+ */
+export function isCodexFormSufficient(provider: ProviderConfig): boolean {
+  if (provider.api_format === 'openai_chat') {
+    return (
+      nonEmpty(provider.litellm_base_url) !== undefined ||
+      nonEmpty(provider.litellm_model_name) !== undefined
+    );
+  }
+  return (
+    nonEmpty(provider.api_key) !== undefined ||
+    nonEmpty(provider.base_url) !== undefined
+  );
+}

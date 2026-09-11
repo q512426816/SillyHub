@@ -88,6 +88,11 @@ import { join } from 'node:path';
 import { daemonStateDir } from '../config.js';
 import { migrateCodexThreadFromHost } from '../codex-settings.js';
 import { applyProviderFileSettingsForReload } from '../provider-file-settings.js';
+// 2026-09-11-provider-adapter-registry task-03（FR-03）：reload 合并块门控改读
+// 聚合表元数据（INTERACTIVE_PROVIDERS——fileSettings 是否 writer；详见下方
+// hasProviderFileWriter 与 _reloadSessionNow 合并块内注释）。
+import { INTERACTIVE_PROVIDERS } from './providers.js';
+import type { ProviderAdapter } from './providers.js';
 // ql-20260822-009：resume / reload 的 CLAUDE_CONFIG_DIR 按 transcript 实际位置判定
 // （隔离目录命中 → 隔离，保 ql-20260807-002 停供应商语义；仅宿主机 ~/.claude 命中 →
 // 不隔离，修复未配供应商会话重开被 fail 打回 ended）。
@@ -208,6 +213,23 @@ import {
   scheduleTaskWakeup,
   writeTaskLine,
 } from './session-manager/background-tasks.js';
+
+// ── 2026-09-11-provider-adapter-registry task-03（FR-03 / design Wave 2 六处收口）──
+//
+// reload 合并块门控的聚合表元数据小助手：数据源 INTERACTIVE_PROVIDERS（task-01
+// 聚合契约）——provider 的 adapter 存在且 fileSettings 为写盘器（codex/pi）才
+// 走文件层写盘 + env 合并；claude / cursor（fileSettings 显式 none）与未知
+// provider（表无条目，as Record 索引得 undefined）零动作，与原
+// `provider === 'codex' || 'pi'` 硬编码逐类等价（task-03 constraints）。
+
+/** provider 的 adapter 存在且 fileSettings 为写盘器（非 { kind: 'none' }）。 */
+function hasProviderFileWriter(provider: string): boolean {
+  const adapter = (INTERACTIVE_PROVIDERS as Record<
+    string,
+    ProviderAdapter | undefined
+  >)[provider];
+  return adapter !== undefined && 'write' in adapter.fileSettings;
+}
 
 export class SessionManager {
   /** 内存 SessionStore。Wave1/2 内存态，daemon 重启丢失（D-003）。 */
@@ -1822,7 +1844,12 @@ export class SessionManager {
       // ── task-03（2026-09-11-session-provider-switch-codex-pi）：codex/pi 文件层配置 ──
       // 写盘 + env 合并。claude 跳过（settings.json 链路仍归 daemon.ts spawn 侧
       // applyClaudeSettings + 上方既有 env 逻辑，零漂移，design Wave 2 步骤 5）。
-      if (state.provider === 'codex' || state.provider === 'pi') {
+      // 2026-09-11-provider-adapter-registry task-03（FR-03）：门控改读聚合表元数据
+      //（原 provider === 'codex' || 'pi' 硬编码）——fileSettings 为 writer 才走
+      // 文件层写盘 + env 合并；claude / cursor / 未知 provider（表无条目）零动作，
+      // 逐类等价（漏改则新引擎 reload 丢文件层 env——Grill 发现）。块内 codex 迁移
+      // 钩子为 per-engine 差异，按 design 非目标保留 provider === 'codex' 原判定。
+      if (hasProviderFileWriter(state.provider)) {
         // codex 迁移钩子（FR-05，仅 codex）：宿主凭证起步会话（oldEnv 无 CODEX_HOME）
         // 首次切平台供应商 → 迁移 thread rollout 历史到 per-session 目录，否则新
         // CODEX_HOME 下 resume 找不到 thread 必断（对齐 claude

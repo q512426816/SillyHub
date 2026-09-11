@@ -10,4 +10,4 @@ created_at: 2026-09-11 23:39:32
 - [x] task-04: caps 生成脚本 gen-provider-caps.mjs（零依赖解析+响亮失败+幂等）+ frontend gen:types 挂钩 + 三端产物落地 + 对齐测试 9→10 键 (depends_on: task-01)
 - [x] task-05: 前端白名单派生——provider-caps.ts 改生成产物含 PROVIDER_SWITCH_ENGINES 派生导出（消费点 import 不变） (depends_on: task-04)
 - [x] task-06: 冒烟制度化——pi-settings/codex-settings 全词表表驱动映射用例 + 守护测试 provider-adapter-registry.test.ts（覆盖/smokeSuite 存在性/词表扫描/caps 一致/REGISTRY 等价/幂等重跑） (depends_on: task-01, task-02, task-04)
-- [ ] task-07: 全量回归与防遗漏演示验证——既有套件全绿 + 「临时抽走一份声明 → tsc 红」验证记录 (depends_on: task-01, task-02, task-03, task-04, task-05, task-06)
+- [x] task-07: 全量回归与防遗漏演示验证——既有套件全绿 + 「临时抽走一份声明 → tsc 红」验证记录 (depends_on: task-01, task-02, task-03, task-04, task-05, task-06)

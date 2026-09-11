@@ -1,6 +1,8 @@
 // tests/interactive/provider-registry.test.ts
 // task-05（FR-05 / D-002@v1 / design §5.2）：providers.ts 注册表与 InteractiveProvider 推导。
 // 2026-09-04-provider-pi-onboarding task-04：用例 1/3/5 扩 pi（注册键/family/实例化）。
+// 2026-09-11-provider-adapter-registry task-01：caps 第 10 键 provider_switch 联动
+//（nineKeys→tenKeys）+ adapter.switchable 与 caps.provider_switch 同值 additive 断言。
 //
 // 覆盖（task-05 验收）：
 //   1. 注册表键集合 = InteractiveProvider 联合（编译层 canary + 运行时键集断言）
@@ -121,17 +123,20 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
-  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、9 契约键齐全', () => {
+  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、10 契约键齐全', () => {
     // ql-20260911-017：99a228add（askuser-pi-cursor）给 caps 增第 9 键 dialog
     // （值 'native' 字符串非 boolean），守护测试未同步——主仓预存债务顺手修
     // （skills-central-library verify 门实测暴露，与本变更无关）。
-    const nineKeys = [
+    // 2026-09-11-provider-adapter-registry task-01：第 10 键 provider_switch
+    //（boolean，与 adapter.switchable 单源一致——下方 additive 断言锁定同值）。
+    const tenKeys = [
       'dialog',
       'edit_patch',
       'mcp',
       'model_select',
       'multimodal',
       'permission_dialog',
+      'provider_switch',
       'resume',
       'subagent',
       'thinking',
@@ -139,16 +144,19 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     for (const [key, d] of Object.entries(INTERACTIVE_PROVIDERS)) {
       // 单源引用（非复制值）：descriptor.caps 必须就是 PROVIDER_CAPS 的表项对象。
       expect(d.caps).toBe(PROVIDER_CAPS[key]);
-      expect(Object.keys(d.caps).slice().sort()).toEqual(nineKeys);
+      expect(Object.keys(d.caps).slice().sort()).toEqual(tenKeys);
       for (const [capKey, capValue] of Object.entries(d.caps)) {
         expect(capValue).toBe(PROVIDER_CAPS[key]?.[capKey as keyof typeof d.caps]);
-        // dialog 为三态标记（'native' | false | …字符串/布尔），其余八键恒 boolean
+        // dialog 为三态标记（'native' | false | …字符串/布尔），其余九键恒 boolean
         if (capKey === 'dialog') {
           expect(['string', 'boolean']).toContain(typeof capValue);
         } else {
           expect(typeof capValue).toBe('boolean');
         }
       }
+      // additive：adapter.switchable 与 caps.provider_switch 单源一致
+      //（task-01 前置锁定；task-04 caps 生成派生后的同值守护延续此断言）。
+      expect(d.switchable).toBe(d.caps.provider_switch);
     }
   });
 

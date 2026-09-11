@@ -461,3 +461,72 @@ describe('writePiDir 写 IO 失败 → error + reject', () => {
     expect(JSON.stringify(payload)).not.toContain('sk-mock-123');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. api_format 全词表→协议字段映射表驱动（FR-05 冒烟制度化）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('writePiDir api_format 全词表→协议字段映射（FR-05 冒烟制度化，2026-09-11-provider-adapter-registry task-06）', () => {
+  // 词表事实源 = backend/app/modules/llm_provider/schema.py:33
+  // `api_format: Literal["anthropic", "openai_chat"] = "anthropic"`（DB 缺省
+  // 'anthropic'，lease payload 可整键缺省 → undefined 单列一行）。本表的
+  // 'anthropic' / 'openai_chat' 字面量即守护测试 tests/provider-adapter-registry.test.ts
+  // ③「smokeSuite 词表扫描」的静态代理对象——词表加值时两处同步（守护测试扫
+  // smokeSuite 文本，本表给真实行为断言）。
+  //
+  // 既有 16 用例零改动：上方 1-4 组的分散断言（golden 逐字段 / 门槛细节）保留
+  // 原样，本组是聚合声明式的「全词表 × 期望协议字段」单表（ql-20260911-029
+  // 教训：pi 曾把 api 写死 openai-completions 致智谱 anthropic 端点全断流，
+  // mock golden 只有 OpenAI 一种形态没拦住——每词一格堵这类静默漏网）。
+  it.each([
+    {
+      apiFormat: 'anthropic' as const,
+      expected: "models.json providers.sillyhub.api === 'anthropic-messages'（写入路径）",
+      outcome: 'write' as const,
+    },
+    {
+      apiFormat: undefined,
+      expected: "缺省（undefined）同 anthropic 路径，api === 'anthropic-messages'",
+      outcome: 'write' as const,
+    },
+    {
+      apiFormat: 'openai_chat' as const,
+      expected: "pi × openai_chat 禁配 → warn pi_dir_write_skipped_openai_chat 跳过零写入",
+      outcome: 'skip' as const,
+      warnCode: 'pi_dir_write_skipped_openai_chat',
+    },
+    {
+      // 词表外哨兵串（运行时可能来自旧持久层/透传）：类型层用 as 模拟
+      // （ProviderConfig.api_format 联合不含词表外值，同上方既有用例先例）。
+      apiFormat: 'some-future-format' as ProviderConfig['api_format'],
+      expected: '未知值（词表外）→ warn pi_dir_write_skipped_unknown_api_format 跳过零写入（宁可不写）',
+      outcome: 'skip' as const,
+      warnCode: 'pi_dir_write_skipped_unknown_api_format',
+    },
+  ])('api_format=$apiFormat → $expected', async ({ apiFormat, outcome, warnCode }) => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dir = newPiDir();
+    await expect(
+      writePiDir({
+        piDir: dir,
+        provider: piCustomProvider({ api_format: apiFormat }),
+      }),
+    ).resolves.toBeUndefined();
+
+    if (outcome === 'write') {
+      // 写入路径：协议字段映射唯一断言点（其余字段形状归上方 golden 组）。
+      expect(warnSpy).not.toHaveBeenCalled();
+      const models = readJson(dir, 'models.json');
+      const sillyhub = (models.providers as Record<string, { api?: string }>)
+        .sillyhub;
+      expect(sillyhub?.api).toBe('anthropic-messages');
+    } else {
+      // 跳过路径：warn 可诊断 + 三文件零写入（诱饵字段即使齐备也不放行）。
+      expect(warnCode).toBeDefined();
+      expect(warnSpy).toHaveBeenCalledWith(warnCode, expect.anything());
+      expect(existsSync(join(dir, 'auth.json'))).toBe(false);
+      expect(existsSync(join(dir, 'models.json'))).toBe(false);
+      expect(existsSync(join(dir, 'settings.json'))).toBe(false);
+    }
+  });
+});

@@ -1,32 +1,60 @@
 /**
- * interactive/providers.ts —— interactive provider 能力矩阵（ProviderCaps）。
+ * interactive/providers.ts —— interactive provider 聚合契约（ProviderAdapter）
+ * 与能力矩阵（ProviderCaps）daemon 单源。
  *
- * 出处：2026-09-03-agent-provider-abstraction task-02（design §5.2）。
+ * 出处：2026-09-03-agent-provider-abstraction task-02（caps 表基座）；
+ * 2026-09-11-provider-adapter-registry task-01（ProviderDescriptor 原地扩展为
+ * ProviderAdapter 聚合契约，D-003@v2——不另立契约文件）。
  *
- * 分层说明：本文件是 ProviderCaps 能力矩阵的**唯一维护源**（daemon 单源）；
- * backend `app/modules/agent/provider_caps.py` 与 frontend `src/lib/provider-caps.ts`
- * 为手工镜像，三端键集合与每个 provider 每键取值必须一致，一致性由
- * `backend/app/modules/agent/tests/test_provider_caps_alignment.py` 以源文件
- * 读取方式守护（读表源比对，不复制值断言）。task-05 再在本文件扩展
- * ProviderDescriptor / INTERACTIVE_PROVIDERS 注册表（createDriver / family /
- * displayName 等），本 task 只落 caps 表基座。
+ * 分层说明：本文件是 ProviderCaps 能力矩阵与 provider 聚合契约的**唯一维护源**
+ * （daemon 单源）；backend `app/modules/agent/provider_caps.py` 与 frontend
+ * `src/lib/provider-caps.ts` 为手工镜像，三端键集合与每个 provider 每键取值必须
+ * 一致，一致性由 `backend/app/modules/agent/tests/test_provider_caps_alignment.py`
+ * 以源文件读取方式守护（读表源比对，不复制值断言）；caps 三端同步生成归
+ * task-04（gen-provider-caps.mjs），本 task 先落第 10 键 provider_switch 单源。
+ *
+ * 聚合契约（新引擎接入清单）：新引擎接入 = 在 INTERACTIVE_PROVIDERS 加**一份
+ * 声明**——现有五要素（provider / family / displayName / createDriver / caps）加
+ * 五新成员（envInjector 懒工厂 / fileSettings 写盘器 / perSessionDir /
+ * smokeSuite / switchable），缺任一必填字段 `satisfies Record<string,
+ * ProviderAdapter>` 即 TS2741 编译红。原先散落七八处的登记点（注入器 REGISTRY /
+ * 文件层分派 / daemon 硬编码 kind 判断 / 前端切换白名单）由 task-02/03/04 改为
+ * 从聚合表派生，本 task 落契约基座（派生前既有字面量与聚合表并存，值等价）。
  *
  * 取值约定：caps 描述 provider 当前真实能力（以本仓现状硬编码门控为准，
- * 不臆断），8 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
+ * 不臆断），9 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
  * 为 string 枚举键（'native' / 'marker' / 'none'，2026-09-09-askuser-pi-cursor
- * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；未知 provider 查询
- * 返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
+ * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；provider_switch 为
+ * 第 10 键（本变更 task-01 加入，与 adapter.switchable 单源一致）；未知 provider
+ * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
  * 改取值先改本文件，再同步两端镜像。
  */
 
 import type { ProtocolType } from '../adapters/index.js';
+import type { CredentialInjector } from '../credential-injector.js';
+import type { ProviderConfig } from '../types.js';
 import type { InteractiveDriver } from './driver.js';
 import { ClaudeSdkDriver } from './claude-sdk-driver.js';
 import { CodexAppServerDriver } from './codex-app-server-driver.js';
 import { CursorDriver } from './cursor-driver.js';
 import { PiRpcDriver } from './pi-rpc-driver.js';
+import { ClaudeCredentialInjector, PiCredentialInjector } from '../credential-injector.js';
+import { isCodexFormSufficient, writeCodexHome } from '../codex-settings.js';
+import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
 
-/** provider 能力矩阵（9 键：8 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+// ── import 环纪律（2026-09-11-provider-adapter-registry task-01）──────────────
+//
+// 本文件对 credential-injector.ts（注入器类值导入）、provider-file-settings.ts
+//（isCodexFormSufficient / isPiFormSufficient / nonEmptyStr）、codex-settings.ts
+//（writeCodexHome）、pi-settings.ts（writePiDir）的**调用**一律只出现在函数体内
+//（envInjector 懒工厂体 / writer 的 write 与 skipsOfficialEndpoint 方法体）——
+// 注入器构造与写盘都在函数体内延迟执行，模块初始化零跨表求值（ESM 零 TDZ）。
+// task-02 REGISTRY / 文件层分派反向派生引本表后，两方向互引均须保持该纪律。
+// isSufficient 为初始化期取函数绑定（非调用）——provider-file-settings.ts 不回引
+// 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
+// ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
+
+/** provider 能力矩阵（10 键：9 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -52,6 +80,13 @@ export interface ProviderCaps {
   edit_patch: boolean;
   /** 模型选择（创建会话时的模型覆盖生效）。 */
   model_select: boolean;
+  /**
+   * 会话级供应商切换支持（2026-09-11-provider-adapter-registry task-01 第 10 键）：
+   * 与 INTERACTIVE_PROVIDERS 条目的 switchable 单源一致（由
+   * provider-registry.test.ts 守护测试锁定同值）；取值依据 frontend
+   * PROVIDER_SWITCH_ENGINES 现行白名单（claude / codex / pi）。
+   */
+  provider_switch: boolean;
 }
 
 /**
@@ -154,6 +189,12 @@ export interface ProviderCaps {
  *   不经后端 dialog 管道——若 spike no-go，随 task-08 三端同步改 'none'；
  * - edit_patch=false（暂缺）：structuredPatch 无对应通道；
  * - model_select=true（原生）：driver `--model` 通道 + CLI 实测。
+ *
+ * provider_switch（第 10 键，2026-09-11-provider-adapter-registry task-01）：
+ * 取值与 INTERACTIVE_PROVIDERS 条目 switchable 同值（守护测试锁定单源一致）；
+ * 依据 frontend `src/lib/provider-caps.ts` PROVIDER_SWITCH_ENGINES 现行白名单
+ *（claude / codex / pi=true，cursor=false——cursor 私有 ConnectRPC 云协议无
+ * BYO 注入面，不支持会话级切换到外部供应商）。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -166,6 +207,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     dialog: 'native',
     edit_patch: true,
     model_select: true,
+    provider_switch: true,
   },
   codex: {
     resume: true,
@@ -177,6 +219,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     dialog: 'native',
     edit_patch: false,
     model_select: true,
+    provider_switch: true,
   },
   // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
@@ -191,6 +234,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     dialog: 'native',
     edit_patch: false,
     model_select: true,
+    provider_switch: true,
   },
   // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
   // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
@@ -206,6 +250,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     dialog: 'marker',
     edit_patch: false,
     model_select: true,
+    provider_switch: false,
   },
 };
 
@@ -231,6 +276,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     dialog: 'none',
     edit_patch: false,
     model_select: false,
+    provider_switch: false,
   };
 }
 
@@ -240,9 +286,11 @@ export function getProviderCaps(provider: string): ProviderCaps {
 // interactive provider 注册表——新增 provider 只加 INTERACTIVE_PROVIDERS 条目，
 // InteractiveProvider 联合自动扩展（keyof 推导），driver.ts / types.ts 不再
 // 维护字面量联合。本文件由此成为 interactive provider 的唯一注册点
-//（caps + family + driver 工厂），与批量层 adapters/index.ts 的 6 协议 ×
-// 12 provider 注册表同构：family 复用其 ProtocolType 联合，取值须与
-// PROVIDER_TO_PROTOCOL 反查结果一致（守护测试断言）。
+//（caps + family + driver 工厂，2026-09-11-provider-adapter-registry task-01
+// 扩展为聚合契约：+ envInjector / fileSettings / perSessionDir / smokeSuite /
+// switchable——新引擎接入清单一份声明，见 ProviderAdapter），与批量层
+// adapters/index.ts 的 6 协议 × 12 provider 注册表同构：family 复用其
+// ProtocolType 联合，取值须与 PROVIDER_TO_PROTOCOL 反查结果一致（守护测试断言）。
 
 /**
  * createDriver 工厂入参（预留形态，本变更不消费）。
@@ -290,6 +338,59 @@ export interface ProviderDescriptor {
   contextFile?: string;
 }
 
+// ── 聚合契约（2026-09-11-provider-adapter-registry task-01 / FR-01）─────────────
+
+/**
+ * 文件层写盘器统一接口（design 接口定义段；Grill P1-1：抹平 writeCodexHome /
+ * writePiDir 签名与 per-kind 五项差异——write / gate / envKey / dirName /
+ * 官方端点 skip）。实现为 codex-settings / pi-settings 的薄适配（写盘器本体
+ * 不动）；claude 的 settings.json 链路在 daemon.ts applyClaudeSettings，不落
+ * 本接口（聚合表声明为显式 none+理由）。
+ */
+export interface ProviderFileSettingsWriter {
+  /** per-session 目录段名（join(daemonStateDir(), dirName, sessionKey)）。 */
+  dirName: 'codex' | 'pi';
+  /** 注入 env 键名（CODEX_HOME / PI_CODING_AGENT_DIR）。 */
+  envKey: string;
+  /** 门槛判定（与写盘器同判据；provider 缺必需字段 → false，调用方 warn 跳过）。 */
+  isSufficient: (provider: ProviderConfig) => boolean;
+  /** 写盘（目录已建；入参归一：codex 消费 daemonApiKey、pi 不消费）。 */
+  write: (input: {
+    dir: string;
+    provider: ProviderConfig;
+    daemonApiKey: string | null;
+  }) => Promise<void>;
+  /** 官方端点形态跳过判定（pi：base_url 空 → true 静默跳过走 env 层；codex 恒 false）。 */
+  skipsOfficialEndpoint: (provider: ProviderConfig) => boolean;
+}
+
+/**
+ * interactive provider 聚合契约（design Wave 1 步 1 / 接口定义段；D-003@v2——
+ * 原地扩展 ProviderDescriptor，不另立契约文件）。新引擎接入 = 聚合表一份声明，
+ * 任一必填字段缺失由 `satisfies Record<string, ProviderAdapter>` 编译拦（TS2741）。
+ */
+export interface ProviderAdapter extends ProviderDescriptor {
+  /**
+   * env 层注入器懒工厂（函数形态 = import 环解法的一半：本文件与
+   * credential-injector.ts 互相仅在函数体内访问）；或显式 none+理由
+   *（codex：二进制无 env 注入面，凭证走文件层——spike A1；原 REGISTRY 注释
+   *  升格为声明式元数据）。
+   */
+  envInjector: (() => CredentialInjector) | { kind: 'none'; reason: string };
+  /** 文件层写盘器或显式 none+理由（claude：settings.json 链路在 daemon.ts）。 */
+  fileSettings: ProviderFileSettingsWriter | { kind: 'none'; reason: string };
+  /**
+   * per-session 目录类型（目录清理 / 孤儿清扫 / restore 探测 / 热切换重写 /
+   * reload 门控的统一数据源）；claude / cursor 无 per-session provider file
+   * dirs → 显式 none（claude 会话目录走 CLAUDE_CONFIG_DIR 另一链路）。
+   */
+  perSessionDir: 'codex' | 'pi' | { kind: 'none' };
+  /** 冒烟套件文件名（守护测试校验真实存在且覆盖全部支持格式，Wave 4 消费）。 */
+  smokeSuite: string;
+  /** 会话级供应商切换支持（与 caps.provider_switch 单源一致，测试锁定）。 */
+  switchable: boolean;
+}
+
 /**
  * 取 provider 的 caps 表项（注册表初始化守卫）。
  *
@@ -309,13 +410,16 @@ function capsOf(provider: string): ProviderCaps {
 }
 
 /**
- * interactive provider 注册表（design §5.2；claude / codex / cursor / pi 四键——
- * cursor 为 2026-09-08-cursor-interactive-session task-05 接入）。
+ * interactive provider 聚合注册表（design §5.2 + 2026-09-11-provider-adapter-
+ * registry task-01 / D-003@v2；claude / codex / cursor / pi 四键——cursor 为
+ * 2026-09-08-cursor-interactive-session task-05 接入）。
  *
  * `satisfies` 手法：不 widen 键类型，`keyof typeof INTERACTIVE_PROVIDERS`
  * 保持 'claude' | 'codex' | 'cursor' | 'pi' 字面量联合——InteractiveProvider 由此推导（单源）。
- * 新增 provider 在此加条目（caps 同步进上方 PROVIDER_CAPS + backend/frontend
- * 两端镜像），类型系统自动扩展，无需改 driver.ts / types.ts 的联合定义。
+ * 新引擎接入 = 在此加一份 ProviderAdapter 声明（caps 同步进上方 PROVIDER_CAPS
+ * + backend/frontend 两端镜像），缺任一必填字段 satisfies 即 TS2741 编译红；
+ * 类型系统自动扩展，无需改 driver.ts / types.ts 的联合定义。全引擎覆盖由守护
+ * 测试跨注册表对账（agent-detector 检测键 + backend agent_kind 词表，Wave 4）。
  */
 export const INTERACTIVE_PROVIDERS = {
   claude: {
@@ -326,6 +430,20 @@ export const INTERACTIVE_PROVIDERS = {
     // InteractiveProvider → keyof 注册表」的类型推理环（否则 TS7022/TS2456）。
     createDriver: (): InteractiveDriver => new ClaudeSdkDriver(),
     caps: capsOf('claude'),
+    // ── 聚合契约五成员（task-01；派生改造归 task-02，本表先声明数据源）──
+    // env 层注入器懒工厂（构造在函数体内，模块初始化零执行——环纪律见文件头）。
+    envInjector: () => new ClaudeCredentialInjector(),
+    // claude 的 settings.json 链路在 daemon.ts applyClaudeSettings（另一链路，
+    // 不属 per-session provider file dirs 写盘器范畴）。
+    fileSettings: {
+      kind: 'none',
+      reason: 'claude settings.json 链路在 daemon.ts applyClaudeSettings',
+    },
+    // claude 会话目录走 CLAUDE_CONFIG_DIR 另一链路，无 per-session provider file dir。
+    perSessionDir: { kind: 'none' },
+    // env 层注入锚点（claude 无写盘器，冒烟取注入器套件）。
+    smokeSuite: 'tests/credential-injector.test.ts',
+    switchable: true,
   },
   codex: {
     provider: 'codex',
@@ -333,6 +451,27 @@ export const INTERACTIVE_PROVIDERS = {
     displayName: 'Codex',
     createDriver: (): InteractiveDriver => new CodexAppServerDriver(),
     caps: capsOf('codex'),
+    // ── 聚合契约五成员（task-01）──
+    // codex 0.147 二进制无 env 注入面，凭证走文件层（spike A1）——原
+    // credential-injector.ts REGISTRY 注释升格为声明式元数据（REGISTRY 派生化归 task-02）。
+    envInjector: {
+      kind: 'none',
+      reason: 'codex 0.147 二进制无 env 注入面，凭证走文件层（spike A1）',
+    },
+    // 写盘器薄适配字面量：wrap writeCodexHome / isCodexFormSufficient（写盘器
+    // 本体不动；write/skipsOfficialEndpoint 方法体内引用=惰性，isSufficient 取
+    // 绑定——provider-file-settings.ts 不回引本文件，环纪律见文件头）。
+    fileSettings: {
+      dirName: 'codex',
+      envKey: 'CODEX_HOME',
+      isSufficient: isCodexFormSufficient,
+      write: ({ dir, provider, daemonApiKey }) =>
+        writeCodexHome({ codexHome: dir, provider, daemonApiKey }),
+      skipsOfficialEndpoint: () => false,
+    },
+    perSessionDir: 'codex',
+    smokeSuite: 'tests/provider-injection-smoke.integ.test.ts',
+    switchable: true,
   },
   // cursor：family='stream_json' 与批量层 PROVIDER_TO_PROTOCOL 反查一致
   //（PROTOCOL_PROVIDERS.stream_json 含 cursor，守护测试断言）；displayName='Cursor'；
@@ -344,6 +483,17 @@ export const INTERACTIVE_PROVIDERS = {
     displayName: 'Cursor',
     createDriver: (): InteractiveDriver => new CursorDriver(),
     caps: capsOf('cursor'),
+    // ── 聚合契约五成员（task-01）──
+    // cursor 私有 ConnectRPC 云协议无 BYO 注入面（spike C）——env / 文件层全 none。
+    envInjector: {
+      kind: 'none',
+      reason: 'cursor 私有 ConnectRPC 云协议无 BYO 注入面（spike C）',
+    },
+    fileSettings: { kind: 'none', reason: '无注入面' },
+    perSessionDir: { kind: 'none' },
+    // driver 层锚点（cursor 无写盘器与 env 注入器，冒烟取 driver 套件）。
+    smokeSuite: 'tests/interactive/cursor-driver.test.ts',
+    switchable: false,
   },
   // pi：family='pi_json' 与批量层 PROVIDER_TO_PROTOCOL 反查一致（守护测试断言）；
   // displayName='PI'；driver 当前为 task-04 占位（零参构造可实例化，契约方法
@@ -354,8 +504,24 @@ export const INTERACTIVE_PROVIDERS = {
     displayName: 'PI',
     createDriver: (): InteractiveDriver => new PiRpcDriver(),
     caps: capsOf('pi'),
+    // ── 聚合契约五成员（task-01）──
+    // env 层注入器懒工厂（构造在函数体内，模块初始化零执行——环纪律见文件头）。
+    envInjector: () => new PiCredentialInjector(),
+    // 写盘器薄适配字面量：wrap writePiDir / isPiFormSufficient；官方端点形态
+    //（base_url 空）跳过写盘、静默走 env 层（pi-settings 同判据 nonEmptyStr）。
+    fileSettings: {
+      dirName: 'pi',
+      envKey: 'PI_CODING_AGENT_DIR',
+      isSufficient: isPiFormSufficient,
+      write: ({ dir, provider }) => writePiDir({ piDir: dir, provider }),
+      skipsOfficialEndpoint: (provider) =>
+        typeof provider.base_url !== 'string' || provider.base_url.length === 0,
+    },
+    perSessionDir: 'pi',
+    smokeSuite: 'tests/provider-injection-smoke.integ.test.ts',
+    switchable: true,
   },
-} satisfies Record<string, ProviderDescriptor>;
+} satisfies Record<string, ProviderAdapter>;
 
 /**
  * interactive provider 联合（FR-05：从注册表推导，单源）。

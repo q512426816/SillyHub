@@ -170,7 +170,14 @@ import type { SessionManager } from './interactive/session-manager.js';
 // 2026-09-10-review-dispatch-platform-fixes task-03（FR-01）：provider 能力单源
 // 查询——onTurnResult mission_worker 兜底代报门控用 caps.mcp===false
 //（pi/codex/cursor 无原生 MCP，无法经 worker_done 工具自报终态产出）。
-import { getProviderCaps } from './interactive/providers.js';
+// 2026-09-11-provider-adapter-registry task-03（FR-03）：INTERACTIVE_PROVIDERS
+// 聚合表引入——热切换门控 / per-session 目录清理 / 孤儿清扫三处硬编码收口
+//（下方 hasProviderFileWriter / providerFileDirNames 两助手）。
+import {
+  getProviderCaps,
+  INTERACTIVE_PROVIDERS,
+} from './interactive/providers.js';
+import type { ProviderAdapter } from './interactive/providers.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
 // 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
 // interactive 无 TaskRunner 实例也能直接调用。
@@ -195,6 +202,33 @@ import type {
   SessionSwitchConfigPayload,
   SessionSwitchProfilePayload,
 } from './interactive/types.js';
+
+// ── 2026-09-11-provider-adapter-registry task-03（FR-03 / design Wave 2 六处收口）──
+//
+// provider kind 硬编码收口的聚合表元数据小助手（daemon 侧三处：热切换尽力
+// 重写门控 / _cleanupProviderFileDirs 目录清理 / _sweepOrphanProviderFileDirs
+// 孤儿清扫）。数据源 INTERACTIVE_PROVIDERS（task-01 聚合契约）——新引擎接入
+// 在聚合表声明 fileSettings writer / perSessionDir 后自动纳入，无需再改本
+// 文件。行为逐类等价：claude / cursor（fileSettings 显式 none）与未知 kind
+//（表无条目，as Record 索引得 undefined）均视同非 writer 与 perSessionDir
+// none → 零动作，与原 codex/pi 字面量判断逐类等价（task-03 constraints）。
+
+/** agentKind 的 adapter 存在且 fileSettings 为写盘器（非 { kind: 'none' }）。 */
+function hasProviderFileWriter(agentKind: string): boolean {
+  const adapter = (INTERACTIVE_PROVIDERS as Record<
+    string,
+    ProviderAdapter | undefined
+  >)[agentKind];
+  return adapter !== undefined && 'write' in adapter.fileSettings;
+}
+
+/** 聚合表 perSessionDir 字符串值集合（现值 'codex'/'pi'，插入序稳定）。 */
+function providerFileDirNames(): Array<'codex' | 'pi'> {
+  return Object.values(INTERACTIVE_PROVIDERS)
+    .map((adapter) => adapter.perSessionDir)
+    .filter((dir): dir is 'codex' | 'pi' => typeof dir === 'string');
+}
+
 
 // ── task-09（2026-08-14-sessions-portal / FR-05 / D-012@v1）────────────────────
 // SESSION_SWITCH_CONFIG 消息类型字面量（Server → Daemon：会话内切档案/供应商 +
@@ -4723,8 +4757,11 @@ export class Daemon {
    *
    * 按确定性路径 rm（不依赖 _providerFileDirsBySession 登记——daemon 重启
    * recover 重建的会话无登记但目录仍在；登记条目照删防 Map 泄漏）：
-   * ``<daemonStateDir()>/codex/<sessionId>/`` 与 ``<daemonStateDir()>/pi/
-   * <sessionId>/``。``recursive+force``（rimraf 风格）：force 容忍目录不存在
+   * ``<daemonStateDir()>/<dirName>/<sessionId>/``，目录清单遍历聚合表
+   * INTERACTIVE_PROVIDERS 的 perSessionDir 字符串值派生（2026-09-11-provider-
+   * adapter-registry task-03 收口，现值 codex/pi——与原硬编码两路径逐字等价，
+   * rm recursive+force 语义不变；新引擎声明 perSessionDir 后自动纳入清理）。
+   * ``recursive+force``（rimraf 风格）：force 容忍目录不存在
    *（零 provider 会话 / 已清过），幂等零泄漏。
    *
    * 尽力语义：逐目录 try/catch，失败仅 warn **不抛**——调用点（onSessionEnd
@@ -4734,10 +4771,10 @@ export class Daemon {
    */
   private async _cleanupProviderFileDirs(sessionId: string): Promise<void> {
     const root = daemonStateDir();
-    for (const kindDir of [
-      join(root, 'codex', sessionId),
-      join(root, 'pi', sessionId),
-    ]) {
+    // 2026-09-11-provider-adapter-registry task-03：codex/pi 硬编码目录清单改由
+    // 聚合表 perSessionDir 派生（插入序 codex→pi，rm 顺序与原硬编码一致）。
+    for (const kind of providerFileDirNames()) {
+      const kindDir = join(root, kind, sessionId);
       try {
         await rm(kindDir, { recursive: true, force: true });
       } catch (e) {
@@ -4771,7 +4808,11 @@ export class Daemon {
       return;
     }
     const root = daemonStateDir();
-    for (const kind of ['codex', 'pi'] as const) {
+    // 2026-09-11-provider-adapter-registry task-03（FR-03）：孤儿清扫清单改由聚合表
+    // perSessionDir 派生（原硬编码 ['codex','pi']，现值逐字等价；漏改则新引擎
+    // 残留目录永不清——Grill 发现）。claude/cursor（perSessionDir none）与未知
+    // kind 天然不在清单，零动作等价。
+    for (const kind of providerFileDirNames()) {
       const kindRoot = join(root, kind);
       let entries: string[];
       try {
@@ -7812,8 +7853,12 @@ export class Daemon {
       return;
     }
     const agentKind = providerConfig.agent_kind;
-    if (agentKind !== 'codex' && agentKind !== 'pi') {
-      // claude / 缺省 kind：无 per-session 文件目录（applyProviderFileSettings
+    // 2026-09-11-provider-adapter-registry task-03（FR-03）：门控改读聚合表元数据
+    //（原 `!== 'codex' && !== 'pi'` 硬编码）——fileSettings 为 writer 才重写；
+    // claude / cursor / 未知 kind（表无条目）零动作，与原判断逐类等价；下方
+    // applyProviderFileSettings 调用不变（task-02 已同源派发）。
+    if (!hasProviderFileWriter(agentKind)) {
+      // claude / cursor / 缺省 kind：无 per-session 文件目录（applyProviderFileSettings
       // 同判），零动作——claude settings.json 热切换归 markPendingSwitch reload 链。
       return;
     }

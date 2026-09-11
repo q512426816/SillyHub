@@ -512,3 +512,81 @@ describe('writeCodexHome TOML 转义（basic string）', () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. api_format 全词表→per-form 产物映射表驱动（FR-05 冒烟制度化）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('writeCodexHome api_format 全词表→per-form 产物映射（FR-05 冒烟制度化，2026-09-11-provider-adapter-registry task-06）', () => {
+  // 词表事实源 = backend/app/modules/llm_provider/schema.py:33
+  // `api_format: Literal["anthropic", "openai_chat"] = "anthropic"`（同
+  // pi-settings 表驱动组）。本表的 'anthropic' / 'openai_chat' 字面量亦为守护
+  // 测试 tests/provider-adapter-registry.test.ts ③「smokeSuite 词表扫描」的
+  // 静态代理对象——词表加值时两处同步。
+  //
+  // 不设词表外行：codex 分派是 else 形态（resolveCodexForm 仅识别 openai_chat，
+  // 其余一律走 anthropic 直连分支），且 backend Literal 422 在入口前置拦截词
+  // 表外值——与 pi 的显式 skip 语义不同，无需哨兵行。
+  //
+  // 既有 18 用例零改动：上方 1-6 组的分散断言（golden 逐字段 / 合并 / 门槛 /
+  // 转义）保留原样，本组是聚合声明式的「全词表 × 期望 per-form 字段」单表。
+  it.each([
+    {
+      apiFormat: 'anthropic' as const,
+      expected: 'anthropic 直连：base_url=provider.base_url、model=裸 model id、auth=provider.api_key',
+      makeProvider: () => anthropicProvider(),
+      daemonApiKey: 'sk-daemon-unused',
+      baseUrl: 'https://anthropic.example.com',
+      model: 'glm-4.7',
+      authKey: 'sk-ant-direct-123',
+    },
+    {
+      apiFormat: 'openai_chat' as const,
+      expected: 'litellm 通道：base_url=litellm_base_url、model=litellm_model_name、auth=daemonApiKey',
+      makeProvider: () => openaiChatProvider(),
+      daemonApiKey: 'sk-daemon-master-1',
+      baseUrl: 'https://hub.example.com/api/daemon/llm-proxy',
+      model: 'usr-42-7',
+      authKey: 'sk-daemon-master-1',
+    },
+  ])(
+    'api_format=$apiFormat → wire_api="responses"（$expected）',
+    async ({ makeProvider, daemonApiKey, baseUrl, model, authKey }) => {
+      const home = newCodexHome();
+      await writeCodexHome({
+        codexHome: home,
+        provider: makeProvider(),
+        daemonApiKey,
+      });
+
+      // D-003：wire_api 恒 'responses'（0.147.0 唯一合法值）是两形态共同锚点。
+      const config = readFileSync(join(home, 'config.toml'), 'utf-8');
+      expect(config).toContain('wire_api = "responses"');
+      // per-form 差异字段（Grill B-3：per-form 映射唯一事实源）逐字段断言。
+      expect(config).toContain(`base_url = "${baseUrl}"`);
+      expect(config).toContain(`model = "${model}"`);
+      expect(readJson(home, 'auth.json').OPENAI_API_KEY).toBe(authKey);
+    },
+  );
+
+  it('api_format 缺省（undefined）→ 产物与 anthropic 行逐字节一致（resolveCodexForm 缺省走 anthropic 分支）', async () => {
+    const homeAnthropic = newCodexHome();
+    const homeUndefined = newCodexHome();
+    await writeCodexHome({
+      codexHome: homeAnthropic,
+      provider: anthropicProvider(),
+      daemonApiKey: 'sk-daemon-unused',
+    });
+    await writeCodexHome({
+      codexHome: homeUndefined,
+      provider: anthropicProvider({ api_format: undefined }),
+      daemonApiKey: 'sk-daemon-unused',
+    });
+    expect(readFileSync(join(homeUndefined, 'config.toml'), 'utf-8')).toBe(
+      readFileSync(join(homeAnthropic, 'config.toml'), 'utf-8'),
+    );
+    expect(readFileSync(join(homeUndefined, 'auth.json'), 'utf-8')).toBe(
+      readFileSync(join(homeAnthropic, 'auth.json'), 'utf-8'),
+    );
+  });
+});

@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "gen:types": "node scripts/gen-api-types.mjs",
+    "gen:types": "node scripts/gen-api-types.mjs && node ../sillyhub-daemon/scripts/gen-provider-caps.mjs",
     "gen:types:check": "node scripts/gen-api-types.mjs && git diff --exit-code src/lib/api-types.ts"
   },
   "dependencies": {

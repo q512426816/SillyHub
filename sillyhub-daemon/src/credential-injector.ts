@@ -20,6 +20,10 @@
  */
 
 import type { ProviderConfig } from './types.js';
+// task-02（2026-09-11-provider-adapter-registry）：REGISTRY 惰性派生的数据源
+//（聚合表）。值引用延迟到 buildRegistry 函数体内——与 providers.ts 对本模块
+// 的函数体内引用互为 import 环的安全形态（模块求值序零 TDZ，见 REGISTRY 注释）。
+import { INTERACTIVE_PROVIDERS } from './interactive/providers.js';
 
 /**
  * daemon 自身 apiKey（task-04 / security-audit-remediation / Grill M-2）。
@@ -250,22 +254,34 @@ export class PiCredentialInjector implements CredentialInjector {
 }
 
 /**
- * 注入器注册表（agent_kind → injector 单例）。
+ * 注入器注册表（agent_kind → injector 单例）——**聚合表惰性派生**。
  *
- * 已注册 claude / pi；未知 agentKind 返回 undefined（task-09 buildSpawnEnv 第 0 层
- * 据此判跳过，零回归 D-007）。
+ * 2026-09-11-provider-adapter-registry task-02（FR-02 / design Wave 1 步 3）：
+ * 数据源改为 INTERACTIVE_PROVIDERS（providers.ts 聚合契约）的 envInjector 声明
+ * ——条目值为懒工厂函数（claude/pi）则调用取实例，为 {kind:'none'}（codex/cursor）
+ * 则跳过。**import 环解法**：providers.ts 值引用本模块的注入器类（构造全在其
+ * 聚合条目的箭头函数体内，模块求值零执行），本模块回读 INTERACTIVE_PROVIDERS
+ * ——两侧互相引用均延迟到函数体内 + 本表惰性 memoized（首调 getInjector 时
+ * 构建），ESM 求值序零 TDZ。
  *
- * **codex 刻意不注册 env 注入器**（2026-09-10-multi-provider-injection / D-003 /
- * D-005）：codex 0.147.0 二进制无任何 base_url/key 类 env 注入面（spike A1 实测），
- * 凭证注入走文件层——provider-file-settings.ts applyProviderFileSettings 按 agent_kind='codex'
- * 分派 writeCodexHome 写 per-session CODEX_HOME/{auth.json, config.toml} 并注入
- * CODEX_HOME env（config.toml [model_providers.sillyhub].base_url 重定向端点）。
- * 故本表登记 codex 也不会被 spawn-env 第 0 层消费；gemini 仍预留后续变更。
+ * **codex 无 env 注入器是声明式元数据**（聚合表 envInjector={kind:'none',reason}，
+ * 原「刻意不注册」注释的升格）：codex 0.147.0 二进制无任何 base_url/key 类 env
+ * 注入面（spike A1 实测），凭证走文件层（provider-file-settings.ts 按
+ * agent_kind='codex' 分派 writeCodexHome 写 per-session CODEX_HOME）。
+ * 新引擎接入在聚合表声明 envInjector 后自动纳入，无需改本文件。
  */
-const REGISTRY: Readonly<Record<string, CredentialInjector>> = Object.freeze({
-  claude: new ClaudeCredentialInjector(),
-  pi: new PiCredentialInjector(),
-});
+let registryCache: Readonly<Record<string, CredentialInjector>> | undefined;
+
+function buildRegistry(): Readonly<Record<string, CredentialInjector>> {
+  const registry: Record<string, CredentialInjector> = {};
+  for (const [kind, adapter] of Object.entries(INTERACTIVE_PROVIDERS)) {
+    const injector = adapter.envInjector;
+    if (typeof injector === 'function') {
+      registry[kind] = injector();
+    }
+  }
+  return Object.freeze(registry);
+}
 
 /**
  * 按 agent_kind 取注入器实例。
@@ -278,5 +294,6 @@ export function getInjector(
   agentKind: string | undefined,
 ): CredentialInjector | undefined {
   if (!agentKind) return undefined;
-  return REGISTRY[agentKind];
+  registryCache ??= buildRegistry();
+  return registryCache[agentKind];
 }

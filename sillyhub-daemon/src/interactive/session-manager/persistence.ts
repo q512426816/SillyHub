@@ -46,6 +46,11 @@ import { join } from 'node:path';
 import { daemonStateDir } from '../../config.js';
 import { mirrorCodexHostAuth } from '../../codex-settings.js';
 import { applyProviderFileSettingsForReload } from '../../provider-file-settings.js';
+// 2026-09-11-provider-adapter-registry task-03（FR-03）：restore 门控与 codex 探测
+// 目录类型判定改读聚合表元数据（INTERACTIVE_PROVIDERS 的 fileSettings writer /
+// perSessionDir；详见下方 restoreAndReconnect 内注释）。
+import { INTERACTIVE_PROVIDERS } from '../providers.js';
+import type { ProviderAdapter } from '../providers.js';
 import type { SessionManagerCore } from './types.js';
 
 /**
@@ -334,7 +339,21 @@ export async function restoreAndReconnect(
     // 链路仍归 daemon.ts spawn 侧 applyClaudeSettings + 上方既有 env 逻辑，零漂移，
     // design Wave 2 步骤 5）。插入位置对齐 task-03 在 _reloadSessionNow 的合并块
     //（applyTranscriptConfigDir 之后、driver.start 之前——文件层键最后合并盖过下层）。
-    if (state.provider === 'codex' || state.provider === 'pi') {
+    //
+    // 2026-09-11-provider-adapter-registry task-03（FR-03）：外层门控改读聚合表
+    // INTERACTIVE_PROVIDERS 元数据（原 provider === 'codex' || 'pi' 硬编码）——
+    // adapter 存在且 fileSettings 为 writer（'write' in 判定，非 { kind:'none' }）
+    // 才注文件层 env；claude / cursor（显式 none）与未知 provider（表无条目，
+    // 索引得 undefined）零动作，与原判断逐类等价（task-03 constraints）。
+    const providerAdapter = (INTERACTIVE_PROVIDERS as Record<
+      string,
+      ProviderAdapter | undefined
+    >)[state.provider];
+    if (
+      providerAdapter !== undefined &&
+      'write' in providerAdapter.fileSettings
+    ) {
+      const fileWriter = providerAdapter.fileSettings;
       // providerConfig 非 null（持久化供应商快照恢复）：经 ForReload 重写
       // per-session 目录 + 注文件层 env（与 _reloadSessionNow task-03 同模式，
       // 失败兜底内聚在返回值矩阵 R-05）。priorEnv 传 undefined = 恢复时无旧 env
@@ -350,7 +369,7 @@ export async function restoreAndReconnect(
           priorEnv: undefined,
         });
         Object.assign(restoreEnv, fileEnv);
-      } else if (state.provider === 'codex') {
+      } else if (providerAdapter.perSessionDir === 'codex') {
         // codex null 目录探测（Grill 复审 P2-3）= 切换后重启不丢 thread：
         // persistence 仅落盘非 null providerConfig（snapshotPersistable task-08），
         // null 切换（切回本机）会话的恢复记录天然无该字段——若按无供应商处理会
@@ -360,7 +379,12 @@ export async function restoreAndReconnect(
         // 目录留旧供应商产物 = 等同未切、env 仍保住）；不存在 → 零动作（行为与
         // 现状逐字一致）。pi 不适用（null = 回宿主即语义本身，pi 历史在 daemon
         // 自管 --session-dir 不丢）。
-        const codexHome = join(daemonStateDir(), 'codex', state.sessionId);
+        // 2026-09-11-provider-adapter-registry task-03：目录类型判定改读
+        // perSessionDir === 'codex'（原 provider === 'codex'，保持仅 codex 探测
+        // 语义——pi 无目录历史）；探测路径由 writer.dirName 派生（现值 'codex'，
+        // 与原 join(daemonStateDir(), 'codex', ...) 逐字等价），stat /
+        // mirrorCodexHostAuth / CODEX_HOME 注入探测体不动。
+        const codexHome = join(daemonStateDir(), fileWriter.dirName, state.sessionId);
         try {
           if ((await stat(codexHome)).isDirectory()) {
             // mirrorCodexHostAuth 自身绝不抛；防御 catch 兜底（镜像成败不影响

@@ -279,3 +279,21 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
     throw e;
   }
 }
+
+/**
+ * pi 写盘门槛判定（2026-09-11-provider-adapter-registry task-02 自
+ * provider-file-settings.ts 迁入——与 writePiDir 同文件且打断 import 环；判据
+ * 与 writePiDir 内部 gate 同源）：非 openai_chat 禁配形态 + base_url 非空
+ *（自定义端点，官方端点归 env 层 D-008）+ api_key 非空 + 裸 model id
+ *（default_fallback_model ?? model）非空。聚合表 pi writer 的 isSufficient 与
+ * spawn/reload 分派共用。
+ */
+export function isPiFormSufficient(provider: ProviderConfig): boolean {
+  return (
+    provider.api_format !== 'openai_chat' &&
+    nonEmpty(provider.base_url) !== undefined &&
+    nonEmpty(provider.api_key) !== undefined &&
+    (nonEmpty(provider.default_fallback_model) ?? nonEmpty(provider.model)) !==
+      undefined
+  );
+}
