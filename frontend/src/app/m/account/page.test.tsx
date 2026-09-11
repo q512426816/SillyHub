@@ -16,11 +16,14 @@ vi.mock("@/lib/auth", () => ({
 
 // 头像上传管线 mock（对齐桌面 (dashboard)/account/page.test 惯例）：
 // uploadFile 供选图断言、getFileDownloadUrl 保持 /api/file/{id} 形态、
-// fetchFileBlob 供头像渲染链路（useAvatarSrc）静默回 Blob。
+// fetchFileBlob 供头像渲染链路（useAvatarSrc）静默回 Blob；
+// tryReclaimOrphanAvatarFile 供上传失败 catch 路径兜底回收（ql-20260911-019-1f01
+// 新增调用，缺导出会让异步 handler 抛未捕获错误——用例全过后仍打挂 vitest 进程）。
 vi.mock("@/lib/file/api", () => ({
   uploadFile: vi.fn(),
   getFileDownloadUrl: (id: string) => `/api/file/${id}`,
   fetchFileBlob: vi.fn(async () => new Blob(["x"], { type: "image/png" })),
+  tryReclaimOrphanAvatarFile: vi.fn(() => false),
 }));
 
 import { changePassword, logout, updateMyAvatar } from "@/lib/auth";

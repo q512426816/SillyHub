@@ -443,7 +443,12 @@
 关联变更：（无）
 文件：sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts
 
-## ql-20260911-022-1614 | 2026-09-11 13:06:33 | 移动端账号页测试 mock 缺 tryReclaimOrphanAvatarFile 导出——d95130926 头像兜底回收首次进 CI 暴露未捕获错误打挂 vitest
-状态：进行中
+## ql-20260911-022-1614 | 2026-09-11 13:06:33 | 移动端账号页测试 mock 补 tryReclaimOrphanAvatarFile 导出（d9519026 头像兜底回收首次进 CI 暴露）
+状态：已完成
 关联变更：（无）
-文件：frontend/src/app/m/account/page.test.tsx
+文件：
+- frontend/src/app/m/account/page.test.tsx（vi.mock 工厂补 tryReclaimOrphanAvatarFile 导出）
+需求：移动端账号页测试 mock 补 tryReclaimOrphanAvatarFile 导出（d9519026 头像兜底回收首次进 CI 暴露）
+根因：d95130926 给 handleAvatarFile catch 路径新增孤儿文件兜底回收调用，三个调用点中桌面账号页与 member-panel 的测试 mock 都补了导出，唯移动端 page.test.tsx 遗漏；上传失败用例断言通过后异步 handler 访问缺失导出抛未捕获错误，经定时器浮出把 vitest 进程打挂（3658 用例全过仍 exit 1）
+方案：移动端测试的 vi.mock 工厂补 tryReclaimOrphanAvatarFile 桩（fire-and-forget 语义返回 false 即可，移动端用例无需断言回收）并加注释说明来源
+结果：vitest 单文件 5 passed；eslint 0 error 0 warning
