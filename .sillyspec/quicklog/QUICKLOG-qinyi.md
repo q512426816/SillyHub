@@ -414,3 +414,15 @@
 结果：backend 定向 87 passed（auth 13+group 35+file 39，含换绑/清除/外链/他人文件回收反例），ruff/mypy/format 0；frontend account 15+member-panel 44 passed，tsc 0；模块文档六卡同步+2 处预存引用债顺手修（daemon.md 裸文件名、code-quality 文档缺仓根前缀）
 审计：⚖️ 归属切分：12 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/docs/SillyHub/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONVENTIONS.md, .sillyspec/docs/frontend/scan/CONVENTIONS.md, .sillyspec/docs/multi-agent-platform/scan/CONCERNS.md, backend/app/modules/daemon/tests/test_group_chat_management.py, backend/tests/modules/auth/test_my_avatar.py, docs/architecture-4a.md, docs/code-quality-hardening-2026-07-24.md, docs/research-ai-toolbox-config-management-2026-09-10.md, frontend/src/app/(dashboard)/account/page.tsx, frontend/src/app/m/account/page.tsx
 审计：🔍 软归属：2 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：frontend/src/app/(dashboard)/account/page.test.tsx（+51/-1）, frontend/src/components/group-chat/__tests__/member-panel.test.tsx（+44/-0）
+
+## ql-20260911-020-1da6 | 2026-09-11 12:38:20 | CI 失败与不稳定测试修复批：6 处测试自身缺陷（常量改名未同步/密钥模型未跟上/缺渲染等待/mock 被覆盖/sessions 未等待/心跳计数过严）
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/change_writer/tests/test_proxy.py, backend/app/modules/daemon/tests/test_mcp_config_endpoint.py, frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx, frontend/src/lib/__tests__/use-daemon-machines.test.ts, sillyhub-daemon/tests/daemon.test.ts
+
+## ql-20260911-019-9d31 | 2026-09-11 11:40:00 | delete-change-confirm 补 scope-audit mock（32d311934 提交后成为正式预存债）
+状态：已完成
+关联变更：2026-09-11-skills-central-library（verify 门暴露；债务源 32d311934）
+文件：
+- frontend/src/components/__tests__/delete-change-confirm.test.tsx（+ScopeAuditCommandCard mock+useQuickSessionName 空实现）
+验证：19 passed
