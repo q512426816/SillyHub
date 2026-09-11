@@ -5,7 +5,7 @@
 // （spike B1 完整闭环证据，pi 0.81.1）：
 //   - auth.json 官方形状 {"<providerKey>": {"type": "api_key", "key": ...}}
 //     （b1-auth.json 的 {"apiKey": ...} 投影形状实测被拒，是负例勿用）
-//   - models.json providers 段 {name, api: "openai-completions", baseUrl, models: [{id}]}
+//   - models.json providers 段 {name, api: "anthropic-messages", baseUrl, models: [{id}]}
 //   - settings.json {defaultProvider, defaultModel}
 //
 // 覆盖 design 接口定义 pi 段 + D-004（官方 auth 形状）/ D-005（文件层载体）/
@@ -107,7 +107,7 @@ describe('writePiDir 自定义端点形态（golden=spike b1b-auth/b1-models/b1-
     expect(sillyhub.key).toBe('sk-mock-123');
   });
 
-  it('models.json providers.sillyhub = {name, api:"openai-completions", baseUrl, models:[{id}]}（b1-models 逐字段）', async () => {
+  it('models.json providers.sillyhub = {name, api:"anthropic-messages", baseUrl, models:[{id}]}（b1-models 逐字段）', async () => {
     const dir = newPiDir();
     await writePiDir({ piDir: dir, provider: piCustomProvider() });
 
@@ -117,7 +117,7 @@ describe('writePiDir 自定义端点形态（golden=spike b1b-auth/b1-models/b1-
       providers: {
         sillyhub: {
           name: 'SillyHub',
-          api: 'openai-completions',
+          api: 'anthropic-messages',
           baseUrl: 'http://127.0.0.1:18999/v1',
           models: [{ id: 'mock-model' }],
         },
@@ -209,13 +209,13 @@ describe('writePiDir preserve unknown（先读后合并，兄弟键/未知字段
           providers: {
             mockprov: {
               name: 'MockProv',
-              api: 'openai-completions',
+              api: 'anthropic-messages',
               baseUrl: 'http://127.0.0.1:18999/v1',
               models: [{ id: 'mock-model' }],
             },
             sillyhub: {
               name: 'Stale Name',
-              api: 'openai-completions',
+              api: 'anthropic-messages',
               baseUrl: 'http://stale.example/v1', // 旧托管值必须被替换
               models: [{ id: 'stale-model' }, { id: 'extra-model' }],
               queryMode: 'think', // 条目内未知字段保留
@@ -239,7 +239,7 @@ describe('writePiDir preserve unknown（先读后合并，兄弟键/未知字段
     // 兄弟 provider 原样保留
     expect(providers.mockprov).toEqual({
       name: 'MockProv',
-      api: 'openai-completions',
+      api: 'anthropic-messages',
       baseUrl: 'http://127.0.0.1:18999/v1',
       models: [{ id: 'mock-model' }],
     });
@@ -330,6 +330,28 @@ describe('writePiDir 写盘门槛', () => {
     expect(existsSync(join(dir, 'settings.json'))).toBe(false);
     // 官方端点是设计内分派而非异常——静默跳过（区别于字段缺失的 warn 跳过）。
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('api_format 未知值（词表外）→ warn 跳过零写入（ql-20260911-029：写错协议的 models.json 会让 pi 全断流，宁可不写）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dir = newPiDir();
+    await expect(
+      writePiDir({
+        piDir: dir,
+        provider: piCustomProvider({
+          api_format: 'google-genai-legacy',
+          api_key: 'sk-test',
+          base_url: 'https://example.com/v1',
+        }),
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'pi_dir_write_skipped_unknown_api_format',
+      expect.objectContaining({ piDir: dir, api_format: 'google-genai-legacy' }),
+    );
+    expect(existsSync(join(dir, 'models.json'))).toBe(false);
+    warnSpy.mockRestore();
   });
 
   it('api_format=openai_chat（pi × openai_chat 禁配组合）→ warn 跳过，即使 base_url/api_key 齐备也不放行（防御性双保险；后端 422 归 task-05）', async () => {

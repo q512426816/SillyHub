@@ -11,8 +11,10 @@
  *   - auth.json 官方形状 `{"<providerKey>": {"type": "api_key", "key": <value>}}`
  *     （golden = spike/b1b-auth.json；b1-auth.json 的 `{"apiKey": ...}` 投影形状
  *     实测被拒——`No API key found for the selected model.`，不采用）；
- *   - models.json providers 段 `api: "openai-completions"` 打 `/chat/completions`
- *     （golden = spike/b1-models.json，api 固定值以 golden 为准，D-010）。
+ *   - models.json providers 段 `api` 按 provider.api_format 映射（anthropic/缺省
+ *     → "anthropic-messages" 打 `/v1/messages`；golden = spike/b1-models.json 的
+ *     openai-completions 形态仅历史依据——ql-20260911-029 实证 anthropic 端点写
+ *     openai-completions 会协议错配全断流，pi docs/models.md:123-128 合法四值）。
  *
  * 与 env 层共存语义（R-04 / spike Pi-3，分层见 D-008）：
  *   - pi 官方 key 解析优先级（官方文档 + spike）：CLI `--api-key` > auth.json >
@@ -24,7 +26,7 @@
  * 产物形状（与 spike b1 系 golden 逐字段一致）：
  *   auth.json:    providers 键 "sillyhub" upsert {"type": "api_key", "key": api_key}
  *                 ——先读后写保留未知兄弟 provider 键；
- *   models.json:  providers.sillyhub = {name: "SillyHub", api: "openai-completions",
+ *   models.json:  providers.sillyhub = {name: "SillyHub", api: <按 api_format 映射>,
  *                 baseUrl: provider.base_url, models: [{id: <裸 model id>}]}
  *                 ——托管字段差量替换，兄弟 provider 键 / 未知顶层键 / sillyhub
  *                 条目内未知字段保留；
@@ -77,11 +79,21 @@ const PROVIDER_KEY = 'sillyhub';
 /** models.json providers.sillyhub.name 展示名（仅展示用途，不影响路由）。 */
 const PROVIDER_DISPLAY_NAME = 'SillyHub';
 /**
- * providers.sillyhub.api 固定值。pi 0.81.1 经 OpenAI SDK 打 `/chat/completions`
- * （spike B1 闭环 + b1-models.json:5 golden），自定义 OpenAI 兼容端点唯一取值
- * ——升级漂移由 task-07 冒烟暴露（R-03，此处为显式事实源）。
+ * models.json providers.sillyhub.api 映射（ql-20260911-029）：
+ * pi 自定义供应商合法 api 四值（docs/models.md:123-128）——openai-completions /
+ * openai-responses / anthropic-messages / google-generative-ai。平台 pi 供应商
+ * 自定义端点形态即 anthropic 协议（DB 词表 default 'anthropic'，openai_chat 禁配
+ * 已在 writePiDir 前置跳过），映射 'anthropic'/缺省 → 'anthropic-messages'；
+ * 其余未知值 → undefined（调用方 warn 跳过，防半配形状写出必断流配置）。
  */
-const PROVIDER_API = 'openai-completions';
+function piApiForFormat(
+  apiFormat: string | null | undefined,
+): string | undefined {
+  if (apiFormat === 'anthropic' || apiFormat === undefined || apiFormat === null || apiFormat === '') {
+    return 'anthropic-messages';
+  }
+  return undefined;
+}
 
 /** 空串 / null / undefined 一律视为未设置（对齐 types.ts 空串=未配置语义）。 */
 function nonEmpty(v: string | null | undefined): string | undefined {
@@ -155,6 +167,7 @@ async function writeModelsJson(
   piDir: string,
   baseUrl: string,
   modelId: string,
+  api: string,
 ): Promise<void> {
   const modelsPath = join(piDir, MODELS_FILENAME);
   const doc = await readJsonObject(modelsPath, MODELS_FILENAME);
@@ -180,7 +193,7 @@ async function writeModelsJson(
   target[PROVIDER_KEY] = {
     ...(existingEntry ?? {}),
     name: PROVIDER_DISPLAY_NAME,
-    api: PROVIDER_API,
+    api,
     baseUrl,
     models: [{ id: modelId }],
   };
@@ -228,6 +241,17 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
   const baseUrl = nonEmpty(provider.base_url);
   if (baseUrl === undefined) return;
 
+  // api_format → pi api 映射（ql-20260911-029）：未知格式 warn 跳过——写错协议
+  // 的 models.json 会让 pi 拿错误 SDK 打端点全断流（线上实证），宁可不写。
+  const api = piApiForFormat(provider.api_format);
+  if (api === undefined) {
+    console.warn('pi_dir_write_skipped_unknown_api_format', {
+      piDir,
+      api_format: provider.api_format ?? '',
+    });
+    return;
+  }
+
   // 必需字段校验：api_key 不写空值（空串 key 会被 pi 当字面量打给上游）；
   // 裸 model id 缺失同样跳过（defaultModel/models 目录是 pi 侧唯一选型键）。
   const apiKey = nonEmpty(provider.api_key);
@@ -245,7 +269,7 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
 
   try {
     await writeAuthJson(piDir, apiKey);
-    await writeModelsJson(piDir, baseUrl, modelId);
+    await writeModelsJson(piDir, baseUrl, modelId, api);
     await writeSettingsJson(piDir, modelId);
   } catch (e) {
     console.error('pi_dir_write_failed', {

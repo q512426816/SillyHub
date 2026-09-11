@@ -207,7 +207,7 @@ describe('applyProviderFileSettings：kind 分派 + per-session 目录布局（D
     expect(auth['sillyhub']).toEqual({ type: 'api_key', key: 'sk-pi-custom' });
     const models = readJson(join(piDir, 'models.json'));
     const providers = models['providers'] as Record<string, Record<string, unknown>>;
-    expect(providers['sillyhub']?.['api']).toBe('openai-completions');
+    expect(providers['sillyhub']?.['api']).toBe('anthropic-messages');
     expect(providers['sillyhub']?.['baseUrl']).toBe('https://pi.example/v1');
     const settings = readJson(join(piDir, 'settings.json'));
     expect(settings['defaultProvider']).toBe('sillyhub');

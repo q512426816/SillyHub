@@ -12,7 +12,7 @@
 //   B（pi 全链）: 同法 pi（base_url 指向 mock）→ 产物与 spike golden
 //      b1-models.json / b1b-auth.json / b1-settings.json 逐字段一致 → 真跑
 //      pi -p --provider sillyhub --model <id> 一条（spike B 形态）→ mock 收到
-//      POST /v1/chat/completions 且 Bearer/model 正确；
+//      POST /v1/messages（anthropic-messages 映射）且 Bearer/model 正确；
 //   C（litellm 通道，产物级）: openai_chat 形态 ProviderConfig（litellm_base_url
 //      指向 mock）→ config.toml base_url / auth.json key 断言。**不真跑**——
 //      litellm 容器不在本机（R-02 残差：litellm /v1/responses 与 codex 的实际
@@ -70,6 +70,8 @@ interface MockEntry {
   /** path 不含 query。 */
   path: string;
   authorization: string;
+  /** anthropic-messages 形态鉴权头（Anthropic SDK 用 x-api-key 而非 Bearer）。 */
+  xApiKey: string;
   model: string | null;
   client: string;
 }
@@ -97,7 +99,8 @@ const RESPONSES_JSON = {
  * 内嵌 mock 端点：记录每个请求的 method/path/Authorization/model（spike 判据 =
  * mock 日志命中），对 /v1/responses、/v1/chat/completions 返回最小合法 SSE 流
  * （事件序列照抄 spike：responses = created → output_item.done → completed；
- * chat/completions = delta chunk → [DONE]），/v1/models 返回列表 JSON，其余
+ * chat/completions = delta chunk → [DONE]；/v1/messages = anthropic SSE 事件序列），
+ * /v1/models 返回列表 JSON，其余
  * 通用 200 JSON。监听 127.0.0.1:0 —— 内核分配临时端口，避开常用端口。
  */
 function startMockServer(): Promise<{ server: Server; port: number; entries: MockEntry[] }> {
@@ -122,6 +125,7 @@ function startMockServer(): Promise<{ server: Server; port: number; entries: Moc
         method: req.method ?? '',
         path,
         authorization: req.headers.authorization ?? '',
+        xApiKey: String(req.headers['x-api-key'] ?? ''),
         model: typeof body.model === 'string' ? body.model : null,
         client: String(req.headers['user-agent'] ?? '').slice(0, 60),
       });
@@ -197,6 +201,50 @@ function startMockServer(): Promise<{ server: Server; port: number; entries: Moc
           })}\n\n`,
         );
         res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+
+      if (pathLower.endsWith('/messages')) {
+        // anthropic-messages 协议（ql-20260911-029：pi 自定义端点 anthropic 形态
+        // 映射 anthropic-messages 打 /v1/messages）。非流式 JSON / 流式 SSE 双形态。
+        if (!wantStream) {
+          sendJson({
+            id: 'msg_mock',
+            type: 'message',
+            role: 'assistant',
+            model: typeof body.model === 'string' ? body.model : 'mock-model',
+            content: [{ type: 'text', text: 'mock says hi' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 1, output_tokens: 1 },
+          });
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const sse = (event: string, payload: unknown): void => {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+        };
+        sse('message_start', {
+          type: 'message_start',
+          message: { id: 'msg_mock', type: 'message', role: 'assistant', content: [], usage: { input_tokens: 1, output_tokens: 0 } },
+        });
+        sse('content_block_start', {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        });
+        sse('content_block_delta', {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'mock says hi' },
+        });
+        sse('content_block_stop', { type: 'content_block_stop', index: 0 });
+        sse('message_delta', {
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn' },
+          usage: { output_tokens: 1 },
+        });
+        sse('message_stop', { type: 'message_stop' });
         res.end();
         return;
       }
@@ -485,15 +533,18 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 
     expect(hit!.model).toBe(CODEX_TEST_MODEL);
   });
 
-  // ── 冒烟 B：pi 全链（写盘产物 golden 对照 + 真跑命中 mock /v1/chat/completions）──
+  // ── 冒烟 B：pi 全链（写盘产物 golden 对照 + 真跑命中 mock /v1/messages）──
 
-  it('B. pi：applyProviderFileSettings 三文件对 spike golden 逐字段一致，真跑 pi 打 mock /v1/chat/completions 且 Bearer=测试 key', async () => {
+  it('B. pi：applyProviderFileSettings 三文件对 spike golden 逐字段一致，真跑 pi 打 mock /v1/messages（anthropic-messages）且 Bearer=测试 key', async () => {
     if (!piProbe.available) return; // 缺席容错（warn 已在 beforeAll 记录）
 
     const provider: ProviderConfig = {
       agent_kind: 'pi',
+      api_format: 'anthropic',
       api_key: PI_TEST_KEY,
-      base_url: `http://127.0.0.1:${mockPort}/v1`,
+      // anthropic-messages 客户端在 baseUrl 后自拼 /v1/messages——baseUrl 不带
+      // /v1（对齐智谱 anthropic 端点 .../api/anthropic 无 /v1 后缀的真实形态）。
+      base_url: `http://127.0.0.1:${mockPort}`,
       model: PI_TEST_MODEL,
     };
     const env = await applyProviderFileSettings({
@@ -510,14 +561,14 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 
       sillyhub: { type: 'api_key', key: PI_TEST_KEY },
     });
 
-    // 产物 2：models.json —— spike golden b1-models.json 逐字段（D-002/D-010：
-    // api 固定 "openai-completions" → 打 /chat/completions）。
+    // 产物 2：models.json —— api 按 api_format 映射（ql-20260911-029：
+    // anthropic 形态 → anthropic-messages 打 /v1/messages）。
     const models = readJson(join(piDir, 'models.json'));
     expect(models['providers']).toEqual({
       sillyhub: {
         name: 'SillyHub',
-        api: 'openai-completions',
-        baseUrl: `http://127.0.0.1:${mockPort}/v1`,
+        api: 'anthropic-messages',
+        baseUrl: `http://127.0.0.1:${mockPort}`,
         models: [{ id: PI_TEST_MODEL }],
       },
     });
@@ -550,10 +601,10 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 
       mockEntries,
       (e) =>
         e.method === 'POST' &&
-        e.path === '/v1/chat/completions' &&
-        e.authorization === `Bearer ${PI_TEST_KEY}`,
+        e.path === '/v1/messages' &&
+        e.xApiKey === PI_TEST_KEY,
     );
-    expect(hit, `mock 未收到带测试 key 的 /v1/chat/completions；entries=${JSON.stringify(mockEntries)}`).toBeDefined();
+    expect(hit, `mock 未收到带测试 key 的 /v1/messages；entries=${JSON.stringify(mockEntries)}`).toBeDefined();
     expect(hit!.model).toBe(PI_TEST_MODEL);
   });
 
