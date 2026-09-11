@@ -79,12 +79,14 @@ import { spawn } from 'node:child_process';
 import { resolveWindowsCmdShim } from '../../src/cmd-shim.js';
 import {
   LfLineFramer,
+  PI_ASK_USER_EXTENSION_ENV,
   PI_SUBAGENT_EXTENSION_ENV,
   PiExecutableNotFoundError,
   PiRpcDriver,
   denormalizePiDialogReply,
   normalizePiExtensionDialog,
   piRpcSessionDir,
+  piVendoredAskUserExtensionPath,
   piVendoredSubagentExtensionPath,
   type PiRpcHandle,
   type PiSessionPermissionHooks,
@@ -109,6 +111,8 @@ let tmpSessionDir: string;
 
 /** task-06：保存 env 原值（beforeEach 统一 off，扩展专测内自行改写）。 */
 let prevSubagentExtEnv: string | undefined;
+/** ql-20260911-027-13b6：ask-user 扩展 env 同款处理（理由同 subagent）。 */
+let prevAskUserExtEnv: string | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -116,12 +120,18 @@ beforeEach(() => {
   // 精确匹配（不含 --extension）；扩展装载行为在专属 describe 内定点打开。
   prevSubagentExtEnv = process.env[PI_SUBAGENT_EXTENSION_ENV];
   process.env[PI_SUBAGENT_EXTENSION_ENV] = 'off';
+  // ask-user 同理（ql-20260911-027-13b6）：默认 off 保精确断言，专测定点打开。
+  prevAskUserExtEnv = process.env[PI_ASK_USER_EXTENSION_ENV];
+  process.env[PI_ASK_USER_EXTENSION_ENV] = 'off';
 });
 
 afterEach(async () => {
   if (prevSubagentExtEnv === undefined) delete process.env[PI_SUBAGENT_EXTENSION_ENV];
   else process.env[PI_SUBAGENT_EXTENSION_ENV] = prevSubagentExtEnv;
   prevSubagentExtEnv = undefined;
+  if (prevAskUserExtEnv === undefined) delete process.env[PI_ASK_USER_EXTENSION_ENV];
+  else process.env[PI_ASK_USER_EXTENSION_ENV] = prevAskUserExtEnv;
+  prevAskUserExtEnv = undefined;
   if (tmpSessionDir) {
     await rm(tmpSessionDir, { recursive: true, force: true }).catch(() => {});
     tmpSessionDir = '';
@@ -610,6 +620,74 @@ describe('vendored subagent 扩展装载（task-06 / R-02）', () => {
     expect(spawn).toHaveBeenCalledWith(
       '/usr/local/bin/pi',
       ['--mode', 'rpc', '--session-dir', tmpSessionDir, '--extension', custom],
+      expect.anything(),
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2.6 ql-20260911-027-13b6：vendored ask-user 扩展装载（AskUser 弹窗 pi 侧发起端）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('vendored ask-user 扩展装载（ql-20260911-027-13b6）', () => {
+  it('piVendoredAskUserExtensionPath 默认候选命中 vendored 拷贝（dev 布局）', () => {
+    delete process.env[PI_ASK_USER_EXTENSION_ENV];
+    // worktree 内 vendor/pi-extensions/ask-user/index.ts 真实存在，vitest 直跑
+    // src/ → ../../vendor 候选命中；endsWith 断言跨平台（同 subagent 先例）。
+    const p = piVendoredAskUserExtensionPath();
+    expect(p).not.toBeNull();
+    expect(p!.endsWith(join('vendor', 'pi-extensions', 'ask-user', 'index.ts'))).toBe(true);
+  });
+
+  it('env off/0/false/disabled/空串 → null（降级开关独立于 subagent）', () => {
+    for (const v of ['off', '0', 'false', 'disabled', 'OFF', '']) {
+      process.env[PI_ASK_USER_EXTENSION_ENV] = v;
+      expect(piVendoredAskUserExtensionPath()).toBeNull();
+    }
+  });
+
+  it('env 显式路径 → 原样透传（最高优先级，不做存在性校验）', () => {
+    process.env[PI_ASK_USER_EXTENSION_ENV] = join(tmpdir(), 'custom-ask-user', 'index.ts');
+    expect(piVendoredAskUserExtensionPath()).toBe(
+      join(tmpdir(), 'custom-ask-user', 'index.ts'),
+    );
+  });
+
+  it('spawn 参数面：双扩展默认解析 → 两个 --extension（subagent 在前，ask-user 在后）', async () => {
+    delete process.env[PI_SUBAGENT_EXTENSION_ENV];
+    delete process.env[PI_ASK_USER_EXTENSION_ENV];
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+    const driver = await makeDriver();
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    const subagent = piVendoredSubagentExtensionPath();
+    const askUser = piVendoredAskUserExtensionPath();
+    expect(subagent).not.toBeNull();
+    expect(askUser).not.toBeNull();
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/local/bin/pi',
+      [
+        '--mode', 'rpc', '--session-dir', tmpSessionDir,
+        '--extension', subagent!,
+        '--extension', askUser!,
+      ],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+
+  it('spawn 参数面：仅 ask-user 开（subagent off） → 只带 ask-user 一个 --extension', async () => {
+    delete process.env[PI_ASK_USER_EXTENSION_ENV];
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+    const driver = await makeDriver();
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    const askUser = piVendoredAskUserExtensionPath();
+    expect(askUser).not.toBeNull();
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/local/bin/pi',
+      ['--mode', 'rpc', '--session-dir', tmpSessionDir, '--extension', askUser!],
       expect.anything(),
     );
   });

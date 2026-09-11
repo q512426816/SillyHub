@@ -1,0 +1,28 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-eece7bf7",
+  "totals": {
+    "files": 1,
+    "additions": 78,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts",
+      "declared": false,
+      "additions": 78,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "soft"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": null,
+  "qlId": "ql-20260911-027-13b6",
+  "sessionId": "quick-eece7bf7",
+  "savedAt": "2026-09-11T10:24:01.002Z"
+}

@@ -162,6 +162,12 @@ export const PI_SUBAGENT_EXTENSION_ENV = 'SILLYHUB_PI_SUBAGENT_EXTENSION';
 /** vendored subagent 扩展入口（相对路径段，join 到候选根上）。 */
 const VENDORED_SUBAGENT_ENTRY = join('vendor', 'pi-extensions', 'subagent', 'index.ts');
 
+/** vendored ask-user 扩展一键降级环境变量（语义同 PI_SUBAGENT_EXTENSION_ENV）。 */
+export const PI_ASK_USER_EXTENSION_ENV = 'SILLYHUB_PI_ASK_USER_EXTENSION';
+
+/** vendored ask-user 扩展入口（相对路径段，join 到候选根上）。 */
+const VENDORED_ASK_USER_ENTRY = join('vendor', 'pi-extensions', 'ask-user', 'index.ts');
+
 /**
  * 解析 vendored subagent 扩展入口的绝对路径（spawn `--extension` 实参来源）。
  *
@@ -194,15 +200,47 @@ const VENDORED_SUBAGENT_ENTRY = join('vendor', 'pi-extensions', 'subagent', 'ind
  * @returns 扩展入口绝对路径；未配置且候选均缺失（或显式 off）返回 null
  */
 export function piVendoredSubagentExtensionPath(): string | null {
-  const raw = process.env[PI_SUBAGENT_EXTENSION_ENV]?.trim();
+  return resolveVendoredExtensionPath(
+    PI_SUBAGENT_EXTENSION_ENV,
+    VENDORED_SUBAGENT_ENTRY,
+  );
+}
+
+/**
+ * ql-20260911-027-13b6：解析 vendored ask-user 扩展入口（spawn `--extension`
+ * 实参来源）。该扩展是 SillyHub 自研件（非 pi examples 快照，源码见
+ * vendor/pi-extensions/ask-user/index.ts 头注释）：pi 本体不提供任何模型可调的
+ * 提问工具——不装载则 pi 会话里模型只能文字罗列问题，平台 AskUser 弹窗链路
+ * （extension_ui_request 桥接）无发起端。解析/降级语义与 subagent 完全同构
+ * （环境变量 `SILLYHUB_PI_ASK_USER_EXTENSION` + ncc/dev 双候选布局）。
+ *
+ * @returns 扩展入口绝对路径；未配置且候选均缺失（或显式 off）返回 null
+ */
+export function piVendoredAskUserExtensionPath(): string | null {
+  return resolveVendoredExtensionPath(
+    PI_ASK_USER_EXTENSION_ENV,
+    VENDORED_ASK_USER_ENTRY,
+  );
+}
+
+/**
+ * vendored 扩展入口双路解析（subagent / ask-user 共用）：环境变量覆盖 →
+ * ncc bundle / dev 两候选布局 existsSync 首个命中 → null（spawn 不带
+ * `--extension`，扩展是可选增强，缺文件不阻断会话）。
+ */
+function resolveVendoredExtensionPath(
+  envVar: string,
+  entry: string,
+): string | null {
+  const raw = process.env[envVar]?.trim();
   if (raw !== undefined) {
     if (raw === '' || /^(off|0|false|disabled)$/i.test(raw)) return null;
     return raw;
   }
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    join(moduleDir, VENDORED_SUBAGENT_ENTRY),
-    join(moduleDir, '..', '..', VENDORED_SUBAGENT_ENTRY),
+    join(moduleDir, entry),
+    join(moduleDir, '..', '..', entry),
   ];
   for (const candidate of candidates) {
     try {
@@ -726,6 +764,13 @@ export class PiRpcDriver implements InteractiveDriver {
     // 影响）；脆弱性与刷新流程见 piVendoredSubagentExtensionPath 注释。
     const subagentExtension = piVendoredSubagentExtensionPath();
     if (subagentExtension) args.push('--extension', subagentExtension);
+
+    // vendored ask-user 扩展装载（ql-20260911-027-13b6）：给模型 AskUserQuestion
+    // 工具（AskUser 弹窗链路的 pi 侧发起端——extension_ui_request 由扩展内的
+    // ctx.ui.select/input 发起，本驱动下方桥接段接手）。`--extension` 可多次传
+    // （args.js:120-122 push 语义）；降级 = SILLYHUB_PI_ASK_USER_EXTENSION=off。
+    const askUserExtension = piVendoredAskUserExtensionPath();
+    if (askUserExtension) args.push('--extension', askUserExtension);
 
     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
 
