@@ -462,6 +462,11 @@
 - sillyhub-daemon/src/host-fs-handler.ts（回落 info）
 - sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts（ZD3 断言）
 - .sillyspec/docs/SillyHub/modules/daemon.md（同步）
+- sillyhub-daemon/src/console-timestamp.ts（五通道）
+- sillyhub-daemon/tests/console-timestamp.test.ts（debug 断言）
+- sillyhub-daemon/src/host-fs-handler.ts（回落 info）
+- sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts（ZD3 断言）
+- .sillyspec/docs/SillyHub/modules/daemon.md（同步）
 需求：可观测性盲区修复——console-timestamp 补 debug 通道 + zcode 回落日志升级 info
 根因：console-timestamp 只包四通道，console.debug 独立属性漏包即绕过；zcode 回落日志恰走 debug 生产无痕（ql-20260911-005）
 方案：包装器五通道补 debug+注释修正；回落日志 debug→info；debug 通道回归断言+ZD3 日志断言；daemon.md 同步
