@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-11-provider-adapter-registry",
+  "generatedAt": "2026-09-11T21:46:31.140Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-11-provider-adapter-registry",
+      "metrics": {
+        "matches": 3,
+        "skippedFiles": 2,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-11-provider-adapter-registry",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-11-provider-adapter-registry",
+      "metrics": {
+        "backendEndpoints": 3961,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-11-provider-adapter-registry",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "真实启动一次（real startup）含新聚合表代码的 daemon 启动入口——隔离 SILLYHUB_DAEMON_DIR 起进程，PID 已登记（24218），[daemon.started] 05:43:08，七引擎检测+runtime_lock providers 全量，启动验证达成后受控停止",
+      "command": "`SILLYHUB_DAEMON_DIR=<temp> node dist/cli.js start --api-key <verify dummy>`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-11-provider-adapter-registry/verify-logs/daemon-start.log"
+    },
+    {
+      "claim": "聚合契约守护测试真实集成——跨注册表对账/smokeSuite 存在性/词表扫描/caps 一致/生成幂等五组",
+      "command": "`pnpm exec vitest run tests/provider-adapter-registry.test.ts tests/interactive/provider-registry.test.ts tests/provider-file-settings-reload.test.ts tests/daemon-provider-file-dispatch.test.ts`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-11-provider-adapter-registry/verify-logs/registry-guard.log"
+    },
+    {
+      "claim": "caps 三端生成脚本真实集成——两连跑双产物幂等（git diff 空）",
+      "command": "`node scripts/gen-provider-caps.mjs ×2`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-11-provider-adapter-registry/verify-logs/gen-caps.log"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

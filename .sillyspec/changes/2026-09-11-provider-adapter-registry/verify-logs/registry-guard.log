@@ -1,0 +1,151 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon[39m
+
+[90mstderr[2m | tests/provider-file-settings-reload.test.ts[2m > [22m[2mForReload 分支二：写盘 IO 失败 → 返 priorEnv 文件层键（等同未切）[2m > [22m[2mpi 写盘 IO 失败（auth.json 被同名目录占用）+ priorEnv 有 PI_CODING_AGENT_DIR → 返 prior 键
+[22m[39mpi_settings_read_failed {
+  path: [32m'C:\\Users\\qinyi\\AppData\\Local\\Temp\\pfr-0ghqaS\\pi\\sess-io2\\auth.json'[39m,
+  code: [32m'EISDIR'[39m
+}
+
+ [32m✓[39m tests/provider-file-settings-reload.test.ts [2m([22m[2m21 tests[22m[2m)[22m[90m 68[2mms[22m[39m
+ [32m✓[39m tests/provider-adapter-registry.test.ts [2m([22m[2m7 tests[22m[2m)[22m[90m 126[2mms[22m[39m
+ [32m✓[39m tests/interactive/provider-registry.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2mapplyProviderFileSettings：kind 分派 + per-session 目录布局（D-011）[2m > [22m[2m写盘 IO 失败（writePiDir reject：auth.json 被同名目录占用）→ 跳过 env 不抛（失败语义唯一化）
+[22m[39mpi_settings_read_failed {
+  path: [32m'C:\\Users\\qinyi\\AppData\\Local\\Temp\\pfd-YChfrR\\pi\\sess-io2\\auth.json'[39m,
+  code: [32m'EISDIR'[39m
+}
+
+[task lease-pfd] spawn: /usr/local/bin/claude -p --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions --include-partial-messages --mcp-config C:\Users\qinyi\AppData\Local\Temp\sillyhub-file-mcp-run-1.json
+[task lease-pfd] done: status=completed exit=0
+[task lease-pfd] spawn: /usr/local/bin/claude -p --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions --include-partial-messages --mcp-config C:\Users\qinyi\AppData\Local\Temp\sillyhub-file-mcp-run-1.json
+[task lease-pfd] done: status=completed exit=0
+[task lease-pfd] spawn: /usr/local/bin/claude -p --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions --include-partial-messages --mcp-config C:\Users\qinyi\AppData\Local\Temp\sillyhub-file-mcp-run-1.json
+[task lease-pfd] done: status=completed exit=0
+[task lease-pfd] spawn: /usr/local/bin/claude -p --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions --include-partial-messages --mcp-config C:\Users\qinyi\AppData\Local\Temp\sillyhub-file-mcp-run-1.json
+[task lease-pfd] done: status=completed exit=0
+[task lease-pfd] spawn: /usr/local/bin/claude -p --output-format stream-json --input-format stream-json --verbose --permission-mode bypassPermissions --include-partial-messages --mcp-config C:\Users\qinyi\AppData\Local\Temp\sillyhub-file-mcp-run-1.json
+[task lease-pfd] done: status=completed exit=0
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.210] [daemon.starting] runtime_id=runtime-uuid-pfd
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.213] [daemon.preflight_sillyspec_unexpected] error=Cannot read properties of null (reading 'stdout')
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.232] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.234] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-12 05:43:24.234] [daemon.agents_detected] agents=["claude","codex"]
+[2026-09-12 05:43:24.238] [daemon.daemon_registered] daemon_local_id=runtime-uuid-pfd providers=["claude"]
+[2026-09-12 05:43:24.241] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.241] [daemon.ws_client_created] daemon_local_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.241] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.242] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.242] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.242] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.242] [daemon.started] runtime_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.243] [daemon.task_available] lease_id=lease-cx
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.235] [daemon.sillyspec_register_probe_failed] error=Cannot read properties of null (reading 'stdout')
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.248] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-pfd
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.252] [daemon.interactive_create_step] session_id=sess-cx1 step=spec_pull_ms elapsed_ms=0
+[2026-09-12 05:43:24.252] [daemon.interactive_create_step] session_id=sess-cx1 step=mcp_prefetch_ms elapsed_ms=0
+[2026-09-12 05:43:24.252] [daemon.interactive_create_step] session_id=sess-cx1 step=skills_ms elapsed_ms=0
+[2026-09-12 05:43:24.252] [daemon.interactive_create_step] session_id=sess-cx1 step=create_ms elapsed_ms=0
+[2026-09-12 05:43:24.253] [daemon.interactive_session_started] lease_id=lease-cx session_id=sess-cx1 run_id=run-1 borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":0,"create_ms":0} total_ms=9
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mcodex 会话：create env.CODEX_HOME 指向 <root>/codex/<sessionId>，文件已写
+[22m[39m[2026-09-12 05:43:24.273] [daemon.stopping]
+[2026-09-12 05:43:24.274] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-12 05:43:24.274] [daemon.stopped]
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[2026-09-12 05:43:24.278] [daemon.starting] runtime_id=runtime-uuid-pfd
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[daemon.preflight_sillyspec_unexpected] error=Cannot read properties of null (reading 'stdout')
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[2026-09-12 05:43:24.280] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-12 05:43:24.281] [daemon.agents_detected] agents=["claude","codex"]
+[2026-09-12 05:43:24.281] [daemon.daemon_registered] daemon_local_id=runtime-uuid-pfd providers=["claude"]
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+[daemon.sillyspec_register_probe_failed] error=Cannot read properties of null (reading 'stdout')
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[2026-09-12 05:43:24.282] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.282] [daemon.ws_client_created] daemon_local_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.282] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.282] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.282] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.282] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.282] [daemon.started] runtime_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.282] [daemon.task_available] lease_id=lease-pi
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[2026-09-12 05:43:24.284] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-pfd
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[2026-09-12 05:43:24.287] [daemon.interactive_create_step] session_id=sess-pi1 step=spec_pull_ms elapsed_ms=0
+[2026-09-12 05:43:24.287] [daemon.interactive_create_step] session_id=sess-pi1 step=mcp_prefetch_ms elapsed_ms=0
+[2026-09-12 05:43:24.287] [daemon.interactive_create_step] session_id=sess-pi1 step=skills_ms elapsed_ms=0
+[2026-09-12 05:43:24.287] [daemon.interactive_create_step] session_id=sess-pi1 step=create_ms elapsed_ms=0
+[2026-09-12 05:43:24.287] [daemon.interactive_session_started] lease_id=lease-pi session_id=sess-pi1 run_id=run-1 borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":0,"create_ms":0} total_ms=5
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mpi 自定义端点：create env.PI_CODING_AGENT_DIR + 三文件 + kind 守卫
+[22m[39m[2026-09-12 05:43:24.304] [daemon.stopping]
+[2026-09-12 05:43:24.304] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-12 05:43:24.304] [daemon.stopped]
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mclaude kind / provider_config absent：applyClaudeSettings 照旧（守卫正向 + 零回归）
+[22m[39m[2026-09-12 05:43:24.307] [daemon.starting] runtime_id=runtime-uuid-pfd
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mclaude kind / provider_config absent：applyClaudeSettings 照旧（守卫正向 + 零回归）
+[22m[39m[daemon.preflight_sillyspec_unexpected] error=Cannot read properties of null (reading 'stdout')
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mclaude kind / provider_config absent：applyClaudeSettings 照旧（守卫正向 + 零回归）
+[22m[39m[daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mclaude kind / provider_config absent：applyClaudeSettings 照旧（守卫正向 + 零回归）
+[22m[39m[2026-09-12 05:43:24.309] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-12 05:43:24.309] [daemon.agents_detected] agents=["claude","codex"]
+[2026-09-12 05:43:24.310] [daemon.daemon_registered] daemon_local_id=runtime-uuid-pfd providers=["claude"]
+[2026-09-12 05:43:24.310] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.310] [daemon.ws_client_created] daemon_local_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.310] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.310] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.310] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.310] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-12 05:43:24.310] [daemon.started] runtime_id=runtime-uuid-pfd
+[2026-09-12 05:43:24.310] [daemon.task_available] lease_id=lease-cl
+[2026-09-12 05:43:24.312] [daemon.interactive_create_step] session_id=sess-cl1 step=spec_pull_ms elapsed_ms=0
+[2026-09-12 05:43:24.312] [daemon.interactive_create_step] session_id=sess-cl1 step=mcp_prefetch_ms elapsed_ms=0
+[2026-09-12 05:43:24.312] [daemon.interactive_create_step] session_id=sess-cl1 step=skills_ms elapsed_ms=0
+[2026-09-12 05:43:24.312] [daemon.interactive_create_step] session_id=sess-cl1 step=create_ms elapsed_ms=0
+[2026-09-12 05:43:24.312] [daemon.interactive_session_started] lease_id=lease-cl session_id=sess-cl1 run_id=run-1 borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":0,"create_ms":0} total_ms=1
+[2026-09-12 05:43:24.313] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-pfd
+
+[90mstderr[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mclaude kind / provider_config absent：applyClaudeSettings 照旧（守卫正向 + 零回归）
+[22m[39m[daemon.sillyspec_register_probe_failed] error=Cannot read properties of null (reading 'stdout')
+
+ [32m✓[39m tests/daemon-provider-file-dispatch.test.ts [2m([22m[2m17 tests[22m[2m)[22m[90m 251[2mms[22m[39m
+[90mstdout[2m | tests/daemon-provider-file-dispatch.test.ts[2m > [22m[2minteractive 接线：_startInteractiveSession → per-session 写盘 + create env（目录段=agent_sessions.id）[2m > [22m[2mclaude kind / provider_config absent：applyClaudeSettings 照旧（守卫正向 + 零回归）
+[22m[39m[2026-09-12 05:43:24.335] [daemon.stopping]
+[2026-09-12 05:43:24.335] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-12 05:43:24.335] [daemon.stopped]
+
+
+[2m Test Files [22m [1m[32m4 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[32m51 passed[39m[22m[90m (51)[39m
+[2m   Start at [22m 05:43:22
+[2m   Duration [22m 1.61s[2m (transform 1.05s, setup 0ms, collect 2.67s, tests 452ms, environment 1ms, prepare 308ms)[22m
+

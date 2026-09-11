@@ -8,36 +8,29 @@
 
 | 模块 | 变更文件 | 影响类型 | 需 review |
 |---|---|---|---|
+| sillyhub-daemon | sillyhub-daemon/src/interactive/providers.ts | 接口变更（ProviderAdapter 扩展+writer 接口+caps 第 10 键） | 是（契约核心） |
+| sillyhub-daemon | sillyhub-daemon/src/credential-injector.ts | 逻辑变更（REGISTRY 惰性派生） | 否 |
+| sillyhub-daemon | sillyhub-daemon/src/provider-file-settings.ts | 逻辑变更（两分派 writer 化） | 是（失败语义保真） |
+| sillyhub-daemon | sillyhub-daemon/src/codex-settings.ts | 逻辑变更（门槛函数迁入） | 否 |
+| sillyhub-daemon | sillyhub-daemon/src/pi-settings.ts | 逻辑变更（门槛函数迁入） | 否 |
+| sillyhub-daemon | sillyhub-daemon/src/daemon.ts | 逻辑变更（三处收口读元数据） | 否 |
+| sillyhub-daemon | sillyhub-daemon/src/interactive/session-manager.ts | 逻辑变更（reload 门控收口） | 否 |
+| sillyhub-daemon | sillyhub-daemon/src/interactive/session-manager/persistence.ts | 逻辑变更（restore 门控收口） | 否 |
+| sillyhub-daemon | sillyhub-daemon/scripts/gen-provider-caps.mjs | 新增（三端生成脚本） | 是（幂等+守卫） |
+| frontend | frontend/package.json | 配置变更（gen:types 挂钩） | 否 |
+| frontend | frontend/src/lib/provider-caps.ts | 新增形态（改生成产物+白名单派生） | 否 |
+| backend | backend/app/modules/agent/provider_caps.py | 新增形态（改生成产物） | 否 |
+| backend | backend/app/modules/agent/tests/test_provider_caps_alignment.py | 逻辑变更（键集合 9→10） | 否 |
+| sillyhub-daemon | tests（provider-adapter-registry 新增/provider-registry/codex/pi-settings 表驱动） | 逻辑变更（守护+制度化） | 否 |
 
 ## 未匹配文件
 
-以下变更文件未命中 _module-map.yaml 任何模块 paths——确认是模块索引过期（该跑 `sillyspec modules rebuild`）还是真的游离文件：
-
-- `sillyhub-daemon/src/interactive/providers.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/src/credential-injector.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/src/provider-file-settings.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/src/daemon.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/src/interactive/session-manager.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/src/interactive/session-manager/persistence.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/scripts/gen-provider-caps.mjs` <!--TODO: 归属判定-->
-- `frontend/package.json` <!--TODO: 归属判定-->
-- `frontend/src/lib/provider-caps.ts` <!--TODO: 归属判定-->
-- `backend/app/modules/agent/provider_caps.py` <!--TODO: 归属判定-->
-- `backend/app/modules/agent/tests/test_provider_caps_alignment.py` <!--TODO: 归属判定-->
-- `sillyhub-daemon/tests/interactive/provider-registry.test.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/tests/pi-settings.test.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/tests/codex-settings.test.ts` <!--TODO: 归属判定-->
-- `sillyhub-daemon/tests/provider-adapter-registry.test.ts` <!--TODO: 归属判定-->
-- `frontend/src/components/sessions/__tests__/session-config-bar.test.tsx` <!--TODO: 归属判定-->
-
-## 影响类型说明
-
-逻辑变更 / 数据结构变更 / 接口变更 / 调用关系变更 / 配置变更 / 新增；不确定的影响标 needs review。
+无——CLI 预填未匹配文件全部归入 sillyhub-daemon/frontend/backend 三模块（见上矩阵；预填未匹配系双层 module-map 前缀口径差异）。
 
 ## 更新结果
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
+| `_module-map.yaml` | 本变更不改模块边界；daemon 模块卡「聚合契约」条目随归档 spec-sync 补登（providers.ts main_symbols 已有 INTERACTIVE_PROVIDERS 条目，描述升格 ProviderAdapter 一句话） | done |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。
