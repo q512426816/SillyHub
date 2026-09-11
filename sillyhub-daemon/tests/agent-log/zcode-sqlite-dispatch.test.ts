@@ -277,9 +277,17 @@ describe('HostFsHandler — readAgentLogMessages zcode 先库后文件分派（t
     pointFactoryAt(fixture.dbPath); // 会话不在库
     const logPath = pathOf(zcodeFilenameOf(NOT_IN_DB)); // 文件也缺
 
+    // 回落日志必须可见（ql-20260911-005：原 console.debug 在 console-timestamp
+    // 包装外全程无痕，排障只能反编译 bundle——升级 info 后本断言锁住可观测性）。
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
     // 现状语义：路径在 rollout 内过目录门 → 读取器抛「会话不在库」→ 回落文件
     // 流程 lstat ENOENT → toRpcError 抛 not_found（读取器错误不冒泡不伪造结果）。
     await expectRpcError(handler.readAgentLogMessages(logPath, ZCODE_FORMAT), 'not_found');
+
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(String(infoSpy.mock.calls[0]?.[0])).toContain('zcode_sqlite_fallback_to_file');
+    infoSpy.mockRestore();
 
     expect(factoryCalls).toBe(1); // 目录门放行，读取器被咨询后抛「不在库」
     expect(lstatSpy).toHaveBeenCalledTimes(1); // 回落文件流程一次（门零 IO）

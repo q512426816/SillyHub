@@ -2011,10 +2011,12 @@ export class HostFsHandler {
         } catch (error) {
           // 仅吞 Error 家族（读取器三种抛错：不可用 / 会话不在库 / 查询异常），
           // 原样落回下方现文件流程兜底（D-001@v1）；非 Error 契约外抛出不吞，
-          // 上抛走 internal 通道。回落打一条 debug 日志（事件名 + 错误摘要单行，
-          // 与 credential.ts console.debug 同风格，不刷屏）。
+          // 上抛走 internal 通道。回落打一条 info 日志（事件名 + 错误摘要单行）——
+          // 回落是异常路径（库读失败），默认 log_level=info 下必须可见：原
+          // console.debug 在 console-timestamp 包装外（ql-20260911-005 排障实证
+          // 全程无痕，定位只能反编译 bundle），升级 info 让下次排障 grep 即得。
           if (!(error instanceof Error)) throw error;
-          console.debug(
+          console.info(
             `agent_log: zcode_sqlite_fallback_to_file sess=${sessId} error=${error.message}`,
           );
         }

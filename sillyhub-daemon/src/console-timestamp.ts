@@ -5,8 +5,8 @@
  * key=value`），排障只能靠事件计数反推时间线（"nonzero_exit 涨了没"），跨小时的
  * 时间定位非常费劲。daemon 侧输出有两类来源——createLogger（`[daemon.*]` 主格式）
  * 与散布在 spec-sync / task-runner / interactive 等模块的 100+ 处裸 console——逐点
- * 改格式不现实，故在 Daemon.start() 长驻入口对 console 四通道（log/info/warn/
- * error）做一次幂等包装：输出前缀本地时间戳 `[YYYY-MM-DD HH:mm:ss.SSS]`。
+ * 改格式不现实，故在 Daemon.start() 长驻入口对 console 五通道（log/info/warn/
+ * error/debug）做一次幂等包装：输出前缀本地时间戳 `[YYYY-MM-DD HH:mm:ss.SSS]`。
  *
  * 刻意约束：
  * - 本地时区而非 ISO UTC——日志读者在本机，UTC 强迫心算 +8 偏移；
@@ -35,14 +35,17 @@ export function logTimestamp(): string {
 
 /**
  * 安装 console 时间戳包装（幂等）。已安装时直接返回，console 各通道引用不变。
- * 只包 log/info/warn/error——debug 级（console.log 同通道）与其余冷门通道
- * （trace/dir/table）不动，避免过度侵入。
+ * 包 log/info/warn/error/debug 五通道——debug 是**独立属性**指向 log 的同一底层
+ * 函数（Node 运行时 `console.debug === console.log` 为引用相等），只包 log 属性
+ * 时 debug 调用仍握着原始函数引用，完全绕过包装（ql-20260911-005 实证：zcode
+ * SQLite 回落日志走 console.debug，排障时既无时间戳也不进 daemon.log，定位
+ * 靠反编译 bundle 才抓到）；trace/dir/table 等冷门通道仍不动，避免过度侵入。
  */
 export function installConsoleTimestamps(): void {
   const flagged = console as unknown as Record<string, unknown>;
   if (flagged[WRAP_FLAG] === true) return;
   flagged[WRAP_FLAG] = true;
-  for (const m of ['log', 'info', 'warn', 'error'] as const) {
+  for (const m of ['log', 'info', 'warn', 'error', 'debug'] as const) {
     const orig = console[m].bind(console);
     console[m] = ((...args: unknown[]) => {
       orig(`[${logTimestamp()}]`, ...args);

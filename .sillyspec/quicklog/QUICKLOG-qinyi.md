@@ -452,3 +452,17 @@
 根因：d95130926 给 handleAvatarFile catch 路径新增孤儿文件兜底回收调用，三个调用点中桌面账号页与 member-panel 的测试 mock 都补了导出，唯移动端 page.test.tsx 遗漏；上传失败用例断言通过后异步 handler 访问缺失导出抛未捕获错误，经定时器浮出把 vitest 进程打挂（3658 用例全过仍 exit 1）
 方案：移动端测试的 vi.mock 工厂补 tryReclaimOrphanAvatarFile 桩（fire-and-forget 语义返回 false 即可，移动端用例无需断言回收）并加注释说明来源
 结果：vitest 单文件 5 passed；eslint 0 error 0 warning
+
+## ql-20260911-023-226d | 2026-09-11 13:52:03 | 可观测性盲区修复——console-timestamp 补 debug 通道 + zcode 回落日志升级 info
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/console-timestamp.ts（五通道）
+- sillyhub-daemon/tests/console-timestamp.test.ts（debug 断言）
+- sillyhub-daemon/src/host-fs-handler.ts（回落 info）
+- sillyhub-daemon/tests/agent-log/zcode-sqlite-dispatch.test.ts（ZD3 断言）
+- .sillyspec/docs/SillyHub/modules/daemon.md（同步）
+需求：可观测性盲区修复——console-timestamp 补 debug 通道 + zcode 回落日志升级 info
+根因：console-timestamp 只包四通道，console.debug 独立属性漏包即绕过；zcode 回落日志恰走 debug 生产无痕（ql-20260911-005）
+方案：包装器五通道补 debug+注释修正；回落日志 debug→info；debug 通道回归断言+ZD3 日志断言；daemon.md 同步
+结果：console-timestamp 5 用例+agent-log+console-timestamp 12 文件 116 用例全绿；typecheck 零错
