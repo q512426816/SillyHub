@@ -148,6 +148,7 @@ scale: large
 | 修改 | backend/app/modules/daemon/run_sync/service/group_bridge.py | 投影拦截谓词扩展（dm/coordinator 轮）；`_close_group_hooks` 挂意见聚合转交与任务推进；converge 轮收口闭合 |
 | 修改 | backend/app/modules/daemon/run_sync/service/submit_steps.py | 投影双写判定消费新 ctx 字段（dm_target_member_id/consensus_role）——拦截点对齐 shadow_direct 现有消费位置 |
 | 修改 | backend/app/main.py | lifespan 挂载 `consensus_sweeper_loop`（照 lease_expiry_sweeper 先例） |
+| 修改 | backend/app/modules/daemon/tests/test_group_bridge_projection.py | 投影拦截断言（dm/coordinator 零投影、converge 放行、普通轮不变） |
 | 新增 | NEW:backend/app/modules/daemon/tests/test_group_consensus.py | 汇总人选择 3 场景/任务创建/意见转交/收口判定（等齐、超时、全失败）/投影拦截/状态卡/互@私聊/开关关闭零行为 |
 | 修改 | backend/app/modules/daemon/tests/test_group_cross_mention.py | 互@行为语义变更（回复不进群、注入发起方）——行为有意变更的断言更新 |
 | 修改 | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | @解析 split_broadcast 模式断言（文本序/广播展开/去重） |
