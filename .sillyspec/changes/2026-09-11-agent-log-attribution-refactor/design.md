@@ -157,6 +157,7 @@ per-harness 锚定规则与回退、会话化上下文段落改写（双向互�
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | backend/app/modules/platform_sync/service.py | 归属段重写（ctx-owner 两级解析 + quick 优先分组） |
+| 修改 | backend/app/modules/platform_sync/schema.py | 注释口径对齐（AgentLogEntry 分组键说明改 quick 优先——acceptance QA P3 漂移修正，无代码变更） |
 | 新增 | NEW:backend/migrations/versions/20260912050000_agent_log_attribution_reset.py | D-004@v2 数据迁移（四条清理，downgrade no-op） |
 | 修改 | backend/app/modules/platform_sync/tests/test_agent_log_push.py | 既有断言更新（分组/归属语义变化回归） |
 | 新增 | NEW:backend/app/modules/platform_sync/tests/test_agent_log_attribution.py | 归属解析新用例（两级 find/跨 harness 挂接/旧双键过渡期等） |

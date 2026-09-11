@@ -12,7 +12,7 @@ requirement_ids: [FR-01, FR-02, FR-04, FR-06]
 decision_ids: [D-001@v1, D-006@v2, D-007@v1, D-008@v1]
 repo: sillyspec
 base_commit: 2b5547961b7d309792fd6c5cb6f1946042fc551c
-head_commit: 91f064399f4c67e1c49b132ac261189c94ac6d78
+head_commit: 8aadc0f40e610fcb8b7c474924b41f3afd3d7e30
 allowed_paths:
   - src/agent-session-log.js
 target_files: [src/agent-session-log.js]

@@ -20,6 +20,12 @@ ql-20260827-016-2b4c：hub 分支时间重叠过滤——last_seen_at 早于会�
 的历史旧条目（CLI 全量重推混入）不挂接、不落绑定、不改写原归属；last_seen_at
 缺失同样跳过；既有 hub 命中/绑定用例改用固定 HUB_CREATED_AT 保证条目落在
 会话生命周期内。
+
+2026-09-11-agent-log-attribution-refactor task-04：归属语义变化断言归位（design
+§Phase 2 / task-03）——非空 ctx 聚合键去 harness 前缀（``{harness}|{ctx}`` →
+``{ctx}``）、title 改「本地 · {ctx}」（空 ctx 单桶 ``{harness}|`` /「{harness} ·
+本地活动」不变）、分组键 quick 优先（D-006@v2）。归属解析专测见
+test_agent_log_attribution.py。
 """
 
 from __future__ import annotations
@@ -703,7 +709,8 @@ async def test_push_aggregation_idempotent_single_session(
     sessions1 = await _tool_report_sessions(db_session)
     assert len(sessions1) == 1
     first = sessions1[0]
-    assert first.aggregation_key == "codex|change-aggregate"
+    # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+    assert first.aggregation_key == "change-aggregate"
     first_active_at = first.last_active_at
     # task-06（design §5.W2.3）：change ctx 组落 change link（placeholder 变更行）。
     changes = await _all_changes(db_session)
@@ -761,16 +768,15 @@ async def test_push_entry_level_ctx_groups_two_sessions(
     sessions = await _tool_report_sessions(db_session)
     assert len(sessions) == 2
     by_key = {s.aggregation_key: s for s in sessions}
-    assert set(by_key) == {"codex|change-a", "codex|change-b"}
-    assert by_key["codex|change-a"].title == "codex · change-a"
-    assert by_key["codex|change-b"].title == "codex · change-b"
+    # task-04：聚合键去 harness 前缀、title 改「本地 · {ctx}」（design §Phase 2）。
+    assert set(by_key) == {"change-a", "change-b"}
+    assert by_key["change-a"].title == "本地 · change-a"
+    assert by_key["change-b"].title == "本地 · change-b"
 
     rows = await _all_log_rows(db_session)
     assert len(rows) == 2
     for row in rows:
-        expected_key = (
-            "codex|change-a" if row.log_path.endswith("rollout-a.jsonl") else "codex|change-b"
-        )
+        expected_key = "change-a" if row.log_path.endswith("rollout-a.jsonl") else "change-b"
         assert row.agent_session_id == by_key[expected_key].id  # 各挂一条
 
     # task-06（design §5.W2.3）：两组各落 change link（placeholder 对应组会话）。
@@ -778,8 +784,8 @@ async def test_push_entry_level_ctx_groups_two_sessions(
     change_by_key = {c.change_key: c for c in changes}
     assert set(change_by_key) == {"change-a", "change-b"}
     assert {(ln.change_id, ln.session_id) for ln in await _change_links(db_session)} == {
-        (change_by_key["change-a"].id, by_key["codex|change-a"].id),
-        (change_by_key["change-b"].id, by_key["codex|change-b"].id),
+        (change_by_key["change-a"].id, by_key["change-a"].id),
+        (change_by_key["change-b"].id, by_key["change-b"].id),
     }
 
 
@@ -838,7 +844,8 @@ async def test_get_session_id_filter_and_out_of_scope_empty(
     assert resp.status_code == 200
     sessions = await _tool_report_sessions(db_session)
     assert len(sessions) == 2
-    target = next(s for s in sessions if s.aggregation_key == "codex|change-x")
+    # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+    target = next(s for s in sessions if s.aggregation_key == "change-x")
 
     resp = await client.get(
         "/api/agent-logs", params={"session_id": str(target.id)}, headers=headers
@@ -904,10 +911,11 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
 
     sessions = await _tool_report_sessions(db_session)
     by_key = {s.aggregation_key: s for s in sessions}
-    assert set(by_key) == {"codex|provider-map-check", "zcode|ql-20260823-001"}
+    # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+    assert set(by_key) == {"provider-map-check", "ql-20260823-001"}
 
-    codex_session = by_key["codex|provider-map-check"]
-    zcode_session = by_key["zcode|ql-20260823-001"]
+    codex_session = by_key["provider-map-check"]
+    zcode_session = by_key["ql-20260823-001"]
     for s in (codex_session, zcode_session):
         assert s.origin == "tool_report"
         assert s.status == "pending"
@@ -918,9 +926,10 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
     # D-007 provider 映射：codex→codex、其余（zcode）→claude。
     assert codex_session.provider == "codex"
     assert zcode_session.provider == "claude"
-    # 标题：change ctx 直显、quick ctx 用原样短码。
-    assert codex_session.title == "codex · provider-map-check"
-    assert zcode_session.title == "zcode · ql-20260823-001"
+    # task-04 标题：非空 ctx 统一「本地 · {quick 原样短码或变更名}」（change ctx
+    # 直显、quick ctx 原样短码入文案）。
+    assert codex_session.title == "本地 · provider-map-check"
+    assert zcode_session.title == "本地 · ql-20260823-001"
     # harness 真实身份由 config_snapshot 展示（D-007）。
     assert codex_session.config_snapshot == {"harness": "codex"}
     assert zcode_session.config_snapshot == {"harness": "zcode"}
@@ -1088,7 +1097,8 @@ async def test_push_aggregation_change_key_binds_tool_report_session(
     sessions = await _tool_report_sessions(db_session)
     assert len(sessions) == 1
     group_session = sessions[0]
-    assert group_session.aggregation_key == "codex|change-agg-bind"
+    # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+    assert group_session.aggregation_key == "change-agg-bind"
 
     changes = await _all_changes(db_session)
     assert [c.change_key for c in changes] == ["change-agg-bind"]
@@ -1117,7 +1127,8 @@ async def test_push_aggregation_quick_id_binds_quicklog_link(
     sessions = await _tool_report_sessions(db_session)
     assert len(sessions) == 1
     group_session = sessions[0]
-    assert group_session.aggregation_key == "codex|ql-20260825-002"
+    # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+    assert group_session.aggregation_key == "ql-20260825-002"
 
     quicklog_links = await _quicklog_links(db_session)
     assert [(ln.workspace_id, ln.ql_id, ln.session_id) for ln in quicklog_links] == [

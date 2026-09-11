@@ -41,6 +41,10 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
 from app.modules.change.binding import bind_session_to_change, bind_session_to_quicklog
 
+# task-03（2026-09-11-agent-log-attribution-refactor）：无 hub 分支第一级 links
+# find 需要按 (workspace_id, change_key)/(workspace_id, ql_id) 反查 owner 候选。
+from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
+
 # ql-20260909-016：pending 集缓存失效挂点（change.pending_cache 只依赖 redis，无环）。
 from app.modules.change.pending_cache import bump_pending_epoch
 from app.modules.daemon.session_events import publish_sessions_changed
@@ -135,7 +139,7 @@ async def _bind_entry_ctx(
 
     - 两键按 schema 互斥（``schema.py`` AgentLogEntry 注释「互斥：CLI quick
       优先」），并存时以 ``quick_id`` 为准只落 quicklog 绑定（防御 CLI 异常双写；
-      聚合分组键虽是 ``change_key or quick_id``，组级绑定仍统一 quick 优先口径）。
+      聚合分组键同为 ``quick_id or change_key``（D-006@v2 两端口径一致））。
     - ``change_key == "default"`` 伪键不在本层判断——``bind_session_to_change``
       内部守卫兜底（D-005@v2 / X-004：命令解析与 agent-logs 两通道统一）。
     - 两 bind 均 savepoint best-effort（失败仅 log.warning 不抛、不自行 commit），
@@ -1218,14 +1222,27 @@ class PlatformSyncService:
            旧账并覆盖原归属；不满足的条目保持原归属、不参与 ctx 绑定）；
            未命中/跨 ws → **静默跳过**（D-005 best-effort：entries 仍入库，
            绝不 4xx/抛错）。
-        2. 无 hub 分支（entry 级 ctx，D-009）：entries 按 ``(harness,
-           coalesce(change_key, quick_id, ''))`` 分组，每组 find-or-create
-           ``origin='tool_report'`` 会话——find 按 ``aggregation_key="{harness}|{ctx}"``
-           取 ``last_active_at`` 最新一行（D-006：无唯一约束，并发撞键重复行按最新
-           收敛、败者僵尸行不清理）；create 由本服务单一写者写入（owner=token
-           派生 user，provider 走 D-007 映射，title=``{harness} · {ctx 或 '本地活动'}``，
-           quick_id 显示为原样短码）。find 命中也刷新 ``last_active_at``，不改
-           status（生命周期契约：已有活跃/终态会话只刷活跃时间）。
+        2. 无 hub 分支（entry 级 ctx，D-009；2026-09-11-agent-log-attribution-
+           refactor design §Phase 2）：entries 按 ``(harness, quick_id or
+           change_key or '')`` 分组（D-006@v2 quick 优先——旧双键条目是 CLI bug
+           产物，归 quick 更符合语义）。非空 ctx 组解析 owner（两级 find，
+           D-002/DG-05——bind 是 best-effort 可失败，仅 links 一级会复现重复
+           建会话）：第一级 links——quick_id → ``quicklog_session_links
+           (workspace_id, ql_id)``、change_key → ``changes(workspace_id,
+           change_key)`` JOIN ``change_session_links``（links 存 change_id FK
+           非文本键，DG-10 join 链），两路均 JOIN ``agent_sessions``
+           （``deleted_at IS NULL``）取 ``last_active_at`` 最新——候选天然含
+           平台派发会话（跨 harness 挂接是需求，D-009@v1 否决拦截）与自动会话
+           （D-002 同变更就挂）；第二级聚合键兜底——按 ``origin='tool_report'
+           AND aggregation_key="{ctx}"`` 取最新（bind 失败遗漏的组由聚合键
+           收敛，D-006 容错）。命中任一级 → 组内 entries 挂 owner 并刷
+           ``last_active_at``（不改 status/turn_count，生命周期契约）；两级
+           均未中 → find-or-create ``origin='tool_report'`` 会话（D-003：
+           ``aggregation_key="{ctx}"`` 不带 harness 前缀、title=``本地 ·
+           {quick 原样短码或变更名}``、provider 走 D-007 映射；D-006 并发撞键
+           重复行按最新收敛、败者僵尸行不清理）。空 ctx 组维持现状单桶
+           （``{harness}|`` 键 + ``{harness} · 本地活动`` 标题，D-003 边界：
+           空 ctx 无 links 可查，两级 find 天然退化为单桶 find-or-create）。
 
         归属后双分支均按 entry 级 ctx 落自动绑定（task-06 / design §5.W2.2/W2.3，
         D-003 检测双通道）：``quick_id`` → quicklog_session_links（quick 绑定唯一
@@ -1385,37 +1402,96 @@ class PlatformSyncService:
             # D-005 best-effort：hub 会话不存在/跨 workspace/已软删 → 静默跳过归属
             # 与绑定，entries 仍入库（不抛错不 4xx），目标会话 status 也不受影响。
         else:
-            # D-009 entry 级 ctx 分组：变更 B 的日志不因全量重推挂到变更 A 的会话。
-            # task-06：分组值改留 (entry, log_row) 配对——组级绑定需要留存原始
-            # change_key / quick_id（design §5.W2.3）。
+            # D-009 entry 级 ctx 分组（D-006@v2 quick 优先）：变更 B 的日志不因
+            # 全量重推挂到变更 A 的会话；旧双键条目（协议称互斥、CLI bug 产物）
+            # 归 quick 组。task-06：分组值留 (entry, log_row) 配对——组级绑定需要
+            # 留存原始 change_key / quick_id（design §5.W2.3）。
             groups: dict[tuple[str, str], list[tuple[AgentLogEntry, AgentSessionLogORM]]] = {}
             for entry, log_row in persisted:
-                ctx = entry.change_key or entry.quick_id or ""
+                ctx = entry.quick_id or entry.change_key or ""
                 groups.setdefault((entry.harness, ctx), []).append((entry, log_row))
             for (harness, ctx), group_items in groups.items():
-                agg_key = f"{harness}|{ctx}"
-                # D-006 find-then-insert：普通索引非唯一，极小概率并发重复行按
-                # last_active_at 最新取一，后续上报自然收敛到该行。
-                found = (
-                    await self._session.execute(
-                        select(AgentSession)
-                        .where(
-                            col(AgentSession.origin) == "tool_report",
-                            col(AgentSession.workspace_id) == workspace_id,
-                            col(AgentSession.aggregation_key) == agg_key,
-                            col(AgentSession.deleted_at).is_(None),
+                group_quick_id = next((e.quick_id for e, _row in group_items if e.quick_id), None)
+                group_change_key = next(
+                    (e.change_key for e, _row in group_items if e.change_key), None
+                )
+                owner: AgentSession | None = None
+                if ctx:
+                    # ── find 第一级（links，D-002 / DG-05）── quick_id 走
+                    # quicklog_session_links 自然键（ql_id 无 FK，binding.py 同
+                    # 口径）；未中且组内带 change_key 再走变更链：links 存
+                    # change_id FK 非文本键，先定位 Change 行再 JOIN（DG-10）。
+                    # 两路均不限 origin/harness/provider——候选含平台派发会话
+                    # （hub 分支 bind 登记过）与自动会话（D-002 同变更就挂、跨
+                    # harness 不限制，D-009@v1 否决拦截）；deleted_at IS NULL
+                    # 排除已软删候选，取 last_active_at 最新（nulls_last）。
+                    if group_quick_id is not None:
+                        owner = (
+                            await self._session.execute(
+                                select(AgentSession)
+                                .join(
+                                    QuicklogSessionLink,
+                                    QuicklogSessionLink.session_id == AgentSession.id,
+                                )
+                                .where(
+                                    QuicklogSessionLink.workspace_id == workspace_id,
+                                    QuicklogSessionLink.ql_id == group_quick_id,
+                                    col(AgentSession.deleted_at).is_(None),
+                                )
+                                .order_by(col(AgentSession.last_active_at).desc().nulls_last())
+                                .limit(1)
+                            )
+                        ).scalar_one_or_none()
+                    if owner is None and group_change_key is not None:
+                        owner = (
+                            await self._session.execute(
+                                select(AgentSession)
+                                .join(
+                                    ChangeSessionLink,
+                                    ChangeSessionLink.session_id == AgentSession.id,
+                                )
+                                .join(Change, Change.id == ChangeSessionLink.change_id)
+                                .where(
+                                    Change.workspace_id == workspace_id,
+                                    Change.change_key == group_change_key,
+                                    col(AgentSession.deleted_at).is_(None),
+                                )
+                                .order_by(col(AgentSession.last_active_at).desc().nulls_last())
+                                .limit(1)
+                            )
+                        ).scalar_one_or_none()
+                if owner is None:
+                    # ── find 第二级（聚合键兜底）/ 空 ctx 单桶（同形查询）──
+                    # 非空 ctx 键="{ctx}"（不带 harness 前缀，同 ctx 跨 harness
+                    # 收敛到同一 owner，D-003@v2）；空 ctx 维持 "{harness}|" 单桶
+                    # （D-003 边界）。D-006 find-then-insert：普通索引非唯一，
+                    # 极小概率并发重复行按 last_active_at 最新取一，后续上报
+                    # 自然收敛到该行。
+                    agg_key = ctx or f"{harness}|"
+                    owner = (
+                        await self._session.execute(
+                            select(AgentSession)
+                            .where(
+                                col(AgentSession.origin) == "tool_report",
+                                col(AgentSession.workspace_id) == workspace_id,
+                                col(AgentSession.aggregation_key) == agg_key,
+                                col(AgentSession.deleted_at).is_(None),
+                            )
+                            .order_by(col(AgentSession.last_active_at).desc().nulls_last())
+                            .limit(1)
                         )
-                        .order_by(col(AgentSession.last_active_at).desc().nulls_last())
-                        .limit(1)
-                    )
-                ).scalar_one_or_none()
-                if found is not None:
+                    ).scalar_one_or_none()
+                if owner is not None:
                     # 命中只刷活跃时间，不改 status/turn_count（生命周期契约）。
-                    found.last_active_at = now
-                    group_session_id = found.id
+                    owner.last_active_at = now
+                    group_session_id = owner.id
                 else:
                     # create（单一写者=本服务）：owner=token 派生 user（R-02）、
-                    # provider 走 D-007 映射、ctx 空显示「本地活动」（D-001 回落单桶）。
+                    # provider 走 D-007 映射；非空 ctx——aggregation_key="{ctx}"
+                    # （不带 harness 前缀）、title="本地 · {quick 原样短码或变更名}"
+                    # （D-003）；空 ctx——维持 "{harness}|" + "{harness} · 本地活动"。
+                    agg_key = ctx or f"{harness}|"
+                    title = f"本地 · {ctx}" if ctx else f"{harness} · 本地活动"
                     group_session_id = uuid.uuid4()
                     self._session.add(
                         AgentSession(
@@ -1426,7 +1502,7 @@ class PlatformSyncService:
                             status="pending",
                             origin="tool_report",
                             aggregation_key=agg_key,
-                            title=f"{harness} · {ctx or '本地活动'}",
+                            title=title,
                             config_snapshot={"harness": harness},
                             turn_count=0,
                             last_active_at=now,
@@ -1436,13 +1512,9 @@ class PlatformSyncService:
                 for _entry, log_row in group_items:
                     log_row.agent_session_id = group_session_id
                 # task-06（design §5.W2.3 / D-003）：tool_report 会话同款 ctx 绑定——
-                # 组级一次（同组 entries 的 coalesce ctx 相同，bind 幂等无需逐条）；
-                # 空 ctx 组（本地活动单桶）两键皆 None，_bind_entry_ctx 天然跳过不落
-                # 任何绑定；两键并存 quick 优先与 hub 分支同口径。
-                group_change_key = next(
-                    (e.change_key for e, _row in group_items if e.change_key), None
-                )
-                group_quick_id = next((e.quick_id for e, _row in group_items if e.quick_id), None)
+                # 组级一次（同组 entries 分组键相同，bind 幂等无需逐条）；空 ctx 组
+                # （本地活动单桶）两键皆 None，_bind_entry_ctx 天然跳过不落任何绑定；
+                # 两键并存 quick 优先与 hub 分支同口径。
                 await _bind_entry_ctx(
                     self._session,
                     workspace_id,

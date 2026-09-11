@@ -278,7 +278,7 @@ class AgentLogEntry(BaseModel):
     # ── 2026-08-23-agent-activity-sessions task-04（design §3.3.2 / D-009 entry 级 ctx）──
     # 检出/更新该 entry 的那次 run 的归属 ctx（change 名或 quick 会话短码），随 entry
     # 持久化——CLI 全量重推时未被本次 run 触及的存量 entry 保留原 ctx；服务端按
-    # ``(harness, coalesce(change_key, quick_id, ''))`` 分组归属（互斥：CLI quick 优先）。
+    # ``(harness, quick_id or change_key or '')`` 分组归属（2026-09-11-agent-log-attribution-refactor D-006@v2：quick 优先；两键互斥，CLI 双向清空）。
     change_key: str | None = Field(default=None, max_length=128)
     quick_id: str | None = Field(default=None, max_length=128)
 

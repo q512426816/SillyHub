@@ -11,8 +11,8 @@ blocks: []
 requirement_ids: [FR-07]
 decision_ids: [D-006@v2, D-007@v1, D-008@v1]
 repo: sillyspec
-base_commit: 2b5547961b7d309792fd6c5cb6f1946042fc551c
-head_commit: 91f064399f4c67e1c49b132ac261189c94ac6d78
+base_commit: 8aadc0f40e610fcb8b7c474924b41f3afd3d7e30
+head_commit: 0b10dc611ed57e5731608a1c836e351ec5b18f31
 allowed_paths:
   - test/agent-session-log.test.mjs
   - docs/platform-agent-log-protocol.md

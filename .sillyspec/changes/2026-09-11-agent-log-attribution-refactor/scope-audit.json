@@ -1,0 +1,108 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "2a74538467a8ce479ac0b77348a9e89d4d15a1ec",
+  "totals": {
+    "files": 11,
+    "additions": 1068574,
+    "deletions": 59
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "additions": 112,
+      "deletions": 40,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_agent_log_attribution.py",
+      "additions": 632,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_agent_log_push.py",
+      "additions": 29,
+      "deletions": 18,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/migrations/versions/20260912050000_agent_log_attribution_reset.py",
+      "additions": 66,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "deploy/backend-only.tar.gz",
+      "additions": 1067622,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/agent-log-ctx-attribution-mismatch.md",
+      "additions": 61,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/agent-log-hub-attribution-cross-session-contamination.md",
+      "additions": 51,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "src/agent-session-log.js",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "docs/platform-agent-log-protocol.md",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "test/agent-session-log.test.mjs",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "2f0201117419fb07fec1fe5d025b2e744be3256510930b0ae3db193d5f8bac5c",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-11T22:28:02.818Z"
+}
