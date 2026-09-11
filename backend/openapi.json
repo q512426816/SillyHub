@@ -1445,6 +1445,104 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/skills/adoptable": {
+      "get": {
+        "tags": [
+          "workspace"
+        ],
+        "summary": "List Adoptable Workspace Skills",
+        "description": "列 specDir/skills 可收编候选（桥④ / FR-03 / D-005 / D-008，只读差集）。\n\n2026-09-11-workspace-asset-bridges task-03。鉴权 WORKSPACE_WRITE（收编入口\n与确认落库同级权限，``require_permission`` 自动取路径 ``{workspace_id}`` 做\n成员校验，非成员 403）。service 层完成：specDir/skills 目录扫描（复用\nlist_skills 同源 resolver 与防穿越遍历）→ 差集排除平台库名全集\n（CustomSkill 全体名 ∪ sillyspec-* ∪ enabled git 源 discover，D-008）→\n候选含归一化名与 valid/invalid_reason（多文件技能标 has_extra_files）。\n无 spec 工作区返回空列表（与 GET skills 同口径）。",
+        "operationId": "list_adoptable_workspace_skills_api_workspaces__workspace_id__skills_adoptable_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdoptableSkillsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/skills/adopt": {
+      "post": {
+        "tags": [
+          "workspace"
+        ],
+        "summary": "Adopt Workspace Skills",
+        "description": "收编 specDir/skills 技能为操作者的 CustomSkill（桥④ / D-005 两阶段之确认落库）。\n\n逐名独立结果（单名失败不炸整批）：adopted / invalid（带原因跳过）/\nmissing / conflict（重名 409 既有语义逐名呈现）。内容口径：SKILL.md\nfrontmatter 原样落库、缺失按打包层口径拼装（防双拼）；**不删 specDir 源\n文件**（用户自清）；CustomSkill 归属操作者本人。",
+        "operationId": "adopt_workspace_skills_api_workspaces__workspace_id__skills_adopt_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillAdoptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillAdoptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/mcp-config": {
       "get": {
         "tags": [
@@ -1524,6 +1622,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/McpConfigViewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/mcp/import-from-registry": {
+      "post": {
+        "tags": [
+          "workspace"
+        ],
+        "summary": "Import Mcp From Registry",
+        "description": "从 MCP 资产库选入 server 定义到 ``.mcp.json``（桥③ / D-004 / D-009）。\n\n2026-09-11-workspace-asset-bridges task-02 / FR-02。鉴权同 mcp-config PUT\n先例（``require_permission(WORKSPACE_WRITE)`` 自动取路径 ``{workspace_id}``\n做成员校验，非成员 403）。service 层完成：registry 可见性（跨用户私有\n404 防枚举）+ env 解密（失败 422 中文文案，D-009 三态）→ 条目校验（与\n手工 PUT 同口径）→ 同名改名 ``-registry`` 循环避撞（D-004）→ 读-合并-\n原子写 + 审计；server 停用/无绑定不阻断导入（响应带 ``warning``——写入\n即生效，与平台绑定态无关）。registry 侧 server/binding 状态零变化。",
+        "operationId": "import_mcp_from_registry_api_workspaces__workspace_id__mcp_import_from_registry_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpImportFromRegistryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpImportFromRegistryResponse"
                 }
               }
             }
@@ -16643,17 +16795,46 @@
           "daemon"
         ],
         "summary": "Get Skills Manifest",
-        "description": "Return sillyspec skills manifest (version + file list + sha256 per file).\n\ndaemon skill-manager 用来判定是否需重新拉取 bundle（版本漂移）。\n合并代码库 ``sillyspec-*`` + DB ``CustomSkill``（task-03，每个 → ``<name>/SKILL.md``）。\n源目录无 skills 时返回 404。",
+        "description": "Return sillyspec skills manifest (version + file list + sha256 per file).\n\ndaemon skill-manager 用来判定是否需重新拉取 bundle（版本漂移）。\n合并代码库 ``sillyspec-*`` + DB ``CustomSkill``（task-03，每个 → ``<name>/SKILL.md``）。\n源目录无 skills 时返回 404。\n\n可选 query ``workspace_id``（bridges task-04 / D-007）：带值时经\n``_require_workspace_member_scope`` 授权后透传，manifest 按 user ∪\nworkspace 并集渲染（workspace 启用的 git 技能一并入集）；缺省 = user-only\n（行为逐字不变）。非法 UUID → 422（全局校验处理器中文报错）。",
         "operationId": "get_skills_manifest_api_daemon_skills_latest_manifest_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Skills Manifest Api Daemon Skills Latest Manifest Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -16667,14 +16848,43 @@
           "daemon"
         ],
         "summary": "Get Skills Bundle",
-        "description": "Return sillyspec-skills.tar.gz binary stream for daemon download.\n\nbundle 含代码库 ``sillyspec-*`` skill 目录 + DB ``CustomSkill``，打包为 gzip tar。\n无 skills 时返回 404。",
+        "description": "Return sillyspec-skills.tar.gz binary stream for daemon download.\n\nbundle 含代码库 ``sillyspec-*`` skill 目录 + DB ``CustomSkill``，打包为 gzip tar。\n无 skills 时返回 404。\n\n可选 query ``workspace_id``（bridges task-04 / D-007）：语义同 manifest\n端点——带值时授权后按 user ∪ workspace 并集打包；缺省 = user-only\n（行为逐字不变）。",
         "operationId": "get_skills_bundle_api_daemon_skills_latest_bundle_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -17337,8 +17547,27 @@
           "skill-sources"
         ],
         "summary": "Get Skills Library",
-        "description": "技能库三源聚合 + 我的启用态（登录即可；git 技能默认关，D-003）。",
+        "description": "技能库三源聚合 + 启用态（登录即可；git 技能默认关，D-003）。\n\n可选 ``?workspace_id=``：带上看 user ∪ workspace 并集启用态（成员校验\n403 在 service）；不带 = user 视图（显式 IS NULL，D-010——不传行为不变）。",
         "operationId": "get_skills_library_api_skills_library_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -17346,6 +17575,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LibraryView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -17359,7 +17598,7 @@
           "skill-sources"
         ],
         "summary": "Enable Skill",
-        "description": "启用/停用一个 git 技能（本人；body ``enabled``，幂等）。\n\n``skill_key`` 格式非法 → 422；未命中启用源的发现结果 → 404（service 层）。",
+        "description": "启用/停用一个 git 技能（本人；body ``enabled``，幂等）。\n\n``skill_key`` 格式非法 → 422；未命中启用源的发现结果 → 404（service 层）。\n可选 ``?workspace_id=``：切 workspace 维度（成员校验 403、谓词带 scope\n在 service；不传 = user 维度旧行为不变）。",
         "operationId": "enable_skill_api_skills__skill_key__enable_post",
         "parameters": [
           {
@@ -17369,6 +17608,23 @@
             "schema": {
               "type": "string",
               "title": "Skill Key"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
             }
           }
         ],
@@ -17403,7 +17659,7 @@
           "skill-sources"
         ],
         "summary": "Disable Skill",
-        "description": "停用一个 git 技能（本人；幂等——无绑定也 204）。",
+        "description": "停用一个 git 技能（本人；幂等——无绑定也 204）。\n\n可选 ``?workspace_id=``：停 workspace 维度绑定（成员校验 403 在 service；\nuser 维度删除谓词显式 IS NULL，不误删 ws 行——D-010）。",
         "operationId": "disable_skill_api_skills__skill_key__enable_delete",
         "parameters": [
           {
@@ -17413,6 +17669,23 @@
             "schema": {
               "type": "string",
               "title": "Skill Key"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
             }
           }
         ],
@@ -32658,6 +32931,68 @@
         ],
         "title": "AccessCheckResult"
       },
+      "AdoptableSkill": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "normalized_name": {
+            "type": "string",
+            "title": "Normalized Name"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "invalid_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Reason"
+          },
+          "has_extra_files": {
+            "type": "boolean",
+            "title": "Has Extra Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "normalized_name",
+          "valid",
+          "has_extra_files"
+        ],
+        "title": "AdoptableSkill",
+        "description": "单个可收编候选（``GET /skills/adoptable`` 条目，D-005 两阶段之列表）。\n\n``name``：specDir/skills/ 目录名原样（确认落库时回传该名）；``valid``：\n归一化后是否满足 CustomSkill name 规则（False → adopt 侧跳过并带\n``invalid_reason``，不炸整批）；``has_extra_files``：除 SKILL.md 外还有\n辅助文件——CustomSkill 单文件模型不收编辅助文件，前端提示手动合并。"
+      },
+      "AdoptableSkillsResponse": {
+        "properties": {
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/AdoptableSkill"
+            },
+            "type": "array",
+            "title": "Skills"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skills"
+        ],
+        "title": "AdoptableSkillsResponse",
+        "description": "``GET /api/workspaces/{id}/skills/adoptable`` 响应（差集候选，只读）。"
+      },
       "AgentKillResponse": {
         "properties": {
           "id": {
@@ -47231,6 +47566,52 @@
         ],
         "title": "McpDiagnostic",
         "description": "平台注入集预检单项（Grill B-03 五项重定义，design 接口定义）。"
+      },
+      "McpImportFromRegistryRequest": {
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Server Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "title": "McpImportFromRegistryRequest",
+        "description": "``POST /api/workspaces/{id}/mcp/import-from-registry`` 请求体（D-004）。"
+      },
+      "McpImportFromRegistryResponse": {
+        "properties": {
+          "written_name": {
+            "type": "string",
+            "title": "Written Name"
+          },
+          "renamed": {
+            "type": "boolean",
+            "title": "Renamed"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "type": "object",
+        "required": [
+          "written_name",
+          "renamed"
+        ],
+        "title": "McpImportFromRegistryResponse",
+        "description": "导入响应：写入结果 + 改名标记 + 三态 warning（D-004/D-009）。\n\n``written_name``：实际写入 ``.mcp.json`` 的 server 名（同名冲突改名后的\n最终名）；``renamed``：是否发生改名；``warning``：server 停用/无绑定时\n的提示（仍可导入——写入即生效，与平台绑定态无关）。"
       },
       "McpImportRequest": {
         "properties": {
@@ -63243,6 +63624,102 @@
         ],
         "title": "SillySpecConflictProgressRow",
         "description": "progress 比对行（design §7.2 progress_rows[] 单项，D-003@v1 对比表）。\n\n字段白名单六项（当前阶段/阶段标签/步骤进度/最近活跃/ql_id/ghost），缺失侧\n显式「—」；``differ`` 由两侧展示值不等判定。"
+      },
+      "SkillAdoptItemResult": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "adopted",
+              "invalid",
+              "missing",
+              "conflict"
+            ],
+            "title": "Status"
+          },
+          "normalized_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized Name"
+          },
+          "skill_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "status"
+        ],
+        "title": "SkillAdoptItemResult",
+        "description": "单个 name 的收编结果（整批逐名独立，单名失败不影响其余，D-005）。"
+      },
+      "SkillAdoptRequest": {
+        "properties": {
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Names"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "names"
+        ],
+        "title": "SkillAdoptRequest",
+        "description": "``POST /api/workspaces/{id}/skills/adopt`` 请求体（确认落库阶段）。\n\n``names`` 为 adoptable 列表回传的目录名数组（原样 name，非归一化名）。"
+      },
+      "SkillAdoptResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SkillAdoptItemResult"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "SkillAdoptResponse",
+        "description": "``POST /api/workspaces/{id}/skills/adopt`` 响应（逐名结果数组）。"
       },
       "SkillCreateRequest": {
         "properties": {

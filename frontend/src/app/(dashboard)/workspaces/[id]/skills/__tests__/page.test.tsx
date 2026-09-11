@@ -19,6 +19,11 @@
  *   8. 删除 Skill：confirm 明示目录级不可恢复；取消不发请求；确认后 DELETE + 列表移除
  *   9. SKILL.md 删除文件按钮禁用；普通文件可删（confirm + DELETE）
  *   10. 新建文件：非法/已存在中文报错；合法名 PUT 空内容 + 选中新文件
+ *   11.（bridges task-05）平台技能库区块：挂载带 workspace_id 拉 library、
+ *       git 开关 POST/DELETE 均带 workspace_id（只影响当前工作区维度）
+ *   12.（bridges task-05）收编弹窗：差集拉取、invalid 灰显不可选、勾选 adopt
+ *       POST names、逐名结果中文（已收编/重名 409）、差集刷新；空态/加载/错误态；
+ *       adopt 整体失败 notify.error
  *
  * mock 模式照 MCP page.test.tsx（apiFetch mock + useNotify mock + vi.hoisted）。
  */
@@ -60,29 +65,112 @@ interface SkillEntry {
   files: string[];
 }
 
+/** 平台技能库 LibraryView（bridges task-05；字段口径同后端 schema.py）。 */
+interface LibraryMock {
+  sources: Array<Record<string, unknown>>;
+  skills: Array<{
+    skill_key: string;
+    name: string;
+    description?: string;
+    source: "sillyspec" | "custom" | "git";
+    enabled: boolean;
+    source_id?: string | null;
+  }>;
+}
+
+/** 可收编候选（字段口径同后端 AdoptableSkill）。 */
+interface AdoptableMock {
+  name: string;
+  description: string;
+  normalized_name: string;
+  valid: boolean;
+  invalid_reason?: string | null;
+  has_extra_files: boolean;
+}
+
 interface CallInit {
   method?: string;
   json?: unknown;
+  query?: Record<string, unknown>;
 }
 
 /**
- * 组装内存态 skills 后端：列表 GET/POST/DELETE + 文件 GET/PUT/DELETE，
- * 写操作同步更新内存态（PUT 更新内容、建文件进清单；DELETE 出清单），
- * 供 invalidate 后 refetch 拿到一致视图（与真实后端行为对齐）。
+ * 组装内存态 skills 后端：列表 GET/POST/DELETE + 文件 GET/PUT/DELETE +
+ * （bridges task-05）技能库 library（带 workspace_id 并集视角）与收编
+ * adoptable/adopt，写操作同步更新内存态（PUT 更新内容、建文件进清单；
+ * DELETE 出清单；adopt 成功名移出差集——与真实后端行为对齐），
+ * 供 invalidate 后 refetch 拿到一致视图。
  */
 function setupApi({
   skills,
   contents = {},
+  library = { sources: [], skills: [] },
+  adoptable = [],
+  conflictNames = [],
 }: {
   skills: SkillEntry[];
   contents?: Record<string, string>;
+  library?: LibraryMock;
+  adoptable?: AdoptableMock[];
+  conflictNames?: string[];
 }) {
   const state = {
     skills: skills.map((s) => ({ ...s, files: [...s.files] })),
     contents: { ...contents },
+    library,
+    adoptable: adoptable.map((a) => ({ ...a })),
+    conflictNames: [...conflictNames],
   };
   apiFetchMock.mockImplementation(async (url: string, init?: CallInit) => {
     const method = init?.method ?? "GET";
+    if (url === "/api/skills/library") {
+      return state.library;
+    }
+    if (url === "/api/workspaces/ws-1/skills/adoptable") {
+      return { skills: state.adoptable };
+    }
+    if (url === "/api/workspaces/ws-1/skills/adopt" && method === "POST") {
+      const body = init?.json as { names: string[] };
+      const results = body.names.map((name) => {
+        const hit = state.adoptable.find((a) => a.name === name);
+        if (!hit) {
+          return {
+            name,
+            status: "missing",
+            normalized_name: null,
+            skill_id: null,
+            reason: "目录或 SKILL.md 不存在",
+          };
+        }
+        if (!hit.valid) {
+          return {
+            name,
+            status: "invalid",
+            normalized_name: null,
+            skill_id: null,
+            reason: hit.invalid_reason ?? "名称非法",
+          };
+        }
+        if (state.conflictNames.includes(name)) {
+          return {
+            name,
+            status: "conflict",
+            normalized_name: hit.normalized_name,
+            skill_id: null,
+            reason: "已存在同名自定义技能",
+          };
+        }
+        state.adoptable = state.adoptable.filter((a) => a.name !== name);
+        return {
+          name,
+          status: "adopted",
+          normalized_name: hit.normalized_name,
+          skill_id: `sk-${name}`,
+          reason: null,
+        };
+      });
+      return { results };
+    }
     if (url === "/api/workspaces/ws-1/skills") {
       if (method === "POST") {
         const body = init?.json as { name: string; description: string };
@@ -246,7 +334,13 @@ describe("workspace skills 子页 · 列表与文件树（task-10 基线 + task-
   });
 
   it("空状态展示", async () => {
-    apiFetchMock.mockResolvedValueOnce({ skills: [] });
+    // bridges task-05：页面挂载即发 library 请求（平台技能库区块）→ 单次
+    // mock 会被任一挂载查询消费，改按 URL 路由保证确定性（断言不变）。
+    apiFetchMock.mockImplementation(async (url: string) =>
+      url === "/api/workspaces/ws-1/skills"
+        ? { skills: [] }
+        : { sources: [], skills: [] },
+    );
 
     renderPage(<SkillsPage params={{ id: "ws-1" }} />);
 
@@ -260,14 +354,18 @@ describe("workspace skills 子页 · 列表与文件树（task-10 基线 + task-
   });
 
   it("错误态展示", async () => {
-    apiFetchMock.mockRejectedValueOnce(
-      new ApiError(500, {
-        code: "internal_error",
-        message: "加载失败",
-        request_id: null,
-        details: null,
-      }),
-    );
+    // 同上：按 URL 路由，仅 workspace skills 列表失败（断言不变）。
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/workspaces/ws-1/skills") {
+        throw new ApiError(500, {
+          code: "internal_error",
+          message: "加载失败",
+          request_id: null,
+          details: null,
+        });
+      }
+      return { sources: [], skills: [] };
+    });
 
     renderPage(<SkillsPage params={{ id: "ws-1" }} />);
 
@@ -542,5 +640,318 @@ describe("workspace skills 子页 · 新建文件（task-06）", () => {
       expect(screen.getByText("deploy-helper / notes.md")).toBeInTheDocument();
     });
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+  });
+});
+
+describe("workspace skills 子页 · 平台技能库区块（bridges task-05，桥①）", () => {
+  const GIT_SOURCE = {
+    id: "src-1",
+    url: "https://github.com/foo/skills-repo.git",
+    branch: "main",
+    subdir: null,
+    enabled: true,
+    last_commit: "abcdef1",
+    last_fetched_at: "2026-09-11T00:00:00Z",
+    last_error: null,
+    created_at: "2026-09-10T00:00:00Z",
+    updated_at: "2026-09-11T00:00:00Z",
+  };
+
+  function makeLibrary(gitEnabled: boolean): LibraryMock {
+    return {
+      sources: [GIT_SOURCE],
+      skills: [
+        {
+          skill_key: "sillyspec-archive",
+          name: "sillyspec-archive",
+          description: "归档变更",
+          source: "sillyspec",
+          enabled: true,
+          source_id: null,
+        },
+        {
+          skill_key: "my-helper",
+          name: "my-helper",
+          description: "辅助技能",
+          source: "custom",
+          enabled: true,
+          source_id: null,
+        },
+        {
+          skill_key: "src-1:deploy-helper",
+          name: "deploy-helper",
+          description: "部署辅助",
+          source: "git",
+          enabled: gitEnabled,
+          source_id: "src-1",
+        },
+      ],
+    };
+  }
+
+  it("挂载即带 workspace_id 拉取 library；只渲染 git 组；开关 POST 带 workspace_id", async () => {
+    setupApi({
+      skills: [{ name: "doc-gen", files: ["SKILL.md"] }],
+      library: makeLibrary(false),
+    });
+    renderPage(<SkillsPage params={{ id: "ws-1" }} />);
+
+    // 等 git 行渲染（library 数据就绪；卡片骨架加载态即有 testid，不能作就绪信号）
+    await screen.findByText("deploy-helper");
+    expect(screen.getByTestId("workspace-library-list")).toBeInTheDocument();
+    // 拉取带 workspace 维度参数（只影响当前工作区，acceptance 可断言项）
+    expect(apiFetchMock).toHaveBeenCalledWith("/api/skills/library", {
+      query: { workspace_id: "ws-1" },
+    });
+    // 只渲染 git 组：个人恒启用源（组头/行/徽标）不出现
+    expect(screen.queryByText("系统自带（sillyspec）")).not.toBeInTheDocument();
+    expect(screen.queryByText("我的自定义技能")).not.toBeInTheDocument();
+    expect(screen.queryByText("sillyspec-archive")).not.toBeInTheDocument();
+    expect(screen.queryByText("my-helper")).not.toBeInTheDocument();
+    expect(screen.queryByText("恒启用")).not.toBeInTheDocument();
+    // git 行 + 源组头 + 计数（只算 git）
+    expect(screen.getByText("git 技能源")).toBeInTheDocument();
+    expect(screen.getByText("1 个技能")).toBeInTheDocument();
+
+    // 打开开关 → POST enable（skill_key 冒号 %3A）+ workspace 维度 query
+    fireEvent.click(
+      screen.getByRole("switch", { name: "启用技能 deploy-helper" }),
+    );
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/skills/src-1%3Adeploy-helper/enable",
+        {
+          method: "POST",
+          json: { enabled: true },
+          query: { workspace_id: "ws-1" },
+        },
+      );
+    });
+  });
+
+  it("关闭已启用开关 → DELETE 带 workspace_id（工作区维度停用）", async () => {
+    setupApi({
+      skills: [{ name: "doc-gen", files: ["SKILL.md"] }],
+      library: makeLibrary(true),
+    });
+    renderPage(<SkillsPage params={{ id: "ws-1" }} />);
+
+    const sw = await screen.findByRole("switch", {
+      name: "启用技能 deploy-helper",
+    });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(sw);
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/skills/src-1%3Adeploy-helper/enable",
+        { method: "DELETE", query: { workspace_id: "ws-1" } },
+      );
+    });
+  });
+});
+
+describe("workspace skills 子页 · 收编为个人技能（bridges task-05，桥④）", () => {
+  const ADOPTABLE: AdoptableMock[] = [
+    {
+      name: "deploy-helper",
+      description: "部署辅助",
+      normalized_name: "deploy-helper",
+      valid: true,
+      invalid_reason: null,
+      has_extra_files: false,
+    },
+    {
+      name: "我的技能",
+      description: "中文名非法",
+      normalized_name: "",
+      valid: false,
+      invalid_reason: "名称仅允许字母/数字/点/下划线/连字符",
+      has_extra_files: false,
+    },
+    {
+      name: "multi-file",
+      description: "带辅助文件",
+      normalized_name: "multi-file",
+      valid: true,
+      invalid_reason: null,
+      has_extra_files: true,
+    },
+  ];
+
+  /** 打开页面 + 收编弹窗，等差集列表就绪。 */
+  async function openAdoptDialog() {
+    fireEvent.click(screen.getByRole("button", { name: "查看可收编技能…" }));
+    await screen.findByTestId("adoptable-list");
+  }
+
+  it("勾选 adopt：POST names 原样数组 + 逐名结果中文（已收编/重名 409）+ 差集刷新", async () => {
+    setupApi({
+      skills: [{ name: "doc-gen", files: ["SKILL.md"] }],
+      adoptable: ADOPTABLE,
+      conflictNames: ["multi-file"],
+    });
+    renderPage(<SkillsPage params={{ id: "ws-1" }} />);
+    await waitFor(() => {
+      expect(screen.getByText("doc-gen")).toBeInTheDocument();
+    });
+
+    await openAdoptDialog();
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/workspaces/ws-1/skills/adoptable",
+    );
+
+    // invalid 灰显不可选（checkbox disabled）+ 原因 tag
+    const invalidBox = screen.getByRole("checkbox", { name: "收编 我的技能" });
+    expect(invalidBox).toBeDisabled();
+    expect(screen.getByText("名称非法")).toBeInTheDocument();
+    // 含辅助文件标记（CustomSkill 单文件模型提示）
+    expect(screen.getByText("含辅助文件")).toBeInTheDocument();
+    // 未勾选时收编按钮禁用
+    expect(screen.getByRole("button", { name: "收编" })).toBeDisabled();
+
+    // 勾选两个合法项 → 按钮计数
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "收编 deploy-helper" }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "收编 multi-file" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "收编（2 个）" }));
+
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/workspaces/ws-1/skills/adopt",
+        { method: "POST", json: { names: ["deploy-helper", "multi-file"] } },
+      );
+    });
+
+    // 逐名结果中文反馈：成功 + 重名 409
+    await screen.findByTestId("adopt-result-deploy-helper");
+    expect(screen.getByText("已收编")).toBeInTheDocument();
+    expect(
+      screen.getByText("重名：个人技能库已有同名技能"),
+    ).toBeInTheDocument();
+    expect(notifyMock.success).toHaveBeenCalledWith("收编完成：成功 1 个");
+
+    // 「继续收编」回到列表：差集已刷新（adopted 移除、conflict/invalid 保留）
+    fireEvent.click(
+      screen.getByRole("button", { name: "继续收编（已刷新差集）" }),
+    );
+    await screen.findByTestId("adoptable-list");
+    expect(
+      screen.queryByTestId("adoptable-item-deploy-helper"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("adoptable-item-multi-file")).toBeInTheDocument();
+    expect(screen.getByTestId("adoptable-item-我的技能")).toBeInTheDocument();
+  });
+
+  it("空差集 → 弹窗空态", async () => {
+    setupApi({ skills: [{ name: "doc-gen", files: ["SKILL.md"] }] });
+    renderPage(<SkillsPage params={{ id: "ws-1" }} />);
+    await waitFor(() => {
+      expect(screen.getByText("doc-gen")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "查看可收编技能…" }));
+    await waitFor(() => {
+      expect(screen.getByText("无可收编技能")).toBeInTheDocument();
+    });
+  });
+
+  it("加载中 → 就绪过渡；adoptable 失败 → ErrorBanner + 重试", async () => {
+    // 挂起 adoptable 响应：先断言加载态，再放行验证空态过渡。
+    let release!: (v: { skills: AdoptableMock[] }) => void;
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/workspaces/ws-1/skills/adoptable") {
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+      if (url === "/api/workspaces/ws-1/skills") {
+        return { skills: [{ name: "doc-gen", files: ["SKILL.md"] }] };
+      }
+      return { sources: [], skills: [] };
+    });
+    renderPage(<SkillsPage params={{ id: "ws-1" }} />);
+    await waitFor(() => {
+      expect(screen.getByText("doc-gen")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "查看可收编技能…" }));
+    await waitFor(() => {
+      expect(screen.getByText("加载可收编技能...")).toBeInTheDocument();
+    });
+    release({ skills: [] });
+    await waitFor(() => {
+      expect(screen.getByText("无可收编技能")).toBeInTheDocument();
+    });
+
+    // 错误态：adoptable 拒绝 → ErrorBanner（role=alert）+ 重试按钮
+    cleanup();
+    apiFetchMock.mockReset();
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/workspaces/ws-1/skills/adoptable") {
+        throw new ApiError(500, {
+          code: "internal_error",
+          message: "加载候选失败",
+          request_id: null,
+          details: null,
+        });
+      }
+      if (url === "/api/workspaces/ws-1/skills") {
+        return { skills: [{ name: "doc-gen", files: ["SKILL.md"] }] };
+      }
+      return { sources: [], skills: [] };
+    });
+    const { unmount } = renderPage(<SkillsPage params={{ id: "ws-1" }} />);
+    await waitFor(() => {
+      expect(screen.getByText("doc-gen")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "查看可收编技能…" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("加载候选失败");
+    expect(
+      screen.getByRole("button", { name: "重试" }),
+    ).toBeInTheDocument();
+    unmount();
+  });
+
+  it("adopt 整体请求失败 → notify.error 中文兜底", async () => {
+    setupApi({
+      skills: [{ name: "doc-gen", files: ["SKILL.md"] }],
+      adoptable: [ADOPTABLE[0]!],
+    });
+    const base = apiFetchMock.getMockImplementation();
+    apiFetchMock.mockImplementation(async (url: string, init?: CallInit) => {
+      if (url === "/api/workspaces/ws-1/skills/adopt") {
+        throw new ApiError(500, {
+          code: "internal_error",
+          message: "服务繁忙",
+          request_id: null,
+          details: null,
+        });
+      }
+      return base!(url, init);
+    });
+    renderPage(<SkillsPage params={{ id: "ws-1" }} />);
+    await waitFor(() => {
+      expect(screen.getByText("doc-gen")).toBeInTheDocument();
+    });
+
+    await openAdoptDialog();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "收编 deploy-helper" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "收编（1 个）" }));
+
+    await waitFor(() => {
+      expect(notifyMock.error).toHaveBeenCalledTimes(1);
+    });
+    const [err, fallback] = notifyMock.error.mock.calls[0]!;
+    expect((err as ApiError).message).toBe("服务繁忙");
+    expect(fallback).toBe("收编失败");
+    // 弹窗停留列表态（结果区不出现），可重试
+    expect(screen.getByTestId("adoptable-list")).toBeInTheDocument();
   });
 });

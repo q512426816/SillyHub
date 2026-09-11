@@ -14,6 +14,9 @@
  *      （skill_key 含冒号 → %3A 编码）+ 成功后失效 library 与 manifest
  *   4. 乐观更新失败回滚：POST 拒绝 → 开关回到未启用
  *   5. 关闭已启用开关 → DELETE /api/skills/{skill_key}/enable
+ *   6.（bridges task-05）workspace 维度模式：library 拉取带 ?workspace_id、
+ *       只渲染 git 组、开关 POST/DELETE 带 workspace_id、失效本维度键且
+ *       不失效个人 manifest；workspace 模式空态（无 git 技能）
  *
  * 测试模式：mock @/lib/api 的 apiFetch（按 path+method 路由）+ AntApp 包裹 +
  * 独立 QueryClient（invalidateQueries spy 验证 manifest 失效）。
@@ -85,6 +88,45 @@ const LIBRARY: LibraryView = {
 /** enable POST 行为开关：默认成功；rollback 用例切 reject。 */
 let enablePostRejects = false;
 
+/**
+ * workspace 维度 library 响应（?workspace_id= 并集视角；bridges task-05）。
+ * 按用例可变（git 启用态/空 git），beforeEach 重置。
+ */
+let wsLibrary: LibraryView;
+
+/** 造一份 workspace 维度 library（深拷贝防用例间串改）。 */
+function makeWsLibrary(gitEnabled: boolean): LibraryView {
+  return {
+    sources: LIBRARY.sources ?? [],
+    skills: [
+      {
+        skill_key: "sillyspec-archive",
+        name: "sillyspec-archive",
+        description: "归档变更",
+        source: "sillyspec",
+        enabled: true,
+        source_id: null,
+      },
+      {
+        skill_key: "my-helper",
+        name: "my-helper",
+        description: "辅助技能",
+        source: "custom",
+        enabled: true,
+        source_id: null,
+      },
+      {
+        skill_key: GIT_SKILL_KEY,
+        name: "deploy-helper",
+        description: "部署辅助",
+        source: "git",
+        enabled: gitEnabled,
+        source_id: "src-1",
+      },
+    ],
+  };
+}
+
 /** 改 git 技能启用态（生成类型 skills 可选——按 source 定位防索引越界）。 */
 function setGitSkillEnabled(enabled: boolean) {
   const git = LIBRARY.skills?.find((s) => s.source === "git");
@@ -92,18 +134,28 @@ function setGitSkillEnabled(enabled: boolean) {
 }
 
 function routeFetch() {
-  api.fetch.mockImplementation(async (path: string, opts?: { method?: string }) => {
-    const method = opts?.method ?? "GET";
-    if (path === "/api/skills/library") return LIBRARY;
-    if (path === `/api/skills/${encodeURIComponent(GIT_SKILL_KEY)}/enable`) {
-      if (method === "POST") {
-        if (enablePostRejects) throw new Error("boom");
-        return undefined;
+  api.fetch.mockImplementation(
+    async (
+      path: string,
+      opts?: { method?: string; query?: Record<string, unknown> },
+    ) => {
+      const method = opts?.method ?? "GET";
+      if (path === "/api/skills/library") {
+        return (opts?.query as { workspace_id?: string } | undefined)
+          ?.workspace_id
+          ? wsLibrary
+          : LIBRARY;
       }
-      if (method === "DELETE") return undefined;
-    }
-    throw new Error(`unexpected apiFetch: ${method} ${path}`);
-  });
+      if (path === `/api/skills/${encodeURIComponent(GIT_SKILL_KEY)}/enable`) {
+        if (method === "POST") {
+          if (enablePostRejects) throw new Error("boom");
+          return undefined;
+        }
+        if (method === "DELETE") return undefined;
+      }
+      throw new Error(`unexpected apiFetch: ${method} ${path}`);
+    },
+  );
 }
 
 function renderList(ui: ReactElement) {
@@ -124,6 +176,7 @@ function renderList(ui: ReactElement) {
 
 beforeEach(() => {
   enablePostRejects = false;
+  wsLibrary = makeWsLibrary(false);
   routeFetch();
 });
 
@@ -217,5 +270,75 @@ describe("LibraryEnableList（技能库区块，全员）", () => {
       );
     });
     setGitSkillEnabled(false);
+  });
+});
+
+describe("LibraryEnableList（workspace 维度模式，bridges task-05 桥①）", () => {
+  it("带 workspaceId：拉取带 query 参数；只渲染 git 组；开关 POST 带 workspace_id 且不失效个人 manifest", async () => {
+    const { invalidateSpy } = renderList(<LibraryEnableList workspaceId="ws-9" />);
+
+    const sw = await screen.findByRole("switch", { name: "启用技能 deploy-helper" });
+    // 拉取走 workspace 维度（query 参数）
+    expect(api.fetch).toHaveBeenCalledWith("/api/skills/library", {
+      query: { workspace_id: "ws-9" },
+    });
+    // 只渲染 git 组：个人恒启用源（组头/行名/恒启用徽标）不出现
+    expect(screen.queryByText("系统自带（sillyspec）")).not.toBeInTheDocument();
+    expect(screen.queryByText("我的自定义技能")).not.toBeInTheDocument();
+    expect(screen.queryByText("sillyspec-archive")).not.toBeInTheDocument();
+    expect(screen.queryByText("my-helper")).not.toBeInTheDocument();
+    expect(screen.queryByText("恒启用")).not.toBeInTheDocument();
+    expect(screen.getByText("git 技能源")).toBeInTheDocument();
+    // 计数只算 git 技能
+    expect(screen.getByText("1 个技能")).toBeInTheDocument();
+
+    fireEvent.click(sw);
+
+    // POST 带 workspace 维度 query（只影响当前工作区）
+    await waitFor(() => {
+      expect(api.fetch).toHaveBeenCalledWith(
+        "/api/skills/src-1%3Adeploy-helper/enable",
+        { method: "POST", json: { enabled: true }, query: { workspace_id: "ws-9" } },
+      );
+    });
+    // 失效本维度键；个人 manifest 不失效（workspace 维度不动个人 bundle）
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["customSkills", "library", "ws-9"],
+      });
+    });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: ["customSkills", "manifest"],
+    });
+  });
+
+  it("workspace 模式关闭已启用开关 → DELETE 带 workspace_id", async () => {
+    wsLibrary = makeWsLibrary(true);
+    renderList(<LibraryEnableList workspaceId="ws-9" />);
+    const sw = await screen.findByRole("switch", { name: "启用技能 deploy-helper" });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(sw);
+
+    await waitFor(() => {
+      expect(api.fetch).toHaveBeenCalledWith(
+        "/api/skills/src-1%3Adeploy-helper/enable",
+        { method: "DELETE", query: { workspace_id: "ws-9" } },
+      );
+    });
+  });
+
+  it("workspace 模式空态：无 git 技能（仅个人源有技能）→ 平台技能库为空", async () => {
+    wsLibrary = {
+      sources: [],
+      skills: (makeWsLibrary(false).skills ?? []).filter(
+        (s) => s.source !== "git",
+      ),
+    };
+    renderList(<LibraryEnableList workspaceId="ws-9" />);
+
+    await screen.findByText("平台技能库为空");
+    expect(screen.getByText("0 个技能")).toBeInTheDocument();
+    expect(screen.queryByText("恒启用")).not.toBeInTheDocument();
   });
 });

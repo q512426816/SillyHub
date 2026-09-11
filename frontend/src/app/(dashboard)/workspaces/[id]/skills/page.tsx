@@ -2,9 +2,16 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Wrench } from "lucide-react";
+import { Tag, Tooltip } from "antd";
+import { Download, Wrench } from "lucide-react";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { LibraryEnableList } from "@/components/skills-library/library-enable-list";
+import {
+  useAdoptableSkills,
+  useAdoptSkills,
+  type SkillAdoptItemResult,
+} from "@/components/skills-library/skill-source-api";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -73,6 +80,11 @@ export function validateSkillFilePath(path: string): string | null {
  * 走 workspace-skills-view hooks（task-05），写成功后失效列表 + 单文件双键。
  * 推翻旧变更 2026-07-07-skills-mcp-management-ui D-006 的只读约束。
  * membership 校验由详情页 layout 的 WorkspaceBindingGuard 完成，本页不重复校验。
+ *
+ * 2026-09-11-workspace-asset-bridges task-05 增两区块（FR-04，既有区块零改动）：
+ * - 「平台技能库」：LibraryEnableList 传 workspaceId——git 技能按工作区维度
+ *   启用开关（桥①，成员即写权限）；
+ * - 「收编为个人技能」：adoptable 差集弹窗 + 勾选 adopt 逐名结果（桥④前端面）。
  */
 export default function WorkspaceSkillsPage({ params }: Props) {
   const workspaceId = params.id;
@@ -85,6 +97,7 @@ export default function WorkspaceSkillsPage({ params }: Props) {
   const [editorText, setEditorText] = useState("");
   const [showCreateSkill, setShowCreateSkill] = useState(false);
   const [showNewFile, setShowNewFile] = useState(false);
+  const [showAdopt, setShowAdopt] = useState(false);
 
   const fileQuery = useWorkspaceSkillFile(
     workspaceId,
@@ -426,6 +439,30 @@ export default function WorkspaceSkillsPage({ params }: Props) {
         </div>
       )}
 
+      {/* ══ 平台技能库（按工作区启用）——桥① / FR-04；与上方 specDir 管理相互独立 ══ */}
+      <LibraryEnableList workspaceId={workspaceId} />
+
+      {/* ══ 收编为个人技能——桥④ / FR-04；弹窗懒加载差集列表 ══ */}
+      <SectionCard
+        title="收编为个人技能"
+        data-testid="skills-adopt-card"
+        extra={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAdopt(true)}
+          >
+            查看可收编技能…
+          </Button>
+        }
+      >
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          将本工作区 specDir/skills/
+          下已手工沉淀、尚未进入平台技能库的 skill 收编为你的个人自定义技能（读取
+          SKILL.md 内容入库，不删除工作区源文件；同名技能会跳过并提示）。
+        </p>
+      </SectionCard>
+
       {showCreateSkill && (
         <CreateSkillDialog
           pending={createSkill.isPending}
@@ -439,6 +476,12 @@ export default function WorkspaceSkillsPage({ params }: Props) {
           pending={writeFile.isPending}
           onClose={() => setShowNewFile(false)}
           onSubmit={handleCreateFile}
+        />
+      )}
+      {showAdopt && (
+        <AdoptSkillsDialog
+          workspaceId={workspaceId}
+          onClose={() => setShowAdopt(false)}
         />
       )}
     </PageContainer>
@@ -621,6 +664,244 @@ function NewFileDialog({
             {pending ? "创建中…" : "创建"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ────────────────────── 收编弹窗（bridges task-05，桥④ / D-005 两阶段） ────────────────────── */
+
+/** adopt 逐名结果的中文状态文案（后端四态字面量 → 展示文案）。 */
+const ADOPT_STATUS_LABEL: Record<SkillAdoptItemResult["status"], string> = {
+  adopted: "已收编",
+  invalid: "名称非法，已跳过",
+  missing: "目录或 SKILL.md 不存在",
+  conflict: "重名：个人技能库已有同名技能",
+};
+
+/** adopt 逐名结果 → 状态徽标语义（成功绿/重名红/其余中性）。 */
+const ADOPT_STATUS_KIND: Record<
+  SkillAdoptItemResult["status"],
+  "success" | "error" | "neutral"
+> = {
+  adopted: "success",
+  conflict: "error",
+  invalid: "neutral",
+  missing: "neutral",
+};
+
+/** 单个收编结果行（收编完成后逐名展示，含归一化名与后端原因）。 */
+function AdoptResultRow({ result }: { result: SkillAdoptItemResult }) {
+  return (
+    <li
+      className="flex flex-wrap items-center gap-2 border-b px-1 py-2 text-xs last:border-0"
+      data-testid={`adopt-result-${result.name}`}
+    >
+      <code className="rounded bg-muted px-1.5 py-0.5 font-medium">
+        {result.name}
+      </code>
+      {result.normalized_name && result.normalized_name !== result.name && (
+        <span className="text-muted-foreground">→ {result.normalized_name}</span>
+      )}
+      <StatusBadge kind={ADOPT_STATUS_KIND[result.status]}>
+        {ADOPT_STATUS_LABEL[result.status]}
+      </StatusBadge>
+      {result.reason && (
+        <span
+          className="min-w-0 flex-1 truncate text-muted-foreground"
+          title={result.reason}
+        >
+          {result.reason}
+        </span>
+      )}
+    </li>
+  );
+}
+
+/**
+ * 「收编为个人技能」弹窗（桥④两阶段：列表勾选 → 确认后逐名结果）。
+ * 打开才拉 adoptable（enabled 开关懒加载）；invalid 条目灰显不可选、原因走
+ * Tooltip；has_extra_files 标记提示辅助文件不随收编（CustomSkill 单文件模型）。
+ * adopt 成功后列表失效重拉（剩余差集），结果区可「继续收编」回到列表。
+ *
+ * 勾选用原生 checkbox（accent-brand-600，session-list-panel 同款）：本页为
+ * 工作台式子页（shadcn 四件套基线），且 antd Checkbox 在 Radix Dialog 内
+ * 点击会触发 wave 效果拼出含 radix id 的非法选择器（jsdom/nwsapi 直接抛错）。
+ */
+function AdoptSkillsDialog({
+  workspaceId,
+  onClose,
+}: {
+  workspaceId: string;
+  onClose: () => void;
+}) {
+  const { skills, isLoading, isError, error, refetch } = useAdoptableSkills(
+    workspaceId,
+    true,
+  );
+  const adopt = useAdoptSkills(workspaceId);
+  const notify = useNotify();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [results, setResults] = useState<SkillAdoptItemResult[] | null>(null);
+
+  const toggleSelected = (name: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const handleAdopt = async () => {
+    if (selected.size === 0) return;
+    try {
+      const res = await adopt.mutateAsync([...selected]);
+      setResults(res.results);
+      setSelected(new Set());
+      const adopted = res.results.filter((r) => r.status === "adopted").length;
+      notify.success(`收编完成：成功 ${adopted} 个`);
+    } catch (err) {
+      notify.error(err, "收编失败");
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>收编为个人技能</DialogTitle>
+          <DialogDescription>
+            勾选要收编的 skill（仅列未进入平台技能库的差集）；收编读取 SKILL.md
+            入库为你的个人自定义技能，不删除工作区源文件。
+          </DialogDescription>
+        </DialogHeader>
+
+        {results ? (
+          <>
+            <ul className="max-h-[50vh] overflow-y-auto rounded-lg border border-border">
+              {results.map((r) => (
+                <AdoptResultRow key={r.name} result={r} />
+              ))}
+            </ul>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>
+                关闭
+              </Button>
+              <Button onClick={() => setResults(null)}>
+                继续收编（已刷新差集）
+              </Button>
+            </DialogFooter>
+          </>
+        ) : isLoading ? (
+          <p className="py-8 text-center text-xs text-muted-foreground">
+            加载可收编技能...
+          </p>
+        ) : isError ? (
+          <ErrorBanner
+            message={errMessage(error, "加载可收编技能失败")}
+            onRetry={() => void refetch()}
+          />
+        ) : skills.length === 0 ? (
+          <EmptyState
+            icon={<Download className="h-5 w-5" />}
+            title="无可收编技能"
+            description="specDir/skills/ 下的技能均已进入平台技能库，或目录为空。"
+          />
+        ) : (
+          <>
+            <ul
+              className="max-h-[50vh] space-y-1 overflow-y-auto"
+              data-testid="adoptable-list"
+            >
+              {skills.map((skill) => {
+                const checked = selected.has(skill.name);
+                return (
+                  <li
+                    key={skill.name}
+                    className={cn(
+                      "flex items-start gap-2 rounded-lg border px-3 py-2",
+                      skill.valid
+                        ? "border-border"
+                        : "border-border/60 bg-muted/30 opacity-60",
+                    )}
+                    data-testid={`adoptable-item-${skill.name}`}
+                  >
+                    <Tooltip
+                      title={
+                        skill.valid
+                          ? undefined
+                          : (skill.invalid_reason ??
+                            "归一化后不满足个人技能命名规则")
+                      }
+                    >
+                      <span className="mt-0.5 inline-flex">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`收编 ${skill.name}`}
+                          checked={checked}
+                          disabled={!skill.valid}
+                          onChange={() => toggleSelected(skill.name)}
+                        />
+                      </span>
+                    </Tooltip>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold">
+                          {skill.name}
+                        </span>
+                        {!skill.valid && (
+                          <Tag className="m-0" color="default">
+                            名称非法
+                          </Tag>
+                        )}
+                        {skill.has_extra_files && (
+                          <Tooltip title="收编仅入库 SKILL.md；其余辅助文件需自行合并进个人技能内容。">
+                            <Tag className="m-0" color="orange">
+                              含辅助文件
+                            </Tag>
+                          </Tooltip>
+                        )}
+                        {skill.valid &&
+                          skill.normalized_name !== skill.name && (
+                            <Tooltip title="目录名归一化后作为个人技能名落库（D-008）。">
+                              <Tag className="m-0" color="processing">
+                                收编为 {skill.normalized_name}
+                              </Tag>
+                            </Tooltip>
+                          )}
+                      </div>
+                      {skill.description && (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {skill.description}
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose} disabled={adopt.isPending}>
+                取消
+              </Button>
+              <Button
+                onClick={() => void handleAdopt()}
+                disabled={adopt.isPending || selected.size === 0}
+              >
+                {adopt.isPending
+                  ? "收编中…"
+                  : `收编${selected.size > 0 ? `（${selected.size} 个）` : ""}`}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

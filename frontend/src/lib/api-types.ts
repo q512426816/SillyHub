@@ -627,6 +627,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/skills/adoptable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Adoptable Workspace Skills
+         * @description 列 specDir/skills 可收编候选（桥④ / FR-03 / D-005 / D-008，只读差集）。
+         *
+         *     2026-09-11-workspace-asset-bridges task-03。鉴权 WORKSPACE_WRITE（收编入口
+         *     与确认落库同级权限，``require_permission`` 自动取路径 ``{workspace_id}`` 做
+         *     成员校验，非成员 403）。service 层完成：specDir/skills 目录扫描（复用
+         *     list_skills 同源 resolver 与防穿越遍历）→ 差集排除平台库名全集
+         *     （CustomSkill 全体名 ∪ sillyspec-* ∪ enabled git 源 discover，D-008）→
+         *     候选含归一化名与 valid/invalid_reason（多文件技能标 has_extra_files）。
+         *     无 spec 工作区返回空列表（与 GET skills 同口径）。
+         */
+        get: operations["list_adoptable_workspace_skills_api_workspaces__workspace_id__skills_adoptable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/skills/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt Workspace Skills
+         * @description 收编 specDir/skills 技能为操作者的 CustomSkill（桥④ / D-005 两阶段之确认落库）。
+         *
+         *     逐名独立结果（单名失败不炸整批）：adopted / invalid（带原因跳过）/
+         *     missing / conflict（重名 409 既有语义逐名呈现）。内容口径：SKILL.md
+         *     frontmatter 原样落库、缺失按打包层口径拼装（防双拼）；**不删 specDir 源
+         *     文件**（用户自清）；CustomSkill 归属操作者本人。
+         */
+        post: operations["adopt_workspace_skills_api_workspaces__workspace_id__skills_adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/mcp-config": {
         parameters: {
             query?: never;
@@ -656,6 +709,34 @@ export interface paths {
          */
         put: operations["update_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/mcp/import-from-registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Mcp From Registry
+         * @description 从 MCP 资产库选入 server 定义到 ``.mcp.json``（桥③ / D-004 / D-009）。
+         *
+         *     2026-09-11-workspace-asset-bridges task-02 / FR-02。鉴权同 mcp-config PUT
+         *     先例（``require_permission(WORKSPACE_WRITE)`` 自动取路径 ``{workspace_id}``
+         *     做成员校验，非成员 403）。service 层完成：registry 可见性（跨用户私有
+         *     404 防枚举）+ env 解密（失败 422 中文文案，D-009 三态）→ 条目校验（与
+         *     手工 PUT 同口径）→ 同名改名 ``-registry`` 循环避撞（D-004）→ 读-合并-
+         *     原子写 + 审计；server 停用/无绑定不阻断导入（响应带 ``warning``——写入
+         *     即生效，与平台绑定态无关）。registry 侧 server/binding 状态零变化。
+         */
+        post: operations["import_mcp_from_registry_api_workspaces__workspace_id__mcp_import_from_registry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6345,6 +6426,11 @@ export interface paths {
          *     daemon skill-manager 用来判定是否需重新拉取 bundle（版本漂移）。
          *     合并代码库 ``sillyspec-*`` + DB ``CustomSkill``（task-03，每个 → ``<name>/SKILL.md``）。
          *     源目录无 skills 时返回 404。
+         *
+         *     可选 query ``workspace_id``（bridges task-04 / D-007）：带值时经
+         *     ``_require_workspace_member_scope`` 授权后透传，manifest 按 user ∪
+         *     workspace 并集渲染（workspace 启用的 git 技能一并入集）；缺省 = user-only
+         *     （行为逐字不变）。非法 UUID → 422（全局校验处理器中文报错）。
          */
         get: operations["get_skills_manifest_api_daemon_skills_latest_manifest_get"];
         put?: never;
@@ -6368,6 +6454,10 @@ export interface paths {
          *
          *     bundle 含代码库 ``sillyspec-*`` skill 目录 + DB ``CustomSkill``，打包为 gzip tar。
          *     无 skills 时返回 404。
+         *
+         *     可选 query ``workspace_id``（bridges task-04 / D-007）：语义同 manifest
+         *     端点——带值时授权后按 user ∪ workspace 并集打包；缺省 = user-only
+         *     （行为逐字不变）。
          */
         get: operations["get_skills_bundle_api_daemon_skills_latest_bundle_get"];
         put?: never;
@@ -6640,7 +6730,10 @@ export interface paths {
         };
         /**
          * Get Skills Library
-         * @description 技能库三源聚合 + 我的启用态（登录即可；git 技能默认关，D-003）。
+         * @description 技能库三源聚合 + 启用态（登录即可；git 技能默认关，D-003）。
+         *
+         *     可选 ``?workspace_id=``：带上看 user ∪ workspace 并集启用态（成员校验
+         *     403 在 service）；不带 = user 视图（显式 IS NULL，D-010——不传行为不变）。
          */
         get: operations["get_skills_library_api_skills_library_get"];
         put?: never;
@@ -6665,11 +6758,16 @@ export interface paths {
          * @description 启用/停用一个 git 技能（本人；body ``enabled``，幂等）。
          *
          *     ``skill_key`` 格式非法 → 422；未命中启用源的发现结果 → 404（service 层）。
+         *     可选 ``?workspace_id=``：切 workspace 维度（成员校验 403、谓词带 scope
+         *     在 service；不传 = user 维度旧行为不变）。
          */
         post: operations["enable_skill_api_skills__skill_key__enable_post"];
         /**
          * Disable Skill
          * @description 停用一个 git 技能（本人；幂等——无绑定也 204）。
+         *
+         *     可选 ``?workspace_id=``：停 workspace 维度绑定（成员校验 403 在 service；
+         *     user 维度删除谓词显式 IS NULL，不误删 ws 行——D-010）。
          */
         delete: operations["disable_skill_api_skills__skill_key__enable_delete"];
         options?: never;
@@ -10930,6 +11028,37 @@ export interface components {
             accessible: boolean;
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * AdoptableSkill
+         * @description 单个可收编候选（``GET /skills/adoptable`` 条目，D-005 两阶段之列表）。
+         *
+         *     ``name``：specDir/skills/ 目录名原样（确认落库时回传该名）；``valid``：
+         *     归一化后是否满足 CustomSkill name 规则（False → adopt 侧跳过并带
+         *     ``invalid_reason``，不炸整批）；``has_extra_files``：除 SKILL.md 外还有
+         *     辅助文件——CustomSkill 单文件模型不收编辅助文件，前端提示手动合并。
+         */
+        AdoptableSkill: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Normalized Name */
+            normalized_name: string;
+            /** Valid */
+            valid: boolean;
+            /** Invalid Reason */
+            invalid_reason?: string | null;
+            /** Has Extra Files */
+            has_extra_files: boolean;
+        };
+        /**
+         * AdoptableSkillsResponse
+         * @description ``GET /api/workspaces/{id}/skills/adoptable`` 响应（差集候选，只读）。
+         */
+        AdoptableSkillsResponse: {
+            /** Skills */
+            skills: components["schemas"]["AdoptableSkill"][];
         };
         /** AgentKillResponse */
         AgentKillResponse: {
@@ -16881,6 +17010,33 @@ export interface components {
             detail?: string | null;
         };
         /**
+         * McpImportFromRegistryRequest
+         * @description ``POST /api/workspaces/{id}/mcp/import-from-registry`` 请求体（D-004）。
+         */
+        McpImportFromRegistryRequest: {
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+        };
+        /**
+         * McpImportFromRegistryResponse
+         * @description 导入响应：写入结果 + 改名标记 + 三态 warning（D-004/D-009）。
+         *
+         *     ``written_name``：实际写入 ``.mcp.json`` 的 server 名（同名冲突改名后的
+         *     最终名）；``renamed``：是否发生改名；``warning``：server 停用/无绑定时
+         *     的提示（仍可导入——写入即生效，与平台绑定态无关）。
+         */
+        McpImportFromRegistryResponse: {
+            /** Written Name */
+            written_name: string;
+            /** Renamed */
+            renamed: boolean;
+            /** Warning */
+            warning?: string | null;
+        };
+        /**
          * McpImportRequest
          * @description ``POST /api/mcp-servers/import-json``：{json_text, scope}（task provides 契约）。
          */
@@ -22536,6 +22692,43 @@ export interface components {
             differ: boolean;
         };
         /**
+         * SkillAdoptItemResult
+         * @description 单个 name 的收编结果（整批逐名独立，单名失败不影响其余，D-005）。
+         */
+        SkillAdoptItemResult: {
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "adopted" | "invalid" | "missing" | "conflict";
+            /** Normalized Name */
+            normalized_name?: string | null;
+            /** Skill Id */
+            skill_id?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * SkillAdoptRequest
+         * @description ``POST /api/workspaces/{id}/skills/adopt`` 请求体（确认落库阶段）。
+         *
+         *     ``names`` 为 adoptable 列表回传的目录名数组（原样 name，非归一化名）。
+         */
+        SkillAdoptRequest: {
+            /** Names */
+            names: string[];
+        };
+        /**
+         * SkillAdoptResponse
+         * @description ``POST /api/workspaces/{id}/skills/adopt`` 响应（逐名结果数组）。
+         */
+        SkillAdoptResponse: {
+            /** Results */
+            results: components["schemas"]["SkillAdoptItemResult"][];
+        };
+        /**
          * SkillCreateRequest
          * @description ``POST /skills`` 请求体。
          */
@@ -26759,6 +26952,72 @@ export interface operations {
             };
         };
     };
+    list_adoptable_workspace_skills_api_workspaces__workspace_id__skills_adoptable_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdoptableSkillsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_workspace_skills_api_workspaces__workspace_id__skills_adopt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillAdoptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillAdoptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_get: {
         parameters: {
             query?: never;
@@ -26812,6 +27071,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["McpConfigViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_mcp_from_registry_api_workspaces__workspace_id__mcp_import_from_registry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpImportFromRegistryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpImportFromRegistryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -35971,7 +36265,9 @@ export interface operations {
     };
     get_skills_manifest_api_daemon_skills_latest_manifest_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -35989,11 +36285,22 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_skills_bundle_api_daemon_skills_latest_bundle_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -36007,6 +36314,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -36471,7 +36787,9 @@ export interface operations {
     };
     get_skills_library_api_skills_library_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -36487,11 +36805,22 @@ export interface operations {
                     "application/json": components["schemas"]["LibraryView"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     enable_skill_api_skills__skill_key__enable_post: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace_id?: string | null;
+            };
             header?: never;
             path: {
                 skill_key: string;
@@ -36524,7 +36853,9 @@ export interface operations {
     };
     disable_skill_api_skills__skill_key__enable_delete: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace_id?: string | null;
+            };
             header?: never;
             path: {
                 skill_key: string;
