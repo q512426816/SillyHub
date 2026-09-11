@@ -52,3 +52,8 @@ daemon 心跳连续 422：`spec_cache[2].workspace_id` uuid_parsing 失败，远
 
 - junction 治理实操：docs/sillyspec/init-lease-silent-no-local-yaml.md（同日另一坑）
 - 2026-09-10 定时复核：修复 commit ef5b3c76a 已验证在 main（UUID 双侧校验两项 ✅；422 日志 loc 提升项按本文件裁决留档不做）；待 daemon 发版部署后归档。
+
+## 处置记录（2026-09-11 定时收口，部署实证，归档）
+
+- 修复已随 daemon 构建分发并落地本机：`~/.sillyhub/daemon/bin/sillyhub-daemon.js`（2026-09-10 23:47 更新的 bundle）实证含 `spec_cache_non_uuid` 守卫标记（commit ef5b3c76a 的写入/读侧/上报三端 UUID 校验）；422 日志 loc 提升项按本文件自身裁决留档不做（守卫落地后 422 不再发生，收益归零）。
+- 现场修复指引（specs 根非 UUID 目录挪出 + status-roots.json 清键重启）已无需日常使用，保留备查。归档。

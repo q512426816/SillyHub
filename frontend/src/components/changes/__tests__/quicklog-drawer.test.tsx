@@ -27,10 +27,12 @@ import type { QuicklogEntryListItem, QuicklogEntryRead } from "@/lib/quicklog";
 const mocks = vi.hoisted(() => ({
   getQuicklogDetail: vi.fn(),
   listQuicklogSessions: vi.fn(),
-  // ql-20260910-017-2006：quick 会话名反查（useQuickSessionName）+ 弹窗取数
+  // ql-20260910-017-2006：quick 会话名反查（useQuickSessionName）+ 弹窗取数；
+  // ql-20260911-001-c0be：结果卡对账表取数（默认降级载荷——多数用例不关心卡内容）。
   fetchMyBinding: vi.fn(),
   listDaemonMachines: vi.fn(),
   getScopeFileDiff: vi.fn(),
+  getScopeAudit: vi.fn(),
 }));
 
 vi.mock("@/lib/quicklog", async () => {
@@ -67,7 +69,11 @@ vi.mock("@/lib/changes", async () => {
   const actual = await vi.importActual<typeof import("@/lib/changes")>(
     "@/lib/changes",
   );
-  return { ...actual, getScopeFileDiff: mocks.getScopeFileDiff };
+  return {
+    ...actual,
+    getScopeFileDiff: mocks.getScopeFileDiff,
+    getScopeAudit: mocks.getScopeAudit,
+  };
 });
 
 vi.mock("next/link", () => ({
@@ -153,6 +159,13 @@ beforeEach(() => {
   mocks.fetchMyBinding.mockReset();
   mocks.listDaemonMachines.mockReset();
   mocks.getScopeFileDiff.mockReset();
+  mocks.getScopeAudit.mockReset();
+  // 结果卡默认降级载荷（多数用例不关心卡内容，仅防未配置 mock 悬挂）
+  mocks.getScopeAudit.mockResolvedValue({
+    ok: false,
+    degraded_reason: "（测试默认降级载荷）",
+    rows: [],
+  });
 });
 
 afterEach(cleanup);

@@ -6580,6 +6580,14 @@ export class Daemon {
         typeof params.workspace_id === 'string' ? params.workspace_id : '';
       return this._sillyspecManager.fileDiff(change, file, workspaceId);
     });
+    // ql-20260911-001-c0be：对账表（变更中心结果卡）——spawn sillyspec
+    // scope-audit --json 表模式（三态全表 + 行数，锚点同源）；错误码族同上。
+    ws.registerRpcHandler('sillyspec_scope_audit', async (params) => {
+      const change = typeof params.change === 'string' ? params.change : '';
+      const workspaceId =
+        typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      return this._sillyspecManager.auditTable(change, workspaceId);
+    });
   }
 
   /**

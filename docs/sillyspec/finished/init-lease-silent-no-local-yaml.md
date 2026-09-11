@@ -68,3 +68,8 @@ daemon 的 api_key 不是用户级凭证会被 401）→ 明文写回 local.yaml
 - docs/sillyspec/finished/init-revokes-persistent-local-yaml-tokens.md（init 吊销坑，已修）
 - docs/sillyspec/finished/坑8-repo-native平台指针锁死CLI上行断链.md（断链同族，指针侧已修）
 - 2026-09-10 定时复核：双层修复已验证在 main（平台 ef5b3c76a + sillyspec 6eea47b）；待 daemon 发版部署后归档。
+
+## 处置记录（2026-09-11 定时收口，部署实证，归档）
+
+- 双层修复已随 daemon 构建分发并落地本机：部署 bundle（2026-09-10 23:47）实证含 `init_lease_local_yaml_skipped` 标记（daemon 跳过写盘 warn + 原因枚举，commit ef5b3c76a）；backend 防御降级 warning 同 commit 在 main；sillyspec 三处注释纠偏 6eea47b 已发版。
+- 三层断链现在两层有声（daemon warn + backend warning），第三层（env 通道注释）已纠偏为「预留通道」——静默断链的排障特征（platform status 未连接 / manifest 版本不动）配合 warn 可定位。手动补凭据路径（容器内 create sync token）保留备查。归档。

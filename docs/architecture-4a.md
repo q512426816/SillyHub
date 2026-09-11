@@ -78,7 +78,7 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 |---|---|---|---|
 | 变更 CRUD/列表/详情/reparse | `/workspaces/{wid}/changes/*` | `backend/app/modules/change/router.py:119-273` | 列表支持 `pending_review_only` 过滤 |
 | 变更文件树/读写 | `/changes/{cid}/files/*` | `backend/app/modules/change/router.py` | 写文件建 pending `DaemonChangeWrite`（`backend/app/modules/change/service.py:652-720`） |
-| 阶段流转与派发 | `POST /changes/{cid}/transition` / `advance-stage` / `dispatch` | `backend/app/modules/change/router.py:703,554,908` | 共用 `transition_with_dispatch`（`backend/app/modules/change/service.py:1029`） |
+| 阶段流转与派发 | `POST /changes/{cid}/transition` / `advance-stage` / `dispatch` | `backend/app/modules/change/router.py:714,554,908` | 共用 `transition_with_dispatch`（`backend/app/modules/change/service.py:1029`） |
 | 4 审核面板 | `proposal-review` / `plan-review` / `human-test` / `archive-confirm` | `backend/app/modules/change/router.py:718-838` | approve→推进、revise→rerun |
 | 审批/驳回/反馈/归档门 | `/approval` / `/approve` / `/reject` / `/feedback` / `/archive-gate` | `backend/app/modules/change/router.py:436-712` | 归档门 6 项 check（`backend/app/modules/change/service.py:1198`） |
 | 变更创建（server-local/lease） | `POST /changes/create` | `backend/app/modules/change_writer/router.py` | 创建后 auto-dispatch brainstorm（未扫描 workspace 拒建，`backend/app/modules/change_writer/service.py:82-89`） |
@@ -261,17 +261,17 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 
 **审批（approvals）—— 双套实现并存**：
 
-- **业务审批**（change 模块，前端/业务用户消费）：`approval_status` 字段（`backend/app/modules/change/model.py:188`，默认 `not_required`），`approve`/`reject` 端点（`backend/app/modules/change/router.py:635`）。
+- **业务审批**（change 模块，前端/业务用户消费）：`approval_status` 字段（`backend/app/modules/change/model.py:188`，默认 `not_required`），`approve`/`reject` 端点（`backend/app/modules/change/router.py:646`）。
 - **CLI execute 审批门**（platform_sync 模块，SillySpec CLI 消费）：`GET /changes/{name}/approval`（`backend/app/modules/platform_sync/router.py:120-137`），CLI execute 启动时读 status 决定放行/阻断。**当前后端无审批策略，恒返回 approved 放行**，不查库不 404（避免误判 pending 卡死）。
 
-**权限模型**（`backend/app/modules/auth/permissions.py:34`）——`Permission` StrEnum 按 7 个 `PermissionGroup`（`:15`）组织：PLATFORM / ADMIN / WORKSPACE / AGENT / CHANGE / AUDIT / PPM。授权双轨：`UserWorkspaceRole`（workspace 级，`(user_id,workspace_id,role_id)`，`backend/app/modules/auth/model.py:255`）+ `UserRole`（平台级，`backend/app/modules/admin/model.py:111`）。系统角色：`platform_admin`（绑全权限，`backend/app/modules/auth/service.py:420`）、`workspace_owner`（创建者自动获，`backend/app/modules/workspace/service.py:842`）、`developer` / `viewer` / `business_member`（无自有 daemon，靠借用，`backend/app/core/permissions.py`）。workspace 级角色白名单显式排除系统角色（`backend/app/modules/workspace/service.py:39-48`）。
+**权限模型**（`backend/app/modules/auth/permissions.py:34`）——`Permission` StrEnum 按 7 个 `PermissionGroup`（`:15`）组织：PLATFORM / ADMIN / WORKSPACE / AGENT / CHANGE / AUDIT / PPM。授权双轨：`UserWorkspaceRole`（workspace 级，`(user_id,workspace_id,role_id)`，`backend/app/modules/auth/model.py:255`）+ `UserRole`（平台级，`backend/app/modules/admin/model.py:111`）。系统角色：`platform_admin`（绑全权限，`backend/app/modules/auth/service.py:475`）、`workspace_owner`（创建者自动获，`backend/app/modules/workspace/service.py:842`）、`developer` / `viewer` / `business_member`（无自有 daemon，靠借用，`backend/app/core/permissions.py`）。workspace 级角色白名单显式排除系统角色（`backend/app/modules/workspace/service.py:39-48`）。
 
 **审计（audit）—— 双轨设计，注意缺口**：
 
 - **自动 ORM 事件钩子**（`backend/app/core/audit_hooks.py:290` `register_audit_hooks`）：设计为对所有 `BaseModel` 子类 insert/update/delete 自动写 `AuditLog`。**但 production `main.py` 的 lifespan/create_app 从未调用它**（全仓仅测试命中 `register_audit_hooks(`），运行态实际休眠。
-- **手工 AuditLog 插入**（实际生效）：约 20 处 service 内直接构造 `AuditLog(...)`，覆盖改密码（`backend/app/modules/auth/service.py:249`）、权限变更（`backend/app/modules/admin/roles_service.py:242`）、禁登录/撤 session（`backend/app/modules/admin/users_service.py:617,630,669,705`）等。
+- **手工 AuditLog 插入**（实际生效）：约 20 处 service 内直接构造 `AuditLog(...)`，覆盖改密码（`backend/app/modules/auth/service.py:265`）、权限变更（`backend/app/modules/admin/roles_service.py:242`）、禁登录/撤 session（`backend/app/modules/admin/users_service.py:617,630,669,705`）等。
 - **写入目标**：DB 表 `audit_logs`（模型物理在 `backend/app/modules/workflow/model.py:46-82`），字段 `workspace_id`/`actor_id`/`action`/`resource_type`/`resource_id`/`details_json`。审计上下文经 `get_session` 注入 `session.info["audit_context"]`（`backend/app/core/db.py`）。
-- **已知缺口**：①登录成功/失败**不入审计表**，仅 `log.info` 结构化日志（`backend/app/modules/auth/service.py:169,129`）；②`settings`/`PlatformSetting` 变更因自动钩子未挂且未手工补，实际无 AuditLog；③daemon 侧另有独立 `PolicyAuditLog` 表（`backend/app/modules/daemon/audit/model.py:23`）与主审计分离。
+- **已知缺口**：①登录成功/失败**不入审计表**，仅 `log.info` 结构化日志（`backend/app/modules/auth/service.py:185,129`）；②`settings`/`PlatformSetting` 变更因自动钩子未挂且未手工补，实际无 AuditLog；③daemon 侧另有独立 `PolicyAuditLog` 表（`backend/app/modules/daemon/audit/model.py:23`）与主审计分离。
 
 ### 1.4 多租户 / 多 workspace 隔离
 
@@ -335,10 +335,10 @@ SillyHub 是一个 **企业级 AI Agent 托管 / 编排 / 管控平台**：企�
 | 表 | 用途 | 关键列 / 依据 |
 |---|---|---|
 | `agent_runs` | 单次 agent 执行（核心状态机表，列最多） | `status`(pending/running/completed/failed/killed) / `task_id`/`lease_id`/`change_id`/`mission_id`/`parent_run_id`(FK) / `agent_profile_id`+`agent_profile_snapshot`(快照) / `idempotency_key`(部分唯一) / `gate_status`/`gate_result`(Driver Gate) / token 用量+cost 列 / `read_only` / `worktree_branch` — `backend/app/modules/agent/model.py:48` |
-| `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:477` |
+| `agent_run_logs` | run 流式日志行 | `channel`(stdout/stderr/tool_call) / `dedup_key`(部分唯一索引幂等去重) / `parent_tool_use_id`+`subagent_type`+`depth`(子代理归属) / `tool_kind`(结构化筛选) / `segment_id`(partial 去重) — `backend/app/modules/agent/model.py:488` |
 | `agent_sessions` | 交互式 SDK 驱动会话（跨多 run） | `agent_session_id`(SDK session) / `lease_id`(kind=interactive) / `change_id`/`workspace_id`(SET NULL) / `status` / `deleted_at`(软删) — `backend/app/modules/agent/model.py:371` |
 | `agent_missions` | 多 agent 委派聚合根（状态不落库，派生自子 run） | `objective` / `worker_preset`/`main_agent_config`(JSON) / `converged_at`(收敛守卫) — `backend/app/modules/agent/model.py:363` |
-| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1750,700` |
+| `agent_run_dependencies` / `agent_artifacts` | run 间 DAG 边 / worker 结构化产出 | `(run_id,depends_on_run_id)` / `kind`(summary/patch/test_result/evidence) — `backend/app/modules/agent/model.py:1798,700` |
 | `daemon_borrow_audit` | 业务/管理人员借用开发人员 daemon 的审计行 | borrower/lender/workspace/agent_run 均 CASCADE；`daemon_instance_id` **RESTRICT**（审计红线） — `backend/app/modules/agent/model.py` |
 | `agent_profiles` | AgentProfile 配置层（人格+工具引用，增强非替代） | `visibility`(private/workspace/platform) / `llm_provider_id`(SET NULL) / `tool_policy_id`/`mcp_refs`/`skill_refs` / `allowed_roots_overlay`(只能收紧) / `is_system_default` — `backend/app/modules/agent/profile/model.py:59` |
 
@@ -731,7 +731,7 @@ SillyHub 是三进程异构栈：后端 Python（FastAPI）、前端 Node（Next
 | TypeScript | 5.5.4（前端 + daemon 统一） | `frontend/package.json:58`、`sillyhub-daemon/package.json:54` |
 | 包管理 | uv 0.4.18（后端）/ pnpm 9.6.0（前端 + daemon） | `backend/Dockerfile:29`、`backend-ci.yml:29`；`frontend/package.json:64`、`sillyhub-daemon/package.json:27` |
 
-> 后端进程入口为 `app.main:app`（`backend/app/main.py:938` `app = create_app()`），`create_app()` 组装 30+ 个业务 router（`backend/app/main.py`）并 `mount_mcp(app)` 挂载对外 MCP server（`backend/app/main.py`）。lifespan 内完成日志/遥测初始化、RBAC 种子、孤儿 gate 任务对账、对象存储单例初始化（`backend/app/main.py:94-170`）。
+> 后端进程入口为 `app.main:app`（`backend/app/main.py:958` `app = create_app()`），`create_app()` 组装 30+ 个业务 router（`backend/app/main.py`）并 `mount_mcp(app)` 挂载对外 MCP server（`backend/app/main.py`）。lifespan 内完成日志/遥测初始化、RBAC 种子、孤儿 gate 任务对账、对象存储单例初始化（`backend/app/main.py:94-170`）。
 
 ### 4.2 数据库与缓存
 

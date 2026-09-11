@@ -40,7 +40,7 @@ tier: independent
 
 ## 5. 总体方案
 
-通道选型 = D-001@v1 方案A：复用机器级即时 WS 指令先例（`POST /machines/{id}/sillyspec-update`，backend/app/modules/daemon/router.py:1268-1302 → ws_hub.send_sillyspec_update，ws_hub.py:411-424；daemon 侧直连 case，daemon.ts:5445-5449）。结果回传仿 `sillyspec_update` 升级状态机的「daemon 内存槽 + 心跳捎带 + 终态窗口惰性过期」范式（sillyhub-daemon/src/sillyspec-manager.ts:250/620-634）。
+通道选型 = D-001@v1 方案A：复用机器级即时 WS 指令先例（`POST /machines/{id}/sillyspec-update`，backend/app/modules/daemon/router.py:1268-1302 → ws_hub.send_sillyspec_update，ws_hub.py:411-424；daemon 侧直连 case，daemon.ts:5445-5449）。结果回传仿 `sillyspec_update` 升级状态机的「daemon 内存槽 + 心跳捎带 + 终态窗口惰性过期」范式（sillyhub-daemon/src/sillyspec-manager.ts:427/620-634）。
 
 ### Phase 1 — Backend 下发通道与结果落库
 

@@ -61,6 +61,7 @@ from app.modules.change.schema import (
     QuicklogFileItem,
     RejectRequest,
     ReviewResponse,
+    ScopeAuditResponse,
     ScopeFileDiffResponse,
     StageProfileUpdate,
     TransitionDispatchResponse,
@@ -1432,4 +1433,33 @@ async def get_change_scope_file_diff(
         user.id,
         change=validate_scope_change(change),
         file=normalize_scope_file_path(file),
+    )
+
+
+# ── 对账表（ql-20260911-001-c0be，scope-audit 表模式平台入口）─────────────────
+
+
+@router.get("/sillyspec/scope-audit", response_model=ScopeAuditResponse)
+async def get_change_scope_audit(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    change: str = Query(
+        min_length=1,
+        max_length=128,
+        description="变更名或 quick-<8hex> 会话名（scope-audit --change 同参）",
+    ),
+) -> ScopeAuditResponse:
+    """对账表：计划×实际三态全表 + 行数（变更中心结果卡数据源）。
+
+    daemon 在本机跑 ``sillyspec scope-audit --change <c> --json``（锚点与
+    --file/行数同源）。full-flow 行 verdict=计划内/计划外/计划未动，quick 行
+    attribution=已声明/软归属/未声明。错误族与 file-diff 端点同源（422 升级
+    引导 / 404 未绑定 / 502 离线远端 / 504 超时）。
+    """
+    service = ScopeFileDiffService(session)
+    return await service.get_scope_audit(
+        workspace_id,
+        user.id,
+        change=validate_scope_change(change),
     )

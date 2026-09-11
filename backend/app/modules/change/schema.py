@@ -684,3 +684,47 @@ class ScopeFileDiffResponse(BaseModel):
     diff: str | None = None
     note: str | None = None
     truncated: bool = False
+
+
+# ── 对账表 DTO（ql-20260911-001-c0be，端点 /sillyspec/scope-audit）────────────
+
+
+class ScopeAuditRow(BaseModel):
+    """对账表单行：full-flow 带 verdict（planned/unplanned/untouched）+ planned
+    （design 文件清单原话），quick 带 attribution（declared/soft/undeclared）+
+    declared——两组字段按 mode 互斥取用。二进制文件行数 null。"""
+
+    path: str
+    additions: int | None = None
+    deletions: int | None = None
+    kind: str = "modified"
+    planned: str | None = None
+    verdict: str | None = None
+    declared: bool | None = None
+    attribution: str | None = None
+
+
+class ScopeAuditTotals(BaseModel):
+    files: int = 0
+    additions: int | None = None
+    deletions: int | None = None
+
+
+class ScopeAuditResponse(BaseModel):
+    """对账表（daemon sillyspec_scope_audit RPC 透传投影）。
+
+    ok=false 时 degraded_reason 带原因（quick 会话不存在等），rows 为空。
+    truncated：rows 超 500 被 daemon 侧截断。
+    """
+
+    change: str
+    ok: bool
+    mode: str = "full-flow"
+    base_ref: str | None = None
+    anchor_label: str | None = None
+    degraded_reason: str | None = None
+    totals: ScopeAuditTotals = Field(default_factory=ScopeAuditTotals)
+    rows: list[ScopeAuditRow] = Field(default_factory=list)
+    excluded_foreign_declared: list[str] = Field(default_factory=list)
+    note: str | None = None
+    truncated: bool = False

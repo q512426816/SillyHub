@@ -282,8 +282,8 @@ describe('ql-20260910-017-2006 manager.fileDiff：256KB 截断护栏', () => {
   });
 
   it('代理对边界（ql-20260911-003-355a P2）：截断点落在代理对中间 → 丢高代理项不产生 lone surrogate', async () => {
-    // MAX_CHARS 为偶数：1 个 ASCII 前缀 + N 个星面字符（每字符 2 code unit）使裸
-    // slice 的截断点恰好落在最后一个字符的代理对中间（高代理项悬挂在结尾）。
+    // 星面字符（😀 = U+1F600，2 个 code unit）：1 个 ASCII 前缀 + N 个 emoji 使
+    // 裸 slice 的截断点恰好落在最后一个 emoji 的代理对中间（高代理悬挂在结尾）。
     const emojiCount = Math.floor(SILLYSPEC_FILE_DIFF_MAX_CHARS / 2);
     const big = 'x' + '😀'.repeat(emojiCount) + 'x'.repeat(10);
     const h = makeFileDiffHarness({
@@ -299,6 +299,97 @@ describe('ql-20260910-017-2006 manager.fileDiff：256KB 截断护栏', () => {
     expect(result.diff.length).toBeLessThanOrEqual(SILLYSPEC_FILE_DIFF_MAX_CHARS);
     const lastUnit = result.diff.charCodeAt(result.diff.length - 1);
     expect(lastUnit >= 0xdc00 && lastUnit <= 0xdfff).toBe(true); // 结尾是低代理=成对完整
+  });
+});
+
+describe('ql-20260911-001-c0be manager.auditTable：表模式投影', () => {
+  it('full-flow 信封 → 三态行投影 + 锚点短化 + totals；spawn 参数无 --file', async () => {
+    const h = makeFileDiffHarness({
+      outcome: {
+        code: 0,
+        stdout: JSON.stringify({
+          command: 'scope-audit',
+          change: '2026-09-10-change-scope-audit',
+          mode: 'full-flow',
+          ok: true,
+          degradedReason: null,
+          baseAnchor: '3f22d6b9b6d1f85415be416c5086e29cfd9998a4',
+          totals: { files: 17, additions: 2196, deletions: 254 },
+          rows: [
+            { path: 'src/index.js', additions: 426, deletions: 17, kind: 'modified', planned: '修改', verdict: 'planned' },
+            { path: 'CLAUDE.md', additions: 1, deletions: 1, kind: 'modified', planned: null, verdict: 'unplanned' },
+            { path: 'logo.png', additions: null, deletions: null, kind: 'binary', planned: null, verdict: 'unplanned' },
+          ],
+          excluded: { foreignDeclared: [] },
+          note: null,
+        }),
+        timedOut: false,
+      },
+    });
+    const result = await h.manager.auditTable('2026-09-10-change-scope-audit');
+    expect(result.ok).toBe(true);
+    expect(result.mode).toBe('full-flow');
+    expect(result.base_ref).toBe('3f22d6b9b6d1f85415be416c5086e29cfd9998a4');
+    expect(result.anchor_label).toBe('3f22d6b');
+    expect(result.totals).toEqual({ files: 17, additions: 2196, deletions: 254 });
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows[0]).toEqual({
+      path: 'src/index.js', additions: 426, deletions: 17, kind: 'modified',
+      planned: '修改', verdict: 'planned', declared: null, attribution: null,
+    });
+    // 二进制行行数 null 原样（不出伪数据）
+    expect(result.rows[2]!.additions).toBeNull();
+    expect(result.truncated).toBe(false);
+    expect(h.calls[0]!.args).toEqual([
+      BIN, 'scope-audit', '--change', '2026-09-10-change-scope-audit', '--json',
+    ]);
+  });
+
+  it('quick 信封 → attribution 行 + 语义锚原样不短化 + degraded 透传', async () => {
+    const h = makeFileDiffHarness({
+      outcome: {
+        code: 0,
+        stdout: JSON.stringify({
+          mode: 'quick', ok: false,
+          degradedReason: 'quick 会话 quick-xxxx 不存在（祖先链各 specBase 下均无 guard.json）',
+          baseAnchor: null,
+          totals: { files: 0, additions: 0, deletions: 0 },
+          rows: [
+            { path: 'docs/a.md', declared: false, additions: 0, deletions: 72, kind: 'deleted', attribution: 'undeclared' },
+            { path: 'src/b.ts', declared: true, additions: 10, deletions: 2, kind: 'modified', attribution: 'declared' },
+          ],
+          excluded: { foreignDeclared: ['frontend/src/x.ts'] },
+        }),
+        timedOut: false,
+      },
+    });
+    const result = await h.manager.auditTable('quick-xxxx');
+    expect(result.mode).toBe('quick');
+    expect(result.ok).toBe(false);
+    expect(result.degraded_reason).toContain('不存在');
+    expect(result.rows[1]!.attribution).toBe('declared');
+    expect(result.excluded_foreign_declared).toEqual(['frontend/src/x.ts']);
+  });
+
+  it('rows 超 500 护栏 → 截断 + truncated=true；能力门复用共享执行器', async () => {
+    const rows = Array.from({ length: 505 }, (_, i) => ({
+      path: `src/f${i}.ts`, additions: 1, deletions: 0, kind: 'modified',
+      verdict: 'planned',
+    }));
+    const h = makeFileDiffHarness({
+      outcome: { code: 0, stdout: JSON.stringify({ ok: true, mode: 'full-flow', rows }), timedOut: false },
+    });
+    const result = await h.manager.auditTable('c1');
+    expect(result.rows).toHaveLength(500);
+    expect(result.truncated).toBe(true);
+
+    // 能力门（旧 sillyspec 未知命令）同 fileDiff
+    const old = makeFileDiffHarness({
+      outcome: { code: 1, stdout: '', stderr: '❌ 未知命令: scope-audit', timedOut: false },
+    });
+    await expect(old.manager.auditTable('c1')).rejects.toMatchObject({
+      code: 'sillyspec_capability_missing',
+    });
   });
 });
 

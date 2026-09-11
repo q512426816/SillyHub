@@ -45,7 +45,7 @@ generator: sillyspec-scan
 ## 代码风格
 
 1. **服务端状态全部走 react-query，queryKey 必须经集中工厂 `queryKeys` 构造，不能就地拼字符串。**
-   工厂在 `frontend/src/lib/query-keys.ts:110`，文件头注释明确规则"凡影响查询结果的变量都进 key"（分页/过滤 params 整体进 key）。mutation 失效缓存复用同一 key 做 `invalidateQueries`，key 拼错会静默去重到不存在的缓存条目，是已踩过的坑。
+   工厂在 `frontend/src/lib/query-keys.ts:120`，文件头注释明确规则"凡影响查询结果的变量都进 key"（分页/过滤 params 整体进 key）。mutation 失效缓存复用同一 key 做 `invalidateQueries`，key 拼错会静默去重到不存在的缓存条目，是已踩过的坑。
 
 2. **数据 hook 统一 `useXxx` 命名，集中在 `src/lib/`，返回 react-query 结果对象（含 `data/isLoading/error`），不拆散。**
    典型文件：`frontend/src/lib/use-daemon-runtimes.ts`（风格基准）、`frontend/src/lib/use-daemon-machines.ts`、`frontend/src/lib/use-agent-runs.ts`、`frontend/src/lib/use-workspace-context.ts`；业务模块 hook 如 `frontend/src/lib/daemon-audit.ts`、`frontend/src/lib/mcp-settings.ts` 内的 `useMcpConfig / useUpdateMcpConfig`。

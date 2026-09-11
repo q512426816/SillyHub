@@ -137,7 +137,7 @@ symlink → Windows junction → copy。中央仓库改一处、所有工具立�
 
 | 能力 | ai-toolbox | SillyHub 现状（2026-09-10 实测） | 差距 |
 |---|---|---|---|
-| 供应商 | 15+ 工具全覆盖，运行时文件保守写出，导入去重 | `llm_provider` 模块较完整（加密 key/set-default/**WS 热切换**，这部分反而领先）；但 daemon 只有 `ClaudeCredentialInjector`（`sillyhub-daemon/src/credential-injector.ts:217`），codex 无 injector、无 config.toml 写盘，靠 CLI `-c` 覆盖 | codex/gemini 供应商注入断层 |
+| 供应商 | 15+ 工具全覆盖，运行时文件保守写出，导入去重 | `llm_provider` 模块较完整（加密 key/set-default/**WS 热切换**，这部分反而领先）；但 daemon 只有 `ClaudeCredentialInjector`（`sillyhub-daemon/src/credential-injector.ts:187`），codex 无 injector、无 config.toml 写盘，靠 CLI `-c` 覆盖 | codex/gemini 供应商注入断层 |
 | MCP | 中央库 + 17 工具格式矩阵 + http/sse + 反向导入 + 分组收藏 | settings 表两个 KV（`mcp.platform_default` + `mcp.whitelist`，`backend/app/modules/settings/router.py:160`）+ workspace `.mcp.json` + daemon spawn 注入（`sillyhub-daemon/src/mcp-config.ts`，仅 stdio，D-017 防 SSRF 设计决策） | 无独立 MCP 实体表/资产库，无导入，无同步诊断；stdio-only（安全决策非缺陷） |
 | Skills | 中央仓库 + 哈希 + symlink 分发 + git 源 + 自动更新 + onboarding 收编 | sillyspec-* 文件扫描 + `CustomSkill` DB（用户隔离）→ tar.gz bundle → daemon 复制到隔离目录 `.claude/skills`（`backend/app/modules/agent/skills_bundle_service.py`） | 无 git 源、无版本更新、无 per-workspace 绑定、无收编 |
 | 插件 | 四体系 | 仅 `enabledPlugins` 透传（settings.json 白名单 4 键之一，`sillyhub-daemon/src/claude-settings.ts`） | 完全空白 |
