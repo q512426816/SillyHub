@@ -250,16 +250,31 @@ function setupMachine(machine: DaemonMachineRead) {
   );
 }
 
-function renderSection(props: { compact?: boolean } = {}) {
+/** renderSection 的 my-binding 覆盖口（隐藏分支用例注入 daemon_id=null 等）。 */
+type BindingFixture = {
+  workspace_id: string;
+  user_id: string;
+  daemon_id: string | null;
+  runtime_id: string | null;
+};
+
+function renderSection(
+  props: { compact?: boolean } = {},
+  bindingOverride: Partial<BindingFixture> = {},
+) {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, refetchInterval: false } },
   });
+  // 注意：mockResolvedValue 是整体替换——用例若在 renderSection 之前自行
+  // mockResolvedValue 会被这里的默认值覆盖（曾致 daemon_id=null 隐藏用例时好时
+  // 坏）。要偏离默认绑定时一律走 bindingOverride 参数，不要在用例里先设 mock。
   mocks.fetchMyBinding.mockResolvedValue({
     workspace_id: "ws-1",
     user_id: OWNER_ID,
     daemon_id: "machine-1",
     runtime_id: null,
-  });
+    ...bindingOverride,
+  } satisfies BindingFixture);
   return render(
     <QueryClientProvider client={queryClient}>
       <AntApp>
@@ -356,13 +371,7 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
   });
 
   it("隐藏——工作区未绑定守护进程（daemon_id=null）→ 整卡不渲染且不发机器查询", async () => {
-    mocks.fetchMyBinding.mockResolvedValue({
-      workspace_id: "ws-1",
-      user_id: OWNER_ID,
-      daemon_id: null,
-      runtime_id: null,
-    });
-    renderSection();
+    renderSection({}, { daemon_id: null });
     await act(async () => {
       await Promise.resolve();
     });

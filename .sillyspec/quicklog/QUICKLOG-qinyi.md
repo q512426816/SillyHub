@@ -415,10 +415,21 @@
 审计：⚖️ 归属切分：12 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/docs/SillyHub/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONCERNS.md, .sillyspec/docs/backend/scan/CONVENTIONS.md, .sillyspec/docs/frontend/scan/CONVENTIONS.md, .sillyspec/docs/multi-agent-platform/scan/CONCERNS.md, backend/app/modules/daemon/tests/test_group_chat_management.py, backend/tests/modules/auth/test_my_avatar.py, docs/architecture-4a.md, docs/code-quality-hardening-2026-07-24.md, docs/research-ai-toolbox-config-management-2026-09-10.md, frontend/src/app/(dashboard)/account/page.tsx, frontend/src/app/m/account/page.tsx
 审计：🔍 软归属：2 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：frontend/src/app/(dashboard)/account/page.test.tsx（+51/-1）, frontend/src/components/group-chat/__tests__/member-panel.test.tsx（+44/-0）
 
-## ql-20260911-020-1da6 | 2026-09-11 12:38:20 | CI 失败与不稳定测试修复批：6 处测试自身缺陷（常量改名未同步/密钥模型未跟上/缺渲染等待/mock 被覆盖/sessions 未等待/心跳计数过严）
-状态：进行中
+## ql-20260911-020-1da6 | 2026-09-11 12:38:20 | CI 失败与不稳定测试修复批：6 处测试自身缺陷（常量改名未同步、密钥模型未跟上、缺渲染等待、mock 被覆盖、sessions 未等待、心跳断言过严）
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/change_writer/tests/test_proxy.py, backend/app/modules/daemon/tests/test_mcp_config_endpoint.py, frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx, frontend/src/lib/__tests__/use-daemon-machines.test.ts, sillyhub-daemon/tests/daemon.test.ts
+文件：
+- backend/app/modules/change_writer/tests/test_proxy.py（PROXY_POLL_INTERVAL_SECONDS 改 patch PROXY_RECEIPT_DB_CHECK_SECONDS/PUBSUB_WINDOW_SECONDS）
+- backend/app/modules/daemon/tests/test_mcp_config_endpoint.py（种子助手增 secret_env_keys 参数，admin 脱敏对照与解密回填两用例显式传键）
+- frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx（嵌套路径用例补 waitFor 子节点渲染）
+- frontend/src/components/changes/__tests__/platform-sync-section.test.tsx（renderSection 增 bindingOverride，隐藏用例改参数注入）
+- frontend/src/lib/__tests__/use-daemon-machines.test.ts（sessions 断言包 waitFor）
+- sillyhub-daemon/tests/daemon.test.ts（AC-05 心跳计数改稳定化断言）
+需求：CI 失败与不稳定测试修复批：6 处测试自身缺陷（常量改名未同步、密钥模型未跟上、缺渲染等待、mock 被覆盖、sessions 未等待、心跳断言过严）
+根因：c04ec8478 把回执轮询改 Redis pubsub 后常量改名测试未同步；e1492300d 密钥改用户逐键显式 secret_env_keys 后测试种子仍按旧子串自动抽列假设；portal-file-panels 新用例只等 fetchTree 调用没等子节点渲染（file-explorer 原版有等待）；platform-sync-section 隐藏用例的 null 绑定 mock 被 renderSection 内部默认值整体覆盖成断言竞态；use-daemon-machines 在 items 就绪后裸断言并行查询 sessions；daemon AC-05 断言停机瞬间零增长而实现允许在途一拍落账
+方案：test_proxy patch 改新常量并加注释；mcp 种子助手增 secret_env_keys 参数、两用例显式传键并修过期注释；portal-file-panels 补 waitFor 子节点文本；renderSection 增 bindingOverride 参数、隐藏用例改参数注入；sessions 断言包 waitFor；AC-05 改停后先收敛记基数再验证计数稳定
+结果：backend pytest 28 passed（test_proxy+test_mcp_config_endpoint）；frontend vitest 25 passed（3 文件）；daemon vitest 33 passed（daemon.test.ts 含 AC-05）；ruff 两文件 check+format 通过；eslint 0 error（2 条预存 warning）；daemon tsc --noEmit 通过
+审计：📝 文档欠账（D-8）：6 个源码文件改动未同步任何模块文档（涉及模块：backend · frontend）
 
 ## ql-20260911-019-9d31 | 2026-09-11 11:40:00 | delete-change-confirm 补 scope-audit mock（32d311934 提交后成为正式预存债）
 状态：已完成

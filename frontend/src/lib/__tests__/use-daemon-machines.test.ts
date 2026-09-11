@@ -81,9 +81,11 @@ describe("useDaemonMachines", () => {
       () => useDaemonMachines({ limit: 20 }, { includeSessions: true }),
       { wrapper: w(mc()) },
     );
+    // sessions 是与 items 并行的另一条查询，可能晚一拍到达——不能在 items 就绪
+    // 后裸断言（CI 上曾间歇挂 sessions.length=0），同样走 waitFor。
     await waitFor(() => expect(result.current.items.length).toBe(1));
     expect(result.current.total).toBe(1);
-    expect(result.current.sessions.length).toBe(1);
+    await waitFor(() => expect(result.current.sessions.length).toBe(1));
     expect(listMock).toHaveBeenCalledWith({ limit: 20 });
   });
 
