@@ -1,3 +1,8 @@
+---
+author: qinyi
+created_at: 2026-09-11 21:32:53
+---
+
 # Decisions — 工作区↔平台资产桥（skills/MCP 四桥）
 
 - id: D-001

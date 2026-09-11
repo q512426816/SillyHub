@@ -51,7 +51,8 @@ scale: large
 | 修改 | backend/app/modules/agent/skills_bundle_service.py | 第三源双维度并集+workspace_id 透传（None case 显式 IS NULL 谓词 D-010——user bundle version hash 零变化） |
 | 修改 | backend/app/modules/daemon/router/daemon_rpc.py | manifest 端点 ?workspace_id 可选参数（带=并集渲染 D-007；不带=user-only 兼容） |
 | 修改 | sillyhub-daemon/src/skill-manager.ts | per-workspace manifest 拉取（缓存槽 <manifest>:<workspace_id> 与全局槽并存；fetchRemoteManifest 增可选 workspaceId） |
-| 修改 | sillyhub-daemon/src/daemon.ts + task-runner.ts | 会话/任务 workspace 绑定时按 workspace 槽拉取+解包其 git 技能到 workdir（Grill B-01/D-007 最小改造 Wave） |
+| 修改 | sillyhub-daemon/src/daemon.ts | 会话 workspace 绑定时按 workspace 槽拉取+解包其 git 技能到 workdir（Grill B-01/D-007） |
+| 修改 | sillyhub-daemon/src/task-runner.ts | 任务 workspace 绑定时同款按槽分发（batch 路径） |
 | 修改 | frontend/src/app/(dashboard)/workspaces/[id]/skills/page.tsx | 平台库启用区块+收编入口 |
 | 修改 | frontend/src/app/(dashboard)/workspaces/[id]/mcp/page.tsx | 从资产库选入按钮+弹窗 |
 | 修改 | frontend/src/components/skills-library/skill-source-api.ts | hook 扩 workspace 参数 |
