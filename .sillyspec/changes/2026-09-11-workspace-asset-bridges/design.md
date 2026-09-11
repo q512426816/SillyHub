@@ -25,7 +25,7 @@ scale: large
 - 不改 workspace .mcp.json 既有 PUT/审计路径（import 复用）
 - 不做 workspace 维度 MCP 绑定进 platform_default（.mcp.json 本身就是 workspace 注入面，桥③已闭环）
 - 不收编多文件技能的辅助文件（CustomSkill 单文件模型，提示用户手动合并）
-- 不改 daemon 侧（manifest 协议零变化；workspace 上下文传参留后续 R-01）
+- 不做 daemon 分发架构深化（D-007 仅最小改造：per-workspace 槽位+按会话选槽；manifest 向后兼容——不带 workspace_id=user-only）
 
 ## 拆分判断
 
