@@ -17075,6 +17075,307 @@
         }
       }
     },
+    "/api/skill-sources": {
+      "get": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "List Skill Sources",
+        "description": "列出全部 git 技能源（admin）。",
+        "operationId": "list_skill_sources_api_skill_sources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceRead"
+                  },
+                  "type": "array",
+                  "title": "Response List Skill Sources Api Skill Sources Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "Create Skill Source",
+        "description": "创建源（admin；SSRF 校验 + git 探测在 service）。",
+        "operationId": "create_skill_source_api_skill_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skill-sources/{source_id}": {
+      "patch": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "Update Skill Source",
+        "description": "部分更新（admin；改 url 重新过 SSRF 校验）。",
+        "operationId": "update_skill_source_api_skill_sources__source_id__patch",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "Delete Skill Source",
+        "description": "删除源（admin；连带清 user_skill_enables 绑定与缓存目录）。",
+        "operationId": "delete_skill_source_api_skill_sources__source_id__delete",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skill-sources/{source_id}/refresh": {
+      "post": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "Refresh Skill Source",
+        "description": "手动刷新源（admin；git 缺失 422，真实拉取归 task-02）。",
+        "operationId": "refresh_skill_source_api_skill_sources__source_id__refresh_post",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/library": {
+      "get": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "Get Skills Library",
+        "description": "技能库三源聚合 + 我的启用态（登录即可；git 技能默认关，D-003）。",
+        "operationId": "get_skills_library_api_skills_library_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/{skill_key}/enable": {
+      "post": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "Enable Skill",
+        "description": "启用/停用一个 git 技能（本人；body ``enabled``，幂等）。\n\n``skill_key`` 格式非法 → 422；未命中启用源的发现结果 → 404（service 层）。",
+        "operationId": "enable_skill_api_skills__skill_key__enable_post",
+        "parameters": [
+          {
+            "name": "skill_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnableOp"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "skill-sources"
+        ],
+        "summary": "Disable Skill",
+        "description": "停用一个 git 技能（本人；幂等——无绑定也 204）。",
+        "operationId": "disable_skill_api_skills__skill_key__enable_delete",
+        "parameters": [
+          {
+            "name": "skill_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/mcp-servers/import-json": {
       "post": {
         "tags": [
@@ -40783,6 +41084,21 @@
         ],
         "title": "DocumentsSyncResponse"
       },
+      "EnableOp": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "True=启用进 bundle，False=停用"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "EnableOp",
+        "description": "启用/停用操作体（``POST /api/skills/{skill_key}/enable``，本人）。\n\n``enabled=False`` 与 ``DELETE /api/skills/{skill_key}/enable`` 语义等价\n（删绑定）；DELETE 端点无请求体，直取 enabled=False。"
+      },
       "ExecutePlanReq": {
         "properties": {
           "plan_task_id": {
@@ -45601,6 +45917,87 @@
         ],
         "title": "LeaseSyncResponse",
         "description": "Response body for lease status sync."
+      },
+      "LibrarySkillItem": {
+        "properties": {
+          "skill_key": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Skill Key",
+            "description": "git 技能 <source_id>:<目录名>；sillyspec/custom 为目录名"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "技能名（git=目录名，与 bundle rel_path 顶层同口径）"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "SKILL.md frontmatter description（缺省空串）",
+            "default": ""
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "sillyspec",
+              "custom",
+              "git"
+            ],
+            "title": "Source",
+            "description": "来源标记（与 bundle manifest files[].source 同口径）"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "我的启用态：git 技能默认 False（D-003，逐个启用进 bundle）；sillyspec/custom 恒 True"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id",
+            "description": "git 技能源 id（source=git 时非空，前端分组用）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skill_key",
+          "name",
+          "source",
+          "enabled"
+        ],
+        "title": "LibrarySkillItem",
+        "description": "技能库单项（三源聚合，task-03）。\n\n``skill_key`` 命名空间：git = ``<source_id>:<目录名>``（含冒号，可 enable）；\nsillyspec/custom = tar 顶层目录名（不含冒号，恒启用不可 enable）。"
+      },
+      "LibraryView": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceRead"
+            },
+            "type": "array",
+            "title": "Sources",
+            "description": "已配置的 git 技能源"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/LibrarySkillItem"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "三源聚合技能项（sillyspec-* + 我的 CustomSkill + 启用源实时发现）"
+          }
+        },
+        "type": "object",
+        "title": "LibraryView",
+        "description": "技能库三源聚合视图（``GET /api/skills/library``，task-03）。"
       },
       "ListDirRequest": {
         "properties": {
@@ -62648,6 +63045,193 @@
         ],
         "title": "SkillsViewResponse",
         "description": "``GET /api/workspaces/{id}/skills`` 响应。"
+      },
+      "SourceCreate": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Url",
+            "description": "git 仓库 https 地址（私网/非法 scheme 会被 SSRF 校验拒绝）"
+          },
+          "branch": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Branch",
+            "description": "分支名，默认 main",
+            "default": "main"
+          },
+          "subdir": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subdir",
+            "description": "仓库内技能子目录（缺省 = 仓库根）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "SourceCreate",
+        "description": "创建请求体（url 经 SSRF 校验须公网，git 二进制探测在 service）。"
+      },
+      "SourceRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "subdir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subdir"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "last_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Commit"
+          },
+          "last_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Fetched At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "branch",
+          "subdir",
+          "enabled",
+          "last_commit",
+          "last_fetched_at",
+          "last_error",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SourceRead",
+        "description": "源详情（含 task-02 拉取器回写的 last_commit/last_fetched_at/last_error）。"
+      },
+      "SourceUpdate": {
+        "properties": {
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "同 create 规则"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "subdir": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subdir"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled",
+            "description": "源级开关（停用不参与技能发现/收集）"
+          }
+        },
+        "type": "object",
+        "title": "SourceUpdate",
+        "description": "更新请求体（部分更新，所有字段可选）。"
       },
       "SpecBootstrapRunStartResponse": {
         "properties": {

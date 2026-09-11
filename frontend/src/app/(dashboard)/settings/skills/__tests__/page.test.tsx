@@ -171,6 +171,16 @@ vi.mock("@/components/ui/markdown-text", () => ({
   ),
 }));
 
+// ── skills-library 两新区块 mock（2026-09-11-skills-central-library task-04）：
+//    页面级只验 admin 门控 + 全员可见；组件本体（apiFetch 请求路径/方法/乐观回滚）
+//    在 src/components/skills-library/__tests__/ 组件级用例覆盖。
+vi.mock("@/components/skills-library/source-manage-card", () => ({
+  SourceManageCard: () => <div data-testid="source-manage-card-mock">git 源管理（admin）</div>,
+}));
+vi.mock("@/components/skills-library/library-enable-list", () => ({
+  LibraryEnableList: () => <div data-testid="library-list-mock">技能库（全部技能 + 按需启用）</div>,
+}));
+
 // ── useNotify mock：弹窗 + 页面都用 useNotify（App.useApp().message），测试环境无
 //    antd <App> provider，mock 成 vi.fn 避免报错；保留 errMessage 真实实现
 //    （页面/弹窗内部仍用 errMessage 解析错误文案）。
@@ -462,5 +472,30 @@ describe("/settings/skills 页", () => {
     expect(
       await screen.findByText("用于归档已验证完成的变更"),
     ).toBeInTheDocument();
+  });
+
+  // ── 2026-09-11-skills-central-library task-04：两新区块门控 ──────────────
+
+  describe("task-04 两新区块（git 源管理 admin 门控 + 技能库全员可见）", () => {
+    it("admin 登录用户：git 源管理区块与技能库区块都渲染", async () => {
+      session.user = { id: "u1", is_platform_admin: true, permissions: [] };
+      renderPage(<SkillsPage />);
+
+      expect(await screen.findByTestId("source-manage-card-mock")).toBeInTheDocument();
+      expect(screen.getByTestId("library-list-mock")).toBeInTheDocument();
+      // 既有两区块（我的技能）不受影响仍渲染
+      expect(await screen.findByText("平台 SillySpec 技能（系统自带）")).toBeInTheDocument();
+      expect(await screen.findByText("自定义技能（自己加的）")).toBeInTheDocument();
+    });
+
+    it("非 admin 登录用户：git 源管理区块不渲染，技能库区块仍可见（D-002 全员共享源）", async () => {
+      session.user = { id: "u2", is_platform_admin: false, permissions: [] };
+      renderPage(<SkillsPage />);
+
+      expect(await screen.findByTestId("library-list-mock")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("source-manage-card-mock"),
+      ).not.toBeInTheDocument();
+    });
   });
 });

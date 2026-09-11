@@ -17,6 +17,8 @@ import {
 
 import { CustomSkillEditDialog } from "@/components/custom-skill-edit-dialog";
 import { SkillContentDrawer } from "@/components/skill-content-drawer";
+import { LibraryEnableList } from "@/components/skills-library/library-enable-list";
+import { SourceManageCard } from "@/components/skills-library/source-manage-card";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -30,6 +32,7 @@ import {
   useUpdateCustomSkill,
   type CustomSkillRead,
 } from "@/lib/custom-skills";
+import { useSession } from "@/stores/session";
 import { cn } from "@/lib/utils";
 
 function formatDateTime(value: string | null): string {
@@ -57,6 +60,10 @@ function deriveSkillGroups(
 }
 
 export default function SkillsSettingsPage() {
+  // 2026-09-11-skills-central-library task-04：git 技能源管理区块按 admin 门控
+  // （settings/mcp/page.tsx 同款判定）；技能库区块全员可见（D-002 平台共享源）。
+  const isAdmin = useSession((s) => s.user?.is_platform_admin) === true;
+
   const {
     skills,
     isLoading: skillsLoading,
@@ -192,6 +199,12 @@ export default function SkillsSettingsPage() {
           {pageError}
         </div>
       )}
+
+      {/* 2026-09-11-skills-central-library task-04 两新区块（下方「我的技能」两既有区块零改动）：
+          git 源管理仅 admin 渲染；技能库三源聚合全员可见 + git 技能启用开关（D-003 默认关）。 */}
+      {isAdmin && <SourceManageCard />}
+
+      <LibraryEnableList />
 
       {/* 上区：平台 sillyspec skills 只读列表 */}
       <SectionCard

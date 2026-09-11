@@ -6538,6 +6538,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/skill-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skill Sources
+         * @description 列出全部 git 技能源（admin）。
+         */
+        get: operations["list_skill_sources_api_skill_sources_get"];
+        put?: never;
+        /**
+         * Create Skill Source
+         * @description 创建源（admin；SSRF 校验 + git 探测在 service）。
+         */
+        post: operations["create_skill_source_api_skill_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skill-sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Skill Source
+         * @description 删除源（admin；连带清 user_skill_enables 绑定与缓存目录）。
+         */
+        delete: operations["delete_skill_source_api_skill_sources__source_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Skill Source
+         * @description 部分更新（admin；改 url 重新过 SSRF 校验）。
+         */
+        patch: operations["update_skill_source_api_skill_sources__source_id__patch"];
+        trace?: never;
+    };
+    "/api/skill-sources/{source_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Skill Source
+         * @description 手动刷新源（admin；git 缺失 422，真实拉取归 task-02）。
+         */
+        post: operations["refresh_skill_source_api_skill_sources__source_id__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skills/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skills Library
+         * @description 技能库三源聚合 + 我的启用态（登录即可；git 技能默认关，D-003）。
+         */
+        get: operations["get_skills_library_api_skills_library_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skills/{skill_key}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Skill
+         * @description 启用/停用一个 git 技能（本人；body ``enabled``，幂等）。
+         *
+         *     ``skill_key`` 格式非法 → 422；未命中启用源的发现结果 → 404（service 层）。
+         */
+        post: operations["enable_skill_api_skills__skill_key__enable_post"];
+        /**
+         * Disable Skill
+         * @description 停用一个 git 技能（本人；幂等——无绑定也 204）。
+         */
+        delete: operations["disable_skill_api_skills__skill_key__enable_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mcp-servers/import-json": {
         parameters: {
             query?: never;
@@ -14085,6 +14199,20 @@ export interface components {
             synced: number;
         };
         /**
+         * EnableOp
+         * @description 启用/停用操作体（``POST /api/skills/{skill_key}/enable``，本人）。
+         *
+         *     ``enabled=False`` 与 ``DELETE /api/skills/{skill_key}/enable`` 语义等价
+         *     （删绑定）；DELETE 端点无请求体，直取 enabled=False。
+         */
+        EnableOp: {
+            /**
+             * Enabled
+             * @description True=启用进 bundle，False=停用
+             */
+            enabled: boolean;
+        };
+        /**
          * ExecutePlanReq
          * @description 执行计划请求 (联动生成/更新 TaskExecute)。
          *
@@ -16224,6 +16352,63 @@ export interface components {
             agent_run_id: string | null;
             /** Status */
             status: string;
+        };
+        /**
+         * LibrarySkillItem
+         * @description 技能库单项（三源聚合，task-03）。
+         *
+         *     ``skill_key`` 命名空间：git = ``<source_id>:<目录名>``（含冒号，可 enable）；
+         *     sillyspec/custom = tar 顶层目录名（不含冒号，恒启用不可 enable）。
+         */
+        LibrarySkillItem: {
+            /**
+             * Skill Key
+             * @description git 技能 <source_id>:<目录名>；sillyspec/custom 为目录名
+             */
+            skill_key: string;
+            /**
+             * Name
+             * @description 技能名（git=目录名，与 bundle rel_path 顶层同口径）
+             */
+            name: string;
+            /**
+             * Description
+             * @description SKILL.md frontmatter description（缺省空串）
+             * @default
+             */
+            description: string;
+            /**
+             * Source
+             * @description 来源标记（与 bundle manifest files[].source 同口径）
+             * @enum {string}
+             */
+            source: "sillyspec" | "custom" | "git";
+            /**
+             * Enabled
+             * @description 我的启用态：git 技能默认 False（D-003，逐个启用进 bundle）；sillyspec/custom 恒 True
+             */
+            enabled: boolean;
+            /**
+             * Source Id
+             * @description git 技能源 id（source=git 时非空，前端分组用）
+             */
+            source_id?: string | null;
+        };
+        /**
+         * LibraryView
+         * @description 技能库三源聚合视图（``GET /api/skills/library``，task-03）。
+         */
+        LibraryView: {
+            /**
+             * Sources
+             * @description 已配置的 git 技能源
+             */
+            sources?: components["schemas"]["SourceRead"][];
+            /**
+             * Skills
+             * @description 三源聚合技能项（sillyspec-* + 我的 CustomSkill + 启用源实时发现）
+             */
+            skills?: components["schemas"]["LibrarySkillItem"][];
         };
         /**
          * ListDirRequest
@@ -22281,6 +22466,83 @@ export interface components {
         SkillsViewResponse: {
             /** Skills */
             skills: components["schemas"]["SkillFileEntry"][];
+        };
+        /**
+         * SourceCreate
+         * @description 创建请求体（url 经 SSRF 校验须公网，git 二进制探测在 service）。
+         */
+        SourceCreate: {
+            /**
+             * Url
+             * @description git 仓库 https 地址（私网/非法 scheme 会被 SSRF 校验拒绝）
+             */
+            url: string;
+            /**
+             * Branch
+             * @description 分支名，默认 main
+             * @default main
+             */
+            branch: string;
+            /**
+             * Subdir
+             * @description 仓库内技能子目录（缺省 = 仓库根）
+             */
+            subdir?: string | null;
+        };
+        /**
+         * SourceRead
+         * @description 源详情（含 task-02 拉取器回写的 last_commit/last_fetched_at/last_error）。
+         */
+        SourceRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Url */
+            url: string;
+            /** Branch */
+            branch: string;
+            /** Subdir */
+            subdir: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Last Commit */
+            last_commit: string | null;
+            /** Last Fetched At */
+            last_fetched_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * SourceUpdate
+         * @description 更新请求体（部分更新，所有字段可选）。
+         */
+        SourceUpdate: {
+            /**
+             * Url
+             * @description 同 create 规则
+             */
+            url?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Subdir */
+            subdir?: string | null;
+            /**
+             * Enabled
+             * @description 源级开关（停用不参与技能发现/收集）
+             */
+            enabled?: boolean | null;
         };
         /**
          * SpecBootstrapRunStartResponse
@@ -35865,6 +36127,236 @@ export interface operations {
             header?: never;
             path: {
                 skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_skill_sources_api_skill_sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceRead"][];
+                };
+            };
+        };
+    };
+    create_skill_source_api_skill_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_skill_source_api_skill_sources__source_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_skill_source_api_skill_sources__source_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_skill_source_api_skill_sources__source_id__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skills_library_api_skills_library_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryView"];
+                };
+            };
+        };
+    };
+    enable_skill_api_skills__skill_key__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnableOp"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_skill_api_skills__skill_key__enable_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_key: string;
             };
             cookie?: never;
         };
