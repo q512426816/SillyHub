@@ -133,6 +133,15 @@ vi.mock("@/components/changes/detail/change-sessions-card", () => ({
 vi.mock("@/components/changes/detail/change-step-timeline", () => ({
   ChangeStepTimeline: () => <div data-testid="change-step-timeline" />,
 }));
+// ql-20260911-019：32d311934 新挂的 scope-audit 结果卡（真实 Modal+明细表）在
+// jsdom 下触发 testing-library role 查询的 matches() 解析坏选择器
+// （div.mt-1,,, .ant-checkbox-input:focus-visible）——本测试关注删除按钮，
+// 与其余兄弟卡同模式 mock 隔离。
+vi.mock("@/components/changes/scope-audit-command-card", () => ({
+  ScopeAuditCommandCard: () => <div data-testid="scope-audit-command-card" />,
+  // 该模块同时导出 quick 列表页消费的 hook——mock 需一并补（返回空态）
+  useQuickSessionName: () => "",
+}));
 
 import {
   DeleteChangeConfirm,
