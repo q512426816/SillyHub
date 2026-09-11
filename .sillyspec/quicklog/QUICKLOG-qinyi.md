@@ -506,4 +506,4 @@
 需求：修复 MinIO client 单例存错对象致线上文件上传 500
 根因：9/9 ql-20260909-012 client 惰性单例改造丢了 ctx.__aenter__() 返回值，把 ClientCreatorContext 本体存进单例，该对象无 put_object 等方法且无 __getattr__ 代理，文件中心上传/下载/删除全量 AttributeError→500；测试替身 create_client 直接返回 client（错误契约）掩盖了回归
 方案：minio_backend._get_client 捕获 __aenter__() 返回值（AioBaseClient）存单例；测试替身按真实契约建模（create_client 返回 _FakeCreatorContext，__aenter__ 返回 client 本体）+ 新增回归锁定测试；storage.md 补记契约陷阱
-结果：tests/modules/storage 4 passed（换回坏实现复跑 4 failed 证明可拦回归）；ruff format/check 通过；线上待重新打包 backend 镜像部署后实测
+结果：tests/modules/storage 4 passed（换回坏实现复跑 4 failed 证明可拦回归）；ruff format/check 通过；已重新打包部署到 47.113.145.252（commit 0618d86c6），线上实测全通——容器内签真实用户 token 走 POST /api/file/upload?owner_type=group_member_avatar 201 / GET 下载 200 内容一致 / DELETE 204，公网域名无 token 401（路由正常，500 消失）
