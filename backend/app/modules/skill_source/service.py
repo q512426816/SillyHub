@@ -1,17 +1,19 @@
-"""SkillSource CRUD 业务逻辑 + SSRF/git 探测门 + 删除连带清理。
+"""SkillSource CRUD 业务逻辑 + SSRF/git 探测门 + 拉取接线 + 删除连带清理。
 
-Change: 2026-09-11-skills-central-library (task-01)
+Change: 2026-09-11-skills-central-library (task-01 + task-02 接线)
 
-职责（design §接口定义 / task-01 implementation）:
-- create/update：``await assert_public_url(url)``（core/ssrf.py:34-53 为
-  **async**——必须显式 await，漏 await 只建 coroutine 不校验；私网/非法
-  scheme → UnsafeRepoUrl/SsrfBlocked 400 直接透传）。
-- create/refresh：git 二进制探测（R-01）——本卡 ``shutil.which("git")``
-  初判，缺 → :class:`GitBinaryMissing` 422；task-02 ``probe_git_binary``
-  统一后替换接线。
-- 保存即触发拉取（design D-006）：``_trigger_fetch`` 为接线点占位——task-02
-  的 git_fetcher 未落地，ImportError 容忍 no-op；落地后失败写 last_error
-  不阻塞保存请求。
+职责（design §接口定义 / task-02 implementation）:
+- create/update 改 url：``await git_fetcher.assert_source_url(url)``（SSRF
+  首防线封装，委托 core/ssrf 的 **async** ``assert_public_url``——必须显式
+  await，漏 await 只建 coroutine 不校验；私网/非法 scheme →
+  UnsafeRepoUrl/SsrfBlocked 400 直接透传）。
+- create/refresh：git 二进制探测统一走 ``await git_fetcher.probe_git_binary()``
+  （which 初判 + ``git --version`` 子进程确认，R-01），缺 →
+  :class:`GitBinaryMissing` 422（替换 task-01 的 shutil.which 初判，语义不变）。
+- 保存即触发拉取（design D-006）：``_trigger_fetch`` 实调
+  ``git_fetcher.fetch_source``——成功回写 last_commit/last_fetched_at 并清
+  last_error；失败记 last_error（成功回写字段保留，描述最近一次成功）。
+  整体 best-effort **永不抛**，不阻塞保存请求（HTTP 仍 2xx）。
 - delete：连带清该源 user_skill_enables（skill_key 前缀 ``<source_id>:``
   匹配）+ 缓存目录 best-effort（目录可不存在）。
 """
@@ -30,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.core.ssrf import assert_public_url
+from app.modules.skill_source import git_fetcher
 from app.modules.skill_source.model import SkillSource, UserSkillEnable
 
 log = get_logger(__name__)
@@ -51,23 +53,37 @@ def source_cache_dir(source_id: uuid.UUID) -> Path:
     return skills_git_cache_root() / str(source_id)
 
 
-def _git_binary_available() -> bool:
-    """git 二进制探测（R-01）——本卡 shutil.which 初判，跨平台不硬编码路径。"""
-    return shutil.which("git") is not None
+async def _trigger_fetch(session: AsyncSession, source: SkillSource) -> None:
+    """保存/刷新即触发拉取 + 回写（design §接口定义：失败不阻塞，**永不抛**）。
 
-
-def _trigger_fetch(source: SkillSource) -> None:
-    """保存/刷新即触发拉取的接线点占位（design §接口定义：失败不阻塞）。
-
-    task-02 的 git_fetcher 尚未落地——模块缺失时 ImportError 容忍 no-op。
+    - 成功：last_commit/last_fetched_at 回写、last_error 清空。
+    - 失败：last_error 记原因（last_commit/last_fetched_at 保留——描述最近
+      一次成功拉取，便于区分「从未成功」与「上次成功这次失败」）。
+    - 拉取成功后顺带跑一次发现（subdir 非空时以缓存根下 subdir 为发现根，
+      taskcard D-006）——验证性扫描 + 日志计数，结果不落库（library 端点
+      task-03 实时发现）。
     """
+    cache_dir = source_cache_dir(source.id)
     try:
-        # task-02 落地后：此 import 命中即改为异步触发
-        # ``fetch_source(source, source_cache_dir(source.id))``，结果回写
-        # last_commit/last_fetched_at/last_error（失败不阻塞调用方）。
-        from app.modules.skill_source import git_fetcher  # noqa: F401
-    except ImportError:
-        return
+        result = await git_fetcher.fetch_source(source, cache_dir)
+        if result.ok:
+            source.last_commit = result.commit
+            source.last_fetched_at = datetime.now(UTC)
+            source.last_error = None
+        else:
+            source.last_error = result.error
+        await session.commit()
+        if result.ok:
+            discover_root = cache_dir / source.subdir if source.subdir else cache_dir
+            discovered = git_fetcher.discover_skills(discover_root)
+            log.info(
+                "skill_source_fetch_done",
+                source_id=str(source.id),
+                commit=result.commit,
+                discovered=len(discovered),
+            )
+    except Exception as exc:  # best-effort：拉取/回写失败不阻塞保存请求
+        log.warning("skill_source_fetch_trigger_failed", source_id=str(source.id), error=str(exc))
 
 
 class SkillSourceNotFound(AppError):
@@ -123,11 +139,11 @@ class SkillSourceService:
         branch: str = "main",
         subdir: str | None = None,
     ) -> SkillSource:
-        """创建源（SSRF await + git 探测 + url 查重，保存即触发拉取占位）。"""
+        """创建源（SSRF await + git 探测 + url 查重，保存即触发拉取）。"""
         # SSRF 校验（async——显式 await，plan-review 修正点）：私网/非法 scheme
         # 抛 UnsafeRepoUrl/SsrfBlocked（400）直接透传给全局异常处理器。
-        await assert_public_url(url)
-        self._require_git_binary()
+        await git_fetcher.assert_source_url(url)
+        await self._require_git_binary()
 
         existing = await self._get_by_url(url)
         if existing is not None:
@@ -149,8 +165,8 @@ class SkillSourceService:
             ) from exc
         await self._session.refresh(source)
 
-        # 保存即触发拉取（task-02 接线点；失败不阻塞——见 _trigger_fetch）。
-        _trigger_fetch(source)
+        # 保存即触发拉取（task-02 接线；失败不阻塞——见 _trigger_fetch）。
+        await _trigger_fetch(self._session, source)
         return source
 
     async def update(
@@ -165,7 +181,7 @@ class SkillSourceService:
         """部分更新（改 url 时重新过 SSRF 校验 + 查重；url/branch 变更重触发拉取）。"""
         source = await self.get(source_id)
         if url is not None and url != source.url:
-            await assert_public_url(url)
+            await git_fetcher.assert_source_url(url)
             existing = await self._get_by_url(url)
             if existing is not None and existing.id != source.id:
                 raise SkillSourceUrlConflict(
@@ -193,16 +209,14 @@ class SkillSourceService:
         await self._session.refresh(source)
 
         if url is not None or branch is not None:
-            _trigger_fetch(source)
+            await _trigger_fetch(self._session, source)
         return source
 
     async def refresh(self, source_id: uuid.UUID) -> SkillSource:
-        """手动刷新（admin）：git 探测 + 触发拉取占位（task-02 落真实 fetch）。"""
+        """手动刷新（admin）：git 探测 + 真实拉取 + 回写 last_* 字段。"""
         source = await self.get(source_id)
-        self._require_git_binary()
-        _trigger_fetch(source)
-        # task-02 接线后：fetch 结果回写 last_commit/last_fetched_at/last_error
-        # 并 commit；本卡占位直接返回当前状态。
+        await self._require_git_binary()
+        await _trigger_fetch(self._session, source)
         return source
 
     async def delete(self, source_id: uuid.UUID) -> None:
@@ -230,10 +244,12 @@ class SkillSourceService:
         return (await self._session.execute(stmt)).scalars().first()
 
     @staticmethod
-    def _require_git_binary() -> None:
+    async def _require_git_binary() -> None:
         """git 二进制探测门（create/refresh 前调，缺 → 422 明确提示，R-01）。"""
-        if not _git_binary_available():
+        if not await git_fetcher.probe_git_binary():
             raise GitBinaryMissing(
                 "当前部署环境缺少 git 可执行文件，无法保存/刷新 git 技能源，请先安装 git。",
-                details={"hint": "shutil.which('git') 未找到 git 二进制"},
+                details={
+                    "hint": "probe_git_binary 探测失败（shutil.which 未找到或 git --version 异常）"
+                },
             )

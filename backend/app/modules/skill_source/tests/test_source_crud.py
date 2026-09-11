@@ -42,13 +42,30 @@ PUBLIC_URL_2 = "https://8.8.8.8/other-skills.git"
 
 
 def _mock_git_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    """git 探测恒「存在」——测试不依赖宿主环境是否装 git（R-01 用例另 mock 缺失）。"""
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}" if name == "git" else None)
+    """git 探测恒「存在」+ 保存即拉取触发 no-op。
+
+    测试不依赖宿主环境是否装 git/外网（R-01 缺失用例另 mock；拉取真仓
+    全链路用例归 test_git_fetcher.py 的本地假仓——CRUD 用例的 URL 是
+    不可达占位地址，必须把触发桩掉防真实 clone 挂网络）。
+    """
+
+    async def _probe() -> bool:
+        return True
+
+    async def _noop_trigger(session, source) -> None:
+        return None
+
+    monkeypatch.setattr("app.modules.skill_source.git_fetcher.probe_git_binary", _probe)
+    monkeypatch.setattr("app.modules.skill_source.service._trigger_fetch", _noop_trigger)
 
 
 def _mock_git_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """git 探测恒「缺失」（模拟部署容器无 git 二进制，R-01）。"""
-    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    async def _probe() -> bool:
+        return False
+
+    monkeypatch.setattr("app.modules.skill_source.git_fetcher.probe_git_binary", _probe)
 
 
 async def _make_user(session: AsyncSession, *, admin: bool) -> tuple[User, str]:
