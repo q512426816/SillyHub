@@ -384,3 +384,10 @@
 文件：
 - sillyhub-daemon/tests/interactive/provider-registry.test.ts（8 键→9 键 + dialog 三态类型断言 string|boolean）
 验证：provider-registry 6 passed + typecheck 0
+
+## ql-20260911-018-5f6e | 2026-09-11 09:20:00 | use-daemon-machines 测试同步 includeSessions opt-in（预存红顺手修，HEAD 副本验证归属）
+状态：已完成
+关联变更：2026-09-11-skills-central-library（verify 门暴露；债务源 a1d7ffba4/ql-20260909-013）
+文件：
+- frontend/src/lib/__tests__/use-daemon-machines.test.ts（sessions 联动用例显式 { includeSessions: true }）
+验证：4 passed；head-check 干净 worktree 复核：本例 HEAD 即红（真债务）、delete-change-confirm HEAD 绿（并行 WIP 污染）
