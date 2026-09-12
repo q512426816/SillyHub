@@ -231,6 +231,8 @@ class TestListSessionRuns:
             llm_provider_id=provider.id,
             input_tokens=1234,
             output_tokens=567,
+            cache_read_tokens=9999,
+            cache_creation_tokens=111,
         )
         plain = AgentRun(
             id=uuid.uuid4(),
@@ -247,18 +249,23 @@ class TestListSessionRuns:
         items = {it["id"]: it for it in resp.json()}
         assert len(items) == 2
 
-        # 配置轮：快照 + 供应商 id + usage 完整透传
+        # 配置轮：快照 + 供应商 id + usage 完整透传（quick ql-20260912-003-4506：
+        # 含 cache 两维，from_attributes 直映既有列）
         cfg = items[str(configured.id)]
         assert cfg["agent_profile_snapshot"] == snapshot
         assert cfg["llm_provider_id"] == str(provider.id)
         assert cfg["input_tokens"] == 1234
         assert cfg["output_tokens"] == 567
+        assert cfg["cache_read_tokens"] == 9999
+        assert cfg["cache_creation_tokens"] == 111
         # 未配置轮（老 run 行）：新字段全 null
         plain_item = items[str(plain.id)]
         assert plain_item["agent_profile_snapshot"] is None
         assert plain_item["llm_provider_id"] is None
         assert plain_item["input_tokens"] is None
         assert plain_item["output_tokens"] is None
+        assert plain_item["cache_read_tokens"] is None
+        assert plain_item["cache_creation_tokens"] is None
 
     @pytest.mark.asyncio
     async def test_returns_ctx_tokens_column(self, client, auth_headers, db_session) -> None:

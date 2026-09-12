@@ -50,6 +50,9 @@ class SessionRunRead(BaseModel):
         渲染每轮 whoLine（历史不跟随会话当前配置）；
       - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
         写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；
+      - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）
+        ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示
+        四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；
       - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该
         run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，
         close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
@@ -86,6 +89,11 @@ class SessionRunRead(BaseModel):
     llm_provider_id: uuid.UUID | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # quick（ql-20260912-003-4506）：缓存两维直映 AgentRun 既有列（from_attributes
+    # 零查询改动），与 input/output 同批由 close_interactive_run / 实时 usage_update
+    # 写入；无缓存引擎与历史行 None，前端按维独立渲染不编造。
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
     # task-05 / FR-01：最近一次调用提示词大小，from_attributes 直映
     # AgentRun.ctx_tokens 列（runs 查询零改动）；历史行 None 如实输出。
     ctx_tokens: int | None = None

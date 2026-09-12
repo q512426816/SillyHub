@@ -629,6 +629,14 @@ export interface SessionRunRead {
   input_tokens: number | null;
   output_tokens: number | null;
   /**
+   * quick（ql-20260912-003-4506）：prompt cache 两维（后端 SessionRunRead
+   * from_attributes 直映 AgentRun 同名列，daemon 关单 / 实时 usage_update 写入）
+   * ，供轮次历史行独立展示 输入/输出/缓存读取/缓存写入 四维；无缓存引擎
+   * （codex / pi）与历史 run 行为 null（前端该维不渲染，不编造 0）。
+   */
+  cache_read_tokens?: number | null;
+  cache_creation_tokens?: number | null;
+  /**
    * 2026-09-10-auto-resume-interrupted-turn：续跑轮标记——自动续跑派发落地的
    * run 为 { auto_resume_of: <源 run id> }（「自动续跑」徽标数据源）；普通轮
    * / 存量行为 null。与后端 SessionRunRead.metadata（validation_alias=

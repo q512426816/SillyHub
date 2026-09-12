@@ -129,6 +129,8 @@ function runRow(overrides: Partial<SessionRunRead> = {}): SessionRunRead {
     llm_provider_id: null,
     input_tokens: 1_200,
     output_tokens: 800,
+    cache_read_tokens: 45_600,
+    cache_creation_tokens: 2_400,
     user_id: null,
     sender_name: "qinyi",
     ...overrides,
@@ -392,6 +394,47 @@ describe("TaskExecutionPanel 轮次历史页签（task-07 / FR-04）", () => {
     expect(rows[0]!.textContent).toContain("qinyi");
     expect(rows[1]!.textContent).toContain("#1");
     expect(rows[1]!.textContent).toContain("运行中");
+  });
+
+  it("轮次行四维用量独立展示（ql-20260912-003-4506：null 维不渲染，全 null 无 meta 行）", async () => {
+    daemonMock.listSessionRuns.mockResolvedValue([
+      runRow({ id: "run-c" }),
+      runRow({
+        id: "run-d",
+        // codex / pi 等无缓存引擎形态：cache 两维 null → 不出现缓存标签
+        cache_read_tokens: null,
+        cache_creation_tokens: null,
+      }),
+      runRow({
+        id: "run-e",
+        // 老 run 行 / 未上报：四维全 null → 不渲染用量 meta 行
+        input_tokens: null,
+        output_tokens: null,
+        cache_read_tokens: null,
+        cache_creation_tokens: null,
+      }),
+    ]);
+    render(<TaskExecutionPanel sessionId="sess-1" />);
+    await flush();
+    fireEvent.click(screen.getByTestId("task-execution-bar"));
+    fireEvent.click(screen.getByTestId("task-execution-tab-runs"));
+    const rows = screen.getAllByTestId("task-execution-run-row");
+    expect(rows).toHaveLength(3);
+    // #3（队首最新）：四维齐全，formatTokens 口径（1_200 → 1.2K）
+    expect(rows[0]!.textContent).toContain("输入 1.2K");
+    expect(rows[0]!.textContent).toContain("输出 800");
+    expect(rows[0]!.textContent).toContain("缓存读取 45.6K");
+    expect(rows[0]!.textContent).toContain("缓存写入 2.4K");
+    // #2：仅输入/输出两维，缓存标签不出现（不编造 0）
+    expect(rows[1]!.textContent).toContain("输入 1.2K");
+    expect(rows[1]!.textContent).toContain("输出 800");
+    expect(rows[1]!.textContent).not.toContain("缓存读取");
+    expect(rows[1]!.textContent).not.toContain("缓存写入");
+    // #1：四维全 null → 无任何用量标签
+    expect(rows[2]!.textContent).not.toContain("输入");
+    expect(rows[2]!.textContent).not.toContain("输出");
+    expect(rows[2]!.textContent).not.toContain("缓存读取");
+    expect(rows[2]!.textContent).not.toContain("缓存写入");
   });
 
   it("runsRefreshSignal 递增触发 listSessionRuns 重拉", async () => {

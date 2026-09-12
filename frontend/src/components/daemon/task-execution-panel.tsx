@@ -22,6 +22,9 @@
  *        同源一致，不新建数据链路）；
  *     ③ 轮次历史：组件内 useEffect 自取数 listSessionRuns（零 react-query，
  *        SessionUsageBar refreshSignal 先例），runsRefreshSignal prop 递增重拉。
+ *        轮次行 tokens 展示 quick ql-20260912-003-4506 改版：原 input+output
+ *        合并单列拆为四维独立标签行（输入/输出/缓存读取/缓存写入，见
+ *        RunListRow 头注释）。
  *
  * ── R-07 降级裁定（勿当 bug 修）───────────────────────────────────────
  * 计划总纲条（planObjective / planTasks props）仅活跃轮实时显示：streamSession
@@ -262,9 +265,14 @@ function runElapsedText(run: SessionRunRead, now: number): string | null {
   return formatElapsedZh(Math.max(0, end - start));
 }
 
-/** 轮次行 grid 列（轮次号 / 状态 / 耗时 / 发送者 / tokens；发送者列弹性截断）。 */
+/**
+ * 轮次行 grid 列（轮次号 / 状态 / 耗时 / 发送者；发送者列弹性截断）。四维用量
+ * （输入/输出/缓存读取/缓存写入）不走列——8 列固定网格在 page / dialog / mobile
+ * 三宿主的窄容器会横向溢出，改主行下方带标签 meta 行（对齐 TaskListRow meta 行
+ * 设计语言，flex-wrap 窄容器自然换行）。
+ */
 const RUN_ROW_GRID_CLS =
-  "grid grid-cols-[2.75rem_4rem_minmax(0,5rem)_minmax(0,1fr)_4rem] items-center gap-2";
+  "grid grid-cols-[2.75rem_4rem_minmax(0,5rem)_minmax(0,1fr)] items-center gap-2";
 
 /** 页签空态轻文案（D-03：不报错、不阻塞对话流）。 */
 function EmptyPane({ text }: { text: string }) {
@@ -331,7 +339,13 @@ function TaskListRow({ task, now }: { task: AgentSessionTaskView; now: number })
   );
 }
 
-/** 轮次历史页签：紧凑轮次行（轮次号 / 状态 pill / 耗时 / 发送者 / tokens）。 */
+/**
+ * 轮次历史页签：紧凑轮次行（主行：轮次号 / 状态 pill / 耗时 / 发送者 + 下方
+ * 四维用量 meta 行）。quick ql-20260912-003-4506：原「tokens」合并单列
+ * （input+output）改为独立的 输入/输出/缓存读取/缓存写入 四维——各维 null
+ * （无缓存引擎 / 老 run 行）不渲染该维（对齐 TaskListRow meta 条件 push 先例，
+ * 不编造 0）；四维全 null 不渲染 meta 行（原「—」占位同语义）。
+ */
 function RunListRow({
   run,
   no,
@@ -344,34 +358,47 @@ function RunListRow({
 }) {
   const view = runStatusView(run.status);
   const elapsed = runElapsedText(run, now);
-  const tokensUnknown = run.input_tokens == null && run.output_tokens == null;
-  const tokens = (run.input_tokens ?? 0) + (run.output_tokens ?? 0);
+  const usageDims: string[] = [];
+  if (run.input_tokens != null) usageDims.push(`输入 ${formatTokens(run.input_tokens)}`);
+  if (run.output_tokens != null) usageDims.push(`输出 ${formatTokens(run.output_tokens)}`);
+  if (run.cache_read_tokens != null) {
+    usageDims.push(`缓存读取 ${formatTokens(run.cache_read_tokens)}`);
+  }
+  if (run.cache_creation_tokens != null) {
+    usageDims.push(`缓存写入 ${formatTokens(run.cache_creation_tokens)}`);
+  }
   return (
     <div
       data-testid="task-execution-run-row"
-      className={cn(RUN_ROW_GRID_CLS, "rounded-md px-2 py-1.5 text-xs hover:bg-muted/50")}
+      className="rounded-md px-2 py-1.5 hover:bg-muted/50"
     >
-      <span className="font-mono text-[11px] text-muted-foreground">#{no}</span>
-      <span
-        className={cn(
-          "justify-self-start whitespace-nowrap rounded-full px-2 py-0 text-[10px] font-semibold",
-          view.cls,
-        )}
-      >
-        {view.label}
-      </span>
-      <span className="truncate tabular-nums text-muted-foreground">
-        {elapsed ?? "—"}
-      </span>
-      <span
-        className="min-w-0 truncate text-muted-foreground"
-        title={run.sender_name ?? undefined}
-      >
-        {run.sender_name || "—"}
-      </span>
-      <span className="justify-self-end truncate tabular-nums text-muted-foreground">
-        {tokensUnknown ? "—" : formatTokens(tokens)}
-      </span>
+      <div className={cn(RUN_ROW_GRID_CLS, "text-xs")}>
+        <span className="font-mono text-[11px] text-muted-foreground">#{no}</span>
+        <span
+          className={cn(
+            "justify-self-start whitespace-nowrap rounded-full px-2 py-0 text-[10px] font-semibold",
+            view.cls,
+          )}
+        >
+          {view.label}
+        </span>
+        <span className="truncate tabular-nums text-muted-foreground">
+          {elapsed ?? "—"}
+        </span>
+        <span
+          className="min-w-0 truncate text-muted-foreground"
+          title={run.sender_name ?? undefined}
+        >
+          {run.sender_name || "—"}
+        </span>
+      </div>
+      {usageDims.length > 0 && (
+        <p className="mt-0.5 flex flex-wrap gap-x-2.5 pl-[3.25rem] text-[10.5px] tabular-nums text-muted-foreground/80">
+          {usageDims.map((dim) => (
+            <span key={dim.split(" ")[0]}>{dim}</span>
+          ))}
+        </p>
+      )}
     </div>
   );
 }
@@ -698,7 +725,6 @@ export const TaskExecutionPanel = forwardRef<
                       <span>状态</span>
                       <span>耗时</span>
                       <span>发送者</span>
-                      <span className="justify-self-end">tokens</span>
                     </div>
                     {runs.map((run, idx) => (
                       <RunListRow

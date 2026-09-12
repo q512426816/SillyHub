@@ -62735,6 +62735,28 @@
             ],
             "title": "Output Tokens"
           },
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "cache_creation_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Creation Tokens"
+          },
           "ctx_tokens": {
             "anyOf": [
               {
@@ -62765,7 +62787,7 @@
           "status"
         ],
         "title": "SessionRunRead",
-        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；\n  - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该\n    run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，\n    close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /\n    老 daemon 无上报为 None（环未知态，design §9）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。"
+        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；\n  - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）\n    ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示\n    四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；\n  - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该\n    run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，\n    close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /\n    老 daemon 无上报为 None（环未知态，design §9）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。"
       },
       "SessionRuntimeRequest": {
         "properties": {
