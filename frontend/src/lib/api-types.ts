@@ -17724,6 +17724,8 @@ export interface components {
             hint?: string | null;
             /** Raw */
             raw?: string | null;
+            /** Reset At */
+            reset_at?: string | null;
         };
         /**
          * ModelErrorType
@@ -21615,6 +21617,8 @@ export interface components {
             error_code?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /** Origin */
+            origin?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -22036,6 +22040,8 @@ export interface components {
             error_msg?: string | null;
             /** Position */
             position: number;
+            /** Origin */
+            origin?: string | null;
             /**
              * Created At
              * Format: date-time

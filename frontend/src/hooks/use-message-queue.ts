@@ -68,6 +68,12 @@ export interface QueueEntry {
   position?: number;
   /** 入队时间戳（Date.now()）。 */
   createdAt: number;
+  /**
+   * 条目来源标记（2026-09-12-chat-turn-auto-recovery FR-5.0）：
+   * "auto_resume:<源 run uuid>" = 系统自动恢复入队（失败卡双信号推导）；
+   * undefined/null = 用户排队。
+   */
+  origin?: string | null;
 }
 
 export interface UseMessageQueueOptions {
@@ -164,6 +170,7 @@ export function useMessageQueue({
             errorMsg: e.error_msg ?? undefined,
             position: e.position ?? undefined,
             createdAt: Date.parse(e.created_at) || 0,
+            origin: e.origin ?? null,
           })),
         );
       } catch {

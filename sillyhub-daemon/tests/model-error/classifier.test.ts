@@ -8,7 +8,8 @@
  *   - 各 type 的 retryable 取值正确；
  *   - code 从文本提取（[1310] / HTTP 状态码 / EN* 网络码）；
  *   - 非模型错误（isError=false 且无错误文本）→ null；
- *   - 非 claude agent → unknown（D-001 扩展点）；
+ *   - 全 agent 同规则归类（2026-09-12 泛化：pi 断流/pi rpc 超时/429 限额）；
+ *   - resetAt 解析（GLM 中文格式 +08:00；英文变体/残缺格式/非 quota → null）；
  *   - 多文本来源（resultText / apiRetryError / assistantStdout / stderrText）拼接后命中。
  *
  * @module model-error/classifier.test
@@ -256,14 +257,14 @@ describe('classifyModelError — 非错误 / 非 claude（task-02 约束）', ()
     expect(result?.retryable).toBe(false);
   });
 
-  it('非 claude agent（codex）有错误 → unknown（D-001 扩展点）', () => {
+  it('非 claude agent（codex）有错误 → 同规则归类（2026-09-12 泛化，原 D-001 扩展点废止）', () => {
     const result = classifyModelError({
       agent: 'codex',
       isError: true,
       resultText: 'Request rejected (429) · 使用上限',
     });
-    // 非 claude 不走 claude 规则，统一兜底 unknown（扩展点，后续 agent 各自实现）。
-    expect(result?.type).toBe('unknown');
+    // 规则体 provider 无关：429+上限 → quota_exceeded（原先落 unknown 无恢复面）。
+    expect(result?.type).toBe('quota_exceeded');
     expect(result?.retryable).toBe(false);
     expect(result?.raw).toContain('使用上限');
   });
@@ -275,6 +276,87 @@ describe('classifyModelError — 非错误 / 非 claude（task-02 约束）', ()
       resultText: '',
     });
     expect(result).toBeNull();
+  });
+});
+
+describe('classifyModelError — 2026-09-12-chat-turn-auto-recovery 泛化与 resetAt', () => {
+  it('pi 断流主实证「Stream ended without finish_reason」→ provider_error + retryable=true', () => {
+    // 2026-09-11 会话 d4c29d95 实证（×8）：原先八类均不命中落 unknown。
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText: 'Stream ended without finish_reason',
+    });
+    expect(result?.type).toBe('provider_error');
+    expect(result?.retryable).toBe(true);
+    // 断流文本不含 4xx/5xx/EN* 等码 → code=null（可读性：无伪码）。
+    expect(result?.code).toBeNull();
+  });
+
+  it('pi 静默中断合成文本 [silent stream truncation] → provider_error（driver 归类面确定性）', () => {
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText:
+        '[silent stream truncation] 上一轮输出流中断，未产生收尾回复（输出流中断检测）',
+    });
+    expect(result?.type).toBe('provider_error');
+    expect(result?.retryable).toBe(true);
+  });
+
+  it('pi rpc 超时「response timeout」→ timeout（既有规则命中，无需新增）', () => {
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText: 'pi rpc "prompt" response timeout (30000ms)',
+    });
+    expect(result?.type).toBe('timeout');
+    expect(result?.retryable).toBe(true);
+  });
+
+  it('GLM 1308 五小时上限（中文格式）→ quota_exceeded + resetAt 解析为 +08:00 ISO', () => {
+    // 2026-09-11 会话 d4c29d95 实证（07:09 四连 429）。
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText:
+        '429 {"type":"error","error":{"type":"rate_limit_error","code":"1308","message":"[1308][已达到 5 小时的使用上限。您的限额将在 2026-09-12 10:03:59 重置。][20260912071637198cfe1a17c0446b]"},"request_id":"x"}',
+    });
+    expect(result?.type).toBe('quota_exceeded');
+    expect(result?.retryable).toBe(false);
+    expect(result?.code).toBe('1308');
+    // 只解析中文「将在/将于 … 重置」（实证文案为「将在」），北京时间固定 +08:00（D-002@v2）。
+    expect(result?.resetAt).toBe('2026-09-12T10:03:59+08:00');
+  });
+
+  it('quota 但英文 resets at 变体 → resetAt=null（无时区信息不猜测）', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: '429 usage limit reached, resets at 2026-09-12 10:03:59',
+    });
+    expect(result?.type).toBe('quota_exceeded');
+    expect(result?.resetAt).toBeNull();
+  });
+
+  it('非 quota 类错误 resetAt 恒 null（仅 quota_exceeded 附加解析）', () => {
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText: 'Stream ended without finish_reason',
+    });
+    expect(result?.type).toBe('provider_error');
+    expect(result?.resetAt).toBeNull();
+  });
+
+  it('中文格式残缺（无「重置」收尾）→ resetAt=null', () => {
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText: '429 已达到使用上限，将于 2026-09-12 10:03:59',
+    });
+    expect(result?.type).toBe('quota_exceeded');
+    expect(result?.resetAt).toBeNull();
   });
 });
 
@@ -308,12 +390,13 @@ describe('classifyModelError — 多文本来源拼接（task-02）', () => {
     });
     expect(result).not.toBeNull();
     if (!result) return;
-    // expects_from task-01：必须含全字段 type/code/message/retryable/hint/raw。
+    // expects_from task-01：必须含全字段 type/code/message/retryable/hint/raw/resetAt。
     expect(typeof result.type).toBe('string');
     expect(result.code === null || typeof result.code === 'string').toBe(true);
     expect(typeof result.message).toBe('string');
     expect(typeof result.retryable).toBe('boolean');
     expect(result.hint === null || typeof result.hint === 'string').toBe(true);
     expect(result.raw === null || typeof result.raw === 'string').toBe(true);
+    expect(result.resetAt === null || typeof result.resetAt === 'string').toBe(true);
   });
 });

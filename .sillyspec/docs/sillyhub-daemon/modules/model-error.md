@@ -59,3 +59,9 @@ classifyModelError(input):
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 2026-09-12-chat-turn-auto-recovery 增量
+
+- `classifyModelError` 规则体 provider 无关化（原 D-001「仅 claude」废止）：pi/codex/cursor 与 claude 同一套关键词规则（`classifyClaude` 更名 `classifyBlob`，agent 参数仅日志归因）。
+- provider_error 规则体补断流关键词（stream ended / without finish_reason / stream truncat / silent stream / 输出流中断 / 流中断）——pi 上游「Stream ended without finish_reason」主实证原先落 unknown/retryable=false。
+- `ModelError` 新增 `resetAt`（ISO-8601）：仅 quota_exceeded 时解析 GLM 中文「将[在于] YYYY-MM-DD HH:MM:SS 重置」（北京时间固定 +08:00；实证文案为「将在」，正则双介词兼容）；英文变体不猜测 → null。wire 键 `reset_at`（daemon.ts 序列化跳显式映射，camel 键剔除）。

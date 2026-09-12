@@ -343,6 +343,12 @@ export interface ErrorLogItem {
   retryable: boolean;
   hint: string | null;
   raw: string | null;
+  /**
+   * 额度重置时间（ISO-8601；null=未解析到）。2026-09-12-chat-turn-auto-recovery
+   * FR-5.1：quota_exceeded 失败卡「将于 XX:XX 自动继续」文案数据源（error_detail
+   * JSON 透传；旧数据缺键 = undefined 兼容）。
+   */
+  reset_at?: string | null;
 }
 
 const MODEL_ERROR_TYPES: ReadonlySet<ModelErrorType> = new Set<ModelErrorType>([
@@ -435,6 +441,7 @@ export function buildErrorLogItem(
       retryable: false,
       hint: "等待用量重置或升级套餐（如 Cursor Pro），也可切换供应商后重新发送",
       raw,
+      reset_at: asStringOrNull(errorDetail["reset_at"]),
     };
   }
   return {
@@ -444,6 +451,10 @@ export function buildErrorLogItem(
     retryable: errorDetail["retryable"] === true,
     hint: asStringOrNull(errorDetail["hint"]),
     raw,
+    // 2026-09-12-chat-turn-auto-recovery（QA P1 修复）：额度重置时间透传——
+    // turn-timeline quota 分支「将于 XX:XX 自动继续」提示的数据源；旧数据/
+    // 非 quota 类缺键 → null。
+    reset_at: asStringOrNull(errorDetail["reset_at"]),
   };
 }
 

@@ -42,6 +42,10 @@ export interface UseScheduledMessagesReturn {
   isLoading: boolean;
 }
 
+/** 空列表模块级常量：data 未就绪/异常时复用同一引用——防回调型消费方
+ * （bar onEntriesChange）因「每渲染新 []」触发 setState→渲染循环。 */
+const EMPTY_SCHEDULED: ScheduledMessageRead[] = [];
+
 export function useScheduledMessages(sessionId: string): UseScheduledMessagesReturn {
   const query = useQuery<ScheduledMessageRead[], ApiError>({
     queryKey: scheduledMessagesQueryKey(sessionId),
@@ -53,7 +57,7 @@ export function useScheduledMessages(sessionId: string): UseScheduledMessagesRet
   return {
     // Array.isArray 防御：测试环境/异常网关可能给非数组 JSON（如全局 fetch mock
     // 兜住所有请求返回对象）——形状不符按空列表收敛（bar 渲染 null），不崩面板。
-    scheduled: Array.isArray(query.data) ? query.data : [],
+    scheduled: Array.isArray(query.data) ? query.data : EMPTY_SCHEDULED,
     isLoading: query.isLoading,
   };
 }

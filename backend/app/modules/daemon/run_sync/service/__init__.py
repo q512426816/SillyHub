@@ -451,15 +451,6 @@ class RunSyncService(BackgroundTaskMixin):
             error=error,
         )
 
-    async def _maybe_autoretry_auth_transient_turn(
-        self,
-        agent_run: AgentRun,
-        error: ModelErrorDTO | None,
-    ) -> None:
-        return await _close_run_steps._maybe_autoretry_auth_transient_turn(
-            self, agent_run=agent_run, error=error
-        )
-
     async def _gate_applicable(self, agent_run: AgentRun) -> bool:
         return await _gate._gate_applicable(self, agent_run)
 

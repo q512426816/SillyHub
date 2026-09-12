@@ -1213,3 +1213,53 @@ describe("task-10: 新旧轨交错（合并指针连续性）", () => {
     expect(ev[2]?.mergedAssistantContent).toBe("工具后");
   });
 });
+
+// ── 2026-09-12-chat-turn-auto-recovery（QA P1 修复回归）：reset_at 透传 ────
+
+describe("buildErrorLogItem reset_at 透传（quota 自动继续提示数据源）", () => {
+  it("主分支：error_detail.reset_at 映射到 ErrorLogItem.reset_at", () => {
+    const item = buildErrorLogItem({
+      type: "quota_exceeded",
+      code: "1308",
+      message: "额度或配额已耗尽",
+      retryable: false,
+      hint: null,
+      raw: "[1308][已达到 5 小时的使用上限。您的限额将在 2026-09-12 10:03:59 重置。]",
+      reset_at: "2026-09-12T10:03:59+08:00",
+    });
+    expect(item?.type).toBe("quota_exceeded");
+    expect(item?.reset_at).toBe("2026-09-12T10:03:59+08:00");
+  });
+
+  it("缺键/非字符串 → null（旧数据兼容，quota 提示分支按无重置时间收敛）", () => {
+    expect(
+      buildErrorLogItem({
+        type: "quota_exceeded",
+        code: null,
+        message: "x",
+        retryable: false,
+        hint: null,
+        raw: "r",
+      })?.reset_at,
+    ).toBeNull();
+    expect(
+      buildErrorLogItem({
+        type: "provider_error",
+        message: "x",
+        retryable: true,
+        raw: null,
+        reset_at: 12345,
+      })?.reset_at,
+    ).toBeNull();
+  });
+
+  it("usage-limit raw 兜底分支同样透传 reset_at", () => {
+    const item = buildErrorLogItem({
+      type: "unknown",
+      raw: "API Error: Request rejected (429) · usage limit reached, resets at 2026-09-13 02:00:00",
+      reset_at: "2026-09-13T02:00:00+08:00",
+    });
+    expect(item?.type).toBe("quota_exceeded");
+    expect(item?.reset_at).toBe("2026-09-13T02:00:00+08:00");
+  });
+});

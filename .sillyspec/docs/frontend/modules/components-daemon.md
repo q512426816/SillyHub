@@ -232,3 +232,9 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 2026-09-12-chat-turn-auto-recovery 增量
+
+- **scheduled-messages-bar**：`onEntriesChange` 回调上提定时列表到父层（R4 不变式不破——数据仍在局部 QueryClientProvider）；内容签名守卫（id/status/origin）防引用抖动渲染循环（use-scheduled-messages 空数组改模块级常量 EMPTY_SCHEDULED 双保险）；origin=auto_resume:* 条目渲染「自动续跑」徽标（tooltip：系统自动排期，可取消=取消自动继续）。
+- **turn-timeline**：`AutoResumeEntry` 类型 + `autoRecoverHintForTurn` 双信号推导（error_detail 类型/reset_at + 同源 pending 恢复条目存在性，D-009@v2：无条目不注入提示防误导）→ RunErrorItem autoRecoverHint。三分支：quota→「额度耗尽，将于 XX:XX 自动继续（可在定时消息中取消）」；瞬时四类→「上游瞬时故障，已自动重发」；silent stream truncation raw→「输出流中断，已自动续跑」。
+- **session-panel page/dialog 两挂载点**：useMemo 聚合排队∪定时 pending origin 条目下发 TurnTimeline；use-message-queue QueueEntry/session-queue DTO 透出 origin。

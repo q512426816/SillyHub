@@ -13,6 +13,7 @@ import { Badge, Button, Drawer, Input, Spin } from "antd";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import { extractPreambleText, finishTurn } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
+import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import {
   joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers,
@@ -60,14 +61,7 @@ import { listWorkspaces } from "@/lib/workspaces";
 import { getProject } from "@/lib/ppm/project";
 import { getChange } from "@/lib/changes";
 import { getQuicklogDetail } from "@/lib/quicklog";
-import {
-  cancelTeamMission, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory,
-  getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
-  triggerSessionTeamMission, maxLogTimestamp, reopenSession, streamSession,
-  updateSessionAutoResume, updateSessionCtxWindow, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest,
-  type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest,
-  type PlanSummary,
-} from "@/lib/daemon";
+import { ScheduledMessageRead, cancelTeamMission, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow } from "@/lib/daemon";
 import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
 
@@ -435,6 +429,11 @@ export function SessionPanelPage({
   const [schedAt, setSchedAt] = useState<Dayjs | null>(null);
   const [schedSubmitting, setSchedSubmitting] = useState(false);
   const [schedRefresh, setSchedRefresh] = useState(0);
+  // 2026-09-12-chat-turn-auto-recovery / FR-5.0：定时列表经 bar 回调上提
+  //（R4 不变式不破），失败卡双信号推导的数据源之一。
+  const [scheduledEntries, setScheduledEntries] = useState<
+    ScheduledMessageRead[]
+  >([]);
   const [schedHints, setSchedHints] = useState<string[]>([]);
   // 切会话：关弹窗 + 清系统提示行（本地会话作用域态，防 A 会话提示残留到 B）。
   useEffect(() => {
@@ -1850,6 +1849,31 @@ export function SessionPanelPage({
     sessionActive,
   });
 
+  // 2026-09-12-chat-turn-auto-recovery / FR-5.1：会话 pending 自动恢复条目
+  // （排队 ∪ 定时，origin=auto_resume:*）——TurnTimeline 失败卡双信号推导。
+  const autoResumeEntries = useMemo<AutoResumeEntry[]>(() => {
+    const queued = queue
+      .filter(
+        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
+      )
+      .map((e) => ({
+        origin: e.origin as string,
+        kind: "queued" as const,
+        dispatchAt: null,
+      }));
+    const scheduled = scheduledEntries
+      .filter(
+        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
+      )
+      .map((e) => ({
+        origin: e.origin as string,
+        kind: "scheduled" as const,
+        dispatchAt: e.dispatch_at,
+      }));
+    return [...queued, ...scheduled];
+  }, [queue, scheduledEntries]);
+
+
   // ── 操作 ───────────────────────────────────────────────────────────────
   // task-11：团队弹层开关（打开时清旧错误；objective 预填 /team 指令文本）。
   // ql-20260828-012-4425：initial 携带编辑回显配置（chip 点击派生自活跃
@@ -2802,6 +2826,7 @@ export function SessionPanelPage({
         errorMsg={errorMsg}
         // 2026-09-10-auto-resume-interrupted-turn / FR-07：daemon_restarted 失败卡
         // 场景化兜底（该码不在 8 类错误映射）——按开关状态两态文案。
+        autoResumeEntries={autoResumeEntries}
         daemonRestartedHint={
           (session.config as Record<string, unknown> | null)?.auto_resume_interrupted
           === false
@@ -3376,6 +3401,7 @@ export function SessionPanelPage({
         <ScheduledMessagesBar
           sessionId={sessionId ?? ""}
           refreshSignal={schedRefresh}
+          onEntriesChange={setScheduledEntries}
         />
         {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
             .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。ql-20260827-020：

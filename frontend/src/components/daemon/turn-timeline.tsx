@@ -49,6 +49,7 @@ import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { AskUserMarkerCard } from "@/components/ask-user-marker-card";
 import { parseAskUserMarker } from "@/lib/askuser-marker";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
+import { formatScheduledTime } from "@/components/daemon/scheduled-messages-bar";
 import type { ErrorLogItem } from "@/components/agent-log/normalize";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
 import { SegmentView, TextSegmentView } from "@/components/daemon/turn-segment-views";
@@ -146,6 +147,16 @@ import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
  * - tool：工具调用事件（含配对 result + 状态；raw 空串=孤儿 result 无配对 use）
  * - stderr：channel=stderr 的错误/告警文本
  */
+/** 2026-09-12-chat-turn-auto-recovery：自动恢复条目（失败卡双信号推导用）。 */
+export interface AutoResumeEntry {
+  /** origin 复合值（'auto_resume:<源 run uuid>'）。 */
+  origin: string;
+  /** 条目面：queued=排队重放/nudge；scheduled=定时续跑（quota）。 */
+  kind: "queued" | "scheduled";
+  /** 定时面计划时间（queued 为 null/undefined）。 */
+  dispatchAt?: string | null;
+}
+
 export type SessionProcessItem =
   | { kind: "thinking"; text: string; ts?: number }
   | ({ kind: "tool" } & SessionToolEvent & { ts?: number })
@@ -205,6 +216,8 @@ export interface SessionTurnView {
    * 可选：外部 logsToTurns 构造的历史 turn 不带此字段（只读 import，不改其构造）。
    */
   errorDetail?: ErrorLogItem | null;
+
+  /** （timeline 内部用）轮终结构化错误（含 reset_at 扩展）。 */
   /**
    * 2026-09-10-auto-resume-interrupted-turn：自动续跑轮标记（源 run id，取
    * run.metadata.auto_resume_of）——非空时轮次行渲染「自动续跑」徽标；缺省
@@ -292,6 +305,13 @@ export interface TurnTimelineProps {
    */
   daemonRestartedHint?: string | null;
   /**
+   * 2026-09-12-chat-turn-auto-recovery / FR-5.1：会话当前 pending 的自动恢复
+   * 条目（排队 ∪ 定时，origin=auto_resume:<源 run uuid>）——失败卡
+   * autoRecoverHint 双信号推导的第二信号（存在性）。undefined = 父层无数据
+   * （保持现行为，不注入提示）。
+   */
+  autoResumeEntries?: AutoResumeEntry[];
+  /**
    * pending 待答卡渲染门控：ended/failed 会话不回显（ql-20260623 改动三，死卡防护）。
    */
   sessionStatus: SessionUiStatus;
@@ -348,6 +368,7 @@ const TurnRow = memo(function TurnRow({
   onResend,
   onSwitchProvider,
   daemonRestartedHint,
+  autoResumeEntries,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
@@ -360,6 +381,8 @@ const TurnRow = memo(function TurnRow({
   onSwitchProvider: () => void;
   /** 2026-09-10-auto-resume-interrupted-turn：daemon_restarted 场景化兜底建议。 */
   daemonRestartedHint?: string | null;
+  /** 2026-09-12-chat-turn-auto-recovery：pending 自动恢复条目（双信号推导）。 */
+  autoResumeEntries?: AutoResumeEntry[];
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
@@ -643,6 +666,7 @@ const TurnRow = memo(function TurnRow({
                             ? (daemonRestartedHint ?? undefined)
                             : undefined
                         }
+                        autoRecoverHint={autoRecoverHintForTurn(turn, autoResumeEntries)}
                         onResend={
                           turn.prompt.trim()
                             ? () => {
@@ -717,11 +741,49 @@ const TurnRow = memo(function TurnRow({
   );
 });
 
+/**
+ * 2026-09-12-chat-turn-auto-recovery / FR-5.1 / D-009@v2：失败卡自动恢复提示
+ * 双信号推导——error_detail 类型（第一信号）+ 会话存在同源 pending 恢复条目
+ * （第二信号，存在性）。无恢复条目（开关关/链上限到/派发已消费）一律不注入
+ * 提示，防静态文案误导。
+ */
+export function autoRecoverHintForTurn(
+  turn: { runId?: string | null; errorDetail?: ErrorLogItem | null },
+  entries: AutoResumeEntry[] | undefined,
+): string | undefined {
+  if (!entries || entries.length === 0 || !turn.errorDetail || !turn.runId) {
+    return undefined;
+  }
+  const origin = `auto_resume:${turn.runId}`;
+  const entry = entries.find((e) => e.origin === origin);
+  if (!entry) return undefined;
+  const d = turn.errorDetail;
+  const raw = String(d.raw ?? "");
+  if (d.type === "quota_exceeded") {
+    if (!d.reset_at) return undefined;
+    const when = formatScheduledTime(d.reset_at);
+    return `额度耗尽，将于 ${when} 自动继续（可在定时消息中取消）`;
+  }
+  if (
+    d.type === "rate_limited" ||
+    d.type === "timeout" ||
+    d.type === "network" ||
+    d.type === "provider_error" ||
+    raw.includes("silent stream truncation")
+  ) {
+    return raw.includes("silent stream truncation")
+      ? "输出流中断，已自动续跑"
+      : "上游瞬时故障，已自动重发";
+  }
+  return undefined;
+}
+
 export function TurnTimeline({
   turns,
   viewMode,
   errorMsg,
   daemonRestartedHint,
+  autoResumeEntries,
   sessionStatus,
   pendingRequests,
   dialogHistory,
@@ -958,6 +1020,7 @@ export function TurnTimeline({
               onResend={onResend}
               onSwitchProvider={onSwitchProvider}
               daemonRestartedHint={daemonRestartedHint}
+            autoResumeEntries={autoResumeEntries}
             />
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——

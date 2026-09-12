@@ -38,3 +38,7 @@ class ModelErrorDTO(BaseModel):
     retryable: bool
     hint: str | None = None  # 针对性建议（中文）
     raw: str | None = None  # 原始错误文本（查看详情）
+    # 2026-09-12-chat-turn-auto-recovery FR-1.3：额度重置时间（ISO-8601 含时区
+    # 偏移；None=未解析到/非 quota 类）。daemon 侧由 GLM 中文「将在/将于 … 重置」
+    # 解析（+08:00）；随 error_detail JSON 落库，前端与 close 钩子 quota 分支消费。
+    reset_at: str | None = None

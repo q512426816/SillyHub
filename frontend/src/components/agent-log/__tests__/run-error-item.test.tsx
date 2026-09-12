@@ -483,3 +483,80 @@ describe("task-11 回归补强：actions 组合 / a11y / 边界", () => {
     expect(container.querySelector("pre")).not.toBeInTheDocument();
   });
 });
+
+// ── 2026-09-12-chat-turn-auto-recovery / FR-5.1：autoRecoverHint 链序 ──────
+
+describe("RunErrorItem autoRecoverHint（hint 链序：item.hint > fallbackHint > autoRecoverHint > defaultHint）", () => {
+  it("item.hint 缺席 + fallbackHint 缺席 + autoRecoverHint 传入 → 显示 autoRecoverHint", () => {
+    render(
+      <RunErrorItem
+        item={{
+          type: "provider_error",
+          code: null,
+          message: "运行失败",
+          retryable: true,
+          hint: null,
+          raw: null,
+        }}
+        autoRecoverHint="上游瞬时故障，已自动重发"
+      />,
+    );
+    expect(screen.getByText("上游瞬时故障，已自动重发")).toBeDefined();
+  });
+
+  it("fallbackHint 存在时优先于 autoRecoverHint（daemon_restarted 场景不受挤占）", () => {
+    render(
+      <RunErrorItem
+        item={{
+          type: "unknown",
+          code: "daemon_restarted",
+          message: "运行失败",
+          retryable: false,
+          hint: null,
+          raw: null,
+        }}
+        fallbackHint="服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"
+        autoRecoverHint="上游瞬时故障，已自动重发"
+      />,
+    );
+    expect(
+      screen.getByText("服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"),
+    ).toBeDefined();
+    expect(screen.queryByText("上游瞬时故障，已自动重发")).toBeNull();
+  });
+
+  it("item.hint 永远最高优先（autoRecoverHint 不挤占后端 hint）", () => {
+    render(
+      <RunErrorItem
+        item={{
+          type: "quota_exceeded",
+          code: "1308",
+          message: "额度或配额已耗尽",
+          retryable: false,
+          hint: "额度耗尽，需充值或切换供应商",
+          raw: null,
+        }}
+        autoRecoverHint="额度耗尽，将于 2026-09-12 10:03 自动继续"
+      />,
+    );
+    expect(screen.getByText("额度耗尽，需充值或切换供应商")).toBeDefined();
+    expect(screen.queryByText(/自动继续/)).toBeNull();
+  });
+
+  it("全部缺席 → 维持类型表 defaultHint 现行为", () => {
+    render(
+      <RunErrorItem
+        item={{
+          type: "provider_error",
+          code: null,
+          message: "运行失败",
+          retryable: true,
+          hint: null,
+          raw: null,
+        }}
+      />,
+    );
+    // defaultHint 非空（类型表）——不渲染 autoRecover 文案。
+    expect(screen.queryByText(/已自动重发/)).toBeNull();
+  });
+});

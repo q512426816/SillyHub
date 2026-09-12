@@ -271,3 +271,56 @@ describe("ScheduledMessagesBar 取消流", () => {
     expect(mocks.cancelScheduledMessage).not.toHaveBeenCalled();
   });
 });
+
+// ── 2026-09-12-chat-turn-auto-recovery / FR-5.2：自动续跑徽标 + 数据上提回调 ──
+
+describe("ScheduledMessagesBar 自动续跑徽标与 onEntriesChange（FR-5.0/5.2）", () => {
+  it("origin=auto_resume:* 条目渲染「自动续跑」徽标；普通条目不渲染", async () => {
+    mocks.listScheduledMessages.mockResolvedValue([
+      makeScheduled({
+        id: "sm-ar",
+        prompt: "[系统续跑] 上游额度已重置…",
+        origin: "auto_resume:11111111-1111-1111-1111-111111111111",
+      }),
+      makeScheduled({ id: "sm-user", prompt: "普通用户预约" }),
+    ]);
+    render(<ScheduledMessagesBar sessionId="sess-1" />);
+
+    expect(await screen.findByText("定时消息（2）")).toBeInTheDocument();
+    expect(screen.getByText("自动续跑")).toBeInTheDocument();
+    // 普通条目无徽标（全文仅一处「自动续跑」）。
+    expect(screen.getAllByText("自动续跑")).toHaveLength(1);
+    expect(screen.getByText("普通用户预约")).toBeInTheDocument();
+  });
+
+  it("onEntriesChange：列表收敛即回传父层（FR-5.0 数据上提）", async () => {
+    const entries = [makeScheduled({ id: "sm-x" })];
+    mocks.listScheduledMessages.mockResolvedValue(entries);
+    const onEntriesChange = vi.fn();
+    render(
+      <ScheduledMessagesBar sessionId="sess-1" onEntriesChange={onEntriesChange} />,
+    );
+
+    await screen.findByText(/定时消息（1）/);
+    await waitFor(() => expect(onEntriesChange).toHaveBeenCalled());
+    expect(onEntriesChange).toHaveBeenLastCalledWith(entries);
+  });
+
+  it("onEntriesChange 内容不变不重复回传（防引用抖动渲染循环）", async () => {
+    mocks.listScheduledMessages.mockResolvedValue([makeScheduled({ id: "sm-y" })]);
+    const onEntriesChange = vi.fn();
+    const { rerender } = render(
+      <ScheduledMessagesBar sessionId="sess-1" onEntriesChange={onEntriesChange} />,
+    );
+    await screen.findByText(/定时消息（1）/);
+    // 两次合法内容变化：初挂空表（prev=null 必通知）→ 数据到达；此后收敛。
+    await waitFor(() => expect(onEntriesChange).toHaveBeenCalledTimes(2));
+    // 父层重渲（同 props 引用）——内容签名相同不再回传。
+    rerender(
+      <ScheduledMessagesBar sessionId="sess-1" onEntriesChange={onEntriesChange} />,
+    );
+    // 再等一拍仍为 2（引用抖动不触发第三回传）。
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onEntriesChange).toHaveBeenCalledTimes(2);
+  });
+});

@@ -241,6 +241,19 @@ function emitEvent(child: FakeChild, evt: Record<string, unknown>): void {
   child.stdout.push(JSON.stringify(evt) + '\n');
 }
 
+/** 2026-09-12 FR-2 配合：发一条带正文的 assistant message_end（使轮「有收尾全文」，
+ * 静默中断检测按 success 收敛；缺帧=合成 error，与本文件既有 success 断言冲突）。 */
+function emitFinalTextEnd(child: FakeChild, text: string): void {
+  emitEvent(child, {
+    type: 'message_end',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+      stopReason: 'stop',
+    },
+  });
+}
+
 /** 给 stdout 推一个原始行（不 JSON 化——坏行用例需控制字节面）。 */
 function emitRaw(child: FakeChild, line: string): void {
   child.stdout.push(line + '\n');
@@ -749,6 +762,7 @@ describe('get_state 握手 → session_started 合成', () => {
     await tick();
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
 
@@ -801,6 +815,7 @@ describe('turn 生命周期', () => {
         usage: { input: 11, output: 7, cacheRead: 3, cacheWrite: 2 },
       },
     });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
 
@@ -985,6 +1000,7 @@ describe('turn 生命周期', () => {
     expect(readStdinJson(child).filter((l) => l.type === 'prompt')).toHaveLength(1);
     expect(results).toHaveLength(0);
 
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(1);
@@ -998,6 +1014,7 @@ describe('turn 生命周期', () => {
 
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(2);
@@ -1054,6 +1071,7 @@ describe('turn 生命周期', () => {
     // 收尾：应答第二条 prompt 并收敛（避免挂 30s 请求超时拖慢测试）
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
 
@@ -1092,6 +1110,7 @@ describe('turn 生命周期', () => {
 
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
 
@@ -1106,6 +1125,7 @@ describe('turn 生命周期', () => {
 
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
 
@@ -1248,6 +1268,7 @@ describe('turn 生命周期', () => {
       type: 'turn_end',
       message: { role: 'assistant', content: [], stopReason: 'stop' },
     });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
 
@@ -1373,6 +1394,7 @@ describe('isStreaming 维护、steer 主通道与 interrupt', () => {
     await expect(interruptP).resolves.toBe(false);
 
     // 收尾：释放 streaming 镜像让 consume 自然退出
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     closeQueue();
@@ -1409,6 +1431,7 @@ describe('isStreaming 维护、steer 主通道与 interrupt', () => {
     expect(readStdinJson(child).filter((l) => l.type === 'prompt')).toHaveLength(0);
 
     respond(child, 'steer');
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(1);
@@ -1459,6 +1482,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
 
     respond(child, 'steer');
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(1);
@@ -1494,6 +1518,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
     expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
 
     respond(child, 'follow_up');
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(1);
@@ -1532,6 +1557,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
     expect(prompt!.streamingBehavior).toBeUndefined();
 
     respond(child, 'prompt');
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(1);
@@ -1576,6 +1602,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
     expect(readStdinJson(child).filter((l) => l.type === 'steer')).toHaveLength(2);
 
     respond(child, 'steer');
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(2);
@@ -1620,6 +1647,7 @@ describe('agent_settled 收敛细化（response→agent_start 跨 chunk 竞态�
     expect(handle.isStreaming).toBe(true);
 
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
     expect(results).toHaveLength(1);
@@ -1650,8 +1678,11 @@ describe('agent_settled 收敛细化（response→agent_start 跨 chunk 竞态�
     });
     await tick();
 
+    // 2026-09-12 FR-2.3 语义更新：extension command 轮无 agent run/零活动 →
+    // 静默中断合成 error（误报容忍面，D-003：链上限兜底，nudge 后自答完成）。
+    // 本用例本职是「复核 false 直接收敛不挂死」，subtype 断言随新语义更新。
     expect(results).toHaveLength(1);
-    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    expect(results[0]).toMatchObject({ subtype: 'error_during_execution', is_error: true });
 
     closeQueue();
     await consumeP;
@@ -1695,8 +1726,10 @@ describe('agent_settled 收敛细化（response→agent_start 跨 chunk 竞态�
     );
     await tick(60);
 
+    // 2026-09-12 FR-2.3 语义更新：本竞态轮零活动 → 静默中断合成 error。
+    // 本用例本职是「事件计数守卫不死锁」（回归时以 vitest 超时暴露）。
     expect(results).toHaveLength(1);
-    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    expect(results[0]).toMatchObject({ subtype: 'error_during_execution', is_error: true });
 
     closeQueue();
     await consumeP;
@@ -2770,6 +2803,7 @@ describe('退出收敛与容错', () => {
     // 收尾：应答该 prompt 并收敛（避免挂 30s 请求超时拖慢测试）
     respond(child, 'prompt');
     emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, '收尾正文');
     emitEvent(child, { type: 'agent_settled' });
     await tick();
 

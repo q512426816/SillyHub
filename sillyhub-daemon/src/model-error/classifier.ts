@@ -1,9 +1,14 @@
 /**
- * model-error/classifier.ts —— claude 模型调用错误归类器（task-02 / FR-01）。
+ * model-error/classifier.ts —— 模型调用错误归类器（task-02 / FR-01）。
  *
- * 职责（design §5 Phase 2 / §7.2）：把 claude turn 的失败信号
+ * 职责（design §5 Phase 2 / §7.2）：把 turn 的失败信号
  *（is_error + resultText + api_retry.error + 最近 assistant stdout + stderr）
  * 按关键词/正则归类成结构化 {@link ModelError}，覆盖 8 类错误。
+ *
+ * 2026-09-12-chat-turn-auto-recovery：规则体 provider 无关化（原 D-001「仅
+ * claude」废止——pi/codex/cursor 走同一套关键词规则；实证 pi 断流/429 全落
+ * unknown 无恢复面）+ 断流关键词（Stream ended without finish_reason 主实证）
+ * + resetAt 解析（GLM 中文格式，北京时间 +08:00）。
  *
  * 数据来源对齐真实数据流（design §1 / claude-sdk-driver.ts / stream-json.ts）：
  *   - isError        ← stream-json.parseResult 的 msg.is_error（=lastResultInfo.isError）/ SDK result.is_error
@@ -31,8 +36,8 @@ import type { ModelError, ModelErrorType } from './types.js';
  */
 export interface ClassifyModelInput {
   /**
-   * agent 类型，决定走哪套归类规则（D-001：本次仅 claude；其他 agent 预留扩展点，
-   * 一律兜底 unknown，等各自实现）。task-03 接线时传入 session 的 provider 标识。
+   * agent 类型（session provider 标识）。仅日志归因用——2026-09-12 起规则体
+   * provider 无关（classifyBlob），全 agent 同一套关键词规则。
    */
   agent: 'claude' | string;
   /** turn result 是否失败（stream-json lastResultInfo.isError / SDK result.is_error）。 */
@@ -145,10 +150,15 @@ function extractCode(blob: string): string | null {
  *   4. timeout/timed out/ETIMEDOUT → timeout
  *   5. model not found/模型不存在 → model_not_found
  *   6. ECONNREFUSED/ENOTFOUND/网络 → network
- *   7. 5xx/internal server error → provider_error
+ *   7. 5xx/internal server error/断流关键词 → provider_error
  *   8. 兜底 → unknown
+ *
+ * 2026-09-12：classifyClaude 更名 classifyBlob（规则体 provider 无关化）；
+ * 第 7 条补断流关键词——pi 上游「Stream ended without finish_reason」主实证
+ * （2026-09-11 会话 d4c29d95 ×8）原先八类均不命中落 unknown/retryable=false，
+ * 自动恢复面拿不到可重试信号。
  */
-function classifyClaude(blob: string): ModelErrorType {
+function classifyBlob(blob: string): ModelErrorType {
   const has429 = /\b429\b/.test(blob);
 
   // 1. quota_exceeded：429 + 额度/配额/上限语义。
@@ -199,8 +209,11 @@ function classifyClaude(blob: string): ModelErrorType {
     return 'network';
   }
 
-  // 7. provider_error：5xx / internal server error / bad gateway / overloaded。
-  if (/\b5\d{2}\b|internal[\s_-]?server[\s_-]?error|server[\s_-]?error|internal[\s_-]?error|bad[\s_-]?gateway|service[\s_-]?unavail|upstream|overloaded|供应商[\s\S]{0,5}(异常|错误)/i.test(blob)) {
+  // 7. provider_error：5xx / internal server error / bad gateway / overloaded /
+  //    断流（2026-09-12-chat-turn-auto-recovery D-011：pi 上游「Stream ended
+  //    without finish_reason」主实证原先八类均不命中落 unknown；pi driver 静默
+  //    中断合成文本 [silent stream truncation] 亦经此处，必须确定性命中）。
+  if (/\b5\d{2}\b|internal[\s_-]?server[\s_-]?error|server[\s_-]?error|internal[\s_-]?error|bad[\s_-]?gateway|service[\s_-]?unavail|upstream|overloaded|供应商[\s\S]{0,5}(异常|错误)|stream[\s_-]?(ended|truncat)|without[\s_-]?finish[\s_-]?reason|silent[\s_-]?stream|输出流中断|流中断/i.test(blob)) {
     return 'provider_error';
   }
 
@@ -209,16 +222,37 @@ function classifyClaude(blob: string): ModelErrorType {
 }
 
 /**
+ * 从 quota 错误文本解析额度重置时间（ISO-8601，含 +08:00 偏移；失败 → null）。
+ *
+ * 2026-09-12-chat-turn-auto-recovery D-002@v2：只解析 GLM 中文实证格式
+ * 「…将于 2026-09-12 10:03:59 重置」（1308 错误体，北京时间，固定标注
+ * +08:00）；英文变体（resets at / will reset）无时区信息不做猜测，返回
+ * null（后端退化为不排期，仅提示）。仅 quota_exceeded 命中时调用。
+ */
+function extractResetAt(blob: string): string | null {
+  // 「将在/将于 … 重置」双介词兼容——实证 1308 文案为「将在」（2026-09-11
+  // 会话 d4c29d95），「将于」留作同构变体兜底。
+  const m = /将[在于]\s*(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*重置/.exec(
+    blob,
+  );
+  if (!m) return null;
+  const [, y, mo, d, h, mi, se] = m;
+  // 显式字符串拼接（不走 new Date 解析——ES 实现相关时区处理不可移植）。
+  return `${y}-${mo}-${d}T${h}:${mi}:${se}+08:00`;
+}
+
+/**
  * 把模型调用失败信号归类为结构化 {@link ModelError}。
  *
- * @param input claude turn 的失败信号（is_error + 各文本来源）
+ * @param input turn 的失败信号（is_error + 各文本来源；agent 仅日志归因）
  * @returns ModelError（失败时）或 null（非模型错误：is_error=false，成功路径不产生 error）
  *
  * 判定顺序：
  *   1. isError=false → null（非模型错误，成功路径不产生 error，D-008；蓝图 acceptance）。
  *      成功 turn 即便残留 api_retry 文本也不算失败（曾瞬时限流但已恢复）。
- *   2. agent 非 claude → 兜底 unknown（D-001 扩展点，等各自 agent 实现）。
- *   3. claude 按规则归类（含 unknown 兜底，R-01）。
+ *   2. 按规则体 classifyBlob 归类（2026-09-12 起 provider 无关，全 agent 同
+ *      规则；含 unknown 兜底，R-01）。
+ *   3. quota_exceeded → 附加 resetAt（extractResetAt，解析失败 null）。
  */
 export function classifyModelError(input: ClassifyModelInput): ModelError | null {
   // 1. 非模型错误：turn 未失败。成功路径一律不产生 ModelError（D-008）。
@@ -230,21 +264,8 @@ export function classifyModelError(input: ClassifyModelInput): ModelError | null
   const raw = blob.length > 0 ? blob : null;
   const code = extractCode(blob);
 
-  // 2. 非 claude agent：预留扩展点，统一兜底 unknown（D-001）。
-  if (input.agent !== 'claude') {
-    const info = ERROR_INFO.unknown;
-    return {
-      type: 'unknown',
-      code,
-      message: info.message,
-      retryable: info.retryable,
-      hint: info.hint,
-      raw,
-    };
-  }
-
-  // 3. claude 归类。
-  const type = classifyClaude(blob);
+  // 2. 归类（provider 无关：pi/codex/cursor 与 claude 同一规则体）。
+  const type = classifyBlob(blob);
   const info = ERROR_INFO[type];
   return {
     type,
@@ -253,5 +274,6 @@ export function classifyModelError(input: ClassifyModelInput): ModelError | null
     retryable: info.retryable,
     hint: info.hint,
     raw,
+    resetAt: type === 'quota_exceeded' ? extractResetAt(blob) : null,
   };
 }

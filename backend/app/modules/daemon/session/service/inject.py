@@ -294,6 +294,11 @@ async def inject_session_as_service(
     # 而影子会话属主恒为群主（§9.2）——按属主校验会误 404。群路径传发送者
     # id；缺省 None = 既有语义（按会话属主 session.user_id）。
     attachment_owner_user_id: uuid.UUID | None = None,
+    # 2026-09-12-chat-turn-auto-recovery（FR-3.7）：自动续跑轮源标记——定时
+    # 派发链（scheduled_send 解析 origin 传入）；新 run 落 metadata_.
+    # auto_resume_of，忙轮转排队时 origin 复合值随 _handle_busy_turn 落
+    # 排队行。None = 普通注入（既有调用点零改动）。
+    auto_resume_of: uuid.UUID | None = None,
 ) -> SessionDispatchResult:
     """Append a turn run to an active session as the **platform service** (D-006@v2).
 
@@ -360,6 +365,7 @@ async def inject_session_as_service(
         # 不携带）。归属基准覆盖见 _inject_into_session 同名参数注释。
         attachment_ids=list(attachment_ids) if attachment_ids else None,
         attachment_owner_user_id=attachment_owner_user_id,
+        auto_resume_of=auto_resume_of,
     )
 
 
@@ -482,6 +488,7 @@ async def _inject_into_session(
                 run_sender_user_id=run_sender_user_id,
                 queue_sender_user_id=queue_sender_user_id,
                 turn_metadata=turn_metadata,
+                auto_resume_of=auto_resume_of,
             )
 
         # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──

@@ -23,6 +23,8 @@ export interface SessionQueueEntry {
    * 不依赖该字段本地重排。
    */
   position?: number;
+  /** 2026-09-12-chat-turn-auto-recovery：auto_resume:<源 run uuid> = 系统自动恢复入队；null/缺省 = 用户排队（旧后端兼容）。 */
+  origin?: string | null;
   created_at: string;
 }
 

@@ -25,6 +25,7 @@ from app.modules.agent.model import (
 )
 from app.modules.daemon.schema import PageContextCreateBlock
 from app.modules.daemon.session.service.auto_resume import (
+    make_auto_resume_origin,
     parse_auto_resume_origin,
 )
 
@@ -64,6 +65,10 @@ async def _handle_busy_turn(
     run_sender_user_id: uuid.UUID | None = None,
     queue_sender_user_id: uuid.UUID | None = None,
     turn_metadata: dict | None = None,
+    # 2026-09-12-chat-turn-auto-recovery（FR-3.7 / R-08）：自动续跑源标记——
+    # 忙轮转排队时落排队行 origin='auto_resume:<源 run uuid>'（幂等查重/G10/
+    # 徽标数据源与直接入队条目同构）；None = 普通排队（既有调用零改动）。
+    auto_resume_of: uuid.UUID | None = None,
 ) -> SessionDispatchResult:
     """忙轮三分支收口（task-08 自 _inject_into_session:3499-3650 拆出，零改写）。
 
@@ -200,6 +205,9 @@ async def _handle_busy_turn(
         ),
         agent_profile_id=agent_profile_id,
         llm_provider_id=llm_provider_id,
+        # 2026-09-12：自动续跑转排队保留 origin（R-08——忙轮 INSERT 此前丢
+        # origin，G10/幂等/徽标全断链）。
+        origin=(make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None),
         status="pending",
         # task-05 缺陷 A 修正：or 兜底在 max==0 时回卷（0 or -1 = -1），
         # 连续入队全 0——显式 None 判（对齐 MAX+1 语义，D-002）。

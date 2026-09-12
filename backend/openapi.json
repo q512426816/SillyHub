@@ -49192,6 +49192,17 @@
               }
             ],
             "title": "Raw"
+          },
+          "reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset At"
           }
         },
         "type": "object",
@@ -61354,6 +61365,17 @@
             ],
             "title": "Error Message"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -62410,6 +62432,17 @@
           "position": {
             "type": "integer",
             "title": "Position"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "created_at": {
             "type": "string",

@@ -41,17 +41,21 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.core.db import get_session_factory
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentSession, AgentSessionScheduledMessage
+from app.modules.agent.model import AgentRun, AgentSession, AgentSessionScheduledMessage
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.session.service import (
     DaemonSessionQueueFull,
     SessionService,
+)
+from app.modules.daemon.session.service.auto_resume import (
+    parse_auto_resume_origin,
 )
 
 log = get_logger(__name__)
@@ -131,6 +135,56 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) -> 
     )
     agent_profile_id = entry.agent_profile_id
     llm_provider_id = entry.llm_provider_id
+    # 2026-09-12-chat-turn-auto-recovery（FR-3.7 / design §5.4）：自动续跑排期
+    # 条目（origin=auto_resume:<源 run id>）派发前 G10 超越守卫 + 打标透传。
+    auto_resume_of = parse_auto_resume_origin(getattr(entry, "origin", None))
+    if auto_resume_of is not None:
+        src_run = await db.get(AgentRun, auto_resume_of)
+        if src_run is not None:
+            newer_run_id = (
+                await db.execute(
+                    select(AgentRun.id)
+                    .where(
+                        AgentRun.agent_session_id == agent_session_id,
+                        AgentRun.id != auto_resume_of,
+                        or_(
+                            col(AgentRun.created_at) > src_run.created_at,
+                            and_(
+                                col(AgentRun.created_at) == src_run.created_at,
+                                col(AgentRun.id) > auto_resume_of,
+                            ),
+                        ),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if newer_run_id is not None:
+                # 排期后被用户手动重发/新发言超越 → 条目置 cancelled 跳过
+                # （定时面有状态留档，区别于排队面删行语义），重放防任务两遍。
+                await db.rollback()
+                await db.execute(
+                    update(AgentSessionScheduledMessage)
+                    .where(
+                        AgentSessionScheduledMessage.id == entry_id,
+                        AgentSessionScheduledMessage.status == "pending",
+                    )
+                    .values(
+                        status="cancelled",
+                        error_code="superseded",
+                        error_message="自动续跑排期被更新的发言超越，已跳过派发。",
+                        cancelled_at=datetime.now(UTC),
+                    )
+                )
+                await db.commit()
+                _OFFLINE_RETRY_ATTEMPTS.pop(entry_id, None)
+                log.info(
+                    "auto_resume_scheduled_dispatch_skipped_superseded",
+                    message_id=str(entry_id),
+                    session_id=str(agent_session_id),
+                    source_run_id=str(auto_resume_of),
+                    newer_run_id=str(newer_run_id),
+                )
+                return True
     try:
         svc = SessionService(db)
         await svc.inject_session_as_service(
@@ -141,6 +195,7 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) -> 
             attachment_ids=attachment_ids,
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            auto_resume_of=auto_resume_of,
         )
     except DaemonSessionQueueFull as exc:
         # D-003@v1：队列满员 → failed(queue_full)，不自动延后重试（重试风暴

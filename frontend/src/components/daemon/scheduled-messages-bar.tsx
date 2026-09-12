@@ -22,7 +22,7 @@
  * 语义阶与 MessageQueueBar 同款（border-input bg-muted/50 / border-destructive）。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Clock, X } from "lucide-react";
 import { Button, Modal, Tag, Tooltip } from "antd";
@@ -101,6 +101,13 @@ export interface ScheduledMessagesBarProps {
   sessionId: string;
   /** 刷新信号（父层创建定时消息成功后递增；SessionUsageBar refreshSignal 同款模式）。 */
   refreshSignal?: number;
+  /**
+   * 2026-09-12-chat-turn-auto-recovery / FR-5.0：定时列表数据上提回调——bar
+   * 内查询每次收敛（轮询/失效/取消）后把全量条目回传父层（会话页/弹窗双挂载
+   * 点），供失败卡 autoRecoverHint 双信号推导。R4 不变式（panel 零 react-query）
+   * 不破——数据仍在局部 client，仅经回调外送。
+   */
+  onEntriesChange?: (entries: ScheduledMessageRead[]) => void;
 }
 
 /**
@@ -109,14 +116,36 @@ export interface ScheduledMessagesBarProps {
 function ScheduledMessagesList({
   sessionId,
   refreshSignal,
+  onEntriesChange,
 }: {
   sessionId: string;
   refreshSignal: number;
+  onEntriesChange?: (entries: ScheduledMessageRead[]) => void;
 }) {
   // useQueryClient 取到的是外层局部 client（QueryClientProvider 注入，R4 定案）。
   const qc = useQueryClient();
   const notify = useNotify();
   const { scheduled } = useScheduledMessages(sessionId);
+
+  // 2026-09-12：列表内容变化才回传父层（FR-5.0 数据上提）。内容签名守卫
+  // （id/status/origin）——防任何来源的引用抖动（data 未就绪新 []、结构共享
+  // 重建等）触发 setState→渲染循环（attach 模式假定时器用例实测翻车根因）。
+  const lastNotifiedRef = useRef<ScheduledMessageRead[] | null>(null);
+  useEffect(() => {
+    const prev = lastNotifiedRef.current;
+    const same =
+      prev !== null &&
+      prev.length === scheduled.length &&
+      prev.every(
+        (m, i) =>
+          m.id === scheduled[i]?.id &&
+          m.status === scheduled[i]?.status &&
+          m.origin === scheduled[i]?.origin,
+      );
+    if (same) return;
+    lastNotifiedRef.current = scheduled;
+    onEntriesChange?.(scheduled);
+  }, [scheduled, onEntriesChange]);
 
   // 父层 refreshSignal 递增（创建成功）→ 失效局部 client 缓存立即重拉（新条目
   // 即时可见，不等 30s 轮询）。0 为初始值不触发。
@@ -187,6 +216,15 @@ function ScheduledMessagesList({
                 <span className="max-w-[240px] truncate" title={msg.prompt}>
                   {summarizeScheduledPrompt(msg.prompt)}
                 </span>
+                {/* 2026-09-12：系统自动排期徽标（origin=auto_resume:*；与状态
+                    tag 并列，注明可取消=取消自动继续）。 */}
+                {(msg.origin ?? "").startsWith("auto_resume:") && (
+                  <Tooltip title="系统自动排期（上游额度重置后自动续跑），可取消">
+                    <Tag color="processing" className="!m-0 shrink-0 !text-[11px]">
+                      自动续跑
+                    </Tag>
+                  </Tooltip>
+                )}
                 {/* 四态 tag：failed 悬停显失败原因（error_code/error_message 审计留档）。 */}
                 {msg.status === "failed" ? (
                   <Tooltip
@@ -235,6 +273,7 @@ function ScheduledMessagesList({
 export function ScheduledMessagesBar({
   sessionId,
   refreshSignal = 0,
+  onEntriesChange,
 }: ScheduledMessagesBarProps) {
   // 局部 client：retry 关闭（辅助信息条，失败静默等下轮轮询；也避免弹窗测试
   // 环境无网络时的重试定时器噪声），聚焦刷新关（30s 轮询已够）。
@@ -254,7 +293,11 @@ export function ScheduledMessagesBar({
 
   return (
     <QueryClientProvider client={client}>
-      <ScheduledMessagesList sessionId={sessionId} refreshSignal={refreshSignal} />
+      <ScheduledMessagesList
+        sessionId={sessionId}
+        refreshSignal={refreshSignal}
+        onEntriesChange={onEntriesChange}
+      />
     </QueryClientProvider>
   );
 }

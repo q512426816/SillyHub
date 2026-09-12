@@ -3979,8 +3979,15 @@ export class Daemon {
     // 注入 payload.error，供 hubClient.notifyRunResult → backend error_detail。
     // 守卫用 truthy（ModelError 恒为对象）：null/undefined（成功 / 非模型错误）不 set，
     // backend error_detail 保留 NULL（D-008 成功路径不回归）。
+    // 2026-09-12-chat-turn-auto-recovery：wire 键 snake_case 化——TS 侧 ModelError
+    // 的 resetAt 在此处解构剔除、以 reset_at 注入（body 其余键全为单词无 case 差），
+    // backend ModelErrorDTO.reset_at 直收；outbox 重放路径同享本 payload 形态。
     if (resultMeta.modelError) {
-      payload.error = resultMeta.modelError;
+      const { resetAt, ...errorRest } = resultMeta.modelError;
+      payload.error = {
+        ...errorRest,
+        ...(resetAt !== null && resetAt !== undefined ? { reset_at: resetAt } : {}),
+      } as typeof payload.error;
     }
     if (!state.claimToken) {
       // task-07（A5 claim_token 空窗）：终态不再丢弃——kind=run_result 入箱

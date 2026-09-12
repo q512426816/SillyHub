@@ -46,6 +46,9 @@ class SessionQueueEntry(BaseModel):
     status: str
     error_msg: str | None = None
     position: int
+    # 2026-09-12-chat-turn-auto-recovery FR-5.0：'auto_resume:<rid>' = 系统
+    # 自动恢复入队（列 2026-09-10 已建，DTO 此前未透出）；None = 用户排队。
+    origin: str | None = None
     created_at: datetime
 
 
@@ -66,6 +69,7 @@ def _queue_entry_dto(entry) -> SessionQueueEntry:
         status=entry.status,
         error_msg=entry.error_msg,
         position=entry.position,
+        origin=entry.origin,
         created_at=entry.created_at,
     )
 

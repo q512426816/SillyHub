@@ -556,6 +556,7 @@ class SessionService(BackgroundTaskMixin):
         llm_provider_id: str | None = None,
         attachment_ids: list[uuid.UUID] | None = None,
         attachment_owner_user_id: uuid.UUID | None = None,
+        auto_resume_of: uuid.UUID | None = None,
     ) -> SessionDispatchResult:
         return await _inject.inject_session_as_service(
             self,
@@ -569,6 +570,7 @@ class SessionService(BackgroundTaskMixin):
             llm_provider_id=llm_provider_id,
             attachment_ids=attachment_ids,
             attachment_owner_user_id=attachment_owner_user_id,
+            auto_resume_of=auto_resume_of,
         )
 
     async def _ensure_session_workspace_writable(

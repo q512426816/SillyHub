@@ -6,7 +6,7 @@
  * §5 Wave 3，原样搬移；establishStream 闭包状态原样保留 R-03）。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dayjs, { type Dayjs } from "dayjs";
 import {
   Ban, MessageSquareText, PauseCircle, Plus, RefreshCw, Square, TriangleAlert, Users,
@@ -16,6 +16,7 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import { applyLogToSegments, finishTurn } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline } from "@/components/daemon/turn-timeline";
+import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
@@ -42,7 +43,7 @@ import { PlanApprovalCard } from "@/components/daemon/plan-approval-card";
 import {
   TaskExecutionPanel, type TaskExecutionPanelHandle,
 } from "@/components/daemon/task-execution-panel";
-import { type PlanSummary } from "@/lib/daemon";
+import { ScheduledMessageRead, type PlanSummary } from "@/lib/daemon";
 import {
   cancelTeamMission, createScheduledMessage, createSession, endSession, fetchPendingDialogs, fetchSessionDialogHistory,
   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
@@ -196,6 +197,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   const [schedAt, setSchedAt] = useState<Dayjs | null>(null);
   const [schedSubmitting, setSchedSubmitting] = useState(false);
   const [schedRefresh, setSchedRefresh] = useState(0);
+  // 2026-09-12-chat-turn-auto-recovery / FR-5.0：定时列表经 bar 回调上提。
+  const [scheduledEntries, setScheduledEntries] = useState<
+    ScheduledMessageRead[]
+  >([]);
   const [schedHints, setSchedHints] = useState<string[]>([]);
   // 会话切换（idle 首句创建成功 / attach 换目标）：关弹窗 + 清系统提示行。
   useEffect(() => {
@@ -314,6 +319,31 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     sessionId: view.sessionId ?? "",
     sessionActive: view.status === "active",
   });
+
+  // 2026-09-12-chat-turn-auto-recovery / FR-5.1：会话 pending 自动恢复条目
+  // （排队 ∪ 定时，origin=auto_resume:*）——TurnTimeline 失败卡双信号推导。
+  const autoResumeEntries = useMemo<AutoResumeEntry[]>(() => {
+    const queued = queue
+      .filter(
+        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
+      )
+      .map((e) => ({
+        origin: e.origin as string,
+        kind: "queued" as const,
+        dispatchAt: null,
+      }));
+    const scheduled = scheduledEntries
+      .filter(
+        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
+      )
+      .map((e) => ({
+        origin: e.origin as string,
+        kind: "scheduled" as const,
+        dispatchAt: e.dispatch_at,
+      }));
+    return [...queued, ...scheduled];
+  }, [queue, scheduledEntries]);
+
   useEffect(() => {
     queueRefreshRef.current = refreshQueue;
   }, [refreshQueue]);
@@ -1709,6 +1739,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           （无 whoLine / 历史 usage / 孤儿 turn 派生链——ISP 现状，强开会多打
           listSessionRuns 请求并重排顺序）。 */}
       <TurnTimeline
+        autoResumeEntries={autoResumeEntries}
         turns={view.turns}
         viewMode={viewMode}
         errorMsg={view.errorMsg}
@@ -1796,6 +1827,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
       <ScheduledMessagesBar
         sessionId={view.sessionId ?? ""}
         refreshSignal={schedRefresh}
+        onEntriesChange={setScheduledEntries}
       />
 
       {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01

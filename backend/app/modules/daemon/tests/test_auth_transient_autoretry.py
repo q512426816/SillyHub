@@ -222,8 +222,8 @@ async def test_auth_transient_failure_enqueues_retry(
 
 @pytest.mark.asyncio
 async def test_tool_activity_skips_enqueue(db_session: AsyncSession, mocked_redis) -> None:
-    """401 发生在 turn 中途（已有 tool_call 日志）→ 不自动重投——重放会再执行
-    一遍已落地的工具副作用；交回用户决定（错误卡可见）。"""
+    """401 发生在 turn 中途（已有 tool_call 日志）→ 不重放原文（副作用已落地）
+    ——2026-09-12 FR-3.4 语义更新：改入续跑 nudge（不重放原任务，链上限内）。"""
     lease_id, run_id, token, session_id, _uid = await _seed_session_run_with_input(db_session)
     db_session.add(
         AgentRunLog(
@@ -249,10 +249,12 @@ async def test_tool_activity_skips_enqueue(db_session: AsyncSession, mocked_redi
         )
     assert run.status == "failed"
 
-    # 无排队条目追加（不重投）。
-    assert await _queued_entries(db_session, session_id) == []
-    db_session.expire_all()
-    assert await _queued_entries(db_session, session_id) == []
+    # FR-3.4：入队的是续跑 nudge（非原文重放），带 origin 标记。
+    entries = await _queued_entries(db_session, session_id)
+    assert len(entries) == 1
+    assert entries[0].prompt.startswith("[系统续跑]")
+    assert entries[0].origin == f"auto_resume:{run_id}"
+    assert entries[0].prompt != "改了什么呀？"
 
 
 # ── 防循环：上一条同会话同 prompt run 已鉴权失败 → 不再追加 ──────────────────
@@ -322,7 +324,8 @@ async def test_loop_guard_skips_second_enqueue(db_session: AsyncSession, mocked_
 
 @pytest.mark.asyncio
 async def test_non_auth_error_not_enqueued(db_session: AsyncSession, mocked_redis) -> None:
-    """429 等普通模型错误不误伤——只有 CLI 鉴权签名才自动重投。"""
+    """429 rate_limited 干净轮 → 2026-09-12 FR-3.3 语义更新：瞬时类自动重放
+    原文（带 origin）；旧断言（仅 auth 才重投）随泛化废止。"""
     lease_id, run_id, token, session_id, _ = await _seed_session_run_with_input(db_session)
     with patch(
         "app.modules.daemon.session.service.dispatch_next_queued_message",
@@ -344,7 +347,10 @@ async def test_non_auth_error_not_enqueued(db_session: AsyncSession, mocked_redi
                 raw="API Error: Request rejected (429) · rate limit",
             ),
         )
-    assert await _queued_entries(db_session, session_id) == []
+    entries = await _queued_entries(db_session, session_id)
+    assert len(entries) == 1
+    assert entries[0].prompt == "改了什么呀？"
+    assert entries[0].origin == f"auto_resume:{run_id}"
 
 
 @pytest.mark.asyncio

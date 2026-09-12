@@ -419,6 +419,9 @@ class ScheduledMessageRead(BaseModel):
     llm_provider_id: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+    # 2026-09-12-chat-turn-auto-recovery FR-3.7/5.0：'auto_resume:<rid>' = 系统
+    # 自动续跑排期（前端徽标 + 双信号推导数据源）；None = 用户预约。
+    origin: str | None = None
     created_at: datetime
     dispatched_at: datetime | None = None
     cancelled_at: datetime | None = None

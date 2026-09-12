@@ -24,7 +24,7 @@ export type ModelErrorType =
  */
 export interface ModelError {
   type: ModelErrorType;
-  /** 原始错误码（如 "1310" / "429" / null） */
+  /** 原始错误码（如 "1308" / "429" / null） */
   code: string | null;
   /** 可读原因（中文） */
   message: string;
@@ -34,4 +34,11 @@ export interface ModelError {
   hint: string | null;
   /** 原始错误文本（查看详情用，可空） */
   raw: string | null;
+  /**
+   * 额度重置时间（ISO-8601 含时区偏移；null=未解析到）。
+   * 2026-09-12-chat-turn-auto-recovery：仅 quota_exceeded 时从错误文本解析
+   * GLM 中文「将于 YYYY-MM-DD HH:MM:SS 重置」（北京时间固定 +08:00 标注）；
+   * 英文变体无时区信息不猜测 → null。wire 键为 reset_at（daemon.ts 序列化跳映射）。
+   */
+  resetAt: string | null;
 }

@@ -212,6 +212,13 @@ export interface RunErrorItemProps {
    */
   fallbackHint?: string;
   /**
+   * 2026-09-12-chat-turn-auto-recovery / FR-5.1：自动恢复状态提示——由父级
+   * （turn-timeline）按「error_detail 类型 + 会话存在 origin=auto_resume 的
+   * pending 恢复条目」双信号推导（D-009@v2：无恢复条目不显示，防误导）。
+   * 链序 item.hint > fallbackHint > autoRecoverHint > defaultHint。
+   */
+  autoRecoverHint?: string;
+  /**
    * 重新发送回调；传入即渲染按钮。ql-20260904-010：不再按 item.retryable 门控
    * （原 D-006 的 quota/auth 隐藏逻辑废除——用户决策所有失败卡都提供重试入口，
    * 重试守卫由父级提交链路承担）；turn 无 prompt 时父级不传（无可重放内容）。
@@ -235,13 +242,14 @@ export interface RunErrorItemProps {
 export function RunErrorItem({
   item,
   fallbackHint,
+  autoRecoverHint,
   onResend,
   onSwitchProvider,
   onViewDetail,
 }: RunErrorItemProps) {
   const meta = errorMetaFor(item);
   const { Icon } = meta;
-  const hint = item.hint ?? fallbackHint ?? meta.defaultHint;
+  const hint = item.hint ?? fallbackHint ?? autoRecoverHint ?? meta.defaultHint;
   const hasRaw = item.raw != null && item.raw.trim().length > 0;
   const [showDetail, setShowDetail] = useState(false);
 

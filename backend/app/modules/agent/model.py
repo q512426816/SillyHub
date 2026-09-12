@@ -1308,6 +1308,15 @@ class AgentSessionScheduledMessage(BaseModel, table=True):
             server_default=text("now()"),
         ),
     )
+    # 2026-09-12-chat-turn-auto-recovery FR-4.1：自动续跑条目标记（soft-add）。
+    # 'auto_resume:<源 run uuid>' = close 钩子 quota 分支排期的自动续跑；NULL =
+    # 用户预约（存量语义不变）。与 agent_session_queued_messages.origin 同构
+    # （2026-09-10-auto-resume-interrupted-turn D-009 先例）：幂等查重 / 派发 G10
+    # 超越守卫 / 前端「自动续跑」徽标与双信号推导的数据源。
+    origin: str | None = Field(
+        default=None,
+        sa_column=Column("origin", String(255), nullable=True),
+    )
     # 审计时间线（design §数据模型）：dispatched_at / cancelled_at 分别在
     # 派发成功 / 用户取消时置位，failed 无独立时间戳（沿用 updated 语义不建列）。
     dispatched_at: datetime | None = Field(

@@ -155,6 +155,7 @@ async def _make_scheduled(
     prompt: str = "定时消息",
     dispatch_at: datetime | None = None,
     status: str = "pending",
+    origin: str | None = None,
 ) -> AgentSessionScheduledMessage:
     """落一行定时条目（默认已到期 pending，dispatch_at UTC tz-aware）。"""
     row = AgentSessionScheduledMessage(
@@ -163,6 +164,7 @@ async def _make_scheduled(
         prompt=prompt,
         dispatch_at=dispatch_at or (datetime.now(UTC) - timedelta(seconds=10)),
         status=status,
+        origin=origin,
     )
     db.add(row)
     await db.commit()
@@ -710,3 +712,110 @@ class TestSweepReviewFixesR3R4R5:
         processed = await scheduled_send_sweep_once(db_session)
         assert processed == 2
         assert seen == [earlier.id, later.id]
+
+
+# ── 2026-09-12-chat-turn-auto-recovery（task-05 / FR-3.7）────────────────────
+
+
+class TestSweepAutoResumeOrigin:
+    async def test_origin_entry_dispatches_with_metadata_tag(
+        self, db_session: AsyncSession, mocked_hub, mocked_redis
+    ) -> None:
+        """origin 条目空闲派发 → 新 run 落 metadata_.auto_resume_of（链计数贯通）。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        # 源 run（quota 失败轮）——origin 指向它。
+        src_run = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status="failed",
+            spec_strategy="interactive",
+            agent_session_id=session_id,
+            user_id=uid,
+            # 最新轮（G10 语义要求：source 之后无更新 run——quota 失败即会话
+            # 最新一轮，晚于 _make_idle_session 的首 run）。
+            created_at=datetime.now(UTC) + timedelta(seconds=1),
+            started_at=datetime.now(UTC) + timedelta(seconds=1),
+        )
+        db_session.add(src_run)
+        await db_session.commit()
+        entry = await _make_scheduled(
+            db_session,
+            session_id,
+            uid,
+            prompt="[系统续跑] 额度已重置…",
+            origin=f"auto_resume:{src_run.id}",
+        )
+
+        processed = await scheduled_send_sweep_once(db_session)
+
+        assert processed == 1
+        status, _ec, _msg, _at = await _entry_row(db_session, entry.id)
+        assert status == "dispatched"
+        runs = await _active_runs(db_session, session_id)
+        assert len(runs) == 1
+        assert runs[0].metadata_ == {"auto_resume_of": str(src_run.id)}
+
+    async def test_origin_entry_superseded_cancelled(
+        self, db_session: AsyncSession, mocked_hub, mocked_redis
+    ) -> None:
+        """G10 超越守卫：source run 之后存在更新 run（用户已手动重发）→ 条目置
+        cancelled(superseded) 跳过 inject，不建新 run。"""
+        uid, session_id, _first = await _make_idle_session(db_session)
+        src_run = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status="failed",
+            spec_strategy="interactive",
+            agent_session_id=session_id,
+            user_id=uid,
+            created_at=datetime.now(UTC) - timedelta(minutes=10),
+        )
+        newer_run = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            spec_strategy="interactive",
+            agent_session_id=session_id,
+            user_id=uid,
+            created_at=datetime.now(UTC) - timedelta(minutes=1),
+        )
+        db_session.add_all([src_run, newer_run])
+        await db_session.commit()
+        entry = await _make_scheduled(
+            db_session, session_id, uid, origin=f"auto_resume:{src_run.id}"
+        )
+
+        processed = await scheduled_send_sweep_once(db_session)
+
+        assert processed == 1
+        status, error_code, _msg, _at = await _entry_row(db_session, entry.id)
+        assert status == "cancelled"
+        assert error_code == "superseded"
+        # 未 inject：除造数 newer_run 外无新 run。
+        assert len(await _active_runs(db_session, session_id)) == 1
+
+    async def test_origin_entry_busy_turn_queue_keeps_origin(
+        self, db_session: AsyncSession, mocked_hub, mocked_redis
+    ) -> None:
+        """R-08：忙轮转排队路径保留 origin——排队行 origin 与定时条目一致
+        （G10/幂等/徽标链路贯通，修复忙轮 INSERT 丢 origin）。"""
+        uid, session_id, busy_run_id = await _make_busy_session(db_session)
+        entry = await _make_scheduled(
+            db_session,
+            session_id,
+            uid,
+            prompt="[系统续跑] 额度已重置…",
+            origin=f"auto_resume:{busy_run_id}",
+        )
+
+        processed = await scheduled_send_sweep_once(db_session)
+
+        assert processed == 1
+        status, _ec, _msg, _at = await _entry_row(db_session, entry.id)
+        assert status == "dispatched"
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 1
+        assert rows[0].origin == f"auto_resume:{busy_run_id}"

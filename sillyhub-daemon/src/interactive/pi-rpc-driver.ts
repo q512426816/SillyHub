@@ -991,6 +991,10 @@ export class PiRpcDriver implements InteractiveDriver {
     let turnFinalText: string | null = null;
     // 本轮 turn 是否已上报 result（防 agent_settled 与进程退出双触发重复）。
     let turnReported = false;
+    // 2026-09-12-chat-turn-auto-recovery FR-2.1：轮尾是否为「带正文的 assistant
+    // 消息」——message_end 边粒度收口（assistant 消息含非空 text part → true），
+    // tool_result 事件翻 false；settle 后仍 false = 静默中断（合成 error result）。
+    let lastWasFinalText = false;
     // consume 是否已最终收敛（进程异常退出 / consume 抛错）。
     let finalized = false;
     // stderr 有界累积（诊断载体：exit/握手超时消息附尾部；不作为事件上报——
@@ -1304,11 +1308,35 @@ export class PiRpcDriver implements InteractiveDriver {
             });
           }
         }
+        // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断检测标记 ①——
+        // message_end 边粒度收口。按本条消息 content parts 是否含非空 text
+        // part 得 hasText：[text,thinking] 同消息排列（pi-events 按 content 序
+        // 产事件）终值正确为 true；仅 thinking 无正文的消息收 false。tool_use
+        // part 不参与（工具调用消息本来就不该算收尾全文）。非 assistant 消息
+        // 不动标记（user/toolResult 的 message_end 不改变「轮尾是否有全文」）。
+        if (endMsg.role === 'assistant' && Array.isArray(endMsg.content)) {
+          const hasText = endMsg.content.some(
+            (part) =>
+              isRecord(part) &&
+              part.type === 'text' &&
+              typeof part.text === 'string' &&
+              part.text.trim() !== '',
+          );
+          lastWasFinalText = hasText;
+        }
       }
       const events = normalizer.normalizeRpcLine(line);
       for (const ev of events) {
         if (ev.type === 'error' && ev.content) {
           pendingTurnError = ev.content;
+        }
+        // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断检测标记 ②——
+        // 仅 tool_result 事件翻 false（工具结果之后尚无新 assistant 消息 =
+        // 轮尾非全文）。thinking / override text / partial text 一律不动标记
+        // （前两者同产自 message_end，已由上方 ① 按整消息收口；partial 是
+        // 流式中途态非终态证据）。
+        if (ev.type === 'tool_result') {
+          lastWasFinalText = false;
         }
         // ql-20260907-002（续）：message_end 的 override 全文（assistant 完整
         // 产出终态，pi-events.ts handleMessageEnd）同为轮内恢复信号——api
@@ -1397,6 +1425,9 @@ export class PiRpcDriver implements InteractiveDriver {
         turnApiCallCount = 0;
         turnReported = false;
         turnSawRun = false;
+        // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断标记每轮重置——
+        // 本轮尚未出现任何带正文的 assistant 消息。
+        lastWasFinalText = false;
 
         // inject 三模式（task-03）：非 streaming → prompt；streaming → steer
         //（默认——UserTurnInput 无模式字段，steer 语义即「streaming 中注入」；
@@ -1432,6 +1463,27 @@ export class PiRpcDriver implements InteractiveDriver {
             result: pendingTurnError,
             ...(h.sessionId ? { session_id: h.sessionId } : {}),
             // ql-20260910-003：失败轮同样真实消耗了 token，明细表不因轮失败缺行
+            ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
+          });
+        } else if (!lastWasFinalText) {
+          // 2026-09-12-chat-turn-auto-recovery FR-2.2：静默中断——无 error 事件
+          // 但轮尾无带正文的 assistant 消息（末条消息仅 thinking / 末事件为
+          // tool_result / 轮内零活动 / usage-only）。实证（2026-09-11 会话
+          // d4c29d95 22:36/23:52 两轮）：pi 照常 agent_settled、run 收敛
+          // completed，后端完全不可见。合成 error result 走 session-manager
+          // 既有 classifyModelError 归类——raw 含「silent stream truncation」
+          // 命中断流关键词 → provider_error/retryable=true，后端三分支自动
+          // 恢复得以触发（误报容忍：合法工具收尾轮多一轮 nudge 成本，紧链
+          // 上限 2 封顶，D-003）。
+          reportTurnResult({
+            subtype: 'error_during_execution',
+            is_error: true,
+            result:
+              '[silent stream truncation] 上一轮输出流中断，未产生收尾回复' +
+              (turnApiCallCount > 0
+                ? `（api_calls=${turnApiCallCount}, final_text=${turnFinalText !== null ? 'y' : 'n'}）`
+                : '（轮内无任何响应）'),
+            ...(h.sessionId ? { session_id: h.sessionId } : {}),
             ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
           });
         } else {

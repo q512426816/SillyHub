@@ -74,3 +74,8 @@ Agent / 运行时日志的渲染引擎（`agent-log-viewer.tsx` 主组件 + `age
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 2026-09-12-chat-turn-auto-recovery 增量（run-error-item / normalize）
+
+- ErrorLogItem + `reset_at?: string | null`（quota 重置时间，error_detail JSON 透传，旧数据缺键兼容）。
+- RunErrorItem 新增 `autoRecoverHint?: string`——hint 链序 item.hint > fallbackHint > autoRecoverHint > 类型表 defaultHint（父级 turn-timeline 双信号推导注入）。

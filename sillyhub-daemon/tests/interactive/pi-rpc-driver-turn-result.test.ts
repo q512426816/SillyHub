@@ -220,7 +220,14 @@ async function driveTurn(
     /** message_update text_delta 增量（partial，无 override）。 */
     deltas?: string[];
     /** message_end 帧（assistant）：texts=text part 全文数组（每 part 一条 override）。 */
-    messageEnds?: Array<{ texts: string[]; usage?: Record<string, number> }>;
+    messageEnds?: Array<{
+      texts?: string[];
+      /** thinking part（追加在 texts 之后——[text,thinking] 排列同消息）。 */
+      thinking?: string;
+      usage?: Record<string, number>;
+    }>;
+    /** message_end 后追加一轮工具往返（tool_execution_start/end——tool_result 尾部）。 */
+    toolRound?: { name?: string };
     /** turn_end stopReason；error 时须给 errorMessage。 */
     stopReason?: 'stop' | 'error';
     errorMessage?: string;
@@ -240,14 +247,37 @@ async function driveTurn(
     });
   }
   for (const me of script.messageEnds ?? []) {
+    const content: Array<Record<string, unknown>> = (me.texts ?? []).map((t) => ({
+      type: 'text',
+      text: t,
+    }));
+    if (me.thinking !== undefined) {
+      content.push({ type: 'thinking', thinking: me.thinking });
+    }
     emitEvent(child, {
       type: 'message_end',
       message: {
         role: 'assistant',
-        content: me.texts.map((t) => ({ type: 'text', text: t })),
+        content,
         stopReason: 'stop',
         ...(me.usage ? { usage: me.usage } : {}),
       },
+    });
+  }
+  if (script.toolRound) {
+    const toolName = script.toolRound.name ?? 'bash';
+    emitEvent(child, {
+      type: 'tool_execution_start',
+      toolName,
+      toolCallId: 'call_t1',
+      args: { command: 'ls' },
+    });
+    emitEvent(child, {
+      type: 'tool_execution_end',
+      toolName,
+      toolCallId: 'call_t1',
+      result: { stdout: 'ok' },
+      isError: false,
     });
   }
   emitEvent(child, {
@@ -345,7 +375,7 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01 
     await s.consumeP;
   });
 
-  it('partial 不计入：仅 text_delta（无 message_end）的成功轮不带 result 键', async () => {
+  it('partial 不计入：仅 text_delta（无 message_end）→ 静默中断合成 error（2026-09-12 FR-2.2）', async () => {
     const s = await makeSession();
     await driveTurn(s.child, s.push, {
       input: '流式不落终态',
@@ -354,9 +384,13 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01 
     });
 
     expect(s.results).toHaveLength(1);
-    expect(s.results[0]).toMatchObject({ subtype: 'success', is_error: false });
-    // 无 override 全文 → result 键完全不出现（不是空串/null）
-    expect('result' in s.results[0]!).toBe(false);
+    // 流断在 partial 阶段（无 message_end 收口）= 静默中断形态——原先报
+    // success 无 result（后端不可见），现合成 error 触发自动恢复（D-003）。
+    expect(s.results[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+    });
+    expect(String(s.results[0]!.result)).toContain('silent stream truncation');
 
     s.closeQueue();
     await s.consumeP;
@@ -383,7 +417,7 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01 
     await s.consumeP;
   });
 
-  it('跨轮重置：上轮 override 全文不泄漏进下轮（第二轮无 override 缺 result 键）', async () => {
+  it('跨轮重置：上轮 override 全文不泄漏进下轮（第二轮无 message_end → 静默中断 error）', async () => {
     const s = await makeSession();
     // 第一轮：带 override 全文
     await driveTurn(s.child, s.push, {
@@ -391,7 +425,7 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01 
       messageEnds: [{ texts: ['第一轮全文'] }],
     });
     // 第二轮：仅流式 partial（无 message_end）——若无重置，上轮 '第一轮全文'
-    // 会粘滞进本轮 result
+    // 会粘滞进本轮 result；且该形态=静默中断 → 合成 error（2026-09-12 FR-2.2）
     await driveTurn(s.child, s.push, {
       input: '第二轮',
       deltas: ['只有流式'],
@@ -399,8 +433,143 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01 
 
     expect(s.results).toHaveLength(2);
     expect(s.results[0]).toMatchObject({ subtype: 'success', result: '第一轮全文' });
-    expect(s.results[1]).toMatchObject({ subtype: 'success', is_error: false });
-    expect('result' in s.results[1]!).toBe(false);
+    expect(s.results[1]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+    });
+    // 上轮全文不掺入下轮 error result（result 是合成中断说明，非 '第一轮全文'）
+    expect(String(s.results[1]!.result)).not.toBe('第一轮全文');
+    expect(String(s.results[1]!.result)).toContain('silent stream truncation');
+
+    s.closeQueue();
+    await s.consumeP;
+  });
+});
+
+describe('PI driver 静默中断检测（2026-09-12-chat-turn-auto-recovery FR-2）', () => {
+  it('零活动轮：inject 后无任何消息事件/usage → 合成 error（注入后毫无响应=异常）', async () => {
+    const s = await makeSession();
+    await driveTurn(s.child, s.push, { input: '静默无声' });
+
+    expect(s.results).toHaveLength(1);
+    expect(s.results[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+    });
+    expect(String(s.results[0]!.result)).toContain('轮内无任何响应');
+
+    s.closeQueue();
+    await s.consumeP;
+  });
+
+  it('[text,thinking] 同消息：末条 assistant 消息含正文 → success 不误报（message_end 边粒度收口）', async () => {
+    const s = await makeSession();
+    await driveTurn(s.child, s.push, {
+      input: '带思考的完整回复',
+      messageEnds: [{ texts: ['这是收尾正文'], thinking: '思考片段' }],
+    });
+
+    expect(s.results).toHaveLength(1);
+    expect(s.results[0]).toMatchObject({
+      subtype: 'success',
+      is_error: false,
+      result: '这是收尾正文',
+    });
+
+    s.closeQueue();
+    await s.consumeP;
+  });
+
+  it('thinking-only 末消息：正文后又一轮纯思考消息收尾 → 合成 error（thinking 后无新正文）', async () => {
+    const s = await makeSession();
+    await driveTurn(s.child, s.push, {
+      input: '先答再想然后断',
+      messageEnds: [
+        { texts: ['中间产出'] },
+        { thinking: '后续思考但没有正文了' },
+      ],
+    });
+
+    expect(s.results).toHaveLength(1);
+    expect(s.results[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+    });
+    expect(String(s.results[0]!.result)).toContain('silent stream truncation');
+
+    s.closeQueue();
+    await s.consumeP;
+  });
+
+  it('tool_result 尾部：工具结果之后流断（无收尾正文）→ 合成 error', async () => {
+    const s = await makeSession();
+    await driveTurn(s.child, s.push, {
+      input: '调工具然后断流',
+      messageEnds: [{ texts: ['我先查一下'] }],
+      toolRound: { name: 'bash' },
+    });
+
+    expect(s.results).toHaveLength(1);
+    expect(s.results[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+    });
+    expect(String(s.results[0]!.result)).toContain('silent stream truncation');
+
+    s.closeQueue();
+    await s.consumeP;
+  });
+
+  it('工具后再有正文收尾：完整轮 → success（tool_result 翻 false 后 message_end 再翻 true）', async () => {
+    // 单 driveTurn 的 toolRound 在 messageEnds 之后，无法表达「工具后再答」——
+    // 用两次手动事件序列拼一轮：正文消息 → 工具往返 → 收尾正文消息。
+    const s = await makeSession();
+    s.push('查完继续答');
+    await tick();
+    respond(s.child, 'prompt');
+    emitEvent(s.child, { type: 'agent_start' });
+    emitEvent(s.child, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '先查文件' }],
+        stopReason: 'stop',
+      },
+    });
+    emitEvent(s.child, {
+      type: 'tool_execution_start',
+      toolName: 'bash',
+      toolCallId: 'call_a',
+      args: { command: 'ls' },
+    });
+    emitEvent(s.child, {
+      type: 'tool_execution_end',
+      toolName: 'bash',
+      toolCallId: 'call_a',
+      result: { stdout: 'ok' },
+      isError: false,
+    });
+    emitEvent(s.child, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '查完了，这是最终答复' }],
+        stopReason: 'stop',
+      },
+    });
+    emitEvent(s.child, {
+      type: 'turn_end',
+      message: { role: 'assistant', content: [], stopReason: 'stop' },
+    });
+    emitEvent(s.child, { type: 'agent_settled' });
+    await tick();
+
+    expect(s.results).toHaveLength(1);
+    expect(s.results[0]).toMatchObject({
+      subtype: 'success',
+      is_error: false,
+      result: '查完了，这是最终答复',
+    });
 
     s.closeQueue();
     await s.consumeP;

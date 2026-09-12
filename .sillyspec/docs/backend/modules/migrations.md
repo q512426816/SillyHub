@@ -40,3 +40,7 @@ alembic upgrade head                       # head = 20260817100000（单 head）
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 20260912110000_add_scheduled_message_origin
+
+- 2026-09-12-chat-turn-auto-recovery FR-4.1：`agent_session_scheduled_messages` + `origin TEXT NULL`（'auto_resume:<源 run uuid>' = close 钩子 quota 分支自动续跑排期；NULL = 用户预约存量语义不变）。down_revision=1d763051eb15 线性追加，downgrade 对称 drop；soft-add 无索引（与 20260910120000 queued origin 同论证）。
