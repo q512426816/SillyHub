@@ -97,3 +97,12 @@
 关联变更：全局审查暴露；债务源 56a37498b/2026-09-11-provider-adapter-registry
 文件：frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx（九键→十键两处断言补 provider_switch）
 验证：27 passed
+
+## ql-20260912-003-4506 | 2026-09-12 16:00:28 | 任务执行面板轮次历史 tokens 列拆分为输入/输出/缓存读取/缓存写入四维独立展示
+状态：已完成
+关联变更：（无）
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md（+1/-0）, .sillyspec/docs/SillyHub/modules/frontend_components.md（+2/-1）, .sillyspec/docs/SillyHub/modules/frontend_lib.md（+1/-1）, backend/app/modules/agent/provider_caps.py（+97/-0）, backend/app/modules/daemon/router/session_insights.py（+8/-0）, backend/app/modules/daemon/tests/test_session_runs_endpoint.py（+8/-1）, backend/openapi.json（+23/-1）, docs/sillyspec/docs-gate-shared-worktree-parallel-block.md（+0/-16）, frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx（+43/-0）, frontend/src/components/daemon/task-execution-panel.tsx（+54/-28）, frontend/src/lib/api-types.ts（+7/-0）, frontend/src/lib/daemon/sessions.ts（+8/-0）, frontend/src/lib/provider-caps.ts（+141/-0）, docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md（+24/-0）, scripts/migrate-spec-junction.mjs（+152/-0）
+需求：任务执行面板轮次历史 tokens 列拆分为输入/输出/缓存读取/缓存写入四维独立展示
+根因：原轮次行 tokens 是 input+output 合并单值且不含缓存两维，长会话 prompt cache 占大头时数字远小于直觉、与会话用量条（含缓存四维）口径不可比，用户误读为统计异常
+方案：后端 runs DTO SessionRunRead 扩 cache_read_tokens/cache_creation_tokens 两 nullable 字段（from_attributes 直映既有列零查询改动）+gen:types；前端 RunListRow 由单 tokens 列改为主行 grid（轮次/状态/耗时/发送者）+下方带标签 meta 行四维独立展示（对齐 TaskListRow meta 设计语言，flex-wrap 窄容器安全；null 维不渲染不编造 0，全 null 无 meta 行）；lib/daemon sessions.ts 手写接口同步两可选字段；模块文档三处同步（含修正 frontend_components 轮次惰性取数陈旧断言——实现本就挂载即拉）；审计解锁的删除/新增文件为并行会话 docs/sillyspec 归档移动与 scripts 未跟踪脚本，非本 quick 产物不随本次提交
+结果：backend test_session_runs_endpoint.py 13 passed（含 cache 两维正/负断言扩展）；frontend task-execution-panel.test.tsx 13 passed（新增四维展示/null 维省略/全 null 无 meta 行用例）；ruff 两后端文件通过；mypy session_insights.py 0 错；frontend tsc --noEmit 干净；eslint 三前端文件 0 告警；未部署（本地改动）
