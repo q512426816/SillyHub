@@ -48,7 +48,7 @@ scale: large
 | `dm_target_member_id` | str(uuid) | 触发侧 | 本轮回复的定向注入目标成员（汇总模式=汇总人；互@私聊=发起方）；**无此键=普通轮** |
 | `dm_kind` | str | 触发侧 | `consensus`（汇总意见）/ `agent_dm`（互@私聊），审计用 |
 
-**投影拦截统一谓词**（D-007 硬约束，`group_bridge`）：`shadow_direct` 轮（现有）∪ `dm_target_member_id` 非空轮 ∪ `consensus_role == "coordinator"` 轮 → 双写投影跳过 + 收口兜底行跳过（[[GROUP]] 标记也拦）。唯一例外：`consensus_role == "converge"` 收口轮正常投影（总结进群）。
+**投影拦截统一谓词**（D-007 硬约束，`group_bridge`）：`dm_target_member_id` 非空轮 ∪ `consensus_role == "coordinator"` 轮 → 双写投影跳过（[[GROUP]] 标记也拦）。唯一例外：`consensus_role == "converge"` 收口轮正常投影（总结进群）。**执行期修正（G-3）**：初稿曾把 `shadow_direct`（用户直聊轮）纳入投影拦截，系对现状误读——直聊轮标记制投影（`[[GROUP]]` 段照投）是 2026-09-02 既有功能（test_group_direct.py 三个投影测试锁定），本变更不破坏；`shadow_direct` 的既有消费（互@检测早退、@轮兜底行跳过——直聊轮不兜底）保持不变，兜底行跳过条件= `shadow_direct` ∪ consensus 拦截轮。
 
 **互@检测**：`shadow_direct` 早退保留（现有）；协作轮/汇总人首轮**不早退**——被咨询成员意见里 @ 其他成员=转私聊讨论（协作网内），汇总人首轮回复里 @ 成员=主动追问，均为 D-005 允许的私聊语义。
 
@@ -138,7 +138,7 @@ scale: large
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | backend/app/modules/agent/model.py | `AgentGroupChat` +`consensus_mode`/`consensus_timeout_seconds` 两列；新表 `AgentGroupConsensusTask`。数据流：producer=PATCH 群设置/建群 → DB 列 → consumer=send_group_message 判定与 deadline 计算 |
-| 新增 | NEW:backend/app/migrations/versions/20260910_group_consensus.py | 两列 + 新表 + 三索引 |
+| 新增 | NEW:backend/app/migrations/versions/20260910130000_group_consensus.py | 两列 + 新表 + 三索引 |
 | 修改 | backend/app/modules/agent/schema.py | Create/Update/Read/GroupMessageSendRead/GroupMemberTriggerRead 扩展。数据流：producer=后端 DTO → OpenAPI → `pnpm gen:types` → consumer=前端表单与响应处理 |
 | 修改 | backend/app/modules/daemon/group/service/helpers.py | DTO 字段（consensus_role/consensus_task_id）；协作角色段常量 + CONSENSUS_OPINION_MAX_CHARS |
 | 修改 | backend/app/modules/daemon/group/service/crud.py | 建群/改群透传 consensus_mode/consensus_timeout_seconds 两顶层列 |

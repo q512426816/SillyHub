@@ -24,7 +24,196 @@ cli: init_tools_detected [ 'claude', 'codex', 'opencode', 'openclaw', 'cursor' ]
 [2026-09-12 05:46:09.210] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=5 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
 [2026-09-12 05:46:09.301] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
 [2026-09-12 05:46:09.301] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=5 next_retry_in_ms=60000
-000
-[2026-09-12 05:46:51.214] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=6 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
-[2026-09-12 05:46:51.308] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
-[2026-09-12 05:46:51.308] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=6 next_retry_in_ms=60000
+[2026-09-12 05:47:09.337] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=6 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:47:09.462] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:47:09.462] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=6 next_retry_in_ms=60000
+[2026-09-12 05:48:09.492] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=7 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:48:09.600] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:48:09.601] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=7 next_retry_in_ms=60000
+[2026-09-12 05:49:09.698] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=8 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:49:09.804] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:49:09.804] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=8 next_retry_in_ms=60000
+[2026-09-12 05:50:09.847] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=9 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:50:09.933] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:50:09.933] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=9 next_retry_in_ms=60000
+[2026-09-12 05:51:09.970] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=10 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:51:10.056] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:51:10.056] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=10 next_retry_in_ms=60000
+[2026-09-12 05:52:10.089] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=11 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:52:10.181] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:52:10.181] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=11 next_retry_in_ms=60000
+[2026-09-12 05:53:08.736] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/latest.json error=fetch failed
+[2026-09-12 05:53:10.217] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=12 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:53:11.449] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:53:11.449] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=12 next_retry_in_ms=60000
+[2026-09-12 05:54:11.493] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=13 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:54:11.584] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:54:11.584] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=13 next_retry_in_ms=60000
+[2026-09-12 05:55:11.615] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=14 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:55:11.709] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:55:11.709] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=14 next_retry_in_ms=60000
+[2026-09-12 05:56:11.735] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=15 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:56:11.827] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:56:11.827] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=15 next_retry_in_ms=60000
+[2026-09-12 05:57:11.859] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=16 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:57:11.948] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:57:11.948] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=16 next_retry_in_ms=60000
+[2026-09-12 05:58:11.968] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=17 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:58:12.053] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:58:12.053] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=17 next_retry_in_ms=60000
+[2026-09-12 05:59:12.089] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=18 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 05:59:12.179] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 05:59:12.179] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=18 next_retry_in_ms=60000
+[2026-09-12 06:00:12.198] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=19 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:00:12.286] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:00:12.286] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=19 next_retry_in_ms=60000
+[2026-09-12 06:01:12.324] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=20 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:01:12.411] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:01:12.411] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=20 next_retry_in_ms=60000
+[2026-09-12 06:02:12.447] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=21 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:02:12.533] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:02:12.533] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=21 next_retry_in_ms=60000
+[2026-09-12 06:03:08.750] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/latest.json error=fetch failed
+[2026-09-12 06:03:12.567] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=22 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:03:13.813] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:03:13.813] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=22 next_retry_in_ms=60000
+[2026-09-12 06:04:13.834] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=23 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:04:13.932] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:04:13.932] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=23 next_retry_in_ms=60000
+[2026-09-12 06:05:13.960] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=24 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:05:14.045] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:05:14.045] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=24 next_retry_in_ms=60000
+[2026-09-12 06:06:14.070] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=25 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:06:14.158] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:06:14.158] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=25 next_retry_in_ms=60000
+[2026-09-12 06:07:14.184] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=26 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:07:14.287] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:07:14.287] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=26 next_retry_in_ms=60000
+[2026-09-12 06:08:14.314] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=27 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:08:14.411] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:08:56.208] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=28 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:08:56.310] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重试。","request_id":"[2026-09-12 06:09:14.455] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=28 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:09:14.543] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:09:56.370] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=29 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:09:56.458] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重试。","request_id":"[2026-09-12 06:10:14.576] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=29 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:10:14.672] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:10:56.489] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=30 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:10:56.583] ✗ 注册被服务器拒绝（401）：API Key 无效、已过期或已被吊销。
+[2026-09-12 06:10:56.583]   处理办法：在 SillyHub 平台重新签发 API Key，然后执行
+[2026-09-12 06:10:56.583]   sillyhub-daemon start --server <服务器地址> --api-key <新Key>
+[[2026-09-12 06:11:14.702] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=30 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:11:14.793] ✗ 注册被服务器拒绝（401）：API Key 无效、已过期或已被吊销。
+[2026-09-12 06:11:14.793]   处理办法：在 SillyHub 平台重新签发 API Key，然后执行
+[2026-09-12 06:11:14.793]   sillyhub-daemon start --server <服务器地址> --api-key <新Key>
+[2026-09-12 06:11:14.793]   daemon 将继续自动重试。
+[2026-09-12 06:11:14.793] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:11:56.613] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=31 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:11:56.714] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重试。","request_id":"[2026-09-12 06:12:14.820] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=31 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:12:14.930] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:12:50.610] [daemon.daemon_newer_available] current=56a37498-20260912054238 latest=unknown
+[2026-09-12 06:12:50.611] [daemon.daemon_bundle_download_non_ok] url=http://localhost:8000/daemon/latest/sillyhub-daemon.js status=404
+[2026-09-12 06:12:50.611] [daemon.self_update_noop] target_version=unknown
+[2026-09-12 06:12:56.744] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=32 providers=["claude","codex","opencode","openclaw","pi","cursor"[2026-09-12 06:13:08.772] [daemon.daemon_newer_available] current=56a37498-20260912054238 latest=unknown
+[2026-09-12 06:13:08.774] [daemon.daemon_bundle_download_non_ok] url=http://localhost:8000/daemon/latest/sillyhub-daemon.js status=404
+[2026-09-12 06:13:08.775] [daemon.self_update_noop] target_version=unknown
+[2026-09-12 06:13:14.946] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=32 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:13:16.108] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:13:58.007] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=33 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:13:58.109] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重试。","request_id":"[2026-09-12 06:14:16.144] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=33 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:14:16.234] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:14:58.144] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=34 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:14:58.238] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重试。","request_id":"[2026-09-12 06:15:16.265] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=34 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:15:16.364] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:15:58.276] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=35 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:15:58.378] ✗ 注册被服务器拒绝（401）：API Key 无效、已过期或已被吊销。
+[2026-09-12 06:15:58.378]   处理办法：在 SillyHub 平台重新签发 API Key，然后执行
+[2026-09-12 06:15:58.378]   sillyhub-daemon start --server <服务器地址> --api-key <新Key>
+[[2026-09-12 06:16:16.392] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=35 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:16:16.480] ✗ 注册被服务器拒绝（401）：API Key 无效、已过期或已被吊销。
+[2026-09-12 06:16:16.480]   处理办法：在 SillyHub 平台重新签发 API Key，然后执行
+[2026-09-12 06:16:16.480]   sillyhub-daemon start --server <服务器地址> --api-key <新Key>
+[2026-09-12 06:16:16.480]   daemon 将继续自动重试。
+[2026-09-12 06:16:16.480] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:16:58.420] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=36 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:16:58.508] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重试。","request_id":"[2026-09-12 06:17:16.502] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=36 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:17:16.600] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:17:58.552] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=37 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:17:58.644] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重试。","request_id":"[2026-09-12 06:18:16.622] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=37 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:18:16.727] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=HTTP 401 POST http://localhost:8000/api/daemon/register: {"code":"HTTP_401_AUTH_TOKEN_INVALID","message":"API 密钥无效、已过期或已被吊销，请检查后重[2026-09-12 06:18:58.674] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=38 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:18:58.784] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:18:58.784] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=38 next_retry_in_ms=60000
+[2026-09-12 06:19:58.817] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=39 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:19:58.992] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:19:58.992] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=39 next_retry_in_ms=60000
+[2026-09-12 06:20:59.009] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=40 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:20:59.105] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:20:59.105] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=40 next_retry_in_ms=60000
+[2026-09-12 06:21:59.146] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=41 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:21:59.242] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:21:59.242] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=41 next_retry_in_ms=60000
+[2026-09-12 06:22:50.616] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/latest.json error=fetch failed
+[2026-09-12 06:22:59.272] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=42 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:23:00.518] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:23:00.519] [daemon.register_retry_s[2026-09-12 06:23:08.759] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/lates[2026-09-12 06:24:00.534] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=43 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:24:00.636] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:24:00.636] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=43 next_retry_in_ms=60000
+[2026-09-12 06:25:00.662] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=44 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:25:00.749] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:25:00.749] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=44 next_retry_in_ms=60000
+[2026-09-12 06:26:00.790] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=45 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:26:00.888] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:26:00.888] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=45 next_retry_in_ms=60000
+[2026-09-12 06:27:00.928] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=46 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:27:01.031] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:27:01.031] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=46 next_retry_in_ms=60000
+[2026-09-12 06:28:01.054] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=47 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:28:01.164] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:28:01.165] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=47 next_retry_in_ms=60000
+[2026-09-12 06:29:01.206] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=48 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:29:01.291] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:29:01.291] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=48 next_retry_in_ms=60000
+[2026-09-12 06:30:01.322] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=49 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:30:01.420] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:30:01.420] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=49 next_retry_in_ms=60000
+[2026-09-12 06:31:01.441] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=50 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:31:01.526] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:31:01.526] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=50 next_retry_in_ms=60000
+[2026-09-12 06:32:01.558] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=51 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:32:01.666] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:32:01.666] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=51 next_retry_in_ms=60000
+[2026-09-12 06:32:50.627] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/latest.json error=fetch failed
+[2026-09-12 06:33:01.697] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=52 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:33:02.914] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:33:02.914] [daemon.register_retry_s[2026-09-12 06:33:08.771] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/lates[2026-09-12 06:34:02.938] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=53 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:34:03.041] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:34:03.041] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=53 next_retry_in_ms=60000
+[2026-09-12 06:35:03.069] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=54 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:35:03.157] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:35:03.157] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=54 next_retry_in_ms=60000
+[2026-09-12 06:36:03.188] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=55 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:36:03.274] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:36:03.274] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=55 next_retry_in_ms=60000
+[2026-09-12 06:37:03.309] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=56 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:37:03.399] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:37:03.399] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=56 next_retry_in_ms=60000
+[2026-09-12 06:38:03.424] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=57 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:38:03.516] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:38:03.516] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=57 next_retry_in_ms=60000
+[2026-09-12 06:39:03.553] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=58 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:39:03.670] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:39:03.670] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=58 next_retry_in_ms=60000
+[2026-09-12 06:40:03.693] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=59 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:40:03.784] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:40:03.784] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=59 next_retry_in_ms=60000
+[2026-09-12 06:41:03.805] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=60 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:41:03.892] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:41:03.893] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=60 next_retry_in_ms=60000
+[2026-09-12 06:42:03.921] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=61 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:42:04.012] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:42:04.013] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=61 next_retry_in_ms=60000
+[2026-09-12 06:42:50.626] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/latest.json error=fetch failed
+[2026-09-12 06:43:04.041] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=62 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:43:05.343] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:43:05.343] [daemon.register_retry_s[2026-09-12 06:43:08.771] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/lates[2026-09-12 06:44:05.374] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=63 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:44:05.461] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:44:05.461] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=63 next_retry_in_ms=60000
+[2026-09-12 06:45:05.493] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=64 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:45:05.578] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:45:05.578] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=64 next_retry_in_ms=60000
+[2026-09-12 06:46:05.594] [daemon.register_retry] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 attempt=65 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:46:05.682] [daemon.daemon_register_failed] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 error=fetch failed
+[2026-09-12 06:46:05.682] [daemon.register_retry_scheduled] daemon_local_id=b2fce98d-a9e7-4761-a1a9-78f1e8569971 fail_count=65 next_retry_in_ms=60000
+64 next_retry_in_ms=60000
+[2026-09-12 06:46:23.679] [daemon.register_retry] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a attempt=65 providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 06:46:23.801] [daemon.daemon_register_failed] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a error=fetch failed
+[2026-09-12 06:46:23.802] [daemon.register_retry_scheduled] daemon_local_id=c2637fb3-c995-4799-a731-f9cc8ea5f23a fail_count=65 next_retry_in_ms=60000

@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-09-10
+最近更新：2026-09-12
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-09-12 · 聊天轮上游故障自动恢复（断流/限额/静默中断三类全修）
+
+- **chat-turn-auto-recovery**（2026-09-12 立项/归档，brainstorm→plan→execute→verify 全流程 PASS，7 task/5 Wave，已合入 main 2842fd594）：生产实证（阿里云会话 d4c29d95 单日 7+ 次中断均需手动"继续"）三类中断自动恢复——①daemon 错误归类器 provider 无关化（原仅 claude，pi 断流/429 全落 unknown 无恢复面）+断流关键词（Stream ended without finish_reason 归 provider_error）+ModelError.resetAt 协议字段（GLM 中文「将[在于]…重置」解析 +08:00，实测文案为「将在」）；②pi 静默中断检测（message_end 边粒度 hasText 收口+仅 tool_result 翻转；settle 后无收尾正文合成 error——实证两轮收敛 completed 后端不可见形态）；③backend close 钩子三分支（瞬时+干净轮原 prompt 重放[G5 截断/G6 附件/防循环防叠加]/有工具活动续跑 nudge 不带原任务[CLI 上下文完整]/quota+reset_at 定时消息 reset+120s 续跑[连续链 3]）+auth-transient 钩子并入统一判定序；④派发链 auto_resume 贯通（scheduled_messages.origin 列+migration 20260912110000+scheduled_send G10 超越守卫+inject 加参转发+忙轮转排队保留 origin R-08）；⑤前端失败卡双信号提示（error_detail 类型+同源 pending 恢复条目存在性，D-009 无条目不显示防误导）+定时列表「自动续跑」徽标可取消。守卫复用 9-10 auto-resume 基建（开关/origin 链上限/G10）。测试：backend 117（含六场景真实 DB 集成）+daemon 149+frontend 322 相关面全绿，QA acceptance 两轮（P1 buildErrorLogItem 漏透 reset_at 构造点绕过假绿→修复复验）。NOTES：daemon 生产生效需 pnpm bundle+重新部署；执行期偏差 4 项 P2 记录（verify-result）；lint 沙箱假败 advisory 留痕（真实仓全链 exit 0）。
 
 ### 2026-09-12 · 工作区↔平台资产桥（四桥：workspace 技能启用/MCP 选入/specDir 收编/daemon per-workspace 分发）
 

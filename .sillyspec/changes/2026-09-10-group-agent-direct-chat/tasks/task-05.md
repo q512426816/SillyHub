@@ -24,7 +24,7 @@ goal: >
   投影层硬驾驭：turn_metadata 携带 dm_target_member_id 或 consensus_role=coordinator 的轮一律不投影（[[GROUP]] 段也拦），仅 consensus_role=converge 收口轮放行——判定对齐 shadow_direct 现有消费位置。
 implementation:
   - "group_bridge.py _GroupBridgeContext 加 dm_target_member_id/consensus_role 字段，_resolve_group_bridge_context 从影子 user_input turn_metadata 解析填充"
-  - "统一拦截谓词（design 5.1）：shadow_direct 轮 ∪ dm_target_member_id 非空 ∪ consensus_role==coordinator → 投影跳过；例外 consensus_role==converge 放行（总结进群）"
+  - "统一拦截谓词（design 5.1 执行期修正 G-3）：dm_target_member_id 非空 ∪ consensus_role==coordinator → 投影跳过；例外 consensus_role==converge 放行（总结进群）；shadow_direct 直聊轮不纳入（直聊标记制投影是既有功能，保持不动；兜底行跳过=shadow_direct ∪ consensus 拦截轮）"
   - "submit_steps.py 投影双写消费点与 _emit_group_mention_projection_fallback 兜底行同步应用谓词（拦截轮连兜底行也不发）"
   - "拦截对 [[GROUP]] 标记段同样生效（段级解析前整体短路）"
   - "test_group_bridge_projection.py 补拦截断言（dm/coordinator 零投影、converge 放行、普通轮不变）"

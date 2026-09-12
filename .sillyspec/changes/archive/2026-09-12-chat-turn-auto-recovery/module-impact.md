@@ -32,7 +32,7 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | 无需增改——未匹配文件均为既有模块存量路径（索引粒度现象非游离文件），模块文档六处增量已同步 | done |
+| `_module-map.yaml` | skipped：终审判定无需增改——未匹配文件均为既有模块存量路径（索引粒度现象非游离文件）；本变更未触碰该文件（diff 无此文件，核对一致） | skipped |
 | sillyhub-daemon/modules/model-error.md | 增量段落（泛化/断流关键词/resetAt） | done |
 | sillyhub-daemon/modules/interactive.md | 增量段落（静默检测两入口与判定） | done |
 | backend/modules/daemon.md | 增量段落（三分支恢复+派发链+origin 列） | done |
@@ -41,3 +41,8 @@
 | frontend/modules/components-agent-log.md | 增量段落（reset_at/autoRecoverHint 链序） | done |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。
+
+## 归档终审补充（三重核对裁决）
+
+- diff 有而矩阵未列的 `.sillyspec/docs/SillyHub/modules/*`（daemon.changelog/frontend_components/frontend_lib/daemon/migrations 等约 60 文件）：spec-sync 平台镜像对六处模块文档更新的自动回写副本（内容同源），非独立手工更新，不单列矩阵行。
+- `_module-map.yaml`：列而 diff 无——终审判定无需增改（见更新结果 skipped 行），核对闭环。

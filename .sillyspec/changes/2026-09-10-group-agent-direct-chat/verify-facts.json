@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-10-group-agent-direct-chat",
+  "generatedAt": "2026-09-11T23:31:32.910Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 3,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "tasks": 10,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "backendEndpoints": 594,
+        "frontendCalls": 5
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  }
+}

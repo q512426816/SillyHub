@@ -14,7 +14,7 @@
 以下变更文件未命中 _module-map.yaml 任何模块 paths——确认是模块索引过期（该跑 `sillyspec modules rebuild`）还是真的游离文件：
 
 - `backend/app/modules/agent/model.py` <!--TODO: 归属判定-->
-- `backend/app/migrations/versions/20260910_group_consensus.py` <!--TODO: 归属判定-->
+- `backend/app/migrations/versions/20260910130000_group_consensus.py` <!--TODO: 归属判定-->
 - `backend/app/modules/agent/schema.py` <!--TODO: 归属判定-->
 - `backend/app/modules/daemon/group/service/helpers.py` <!--TODO: 归属判定-->
 - `backend/app/modules/daemon/group/service/messages.py` <!--TODO: 归属判定-->
