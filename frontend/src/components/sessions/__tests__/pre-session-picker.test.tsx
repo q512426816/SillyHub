@@ -615,9 +615,11 @@ describe("对话框路径 Cursor 引擎可选（runtime-session-helpers 白名�
 // 表值前置事实（与 daemon providers.ts PROVIDER_CAPS.cursor 一致；thinking=true
 // 为 Reverse Sync / design 真相，不以过期任务卡 thinking=false 为准）。
 describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", () => {
-  it("九键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog none）不抛错", () => {
+  it("十键与 daemon 单源一致；未知 provider 默认拒绝（boolean 全 false + dialog none）不抛错", () => {
     // dialog='marker' 为 2026-09-09-askuser-pi-cursor task-12（FR-06）新增的
     // string 枚举键初值（spike no-go 则随 task-08 三端改 'none'）。
+    // ql-20260912-002：56a37498b（provider-adapter-registry）给 caps 加第 10 键
+    // provider_switch（daemon 单源 adapter.switchable 同源），本断言未同步——补齐。
     const caps = getProviderCaps("cursor");
     expect(caps).toEqual({
       resume: true,
@@ -629,6 +631,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
       dialog: "marker",
       edit_patch: false,
       model_select: true,
+      provider_switch: false,
     });
     // 任务卡点名的门控前置事实（model_select / mcp / thinking）再显式锁一次。
     expect(caps.model_select).toBe(true);
@@ -644,6 +647,7 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
       dialog: "none",
       edit_patch: false,
       model_select: false,
+      provider_switch: false,
     });
   });
 
