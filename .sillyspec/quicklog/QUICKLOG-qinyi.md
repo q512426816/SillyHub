@@ -60,3 +60,18 @@
 关联变更：2026-09-11-workspace-asset-bridges（verify 门暴露；债务源 1e4bb818f/2026-09-11-session-provider-switch-codex-pi）
 文件：frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（mock provider 补 agent_kind: claude）
 验证：36 passed
+
+## ql-20260912-001-081d | 2026-09-12 07:06:51 | 24h审查风险修复批第二轮：skill_source subdir穿越/换URL失效/rmtree死循环/子进程树杀/事件循环阻塞/branch注入/refresh SSRF复查、MCP PATCH密钥静默清空、头像fetchMe失败误删新…
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/skill_source/schema.py, backend/app/modules/skill_source/service.py, backend/app/modules/skill_source/git_fetcher.py, backend/app/modules/mcp_registry/service.py, backend/app/modules/file/service.py, backend/app/modules/agent/skills_bundle_service.py, frontend/src/lib/auth.ts
+
+## ql-20260912-001-b3f7 | 2026-09-12 07:30:00 | env.py 登记+循环导入 P0+双 head 缝合+gitignore（quick 三连收尾）
+状态：已完成
+关联变更：2026-09-11-workspace-asset-bridges / 2026-09-11-skills-central-library（遗留收尾）；并行 20260912050000（双 head 缝合）
+文件：
+- backend/migrations/env.py（补 skill_source model import——autogenerate 假漂移消除）
+- backend/app/modules/skill_source/service.py（Workspace 顶层导入→函数级 lazy：bridges task-03 的 skills_view_service 反向导入造成循环，import skill_source.service 直接炸——真 P0 顺手抓）
+- backend/migrations/versions/1d763051eb15_merge_*.py（双 head merge revision）
+- .gitignore（deploy/*.tar.gz——289MB 产物误入 4ad0b87c6 教训）
+验证：570 passed+3skip（四模块）+ import 链 app.main OK + ruff/mypy clean + alembic 单 head
