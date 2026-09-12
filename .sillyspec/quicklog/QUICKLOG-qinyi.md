@@ -91,3 +91,9 @@
 - backend/migrations/versions/1d763051eb15_merge_*.py（双 head merge revision）
 - .gitignore（deploy/*.tar.gz——289MB 产物误入 4ad0b87c6 教训）
 验证：570 passed+3skip（四模块）+ import 链 app.main OK + ruff/mypy clean + alembic 单 head
+
+## ql-20260912-002-4e8a | 2026-09-12 11:30:00 | pre-session-picker caps 断言同步第 10 键（预存债）
+状态：已完成
+关联变更：全局审查暴露；债务源 56a37498b/2026-09-11-provider-adapter-registry
+文件：frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx（九键→十键两处断言补 provider_switch）
+验证：27 passed
