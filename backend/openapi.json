@@ -43843,6 +43843,15 @@
               }
             ],
             "title": "Last Mention"
+          },
+          "visible_workspace_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Visible Workspace Ids",
+            "default": []
           }
         },
         "type": "object",
@@ -43859,7 +43868,7 @@
           "created_at"
         ],
         "title": "GroupChatListItemRead",
-        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。\n\n``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.\npinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed\n``GroupChatPinnedRead``；无置顶为 None）。\n\n``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线\n最新一行 ts（无消息 None，未读排序数据源）与本成员未读数\n（``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则\nts > 位点；cap 99+）。"
+        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。\n\n``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.\npinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed\n``GroupChatPinnedRead``；无置顶为 None）。\n\n``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线\n最新一行 ts（无消息 None，未读排序数据源）与本成员未读数\n（``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则\nts > 位点；cap 99+）。\n\n``visible_workspace_ids``（2026-09-13-session-group-ux-fixes D-003）：群\n可见工作区集合 = 直接归属 ``workspace_id`` ∪ 项目关联工作区\n（``PpmProjectWorkspace`` M:N，批量单查，去重）——群列表可见性判定的\n单一源，前端桌面/移动列表过滤消费（旧缓存无该字段时 ``?? [workspace_id]``\n兜底退化现状行为）。"
       },
       "GroupChatPinnedRead": {
         "properties": {

@@ -399,16 +399,23 @@ export function SessionPanelPage({
   const [pendingMentions, setPendingMentions] = useState<SessionInputMentions>({});
 
   // ── ql-20260825-011：输入框草稿持久化（刷新/切换会话不丢）──────────────────
-  // 回读：挂载 + sessionId 变化（预会话态无 id 用固定键 __pre__）。
+  // 回读：挂载 + sessionId 变化（预会话态无 id 用入口隔离键 __pre__:<scope>，
+  // task-01 / D-001——A 入口的未发送内容不再带入 B 入口）。
   // hydrated 门闩防「回读前先写空串」冲掉已存草稿：restore 先 setInput，rAF 后
   // 才放行持久化 effect（该 commit 内 input 仍是旧会话的值，不写新会话键）。
   // 缺陷修复收口（A-1）：切会话时清 @ 联想选中残留——草稿换装（setInput 非
   // 空新草稿）不触发组件归空复位，会话 A 的绑定会随会话 B 的消息错绑；
   // R-7 语义（草稿只存文本、绑定需重选）在切会话边界同样成立。
   const draftHydratedRef = useRef(false);
+  // task-01（D-001）：预会话草稿入口标识串 = workspaceId 缺省 '-' + runtimeId
+  //（形如 "ws-1:rt-claude"）；真会话（sessionId 非空）下 read/writeSessionDraft
+  // 忽略该值，键仍按 sessionId 组装。
+  const preDraftScope = preContext
+    ? `${preContext.workspaceId ?? '-'}:${preContext.runtimeId}`
+    : null;
   useEffect(() => {
     draftHydratedRef.current = false;
-    setInput(readSessionDraft(sessionId));
+    setInput(readSessionDraft(sessionId, preDraftScope));
     setPendingMentions({});
     const raf = requestAnimationFrame(() => {
       draftHydratedRef.current = true;
@@ -418,7 +425,11 @@ export function SessionPanelPage({
   }, [sessionId]);
   useEffect(() => {
     if (!draftHydratedRef.current) return;
-    writeSessionDraft(sessionId, input);
+    writeSessionDraft(sessionId, input, preDraftScope);
+    // preDraftScope 有意不入依赖：preContext 变化时宿主随 sessionId 重挂载
+    //（key 契约），入依赖会引入额外写触发——旧入口输入被迁移写进新入口键，
+    // 恰是 D-001 要消除的跨入口串台。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, input]);
 
   // ── task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时发送 ──

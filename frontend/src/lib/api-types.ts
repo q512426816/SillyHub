@@ -15421,6 +15421,12 @@ export interface components {
          *     最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
          *     （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
          *     ts > 位点；cap 99+）。
+         *
+         *     ``visible_workspace_ids``（2026-09-13-session-group-ux-fixes D-003）：群
+         *     可见工作区集合 = 直接归属 ``workspace_id`` ∪ 项目关联工作区
+         *     （``PpmProjectWorkspace`` M:N，批量单查，去重）——群列表可见性判定的
+         *     单一源，前端桌面/移动列表过滤消费（旧缓存无该字段时 ``?? [workspace_id]``
+         *     兜底退化现状行为）。
          */
         GroupChatListItemRead: {
             /**
@@ -15486,6 +15492,11 @@ export interface components {
             last_mention?: {
                 [key: string]: string;
             } | null;
+            /**
+             * Visible Workspace Ids
+             * @default []
+             */
+            visible_workspace_ids: string[];
         };
         /**
          * GroupChatPinnedRead

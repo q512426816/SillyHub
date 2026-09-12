@@ -178,6 +178,7 @@ vi.mock("@/components/group-chat/create-group-wizard", () => ({
             (props.onCreated as (g: unknown) => void)({
               id: "g-new",
               title: "新群",
+              workspace_id: "ws-1",
             })
           }
         >
@@ -486,6 +487,9 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
       id: "g-new",
       online_member_ids: [],
       last_message: null,
+      // D-003（2026-09-13-session-group-ux-fixes）：新建群无项目关联，列表项
+      // 归一占位 = 直接归属工作区（invalidate 重拉后为后端口径覆盖）。
+      visible_workspace_ids: ["ws-1"],
     });
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({

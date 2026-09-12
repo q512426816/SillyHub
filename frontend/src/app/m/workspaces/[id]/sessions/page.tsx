@@ -136,6 +136,9 @@ export default function MobileWorkspaceSessionsPage() {
     last_message: null,
     pinned: null,
     unread_count: 0,
+    // D-003（2026-09-13-session-group-ux-fixes）：新建群无项目关联，可见
+    // 工作区集合占位 = 直接归属（invalidate 重拉后为后端口径覆盖）。
+    visible_workspace_ids: [group.workspace_id],
   });
     void qc.invalidateQueries({ queryKey: ["groupChats"] });
   };

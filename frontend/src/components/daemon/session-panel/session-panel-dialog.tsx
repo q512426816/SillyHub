@@ -264,19 +264,27 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   }, [connGuard.connStatus]);
 
   // ql-20260825-011：输入草稿持久化（同 page 模式；dialog 会话键 = view.sessionId，
-  // idle 无会话用 __pre__ 固定键）。
+  // idle 无会话用入口隔离键 __pre__:<workspaceId|'-'>——task-01 / D-001：dialog
+  // 无 runtime 维度，仅按 workspaceId 区分入口；未传 workspaceId 的消费方回落
+  // '-'（同一消费方内部共享，跨工作区不再串台）。真会话（view.sessionId 非空）
+  // preScope 被忽略，键仍按 sessionId 组装。
   const draftHydratedRef = useRef(false);
   useEffect(() => {
     draftHydratedRef.current = false;
-    setInput(readSessionDraft(view.sessionId ?? null));
+    setInput(readSessionDraft(view.sessionId ?? null, workspaceId ?? '-'));
     const raf = requestAnimationFrame(() => {
       draftHydratedRef.current = true;
     });
     return () => cancelAnimationFrame(raf);
+    // workspaceId 有意不入依赖：prop 在 dialog 生命周期内不变（宿主挂载即定），
+    // 入依赖会让 scope 翻转触发额外回读（当前输入被另一 scope 的草稿覆盖）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.sessionId]);
   useEffect(() => {
     if (!draftHydratedRef.current) return;
-    writeSessionDraft(view.sessionId ?? null, input);
+    writeSessionDraft(view.sessionId ?? null, input, workspaceId ?? '-');
+    // 同上：workspaceId 不入依赖（生命周期内不变；真会话态 preScope 被忽略）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.sessionId, input]);
 
   /**

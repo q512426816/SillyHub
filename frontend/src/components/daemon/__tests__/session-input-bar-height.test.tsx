@@ -1,4 +1,6 @@
 // ql-20260826-010：SessionInputBar 高度拖拽调节单测。
+// 2026-09-13-session-group-ux-fixes（D-002@v2）：事件迁 Pointer Events，
+// 与生产代码同路径覆盖鼠标/触摸统一后的手柄拖拽。
 //
 // 覆盖：
 //   1. 拖拽上移 60px → textarea 高度 = 起点 + 60 并落 localStorage；
@@ -7,7 +9,7 @@
 //   4. 拖拽下压越过下限 → 钳制在 44px（min-h-11 默认高度）。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, createEvent } from "@testing-library/react";
 
 import { SessionInputBar } from "../session-input-bar";
 
@@ -18,6 +20,23 @@ vi.mock("@/lib/api/session-attachments", () => ({
 }));
 
 const HEIGHT_KEY = "sillyhub.sessions.inputBarHeight";
+
+/** jsdom 无 PointerEvent 实现，fireEvent.pointer* 走 Event 兜底构造带不上
+ *  坐标（React handler 里 clientY 为 undefined）——createEvent 后 defineProperty
+ *  手工补属性再派发（先例：explorer-page.test.tsx firePointer、
+ *  floating-session-host.test.tsx pointerEvt）；pointerId 补 0 占位。 */
+function firePointer(
+  el: Element | Window,
+  name: "pointerDown" | "pointerMove" | "pointerUp",
+  props: { clientY?: number } = {},
+) {
+  const init = { pointerId: 0, ...props };
+  const ev = createEvent[name](el as Element, init);
+  for (const [k, v] of Object.entries(init)) {
+    Object.defineProperty(ev, k, { value: v });
+  }
+  fireEvent(el, ev);
+}
 
 function renderBar() {
   return render(
@@ -51,9 +70,9 @@ describe("SessionInputBar 高度拖拽（ql-20260826-010）", () => {
     ) as HTMLTextAreaElement;
 
     // jsdom 无布局，起点按默认下限 44；上移 60 → 104。
-    fireEvent.mouseDown(handle, { clientY: 300 });
-    fireEvent.mouseMove(window, { clientY: 240 });
-    fireEvent.mouseUp(window);
+    firePointer(handle, "pointerDown", { clientY: 300 });
+    firePointer(window, "pointerMove", { clientY: 240 });
+    firePointer(window, "pointerUp");
 
     expect(textarea.style.height).toBe("104px");
     expect(window.localStorage.getItem(HEIGHT_KEY)).toBe("104");
@@ -88,9 +107,9 @@ describe("SessionInputBar 高度拖拽（ql-20260826-010）", () => {
       "测试输入",
     ) as HTMLTextAreaElement;
 
-    fireEvent.mouseDown(handle, { clientY: 300 });
-    fireEvent.mouseMove(window, { clientY: 500 }); // 下压 200 → 负值钳下限
-    fireEvent.mouseUp(window);
+    firePointer(handle, "pointerDown", { clientY: 300 });
+    firePointer(window, "pointerMove", { clientY: 500 }); // 下压 200 → 负值钳下限
+    firePointer(window, "pointerUp");
 
     expect(textarea.style.height).toBe("44px");
     expect(window.localStorage.getItem(HEIGHT_KEY)).toBe("44");

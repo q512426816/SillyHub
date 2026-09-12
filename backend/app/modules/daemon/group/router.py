@@ -50,6 +50,10 @@ from app.modules.daemon.group.service import (
     get_online_member_ids_bulk,
 )
 
+# crud 子模块直取（service/__init__ 聚合重导出面不含本函数；照
+# permission_service.py:1183 的 helpers 子模块直取先例）。
+from app.modules.daemon.group.service.crud import get_project_workspace_map
+
 # 自带 /group-chats prefix（空根路径 "" 在 FastAPI 需挂非空 prefix 才合法），
 # 经 daemon router include 复用其 /daemon prefix → 最终 /api/daemon/group-chats。
 router = APIRouter(prefix="/group-chats", tags=["daemon-group-chat"])
@@ -79,6 +83,12 @@ class GroupChatListItemRead(GroupChatRead):
     最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
     （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
     ts > 位点；cap 99+）。
+
+    ``visible_workspace_ids``（2026-09-13-session-group-ux-fixes D-003）：群
+    可见工作区集合 = 直接归属 ``workspace_id`` ∪ 项目关联工作区
+    （``PpmProjectWorkspace`` M:N，批量单查，去重）——群列表可见性判定的
+    单一源，前端桌面/移动列表过滤消费（旧缓存无该字段时 ``?? [workspace_id]``
+    兜底退化现状行为）。
     """
 
     online_member_ids: list[uuid.UUID] = []
@@ -87,6 +97,8 @@ class GroupChatListItemRead(GroupChatRead):
     unread_count: int = 0
     last_mention: dict[str, str] | None = None
     pinned: GroupChatPinnedRead | None = None
+    # D-003：端点层组装（照 online_member_ids 先例），service 读体不携带。
+    visible_workspace_ids: list[uuid.UUID] = []
 
 
 class GroupMemberDetailRead(GroupMemberRead):
@@ -239,6 +251,11 @@ async def list_group_chats(
     items = [_to_list_item(r) for r in reads]
     # ql-20260903-024：presence 一次 SCAN 分桶（原逐群各扫一遍全键空间）。
     online_by_group = await get_online_member_ids_bulk([item.id for item in items])
+    # 2026-09-13-session-group-ux-fixes（D-003）：项目 → 关联工作区批量映射
+    # （单条 IN 查，无 N+1）——群列表可见工作区集合的数据源。
+    project_workspace_map = await get_project_workspace_map(
+        session, {r.project_id for r in reads if r.project_id is not None}
+    )
     for item in items:
         last_content, last_ts = previews.get(item.id, (None, None))
         item.last_message = last_content
@@ -247,6 +264,10 @@ async def list_group_chats(
         item.last_mention = mentions.get(item.id)
         # task-06（§5.4）：presence 在线集接通（Redis 不可用降级空数组）。
         item.online_member_ids = online_by_group.get(item.id, [])
+        # D-003：可见工作区集合 = 直接归属 ∪ 项目关联（去重保序，锚工作区
+        # 居首）；组装在端点层（service 返回 GroupChatRead，DTO 通路进不去）。
+        linked = project_workspace_map.get(item.project_id, []) if item.project_id else []
+        item.visible_workspace_ids = list(dict.fromkeys([item.workspace_id, *linked]))
     return items
 
 

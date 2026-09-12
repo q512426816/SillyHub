@@ -1893,6 +1893,9 @@ function makeGroupListItem(): GroupChatListItemRead {
     unread_count: 0,
     online_member_ids: [],
     last_message: null,
+    // D-003（2026-09-13-session-group-ux-fixes）：可见工作区集合默认 = 直接
+    // 归属（无项目群的后端口径）。
+    visible_workspace_ids: ["ws-1"],
   };
 }
 

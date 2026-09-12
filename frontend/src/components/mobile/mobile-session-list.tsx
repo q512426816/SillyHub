@@ -246,11 +246,14 @@ export function MobileSessionList({
     enabled: groupSectionEnabled,
     staleTime: 30_000,
   });
-  /** 客户端 workspace 过滤：只看本工作区群（端点无过滤参，照桌面同款筛）。 */
+  /** 客户端 workspace 过滤：按 D-003（2026-09-13-session-group-ux-fixes）
+   * 可见工作区集合筛——visible_workspace_ids = 直接归属 ∪ 项目关联工作区，
+   * 挂项目的群在其关联工作区均显示；`?? [workspace_id]` 兜底 react-query 旧
+   * 缓存（字段未到时不闪隐，退化为现状只看直接归属）。照桌面同款筛。 */
   const groupChats = useMemo(
     () =>
-      (groupChatsQuery.data ?? []).filter(
-        (g) => g.workspace_id === workspaceId,
+      (groupChatsQuery.data ?? []).filter((g) =>
+        (g.visible_workspace_ids ?? [g.workspace_id]).includes(workspaceId),
       ),
     [groupChatsQuery.data, workspaceId],
   );

@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import (
     AgentGroupChat,
@@ -30,6 +32,7 @@ from app.modules.agent.schema import (
 )
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.workspace.model import PpmProjectWorkspace
 
 from .helpers import (
     GROUP_AGENT_MEMBER_LIMIT,
@@ -441,6 +444,32 @@ async def list_groups(svc, user: User, *, archived: bool | None = False) -> list
     return [
         svc._to_read(g, by_group.get(g.id, []), avatar_by_user_id=avatar_by_user_id) for g in groups
     ]
+
+
+async def get_project_workspace_map(
+    session: AsyncSession, project_ids: Iterable[uuid.UUID]
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """项目 → 关联工作区列表的批量映射（2026-09-13-session-group-ux-fixes D-003）。
+
+    单条 ``SELECT ppm_project_id, workspace_id FROM ppm_project_workspace
+    WHERE ppm_project_id IN (...)``（无 N+1），供群列表端点组装
+    ``visible_workspace_ids``（直接归属 ∪ 项目关联，去重）——群列表可见性
+    判定的单一数据源。空 ``project_ids`` 早退空 dict（免空 IN 查询）。
+    """
+    ids = list(project_ids)
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(PpmProjectWorkspace.ppm_project_id, PpmProjectWorkspace.workspace_id).where(
+                PpmProjectWorkspace.ppm_project_id.in_(ids)
+            )
+        )
+    ).all()
+    mapping: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for ppm_project_id, workspace_id in rows:
+        mapping.setdefault(ppm_project_id, []).append(workspace_id)
+    return mapping
 
 
 async def get_group(svc, group_id: uuid.UUID, user: User) -> GroupChatRead:

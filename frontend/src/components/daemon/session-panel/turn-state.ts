@@ -299,29 +299,42 @@ export function writePersistedViewMode(
 }
 
 /* ── ql-20260825-011：输入框草稿按会话持久化（刷新/切换会话不丢）────────── */
+/* task-01（2026-09-13-session-group-ux-fixes / FR-1 / D-001）：预会话草稿键按
+ * 入口隔离——原固定 __pre__ 键跨工作区/跨机器入口共享，任一入口未发送内容必然
+ * 带入下一入口（用户实测串台根因）。分支规则：真会话（sessionId 非空）键照旧
+ * 按 sessionId 组装（preScope 被忽略，真会话隔离零回归）；预会话且有入口标识串
+ * preScope（page 形如 "<workspaceId|'-'>:<runtimeId>"，dialog 无 runtime 维度
+ * 只传 "<workspaceId|'-'>"）→ __pre__:<preScope>；均无回落共享键 __pre__
+ * （未传 preScope 的旧调用点行为兼容；不做旧键迁移——项目未上线，非目标）。 */
 
-/** 预会话态（无 sessionId）的草稿固定键。 */
+/** 预会话态（无 sessionId）的草稿键前缀（亦即无 preScope 时的共享回落键）。 */
 const SESSION_DRAFT_PRE_KEY = "__pre__";
 
-function sessionDraftLsKey(sessionId: string | null): string {
-  return `sillyhub.sessions.draft.${sessionId ?? SESSION_DRAFT_PRE_KEY}`;
+function sessionDraftLsKey(sessionId: string | null, preScope?: string | null): string {
+  const key =
+    sessionId ?? (preScope ? `${SESSION_DRAFT_PRE_KEY}:${preScope}` : SESSION_DRAFT_PRE_KEY);
+  return `sillyhub.sessions.draft.${key}`;
 }
 
-/** 挂载/切换会话回读草稿（SSR 或读取失败返回空串）。 */
-export function readSessionDraft(sessionId: string | null): string {
+/** 挂载/切换会话回读草稿（SSR 或读取失败返回空串；preScope 仅预会话态参与键组装）。 */
+export function readSessionDraft(sessionId: string | null, preScope?: string | null): string {
   if (typeof window === "undefined") return "";
   try {
-    return window.localStorage.getItem(sessionDraftLsKey(sessionId)) ?? "";
+    return window.localStorage.getItem(sessionDraftLsKey(sessionId, preScope)) ?? "";
   } catch {
     return "";
   }
 }
 
-/** 每次输入变化写入（隐私模式等写入失败静默）。 */
-export function writeSessionDraft(sessionId: string | null, draft: string): void {
+/** 每次输入变化写入（隐私模式等写入失败静默；preScope 仅预会话态参与键组装）。 */
+export function writeSessionDraft(
+  sessionId: string | null,
+  draft: string,
+  preScope?: string | null,
+): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(sessionDraftLsKey(sessionId), draft);
+    window.localStorage.setItem(sessionDraftLsKey(sessionId, preScope), draft);
   } catch {
     /* 静默容错 */
   }

@@ -38,6 +38,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   cleanup,
+  createEvent,
   render,
   screen,
   fireEvent,
@@ -1445,6 +1446,82 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
     // errMessage 吞掉只显示「操作失败」。固化两参契约。
     expect(errArg).toBeInstanceOf(Error);
     expect(fallbackArg).toBe("搜索失败，请稍后重试");
+  });
+});
+
+/* ── 高度拖拽（2026-09-13-session-group-ux-fixes FR-2 / D-002@v2 pointer 迁移）── */
+
+describe("GroupChatPanel 高度拖拽（FR-2 / D-002@v2）", () => {
+  /** jsdom 无 PointerEvent 实现，fireEvent.pointer* 的 clientY 带不上（React
+   *  handler 读 undefined）——createEvent 后 defineProperty 手工补坐标再派发
+   *  （单聊 session-input-bar-height.test.tsx 同款，先例 explorer-page.test.tsx
+   *  firePointer / floating-session-host.test.tsx pointerEvt）。 */
+  function firePointer(
+    el: Element | Window,
+    name: "pointerDown" | "pointerMove" | "pointerUp",
+    props: { clientY?: number } = {},
+  ) {
+    const init = { pointerId: 0, ...props };
+    const ev = createEvent[name](el as Element, init);
+    for (const [k, v] of Object.entries(init)) {
+      Object.defineProperty(ev, k, { value: v });
+    }
+    fireEvent(el, ev);
+  }
+
+  it("pointer 拖拽上移 60px → 输入框高度生效 + localStorage 落盘；双击恢复默认", async () => {
+    // 该文件 beforeEach 不清 localStorage（各用例自理）；高度键与本文件其它
+    // 用例无关，先清保证起点为默认单行。
+    window.localStorage.clear();
+    renderPanel();
+    await waitForStreamWired();
+
+    const handle = screen.getByRole("separator", {
+      name: /拖动调节输入框高度/,
+    });
+    const textarea = screen.getByLabelText(
+      "群消息输入框",
+    ) as HTMLTextAreaElement;
+
+    // jsdom 无布局，起点按默认下限 44；上移 60 → 104。
+    firePointer(handle, "pointerDown", { clientY: 300 });
+    firePointer(window, "pointerMove", { clientY: 240 });
+    firePointer(window, "pointerUp");
+
+    expect(textarea.style.height).toBe("104px");
+    // 群聊与单聊共用 sillyhub.sessions.inputBarHeight 键（ql-20260911-030）。
+    expect(window.localStorage.getItem("sillyhub.sessions.inputBarHeight")).toBe(
+      "104",
+    );
+
+    // 双击手柄恢复默认：高度清除 + 键删除。
+    fireEvent.doubleClick(handle);
+    expect(textarea.style.height).toBe("");
+    expect(
+      window.localStorage.getItem("sillyhub.sessions.inputBarHeight"),
+    ).toBeNull();
+  });
+
+  it("pointer 拖拽下压越过下限 → 钳制 44px", async () => {
+    window.localStorage.clear();
+    renderPanel();
+    await waitForStreamWired();
+
+    const handle = screen.getByRole("separator", {
+      name: /拖动调节输入框高度/,
+    });
+    const textarea = screen.getByLabelText(
+      "群消息输入框",
+    ) as HTMLTextAreaElement;
+
+    firePointer(handle, "pointerDown", { clientY: 300 });
+    firePointer(window, "pointerMove", { clientY: 500 }); // 下压 200 → 负值钳下限
+    firePointer(window, "pointerUp");
+
+    expect(textarea.style.height).toBe("44px");
+    expect(window.localStorage.getItem("sillyhub.sessions.inputBarHeight")).toBe(
+      "44",
+    );
   });
 });
 

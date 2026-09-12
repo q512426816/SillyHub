@@ -161,6 +161,9 @@ function makeGroupListItem(
     online_member_ids: [],
     last_message: "小码：已定位到问题在 hooks 依赖数组…",
     last_mention: null,
+    // D-003（2026-09-13-session-group-ux-fixes）：可见工作区集合默认 = 直接
+    // 归属（无项目群的后端口径）；换 workspace 的 override 须同步换此字段。
+    visible_workspace_ids: ["ws-1"],
     ...overrides,
   } as unknown as GroupChatListItemRead;
 }
@@ -571,7 +574,13 @@ describe("MobileSessionList 群聊分区", () => {
   it("群行渲染 + 独立数据源同 key 形态（groupChats/list/workspaceId 落缓存）+ workspace 客户端过滤", async () => {
     const groups = [
       makeGroupListItem(),
-      makeGroupListItem({ id: "g-2", title: "别家的群", workspace_id: "ws-other" }),
+      makeGroupListItem({
+        id: "g-2",
+        title: "别家的群",
+        workspace_id: "ws-other",
+        // D-003：无项目关联群，集合 = 仅直接归属。
+        visible_workspace_ids: ["ws-other"],
+      }),
     ];
     daemonApi.listGroupChats.mockResolvedValue(groups);
     renderListGroupCallbacks(vi.fn(), vi.fn());

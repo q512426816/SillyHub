@@ -960,11 +960,18 @@ function WorkspaceTreeList({
     enabled: groupSectionEnabled,
     staleTime: 30_000,
   });
-  /** scope 过滤：workspace scope 只看本工作区群（端点无过滤参，客户端筛）。 */
+  /** scope 过滤：workspace scope 按 D-003（2026-09-13-session-group-ux-fixes）
+   * 可见工作区集合筛——visible_workspace_ids = 直接归属 ∪ 项目关联工作区，
+   * 挂项目的群在其关联工作区均显示；`?? [workspace_id]` 兜底 react-query 旧
+   * 缓存（字段未到时不闪隐，退化为现状只看直接归属）。端点无过滤参，客户端筛。 */
   const groupChats = useMemo(() => {
     const items = groupChatsQuery.data ?? [];
     if (scope?.kind === "workspace") {
-      return items.filter((g) => g.workspace_id === scope.workspaceId);
+      return items.filter((g) =>
+        (g.visible_workspace_ids ?? [g.workspace_id]).includes(
+          scope.workspaceId,
+        ),
+      );
     }
     return items;
   }, [groupChatsQuery.data, scope]);

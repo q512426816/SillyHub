@@ -2490,6 +2490,9 @@ function makeGroupListItem(
     online_member_ids: [],
     last_message: "小码：已定位到问题在 hooks 依赖数组…",
     unread_count: 0,
+    // D-003（2026-09-13-session-group-ux-fixes）：可见工作区集合默认 = 直接
+    // 归属（无项目群的后端口径）；换 workspace 的 override 须同步换此字段。
+    visible_workspace_ids: ["ws-1"],
     ...overrides,
   };
 }
@@ -2536,7 +2539,7 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
     expect(mocks.listGroupChats).not.toHaveBeenCalled();
   });
 
-  it("workspace scope：群按 workspace_id 客户端过滤（他工作区群不渲染）", async () => {
+  it("workspace scope：群按 visible_workspace_ids 集合过滤（无项目关联的他工作区群不渲染）", async () => {
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listGroupChats.mockResolvedValue([
       makeGroupListItem(),
@@ -2544,6 +2547,8 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
         id: "g-2",
         title: "别家的群",
         workspace_id: "ws-other",
+        // D-003：无项目关联群，集合 = 仅直接归属。
+        visible_workspace_ids: ["ws-other"],
       }),
     ]);
     renderPanel(
@@ -2559,6 +2564,64 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
     expect(
       screen.queryByRole("button", { name: "群聊 别家的群" }),
     ).toBeNull();
+  });
+
+  // D-003（2026-09-13-session-group-ux-fixes）：群可见性 = 直接归属 ∪ 项目
+  // 关联工作区（后端组装进 visible_workspace_ids，前端集合判定）。
+  it("D-003 workspace scope：挂 D 项目关联 D/F 的群在 D/F 两 scope 均渲染；旧缓存无字段退化直接归属", async () => {
+    setWorkspaces([
+      makeWorkspace({ id: "ws-d", name: "工作区D" }),
+      makeWorkspace({ id: "ws-f", name: "工作区F" }),
+    ]);
+    mocks.listGroupChats.mockResolvedValue([
+      // 群直接挂 D，项目关联 D/F → 集合两工作区（后端去重口径）。
+      makeGroupListItem({
+        id: "g-proj",
+        title: "项目群",
+        workspace_id: "ws-d",
+        project_id: "ppm-1",
+        visible_workspace_ids: ["ws-d", "ws-f"],
+      }),
+      // 旧缓存形态：字段缺失（显式 undefined 模拟 react-query 缓存未含新
+      // 字段）→ `?? [workspace_id]` 兜底，仅直接归属 F 可见（不闪隐）。
+      makeGroupListItem({
+        id: "g-legacy",
+        title: "旧缓存群",
+        workspace_id: "ws-f",
+        visible_workspace_ids: undefined,
+      }),
+    ]);
+    // scope D：项目群经集合可见；旧缓存群（直接归属 F）不可见。
+    const { unmount } = renderPanel(
+      <SessionListPanel
+        scope={{ kind: "workspace", workspaceId: "ws-d" }}
+        onSelectGroup={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(mocks.listGroupChats).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByRole("button", { name: "群聊 项目群" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "群聊 旧缓存群" }),
+    ).toBeNull();
+    unmount();
+
+    // scope F：项目群经集合可见（跨工作区显示——本变更核心行为）；旧缓存群
+    // 经兜底直接归属可见。
+    renderPanel(
+      <SessionListPanel
+        scope={{ kind: "workspace", workspaceId: "ws-f" }}
+        onSelectGroup={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(mocks.listGroupChats).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByRole("button", { name: "群聊 项目群" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "群聊 旧缓存群" }),
+    ).toBeTruthy();
   });
 
   it("runtime scope：分区隐藏（群无 runtime 归属，语义偏离不挂）", async () => {

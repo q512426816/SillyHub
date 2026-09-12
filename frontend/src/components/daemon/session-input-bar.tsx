@@ -500,13 +500,17 @@ export function SessionInputBar({
 
   const dragStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
-  const handleHeightDragStart = (e: React.MouseEvent) => {
+  /* 2026-09-13-session-group-ux-fixes D-002@v2：拖拽迁 Pointer Events 统一
+   * 鼠标/触摸/触控笔（旧 onMouseDown + window mousemove/mouseup 触摸屏不触发）。
+   * 不用 setPointerCapture——jsdom 无实现，window 级 pointermove/pointerup 监听
+   * 已保证拖出手柄仍收事件（panel-resizer.tsx 真实先例）。 */
+  const handleHeightDragStart = (e: React.PointerEvent) => {
     e.preventDefault();
     // 实测高度兜底：jsdom / 未布局时 offsetHeight 为 0，按默认下限起步。
     const measured = textareaRef.current?.offsetHeight ?? 0;
     const current = inputHeight ?? (measured > 0 ? measured : INPUT_HEIGHT_MIN);
     dragStateRef.current = { startY: e.clientY, startHeight: current };
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const d = dragStateRef.current;
       if (!d) return;
       const max = Math.min(INPUT_HEIGHT_MAX, Math.round(window.innerHeight * 0.6));
@@ -518,11 +522,11 @@ export function SessionInputBar({
     };
     const onUp = () => {
       dragStateRef.current = null;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
 
   const handleHeightReset = () => {
@@ -641,14 +645,15 @@ export function SessionInputBar({
           )}
         </div>
       )}
-      {/* 高度拖拽手柄（ql-20260826-010）：输入胶囊上缘细条——按下沿竖向拖动
-          增减高度（实时生效 + 落盘），双击恢复默认。 */}
+      {/* 高度拖拽手柄（ql-20260826-010；Pointer Events 迁移 D-002@v2）：输入
+          胶囊上缘细条——按下沿竖向拖动增减高度（实时生效 + 落盘），双击恢复
+          默认；onPointerDown 统一鼠标/触摸。 */}
       <div
         role="separator"
         aria-orientation="horizontal"
         aria-label="拖动调节输入框高度（双击恢复默认）"
         title="拖动调节输入框高度，双击恢复默认"
-        onMouseDown={handleHeightDragStart}
+        onPointerDown={handleHeightDragStart}
         onDoubleClick={handleHeightReset}
         className="group -mb-0.5 flex h-3 cursor-ns-resize touch-none items-center justify-center"
       >
