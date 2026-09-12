@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-12-group-trigger-lock-graceful",
+  "generatedAt": "2026-09-12T17:25:07.093Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-12-group-trigger-lock-graceful",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 1,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-12-group-trigger-lock-graceful",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 2
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-12-group-trigger-lock-graceful",
+      "metrics": {
+        "backendEndpoints": 594,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-12-group-trigger-lock-graceful",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "tests": {
+    "command": "module[daemon]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-12T17:26:39.870Z"
+  },
+  "runtimeEvidence": [
+    {
+      "claim": "真实集成·持锁现场复现三段式降级（psql 持成员行 FOR UPDATE 30s + uvicorn 真实进程 bef54b4b5 双 @ 消息 200 非 500，elapsed 10.6s，报忙文案透出，FK 降级 consensus_task_id=None）",
+      "command": "python .sillyspec/.runtime/verify-lock-contended.py a7a3c9b2-d5ba-47a2-b01f-ed5398a84675 + docker exec psql FOR UPDATE pg_sleep(30)",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-12-group-trigger-lock-graceful/evidence/verify-lock-contended-run2.txt"
+    },
+    {
+      "claim": "真实集成·uvicorn 服务日志（worktree 分支 18099，请求 200 + 三段式报忙/降级链，无 unhandled error）",
+      "command": "DATABASE_URL=verify_consensus uv run uvicorn app.main:app --port 18099",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-12-group-trigger-lock-graceful/evidence/verify-lock-uvicorn6.log"
+    },
+    {
+      "claim": "真实集成·verify_consensus 独立库 alembic upgrade head 至 merge 迁移 c97f3be457e6（apply 分叉合流）",
+      "command": "uv run alembic upgrade head（DATABASE_URL=postgresql+asyncpg://platform/platform@127.0.0.1:5432/verify_consensus）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-12-group-trigger-lock-graceful/evidence/verify-lock-alembic-upgrade.log"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

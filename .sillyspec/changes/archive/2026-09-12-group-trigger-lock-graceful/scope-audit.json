@@ -1,0 +1,116 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "f9fdf6ce123fc07e493d88fc8f67cfde905f1f96",
+  "totals": {
+    "files": 12,
+    "additions": 1202,
+    "deletions": 32
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/group/service/messages.py",
+      "additions": 61,
+      "deletions": 17,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/shadow.py",
+      "additions": 91,
+      "deletions": 15,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_trigger_lock.py",
+      "additions": 424,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/migrations/versions/c97f3be457e6_merge_group_consensus_and_scheduled_.py",
+      "additions": 27,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/agent-log-ctx-attribution-mismatch.md",
+      "additions": 78,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/agent-log-hub-attribution-cross-session-contamination.md",
+      "additions": 58,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/conflict-compare-wrong-status-root.md",
+      "additions": 125,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md",
+      "additions": 24,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/platform-spec-junction-migration-split.md",
+      "additions": 48,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/platform-sync-progress-rollback-and-db-corruption.md",
+      "additions": 48,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/pre-commit-autofix-swallows-commit.md",
+      "additions": 66,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "scripts/migrate-spec-junction.mjs",
+      "additions": 152,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "65538fe02302c97081838d8143d5dc5530246e8d523f6be0ca4159203ba33573",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-12T16:35:01.566Z"
+}

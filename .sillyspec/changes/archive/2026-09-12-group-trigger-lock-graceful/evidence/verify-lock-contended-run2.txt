@@ -1,0 +1,8 @@
+status=200 elapsed=10.6s
+triggered=2 errors=['机器当前不可用或未授权，无法触发。', '正在被触发中，请稍后重发。']
+consensus_task_id=None
+PASS no_500 | status=200
+PASS lock_wait_then_degrade | elapsed=10.6s（>=4.5s：段2 等锁 5s 超时→段3 降级）
+PASS partial_failure_collected | errors=['机器当前不可用或未授权，无法触发。', '正在被触发中，请稍后重发。']
+
+=== 3/3 PASS ===
