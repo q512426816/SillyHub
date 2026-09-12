@@ -574,6 +574,7 @@ class TestCryptoRoundtrip:
         )
         row = await db_session.get(McpServer, created.id)
         assert row is not None
+        assert row.encrypted_env is not None
         frozen_ct = row.encrypted_env["API_KEY"]["ct"]
 
         # 读-改-写：改 command/args + 提交不含 API_KEY 的 env，不带 secret_env_keys。
@@ -608,6 +609,7 @@ class TestCryptoRoundtrip:
         )
         row = await db_session.get(McpServer, created.id)
         assert row is not None
+        assert row.encrypted_env is not None
         frozen_ct = row.encrypted_env["API_KEY"]["ct"]
 
         await svc.update_server(
