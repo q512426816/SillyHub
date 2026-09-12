@@ -1,0 +1,1017 @@
+diff --git a/backend/app/modules/agent/skills_bundle_service.py b/backend/app/modules/agent/skills_bundle_service.py
+index 1a86391b5..f3c810578 100644
+--- a/backend/app/modules/agent/skills_bundle_service.py
++++ b/backend/app/modules/agent/skills_bundle_service.py
+@@ -178,7 +178,13 @@ def _read_skill_dir_files(skill_dir: Path, top_name: str) -> list[tuple[Path, by
+     for root, dirs, file_names in os.walk(skill_dir):
+         dirs[:] = [d for d in dirs if d != ".git"]
+         for fname in file_names:
+-            paths.append(Path(root) / fname)
++            fpath = Path(root) / fname
++            if fpath.is_symlink():
++                # POSIX 恶意仓可 checkout 出指向缓存外（如 /etc/passwd）的文件
++                # symlink，read_bytes 跟随链接即越界读——链接文件一律不进 bundle
++                # （Windows git 默认物化链接为纯文本，无此面）。
++                continue
++            paths.append(fpath)
+     files: list[tuple[Path, bytes]] = []
+     for fpath in sorted(paths):
+         rel_path = Path(top_name) / fpath.relative_to(skill_dir)
+@@ -216,7 +222,7 @@ async def _collect_enabled_git_skills(
+     # 延迟导入：skill_source.git_fetcher 顶层 import 本模块的 _parse_skill_frontmatter，
+     # 模块级反向 import 会成环（daemon_rpc.py 函数内 import 同款先例）。
+     from app.modules.skill_source.model import SkillSource, UserSkillEnable
+-    from app.modules.skill_source.service import source_cache_dir
++    from app.modules.skill_source.service import safe_discovery_root
+ 
+     # D-010：user 维度显式 IS NULL（ws 行不混入——version hash 零回归底线）；
+     # D-002：workspace 维度并集（OR 分支不限 user_id）。
+@@ -251,8 +257,12 @@ async def _collect_enabled_git_skills(
+         if source is None:
+             # 源已删除（绑定本应被 service 删源连带清理，容错）或已停用——跳过。
+             continue
+-        cache_dir = source_cache_dir(source.id)
+-        discovery_root = cache_dir / source.subdir if source.subdir else cache_dir
++        # 安全发现根（H-1 纵深）：subdir 越界（存量脏数据）→ None，跳过该绑定，
++        # 绝不把收集根引出 skills_git_cache。
++        discovery_root = safe_discovery_root(source)
++        if discovery_root is None:
++            log.warning("skill_bundle_unsafe_subdir_skipped", skill_key=enable.skill_key)
++            continue
+         skill_dir = discovery_root / dir_name
+         if not await asyncio.to_thread(skill_dir.is_dir):
+             # 悬空绑定：目录不存在（刷新后技能目录消失）——跳过但绑定保留。
+diff --git a/backend/app/modules/file/service.py b/backend/app/modules/file/service.py
+index 4b3ab2559..3ed30eb81 100644
+--- a/backend/app/modules/file/service.py
++++ b/backend/app/modules/file/service.py
+@@ -43,10 +43,15 @@ async def reclaim_orphaned_file_by_url(
+     """best-effort 回收文件中心 URL 指向的文件（ql-20260911-019-1f01 头像孤儿清理）。
+ 
+     头像换绑/清除后旧值失引用——调用方在**新值落库成功后**以旧 URL 调本函数：
+-    形态为 ``/api/file/{uuid}`` 且行存在、归属通过（uploaded_by 本人）→
+-    ``FileService.soft_delete``（置 deleted_at + best-effort 删存储对象）；其余
+-    情况（外链 / 非 uuid / 不存在或已删 / 无权 / 存储抖动）一律 False 静默——
+-    回收是兜底语义，绝不影响主写路径的成功返回。
++    形态为 ``/api/file/{uuid}`` 且行存在、当前用户对该文件**可见** →
++    ``FileService.soft_delete``（置 deleted_at + best-effort 删存储对象）；
++    其余情况（外链 / 非 uuid / 不存在或已删 / 无权 / 存储抖动）一律 False
++    静默——回收是兜底语义，绝不影响主写路径的成功返回。
++
++    可见性判定即 ``FileService._can_access``（与下载同口径，**非** uploaded_by
++    严格断言）：uploaded_by 本人 / platform admin / workspace 归属文件对
++    WORKSPACE_READ 成员均放行。也因此本函数不是引用计数回收——同一文件被
++    多行引用（如头像 URL 重复绑定）时，任一可见者回收即整体下线。
+     """
+     if not url or not url.startswith(FILE_URL_PREFIX):
+         return False
+diff --git a/backend/app/modules/mcp_registry/service.py b/backend/app/modules/mcp_registry/service.py
+index 690198e90..176d9a2c2 100644
+--- a/backend/app/modules/mcp_registry/service.py
++++ b/backend/app/modules/mcp_registry/service.py
+@@ -348,6 +348,11 @@ class McpRegistryService:
+         既有信封不重加密；新密钥键用占位符、或明文键值是占位符 → 422。只改
+         ``secret_env_keys``（不动 server_config）同样支持：升级键值明文加密、
+         降级键解密回明文 env。
++
++        保留语义（H-2 修复）：提交 server_config 但**不带** ``secret_env_keys``
++        → 沿用全部既有密钥键原密文（GET 的 env 不回显密钥键，读-改-写客户端的
++        提交 env 恒缺密钥键，按 env 交集推导会静默清空全部密文）；移除密钥必须
++        显式传 ``secret_env_keys=[]``。
+         """
+         row = await self._get_server_for_write(server_id, user)
+         updates = inp.model_dump(exclude_unset=True)
+@@ -364,11 +369,21 @@ class McpRegistryService:
+             self._validate_server_type(new_config)
+             existing_env = row.encrypted_env or {}
+             if new_secret_keys is None:
+-                # 指定态未随提交：沿用既有密钥键集与提交 env 的交集（保底不改密文）。
+-                secret_keys = [k for k in existing_env if k in _env_keys(new_config)]
++                # 指定态未随提交 = 保持现状：沿用全部既有密钥键（H-2 修复）。
++                # GET 响应的 env 不回显密钥键（只回 secret_env_keys 键名清单），
++                # 裸 API「GET→改→PATCH」客户端的提交 env 恒缺密钥键——旧实现
++                # 「与提交 env 取交集」会把交集算成空、全部密文静默清空。移除
++                # 密钥必须显式传 ``secret_env_keys=[]``；升级新密钥同样显式传。
++                secret_keys = _normalize_secret_keys(list(existing_env))
+             else:
+                 secret_keys = _normalize_secret_keys(new_secret_keys)
+-            self._validate_secret_keys(new_config, secret_keys, allow_placeholder=True)
++            # 键存在性校验只针对出现在提交 env 里的键：显式指定的键必须在 env
++            # （前端契约不变）；保留键不在提交 env 属预期（GET 不回显），无值可校。
++            self._validate_secret_keys(
++                new_config,
++                [k for k in secret_keys if k in _env_keys(new_config)],
++                allow_placeholder=True,
++            )
+             sanitized, secret_env = _split_secret_env(new_config, secret_keys)
+             self._validate_plain_placeholder(sanitized)
+             encrypted: dict[str, dict[str, str]] = {}
+@@ -383,6 +398,10 @@ class McpRegistryService:
+                 else:
+                     ciphertext, key_id = self.cipher.encrypt(str(value))
+                     encrypted[key] = McpEnvCiphertext.of(ciphertext, key_id).model_dump()
++            # 保留态密钥未出现在提交 env（新 GET 形态的读-改-写）：原密文原样保留。
++            for key in secret_keys:
++                if key not in encrypted and key in existing_env:
++                    encrypted[key] = existing_env[key]
+             row.server_config = sanitized
+             row.encrypted_env = encrypted or None
+         elif new_secret_keys is not None:
+diff --git a/backend/app/modules/mcp_registry/tests/test_service.py b/backend/app/modules/mcp_registry/tests/test_service.py
+index eba2f64dd..2b9792f49 100644
+--- a/backend/app/modules/mcp_registry/tests/test_service.py
++++ b/backend/app/modules/mcp_registry/tests/test_service.py
+@@ -553,14 +553,89 @@ class TestCryptoRoundtrip:
+         assert row.encrypted_env["API_KEY"]["ct"] != old_ct  # 密文已换
+         assert svc.decrypt_server_env(row) == {"API_KEY": "new-key"}
+ 
+-    async def test_update_replacing_config_with_no_secrets_clears_encrypted_env(
++    async def test_update_config_without_secret_keys_preserves_ciphertext(
+         self, db_session: AsyncSession
+     ) -> None:
++        """H-2：PATCH server_config 不带 secret_env_keys → 既有密文原样保留。
++
++        新 GET 形态 env 不回显密钥键（只回 secret_env_keys 键名清单），裸 API
++        「GET→改→PATCH」客户端的提交 env 恒缺密钥键——旧实现按 env 交集推导
++        会把全部密文静默清空（正是 P0「密钥毁坏」的残留面）。
++        """
+         user = await _create_user(db_session, label="a")
+         svc = McpRegistryService(db_session)
+         created = await svc.create_server(
+             _payload(
+-                name="clear-sec",
++                name="keep-rmw",
++                server_config={"command": "npx", "args": [], "env": {"API_KEY": "old-secret"}},
++                secret_env_keys=["API_KEY"],
++            ),
++            user,
++        )
++        row = await db_session.get(McpServer, created.id)
++        assert row is not None
++        frozen_ct = row.encrypted_env["API_KEY"]["ct"]
++
++        # 读-改-写：改 command/args + 提交不含 API_KEY 的 env，不带 secret_env_keys。
++        updated = await svc.update_server(
++            created.id,
++            McpServerUpdate(
++                server_config={"command": "npx", "args": ["--new"], "env": {"CACHE_DIR": "/tmp"}}
++            ),
++            user,
++        )
++        await db_session.refresh(row)
++
++        assert updated.secret_env_keys == ["API_KEY"]  # 键集回显不变
++        assert row.encrypted_env is not None
++        assert row.encrypted_env["API_KEY"]["ct"] == frozen_ct  # 密文一字节不动
++        assert svc.decrypt_server_env(row) == {"API_KEY": "old-secret", "CACHE_DIR": "/tmp"}
++        assert row.server_config["command"] == "npx"  # 明文改动生效
++
++    async def test_update_legacy_env_placeholder_without_keys_spec_keeps_ciphertext(
++        self, db_session: AsyncSession
++    ) -> None:
++        """旧客户端形态：env 带 <set> 占位、不带 secret_env_keys → 密文同样保留。"""
++        user = await _create_user(db_session, label="a")
++        svc = McpRegistryService(db_session)
++        created = await svc.create_server(
++            _payload(
++                name="keep-legacy",
++                server_config={"command": "npx", "args": [], "env": {"API_KEY": "v1"}},
++                secret_env_keys=["API_KEY"],
++            ),
++            user,
++        )
++        row = await db_session.get(McpServer, created.id)
++        assert row is not None
++        frozen_ct = row.encrypted_env["API_KEY"]["ct"]
++
++        await svc.update_server(
++            created.id,
++            McpServerUpdate(
++                server_config={
++                    "command": "npx",
++                    "args": [],
++                    "env": {"API_KEY": "<set>", "CACHE_DIR": "/tmp"},
++                },
++            ),
++            user,
++        )
++        await db_session.refresh(row)
++
++        assert row.encrypted_env is not None
++        assert row.encrypted_env["API_KEY"]["ct"] == frozen_ct
++        assert svc.decrypt_server_env(row) == {"API_KEY": "v1", "CACHE_DIR": "/tmp"}
++
++    async def test_update_config_with_empty_secret_keys_clears(
++        self, db_session: AsyncSession
++    ) -> None:
++        """显式清空：提交 ``secret_env_keys=[]`` 才移除全部密钥（H-2 新契约）。"""
++        user = await _create_user(db_session, label="a")
++        svc = McpRegistryService(db_session)
++        created = await svc.create_server(
++            _payload(
++                name="clear-explicit",
+                 server_config={"command": "npx", "args": [], "env": {"API_KEY": "to-be-dropped"}},
+                 secret_env_keys=["API_KEY"],
+             ),
+@@ -569,13 +644,16 @@ class TestCryptoRoundtrip:
+ 
+         await svc.update_server(
+             created.id,
+-            McpServerUpdate(server_config={"command": "npx", "args": [], "env": {"N": "1"}}),
++            McpServerUpdate(
++                server_config={"command": "npx", "args": [], "env": {"N": "1"}},
++                secret_env_keys=[],
++            ),
+             user,
+         )
+ 
+         row = await db_session.get(McpServer, created.id)
+         assert row is not None
+-        assert row.encrypted_env is None  # 整份替换语义：新配置无 secret → 清空
++        assert row.encrypted_env is None  # 显式空键集 = 清空
+ 
+     async def test_update_without_server_config_keeps_ciphertext(
+         self, db_session: AsyncSession
+diff --git a/backend/app/modules/skill_source/git_fetcher.py b/backend/app/modules/skill_source/git_fetcher.py
+index 5fd057fef..274797cd1 100644
+--- a/backend/app/modules/skill_source/git_fetcher.py
++++ b/backend/app/modules/skill_source/git_fetcher.py
+@@ -10,12 +10,15 @@ Change: 2026-09-11-skills-central-library (task-02)
+   **fetcher 自身不拦**——create 已拦，refresh/触发走缓存无须重复 DNS 解析，
+   也让本地假仓（file://）测试可直达 :func:`fetch_source`。
+ - :func:`fetch_source`——缓存目录无 ``.git`` 时 ``git clone --depth 1
+-  --filter=blob:none --no-tags [-b branch]``；已有则 ``git fetch --prune
+-  origin <branch>`` + ``git reset --hard FETCH_HEAD`` 增量更新；commit 取
+-  ``git rev-parse HEAD``。子进程一律 ``asyncio.create_subprocess_exec``
+-  （worktree/git_runner.py 先例）+ env 注入 ``GIT_TERMINAL_PROMPT=0``（禁凭据
+-  交互挂死）+ 每步 300s 超时。**永不抛异常**——失败原因进
+-  :class:`FetchResult.error`（调用方写 last_error，不阻塞保存请求）。
++  --filter=blob:none --no-tags [-b branch]``；已有则先做 **origin URL 漂移
++  修正**（``remote get-url`` 与 ``source.url`` 不一致 → ``set-url``/``add``，
++  防 update 换 url 后永远拉旧仓库），再 ``git fetch --prune origin <branch>``
++  + ``git reset --hard FETCH_HEAD`` 增量更新；commit 取 ``git rev-parse HEAD``。
++  子进程一律 ``asyncio.create_subprocess_exec``（worktree/git_runner.py 先例）
++  + env 注入 ``GIT_TERMINAL_PROMPT=0``（禁凭据交互挂死）+ 每步 300s 超时
++  **杀进程树**（POSIX killpg / Windows taskkill /T）。半成品/删除清理走
++  :func:`rmtree_force`（Windows git 只读对象兼容）。**永不抛异常**——失败
++  原因进 :class:`FetchResult.error`（调用方写 last_error，不阻塞保存请求）。
+ - :func:`discover_skills`——扫含 ``SKILL.md`` 的目录（剪枝 ``.git``）；单技能
+   >200 文件或 >10MB 跳过 + log warn（D-007 二防线，不影响其它技能）；description
+   复用 ``skills_bundle_service._parse_skill_frontmatter`` 解析（坏 SKILL.md
+@@ -28,8 +31,12 @@ Windows/Linux/macOS 三平台可跑（CLAUDE.md 规则 13）。
+ from __future__ import annotations
+ 
+ import asyncio
++import contextlib
+ import os
+ import shutil
++import signal
++import stat
++import sys
+ from dataclasses import dataclass
+ from pathlib import Path
+ 
+@@ -78,6 +85,63 @@ def _git_env() -> dict[str, str]:
+     return {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+ 
+ 
++async def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
++    """杀掉整棵子进程树（git fetch/clone 会派生 git-remote-https helper，只杀
++    父进程会留孤儿持有网络连接与 ``.git`` 句柄）。
++
++    - POSIX：spawn 侧 ``start_new_session=True`` 建独立进程组，此处 ``killpg``
++      一次清组（进程已死时 ProcessLookupError 回退单杀）；
++    - Windows：``taskkill /PID <pid> /T /F``（/T = 进程树）；taskkill 不可用
++      （OSError）回退单杀。
++    """
++    if sys.platform == "win32":
++        try:
++            killer = await asyncio.create_subprocess_exec(
++                "taskkill",
++                "/PID",
++                str(proc.pid),
++                "/T",
++                "/F",
++                stdout=asyncio.subprocess.DEVNULL,
++                stderr=asyncio.subprocess.DEVNULL,
++            )
++            await killer.wait()
++        except OSError:
++            with contextlib.suppress(ProcessLookupError):
++                proc.kill()
++    else:
++        try:
++            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
++        except (ProcessLookupError, PermissionError):
++            with contextlib.suppress(ProcessLookupError):
++                proc.kill()
++    with contextlib.suppress(ProcessLookupError):
++        await proc.wait()
++
++
++def rmtree_force(path: Path) -> None:
++    """尽力强删目录：Windows 上 git 把 pack/loose object 设为只读，裸
++    ``rmtree(ignore_errors=True)`` 会 PermissionError 静默跳过 → 残留非空目录
++    → 下次 clone 到非空目标 fatal，源陷入永久失败循环。此处对失败项去只读
++    （``stat.S_IWRITE``）重试一次；仍失败则放过（保持 best-effort 语义）。
++    """
++    if not path.exists():
++        return
++
++    def _chmod_retry(func, target, _exc) -> None:  # onexc 签名（3.12+）
++        try:
++            os.chmod(target, stat.S_IWRITE)
++            func(target)
++        except OSError:
++            pass
++
++    try:
++        # requires-python >= 3.12，直接用 onexc（onerror 已废弃、3.14 移除）。
++        shutil.rmtree(path, onexc=_chmod_retry)
++    except OSError:
++        pass
++
++
+ async def assert_source_url(url: str) -> None:
+     """SSRF 首防线封装（D-007）：私网/非法 scheme 抛 UnsafeRepoUrl/SsrfBlocked（400）。"""
+     await assert_public_url(url)
+@@ -87,6 +151,7 @@ async def probe_git_binary() -> bool:
+     """git 二进制探测（R-01）：``shutil.which`` 初判 + ``git --version`` 子进程确认。"""
+     if shutil.which("git") is None:
+         return False
++    proc: asyncio.subprocess.Process | None = None
+     try:
+         proc = await asyncio.create_subprocess_exec(
+             "git",
+@@ -96,7 +161,12 @@ async def probe_git_binary() -> bool:
+             stderr=asyncio.subprocess.PIPE,
+         )
+         await asyncio.wait_for(proc.communicate(), timeout=GIT_STEP_TIMEOUT_SECONDS)
+-    except (TimeoutError, FileNotFoundError, OSError):
++    except TimeoutError:
++        # 超时补杀（此前裸 return 会留孤儿 git 进程，与 _run_git 行为不一致）。
++        if proc is not None:
++            await _kill_process_tree(proc)
++        return False
++    except (FileNotFoundError, OSError):
+         return False
+     return proc.returncode == 0
+ 
+@@ -104,9 +174,14 @@ async def probe_git_binary() -> bool:
+ async def _run_git(args: list[str], *, cwd: Path | None = None) -> tuple[int, str, str]:
+     """跑一条 git 命令（无 shell、env 注入、300s 超时），返回 (rc, stdout, stderr)。
+ 
+-    超时杀进程后按 rc=124 返回（不抛）；spawn 失败（无 git 等）交由
+-    :func:`fetch_source` 的兜底 except 收敛成 FetchResult。
++    超时杀**整棵进程树**（POSIX 独立进程组 killpg / Windows taskkill /T）后按
++    rc=124 返回（不抛）；spawn 失败（无 git 等）交由 :func:`fetch_source` 的
++    兜底 except 收敛成 FetchResult。
+     """
++    spawn_kwargs: dict = {}
++    if sys.platform != "win32":
++        # 独立进程组：超时可 killpg 一次清掉 git-remote-https 等派生 helper。
++        spawn_kwargs["start_new_session"] = True
+     proc = await asyncio.create_subprocess_exec(
+         "git",
+         *args,
+@@ -114,14 +189,14 @@ async def _run_git(args: list[str], *, cwd: Path | None = None) -> tuple[int, st
+         env=_git_env(),
+         stdout=asyncio.subprocess.PIPE,
+         stderr=asyncio.subprocess.PIPE,
++        **spawn_kwargs,
+     )
+     try:
+         stdout_b, stderr_b = await asyncio.wait_for(
+             proc.communicate(), timeout=GIT_STEP_TIMEOUT_SECONDS
+         )
+     except TimeoutError:
+-        proc.kill()
+-        await proc.wait()
++        await _kill_process_tree(proc)
+         arg_head = " ".join(args[:3])
+         return 124, "", f"git {arg_head} 超时（{GIT_STEP_TIMEOUT_SECONDS}s），进程已终止"
+     return (
+@@ -149,7 +224,7 @@ async def fetch_source(source: SkillSource, cache_root: Path) -> FetchResult:
+ async def _clone_repo(source: SkillSource, repo_dir: Path) -> FetchResult:
+     # clone 目标须不存在/为空：清掉无 .git 的残留目录（上次失败的半成品）。
+     if repo_dir.exists():
+-        shutil.rmtree(repo_dir, ignore_errors=True)
++        rmtree_force(repo_dir)
+     repo_dir.parent.mkdir(parents=True, exist_ok=True)
+     rc, _stdout, stderr = await _run_git(
+         [
+@@ -166,12 +241,30 @@ async def _clone_repo(source: SkillSource, repo_dir: Path) -> FetchResult:
+     )
+     if rc != 0:
+         # 失败半成品清掉，下次保存/刷新可重 clone（不留只含 .git 碎片的目录）。
+-        shutil.rmtree(repo_dir, ignore_errors=True)
++        rmtree_force(repo_dir)
+         return FetchResult(ok=False, error=f"git clone 失败（exit {rc}）：{stderr[:_STDERR_CLIP]}")
+     return await _resolve_head(repo_dir)
+ 
+ 
+ async def _update_repo(source: SkillSource, repo_dir: Path) -> FetchResult:
++    # URL 漂移修正：update 改 url 只写 DB，origin 仍是首次 clone 时写进
++    # .git/config 的旧地址——不修正则后续 fetch 永远拉旧仓库（M-1）。
++    rc, stdout, _stderr = await _run_git(["remote", "get-url", "origin"], cwd=repo_dir)
++    if rc != 0:
++        rc_fix, _out, stderr = await _run_git(["remote", "add", "origin", source.url], cwd=repo_dir)
++        if rc_fix != 0:
++            return FetchResult(
++                ok=False, error=f"git remote add 失败（exit {rc_fix}）：{stderr[:_STDERR_CLIP]}"
++            )
++    elif stdout != source.url:
++        rc_fix, _out, stderr = await _run_git(
++            ["remote", "set-url", "origin", source.url], cwd=repo_dir
++        )
++        if rc_fix != 0:
++            return FetchResult(
++                ok=False,
++                error=f"git remote set-url 失败（exit {rc_fix}）：{stderr[:_STDERR_CLIP]}",
++            )
+     rc, _stdout, stderr = await _run_git(
+         ["fetch", "--prune", "origin", source.branch], cwd=repo_dir
+     )
+@@ -209,7 +302,9 @@ def discover_skills(cache_dir: Path) -> list[DiscoveredSkill]:
+     skill_dirs: list[Path] = []
+     for root, dirs, files in os.walk(cache_dir):
+         dirs[:] = [d for d in dirs if d != ".git"]
+-        if "SKILL.md" in files:
++        # SKILL.md 本身是 symlink 的目录不算技能目录（POSIX 恶意仓可用链接
++        # 指向缓存外文件借 description 泄露内容；Windows git 默认物化链接无此面）。
++        if "SKILL.md" in files and not (Path(root) / "SKILL.md").is_symlink():
+             skill_dirs.append(Path(root))
+ 
+     results: list[DiscoveredSkill] = []
+diff --git a/backend/app/modules/skill_source/service.py b/backend/app/modules/skill_source/service.py
+index bee44a18a..661e6c20d 100644
+--- a/backend/app/modules/skill_source/service.py
++++ b/backend/app/modules/skill_source/service.py
+@@ -32,8 +32,8 @@ Change: 2026-09-11-skills-central-library (task-01 + task-02 接线 + task-03)
+ 
+ from __future__ import annotations
+ 
++import asyncio
+ import re
+-import shutil
+ import uuid
+ from datetime import UTC, datetime
+ from pathlib import Path
+@@ -51,8 +51,11 @@ from app.modules.skill_source import git_fetcher
+ from app.modules.skill_source.model import SkillSource, UserSkillEnable
+ from app.modules.skill_source.schema import LibrarySkillItem, LibraryView, SourceRead
+ from app.modules.skills.model import CustomSkill
+-from app.modules.workspace.model import Workspace
+ 
++# ql-20260912-001：顶层导入 Workspace 会触发 workspace/__init__ → router →
++# skills_view_service → 本模块 的循环导入（bridges task-03 引入，直接
++# `import app.modules.skill_source.service` 即炸）。照 settings 模块 lazy import
++# 先例下沉到唯一消费点（_require_workspace_member 的 session.get）。
+ log = get_logger(__name__)
+ 
+ # 缓存根约定（design 总体方案 / provides）：``<spec_data_root>/skills_git_cache/<source_id>/``。
+@@ -129,8 +132,14 @@ async def _trigger_fetch(session: AsyncSession, source: SkillSource) -> None:
+             source.last_error = result.error
+         await session.commit()
+         if result.ok:
+-            discover_root = cache_dir / source.subdir if source.subdir else cache_dir
+-            discovered = git_fetcher.discover_skills(discover_root)
++            # 发现扫描走 to_thread（全树 os.walk+逐文件 stat，同步跑会阻塞事件
++            # 循环）；发现根经 safe_discovery_root（subdir 非法跳过）。
++            discover_root = safe_discovery_root(source)
++            discovered = (
++                await asyncio.to_thread(git_fetcher.discover_skills, discover_root)
++                if discover_root is not None
++                else []
++            )
+             log.info(
+                 "skill_source_fetch_done",
+                 source_id=str(source.id),
+@@ -191,6 +200,63 @@ class WorkspaceScopeForbidden(AppError):
+     http_status = 403
+ 
+ 
++class SkillSourceSubdirInvalid(AppError):
++    """subdir 非法（422，防穿越：``..`` 段 / 绝对路径 / 盘符 / 反斜杠 / 控制字符 / 空段）。"""
++
++    code = "skill_source.invalid_subdir"
++    http_status = 422
++
++
++class SkillSourceBranchInvalid(AppError):
++    """branch 非法（422，防 git 选项注入：``-`` 前缀 / 反斜杠 / 控制字符 / 空白 / 空串）。"""
++
++    code = "skill_source.invalid_branch"
++    http_status = 422
++
++
++# subdir/branch 共用的控制字符判定（含 NUL、换行、DEL）。
++_CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
++# Windows 盘符绝对路径（C:/x、C:\x）——pathlib 在 Windows 上会把它当绝对路径替换。
++_DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
++
++
++def validate_subdir(subdir: str) -> None:
++    """subdir 防穿越校验（422）——发现根/收集根拼 ``缓存根 / subdir``，值域必须
++    限定在仓库相对 posix 子路径：允许 ``a/b`` 嵌套，拒绝 ``..``/``.``/空段、
++    绝对路径（前导 ``/``、盘符）、反斜杠（Windows 分隔歧义）与控制字符。
++    """
++    if subdir == "":
++        raise SkillSourceSubdirInvalid("subdir 不能为空串——仓库根请传 null")
++    if _CTRL_CHARS_RE.search(subdir):
++        raise SkillSourceSubdirInvalid(f"subdir 含控制字符：{subdir!r}")
++    if "\\" in subdir:
++        raise SkillSourceSubdirInvalid(f"subdir 不能含反斜杠（分隔符仅支持 /）：{subdir!r}")
++    if subdir.startswith("/") or _DRIVE_LETTER_RE.match(subdir):
++        raise SkillSourceSubdirInvalid(f"subdir 不能是绝对路径：{subdir!r}")
++    bad_segments = [s for s in subdir.split("/") if s in ("", ".", "..")]
++    if bad_segments:
++        raise SkillSourceSubdirInvalid(
++            f"subdir 含空段或 .. 段（不允许逃出仓库）：{subdir!r}",
++        )
++
++
++def validate_branch(branch: str) -> None:
++    """branch 防选项注入校验（422）——fetch 侧 branch 是位置参数（refspec 位），
++    ``-`` 前缀值会被 git parse-options 当选项（如 ``--recurse-submodules`` 可拉
++    .gitmodules 里攻击者控制的 URL）；反斜杠/控制字符/空白对 git ref 名同样非法。
++    """
++    if (
++        branch == ""
++        or branch.startswith("-")
++        or "\\" in branch
++        or _CTRL_CHARS_RE.search(branch)
++        or any(ch.isspace() for ch in branch)
++    ):
++        raise SkillSourceBranchInvalid(
++            f"branch 非法（不允许 - 前缀 / 反斜杠 / 控制字符 / 空白 / 空串）：{branch!r}"
++        )
++
++
+ def parse_skill_key(skill_key: str) -> tuple[uuid.UUID, str]:
+     """解析 ``<source_id>:<目录名>`` → ``(source_id, 目录名)``；非法抛 422。
+ 
+@@ -220,10 +286,36 @@ def parse_skill_key(skill_key: str) -> tuple[uuid.UUID, str]:
+     return source_id, dir_part
+ 
+ 
+-def _discovery_root(source: SkillSource) -> Path:
+-    """源的技能发现根：``缓存根/[subdir]``（task-02 _trigger_fetch 同口径）。"""
++def safe_discovery_root(source: SkillSource) -> Path | None:
++    """源的技能发现根：``缓存根/[subdir]``；subdir 非法或逃出缓存根 → None。
++
++    纵深防御（H-1）：保存口 :func:`validate_subdir` 已 422 拦新值，但存量行 /
++    手工改库仍可能带越界 subdir——所有读路径（library 聚合、enable 校验、
++    bundle 收集）统一经本函数取根，None 即跳过该源并 warn，绝不把发现/收集
++    引出缓存目录。subdir 为空 = 缓存根本身（恒安全）。
++    """
+     cache_dir = source_cache_dir(source.id)
+-    return cache_dir / source.subdir if source.subdir else cache_dir
++    if not source.subdir:
++        return cache_dir
++    try:
++        validate_subdir(source.subdir)
++    except SkillSourceSubdirInvalid as exc:
++        log.warning(
++            "skill_source_subdir_invalid_skipped",
++            source_id=str(source.id),
++            error=str(exc),
++        )
++        return None
++    root = cache_dir / source.subdir
++    # 双保险：格式合法仍以 resolve 后的包含关系兜底（防空串段绕过类残余）。
++    if not root.resolve().is_relative_to(cache_dir.resolve()):
++        log.warning(
++            "skill_source_subdir_escapes_cache_skipped",
++            source_id=str(source.id),
++            subdir=source.subdir,
++        )
++        return None
++    return root
+ 
+ 
+ def _sillyspec_description(skill_dir: Path) -> str:
+@@ -267,10 +359,13 @@ class SkillSourceService:
+         branch: str = "main",
+         subdir: str | None = None,
+     ) -> SkillSource:
+-        """创建源（SSRF await + git 探测 + url 查重，保存即触发拉取）。"""
++        """创建源（SSRF await + git 探测 + url 查重 + branch/subdir 校验，保存即触发拉取）。"""
+         # SSRF 校验（async——显式 await，plan-review 修正点）：私网/非法 scheme
+         # 抛 UnsafeRepoUrl/SsrfBlocked（400）直接透传给全局异常处理器。
+         await git_fetcher.assert_source_url(url)
++        validate_branch(branch)
++        if subdir is not None:
++            validate_subdir(subdir)
+         await self._require_git_binary()
+ 
+         existing = await self._get_by_url(url)
+@@ -318,8 +413,10 @@ class SkillSourceService:
+                 )
+             source.url = url
+         if branch is not None:
++            validate_branch(branch)
+             source.branch = branch
+         if subdir is not None:
++            validate_subdir(subdir)
+             source.subdir = subdir
+         if enabled is not None:
+             source.enabled = enabled
+@@ -341,8 +438,15 @@ class SkillSourceService:
+         return source
+ 
+     async def refresh(self, source_id: uuid.UUID) -> SkillSource:
+-        """手动刷新（admin）：git 探测 + 真实拉取 + 回写 last_* 字段。"""
++        """手动刷新（admin）：SSRF 复查 + git 探测 + 真实拉取 + 回写 last_* 字段。
++
++        SSRF 复查（M-5）：保存时校验一次不足以防保存后 DNS rebinding 到内网
++        （core/ssrf 基线承诺「每次调用重新解析」，webhook/http_get 每跳复查）——
++        refresh 是唯一不经 create/update 的拉取入口，拉取前对当前 url 重跑
++        :func:`assert_source_url`，域已 rebinding 到私网 → 400 fail-loud。
++        """
+         source = await self.get(source_id)
++        await git_fetcher.assert_source_url(source.url)
+         await self._require_git_binary()
+         await _trigger_fetch(self._session, source)
+         return source
+@@ -405,7 +509,16 @@ class SkillSourceService:
+                 f"技能不可启用（源不存在或已停用）：{skill_key!r}",
+                 details={"skill_key": skill_key},
+             )
+-        discovered_names = {d.name for d in git_fetcher.discover_skills(_discovery_root(source))}
++        discovery_root = safe_discovery_root(source)
++        if discovery_root is None:
++            # subdir 越界（存量脏数据纵深拦截）——该源整体不可启用。
++            raise SkillNotDiscoverable(
++                f"技能源 subdir 非法（越界），不可启用：{skill_key!r}",
++                details={"skill_key": skill_key, "source_id": str(source_id)},
++            )
++        discovered_names = {
++            d.name for d in await asyncio.to_thread(git_fetcher.discover_skills, discovery_root)
++        }
+         if dir_name not in discovered_names:
+             raise SkillNotDiscoverable(
+                 f"技能不存在于该源当前发现结果：{skill_key!r}",
+@@ -504,7 +617,10 @@ class SkillSourceService:
+         for source in sources:
+             if not source.enabled:
+                 continue
+-            for discovered in git_fetcher.discover_skills(_discovery_root(source)):
++            discovery_root = safe_discovery_root(source)
++            if discovery_root is None:
++                continue  # subdir 越界（存量脏数据纵深拦截）——该源不参与发现
++            for discovered in await asyncio.to_thread(git_fetcher.discover_skills, discovery_root):
+                 skill_key = f"{source.id}:{discovered.name}"
+                 skills.append(
+                     LibrarySkillItem(
+@@ -542,7 +658,12 @@ class SkillSourceService:
+         for source in await self.list_():
+             if not source.enabled:
+                 continue
+-            names.update(d.name for d in git_fetcher.discover_skills(_discovery_root(source)))
++            discovery_root = safe_discovery_root(source)
++            if discovery_root is None:
++                continue  # subdir 越界（存量脏数据纵深拦截）——该源不参与差集
++            names.update(
++                d.name for d in await asyncio.to_thread(git_fetcher.discover_skills, discovery_root)
++            )
+         return names
+ 
+     async def delete(self, source_id: uuid.UUID) -> None:
+@@ -561,7 +682,9 @@ class SkillSourceService:
+         await self._session.commit()
+ 
+         # 缓存目录清理 best-effort：目录可能从未拉取过（task-02 前必不存在）。
+-        shutil.rmtree(source_cache_dir(source.id), ignore_errors=True)
++        # rmtree_force：Windows 上 git 只读对象需去只读重试，否则残留非空目录
++        # 卡死同名重建。
++        git_fetcher.rmtree_force(source_cache_dir(source.id))
+ 
+     # ── helpers ───────────────────────────────────────────────────────
+ 
+@@ -572,6 +695,10 @@ class SkillSourceService:
+         ``_is_workspace_member`` 同款——任意角色行即视为 member，不关心权限粒度；
+         细粒度 WORKSPACE_WRITE 域门在后续 workspace 端点卡片）。
+         """
++        from app.modules.workspace.model import (
++            Workspace,
++        )
++
+         workspace = await self._session.get(Workspace, workspace_id)
+         if workspace is None:
+             raise WorkspaceScopeForbidden(
+diff --git a/backend/app/modules/skill_source/tests/test_git_fetcher.py b/backend/app/modules/skill_source/tests/test_git_fetcher.py
+index c8b21d9a0..b6e102abb 100644
+--- a/backend/app/modules/skill_source/tests/test_git_fetcher.py
++++ b/backend/app/modules/skill_source/tests/test_git_fetcher.py
+@@ -25,8 +25,11 @@ create 已拦（D-007 首防线），fetcher 不重复拦，本地 URL 可直达
+ 
+ from __future__ import annotations
+ 
++import os
+ import shutil
++import stat
+ import subprocess
++import sys
+ import uuid
+ from pathlib import Path
+ 
+@@ -36,12 +39,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core.config import get_settings
+ from app.core.security import create_access_token, password_hasher
++from app.core.ssrf import UnsafeRepoUrl
+ from app.modules.auth.model import User
+ from app.modules.skill_source.git_fetcher import (
+     FetchResult,
+     discover_skills,
+     fetch_source,
+     probe_git_binary,
++    rmtree_force,
+ )
+ from app.modules.skill_source.model import SkillSource
+ from app.modules.skill_source.service import SkillSourceService, source_cache_dir
+@@ -212,6 +217,87 @@ async def test_fetch_missing_remote_then_retry(tmp_path: Path):
+     assert ok_again.commit == _head(repo)
+ 
+ 
++@requires_git
++async def test_fetch_update_url_drift_switches_origin(tmp_path: Path):
++    """换 url 后增量拉取切到新仓库（M-1：remote set-url 修正，不再永远拉旧仓）。"""
++    repo_a = _fake_repo(tmp_path / "a")
++    repo_b = _fake_repo(tmp_path / "b")
++    # B 仓加独有内容，证明拉的是 B 而非结构相同的 A（同秒提交 hash 可能撞）。
++    (repo_b / "skills" / "delta-skill").mkdir()
++    (repo_b / "skills" / "delta-skill" / "SKILL.md").write_text(
++        "---\nname: delta\ndescription: B 仓独有\n---\n", encoding="utf-8"
++    )
++    _git(["add", "-A"], repo_b)
++    _git(["commit", "-m", "b-unique"], repo_b)
++
++    cache = tmp_path / "cache" / "src-1"
++
++    first = await fetch_source(_source(repo_a.as_uri()), cache)
++    assert first.ok is True, first.error
++    assert first.commit == _head(repo_a)
++
++    second = await fetch_source(_source(repo_b.as_uri()), cache)
++
++    assert second.ok is True, second.error
++    assert second.commit == _head(repo_b)
++    assert (cache / "skills" / "delta-skill" / "SKILL.md").is_file(), (
++        "换 url 后应拉到 B 仓内容（origin set-url 修正）"
++    )
++    remote_url = subprocess.run(
++        ["git", "remote", "get-url", "origin"], cwd=cache, capture_output=True, check=True
++    )
++    assert remote_url.stdout.decode("utf-8").strip() == repo_b.as_uri()
++
++
++def test_rmtree_force_readonly(tmp_path: Path):
++    """Windows git 只读对象兼容（M-2）：只读文件/目录也强删，不留非空残留。"""
++    target = tmp_path / "cache-x"
++    obj_dir = target / "objects"
++    obj_dir.mkdir(parents=True)
++    pack = obj_dir / "pack-abc.pack"
++    pack.write_bytes(b"x")
++    os.chmod(pack, stat.S_IREAD)
++    os.chmod(obj_dir, stat.S_IREAD | stat.S_IEXEC)  # 只读目录一并测（rmdir 也会被拒）
++
++    rmtree_force(target)
++    assert not target.exists(), "只读对象应被去只读重试后清掉"
++
++
++@pytest.mark.skipif(sys.platform == "win32", reason="Windows git 默认物化 symlink，无此攻击面")
++def test_discover_skips_symlinked_skill_md(tmp_path: Path):
++    """SKILL.md 本身是 symlink 的目录不算技能（M-6：防借 description 越界读）。"""
++    secret = tmp_path / "secret.md"
++    secret.write_text("---\ndescription: 缓存外机密内容\n---\n", encoding="utf-8")
++    evil = tmp_path / "evil-skill"
++    evil.mkdir()
++    (evil / "SKILL.md").symlink_to(secret)
++    _write_skill(tmp_path, "good-skill", "---\ndescription: 正常\n---\n")
++
++    found = discover_skills(tmp_path)
++
++    assert [s.name for s in found] == ["good-skill"]
++
++
++@pytest.mark.skipif(sys.platform == "win32", reason="Windows git 默认物化 symlink，无此攻击面")
++def test_read_skill_dir_files_skips_symlink(tmp_path: Path):
++    """bundle 收集跳过文件 symlink（M-6：read_bytes 跟随链接即越界读）。"""
++    from app.modules.agent.skills_bundle_service import _read_skill_dir_files
++
++    secret = tmp_path / "outside-secret.txt"
++    secret.write_text("TOP-SECRET", encoding="utf-8")
++    skill_dir = tmp_path / "skill-dir"
++    skill_dir.mkdir()
++    (skill_dir / "SKILL.md").write_text("---\nname: s\n---\n", encoding="utf-8")
++    (skill_dir / "leak.txt").symlink_to(secret)
++
++    files = _read_skill_dir_files(skill_dir, "skill-dir")
++
++    names = [str(rel) for rel, _ in files]
++    assert any(n.replace("\\", "/").endswith("SKILL.md") for n in names)
++    assert not any("leak.txt" in n for n in names), "symlink 文件不应进 bundle"
++    assert b"TOP-SECRET" not in b"".join(content for _, content in files)
++
++
+ # ─── discover_skills：subdir / frontmatter / 容错 / 排除 ────────────────
+ 
+ 
+@@ -310,7 +396,17 @@ def test_discover_excludes_git_dir(tmp_path: Path):
+ async def test_refresh_fetch_writes_back(
+     tmp_path: Path, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+ ):
+-    """refresh 真拉取本地假仓：last_commit/last_fetched_at 回写、last_error 空、缓存落盘。"""
++    """refresh 真拉取本地假仓：last_commit/last_fetched_at 回写、last_error 空、缓存落盘。
++
++    SSRF 复查（M-5）放行桩：本用例 URL 是 file:// 假仓（生产必被拒），专测
++    拉取/回写链路，故拦 assert_source_url；复查语义另见
++    test_refresh_ssrf_recheck_rejects。
++    """
++
++    async def _allow_local(_url: str) -> None:
++        return None
++
++    monkeypatch.setattr("app.modules.skill_source.git_fetcher.assert_source_url", _allow_local)
+     repo = _fake_repo(tmp_path)
+     # 缓存根进测试沙箱：对 Settings 实例 setattr（init kwarg 注入坑，先例
+     # test_source_crud.py test_delete_cascades——setenv 会被 init kwarg 覆盖）。
+@@ -329,6 +425,35 @@ async def test_refresh_fetch_writes_back(
+     assert (source_cache_dir(src.id) / ".git").is_dir(), "真实 clone 应落缓存目录"
+ 
+ 
++async def test_refresh_ssrf_recheck_rejects(
++    tmp_path: Path, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++):
++    """M-5：refresh 拉取前对当前 url 重跑 SSRF——域已不安全 → 400 fail-loud 不拉取。"""
++
++    async def _rebind_to_private(_url: str) -> None:
++        raise UnsafeRepoUrl("域名已解析到私网（模拟保存后 DNS rebinding）")
++
++    async def _probe() -> bool:
++        return True
++
++    async def _must_not_fetch(_session, _source) -> None:
++        raise AssertionError("SSRF 复查未拦截就触发了拉取")
++
++    monkeypatch.setattr(
++        "app.modules.skill_source.git_fetcher.assert_source_url", _rebind_to_private
++    )
++    monkeypatch.setattr("app.modules.skill_source.git_fetcher.probe_git_binary", _probe)
++    monkeypatch.setattr("app.modules.skill_source.service._trigger_fetch", _must_not_fetch)
++
++    src = SkillSource(url="https://8.8.8.8/skills.git", branch="main")
++    db_session.add(src)
++    await db_session.commit()
++    await db_session.refresh(src)
++
++    with pytest.raises(UnsafeRepoUrl):
++        await SkillSourceService(db_session).refresh(src.id)
++
++
+ async def test_create_fetch_failure_not_blocking(
+     client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+ ):
+diff --git a/docs/sillyspec/external-mode-no-root-session-resolution.md b/docs/sillyspec/external-mode-no-root-session-resolution.md
+index 39301c5d0..9d306175f 100644
+--- a/docs/sillyspec/external-mode-no-root-session-resolution.md
++++ b/docs/sillyspec/external-mode-no-root-session-resolution.md
+@@ -59,8 +59,14 @@ read_only PI worker 正常完成（分支产物已 commit、`output_redacted` 50
+ 
+ ## 守护测试锚点
+ 
+-- `test_mission_external_mode.py`（AC-04/05）：external 建仓/converge 短路；
+-- `test_worker_subsession_done.py::TestExternalModeWorkerDone`（ql-20260911-002）：
+-  external worker_done 200+artifact+零唤醒 / 终态 409 / 无归属 404。
++- `backend/app/modules/agent/tests/test_mission_external_mode.py`（AC-04/05）：
++  external 建仓/converge 短路；
++- `backend/app/modules/agent/tests/test_worker_subsession_done.py::TestExternalModeWorkerDone`
++  （ql-20260911-002）：external worker_done 200+artifact+零唤醒 / 终态 409 / 无归属 404。
+ - **待补（建议）**：report_progress / mission_status 的 external 形态冒烟用例
+   （走 resolve 的端点已被源头修复覆盖，测试是防回归锚）。
++
++## 巡检注记（2026-09-12 定时扫描）
++
++- 已知断裂点修复已验证在 main（d879ea247：resolve_mission_for_session run 归属回退 + external 首 run 锚成员资格，守护测试锚点齐）；本文件定位为「双形态契约守则」参考文档，长期有效。
++- 待补建议（report_progress / mission_status 的 external 冒烟用例）属防回归增强，留属主/后续认领；守则本身随每次新写解析/治理逻辑复用。保持活跃（守则文档属性，不随单点修复归档）。
+diff --git a/frontend/src/lib/__tests__/auth.test.ts b/frontend/src/lib/__tests__/auth.test.ts
+new file mode 100644
+index 000000000..10d52aa45
+--- /dev/null
++++ b/frontend/src/lib/__tests__/auth.test.ts
+@@ -0,0 +1,83 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import { updateMyAvatar } from "@/lib/auth";
++
++// fetchMe 会写 zustand store——mock 掉 session store，只断言调用语义。
++const setUserMock = vi.fn();
++vi.mock("@/stores/session", () => ({
++  useSession: {
++    getState: () => ({ setUser: setUserMock }),
++  },
++}));
++
++const fetchMock = vi.fn();
++vi.stubGlobal("fetch", fetchMock);
++
++const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
++
++function meResponse(): Response {
++  return new Response(
++    JSON.stringify({
++      user: { id: "u1", email: "a@b.c", username: "a", is_platform_admin: false },
++      permissions: [],
++    }),
++    { status: 200, headers: { "content-type": "application/json" } },
++  );
++}
++
++afterEach(() => {
++  fetchMock.mockReset();
++  setUserMock.mockReset();
++  warnSpy.mockClear();
++});
++
++describe("updateMyAvatar（H-3：PATCH 成功即成功，fetchMe 刷新失败不上抛）", () => {
++  it("PATCH 成功 + fetchMe 成功 → 正常返回且 store 刷新一次", async () => {
++    fetchMock
++      .mockResolvedValueOnce(new Response("null", { status: 200 })) // PATCH
++      .mockResolvedValueOnce(meResponse()); // GET /api/auth/me
++
++    await expect(updateMyAvatar("/api/file/abc")).resolves.toBeUndefined();
++
++    const [patchUrl, patchInit] = fetchMock.mock.calls[0] ?? [];
++    // apiFetch 会把相对路径补全为绝对 URL（api.test.ts 同款地址断言口径）。
++    expect(String(patchUrl)).toContain("/api/auth/me/avatar");
++    expect(patchInit?.method).toBe("PATCH");
++    expect(patchInit?.body).toBe(JSON.stringify({ avatar: "/api/file/abc" }));
++    expect(setUserMock).toHaveBeenCalledTimes(1);
++    expect(warnSpy).not.toHaveBeenCalled();
++  });
++
++  it("PATCH 成功但 fetchMe 网络失败 → 不抛错（调用方不得误判保存失败而回收新文件）", async () => {
++    fetchMock
++      .mockResolvedValueOnce(new Response("null", { status: 200 })) // PATCH 成功
++      .mockRejectedValueOnce(new TypeError("网络抖动")); // fetchMe 失败
++
++    await expect(updateMyAvatar("/api/file/abc")).resolves.toBeUndefined();
++
++    expect(warnSpy).toHaveBeenCalledTimes(1); // 只留 warn，不上抛
++  });
++
++  it("PATCH 失败 → 原样上抛（调用方孤儿回收路径仍生效）", async () => {
++    fetchMock.mockResolvedValueOnce(
++      new Response(JSON.stringify({ code: "x", message: "bad" }), {
++        status: 500,
++        headers: { "content-type": "application/json" },
++      }),
++    );
++
++    await expect(updateMyAvatar("/api/file/abc")).rejects.toMatchObject({ status: 500 });
++    expect(setUserMock).not.toHaveBeenCalled();
++  });
++
++  it("清除头像：null 映射为空串下发（三态契约回归）", async () => {
++    fetchMock
++      .mockResolvedValueOnce(new Response("null", { status: 200 }))
++      .mockResolvedValueOnce(meResponse());
++
++    await updateMyAvatar(null);
++
++    const [, clearInit] = fetchMock.mock.calls[0] ?? [];
++    expect(clearInit?.body).toBe(JSON.stringify({ avatar: "" }));
++  });
++});
+diff --git a/frontend/src/lib/auth.ts b/frontend/src/lib/auth.ts
+index de9da40eb..6d72fac8b 100644
+--- a/frontend/src/lib/auth.ts
++++ b/frontend/src/lib/auth.ts
+@@ -84,15 +84,22 @@ export async function changePassword(
+  * 值=设置、空串 ''=清除置 NULL、null/缺省=不改——因此清除时映射为空串下发，
+  * 发字面 null 会被后端当「不改」静默忽略。
+  *
+- * 成功后重跑 fetchMe() 写回 store：PATCH 响应是 snake_case 的 UserRead，禁止
+- * 直接 setUser——复用 fetchMe 既有的 snake→camel 降级合并，防映射逻辑双份漂移。
++ * 成功后 best-effort 重跑 fetchMe() 写回 store（复用其 snake→camel 降级合并，
++ * 防映射逻辑双份漂移）。刷新失败**不上抛**：PATCH 已成功（新头像已绑定），
++ * 若把刷新失败当保存失败抛出，调用方 catch 会误回收刚绑定成功的新文件
++ * （桌面/移动账号页的孤儿兜底删除，H-3）；store 短暂滞后由下次任意
++ * fetchMe/页面加载自然收敛。
+  */
+ export async function updateMyAvatar(avatar: string | null): Promise<void> {
+   await apiFetch<void>("/api/auth/me/avatar", {
+     method: "PATCH",
+     json: { avatar: avatar ?? "" },
+   });
+-  await fetchMe();
++  try {
++    await fetchMe();
++  } catch (err) {
++    console.warn("[auth] 头像保存成功但 fetchMe 刷新失败（store 可能短暂滞后）", err);
++  }
+ }
+ 
+ // 点按式人机确认(登录爆破防护;原拖拉滑块已下线)。类型复用 OpenAPI 生成类型

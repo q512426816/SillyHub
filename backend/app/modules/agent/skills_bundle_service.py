@@ -178,7 +178,13 @@ def _read_skill_dir_files(skill_dir: Path, top_name: str) -> list[tuple[Path, by
     for root, dirs, file_names in os.walk(skill_dir):
         dirs[:] = [d for d in dirs if d != ".git"]
         for fname in file_names:
-            paths.append(Path(root) / fname)
+            fpath = Path(root) / fname
+            if fpath.is_symlink():
+                # POSIX 恶意仓可 checkout 出指向缓存外（如 /etc/passwd）的文件
+                # symlink，read_bytes 跟随链接即越界读——链接文件一律不进 bundle
+                # （Windows git 默认物化链接为纯文本，无此面）。
+                continue
+            paths.append(fpath)
     files: list[tuple[Path, bytes]] = []
     for fpath in sorted(paths):
         rel_path = Path(top_name) / fpath.relative_to(skill_dir)
@@ -216,7 +222,7 @@ async def _collect_enabled_git_skills(
     # 延迟导入：skill_source.git_fetcher 顶层 import 本模块的 _parse_skill_frontmatter，
     # 模块级反向 import 会成环（daemon_rpc.py 函数内 import 同款先例）。
     from app.modules.skill_source.model import SkillSource, UserSkillEnable
-    from app.modules.skill_source.service import source_cache_dir
+    from app.modules.skill_source.service import safe_discovery_root
 
     # D-010：user 维度显式 IS NULL（ws 行不混入——version hash 零回归底线）；
     # D-002：workspace 维度并集（OR 分支不限 user_id）。
@@ -251,8 +257,12 @@ async def _collect_enabled_git_skills(
         if source is None:
             # 源已删除（绑定本应被 service 删源连带清理，容错）或已停用——跳过。
             continue
-        cache_dir = source_cache_dir(source.id)
-        discovery_root = cache_dir / source.subdir if source.subdir else cache_dir
+        # 安全发现根（H-1 纵深）：subdir 越界（存量脏数据）→ None，跳过该绑定，
+        # 绝不把收集根引出 skills_git_cache。
+        discovery_root = safe_discovery_root(source)
+        if discovery_root is None:
+            log.warning("skill_bundle_unsafe_subdir_skipped", skill_key=enable.skill_key)
+            continue
         skill_dir = discovery_root / dir_name
         if not await asyncio.to_thread(skill_dir.is_dir):
             # 悬空绑定：目录不存在（刷新后技能目录消失）——跳过但绑定保留。

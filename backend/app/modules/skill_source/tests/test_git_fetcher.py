@@ -25,8 +25,11 @@ create 已拦（D-007 首防线），fetcher 不重复拦，本地 URL 可直达
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -36,12 +39,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, password_hasher
+from app.core.ssrf import UnsafeRepoUrl
 from app.modules.auth.model import User
 from app.modules.skill_source.git_fetcher import (
     FetchResult,
     discover_skills,
     fetch_source,
     probe_git_binary,
+    rmtree_force,
 )
 from app.modules.skill_source.model import SkillSource
 from app.modules.skill_source.service import SkillSourceService, source_cache_dir
@@ -212,6 +217,87 @@ async def test_fetch_missing_remote_then_retry(tmp_path: Path):
     assert ok_again.commit == _head(repo)
 
 
+@requires_git
+async def test_fetch_update_url_drift_switches_origin(tmp_path: Path):
+    """换 url 后增量拉取切到新仓库（M-1：remote set-url 修正，不再永远拉旧仓）。"""
+    repo_a = _fake_repo(tmp_path / "a")
+    repo_b = _fake_repo(tmp_path / "b")
+    # B 仓加独有内容，证明拉的是 B 而非结构相同的 A（同秒提交 hash 可能撞）。
+    (repo_b / "skills" / "delta-skill").mkdir()
+    (repo_b / "skills" / "delta-skill" / "SKILL.md").write_text(
+        "---\nname: delta\ndescription: B 仓独有\n---\n", encoding="utf-8"
+    )
+    _git(["add", "-A"], repo_b)
+    _git(["commit", "-m", "b-unique"], repo_b)
+
+    cache = tmp_path / "cache" / "src-1"
+
+    first = await fetch_source(_source(repo_a.as_uri()), cache)
+    assert first.ok is True, first.error
+    assert first.commit == _head(repo_a)
+
+    second = await fetch_source(_source(repo_b.as_uri()), cache)
+
+    assert second.ok is True, second.error
+    assert second.commit == _head(repo_b)
+    assert (cache / "skills" / "delta-skill" / "SKILL.md").is_file(), (
+        "换 url 后应拉到 B 仓内容（origin set-url 修正）"
+    )
+    remote_url = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=cache, capture_output=True, check=True
+    )
+    assert remote_url.stdout.decode("utf-8").strip() == repo_b.as_uri()
+
+
+def test_rmtree_force_readonly(tmp_path: Path):
+    """Windows git 只读对象兼容（M-2）：只读文件/目录也强删，不留非空残留。"""
+    target = tmp_path / "cache-x"
+    obj_dir = target / "objects"
+    obj_dir.mkdir(parents=True)
+    pack = obj_dir / "pack-abc.pack"
+    pack.write_bytes(b"x")
+    os.chmod(pack, stat.S_IREAD)
+    os.chmod(obj_dir, stat.S_IREAD | stat.S_IEXEC)  # 只读目录一并测（rmdir 也会被拒）
+
+    rmtree_force(target)
+    assert not target.exists(), "只读对象应被去只读重试后清掉"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows git 默认物化 symlink，无此攻击面")
+def test_discover_skips_symlinked_skill_md(tmp_path: Path):
+    """SKILL.md 本身是 symlink 的目录不算技能（M-6：防借 description 越界读）。"""
+    secret = tmp_path / "secret.md"
+    secret.write_text("---\ndescription: 缓存外机密内容\n---\n", encoding="utf-8")
+    evil = tmp_path / "evil-skill"
+    evil.mkdir()
+    (evil / "SKILL.md").symlink_to(secret)
+    _write_skill(tmp_path, "good-skill", "---\ndescription: 正常\n---\n")
+
+    found = discover_skills(tmp_path)
+
+    assert [s.name for s in found] == ["good-skill"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows git 默认物化 symlink，无此攻击面")
+def test_read_skill_dir_files_skips_symlink(tmp_path: Path):
+    """bundle 收集跳过文件 symlink（M-6：read_bytes 跟随链接即越界读）。"""
+    from app.modules.agent.skills_bundle_service import _read_skill_dir_files
+
+    secret = tmp_path / "outside-secret.txt"
+    secret.write_text("TOP-SECRET", encoding="utf-8")
+    skill_dir = tmp_path / "skill-dir"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: s\n---\n", encoding="utf-8")
+    (skill_dir / "leak.txt").symlink_to(secret)
+
+    files = _read_skill_dir_files(skill_dir, "skill-dir")
+
+    names = [str(rel) for rel, _ in files]
+    assert any(n.replace("\\", "/").endswith("SKILL.md") for n in names)
+    assert not any("leak.txt" in n for n in names), "symlink 文件不应进 bundle"
+    assert b"TOP-SECRET" not in b"".join(content for _, content in files)
+
+
 # ─── discover_skills：subdir / frontmatter / 容错 / 排除 ────────────────
 
 
@@ -310,7 +396,17 @@ def test_discover_excludes_git_dir(tmp_path: Path):
 async def test_refresh_fetch_writes_back(
     tmp_path: Path, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
-    """refresh 真拉取本地假仓：last_commit/last_fetched_at 回写、last_error 空、缓存落盘。"""
+    """refresh 真拉取本地假仓：last_commit/last_fetched_at 回写、last_error 空、缓存落盘。
+
+    SSRF 复查（M-5）放行桩：本用例 URL 是 file:// 假仓（生产必被拒），专测
+    拉取/回写链路，故拦 assert_source_url；复查语义另见
+    test_refresh_ssrf_recheck_rejects。
+    """
+
+    async def _allow_local(_url: str) -> None:
+        return None
+
+    monkeypatch.setattr("app.modules.skill_source.git_fetcher.assert_source_url", _allow_local)
     repo = _fake_repo(tmp_path)
     # 缓存根进测试沙箱：对 Settings 实例 setattr（init kwarg 注入坑，先例
     # test_source_crud.py test_delete_cascades——setenv 会被 init kwarg 覆盖）。
@@ -327,6 +423,35 @@ async def test_refresh_fetch_writes_back(
     assert updated.last_commit == _head(repo)
     assert updated.last_fetched_at is not None
     assert (source_cache_dir(src.id) / ".git").is_dir(), "真实 clone 应落缓存目录"
+
+
+async def test_refresh_ssrf_recheck_rejects(
+    tmp_path: Path, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """M-5：refresh 拉取前对当前 url 重跑 SSRF——域已不安全 → 400 fail-loud 不拉取。"""
+
+    async def _rebind_to_private(_url: str) -> None:
+        raise UnsafeRepoUrl("域名已解析到私网（模拟保存后 DNS rebinding）")
+
+    async def _probe() -> bool:
+        return True
+
+    async def _must_not_fetch(_session, _source) -> None:
+        raise AssertionError("SSRF 复查未拦截就触发了拉取")
+
+    monkeypatch.setattr(
+        "app.modules.skill_source.git_fetcher.assert_source_url", _rebind_to_private
+    )
+    monkeypatch.setattr("app.modules.skill_source.git_fetcher.probe_git_binary", _probe)
+    monkeypatch.setattr("app.modules.skill_source.service._trigger_fetch", _must_not_fetch)
+
+    src = SkillSource(url="https://8.8.8.8/skills.git", branch="main")
+    db_session.add(src)
+    await db_session.commit()
+    await db_session.refresh(src)
+
+    with pytest.raises(UnsafeRepoUrl):
+        await SkillSourceService(db_session).refresh(src.id)
 
 
 async def test_create_fetch_failure_not_blocking(

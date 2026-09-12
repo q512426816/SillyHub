@@ -10,12 +10,15 @@ Change: 2026-09-11-skills-central-library (task-02)
   **fetcher 自身不拦**——create 已拦，refresh/触发走缓存无须重复 DNS 解析，
   也让本地假仓（file://）测试可直达 :func:`fetch_source`。
 - :func:`fetch_source`——缓存目录无 ``.git`` 时 ``git clone --depth 1
-  --filter=blob:none --no-tags [-b branch]``；已有则 ``git fetch --prune
-  origin <branch>`` + ``git reset --hard FETCH_HEAD`` 增量更新；commit 取
-  ``git rev-parse HEAD``。子进程一律 ``asyncio.create_subprocess_exec``
-  （worktree/git_runner.py 先例）+ env 注入 ``GIT_TERMINAL_PROMPT=0``（禁凭据
-  交互挂死）+ 每步 300s 超时。**永不抛异常**——失败原因进
-  :class:`FetchResult.error`（调用方写 last_error，不阻塞保存请求）。
+  --filter=blob:none --no-tags [-b branch]``；已有则先做 **origin URL 漂移
+  修正**（``remote get-url`` 与 ``source.url`` 不一致 → ``set-url``/``add``，
+  防 update 换 url 后永远拉旧仓库），再 ``git fetch --prune origin <branch>``
+  + ``git reset --hard FETCH_HEAD`` 增量更新；commit 取 ``git rev-parse HEAD``。
+  子进程一律 ``asyncio.create_subprocess_exec``（worktree/git_runner.py 先例）
+  + env 注入 ``GIT_TERMINAL_PROMPT=0``（禁凭据交互挂死）+ 每步 300s 超时
+  **杀进程树**（POSIX killpg / Windows taskkill /T）。半成品/删除清理走
+  :func:`rmtree_force`（Windows git 只读对象兼容）。**永不抛异常**——失败
+  原因进 :class:`FetchResult.error`（调用方写 last_error，不阻塞保存请求）。
 - :func:`discover_skills`——扫含 ``SKILL.md`` 的目录（剪枝 ``.git``）；单技能
   >200 文件或 >10MB 跳过 + log warn（D-007 二防线，不影响其它技能）；description
   复用 ``skills_bundle_service._parse_skill_frontmatter`` 解析（坏 SKILL.md
@@ -28,8 +31,12 @@ Windows/Linux/macOS 三平台可跑（CLAUDE.md 规则 13）。
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
+import signal
+import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,6 +85,63 @@ def _git_env() -> dict[str, str]:
     return {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 
 
+async def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
+    """杀掉整棵子进程树（git fetch/clone 会派生 git-remote-https helper，只杀
+    父进程会留孤儿持有网络连接与 ``.git`` 句柄）。
+
+    - POSIX：spawn 侧 ``start_new_session=True`` 建独立进程组，此处 ``killpg``
+      一次清组（进程已死时 ProcessLookupError 回退单杀）；
+    - Windows：``taskkill /PID <pid> /T /F``（/T = 进程树）；taskkill 不可用
+      （OSError）回退单杀。
+    """
+    if sys.platform == "win32":
+        try:
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(proc.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        except OSError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+    with contextlib.suppress(ProcessLookupError):
+        await proc.wait()
+
+
+def rmtree_force(path: Path) -> None:
+    """尽力强删目录：Windows 上 git 把 pack/loose object 设为只读，裸
+    ``rmtree(ignore_errors=True)`` 会 PermissionError 静默跳过 → 残留非空目录
+    → 下次 clone 到非空目标 fatal，源陷入永久失败循环。此处对失败项去只读
+    （``stat.S_IWRITE``）重试一次；仍失败则放过（保持 best-effort 语义）。
+    """
+    if not path.exists():
+        return
+
+    def _chmod_retry(func, target, _exc) -> None:  # onexc 签名（3.12+）
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            pass
+
+    try:
+        # requires-python >= 3.12，直接用 onexc（onerror 已废弃、3.14 移除）。
+        shutil.rmtree(path, onexc=_chmod_retry)
+    except OSError:
+        pass
+
+
 async def assert_source_url(url: str) -> None:
     """SSRF 首防线封装（D-007）：私网/非法 scheme 抛 UnsafeRepoUrl/SsrfBlocked（400）。"""
     await assert_public_url(url)
@@ -87,6 +151,7 @@ async def probe_git_binary() -> bool:
     """git 二进制探测（R-01）：``shutil.which`` 初判 + ``git --version`` 子进程确认。"""
     if shutil.which("git") is None:
         return False
+    proc: asyncio.subprocess.Process | None = None
     try:
         proc = await asyncio.create_subprocess_exec(
             "git",
@@ -96,7 +161,12 @@ async def probe_git_binary() -> bool:
             stderr=asyncio.subprocess.PIPE,
         )
         await asyncio.wait_for(proc.communicate(), timeout=GIT_STEP_TIMEOUT_SECONDS)
-    except (TimeoutError, FileNotFoundError, OSError):
+    except TimeoutError:
+        # 超时补杀（此前裸 return 会留孤儿 git 进程，与 _run_git 行为不一致）。
+        if proc is not None:
+            await _kill_process_tree(proc)
+        return False
+    except (FileNotFoundError, OSError):
         return False
     return proc.returncode == 0
 
@@ -104,9 +174,14 @@ async def probe_git_binary() -> bool:
 async def _run_git(args: list[str], *, cwd: Path | None = None) -> tuple[int, str, str]:
     """跑一条 git 命令（无 shell、env 注入、300s 超时），返回 (rc, stdout, stderr)。
 
-    超时杀进程后按 rc=124 返回（不抛）；spawn 失败（无 git 等）交由
-    :func:`fetch_source` 的兜底 except 收敛成 FetchResult。
+    超时杀**整棵进程树**（POSIX 独立进程组 killpg / Windows taskkill /T）后按
+    rc=124 返回（不抛）；spawn 失败（无 git 等）交由 :func:`fetch_source` 的
+    兜底 except 收敛成 FetchResult。
     """
+    spawn_kwargs: dict = {}
+    if sys.platform != "win32":
+        # 独立进程组：超时可 killpg 一次清掉 git-remote-https 等派生 helper。
+        spawn_kwargs["start_new_session"] = True
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
@@ -114,14 +189,14 @@ async def _run_git(args: list[str], *, cwd: Path | None = None) -> tuple[int, st
         env=_git_env(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **spawn_kwargs,
     )
     try:
         stdout_b, stderr_b = await asyncio.wait_for(
             proc.communicate(), timeout=GIT_STEP_TIMEOUT_SECONDS
         )
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
+        await _kill_process_tree(proc)
         arg_head = " ".join(args[:3])
         return 124, "", f"git {arg_head} 超时（{GIT_STEP_TIMEOUT_SECONDS}s），进程已终止"
     return (
@@ -149,7 +224,7 @@ async def fetch_source(source: SkillSource, cache_root: Path) -> FetchResult:
 async def _clone_repo(source: SkillSource, repo_dir: Path) -> FetchResult:
     # clone 目标须不存在/为空：清掉无 .git 的残留目录（上次失败的半成品）。
     if repo_dir.exists():
-        shutil.rmtree(repo_dir, ignore_errors=True)
+        rmtree_force(repo_dir)
     repo_dir.parent.mkdir(parents=True, exist_ok=True)
     rc, _stdout, stderr = await _run_git(
         [
@@ -166,12 +241,30 @@ async def _clone_repo(source: SkillSource, repo_dir: Path) -> FetchResult:
     )
     if rc != 0:
         # 失败半成品清掉，下次保存/刷新可重 clone（不留只含 .git 碎片的目录）。
-        shutil.rmtree(repo_dir, ignore_errors=True)
+        rmtree_force(repo_dir)
         return FetchResult(ok=False, error=f"git clone 失败（exit {rc}）：{stderr[:_STDERR_CLIP]}")
     return await _resolve_head(repo_dir)
 
 
 async def _update_repo(source: SkillSource, repo_dir: Path) -> FetchResult:
+    # URL 漂移修正：update 改 url 只写 DB，origin 仍是首次 clone 时写进
+    # .git/config 的旧地址——不修正则后续 fetch 永远拉旧仓库（M-1）。
+    rc, stdout, _stderr = await _run_git(["remote", "get-url", "origin"], cwd=repo_dir)
+    if rc != 0:
+        rc_fix, _out, stderr = await _run_git(["remote", "add", "origin", source.url], cwd=repo_dir)
+        if rc_fix != 0:
+            return FetchResult(
+                ok=False, error=f"git remote add 失败（exit {rc_fix}）：{stderr[:_STDERR_CLIP]}"
+            )
+    elif stdout != source.url:
+        rc_fix, _out, stderr = await _run_git(
+            ["remote", "set-url", "origin", source.url], cwd=repo_dir
+        )
+        if rc_fix != 0:
+            return FetchResult(
+                ok=False,
+                error=f"git remote set-url 失败（exit {rc_fix}）：{stderr[:_STDERR_CLIP]}",
+            )
     rc, _stdout, stderr = await _run_git(
         ["fetch", "--prune", "origin", source.branch], cwd=repo_dir
     )
@@ -209,7 +302,9 @@ def discover_skills(cache_dir: Path) -> list[DiscoveredSkill]:
     skill_dirs: list[Path] = []
     for root, dirs, files in os.walk(cache_dir):
         dirs[:] = [d for d in dirs if d != ".git"]
-        if "SKILL.md" in files:
+        # SKILL.md 本身是 symlink 的目录不算技能目录（POSIX 恶意仓可用链接
+        # 指向缓存外文件借 description 泄露内容；Windows git 默认物化链接无此面）。
+        if "SKILL.md" in files and not (Path(root) / "SKILL.md").is_symlink():
             skill_dirs.append(Path(root))
 
     results: list[DiscoveredSkill] = []

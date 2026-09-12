@@ -32,8 +32,8 @@ Change: 2026-09-11-skills-central-library (task-01 + task-02 接线 + task-03)
 
 from __future__ import annotations
 
+import asyncio
 import re
-import shutil
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,8 +51,11 @@ from app.modules.skill_source import git_fetcher
 from app.modules.skill_source.model import SkillSource, UserSkillEnable
 from app.modules.skill_source.schema import LibrarySkillItem, LibraryView, SourceRead
 from app.modules.skills.model import CustomSkill
-from app.modules.workspace.model import Workspace
 
+# ql-20260912-001：顶层导入 Workspace 会触发 workspace/__init__ → router →
+# skills_view_service → 本模块 的循环导入（bridges task-03 引入，直接
+# `import app.modules.skill_source.service` 即炸）。照 settings 模块 lazy import
+# 先例下沉到唯一消费点（_require_workspace_member 的 session.get）。
 log = get_logger(__name__)
 
 # 缓存根约定（design 总体方案 / provides）：``<spec_data_root>/skills_git_cache/<source_id>/``。
@@ -129,8 +132,14 @@ async def _trigger_fetch(session: AsyncSession, source: SkillSource) -> None:
             source.last_error = result.error
         await session.commit()
         if result.ok:
-            discover_root = cache_dir / source.subdir if source.subdir else cache_dir
-            discovered = git_fetcher.discover_skills(discover_root)
+            # 发现扫描走 to_thread（全树 os.walk+逐文件 stat，同步跑会阻塞事件
+            # 循环）；发现根经 safe_discovery_root（subdir 非法跳过）。
+            discover_root = safe_discovery_root(source)
+            discovered = (
+                await asyncio.to_thread(git_fetcher.discover_skills, discover_root)
+                if discover_root is not None
+                else []
+            )
             log.info(
                 "skill_source_fetch_done",
                 source_id=str(source.id),
@@ -191,6 +200,63 @@ class WorkspaceScopeForbidden(AppError):
     http_status = 403
 
 
+class SkillSourceSubdirInvalid(AppError):
+    """subdir 非法（422，防穿越：``..`` 段 / 绝对路径 / 盘符 / 反斜杠 / 控制字符 / 空段）。"""
+
+    code = "skill_source.invalid_subdir"
+    http_status = 422
+
+
+class SkillSourceBranchInvalid(AppError):
+    """branch 非法（422，防 git 选项注入：``-`` 前缀 / 反斜杠 / 控制字符 / 空白 / 空串）。"""
+
+    code = "skill_source.invalid_branch"
+    http_status = 422
+
+
+# subdir/branch 共用的控制字符判定（含 NUL、换行、DEL）。
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+# Windows 盘符绝对路径（C:/x、C:\x）——pathlib 在 Windows 上会把它当绝对路径替换。
+_DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
+
+
+def validate_subdir(subdir: str) -> None:
+    """subdir 防穿越校验（422）——发现根/收集根拼 ``缓存根 / subdir``，值域必须
+    限定在仓库相对 posix 子路径：允许 ``a/b`` 嵌套，拒绝 ``..``/``.``/空段、
+    绝对路径（前导 ``/``、盘符）、反斜杠（Windows 分隔歧义）与控制字符。
+    """
+    if subdir == "":
+        raise SkillSourceSubdirInvalid("subdir 不能为空串——仓库根请传 null")
+    if _CTRL_CHARS_RE.search(subdir):
+        raise SkillSourceSubdirInvalid(f"subdir 含控制字符：{subdir!r}")
+    if "\\" in subdir:
+        raise SkillSourceSubdirInvalid(f"subdir 不能含反斜杠（分隔符仅支持 /）：{subdir!r}")
+    if subdir.startswith("/") or _DRIVE_LETTER_RE.match(subdir):
+        raise SkillSourceSubdirInvalid(f"subdir 不能是绝对路径：{subdir!r}")
+    bad_segments = [s for s in subdir.split("/") if s in ("", ".", "..")]
+    if bad_segments:
+        raise SkillSourceSubdirInvalid(
+            f"subdir 含空段或 .. 段（不允许逃出仓库）：{subdir!r}",
+        )
+
+
+def validate_branch(branch: str) -> None:
+    """branch 防选项注入校验（422）——fetch 侧 branch 是位置参数（refspec 位），
+    ``-`` 前缀值会被 git parse-options 当选项（如 ``--recurse-submodules`` 可拉
+    .gitmodules 里攻击者控制的 URL）；反斜杠/控制字符/空白对 git ref 名同样非法。
+    """
+    if (
+        branch == ""
+        or branch.startswith("-")
+        or "\\" in branch
+        or _CTRL_CHARS_RE.search(branch)
+        or any(ch.isspace() for ch in branch)
+    ):
+        raise SkillSourceBranchInvalid(
+            f"branch 非法（不允许 - 前缀 / 反斜杠 / 控制字符 / 空白 / 空串）：{branch!r}"
+        )
+
+
 def parse_skill_key(skill_key: str) -> tuple[uuid.UUID, str]:
     """解析 ``<source_id>:<目录名>`` → ``(source_id, 目录名)``；非法抛 422。
 
@@ -220,10 +286,36 @@ def parse_skill_key(skill_key: str) -> tuple[uuid.UUID, str]:
     return source_id, dir_part
 
 
-def _discovery_root(source: SkillSource) -> Path:
-    """源的技能发现根：``缓存根/[subdir]``（task-02 _trigger_fetch 同口径）。"""
+def safe_discovery_root(source: SkillSource) -> Path | None:
+    """源的技能发现根：``缓存根/[subdir]``；subdir 非法或逃出缓存根 → None。
+
+    纵深防御（H-1）：保存口 :func:`validate_subdir` 已 422 拦新值，但存量行 /
+    手工改库仍可能带越界 subdir——所有读路径（library 聚合、enable 校验、
+    bundle 收集）统一经本函数取根，None 即跳过该源并 warn，绝不把发现/收集
+    引出缓存目录。subdir 为空 = 缓存根本身（恒安全）。
+    """
     cache_dir = source_cache_dir(source.id)
-    return cache_dir / source.subdir if source.subdir else cache_dir
+    if not source.subdir:
+        return cache_dir
+    try:
+        validate_subdir(source.subdir)
+    except SkillSourceSubdirInvalid as exc:
+        log.warning(
+            "skill_source_subdir_invalid_skipped",
+            source_id=str(source.id),
+            error=str(exc),
+        )
+        return None
+    root = cache_dir / source.subdir
+    # 双保险：格式合法仍以 resolve 后的包含关系兜底（防空串段绕过类残余）。
+    if not root.resolve().is_relative_to(cache_dir.resolve()):
+        log.warning(
+            "skill_source_subdir_escapes_cache_skipped",
+            source_id=str(source.id),
+            subdir=source.subdir,
+        )
+        return None
+    return root
 
 
 def _sillyspec_description(skill_dir: Path) -> str:
@@ -267,10 +359,13 @@ class SkillSourceService:
         branch: str = "main",
         subdir: str | None = None,
     ) -> SkillSource:
-        """创建源（SSRF await + git 探测 + url 查重，保存即触发拉取）。"""
+        """创建源（SSRF await + git 探测 + url 查重 + branch/subdir 校验，保存即触发拉取）。"""
         # SSRF 校验（async——显式 await，plan-review 修正点）：私网/非法 scheme
         # 抛 UnsafeRepoUrl/SsrfBlocked（400）直接透传给全局异常处理器。
         await git_fetcher.assert_source_url(url)
+        validate_branch(branch)
+        if subdir is not None:
+            validate_subdir(subdir)
         await self._require_git_binary()
 
         existing = await self._get_by_url(url)
@@ -318,8 +413,10 @@ class SkillSourceService:
                 )
             source.url = url
         if branch is not None:
+            validate_branch(branch)
             source.branch = branch
         if subdir is not None:
+            validate_subdir(subdir)
             source.subdir = subdir
         if enabled is not None:
             source.enabled = enabled
@@ -341,8 +438,15 @@ class SkillSourceService:
         return source
 
     async def refresh(self, source_id: uuid.UUID) -> SkillSource:
-        """手动刷新（admin）：git 探测 + 真实拉取 + 回写 last_* 字段。"""
+        """手动刷新（admin）：SSRF 复查 + git 探测 + 真实拉取 + 回写 last_* 字段。
+
+        SSRF 复查（M-5）：保存时校验一次不足以防保存后 DNS rebinding 到内网
+        （core/ssrf 基线承诺「每次调用重新解析」，webhook/http_get 每跳复查）——
+        refresh 是唯一不经 create/update 的拉取入口，拉取前对当前 url 重跑
+        :func:`assert_source_url`，域已 rebinding 到私网 → 400 fail-loud。
+        """
         source = await self.get(source_id)
+        await git_fetcher.assert_source_url(source.url)
         await self._require_git_binary()
         await _trigger_fetch(self._session, source)
         return source
@@ -405,7 +509,16 @@ class SkillSourceService:
                 f"技能不可启用（源不存在或已停用）：{skill_key!r}",
                 details={"skill_key": skill_key},
             )
-        discovered_names = {d.name for d in git_fetcher.discover_skills(_discovery_root(source))}
+        discovery_root = safe_discovery_root(source)
+        if discovery_root is None:
+            # subdir 越界（存量脏数据纵深拦截）——该源整体不可启用。
+            raise SkillNotDiscoverable(
+                f"技能源 subdir 非法（越界），不可启用：{skill_key!r}",
+                details={"skill_key": skill_key, "source_id": str(source_id)},
+            )
+        discovered_names = {
+            d.name for d in await asyncio.to_thread(git_fetcher.discover_skills, discovery_root)
+        }
         if dir_name not in discovered_names:
             raise SkillNotDiscoverable(
                 f"技能不存在于该源当前发现结果：{skill_key!r}",
@@ -504,7 +617,10 @@ class SkillSourceService:
         for source in sources:
             if not source.enabled:
                 continue
-            for discovered in git_fetcher.discover_skills(_discovery_root(source)):
+            discovery_root = safe_discovery_root(source)
+            if discovery_root is None:
+                continue  # subdir 越界（存量脏数据纵深拦截）——该源不参与发现
+            for discovered in await asyncio.to_thread(git_fetcher.discover_skills, discovery_root):
                 skill_key = f"{source.id}:{discovered.name}"
                 skills.append(
                     LibrarySkillItem(
@@ -542,7 +658,12 @@ class SkillSourceService:
         for source in await self.list_():
             if not source.enabled:
                 continue
-            names.update(d.name for d in git_fetcher.discover_skills(_discovery_root(source)))
+            discovery_root = safe_discovery_root(source)
+            if discovery_root is None:
+                continue  # subdir 越界（存量脏数据纵深拦截）——该源不参与差集
+            names.update(
+                d.name for d in await asyncio.to_thread(git_fetcher.discover_skills, discovery_root)
+            )
         return names
 
     async def delete(self, source_id: uuid.UUID) -> None:
@@ -561,7 +682,9 @@ class SkillSourceService:
         await self._session.commit()
 
         # 缓存目录清理 best-effort：目录可能从未拉取过（task-02 前必不存在）。
-        shutil.rmtree(source_cache_dir(source.id), ignore_errors=True)
+        # rmtree_force：Windows 上 git 只读对象需去只读重试，否则残留非空目录
+        # 卡死同名重建。
+        git_fetcher.rmtree_force(source_cache_dir(source.id))
 
     # ── helpers ───────────────────────────────────────────────────────
 
@@ -572,6 +695,10 @@ class SkillSourceService:
         ``_is_workspace_member`` 同款——任意角色行即视为 member，不关心权限粒度；
         细粒度 WORKSPACE_WRITE 域门在后续 workspace 端点卡片）。
         """
+        from app.modules.workspace.model import (
+            Workspace,
+        )
+
         workspace = await self._session.get(Workspace, workspace_id)
         if workspace is None:
             raise WorkspaceScopeForbidden(

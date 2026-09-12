@@ -59,8 +59,14 @@ read_only PI worker 正常完成（分支产物已 commit、`output_redacted` 50
 
 ## 守护测试锚点
 
-- `test_mission_external_mode.py`（AC-04/05）：external 建仓/converge 短路；
-- `test_worker_subsession_done.py::TestExternalModeWorkerDone`（ql-20260911-002）：
-  external worker_done 200+artifact+零唤醒 / 终态 409 / 无归属 404。
+- `backend/app/modules/agent/tests/test_mission_external_mode.py`（AC-04/05）：
+  external 建仓/converge 短路；
+- `backend/app/modules/agent/tests/test_worker_subsession_done.py::TestExternalModeWorkerDone`
+  （ql-20260911-002）：external worker_done 200+artifact+零唤醒 / 终态 409 / 无归属 404。
 - **待补（建议）**：report_progress / mission_status 的 external 形态冒烟用例
   （走 resolve 的端点已被源头修复覆盖，测试是防回归锚）。
+
+## 巡检注记（2026-09-12 定时扫描）
+
+- 已知断裂点修复已验证在 main（d879ea247：resolve_mission_for_session run 归属回退 + external 首 run 锚成员资格，守护测试锚点齐）；本文件定位为「双形态契约守则」参考文档，长期有效。
+- 待补建议（report_progress / mission_status 的 external 冒烟用例）属防回归增强，留属主/后续认领；守则本身随每次新写解析/治理逻辑复用。保持活跃（守则文档属性，不随单点修复归档）。

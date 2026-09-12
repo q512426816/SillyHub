@@ -61,10 +61,26 @@
 文件：frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（mock provider 补 agent_kind: claude）
 验证：36 passed
 
-## ql-20260912-001-081d | 2026-09-12 07:06:51 | 24h审查风险修复批第二轮：skill_source subdir穿越/换URL失效/rmtree死循环/子进程树杀/事件循环阻塞/branch注入/refresh SSRF复查、MCP PATCH密钥静默清空、头像fetchMe失败误删新…
-状态：进行中
+## ql-20260912-001-081d | 2026-09-12 07:06:51 | 24h 只读审查发现的十项高置信风险落地修复（H-1 subdir 穿越 / H-2 MCP PATCH 密钥静默清空 / H-3 头像误删新文件 / M-1…
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/skill_source/schema.py, backend/app/modules/skill_source/service.py, backend/app/modules/skill_source/git_fetcher.py, backend/app/modules/mcp_registry/service.py, backend/app/modules/file/service.py, backend/app/modules/agent/skills_bundle_service.py, frontend/src/lib/auth.ts
+文件：
+- backend/app/modules/skill_source/service.py（H-1 校验+safe_discovery_root+M-4/M-5+循环导入拆环）
+- backend/app/modules/skill_source/git_fetcher.py（M-1/M-2/M-3/M-6+probe 补杀）
+- backend/app/modules/mcp_registry/service.py（H-2 密钥保留语义）
+- backend/app/modules/file/service.py（M-8 docstring）
+- backend/app/modules/agent/skills_bundle_service.py（M-6+safe_discovery_root 接入）
+- frontend/src/lib/auth.ts（H-3 fetchMe best-effort）
+- docs/sillyspec/external-mode-no-root-session-resolution.md（门禁拦·裸文件名引用改仓根相对路径）
+- backend/app/modules/mcp_registry/tests/test_service.py（软归属·同模块测试，未声明）
+- backend/app/modules/skill_source/tests/test_git_fetcher.py（软归属·同模块测试，未声明）
+- frontend/src/lib/__tests__/auth.test.ts（软归属·同模块测试，未声明）
+需求：24h 只读审查发现的十项高置信风险落地修复（H-1 subdir 穿越 / H-2 MCP PATCH 密钥静默清空 / H-3 头像误删新文件 / M-1 换 URL 失效 / M-2 Windows rmtree 死循环 / M-3 子进程树杀 / M-4 事件循环阻塞 / M-5 branch 注入+refresh SSRF 复查 / M-6 symlink 越界读 / M-8 回收语义 docstring），外加预存循环导入拆环与并行会话遗留的门禁两拦（坑文档移动核实放行、裸文件名引用改仓根相对路径）。
+根因：GET 不回显密钥键致读-改-写交集恒空、fetchMe 与 PATCH 同抛误判保存失败、origin 地址只写 DB 不修正、git 只读对象+rmtree ignore_errors 静默失败、kill 单进程留 helper 孤儿、同步 os.walk 阻塞事件循环、refspec 位可注入选项、followlinks 只挡目录链接、workspace/__init__ 急切拉 router 成环。
+方案：service 层 validate_subdir/validate_branch 422 + safe_discovery_root 五消费点纵深、密钥保留语义改显式清空、fetchMe best-effort、remote get-url/set-url 漂移修正、rmtree_force onexc chmod 重试、POSIX killpg+Windows taskkill /T /F、asyncio.to_thread 四点、symlink 双侧跳过、Workspace 延迟导入拆环。
+结果：skill_source 80 passed 2 skipped（Windows symlink 按设计跳过）/ mcp_registry test_service 58 passed / 前端 auth 4 + 账号页 15 passed / ruff check+format 绿 / mypy 14 文件零 issue / 前端 tsc exit 0。
+审计：⚖️ 归属切分：7 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.gitignore, backend/app/modules/skill_source/tests/test_source_crud.py, backend/migrations/env.py, backend/migrations/versions/1d763051eb15_merge_workspace_scope_and_agent_log_.py, docs/sillyspec/pre-commit-autofix-swallows-commit.md, docs/sillyspec/finished/agent-log-hub-attribution-cross-session-contamination.md, docs/sillyspec/finished/pre-commit-autofix-swallows-commit.md
+审计：🔍 软归属：3 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：backend/app/modules/mcp_registry/tests/test_service.py（+82/-4）, backend/app/modules/skill_source/tests/test_git_fetcher.py（+126/-1）, frontend/src/lib/__tests__/auth.test.ts（+83/-0）
 
 ## ql-20260912-001-b3f7 | 2026-09-12 07:30:00 | env.py 登记+循环导入 P0+双 head 缝合+gitignore（quick 三连收尾）
 状态：已完成

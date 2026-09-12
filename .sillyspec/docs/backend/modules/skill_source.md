@@ -44,16 +44,33 @@ git 技能本体**不进 DB**——浅克隆进缓存根 `<spec_data_root>/skill
        last_commit/last_fetched_at 并清 last_error；失败只记 last_error
        （成功回写字段保留，区分「从未成功」与「上次成功这次失败」）
 拉取: 缓存目录无 .git → clone --depth 1 --filter=blob:none --no-tags -b <branch>；
-       有 → fetch --prune origin <branch> + reset --hard FETCH_HEAD（增量不重建，
-       未跟踪文件保留）；GIT_TERMINAL_PROMPT=0 + 每步 300s 超时 +
-       asyncio.create_subprocess_exec；失败半成品目录清掉可重 clone
-发现: discover_skills 扫含 SKILL.md 目录（剪枝 .git）；单技能 >200 文件或
+       有 → 先 origin URL 漂移修正（remote get-url ≠ source.url 时 set-url/add，
+       ql-20260912-001——update 换 url 只写 DB，origin 不修正会永远拉旧仓库），
+       再 fetch --prune origin <branch> + reset --hard FETCH_HEAD（增量不重建，
+       未跟踪文件保留）；GIT_TERMINAL_PROMPT=0 + 每步 300s 超时**杀进程树**
+       （POSIX start_new_session+killpg / Windows taskkill /T /F，防 git-remote-https
+       helper 孤儿）+ asyncio.create_subprocess_exec；失败/删除的目录清理走
+       rmtree_force（Windows git 只读对象去只读重试，裸 ignore_errors rmtree 会
+       静默失败留非空目录、同名重建永久卡死）
+发现: discover_skills 扫含 SKILL.md 目录（剪枝 .git；SKILL.md 本身是 symlink 的
+       目录不算技能——POSIX 恶意仓借链接越界读 description）；调用侧一律
+       asyncio.to_thread（全树 walk+stat 不许阻塞事件循环）；单技能 >200 文件或
        >10MB 跳过 + log warn（D-007 二防线，不影响其它技能）；结果不落库
+subdir/branch 校验: create/update 保存口 validate_subdir（拒 ../绝对路径/盘符/
+       反斜杠/控制字符/空段——发现根/收集根拼 缓存根/subdir，值域必须锁在仓库
+       相对 posix 子路径）+ validate_branch（拒 - 前缀/反斜杠/控制字符/空白——
+       fetch 侧 branch 是 refspec 位，- 开头会被 git parse-options 当选项）；
+       读路径统一经 safe_discovery_root（subdir 非法或逃出缓存根 → None 跳过该源，
+       存量脏数据纵深）——收集侧 skills_bundle_service 同口径接入
 enable: parse_skill_key 格式非法 422 → enabled=True 须命中**启用源**的发现结果
        （源不存在/停用/目录消失统一 404 SkillNotDiscoverable）→ 绑定
        upsert/delete 幂等；停用不校验存在性（悬空语义归收集层）
+refresh: 拉取前对当前 url 重跑 assert_source_url（ql-20260912-001，M-5——保存后
+       DNS rebinding 到内网须 fail-loud 400，对齐 core/ssrf「每次调用重新解析」基线）
 bundle 第三源: agent/skills_bundle_service._collect_enabled_git_skills 收集启用绑定
-       命中（悬空绑定验目录存在，不存在跳过但绑定保留——技能回来自动恢复）
+       命中（悬空绑定验目录存在，不存在跳过但绑定保留——技能回来自动恢复；
+       发现根经 safe_discovery_root；收集跳过 symlink 文件——POSIX 链接目标
+       越界读防护）
 ```
 
 ## 注意事项

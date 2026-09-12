@@ -43,10 +43,15 @@ async def reclaim_orphaned_file_by_url(
     """best-effort 回收文件中心 URL 指向的文件（ql-20260911-019-1f01 头像孤儿清理）。
 
     头像换绑/清除后旧值失引用——调用方在**新值落库成功后**以旧 URL 调本函数：
-    形态为 ``/api/file/{uuid}`` 且行存在、归属通过（uploaded_by 本人）→
-    ``FileService.soft_delete``（置 deleted_at + best-effort 删存储对象）；其余
-    情况（外链 / 非 uuid / 不存在或已删 / 无权 / 存储抖动）一律 False 静默——
-    回收是兜底语义，绝不影响主写路径的成功返回。
+    形态为 ``/api/file/{uuid}`` 且行存在、当前用户对该文件**可见** →
+    ``FileService.soft_delete``（置 deleted_at + best-effort 删存储对象）；
+    其余情况（外链 / 非 uuid / 不存在或已删 / 无权 / 存储抖动）一律 False
+    静默——回收是兜底语义，绝不影响主写路径的成功返回。
+
+    可见性判定即 ``FileService._can_access``（与下载同口径，**非** uploaded_by
+    严格断言）：uploaded_by 本人 / platform admin / workspace 归属文件对
+    WORKSPACE_READ 成员均放行。也因此本函数不是引用计数回收——同一文件被
+    多行引用（如头像 URL 重复绑定）时，任一可见者回收即整体下线。
     """
     if not url or not url.startswith(FILE_URL_PREFIX):
         return False

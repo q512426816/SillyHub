@@ -40,6 +40,11 @@ download: _get_active_for(user)（缺/软删/无权 → 404）
 - inline 预览白名单 `_INLINE_IMAGE_TYPES = {jpeg,png,gif,webp}`，其余一律 attachment 强制下载。
 - `file_urls` 字段值语义是文件 id 而非 URL：前端受控值为 id 列表，回显经 batch-meta 取文件名；PPM 各业务表字段名不变仅值含义变。
 - 访问控制：meta/download/batch/list 均过 `_can_access`/`allowed_workspace_ids`，跨 owner 访问按工作区读权限收敛。
+- `reclaim_orphaned_file_by_url`（头像孤儿回收，ql-20260911-019-1f01）的可见性判定
+  = `_can_access`（uploaded_by 本人 / platform admin / workspace 归属文件对
+  WORKSPACE_READ 成员），**非** uploaded_by 严格断言、也**无引用计数**——同一
+  文件被多行引用时任一可见者回收即整体下线（语义与 `DELETE /api/file/{id}`
+  同源；调它前确认业务上可接受，ql-20260912-001 文档修正）。
 - 测试用 `MockStorage`（内存 dict）替身，conftest 同时替换 `get_session` 与 `get_storage_backend`。
 
 ## 人工备注

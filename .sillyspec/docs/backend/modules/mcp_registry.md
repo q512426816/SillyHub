@@ -118,6 +118,11 @@ user_id=None 时仅 platform 位 == 旧 KV platform_default 语义（旧 daemon 
   `/api/platform-settings/mcp` 端点与前端旧客户端已移除（本 change task-13）
 - 前端解绑契约（P1-1 修复）：user 解绑必须 `DELETE /bindings/user/{本人 user_id}`
   带尾段——无尾段形态后端恒 422（`useToggleMcpBinding` 已自动携带当前用户 id）
+- **PATCH server_config 密钥保留语义（H-2，ql-20260912-001）**：提交
+  `server_config` 但不带 `secret_env_keys` → 沿用全部既有密钥键原密文（GET 的
+  env 不回显密钥键，裸 API 读-改-写客户端的提交 env 恒缺密钥键——按 env 交集
+  推导会静默清空全部密文，即 P0「密钥毁坏」残留面）；移除密钥必须显式
+  `secret_env_keys=[]`；提交 env 里带 `<set>` 占位的既有键仍走保留信封分支
 
 ## 人工备注
 

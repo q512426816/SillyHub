@@ -287,6 +287,101 @@ async def test_update_url_to_new_public_200(
     assert resp.json()["url"] == PUBLIC_URL_2
 
 
+# ─── subdir 防穿越 / branch 防选项注入（422）────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_subdir",
+    [
+        "",  # 空串（仓库根应传 null）
+        "../escape",  # 父段
+        "skills/../../etc",  # 深层父段
+        "/abs/path",  # 前导 / 绝对路径
+        "C:/win/abs",  # Windows 盘符（pathlib 会当绝对路径替换）
+        "C:\\win\\abs",  # 盘符 + 反斜杠
+        "skills\\nested",  # 反斜杠（Windows 分隔歧义）
+        "skills//nested",  # 空段
+        "skills/./nested",  # 当前段
+        "skills/\tnested",  # 控制字符
+    ],
+)
+async def test_create_subdir_invalid_422(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch, bad_subdir: str
+):
+    """subdir 越界形态创建 → 422 且不落库（H-1：发现/收集根拼 缓存根/subdir）。"""
+    _mock_git_present(monkeypatch)
+    _, token = await _make_user(db_session, admin=True)
+    h = _headers(token)
+
+    resp = await client.post(
+        SOURCES_PATH, json={"url": PUBLIC_URL, "subdir": bad_subdir}, headers=h
+    )
+    assert resp.status_code == 422, (
+        f"{bad_subdir!r} should be 422, got {resp.status_code}: {resp.text}"
+    )
+    resp = await client.get(SOURCES_PATH, headers=h)
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_create_subdir_nested_ok(client: AsyncClient, db_session: AsyncSession, monkeypatch):
+    """合法嵌套 subdir（仓库相对 posix 子路径）→ 201 正常回显。"""
+    _mock_git_present(monkeypatch)
+    _, token = await _make_user(db_session, admin=True)
+
+    resp = await client.post(
+        SOURCES_PATH, json={"url": PUBLIC_URL, "subdir": "packages/skills"}, headers=_headers(token)
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["subdir"] == "packages/skills"
+
+
+@pytest.mark.asyncio
+async def test_update_subdir_invalid_422(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """update 改 subdir 到越界形态 → 422 且原值不动。"""
+    _mock_git_present(monkeypatch)
+    _, token = await _make_user(db_session, admin=True)
+    h = _headers(token)
+    created = await _create_source(client, token)
+
+    resp = await client.patch(
+        f"{SOURCES_PATH}/{created['id']}", json={"subdir": "../escape"}, headers=h
+    )
+    assert resp.status_code == 422, resp.text
+    resp = await client.get(SOURCES_PATH, headers=h)
+    assert resp.json()[0]["subdir"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_branch",
+    [
+        "-recurse-submodules=yes",  # fetch refspec 位被 parse-options 当选项
+        "--depth=1",
+        "",  # 空串
+        "fe ature",  # 空白（git ref 名非法）
+        "fea\\ture",  # 反斜杠
+        "fea\nture",  # 控制字符
+    ],
+)
+async def test_create_branch_invalid_422(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch, bad_branch: str
+):
+    """branch 防选项注入（M-5）：- 前缀/空白/反斜杠/控制字符/空串 → 422。"""
+    _mock_git_present(monkeypatch)
+    _, token = await _make_user(db_session, admin=True)
+
+    resp = await client.post(
+        SOURCES_PATH, json={"url": PUBLIC_URL, "branch": bad_branch}, headers=_headers(token)
+    )
+    assert resp.status_code == 422, (
+        f"{bad_branch!r} should be 422, got {resp.status_code}: {resp.text}"
+    )
+
+
 # ─── git 二进制探测（R-01 → 422）────────────────────────────────────────
 
 

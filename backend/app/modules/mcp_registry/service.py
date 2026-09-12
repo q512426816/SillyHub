@@ -348,6 +348,11 @@ class McpRegistryService:
         既有信封不重加密；新密钥键用占位符、或明文键值是占位符 → 422。只改
         ``secret_env_keys``（不动 server_config）同样支持：升级键值明文加密、
         降级键解密回明文 env。
+
+        保留语义（H-2 修复）：提交 server_config 但**不带** ``secret_env_keys``
+        → 沿用全部既有密钥键原密文（GET 的 env 不回显密钥键，读-改-写客户端的
+        提交 env 恒缺密钥键，按 env 交集推导会静默清空全部密文）；移除密钥必须
+        显式传 ``secret_env_keys=[]``。
         """
         row = await self._get_server_for_write(server_id, user)
         updates = inp.model_dump(exclude_unset=True)
@@ -364,11 +369,21 @@ class McpRegistryService:
             self._validate_server_type(new_config)
             existing_env = row.encrypted_env or {}
             if new_secret_keys is None:
-                # 指定态未随提交：沿用既有密钥键集与提交 env 的交集（保底不改密文）。
-                secret_keys = [k for k in existing_env if k in _env_keys(new_config)]
+                # 指定态未随提交 = 保持现状：沿用全部既有密钥键（H-2 修复）。
+                # GET 响应的 env 不回显密钥键（只回 secret_env_keys 键名清单），
+                # 裸 API「GET→改→PATCH」客户端的提交 env 恒缺密钥键——旧实现
+                # 「与提交 env 取交集」会把交集算成空、全部密文静默清空。移除
+                # 密钥必须显式传 ``secret_env_keys=[]``；升级新密钥同样显式传。
+                secret_keys = _normalize_secret_keys(list(existing_env))
             else:
                 secret_keys = _normalize_secret_keys(new_secret_keys)
-            self._validate_secret_keys(new_config, secret_keys, allow_placeholder=True)
+            # 键存在性校验只针对出现在提交 env 里的键：显式指定的键必须在 env
+            # （前端契约不变）；保留键不在提交 env 属预期（GET 不回显），无值可校。
+            self._validate_secret_keys(
+                new_config,
+                [k for k in secret_keys if k in _env_keys(new_config)],
+                allow_placeholder=True,
+            )
             sanitized, secret_env = _split_secret_env(new_config, secret_keys)
             self._validate_plain_placeholder(sanitized)
             encrypted: dict[str, dict[str, str]] = {}
@@ -383,6 +398,10 @@ class McpRegistryService:
                 else:
                     ciphertext, key_id = self.cipher.encrypt(str(value))
                     encrypted[key] = McpEnvCiphertext.of(ciphertext, key_id).model_dump()
+            # 保留态密钥未出现在提交 env（新 GET 形态的读-改-写）：原密文原样保留。
+            for key in secret_keys:
+                if key not in encrypted and key in existing_env:
+                    encrypted[key] = existing_env[key]
             row.server_config = sanitized
             row.encrypted_env = encrypted or None
         elif new_secret_keys is not None:

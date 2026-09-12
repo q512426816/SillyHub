@@ -84,15 +84,22 @@ export async function changePassword(
  * 值=设置、空串 ''=清除置 NULL、null/缺省=不改——因此清除时映射为空串下发，
  * 发字面 null 会被后端当「不改」静默忽略。
  *
- * 成功后重跑 fetchMe() 写回 store：PATCH 响应是 snake_case 的 UserRead，禁止
- * 直接 setUser——复用 fetchMe 既有的 snake→camel 降级合并，防映射逻辑双份漂移。
+ * 成功后 best-effort 重跑 fetchMe() 写回 store（复用其 snake→camel 降级合并，
+ * 防映射逻辑双份漂移）。刷新失败**不上抛**：PATCH 已成功（新头像已绑定），
+ * 若把刷新失败当保存失败抛出，调用方 catch 会误回收刚绑定成功的新文件
+ * （桌面/移动账号页的孤儿兜底删除，H-3）；store 短暂滞后由下次任意
+ * fetchMe/页面加载自然收敛。
  */
 export async function updateMyAvatar(avatar: string | null): Promise<void> {
   await apiFetch<void>("/api/auth/me/avatar", {
     method: "PATCH",
     json: { avatar: avatar ?? "" },
   });
-  await fetchMe();
+  try {
+    await fetchMe();
+  } catch (err) {
+    console.warn("[auth] 头像保存成功但 fetchMe 刷新失败（store 可能短暂滞后）", err);
+  }
 }
 
 // 点按式人机确认(登录爆破防护;原拖拉滑块已下线)。类型复用 OpenAPI 生成类型

@@ -553,14 +553,89 @@ class TestCryptoRoundtrip:
         assert row.encrypted_env["API_KEY"]["ct"] != old_ct  # 密文已换
         assert svc.decrypt_server_env(row) == {"API_KEY": "new-key"}
 
-    async def test_update_replacing_config_with_no_secrets_clears_encrypted_env(
+    async def test_update_config_without_secret_keys_preserves_ciphertext(
         self, db_session: AsyncSession
     ) -> None:
+        """H-2：PATCH server_config 不带 secret_env_keys → 既有密文原样保留。
+
+        新 GET 形态 env 不回显密钥键（只回 secret_env_keys 键名清单），裸 API
+        「GET→改→PATCH」客户端的提交 env 恒缺密钥键——旧实现按 env 交集推导
+        会把全部密文静默清空（正是 P0「密钥毁坏」的残留面）。
+        """
         user = await _create_user(db_session, label="a")
         svc = McpRegistryService(db_session)
         created = await svc.create_server(
             _payload(
-                name="clear-sec",
+                name="keep-rmw",
+                server_config={"command": "npx", "args": [], "env": {"API_KEY": "old-secret"}},
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+        row = await db_session.get(McpServer, created.id)
+        assert row is not None
+        frozen_ct = row.encrypted_env["API_KEY"]["ct"]
+
+        # 读-改-写：改 command/args + 提交不含 API_KEY 的 env，不带 secret_env_keys。
+        updated = await svc.update_server(
+            created.id,
+            McpServerUpdate(
+                server_config={"command": "npx", "args": ["--new"], "env": {"CACHE_DIR": "/tmp"}}
+            ),
+            user,
+        )
+        await db_session.refresh(row)
+
+        assert updated.secret_env_keys == ["API_KEY"]  # 键集回显不变
+        assert row.encrypted_env is not None
+        assert row.encrypted_env["API_KEY"]["ct"] == frozen_ct  # 密文一字节不动
+        assert svc.decrypt_server_env(row) == {"API_KEY": "old-secret", "CACHE_DIR": "/tmp"}
+        assert row.server_config["command"] == "npx"  # 明文改动生效
+
+    async def test_update_legacy_env_placeholder_without_keys_spec_keeps_ciphertext(
+        self, db_session: AsyncSession
+    ) -> None:
+        """旧客户端形态：env 带 <set> 占位、不带 secret_env_keys → 密文同样保留。"""
+        user = await _create_user(db_session, label="a")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="keep-legacy",
+                server_config={"command": "npx", "args": [], "env": {"API_KEY": "v1"}},
+                secret_env_keys=["API_KEY"],
+            ),
+            user,
+        )
+        row = await db_session.get(McpServer, created.id)
+        assert row is not None
+        frozen_ct = row.encrypted_env["API_KEY"]["ct"]
+
+        await svc.update_server(
+            created.id,
+            McpServerUpdate(
+                server_config={
+                    "command": "npx",
+                    "args": [],
+                    "env": {"API_KEY": "<set>", "CACHE_DIR": "/tmp"},
+                },
+            ),
+            user,
+        )
+        await db_session.refresh(row)
+
+        assert row.encrypted_env is not None
+        assert row.encrypted_env["API_KEY"]["ct"] == frozen_ct
+        assert svc.decrypt_server_env(row) == {"API_KEY": "v1", "CACHE_DIR": "/tmp"}
+
+    async def test_update_config_with_empty_secret_keys_clears(
+        self, db_session: AsyncSession
+    ) -> None:
+        """显式清空：提交 ``secret_env_keys=[]`` 才移除全部密钥（H-2 新契约）。"""
+        user = await _create_user(db_session, label="a")
+        svc = McpRegistryService(db_session)
+        created = await svc.create_server(
+            _payload(
+                name="clear-explicit",
                 server_config={"command": "npx", "args": [], "env": {"API_KEY": "to-be-dropped"}},
                 secret_env_keys=["API_KEY"],
             ),
@@ -569,13 +644,16 @@ class TestCryptoRoundtrip:
 
         await svc.update_server(
             created.id,
-            McpServerUpdate(server_config={"command": "npx", "args": [], "env": {"N": "1"}}),
+            McpServerUpdate(
+                server_config={"command": "npx", "args": [], "env": {"N": "1"}},
+                secret_env_keys=[],
+            ),
             user,
         )
 
         row = await db_session.get(McpServer, created.id)
         assert row is not None
-        assert row.encrypted_env is None  # 整份替换语义：新配置无 secret → 清空
+        assert row.encrypted_env is None  # 显式空键集 = 清空
 
     async def test_update_without_server_config_keeps_ciphertext(
         self, db_session: AsyncSession

@@ -1,0 +1,102 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-ef4648bf",
+  "totals": {
+    "files": 10,
+    "additions": 604,
+    "deletions": 49
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/skills_bundle_service.py",
+      "declared": true,
+      "additions": 14,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/file/service.py",
+      "declared": true,
+      "additions": 9,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/mcp_registry/service.py",
+      "declared": true,
+      "additions": 22,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/skill_source/git_fetcher.py",
+      "declared": true,
+      "additions": 109,
+      "deletions": 14,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/skill_source/service.py",
+      "declared": true,
+      "additions": 140,
+      "deletions": 13,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "docs/sillyspec/external-mode-no-root-session-resolution.md",
+      "declared": true,
+      "additions": 9,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/auth.ts",
+      "declared": true,
+      "additions": 10,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/mcp_registry/tests/test_service.py",
+      "declared": false,
+      "additions": 82,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "soft"
+    },
+    {
+      "path": "backend/app/modules/skill_source/tests/test_git_fetcher.py",
+      "declared": false,
+      "additions": 126,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "soft"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/auth.test.ts",
+      "declared": false,
+      "additions": 83,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "soft"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260912-001-081d",
+  "sessionId": "quick-ef4648bf",
+  "savedAt": "2026-09-12T02:28:37.588Z",
+  "patchSha256": "74b64c0deeb23dc11e876ccada5b1ee16937fdd3d3c3a72e6e0f6372340684d0",
+  "patchStatus": "ok"
+}
