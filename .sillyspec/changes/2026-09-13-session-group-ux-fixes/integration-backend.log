@@ -1,0 +1,40 @@
+...                                                                      [100%]
+============================== warnings summary ===============================
+app\core\errors.py:223
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\core\errors.py:223: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class AuthAvatarInvalid(AppError):
+
+app\core\errors.py:240
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\core\errors.py:240: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class InvalidTransition(AppError):
+
+app\modules\workspace\skills_view_service.py:107
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\modules\workspace\skills_view_service.py:107: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpConfigTypeNotStdio(AppError):
+
+app\modules\workspace\skills_view_service.py:120
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\modules\workspace\skills_view_service.py:120: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpConfigSecretUnresolvable(AppError):
+
+app\modules\workspace\skills_view_service.py:139
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\modules\workspace\skills_view_service.py:139: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpRegistryEnvUndecryptable(AppError):
+
+app\modules\workspace\skills_view_service.py:157
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\modules\workspace\skills_view_service.py:157: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpRegistryEntryInvalid(AppError):
+
+app\modules\workspace\skills_view_service.py:266
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\modules\workspace\skills_view_service.py:266: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class SkillNameInvalid(AppError):
+
+app\modules\workspace\skills_view_service.py:279
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\modules\workspace\skills_view_service.py:279: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class SkillPathInvalid(AppError):
+
+app\modules\workspace\skills_view_service.py:322
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\worktrees\2026-09-13-session-group-ux-fixes\backend\app\modules\workspace\skills_view_service.py:322: DeprecationWarning: 'HTTP_413_REQUEST_ENTITY_TOO_LARGE' is deprecated. Use 'HTTP_413_CONTENT_TOO_LARGE' instead.
+    class SkillFileTooLarge(AppError):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3 passed, 9 warnings in 13.41s

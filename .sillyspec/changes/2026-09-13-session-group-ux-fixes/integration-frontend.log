@@ -1,0 +1,157 @@
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/qinyi/IdeaProjects/multi-agent-platform/.sillyspec/.runtime/worktrees/2026-09-13-session-group-ux-fixes/frontend[39m
+
+ [32m✓[39m src/components/daemon/__tests__/session-input-bar-height.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 415[2mms[22m[39m
+ [32m✓[39m src/components/daemon/__tests__/session-panel-draft-scope.test.tsx [2m([22m[2m10 tests[22m[2m)[22m[33m 1241[2mms[22m[39m
+   [33m[2m✓[22m[39m page 真会话草稿切换时序（R-01 基线锁定）[2m > [22mA 输入草稿 → 切 B：B 显示自有草稿，A 的键不被 B 的写入污染 [33m657[2mms[22m[39m
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 批量与单条删除（组头尾随多选入口）[2m > [22m[2m组头「多选」→ 勾选条目 → 删除选中回调 ids；全选本组
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 批量与单条删除（组头尾随多选入口）[2m > [22m[2m单条删除：hover 删除按钮 → 确认 → onDeleteSessions([id])
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 批量与单条删除（组头尾随多选入口）[2m > [22m[2m删除结果 toast（ql-20260903-019）：回调返回失败个数 → warning 提示，不再零反馈
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 归档 UX（ql-20260831-013）[2m > [22m[2m归档确认成功 → toast 指引去「已归档会话」筛选；部分失败 → warning
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 归档 UX（ql-20260831-013）[2m > [22m[2m归档确认成功 → toast 指引去「已归档会话」筛选；部分失败 → warning
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 群行归档与删除操作（task-06）[2m > [22m[2m删除确认流：Modal 文案含群名与「所有成员」语义；确认 → onDeleteGroup(群 id)
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 群行归档与删除操作（task-06）[2m > [22m[2m删除确认点「取消」→ onDeleteGroup 零触发（误点保护）
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 群行归档与删除操作（task-06）[2m > [22m[2m归档确认流：确认 → onArchiveGroup(群 id) + 成功 toast 指引去归档视图
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 群行归档与删除操作（task-06）[2m > [22m[2m已归档群行「取消归档」确认流：Modal 文案恢复语义 → 确认后 onUnarchiveGroup(群 id)
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+[90mstderr[2m | src/components/sessions/__tests__/session-list-panel.test.tsx[2m > [22m[2mSessionListPanel 群行归档与删除操作（task-06）[2m > [22m[2m多群 id 透传：对第二群删除 → Modal 文案只绑定该群名，onDeleteGroup 收到 g-2（非首群串号）
+[22m[39mError: Not implemented: window.getComputedStyle(elt, pseudoElt)
+    at module.exports (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at window.getComputedStyle (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\jsdom@24.1.3\node_modules\jsdom\lib\jsdom\browser\Window.js:897:7)
+    at measureScrollbarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:35:34)
+    at getTargetScrollBarSize (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\getScrollBarSize.js:87:10)
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+portal@2.2.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\portal\lib\useScrollLocker.js:22:62
+    at C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\@rc-component+util@1.11.1_react-dom@18.3.1_react@18.3.1__react@18.3.1\node_modules\@rc-component\util\lib\hooks\useLayoutEffect.js:19:12
+    at commitHookEffectListMount (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:23189:26)
+    at commitPassiveMountOnFiber (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24970:11)
+    at commitPassiveMountEffects_complete (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24930:9)
+    at commitPassiveMountEffects_begin (C:\Users\qinyi\IdeaProjects\multi-agent-platform\frontend\node_modules\.pnpm\react-dom@18.3.1_react@18.3.1\node_modules\react-dom\cjs\react-dom.development.js:24917:7) [90mundefined[39m
+
+ [32m✓[39m src/components/sessions/__tests__/session-list-panel.test.tsx [2m([22m[2m101 tests[22m[2m)[22m[33m 19286[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 全局树初次渲染[2m > [22m默认一次拉取 limit=500；按 workspace_id 分组（可见会话数排序+构造序稳定，0 会话组沉底仍显示计数 0） [33m506[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 两层筛选下拉[2m > [22m智能体层过滤 codex；「全部」清空智能体；机器层「全部」清空并隐藏第二层 [33m553[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 两层筛选下拉[2m > [22m智能体下拉含全部支持引擎（pi/cursor，单一源 ql-20260908-007）：pi/cursor 会话可筛选 [33m438[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 状态与搜索（树形态视图过滤）[2m > [22m状态下拉选「已结束」→ 仅 ended 条目；零新增请求 [33m426[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 筛选后条目去冗余（ql-20260823-003）[2m > [22m筛选智能体后条目隐藏引擎 chip（全部同引擎，冗余）；清空恢复 [33m488[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 组头回调与截断[2m > [22m组内超 50 截断 + 「显示全部」（R-03） [33m823[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 批量与单条删除（组头尾随多选入口）[2m > [22m组头「多选」→ 勾选条目 → 删除选中回调 ids；全选本组 [33m728[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 批量与单条删除（组头尾随多选入口）[2m > [22m单条删除：hover 删除按钮 → 确认 → onDeleteSessions([id]) [33m371[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 批量与单条删除（组头尾随多选入口）[2m > [22m删除结果 toast（ql-20260903-019）：回调返回失败个数 → warning 提示，不再零反馈 [33m364[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 归档 UX（ql-20260831-013）[2m > [22m归档确认成功 → toast 指引去「已归档会话」筛选；部分失败 → warning [33m382[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 分组默认折叠与本地 Agent 小节（ql-20260824-001）[2m > [22mR-05：筛选变化重置「本地 Agent」小节展开态（与组级重置同语义） [33m310[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel「关联」筛选下拉（task-10 / X-009）[2m > [22mtask-06（FR-05）：PPM 任务/问题分组选项 + 选中 ppm:<kind>:<uuid> → ppm_item_kind/ppm_item_id 透传 [33m350[2mms[22m[39m
+   [33m[2m✓[22m[39m SessionListPanel 行尾活性小灯与未读红点[2m > [22mmap 命中渲染行尾小灯；悬停弹组合渲染悬停卡（状态名/静默时长/证据摘要/推导时间四行） [33m359[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m115 passed[39m[22m[90m (115)[39m
+[2m   Start at [22m 05:36:17
+[2m   Duration [22m 32.99s[2m (transform 2.81s, setup 2.52s, collect 27.71s, tests 20.94s, environment 5.74s, prepare 854ms)[22m
+

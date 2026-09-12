@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-13-session-group-ux-fixes",
+  "generatedAt": "2026-09-12T21:45:55.340Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-13-session-group-ux-fixes",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 1,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-13-session-group-ux-fixes",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-13-session-group-ux-fixes",
+      "metrics": {
+        "backendEndpoints": 594,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-13-session-group-ux-fixes",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "tests": {
+    "command": "module[frontend,daemon]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-12T21:47:01.242Z"
+  },
+  "runtimeEvidence": [
+    {
+      "claim": "FR-3 后端群列表可见工作区集合在真实 DB + 真实 app router 下集成验证通过（双工作区关联群可见集恰为 {D,F}、无项目群仅直接归属、非成员不可见）",
+      "command": "`cd <worktree>/backend && uv run pytest tests/modules/daemon/test_group_visible_workspaces.py -q --no-cov`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-13-session-group-ux-fixes/integration-backend.log"
+    },
+    {
+      "claim": "FR-1/FR-2/FR-3 前端关键面（草稿隔离时序 + pointer 拖拽 + 集合过滤渲染）jsdom 集成验证通过",
+      "command": "`cd <worktree>/frontend && pnpm exec vitest run src/components/daemon/__tests__/session-panel-draft-scope.test.tsx src/components/daemon/__tests__/session-input-bar-height.test.tsx src/components/sessions/__tests__/session-list-panel.test.tsx`",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-13-session-group-ux-fixes/integration-frontend.log"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

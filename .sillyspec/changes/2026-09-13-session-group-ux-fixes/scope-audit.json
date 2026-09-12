@@ -1,0 +1,260 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "79ceacd7e44d5f2f8ba9bd600c0c5534331b537e",
+  "totals": {
+    "files": 30,
+    "additions": 1708,
+    "deletions": 50
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/group/router.py",
+      "additions": 21,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/crud.py",
+      "additions": 29,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 10,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/tests/modules/daemon/test_group_visible_workspaces.py",
+      "additions": 264,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "docs/sillyspec/finished/agent-log-ctx-attribution-mismatch.md",
+      "additions": 78,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/agent-log-hub-attribution-cross-session-contamination.md",
+      "additions": 58,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/conflict-compare-wrong-status-root.md",
+      "additions": 125,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md",
+      "additions": 24,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/platform-spec-junction-migration-split.md",
+      "additions": 48,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/platform-sync-progress-rollback-and-db-corruption.md",
+      "additions": 48,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/pre-commit-autofix-swallows-commit.md",
+      "additions": 66,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/sessions/page.tsx",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx",
+      "additions": 26,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx",
+      "additions": 489,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-input-bar.tsx",
+      "additions": 14,
+      "deletions": 9,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "additions": 11,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "additions": 14,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/turn-state.ts",
+      "additions": 23,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/floating/floating-session-host.tsx",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+      "additions": 77,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "additions": 15,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-session-list.test.tsx",
+      "additions": 10,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-session-list.tsx",
+      "additions": 6,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+      "additions": 64,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-list-panel.tsx",
+      "additions": 9,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/sessions-portal.tsx",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 11,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "scripts/migrate-spec-junction.mjs",
+      "additions": 152,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "73e39f20145c4e04fa57e08e410c3a24696a1702fe9a612f436e4ee0b03bb133",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-12T18:00:36.168Z"
+}

@@ -1,0 +1,1618 @@
+diff --git a/backend/app/modules/daemon/group/router.py b/backend/app/modules/daemon/group/router.py
+index 1a51fec0c..efc65454d 100644
+--- a/backend/app/modules/daemon/group/router.py
++++ b/backend/app/modules/daemon/group/router.py
+@@ -50,6 +50,10 @@ from app.modules.daemon.group.service import (
+     get_online_member_ids_bulk,
+ )
+ 
++# crud 子模块直取（service/__init__ 聚合重导出面不含本函数；照
++# permission_service.py:1183 的 helpers 子模块直取先例）。
++from app.modules.daemon.group.service.crud import get_project_workspace_map
++
+ # 自带 /group-chats prefix（空根路径 "" 在 FastAPI 需挂非空 prefix 才合法），
+ # 经 daemon router include 复用其 /daemon prefix → 最终 /api/daemon/group-chats。
+ router = APIRouter(prefix="/group-chats", tags=["daemon-group-chat"])
+@@ -79,6 +83,12 @@ class GroupChatListItemRead(GroupChatRead):
+     最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
+     （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
+     ts > 位点；cap 99+）。
++
++    ``visible_workspace_ids``（2026-09-13-session-group-ux-fixes D-003）：群
++    可见工作区集合 = 直接归属 ``workspace_id`` ∪ 项目关联工作区
++    （``PpmProjectWorkspace`` M:N，批量单查，去重）——群列表可见性判定的
++    单一源，前端桌面/移动列表过滤消费（旧缓存无该字段时 ``?? [workspace_id]``
++    兜底退化现状行为）。
+     """
+ 
+     online_member_ids: list[uuid.UUID] = []
+@@ -87,6 +97,8 @@ class GroupChatListItemRead(GroupChatRead):
+     unread_count: int = 0
+     last_mention: dict[str, str] | None = None
+     pinned: GroupChatPinnedRead | None = None
++    # D-003：端点层组装（照 online_member_ids 先例），service 读体不携带。
++    visible_workspace_ids: list[uuid.UUID] = []
+ 
+ 
+ class GroupMemberDetailRead(GroupMemberRead):
+@@ -239,6 +251,11 @@ async def list_group_chats(
+     items = [_to_list_item(r) for r in reads]
+     # ql-20260903-024：presence 一次 SCAN 分桶（原逐群各扫一遍全键空间）。
+     online_by_group = await get_online_member_ids_bulk([item.id for item in items])
++    # 2026-09-13-session-group-ux-fixes（D-003）：项目 → 关联工作区批量映射
++    # （单条 IN 查，无 N+1）——群列表可见工作区集合的数据源。
++    project_workspace_map = await get_project_workspace_map(
++        session, {r.project_id for r in reads if r.project_id is not None}
++    )
+     for item in items:
+         last_content, last_ts = previews.get(item.id, (None, None))
+         item.last_message = last_content
+@@ -247,6 +264,10 @@ async def list_group_chats(
+         item.last_mention = mentions.get(item.id)
+         # task-06（§5.4）：presence 在线集接通（Redis 不可用降级空数组）。
+         item.online_member_ids = online_by_group.get(item.id, [])
++        # D-003：可见工作区集合 = 直接归属 ∪ 项目关联（去重保序，锚工作区
++        # 居首）；组装在端点层（service 返回 GroupChatRead，DTO 通路进不去）。
++        linked = project_workspace_map.get(item.project_id, []) if item.project_id else []
++        item.visible_workspace_ids = list(dict.fromkeys([item.workspace_id, *linked]))
+     return items
+ 
+ 
+diff --git a/backend/app/modules/daemon/group/service/crud.py b/backend/app/modules/daemon/group/service/crud.py
+index 2571d6514..0c2bfa75f 100644
+--- a/backend/app/modules/daemon/group/service/crud.py
++++ b/backend/app/modules/daemon/group/service/crud.py
+@@ -11,9 +11,11 @@ from __future__ import annotations
+ 
+ import uuid
+ from collections import Counter
++from collections.abc import Iterable
+ from datetime import UTC, datetime
+ 
+ from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.modules.agent.model import (
+     AgentGroupChat,
+@@ -30,6 +32,7 @@ from app.modules.agent.schema import (
+ )
+ from app.modules.auth.model import User
+ from app.modules.daemon.model import DaemonInstance, DaemonRuntime
++from app.modules.workspace.model import PpmProjectWorkspace
+ 
+ from .helpers import (
+     GROUP_AGENT_MEMBER_LIMIT,
+@@ -443,6 +446,32 @@ async def list_groups(svc, user: User, *, archived: bool | None = False) -> list
+     ]
+ 
+ 
++async def get_project_workspace_map(
++    session: AsyncSession, project_ids: Iterable[uuid.UUID]
++) -> dict[uuid.UUID, list[uuid.UUID]]:
++    """项目 → 关联工作区列表的批量映射（2026-09-13-session-group-ux-fixes D-003）。
++
++    单条 ``SELECT ppm_project_id, workspace_id FROM ppm_project_workspace
++    WHERE ppm_project_id IN (...)``（无 N+1），供群列表端点组装
++    ``visible_workspace_ids``（直接归属 ∪ 项目关联，去重）——群列表可见性
++    判定的单一数据源。空 ``project_ids`` 早退空 dict（免空 IN 查询）。
++    """
++    ids = list(project_ids)
++    if not ids:
++        return {}
++    rows = (
++        await session.execute(
++            select(PpmProjectWorkspace.ppm_project_id, PpmProjectWorkspace.workspace_id).where(
++                PpmProjectWorkspace.ppm_project_id.in_(ids)
++            )
++        )
++    ).all()
++    mapping: dict[uuid.UUID, list[uuid.UUID]] = {}
++    for ppm_project_id, workspace_id in rows:
++        mapping.setdefault(ppm_project_id, []).append(workspace_id)
++    return mapping
++
++
+ async def get_group(svc, group_id: uuid.UUID, user: User) -> GroupChatRead:
+     """群详情（成员完整列表含六要素 + shadow_status，design §6.1）。"""
+     group = await svc._get_group(group_id)
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 2b399d51e..2e4e9aad3 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -43843,6 +43843,15 @@
+               }
+             ],
+             "title": "Last Mention"
++          },
++          "visible_workspace_ids": {
++            "items": {
++              "type": "string",
++              "format": "uuid"
++            },
++            "type": "array",
++            "title": "Visible Workspace Ids",
++            "default": []
+           }
+         },
+         "type": "object",
+@@ -43859,7 +43868,7 @@
+           "created_at"
+         ],
+         "title": "GroupChatListItemRead",
+-        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。\n\n``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.\npinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed\n``GroupChatPinnedRead``；无置顶为 None）。\n\n``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线\n最新一行 ts（无消息 None，未读排序数据源）与本成员未读数\n（``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则\nts > 位点；cap 99+）。"
++        "description": "群列表项（design §6.1：成员摘要 + online_member_ids + 最后消息）。\n\n``online_member_ids``（task-06 接通，design §5.4）：读 Redis\n``group_presence:{群id}:*`` 活跃集（群 SSE 生成器循环 touch 续期，TTL\n60s）；Redis 不可用降级空数组。最后消息摘要 task-03 已接通\n（``get_last_message_previews``：最新 user_input/投影行首 60 字）。\n\n``last_mention``（群聊体验 quick，2026-09-02）：最近 @请求用户的摘要\n（``get_last_mention_previews`` 扫描最近时间线，命中返回\n``{content(截 60 字), ts, member_name}``，无 @ 为 None）。\n\n``pinned``（quick 群 P2，2026-09-02）：置顶消息快照（``settings_json.\npinned`` 透出，service ``_to_read`` 已填 dict——本读体收窄为 typed\n``GroupChatPinnedRead``；无置顶为 None）。\n\n``last_message_at``/``unread_count``（群 P2 第二波，2026-09-02）：时间线\n最新一行 ts（无消息 None，未读排序数据源）与本成员未读数\n（``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则\nts > 位点；cap 99+）。\n\n``visible_workspace_ids``（2026-09-13-session-group-ux-fixes D-003）：群\n可见工作区集合 = 直接归属 ``workspace_id`` ∪ 项目关联工作区\n（``PpmProjectWorkspace`` M:N，批量单查，去重）——群列表可见性判定的\n单一源，前端桌面/移动列表过滤消费（旧缓存无该字段时 ``?? [workspace_id]``\n兜底退化现状行为）。"
+       },
+       "GroupChatPinnedRead": {
+         "properties": {
+diff --git a/backend/tests/modules/daemon/test_group_visible_workspaces.py b/backend/tests/modules/daemon/test_group_visible_workspaces.py
+new file mode 100644
+index 000000000..8dd5f2a27
+--- /dev/null
++++ b/backend/tests/modules/daemon/test_group_visible_workspaces.py
+@@ -0,0 +1,264 @@
++"""task-03（2026-09-13-session-group-ux-fixes D-003）群列表 visible_workspace_ids。
++
++覆盖（任务卡 acceptance）：
++
++- 群挂项目（``PpmProjectWorkspace`` 关联 D/F 两工作区、群 ``workspace_id=D``）
++  → 列表项 ``visible_workspace_ids`` 含 D 与 F（顺序不敏感，且 D 去重不重复
++  出现——直接归属与项目关联交集）；
++- 无 project 群（项目删除 SET NULL 后的存量口径，直改行模拟）→
++  ``visible_workspace_ids`` 仅直接归属 ``[workspace_id]``；
++- 非群成员用户（纵使是项目成员）列表不见该群——既有成员过滤零回归。
++
++夹具范式镜像 ``test_group_member_avatar_fallback.py``（in-memory SQLite +
++httpx ASGI client + 手签 JWT + workspace 角色播种；Redis publish 两处
++get_redis 打桩）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from collections.abc import AsyncIterator
++from datetime import UTC, datetime
++from unittest.mock import AsyncMock
++from unittest.mock import patch as mock_patch
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy import update
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentGroupChat
++from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
++from app.modules.auth.permissions import Permission
++from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
++from app.modules.workspace.model import PpmProjectWorkspace, Workspace
++
++# ── 环境播种（test_group_member_avatar_fallback.py 同款）────────────────────
++
++
++async def _token_for(user: User) -> str:
++    """为用户行手签 JWT（get_current_principal Bearer 路径）。"""
++    from app.core.config import get_settings
++    from app.core.security import create_access_token
++
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email or "",
++        is_admin=bool(user.is_platform_admin),
++        settings=get_settings(),
++    )
++    return token
++
++
++async def _create_user_with_token(
++    db_session: AsyncSession,
++    *,
++    name: str,
++) -> tuple[User, str]:
++    """造平台用户。"""
++    user = User(
++        id=uuid.uuid4(),
++        email=f"visible-{name}-{uuid.uuid4()}@example.com",
++        password_hash="irrelevant",
++        display_name=name,
++        status="active",
++        is_platform_admin=False,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    await db_session.refresh(user)
++    return user, await _token_for(user)
++
++
++def _headers(token: str) -> dict[str, str]:
++    return {"Authorization": f"Bearer {token}"}
++
++
++async def _grant_workspace_role(
++    db_session: AsyncSession,
++    *,
++    workspace_id: uuid.UUID,
++    user_id: uuid.UUID,
++    permissions: list[Permission],
++) -> None:
++    role = Role(
++        id=uuid.uuid4(),
++        key=f"visible-{uuid.uuid4().hex[:8]}",
++        name="visible-workspace-test-role",
++        description="task-03 seed",
++        is_system=False,
++    )
++    db_session.add(role)
++    await db_session.flush()
++    for p in permissions:
++        db_session.add(RolePermission(role_id=role.id, permission=p))
++    db_session.add(
++        UserWorkspaceRole(
++            user_id=user_id,
++            workspace_id=workspace_id,
++            role_id=role.id,
++            granted_by=None,
++            granted_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++
++async def _make_env(
++    db_session: AsyncSession,
++) -> tuple[Workspace, Workspace, PpmProjectMaintenance]:
++    """双工作区（D/F）+ 同时关联两工作区的项目（D-003 场景底座）。"""
++    ws_d = Workspace(
++        id=uuid.uuid4(),
++        name="visible-ws-d",
++        slug=f"visible-ws-d-{uuid.uuid4().hex[:8]}",
++        root_path="C:/tmp/visible-ws-d",
++        status="active",
++    )
++    ws_f = Workspace(
++        id=uuid.uuid4(),
++        name="visible-ws-f",
++        slug=f"visible-ws-f-{uuid.uuid4().hex[:8]}",
++        root_path="C:/tmp/visible-ws-f",
++        status="active",
++    )
++    db_session.add_all([ws_d, ws_f])
++    project = PpmProjectMaintenance(
++        id=uuid.uuid4(),
++        project_code=f"VIS-{uuid.uuid4().hex[:12]}",
++        project_name="可见工作区测试项目",
++    )
++    db_session.add(project)
++    db_session.add_all(
++        [
++            PpmProjectWorkspace(ppm_project_id=project.id, workspace_id=ws_d.id),
++            PpmProjectWorkspace(ppm_project_id=project.id, workspace_id=ws_f.id),
++        ]
++    )
++    await db_session.commit()
++    return ws_d, ws_f, project
++
++
++async def _env_user(
++    db_session: AsyncSession,
++    ws_d: Workspace,
++    project: PpmProjectMaintenance,
++    *,
++    name: str,
++) -> tuple[User, str]:
++    """项目成员 + D 工作区 TASK_RUN_AGENT 角色（端点门；群成员资格另行区分）。"""
++    user, token = await _create_user_with_token(db_session, name=name)
++    await _grant_workspace_role(
++        db_session,
++        workspace_id=ws_d.id,
++        user_id=user.id,
++        permissions=[Permission.TASK_RUN_AGENT],
++    )
++    db_session.add(PpmProjectMember(id=uuid.uuid4(), pm_project_id=project.id, user_id=user.id))
++    await db_session.commit()
++    return user, token
++
++
++async def _create_group_on_d(
++    client: AsyncClient,
++    owner_token: str,
++    *,
++    project_id: uuid.UUID,
++    workspace_id: uuid.UUID,
++) -> dict:
++    payload = {
++        "title": "可见工作区测试群",
++        "project_id": str(project_id),
++        "workspace_id": str(workspace_id),
++    }
++    resp = await client.post("/api/daemon/group-chats", json=payload, headers=_headers(owner_token))
++    assert resp.status_code == 201, resp.text
++    return resp.json()
++
++
++async def _list_groups(client: AsyncClient, token: str) -> dict[str, dict]:
++    resp = await client.get("/api/daemon/group-chats", headers=_headers(token))
++    assert resp.status_code == 200, resp.text
++    return {item["id"]: item for item in resp.json()}
++
++
++# ── Redis publish 替身（test_group_member_avatar_fallback.py 先例）──────────
++
++
++@pytest.fixture(autouse=True)
++def _mocked_group_redis() -> AsyncIterator[AsyncMock]:
++    """群频道 publish 替身（group service 侧 get_redis）。"""
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    with mock_patch("app.modules.daemon.group.service.get_redis", return_value=redis):
++        yield redis
++
++
++@pytest.fixture(autouse=True)
++def _mocked_sessions_events_redis() -> AsyncIterator[AsyncMock]:
++    """agent_sessions:changed publish 替身（session_events 模块侧 get_redis）。"""
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    with mock_patch("app.modules.daemon.session_events.get_redis", return_value=redis):
++        yield redis
++
++
++# ── D-003：visible_workspace_ids 组装三断言 ─────────────────────────────────
++
++
++class TestGroupVisibleWorkspaceIds:
++    async def test_project_group_unions_linked_workspaces(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """群挂 D/F 双工作区项目（锚 D）：可见集合 = {D, F}，D 去重不重复。"""
++        ws_d, ws_f, project = await _make_env(db_session)
++        _owner, owner_token = await _env_user(db_session, ws_d, project, name="群主")
++        data = await _create_group_on_d(
++            client, owner_token, project_id=project.id, workspace_id=ws_d.id
++        )
++        assert data["workspace_id"] == str(ws_d.id)  # 锚定直接归属 D
++
++        items = await _list_groups(client, owner_token)
++        item = items[data["id"]]
++        visible = item["visible_workspace_ids"]
++        # 顺序不敏感；D 既在直接归属又在项目关联集——去重后恰 2 个元素。
++        assert set(visible) == {str(ws_d.id), str(ws_f.id)}
++        assert len(visible) == 2, visible
++
++    async def test_no_project_group_only_direct_workspace(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """项目删除后的存量无 project 群：可见集合退化为仅直接归属 [D]。"""
++        ws_d, _ws_f, project = await _make_env(db_session)
++        _owner, owner_token = await _env_user(db_session, ws_d, project, name="群主")
++        data = await _create_group_on_d(
++            client, owner_token, project_id=project.id, workspace_id=ws_d.id
++        )
++        group_id = uuid.UUID(data["id"])
++
++        # 模拟项目删除（ppm FK ondelete=SET NULL 后的存量群口径）：直改行置空。
++        await db_session.execute(
++            update(AgentGroupChat).where(AgentGroupChat.id == group_id).values(project_id=None)
++        )
++        await db_session.commit()
++
++        items = await _list_groups(client, owner_token)
++        assert items[str(group_id)]["visible_workspace_ids"] == [str(ws_d.id)]
++
++    async def test_non_member_cannot_see_group(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """非群成员（纵使是项目成员）列表不见该群——成员过滤零回归。"""
++        ws_d, _ws_f, project = await _make_env(db_session)
++        _owner, owner_token = await _env_user(db_session, ws_d, project, name="群主")
++        data = await _create_group_on_d(
++            client, owner_token, project_id=project.id, workspace_id=ws_d.id
++        )
++        # 旁观者：同项目成员 + 同工作区角色，但从未被邀请进群。
++        _outsider, outsider_token = await _env_user(db_session, ws_d, project, name="旁观者")
++
++        owner_items = await _list_groups(client, owner_token)
++        assert data["id"] in owner_items  # 群主视角可见（对照组）
++        outsider_items = await _list_groups(client, outsider_token)
++        assert data["id"] not in outsider_items
++        assert outsider_items == {}  # 无任何群——成员过滤不因可见集扩展放宽
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx b/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
+index 746f982a4..0281a637d 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
+@@ -178,6 +178,7 @@ vi.mock("@/components/group-chat/create-group-wizard", () => ({
+             (props.onCreated as (g: unknown) => void)({
+               id: "g-new",
+               title: "新群",
++              workspace_id: "ws-1",
+             })
+           }
+         >
+@@ -486,6 +487,9 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
+       id: "g-new",
+       online_member_ids: [],
+       last_message: null,
++      // D-003（2026-09-13-session-group-ux-fixes）：新建群无项目关联，列表项
++      // 归一占位 = 直接归属工作区（invalidate 重拉后为后端口径覆盖）。
++      visible_workspace_ids: ["ws-1"],
+     });
+     await waitFor(() => {
+       expect(invalidateSpy).toHaveBeenCalledWith({
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+index c19eed88b..2ae1ea342 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+@@ -136,6 +136,9 @@ export default function MobileWorkspaceSessionsPage() {
+     last_message: null,
+     pinned: null,
+     unread_count: 0,
++    // D-003（2026-09-13-session-group-ux-fixes）：新建群无项目关联，可见
++    // 工作区集合占位 = 直接归属（invalidate 重拉后为后端口径覆盖）。
++    visible_workspace_ids: [group.workspace_id],
+   });
+     void qc.invalidateQueries({ queryKey: ["groupChats"] });
+   };
+diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
+index 1cbf6b111..c1aad79d6 100644
+--- a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
+@@ -1,4 +1,6 @@
+ // ql-20260826-010：SessionInputBar 高度拖拽调节单测。
++// 2026-09-13-session-group-ux-fixes（D-002@v2）：事件迁 Pointer Events，
++// 与生产代码同路径覆盖鼠标/触摸统一后的手柄拖拽。
+ //
+ // 覆盖：
+ //   1. 拖拽上移 60px → textarea 高度 = 起点 + 60 并落 localStorage；
+@@ -7,7 +9,7 @@
+ //   4. 拖拽下压越过下限 → 钳制在 44px（min-h-11 默认高度）。
+ 
+ import { describe, it, expect, beforeEach, vi } from "vitest";
+-import { render, screen, fireEvent } from "@testing-library/react";
++import { render, screen, fireEvent, createEvent } from "@testing-library/react";
+ 
+ import { SessionInputBar } from "../session-input-bar";
+ 
+@@ -19,6 +21,23 @@ vi.mock("@/lib/api/session-attachments", () => ({
+ 
+ const HEIGHT_KEY = "sillyhub.sessions.inputBarHeight";
+ 
++/** jsdom 无 PointerEvent 实现，fireEvent.pointer* 走 Event 兜底构造带不上
++ *  坐标（React handler 里 clientY 为 undefined）——createEvent 后 defineProperty
++ *  手工补属性再派发（先例：explorer-page.test.tsx firePointer、
++ *  floating-session-host.test.tsx pointerEvt）；pointerId 补 0 占位。 */
++function firePointer(
++  el: Element | Window,
++  name: "pointerDown" | "pointerMove" | "pointerUp",
++  props: { clientY?: number } = {},
++) {
++  const init = { pointerId: 0, ...props };
++  const ev = createEvent[name](el as Element, init);
++  for (const [k, v] of Object.entries(init)) {
++    Object.defineProperty(ev, k, { value: v });
++  }
++  fireEvent(el, ev);
++}
++
+ function renderBar() {
+   return render(
+     <SessionInputBar
+@@ -51,9 +70,9 @@ describe("SessionInputBar 高度拖拽（ql-20260826-010）", () => {
+     ) as HTMLTextAreaElement;
+ 
+     // jsdom 无布局，起点按默认下限 44；上移 60 → 104。
+-    fireEvent.mouseDown(handle, { clientY: 300 });
+-    fireEvent.mouseMove(window, { clientY: 240 });
+-    fireEvent.mouseUp(window);
++    firePointer(handle, "pointerDown", { clientY: 300 });
++    firePointer(window, "pointerMove", { clientY: 240 });
++    firePointer(window, "pointerUp");
+ 
+     expect(textarea.style.height).toBe("104px");
+     expect(window.localStorage.getItem(HEIGHT_KEY)).toBe("104");
+@@ -88,9 +107,9 @@ describe("SessionInputBar 高度拖拽（ql-20260826-010）", () => {
+       "测试输入",
+     ) as HTMLTextAreaElement;
+ 
+-    fireEvent.mouseDown(handle, { clientY: 300 });
+-    fireEvent.mouseMove(window, { clientY: 500 }); // 下压 200 → 负值钳下限
+-    fireEvent.mouseUp(window);
++    firePointer(handle, "pointerDown", { clientY: 300 });
++    firePointer(window, "pointerMove", { clientY: 500 }); // 下压 200 → 负值钳下限
++    firePointer(window, "pointerUp");
+ 
+     expect(textarea.style.height).toBe("44px");
+     expect(window.localStorage.getItem(HEIGHT_KEY)).toBe("44");
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
+new file mode 100644
+index 000000000..020fdd63f
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
+@@ -0,0 +1,489 @@
++// task-01（2026-09-13-session-group-ux-fixes / FR-1 / D-001）：预会话草稿按
++// 入口隔离的回归锚点。
++//
++// 背景：预会话（sessionId=null）草稿原固定键 __pre__ 跨工作区/跨机器入口共享，
++// 任一入口未发送内容必然带入下一入口（用户实测「a 会话内容带到 b 会话」的
++// 根因定位，design 背景 1）。真会话草稿按 sessionId 隔离（七宿主 key 重挂载），
++// 理论正确——本文件同时锁定其切换时序行为（design R-01：若用户复现真会话
++// 串台，凭此基线再定位，不在本 task 范围内改真会话系统）。
++//
++// 覆盖（task-01 acceptance）：
++//   1. turn-state 纯函数三分支：真会话键（preScope 被忽略）/ 预会话 + preScope
++//      入口键 __pre__:<scope> / 均无回落共享键 __pre__（旧调用点兼容）。
++//   2. page 真会话切换时序锁定：A 输入 → 切 B → B 显示自有草稿、A 的键不被
++//      B 的写入污染（含 B 有既有草稿的换装断言）。
++//   3. page 预会话两入口隔离：不同 preScope 键互不可见；同 scope 重进恢复；
++//      workspaceId null 用 '-' 分量组装。
++//   4. dialog 预会话 workspaceId 维度 scope（无 runtime 维度；未传回落 '-'）。
++//
++// mock 骨架平移 session-panel-pre-session.test.tsx（page 段）与
++// session-panel-dialog.test.tsx（dialog 段）；草稿落键断言直接读 localStorage
++// （键组装是本变更的被测行为本体）。门闩时序：draftHydratedRef 经 rAF 放行，
++// 输入前先 nextFrame() 等一帧，否则写入被门闩拦截（组件内 ql-20260825-011 设计）。
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import {
++  SessionPanel, type SessionPanelProps, type SessionPreContext,
++} from "../session-panel";
++import { readSessionDraft, writeSessionDraft } from "../session-panel/turn-state";
++import { useMentionSources } from "@/lib/session-mention-sources";
++import type {
++  DaemonMachineRead,
++  DaemonRuntimeRead,
++} from "@/lib/daemon";
++
++// @ 联想数据源 hook mock——textarea 首次聚焦才挂载数据桥，change 不聚焦零影响；
++// dialog 测试无 QueryClientProvider，真实 hook 会因缺 QueryClient 抛错，必须 mock。
++vi.mock("@/lib/session-mention-sources", () => ({
++  useMentionSources: vi.fn(),
++}));
++
++const mentionSourcesMock = vi.mocked(useMentionSources);
++
++// MarkdownText 用 next/dynamic + ssr:false，jsdom 同步 render 处于 loading(null)——
++// mock 成纯文本渲染（同 session-panel-dialog.test.tsx）。
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++/* ----- mock 网络层（page/dialog 两模式共享的面取并集） ----- */
++
++const sessionApi = vi.hoisted(() => ({
++  // 会话用量条（session-usage-bar）自取数：必须 resolve（裸 vi.fn() 返回
++  // undefined 会被组件 .then 同步崩）；null = 按无数据不渲染。
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  listScheduledMessages: vi.fn().mockResolvedValue([]),
++  fetchSessionQueue: vi.fn().mockResolvedValue([]),
++  deleteSessionQueueEntry: vi.fn(),
++  retrySessionQueueEntry: vi.fn(),
++  listSessionRuns: vi.fn().mockResolvedValue([]),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionTeamMissions: vi.fn(),
++  triggerSessionTeamMission: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    listScheduledMessages: sessionApi.listScheduledMessages,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
++    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
++  };
++});
++
++// page 模式 workspacesQuery（工作区名解析）+ 弹层项目下拉两数据源。
++const workspaceApi = vi.hoisted(() => ({
++  listWorkspaces: vi.fn(),
++  listProjects: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++}));
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return { ...actual, listWorkspaces: workspaceApi.listWorkspaces };
++});
++
++vi.mock("@/lib/ppm/project", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
++    "@/lib/ppm/project",
++  );
++  return { ...actual, listProjects: workspaceApi.listProjects };
++});
++
++vi.mock("@/lib/workspace", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
++    "@/lib/workspace",
++  );
++  return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
++});
++
++// 弹层 probe 数据源（POST /api/workspaces/probe）：默认空响应（fail-safe）。
++const apiFetchMock = vi.hoisted(() => vi.fn());
++vi.mock("@/lib/api", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
++  return { ...actual, apiFetch: apiFetchMock };
++});
++
++// useNotify mock（测试环境无 antd App 包裹，先例 config-bar.test 注释）。
++vi.mock("@/lib/errors", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/errors")>(
++    "@/lib/errors",
++  );
++  return {
++    ...actual,
++    useNotify: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
++  };
++});
++
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++/* ----- fixture（平移 session-panel-pre-session.test.tsx） ----- */
++
++function makeRuntime(
++  id: string,
++  provider: string,
++  overrides: Partial<DaemonRuntimeRead> = {},
++): DaemonRuntimeRead {
++  return {
++    id,
++    display_alias: null,
++    name: "DESKTOP-1",
++    provider,
++    version: null,
++    os: null,
++    arch: null,
++    status: "online",
++    last_heartbeat_at: null,
++    capabilities: null,
++    allowed_roots: [],
++    created_at: "2026-08-01T00:00:00Z",
++    updated_at: "2026-08-01T00:00:00Z",
++    ...overrides,
++  };
++}
++
++function makeMachine(overrides: Partial<DaemonMachineRead> = {}): DaemonMachineRead {
++  return {
++    id: "m-1",
++    hostname: "DESKTOP-1",
++    display_alias: "机器一",
++    os: "Windows",
++    arch: "x64",
++    status: "online",
++    last_heartbeat_at: "2026-08-23T04:00:00Z",
++    version: "1.0.0",
++    build_id: null,
++    started_at: null,
++    created_at: "2026-08-01T00:00:00Z",
++    runtime_count: 2,
++    online_runtime_count: 2,
++    runtimes: [makeRuntime("rt-claude", "claude"), makeRuntime("rt-codex", "codex")],
++    ...overrides,
++  };
++}
++
++/** 真会话详情（active 空闲；id 由 setupPage 按挂载 sessionId 覆写）。 */
++function makeDetail() {
++  return {
++    id: "sess-x",
++    runtime_id: "rt-claude",
++    lease_id: null,
++    provider: "claude",
++    status: "active",
++    agent_session_id: "ag-1",
++    config: null,
++    turn_count: 1,
++    created_at: "t",
++    last_active_at: null,
++    ended_at: null,
++    current_run_id: null,
++    workspace_id: null,
++    llm_provider_id: null,
++    agent_profile_id: null,
++    title: "草稿隔离会话",
++    config_snapshot: null,
++  };
++}
++
++/** 草稿 localStorage 键（直读断言用；组装逻辑本体在 turn-state.sessionDraftLsKey）。 */
++const DRAFT_KEY = (k: string) => `sillyhub.sessions.draft.${k}`;
++
++/** 等一帧：草稿门闩 draftHydratedRef 经 rAF 放行——先于帧输入会因门闩未开丢写。 */
++async function nextFrame() {
++  await act(async () => {
++    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
++  });
++}
++
++/** page 模式挂载（rerenderWith 切换 sessionId；preContext 全程不变）。 */
++function setupPage(
++  overrides: {
++    sessionId?: string | null;
++    preContext?: SessionPreContext | null;
++  } = {},
++) {
++  sessionApi.getAgentSession.mockImplementation(async (id: string) => ({
++    ...makeDetail(),
++    id,
++  }));
++  sessionApi.getAgentSessionLogs.mockResolvedValue([]);
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.streamSession.mockImplementation(() => ({
++    close: vi.fn(),
++    getLastEventId: () => null,
++  }));
++  workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
++  workspaceApi.listProjects.mockResolvedValue([]);
++  workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
++  apiFetchMock.mockResolvedValue([]);
++
++  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  const view = (sid: string | null, preCtx: SessionPreContext | null) => (
++    <QueryClientProvider client={qc}>
++      <SessionPanel
++        mode="page"
++        sessionId={sid}
++        machines={[makeMachine()]}
++        llmProviders={[]}
++        preContext={preCtx ?? undefined}
++      />
++    </QueryClientProvider>
++  );
++  const preContext = overrides.preContext ?? null;
++  const result = render(view(overrides.sessionId ?? null, preContext));
++  return {
++    ...result,
++    rerenderWith: (sid: string | null) => result.rerender(view(sid, preContext)),
++  };
++}
++
++/** dialog 模式挂载（idle：sessionId=null；workspaceId 经 overrides 传入）。 */
++function setupDialog(overrides: Partial<Omit<SessionPanelProps, "mode" | "sessionId">> = {}) {
++  const props: Omit<SessionPanelProps, "mode" | "sessionId"> = {
++    providers: ["claude"],
++    defaultProvider: "claude",
++    model: null,
++    onModelChange: vi.fn(),
++    hasOnlineProvider: true,
++    ...overrides,
++  };
++  return render(<SessionPanel mode="dialog" sessionId={null} {...props} />);
++}
++
++beforeEach(() => {
++  // 联想数据源默认空快照（不聚焦零影响；dialog 段防缺 QueryClient 抛错）。
++  mentionSourcesMock.mockReturnValue({
++    skills: [],
++    changes: [],
++    quicklogs: [],
++    ppmTasks: [],
++    ppmProblems: [],
++    atEnabled: true,
++  });
++  // 草稿键跨测试隔离（本文件断言的本体就是 localStorage 键分布）。
++  window.localStorage.clear();
++});
++
++/* ───────── 1. turn-state 纯函数：键组装三分支（D-001） ───────── */
++
++describe("turn-state 草稿键组装（task-01 / D-001 三分支）", () => {
++  it("真会话：键按 sessionId 组装，preScope 被忽略（真会话隔离零回归）", () => {
++    writeSessionDraft("sess-1", "真会话草稿", "ws-1:rt-claude");
++    expect(window.localStorage.getItem(DRAFT_KEY("sess-1"))).toBe("真会话草稿");
++    // preScope 不渗入任何 __pre__ 系键（真会话下传 scope 不改变落键）。
++    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBeNull();
++    expect(readSessionDraft("sess-1", "ws-9:rt-x")).toBe("真会话草稿");
++  });
++
++  it("预会话 + preScope：入口隔离键 __pre__:<scope>，不同 scope 互不可见", () => {
++    writeSessionDraft(null, "入口一草稿", "ws-1:rt-claude");
++    writeSessionDraft(null, "入口二草稿", "-:rt-claude"); // workspaceId null → '-'
++    expect(readSessionDraft(null, "ws-1:rt-claude")).toBe("入口一草稿");
++    expect(readSessionDraft(null, "-:rt-claude")).toBe("入口二草稿");
++    // 键格式直读锁定（page 组装口径 "<workspaceId|'-'>:<runtimeId>"，消费兼容锚点）。
++    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
++      "入口一草稿",
++    );
++  });
++
++  it("预会话无 preScope：回落共享键 __pre__（未传参旧调用点行为兼容）", () => {
++    writeSessionDraft(null, "共享草稿");
++    expect(window.localStorage.getItem(DRAFT_KEY("__pre__"))).toBe("共享草稿");
++    expect(readSessionDraft(null)).toBe("共享草稿");
++  });
++});
++
++/* ───────── 2. page 真会话切换时序锁定（design R-01 基线） ───────── */
++
++describe("page 真会话草稿切换时序（R-01 基线锁定）", () => {
++  it("A 输入草稿 → 切 B：B 显示自有草稿，A 的键不被 B 的写入污染", async () => {
++    // 预置 B 的既有草稿（切换后应原样换装显示，而非 A 的内容）。
++    window.localStorage.setItem(DRAFT_KEY("sess-b"), "B 的旧草稿");
++    const { rerenderWith } = setupPage({ sessionId: "sess-a" });
++
++    const input = (await screen.findByPlaceholderText(
++      /继续追问/,
++    )) as HTMLTextAreaElement;
++    await nextFrame(); // 门闩放行后再输入，写入才生效
++    fireEvent.change(input, { target: { value: "A 的未发送草稿" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("sess-a"))).toBe("A 的未发送草稿"),
++    );
++
++    // 切到 B：输入框换装 B 自有草稿（不显示 A 的内容）。切会话后 detailQuery
++    // 重新加载会重挂输入区——重新查询节点，不复用切换前的 DOM 引用。
++    rerenderWith("sess-b");
++    const inputB = (await screen.findByPlaceholderText(
++      /继续追问/,
++    )) as HTMLTextAreaElement;
++    await waitFor(() => expect(inputB.value).toBe("B 的旧草稿"));
++    // A 的键原样保留（未被切换时的回读/B 的后续输入冲掉）。
++    expect(window.localStorage.getItem(DRAFT_KEY("sess-a"))).toBe("A 的未发送草稿");
++
++    // B 输入新内容只写 B 的键——A 键仍不被污染。
++    await nextFrame();
++    fireEvent.change(inputB, { target: { value: "B 的新草稿" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("sess-b"))).toBe("B 的新草稿"),
++    );
++    expect(window.localStorage.getItem(DRAFT_KEY("sess-a"))).toBe("A 的未发送草稿");
++  });
++});
++
++/* ───────── 3. page 预会话两入口隔离（task-01 核心） ───────── */
++
++describe("page 预会话草稿入口隔离（task-01 / D-001）", () => {
++  it("入口一输入 → 换入口二（宿主重挂载）：二看不到一的草稿，一键原样保留", async () => {
++    const first = setupPage({
++      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
++    });
++    const input1 = screen.getByPlaceholderText(
++      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
++    ) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input1, { target: { value: "入口一的未发送草稿" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
++        "入口一的未发送草稿",
++      ),
++    );
++    // 固定 __pre__ 共享键不再被写（隔离生效的直接证据——旧行为落此键）。
++    expect(window.localStorage.getItem(DRAFT_KEY("__pre__"))).toBeNull();
++    first.unmount();
++
++    // 入口二（不同工作区 + 不同 runtime）全新挂载：回读自己的键 → 空。
++    setupPage({
++      preContext: { workspaceId: "ws-2", runtimeId: "rt-codex" },
++    });
++    const input2 = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    expect(input2.value).toBe("");
++    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
++      "入口一的未发送草稿",
++    );
++  });
++
++  it("同一入口重进：草稿恢复到输入框", async () => {
++    window.localStorage.setItem(DRAFT_KEY("__pre__:ws-1:rt-claude"), "重进应恢复");
++    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const input = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await waitFor(() => expect(input.value).toBe("重进应恢复"));
++  });
++
++  it("workspaceId null 的入口：scope 用 '-' 分量组装（与具名工作区入口隔离）", async () => {
++    setupPage({ preContext: { workspaceId: null, runtimeId: "rt-claude" } });
++    const input = screen.getByPlaceholderText(
++      /发送第一句话开始对话/,
++    ) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "非工作区入口草稿" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:-:rt-claude"))).toBe(
++        "非工作区入口草稿",
++      ),
++    );
++  });
++});
++
++/* ───────── 4. dialog 预会话 workspaceId 维度 scope（无 runtime 维度） ───────── */
++
++describe("dialog 预会话草稿 scope（task-01 / D-001）", () => {
++  it("idle + workspaceId：草稿落 __pre__:<workspaceId>；不同 workspaceId 互不可见", async () => {
++    const first = setupDialog({ workspaceId: "ws-d1" });
++    const input1 = screen.getByPlaceholderText(
++      /输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/,
++    ) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input1, { target: { value: "dialog 一的草稿" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe(
++        "dialog 一的草稿",
++      ),
++    );
++    first.unmount();
++
++    // 另一 workspaceId 的 dialog：看不到一的草稿，一键原样保留。
++    setupDialog({ workspaceId: "ws-d2" });
++    const input2 = (await screen.findByPlaceholderText(
++      /输入首条消息创建会话/,
++    )) as HTMLTextAreaElement;
++    expect(input2.value).toBe("");
++    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe(
++      "dialog 一的草稿",
++    );
++  });
++
++  it("idle 未传 workspaceId：回落 '-' 维度键（同一消费方内部共享）", async () => {
++    setupDialog();
++    const input = screen.getByPlaceholderText(
++      /输入首条消息创建会话/,
++    ) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "无工作区 dialog 草稿" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:-"))).toBe(
++        "无工作区 dialog 草稿",
++      ),
++    );
++  });
++
++  it("同 workspaceId 重开 dialog：草稿恢复到输入框", async () => {
++    window.localStorage.setItem(DRAFT_KEY("__pre__:ws-d1"), "dialog 重进恢复");
++    setupDialog({ workspaceId: "ws-d1" });
++    const input = (await screen.findByPlaceholderText(
++      /输入首条消息创建会话/,
++    )) as HTMLTextAreaElement;
++    await waitFor(() => expect(input.value).toBe("dialog 重进恢复"));
++  });
++});
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index e18044495..d9598760d 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -500,13 +500,17 @@ export function SessionInputBar({
+ 
+   const dragStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
+ 
+-  const handleHeightDragStart = (e: React.MouseEvent) => {
++  /* 2026-09-13-session-group-ux-fixes D-002@v2：拖拽迁 Pointer Events 统一
++   * 鼠标/触摸/触控笔（旧 onMouseDown + window mousemove/mouseup 触摸屏不触发）。
++   * 不用 setPointerCapture——jsdom 无实现，window 级 pointermove/pointerup 监听
++   * 已保证拖出手柄仍收事件（panel-resizer.tsx 真实先例）。 */
++  const handleHeightDragStart = (e: React.PointerEvent) => {
+     e.preventDefault();
+     // 实测高度兜底：jsdom / 未布局时 offsetHeight 为 0，按默认下限起步。
+     const measured = textareaRef.current?.offsetHeight ?? 0;
+     const current = inputHeight ?? (measured > 0 ? measured : INPUT_HEIGHT_MIN);
+     dragStateRef.current = { startY: e.clientY, startHeight: current };
+-    const onMove = (ev: MouseEvent) => {
++    const onMove = (ev: PointerEvent) => {
+       const d = dragStateRef.current;
+       if (!d) return;
+       const max = Math.min(INPUT_HEIGHT_MAX, Math.round(window.innerHeight * 0.6));
+@@ -518,11 +522,11 @@ export function SessionInputBar({
+     };
+     const onUp = () => {
+       dragStateRef.current = null;
+-      window.removeEventListener("mousemove", onMove);
+-      window.removeEventListener("mouseup", onUp);
++      window.removeEventListener("pointermove", onMove);
++      window.removeEventListener("pointerup", onUp);
+     };
+-    window.addEventListener("mousemove", onMove);
+-    window.addEventListener("mouseup", onUp);
++    window.addEventListener("pointermove", onMove);
++    window.addEventListener("pointerup", onUp);
+   };
+ 
+   const handleHeightReset = () => {
+@@ -641,14 +645,15 @@ export function SessionInputBar({
+           )}
+         </div>
+       )}
+-      {/* 高度拖拽手柄（ql-20260826-010）：输入胶囊上缘细条——按下沿竖向拖动
+-          增减高度（实时生效 + 落盘），双击恢复默认。 */}
++      {/* 高度拖拽手柄（ql-20260826-010；Pointer Events 迁移 D-002@v2）：输入
++          胶囊上缘细条——按下沿竖向拖动增减高度（实时生效 + 落盘），双击恢复
++          默认；onPointerDown 统一鼠标/触摸。 */}
+       <div
+         role="separator"
+         aria-orientation="horizontal"
+         aria-label="拖动调节输入框高度（双击恢复默认）"
+         title="拖动调节输入框高度，双击恢复默认"
+-        onMouseDown={handleHeightDragStart}
++        onPointerDown={handleHeightDragStart}
+         onDoubleClick={handleHeightReset}
+         className="group -mb-0.5 flex h-3 cursor-ns-resize touch-none items-center justify-center"
+       >
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 4e4d02b8e..4076ee4ba 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -264,19 +264,27 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   }, [connGuard.connStatus]);
+ 
+   // ql-20260825-011：输入草稿持久化（同 page 模式；dialog 会话键 = view.sessionId，
+-  // idle 无会话用 __pre__ 固定键）。
++  // idle 无会话用入口隔离键 __pre__:<workspaceId|'-'>——task-01 / D-001：dialog
++  // 无 runtime 维度，仅按 workspaceId 区分入口；未传 workspaceId 的消费方回落
++  // '-'（同一消费方内部共享，跨工作区不再串台）。真会话（view.sessionId 非空）
++  // preScope 被忽略，键仍按 sessionId 组装。
+   const draftHydratedRef = useRef(false);
+   useEffect(() => {
+     draftHydratedRef.current = false;
+-    setInput(readSessionDraft(view.sessionId ?? null));
++    setInput(readSessionDraft(view.sessionId ?? null, workspaceId ?? '-'));
+     const raf = requestAnimationFrame(() => {
+       draftHydratedRef.current = true;
+     });
+     return () => cancelAnimationFrame(raf);
++    // workspaceId 有意不入依赖：prop 在 dialog 生命周期内不变（宿主挂载即定），
++    // 入依赖会让 scope 翻转触发额外回读（当前输入被另一 scope 的草稿覆盖）。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [view.sessionId]);
+   useEffect(() => {
+     if (!draftHydratedRef.current) return;
+-    writeSessionDraft(view.sessionId ?? null, input);
++    writeSessionDraft(view.sessionId ?? null, input, workspaceId ?? '-');
++    // 同上：workspaceId 不入依赖（生命周期内不变；真会话态 preScope 被忽略）。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [view.sessionId, input]);
+ 
+   /**
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 29c8e36b6..73a4b641d 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -399,16 +399,23 @@ export function SessionPanelPage({
+   const [pendingMentions, setPendingMentions] = useState<SessionInputMentions>({});
+ 
+   // ── ql-20260825-011：输入框草稿持久化（刷新/切换会话不丢）──────────────────
+-  // 回读：挂载 + sessionId 变化（预会话态无 id 用固定键 __pre__）。
++  // 回读：挂载 + sessionId 变化（预会话态无 id 用入口隔离键 __pre__:<scope>，
++  // task-01 / D-001——A 入口的未发送内容不再带入 B 入口）。
+   // hydrated 门闩防「回读前先写空串」冲掉已存草稿：restore 先 setInput，rAF 后
+   // 才放行持久化 effect（该 commit 内 input 仍是旧会话的值，不写新会话键）。
+   // 缺陷修复收口（A-1）：切会话时清 @ 联想选中残留——草稿换装（setInput 非
+   // 空新草稿）不触发组件归空复位，会话 A 的绑定会随会话 B 的消息错绑；
+   // R-7 语义（草稿只存文本、绑定需重选）在切会话边界同样成立。
+   const draftHydratedRef = useRef(false);
++  // task-01（D-001）：预会话草稿入口标识串 = workspaceId 缺省 '-' + runtimeId
++  //（形如 "ws-1:rt-claude"）；真会话（sessionId 非空）下 read/writeSessionDraft
++  // 忽略该值，键仍按 sessionId 组装。
++  const preDraftScope = preContext
++    ? `${preContext.workspaceId ?? '-'}:${preContext.runtimeId}`
++    : null;
+   useEffect(() => {
+     draftHydratedRef.current = false;
+-    setInput(readSessionDraft(sessionId));
++    setInput(readSessionDraft(sessionId, preDraftScope));
+     setPendingMentions({});
+     const raf = requestAnimationFrame(() => {
+       draftHydratedRef.current = true;
+@@ -418,7 +425,11 @@ export function SessionPanelPage({
+   }, [sessionId]);
+   useEffect(() => {
+     if (!draftHydratedRef.current) return;
+-    writeSessionDraft(sessionId, input);
++    writeSessionDraft(sessionId, input, preDraftScope);
++    // preDraftScope 有意不入依赖：preContext 变化时宿主随 sessionId 重挂载
++    //（key 契约），入依赖会引入额外写触发——旧入口输入被迁移写进新入口键，
++    // 恰是 D-001 要消除的跨入口串台。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [sessionId, input]);
+ 
+   // ── task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时发送 ──
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index c9b51bf3f..352028163 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -299,29 +299,42 @@ export function writePersistedViewMode(
+ }
+ 
+ /* ── ql-20260825-011：输入框草稿按会话持久化（刷新/切换会话不丢）────────── */
+-
+-/** 预会话态（无 sessionId）的草稿固定键。 */
++/* task-01（2026-09-13-session-group-ux-fixes / FR-1 / D-001）：预会话草稿键按
++ * 入口隔离——原固定 __pre__ 键跨工作区/跨机器入口共享，任一入口未发送内容必然
++ * 带入下一入口（用户实测串台根因）。分支规则：真会话（sessionId 非空）键照旧
++ * 按 sessionId 组装（preScope 被忽略，真会话隔离零回归）；预会话且有入口标识串
++ * preScope（page 形如 "<workspaceId|'-'>:<runtimeId>"，dialog 无 runtime 维度
++ * 只传 "<workspaceId|'-'>"）→ __pre__:<preScope>；均无回落共享键 __pre__
++ * （未传 preScope 的旧调用点行为兼容；不做旧键迁移——项目未上线，非目标）。 */
++
++/** 预会话态（无 sessionId）的草稿键前缀（亦即无 preScope 时的共享回落键）。 */
+ const SESSION_DRAFT_PRE_KEY = "__pre__";
+ 
+-function sessionDraftLsKey(sessionId: string | null): string {
+-  return `sillyhub.sessions.draft.${sessionId ?? SESSION_DRAFT_PRE_KEY}`;
++function sessionDraftLsKey(sessionId: string | null, preScope?: string | null): string {
++  const key =
++    sessionId ?? (preScope ? `${SESSION_DRAFT_PRE_KEY}:${preScope}` : SESSION_DRAFT_PRE_KEY);
++  return `sillyhub.sessions.draft.${key}`;
+ }
+ 
+-/** 挂载/切换会话回读草稿（SSR 或读取失败返回空串）。 */
+-export function readSessionDraft(sessionId: string | null): string {
++/** 挂载/切换会话回读草稿（SSR 或读取失败返回空串；preScope 仅预会话态参与键组装）。 */
++export function readSessionDraft(sessionId: string | null, preScope?: string | null): string {
+   if (typeof window === "undefined") return "";
+   try {
+-    return window.localStorage.getItem(sessionDraftLsKey(sessionId)) ?? "";
++    return window.localStorage.getItem(sessionDraftLsKey(sessionId, preScope)) ?? "";
+   } catch {
+     return "";
+   }
+ }
+ 
+-/** 每次输入变化写入（隐私模式等写入失败静默）。 */
+-export function writeSessionDraft(sessionId: string | null, draft: string): void {
++/** 每次输入变化写入（隐私模式等写入失败静默；preScope 仅预会话态参与键组装）。 */
++export function writeSessionDraft(
++  sessionId: string | null,
++  draft: string,
++  preScope?: string | null,
++): void {
+   if (typeof window === "undefined") return;
+   try {
+-    window.localStorage.setItem(sessionDraftLsKey(sessionId), draft);
++    window.localStorage.setItem(sessionDraftLsKey(sessionId, preScope), draft);
+   } catch {
+     /* 静默容错 */
+   }
+diff --git a/frontend/src/components/floating/floating-session-host.tsx b/frontend/src/components/floating/floating-session-host.tsx
+index 943410105..b6b904791 100644
+--- a/frontend/src/components/floating/floating-session-host.tsx
++++ b/frontend/src/components/floating/floating-session-host.tsx
+@@ -339,6 +339,9 @@ function FloatingDrawerBody({
+       last_message: null,
+       pinned: null,
+       unread_count: 0,
++      // D-003（2026-09-13-session-group-ux-fixes）：新建群无项目关联，可见
++      // 工作区集合占位 = 直接归属（invalidate 重拉后为后端口径覆盖）。
++      visible_workspace_ids: [group.workspace_id],
+     });
+       void qc.invalidateQueries({ queryKey: ["groupChats"] });
+     },
+diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+index 9ed447387..01a3f2268 100644
+--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+@@ -38,6 +38,7 @@
+ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import {
+   cleanup,
++  createEvent,
+   render,
+   screen,
+   fireEvent,
+@@ -1448,6 +1449,82 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
+   });
+ });
+ 
++/* ── 高度拖拽（2026-09-13-session-group-ux-fixes FR-2 / D-002@v2 pointer 迁移）── */
++
++describe("GroupChatPanel 高度拖拽（FR-2 / D-002@v2）", () => {
++  /** jsdom 无 PointerEvent 实现，fireEvent.pointer* 的 clientY 带不上（React
++   *  handler 读 undefined）——createEvent 后 defineProperty 手工补坐标再派发
++   *  （单聊 session-input-bar-height.test.tsx 同款，先例 explorer-page.test.tsx
++   *  firePointer / floating-session-host.test.tsx pointerEvt）。 */
++  function firePointer(
++    el: Element | Window,
++    name: "pointerDown" | "pointerMove" | "pointerUp",
++    props: { clientY?: number } = {},
++  ) {
++    const init = { pointerId: 0, ...props };
++    const ev = createEvent[name](el as Element, init);
++    for (const [k, v] of Object.entries(init)) {
++      Object.defineProperty(ev, k, { value: v });
++    }
++    fireEvent(el, ev);
++  }
++
++  it("pointer 拖拽上移 60px → 输入框高度生效 + localStorage 落盘；双击恢复默认", async () => {
++    // 该文件 beforeEach 不清 localStorage（各用例自理）；高度键与本文件其它
++    // 用例无关，先清保证起点为默认单行。
++    window.localStorage.clear();
++    renderPanel();
++    await waitForStreamWired();
++
++    const handle = screen.getByRole("separator", {
++      name: /拖动调节输入框高度/,
++    });
++    const textarea = screen.getByLabelText(
++      "群消息输入框",
++    ) as HTMLTextAreaElement;
++
++    // jsdom 无布局，起点按默认下限 44；上移 60 → 104。
++    firePointer(handle, "pointerDown", { clientY: 300 });
++    firePointer(window, "pointerMove", { clientY: 240 });
++    firePointer(window, "pointerUp");
++
++    expect(textarea.style.height).toBe("104px");
++    // 群聊与单聊共用 sillyhub.sessions.inputBarHeight 键（ql-20260911-030）。
++    expect(window.localStorage.getItem("sillyhub.sessions.inputBarHeight")).toBe(
++      "104",
++    );
++
++    // 双击手柄恢复默认：高度清除 + 键删除。
++    fireEvent.doubleClick(handle);
++    expect(textarea.style.height).toBe("");
++    expect(
++      window.localStorage.getItem("sillyhub.sessions.inputBarHeight"),
++    ).toBeNull();
++  });
++
++  it("pointer 拖拽下压越过下限 → 钳制 44px", async () => {
++    window.localStorage.clear();
++    renderPanel();
++    await waitForStreamWired();
++
++    const handle = screen.getByRole("separator", {
++      name: /拖动调节输入框高度/,
++    });
++    const textarea = screen.getByLabelText(
++      "群消息输入框",
++    ) as HTMLTextAreaElement;
++
++    firePointer(handle, "pointerDown", { clientY: 300 });
++    firePointer(window, "pointerMove", { clientY: 500 }); // 下压 200 → 负值钳下限
++    firePointer(window, "pointerUp");
++
++    expect(textarea.style.height).toBe("44px");
++    expect(window.localStorage.getItem("sillyhub.sessions.inputBarHeight")).toBe(
++      "44",
++    );
++  });
++});
++
+ /* ── 6. 群消息附件（FR-05 补遗：上传 chips / 发送参数 / 时间线附件条） ────── */
+ 
+ describe("群消息附件（FR-05 补遗）", () => {
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 2be5cd415..937a94f8f 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -109,7 +109,7 @@ import {
+   useRef,
+   useState,
+   type KeyboardEvent as ReactKeyboardEvent,
+-  type MouseEvent as ReactMouseEvent,
++  type PointerEvent as ReactPointerEvent,
+ } from "react";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { ArrowDown, Ban, CheckCircle2, Clock, FileText, Image as ImageIcon, Loader2, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, Timer, TriangleAlert, Users, X } from "lucide-react";
+@@ -1686,13 +1686,17 @@ export function GroupChatPanel({
+     }
+   }, [inputHeight]);
+   const inputDragStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
+-  const handleHeightDragStart = (e: ReactMouseEvent) => {
++  /* 2026-09-13-session-group-ux-fixes D-002@v2：拖拽迁 Pointer Events 统一
++   * 鼠标/触摸/触控笔——与单聊 session-input-bar 同步；不用 setPointerCapture
++   * （jsdom 无实现，window 级 pointermove/pointerup 已保证拖出手柄收事件，
++   * panel-resizer.tsx 真实先例）。 */
++  const handleHeightDragStart = (e: ReactPointerEvent) => {
+     e.preventDefault();
+     // 实测高度兜底：jsdom / 未布局时 offsetHeight 为 0，按默认下限起步。
+     const measured = inputRef.current?.offsetHeight ?? 0;
+     const current = inputHeight ?? (measured > 0 ? measured : INPUT_HEIGHT_MIN);
+     inputDragStateRef.current = { startY: e.clientY, startHeight: current };
+-    const onMove = (ev: MouseEvent) => {
++    const onMove = (ev: PointerEvent) => {
+       const d = inputDragStateRef.current;
+       if (!d) return;
+       const max = Math.min(INPUT_HEIGHT_MAX, Math.round(window.innerHeight * 0.6));
+@@ -1704,11 +1708,11 @@ export function GroupChatPanel({
+     };
+     const onUp = () => {
+       inputDragStateRef.current = null;
+-      window.removeEventListener("mousemove", onMove);
+-      window.removeEventListener("mouseup", onUp);
++      window.removeEventListener("pointermove", onMove);
++      window.removeEventListener("pointerup", onUp);
+     };
+-    window.addEventListener("mousemove", onMove);
+-    window.addEventListener("mouseup", onUp);
++    window.addEventListener("pointermove", onMove);
++    window.addEventListener("pointerup", onUp);
+   };
+   const handleHeightReset = () => {
+     setInputHeight(null);
+@@ -2761,14 +2765,15 @@ export function GroupChatPanel({
+               }}
+             />
+           )}
+-          {/* 高度拖拽手柄（ql-20260911-030，单聊 ql-20260826-010 同款）：胶囊
+-              上缘细条——按下沿竖向拖动增减高度（实时生效 + 落盘），双击恢复默认。 */}
++          {/* 高度拖拽手柄（ql-20260911-030，单聊 ql-20260826-010 同款；Pointer
++              Events 迁移 D-002@v2）：胶囊上缘细条——按下沿竖向拖动增减高度
++              （实时生效 + 落盘），双击恢复默认；onPointerDown 统一鼠标/触摸。 */}
+           <div
+             role="separator"
+             aria-orientation="horizontal"
+             aria-label="拖动调节输入框高度（双击恢复默认）"
+             title="拖动调节输入框高度，双击恢复默认"
+-            onMouseDown={handleHeightDragStart}
++            onPointerDown={handleHeightDragStart}
+             onDoubleClick={handleHeightReset}
+             className="group -mb-0.5 flex h-3 cursor-ns-resize touch-none items-center justify-center"
+           >
+diff --git a/frontend/src/components/mobile/mobile-session-list.test.tsx b/frontend/src/components/mobile/mobile-session-list.test.tsx
+index 758f31d94..f349f5889 100644
+--- a/frontend/src/components/mobile/mobile-session-list.test.tsx
++++ b/frontend/src/components/mobile/mobile-session-list.test.tsx
+@@ -161,6 +161,9 @@ function makeGroupListItem(
+     online_member_ids: [],
+     last_message: "小码：已定位到问题在 hooks 依赖数组…",
+     last_mention: null,
++    // D-003（2026-09-13-session-group-ux-fixes）：可见工作区集合默认 = 直接
++    // 归属（无项目群的后端口径）；换 workspace 的 override 须同步换此字段。
++    visible_workspace_ids: ["ws-1"],
+     ...overrides,
+   } as unknown as GroupChatListItemRead;
+ }
+@@ -571,7 +574,13 @@ describe("MobileSessionList 群聊分区", () => {
+   it("群行渲染 + 独立数据源同 key 形态（groupChats/list/workspaceId 落缓存）+ workspace 客户端过滤", async () => {
+     const groups = [
+       makeGroupListItem(),
+-      makeGroupListItem({ id: "g-2", title: "别家的群", workspace_id: "ws-other" }),
++      makeGroupListItem({
++        id: "g-2",
++        title: "别家的群",
++        workspace_id: "ws-other",
++        // D-003：无项目关联群，集合 = 仅直接归属。
++        visible_workspace_ids: ["ws-other"],
++      }),
+     ];
+     daemonApi.listGroupChats.mockResolvedValue(groups);
+     renderListGroupCallbacks(vi.fn(), vi.fn());
+diff --git a/frontend/src/components/mobile/mobile-session-list.tsx b/frontend/src/components/mobile/mobile-session-list.tsx
+index 5e8851a62..b0f60bccb 100644
+--- a/frontend/src/components/mobile/mobile-session-list.tsx
++++ b/frontend/src/components/mobile/mobile-session-list.tsx
+@@ -246,11 +246,14 @@ export function MobileSessionList({
+     enabled: groupSectionEnabled,
+     staleTime: 30_000,
+   });
+-  /** 客户端 workspace 过滤：只看本工作区群（端点无过滤参，照桌面同款筛）。 */
++  /** 客户端 workspace 过滤：按 D-003（2026-09-13-session-group-ux-fixes）
++   * 可见工作区集合筛——visible_workspace_ids = 直接归属 ∪ 项目关联工作区，
++   * 挂项目的群在其关联工作区均显示；`?? [workspace_id]` 兜底 react-query 旧
++   * 缓存（字段未到时不闪隐，退化为现状只看直接归属）。照桌面同款筛。 */
+   const groupChats = useMemo(
+     () =>
+-      (groupChatsQuery.data ?? []).filter(
+-        (g) => g.workspace_id === workspaceId,
++      (groupChatsQuery.data ?? []).filter((g) =>
++        (g.visible_workspace_ids ?? [g.workspace_id]).includes(workspaceId),
+       ),
+     [groupChatsQuery.data, workspaceId],
+   );
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 07182e330..5aaba8ec0 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -2490,6 +2490,9 @@ function makeGroupListItem(
+     online_member_ids: [],
+     last_message: "小码：已定位到问题在 hooks 依赖数组…",
+     unread_count: 0,
++    // D-003（2026-09-13-session-group-ux-fixes）：可见工作区集合默认 = 直接
++    // 归属（无项目群的后端口径）；换 workspace 的 override 须同步换此字段。
++    visible_workspace_ids: ["ws-1"],
+     ...overrides,
+   };
+ }
+@@ -2536,7 +2539,7 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
+     expect(mocks.listGroupChats).not.toHaveBeenCalled();
+   });
+ 
+-  it("workspace scope：群按 workspace_id 客户端过滤（他工作区群不渲染）", async () => {
++  it("workspace scope：群按 visible_workspace_ids 集合过滤（无项目关联的他工作区群不渲染）", async () => {
+     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+     mocks.listGroupChats.mockResolvedValue([
+       makeGroupListItem(),
+@@ -2544,6 +2547,8 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
+         id: "g-2",
+         title: "别家的群",
+         workspace_id: "ws-other",
++        // D-003：无项目关联群，集合 = 仅直接归属。
++        visible_workspace_ids: ["ws-other"],
+       }),
+     ]);
+     renderPanel(
+@@ -2561,6 +2566,64 @@ describe("SessionListPanel 群聊分区（task-07）", () => {
+     ).toBeNull();
+   });
+ 
++  // D-003（2026-09-13-session-group-ux-fixes）：群可见性 = 直接归属 ∪ 项目
++  // 关联工作区（后端组装进 visible_workspace_ids，前端集合判定）。
++  it("D-003 workspace scope：挂 D 项目关联 D/F 的群在 D/F 两 scope 均渲染；旧缓存无字段退化直接归属", async () => {
++    setWorkspaces([
++      makeWorkspace({ id: "ws-d", name: "工作区D" }),
++      makeWorkspace({ id: "ws-f", name: "工作区F" }),
++    ]);
++    mocks.listGroupChats.mockResolvedValue([
++      // 群直接挂 D，项目关联 D/F → 集合两工作区（后端去重口径）。
++      makeGroupListItem({
++        id: "g-proj",
++        title: "项目群",
++        workspace_id: "ws-d",
++        project_id: "ppm-1",
++        visible_workspace_ids: ["ws-d", "ws-f"],
++      }),
++      // 旧缓存形态：字段缺失（显式 undefined 模拟 react-query 缓存未含新
++      // 字段）→ `?? [workspace_id]` 兜底，仅直接归属 F 可见（不闪隐）。
++      makeGroupListItem({
++        id: "g-legacy",
++        title: "旧缓存群",
++        workspace_id: "ws-f",
++        visible_workspace_ids: undefined,
++      }),
++    ]);
++    // scope D：项目群经集合可见；旧缓存群（直接归属 F）不可见。
++    const { unmount } = renderPanel(
++      <SessionListPanel
++        scope={{ kind: "workspace", workspaceId: "ws-d" }}
++        onSelectGroup={vi.fn()}
++      />,
++    );
++    await waitFor(() => expect(mocks.listGroupChats).toHaveBeenCalledTimes(1));
++    expect(
++      await screen.findByRole("button", { name: "群聊 项目群" }),
++    ).toBeTruthy();
++    expect(
++      screen.queryByRole("button", { name: "群聊 旧缓存群" }),
++    ).toBeNull();
++    unmount();
++
++    // scope F：项目群经集合可见（跨工作区显示——本变更核心行为）；旧缓存群
++    // 经兜底直接归属可见。
++    renderPanel(
++      <SessionListPanel
++        scope={{ kind: "workspace", workspaceId: "ws-f" }}
++        onSelectGroup={vi.fn()}
++      />,
++    );
++    await waitFor(() => expect(mocks.listGroupChats).toHaveBeenCalledTimes(2));
++    expect(
++      await screen.findByRole("button", { name: "群聊 项目群" }),
++    ).toBeTruthy();
++    expect(
++      screen.getByRole("button", { name: "群聊 旧缓存群" }),
++    ).toBeTruthy();
++  });
++
+   it("runtime scope：分区隐藏（群无 runtime 归属，语义偏离不挂）", async () => {
+     renderPanel(
+       <SessionListPanel
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index 2b90dd31a..98ba5264a 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -1893,6 +1893,9 @@ function makeGroupListItem(): GroupChatListItemRead {
+     unread_count: 0,
+     online_member_ids: [],
+     last_message: null,
++    // D-003（2026-09-13-session-group-ux-fixes）：可见工作区集合默认 = 直接
++    // 归属（无项目群的后端口径）。
++    visible_workspace_ids: ["ws-1"],
+   };
+ }
+ 
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index a7b77f237..72cf9526d 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -960,11 +960,18 @@ function WorkspaceTreeList({
+     enabled: groupSectionEnabled,
+     staleTime: 30_000,
+   });
+-  /** scope 过滤：workspace scope 只看本工作区群（端点无过滤参，客户端筛）。 */
++  /** scope 过滤：workspace scope 按 D-003（2026-09-13-session-group-ux-fixes）
++   * 可见工作区集合筛——visible_workspace_ids = 直接归属 ∪ 项目关联工作区，
++   * 挂项目的群在其关联工作区均显示；`?? [workspace_id]` 兜底 react-query 旧
++   * 缓存（字段未到时不闪隐，退化为现状只看直接归属）。端点无过滤参，客户端筛。 */
+   const groupChats = useMemo(() => {
+     const items = groupChatsQuery.data ?? [];
+     if (scope?.kind === "workspace") {
+-      return items.filter((g) => g.workspace_id === scope.workspaceId);
++      return items.filter((g) =>
++        (g.visible_workspace_ids ?? [g.workspace_id]).includes(
++          scope.workspaceId,
++        ),
++      );
+     }
+     return items;
+   }, [groupChatsQuery.data, scope]);
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index e1920c0f8..8c9d2de97 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -598,6 +598,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+       last_message: null,
+       pinned: null,
+       unread_count: 0,
++      // D-003（2026-09-13-session-group-ux-fixes）：新建群无项目关联，可见
++      // 工作区集合占位 = 直接归属（invalidate 重拉后为后端口径覆盖）。
++      visible_workspace_ids: [group.workspace_id],
+     });
+       // quick-fdd8219a：建群成功同样落 URL。
+       syncSessionParam(group.id);
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 16d4b099b..bd503f2e5 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -15421,6 +15421,12 @@ export interface components {
+          *     最新一行 ts（无消息 None，未读排序数据源）与本成员未读数
+          *     （``get_group_unread_counts``：``last_read_at`` 为 NULL → 全量；否则
+          *     ts > 位点；cap 99+）。
++         *
++         *     ``visible_workspace_ids``（2026-09-13-session-group-ux-fixes D-003）：群
++         *     可见工作区集合 = 直接归属 ``workspace_id`` ∪ 项目关联工作区
++         *     （``PpmProjectWorkspace`` M:N，批量单查，去重）——群列表可见性判定的
++         *     单一源，前端桌面/移动列表过滤消费（旧缓存无该字段时 ``?? [workspace_id]``
++         *     兜底退化现状行为）。
+          */
+         GroupChatListItemRead: {
+             /**
+@@ -15486,6 +15492,11 @@ export interface components {
+             last_mention?: {
+                 [key: string]: string;
+             } | null;
++            /**
++             * Visible Workspace Ids
++             * @default []
++             */
++            visible_workspace_ids: string[];
+         };
+         /**
+          * GroupChatPinnedRead
