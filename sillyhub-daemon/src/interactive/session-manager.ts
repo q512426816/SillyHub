@@ -85,9 +85,21 @@ import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
 // join / daemonStateDir 派生确定性 per-session 路径 `<daemonStateDir()>/codex/<sessionId>`
 //（与 task-runner.ts spawn 侧同口径）。
 import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { daemonStateDir } from '../config.js';
+
+/**
+ * 2026-09-12-provider-file-tx D-005@v2：reload 引擎白名单（provider 维度门）。
+ * 仅 provider 切换载荷（opts.providerConfig !== undefined）判门；config-only 路径
+ * （人格/配置切换）不受限——cursor 的 reloadWithConfig 行为保持。口径与前端
+ * frontend/src/lib/provider-caps.ts PROVIDER_SWITCH_ENGINES 对齐（改任一侧须同步）。
+ */
+const PROVIDER_RELOAD_ENGINES: ReadonlySet<string> = new Set(['claude', 'codex', 'pi']);
 import { migrateCodexThreadFromHost } from '../codex-settings.js';
-import { applyProviderFileSettingsForReload } from '../provider-file-settings.js';
+import {
+  applyProviderFileSettingsForReload,
+  MANAGED_MARKER_FILENAME,
+} from '../provider-file-settings.js';
 // 2026-09-11-provider-adapter-registry task-03（FR-03）：reload 合并块门控改读
 // 聚合表元数据（INTERACTIVE_PROVIDERS——fileSettings 是否 writer；详见下方
 // hasProviderFileWriter 与 _reloadSessionNow 合并块内注释）。
@@ -1777,6 +1789,21 @@ export class SessionManager {
         ? opts.providerConfig
         : (state.providerConfig ?? null);
 
+    // D-005@v2 引擎门：provider 切换载荷 + 白名单外引擎 → 显式 fail-loud（恢复
+    // 1e4bb818f 删除 claude-only 守卫前的拒绝语义，口径改白名单；cursor 曾被静默
+    // 卷入未验证的 reload 路径——审查 F4）。
+    // 载荷判据=「携带 providerConfig 且与当前值实际不同」（reloadWithConfig 带
+    // 档案时也会传派生 providerConfig——与现值相同属 config-only，不判门）。
+    const providerSwitchPayload =
+      opts.providerConfig !== undefined &&
+      JSON.stringify(opts.providerConfig ?? null) !==
+        JSON.stringify(state.providerConfig ?? null);
+    if (providerSwitchPayload && !PROVIDER_RELOAD_ENGINES.has(state.provider)) {
+      throw new Error(
+        `_reloadSession: provider 切换不支持引擎 ${state.provider}（session ${sessionId}；白名单 claude/codex/pi）`,
+      );
+    }
+
     // 进入时快照旧句柄/env/config 供失败回滚（R-01）。句柄是引用，旧对象本身会被
     // close，但保留引用让 catch 区分「reload 失败 → 用旧引用占位，不 nil」。
     const oldHandle =
@@ -1784,6 +1811,8 @@ export class SessionManager {
     const oldEnv = state.env;
     const oldProviderConfig = state.providerConfig;
     const oldSystemPrompt = state.systemPrompt;
+    // D-002@v2：文件层回滚标记——写盘块内置位，catch 侧据此以旧形态重跑 ForReload。
+    let fileLayerTouched = false;
 
     try {
       // ── buildSpawnEnv 构造新 env（provider_config null 时第 0 层跳过 → 本机凭证）──
@@ -1849,6 +1878,17 @@ export class SessionManager {
       // 文件层写盘 + env 合并；claude / cursor / 未知 provider（表无条目）零动作，
       // 逐类等价（漏改则新引擎 reload 丢文件层 env——Grill 发现）。块内 codex 迁移
       // 钩子为 per-engine 差异，按 design 非目标保留 provider === 'codex' 原判定。
+      // ── ③ 校验 resume key 必需（D-001@v1 守卫前移：先于文件层写盘——缺 key 时
+      // 零文件写入直接抛，消除「先覆盖目录再发现不能 reload」路径，审查 F1 前半）──
+      // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
+      // 是 SDK jsonl 恢复 key。缺失说明首 turn 未完成，无可恢复 jsonl → 拒绝 reload
+      //（避免 SDK 拿空 resume 启动全新会话替换语义——那是 end + create 流程，不是 reload）。
+      if (!state.agentSessionId) {
+        throw new Error(
+          `_reloadSession: missing agentSessionId (session ${sessionId} 首 turn system/init 未完成,无 jsonl 可 resume)`,
+        );
+      }
+
       if (hasProviderFileWriter(state.provider)) {
         // codex 迁移钩子（FR-05，仅 codex）：宿主凭证起步会话（oldEnv 无 CODEX_HOME）
         // 首次切平台供应商 → 迁移 thread rollout 历史到 per-session 目录，否则新
@@ -1874,6 +1914,7 @@ export class SessionManager {
         // priorEnv 断言：state.env 是 NodeJS.ProcessEnv（索引值 string | undefined），
         // 但 env 快照实际由 buildSpawnEnv 产出（值恒为 string）；ForReload 内部经
         // nonEmptyStr 逐键判空，undefined 值与缺键同义，断言仅对齐声明类型。
+        fileLayerTouched = true;
         const fileEnv = await applyProviderFileSettingsForReload({
           sessionKey: state.sessionId,
           provider: providerConfig,
@@ -1883,15 +1924,6 @@ export class SessionManager {
         Object.assign(newEnv, fileEnv);
       }
 
-      // ── ③ 校验 resume key 必需 ──
-      // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
-      // 是 SDK jsonl 恢复 key。缺失说明首 turn 未完成，无可恢复 jsonl → 拒绝 reload
-      //（避免 SDK 拿空 resume 启动全新会话替换语义——那是 end + create 流程，不是 reload）。
-      if (!state.agentSessionId) {
-        throw new Error(
-          `_reloadSession: missing agentSessionId (session ${sessionId} 首 turn system/init 未完成,无 jsonl 可 resume)`,
-        );
-      }
 
       // ── ④ _buildDriverOptions 构造 driverOpts（透传 cwd / canUseTool / mcpServers / resume / env）──
       const driver = state.driver ?? this._drivers.claude;
@@ -2015,6 +2047,34 @@ export class SessionManager {
       state.env = oldEnv;
       state.providerConfig = oldProviderConfig;
       state.systemPrompt = oldSystemPrompt;
+      // D-002@v2 文件层回滚：写盘已越过时以旧形态重跑 ForReload（绝不抛契约 →
+      // 回滚动作自身安全；codex null+prior 键走宿主镜像分支恢复宿主态，pi null /
+      // undefined 返 {}）。返回空对象（未建立任何文件层键）且目录可能存在时
+      // best-effort 删生效标记——防 restore 把残留新供应商产物误判为切换曾生效。
+      if (fileLayerTouched) {
+        try {
+          const rollbackEnv = await applyProviderFileSettingsForReload({
+            sessionKey: sessionId,
+            provider: oldProviderConfig,
+            daemonApiKey: this.deps.daemonApiKey ?? null,
+            priorEnv: oldEnv as Record<string, string> | undefined,
+          });
+          if (Object.keys(rollbackEnv).length === 0) {
+            for (const engineDir of ['codex', 'pi']) {
+              await rm(
+                join(daemonStateDir(), engineDir, sessionId, MANAGED_MARKER_FILENAME),
+                { force: true },
+              ).catch(() => undefined);
+            }
+          }
+        } catch (rollbackErr) {
+          // eslint-disable-next-line no-console
+          console.error(
+            `[session-manager] _reloadSession file-layer rollback failed (session=${sessionId})`,
+            rollbackErr,
+          );
+        }
+      }
       // eslint-disable-next-line no-console
       console.error(
         `[session-manager] _reloadSession failed (session=${sessionId}), 保留旧句柄降级`,

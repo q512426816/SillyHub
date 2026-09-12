@@ -72,9 +72,11 @@
  * @module codex-settings
  */
 
-import { copyFile, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { copyFile, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
+import { writeFileAtomic } from './atomic-write.js';
 import type { ProviderConfig } from './types.js';
 
 /** 写盘器入参（design 接口定义；风格对齐 claude-settings.ts 纯函数 + 显式路径入参）。 */
@@ -322,7 +324,7 @@ async function writeAuthJson(dir: string, key: string): Promise<void> {
     }
   }
   obj.OPENAI_API_KEY = key;
-  await writeFile(authPath, JSON.stringify(obj, null, 2), 'utf-8');
+  await writeFileAtomic(authPath, JSON.stringify(obj, null, 2));
 }
 
 /**
@@ -363,7 +365,7 @@ export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void> 
     }
     const configPath = join(codexHome, CONFIG_FILENAME);
     const existing = await readTextIfExists(configPath);
-    await writeFile(configPath, mergeConfigToml(existing, values), 'utf-8');
+    await writeFileAtomic(configPath, mergeConfigToml(existing, values));
   } catch (e) {
     console.error('codex_home_write_failed', {
       codexHome,
@@ -414,7 +416,21 @@ export async function mirrorCodexHostAuth(codexHome: string): Promise<void> {
     const src = join(hostHome, filename);
     const dest = join(codexHome, filename);
     try {
-      await copyFile(src, dest);
+      // 原子拷入（D-003@v1）：copy 到 tmp 再 rename 顶替——镜像中途崩溃不留半截
+      // auth.json/config.toml（tmp 名带随机段，失败 best-effort 清理后按原错误走
+      // 下方 ENOENT/其它错误分支）。
+      const tmpDest = `${dest}.tmp-${process.pid}-${randomUUID().slice(0, 8)}`;
+      try {
+        await copyFile(src, tmpDest);
+        await rename(tmpDest, dest);
+      } catch (copyErr) {
+        try {
+          await rm(tmpDest, { force: true });
+        } catch {
+          /* best-effort 清理 */
+        }
+        throw copyErr;
+      }
     } catch (e) {
       if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
         // 宿主无该文件：删 per-session 同名文件（force 容忍本就不存在）。

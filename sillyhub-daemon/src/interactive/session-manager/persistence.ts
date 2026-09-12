@@ -41,11 +41,15 @@ import type { SpawnCredentialManager } from '../../spawn-env.js';
 // 目录探测后镜像，helper 在 provider-file-settings.ts / codex-settings.ts）。
 // stat / join / daemonStateDir 用于探测确定性 per-session 目录
 // `<daemonStateDir()>/codex/<sessionId>/`（与 spawn/reload 同口径派生路径）。
-import { stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { writeFileAtomic } from '../../atomic-write.js';
 import { daemonStateDir } from '../../config.js';
 import { mirrorCodexHostAuth } from '../../codex-settings.js';
-import { applyProviderFileSettingsForReload } from '../../provider-file-settings.js';
+import {
+  applyProviderFileSettingsForReload,
+  MANAGED_MARKER_FILENAME,
+} from '../../provider-file-settings.js';
 // 2026-09-11-provider-adapter-registry task-03（FR-03）：restore 门控与 codex 探测
 // 目录类型判定改读聚合表元数据（INTERACTIVE_PROVIDERS 的 fileSettings writer /
 // perSessionDir；详见下方 restoreAndReconnect 内注释）。
@@ -386,18 +390,65 @@ export async function restoreAndReconnect(
         // mirrorCodexHostAuth / CODEX_HOME 注入探测体不动。
         const codexHome = join(daemonStateDir(), fileWriter.dirName, state.sessionId);
         try {
-          if ((await stat(codexHome)).isDirectory()) {
-            // mirrorCodexHostAuth 自身绝不抛；防御 catch 兜底（镜像成败不影响
-            // 下方 env 注入）。
-            try {
-              await mirrorCodexHostAuth(codexHome);
-            } catch {
-              // 防御性兜底：零动作，不阻断恢复。
+          // 2026-09-12-provider-file-tx D-004@v2：探测三态化——
+          //   标记在 = 切换曾真实生效 → managed；
+          //   无标记但 auth.json/config.toml 在 = legacy 兼容（修复前存量已切换
+          //     会话，行为与旧「目录存在」判定逐字一致）→ managed；
+          //   皆无 = 零动作（宿主语义；迁移钩子只建目录+sessions/ 恒落此态，
+          //     F3「目录存在即 managed」假阳性从根消除）。
+          const markerPath = join(codexHome, MANAGED_MARKER_FILENAME);
+          const markerExists = await stat(markerPath).then(
+            () => true,
+            () => false,
+          );
+          const legacyHit = markerExists
+            ? false
+            : await Promise.all([
+                stat(join(codexHome, 'auth.json')).then(
+                  () => true,
+                  () => false,
+                ),
+                stat(join(codexHome, 'config.toml')).then(
+                  () => true,
+                  () => false,
+                ),
+              ]).then(([authHit, configHit]) => authHit || configHit);
+          if (markerExists || legacyHit) {
+            if (legacyHit) {
+              // eslint-disable-next-line no-console
+              console.info('codex_restore_legacy_marker_missing', { codexHome });
+            }
+            // 标记先行不变量（D-004@v2）：legacy 无标记 → 删除类镜像动作前先补落
+            // 标记（失败跳过镜像，env 注入保持——目录旧产物=等同未切，与 ForReload
+            // 分支四同序）。
+            let markerOk = true;
+            if (!markerExists) {
+              try {
+                await mkdir(codexHome, { recursive: true });
+                await writeFileAtomic(
+                  markerPath,
+                  JSON.stringify({
+                    envKey: 'CODEX_HOME',
+                    switchedAt: new Date().toISOString(),
+                  }),
+                );
+              } catch {
+                markerOk = false;
+              }
+            }
+            if (markerOk) {
+              // mirrorCodexHostAuth 自身绝不抛；防御 catch 兜底（镜像成败不影响
+              // 下方 env 注入）。
+              try {
+                await mirrorCodexHostAuth(codexHome);
+              } catch {
+                // 防御性兜底：零动作，不阻断恢复。
+              }
             }
             Object.assign(restoreEnv, { CODEX_HOME: codexHome });
           }
         } catch {
-          // stat ENOENT / IO 异常 = 目录不存在 → 零动作。
+          // stat / mkdir IO 异常 → 零动作（宿主语义）。
         }
       }
     }

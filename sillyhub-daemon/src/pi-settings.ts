@@ -56,8 +56,10 @@
  * @module pi-settings
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+import { writeFileAtomic } from './atomic-write.js';
 import type { ProviderConfig } from './types.js';
 
 /** 写盘器入参（design 接口定义；风格对齐 codex-settings.ts 纯函数 + 显式路径入参）。 */
@@ -155,7 +157,7 @@ async function writeAuthJson(piDir: string, apiKey: string): Promise<void> {
   const authPath = join(piDir, AUTH_FILENAME);
   const auth = await readJsonObject(authPath, AUTH_FILENAME);
   auth[PROVIDER_KEY] = { type: 'api_key', key: apiKey };
-  await writeFile(authPath, JSON.stringify(auth, null, 2), 'utf-8');
+  await writeFileAtomic(authPath, JSON.stringify(auth, null, 2));
 }
 
 /**
@@ -198,7 +200,7 @@ async function writeModelsJson(
     models: [{ id: modelId }],
   };
   doc.providers = target;
-  await writeFile(modelsPath, JSON.stringify(doc, null, 2), 'utf-8');
+  await writeFileAtomic(modelsPath, JSON.stringify(doc, null, 2));
 }
 
 /**
@@ -210,7 +212,7 @@ async function writeSettingsJson(piDir: string, modelId: string): Promise<void> 
   const settings = await readJsonObject(settingsPath, SETTINGS_FILENAME);
   settings.defaultProvider = PROVIDER_KEY;
   settings.defaultModel = modelId;
-  await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+  await writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2));
 }
 
 /**

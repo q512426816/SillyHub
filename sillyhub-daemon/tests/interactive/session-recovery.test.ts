@@ -29,6 +29,7 @@ import {
 } from '../../src/interactive/types.js';
 // vi.mock 已 hoist，import 拿到 mock 版本（mirrorCodexHostAuth 断言载体）。
 import { mirrorCodexHostAuth } from '../../src/codex-settings.js';
+import { MANAGED_MARKER_FILENAME } from '../../src/provider-file-settings.js';
 import type {
   ClaudeSdkDriver,
   InteractiveDriverCallbacks,
@@ -605,9 +606,10 @@ describe('task-04 / restore 自愈：codex·pi 恢复注文件层 env（FR-01 / 
     );
   });
 
-  it('RESTORE-4: codex null + 确定性目录存在 → mirrorCodexHostAuth 幂等重镜像 + 注 CODEX_HOME（Grill P2-3）', async () => {
-    // 切回本机的会话：persistence 仅落盘非 null providerConfig → 记录无该字段，
-    // 但 per-session 目录存在 = 此前在平台供应商上（thread 历史在其中）。
+  it('RESTORE-4: codex null + legacy 目录（无标记有 auth.json）→ 补落标记 + 幂等重镜像 + 注 CODEX_HOME（D-004@v2 legacy 态）', async () => {
+    // 切回本机的会话：persistence 仅落盘非 null providerConfig → 记录无该字段。
+    // legacy 态（修复前存量）：目录无标记但有 auth.json = 此前在平台供应商上
+    //（thread 历史在其中）——探测三态化后行为与旧「目录存在」判定逐字一致。
     const codexHome = join(tmpRoot, 'codex', 'sess-rn');
     mkdirSync(codexHome, { recursive: true });
     writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-provider-era"}');
@@ -663,5 +665,65 @@ describe('task-04 / restore 自愈：codex·pi 恢复注文件层 env（FR-01 / 
     expect(env['CODEX_HOME']).toBeUndefined();
     expect(existsSync(join(tmpRoot, 'codex'))).toBe(false);
     expect(sm.get('sess-rx')?.status).toBe('reconnecting');
+  });
+
+  it('RESTORE-6: codex null + 标记在（无 auth/config）→ managed：镜像 + 注 CODEX_HOME（标记=切换曾生效唯一真相）', async () => {
+    // 目录里只有标记（镜像删除后形态）——旧「目录存在」判定也命中，但本用例
+    // 锁定的是：标记在即 managed，不依赖 auth/config 存在性。
+    const codexHome = join(tmpRoot, 'codex', 'sess-rn-mk');
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(
+      join(codexHome, MANAGED_MARKER_FILENAME),
+      JSON.stringify({ envKey: 'CODEX_HOME', switchedAt: '2026-09-12T00:00:00Z' }),
+    );
+    const codex = makeMockAgentDriver();
+    const claude = makeMockDriver();
+    const sm = new SessionManager({
+      driver: claude.driver,
+      drivers: { codex: codex.driver },
+      ...makeDeps(),
+    });
+
+    await sm.restoreAndReconnect({
+      sessionId: 'sess-rn-mk',
+      leaseId: 'lease-rn-mk',
+      agentSessionId: 'thread-rn-mk',
+      cwd: 'C:\proj',
+      provider: 'codex',
+      turnCount: 1,
+      lastActiveAt: 1_700_000_000_000,
+    });
+
+    expect(mirrorCodexHostAuth).toHaveBeenCalledWith(codexHome);
+    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+    expect(env['CODEX_HOME']).toBe(codexHome);
+  });
+
+  it('RESTORE-7: codex null + 仅迁移钩子形态目录（sessions/ 子目录，无标记无 auth/config）→ 零动作（F3 假阳性消除锚点）', async () => {
+    // 迁移钩子只建目录 + sessions/ 拷贝（session-manager.ts reload 块）；旧
+    // 「目录存在」判定会误判 managed → resume 回退过期快照丢轮次（审查 F3）。
+    const codexHome = join(tmpRoot, 'codex', 'sess-rn-mig');
+    mkdirSync(join(codexHome, 'sessions'), { recursive: true });
+    const codex = makeMockAgentDriver();
+    const claude = makeMockDriver();
+    const sm = new SessionManager({
+      driver: claude.driver,
+      drivers: { codex: codex.driver },
+      ...makeDeps(),
+    });
+
+    await sm.restoreAndReconnect({
+      sessionId: 'sess-rn-mig',
+      leaseId: 'lease-rn-mig',
+      agentSessionId: 'thread-rn-mig',
+      cwd: 'C:\proj',
+      provider: 'codex',
+      turnCount: 1,
+      lastActiveAt: 1_700_000_000_000,
+    });
+
+    expect(mirrorCodexHostAuth).not.toHaveBeenCalled();
+    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+    expect(env['CODEX_HOME']).toBeUndefined();
   });
 });

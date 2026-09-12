@@ -36,6 +36,10 @@ writePiDir({piDir, provider}):
 ```
 
 ## 注意事项
+
+- **写入一律原子**（2026-09-12-provider-file-tx D-003@v1）：auth.json/models.json/
+  settings.json 三文件走 `atomic-write.ts` writeFileAtomic（tmp+fsync+rename）——直接
+  writeFile 崩溃留半截 JSON。pi 无 null 探测/无镜像删除面，不涉及生效标记先行序。
 - CLI 版本基线（R-03）：写盘形状以 **pi 0.81.1** 实测为 golden——`providers.<key>.api` 按 api_format 映射（ql-20260911-029 起 anthropic 形态 = `"anthropic-messages"`，Anthropic SDK 打 `{baseUrl}/v1/messages` + `x-api-key` 头，智谱真实端点实测 exit=0；spike B1 的 openai-completions 形态仅适用于 OpenAI 兼容端点，当前词表无该形态合法入口）；auth.json 官方形状是 `{"type": "api_key", "key": ...}`（`{"apiKey": ...}` 投影形状实测被拒：`No API key found for the selected model.`，不采用）；CLI 升级漂移由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 0.81.1，mock 全链 exit=0）。
 - spike golden 证据：`.sillyspec/changes/2026-09-10-multi-provider-injection/spike/b1-models.json`、`b1b-auth.json`、`b1-settings.json`；冒烟测试对 b1 系 golden 做逐字段断言。
 - 与 env 层共存（R-04）：pi key 解析优先级 CLI `--api-key` > auth.json > env > models.json 内联 apiKey——文件层与 env 层并存时 auth.json 文件值压制 env 同键值，两层叠加无歧义路由；官方端点（base_url 空）本模块零写入，对 env 层零干扰。

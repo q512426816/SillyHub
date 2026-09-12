@@ -1425,3 +1425,183 @@ describe('ql-20260822-001 / home 会话切供应商迁移 jsonl 到隔离目录'
     }
   });
 });
+
+
+// ── (6) 2026-09-12-provider-file-tx：引擎门 / 守卫前移 / 文件层回滚 ─────────────
+
+describe('provider-file-tx：D-005@v2 引擎门（provider 维度条件化）', () => {
+  it('GATE-1: cursor + provider 切换载荷 → 白名单外显式 throw + 会话不破坏', async () => {
+    const mock = makeMockClaudeDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT });
+    mock.emitMessage(systemInitMessage());
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    const state = readState(sm, BASE_INPUT.sessionId)!;
+    (state as { provider: string }).provider = 'cursor';
+
+    await expect(
+      sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig()),
+    ).rejects.toThrow(/不支持引擎 cursor/);
+    expect(sm.get(BASE_INPUT.sessionId)?.status).toBe('active');
+    expect(mock.startCalls.length).toBe(1); // 未 spawn 新句柄
+  });
+
+  it('GATE-2: cursor + config-only（providerConfig 字段缺席）→ 不判门照常 reload', async () => {
+    const mock = makeMockClaudeDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT });
+    mock.emitMessage(systemInitMessage());
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    const state = readState(sm, BASE_INPUT.sessionId)!;
+    (state as { provider: string }).provider = 'cursor';
+
+    await sm.reloadWithConfig(BASE_INPUT.sessionId, { profileName: 'p' });
+
+    expect(mock.startCalls.length).toBe(2); // config-only reload 正常执行
+  });
+});
+
+describe('provider-file-tx：D-001@v1 守卫前移（缺 key 零文件写入）', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-pftx-'));
+    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
+    vi.mocked(migrateCodexThreadFromHost).mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('HOIST-1: codex 缺 agentSessionId → 写盘前抛 + per-session 目录零创建', async () => {
+    const mock = makeMockClaudeDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT });
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    const state = readState(sm, BASE_INPUT.sessionId)!;
+    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
+
+    await expect(
+      sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig()),
+    ).rejects.toThrow(/missing agentSessionId/);
+
+    // 守卫先于 ForReload 写盘：目录不存在（旧实现先写 auth/config 再抛）。
+    expect(existsSync(join(tmpRoot, 'codex', BASE_INPUT.sessionId))).toBe(false);
+    expect(migrateCodexThreadFromHost).not.toHaveBeenCalled();
+  });
+});
+
+describe('provider-file-tx：D-002@v2 catch 文件层回滚（A→B 失败回 A）', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-pftx-'));
+    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
+    vi.mocked(migrateCodexThreadFromHost).mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('ROLL-1: driver.start 失败 → 目录被旧供应商形态重写（config.toml=old base_url）+ 标记保留 + R-01 降级', async () => {
+    const mock = makeMockClaudeDriver();
+    const originalStart = mock.driver.start;
+    let call = 0;
+    mock.driver.start = vi.fn(
+      (input: AsyncIterable<SDKUserMessage>, opts: StartOptions): Query => {
+        call += 1;
+        if (call === 1) {
+          return (originalStart as unknown as (
+            i: AsyncIterable<SDKUserMessage>,
+            o: StartOptions,
+          ) => Query)(input, opts);
+        }
+        throw new Error('simulated spawn EINVAL');
+      },
+    ) as unknown as ClaudeSdkDriver['start'];
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT });
+    mock.emitMessage(systemInitMessage());
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    const state = readState(sm, BASE_INPUT.sessionId)!;
+    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
+    // 旧形态 A：白盒置 providerConfig（ForReload(A) 回滚产物断言依据）。
+    const oldConfig = codexProviderConfig();
+    (state as { providerConfig: ProviderConfig | null }).providerConfig = oldConfig;
+
+    const newConfig: ProviderConfig = {
+      ...codexProviderConfig(),
+      api_key: 'sk-codex-new',
+      base_url: 'https://codex-new.example/v1',
+    };
+    await expect(
+      sm.reloadWithProvider(BASE_INPUT.sessionId, newConfig),
+    ).rejects.toThrow(/simulated spawn EINVAL/);
+
+    // 回滚：目录 config.toml = 旧供应商 A 的 base_url（非 B）。
+    const toml = readFileSync(
+      join(tmpRoot, 'codex', BASE_INPUT.sessionId, 'config.toml'),
+      'utf-8',
+    );
+    expect(toml).toContain('https://codex-rl.example/v1');
+    expect(toml).not.toContain('codex-new.example');
+    // 内存态还原（R-01 既有断言面）。
+    const after = readState(sm, BASE_INPUT.sessionId)!;
+    expect(after.providerConfig).toBe(oldConfig);
+    expect(after.status).toBe('active');
+  });
+
+  it('ROLL-2: 旧形态 undefined（从未配置）→ 回滚 ForReload 返 {} + best-effort 删标记（防 restore 误判 managed）', async () => {
+    const mock = makeMockClaudeDriver();
+    const originalStart = mock.driver.start;
+    let call = 0;
+    mock.driver.start = vi.fn(
+      (input: AsyncIterable<SDKUserMessage>, opts: StartOptions): Query => {
+        call += 1;
+        if (call === 1) {
+          return (originalStart as unknown as (
+            i: AsyncIterable<SDKUserMessage>,
+            o: StartOptions,
+          ) => Query)(input, opts);
+        }
+        throw new Error('simulated spawn EINVAL');
+      },
+    ) as unknown as ClaudeSdkDriver['start'];
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT });
+    mock.emitMessage(systemInitMessage());
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    const state = readState(sm, BASE_INPUT.sessionId)!;
+    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
+    // 旧形态 undefined：state.providerConfig 未设（从未配置）。
+    const before = readState(sm, BASE_INPUT.sessionId)!;
+    expect(before.providerConfig).toBeUndefined();
+
+    await expect(
+      sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig()),
+    ).rejects.toThrow(/simulated spawn EINVAL/);
+
+    // 回滚 ForReload(undefined) 返 {} → 删标记（目录残留新供应商产物但无标记，
+    // restore 探测恒落零动作/legacy 判定不误 managed——undefined 旧形态无 thread
+    // 迁移面，残留无 env 指向即惰性）。
+    expect(existsSync(join(tmpRoot, 'codex', BASE_INPUT.sessionId, '.sillyhub-managed'))).toBe(
+      false,
+    );
+    // 目录残留属预期（惰性无害）；R-01 降级保持。
+    expect(sm.get(BASE_INPUT.sessionId)?.status).toBe('active');
+  });
+
+});

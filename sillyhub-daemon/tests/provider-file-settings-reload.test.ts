@@ -56,6 +56,7 @@ vi.mock('node:os', async (importOriginal) => {
 import {
   applyProviderFileSettingsForReload,
   type ProviderFileSettingsReloadInput,
+  MANAGED_MARKER_FILENAME,
 } from '../src/provider-file-settings.js';
 import {
   mirrorCodexHostAuth,
@@ -314,11 +315,20 @@ describe('ForReload 分支四：null + prior CODEX_HOME → 镜像成败均返 p
     expect(readFileSync(join(stubbedRoot(), 'codex', 'sess-null1', 'auth.json'), 'utf-8')).toContain(
       'sk-host-login',
     );
+    // D-004@v2 标记先行：镜像前标记已落盘（内容含 envKey，探测侧只判存在性）。
+    expect(existsSync(join(stubbedRoot(), 'codex', 'sess-null1', MANAGED_MARKER_FILENAME))).toBe(
+      true,
+    );
+    const marker = JSON.parse(
+      readFileSync(join(stubbedRoot(), 'codex', 'sess-null1', MANAGED_MARKER_FILENAME), 'utf-8'),
+    ) as { envKey?: string };
+    expect(marker.envKey).toBe('CODEX_HOME');
   });
 
-  it('镜像 IO 失败（codexHome 路径被同名文件占用）→ 仍返 prior 键不抛（目录留旧产物=等同未切）', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    // 阻断镜像：目标目录段被普通文件占用 → mkdir/copyFile 全失败。
+  it('标记写失败（codexHome 路径被同名文件占用）→ 跳过整个镜像返 prior 键不抛（D-004@v2 标记先行）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // 阻断标记：目标目录段被普通文件占用 → mkdir/writeFileAtomic 全失败
+    // → 标记先行语义 = 不执行镜像（含删除动作），等同未切。
     writeFileSync(join(stubbedRoot(), 'codex'), 'not-a-dir');
 
     const env = await forReload({
@@ -327,8 +337,31 @@ describe('ForReload 分支四：null + prior CODEX_HOME → 镜像成败均返 p
       priorEnv: { CODEX_HOME: '/prior/codex-null2' },
     });
 
-    // 铁律：镜像失败不抛、env 仍保住旧目录（thread 历史保住）。
+    // 铁律保持：不抛、env 仍保住旧目录（thread 历史保住）。
     expect(env).toEqual({ CODEX_HOME: '/prior/codex-null2' });
+    expect(warnSpy).toHaveBeenCalledWith(
+      'provider_file_marker_write_failed',
+      expect.objectContaining({ dir: join(stubbedRoot(), 'codex', 'sess-null2') }),
+    );
+  });
+
+  it('标记成功 + 镜像 IO 失败（auth.json 目标位被同名目录占用）→ error 日志 + 仍返 prior 键不抛', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 宿主 auth.json 存在（触发拷入分支），但 per-session 目标位被同名目录占用
+    // → copyFile EISDIR（标记已先行落盘成功，镜像内部失败走 error 日志）。
+    mkdirSync(hostCodex(), { recursive: true });
+    writeFileSync(join(hostCodex(), 'auth.json'), '{"OPENAI_API_KEY":"sk-x"}');
+    const codexHome = join(stubbedRoot(), 'codex', 'sess-null2b');
+    mkdirSync(join(codexHome, 'auth.json'), { recursive: true });
+
+    const env = await forReload({
+      sessionKey: 'sess-null2b',
+      provider: null,
+      priorEnv: { CODEX_HOME: '/prior/codex-null2b' },
+    });
+
+    expect(env).toEqual({ CODEX_HOME: '/prior/codex-null2b' });
+    expect(existsSync(join(codexHome, MANAGED_MARKER_FILENAME))).toBe(true);
     expect(errSpy).toHaveBeenCalled();
   });
 });
@@ -491,5 +524,53 @@ describe('migrateCodexThreadFromHost 三态', () => {
       'codex_thread_migrate_no_match',
       expect.objectContaining({ thread_id: 'thread-any', scanned: 0 }),
     );
+  });
+});
+
+
+// ── 生效标记序（2026-09-12-provider-file-tx D-004@v2）────────────────────────
+
+describe('生效标记：分支一后置 / 门槛缺不落 / 失败 best-effort', () => {
+  it('分支一写盘成功 → 标记后置落盘（内容含 envKey，探测侧只判存在性）', async () => {
+    const env = await forReload({
+      sessionKey: 'sess-mk1',
+      provider: codexAnthropicConfig(),
+      priorEnv: undefined,
+    });
+
+    expect(env).toEqual({ CODEX_HOME: join(stubbedRoot(), 'codex', 'sess-mk1') });
+    const markerPath = join(stubbedRoot(), 'codex', 'sess-mk1', MANAGED_MARKER_FILENAME);
+    expect(existsSync(markerPath)).toBe(true);
+    expect(
+      (JSON.parse(readFileSync(markerPath, 'utf-8')) as { envKey?: string }).envKey,
+    ).toBe('CODEX_HOME');
+  });
+
+  it('分支一标记写失败（标记位被同名目录占用）→ 仅 warn，写盘主体成功 env 照常返回', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // 预占标记位：writeFileAtomic 的 rename 顶替目录失败 → helper 吞错 warn。
+    const dir = join(stubbedRoot(), 'codex', 'sess-mk2');
+    mkdirSync(join(dir, MANAGED_MARKER_FILENAME), { recursive: true });
+
+    const env = await forReload({
+      sessionKey: 'sess-mk2',
+      provider: codexAnthropicConfig(),
+      priorEnv: undefined,
+    });
+
+    expect(env).toEqual({ CODEX_HOME: dir });
+    expect(existsSync(join(dir, 'auth.json'))).toBe(true); // 写盘主体不受标记失败影响
+    expect(warnSpy).toHaveBeenCalledWith('provider_file_marker_write_failed', expect.anything());
+  });
+
+  it('分支三门槛缺跳过 → 零标记零目录（标记=「切换曾真实生效」信号，不得虚报）', async () => {
+    const env = await forReload({
+      sessionKey: 'sess-mk3',
+      provider: { agent_kind: 'codex', api_key: '', base_url: '', model: 'm' } as ProviderConfig,
+      priorEnv: { CODEX_HOME: '/prior/mk3' },
+    });
+
+    expect(env).toEqual({ CODEX_HOME: '/prior/mk3' });
+    expect(existsSync(join(stubbedRoot(), 'codex', 'sess-mk3'))).toBe(false);
   });
 });

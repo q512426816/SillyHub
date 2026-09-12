@@ -35,6 +35,14 @@ writeCodexHome({codexHome, provider, daemonApiKey}):
 ```
 
 ## 注意事项
+
+- **写入一律原子**（2026-09-12-provider-file-tx D-003@v1）：auth.json/config.toml/宿主镜像
+  拷贝走 `atomic-write.ts` writeFileAtomic（tmp+fsync+rename）——直接 writeFile 会留半截
+  文件，config.toml 截断后保守合并保留残行持续产出非法 TOML。migrate rollout 拷贝例外
+  （数据搬运非配置，幂等可重拷）。
+- **`.sillyhub-managed` 生效标记**（D-004@v2）：ForReload 分支四镜像**标记先行**（标记
+  写失败跳过整个镜像含删除动作）；restore 探测消费该标记（详见 provider-file-settings
+  模块）。改写盘/镜像序时保持「删除类动作晚于标记持久化」不变量。
 - CLI 版本基线（R-03）：写盘形状以 **codex 0.147.0** 实测为 golden——`wire_api = "responses"` 是自定义 provider 唯一合法值（0.147.0 已移除 "chat"，配置加载即报错）；CLI 升级若改文件格式，由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 codex-cli 0.147.0，mock 全链 exit=0）。
 - spike golden 证据：`.sillyspec/changes/2026-09-10-multi-provider-injection/spike/a2b-config.toml` 与 `a2-auth.json`（产物逐字段同形）；冒烟测试对该 golden 做整文件逐字段断言。
 - 自定义 provider 不强制 key（spike A3a：无 key 请求照发、Authorization 空）→ key 缺省不写 auth.json 是合法形态而非错误。

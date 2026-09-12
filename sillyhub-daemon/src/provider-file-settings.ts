@@ -14,6 +14,7 @@
 
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { writeFileAtomic } from './atomic-write.js';
 import { daemonStateDir } from './config.js';
 import { mirrorCodexHostAuth } from './codex-settings.js';
 // task-02（2026-09-11-provider-adapter-registry）：分派数据源——聚合表
@@ -24,6 +25,37 @@ import {
   type ProviderAdapter,
 } from './interactive/providers.js';
 import type { ProviderConfig } from './types.js';
+
+// ── 生效标记（2026-09-12-provider-file-tx D-004@v2）─────────────────────────
+
+/** per-session 目录的「切换曾真实生效」标记文件名（点前缀对 CLI 透明）。 */
+export const MANAGED_MARKER_FILENAME = '.sillyhub-managed';
+
+/**
+ * 落生效标记（内容仅排障用非契约：envKey + switchedAt）。
+ *
+ * 返回是否成功——分支四（codex-null 镜像）以返回值决定是否执行镜像（标记先行，
+ * 删除类动作只发生在标记持久化之后，R-03 双失败从根消除）；分支一（非 null 写盘）
+ * 后置调用、失败仅 warn（写盘主体已成功，legacy 探测判据可兜）。
+ */
+async function writeManagedMarker(dir: string, envKey: string): Promise<boolean> {
+  try {
+    // 目录可能尚未建（镜像路径的 mkdir 原在 mirrorCodexHostAuth 内部，标记先行
+    // 后由本处负责建）。
+    await mkdir(dir, { recursive: true });
+    await writeFileAtomic(
+      join(dir, MANAGED_MARKER_FILENAME),
+      JSON.stringify({ envKey, switchedAt: new Date().toISOString() }),
+    );
+    return true;
+  } catch (e) {
+    console.warn('provider_file_marker_write_failed', {
+      dir,
+      error: (e as Error)?.message ?? String(e),
+    });
+    return false;
+  }
+}
 
 // ── provider 文件层分派（task-03 / 2026-09-10-multi-provider-injection）──────────
 
@@ -189,8 +221,15 @@ export async function applyProviderFileSettingsForReload(
       //（task-02：null 分支无 agent_kind 可查表，codex 镜像目标为 per-engine
       // 差异按 design 非目标保留原 'codex' 字面量——仅 codex 有「丢目录=断
       // resume」的镜像语义，pi null = 回宿主即语义本身。）
+      const codexHome = join(daemonStateDir(), 'codex', sessionKey);
+      // D-004@v2 标记先行：标记写失败则跳过整个镜像（含删除动作）直接返 prior
+      //（「镜像失败=等同未切」语义延伸）——删除类动作只发生在标记持久化之后。
+      const markerOk = await writeManagedMarker(codexHome, 'CODEX_HOME');
+      if (!markerOk) {
+        return { CODEX_HOME: priorCodexHome };
+      }
       try {
-        await mirrorCodexHostAuth(join(daemonStateDir(), 'codex', sessionKey));
+        await mirrorCodexHostAuth(codexHome);
       } catch (e) {
         console.error('provider_file_reload_codex_mirror_failed', {
           session_key: sessionKey,
@@ -234,6 +273,9 @@ export async function applyProviderFileSettingsForReload(
       // 分支一：与 spawn 版同分派同产物（mkdir → write → 单键 env）。
       await mkdir(dir, { recursive: true });
       await writer.write({ dir, provider, daemonApiKey });
+      // D-004@v2 标记后置 best-effort：写盘主体已成功，标记失败仅 warn（helper
+      // 内部吞错），legacy 探测判据（auth/config 存在）可兜住无标记场景。
+      await writeManagedMarker(dir, writer.envKey);
       return { [writer.envKey]: dir };
     } catch (e) {
       // 分支二：目录里旧供应商产物未动 = 新进程沿用旧供应商，行为等同未切。
