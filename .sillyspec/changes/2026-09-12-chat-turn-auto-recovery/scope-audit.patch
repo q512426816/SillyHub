@@ -1,0 +1,3946 @@
+diff --git a/.sillyspec/docs/backend/modules/daemon.md b/.sillyspec/docs/backend/modules/daemon.md
+index 9c09f5707..53e73a7bc 100644
+--- a/.sillyspec/docs/backend/modules/daemon.md
++++ b/.sillyspec/docs/backend/modules/daemon.md
+@@ -270,3 +270,9 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
+ - ql-20260904-011-6f3f：群成员在线状态实时化 + 打断按钮仅运行时显示。① presence 连接级化：`group_presence:{gid}:{uid}:{conn}` 后缀（router 群 SSE 分支生成 conn token，同用户多标签页各自 touch 互不干扰）；② 上/下线事件：stream_session_logs 增 presence_on_change 回调（首触成功→online、finally 断连→offline，shield + 吞 CancelledError 保取消路径清理链），group/service 新增 publish_member_presence（event='presence' 同 group_typing 频道）与 release_member_presence（删本连接 key 即时熄灯 + SCAN 剩余连接全退出才发 offline——多标签页互不误伤）；③ 合流通道改单 pubsub 双订阅（agent_session + group_typing 按 message.channel 分派）：原双 pubsub 抽干方案在安静群 typing/presence 帧要等主频道 25s 超时窗口才下发，即达即发顺带修 typing 滞后；④ get_online_member_ids_bulk 剥连接后缀取 uid（set 去重 + 旧两段 key 兼容）；⑤ 前端 daemon.ts GroupChatPresenceEvent/onPresence 分派 + group-chat-panel presenceOverrides 覆盖层（最新事件胜，reconnected 作废 + 强拉列表对账——事件不可回放）；⑥ member-panel 打断按钮改 runningMemberIds 命中才渲染（原常驻禁用），后端 409 兜底不变。
+ - ql-20260907-010-38f5：心跳 spec 版本对答——DaemonHeartbeatRequest 增可选 spec_cache[]（workspace_id+本地版本，daemon 上报本机 specs 缓存清单），DaemonHeartbeatResponse 增 spec_versions（dict[str,int]，按请求批查 spec_workspaces 权威版本一次 IN 查询；无行工作区键缺席）。纯读 additive：旧 daemon 不带键 → 恒 {}；归属校验（owner 404）不被旁路。供 daemon 侧工作区级后台预取（详见 sillyhub-daemon/modules/daemon.md 同 ql 条目）——把全量 bundle 下载挪出会话创建关键路径（实机 47MB 树 / ~0.4MB/s 链路 spec_pull_ms 40s+）。
+ <!-- MANUAL_NOTES_END -->
++
++## 2026-09-12-chat-turn-auto-recovery 增量
++
++- **三分支自动恢复**（`session/service/auto_resume.py::maybe_auto_recover_failed_turn`，close_run_steps commit 后调用，取代 ql-20260903-011 auth-transient 专用钩子并入统一判定序）：G0 总门（failed/active/开关 auto_resume_interrupted/主会话 chat/最新轮 created_at+id/非空 user_input/排队∪定时双表 origin 幂等）→ A quota_exceeded+reset_at → 定时消息（dispatch_at=reset+120s，QUOTA_NUDGE_PROMPT，quota 连续链上限 3）；B 瞬时四类（rate_limited/timeout/network/provider_error）或 CLI 合成鉴权 raw → 干净轮 G5 截断/G6 附件守卫+紧邻前 run 同型同输入+同文 pending 防叠加 → 原 prompt 重放；有工具活动 → 紧链上限 2 → RESUME_NUDGE_PROMPT（不带原任务——CLI 进程内上下文完整，重放诱导从头执行）；C 其余不动作。
++- **scheduled_messages.origin 列**（migration 20260912110000）：'auto_resume:<源 run uuid>' = 系统排期；派发链（scheduled_send._dispatch_scheduled_entry）origin 解析 → G10 超越守卫（source 后有更新 run → cancelled/superseded）→ inject_session_as_service 透传 auto_resume_of（新参，SessionService 壳同步）→ 新 run metadata_.auto_resume_of；忙轮转排队经 _handle_busy_turn 落排队行 origin（R-08）。
++- **ModelErrorDTO.reset_at**（soft-add）：error_detail JSON 携带，quota 分支与前端消费。
+diff --git a/.sillyspec/docs/backend/modules/migrations.md b/.sillyspec/docs/backend/modules/migrations.md
+index fac16f7e8..06e058a5d 100644
+--- a/.sillyspec/docs/backend/modules/migrations.md
++++ b/.sillyspec/docs/backend/modules/migrations.md
+@@ -40,3 +40,7 @@ alembic upgrade head                       # head = 20260817100000（单 head）
+ <!-- MANUAL_NOTES_START -->
+ 
+ <!-- MANUAL_NOTES_END -->
++
++## 20260912110000_add_scheduled_message_origin
++
++- 2026-09-12-chat-turn-auto-recovery FR-4.1：`agent_session_scheduled_messages` + `origin TEXT NULL`（'auto_resume:<源 run uuid>' = close 钩子 quota 分支自动续跑排期；NULL = 用户预约存量语义不变）。down_revision=1d763051eb15 线性追加，downgrade 对称 drop；soft-add 无索引（与 20260910120000 queued origin 同论证）。
+diff --git a/.sillyspec/docs/frontend/modules/components-agent-log.md b/.sillyspec/docs/frontend/modules/components-agent-log.md
+index 7bfcbf8cf..31e4b31d0 100644
+--- a/.sillyspec/docs/frontend/modules/components-agent-log.md
++++ b/.sillyspec/docs/frontend/modules/components-agent-log.md
+@@ -74,3 +74,8 @@ Agent / 运行时日志的渲染引擎（`agent-log-viewer.tsx` 主组件 + `age
+ <!-- MANUAL_NOTES_START -->
+ 
+ <!-- MANUAL_NOTES_END -->
++
++## 2026-09-12-chat-turn-auto-recovery 增量（run-error-item / normalize）
++
++- ErrorLogItem + `reset_at?: string | null`（quota 重置时间，error_detail JSON 透传，旧数据缺键兼容）。
++- RunErrorItem 新增 `autoRecoverHint?: string`——hint 链序 item.hint > fallbackHint > autoRecoverHint > 类型表 defaultHint（父级 turn-timeline 双信号推导注入）。
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 4de3b5f9a..b0e1ea8b9 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -232,3 +232,9 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+ <!-- MANUAL_NOTES_START -->
+ 
+ <!-- MANUAL_NOTES_END -->
++
++## 2026-09-12-chat-turn-auto-recovery 增量
++
++- **scheduled-messages-bar**：`onEntriesChange` 回调上提定时列表到父层（R4 不变式不破——数据仍在局部 QueryClientProvider）；内容签名守卫（id/status/origin）防引用抖动渲染循环（use-scheduled-messages 空数组改模块级常量 EMPTY_SCHEDULED 双保险）；origin=auto_resume:* 条目渲染「自动续跑」徽标（tooltip：系统自动排期，可取消=取消自动继续）。
++- **turn-timeline**：`AutoResumeEntry` 类型 + `autoRecoverHintForTurn` 双信号推导（error_detail 类型/reset_at + 同源 pending 恢复条目存在性，D-009@v2：无条目不注入提示防误导）→ RunErrorItem autoRecoverHint。三分支：quota→「额度耗尽，将于 XX:XX 自动继续（可在定时消息中取消）」；瞬时四类→「上游瞬时故障，已自动重发」；silent stream truncation raw→「输出流中断，已自动续跑」。
++- **session-panel page/dialog 两挂载点**：useMemo 聚合排队∪定时 pending origin 条目下发 TurnTimeline；use-message-queue QueueEntry/session-queue DTO 透出 origin。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+index 5dc56ccda..80ef66d8e 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+@@ -129,3 +129,9 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快
+ - ql-20260910-003-0d35（三家用量接按模型明细表，2026-09-10）：agent_run_model_usage 明细 + run 级 api_requests 原本只有 claude 有（SDK modelUsage 透传，daemon _deltaModelUsage 差分 + _modelUsageRows 拆行）；codex/pi/cursor run 无明细行 → 按模型统计页空。修法：InteractiveDriverResult 增 `modelUsage?: Record<model, camelCase 四维>`（driver.ts 新类型 DriverModelUsage + addToModelUsage/setModelUsageSnapshot helpers），三家驱动各自维护**会话累计快照**随 result 上报，复用 daemon 既有差分/拆行/api_requests 分摊管线（daemon.ts 零改动；backend 零改动）：① codex——thread/start|resume 的 response 提取 **result.model**（生产会话 02559587 真实日志重放实证：model 在 result 顶层，thread/started 通知与 result.thread 均只有 modelProvider 不带 model——首版误挂通知形状，单测自造帧过了但生产不生效，真实帧重放测试抓出），_extractTokenUsage 时 setModelUsageSnapshot 覆盖（净输入分桶，口径同 _usageDelta）；② pi——**get_state 握手响应 data.model.id**（实测 RPC 流无 model_change 事件——那是会话文件记录类型；get_state 实测含 model 对象；会话中途 /model 切换不跟踪），message_end 逐调用 addToModelUsage（pi 四维本就是净输入分桶）；③ cursor——system/init 帧提取 model（每轮进程启动重发），result 帧 usage（整轮聚合）逐轮 addToModelUsage。失败轮同样附带（真实消耗不因轮失败缺行）。模型名未知时不记快照（行为同修复前）；api_requests 三层：① pi/codex driver 在 result 带 `api_request_count` 精确值（pi=message_end 带 usage 的 assistant 消息数、codex=tokenUsage 通知数），daemon 组装优先采用；② 无精确值（claude/cursor）回落 assistant text 事件计数启发式；③ **usage-only 空事件（type=text + content=''）排除**（daemon.ts 计数点，实证 codex 3 调用被记 6 / pi 2 记 3，在途 usage_update 空事件误计；claude flush 桶同款受益）；run.model 由 backend close 从明细最大行填充（顺带修正）。
+ - ql-20260911-003-355a（24h 审查 P2 修复·用量/读取三件，2026-09-11）：① **pi/cursor 受控 reload 基线回收**——`_reloadSession` 重建 driver 句柄成功后经新 `SessionManagerDeps.onSessionReloaded`（可选回调）通知 daemon `onSessionReloaded` 删除 `_modelUsageBaselineBySession[sessionId]`：pi/cursor 的 modelUsage 快照 per-handle 从 0 累计，句柄重建后快照归零而基线残留会让恢复首轮差分少记（复位检测只拦 cur<base 形态）；与 onSessionEnd 的基线回收（ql-20260831-009）同族，锚点=句柄重建。② **zcode SQLite 读取内存预算**——readZcodeSqliteMessages 遍历行累计 data code unit，超 `DEFAULT_MAX_CONTENT_BYTES`（20MB，与文件路径 lstat 预检同源常量；opts.maxContentUnits 可注入测试）返回 too_large，不再全量物化后切 200 段窗口。③ **zcode 分派存在性门**——host-fs-handler zcode 先库后文件分派前先 `lstat(abs)`：上报 rollout 文件必须真实存在才进库读取器（log_path 可经 platform_sync 自登记任意路径；文件缺失 → 回落文件流程最终 not_found，与未上报路径同语义）。
+ <!-- MANUAL_NOTES_END -->
++
++## 2026-09-12-chat-turn-auto-recovery 增量（pi-rpc-driver）
++
++- 静默中断检测（FR-2）：轮收敛（agent_settled 后无 pendingTurnError）时判定 `!lastWasFinalText` → 合成 error result（`[silent stream truncation] 上一轮输出流中断…`），session-manager 既有 classifyModelError 按断流关键词归 provider_error/retryable=true，后端三分支自动恢复得以触发。
++- `lastWasFinalText` 标记翻转两入口（message_end 边粒度）：①raw message_end 拦截处（与 usage 累计钩同位）按 content parts 是否含非空 text part 收口——[text,thinking] 同消息排列终值正确为 true；②归一化事件循环内仅 tool_result 翻 false（thinking/override/partial 不动标记）。每 inject 重置。
++- 判定仅一条：settle 后仍无收尾正文即报 error（零活动轮 / usage-only 轮 / thinking 尾 / tool_result 尾全覆盖）；误报容忍=紧链上限 2 封顶（D-003），nudge 文案含「若已完成请说明」。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/model-error.md b/.sillyspec/docs/sillyhub-daemon/modules/model-error.md
+index 492571d41..38a9088b9 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/model-error.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/model-error.md
+@@ -59,3 +59,9 @@ classifyModelError(input):
+ <!-- MANUAL_NOTES_START -->
+ 
+ <!-- MANUAL_NOTES_END -->
++
++## 2026-09-12-chat-turn-auto-recovery 增量
++
++- `classifyModelError` 规则体 provider 无关化（原 D-001「仅 claude」废止）：pi/codex/cursor 与 claude 同一套关键词规则（`classifyClaude` 更名 `classifyBlob`，agent 参数仅日志归因）。
++- provider_error 规则体补断流关键词（stream ended / without finish_reason / stream truncat / silent stream / 输出流中断 / 流中断）——pi 上游「Stream ended without finish_reason」主实证原先落 unknown/retryable=false。
++- `ModelError` 新增 `resetAt`（ISO-8601）：仅 quota_exceeded 时解析 GLM 中文「将[在于] YYYY-MM-DD HH:MM:SS 重置」（北京时间固定 +08:00；实证文案为「将在」，正则双介词兼容）；英文变体不猜测 → null。wire 键 `reset_at`（daemon.ts 序列化跳显式映射，camel 键剔除）。
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index 5ac0f050a..3de2e6db5 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -1308,6 +1308,15 @@ class AgentSessionScheduledMessage(BaseModel, table=True):
+             server_default=text("now()"),
+         ),
+     )
++    # 2026-09-12-chat-turn-auto-recovery FR-4.1：自动续跑条目标记（soft-add）。
++    # 'auto_resume:<源 run uuid>' = close 钩子 quota 分支排期的自动续跑；NULL =
++    # 用户预约（存量语义不变）。与 agent_session_queued_messages.origin 同构
++    # （2026-09-10-auto-resume-interrupted-turn D-009 先例）：幂等查重 / 派发 G10
++    # 超越守卫 / 前端「自动续跑」徽标与双信号推导的数据源。
++    origin: str | None = Field(
++        default=None,
++        sa_column=Column("origin", String(255), nullable=True),
++    )
+     # 审计时间线（design §数据模型）：dispatched_at / cancelled_at 分别在
+     # 派发成功 / 用户取消时置位，failed 无独立时间戳（沿用 updated 语义不建列）。
+     dispatched_at: datetime | None = Field(
+diff --git a/backend/app/modules/daemon/model_error.py b/backend/app/modules/daemon/model_error.py
+index cc3fa7bc9..63ff8ffb9 100644
+--- a/backend/app/modules/daemon/model_error.py
++++ b/backend/app/modules/daemon/model_error.py
+@@ -38,3 +38,7 @@ class ModelErrorDTO(BaseModel):
+     retryable: bool
+     hint: str | None = None  # 针对性建议（中文）
+     raw: str | None = None  # 原始错误文本（查看详情）
++    # 2026-09-12-chat-turn-auto-recovery FR-1.3：额度重置时间（ISO-8601 含时区
++    # 偏移；None=未解析到/非 quota 类）。daemon 侧由 GLM 中文「将在/将于 … 重置」
++    # 解析（+08:00）；随 error_detail JSON 落库，前端与 close 钩子 quota 分支消费。
++    reset_at: str | None = None
+diff --git a/backend/app/modules/daemon/router/session_queue.py b/backend/app/modules/daemon/router/session_queue.py
+index 383cdc197..7012327c1 100644
+--- a/backend/app/modules/daemon/router/session_queue.py
++++ b/backend/app/modules/daemon/router/session_queue.py
+@@ -46,6 +46,9 @@ class SessionQueueEntry(BaseModel):
+     status: str
+     error_msg: str | None = None
+     position: int
++    # 2026-09-12-chat-turn-auto-recovery FR-5.0：'auto_resume:<rid>' = 系统
++    # 自动恢复入队（列 2026-09-10 已建，DTO 此前未透出）；None = 用户排队。
++    origin: str | None = None
+     created_at: datetime
+ 
+ 
+@@ -66,6 +69,7 @@ def _queue_entry_dto(entry) -> SessionQueueEntry:
+         status=entry.status,
+         error_msg=entry.error_msg,
+         position=entry.position,
++        origin=entry.origin,
+         created_at=entry.created_at,
+     )
+ 
+diff --git a/backend/app/modules/daemon/run_sync/service/__init__.py b/backend/app/modules/daemon/run_sync/service/__init__.py
+index 0e2f8cc6d..bf942e509 100644
+--- a/backend/app/modules/daemon/run_sync/service/__init__.py
++++ b/backend/app/modules/daemon/run_sync/service/__init__.py
+@@ -451,15 +451,6 @@ class RunSyncService(BackgroundTaskMixin):
+             error=error,
+         )
+ 
+-    async def _maybe_autoretry_auth_transient_turn(
+-        self,
+-        agent_run: AgentRun,
+-        error: ModelErrorDTO | None,
+-    ) -> None:
+-        return await _close_run_steps._maybe_autoretry_auth_transient_turn(
+-            self, agent_run=agent_run, error=error
+-        )
+-
+     async def _gate_applicable(self, agent_run: AgentRun) -> bool:
+         return await _gate._gate_applicable(self, agent_run)
+ 
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 5f6dcb423..27abafe87 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -5,8 +5,8 @@
+ summary）→ _close_flip_session（session 终态翻转，返回双意图）→ commit →
+ _close_post_commit（自动重投 / SESSION_END / 列表信号 / borrow 钩子 / gate
+ enqueue / 双频道终态事件）→ group_bridge._close_group_hooks（群收口簇）→
+-_close_finish（收口日志 + 排队派发）。_maybe_autoretry_auth_transient_turn
+-（ql-20260903-011 CLI 合成鉴权错误自动重投）随主方法归位。
++_close_finish（收口日志 + 排队派发）。maybe_auto_recover_failed_turn（2026-09-12 三分支自动恢复，ql-20260903-011 auth 类并入）
++由 close_run_steps 调用 auto_resume.py 实现。
+ 
+ D-007：get_redis 经 ``_rsvc.`` 延迟解析（43 处 patch 目标）；log 经
+ ``_rsvc.log`` 保持原模块 logger 身份。对 session.service 私有符号
+@@ -17,19 +17,16 @@ TERMINAL_TURN_STATUSES 的既有顶部导入语句原样落在本子模块（语
+ from __future__ import annotations
+ 
+ import json
+-import re
+ import uuid
+ from datetime import UTC, datetime
+ 
+-from sqlalchemy import delete, func, select
++from sqlalchemy import delete, select
+ 
+ import app.modules.daemon.run_sync.service as _rsvc
+ from app.modules.agent.model import (
+     AgentRun,
+-    AgentRunLog,
+     AgentRunModelUsage,
+     AgentSession,
+-    AgentSessionQueuedMessage,
+ )
+ from app.modules.daemon.lease.service import DaemonAgentRunNotFound
+ from app.modules.daemon.model_error import ModelErrorDTO
+@@ -43,14 +40,6 @@ from app.modules.git_gateway.service import redact_output
+ 
+ from .group_bridge import _close_group_hooks
+ 
+-# ql-20260903-011：claude CLI 把模型网关返回的 401 统一合成
+-# "Not logged in · Please run /login" 错误消息注入对话（transcript 侧特征：
+-# model=<synthetic>、error=authentication_failed、isApiErrorMessage=true）——
+-# 文案把远端瞬时抖动误导成本地凭证缺失。该正则用于识别这类「CLI 合成鉴权
+-# 错误」，命中即视为可自动重投的瞬时失败（实证：同一进程同一份密钥 13 秒后
+-# 重发即成功，2026-09-03 会话 cb56fabf 事故）。
+-_CLI_AUTH_TRANSIENT_RE = re.compile(r"Not\s+logged\s+in|Please\s+run\s+/login", re.IGNORECASE)
+-
+ 
+ async def close_interactive_run(
+     svc,
+@@ -444,10 +433,25 @@ async def _close_post_commit(
+ 
+     + gate enqueue + run/session 双频道终态事件（task-10 搬移）。
+     """
+-    # ql-20260903-011：CLI 合成鉴权错误（远端 401 被误报为 "Not logged in"）
+-    # 自动重投一次——终态已 commit，重投走排队消息表 + 后台派发（供应商/档案
+-    # 快照随条目重放，派发语义与忙轮入队一致）。helper 全程静默容错。
+-    await svc._maybe_autoretry_auth_transient_turn(agent_run, error)
++    # 2026-09-12-chat-turn-auto-recovery（task-04 / design §5.3）：上游故障轮
++    # 三分支自动恢复（瞬时干净轮重放原文 / 有工具活动 nudge 续跑 / quota 到
++    # 重置时间定时续跑）。泛化并取代 ql-20260903-011 的 auth-transient 专用
++    # 钩子（auth 类并入统一判定序，D-004@v2）。终态已 commit，恢复走排队/
++    # 定时消息表 + 既有派发链。helper 全程静默容错。
++    from app.modules.daemon.session.service.auto_resume import (
++        maybe_auto_recover_failed_turn,
++    )
++
++    try:
++        await maybe_auto_recover_failed_turn(svc, agent_run)
++    except Exception as exc:
++        # 双层防御：钩子内部已全程静默容错，此处兜底防实现漂移（NFR-4——
++        # 恢复失败绝不影响已 commit 终态）。
++        _rsvc.log.warning(
++            "auto_recover_hook_unexpected_failure",
++            run_id=str(agent_run.id),
++            error=str(exc),
++        )
+ 
+     # ql-20260823-006：run 终态翻会话 ended/failed → commit 后 best-effort 补发
+     # SESSION_END（失败仅日志，不影响已 commit 终态），daemon 侧 end() 收口
+@@ -604,171 +608,3 @@ async def _close_finish(
+                 run_id=agent_run.id,
+             )
+     return agent_run
+-
+-
+-async def _maybe_autoretry_auth_transient_turn(
+-    svc,
+-    agent_run: AgentRun,
+-    error: ModelErrorDTO | None,
+-) -> None:
+-    """CLI 合成鉴权错误自动重投一次（ql-20260903-011）。
+-
+-    背景：claude CLI 把模型网关返回的 401 统一合成 "Not logged in · Please
+-    run /login" 错误消息注入对话（transcript 特征 model=<synthetic> /
+-    error=authentication_failed / isApiErrorMessage）——远端瞬时抖动被误导成
+-    本地凭证缺失，且 retryable=false 不引导重试，用户只能手动重发。实证
+-    （2026-09-03 会话 cb56fabf）：同一进程同一份密钥，13 秒后重发即成功。
+-
+-    处理：把本 run 的 user_input 追加为排队消息（携带 run 上的供应商/档案
+-    快照），由 close 末尾既有的排队派发钩子（ql-20260825-011）随即重放——
+-    排队条目派发语义与忙轮入队一致（供应商配置原样重放、至多一个活跃 run）。
+-
+-    防循环（至多一次自动重投）：紧邻的上一条同会话 run 若同为 CLI 鉴权失败
+-    且 user_input 相同 → 本 run 已是那次自动重投的结果（网关持续性故障），
+-    不再追加，交回用户处理。另查同文 pending 条目防与用户手动重发叠加。
+-
+-    防副作用重复（ql-20260904-M1）：本 run 已有 tool_call 日志（401 发生在
+-    turn 中途，工具副作用可能已落地）→ 跳过重投交回用户——重放会再执行
+-    一遍；只有无工具活动的干净轮（首 LLM 调用即 401）才自动重投。
+-
+-    调用点：close_interactive_run 主事务 commit 之后（终态已落库）。全程
+-    静默容错——任何一步失败仅回滚本 helper 的事务并 warn，绝不影响已
+-    commit 的 run 终态。
+-    """
+-    raw = (error.raw if error is not None else None) or ""
+-    if agent_run.status != "failed" or not _CLI_AUTH_TRANSIENT_RE.search(raw):
+-        return
+-    session_id = agent_run.agent_session_id
+-    if session_id is None or agent_run.user_id is None:
+-        return
+-    try:
+-        session = await svc._session.get(AgentSession, session_id)
+-        # 会话已终态（ended/failed）→ 排队派发也无意义，直接放弃。
+-        if session is None or session.status != "active":
+-            return
+-        # 本 run 的原始输入（与 group/service.py 等生产查询同形态绑 UUID）。
+-        prompt = (
+-            await svc._session.execute(
+-                select(AgentRunLog.content_redacted)
+-                .where(
+-                    AgentRunLog.run_id == agent_run.id,
+-                    AgentRunLog.channel == "user_input",
+-                )
+-                .order_by(AgentRunLog.timestamp)
+-                .limit(1)
+-            )
+-        ).scalar_one_or_none()
+-        if prompt is None or not prompt.strip():
+-            return
+-        prompt = prompt.strip()
+-        # ql-20260904-M1（24h 审计）：本 run 已有工具调用（tool_call 日志非零）
+-        # → 跳过自动重投。401 可发生在 turn 中途——此前已执行的工具副作用
+-        # （写文件/跑命令/git 提交）已落地，重放同一 prompt 会再执行一遍
+-        # （同一条消息执行两遍，无幂等键防护）。首 LLM 调用即 401 的干净轮
+-        # （无工具活动）保持自动重投自愈语义；有活动的轮交回用户决定。
+-        tool_activity = (
+-            await svc._session.execute(
+-                select(func.count())
+-                .select_from(AgentRunLog)
+-                .where(
+-                    AgentRunLog.run_id == agent_run.id,
+-                    AgentRunLog.channel == "tool_call",
+-                )
+-            )
+-        ).scalar_one()
+-        if tool_activity:
+-            _rsvc.log.info(
+-                "auth_transient_autoretry_skipped_tool_activity",
+-                run_id=str(agent_run.id),
+-                session_id=str(session_id),
+-                tool_calls=tool_activity,
+-            )
+-            return
+-        # 防循环：紧邻上一条同会话 run 同为 CLI 鉴权失败且输入相同 → 已重投过。
+-        prev_run = (
+-            await svc._session.execute(
+-                select(AgentRun)
+-                .where(
+-                    AgentRun.agent_session_id == session_id,
+-                    AgentRun.started_at < agent_run.started_at,
+-                    AgentRun.id != agent_run.id,
+-                )
+-                .order_by(AgentRun.started_at.desc())
+-                .limit(1)
+-            )
+-        ).scalar_one_or_none()
+-        if prev_run is not None and prev_run.status == "failed":
+-            prev_raw = ""
+-            if isinstance(prev_run.error_detail, dict):
+-                prev_raw = str(prev_run.error_detail.get("raw") or "")
+-            if _CLI_AUTH_TRANSIENT_RE.search(prev_raw):
+-                prev_prompt = (
+-                    await svc._session.execute(
+-                        select(AgentRunLog.content_redacted)
+-                        .where(
+-                            AgentRunLog.run_id == prev_run.id,
+-                            AgentRunLog.channel == "user_input",
+-                        )
+-                        .order_by(AgentRunLog.timestamp)
+-                        .limit(1)
+-                    )
+-                ).scalar_one_or_none()
+-                if (prev_prompt or "").strip() == prompt:
+-                    _rsvc.log.info(
+-                        "auth_transient_autoretry_skipped_already_retried",
+-                        run_id=str(agent_run.id),
+-                        session_id=str(session_id),
+-                    )
+-                    return
+-        # 用户已手动重发同文并排队（pending）→ 不重复追加。
+-        dup_pending = (
+-            await svc._session.execute(
+-                select(func.count())
+-                .select_from(AgentSessionQueuedMessage)
+-                .where(
+-                    AgentSessionQueuedMessage.agent_session_id == session_id,
+-                    AgentSessionQueuedMessage.status == "pending",
+-                    AgentSessionQueuedMessage.prompt == prompt,
+-                )
+-            )
+-        ).scalar_one()
+-        if dup_pending:
+-            return
+-        position = (
+-            await svc._session.execute(
+-                select(func.coalesce(func.max(AgentSessionQueuedMessage.position), -1)).where(
+-                    AgentSessionQueuedMessage.agent_session_id == session_id
+-                )
+-            )
+-        ).scalar_one()
+-        svc._session.add(
+-            AgentSessionQueuedMessage(
+-                agent_session_id=session_id,
+-                sender_user_id=agent_run.user_id,
+-                prompt=prompt,
+-                # 供应商/档案快照随 run 重放（排队条目契约：发送时配置原样重放）。
+-                llm_provider_id=(
+-                    str(agent_run.llm_provider_id) if agent_run.llm_provider_id else None
+-                ),
+-                agent_profile_id=(
+-                    str(agent_run.agent_profile_id) if agent_run.agent_profile_id else None
+-                ),
+-                status="pending",
+-                position=int(position) + 1,
+-            )
+-        )
+-        await svc._session.commit()
+-        _rsvc.log.info(
+-            "auth_transient_turn_autoretry_enqueued",
+-            run_id=str(agent_run.id),
+-            session_id=str(session_id),
+-            # close 末尾的排队派发钩子检测 pending 条目存在即触发重放。
+-        )
+-    except Exception as exc:
+-        await svc._session.rollback()
+-        _rsvc.log.warning(
+-            "auth_transient_autoretry_failed",
+-            run_id=str(agent_run.id),
+-            session_id=str(agent_run.agent_session_id),
+-            error=str(exc),
+-        )
+diff --git a/backend/app/modules/daemon/scheduled_send.py b/backend/app/modules/daemon/scheduled_send.py
+index 5420f6feb..d17dc771f 100644
+--- a/backend/app/modules/daemon/scheduled_send.py
++++ b/backend/app/modules/daemon/scheduled_send.py
+@@ -41,18 +41,22 @@ import asyncio
+ import uuid
+ from datetime import UTC, datetime, timedelta
+ 
+-from sqlalchemy import select, update
++from sqlalchemy import and_, or_, select, update
+ from sqlalchemy.ext.asyncio import AsyncSession
++from sqlmodel import col
+ 
+ from app.core.db import get_session_factory
+ from app.core.errors import AppError
+ from app.core.logging import get_logger
+-from app.modules.agent.model import AgentSession, AgentSessionScheduledMessage
++from app.modules.agent.model import AgentRun, AgentSession, AgentSessionScheduledMessage
+ from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+ from app.modules.daemon.session.service import (
+     DaemonSessionQueueFull,
+     SessionService,
+ )
++from app.modules.daemon.session.service.auto_resume import (
++    parse_auto_resume_origin,
++)
+ 
+ log = get_logger(__name__)
+ 
+@@ -131,6 +135,56 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) ->
+     )
+     agent_profile_id = entry.agent_profile_id
+     llm_provider_id = entry.llm_provider_id
++    # 2026-09-12-chat-turn-auto-recovery（FR-3.7 / design §5.4）：自动续跑排期
++    # 条目（origin=auto_resume:<源 run id>）派发前 G10 超越守卫 + 打标透传。
++    auto_resume_of = parse_auto_resume_origin(getattr(entry, "origin", None))
++    if auto_resume_of is not None:
++        src_run = await db.get(AgentRun, auto_resume_of)
++        if src_run is not None:
++            newer_run_id = (
++                await db.execute(
++                    select(AgentRun.id)
++                    .where(
++                        AgentRun.agent_session_id == agent_session_id,
++                        AgentRun.id != auto_resume_of,
++                        or_(
++                            col(AgentRun.created_at) > src_run.created_at,
++                            and_(
++                                col(AgentRun.created_at) == src_run.created_at,
++                                col(AgentRun.id) > auto_resume_of,
++                            ),
++                        ),
++                    )
++                    .limit(1)
++                )
++            ).scalar_one_or_none()
++            if newer_run_id is not None:
++                # 排期后被用户手动重发/新发言超越 → 条目置 cancelled 跳过
++                # （定时面有状态留档，区别于排队面删行语义），重放防任务两遍。
++                await db.rollback()
++                await db.execute(
++                    update(AgentSessionScheduledMessage)
++                    .where(
++                        AgentSessionScheduledMessage.id == entry_id,
++                        AgentSessionScheduledMessage.status == "pending",
++                    )
++                    .values(
++                        status="cancelled",
++                        error_code="superseded",
++                        error_message="自动续跑排期被更新的发言超越，已跳过派发。",
++                        cancelled_at=datetime.now(UTC),
++                    )
++                )
++                await db.commit()
++                _OFFLINE_RETRY_ATTEMPTS.pop(entry_id, None)
++                log.info(
++                    "auto_resume_scheduled_dispatch_skipped_superseded",
++                    message_id=str(entry_id),
++                    session_id=str(agent_session_id),
++                    source_run_id=str(auto_resume_of),
++                    newer_run_id=str(newer_run_id),
++                )
++                return True
+     try:
+         svc = SessionService(db)
+         await svc.inject_session_as_service(
+@@ -141,6 +195,7 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) ->
+             attachment_ids=attachment_ids,
+             agent_profile_id=agent_profile_id,
+             llm_provider_id=llm_provider_id,
++            auto_resume_of=auto_resume_of,
+         )
+     except DaemonSessionQueueFull as exc:
+         # D-003@v1：队列满员 → failed(queue_full)，不自动延后重试（重试风暴
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 4b8359c31..1b2ed9e87 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -419,6 +419,9 @@ class ScheduledMessageRead(BaseModel):
+     llm_provider_id: str | None = None
+     error_code: str | None = None
+     error_message: str | None = None
++    # 2026-09-12-chat-turn-auto-recovery FR-3.7/5.0：'auto_resume:<rid>' = 系统
++    # 自动续跑排期（前端徽标 + 双信号推导数据源）；None = 用户预约。
++    origin: str | None = None
+     created_at: datetime
+     dispatched_at: datetime | None = None
+     cancelled_at: datetime | None = None
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index c50ea3ae3..03c7c59f1 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -556,6 +556,7 @@ class SessionService(BackgroundTaskMixin):
+         llm_provider_id: str | None = None,
+         attachment_ids: list[uuid.UUID] | None = None,
+         attachment_owner_user_id: uuid.UUID | None = None,
++        auto_resume_of: uuid.UUID | None = None,
+     ) -> SessionDispatchResult:
+         return await _inject.inject_session_as_service(
+             self,
+@@ -569,6 +570,7 @@ class SessionService(BackgroundTaskMixin):
+             llm_provider_id=llm_provider_id,
+             attachment_ids=attachment_ids,
+             attachment_owner_user_id=attachment_owner_user_id,
++            auto_resume_of=auto_resume_of,
+         )
+ 
+     async def _ensure_session_workspace_writable(
+diff --git a/backend/app/modules/daemon/session/service/auto_resume.py b/backend/app/modules/daemon/session/service/auto_resume.py
+index b531a8f83..93a8d6f10 100644
+--- a/backend/app/modules/daemon/session/service/auto_resume.py
++++ b/backend/app/modules/daemon/session/service/auto_resume.py
+@@ -33,7 +33,7 @@ from __future__ import annotations
+ import re
+ import uuid
+ 
+-from sqlalchemy import select
++from sqlalchemy import func, select
+ from sqlmodel import col
+ 
+ from app.core.logging import get_logger
+@@ -80,6 +80,44 @@ _ATTACHMENT_MARKER_LINE_RE = re.compile(
+     re.MULTILINE,
+ )
+ 
++# ── 2026-09-12-chat-turn-auto-recovery（task-04 / design §5.3）────────────────
++
++# CLI 合成鉴权错误签名（ql-20260903-011，自 close_run_steps.py 迁入）：claude CLI
++# 把模型网关 401 统一合成 "Not logged in · Please run /login"——文案把远端瞬时
++# 抖动误导成本地凭证缺失。命中即视为可自动重投的瞬时失败（实证：同进程同密钥
++# 13 秒后重发即成功，2026-09-03 会话 cb56fabf）。
++_CLI_AUTH_TRANSIENT_RE = re.compile(r"Not\s+logged\s+in|Please\s+run\s+/login", re.IGNORECASE)
++
++# 瞬时可重试错误类型（分支 B 触发面；design §5.3——daemon 归类器泛化后 pi 的
++# 断流/超时/网络/供应商异常均落这四类，retryable=true）。
++TRANSIENT_ERROR_TYPES = {"rate_limited", "timeout", "network", "provider_error"}
++
++# 中断续跑 nudge 提示词（design §5.3 单一源常量，测试锁定）。不带原任务——
++# 会话是常驻 CLI 进程、上下文完整，重放原文会诱导从头执行（副作用重复）；
++# 区别于 daemon 重启场景的 RESUME_PROMPT_TEMPLATE（换进程丢上下文才包原文）。
++RESUME_NUDGE_PROMPT = (
++    "[系统续跑] 上一轮执行因上游输出流中断未完成，会话上下文完整。\n"
++    "请检查当前工作状态（已修改的文件、已执行的命令），从中断处继续完成原任务；\n"
++    "已完成的步骤不要重复执行；若原任务已完成，请直接说明即可。"
++)
++
++# 额度恢复型 nudge（分支 A 定时到点派发用）。
++QUOTA_NUDGE_PROMPT = (
++    "[系统续跑] 上游额度已重置，会话从中断处继续。\n"
++    "请检查当前工作状态，继续完成原任务；已完成的步骤不要重复执行；\n"
++    "若原任务已完成，请直接说明即可。"
++)
++
++# quota 连续自动续跑上限（design D-007）：沿 auto_resume_of 链回溯数连续
++# quota_exceeded 节点，≥3 不再排期交回用户。quota 窗口天然限速（≥5h 间隔），
++# 比 transient 紧链（2）放宽一档。
++QUOTA_CHAIN_LIMIT = 3
++
++# 到点缓冲（秒）：reset_at 后再加缓冲防上游时钟偏差/边界复位延迟（design
++# §5.3「+120s」）；reset_at 已过（时钟偏差/积压条目）→ 尽快派发再兜 30s。
++QUOTA_DISPATCH_BUFFER_SECONDS = 120
++_PAST_RESET_DISPATCH_DELAY_SECONDS = 30
++
+ 
+ def make_auto_resume_origin(run_id: uuid.UUID) -> str:
+     """队列条目 origin 复合值：'auto_resume:<源 run uuid>'。"""
+@@ -295,3 +333,343 @@ async def _enqueue_within_savepoint(
+         position=min_position - 1,
+     )
+     return True
++
++
++async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
++    """上游故障轮三分支自动恢复（2026-09-12-chat-turn-auto-recovery design §5.3）。
++
++    由 ``close_run_steps._close_post_commit`` 在 run 终态 commit 之后调用（终态
++    已落库）。泛化并取代 ql-20260903-011 的 ``_maybe_autoretry_auth_transient_turn``
++    ——CLI 合成鉴权错误保留为一类（raw 命中 ``_CLI_AUTH_TRANSIENT_RE``）并入统一
++    判定序。行为面变化（D-004@v2，有意）：① 恢复条目统一带 origin 标记；② G0
++    守卫（开关/最新轮/双表幂等）对 auth 类同样生效；③ 既有防循环/防手动重发叠加
++    守卫保留在分支 B 内。
++
++    判定序（互斥，命中即返回）：
++      G0 总门（全分支）：run.status=failed；session active；开关非 False；G1
++         范围（主会话 chat）；G4 最新轮（created_at desc + id desc）；非空
++         user_input；排队/定时双表 origin 幂等。
++      A quota_exceeded + reset_at 可解析 → quota 链 <3 → INSERT 定时消息
++        （dispatch_at=reset_at+120s，QUOTA_NUDGE_PROMPT）。
++      B 瞬时四类或 auth-transient raw：
++        - 干净轮（无 tool_call 日志）：G5 截断 / G6 附件守卫 + 紧邻前 run 同型
++          同输入防循环 + 同文 pending 防手动叠加 → 原 prompt 入排队。
++        - 有工具活动：紧链（auto_resume_of）<2 → RESUME_NUDGE_PROMPT 入排队。
++      C 其余不动作。
++
++    全程静默容错——任何失败仅 rollback+warn，绝不影响已 commit 的 run 终态。
++    """
++    from datetime import UTC, datetime, timedelta
++
++    from app.modules.agent.model import AgentSessionScheduledMessage
++
++    try:
++        if agent_run.status != "failed":
++            return
++        session_id = agent_run.agent_session_id
++        user_id = agent_run.user_id
++        if session_id is None or user_id is None:
++            return
++        session = await svc._session.get(AgentSession, session_id)
++        if session is None or session.status != "active":
++            return
++        # G2 开关（与 9-10 变更共用同一键：关=全类回到手动模式，NFR-3）。
++        config = session.config if isinstance(session.config, dict) else {}
++        if config.get("auto_resume_interrupted") is False:
++            return
++        # G1 范围：主会话 chat（worker 有专用重派；群聊影子另议）。
++        if session.parent_session_id is not None or (session.session_kind or "chat") != "chat":
++            return
++        # G4 最新轮：用户已手动重发/新发言则不自动。
++        latest_run_id = (
++            await svc._session.execute(
++                select(AgentRun.id)
++                .where(AgentRun.agent_session_id == session_id)
++                .order_by(col(AgentRun.created_at).desc(), col(AgentRun.id).desc())
++                .limit(1)
++            )
++        ).scalar_one_or_none()
++        if latest_run_id != agent_run.id:
++            return
++        # 双表幂等：同 source run 的 pending 恢复条目已存在（含并发重入）。
++        origin = make_auto_resume_origin(agent_run.id)
++        dup_queued = (
++            await svc._session.execute(
++                select(AgentSessionQueuedMessage.id)
++                .where(
++                    AgentSessionQueuedMessage.agent_session_id == session_id,
++                    AgentSessionQueuedMessage.status == "pending",
++                    AgentSessionQueuedMessage.origin == origin,
++                )
++                .limit(1)
++            )
++        ).scalar_one_or_none()
++        dup_scheduled = (
++            await svc._session.execute(
++                select(AgentSessionScheduledMessage.id)
++                .where(
++                    AgentSessionScheduledMessage.agent_session_id == session_id,
++                    AgentSessionScheduledMessage.status == "pending",
++                    AgentSessionScheduledMessage.origin == origin,
++                )
++                .limit(1)
++            )
++        ).scalar_one_or_none()
++        if dup_queued is not None or dup_scheduled is not None:
++            return
++
++        error_detail = agent_run.error_detail if isinstance(agent_run.error_detail, dict) else {}
++        error_type = str(error_detail.get("type") or "")
++        error_raw = str(error_detail.get("raw") or "")
++
++        # ── 分支 A：额度耗尽 + 重置时间可解析 → 定时自动续跑 ──────────────
++        if error_type == "quota_exceeded":
++            reset_at_raw = error_detail.get("reset_at")
++            reset_at = None
++            if isinstance(reset_at_raw, str) and reset_at_raw.strip():
++                try:
++                    reset_at = datetime.fromisoformat(reset_at_raw.strip())
++                except ValueError:
++                    reset_at = None
++            if reset_at is None:
++                # 无可解析重置时间：不排期，仅前端按类型提示（分支 C 语义）。
++                return
++            quota_chain = await _count_chain_type(svc, agent_run, quota_exceeded_only=True)
++            if quota_chain >= QUOTA_CHAIN_LIMIT:
++                log.info(
++                    "auto_recover_quota_chain_limit",
++                    session_id=str(session_id),
++                    run_id=str(agent_run.id),
++                    chain=quota_chain,
++                )
++                return
++            now = datetime.now(UTC)
++            if reset_at.tzinfo is None:
++                reset_at = reset_at.replace(tzinfo=UTC)
++            dispatch_at = reset_at + timedelta(seconds=QUOTA_DISPATCH_BUFFER_SECONDS)
++            if dispatch_at <= now:
++                dispatch_at = now + timedelta(seconds=_PAST_RESET_DISPATCH_DELAY_SECONDS)
++            svc._session.add(
++                AgentSessionScheduledMessage(
++                    agent_session_id=session_id,
++                    sender_user_id=user_id,
++                    prompt=QUOTA_NUDGE_PROMPT,
++                    origin=origin,
++                    dispatch_at=dispatch_at,
++                    status="pending",
++                    llm_provider_id=(
++                        str(agent_run.llm_provider_id) if agent_run.llm_provider_id else None
++                    ),
++                    agent_profile_id=(
++                        str(agent_run.agent_profile_id) if agent_run.agent_profile_id else None
++                    ),
++                )
++            )
++            await svc._session.commit()
++            log.info(
++                "auto_recover_quota_scheduled",
++                session_id=str(session_id),
++                run_id=str(agent_run.id),
++                dispatch_at=dispatch_at.isoformat(),
++            )
++            return
++
++        # ── 分支 B：瞬时四类 / CLI 合成鉴权 raw ────────────────────────────
++        is_transient = error_type in TRANSIENT_ERROR_TYPES
++        is_cli_auth_transient = bool(_CLI_AUTH_TRANSIENT_RE.search(error_raw))
++        if not (is_transient or is_cli_auth_transient):
++            return
++
++        # 原始输入（与既有生产查询同形态）。
++        prompt = (
++            await svc._session.execute(
++                select(AgentRunLog.content_redacted)
++                .where(
++                    AgentRunLog.run_id == agent_run.id,
++                    AgentRunLog.channel == "user_input",
++                )
++                .order_by(AgentRunLog.timestamp)
++                .limit(1)
++            )
++        ).scalar_one_or_none()
++        if prompt is None or not prompt.strip():
++            return
++        prompt = prompt.strip()
++
++        tool_activity = (
++            await svc._session.execute(
++                select(func.count())
++                .select_from(AgentRunLog)
++                .where(
++                    AgentRunLog.run_id == agent_run.id,
++                    AgentRunLog.channel == "tool_call",
++                )
++            )
++        ).scalar_one()
++
++        if tool_activity:
++            # 有工具活动：副作用已落地，不重放原任务——nudge 续跑；紧链上限 2
++            # （与 9-10 G7 同款防自动恢复风暴）。
++            chain_len = await _count_chain_type(svc, agent_run)
++            if chain_len >= AUTO_RESUME_MAX_CHAIN:
++                log.info(
++                    "auto_recover_nudge_chain_limit",
++                    session_id=str(session_id),
++                    run_id=str(agent_run.id),
++                    chain=chain_len,
++                )
++                return
++            enqueue_prompt = RESUME_NUDGE_PROMPT
++        else:
++            # 干净轮：首 LLM 调用即失败，重放原文安全。G5 截断 / G6 附件守卫
++            # （命中降级手动——截断文二次包装退化 / 附件引用快照过期，对齐
++            # 9-10 变更 G5/G6）。
++            if len(prompt) >= USER_INPUT_TRUNCATION_LIMIT:
++                log.info("auto_recover_skip_input_truncated", run_id=str(agent_run.id))
++                return
++            if _ATTACHMENT_MARKER_LINE_RE.search(prompt):
++                log.info("auto_recover_skip_attachment", run_id=str(agent_run.id))
++                return
++            # 紧邻前 run 同型失败且输入相同 → 本 run 已是自动重投结果（持续性
++            # 故障），不再追加交回用户（ql-20260903-011 防循环泛化）。
++            prev_run = (
++                await svc._session.execute(
++                    select(AgentRun)
++                    .where(
++                        AgentRun.agent_session_id == session_id,
++                        AgentRun.created_at < agent_run.created_at,
++                        AgentRun.id != agent_run.id,
++                    )
++                    .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
++                    .limit(1)
++                )
++            ).scalar_one_or_none()
++            if prev_run is not None and prev_run.status == "failed":
++                prev_detail = (
++                    prev_run.error_detail if isinstance(prev_run.error_detail, dict) else {}
++                )
++                if str(prev_detail.get("type") or "") == error_type:
++                    prev_prompt = (
++                        await svc._session.execute(
++                            select(AgentRunLog.content_redacted)
++                            .where(
++                                AgentRunLog.run_id == prev_run.id,
++                                AgentRunLog.channel == "user_input",
++                            )
++                            .order_by(AgentRunLog.timestamp)
++                            .limit(1)
++                        )
++                    ).scalar_one_or_none()
++                    if (prev_prompt or "").strip() == prompt:
++                        log.info("auto_recover_skip_already_retried", run_id=str(agent_run.id))
++                        return
++            # 用户已手动重发同文并排队（pending）→ 不重复追加。
++            dup_pending_same_text = (
++                await svc._session.execute(
++                    select(func.count())
++                    .select_from(AgentSessionQueuedMessage)
++                    .where(
++                        AgentSessionQueuedMessage.agent_session_id == session_id,
++                        AgentSessionQueuedMessage.status == "pending",
++                        AgentSessionQueuedMessage.prompt == prompt,
++                    )
++                )
++            ).scalar_one()
++            if dup_pending_same_text:
++                return
++            enqueue_prompt = prompt
++
++        # 满员守卫（对齐 9-10 G10'：pending ≥ 上限弃自动，前端口径不被破坏）。
++        pending_count = (
++            await svc._session.execute(
++                select(func.count())
++                .select_from(AgentSessionQueuedMessage)
++                .where(
++                    AgentSessionQueuedMessage.agent_session_id == session_id,
++                    AgentSessionQueuedMessage.status == "pending",
++                )
++            )
++        ).scalar_one()
++        if pending_count >= SESSION_QUEUE_MAX_PENDING:
++            log.info(
++                "auto_recover_skip_queue_full",
++                session_id=str(session_id),
++                pending=pending_count,
++            )
++            return
++
++        position = (
++            await svc._session.execute(
++                select(func.coalesce(func.max(AgentSessionQueuedMessage.position), -1)).where(
++                    AgentSessionQueuedMessage.agent_session_id == session_id
++                )
++            )
++        ).scalar_one()
++        svc._session.add(
++            AgentSessionQueuedMessage(
++                agent_session_id=session_id,
++                sender_user_id=user_id,
++                prompt=enqueue_prompt,
++                origin=origin,
++                llm_provider_id=(
++                    str(agent_run.llm_provider_id) if agent_run.llm_provider_id else None
++                ),
++                agent_profile_id=(
++                    str(agent_run.agent_profile_id) if agent_run.agent_profile_id else None
++                ),
++                status="pending",
++                position=int(position) + 1,
++            )
++        )
++        await svc._session.commit()
++        log.info(
++            "auto_recover_enqueued",
++            session_id=str(session_id),
++            run_id=str(agent_run.id),
++            kind="nudge" if tool_activity else "replay",
++            origin=origin,
++        )
++    except Exception as exc:
++        await svc._session.rollback()
++        log.warning(
++            "auto_recover_failed",
++            run_id=str(agent_run.id),
++            session_id=str(agent_run.agent_session_id),
++            error=str(exc),
++        )
++
++
++async def _count_chain_type(
++    svc,
++    run: AgentRun,
++    *,
++    quota_exceeded_only: bool = False,
++) -> int:
++    """沿 metadata_.auto_resume_of 链回溯计数。
++
++    quota_exceeded_only=True：只数连续 error_detail.type == 'quota_exceeded' 的
++    节点（quota 链上限专用，遇非 quota 节点断链）；False：数全链长（紧链上限
++    专用，对齐 9-10 G7 语义）。含当前节点。guard 防环。
++    """
++    chain = 0
++    cursor: AgentRun | None = run
++    guard = 0
++    while cursor is not None and guard < 10:
++        guard += 1
++        detail = cursor.metadata_ if isinstance(cursor.metadata_, dict) else {}
++        if quota_exceeded_only:
++            d = cursor.error_detail if isinstance(cursor.error_detail, dict) else {}
++            if str(d.get("type") or "") == "quota_exceeded":
++                chain += 1
++            else:
++                break
++        else:
++            chain += 1
++        next_id = detail.get("auto_resume_of")
++        if not next_id:
++            break
++        try:
++            cursor = await svc._session.get(AgentRun, uuid.UUID(str(next_id)))
++        except ValueError:
++            cursor = None
++    return chain
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index caf842eac..2e4548b95 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -294,6 +294,11 @@ async def inject_session_as_service(
+     # 而影子会话属主恒为群主（§9.2）——按属主校验会误 404。群路径传发送者
+     # id；缺省 None = 既有语义（按会话属主 session.user_id）。
+     attachment_owner_user_id: uuid.UUID | None = None,
++    # 2026-09-12-chat-turn-auto-recovery（FR-3.7）：自动续跑轮源标记——定时
++    # 派发链（scheduled_send 解析 origin 传入）；新 run 落 metadata_.
++    # auto_resume_of，忙轮转排队时 origin 复合值随 _handle_busy_turn 落
++    # 排队行。None = 普通注入（既有调用点零改动）。
++    auto_resume_of: uuid.UUID | None = None,
+ ) -> SessionDispatchResult:
+     """Append a turn run to an active session as the **platform service** (D-006@v2).
+ 
+@@ -360,6 +365,7 @@ async def inject_session_as_service(
+         # 不携带）。归属基准覆盖见 _inject_into_session 同名参数注释。
+         attachment_ids=list(attachment_ids) if attachment_ids else None,
+         attachment_owner_user_id=attachment_owner_user_id,
++        auto_resume_of=auto_resume_of,
+     )
+ 
+ 
+@@ -482,6 +488,7 @@ async def _inject_into_session(
+                 run_sender_user_id=run_sender_user_id,
+                 queue_sender_user_id=queue_sender_user_id,
+                 turn_metadata=turn_metadata,
++                auto_resume_of=auto_resume_of,
+             )
+ 
+         # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index d90f7f376..6b64673d9 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -25,6 +25,7 @@ from app.modules.agent.model import (
+ )
+ from app.modules.daemon.schema import PageContextCreateBlock
+ from app.modules.daemon.session.service.auto_resume import (
++    make_auto_resume_origin,
+     parse_auto_resume_origin,
+ )
+ 
+@@ -64,6 +65,10 @@ async def _handle_busy_turn(
+     run_sender_user_id: uuid.UUID | None = None,
+     queue_sender_user_id: uuid.UUID | None = None,
+     turn_metadata: dict | None = None,
++    # 2026-09-12-chat-turn-auto-recovery（FR-3.7 / R-08）：自动续跑源标记——
++    # 忙轮转排队时落排队行 origin='auto_resume:<源 run uuid>'（幂等查重/G10/
++    # 徽标数据源与直接入队条目同构）；None = 普通排队（既有调用零改动）。
++    auto_resume_of: uuid.UUID | None = None,
+ ) -> SessionDispatchResult:
+     """忙轮三分支收口（task-08 自 _inject_into_session:3499-3650 拆出，零改写）。
+ 
+@@ -200,6 +205,9 @@ async def _handle_busy_turn(
+         ),
+         agent_profile_id=agent_profile_id,
+         llm_provider_id=llm_provider_id,
++        # 2026-09-12：自动续跑转排队保留 origin（R-08——忙轮 INSERT 此前丢
++        # origin，G10/幂等/徽标全断链）。
++        origin=(make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None),
+         status="pending",
+         # task-05 缺陷 A 修正：or 兜底在 max==0 时回卷（0 or -1 = -1），
+         # 连续入队全 0——显式 None 判（对齐 MAX+1 语义，D-002）。
+diff --git a/backend/app/modules/daemon/tests/test_auth_transient_autoretry.py b/backend/app/modules/daemon/tests/test_auth_transient_autoretry.py
+index ea711bfe2..71c585e4b 100644
+--- a/backend/app/modules/daemon/tests/test_auth_transient_autoretry.py
++++ b/backend/app/modules/daemon/tests/test_auth_transient_autoretry.py
+@@ -222,8 +222,8 @@ async def test_auth_transient_failure_enqueues_retry(
+ 
+ @pytest.mark.asyncio
+ async def test_tool_activity_skips_enqueue(db_session: AsyncSession, mocked_redis) -> None:
+-    """401 发生在 turn 中途（已有 tool_call 日志）→ 不自动重投——重放会再执行
+-    一遍已落地的工具副作用；交回用户决定（错误卡可见）。"""
++    """401 发生在 turn 中途（已有 tool_call 日志）→ 不重放原文（副作用已落地）
++    ——2026-09-12 FR-3.4 语义更新：改入续跑 nudge（不重放原任务，链上限内）。"""
+     lease_id, run_id, token, session_id, _uid = await _seed_session_run_with_input(db_session)
+     db_session.add(
+         AgentRunLog(
+@@ -249,10 +249,12 @@ async def test_tool_activity_skips_enqueue(db_session: AsyncSession, mocked_redi
+         )
+     assert run.status == "failed"
+ 
+-    # 无排队条目追加（不重投）。
+-    assert await _queued_entries(db_session, session_id) == []
+-    db_session.expire_all()
+-    assert await _queued_entries(db_session, session_id) == []
++    # FR-3.4：入队的是续跑 nudge（非原文重放），带 origin 标记。
++    entries = await _queued_entries(db_session, session_id)
++    assert len(entries) == 1
++    assert entries[0].prompt.startswith("[系统续跑]")
++    assert entries[0].origin == f"auto_resume:{run_id}"
++    assert entries[0].prompt != "改了什么呀？"
+ 
+ 
+ # ── 防循环：上一条同会话同 prompt run 已鉴权失败 → 不再追加 ──────────────────
+@@ -322,7 +324,8 @@ async def test_loop_guard_skips_second_enqueue(db_session: AsyncSession, mocked_
+ 
+ @pytest.mark.asyncio
+ async def test_non_auth_error_not_enqueued(db_session: AsyncSession, mocked_redis) -> None:
+-    """429 等普通模型错误不误伤——只有 CLI 鉴权签名才自动重投。"""
++    """429 rate_limited 干净轮 → 2026-09-12 FR-3.3 语义更新：瞬时类自动重放
++    原文（带 origin）；旧断言（仅 auth 才重投）随泛化废止。"""
+     lease_id, run_id, token, session_id, _ = await _seed_session_run_with_input(db_session)
+     with patch(
+         "app.modules.daemon.session.service.dispatch_next_queued_message",
+@@ -344,7 +347,10 @@ async def test_non_auth_error_not_enqueued(db_session: AsyncSession, mocked_redi
+                 raw="API Error: Request rejected (429) · rate limit",
+             ),
+         )
+-    assert await _queued_entries(db_session, session_id) == []
++    entries = await _queued_entries(db_session, session_id)
++    assert len(entries) == 1
++    assert entries[0].prompt == "改了什么呀？"
++    assert entries[0].origin == f"auto_resume:{run_id}"
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py b/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
+new file mode 100644
+index 000000000..5f6129312
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
+@@ -0,0 +1,541 @@
++"""2026-09-12-chat-turn-auto-recovery task-04 单测：三分支自动恢复判定序。
++
++钉死 ``maybe_auto_recover_failed_turn``（经 ``close_interactive_run`` 全链调用）：
++- 分支 A：quota_exceeded + reset_at → 定时消息（dispatch_at=reset_at+120s）；
++- 分支 B 干净轮：瞬时四类 → 原 prompt 重放（带 origin）；
++- 分支 B 工具活动：→ RESUME_NUDGE_PROMPT（不重放原文）；
++- 分支 C：auth_failed/model_not_found/unknown/quota 无 reset_at → 不动作；
++- G0 守卫：开关关闭/非最新轮/空输入/双表幂等；
++- 链上限：transient 紧链 2 / quota 链 3；
++- 静默容错：恢复路径异常不影响已 commit 终态。
++
++夹具范式沿用 test_auth_transient_autoretry.py（同目录）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta, timezone
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import (
++    AgentRun,
++    AgentRunLog,
++    AgentSession,
++    AgentSessionQueuedMessage,
++    AgentSessionScheduledMessage,
++)
++from app.modules.agent.placement import RunPlacementService
++from app.modules.daemon.model import DaemonRuntime
++from app.modules.daemon.model_error import ModelErrorDTO, ModelErrorType
++from app.modules.daemon.service import DaemonService
++from app.modules.daemon.session.service.auto_resume import (
++    QUOTA_CHAIN_LIMIT,
++    QUOTA_DISPATCH_BUFFER_SECONDS,
++    QUOTA_NUDGE_PROMPT,
++    RESUME_NUDGE_PROMPT,
++    TRANSIENT_ERROR_TYPES,
++)
++
++# 动态未来时间（+2h，北京时间格式）：固定历史日期会触发「已过重置时间→尽快派发」分支。
++RESET_AT = (
++    (datetime.now(UTC) + timedelta(hours=2)).astimezone(timezone(timedelta(hours=8)))
++).strftime("%Y-%m-%dT%H:%M:%S+08:00")
++
++
++async def _create_user(session: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    session.add(
++        User(
++            id=uid,
++            email=f"ar-{uid}@example.com",
++            password_hash="x",
++            display_name="T",
++            status="active",
++        )
++    )
++    await session.commit()
++    return uid
++
++
++def _mock_redis() -> AsyncMock:
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    return redis
++
++
++@pytest.fixture()
++def mocked_redis():
++    redis = _mock_redis()
++    with (
++        patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis),
++        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
++    ):
++        yield redis
++
++
++async def _seed(
++    db_session: AsyncSession,
++    *,
++    prompt: str = "继续任务",
++    config: dict | None = None,
++) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID, uuid.UUID]:
++    """active 主会话 + running run（含 user_input 日志）。返回
++    (lease_id, run_id, claim_token, session_id, user_id)。范式对齐
++    test_auth_transient_autoretry._seed_session_run_with_input。"""
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    db_session.add(
++        User(
++            id=uid,
++            email=f"ar2-{uid}@example.com",
++            password_hash="x",
++            display_name="T",
++            status="active",
++        )
++    )
++    await db_session.commit()
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=uid,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db_session.add(rt)
++    await db_session.commit()
++    placement = RunPlacementService(db_session)
++    session_id = uuid.uuid4()
++    run_id = uuid.uuid4()
++    dispatch = await placement.prepare_interactive_dispatch(
++        agent_session_id=session_id,
++        agent_run_id=run_id,
++        user_id=uid,
++        provider="claude",
++        prompt=prompt,
++        model=None,
++    )
++    db_session.add_all(
++        [
++            AgentSession(
++                id=session_id,
++                user_id=uid,
++                provider="claude",
++                status="active",
++                config=dict(config) if config is not None else {},
++                turn_count=1,
++                runtime_id=rt.id,
++                lease_id=dispatch.lease_id,
++                last_active_at=datetime.now(UTC),
++                created_at=datetime.now(UTC),
++            ),
++            AgentRun(
++                id=run_id,
++                agent_type="claude_code",
++                provider="claude",
++                status="running",
++                spec_strategy="interactive",
++                agent_session_id=session_id,
++                user_id=uid,
++                started_at=datetime.now(UTC),
++            ),
++            AgentRunLog(
++                run_id=run_id,
++                channel="user_input",
++                content_redacted=prompt,
++                timestamp=datetime.now(UTC),
++            ),
++        ]
++    )
++    await db_session.commit()
++    return dispatch.lease_id, run_id, dispatch.claim_token, session_id, uid
++
++
++async def _close_failed(
++    db_session: AsyncSession,
++    lease_id: uuid.UUID,
++    run_id: uuid.UUID,
++    token: str,
++    error: ModelErrorDTO,
++) -> AgentRun:
++    with patch(
++        "app.modules.daemon.session.service.dispatch_next_queued_message",
++        new=AsyncMock(),
++    ):
++        svc = DaemonService(db_session)
++        return await svc.close_interactive_run(
++            lease_id,
++            run_id,
++            token,
++            status="error",
++            is_error=True,
++            error=error,
++        )
++
++
++def _transient_error(
++    t: str = "provider_error", raw: str = "Stream ended without finish_reason"
++) -> ModelErrorDTO:
++    assert t in {x.value for x in ModelErrorType} | TRANSIENT_ERROR_TYPES
++    return ModelErrorDTO(
++        type=ModelErrorType(t),
++        code=None,
++        message="运行失败",
++        retryable=True,
++        hint=None,
++        raw=raw,
++    )
++
++
++def _quota_error(reset_at: str | None = RESET_AT) -> ModelErrorDTO:
++    return ModelErrorDTO(
++        type=ModelErrorType.QUOTA_EXCEEDED,
++        code="1308",
++        message="额度或配额已耗尽",
++        retryable=False,
++        hint=None,
++        raw="[1308][已达到 5 小时的使用上限。您的限额将在 2026-09-12 10:03:59 重置。]",
++        reset_at=reset_at,
++    )
++
++
++async def _queued(db_session, session_id) -> list[AgentSessionQueuedMessage]:
++    return list(
++        (
++            await db_session.execute(
++                select(AgentSessionQueuedMessage).where(
++                    AgentSessionQueuedMessage.agent_session_id == session_id
++                )
++            )
++        ).scalars()
++    )
++
++
++async def _scheduled(db_session, session_id) -> list[AgentSessionScheduledMessage]:
++    return list(
++        (
++            await db_session.execute(
++                select(AgentSessionScheduledMessage).where(
++                    AgentSessionScheduledMessage.agent_session_id == session_id
++                )
++            )
++        ).scalars()
++    )
++
++
++async def _add_prev_run(
++    db_session: AsyncSession,
++    session_id: uuid.UUID,
++    uid: uuid.UUID,
++    *,
++    minutes_before: int = 10,
++    metadata_: dict | None = None,
++    error_detail: dict | None = None,
++    status: str = "failed",
++) -> uuid.UUID:
++    """手工插入历史 run（链计数/非最新守卫用）。"""
++    rid = uuid.uuid4()
++    db_session.add(
++        AgentRun(
++            id=rid,
++            user_id=uid,
++            agent_session_id=session_id,
++            agent_type="claude_code",
++            status=status,
++            created_at=datetime.now(UTC) - timedelta(minutes=minutes_before),
++            error_detail=error_detail,
++            metadata_=metadata_,
++        )
++    )
++    await db_session.commit()
++    return rid
++
++
++# ── 分支 B：瞬时错误 ─────────────────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_transient_clean_replay(db_session: AsyncSession, mocked_redis) -> None:
++    """瞬时+干净轮 → 原 prompt 重放，带 origin + 快照。"""
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    run = await _close_failed(db_session, lease_id, run_id, token, _transient_error())
++    assert run.status == "failed"
++
++    entries = await _queued(db_session, session_id)
++    assert len(entries) == 1
++    assert entries[0].prompt == "继续任务"
++    assert entries[0].origin == f"auto_resume:{run_id}"
++    assert entries[0].status == "pending"
++    assert await _scheduled(db_session, session_id) == []
++
++
++@pytest.mark.asyncio
++async def test_transient_tool_activity_nudge(db_session: AsyncSession, mocked_redis) -> None:
++    """瞬时+有工具活动 → nudge（不重放原文）。"""
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    db_session.add(
++        AgentRunLog(
++            run_id=run_id,
++            channel="tool_call",
++            content_redacted='{"tool":"bash"}',
++            timestamp=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    await _close_failed(
++        db_session,
++        lease_id,
++        run_id,
++        token,
++        _transient_error("timeout", 'pi rpc "prompt" response timeout (30000ms)'),
++    )
++
++    entries = await _queued(db_session, session_id)
++    assert len(entries) == 1
++    assert entries[0].prompt == RESUME_NUDGE_PROMPT
++    assert entries[0].origin == f"auto_resume:{run_id}"
++    assert entries[0].prompt != "继续任务"
++
++
++@pytest.mark.asyncio
++async def test_silent_truncation_text_classified_transient(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """静默中断合成文本（task-02）归类 provider_error → 走分支 B。"""
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    await _close_failed(
++        db_session,
++        lease_id,
++        run_id,
++        token,
++        _transient_error("provider_error", "[silent stream truncation] 上一轮输出流中断"),
++    )
++    entries = await _queued(db_session, session_id)
++    assert len(entries) == 1
++
++
++# ── 分支 A：quota 定时续跑 ───────────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_quota_schedules_at_reset(db_session: AsyncSession, mocked_redis) -> None:
++    """quota + reset_at → 定时消息 dispatch_at=reset_at+120s，nudge 文案。"""
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    await _close_failed(db_session, lease_id, run_id, token, _quota_error())
++
++    assert await _queued(db_session, session_id) == []
++    scheduled = await _scheduled(db_session, session_id)
++    assert len(scheduled) == 1
++    assert scheduled[0].prompt == QUOTA_NUDGE_PROMPT
++    assert scheduled[0].origin == f"auto_resume:{run_id}"
++    assert scheduled[0].status == "pending"
++    # dispatch_at = reset_at + 120s（SQLite 可能丢 tz——统一 naive 比较，容差 2s）。
++    reset_dt = datetime.fromisoformat(RESET_AT)
++    expected_naive = (reset_dt + timedelta(seconds=QUOTA_DISPATCH_BUFFER_SECONDS)).replace(
++        tzinfo=None
++    )
++    actual = scheduled[0].dispatch_at
++    actual_naive = actual.replace(tzinfo=None) if actual.tzinfo else actual
++    assert abs((actual_naive - expected_naive).total_seconds()) < 2
++
++
++@pytest.mark.asyncio
++async def test_quota_no_reset_at_no_action(db_session: AsyncSession, mocked_redis) -> None:
++    """quota 无 reset_at（daemon 未解析到）→ 不排期不排队。"""
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    await _close_failed(db_session, lease_id, run_id, token, _quota_error(reset_at=None))
++    assert await _queued(db_session, session_id) == []
++    assert await _scheduled(db_session, session_id) == []
++
++
++@pytest.mark.asyncio
++async def test_quota_chain_limit(db_session: AsyncSession, mocked_redis) -> None:
++    """quota 链 ≥3（当前+两代前驱均 quota）→ 不再排期。"""
++    lease_id, run_id, token, session_id, uid = await _seed(db_session)
++    # 两代前驱：run2(run_id) → prev2 → prev1，均 quota 失败 + 链标记。
++    prev1 = await _add_prev_run(
++        db_session,
++        session_id,
++        uid,
++        minutes_before=30,
++        error_detail={"type": "quota_exceeded"},
++    )
++    prev2 = await _add_prev_run(
++        db_session,
++        session_id,
++        uid,
++        minutes_before=20,
++        metadata_={"auto_resume_of": str(prev1)},
++        error_detail={"type": "quota_exceeded"},
++    )
++    # 当前 run 挂链（模拟其派发时打标）。
++    run = await db_session.get(AgentRun, run_id)
++    run.metadata_ = {"auto_resume_of": str(prev2)}
++    await db_session.commit()
++
++    await _close_failed(db_session, lease_id, run_id, token, _quota_error())
++    assert await _scheduled(db_session, session_id) == []
++    assert await _queued(db_session, session_id) == []
++
++
++@pytest.mark.asyncio
++async def test_quota_chain_breaks_on_non_quota(db_session: AsyncSession, mocked_redis) -> None:
++    """quota 链遇非 quota 前驱断链 → 计数 1 → 正常排期（链上限按连续计）。"""
++    lease_id, run_id, token, session_id, uid = await _seed(db_session)
++    prev1 = await _add_prev_run(
++        db_session,
++        session_id,
++        uid,
++        minutes_before=30,
++        metadata_={"auto_resume_of": str(uuid.uuid4())},
++        error_detail={"type": "provider_error"},
++    )
++    run = await db_session.get(AgentRun, run_id)
++    run.metadata_ = {"auto_resume_of": str(prev1)}
++    await db_session.commit()
++
++    await _close_failed(db_session, lease_id, run_id, token, _quota_error())
++    scheduled = await _scheduled(db_session, session_id)
++    assert len(scheduled) == 1
++
++
++# ── 链上限（分支 B 工具活动）────────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_transient_tight_chain_limit(db_session: AsyncSession, mocked_redis) -> None:
++    """紧链 ≥2 → 不再 nudge。"""
++    lease_id, run_id, token, session_id, uid = await _seed(db_session)
++    db_session.add(
++        AgentRunLog(
++            run_id=run_id,
++            channel="tool_call",
++            content_redacted='{"tool":"bash"}',
++            timestamp=datetime.now(UTC),
++        )
++    )
++    prev1 = await _add_prev_run(
++        db_session,
++        session_id,
++        uid,
++        minutes_before=30,
++        error_detail={"type": "provider_error"},
++    )
++    run = await db_session.get(AgentRun, run_id)
++    run.metadata_ = {"auto_resume_of": str(prev1)}
++    await db_session.commit()
++
++    await _close_failed(db_session, lease_id, run_id, token, _transient_error())
++    assert await _queued(db_session, session_id) == []
++
++
++# ── 分支 C ───────────────────────────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("err_type", ["auth_failed", "model_not_found", "unknown"])
++async def test_non_recoverable_no_action(
++    db_session: AsyncSession, mocked_redis, err_type: str
++) -> None:
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    await _close_failed(
++        db_session, lease_id, run_id, token, _transient_error(err_type, "some other error")
++    )
++    assert await _queued(db_session, session_id) == []
++    assert await _scheduled(db_session, session_id) == []
++
++
++# ── G0 守卫 ──────────────────────────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_switch_off_no_action(db_session: AsyncSession, mocked_redis) -> None:
++    """config.auto_resume_interrupted=False → 全分支回到手动（NFR-3）。"""
++    lease_id, run_id, token, session_id, _ = await _seed(
++        db_session, config={"auto_resume_interrupted": False}
++    )
++    await _close_failed(db_session, lease_id, run_id, token, _transient_error())
++    assert await _queued(db_session, session_id) == []
++    await _close_failed(db_session, lease_id, run_id, token, _transient_error())
++    assert await _queued(db_session, session_id) == []
++
++
++@pytest.mark.asyncio
++async def test_not_latest_no_action(db_session: AsyncSession, mocked_redis) -> None:
++    """run 之后有更新 run（用户已手动重发）→ 不自动。"""
++    lease_id, run_id, token, session_id, uid = await _seed(db_session)
++    await _add_prev_run(db_session, session_id, uid, minutes_before=-5, status="running")
++    await _close_failed(db_session, lease_id, run_id, token, _transient_error())
++    assert await _queued(db_session, session_id) == []
++
++
++@pytest.mark.asyncio
++async def test_empty_input_no_action(db_session: AsyncSession, mocked_redis) -> None:
++    """无 user_input 日志（空轮）→ 不恢复（D-010）。"""
++    from sqlalchemy import delete as sa_delete
++
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    await db_session.execute(
++        sa_delete(AgentRunLog).where(
++            AgentRunLog.run_id == run_id, AgentRunLog.channel == "user_input"
++        )
++    )
++    await db_session.commit()
++    await _close_failed(db_session, lease_id, run_id, token, _transient_error())
++    assert await _queued(db_session, session_id) == []
++
++
++# ── 静默容错 ─────────────────────────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_recovery_failure_does_not_break_close(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """恢复路径异常（session.get 抛错）→ 静默吞掉，close 终态不受影响。"""
++    lease_id, run_id, token, session_id, _ = await _seed(db_session)
++    with (
++        patch("app.modules.daemon.session.service.dispatch_next_queued_message", new=AsyncMock()),
++        patch(
++            "app.modules.daemon.session.service.auto_resume.maybe_auto_recover_failed_turn",
++            side_effect=RuntimeError("recovery exploded"),
++        ),
++    ):
++        svc = DaemonService(db_session)
++        run = await svc.close_interactive_run(
++            lease_id,
++            run_id,
++            token,
++            status="error",
++            is_error=True,
++            error=_transient_error(),
++        )
++    assert run.status == "failed"
++    db_session.expire_all()
++    assert await _queued(db_session, session_id) == []
++
++
++# ── 提示词文案锁定 ───────────────────────────────────────────────────────────
++
++
++def test_nudge_prompt_text_lock() -> None:
++    """nudge 文案锁定（design §5.3 单一源，防措辞漂移破坏语义）。"""
++    assert RESUME_NUDGE_PROMPT.startswith("[系统续跑]")
++    assert "上游输出流中断" in RESUME_NUDGE_PROMPT
++    assert "已完成的步骤不要重复执行" in RESUME_NUDGE_PROMPT
++    assert "若原任务已完成" in RESUME_NUDGE_PROMPT
++    assert QUOTA_NUDGE_PROMPT.startswith("[系统续跑]")
++    assert "额度已重置" in QUOTA_NUDGE_PROMPT
++    assert "已完成的步骤不要重复执行" in QUOTA_NUDGE_PROMPT
++    assert QUOTA_CHAIN_LIMIT == 3
++    assert QUOTA_DISPATCH_BUFFER_SECONDS == 120
++    assert {"rate_limited", "timeout", "network", "provider_error"} == TRANSIENT_ERROR_TYPES
+diff --git a/backend/app/modules/daemon/tests/test_auto_recover_integration.py b/backend/app/modules/daemon/tests/test_auto_recover_integration.py
+new file mode 100644
+index 000000000..738bd8b81
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_auto_recover_integration.py
+@@ -0,0 +1,385 @@
++"""全链集成验证：上游故障轮三分支自动恢复（2026-09-12-chat-turn-auto-recovery）.
++
++六场景（design §12 验收 / task-07 goal，真实 DB 事务非 mock 断言）：
++1. 瞬时+干净轮：close(failed, provider_error) → 排队 origin 条目 → 派发 →
++   新 run metadata_.auto_resume_of 打标（原文重放）；
++2. 瞬时+工具活动：nudge 文案入队（不重放原文）；
++3. quota+reset_at：close → 定时条目（dispatch_at≈reset+120s）→ sweep 派发 →
++   条目 dispatched + 新 run 打标；
++4. G10：排期后 source run 被更新 run 超越 → sweep 置 cancelled(superseded)；
++5. 开关关闭：全分支不动作（NFR-3）；
++6. 静默中断（task-02 合成 error 形态 + 工具活动）→ nudge 自动续跑。
++
++daemon 侧（task-01/02）不在 backend 集成面——以 daemon 回传形态的 error
++payload 直灌 close_interactive_run 模拟（design task-07 implementation 口径）。
++fixture 范式照 test_auto_resume_integration.py。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++from unittest.mock import AsyncMock, MagicMock, patch
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import (
++    AgentRun,
++    AgentRunLog,
++    AgentSession,
++    AgentSessionQueuedMessage,
++    AgentSessionScheduledMessage,
++)
++from app.modules.agent.placement import RunPlacementService
++from app.modules.daemon.model import DaemonRuntime
++from app.modules.daemon.model_error import ModelErrorDTO, ModelErrorType
++from app.modules.daemon.scheduled_send import scheduled_send_sweep_once
++from app.modules.daemon.service import DaemonService
++
++RESET_AT_ISO = (datetime.now(UTC) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S+08:00")
++
++
++async def _create_user(db: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    db.add(
++        User(
++            id=uid,
++            email=f"acr-{uid}@example.com",
++            password_hash="x",
++            display_name="T",
++            status="active",
++        )
++    )
++    await db.commit()
++    return uid
++
++
++async def _seed(
++    db: AsyncSession,
++    uid: uuid.UUID,
++    *,
++    prompt: str = "把登录模块重构完",
++    config: dict | None = None,
++) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID]:
++    """active 主会话 + running run + user_input 日志。返回
++    (session_id, run_id, claim_token, lease_id)。"""
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=uid,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db.add(rt)
++    await db.commit()
++    placement = RunPlacementService(db)
++    session_id = uuid.uuid4()
++    run_id = uuid.uuid4()
++    dispatch = await placement.prepare_interactive_dispatch(
++        agent_session_id=session_id,
++        agent_run_id=run_id,
++        user_id=uid,
++        provider="claude",
++        prompt=prompt,
++        model=None,
++    )
++    db.add_all(
++        [
++            AgentSession(
++                id=session_id,
++                user_id=uid,
++                provider="claude",
++                status="active",
++                config=dict(config) if config is not None else {},
++                turn_count=1,
++                runtime_id=rt.id,
++                lease_id=dispatch.lease_id,
++                last_active_at=datetime.now(UTC),
++                created_at=datetime.now(UTC),
++            ),
++            AgentRun(
++                id=run_id,
++                agent_type="claude_code",
++                provider="claude",
++                status="running",
++                spec_strategy="interactive",
++                agent_session_id=session_id,
++                user_id=uid,
++                started_at=datetime.now(UTC),
++            ),
++            AgentRunLog(
++                run_id=run_id,
++                channel="user_input",
++                content_redacted=prompt,
++                timestamp=datetime.now(UTC),
++            ),
++        ]
++    )
++    await db.commit()
++    return session_id, run_id, dispatch.claim_token, dispatch.lease_id
++
++
++async def _close_failed(
++    db: AsyncSession,
++    lease_id: uuid.UUID,
++    run_id: uuid.UUID,
++    token: str,
++    error: ModelErrorDTO,
++) -> None:
++    with patch(
++        "app.modules.daemon.session.service.dispatch_next_queued_message",
++        new=AsyncMock(),
++    ):
++        svc = DaemonService(db)
++        await svc.close_interactive_run(
++            lease_id,
++            run_id,
++            token,
++            status="error",
++            is_error=True,
++            error=error,
++        )
++
++
++def _stream_error() -> ModelErrorDTO:
++    return ModelErrorDTO(
++        type=ModelErrorType.PROVIDER_ERROR,
++        code=None,
++        message="运行失败",
++        retryable=True,
++        hint=None,
++        raw="Stream ended without finish_reason",
++    )
++
++
++def _silent_truncation_error() -> ModelErrorDTO:
++    return ModelErrorDTO(
++        type=ModelErrorType.PROVIDER_ERROR,
++        code=None,
++        message="运行失败",
++        retryable=True,
++        hint=None,
++        raw=(
++            "[silent stream truncation] 上一轮输出流中断，未产生收尾回复"
++            "（api_calls=8, final_text=y）"
++        ),
++    )
++
++
++def _quota_error() -> ModelErrorDTO:
++    return ModelErrorDTO(
++        type=ModelErrorType.QUOTA_EXCEEDED,
++        code="1308",
++        message="额度或配额已耗尽",
++        retryable=False,
++        hint=None,
++        raw="[1308][已达到 5 小时的使用上限。您的限额将重置。]",
++        reset_at=RESET_AT_ISO,
++    )
++
++
++async def _queue_rows(db: AsyncSession, sid: uuid.UUID):
++    return list(
++        (
++            await db.execute(
++                select(AgentSessionQueuedMessage).where(
++                    AgentSessionQueuedMessage.agent_session_id == sid
++                )
++            )
++        ).scalars()
++    )
++
++
++async def _scheduled_rows(db: AsyncSession, sid: uuid.UUID):
++    return list(
++        (
++            await db.execute(
++                select(AgentSessionScheduledMessage).where(
++                    AgentSessionScheduledMessage.agent_session_id == sid
++                )
++            )
++        ).scalars()
++    )
++
++
++async def _runs(db: AsyncSession, sid: uuid.UUID):
++    return list(
++        (await db.execute(select(AgentRun).where(AgentRun.agent_session_id == sid))).scalars()
++    )
++
++
++@pytest.fixture()
++def mocked_redis():
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    with (
++        patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis),
++        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
++    ):
++        yield redis
++
++
++def _mock_hub(*, connected: bool = True) -> MagicMock:
++    hub = MagicMock()
++    hub.is_connected.return_value = connected
++    hub.connected_runtime_ids = []
++    hub.connected_daemon_ids = []
++    hub.send_wakeup = AsyncMock(return_value=True)
++    hub.send_session_control = AsyncMock(return_value=connected)
++    return hub
++
++
++@pytest.fixture()
++def mocked_hub():
++    hub = _mock_hub()
++    with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
++        yield hub
++
++
++@pytest.mark.asyncio
++class TestAutoRecoverFullChain:
++    async def test_1_transient_clean_replay_dispatch_tagged(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """瞬时+干净轮 → 原 prompt 重放 → 派发 → 新 run 打标（契约表：自动恢复
++        入队/排队派发两事件）。"""
++        uid = await _create_user(db_session)
++        sid, run1, token, lease_id = await _seed(db_session, uid)
++        await _close_failed(db_session, lease_id, run1, token, _stream_error())
++
++        rows = await _queue_rows(db_session, sid)
++        assert len(rows) == 1
++        assert rows[0].origin == f"auto_resume:{run1}"
++        assert rows[0].prompt == "把登录模块重构完"
++        assert rows[0].status == "pending"
++
++        svc = DaemonService(db_session)
++        await svc.dispatch_queued_messages(sid)
++        assert await _queue_rows(db_session, sid) == []
++        run2 = next(r for r in await _runs(db_session, sid) if r.id != run1)
++        assert run2.metadata_ == {"auto_resume_of": str(run1)}
++
++    async def test_2_transient_tool_activity_nudge(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """瞬时+工具活动（副作用已落地）→ nudge 文案入队（不重放原文）。"""
++        uid = await _create_user(db_session)
++        sid, run1, token, lease_id = await _seed(db_session, uid)
++        db_session.add(
++            AgentRunLog(
++                run_id=run1,
++                channel="tool_call",
++                content_redacted='{"tool":"bash"}',
++                timestamp=datetime.now(UTC),
++            )
++        )
++        await db_session.commit()
++        await _close_failed(db_session, lease_id, run1, token, _stream_error())
++
++        rows = await _queue_rows(db_session, sid)
++        assert len(rows) == 1
++        assert rows[0].origin == f"auto_resume:{run1}"
++        assert rows[0].prompt.startswith("[系统续跑]")
++        assert "把登录模块重构完" not in rows[0].prompt
++
++    async def test_3_quota_schedule_then_sweep_dispatch(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """quota+reset_at → 定时条目（+120s）→ 到点 sweep 派发 → dispatched +
++        新 run 打标（契约表：自动恢复排期/定时到点派发两事件）。"""
++        uid = await _create_user(db_session)
++        sid, run1, token, lease_id = await _seed(db_session, uid)
++        await _close_failed(db_session, lease_id, run1, token, _quota_error())
++
++        assert await _queue_rows(db_session, sid) == []
++        scheduled = await _scheduled_rows(db_session, sid)
++        assert len(scheduled) == 1
++        assert scheduled[0].origin == f"auto_resume:{run1}"
++        assert scheduled[0].prompt.startswith("[系统续跑]")
++        assert scheduled[0].status == "pending"
++
++        # 推到到期（dispatch_at = reset+120s；直接回拨为已到期走 sweep）。
++        db_session.expire_all()
++        entry = (await _scheduled_rows(db_session, sid))[0]
++        entry.dispatch_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++
++        processed = await scheduled_send_sweep_once(db_session)
++        assert processed == 1
++        db_session.expire_all()
++        entry = (await _scheduled_rows(db_session, sid))[0]
++        assert entry.status == "dispatched"
++        assert entry.dispatched_at is not None
++        run2 = next(r for r in await _runs(db_session, sid) if r.id != run1)
++        assert run2.metadata_ == {"auto_resume_of": str(run1)}
++
++    async def test_4_g10_superseded_cancelled(self, db_session, mocked_hub, mocked_redis) -> None:
++        """排期后 source run 被更新 run 超越（用户已手动重发）→ sweep 置
++        cancelled(superseded)，不派发（契约表：G10 超越守卫事件）。"""
++        uid = await _create_user(db_session)
++        sid, run1, token, lease_id = await _seed(db_session, uid)
++        await _close_failed(db_session, lease_id, run1, token, _quota_error())
++
++        # 用户手动重发（新 run，更新 created_at）。
++        db_session.add(
++            AgentRun(
++                id=uuid.uuid4(),
++                agent_type="claude_code",
++                provider="claude",
++                status="running",
++                spec_strategy="interactive",
++                agent_session_id=sid,
++                user_id=uid,
++                created_at=datetime.now(UTC) + timedelta(seconds=5),
++            )
++        )
++        await db_session.commit()
++        db_session.expire_all()
++        entry = (await _scheduled_rows(db_session, sid))[0]
++        entry.dispatch_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++
++        processed = await scheduled_send_sweep_once(db_session)
++        assert processed == 1
++        db_session.expire_all()
++        entry = (await _scheduled_rows(db_session, sid))[0]
++        assert entry.status == "cancelled"
++        assert entry.error_code == "superseded"
++
++    async def test_5_switch_off_full_manual(self, db_session, mocked_hub, mocked_redis) -> None:
++        """开关关闭 → 三类全不动作（NFR-3：完全回到手动模式）。"""
++        uid = await _create_user(db_session)
++        sid, run1, token, lease_id = await _seed(
++            db_session, uid, config={"auto_resume_interrupted": False}
++        )
++        await _close_failed(db_session, lease_id, run1, token, _stream_error())
++        assert await _queue_rows(db_session, sid) == []
++        assert await _scheduled_rows(db_session, sid) == []
++        await _close_failed(db_session, lease_id, run1, token, _quota_error())
++        assert await _queue_rows(db_session, sid) == []
++        assert await _scheduled_rows(db_session, sid) == []
++
++    async def test_6_silent_truncation_recovers(self, db_session, mocked_hub, mocked_redis) -> None:
++        """静默中断（task-02 合成 error 形态）+ 工具活动 → nudge 自动续跑。"""
++        uid = await _create_user(db_session)
++        sid, run1, token, lease_id = await _seed(db_session, uid)
++        db_session.add(
++            AgentRunLog(
++                run_id=run1,
++                channel="tool_call",
++                content_redacted='{"tool":"edit"}',
++                timestamp=datetime.now(UTC),
++            )
++        )
++        await db_session.commit()
++        await _close_failed(db_session, lease_id, run1, token, _silent_truncation_error())
++
++        rows = await _queue_rows(db_session, sid)
++        assert len(rows) == 1
++        assert rows[0].origin == f"auto_resume:{run1}"
++        assert rows[0].prompt.startswith("[系统续跑]")
+diff --git a/backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py b/backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py
+index e281267ac..611eb1526 100644
+--- a/backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py
++++ b/backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py
+@@ -155,6 +155,7 @@ async def _make_scheduled(
+     prompt: str = "定时消息",
+     dispatch_at: datetime | None = None,
+     status: str = "pending",
++    origin: str | None = None,
+ ) -> AgentSessionScheduledMessage:
+     """落一行定时条目（默认已到期 pending，dispatch_at UTC tz-aware）。"""
+     row = AgentSessionScheduledMessage(
+@@ -163,6 +164,7 @@ async def _make_scheduled(
+         prompt=prompt,
+         dispatch_at=dispatch_at or (datetime.now(UTC) - timedelta(seconds=10)),
+         status=status,
++        origin=origin,
+     )
+     db.add(row)
+     await db.commit()
+@@ -710,3 +712,110 @@ class TestSweepReviewFixesR3R4R5:
+         processed = await scheduled_send_sweep_once(db_session)
+         assert processed == 2
+         assert seen == [earlier.id, later.id]
++
++
++# ── 2026-09-12-chat-turn-auto-recovery（task-05 / FR-3.7）────────────────────
++
++
++class TestSweepAutoResumeOrigin:
++    async def test_origin_entry_dispatches_with_metadata_tag(
++        self, db_session: AsyncSession, mocked_hub, mocked_redis
++    ) -> None:
++        """origin 条目空闲派发 → 新 run 落 metadata_.auto_resume_of（链计数贯通）。"""
++        uid, session_id, _first = await _make_idle_session(db_session)
++        # 源 run（quota 失败轮）——origin 指向它。
++        src_run = AgentRun(
++            id=uuid.uuid4(),
++            agent_type="claude_code",
++            provider="claude",
++            status="failed",
++            spec_strategy="interactive",
++            agent_session_id=session_id,
++            user_id=uid,
++            # 最新轮（G10 语义要求：source 之后无更新 run——quota 失败即会话
++            # 最新一轮，晚于 _make_idle_session 的首 run）。
++            created_at=datetime.now(UTC) + timedelta(seconds=1),
++            started_at=datetime.now(UTC) + timedelta(seconds=1),
++        )
++        db_session.add(src_run)
++        await db_session.commit()
++        entry = await _make_scheduled(
++            db_session,
++            session_id,
++            uid,
++            prompt="[系统续跑] 额度已重置…",
++            origin=f"auto_resume:{src_run.id}",
++        )
++
++        processed = await scheduled_send_sweep_once(db_session)
++
++        assert processed == 1
++        status, _ec, _msg, _at = await _entry_row(db_session, entry.id)
++        assert status == "dispatched"
++        runs = await _active_runs(db_session, session_id)
++        assert len(runs) == 1
++        assert runs[0].metadata_ == {"auto_resume_of": str(src_run.id)}
++
++    async def test_origin_entry_superseded_cancelled(
++        self, db_session: AsyncSession, mocked_hub, mocked_redis
++    ) -> None:
++        """G10 超越守卫：source run 之后存在更新 run（用户已手动重发）→ 条目置
++        cancelled(superseded) 跳过 inject，不建新 run。"""
++        uid, session_id, _first = await _make_idle_session(db_session)
++        src_run = AgentRun(
++            id=uuid.uuid4(),
++            agent_type="claude_code",
++            provider="claude",
++            status="failed",
++            spec_strategy="interactive",
++            agent_session_id=session_id,
++            user_id=uid,
++            created_at=datetime.now(UTC) - timedelta(minutes=10),
++        )
++        newer_run = AgentRun(
++            id=uuid.uuid4(),
++            agent_type="claude_code",
++            provider="claude",
++            status="running",
++            spec_strategy="interactive",
++            agent_session_id=session_id,
++            user_id=uid,
++            created_at=datetime.now(UTC) - timedelta(minutes=1),
++        )
++        db_session.add_all([src_run, newer_run])
++        await db_session.commit()
++        entry = await _make_scheduled(
++            db_session, session_id, uid, origin=f"auto_resume:{src_run.id}"
++        )
++
++        processed = await scheduled_send_sweep_once(db_session)
++
++        assert processed == 1
++        status, error_code, _msg, _at = await _entry_row(db_session, entry.id)
++        assert status == "cancelled"
++        assert error_code == "superseded"
++        # 未 inject：除造数 newer_run 外无新 run。
++        assert len(await _active_runs(db_session, session_id)) == 1
++
++    async def test_origin_entry_busy_turn_queue_keeps_origin(
++        self, db_session: AsyncSession, mocked_hub, mocked_redis
++    ) -> None:
++        """R-08：忙轮转排队路径保留 origin——排队行 origin 与定时条目一致
++        （G10/幂等/徽标链路贯通，修复忙轮 INSERT 丢 origin）。"""
++        uid, session_id, busy_run_id = await _make_busy_session(db_session)
++        entry = await _make_scheduled(
++            db_session,
++            session_id,
++            uid,
++            prompt="[系统续跑] 额度已重置…",
++            origin=f"auto_resume:{busy_run_id}",
++        )
++
++        processed = await scheduled_send_sweep_once(db_session)
++
++        assert processed == 1
++        status, _ec, _msg, _at = await _entry_row(db_session, entry.id)
++        assert status == "dispatched"
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 1
++        assert rows[0].origin == f"auto_resume:{busy_run_id}"
+diff --git a/backend/migrations/versions/20260912110000_add_scheduled_message_origin.py b/backend/migrations/versions/20260912110000_add_scheduled_message_origin.py
+new file mode 100644
+index 000000000..229e26654
+--- /dev/null
++++ b/backend/migrations/versions/20260912110000_add_scheduled_message_origin.py
+@@ -0,0 +1,33 @@
++"""agent_session_scheduled_messages + origin（自动续跑排期标记）
++
++Revision ID: 20260912110000
++Revises: 1d763051eb15
++Create Date: 2026-09-12 11:00:00
++
++2026-09-12-chat-turn-auto-recovery FR-4.1（design §8）：
++- origin TEXT NULL —— 'auto_resume:<源 run uuid>' = close 钩子 quota 分支排期
++  的自动续跑条目；NULL = 用户预约（存量语义不变）。
++- soft-add：旧行 NULL=非自动续跑；无索引诉求（会话维度条目数小，幂等/G10 按
++  agent_session_id+status 过滤后小集合扫描——与 20260910120000 的
++  queued_messages.origin 同论证）。
++"""
++
++import sqlalchemy as sa
++from alembic import op
++
++# revision identifiers, used by Alembic.
++revision = "20260912110000"
++down_revision = "1d763051eb15"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "agent_session_scheduled_messages",
++        sa.Column("origin", sa.String(length=255), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("agent_session_scheduled_messages", "origin")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 6ab30bfcf..e14021f0a 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -49192,6 +49192,17 @@
+               }
+             ],
+             "title": "Raw"
++          },
++          "reset_at": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Reset At"
+           }
+         },
+         "type": "object",
+@@ -61354,6 +61365,17 @@
+             ],
+             "title": "Error Message"
+           },
++          "origin": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Origin"
++          },
+           "created_at": {
+             "type": "string",
+             "format": "date-time",
+@@ -62411,6 +62433,17 @@
+             "type": "integer",
+             "title": "Position"
+           },
++          "origin": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Origin"
++          },
+           "created_at": {
+             "type": "string",
+             "format": "date-time",
+diff --git a/frontend/src/components/agent-log/__tests__/normalize.test.ts b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+index 085abdd97..f3867b932 100644
+--- a/frontend/src/components/agent-log/__tests__/normalize.test.ts
++++ b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+@@ -1213,3 +1213,53 @@ describe("task-10: 新旧轨交错（合并指针连续性）", () => {
+     expect(ev[2]?.mergedAssistantContent).toBe("工具后");
+   });
+ });
++
++// ── 2026-09-12-chat-turn-auto-recovery（QA P1 修复回归）：reset_at 透传 ────
++
++describe("buildErrorLogItem reset_at 透传（quota 自动继续提示数据源）", () => {
++  it("主分支：error_detail.reset_at 映射到 ErrorLogItem.reset_at", () => {
++    const item = buildErrorLogItem({
++      type: "quota_exceeded",
++      code: "1308",
++      message: "额度或配额已耗尽",
++      retryable: false,
++      hint: null,
++      raw: "[1308][已达到 5 小时的使用上限。您的限额将在 2026-09-12 10:03:59 重置。]",
++      reset_at: "2026-09-12T10:03:59+08:00",
++    });
++    expect(item?.type).toBe("quota_exceeded");
++    expect(item?.reset_at).toBe("2026-09-12T10:03:59+08:00");
++  });
++
++  it("缺键/非字符串 → null（旧数据兼容，quota 提示分支按无重置时间收敛）", () => {
++    expect(
++      buildErrorLogItem({
++        type: "quota_exceeded",
++        code: null,
++        message: "x",
++        retryable: false,
++        hint: null,
++        raw: "r",
++      })?.reset_at,
++    ).toBeNull();
++    expect(
++      buildErrorLogItem({
++        type: "provider_error",
++        message: "x",
++        retryable: true,
++        raw: null,
++        reset_at: 12345,
++      })?.reset_at,
++    ).toBeNull();
++  });
++
++  it("usage-limit raw 兜底分支同样透传 reset_at", () => {
++    const item = buildErrorLogItem({
++      type: "unknown",
++      raw: "API Error: Request rejected (429) · usage limit reached, resets at 2026-09-13 02:00:00",
++      reset_at: "2026-09-13T02:00:00+08:00",
++    });
++    expect(item?.type).toBe("quota_exceeded");
++    expect(item?.reset_at).toBe("2026-09-13T02:00:00+08:00");
++  });
++});
+diff --git a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+index 10819ba41..ede246a12 100644
+--- a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
++++ b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+@@ -483,3 +483,80 @@ describe("task-11 回归补强：actions 组合 / a11y / 边界", () => {
+     expect(container.querySelector("pre")).not.toBeInTheDocument();
+   });
+ });
++
++// ── 2026-09-12-chat-turn-auto-recovery / FR-5.1：autoRecoverHint 链序 ──────
++
++describe("RunErrorItem autoRecoverHint（hint 链序：item.hint > fallbackHint > autoRecoverHint > defaultHint）", () => {
++  it("item.hint 缺席 + fallbackHint 缺席 + autoRecoverHint 传入 → 显示 autoRecoverHint", () => {
++    render(
++      <RunErrorItem
++        item={{
++          type: "provider_error",
++          code: null,
++          message: "运行失败",
++          retryable: true,
++          hint: null,
++          raw: null,
++        }}
++        autoRecoverHint="上游瞬时故障，已自动重发"
++      />,
++    );
++    expect(screen.getByText("上游瞬时故障，已自动重发")).toBeDefined();
++  });
++
++  it("fallbackHint 存在时优先于 autoRecoverHint（daemon_restarted 场景不受挤占）", () => {
++    render(
++      <RunErrorItem
++        item={{
++          type: "unknown",
++          code: "daemon_restarted",
++          message: "运行失败",
++          retryable: false,
++          hint: null,
++          raw: null,
++        }}
++        fallbackHint="服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"
++        autoRecoverHint="上游瞬时故障，已自动重发"
++      />,
++    );
++    expect(
++      screen.getByText("服务重启中断本轮，会话恢复后将自动续跑（无需手动重发）"),
++    ).toBeDefined();
++    expect(screen.queryByText("上游瞬时故障，已自动重发")).toBeNull();
++  });
++
++  it("item.hint 永远最高优先（autoRecoverHint 不挤占后端 hint）", () => {
++    render(
++      <RunErrorItem
++        item={{
++          type: "quota_exceeded",
++          code: "1308",
++          message: "额度或配额已耗尽",
++          retryable: false,
++          hint: "额度耗尽，需充值或切换供应商",
++          raw: null,
++        }}
++        autoRecoverHint="额度耗尽，将于 2026-09-12 10:03 自动继续"
++      />,
++    );
++    expect(screen.getByText("额度耗尽，需充值或切换供应商")).toBeDefined();
++    expect(screen.queryByText(/自动继续/)).toBeNull();
++  });
++
++  it("全部缺席 → 维持类型表 defaultHint 现行为", () => {
++    render(
++      <RunErrorItem
++        item={{
++          type: "provider_error",
++          code: null,
++          message: "运行失败",
++          retryable: true,
++          hint: null,
++          raw: null,
++        }}
++      />,
++    );
++    // defaultHint 非空（类型表）——不渲染 autoRecover 文案。
++    expect(screen.queryByText(/已自动重发/)).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/agent-log/normalize.ts b/frontend/src/components/agent-log/normalize.ts
+index a6ca39bce..b8f641dae 100644
+--- a/frontend/src/components/agent-log/normalize.ts
++++ b/frontend/src/components/agent-log/normalize.ts
+@@ -343,6 +343,12 @@ export interface ErrorLogItem {
+   retryable: boolean;
+   hint: string | null;
+   raw: string | null;
++  /**
++   * 额度重置时间（ISO-8601；null=未解析到）。2026-09-12-chat-turn-auto-recovery
++   * FR-5.1：quota_exceeded 失败卡「将于 XX:XX 自动继续」文案数据源（error_detail
++   * JSON 透传；旧数据缺键 = undefined 兼容）。
++   */
++  reset_at?: string | null;
+ }
+ 
+ const MODEL_ERROR_TYPES: ReadonlySet<ModelErrorType> = new Set<ModelErrorType>([
+@@ -435,6 +441,7 @@ export function buildErrorLogItem(
+       retryable: false,
+       hint: "等待用量重置或升级套餐（如 Cursor Pro），也可切换供应商后重新发送",
+       raw,
++      reset_at: asStringOrNull(errorDetail["reset_at"]),
+     };
+   }
+   return {
+@@ -444,6 +451,10 @@ export function buildErrorLogItem(
+     retryable: errorDetail["retryable"] === true,
+     hint: asStringOrNull(errorDetail["hint"]),
+     raw,
++    // 2026-09-12-chat-turn-auto-recovery（QA P1 修复）：额度重置时间透传——
++    // turn-timeline quota 分支「将于 XX:XX 自动继续」提示的数据源；旧数据/
++    // 非 quota 类缺键 → null。
++    reset_at: asStringOrNull(errorDetail["reset_at"]),
+   };
+ }
+ 
+diff --git a/frontend/src/components/agent-log/run-error-item.tsx b/frontend/src/components/agent-log/run-error-item.tsx
+index 6bd6b3ea2..7e1d94dcf 100644
+--- a/frontend/src/components/agent-log/run-error-item.tsx
++++ b/frontend/src/components/agent-log/run-error-item.tsx
+@@ -211,6 +211,13 @@ export interface RunErrorItemProps {
+    * 现行为（类型表 defaultHint）。
+    */
+   fallbackHint?: string;
++  /**
++   * 2026-09-12-chat-turn-auto-recovery / FR-5.1：自动恢复状态提示——由父级
++   * （turn-timeline）按「error_detail 类型 + 会话存在 origin=auto_resume 的
++   * pending 恢复条目」双信号推导（D-009@v2：无恢复条目不显示，防误导）。
++   * 链序 item.hint > fallbackHint > autoRecoverHint > defaultHint。
++   */
++  autoRecoverHint?: string;
+   /**
+    * 重新发送回调；传入即渲染按钮。ql-20260904-010：不再按 item.retryable 门控
+    * （原 D-006 的 quota/auth 隐藏逻辑废除——用户决策所有失败卡都提供重试入口，
+@@ -235,13 +242,14 @@ export interface RunErrorItemProps {
+ export function RunErrorItem({
+   item,
+   fallbackHint,
++  autoRecoverHint,
+   onResend,
+   onSwitchProvider,
+   onViewDetail,
+ }: RunErrorItemProps) {
+   const meta = errorMetaFor(item);
+   const { Icon } = meta;
+-  const hint = item.hint ?? fallbackHint ?? meta.defaultHint;
++  const hint = item.hint ?? fallbackHint ?? autoRecoverHint ?? meta.defaultHint;
+   const hasRaw = item.raw != null && item.raw.trim().length > 0;
+   const [showDetail, setShowDetail] = useState(false);
+ 
+diff --git a/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx b/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx
+index 151030b1f..67dcc0858 100644
+--- a/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx
+@@ -271,3 +271,56 @@ describe("ScheduledMessagesBar 取消流", () => {
+     expect(mocks.cancelScheduledMessage).not.toHaveBeenCalled();
+   });
+ });
++
++// ── 2026-09-12-chat-turn-auto-recovery / FR-5.2：自动续跑徽标 + 数据上提回调 ──
++
++describe("ScheduledMessagesBar 自动续跑徽标与 onEntriesChange（FR-5.0/5.2）", () => {
++  it("origin=auto_resume:* 条目渲染「自动续跑」徽标；普通条目不渲染", async () => {
++    mocks.listScheduledMessages.mockResolvedValue([
++      makeScheduled({
++        id: "sm-ar",
++        prompt: "[系统续跑] 上游额度已重置…",
++        origin: "auto_resume:11111111-1111-1111-1111-111111111111",
++      }),
++      makeScheduled({ id: "sm-user", prompt: "普通用户预约" }),
++    ]);
++    render(<ScheduledMessagesBar sessionId="sess-1" />);
++
++    expect(await screen.findByText("定时消息（2）")).toBeInTheDocument();
++    expect(screen.getByText("自动续跑")).toBeInTheDocument();
++    // 普通条目无徽标（全文仅一处「自动续跑」）。
++    expect(screen.getAllByText("自动续跑")).toHaveLength(1);
++    expect(screen.getByText("普通用户预约")).toBeInTheDocument();
++  });
++
++  it("onEntriesChange：列表收敛即回传父层（FR-5.0 数据上提）", async () => {
++    const entries = [makeScheduled({ id: "sm-x" })];
++    mocks.listScheduledMessages.mockResolvedValue(entries);
++    const onEntriesChange = vi.fn();
++    render(
++      <ScheduledMessagesBar sessionId="sess-1" onEntriesChange={onEntriesChange} />,
++    );
++
++    await screen.findByText(/定时消息（1）/);
++    await waitFor(() => expect(onEntriesChange).toHaveBeenCalled());
++    expect(onEntriesChange).toHaveBeenLastCalledWith(entries);
++  });
++
++  it("onEntriesChange 内容不变不重复回传（防引用抖动渲染循环）", async () => {
++    mocks.listScheduledMessages.mockResolvedValue([makeScheduled({ id: "sm-y" })]);
++    const onEntriesChange = vi.fn();
++    const { rerender } = render(
++      <ScheduledMessagesBar sessionId="sess-1" onEntriesChange={onEntriesChange} />,
++    );
++    await screen.findByText(/定时消息（1）/);
++    // 两次合法内容变化：初挂空表（prev=null 必通知）→ 数据到达；此后收敛。
++    await waitFor(() => expect(onEntriesChange).toHaveBeenCalledTimes(2));
++    // 父层重渲（同 props 引用）——内容签名相同不再回传。
++    rerender(
++      <ScheduledMessagesBar sessionId="sess-1" onEntriesChange={onEntriesChange} />,
++    );
++    // 再等一拍仍为 2（引用抖动不触发第三回传）。
++    await new Promise((r) => setTimeout(r, 50));
++    expect(onEntriesChange).toHaveBeenCalledTimes(2);
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-auto-recover.test.ts b/frontend/src/components/daemon/__tests__/turn-timeline-auto-recover.test.ts
+new file mode 100644
+index 000000000..fb7c87693
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-auto-recover.test.ts
+@@ -0,0 +1,99 @@
++// 2026-09-12-chat-turn-auto-recovery / FR-5.1：autoRecoverHintForTurn 双信号
++// 推导单测（error_detail 类型 + pending 恢复条目存在性，D-009@v2）。
++
++import { describe, expect, it } from "vitest";
++
++import {
++  autoRecoverHintForTurn,
++  type AutoResumeEntry,
++} from "@/components/daemon/turn-timeline";
++import type { ErrorLogItem } from "@/components/agent-log/normalize";
++
++function err(partial: Partial<ErrorLogItem>): ErrorLogItem {
++  return {
++    type: "provider_error",
++    code: null,
++    message: "运行失败",
++    retryable: true,
++    hint: null,
++    raw: null,
++    ...partial,
++  };
++}
++
++const RUN_ID = "11111111-1111-1111-1111-111111111111";
++const SCHED: AutoResumeEntry[] = [
++  { origin: `auto_resume:${RUN_ID}`, kind: "scheduled", dispatchAt: "2026-09-12T10:03:59+08:00" },
++];
++const QUEUED: AutoResumeEntry[] = [
++  { origin: `auto_resume:${RUN_ID}`, kind: "queued", dispatchAt: null },
++];
++
++describe("autoRecoverHintForTurn（2026-09-12 FR-5.1 双信号推导）", () => {
++  it("quota + reset_at + 定时条目 → 额度提示含本地时间与取消入口", () => {
++    const hint = autoRecoverHintForTurn(
++      { runId: RUN_ID, errorDetail: err({ type: "quota_exceeded", reset_at: "2026-09-12T10:03:59+08:00" }) },
++      SCHED,
++    );
++    expect(hint).toContain("额度耗尽");
++    expect(hint).toContain("自动继续");
++    expect(hint).toContain("可在定时消息中取消");
++    expect(hint).toContain("10:03");
++  });
++
++  it("瞬时四类 + 排队条目 → 上游瞬时故障已自动重发", () => {
++    for (const t of ["rate_limited", "timeout", "network", "provider_error"] as const) {
++      expect(
++        autoRecoverHintForTurn({ runId: RUN_ID, errorDetail: err({ type: t }) }, QUEUED),
++      ).toBe("上游瞬时故障，已自动重发");
++    }
++  });
++
++  it("静默中断 raw（silent stream truncation）+ 条目 → 输出流中断已自动续跑", () => {
++    const hint = autoRecoverHintForTurn(
++      {
++        runId: RUN_ID,
++        errorDetail: err({ raw: "[silent stream truncation] 上一轮输出流中断，未产生收尾回复" }),
++      },
++      QUEUED,
++    );
++    expect(hint).toBe("输出流中断，已自动续跑");
++  });
++
++  it("无恢复条目（第二信号缺失）→ undefined——防静态文案误导（D-009@v2）", () => {
++    expect(
++      autoRecoverHintForTurn({ runId: RUN_ID, errorDetail: err({ type: "provider_error" }) }, []),
++    ).toBeUndefined();
++    expect(
++      autoRecoverHintForTurn({ runId: RUN_ID, errorDetail: err({ type: "provider_error" }) }, undefined),
++    ).toBeUndefined();
++  });
++
++  it("origin 不匹配（条目属其它 run）→ undefined", () => {
++    const other: AutoResumeEntry[] = [
++      { origin: "auto_resume:22222222-2222-2222-2222-222222222222", kind: "queued" },
++    ];
++    expect(
++      autoRecoverHintForTurn({ runId: RUN_ID, errorDetail: err({ type: "provider_error" }) }, other),
++    ).toBeUndefined();
++  });
++
++  it("quota 无 reset_at / 非恢复类（auth/unknown）→ undefined", () => {
++    expect(
++      autoRecoverHintForTurn(
++        { runId: RUN_ID, errorDetail: err({ type: "quota_exceeded" }) },
++        SCHED,
++      ),
++    ).toBeUndefined();
++    expect(
++      autoRecoverHintForTurn({ runId: RUN_ID, errorDetail: err({ type: "auth_failed" }) }, QUEUED),
++    ).toBeUndefined();
++  });
++
++  it("无 errorDetail / 无 runId → undefined", () => {
++    expect(autoRecoverHintForTurn({ runId: RUN_ID, errorDetail: null }, QUEUED)).toBeUndefined();
++    expect(
++      autoRecoverHintForTurn({ runId: null, errorDetail: err({ type: "provider_error" }) }, QUEUED),
++    ).toBeUndefined();
++  });
++});
+diff --git a/frontend/src/components/daemon/scheduled-messages-bar.tsx b/frontend/src/components/daemon/scheduled-messages-bar.tsx
+index a587ef58e..a36ccdf87 100644
+--- a/frontend/src/components/daemon/scheduled-messages-bar.tsx
++++ b/frontend/src/components/daemon/scheduled-messages-bar.tsx
+@@ -22,7 +22,7 @@
+  * 语义阶与 MessageQueueBar 同款（border-input bg-muted/50 / border-destructive）。
+  */
+ 
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+ import { Clock, X } from "lucide-react";
+ import { Button, Modal, Tag, Tooltip } from "antd";
+@@ -101,6 +101,13 @@ export interface ScheduledMessagesBarProps {
+   sessionId: string;
+   /** 刷新信号（父层创建定时消息成功后递增；SessionUsageBar refreshSignal 同款模式）。 */
+   refreshSignal?: number;
++  /**
++   * 2026-09-12-chat-turn-auto-recovery / FR-5.0：定时列表数据上提回调——bar
++   * 内查询每次收敛（轮询/失效/取消）后把全量条目回传父层（会话页/弹窗双挂载
++   * 点），供失败卡 autoRecoverHint 双信号推导。R4 不变式（panel 零 react-query）
++   * 不破——数据仍在局部 client，仅经回调外送。
++   */
++  onEntriesChange?: (entries: ScheduledMessageRead[]) => void;
+ }
+ 
+ /**
+@@ -109,15 +116,37 @@ export interface ScheduledMessagesBarProps {
+ function ScheduledMessagesList({
+   sessionId,
+   refreshSignal,
++  onEntriesChange,
+ }: {
+   sessionId: string;
+   refreshSignal: number;
++  onEntriesChange?: (entries: ScheduledMessageRead[]) => void;
+ }) {
+   // useQueryClient 取到的是外层局部 client（QueryClientProvider 注入，R4 定案）。
+   const qc = useQueryClient();
+   const notify = useNotify();
+   const { scheduled } = useScheduledMessages(sessionId);
+ 
++  // 2026-09-12：列表内容变化才回传父层（FR-5.0 数据上提）。内容签名守卫
++  // （id/status/origin）——防任何来源的引用抖动（data 未就绪新 []、结构共享
++  // 重建等）触发 setState→渲染循环（attach 模式假定时器用例实测翻车根因）。
++  const lastNotifiedRef = useRef<ScheduledMessageRead[] | null>(null);
++  useEffect(() => {
++    const prev = lastNotifiedRef.current;
++    const same =
++      prev !== null &&
++      prev.length === scheduled.length &&
++      prev.every(
++        (m, i) =>
++          m.id === scheduled[i]?.id &&
++          m.status === scheduled[i]?.status &&
++          m.origin === scheduled[i]?.origin,
++      );
++    if (same) return;
++    lastNotifiedRef.current = scheduled;
++    onEntriesChange?.(scheduled);
++  }, [scheduled, onEntriesChange]);
++
+   // 父层 refreshSignal 递增（创建成功）→ 失效局部 client 缓存立即重拉（新条目
+   // 即时可见，不等 30s 轮询）。0 为初始值不触发。
+   useEffect(() => {
+@@ -187,6 +216,15 @@ function ScheduledMessagesList({
+                 <span className="max-w-[240px] truncate" title={msg.prompt}>
+                   {summarizeScheduledPrompt(msg.prompt)}
+                 </span>
++                {/* 2026-09-12：系统自动排期徽标（origin=auto_resume:*；与状态
++                    tag 并列，注明可取消=取消自动继续）。 */}
++                {(msg.origin ?? "").startsWith("auto_resume:") && (
++                  <Tooltip title="系统自动排期（上游额度重置后自动续跑），可取消">
++                    <Tag color="processing" className="!m-0 shrink-0 !text-[11px]">
++                      自动续跑
++                    </Tag>
++                  </Tooltip>
++                )}
+                 {/* 四态 tag：failed 悬停显失败原因（error_code/error_message 审计留档）。 */}
+                 {msg.status === "failed" ? (
+                   <Tooltip
+@@ -235,6 +273,7 @@ function ScheduledMessagesList({
+ export function ScheduledMessagesBar({
+   sessionId,
+   refreshSignal = 0,
++  onEntriesChange,
+ }: ScheduledMessagesBarProps) {
+   // 局部 client：retry 关闭（辅助信息条，失败静默等下轮轮询；也避免弹窗测试
+   // 环境无网络时的重试定时器噪声），聚焦刷新关（30s 轮询已够）。
+@@ -254,7 +293,11 @@ export function ScheduledMessagesBar({
+ 
+   return (
+     <QueryClientProvider client={client}>
+-      <ScheduledMessagesList sessionId={sessionId} refreshSignal={refreshSignal} />
++      <ScheduledMessagesList
++        sessionId={sessionId}
++        refreshSignal={refreshSignal}
++        onEntriesChange={onEntriesChange}
++      />
+     </QueryClientProvider>
+   );
+ }
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index e1e846572..4e4d02b8e 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -6,7 +6,7 @@
+  * §5 Wave 3，原样搬移；establishStream 闭包状态原样保留 R-03）。
+  */
+ 
+-import { useCallback, useEffect, useRef, useState } from "react";
++import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import dayjs, { type Dayjs } from "dayjs";
+ import {
+   Ban, MessageSquareText, PauseCircle, Plus, RefreshCw, Square, TriangleAlert, Users,
+@@ -16,6 +16,7 @@ import { AgentModelInput } from "@/components/AgentModelInput";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+ import { applyLogToSegments, finishTurn } from "@/components/daemon/session-log-assembler";
+ import { TurnTimeline } from "@/components/daemon/turn-timeline";
++import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
+ import { type AttachmentRead } from "@/lib/api/session-attachments";
+ import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+ import {
+@@ -42,7 +43,7 @@ import { PlanApprovalCard } from "@/components/daemon/plan-approval-card";
+ import {
+   TaskExecutionPanel, type TaskExecutionPanelHandle,
+ } from "@/components/daemon/task-execution-panel";
+-import { type PlanSummary } from "@/lib/daemon";
++import { ScheduledMessageRead, type PlanSummary } from "@/lib/daemon";
+ import {
+   cancelTeamMission, createScheduledMessage, createSession, endSession, fetchPendingDialogs, fetchSessionDialogHistory,
+   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
+@@ -196,6 +197,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   const [schedAt, setSchedAt] = useState<Dayjs | null>(null);
+   const [schedSubmitting, setSchedSubmitting] = useState(false);
+   const [schedRefresh, setSchedRefresh] = useState(0);
++  // 2026-09-12-chat-turn-auto-recovery / FR-5.0：定时列表经 bar 回调上提。
++  const [scheduledEntries, setScheduledEntries] = useState<
++    ScheduledMessageRead[]
++  >([]);
+   const [schedHints, setSchedHints] = useState<string[]>([]);
+   // 会话切换（idle 首句创建成功 / attach 换目标）：关弹窗 + 清系统提示行。
+   useEffect(() => {
+@@ -314,6 +319,31 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     sessionId: view.sessionId ?? "",
+     sessionActive: view.status === "active",
+   });
++
++  // 2026-09-12-chat-turn-auto-recovery / FR-5.1：会话 pending 自动恢复条目
++  // （排队 ∪ 定时，origin=auto_resume:*）——TurnTimeline 失败卡双信号推导。
++  const autoResumeEntries = useMemo<AutoResumeEntry[]>(() => {
++    const queued = queue
++      .filter(
++        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
++      )
++      .map((e) => ({
++        origin: e.origin as string,
++        kind: "queued" as const,
++        dispatchAt: null,
++      }));
++    const scheduled = scheduledEntries
++      .filter(
++        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
++      )
++      .map((e) => ({
++        origin: e.origin as string,
++        kind: "scheduled" as const,
++        dispatchAt: e.dispatch_at,
++      }));
++    return [...queued, ...scheduled];
++  }, [queue, scheduledEntries]);
++
+   useEffect(() => {
+     queueRefreshRef.current = refreshQueue;
+   }, [refreshQueue]);
+@@ -1709,6 +1739,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+           （无 whoLine / 历史 usage / 孤儿 turn 派生链——ISP 现状，强开会多打
+           listSessionRuns 请求并重排顺序）。 */}
+       <TurnTimeline
++        autoResumeEntries={autoResumeEntries}
+         turns={view.turns}
+         viewMode={viewMode}
+         errorMsg={view.errorMsg}
+@@ -1796,6 +1827,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+       <ScheduledMessagesBar
+         sessionId={view.sessionId ?? ""}
+         refreshSignal={schedRefresh}
++        onEntriesChange={setScheduledEntries}
+       />
+ 
+       {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index fbaee3180..29c8e36b6 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -13,6 +13,7 @@ import { Badge, Button, Drawer, Input, Spin } from "antd";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+ import { extractPreambleText, finishTurn } from "@/components/daemon/session-log-assembler";
+ import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
+ import { type AttachmentRead } from "@/lib/api/session-attachments";
+ import {
+   joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers,
+@@ -60,14 +61,7 @@ import { listWorkspaces } from "@/lib/workspaces";
+ import { getProject } from "@/lib/ppm/project";
+ import { getChange } from "@/lib/changes";
+ import { getQuicklogDetail } from "@/lib/quicklog";
+-import {
+-  cancelTeamMission, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory,
+-  getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
+-  triggerSessionTeamMission, maxLogTimestamp, reopenSession, streamSession,
+-  updateSessionAutoResume, updateSessionCtxWindow, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest,
+-  type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest,
+-  type PlanSummary,
+-} from "@/lib/daemon";
++import { ScheduledMessageRead, cancelTeamMission, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow } from "@/lib/daemon";
+ import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
+ import { cn } from "@/lib/utils";
+ 
+@@ -435,6 +429,11 @@ export function SessionPanelPage({
+   const [schedAt, setSchedAt] = useState<Dayjs | null>(null);
+   const [schedSubmitting, setSchedSubmitting] = useState(false);
+   const [schedRefresh, setSchedRefresh] = useState(0);
++  // 2026-09-12-chat-turn-auto-recovery / FR-5.0：定时列表经 bar 回调上提
++  //（R4 不变式不破），失败卡双信号推导的数据源之一。
++  const [scheduledEntries, setScheduledEntries] = useState<
++    ScheduledMessageRead[]
++  >([]);
+   const [schedHints, setSchedHints] = useState<string[]>([]);
+   // 切会话：关弹窗 + 清系统提示行（本地会话作用域态，防 A 会话提示残留到 B）。
+   useEffect(() => {
+@@ -1850,6 +1849,31 @@ export function SessionPanelPage({
+     sessionActive,
+   });
+ 
++  // 2026-09-12-chat-turn-auto-recovery / FR-5.1：会话 pending 自动恢复条目
++  // （排队 ∪ 定时，origin=auto_resume:*）——TurnTimeline 失败卡双信号推导。
++  const autoResumeEntries = useMemo<AutoResumeEntry[]>(() => {
++    const queued = queue
++      .filter(
++        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
++      )
++      .map((e) => ({
++        origin: e.origin as string,
++        kind: "queued" as const,
++        dispatchAt: null,
++      }));
++    const scheduled = scheduledEntries
++      .filter(
++        (e) => e.status === "pending" && (e.origin ?? "").startsWith("auto_resume:"),
++      )
++      .map((e) => ({
++        origin: e.origin as string,
++        kind: "scheduled" as const,
++        dispatchAt: e.dispatch_at,
++      }));
++    return [...queued, ...scheduled];
++  }, [queue, scheduledEntries]);
++
++
+   // ── 操作 ───────────────────────────────────────────────────────────────
+   // task-11：团队弹层开关（打开时清旧错误；objective 预填 /team 指令文本）。
+   // ql-20260828-012-4425：initial 携带编辑回显配置（chip 点击派生自活跃
+@@ -2802,6 +2826,7 @@ export function SessionPanelPage({
+         errorMsg={errorMsg}
+         // 2026-09-10-auto-resume-interrupted-turn / FR-07：daemon_restarted 失败卡
+         // 场景化兜底（该码不在 8 类错误映射）——按开关状态两态文案。
++        autoResumeEntries={autoResumeEntries}
+         daemonRestartedHint={
+           (session.config as Record<string, unknown> | null)?.auto_resume_interrupted
+           === false
+@@ -3376,6 +3401,7 @@ export function SessionPanelPage({
+         <ScheduledMessagesBar
+           sessionId={sessionId ?? ""}
+           refreshSignal={schedRefresh}
++          onEntriesChange={setScheduledEntries}
+         />
+         {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
+             .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。ql-20260827-020：
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index bddc1c54b..2b7ca16f8 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -49,6 +49,7 @@ import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+ import { AskUserMarkerCard } from "@/components/ask-user-marker-card";
+ import { parseAskUserMarker } from "@/lib/askuser-marker";
+ import { RunErrorItem } from "@/components/agent-log/run-error-item";
++import { formatScheduledTime } from "@/components/daemon/scheduled-messages-bar";
+ import type { ErrorLogItem } from "@/components/agent-log/normalize";
+ import type { TurnSegment } from "@/components/daemon/session-log-assembler";
+ import { SegmentView, TextSegmentView } from "@/components/daemon/turn-segment-views";
+@@ -146,6 +147,16 @@ import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
+  * - tool：工具调用事件（含配对 result + 状态；raw 空串=孤儿 result 无配对 use）
+  * - stderr：channel=stderr 的错误/告警文本
+  */
++/** 2026-09-12-chat-turn-auto-recovery：自动恢复条目（失败卡双信号推导用）。 */
++export interface AutoResumeEntry {
++  /** origin 复合值（'auto_resume:<源 run uuid>'）。 */
++  origin: string;
++  /** 条目面：queued=排队重放/nudge；scheduled=定时续跑（quota）。 */
++  kind: "queued" | "scheduled";
++  /** 定时面计划时间（queued 为 null/undefined）。 */
++  dispatchAt?: string | null;
++}
++
+ export type SessionProcessItem =
+   | { kind: "thinking"; text: string; ts?: number }
+   | ({ kind: "tool" } & SessionToolEvent & { ts?: number })
+@@ -205,6 +216,8 @@ export interface SessionTurnView {
+    * 可选：外部 logsToTurns 构造的历史 turn 不带此字段（只读 import，不改其构造）。
+    */
+   errorDetail?: ErrorLogItem | null;
++
++  /** （timeline 内部用）轮终结构化错误（含 reset_at 扩展）。 */
+   /**
+    * 2026-09-10-auto-resume-interrupted-turn：自动续跑轮标记（源 run id，取
+    * run.metadata.auto_resume_of）——非空时轮次行渲染「自动续跑」徽标；缺省
+@@ -291,6 +304,13 @@ export interface TurnTimelineProps {
+    * 「中断自动续跑」开关状态传两态文案；不传保持现行为（类型表 defaultHint）。
+    */
+   daemonRestartedHint?: string | null;
++  /**
++   * 2026-09-12-chat-turn-auto-recovery / FR-5.1：会话当前 pending 的自动恢复
++   * 条目（排队 ∪ 定时，origin=auto_resume:<源 run uuid>）——失败卡
++   * autoRecoverHint 双信号推导的第二信号（存在性）。undefined = 父层无数据
++   * （保持现行为，不注入提示）。
++   */
++  autoResumeEntries?: AutoResumeEntry[];
+   /**
+    * pending 待答卡渲染门控：ended/failed 会话不回显（ql-20260623 改动三，死卡防护）。
+    */
+@@ -348,6 +368,7 @@ const TurnRow = memo(function TurnRow({
+   onResend,
+   onSwitchProvider,
+   daemonRestartedHint,
++  autoResumeEntries,
+ }: {
+   turn: SessionTurnView;
+   viewMode: SessionViewMode;
+@@ -360,6 +381,8 @@ const TurnRow = memo(function TurnRow({
+   onSwitchProvider: () => void;
+   /** 2026-09-10-auto-resume-interrupted-turn：daemon_restarted 场景化兜底建议。 */
+   daemonRestartedHint?: string | null;
++  /** 2026-09-12-chat-turn-auto-recovery：pending 自动恢复条目（双信号推导）。 */
++  autoResumeEntries?: AutoResumeEntry[];
+ }) {
+   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
+   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
+@@ -643,6 +666,7 @@ const TurnRow = memo(function TurnRow({
+                             ? (daemonRestartedHint ?? undefined)
+                             : undefined
+                         }
++                        autoRecoverHint={autoRecoverHintForTurn(turn, autoResumeEntries)}
+                         onResend={
+                           turn.prompt.trim()
+                             ? () => {
+@@ -717,11 +741,49 @@ const TurnRow = memo(function TurnRow({
+   );
+ });
+ 
++/**
++ * 2026-09-12-chat-turn-auto-recovery / FR-5.1 / D-009@v2：失败卡自动恢复提示
++ * 双信号推导——error_detail 类型（第一信号）+ 会话存在同源 pending 恢复条目
++ * （第二信号，存在性）。无恢复条目（开关关/链上限到/派发已消费）一律不注入
++ * 提示，防静态文案误导。
++ */
++export function autoRecoverHintForTurn(
++  turn: { runId?: string | null; errorDetail?: ErrorLogItem | null },
++  entries: AutoResumeEntry[] | undefined,
++): string | undefined {
++  if (!entries || entries.length === 0 || !turn.errorDetail || !turn.runId) {
++    return undefined;
++  }
++  const origin = `auto_resume:${turn.runId}`;
++  const entry = entries.find((e) => e.origin === origin);
++  if (!entry) return undefined;
++  const d = turn.errorDetail;
++  const raw = String(d.raw ?? "");
++  if (d.type === "quota_exceeded") {
++    if (!d.reset_at) return undefined;
++    const when = formatScheduledTime(d.reset_at);
++    return `额度耗尽，将于 ${when} 自动继续（可在定时消息中取消）`;
++  }
++  if (
++    d.type === "rate_limited" ||
++    d.type === "timeout" ||
++    d.type === "network" ||
++    d.type === "provider_error" ||
++    raw.includes("silent stream truncation")
++  ) {
++    return raw.includes("silent stream truncation")
++      ? "输出流中断，已自动续跑"
++      : "上游瞬时故障，已自动重发";
++  }
++  return undefined;
++}
++
+ export function TurnTimeline({
+   turns,
+   viewMode,
+   errorMsg,
+   daemonRestartedHint,
++  autoResumeEntries,
+   sessionStatus,
+   pendingRequests,
+   dialogHistory,
+@@ -958,6 +1020,7 @@ export function TurnTimeline({
+               onResend={onResend}
+               onSwitchProvider={onSwitchProvider}
+               daemonRestartedHint={daemonRestartedHint}
++            autoResumeEntries={autoResumeEntries}
+             />
+           ))}
+           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——
+diff --git a/frontend/src/hooks/use-message-queue.ts b/frontend/src/hooks/use-message-queue.ts
+index 2207cbcbb..95fcee8e2 100644
+--- a/frontend/src/hooks/use-message-queue.ts
++++ b/frontend/src/hooks/use-message-queue.ts
+@@ -68,6 +68,12 @@ export interface QueueEntry {
+   position?: number;
+   /** 入队时间戳（Date.now()）。 */
+   createdAt: number;
++  /**
++   * 条目来源标记（2026-09-12-chat-turn-auto-recovery FR-5.0）：
++   * "auto_resume:<源 run uuid>" = 系统自动恢复入队（失败卡双信号推导）；
++   * undefined/null = 用户排队。
++   */
++  origin?: string | null;
+ }
+ 
+ export interface UseMessageQueueOptions {
+@@ -164,6 +170,7 @@ export function useMessageQueue({
+             errorMsg: e.error_msg ?? undefined,
+             position: e.position ?? undefined,
+             createdAt: Date.parse(e.created_at) || 0,
++            origin: e.origin ?? null,
+           })),
+         );
+       } catch {
+diff --git a/frontend/src/hooks/use-scheduled-messages.ts b/frontend/src/hooks/use-scheduled-messages.ts
+index 031178af3..a041695c3 100644
+--- a/frontend/src/hooks/use-scheduled-messages.ts
++++ b/frontend/src/hooks/use-scheduled-messages.ts
+@@ -42,6 +42,10 @@ export interface UseScheduledMessagesReturn {
+   isLoading: boolean;
+ }
+ 
++/** 空列表模块级常量：data 未就绪/异常时复用同一引用——防回调型消费方
++ * （bar onEntriesChange）因「每渲染新 []」触发 setState→渲染循环。 */
++const EMPTY_SCHEDULED: ScheduledMessageRead[] = [];
++
+ export function useScheduledMessages(sessionId: string): UseScheduledMessagesReturn {
+   const query = useQuery<ScheduledMessageRead[], ApiError>({
+     queryKey: scheduledMessagesQueryKey(sessionId),
+@@ -53,7 +57,7 @@ export function useScheduledMessages(sessionId: string): UseScheduledMessagesRet
+   return {
+     // Array.isArray 防御：测试环境/异常网关可能给非数组 JSON（如全局 fetch mock
+     // 兜住所有请求返回对象）——形状不符按空列表收敛（bar 渲染 null），不崩面板。
+-    scheduled: Array.isArray(query.data) ? query.data : [],
++    scheduled: Array.isArray(query.data) ? query.data : EMPTY_SCHEDULED,
+     isLoading: query.isLoading,
+   };
+ }
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 6e8abfd23..07048f555 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -17724,6 +17724,8 @@ export interface components {
+             hint?: string | null;
+             /** Raw */
+             raw?: string | null;
++            /** Reset At */
++            reset_at?: string | null;
+         };
+         /**
+          * ModelErrorType
+@@ -21615,6 +21617,8 @@ export interface components {
+             error_code?: string | null;
+             /** Error Message */
+             error_message?: string | null;
++            /** Origin */
++            origin?: string | null;
+             /**
+              * Created At
+              * Format: date-time
+@@ -22036,6 +22040,8 @@ export interface components {
+             error_msg?: string | null;
+             /** Position */
+             position: number;
++            /** Origin */
++            origin?: string | null;
+             /**
+              * Created At
+              * Format: date-time
+diff --git a/frontend/src/lib/daemon/session-queue.ts b/frontend/src/lib/daemon/session-queue.ts
+index ef2811380..f1c1cd48a 100644
+--- a/frontend/src/lib/daemon/session-queue.ts
++++ b/frontend/src/lib/daemon/session-queue.ts
+@@ -23,6 +23,8 @@ export interface SessionQueueEntry {
+    * 不依赖该字段本地重排。
+    */
+   position?: number;
++  /** 2026-09-12-chat-turn-auto-recovery：auto_resume:<源 run uuid> = 系统自动恢复入队；null/缺省 = 用户排队（旧后端兼容）。 */
++  origin?: string | null;
+   created_at: string;
+ }
+ 
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 227de3418..aea17483f 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -3979,8 +3979,15 @@ export class Daemon {
+     // 注入 payload.error，供 hubClient.notifyRunResult → backend error_detail。
+     // 守卫用 truthy（ModelError 恒为对象）：null/undefined（成功 / 非模型错误）不 set，
+     // backend error_detail 保留 NULL（D-008 成功路径不回归）。
++    // 2026-09-12-chat-turn-auto-recovery：wire 键 snake_case 化——TS 侧 ModelError
++    // 的 resetAt 在此处解构剔除、以 reset_at 注入（body 其余键全为单词无 case 差），
++    // backend ModelErrorDTO.reset_at 直收；outbox 重放路径同享本 payload 形态。
+     if (resultMeta.modelError) {
+-      payload.error = resultMeta.modelError;
++      const { resetAt, ...errorRest } = resultMeta.modelError;
++      payload.error = {
++        ...errorRest,
++        ...(resetAt !== null && resetAt !== undefined ? { reset_at: resetAt } : {}),
++      } as typeof payload.error;
+     }
+     if (!state.claimToken) {
+       // task-07（A5 claim_token 空窗）：终态不再丢弃——kind=run_result 入箱
+diff --git a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+index 2a9f9969b..04919ce6a 100644
+--- a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
++++ b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+@@ -991,6 +991,10 @@ export class PiRpcDriver implements InteractiveDriver {
+     let turnFinalText: string | null = null;
+     // 本轮 turn 是否已上报 result（防 agent_settled 与进程退出双触发重复）。
+     let turnReported = false;
++    // 2026-09-12-chat-turn-auto-recovery FR-2.1：轮尾是否为「带正文的 assistant
++    // 消息」——message_end 边粒度收口（assistant 消息含非空 text part → true），
++    // tool_result 事件翻 false；settle 后仍 false = 静默中断（合成 error result）。
++    let lastWasFinalText = false;
+     // consume 是否已最终收敛（进程异常退出 / consume 抛错）。
+     let finalized = false;
+     // stderr 有界累积（诊断载体：exit/握手超时消息附尾部；不作为事件上报——
+@@ -1304,12 +1308,36 @@ export class PiRpcDriver implements InteractiveDriver {
+             });
+           }
+         }
++        // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断检测标记 ①——
++        // message_end 边粒度收口。按本条消息 content parts 是否含非空 text
++        // part 得 hasText：[text,thinking] 同消息排列（pi-events 按 content 序
++        // 产事件）终值正确为 true；仅 thinking 无正文的消息收 false。tool_use
++        // part 不参与（工具调用消息本来就不该算收尾全文）。非 assistant 消息
++        // 不动标记（user/toolResult 的 message_end 不改变「轮尾是否有全文」）。
++        if (endMsg.role === 'assistant' && Array.isArray(endMsg.content)) {
++          const hasText = endMsg.content.some(
++            (part) =>
++              isRecord(part) &&
++              part.type === 'text' &&
++              typeof part.text === 'string' &&
++              part.text.trim() !== '',
++          );
++          lastWasFinalText = hasText;
++        }
+       }
+       const events = normalizer.normalizeRpcLine(line);
+       for (const ev of events) {
+         if (ev.type === 'error' && ev.content) {
+           pendingTurnError = ev.content;
+         }
++        // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断检测标记 ②——
++        // 仅 tool_result 事件翻 false（工具结果之后尚无新 assistant 消息 =
++        // 轮尾非全文）。thinking / override text / partial text 一律不动标记
++        // （前两者同产自 message_end，已由上方 ① 按整消息收口；partial 是
++        // 流式中途态非终态证据）。
++        if (ev.type === 'tool_result') {
++          lastWasFinalText = false;
++        }
+         // ql-20260907-002（续）：message_end 的 override 全文（assistant 完整
+         // 产出终态，pi-events.ts handleMessageEnd）同为轮内恢复信号——api
+         // 重试成功后先于 turn_end 到达，提前清粘滞 error。
+@@ -1397,6 +1425,9 @@ export class PiRpcDriver implements InteractiveDriver {
+         turnApiCallCount = 0;
+         turnReported = false;
+         turnSawRun = false;
++        // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断标记每轮重置——
++        // 本轮尚未出现任何带正文的 assistant 消息。
++        lastWasFinalText = false;
+ 
+         // inject 三模式（task-03）：非 streaming → prompt；streaming → steer
+         //（默认——UserTurnInput 无模式字段，steer 语义即「streaming 中注入」；
+@@ -1434,6 +1465,27 @@ export class PiRpcDriver implements InteractiveDriver {
+             // ql-20260910-003：失败轮同样真实消耗了 token，明细表不因轮失败缺行
+             ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
+           });
++        } else if (!lastWasFinalText) {
++          // 2026-09-12-chat-turn-auto-recovery FR-2.2：静默中断——无 error 事件
++          // 但轮尾无带正文的 assistant 消息（末条消息仅 thinking / 末事件为
++          // tool_result / 轮内零活动 / usage-only）。实证（2026-09-11 会话
++          // d4c29d95 22:36/23:52 两轮）：pi 照常 agent_settled、run 收敛
++          // completed，后端完全不可见。合成 error result 走 session-manager
++          // 既有 classifyModelError 归类——raw 含「silent stream truncation」
++          // 命中断流关键词 → provider_error/retryable=true，后端三分支自动
++          // 恢复得以触发（误报容忍：合法工具收尾轮多一轮 nudge 成本，紧链
++          // 上限 2 封顶，D-003）。
++          reportTurnResult({
++            subtype: 'error_during_execution',
++            is_error: true,
++            result:
++              '[silent stream truncation] 上一轮输出流中断，未产生收尾回复' +
++              (turnApiCallCount > 0
++                ? `（api_calls=${turnApiCallCount}, final_text=${turnFinalText !== null ? 'y' : 'n'}）`
++                : '（轮内无任何响应）'),
++            ...(h.sessionId ? { session_id: h.sessionId } : {}),
++            ...(modelUsageSnapshot ? { modelUsage: modelUsageSnapshot } : {}),
++          });
+         } else {
+           reportTurnResult({
+             subtype: 'success',
+diff --git a/sillyhub-daemon/src/model-error/classifier.ts b/sillyhub-daemon/src/model-error/classifier.ts
+index 232dd2c08..b23de8a1c 100644
+--- a/sillyhub-daemon/src/model-error/classifier.ts
++++ b/sillyhub-daemon/src/model-error/classifier.ts
+@@ -1,10 +1,15 @@
+ /**
+- * model-error/classifier.ts —— claude 模型调用错误归类器（task-02 / FR-01）。
++ * model-error/classifier.ts —— 模型调用错误归类器（task-02 / FR-01）。
+  *
+- * 职责（design §5 Phase 2 / §7.2）：把 claude turn 的失败信号
++ * 职责（design §5 Phase 2 / §7.2）：把 turn 的失败信号
+  *（is_error + resultText + api_retry.error + 最近 assistant stdout + stderr）
+  * 按关键词/正则归类成结构化 {@link ModelError}，覆盖 8 类错误。
+  *
++ * 2026-09-12-chat-turn-auto-recovery：规则体 provider 无关化（原 D-001「仅
++ * claude」废止——pi/codex/cursor 走同一套关键词规则；实证 pi 断流/429 全落
++ * unknown 无恢复面）+ 断流关键词（Stream ended without finish_reason 主实证）
++ * + resetAt 解析（GLM 中文格式，北京时间 +08:00）。
++ *
+  * 数据来源对齐真实数据流（design §1 / claude-sdk-driver.ts / stream-json.ts）：
+  *   - isError        ← stream-json.parseResult 的 msg.is_error（=lastResultInfo.isError）/ SDK result.is_error
+  *   - resultText     ← stream-json lastResultInfo.resultText（result.result 文本）
+@@ -31,8 +36,8 @@ import type { ModelError, ModelErrorType } from './types.js';
+  */
+ export interface ClassifyModelInput {
+   /**
+-   * agent 类型，决定走哪套归类规则（D-001：本次仅 claude；其他 agent 预留扩展点，
+-   * 一律兜底 unknown，等各自实现）。task-03 接线时传入 session 的 provider 标识。
++   * agent 类型（session provider 标识）。仅日志归因用——2026-09-12 起规则体
++   * provider 无关（classifyBlob），全 agent 同一套关键词规则。
+    */
+   agent: 'claude' | string;
+   /** turn result 是否失败（stream-json lastResultInfo.isError / SDK result.is_error）。 */
+@@ -145,10 +150,15 @@ function extractCode(blob: string): string | null {
+  *   4. timeout/timed out/ETIMEDOUT → timeout
+  *   5. model not found/模型不存在 → model_not_found
+  *   6. ECONNREFUSED/ENOTFOUND/网络 → network
+- *   7. 5xx/internal server error → provider_error
++ *   7. 5xx/internal server error/断流关键词 → provider_error
+  *   8. 兜底 → unknown
++ *
++ * 2026-09-12：classifyClaude 更名 classifyBlob（规则体 provider 无关化）；
++ * 第 7 条补断流关键词——pi 上游「Stream ended without finish_reason」主实证
++ * （2026-09-11 会话 d4c29d95 ×8）原先八类均不命中落 unknown/retryable=false，
++ * 自动恢复面拿不到可重试信号。
+  */
+-function classifyClaude(blob: string): ModelErrorType {
++function classifyBlob(blob: string): ModelErrorType {
+   const has429 = /\b429\b/.test(blob);
+ 
+   // 1. quota_exceeded：429 + 额度/配额/上限语义。
+@@ -199,8 +209,11 @@ function classifyClaude(blob: string): ModelErrorType {
+     return 'network';
+   }
+ 
+-  // 7. provider_error：5xx / internal server error / bad gateway / overloaded。
+-  if (/\b5\d{2}\b|internal[\s_-]?server[\s_-]?error|server[\s_-]?error|internal[\s_-]?error|bad[\s_-]?gateway|service[\s_-]?unavail|upstream|overloaded|供应商[\s\S]{0,5}(异常|错误)/i.test(blob)) {
++  // 7. provider_error：5xx / internal server error / bad gateway / overloaded /
++  //    断流（2026-09-12-chat-turn-auto-recovery D-011：pi 上游「Stream ended
++  //    without finish_reason」主实证原先八类均不命中落 unknown；pi driver 静默
++  //    中断合成文本 [silent stream truncation] 亦经此处，必须确定性命中）。
++  if (/\b5\d{2}\b|internal[\s_-]?server[\s_-]?error|server[\s_-]?error|internal[\s_-]?error|bad[\s_-]?gateway|service[\s_-]?unavail|upstream|overloaded|供应商[\s\S]{0,5}(异常|错误)|stream[\s_-]?(ended|truncat)|without[\s_-]?finish[\s_-]?reason|silent[\s_-]?stream|输出流中断|流中断/i.test(blob)) {
+     return 'provider_error';
+   }
+ 
+@@ -208,17 +221,38 @@ function classifyClaude(blob: string): ModelErrorType {
+   return 'unknown';
+ }
+ 
++/**
++ * 从 quota 错误文本解析额度重置时间（ISO-8601，含 +08:00 偏移；失败 → null）。
++ *
++ * 2026-09-12-chat-turn-auto-recovery D-002@v2：只解析 GLM 中文实证格式
++ * 「…将于 2026-09-12 10:03:59 重置」（1308 错误体，北京时间，固定标注
++ * +08:00）；英文变体（resets at / will reset）无时区信息不做猜测，返回
++ * null（后端退化为不排期，仅提示）。仅 quota_exceeded 命中时调用。
++ */
++function extractResetAt(blob: string): string | null {
++  // 「将在/将于 … 重置」双介词兼容——实证 1308 文案为「将在」（2026-09-11
++  // 会话 d4c29d95），「将于」留作同构变体兜底。
++  const m = /将[在于]\s*(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*重置/.exec(
++    blob,
++  );
++  if (!m) return null;
++  const [, y, mo, d, h, mi, se] = m;
++  // 显式字符串拼接（不走 new Date 解析——ES 实现相关时区处理不可移植）。
++  return `${y}-${mo}-${d}T${h}:${mi}:${se}+08:00`;
++}
++
+ /**
+  * 把模型调用失败信号归类为结构化 {@link ModelError}。
+  *
+- * @param input claude turn 的失败信号（is_error + 各文本来源）
++ * @param input turn 的失败信号（is_error + 各文本来源；agent 仅日志归因）
+  * @returns ModelError（失败时）或 null（非模型错误：is_error=false，成功路径不产生 error）
+  *
+  * 判定顺序：
+  *   1. isError=false → null（非模型错误，成功路径不产生 error，D-008；蓝图 acceptance）。
+  *      成功 turn 即便残留 api_retry 文本也不算失败（曾瞬时限流但已恢复）。
+- *   2. agent 非 claude → 兜底 unknown（D-001 扩展点，等各自 agent 实现）。
+- *   3. claude 按规则归类（含 unknown 兜底，R-01）。
++ *   2. 按规则体 classifyBlob 归类（2026-09-12 起 provider 无关，全 agent 同
++ *      规则；含 unknown 兜底，R-01）。
++ *   3. quota_exceeded → 附加 resetAt（extractResetAt，解析失败 null）。
+  */
+ export function classifyModelError(input: ClassifyModelInput): ModelError | null {
+   // 1. 非模型错误：turn 未失败。成功路径一律不产生 ModelError（D-008）。
+@@ -230,21 +264,8 @@ export function classifyModelError(input: ClassifyModelInput): ModelError | null
+   const raw = blob.length > 0 ? blob : null;
+   const code = extractCode(blob);
+ 
+-  // 2. 非 claude agent：预留扩展点，统一兜底 unknown（D-001）。
+-  if (input.agent !== 'claude') {
+-    const info = ERROR_INFO.unknown;
+-    return {
+-      type: 'unknown',
+-      code,
+-      message: info.message,
+-      retryable: info.retryable,
+-      hint: info.hint,
+-      raw,
+-    };
+-  }
+-
+-  // 3. claude 归类。
+-  const type = classifyClaude(blob);
++  // 2. 归类（provider 无关：pi/codex/cursor 与 claude 同一规则体）。
++  const type = classifyBlob(blob);
+   const info = ERROR_INFO[type];
+   return {
+     type,
+@@ -253,5 +274,6 @@ export function classifyModelError(input: ClassifyModelInput): ModelError | null
+     retryable: info.retryable,
+     hint: info.hint,
+     raw,
++    resetAt: type === 'quota_exceeded' ? extractResetAt(blob) : null,
+   };
+ }
+diff --git a/sillyhub-daemon/src/model-error/types.ts b/sillyhub-daemon/src/model-error/types.ts
+index de925ad6a..f91963a63 100644
+--- a/sillyhub-daemon/src/model-error/types.ts
++++ b/sillyhub-daemon/src/model-error/types.ts
+@@ -24,7 +24,7 @@ export type ModelErrorType =
+  */
+ export interface ModelError {
+   type: ModelErrorType;
+-  /** 原始错误码（如 "1310" / "429" / null） */
++  /** 原始错误码（如 "1308" / "429" / null） */
+   code: string | null;
+   /** 可读原因（中文） */
+   message: string;
+@@ -34,4 +34,11 @@ export interface ModelError {
+   hint: string | null;
+   /** 原始错误文本（查看详情用，可空） */
+   raw: string | null;
++  /**
++   * 额度重置时间（ISO-8601 含时区偏移；null=未解析到）。
++   * 2026-09-12-chat-turn-auto-recovery：仅 quota_exceeded 时从错误文本解析
++   * GLM 中文「将于 YYYY-MM-DD HH:MM:SS 重置」（北京时间固定 +08:00 标注）；
++   * 英文变体无时区信息不猜测 → null。wire 键为 reset_at（daemon.ts 序列化跳映射）。
++   */
++  resetAt: string | null;
+ }
+diff --git a/sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts b/sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts
+index 0049d6700..3ec786a7a 100644
+--- a/sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts
++++ b/sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts
+@@ -220,7 +220,14 @@ async function driveTurn(
+     /** message_update text_delta 增量（partial，无 override）。 */
+     deltas?: string[];
+     /** message_end 帧（assistant）：texts=text part 全文数组（每 part 一条 override）。 */
+-    messageEnds?: Array<{ texts: string[]; usage?: Record<string, number> }>;
++    messageEnds?: Array<{
++      texts?: string[];
++      /** thinking part（追加在 texts 之后——[text,thinking] 排列同消息）。 */
++      thinking?: string;
++      usage?: Record<string, number>;
++    }>;
++    /** message_end 后追加一轮工具往返（tool_execution_start/end——tool_result 尾部）。 */
++    toolRound?: { name?: string };
+     /** turn_end stopReason；error 时须给 errorMessage。 */
+     stopReason?: 'stop' | 'error';
+     errorMessage?: string;
+@@ -240,16 +247,39 @@ async function driveTurn(
+     });
+   }
+   for (const me of script.messageEnds ?? []) {
++    const content: Array<Record<string, unknown>> = (me.texts ?? []).map((t) => ({
++      type: 'text',
++      text: t,
++    }));
++    if (me.thinking !== undefined) {
++      content.push({ type: 'thinking', thinking: me.thinking });
++    }
+     emitEvent(child, {
+       type: 'message_end',
+       message: {
+         role: 'assistant',
+-        content: me.texts.map((t) => ({ type: 'text', text: t })),
++        content,
+         stopReason: 'stop',
+         ...(me.usage ? { usage: me.usage } : {}),
+       },
+     });
+   }
++  if (script.toolRound) {
++    const toolName = script.toolRound.name ?? 'bash';
++    emitEvent(child, {
++      type: 'tool_execution_start',
++      toolName,
++      toolCallId: 'call_t1',
++      args: { command: 'ls' },
++    });
++    emitEvent(child, {
++      type: 'tool_execution_end',
++      toolName,
++      toolCallId: 'call_t1',
++      result: { stdout: 'ok' },
++      isError: false,
++    });
++  }
+   emitEvent(child, {
+     type: 'turn_end',
+     message: {
+@@ -345,7 +375,7 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01
+     await s.consumeP;
+   });
+ 
+-  it('partial 不计入：仅 text_delta（无 message_end）的成功轮不带 result 键', async () => {
++  it('partial 不计入：仅 text_delta（无 message_end）→ 静默中断合成 error（2026-09-12 FR-2.2）', async () => {
+     const s = await makeSession();
+     await driveTurn(s.child, s.push, {
+       input: '流式不落终态',
+@@ -354,9 +384,13 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01
+     });
+ 
+     expect(s.results).toHaveLength(1);
+-    expect(s.results[0]).toMatchObject({ subtype: 'success', is_error: false });
+-    // 无 override 全文 → result 键完全不出现（不是空串/null）
+-    expect('result' in s.results[0]!).toBe(false);
++    // 流断在 partial 阶段（无 message_end 收口）= 静默中断形态——原先报
++    // success 无 result（后端不可见），现合成 error 触发自动恢复（D-003）。
++    expect(s.results[0]).toMatchObject({
++      subtype: 'error_during_execution',
++      is_error: true,
++    });
++    expect(String(s.results[0]!.result)).toContain('silent stream truncation');
+ 
+     s.closeQueue();
+     await s.consumeP;
+@@ -383,7 +417,7 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01
+     await s.consumeP;
+   });
+ 
+-  it('跨轮重置：上轮 override 全文不泄漏进下轮（第二轮无 override 缺 result 键）', async () => {
++  it('跨轮重置：上轮 override 全文不泄漏进下轮（第二轮无 message_end → 静默中断 error）', async () => {
+     const s = await makeSession();
+     // 第一轮：带 override 全文
+     await driveTurn(s.child, s.push, {
+@@ -391,7 +425,7 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01
+       messageEnds: [{ texts: ['第一轮全文'] }],
+     });
+     // 第二轮：仅流式 partial（无 message_end）——若无重置，上轮 '第一轮全文'
+-    // 会粘滞进本轮 result
++    // 会粘滞进本轮 result；且该形态=静默中断 → 合成 error（2026-09-12 FR-2.2）
+     await driveTurn(s.child, s.push, {
+       input: '第二轮',
+       deltas: ['只有流式'],
+@@ -399,8 +433,143 @@ describe('PI driver 轮终 assistant 全文 → success result 字段（task-01
+ 
+     expect(s.results).toHaveLength(2);
+     expect(s.results[0]).toMatchObject({ subtype: 'success', result: '第一轮全文' });
+-    expect(s.results[1]).toMatchObject({ subtype: 'success', is_error: false });
+-    expect('result' in s.results[1]!).toBe(false);
++    expect(s.results[1]).toMatchObject({
++      subtype: 'error_during_execution',
++      is_error: true,
++    });
++    // 上轮全文不掺入下轮 error result（result 是合成中断说明，非 '第一轮全文'）
++    expect(String(s.results[1]!.result)).not.toBe('第一轮全文');
++    expect(String(s.results[1]!.result)).toContain('silent stream truncation');
++
++    s.closeQueue();
++    await s.consumeP;
++  });
++});
++
++describe('PI driver 静默中断检测（2026-09-12-chat-turn-auto-recovery FR-2）', () => {
++  it('零活动轮：inject 后无任何消息事件/usage → 合成 error（注入后毫无响应=异常）', async () => {
++    const s = await makeSession();
++    await driveTurn(s.child, s.push, { input: '静默无声' });
++
++    expect(s.results).toHaveLength(1);
++    expect(s.results[0]).toMatchObject({
++      subtype: 'error_during_execution',
++      is_error: true,
++    });
++    expect(String(s.results[0]!.result)).toContain('轮内无任何响应');
++
++    s.closeQueue();
++    await s.consumeP;
++  });
++
++  it('[text,thinking] 同消息：末条 assistant 消息含正文 → success 不误报（message_end 边粒度收口）', async () => {
++    const s = await makeSession();
++    await driveTurn(s.child, s.push, {
++      input: '带思考的完整回复',
++      messageEnds: [{ texts: ['这是收尾正文'], thinking: '思考片段' }],
++    });
++
++    expect(s.results).toHaveLength(1);
++    expect(s.results[0]).toMatchObject({
++      subtype: 'success',
++      is_error: false,
++      result: '这是收尾正文',
++    });
++
++    s.closeQueue();
++    await s.consumeP;
++  });
++
++  it('thinking-only 末消息：正文后又一轮纯思考消息收尾 → 合成 error（thinking 后无新正文）', async () => {
++    const s = await makeSession();
++    await driveTurn(s.child, s.push, {
++      input: '先答再想然后断',
++      messageEnds: [
++        { texts: ['中间产出'] },
++        { thinking: '后续思考但没有正文了' },
++      ],
++    });
++
++    expect(s.results).toHaveLength(1);
++    expect(s.results[0]).toMatchObject({
++      subtype: 'error_during_execution',
++      is_error: true,
++    });
++    expect(String(s.results[0]!.result)).toContain('silent stream truncation');
++
++    s.closeQueue();
++    await s.consumeP;
++  });
++
++  it('tool_result 尾部：工具结果之后流断（无收尾正文）→ 合成 error', async () => {
++    const s = await makeSession();
++    await driveTurn(s.child, s.push, {
++      input: '调工具然后断流',
++      messageEnds: [{ texts: ['我先查一下'] }],
++      toolRound: { name: 'bash' },
++    });
++
++    expect(s.results).toHaveLength(1);
++    expect(s.results[0]).toMatchObject({
++      subtype: 'error_during_execution',
++      is_error: true,
++    });
++    expect(String(s.results[0]!.result)).toContain('silent stream truncation');
++
++    s.closeQueue();
++    await s.consumeP;
++  });
++
++  it('工具后再有正文收尾：完整轮 → success（tool_result 翻 false 后 message_end 再翻 true）', async () => {
++    // 单 driveTurn 的 toolRound 在 messageEnds 之后，无法表达「工具后再答」——
++    // 用两次手动事件序列拼一轮：正文消息 → 工具往返 → 收尾正文消息。
++    const s = await makeSession();
++    s.push('查完继续答');
++    await tick();
++    respond(s.child, 'prompt');
++    emitEvent(s.child, { type: 'agent_start' });
++    emitEvent(s.child, {
++      type: 'message_end',
++      message: {
++        role: 'assistant',
++        content: [{ type: 'text', text: '先查文件' }],
++        stopReason: 'stop',
++      },
++    });
++    emitEvent(s.child, {
++      type: 'tool_execution_start',
++      toolName: 'bash',
++      toolCallId: 'call_a',
++      args: { command: 'ls' },
++    });
++    emitEvent(s.child, {
++      type: 'tool_execution_end',
++      toolName: 'bash',
++      toolCallId: 'call_a',
++      result: { stdout: 'ok' },
++      isError: false,
++    });
++    emitEvent(s.child, {
++      type: 'message_end',
++      message: {
++        role: 'assistant',
++        content: [{ type: 'text', text: '查完了，这是最终答复' }],
++        stopReason: 'stop',
++      },
++    });
++    emitEvent(s.child, {
++      type: 'turn_end',
++      message: { role: 'assistant', content: [], stopReason: 'stop' },
++    });
++    emitEvent(s.child, { type: 'agent_settled' });
++    await tick();
++
++    expect(s.results).toHaveLength(1);
++    expect(s.results[0]).toMatchObject({
++      subtype: 'success',
++      is_error: false,
++      result: '查完了，这是最终答复',
++    });
+ 
+     s.closeQueue();
+     await s.consumeP;
+diff --git a/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts b/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+index a6d74fe71..e5b8e3739 100644
+--- a/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
++++ b/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+@@ -241,6 +241,19 @@ function emitEvent(child: FakeChild, evt: Record<string, unknown>): void {
+   child.stdout.push(JSON.stringify(evt) + '\n');
+ }
+ 
++/** 2026-09-12 FR-2 配合：发一条带正文的 assistant message_end（使轮「有收尾全文」，
++ * 静默中断检测按 success 收敛；缺帧=合成 error，与本文件既有 success 断言冲突）。 */
++function emitFinalTextEnd(child: FakeChild, text: string): void {
++  emitEvent(child, {
++    type: 'message_end',
++    message: {
++      role: 'assistant',
++      content: [{ type: 'text', text }],
++      stopReason: 'stop',
++    },
++  });
++}
++
+ /** 给 stdout 推一个原始行（不 JSON 化——坏行用例需控制字节面）。 */
+ function emitRaw(child: FakeChild, line: string): void {
+   child.stdout.push(line + '\n');
+@@ -749,6 +762,7 @@ describe('get_state 握手 → session_started 合成', () => {
+     await tick();
+     respond(child, 'prompt');
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+ 
+@@ -801,6 +815,7 @@ describe('turn 生命周期', () => {
+         usage: { input: 11, output: 7, cacheRead: 3, cacheWrite: 2 },
+       },
+     });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+ 
+@@ -985,6 +1000,7 @@ describe('turn 生命周期', () => {
+     expect(readStdinJson(child).filter((l) => l.type === 'prompt')).toHaveLength(1);
+     expect(results).toHaveLength(0);
+ 
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(1);
+@@ -998,6 +1014,7 @@ describe('turn 生命周期', () => {
+ 
+     respond(child, 'prompt');
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(2);
+@@ -1054,6 +1071,7 @@ describe('turn 生命周期', () => {
+     // 收尾：应答第二条 prompt 并收敛（避免挂 30s 请求超时拖慢测试）
+     respond(child, 'prompt');
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+ 
+@@ -1092,6 +1110,7 @@ describe('turn 生命周期', () => {
+ 
+     respond(child, 'prompt');
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+ 
+@@ -1106,6 +1125,7 @@ describe('turn 生命周期', () => {
+ 
+     respond(child, 'prompt');
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+ 
+@@ -1248,6 +1268,7 @@ describe('turn 生命周期', () => {
+       type: 'turn_end',
+       message: { role: 'assistant', content: [], stopReason: 'stop' },
+     });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+ 
+@@ -1373,6 +1394,7 @@ describe('isStreaming 维护、steer 主通道与 interrupt', () => {
+     await expect(interruptP).resolves.toBe(false);
+ 
+     // 收尾：释放 streaming 镜像让 consume 自然退出
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     closeQueue();
+@@ -1409,6 +1431,7 @@ describe('isStreaming 维护、steer 主通道与 interrupt', () => {
+     expect(readStdinJson(child).filter((l) => l.type === 'prompt')).toHaveLength(0);
+ 
+     respond(child, 'steer');
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(1);
+@@ -1459,6 +1482,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
+ 
+     respond(child, 'steer');
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(1);
+@@ -1494,6 +1518,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
+     expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+ 
+     respond(child, 'follow_up');
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(1);
+@@ -1532,6 +1557,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
+     expect(prompt!.streamingBehavior).toBeUndefined();
+ 
+     respond(child, 'prompt');
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(1);
+@@ -1576,6 +1602,7 @@ describe('inject 三模式降级链（被拒单次重试）', () => {
+     expect(readStdinJson(child).filter((l) => l.type === 'steer')).toHaveLength(2);
+ 
+     respond(child, 'steer');
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(2);
+@@ -1620,6 +1647,7 @@ describe('agent_settled 收敛细化（response→agent_start 跨 chunk 竞态
+     expect(handle.isStreaming).toBe(true);
+ 
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+     expect(results).toHaveLength(1);
+@@ -1650,8 +1678,11 @@ describe('agent_settled 收敛细化（response→agent_start 跨 chunk 竞态
+     });
+     await tick();
+ 
++    // 2026-09-12 FR-2.3 语义更新：extension command 轮无 agent run/零活动 →
++    // 静默中断合成 error（误报容忍面，D-003：链上限兜底，nudge 后自答完成）。
++    // 本用例本职是「复核 false 直接收敛不挂死」，subtype 断言随新语义更新。
+     expect(results).toHaveLength(1);
+-    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
++    expect(results[0]).toMatchObject({ subtype: 'error_during_execution', is_error: true });
+ 
+     closeQueue();
+     await consumeP;
+@@ -1695,8 +1726,10 @@ describe('agent_settled 收敛细化（response→agent_start 跨 chunk 竞态
+     );
+     await tick(60);
+ 
++    // 2026-09-12 FR-2.3 语义更新：本竞态轮零活动 → 静默中断合成 error。
++    // 本用例本职是「事件计数守卫不死锁」（回归时以 vitest 超时暴露）。
+     expect(results).toHaveLength(1);
+-    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
++    expect(results[0]).toMatchObject({ subtype: 'error_during_execution', is_error: true });
+ 
+     closeQueue();
+     await consumeP;
+@@ -2770,6 +2803,7 @@ describe('退出收敛与容错', () => {
+     // 收尾：应答该 prompt 并收敛（避免挂 30s 请求超时拖慢测试）
+     respond(child, 'prompt');
+     emitEvent(child, { type: 'agent_start' });
++    emitFinalTextEnd(child, '收尾正文');
+     emitEvent(child, { type: 'agent_settled' });
+     await tick();
+ 
+diff --git a/sillyhub-daemon/tests/model-error/classifier.test.ts b/sillyhub-daemon/tests/model-error/classifier.test.ts
+index 5e208f371..fec8a1056 100644
+--- a/sillyhub-daemon/tests/model-error/classifier.test.ts
++++ b/sillyhub-daemon/tests/model-error/classifier.test.ts
+@@ -8,7 +8,8 @@
+  *   - 各 type 的 retryable 取值正确；
+  *   - code 从文本提取（[1310] / HTTP 状态码 / EN* 网络码）；
+  *   - 非模型错误（isError=false 且无错误文本）→ null；
+- *   - 非 claude agent → unknown（D-001 扩展点）；
++ *   - 全 agent 同规则归类（2026-09-12 泛化：pi 断流/pi rpc 超时/429 限额）；
++ *   - resetAt 解析（GLM 中文格式 +08:00；英文变体/残缺格式/非 quota → null）；
+  *   - 多文本来源（resultText / apiRetryError / assistantStdout / stderrText）拼接后命中。
+  *
+  * @module model-error/classifier.test
+@@ -256,14 +257,14 @@ describe('classifyModelError — 非错误 / 非 claude（task-02 约束）', ()
+     expect(result?.retryable).toBe(false);
+   });
+ 
+-  it('非 claude agent（codex）有错误 → unknown（D-001 扩展点）', () => {
++  it('非 claude agent（codex）有错误 → 同规则归类（2026-09-12 泛化，原 D-001 扩展点废止）', () => {
+     const result = classifyModelError({
+       agent: 'codex',
+       isError: true,
+       resultText: 'Request rejected (429) · 使用上限',
+     });
+-    // 非 claude 不走 claude 规则，统一兜底 unknown（扩展点，后续 agent 各自实现）。
+-    expect(result?.type).toBe('unknown');
++    // 规则体 provider 无关：429+上限 → quota_exceeded（原先落 unknown 无恢复面）。
++    expect(result?.type).toBe('quota_exceeded');
+     expect(result?.retryable).toBe(false);
+     expect(result?.raw).toContain('使用上限');
+   });
+@@ -278,6 +279,87 @@ describe('classifyModelError — 非错误 / 非 claude（task-02 约束）', ()
+   });
+ });
+ 
++describe('classifyModelError — 2026-09-12-chat-turn-auto-recovery 泛化与 resetAt', () => {
++  it('pi 断流主实证「Stream ended without finish_reason」→ provider_error + retryable=true', () => {
++    // 2026-09-11 会话 d4c29d95 实证（×8）：原先八类均不命中落 unknown。
++    const result = classifyModelError({
++      agent: 'pi',
++      isError: true,
++      resultText: 'Stream ended without finish_reason',
++    });
++    expect(result?.type).toBe('provider_error');
++    expect(result?.retryable).toBe(true);
++    // 断流文本不含 4xx/5xx/EN* 等码 → code=null（可读性：无伪码）。
++    expect(result?.code).toBeNull();
++  });
++
++  it('pi 静默中断合成文本 [silent stream truncation] → provider_error（driver 归类面确定性）', () => {
++    const result = classifyModelError({
++      agent: 'pi',
++      isError: true,
++      resultText:
++        '[silent stream truncation] 上一轮输出流中断，未产生收尾回复（输出流中断检测）',
++    });
++    expect(result?.type).toBe('provider_error');
++    expect(result?.retryable).toBe(true);
++  });
++
++  it('pi rpc 超时「response timeout」→ timeout（既有规则命中，无需新增）', () => {
++    const result = classifyModelError({
++      agent: 'pi',
++      isError: true,
++      resultText: 'pi rpc "prompt" response timeout (30000ms)',
++    });
++    expect(result?.type).toBe('timeout');
++    expect(result?.retryable).toBe(true);
++  });
++
++  it('GLM 1308 五小时上限（中文格式）→ quota_exceeded + resetAt 解析为 +08:00 ISO', () => {
++    // 2026-09-11 会话 d4c29d95 实证（07:09 四连 429）。
++    const result = classifyModelError({
++      agent: 'pi',
++      isError: true,
++      resultText:
++        '429 {"type":"error","error":{"type":"rate_limit_error","code":"1308","message":"[1308][已达到 5 小时的使用上限。您的限额将在 2026-09-12 10:03:59 重置。][20260912071637198cfe1a17c0446b]"},"request_id":"x"}',
++    });
++    expect(result?.type).toBe('quota_exceeded');
++    expect(result?.retryable).toBe(false);
++    expect(result?.code).toBe('1308');
++    // 只解析中文「将在/将于 … 重置」（实证文案为「将在」），北京时间固定 +08:00（D-002@v2）。
++    expect(result?.resetAt).toBe('2026-09-12T10:03:59+08:00');
++  });
++
++  it('quota 但英文 resets at 变体 → resetAt=null（无时区信息不猜测）', () => {
++    const result = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: '429 usage limit reached, resets at 2026-09-12 10:03:59',
++    });
++    expect(result?.type).toBe('quota_exceeded');
++    expect(result?.resetAt).toBeNull();
++  });
++
++  it('非 quota 类错误 resetAt 恒 null（仅 quota_exceeded 附加解析）', () => {
++    const result = classifyModelError({
++      agent: 'pi',
++      isError: true,
++      resultText: 'Stream ended without finish_reason',
++    });
++    expect(result?.type).toBe('provider_error');
++    expect(result?.resetAt).toBeNull();
++  });
++
++  it('中文格式残缺（无「重置」收尾）→ resetAt=null', () => {
++    const result = classifyModelError({
++      agent: 'pi',
++      isError: true,
++      resultText: '429 已达到使用上限，将于 2026-09-12 10:03:59',
++    });
++    expect(result?.type).toBe('quota_exceeded');
++    expect(result?.resetAt).toBeNull();
++  });
++});
++
+ describe('classifyModelError — 多文本来源拼接（task-02）', () => {
+   it('resultText 为空但 apiRetryError 命中限流 → rate_limited', () => {
+     const result = classifyModelError({
+@@ -308,12 +390,13 @@ describe('classifyModelError — 多文本来源拼接（task-02）', () => {
+     });
+     expect(result).not.toBeNull();
+     if (!result) return;
+-    // expects_from task-01：必须含全字段 type/code/message/retryable/hint/raw。
++    // expects_from task-01：必须含全字段 type/code/message/retryable/hint/raw/resetAt。
+     expect(typeof result.type).toBe('string');
+     expect(result.code === null || typeof result.code === 'string').toBe(true);
+     expect(typeof result.message).toBe('string');
+     expect(typeof result.retryable).toBe('boolean');
+     expect(result.hint === null || typeof result.hint === 'string').toBe(true);
+     expect(result.raw === null || typeof result.raw === 'string').toBe(true);
++    expect(result.resetAt === null || typeof result.resetAt === 'string').toBe(true);
+   });
+ });

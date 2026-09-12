@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-12-chat-turn-auto-recovery",
+  "generatedAt": "2026-09-12T10:01:20.283Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-12-chat-turn-auto-recovery",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 2,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-12-chat-turn-auto-recovery",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-12-chat-turn-auto-recovery",
+      "metrics": {
+        "backendEndpoints": 2783,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-12-chat-turn-auto-recovery",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "三类中断自动恢复全链端到端（瞬时干净轮排队重放打标/工具活动 nudge/quota 定时排期→sweep 派发打标/G10 超越取消/开关关闭全手动/静默中断 nudge），真实 DB 事务非 mock",
+      "command": "cd backend && uv run pytest -q --no-cov app/modules/daemon/tests/test_auto_recover_integration.py --log-file=../.sillyspec/changes/2026-09-12-chat-turn-auto-recovery/integration-run.log --log-file-level=INFO",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-12-chat-turn-auto-recovery/integration-run.log"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

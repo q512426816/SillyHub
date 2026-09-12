@@ -1,0 +1,404 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "fe7b8029687462a286e588b7d3a159fe7536244d",
+  "totals": {
+    "files": 48,
+    "additions": 2747,
+    "deletions": 265
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/daemon.md",
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/backend/modules/migrations.md",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-agent-log.md",
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/model-error.md",
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/agent/model.py",
+      "additions": 9,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/model_error.py",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_queue.py",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/__init__.py",
+      "additions": 0,
+      "deletions": 9,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+      "additions": 22,
+      "deletions": 186,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/scheduled_send.py",
+      "additions": 57,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/auto_resume.py",
+      "additions": 379,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/inject.py",
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/queue.py",
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_auth_transient_autoretry.py",
+      "additions": 14,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py",
+      "additions": 541,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_auto_recover_integration.py",
+      "additions": 385,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py",
+      "additions": 109,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/migrations/versions/20260912110000_add_scheduled_message_origin.py",
+      "additions": 33,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 33,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "docs/sillyspec/agent-log-ctx-attribution-mismatch.md",
+      "additions": 66,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/agent-log-hub-attribution-cross-session-contamination.md",
+      "additions": 58,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/pre-commit-autofix-swallows-commit.md",
+      "additions": 66,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/agent-log/__tests__/normalize.test.ts",
+      "additions": 50,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+      "additions": 77,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/agent-log/normalize.ts",
+      "additions": 11,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/agent-log/run-error-item.tsx",
+      "additions": 9,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx",
+      "additions": 53,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-auto-recover.test.ts",
+      "additions": 99,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/scheduled-messages-bar.tsx",
+      "additions": 45,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "additions": 34,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "additions": 34,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "additions": 63,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/hooks/use-message-queue.ts",
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/hooks/use-scheduled-messages.ts",
+      "additions": 5,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-queue.ts",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "additions": 8,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+      "additions": 52,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/model-error/classifier.ts",
+      "additions": 48,
+      "deletions": 26,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/model-error/types.ts",
+      "additions": 8,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts",
+      "additions": 179,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts",
+      "additions": 36,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/model-error/classifier.test.ts",
+      "additions": 88,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/pi-events.test.ts",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "76a45f6e6812ce74526ae520b526287542ee93c91205c01d591de0e1173f219d",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-12T09:55:05.505Z"
+}
