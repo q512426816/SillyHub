@@ -1,0 +1,148 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "4445fe221237324c9b3dee0ca727ec4db548ec3e",
+  "totals": {
+    "files": 16,
+    "additions": 862,
+    "deletions": 36
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/codex-settings.md",
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/pi-settings.md",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/agent-log-ctx-attribution-mismatch.md",
+      "additions": 66,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/agent-log-hub-attribution-cross-session-contamination.md",
+      "additions": 58,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/pre-commit-autofix-swallows-commit.md",
+      "additions": 66,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/src/atomic-write.ts",
+      "additions": 41,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/codex-settings.ts",
+      "additions": 20,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+      "additions": 70,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/persistence.ts",
+      "additions": 61,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/pi-settings.ts",
+      "additions": 6,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/provider-file-settings.ts",
+      "additions": 43,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/atomic-write.test.ts",
+      "additions": 88,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts",
+      "additions": 180,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/session-recovery.test.ts",
+      "additions": 65,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/provider-file-settings-reload.test.ts",
+      "additions": 85,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "f3f1df89e1c3d63597f2572ebc054d58b5e4e14d675005e12d7b631de256fee4",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-12T03:51:59.265Z"
+}

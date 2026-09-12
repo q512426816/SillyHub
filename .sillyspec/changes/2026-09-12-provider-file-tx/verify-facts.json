@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-12-provider-file-tx",
+  "generatedAt": "2026-09-12T04:01:18.877Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-12-provider-file-tx",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 2,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-12-provider-file-tx",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-12-provider-file-tx",
+      "metrics": {
+        "backendEndpoints": 594,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-12-provider-file-tx",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

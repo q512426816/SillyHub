@@ -1,0 +1,11 @@
+Starting SillyHub daemon (server=http://localhost:8000)...
+Runtime ID: e6099bf5-bdf1-4a70-8e0c-09544a60549d
+credentials_file_not_found path=C:\Users\qinyi\AppData\Local\Temp\tmp.gOiMikKROp\credentials.json
+cli: init_tools_detected [ 'claude', 'codex', 'opencode', 'openclaw', 'cursor' ]
+[2026-09-12 11:53:39.015] [daemon.starting] runtime_id=e6099bf5-bdf1-4a70-8e0c-09544a60549d
+[2026-09-12 11:53:41.400] [daemon.daemon_latest_fetch_failed] url=http://localhost:8000/daemon/latest.json error=fetch failed
+[2026-09-12 11:53:44.863] [daemon.agents_detected] agents=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 11:53:44.869] [daemon.runtime_lock_acquired] providers=["claude","codex","opencode","openclaw","pi","cursor","kimi"]
+[2026-09-12 11:53:46.246] [daemon.daemon_register_failed] daemon_local_id=e6099bf5-bdf1-4a70-8e0c-09544a60549d error=fetch failed
+[2026-09-12 11:53:46.250] [daemon.skill_manifest_unreachable] url=http://localhost:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+[2026-09-12 11:53:46.252] [daemon.started] runtime_id=e6099bf5-bdf1-4a70-8e0c-09544a60549d

@@ -32,6 +32,6 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
+| `_module-map.yaml` | 新增 atomic-write.ts 归属既有 sillyhub-daemon 模块域（无新模块）；三模块文档已同步（sillyhub-daemon.md 变更索引 + codex/pi-settings 注意事项） | done |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

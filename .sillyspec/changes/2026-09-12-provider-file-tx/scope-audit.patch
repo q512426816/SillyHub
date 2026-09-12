@@ -1,0 +1,996 @@
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+index f057fef38..b12745e9b 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+@@ -65,6 +65,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
+ - **2026-08-15-init-trigger-sillyspec-init**（init lease 触发 sillyspec init）：`handleInitLease`（spec-sync.ts）编序 5→6 步——pullSpecBundle 之后、postSpecSync 之前插入 `runSillyspecInit`（硬失败 abort，D-003）：spawn `sillyspec init --dir <rootPath> --spec-dir <specCacheRoot> --workspace-id <wsId> --no-skills --tool <逗号列表>`（shell:true + 60s 超时杀树 + spawnFn 依赖注入），落 .sillyspec-platform.json 平台指针 + CLAUDE.md 等指令注入 + spec 骨架。**spawn 前 3s 版本门控**（MIN_SILLYSPEC_VERSION_FOR_INIT=3.26.8，查询/解析失败 fail-safe 拦截，错误前缀 sillyspec_init_cli_too_old 带中文升级指引，不依赖 daemon 重启）。tools 来源：cli.ts 构造 TaskRunner 前 AgentDetector 独立探测映射 SILLYSPEC_VALID_TOOLS（6 值同名交集），空/失败兜底 ['claude']。**上传排除三处统一**：UPLOAD_EXCLUDE_TOP_BASE（含 projects）由 computeIncrementalOps/buildFullManifest/packSpecDir 共用 + isUploadExcludedPath 过滤缓存残留行防 delete op 误删（pull extractTar 不排除）。init 失败 error 前缀 sillyspec_init_failed 透传 stats.init_error。CLI 侧配套（sillyspec 仓 3.26.8）：--no-skills 开关、--tool 逗号/重复多值、平台模式整体跳过项目内 .sillyspec 清理（保 local.yaml 手调段）。
+ - **ql-20260820-007**（spec 策略两路径静默失效修复）：①`handleInitLease` 时序重排 pull → writeDaemonState（原状态文件先写会在缓存根占位 `.runtime/` 普通目录，阻塞 pullSpecBundle 的 repo-native `ensureSpecJunction` 普通目录守卫 + repo-mirrored cacheEmpty 首拷判定 → 两策略静默降级 platform-managed；且 pull 的 rm -rf 会删掉先写的状态文件）；repo-native 时状态文件经 junction 落源项目 `.sillyspec/.runtime`（gitignored，三策略读写路径 resolveSpecDir(ws)/.runtime 统一）。②task-runner batch agent 路径 `pullSpecBundle` 补传 `strategy: ctx.specStrategy, rootPath: ctx.rootPath`（原只传 existingSpecRoot → 永远 platform-managed pull，rm -rf 拆除 interactive scan 已建 junction，repo-native 永久退化）。③`bumpLocalSpecVersion` 状态文件缺失/损坏时完整重建 2 字段（原「缺失跳过不创建」在 pull rm -rf 后保鲜永久失效，每次任务全量 pull）。副作用契约变更：pull 失败返回 `daemonState: null`（状态文件后置未写）。回归：test_init_lease 新 7 用例（init 策略分支/状态文件幸存/bump 重建/batch 透传）+ test_spec_version_refresh 2 用例改新契约；daemon 全量 2453 绿 + tsc 干净。
+ ## 变更索引
++- 2026-09-12-provider-file-tx | 供应商切换文件层事务性（24h 审查 M-7 修复）：①`src/atomic-write.ts` writeFileAtomic（tmp+fsync+rename 顶替，Windows=MoveFileEx REPLACE_EXISTING，失败清 tmp）——codex 两文件+pi 三文件+宿主镜像拷贝六写盘点全部原子化（rollout 拷贝按划界不纳入）；②ForReload 落 `.sillyhub-managed` 生效标记（分支一后置 best-effort；分支四标记先行——标记失败跳过镜像含删除动作，R-03 双失败从根消除）；③reload 事务性三改造（引擎门 provider 维度值比较判据、resume 守卫前移=缺 key 零文件写入、catch 以旧形态重跑 ForReload+空返回删标记）；④restore null+codex 探测三态化（标记在=managed / 无标记有 auth|config=legacy 兼容补落标记 / 皆无=零动作——迁移钩子只建目录恒落第三态，F3 假阳性消除）。测试：九套件 189 用例全绿+typecheck 0。
+ - ql-20260911-027-13b6 | vendored ask-user 扩展（pi AskUser 弹窗缺失的发起端补全，会话 d4c29d95 实证：pi 会话模型只能文字罗列问题、session_dialog_requests 零行——2026-09-09-askuser-pi-cursor 只桥接了 extension_ui_request 的接收半，但 pi 本体无任何模型可调提问工具、daemon 也只挂 subagent 扩展，弹窗链路无发起端）：①新增自研扩展 `vendor/pi-extensions/ask-user/index.ts`——注册模型可调 `AskUserQuestion` 工具（有 options 走 ctx.ui.select、无 options 走 ctx.ui.input；**不传 timeout** 对齐平台 dialog 永久等待语义；hasUI=false/取消/空答均降级明确文本告知模型），工具名对齐 claude 内置名 → daemon/backend 双端 tool-kind 分类器零改动归 ask、backend scan 提示词「必须调用 AskUserQuestion」对 pi 直接成立；②pi-rpc-driver 抽共用 resolveVendoredExtensionPath + piVendoredAskUserExtensionPath（降级开关 SILLYHUB_PI_ASK_USER_EXTENSION=off，语义同 subagent）+ spawn 追加第二个 `--extension`（pi CLI 支持多次）；③vendor README 补自研件行。测试：pi-rpc-driver 78 passed（+5：路径解析三态/双扩展 spawn 参数面含顺序断言）；tsc 0；本机真实 pi CLI 装载冒烟过（对照实验：坏扩展会报 ParseError，方法有效）。
+ - ql-20260911-024-9098 | 平台命令结果回显提速第一级（用户反馈「执行很慢，基本都要十秒以上」——实测命令本体 0.2-0.7s，大头是结果回显两级 15s 定时器）：daemon.ts `_runSillySpecCommand` 忙拒落槽与执行完成（finally 统一出口）均立即补发一次心跳——新私有方法 `_nudgeHeartbeatAfterCommandResult(action, phase)`（debug 日志 sillyspec_command_heartbeat_nudge）`void _sendHeartbeatOnce()` fire-and-forget，结果不再等下一个 15s 心跳节拍。安全性：_sendHeartbeatOnce 全路径 catch 不 reject（不阻塞 WS 接收）；未注册 runtime 时其内部 return false 静默跳过；与 15s 循环短暂重叠无害（心跳是无状态全量上报，backend 字段级 last-write-wins）。第二级（前端下发后 5s×3 加速轮询）见 frontend.md 同 ql 条目。测试：sillyspec-platform-command.test.ts +3（WS 下发完成即补发且第 7 参携带新结果/忙拒路径同补发+放行后首条完成再补发共两次/未注册 runtime nudge 静默 no-op）共 41 绿；近邻 daemon-heartbeat-sillyspec + sillyspec-conflict-snapshot 49 绿；tsc 0。
+ - ql-20260911-003-355a（24h 审查 P2 修复·daemon 三件）| ① fileDiff 256KB 截断代理对安全化——新增 `truncateUtf16Safe(str, maxChars)`（sillyspec-manager.ts 导出）：String.slice 恰切在代理对中间时尾字符为 lone surrogate，backend Python 侧 ensure_ascii=False UTF-8 编码抛 UnicodeEncodeError → HTTP 500（星面字符 diff 边界约半概率）；截在高代理项（U+D800-DBFF）时丢弃该项。② zcode SQLite 读取内存预算——readZcodeSqliteMessages 遍历行累计 data code unit 超 `DEFAULT_MAX_CONTENT_BYTES`（20MB，与文件路径 lstat 预检同源常量；opts.maxContentUnits 注入测试）返回 too_large，不再全量物化后才切 200 段窗口。③ zcode 分派存在性门——host-fs-handler zcode 先库后文件分派前先 `lstat(abs)`：上报 rollout 文件必须真实存在才进库读取器（log_path 可经 platform_sync 自登记任意路径；文件缺失回落文件流程最终 not_found）。④ pi/cursor 受控 reload 基线回收——`_reloadSession` 成功后经新可选 `SessionManagerDeps.onSessionReloaded` 通知 daemon 删 `_modelUsageBaselineBySession[sessionId]`（快照 per-handle 归零后残留基线致恢复首轮差分少记）。测试：sillyspec-file-diff +1（代理对边界）/read-zcode-sqlite +1（预算）/zcode-sqlite-dispatch ZD1/ZD3/ZD6 改写/session-manager-config-switch CFG-1 +reload 回调断言，定向 99 passed；tsc 0。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md b/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md
+index 77ea18254..8b7c5714b 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md
+@@ -35,6 +35,14 @@ writeCodexHome({codexHome, provider, daemonApiKey}):
+ ```
+ 
+ ## 注意事项
++
++- **写入一律原子**（2026-09-12-provider-file-tx D-003@v1）：auth.json/config.toml/宿主镜像
++  拷贝走 `atomic-write.ts` writeFileAtomic（tmp+fsync+rename）——直接 writeFile 会留半截
++  文件，config.toml 截断后保守合并保留残行持续产出非法 TOML。migrate rollout 拷贝例外
++  （数据搬运非配置，幂等可重拷）。
++- **`.sillyhub-managed` 生效标记**（D-004@v2）：ForReload 分支四镜像**标记先行**（标记
++  写失败跳过整个镜像含删除动作）；restore 探测消费该标记（详见 provider-file-settings
++  模块）。改写盘/镜像序时保持「删除类动作晚于标记持久化」不变量。
+ - CLI 版本基线（R-03）：写盘形状以 **codex 0.147.0** 实测为 golden——`wire_api = "responses"` 是自定义 provider 唯一合法值（0.147.0 已移除 "chat"，配置加载即报错）；CLI 升级若改文件格式，由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 codex-cli 0.147.0，mock 全链 exit=0）。
+ - spike golden 证据：`.sillyspec/changes/2026-09-10-multi-provider-injection/spike/a2b-config.toml` 与 `a2-auth.json`（产物逐字段同形）；冒烟测试对该 golden 做整文件逐字段断言。
+ - 自定义 provider 不强制 key（spike A3a：无 key 请求照发、Authorization 空）→ key 缺省不写 auth.json 是合法形态而非错误。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md b/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
+index 1c1494b30..fe06c5d15 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
+@@ -36,6 +36,10 @@ writePiDir({piDir, provider}):
+ ```
+ 
+ ## 注意事项
++
++- **写入一律原子**（2026-09-12-provider-file-tx D-003@v1）：auth.json/models.json/
++  settings.json 三文件走 `atomic-write.ts` writeFileAtomic（tmp+fsync+rename）——直接
++  writeFile 崩溃留半截 JSON。pi 无 null 探测/无镜像删除面，不涉及生效标记先行序。
+ - CLI 版本基线（R-03）：写盘形状以 **pi 0.81.1** 实测为 golden——`providers.<key>.api` 按 api_format 映射（ql-20260911-029 起 anthropic 形态 = `"anthropic-messages"`，Anthropic SDK 打 `{baseUrl}/v1/messages` + `x-api-key` 头，智谱真实端点实测 exit=0；spike B1 的 openai-completions 形态仅适用于 OpenAI 兼容端点，当前词表无该形态合法入口）；auth.json 官方形状是 `{"type": "api_key", "key": ...}`（`{"apiKey": ...}` 投影形状实测被拒：`No API key found for the selected model.`，不采用）；CLI 升级漂移由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 0.81.1，mock 全链 exit=0）。
+ - spike golden 证据：`.sillyspec/changes/2026-09-10-multi-provider-injection/spike/b1-models.json`、`b1b-auth.json`、`b1-settings.json`；冒烟测试对 b1 系 golden 做逐字段断言。
+ - 与 env 层共存（R-04）：pi key 解析优先级 CLI `--api-key` > auth.json > env > models.json 内联 apiKey——文件层与 env 层并存时 auth.json 文件值压制 env 同键值，两层叠加无歧义路由；官方端点（base_url 空）本模块零写入，对 env 层零干扰。
+diff --git a/sillyhub-daemon/src/atomic-write.ts b/sillyhub-daemon/src/atomic-write.ts
+new file mode 100644
+index 000000000..ad22377da
+--- /dev/null
++++ b/sillyhub-daemon/src/atomic-write.ts
+@@ -0,0 +1,41 @@
++/**
++ * 原子写原语——per-session 供应商配置写盘的事务性基座（D-003@v1）。
++ *
++ * 语义：写 `<path>.tmp-<pid>-<rand>` → fsync → rename 顶替。任一观察时刻
++ * 目标文件要么旧全文要么新全文；进程崩溃最坏残留 tmp（本函数失败路径
++ * best-effort 清理，且 tmp 名带随机段、残留不挡后续写入）。rename 在 POSIX
++ * 原子；Windows 走 MoveFileEx(REPLACE_EXISTING)，对已存在目标同样顶替
++ * （win32 顶替语义由 tests/atomic-write.test.ts 本机锁定）。
++ *
++ * 适用边界（design 划界）：配置文件写入（auth.json/config.toml/models.json/
++ * settings.json/宿主镜像拷贝）；数据搬运（如 rollout thread 拷贝）不适用——
++ * 截断只损单条副本且源可重拷，幂等重试可恢复。
++ */
++
++import { randomUUID } from 'node:crypto';
++import { open, rename, unlink } from 'node:fs/promises';
++
++export async function writeFileAtomic(
++  path: string,
++  data: string,
++  encoding: BufferEncoding = 'utf-8',
++): Promise<void> {
++  const tmpPath = `${path}.tmp-${process.pid}-${randomUUID().slice(0, 8)}`;
++  try {
++    const handle = await open(tmpPath, 'w');
++    try {
++      await handle.writeFile(data, encoding);
++      await handle.sync();
++    } finally {
++      await handle.close();
++    }
++    await rename(tmpPath, path);
++  } catch (e) {
++    try {
++      await unlink(tmpPath);
++    } catch {
++      /* best-effort 清理：tmp 可能从未建成（open 即败）或已被并发清走 */
++    }
++    throw e;
++  }
++}
+diff --git a/sillyhub-daemon/src/codex-settings.ts b/sillyhub-daemon/src/codex-settings.ts
+index 4e4f99a54..2ca597a57 100644
+--- a/sillyhub-daemon/src/codex-settings.ts
++++ b/sillyhub-daemon/src/codex-settings.ts
+@@ -72,9 +72,11 @@
+  * @module codex-settings
+  */
+ 
+-import { copyFile, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
++import { randomUUID } from 'node:crypto';
++import { copyFile, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
+ import { homedir } from 'node:os';
+ import { dirname, join, relative } from 'node:path';
++import { writeFileAtomic } from './atomic-write.js';
+ import type { ProviderConfig } from './types.js';
+ 
+ /** 写盘器入参（design 接口定义；风格对齐 claude-settings.ts 纯函数 + 显式路径入参）。 */
+@@ -322,7 +324,7 @@ async function writeAuthJson(dir: string, key: string): Promise<void> {
+     }
+   }
+   obj.OPENAI_API_KEY = key;
+-  await writeFile(authPath, JSON.stringify(obj, null, 2), 'utf-8');
++  await writeFileAtomic(authPath, JSON.stringify(obj, null, 2));
+ }
+ 
+ /**
+@@ -363,7 +365,7 @@ export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void>
+     }
+     const configPath = join(codexHome, CONFIG_FILENAME);
+     const existing = await readTextIfExists(configPath);
+-    await writeFile(configPath, mergeConfigToml(existing, values), 'utf-8');
++    await writeFileAtomic(configPath, mergeConfigToml(existing, values));
+   } catch (e) {
+     console.error('codex_home_write_failed', {
+       codexHome,
+@@ -414,7 +416,21 @@ export async function mirrorCodexHostAuth(codexHome: string): Promise<void> {
+     const src = join(hostHome, filename);
+     const dest = join(codexHome, filename);
+     try {
+-      await copyFile(src, dest);
++      // 原子拷入（D-003@v1）：copy 到 tmp 再 rename 顶替——镜像中途崩溃不留半截
++      // auth.json/config.toml（tmp 名带随机段，失败 best-effort 清理后按原错误走
++      // 下方 ENOENT/其它错误分支）。
++      const tmpDest = `${dest}.tmp-${process.pid}-${randomUUID().slice(0, 8)}`;
++      try {
++        await copyFile(src, tmpDest);
++        await rename(tmpDest, dest);
++      } catch (copyErr) {
++        try {
++          await rm(tmpDest, { force: true });
++        } catch {
++          /* best-effort 清理 */
++        }
++        throw copyErr;
++      }
+     } catch (e) {
+       if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
+         // 宿主无该文件：删 per-session 同名文件（force 容忍本就不存在）。
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 12436f914..5ae058c14 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -85,9 +85,21 @@ import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
+ // join / daemonStateDir 派生确定性 per-session 路径 `<daemonStateDir()>/codex/<sessionId>`
+ //（与 task-runner.ts spawn 侧同口径）。
+ import { join } from 'node:path';
++import { rm } from 'node:fs/promises';
+ import { daemonStateDir } from '../config.js';
++
++/**
++ * 2026-09-12-provider-file-tx D-005@v2：reload 引擎白名单（provider 维度门）。
++ * 仅 provider 切换载荷（opts.providerConfig !== undefined）判门；config-only 路径
++ * （人格/配置切换）不受限——cursor 的 reloadWithConfig 行为保持。口径与前端
++ * frontend/src/lib/provider-caps.ts PROVIDER_SWITCH_ENGINES 对齐（改任一侧须同步）。
++ */
++const PROVIDER_RELOAD_ENGINES: ReadonlySet<string> = new Set(['claude', 'codex', 'pi']);
+ import { migrateCodexThreadFromHost } from '../codex-settings.js';
+-import { applyProviderFileSettingsForReload } from '../provider-file-settings.js';
++import {
++  applyProviderFileSettingsForReload,
++  MANAGED_MARKER_FILENAME,
++} from '../provider-file-settings.js';
+ // 2026-09-11-provider-adapter-registry task-03（FR-03）：reload 合并块门控改读
+ // 聚合表元数据（INTERACTIVE_PROVIDERS——fileSettings 是否 writer；详见下方
+ // hasProviderFileWriter 与 _reloadSessionNow 合并块内注释）。
+@@ -1777,6 +1789,21 @@ export class SessionManager {
+         ? opts.providerConfig
+         : (state.providerConfig ?? null);
+ 
++    // D-005@v2 引擎门：provider 切换载荷 + 白名单外引擎 → 显式 fail-loud（恢复
++    // 1e4bb818f 删除 claude-only 守卫前的拒绝语义，口径改白名单；cursor 曾被静默
++    // 卷入未验证的 reload 路径——审查 F4）。
++    // 载荷判据=「携带 providerConfig 且与当前值实际不同」（reloadWithConfig 带
++    // 档案时也会传派生 providerConfig——与现值相同属 config-only，不判门）。
++    const providerSwitchPayload =
++      opts.providerConfig !== undefined &&
++      JSON.stringify(opts.providerConfig ?? null) !==
++        JSON.stringify(state.providerConfig ?? null);
++    if (providerSwitchPayload && !PROVIDER_RELOAD_ENGINES.has(state.provider)) {
++      throw new Error(
++        `_reloadSession: provider 切换不支持引擎 ${state.provider}（session ${sessionId}；白名单 claude/codex/pi）`,
++      );
++    }
++
+     // 进入时快照旧句柄/env/config 供失败回滚（R-01）。句柄是引用，旧对象本身会被
+     // close，但保留引用让 catch 区分「reload 失败 → 用旧引用占位，不 nil」。
+     const oldHandle =
+@@ -1784,6 +1811,8 @@ export class SessionManager {
+     const oldEnv = state.env;
+     const oldProviderConfig = state.providerConfig;
+     const oldSystemPrompt = state.systemPrompt;
++    // D-002@v2：文件层回滚标记——写盘块内置位，catch 侧据此以旧形态重跑 ForReload。
++    let fileLayerTouched = false;
+ 
+     try {
+       // ── buildSpawnEnv 构造新 env（provider_config null 时第 0 层跳过 → 本机凭证）──
+@@ -1849,6 +1878,17 @@ export class SessionManager {
+       // 文件层写盘 + env 合并；claude / cursor / 未知 provider（表无条目）零动作，
+       // 逐类等价（漏改则新引擎 reload 丢文件层 env——Grill 发现）。块内 codex 迁移
+       // 钩子为 per-engine 差异，按 design 非目标保留 provider === 'codex' 原判定。
++      // ── ③ 校验 resume key 必需（D-001@v1 守卫前移：先于文件层写盘——缺 key 时
++      // 零文件写入直接抛，消除「先覆盖目录再发现不能 reload」路径，审查 F1 前半）──
++      // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
++      // 是 SDK jsonl 恢复 key。缺失说明首 turn 未完成，无可恢复 jsonl → 拒绝 reload
++      //（避免 SDK 拿空 resume 启动全新会话替换语义——那是 end + create 流程，不是 reload）。
++      if (!state.agentSessionId) {
++        throw new Error(
++          `_reloadSession: missing agentSessionId (session ${sessionId} 首 turn system/init 未完成,无 jsonl 可 resume)`,
++        );
++      }
++
+       if (hasProviderFileWriter(state.provider)) {
+         // codex 迁移钩子（FR-05，仅 codex）：宿主凭证起步会话（oldEnv 无 CODEX_HOME）
+         // 首次切平台供应商 → 迁移 thread rollout 历史到 per-session 目录，否则新
+@@ -1874,6 +1914,7 @@ export class SessionManager {
+         // priorEnv 断言：state.env 是 NodeJS.ProcessEnv（索引值 string | undefined），
+         // 但 env 快照实际由 buildSpawnEnv 产出（值恒为 string）；ForReload 内部经
+         // nonEmptyStr 逐键判空，undefined 值与缺键同义，断言仅对齐声明类型。
++        fileLayerTouched = true;
+         const fileEnv = await applyProviderFileSettingsForReload({
+           sessionKey: state.sessionId,
+           provider: providerConfig,
+@@ -1883,15 +1924,6 @@ export class SessionManager {
+         Object.assign(newEnv, fileEnv);
+       }
+ 
+-      // ── ③ 校验 resume key 必需 ──
+-      // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
+-      // 是 SDK jsonl 恢复 key。缺失说明首 turn 未完成，无可恢复 jsonl → 拒绝 reload
+-      //（避免 SDK 拿空 resume 启动全新会话替换语义——那是 end + create 流程，不是 reload）。
+-      if (!state.agentSessionId) {
+-        throw new Error(
+-          `_reloadSession: missing agentSessionId (session ${sessionId} 首 turn system/init 未完成,无 jsonl 可 resume)`,
+-        );
+-      }
+ 
+       // ── ④ _buildDriverOptions 构造 driverOpts（透传 cwd / canUseTool / mcpServers / resume / env）──
+       const driver = state.driver ?? this._drivers.claude;
+@@ -2015,6 +2047,34 @@ export class SessionManager {
+       state.env = oldEnv;
+       state.providerConfig = oldProviderConfig;
+       state.systemPrompt = oldSystemPrompt;
++      // D-002@v2 文件层回滚：写盘已越过时以旧形态重跑 ForReload（绝不抛契约 →
++      // 回滚动作自身安全；codex null+prior 键走宿主镜像分支恢复宿主态，pi null /
++      // undefined 返 {}）。返回空对象（未建立任何文件层键）且目录可能存在时
++      // best-effort 删生效标记——防 restore 把残留新供应商产物误判为切换曾生效。
++      if (fileLayerTouched) {
++        try {
++          const rollbackEnv = await applyProviderFileSettingsForReload({
++            sessionKey: sessionId,
++            provider: oldProviderConfig,
++            daemonApiKey: this.deps.daemonApiKey ?? null,
++            priorEnv: oldEnv as Record<string, string> | undefined,
++          });
++          if (Object.keys(rollbackEnv).length === 0) {
++            for (const engineDir of ['codex', 'pi']) {
++              await rm(
++                join(daemonStateDir(), engineDir, sessionId, MANAGED_MARKER_FILENAME),
++                { force: true },
++              ).catch(() => undefined);
++            }
++          }
++        } catch (rollbackErr) {
++          // eslint-disable-next-line no-console
++          console.error(
++            `[session-manager] _reloadSession file-layer rollback failed (session=${sessionId})`,
++            rollbackErr,
++          );
++        }
++      }
+       // eslint-disable-next-line no-console
+       console.error(
+         `[session-manager] _reloadSession failed (session=${sessionId}), 保留旧句柄降级`,
+diff --git a/sillyhub-daemon/src/interactive/session-manager/persistence.ts b/sillyhub-daemon/src/interactive/session-manager/persistence.ts
+index 40591bd53..c8333ccca 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/persistence.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/persistence.ts
+@@ -41,11 +41,15 @@ import type { SpawnCredentialManager } from '../../spawn-env.js';
+ // 目录探测后镜像，helper 在 provider-file-settings.ts / codex-settings.ts）。
+ // stat / join / daemonStateDir 用于探测确定性 per-session 目录
+ // `<daemonStateDir()>/codex/<sessionId>/`（与 spawn/reload 同口径派生路径）。
+-import { stat } from 'node:fs/promises';
++import { mkdir, stat } from 'node:fs/promises';
+ import { join } from 'node:path';
++import { writeFileAtomic } from '../../atomic-write.js';
+ import { daemonStateDir } from '../../config.js';
+ import { mirrorCodexHostAuth } from '../../codex-settings.js';
+-import { applyProviderFileSettingsForReload } from '../../provider-file-settings.js';
++import {
++  applyProviderFileSettingsForReload,
++  MANAGED_MARKER_FILENAME,
++} from '../../provider-file-settings.js';
+ // 2026-09-11-provider-adapter-registry task-03（FR-03）：restore 门控与 codex 探测
+ // 目录类型判定改读聚合表元数据（INTERACTIVE_PROVIDERS 的 fileSettings writer /
+ // perSessionDir；详见下方 restoreAndReconnect 内注释）。
+@@ -386,18 +390,65 @@ export async function restoreAndReconnect(
+         // mirrorCodexHostAuth / CODEX_HOME 注入探测体不动。
+         const codexHome = join(daemonStateDir(), fileWriter.dirName, state.sessionId);
+         try {
+-          if ((await stat(codexHome)).isDirectory()) {
+-            // mirrorCodexHostAuth 自身绝不抛；防御 catch 兜底（镜像成败不影响
+-            // 下方 env 注入）。
+-            try {
+-              await mirrorCodexHostAuth(codexHome);
+-            } catch {
+-              // 防御性兜底：零动作，不阻断恢复。
++          // 2026-09-12-provider-file-tx D-004@v2：探测三态化——
++          //   标记在 = 切换曾真实生效 → managed；
++          //   无标记但 auth.json/config.toml 在 = legacy 兼容（修复前存量已切换
++          //     会话，行为与旧「目录存在」判定逐字一致）→ managed；
++          //   皆无 = 零动作（宿主语义；迁移钩子只建目录+sessions/ 恒落此态，
++          //     F3「目录存在即 managed」假阳性从根消除）。
++          const markerPath = join(codexHome, MANAGED_MARKER_FILENAME);
++          const markerExists = await stat(markerPath).then(
++            () => true,
++            () => false,
++          );
++          const legacyHit = markerExists
++            ? false
++            : await Promise.all([
++                stat(join(codexHome, 'auth.json')).then(
++                  () => true,
++                  () => false,
++                ),
++                stat(join(codexHome, 'config.toml')).then(
++                  () => true,
++                  () => false,
++                ),
++              ]).then(([authHit, configHit]) => authHit || configHit);
++          if (markerExists || legacyHit) {
++            if (legacyHit) {
++              // eslint-disable-next-line no-console
++              console.info('codex_restore_legacy_marker_missing', { codexHome });
++            }
++            // 标记先行不变量（D-004@v2）：legacy 无标记 → 删除类镜像动作前先补落
++            // 标记（失败跳过镜像，env 注入保持——目录旧产物=等同未切，与 ForReload
++            // 分支四同序）。
++            let markerOk = true;
++            if (!markerExists) {
++              try {
++                await mkdir(codexHome, { recursive: true });
++                await writeFileAtomic(
++                  markerPath,
++                  JSON.stringify({
++                    envKey: 'CODEX_HOME',
++                    switchedAt: new Date().toISOString(),
++                  }),
++                );
++              } catch {
++                markerOk = false;
++              }
++            }
++            if (markerOk) {
++              // mirrorCodexHostAuth 自身绝不抛；防御 catch 兜底（镜像成败不影响
++              // 下方 env 注入）。
++              try {
++                await mirrorCodexHostAuth(codexHome);
++              } catch {
++                // 防御性兜底：零动作，不阻断恢复。
++              }
+             }
+             Object.assign(restoreEnv, { CODEX_HOME: codexHome });
+           }
+         } catch {
+-          // stat ENOENT / IO 异常 = 目录不存在 → 零动作。
++          // stat / mkdir IO 异常 → 零动作（宿主语义）。
+         }
+       }
+     }
+diff --git a/sillyhub-daemon/src/pi-settings.ts b/sillyhub-daemon/src/pi-settings.ts
+index 9f3e18691..446ef9b05 100644
+--- a/sillyhub-daemon/src/pi-settings.ts
++++ b/sillyhub-daemon/src/pi-settings.ts
+@@ -56,8 +56,10 @@
+  * @module pi-settings
+  */
+ 
+-import { readFile, writeFile } from 'node:fs/promises';
++import { readFile } from 'node:fs/promises';
+ import { join } from 'node:path';
++
++import { writeFileAtomic } from './atomic-write.js';
+ import type { ProviderConfig } from './types.js';
+ 
+ /** 写盘器入参（design 接口定义；风格对齐 codex-settings.ts 纯函数 + 显式路径入参）。 */
+@@ -155,7 +157,7 @@ async function writeAuthJson(piDir: string, apiKey: string): Promise<void> {
+   const authPath = join(piDir, AUTH_FILENAME);
+   const auth = await readJsonObject(authPath, AUTH_FILENAME);
+   auth[PROVIDER_KEY] = { type: 'api_key', key: apiKey };
+-  await writeFile(authPath, JSON.stringify(auth, null, 2), 'utf-8');
++  await writeFileAtomic(authPath, JSON.stringify(auth, null, 2));
+ }
+ 
+ /**
+@@ -198,7 +200,7 @@ async function writeModelsJson(
+     models: [{ id: modelId }],
+   };
+   doc.providers = target;
+-  await writeFile(modelsPath, JSON.stringify(doc, null, 2), 'utf-8');
++  await writeFileAtomic(modelsPath, JSON.stringify(doc, null, 2));
+ }
+ 
+ /**
+@@ -210,7 +212,7 @@ async function writeSettingsJson(piDir: string, modelId: string): Promise<void>
+   const settings = await readJsonObject(settingsPath, SETTINGS_FILENAME);
+   settings.defaultProvider = PROVIDER_KEY;
+   settings.defaultModel = modelId;
+-  await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
++  await writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2));
+ }
+ 
+ /**
+diff --git a/sillyhub-daemon/src/provider-file-settings.ts b/sillyhub-daemon/src/provider-file-settings.ts
+index d4307f8b8..f6dc7ae46 100644
+--- a/sillyhub-daemon/src/provider-file-settings.ts
++++ b/sillyhub-daemon/src/provider-file-settings.ts
+@@ -14,6 +14,7 @@
+ 
+ import { mkdir } from 'node:fs/promises';
+ import { join } from 'node:path';
++import { writeFileAtomic } from './atomic-write.js';
+ import { daemonStateDir } from './config.js';
+ import { mirrorCodexHostAuth } from './codex-settings.js';
+ // task-02（2026-09-11-provider-adapter-registry）：分派数据源——聚合表
+@@ -25,6 +26,37 @@ import {
+ } from './interactive/providers.js';
+ import type { ProviderConfig } from './types.js';
+ 
++// ── 生效标记（2026-09-12-provider-file-tx D-004@v2）─────────────────────────
++
++/** per-session 目录的「切换曾真实生效」标记文件名（点前缀对 CLI 透明）。 */
++export const MANAGED_MARKER_FILENAME = '.sillyhub-managed';
++
++/**
++ * 落生效标记（内容仅排障用非契约：envKey + switchedAt）。
++ *
++ * 返回是否成功——分支四（codex-null 镜像）以返回值决定是否执行镜像（标记先行，
++ * 删除类动作只发生在标记持久化之后，R-03 双失败从根消除）；分支一（非 null 写盘）
++ * 后置调用、失败仅 warn（写盘主体已成功，legacy 探测判据可兜）。
++ */
++async function writeManagedMarker(dir: string, envKey: string): Promise<boolean> {
++  try {
++    // 目录可能尚未建（镜像路径的 mkdir 原在 mirrorCodexHostAuth 内部，标记先行
++    // 后由本处负责建）。
++    await mkdir(dir, { recursive: true });
++    await writeFileAtomic(
++      join(dir, MANAGED_MARKER_FILENAME),
++      JSON.stringify({ envKey, switchedAt: new Date().toISOString() }),
++    );
++    return true;
++  } catch (e) {
++    console.warn('provider_file_marker_write_failed', {
++      dir,
++      error: (e as Error)?.message ?? String(e),
++    });
++    return false;
++  }
++}
++
+ // ── provider 文件层分派（task-03 / 2026-09-10-multi-provider-injection）──────────
+ 
+ /** 空串 / null / undefined 一律视为未设置（对齐 codex/pi-settings 同名判式）。 */
+@@ -189,8 +221,15 @@ export async function applyProviderFileSettingsForReload(
+       //（task-02：null 分支无 agent_kind 可查表，codex 镜像目标为 per-engine
+       // 差异按 design 非目标保留原 'codex' 字面量——仅 codex 有「丢目录=断
+       // resume」的镜像语义，pi null = 回宿主即语义本身。）
++      const codexHome = join(daemonStateDir(), 'codex', sessionKey);
++      // D-004@v2 标记先行：标记写失败则跳过整个镜像（含删除动作）直接返 prior
++      //（「镜像失败=等同未切」语义延伸）——删除类动作只发生在标记持久化之后。
++      const markerOk = await writeManagedMarker(codexHome, 'CODEX_HOME');
++      if (!markerOk) {
++        return { CODEX_HOME: priorCodexHome };
++      }
+       try {
+-        await mirrorCodexHostAuth(join(daemonStateDir(), 'codex', sessionKey));
++        await mirrorCodexHostAuth(codexHome);
+       } catch (e) {
+         console.error('provider_file_reload_codex_mirror_failed', {
+           session_key: sessionKey,
+@@ -234,6 +273,9 @@ export async function applyProviderFileSettingsForReload(
+       // 分支一：与 spawn 版同分派同产物（mkdir → write → 单键 env）。
+       await mkdir(dir, { recursive: true });
+       await writer.write({ dir, provider, daemonApiKey });
++      // D-004@v2 标记后置 best-effort：写盘主体已成功，标记失败仅 warn（helper
++      // 内部吞错），legacy 探测判据（auth/config 存在）可兜住无标记场景。
++      await writeManagedMarker(dir, writer.envKey);
+       return { [writer.envKey]: dir };
+     } catch (e) {
+       // 分支二：目录里旧供应商产物未动 = 新进程沿用旧供应商，行为等同未切。
+diff --git a/sillyhub-daemon/tests/atomic-write.test.ts b/sillyhub-daemon/tests/atomic-write.test.ts
+new file mode 100644
+index 000000000..fb9311656
+--- /dev/null
++++ b/sillyhub-daemon/tests/atomic-write.test.ts
+@@ -0,0 +1,88 @@
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++// rename 可注入失败（失败保留旧全文用例）；默认透传真实实现。
++const renameHook = vi.hoisted(() => ({ failNext: false }));
++vi.mock('node:fs/promises', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:fs/promises')>();
++  return {
++    ...actual,
++    rename: (...args: Parameters<typeof actual.rename>) => {
++      if (renameHook.failNext) {
++        renameHook.failNext = false;
++        return Promise.reject(new Error('rename 注入失败（测试）'));
++      }
++      return actual.rename(...args);
++    },
++  };
++});
++
++const { writeFileAtomic } = await import('../src/atomic-write.js');
++
++let dir: string;
++
++async function freshDir(): Promise<string> {
++  dir = await mkdtemp(join(tmpdir(), 'atomic-write-'));
++  return dir;
++}
++
++afterEach(async () => {
++  renameHook.failNext = false;
++  if (dir) await rm(dir, { recursive: true, force: true });
++});
++
++function tmpLeftover(files: string[]): string[] {
++  return files.filter((f) => f.includes('.tmp-'));
++}
++
++describe('writeFileAtomic（D-003@v1 原子写基座）', () => {
++  it('新建写入：目标落新全文，目录无 tmp 残留', async () => {
++    const d = await freshDir();
++    const target = join(d, 'auth.json');
++
++    await writeFileAtomic(target, '{"k":"v"}');
++
++    expect(await readFile(target, 'utf-8')).toBe('{"k":"v"}');
++    expect(tmpLeftover(await readdir(d))).toEqual([]);
++  });
++
++  it('顶替已存在目标（win32=MoveFileEx REPLACE_EXISTING 语义锁定）：旧全文原子换新全文', async () => {
++    const d = await freshDir();
++    const target = join(d, 'config.toml');
++    await writeFile(target, 'old-content\n', 'utf-8');
++
++    await writeFileAtomic(target, 'new-content\n');
++
++    expect(await readFile(target, 'utf-8')).toBe('new-content\n');
++    expect(tmpLeftover(await readdir(d))).toEqual([]);
++  });
++
++  it('rename 前失败注入：目标保持旧全文逐字节不变 + tmp 清理 + 原样抛错', async () => {
++    const d = await freshDir();
++    const target = join(d, 'models.json');
++    const frozen = '{"providers":{"keep":1}}';
++    await writeFile(target, frozen, 'utf-8');
++
++    renameHook.failNext = true;
++    await expect(writeFileAtomic(target, '{"providers":{"evil":2}}')).rejects.toThrow(
++      'rename 注入失败（测试）',
++    );
++
++    expect(await readFile(target, 'utf-8')).toBe(frozen);
++    expect(tmpLeftover(await readdir(d))).toEqual([]);
++  });
++
++  it('连续两次写不同内容：终值为其一且全文完整（无交叠半截）', async () => {
++    const d = await freshDir();
++    const target = join(d, 'settings.json');
++
++    await writeFileAtomic(target, '{"defaultModel":"a"}');
++    await writeFileAtomic(target, '{"defaultModel":"b"}');
++
++    const final = await readFile(target, 'utf-8');
++    expect(['{"defaultModel":"a"}', '{"defaultModel":"b"}']).toContain(final);
++    expect(tmpLeftover(await readdir(d))).toEqual([]);
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+index 2609ea2e8..138338317 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+@@ -1425,3 +1425,183 @@ describe('ql-20260822-001 / home 会话切供应商迁移 jsonl 到隔离目录'
+     }
+   });
+ });
++
++
++// ── (6) 2026-09-12-provider-file-tx：引擎门 / 守卫前移 / 文件层回滚 ─────────────
++
++describe('provider-file-tx：D-005@v2 引擎门（provider 维度条件化）', () => {
++  it('GATE-1: cursor + provider 切换载荷 → 白名单外显式 throw + 会话不破坏', async () => {
++    const mock = makeMockClaudeDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await sm.create({ ...BASE_INPUT });
++    mock.emitMessage(systemInitMessage());
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: string }).provider = 'cursor';
++
++    await expect(
++      sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig()),
++    ).rejects.toThrow(/不支持引擎 cursor/);
++    expect(sm.get(BASE_INPUT.sessionId)?.status).toBe('active');
++    expect(mock.startCalls.length).toBe(1); // 未 spawn 新句柄
++  });
++
++  it('GATE-2: cursor + config-only（providerConfig 字段缺席）→ 不判门照常 reload', async () => {
++    const mock = makeMockClaudeDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await sm.create({ ...BASE_INPUT });
++    mock.emitMessage(systemInitMessage());
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: string }).provider = 'cursor';
++
++    await sm.reloadWithConfig(BASE_INPUT.sessionId, { profileName: 'p' });
++
++    expect(mock.startCalls.length).toBe(2); // config-only reload 正常执行
++  });
++});
++
++describe('provider-file-tx：D-001@v1 守卫前移（缺 key 零文件写入）', () => {
++  let tmpRoot: string;
++
++  beforeEach(() => {
++    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-pftx-'));
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
++    vi.mocked(migrateCodexThreadFromHost).mockClear();
++  });
++
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    rmSync(tmpRoot, { recursive: true, force: true });
++  });
++
++  it('HOIST-1: codex 缺 agentSessionId → 写盘前抛 + per-session 目录零创建', async () => {
++    const mock = makeMockClaudeDriver();
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await sm.create({ ...BASE_INPUT });
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
++
++    await expect(
++      sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig()),
++    ).rejects.toThrow(/missing agentSessionId/);
++
++    // 守卫先于 ForReload 写盘：目录不存在（旧实现先写 auth/config 再抛）。
++    expect(existsSync(join(tmpRoot, 'codex', BASE_INPUT.sessionId))).toBe(false);
++    expect(migrateCodexThreadFromHost).not.toHaveBeenCalled();
++  });
++});
++
++describe('provider-file-tx：D-002@v2 catch 文件层回滚（A→B 失败回 A）', () => {
++  let tmpRoot: string;
++
++  beforeEach(() => {
++    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-pftx-'));
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', tmpRoot);
++    vi.mocked(migrateCodexThreadFromHost).mockClear();
++  });
++
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    rmSync(tmpRoot, { recursive: true, force: true });
++  });
++
++  it('ROLL-1: driver.start 失败 → 目录被旧供应商形态重写（config.toml=old base_url）+ 标记保留 + R-01 降级', async () => {
++    const mock = makeMockClaudeDriver();
++    const originalStart = mock.driver.start;
++    let call = 0;
++    mock.driver.start = vi.fn(
++      (input: AsyncIterable<SDKUserMessage>, opts: StartOptions): Query => {
++        call += 1;
++        if (call === 1) {
++          return (originalStart as unknown as (
++            i: AsyncIterable<SDKUserMessage>,
++            o: StartOptions,
++          ) => Query)(input, opts);
++        }
++        throw new Error('simulated spawn EINVAL');
++      },
++    ) as unknown as ClaudeSdkDriver['start'];
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await sm.create({ ...BASE_INPUT });
++    mock.emitMessage(systemInitMessage());
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
++    // 旧形态 A：白盒置 providerConfig（ForReload(A) 回滚产物断言依据）。
++    const oldConfig = codexProviderConfig();
++    (state as { providerConfig: ProviderConfig | null }).providerConfig = oldConfig;
++
++    const newConfig: ProviderConfig = {
++      ...codexProviderConfig(),
++      api_key: 'sk-codex-new',
++      base_url: 'https://codex-new.example/v1',
++    };
++    await expect(
++      sm.reloadWithProvider(BASE_INPUT.sessionId, newConfig),
++    ).rejects.toThrow(/simulated spawn EINVAL/);
++
++    // 回滚：目录 config.toml = 旧供应商 A 的 base_url（非 B）。
++    const toml = readFileSync(
++      join(tmpRoot, 'codex', BASE_INPUT.sessionId, 'config.toml'),
++      'utf-8',
++    );
++    expect(toml).toContain('https://codex-rl.example/v1');
++    expect(toml).not.toContain('codex-new.example');
++    // 内存态还原（R-01 既有断言面）。
++    const after = readState(sm, BASE_INPUT.sessionId)!;
++    expect(after.providerConfig).toBe(oldConfig);
++    expect(after.status).toBe('active');
++  });
++
++  it('ROLL-2: 旧形态 undefined（从未配置）→ 回滚 ForReload 返 {} + best-effort 删标记（防 restore 误判 managed）', async () => {
++    const mock = makeMockClaudeDriver();
++    const originalStart = mock.driver.start;
++    let call = 0;
++    mock.driver.start = vi.fn(
++      (input: AsyncIterable<SDKUserMessage>, opts: StartOptions): Query => {
++        call += 1;
++        if (call === 1) {
++          return (originalStart as unknown as (
++            i: AsyncIterable<SDKUserMessage>,
++            o: StartOptions,
++          ) => Query)(input, opts);
++        }
++        throw new Error('simulated spawn EINVAL');
++      },
++    ) as unknown as ClaudeSdkDriver['start'];
++    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
++    await sm.create({ ...BASE_INPUT });
++    mock.emitMessage(systemInitMessage());
++    await flushMicrotasks();
++    mock.emitResult(resultSuccess());
++    await flushMicrotasks();
++    const state = readState(sm, BASE_INPUT.sessionId)!;
++    (state as { provider: 'claude' | 'codex' }).provider = 'codex';
++    // 旧形态 undefined：state.providerConfig 未设（从未配置）。
++    const before = readState(sm, BASE_INPUT.sessionId)!;
++    expect(before.providerConfig).toBeUndefined();
++
++    await expect(
++      sm.reloadWithProvider(BASE_INPUT.sessionId, codexProviderConfig()),
++    ).rejects.toThrow(/simulated spawn EINVAL/);
++
++    // 回滚 ForReload(undefined) 返 {} → 删标记（目录残留新供应商产物但无标记，
++    // restore 探测恒落零动作/legacy 判定不误 managed——undefined 旧形态无 thread
++    // 迁移面，残留无 env 指向即惰性）。
++    expect(existsSync(join(tmpRoot, 'codex', BASE_INPUT.sessionId, '.sillyhub-managed'))).toBe(
++      false,
++    );
++    // 目录残留属预期（惰性无害）；R-01 降级保持。
++    expect(sm.get(BASE_INPUT.sessionId)?.status).toBe('active');
++  });
++
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-recovery.test.ts b/sillyhub-daemon/tests/interactive/session-recovery.test.ts
+index 519010184..c457f137d 100644
+--- a/sillyhub-daemon/tests/interactive/session-recovery.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-recovery.test.ts
+@@ -29,6 +29,7 @@ import {
+ } from '../../src/interactive/types.js';
+ // vi.mock 已 hoist，import 拿到 mock 版本（mirrorCodexHostAuth 断言载体）。
+ import { mirrorCodexHostAuth } from '../../src/codex-settings.js';
++import { MANAGED_MARKER_FILENAME } from '../../src/provider-file-settings.js';
+ import type {
+   ClaudeSdkDriver,
+   InteractiveDriverCallbacks,
+@@ -605,9 +606,10 @@ describe('task-04 / restore 自愈：codex·pi 恢复注文件层 env（FR-01 /
+     );
+   });
+ 
+-  it('RESTORE-4: codex null + 确定性目录存在 → mirrorCodexHostAuth 幂等重镜像 + 注 CODEX_HOME（Grill P2-3）', async () => {
+-    // 切回本机的会话：persistence 仅落盘非 null providerConfig → 记录无该字段，
+-    // 但 per-session 目录存在 = 此前在平台供应商上（thread 历史在其中）。
++  it('RESTORE-4: codex null + legacy 目录（无标记有 auth.json）→ 补落标记 + 幂等重镜像 + 注 CODEX_HOME（D-004@v2 legacy 态）', async () => {
++    // 切回本机的会话：persistence 仅落盘非 null providerConfig → 记录无该字段。
++    // legacy 态（修复前存量）：目录无标记但有 auth.json = 此前在平台供应商上
++    //（thread 历史在其中）——探测三态化后行为与旧「目录存在」判定逐字一致。
+     const codexHome = join(tmpRoot, 'codex', 'sess-rn');
+     mkdirSync(codexHome, { recursive: true });
+     writeFileSync(join(codexHome, 'auth.json'), '{"OPENAI_API_KEY":"sk-provider-era"}');
+@@ -664,4 +666,64 @@ describe('task-04 / restore 自愈：codex·pi 恢复注文件层 env（FR-01 /
+     expect(existsSync(join(tmpRoot, 'codex'))).toBe(false);
+     expect(sm.get('sess-rx')?.status).toBe('reconnecting');
+   });
++
++  it('RESTORE-6: codex null + 标记在（无 auth/config）→ managed：镜像 + 注 CODEX_HOME（标记=切换曾生效唯一真相）', async () => {
++    // 目录里只有标记（镜像删除后形态）——旧「目录存在」判定也命中，但本用例
++    // 锁定的是：标记在即 managed，不依赖 auth/config 存在性。
++    const codexHome = join(tmpRoot, 'codex', 'sess-rn-mk');
++    mkdirSync(codexHome, { recursive: true });
++    writeFileSync(
++      join(codexHome, MANAGED_MARKER_FILENAME),
++      JSON.stringify({ envKey: 'CODEX_HOME', switchedAt: '2026-09-12T00:00:00Z' }),
++    );
++    const codex = makeMockAgentDriver();
++    const claude = makeMockDriver();
++    const sm = new SessionManager({
++      driver: claude.driver,
++      drivers: { codex: codex.driver },
++      ...makeDeps(),
++    });
++
++    await sm.restoreAndReconnect({
++      sessionId: 'sess-rn-mk',
++      leaseId: 'lease-rn-mk',
++      agentSessionId: 'thread-rn-mk',
++      cwd: 'C:\proj',
++      provider: 'codex',
++      turnCount: 1,
++      lastActiveAt: 1_700_000_000_000,
++    });
++
++    expect(mirrorCodexHostAuth).toHaveBeenCalledWith(codexHome);
++    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
++    expect(env['CODEX_HOME']).toBe(codexHome);
++  });
++
++  it('RESTORE-7: codex null + 仅迁移钩子形态目录（sessions/ 子目录，无标记无 auth/config）→ 零动作（F3 假阳性消除锚点）', async () => {
++    // 迁移钩子只建目录 + sessions/ 拷贝（session-manager.ts reload 块）；旧
++    // 「目录存在」判定会误判 managed → resume 回退过期快照丢轮次（审查 F3）。
++    const codexHome = join(tmpRoot, 'codex', 'sess-rn-mig');
++    mkdirSync(join(codexHome, 'sessions'), { recursive: true });
++    const codex = makeMockAgentDriver();
++    const claude = makeMockDriver();
++    const sm = new SessionManager({
++      driver: claude.driver,
++      drivers: { codex: codex.driver },
++      ...makeDeps(),
++    });
++
++    await sm.restoreAndReconnect({
++      sessionId: 'sess-rn-mig',
++      leaseId: 'lease-rn-mig',
++      agentSessionId: 'thread-rn-mig',
++      cwd: 'C:\proj',
++      provider: 'codex',
++      turnCount: 1,
++      lastActiveAt: 1_700_000_000_000,
++    });
++
++    expect(mirrorCodexHostAuth).not.toHaveBeenCalled();
++    const env = codex.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
++    expect(env['CODEX_HOME']).toBeUndefined();
++  });
+ });
+diff --git a/sillyhub-daemon/tests/provider-file-settings-reload.test.ts b/sillyhub-daemon/tests/provider-file-settings-reload.test.ts
+index f940ac53d..b298552c9 100644
+--- a/sillyhub-daemon/tests/provider-file-settings-reload.test.ts
++++ b/sillyhub-daemon/tests/provider-file-settings-reload.test.ts
+@@ -56,6 +56,7 @@ vi.mock('node:os', async (importOriginal) => {
+ import {
+   applyProviderFileSettingsForReload,
+   type ProviderFileSettingsReloadInput,
++  MANAGED_MARKER_FILENAME,
+ } from '../src/provider-file-settings.js';
+ import {
+   mirrorCodexHostAuth,
+@@ -314,11 +315,20 @@ describe('ForReload 分支四：null + prior CODEX_HOME → 镜像成败均返 p
+     expect(readFileSync(join(stubbedRoot(), 'codex', 'sess-null1', 'auth.json'), 'utf-8')).toContain(
+       'sk-host-login',
+     );
++    // D-004@v2 标记先行：镜像前标记已落盘（内容含 envKey，探测侧只判存在性）。
++    expect(existsSync(join(stubbedRoot(), 'codex', 'sess-null1', MANAGED_MARKER_FILENAME))).toBe(
++      true,
++    );
++    const marker = JSON.parse(
++      readFileSync(join(stubbedRoot(), 'codex', 'sess-null1', MANAGED_MARKER_FILENAME), 'utf-8'),
++    ) as { envKey?: string };
++    expect(marker.envKey).toBe('CODEX_HOME');
+   });
+ 
+-  it('镜像 IO 失败（codexHome 路径被同名文件占用）→ 仍返 prior 键不抛（目录留旧产物=等同未切）', async () => {
+-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+-    // 阻断镜像：目标目录段被普通文件占用 → mkdir/copyFile 全失败。
++  it('标记写失败（codexHome 路径被同名文件占用）→ 跳过整个镜像返 prior 键不抛（D-004@v2 标记先行）', async () => {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    // 阻断标记：目标目录段被普通文件占用 → mkdir/writeFileAtomic 全失败
++    // → 标记先行语义 = 不执行镜像（含删除动作），等同未切。
+     writeFileSync(join(stubbedRoot(), 'codex'), 'not-a-dir');
+ 
+     const env = await forReload({
+@@ -327,8 +337,31 @@ describe('ForReload 分支四：null + prior CODEX_HOME → 镜像成败均返 p
+       priorEnv: { CODEX_HOME: '/prior/codex-null2' },
+     });
+ 
+-    // 铁律：镜像失败不抛、env 仍保住旧目录（thread 历史保住）。
++    // 铁律保持：不抛、env 仍保住旧目录（thread 历史保住）。
+     expect(env).toEqual({ CODEX_HOME: '/prior/codex-null2' });
++    expect(warnSpy).toHaveBeenCalledWith(
++      'provider_file_marker_write_failed',
++      expect.objectContaining({ dir: join(stubbedRoot(), 'codex', 'sess-null2') }),
++    );
++  });
++
++  it('标记成功 + 镜像 IO 失败（auth.json 目标位被同名目录占用）→ error 日志 + 仍返 prior 键不抛', async () => {
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    // 宿主 auth.json 存在（触发拷入分支），但 per-session 目标位被同名目录占用
++    // → copyFile EISDIR（标记已先行落盘成功，镜像内部失败走 error 日志）。
++    mkdirSync(hostCodex(), { recursive: true });
++    writeFileSync(join(hostCodex(), 'auth.json'), '{"OPENAI_API_KEY":"sk-x"}');
++    const codexHome = join(stubbedRoot(), 'codex', 'sess-null2b');
++    mkdirSync(join(codexHome, 'auth.json'), { recursive: true });
++
++    const env = await forReload({
++      sessionKey: 'sess-null2b',
++      provider: null,
++      priorEnv: { CODEX_HOME: '/prior/codex-null2b' },
++    });
++
++    expect(env).toEqual({ CODEX_HOME: '/prior/codex-null2b' });
++    expect(existsSync(join(codexHome, MANAGED_MARKER_FILENAME))).toBe(true);
+     expect(errSpy).toHaveBeenCalled();
+   });
+ });
+@@ -493,3 +526,51 @@ describe('migrateCodexThreadFromHost 三态', () => {
+     );
+   });
+ });
++
++
++// ── 生效标记序（2026-09-12-provider-file-tx D-004@v2）────────────────────────
++
++describe('生效标记：分支一后置 / 门槛缺不落 / 失败 best-effort', () => {
++  it('分支一写盘成功 → 标记后置落盘（内容含 envKey，探测侧只判存在性）', async () => {
++    const env = await forReload({
++      sessionKey: 'sess-mk1',
++      provider: codexAnthropicConfig(),
++      priorEnv: undefined,
++    });
++
++    expect(env).toEqual({ CODEX_HOME: join(stubbedRoot(), 'codex', 'sess-mk1') });
++    const markerPath = join(stubbedRoot(), 'codex', 'sess-mk1', MANAGED_MARKER_FILENAME);
++    expect(existsSync(markerPath)).toBe(true);
++    expect(
++      (JSON.parse(readFileSync(markerPath, 'utf-8')) as { envKey?: string }).envKey,
++    ).toBe('CODEX_HOME');
++  });
++
++  it('分支一标记写失败（标记位被同名目录占用）→ 仅 warn，写盘主体成功 env 照常返回', async () => {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    // 预占标记位：writeFileAtomic 的 rename 顶替目录失败 → helper 吞错 warn。
++    const dir = join(stubbedRoot(), 'codex', 'sess-mk2');
++    mkdirSync(join(dir, MANAGED_MARKER_FILENAME), { recursive: true });
++
++    const env = await forReload({
++      sessionKey: 'sess-mk2',
++      provider: codexAnthropicConfig(),
++      priorEnv: undefined,
++    });
++
++    expect(env).toEqual({ CODEX_HOME: dir });
++    expect(existsSync(join(dir, 'auth.json'))).toBe(true); // 写盘主体不受标记失败影响
++    expect(warnSpy).toHaveBeenCalledWith('provider_file_marker_write_failed', expect.anything());
++  });
++
++  it('分支三门槛缺跳过 → 零标记零目录（标记=「切换曾真实生效」信号，不得虚报）', async () => {
++    const env = await forReload({
++      sessionKey: 'sess-mk3',
++      provider: { agent_kind: 'codex', api_key: '', base_url: '', model: 'm' } as ProviderConfig,
++      priorEnv: { CODEX_HOME: '/prior/mk3' },
++    });
++
++    expect(env).toEqual({ CODEX_HOME: '/prior/mk3' });
++    expect(existsSync(join(stubbedRoot(), 'codex', 'sess-mk3'))).toBe(false);
++  });
++});
