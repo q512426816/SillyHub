@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules.daemon.group.service as _gsvc
@@ -402,6 +403,21 @@ async def _get_shadow_active_run(svc, shadow_session_id: uuid.UUID) -> AgentRun 
     return (await svc._session.execute(stmt)).scalars().first()
 
 
+def _is_member_lock_wait_timeout(exc: BaseException) -> bool:
+    """成员行 FOR UPDATE 等锁超时判定（2026-09-12-group-trigger-lock-graceful design §2.1）。
+
+    双口径：asyncpg ``LockNotAvailableError``（类名比对，不顶层 import
+    asyncpg——SQLite 测试环境无该包也能跑）或 SQLSTATE ``55P03``
+    （lock_not_available，含其他驱动同语义包装）。
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    if getattr(orig, "sqlstate", None) == "55P03":
+        return True
+    return type(orig).__name__ == "LockNotAvailableError"
+
+
 async def _ensure_shadow_session(
     svc,
     group: AgentGroupChat,
@@ -438,29 +454,91 @@ async def _ensure_shadow_session(
     P0 修复注释口径）。``parent_session_id`` 恒 NULL（D-007/§5.1）。
     """
     # 幂等复用：指针非空且影子非终态 → 直接复用（懒建只在首次触发发生）。
-    # quick 群 P1（2026-09-02 并发双建修复）：幂等判定前先以行锁重读成员行
-    # （SELECT ... FOR UPDATE，照 auth/service.py refresh-token 并发先例；
-    # SQLite 忽略锁提示、语义不变）——并发触发同一成员时，第二个事务在
-    # 成员行上等锁，首个事务 commit（回填指针）后读到已回填指针直接复用，
-    # 不再双建影子。populate_existing 强制刷新 identity map 内既有对象——
-    # 不带则查询命中缓存旧快照，调用方传入的 member 指针仍是 NULL。锁在
-    # 调用方事务内持有至 commit，不新增 commit。
-    locked_member = (
+    # quick 群 P1（2026-09-02 并发双建修复）：防双建语义 = 幂等判定前以行锁
+    # 重读成员行（SELECT ... FOR UPDATE，照 auth/service.py refresh-token
+    # 并发先例；SQLite 忽略锁提示、语义不变）——并发触发同一成员时，第二
+    # 个事务在成员行上等锁，首个事务 commit（回填指针）后读到已回填指针
+    # 直接复用，不再双建影子。populate_existing 强制刷新 identity map 内
+    # 既有对象——不带则查询命中缓存旧快照，调用方传入的 member 指针仍是
+    # NULL。锁在调用方事务内持有至 commit，不新增 commit。
+    #
+    # 2026-09-12-group-trigger-lock-graceful design §2.1 三段式锁语义：
+    #   段1 无锁快查——指针已回填且影子非终态直接复用（对方已建完，零锁
+    #       等待；daemon 缺位时对方持锁收口链长，这里是最常见的并发快路径）；
+    #   段2 指针空 → FOR UPDATE 正常等锁（防双建语义原样，daemon 在线时
+    #       对方几十 ms 内 commit 释放）；
+    #   段3 等锁超时（55P03）→ rollback（语句被 PG 取消后事务已废）→ 无锁
+    #       重读一次：回填 → 复用；未回填 → GroupChatInvalid 报忙（4xx 群
+    #       错误族，落 send_group_message gather 部分失败收集，不再裸 500）。
+    #       不自动重试拿锁：daemon 缺位时对方收口链本身就慢，重试大概率
+    #       再等 5s 再超时；报忙让用户重发，语义诚实（design D-2）。
+
+    async def _reuse_member_shadow(
+        candidate: AgentGroupMember | None,
+    ) -> AgentSession | None:
+        """指针非空且影子非终态 → 返回既有影子（复用快路径，段1/段2/段3 共用）。"""
+        if candidate is None or candidate.shadow_session_id is None:
+            return None
+        existing = await svc._session.get(AgentSession, candidate.shadow_session_id)
+        if existing is not None and existing.status not in ("ended", "failed"):
+            return existing
+        # 指针悬挂（reset-memory 后重建 / 派发失败残留）→ 调用方走下方新建，
+        # 旧行留史，成员指针更新到新影子。
+        return None
+
+    # 段1 无锁快查（不加锁，不进任何竞争窗口）。
+    member_id_val = member.id  # rollback 前预取（防段3 后 ORM 过期触发 lazy load）
+    member_display_name = member.display_name  # 同上
+    unlocked_member = (
         await svc._session.execute(
             select(AgentGroupMember)
             .where(AgentGroupMember.id == member.id)
-            .with_for_update()
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
+    if unlocked_member is not None:
+        member = unlocked_member
+    reused = await _reuse_member_shadow(member)
+    if reused is not None:
+        return reused, None
+
+    # 段2 FOR UPDATE 正常等锁（防双建原样）；段3 超时降级。
+    try:
+        locked_member = (
+            await svc._session.execute(
+                select(AgentGroupMember)
+                .where(AgentGroupMember.id == member.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+    except DBAPIError as exc:
+        if not _is_member_lock_wait_timeout(exc):
+            raise
+        # 段3：语句被 PG 取消（lock_timeout=5s fail-fast），事务已废 →
+        # rollback 后无锁重读一次，见上三段式注释。
+        await svc._session.rollback()
+        reread_member = (
+            await svc._session.execute(
+                select(AgentGroupMember)
+                .where(
+                    AgentGroupMember.id == member_id_val
+                )  # 预取标量（rollback 已过期 member 对象）
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        reread_reused = await _reuse_member_shadow(reread_member)
+        if reread_reused is not None:
+            return reread_reused, None
+        raise GroupChatInvalid(
+            f"成员「{member_display_name}」正在被触发中，请稍后重发。",
+            details={"member_id": str(member_id_val)},
+        ) from exc
     if locked_member is not None:
         member = locked_member
-    if member.shadow_session_id is not None:
-        existing = await svc._session.get(AgentSession, member.shadow_session_id)
-        if existing is not None and existing.status not in ("ended", "failed"):
-            return existing, None
-        # 指针悬挂（reset-memory 后重建 / 派发失败残留）→ 走下方新建，
-        # 旧行留史，成员指针更新到新影子。
+    reused = await _reuse_member_shadow(member)
+    if reused is not None:
+        return reused, None
 
     from app.modules.agent.placement import (
         NoOnlineDaemonError,

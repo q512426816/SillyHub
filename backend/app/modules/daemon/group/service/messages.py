@@ -18,6 +18,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules.daemon.group.service as _gsvc
@@ -69,7 +70,7 @@ from .mentions import (
     _register_chain_members,
 )
 from .settings import _group_guardrail_settings
-from .shadow import _MID_TURN_NOTICE
+from .shadow import _MID_TURN_NOTICE, _is_member_lock_wait_timeout
 from .timeline_reads import GROUP_LAST_MESSAGE_PREVIEW_CHARS
 from .typing_presence import (
     _publish_agent_typing_event,
@@ -324,22 +325,65 @@ async def send_group_message(
                 ordered.append(m)
         consensus_coordinator = ordered[0]
         collaborators = ordered[1:]
-        consensus_task = await create_consensus_task(
-            svc._session,
-            group=group,
-            carrier_run_id=carrier.id,
-            coordinator=consensus_coordinator,
-            collaborators=collaborators,
-            created_by=user.id,
-            source_summary=content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
-        )
-        _gsvc.log.info(
-            "group_consensus_task_created",
-            group_id=str(group.id),
-            consensus_task_id=str(consensus_task.id),
-            coordinator_member_id=str(consensus_coordinator.id),
-            collaborator_count=len(collaborators),
-        )
+        try:
+            consensus_task = await create_consensus_task(
+                svc._session,
+                group=group,
+                carrier_run_id=carrier.id,
+                coordinator=consensus_coordinator,
+                collaborators=collaborators,
+                created_by=user.id,
+                source_summary=content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
+            )
+        except DBAPIError as exc:
+            # FK 撞锁降级（真实复验补盲，2026-09-12 design §2.2）：任务行
+            # INSERT 的外键（coordinator_member_id → agent_group_members）
+            # 在 PG 内需对父行取 KEY SHARE 锁——与成员行 FOR UPDATE 持锁方
+            # （触发链懒建/外部事务）互斥，同样吃 lock_timeout 55P03。
+            # 降级：rollback（消息已上方 commit 落时间线不丢）→ 无任务继续
+            # ——本轮退化为普通多 @ 消息（无共识卡，触发照常、各自部分
+            # 失败收集）；比 500 整条回滚丢任务/4xx 撕裂（客户端重发重复
+            # 消息）均优。非 55P03 的 DBAPIError 原样冒泡（非锁语义不降级）。
+            if not _is_member_lock_wait_timeout(exc):
+                raise
+            await svc._session.rollback()
+            consensus_task = None
+            consensus_coordinator = None
+            # rollback 过期恢复：group/members 若在本事务内有 pending 修改
+            # 会被过期（gather 段续用炸 lazy load）——重查恢复（identity map
+            # 同对象；无锁 SELECT 不撞锁）。user 来自 auth 依赖（detached
+            # 带属性，不属本 session），rollback 不影响，直接续用。
+            await svc._session.refresh(group)
+            await svc._session.refresh(carrier)
+            await svc._session.refresh(log_row)
+            members = await svc._list_active_member_rows(group.id)
+            mentioned = _parse_group_mentions(content, members)
+            _gsvc.log.warning(
+                "group_consensus_task_lock_busy_degraded",
+                group_id=str(group.id),
+                coordinator_member_id=str(ordered[0].id),
+                detail="consensus INSERT blocked by member-row lock (55P03); degraded to plain multi-mention message",
+            )
+        if consensus_task is not None:
+            _gsvc.log.info(
+                "group_consensus_task_created",
+                group_id=str(group.id),
+                consensus_task_id=str(consensus_task.id),
+                coordinator_member_id=str(consensus_coordinator.id),
+                collaborator_count=len(collaborators),
+            )
+            # 任务行先行提交（2026-09-12-group-trigger-lock-graceful design §2.2）：
+            # create_consensus_task 是 flush-only——挂在主事务的任务行在并行
+            # 触发失败（含成员行锁超时报忙）时会被整条回滚，产生「消息已落
+            # 时间线（上方先 commit）但任务蒸发」的不一致，sweeper 无从兜底
+            # （任务行不存在）。gather 前显式 commit：任务与消息同生，触发
+            # 全失败由 sweeper 超时收口 aborted（D-006 兜底闭环按设计意图
+            # 生效，非数据残留）。sessionmaker expire_on_commit=False（core/
+            # db.py）——commit 后 consensus_task/group 等对象属性保持可用，
+            # gather 段/收口段读写不受影响。普通路径（use_consensus=False）
+            # 零变化，不新增 commit。
+            # 降级路径无任务行可 commit，不进本分支。
+            await svc._session.commit()
     # 返回体用标量（PK 不过期；并行触发子链 rollback 已隔离在各自独立
     # session，不再触碰请求 session 的对象状态——防御性口径保留）。
     carrier_run_id_val = carrier.id
