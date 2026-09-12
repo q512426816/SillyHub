@@ -43318,6 +43318,20 @@
             "description": "群背景摘要条数",
             "default": 20
           },
+          "consensus_mode": {
+            "type": "boolean",
+            "title": "Consensus Mode",
+            "description": "汇总收口模式开关（默认关）",
+            "default": false
+          },
+          "consensus_timeout_seconds": {
+            "type": "integer",
+            "maximum": 3600.0,
+            "minimum": 60.0,
+            "title": "Consensus Timeout Seconds",
+            "description": "汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）",
+            "default": 600
+          },
           "user_members": {
             "items": {
               "$ref": "#/components/schemas/GroupMemberUserCreate"
@@ -43398,6 +43412,14 @@
             "type": "integer",
             "title": "Context Window"
           },
+          "consensus_mode": {
+            "type": "boolean",
+            "title": "Consensus Mode"
+          },
+          "consensus_timeout_seconds": {
+            "type": "integer",
+            "title": "Consensus Timeout Seconds"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -43475,6 +43497,8 @@
           "agent_cross_mention",
           "cross_mention_depth",
           "context_window",
+          "consensus_mode",
+          "consensus_timeout_seconds",
           "created_at"
         ],
         "title": "GroupChatCreateRead",
@@ -43536,6 +43560,14 @@
           "context_window": {
             "type": "integer",
             "title": "Context Window"
+          },
+          "consensus_mode": {
+            "type": "boolean",
+            "title": "Consensus Mode"
+          },
+          "consensus_timeout_seconds": {
+            "type": "integer",
+            "title": "Consensus Timeout Seconds"
           },
           "created_at": {
             "type": "string",
@@ -43631,6 +43663,8 @@
           "agent_cross_mention",
           "cross_mention_depth",
           "context_window",
+          "consensus_mode",
+          "consensus_timeout_seconds",
           "created_at"
         ],
         "title": "GroupChatDetailRead",
@@ -43692,6 +43726,14 @@
           "context_window": {
             "type": "integer",
             "title": "Context Window"
+          },
+          "consensus_mode": {
+            "type": "boolean",
+            "title": "Consensus Mode"
+          },
+          "consensus_timeout_seconds": {
+            "type": "integer",
+            "title": "Consensus Timeout Seconds"
           },
           "created_at": {
             "type": "string",
@@ -43812,6 +43854,8 @@
           "agent_cross_mention",
           "cross_mention_depth",
           "context_window",
+          "consensus_mode",
+          "consensus_timeout_seconds",
           "created_at"
         ],
         "title": "GroupChatListItemRead",
@@ -43911,6 +43955,14 @@
             "type": "integer",
             "title": "Context Window"
           },
+          "consensus_mode": {
+            "type": "boolean",
+            "title": "Consensus Mode"
+          },
+          "consensus_timeout_seconds": {
+            "type": "integer",
+            "title": "Consensus Timeout Seconds"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -43981,6 +44033,8 @@
           "agent_cross_mention",
           "cross_mention_depth",
           "context_window",
+          "consensus_mode",
+          "consensus_timeout_seconds",
           "created_at"
         ],
         "title": "GroupChatRead",
@@ -44037,6 +44091,30 @@
               }
             ],
             "title": "Context Window"
+          },
+          "consensus_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consensus Mode"
+          },
+          "consensus_timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3600.0,
+                "minimum": 60.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consensus Timeout Seconds"
           },
           "settings_json": {
             "anyOf": [
@@ -44857,6 +44935,17 @@
               }
             ],
             "title": "Error"
+          },
+          "consensus_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consensus Role"
           }
         },
         "type": "object",
@@ -45045,6 +45134,18 @@
             },
             "type": "array",
             "title": "Triggered"
+          },
+          "consensus_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consensus Task Id"
           }
         },
         "type": "object",

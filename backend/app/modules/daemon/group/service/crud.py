@@ -304,6 +304,8 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
         agent_cross_mention=payload.agent_cross_mention,
         cross_mention_depth=payload.cross_mention_depth,
         context_window=payload.context_window,
+        consensus_mode=payload.consensus_mode,
+        consensus_timeout_seconds=payload.consensus_timeout_seconds,
         created_at=now,
     )
     svc._session.add(group)
@@ -491,6 +493,11 @@ async def update_group(
         group.cross_mention_depth = payload.cross_mention_depth
     if payload.context_window is not None:
         group.context_window = payload.context_window
+    # 2026-09-10-group-agent-direct-chat（D-002）：汇总收口模式两字段局部更新。
+    if payload.consensus_mode is not None:
+        group.consensus_mode = payload.consensus_mode
+    if payload.consensus_timeout_seconds is not None:
+        group.consensus_timeout_seconds = payload.consensus_timeout_seconds
     if payload.settings_json is not None:
         # quick 群 P1（2026-09-02）互@护栏群级可配：settings_json.guardrails
         # 子键写入（字段级合并；非法键/范围外值 400 中文）。

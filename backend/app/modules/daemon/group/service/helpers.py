@@ -74,6 +74,40 @@ GROUP_MEMBER_STAGE = "group_member"
 SHADOW_DIRECT_SOURCE = "shadow_direct"
 
 
+# ── 汇总收口模式（2026-09-10-group-agent-direct-chat design §5.8，task-02）──
+# 协作角色段 prompt 常量（软引导，非 correctness 依赖——硬拦截在投影层
+# metadata 谓词，D-007）；str.format 填充占位符。消费方：messages.py（发
+# 送侧 fan-out）/mentions.py（互@私聊）/consensus.py（意见转交与收口）。
+ROLE_PROMPT_COLLABORATOR = (
+    "【协作指令】你是被咨询成员：直接给出分析意见——本回复不会出现在群里，"
+    "将私下转交汇总人「{coordinator_name}」；如需与其他成员讨论分歧，可在"
+    "回复中 @ 对方（同样私下转交）。无需使用 [[GROUP]] 标记。"
+)
+ROLE_PROMPT_COORDINATOR = (
+    "【协作指令】你是指定汇总人：先独立分析（本轮不会出现在群里）；成员"
+    "意见将陆续私下转交给你；收到【收口指令】后输出最终总结（[[GROUP]] 段"
+    "发群）。收到收口指令前不要向群里发言。"
+)
+ROLE_PROMPT_AGENT_DM = (
+    "【私聊指令】成员「{sender_name}」私聊向你发起协作——本回复不会出现在群里，将直接转交对方。"
+)
+# 意见转交 preamble（deliver_collaborator_opinion 注入文本头部；末尾拼意见
+# 全文，多任务并行时 source_summary 标注来源消息摘要）。
+OPINION_TRANSFER_HEADER = (
+    "【成员意见转交】「{source_name}」对本次协作的意见（私下转交，不进群）"
+    "（来源消息：{source_summary}）：\n{opinion_text}\n\n你可在回复中 @ 该"
+    "成员继续讨论。"
+)
+# 收口指令（inject_converge_directive 注入文本）：converge 轮 prompt 主体。
+CONVERGE_DIRECTIVE = (
+    "【收口指令】触发消息：「{source_summary}」；已收意见：\n{opinions}\n；"
+    "未响应：{non_responders}。请输出最终汇总结论：给群内看的总结放 "
+    "[[GROUP]]…[[/GROUP]] 段，整合各意见、标注分歧与未响应成员。"
+)
+# 单成员意见聚合截断上限（收口钩子全量 assistant 文本口径，design §5.4）。
+CONSENSUS_OPINION_MAX_CHARS = 4000
+
+
 # quick 群 P1 llm_provider 预检（2026-09-02）：agent 成员 ``llm_provider_id=None``
 # 的非阻断提示文案——None=走机器本机默认 LLM 出口（可能可用），建群/加成员
 # 不拦截，仅随响应 ``warnings`` 提示前端（向导/成员面板展示）。
@@ -166,6 +200,10 @@ class GroupMemberTriggerRead(BaseModel):
     mid_turn: bool = False
     # quick 群 P2（2026-09-02）触发失败原因摘要（成功恒 None）。
     error: str | None = None
+    # 2026-09-10-group-agent-direct-chat：汇总协作角色（collaborator=
+    # 被咨询成员 / coordinator=汇总人首轮；普通触发轮 None）。发送侧
+    # fan-out 填充，前端/审计消费。
+    consensus_role: str | None = None
 
 
 class GroupChatPinnedRead(BaseModel):
@@ -208,6 +246,9 @@ class GroupMessageSendRead(BaseModel):
     mentioned_member_ids: list[uuid.UUID] = Field(default_factory=list)
     mention_all: bool = False
     triggered: list[GroupMemberTriggerRead] = Field(default_factory=list)
+    # 2026-09-10-group-agent-direct-chat：汇总任务 id（本次发送进入汇总
+    # 模式时非 None——前端据此展示状态卡占位；普通多 @ 轮 None）。
+    consensus_task_id: uuid.UUID | None = None
 
 
 class GroupDirectMessageRead(BaseModel):

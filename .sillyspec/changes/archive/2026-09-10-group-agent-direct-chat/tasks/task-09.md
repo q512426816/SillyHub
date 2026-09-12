@@ -32,6 +32,8 @@ acceptance:
   - "应用启动日志出现 consensus_sweeper 挂载记录"
 verify:
   - "cd backend && uv run ruff check app/modules/daemon/group/service/consensus.py app/main.py && uv run pytest -q --no-cov app/modules/daemon/tests/test_group_consensus.py"
+execution_fixes:
+  - "执行期修正（2026-09-12 E2E 真实集成抓获，G-4）：consensus_sweep_once 的 0-delivered 分支与 inject 调用后缺 await db.commit()——write_consensus_card/inject_converge_directive 只 flush 不 commit，sweep 独立 session 收口时无调用方兜底，aborted/timeout 改动随会话关闭回滚（日志 processed=1 但库内 status 仍 open）。单测同 session refresh 可见未提交改动掩盖；补 rollback 后重读断言 + 两分支 commit 修复，真实 uvicorn+PG 复验持久化。"
 constraints:
   - "循环只做超时兜底不接管正常推进"
   - "挂载形态与既有 sweeper 完全一致（不加开关）"

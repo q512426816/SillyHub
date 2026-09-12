@@ -15255,6 +15255,18 @@ export interface components {
              * @default 20
              */
             context_window: number;
+            /**
+             * Consensus Mode
+             * @description 汇总收口模式开关（默认关）
+             * @default false
+             */
+            consensus_mode: boolean;
+            /**
+             * Consensus Timeout Seconds
+             * @description 汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）
+             * @default 600
+             */
+            consensus_timeout_seconds: number;
             /** User Members */
             user_members?: components["schemas"]["GroupMemberUserCreate"][];
             /** Agent Members */
@@ -15295,6 +15307,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15353,6 +15369,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15430,6 +15450,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15527,6 +15551,10 @@ export interface components {
             cross_mention_depth: number;
             /** Context Window */
             context_window: number;
+            /** Consensus Mode */
+            consensus_mode: boolean;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds: number;
             /**
              * Created At
              * Format: date-time
@@ -15560,6 +15588,10 @@ export interface components {
             cross_mention_depth?: number | null;
             /** Context Window */
             context_window?: number | null;
+            /** Consensus Mode */
+            consensus_mode?: boolean | null;
+            /** Consensus Timeout Seconds */
+            consensus_timeout_seconds?: number | null;
             /**
              * Settings Json
              * @description 群扩展设置；None=不改。支持 guardrails 子键（互@护栏群级覆盖）与 typing_preview 顶层键（typing 草稿预览开关，默认关）
@@ -15904,6 +15936,8 @@ export interface components {
             mid_turn: boolean;
             /** Error */
             error?: string | null;
+            /** Consensus Role */
+            consensus_role?: string | null;
         };
         /**
          * GroupMemberUpdate
@@ -15979,6 +16013,8 @@ export interface components {
             mention_all: boolean;
             /** Triggered */
             triggered?: components["schemas"]["GroupMemberTriggerRead"][];
+            /** Consensus Task Id */
+            consensus_task_id?: string | null;
         };
         /**
          * GroupMessageSendRequest

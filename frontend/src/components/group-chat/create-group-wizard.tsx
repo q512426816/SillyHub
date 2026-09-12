@@ -48,7 +48,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Input, Modal, Select, Switch, Tooltip } from "antd";
+import { Button, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd";
 import { Bot, Plus, Trash2 } from "lucide-react";
 
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
@@ -183,6 +183,9 @@ export function CreateGroupWizard({
   /** 已邀用户（user_id + 可选群内头像；Select onChange 时保号同步）。 */
   const [invited, setInvited] = useState<{ user_id: string; avatar: string | null }[]>([]);
   const [agentCards, setAgentCards] = useState<AgentMemberCardState[]>([]);
+  /** 汇总收口模式（task-10，D-002 默认关/超时 600——照后端 schema 默认值镜像）。 */
+  const [consensusMode, setConsensusMode] = useState(false);
+  const [consensusTimeout, setConsensusTimeout] = useState(600);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const qc = useQueryClient();
   const notify = useNotify();
@@ -198,6 +201,8 @@ export function CreateGroupWizard({
       setProjectId(null);
       setInvited([]);
       setAgentCards([]);
+      setConsensusMode(false);
+      setConsensusTimeout(600);
       setSubmitAttempted(false);
     }
   }, [open]);
@@ -409,6 +414,10 @@ export function CreateGroupWizard({
       agent_cross_mention: true,
       cross_mention_depth: 4,
       context_window: 20,
+      // 汇总收口模式（task-10）：默认关/600 与后端 GroupChatCreate 默认值
+      // 镜像（生成版 TS 类型必填须显式传——开方汇总是群级行为开关）。
+      consensus_mode: consensusMode,
+      consensus_timeout_seconds: consensusTimeout,
       ...(invited.length > 0
         ? {
             user_members: invited.map((u) => ({
@@ -666,6 +675,42 @@ export function CreateGroupWizard({
             仅该项目成员可邀请（上限 {GROUP_USER_MEMBER_LIMIT} 人）；你将作为群主，
             被邀请成员即可查看并参与群聊。
           </p>
+          {/* ── 汇总收口模式（task-10，D-002）：开关默认关；开启显示超时输入
+              （60~3600s，默认 600——建群后可在群设置随时改，member-panel 同款）。 ── */}
+          <div className="rounded-md border border-border bg-card px-2.5 py-2">
+            <div className="flex items-center gap-2">
+              <Switch
+                size="small"
+                checked={consensusMode}
+                onChange={setConsensusMode}
+                aria-label="汇总收口模式"
+                data-testid="cgw-consensus-mode-switch"
+              />
+              <span className="text-xs font-medium text-foreground">
+                汇总收口模式
+              </span>
+              {consensusMode && (
+                <InputNumber
+                  size="small"
+                  min={60}
+                  max={3600}
+                  step={30}
+                  value={consensusTimeout}
+                  onChange={(v) => {
+                    if (typeof v === "number") setConsensusTimeout(v);
+                  }}
+                  addonAfter="秒"
+                  className="ml-auto w-[120px]"
+                  aria-label="收口超时秒数"
+                  data-testid="cgw-consensus-timeout-input"
+                />
+              )}
+            </div>
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+              开启后，一条消息 @ 多个 Agent 时由汇总人收齐各成员意见后统一发群；
+              超时未收齐则按已到意见收口。建群后可在群设置中随时开关。
+            </p>
+          </div>
         </div>
       )}
 

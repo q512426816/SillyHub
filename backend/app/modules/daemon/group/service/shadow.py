@@ -234,6 +234,8 @@ async def _trigger_group_member(
     source_member_name: str | None = None,
     chain_depth: int = 0,
     attachment_rows: list | None = None,
+    role_prompt: str | None = None,
+    turn_overrides: dict | None = None,
 ) -> GroupMemberTriggerRead:
     """触发单个 agent 成员（design §4.1 步 6 / §8 member.injected）。
 
@@ -252,6 +254,13 @@ async def _trigger_group_member(
     prompt 末尾附提示行 + SESSION_INJECT attachments 通道下发（多模态块
     内联/磁盘落盘，与单聊同管线）；互@路径不携带（agent 消息无附件）。
     非 Claude 成员引擎 → 400（单聊引擎门控 D-6 同口径，群错误族）。
+
+    ``role_prompt``/``turn_overrides``（2026-09-10-group-agent-direct-chat
+    task-04，汇总协作/互@私聊消费）：协作角色段文本（包在 _build_group_prompt
+    产物外层头部，不动其纯函数——照 _MID_TURN_NOTICE 包装先例）与
+    turn_metadata 附加键（consensus_task_id/consensus_role/
+    dm_target_member_id/dm_kind 等，在基础键之后 merge——新键不碰
+    source_* 既有链标记）。两者均 None 时零行为变化（开关关闭路径）。
     """
     # 引擎门控（单聊 D-6 同口径：仅 Claude 支持附件）——发送侧已过归属/
     # 数量校验并落时间线，此处 fail-loud 拒绝触发（消息保留可重发仅触发）。
@@ -282,6 +291,10 @@ async def _trigger_group_member(
         source_member_name=source_member_name,
         attachment_lines=attachment_lines,
     )
+    # 协作角色段（task-04）：包在产物外层头部（懒建/复用/排队共用同一
+    # 文本——快照冻结语义与 _MID_TURN_NOTICE 包装一致）。
+    if role_prompt is not None:
+        prompt = f"{role_prompt}\n\n{prompt}"
     # 群链路 metadata（§4.3 注入 / §4.4 链 id 透传）：写本轮 user_input 日志
     # metadata_ 列——task-04 turn_completed 互@检测读取（排队派发的透传
     # 见 dispatch_next_queued_message 侧 task-04 接线）。
@@ -300,6 +313,12 @@ async def _trigger_group_member(
         # 互@轮：来源是 Agent 成员（无 user 行）——记成员身份供审计/展示。
         turn_metadata["sender_member_name"] = source_member_name
         turn_metadata["sender_member_kind"] = "agent"
+    if turn_overrides:
+        # 协作轮附加键（task-04，consensus/dm 标记）：在基础链标记之后
+        # merge——新键（consensus_task_id/consensus_role/dm_target_member_id/
+        # dm_kind）不碰 source_* 既有链标记；显式传入同名键时以后者为准
+        # （投影拦截/收口钩子消费，D-007 硬约束链路）。
+        turn_metadata.update(turn_overrides)
 
     shadow, first_run_id = await svc._ensure_shadow_session(
         group,

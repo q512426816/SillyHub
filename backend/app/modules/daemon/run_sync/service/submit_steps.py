@@ -641,6 +641,11 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
             and is_group_projectable_reply(channel, content)
             and not log_entry.segment_id
             and isinstance(content, str)
+            # 2026-09-10-group-agent-direct-chat（D-007 硬驾驭）：拦截轮
+            # 整轮不投影——[[GROUP]] 段也拦（collaborator/coordinator/
+            # 直聊/成员私聊轮不经群时间线，硬拦截不依赖 prompt 自觉）；
+            # converge 轮无 dm_target 放行（最终总结照标记投影进群）。
+            and not st.group_bridge.projection_blocked
         ):
             for seg_idx, seg_text in enumerate(extract_group_broadcast_segments(content)):
                 projection_row = svc._build_group_projection_row(

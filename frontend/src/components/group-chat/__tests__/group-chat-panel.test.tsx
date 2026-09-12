@@ -59,6 +59,9 @@ import {
   containsMentionAll,
   entryFromReplayLog,
   insertSortedGroupEntry,
+  ConsensusStatusCard,
+  parseConsensusCard,
+  parseGroupLiveLog,
   parseReplySnapshot,
   pruneTypingIndicators,
   quoteHeadOf,
@@ -270,6 +273,8 @@ function makeGroupDetail(): Record<string, unknown> {
     agent_cross_mention: true,
     cross_mention_depth: 2,
     context_window: 20,
+    consensus_mode: false,
+    consensus_timeout_seconds: 600,
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,
@@ -2659,3 +2664,152 @@ describe("insertSortedGroupEntry（ql-20260904-002）", () => {
     expect(out.map((e) => e.id)).toEqual(["l0", "l2", "l1"]);
   });
 });
+
+
+// ── 汇总收口状态卡（2026-09-10-group-agent-direct-chat task-10，FR-1.6）──
+
+describe("汇总收口状态卡（task-10）", () => {
+  const cardLog = (phase: string, logId: string): GroupReplayLogEntry => ({
+    id: logId,
+    run_id: "r-carrier",
+    timestamp: "2026-09-10T08:00:00Z",
+    channel: "system",
+    content_redacted: `汇总收口状态：${phase}`,
+    metadata: {
+      consensus_card: {
+        coordinator_name: "小码",
+        phase,
+        members: [
+          { name: "小测", state: "pending" },
+          { name: "小译", state: "delivered" },
+        ],
+        updated_at: "2026-09-10T08:00:01Z",
+      },
+    },
+  });
+
+  it("entryFromReplayLog：channel=system 且 consensus_card → consensus 条目；无卡 system 行 → null", () => {
+    const entry = entryFromReplayLog(cardLog("collecting", "c-1"), "u-me");
+    expect(entry?.kind).toBe("consensus");
+    if (entry?.kind === "consensus") {
+      expect(entry.card.coordinatorName).toBe("小码");
+      expect(entry.card.phase).toBe("collecting");
+      expect(entry.card.members).toEqual([
+        { name: "小测", state: "pending" },
+        { name: "小译", state: "delivered" },
+      ]);
+    }
+    const plain = entryFromReplayLog(
+      { ...cardLog("x", "c-2"), metadata: null } as GroupReplayLogEntry,
+      "u-me",
+    );
+    expect(plain).toBeNull();
+  });
+
+  it("parseGroupLiveLog：实时 system 事件带 metadata.consensus_card → entry；不带 → ignore", () => {
+    const env = {
+      channel: "system",
+      content: "汇总收口状态：converging",
+      log_id: "c-1",
+      timestamp: "2026-09-10T08:00:00Z",
+      run_id: "r-carrier",
+      metadata: {
+        consensus_card: {
+          coordinator_name: "小码",
+          phase: "converging",
+          members: [{ name: "小测", state: "delivered" }],
+          updated_at: "2026-09-10T08:00:02Z",
+        },
+      },
+    } as Parameters<typeof parseGroupLiveLog>[0];
+    const hit = parseGroupLiveLog(env, "u-me");
+    expect(hit.type).toBe("entry");
+    const miss = parseGroupLiveLog(
+      { ...env, metadata: null } as Parameters<typeof parseGroupLiveLog>[0],
+      "u-me",
+    );
+    expect(miss.type).toBe("ignore");
+  });
+
+  it("applyGroupTimelineEvent：consensus 同 log_id 原位替换（D-006 卡面 UPDATE 镜像），不双条", () => {
+    const seen = new Set<string>();
+    const first = applyGroupTimelineEvent([], seen, {
+      type: "entry",
+      entry: {
+        kind: "consensus",
+        id: "c-1",
+        timestamp: "2026-09-10T08:00:00Z",
+        content: "汇总收口状态：collecting",
+        card: {
+          coordinatorName: "小码",
+          phase: "collecting",
+          members: [{ name: "小测", state: "pending" }],
+          updatedAt: "2026-09-10T08:00:01Z",
+        },
+      },
+    });
+    expect(first).toHaveLength(1);
+    // 重发同 id（卡面更新——collecting → closed）：原位替换内容，不追加。
+    const second = applyGroupTimelineEvent(first, seen, {
+      type: "entry",
+      entry: {
+        kind: "consensus",
+        id: "c-1",
+        timestamp: "2026-09-10T08:00:00Z",
+        content: "汇总收口状态：closed",
+        card: {
+          coordinatorName: "小码",
+          phase: "closed",
+          members: [{ name: "小测", state: "delivered" }],
+          updatedAt: "2026-09-10T08:05:00Z",
+        },
+      },
+    });
+    expect(second).toHaveLength(1);
+    const replaced = second[0];
+    expect(replaced?.kind).toBe("consensus");
+    if (replaced?.kind === "consensus") {
+      expect(replaced.card.phase).toBe("closed");
+    }
+    // 普通 agent 条目去重语义不受影响（同 id 跳过）。
+  });
+
+  it("parseConsensusCard：畸形输入容错 → null", () => {
+    expect(parseConsensusCard(null)).toBeNull();
+    expect(parseConsensusCard("x")).toBeNull();
+    expect(parseConsensusCard({ phase: "collecting" })).toBeNull();
+    expect(parseConsensusCard({ coordinator_name: "", phase: "x" })).toBeNull();
+  });
+
+
+  it("ConsensusStatusCard 四态渲染：phase 透传 data-phase + 成员状态点", () => {
+    const mk = (phase: string): Extract<GroupTimelineEntry, { kind: "consensus" }> => ({
+      kind: "consensus",
+      id: "c-1",
+      timestamp: "2026-09-10T08:00:00Z",
+      content: `汇总收口状态：${phase}`,
+      card: {
+        coordinatorName: "小码",
+        phase,
+        members: [
+          { name: "小测", state: "pending" },
+          { name: "小译", state: "delivered" },
+          { name: "小译2", state: "timeout" },
+        ],
+        updatedAt: "2026-09-10T08:00:01Z",
+      },
+    });
+    for (const phase of ["collecting", "converging", "closed", "timeout", "aborted"]) {
+      const { container, unmount } = render(<ConsensusStatusCard entry={mk(phase)} pinnedRowClass="" />);
+      const card = container.querySelector('[data-testid="group-consensus-card"]');
+      expect(card?.getAttribute("data-phase")).toBe(phase);
+      expect(card?.textContent).toContain("小码");
+      const states = container.querySelectorAll('[data-testid="consensus-member-state"]');
+      expect(states).toHaveLength(3);
+      expect(states[0]?.getAttribute("data-state")).toBe("pending");
+      expect(states[1]?.getAttribute("data-state")).toBe("delivered");
+      unmount();
+    }
+  });
+});
+

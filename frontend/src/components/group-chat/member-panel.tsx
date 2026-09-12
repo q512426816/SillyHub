@@ -48,7 +48,7 @@
 
 import { useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Button, Drawer, Input, Modal, Select, Switch, Tooltip } from "antd";
+import { Button, Drawer, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd";
 import { Plus, Square, UserMinus } from "lucide-react";
 
 import { SessionPanel } from "@/components/daemon/session-panel";
@@ -372,6 +372,44 @@ export function MemberPanel({
     },
   });
 
+  /* ── 汇总收口模式（2026-09-10-group-agent-direct-chat task-10，FR-1.1）：
+   *    群级开关 + 超时（60~3600s，D-002 默认关/600）。GroupChatRead 透出
+   *    consensus_mode/consensus_timeout_seconds 顶层列——开关有服务端真值
+   *    （group.consensus_mode），照 typing_preview 先例做乐观本地态 + 局部
+   *    PATCH（顶层列字段，非 settings_json 键级），失败回滚并刷新兜底；
+   *    超时输入 InputNumber（开启动后显示）失焦提交，非法值不发包。 ── */
+  const [consensusMode, setConsensusMode] = useState(group.consensus_mode);
+  const [consensusTimeout, setConsensusTimeout] = useState<number>(
+    group.consensus_timeout_seconds,
+  );
+  const consensusModeMutation = useMutation({
+    mutationFn: (next: boolean) =>
+      updateGroupChat(group.id, { consensus_mode: next }),
+    onMutate: (next) => {
+      setConsensusMode(next);
+    },
+    onError: (err, next) => {
+      setConsensusMode(!next);
+      notify.error(err, "设置失败，请稍后重试");
+    },
+    onSuccess: (_res, next) => {
+      notify.success(next ? "已开启汇总收口模式" : "已关闭汇总收口模式");
+      onRefresh?.();
+    },
+  });
+  const consensusTimeoutMutation = useMutation({
+    mutationFn: (next: number) =>
+      updateGroupChat(group.id, { consensus_timeout_seconds: next }),
+    onError: (err) => {
+      notify.error(err, "超时设置失败，请稍后重试");
+      setConsensusTimeout(group.consensus_timeout_seconds);
+    },
+    onSuccess: (_res, next) => {
+      notify.success(`收口超时已设为 ${next} 秒`);
+      onRefresh?.();
+    },
+  });
+
   /* ── 群聊体验对齐 quick：邀请用户（项目人员多选 → 逐个 POST members user 体；
    *    display_name 默认用户名——后端 GroupMemberUserCreate 同口径）。 ── */
   const inviteMutation = useMutation({
@@ -531,6 +569,57 @@ export function MemberPanel({
           </div>
           <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
             开启后群成员可看到彼此正在输入的草稿内容；关闭时仅显示「正在输入」。
+          </p>
+        </div>
+      )}
+
+      {/* ── 汇总收口模式开关+超时（task-10，D-002 群级开关默认关；开关有
+          服务端真值 group.consensus_mode，与上方 typing_preview 的本地态
+          不同源——updateGroupChat 顶层列局部 PATCH） ── */}
+      {isOwner && (
+        <div className="mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Switch
+              size="small"
+              checked={consensusMode}
+              loading={consensusModeMutation.isPending}
+              onChange={(checked) => consensusModeMutation.mutate(checked)}
+              aria-label="汇总收口模式"
+              data-testid="group-consensus-mode-switch"
+            />
+            <span className="text-[11.5px] font-medium text-foreground">
+              汇总收口模式
+            </span>
+            {consensusMode && (
+              <InputNumber
+                size="small"
+                min={60}
+                max={3600}
+                step={30}
+                value={consensusTimeout}
+                onChange={(v) => {
+                  if (typeof v === "number") setConsensusTimeout(v);
+                }}
+                onBlur={() => {
+                  const clamped = Math.min(
+                    3600,
+                    Math.max(60, Math.round(consensusTimeout)),
+                  );
+                  setConsensusTimeout(clamped);
+                  if (clamped !== group.consensus_timeout_seconds) {
+                    consensusTimeoutMutation.mutate(clamped);
+                  }
+                }}
+                addonAfter="秒"
+                className="ml-auto w-[130px]"
+                aria-label="收口超时秒数"
+                data-testid="group-consensus-timeout-input"
+              />
+            )}
+          </div>
+          <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+            开启后，一条消息 @ 多个 Agent 时由汇总人收齐各成员意见后统一发群；
+            超时（60~3600 秒）未收齐则按已到意见收口。
           </p>
         </div>
       )}

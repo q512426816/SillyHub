@@ -1,0 +1,3932 @@
+diff --git a/backend/app/main.py b/backend/app/main.py
+index b8c0d09bc..edca5745e 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -130,6 +130,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+     # Wave2：定时消息到点派发常驻协程占位——同样先占 None 保证 bootstrap 抛错
+     # 走 finally 时不会因未定义而掩盖原始异常（对齐上方三协程注释）。
+     scheduled_send_task: asyncio.Task[None] | None = None
++    consensus_sweep_task: asyncio.Task[None] | None = None
+     try:
+         # Bootstrap auth once the DB connection pool exists.
+         from app.core.db import get_engine, get_session_factory
+@@ -283,12 +284,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+         # scheduled_send.py 模块 docstring）。关停走 finally 的 cancel +
+         # await gather（对齐 session_reconnect_sweeper——巡检轮内有 DB 写，
+         # 须等取消落地）。
++        from app.modules.daemon.group.service import consensus_sweeper_loop
+         from app.modules.daemon.scheduled_send import scheduled_send_sweeper
+ 
+         scheduled_send_task = asyncio.create_task(
+             scheduled_send_sweeper(), name="scheduled-send-sweeper"
+         )
+         log.info("scheduled_send_sweeper_started")
++        # 2026-09-10-group-agent-direct-chat task-09（design §12）：汇总
++        # 收口超时 sweeper——30s 周期扫 open 且 deadline 过的共识任务，超时
++        # 收口（timed_out 版收口指令 / 零 delivered 则 aborted）、群解散
++        # 静默 aborted。关停契约同 scheduled_send_sweeper（cancel + await
++        # gather；巡检轮内有 DB 写，须等取消落地）。
++        consensus_sweep_task = asyncio.create_task(
++            consensus_sweeper_loop(), name="consensus-sweeper"
++        )
++        log.info("consensus_sweeper_started")
+         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
+         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
+         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
+@@ -339,6 +350,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+         if scheduled_send_task is not None:
+             scheduled_send_task.cancel()
+             await asyncio.gather(scheduled_send_task, return_exceptions=True)
++        if consensus_sweep_task is not None:
++            consensus_sweep_task.cancel()
++            await asyncio.gather(consensus_sweep_task, return_exceptions=True)
+         # ql-20260910-005：spec_workspace reparse 后台任务排空——巡检类协程
+         # 是「取消即走」，reparse 任务不同：每步是独立短事务（取消会回滚到
+         # 上一致投影，但截断中的事务退出路径不可控），且尾随节流窗内的补发
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index 5ac0f050a..d9e95d4fa 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -1401,6 +1401,19 @@ class AgentGroupChat(BaseModel, table=True):
+         default=20,
+         sa_column=Column(Integer, nullable=False, default=20),
+     )
++    # 汇总收口模式开关（2026-09-10-group-agent-direct-chat design §5.2，默认
++    # 关——存量群零行为变化；开启后一条消息 @ ≥2 个 agent 成员时由首个被 @
++    # 成员作汇总人收口，其余成员意见私下转交，见 consensus 任务表）。
++    consensus_mode: bool = Field(
++        default=False,
++        sa_column=Column(Boolean, nullable=False, default=False),
++    )
++    # 汇总收口超时秒数（design §5.2/D-004，默认 600、范围 60~3600 由 schema
++    # 层校验；超时由后台 sweeper 强制收口并标注未响应成员）。
++    consensus_timeout_seconds: int = Field(
++        default=600,
++        sa_column=Column(Integer, nullable=False, default=600),
++    )
+     # 预留护栏参数等（§3.2 settings_json；首期空置）。
+     settings_json: dict | None = Field(
+         default=None,
+@@ -1609,6 +1622,91 @@ class AgentGroupMember(BaseModel, table=True):
+     )
+ 
+ 
++class AgentGroupConsensusTask(BaseModel, table=True):
++    """群聊汇总收口任务（2026-09-10-group-agent-direct-chat design §5.2，D-008）。
++
++    一行 = 一条触发消息的汇总任务（状态机唯一状态源，崩溃可恢复）：
++    carrier_run_id UNIQUE 防同消息重复建任务；members JSONB 存被咨询成员
++    明细（不含汇总人）；deadline_at 供后台 sweeper（30s 扫描）超时强制
++    收口。状态流：open → closing（收口指令已注入）/ timeout（超时收口）
++    → closed（收口轮完成）；异常终态 aborted（coordinator 触发失败/影子
++    不可用/群解散/零意见超时，design §12）。
++    """
++
++    __tablename__ = "agent_group_consensus_tasks"
++    __table_args__ = (
++        # 按群查活跃任务（发送侧判定/群设置展示）。
++        Index("ix_agct_group", "group_id"),
++        # sweeper 扫描谓词（status='open' AND deadline_at < now()）。
++        Index("ix_agct_status_deadline", "status", "deadline_at"),
++    )
++
++    id: uuid.UUID = Field(
++        default_factory=uuid.uuid4,
++        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
++    )
++    # 群删级联清任务（对齐 AgentGroupMember.group_id 先例）。
++    group_id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("agent_group_chats.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++    )
++    # 触发消息载体 run（唯一——同消息不重复建任务；run 硬删随任务删，群
++    # 会话硬删→群删→任务删链一致）。
++    carrier_run_id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("agent_runs.id", ondelete="CASCADE"),
++            nullable=False,
++            unique=True,
++        ),
++    )
++    # 汇总人成员行（FK 随成员硬删；软删 removed_at 不触发，收口钩子侧
++    # 健康检查拦截，design §12.2/12.3）。
++    coordinator_member_id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("agent_group_members.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++    )
++    # open/closing/closed/timeout/aborted（应用层状态机控制，模型不设默认）。
++    status: str = Field(sa_column=Column(String(16), nullable=False))
++    # 被咨询成员明细（不含汇总人）：[{member_id, member_name, state:
++    # pending|delivered|failed|timeout, delivered_at}]——JSONB 快照而非关联
++    # 表，成员状态变更整体覆写（任务行锁内，D-008 单表方案）。
++    members: list = Field(
++        default_factory=list,
++        sa_column=Column(JSON, nullable=False, default=list),
++    )
++    # 超时死线（触发时刻 + group.consensus_timeout_seconds）。
++    deadline_at: datetime = Field(
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
++    created_by: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("users.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++    )
++    created_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(
++            DateTime(timezone=True),
++            nullable=False,
++            server_default=text("now()"),
++        ),
++    )
++    # 收口完成/中止时刻（closed/timeout/aborted 终态时回写）。
++    converged_at: datetime | None = Field(
++        default=None,
++        sa_column=Column(DateTime(timezone=True), nullable=True),
++    )
++
++
+ class ConstraintsJSON(TypeDecorator):
+     """mission.constraints 列的类型装饰器（ql-20260831-008-6876）。
+ 
+diff --git a/backend/app/modules/agent/schema.py b/backend/app/modules/agent/schema.py
+index 79e9b1351..0e047ffef 100644
+--- a/backend/app/modules/agent/schema.py
++++ b/backend/app/modules/agent/schema.py
+@@ -407,6 +407,15 @@ class GroupChatCreate(BaseModel):
+         default=4, ge=1, le=8, description="协作链深度上限（防环护栏）"
+     )
+     context_window: int = Field(default=20, ge=1, le=100, description="群背景摘要条数")
++    # 2026-09-10-group-agent-direct-chat（D-002）：汇总收口模式，默认关——
++    # 存量群零行为变化；开启后多 @ 消息由首个被 @ 成员收口汇总。
++    consensus_mode: bool = Field(default=False, description="汇总收口模式开关（默认关）")
++    consensus_timeout_seconds: int = Field(
++        default=600,
++        ge=60,
++        le=3600,
++        description="汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）",
++    )
+     user_members: list[GroupMemberUserCreate] = Field(default_factory=list)
+     agent_members: list[GroupMemberAgentConfig] = Field(default_factory=list)
+ 
+@@ -421,6 +430,9 @@ class GroupChatUpdate(BaseModel):
+     agent_cross_mention: bool | None = None
+     cross_mention_depth: int | None = Field(default=None, ge=1, le=8)
+     context_window: int | None = Field(default=None, ge=1, le=100)
++    # 2026-09-10-group-agent-direct-chat（D-002）：None=不改（逐字段局部更新）。
++    consensus_mode: bool | None = None
++    consensus_timeout_seconds: int | None = Field(default=None, ge=60, le=3600)
+     # quick 群 P1（2026-09-02）互@护栏群级可配：``settings_json.guardrails`` 子键
+     # 写入（rate_limit_per_minute / member_trigger_limit / chain_ttl_seconds）。
+     # quick 群 P2（2026-09-02）增 ``typing_preview`` 顶层布尔键（typing 草稿预览
+@@ -509,6 +521,9 @@ class GroupChatRead(BaseModel):
+     agent_cross_mention: bool
+     cross_mention_depth: int
+     context_window: int
++    # 2026-09-10-group-agent-direct-chat：汇总收口模式设置透出（向导/群设置区消费）。
++    consensus_mode: bool
++    consensus_timeout_seconds: int
+     created_at: datetime
+     ended_at: datetime | None = None
+     deleted_at: datetime | None = None
+diff --git a/backend/app/modules/daemon/group/service/__init__.py b/backend/app/modules/daemon/group/service/__init__.py
+index c84125408..e23cc090f 100644
+--- a/backend/app/modules/daemon/group/service/__init__.py
++++ b/backend/app/modules/daemon/group/service/__init__.py
+@@ -199,6 +199,28 @@ from app.modules.daemon.session_events import (
+ log = get_logger(__name__)
+ 
+ # ── 聚合重导出（import 面 + patch 面，D-006/D-007）─────────────────────────
++from .consensus import (  # noqa: E402
++    CONSENSUS_MEMBER_DELIVERED,
++    CONSENSUS_MEMBER_FAILED,
++    CONSENSUS_MEMBER_PENDING,
++    CONSENSUS_MEMBER_TIMEOUT,
++    CONSENSUS_PHASE_ABORTED,
++    CONSENSUS_PHASE_COLLECTING,
++    CONSENSUS_PHASE_CONVERGING,
++    CONSENSUS_TASK_ABORTED,
++    CONSENSUS_TASK_CLOSED,
++    CONSENSUS_TASK_CLOSING,
++    CONSENSUS_TASK_OPEN,
++    CONSENSUS_TASK_TIMEOUT,
++    collect_collaborator_opinion,
++    consensus_member_states,
++    consensus_sweep_once,
++    consensus_sweeper_loop,
++    create_consensus_task,
++    inject_converge_directive,
++    record_collaborator_outcome,
++    write_consensus_card,
++)
+ from .helpers import (  # noqa: E402
+     _LLM_PROVIDER_MISSING_WARNING,
+     GROUP_AGENT_MEMBER_LIMIT,
+@@ -308,6 +330,19 @@ from .typing_presence import (  # noqa: E402
+ # 绑定）——显式声明兼容面，杜绝子模块内部符号意外泄漏 / 遗漏。
+ __all__ = [
+     "BROADCAST_MENTION_WORDS",
++    # consensus（2026-09-10-group-agent-direct-chat task-07：状态机 import 面）
++    "CONSENSUS_MEMBER_DELIVERED",
++    "CONSENSUS_MEMBER_FAILED",
++    "CONSENSUS_MEMBER_PENDING",
++    "CONSENSUS_MEMBER_TIMEOUT",
++    "CONSENSUS_PHASE_ABORTED",
++    "CONSENSUS_PHASE_COLLECTING",
++    "CONSENSUS_PHASE_CONVERGING",
++    "CONSENSUS_TASK_ABORTED",
++    "CONSENSUS_TASK_CLOSED",
++    "CONSENSUS_TASK_CLOSING",
++    "CONSENSUS_TASK_OPEN",
++    "CONSENSUS_TASK_TIMEOUT",
+     "GROUP_AGENT_MEMBER_LIMIT",
+     "GROUP_CARRIER_SPEC_STRATEGY",
+     "GROUP_CHAIN_DEPTH_FIELD",
+@@ -383,6 +418,11 @@ __all__ = [
+     "_user_display_name",
+     "_validate_display_name",
+     "_validate_guardrail_overrides",
++    "collect_collaborator_opinion",
++    "consensus_member_states",
++    "consensus_sweep_once",
++    "consensus_sweeper_loop",
++    "create_consensus_task",
+     "detect_cross_mentions",
+     "get_active_user_membership",
+     "get_group_accessible_session",
+@@ -397,13 +437,16 @@ __all__ = [
+     "group_presence_key",
+     "group_rate_key",
+     "group_typing_channel",
++    "inject_converge_directive",
+     "log",
+     "prepare_shadow_direct_turn",
+     "publish_member_presence",
+     "publish_sessions_changed",
++    "record_collaborator_outcome",
+     "release_member_presence",
+     "resolve_shadow_member",
+     "run_cross_mention_detection",
++    "write_consensus_card",
+ ]
+ 
+ # ── 子模块（import 即注册；GroupChatService 类壳在其后定义。仅列持有方法体
+@@ -635,6 +678,8 @@ class GroupChatService:
+         carrier_run_id: uuid.UUID,
+         exclude_log_id: uuid.UUID | None,
+         attachment_ids: list[uuid.UUID] | None = None,
++        role_prompt: str | None = None,
++        turn_overrides: dict | None = None,
+     ) -> GroupMemberTriggerRead:
+         return await _messages._trigger_member_isolated(
+             self,
+@@ -647,6 +692,8 @@ class GroupChatService:
+             carrier_run_id=carrier_run_id,
+             exclude_log_id=exclude_log_id,
+             attachment_ids=attachment_ids,
++            role_prompt=role_prompt,
++            turn_overrides=turn_overrides,
+         )
+ 
+     async def _validate_group_attachments(
+@@ -724,6 +771,8 @@ class GroupChatService:
+         source_member_name: str | None = None,
+         chain_depth: int = 0,
+         attachment_rows: list | None = None,
++        role_prompt: str | None = None,
++        turn_overrides: dict | None = None,
+     ) -> GroupMemberTriggerRead:
+         return await _shadow._trigger_group_member(
+             self,
+@@ -739,6 +788,8 @@ class GroupChatService:
+             source_member_name=source_member_name,
+             chain_depth=chain_depth,
+             attachment_rows=attachment_rows,
++            role_prompt=role_prompt,
++            turn_overrides=turn_overrides,
+         )
+ 
+     async def _get_shadow_active_run(self, shadow_session_id: uuid.UUID) -> AgentRun | None:
+diff --git a/backend/app/modules/daemon/group/service/consensus.py b/backend/app/modules/daemon/group/service/consensus.py
+new file mode 100644
+index 000000000..9877f2691
+--- /dev/null
++++ b/backend/app/modules/daemon/group/service/consensus.py
+@@ -0,0 +1,687 @@
++"""群聊汇总收口任务状态机（2026-09-10-group-agent-direct-chat design §5.2/§5.6）。
++
++首版（task-03）：建任务（``create_consensus_task``）+ 协调状态卡（channel='system'
++落库行，挂任务载体 run——回放走群会话 logs 聚合天然覆盖，与投影行同机制；
++更新=UPDATE 同 log 行 + 同 log_id 重发群频道 log 事件）。状态机扩展（成员登记/
++收口判定/收口指令注入，task-07）与超时扫描循环（task-09）在本文件增量。
++
++设计要点（D-008）：本表是汇总任务唯一状态源——崩溃重启后未超时任务由收口
++钩子继续推进、超时任务被 sweeper 扫到，协调链不悬挂。
++"""
++
++from __future__ import annotations
++
++import asyncio
++import uuid
++from datetime import UTC, datetime, timedelta
++from typing import TYPE_CHECKING
++
++from sqlalchemy import select
++
++import app.modules.daemon.group.service as _gsvc
++from app.core.errors import AppError
++from app.modules.agent.model import (
++    AgentGroupChat,
++    AgentGroupConsensusTask,
++    AgentGroupMember,
++    AgentRunLog,
++    AgentSession,
++)
++
++from .helpers import (
++    CONSENSUS_OPINION_MAX_CHARS,
++    CONVERGE_DIRECTIVE,
++    OPINION_TRANSFER_HEADER,
++)
++
++if TYPE_CHECKING:
++    from sqlalchemy.ext.asyncio import AsyncSession
++
++# 任务状态词表（design §5.2）：open → closing（收口指令已注入）/ timeout（超时
++# 收口指令已注入）→ closed（收口轮完成）；异常终态 aborted（coordinator 触发
++# 失败/影子不可用/群解散/零意见超时，design §12）。
++CONSENSUS_TASK_OPEN = "open"
++CONSENSUS_TASK_CLOSING = "closing"
++CONSENSUS_TASK_CLOSED = "closed"
++CONSENSUS_TASK_TIMEOUT = "timeout"
++CONSENSUS_TASK_ABORTED = "aborted"
++
++# 成员明细状态词表：pending（已触发待回复）/ delivered（意见已转交汇总人）/
++# failed（触发失败或回复失败）/ timeout（超时未响应）。
++CONSENSUS_MEMBER_PENDING = "pending"
++CONSENSUS_MEMBER_DELIVERED = "delivered"
++CONSENSUS_MEMBER_FAILED = "failed"
++CONSENSUS_MEMBER_TIMEOUT = "timeout"
++
++# 状态卡 phase 词表（design §5.6）：collecting（意见收集）→ converging（收口
++# 中）→ closed/timeout/aborted（终态，复用任务状态常量语义，别名分层）。
++CONSENSUS_PHASE_COLLECTING = "collecting"
++CONSENSUS_PHASE_CONVERGING = "converging"
++CONSENSUS_PHASE_CLOSED = CONSENSUS_TASK_CLOSED
++CONSENSUS_PHASE_TIMEOUT = CONSENSUS_TASK_TIMEOUT
++CONSENSUS_PHASE_ABORTED = CONSENSUS_TASK_ABORTED
++
++# 状态卡 content 单行摘要截断（成员名单过长时省略号收口）。
++_CONSENSUS_CARD_CONTENT_MAX_CHARS = 200
++
++
++async def create_consensus_task(
++    db: "AsyncSession",
++    *,
++    group: AgentGroupChat,
++    carrier_run_id: uuid.UUID,
++    coordinator: AgentGroupMember,
++    collaborators: list[AgentGroupMember],
++    created_by: uuid.UUID,
++    timeout_seconds: int | None = None,
++    source_summary: str = "",
++) -> AgentGroupConsensusTask:
++    """建汇总任务 + 落协调状态卡（design §5.3 步 4，发送侧汇总分支调用）。
++
++    - 幂等：``carrier_run_id`` 唯一约束防同消息重复建任务——冲突时查既有
++      任务返回（不重复落状态卡）；
++    - members 明细初始化 pending（不含汇总人，design §5.2 JSONB 快照）；
++    - deadline = 触发时刻 + 群 ``consensus_timeout_seconds``（sweeper 扫描
++      谓词锚点，D-004）；
++    - 状态卡（``_write_consensus_card``）随任务同 session 落库，phase=
++      collecting。
++    """
++    now = datetime.now(UTC)
++    existing = (
++        (
++            await db.execute(
++                select(AgentGroupConsensusTask).where(
++                    AgentGroupConsensusTask.carrier_run_id == carrier_run_id
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++    if existing is not None:
++        return existing
++
++    task = AgentGroupConsensusTask(
++        group_id=group.id,
++        carrier_run_id=carrier_run_id,
++        coordinator_member_id=coordinator.id,
++        status=CONSENSUS_TASK_OPEN,
++        members=[
++            {
++                "member_id": str(m.id),
++                "member_name": m.display_name,
++                "state": CONSENSUS_MEMBER_PENDING,
++                "delivered_at": None,
++            }
++            for m in collaborators
++        ],
++        deadline_at=now
++        + timedelta(
++            seconds=timeout_seconds
++            if timeout_seconds is not None
++            else group.consensus_timeout_seconds
++        ),
++        created_by=created_by,
++        created_at=now,
++        # 触发消息摘要（收口指令 prompt 复用；状态卡不含——卡片只显成员态）。
++        # 注意：AgentGroupConsensusTask 无独立列，摘要经状态卡 metadata 透出
++        # 由调用方组装收口 prompt 时重查原消息（design §5.4 第 4 步）。
++    )
++    db.add(task)
++    await db.flush()
++
++    await write_consensus_card(
++        db,
++        group=group,
++        task=task,
++        coordinator_name=coordinator.display_name,
++        phase=CONSENSUS_PHASE_COLLECTING,
++        source_summary=source_summary,
++    )
++    return task
++
++
++def consensus_member_states(task: AgentGroupConsensusTask) -> list[dict]:
++    """任务成员明细（JSONB 快照）安全读取——异常形态归一空列表。
++
++    返回**深拷贝**（逐行 ``dict(m)``）：调用方原地改行后重新赋 ``task.members``
++    时，新旧值不得 ``==`` 相等——否则 SQLAlchemy History 判定未变不生成
++    UPDATE（同 dict 引用修改即踩坑，单测诊断实录）。
++    """
++    raw = task.members or []
++    return [dict(m) for m in raw if isinstance(m, dict)]
++
++
++def _card_content(
++    coordinator_name: str,
++    phase: str,
++    members: list[dict],
++) -> str:
++    """状态卡人类可读单行摘要（design §5.6：content 列，回放直显）。
++
++    形态对照原型 prototype-consensus-mode.html：进行中=「⏳ 汇总收集中：
++    {汇总人} 收口 · 已交 {n}/{total}」；converging=「🔄 汇总收口中…」；
++    终态按 task.status 渲染（closed=✅/timeout=⌛/aborted=⛔）。
++    """
++    total = len(members)
++    delivered = sum(1 for m in members if m.get("state") == CONSENSUS_MEMBER_DELIVERED)
++    if phase == CONSENSUS_PHASE_COLLECTING:
++        return f"⏳ 汇总收集中：「{coordinator_name}」负责收口 · 已交意见 {delivered}/{total}"
++    if phase == CONSENSUS_PHASE_CONVERGING:
++        return f"🔄 汇总收口中：「{coordinator_name}」正在整合 {delivered} 份意见并输出群内总结"
++    if phase == CONSENSUS_TASK_TIMEOUT:
++        return (
++            f"⌛ 汇总已超时收口：「{coordinator_name}」基于已收意见收口（未响应成员已在总结中标注）"
++        )
++    if phase == CONSENSUS_TASK_ABORTED:
++        return f"⛔ 汇总协作中止：汇总人「{coordinator_name}」未能参与本轮协作"
++    return f"✅ 汇总已完成：「{coordinator_name}」已输出群内总结（{delivered}/{total} 份意见）"
++
++
++async def write_consensus_card(
++    db: "AsyncSession",
++    *,
++    group: AgentGroupChat,
++    task: AgentGroupConsensusTask,
++    coordinator_name: str,
++    phase: str,
++    source_summary: str = "",
++) -> AgentRunLog | None:
++    """写/更新协调状态卡（design §5.6：UPDATE 单行模式 + 同 log_id 重发）。
++
++    - 定位：任务载体 run 下唯一 ``channel='system'`` 行（一条消息一个任务
++      一张卡，run_id+channel 唯一定位，免 JSON 谓词跨方言）；
++    - 首写 INSERT、后续 UPDATE 同行 content/metadata_；timestamp 不动（保留
++      卡片首现时刻，排序稳定）；
++    - 实时推送：同 log_id 重发群频道 log 事件（前端按 log_id 内容替换，
++      prototype 状态卡两态）——publish 容错语义同 _publish_group_channel_event。
++
++    返回状态卡 log 行（None=落库失败防御口径，不阻断主流程）。
++    """
++    now = datetime.now(UTC)
++    members = consensus_member_states(task)
++    card_meta = {
++        "consensus_task_id": str(task.id),
++        "consensus_card": {
++            "coordinator_name": coordinator_name,
++            "phase": phase,
++            "members": [
++                {"name": m.get("member_name", "?"), "state": m.get("state", "?")} for m in members
++            ],
++            "updated_at": now.isoformat(),
++        },
++    }
++    if source_summary:
++        card_meta["consensus_source_summary"] = source_summary[:200]
++    content = _card_content(coordinator_name, phase, members)[:_CONSENSUS_CARD_CONTENT_MAX_CHARS]
++
++    card = (
++        (
++            await db.execute(
++                select(AgentRunLog).where(
++                    AgentRunLog.run_id == task.carrier_run_id,
++                    AgentRunLog.channel == "system",
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++    if card is None:
++        card = AgentRunLog(
++            run_id=task.carrier_run_id,
++            channel="system",
++            content_redacted=content,
++            metadata_=card_meta,
++            timestamp=now,
++        )
++        db.add(card)
++        await db.flush()
++    else:
++        card.content_redacted = content
++        card.metadata_ = card_meta
++        await db.flush()
++
++    # 同 log_id 重发（SSE 内容替换）：channel='system' 形态照 typing_presence
++    # 系统行（ephemeral 版不落库；本卡落库可回放——重发 payload 带 log_id 供
++    # 前端去重定位）。
++    await _gsvc._publish_group_channel_event(
++        group.session_id,
++        {
++            "event": "log",
++            "session_id": str(group.session_id),
++            "run_id": str(task.carrier_run_id),
++            "log_id": str(card.id),
++            "channel": "system",
++            "content": content,
++            "metadata": card_meta,
++            "timestamp": now.isoformat(),
++        },
++    )
++    return card
++
++
++# ── 状态机扩展（task-07，design §5.4 / §7）────────────────────────────────
++
++
++async def collect_collaborator_opinion(db: "AsyncSession", *, run_id: uuid.UUID) -> str | None:
++    """聚合影子 run 全量 assistant 文本为单成员意见（design §5.4 步 1）。
++
++    口径照 ``_build_group_fallback_summary``：``is_group_projectable_reply``
++    同源过滤（thinking/tool/stderr/系统行不进意见）+ 剥 ``[ASSISTANT]`` 前缀，
++    **全段拼接**（协作轮无投影行——投影层已拦截，意见以影子 run 为唯一
++    源）；末段截 ``CONSENSUS_OPINION_MAX_CHARS``（收口 prompt 预算）。
++    整轮无可取文本（纯工具轮）返回 None——调用方登记 failed（无意见可交）。
++    """
++    from app.modules.daemon.run_sync.service.group_bridge import is_group_projectable_reply
++
++    rows = (
++        await db.execute(
++            select(AgentRunLog.channel, AgentRunLog.content_redacted)
++            .where(AgentRunLog.run_id == run_id)
++            .order_by(AgentRunLog.timestamp, AgentRunLog.id)
++        )
++    ).all()
++    parts: list[str] = []
++    for channel, content in rows:
++        if not is_group_projectable_reply(channel, content):
++            continue
++        text = (content or "").strip()
++        if text.startswith("[ASSISTANT]"):
++            text = text[len("[ASSISTANT]") :].strip()
++        if text:
++            parts.append(text)
++    if not parts:
++        return None
++    return "\n".join(parts)[:CONSENSUS_OPINION_MAX_CHARS]
++
++
++async def deliver_collaborator_opinion(
++    db: "AsyncSession",
++    *,
++    group: AgentGroupChat,
++    target_member: AgentGroupMember,
++    source_member_name: str,
++    opinion_text: str,
++    task: AgentGroupConsensusTask | None = None,
++    source_summary: str = "",
++) -> None:
++    """意见定向注入目标成员影子会话（design §5.4 步 2，收口钩子调用）。
++
++    - 注入 prompt = ``OPINION_TRANSFER_HEADER``（意见转交 preamble，多任务
++      并行时 source_summary 标注来源消息摘要）+ 意见全文（常量已含正文槽）；
++    - 注入轮 metadata：consensus 上下文（task 非 None）→ coordinator 角色
++      （消化意见轮不进群，D-007）；互@私聊（task=None）→ agent_dm 直达
++      （无任务推进，仅转交）；
++    - busy_strategy="inject" 忙轮中途注入 + 409 竞态降级排队（与群消息/
++      直聊同机制）；注入失败 AppError 上抛——调用方（收口钩子）决定登记
++      failed 还是忽略（互@私聊转交失败仅记日志）。
++
++    独立短 session 注入（对齐 ``_trigger_member_isolated``：钩子在收口事务
++    外调用，注入自持事务边界；``db`` 形参保留 §7 签名兼容，仅用于日志上下文）。
++    """
++    from app.core.db import get_session_factory
++    from app.modules.daemon.session.service import DaemonSessionTurnConflict
++
++    turn_metadata: dict = {"source": "shadow_direct"}
++    if task is not None:
++        turn_metadata.update(
++            {
++                "source_carrier_run_id": str(task.carrier_run_id),
++                "consensus_task_id": str(task.id),
++                "consensus_role": "coordinator",
++                "dm_kind": "consensus",
++            }
++        )
++    prompt = OPINION_TRANSFER_HEADER.format(
++        source_name=source_member_name,
++        source_summary=source_summary or "（无摘要）",
++        opinion_text=opinion_text,
++    )
++    async with get_session_factory()() as inj_db:
++        try:
++            await _gsvc.SessionService(inj_db).inject_session_as_service(
++                target_member.shadow_session_id,
++                prompt=prompt,
++                busy_strategy="inject",
++                queue_when_busy=True,
++                queue_sender_user_id=group.created_by,
++                turn_metadata=turn_metadata,
++            )
++        except DaemonSessionTurnConflict:
++            await _gsvc.SessionService(inj_db).inject_session_as_service(
++                target_member.shadow_session_id,
++                prompt=prompt,
++                queue_when_busy=True,
++                queue_sender_user_id=group.created_by,
++                turn_metadata=turn_metadata,
++            )
++
++
++async def record_collaborator_outcome(
++    db: "AsyncSession",
++    *,
++    task_id: uuid.UUID,
++    member_id: uuid.UUID,
++    state: str,
++    opinion_text: str | None = None,
++) -> None:
++    """登记协作成员终态 + 状态卡 + 收口判定（design §5.4 步 3，内聚）。
++
++    行锁读任务行（``FOR UPDATE``——并发钩子/超时 sweeper 互斥；SQLite 测试
++    环境静默忽略锁）→ 更新成员明细（state + delivered_at + opinion 快照
++    落 JSONB——收口指令的意见全文源，崩溃安全）→ 状态卡 UPDATE 重发 →
++    收口判定：全员终态（delivered|failed|timeout）且 ≥1 delivered 且任务
++    仍 open → ``inject_converge_directive``（等齐版）；零 delivered 全终态
++    → aborted（无意见可收，design §12.1 语义）。
++
++    幂等：成员已是终态时跳过（重复钩子/重放安全）；任务非 open（closing/
++    closed/timeout/aborted）仅补登记不动状态机。
++    """
++    task = (
++        (
++            await db.execute(
++                select(AgentGroupConsensusTask)
++                .where(AgentGroupConsensusTask.id == task_id)
++                .with_for_update()
++            )
++        )
++        .scalars()
++        .first()
++    )
++    if task is None:
++        _gsvc.log.warning("consensus_task_missing_on_outcome", task_id=str(task_id))
++        return
++    group = await db.get(AgentGroupChat, task.group_id)
++    coordinator = await db.get(AgentGroupMember, task.coordinator_member_id)
++    if group is None or coordinator is None:
++        return
++    states = consensus_member_states(task)
++    row = next((r for r in states if r.get("member_id") == str(member_id)), None)
++    if row is None:
++        return
++    if row.get("state") in (
++        CONSENSUS_MEMBER_DELIVERED,
++        CONSENSUS_MEMBER_FAILED,
++        CONSENSUS_MEMBER_TIMEOUT,
++    ):
++        return  # 幂等：终态不可逆
++    row["state"] = state
++    if state == CONSENSUS_MEMBER_DELIVERED:
++        row["delivered_at"] = datetime.now(UTC).isoformat()
++        if opinion_text:
++            row["opinion"] = opinion_text
++    task.members = states
++    await db.flush()
++    if task.status != CONSENSUS_TASK_OPEN:
++        await db.commit()
++        return
++    delivered = [r for r in states if r.get("state") == CONSENSUS_MEMBER_DELIVERED]
++    terminal = all(
++        r.get("state")
++        in (CONSENSUS_MEMBER_DELIVERED, CONSENSUS_MEMBER_FAILED, CONSENSUS_MEMBER_TIMEOUT)
++        for r in states
++    )
++    if not terminal:
++        await write_consensus_card(
++            db,
++            group=group,
++            task=task,
++            coordinator_name=coordinator.display_name,
++            phase=CONSENSUS_PHASE_COLLECTING,
++        )
++        await db.commit()
++        return
++    if not delivered:
++        task.status = CONSENSUS_TASK_ABORTED
++        task.converged_at = datetime.now(UTC)
++        await write_consensus_card(
++            db,
++            group=group,
++            task=task,
++            coordinator_name=coordinator.display_name,
++            phase=CONSENSUS_PHASE_ABORTED,
++        )
++        await db.commit()
++        return
++    await inject_converge_directive(db, task=task, timed_out=False)
++    await db.commit()
++
++
++async def inject_converge_directive(
++    db: "AsyncSession",
++    *,
++    task: AgentGroupConsensusTask,
++    timed_out: bool,
++) -> None:
++    """收口指令注入 coordinator 影子会话（design §5.4 步 4，等齐/超时两版）。
++
++    - prompt = ``CONVERGE_DIRECTIVE``：触发消息摘要 + 各 delivered 成员
++      意见全文（members JSONB 快照）+ 未响应名单（timeout/failed 成员）；
++    - 轮 metadata：``{consensus_task_id, consensus_role: "converge",
++      source_carrier_run_id}``——**无 dm_target**，投影放行（``[[GROUP]]``
++      总结段进群，D-007 唯一例外）；
++    - 健康检查（§12.2）：注入前查 coordinator 影子会话——ended/缺失 →
++      任务 aborted + 状态卡终态（不再注入）；注入 AppError 失败（机器
++      不可用/队列满等）同 aborted 路径（超时版由 sweeper 幂等跳过——
++      status 已非 open 不会二次注入）；
++    - timed_out：超时版未响应成员标注 timeout；status → timeout（非
++      closing——语义可区分回放审计）。
++    """
++    group = await db.get(AgentGroupChat, task.group_id)
++    coordinator = await db.get(AgentGroupMember, task.coordinator_member_id)
++    if group is None or coordinator is None:
++        return
++    shadow = await db.get(AgentSession, coordinator.shadow_session_id)
++    if shadow is None or shadow.ended_at is not None:
++        _gsvc.log.warning(
++            "consensus_converge_coordinator_unhealthy",
++            task_id=str(task.id),
++            shadow_session_id=str(coordinator.shadow_session_id),
++        )
++        task.status = CONSENSUS_TASK_ABORTED
++        task.converged_at = datetime.now(UTC)
++        await write_consensus_card(
++            db,
++            group=group,
++            task=task,
++            coordinator_name=coordinator.display_name,
++            phase=CONSENSUS_PHASE_ABORTED,
++        )
++        return
++
++    states = consensus_member_states(task)
++    delivered = [r for r in states if r.get("state") == CONSENSUS_MEMBER_DELIVERED]
++    non_responders = [
++        str(r.get("member_name", "?"))
++        for r in states
++        if r.get("state") in (CONSENSUS_MEMBER_TIMEOUT, CONSENSUS_MEMBER_FAILED)
++    ]
++    if timed_out:
++        for r in states:
++            if r.get("state") == CONSENSUS_MEMBER_PENDING:
++                r["state"] = CONSENSUS_MEMBER_TIMEOUT
++        task.members = states
++        non_responders = [
++            str(r.get("member_name", "?"))
++            for r in states
++            if r.get("state") in (CONSENSUS_MEMBER_TIMEOUT, CONSENSUS_MEMBER_FAILED)
++        ]
++    opinions = "\n\n".join(
++        f"── 「{r.get('member_name', '?')}」的意见 ──\n{r.get('opinion', '（无文本）')}"
++        for r in delivered
++    )
++    # 触发消息摘要源=载体 run 的 user_input 原文（非 metadata 键——发送侧
++    # user_input metadata 不带 consensus 键，卡面摘要仅落状态卡 metadata）。
++    carrier_content = (
++        (
++            await db.execute(
++                select(AgentRunLog.content_redacted).where(
++                    AgentRunLog.run_id == task.carrier_run_id,
++                    AgentRunLog.channel == "user_input",
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++    source_summary = (carrier_content or "").strip()[:120]
++
++    from app.core.db import get_session_factory
++    from app.modules.daemon.session.service import DaemonSessionTurnConflict
++
++    prompt = CONVERGE_DIRECTIVE.format(
++        source_summary=source_summary or "（见前文触发消息）",
++        opinions=opinions or "（无）",
++        non_responders="、".join(non_responders) or "无",
++    )
++    turn_metadata = {
++        "consensus_task_id": str(task.id),
++        "consensus_role": "converge",
++        "source_carrier_run_id": str(task.carrier_run_id),
++    }
++    task.status = CONSENSUS_TASK_TIMEOUT if timed_out else CONSENSUS_TASK_CLOSING
++    await write_consensus_card(
++        db,
++        group=group,
++        task=task,
++        coordinator_name=coordinator.display_name,
++        phase=CONSENSUS_PHASE_CONVERGING,
++    )
++    try:
++        async with get_session_factory()() as inj_db:
++            try:
++                await _gsvc.SessionService(inj_db).inject_session_as_service(
++                    coordinator.shadow_session_id,
++                    prompt=prompt,
++                    busy_strategy="inject",
++                    queue_when_busy=True,
++                    queue_sender_user_id=group.created_by,
++                    turn_metadata=turn_metadata,
++                )
++            except DaemonSessionTurnConflict:
++                await _gsvc.SessionService(inj_db).inject_session_as_service(
++                    coordinator.shadow_session_id,
++                    prompt=prompt,
++                    queue_when_busy=True,
++                    queue_sender_user_id=group.created_by,
++                    turn_metadata=turn_metadata,
++                )
++    except AppError as exc:
++        _gsvc.log.warning(
++            "consensus_converge_inject_failed",
++            task_id=str(task.id),
++            code=exc.code,
++        )
++        task.status = CONSENSUS_TASK_ABORTED
++        task.converged_at = datetime.now(UTC)
++        await write_consensus_card(
++            db,
++            group=group,
++            task=task,
++            coordinator_name=coordinator.display_name,
++            phase=CONSENSUS_PHASE_ABORTED,
++        )
++
++
++CONSENSUS_SWEEP_INTERVAL_SEC = 30.0
++
++
++async def consensus_sweep_once(db: "AsyncSession") -> int:
++    """超时任务巡检单轮（task-09，design §12）：返回本轮处理条数.
++
++    - 扫 ``status=open 且 deadline_at < now``：行锁 ``FOR UPDATE
++      SKIP LOCKED``（docker-compose 单 worker 之外的兜底，多实例不连坐）；
++    - 群已解散/删除（AgentGroupChat 缺失或 ended）→ 任务静默 aborted
++      （§12.3，不发群内行——群没了无处发）；
++    - 有 delivered 意见 → ``inject_converge_directive(timed_out=True)``
++      （内部 pending→timeout、status→timeout、健康检查失败→aborted）；
++    - 零 delivered → 直接 aborted（无人响应无从收口）+ 状态卡终态。
++
++    单条异常（AppError 等）只 ``log.warning`` 吞掉——不连坐同批其余任务。
++    """
++    now = datetime.now(UTC)
++    tasks = (
++        (
++            await db.execute(
++                select(AgentGroupConsensusTask)
++                .where(
++                    AgentGroupConsensusTask.status == CONSENSUS_TASK_OPEN,
++                    AgentGroupConsensusTask.deadline_at < now,
++                )
++                .with_for_update(skip_locked=True)
++            )
++        )
++        .scalars()
++        .all()
++    )
++    if not tasks:
++        return 0
++    processed = 0
++    for task in tasks:
++        try:
++            group = await db.get(AgentGroupChat, task.group_id)
++            coordinator = await db.get(AgentGroupMember, task.coordinator_member_id)
++            if group is None or group.ended_at is not None or coordinator is None:
++                task.status = CONSENSUS_TASK_ABORTED
++                task.converged_at = datetime.now(UTC)
++                await db.commit()
++                processed += 1
++                continue
++            states = consensus_member_states(task)
++            delivered = [r for r in states if r.get("state") == CONSENSUS_MEMBER_DELIVERED]
++            if delivered:
++                await inject_converge_directive(db, task=task, timed_out=True)
++                # 真实集成修正（2026-09-12 E2E 抓获）：inject/write_consensus_card
++                # 只 flush 不 commit——sweep 独立 session 收口时无调用方兜底
++                # commit，aborted/timeout 改动随会话关闭回滚（processed 计数
++                # 与库内终态脱节）。单测同 session 内存态断言掩盖（identity
++                # map 未过期）；真实独立连接重读复现。
++                await db.commit()
++            else:
++                task.status = CONSENSUS_TASK_ABORTED
++                task.converged_at = datetime.now(UTC)
++                await write_consensus_card(
++                    db,
++                    group=group,
++                    task=task,
++                    coordinator_name=coordinator.display_name,
++                    phase=CONSENSUS_PHASE_ABORTED,
++                )
++                await db.commit()
++            processed += 1
++        except Exception:
++            _gsvc.log.warning(
++                "consensus_sweep_task_failed",
++                task_id=str(task.id),
++                exc_info=True,
++            )
++            await db.rollback()
++    return processed
++
++
++async def consensus_sweeper_loop(
++    interval: float = CONSENSUS_SWEEP_INTERVAL_SEC,
++) -> None:
++    """常驻巡检循环（main.py lifespan ``create_task`` 消费，task-09）.
++
++    模式与关停契约同 ``scheduled_send_sweeper``（scheduled_send.py）：
++    每轮经 ``get_session_factory()`` 开短 session、轮间不占连接池；单轮
++    异常 ``except Exception`` 只 ``log.exception`` 吞掉不崩循环；
++    ``asyncio.sleep`` 处 ``CancelledError`` 透传保证 shutdown cancel
++    干净落地。
++    """
++    from app.core.db import get_session_factory
++
++    while True:
++        try:
++            async with get_session_factory()() as db_session:
++                processed = await consensus_sweep_once(db_session)
++            if processed:
++                _gsvc.log.info("consensus_sweep_round", processed=processed)
++        except Exception:
++            _gsvc.log.exception("consensus_sweep_round_failed")
++        try:
++            await asyncio.sleep(interval)
++        except asyncio.CancelledError:
++            raise
+diff --git a/backend/app/modules/daemon/group/service/crud.py b/backend/app/modules/daemon/group/service/crud.py
+index d2b52eebe..2571d6514 100644
+--- a/backend/app/modules/daemon/group/service/crud.py
++++ b/backend/app/modules/daemon/group/service/crud.py
+@@ -304,6 +304,8 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
+         agent_cross_mention=payload.agent_cross_mention,
+         cross_mention_depth=payload.cross_mention_depth,
+         context_window=payload.context_window,
++        consensus_mode=payload.consensus_mode,
++        consensus_timeout_seconds=payload.consensus_timeout_seconds,
+         created_at=now,
+     )
+     svc._session.add(group)
+@@ -491,6 +493,11 @@ async def update_group(
+         group.cross_mention_depth = payload.cross_mention_depth
+     if payload.context_window is not None:
+         group.context_window = payload.context_window
++    # 2026-09-10-group-agent-direct-chat（D-002）：汇总收口模式两字段局部更新。
++    if payload.consensus_mode is not None:
++        group.consensus_mode = payload.consensus_mode
++    if payload.consensus_timeout_seconds is not None:
++        group.consensus_timeout_seconds = payload.consensus_timeout_seconds
+     if payload.settings_json is not None:
+         # quick 群 P1（2026-09-02）互@护栏群级可配：settings_json.guardrails
+         # 子键写入（字段级合并；非法键/范围外值 400 中文）。
+diff --git a/backend/app/modules/daemon/group/service/helpers.py b/backend/app/modules/daemon/group/service/helpers.py
+index 6b24ec94d..109ab83a2 100644
+--- a/backend/app/modules/daemon/group/service/helpers.py
++++ b/backend/app/modules/daemon/group/service/helpers.py
+@@ -74,6 +74,40 @@ GROUP_MEMBER_STAGE = "group_member"
+ SHADOW_DIRECT_SOURCE = "shadow_direct"
+ 
+ 
++# ── 汇总收口模式（2026-09-10-group-agent-direct-chat design §5.8，task-02）──
++# 协作角色段 prompt 常量（软引导，非 correctness 依赖——硬拦截在投影层
++# metadata 谓词，D-007）；str.format 填充占位符。消费方：messages.py（发
++# 送侧 fan-out）/mentions.py（互@私聊）/consensus.py（意见转交与收口）。
++ROLE_PROMPT_COLLABORATOR = (
++    "【协作指令】你是被咨询成员：直接给出分析意见——本回复不会出现在群里，"
++    "将私下转交汇总人「{coordinator_name}」；如需与其他成员讨论分歧，可在"
++    "回复中 @ 对方（同样私下转交）。无需使用 [[GROUP]] 标记。"
++)
++ROLE_PROMPT_COORDINATOR = (
++    "【协作指令】你是指定汇总人：先独立分析（本轮不会出现在群里）；成员"
++    "意见将陆续私下转交给你；收到【收口指令】后输出最终总结（[[GROUP]] 段"
++    "发群）。收到收口指令前不要向群里发言。"
++)
++ROLE_PROMPT_AGENT_DM = (
++    "【私聊指令】成员「{sender_name}」私聊向你发起协作——本回复不会出现在群里，将直接转交对方。"
++)
++# 意见转交 preamble（deliver_collaborator_opinion 注入文本头部；末尾拼意见
++# 全文，多任务并行时 source_summary 标注来源消息摘要）。
++OPINION_TRANSFER_HEADER = (
++    "【成员意见转交】「{source_name}」对本次协作的意见（私下转交，不进群）"
++    "（来源消息：{source_summary}）：\n{opinion_text}\n\n你可在回复中 @ 该"
++    "成员继续讨论。"
++)
++# 收口指令（inject_converge_directive 注入文本）：converge 轮 prompt 主体。
++CONVERGE_DIRECTIVE = (
++    "【收口指令】触发消息：「{source_summary}」；已收意见：\n{opinions}\n；"
++    "未响应：{non_responders}。请输出最终汇总结论：给群内看的总结放 "
++    "[[GROUP]]…[[/GROUP]] 段，整合各意见、标注分歧与未响应成员。"
++)
++# 单成员意见聚合截断上限（收口钩子全量 assistant 文本口径，design §5.4）。
++CONSENSUS_OPINION_MAX_CHARS = 4000
++
++
+ # quick 群 P1 llm_provider 预检（2026-09-02）：agent 成员 ``llm_provider_id=None``
+ # 的非阻断提示文案——None=走机器本机默认 LLM 出口（可能可用），建群/加成员
+ # 不拦截，仅随响应 ``warnings`` 提示前端（向导/成员面板展示）。
+@@ -166,6 +200,10 @@ class GroupMemberTriggerRead(BaseModel):
+     mid_turn: bool = False
+     # quick 群 P2（2026-09-02）触发失败原因摘要（成功恒 None）。
+     error: str | None = None
++    # 2026-09-10-group-agent-direct-chat：汇总协作角色（collaborator=
++    # 被咨询成员 / coordinator=汇总人首轮；普通触发轮 None）。发送侧
++    # fan-out 填充，前端/审计消费。
++    consensus_role: str | None = None
+ 
+ 
+ class GroupChatPinnedRead(BaseModel):
+@@ -208,6 +246,9 @@ class GroupMessageSendRead(BaseModel):
+     mentioned_member_ids: list[uuid.UUID] = Field(default_factory=list)
+     mention_all: bool = False
+     triggered: list[GroupMemberTriggerRead] = Field(default_factory=list)
++    # 2026-09-10-group-agent-direct-chat：汇总任务 id（本次发送进入汇总
++    # 模式时非 None——前端据此展示状态卡占位；普通多 @ 轮 None）。
++    consensus_task_id: uuid.UUID | None = None
+ 
+ 
+ class GroupDirectMessageRead(BaseModel):
+diff --git a/backend/app/modules/daemon/group/service/mentions.py b/backend/app/modules/daemon/group/service/mentions.py
+index d01dd1af2..d56b08c73 100644
+--- a/backend/app/modules/daemon/group/service/mentions.py
++++ b/backend/app/modules/daemon/group/service/mentions.py
+@@ -29,7 +29,7 @@ from app.modules.agent.model import (
+     AgentRunLog,
+ )
+ 
+-from .helpers import SHADOW_DIRECT_SOURCE, GroupMemberTriggerRead
++from .helpers import ROLE_PROMPT_AGENT_DM, SHADOW_DIRECT_SOURCE, GroupMemberTriggerRead
+ from .settings import (
+     GROUP_CHAIN_DEPTH_FIELD,
+     GROUP_CHAIN_TTL_SECONDS,
+@@ -85,8 +85,11 @@ def _mention_match(token: str, names: Sequence[str]) -> bool:
+ 
+ 
+ def _parse_group_mentions(
+-    content: str, members: Sequence[AgentGroupMember]
+-) -> list[AgentGroupMember]:
++    content: str,
++    members: Sequence[AgentGroupMember],
++    *,
++    split_broadcast: bool = False,
++) -> list[AgentGroupMember] | tuple[list[AgentGroupMember], list[AgentGroupMember]]:
+     """解析消息中的 @提及（design §4.1 步 4）。
+ 
+     - 正则 ``[@＠]\\S+`` 提取候选词（到空白截断），再与 agent 成员
+@@ -96,21 +99,35 @@ def _parse_group_mentions(
+     - 用户成员昵称不触发（仅 agent 成员有独立记忆可触发）；
+     - 返回命中成员列表（按 id 去重，保首次命中序；SQLModel 实例不可哈希，
+       集合语义以 list 承载）。
++
++    ``split_broadcast=True``（2026-09-10-group-agent-direct-chat task-03，D-003）：
++    汇总模式专用两段拆分——返回 ``(explicit_hits, broadcast_expanded)``：
++    explicit = 单 @ 命中按**文本出现序**（去重保首序，汇总人选择基准）；
++    broadcast = 含 @全体/@all 时按**成员表序**（agent_members 列表序 =
++    joined_at 序）展开的全部 agent 成员。两段独立收集互不掺序，调用方
++    （发送侧汇总分支）自行做并集去重与汇总人选取。
+     """
+     agent_members = [m for m in members if m.member_type == "agent" and m.removed_at is None]
+     by_name = {m.display_name: m for m in agent_members}
+-    hits: dict[uuid.UUID, AgentGroupMember] = {}
++    explicit: dict[uuid.UUID, AgentGroupMember] = {}
++    broadcast_hit = False
++    merged: dict[uuid.UUID, AgentGroupMember] = {}
+     for match in _MENTION_TOKEN_RE.finditer(content):
+         token = match.group(1)
+         if _mention_match(token, BROADCAST_MENTION_WORDS):
++            broadcast_hit = True
+             for member in agent_members:
+-                hits.setdefault(member.id, member)
++                merged.setdefault(member.id, member)
+             continue
+         for name in by_name:
+             if _mention_match(token, (name,)):
+                 member = by_name[name]
+-                hits.setdefault(member.id, member)
+-    return list(hits.values())
++                explicit.setdefault(member.id, member)
++                merged.setdefault(member.id, member)
++    if split_broadcast:
++        broadcast_expanded = list(agent_members) if broadcast_hit else []
++        return list(explicit.values()), broadcast_expanded
++    return list(merged.values())
+ 
+ 
+ def _has_broadcast_mention(content: str) -> bool:
+@@ -137,7 +154,11 @@ def detect_cross_mentions(
+     - **不自我触发**：命中来源成员自身（回复 @自己）一律忽略；
+     - 用户成员昵称照旧不触发（与用户 @ 同口径，仅 agent 成员可被触发）。
+     """
+-    return [m for m in _parse_group_mentions(reply_text, members) if m.id != source_member_id]
++    parsed = _parse_group_mentions(reply_text, members)
++    # 真实集成修正（2026-09-12 verify mypy 硬门）：split_broadcast 未启用时返回 list 分支，
++    # 联合类型显式收窄（运行时恒真），否则推导式类型不符。
++    assert not isinstance(parsed, tuple)
++    return [m for m in parsed if m.id != source_member_id]
+ 
+ 
+ async def _load_run_reply_text(
+@@ -177,6 +198,36 @@ async def _load_run_reply_text(
+     return "\n".join(parts)
+ 
+ 
++async def _load_shadow_reply_text(db: AsyncSession, *, run_id: uuid.UUID) -> str:
++    """聚合影子 run 本轮自身 assistant 文本（私聊轮互@检测源，D-005）。
++
++    私聊轮（汇总协作/成员私聊）被投影层硬拦截（D-007）——载体 run 无投影
++    行，互@检测改读影子 run 全量行：``is_group_projectable_reply`` 同口径
++    过滤（thinking/tool/stderr 不进检测）+ 剥 ``[ASSISTANT]`` 前缀，全段
++    拼接（口径照 ``_build_group_fallback_summary``，不截断——检测需完整文本
++    才能 @ 后缀成员）。
++    """
++    from app.modules.daemon.run_sync.service.group_bridge import is_group_projectable_reply
++
++    rows = (
++        await db.execute(
++            select(AgentRunLog.channel, AgentRunLog.content_redacted)
++            .where(AgentRunLog.run_id == run_id)
++            .order_by(AgentRunLog.timestamp, AgentRunLog.id)
++        )
++    ).all()
++    parts: list[str] = []
++    for channel, content in rows:
++        if not is_group_projectable_reply(channel, content):
++            continue
++        text = (content or "").strip()
++        if text.startswith("[ASSISTANT]"):
++            text = text[len("[ASSISTANT]") :].strip()
++        if text:
++            parts.append(text)
++    return "\n".join(parts)
++
++
+ async def _register_chain_members(
+     redis: Redis,
+     carrier_run_id: uuid.UUID,
+@@ -266,6 +317,10 @@ async def run_cross_mention_detection(
+     # 私密 + 零自动化副作用）。
+     if turn_meta.get("source") == SHADOW_DIRECT_SOURCE:
+         return []
++    # 2026-09-10-group-agent-direct-chat（D-005）：converge 收口轮不开新互@
++    # （收口阶段再开讨论链会破坏收口时序；其余轮型照旧/私聊轮可用）。
++    if turn_meta.get("consensus_role") == "converge":
++        return []
+     carrier_raw = turn_meta.get("source_carrier_run_id")
+     if not isinstance(carrier_raw, str) or not carrier_raw:
+         return []
+@@ -279,7 +334,20 @@ async def run_cross_mention_detection(
+         )
+         return []
+ 
+-    reply_text = await _load_run_reply_text(db, carrier_run_id=carrier_run_id, member_id=member_id)
++    # 2026-09-10-group-agent-direct-chat（D-005/D-007）：轮型分源——私聊轮
++    # （汇总协作/成员互私聊，dm_target 非空）被投影层硬拦截，载体 run 无投影
++    # 行，互@检测改读影子 run 自身文本；普通 @轮照旧读载体 run 投影行。
++    # 源轮 consensus 上下文透传（见下方 turn_overrides）：collaborator 发起的
++    # 分歧讨论回复仍属意见链（终轮由收口钩子全量聚合）。且互@默认改私聊：
++    # 被@成员的回复注入发起方会话不进群（D-005）。
++    turn_dm_target = turn_meta.get("dm_target_member_id")
++    turn_consensus_task = turn_meta.get("consensus_task_id")
++    if isinstance(turn_dm_target, str) and turn_dm_target:
++        reply_text = await _load_shadow_reply_text(db, run_id=run.id)
++    else:
++        reply_text = await _load_run_reply_text(
++            db, carrier_run_id=carrier_run_id, member_id=member_id
++        )
+     if not reply_text:
+         return []
+ 
+@@ -385,6 +453,21 @@ async def run_cross_mention_detection(
+         await redis.expire(chain_key, chain_ttl_seconds)
+ 
+         # ── 与用户 @ 同管线触发（链沿用原链，链 id 不新建）────────────────────
++        # 2026-09-10-group-agent-direct-chat（D-005）：互@默认改私聊——
++        # role_prompt 私聊指令 + turn_overrides 带 dm_target（回复注入发起方
++        # 会话不进群，D-007 投影谓词拦截）；源轮带 consensus 上下文时新轮
++        # 同任务意见链（collaborator，意见终由收口钩子全量聚合）。
++        dm_overrides: dict = {
++            "dm_target_member_id": str(member_id),
++            "dm_kind": (
++                "consensus"
++                if isinstance(turn_consensus_task, str) and turn_consensus_task
++                else "agent_dm"
++            ),
++        }
++        if isinstance(turn_consensus_task, str) and turn_consensus_task:
++            dm_overrides["consensus_task_id"] = turn_consensus_task
++            dm_overrides["consensus_role"] = "collaborator"
+         try:
+             trigger = await _gsvc.GroupChatService(db)._trigger_group_member(
+                 group=group,
+@@ -398,6 +481,8 @@ async def run_cross_mention_detection(
+                 exclude_log_id=None,
+                 source_member_name=member_name,
+                 chain_depth=new_depth,
++                role_prompt=ROLE_PROMPT_AGENT_DM.format(sender_name=member_name),
++                turn_overrides=dm_overrides,
+             )
+         except AppError as exc:
+             _gsvc.log.warning(
+diff --git a/backend/app/modules/daemon/group/service/messages.py b/backend/app/modules/daemon/group/service/messages.py
+index cd2a1577f..bf695d0d3 100644
+--- a/backend/app/modules/daemon/group/service/messages.py
++++ b/backend/app/modules/daemon/group/service/messages.py
+@@ -34,9 +34,24 @@ from app.modules.auth.model import User
+ from app.modules.daemon import attachment_pipeline
+ from app.modules.daemon.session.service import DaemonSessionTurnConflict
+ 
++from .consensus import (
++    CONSENSUS_MEMBER_FAILED,
++    CONSENSUS_PHASE_ABORTED,
++    CONSENSUS_PHASE_COLLECTING,
++    CONSENSUS_PHASE_CONVERGING,
++    CONSENSUS_TASK_ABORTED,
++    CONSENSUS_TASK_CLOSING,
++    CONSENSUS_TASK_OPEN,
++    consensus_member_states,
++    create_consensus_task,
++    write_consensus_card,
++)
+ from .helpers import (
++    CONVERGE_DIRECTIVE,
+     GROUP_CARRIER_SPEC_STRATEGY,
+     GROUP_SESSION_PROVIDER,
++    ROLE_PROMPT_COLLABORATOR,
++    ROLE_PROMPT_COORDINATOR,
+     SHADOW_DIRECT_SOURCE,
+     GroupChatInvalid,
+     GroupDirectMessageRead,
+@@ -290,6 +305,41 @@ async def send_group_message(
+     # ── @解析 + 触发编排（§4.1 步 4-6）。
+     mentioned = _parse_group_mentions(content, members)
+     mentioned_ids = [m.id for m in mentioned]
++    # ── 汇总模式分支（2026-09-10-group-agent-direct-chat design §5.3，D-003）：
++    #    开关开启且去重后 agent 目标 ≥2 → 汇总收口编排（不满足则原路径
++    #    零变化，D-002 回归底线）。汇总人 = 单@首个（文本出现序）优先，纯
++    #    @全体 取成员表序首个；目标集 = 单@ ∪ 广播展开去重。
++    consensus_task = None
++    consensus_coordinator = None
++    use_consensus = bool(mentioned) and group.consensus_mode and len(mentioned) >= 2
++    if use_consensus:
++        explicit_hits, broadcast_expanded = _parse_group_mentions(
++            content, members, split_broadcast=True
++        )
++        ordered: list = []
++        seen_ids: set[uuid.UUID] = set()
++        for m in [*explicit_hits, *broadcast_expanded]:
++            if m.id not in seen_ids:
++                seen_ids.add(m.id)
++                ordered.append(m)
++        consensus_coordinator = ordered[0]
++        collaborators = ordered[1:]
++        consensus_task = await create_consensus_task(
++            svc._session,
++            group=group,
++            carrier_run_id=carrier.id,
++            coordinator=consensus_coordinator,
++            collaborators=collaborators,
++            created_by=user.id,
++            source_summary=content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
++        )
++        _gsvc.log.info(
++            "group_consensus_task_created",
++            group_id=str(group.id),
++            consensus_task_id=str(consensus_task.id),
++            coordinator_member_id=str(consensus_coordinator.id),
++            collaborator_count=len(collaborators),
++        )
+     # 返回体用标量（PK 不过期；并行触发子链 rollback 已隔离在各自独立
+     # session，不再触碰请求 session 的对象状态——防御性口径保留）。
+     carrier_run_id_val = carrier.id
+@@ -333,6 +383,33 @@ async def send_group_message(
+         sender_user_id_val = user.id
+         attachment_ids_val = [r.id for r in attachment_rows] if attachment_rows else None
+         targets = sorted(mentioned, key=lambda m: (m.joined_at, m.id))
++
++        # 汇总模式角色参数（design §5.3 步 5）：coordinator/collaborator 分别
++        # 带角色段与 metadata 标记（D-007 投影拦截链路锚点）；普通路径 None
++        # 零变化。
++        def _consensus_trigger_kwargs(member) -> dict:
++            if consensus_task is None or consensus_coordinator is None:
++                return {}
++            if member.id == consensus_coordinator.id:
++                return {
++                    "role_prompt": ROLE_PROMPT_COORDINATOR,
++                    "turn_overrides": {
++                        "consensus_task_id": str(consensus_task.id),
++                        "consensus_role": "coordinator",
++                    },
++                }
++            return {
++                "role_prompt": ROLE_PROMPT_COLLABORATOR.format(
++                    coordinator_name=consensus_coordinator.display_name
++                ),
++                "turn_overrides": {
++                    "consensus_task_id": str(consensus_task.id),
++                    "consensus_role": "collaborator",
++                    "dm_target_member_id": str(consensus_coordinator.id),
++                    "dm_kind": "consensus",
++                },
++            }
++
+         results = await asyncio.gather(
+             *(
+                 svc._trigger_member_isolated(
+@@ -345,6 +422,7 @@ async def send_group_message(
+                     carrier_run_id=carrier_run_id_val,
+                     exclude_log_id=log_row_id_val,
+                     attachment_ids=attachment_ids_val,
++                    **_consensus_trigger_kwargs(member),
+                 )
+                 for member in targets
+             ),
+@@ -372,6 +450,34 @@ async def send_group_message(
+                     code=result.code,
+                     reason=reason,
+                 )
++                # 汇总模式失败登记（design §5.3 步 6 + §12.1）：coordinator
++                # 失败 → 任务立即 aborted（意见转交失去目的地，不等待其余
++                # 成员）+ 状态卡终态；collaborator 失败 → 明细 state=failed +
++                # 状态卡更新（收口判定在钩子/超时路径，task-07/08/09）。
++                if consensus_task is not None and consensus_coordinator is not None:
++                    member_states = consensus_member_states(consensus_task)
++                    if member.id == consensus_coordinator.id:
++                        consensus_task.status = CONSENSUS_TASK_ABORTED
++                        consensus_task.converged_at = datetime.now(UTC)
++                        await write_consensus_card(
++                            svc._session,
++                            group=group,
++                            task=consensus_task,
++                            coordinator_name=consensus_coordinator.display_name,
++                            phase=CONSENSUS_PHASE_ABORTED,
++                        )
++                    else:
++                        for row in member_states:
++                            if row.get("member_id") == str(member.id):
++                                row["state"] = CONSENSUS_MEMBER_FAILED
++                        consensus_task.members = member_states
++                        await write_consensus_card(
++                            svc._session,
++                            group=group,
++                            task=consensus_task,
++                            coordinator_name=consensus_coordinator.display_name,
++                            phase=CONSENSUS_PHASE_COLLECTING,
++                        )
+                 await _publish_trigger_failed_notice(
+                     group_session_id_val, member_name=member.display_name, reason=reason
+                 )
+@@ -401,12 +507,73 @@ async def send_group_message(
+                     member_id=str(member.id),
+                     reply_to_log_id=str(log_row_id_val),
+                 )
++        # ── 汇总模式立即收口（design §12.1）：coordinator 触发成功而全部
++        #    collaborator 触发失败——零意见等待无意义（无钩子会来、超时要等
++        #    全程），直接注入收口指令让汇总人说明情况收口。收口触发本身失败
++        #    → 任务 aborted + 状态卡终态（不再重试，设计同 coordinator 失败
++        #    语义）。非全败场景的等齐收口在钩子路径（task-08）/超时 sweeper
++        #    （task-09）。
++        if (
++            use_consensus
++            and consensus_task is not None
++            and consensus_coordinator is not None
++            and consensus_task.status == CONSENSUS_TASK_OPEN
++        ):
++            states = consensus_member_states(consensus_task)
++            if states and all(r.get("state") == CONSENSUS_MEMBER_FAILED for r in states):
++                non_responders = "、".join(str(r.get("member_name", "?")) for r in states)
++                try:
++                    await svc._trigger_member_isolated(
++                        group_id=group_id_val,
++                        member_id=consensus_coordinator.id,
++                        member_lines=member_lines,
++                        sender_user_id=sender_user_id_val,
++                        sender_member_name=sender_member_name,
++                        content=content,
++                        carrier_run_id=carrier_run_id_val,
++                        exclude_log_id=log_row_id_val,
++                        attachment_ids=attachment_ids_val,
++                        role_prompt=CONVERGE_DIRECTIVE.format(
++                            source_summary=content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
++                            opinions="（无——全部被咨询成员触发失败）",
++                            non_responders=non_responders,
++                        ),
++                        turn_overrides={
++                            "consensus_task_id": str(consensus_task.id),
++                            "consensus_role": "converge",
++                        },
++                    )
++                    consensus_task.status = CONSENSUS_TASK_CLOSING
++                    await write_consensus_card(
++                        svc._session,
++                        group=group,
++                        task=consensus_task,
++                        coordinator_name=consensus_coordinator.display_name,
++                        phase=CONSENSUS_PHASE_CONVERGING,
++                    )
++                except AppError as exc:
++                    _gsvc.log.warning(
++                        "group_consensus_immediate_converge_failed",
++                        consensus_task_id=str(consensus_task.id),
++                        code=exc.code,
++                        reason=_trigger_failure_reason(exc),
++                    )
++                    consensus_task.status = CONSENSUS_TASK_ABORTED
++                    consensus_task.converged_at = datetime.now(UTC)
++                    await write_consensus_card(
++                        svc._session,
++                        group=group,
++                        task=consensus_task,
++                        coordinator_name=consensus_coordinator.display_name,
++                        phase=CONSENSUS_PHASE_ABORTED,
++                    )
+     return GroupMessageSendRead(
+         carrier_run_id=carrier_run_id_val,
+         log_id=log_row_id_val,
+         mentioned_member_ids=mentioned_ids,
+         mention_all=_has_broadcast_mention(content),
+         triggered=triggered,
++        consensus_task_id=(consensus_task.id if consensus_task is not None else None),
+     )
+ 
+ 
+@@ -422,6 +589,8 @@ async def _trigger_member_isolated(
+     carrier_run_id: uuid.UUID,
+     exclude_log_id: uuid.UUID | None,
+     attachment_ids: list[uuid.UUID] | None = None,
++    role_prompt: str | None = None,
++    turn_overrides: dict | None = None,
+ ) -> GroupMemberTriggerRead:
+     """单成员触发的独立 session 协程体（群 P2 第二波并行编排）。
+ 
+@@ -436,6 +605,10 @@ async def _trigger_member_isolated(
+     已过同一校验——幂等重查，只多两条 SELECT/成员）。session 随 async with
+     收口归还连接池；``_trigger_group_member`` 内部各事务边界（懒建 commit /
+     注入 commit / 失败 rollback）自持。
++
++    ``role_prompt`` / ``turn_overrides``（2026-09-10-group-agent-direct-chat
++    task-04 扩展）：汇总模式角色段与 metadata 标记透传（task-03 发送侧
++    fan-out / 收口指令注入消费）；默认 None 时单成员触发路径零变化。
+     """
+     from app.core.db import get_session_factory
+ 
+@@ -458,6 +631,8 @@ async def _trigger_member_isolated(
+             carrier_run_id=carrier_run_id,
+             exclude_log_id=exclude_log_id,
+             attachment_rows=attachment_rows,
++            role_prompt=role_prompt,
++            turn_overrides=turn_overrides,
+         )
+ 
+ 
+diff --git a/backend/app/modules/daemon/group/service/shadow.py b/backend/app/modules/daemon/group/service/shadow.py
+index c1a7dab55..39c859d17 100644
+--- a/backend/app/modules/daemon/group/service/shadow.py
++++ b/backend/app/modules/daemon/group/service/shadow.py
+@@ -234,6 +234,8 @@ async def _trigger_group_member(
+     source_member_name: str | None = None,
+     chain_depth: int = 0,
+     attachment_rows: list | None = None,
++    role_prompt: str | None = None,
++    turn_overrides: dict | None = None,
+ ) -> GroupMemberTriggerRead:
+     """触发单个 agent 成员（design §4.1 步 6 / §8 member.injected）。
+ 
+@@ -252,6 +254,13 @@ async def _trigger_group_member(
+     prompt 末尾附提示行 + SESSION_INJECT attachments 通道下发（多模态块
+     内联/磁盘落盘，与单聊同管线）；互@路径不携带（agent 消息无附件）。
+     非 Claude 成员引擎 → 400（单聊引擎门控 D-6 同口径，群错误族）。
++
++    ``role_prompt``/``turn_overrides``（2026-09-10-group-agent-direct-chat
++    task-04，汇总协作/互@私聊消费）：协作角色段文本（包在 _build_group_prompt
++    产物外层头部，不动其纯函数——照 _MID_TURN_NOTICE 包装先例）与
++    turn_metadata 附加键（consensus_task_id/consensus_role/
++    dm_target_member_id/dm_kind 等，在基础键之后 merge——新键不碰
++    source_* 既有链标记）。两者均 None 时零行为变化（开关关闭路径）。
+     """
+     # 引擎门控（单聊 D-6 同口径：仅 Claude 支持附件）——发送侧已过归属/
+     # 数量校验并落时间线，此处 fail-loud 拒绝触发（消息保留可重发仅触发）。
+@@ -282,6 +291,10 @@ async def _trigger_group_member(
+         source_member_name=source_member_name,
+         attachment_lines=attachment_lines,
+     )
++    # 协作角色段（task-04）：包在产物外层头部（懒建/复用/排队共用同一
++    # 文本——快照冻结语义与 _MID_TURN_NOTICE 包装一致）。
++    if role_prompt is not None:
++        prompt = f"{role_prompt}\n\n{prompt}"
+     # 群链路 metadata（§4.3 注入 / §4.4 链 id 透传）：写本轮 user_input 日志
+     # metadata_ 列——task-04 turn_completed 互@检测读取（排队派发的透传
+     # 见 dispatch_next_queued_message 侧 task-04 接线）。
+@@ -300,6 +313,12 @@ async def _trigger_group_member(
+         # 互@轮：来源是 Agent 成员（无 user 行）——记成员身份供审计/展示。
+         turn_metadata["sender_member_name"] = source_member_name
+         turn_metadata["sender_member_kind"] = "agent"
++    if turn_overrides:
++        # 协作轮附加键（task-04，consensus/dm 标记）：在基础链标记之后
++        # merge——新键（consensus_task_id/consensus_role/dm_target_member_id/
++        # dm_kind）不碰 source_* 既有链标记；显式传入同名键时以后者为准
++        # （投影拦截/收口钩子消费，D-007 硬约束链路）。
++        turn_metadata.update(turn_overrides)
+ 
+     shadow, first_run_id = await svc._ensure_shadow_session(
+         group,
+diff --git a/backend/app/modules/daemon/run_sync/service/group_bridge.py b/backend/app/modules/daemon/run_sync/service/group_bridge.py
+index 8309a8579..22ef489b7 100644
+--- a/backend/app/modules/daemon/run_sync/service/group_bridge.py
++++ b/backend/app/modules/daemon/run_sync/service/group_bridge.py
+@@ -49,6 +49,13 @@ class _GroupBridgeContext:
+       （@轮与直聊轮同款：完整 assistant 文本仅 ``[[GROUP]]`` 标记段投影，见
+       extract_group_broadcast_segments）；本标志仅区分轮型供消费方判定
+       （互@检测直聊轮早退、@轮无标记兜底行仅对非直聊轮生效）。
++    - 汇总收口/成员私聊四元组（2026-09-10-group-agent-direct-chat，D-007）：
++      ``consensus_task_id`` / ``consensus_role``（collaborator|coordinator|
++      converge）/ ``dm_target_member_id`` / ``dm_kind``（consensus|agent_dm）
++      ——均从本 run 最近 user_input metadata 解析，无键=普通轮。
++      ``projection_blocked`` 谓词：dm_target 非空 ∪ role==coordinator →
++      整轮不投影（[[GROUP]] 段也拦，硬驾驭不依赖 prompt 自觉）；
++      唯一例外 converge 轮（无 dm_target）放行走标记投影。
+     """
+ 
+     group_id: uuid.UUID
+@@ -57,6 +64,25 @@ class _GroupBridgeContext:
+     member_session_id: uuid.UUID
+     carrier_run_id: uuid.UUID
+     shadow_direct: bool = False
++    consensus_task_id: str | None = None
++    consensus_role: str | None = None
++    dm_target_member_id: str | None = None
++    dm_kind: str | None = None
++
++    @property
++    def projection_blocked(self) -> bool:
++        """整轮不投影硬拦截谓词（D-007：投影层统一谓词，消费方不得各自判定）。
++
++        仅 consensus 编排轮：dm_target 非空（协作/私聊轮）∪ role==coordinator
++        （汇总人首轮）。**不含 shadow_direct**——直聊轮标记制投影（[[GROUP]]
++        段照投）是 2026-09-02 既有功能（test_group_direct.py 锁定），design
++        §5.1 初稿将其纳入拦截系对现状误读，执行期修正（G-3 声明对齐）；
++        shadow_direct 的既有消费是互@检测早退与 @轮兜底行跳过，不受影响。
++        converge 轮（无 dm_target）不命中——收口总结轮放行投影。
++        """
++        if self.dm_target_member_id:
++            return True
++        return self.consensus_role == "coordinator"
+ 
+ 
+ async def resolve_group_member_identity(
+@@ -201,6 +227,13 @@ async def _resolve_group_bridge_context(
+     shadow_direct = (
+         turn_meta.get("source") == "shadow_direct" if isinstance(turn_meta, dict) else False
+     )
++
++    # 汇总收口/成员私聊四元组（2026-09-10-group-agent-direct-chat，D-007）：
++    # 无键=普通轮；有键时 projection_blocked 谓词接管整轮投影拦截。
++    def _meta_str(key: str) -> str | None:
++        raw = turn_meta.get(key) if isinstance(turn_meta, dict) else None
++        return raw if isinstance(raw, str) and raw else None
++
+     return _GroupBridgeContext(
+         group_id=group_id,
+         member_id=member_id,
+@@ -208,6 +241,10 @@ async def _resolve_group_bridge_context(
+         member_session_id=agent_run.agent_session_id,
+         carrier_run_id=carrier_run_id,
+         shadow_direct=shadow_direct,
++        consensus_task_id=_meta_str("consensus_task_id"),
++        consensus_role=_meta_str("consensus_role"),
++        dm_target_member_id=_meta_str("dm_target_member_id"),
++        dm_kind=_meta_str("dm_kind"),
+     )
+ 
+ 
+@@ -282,7 +319,13 @@ async def _emit_group_mention_projection_fallback(svc, agent_run: AgentRun) -> N
+     turn_completed / 互@检测 / 排队派发（调用方 try/except 包裹）。
+     """
+     ctx = await svc._resolve_group_bridge_context(agent_run)
+-    if ctx is None or ctx.shadow_direct:
++    # 拦截轮（直聊/汇总协作/成员私聊）不兑兜底行——群内静默是设计语义
++    # （意见走私聊转交/直聊不经群时间线，D-007）；converge 轮放行（汇总
++    # 人忘打 [[GROUP]] 标记时兑底行防群里死寂，2026-09-10-group-agent-
++    # direct-chat 扩展：原仅 shadow_direct 早退，现 shadow_direct ∪
++    # consensus 拦截轮（dm/coordinator——意见轮不发兜底，静默是收口管线
++    # 语义；converge 轮投影已落无需兜底）统一早退。
++    if ctx is None or ctx.shadow_direct or ctx.projection_blocked:
+         return
+     carrier_rows = (
+         (
+@@ -504,3 +547,197 @@ async def _close_group_hooks(
+                         group_id=str(group_id),
+                         exc_info=True,
+                     )
++            # 2026-09-10-group-agent-direct-chat（task-08，design §5.4）：汇总
++            # 收口/成员私聊轮终态编排（意见聚合→转交→登记 / converge 轮收口
++            # / 收口轮失败兑底）。fail-open 同互@挂接，独立小事务。
++            try:
++                await _consensus_close_hook(
++                    svc,
++                    agent_run,
++                    group_id=group_id,
++                    member_id=group_member_id,
++                    member_name=group_member_name,
++                )
++            except Exception:
++                _rsvc.log.warning(
++                    "group_consensus_close_hook_failed",
++                    agent_run_id=str(agent_run.id),
++                    group_id=str(group_id),
++                    exc_info=True,
++                )
++
++
++async def _consensus_close_hook(
++    svc,
++    agent_run: AgentRun,
++    *,
++    group_id: uuid.UUID,
++    member_id: uuid.UUID,
++    member_name: str,
++) -> None:
++    """汇总收口/成员私聊轮终态编排（design §5.4，task-08；fail-open）。
++
++    轮型分流（turn_metadata 四元组，与 ``_resolve_group_bridge_context``
++    同源读取）：
++
++    - **converge 轮**（role=="converge"）：completed → 任务 closed + 状态卡
++      终态；failed → 任务 aborted + 状态卡终态 + 群内 system 兑底行（「汇总
++      收口失败…」防死寂，§5.4 步 5）；
++    - **意见轮**（dm_target 非空，dm_kind=="consensus"）：completed →
++      聚合意见 → 转交 coordinator → ``record_collaborator_outcome``
++      （delivered，内聚收口判定）；聚合无文本/转交失败/轮 failed → 登记
++      failed（收口判定内聚）；
++    - **互@私聊轮**（dm_kind=="agent_dm"）：completed → 聚合意见转交发起
++      方（无任务推进，失败仅日志）；failed 零动作；
++    - **coordinator 首轮**（role=="coordinator" 无 dm_target）终态：零动作
++      （等待意见注入/收口指令，超时 sweeper 兕底）。
++
++    普通轮（无 consensus/dm 键）零进入（谓词前置，开销一次桥接解析）。
++    """
++    from app.core.errors import AppError
++    from app.modules.agent.model import AgentGroupChat, AgentGroupConsensusTask, AgentGroupMember
++    from app.modules.daemon.group.service import (
++        CONSENSUS_MEMBER_DELIVERED,
++        CONSENSUS_MEMBER_FAILED,
++        CONSENSUS_PHASE_ABORTED,
++        CONSENSUS_PHASE_CLOSED,
++        CONSENSUS_TASK_ABORTED,
++        CONSENSUS_TASK_CLOSED,
++        CONSENSUS_TASK_CLOSING,
++        CONSENSUS_TASK_OPEN,
++        CONSENSUS_TASK_TIMEOUT,
++        collect_collaborator_opinion,
++        deliver_collaborator_opinion,
++        record_collaborator_outcome,
++        write_consensus_card,
++    )
++
++    ctx = await svc._resolve_group_bridge_context(agent_run)
++    if ctx is None or (
++        not ctx.consensus_task_id
++        and not ctx.dm_target_member_id
++        and ctx.consensus_role != "coordinator"
++    ):
++        return
++    db = svc._session
++
++    # ── converge 轮：任务终态 ─────────────────────────────────────────
++    if ctx.consensus_role == "converge" and ctx.consensus_task_id:
++        task = await db.get(AgentGroupConsensusTask, uuid.UUID(ctx.consensus_task_id))
++        if task is None or task.status not in (CONSENSUS_TASK_CLOSING, CONSENSUS_TASK_TIMEOUT):
++            return
++        group = await db.get(AgentGroupChat, task.group_id)
++        coordinator = await db.get(AgentGroupMember, task.coordinator_member_id)
++        if group is None or coordinator is None:
++            return
++        now = datetime.now(UTC)
++        if agent_run.status == "completed":
++            task.status = CONSENSUS_TASK_CLOSED
++            task.converged_at = now
++            await write_consensus_card(
++                db,
++                group=group,
++                task=task,
++                coordinator_name=coordinator.display_name,
++                phase=CONSENSUS_PHASE_CLOSED,
++            )
++        else:
++            task.status = CONSENSUS_TASK_ABORTED
++            task.converged_at = now
++            await write_consensus_card(
++                db,
++                group=group,
++                task=task,
++                coordinator_name=coordinator.display_name,
++                phase=CONSENSUS_PHASE_ABORTED,
++            )
++            # 群内 system 兕底行（收口轮失败防死寂，§5.4 步 5；ephemeral——
++            # 状态卡已落库可回放，本行仅实时提示）。
++            try:
++                from .typing_presence import _publish_group_channel_event
++            except ImportError:
++                pass
++            try:
++                from app.modules.daemon.group.service import _publish_group_channel_event
++
++                await _publish_group_channel_event(
++                    group.session_id,
++                    {
++                        "event": "log",
++                        "session_id": str(group.session_id),
++                        "channel": "system",
++                        "content": (
++                            f"汇总收口失败：汇总人「{coordinator.display_name}」本轮未完成，"
++                            "各成员意见可在其会话时间线查看"
++                        ),
++                        "timestamp": now.isoformat(),
++                    },
++                )
++            except Exception:
++                _rsvc.log.warning(
++                    "consensus_converge_failed_notice_publish_failed",
++                    task_id=str(task.id),
++                )
++        await db.commit()
++        return
++
++    # ── 意见轮（consensus）/互@私聊轮（agent_dm）：聚合转交 ─────────────
++    if not ctx.dm_target_member_id:
++        return
++    target_member = await db.get(AgentGroupMember, uuid.UUID(ctx.dm_target_member_id))
++    group = await db.get(AgentGroupChat, group_id)
++    if target_member is None or group is None:
++        return
++    task = None
++    if ctx.dm_kind == "consensus" and ctx.consensus_task_id:
++        task = await db.get(AgentGroupConsensusTask, uuid.UUID(ctx.consensus_task_id))
++        if task is None or task.status != CONSENSUS_TASK_OPEN:
++            # 任务已收口中/终态：意见迟到，仅日志（收口指令带未响应名单）。
++            _rsvc.log.info(
++                "consensus_opinion_late",
++                task_id=ctx.consensus_task_id,
++                member_id=str(member_id),
++            )
++            return
++    if agent_run.status != "completed":
++        if task is not None:
++            await record_collaborator_outcome(
++                db, task_id=task.id, member_id=member_id, state=CONSENSUS_MEMBER_FAILED
++            )
++        return
++    opinion = await collect_collaborator_opinion(db, run_id=agent_run.id)
++    if not opinion:
++        if task is not None:
++            await record_collaborator_outcome(
++                db, task_id=task.id, member_id=member_id, state=CONSENSUS_MEMBER_FAILED
++            )
++        return
++    try:
++        await deliver_collaborator_opinion(
++            db,
++            group=group,
++            target_member=target_member,
++            source_member_name=member_name,
++            opinion_text=opinion,
++            task=task,
++        )
++    except AppError as exc:
++        _rsvc.log.warning(
++            "consensus_opinion_deliver_failed",
++            task_id=ctx.consensus_task_id,
++            member_id=str(member_id),
++            code=exc.code,
++        )
++        if task is not None:
++            await record_collaborator_outcome(
++                db, task_id=task.id, member_id=member_id, state=CONSENSUS_MEMBER_FAILED
++            )
++        return
++    if task is not None:
++        await record_collaborator_outcome(
++            db,
++            task_id=task.id,
++            member_id=member_id,
++            state=CONSENSUS_MEMBER_DELIVERED,
++            opinion_text=opinion,
++        )
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_steps.py b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+index d9eb07fc9..92dde9cf7 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+@@ -641,6 +641,11 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
+             and is_group_projectable_reply(channel, content)
+             and not log_entry.segment_id
+             and isinstance(content, str)
++            # 2026-09-10-group-agent-direct-chat（D-007 硬驾驭）：拦截轮
++            # 整轮不投影——[[GROUP]] 段也拦（collaborator/coordinator/
++            # 直聊/成员私聊轮不经群时间线，硬拦截不依赖 prompt 自觉）；
++            # converge 轮无 dm_target 放行（最终总结照标记投影进群）。
++            and not st.group_bridge.projection_blocked
+         ):
+             for seg_idx, seg_text in enumerate(extract_group_broadcast_segments(content)):
+                 projection_row = svc._build_group_projection_row(
+diff --git a/backend/app/modules/daemon/tests/test_group_consensus.py b/backend/app/modules/daemon/tests/test_group_consensus.py
+new file mode 100644
+index 000000000..4fc70f94b
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_group_consensus.py
+@@ -0,0 +1,726 @@
++"""task-07（2026-09-10-group-agent-direct-chat）汇总收口状态机测试。
++
++覆盖（design §5.2/§5.4/§7，任务卡 acceptance）：
++
++- ``_parse_group_mentions`` split_broadcast：单 @ 文本出现序 / @全体成员表
++  序展开 / 混合两段独立（D-003 汇总人选择基准）；旧调用（合并返回）零变化；
++- ``create_consensus_task``：members pending 初始化 + deadline=now+timeout、
++  carrier_run_id 幂等（重复建任务返回既有行）、状态卡 channel='system' 落
++  载体 run + collecting 卡面；
++- ``write_consensus_card``：UPDATE 单行模式（同 log 行 content/metadata 替换，
++  不产生第二行）+ 各 phase 卡面文案（collecting/converging/终态）；
++- ``record_collaborator_outcome``：delivered 登记 + opinion 快照落 JSONB；
++  部分终态仍 collecting；全员终态且 ≥1 delivered → 收口指令注入
++  （inject_converge_directive 被调）+ status=closing；零 delivered 全终态
++  → aborted；终态幂等（重复登记跳过）；
++- ``inject_converge_directive``：coordinator 影子 ended → 任务 aborted 不注入；
++  健康 → 注入 prompt 含意见全文与未响应名单、turn_metadata role=converge
++  且**无 dm_target**（投影放行契约，D-007 唯一例外）+ timed_out 版
++  pending→timeout 标注。
++
++夹具范式镜像 ``test_group_cross_mention.py``（in-memory SQLite db_session），
++注入点 ``SessionService.inject_session_as_service`` 全部 mock——状态机语义
++单测，不跑引擎链路。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import (
++    AgentGroupChat,
++    AgentGroupConsensusTask,
++    AgentGroupMember,
++    AgentRun,
++    AgentRunLog,
++    AgentSession,
++)
++from app.modules.agent.schema import GroupMemberAgentConfig
++from app.modules.auth.model import User
++from app.modules.daemon.group.service import (
++    CONSENSUS_MEMBER_DELIVERED,
++    CONSENSUS_MEMBER_FAILED,
++    CONSENSUS_MEMBER_PENDING,
++    CONSENSUS_MEMBER_TIMEOUT,
++    CONSENSUS_PHASE_ABORTED,
++    CONSENSUS_PHASE_COLLECTING,
++    CONSENSUS_PHASE_CONVERGING,
++    CONSENSUS_TASK_ABORTED,
++    CONSENSUS_TASK_CLOSING,
++    CONSENSUS_TASK_OPEN,
++    CONSENSUS_TASK_TIMEOUT,
++    _parse_group_mentions,
++    collect_collaborator_opinion,
++    consensus_member_states,
++    consensus_sweep_once,
++    create_consensus_task,
++    inject_converge_directive,
++    record_collaborator_outcome,
++    write_consensus_card,
++)
++from app.modules.workspace.model import Workspace
++
++pytestmark = pytest.mark.anyio
++
++
++@pytest.fixture
++def anyio_backend() -> str:
++    return "asyncio"
++
++
++# ── 夹具（最小行集：群 + 成员 + 载体 run + 影子会话）────────────────────────
++
++
++async def _make_user(db_session: AsyncSession, name: str) -> User:
++    user = User(
++        id=uuid.uuid4(),
++        email=f"cons-{name}-{uuid.uuid4()}@example.com",
++        password_hash="irrelevant",
++        display_name=name,
++        status="active",
++    )
++    db_session.add(user)
++    await db_session.flush()
++    return user
++
++
++async def _make_group_env(db_session: AsyncSession) -> SimpleNamespace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="cons-ws",
++        slug=f"cons-ws-{uuid.uuid4().hex[:8]}",
++        root_path="C:/tmp/cons-ws",
++        status="active",
++    )
++    db_session.add(ws)
++    owner = await _make_user(db_session, "群主")
++    group = AgentGroupChat(
++        id=uuid.uuid4(),
++        session_id=uuid.uuid4(),
++        workspace_id=ws.id,
++        project_id=None,
++        title="汇总测试群",
++        created_by=owner.id,
++        agent_cross_mention=True,
++        cross_mention_depth=4,
++        context_window=20,
++        consensus_mode=True,
++        consensus_timeout_seconds=600,
++        created_at=datetime.now(UTC),
++    )
++    db_session.add(group)
++    # 载体 run（群会话维度）+ 触发消息行。
++    carrier = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="group",
++        agent_session_id=group.session_id,
++        user_id=owner.id,
++        status="completed",
++        started_at=datetime.now(UTC),
++        spec_strategy="group_carrier",
++    )
++    db_session.add(carrier)
++    await db_session.flush()
++    return SimpleNamespace(ws=ws, owner=owner, group=group, carrier=carrier)
++
++
++async def _make_member(
++    db_session: AsyncSession,
++    group: AgentGroupChat,
++    *,
++    name: str,
++    owner_id: uuid.UUID,
++    shadow_ended: datetime | None = None,
++) -> AgentGroupMember:
++    shadow = AgentSession(
++        id=uuid.uuid4(),
++        user_id=owner_id,
++        name=f"影子-{name}",
++        session_kind="group_member",
++        provider="claude",
++        status="active",
++        turn_count=0,
++        created_at=datetime.now(UTC),
++        ended_at=shadow_ended,
++    )
++    db_session.add(shadow)
++    await db_session.flush()
++    member = AgentGroupMember(
++        id=uuid.uuid4(),
++        group_id=group.id,
++        member_type="agent",
++        display_name=name,
++        config=GroupMemberAgentConfig(
++            display_name=name,
++            runtime_id=uuid.uuid4(),
++            provider="claude",
++        ),
++        joined_at=datetime.now(UTC),
++        created_by=owner_id,
++        shadow_session_id=shadow.id,
++    )
++    db_session.add(member)
++    await db_session.flush()
++    return member
++
++
++async def _seed_task(
++    db_session: AsyncSession,
++    env: SimpleNamespace,
++    *,
++    coordinator: AgentGroupMember,
++    collaborators: list[AgentGroupMember],
++) -> AgentGroupConsensusTask:
++    return await create_consensus_task(
++        db_session,
++        group=env.group,
++        carrier_run_id=env.carrier.id,
++        coordinator=coordinator,
++        collaborators=collaborators,
++        created_by=env.owner.id,
++        timeout_seconds=600,
++        source_summary="触发消息摘要",
++    )
++
++
++async def _card_row(db_session: AsyncSession, carrier_run_id: uuid.UUID) -> AgentRunLog | None:
++    return (
++        (
++            await db_session.execute(
++                select(AgentRunLog).where(
++                    AgentRunLog.run_id == carrier_run_id,
++                    AgentRunLog.channel == "system",
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++
++
++# ── split_broadcast（D-003 汇总人选择基准）─────────────────────────────────
++
++
++def _member_stub(name: str, member_id: uuid.UUID | None = None) -> AgentGroupMember:
++    return AgentGroupMember(
++        id=member_id or uuid.uuid4(),
++        group_id=uuid.uuid4(),
++        member_type="agent",
++        display_name=name,
++        joined_at=datetime.now(UTC),
++    )
++
++
++class TestSplitBroadcast:
++    def test_explicit_order_by_text(self):
++        a, b, c = _member_stub("甲"), _member_stub("乙"), _member_stub("丙")
++        explicit, broadcast = _parse_group_mentions(
++            "@丙 帮忙看下 @甲 @乙", [a, b, c], split_broadcast=True
++        )
++        assert [m.display_name for m in explicit] == ["丙", "甲", "乙"]
++        assert broadcast == []
++
++    def test_broadcast_expands_member_table_order(self):
++        a, b, c = _member_stub("甲"), _member_stub("乙"), _member_stub("丙")
++        explicit, broadcast = _parse_group_mentions("@全体", [a, b, c], split_broadcast=True)
++        assert explicit == []
++        assert [m.display_name for m in broadcast] == ["甲", "乙", "丙"]
++
++    def test_mixed_two_segments_independent(self):
++        a, b, c = _member_stub("甲"), _member_stub("乙"), _member_stub("丙")
++        explicit, broadcast = _parse_group_mentions("@乙 @全体", [a, b, c], split_broadcast=True)
++        assert [m.display_name for m in explicit] == ["乙"]
++        assert [m.display_name for m in broadcast] == ["甲", "乙", "丙"]
++
++    def test_legacy_merged_return_unchanged(self):
++        a, b = _member_stub("甲"), _member_stub("乙")
++        merged = _parse_group_mentions("@乙 @甲", [a, b])
++        assert [m.display_name for m in merged] == ["乙", "甲"]
++
++
++# ── create_consensus_task（§5.2 建任务 + 状态卡）────────────────────────────
++
++
++class TestCreateConsensusTask:
++    async def test_members_pending_and_deadline(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        c2 = await _make_member(db_session, env.group, name="成员二", owner_id=env.owner.id)
++        before = datetime.now(UTC)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1, c2])
++        await db_session.commit()
++        assert task.status == CONSENSUS_TASK_OPEN
++        assert task.coordinator_member_id == coordinator.id
++        states = consensus_member_states(task)
++        assert [r["member_name"] for r in states] == ["成员一", "成员二"]
++        assert all(r["state"] == CONSENSUS_MEMBER_PENDING for r in states)
++        assert task.deadline_at is not None
++        delta = task.deadline_at - before
++        assert timedelta(seconds=599) <= delta <= timedelta(seconds=601)
++
++    async def test_idempotent_by_carrier_run(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        first = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        await db_session.commit()
++        second = await create_consensus_task(
++            db_session,
++            group=env.group,
++            carrier_run_id=env.carrier.id,
++            coordinator=coordinator,
++            collaborators=[c1],
++            created_by=env.owner.id,
++            source_summary="重复建",
++        )
++        assert second.id == first.id
++
++    async def test_status_card_lands_on_carrier(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        await db_session.commit()
++        card = await _card_row(db_session, env.carrier.id)
++        assert card is not None
++        assert "汇总收集中" in (card.content_redacted or "")
++        assert card.metadata_["consensus_card"]["coordinator_name"] == "汇总人"
++        assert card.metadata_["consensus_task_id"] == str(task.id)
++
++
++# ── write_consensus_card（UPDATE 单行模式）──────────────────────────────────
++
++
++class TestWriteConsensusCard:
++    async def test_update_reuses_single_row(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        await db_session.commit()
++        first = await _card_row(db_session, env.carrier.id)
++        states = consensus_member_states(task)
++        states[0]["state"] = CONSENSUS_MEMBER_DELIVERED
++        task.members = states
++        await write_consensus_card(
++            db_session,
++            group=env.group,
++            task=task,
++            coordinator_name=coordinator.display_name,
++            phase=CONSENSUS_PHASE_COLLECTING,
++        )
++        await db_session.commit()
++        rows = (
++            (
++                await db_session.execute(
++                    select(AgentRunLog).where(
++                        AgentRunLog.run_id == env.carrier.id,
++                        AgentRunLog.channel == "system",
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        assert len(rows) == 1
++        assert "已交意见 1/1" in (rows[0].content_redacted or "")
++        assert rows[0].id == first.id
++
++    async def test_terminal_phases_render(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        await write_consensus_card(
++            db_session,
++            group=env.group,
++            task=task,
++            coordinator_name=coordinator.display_name,
++            phase=CONSENSUS_PHASE_CONVERGING,
++        )
++        card = await _card_row(db_session, env.carrier.id)
++        assert "汇总收口中" in (card.content_redacted or "")
++        await write_consensus_card(
++            db_session,
++            group=env.group,
++            task=task,
++            coordinator_name=coordinator.display_name,
++            phase=CONSENSUS_PHASE_ABORTED,
++        )
++        card = await _card_row(db_session, env.carrier.id)
++        assert "中止" in (card.content_redacted or "")
++        await db_session.commit()
++
++
++# ── record_collaborator_outcome（登记 + 收口判定内聚）───────────────────────
++
++
++class TestRecordCollaboratorOutcome:
++    async def test_partial_terminal_stays_collecting(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        c2 = await _make_member(db_session, env.group, name="成员二", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1, c2])
++        await db_session.commit()
++        converge_calls: list = []
++        monkeypatch.setattr(
++            "app.modules.daemon.group.service.consensus.inject_converge_directive",
++            AsyncMock(side_effect=lambda *a, **k: converge_calls.append(k)),
++        )
++        await record_collaborator_outcome(
++            db_session,
++            task_id=task.id,
++            member_id=c1.id,
++            state=CONSENSUS_MEMBER_DELIVERED,
++            opinion_text="成员一的意见全文",
++        )
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_OPEN
++        states = consensus_member_states(task)
++        row1 = next(r for r in states if r["member_name"] == "成员一")
++        assert row1["state"] == CONSENSUS_MEMBER_DELIVERED
++        assert row1["opinion"] == "成员一的意见全文"
++        assert converge_calls == []
++
++    async def test_all_terminal_with_delivered_triggers_converge(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        c2 = await _make_member(db_session, env.group, name="成员二", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1, c2])
++        await db_session.commit()
++        calls: list = []
++        monkeypatch.setattr(
++            "app.modules.daemon.group.service.consensus.inject_converge_directive",
++            AsyncMock(side_effect=lambda *a, **k: calls.append(k)),
++        )
++        await record_collaborator_outcome(
++            db_session,
++            task_id=task.id,
++            member_id=c1.id,
++            state=CONSENSUS_MEMBER_DELIVERED,
++            opinion_text="意见一",
++        )
++        await record_collaborator_outcome(
++            db_session,
++            task_id=task.id,
++            member_id=c2.id,
++            state=CONSENSUS_MEMBER_FAILED,
++        )
++        await db_session.refresh(task)
++        # 状态推进（status→closing）在 inject_converge_directive 内（此处被
++        # mock）——本断言只验「全员终态触发收口注入一次」，status 变更见
++        # TestInjectConvergeDirective。
++        assert len(calls) == 1
++        assert calls[0]["timed_out"] is False
++
++    async def test_all_terminal_zero_delivered_aborts(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        await db_session.commit()
++        monkeypatch.setattr(
++            "app.modules.daemon.group.service.consensus.inject_converge_directive",
++            AsyncMock(),
++        )
++        await record_collaborator_outcome(
++            db_session, task_id=task.id, member_id=c1.id, state=CONSENSUS_MEMBER_FAILED
++        )
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_ABORTED
++
++    async def test_terminal_state_idempotent(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        await db_session.commit()
++        calls: list = []
++        monkeypatch.setattr(
++            "app.modules.daemon.group.service.consensus.inject_converge_directive",
++            AsyncMock(side_effect=lambda *a, **k: calls.append(k)),
++        )
++        await record_collaborator_outcome(
++            db_session,
++            task_id=task.id,
++            member_id=c1.id,
++            state=CONSENSUS_MEMBER_DELIVERED,
++            opinion_text="意见一",
++        )
++        # 重复登记（终态不可逆）：不再触发第二次收口注入。
++        await record_collaborator_outcome(
++            db_session,
++            task_id=task.id,
++            member_id=c1.id,
++            state=CONSENSUS_MEMBER_FAILED,
++        )
++        await db_session.refresh(task)
++        assert len(calls) == 1
++        states = consensus_member_states(task)
++        assert states[0]["state"] == CONSENSUS_MEMBER_DELIVERED
++
++
++# ── inject_converge_directive（收口指令注入 + 健康检查）────────────────────
++
++
++def _inject_calls(monkeypatch) -> list:
++    calls: list = []
++
++    async def _fake_inject(session_id, *, prompt=None, turn_metadata=None, **kwargs):
++        calls.append({"session_id": session_id, "prompt": prompt, "meta": turn_metadata})
++        return SimpleNamespace(agent_run=None, queued=False, mid_turn=False)
++
++    fake_service = SimpleNamespace(inject_session_as_service=_fake_inject)
++    monkeypatch.setattr(
++        "app.modules.daemon.group.service.SessionService",
++        lambda db: fake_service,
++    )
++    return calls
++
++
++class TestInjectConvergeDirective:
++    async def test_coordinator_shadow_ended_aborts(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session,
++            env.group,
++            name="汇总人",
++            owner_id=env.owner.id,
++            shadow_ended=datetime.now(UTC),
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        await db_session.commit()
++        calls = _inject_calls(monkeypatch)
++        await inject_converge_directive(db_session, task=task, timed_out=False)
++        await db_session.commit()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_ABORTED
++        assert calls == []
++        card = await _card_row(db_session, env.carrier.id)
++        assert "中止" in (card.content_redacted or "")
++
++    async def test_inject_metadata_no_dm_target(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        c2 = await _make_member(db_session, env.group, name="成员二", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1, c2])
++        states = consensus_member_states(task)
++        states[0]["state"] = CONSENSUS_MEMBER_DELIVERED
++        states[0]["opinion"] = "成员一的完整意见"
++        states[1]["state"] = CONSENSUS_MEMBER_TIMEOUT
++        task.members = states
++        await db_session.commit()
++        calls = _inject_calls(monkeypatch)
++        await inject_converge_directive(db_session, task=task, timed_out=False)
++        await db_session.commit()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_CLOSING
++        assert len(calls) == 1
++        assert calls[0]["session_id"] == coordinator.shadow_session_id
++        assert "成员一的完整意见" in calls[0]["prompt"]
++        assert "成员二" in calls[0]["prompt"]  # 未响应名单
++        meta = calls[0]["meta"]
++        assert meta["consensus_role"] == "converge"
++        assert meta["consensus_task_id"] == str(task.id)
++        # D-007 唯一例外：converge 轮无 dm_target → 投影放行。
++        assert "dm_target_member_id" not in meta
++
++    async def test_timed_out_marks_pending_timeout(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        c2 = await _make_member(db_session, env.group, name="成员二", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1, c2])
++        states = consensus_member_states(task)
++        states[0]["state"] = CONSENSUS_MEMBER_DELIVERED
++        states[0]["opinion"] = "意见一"
++        task.members = states
++        await db_session.commit()
++        calls = _inject_calls(monkeypatch)
++        await inject_converge_directive(db_session, task=task, timed_out=True)
++        await db_session.commit()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_TIMEOUT
++        states = consensus_member_states(task)
++        assert states[1]["state"] == CONSENSUS_MEMBER_TIMEOUT
++        assert "成员二" in calls[0]["prompt"]
++        assert len(calls) == 1
++
++
++# ── collect_collaborator_opinion（意见聚合口径）────────────────────────────
++
++
++class TestCollectOpinion:
++    async def test_filters_and_strips_prefix(self, db_session):
++        env = await _make_group_env(db_session)
++        run = AgentRun(
++            id=uuid.uuid4(),
++            agent_type="claude_code",
++            provider="claude",
++            agent_session_id=uuid.uuid4(),
++            user_id=env.owner.id,
++            status="completed",
++            started_at=datetime.now(UTC),
++        )
++        db_session.add(run)
++        base = datetime.now(UTC)
++        rows = [
++            AgentRunLog(
++                run_id=run.id,
++                timestamp=base,
++                channel="user_input",
++                content_redacted="触发消息",
++            ),
++            AgentRunLog(
++                run_id=run.id,
++                timestamp=base + timedelta(seconds=1),
++                channel="stdout",
++                content_redacted="[ASSISTANT]第一段意见",
++            ),
++            AgentRunLog(
++                run_id=run.id,
++                timestamp=base + timedelta(seconds=2),
++                channel="thinking",
++                content_redacted="[THINKING]内部推理",
++            ),
++            AgentRunLog(
++                run_id=run.id,
++                timestamp=base + timedelta(seconds=3),
++                channel="stdout",
++                content_redacted="[ASSISTANT]第二段意见",
++            ),
++        ]
++        db_session.add_all(rows)
++        await db_session.commit()
++        opinion = await collect_collaborator_opinion(db_session, run_id=run.id)
++        assert opinion is not None
++        assert "触发消息" not in opinion
++        assert "[THINKING]" not in opinion
++        assert "第一段意见" in opinion
++        assert "第二段意见" in opinion
++
++
++class TestConsensusSweepOnce:
++    """task-09：超时任务巡检——零 delivered→aborted / 有 delivered→超时收口注入。"""
++
++    async def test_not_due_returns_zero(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        task = await _seed_task(
++            db_session, env, coordinator=coordinator, collaborators=[coordinator]
++        )
++        processed = await consensus_sweep_once(db_session)
++        assert processed == 0
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_OPEN
++
++    async def test_zero_delivered_overdue_aborts(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++        processed = await consensus_sweep_once(db_session)
++        assert processed == 1
++        # 真实集成修正（2026-09-12 E2E）：rollback 丢弃未提交改动后重读，
++        # 验证 sweep 零 delivered 分支的 aborted 已持久化（同事务 refresh
++        # 可见未提交改动，无法检出缺 commit）。检测不到则 status 回 open。
++        await db_session.rollback()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_ABORTED
++        assert task.converged_at is not None
++
++    async def test_delivered_overdue_triggers_timed_out_converge(self, db_session, monkeypatch):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        task.members = [
++            {
++                "member_id": str(c1.id),
++                "member_name": c1.display_name,
++                "state": CONSENSUS_MEMBER_DELIVERED,
++                "delivered_at": datetime.now(UTC).isoformat(),
++                "opinion": "意见已转交",
++            }
++        ]
++        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++        calls: list[dict] = []
++
++        async def fake_inject(db, *, task, timed_out):
++            calls.append({"task_id": task.id, "timed_out": timed_out})
++
++        monkeypatch.setattr(
++            "app.modules.daemon.group.service.consensus.inject_converge_directive",
++            fake_inject,
++        )
++        processed = await consensus_sweep_once(db_session)
++        assert processed == 1
++        assert len(calls) == 1
++        assert calls[0]["timed_out"] is True
++        assert calls[0]["task_id"] == task.id
++        # 真实集成修正（2026-09-12 E2E）：sweep 调 inject 后的持久化由真函数内
++        # commit 兑现——本用例 mock 掉 inject（status=timeout 赋值在真函数内，
++        # 职责边界归 TestInjectConvergeDirective），此处 rollback 重读验证 sweep
++        # 自身未产生意外未提交改动（回 committed 基线 open）。
++        await db_session.rollback()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_OPEN
++
++    async def test_dissolved_group_silent_abort(self, db_session):
++        env = await _make_group_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
++        env.group.ended_at = datetime.now(UTC)
++        await db_session.commit()
++        processed = await consensus_sweep_once(db_session)
++        assert processed == 1
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_ABORTED
+diff --git a/backend/migrations/versions/20260910130000_group_consensus.py b/backend/migrations/versions/20260910130000_group_consensus.py
+new file mode 100644
+index 000000000..091c7f27b
+--- /dev/null
++++ b/backend/migrations/versions/20260910130000_group_consensus.py
+@@ -0,0 +1,126 @@
++"""agent_group_chats consensus columns + agent_group_consensus_tasks
++
++Revision ID: 20260910120000
++Revises: 5e295549e20f
++Create Date: 2026-09-11 22:30:00
++
++2026-09-10-group-agent-direct-chat task-01（design §5.2 / D-002@v1 / D-008@v1）：
++群聊汇总收口模式持久层。
++
++1. ``agent_group_chats`` 加两列（照 agent_cross_mention 顶层列先例）：
++   - ``consensus_mode`` BOOL NOT NULL server_default false——存量群默认关，
++     发送侧零行为变化（D-002 零回归底线）；
++   - ``consensus_timeout_seconds`` INT NOT NULL server_default 600——范围
++     60~3600 由 schema 层校验，DB 不设 CHECK（对齐 cross_mention_depth 先例）。
++2. 新表 ``agent_group_consensus_tasks``（汇总任务状态机唯一状态源，D-008）：
++   group_id FK CASCADE / carrier_run_id FK agent_runs CASCADE + UNIQUE（防同
++   消息重复建任务）/ coordinator_member_id FK agent_group_members CASCADE /
++   status VARCHAR(16) NOT NULL（open|closing|closed|timeout|aborted，应用层
++   控制，不设 server_default——对齐 skill_sources 先例防 autogenerate 漂移）/
++   members JSON NOT NULL（被咨询成员明细快照）/ deadline_at TIMESTAMPTZ
++   NOT NULL / created_by FK users CASCADE / created_at now() server_default /
++   converged_at NULL。
++3. 索引：ix_agct_group(group_id)、ix_agct_status_deadline(status,
++   deadline_at)（sweeper 扫描谓词）、uq_agct_carrier_run(carrier_run_id)
++   （unique=True 内联约束）。
++
++无数据回填（新表零存量；两列 server_default 覆盖存量行）。downgrade 对称
++回落：先删表（连带索引/约束随表删），再删两列。
++
++author: qinyi
++created_at: 2026-09-11 22:30:00
++"""
++
++from __future__ import annotations
++
++import sqlalchemy as sa
++from alembic import op
++
++# revision identifiers, used by Alembic.
++revision = "20260910130000"
++down_revision = "5e295549e20f"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "agent_group_chats",
++        sa.Column(
++            "consensus_mode",
++            sa.Boolean(),
++            nullable=False,
++            server_default=sa.text("false"),
++        ),
++    )
++    op.add_column(
++        "agent_group_chats",
++        sa.Column(
++            "consensus_timeout_seconds",
++            sa.Integer(),
++            nullable=False,
++            server_default=sa.text("600"),
++        ),
++    )
++    op.create_table(
++        "agent_group_consensus_tasks",
++        sa.Column(
++            "id",
++            sa.Uuid(as_uuid=True),
++            primary_key=True,
++            nullable=False,
++        ),
++        sa.Column(
++            "group_id",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("agent_group_chats.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++        sa.Column(
++            "carrier_run_id",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("agent_runs.id", ondelete="CASCADE"),
++            nullable=False,
++            unique=True,
++        ),
++        sa.Column(
++            "coordinator_member_id",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("agent_group_members.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++        sa.Column("status", sa.String(length=16), nullable=False),
++        sa.Column("members", sa.JSON(), nullable=False),
++        sa.Column("deadline_at", sa.DateTime(timezone=True), nullable=False),
++        sa.Column(
++            "created_by",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("users.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++        sa.Column(
++            "created_at",
++            sa.DateTime(timezone=True),
++            nullable=False,
++            server_default=sa.text("now()"),
++        ),
++        sa.Column("converged_at", sa.DateTime(timezone=True), nullable=True),
++    )
++    op.create_index(
++        "ix_agct_group",
++        "agent_group_consensus_tasks",
++        ["group_id"],
++    )
++    op.create_index(
++        "ix_agct_status_deadline",
++        "agent_group_consensus_tasks",
++        ["status", "deadline_at"],
++    )
++
++
++def downgrade() -> None:
++    op.drop_index("ix_agct_status_deadline", table_name="agent_group_consensus_tasks")
++    op.drop_index("ix_agct_group", table_name="agent_group_consensus_tasks")
++    op.drop_table("agent_group_consensus_tasks")
++    op.drop_column("agent_group_chats", "consensus_timeout_seconds")
++    op.drop_column("agent_group_chats", "consensus_mode")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 18179c85a..21d681d98 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -42983,6 +42983,20 @@
+             "description": "群背景摘要条数",
+             "default": 20
+           },
++          "consensus_mode": {
++            "type": "boolean",
++            "title": "Consensus Mode",
++            "description": "汇总收口模式开关（默认关）",
++            "default": false
++          },
++          "consensus_timeout_seconds": {
++            "type": "integer",
++            "maximum": 3600.0,
++            "minimum": 60.0,
++            "title": "Consensus Timeout Seconds",
++            "description": "汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）",
++            "default": 600
++          },
+           "user_members": {
+             "items": {
+               "$ref": "#/components/schemas/GroupMemberUserCreate"
+@@ -43063,6 +43077,14 @@
+             "type": "integer",
+             "title": "Context Window"
+           },
++          "consensus_mode": {
++            "type": "boolean",
++            "title": "Consensus Mode"
++          },
++          "consensus_timeout_seconds": {
++            "type": "integer",
++            "title": "Consensus Timeout Seconds"
++          },
+           "created_at": {
+             "type": "string",
+             "format": "date-time",
+@@ -43140,6 +43162,8 @@
+           "agent_cross_mention",
+           "cross_mention_depth",
+           "context_window",
++          "consensus_mode",
++          "consensus_timeout_seconds",
+           "created_at"
+         ],
+         "title": "GroupChatCreateRead",
+@@ -43202,6 +43226,14 @@
+             "type": "integer",
+             "title": "Context Window"
+           },
++          "consensus_mode": {
++            "type": "boolean",
++            "title": "Consensus Mode"
++          },
++          "consensus_timeout_seconds": {
++            "type": "integer",
++            "title": "Consensus Timeout Seconds"
++          },
+           "created_at": {
+             "type": "string",
+             "format": "date-time",
+@@ -43296,6 +43328,8 @@
+           "agent_cross_mention",
+           "cross_mention_depth",
+           "context_window",
++          "consensus_mode",
++          "consensus_timeout_seconds",
+           "created_at"
+         ],
+         "title": "GroupChatDetailRead",
+@@ -43358,6 +43392,14 @@
+             "type": "integer",
+             "title": "Context Window"
+           },
++          "consensus_mode": {
++            "type": "boolean",
++            "title": "Consensus Mode"
++          },
++          "consensus_timeout_seconds": {
++            "type": "integer",
++            "title": "Consensus Timeout Seconds"
++          },
+           "created_at": {
+             "type": "string",
+             "format": "date-time",
+@@ -43477,6 +43519,8 @@
+           "agent_cross_mention",
+           "cross_mention_depth",
+           "context_window",
++          "consensus_mode",
++          "consensus_timeout_seconds",
+           "created_at"
+         ],
+         "title": "GroupChatListItemRead",
+@@ -43576,6 +43620,14 @@
+             "type": "integer",
+             "title": "Context Window"
+           },
++          "consensus_mode": {
++            "type": "boolean",
++            "title": "Consensus Mode"
++          },
++          "consensus_timeout_seconds": {
++            "type": "integer",
++            "title": "Consensus Timeout Seconds"
++          },
+           "created_at": {
+             "type": "string",
+             "format": "date-time",
+@@ -43646,6 +43698,8 @@
+           "agent_cross_mention",
+           "cross_mention_depth",
+           "context_window",
++          "consensus_mode",
++          "consensus_timeout_seconds",
+           "created_at"
+         ],
+         "title": "GroupChatRead",
+@@ -43703,6 +43757,30 @@
+             ],
+             "title": "Context Window"
+           },
++          "consensus_mode": {
++            "anyOf": [
++              {
++                "type": "boolean"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Consensus Mode"
++          },
++          "consensus_timeout_seconds": {
++            "anyOf": [
++              {
++                "type": "integer",
++                "maximum": 3600.0,
++                "minimum": 60.0
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Consensus Timeout Seconds"
++          },
+           "settings_json": {
+             "anyOf": [
+               {
+@@ -44522,6 +44600,17 @@
+               }
+             ],
+             "title": "Error"
++          },
++          "consensus_role": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Consensus Role"
+           }
+         },
+         "type": "object",
+@@ -44710,6 +44799,18 @@
+             },
+             "type": "array",
+             "title": "Triggered"
++          },
++          "consensus_task_id": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "uuid"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Consensus Task Id"
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx b/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
+index 51eb8e47b..9e2a66270 100644
+--- a/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
+@@ -208,6 +208,8 @@ function makeGroupDetail(): Record<string, unknown> {
+     agent_cross_mention: true,
+     cross_mention_depth: 2,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+index 385732b70..9ed447387 100644
+--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+@@ -59,6 +59,9 @@ import {
+   containsMentionAll,
+   entryFromReplayLog,
+   insertSortedGroupEntry,
++  ConsensusStatusCard,
++  parseConsensusCard,
++  parseGroupLiveLog,
+   parseReplySnapshot,
+   pruneTypingIndicators,
+   quoteHeadOf,
+@@ -270,6 +273,8 @@ function makeGroupDetail(): Record<string, unknown> {
+     agent_cross_mention: true,
+     cross_mention_depth: 2,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+@@ -2659,3 +2664,152 @@ describe("insertSortedGroupEntry（ql-20260904-002）", () => {
+     expect(out.map((e) => e.id)).toEqual(["l0", "l2", "l1"]);
+   });
+ });
++
++
++// ── 汇总收口状态卡（2026-09-10-group-agent-direct-chat task-10，FR-1.6）──
++
++describe("汇总收口状态卡（task-10）", () => {
++  const cardLog = (phase: string, logId: string): GroupReplayLogEntry => ({
++    id: logId,
++    run_id: "r-carrier",
++    timestamp: "2026-09-10T08:00:00Z",
++    channel: "system",
++    content_redacted: `汇总收口状态：${phase}`,
++    metadata: {
++      consensus_card: {
++        coordinator_name: "小码",
++        phase,
++        members: [
++          { name: "小测", state: "pending" },
++          { name: "小译", state: "delivered" },
++        ],
++        updated_at: "2026-09-10T08:00:01Z",
++      },
++    },
++  });
++
++  it("entryFromReplayLog：channel=system 且 consensus_card → consensus 条目；无卡 system 行 → null", () => {
++    const entry = entryFromReplayLog(cardLog("collecting", "c-1"), "u-me");
++    expect(entry?.kind).toBe("consensus");
++    if (entry?.kind === "consensus") {
++      expect(entry.card.coordinatorName).toBe("小码");
++      expect(entry.card.phase).toBe("collecting");
++      expect(entry.card.members).toEqual([
++        { name: "小测", state: "pending" },
++        { name: "小译", state: "delivered" },
++      ]);
++    }
++    const plain = entryFromReplayLog(
++      { ...cardLog("x", "c-2"), metadata: null } as GroupReplayLogEntry,
++      "u-me",
++    );
++    expect(plain).toBeNull();
++  });
++
++  it("parseGroupLiveLog：实时 system 事件带 metadata.consensus_card → entry；不带 → ignore", () => {
++    const env = {
++      channel: "system",
++      content: "汇总收口状态：converging",
++      log_id: "c-1",
++      timestamp: "2026-09-10T08:00:00Z",
++      run_id: "r-carrier",
++      metadata: {
++        consensus_card: {
++          coordinator_name: "小码",
++          phase: "converging",
++          members: [{ name: "小测", state: "delivered" }],
++          updated_at: "2026-09-10T08:00:02Z",
++        },
++      },
++    } as Parameters<typeof parseGroupLiveLog>[0];
++    const hit = parseGroupLiveLog(env, "u-me");
++    expect(hit.type).toBe("entry");
++    const miss = parseGroupLiveLog(
++      { ...env, metadata: null } as Parameters<typeof parseGroupLiveLog>[0],
++      "u-me",
++    );
++    expect(miss.type).toBe("ignore");
++  });
++
++  it("applyGroupTimelineEvent：consensus 同 log_id 原位替换（D-006 卡面 UPDATE 镜像），不双条", () => {
++    const seen = new Set<string>();
++    const first = applyGroupTimelineEvent([], seen, {
++      type: "entry",
++      entry: {
++        kind: "consensus",
++        id: "c-1",
++        timestamp: "2026-09-10T08:00:00Z",
++        content: "汇总收口状态：collecting",
++        card: {
++          coordinatorName: "小码",
++          phase: "collecting",
++          members: [{ name: "小测", state: "pending" }],
++          updatedAt: "2026-09-10T08:00:01Z",
++        },
++      },
++    });
++    expect(first).toHaveLength(1);
++    // 重发同 id（卡面更新——collecting → closed）：原位替换内容，不追加。
++    const second = applyGroupTimelineEvent(first, seen, {
++      type: "entry",
++      entry: {
++        kind: "consensus",
++        id: "c-1",
++        timestamp: "2026-09-10T08:00:00Z",
++        content: "汇总收口状态：closed",
++        card: {
++          coordinatorName: "小码",
++          phase: "closed",
++          members: [{ name: "小测", state: "delivered" }],
++          updatedAt: "2026-09-10T08:05:00Z",
++        },
++      },
++    });
++    expect(second).toHaveLength(1);
++    const replaced = second[0];
++    expect(replaced?.kind).toBe("consensus");
++    if (replaced?.kind === "consensus") {
++      expect(replaced.card.phase).toBe("closed");
++    }
++    // 普通 agent 条目去重语义不受影响（同 id 跳过）。
++  });
++
++  it("parseConsensusCard：畸形输入容错 → null", () => {
++    expect(parseConsensusCard(null)).toBeNull();
++    expect(parseConsensusCard("x")).toBeNull();
++    expect(parseConsensusCard({ phase: "collecting" })).toBeNull();
++    expect(parseConsensusCard({ coordinator_name: "", phase: "x" })).toBeNull();
++  });
++
++
++  it("ConsensusStatusCard 四态渲染：phase 透传 data-phase + 成员状态点", () => {
++    const mk = (phase: string): Extract<GroupTimelineEntry, { kind: "consensus" }> => ({
++      kind: "consensus",
++      id: "c-1",
++      timestamp: "2026-09-10T08:00:00Z",
++      content: `汇总收口状态：${phase}`,
++      card: {
++        coordinatorName: "小码",
++        phase,
++        members: [
++          { name: "小测", state: "pending" },
++          { name: "小译", state: "delivered" },
++          { name: "小译2", state: "timeout" },
++        ],
++        updatedAt: "2026-09-10T08:00:01Z",
++      },
++    });
++    for (const phase of ["collecting", "converging", "closed", "timeout", "aborted"]) {
++      const { container, unmount } = render(<ConsensusStatusCard entry={mk(phase)} pinnedRowClass="" />);
++      const card = container.querySelector('[data-testid="group-consensus-card"]');
++      expect(card?.getAttribute("data-phase")).toBe(phase);
++      expect(card?.textContent).toContain("小码");
++      const states = container.querySelectorAll('[data-testid="consensus-member-state"]');
++      expect(states).toHaveLength(3);
++      expect(states[0]?.getAttribute("data-state")).toBe("pending");
++      expect(states[1]?.getAttribute("data-state")).toBe("delivered");
++      unmount();
++    }
++  });
++});
++
+diff --git a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+index ea4d4f7a2..f8778ebac 100644
+--- a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+@@ -371,6 +371,8 @@ function makeGroup(overrides: Partial<GroupChatRead> = {}): GroupChatRead {
+     agent_cross_mention: true,
+     cross_mention_depth: 2,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+@@ -1430,3 +1432,54 @@ describe("MemberPanel 群设置：输入草稿预览开关（quick 群 P2）", (
+     expect(screen.queryByTestId("group-typing-preview-switch")).toBeNull();
+   });
+ });
++
++
++// ── 汇总收口模式设置（2026-09-10-group-agent-direct-chat task-10，FR-1.1）──
++
++describe("MemberPanel 群设置：汇总收口模式（task-10，D-002 群级开关）", () => {
++  it("群读体回显真值：默认关；切换 → PATCH consensus_mode=true + 开启后超时输入出现", async () => {
++    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
++
++    const sw = screen.getByTestId("group-consensus-mode-switch");
++    expect(sw.getAttribute("aria-checked")).toBe("false");
++    // 关态不渲染超时输入（收口超时只在开启后有义）。
++    expect(screen.queryByTestId("group-consensus-timeout-input")).toBeNull();
++
++    fireEvent.click(sw);
++    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
++    expect(mocks.apiFetch).toHaveBeenCalledWith(
++      "/api/daemon/group-chats/g-1",
++      { method: "PATCH", json: { consensus_mode: true } },
++    );
++    await waitFor(() =>
++      expect(sw.getAttribute("aria-checked")).toBe("true"),
++    );
++    // 开启后超时输入出现且回显真值 600（后端默认镜像；antd InputNumber 把
++    // data-testid 透传到内部 input 元素本身）。
++    const input = (await screen.findByTestId(
++      "group-consensus-timeout-input",
++    )) as HTMLInputElement;
++    expect((input.tagName === "INPUT" ? input : input.querySelector("input"))?.value).toBe("600");
++    expect(mocks.notify.success).toHaveBeenCalledWith("已开启汇总收口模式");
++  });
++
++  it("群已开启回显：consensus_mode=true + 超时 900 透传", () => {
++    renderPanel(
++      <MemberPanel
++        group={makeGroup({ consensus_mode: true, consensus_timeout_seconds: 900 })}
++        currentUserId="u-me"
++      />,
++    );
++    const sw = screen.getByTestId("group-consensus-mode-switch");
++    expect(sw.getAttribute("aria-checked")).toBe("true");
++    const input2 = screen.getByTestId("group-consensus-timeout-input") as HTMLInputElement;
++    expect(
++      (input2.tagName === "INPUT" ? input2 : input2.querySelector("input"))?.value,
++    ).toBe("900");
++  });
++
++  it("非群主：不渲染汇总收口设置区", () => {
++    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-lin" />);
++    expect(screen.queryByTestId("group-consensus-mode-switch")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/group-chat/create-group-wizard.tsx b/frontend/src/components/group-chat/create-group-wizard.tsx
+index 320320ab7..9868312e5 100644
+--- a/frontend/src/components/group-chat/create-group-wizard.tsx
++++ b/frontend/src/components/group-chat/create-group-wizard.tsx
+@@ -48,7 +48,7 @@
+ 
+ import { useEffect, useMemo, useState, type ReactNode } from "react";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+-import { Button, Input, Modal, Select, Switch, Tooltip } from "antd";
++import { Button, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd";
+ import { Bot, Plus, Trash2 } from "lucide-react";
+ 
+ import { useMineAgentProfiles } from "@/lib/agent-profiles";
+@@ -183,6 +183,9 @@ export function CreateGroupWizard({
+   /** 已邀用户（user_id + 可选群内头像；Select onChange 时保号同步）。 */
+   const [invited, setInvited] = useState<{ user_id: string; avatar: string | null }[]>([]);
+   const [agentCards, setAgentCards] = useState<AgentMemberCardState[]>([]);
++  /** 汇总收口模式（task-10，D-002 默认关/超时 600——照后端 schema 默认值镜像）。 */
++  const [consensusMode, setConsensusMode] = useState(false);
++  const [consensusTimeout, setConsensusTimeout] = useState(600);
+   const [submitAttempted, setSubmitAttempted] = useState(false);
+   const qc = useQueryClient();
+   const notify = useNotify();
+@@ -198,6 +201,8 @@ export function CreateGroupWizard({
+       setProjectId(null);
+       setInvited([]);
+       setAgentCards([]);
++      setConsensusMode(false);
++      setConsensusTimeout(600);
+       setSubmitAttempted(false);
+     }
+   }, [open]);
+@@ -409,6 +414,10 @@ export function CreateGroupWizard({
+       agent_cross_mention: true,
+       cross_mention_depth: 4,
+       context_window: 20,
++      // 汇总收口模式（task-10）：默认关/600 与后端 GroupChatCreate 默认值
++      // 镜像（生成版 TS 类型必填须显式传——开方汇总是群级行为开关）。
++      consensus_mode: consensusMode,
++      consensus_timeout_seconds: consensusTimeout,
+       ...(invited.length > 0
+         ? {
+             user_members: invited.map((u) => ({
+@@ -666,6 +675,42 @@ export function CreateGroupWizard({
+             仅该项目成员可邀请（上限 {GROUP_USER_MEMBER_LIMIT} 人）；你将作为群主，
+             被邀请成员即可查看并参与群聊。
+           </p>
++          {/* ── 汇总收口模式（task-10，D-002）：开关默认关；开启显示超时输入
++              （60~3600s，默认 600——建群后可在群设置随时改，member-panel 同款）。 ── */}
++          <div className="rounded-md border border-border bg-card px-2.5 py-2">
++            <div className="flex items-center gap-2">
++              <Switch
++                size="small"
++                checked={consensusMode}
++                onChange={setConsensusMode}
++                aria-label="汇总收口模式"
++                data-testid="cgw-consensus-mode-switch"
++              />
++              <span className="text-xs font-medium text-foreground">
++                汇总收口模式
++              </span>
++              {consensusMode && (
++                <InputNumber
++                  size="small"
++                  min={60}
++                  max={3600}
++                  step={30}
++                  value={consensusTimeout}
++                  onChange={(v) => {
++                    if (typeof v === "number") setConsensusTimeout(v);
++                  }}
++                  addonAfter="秒"
++                  className="ml-auto w-[120px]"
++                  aria-label="收口超时秒数"
++                  data-testid="cgw-consensus-timeout-input"
++                />
++              )}
++            </div>
++            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
++              开启后，一条消息 @ 多个 Agent 时由汇总人收齐各成员意见后统一发群；
++              超时未收齐则按已到意见收口。建群后可在群设置中随时开关。
++            </p>
++          </div>
+         </div>
+       )}
+ 
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 05e109814..3b6e07e06 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -111,7 +111,7 @@ import {
+   type KeyboardEvent as ReactKeyboardEvent,
+ } from "react";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+-import { ArrowDown, CheckCircle2, FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, TriangleAlert, Users, X } from "lucide-react";
++import { ArrowDown, Ban, CheckCircle2, Clock, FileText, Image as ImageIcon, Loader2, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, Timer, TriangleAlert, Users, X } from "lucide-react";
+ 
+ import { Drawer, Modal } from "antd";
+ import { MemberPanel } from "@/components/group-chat/member-panel";
+@@ -428,6 +428,17 @@ export type GroupTimelineEntry =
+       id: string;
+       timestamp: string;
+       content: string;
++    }
++  | {
++      /** 汇总收口状态卡（task-10，FR-1.6）：channel=system 且
++       * metadata.consensus_card 的行——同 log_id 重复事件内容替换（卡面
++       * UPDATE 单行模式的前端侧镜像，D-006）。 */
++      kind: "consensus";
++      id: string;
++      timestamp: string;
++      /** 单行摘要（后端 _card_content；卡面主文案）。 */
++      content: string;
++      card: ConsensusCardData;
+     };
+ 
+ /** 时间轴比较：timestamp 升序（解析失败回退字符串比较），同拍按 id 稳定定序。 */
+@@ -480,6 +491,42 @@ export function insertSortedGroupEntry(
+   return [...entries.slice(0, lo), entry, ...entries.slice(lo)];
+ }
+ 
++/** 汇总收口状态卡数据（后端 metadata.consensus_card 同构；task-10）。 */
++export interface ConsensusCardData {
++  coordinatorName: string;
++  /** collecting / converging / closed / timeout / aborted（后端词表镜像）。 */
++  phase: string;
++  members: { name: string; state: string }[];
++  updatedAt: string;
++}
++
++/** 回放 metadata / 实时事件 metadata 的 consensus_card 容错解析（畸形 → null）。 */
++export function parseConsensusCard(raw: unknown): ConsensusCardData | null {
++  if (typeof raw !== "object" || raw === null) return null;
++  const c = raw as Record<string, unknown>;
++  const coordinatorName =
++    typeof c.coordinator_name === "string" ? c.coordinator_name.trim() : "";
++  const phase = typeof c.phase === "string" ? c.phase : "";
++  if (!coordinatorName || !phase) return null;
++  const membersRaw = Array.isArray(c.members) ? c.members : [];
++  const members = membersRaw
++    .map((m): { name: string; state: string } | null => {
++      if (typeof m !== "object" || m === null) return null;
++      const r = m as Record<string, unknown>;
++      return {
++        name: typeof r.name === "string" ? r.name : "?",
++        state: typeof r.state === "string" ? r.state : "?",
++      };
++    })
++    .filter((m): m is { name: string; state: string } => m !== null);
++  return {
++    coordinatorName,
++    phase,
++    members,
++    updatedAt: typeof c.updated_at === "string" ? c.updated_at : "",
++  };
++}
++
+ /** 回放日志行 → 时间线条目（null=不进群时间线：工具/思考/撤回令箭/系统行）。 */
+ export function entryFromReplayLog(
+   log: GroupReplayLogEntry,
+@@ -505,6 +552,21 @@ export function entryFromReplayLog(
+       replyTo: parseReplySnapshot(meta?.reply_to),
+     };
+   }
++  // 汇总收口状态卡（task-10）：channel=system 且 metadata.consensus_card——
++  // 其余 system 行（运行态提示等）不进回放时间线，保持原丢弃语义。
++  if (log.channel === "system") {
++    const card = parseConsensusCard(meta?.consensus_card);
++    if (card) {
++      return {
++        kind: "consensus",
++        id: log.id,
++        timestamp: log.timestamp,
++        content,
++        card,
++      };
++    }
++    return null;
++  }
+   if (log.channel !== "stdout") return null;
+   // 载体 run 上 stdout 行即投影行（task-05 形态：仅 user_input + 投影行落群会话）；
+   // 分类口径复用 classifySessionLog（前缀剥除 + 噪音行丢弃，与单聊同源）。
+@@ -561,6 +623,26 @@ export function parseGroupLiveLog(
+       },
+     };
+   }
++  // 汇总收口状态卡（task-10）：channel=system 且事件 metadata.consensus_card
++  // ——同 log_id 重发的内容替换事件（applyGroupTimelineEvent 分支处理）。
++  if (env.channel === "system") {
++    const card = parseConsensusCard(
++      env.metadata?.consensus_card,
++    );
++    if (card) {
++      return {
++        type: "entry",
++        entry: {
++          kind: "consensus",
++          id: env.log_id ?? "",
++          timestamp: env.timestamp ?? "",
++          content,
++          card,
++        },
++      };
++    }
++    return { type: "ignore" };
++  }
+   if (env.channel !== "stdout") return { type: "ignore" };
+   // 撤回令箭（stale=true 且 [ASSISTANT_OVERRIDE] 前缀；分类器 override kind 的
+   // segmentId 捕获组即被撤回段）——按段撤回已渲染半截行，不产生新条目。
+@@ -620,8 +702,26 @@ export function applyGroupTimelineEvent(
+     return next.length === entries.length ? entries : next;
+   }
+   const entry = incoming.entry;
+-  if (!entry.id || seenIds.has(entry.id)) return entries;
+-  seenIds.add(entry.id);
++  // 汇总收口状态卡（task-10，D-006 同 log_id 内容替换）：卡面 UPDATE 单行
++  // 模式的实时镜像——同 id 命中时原位替换（timestamp 保留首现时刻），不
++  // 跳过不追加（去重语义只适用 append-only 投影行）。
++  if (entry.kind === "consensus") {
++    if (!entry.id) return entries;
++    if (seenIds.has(entry.id)) {
++      const idx = entries.findIndex(
++        (e) => e.kind === "consensus" && e.id === entry.id,
++      );
++      if (idx < 0) return entries;
++      const next = [...entries];
++      next[idx] = entry;
++      return next;
++    }
++    seenIds.add(entry.id);
++  } else if (!entry.id || seenIds.has(entry.id)) {
++    return entries;
++  } else {
++    seenIds.add(entry.id);
++  }
+   let base = entries;
+   if (entry.kind === "agent" && entry.segmentId == null) {
+     // 完整行吞噬同归属键同 run 的半截前缀行（乱序胶水段自愈）。
+@@ -2990,6 +3090,12 @@ function GroupTimelineRowInner({
+     );
+   }
+ 
++  if (entry.kind === "consensus") {
++    return (
++      <ConsensusStatusCard entry={entry} pinnedRowClass={pinnedRowClass} />
++    );
++  }
++
+   if (entry.kind === "user") {
+     const chips = entry.attachments ? summaryToChips(entry.attachments) : [];
+     if (entry.isSelf) {
+@@ -3186,3 +3292,130 @@ function ReplyingTags({ replying }: { replying: GroupReplyingMember[] }) {
+     </div>
+   );
+ }
++
++/**
++ * 汇总收口状态卡（task-10，FR-1.6 / design §5.6）：channel=system 且
++ * metadata.consensus_card 的行——四态（collecting/converging 收口中/
++ * closed 已收口 / timeout 超时 / aborted 中止）+ 成员明细状态点。
++ * 同 log_id 事件由 applyGroupTimelineEvent 原位替换（卡面 UPDATE 单行
++ * 模式的前端镜像，D-006）；样式照 AI-Native 双主题 token（原型
++ * prototype-consensus-mode.html 状态卡形态）。
++ */
++export function ConsensusStatusCard({
++  entry,
++  pinnedRowClass,
++}: {
++  entry: Extract<GroupTimelineEntry, { kind: "consensus" }>;
++  pinnedRowClass: string;
++}) {
++  const { phase, coordinatorName, members } = entry.card;
++  const running = phase === "collecting" || phase === "converging";
++
++  const phaseMeta = (() => {
++    switch (phase) {
++      case "collecting":
++        return {
++          icon: <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" />,
++          label: "意见收集中",
++          cls: "border-border bg-card",
++          iconCls: "text-brand-600",
++        };
++      case "converging":
++        return {
++          icon: <Timer aria-hidden className="h-3.5 w-3.5" />,
++          label: "汇总中",
++          cls: "border-border bg-card",
++          iconCls: "text-brand-600",
++        };
++      case "closed":
++        return {
++          icon: <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />,
++          label: "已收口",
++          cls: "border-border bg-muted/40",
++          iconCls: "text-emerald-600 dark:text-emerald-400",
++        };
++      case "timeout":
++        return {
++          icon: <Clock aria-hidden className="h-3.5 w-3.5" />,
++          label: "已超时收口",
++          cls: "border-border bg-muted/40",
++          iconCls: "text-amber-600 dark:text-amber-400",
++        };
++      case "aborted":
++        return {
++          icon: <Ban aria-hidden className="h-3.5 w-3.5" />,
++          label: "已中止",
++          cls: "border-border bg-muted/40",
++          iconCls: "text-muted-foreground",
++        };
++      default:
++        return {
++          icon: <TriangleAlert aria-hidden className="h-3.5 w-3.5" />,
++          label: phase,
++          cls: "border-border bg-card",
++          iconCls: "text-muted-foreground",
++        };
++    }
++  })();
++
++  const memberStateDot = (state: string): string => {
++    switch (state) {
++      case "pending":
++        return "bg-muted-foreground/40";
++      case "delivered":
++        return "bg-emerald-500";
++      case "failed":
++        return "bg-red-500";
++      case "timeout":
++        return "bg-amber-500";
++      default:
++        return "bg-muted-foreground/40";
++    }
++  };
++
++  return (
++    <div
++      data-testid="group-consensus-card"
++      data-phase={phase}
++      data-log-id={entry.id}
++      className={cn(
++        "my-2.5 rounded-lg border px-3 py-2 shadow-sm",
++        phaseMeta.cls,
++        pinnedRowClass,
++      )}
++    >
++      <div className="flex items-center gap-2">
++        <span className={cn("shrink-0", phaseMeta.iconCls)}>{phaseMeta.icon}</span>
++        <span className="text-[11.5px] font-semibold text-foreground">
++          汇总收口 · {phaseMeta.label}
++        </span>
++        <span className="text-[11px] text-muted-foreground">
++          汇总人 {coordinatorName}
++        </span>
++      </div>
++      {members.length > 0 && (
++        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
++          {members.map((m) => (
++            <span
++              key={m.name}
++              data-testid="consensus-member-state"
++              data-member={m.name}
++              data-state={m.state}
++              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
++            >
++              <span
++                aria-hidden
++                className={cn(
++                  "h-1.5 w-1.5 rounded-full",
++                  memberStateDot(m.state),
++                  running && m.state === "pending" && "animate-pulse",
++                )}
++              />
++              {m.name}
++            </span>
++          ))}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/group-chat/member-panel.tsx b/frontend/src/components/group-chat/member-panel.tsx
+index 19eb30627..7a8850aac 100644
+--- a/frontend/src/components/group-chat/member-panel.tsx
++++ b/frontend/src/components/group-chat/member-panel.tsx
+@@ -48,7 +48,7 @@
+ 
+ import { useMemo, useState, type MouseEvent } from "react";
+ import { useMutation, useQuery } from "@tanstack/react-query";
+-import { Button, Drawer, Input, Modal, Select, Switch, Tooltip } from "antd";
++import { Button, Drawer, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd";
+ import { Plus, Square, UserMinus } from "lucide-react";
+ 
+ import { SessionPanel } from "@/components/daemon/session-panel";
+@@ -372,6 +372,44 @@ export function MemberPanel({
+     },
+   });
+ 
++  /* ── 汇总收口模式（2026-09-10-group-agent-direct-chat task-10，FR-1.1）：
++   *    群级开关 + 超时（60~3600s，D-002 默认关/600）。GroupChatRead 透出
++   *    consensus_mode/consensus_timeout_seconds 顶层列——开关有服务端真值
++   *    （group.consensus_mode），照 typing_preview 先例做乐观本地态 + 局部
++   *    PATCH（顶层列字段，非 settings_json 键级），失败回滚并刷新兜底；
++   *    超时输入 InputNumber（开启动后显示）失焦提交，非法值不发包。 ── */
++  const [consensusMode, setConsensusMode] = useState(group.consensus_mode);
++  const [consensusTimeout, setConsensusTimeout] = useState<number>(
++    group.consensus_timeout_seconds,
++  );
++  const consensusModeMutation = useMutation({
++    mutationFn: (next: boolean) =>
++      updateGroupChat(group.id, { consensus_mode: next }),
++    onMutate: (next) => {
++      setConsensusMode(next);
++    },
++    onError: (err, next) => {
++      setConsensusMode(!next);
++      notify.error(err, "设置失败，请稍后重试");
++    },
++    onSuccess: (_res, next) => {
++      notify.success(next ? "已开启汇总收口模式" : "已关闭汇总收口模式");
++      onRefresh?.();
++    },
++  });
++  const consensusTimeoutMutation = useMutation({
++    mutationFn: (next: number) =>
++      updateGroupChat(group.id, { consensus_timeout_seconds: next }),
++    onError: (err) => {
++      notify.error(err, "超时设置失败，请稍后重试");
++      setConsensusTimeout(group.consensus_timeout_seconds);
++    },
++    onSuccess: (_res, next) => {
++      notify.success(`收口超时已设为 ${next} 秒`);
++      onRefresh?.();
++    },
++  });
++
+   /* ── 群聊体验对齐 quick：邀请用户（项目人员多选 → 逐个 POST members user 体；
+    *    display_name 默认用户名——后端 GroupMemberUserCreate 同口径）。 ── */
+   const inviteMutation = useMutation({
+@@ -532,6 +570,57 @@ export function MemberPanel({
+         </div>
+       )}
+ 
++      {/* ── 汇总收口模式开关+超时（task-10，D-002 群级开关默认关；开关有
++          服务端真值 group.consensus_mode，与上方 typing_preview 的本地态
++          不同源——updateGroupChat 顶层列局部 PATCH） ── */}
++      {isOwner && (
++        <div className="mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm">
++          <div className="flex items-center gap-2">
++            <Switch
++              size="small"
++              checked={consensusMode}
++              loading={consensusModeMutation.isPending}
++              onChange={(checked) => consensusModeMutation.mutate(checked)}
++              aria-label="汇总收口模式"
++              data-testid="group-consensus-mode-switch"
++            />
++            <span className="text-[11.5px] font-medium text-foreground">
++              汇总收口模式
++            </span>
++            {consensusMode && (
++              <InputNumber
++                size="small"
++                min={60}
++                max={3600}
++                step={30}
++                value={consensusTimeout}
++                onChange={(v) => {
++                  if (typeof v === "number") setConsensusTimeout(v);
++                }}
++                onBlur={() => {
++                  const clamped = Math.min(
++                    3600,
++                    Math.max(60, Math.round(consensusTimeout)),
++                  );
++                  setConsensusTimeout(clamped);
++                  if (clamped !== group.consensus_timeout_seconds) {
++                    consensusTimeoutMutation.mutate(clamped);
++                  }
++                }}
++                addonAfter="秒"
++                className="ml-auto w-[130px]"
++                aria-label="收口超时秒数"
++                data-testid="group-consensus-timeout-input"
++              />
++            )}
++          </div>
++          <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
++            开启后，一条消息 @ 多个 Agent 时由汇总人收齐各成员意见后统一发群；
++            超时（60~3600 秒）未收齐则按已到意见收口。
++          </p>
++        </div>
++      )}
++
+       {/* ── Agent 成员区（原型 .sec-label + .agent-card） ── */}
+       <div className="flex items-center justify-between px-4 pb-1 pt-2">
+         <p className="text-[11px] font-semibold tracking-wide text-muted-foreground">
+diff --git a/frontend/src/components/mobile/mobile-session-list.test.tsx b/frontend/src/components/mobile/mobile-session-list.test.tsx
+index d95b8feee..758f31d94 100644
+--- a/frontend/src/components/mobile/mobile-session-list.test.tsx
++++ b/frontend/src/components/mobile/mobile-session-list.test.tsx
+@@ -133,6 +133,8 @@ function makeGroupListItem(
+     agent_cross_mention: true,
+     cross_mention_depth: 2,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+diff --git a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+index 27d2865d2..99d067709 100644
+--- a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
++++ b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+@@ -311,6 +311,8 @@ function makeGroupRead(
+     agent_cross_mention: true,
+     cross_mention_depth: 4,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+@@ -660,6 +662,8 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
+         agent_cross_mention: true,
+         cross_mention_depth: 4,
+         context_window: 20,
++        consensus_mode: false,
++        consensus_timeout_seconds: 600,
+         user_members: [{ user_id: "u-lin" }],
+         agent_members: [
+           expect.objectContaining({
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index a4085debe..07182e330 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -2462,6 +2462,8 @@ function makeGroupListItem(
+     agent_cross_mention: true,
+     cross_mention_depth: 2,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index 13b32c079..2b90dd31a 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -691,6 +691,8 @@ beforeEach(() => {
+     agent_cross_mention: true,
+     cross_mention_depth: 4,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+@@ -708,6 +710,8 @@ beforeEach(() => {
+     agent_cross_mention: true,
+     cross_mention_depth: 4,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+@@ -1861,6 +1865,8 @@ function makeGroupListItem(): GroupChatListItemRead {
+     agent_cross_mention: true,
+     cross_mention_depth: 4,
+     context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
+     created_at: "2026-09-01T00:00:00Z",
+     ended_at: null,
+     deleted_at: null,
+@@ -2021,6 +2027,8 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
+         agent_cross_mention: true,
+         cross_mention_depth: 4,
+         context_window: 20,
++        consensus_mode: false,
++        consensus_timeout_seconds: 600,
+       }),
+     );
+     // quick：群工作区后端推导——提交不带 workspace_id。
+diff --git a/frontend/src/lib/agent.ts b/frontend/src/lib/agent.ts
+index dfe5e1725..6ab2647f0 100644
+--- a/frontend/src/lib/agent.ts
++++ b/frontend/src/lib/agent.ts
+@@ -58,7 +58,10 @@ export type AgentRunLogChannel =
+   | "stderr"
+   | "tool_call"
+   | "pending_input"
+-  | "user_input";
++  | "user_input"
++  // 2026-09-10-group-agent-direct-chat：群会话 channel=system 行（汇总收口
++  // 状态卡落库形态，design §5.6；单聊路径不产生）。
++  | "system";
+ 
+ export interface AgentRunLogEntry {
+   id: string;
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 6f39afb6b..674361657 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -15126,6 +15126,18 @@ export interface components {
+              * @default 20
+              */
+             context_window: number;
++            /**
++             * Consensus Mode
++             * @description 汇总收口模式开关（默认关）
++             * @default false
++             */
++            consensus_mode: boolean;
++            /**
++             * Consensus Timeout Seconds
++             * @description 汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）
++             * @default 600
++             */
++            consensus_timeout_seconds: number;
+             /** User Members */
+             user_members?: components["schemas"]["GroupMemberUserCreate"][];
+             /** Agent Members */
+@@ -15166,6 +15178,10 @@ export interface components {
+             cross_mention_depth: number;
+             /** Context Window */
+             context_window: number;
++            /** Consensus Mode */
++            consensus_mode: boolean;
++            /** Consensus Timeout Seconds */
++            consensus_timeout_seconds: number;
+             /**
+              * Created At
+              * Format: date-time
+@@ -15224,6 +15240,10 @@ export interface components {
+             cross_mention_depth: number;
+             /** Context Window */
+             context_window: number;
++            /** Consensus Mode */
++            consensus_mode: boolean;
++            /** Consensus Timeout Seconds */
++            consensus_timeout_seconds: number;
+             /**
+              * Created At
+              * Format: date-time
+@@ -15301,6 +15321,10 @@ export interface components {
+             cross_mention_depth: number;
+             /** Context Window */
+             context_window: number;
++            /** Consensus Mode */
++            consensus_mode: boolean;
++            /** Consensus Timeout Seconds */
++            consensus_timeout_seconds: number;
+             /**
+              * Created At
+              * Format: date-time
+@@ -15398,6 +15422,10 @@ export interface components {
+             cross_mention_depth: number;
+             /** Context Window */
+             context_window: number;
++            /** Consensus Mode */
++            consensus_mode: boolean;
++            /** Consensus Timeout Seconds */
++            consensus_timeout_seconds: number;
+             /**
+              * Created At
+              * Format: date-time
+@@ -15431,6 +15459,10 @@ export interface components {
+             cross_mention_depth?: number | null;
+             /** Context Window */
+             context_window?: number | null;
++            /** Consensus Mode */
++            consensus_mode?: boolean | null;
++            /** Consensus Timeout Seconds */
++            consensus_timeout_seconds?: number | null;
+             /**
+              * Settings Json
+              * @description 群扩展设置；None=不改。支持 guardrails 子键（互@护栏群级覆盖）与 typing_preview 顶层键（typing 草稿预览开关，默认关）
+@@ -15775,6 +15807,8 @@ export interface components {
+             mid_turn: boolean;
+             /** Error */
+             error?: string | null;
++            /** Consensus Role */
++            consensus_role?: string | null;
+         };
+         /**
+          * GroupMemberUpdate
+@@ -15850,6 +15884,8 @@ export interface components {
+             mention_all: boolean;
+             /** Triggered */
+             triggered?: components["schemas"]["GroupMemberTriggerRead"][];
++            /** Consensus Task Id */
++            consensus_task_id?: string | null;
+         };
+         /**
+          * GroupMessageSendRequest
+diff --git a/frontend/src/lib/daemon/group-shadow-stream.ts b/frontend/src/lib/daemon/group-shadow-stream.ts
+index 8fb967e0b..a03bd089a 100644
+--- a/frontend/src/lib/daemon/group-shadow-stream.ts
++++ b/frontend/src/lib/daemon/group-shadow-stream.ts
+@@ -67,6 +67,18 @@ export interface GroupChatStreamEnvelope extends SessionStreamEnvelope {
+   user_id?: string | null;
+   online?: boolean | null;
+   ts?: string | null;
++  /**
++   * 汇总收口状态卡（task-10）：channel=system 的 log 事件附带行 metadata
++   * （consensus_card 同回放形态）——卡面 UPDATE 重发即换内容（同 log_id）。
++   */
++  metadata?: {
++    consensus_card?: {
++      coordinator_name?: string | null;
++      phase?: string | null;
++      members?: { name?: string | null; state?: string | null }[] | null;
++      updated_at?: string | null;
++    } | null;
++  } | null;
+ }
+ 
+ /**
+@@ -146,6 +158,17 @@ export interface GroupReplayLogEntry extends AgentRunLogEntry {
+     attachments?: GroupMessageAttachmentSummary[] | null;
+     /** 引用回复快照（群 P2 第二波；与实时事件 payload 同形态）。 */
+     reply_to?: GroupMessageReplySnapshot | null;
++    /**
++     * 汇总收口状态卡（2026-09-10-group-agent-direct-chat task-10）：
++     * channel=system 行的卡面数据（{coordinator_name, phase, members,
++     * updated_at}）——同 log_id 行 UPDATE 单行重写（D-006）。
++     */
++    consensus_card?: {
++      coordinator_name?: string | null;
++      phase?: string | null;
++      members?: { name?: string | null; state?: string | null }[] | null;
++      updated_at?: string | null;
++    } | null;
+   } | null;
+ }

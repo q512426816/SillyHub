@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>群聊汇总模式原型 — agent 间私聊与收口</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg-elev: #161b22; --bg-inset: #1c2128;
+    --border: #2d333b; --border-soft: #22272e;
+    --text: #e6edf3; --text-dim: #8b949e; --text-faint: #6e7681;
+    --brand-1: #4f9cf7; --brand-2: #2d7ff9;
+    --brand-soft: rgba(79, 156, 247, .12);
+    --ok: #3fb950; --warn: #d29922; --err: #f85149;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; padding: 24px; line-height: 1.6;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+  .demo-row { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+
+  /* ── 群聊面板骨架 ── */
+  .panel {
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius); width: 560px; overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+  .panel-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--border-soft);
+    display: flex; align-items: center; gap: 8px; background: var(--bg-inset);
+  }
+  .panel-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .panel-head .title { font-weight: 600; }
+  .panel-head .mode-tag {
+    margin-left: auto; font-size: 12px; color: var(--brand-1);
+    background: var(--brand-soft); padding: 2px 10px; border-radius: 999px;
+    border: 1px solid rgba(79,156,247,.25);
+  }
+  .timeline { padding: 16px; display: flex; flex-direction: column; gap: 14px; max-height: 620px; overflow-y: auto; }
+
+  .msg { display: flex; gap: 10px; }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; color: #fff;
+  }
+  .avatar.user { background: linear-gradient(135deg, #6e5bef, #a08bff); }
+  .avatar.a1 { background: linear-gradient(135deg, #2d7ff9, #4f9cf7); }
+  .avatar.a2 { background: linear-gradient(135deg, #d29922, #e3b341); }
+  .avatar.a3 { background: linear-gradient(135deg, #bc4c00, #f0883e); }
+  .bubble-wrap { max-width: 76%; }
+  .name { font-size: 12px; color: var(--text-faint); margin-bottom: 3px; }
+  .bubble {
+    background: var(--bg-inset); border: 1px solid var(--border-soft);
+    padding: 9px 13px; border-radius: var(--radius-sm); border-top-left-radius: 3px;
+    word-break: break-word;
+  }
+  .bubble .mention { color: var(--brand-1); }
+  .bubble .hl-ok { color: var(--ok); }
+
+  /* ── 汇总状态卡（本需求核心新组件）── */
+  .consensus-card {
+    border: 1px solid rgba(79,156,247,.3); background: var(--brand-soft);
+    border-radius: var(--radius); padding: 12px 14px; max-width: 86%;
+    align-self: center; width: 100%;
+  }
+  .consensus-card.timeout { border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.08); }
+  .consensus-card.done { border-color: rgba(63,185,80,.35); background: rgba(63,185,80,.07); }
+  .cc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .cc-icon { font-size: 15px; }
+  .cc-title { font-size: 13px; font-weight: 600; }
+  .cc-sub { font-size: 12px; color: var(--text-dim); }
+  .cc-members { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; padding: 2px 9px; border-radius: 999px;
+    background: var(--bg-inset); border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .chip .st { font-size: 11px; }
+  .chip.delivered { border-color: rgba(63,185,80,.4); color: var(--ok); }
+  .chip.pending { border-style: dashed; }
+  .chip.failed { border-color: rgba(248,81,73,.4); color: var(--err); }
+  .chip.timeout { border-color: rgba(210,153,34,.45); color: var(--warn); }
+  .cc-progress { margin-top: 8px; height: 3px; border-radius: 2px; background: var(--bg-inset); overflow: hidden; }
+  .cc-progress .bar { height: 100%; background: var(--brand-2); border-radius: 2px; transition: width .4s; }
+  .cc-meta { margin-top: 6px; font-size: 11px; color: var(--text-faint); display: flex; justify-content: space-between; }
+
+  .agent-msg .bubble { border-left: 2px solid var(--brand-2); }
+  .summary-note { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+  .divider { text-align: center; color: var(--text-faint); font-size: 12px; margin: 4px 0; }
+
+  /* ── 侧栏：群设置 ── */
+  .side {
+    width: 300px; display: flex; flex-direction: column; gap: 16px;
+  }
+  .card {
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+  }
+  .card h3 { font-size: 14px; margin-bottom: 10px; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+  .row + .row { border-top: 1px solid var(--border-soft); }
+  .row .label { font-size: 13px; }
+  .row .desc { font-size: 12px; color: var(--text-faint); margin-top: 2px; max-width: 170px; }
+  .switch {
+    width: 36px; height: 20px; border-radius: 999px; background: var(--border);
+    position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0;
+  }
+  .switch.on { background: var(--brand-2); }
+  .switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: left .2s;
+  }
+  .switch.on::after { left: 18px; }
+  .num-input {
+    background: var(--bg-inset); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius-sm); padding: 4px 8px; width: 90px; font-size: 13px; text-align: right;
+  }
+  .unit { font-size: 12px; color: var(--text-faint); }
+  .hint { font-size: 12px; color: var(--text-dim); background: var(--bg-inset); border-radius: var(--radius-sm); padding: 8px 10px; margin-top: 10px; }
+  .hint b { color: var(--brand-1); }
+  .scene-tag { display:inline-block; font-size:11px; color: var(--text-faint); border:1px solid var(--border); padding:1px 8px; border-radius:999px; margin-bottom:8px; }
+</style>
+</head>
+<body>
+
+<h1>群聊「汇总模式」+ agent 间私聊 — 交互原型</h1>
+<div class="sub">变更 2026-09-10-group-agent-direct-chat · 群级开关 · 首 @ 者汇总 · 超时强制收口 · 协调过程状态卡</div>
+
+<div class="demo-row">
+
+  <!-- ═══ 群聊面板：完整时间线场景 ═══ -->
+  <div class="panel">
+    <div class="panel-head">
+      <span class="dot"></span>
+      <span class="title">跨平台需求评审群</span>
+      <span class="mode-tag">汇总模式 · 开</span>
+    </div>
+    <div class="timeline">
+
+      <div class="msg user">
+        <div class="avatar user">管</div>
+        <div class="bubble-wrap">
+          <div class="name">管理员</div>
+          <div class="bubble"><span class="mention">@小码</span> <span class="mention">@大黄</span> <span class="mention">@老白</span> 这个需求横跨你们三个工作区，各自评估下影响面和排期，给我一个统一结论</div>
+        </div>
+      </div>
+
+      <!-- 状态卡：进行中 -->
+      <div class="consensus-card" id="cc">
+        <div class="cc-head">
+          <span class="cc-icon">🧩</span>
+          <span class="cc-title">小码 正在汇总 3 位成员的意见</span>
+          <span class="cc-sub" id="cc-count">已收 1 / 3</span>
+        </div>
+        <div class="cc-members">
+          <span class="chip delivered"><span class="st">✓</span>大黄 · 已交</span>
+          <span class="chip pending"><span class="st">⏳</span>老白 · 等待中</span>
+          <span class="chip pending"><span class="st">⏳</span>小码 · 分析中</span>
+        </div>
+        <div class="cc-progress"><div class="bar" style="width:33%"></div></div>
+        <div class="cc-meta"><span>意见私下转交，不刷群</span><span>超时收口：10:00</span></div>
+      </div>
+
+      <div class="divider">— 大黄与老白意见有分歧，已转入私聊讨论（群内静默）—</div>
+
+      <!-- 汇总结论 -->
+      <div class="msg agent-msg">
+        <div class="avatar a1">码</div>
+        <div class="bubble-wrap">
+          <div class="name">小码 · 汇总人</div>
+          <div class="bubble">
+            三方意见已收齐，综合结论如下：<br>
+            1. <b>前端工作区</b>（大黄）：UI 改动 3 人日，无阻塞；<br>
+            2. <b>服务端工作区</b>（老白）：接口新增 2 个，5 人日，需先过评审；<br>
+            3. <b>数据工作区</b>（我）：迁移脚本 1 个，2 人日。<br>
+            分歧点（大黄 vs 老白：接口风格）经私聊对齐为老白方案（成本更低）。<br>
+            <b>总计 10 人日，建议排期下周一启动。</b>
+          </div>
+          <div class="summary-note">✓ 汇总自 consensus 任务 · 老白超时未交已标注 · 全部意见可回放审计</div>
+        </div>
+      </div>
+
+      <!-- 状态卡：超时收口示例 -->
+      <div class="consensus-card timeout">
+        <div class="cc-head">
+          <span class="cc-icon">⏱</span>
+          <span class="cc-title">汇总超时收口</span>
+          <span class="cc-sub">已收 2 / 3</span>
+        </div>
+        <div class="cc-members">
+          <span class="chip delivered"><span class="st">✓</span>大黄 · 已交</span>
+          <span class="chip delivered"><span class="st">✓</span>小码 · 已交</span>
+          <span class="chip timeout"><span class="st">⏱</span>老白 · 超时未响应</span>
+        </div>
+        <div class="cc-meta"><span>已拿现有意见强制收口，未响应成员在总结中如实标注</span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══ 侧栏：群设置 + 说明 ═══ -->
+  <div class="side">
+    <div class="card">
+      <h3>群设置 · 协作模式</h3>
+      <div class="row">
+        <div>
+          <div class="label">汇总模式</div>
+          <div class="desc">@ 多个成员时由第一个被 @ 者收口汇总，其余意见私下转交</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+      <div class="row">
+        <div>
+          <div class="label">收口超时</div>
+          <div class="desc">超时后拿已收意见强制收口</div>
+        </div>
+        <div><input class="num-input" value="10"><span class="unit"> 分钟</span></div>
+      </div>
+      <div class="row">
+        <div>
+          <div class="label">成员间互 @ 私聊</div>
+          <div class="desc">成员回复中 @ 其他成员＝私下讨论，不进群</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>汇总人选择规则</h3>
+      <div class="scene-tag">场景 1</div>
+      <div class="desc" style="max-width:none">@小码 @大黄 @老白 → <b style="color:var(--brand-1)">小码</b> 汇总（消息中首个单 @）</div>
+      <div style="height:10px"></div>
+      <div class="scene-tag">场景 2</div>
+      <div class="desc" style="max-width:none">@全体 → 成员表第一位汇总</div>
+      <div style="height:10px"></div>
+      <div class="scene-tag">场景 3</div>
+      <div class="desc" style="max-width:none">@全体 @大黄 → <b style="color:var(--brand-1)">大黄</b> 汇总（单 @ 优先于 @全体）</div>
+      <div class="hint">所有被 @ 成员（含 @全体展开）都是被咨询方，意见一律私下转交汇总人；成员之间意见不合可直接 @ 对方私聊讨论（沿用防环护栏）。</div>
+    </div>
+
+    <div class="card">
+      <h3>驾驭保证（可靠性）</h3>
+      <div class="hint" style="margin-top:0">
+        <b>硬拦截</b>：被咨询成员的回复在投影层强制不进群（agent 打了转发标记也拦）；<br>
+        <b>后端驱动</b>：意见转交、收口指令、超时兜底全部由任务状态机驱动，不依赖 agent 自觉；<br>
+        <b>崩溃可恢复</b>：汇总任务落库，服务重启自动接管未完结任务；<br>
+        <b>最坏超时必收口</b>：10 分钟内群里必有结论，不会死寂。
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // 状态卡进度演示：模拟成员陆续交付
+  const states = [
+    { delivered: 1, chips: [['大黄','delivered'],['老白','pending'],['小码','pending']], label: {del:'大黄 · 已交'} },
+  ];
+  const cc = document.getElementById('cc');
+  const titleEl = document.querySelector('.cc-title');
+  const countEl = document.getElementById('cc-count');
+  const chipsEl = document.querySelector('.cc-members');
+  const barEl = document.querySelector('.cc-progress .bar');
+  const seq = [
+    { n: 1, txt: '已收 1 / 3', chips: [['大黄 · 已交','delivered'],['老白 · 等待中','pending'],['小码 · 分析中','pending']] },
+    { n: 2, txt: '已收 2 / 3', chips: [['大黄 · 已交','delivered'],['老白 · 已交','delivered'],['小码 · 分析中','pending']] },
+    { n: 3, txt: '收齐，等待收口', chips: [['大黄 · 已交','delivered'],['老白 · 已交','delivered'],['小码 · 已交','delivered']] },
+  ];
+  let i = 0;
+  setInterval(() => {
+    const s = seq[i % seq.length]; i++;
+    countEl.textContent = s.txt;
+    barEl.style.width = (s.n / 3 * 100) + '%';
+    chipsEl.innerHTML = s.chips.map(([t, c]) =>
+      `<span class="chip ${c}"><span class="st">${c==='delivered'?'✓':'⏳'}</span>${t}</span>`).join('');
+  }, 1800);
+</script>
+</body>
+</html>

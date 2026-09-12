@@ -67,6 +67,18 @@ export interface GroupChatStreamEnvelope extends SessionStreamEnvelope {
   user_id?: string | null;
   online?: boolean | null;
   ts?: string | null;
+  /**
+   * 汇总收口状态卡（task-10）：channel=system 的 log 事件附带行 metadata
+   * （consensus_card 同回放形态）——卡面 UPDATE 重发即换内容（同 log_id）。
+   */
+  metadata?: {
+    consensus_card?: {
+      coordinator_name?: string | null;
+      phase?: string | null;
+      members?: { name?: string | null; state?: string | null }[] | null;
+      updated_at?: string | null;
+    } | null;
+  } | null;
 }
 
 /**
@@ -146,6 +158,17 @@ export interface GroupReplayLogEntry extends AgentRunLogEntry {
     attachments?: GroupMessageAttachmentSummary[] | null;
     /** 引用回复快照（群 P2 第二波；与实时事件 payload 同形态）。 */
     reply_to?: GroupMessageReplySnapshot | null;
+    /**
+     * 汇总收口状态卡（2026-09-10-group-agent-direct-chat task-10）：
+     * channel=system 行的卡面数据（{coordinator_name, phase, members,
+     * updated_at}）——同 log_id 行 UPDATE 单行重写（D-006）。
+     */
+    consensus_card?: {
+      coordinator_name?: string | null;
+      phase?: string | null;
+      members?: { name?: string | null; state?: string | null }[] | null;
+      updated_at?: string | null;
+    } | null;
   } | null;
 }
 

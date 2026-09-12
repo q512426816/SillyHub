@@ -199,6 +199,28 @@ from app.modules.daemon.session_events import (
 log = get_logger(__name__)
 
 # ── 聚合重导出（import 面 + patch 面，D-006/D-007）─────────────────────────
+from .consensus import (  # noqa: E402
+    CONSENSUS_MEMBER_DELIVERED,
+    CONSENSUS_MEMBER_FAILED,
+    CONSENSUS_MEMBER_PENDING,
+    CONSENSUS_MEMBER_TIMEOUT,
+    CONSENSUS_PHASE_ABORTED,
+    CONSENSUS_PHASE_COLLECTING,
+    CONSENSUS_PHASE_CONVERGING,
+    CONSENSUS_TASK_ABORTED,
+    CONSENSUS_TASK_CLOSED,
+    CONSENSUS_TASK_CLOSING,
+    CONSENSUS_TASK_OPEN,
+    CONSENSUS_TASK_TIMEOUT,
+    collect_collaborator_opinion,
+    consensus_member_states,
+    consensus_sweep_once,
+    consensus_sweeper_loop,
+    create_consensus_task,
+    inject_converge_directive,
+    record_collaborator_outcome,
+    write_consensus_card,
+)
 from .helpers import (  # noqa: E402
     _LLM_PROVIDER_MISSING_WARNING,
     GROUP_AGENT_MEMBER_LIMIT,
@@ -308,6 +330,19 @@ from .typing_presence import (  # noqa: E402
 # 绑定）——显式声明兼容面，杜绝子模块内部符号意外泄漏 / 遗漏。
 __all__ = [
     "BROADCAST_MENTION_WORDS",
+    # consensus（2026-09-10-group-agent-direct-chat task-07：状态机 import 面）
+    "CONSENSUS_MEMBER_DELIVERED",
+    "CONSENSUS_MEMBER_FAILED",
+    "CONSENSUS_MEMBER_PENDING",
+    "CONSENSUS_MEMBER_TIMEOUT",
+    "CONSENSUS_PHASE_ABORTED",
+    "CONSENSUS_PHASE_COLLECTING",
+    "CONSENSUS_PHASE_CONVERGING",
+    "CONSENSUS_TASK_ABORTED",
+    "CONSENSUS_TASK_CLOSED",
+    "CONSENSUS_TASK_CLOSING",
+    "CONSENSUS_TASK_OPEN",
+    "CONSENSUS_TASK_TIMEOUT",
     "GROUP_AGENT_MEMBER_LIMIT",
     "GROUP_CARRIER_SPEC_STRATEGY",
     "GROUP_CHAIN_DEPTH_FIELD",
@@ -383,6 +418,11 @@ __all__ = [
     "_user_display_name",
     "_validate_display_name",
     "_validate_guardrail_overrides",
+    "collect_collaborator_opinion",
+    "consensus_member_states",
+    "consensus_sweep_once",
+    "consensus_sweeper_loop",
+    "create_consensus_task",
     "detect_cross_mentions",
     "get_active_user_membership",
     "get_group_accessible_session",
@@ -397,13 +437,16 @@ __all__ = [
     "group_presence_key",
     "group_rate_key",
     "group_typing_channel",
+    "inject_converge_directive",
     "log",
     "prepare_shadow_direct_turn",
     "publish_member_presence",
     "publish_sessions_changed",
+    "record_collaborator_outcome",
     "release_member_presence",
     "resolve_shadow_member",
     "run_cross_mention_detection",
+    "write_consensus_card",
 ]
 
 # ── 子模块（import 即注册；GroupChatService 类壳在其后定义。仅列持有方法体
@@ -635,6 +678,8 @@ class GroupChatService:
         carrier_run_id: uuid.UUID,
         exclude_log_id: uuid.UUID | None,
         attachment_ids: list[uuid.UUID] | None = None,
+        role_prompt: str | None = None,
+        turn_overrides: dict | None = None,
     ) -> GroupMemberTriggerRead:
         return await _messages._trigger_member_isolated(
             self,
@@ -647,6 +692,8 @@ class GroupChatService:
             carrier_run_id=carrier_run_id,
             exclude_log_id=exclude_log_id,
             attachment_ids=attachment_ids,
+            role_prompt=role_prompt,
+            turn_overrides=turn_overrides,
         )
 
     async def _validate_group_attachments(
@@ -724,6 +771,8 @@ class GroupChatService:
         source_member_name: str | None = None,
         chain_depth: int = 0,
         attachment_rows: list | None = None,
+        role_prompt: str | None = None,
+        turn_overrides: dict | None = None,
     ) -> GroupMemberTriggerRead:
         return await _shadow._trigger_group_member(
             self,
@@ -739,6 +788,8 @@ class GroupChatService:
             source_member_name=source_member_name,
             chain_depth=chain_depth,
             attachment_rows=attachment_rows,
+            role_prompt=role_prompt,
+            turn_overrides=turn_overrides,
         )
 
     async def _get_shadow_active_run(self, shadow_session_id: uuid.UUID) -> AgentRun | None:

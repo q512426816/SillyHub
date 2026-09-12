@@ -1,0 +1,284 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "611783a0ca423aafbfcc141f3071cc803b79447e",
+  "totals": {
+    "files": 33,
+    "additions": 1070730,
+    "deletions": 16
+  },
+  "rows": [
+    {
+      "path": "backend/app/main.py",
+      "additions": 14,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/agent/model.py",
+      "additions": 98,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/agent/schema.py",
+      "additions": 15,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/__init__.py",
+      "additions": 51,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/consensus.py",
+      "additions": 687,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/crud.py",
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/helpers.py",
+      "additions": 41,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/mentions.py",
+      "additions": 94,
+      "deletions": 9,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/messages.py",
+      "additions": 175,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/shadow.py",
+      "additions": 19,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/group_bridge.py",
+      "additions": 238,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_consensus.py",
+      "additions": 726,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/migrations/versions/20260910130000_group_consensus.py",
+      "additions": 126,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 101,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "deploy/backend-only.tar.gz",
+      "additions": 1067622,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/agent-log-hub-attribution-cross-session-contamination.md",
+      "additions": 51,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+      "additions": 154,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/member-panel.test.tsx",
+      "additions": 53,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/create-group-wizard.tsx",
+      "additions": 46,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "additions": 236,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/member-panel.tsx",
+      "additions": 90,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-session-list.test.tsx",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/lib/agent.ts",
+      "additions": 4,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 36,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/daemon/group-shadow-stream.ts",
+      "additions": 23,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_cross_mention.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_mention_pipeline.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "a32600f2a770b7c5dff276ef9a4e4bf3b57e9311ccfa091ede1bc93a2f6c960c",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-12T12:26:10.212Z"
+}

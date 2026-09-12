@@ -130,6 +130,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Wave2：定时消息到点派发常驻协程占位——同样先占 None 保证 bootstrap 抛错
     # 走 finally 时不会因未定义而掩盖原始异常（对齐上方三协程注释）。
     scheduled_send_task: asyncio.Task[None] | None = None
+    consensus_sweep_task: asyncio.Task[None] | None = None
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_engine, get_session_factory
@@ -283,12 +284,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # scheduled_send.py 模块 docstring）。关停走 finally 的 cancel +
         # await gather（对齐 session_reconnect_sweeper——巡检轮内有 DB 写，
         # 须等取消落地）。
+        from app.modules.daemon.group.service import consensus_sweeper_loop
         from app.modules.daemon.scheduled_send import scheduled_send_sweeper
 
         scheduled_send_task = asyncio.create_task(
             scheduled_send_sweeper(), name="scheduled-send-sweeper"
         )
         log.info("scheduled_send_sweeper_started")
+        # 2026-09-10-group-agent-direct-chat task-09（design §12）：汇总
+        # 收口超时 sweeper——30s 周期扫 open 且 deadline 过的共识任务，超时
+        # 收口（timed_out 版收口指令 / 零 delivered 则 aborted）、群解散
+        # 静默 aborted。关停契约同 scheduled_send_sweeper（cancel + await
+        # gather；巡检轮内有 DB 写，须等取消落地）。
+        consensus_sweep_task = asyncio.create_task(
+            consensus_sweeper_loop(), name="consensus-sweeper"
+        )
+        log.info("consensus_sweeper_started")
         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
@@ -339,6 +350,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if scheduled_send_task is not None:
             scheduled_send_task.cancel()
             await asyncio.gather(scheduled_send_task, return_exceptions=True)
+        if consensus_sweep_task is not None:
+            consensus_sweep_task.cancel()
+            await asyncio.gather(consensus_sweep_task, return_exceptions=True)
         # ql-20260910-005：spec_workspace reparse 后台任务排空——巡检类协程
         # 是「取消即走」，reparse 任务不同：每步是独立短事务（取消会回滚到
         # 上一致投影，但截断中的事务退出路径不可控），且尾随节流窗内的补发

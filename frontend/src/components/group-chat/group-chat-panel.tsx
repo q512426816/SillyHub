@@ -112,7 +112,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, CheckCircle2, FileText, Image as ImageIcon, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, TriangleAlert, Users, X } from "lucide-react";
+import { ArrowDown, Ban, CheckCircle2, Clock, FileText, Image as ImageIcon, Loader2, Paperclip, Pin, PinOff, Quote, RefreshCw, Search, SendHorizontal, Timer, TriangleAlert, Users, X } from "lucide-react";
 
 import { Drawer, Modal } from "antd";
 import { MemberPanel } from "@/components/group-chat/member-panel";
@@ -451,6 +451,17 @@ export type GroupTimelineEntry =
       id: string;
       timestamp: string;
       content: string;
+    }
+  | {
+      /** 汇总收口状态卡（task-10，FR-1.6）：channel=system 且
+       * metadata.consensus_card 的行——同 log_id 重复事件内容替换（卡面
+       * UPDATE 单行模式的前端侧镜像，D-006）。 */
+      kind: "consensus";
+      id: string;
+      timestamp: string;
+      /** 单行摘要（后端 _card_content；卡面主文案）。 */
+      content: string;
+      card: ConsensusCardData;
     };
 
 /** 时间轴比较：timestamp 升序（解析失败回退字符串比较），同拍按 id 稳定定序。 */
@@ -503,6 +514,42 @@ export function insertSortedGroupEntry(
   return [...entries.slice(0, lo), entry, ...entries.slice(lo)];
 }
 
+/** 汇总收口状态卡数据（后端 metadata.consensus_card 同构；task-10）。 */
+export interface ConsensusCardData {
+  coordinatorName: string;
+  /** collecting / converging / closed / timeout / aborted（后端词表镜像）。 */
+  phase: string;
+  members: { name: string; state: string }[];
+  updatedAt: string;
+}
+
+/** 回放 metadata / 实时事件 metadata 的 consensus_card 容错解析（畸形 → null）。 */
+export function parseConsensusCard(raw: unknown): ConsensusCardData | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const c = raw as Record<string, unknown>;
+  const coordinatorName =
+    typeof c.coordinator_name === "string" ? c.coordinator_name.trim() : "";
+  const phase = typeof c.phase === "string" ? c.phase : "";
+  if (!coordinatorName || !phase) return null;
+  const membersRaw = Array.isArray(c.members) ? c.members : [];
+  const members = membersRaw
+    .map((m): { name: string; state: string } | null => {
+      if (typeof m !== "object" || m === null) return null;
+      const r = m as Record<string, unknown>;
+      return {
+        name: typeof r.name === "string" ? r.name : "?",
+        state: typeof r.state === "string" ? r.state : "?",
+      };
+    })
+    .filter((m): m is { name: string; state: string } => m !== null);
+  return {
+    coordinatorName,
+    phase,
+    members,
+    updatedAt: typeof c.updated_at === "string" ? c.updated_at : "",
+  };
+}
+
 /** 回放日志行 → 时间线条目（null=不进群时间线：工具/思考/撤回令箭/系统行）。 */
 export function entryFromReplayLog(
   log: GroupReplayLogEntry,
@@ -527,6 +574,21 @@ export function entryFromReplayLog(
       // 群 P2 引用回复快照（缺省 null——气泡顶部引用条不渲染）。
       replyTo: parseReplySnapshot(meta?.reply_to),
     };
+  }
+  // 汇总收口状态卡（task-10）：channel=system 且 metadata.consensus_card——
+  // 其余 system 行（运行态提示等）不进回放时间线，保持原丢弃语义。
+  if (log.channel === "system") {
+    const card = parseConsensusCard(meta?.consensus_card);
+    if (card) {
+      return {
+        kind: "consensus",
+        id: log.id,
+        timestamp: log.timestamp,
+        content,
+        card,
+      };
+    }
+    return null;
   }
   if (log.channel !== "stdout") return null;
   // 载体 run 上 stdout 行即投影行（task-05 形态：仅 user_input + 投影行落群会话）；
@@ -583,6 +645,26 @@ export function parseGroupLiveLog(
         replyTo: parseReplySnapshot(env.reply_to),
       },
     };
+  }
+  // 汇总收口状态卡（task-10）：channel=system 且事件 metadata.consensus_card
+  // ——同 log_id 重发的内容替换事件（applyGroupTimelineEvent 分支处理）。
+  if (env.channel === "system") {
+    const card = parseConsensusCard(
+      env.metadata?.consensus_card,
+    );
+    if (card) {
+      return {
+        type: "entry",
+        entry: {
+          kind: "consensus",
+          id: env.log_id ?? "",
+          timestamp: env.timestamp ?? "",
+          content,
+          card,
+        },
+      };
+    }
+    return { type: "ignore" };
   }
   if (env.channel !== "stdout") return { type: "ignore" };
   // 撤回令箭（stale=true 且 [ASSISTANT_OVERRIDE] 前缀；分类器 override kind 的
@@ -643,8 +725,26 @@ export function applyGroupTimelineEvent(
     return next.length === entries.length ? entries : next;
   }
   const entry = incoming.entry;
-  if (!entry.id || seenIds.has(entry.id)) return entries;
-  seenIds.add(entry.id);
+  // 汇总收口状态卡（task-10，D-006 同 log_id 内容替换）：卡面 UPDATE 单行
+  // 模式的实时镜像——同 id 命中时原位替换（timestamp 保留首现时刻），不
+  // 跳过不追加（去重语义只适用 append-only 投影行）。
+  if (entry.kind === "consensus") {
+    if (!entry.id) return entries;
+    if (seenIds.has(entry.id)) {
+      const idx = entries.findIndex(
+        (e) => e.kind === "consensus" && e.id === entry.id,
+      );
+      if (idx < 0) return entries;
+      const next = [...entries];
+      next[idx] = entry;
+      return next;
+    }
+    seenIds.add(entry.id);
+  } else if (!entry.id || seenIds.has(entry.id)) {
+    return entries;
+  } else {
+    seenIds.add(entry.id);
+  }
   let base = entries;
   if (entry.kind === "agent" && entry.segmentId == null) {
     // 完整行吞噬同归属键同 run 的半截前缀行（乱序胶水段自愈）。
@@ -3088,6 +3188,12 @@ function GroupTimelineRowInner({
     );
   }
 
+  if (entry.kind === "consensus") {
+    return (
+      <ConsensusStatusCard entry={entry} pinnedRowClass={pinnedRowClass} />
+    );
+  }
+
   if (entry.kind === "user") {
     const chips = entry.attachments ? summaryToChips(entry.attachments) : [];
     if (entry.isSelf) {
@@ -3281,6 +3387,133 @@ function ReplyingTags({ replying }: { replying: GroupReplyingMember[] }) {
           {r.memberName} 正在回复…
         </span>
       ))}
+    </div>
+  );
+}
+
+/**
+ * 汇总收口状态卡（task-10，FR-1.6 / design §5.6）：channel=system 且
+ * metadata.consensus_card 的行——四态（collecting/converging 收口中/
+ * closed 已收口 / timeout 超时 / aborted 中止）+ 成员明细状态点。
+ * 同 log_id 事件由 applyGroupTimelineEvent 原位替换（卡面 UPDATE 单行
+ * 模式的前端镜像，D-006）；样式照 AI-Native 双主题 token（原型
+ * prototype-consensus-mode.html 状态卡形态）。
+ */
+export function ConsensusStatusCard({
+  entry,
+  pinnedRowClass,
+}: {
+  entry: Extract<GroupTimelineEntry, { kind: "consensus" }>;
+  pinnedRowClass: string;
+}) {
+  const { phase, coordinatorName, members } = entry.card;
+  const running = phase === "collecting" || phase === "converging";
+
+  const phaseMeta = (() => {
+    switch (phase) {
+      case "collecting":
+        return {
+          icon: <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" />,
+          label: "意见收集中",
+          cls: "border-border bg-card",
+          iconCls: "text-brand-600",
+        };
+      case "converging":
+        return {
+          icon: <Timer aria-hidden className="h-3.5 w-3.5" />,
+          label: "汇总中",
+          cls: "border-border bg-card",
+          iconCls: "text-brand-600",
+        };
+      case "closed":
+        return {
+          icon: <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />,
+          label: "已收口",
+          cls: "border-border bg-muted/40",
+          iconCls: "text-emerald-600 dark:text-emerald-400",
+        };
+      case "timeout":
+        return {
+          icon: <Clock aria-hidden className="h-3.5 w-3.5" />,
+          label: "已超时收口",
+          cls: "border-border bg-muted/40",
+          iconCls: "text-amber-600 dark:text-amber-400",
+        };
+      case "aborted":
+        return {
+          icon: <Ban aria-hidden className="h-3.5 w-3.5" />,
+          label: "已中止",
+          cls: "border-border bg-muted/40",
+          iconCls: "text-muted-foreground",
+        };
+      default:
+        return {
+          icon: <TriangleAlert aria-hidden className="h-3.5 w-3.5" />,
+          label: phase,
+          cls: "border-border bg-card",
+          iconCls: "text-muted-foreground",
+        };
+    }
+  })();
+
+  const memberStateDot = (state: string): string => {
+    switch (state) {
+      case "pending":
+        return "bg-muted-foreground/40";
+      case "delivered":
+        return "bg-emerald-500";
+      case "failed":
+        return "bg-red-500";
+      case "timeout":
+        return "bg-amber-500";
+      default:
+        return "bg-muted-foreground/40";
+    }
+  };
+
+  return (
+    <div
+      data-testid="group-consensus-card"
+      data-phase={phase}
+      data-log-id={entry.id}
+      className={cn(
+        "my-2.5 rounded-lg border px-3 py-2 shadow-sm",
+        phaseMeta.cls,
+        pinnedRowClass,
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span className={cn("shrink-0", phaseMeta.iconCls)}>{phaseMeta.icon}</span>
+        <span className="text-[11.5px] font-semibold text-foreground">
+          汇总收口 · {phaseMeta.label}
+        </span>
+        <span className="text-[11px] text-muted-foreground">
+          汇总人 {coordinatorName}
+        </span>
+      </div>
+      {members.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {members.map((m) => (
+            <span
+              key={m.name}
+              data-testid="consensus-member-state"
+              data-member={m.name}
+              data-state={m.state}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  memberStateDot(m.state),
+                  running && m.state === "pending" && "animate-pulse",
+                )}
+              />
+              {m.name}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

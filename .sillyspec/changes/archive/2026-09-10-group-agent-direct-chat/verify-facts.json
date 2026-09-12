@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-10-group-agent-direct-chat",
+  "generatedAt": "2026-09-11T23:31:32.910Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 3,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "tasks": 10,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "backendEndpoints": 594,
+        "frontendCalls": 5
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-10-group-agent-direct-chat",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "真实 backend 状态机端到端：独立库全链 alembic 迁移 → uvicorn 真进程 → HTTP 建群(consensus_mode)/PATCH 开关/多 @ 消息建任务 → sweeper 超时收口 aborted 持久化 + 状态卡落库 + 回放端点返回 consensus_card",
+      "command": "uv run uvicorn app.main:app --host 127.0.0.1 --port 18099（env: verify_consensus 库/redis db3/minio/bootstrap admin）+ curl HTTP 脚本 + docker exec psql 断言",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/verify-consensus-uvicorn2.log"
+    },
+    {
+      "claim": "G-4 修复复验：consensus_sweep_once 补 commit 后，手动过期任务经 30s 扫描轮从 open → aborted（converged_at 填充），agent_run_logs 出现 channel=system 且 metadata.consensus_card.phase=aborted 行（task_id 匹配）；修复前同场景 processed=1 但 status 仍 open（随会话关闭回滚）",
+      "command": "docker exec multi-agent-platform-postgres-1 psql -U platform -d verify_consensus -c \"SELECT id,status,converged_at FROM agent_group_consensus_tasks;\"",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/verify-consensus-uvicorn2.log"
+    }
+  ],
+  "tests": {
+    "command": "module[frontend,daemon,agent]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-12T12:49:48.584Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe3"
+    ],
+    "verdict": "mismatch",
+    "detail": [
+      {
+        "probe": "probe3",
+        "snapshot": 7,
+        "rerun": 6,
+        "severity": "warning",
+        "note": "facts 快照 hasTest 数与重跑不符（测试布局环境敏感，WARNING）"
+      }
+    ]
+  }
+}

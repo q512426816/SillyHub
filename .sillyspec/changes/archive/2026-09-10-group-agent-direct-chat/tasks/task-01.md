@@ -12,10 +12,10 @@ requirement_ids: [FR-1.1]
 decision_ids: [D-002@v1, D-008@v1]
 allowed_paths:
   - backend/app/modules/agent/model.py
-  - backend/app/migrations/versions/20260910130000_group_consensus.py
+  - backend/migrations/versions/20260910130000_group_consensus.py
 target_files:
   - backend/app/modules/agent/model.py
-  - NEW:backend/app/migrations/versions/20260910130000_group_consensus.py
+  - NEW:backend/migrations/versions/20260910130000_group_consensus.py
 goal: >
   为汇总模式提供持久层：AgentGroupChat 加 consensus_mode/consensus_timeout_seconds 两列，新建 agent_group_consensus_tasks 状态机表（JSONB 成员明细 + deadline + 三索引），alembic 迁移可升可降（design 5.2）。
 implementation:

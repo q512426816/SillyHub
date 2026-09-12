@@ -407,6 +407,15 @@ class GroupChatCreate(BaseModel):
         default=4, ge=1, le=8, description="协作链深度上限（防环护栏）"
     )
     context_window: int = Field(default=20, ge=1, le=100, description="群背景摘要条数")
+    # 2026-09-10-group-agent-direct-chat（D-002）：汇总收口模式，默认关——
+    # 存量群零行为变化；开启后多 @ 消息由首个被 @ 成员收口汇总。
+    consensus_mode: bool = Field(default=False, description="汇总收口模式开关（默认关）")
+    consensus_timeout_seconds: int = Field(
+        default=600,
+        ge=60,
+        le=3600,
+        description="汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）",
+    )
     user_members: list[GroupMemberUserCreate] = Field(default_factory=list)
     agent_members: list[GroupMemberAgentConfig] = Field(default_factory=list)
 
@@ -421,6 +430,9 @@ class GroupChatUpdate(BaseModel):
     agent_cross_mention: bool | None = None
     cross_mention_depth: int | None = Field(default=None, ge=1, le=8)
     context_window: int | None = Field(default=None, ge=1, le=100)
+    # 2026-09-10-group-agent-direct-chat（D-002）：None=不改（逐字段局部更新）。
+    consensus_mode: bool | None = None
+    consensus_timeout_seconds: int | None = Field(default=None, ge=60, le=3600)
     # quick 群 P1（2026-09-02）互@护栏群级可配：``settings_json.guardrails`` 子键
     # 写入（rate_limit_per_minute / member_trigger_limit / chain_ttl_seconds）。
     # quick 群 P2（2026-09-02）增 ``typing_preview`` 顶层布尔键（typing 草稿预览
@@ -509,6 +521,9 @@ class GroupChatRead(BaseModel):
     agent_cross_mention: bool
     cross_mention_depth: int
     context_window: int
+    # 2026-09-10-group-agent-direct-chat：汇总收口模式设置透出（向导/群设置区消费）。
+    consensus_mode: bool
+    consensus_timeout_seconds: int
     created_at: datetime
     ended_at: datetime | None = None
     deleted_at: datetime | None = None

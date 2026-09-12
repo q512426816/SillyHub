@@ -12,12 +12,10 @@ requirement_ids: [FR-2.1, FR-2.2, FR-2.3, FR-2.4]
 decision_ids: [D-005@v1]
 allowed_paths:
   - backend/app/modules/daemon/group/service/mentions.py
-  - backend/app/modules/daemon/tests/test_group_cross_mention.py
-  - backend/app/modules/daemon/tests/test_group_mention_pipeline.py
+  - backend/app/modules/daemon/tests/test_group_consensus.py
 target_files:
   - backend/app/modules/daemon/group/service/mentions.py
-  - backend/app/modules/daemon/tests/test_group_cross_mention.py
-  - backend/app/modules/daemon/tests/test_group_mention_pipeline.py
+  - backend/app/modules/daemon/tests/test_group_consensus.py
 expects_from: "task-04 触发签名; task-05 拦截谓词; task-02 ROLE_PROMPT_AGENT_DM 常量"
 goal: >
   互@触发的协作轮改私聊语义：_trigger_group_member 调用点统一带 dm_target_member_id=发起方、dm_kind=agent_dm + 私聊角色段——回复注入发起方影子会话、群时间线零泄漏；护栏全沿用。
@@ -26,7 +24,7 @@ implementation:
   - "护栏零改动：链深度/同成员次数/滑窗限频/Redis fail-closed 逻辑不动"
   - "协作轮内互@检测不早退（允许被咨询成员回复中 @ 其他成员继续私聊）；shadow_direct 直聊轮早退语义保留"
   - "typing 事件保留（群内运行态可见）"
-  - "更新 test_group_cross_mention.py 断言：互@回复不进群时间线、影子 metadata 含 dm 键；test_group_mention_pipeline.py 补 split_broadcast 断言（文本序/广播展开/去重）"
+  - "split_broadcast 断言（文本序/广播展开/去重）落在 test_group_consensus.py TestSplitBroadcast（本变更新建）；互@不进群时间线/影子 metadata dm 键由存量 test_group_direct.py 既有用例覆盖（本次无需改动）——执行期修正：声明对齐实际交付"
 acceptance:
   - "互@触发后被@成员回复仅出现在发起方影子会话，群时间线零行"
   - "防环护栏行为与现状一致（深度超限/限频被拦用例全绿）"

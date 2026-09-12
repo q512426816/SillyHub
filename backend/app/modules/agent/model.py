@@ -1410,6 +1410,19 @@ class AgentGroupChat(BaseModel, table=True):
         default=20,
         sa_column=Column(Integer, nullable=False, default=20),
     )
+    # 汇总收口模式开关（2026-09-10-group-agent-direct-chat design §5.2，默认
+    # 关——存量群零行为变化；开启后一条消息 @ ≥2 个 agent 成员时由首个被 @
+    # 成员作汇总人收口，其余成员意见私下转交，见 consensus 任务表）。
+    consensus_mode: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False),
+    )
+    # 汇总收口超时秒数（design §5.2/D-004，默认 600、范围 60~3600 由 schema
+    # 层校验；超时由后台 sweeper 强制收口并标注未响应成员）。
+    consensus_timeout_seconds: int = Field(
+        default=600,
+        sa_column=Column(Integer, nullable=False, default=600),
+    )
     # 预留护栏参数等（§3.2 settings_json；首期空置）。
     settings_json: dict | None = Field(
         default=None,
@@ -1613,6 +1626,91 @@ class AgentGroupMember(BaseModel, table=True):
     # 的不算未读）。NULL=从未标记已读（未读数按全量计，显示 cap 99+）。
     # 成员维度状态直接住成员行（settings_json 是群级共享，不合适）。
     last_read_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+class AgentGroupConsensusTask(BaseModel, table=True):
+    """群聊汇总收口任务（2026-09-10-group-agent-direct-chat design §5.2，D-008）。
+
+    一行 = 一条触发消息的汇总任务（状态机唯一状态源，崩溃可恢复）：
+    carrier_run_id UNIQUE 防同消息重复建任务；members JSONB 存被咨询成员
+    明细（不含汇总人）；deadline_at 供后台 sweeper（30s 扫描）超时强制
+    收口。状态流：open → closing（收口指令已注入）/ timeout（超时收口）
+    → closed（收口轮完成）；异常终态 aborted（coordinator 触发失败/影子
+    不可用/群解散/零意见超时，design §12）。
+    """
+
+    __tablename__ = "agent_group_consensus_tasks"
+    __table_args__ = (
+        # 按群查活跃任务（发送侧判定/群设置展示）。
+        Index("ix_agct_group", "group_id"),
+        # sweeper 扫描谓词（status='open' AND deadline_at < now()）。
+        Index("ix_agct_status_deadline", "status", "deadline_at"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    # 群删级联清任务（对齐 AgentGroupMember.group_id 先例）。
+    group_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_group_chats.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # 触发消息载体 run（唯一——同消息不重复建任务；run 硬删随任务删，群
+    # 会话硬删→群删→任务删链一致）。
+    carrier_run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            nullable=False,
+            unique=True,
+        ),
+    )
+    # 汇总人成员行（FK 随成员硬删；软删 removed_at 不触发，收口钩子侧
+    # 健康检查拦截，design §12.2/12.3）。
+    coordinator_member_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_group_members.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # open/closing/closed/timeout/aborted（应用层状态机控制，模型不设默认）。
+    status: str = Field(sa_column=Column(String(16), nullable=False))
+    # 被咨询成员明细（不含汇总人）：[{member_id, member_name, state:
+    # pending|delivered|failed|timeout, delivered_at}]——JSONB 快照而非关联
+    # 表，成员状态变更整体覆写（任务行锁内，D-008 单表方案）。
+    members: list = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, default=list),
+    )
+    # 超时死线（触发时刻 + group.consensus_timeout_seconds）。
+    deadline_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    created_by: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    # 收口完成/中止时刻（closed/timeout/aborted 终态时回写）。
+    converged_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )

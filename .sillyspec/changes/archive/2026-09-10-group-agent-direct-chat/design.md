@@ -48,7 +48,7 @@ scale: large
 | `dm_target_member_id` | str(uuid) | 触发侧 | 本轮回复的定向注入目标成员（汇总模式=汇总人；互@私聊=发起方）；**无此键=普通轮** |
 | `dm_kind` | str | 触发侧 | `consensus`（汇总意见）/ `agent_dm`（互@私聊），审计用 |
 
-**投影拦截统一谓词**（D-007 硬约束，`group_bridge`）：`shadow_direct` 轮（现有）∪ `dm_target_member_id` 非空轮 ∪ `consensus_role == "coordinator"` 轮 → 双写投影跳过 + 收口兜底行跳过（[[GROUP]] 标记也拦）。唯一例外：`consensus_role == "converge"` 收口轮正常投影（总结进群）。
+**投影拦截统一谓词**（D-007 硬约束，`group_bridge`）：`dm_target_member_id` 非空轮 ∪ `consensus_role == "coordinator"` 轮 → 双写投影跳过（[[GROUP]] 标记也拦）。唯一例外：`consensus_role == "converge"` 收口轮正常投影（总结进群）。**执行期修正（G-3）**：初稿曾把 `shadow_direct`（用户直聊轮）纳入投影拦截，系对现状误读——直聊轮标记制投影（`[[GROUP]]` 段照投）是 2026-09-02 既有功能（test_group_direct.py 三个投影测试锁定），本变更不破坏；`shadow_direct` 的既有消费（互@检测早退、@轮兜底行跳过——直聊轮不兜底）保持不变，兜底行跳过条件= `shadow_direct` ∪ consensus 拦截轮。
 
 **互@检测**：`shadow_direct` 早退保留（现有）；协作轮/汇总人首轮**不早退**——被咨询成员意见里 @ 其他成员=转私聊讨论（协作网内），汇总人首轮回复里 @ 成员=主动追问，均为 D-005 允许的私聊语义。
 
@@ -112,6 +112,7 @@ scale: large
 ### 5.7 超时扫描循环（新 `consensus.py` + `main.py` 挂载）
 
 `consensus_sweeper_loop()`：常驻 asyncio task（照 `lease_expiry_sweeper` 先例，main.py lifespan 挂载），30s 间隔：
+> 执行期修正（G-4，2026-09-12 verify E2E）：单轮收口的 0-delivered 与 inject 两分支补 `await db.commit()`——`write_consensus_card`/`inject_converge_directive` 只 flush，sweep 独立 session 无调用方兜底 commit 时终态改动随会话关闭回滚。
 
 1. 查 `status='open' AND deadline_at < now()`；
 2. 行锁（FOR UPDATE）逐任务：未终态成员标 `timeout`；≥1 delivered → 注入超时版收口指令（如实标注未响应名单）+ `status=timeout`；0 delivered → `aborted` + 状态卡终态；
@@ -138,9 +139,10 @@ scale: large
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | backend/app/modules/agent/model.py | `AgentGroupChat` +`consensus_mode`/`consensus_timeout_seconds` 两列；新表 `AgentGroupConsensusTask`。数据流：producer=PATCH 群设置/建群 → DB 列 → consumer=send_group_message 判定与 deadline 计算 |
-| 新增 | NEW:backend/app/migrations/versions/20260910_group_consensus.py | 两列 + 新表 + 三索引 |
+| 新增 | NEW:backend/migrations/versions/20260910130000_group_consensus.py | 两列 + 新表 + 三索引 |
 | 修改 | backend/app/modules/agent/schema.py | Create/Update/Read/GroupMessageSendRead/GroupMemberTriggerRead 扩展。数据流：producer=后端 DTO → OpenAPI → `pnpm gen:types` → consumer=前端表单与响应处理 |
-| 修改 | backend/app/modules/daemon/group/service/helpers.py | DTO 字段（consensus_role）；协作轮常量（CONSENSUS_OPINION_MAX_CHARS） |
+| 修改 | backend/app/modules/daemon/group/service/helpers.py | DTO 字段（consensus_role/consensus_task_id）；协作角色段常量 + CONSENSUS_OPINION_MAX_CHARS |
+| 修改 | backend/app/modules/daemon/group/service/crud.py | 建群/改群透传 consensus_mode/consensus_timeout_seconds 两顶层列 |
 | 修改 | backend/app/modules/daemon/group/service/messages.py | `send_group_message` 汇总分支（判定/汇总人选择/建任务/fan-out 标记/失败登记）。数据流：producer=本分支写 `turn_metadata.consensus_task_id/consensus_role/dm_target_member_id` → 影子 run user_input 日志 → consumer=group_bridge 投影拦截与收口钩子 |
 | 修改 | backend/app/modules/daemon/group/service/mentions.py | `_parse_group_mentions` split_broadcast 模式；`run_cross_mention_detection` 触发加 dm 标记（互@私聊） |
 | 修改 | backend/app/modules/daemon/group/service/shadow.py | `_trigger_group_member` +`role_prompt`/`turn_overrides` 参数（协作角色段 + metadata 附加键） |
@@ -148,6 +150,7 @@ scale: large
 | 修改 | backend/app/modules/daemon/run_sync/service/group_bridge.py | 投影拦截谓词扩展（dm/coordinator 轮）；`_close_group_hooks` 挂意见聚合转交与任务推进；converge 轮收口闭合 |
 | 修改 | backend/app/modules/daemon/run_sync/service/submit_steps.py | 投影双写判定消费新 ctx 字段（dm_target_member_id/consensus_role）——拦截点对齐 shadow_direct 现有消费位置 |
 | 修改 | backend/app/main.py | lifespan 挂载 `consensus_sweeper_loop`（照 lease_expiry_sweeper 先例） |
+| 修改 | backend/app/modules/daemon/tests/test_group_bridge_projection.py | 投影拦截断言（dm/coordinator 零投影、converge 放行、普通轮不变） |
 | 新增 | NEW:backend/app/modules/daemon/tests/test_group_consensus.py | 汇总人选择 3 场景/任务创建/意见转交/收口判定（等齐、超时、全失败）/投影拦截/状态卡/互@私聊/开关关闭零行为 |
 | 修改 | backend/app/modules/daemon/tests/test_group_cross_mention.py | 互@行为语义变更（回复不进群、注入发起方）——行为有意变更的断言更新 |
 | 修改 | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | @解析 split_broadcast 模式断言（文本序/广播展开/去重） |
@@ -162,6 +165,14 @@ scale: large
 | 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 状态卡渲染分支（consensus_card 驱动、同 log_id 替换） |
 | 修改 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | 状态卡渲染测试（collecting/timeout/closed、同 log_id 替换） |
 | 修改 | frontend/src/components/group-chat/__tests__/member-panel.test.tsx | 群设置区开关/超时交互测试 |
+| 修改 | backend/openapi.json | OpenAPI 导出同步（apply 对账补行：consensus 字段/状态卡 DTO，101 行） |
+| 修改 | frontend/src/lib/daemon/group-shadow-stream.ts | 回放 `replayLogsFromDb` JOIN agent_session_id 修复（apply 对账补行，23 行） |
+| 修改 | frontend/src/lib/agent.ts | 随 DTO 类型更新（apply 对账补行） |
+| 新增 | NEW:frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | AskUserQuestion 聚合用例（apply 对账补行） |
+| 修改 | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | 建群向导测试随开关扩展（apply 对账补行） |
+| 修改 | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | 随类型更新（apply 对账补行） |
+| 修改 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | 随类型更新（apply 对账补行） |
+| 修改 | frontend/src/components/mobile/mobile-session-list.test.tsx | 随类型更新（apply 对账补行） |
 
 daemon（sillyhub-daemon）：**零改动**。
 

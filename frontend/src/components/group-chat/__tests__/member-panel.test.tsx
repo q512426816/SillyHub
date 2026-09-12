@@ -371,6 +371,8 @@ function makeGroup(overrides: Partial<GroupChatRead> = {}): GroupChatRead {
     agent_cross_mention: true,
     cross_mention_depth: 2,
     context_window: 20,
+    consensus_mode: false,
+    consensus_timeout_seconds: 600,
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,
@@ -1428,5 +1430,56 @@ describe("MemberPanel 群设置：输入草稿预览开关（quick 群 P2）", (
   it("非群主：不渲染群设置区", () => {
     renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-lin" />);
     expect(screen.queryByTestId("group-typing-preview-switch")).toBeNull();
+  });
+});
+
+
+// ── 汇总收口模式设置（2026-09-10-group-agent-direct-chat task-10，FR-1.1）──
+
+describe("MemberPanel 群设置：汇总收口模式（task-10，D-002 群级开关）", () => {
+  it("群读体回显真值：默认关；切换 → PATCH consensus_mode=true + 开启后超时输入出现", async () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+
+    const sw = screen.getByTestId("group-consensus-mode-switch");
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    // 关态不渲染超时输入（收口超时只在开启后有义）。
+    expect(screen.queryByTestId("group-consensus-timeout-input")).toBeNull();
+
+    fireEvent.click(sw);
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1",
+      { method: "PATCH", json: { consensus_mode: true } },
+    );
+    await waitFor(() =>
+      expect(sw.getAttribute("aria-checked")).toBe("true"),
+    );
+    // 开启后超时输入出现且回显真值 600（后端默认镜像；antd InputNumber 把
+    // data-testid 透传到内部 input 元素本身）。
+    const input = (await screen.findByTestId(
+      "group-consensus-timeout-input",
+    )) as HTMLInputElement;
+    expect((input.tagName === "INPUT" ? input : input.querySelector("input"))?.value).toBe("600");
+    expect(mocks.notify.success).toHaveBeenCalledWith("已开启汇总收口模式");
+  });
+
+  it("群已开启回显：consensus_mode=true + 超时 900 透传", () => {
+    renderPanel(
+      <MemberPanel
+        group={makeGroup({ consensus_mode: true, consensus_timeout_seconds: 900 })}
+        currentUserId="u-me"
+      />,
+    );
+    const sw = screen.getByTestId("group-consensus-mode-switch");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    const input2 = screen.getByTestId("group-consensus-timeout-input") as HTMLInputElement;
+    expect(
+      (input2.tagName === "INPUT" ? input2 : input2.querySelector("input"))?.value,
+    ).toBe("900");
+  });
+
+  it("非群主：不渲染汇总收口设置区", () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-lin" />);
+    expect(screen.queryByTestId("group-consensus-mode-switch")).toBeNull();
   });
 });

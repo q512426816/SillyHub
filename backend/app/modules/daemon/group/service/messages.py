@@ -34,9 +34,24 @@ from app.modules.auth.model import User
 from app.modules.daemon import attachment_pipeline
 from app.modules.daemon.session.service import DaemonSessionTurnConflict
 
+from .consensus import (
+    CONSENSUS_MEMBER_FAILED,
+    CONSENSUS_PHASE_ABORTED,
+    CONSENSUS_PHASE_COLLECTING,
+    CONSENSUS_PHASE_CONVERGING,
+    CONSENSUS_TASK_ABORTED,
+    CONSENSUS_TASK_CLOSING,
+    CONSENSUS_TASK_OPEN,
+    consensus_member_states,
+    create_consensus_task,
+    write_consensus_card,
+)
 from .helpers import (
+    CONVERGE_DIRECTIVE,
     GROUP_CARRIER_SPEC_STRATEGY,
     GROUP_SESSION_PROVIDER,
+    ROLE_PROMPT_COLLABORATOR,
+    ROLE_PROMPT_COORDINATOR,
     SHADOW_DIRECT_SOURCE,
     GroupChatInvalid,
     GroupDirectMessageRead,
@@ -290,6 +305,41 @@ async def send_group_message(
     # ── @解析 + 触发编排（§4.1 步 4-6）。
     mentioned = _parse_group_mentions(content, members)
     mentioned_ids = [m.id for m in mentioned]
+    # ── 汇总模式分支（2026-09-10-group-agent-direct-chat design §5.3，D-003）：
+    #    开关开启且去重后 agent 目标 ≥2 → 汇总收口编排（不满足则原路径
+    #    零变化，D-002 回归底线）。汇总人 = 单@首个（文本出现序）优先，纯
+    #    @全体 取成员表序首个；目标集 = 单@ ∪ 广播展开去重。
+    consensus_task = None
+    consensus_coordinator = None
+    use_consensus = bool(mentioned) and group.consensus_mode and len(mentioned) >= 2
+    if use_consensus:
+        explicit_hits, broadcast_expanded = _parse_group_mentions(
+            content, members, split_broadcast=True
+        )
+        ordered: list = []
+        seen_ids: set[uuid.UUID] = set()
+        for m in [*explicit_hits, *broadcast_expanded]:
+            if m.id not in seen_ids:
+                seen_ids.add(m.id)
+                ordered.append(m)
+        consensus_coordinator = ordered[0]
+        collaborators = ordered[1:]
+        consensus_task = await create_consensus_task(
+            svc._session,
+            group=group,
+            carrier_run_id=carrier.id,
+            coordinator=consensus_coordinator,
+            collaborators=collaborators,
+            created_by=user.id,
+            source_summary=content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
+        )
+        _gsvc.log.info(
+            "group_consensus_task_created",
+            group_id=str(group.id),
+            consensus_task_id=str(consensus_task.id),
+            coordinator_member_id=str(consensus_coordinator.id),
+            collaborator_count=len(collaborators),
+        )
     # 返回体用标量（PK 不过期；并行触发子链 rollback 已隔离在各自独立
     # session，不再触碰请求 session 的对象状态——防御性口径保留）。
     carrier_run_id_val = carrier.id
@@ -333,6 +383,33 @@ async def send_group_message(
         sender_user_id_val = user.id
         attachment_ids_val = [r.id for r in attachment_rows] if attachment_rows else None
         targets = sorted(mentioned, key=lambda m: (m.joined_at, m.id))
+
+        # 汇总模式角色参数（design §5.3 步 5）：coordinator/collaborator 分别
+        # 带角色段与 metadata 标记（D-007 投影拦截链路锚点）；普通路径 None
+        # 零变化。
+        def _consensus_trigger_kwargs(member) -> dict:
+            if consensus_task is None or consensus_coordinator is None:
+                return {}
+            if member.id == consensus_coordinator.id:
+                return {
+                    "role_prompt": ROLE_PROMPT_COORDINATOR,
+                    "turn_overrides": {
+                        "consensus_task_id": str(consensus_task.id),
+                        "consensus_role": "coordinator",
+                    },
+                }
+            return {
+                "role_prompt": ROLE_PROMPT_COLLABORATOR.format(
+                    coordinator_name=consensus_coordinator.display_name
+                ),
+                "turn_overrides": {
+                    "consensus_task_id": str(consensus_task.id),
+                    "consensus_role": "collaborator",
+                    "dm_target_member_id": str(consensus_coordinator.id),
+                    "dm_kind": "consensus",
+                },
+            }
+
         results = await asyncio.gather(
             *(
                 svc._trigger_member_isolated(
@@ -345,6 +422,7 @@ async def send_group_message(
                     carrier_run_id=carrier_run_id_val,
                     exclude_log_id=log_row_id_val,
                     attachment_ids=attachment_ids_val,
+                    **_consensus_trigger_kwargs(member),
                 )
                 for member in targets
             ),
@@ -372,6 +450,34 @@ async def send_group_message(
                     code=result.code,
                     reason=reason,
                 )
+                # 汇总模式失败登记（design §5.3 步 6 + §12.1）：coordinator
+                # 失败 → 任务立即 aborted（意见转交失去目的地，不等待其余
+                # 成员）+ 状态卡终态；collaborator 失败 → 明细 state=failed +
+                # 状态卡更新（收口判定在钩子/超时路径，task-07/08/09）。
+                if consensus_task is not None and consensus_coordinator is not None:
+                    member_states = consensus_member_states(consensus_task)
+                    if member.id == consensus_coordinator.id:
+                        consensus_task.status = CONSENSUS_TASK_ABORTED
+                        consensus_task.converged_at = datetime.now(UTC)
+                        await write_consensus_card(
+                            svc._session,
+                            group=group,
+                            task=consensus_task,
+                            coordinator_name=consensus_coordinator.display_name,
+                            phase=CONSENSUS_PHASE_ABORTED,
+                        )
+                    else:
+                        for row in member_states:
+                            if row.get("member_id") == str(member.id):
+                                row["state"] = CONSENSUS_MEMBER_FAILED
+                        consensus_task.members = member_states
+                        await write_consensus_card(
+                            svc._session,
+                            group=group,
+                            task=consensus_task,
+                            coordinator_name=consensus_coordinator.display_name,
+                            phase=CONSENSUS_PHASE_COLLECTING,
+                        )
                 await _publish_trigger_failed_notice(
                     group_session_id_val, member_name=member.display_name, reason=reason
                 )
@@ -401,12 +507,73 @@ async def send_group_message(
                     member_id=str(member.id),
                     reply_to_log_id=str(log_row_id_val),
                 )
+        # ── 汇总模式立即收口（design §12.1）：coordinator 触发成功而全部
+        #    collaborator 触发失败——零意见等待无意义（无钩子会来、超时要等
+        #    全程），直接注入收口指令让汇总人说明情况收口。收口触发本身失败
+        #    → 任务 aborted + 状态卡终态（不再重试，设计同 coordinator 失败
+        #    语义）。非全败场景的等齐收口在钩子路径（task-08）/超时 sweeper
+        #    （task-09）。
+        if (
+            use_consensus
+            and consensus_task is not None
+            and consensus_coordinator is not None
+            and consensus_task.status == CONSENSUS_TASK_OPEN
+        ):
+            states = consensus_member_states(consensus_task)
+            if states and all(r.get("state") == CONSENSUS_MEMBER_FAILED for r in states):
+                non_responders = "、".join(str(r.get("member_name", "?")) for r in states)
+                try:
+                    await svc._trigger_member_isolated(
+                        group_id=group_id_val,
+                        member_id=consensus_coordinator.id,
+                        member_lines=member_lines,
+                        sender_user_id=sender_user_id_val,
+                        sender_member_name=sender_member_name,
+                        content=content,
+                        carrier_run_id=carrier_run_id_val,
+                        exclude_log_id=log_row_id_val,
+                        attachment_ids=attachment_ids_val,
+                        role_prompt=CONVERGE_DIRECTIVE.format(
+                            source_summary=content[:GROUP_LAST_MESSAGE_PREVIEW_CHARS],
+                            opinions="（无——全部被咨询成员触发失败）",
+                            non_responders=non_responders,
+                        ),
+                        turn_overrides={
+                            "consensus_task_id": str(consensus_task.id),
+                            "consensus_role": "converge",
+                        },
+                    )
+                    consensus_task.status = CONSENSUS_TASK_CLOSING
+                    await write_consensus_card(
+                        svc._session,
+                        group=group,
+                        task=consensus_task,
+                        coordinator_name=consensus_coordinator.display_name,
+                        phase=CONSENSUS_PHASE_CONVERGING,
+                    )
+                except AppError as exc:
+                    _gsvc.log.warning(
+                        "group_consensus_immediate_converge_failed",
+                        consensus_task_id=str(consensus_task.id),
+                        code=exc.code,
+                        reason=_trigger_failure_reason(exc),
+                    )
+                    consensus_task.status = CONSENSUS_TASK_ABORTED
+                    consensus_task.converged_at = datetime.now(UTC)
+                    await write_consensus_card(
+                        svc._session,
+                        group=group,
+                        task=consensus_task,
+                        coordinator_name=consensus_coordinator.display_name,
+                        phase=CONSENSUS_PHASE_ABORTED,
+                    )
     return GroupMessageSendRead(
         carrier_run_id=carrier_run_id_val,
         log_id=log_row_id_val,
         mentioned_member_ids=mentioned_ids,
         mention_all=_has_broadcast_mention(content),
         triggered=triggered,
+        consensus_task_id=(consensus_task.id if consensus_task is not None else None),
     )
 
 
@@ -422,6 +589,8 @@ async def _trigger_member_isolated(
     carrier_run_id: uuid.UUID,
     exclude_log_id: uuid.UUID | None,
     attachment_ids: list[uuid.UUID] | None = None,
+    role_prompt: str | None = None,
+    turn_overrides: dict | None = None,
 ) -> GroupMemberTriggerRead:
     """单成员触发的独立 session 协程体（群 P2 第二波并行编排）。
 
@@ -436,6 +605,10 @@ async def _trigger_member_isolated(
     已过同一校验——幂等重查，只多两条 SELECT/成员）。session 随 async with
     收口归还连接池；``_trigger_group_member`` 内部各事务边界（懒建 commit /
     注入 commit / 失败 rollback）自持。
+
+    ``role_prompt`` / ``turn_overrides``（2026-09-10-group-agent-direct-chat
+    task-04 扩展）：汇总模式角色段与 metadata 标记透传（task-03 发送侧
+    fan-out / 收口指令注入消费）；默认 None 时单成员触发路径零变化。
     """
     from app.core.db import get_session_factory
 
@@ -458,6 +631,8 @@ async def _trigger_member_isolated(
             carrier_run_id=carrier_run_id,
             exclude_log_id=exclude_log_id,
             attachment_rows=attachment_rows,
+            role_prompt=role_prompt,
+            turn_overrides=turn_overrides,
         )
 
 

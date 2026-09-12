@@ -29,7 +29,7 @@ from app.modules.agent.model import (
     AgentRunLog,
 )
 
-from .helpers import SHADOW_DIRECT_SOURCE, GroupMemberTriggerRead
+from .helpers import ROLE_PROMPT_AGENT_DM, SHADOW_DIRECT_SOURCE, GroupMemberTriggerRead
 from .settings import (
     GROUP_CHAIN_DEPTH_FIELD,
     GROUP_CHAIN_TTL_SECONDS,
@@ -85,8 +85,11 @@ def _mention_match(token: str, names: Sequence[str]) -> bool:
 
 
 def _parse_group_mentions(
-    content: str, members: Sequence[AgentGroupMember]
-) -> list[AgentGroupMember]:
+    content: str,
+    members: Sequence[AgentGroupMember],
+    *,
+    split_broadcast: bool = False,
+) -> list[AgentGroupMember] | tuple[list[AgentGroupMember], list[AgentGroupMember]]:
     """解析消息中的 @提及（design §4.1 步 4）。
 
     - 正则 ``[@＠]\\S+`` 提取候选词（到空白截断），再与 agent 成员
@@ -96,21 +99,35 @@ def _parse_group_mentions(
     - 用户成员昵称不触发（仅 agent 成员有独立记忆可触发）；
     - 返回命中成员列表（按 id 去重，保首次命中序；SQLModel 实例不可哈希，
       集合语义以 list 承载）。
+
+    ``split_broadcast=True``（2026-09-10-group-agent-direct-chat task-03，D-003）：
+    汇总模式专用两段拆分——返回 ``(explicit_hits, broadcast_expanded)``：
+    explicit = 单 @ 命中按**文本出现序**（去重保首序，汇总人选择基准）；
+    broadcast = 含 @全体/@all 时按**成员表序**（agent_members 列表序 =
+    joined_at 序）展开的全部 agent 成员。两段独立收集互不掺序，调用方
+    （发送侧汇总分支）自行做并集去重与汇总人选取。
     """
     agent_members = [m for m in members if m.member_type == "agent" and m.removed_at is None]
     by_name = {m.display_name: m for m in agent_members}
-    hits: dict[uuid.UUID, AgentGroupMember] = {}
+    explicit: dict[uuid.UUID, AgentGroupMember] = {}
+    broadcast_hit = False
+    merged: dict[uuid.UUID, AgentGroupMember] = {}
     for match in _MENTION_TOKEN_RE.finditer(content):
         token = match.group(1)
         if _mention_match(token, BROADCAST_MENTION_WORDS):
+            broadcast_hit = True
             for member in agent_members:
-                hits.setdefault(member.id, member)
+                merged.setdefault(member.id, member)
             continue
         for name in by_name:
             if _mention_match(token, (name,)):
                 member = by_name[name]
-                hits.setdefault(member.id, member)
-    return list(hits.values())
+                explicit.setdefault(member.id, member)
+                merged.setdefault(member.id, member)
+    if split_broadcast:
+        broadcast_expanded = list(agent_members) if broadcast_hit else []
+        return list(explicit.values()), broadcast_expanded
+    return list(merged.values())
 
 
 def _has_broadcast_mention(content: str) -> bool:
@@ -137,7 +154,11 @@ def detect_cross_mentions(
     - **不自我触发**：命中来源成员自身（回复 @自己）一律忽略；
     - 用户成员昵称照旧不触发（与用户 @ 同口径，仅 agent 成员可被触发）。
     """
-    return [m for m in _parse_group_mentions(reply_text, members) if m.id != source_member_id]
+    parsed = _parse_group_mentions(reply_text, members)
+    # 真实集成修正（2026-09-12 verify mypy 硬门）：split_broadcast 未启用时返回 list 分支，
+    # 联合类型显式收窄（运行时恒真），否则推导式类型不符。
+    assert not isinstance(parsed, tuple)
+    return [m for m in parsed if m.id != source_member_id]
 
 
 async def _load_run_reply_text(
@@ -172,6 +193,36 @@ async def _load_run_reply_text(
         if not isinstance(meta, dict) or meta.get("member_id") != str(member_id):
             continue
         text = (content or "").strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
+async def _load_shadow_reply_text(db: AsyncSession, *, run_id: uuid.UUID) -> str:
+    """聚合影子 run 本轮自身 assistant 文本（私聊轮互@检测源，D-005）。
+
+    私聊轮（汇总协作/成员私聊）被投影层硬拦截（D-007）——载体 run 无投影
+    行，互@检测改读影子 run 全量行：``is_group_projectable_reply`` 同口径
+    过滤（thinking/tool/stderr 不进检测）+ 剥 ``[ASSISTANT]`` 前缀，全段
+    拼接（口径照 ``_build_group_fallback_summary``，不截断——检测需完整文本
+    才能 @ 后缀成员）。
+    """
+    from app.modules.daemon.run_sync.service.group_bridge import is_group_projectable_reply
+
+    rows = (
+        await db.execute(
+            select(AgentRunLog.channel, AgentRunLog.content_redacted)
+            .where(AgentRunLog.run_id == run_id)
+            .order_by(AgentRunLog.timestamp, AgentRunLog.id)
+        )
+    ).all()
+    parts: list[str] = []
+    for channel, content in rows:
+        if not is_group_projectable_reply(channel, content):
+            continue
+        text = (content or "").strip()
+        if text.startswith("[ASSISTANT]"):
+            text = text[len("[ASSISTANT]") :].strip()
         if text:
             parts.append(text)
     return "\n".join(parts)
@@ -266,6 +317,10 @@ async def run_cross_mention_detection(
     # 私密 + 零自动化副作用）。
     if turn_meta.get("source") == SHADOW_DIRECT_SOURCE:
         return []
+    # 2026-09-10-group-agent-direct-chat（D-005）：converge 收口轮不开新互@
+    # （收口阶段再开讨论链会破坏收口时序；其余轮型照旧/私聊轮可用）。
+    if turn_meta.get("consensus_role") == "converge":
+        return []
     carrier_raw = turn_meta.get("source_carrier_run_id")
     if not isinstance(carrier_raw, str) or not carrier_raw:
         return []
@@ -279,7 +334,20 @@ async def run_cross_mention_detection(
         )
         return []
 
-    reply_text = await _load_run_reply_text(db, carrier_run_id=carrier_run_id, member_id=member_id)
+    # 2026-09-10-group-agent-direct-chat（D-005/D-007）：轮型分源——私聊轮
+    # （汇总协作/成员互私聊，dm_target 非空）被投影层硬拦截，载体 run 无投影
+    # 行，互@检测改读影子 run 自身文本；普通 @轮照旧读载体 run 投影行。
+    # 源轮 consensus 上下文透传（见下方 turn_overrides）：collaborator 发起的
+    # 分歧讨论回复仍属意见链（终轮由收口钩子全量聚合）。且互@默认改私聊：
+    # 被@成员的回复注入发起方会话不进群（D-005）。
+    turn_dm_target = turn_meta.get("dm_target_member_id")
+    turn_consensus_task = turn_meta.get("consensus_task_id")
+    if isinstance(turn_dm_target, str) and turn_dm_target:
+        reply_text = await _load_shadow_reply_text(db, run_id=run.id)
+    else:
+        reply_text = await _load_run_reply_text(
+            db, carrier_run_id=carrier_run_id, member_id=member_id
+        )
     if not reply_text:
         return []
 
@@ -385,6 +453,21 @@ async def run_cross_mention_detection(
         await redis.expire(chain_key, chain_ttl_seconds)
 
         # ── 与用户 @ 同管线触发（链沿用原链，链 id 不新建）────────────────────
+        # 2026-09-10-group-agent-direct-chat（D-005）：互@默认改私聊——
+        # role_prompt 私聊指令 + turn_overrides 带 dm_target（回复注入发起方
+        # 会话不进群，D-007 投影谓词拦截）；源轮带 consensus 上下文时新轮
+        # 同任务意见链（collaborator，意见终由收口钩子全量聚合）。
+        dm_overrides: dict = {
+            "dm_target_member_id": str(member_id),
+            "dm_kind": (
+                "consensus"
+                if isinstance(turn_consensus_task, str) and turn_consensus_task
+                else "agent_dm"
+            ),
+        }
+        if isinstance(turn_consensus_task, str) and turn_consensus_task:
+            dm_overrides["consensus_task_id"] = turn_consensus_task
+            dm_overrides["consensus_role"] = "collaborator"
         try:
             trigger = await _gsvc.GroupChatService(db)._trigger_group_member(
                 group=group,
@@ -398,6 +481,8 @@ async def run_cross_mention_detection(
                 exclude_log_id=None,
                 source_member_name=member_name,
                 chain_depth=new_depth,
+                role_prompt=ROLE_PROMPT_AGENT_DM.format(sender_name=member_name),
+                turn_overrides=dm_overrides,
             )
         except AppError as exc:
             _gsvc.log.warning(

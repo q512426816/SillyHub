@@ -49,6 +49,13 @@ class _GroupBridgeContext:
       （@轮与直聊轮同款：完整 assistant 文本仅 ``[[GROUP]]`` 标记段投影，见
       extract_group_broadcast_segments）；本标志仅区分轮型供消费方判定
       （互@检测直聊轮早退、@轮无标记兜底行仅对非直聊轮生效）。
+    - 汇总收口/成员私聊四元组（2026-09-10-group-agent-direct-chat，D-007）：
+      ``consensus_task_id`` / ``consensus_role``（collaborator|coordinator|
+      converge）/ ``dm_target_member_id`` / ``dm_kind``（consensus|agent_dm）
+      ——均从本 run 最近 user_input metadata 解析，无键=普通轮。
+      ``projection_blocked`` 谓词：dm_target 非空 ∪ role==coordinator →
+      整轮不投影（[[GROUP]] 段也拦，硬驾驭不依赖 prompt 自觉）；
+      唯一例外 converge 轮（无 dm_target）放行走标记投影。
     """
 
     group_id: uuid.UUID
@@ -57,6 +64,25 @@ class _GroupBridgeContext:
     member_session_id: uuid.UUID
     carrier_run_id: uuid.UUID
     shadow_direct: bool = False
+    consensus_task_id: str | None = None
+    consensus_role: str | None = None
+    dm_target_member_id: str | None = None
+    dm_kind: str | None = None
+
+    @property
+    def projection_blocked(self) -> bool:
+        """整轮不投影硬拦截谓词（D-007：投影层统一谓词，消费方不得各自判定）。
+
+        仅 consensus 编排轮：dm_target 非空（协作/私聊轮）∪ role==coordinator
+        （汇总人首轮）。**不含 shadow_direct**——直聊轮标记制投影（[[GROUP]]
+        段照投）是 2026-09-02 既有功能（test_group_direct.py 锁定），design
+        §5.1 初稿将其纳入拦截系对现状误读，执行期修正（G-3 声明对齐）；
+        shadow_direct 的既有消费是互@检测早退与 @轮兜底行跳过，不受影响。
+        converge 轮（无 dm_target）不命中——收口总结轮放行投影。
+        """
+        if self.dm_target_member_id:
+            return True
+        return self.consensus_role == "coordinator"
 
 
 async def resolve_group_member_identity(
@@ -201,6 +227,13 @@ async def _resolve_group_bridge_context(
     shadow_direct = (
         turn_meta.get("source") == "shadow_direct" if isinstance(turn_meta, dict) else False
     )
+
+    # 汇总收口/成员私聊四元组（2026-09-10-group-agent-direct-chat，D-007）：
+    # 无键=普通轮；有键时 projection_blocked 谓词接管整轮投影拦截。
+    def _meta_str(key: str) -> str | None:
+        raw = turn_meta.get(key) if isinstance(turn_meta, dict) else None
+        return raw if isinstance(raw, str) and raw else None
+
     return _GroupBridgeContext(
         group_id=group_id,
         member_id=member_id,
@@ -208,6 +241,10 @@ async def _resolve_group_bridge_context(
         member_session_id=agent_run.agent_session_id,
         carrier_run_id=carrier_run_id,
         shadow_direct=shadow_direct,
+        consensus_task_id=_meta_str("consensus_task_id"),
+        consensus_role=_meta_str("consensus_role"),
+        dm_target_member_id=_meta_str("dm_target_member_id"),
+        dm_kind=_meta_str("dm_kind"),
     )
 
 
@@ -282,7 +319,13 @@ async def _emit_group_mention_projection_fallback(svc, agent_run: AgentRun) -> N
     turn_completed / 互@检测 / 排队派发（调用方 try/except 包裹）。
     """
     ctx = await svc._resolve_group_bridge_context(agent_run)
-    if ctx is None or ctx.shadow_direct:
+    # 拦截轮（直聊/汇总协作/成员私聊）不兑兜底行——群内静默是设计语义
+    # （意见走私聊转交/直聊不经群时间线，D-007）；converge 轮放行（汇总
+    # 人忘打 [[GROUP]] 标记时兑底行防群里死寂，2026-09-10-group-agent-
+    # direct-chat 扩展：原仅 shadow_direct 早退，现 shadow_direct ∪
+    # consensus 拦截轮（dm/coordinator——意见轮不发兜底，静默是收口管线
+    # 语义；converge 轮投影已落无需兜底）统一早退。
+    if ctx is None or ctx.shadow_direct or ctx.projection_blocked:
         return
     carrier_rows = (
         (
@@ -504,3 +547,197 @@ async def _close_group_hooks(
                         group_id=str(group_id),
                         exc_info=True,
                     )
+            # 2026-09-10-group-agent-direct-chat（task-08，design §5.4）：汇总
+            # 收口/成员私聊轮终态编排（意见聚合→转交→登记 / converge 轮收口
+            # / 收口轮失败兑底）。fail-open 同互@挂接，独立小事务。
+            try:
+                await _consensus_close_hook(
+                    svc,
+                    agent_run,
+                    group_id=group_id,
+                    member_id=group_member_id,
+                    member_name=group_member_name,
+                )
+            except Exception:
+                _rsvc.log.warning(
+                    "group_consensus_close_hook_failed",
+                    agent_run_id=str(agent_run.id),
+                    group_id=str(group_id),
+                    exc_info=True,
+                )
+
+
+async def _consensus_close_hook(
+    svc,
+    agent_run: AgentRun,
+    *,
+    group_id: uuid.UUID,
+    member_id: uuid.UUID,
+    member_name: str,
+) -> None:
+    """汇总收口/成员私聊轮终态编排（design §5.4，task-08；fail-open）。
+
+    轮型分流（turn_metadata 四元组，与 ``_resolve_group_bridge_context``
+    同源读取）：
+
+    - **converge 轮**（role=="converge"）：completed → 任务 closed + 状态卡
+      终态；failed → 任务 aborted + 状态卡终态 + 群内 system 兑底行（「汇总
+      收口失败…」防死寂，§5.4 步 5）；
+    - **意见轮**（dm_target 非空，dm_kind=="consensus"）：completed →
+      聚合意见 → 转交 coordinator → ``record_collaborator_outcome``
+      （delivered，内聚收口判定）；聚合无文本/转交失败/轮 failed → 登记
+      failed（收口判定内聚）；
+    - **互@私聊轮**（dm_kind=="agent_dm"）：completed → 聚合意见转交发起
+      方（无任务推进，失败仅日志）；failed 零动作；
+    - **coordinator 首轮**（role=="coordinator" 无 dm_target）终态：零动作
+      （等待意见注入/收口指令，超时 sweeper 兕底）。
+
+    普通轮（无 consensus/dm 键）零进入（谓词前置，开销一次桥接解析）。
+    """
+    from app.core.errors import AppError
+    from app.modules.agent.model import AgentGroupChat, AgentGroupConsensusTask, AgentGroupMember
+    from app.modules.daemon.group.service import (
+        CONSENSUS_MEMBER_DELIVERED,
+        CONSENSUS_MEMBER_FAILED,
+        CONSENSUS_PHASE_ABORTED,
+        CONSENSUS_PHASE_CLOSED,
+        CONSENSUS_TASK_ABORTED,
+        CONSENSUS_TASK_CLOSED,
+        CONSENSUS_TASK_CLOSING,
+        CONSENSUS_TASK_OPEN,
+        CONSENSUS_TASK_TIMEOUT,
+        collect_collaborator_opinion,
+        deliver_collaborator_opinion,
+        record_collaborator_outcome,
+        write_consensus_card,
+    )
+
+    ctx = await svc._resolve_group_bridge_context(agent_run)
+    if ctx is None or (
+        not ctx.consensus_task_id
+        and not ctx.dm_target_member_id
+        and ctx.consensus_role != "coordinator"
+    ):
+        return
+    db = svc._session
+
+    # ── converge 轮：任务终态 ─────────────────────────────────────────
+    if ctx.consensus_role == "converge" and ctx.consensus_task_id:
+        task = await db.get(AgentGroupConsensusTask, uuid.UUID(ctx.consensus_task_id))
+        if task is None or task.status not in (CONSENSUS_TASK_CLOSING, CONSENSUS_TASK_TIMEOUT):
+            return
+        group = await db.get(AgentGroupChat, task.group_id)
+        coordinator = await db.get(AgentGroupMember, task.coordinator_member_id)
+        if group is None or coordinator is None:
+            return
+        now = datetime.now(UTC)
+        if agent_run.status == "completed":
+            task.status = CONSENSUS_TASK_CLOSED
+            task.converged_at = now
+            await write_consensus_card(
+                db,
+                group=group,
+                task=task,
+                coordinator_name=coordinator.display_name,
+                phase=CONSENSUS_PHASE_CLOSED,
+            )
+        else:
+            task.status = CONSENSUS_TASK_ABORTED
+            task.converged_at = now
+            await write_consensus_card(
+                db,
+                group=group,
+                task=task,
+                coordinator_name=coordinator.display_name,
+                phase=CONSENSUS_PHASE_ABORTED,
+            )
+            # 群内 system 兕底行（收口轮失败防死寂，§5.4 步 5；ephemeral——
+            # 状态卡已落库可回放，本行仅实时提示）。
+            try:
+                from .typing_presence import _publish_group_channel_event
+            except ImportError:
+                pass
+            try:
+                from app.modules.daemon.group.service import _publish_group_channel_event
+
+                await _publish_group_channel_event(
+                    group.session_id,
+                    {
+                        "event": "log",
+                        "session_id": str(group.session_id),
+                        "channel": "system",
+                        "content": (
+                            f"汇总收口失败：汇总人「{coordinator.display_name}」本轮未完成，"
+                            "各成员意见可在其会话时间线查看"
+                        ),
+                        "timestamp": now.isoformat(),
+                    },
+                )
+            except Exception:
+                _rsvc.log.warning(
+                    "consensus_converge_failed_notice_publish_failed",
+                    task_id=str(task.id),
+                )
+        await db.commit()
+        return
+
+    # ── 意见轮（consensus）/互@私聊轮（agent_dm）：聚合转交 ─────────────
+    if not ctx.dm_target_member_id:
+        return
+    target_member = await db.get(AgentGroupMember, uuid.UUID(ctx.dm_target_member_id))
+    group = await db.get(AgentGroupChat, group_id)
+    if target_member is None or group is None:
+        return
+    task = None
+    if ctx.dm_kind == "consensus" and ctx.consensus_task_id:
+        task = await db.get(AgentGroupConsensusTask, uuid.UUID(ctx.consensus_task_id))
+        if task is None or task.status != CONSENSUS_TASK_OPEN:
+            # 任务已收口中/终态：意见迟到，仅日志（收口指令带未响应名单）。
+            _rsvc.log.info(
+                "consensus_opinion_late",
+                task_id=ctx.consensus_task_id,
+                member_id=str(member_id),
+            )
+            return
+    if agent_run.status != "completed":
+        if task is not None:
+            await record_collaborator_outcome(
+                db, task_id=task.id, member_id=member_id, state=CONSENSUS_MEMBER_FAILED
+            )
+        return
+    opinion = await collect_collaborator_opinion(db, run_id=agent_run.id)
+    if not opinion:
+        if task is not None:
+            await record_collaborator_outcome(
+                db, task_id=task.id, member_id=member_id, state=CONSENSUS_MEMBER_FAILED
+            )
+        return
+    try:
+        await deliver_collaborator_opinion(
+            db,
+            group=group,
+            target_member=target_member,
+            source_member_name=member_name,
+            opinion_text=opinion,
+            task=task,
+        )
+    except AppError as exc:
+        _rsvc.log.warning(
+            "consensus_opinion_deliver_failed",
+            task_id=ctx.consensus_task_id,
+            member_id=str(member_id),
+            code=exc.code,
+        )
+        if task is not None:
+            await record_collaborator_outcome(
+                db, task_id=task.id, member_id=member_id, state=CONSENSUS_MEMBER_FAILED
+            )
+        return
+    if task is not None:
+        await record_collaborator_outcome(
+            db,
+            task_id=task.id,
+            member_id=member_id,
+            state=CONSENSUS_MEMBER_DELIVERED,
+            opinion_text=opinion,
+        )

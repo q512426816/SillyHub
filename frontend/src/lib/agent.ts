@@ -58,7 +58,10 @@ export type AgentRunLogChannel =
   | "stderr"
   | "tool_call"
   | "pending_input"
-  | "user_input";
+  | "user_input"
+  // 2026-09-10-group-agent-direct-chat：群会话 channel=system 行（汇总收口
+  // 状态卡落库形态，design §5.6；单聊路径不产生）。
+  | "system";
 
 export interface AgentRunLogEntry {
   id: string;
