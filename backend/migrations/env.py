@@ -60,6 +60,10 @@ from app.modules.release import model as _release_model  # noqa: F401
 from app.modules.scan_docs import conflict_model as _scan_conflict_model  # noqa: F401
 from app.modules.scan_docs import model as _scan_model  # noqa: F401
 from app.modules.settings import model as _settings_model  # noqa: F401
+
+# 2026-09-11-skills-central-library task-01 卡点遗留收尾（ql-20260912-001）：
+# 漏登记 = autogenerate 误报 remove_table skill_sources/user_skill_enables。
+from app.modules.skill_source import model as _skill_source_model  # noqa: F401
 from app.modules.skills import model as _skills_model  # noqa: F401
 from app.modules.spec_profile import model as _spec_profile_model  # noqa: F401
 from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
