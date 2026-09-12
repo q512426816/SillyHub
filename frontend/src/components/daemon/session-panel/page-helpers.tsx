@@ -135,6 +135,13 @@ export interface SessionPanelPageProps {
 }
 
 /**
+ * 2026-09-12-session-live-display-fixes（R4）：run 快照活跃状态词表——处于这些
+ * 状态的轮次正在计时，turnStartedAt 强制取快照 started_at（后端权威起点）。
+ * 词表口径对齐 backend agent/model.py run 状态（pending_approval 为 team 审批轮）。
+ */
+const ACTIVE_RUN_STATUSES = new Set(["running", "pending", "pending_approval"]);
+
+/**
  * 按 run 快照补 whoLine / 历史 usage（原 SessionPanelPage displayTurns useMemo 体外提）：
  * 只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 / 占位 turn）原样返回——
  * whoLine 不渲染（零回归）。
@@ -209,10 +216,17 @@ export function enrichDisplayTurns(
         ctxTokens: t.ctxTokens ?? meta.ctx_tokens ?? null,
         // ql-20260817-004：答复完成时间（finished_at 优先；运行中/旧数据 null 不显示）。
         replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
-        // task-09（FR-02）计时锚点 ?? 链：turn 已有值（live 发送占位 / 首条 log
-        // timestamp 兜底）优先，run 快照 started_at 次之——attach 恢复计时不归零
-        // 不计（SSE 流中无 run_started 事件，不覆盖已有锚点）。
-        turnStartedAt: t.turnStartedAt ?? parseRunStartedAt(meta.started_at),
+        // task-09（FR-02）计时锚点：终态轮维持 ?? 链（turn 已有值优先——live 发送
+        // 占位 / 首条 log timestamp 兜底，attach 恢复计时不归零不计）。
+        // 2026-09-12-session-live-display-fixes（R4）：活跃轮（running/pending/
+        // pending_approval）改为**快照 started_at 优先**——attach 时 logsToTurns 的
+        // firstLogTimestampMs 受 limit 窗口截断（千行 run 只覆盖尾部），重连
+        // initialSync 重建时窗口滑动会把锚点带走（实证：两次观察隔 11 分钟 elapsed
+        // 只涨 46 秒）；run 快照是后端权威起点，活跃轮强制采用，重连不重置不漂移。
+        turnStartedAt:
+          terminal === null && meta.status != null && ACTIVE_RUN_STATUSES.has(meta.status)
+            ? (parseRunStartedAt(meta.started_at) ?? t.turnStartedAt ?? null)
+            : (t.turnStartedAt ?? parseRunStartedAt(meta.started_at)),
       };
     };
     // ql-20260903-025：身份稳定守卫——补齐字段与原值全部一致时返回**原对象**：

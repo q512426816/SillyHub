@@ -126,9 +126,16 @@ function extractCode(blob: string): string | null {
     );
   if (enErr?.[1]) return enErr[1];
 
-  // 3. HTTP 状态码：(429) / HTTP 429 / status: 429 / http=429 / 裸 4xx|5xx。
+  // 3. HTTP 状态码：(429) / HTTP 429 / status: 429 / http=429 / 原因短语形态
+  //    （"401 Unauthorized" / "502 Bad Gateway"）。2026-09-12-session-live-display-fixes
+  //    （R2 / D-003）：原第 5 分支裸 \b[1-5]\d{2}\b 无任何上下文锚定，把 pi 静默断流
+  //    合成文本里的 api_calls=116（本轮 API 调用计数）误抓为 HTTP 码展示成
+  //    code:116——替换为「3 位数字 + 空白 + 大写开头词」的 reason phrase 锚定；
+  //    '401 Unauthorized'/'502 Bad Gateway' 既有断言继续命中（正则整体 /i，大写
+  //    锚定实为字母开头词的宽口径——保留既有断言语义，误报面从任意裸数字收窄
+  //    到「数字后紧跟空白+词」形态）。
   const http =
-    /\((\d{3})\)|HTTP[\s/]*(\d{3})|status[^\d]{0,3}(\d{3})|http[^\d]{0,3}(\d{3})|\b([1-5]\d{2})\b/i.exec(
+    /\((\d{3})\)|HTTP[\s/]*(\d{3})|status[^\d]{0,3}(\d{3})|http[^\d]{0,3}(\d{3})|\b(\d{3})\s+[A-Za-z]/i.exec(
       blob,
     );
   if (http) {
@@ -262,11 +269,30 @@ export function classifyModelError(input: ClassifyModelInput): ModelError | null
 
   const blob = buildBlob(input);
   const raw = blob.length > 0 ? blob : null;
-  const code = extractCode(blob);
+
+  // 2026-09-12-session-live-display-fixes（R2 / D-003）：pi 静默断流签名——
+  // pi driver 合成的「[silent stream truncation] …（api_calls=N, …）」不是供应商
+  // 返回的业务错误（api_calls 计数曾被 extractCode 裸数字兜底误抓为 code:116
+  // 展示在失败卡上误导用户），message/hint 覆写为断流专属中文归因；type 仍走
+  // classifyBlob（规则 7 断流关键词确定性命中 provider_error，auto-recovery
+  // TRANSIENT_ERROR_TYPES 判定零变更）；code 对该签名恒 null。
+  const silentTruncation = /\[silent[\s_-]?stream[\s_-]?truncation\]/i.test(blob);
+  const code = silentTruncation ? null : extractCode(blob);
 
   // 2. 归类（provider 无关：pi/codex/cursor 与 claude 同一规则体）。
   const type = classifyBlob(blob);
   const info = ERROR_INFO[type];
+  if (silentTruncation) {
+    return {
+      type,
+      code: null,
+      message: '上游输出流中断，本轮未产生收尾回复',
+      retryable: info.retryable,
+      hint: '上游输出流中断，已支持自动续跑；若未自动续跑可重试或切换供应商',
+      raw,
+      resetAt: null,
+    };
+  }
   return {
     type,
     code,

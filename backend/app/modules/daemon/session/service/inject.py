@@ -593,7 +593,11 @@ async def _inject_into_session(
         # 会烧断简报一次性名额（与「纯切换轮不注入也不消耗」的验收口径冲突，
         # CC-12 关切正是"空 prompt 切换轮被双标记消耗一次性简报"）。带文本的
         # 切换轮是真 LLM 轮，照常双标记。
-        silent_config_switch = config_switch and not prompt.strip()
+        # 2026-09-12-session-live-display-fixes（R3 / D-002）：单源定义收紧——
+        # 「纯切换」要求无用户内容（空 prompt **且无附件**：空 prompt + 附件是
+        # 看图说话的真 LLM 轮，D-7 豁免入口可携切换字段到达，不得按静默处理）；
+        # 该变量同时消费于 user_input/turn_count 跳过与终态收口（下方两处）。
+        silent_config_switch = config_switch and not prompt.strip() and not validated_attachments
         run = AgentRun(
             id=uuid.uuid4(),
             agent_type="claude_code",
@@ -634,7 +638,14 @@ async def _inject_into_session(
         run.llm_provider_id = new_llm_provider_id if config_switch else session.llm_provider_id
         svc._session.add(run)
 
-        session.turn_count = (session.turn_count or 0) + 1
+        # 2026-09-12-session-live-display-fixes（R3 / D-002）：user_input 落库与
+        # turn_count 递增收口到 silent_config_switch 单源——纯切换轮（空 prompt）
+        # 无用户消息（对齐 ql-20260817-010 声明的「无 user_input 日志 → 时间线不
+        # 渲染」语义；此前实现与注释矛盾：无条件落空行 + 计数虚高，实证会话
+        # d4c29d95 30 轮中 12 轮为空切换轮）。last_active_at 照刷（活动真实），
+        # run 照建（前端紧凑配置行 ql-20260818-011 / runsMeta 孤儿轮补建消费链）。
+        if not silent_config_switch:
+            session.turn_count = (session.turn_count or 0) + 1
         session.last_active_at = now
         if config_switch:
             # task-05 / FR-04：会话三列刷新（快照含 machine_name/agent_name，
@@ -663,25 +674,28 @@ async def _inject_into_session(
         # 2026-08-20 task-06（D-3）：附件标记行插头部——[附件:id|kind|name]
         # 逐附件一行，换行后接原 prompt；kind 取 DB 原始值（前端回显缩略图
         # 数据源）；统一 USER_INPUT_LOG_MAX_CHARS 截断（ql-20260910-016 由 5000 放宽）。
-        user_input_content = prompt
-        if validated_attachments:
-            from app.modules.session_attachment.service import (
-                attachment_marker_line,
-            )
+        # R3：纯切换轮跳过（空 prompt 亦无附件——附件非空时 inject 入口豁免
+        # 会把 prompt 视为可空但非纯切换；此处与 turn_count 同源收口）。
+        if not silent_config_switch:
+            user_input_content = prompt
+            if validated_attachments:
+                from app.modules.session_attachment.service import (
+                    attachment_marker_line,
+                )
 
-            marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
-            user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
-        svc._session.add(
-            AgentRunLog(
-                run_id=run.id,
-                channel="user_input",
-                content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
-                timestamp=now,
-                # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
-                # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
-                metadata_=dict(turn_metadata) if turn_metadata is not None else None,
+                marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
+                user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
+            svc._session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel="user_input",
+                    content_redacted=user_input_content[:USER_INPUT_LOG_MAX_CHARS],
+                    timestamp=now,
+                    # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
+                    # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
+                    metadata_=dict(turn_metadata) if turn_metadata is not None else None,
+                )
             )
-        )
 
         # task-08 拆分：附件组装/gate 复核 + lease metadata 同步 +
         # providerConfig 构造段下沉 inject_gates._finalize_inject_turn_writes。
@@ -706,7 +720,9 @@ async def _inject_into_session(
         # ql-20260817-010：静默切换——空 prompt 的切换轮无 LLM turn，run 直接
         # 落终态 completed（纯配置变更记录，无 user_input 日志 → 时间线不渲染）；
         # daemon 收到空 prompt 只 reload 配置不喂消息（reloadWithConfig 既有守卫）。
-        if config_switch and not prompt.strip():
+        # 2026-09-12-session-live-display-fixes R3：判定收口到 silent_config_switch
+        # 单源（与上方 user_input/turn_count 跳过同变量，消除第二处重复判定）。
+        if silent_config_switch:
             run.status = "completed"
             run.finished_at = datetime.now(UTC)
 

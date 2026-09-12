@@ -940,15 +940,21 @@ function applyTaskMeta(tool: ToolTurnSegment, meta: TaskLineMeta): ToolTurnSegme
 }
 
 /**
- * override 撤回（task-02 / R-06 / Grill X-06）：按 segmentId 前缀路由目标桶——
- * `main:` → 顶层段；`<tool_use_id>:` → 该 id 匹配容器（tool / stub，DFS 含嵌套）的
- * children；无 `:` 视同 main（顶层）。桶内移除该 segmentId 派生的全部同类段：
+ * override 撤回（task-02 / R-06 / Grill X-06；2026-09-12-session-live-display-fixes
+ * 全树化）：按 segmentId **全树扫描**移除该 segmentId 派生的全部同类段——不依赖
+ * 前缀路由（backend quick-0e56260f 合成令箭声明的协议语义：「按段 id 任意位置撤回，
+ * 不依赖前缀判定」）。原 main:/<tool_use_id>: 前缀路由对 pi 引擎的 pi:msg<N>:ci<C>
+ * 形态静默 no-op（前缀 pi 永远找不到容器），是直播碎片气泡根因之一（实证会话
+ * d4c29d95）；全树扫描是两种前缀形态的语义超集，顺带覆盖容器嵌套 children 深度>1
+ * （原实现容器只撤直接 children）。
  * - variant=assistant → 撤 text 段（文本截断语义：派生段内文本全部来自该 partial，
  *   整段移除即从 output 投影截断其贡献，前后他段文本保留拼接——同现有
  *   partialSegmentsRef 的 outputStart/length 范围截断，段模型跨段版）；
  * - variant=thinking → 撤 thinking 段（思考项移除语义，跨段派生一并移除）。
- * 段移除即 streaming 随段消失（清除语义）。无匹配段 / 无匹配容器 → null（调用方
- * 静默 no-op，对齐现有 partialSegments.get 未命中即 return 的行为）。
+ * 段 id 经 derivesFromSegmentId 严格派生判定（<kind>:<segmentId> + 唯一后缀链），
+ * 同 segmentId 派生段只属同一流式源，跨容器误删实践不撞。容器 children 变化沿
+ * path-copy 重建（未触及的兄弟段保持原引用，FR-06）。段移除即 streaming 随段消失
+ * （清除语义）。无匹配段 → null（调用方静默 no-op，对齐现有行为）。
  */
 function revokePartialSegments(
   segments: TurnSegment[],
@@ -956,27 +962,34 @@ function revokePartialSegments(
   variant: "assistant" | "thinking",
   removedIds: Set<string>,
 ): TurnSegment[] | null {
-  const colon = segmentId.indexOf(":");
-  const prefix = colon > 0 ? segmentId.slice(0, colon) : "main";
   const kind: "text" | "thinking" = variant === "assistant" ? "text" : "thinking";
-  const removeAll = (children: TurnSegment[]): TurnSegment[] =>
-    children.filter((s) => {
-      const hit = s.kind === kind && derivesFromSegmentId(s.id, kind, segmentId);
-      if (hit) removedIds.add(s.id);
-      return !hit;
-    });
-
-  if (prefix === "main") {
-    const next = removeAll(segments);
-    return next.length === segments.length ? null : next;
-  }
-  if (!treeContainsContainerWithId(segments, prefix)) return null;
   let changed = false;
-  const next = updateContainerById(segments, prefix, (c) => {
-    const children = removeAll(c.children);
-    changed = children.length !== c.children.length;
-    return { ...c, children };
-  });
+  // 惰性 path-copy：仅当本层实际发生移除（或子层返回新数组）才产出新数组，
+  // 否则原引用返回（FR-06 段引用稳定）。
+  const walk = (list: TurnSegment[]): TurnSegment[] => {
+    let listChanged = false;
+    const out: TurnSegment[] = [];
+    for (const s of list) {
+      if (s.kind === kind && derivesFromSegmentId(s.id, kind, segmentId)) {
+        removedIds.add(s.id);
+        changed = true;
+        listChanged = true;
+        continue;
+      }
+      if ((s.kind === "tool" || s.kind === "subagent_stub") && s.children.length > 0) {
+        const nextChildren = walk(s.children);
+        if (nextChildren !== s.children) {
+          changed = true;
+          listChanged = true;
+          out.push({ ...s, children: nextChildren });
+          continue;
+        }
+      }
+      out.push(s);
+    }
+    return listChanged ? out : list;
+  };
+  const next = walk(segments);
   return changed ? next : null;
 }
 
@@ -1110,9 +1123,10 @@ export function applyLogToSegments(
     return idIndex;
   };
 
-  // override 撤回令箭（task-02）：撤回信号非内容，不渲染进段——按 segmentId 前缀路由
-  // 定位桶，移除该 segmentId 派生的全部分裂段（R-06 跨段撤回；assistant 文本截断 /
-  // thinking 项移除，语义平移自 applyLogToTurn 的 partialSegmentsRef），重算投影。
+  // override 撤回令箭（task-02）：撤回信号非内容，不渲染进段——revokePartialSegments
+  // 全树扫描移除该 segmentId 派生的全部分裂段（R-06 跨段撤回 + 2026-09-12 全树化，
+  // 不再按前缀路由；assistant 文本截断 / thinking 项移除，语义平移自 applyLogToTurn
+  // 的 partialSegmentsRef），重算投影。
   // segmentId / variant 由 classifySessionLog 的 OVERRIDE_RE 捕获组保证；类型上可选，
   // 缺失属畸形令箭——静默 no-op 原引用返回（对齐现有 Map 未命中即 return）。
   if (seg.kind === "override") {
@@ -1180,6 +1194,9 @@ export function applyLogToSegments(
   const subagentType = nonEmptyString(input.subagentType);
   let segments = turn.segments;
   let mergedInto: StreamMergeReport | null = null;
+  // R1.2（2026-09-12-session-live-display-fixes）：本条 log 是否因全桶前缀收编
+  // 实际移除了段——置位时 F7 增量 cell 视为失效（见尾部投影段的 stale output 防御）。
+  let prefixDropInvalidatedCell = false;
 
   // 1. tool_use 兜底合并（§9.5）：同 tool_use_id 的 subagent_stub 已存在（子消息先
   //    到）→ 摘除 stub，其 children / subagentType 随迁到即将创建的 tool 段。
@@ -1241,18 +1258,21 @@ export function applyLogToSegments(
             break;
           }
         } else if (seg.kind === "reply") {
-          // 用户反馈⑥防御：完整回复行 + 遗留 partial（override 丢失）前缀命中 →
-          // 先移除 partial（ql-20260820-011 的 override 协同不受影响：override 正常
-          // 到达时 partial 已被撤走，此处为空操作）。quick-9f86d2c3：吸收成功时封存
+          // 用户反馈⑥防御 + R1.2 全桶收编：完整回复行 + 桶内任意位置的前缀
+          // partial（override 丢失 / 被 thinking 段挤开）→ 全部移除再落全文
+          // （ql-20260820-011 的 override 协同不受影响：override 正常到达时
+          // partial 已被撤走，此处为空操作）。quick-9f86d2c3：吸收成功时封存
           // 该 segmentId，后续同源重放窗口不再复活。
           const superseded = supersededSegIdsOf(turn);
-          segments = dropPrefixPartialReply(
+          const dropped = dropPrefixPartialReply(
             segments,
             bucketId,
             routeSubagentType,
             seg.text,
             (sealedSegId) => superseded.add(sealedSegId),
           );
+          segments = dropped.segments;
+          prefixDropInvalidatedCell = dropped.removed;
         }
         const appended = appendStreamText(
           segments,
@@ -1408,8 +1428,12 @@ export function applyLogToSegments(
   //    - text partial 续接 DFS 末位 text 段 → output 尾接增量，processItems 引用复用；
   //    - thinking partial 续接 DFS 末位过程项段 → 末项文本替换（数组浅拷贝）；
   //    - 无结构变更（裸前缀空文本行）→ cell 原样；
-  //    - 其余（新建段 / 配对 / 撤回 / 无 cell 外部构造 turn）→ 全量重投影重建 cell。
-  const prevCell = (turn as AssembledTurn & AssemblerInternalsCarrier)[LEGACY_CELL];
+  //    - 其余（新建段 / 配对 / 撤回 / 无 cell 外部构造 turn / R1.2 全桶收编
+  //      实际移除段）→ 全量重投影重建 cell（增量基线含已删段文本，直接用会
+  //      产出 stale output——F7 不变量「cell 值恒等于 segmentsToLegacy」）。
+  const prevCell = prefixDropInvalidatedCell
+    ? null
+    : (turn as AssembledTurn & AssemblerInternalsCarrier)[LEGACY_CELL];
   let cell: LegacyCell;
   if (
     prevCell &&
@@ -1575,10 +1599,20 @@ function attachSkillInjection(
  * 用户反馈⑥防御（2026-08-25）：完整回复行（无 segmentId）到达时，直播 partial
  * 派生段仍在（override 撤回丢失/未发）且其文本是全文前缀 → 先移除该 partial
  * 段再落全文，避免「partial（可能截断）+ 全文」双气泡重复显示。partial 非前缀
- * （内容已分叉）时保守保留双方。仅处理同桶尾部单个 text partial——partial 链
- * 按源合并恒为一段（appendStreamText 语义）。
+ * （内容已分叉）时保守保留双方（由 revokePartialSegments 的令箭撤回兜底乱序流）。
  * quick-9f86d2c3：吸收成功时经 onSeal 回调封存该 segmentId——同 segmentId 的
  * 后续重放窗口（轮后对账 / 断线 resync 增量）不再以 streaming 新段复活。
+ *
+ * 2026-09-12-session-live-display-fixes（R1.2 / D-001）：只看桶尾 → 全桶扫描。
+ * pi 消息形态固定 [thinking, text]，backend 发布序固定 THINKING → OVERRIDE →
+ * ASSISTANT 全文——THINKING 行先把 text partial 从尾位挤开，尾位-only 收编对
+ * pi 恒失效（实证会话 d4c29d95 直播碎片气泡根因之二）。改为扫描桶内全部
+ * children：凡 kind=text 且 segId 非空且文本是 fullText 前缀的段全部移除
+ * （多 text part 消息 ci0/ci1 交错段、多窗口乱序同样收敛）；仅流式派生段
+ * 参与判定（完整行段 segId 恒 null、用户消息走 user_input 通道，均不误伤）。
+ * 返回 removed 信号供调用方失效 F7 增量 cell（中位移除后 O(1) 增量路径会产出
+ * 含已删 partial 文本的 stale output，必须强制本条 log 走全量重投影——对拍
+ * 用例锁定，F7 不变量审查 P1-1）。
  */
 function dropPrefixPartialReply(
   segments: TurnSegment[],
@@ -1586,20 +1620,26 @@ function dropPrefixPartialReply(
   subagentType: string | null,
   fullText: string,
   onSeal?: (segId: string) => void,
-): TurnSegment[] {
-  return applyToBucket(segments, bucketId, subagentType, (children) => {
-    const last = children[children.length - 1];
-    if (
-      last != null &&
-      last.kind === "text" &&
-      last.segId != null &&
-      fullText.startsWith(last.text)
-    ) {
-      if (onSeal && last.segId) onSeal(last.segId);
-      return children.slice(0, -1);
-    }
-    return children;
+): { segments: TurnSegment[]; removed: boolean } {
+  let removed = false;
+  const next = applyToBucket(segments, bucketId, subagentType, (children) => {
+    let listChanged = false;
+    const kept = children.filter((s) => {
+      const hit =
+        s.kind === "text" &&
+        s.segId != null &&
+        s.text.length > 0 &&
+        fullText.startsWith(s.text);
+      if (hit) {
+        removed = true;
+        listChanged = true;
+        if (onSeal && s.segId) onSeal(s.segId);
+      }
+      return !hit;
+    });
+    return listChanged ? kept : children;
   });
+  return { segments: next, removed };
 }
 
 /**

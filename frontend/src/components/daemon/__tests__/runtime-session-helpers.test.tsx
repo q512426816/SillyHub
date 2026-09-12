@@ -436,3 +436,100 @@ describe("runTerminalTurnStatus（ql-20260822-010）", () => {
     expect(runTerminalTurnStatus(null)).toBeNull();
   });
 });
+
+/* ───────── 2026-09-12-session-live-display-fixes task-03（R4）：enrichDisplayTurns 活跃轮计时锚点 ───────── */
+
+import { enrichDisplayTurns } from "../session-panel/page-helpers";
+import type { SessionRunRead } from "@/lib/daemon/sessions";
+import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+
+function makeRun(overrides: Partial<SessionRunRead>): SessionRunRead {
+  return {
+    id: "run-1",
+    created_at: "2026-09-12T10:00:00Z",
+    status: "running",
+    error_code: null,
+    failure_summary: null,
+    error_detail: null,
+    started_at: "2026-09-12T10:00:01Z",
+    finished_at: null,
+    exit_code: null,
+    agent_profile_snapshot: null,
+    llm_provider_id: null,
+    input_tokens: null,
+    output_tokens: null,
+    user_id: null,
+    sender_name: null,
+    ...overrides,
+  };
+}
+
+function makeTurn(overrides: Partial<SessionTurnView> & { runId?: string }): SessionTurnView {
+  return {
+    runId: "run-1",
+    turn: 1,
+    prompt: "你好",
+    output: "",
+    status: "running",
+    seenLogIds: new Set<string>(),
+    inputTokens: null,
+    outputTokens: null,
+    ...overrides,
+  };
+}
+
+describe("enrichDisplayTurns 计时锚点（R4：活跃轮快照优先，终态轮 ?? 链）", () => {
+  it("running 轮 + 快照 started_at 可解析 → 锚点强制取快照（覆盖本地窗口派生锚点）", () => {
+    const turn = makeTurn({ turnStartedAt: Date.parse("2026-09-12T10:05:00Z") });
+    const meta = makeRun({ status: "running", started_at: "2026-09-12T10:00:01Z" });
+    const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+    // 窗口锚点（10:05，来自 limit 截断的首行时间戳）被后端权威起点（10:00:01）覆盖
+    expect(enriched?.turnStartedAt).toBe(Date.parse("2026-09-12T10:00:01Z"));
+  });
+
+  it("pending_approval（team 审批轮）同属活跃词表 → 快照优先", () => {
+    const turn = makeTurn({ turnStartedAt: 999 });
+    const meta = makeRun({ status: "pending_approval", started_at: "2026-09-12T11:00:00Z" });
+    const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+    expect(enriched?.turnStartedAt).toBe(Date.parse("2026-09-12T11:00:00Z"));
+  });
+
+  it("pending 且快照 started_at 为 null → 不覆盖（本地锚点保留）", () => {
+    const localAnchor = Date.parse("2026-09-12T12:00:00Z");
+    const turn = makeTurn({ turnStartedAt: localAnchor });
+    const meta = makeRun({ status: "pending", started_at: null });
+    const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+    expect(enriched?.turnStartedAt).toBe(localAnchor);
+  });
+
+  it("终态轮（completed/failed）维持 ?? 链：turn 已有本地值不被快照覆盖", () => {
+    const localAnchor = Date.parse("2026-09-12T13:00:00Z");
+    for (const status of ["completed", "failed"] as const) {
+      const turn = makeTurn({ status: "completed", turnStartedAt: localAnchor });
+      const meta = makeRun({ status, started_at: "2026-09-12T09:00:00Z" });
+      const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+      expect(enriched?.turnStartedAt).toBe(localAnchor);
+    }
+  });
+
+  it("活跃轮快照值稳定 → 引用不变（身份稳定守卫不抖动）", () => {
+    const turn = makeTurn({
+      turnStartedAt: Date.parse("2026-09-12T10:00:01Z"),
+      // 守卫比对涉及的全部回填字段预先与快照值一致（?? 链产物），确保唯一变量
+      // 是 turnStartedAt 的取值路径——否则守卫因其它字段补缺而判变。
+      replyAt: "2026-09-12T10:00:01Z",
+      ctxTokens: null,
+      autoResumeOf: null,
+      sender: undefined,
+      whoLine: {
+        profileName: null,
+        agentName: "agent",
+        providerName: null,
+      },
+    });
+    const meta = makeRun({ status: "running", started_at: "2026-09-12T10:00:01Z" });
+    const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+    // 锚点与各补齐字段值均一致 → 返回原对象（FR-06 memo 命中前提）
+    expect(enriched).toBe(turn);
+  });
+});

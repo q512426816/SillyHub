@@ -400,3 +400,75 @@ describe('classifyModelError — 多文本来源拼接（task-02）', () => {
     expect(result.resetAt === null || typeof result.resetAt === 'string').toBe(true);
   });
 });
+
+describe('classifyModelError — 2026-09-12-session-live-display-fixes（R2 / D-003）', () => {
+  it('api_calls 计数不再误抓为错误码：[silent stream truncation]（api_calls=116, …）→ code=null（生产 bug 回归：失败卡曾显示 code:116）', () => {
+    // 2026-09-12 会话 d4c29d95 实证：error_detail.code="116" 实为 api_calls 计数。
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText:
+        '[silent stream truncation] 上一轮输出流中断，未产生收尾回复（api_calls=116, final_text=y）',
+    });
+    expect(result?.type).toBe('provider_error');
+    expect(result?.retryable).toBe(true);
+    expect(result?.code).toBeNull();
+  });
+
+  it('断流签名 message/hint 覆写为专属中文归因（type 仍 provider_error，分类学零变更）', () => {
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText:
+        '[silent stream truncation] 上一轮输出流中断，未产生收尾回复（api_calls=171, final_text=y）',
+    });
+    expect(result?.message).toBe('上游输出流中断，本轮未产生收尾回复');
+    expect(result?.hint).toContain('自动续跑');
+    expect(result?.type).toBe('provider_error');
+    expect(result?.resetAt).toBeNull();
+  });
+
+  it('非断流文本里的 api_calls 计数同样不出码（裸数字兜底已收窄为原因短语锚定）', () => {
+    const result = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText: 'provider failed after api_calls=203, no retry left',
+    });
+    // "203," 后跟逗号无词 → 不命中原因短语锚定；无其它码源 → code=null
+    expect(result?.code).toBeNull();
+  });
+
+  it('原因短语锚定保留既有出码：401 Unauthorized / 502 Bad Gateway / HTTP 500 / status: 502 / http=503', () => {
+    const a = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: '401 Unauthorized: invalid api key',
+    });
+    expect(a?.code).toBe('401');
+    const b = classifyModelError({ agent: 'claude', isError: true, resultText: '502 Bad Gateway' });
+    expect(b?.code).toBe('502');
+    const c = classifyModelError({ agent: 'claude', isError: true, resultText: 'HTTP 500' });
+    expect(c?.code).toBe('500');
+    const d = classifyModelError({ agent: 'claude', isError: true, resultText: 'status: 502' });
+    expect(d?.code).toBe('502');
+    const e = classifyModelError({ agent: 'claude', isError: true, resultText: 'http=503' });
+    expect(e?.code).toBe('503');
+  });
+
+  it('毫秒时长数字（60000ms / 30000ms）仍不出码', () => {
+    const a = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'Request timed out after 60000ms',
+    });
+    expect(a?.type).toBe('timeout');
+    expect(a?.code).toBeNull();
+    const b = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText: 'pi rpc "prompt" response timeout (30000ms)',
+    });
+    expect(b?.type).toBe('timeout');
+    expect(b?.code).toBeNull();
+  });
+});

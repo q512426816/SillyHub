@@ -336,6 +336,64 @@ describe("override 撤回（R-06：前缀路由 × variant × 跨段撤回）", 
     // 撤 thinking 但只有 text 段（variant 决定撤回 kind）
     expect(applyLogToSegments(turn, makeLog("4", null, "[THINKING_OVERRIDE] main:1"))).toBe(turn);
   });
+
+  // ── 2026-09-12-session-live-display-fixes task-01：pi 前缀全树撤回 ──
+  // 改前复现：pi:msg<N>:ci<C> 前缀 pi 被当容器 id 查找恒 miss → 撤回静默 no-op，
+  // 直播碎片气泡根因（实证会话 d4c29d95：partial 半截段 + 全文段双显，刷新恢复）。
+  it("pi 前缀 × assistant：顶层 partial 段收到撤回令箭 → 移除（改前 no-op 回归锁定）", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "保留整段"),
+      makeLog("2", "stdout", "apply", { segmentId: "pi:msg588:ci1" }),
+    ]);
+    expect(turn.segments.map((s) => s.id)).toEqual(["text:1", "text:pi:msg588:ci1"]);
+    expect(turn.output).toBe("保留整段apply");
+    const after = applyLogToSegments(turn, makeLog("3", null, "[ASSISTANT_OVERRIDE] pi:msg588:ci1"));
+    expect(after.segments.map((s) => s.id)).toEqual(["text:1"]);
+    expect(after.output).toBe("保留整段");
+    // 未触及段引用稳定
+    expect(after.segments[0]).toBe(turn.segments[0]);
+  });
+
+  it("pi 前缀 × 分裂派生链：同 segmentId 多窗口分裂出 -2 后缀段 → 全部撤回（唯一后缀防御）", () => {
+    const raw = '{"tool":"Bash","args":{"command":"ls"},"tool_use_id":"tu_pi","success":true}';
+    const turn = applyAll([
+      makeLog("1", "stdout", "win-a", { segmentId: "pi:msg171:ci1" }),
+      makeLog("2", "tool_call", raw),
+      makeLog("3", "stdout", "win-b", { segmentId: "pi:msg171:ci1" }),
+    ]);
+    expect(turn.segments.map((s) => s.id)).toEqual([
+      "text:pi:msg171:ci1",
+      "tu_pi",
+      "text:pi:msg171:ci1-2",
+    ]);
+    const after = applyLogToSegments(turn, makeLog("4", null, "[ASSISTANT_OVERRIDE] pi:msg171:ci1"));
+    expect(after.segments.map((s) => s.id)).toEqual(["tu_pi"]);
+    expect(after.output).toBe("");
+  });
+
+  it("pi 前缀 × 嵌套容器：tool 桶 children 内 pi partial（深度>1）→ 撤回命中（原实现只撤直接 children 的缺口）", () => {
+    const outerRaw = '{"tool":"Task","args":{"description":"外层"},"tool_use_id":"tu_out","success":true}';
+    const innerRaw = '{"tool":"Task","args":{"description":"内层"},"tool_use_id":"tu_in","success":true}';
+    const turn = applyAll([
+      makeLog("1", "tool_call", outerRaw),
+      makeLog("2", "tool_call", innerRaw, { parentToolUseId: "tu_out", subagentType: "outer-sub" }),
+      // 孙辈（深度 2）的 pi partial 落在内层 tool 桶 children
+      makeLog("3", "stdout", "deep-partial", {
+        parentToolUseId: "tu_in",
+        subagentType: "inner-sub",
+        depth: 2,
+        segmentId: "pi:msg7:ci0",
+      }),
+    ]);
+    const before = findSeg(turn.segments, (s) => s.id === "text:pi:msg7:ci0");
+    expect(before).toBeDefined();
+    const after = applyLogToSegments(turn, makeLog("4", null, "[ASSISTANT_OVERRIDE] pi:msg7:ci0"));
+    // 全树扫描命中深度>1 的嵌套段；两个容器段原引用保持（path-copy 只重建命中路径）
+    expect(findSeg(after.segments, (s) => s.id === "text:pi:msg7:ci0")).toBeUndefined();
+    const outer = expectTool(after.segments[0]);
+    const inner = expectTool(outer.children.find((s) => s.kind === "tool"));
+    expect(inner.children).toHaveLength(0);
+  });
 });
 
 /* ───────── 4. 归属桶配对（Grill X-02）与 tool 段容错（R-07） ───────── */
@@ -1352,5 +1410,74 @@ describe("backend 合成 override 治愈乱序胶水段（quick-0e56260f）", ()
       "完整回答一全文在此。",
       "完整回答二全文在此。",
     ]);
+  });
+});
+
+/* ───────── 2026-09-12-session-live-display-fixes task-02（R1.2）：全桶前缀收编 + F7 失效 ───────── */
+
+describe("dropPrefixPartialReply 全桶收编（R1.2：partial 被挤开尾位仍收编）", () => {
+  it("pi 三行序（THINKING → OVERRIDE → ASSISTANT 全文）：直播装配与干净装配等价（无碎片/重复段）", () => {
+    // 实证会话 d4c29d95：pi 消息 [thinking(ci0), text(ci1)]，backend 发布序固定
+    // THINKING → 撤回令箭 → 全文。改前：THINKING 把 partial 挤开尾位，前缀收编
+    // 失效 + 令箭 pi: 前缀路由 no-op → 「apply」碎片气泡 + 全文气泡双显。
+    const partial = makeLog("1", "stdout", "apply", { segmentId: "pi:msg588:ci1" });
+    const thinking = makeLog("2", null, "[THINKING] 先想想再答");
+    const overrideArrow = makeLog("3", null, "[ASSISTANT_OVERRIDE] pi:msg588:ci1");
+    const full = makeLog("4", null, "[ASSISTANT] apply 对账缺 8 个文件声明——需要先补");
+
+    const live = applyAll([partial, thinking, overrideArrow, full]);
+    // 干净装配 = 历史回放形态（backend 已删 partial 行、令箭不落库）
+    const clean = applyAll([thinking, full]);
+
+    const textOf = (t: AssembledTurn) =>
+      t.segments
+        .filter((s): s is TurnSegment & { kind: "text" } => s.kind === "text")
+        .map((s) => s.text);
+    expect(textOf(live)).toEqual(textOf(clean));
+    expect(live.output).toBe(clean.output);
+    // 直播终态无 streaming 残留段
+    expect(
+      live.segments.some((s) => s.kind === "text" && s.streaming === true),
+    ).toBe(false);
+  });
+
+  it("中位收编：partial 在桶中部（尾位是完整行）→ 前缀命中即移除，全文 merge 不留碎片", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "frag", { segmentId: "pi:msg7:ci0" }),
+      makeLog("2", "stdout", "前一条完整回复"),
+    ]);
+    // partial 已不在尾位（尾位是完整行段 segId null）
+    expect(turn.segments.map((s) => s.id)).toEqual(["text:pi:msg7:ci0", "text:2"]);
+    const after = applyLogToSegments(turn, makeLog("3", null, "[ASSISTANT] frag 完整全文"));
+    // 中位碎片被收编，全文 merge 进尾位完整行段——桶内只剩一个 text 段，
+    // 文本 = 前一条完整行 + 全文（碎片贡献消失，不重复）。
+    expect(after.segments.map((s) => s.kind)).toEqual(["text"]);
+    expect(after.output).toBe("前一条完整回复frag 完整全文");
+  });
+
+  it("F7 对拍：中位移除后增量投影 output === 全量重投影（触发序 [partialB(s1), fullX] + fullB）", () => {
+    // 审查 P1-1 的精确触发序：partialB 先落段（cell 锚到它）→ fullX 完整行落段
+    // （cell 锚移到 fullX）→ fullB 收编掉中位 partialB 后 merge 进 fullX——若不
+    // 失效 cell，O(1) 增量会拼出「partialB+fullX+fullB」stale output。
+    const turn = applyAll([
+      makeLog("1", "stdout", "B前缀", { segmentId: "pi:msg9:ci1" }),
+      makeLog("2", "stdout", "X全文"),
+      makeLog("3", null, "[ASSISTANT] B前缀B后半"),
+    ]);
+    // 增量维护的 output 必须与全量重投影逐字节一致（F7 不变量）
+    const reprojected = segmentsToLegacy(turn.segments);
+    expect(turn.output).toBe(reprojected.output);
+    expect(turn.output).toBe("X全文B前缀B后半");
+    expect(turn.processItems).toEqual(reprojected.processItems);
+  });
+
+  it("非前缀（内容分叉）不误删：partial 文本不是 fullText 前缀 → 双方保留", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "分叉内容", { segmentId: "pi:msg11:ci0" }),
+    ]);
+    const after = applyLogToSegments(turn, makeLog("2", null, "[ASSISTANT] 完全不同的回复"));
+    // 分叉 partial 保留（由令箭撤回兜底），完整行照常落段
+    expect(after.segments).toHaveLength(2);
+    expect(after.output).toBe("分叉内容完全不同的回复");
   });
 });

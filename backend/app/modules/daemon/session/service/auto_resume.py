@@ -518,6 +518,28 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
                     run_id=str(agent_run.id),
                     chain=chain_len,
                 )
+                # 2026-09-12-session-live-display-fixes（R5 / D-004）：链到上限停跑
+                # 不再纯静默——对刚终态的 run 补写 error_detail 接续指引（前端失败
+                # 卡已渲染 hint，零前端改动即可告知「为什么不再自动续、该怎么做」；
+                # 实证会话 d4c29d95 15:11 chain=2 停跑，用户只见「供应商异常」失败卡
+                # 不知道要手动继续）。type/code/raw 原值不动（auto-recovery 判定消费
+                # type/raw，既有断言零影响）；写入失败仅 warn（维持全程静默容错原则）。
+                try:
+                    detail = dict(agent_run.error_detail) if agent_run.error_detail else {}
+                    detail["hint"] = (
+                        "上游连续中断，自动续跑已达上限（2 次）；"
+                        "请手动发送继续接续，或切换供应商后重发"
+                    )
+                    detail["auto_resume_stopped"] = True
+                    agent_run.error_detail = detail
+                    await svc._session.commit()
+                except Exception as hint_err:  # noqa: BLE001（静默容错原则）
+                    await svc._session.rollback()
+                    log.warning(
+                        "auto_recover_chain_limit_hint_write_failed",
+                        run_id=str(agent_run.id),
+                        error=str(hint_err),
+                    )
                 return
             enqueue_prompt = RESUME_NUDGE_PROMPT
         else:
