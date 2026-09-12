@@ -62,7 +62,8 @@ scale: large
 | 修改 | sillyhub-daemon/src/interactive/session-manager/persistence.ts | null+codex 探测三态化（标记/legacy/零动作） |
 | 新增 | NEW:sillyhub-daemon/tests/atomic-write.test.ts | 原子写单测（顶替/失败清理/旧内容保留） |
 | 修改 | sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts | 守卫前移/回滚重写/cursor 拒绝用例 |
-| 修改 | sillyhub-daemon/tests/interactive/session-store-persistence.test.ts | restore 探测三态用例 |
+| 修改 | sillyhub-daemon/tests/interactive/session-recovery.test.ts | restore 探测三态用例（RESTORE 系真宿主，plan-review 修正） |
+| 修改 | sillyhub-daemon/tests/provider-file-settings-reload.test.ts | 标记先行/后置序单测宿主（plan-review 修正） |
 
 ## 接口定义
 
