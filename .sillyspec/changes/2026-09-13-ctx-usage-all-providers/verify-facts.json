@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-13-ctx-usage-all-providers",
+  "generatedAt": "2026-09-12T23:26:27.166Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-13-ctx-usage-all-providers",
+      "metrics": {
+        "matches": 4,
+        "skippedFiles": 0,
+        "worktreeHits": 2,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-13-ctx-usage-all-providers",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-13-ctx-usage-all-providers",
+      "metrics": {
+        "backendEndpoints": 989,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-13-ctx-usage-all-providers",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,workspace,daemon,agent,platform_sync]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-13T03:04:48.993Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
