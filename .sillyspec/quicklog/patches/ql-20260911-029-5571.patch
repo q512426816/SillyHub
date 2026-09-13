@@ -1,0 +1,466 @@
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md b/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
+index 066bf0b40..1c1494b30 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
+@@ -16,7 +16,7 @@ created_at: 2026-09-11 01:06:00
+ - 仅消费「自定义端点」形态（provider.base_url 非空 + api_key + 裸 model id 齐）；api_format='openai_chat' 为 pi × openai_chat 禁配组合（后端 422 归 Create/Update 校验、前端禁选归表单，此处防御性双保险 warn 跳过）。
+ - 产物三文件（托管键差量替换，未知键 / 兄弟 provider 保留）：
+   - auth.json：`{"sillyhub": {"type": "api_key", "key": api_key}}`（官方形状）；
+-  - models.json：`providers.sillyhub = {name: "SillyHub", api: "openai-completions", baseUrl, models: [{id: 裸 model id}]}`；
++  - models.json：`providers.sillyhub = {name: "SillyHub", api: <按 api_format 映射>, baseUrl, models: [{id: 裸 model id}]}`——anthropic/缺省 → `"anthropic-messages"`（Anthropic SDK 打 `{baseUrl}/v1/messages`，鉴权 `x-api-key` 头；baseUrl 不得带 `/v1` 后缀，客户端自拼。ql-20260911-029：原写死 openai-completions 导致智谱 anthropic 端点协议错配全断流）；未知 api_format → warn 跳过零写入；
+   - settings.json：`defaultProvider = "sillyhub"`、`defaultModel = 裸 model id`。
+ - 裸 model id = `default_fallback_model ?? model`（与 codex-settings 同取值序，D-010）。
+ 
+@@ -25,15 +25,18 @@ created_at: 2026-09-11 01:06:00
+ writePiDir({piDir, provider}):
+   api_format='openai_chat' → console.warn 后 return（禁配防御，零写入）
+   base_url 为空（官方端点形态）→ 静默 return（零写入——凭证注入归 env 层，D-008 分层）
++  api_format 未知值（词表外）→ console.warn 后 return（ql-20260911-029：写错协议
++    的 models.json 会让 pi 全断流，宁可不写）
+   api_key / 裸 model id 缺失 → console.warn 后 return（宁可不写空 key：空串会被
+     pi 当字面量 key 打给上游；无 model 的三文件是 CLI 不可用配置）
+-  auth.json → models.json → settings.json 依序先读后写（preserve unknown）
++  api = 映射（anthropic/缺省 → 'anthropic-messages'）
++  auth.json → models.json(api) → settings.json 依序先读后写（preserve unknown）
+   任一 IO 失败 → console.error 后 throw（reject）→ 调用方跳过 PI_CODING_AGENT_DIR
+     env 注入仍 spawn（失败语义唯一化）
+ ```
+ 
+ ## 注意事项
+-- CLI 版本基线（R-03）：写盘形状以 **pi 0.81.1** 实测为 golden——`providers.<key>.api = "openai-completions"`（经 OpenAI SDK 打 `{baseUrl}/chat/completions`，SSE 流）；auth.json 官方形状是 `{"type": "api_key", "key": ...}`（`{"apiKey": ...}` 投影形状实测被拒：`No API key found for the selected model.`，不采用）；CLI 升级漂移由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 0.81.1，mock 全链 exit=0）。
++- CLI 版本基线（R-03）：写盘形状以 **pi 0.81.1** 实测为 golden——`providers.<key>.api` 按 api_format 映射（ql-20260911-029 起 anthropic 形态 = `"anthropic-messages"`，Anthropic SDK 打 `{baseUrl}/v1/messages` + `x-api-key` 头，智谱真实端点实测 exit=0；spike B1 的 openai-completions 形态仅适用于 OpenAI 兼容端点，当前词表无该形态合法入口）；auth.json 官方形状是 `{"type": "api_key", "key": ...}`（`{"apiKey": ...}` 投影形状实测被拒：`No API key found for the selected model.`，不采用）；CLI 升级漂移由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 0.81.1，mock 全链 exit=0）。
+ - spike golden 证据：`.sillyspec/changes/2026-09-10-multi-provider-injection/spike/b1-models.json`、`b1b-auth.json`、`b1-settings.json`；冒烟测试对 b1 系 golden 做逐字段断言。
+ - 与 env 层共存（R-04）：pi key 解析优先级 CLI `--api-key` > auth.json > env > models.json 内联 apiKey——文件层与 env 层并存时 auth.json 文件值压制 env 同键值，两层叠加无歧义路由；官方端点（base_url 空）本模块零写入，对 env 层零干扰。
+ - 安全：api_key 明文只进文件不进任何日志。
+diff --git a/.sillyspec/quicklog/QUICKLOG-qinyi.md b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+index eddfb9fe7..1385013cc 100644
+--- a/.sillyspec/quicklog/QUICKLOG-qinyi.md
++++ b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+@@ -28,3 +28,17 @@
+ 根因：立即代报只覆盖 mcp=false（claude 自报无兜底）；pi 空白 result（override 晚到）无补报机会；叠加 workspace b97f8231 default_agent=NULL 使派发白跑 claude（已补 pi）。
+ 方案：一切 mission_worker 成功轮 +90s 探测 getMissionStatus（session-scoped opts.sessionId）——本 run artifacts 仍空且 mission 活跃才用 result/会话级最后全文兜底代报（防双写）；文本缓存双写源（onTurnMessage 完整 text 事件 + result），FIFO 500 上限。
+ 结果：daemon 18 用例（新增 6：兜底触发/已自报跳过/不活跃跳过/pi 立即后不二次/空白+晚到全文/探测失败与缺失）+回归 111 全绿，tsc 过；4ca98b77 已手工回填（artifact 8da04f9c 全文 11928 字节）；uuid 配对疑点裁决非 bug（_revoke_committed_partials 按 segment_id 单段配对，by-design）。
++
++## ql-20260911-029-5571 | 2026-09-11 21:33:04 | pi 切智谱断流修复：models.json api 按 api_format 映射
++状态：已完成
++关联变更：2026-09-11-session-provider-switch-codex-pi
++文件：
++- sillyhub-daemon/src/pi-settings.ts（PROVIDER_API→piApiForFormat 映射+未知格式 warn 跳过）
++- sillyhub-daemon/tests/pi-settings.test.ts（期望值+未知格式新用例）
++- sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts（pi 产物期望值）
++- sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts（fixture+mock /v1/messages+x-api-key 断言）
++- .sillyspec/docs/sillyhub-daemon/modules/pi-settings.md（契约/逻辑/基线三处同步）
++需求：pi 切智谱断流修复：models.json api 按 api_format 映射
++根因：writePiDir 把 api 写死 openai-completions（上一变更按 OpenAI 兼容端点 golden 设计），anthropic 形态无映射——pi 拿 OpenAI 协议打智谱 anthropic 端点必断流（线上会话 d4c29d95 首切实证，pi 四次重试全秒断）
++方案：PROVIDER_API 常量改 piApiForFormat 映射（anthropic/缺省→anthropic-messages；未知值→warn 跳过零写入）；writeModelsJson 增 api 参；pi-settings/dispatch 期望值 + 未知格式新用例 + smoke integ fixture 加 api_format、mock 增 /v1/messages anthropic SSE、断言改 x-api-key 头；pi-settings 模块卡三处口径同步
++结果：typecheck 0 错；pi-settings 16 + dispatch 17 + reload 21 + smoke integ 5（真 pi CLI 命中 mock /v1/messages + x-api-key，exit=0）全绿；真实智谱端点端到端实测（用户 key + glm-5.3）输出正常 exit=0；待重新打包部署
+diff --git a/sillyhub-daemon/src/pi-settings.ts b/sillyhub-daemon/src/pi-settings.ts
+index 686b9093e..c9d6b03ce 100644
+--- a/sillyhub-daemon/src/pi-settings.ts
++++ b/sillyhub-daemon/src/pi-settings.ts
+@@ -11,8 +11,10 @@
+  *   - auth.json 官方形状 `{"<providerKey>": {"type": "api_key", "key": <value>}}`
+  *     （golden = spike/b1b-auth.json；b1-auth.json 的 `{"apiKey": ...}` 投影形状
+  *     实测被拒——`No API key found for the selected model.`，不采用）；
+- *   - models.json providers 段 `api: "openai-completions"` 打 `/chat/completions`
+- *     （golden = spike/b1-models.json，api 固定值以 golden 为准，D-010）。
++ *   - models.json providers 段 `api` 按 provider.api_format 映射（anthropic/缺省
++ *     → "anthropic-messages" 打 `/v1/messages`；golden = spike/b1-models.json 的
++ *     openai-completions 形态仅历史依据——ql-20260911-029 实证 anthropic 端点写
++ *     openai-completions 会协议错配全断流，pi docs/models.md:123-128 合法四值）。
+  *
+  * 与 env 层共存语义（R-04 / spike Pi-3，分层见 D-008）：
+  *   - pi 官方 key 解析优先级（官方文档 + spike）：CLI `--api-key` > auth.json >
+@@ -24,7 +26,7 @@
+  * 产物形状（与 spike b1 系 golden 逐字段一致）：
+  *   auth.json:    providers 键 "sillyhub" upsert {"type": "api_key", "key": api_key}
+  *                 ——先读后写保留未知兄弟 provider 键；
+- *   models.json:  providers.sillyhub = {name: "SillyHub", api: "openai-completions",
++ *   models.json:  providers.sillyhub = {name: "SillyHub", api: <按 api_format 映射>,
+  *                 baseUrl: provider.base_url, models: [{id: <裸 model id>}]}
+  *                 ——托管字段差量替换，兄弟 provider 键 / 未知顶层键 / sillyhub
+  *                 条目内未知字段保留；
+@@ -77,11 +79,21 @@ const PROVIDER_KEY = 'sillyhub';
+ /** models.json providers.sillyhub.name 展示名（仅展示用途，不影响路由）。 */
+ const PROVIDER_DISPLAY_NAME = 'SillyHub';
+ /**
+- * providers.sillyhub.api 固定值。pi 0.81.1 经 OpenAI SDK 打 `/chat/completions`
+- * （spike B1 闭环 + b1-models.json:5 golden），自定义 OpenAI 兼容端点唯一取值
+- * ——升级漂移由 task-07 冒烟暴露（R-03，此处为显式事实源）。
++ * models.json providers.sillyhub.api 映射（ql-20260911-029）：
++ * pi 自定义供应商合法 api 四值（docs/models.md:123-128）——openai-completions /
++ * openai-responses / anthropic-messages / google-generative-ai。平台 pi 供应商
++ * 自定义端点形态即 anthropic 协议（DB 词表 default 'anthropic'，openai_chat 禁配
++ * 已在 writePiDir 前置跳过），映射 'anthropic'/缺省 → 'anthropic-messages'；
++ * 其余未知值 → undefined（调用方 warn 跳过，防半配形状写出必断流配置）。
+  */
+-const PROVIDER_API = 'openai-completions';
++function piApiForFormat(
++  apiFormat: string | null | undefined,
++): string | undefined {
++  if (apiFormat === 'anthropic' || apiFormat === undefined || apiFormat === null || apiFormat === '') {
++    return 'anthropic-messages';
++  }
++  return undefined;
++}
+ 
+ /** 空串 / null / undefined 一律视为未设置（对齐 types.ts 空串=未配置语义）。 */
+ function nonEmpty(v: string | null | undefined): string | undefined {
+@@ -155,6 +167,7 @@ async function writeModelsJson(
+   piDir: string,
+   baseUrl: string,
+   modelId: string,
++  api: string,
+ ): Promise<void> {
+   const modelsPath = join(piDir, MODELS_FILENAME);
+   const doc = await readJsonObject(modelsPath, MODELS_FILENAME);
+@@ -180,7 +193,7 @@ async function writeModelsJson(
+   target[PROVIDER_KEY] = {
+     ...(existingEntry ?? {}),
+     name: PROVIDER_DISPLAY_NAME,
+-    api: PROVIDER_API,
++    api,
+     baseUrl,
+     models: [{ id: modelId }],
+   };
+@@ -228,6 +241,17 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
+   const baseUrl = nonEmpty(provider.base_url);
+   if (baseUrl === undefined) return;
+ 
++  // api_format → pi api 映射（ql-20260911-029）：未知格式 warn 跳过——写错协议
++  // 的 models.json 会让 pi 拿错误 SDK 打端点全断流（线上实证），宁可不写。
++  const api = piApiForFormat(provider.api_format);
++  if (api === undefined) {
++    console.warn('pi_dir_write_skipped_unknown_api_format', {
++      piDir,
++      api_format: provider.api_format ?? '',
++    });
++    return;
++  }
++
+   // 必需字段校验：api_key 不写空值（空串 key 会被 pi 当字面量打给上游）；
+   // 裸 model id 缺失同样跳过（defaultModel/models 目录是 pi 侧唯一选型键）。
+   const apiKey = nonEmpty(provider.api_key);
+@@ -245,7 +269,7 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
+ 
+   try {
+     await writeAuthJson(piDir, apiKey);
+-    await writeModelsJson(piDir, baseUrl, modelId);
++    await writeModelsJson(piDir, baseUrl, modelId, api);
+     await writeSettingsJson(piDir, modelId);
+   } catch (e) {
+     console.error('pi_dir_write_failed', {
+diff --git a/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts b/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts
+index 29cb3387c..bb9d7247c 100644
+--- a/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts
++++ b/sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts
+@@ -207,7 +207,7 @@ describe('applyProviderFileSettings：kind 分派 + per-session 目录布局（D
+     expect(auth['sillyhub']).toEqual({ type: 'api_key', key: 'sk-pi-custom' });
+     const models = readJson(join(piDir, 'models.json'));
+     const providers = models['providers'] as Record<string, Record<string, unknown>>;
+-    expect(providers['sillyhub']?.['api']).toBe('openai-completions');
++    expect(providers['sillyhub']?.['api']).toBe('anthropic-messages');
+     expect(providers['sillyhub']?.['baseUrl']).toBe('https://pi.example/v1');
+     const settings = readJson(join(piDir, 'settings.json'));
+     expect(settings['defaultProvider']).toBe('sillyhub');
+diff --git a/sillyhub-daemon/tests/pi-settings.test.ts b/sillyhub-daemon/tests/pi-settings.test.ts
+index affd40ec3..2471af2bc 100644
+--- a/sillyhub-daemon/tests/pi-settings.test.ts
++++ b/sillyhub-daemon/tests/pi-settings.test.ts
+@@ -5,7 +5,7 @@
+ // （spike B1 完整闭环证据，pi 0.81.1）：
+ //   - auth.json 官方形状 {"<providerKey>": {"type": "api_key", "key": ...}}
+ //     （b1-auth.json 的 {"apiKey": ...} 投影形状实测被拒，是负例勿用）
+-//   - models.json providers 段 {name, api: "openai-completions", baseUrl, models: [{id}]}
++//   - models.json providers 段 {name, api: "anthropic-messages", baseUrl, models: [{id}]}
+ //   - settings.json {defaultProvider, defaultModel}
+ //
+ // 覆盖 design 接口定义 pi 段 + D-004（官方 auth 形状）/ D-005（文件层载体）/
+@@ -107,7 +107,7 @@ describe('writePiDir 自定义端点形态（golden=spike b1b-auth/b1-models/b1-
+     expect(sillyhub.key).toBe('sk-mock-123');
+   });
+ 
+-  it('models.json providers.sillyhub = {name, api:"openai-completions", baseUrl, models:[{id}]}（b1-models 逐字段）', async () => {
++  it('models.json providers.sillyhub = {name, api:"anthropic-messages", baseUrl, models:[{id}]}（b1-models 逐字段）', async () => {
+     const dir = newPiDir();
+     await writePiDir({ piDir: dir, provider: piCustomProvider() });
+ 
+@@ -117,7 +117,7 @@ describe('writePiDir 自定义端点形态（golden=spike b1b-auth/b1-models/b1-
+       providers: {
+         sillyhub: {
+           name: 'SillyHub',
+-          api: 'openai-completions',
++          api: 'anthropic-messages',
+           baseUrl: 'http://127.0.0.1:18999/v1',
+           models: [{ id: 'mock-model' }],
+         },
+@@ -209,13 +209,13 @@ describe('writePiDir preserve unknown（先读后合并，兄弟键/未知字段
+           providers: {
+             mockprov: {
+               name: 'MockProv',
+-              api: 'openai-completions',
++              api: 'anthropic-messages',
+               baseUrl: 'http://127.0.0.1:18999/v1',
+               models: [{ id: 'mock-model' }],
+             },
+             sillyhub: {
+               name: 'Stale Name',
+-              api: 'openai-completions',
++              api: 'anthropic-messages',
+               baseUrl: 'http://stale.example/v1', // 旧托管值必须被替换
+               models: [{ id: 'stale-model' }, { id: 'extra-model' }],
+               queryMode: 'think', // 条目内未知字段保留
+@@ -239,7 +239,7 @@ describe('writePiDir preserve unknown（先读后合并，兄弟键/未知字段
+     // 兄弟 provider 原样保留
+     expect(providers.mockprov).toEqual({
+       name: 'MockProv',
+-      api: 'openai-completions',
++      api: 'anthropic-messages',
+       baseUrl: 'http://127.0.0.1:18999/v1',
+       models: [{ id: 'mock-model' }],
+     });
+@@ -332,6 +332,28 @@ describe('writePiDir 写盘门槛', () => {
+     expect(warnSpy).not.toHaveBeenCalled();
+   });
+ 
++  it('api_format 未知值（词表外）→ warn 跳过零写入（ql-20260911-029：写错协议的 models.json 会让 pi 全断流，宁可不写）', async () => {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    const dir = newPiDir();
++    await expect(
++      writePiDir({
++        piDir: dir,
++        provider: piCustomProvider({
++          api_format: 'google-genai-legacy',
++          api_key: 'sk-test',
++          base_url: 'https://example.com/v1',
++        }),
++      }),
++    ).resolves.toBeUndefined();
++
++    expect(warnSpy).toHaveBeenCalledWith(
++      'pi_dir_write_skipped_unknown_api_format',
++      expect.objectContaining({ piDir: dir, api_format: 'google-genai-legacy' }),
++    );
++    expect(existsSync(join(dir, 'models.json'))).toBe(false);
++    warnSpy.mockRestore();
++  });
++
+   it('api_format=openai_chat（pi × openai_chat 禁配组合）→ warn 跳过，即使 base_url/api_key 齐备也不放行（防御性双保险；后端 422 归 task-05）', async () => {
+     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+     const dir = newPiDir();
+diff --git a/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts b/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
+index e8c3a959b..922e11a38 100644
+--- a/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
++++ b/sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
+@@ -12,7 +12,7 @@
+ //   B（pi 全链）: 同法 pi（base_url 指向 mock）→ 产物与 spike golden
+ //      b1-models.json / b1b-auth.json / b1-settings.json 逐字段一致 → 真跑
+ //      pi -p --provider sillyhub --model <id> 一条（spike B 形态）→ mock 收到
+-//      POST /v1/chat/completions 且 Bearer/model 正确；
++//      POST /v1/messages（anthropic-messages 映射）且 Bearer/model 正确；
+ //   C（litellm 通道，产物级）: openai_chat 形态 ProviderConfig（litellm_base_url
+ //      指向 mock）→ config.toml base_url / auth.json key 断言。**不真跑**——
+ //      litellm 容器不在本机（R-02 残差：litellm /v1/responses 与 codex 的实际
+@@ -70,6 +70,8 @@ interface MockEntry {
+   /** path 不含 query。 */
+   path: string;
+   authorization: string;
++  /** anthropic-messages 形态鉴权头（Anthropic SDK 用 x-api-key 而非 Bearer）。 */
++  xApiKey: string;
+   model: string | null;
+   client: string;
+ }
+@@ -97,7 +99,8 @@ const RESPONSES_JSON = {
+  * 内嵌 mock 端点：记录每个请求的 method/path/Authorization/model（spike 判据 =
+  * mock 日志命中），对 /v1/responses、/v1/chat/completions 返回最小合法 SSE 流
+  * （事件序列照抄 spike：responses = created → output_item.done → completed；
+- * chat/completions = delta chunk → [DONE]），/v1/models 返回列表 JSON，其余
++ * chat/completions = delta chunk → [DONE]；/v1/messages = anthropic SSE 事件序列），
++ * /v1/models 返回列表 JSON，其余
+  * 通用 200 JSON。监听 127.0.0.1:0 —— 内核分配临时端口，避开常用端口。
+  */
+ function startMockServer(): Promise<{ server: Server; port: number; entries: MockEntry[] }> {
+@@ -122,6 +125,7 @@ function startMockServer(): Promise<{ server: Server; port: number; entries: Moc
+         method: req.method ?? '',
+         path,
+         authorization: req.headers.authorization ?? '',
++        xApiKey: String(req.headers['x-api-key'] ?? ''),
+         model: typeof body.model === 'string' ? body.model : null,
+         client: String(req.headers['user-agent'] ?? '').slice(0, 60),
+       });
+@@ -201,6 +205,50 @@ function startMockServer(): Promise<{ server: Server; port: number; entries: Moc
+         return;
+       }
+ 
++      if (pathLower.endsWith('/messages')) {
++        // anthropic-messages 协议（ql-20260911-029：pi 自定义端点 anthropic 形态
++        // 映射 anthropic-messages 打 /v1/messages）。非流式 JSON / 流式 SSE 双形态。
++        if (!wantStream) {
++          sendJson({
++            id: 'msg_mock',
++            type: 'message',
++            role: 'assistant',
++            model: typeof body.model === 'string' ? body.model : 'mock-model',
++            content: [{ type: 'text', text: 'mock says hi' }],
++            stop_reason: 'end_turn',
++            usage: { input_tokens: 1, output_tokens: 1 },
++          });
++          return;
++        }
++        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
++        const sse = (event: string, payload: unknown): void => {
++          res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
++        };
++        sse('message_start', {
++          type: 'message_start',
++          message: { id: 'msg_mock', type: 'message', role: 'assistant', content: [], usage: { input_tokens: 1, output_tokens: 0 } },
++        });
++        sse('content_block_start', {
++          type: 'content_block_start',
++          index: 0,
++          content_block: { type: 'text', text: '' },
++        });
++        sse('content_block_delta', {
++          type: 'content_block_delta',
++          index: 0,
++          delta: { type: 'text_delta', text: 'mock says hi' },
++        });
++        sse('content_block_stop', { type: 'content_block_stop', index: 0 });
++        sse('message_delta', {
++          type: 'message_delta',
++          delta: { stop_reason: 'end_turn' },
++          usage: { output_tokens: 1 },
++        });
++        sse('message_stop', { type: 'message_stop' });
++        res.end();
++        return;
++      }
++
+       if (pathLower.endsWith('/models')) {
+         sendJson({
+           object: 'list',
+@@ -485,15 +533,18 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 +
+     expect(hit!.model).toBe(CODEX_TEST_MODEL);
+   });
+ 
+-  // ── 冒烟 B：pi 全链（写盘产物 golden 对照 + 真跑命中 mock /v1/chat/completions）──
++  // ── 冒烟 B：pi 全链（写盘产物 golden 对照 + 真跑命中 mock /v1/messages）──
+ 
+-  it('B. pi：applyProviderFileSettings 三文件对 spike golden 逐字段一致，真跑 pi 打 mock /v1/chat/completions 且 Bearer=测试 key', async () => {
++  it('B. pi：applyProviderFileSettings 三文件对 spike golden 逐字段一致，真跑 pi 打 mock /v1/messages（anthropic-messages）且 Bearer=测试 key', async () => {
+     if (!piProbe.available) return; // 缺席容错（warn 已在 beforeAll 记录）
+ 
+     const provider: ProviderConfig = {
+       agent_kind: 'pi',
++      api_format: 'anthropic',
+       api_key: PI_TEST_KEY,
+-      base_url: `http://127.0.0.1:${mockPort}/v1`,
++      // anthropic-messages 客户端在 baseUrl 后自拼 /v1/messages——baseUrl 不带
++      // /v1（对齐智谱 anthropic 端点 .../api/anthropic 无 /v1 后缀的真实形态）。
++      base_url: `http://127.0.0.1:${mockPort}`,
+       model: PI_TEST_MODEL,
+     };
+     const env = await applyProviderFileSettings({
+@@ -510,14 +561,14 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 +
+       sillyhub: { type: 'api_key', key: PI_TEST_KEY },
+     });
+ 
+-    // 产物 2：models.json —— spike golden b1-models.json 逐字段（D-002/D-010：
+-    // api 固定 "openai-completions" → 打 /chat/completions）。
++    // 产物 2：models.json —— api 按 api_format 映射（ql-20260911-029：
++    // anthropic 形态 → anthropic-messages 打 /v1/messages）。
+     const models = readJson(join(piDir, 'models.json'));
+     expect(models['providers']).toEqual({
+       sillyhub: {
+         name: 'SillyHub',
+-        api: 'openai-completions',
+-        baseUrl: `http://127.0.0.1:${mockPort}/v1`,
++        api: 'anthropic-messages',
++        baseUrl: `http://127.0.0.1:${mockPort}`,
+         models: [{ id: PI_TEST_MODEL }],
+       },
+     });
+@@ -550,10 +601,10 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 +
+       mockEntries,
+       (e) =>
+         e.method === 'POST' &&
+-        e.path === '/v1/chat/completions' &&
+-        e.authorization === `Bearer ${PI_TEST_KEY}`,
++        e.path === '/v1/messages' &&
++        e.xApiKey === PI_TEST_KEY,
+     );
+-    expect(hit, `mock 未收到带测试 key 的 /v1/chat/completions；entries=${JSON.stringify(mockEntries)}`).toBeDefined();
++    expect(hit, `mock 未收到带测试 key 的 /v1/messages；entries=${JSON.stringify(mockEntries)}`).toBeDefined();
+     expect(hit!.model).toBe(PI_TEST_MODEL);
+   });
+diff --git a/.sillyspec/changes/2026-09-11-workspace-asset-bridges/plan.md b/.sillyspec/changes/2026-09-11-workspace-asset-bridges/plan.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-11-workspace-asset-bridges/plan.md
+@@ -0,0 +1,66 @@
++---
++author: qinyi
++created_at: 2026-09-11 21:40:00
++plan_level: full
++---
++
++# 实现计划（Plan）— 工作区↔平台资产桥
++
++> full：6 task / 跨 backend+daemon+frontend / 表列变更+partial 索引 / daemon 分发链。
++> decisions：D-001~D-010 全 accepted。
++
++## Spike 前置验证
++不需要（锚点经 Grill 源码核验：manifest 签名/skill-manager 拉取点/表约束/写路径/解密先例全在案）。
++
++## Wave 1（表+双 scope）
++
++- task-01
++
++## Wave 2（MCP import）
++
++- task-02
++
++## Wave 3（收编）
++
++- task-03
++
++## Wave 4（daemon 分发）
++
++- task-04
++
++## Wave 5（前端）
++
++- task-05
++- task-06
++
++## 任务总表
++
++| 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 FR/D | 说明 |
++|---|---|---|---|---|---|---|
++| task-01 | 迁移+双 scope+toggle+D-010 谓词 | W1 | P0 | — | FR-01, D-003/D-010 | workspace_id 列+双 partial；四处 NULL 谓词各有回归 |
++| task-02 | MCP import 端点 | W2 | P0 | task-01 | FR-02, D-004/D-009 | get_server_for_import(user)+三态契约 |
++| task-03 | 收编两端点 | W3 | P0 | task-01 | FR-03, D-005/D-008 | 归一化+差集三源排除 |
++| task-04 | daemon per-workspace 分发 | W4 | P0 | task-01 | FR-01, D-007 | manifest ?workspace_id+槽位+两路径选槽 |
++| task-05 | workspace skills 页区块 | W5 | P1 | task-01, task-03 | FR-04 | 平台库启用+收编入口 |
++| task-06 | mcp 页选入+gen:types | W5 | P1 | task-02, task-05 | FR-04 | 弹窗+双仓生成物 |
++
++## 关键路径
++task-01 → 02/03/04（三支并行）→ 05 → 06。W5 内 05→06 串行（共享生成物收口）。
++
++## 全局验收标准
++1. backend：uv run pytest app/modules/skill_source app/modules/workspace app/modules/mcp_registry app/modules/daemon/tests/test_skills_bundle.py -q（plan-review G-1：含 mcp_registry 回归与 version hash 零回归直接落点）
++2. daemon：pnpm vitest run tests/skill-manager 相关+新增 per-workspace 用例+tests/task-runner-skill-detect.test.ts（A-2 连带）+ typecheck
++3. 三零回归：user 维度 version hash 零变化（显式断言）；list_library/toggle/收集 NULL 谓词四处各有用例
++4. 真注入：workspace 启用→manifest(?workspace_id) 并集含该技能（HTTP 实测）；daemon 槽位用例
++5. import/adopt 契约：三态+归一化+409 各有测试
++6. 前端：两页用例+tsc；gen:types 零漂移
++
++## 覆盖矩阵
++
++| ID | 覆盖任务 | 证据 |
++|---|---|---|
++| D-002/D-003 并集/单表 | 01,04 | AC-3/4 |
++| D-007 daemon 分发 | 04 | AC-2/4 |
++| D-008 归一化 | 03 | AC-5 |
++| D-009 import 三态 | 02 | AC-5 |
++| D-010 谓词 | 01 | AC-3 |

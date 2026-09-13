@@ -1,0 +1,445 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index a9be23f94..2a2ea9f95 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -111,3 +111,7 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ - monkeypatch 命名空间兼容规则（D-007）：被 patch 符号在子模块内经原模块命名空间延迟解析调用，`__init__.py` 顶部保持原绑定——157 处既有 patch 目标零失效、既有测试文件零修改（D-006）。
+ 
+ （本节只覆盖 backend 侧文件结构；Node 侧 sillyhub-daemon 的结构更新见项目级 modules/sillyhub-daemon.md 同名节。）
++
++## worker_done 代报链（2026-09-10-review-dispatch-platform-fixes 系）
++- 立即代报（task-03/ql-20260910-003）：onTurnResult 对 stage=mission_worker 且 caps.mcp===false 的成功轮，在 notifyRunResult 之后 fire-and-forget 代报 worker_done（summary=轮终全文，X-Session-Id 承载分身身份）；409/422 仅 warn。
++- ql-20260911-028 延迟兜底：一切 mission_worker 成功轮 +90s 探测 getMissionStatus（session-scoped，opts.sessionId 一次性覆盖）——本 run artifacts 仍空且 mission 活跃 → 用 result/会话级最后全文（_lastAssistantTextBySession，onTurnMessage 完整 text 事件 + result 双写源，FIFO 500 上限）兜底代报；覆盖 mcp=true 分身不自报（活体 mission c4731a06：claude worker 未调工具）与 override 晚到空白 result 两形态；已自报/不活跃/无文本/探测失败均跳过仅日志。
+diff --git a/.sillyspec/quicklog/QUICKLOG-qinyi.md b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+index 626ee2079..eddfb9fe7 100644
+--- a/.sillyspec/quicklog/QUICKLOG-qinyi.md
++++ b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+@@ -15,3 +15,16 @@
+ 结果：pi-rpc-driver 78 passed（+5 新例）；tsc 0；本机真实 pi CLI 装载冒烟通过（对照实验验证方法有效）；待提交后 bundle 部署服务器 + 本机 daemon 自更新 + 平台真机验证
+ 审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/src/interactive/pi-rpc-driver.ts, sillyhub-daemon/vendor/pi-extensions/README.md, sillyhub-daemon/vendor/pi-extensions/ask-user/
+ 审计：🔍 软归属：1 个窗口内未声明同模块测试文件已补入文件行（若属并行会话改动请手工剔除）：sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（+78/-0）
++
++## ql-20260911-028-8736 | 2026-09-11 19:01:43 | 代报需要延迟兜底——活体 mission c4731a06/worker 4ca98b77 实证 claude_code 分身（mcp=true 自报路径）未调…
++状态：已完成
++关联变更：2026-09-10-review-dispatch-platform-fixes
++文件：
++- sillyhub-daemon/src/daemon.ts（缓存+延迟兜底）
++- sillyhub-daemon/src/hub-client.ts（getMissionStatus opts）
++- sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts（新增 6 用例）
++- .sillyspec/docs/SillyHub/modules/daemon.md（代报链条目）
++需求：代报需要延迟兜底——活体 mission c4731a06/worker 4ca98b77 实证 claude_code 分身（mcp=true 自报路径）未调 worker_done 工具致 artifacts 恒空。
++根因：立即代报只覆盖 mcp=false（claude 自报无兜底）；pi 空白 result（override 晚到）无补报机会；叠加 workspace b97f8231 default_agent=NULL 使派发白跑 claude（已补 pi）。
++方案：一切 mission_worker 成功轮 +90s 探测 getMissionStatus（session-scoped opts.sessionId）——本 run artifacts 仍空且 mission 活跃才用 result/会话级最后全文兜底代报（防双写）；文本缓存双写源（onTurnMessage 完整 text 事件 + result），FIFO 500 上限。
++结果：daemon 18 用例（新增 6：兜底触发/已自报跳过/不活跃跳过/pi 立即后不二次/空白+晚到全文/探测失败与缺失）+回归 111 全绿，tsc 过；4ca98b77 已手工回填（artifact 8da04f9c 全文 11928 字节）；uuid 配对疑点裁决非 bug（_revoke_committed_partials 按 segment_id 单段配对，by-design）。
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 17d55a8a0..005c461e7 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -963,6 +963,16 @@ interface ClientLike {
+     body: { summary: string },
+     opts?: { sessionId?: string },
+   ): Promise<Record<string, unknown>>;
++  /**
++   * ql-20260911-028：mission 状态查询（延迟兜底代报的未自报探测）。可选——
++   * 真实 HubClient 已实现（含 opts.sessionId 一次性覆盖）；旧 mock 未实现时
++   * 兜底跳过（debug 日志）。
++   */
++  getMissionStatus?(
++    workspaceId: string | undefined,
++    missionId: string | undefined,
++    opts?: { sessionId?: string },
++  ): Promise<Record<string, unknown>>;
+   /**
+    * 2026-08-29-daemon-platform-resilience task-07（design A3）：PERMISSION_REQUEST
+    * 的 HTTP 上行兜底（WS 不通时 sendToHub 改走）。可选——真实 HubClient 已实现；
+@@ -1655,6 +1665,15 @@ export class Daemon {
+    * Map 跟随 daemon 实例生命周期（重启即清零，只影响本次终态上报，不落盘）。
+    */
+   private readonly _assistantMsgCountByRun = new Map<string, number>();
++  /**
++   * ql-20260911-028：会话级最后一条完整 assistant 全文（延迟兜底代报数据源）。
++   * 写入点两处：onTurnMessage 完整 text 事件（override 晚到场景的唯一来源）+
++   * onTurnResult result 非空白时（claude 等带 result 轮的主来源）。消费点：
++   * _fallbackWorkerDone（turn 成功 +90s 探测到分身未自报时兜底 worker_done）。
++   * 不随 onSessionEnd 清理——worker 会话常在兜底窗口内结束，清理会丢全文；
++   * 容量上限 FIFO 驱逐（_FALLBACK_TEXT_CAP），重启即清零不落盘。
++   */
++  private readonly _lastAssistantTextBySession = new Map<string, string>();
+   /**
+    * ql-20260831-009：modelUsage / total_cost_usd 快照差分基线（sessionId → 基线）。
+    * SDK 在 streaming-input 会话跨轮报累计快照，onTurnResult 用它差分出本轮增量
+@@ -4025,6 +4044,28 @@ export class Daemon {
+       }
+     }
+ 
++    // ql-20260911-028：延迟兜底代报（+90s 探测自报缺失再报）。活体回执
++    //（mission c4731a06 / worker 4ca98b77）：claude_code 分身（mcp=true）走
++    // worker_prompt 自报路径但实测未调 worker_done 工具——终态全文在、artifacts
++    // 恒空；pi 的空白 result 也可能因 override 晚到（终态时 turnFinalText 尚空）。
++    // 对**一切** mission_worker 成功轮排一个 +90s 探测：getMissionStatus
++    //（session-scoped，X-Session-Id 一次性覆盖）里本 run 的 artifacts 仍空且
++    // mission 活跃 → 用 result/会话级最后全文兜底代报；已自报（立即路径成功或
++    // worker 自己调了工具）探测即跳过，无双写。fire-and-forget，失败仅 warn。
++    if (state.stage === 'mission_worker' && !isError) {
++      // result 非空白时先入会话级缓存（claude 主来源；空白时缓存由晚到的
++      // onTurnMessage 完整 text 事件填充）。
++      if (typeof resultMeta.result === 'string' && resultMeta.result.trim() !== '') {
++        this._rememberAssistantText(sessionId, resultMeta.result);
++      }
++      const fallbackTimer = setTimeout(
++        () => void this._fallbackWorkerDone(sessionId, runId),
++        90_000,
++      );
++      // unref：兜底定时器不阻止进程退出（daemon stop 后残留触发只多一次探测）。
++      fallbackTimer.unref?.();
++    }
++
+     // task-06（FR-05 / D-002@v1）：scan run 终态额外触发 spec 树回灌（独立于 session end）。
+     // scan/stage 跑在长生命周期 interactive session（scan 期 session 永不 end），仅靠
+     // onSessionEnd 兜底会导致 scan-docs/knowledge/.runtime 一直不可见；此处终态点立即回灌。
+@@ -4062,6 +4103,82 @@ export class Daemon {
+    * @param runId  当前 turn 的 AgentRun.id
+    * @param msg  上报消息 dict（事件轨或 legacy flat，见上）
+    */
++
++  /** ql-20260911-028：会话级最后全文写入 + 容量上限 FIFO 驱逐（Map 插入序）。 */
++  private _rememberAssistantText(sessionId: string, text: string): void {
++    const CAP = 500;
++    this._lastAssistantTextBySession.delete(sessionId);
++    this._lastAssistantTextBySession.set(sessionId, text);
++    while (this._lastAssistantTextBySession.size > CAP) {
++      const oldest = this._lastAssistantTextBySession.keys().next().value;
++      if (oldest === undefined) break;
++      this._lastAssistantTextBySession.delete(oldest);
++    }
++  }
++
++  /**
++   * ql-20260911-028：延迟兜底 worker_done——探测本 run 是否已自报（立即代报或
++   * worker 自己调工具），未报且 mission 活跃且有全文时补报。全部失败路径仅记
++   * 日志；getMissionStatus 缺失（旧 client 形态）或返回异常形状一律跳过。
++   */
++  private async _fallbackWorkerDone(sessionId: string, runId: string): Promise<void> {
++    try {
++      const status = await this._client.getMissionStatus?.(undefined, undefined, {
++        sessionId,
++      });
++      if (
++        status === undefined ||
++        (status as { active?: unknown }).active !== true ||
++        !Array.isArray((status as { workers?: unknown }).workers)
++      ) {
++        // mission 不活跃 / 旧 client / 异常形状：无兜底意义。
++        this._logger.debug('worker_auto_done_fallback_skip', {
++          session_id: sessionId,
++          run_id: runId,
++        });
++        return;
++      }
++      const workers = (status as {
++        workers: Array<{ id?: unknown; artifacts?: unknown[] }>;
++      }).workers;
++      const mine = workers.find((w) => w.id === runId);
++      if (!mine) {
++        this._logger.debug('worker_auto_done_fallback_run_missing', {
++          session_id: sessionId,
++          run_id: runId,
++        });
++        return;
++      }
++      if ((mine.artifacts?.length ?? 0) > 0) {
++        // 已自报（worker_done 工具或立即代报已落 artifacts）——防双写跳过。
++        this._logger.debug('worker_auto_done_fallback_already_reported', {
++          session_id: sessionId,
++          run_id: runId,
++        });
++        return;
++      }
++      const summary = this._lastAssistantTextBySession.get(sessionId)?.trim();
++      if (!summary) {
++        this._logger.warn('worker_auto_done_fallback_no_text', {
++          session_id: sessionId,
++          run_id: runId,
++        });
++        return;
++      }
++      await this._client.workerDone?.(undefined, undefined, { summary }, { sessionId });
++      this._logger.info('worker_auto_done_fallback_fired', {
++        session_id: sessionId,
++        run_id: runId,
++      });
++    } catch (err: unknown) {
++      this._logger.warn('worker_auto_done_fallback_failed', {
++        session_id: sessionId,
++        run_id: runId,
++        error: String(err),
++      });
++    }
++  }
++
+   async onTurnMessage(
+     sessionId: string,
+     runId: string,
+@@ -4117,6 +4234,11 @@ export class Daemon {
+           runId,
+           (this._assistantMsgCountByRun.get(runId) ?? 0) + 1,
+         );
++        // ql-20260911-028：会话级最后完整 assistant 全文（延迟兜底代报数据源，
++        // override 晚到场景的唯一来源；末条胜出对齐 driver turnFinalText 口径）。
++        if (typeof fwdMsg['content'] === 'string') {
++          this._rememberAssistantText(sessionId, fwdMsg['content']);
++        }
+       }
+     } else if (fwdMsg['type'] === 'assistant') {
+       this._assistantMsgCountByRun.set(
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index 31b1a2beb..8bc284f79 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -2102,12 +2102,18 @@ signal: AbortSignal.timeout(SPEC_BUNDLE_TIMEOUT_MS),
+   async getMissionStatus(
+     workspaceId: string | undefined,
+     missionId: string | undefined,
++    opts?: { sessionId?: string },
+   ): Promise<Record<string, unknown>> {
++    // ql-20260911-028：opts.sessionId 一次性 X-Session-Id 覆盖（workerDone 同款
++    // 先例）——daemon 延迟兜底代报的分身身份探测（session-scoped status 形态）。
+     return this._request<Record<string, unknown>>(
+       'GET',
+       this._missionActionPath(workspaceId, missionId, 'status'),
+       undefined,
+-      this._sessionIdHeaders(),
++      {
++        ...(this._sessionIdHeaders() ?? {}),
++        ...(opts?.sessionId ? { [X_SESSION_ID_HEADER]: opts.sessionId } : {}),
++      },
+     );
+   }
+ 
+diff --git a/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts b/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
+index 98172f78f..643b610b9 100644
+--- a/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
++++ b/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
+@@ -439,3 +439,171 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+     );
+   });
+ });
++
++// ── ql-20260911-028：延迟兜底代报（+90s 探测自报缺失再报）──────────────────────
++// 活体回执（mission c4731a06 / worker 4ca98b77）：claude_code 分身（mcp=true）
++// 走 worker_prompt 自报路径但实测未调 worker_done 工具（终态全文在、artifacts 恒空）；
++// pi 的空白 result 也可能因 override 晚到。修：turn 成功后 +90s 探测
++// getMissionStatus（session-scoped）——本 run 仍无 artifacts 且 mission 活跃 →
++// 用 result/会话级最后全文兜底代报；已自报 / 不活跃 / 无文本 / 探测失败均跳过仅记日志。
++
++describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白 result 晚到全文）', () => {
++  let daemons: Daemon[] = [];
++
++  afterEach(async () => {
++    vi.useRealTimers();
++    for (const d of daemons) {
++      if (d.isRunning) await d.stop().catch(() => undefined);
++    }
++    daemons = [];
++    vi.restoreAllMocks();
++  });
++
++  /** harness 扩展：client 带 getMissionStatus（返回体可注入）。 */
++  function buildFallbackHarness(
++    state: Partial<SessionState>,
++    statusImpl: () => Promise<Record<string, unknown>>,
++  ) {
++    const base = buildHarness(state);
++    base.client['getMissionStatus'] = vi.fn(statusImpl);
++    return base;
++  }
++
++  it('claude(mcp=true) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（summary=result 全文 + sessionId）', async () => {
++    vi.useFakeTimers();
++    const { daemon, client } = buildFallbackHarness(
++      { stage: 'mission_worker', provider: 'claude' },
++      async () => ({
++        active: true,
++        workers: [{ id: 'run-mw-1', artifacts: [] }],
++      }),
++    );
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
++    await vi.advanceTimersByTimeAsync(0);
++    // 立即路径：mcp=true 不代报（防双写语义保留）。
++    expect(client['workerDone']).not.toHaveBeenCalled();
++    expect(client['getMissionStatus']).not.toHaveBeenCalled();
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(client['getMissionStatus']).toHaveBeenCalledWith(undefined, undefined, {
++      sessionId: 'sess-mw-1',
++    });
++    expect(client['workerDone']).toHaveBeenCalledTimes(1);
++    expect(client['workerDone']).toHaveBeenCalledWith(
++      undefined,
++      undefined,
++      { summary: FULL_TEXT },
++      { sessionId: 'sess-mw-1' },
++    );
++  });
++
++  it('已自报（探测到 artifacts 非空）→ 不兜底（防双写）', async () => {
++    vi.useFakeTimers();
++    const { daemon, client } = buildFallbackHarness(
++      { stage: 'mission_worker', provider: 'claude' },
++      async () => ({
++        active: true,
++        workers: [{ id: 'run-mw-1', artifacts: [{ kind: 'summary' }] }],
++      }),
++    );
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(client['getMissionStatus']).toHaveBeenCalledTimes(1);
++    expect(client['workerDone']).not.toHaveBeenCalled();
++  });
++
++  it('mission 不活跃（active=false，已收敛/无 mission）→ 跳过', async () => {
++    vi.useFakeTimers();
++    const { daemon, client } = buildFallbackHarness(
++      { stage: 'mission_worker', provider: 'claude' },
++      async () => ({ active: false }),
++    );
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(client['workerDone']).not.toHaveBeenCalled();
++  });
++
++  it('pi 立即代报成功后 +90s：探测 artifacts 已存在 → 不二次代报', async () => {
++    vi.useFakeTimers();
++    const { daemon, client } = buildFallbackHarness(
++      { stage: 'mission_worker', provider: 'pi' },
++      async () => ({
++        active: true,
++        workers: [{ id: 'run-mw-1', artifacts: [{ kind: 'summary' }] }],
++      }),
++    );
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
++    await vi.advanceTimersByTimeAsync(0);
++    expect(client['workerDone']).toHaveBeenCalledTimes(1); // 立即路径
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(client['workerDone']).toHaveBeenCalledTimes(1); // 兜底跳过
++  });
++
++  it('result 空白 + 晚到完整 text 事件（onTurnMessage）→ 兜底用会话级最后全文', async () => {
++    vi.useFakeTimers();
++    const { daemon, client } = buildFallbackHarness(
++      { stage: 'mission_worker', provider: 'pi' },
++      async () => ({
++        active: true,
++        workers: [{ id: 'run-mw-1', artifacts: [] }],
++      }),
++    );
++    daemons.push(daemon);
++
++    // 空白 result：立即路径被门控③拦（零调用）。
++    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult('   '));
++    await vi.advanceTimersByTimeAsync(0);
++    expect(client['workerDone']).not.toHaveBeenCalled();
++    // 晚到的完整 assistant 全文（override 后到场景）经 onTurnMessage 进会话级缓存。
++    await daemon.onTurnMessage('sess-mw-1', 'run-mw-1', {
++      event_type: 'text',
++      type: 'text',
++      seq: 7,
++      content: '晚到的轮终全文（override 后到）',
++      is_partial: false,
++    });
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(client['workerDone']).toHaveBeenCalledWith(
++      undefined,
++      undefined,
++      { summary: '晚到的轮终全文（override 后到）' },
++      { sessionId: 'sess-mw-1' },
++    );
++  });
++
++  it('探测失败（getMissionStatus reject / 缺失）→ 仅 warn 不抛、不代报', async () => {
++    vi.useFakeTimers();
++    const rejectHarness = buildHarness({ stage: 'mission_worker', provider: 'claude' });
++    rejectHarness.client['getMissionStatus'] = vi.fn(async () => {
++      throw new HubHttpError(502, 'bad gateway', 'POST', '/api/missions/status');
++    });
++    daemons.push(rejectHarness.daemon);
++
++    await rejectHarness.daemon.onTurnResult(
++      'sess-mw-1',
++      'run-mw-1',
++      successResult(FULL_TEXT),
++    );
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(rejectHarness.client['workerDone']).not.toHaveBeenCalled();
++
++    // client 未实现 getMissionStatus（旧 mock 形态）→ 可选链跳过，零副作用。
++    const omitHarness = buildHarness({ stage: 'mission_worker', provider: 'claude' });
++    daemons.push(omitHarness.daemon);
++    await omitHarness.daemon.onTurnResult(
++      'sess-mw-1',
++      'run-mw-1',
++      successResult(FULL_TEXT),
++    );
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(omitHarness.client['workerDone']).not.toHaveBeenCalled();
++  });
++});
+diff --git a/.sillyspec/changes/2026-09-11-session-provider-switch-codex-pi/module-impact.md b/.sillyspec/changes/2026-09-11-session-provider-switch-codex-pi/module-impact.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-09-11-session-provider-switch-codex-pi/module-impact.md
+@@ -0,0 +1,46 @@
++# 模块影响分析（骨架由 plan --done CLI（design 声明清单 × module-map 前缀匹配） 生成）
++
++> 文件×模块归属由 CLI 按 _module-map.yaml paths 前缀匹配预填；
++> **影响类型**（逻辑变更/数据结构变更/接口变更/调用关系变更/配置变更/新增）与 review 标记是语义判断，
++> 逐行把 <!--TODO--> 替换为真实结论——以 git diff 为准（真实 > 声明）。
++
++## 模块影响矩阵
++
++| 模块 | 变更文件 | 影响类型 | 需 review |
++|---|---|---|---|
++
++## 未匹配文件
++
++以下变更文件未命中 _module-map.yaml 任何模块 paths——确认是模块索引过期（该跑 `sillyspec modules rebuild`）还是真的游离文件：
++
++- `sillyhub-daemon/src/provider-file-settings.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/src/task-runner.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/src/codex-settings.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/src/interactive/types.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/src/cli.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/src/interactive/session-manager.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/src/interactive/session-manager/persistence.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/src/daemon.ts` <!--TODO: 归属判定-->
++- `frontend/src/lib/provider-caps.ts` <!--TODO: 归属判定-->
++- `frontend/src/components/sessions/session-config-bar.tsx` <!--TODO: 归属判定-->
++- `frontend/src/components/daemon/session-panel/session-panel-page.tsx` <!--TODO: 归属判定-->
++- `sillyhub-daemon/tests/daemon-provider-file-dispatch.test.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/tests/provider-file-settings-reload.test.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts` <!--TODO: 归属判定-->
++- `sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts` <!--TODO: 归属判定-->
++- `frontend/src/components/sessions/__tests__/session-config-bar.test.tsx` <!--TODO: 归属判定-->
++- `frontend/src/components/daemon/__tests__/session-panel-provider-caps.test.tsx` <!--TODO: 归属判定-->
++
++## 影响类型说明
++
++逻辑变更 / 数据结构变更 / 接口变更 / 调用关系变更 / 配置变更 / 新增；不确定的影响标 needs review。
++
++## 更新结果
++
++| 目标 | 操作 | 状态 |
++|------|------|------|
++| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
++
++规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

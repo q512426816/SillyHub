@@ -1,0 +1,52 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-4bf48a72",
+  "totals": {
+    "files": 4,
+    "additions": 301,
+    "deletions": 1
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+      "declared": true,
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "declared": true,
+      "additions": 122,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "declared": true,
+      "additions": 7,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts",
+      "declared": true,
+      "additions": 168,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": null,
+  "qlId": "ql-20260911-028-8736",
+  "sessionId": "quick-4bf48a72",
+  "savedAt": "2026-09-11T11:07:47.779Z"
+}

@@ -1,0 +1,606 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index f278aae03..25cf2a6e4 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -20,3 +20,4 @@ created_at: 2026-08-27 14:32:24
+ - ql-20260831-006-6d67 | sweep 第三档 `session_auto_recover_sweep_once`——suspended 主会话其 runtime 重新在线（online+600s 心跳宽限镜像判定）且挂起满 60s → 翻 reconnecting（重置 180s 窗口）+ best-effort 发 SESSION_RESUME 控制指令（payload/会话级供应商凭证解析逐字对齐 reopen），daemon restoreAndReconnect→confirmReconnected 翻 active；修 backend 重启场景 daemon WS 断开 10s 降级 offline → offline sweep 误挂起 active 主会话后无人恢复（既有恢复链只在 daemon 自身重启时触发，实测挂起 15 分钟直到人工干预/24h GC）
+ - ql-20260908-004-2b59 | backend-ci mypy 93 错修复（arch-large-file-split 合并遗留）——router/__init__ 的 `router` 加显式 `: APIRouter` 注解（子模块反向导入成环，mypy 环内推不出隐式类型 → 12 个 router 子文件 76 处 @router.* has-type）；submit_steps.py 16 处 `st.xxx: T = 值` 删冗余注解（mypy 仅允许 self 属性声明类型，_SubmitState dataclass 已声明全部字段）；_background_tasks.py `task` 补 `: asyncio.Task` 注解（coro: object 传入 create_task 推不出 Task[T]）。mypy 896 文件 0 错，ruff/format 绿，daemon 相关 181 测试绿
+ - ql-20260908-006-4ff6 | 只读审查风险修复批 R3/R4/R5（scheduled_send）——R3 终态写回改条件 UPDATE（WHERE status='pending'）：inject 内部 commit 已释放开头的行锁，条目仍 pending 窗口内并发 cancel 落库返回 204 后，旧盲 ORM 赋值会把 cancelled 覆写成 dispatched；0 行命中即尊重取消语义（消息可能已发出属 R-02 at-least-once 固有代价）。R4 DaemonRuntimeOffline 不再一次性 failed(inject_failed)（关机/掉线即永久丢消息）——每次失败 dispatch_at 延后 5min 有界重试（至多 6 次 ≈30min，进程内计数重启清零），超限置 failed(daemon_offline)。R5 毒丸收口——due 扫描加 ORDER BY dispatch_at,id（无排序截断 50 同批毒丸饿死其余到期条目）+ 单条连续崩溃 5 轮置 failed(sweep_crash_retry_exhausted) 不再无限重试。sweeper 14 用例 + CRUD/pin-rename 回归 22 用例全绿
++- ql-20260912-003-4506 | GET /sessions/{id}/runs 的 SessionRunRead（router/session_insights.py）扩 cache_read_tokens / cache_creation_tokens 两 nullable 字段（from_attributes 直映 AgentRun 既有列零查询改动，openapi+api-types 同批再生成）——供前端任务执行面板「轮次历史」行独立展示 输入/输出/缓存读取/缓存写入 四维用量（原 input+output 合并单列不含缓存易误读）；无缓存引擎（codex/pi）与历史 run 行 null。runs 端点 13 用例绿（含扩断言）
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.md b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+index 58cd6ebeb..f4862a98e 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+@@ -24,7 +24,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
+   - `turn-timeline.tsx` / `session-input-bar.tsx` — /sessions 总入口复用
+   - `session-usage-bar.tsx` — 会话用量条（2026-08-29-session-usage-stats；ql-20260830-013-14b3 小型化）：摘要行五指标+缓存命中率为图标化小号形态（lucide 图标 + 11px 值，指标名收敛为 antd Tooltip 悬浮提示（触发元素 aria-label，ql-20260830-014-74f5）；命中率 cache_read÷(cache_read+input)，分母 0「—」）+按模型折叠明细（ChevronDown 图标按钮 aria-label 保语义）；自取数（useEffect+refreshSignal prop，零 react-query 对齐 dialog 渲染约束），session-panel page（头部下方）/dialog（输入框上方）双模式挂载，轮次终态递增信号重取
+   - `machine-card.tsx` / `runtime-card.tsx` — 机器级与实例级卡片
+-  - `task-execution-panel.tsx` — 任务执行折叠面板（2026-09-04-session-task-execution-panel，D-004 方案B）：折叠态一行常驻摘要（运行中 N·任务 M 成功 X 失败 Y·轮次 K）+三页签（任务清单=useSessionTasks 快照+applyEvent 实时合并+plan 总纲仅活跃轮显示[R-07 降级：syncGapFromDb 不回放 plan_mode_entered，勿当 bug 修]/运行中=agent-task-card+bash-progress-card+team-task-block 三类卡 props 注入/轮次=listSessionRuns 自取数+refreshSignal，惰性取数——轮次页签首次查看才拉，避免挂载即请求灌水对账计数）；forwardRef 暴露 applyEvent（SSE 分发处 ref 桥接，不建第二条连接）；page（AgentLogCard 同层）/dialog/mobile 三挂载同组件；brand-* 语义阶零视口断点前缀
++  - `task-execution-panel.tsx` — 任务执行折叠面板（2026-09-04-session-task-execution-panel，D-004 方案B）：折叠态一行常驻摘要（运行中 N·任务 M 成功 X 失败 Y·轮次 K）+三页签（任务清单=useSessionTasks 快照+applyEvent 实时合并+plan 总纲仅活跃轮显示[R-07 降级：syncGapFromDb 不回放 plan_mode_entered，勿当 bug 修]/运行中=agent-task-card+bash-progress-card+team-task-block 三类卡 props 注入/轮次=listSessionRuns 自取数+refreshSignal（挂载即拉——折叠条「轮次 K」计数依赖；轮次行用量 ql-20260912-003-4506 起四维独立展示：主行下「输入/输出/缓存读取/缓存写入」标签 meta 行，null 维不渲染[无缓存引擎/老 run 行]——8 列固定网格 page/dialog/mobile 窄容器会横向溢出，故不走列））；forwardRef 暴露 applyEvent（SSE 分发处 ref 桥接，不建第二条连接）；page（AgentLogCard 同层）/dialog/mobile 三挂载同组件；brand-* 语义阶零视口断点前缀
+   - `agent-task-store.ts` — applyAgentTaskStatusEvent 等值抽出共享模块（session-panel 保留 re-export 保 agent-task-card-lifecycle.test.tsx 直连 import；终态定格/缺字段保旧值/最近 6 条截断语义不变）
+   - `remote-folder-picker.tsx` — daemon list_roots/list_dir 懒加载目录树（自治：初始化根 / Tree loadData / 手输跳转校验 / 错误降级红条）
+   - `session-list-layout.tsx` / `session-log-sanitize.ts` / `daemon-required-notice.tsx`
+@@ -159,6 +159,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
+ 
+ ## 变更索引
+ 
++- ql-20260912-003-4506 | 任务执行面板「轮次历史」tokens 列改四维独立展示：原 input+output 合并单值（不含缓存，口径易误读）改主行下「输入/输出/缓存读取/缓存写入」标签 meta 行（对齐 TaskListRow meta 设计语言，flex-wrap 窄容器安全；null 维不渲染防编造 0）；后端 runs DTO 同批扩 cache_read_tokens/cache_creation_tokens 两 nullable 字段（from_attributes 零查询改动）+gen:types；同 bullet 修正文档陈旧断言「轮次页签惰性取数」——实现本就挂载即拉（折叠条轮次计数依赖）。
+ - ql-20260911-019-1f01 | member-panel 头像 PATCH 失败（onError 携 vars）→ tryReclaimOrphanAvatarFile(vars.avatar) best-effort 回收本次上传的新文件（恢复默认空串不触发）；建群向导本地值路径无服务端写不受影响。
+ - ql-20260911-003-355a | group-member-avatar 增可选 disabled prop（外部忙碌门：个人中心 PATCH 在途禁用上传/恢复默认）；mcp-registry/server-form-modal 重构 env 表——「加密」列改用户逐键 Switch 开关（显式指定优先，未触碰行按键名 token/key/secret/password 缺省建议勾选可改，不再自动判定）；编辑态密钥行值固定 <set> 占位（保留提交=不改密钥）、copy 态置空待重填；底部提示文案同步新语义。
+ - ql-20260904-028-3cb5 | 工作区 spec 策略支持修改：后端 PATCH /spec-workspace 早已存在但前端无入口——lib/spec-workspaces.ts 补 updateSpecWorkspace（PATCH + 三字段透传）；workspace-config-card 策略行加 owner 门禁「修改」入口（antd Modal 三选、同值禁存、repo-native 写源项目警告、成功 toast 提示点「初始化」重建本地缓存）；生效语义：claim payload 实时读库下发（lease_meta 显式值 > SpecWorkspace.strategy 回退，普通会话缺口由 ql-20260904-030-45d1 补齐），daemon 缓存布局等无条件 pull（=初始化按钮）重建，详见 spec_workspace.md 注意事项
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.md
+index 054e9ad68..2ac512772 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.md
+@@ -57,7 +57,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。
+ - 取数 hooks：
+   - `use-agent-run-stream` — run 级 SSE 订阅（ql-20260909-019-4534：预取回放走 onMessagesBatch 整批一次 setLogs 追加——原逐条 emit 每条 O(n) 数组拷贝打开大 run 历史累计 O(n²)；log_id 去重改 seenLogIdsRef O(1) 查询——原 prev.some 每事件 O(n) 线性扫；两路径共享索引，effect 重跑/clear 时重置；ql-20260910-002：onMessage 去重移出 setState updater——Set.add 副作用在 updater 内被 StrictMode 双调二次命中误判重复丢条目（session-log-assembler F7 同型），改「updater 外去重 + 纯追加」对齐批量路径）
+   - `use-agent-runs` — Agent 运行列表 5s 条件轮询
+-  - `daemon/session-lists` — updateSessionAutoResume（PATCH /sessions/{id}/auto-resume，2026-09-10-auto-resume-interrupted-turn FR-06：会话级中断自动续跑开关，缺省开）；手写 SessionRunRead interface（daemon/sessions.ts）补 metadata?: { auto_resume_of?: string } 可选字段（与后端 SessionRunRead.metadata 对齐，续跑徽标数据源）
++  - `daemon/session-lists` — updateSessionAutoResume（PATCH /sessions/{id}/auto-resume，2026-09-10-auto-resume-interrupted-turn FR-06：会话级中断自动续跑开关，缺省开）；手写 SessionRunRead interface（daemon/sessions.ts）补 metadata?: { auto_resume_of?: string } 可选字段（与后端 SessionRunRead.metadata 对齐，续跑徽标数据源）；quick ql-20260912-003-4506：同 interface 再补 cache_read_tokens?/cache_creation_tokens? 两可选字段（后端 runs DTO 同批扩列，轮次历史四维用量展示数据源，无缓存引擎/老 run 行 null）
+   - `use-daemon-machines` — 机器级列表，refetchInterval 15s；sessions（100 行级重列表）默认不拉、opts.includeSessions 才并发（ql-20260909-013-5c88：其余挂载方 15s 白拉清零；ql-20260910-002：门户/悬浮宿主消费 sessions（继续最近会话/D-005 回退），拆分时漏传致入口消失——已补传 true，消费方=机器页+门户+悬浮宿主）——includeSessions 进 queryKey（daemonMachinesQueryKey 导出 helper，setQueryData 侧写必须同 key）
+   - `use-session-tasks`（hooks/，2026-09-04-session-task-execution-panel）— 会话任务清单三链路：mount/sessionId 变化拉 `listSessionTasks` 快照（lib/daemon.ts 新函数，形态对齐 listSessionRuns，类型=api-types 生成 AgentSessionTaskRead）+applyEvent 按 task_id upsert 实时合并（复用 agent-task-store 归约，单元素数组过桥规避 slice(-6) 截断）+refreshSignal 重连对账重拉；纯 useState/useEffect 零 react-query（dialog 无 QueryClientProvider）；useNotify 经 ref 稳定化（其每渲染新对象会让 load useCallback 无限重拉——task-10 回归实证）；AgentSessionTaskView extends AgentTaskEntry 使 AgentTaskCard 零适配层直接渲染
+   - `use-workspace-context` — 从 URL 重建工作区上下文写 workspace store
+diff --git a/.sillyspec/quicklog/QUICKLOG-qinyi.md b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+index 3c9314177..6b8f6bd37 100644
+--- a/.sillyspec/quicklog/QUICKLOG-qinyi.md
++++ b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+@@ -97,3 +97,12 @@
+ 关联变更：全局审查暴露；债务源 56a37498b/2026-09-11-provider-adapter-registry
+ 文件：frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx（九键→十键两处断言补 provider_switch）
+ 验证：27 passed
++
++## ql-20260912-003-4506 | 2026-09-12 16:00:28 | 任务执行面板轮次历史 tokens 列拆分为输入/输出/缓存读取/缓存写入四维独立展示
++状态：已完成
++关联变更：（无）
++文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md（+1/-0）, .sillyspec/docs/SillyHub/modules/frontend_components.md（+2/-1）, .sillyspec/docs/SillyHub/modules/frontend_lib.md（+1/-1）, backend/app/modules/agent/provider_caps.py（+97/-0）, backend/app/modules/daemon/router/session_insights.py（+8/-0）, backend/app/modules/daemon/tests/test_session_runs_endpoint.py（+8/-1）, backend/openapi.json（+23/-1）, docs/sillyspec/docs-gate-shared-worktree-parallel-block.md（+0/-16）, frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx（+43/-0）, frontend/src/components/daemon/task-execution-panel.tsx（+54/-28）, frontend/src/lib/api-types.ts（+7/-0）, frontend/src/lib/daemon/sessions.ts（+8/-0）, frontend/src/lib/provider-caps.ts（+141/-0）, docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md（+24/-0）, scripts/migrate-spec-junction.mjs（+152/-0）
++需求：任务执行面板轮次历史 tokens 列拆分为输入/输出/缓存读取/缓存写入四维独立展示
++根因：原轮次行 tokens 是 input+output 合并单值且不含缓存两维，长会话 prompt cache 占大头时数字远小于直觉、与会话用量条（含缓存四维）口径不可比，用户误读为统计异常
++方案：后端 runs DTO SessionRunRead 扩 cache_read_tokens/cache_creation_tokens 两 nullable 字段（from_attributes 直映既有列零查询改动）+gen:types；前端 RunListRow 由单 tokens 列改为主行 grid（轮次/状态/耗时/发送者）+下方带标签 meta 行四维独立展示（对齐 TaskListRow meta 设计语言，flex-wrap 窄容器安全；null 维不渲染不编造 0，全 null 无 meta 行）；lib/daemon sessions.ts 手写接口同步两可选字段；模块文档三处同步（含修正 frontend_components 轮次惰性取数陈旧断言——实现本就挂载即拉）；审计解锁的删除/新增文件为并行会话 docs/sillyspec 归档移动与 scripts 未跟踪脚本，非本 quick 产物不随本次提交
++结果：backend test_session_runs_endpoint.py 13 passed（含 cache 两维正/负断言扩展）；frontend task-execution-panel.test.tsx 13 passed（新增四维展示/null 维省略/全 null 无 meta 行用例）；ruff 两后端文件通过；mypy session_insights.py 0 错；frontend tsc --noEmit 干净；eslint 三前端文件 0 告警；未部署（本地改动）
+diff --git a/backend/app/modules/daemon/router/session_insights.py b/backend/app/modules/daemon/router/session_insights.py
+index 57aa60f26..739d2183c 100644
+--- a/backend/app/modules/daemon/router/session_insights.py
++++ b/backend/app/modules/daemon/router/session_insights.py
+@@ -50,6 +50,9 @@ class SessionRunRead(BaseModel):
+         渲染每轮 whoLine（历史不跟随会话当前配置）；
+       - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
+         写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；
++      - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）
++        ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示
++        四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；
+       - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该
+         run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，
+         close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
+@@ -86,6 +89,11 @@ class SessionRunRead(BaseModel):
+     llm_provider_id: uuid.UUID | None = None
+     input_tokens: int | None = None
+     output_tokens: int | None = None
++    # quick（ql-20260912-003-4506）：缓存两维直映 AgentRun 既有列（from_attributes
++    # 零查询改动），与 input/output 同批由 close_interactive_run / 实时 usage_update
++    # 写入；无缓存引擎与历史行 None，前端按维独立渲染不编造。
++    cache_read_tokens: int | None = None
++    cache_creation_tokens: int | None = None
+     # task-05 / FR-01：最近一次调用提示词大小，from_attributes 直映
+     # AgentRun.ctx_tokens 列（runs 查询零改动）；历史行 None 如实输出。
+     ctx_tokens: int | None = None
+diff --git a/backend/app/modules/daemon/tests/test_session_runs_endpoint.py b/backend/app/modules/daemon/tests/test_session_runs_endpoint.py
+index 9b681af25..ce43527ee 100644
+--- a/backend/app/modules/daemon/tests/test_session_runs_endpoint.py
++++ b/backend/app/modules/daemon/tests/test_session_runs_endpoint.py
+@@ -231,6 +231,8 @@ class TestListSessionRuns:
+             llm_provider_id=provider.id,
+             input_tokens=1234,
+             output_tokens=567,
++            cache_read_tokens=9999,
++            cache_creation_tokens=111,
+         )
+         plain = AgentRun(
+             id=uuid.uuid4(),
+@@ -247,18 +249,23 @@ class TestListSessionRuns:
+         items = {it["id"]: it for it in resp.json()}
+         assert len(items) == 2
+ 
+-        # 配置轮：快照 + 供应商 id + usage 完整透传
++        # 配置轮：快照 + 供应商 id + usage 完整透传（quick ql-20260912-003-4506：
++        # 含 cache 两维，from_attributes 直映既有列）
+         cfg = items[str(configured.id)]
+         assert cfg["agent_profile_snapshot"] == snapshot
+         assert cfg["llm_provider_id"] == str(provider.id)
+         assert cfg["input_tokens"] == 1234
+         assert cfg["output_tokens"] == 567
++        assert cfg["cache_read_tokens"] == 9999
++        assert cfg["cache_creation_tokens"] == 111
+         # 未配置轮（老 run 行）：新字段全 null
+         plain_item = items[str(plain.id)]
+         assert plain_item["agent_profile_snapshot"] is None
+         assert plain_item["llm_provider_id"] is None
+         assert plain_item["input_tokens"] is None
+         assert plain_item["output_tokens"] is None
++        assert plain_item["cache_read_tokens"] is None
++        assert plain_item["cache_creation_tokens"] is None
+ 
+     @pytest.mark.asyncio
+     async def test_returns_ctx_tokens_column(self, client, auth_headers, db_session) -> None:
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 6ab30bfcf..6dab859bd 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -62735,6 +62735,28 @@
+             ],
+             "title": "Output Tokens"
+           },
++          "cache_read_tokens": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Cache Read Tokens"
++          },
++          "cache_creation_tokens": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Cache Creation Tokens"
++          },
+           "ctx_tokens": {
+             "anyOf": [
+               {
+@@ -62765,7 +62787,7 @@
+           "status"
+         ],
+         "title": "SessionRunRead",
+-        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；\n  - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该\n    run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，\n    close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /\n    老 daemon 无上报为 None（环未知态，design §9）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。"
++        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；\n  - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）\n    ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示\n    四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；\n  - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该\n    run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，\n    close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /\n    老 daemon 无上报为 None（环未知态，design §9）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。"
+       },
+       "SessionRuntimeRequest": {
+         "properties": {
+diff --git a/docs/sillyspec/docs-gate-shared-worktree-parallel-block.md b/docs/sillyspec/docs-gate-shared-worktree-parallel-block.md
+deleted file mode 100644
+index 2e36ee720..000000000
+--- a/docs/sillyspec/docs-gate-shared-worktree-parallel-block.md
++++ /dev/null
+@@ -1,16 +0,0 @@
+-# docs gate 在共享工作区多会话并编辑时拦住无关推送（活跃坑）
+-
+-- **日期**：2026-09-08（ql-20260908-012 推送时实测）
+-- **现象**：pre-push 钩子 `sillyspec docs gate` 对**整个工作区当前状态**做引用校验，而不是对「本次要推送的提交内容」。并行会话正在编辑（未提交）backend/daemon 源码时行号临时漂移，活文档锚点（architecture-4a.md / INTEGRATIONS.md 共 7 处）瞬时失效——任何会话此时推送都会被拦，即使它推的提交与漂移毫无关系（本次推的是纯 docs/qa 豁免提交）。失败数在两次运行间 5→7 波动，证实在途编辑是移动靶。
+-- **影响**：多 agent 共享同一工作区是本仓常态（SillySpec 任务隔离设计），该门槛会把「别人的半成品」变成「所有人的推送锁」，直到在途会话落定并修锚。
+-- **绕过（当下）**：等在途会话提交/修锚后再推；或由用户确认后 `--init-baseline`（不推荐，会把瞬时债固化）。**不应该**由旁观会话去修移动靶上的锚（会撞车且修完即过期），也不该 stash 他人在途文件。
+-- **建议工具修复方向**（任一即可）：
+-  1. gate/pre-push 只校验「被推送提交实际改动的文件所关联的文档引用」（push range diff 驱动），或
+-  2. 校验基线取 `HEAD`（git show）而非工作区文件内容，或
+-  3. gate 支持 `--against HEAD` 模式，pre-push 默认用之。
+-- **关联**：ql-20260908-011/012（snapshot 豁免是文档侧减敏，本坑是门槛侧机制问题，两者互补）。
+-
+-## 巡检注记（2026-09-09 定时扫描）
+-
+-- 定性：**门禁语义设计变更**（三选一：push range diff 驱动 / 校验基线取 git show HEAD / `--against HEAD` 模式 + pre-push 默认）——涉及 docs-check 读文件层重构与 pre-push 行为契约，属专项变更而非巡检级小修，本轮不代位实现。
+-- 关联减敏已落地：docs-fix-capability 变更（2026-09-08）的 snapshot/archive 豁免双通道减少了活文档锚点面；本坑是门槛侧机制问题的剩余半边。保持活跃待专项认领。
+diff --git a/frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx b/frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx
+index 7492c9df0..f4eeb1d34 100644
+--- a/frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx
++++ b/frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx
+@@ -129,6 +129,8 @@ function runRow(overrides: Partial<SessionRunRead> = {}): SessionRunRead {
+     llm_provider_id: null,
+     input_tokens: 1_200,
+     output_tokens: 800,
++    cache_read_tokens: 45_600,
++    cache_creation_tokens: 2_400,
+     user_id: null,
+     sender_name: "qinyi",
+     ...overrides,
+@@ -394,6 +396,47 @@ describe("TaskExecutionPanel 轮次历史页签（task-07 / FR-04）", () => {
+     expect(rows[1]!.textContent).toContain("运行中");
+   });
+ 
++  it("轮次行四维用量独立展示（ql-20260912-003-4506：null 维不渲染，全 null 无 meta 行）", async () => {
++    daemonMock.listSessionRuns.mockResolvedValue([
++      runRow({ id: "run-c" }),
++      runRow({
++        id: "run-d",
++        // codex / pi 等无缓存引擎形态：cache 两维 null → 不出现缓存标签
++        cache_read_tokens: null,
++        cache_creation_tokens: null,
++      }),
++      runRow({
++        id: "run-e",
++        // 老 run 行 / 未上报：四维全 null → 不渲染用量 meta 行
++        input_tokens: null,
++        output_tokens: null,
++        cache_read_tokens: null,
++        cache_creation_tokens: null,
++      }),
++    ]);
++    render(<TaskExecutionPanel sessionId="sess-1" />);
++    await flush();
++    fireEvent.click(screen.getByTestId("task-execution-bar"));
++    fireEvent.click(screen.getByTestId("task-execution-tab-runs"));
++    const rows = screen.getAllByTestId("task-execution-run-row");
++    expect(rows).toHaveLength(3);
++    // #3（队首最新）：四维齐全，formatTokens 口径（1_200 → 1.2K）
++    expect(rows[0]!.textContent).toContain("输入 1.2K");
++    expect(rows[0]!.textContent).toContain("输出 800");
++    expect(rows[0]!.textContent).toContain("缓存读取 45.6K");
++    expect(rows[0]!.textContent).toContain("缓存写入 2.4K");
++    // #2：仅输入/输出两维，缓存标签不出现（不编造 0）
++    expect(rows[1]!.textContent).toContain("输入 1.2K");
++    expect(rows[1]!.textContent).toContain("输出 800");
++    expect(rows[1]!.textContent).not.toContain("缓存读取");
++    expect(rows[1]!.textContent).not.toContain("缓存写入");
++    // #1：四维全 null → 无任何用量标签
++    expect(rows[2]!.textContent).not.toContain("输入");
++    expect(rows[2]!.textContent).not.toContain("输出");
++    expect(rows[2]!.textContent).not.toContain("缓存读取");
++    expect(rows[2]!.textContent).not.toContain("缓存写入");
++  });
++
+   it("runsRefreshSignal 递增触发 listSessionRuns 重拉", async () => {
+     const { rerender } = render(<TaskExecutionPanel sessionId="sess-1" />);
+     await waitFor(() => expect(daemonMock.listSessionRuns).toHaveBeenCalledTimes(1));
+diff --git a/frontend/src/components/daemon/task-execution-panel.tsx b/frontend/src/components/daemon/task-execution-panel.tsx
+index 737625970..4831b5735 100644
+--- a/frontend/src/components/daemon/task-execution-panel.tsx
++++ b/frontend/src/components/daemon/task-execution-panel.tsx
+@@ -22,6 +22,9 @@
+  *        同源一致，不新建数据链路）；
+  *     ③ 轮次历史：组件内 useEffect 自取数 listSessionRuns（零 react-query，
+  *        SessionUsageBar refreshSignal 先例），runsRefreshSignal prop 递增重拉。
++ *        轮次行 tokens 展示 quick ql-20260912-003-4506 改版：原 input+output
++ *        合并单列拆为四维独立标签行（输入/输出/缓存读取/缓存写入，见
++ *        RunListRow 头注释）。
+  *
+  * ── R-07 降级裁定（勿当 bug 修）───────────────────────────────────────
+  * 计划总纲条（planObjective / planTasks props）仅活跃轮实时显示：streamSession
+@@ -262,9 +265,14 @@ function runElapsedText(run: SessionRunRead, now: number): string | null {
+   return formatElapsedZh(Math.max(0, end - start));
+ }
+ 
+-/** 轮次行 grid 列（轮次号 / 状态 / 耗时 / 发送者 / tokens；发送者列弹性截断）。 */
++/**
++ * 轮次行 grid 列（轮次号 / 状态 / 耗时 / 发送者；发送者列弹性截断）。四维用量
++ * （输入/输出/缓存读取/缓存写入）不走列——8 列固定网格在 page / dialog / mobile
++ * 三宿主的窄容器会横向溢出，改主行下方带标签 meta 行（对齐 TaskListRow meta 行
++ * 设计语言，flex-wrap 窄容器自然换行）。
++ */
+ const RUN_ROW_GRID_CLS =
+-  "grid grid-cols-[2.75rem_4rem_minmax(0,5rem)_minmax(0,1fr)_4rem] items-center gap-2";
++  "grid grid-cols-[2.75rem_4rem_minmax(0,5rem)_minmax(0,1fr)] items-center gap-2";
+ 
+ /** 页签空态轻文案（D-03：不报错、不阻塞对话流）。 */
+ function EmptyPane({ text }: { text: string }) {
+@@ -331,7 +339,13 @@ function TaskListRow({ task, now }: { task: AgentSessionTaskView; now: number })
+   );
+ }
+ 
+-/** 轮次历史页签：紧凑轮次行（轮次号 / 状态 pill / 耗时 / 发送者 / tokens）。 */
++/**
++ * 轮次历史页签：紧凑轮次行（主行：轮次号 / 状态 pill / 耗时 / 发送者 + 下方
++ * 四维用量 meta 行）。quick ql-20260912-003-4506：原「tokens」合并单列
++ * （input+output）改为独立的 输入/输出/缓存读取/缓存写入 四维——各维 null
++ * （无缓存引擎 / 老 run 行）不渲染该维（对齐 TaskListRow meta 条件 push 先例，
++ * 不编造 0）；四维全 null 不渲染 meta 行（原「—」占位同语义）。
++ */
+ function RunListRow({
+   run,
+   no,
+@@ -344,34 +358,47 @@ function RunListRow({
+ }) {
+   const view = runStatusView(run.status);
+   const elapsed = runElapsedText(run, now);
+-  const tokensUnknown = run.input_tokens == null && run.output_tokens == null;
+-  const tokens = (run.input_tokens ?? 0) + (run.output_tokens ?? 0);
++  const usageDims: string[] = [];
++  if (run.input_tokens != null) usageDims.push(`输入 ${formatTokens(run.input_tokens)}`);
++  if (run.output_tokens != null) usageDims.push(`输出 ${formatTokens(run.output_tokens)}`);
++  if (run.cache_read_tokens != null) {
++    usageDims.push(`缓存读取 ${formatTokens(run.cache_read_tokens)}`);
++  }
++  if (run.cache_creation_tokens != null) {
++    usageDims.push(`缓存写入 ${formatTokens(run.cache_creation_tokens)}`);
++  }
+   return (
+     <div
+       data-testid="task-execution-run-row"
+-      className={cn(RUN_ROW_GRID_CLS, "rounded-md px-2 py-1.5 text-xs hover:bg-muted/50")}
++      className="rounded-md px-2 py-1.5 hover:bg-muted/50"
+     >
+-      <span className="font-mono text-[11px] text-muted-foreground">#{no}</span>
+-      <span
+-        className={cn(
+-          "justify-self-start whitespace-nowrap rounded-full px-2 py-0 text-[10px] font-semibold",
+-          view.cls,
+-        )}
+-      >
+-        {view.label}
+-      </span>
+-      <span className="truncate tabular-nums text-muted-foreground">
+-        {elapsed ?? "—"}
+-      </span>
+-      <span
+-        className="min-w-0 truncate text-muted-foreground"
+-        title={run.sender_name ?? undefined}
+-      >
+-        {run.sender_name || "—"}
+-      </span>
+-      <span className="justify-self-end truncate tabular-nums text-muted-foreground">
+-        {tokensUnknown ? "—" : formatTokens(tokens)}
+-      </span>
++      <div className={cn(RUN_ROW_GRID_CLS, "text-xs")}>
++        <span className="font-mono text-[11px] text-muted-foreground">#{no}</span>
++        <span
++          className={cn(
++            "justify-self-start whitespace-nowrap rounded-full px-2 py-0 text-[10px] font-semibold",
++            view.cls,
++          )}
++        >
++          {view.label}
++        </span>
++        <span className="truncate tabular-nums text-muted-foreground">
++          {elapsed ?? "—"}
++        </span>
++        <span
++          className="min-w-0 truncate text-muted-foreground"
++          title={run.sender_name ?? undefined}
++        >
++          {run.sender_name || "—"}
++        </span>
++      </div>
++      {usageDims.length > 0 && (
++        <p className="mt-0.5 flex flex-wrap gap-x-2.5 pl-[3.25rem] text-[10.5px] tabular-nums text-muted-foreground/80">
++          {usageDims.map((dim) => (
++            <span key={dim.split(" ")[0]}>{dim}</span>
++          ))}
++        </p>
++      )}
+     </div>
+   );
+ }
+@@ -698,7 +725,6 @@ export const TaskExecutionPanel = forwardRef<
+                       <span>状态</span>
+                       <span>耗时</span>
+                       <span>发送者</span>
+-                      <span className="justify-self-end">tokens</span>
+                     </div>
+                     {runs.map((run, idx) => (
+                       <RunListRow
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 6e8abfd23..03c0ccaf0 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -22134,6 +22134,9 @@ export interface components {
+          *         渲染每轮 whoLine（历史不跟随会话当前配置）；
+          *       - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
+          *         写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；
++         *       - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）
++         *         ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示
++         *         四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；
+          *       - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该
+          *         run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，
+          *         close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
+@@ -22185,6 +22188,10 @@ export interface components {
+             input_tokens?: number | null;
+             /** Output Tokens */
+             output_tokens?: number | null;
++            /** Cache Read Tokens */
++            cache_read_tokens?: number | null;
++            /** Cache Creation Tokens */
++            cache_creation_tokens?: number | null;
+             /** Ctx Tokens */
+             ctx_tokens?: number | null;
+             /** Failure Summary */
+diff --git a/frontend/src/lib/daemon/sessions.ts b/frontend/src/lib/daemon/sessions.ts
+index 94c6e77bb..acef69901 100644
+--- a/frontend/src/lib/daemon/sessions.ts
++++ b/frontend/src/lib/daemon/sessions.ts
+@@ -628,6 +628,14 @@ export interface SessionRunRead {
+   llm_provider_id: string | null;
+   input_tokens: number | null;
+   output_tokens: number | null;
++  /**
++   * quick（ql-20260912-003-4506）：prompt cache 两维（后端 SessionRunRead
++   * from_attributes 直映 AgentRun 同名列，daemon 关单 / 实时 usage_update 写入）
++   * ，供轮次历史行独立展示 输入/输出/缓存读取/缓存写入 四维；无缓存引擎
++   * （codex / pi）与历史 run 行为 null（前端该维不渲染，不编造 0）。
++   */
++  cache_read_tokens?: number | null;
++  cache_creation_tokens?: number | null;
+   /**
+    * 2026-09-10-auto-resume-interrupted-turn：续跑轮标记——自动续跑派发落地的
+    * run 为 { auto_resume_of: <源 run id> }（「自动续跑」徽标数据源）；普通轮
+diff --git a/docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md b/docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md
+new file mode 100644
+--- /dev/null
++++ b/docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md
+@@ -0,0 +1,24 @@
++# docs gate 在共享工作区多会话并编辑时拦住无关推送（活跃坑）
++
++- **日期**：2026-09-08（ql-20260908-012 推送时实测）
++- **现象**：pre-push 钩子 `sillyspec docs gate` 对**整个工作区当前状态**做引用校验，而不是对「本次要推送的提交内容」。并行会话正在编辑（未提交）backend/daemon 源码时行号临时漂移，活文档锚点（architecture-4a.md / INTEGRATIONS.md 共 7 处）瞬时失效——任何会话此时推送都会被拦，即使它推的提交与漂移毫无关系（本次推的是纯 docs/qa 豁免提交）。失败数在两次运行间 5→7 波动，证实在途编辑是移动靶。
++- **影响**：多 agent 共享同一工作区是本仓常态（SillySpec 任务隔离设计），该门槛会把「别人的半成品」变成「所有人的推送锁」，直到在途会话落定并修锚。
++- **绕过（当下）**：等在途会话提交/修锚后再推；或由用户确认后 `--init-baseline`（不推荐，会把瞬时债固化）。**不应该**由旁观会话去修移动靶上的锚（会撞车且修完即过期），也不该 stash 他人在途文件。
++- **建议工具修复方向**（任一即可）：
++  1. gate/pre-push 只校验「被推送提交实际改动的文件所关联的文档引用」（push range diff 驱动），或
++  2. 校验基线取 `HEAD`（git show）而非工作区文件内容，或
++  3. gate 支持 `--against HEAD` 模式，pre-push 默认用之。
++- **关联**：ql-20260908-011/012（snapshot 豁免是文档侧减敏，本坑是门槛侧机制问题，两者互补）。
++
++## 巡检注记（2026-09-09 定时扫描）
++
++- 定性：**门禁语义设计变更**（三选一：push range diff 驱动 / 校验基线取 git show HEAD / `--against HEAD` 模式 + pre-push 默认）——涉及 docs-check 读文件层重构与 pre-push 行为契约，属专项变更而非巡检级小修，本轮不代位实现。
++- 关联减敏已落地：docs-fix-capability 变更（2026-09-08）的 snapshot/archive 豁免双通道减少了活文档锚点面；本坑是门槛侧机制问题的剩余半边。保持活跃待专项认领。
++
++## 处置记录（2026-09-12 定时收口，方案③落地，归档）
++
++- **已实现 `docs gate/check --against <ref>` 模式**（本坑建议③：gate 支持 --against HEAD，pre-push 默认用之）：`docs-check.js` 新增 HEAD 内容解析层——干净文件磁盘直读（与 HEAD 逐字节一致零开销）、脏文件（M/D/R）`git show` 取提交树内容、未跟踪视为不存在（文档静默跳过、源文件不作候选——皆「不随推送走」语义）；非 git 仓/子目录自动回退磁盘模式并附 warning。reader 经模块级 set/restore 激活，未激活时全部读取点字节等价（既有行为零变化）。
++- **接线**：sillyspec 仓 `.husky/pre-push` 的 gate 命令已加 `--against HEAD`（本仓即时生效——hook 走 bin/sillyspec.js 本地代码）；CLI 层 `--fix/--dry-run` 与 `--against` 互斥（fix 恒操作工作区）。
++- **本仓实测（2026-09-12，移动靶现场）**：工作区模式 31 失效拦截（并行在途编辑漂移中）vs `--against HEAD` **0 失效放行**——「推的是提交不是工作区」语义落地，别人的半成品不再变成所有人的推送锁。
++- **测试**：新增 `test/docs-check-against-head.test.mjs` 5 用例（源码漂移隔离/未跟踪文档跳过/未跟踪源文件不作候选/非 git 回退/干净树两模式一致）5/5 绿；docs-check 消费面回归 20/20（doc-ref-check 与 check-syntax 的失败为并行在途漂移/他人在途新文件，与本次改动无关——reader 未激活时字节等价）。
++- **遗留（部署节奏）**：其他仓的 `.git/hooks/pre-push`（调全局安装的 sillyspec，如本平台仓）须等 sillyspec npm 发版含本特性后再加 flag（旧版 CLI 未知 flag 会 exit 2 反而挡推送）——发版后逐仓更新一行。
+
+diff --git a/scripts/migrate-spec-junction.mjs b/scripts/migrate-spec-junction.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/migrate-spec-junction.mjs
+@@ -0,0 +1,152 @@
++#!/usr/bin/env node
++/**
++ * migrate-spec-junction.mjs — daemon 规范目录 junction 迁移官方脚本（三护栏）
++ *
++ * 来源坑：docs/sillyspec/platform-spec-junction-migration-split.md（2026-09-09 实证）：
++ * 迁移快照落后进行中写入 30 分钟 → 变更产物劈在两个目录；备份落在 specs/ 与
++ * spec-backups/ 两处且内容不一致，极易拿错。本脚本把三条改进建议机制化：
++ *   ① 先全量快照再切 junction（快照的是切换瞬间的真实活目录，不是历史副本）；
++ *   ② 切换前静默窗口检查（.runtime 最近 5 秒有写入 → 拒绝，提示稍后重试）；
++ *   ③ 备份位置唯一：~/.sillyhub/daemon/spec-backups/<wsId>-prejunction-<ts>/。
++ *
++ * 用法：
++ *   node scripts/migrate-spec-junction.mjs <workspaceId> <repoSillySpecAbsDir>          # dry-run 计划
++ *   node scripts/migrate-spec-junction.mjs <workspaceId> <repoSillySpecAbsDir> --apply  # 执行
++ *
++ * 行为：
++ *   1. 校验：workspaceId 形如 UUID；repo .sillyspec 目录存在；daemon specs/<wsId> 存在且
++ *      当前不是 junction（已 junction 则幂等退出）。
++ *   2. 静默检查：活目录 .runtime 下任意文件 mtime 距今 <5s → 拒绝执行（CLI/daemon 在写）。
++ *   3. 快照：活目录整树复制到 spec-backups/<wsId>-prejunction-<YYYYMMDD-HHMMSS>/。
++ *   4. 切换：specs/<wsId> 改名 <wsId>.switching-<ts>（临时持有，非备份）→ 在原位创建
++ *      junction 指向 repo .sillyspec（Windows junction / POSIX symlink 自动选择）。
++ *   5. 验证：经 junction 读写探针文件成功 → 删临时持有目录（备份已在唯一位置）；
++ *      失败 → 自动回滚（删 junction、持有目录改名回去），退出码 1。
++ *
++ * 注意：junction 目标（repo .sillyspec）若已有旧内容，与快照的新内容可能分裂——本脚本
++ * 不自动合并（风险大于收益），切换后请人工比对 spec-backups 快照与 repo 侧差异后搬运。
++ * 跨平台：Windows 用 junction type，POSIX 用 dir symlink。
++ */
++import { existsSync, statSync, readdirSync, renameSync, symlinkSync, rmSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
++import { join, basename, dirname } from 'node:path'
++import { homedir } from 'node:os'
++
++const args = process.argv.slice(2)
++const apply = args.includes('--apply')
++const positional = args.filter(a => !a.startsWith('--'))
++if (positional.length !== 2) {
++  console.error('用法: node scripts/migrate-spec-junction.mjs <workspaceId> <repoSillySpecAbsDir> [--apply]')
++  process.exit(2)
++}
++const [wsId, repoSpecDir] = positional
++const DAEMON_HOME = join(homedir(), '.sillyhub', 'daemon')
++const SPECS_DIR = join(DAEMON_HOME, 'specs')
++const BACKUPS_DIR = join(DAEMON_HOME, 'spec-backups')
++const liveDir = join(SPECS_DIR, wsId)
++
++// ── 1. 校验 ──
++if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wsId)) {
++  console.error(`❌ workspaceId 形态非 UUID: ${wsId}（非 UUID 目录名不得进 daemon specs/——心跳 UUID 守卫会 422）`)
++  process.exit(2)
++}
++if (!existsSync(repoSpecDir) || !statSync(repoSpecDir).isDirectory()) {
++  console.error(`❌ 目标目录不存在或非目录: ${repoSpecDir}`)
++  process.exit(2)
++}
++if (!existsSync(liveDir)) {
++  console.error(`❌ daemon specs 下无该工作区目录: ${liveDir}`)
++  process.exit(1)
++}
++const liveStat = statSync(liveDir) // lstat 语义：junction/symlink 检测
++if (liveStat.isSymbolicLink()) {
++  console.log(`ℹ️ ${liveDir} 已是 junction/symlink——幂等退出，无需迁移`)
++  process.exit(0)
++}
++
++// ── 2. 静默窗口检查（护栏②）──
++const QUIESCE_MS = 5_000
++function latestWriteMs(dir, root = true) {
++  let latest = 0
++  let names
++  try { names = readdirSync(dir) } catch { return latest }
++  for (const n of names) {
++    const p = join(dir, n)
++    let st
++    try { st = statSync(p) } catch { continue }
++    if (st.isDirectory()) latest = Math.max(latest, latestWriteMs(p, false))
++    else latest = Math.max(latest, st.mtimeMs)
++  }
++  return latest
++}
++const latest = latestWriteMs(join(liveDir, '.runtime'))
++const quietMs = Date.now() - latest
++if (apply && latest > 0 && quietMs < QUIESCE_MS) {
++  console.error(`❌ 静默检查未过：.runtime ${Math.round(quietMs / 1000)}s 前仍有写入（CLI/daemon 活跃）——等写入停止后重试`)
++  console.error(`   （坑 platform-spec-junction-migration-split 护栏②：迁移期写入 = 产物分裂）`)
++  process.exit(1)
++}
++
++// ── 计划输出 / dry-run ──
++const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15)
++const backupDir = join(BACKUPS_DIR, `${wsId}-prejunction-${ts}`)
++const holdDir = join(SPECS_DIR, `${wsId}.switching-${ts}`)
++console.log(`迁移计划（${apply ? ' APPLY' : 'DRY-RUN'}）：`)
++console.log(`  活目录     ${liveDir}`)
++console.log(`  junction → ${repoSpecDir}`)
++console.log(`  快照备份   ${backupDir}   （护栏①③：切换瞬间全量快照，位置唯一）`)
++console.log(`  临时持有   ${holdDir}   （验证通过后删除，不是备份）`)
++console.log(`  静默窗口   ${latest === 0 ? '（无 .runtime，视为静默）' : `最近写入 ${Math.round(quietMs / 1000)}s 前（阈值 ${QUIESCE_MS / 1000}s）`}`)
++if (!apply) {
++  console.log('\ndry-run 不落任何改动；确认后加 --apply 执行')
++  process.exit(0)
++}
++
++// ── 3. 全量快照（护栏①）──
++function copyTree(src, dst) {
++  mkdirSync(dst, { recursive: true })
++  for (const n of readdirSync(src)) {
++    const s = join(src, n), d = join(dst, n)
++    const st = statSync(s)
++    if (st.isDirectory()) copyTree(s, d)
++    else copyFileSync(s, d)
++  }
++}
++try {
++  copyTree(liveDir, backupDir)
++  console.log(`✅ 快照完成（唯一备份位置）: ${backupDir}`)
++} catch (e) {
++  console.error(`❌ 快照失败，中止（未做任何切换）: ${e.message}`)
++  process.exit(1)
++}
++
++// ── 4. 切换 ──
++try {
++  renameSync(liveDir, holdDir)
++  try {
++    symlinkSync(repoSpecDir, liveDir, 'junction')
++  } catch {
++    symlinkSync(repoSpecDir, liveDir, 'dir') // POSIX
++  }
++} catch (e) {
++  // 回滚：持有目录改名回去
++  try { if (existsSync(holdDir) && !existsSync(liveDir)) renameSync(holdDir, liveDir) } catch {}
++  console.error(`❌ junction 创建失败，已回滚: ${e.message}`)
++  process.exit(1)
++}
++
++// ── 5. 验证 + 收尾 ──
++const probe = join(liveDir, '.runtime', '.junction-probe-' + ts)
++try {
++  mkdirSync(join(liveDir, '.runtime'), { recursive: true })
++  writeFileSync(probe, 'junction-verify\n')
++  if (readFileSync(probe, 'utf8') !== 'junction-verify\n') throw new Error('读回不一致')
++  unlinkSync(probe)
++  rmSync(holdDir, { recursive: true, force: true })
++  console.log(`✅ junction 验证通过（读写探针），临时持有目录已清理`)
++  console.log(`ℹ️ 后续：比对快照 ${backupDir} 与 repo 侧内容——快照里更新的人工搬运进 repo（本脚本不自动合并）`)
++} catch (e) {
++  // 验证失败回滚：删 junction，持有目录还原
++  try { rmSync(liveDir, { recursive: true, force: true }); renameSync(holdDir, liveDir) } catch {}
++  console.error(`❌ junction 验证失败，已回滚（活目录还原，快照保留在 ${backupDir}）: ${e.message}`)
++  process.exit(1)
++}
