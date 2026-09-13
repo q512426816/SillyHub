@@ -17,8 +17,8 @@
 //      字面量（表驱动覆盖的静态代理判据，R-05 保守规则：词表全出现才过，
 //      规则写在本注释可演进；claude/cursor 的 smokeSuite 无写盘器语义不校验）。
 //   ④ caps 一致：caps.provider_switch 与 adapter.switchable 逐引擎同值
-//      （caps 10 键集合联动已由 tests/interactive/provider-registry.test.ts
-//      tenKeys canary 覆盖，不重复）。
+//      （caps 11 键集合联动已由 tests/interactive/provider-registry.test.ts
+//      elevenKeys canary 覆盖，不重复）。
 //   ⑤ 生成脚本幂等：gen-provider-caps.mjs 两连跑，第二遍前后双产物
 //      （frontend provider-caps.ts + backend provider_caps.py）逐字节不变。
 //
@@ -56,7 +56,7 @@ const BACKEND_SCHEMA_PATH = join(
 /**
  * api_format 词表（词表常量在测试内声明，注释锚 backend/app/modules/
  * llm_provider/schema.py:33 `api_format: Literal["anthropic", "openai_chat"]`
- * ——同 provider-registry.test.ts nineKeys→tenKeys canary 先例：词表加值时
+ * ——同 provider-registry.test.ts tenKeys→elevenKeys canary 先例：词表加值时
  * 此处与 pi/codex-settings 表驱动用例组同步，③ 的静态扫描随字面量收紧）。
  */
 const API_FORMAT_VOCAB: readonly string[] = ['anthropic', 'openai_chat'];
@@ -214,8 +214,8 @@ describe('task-06 守护③ smokeSuite 词表扫描（writer 的冒烟文件含 
 
 describe('task-06 守护④ caps 一致（provider_switch 单源）', () => {
   it('caps.provider_switch 与 adapter.switchable 逐引擎同值', () => {
-    // caps 10 键集合 / 键序联动已由 tests/interactive/provider-registry.test.ts
-    // 用例 4（tenKeys canary + 同引用断言）覆盖，此处不重复，只锁单源一致。
+    // caps 11 键集合 / 键序联动已由 tests/interactive/provider-registry.test.ts
+    // 用例 4（elevenKeys canary + 同引用断言）覆盖，此处不重复，只锁单源一致。
     for (const [key, adapter] of Object.entries(INTERACTIVE_PROVIDERS)) {
       expect(
         adapter.caps.provider_switch,

@@ -37,7 +37,8 @@
 //   usage camelCase → 短名映射（spike 设计影响 #1）：
 //     inputTokens→input_tokens / outputTokens→output_tokens /
 //     cacheReadTokens→cache_read_tokens / cacheWriteTokens→cache_creation_tokens。
-//     非 number 字段不设值（不伪造 0）；cursor 侧无 ctx 维度，ctx_tokens 缺省。
+//     非 number 字段不设值（不伪造 0）；ctx_tokens = inputTokens + cacheReadTokens
+//     + cacheWriteTokens 净值三和（fixture 跨轮连续性验证）。
 //
 // ── 行为约定 ──────────────────────────────────────────────────────────────
 //   - 每条产出事件过 safeParseAgentEvent（agent-event-schema.ts）：校验失败
@@ -52,6 +53,7 @@
 
 import { safeParseAgentEvent } from '../agent-event-schema.js';
 import type { AgentEvent, AgentEventUsage } from '../types.js';
+import { ctxTokensFromNetInput } from './usage-ctx.js';
 
 /**
  * 可选跨帧上下文（driver 持有，per-session 注入）。
@@ -311,6 +313,10 @@ function handleResult(frame: Record<string, unknown>): AgentEvent[] {
  *   cacheReadTokens→cache_read_tokens / cacheWriteTokens→cache_creation_tokens。
  * 非 number（含 NaN/Infinity）字段不设值不伪造 0；全无效时返回 undefined
  * （不挂空 usage 对象）。
+ * ctx_tokens = input + cacheRead + cacheWrite 净值三和（ctxTokensFromNetInput
+ * 共享 helper，复用已过校验的短名值）：任一有效分量存在即派生（缺失按 0 计）、
+ * 三分量全缺 → 不携带 ctx_tokens 键（与 pi numOr0 恒派生口径相反，设计两口径
+ * 并列成立）。output_tokens 不进 ctx（ctx 为输入侧三分量和）。
  */
 function mapUsage(raw: Record<string, unknown>): AgentEventUsage | undefined {
   const usage: AgentEventUsage = {};
@@ -328,6 +334,14 @@ function mapUsage(raw: Record<string, unknown>): AgentEventUsage | undefined {
       any = true;
     }
   }
+  // ctx 派生只消费已校验短名值（不读原始 raw 字段绕过校验）：全缺 → undefined
+  // 不携带（非伪造 0 守卫口径不变）。
+  const ctx = ctxTokensFromNetInput(
+    usage.input_tokens,
+    usage.cache_read_tokens,
+    usage.cache_creation_tokens,
+  );
+  if (ctx !== undefined) usage.ctx_tokens = ctx;
   return any ? usage : undefined;
 }
 

@@ -16,7 +16,7 @@
 // 字符串 'native'/'marker'/'none'）。
 //
 // 响亮失败守卫（R-02）：解析结果必须恰含四引擎（claude/codex/pi/cursor）且
-// 每键恰 10 个 caps 键；任一不符即 stderr 打印差异明细并 exit 1，**不写任何
+// 每键恰 11 个 caps 键；任一不符即 stderr 打印差异明细并 exit 1，**不写任何
 // 产物**（值形态写错——如裸 true 误写成字符串——同样以「缺少 caps 键」暴露）。
 //
 // 幂等：固定引擎序/键序/缩进/引号风格，重跑输出逐字节一致（frontend
@@ -67,6 +67,7 @@ const CAPS_KEYS = [
   "edit_patch",
   "model_select",
   "provider_switch",
+  "ctx_usage",
 ];
 
 // ── 解析（backend 对齐测试 _extract_ts_const_object_body / _TS_BOOL_PAIR_RE
@@ -136,7 +137,7 @@ function parseCapsTable(body) {
   return table;
 }
 
-// ── 响亮失败守卫（R-02）：恰四引擎 × 每键恰 10 caps 键 ────────────────────────
+// ── 响亮失败守卫（R-02）：恰四引擎 × 每键恰 11 caps 键 ────────────────────────
 
 function guardTable(table) {
   const errors = [];
@@ -204,18 +205,18 @@ function renderFrontend(table) {
  *
  * 镜像约定（三端同步，单源 = daemon 侧，2026-09-11-provider-adapter-registry
  * task-04 起手抄镜像退役）：daemon 单源改取值后重跑生成脚本，本文件与 backend
- * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（10 键：
- * 9 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
+ * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（11 键：
+ * 10 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
  * backend/app/modules/agent/tests/test_provider_caps_alignment.py 以源文件
  * 读取方式守护（任一端漂移即测试失败）。
  *
- * 取值语义：caps 描述 provider 当前真实能力，9 个 boolean 键缺省 false 默认
+ * 取值语义：caps 描述 provider 当前真实能力，10 个 boolean 键缺省 false 默认
  * 拒绝（FR-06 / D-002@v1）；dialog 为 string 枚举键（'native' = 走平台
  * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；未知 provider
  * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
  */
 
-/** provider 能力矩阵（10 键：9 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（11 键：10 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -243,6 +244,13 @@ export interface ProviderCaps {
   model_select: boolean;
   /** 会话级供应商切换支持（第 10 键，与 daemon 单源 adapter.switchable 同源）。 */
   provider_switch: boolean;
+  /**
+   * 上下文窗口用量上报（第 11 键，2026-09-13-ctx-usage-all-providers task-06 /
+   * FR-04）：interactive 会话是否上报上下文窗口用量分子 ctx_tokens（用量环
+   * 分子，最近一次模型调用的提示词大小）；取值依据锚点见 daemon 单源
+   * PROVIDER_CAPS docblock（四引擎全 true，未知 provider 回退 false）。
+   */
+  ctx_usage: boolean;
 }
 
 /**
@@ -276,6 +284,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     edit_patch: false,
     model_select: false,
     provider_switch: false,
+    ctx_usage: false,
   };
 }
 
@@ -319,7 +328,7 @@ task-04 起手抄镜像退役）：
   \`\`PROVIDER_CAPS\`\`（含取值依据的文件:行号锚点注释，改值先改那里）；
 - 本文件与 \`\`frontend/src/lib/provider-caps.ts\`\` 均为脚本生成产物，daemon
   单源改值后重跑 \`\`sillyhub-daemon/scripts/gen-provider-caps.mjs\`\` 三端一并
-  刷新，三端键集合（10 键：9 个 boolean + dialog string 枚举）与每个
+  刷新，三端键集合（11 键：10 个 boolean + dialog string 枚举）与每个
   provider 每键取值必须一致；
 - 一致性由 \`\`app/modules/agent/tests/test_provider_caps_alignment.py\`\` 以
   源文件读取方式守护（直接读 daemon / frontend 表源比对，不复制值断言），
@@ -336,7 +345,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
 ${engineBlocks}
 }
 
-# 键序取自镜像表首条目（claude）；10 键齐全与三端一致性由守护测试保证。
+# 键序取自镜像表首条目（claude）；11 键齐全与三端一致性由守护测试保证。
 _CAPS_KEYS: tuple[str, ...] = tuple(next(iter(PROVIDER_CAPS.values())))
 
 
@@ -349,7 +358,7 @@ def get_provider_caps(provider: str) -> dict[str, bool | str]:
     Returns:
         dict[str, bool | str]: 已知 provider 返回表内条目的**副本**（调用方可安全
         修改，不污染模块级共享表）；未知 provider 返回默认拒绝新 dict（boolean
-        键全 False、dialog string 枚举取 \`\`"none"\`\`，10 键齐全，FR-06），不抛错。
+        键全 False、dialog string 枚举取 \`\`"none"\`\`，11 键齐全，FR-06），不抛错。
     """
     caps = PROVIDER_CAPS.get(provider)
     if caps is not None:

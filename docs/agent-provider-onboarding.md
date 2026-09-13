@@ -43,15 +43,16 @@ created_at: 2026-09-04 03:04:41
 └─────────────────────────────────────────────────────────────────────────────┘
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  ③ 能力矩阵 ProviderCaps（8 键全 boolean，缺省 false 默认拒绝）              │
+│  ③ 能力矩阵 ProviderCaps（11 键：10 boolean + dialog 枚举，缺省默认拒绝）    │
 │                                                                             │
 │    单源：sillyhub-daemon/src/interactive/providers.ts       PROVIDER_CAPS   │
-│    镜像：backend/app/modules/agent/provider_caps.py         PROVIDER_CAPS   │
-│    镜像：frontend/src/lib/provider-caps.ts                  PROVIDER_CAPS   │
+│    镜：backend provider_caps.py + frontend provider-caps.ts                 │
+│        （@generated，由 gen-provider-caps.mjs 生成，勿手写）                │
 │    守护：backend/app/modules/agent/tests/                                   │
 │          test_provider_caps_alignment.py（源文件读取断言）                   │
-│    8 键：resume / mcp / multimodal / thinking / subagent /                  │
-│          permission_dialog / edit_patch / model_select                      │
+│    11 键：resume / mcp / multimodal / thinking / subagent /                 │
+│          permission_dialog / dialog / edit_patch / model_select /           │
+│          provider_switch / ctx_usage                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -202,9 +203,11 @@ stream-json SDK 帧集；codex 族 = app-server JSON-RPC 方法集）。若帧�
    ```
 
 2. [ ] **caps 单源**：`sillyhub-daemon/src/interactive/providers.ts`
-   `PROVIDER_CAPS` 加 `xxx` 条目（8 键全 boolean，逐键给取值依据的
-   文件:行号锚点注释——照抄上方 claude/codex 注释块格式）。
+   `PROVIDER_CAPS` 加 `xxx` 条目（11 键：10 boolean + dialog 枚举，逐键给
+   取值依据的文件:行号锚点注释——照抄上方 claude/codex 注释块格式）。
    取值原则：**只描述已验证的真实能力，未验证一律 false**（见 §6）。
+   `ctx_usage` 取值：归一化器已按上方两种口径派生 ctx_tokens 才 true，
+   未派生如实 false（前端环对 false 引擎不渲染）。
 
 3. [ ] **注册表**：同文件 `INTERACTIVE_PROVIDERS` 加条目：
 
@@ -235,11 +238,13 @@ stream-json SDK 帧集；codex 族 = app-server JSON-RPC 方法集）。若帧�
    `family === PROVIDER_TO_PROTOCOL[provider]`（interactive 与批量两层共享
    同一 provider→protocol 映射），新 provider 不进批量反查表则测试失败。
 
-6. [ ] **backend 镜像**：`backend/app/modules/agent/provider_caps.py`
-   `PROVIDER_CAPS` 加 `xxx` 字典（8 键取值与 daemon 单源逐键一致）。
-
-7. [ ] **frontend 镜像**：`frontend/src/lib/provider-caps.ts` `PROVIDER_CAPS`
-   加 `xxx` 对象（同上逐键一致）。
+6. [ ] **backend + frontend 镜像（@generated，勿手写）**：改完 daemon 单源后
+   跑 `node sillyhub-daemon/scripts/gen-provider-caps.mjs` 一键刷新
+   `backend/app/modules/agent/provider_caps.py` 与
+   `frontend/src/lib/provider-caps.ts`（键集/回退/文案由脚本从单源生成；
+   解析器只认裸 boolean 与 `'native'/'marker'/'none'` 字符串——未来数值型
+   能力键需先扩脚本 PAIR_RE，R-04 注记）。同步脚本常量 `CAPS_KEYS` 与
+   `ENGINES`（新引擎/新键不同步即 exit 1 零写盘，响亮失败）。
 
 8. [ ] **测试同步**：
    - `sillyhub-daemon/tests/interactive/provider-registry.test.ts`：用例 1
@@ -342,6 +347,16 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
    - usage 五字段短名：`input_tokens / output_tokens / cache_read_tokens /
      cache_creation_tokens / ctx_tokens`（D-005@v1 含 ctx_tokens），任意型
      事件可携带（D-003@v1 实时语义）。
+   - `ctx_tokens`（上下文窗口用量分子）派生口径二选一，共享 helper 单源
+     （2026-09-13-ctx-usage-all-providers，`src/interactive/usage-ctx.ts`）：
+     - **净值三和**（input 为不含缓存的净输入：claude / pi / cursor）：
+       `ctx_tokens = input + cache_read + cache_creation`
+       （`ctxTokensFromNetInput`）；
+     - **毛值直取**（input 已含 cache 分量：codex
+       `tokenUsage.last.inputTokens`）：`ctx_tokens = 毛值 input` 直取
+       不再加分量（`ctxTokensFromGrossInput`，重复加 cache 会双计）。
+     - 三分量（或毛值）全缺 → **不携带该键**（不伪造 0，消费侧缺键即
+       未知态）；caps 声明见 `ProviderCaps.ctx_usage`（§6）。
 
 3. [ ] **driver**：新建 `sillyhub-daemon/src/interactive/<name>-driver.ts`，
    `implements InteractiveDriver`（契约全集见
@@ -363,8 +378,8 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
      `pathToAgentExecutable`，均经 `CreateSessionInput`
      `interactive/types.ts` 传入，值来自 daemon `_agentPaths`）。
 
-4. [ ] **caps 单源**：`providers.ts` `PROVIDER_CAPS` 加条目（8 键 + 取值
-   依据锚点注释，未验证能力一律 false——见 §6）。
+4. [ ] **caps 单源**：`providers.ts` `PROVIDER_CAPS` 加条目（11 键 + 取值
+   依据锚点注释，未验证能力一律 false——见 §6；ctx_usage 见 §2 派生口径）。
 
 5. [ ] **注册表**：同文件 `INTERACTIVE_PROVIDERS` 加条目
    （`provider/family/displayName/createDriver/caps: capsOf(<name>)`；
@@ -565,24 +580,25 @@ caps.subagent 维持 false。扩展的 ExtensionAPI 面与 pi 版本强耦合，
 
 ### 6.1 改值流程（单源 → 两镜像 → EXPECTED_PROVIDERS → 守护测试）
 
-`ProviderCaps` 8 键：`resume / mcp / multimodal / thinking / subagent /
-permission_dialog / edit_patch / model_select`（全 boolean）。
+`ProviderCaps` 11 键：`resume / mcp / multimodal / thinking / subagent /
+permission_dialog / dialog / edit_patch / model_select / provider_switch /
+ctx_usage`（10 boolean + dialog string 枚举）。
 
 1. [ ] 改 **daemon 单源** `sillyhub-daemon/src/interactive/providers.ts`
    `PROVIDER_CAPS.<provider>.<key>` 取值，**同 commit 更新该条目上方
    docblock 的取值依据锚点**（文件:行号——现有 claude/codex 注释块即模板；
    锚点过期是文档债）；
-2. [ ] 同步 **backend 镜像** `backend/app/modules/agent/provider_caps.py`
-   `PROVIDER_CAPS`；
-3. [ ] 同步 **frontend 镜像** `frontend/src/lib/provider-caps.ts` `PROVIDER_CAPS`；
+2. [ ] 跑 `node sillyhub-daemon/scripts/gen-provider-caps.mjs` 刷新两份
+   @generated 镜像（backend `provider_caps.py` / frontend
+   `provider-caps.ts`，勿手写）；
 4. [ ] **同 commit** 更新守护测试硬编码集合
    `backend/app/modules/agent/tests/test_provider_caps_alignment.py`
    `EXPECTED_PROVIDERS`（D-004@v1——新 provider 不是自动覆盖；漏改则
    provider 集断言失败）；
 5. [ ] 跑对齐守护测试：
    `pytest backend/app/modules/agent/tests/test_provider_caps_alignment.py`
-   （4 用例：三端键集一致且为 8 契约键 / provider 集一致 / 逐 provider 逐键
-   取值相等 / 未知 provider 返回全 false 且 8 键齐全）。
+   （4 用例：三端键集一致且为 11 契约键 / provider 集一致 / 逐 provider 逐键
+   取值相等 / 未知 provider 返回全 false 且 11 键齐全）。
 
 三端查询函数语义一致：daemon `getProviderCaps()` / backend
 `get_provider_caps()` / frontend `getProviderCaps()`——已知 provider 返回

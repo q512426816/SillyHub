@@ -2716,12 +2716,15 @@ export function SessionPanelPage({
               // D-002@v1：模型暂存专用回调（onProvisionalSwitch 二分收值会误写档案）。
               onProvisionalModelSwitch={setPreModelId}
               // ql-20260909-006：ctx 用量（未知态圆环+额度胶囊）同样收进行尾插槽。
+              // 2026-09-13-ctx-usage-all-providers task-07（FR-06）：传引擎名走
+              // caps 门控（与 :2700 engine prop 同源 preEngine）。
               trailing={
                 <CtxUsageBar
                   usedTokens={null}
                   roleMapping={null}
                   fallbackModel={null}
                   providerId={preProviderId || null}
+                  provider={preEngine}
                 />
               }
             />
@@ -3507,7 +3510,8 @@ export function SessionPanelPage({
             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
             providerOpenSignal={configProviderSignal}
             // ql-20260909-006：ctx 用量圆环+额度胶囊收进配置条行尾插槽（原输入框
-            // 上方独占行——孤零零一整行很突兀）。
+            // 上方独占行——孤零零一整行很突兀）。2026-09-13-ctx-usage-all-providers
+            // task-07（FR-06）：传引擎名走 caps 门控（与上方 engine prop 同式）。
             trailing={
               <CtxUsageBar
                 usedTokens={usedTokens}
@@ -3516,6 +3520,7 @@ export function SessionPanelPage({
                 windowOverride={session?.ctx_window_tokens ?? null}
                 onWindowOverrideChange={handleCtxWindowOverrideChange}
                 providerId={session.llm_provider_id ?? null}
+                provider={session.provider ?? null}
               />
             }
             onSwitched={() => {

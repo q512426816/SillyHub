@@ -142,6 +142,7 @@ describe('normalizeCursorFrame / turn1-fresh（基础轮逐型映射）', () => 
       output_tokens: 78,
       cache_read_tokens: 8704,
       cache_creation_tokens: 0,
+      ctx_tokens: 15282, // 净值三和 6578+8704+0（ctxTokensFromNetInput）
     });
     expect(ev.metadata).toMatchObject({
       is_error: false,
@@ -190,6 +191,9 @@ describe('normalizeCursorFrame / turn2-resume（resume 记忆连续轮）', () =
       output_tokens: 33,
       cache_read_tokens: 15232,
       cache_creation_tokens: 0,
+      // ctx = 186+15232 = 15418——与 turn1 的 15282 跨轮连续（15282 + 轮间增量
+      // ≈ 吻合），净值三和口径的 fixture 实证
+      ctx_tokens: 15418,
     });
   });
 
@@ -240,6 +244,7 @@ describe('normalizeCursorFrame / create-chat-probe（create-chat 兜底 ID 轮�
       output_tokens: 90,
       cache_read_tokens: 8704,
       cache_creation_tokens: 0,
+      ctx_tokens: 15270, // 净值三和 6566+8704+0
     });
   });
 });
@@ -314,6 +319,7 @@ describe('normalizeCursorFrame / tool-use-probe（shellToolCall 工具对 + 传�
       output_tokens: 79,
       cache_read_tokens: 9216,
       cache_creation_tokens: 0,
+      ctx_tokens: 30645, // 净值三和 21429+9216+0
     });
   });
 });
@@ -373,6 +379,7 @@ describe('normalizeCursorFrame / probe-trust-only（editToolCall 写文件工具
       output_tokens: 117,
       cache_read_tokens: 16896,
       cache_creation_tokens: 0,
+      ctx_tokens: 31180, // 净值三和 14284+16896+0
     });
   });
 });

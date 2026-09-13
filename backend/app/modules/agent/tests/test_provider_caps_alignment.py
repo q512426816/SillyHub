@@ -36,7 +36,9 @@ _FRONTEND_TABLE_PATH = _REPO_ROOT / "frontend" / "src" / "lib" / "provider-caps.
 # 契约键（design §5.2 ProviderCaps 8 个 boolean 键 + 2026-09-09-askuser-pi-cursor
 # task-12（FR-06）新增 dialog string 枚举键 + 2026-09-11-provider-adapter-registry
 # task-04 新增 provider_switch boolean 键（FR-04 会话级供应商切换，三端生成产物
-# 由 sillyhub-daemon/scripts/gen-provider-caps.mjs 产出）= 10 键。
+# 由 sillyhub-daemon/scripts/gen-provider-caps.mjs 产出）+ 2026-09-13-ctx-usage-
+# all-providers task-06 新增 ctx_usage boolean 键（FR-04 上下文窗口用量上报，
+# 四引擎全 true）= 11 键。
 EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
     {
         "resume",
@@ -49,6 +51,7 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
         "edit_patch",
         "model_select",
         "provider_switch",
+        "ctx_usage",
     }
 )
 
@@ -60,7 +63,7 @@ EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi
 # TS 表源解析：provider 条目块（`claude: { ... }`）与块内键值对。
 # 值形态两代（R-09：解析器扩展与 caps 键同任务交付，防止 string 枚举键被
 # 静默丢弃后键集合断言哑绿）：
-# - 8 个 boolean 键：true / false 裸字面量；
+# - 10 个 boolean 键：true / false 裸字面量；
 # - dialog string 枚举键（task-12 / FR-06）：带引号 'native' / 'marker' / 'none'。
 _TS_PROVIDER_BLOCK_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\{([^{}]*)\}")
 _TS_BOOL_PAIR_RE = re.compile(
@@ -139,13 +142,13 @@ def _all_ends() -> dict[str, dict[str, dict[str, bool | str]]]:
     }
 
 
-def test_caps_key_sets_identical_and_are_the_9_contract_keys() -> None:
-    """①三端每个 provider 条目的键集合一致，且恰为契约 9 键（多键少键都失败）。
+def test_caps_key_sets_identical_and_are_the_11_contract_keys() -> None:
+    """①三端每个 provider 条目的键集合一致，且恰为契约 11 键（多键少键都失败）。
 
-    9 键 = 8 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
+    11 键 = 10 个 boolean 键 + dialog string 枚举键（task-12 / FR-06）——任一端
     漏加 dialog 键即在此失败（R-09：解析器已扩 string 值支持，不会静默丢弃）。
     """
-    assert len(EXPECTED_CAPS_KEYS) == 10
+    assert len(EXPECTED_CAPS_KEYS) == 11
     for end_name, table in _all_ends().items():
         for provider, caps in table.items():
             assert set(caps) == EXPECTED_CAPS_KEYS, (
@@ -185,14 +188,14 @@ def test_cap_values_identical_per_provider_per_key() -> None:
                 )
 
 
-def test_unknown_provider_returns_default_deny_with_9_keys() -> None:
-    """④未知 provider 查询：不抛错 + 9 键齐全 + 默认拒绝（FR-06 / R-09）。
+def test_unknown_provider_returns_default_deny_with_11_keys() -> None:
+    """④未知 provider 查询：不抛错 + 11 键齐全 + 默认拒绝（FR-06 / R-09）。
 
-    默认拒绝形态：8 个 boolean 键全 False + dialog string 枚举回退 'none'。
+    默认拒绝形态：10 个 boolean 键全 False + dialog string 枚举回退 'none'。
     """
     caps = get_provider_caps("__definitely_unknown_provider__")
     assert set(caps) == EXPECTED_CAPS_KEYS
-    assert len(caps) == 10
+    assert len(caps) == 11
     assert caps["dialog"] == "none"
     assert all(value is False for key, value in caps.items() if key != "dialog")
     # 返回新 dict：调用方修改不污染模块级镜像表。

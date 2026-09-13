@@ -27,6 +27,7 @@ import {
   type LlmProviderQuotaData,
   type LlmProviderRoleMapping,
 } from "@/lib/api/llm-providers";
+import { getProviderCaps } from "@/lib/provider-caps";
 import { formatTokenCount } from "@/lib/format-token";
 
 // ── 分母解析链（D-014@v1 / spike-01 + ql-20260831-002 覆盖层）──────────────
@@ -418,15 +419,27 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
 export interface CtxUsageBarProps extends CtxUsageRingProps {
   /** 传给 QuotaPill 的当前供应商 id（null=本机默认，胶囊不渲染）。 */
   providerId?: string | null;
+  /**
+   * 会话引擎名（INTERACTIVE_PROVIDERS 键）；caps.ctx_usage=false 不渲染环
+   * （2026-09-13-ctx-usage-all-providers task-07 / FR-06：防未来不支持引擎
+   * 永远「—」误导）。null/未传照常渲染（本机默认供应商等场景旁路门控）。
+   */
+  provider?: string | null;
 }
 
 export function CtxUsageBar({
   providerId,
+  provider,
   ...ringProps
 }: CtxUsageBarProps) {
+  // FR-06 caps 门控：provider 明确且 getProviderCaps(provider).ctx_usage=false
+  // （未知引擎名命中回退 false）→ 只渲染 QuotaPill 不渲染 CtxUsageRing；
+  // null/未传旁路门控照常渲染环（不因门控丢现有功能，环仍有未知态「—」兜底）。
+  // providerId 语义与 QuotaPill 行为不动（额度查询照旧）。
+  const ctxSupported = provider == null || getProviderCaps(provider).ctx_usage;
   return (
     <div className="flex items-center gap-2.5">
-      <CtxUsageRing {...ringProps} />
+      {ctxSupported ? <CtxUsageRing {...ringProps} /> : null}
       <QuotaPill providerId={providerId} />
     </div>
   );

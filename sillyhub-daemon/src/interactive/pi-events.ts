@@ -31,7 +31,7 @@
 //   | tool_execution_end | tool_result（call_id 配对；无 edit_patch——pi edit 结果为 diff 文本无结构化 patch，design §3 非目标） | design §5.2 第 4 条；批量 pi-json.ts:304-321 口径 |
 //   | error（顶层）/ extension_error / message_update+ame.error | error | design §5.2 第 5 条；ame.error 覆盖流层中止（reason=aborted|error，pi-ai types.d.ts:386-389） |
 //   | turn_end.message.stopReason==='error' | error（errorMessage 载体） | pi 0.81.1 实跑证实（fixture real-error-turn.jsonl）：流层无独立 error 事件时，失败仅经 turn_end 浮出，不映射则错误对下游不可见 |
-//   | turn_end.message.usage | usage（text 空事件承载，见 buildUsageEvent） | design §5.2 第 6 条；cacheRead→cache_read / cacheWrite→cache_creation（批量 pi-json.ts:341-344 已验证口径） |
+//   | turn_end.message.usage | usage（text 空事件承载，见 buildUsageEvent） | design §5.2 第 6 条；cacheRead→cache_read / cacheWrite→cache_creation（批量 pi-json.ts:341-344 已验证口径）；ctx_tokens = input + cacheRead + cacheWrite 净值三和（ctxTokensFromNetInput 共享 helper） |
 //   | agent_settled | []（driver 收敛信号，不经归一化器） | 任务卡明示；design §5.1 B-05 |
 //   | 其余已知生命周期型（session/agent_start/agent_end/turn_start/message_start/tool_execution_update/queue_update/compaction_*/auto_retry_*/summarization_retry_*/entry_appended/session_info_changed/thinking_level_changed） | [] | 批量 pi-json.ts:234-240 同决策（纯生命周期无 IR）；session 为打印模式首帧，rpc 不发，防御容忍 |
 //   | 未知事件 | status + subtype='task_notification' 降级桶（content=原 type；metadata.original_event_type + 原字段全量保留） | design §5.2 第 7 条 fail-safe；subtype 取值与 codex driver 降级桶一致（codex-app-server-driver.ts:513-520：schema 强制 status 必带闭合枚举 subtype，task_notification 走瞬时通道不污染持久化） |
@@ -58,6 +58,7 @@
 // 测试逐条断言）。
 
 import type { AgentEvent, AgentEventUsage } from '../types.js';
+import { ctxTokensFromNetInput } from './usage-ctx.js';
 
 /** pi 下行事件的顶层 `type` 已知集合（词表真源见文件头）。 */
 const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
@@ -513,15 +514,22 @@ export class PiEventNormalizer {
    *
    * 字段映射（批量 pi-json.ts:341-344 已验证口径，设计 §5.2）：
    *   input→input_tokens；output→output_tokens；
-   *   cacheRead→cache_read_tokens；cacheWrite→cache_creation_tokens（= creation）。
+   *   cacheRead→cache_read_tokens；cacheWrite→cache_creation_tokens（= creation）；
+   *   ctx_tokens = input + cacheRead + cacheWrite 净值三和（ctxTokensFromNetInput
+   *   共享 helper）——numOr0 恒返回 number → pi 恒派生（全零轮如实携带 0，
+   *   Grill D-1 有意口径，勿加全零省略分支）。
    *   totalTokens/cost/reasoning 不映射（契约无对应字段）。
    */
   private buildUsageEvent(usage: Record<string, unknown>): AgentEvent {
+    const inputTokens = numOr0(usage.input);
+    const cacheReadTokens = numOr0(usage.cacheRead);
+    const cacheWriteTokens = numOr0(usage.cacheWrite);
     const mapped: AgentEventUsage = {
-      input_tokens: numOr0(usage.input),
+      input_tokens: inputTokens,
       output_tokens: numOr0(usage.output),
-      cache_read_tokens: numOr0(usage.cacheRead),
-      cache_creation_tokens: numOr0(usage.cacheWrite),
+      cache_read_tokens: cacheReadTokens,
+      cache_creation_tokens: cacheWriteTokens,
+      ctx_tokens: ctxTokensFromNetInput(inputTokens, cacheReadTokens, cacheWriteTokens),
     };
     return {
       type: 'text',

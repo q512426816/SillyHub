@@ -70,6 +70,7 @@ import type {
   UserTurnInput,
 } from './driver.js';
 import { setModelUsageSnapshot, type DriverModelUsage } from './driver.js';
+import { ctxTokensFromGrossInput } from './usage-ctx.js';
 
 /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 task-runner.ts KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
@@ -468,6 +469,13 @@ export interface CodexHandle extends InteractiveDriverHandle {
    * text 事件计数启发式）；轮 start 快照基线时清零。
    */
   turnApiCallCount: number;
+  /**
+   * 2026-09-13-ctx-usage-all-providers task-04（FR-03）：最近一次 API 调用 ctx——
+   * tokenUsage.last.inputTokens 毛值直取（ctxTokensFromGrossInput：毛值已含
+   * cached/cacheWrite，直取不加分量）。undefined = last 缺失/非法不携带
+   * （不伪造 0，codex ctx 保持未知态，设计兼容策略）。
+   */
+  lastCallCtxTokens?: number;
   /** 释放底层资源（关 stdin + kill child）。幂等。 */
   close(): Promise<void>;
 }
@@ -515,7 +523,8 @@ export type CodexAgentEventMessage = { [K in keyof AgentEvent]: AgentEvent[K] } 
 };
 
 /**
- * 从 metadata.usage 尽力提取 token 用量（AgentEventUsage 四字段短名）。
+ * 从 metadata.usage 尽力提取 token 用量（AgentEventUsage 四字段短名 + ctx_tokens
+ * 透传）。
  *
  * 实读依据（不主动猜测字段名，对齐本文件 _outcomeFromComplete 既有守卫语义）：
  *   - metadata.usage 的来源字段名已由 adapter 归一：turn/completed 的
@@ -538,6 +547,10 @@ function extractEventUsage(raw: unknown): AgentEventUsage | undefined {
   if (typeof u.cache_creation_tokens === 'number') {
     out.cache_creation_tokens = u.cache_creation_tokens;
   }
+  // 2026-09-13-ctx-usage-all-providers task-04（FR-03）：ctx 维同守卫透传——
+  // usage_update 事件一等 usage 携带 last 毛值直取的 ctx_tokens（delta 附加后
+  // 经 toAgentEvent 提升；非 number 不设置，不伪造 0）。
+  if (typeof u.ctx_tokens === 'number') out.ctx_tokens = u.ctx_tokens;
   // 四字段全缺/全非法 → 不带 usage（比「全 undefined 的空壳对象」更干净，
   // 下游 isPresent 判定与既有 undefined 语义一致）
   return Object.keys(out).length > 0 ? out : undefined;
@@ -788,6 +801,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
       threadModel: null,
       modelUsageSnapshot: null,
       turnApiCallCount: 0,
+      // 2026-09-13-ctx-usage-all-providers task-04：最近一次调用 ctx（见字段注释）。
+      lastCallCtxTokens: undefined,
       close: (): Promise<void> => this._close(handle),
       // 扩展槽（非 CodexHandle 公共字段，consume 内部用）
       ...({ _ctx: ctx } as object),
@@ -1403,6 +1418,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
    * h.threadUsageTotal；turn 在途时向 onMessage 发「本轮累计差值」usage_update
    * 事件（text + content='' 载体，session-manager _liftSessionUsage 按 replace
    * 语义消费单调递增轮累计，口径与 pi turn_end 快照一致）。
+   *
+   * 2026-09-13-ctx-usage-all-providers task-04（FR-03）：同步解析 last——
+   * last.inputTokens 为单调用毛值（含 cached/cacheWrite，即该次调用的全提示词
+   * 大小），存 h.lastCallCtxTokens = ctxTokensFromGrossInput(last.inputTokens)
+   * （毛值直取不加分量）；缺失/非法 → undefined 不携带（不伪造 0）。total
+   * 缺失仍整体忽略（既有提前返回语义不动——total 与 last 同帧真源）。
    */
   private _extractTokenUsage(
     h: CodexHandle,
@@ -1413,7 +1434,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
   ): void {
     if (!line.includes('"thread/tokenUsage/updated"')) return;
     let msg: {
-      params?: { tokenUsage?: { total?: Record<string, unknown> } };
+      params?: {
+        tokenUsage?: {
+          total?: Record<string, unknown>;
+          last?: Record<string, unknown>;
+        };
+      };
     };
     try {
       msg = JSON.parse(line) as typeof msg;
@@ -1430,6 +1456,16 @@ export class CodexAppServerDriver implements InteractiveDriver {
       cacheWriteInputTokens: num(total.cacheWriteInputTokens),
       outputTokens: num(total.outputTokens),
     };
+    // 2026-09-13-ctx-usage-all-providers task-04（FR-03）：last 毛值直取存
+    // lastCallCtxTokens——在 _usageDelta 调用前更新，保证本帧 usage_update 即
+    // 携带该次调用的 ctx；非法（非有限数值）→ undefined（不伪造 0）。
+    const last = msg.params?.tokenUsage?.last;
+    h.lastCallCtxTokens =
+      last &&
+      typeof last.inputTokens === 'number' &&
+      Number.isFinite(last.inputTokens)
+        ? ctxTokensFromGrossInput(last.inputTokens)
+        : undefined;
     // ql-20260910-003：每条通知 = 一次 API 调用（精确计数，daemon 优先采用）。
     h.turnApiCallCount += 1;
     // ql-20260910-003：同步维护按模型累计快照（净输入分桶，毛值拆桶口径同
@@ -1473,6 +1509,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
    * input_tokens = Δinput - Δcached - Δwrite（未命中缓存的净输入，clamp ≥0）、
    * cache_read_tokens = Δcached、cache_creation_tokens = Δwrite、
    * output_tokens = Δoutput。全字段 Δ≤0（通知未到 / total 回退）→ null。
+   *
+   * 2026-09-13-ctx-usage-all-providers task-04（FR-03）：附加 ctx_tokens =
+   * h.lastCallCtxTokens（本帧 last 毛值直取）——usage_update 事件与 turn result
+   * usage 复用同一返回对象两路同源；last 缺失/非法不携带（不伪造 0）。
+   * 全字段 Δ≤0 → null 语义不变（无新用量即无 usage_update，ctx 无从携带
+   * 语义自洽）。
    */
   private _usageDelta(h: CodexHandle): AgentEventUsage | null {
     if (!h.threadUsageTotal) return null;
@@ -1491,6 +1533,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
       output_tokens: Math.max(0, dOut),
       cache_read_tokens: Math.max(0, dCached),
       cache_creation_tokens: Math.max(0, dWrite),
+      ...(h.lastCallCtxTokens !== undefined
+        ? { ctx_tokens: h.lastCallCtxTokens }
+        : {}),
     };
   }
 
@@ -1498,6 +1543,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
    * ql-20260909-027：轮结果补差值用量。outcome 已带 usage（未来 codex 若恢复在
    * turn/completed 携带则优先）不动；差值可算则填。total 回退（进程重建线程累计
    * 归零等）时顺带重置基线，避免后续轮长期负差值漏记。
+   *
+   * 2026-09-13-ctx-usage-all-providers task-04（FR-03）：outcome.usage = delta
+   * 直接复用 _usageDelta 返回对象 → usage_update 事件与 turn result usage 两路
+   * 同源携带 ctx_tokens（单点附加即双路生效，无对象分叉风险）。
    */
   private _applyTurnUsageDelta(
     h: CodexHandle,

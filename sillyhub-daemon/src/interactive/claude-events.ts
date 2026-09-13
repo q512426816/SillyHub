@@ -42,6 +42,7 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 import type { AgentEvent, AgentEventUsage } from '../types.js';
 import { classifyToolKind } from '../tool-kind.js';
+import { ctxTokensFromNetInput } from './usage-ctx.js';
 
 /** partial flush 节流间隔默认值（ms）。照抄 session-manager.ts:786 PARTIAL_FLUSH_MS。 */
 const DEFAULT_PARTIAL_FLUSH_MS = 500;
@@ -938,12 +939,16 @@ export class ClaudeEventNormalizer {
         // cache 两维 tracker 归零，main 桶以 start 值重建 + 计算本调用 ctx =
         // input + cache_read + cache_creation（上下文环分子，session-manager.ts
         // :5691-5714）。子代理桶不计算（恒 0——其上下文非会话主上下文）。
+        // 2026-09-13-ctx-usage-all-providers task-05（FR-05）：公式改调单源 helper
+        // ctxTokensFromNetInput（净值三和，claude/pi/cursor 同式一处定义）；?? 0 兜底
+        // 三分量全缺分支（helper 全缺→undefined，旧代码恒 0，字段类型 number 不变）。
         buf.lastCallCacheReadTokens = 0;
         buf.lastCallCacheCreationTokens = 0;
         if (buf.parentKey === 'main') {
           const startCrV = startCr ?? 0;
           const startCcV = startCc ?? 0;
-          buf.lastCallCtxTokens = (startInput ?? 0) + startCrV + startCcV;
+          buf.lastCallCtxTokens =
+            ctxTokensFromNetInput(startInput, startCr, startCc) ?? 0;
           buf.lastCallCacheReadTokens = startCrV;
           buf.lastCallCacheCreationTokens = startCcV;
         }
@@ -997,6 +1002,10 @@ export class ClaudeEventNormalizer {
         }
         // main 桶在 delta 携带 cache 时以「上次快照 ± cache 差量」重算本调用 ctx
         // （delta 不带 input_tokens，只能差分；:5801-5812）。子代理桶不重算。
+        // 不变式锚定（2026-09-13-ctx-usage-all-providers task-05 / FR-05）：共享
+        // helper ctxTokensFromNetInput（上方 start 路径）保持 lastCallCtxTokens =
+        // input + cache_read + cache_creation 不变式，本差分路径即该不变式的增量
+        // 维护形态（无法直接复用三和 helper，故原样保留）。
         if (buf.parentKey === 'main' && (cr !== undefined || cc !== undefined)) {
           const prevCr = buf.lastCallCacheReadTokens;
           const prevCc = buf.lastCallCacheCreationTokens;

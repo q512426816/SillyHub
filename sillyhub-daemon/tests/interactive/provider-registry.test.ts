@@ -3,6 +3,8 @@
 // 2026-09-04-provider-pi-onboarding task-04：用例 1/3/5 扩 pi（注册键/family/实例化）。
 // 2026-09-11-provider-adapter-registry task-01：caps 第 10 键 provider_switch 联动
 //（nineKeys→tenKeys）+ adapter.switchable 与 caps.provider_switch 同值 additive 断言。
+// 2026-09-13-ctx-usage-all-providers task-06：caps 第 11 键 ctx_usage 联动
+//（tenKeys→elevenKeys，FR-04 上下文窗口用量上报，四引擎全 true）。
 //
 // 覆盖（task-05 验收）：
 //   1. 注册表键集合 = InteractiveProvider 联合（编译层 canary + 运行时键集断言）
@@ -123,13 +125,17 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
-  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、10 契约键齐全', () => {
+  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、11 契约键齐全', () => {
     // ql-20260911-017：99a228add（askuser-pi-cursor）给 caps 增第 9 键 dialog
     // （值 'native' 字符串非 boolean），守护测试未同步——主仓预存债务顺手修
     // （skills-central-library verify 门实测暴露，与本变更无关）。
     // 2026-09-11-provider-adapter-registry task-01：第 10 键 provider_switch
     //（boolean，与 adapter.switchable 单源一致——下方 additive 断言锁定同值）。
-    const tenKeys = [
+    // 2026-09-13-ctx-usage-all-providers task-06（FR-04）：第 11 键 ctx_usage
+    //（boolean，interactive 会话是否上报 ctx_tokens——Wave A task-02/03/04
+    // 四引擎派生回填后全 true，未知 provider 回退 false）。
+    const elevenKeys = [
+      'ctx_usage',
       'dialog',
       'edit_patch',
       'mcp',
@@ -144,10 +150,10 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     for (const [key, d] of Object.entries(INTERACTIVE_PROVIDERS)) {
       // 单源引用（非复制值）：descriptor.caps 必须就是 PROVIDER_CAPS 的表项对象。
       expect(d.caps).toBe(PROVIDER_CAPS[key]);
-      expect(Object.keys(d.caps).slice().sort()).toEqual(tenKeys);
+      expect(Object.keys(d.caps).slice().sort()).toEqual(elevenKeys);
       for (const [capKey, capValue] of Object.entries(d.caps)) {
         expect(capValue).toBe(PROVIDER_CAPS[key]?.[capKey as keyof typeof d.caps]);
-        // dialog 为三态标记（'native' | false | …字符串/布尔），其余九键恒 boolean
+        // dialog 为三态标记（'native' | false | …字符串/布尔），其余十键恒 boolean
         if (capKey === 'dialog') {
           expect(['string', 'boolean']).toContain(typeof capValue);
         } else {

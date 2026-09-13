@@ -22,10 +22,13 @@
  * 从聚合表派生，本 task 落契约基座（派生前既有字面量与聚合表并存，值等价）。
  *
  * 取值约定：caps 描述 provider 当前真实能力（以本仓现状硬编码门控为准，
- * 不臆断），9 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
+ * 不臆断），10 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
  * 为 string 枚举键（'native' / 'marker' / 'none'，2026-09-09-askuser-pi-cursor
  * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；provider_switch 为
- * 第 10 键（本变更 task-01 加入，与 adapter.switchable 单源一致）；未知 provider
+ * 第 10 键（2026-09-11-provider-adapter-registry task-01 加入，与
+ * adapter.switchable 单源一致）；ctx_usage 为第 11 键
+ * （2026-09-13-ctx-usage-all-providers task-06 / FR-04 加入——interactive
+ * 会话是否上报 ctx_tokens，四引擎全 true）；未知 provider
  * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
  * 改取值先改本文件，再同步两端镜像。
  */
@@ -54,7 +57,7 @@ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
 // 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
 // ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
 
-/** provider 能力矩阵（10 键：9 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（11 键：10 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -87,6 +90,15 @@ export interface ProviderCaps {
    * PROVIDER_SWITCH_ENGINES 现行白名单（claude / codex / pi）。
    */
   provider_switch: boolean;
+  /**
+   * 上下文窗口用量上报（第 11 键，2026-09-13-ctx-usage-all-providers
+   * task-06 / FR-04）：interactive 会话是否上报上下文窗口用量分子 ctx_tokens
+   * （最近一次模型调用的提示词大小，会话页用量环的分子）。取值依据：claude
+   * 既有两源（claude-events.ts 差分派生 / claude-sdk-driver.ts SDK 透传），
+   * pi / cursor / codex 由本变更 Wave A task-02/03/04 派生回填
+   * （usage-ctx.ts 共享 helper）——四引擎全 true；未知 provider 回退 false。
+   */
+  ctx_usage: boolean;
 }
 
 /**
@@ -195,6 +207,14 @@ export interface ProviderCaps {
  * 依据 frontend `src/lib/provider-caps.ts` PROVIDER_SWITCH_ENGINES 现行白名单
  *（claude / codex / pi=true，cursor=false——cursor 私有 ConnectRPC 云协议无
  * BYO 注入面，不支持会话级切换到外部供应商）。
+ *
+ * ctx_usage（第 11 键，2026-09-13-ctx-usage-all-providers task-06 / FR-04）：
+ * interactive 会话是否上报上下文窗口用量分子 ctx_tokens（用量环分子，最近
+ * 一次模型调用的提示词大小）。取值依据：claude 既有两源（claude-events.ts
+ * 差分派生 / claude-sdk-driver.ts SDK 透传，task-05 重构引用共享 helper），
+ * pi / cursor / codex 由本变更 Wave A task-02/03/04 派生回填（usage-ctx.ts
+ * 共享 helper：净值三和 / codex 毛值直取）——四引擎全 true；未知 provider
+ * 回退 false（默认拒绝）。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -208,6 +228,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     edit_patch: true,
     model_select: true,
     provider_switch: true,
+    ctx_usage: true,
   },
   codex: {
     resume: true,
@@ -220,6 +241,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     edit_patch: false,
     model_select: true,
     provider_switch: true,
+    ctx_usage: true,
   },
   // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
@@ -235,6 +257,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     edit_patch: false,
     model_select: true,
     provider_switch: true,
+    ctx_usage: true,
   },
   // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
   // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
@@ -251,6 +274,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     edit_patch: false,
     model_select: true,
     provider_switch: false,
+    ctx_usage: true,
   },
 };
 
@@ -277,6 +301,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     edit_patch: false,
     model_select: false,
     provider_switch: false,
+    ctx_usage: false,
   };
 }
 

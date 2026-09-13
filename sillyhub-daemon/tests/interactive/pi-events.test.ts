@@ -215,11 +215,14 @@ describe('PiEventNormalizer / manual-success-turn（成功轮逐型映射）', (
     expect(usageEvents.length).toBe(1);
     const ev = usageEvents[0]!.ev;
     // fixture turn_end.usage：input=520 output=64 cacheRead=1024 cacheWrite=256
+    // ctx_tokens = 520+1024+256 = 1800——单调用终值快照语义（fixture 第 9/18/19 行
+    // 实证：两调用轮的 turn_end.usage 与末次 message_end.usage 逐字段相同，非轮累计）
     expect(ev.usage).toEqual({
       input_tokens: 520,
       output_tokens: 64,
       cache_read_tokens: 1024,
       cache_creation_tokens: 256, // pi cacheWrite = Anthropic cache_creation（批量口径）
+      ctx_tokens: 1800, // 净值三和（ctxTokensFromNetInput，末次调用）
     });
     expect(ev.metadata).toEqual({
       status: 'usage_update',
@@ -228,6 +231,7 @@ describe('PiEventNormalizer / manual-success-turn（成功轮逐型映射）', (
         output_tokens: 64,
         cache_read_tokens: 1024,
         cache_creation_tokens: 256,
+        ctx_tokens: 1800, // 与一等 usage 同源（同一 mapped 对象透传）
       },
     });
     expectValid(ev);
@@ -289,6 +293,7 @@ describe('PiEventNormalizer / real-error-turn（实跑采样错误路径）', ()
       output_tokens: 0,
       cache_read_tokens: 0,
       cache_creation_tokens: 0,
+      ctx_tokens: 0, // 全零轮如实携带 0（Grill D-1 有意口径，非未知态）
     });
   });
 
@@ -473,6 +478,7 @@ describe('PiEventNormalizer / 未知事件降级与边界', () => {
       output_tokens: 5,
       cache_read_tokens: 0,
       cache_creation_tokens: 0,
+      ctx_tokens: 0, // numOr0 恒数值故 pi 恒派生（三入参永非 undefined）
     });
   });
 });

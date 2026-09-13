@@ -211,7 +211,12 @@ function turnCompletedNotif(
   });
 }
 
-/** ql-20260909-027：thread/tokenUsage/updated notification 行（total 线程累计）。 */
+/**
+ * ql-20260909-027：thread/tokenUsage/updated notification 行（total 线程累计）。
+ * 2026-09-13-ctx-usage-all-providers task-04：第三参 last 可选——缺省与 total
+ * 同形态（既有用例零改动）；null = 整体省略 last 键（「无 last」反断言用例）；
+ * 传对象 = 原样内联（last.inputTokens 非法样本用例）。
+ */
 function tokenUsageNotif(
   threadId: string,
   total: {
@@ -220,6 +225,7 @@ function tokenUsageNotif(
     cacheWriteInputTokens: number;
     outputTokens: number;
   },
+  last?: Record<string, unknown> | null,
 ): string {
   return JSON.stringify({
     jsonrpc: '2.0',
@@ -232,7 +238,7 @@ function tokenUsageNotif(
           ...total,
           reasoningOutputTokens: 0,
         },
-        last: { ...total },
+        ...(last === null ? {} : { last: last ?? { ...total } }),
         modelContextWindow: 950000,
       },
     },
@@ -675,6 +681,7 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
     await new Promise<void>((r) => setTimeout(r, 30));
 
     // 轮中的 live usage_update 事件：短名四字段 + 递增（第 2 次 = 全轮差值）
+    // + ctx_tokens = 当帧 last.inputTokens 毛值直取（10000 / 20000）
     const usageMsgs = messages.filter(
       (m) => (m.metadata as { status?: string })?.status === 'usage_update',
     );
@@ -684,19 +691,22 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
       output_tokens: 50,
       cache_read_tokens: 9000,
       cache_creation_tokens: 0,
+      ctx_tokens: 10000,
     });
     expect(usageMsgs[1]!.usage).toMatchObject({
       input_tokens: 900,
       output_tokens: 120,
       cache_read_tokens: 19000,
       cache_creation_tokens: 100,
+      ctx_tokens: 20000,
     });
     expect(safeParseAgentEvent(usageMsgs[1]!).success).toBe(true);
 
     emitLines(child, [turnCompletedNotif('completed')]);
     await new Promise<void>((r) => setTimeout(r, 50));
 
-    // result.usage = 末次差值（基线 0）：20000-19000-100=900 净输入
+    // result.usage = 末次差值（基线 0）：20000-19000-100=900 净输入；
+    // ctx_tokens = 末次 last 毛值 20000 进 result（与 usage_update 两路同源）
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ subtype: 'success' });
     expect(results[0]!.usage).toMatchObject({
@@ -704,6 +714,7 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
       output_tokens: 120,
       cache_read_tokens: 19000,
       cache_creation_tokens: 100,
+      ctx_tokens: 20000,
     });
 
     close();
@@ -757,12 +768,14 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
     await new Promise<void>((r) => setTimeout(r, 50));
 
     expect(results).toHaveLength(2);
-    // Δgross_input(5000) - Δcached(4000) - Δwrite(500) = 500 净输入
+    // Δgross_input(5000) - Δcached(4000) - Δwrite(500) = 500 净输入；
+    // ctx_tokens = 第 2 轮末次 last 毛值 35000（毛值直取，跨轮无差值语义）
     expect(results[1]!.usage).toMatchObject({
       input_tokens: 500,
       output_tokens: 400,
       cache_read_tokens: 4000,
       cache_creation_tokens: 500,
+      ctx_tokens: 35000,
     });
 
     close();
@@ -790,6 +803,118 @@ describe('ql-20260909-027：用量差值记账（thread/tokenUsage/updated）', 
 
     expect(results).toHaveLength(1);
     expect(results[0]!.usage).toBeUndefined();
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('2026-09-13-ctx-usage-all-providers：无 last 字段的通知 → usage 四维照旧、ctx_tokens 键不存在（不伪造 0）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_nolast')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // last 键整体省略（旧版/降级形态）：total 四维照旧解析上报
+    emitLines(child, [
+      tokenUsageNotif(
+        'thr_nolast',
+        {
+          inputTokens: 10000,
+          cachedInputTokens: 9000,
+          cacheWriteInputTokens: 0,
+          outputTokens: 50,
+        },
+        null,
+      ),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+
+    // 精确反断言：usage_update 四维照旧、ctx_tokens 键不存在（环未知态而非 0.0%）
+    const usageMsgs = messages.filter(
+      (m) => (m.metadata as { status?: string })?.status === 'usage_update',
+    );
+    expect(usageMsgs).toHaveLength(1);
+    expect(usageMsgs[0]!.usage).toEqual({
+      input_tokens: 1000,
+      output_tokens: 50,
+      cache_read_tokens: 9000,
+      cache_creation_tokens: 0,
+    });
+    expect(usageMsgs[0]!.usage).not.toHaveProperty('ctx_tokens');
+
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success' });
+    expect(results[0]!.usage).not.toHaveProperty('ctx_tokens');
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('2026-09-13-ctx-usage-all-providers：last.inputTokens 非法（非有限数值）→ 同不携带 ctx_tokens', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_badlast')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    emitLines(child, [
+      tokenUsageNotif(
+        'thr_badlast',
+        {
+          inputTokens: 12000,
+          cachedInputTokens: 10000,
+          cacheWriteInputTokens: 0,
+          outputTokens: 60,
+        },
+        { inputTokens: 'NaN-ish' },
+      ),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+
+    // 非法 last（字符串）不伪造 0：四维照旧、ctx_tokens 键不存在
+    const usageMsgs = messages.filter(
+      (m) => (m.metadata as { status?: string })?.status === 'usage_update',
+    );
+    expect(usageMsgs).toHaveLength(1);
+    expect(usageMsgs[0]!.usage).toEqual({
+      input_tokens: 2000,
+      output_tokens: 60,
+      cache_read_tokens: 10000,
+      cache_creation_tokens: 0,
+    });
+    expect(usageMsgs[0]!.usage).not.toHaveProperty('ctx_tokens');
+
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.usage).not.toHaveProperty('ctx_tokens');
 
     close();
     child._emitExit(0);

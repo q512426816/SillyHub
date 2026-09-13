@@ -366,3 +366,47 @@ describe("QuotaPill", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ── CtxUsageBar：caps ctx_usage 门控（2026-09-13-ctx-usage-all-providers
+//    task-07 / FR-06）──────────────────────────────────────────────────────
+
+describe("CtxUsageBar（caps 门控）", () => {
+  it("provider 为未知引擎名（命中 getProviderCaps 回退 ctx_usage=false）→ 环不渲染、QuotaPill 照常", async () => {
+    // 虚构引擎名：provider-caps.ts 为 @generated 纯常量表（未知回退全 false），
+    // 直接用真实模块即可，无需 mock（task-07 约束）。
+    mockGetProviderQuota.mockResolvedValue(
+      quotaResp({
+        model: "glm-4.7",
+        windows: [{ label: "5小时窗", left: 80, reset: null }],
+      }),
+    );
+    render(
+      <CtxUsageBar
+        usedTokens={100_000}
+        roleMapping={{ model: "glm-4.6" }}
+        providerId="p-1"
+        provider="no-ctx-engine"
+      />,
+    );
+    expect(screen.queryByTestId("ctx-ring")).not.toBeInTheDocument();
+    // 门控只决定环渲染与否，额度胶囊照常挂载查询
+    expect(await screen.findByTestId("quota-pill")).toBeInTheDocument();
+  });
+
+  it("现有引擎名（claude，ctx_usage=true）→ 照常渲染环并显示百分比", () => {
+    render(
+      <CtxUsageBar
+        usedTokens={100_000}
+        roleMapping={{ model: "glm-4.6" }}
+        provider="claude"
+      />,
+    );
+    expect(screen.getByTestId("ctx-ring").textContent).toContain("50%");
+  });
+
+  it("不传 provider（undefined）→ 旁路门控照常渲染环（本机默认供应商等场景）", () => {
+    render(<CtxUsageBar usedTokens={12_345} />);
+    // 12,345 / 兜底 1M → 中心取整 1%（与上方既有用例同形态，显式锚定旁路语义）
+    expect(screen.getByTestId("ctx-ring").textContent).toContain("1%");
+  });
+});
