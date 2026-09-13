@@ -422,3 +422,92 @@ async def test_consensus_insert_lock_busy_degrades_to_plain(db_session, monkeypa
             env.owner,
             content=f"@{m1_name_val} @{m2_name_val} 非锁错误不降级",
         )
+
+
+# ── 用例4：gather 失败登记随请求收口提交（2026-09-13 24h 审查 P0 收尾）────
+
+
+async def test_consensus_failure_registration_persisted(db_session, monkeypatch):
+    """协调人触发失败（AppError 族）→ aborted 登记与成员态须随请求提交落库。
+
+    修复前：「任务行先行提交」只保住任务本体；gather 后对 task.status /
+    members / 状态卡的变更仍挂在请求事务——get_session 成功路径不 commit，
+    收口即回滚（DB 态停留 OPEN、卡片刷新即失）。修复后：send 返回前统一
+    收口 commit（消息 200 部分失败语义不变）。
+    """
+    from app.modules.agent.model import AgentRunLog
+    from app.modules.daemon.group.service import (
+        CONSENSUS_MEMBER_FAILED,
+        CONSENSUS_TASK_ABORTED,
+    )
+
+    env = await _make_group_env(db_session)
+    env_owner_member = AgentGroupMember(
+        group_id=env.group.id,
+        member_type="user",
+        display_name="群主",
+        user_id=env.owner.id,
+        invited_by=env.owner.id,
+        joined_at=datetime.now(UTC),
+    )
+    db_session.add(env_owner_member)
+    m1, _ = await _make_member(db_session, env.group, name="小码", owner_id=env.owner.id)
+    m2, _ = await _make_member(db_session, env.group, name="小测", owner_id=env.owner.id)
+    await db_session.commit()
+
+    import app.modules.daemon.group.service as gsvc
+    import app.modules.daemon.group.service.messages as messages_module
+
+    async def _redis_ping():
+        raise ConnectionError("no redis in test")
+
+    monkeypatch.setattr(gsvc, "get_redis", lambda: SimpleNamespace(ping=_redis_ping))
+    monkeypatch.setattr(
+        messages_module, "_publish_group_channel_event", AsyncMock(return_value=None)
+    )
+    # 两个成员触发全失败（AppError 族——gather 部分失败收集，响应恒 200）。
+    monkeypatch.setattr(
+        GroupChatService,
+        "_trigger_member_isolated",
+        AsyncMock(side_effect=GroupChatInvalid("机器未授权，成员触发失败。")),
+    )
+
+    resp = await GroupChatService(db_session).send_group_message(
+        env.group.id,
+        env.owner,
+        content=f"@{m1.display_name} @{m2.display_name} 讨论一下失败登记",
+    )
+    assert resp.consensus_task_id is not None
+    assert len(resp.triggered) == 2
+    assert all(t.error for t in resp.triggered)
+
+    # 独立重读（rollback 清事务态后重查）——aborted 登记、成员态、状态卡
+    # 均须已提交（修复前此处 task.status 仍为 OPEN、状态卡无行）。
+    await db_session.rollback()
+    task = (
+        (
+            await db_session.execute(
+                select(AgentGroupConsensusTask).where(
+                    AgentGroupConsensusTask.group_id == env.group.id
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert task.status == CONSENSUS_TASK_ABORTED
+    states = task.members or []
+    assert states and all(s.get("state") == CONSENSUS_MEMBER_FAILED for s in states)
+    card = (
+        (
+            await db_session.execute(
+                select(AgentRunLog).where(
+                    AgentRunLog.run_id == task.carrier_run_id,
+                    AgentRunLog.channel == "system",
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert card is not None

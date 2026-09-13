@@ -611,6 +611,14 @@ async def send_group_message(
                         coordinator_name=consensus_coordinator.display_name,
                         phase=CONSENSUS_PHASE_ABORTED,
                     )
+    # 汇总收尾变更统一提交（2026-09-13 24h 审查 P0 收尾）：上方「任务行先行
+    # 提交」只保住任务本体；gather 失败登记（coordinator aborted / 成员态
+    # failed）与立即收口分支对 task.status/members/状态卡的变更仍挂在本事务
+    # ——请求级 get_session 成功路径不 commit，收口即回滚（卡片仅 SSE 瞬时
+    # 可见、刷新即失；立即收口轮已在跑而任务 DB 态停留 OPEN，sweeper 会二次
+    # 注入收口）。降级路径（consensus_task=None）不进本分支，零变化。
+    if consensus_task is not None:
+        await svc._session.commit()
     return GroupMessageSendRead(
         carrier_run_id=carrier_run_id_val,
         log_id=log_row_id_val,

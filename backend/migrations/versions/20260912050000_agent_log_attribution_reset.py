@@ -12,9 +12,10 @@ agent-log-hub-attribution-cross-session-contamination.md），正确归属由 CL
 
 1. ``UPDATE platform_agent_logs SET agent_session_id = NULL``——行保留
    （探测事实/invocations 计数不动），仅清归属列等重推；
-2. ``UPDATE agent_sessions SET deleted_at = now() WHERE origin = 'tool_report'
-   AND deleted_at IS NULL``——旧 ``{harness}|{ctx}`` 聚合键会话在新解析下
-   永不再命中（新键值 ``{ctx}``），防僵尸；软删不硬删（R-07 可逆）；
+2. ``UPDATE agent_sessions SET deleted_at = <迁移执行时刻（绑定参数）>`` WHERE
+   ``origin = 'tool_report' AND deleted_at IS NULL``——旧 ``{harness}|{ctx}``
+   聚合键会话在新解析下永不再命中（新键值 ``{ctx}``），防僵尸；软删不硬删
+   （R-07 可逆）；
 3. ``DELETE FROM change_session_links``——全表清空：links 无来源列，错配
    时代的 hub 污染行与合法行不可区分，用户裁决全清（DG-04）；
 4. ``DELETE FROM quicklog_session_links``——同上。
@@ -35,6 +36,7 @@ created_at: 2026-09-12 05:00:00
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Sequence
 
 import sqlalchemy as sa
@@ -50,11 +52,13 @@ def upgrade() -> None:
     # ── D-004@v2 ①：清归属列（行保留，重推重建归属）──
     op.execute(sa.text("UPDATE platform_agent_logs SET agent_session_id = NULL"))
     # ── D-004@v2 ②：旧 {harness}|{ctx} 聚合键 tool_report 会话软删防僵尸（R-07 可逆）──
+    # 时间戳走绑定参数由 Python 侧生成——SQL now() 是 PG-only 函数（SQLite
+    # upgrade 直接 OperationalError；2026-09-13 审查改方言无关）。
     op.execute(
         sa.text(
-            "UPDATE agent_sessions SET deleted_at = now() "
+            "UPDATE agent_sessions SET deleted_at = :ts "
             "WHERE origin = 'tool_report' AND deleted_at IS NULL"
-        )
+        ).bindparams(ts=datetime.now(UTC))
     )
     # ── D-004@v2 ③④：两张 links 表全清（无来源列，污染行与合法行不可区分，DG-04）──
     op.execute(sa.text("DELETE FROM change_session_links"))

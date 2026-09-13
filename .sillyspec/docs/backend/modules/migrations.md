@@ -30,6 +30,8 @@ alembic upgrade head                       # head = 20260817100000（单 head）
 - 多 agent 并行 change 各自生成迁移时 `down_revision` 易撞出多 head：提交前核对单 head（alembic heads 或 DAG 脚本），出现多 head 用 merge revision 收敛——历史上至少三次（见 versions/ 内多个 merge 文件）。
 - 新 revision 的 `down_revision` 必须指向当时最新 head；日期式编号建议精确到秒避免同日撞号（历史撞号曾迫使另一 change 改号收敛）。
 - 迁移文件会被 pre-commit 的 ruff 重排格式，首次 commit 后核对文件真的落盘（历史上有 ruff 重排致 commit 静默不落地先例）。
+- **DML 方言兼容（2026-09-13）**：迁移内 SQL 不得用 PG-only 函数（`now()` 等）——SQLite 环境直接 OperationalError；时间戳一律 Python 侧生成走绑定参数（`sa.text(...).bindparams(ts=...)`，先例 20260912050000 修复，全仓首条裸 now() DML 由 24h 审查抓出）。
+- **单头守护测试（2026-09-13）**：`backend/tests/test_migrations_graph.py` AST 静态解析 versions/*.py 断言单 head + down_revision 引用闭合 + revision 唯一（compose 启动命令即 `alembic upgrade head`，双头 = 后端容器起不来；两周内两次复发——20260910130000 与更早 6756e634f119——测试建表走 metadata 不走迁移链，CI 原本拦不住）。解析须同时接老式 `revision = "x"` 与新模板 `revision: str = "x"`（AnnAssign）两种形态。
 - 本项目除 PPM 外未正式上线，不要求历史兼容与完整 down-grade，以 head 前进为准。
 
 - 20260825230000_add_quicklog_session_links（2026-08-25-session-spec-binding）：建表 + agent_sessions.change_id 存量播种至 change_session_links（ON CONFLICT DO NOTHING）；downgrade drop 表、播种行保留无害。
@@ -44,3 +46,7 @@ alembic upgrade head                       # head = 20260817100000（单 head）
 ## 20260912110000_add_scheduled_message_origin
 
 - 2026-09-12-chat-turn-auto-recovery FR-4.1：`agent_session_scheduled_messages` + `origin TEXT NULL`（'auto_resume:<源 run uuid>' = close 钩子 quota 分支自动续跑排期；NULL = 用户预约存量语义不变）。down_revision=1d763051eb15 线性追加，downgrade 对称 drop；soft-add 无索引（与 20260910120000 queued origin 同论证）。
+
+## 20260912050000_agent_log_attribution_reset（2026-09-13 24h 审查修订）
+
+- 2026-09-11-agent-log-attribution-refactor task-05 纯数据迁移（清归属列 + tool_report 聚合键会话软删 + 两张 links 表全清，DG-04 用户裁决）。修订：软删时间戳原为 SQL `now()`（PG-only，SQLite upgrade 必炸）改 `sa.text(...).bindparams(ts=datetime.now(UTC))` 方言无关，语义不变（取迁移执行时刻）。downgrade 维持 no-op（D-004@v2 设计）。

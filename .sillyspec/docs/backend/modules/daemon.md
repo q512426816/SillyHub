@@ -87,6 +87,14 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   - @路由：`_parse_group_mentions`（全/半角 @ 昵称精确命中成员表 display_name，
     @全体/@all 广播全部 agent 成员）；未@仅落时间线进群背景摘要（context_window
     默认 20 条、单条 500 字/总长 6000 字，含 agent 回复）。
+  - 汇总收口 consensus（2026-09-10-group-agent-direct-chat + 2026-09-12-group-
+    trigger-lock-graceful + 2026-09-13 事务收口）：consensus_mode 开启且去重后
+    @agent ≥2 → create_consensus_task（按 carrier_run_id 幂等；55P03 撞锁降级
+    普通多@消息）。事务边界三段：载体消息 commit → 任务行+首卡 gather 前先行
+    commit（防触发失败回滚吞任务）→ gather 失败登记（coordinator aborted/成员
+    态 failed）与立即收口变更（status/members/状态卡）send 返回前统一收口
+    commit——请求级 get_session 成功路径不 commit，只 flush 不 commit 的产物
+    在会话关闭时整体隐式回滚（2026-09-13 24h 审查 P0 两段修复，缺一不可）。
   - 影子懒建三件套（照 worker `_dispatch_worker_core` 先例）：①直接 ORM 建行
     AgentSession(kind='group_member', config.manual_approval=False)；②
     prepare_interactive_dispatch(pinned_runtime_id=成员机器, stage='group_member')
@@ -273,6 +281,6 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 
 ## 2026-09-12-chat-turn-auto-recovery 增量
 
-- **三分支自动恢复**（`session/service/auto_resume.py::maybe_auto_recover_failed_turn`，close_run_steps commit 后调用，取代 ql-20260903-011 auth-transient 专用钩子并入统一判定序）：G0 总门（failed/active/开关 auto_resume_interrupted/主会话 chat/最新轮 created_at+id/非空 user_input/排队∪定时双表 origin 幂等）→ A quota_exceeded+reset_at → 定时消息（dispatch_at=reset+120s，QUOTA_NUDGE_PROMPT，quota 连续链上限 3）；B 瞬时四类（rate_limited/timeout/network/provider_error）或 CLI 合成鉴权 raw → 干净轮 G5 截断/G6 附件守卫+紧邻前 run 同型同输入+同文 pending 防叠加 → 原 prompt 重放；有工具活动 → 紧链上限 2 → RESUME_NUDGE_PROMPT（不带原任务——CLI 进程内上下文完整，重放诱导从头执行）；C 其余不动作。
+- **三分支自动恢复**（`session/service/auto_resume.py::maybe_auto_recover_failed_turn`，close_run_steps commit 后调用，取代 ql-20260903-011 auth-transient 专用钩子并入统一判定序）：G0 总门（failed/active/开关 auto_resume_interrupted/主会话 chat/最新轮 created_at+id/非空 user_input/排队∪定时双表 origin 幂等）→ A quota_exceeded+reset_at → 定时消息（dispatch_at=reset+120s，QUOTA_NUDGE_PROMPT，quota 连续链上限 3）；B 瞬时四类（rate_limited/timeout/network/provider_error）或 CLI 合成鉴权 raw → 干净轮 G5 截断/G6 附件守卫+紧邻前 run 同型同输入（前驱取「排除自身后 G4 同款排序首行」——created_at 严格小于在撞值时取错前驱）+auto_resume_of 紧链上限 2（2026-09-13：交替错误类型如 429↔502 永不同型击穿同型守卫，链长兜底停跑并写 hint 交回用户）+同文 pending 防叠加 → 原 prompt 重放；有工具活动 → 紧链上限 2 → RESUME_NUDGE_PROMPT（不带原任务——CLI 进程内上下文完整，重放诱导从头执行）；C 其余不动作。
 - **scheduled_messages.origin 列**（migration 20260912110000）：'auto_resume:<源 run uuid>' = 系统排期；派发链（scheduled_send._dispatch_scheduled_entry）origin 解析 → G10 超越守卫（source 后有更新 run → cancelled/superseded）→ inject_session_as_service 透传 auto_resume_of（新参，SessionService 壳同步）→ 新 run metadata_.auto_resume_of；忙轮转排队经 _handle_busy_turn 落排队行 origin（R-08）。
 - **ModelErrorDTO.reset_at**（soft-add）：error_detail JSON 携带，quota 分支与前端消费。

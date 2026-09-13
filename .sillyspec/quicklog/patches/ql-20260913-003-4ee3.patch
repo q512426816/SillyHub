@@ -1,0 +1,635 @@
+diff --git a/.sillyspec/docs/backend/modules/daemon.md b/.sillyspec/docs/backend/modules/daemon.md
+index 53e73a7bc..617881876 100644
+--- a/.sillyspec/docs/backend/modules/daemon.md
++++ b/.sillyspec/docs/backend/modules/daemon.md
+@@ -87,6 +87,14 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
+   - @路由：`_parse_group_mentions`（全/半角 @ 昵称精确命中成员表 display_name，
+     @全体/@all 广播全部 agent 成员）；未@仅落时间线进群背景摘要（context_window
+     默认 20 条、单条 500 字/总长 6000 字，含 agent 回复）。
++  - 汇总收口 consensus（2026-09-10-group-agent-direct-chat + 2026-09-12-group-
++    trigger-lock-graceful + 2026-09-13 事务收口）：consensus_mode 开启且去重后
++    @agent ≥2 → create_consensus_task（按 carrier_run_id 幂等；55P03 撞锁降级
++    普通多@消息）。事务边界三段：载体消息 commit → 任务行+首卡 gather 前先行
++    commit（防触发失败回滚吞任务）→ gather 失败登记（coordinator aborted/成员
++    态 failed）与立即收口变更（status/members/状态卡）send 返回前统一收口
++    commit——请求级 get_session 成功路径不 commit，只 flush 不 commit 的产物
++    在会话关闭时整体隐式回滚（2026-09-13 24h 审查 P0 两段修复，缺一不可）。
+   - 影子懒建三件套（照 worker `_dispatch_worker_core` 先例）：①直接 ORM 建行
+     AgentSession(kind='group_member', config.manual_approval=False)；②
+     prepare_interactive_dispatch(pinned_runtime_id=成员机器, stage='group_member')
+@@ -273,6 +281,6 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
+ 
+ ## 2026-09-12-chat-turn-auto-recovery 增量
+ 
+-- **三分支自动恢复**（`session/service/auto_resume.py::maybe_auto_recover_failed_turn`，close_run_steps commit 后调用，取代 ql-20260903-011 auth-transient 专用钩子并入统一判定序）：G0 总门（failed/active/开关 auto_resume_interrupted/主会话 chat/最新轮 created_at+id/非空 user_input/排队∪定时双表 origin 幂等）→ A quota_exceeded+reset_at → 定时消息（dispatch_at=reset+120s，QUOTA_NUDGE_PROMPT，quota 连续链上限 3）；B 瞬时四类（rate_limited/timeout/network/provider_error）或 CLI 合成鉴权 raw → 干净轮 G5 截断/G6 附件守卫+紧邻前 run 同型同输入+同文 pending 防叠加 → 原 prompt 重放；有工具活动 → 紧链上限 2 → RESUME_NUDGE_PROMPT（不带原任务——CLI 进程内上下文完整，重放诱导从头执行）；C 其余不动作。
++- **三分支自动恢复**（`session/service/auto_resume.py::maybe_auto_recover_failed_turn`，close_run_steps commit 后调用，取代 ql-20260903-011 auth-transient 专用钩子并入统一判定序）：G0 总门（failed/active/开关 auto_resume_interrupted/主会话 chat/最新轮 created_at+id/非空 user_input/排队∪定时双表 origin 幂等）→ A quota_exceeded+reset_at → 定时消息（dispatch_at=reset+120s，QUOTA_NUDGE_PROMPT，quota 连续链上限 3）；B 瞬时四类（rate_limited/timeout/network/provider_error）或 CLI 合成鉴权 raw → 干净轮 G5 截断/G6 附件守卫+紧邻前 run 同型同输入（前驱取「排除自身后 G4 同款排序首行」——created_at 严格小于在撞值时取错前驱）+auto_resume_of 紧链上限 2（2026-09-13：交替错误类型如 429↔502 永不同型击穿同型守卫，链长兜底停跑并写 hint 交回用户）+同文 pending 防叠加 → 原 prompt 重放；有工具活动 → 紧链上限 2 → RESUME_NUDGE_PROMPT（不带原任务——CLI 进程内上下文完整，重放诱导从头执行）；C 其余不动作。
+ - **scheduled_messages.origin 列**（migration 20260912110000）：'auto_resume:<源 run uuid>' = 系统排期；派发链（scheduled_send._dispatch_scheduled_entry）origin 解析 → G10 超越守卫（source 后有更新 run → cancelled/superseded）→ inject_session_as_service 透传 auto_resume_of（新参，SessionService 壳同步）→ 新 run metadata_.auto_resume_of；忙轮转排队经 _handle_busy_turn 落排队行 origin（R-08）。
+ - **ModelErrorDTO.reset_at**（soft-add）：error_detail JSON 携带，quota 分支与前端消费。
+diff --git a/.sillyspec/docs/backend/modules/migrations.md b/.sillyspec/docs/backend/modules/migrations.md
+index 06e058a5d..c94c7c14e 100644
+--- a/.sillyspec/docs/backend/modules/migrations.md
++++ b/.sillyspec/docs/backend/modules/migrations.md
+@@ -30,6 +30,8 @@ alembic upgrade head                       # head = 20260817100000（单 head）
+ - 多 agent 并行 change 各自生成迁移时 `down_revision` 易撞出多 head：提交前核对单 head（alembic heads 或 DAG 脚本），出现多 head 用 merge revision 收敛——历史上至少三次（见 versions/ 内多个 merge 文件）。
+ - 新 revision 的 `down_revision` 必须指向当时最新 head；日期式编号建议精确到秒避免同日撞号（历史撞号曾迫使另一 change 改号收敛）。
+ - 迁移文件会被 pre-commit 的 ruff 重排格式，首次 commit 后核对文件真的落盘（历史上有 ruff 重排致 commit 静默不落地先例）。
++- **DML 方言兼容（2026-09-13）**：迁移内 SQL 不得用 PG-only 函数（`now()` 等）——SQLite 环境直接 OperationalError；时间戳一律 Python 侧生成走绑定参数（`sa.text(...).bindparams(ts=...)`，先例 20260912050000 修复，全仓首条裸 now() DML 由 24h 审查抓出）。
++- **单头守护测试（2026-09-13）**：`backend/tests/test_migrations_graph.py` AST 静态解析 versions/*.py 断言单 head + down_revision 引用闭合 + revision 唯一（compose 启动命令即 `alembic upgrade head`，双头 = 后端容器起不来；两周内两次复发——20260910130000 与更早 6756e634f119——测试建表走 metadata 不走迁移链，CI 原本拦不住）。解析须同时接老式 `revision = "x"` 与新模板 `revision: str = "x"`（AnnAssign）两种形态。
+ - 本项目除 PPM 外未正式上线，不要求历史兼容与完整 down-grade，以 head 前进为准。
+ 
+ - 20260825230000_add_quicklog_session_links（2026-08-25-session-spec-binding）：建表 + agent_sessions.change_id 存量播种至 change_session_links（ON CONFLICT DO NOTHING）；downgrade drop 表、播种行保留无害。
+@@ -44,3 +46,7 @@ alembic upgrade head                       # head = 20260817100000（单 head）
+ ## 20260912110000_add_scheduled_message_origin
+ 
+ - 2026-09-12-chat-turn-auto-recovery FR-4.1：`agent_session_scheduled_messages` + `origin TEXT NULL`（'auto_resume:<源 run uuid>' = close 钩子 quota 分支自动续跑排期；NULL = 用户预约存量语义不变）。down_revision=1d763051eb15 线性追加，downgrade 对称 drop；soft-add 无索引（与 20260910120000 queued origin 同论证）。
++
++## 20260912050000_agent_log_attribution_reset（2026-09-13 24h 审查修订）
++
++- 2026-09-11-agent-log-attribution-refactor task-05 纯数据迁移（清归属列 + tool_report 聚合键会话软删 + 两张 links 表全清，DG-04 用户裁决）。修订：软删时间戳原为 SQL `now()`（PG-only，SQLite upgrade 必炸）改 `sa.text(...).bindparams(ts=datetime.now(UTC))` 方言无关，语义不变（取迁移执行时刻）。downgrade 维持 no-op（D-004@v2 设计）。
+diff --git a/backend/app/modules/daemon/group/service/messages.py b/backend/app/modules/daemon/group/service/messages.py
+index 5dde51b61..25f5a5093 100644
+--- a/backend/app/modules/daemon/group/service/messages.py
++++ b/backend/app/modules/daemon/group/service/messages.py
+@@ -611,6 +611,14 @@ async def send_group_message(
+                         coordinator_name=consensus_coordinator.display_name,
+                         phase=CONSENSUS_PHASE_ABORTED,
+                     )
++    # 汇总收尾变更统一提交（2026-09-13 24h 审查 P0 收尾）：上方「任务行先行
++    # 提交」只保住任务本体；gather 失败登记（coordinator aborted / 成员态
++    # failed）与立即收口分支对 task.status/members/状态卡的变更仍挂在本事务
++    # ——请求级 get_session 成功路径不 commit，收口即回滚（卡片仅 SSE 瞬时
++    # 可见、刷新即失；立即收口轮已在跑而任务 DB 态停留 OPEN，sweeper 会二次
++    # 注入收口）。降级路径（consensus_task=None）不进本分支，零变化。
++    if consensus_task is not None:
++        await svc._session.commit()
+     return GroupMessageSendRead(
+         carrier_run_id=carrier_run_id_val,
+         log_id=log_row_id_val,
+diff --git a/backend/app/modules/daemon/session/service/auto_resume.py b/backend/app/modules/daemon/session/service/auto_resume.py
+index 13cef93e5..af71efcd4 100644
+--- a/backend/app/modules/daemon/session/service/auto_resume.py
++++ b/backend/app/modules/daemon/session/service/auto_resume.py
+@@ -518,28 +518,7 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
+                     run_id=str(agent_run.id),
+                     chain=chain_len,
+                 )
+-                # 2026-09-12-session-live-display-fixes（R5 / D-004）：链到上限停跑
+-                # 不再纯静默——对刚终态的 run 补写 error_detail 接续指引（前端失败
+-                # 卡已渲染 hint，零前端改动即可告知「为什么不再自动续、该怎么做」；
+-                # 实证会话 d4c29d95 15:11 chain=2 停跑，用户只见「供应商异常」失败卡
+-                # 不知道要手动继续）。type/code/raw 原值不动（auto-recovery 判定消费
+-                # type/raw，既有断言零影响）；写入失败仅 warn（维持全程静默容错原则）。
+-                try:
+-                    detail = dict(agent_run.error_detail) if agent_run.error_detail else {}
+-                    detail["hint"] = (
+-                        "上游连续中断，自动续跑已达上限（2 次）；"
+-                        "请手动发送继续接续，或切换供应商后重发"
+-                    )
+-                    detail["auto_resume_stopped"] = True
+-                    agent_run.error_detail = detail
+-                    await svc._session.commit()
+-                except Exception as hint_err:  # noqa: BLE001（静默容错原则）
+-                    await svc._session.rollback()
+-                    log.warning(
+-                        "auto_recover_chain_limit_hint_write_failed",
+-                        run_id=str(agent_run.id),
+-                        error=str(hint_err),
+-                    )
++                await _write_chain_limit_hint(svc, agent_run)
+                 return
+             enqueue_prompt = RESUME_NUDGE_PROMPT
+         else:
+@@ -553,13 +532,14 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
+                 log.info("auto_recover_skip_attachment", run_id=str(agent_run.id))
+                 return
+             # 紧邻前 run 同型失败且输入相同 → 本 run 已是自动重投结果（持续性
+-            # 故障），不再追加交回用户（ql-20260903-011 防循环泛化）。
++            # 故障），不再追加交回用户（ql-20260903-011 防循环泛化）。前驱取
++            # 「排除自身后按 G4 同款排序的首行」——created_at 严格小于在撞值时
++            # 会跳过同刻前驱取错行（漏判）。
+             prev_run = (
+                 await svc._session.execute(
+                     select(AgentRun)
+                     .where(
+                         AgentRun.agent_session_id == session_id,
+-                        AgentRun.created_at < agent_run.created_at,
+                         AgentRun.id != agent_run.id,
+                     )
+                     .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+@@ -585,6 +565,22 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
+                     if (prev_prompt or "").strip() == prompt:
+                         log.info("auto_recover_skip_already_retried", run_id=str(agent_run.id))
+                         return
++            # 紧链上限（2026-09-13 24h 审查 P1）：紧邻同型守卫拦不住交替错误
++            # 类型（网关 429↔502 抖动相邻永不同型，守卫永不命中 → 每次失败
++            # 都重新入队、close 钩子立即派发，无上限计费重放）。auto_resume_of
++            # 链长与错误类型无关（派发链 queue.py→inject.py 落该元数据），
++            # 与 nudge 分支同款 AUTO_RESUME_MAX_CHAIN 兜底：本 run 已是自动
++            # 重放产物即停跑交回用户。
++            chain_len = await _count_chain_type(svc, agent_run)
++            if chain_len >= AUTO_RESUME_MAX_CHAIN:
++                log.info(
++                    "auto_recover_replay_chain_limit",
++                    session_id=str(session_id),
++                    run_id=str(agent_run.id),
++                    chain=chain_len,
++                )
++                await _write_chain_limit_hint(svc, agent_run)
++                return
+             # 用户已手动重发同文并排队（pending）→ 不重复追加。
+             dup_pending_same_text = (
+                 await svc._session.execute(
+@@ -695,3 +691,30 @@ async def _count_chain_type(
+         except ValueError:
+             cursor = None
+     return chain
++
++
++async def _write_chain_limit_hint(svc, agent_run: AgentRun) -> None:
++    """链上限停跑补写 error_detail 接续指引（2026-09-12-session-live-display-fixes
++    R5 / D-004；nudge 与重放分支共用）。
++
++    链到上限停跑不再纯静默——对刚终态的 run 补写 hint（前端失败卡已渲染
++    hint，零前端改动即可告知「为什么不再自动续、该怎么做」；实证会话
++    d4c29d95 15:11 chain=2 停跑，用户只见「供应商异常」失败卡不知道要手动
++    继续）。type/code/raw 原值不动（auto-recovery 判定消费 type/raw，既有
++    断言零影响）；写入失败仅 warn（维持全程静默容错原则）。
++    """
++    try:
++        detail = dict(agent_run.error_detail) if agent_run.error_detail else {}
++        detail["hint"] = (
++            "上游连续中断，自动续跑已达上限（2 次）；请手动发送继续接续，或切换供应商后重发"
++        )
++        detail["auto_resume_stopped"] = True
++        agent_run.error_detail = detail
++        await svc._session.commit()
++    except Exception as hint_err:  # 静默容错原则（维持全程不上抛）
++        await svc._session.rollback()
++        log.warning(
++            "auto_recover_chain_limit_hint_write_failed",
++            run_id=str(agent_run.id),
++            error=str(hint_err),
++        )
+diff --git a/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py b/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
+index 5f6129312..169aa83e3 100644
+--- a/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
++++ b/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
+@@ -438,6 +438,42 @@ async def test_transient_tight_chain_limit(db_session: AsyncSession, mocked_redi
+     assert await _queued(db_session, session_id) == []
+ 
+ 
++@pytest.mark.asyncio
++async def test_transient_replay_alternating_type_chain_limit(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """交替错误类型击穿同型守卫 → 紧链上限兜底停跑（2026-09-13 24h 审查 P1）。
++
++    前驱 run 类型与本次不同（rate_limited vs provider_error）——紧邻同型守卫
++    放行（修复前：交替型故障每次失败都重新入队，close 钩子立即派发，无上限
++    计费重放）；本 run 已是自动重放产物（auto_resume_of 指向前驱），紧链=2
++    触发上限停跑 + error_detail 接续指引写回。
++    """
++    lease_id, run_id, token, session_id, uid = await _seed(db_session)
++    prev1 = await _add_prev_run(
++        db_session,
++        session_id,
++        uid,
++        minutes_before=30,
++        error_detail={"type": "rate_limited"},
++    )
++    run = await db_session.get(AgentRun, run_id)
++    run.metadata_ = {"auto_resume_of": str(prev1)}
++    await db_session.commit()
++
++    closed = await _close_failed(
++        db_session,
++        lease_id,
++        run_id,
++        token,
++        _transient_error("provider_error"),
++    )
++    assert await _queued(db_session, session_id) == []
++    detail = closed.error_detail if isinstance(closed.error_detail, dict) else {}
++    assert detail.get("auto_resume_stopped") is True
++    assert "上限" in str(detail.get("hint") or "")
++
++
+ # ── 分支 C ───────────────────────────────────────────────────────────────────
+ 
+ 
+diff --git a/backend/app/modules/daemon/tests/test_group_trigger_lock.py b/backend/app/modules/daemon/tests/test_group_trigger_lock.py
+index 8aa11d24c..4bd79daea 100644
+--- a/backend/app/modules/daemon/tests/test_group_trigger_lock.py
++++ b/backend/app/modules/daemon/tests/test_group_trigger_lock.py
+@@ -422,3 +422,92 @@ async def test_consensus_insert_lock_busy_degrades_to_plain(db_session, monkeypa
+             env.owner,
+             content=f"@{m1_name_val} @{m2_name_val} 非锁错误不降级",
+         )
++
++
++# ── 用例4：gather 失败登记随请求收口提交（2026-09-13 24h 审查 P0 收尾）────
++
++
++async def test_consensus_failure_registration_persisted(db_session, monkeypatch):
++    """协调人触发失败（AppError 族）→ aborted 登记与成员态须随请求提交落库。
++
++    修复前：「任务行先行提交」只保住任务本体；gather 后对 task.status /
++    members / 状态卡的变更仍挂在请求事务——get_session 成功路径不 commit，
++    收口即回滚（DB 态停留 OPEN、卡片刷新即失）。修复后：send 返回前统一
++    收口 commit（消息 200 部分失败语义不变）。
++    """
++    from app.modules.agent.model import AgentRunLog
++    from app.modules.daemon.group.service import (
++        CONSENSUS_MEMBER_FAILED,
++        CONSENSUS_TASK_ABORTED,
++    )
++
++    env = await _make_group_env(db_session)
++    env_owner_member = AgentGroupMember(
++        group_id=env.group.id,
++        member_type="user",
++        display_name="群主",
++        user_id=env.owner.id,
++        invited_by=env.owner.id,
++        joined_at=datetime.now(UTC),
++    )
++    db_session.add(env_owner_member)
++    m1, _ = await _make_member(db_session, env.group, name="小码", owner_id=env.owner.id)
++    m2, _ = await _make_member(db_session, env.group, name="小测", owner_id=env.owner.id)
++    await db_session.commit()
++
++    import app.modules.daemon.group.service as gsvc
++    import app.modules.daemon.group.service.messages as messages_module
++
++    async def _redis_ping():
++        raise ConnectionError("no redis in test")
++
++    monkeypatch.setattr(gsvc, "get_redis", lambda: SimpleNamespace(ping=_redis_ping))
++    monkeypatch.setattr(
++        messages_module, "_publish_group_channel_event", AsyncMock(return_value=None)
++    )
++    # 两个成员触发全失败（AppError 族——gather 部分失败收集，响应恒 200）。
++    monkeypatch.setattr(
++        GroupChatService,
++        "_trigger_member_isolated",
++        AsyncMock(side_effect=GroupChatInvalid("机器未授权，成员触发失败。")),
++    )
++
++    resp = await GroupChatService(db_session).send_group_message(
++        env.group.id,
++        env.owner,
++        content=f"@{m1.display_name} @{m2.display_name} 讨论一下失败登记",
++    )
++    assert resp.consensus_task_id is not None
++    assert len(resp.triggered) == 2
++    assert all(t.error for t in resp.triggered)
++
++    # 独立重读（rollback 清事务态后重查）——aborted 登记、成员态、状态卡
++    # 均须已提交（修复前此处 task.status 仍为 OPEN、状态卡无行）。
++    await db_session.rollback()
++    task = (
++        (
++            await db_session.execute(
++                select(AgentGroupConsensusTask).where(
++                    AgentGroupConsensusTask.group_id == env.group.id
++                )
++            )
++        )
++        .scalars()
++        .one()
++    )
++    assert task.status == CONSENSUS_TASK_ABORTED
++    states = task.members or []
++    assert states and all(s.get("state") == CONSENSUS_MEMBER_FAILED for s in states)
++    card = (
++        (
++            await db_session.execute(
++                select(AgentRunLog).where(
++                    AgentRunLog.run_id == task.carrier_run_id,
++                    AgentRunLog.channel == "system",
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++    assert card is not None
+diff --git a/backend/migrations/versions/20260912050000_agent_log_attribution_reset.py b/backend/migrations/versions/20260912050000_agent_log_attribution_reset.py
+index 5589bd125..486b8cda4 100644
+--- a/backend/migrations/versions/20260912050000_agent_log_attribution_reset.py
++++ b/backend/migrations/versions/20260912050000_agent_log_attribution_reset.py
+@@ -12,9 +12,10 @@ agent-log-hub-attribution-cross-session-contamination.md），正确归属由 CL
+ 
+ 1. ``UPDATE platform_agent_logs SET agent_session_id = NULL``——行保留
+    （探测事实/invocations 计数不动），仅清归属列等重推；
+-2. ``UPDATE agent_sessions SET deleted_at = now() WHERE origin = 'tool_report'
+-   AND deleted_at IS NULL``——旧 ``{harness}|{ctx}`` 聚合键会话在新解析下
+-   永不再命中（新键值 ``{ctx}``），防僵尸；软删不硬删（R-07 可逆）；
++2. ``UPDATE agent_sessions SET deleted_at = <迁移执行时刻（绑定参数）>`` WHERE
++   ``origin = 'tool_report' AND deleted_at IS NULL``——旧 ``{harness}|{ctx}``
++   聚合键会话在新解析下永不再命中（新键值 ``{ctx}``），防僵尸；软删不硬删
++   （R-07 可逆）；
+ 3. ``DELETE FROM change_session_links``——全表清空：links 无来源列，错配
+    时代的 hub 污染行与合法行不可区分，用户裁决全清（DG-04）；
+ 4. ``DELETE FROM quicklog_session_links``——同上。
+@@ -35,6 +36,7 @@ created_at: 2026-09-12 05:00:00
+ 
+ from __future__ import annotations
+ 
++from datetime import UTC, datetime
+ from typing import Sequence
+ 
+ import sqlalchemy as sa
+@@ -50,11 +52,13 @@ def upgrade() -> None:
+     # ── D-004@v2 ①：清归属列（行保留，重推重建归属）──
+     op.execute(sa.text("UPDATE platform_agent_logs SET agent_session_id = NULL"))
+     # ── D-004@v2 ②：旧 {harness}|{ctx} 聚合键 tool_report 会话软删防僵尸（R-07 可逆）──
++    # 时间戳走绑定参数由 Python 侧生成——SQL now() 是 PG-only 函数（SQLite
++    # upgrade 直接 OperationalError；2026-09-13 审查改方言无关）。
+     op.execute(
+         sa.text(
+-            "UPDATE agent_sessions SET deleted_at = now() "
++            "UPDATE agent_sessions SET deleted_at = :ts "
+             "WHERE origin = 'tool_report' AND deleted_at IS NULL"
+-        )
++        ).bindparams(ts=datetime.now(UTC))
+     )
+     # ── D-004@v2 ③④：两张 links 表全清（无来源列，污染行与合法行不可区分，DG-04）──
+     op.execute(sa.text("DELETE FROM change_session_links"))
+diff --git a/backend/tests/test_migrations_graph.py b/backend/tests/test_migrations_graph.py
+new file mode 100644
+index 000000000..4b875c4ea
+--- /dev/null
++++ b/backend/tests/test_migrations_graph.py
+@@ -0,0 +1,92 @@
++"""alembic 版本图守护：迁移链必须单头、引用闭合、revision 唯一。
++
++背景（2026-09-13 24h 审查）：并行变更各自挂迁移但 down_revision 接错基线，
++两周内两次产生双头（2026-09-12 b6fb75dee 的 20260910130000 从 5e295549e20f
++再分叉，与 20260912110000 并存；更早 6756e634f119 同类，见 local.yaml
++known_failures D 段沿革）。双头下 ``alembic upgrade head`` 直接报 Multiple
++head revisions，而 deploy/docker-compose.yml 启动命令即 ``alembic upgrade
++head && exec uvicorn ...``——后端容器起不来，且测试建表走 metadata 不走
++迁移链，CI 拦不住。本守护用 AST 静态解析 versions/*.py（不 import 迁移
++模块、不连库，快且无副作用）。
++
++规则：
++- revision 标识全目录唯一；
++- down_revision（str / tuple / None）引用的 revision 必须存在（防手滑改号
++  悬空）；
++- 无后继引用的 head 恰好一个。
++"""
++
++from __future__ import annotations
++
++import ast
++from pathlib import Path
++
++VERSIONS_DIR = Path(__file__).resolve().parents[1] / "migrations" / "versions"
++
++
++def _load_revisions() -> list[tuple[str, str | tuple[str, ...] | None, str]]:
++    """解析全部迁移文件的 (revision, down_revision, 文件名)。
++
++    AST 取模块级赋值字面量——down_revision 可能是 str、tuple（merge）或 None。
++    """
++    assert VERSIONS_DIR.is_dir(), f"迁移目录不存在: {VERSIONS_DIR}"
++    files = sorted(VERSIONS_DIR.glob("*.py"))
++    assert files, "迁移目录为空——守护测试自身失效"
++    rows: list[tuple[str, str | tuple[str, ...] | None, str]] = []
++    for path in files:
++        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++        rev: str | None = None
++        down: str | tuple[str, ...] | None = None
++        # 两种模块级赋值形态都要接：老模板 ``revision = "x"``（ast.Assign）与
++        # 新模板 ``revision: str = "x"``（ast.AnnAssign，20260912050000 起在用）。
++        assigns: list[tuple[str, ast.expr]] = []
++        for node in tree.body:
++            if isinstance(node, ast.Assign):
++                assigns.extend((t.id, node.value) for t in node.targets if isinstance(t, ast.Name))
++            elif (
++                isinstance(node, ast.AnnAssign)
++                and isinstance(node.target, ast.Name)
++                and node.value is not None
++            ):
++                assigns.append((node.target.id, node.value))
++        for name, value in assigns:
++            try:
++                literal = ast.literal_eval(value)
++            except ValueError:
++                continue
++            if name == "revision" and isinstance(literal, str):
++                rev = literal
++            elif name == "down_revision":
++                down = literal
++        if rev is None:
++            continue  # 非迁移辅助模块（如 __init__）无 revision
++        rows.append((rev, down, path.name))
++    return rows
++
++
++def test_migration_revisions_unique() -> None:
++    rows = _load_revisions()
++    assert len(rows) >= 2, "至少应有多个迁移文件（守护自身健全性）"
++    seen: dict[str, str] = {}
++    for rev, _down, filename in rows:
++        assert rev not in seen, f"revision {rev!r} 重复定义：{seen[rev]} 与 {filename}"
++        seen[rev] = filename
++
++
++def test_migration_graph_single_head_and_closed_refs() -> None:
++    rows = _load_revisions()
++    known = {rev for rev, _down, _filename in rows}
++    referenced: set[str] = set()
++    for _rev, down, filename in rows:
++        parents = down if isinstance(down, tuple) else ((down,) if down else ())
++        for parent in parents:
++            assert parent in known, (
++                f"{filename} 的 down_revision={parent!r} 不存在于版本目录（悬空引用）"
++            )
++            referenced.add(parent)
++    heads = sorted(known - referenced)
++    assert len(heads) == 1, (
++        f"alembic 多头（{len(heads)} 个）：{heads}——deploy compose 启动命令"
++        " `alembic upgrade head` 会直接失败；新迁移的 down_revision 必须接当前"
++        " head，并行迁移须补 merge revision（先例 1d763051eb15 / c97f3be457e6）"
++    )
+diff --git a/scripts/migrate-spec-junction.mjs b/scripts/migrate-spec-junction.mjs
+new file mode 100644
+index 000000000..47910bd8c
+--- /dev/null
++++ b/scripts/migrate-spec-junction.mjs
+@@ -0,0 +1,173 @@
++#!/usr/bin/env node
++/**
++ * migrate-spec-junction.mjs — daemon 规范目录 junction 迁移官方脚本（三护栏）
++ *
++ * 来源坑：docs/sillyspec/platform-spec-junction-migration-split.md（2026-09-09 实证）：
++ * 迁移快照落后进行中写入 30 分钟 → 变更产物劈在两个目录；备份落在 specs/ 与
++ * spec-backups/ 两处且内容不一致，极易拿错。本脚本把三条改进建议机制化：
++ *   ① 先全量快照再切 junction（快照的是切换瞬间的真实活目录，不是历史副本）；
++ *   ② 切换前静默窗口检查（.runtime 最近 5 秒有写入 → 拒绝，提示稍后重试）；
++ *   ③ 备份位置唯一：~/.sillyhub/daemon/spec-backups/<wsId>-prejunction-<ts>/。
++ *
++ * 用法：
++ *   node scripts/migrate-spec-junction.mjs <workspaceId> <repoSillySpecAbsDir>          # dry-run 计划
++ *   node scripts/migrate-spec-junction.mjs <workspaceId> <repoSillySpecAbsDir> --apply  # 执行
++ *
++ * 行为：
++ *   1. 校验：workspaceId 形如 UUID；repo .sillyspec 目录存在；daemon specs/<wsId> 存在且
++ *      当前不是 junction（已 junction 则幂等退出）。
++ *   2. 静默检查：活目录 .runtime 下任意文件 mtime 距今 <5s → 拒绝执行（CLI/daemon 在写）。
++ *   3. 快照：活目录整树复制到 spec-backups/<wsId>-prejunction-<YYYYMMDD-HHMMSS>/。
++ *   4. 切换：specs/<wsId> 改名 <wsId>.switching-<ts>（临时持有，非备份）→ 在原位创建
++ *      junction 指向 repo .sillyspec（Windows junction / POSIX symlink 自动选择）。
++ *   5. 验证：经 junction 读写探针文件成功 → 删临时持有目录（备份已在唯一位置）；
++ *      失败 → 自动回滚（删 junction、持有目录改名回去），退出码 1。
++ *
++ * 注意：junction 目标（repo .sillyspec）若已有旧内容，与快照的新内容可能分裂——本脚本
++ * 不自动合并（风险大于收益），切换后请人工比对 spec-backups 快照与 repo 侧差异后搬运。
++ * 跨平台：Windows 用 junction type，POSIX 用 dir symlink。
++ */
++import { existsSync, statSync, lstatSync, readdirSync, renameSync, symlinkSync, rmSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
++import { join, basename, dirname } from 'node:path'
++import { homedir } from 'node:os'
++
++const args = process.argv.slice(2)
++const apply = args.includes('--apply')
++const positional = args.filter(a => !a.startsWith('--'))
++if (positional.length !== 2) {
++  console.error('用法: node scripts/migrate-spec-junction.mjs <workspaceId> <repoSillySpecAbsDir> [--apply]')
++  process.exit(2)
++}
++const [wsId, repoSpecDir] = positional
++const DAEMON_HOME = join(homedir(), '.sillyhub', 'daemon')
++const SPECS_DIR = join(DAEMON_HOME, 'specs')
++const BACKUPS_DIR = join(DAEMON_HOME, 'spec-backups')
++const liveDir = join(SPECS_DIR, wsId)
++
++// ── 1. 校验 ──
++if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wsId)) {
++  console.error(`❌ workspaceId 形态非 UUID: ${wsId}（非 UUID 目录名不得进 daemon specs/——心跳 UUID 守卫会 422）`)
++  process.exit(2)
++}
++if (!existsSync(repoSpecDir) || !statSync(repoSpecDir).isDirectory()) {
++  console.error(`❌ 目标目录不存在或非目录: ${repoSpecDir}`)
++  process.exit(2)
++}
++if (!existsSync(liveDir)) {
++  console.error(`❌ daemon specs 下无该工作区目录: ${liveDir}`)
++  process.exit(1)
++}
++// 必须真 lstat：statSync 会跟随 junction/symlink 返回目标目录的 stat
++// （isSymbolicLink 恒 false）——幂等护栏对已迁移目录永不触发，--apply 重跑
++// 会穿透护栏把整个 repo .sillyspec 经 junction 复制一遍快照（2026-09-13 审查）。
++const liveStat = lstatSync(liveDir)
++if (liveStat.isSymbolicLink()) {
++  console.log(`ℹ️ ${liveDir} 已是 junction/symlink——幂等退出，无需迁移`)
++  process.exit(0)
++}
++
++// ── 2. 静默窗口检查（护栏②）──
++const QUIESCE_MS = 5_000
++function latestWriteMs(dir, root = true) {
++  let latest = 0
++  let names
++  try { names = readdirSync(dir) } catch { return latest }
++  for (const n of names) {
++    const p = join(dir, n)
++    let st
++    try { st = statSync(p) } catch { continue }
++    if (st.isDirectory()) latest = Math.max(latest, latestWriteMs(p, false))
++    else latest = Math.max(latest, st.mtimeMs)
++  }
++  return latest
++}
++const latest = latestWriteMs(join(liveDir, '.runtime'))
++const quietMs = Date.now() - latest
++if (apply && latest > 0 && quietMs < QUIESCE_MS) {
++  console.error(`❌ 静默检查未过：.runtime ${Math.round(quietMs / 1000)}s 前仍有写入（CLI/daemon 活跃）——等写入停止后重试`)
++  console.error(`   （坑 platform-spec-junction-migration-split 护栏②：迁移期写入 = 产物分裂）`)
++  process.exit(1)
++}
++
++// ── 计划输出 / dry-run ──
++const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15)
++const backupDir = join(BACKUPS_DIR, `${wsId}-prejunction-${ts}`)
++const holdDir = join(SPECS_DIR, `${wsId}.switching-${ts}`)
++console.log(`迁移计划（${apply ? ' APPLY' : 'DRY-RUN'}）：`)
++console.log(`  活目录     ${liveDir}`)
++console.log(`  junction → ${repoSpecDir}`)
++console.log(`  快照备份   ${backupDir}   （护栏①③：切换瞬间全量快照，位置唯一）`)
++console.log(`  临时持有   ${holdDir}   （验证通过后删除，不是备份）`)
++console.log(`  静默窗口   ${latest === 0 ? '（无 .runtime，视为静默）' : `最近写入 ${Math.round(quietMs / 1000)}s 前（阈值 ${QUIESCE_MS / 1000}s）`}`)
++if (!apply) {
++  console.log('\ndry-run 不落任何改动；确认后加 --apply 执行')
++  process.exit(0)
++}
++
++// ── 3. 全量快照（护栏①）──
++function copyTree(src, dst) {
++  mkdirSync(dst, { recursive: true })
++  for (const n of readdirSync(src)) {
++    const s = join(src, n), d = join(dst, n)
++    const st = statSync(s)
++    if (st.isDirectory()) copyTree(s, d)
++    else copyFileSync(s, d)
++  }
++}
++try {
++  copyTree(liveDir, backupDir)
++  console.log(`✅ 快照完成（唯一备份位置）: ${backupDir}`)
++} catch (e) {
++  console.error(`❌ 快照失败，中止（未做任何切换）: ${e.message}`)
++  process.exit(1)
++}
++
++// ── 4. 切换 ──
++try {
++  renameSync(liveDir, holdDir)
++  try {
++    symlinkSync(repoSpecDir, liveDir, 'junction')
++  } catch {
++    symlinkSync(repoSpecDir, liveDir, 'dir') // POSIX
++  }
++} catch (e) {
++  // 回滚：持有目录改名回去——失败必须如实报（原版 catch{} 吞错后仍打印
++  // 「已回滚」，活目录实际缺失却被当成功，只剩快照可救）。
++  let restored = false
++  if (existsSync(holdDir) && !existsSync(liveDir)) {
++    try { renameSync(holdDir, liveDir); restored = true } catch (e2) {
++      console.error(`❌ 回滚失败：活目录未还原。数据保留在 ${holdDir}，快照在 ${backupDir}，请人工恢复: ${e2.message}`)
++    }
++  }
++  if (restored) {
++    console.error(`❌ junction 创建失败，已回滚（活目录已还原）: ${e.message}`)
++  } else if (existsSync(liveDir)) {
++    console.error(`❌ junction 创建失败（改名未发生，活目录仍在原位）: ${e.message}`)
++  }
++  process.exit(1)
++}
++
++// ── 5. 验证 + 收尾 ──
++const probe = join(liveDir, '.runtime', '.junction-probe-' + ts)
++try {
++  mkdirSync(join(liveDir, '.runtime'), { recursive: true })
++  writeFileSync(probe, 'junction-verify\n')
++  if (readFileSync(probe, 'utf8') !== 'junction-verify\n') throw new Error('读回不一致')
++  unlinkSync(probe)
++  rmSync(holdDir, { recursive: true, force: true })
++  console.log(`✅ junction 验证通过（读写探针），临时持有目录已清理`)
++  console.log(`ℹ️ 后续：比对快照 ${backupDir} 与 repo 侧内容——快照里更新的人工搬运进 repo（本脚本不自动合并）`)
++} catch (e) {
++  // 验证失败回滚：删 junction、持有目录还原——每步失败如实报，活目录未还原
++  // 时不得仍报「已回滚」。
++  try { rmSync(liveDir, { recursive: true, force: true }) } catch (e2) {
++    console.error(`⚠️ junction 删除失败（${liveDir} 仍在）: ${e2.message}`)
++  }
++  try {
++    renameSync(holdDir, liveDir)
++    console.error(`❌ junction 验证失败，已回滚（活目录已还原，快照保留在 ${backupDir}）: ${e.message}`)
++  } catch (e2) {
++    console.error(`❌ junction 验证失败且回滚未完成：活目录缺失，数据在 ${holdDir}，快照在 ${backupDir}，请人工恢复: ${e2.message}`)
++  }
++  process.exit(1)
++}

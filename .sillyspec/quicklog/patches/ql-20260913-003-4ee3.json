@@ -1,0 +1,94 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-72fca0c3",
+  "totals": {
+    "files": 9,
+    "additions": 469,
+    "deletions": 30
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/daemon.md",
+      "declared": true,
+      "additions": 9,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/backend/modules/migrations.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/messages.py",
+      "declared": true,
+      "additions": 8,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/auto_resume.py",
+      "declared": true,
+      "additions": 47,
+      "deletions": 24,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py",
+      "declared": true,
+      "additions": 36,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_trigger_lock.py",
+      "declared": true,
+      "additions": 89,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/migrations/versions/20260912050000_agent_log_attribution_reset.py",
+      "declared": true,
+      "additions": 9,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/tests/test_migrations_graph.py",
+      "declared": true,
+      "additions": 92,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "scripts/migrate-spec-junction.mjs",
+      "declared": true,
+      "additions": 173,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260913-003-4ee3",
+  "sessionId": "quick-72fca0c3",
+  "savedAt": "2026-09-13T00:04:57.107Z",
+  "patchSha256": "988e3d14aa946c7aa53db81885dcbb90fd1188afa47a8b7eb0761e31bea16397",
+  "patchStatus": "ok"
+}

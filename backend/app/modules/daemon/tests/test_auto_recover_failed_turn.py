@@ -438,6 +438,42 @@ async def test_transient_tight_chain_limit(db_session: AsyncSession, mocked_redi
     assert await _queued(db_session, session_id) == []
 
 
+@pytest.mark.asyncio
+async def test_transient_replay_alternating_type_chain_limit(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """交替错误类型击穿同型守卫 → 紧链上限兜底停跑（2026-09-13 24h 审查 P1）。
+
+    前驱 run 类型与本次不同（rate_limited vs provider_error）——紧邻同型守卫
+    放行（修复前：交替型故障每次失败都重新入队，close 钩子立即派发，无上限
+    计费重放）；本 run 已是自动重放产物（auto_resume_of 指向前驱），紧链=2
+    触发上限停跑 + error_detail 接续指引写回。
+    """
+    lease_id, run_id, token, session_id, uid = await _seed(db_session)
+    prev1 = await _add_prev_run(
+        db_session,
+        session_id,
+        uid,
+        minutes_before=30,
+        error_detail={"type": "rate_limited"},
+    )
+    run = await db_session.get(AgentRun, run_id)
+    run.metadata_ = {"auto_resume_of": str(prev1)}
+    await db_session.commit()
+
+    closed = await _close_failed(
+        db_session,
+        lease_id,
+        run_id,
+        token,
+        _transient_error("provider_error"),
+    )
+    assert await _queued(db_session, session_id) == []
+    detail = closed.error_detail if isinstance(closed.error_detail, dict) else {}
+    assert detail.get("auto_resume_stopped") is True
+    assert "上限" in str(detail.get("hint") or "")
+
+
 # ── 分支 C ───────────────────────────────────────────────────────────────────
 
 

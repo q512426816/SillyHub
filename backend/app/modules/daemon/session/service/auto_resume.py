@@ -518,28 +518,7 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
                     run_id=str(agent_run.id),
                     chain=chain_len,
                 )
-                # 2026-09-12-session-live-display-fixes（R5 / D-004）：链到上限停跑
-                # 不再纯静默——对刚终态的 run 补写 error_detail 接续指引（前端失败
-                # 卡已渲染 hint，零前端改动即可告知「为什么不再自动续、该怎么做」；
-                # 实证会话 d4c29d95 15:11 chain=2 停跑，用户只见「供应商异常」失败卡
-                # 不知道要手动继续）。type/code/raw 原值不动（auto-recovery 判定消费
-                # type/raw，既有断言零影响）；写入失败仅 warn（维持全程静默容错原则）。
-                try:
-                    detail = dict(agent_run.error_detail) if agent_run.error_detail else {}
-                    detail["hint"] = (
-                        "上游连续中断，自动续跑已达上限（2 次）；"
-                        "请手动发送继续接续，或切换供应商后重发"
-                    )
-                    detail["auto_resume_stopped"] = True
-                    agent_run.error_detail = detail
-                    await svc._session.commit()
-                except Exception as hint_err:  # noqa: BLE001（静默容错原则）
-                    await svc._session.rollback()
-                    log.warning(
-                        "auto_recover_chain_limit_hint_write_failed",
-                        run_id=str(agent_run.id),
-                        error=str(hint_err),
-                    )
+                await _write_chain_limit_hint(svc, agent_run)
                 return
             enqueue_prompt = RESUME_NUDGE_PROMPT
         else:
@@ -553,13 +532,14 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
                 log.info("auto_recover_skip_attachment", run_id=str(agent_run.id))
                 return
             # 紧邻前 run 同型失败且输入相同 → 本 run 已是自动重投结果（持续性
-            # 故障），不再追加交回用户（ql-20260903-011 防循环泛化）。
+            # 故障），不再追加交回用户（ql-20260903-011 防循环泛化）。前驱取
+            # 「排除自身后按 G4 同款排序的首行」——created_at 严格小于在撞值时
+            # 会跳过同刻前驱取错行（漏判）。
             prev_run = (
                 await svc._session.execute(
                     select(AgentRun)
                     .where(
                         AgentRun.agent_session_id == session_id,
-                        AgentRun.created_at < agent_run.created_at,
                         AgentRun.id != agent_run.id,
                     )
                     .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
@@ -585,6 +565,22 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
                     if (prev_prompt or "").strip() == prompt:
                         log.info("auto_recover_skip_already_retried", run_id=str(agent_run.id))
                         return
+            # 紧链上限（2026-09-13 24h 审查 P1）：紧邻同型守卫拦不住交替错误
+            # 类型（网关 429↔502 抖动相邻永不同型，守卫永不命中 → 每次失败
+            # 都重新入队、close 钩子立即派发，无上限计费重放）。auto_resume_of
+            # 链长与错误类型无关（派发链 queue.py→inject.py 落该元数据），
+            # 与 nudge 分支同款 AUTO_RESUME_MAX_CHAIN 兜底：本 run 已是自动
+            # 重放产物即停跑交回用户。
+            chain_len = await _count_chain_type(svc, agent_run)
+            if chain_len >= AUTO_RESUME_MAX_CHAIN:
+                log.info(
+                    "auto_recover_replay_chain_limit",
+                    session_id=str(session_id),
+                    run_id=str(agent_run.id),
+                    chain=chain_len,
+                )
+                await _write_chain_limit_hint(svc, agent_run)
+                return
             # 用户已手动重发同文并排队（pending）→ 不重复追加。
             dup_pending_same_text = (
                 await svc._session.execute(
@@ -695,3 +691,30 @@ async def _count_chain_type(
         except ValueError:
             cursor = None
     return chain
+
+
+async def _write_chain_limit_hint(svc, agent_run: AgentRun) -> None:
+    """链上限停跑补写 error_detail 接续指引（2026-09-12-session-live-display-fixes
+    R5 / D-004；nudge 与重放分支共用）。
+
+    链到上限停跑不再纯静默——对刚终态的 run 补写 hint（前端失败卡已渲染
+    hint，零前端改动即可告知「为什么不再自动续、该怎么做」；实证会话
+    d4c29d95 15:11 chain=2 停跑，用户只见「供应商异常」失败卡不知道要手动
+    继续）。type/code/raw 原值不动（auto-recovery 判定消费 type/raw，既有
+    断言零影响）；写入失败仅 warn（维持全程静默容错原则）。
+    """
+    try:
+        detail = dict(agent_run.error_detail) if agent_run.error_detail else {}
+        detail["hint"] = (
+            "上游连续中断，自动续跑已达上限（2 次）；请手动发送继续接续，或切换供应商后重发"
+        )
+        detail["auto_resume_stopped"] = True
+        agent_run.error_detail = detail
+        await svc._session.commit()
+    except Exception as hint_err:  # 静默容错原则（维持全程不上抛）
+        await svc._session.rollback()
+        log.warning(
+            "auto_recover_chain_limit_hint_write_failed",
+            run_id=str(agent_run.id),
+            error=str(hint_err),
+        )

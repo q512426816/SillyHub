@@ -106,3 +106,43 @@
 根因：原轮次行 tokens 是 input+output 合并单值且不含缓存两维，长会话 prompt cache 占大头时数字远小于直觉、与会话用量条（含缓存四维）口径不可比，用户误读为统计异常
 方案：后端 runs DTO SessionRunRead 扩 cache_read_tokens/cache_creation_tokens 两 nullable 字段（from_attributes 直映既有列零查询改动）+gen:types；前端 RunListRow 由单 tokens 列改为主行 grid（轮次/状态/耗时/发送者）+下方带标签 meta 行四维独立展示（对齐 TaskListRow meta 设计语言，flex-wrap 窄容器安全；null 维不渲染不编造 0，全 null 无 meta 行）；lib/daemon sessions.ts 手写接口同步两可选字段；模块文档三处同步（含修正 frontend_components 轮次惰性取数陈旧断言——实现本就挂载即拉）；审计解锁的删除/新增文件为并行会话 docs/sillyspec 归档移动与 scripts 未跟踪脚本，非本 quick 产物不随本次提交
 结果：backend test_session_runs_endpoint.py 13 passed（含 cache 两维正/负断言扩展）；frontend task-execution-panel.test.tsx 13 passed（新增四维展示/null 维省略/全 null 无 meta 行用例）；ruff 两后端文件通过；mypy session_insights.py 0 错；frontend tsc --noEmit 干净；eslint 三前端文件 0 告警；未部署（本地改动）
+
+## ql-20260913-001-1c98 | 2026-09-13 07:17:04 | 24h 审查风险修复批第三轮：group 共识事务边界+alembic 双头+auto_resume 重放链上限+junction 迁移脚本护栏+迁移 now() 方言兼容
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/daemon/group/service/messages.py, backend/app/modules/daemon/session/service/auto_resume.py, backend/app/modules/daemon/tests/test_group_consensus.py, backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py, backend/migrations/versions/20260910130000_group_consensus.py, backend/migrations/versions/20260912050000_agent_log_attribution_reset.py, backend/tests/test_migrations_graph.py, scripts/migrate-spec-junction.mjs, .sillyspec/docs/backend/modules/daemon.md, .sillyspec/docs/backend/modules/migrations.md
+
+## ql-20260913-002-a71d | 2026-09-13 02:10:00 | spike-01 codex tokenUsage.last 字段真机实证（2026-09-13-ctx-usage-all-providers task-08）
+状态：已完成
+关联变更：2026-09-13-ctx-usage-all-providers（task-08 / R-01 / FR-07）
+验证方法：临时 Node ESM 脚本（/tmp/spike-ctx-usage/spike-codex.mjs，不进仓）spawn 真机 `codex app-server --listen stdio://`（codex-cli 0.147.0），行分隔 JSON-RPC 握手（initialize → notifications/initialized → thread/start）→ turn/start 单轮（提示词要求不调用工具），捕获全部通知帧
+结论（thread/tokenUsage/updated 实捕 JSON）：
+1. `last` 字段存在且为单调用快照（首轮 total == last 逐字段相同，佐证 total 线程累计 / last 单调用的既有注释口径）
+2. 毛值口径实锤：last.inputTokens=12122 ≥ cachedInputTokens=1216 且 totalTokens=12126=inputTokens+outputTokens——inputTokens 已含 cache 分量即该次调用全提示词大小，ctx_tokens = last.inputTokens 直取正确（加 cache 分量会双计）
+3. 意外收获：通知自带 `modelContextWindow: 950000`（模型上下文窗口分母真源！）——后续可做「codex 会话环分母精确派生」独立变更（本次 NG-05 分母链不动，仅记录机会）
+pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 2026-09-04 真机采样（README 采样环境节：pi 0.81.1 `pi --mode json -p "用 Bash 执行 echo pi-smoke 并汇报"` 真工具调用轮），两调用轮 turn_end.usage 与末次 message_end 逐字段相同（input=520 非累计 1000）——单调用快照语义真机证据链闭合，无需重跑
+
+## ql-20260913-003-4ee3 | 2026-09-13 07:25:02 | 24h 审查风险修复批第三轮收尾：群共识收尾事务+auto_resume 重放链上限+junction 脚本护栏+迁移方言兼容+alembic 单头守护
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/group/service/messages.py（gather 后失败登记/立即收口变更统一收口 commit（P0 后半））
+- backend/app/modules/daemon/session/service/auto_resume.py（重放分支 auto_resume_of 紧链上限+hint 共用助手+前驱查询 tiebreak）
+- backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py（新增交替类型击穿同型守卫用例）
+- backend/app/modules/daemon/tests/test_group_trigger_lock.py（新增失败登记持久化用例（rollback 独立重读断言））
+- backend/tests/test_migrations_graph.py（新增 alembic 单头/引用闭合/唯一守护（AST 接 Assign+AnnAssign））
+- backend/migrations/versions/20260912050000_agent_log_attribution_reset.py（now() 改绑定参数方言无关）
+- scripts/migrate-spec-junction.mjs（statSync→lstatSync 修幂等护栏+两处回滚失败如实上报）
+- .sillyspec/docs/backend/modules/daemon.md（群共识事务三段边界+自动恢复 B 分支链上限）
+- .sillyspec/docs/backend/modules/migrations.md（DML 方言规则+单头守护+20260912050000 修订）
+需求：24h 审查风险修复批第三轮收尾：群共识收尾事务+auto_resume 重放链上限+junction 脚本护栏+迁移方言兼容+alembic 单头守护
+根因：①get_session 成功路径不 commit，gather 后共识变更只 flush 即回滚；②同型守卫拦不住交替错误类型；③statSync 跟随 junction 致幂等护栏失效、回滚 catch{} 吞错误报成功；④now() 是 PG-only 函数；⑤双头两周两次复发且 CI 拦不住
+方案：①send 返回前 consensus_task 非空统一收口 commit；②重放分支补 auto_resume_of 紧链上限 2+hint（与 nudge 同款，hint 提取共用助手）+前驱查询排除自身消撞值；③lstatSync+两处回滚逐步如实上报；④bindparams(ts) Python 侧生成时间戳；⑤新增 AST 单头/引用闭合/唯一守护测试
+结果：9 个相关测试文件 62 passed（含 2 新用例）；mypy 942 文件 0 issue；ruff check+format 0 告警；node --check 过；迁移语句 SQLite 绑定参数冒烟过
+审计：📎 文档引用失效：5/0 处 file:line 失效（sillyspec docs check 可复现）
+审计：   ❌ [docs/sillyspec/conflict-compare-wrong-status-root.md:0]  → 文档不存在
+审计：   ❌ [docs/sillyspec/docs-gate-shared-worktree-parallel-block.md:0]  → 文档不存在
+审计：   ❌ [docs/sillyspec/platform-spec-junction-migration-split.md:0]  → 文档不存在
+审计：   ❌ [docs/sillyspec/platform-sync-progress-rollback-and-db-corruption.md:0]  → 文档不存在
+审计：   ❌ [docs/sillyspec/pre-commit-autofix-swallows-commit.md:0]  → 文档不存在
+审计：⚖️ 归属切分：12 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/conflict-compare-wrong-status-root.md, docs/sillyspec/docs-gate-shared-worktree-parallel-block.md, docs/sillyspec/platform-spec-junction-migration-split.md, docs/sillyspec/platform-sync-progress-rollback-and-db-corruption.md, docs/sillyspec/pre-commit-autofix-swallows-commit.md, docs/sillyspec/finished/agent-log-ctx-attribution-mismatch.md, docs/sillyspec/finished/agent-log-hub-attribution-cross-session-contamination.md, docs/sillyspec/finished/conflict-compare-wrong-status-root.md, docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md, docs/sillyspec/finished/platform-spec-junction-migration-split.md, docs/sillyspec/finished/platform-sync-progress-rollback-and-db-corruption.md, docs/sillyspec/finished/pre-commit-autofix-swallows-commit.md
