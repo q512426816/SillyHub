@@ -91,6 +91,18 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy 
 - 看到 `Application startup complete` + `Uvicorn running on http://0.0.0.0:8000` = 成功
 - 看到 alembic 报错 / 容器反复重启 = migration 问题，见下方「回滚」
 
+**一次性运维动作（agent 日志归属重构上线窗口，2026-09-13 部署裁决）**——执行完可删本段：
+
+20260912050000 清库迁移已改 no-op（不再随 `alembic upgrade head` 自动执行）。按 DG-03 时序：backend 发布（本次部署）→ CLI/daemon 新版铺开 → **手动执行一次**清库脚本，之后由新版 CLI 重推重建正确归属。服务器端（镜像内 `/app/scripts/`，`COPY . .` 随源码进镜像）：
+
+```bash
+ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 \
+  'docker exec multi-agent-platform-backend-1 /opt/venv/bin/python /app/scripts/reset_agent_log_attribution.py'
+# dry-run 看四类影响计数；确认后加 --apply（单事务 + 前后计数回报，执行后计数应全 0）
+```
+
+⚠️ **只跑一次；CLI 重推开始后禁跑**（脚本会把已重建的正确归属再清掉）。脚本细节见 `backend/scripts/reset_agent_log_attribution.py` docstring 与 `.sillyspec/docs/backend/modules/migrations.md` 的 20260912050000 段。
+
 **若本次动了 daemon bundle 或 install 脚本，再验 daemon 分发端点**（公网经 nginx 与后端容器
 必须一致，不一致 = nginx 在用静态旧副本，见下方「nginx 与 daemon 分发」）：
 ```bash
@@ -279,6 +291,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
 - **磁盘**：40G 盘。`load-and-up.sh` 自动 `image prune -f` + 删 tar。但 `backup-<时间>` tag 会累积，定期手动清：`docker images | grep backup` → `docker rmi <旧backup>`。
 - **commit_sha=unknown**：health 端点这个字段恒 `unknown` 是既有问题（compose 运行时 `COMMIT_SHA` 覆盖镜像 build 值），不影响功能，见 memory `compose-commit-sha-runtime-override`。
 - **backend 变更触发 alembic**：load + up 后 backend 启动跑 `alembic upgrade head`。migration 链断裂会 crash-loop，看 logs 诊断；项目未上线，可 `docker compose down -v` 重置 DB（先确认数据可丢）。
+- **清库迁移已改 no-op（2026-09-13 部署裁决）**：20260912050000 的破坏性清库 DML **不随** `alembic upgrade head` 自动执行（旧逻辑会在 CLI 升级前自动清库、清空白做；且迁移链重放会把已重建的正确数据再清一遍）。清库改 `backend/scripts/reset_agent_log_attribution.py` 手动执行——见「更新部署 §4」的一次性运维动作段；**只跑一次，CLI 重推开始后禁跑**。
 - **daemon bundle**：backend 镜像依赖 `sillyhub-daemon/build/bundle/`。daemon 的 `src/` 改过必须 `pnpm bundle` 再打包；只改 `scripts/install.*` 不影响 bundle JS（随 rebuild 自动 COPY 最新源）。
 - **不要碰 ppdmq-\***：服务器另有 `ppdmq-app/redis/mysql` 是别的项目，部署只动 `multi-agent-platform-*` 容器。
 - **容器端口用 127.0.0.1**：本机 curl 验证服务器映射端口用 `127.0.0.1`（在服务器上 ssh 内执行），不要用 `localhost`（IPv6 解析问题）。
