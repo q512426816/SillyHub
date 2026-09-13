@@ -146,3 +146,13 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 审计：   ❌ [docs/sillyspec/platform-sync-progress-rollback-and-db-corruption.md:0]  → 文档不存在
 审计：   ❌ [docs/sillyspec/pre-commit-autofix-swallows-commit.md:0]  → 文档不存在
 审计：⚖️ 归属切分：12 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/conflict-compare-wrong-status-root.md, docs/sillyspec/docs-gate-shared-worktree-parallel-block.md, docs/sillyspec/platform-spec-junction-migration-split.md, docs/sillyspec/platform-sync-progress-rollback-and-db-corruption.md, docs/sillyspec/pre-commit-autofix-swallows-commit.md, docs/sillyspec/finished/agent-log-ctx-attribution-mismatch.md, docs/sillyspec/finished/agent-log-hub-attribution-cross-session-contamination.md, docs/sillyspec/finished/conflict-compare-wrong-status-root.md, docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md, docs/sillyspec/finished/platform-spec-junction-migration-split.md, docs/sillyspec/finished/platform-sync-progress-rollback-and-db-corruption.md, docs/sillyspec/finished/pre-commit-autofix-swallows-commit.md
+
+## ql-20260913-004-dd9c | 2026-09-13 08:38:34 | sillyspec CLI 三个工具负面点按规则 15 落 docs/sillyspec/ 活跃坑登记
+状态：已完成
+关联变更：（无）
+文件：
+- docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md（规则 15 活跃坑登记——quick 启动同步阻塞/file-notes 后置生效预告缺失/QUICKLOG 共享文件提交夹带三坑）
+需求：sillyspec CLI 三个工具负面点按规则 15 落 docs/sillyspec/ 活跃坑登记
+根因：上一批修复会话实证：quick 启动被平台同步阻塞 126s 超时会话却已建立；--file-notes step2 传完才被告知仅 step3 生效；QUICKLOG 共享文件提交必夹带并行会话条目
+方案：单文件三坑分节登记（现象/环境/影响/绕过/建议工具修复+处置进展），每坑附实证细节与绕过路径、修复建议按侵入度分档
+结果：docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md 落盘；纯文档登记零代码零测试面；登记会话启动尾部再次实证坑 1 已记入
