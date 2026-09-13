@@ -36,3 +36,13 @@
 - **坑 3（NEW: 前缀两道门禁互斥）已修复**：`change-list.js pathMatches` 在**比对语义**下剥 `NEW:` 前缀（与 target_files 解析器对齐）——design 清单带 NEW: 的待建文件 vs task allowed_paths 裸路径现在命中，「brainstorm 要求加 NEW:」与「plan 覆盖对账」不再互斥。刻意只在比对处剥：存在性核验（design-facts 的 NEW: 豁免）不走 pathMatches、仍见原文。touch 空占位绕过不再需要。测试：change-list-operation 新增 7 断言（23/23 绿）+ pathMatches 消费方回归 47/47。
 - **坑 4（taskcard 不吃平台 cwd 探测）已修复**：index.js taskcard 分支接入 `resolvePlatformSpecDir`（与 run/plan/endpoints 同源，指针 fail-closed 语义一致），平台模式仓库根裸跑不再报「变更目录不存在」。taskcard 回归 3/3 绿。
 - **坑 1（进度回滚环）/ 坑 2（DB 并发损坏）留专项**：分别涉及「pull 应用前 last_local_modified vs last_pushed 比对 + resolve 无冲突文件强推 + disconnect 指针语义」与「心跳只读快照 + 定期 .bak」——同步协议与存储层设计决策，非巡检级小修；本文件恢复序列（①disconnect 态重放 ②等指针重建 ③环自熄）已实证可复用。保持活跃。
+
+## 处置记录（2026-09-12 用户指认收口，四坑全处置，归档）
+
+- **坑1①（pull 回写回滚）**：核实在位且已相当成熟——pull 二级比对「本地 last_local_modified_ts > last_synced 且平台 last_pushed_at 更新 → 冲突不 import」+ 自竞态防御重读（base-ts-silent-conflict 家族历代修复），另有 skipIfLocalDirty 自动注入守卫。
+- **坑1②（resolve 无冲突文件拒绝）本轮修复**：keep-local 无冲突文件时降级「无冲突强推」——拉平台 last_pushed_at、以有冲突路径同款 MAX/COALESCE 单调 SQL 推进 base_ts、自动重推闭环（fromResolve）；take-platform 依赖冲突文件快照仍拒绝。回滚环中间态（冲突文件被静默清除）从人肉 SQL 变一条命令。
+- **坑1③（disconnect 清指针放大回滚）本轮修复**：`platform disconnect --keep-pointer` 只清 local.yaml platform 段、保留指针/声明给 daemon 内嵌 CLI（恢复序列「只断自己同步」的正规出口）；默认三清前检测 daemon 主目录存在即醒目警告（含指引）。默认三清语义不变（本地模式可达性不回归）。
+- **坑2①（daemon 只读快照化）**：核实 WAL + busy_timeout=5000 已在引擎层（并发写者互斥基础）；daemon 心跳侧只读化留注记——本机 daemon spawn node 恒挂起未解（daemon-spawn-node-hang），心跳 progress 采集链路当前不可用，待其修复随链路重构一并做。
+- **坑2②（.bak 快照）本轮修复**：`ProgressManager._write` 前 5 分钟龄控 `VACUUM INTO` 一致性快照落 `sillyspec.db.bak`（db.js `_openWithFallback` 既有回退链直接消费）——损坏最坏回退 ≤5min 进度，事故的「0 字节主库 + .bak 全空只能删库重放」有了恢复出路；best-effort 失败不影响写主流程。
+- **测试**：新增 `test/rollback-loop-guards.test.mjs` 5 用例（快照节流/keep-pointer 保留指针/默认三清回归/无冲突强推 base_ts 对齐/take-platform 仍拒绝）5/5 绿；platform-sync 全家回归 21 文件通过。
+- 坑3（NEW: 前缀）/坑4（taskcard 探测）已于 2026-09-09 轮修复（见前次处置进展）。归档。

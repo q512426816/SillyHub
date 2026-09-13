@@ -116,3 +116,10 @@ ghost_cleanup 不进本 change。先 brainstorm。
 ## 巡检注记（2026-09-09 定时扫描）
 
 - 根治 change `2026-09-09-conflict-root-workspace-scoping` **已开且正在进行中**（本仓 .sillyspec/changes/ 下有实体，verify-facts.json 处于活跃编辑）——按本文件口径走完整流程，定时巡检不抢跑。待其 verify/archive 后本文件随验归档。
+
+## 处置记录（2026-09-12 用户指认复核，根治 verify PASS + 部署实证，归档）
+
+- **根治变更 `2026-09-09-conflict-root-workspace-scoping` verify PASS**（按本文件口径走完整流程，6/6 task，主仓提交 28b758edc）：主修三项全落地——①compare RPC 与 resolve 指令强制携带 workspace_id（缺参 422 契约必填）；②daemon 按 `_sillyspecStatusRoots` 映射取根，映射未命中显式 `workspace_root_unknown`（502 + 文案分叉「该工作区尚未被本机认领」），**不回退单槽位**；③无 workspace 的 claim 不再覆盖单槽位（防投毒辅防）。
+- **真实栈集成回执覆盖本坑事故形态**：独立库+独立端口+隔离 daemon 实测「映射命中 + 单槽位被投毒为 Temp」→ compare 200 且读对根读对文件（FR-02 核心命题）；未命中→workspace_root_unknown；resolve 三态（缺 ws 422 / 未命中 failed 回传 / 命中 success——成功恰证明 cwd=映射根而非 Temp）。
+- **部署实证**：本机 daemon bundle（2026-09-11 22:13 更新）含 `workspace_root_unknown` 标记 ×3——存量 daemon 已自更新到修复版。
+- 三端测试：daemon 全量 3830 用例 + compare 30 + platform-commands 42 + 前端 modal 13 全绿。临时绕过（修好前不要点裁决/重开会话 claim 修单槽位/重启无效）不再需要。归档。

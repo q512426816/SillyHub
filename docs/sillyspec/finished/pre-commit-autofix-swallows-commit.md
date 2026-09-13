@@ -59,3 +59,8 @@ pre-commit 4.6.1 下该路径 **exit code = 1（git 层面是响亮失败，非�
   编辑生成 hook 脚本又会被 `pre-commit install` 覆盖——不可持久，弃。
 - **习惯项（对 agent 尤其）**：`git commit` 不接管道掩码退出码（或用
   `set -o pipefail`）；提交后核对 `git log -1` 真有新提交。
+
+## 处置记录（2026-09-12 定时收口，验证归档）
+
+- check-only 方案已入库实证：commit d1d472795（backend/.pre-commit-config.yaml 两 hook 去 --fix，三段实测记录随坑文档进提交）；本仓 pre-push docs gate 亦在同批恢复。
+- 习惯项（不接管道掩码退出码 / 提交后核对 git log -1）与 CLAUDE.md 规则 12 的核实要求互补，继续有效。归档。

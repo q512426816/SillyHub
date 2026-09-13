@@ -39,3 +39,10 @@ junction → 仓库 `.sillyspec/`（另一项目 sillyspec 仓库前一日 21:00
 ## 巡检注记（2026-09-10 定时扫描）
 
 - 迁移工具定位：`pre-junction-backup` 命名与 junction 切换逻辑**不在两仓源码内**（daemon.ts 无此字符串）——本次迁移为运维侧操作过程，三条改进建议（先全量快照再切/迁移期阻止 CLI 写入/备份位置唯一）暂无代码归属方。定位到工具本体（或 daemon 官方化迁移路径立项）前保持活跃；若属一次性运维动作不再复现，可由管理员裁决归档。
+
+## 处置记录（2026-09-12 用户指认收口，官方迁移脚本落地，归档）
+
+- **三护栏已机制化**：平台仓新增 `scripts/migrate-spec-junction.mjs`（运维官方工具，治「迁移无归属方」）——①**先全量快照再切**（快照切换瞬间的真实活目录，杜绝 30 分钟陈旧快照）；②**静默窗口检查**（.runtime 5 秒内有写入即拒绝，CLI/daemon 活跃不迁）；③**备份位置唯一**（`~/.sillyhub/daemon/spec-backups/<wsId>-prejunction-<ts>/`，消灭 specs/ 与 spec-backups/ 双份不一致）；另含 junction 创建后读写探针验证 + 失败自动回滚 + 已 junction 幂等退出 + workspaceId UUID 校验。
+- 用法：`node scripts/migrate-spec-junction.mjs <workspaceId> <repoSillySpecAbsDir>`（dry-run 计划）加 `--apply` 执行；不自动合并两侧内容（快照新内容人工搬运，风险大于收益）。
+- 已验证：语法 + 非 UUID 拒绝 + 目标缺失拒绝分支实测；首次真实使用请按 dry-run → apply 流程盯跑。
+- 本坑的三个改进建议全部落地（手工恢复流程保留作历史记录）。归档。
