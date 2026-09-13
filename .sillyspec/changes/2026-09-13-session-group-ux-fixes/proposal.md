@@ -9,7 +9,7 @@ generated_by: sillyspec-fourpiece-init
 用户实测反馈三项会话/群聊体验缺陷，直接影响日常使用：输入框未发送内容跨入口串台（隐私与误发风险）、移动端输入框高度完全不可调（小屏可用性）、群聊在项目关联的其他工作区不可见（跨工作区协作断裂）。
 
 ## 关键问题
-1. 预会话草稿用固定键 `__pre__`（turn-state.ts:304），所有入口共享一份草稿——A 入口未发送内容必然带入 B 入口，用户感知为「会话间串台」。
+1. 预会话草稿用固定键 `__pre__`（frontend/src/components/daemon/session-panel/turn-state.ts:304），所有入口共享一份草稿——A 入口未发送内容必然带入 B 入口，用户感知为「会话间串台」。
 2. 输入框高度拖拽手柄只绑 mouse 事件（onMouseDown + window mousemove/mouseup），触摸屏零响应；CSS touch-none 已备但 JS 层无触摸通路。
 3. 群聊可见性只认直接 workspace_id（两处前端过滤），项目 M:N 关联的多工作区场景断裂——群挂项目 A（关联 D/F）时 F 看不到群。
 

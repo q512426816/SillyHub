@@ -38,8 +38,8 @@ goal: >
   重生成前端类型，两消费点过滤改 visible_workspace_ids 集合判定。
 implementation:
   - pnpm gen:types 重生成 api-types.ts + openapi.json（先确认 node_modules 健康：pnpm exec tsc --version）
-  - session-list-panel.tsx:964-970：过滤改 (g.visible_workspace_ids ?? [g.workspace_id]).includes(scope.workspaceId)
-  - mobile-session-list.tsx:250-256：同款迁移
+  - frontend/src/components/sessions/session-list-panel.tsx:964-970：过滤改 (g.visible_workspace_ids ?? [g.workspace_id]).includes(scope.workspaceId)
+  - frontend/src/components/mobile/mobile-session-list.tsx:250-256：同款迁移
   - 受影响既有测试 mock 补 visible_workspace_ids 字段（session-list-panel/sessions-portal/page.m-sessions/mobile）
   - 新增过滤断言：挂 D 项目关联 D/F → D/F 均含；无 project 仅直接归属；旧缓存无字段退化现状
 acceptance:

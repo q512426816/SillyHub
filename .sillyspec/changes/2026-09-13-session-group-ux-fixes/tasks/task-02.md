@@ -19,9 +19,9 @@ target_files: [frontend/src/components/daemon/session-input-bar.tsx, frontend/sr
 goal: >
   输入框高度拖拽从 mouse 事件迁移 Pointer Events，触摸屏可拖。
 implementation:
-  - session-input-bar.tsx:501-526,651：onMouseDown→onPointerDown、window mousemove/mouseup→pointermove/pointerup（不用 setPointerCapture，对齐 panel-resizer 先例）
-  - group-chat-panel.tsx:1688-1711,2771：同款副本同步迁移
-  - session-input-bar-height.test.tsx：断言迁 pointer 事件 + createEvent/defineProperty 补 clientY 坐标（floating-session-host.test.tsx:711 方案）
+  - frontend/src/components/daemon/session-input-bar.tsx:501-526,651：onMouseDown→onPointerDown、window mousemove/mouseup→pointermove/pointerup（不用 setPointerCapture，对齐 panel-resizer 先例）
+  - frontend/src/components/group-chat/group-chat-panel.tsx:1688-1711,2771：同款副本同步迁移
+  - session-input-bar-height.test.tsx：断言迁 pointer 事件 + createEvent/defineProperty 补 clientY 坐标（frontend/src/components/floating/floating-session-host.test.tsx:711 方案）
   - group-chat-panel 高度拖拽新增同款断言（无现成测试）
 acceptance:
   - pointer 拖拽实时改高度并钳制 44-480px

@@ -21,7 +21,7 @@ goal: >
   群列表端点返回 visible_workspace_ids（直接归属∪项目关联，批量查）。
 implementation:
   - crud.py：新增 get_project_workspace_map(session, project_ids) 单条 IN 批量查 PpmProjectWorkspace
-  - router.py:62：GroupChatListItemRead 加 visible_workspace_ids: list[uuid.UUID] = []
+  - backend/app/modules/daemon/group/router.py:62：GroupChatListItemRead 加 visible_workspace_ids: list[uuid.UUID] = []
   - router.py 列表端点：_to_list_item 组装后统一填充（去重 [workspace_id] ∪ 项目关联集；照 online_member_ids 端点层组装先例）
   - 后端测试：群挂项目（关联 D/F、锚 D）→ 含 D/F；无项目群=[workspace_id]；非成员不可见不变
 acceptance:

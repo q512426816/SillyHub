@@ -30,7 +30,7 @@
 - FR-2 与 D-002@v2 一致（不用 setPointerCapture）。
 - FR-3 落点与 Grill 修正版一致（router 层字段+组装、crud 只加辅助、GroupChatRead 本体不动）。
 - 偏差一（已对账）：三处建群归一构造（m 页面/floating/portal）补占位 visible_workspace_ids——gen:types 后字段必填的类型级联，design 文件清单小遗漏，行为正确（新建群无项目=直接归属，与后端口径一致），task-04 allowed_paths 已补录。
-- 偏差二（已对账）：task-03 import 走子模块直取（service/__init__ 聚合面外），仓内有先例（permission_service.py:1183），import 处注释留痕。
+- 偏差二（已对账）：task-03 import 走子模块直取（service/__init__ 聚合面外），仓内有先例（backend/app/modules/daemon/permission_service.py:1183），import 处注释留痕。
 
 ## 探针结果（CLI 机械预填） [层：可复跑探针——gate 抽查防篡改]
 #### 探针 1：未实现标记扫描（design 清单文件）

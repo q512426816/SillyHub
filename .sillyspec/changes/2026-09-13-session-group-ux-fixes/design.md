@@ -11,9 +11,9 @@ scale: large
 
 用户实测反馈三项会话/群聊体验缺陷：
 
-1. **输入框草稿跨会话串台**：在一个会话输入未发送的内容，切到另一个会话输入框仍出现。代码查证：真会话草稿按 sessionId 隔离且七宿主均 key 重挂载，隔离正确；唯预会话（sessionId=null）草稿用固定键 `__pre__`（`turn-state.ts:304`），跨工作区/跨机器入口共享，任一入口的未发送内容必然带入下一入口——与用户「a 会话内容带到 b 会话」实测吻合（D-001）。
+1. **输入框草稿跨会话串台**：在一个会话输入未发送的内容，切到另一个会话输入框仍出现。代码查证：真会话草稿按 sessionId 隔离且七宿主均 key 重挂载，隔离正确；唯预会话（sessionId=null）草稿用固定键 `__pre__`（`frontend/src/components/daemon/session-panel/turn-state.ts:304`），跨工作区/跨机器入口共享，任一入口的未发送内容必然带入下一入口——与用户「a 会话内容带到 b 会话」实测吻合（D-001）。
 2. **移动端输入框高度拖拽手柄无响应**：`handleHeightDragStart` 只绑 `onMouseDown` + window `mousemove/mouseup`，触摸屏不触发；CSS `touch-none` 禁了默认手势但 JS 层无触摸监听（D-002）。`session-input-bar.tsx` 与 `group-chat-panel.tsx` 两处同款副本。
-3. **群聊跨工作区不可见**：群挂项目 A（`project_id`），项目 A 关联工作区 D/F（`PpmProjectWorkspace` M:N），用户期望 D/F 都能看到群聊；现前端过滤只匹配群聊直接 `workspace_id`（`session-list-panel.tsx:964-970`、`mobile-session-list.tsx:250-256`），挂 D 的群在 F 不可见（D-003）。
+3. **群聊跨工作区不可见**：群挂项目 A（`project_id`），项目 A 关联工作区 D/F（`PpmProjectWorkspace` M:N），用户期望 D/F 都能看到群聊；现前端过滤只匹配群聊直接 `workspace_id`（`frontend/src/components/sessions/session-list-panel.tsx:964-970`、`frontend/src/components/mobile/mobile-session-list.tsx:250-256`），挂 D 的群在 F 不可见（D-003）。
 
 ## 设计目标
 
@@ -46,10 +46,10 @@ scale: large
 
 **模块二：拖拽 Pointer Events（FR-2）**
 
-- `session-input-bar.tsx`（501-526,651）与 `group-chat-panel.tsx`（1688-1711,2771）：`handleHeightDragStart` 改 `React.PointerEvent`，`onMouseDown` → `onPointerDown`，window 监听 `mousemove/mouseup` → `pointermove/pointerup`。**不用 setPointerCapture**（对齐 `panel-resizer.tsx:5-20` 真实先例：window 级监听保证拖出元素仍收事件，且 jsdom 无 setPointerCapture 实现——测试同路径）。坐标取 `e.clientY`（PointerEvent 同名字段，触摸/鼠标统一）。
+- `session-input-bar.tsx`（501-526,651）与 `group-chat-panel.tsx`（1688-1711,2771）：`handleHeightDragStart` 改 `React.PointerEvent`，`onMouseDown` → `onPointerDown`，window 监听 `mousemove/mouseup` → `pointermove/pointerup`。**不用 setPointerCapture**（对齐 `frontend/src/components/ui/panel-resizer.tsx:5-20?` 真实先例：window 级监听保证拖出元素仍收事件，且 jsdom 无 setPointerCapture 实现——测试同路径）。坐标取 `e.clientY`（PointerEvent 同名字段，触摸/鼠标统一）。
 - `touch-none` 类名保留（阻止浏览器滚动/缩放接管触摸）。
 - 双击恢复（`onDoubleClick`）、44-480px 钳制、`INPUT_HEIGHT_LS_KEY` 持久化全部不动。
-- 测试：`session-input-bar-height.test.tsx` 断言从 `fireEvent.mouseDown/mouseMove/mouseUp` 迁 `fireEvent.pointerDown/pointerMove/pointerUp`；jsdom 的 `fireEvent.pointer*` 丢 `clientY` 坐标，用 `createEvent + defineProperty` 补坐标（先例 `floating-session-host.test.tsx:711`、`explorer-page.test.tsx`）。`group-chat-panel` 无现成高度拖拽测试，新增同款断言。
+- 测试：`session-input-bar-height.test.tsx` 断言从 `fireEvent.mouseDown/mouseMove/mouseUp` 迁 `fireEvent.pointerDown/pointerMove/pointerUp`；jsdom 的 `fireEvent.pointer*` 丢 `clientY` 坐标，用 `createEvent + defineProperty` 补坐标（先例 `frontend/src/components/floating/floating-session-host.test.tsx:711?`、`explorer-page.test.tsx`）。`group-chat-panel` 无现成高度拖拽测试，新增同款断言。
 
 **模块三：后端可见工作区集合（FR-3 后半前置）**
 
@@ -131,7 +131,7 @@ Producer→consumer 数据流：router 列表端点调 crud 辅助取项目→�
 |---|---|---|---|
 | R-01 | 真会话串台另有未定位根因（理论隔离正确但用户实测遇串） | P2 | FR-1 时序测试锁定行为；若用户复现仍现在真会话间，凭测试基线再定位（decisions D-001 evidence 留痕） |
 | R-02 | Pointer Events 在老旧移动浏览器兼容 | P3 | Pointer Events 基线 2019+ 全绿（caniuse），项目内 panel-resizer/悬浮球已生产使用同 API |
-| R-06 | jsdom 测试双坑：无 setPointerCapture 实现 + fireEvent.pointer* 丢 clientY 坐标 | P2 | 实现不用 setPointerCapture（window 级监听先例）；测试用 createEvent+defineProperty 补坐标（floating-session-host.test.tsx:711 方案）——Grill 审查补登 |
+| R-06 | jsdom 测试双坑：无 setPointerCapture 实现 + fireEvent.pointer* 丢 clientY 坐标 | P2 | 实现不用 setPointerCapture（window 级监听先例）；测试用 createEvent+defineProperty 补坐标（frontend/src/components/floating/floating-session-host.test.tsx:711? 方案）——Grill 审查补登 |
 | R-03 | gen:types 暴露无关旧测试债（mock 缺字段） | P3 | 按惯例顺手补字段修复，不回退手写（CLAUDE.md 规则 21） |
 | R-04 | 批量 PpmProjectWorkspace 查询在大群量下的性能 | P3 | 单条 IN 查询 + 索引（复合主键）；群量级远低于阈值，无分页需求（现状全量列表） |
 | R-05 | UI 原型跳过（分级依据：三项均行为级修复，无布局/结构/流程变化） | — | 用户已在 Step 5 确认设计，原型无对照需求 |
