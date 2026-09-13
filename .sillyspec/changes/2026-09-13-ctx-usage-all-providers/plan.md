@@ -36,7 +36,7 @@ plan_level: full
 | task-04 | codex driver 解析 last + 两路 usage 附加 ctx_tokens + 测试 | W2 | P0 | task-01 | FR-03, D-001@v1 | `lastCallCtxTokens = last.inputTokens` 毛值直取；`_usageDelta`（usage_update）与 `_applyTurnUsageDelta`（turn result）双路携带；last 缺失不携带 |
 | task-05 | claude-events 改调共享 helper（行为零变化） | W2 | P1 | task-01 | FR-05, D-001@v1 | :946 三分量求和改调 helper；差分路径（:1007-1008）原样保留注释锚定；既有 claude-events 测试全绿兜底 |
 | task-06 | ProviderCaps 第 11 键 ctx_usage + gen 脚本同步 + 三端生成 + 双守护测试同步 | W1 | P0 | — | FR-04, D-001@v1 | providers.ts 接口/表/回退三处 + CAPS_KEYS + renderFrontend 模板（接口体 :218-246 + 回退字面量 + 「10 键」文案）+ alignment EXPECTED_CAPS_KEYS 与两处 len==10 断言 + provider-registry tenKeys + **pre-session-picker.test.tsx 两处 10 键全对象 toEqual 同步（cursor 加 ctx_usage:true / unknown-engine 回退加 ctx_usage:false，「十键」标题改十一键——plan-review P1 连带测试）** + provider-adapter-registry.test.ts 三处「caps 10 键」过时注释顺手同步（P2）；跑生成刷新两端 @generated 产物 |
-| task-07 | 前端 CtxUsageBar caps 门控 + 调用点传 provider + vitest | W2 | P0 | task-06 | FR-06, D-001@v1 | provider prop；false 只渲染 QuotaPill；null/未知照常；全仓调用点仅 session-panel-page.tsx:2709（preEngine）/ :3501（session.provider） |
+| task-07 | 前端 CtxUsageBar caps 门控 + 调用点传 provider + vitest | W2 | P0 | task-06 | FR-06, D-001@v1 | provider prop；false 只渲染 QuotaPill；null/未知照常；全仓调用点仅 frontend/src/components/daemon/session-panel/session-panel-page.tsx:2709（preEngine）/ :3501（session.provider） |
 | task-08 | onboarding 文档补口径说明 + 真机验证三引擎 | W3 | P0 | task-02,03,04,06 | FR-07, D-001@v1 | spike-01 codex last 验证（结论记 QUICKLOG）+ pi 语义复核 + cursor/pi/codex 环真机冒烟 |
 
 ## 关键路径

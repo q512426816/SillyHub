@@ -11,16 +11,16 @@ scale: large
 
 会话页的上下文用量环（`CtxUsageRing`，分子 `ctx_tokens` ÷ 分母窗口大小）目前**只有 Claude 会话显示真实百分比**，codex / pi / cursor 会话环显示未知态「—」。
 
-根因不在 backend / frontend——两者对 provider 无关（`AgentRun.ctx_tokens` 列、SSE `tokens` 事件、`latestCtxTokens` 逆序取值、未知态渲染全链路已存在且引擎无关）。缺口完全在 **daemon 归一化层**：`ctx_tokens`（最近一次模型调用的提示词大小）只在两处 Claude 代码派生（`claude-events.ts:938-1021` 差分派生、`claude-sdk-driver.ts:696-697` SDK 透传）；codex / pi / cursor 的解析器都产出了四维 token（input / output / cache_read / cache_creation），但都不派生 ctx 维度。
+根因不在 backend / frontend——两者对 provider 无关（`AgentRun.ctx_tokens` 列、SSE `tokens` 事件、`latestCtxTokens` 逆序取值、未知态渲染全链路已存在且引擎无关）。缺口完全在 **daemon 归一化层**：`ctx_tokens`（最近一次模型调用的提示词大小）只在两处 Claude 代码派生（`sillyhub-daemon/src/interactive/claude-events.ts:938-1021` 差分派生、`sillyhub-daemon/src/interactive/claude-sdk-driver.ts:696-697` SDK 透传）；codex / pi / cursor 的解析器都产出了四维 token（input / output / cache_read / cache_creation），但都不派生 ctx 维度。
 
 数据其实都在（调研实证）：
 
 - **pi**：`turn_end.message.usage`（`{input, output, cacheRead, cacheWrite}`）。pi-ai 官方库源码实证（本机 pi 0.81.1）——Anthropic 系 provider 直映 `input_tokens→input`（净值，`totalTokens = input+output+cacheRead+cacheWrite`）；openai-completions 系 `input = prompt_tokens − cacheRead − cacheWrite`（同样净值）。且 pi 的 agent turn = 单次 LLM 调用（`turn_end.message` 即该调用产出的 assistant 消息），turn_end.usage 即**该次调用的终值快照**。
-- **cursor**：`result` 帧 `usage`（camelCase 四维）。fixture 跨轮连续性验证净值口径：turn1 `6578+8704=15282`（turn1 全上下文）→ turn2 `186+15232=15418`（15282 + 轮间增量 ≈ 吻合）。`cursor-events.ts:40` 旧注释「cursor 侧无 ctx 维度，ctx_tokens 缺省」是当时未派生的决策记录，非数据缺失。
-- **codex**：`thread/tokenUsage/updated` 通知（`_extractTokenUsage`，codex-app-server-driver.ts:1399-1466，注释实测 codex 0.147）：`total` 为**线程累计**（inputTokens 为含 cached/cacheWrite 的毛值，实测 `totalTokens = inputTokens + outputTokens`）；`last` 为**单调用**——单调用毛值 input 恰为该次调用的全提示词大小。现行代码只解析 `total`。
+- **cursor**：`result` 帧 `usage`（camelCase 四维）。fixture 跨轮连续性验证净值口径：turn1 `6578+8704=15282`（turn1 全上下文）→ turn2 `186+15232=15418`（15282 + 轮间增量 ≈ 吻合）。`sillyhub-daemon/src/interactive/cursor-events.ts:40` 旧注释「cursor 侧无 ctx 维度，ctx_tokens 缺省」是当时未派生的决策记录，非数据缺失。
+- **codex**：`thread/tokenUsage/updated` 通知（`_extractTokenUsage`，sillyhub-daemon/src/interactive/codex-app-server-driver.ts:1399-1466，注释实测 codex 0.147）：`total` 为**线程累计**（inputTokens 为含 cached/cacheWrite 的毛值，实测 `totalTokens = inputTokens + outputTokens`）；`last` 为**单调用**——单调用毛值 input 恰为该次调用的全提示词大小。现行代码只解析 `total`。
 - **claude**（参照实现，不动）：`ctx = input_tokens + cache_read + cache_creation`，仅 main 桶；`usage_update` 的轮级 `input_tokens` 是**本轮累计**（Σ 逐调用），证明消费侧无法从轮累计反推单调用 ctx——这正是 2026-08-27-session-token-usage-fix 修掉的「环永远封顶 100%」缺陷的物理根源。
 
-契约与抽象设施也已就位但被「祖父豁免」：`agent-event-schema.ts:52` 的 `ctx_tokens` 可选键、backend `submit_steps.py:357-361` 提取、`docs/agent-provider-onboarding.md` usage 五字段短名契约（D-005@v1 含 ctx_tokens）都已存在；但 codex / pi / cursor 是契约定稿前接入的，从未回填。防遗漏抽象（2026-09-11-provider-adapter-registry：`INTERACTIVE_PROVIDERS` satisfies TS2741 强制 + `gen-provider-caps.mjs` 三端生成 + 双守护测试）没有 ctx 用量这一能力键，新引擎接入时「漏派生 ctx」不会被任何机制拦截。
+契约与抽象设施也已就位但被「祖父豁免」：`sillyhub-daemon/src/agent-event-schema.ts:52` 的 `ctx_tokens` 可选键、backend `backend/app/modules/daemon/run_sync/service/submit_steps.py:357-361` 提取、`docs/agent-provider-onboarding.md` usage 五字段短名契约（D-005@v1 含 ctx_tokens）都已存在；但 codex / pi / cursor 是契约定稿前接入的，从未回填。防遗漏抽象（2026-09-11-provider-adapter-registry：`INTERACTIVE_PROVIDERS` satisfies TS2741 强制 + `gen-provider-caps.mjs` 三端生成 + 双守护测试）没有 ctx 用量这一能力键，新引擎接入时「漏派生 ctx」不会被任何机制拦截。
 
 ## 设计目标
 
@@ -65,14 +65,14 @@ export function ctxTokensFromGrossInput(
 ): number | undefined;
 ```
 
-语义：三分量（或毛值）**全缺 → undefined**（不伪造 0，事件不含 ctx_tokens 键 → 消费侧缺键即跳过，与 claude 子桶同契约）；任一分量缺失按 0 计（有部分数据即派生，与 claude `startInput ?? 0` 同口径）。**pi 口径特记（Grill D-1）**：pi 路径 `numOr0` 归一使三入参恒为 number，全缺分支恒不触发——错误轮全零 usage（pi-events.ts:416「全零——错误轮的用量事实」）将携带 `ctx_tokens=0`，环显示 0.0% 而非未知态。这是**有意的口径**：全零是该轮真实用量事实（pi 归一化器原样上报哲学），与 claude「事件缺键」的未知态语义并列成立；cursor / codex 路径走 undefined 分支不受影响。
+语义：三分量（或毛值）**全缺 → undefined**（不伪造 0，事件不含 ctx_tokens 键 → 消费侧缺键即跳过，与 claude 子桶同契约）；任一分量缺失按 0 计（有部分数据即派生，与 claude `startInput ?? 0` 同口径）。**pi 口径特记（Grill D-1）**：pi 路径 `numOr0` 归一使三入参恒为 number，全缺分支恒不触发——错误轮全零 usage（sillyhub-daemon/src/interactive/pi-events.ts:417?「全零——错误轮的用量事实」）将携带 `ctx_tokens=0`，环显示 0.0% 而非未知态。这是**有意的口径**：全零是该轮真实用量事实（pi 归一化器原样上报哲学），与 claude「事件缺键」的未知态语义并列成立；cursor / codex 路径走 undefined 分支不受影响。
 
 1. **pi-events.ts `buildUsageEvent`**（:519-532）：映射处加 `ctx_tokens = ctxTokensFromNetInput(input, cacheRead, cacheWrite)`——`numOr0` 已保证 number，直接算；`usage` 一等字段与 `metadata.usage` 两处同源注入。
 2. **cursor-events.ts `mapUsage`**（:315-332）：四对映射后加 ctx 派生（任一有效字段存在即算）；usage 挂载点（result 帧 → `ev.usage`，:296-299）无需改——mapUsage 返回值带上即透传。同步修正 :37-40 头注释「cursor 侧无 ctx 维度」→「ctx_tokens = inputTokens + cacheReadTokens + cacheWriteTokens 净值三和（fixture 跨轮连续性验证）」。
 3. **codex-app-server-driver.ts `_extractTokenUsage`**（:1407-1466）：解析扩展 `params.tokenUsage.last`；存 `h.lastCallCtxTokens = ctxTokensFromGrossInput(last.inputTokens)`；`_usageDelta` 返回的 usage（usage_update 事件载体）与 `_applyTurnUsageDelta` 填充的 turn result usage 都附加 `ctx_tokens`。`last` 缺失 / 非法 → 不携带（该引擎 ctx 保持未知态，不伪造）。
 4. **claude-events.ts 重构引用 helper**（:946 三分量求和处改调 `ctxTokensFromNetInput`）：行为零变化（公式同式），口径单源。差分路径（:1007-1008 `ctx − prevCr − prevCc + newCr + newCc`）维持原样——增量维护公式无法直接复用三和 helper，注释锚定共享 helper 保持不变式。
 
-**数据流（全链路既有，零新增跳数）**：normalizer 产 `AgentEvent.usage.ctx_tokens`（schema `agent-event-schema.ts:52` 已有可选键）→ `SessionManager._eventToReportDict` 平铺 dict 顶层 → daemon submit → backend `submit_steps.py:357-361` 提取 → `AgentRun.ctx_tokens` last-write-wins（`submit_commit.py:187-193`）→ SSE run summary + session `tokens` 事件（`publish.py:140-143/:216-220`）→ 前端 `onTokens`/`runsMeta` 回填 turn.ctxTokens → `latestCtxTokens` 逆序首个非 null → 环分子。
+**数据流（全链路既有，零新增跳数）**：normalizer 产 `AgentEvent.usage.ctx_tokens`（schema `sillyhub-daemon/src/agent-event-schema.ts:52` 已有可选键）→ `SessionManager._eventToReportDict` 平铺 dict 顶层 → daemon submit → backend `backend/app/modules/daemon/run_sync/service/submit_steps.py:357-361` 提取 → `AgentRun.ctx_tokens` last-write-wins（`backend/app/modules/daemon/run_sync/service/submit_commit.py:187-193`）→ SSE run summary + session `tokens` 事件（`backend/app/modules/daemon/run_sync/service/publish.py:140-143/:216-220`）→ 前端 `onTokens`/`runsMeta` 回填 turn.ctxTokens → `latestCtxTokens` 逆序首个非 null → 环分子。
 
 ### Wave B — caps 第 11 键三端贯通（FR-04）
 
@@ -83,7 +83,7 @@ export function ctxTokensFromGrossInput(
 
 ### Wave C — frontend 门控（FR-06）
 
-`ctx-usage-bar.tsx`：`CtxUsageBarProps` 加 `provider?: string | null`；组件内 `provider != null && !getProviderCaps(provider).ctx_usage` → 只渲染 `QuotaPill`（环不渲染）；调用方（全仓仅 `session-panel-page.tsx:2709/:3501` 两处，Grill X-c 核实）传 provider。provider 未知 / null（本机默认供应商等）→ 维持现状渲染环（未知引擎不因门控丢功能，环仍有未知态兜底）。
+`ctx-usage-bar.tsx`：`CtxUsageBarProps` 加 `provider?: string | null`；组件内 `provider != null && !getProviderCaps(provider).ctx_usage` → 只渲染 `QuotaPill`（环不渲染）；调用方（全仓仅 `frontend/src/components/daemon/session-panel/session-panel-page.tsx:2727?/:3501` 两处，Grill X-c 核实）传 provider。provider 未知 / null（本机默认供应商等）→ 维持现状渲染环（未知引擎不因门控丢功能，环仍有未知态兜底）。
 
 ### Wave D — 验证（FR-07）
 

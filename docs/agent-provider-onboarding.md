@@ -524,7 +524,7 @@ caps.subagent 维持 false。扩展的 ExtensionAPI 面与 pi 版本强耦合，
    close 走 SIGTERM→SIGKILL；result 帧
    `{subtype:'error_during_execution', is_error:true}` 收敛 → backend
    `error_code=interactive_interrupted`（区别 pi abort→settled 报 success）。
-4. [x] caps 单源：`PROVIDER_CAPS.cursor`（sillyhub-daemon/src/interactive/providers.ts:199）3 true /
+4. [x] caps 单源：`PROVIDER_CAPS.cursor`（sillyhub-daemon/src/interactive/providers.ts:266?）3 true /
    5 false——`resume/thinking/model_select=true`；`mcp/multimodal/subagent/
    permission_dialog/edit_patch=false`。thinking=true 为 task-01 实测修正
    （顶层 thinking 帧稳定），不以过期任务卡 thinking=false 为准。

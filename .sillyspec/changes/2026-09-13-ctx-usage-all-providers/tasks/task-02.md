@@ -39,7 +39,7 @@ acceptance:
   - manual-success-turn.jsonl golden——turn_end usage 快照事件 ev.usage.ctx_tokens = 1800 且 metadata.usage.ctx_tokens = 1800（末次调用 input 520 + cacheRead 1024 + cacheWrite 256）
   - real-error-turn.jsonl——错误轮全零 usage 快照 ctx_tokens = 0（全零是该轮真实用量事实，如实携带非未知态）
   - numOr0 守卫用例——非数值字段归 0 后 ctx_tokens = 0
-  - 全部产出事件仍过 safeParseAgentEvent（ctx_tokens 为 agent-event-schema.ts:52 既有可选键，零 schema 改动）
+  - 全部产出事件仍过 safeParseAgentEvent（ctx_tokens 为 sillyhub-daemon/src/agent-event-schema.ts:52 既有可选键，零 schema 改动）
 verify:
   - pnpm -C sillyhub-daemon exec vitest run tests/interactive/pi-events.test.ts
   - pnpm -C sillyhub-daemon run typecheck

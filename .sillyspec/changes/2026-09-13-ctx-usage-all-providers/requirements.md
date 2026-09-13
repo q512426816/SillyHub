@@ -57,7 +57,7 @@ Then 均引用 helper（claude :946 求和处改调，行为零变化；差分�
 
 ### FR-06: 前端 caps 门控
 覆盖决策：D-001@v1
-Given CtxUsageBar 加 `provider?: string | null` prop（全仓调用点仅 session-panel-page.tsx:2709/:3501 两处）
+Given CtxUsageBar 加 `provider?: string | null` prop（全仓调用点仅 frontend/src/components/daemon/session-panel/session-panel-page.tsx:2709/:3501 两处）
 When `provider != null && !getProviderCaps(provider).ctx_usage`
 Then 只渲染 QuotaPill 不渲染环；provider 为 null/未知 → 照常渲染环（本机默认供应商不回归）
 
