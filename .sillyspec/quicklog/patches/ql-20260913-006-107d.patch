@@ -1,0 +1,19 @@
+diff --git a/backend/scripts/reset_agent_log_attribution.py b/backend/scripts/reset_agent_log_attribution.py
+index b0c0658a6..a8e8f4b96 100644
+--- a/backend/scripts/reset_agent_log_attribution.py
++++ b/backend/scripts/reset_agent_log_attribution.py
+@@ -45,7 +45,14 @@ from __future__ import annotations
+ 
+ import argparse
+ import asyncio
++import sys
+ from datetime import UTC, datetime
++from pathlib import Path
++
++# scripts/ 不是包：直接执行（python scripts/x.py / docker exec /app/scripts/x.py）时
++# sys.path[0] 是 scripts 目录，`import app` 不可达——照 cleanup_daemon_instances.py 先例
++# 引导仓库根（单测经 pytest 路径注入不踩，直接执行必踩）。
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ 
+ import sqlalchemy as sa
+ from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine

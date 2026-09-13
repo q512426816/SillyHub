@@ -1,0 +1,30 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-60c2e0ee",
+  "totals": {
+    "files": 1,
+    "additions": 7,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "backend/scripts/reset_agent_log_attribution.py",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260913-006-107d",
+  "sessionId": "quick-60c2e0ee",
+  "savedAt": "2026-09-13T01:39:19.976Z",
+  "patchSha256": "ccc6b638035b3f84b553930b1923963234dae997e632de117ac0ff572f947bea",
+  "patchStatus": "ok"
+}
