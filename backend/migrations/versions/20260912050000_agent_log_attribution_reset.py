@@ -1,31 +1,25 @@
-"""agent 日志归属存量清理（纯数据迁移，零 schema 变更）
+"""agent 日志归属存量清理——已改 no-op，DML 抽出到运维脚本（2026-09-13 部署裁决）
 
 Revision ID: 20260912050000
 Revises: 5e295549e20f
 Create Date: 2026-09-12 05:00:00
 
 Change 2026-09-11-agent-log-attribution-refactor task-05 / design §Phase 3 /
-D-004@v2（用户裁决全清）：一次性清空错配时代的归属数据（ctx 错配 + hub 交叉
-污染两份实证见 docs/sillyspec/agent-log-ctx-attribution-mismatch.md 与
-agent-log-hub-attribution-cross-session-contamination.md），正确归属由 CLI
-升级（Phase 1 own-only 推送）后重推重建（D-005@v1 不动表结构）：
+D-004@v2（用户裁决全清）。**本迁移不再执行任何 DML**：deploy/docker-compose.yml
+启动命令 ``alembic upgrade head`` 自动前滚，链内破坏性清库会在 CLI 升级前自动
+执行（DG-03 设计时序是 backend 发布 → CLI 升级 → 手动执行清库），清空白做且旧
+CLI 旧语义上报会立刻重建错配数据；且 downgrade→upgrade 重放会把已重建的正确
+数据再清一遍。白名单/stop-revision 对本迁移不可行（与 20260911220000 是
+5e295549e20f 兄弟分叉，停在任一止点必丢另一支及后续 schema 迁移）；迁移内
+env 门控有"首次 upgrade 即 stamp、跳过的 DML 永不重跑"死结。
 
-1. ``UPDATE platform_agent_logs SET agent_session_id = NULL``——行保留
-   （探测事实/invocations 计数不动），仅清归属列等重推；
-2. ``UPDATE agent_sessions SET deleted_at = <迁移执行时刻（绑定参数）>`` WHERE
-   ``origin = 'tool_report' AND deleted_at IS NULL``——旧 ``{harness}|{ctx}``
-   聚合键会话在新解析下永不再命中（新键值 ``{ctx}``），防僵尸；软删不硬删
-   （R-07 可逆）；
-3. ``DELETE FROM change_session_links``——全表清空：links 无来源列，错配
-   时代的 hub 污染行与合法行不可区分，用户裁决全清（DG-04）；
-4. ``DELETE FROM quicklog_session_links``——同上。
+清库动作（与原 DML 逐条对齐）改由一次性运维脚本执行：
+``backend/scripts/reset_agent_log_attribution.py``（dry-run 默认 + ``--apply``
+单事务 + 前后计数回报；在 CLI 升级完成后、重推开始前手动跑一次）。
 
-**执行时机（DG-03，与 backend 代码发布解耦）**：backend 代码先行发布（兼容
-旧 CLI 全量推送）→ CLI 升级 → 本迁移作为一次性运维动作手动执行；迁移脚本
-不随 backend 发布自动前滚。
-
-downgrade no-op：归属/绑定数据可由 CLI 重推重建，反向回填无意义（D-004@v2
-明示，no-op 是设计而非缺失）。
+保留 revision id 占位（2026-09-13 前已 stamp 过的环境不受影响）；schema 零
+变更（本来就不建表不加列），no-op 化无副作用。downgrade 维持 no-op
+（D-004@v2：数据可由 CLI 重推重建，恢复错配时代的旧归属无意义）。
 
 down_revision 接执行时唯一 head 5e295549e20f（2026-09-12 ``alembic heads``
 实测单 head）。
@@ -36,11 +30,7 @@ created_at: 2026-09-12 05:00:00
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Sequence
-
-import sqlalchemy as sa
-from alembic import op
 
 revision: str = "20260912050000"
 down_revision: str | None = "5e295549e20f"
@@ -49,20 +39,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # ── D-004@v2 ①：清归属列（行保留，重推重建归属）──
-    op.execute(sa.text("UPDATE platform_agent_logs SET agent_session_id = NULL"))
-    # ── D-004@v2 ②：旧 {harness}|{ctx} 聚合键 tool_report 会话软删防僵尸（R-07 可逆）──
-    # 时间戳走绑定参数由 Python 侧生成——SQL now() 是 PG-only 函数（SQLite
-    # upgrade 直接 OperationalError；2026-09-13 审查改方言无关）。
-    op.execute(
-        sa.text(
-            "UPDATE agent_sessions SET deleted_at = :ts "
-            "WHERE origin = 'tool_report' AND deleted_at IS NULL"
-        ).bindparams(ts=datetime.now(UTC))
-    )
-    # ── D-004@v2 ③④：两张 links 表全清（无来源列，污染行与合法行不可区分，DG-04）──
-    op.execute(sa.text("DELETE FROM change_session_links"))
-    op.execute(sa.text("DELETE FROM quicklog_session_links"))
+    # no-op（2026-09-13 部署裁决）：破坏性清库 DML 抽出到
+    # backend/scripts/reset_agent_log_attribution.py 按 DG-03 时序手动执行。
+    pass
 
 
 def downgrade() -> None:

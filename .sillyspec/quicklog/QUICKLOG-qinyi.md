@@ -156,3 +156,16 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：上一批修复会话实证：quick 启动被平台同步阻塞 126s 超时会话却已建立；--file-notes step2 传完才被告知仅 step3 生效；QUICKLOG 共享文件提交必夹带并行会话条目
 方案：单文件三坑分节登记（现象/环境/影响/绕过/建议工具修复+处置进展），每坑附实证细节与绕过路径、修复建议按侵入度分档
 结果：docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md 落盘；纯文档登记零代码零测试面；登记会话启动尾部再次实证坑 1 已记入
+
+## ql-20260913-005-06bf | 2026-09-13 08:46:18 | 裁决 20260912050000 清库迁移与 compose 自动前滚的时序矛盾并落地（用户授权评估摘除自动执行或白名单门控）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/scripts/reset_agent_log_attribution.py（一次性清库运维脚本——collect_counts/apply_reset 分离、事务边界归调用方、时间戳 bindparams 方言无关）
+- backend/migrations/versions/20260912050000_agent_log_attribution_reset.py（DML 抽出改 no-op 指针（revision 保留，docstring 记三候选取舍））
+- backend/tests/test_reset_agent_log_attribution.py（DML 语义 2 用例（含不提交事务边界断言））
+- .sillyspec/docs/backend/modules/migrations.md（部署裁决段落替换+方言条目先例指向更新）
+需求：裁决 20260912050000 清库迁移与 compose 自动前滚的时序矛盾并落地（用户授权评估摘除自动执行或白名单门控）
+根因：compose 启动命令 alembic upgrade head 自动执行破坏性清库，必然发生在 CLI 升级前（DG-03 时序为 backend 发布→CLI 升级→手动执行），清空白做且旧 CLI 旧语义上报立即重建错配数据；链内数据 DML 在 downgrade→upgrade 重放时还会把已重建的正确数据再清一遍
+方案：两候选均否决（白名单/stop-revision 因兄弟分叉迁移图不可行、env 门控有 stamp 后永不重跑死结）后取第三方案：DML 抽出到 backend/scripts/reset_agent_log_attribution.py（dry-run 默认+--apply 单事务+前后计数回报），迁移本体改 no-op 指针保留 revision id 维持图完整，compose 零改动、后续 schema 迁移自动升级惯例不破坏
+结果：2 新用例+图守护回归 4 用例绿；ruff check/format 0；mypy 942 文件 0；开发中修正 dry-run 计数与 UPDATE rowcount 的口径差（NULL→NULL 同计）

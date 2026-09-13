@@ -1,0 +1,54 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-beb253af",
+  "totals": {
+    "files": 4,
+    "additions": 375,
+    "deletions": 43
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/migrations.md",
+      "declared": true,
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/migrations/versions/20260912050000_agent_log_attribution_reset.py",
+      "declared": true,
+      "additions": 19,
+      "deletions": 40,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/scripts/reset_agent_log_attribution.py",
+      "declared": true,
+      "additions": 154,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/tests/test_reset_agent_log_attribution.py",
+      "declared": true,
+      "additions": 198,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260913-005-06bf",
+  "sessionId": "quick-beb253af",
+  "savedAt": "2026-09-13T00:57:05.941Z",
+  "patchSha256": "b7acbac41c950712fd4358839ea295749f6c1302e5ce97f01bc98fd45abab802",
+  "patchStatus": "ok"
+}
