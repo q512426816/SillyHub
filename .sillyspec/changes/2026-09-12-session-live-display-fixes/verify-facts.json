@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-12-session-live-display-fixes",
+  "generatedAt": "2026-09-13T00:55:33.909Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-12-session-live-display-fixes",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-12-session-live-display-fixes",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-12-session-live-display-fixes",
+      "metrics": {
+        "backendEndpoints": 2783,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-12-session-live-display-fixes",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "生产环境四项修复全部生效——健康检查过、daemon 新 build 双机在线、纯切换轮零日志行、直播轮无 partial 残留、计时锚点=run started_at、会话终态 turn_count=35（两切换轮未计数）且 provider 复原",
+      "command": "ssh 脚本组（7 断言：/api/health + latest.json 公网/后端对比 + daemon_instances + agent_run_logs×2 + agent_runs + agent_sessions）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-12-session-live-display-fixes/evidence/integration-receipt-20260913.log"
+    }
+  ],
+  "requiredEvidence": [
+    {
+      "task": "task-01",
+      "status": "missing",
+      "verifiedFiles": [],
+      "exempt": true,
+      "exemptionReason": "（豁免：代码已在 execute 按路径提交（session-log-assembler.ts + 测试）"
+    },
+    {
+      "task": "task-02",
+      "status": "missing",
+      "verifiedFiles": [],
+      "exempt": true,
+      "exemptionReason": "（豁免：同 task-01 同文件双改动已提交；pi 三行序等价 + F7 对拍用例绿佐证）"
+    },
+    {
+      "task": "task-03",
+      "status": "missing",
+      "verifiedFiles": [],
+      "exempt": true,
+      "exemptionReason": "（豁免：page-helpers.tsx:142 + runtime-session-helpers.test.tsx 已提交；30/30 锚点用例佐证）"
+    },
+    {
+      "task": "task-04",
+      "status": "missing",
+      "verifiedFiles": [],
+      "exempt": true,
+      "exemptionReason": "（豁免：classifier.ts + tests/model-error/classifier.test.ts 已提交；37/37 含 api_calls=116 生产回归用例佐证）"
+    },
+    {
+      "task": "task-05",
+      "status": "missing",
+      "verifiedFiles": [],
+      "exempt": true,
+      "exemptionReason": "（豁免：inject.py + test_inject_silent_switch.py 已提交；3 用例 + 生产双向切换零日志行实测佐证）"
+    },
+    {
+      "task": "task-06",
+      "status": "missing",
+      "verifiedFiles": [],
+      "exempt": true,
+      "exemptionReason": "（豁免：auto_resume.py + test_auto_resume_chain_limit_hint.py 已提交；2 用例佐证）"
+    },
+    {
+      "task": "task-07",
+      "status": "missing",
+      "verifiedFiles": [],
+      "exempt": true,
+      "exemptionReason": "（豁免：纯验证任务，四测试文件已在 task-01~06 提交；三端 204/37/78 相关面全绿记录于 verify-result 测试结果节）"
+    },
+    {
+      "task": "task-08",
+      "status": "satisfied",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-09-12-session-live-display-fixes/evidence/prod-live-test-20260913.md",
+        ".sillyspec/changes/2026-09-12-session-live-display-fixes/evidence/integration-receipt-20260913.log"
+      ]
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

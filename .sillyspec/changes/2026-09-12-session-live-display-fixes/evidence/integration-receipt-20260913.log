@@ -1,0 +1,26 @@
+=== SillyHub 生产集成回执（verify 窗口内实跑）2026-09-13 08:57:56 ===
+--- [1] /api/health ---
+{"status":"ok","db":"ok","redis":"ok","version":"0.1.0","commit_sha":"unknown","server_time":"2026-09-13T00:58:01.935427Z","environment":"dev"}
+--- [2] daemon latest.json 公网 vs 后端一致性 ---
+public="version":"9cd65485-20260913014354"
+backend="version":"9cd65485-20260913014354"
+CONSISTENT
+--- [3] daemon 实例注册（新 build 在线）---
+DESKTOP-HJ0AM09|0.1.1|9cd65485-20260913014354|online|09-13 00:58:00
+qinyideMac-mini-4.local|0.1.1|9cd65485-20260913014354|online|09-13 00:57:57
+--- [4] R3 断言：双向纯切换轮零日志行（无结果输出 = 0 行）---
+switch_turn_log_rows_gone
+--- [5] R1 断言：直播轮完整 [ASSISTANT] + [ASSISTANT_OVERRIDE] 令箭、无 partial 残留 ---
+请只回复文字，不要调用任何工具：写一篇大约一千二百字的短文，分六段，主题
+[TASK_STARTED] {"task_id":"pi-t2","t
+[TASK_PROGRESS] {"task_id":"pi-t2"}
+[THINKING] The user wants a ~1200-ch
+[ASSISTANT] **软件工程中的可观测性**
+
+可观测性一词借自
+[ASSISTANT_OVERRIDE] pi:msg1:ci1
+--- [6] R4 断言：run 元数据 started_at（浏览器计时读数 00:15/00:18 反推锚点 00:21:18.5-19.5）---
+completed|00:21:17|00:21:18|00:21:40
+--- [7] 会话终态：turn_count=35（=32+3 实测轮，两切换轮未计数）+ provider 已复原 ---
+35|t|active
+=== 回执结束 exit=0 2026-09-13 08:58:07 ===
