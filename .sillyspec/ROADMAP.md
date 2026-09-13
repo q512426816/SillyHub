@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-09-12
+最近更新：2026-09-13
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-09-13 · 上下文窗口用量全引擎接入 + ctx_usage 能力键统一抽象
+
+- **ctx-usage-all-providers**（2026-09-13 立项/归档，brainstorm→plan→execute→verify 全流程 PASS WITH NOTES，8 task/3 Wave，已合入 main 4c9e88592 并部署阿里云 c8bf23382）：会话页上下文用量环此前仅 Claude 显示真实百分比（codex/pi/cursor 恒未知态"—"）——根因在 daemon 归一化层只有 claude 派生分子 ctx_tokens，backend/前端链路本就引擎无关。本变更：①新增 usage-ctx.ts 共享派生 helper 单源（净值三和=claude/pi/cursor 同式、毛值直取=codex last.inputTokens，全缺不携带不伪造 0）；②三解析器回填派生（pi numOr0 恒派生含错误轮全零 0 有意口径/cursor 守卫派生/codex last 双路携带+extractEventUsage 透传）；③ProviderCaps 第 11 键 ctx_usage 经 gen-provider-caps.mjs 三端生成+双守护测试同步——新引擎漏声明即编译红/测试红（用户点名要的防遗漏机制，复用 2026-09-11-provider-adapter-registry 契约）；④前端 CtxUsageBar caps 门控（false 只渲染额度胶囊，四引擎全 true 界面零变化）+claude 重构引用 helper 行为零变化。真机证据：codex app-server 0.147 实捕 tokenUsage（last 毛值口径 12122 实证+意外发现 modelContextWindow=950000 分母机会留后续）+pi 0.81.1 真机输出过归一化器+daemon.started 真启动。测试：daemon 148/frontend 55/backend 4 相关面全绿。NOTES：三引擎环平台级 e2e 留部署环境（先例口径）；pi 当前 provider 无计量全零如实携带。
 
 ### 2026-09-12 · 聊天轮上游故障自动恢复（断流/限额/静默中断三类全修）
 
