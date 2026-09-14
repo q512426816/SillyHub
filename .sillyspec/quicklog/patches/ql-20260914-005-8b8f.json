@@ -1,0 +1,30 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-3b571ae0",
+  "totals": {
+    "files": 1,
+    "additions": 1,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260914-005-8b8f",
+  "sessionId": "quick-3b571ae0",
+  "savedAt": "2026-09-14T01:58:21.840Z",
+  "patchSha256": "5187d6f955e6ed5ab166de30ccfa865681792629294c21eebbd5b584e8bf7110",
+  "patchStatus": "ok"
+}

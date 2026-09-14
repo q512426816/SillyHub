@@ -236,3 +236,13 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：quick 会话启动预留 ql-ID 无查重，同一 ID 可双发放（实证 007-1351）；file-notes/模块文档在最终 ID 分配前引用预留值会指向他者条目
 方案：坑文档补第四坑（现象/影响/绕过/建议修复，工具修复归 sillyspec 仓用户另行安排）+QUICKLOG b14c 条目文件行旧 ID 修正并注善后原因
 结果：纯文档与日志数据修正零代码零测试面；登记会话自身 guard.json 复现同一 stale ID（坑 4 第二现场）
+
+## ql-20260914-005-8b8f | 2026-09-14 09:57:08 | 坑 4（ql-ID 预留/分配竞态）处置记录补登，规则 15 闭环
+状态：已完成
+关联变更：（无）
+文件：
+- docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md（坑 4 处置记录（sillyspec 132d01d 修复证据+本机 CLI 重装激活））
+需求：坑 4（ql-ID 预留/分配竞态）处置记录补登，规则 15 闭环
+根因：工具侧已修（sillyspec 仓 132d01d 三层护栏），活跃坑文档需补处置进展；坑 1-3 未修不能整体迁 finished
+方案：处置进展节补登：修复证据链（三层护栏+25 断言+463 绿）+本机 CLI 旧装不含修复实证与重装激活确认；坑 4 关闭标注，文件保持活跃位
+结果：纯文档补登零代码零测试面；本 quick 会话由修复版 CLI 承载（分配正常间接自证）
