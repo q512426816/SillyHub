@@ -224,19 +224,23 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
   const workspaceId = target.workspaceId;
   const qlId = target.kind === "quick" ? target.qlId : "";
 
+  // ql-xxx 直发（2026-09-14 sillyspec 仓 ql-xxx 反查支持落地——patches 持久映射让历史条目
+  // 不再降级）：quick 直接用条目号 ql-xxx 发起对账（CLI 侧 findQuickSessionByQlId 反查
+  // quick-xxxx 出记录态）；daemon 心跳反查到的 quick-<8hex> 作优先（会话仍活跃时走实时链，
+  // 而非记录态）。
   const quickName = useQuickSessionName(workspaceId, qlId, enabled);
   const identifier =
-    target.kind === "change" ? target.changeKey : quickName;
+    target.kind === "change" ? target.changeKey : (quickName ?? qlId);
 
   // 对账表取数（identifier 就绪即拉；change 直代，quick 反查成功后拉）。
   const auditQ = useQuery({
     queryKey: ["scope-audit-card", "audit", workspaceId, identifier],
     queryFn: () => getScopeAudit(workspaceId, identifier!),
-    enabled: identifier !== null,
+    enabled: identifier !== "",
     refetchOnWindowFocus: false,
   });
   const audit = auditQ.data ?? null;
-  const auditLoading = identifier !== null && auditQ.isPending;
+  const auditLoading = identifier !== "" && auditQ.isPending;
 
   // 三态计数（mode 分派）。
   const counts = useMemo(() => {
@@ -254,8 +258,8 @@ export function ScopeAuditCommandCard({ target }: ScopeAuditCommandCardProps) {
   const [diffRow, setDiffRow] = useState<string | null>(null);
 
   const renderSummary = () => {
-    if (identifier === null) {
-      // quick 反查失败：降级为提示 + 命令（不发起对账）。
+    if (identifier === "") {
+      // quick 分支且 qlId 为空（理论不触发，防御）：降级为提示。
       return (
         <>
           <p className="text-[11px] leading-4 text-muted-foreground">

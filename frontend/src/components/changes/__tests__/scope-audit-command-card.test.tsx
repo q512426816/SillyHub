@@ -307,23 +307,59 @@ describe("ql-20260911-001-c0be quick 目标：反查后取数", () => {
     );
   });
 
-  it("反查失败 → 不发起对账；占位提示 + 占位命令", async () => {
+  it("反查失败 → ql-xxx 直发对账（sillyspec 仓 ql-xxx 反查支持；历史条目不再降级）", async () => {
+    // 2026-09-14：useQuickSessionName 反查失败（fetchMyBinding=null 模拟旧 daemon /
+    // 会话已结束 guard 清理）→ 不再占位降级，直接用条目号 ql-xxx 发起——CLI 侧
+    // findQuickSessionByQlId 走 patches 持久映射出记录态。
     mocks.fetchMyBinding.mockResolvedValue(null);
+    mocks.getScopeAudit.mockResolvedValue({
+      change: "ql-20260910-014-6c29",
+      ok: true,
+      mode: "quick",
+      base_ref: null,
+      anchor_label: null,
+      degraded_reason: null,
+      totals: { files: 2, additions: 10, deletions: 74 },
+      rows: [
+        {
+          path: "docs/a.md",
+          additions: 0,
+          deletions: 72,
+          kind: "modified",
+          planned: null,
+          verdict: null,
+          declared: false,
+          attribution: "declared",
+        },
+        {
+          path: "docs/b.md",
+          additions: 10,
+          deletions: 2,
+          kind: "modified",
+          planned: null,
+          verdict: null,
+          declared: false,
+          attribution: "soft",
+        },
+      ],
+      excluded_foreign_declared: [],
+      note: "quick 会话已收尾——记录态",
+      truncated: false,
+    });
     renderCard(
       <ScopeAuditCommandCard
         target={{ kind: "quick", workspaceId: "ws-1", qlId: "ql-20260910-014-6c29" }}
       />,
     );
-    expect(
-      await screen.findByText(/未解析到本条对应的 quick 会话 ID/),
-    ).toBeInTheDocument();
-    expect(mocks.getScopeAudit).not.toHaveBeenCalled();
-    expect(screen.getByTestId("scope-audit-commands")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        `sillyspec scope-audit --change ${QUICK_ID_PLACEHOLDER}`,
+    await waitFor(() =>
+      expect(mocks.getScopeAudit).toHaveBeenCalledWith("ws-1", "ql-20260910-014-6c29"),
+    );
+    // 命令展示也用 ql-xxx（用户可直接复制执行）；等取数完成渲染后断言。
+    await waitFor(() =>
+      expect(screen.getByTestId("scope-audit-cmd-table")).toHaveTextContent(
+        "sillyspec scope-audit --change ql-20260910-014-6c29",
       ),
-    ).toBeInTheDocument();
+    );
   });
 });
 

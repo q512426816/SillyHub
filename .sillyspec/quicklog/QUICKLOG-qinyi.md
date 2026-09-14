@@ -296,3 +296,17 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 1. spike-02 codex **全实证**：真机 codex app-server 0.147 建线程跑一轮后发 `thread/compact/start {threadId}`（camelCase）→ response `{"id":100,"result":{}}` 空对象受理，与设计/实现完全一致；thread/compacted 通知未见（v1 不消费，NG-04 无影响）
 2. spike-01 pi **机制实证**：真机 pi 0.81.1 rpc 模式 get_state→prompt→turn_end 后发 `{"type":"compact"}` 命令，返回真实 response 信封与文档错误语义（"Nothing to compact (session too small)"，三轮放大上下文仍低于压缩阈值 ~36k tokens 未取得数字回执）——命令通道/响应信封/error 语义实证；回执字段名 tokensBefore/estimatedTokensAfter 以官方 rpc.md:374-411 为准，代码留有 spike 校正点（不符只改 data 读取处）
 3. R-01 claude **未取得真机实证**：本机裸 claude CLI 认证失效（401 authentication_failed 重试环），stream-json 仅见 init/api_retry 帧；按设计降级姿态收口——官方 Agent SDK 文档背书 slash 经 prompt 分发 + 代码就位 + 生产实证不生效则 caps claude compact 翻 false 重生成（按钮消失，其余三键不受影响）
+
+## ql-20260915-002-3fa | 2026-09-15 04:15:00 | 思考级别真机三引擎实证（2026-09-14-session-thinking-level task-04 spike + task-07）
+状态：已完成
+关联变更：2026-09-14-session-thinking-level（task-04 首步 spike / task-07 / FR-07 / R-01·R-02·R-03）
+方法：临时脚本真机驱动（$TEMP/spike-tl-codex*.mjs / spike-tl-pi*.mjs，不入库）
+结论：
+1. **codex 三结论全实证**（task-04 spike，sidecar ql-20260915-001-0de2 详录）：①turn/start 顶层 reasoningEffort 受理（轮收敛正常——启动设置保留不走降级）；②thread/settings/update 需 initialize capabilities.experimentalApi=true（注入后受理空 result）；③thread/read 无 reasoningEffort 现值（current=undefined 不伪造）
+2. **pi 双命令+事件+现值全实证**（本轮 task-07）：get_available_thinking_levels 按模型动态返回（kimi-for-coding → ["off","minimal","low","medium","high"] 五档非全七档——映射矩阵 pi 全直传正确）；set_thinking_level 生效（high→off 两轮切换成功回 {}）；thinking_level_changed 事件实时推送；get_state.thinkingLevel 现值准确反映（off→xhigh→high 链验证）
+3. claude applyFlagSettings/supportedModels 未真机实证（本机裸 CLI 401 认证环同 compact R-01）——SDK 类型级实证（sdk.d.ts:2505/:2552/:576）+driver 实现就位+降级预案（supportedModels 不可用退默认五档/off 无操作语义）
+
+## ql-20260915-001-8312 | 2026-09-15 05:03:35 | 修复 codex driver JSON-RPC id 空间碰撞：nextRpcId 与 nextJsonRpcId 统一单计数器分配
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/codex-app-server-driver.ts, sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts

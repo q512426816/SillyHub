@@ -34,7 +34,7 @@ target_files:
   - frontend/src/lib/api-types.ts
 provides:
   - contract: thinking-level 两端点+DTO
-    fields: [SessionCreateRequest.thinking_level, SessionThinkingLevelsResponse, SessionThinkingLevelRequest, SessionThinkingLevelResponse, api-types 产物]
+    fields: [SessionCreateRequest.thinking_level, SessionThinkingLevelsResponse, SessionThinkingLevelRequest, SessionThinkingLevelResponse, api-types 产物, GET/POST 端点, 七档镜像校验]
 expects_from:
   task-01:
     - contract: ProviderCaps

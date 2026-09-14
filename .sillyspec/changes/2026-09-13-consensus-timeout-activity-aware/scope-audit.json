@@ -1,0 +1,52 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "40eecd92c0e8a1221874cc7da9ebc6786aeefe55",
+  "totals": {
+    "files": 4,
+    "additions": 638,
+    "deletions": 15
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/group/service/consensus.py",
+      "additions": 160,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/mentions.py",
+      "additions": 8,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/messages.py",
+      "additions": 21,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_consensus_activity.py",
+      "additions": 449,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "6c8709d20ae38ff4b6b9253233b3c0295ddd83b0cdac0a6847886cbe62fe857b",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-13T14:59:45.520Z"
+}

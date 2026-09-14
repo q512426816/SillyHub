@@ -22,6 +22,9 @@ target_files:
   - sillyhub-daemon/src/interactive/codex-app-server-driver.ts
   - sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
   - sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+provides:
+  - contract: 三 driver 实现
+    fields: [codex turn/start spike 形状结论, 降级分支落点]
 expects_from:
   task-03:
     - contract: InteractiveDriver 可选两方法+启动字段
@@ -70,6 +73,6 @@ constraints:
      可选字段按需插进上方 frontmatter（规则见 taskcard-rules）：
      repo:          仅跨仓 task 填（local.yaml repos: 注册的仓 key；缺省=main。allowed_paths 相对该仓根写，
                     禁止带仓库名前缀/绝对路径——review 对账按仓根相对路径匹配，带前缀永不命中）
-     provides:      仅当本 task 给其他 task 提供接口/DTO/响应时填
+          provides:      仅当本 task 给其他 task 提供接口/DTO/响应时填
      expects_from:  仅当本 task 消费其他 task 的契约时填
      related_tests: 仅当本 task 改动导致既有测试断言失效时填（测试路径须同时进 allowed_paths） -->

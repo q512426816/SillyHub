@@ -49,13 +49,15 @@ export function QuicklogDrawer({
 }: QuicklogDrawerProps) {
   const [showRaw, setShowRaw] = useState(false);
   // ql-20260910-017-2006：文件行点击打开单文件变化比对弹窗（identifier=反查的
-  // quick-<8hex> 会话名；解析不到时行不可点 + 脚注说明）。
+  // quick-<8hex> 会话名）。2026-09-14 sillyspec 仓 ql-xxx 反查支持：心跳反查失败时
+  // 直接用条目号 ql-xxx 发起（CLI 侧 patches 持久映射出记录态），历史条目文件行也可点。
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const quickName = useQuickSessionName(
     workspaceId,
     entry?.ql_id ?? "",
     Boolean(entry),
   );
+  const diffIdentifier = quickName ?? entry?.ql_id ?? null;
 
   const detailQuery = useQuery({
     queryKey: ["quicklogDetail", workspaceId, entry?.ql_id],
@@ -196,7 +198,7 @@ export function QuicklogDrawer({
                   <ul className="flex flex-col gap-1">
                     {detail.files.map((f) => (
                       <li key={f.path}>
-                        {quickName ? (
+                        {diffIdentifier ? (
                           <button
                             type="button"
                             data-testid={`quicklog-file-diff-${f.path}`}
@@ -227,7 +229,7 @@ export function QuicklogDrawer({
                 ) : (
                   <p className="text-xs text-muted-foreground">（无）</p>
                 )}
-                {detail.files.length > 0 && !quickName && (
+                {detail.files.length > 0 && !diffIdentifier && (
                   <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
                     未解析到本条的 quick 会话 ID（旧 daemon / 会话已结束），
                     文件行暂不能点击比对。
@@ -295,12 +297,12 @@ export function QuicklogDrawer({
         </div>
       )}
 
-      {/* ql-20260910-017-2006：单文件变化比对弹窗（change=反查的 quick 会话名） */}
+      {/* ql-20260910-017-2006：单文件变化比对弹窗（change=反查的 quick 会话名或 ql-xxx 条目号） */}
       <ScopeFileDiffModal
-        open={diffFile !== null && quickName !== null}
+        open={diffFile !== null && diffIdentifier !== null}
         onClose={() => setDiffFile(null)}
         workspaceId={workspaceId}
-        change={quickName}
+        change={diffIdentifier ?? ""}
         filePath={diffFile}
       />
     </Drawer>

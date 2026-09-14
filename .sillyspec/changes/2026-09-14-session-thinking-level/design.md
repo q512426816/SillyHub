@@ -117,7 +117,7 @@ caps 键 → daemon 契约与三 driver → backend 端点 → 前端双控件�
 | 修改 | frontend/src/lib/daemon/sessions.ts | 两 API 客户端（FR-06） |
 | 修改 | frontend/src/components/sessions/session-config-bar.tsx | 档位下拉（FR-06①） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | preThinkingLevel+会话切换控件（FR-06②） |
-| 修改 | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx 或独立测试 | 门控与交互测试（FR-06） |
+| 修改 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | 档位下拉控件测试（渲染/门控/级联/模型变重置，FR-06，plan-review P1-3 归属） |
 | 修改 | docs/agent-provider-onboarding.md | thinking_level 接入指引（收尾） |
 
 **字段数据流标注**：①创建：前端 preThinkingLevel→createSession body→SessionCreateRequest.thinking_level→create.py 形参→placement.py lease metadata→lease/context.py 白名单→daemon.ts execPayload 归一化→CreateSessionInput.thinkingLevel→_buildDriverOptions→三 driver 启动设置（claude options.effort/codex ctx+turn params/pi 握手完成后命令）。②查询：前端 react-query→GET thinking-levels→backend RPC→daemon handler→session-manager→driver.getThinkingLevels→pi rpc/claude supportedModels/codex 静态→{levels,current} 回传。③切换：前端控件→POST thinking-level→backend 校验（词表+状态）→RPC→daemon handler→session-manager 守卫→driver.setThinkingLevel→pi set_thinking_level/claude applyFlagSettings/codex thread/settings/update→{ok,error}→前端通知。caps `thinking_level` 键：providers.ts 单源→gen→前端门控+backend 校验。

@@ -329,17 +329,18 @@ describe("QuicklogDrawer", () => {
     );
   });
 
-  it("ql-20260910-017-2006：反查失败（无绑定）→ 文件行为纯文本 + 脚注提示，点击无弹窗", async () => {
+  it("ql-20260910-017-2006：反查失败（无绑定）→ ql-xxx 直发，文件行可点击（2026-09-14 sillyspec 仓 ql-xxx 反查支持）", async () => {
     mocks.getQuicklogDetail.mockResolvedValue(makeDetail());
     mocks.fetchMyBinding.mockResolvedValue(null);
     renderDrawer(makeEntry());
 
     await screen.findByTestId("body-需求");
+    // diffIdentifier = ql_id（心跳反查失败 fallback）→ 文件行可点 + 无脚注提示。
     expect(
-      screen.queryByTestId("quicklog-file-diff-frontend/src/lib/quicklog.ts"),
-    ).toBeNull();
-    expect(
-      screen.getByText(/未解析到本条的 quick 会话 ID/),
+      screen.getByTestId("quicklog-file-diff-frontend/src/lib/quicklog.ts"),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/未解析到本条的 quick 会话 ID/),
+    ).toBeNull();
   });
 });

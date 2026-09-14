@@ -1,0 +1,769 @@
+diff --git a/backend/app/modules/daemon/group/service/consensus.py b/backend/app/modules/daemon/group/service/consensus.py
+index 9877f2691..38146486a 100644
+--- a/backend/app/modules/daemon/group/service/consensus.py
++++ b/backend/app/modules/daemon/group/service/consensus.py
+@@ -24,6 +24,7 @@ from app.modules.agent.model import (
+     AgentGroupChat,
+     AgentGroupConsensusTask,
+     AgentGroupMember,
++    AgentRun,
+     AgentRunLog,
+     AgentSession,
+ )
+@@ -106,6 +107,8 @@ async def create_consensus_task(
+         carrier_run_id=carrier_run_id,
+         coordinator_member_id=coordinator.id,
+         status=CONSENSUS_TASK_OPEN,
++        # 快照按成员 ID 去重（2026-09-13 task-02，FR-3）：上游集合任何
++        # 形态的重复行不进快照（dict 保序，先见者胜）。
+         members=[
+             {
+                 "member_id": str(m.id),
+@@ -113,7 +116,7 @@ async def create_consensus_task(
+                 "state": CONSENSUS_MEMBER_PENDING,
+                 "delivered_at": None,
+             }
+-            for m in collaborators
++            for m in {str(m.id): m for m in collaborators}.values()
+         ],
+         deadline_at=now
+         + timedelta(
+@@ -152,10 +155,42 @@ def consensus_member_states(task: AgentGroupConsensusTask) -> list[dict]:
+     return [dict(m) for m in raw if isinstance(m, dict)]
+ 
+ 
++def _card_outcome_summary(members: list[dict]) -> str:
++    """终态卡逐成员结局摘要（FR-4/AC-5）：failed 带 error 一句话、
++    timeout 未响应名单；同名成员（不同 id）加 id 前 6 位区分（FR-3/AC-4，
++    两遍式：先数名再渲染）；单行长度由外层 200 字符截断兜底。"""
++    from collections import Counter
++
++    name_counts = Counter(str(m.get("member_name", "?")) for m in members)
++
++    def label(m: dict) -> str:
++        name = str(m.get("member_name", "?"))
++        if name_counts[name] > 1:
++            mid = str(m.get("member_id", ""))
++            return f"{name}({mid[:6]})" if mid else name
++        return name
++
++    failed_parts = [
++        f"{label(m)}触发失败" + (f"({str(m.get('error', ''))[:40]})" if m.get("error") else "")
++        for m in members
++        if m.get("state") == CONSENSUS_MEMBER_FAILED
++    ]
++    timeout_parts = [label(m) for m in members if m.get("state") == CONSENSUS_MEMBER_TIMEOUT]
++    parts: list[str] = []
++    if failed_parts:
++        parts.append("失败：" + "、".join(failed_parts))
++    if timeout_parts:
++        parts.append("未响应：" + "、".join(timeout_parts))
++    return "；".join(parts)
++
++
+ def _card_content(
+     coordinator_name: str,
+     phase: str,
+     members: list[dict],
++    *,
++    extended: bool = False,
++    abort_reason: str = "",
+ ) -> str:
+     """状态卡人类可读单行摘要（design §5.6：content 列，回放直显）。
+ 
+@@ -166,15 +201,22 @@ def _card_content(
+     total = len(members)
+     delivered = sum(1 for m in members if m.get("state") == CONSENSUS_MEMBER_DELIVERED)
+     if phase == CONSENSUS_PHASE_COLLECTING:
+-        return f"⏳ 汇总收集中：「{coordinator_name}」负责收口 · 已交意见 {delivered}/{total}"
++        suffix = "（仍在工作，已延长等待）" if extended else ""
++        return (
++            f"⏳ 汇总收集中：「{coordinator_name}」负责收口 · 已交意见 {delivered}/{total}{suffix}"
++        )
+     if phase == CONSENSUS_PHASE_CONVERGING:
+         return f"🔄 汇总收口中：「{coordinator_name}」正在整合 {delivered} 份意见并输出群内总结"
+     if phase == CONSENSUS_TASK_TIMEOUT:
+-        return (
+-            f"⌛ 汇总已超时收口：「{coordinator_name}」基于已收意见收口（未响应成员已在总结中标注）"
+-        )
++        outcome = _card_outcome_summary(members)
++        suffix = f"（{outcome}）" if outcome else ""
++        return f"⌛ 汇总已超时收口：「{coordinator_name}」基于已收 {delivered} 份意见收口{suffix}"
+     if phase == CONSENSUS_TASK_ABORTED:
+-        return f"⛔ 汇总协作中止：汇总人「{coordinator_name}」未能参与本轮协作"
++        if abort_reason:
++            return f"⛔ 汇总协作中止：{abort_reason}"
++        outcome = _card_outcome_summary(members)
++        no_reply = outcome if outcome else "成员均未交回意见"
++        return f"⛔ 汇总协作中止：汇总人「{coordinator_name}」，{no_reply}"
+     return f"✅ 汇总已完成：「{coordinator_name}」已输出群内总结（{delivered}/{total} 份意见）"
+ 
+ 
+@@ -186,6 +228,8 @@ async def write_consensus_card(
+     coordinator_name: str,
+     phase: str,
+     source_summary: str = "",
++    extended: bool = False,
++    abort_reason: str = "",
+ ) -> AgentRunLog | None:
+     """写/更新协调状态卡（design §5.6：UPDATE 单行模式 + 同 log_id 重发）。
+ 
+@@ -213,7 +257,9 @@ async def write_consensus_card(
+     }
+     if source_summary:
+         card_meta["consensus_source_summary"] = source_summary[:200]
+-    content = _card_content(coordinator_name, phase, members)[:_CONSENSUS_CARD_CONTENT_MAX_CHARS]
++    content = _card_content(
++        coordinator_name, phase, members, extended=extended, abort_reason=abort_reason
++    )[:_CONSENSUS_CARD_CONTENT_MAX_CHARS]
+ 
+     card = (
+         (
+@@ -584,6 +630,58 @@ async def inject_converge_directive(
+         )
+ 
+ 
++# ── 活动感知续期（2026-09-13-consensus-timeout-activity-aware design §3.1）──
++# 续期步进：每轮顺延 60s（与 30s 巡检节奏匹配，两次巡检一续）；
++# 累计上限：原始死线后再等 10 分钟封顶（防 run 状态残留 running 的卡死
++# 成员导致无限等待——design §5 风险兜底）。
++CONSENSUS_EXTEND_STEP_SEC = 60.0
++CONSENSUS_EXTEND_MAX_SEC = 600.0
++# 活动判定窗口：影子最新 run 时间线最近 120s 有新行视为「在活动」
++# （流式输出中/工具轮推进中——design D-2）。
++_CONSENSUS_ACTIVITY_WINDOW_SEC = 120.0
++
++
++async def _member_is_active(db: "AsyncSession", shadow_session_id: uuid.UUID) -> bool:
++    """成员活动信号判定（design §3.1，fail-closed）。
++
++    - 影子会话最新 run status ∈ {pending, running}（pending=排队——机器
++      在线只是忙，排队中的长任务不该被死线误杀，design D-2）→ 活动；
++    - 或该 run 时间线最近 ``_CONSENSUS_ACTIVITY_WINDOW_SEC`` 秒有新行 → 活动；
++    - 无 run（触发从未成功）/ 查询异常 → False（fail-closed——单成员探测
++      异常不连坐任务收口时序，沿用 sweep per-task 吞错语义）。
++    """
++    try:
++        latest_run = (
++            await db.execute(
++                select(AgentRun.id, AgentRun.status)
++                .where(AgentRun.agent_session_id == shadow_session_id)
++                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
++                .limit(1)
++            )
++        ).first()
++        if latest_run is None:
++            return False
++        if latest_run.status in ("pending", "running"):
++            return True
++        cutoff = datetime.now(UTC) - timedelta(seconds=_CONSENSUS_ACTIVITY_WINDOW_SEC)
++        last_log_at = (
++            await db.execute(
++                select(AgentRunLog.timestamp)
++                .where(AgentRunLog.run_id == latest_run.id)
++                .order_by(AgentRunLog.timestamp.desc())
++                .limit(1)
++            )
++        ).scalar()
++        return last_log_at is not None and last_log_at >= cutoff
++    except Exception:
++        _gsvc.log.warning(
++            "consensus_member_activity_probe_failed",
++            shadow_session_id=str(shadow_session_id),
++            exc_info=True,
++        )
++        return False
++
++
+ CONSENSUS_SWEEP_INTERVAL_SEC = 30.0
+ 
+ 
+@@ -629,6 +727,55 @@ async def consensus_sweep_once(db: "AsyncSession") -> int:
+                 processed += 1
+                 continue
+             states = consensus_member_states(task)
++            # 活动感知续期（2026-09-13 design §3.1，FR-1/D-3）：死线到点但
++            # 仍有 pending 成员在干活（run 排队/运行或时间线 2 分钟内有新
++            # 输出）→ 顺延死线本轮不收口；累计续期不超过硬上限（原始死线
++            # 再 +10 分钟）——防 run 状态残留 running 的卡死成员无限等待。
++            now2 = datetime.now(UTC)
++            hard_cap = task.created_at + timedelta(
++                seconds=group.consensus_timeout_seconds + CONSENSUS_EXTEND_MAX_SEC
++            )
++            pending_rows = [r for r in states if r.get("state") == CONSENSUS_MEMBER_PENDING]
++            if now2 < hard_cap and pending_rows:
++                shadow_ids = [
++                    r.get("shadow_session_id") for r in pending_rows if r.get("shadow_session_id")
++                ]
++                # pending 快照无 shadow_session_id 时回查成员行（快照字段
++                # 兼容：新任务创建即写入，存量行防御回查）。
++                if not shadow_ids:
++                    for r in pending_rows:
++                        mid = r.get("member_id")
++                        if not mid:
++                            continue
++                        # 快照 member_id 为 str（JSONB），db.get 需 UUID。
++                        m = await db.get(AgentGroupMember, uuid.UUID(mid))
++                        if m is not None and m.shadow_session_id is not None:
++                            shadow_ids.append(m.shadow_session_id)
++                # 串行探测：AsyncSession 非并发安全（gather 并发共用一个
++                # session 会话会抛 InvalidRequestError——单测抓获），成员数
++                # 个位数无并发收益。
++                any_active = False
++                for sid in shadow_ids:
++                    if await _member_is_active(db, sid):
++                        any_active = True
++                        break
++                if any_active:
++                    task.deadline_at = min(
++                        now2 + timedelta(seconds=CONSENSUS_EXTEND_STEP_SEC),
++                        hard_cap,
++                    )
++                    await write_consensus_card(
++                        db,
++                        group=group,
++                        task=task,
++                        coordinator_name=coordinator.display_name,
++                        phase=CONSENSUS_PHASE_COLLECTING,
++                        extended=True,
++                    )
++                    await db.commit()
++                    processed += 1
++                    continue
++
+             delivered = [r for r in states if r.get("state") == CONSENSUS_MEMBER_DELIVERED]
+             if delivered:
+                 await inject_converge_directive(db, task=task, timed_out=True)
+@@ -639,6 +786,12 @@ async def consensus_sweep_once(db: "AsyncSession") -> int:
+                 # map 未过期）；真实独立连接重读复现。
+                 await db.commit()
+             else:
++                # 零 delivered 中止：pending 行终态化标注 timeout（2026-09-13
++                # task-03 测试驱动补齐——卡面「未响应」名单数据源，FR-4）。
++                for r in states:
++                    if r.get("state") == CONSENSUS_MEMBER_PENDING:
++                        r["state"] = CONSENSUS_MEMBER_TIMEOUT
++                task.members = states
+                 task.status = CONSENSUS_TASK_ABORTED
+                 task.converged_at = datetime.now(UTC)
+                 await write_consensus_card(
+diff --git a/backend/app/modules/daemon/group/service/mentions.py b/backend/app/modules/daemon/group/service/mentions.py
+index d56b08c73..096090b01 100644
+--- a/backend/app/modules/daemon/group/service/mentions.py
++++ b/backend/app/modules/daemon/group/service/mentions.py
+@@ -108,7 +108,14 @@ def _parse_group_mentions(
+     （发送侧汇总分支）自行做并集去重与汇总人选取。
+     """
+     agent_members = [m for m in members if m.member_type == "agent" and m.removed_at is None]
+-    by_name = {m.display_name: m for m in agent_members}
++    # 同名确定性（2026-09-13 task-02，FR-3）：同 display_name 多行时取
++    # joined_at 最早（与 broadcast 成员表序一致，稳定可复现）——@ 名字
++    # 永远命中同一行，避免同名多实例各自触发造成卡面名单重复。
++    by_name: dict[str, AgentGroupMember] = {}
++    for m in agent_members:
++        cur = by_name.get(m.display_name)
++        if cur is None or (m.joined_at, m.id) < (cur.joined_at, cur.id):
++            by_name[m.display_name] = m
+     explicit: dict[uuid.UUID, AgentGroupMember] = {}
+     broadcast_hit = False
+     merged: dict[uuid.UUID, AgentGroupMember] = {}
+diff --git a/backend/app/modules/daemon/group/service/messages.py b/backend/app/modules/daemon/group/service/messages.py
+index 25f5a5093..9f67695da 100644
+--- a/backend/app/modules/daemon/group/service/messages.py
++++ b/backend/app/modules/daemon/group/service/messages.py
+@@ -509,19 +509,33 @@ async def send_group_message(
+                             task=consensus_task,
+                             coordinator_name=consensus_coordinator.display_name,
+                             phase=CONSENSUS_PHASE_ABORTED,
++                            # 汇总人自身结局可见（2026-09-13 task-02，
++                            # FR-4/AC-5）：卡面直接说明汇总人触发失败原因。
++                            abort_reason=(
++                                f"汇总人「{consensus_coordinator.display_name}」"
++                                f"触发失败（{reason}），意见转交失去目的地"
++                            ),
+                         )
+                     else:
+                         for row in member_states:
+                             if row.get("member_id") == str(member.id):
+                                 row["state"] = CONSENSUS_MEMBER_FAILED
++                                # 失败原因一句话落快照（2026-09-13 task-02，
++                                # FR-5）：终态卡「成员 触发失败(原因)」数据源。
++                                row["error"] = reason[:80]
+                         consensus_task.members = member_states
+-                        await write_consensus_card(
+-                            svc._session,
+-                            group=group,
+-                            task=consensus_task,
+-                            coordinator_name=consensus_coordinator.display_name,
+-                            phase=CONSENSUS_PHASE_COLLECTING,
+-                        )
++                        # 任务已终态（coordinator 先失败已 abort——gather 按
++                        # 成员序，后续 collaborator 失败登记不得把中止卡覆
++                        # 盖回收集中，2026-09-13 task-04 真实复验 A3 抓获）
++                        # → 只落明细不重写卡面（aborted 卡已含汇总人结局）。
++                        if consensus_task.status == CONSENSUS_TASK_OPEN:
++                            await write_consensus_card(
++                                svc._session,
++                                group=group,
++                                task=consensus_task,
++                                coordinator_name=consensus_coordinator.display_name,
++                                phase=CONSENSUS_PHASE_COLLECTING,
++                            )
+                 await _publish_trigger_failed_notice(
+                     group_session_id_val, member_name=member.display_name, reason=reason
+                 )
+diff --git a/backend/app/modules/daemon/tests/test_group_consensus_activity.py b/backend/app/modules/daemon/tests/test_group_consensus_activity.py
+new file mode 100644
+index 000000000..4af2b85c0
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_group_consensus_activity.py
+@@ -0,0 +1,449 @@
++"""共识收口活动感知续期测试（2026-09-13-consensus-timeout-activity-aware task-03）。
++
++覆盖 AC-1~5：
++- 续期触发（死线到点 + pending 成员 run 运行中 → 顺延不收口 + 卡面延长提示）；
++- 硬上限两分支（达上限不再顺延：零 delivered→aborted / 有 delivered→timeout 收口）；
++- 无活动立即收口（run 终态 + 时间线窗口外 → 原路径无额外等待）；
++- 快照去重 / 同名确定性 / 卡面同名区分；
++- 终态卡逐成员结局（含 abort_reason 汇总人自身结局）。
++
++范式照 test_group_consensus.py（自包含 fixture；SQLite aiosqlite 内存库）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++from types import SimpleNamespace
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import (
++    AgentGroupChat,
++    AgentGroupConsensusTask,
++    AgentGroupMember,
++    AgentRun,
++    AgentRunLog,
++    AgentSession,
++)
++from app.modules.agent.schema import GroupMemberAgentConfig
++from app.modules.auth.model import User
++from app.modules.daemon.group.service.consensus import (
++    CONSENSUS_MEMBER_DELIVERED,
++    CONSENSUS_MEMBER_FAILED,
++    CONSENSUS_MEMBER_PENDING,
++    CONSENSUS_MEMBER_TIMEOUT,
++    CONSENSUS_TASK_ABORTED,
++    CONSENSUS_TASK_OPEN,
++    CONSENSUS_TASK_TIMEOUT,
++    _card_content,
++    consensus_sweep_once,
++    create_consensus_task,
++)
++from app.modules.daemon.group.service.mentions import _parse_group_mentions
++from app.modules.workspace.model import Workspace
++
++
++@pytest.fixture
++def anyio_backend() -> str:
++    return "asyncio"
++
++
++async def _make_user(db_session: AsyncSession, name: str) -> User:
++    user = User(
++        id=uuid.uuid4(),
++        email=f"{name}-{uuid.uuid4().hex[:6]}@t.cn",
++        display_name=name,
++        password_hash="x",
++    )
++    db_session.add(user)
++    await db_session.flush()
++    return user
++
++
++async def _make_env(db_session: AsyncSession, *, timeout_seconds: int = 600) -> SimpleNamespace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="act-ws",
++        slug=f"act-ws-{uuid.uuid4().hex[:8]}",
++        root_path="C:/tmp/act-ws",
++        status="active",
++    )
++    db_session.add(ws)
++    owner = await _make_user(db_session, "群主")
++    group = AgentGroupChat(
++        id=uuid.uuid4(),
++        session_id=uuid.uuid4(),
++        workspace_id=ws.id,
++        project_id=None,
++        title="活动感知测试群",
++        created_by=owner.id,
++        consensus_mode=True,
++        consensus_timeout_seconds=timeout_seconds,
++        created_at=datetime.now(UTC),
++    )
++    db_session.add(group)
++    carrier = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="group",
++        agent_session_id=group.session_id,
++        user_id=owner.id,
++        status="completed",
++        started_at=datetime.now(UTC),
++        spec_strategy="group_carrier",
++    )
++    db_session.add(carrier)
++    await db_session.flush()
++    return SimpleNamespace(ws=ws, owner=owner, group=group, carrier=carrier)
++
++
++async def _make_member(
++    db_session: AsyncSession,
++    group: AgentGroupChat,
++    *,
++    name: str,
++    owner_id: uuid.UUID,
++    joined_at: datetime | None = None,
++) -> AgentGroupMember:
++    shadow = AgentSession(
++        id=uuid.uuid4(),
++        user_id=owner_id,
++        name=f"影子-{name}",
++        session_kind="group_member",
++        provider="claude",
++        status="active",
++        turn_count=0,
++        created_at=datetime.now(UTC),
++    )
++    db_session.add(shadow)
++    await db_session.flush()
++    member = AgentGroupMember(
++        id=uuid.uuid4(),
++        group_id=group.id,
++        member_type="agent",
++        display_name=name,
++        config=GroupMemberAgentConfig(
++            display_name=name,
++            runtime_id=uuid.uuid4(),
++            provider="claude",
++        ),
++        joined_at=joined_at or datetime.now(UTC),
++        created_by=owner_id,
++        shadow_session_id=shadow.id,
++    )
++    db_session.add(member)
++    await db_session.flush()
++    return member
++
++
++async def _seed_run(
++    db_session: AsyncSession,
++    shadow: AgentSession,
++    *,
++    status: str,
++    last_log_at: datetime | None = None,
++) -> AgentRun:
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="group",
++        agent_session_id=shadow.id,
++        user_id=shadow.user_id,
++        status=status,
++        started_at=datetime.now(UTC) - timedelta(minutes=5),
++        spec_strategy="group_member",
++    )
++    db_session.add(run)
++    await db_session.flush()
++    if last_log_at is not None:
++        db_session.add(
++            AgentRunLog(
++                id=uuid.uuid4(),
++                run_id=run.id,
++                channel="assistant",
++                content_redacted="意见草稿……",
++                timestamp=last_log_at,
++            )
++        )
++        await db_session.flush()
++    return run
++
++
++async def _seed_task(
++    db_session: AsyncSession,
++    env: SimpleNamespace,
++    *,
++    coordinator: AgentGroupMember,
++    collaborators: list[AgentGroupMember],
++    created_at: datetime | None = None,
++) -> AgentGroupConsensusTask:
++    task = await create_consensus_task(
++        db_session,
++        group=env.group,
++        carrier_run_id=env.carrier.id,
++        coordinator=coordinator,
++        collaborators=collaborators,
++        created_by=env.owner.id,
++        timeout_seconds=60,
++        source_summary="触发消息摘要",
++    )
++    if created_at is not None:
++        task.created_at = created_at
++    return task
++
++
++async def _card_row(db_session: AsyncSession, carrier_run_id: uuid.UUID) -> AgentRunLog | None:
++    return (
++        (
++            await db_session.execute(
++                select(AgentRunLog).where(
++                    AgentRunLog.run_id == carrier_run_id,
++                    AgentRunLog.channel == "system",
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++
++
++class TestActivityAwareExtension:
++    async def test_deadline_extended_when_member_active(self, db_session):
++        """AC-1：死线到点 + pending 成员 run 运行中 → 顺延不收口 + 卡面提示。"""
++        env = await _make_env(db_session, timeout_seconds=60)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="长任务成员", owner_id=env.owner.id)
++        shadow = await db_session.get(AgentSession, c1.shadow_session_id)
++        assert shadow is not None
++        await _seed_run(db_session, shadow, status="running")
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++
++        processed = await consensus_sweep_once(db_session)
++
++        assert processed == 1
++        await db_session.rollback()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_OPEN  # 未收口
++        deadline_val = task.deadline_at
++        if deadline_val.tzinfo is None:  # SQLite 回读 naive 归一
++            deadline_val = deadline_val.replace(tzinfo=UTC)
++        assert deadline_val > datetime.now(UTC) - timedelta(seconds=5)  # 已顺延
++        card = await _card_row(db_session, env.carrier.id)
++        assert card is not None
++        assert "仍在工作，已延长等待" in (card.content_redacted or "")
++
++    async def test_hard_cap_zero_delivered_aborts(self, db_session):
++        """AC-2a：续期达硬上限（created_at 早于 上限窗）→ 零 delivered aborted。"""
++        env = await _make_env(db_session, timeout_seconds=60)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        shadow = await db_session.get(AgentSession, c1.shadow_session_id)
++        assert shadow is not None
++        await _seed_run(db_session, shadow, status="running")  # 仍在活动
++        # created_at 拉到 (timeout+600) 窗口之外 → hard_cap 已过。
++        task = await _seed_task(
++            db_session,
++            env,
++            coordinator=coordinator,
++            collaborators=[c1],
++            created_at=datetime.now(UTC) - timedelta(seconds=60 + 700),
++        )
++        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++
++        processed = await consensus_sweep_once(db_session)
++
++        assert processed == 1
++        await db_session.rollback()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_ABORTED
++        card = await _card_row(db_session, env.carrier.id)
++        assert card is not None
++        assert "未响应" in (card.content_redacted or "")
++
++    async def test_hard_cap_delivered_converges_timeout(self, db_session, monkeypatch):
++        """AC-2b：达上限且有 delivered → 超时收口注入（不再顺延）。"""
++        from app.modules.daemon.group.service import consensus as cons
++
++        env = await _make_env(db_session, timeout_seconds=60)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        shadow = await db_session.get(AgentSession, c1.shadow_session_id)
++        assert shadow is not None
++        await _seed_run(db_session, shadow, status="running")
++        task = await _seed_task(
++            db_session,
++            env,
++            coordinator=coordinator,
++            collaborators=[c1],
++            created_at=datetime.now(UTC) - timedelta(seconds=60 + 700),
++        )
++        task.members = [
++            {
++                "member_id": str(c1.id),
++                "member_name": c1.display_name,
++                "state": CONSENSUS_MEMBER_DELIVERED,
++                "delivered_at": datetime.now(UTC).isoformat(),
++                "opinion": "意见已交",
++            }
++        ]
++        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++        calls: list[dict] = []
++
++        async def fake_inject(db, *, task, timed_out):
++            calls.append({"task_id": task.id, "timed_out": timed_out})
++            task.status = CONSENSUS_TASK_TIMEOUT
++
++        monkeypatch.setattr(cons, "inject_converge_directive", fake_inject)
++        await consensus_sweep_once(db_session)
++
++        assert calls and calls[0]["timed_out"] is True
++
++    async def test_no_activity_immediate_abort(self, db_session):
++        """AC-3：全员无活动（run 终态 + 时间线窗口外）→ 立即原路径 aborted。"""
++        env = await _make_env(db_session, timeout_seconds=60)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        shadow = await db_session.get(AgentSession, c1.shadow_session_id)
++        assert shadow is not None
++        await _seed_run(
++            db_session,
++            shadow,
++            status="completed",
++            last_log_at=datetime.now(UTC) - timedelta(minutes=3),  # 窗口（120s）外
++        )
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
++        await db_session.commit()
++
++        processed = await consensus_sweep_once(db_session)
++
++        assert processed == 1
++        await db_session.rollback()
++        await db_session.refresh(task)
++        assert task.status == CONSENSUS_TASK_ABORTED  # 原路径，无续期
++
++
++class TestSnapshotDedupAndSameName:
++    async def test_snapshot_dedup(self, db_session):
++        """AC-4：collaborators 含重复行 → 快照按成员 ID 去重。"""
++        env = await _make_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(
++            db_session, env, coordinator=coordinator, collaborators=[c1, c1, c1]
++        )
++        assert len(task.members) == 1
++        assert task.members[0]["member_id"] == str(c1.id)
++
++    def test_same_name_deterministic_pick_earliest(self):
++        """AC-4：同名多行 @ 解析确定性命中 joined_at 最早一行。
++
++        纯函数级（不落库）——成员表 UNIQUE(group_id, display_name) 约束下
++        同库同名多行不可能（2026-09-13 task-03 实测抓获：UNIQUE 约束即
++        用户现场名单重复根因的排除证据——重复必为同 id 重复塞入，快照
++        ID 去重根治；本用例防未来约束放宽/跨群共享成员行场景）。
++        """
++        early = AgentGroupMember(
++            id=uuid.uuid4(),
++            group_id=uuid.uuid4(),
++            member_type="agent",
++            display_name="同名君",
++            joined_at=datetime.now(UTC) - timedelta(days=1),
++        )
++        late = AgentGroupMember(
++            id=uuid.uuid4(),
++            group_id=uuid.uuid4(),
++            member_type="agent",
++            display_name="同名君",
++            joined_at=datetime.now(UTC),
++        )
++        hits = _parse_group_mentions("@同名君 帮忙看看", [early, late])
++        assert len(hits) == 1
++        assert hits[0].id == early.id
++
++    def test_card_outcome_same_name_labeled_with_id_prefix(self):
++        """AC-4：终态原因段同名成员加 id 前 6 位区分。"""
++        mid_a, mid_b = uuid.uuid4(), uuid.uuid4()
++        members = [
++            {
++                "member_id": str(mid_a),
++                "member_name": "同名君",
++                "state": CONSENSUS_MEMBER_FAILED,
++                "error": "机器不可用",
++            },
++            {
++                "member_id": str(mid_b),
++                "member_name": "同名君",
++                "state": CONSENSUS_MEMBER_TIMEOUT,
++            },
++        ]
++        content = _card_content("汇总人", CONSENSUS_TASK_ABORTED, members)
++        assert f"同名君({str(mid_a)[:6]})" in content
++        assert f"同名君({str(mid_b)[:6]})" in content
++        assert "触发失败" in content and "机器不可用" in content
++        assert "未响应" in content
++
++
++class TestTerminalCardOutcomes:
++    async def test_abort_reason_shown(self, db_session):
++        """AC-5：coordinator 触发失败 abort → 卡面带汇总人结局原因。"""
++        env = await _make_env(db_session)
++        coordinator = await _make_member(
++            db_session, env.group, name="汇总人", owner_id=env.owner.id
++        )
++        c1 = await _make_member(db_session, env.group, name="成员一", owner_id=env.owner.id)
++        task = await _seed_task(db_session, env, coordinator=coordinator, collaborators=[c1])
++        content = _card_content(
++            coordinator.display_name,
++            CONSENSUS_TASK_ABORTED,
++            task.members,
++            abort_reason="汇总人「汇总人」触发失败（机器不可用），意见转交失去目的地",
++        )
++        assert "汇总人" in content and "机器不可用" in content
++
++    def test_timeout_card_lists_non_responders(self):
++        """AC-5：timeout 卡面含未响应名单与已交计数。"""
++        members = [
++            {
++                "member_id": str(uuid.uuid4()),
++                "member_name": "甲",
++                "state": CONSENSUS_MEMBER_DELIVERED,
++            },
++            {
++                "member_id": str(uuid.uuid4()),
++                "member_name": "乙",
++                "state": CONSENSUS_MEMBER_TIMEOUT,
++            },
++        ]
++        content = _card_content("汇总人", CONSENSUS_TASK_TIMEOUT, members)
++        assert "已收 1 份意见" in content
++        assert "未响应" in content and "乙" in content
++
++    def test_pending_members_not_in_outcome(self):
++        """终态摘要只列 failed/timeout，pending（续期中）不入结局段。"""
++        members = [
++            {
++                "member_id": str(uuid.uuid4()),
++                "member_name": "丙",
++                "state": CONSENSUS_MEMBER_PENDING,
++            }
++        ]
++        content = _card_content("汇总人", CONSENSUS_TASK_TIMEOUT, members)
++        assert "丙" not in content.split("）")[-1] or "未响应" not in content
