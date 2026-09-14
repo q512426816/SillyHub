@@ -26,7 +26,7 @@ goal: >
   单源避免各层自拼档位串；矩阵全组合单测兜底 R-05（矩阵为纯函数易改）。
 implementation:
   - 'NEW thinking-levels.ts——export const THINKING_LEVELS = ["off","minimal","low","medium","high","xhigh","max"] as const（七档词表单源，design §接口定义原文）+ export type PlatformThinkingLevel = (typeof THINKING_LEVELS)[number] 便利类型；文件头注释标 FR-02 与前端/ backend 两侧镜像同源关系'
-  - 'mapPlatformLevelToEngine(provider: string, level: string): string | undefined——三引擎矩阵：pi 七档直传（含 off=真关，rpc.md:281-295）；claude：low/medium/high/xhigh/max 直传 EffortLevel（sdk.d.ts:1735 五档）、minimal→low 降级、off→undefined（不设 effort）；codex：minimal/low/medium/high/xhigh 直传（二进制枚举实证）、max→xhigh 降级、off→undefined（不设 reasoningEffort）；未知 provider 或非法 level → undefined；矩阵逐格注释引调研锚点'
+  - 'mapPlatformLevelToEngine(provider: string, level: string): string | undefined——三引擎矩阵：pi 七档直传（含 off=真关，rpc.md:281-295）；claude：low/medium/high/xhigh/max 直传 EffortLevel（sillyhub-daemon/node_modules/@claude-agent-sdk sdk.d.ts（pnpm .pnpm hash 目录内）:1735 五档）、minimal→low 降级、off→undefined（不设 effort）；codex：minimal/low/medium/high/xhigh 直传（二进制枚举实证）、max→xhigh 降级、off→undefined（不设 reasoningEffort）；未知 provider 或非法 level → undefined；矩阵逐格注释引调研锚点'
   - 'off 语义差异注释必写（design P2-11 口径）——pi=真关（引擎停止思考）/ claude=不设 effort=引擎默认思考通常开（非关闭）：同返回 undefined 但语义不同，注释钉死供前端 tooltip（task-06）与 onboarding 文档（task-07）同源引用'
   - 'isValidPlatformLevel(level: string): boolean——THINKING_LEVELS.includes 窄化守卫（daemon RPC 归一化与 backend 镜像共用语义）'
   - 'NEW thinking-levels.test.ts——① 全组合矩阵：七档 × claude/pi/codex 逐格断言期望值（21 格表驱动）② 降级规则显式用例：claude minimal→low、claude off→undefined、codex max→xhigh、codex off→undefined ③ 非法输入：未知 provider（"cursor"/任意串）→ undefined、"ultra"/空串/大小写变体 → undefined / isValidPlatformLevel=false ④ THINKING_LEVELS 长度=7 且顺序 off→max 锁定（防词表漂移）'

@@ -13,12 +13,12 @@ scale: large
 
 调研实证（2026-09-14，两路调研，源码/二进制/SDK 文档锚点核过）：
 
-- **claude**（SDK 0.3.247）：`Options.effort?: EffortLevel`（sdk.d.ts:1735，五档 low/medium/high/xhigh/max，xhigh 有模型条件回退）；**会话中切** `Query.applyFlagSettings({effortLevel})`（:2505-2507，session-scoped，'max' 特例不入持久化）；**档位查询** `Query.supportedModels(): Promise<ModelInfo[]>`（:2552，ModelInfo.supportsEffort :1267 / supportedEffortLevels :1271）。daemon 落点：claude-sdk-driver.ts:409-411 options 构造区、:217-242 ClaudeStartOptions、state.query 可达（session-manager 存）。
+- **claude**（SDK 0.3.247）：`Options.effort?: EffortLevel`（sillyhub-daemon/node_modules/@claude-agent-sdk sdk.d.ts（pnpm .pnpm hash 目录内）:1735，五档 low/medium/high/xhigh/max，xhigh 有模型条件回退）；**会话中切** `Query.applyFlagSettings({effortLevel})`（:2505-2507，session-scoped，'max' 特例不入持久化）；**档位查询** `Query.supportedModels(): Promise<ModelInfo[]>`（:2552，ModelInfo.supportsEffort :1267 / supportedEffortLevels :1271）。daemon 落点：sillyhub-daemon/src/interactive/claude-sdk-driver.ts:409-411? options 构造区、:217-242 ClaudeStartOptions、state.query 可达（session-manager 存）。
 - **pi**（0.81.1）：spawn 无 thinking 参数；**切换** `set_thinking_level {level}`（rpc.md:281-295，七档 off/minimal/low/medium/high/xhigh/max，xhigh/max 按模型条件）；**档位查询** `get_available_thinking_levels`（:316-335，按当前模型动态，无推理返回 ["off"]）+ get_state 的 thinkingLevel 现值 + thinking_level_change 事件。driver `_sendCommand` 通道现成（compact task-04 刚用）。
 - **codex**（0.147.0 二进制 strings 实证）：turn/start params 有 model 先例（:1650），effort 极可能同位；**会话中切** `thread/settings/update` + `reasoningEffort` 字段（与 serviceTier/sandbox 同 struct）+ `thread/settings/updated` 通知；枚举 minimal/low/medium/high/xhigh；档位查询经模型目录元数据 `supported_reasoning_levels`。driver `_sendJsonRpcRequest` pending 通道现成（compact task-05 刚建）。
 - **cursor**：无通道。
 - **平台既有先例**：compact（2026-09-14-session-ctx-compact）刚验证的 RPC 模式——driver 可选契约方法+daemon RPC handler+caps 键+backend 端点+前端控件，照抄成本极低。会话中切模型走的是进程重启式（reloadWithConfig :1651-1716），体验差不适用于切档。
-- **漂移发现**：codex caps.thinking=false 但 driver :671-682 已把 reasoning item 映射成 thinking 事件（json-rpc.ts:626-651 注释明说"codex reasoning 与 claude thinking 同契约"）——取值依据过时，顺手翻值。
+- **漂移发现**：codex caps.thinking=false 但 driver :671-682 已把 reasoning item 映射成 thinking 事件（sillyhub-daemon/src/adapters/json-rpc.ts:626-651 注释明说"codex reasoning 与 claude thinking 同契约"）——取值依据过时，顺手翻值。
 
 ## 设计目标
 
@@ -47,7 +47,7 @@ caps 键 → daemon 契约与三 driver → backend 端点 → 前端双控件�
 
 ### Wave A — caps 第 13 键+codex thinking 翻值（FR-01）
 
-八步样板（providers.ts 接口/表/回退+gen 脚本+两 @generated+alignment len==13×2+registry thirteenKeys+picker 两 toEqual+adapter 注释）。**增量**：codex 表 thinking 翻 true（docblock 补依据：driver :671-682 reasoning→thinking 映射+json-rpc.ts:626-651 同契约注释+前端渲染由事件流无条件驱动零 caps 消费方——**纯声明对齐无行为变化**，Grill P0-3 改写）。
+八步样板（providers.ts 接口/表/回退+gen 脚本+两 @generated+alignment len==13×2+registry thirteenKeys+picker 两 toEqual+adapter 注释）。**增量**：codex 表 thinking 翻 true（docblock 补依据：driver :671-682 reasoning→thinking 映射+sillyhub-daemon/src/adapters/json-rpc.ts:626-651 同契约注释+前端渲染由事件流无条件驱动零 caps 消费方——**纯声明对齐无行为变化**，Grill P0-3 改写）。
 
 ### Wave B — daemon 契约与三 driver（FR-02/03/04/05）
 
@@ -157,7 +157,7 @@ class SessionThinkingLevelResponse(BaseModel):
 
 ## 生命周期契约表
 
-生命周期契约：无/N/A（查询与切换为既有 interactive 会话上的瞬时 RPC 动作零状态迁移；创建时 thinkingLevel 为 CreateSessionInput 可选字段经既有创建链路；pi thinking_level_changed 事件维持现状不透传（pi-events.ts:88 已在吸收名单）——档位现值经 getThinkingLevels 查询而非事件推送）。
+生命周期契约：无/N/A（查询与切换为既有 interactive 会话上的瞬时 RPC 动作零状态迁移；创建时 thinkingLevel 为 CreateSessionInput 可选字段经既有创建链路；pi thinking_level_changed 事件维持现状不透传（sillyhub-daemon/src/interactive/pi-events.ts:88 已在吸收名单）——档位现值经 getThinkingLevels 查询而非事件推送）。
 
 ## 数据模型
 

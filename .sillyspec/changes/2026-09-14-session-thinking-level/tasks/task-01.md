@@ -39,7 +39,7 @@ goal: >
   reasoning→thinking 事件而 caps 表值过时，Grill P0-3），为 FR-02~06 提供 caps 门控真数据源。
 implementation:
   - 'providers.ts 三处——① ProviderCaps 接口加 thinking_level: boolean（第 13 键，注释注明取值依据：claude applyFlagSettings/pi set_thinking_level/codex thread/settings/update 三通道实证、cursor 无通道），接口头注释键计数同步 13；② PROVIDER_CAPS 表 claude/pi/codex 各加 thinking_level: true、cursor 加 thinking_level: false；③ getProviderCaps 未知回退字面量加 thinking_level: false'
-  - 'codex thinking 翻 true（Grill P0-3 纯声明对齐）——PROVIDER_CAPS.codex.thinking 由 false 翻 true，docblock 补依据三件：codex-app-server-driver.ts:671-682 已把 reasoning item（text+metadata.thinking=true）映射成 thinking 事件、json-rpc.ts:626-651 注释明说 codex reasoning 与 claude thinking 同契约、前端渲染由事件流无条件驱动零 caps 消费方——「翻值非解锁渲染而是纠正声明、无行为变化」注释必写；providers.ts:159-160 一带过时「codex flat 契约无 thinking」docblock 同步改写'
+  - 'codex thinking 翻 true（Grill P0-3 纯声明对齐）——PROVIDER_CAPS.codex.thinking 由 false 翻 true，docblock 补依据三件：sillyhub-daemon/src/interactive/codex-app-server-driver.ts:671-682 已把 reasoning item（text+metadata.thinking=true）映射成 thinking 事件、sillyhub-daemon/src/adapters/json-rpc.ts:626-651 注释明说 codex reasoning 与 claude thinking 同契约、前端渲染由事件流无条件驱动零 caps 消费方——「翻值非解锁渲染而是纠正声明、无行为变化」注释必写；sillyhub-daemon/src/interactive/providers.ts:159-160 一带过时「codex flat 契约无 thinking」docblock 同步改写'
   - 'gen-provider-caps.mjs——CAPS_KEYS（:71 compact 后）加 "thinking_level"（boolean 解析器原生支持）；renderFrontend 模板三处：硬编码接口体（:261 compact 键一带）加 thinking_level 键（漏加则生成的前端表 excess property 编译红）、getProviderCaps 回退字面量（:296 compact 一带）加 thinking_level: false、docblock 键计数文案同步 13；renderBackend docblock 键计数同步（backend 回退程序化派生 _CAPS_KEYS 无需改代码）'
   - '跑生成刷新两端产物——node sillyhub-daemon/scripts/gen-provider-caps.mjs，刷新 frontend/src/lib/provider-caps.ts 与 backend/app/modules/agent/provider_caps.py 两份 @generated'
   - 'test_provider_caps_alignment.py——EXPECTED_CAPS_KEYS 加 thinking_level；两处 len == 12 硬断言改 13；docstring 过时计数字样顺手对齐'
@@ -50,7 +50,7 @@ implementation:
 acceptance:
   - 三端产物逐值一致：daemon PROVIDER_CAPS ↔ frontend provider-caps.ts ↔ backend provider_caps.py 均含 thinking_level，claude/pi/codex=true、cursor=false、未知回退 false；codex thinking=true 翻值三端同步；既有 12 键取值与键序零变化
   - 双守护测试绿（alignment + provider-registry / provider-adapter-registry 套件）+ pre-session-picker 套件绿 + 两端 typecheck 绿
-  - 生成幂等：gen-provider-caps.mjs 两连跑，两份 @generated 产物第二遍前后逐字节一致；codex 翻值处 docblock 含 :671-682+json-rpc.ts:626 依据与「纯声明对齐无行为变化」注释
+  - 生成幂等：gen-provider-caps.mjs 两连跑，两份 @generated 产物第二遍前后逐字节一致；codex 翻值处 docblock 含 :671-682+sillyhub-daemon/src/adapters/json-rpc.ts:626 依据与「纯声明对齐无行为变化」注释
 verify:
   - node sillyhub-daemon/scripts/gen-provider-caps.mjs
   - pnpm -C sillyhub-daemon exec vitest run tests/interactive/provider-registry.test.ts tests/provider-adapter-registry.test.ts
