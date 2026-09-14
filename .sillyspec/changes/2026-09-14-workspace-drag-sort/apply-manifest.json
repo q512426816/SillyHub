@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-14-workspace-drag-sort",
+  "appliedAt": "2026-09-14T17:12:03.570Z",
+  "baseHash": "9890a20acc566c8af6d82e8999f657e513f5daca",
+  "files": [
+    {
+      "path": "backend/app/modules/workspace/model.py",
+      "sha256": "b91f98b7d9c5bf17fe9d1abf5800f8cadad7be67e55c53afa85dfafb65f565ef"
+    },
+    {
+      "path": "backend/app/modules/workspace/router.py",
+      "sha256": "3df8a4a1661c4714e05d6f12bb1b1b70719fa4528f35e0d2cdabca70e9be4430"
+    },
+    {
+      "path": "backend/app/modules/workspace/schema.py",
+      "sha256": "a49333ead36d2bf7889ae1a844114c1d025ea16011aa8556e024f4fa1f5e275a"
+    },
+    {
+      "path": "backend/app/modules/workspace/service.py",
+      "sha256": "311d01c5b3ae23ad1afd82333155c2fcd60b9b1a6e5996f0440377680ecbcc3d"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_move_order.py",
+      "sha256": "4f68c8134233207a98f0b655f3c7b7051339df37fe9f4435c5440cfb5f79f5c2"
+    },
+    {
+      "path": "backend/migrations/versions/20260914100000_create_user_workspace_orders.py",
+      "sha256": "52676d0695627683621dd1afffd6a885469f312c2060dead4777945cbb444ca2"
+    },
+    {
+      "path": "frontend/package.json",
+      "sha256": "41600c75fcf4f8105681fc3960a8ad6cba06362eedddf1238622812a2b3d0ddd"
+    },
+    {
+      "path": "frontend/pnpm-lock.yaml",
+      "sha256": "e1bc8a72a592263856b7df2c0c48b395015f6d211605e0120fc907d5631bc75c"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx",
+      "sha256": "12062c29302473c3ee5bf03825cd369e383fa4d6a29969e066b9a086eca73496"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/page.tsx",
+      "sha256": "5a0ee473bef732a95c564d09580ecddc891301852bbb2fc94f534c238b9f84d5"
+    },
+    {
+      "path": "frontend/src/components/__tests__/workspace-card.test.tsx",
+      "sha256": "7d39b7d30bad33fdc11d6aea86f02146d55afbd8fd82b9644ed50f40312bbd47"
+    },
+    {
+      "path": "frontend/src/components/__tests__/workspace-drag-grid.test.tsx",
+      "sha256": "dc071c6104dd7470f9f8edb082dc26ec9d233a61cbd4305fdd5501b4e3c188ad"
+    },
+    {
+      "path": "frontend/src/components/workspace-card.tsx",
+      "sha256": "4d0ea62f1dabd90afe402cc078892762cdbd1242824a688d3ba45040f88b4f26"
+    },
+    {
+      "path": "frontend/src/components/workspace-drag-grid.tsx",
+      "sha256": "475900bda615c47c10d7e4484f3e67c16964da67d5c7a8135481fd539a84eb04"
+    },
+    {
+      "path": "frontend/src/components/workspace-move-dialog.tsx",
+      "sha256": "dc09589ecb00d2bee9abd3828643b99f1cc1e6e8157c46b450c2b3d5ef2bfc6b"
+    },
+    {
+      "path": "frontend/src/lib/workspaces.ts",
+      "sha256": "3496123cdaabfc20aa9dbbb2aa83956df848eeaf3b0a13a206c9dc89d0c79587"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "653adff18da5920e6656aebf4894266663a9a3513267e84c1aea001d24893edd"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "6d312629977a2073516a71ee186c797f4712ded5ef662ad56b1f8cc64638a221"
+    }
+  ]
+}

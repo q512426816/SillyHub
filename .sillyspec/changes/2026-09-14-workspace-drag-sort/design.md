@@ -65,7 +65,7 @@ risk_level: unit-sufficient
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | backend/app/modules/workspace/model.py | 新增 `UserWorkspaceOrder` SQLModel 模型（表 `user_workspace_orders`） |
-| 新增 | NEW:backend/migrations/versions/<rev>_create_user_workspace_orders.py | 建表 + 唯一索引 (user_id, workspace_id) + (user_id, sort_position) 索引 |
+| 新增 | NEW:backend/migrations/versions/20260914100000_create_user_workspace_orders.py | 建表 + 唯一索引 (user_id, workspace_id) + (user_id, sort_position) 索引 |
 | 修改 | backend/app/modules/workspace/schema.py | 新增 `WorkspaceMoveRequest`（after_id/before_id/to 三选一 + page_size）与 `WorkspaceMoveResponse`（workspace/rebalanced/rank） |
 | 修改 | backend/app/modules/workspace/router.py | 新增 `POST /{workspace_id}/move` 端点（鉴权 WORKSPACE_READ + 行级可见校验）；list 端点透传 `order_user_id=user.id` |
 | 修改 | backend/app/modules/workspace/service.py | `WorkspaceService` 新增 `move_workspace()`（幂等 backfill/to 锚点解析/中点/整集重排/rank）与私有 `_backfill_order_rows()`；`list_with_owner()` 增 `order_user_id` 参数改 LEFT JOIN 排序 |

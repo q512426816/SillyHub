@@ -1,0 +1,3793 @@
+diff --git a/backend/app/modules/workspace/model.py b/backend/app/modules/workspace/model.py
+index 263e683ba..57648ea39 100644
+--- a/backend/app/modules/workspace/model.py
++++ b/backend/app/modules/workspace/model.py
+@@ -11,7 +11,18 @@ import uuid
+ from datetime import UTC, datetime
+ from typing import Literal
+ 
+-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Text, Uuid, text
++from sqlalchemy import (
++    JSON,
++    Column,
++    DateTime,
++    Float,
++    ForeignKey,
++    Index,
++    String,
++    Text,
++    Uuid,
++    text,
++)
+ from sqlmodel import Field
+ 
+ from app.models.base import BaseModel
+@@ -212,6 +223,59 @@ class PpmProjectWorkspace(BaseModel, table=True):
+     )
+ 
+ 
++class UserWorkspaceOrder(BaseModel, table=True):
++    """Per-user drag-sort position of one workspace (user-scoped).
++
++    每人一套的工作区拖拽顺序存储（change ``2026-09-14-workspace-drag-sort``，
++    D-001@v1/D-011@v1 方案 A）：一行 = 某用户对某工作区的排序位置。
++    ``sort_position`` 为浮点中点键（``Float`` → PG ``DOUBLE PRECISION``），
++    列表按 ``ASC`` 消费；无行 = 未物化（新建工作区/未拖拽用户），由列表 SQL
++    的 NULLS 分支兜底回 ``created_at DESC`` 现状（D-004@v1）。排序行惰性
++    物化归 move 服务首拖 backfill（D-006@v2），本表零存量回填；软删
++    workspace 的行保留（复活回原位），不做级联清理——FK 不带 ondelete。
++
++    - ``ux_uwo_user_workspace`` 唯一索引：一人一工作区至多一行（upsert 依据）
++    - ``ix_uwo_user_position`` 普通索引：列表 LEFT JOIN 的
++      (user_id, sort_position) 排序热路径
++    """
++
++    __tablename__ = "user_workspace_orders"
++    __table_args__ = (
++        Index("ux_uwo_user_workspace", "user_id", "workspace_id", unique=True),
++        Index("ix_uwo_user_position", "user_id", "sort_position"),
++    )
++
++    id: uuid.UUID = Field(
++        default_factory=uuid.uuid4,
++        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
++    )
++    user_id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("users.id"),
++            nullable=False,
++        ),
++    )
++    workspace_id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("workspaces.id"),
++            nullable=False,
++        ),
++    )
++    sort_position: float = Field(
++        sa_column=Column(Float, nullable=False),
++    )
++    created_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
++    updated_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
++
++
+ class AgentRunWorkspace(BaseModel, table=True):
+     """M:N association between agent runs and workspaces."""
+ 
+diff --git a/backend/app/modules/workspace/router.py b/backend/app/modules/workspace/router.py
+index 20f729778..37b72db55 100644
+--- a/backend/app/modules/workspace/router.py
++++ b/backend/app/modules/workspace/router.py
+@@ -37,6 +37,8 @@ from app.modules.workspace.schema import (
+     ScanResponse,
+     WorkspaceCreate,
+     WorkspaceListResponse,
++    WorkspaceMoveRequest,
++    WorkspaceMoveResponse,
+     WorkspaceProbeItem,
+     WorkspaceProbeRequest,
+     WorkspaceRead,
+@@ -289,6 +291,10 @@ async def list_workspaces(
+     change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
+     ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
+     ``?type=`` 等值匹配表达不了 NULL，语义互斥。
++
++    change 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传
++    ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
++    （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
+     """
+     if unclassified and workspace_type is not None:
+         raise AppError(
+@@ -308,6 +314,7 @@ async def list_workspaces(
+             status=status_filter,
+             user_id=user_id,
+             allowed_workspace_ids=None,
++            order_user_id=user.id,
+         )
+     else:
+         allowed = await allowed_workspace_ids(
+@@ -323,6 +330,7 @@ async def list_workspaces(
+             status=status_filter,
+             user_id=None,
+             allowed_workspace_ids=allowed,
++            order_user_id=user.id,
+         )
+ 
+     return WorkspaceListResponse(
+@@ -331,6 +339,56 @@ async def list_workspaces(
+     )
+ 
+ 
++@router.post(
++    "/{workspace_id}/move",
++    response_model=WorkspaceMoveResponse,
++    status_code=status.HTTP_200_OK,
++)
++async def move_workspace(
++    workspace_id: uuid.UUID,
++    payload: WorkspaceMoveRequest,
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
++) -> WorkspaceMoveResponse:
++    """拖拽排序移动工作区（task-02 / FR-02，change 2026-09-14-workspace-drag-sort）。
++
++    顺序按 user_id 持久化（每人一套，D-001@v1）；锚点三选一校验在
++    ``WorkspaceMoveRequest``（422 HTTP_422_MOVE_ANCHOR_CONFLICT，中文文案）。
++    鉴权对齐 list 端点现状（require_permission_any(WORKSPACE_READ)）；非平台
++    管理员行级可见校验 workspace_id ∈ allowed_workspace_ids（复用 list 端点既有
++    模式），不可见 403 HTTP_403_PERMISSION_DENIED；管理员 allowed_ids=None 全量。
++    排序/backfill/锚点解析全在 service.move_workspace（task-03，签名钉死不自增
++    参数），本层只做契约接线；响应 ``rank`` 供前端 floor(rank/page_size) 换算
++    目标页（R-07）。
++    """
++    allowed: list[uuid.UUID] | None = None
++    if not user.is_platform_admin:
++        allowed = await allowed_workspace_ids(
++            session, user_id=user.id, permission=Permission.WORKSPACE_READ
++        )
++        if workspace_id not in allowed:
++            raise AppError(
++                "无权访问该工作区，无法移动排序。",
++                code="HTTP_403_PERMISSION_DENIED",
++                http_status=403,
++            )
++    service = WorkspaceService(session)
++    workspace, rebalanced, rank = await service.move_workspace(
++        workspace_id=workspace_id,
++        user_id=user.id,
++        after_id=payload.after_id,
++        before_id=payload.before_id,
++        to=payload.to,
++        page_size=payload.page_size,
++        allowed_ids=allowed,
++    )
++    return WorkspaceMoveResponse(
++        workspace=WorkspaceRead.model_validate(workspace),
++        rebalanced=rebalanced,
++        rank=rank,
++    )
++
++
+ @router.get("/{workspace_id}", response_model=WorkspaceRead)
+ async def get_workspace(
+     workspace_id: uuid.UUID,
+diff --git a/backend/app/modules/workspace/schema.py b/backend/app/modules/workspace/schema.py
+index 775c0799e..a0f31c139 100644
+--- a/backend/app/modules/workspace/schema.py
++++ b/backend/app/modules/workspace/schema.py
+@@ -7,8 +7,9 @@ import uuid
+ from datetime import datetime
+ from typing import Literal
+ 
+-from pydantic import BaseModel, ConfigDict, Field, field_validator
++from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+ 
++from app.core.errors import AppError
+ from app.modules.workspace.constants import WorkspaceTypeLiteral
+ 
+ WorkspaceStatusLiteral = Literal["pending", "active", "archived", "deleted"]
+@@ -20,6 +21,11 @@ WorkspacePatchStatusLiteral = Literal["active", "archived"]
+ # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
+ # daemon-client workspace 创建时用户可选；决定源项目已有 .sillyspec 如何进入平台。
+ SpecStrategyLiteral = Literal["platform-managed", "repo-mirrored", "repo-native"]
++# 拖拽排序移动目标（change 2026-09-14-workspace-drag-sort / D-012@v1）：边缘投放带
++# 专用枚举——跨页落位由持有全量顺序的服务端在默认视图序列上解析成 id 锚点，
++# 客户端算不出相邻页边界卡（Grill F-01 修订）。Literal 校验让非法值在 Pydantic
++# 层 422 并进 OpenAPI enum（前端 gen:types 消费，task-06 前置）。
++WorkspaceMoveTargetLiteral = Literal["next_page_head", "prev_page_tail"]
+ 
+ _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$")
+ 
+@@ -245,6 +251,53 @@ class WorkspaceListResponse(BaseModel):
+     total: int
+ 
+ 
++# ── 拖拽排序 move DTO（change 2026-09-14-workspace-drag-sort task-02 / FR-02）──
++
++
++class WorkspaceMoveRequest(BaseModel):
++    """Request body for ``POST /api/workspaces/{workspace_id}/move``。
++
++    锚点三选一（D-013@v1）：``after_id`` / ``before_id`` / ``to`` 恰好携带一个
++    ——同缺、同传多个或 ``after_id == before_id`` 同值均 422
++    ``HTTP_422_MOVE_ANCHOR_CONFLICT``。无 null 置顶语义（Grill F-03：pydantic
++    无法区分缺省与 null，置顶场景由「移动到…」弹窗的页首锚点表达）。
++    """
++
++    # 放到锚点卡之后（页内拖拽落位 / 弹窗向下·页尾）
++    after_id: uuid.UUID | None = None
++    # 放到锚点卡之前（弹窗向上·页首/页尾）
++    before_id: uuid.UUID | None = None
++    # 边缘投放带专用：服务端默认视图序列解析（D-012@v1）
++    to: WorkspaceMoveTargetLiteral | None = None
++    # ``to`` 路径专用分页宽度，与前端 PAGE_SIZE 常量同源（R-08 接口写明耦合）
++    page_size: int = 12
++
++    @model_validator(mode="after")
++    def _require_exactly_one_anchor(self) -> WorkspaceMoveRequest:
++        # 恰一非空：``after_id == before_id`` 同值属"同传"（计数=2），被同一条件
++        # 覆盖。抛 AppError 而非 ValueError——pydantic 不包装非 ValueError 异常，
++        # 直接冒泡到全局 handler 出 422 + 业务 code + 中文文案（对齐 router.py
++        # 既有 AppError 422 惯例；错误文案中文守护 test_error_message_l10n）。
++        if sum(anchor is not None for anchor in (self.after_id, self.before_id, self.to)) != 1:
++            raise AppError(
++                "移动锚点 after_id / before_id / to 必须恰好提供一个，不能缺省或同时携带多个。",
++                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
++                http_status=422,
++            )
++        return self
++
++
++class WorkspaceMoveResponse(BaseModel):
++    """Response body for ``POST /api/workspaces/{workspace_id}/move``（*Response 后缀惯例，Grill F-10）。"""
++
++    workspace: WorkspaceRead
++    # 本次是否触发整集重排（浮点精度耗尽诊断，R-01）
++    rebalanced: bool
++    # 移动后该卡在默认视图序列中的 0 基序号（前端 floor(rank/page_size) 换算
++    # 目标页驱动落带自动翻页，R-07）；sort_position 不出现在任何 DTO。
++    rank: int
++
++
+ def slugify(name: str) -> str:
+     """Derive a default slug from a workspace name.
+ 
+diff --git a/backend/app/modules/workspace/service.py b/backend/app/modules/workspace/service.py
+index b8a82ba9d..c5271e59e 100644
+--- a/backend/app/modules/workspace/service.py
++++ b/backend/app/modules/workspace/service.py
+@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
+ if TYPE_CHECKING:
+     from app.modules.agent.service import AgentService
+ 
+-from sqlalchemy import func, or_, select
++from sqlalchemy import and_, func, or_, select
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+@@ -42,6 +42,7 @@ from app.modules.auth.model import Role, User, UserWorkspaceRole
+ from app.modules.workspace.constants import WorkspaceTypeLiteral
+ from app.modules.workspace.model import (
+     AgentRunWorkspace,
++    UserWorkspaceOrder,
+     Workspace,
+ )
+ from app.modules.workspace.scanner import ScanResult, WorkspaceScanner
+@@ -49,6 +50,10 @@ from app.modules.workspace.schema import WorkspaceCreate, WorkspaceUpdate, slugi
+ 
+ log = get_logger(__name__)
+ 
++# 拖拽排序浮点中点键的相邻间隔基数（D-011@v1 方案 A；backfill 首次物化 /
++# 边界 ±1024 / 精度耗尽整集重排共用同一基数，change 2026-09-14-workspace-drag-sort）。
++_MOVE_POSITION_GAP: float = 1024.0
++
+ 
+ def _rewrite_path(root_path: str) -> str:
+     """Rewrite a host-style path to the container mount if configured.
+@@ -366,6 +371,7 @@ class WorkspaceService:
+         status: str | None = None,
+         user_id: uuid.UUID | None = None,
+         allowed_workspace_ids: list[uuid.UUID] | None = None,
++        order_user_id: uuid.UUID | None = None,
+     ) -> tuple[list[tuple[Workspace, User | None]], int]:
+         """Filtered + paginated workspace list with owner JOIN (task-05 / FR-01/02/04).
+ 
+@@ -378,6 +384,14 @@ class WorkspaceService:
+         - ``unclassified``: type IS NULL 谓词（D-005@v1，"未分类"筛选；与
+           workspace_type 互斥由 router 层 422 保证）。
+         - ``status``: 精确匹配 status。
++        - ``order_user_id``: 排序视角用户（task-04 / FR-03，change
++          2026-09-14-workspace-drag-sort），与 ``user_id``（created_by 精确筛选）
++          语义独立。非 None 时 rows 语句 LEFT JOIN 该用户的 UserWorkspaceOrder
++          排序行，默认排序改三元组「无行在前（组内 created_at DESC，D-004@v1
++          新建落最前）→ sort_position ASC → created_at DESC」；None=不加 JOIN，
++          保持 created_at DESC 现状（router 透传 user.id 归 task-02，接线前
++          既有调用全走 None 分支零变化）。total 计数与 limit/offset 分页不受
++          排序影响（D-002@v1）。
+         """
+         if allowed_workspace_ids is not None and len(allowed_workspace_ids) == 0:
+             return [], 0
+@@ -414,13 +428,32 @@ class WorkspaceService:
+             total_stmt = total_stmt.where(*filters)
+         total = int((await self._session.scalar(total_stmt)) or 0)
+ 
+-        rows_stmt = (
+-            select(Workspace, User)
+-            .outerjoin(User, Workspace.created_by == User.id)
+-            .order_by(col(Workspace.created_at).desc())
+-            .limit(limit)
+-            .offset(offset)
+-        )
++        # task-04 / FR-03：order_user_id 非 None 时 LEFT JOIN 该用户排序行，默认排序改
++        # 三元组「无行在前 → sort_position ASC → created_at DESC」（D-004@v1 无行的新建
++        # 工作区落最前；与 _load_default_view / move 服务的显示序语义一致）。首键跨方言
++        # 等价 NULLS FIRST——两方言均 false<true，DESC 把 IS NULL=true 的无行卡排最前，
++        # 禁用 PG 专有 NULLS FIRST/LAST 语法；次键在无行组内恒为 NULL 不参与比较，组内
++        # 顺序由末键决定（SQLite/PG 的 ASC NULL 排位差异因此不干扰）。无行用户
++        # （order_user_id 传入但零排序行）三键全退化，结果与现状 created_at DESC 完全
++        # 一致（D-004 回归验收）。None=不加 JOIN 保持现状（兼容策略：ORDER BY 分支由
++        # order_user_id 有无决定）。唯一索引 (user_id, workspace_id) 保证 JOIN 不放大
++        # 行数；total_stmt 不 JOIN 排序表，计数不受影响。
++        rows_stmt = select(Workspace, User).outerjoin(User, Workspace.created_by == User.id)
++        if order_user_id is not None:
++            rows_stmt = rows_stmt.outerjoin(
++                UserWorkspaceOrder,
++                and_(
++                    col(UserWorkspaceOrder.workspace_id) == col(Workspace.id),
++                    col(UserWorkspaceOrder.user_id) == order_user_id,
++                ),
++            ).order_by(
++                col(UserWorkspaceOrder.sort_position).is_(None).desc(),
++                col(UserWorkspaceOrder.sort_position).asc(),
++                col(Workspace.created_at).desc(),
++            )
++        else:
++            rows_stmt = rows_stmt.order_by(col(Workspace.created_at).desc())
++        rows_stmt = rows_stmt.limit(limit).offset(offset)
+         if filters:
+             rows_stmt = rows_stmt.where(*filters)
+         rows = list((await self._session.execute(rows_stmt)).all())
+@@ -600,6 +633,458 @@ class WorkspaceService:
+             )
+         return ws
+ 
++    # -- Drag-sort move (change 2026-09-14-workspace-drag-sort, task-03) ---
++
++    async def move_workspace(
++        self,
++        *,
++        workspace_id: uuid.UUID,
++        user_id: uuid.UUID,
++        after_id: uuid.UUID | None,
++        before_id: uuid.UUID | None,
++        to: str | None,
++        page_size: int,
++        allowed_ids: list[uuid.UUID] | None,
++    ) -> tuple[Workspace, bool, int]:
++        """拖拽移动工作区（FR-01 顺序持久化 / FR-02 跨页移动，design 总体方案 Wave 1）。
++
++        事务四步：①幂等 backfill 物化排序行（D-006@v2）→ ②锚点解析（id 锚点直取
++        邻居；``to`` 枚举在默认视图序列上做分页数学解析成 id 锚点，D-012@v1）→
++        ③锚点邻居浮点中点 / ±1024，精度耗尽时同一事务内整集重排（D-011@v1 /
++        R-01）→ ④单行 upsert + 默认视图 0 基 rank（前端 floor(rank/page_size)
++        换算页码，R-07）。
++
++        - ``allowed_ids=None`` 表示平台管理员（与 ``list_with_owner`` 可见性语义
++          一致）；行级可见校验归 task-02 router 层，此处防御性复验。
++        - 锚点三选一互斥校验归 task-02 pydantic 层，service 按已校验输入处理并
++          防御性复验。
++        - 返回 ``(移动后的 Workspace, 是否触发整集重排, 0 基 rank)``。
++
++        move 是纯重排——只写 user_workspace_orders 排序行，不增删 workspaces 行
++        （D-014@v1 分页数量不变量的前提）；同用户并发后写覆盖按 D-008@v1 接受，
++        不加乐观锁。
++        """
++        # 防御性三选一校验（正常由 task-02 schema 层 422 HTTP_422_MOVE_ANCHOR_CONFLICT 拦截）
++        if sum(anchor is not None for anchor in (after_id, before_id, to)) != 1:
++            raise AppError(
++                "移动锚点 after_id / before_id / to 必须恰好提供一个。",
++                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
++                http_status=422,
++            )
++        if to is not None and (to not in ("next_page_head", "prev_page_tail") or page_size < 1):
++            raise AppError(
++                "to 仅支持 next_page_head / prev_page_tail，且 page_size 必须为正整数。",
++                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
++                http_status=422,
++            )
++
++        workspace = await self.get(workspace_id)  # 不存在/软删 → 404
++        # 行级可见性防御复验（None=平台管理员全量）
++        if allowed_ids is not None and workspace_id not in allowed_ids:
++            raise WorkspacePermissionDenied("无权访问该工作区，无法移动排序。")
++
++        # ① 幂等 backfill：可见 ∧ active/archived ∧ 未软删 ∧ 尚无排序行的全集一次性物化
++        await self._backfill_order_rows(user_id=user_id, allowed_ids=allowed_ids)
++
++        # ② 锚点解析：统一收敛为 (anchor_after, anchor_before) 相邻 id 锚点
++        anchor_after: uuid.UUID | None = None
++        anchor_before: uuid.UUID | None = None
++        if to is not None:
++            anchor_after, anchor_before = await self._resolve_page_target(
++                workspace_id=workspace_id,
++                user_id=user_id,
++                to=to,
++                page_size=page_size,
++                allowed_ids=allowed_ids,
++            )
++        elif after_id is not None:
++            await self._validate_move_anchor(
++                after_id, workspace_id=workspace_id, allowed_ids=allowed_ids
++            )
++            anchor_after = after_id
++        elif before_id is not None:
++            await self._validate_move_anchor(
++                before_id, workspace_id=workspace_id, allowed_ids=allowed_ids
++            )
++            anchor_before = before_id
++        else:  # 不可达：三选一防御校验已保证恰好一个
++            raise AppError(
++                "移动锚点 after_id / before_id / to 必须恰好提供一个。",
++                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
++                http_status=422,
++            )
++
++        # ③+④ 中点落位并单行 upsert；默认视图只有被移动卡自身时（to 收敛后无邻居）
++        # 为纯 no-op——位置不动，只返回 rank。
++        rebalanced = False
++        if anchor_after is not None or anchor_before is not None:
++            position, rebalanced = await self._compute_anchor_position(
++                user_id=user_id, anchor_after=anchor_after, anchor_before=anchor_before
++            )
++            await self._upsert_order_row(
++                user_id=user_id, workspace_id=workspace_id, position=position
++            )
++
++        # rank 在提交前按同事务内已 flush 的落位计算（失败可整体回滚）
++        rank = await self._default_view_rank(
++            workspace_id=workspace_id,
++            user_id=user_id,
++            allowed_ids=allowed_ids,
++            fallback_created_at=workspace.created_at,
++        )
++        # 单事务提交：backfill / 整集重排 / upsert 全部写路径在此一次落库
++        await self._session.commit()
++        log.info(
++            "workspace.moved",
++            workspace_id=str(workspace_id),
++            user_id=str(user_id),
++            to=to,
++            rebalanced=rebalanced,
++            rank=rank,
++        )
++        return workspace, rebalanced, rank
++
++    async def _backfill_order_rows(
++        self,
++        *,
++        user_id: uuid.UUID,
++        allowed_ids: list[uuid.UUID] | None,
++    ) -> None:
++        """幂等物化排序行（D-006@v2）：每次 move 事务首步执行。
++
++        INSERT..SELECT WHERE NOT EXISTS 的 Python 等价实现——位置公式需按「首用户
++        row_number×1024 / 已有行 min(pos)-1024×n」分派，纯 SQL 双方言表达繁琐；
++        量级一两百直接整取（D-002@v1）。一次性物化「该用户可见 ∧ status IN
++        (active, archived) ∧ 未软删 ∧ 尚无排序行」的全部 workspace——锚点卡因此
++        永远有行，无「锚点无行」输入域（Grill F-04）。
++
++        - 首用户（零存量行）：全集按显示序（created_at DESC）赋 row_number×1024
++          递增序列（D-006@v2 勘误——ASC 消费下沿显示序递增，v1「递减」为笔误）。
++        - 已有行：新增无行组整体物化在现有最小位置之下（min(pos)-1024×n 区段），
++          组内 created_at DESC——物化前后默认视图显示序零变化（D-004@v1 回归约束）。
++        - 软删（deleted_at 非空）行不物化；重复执行零新增行。
++        """
++        conds = [
++            col(Workspace.deleted_at).is_(None),
++            col(Workspace.status).in_(("active", "archived")),
++        ]
++        if allowed_ids is not None:
++            conds.append(col(Workspace.id).in_(allowed_ids))
++        candidates = (
++            await self._session.execute(select(Workspace.id, Workspace.created_at).where(*conds))
++        ).all()
++        if not candidates:
++            return
++        existing = (
++            await self._session.execute(
++                select(
++                    UserWorkspaceOrder.workspace_id,
++                    UserWorkspaceOrder.sort_position,
++                ).where(col(UserWorkspaceOrder.user_id) == user_id)
++            )
++        ).all()
++        existing_ids = {row.workspace_id for row in existing}
++        missing = [row for row in candidates if row.id not in existing_ids]
++        if not missing:
++            return  # 幂等：重复执行零新增行
++        # 组内显示序：created_at DESC（新建优先；id 仅作稳定并列次序）
++        missing.sort(key=lambda row: (row.created_at, row.id), reverse=True)
++        if existing:
++            base = min(row.sort_position for row in existing)
++            positions = [base - _MOVE_POSITION_GAP * (i + 1) for i in range(len(missing))]
++        else:
++            positions = [_MOVE_POSITION_GAP * (i + 1) for i in range(len(missing))]
++        now = datetime.now(UTC)
++        self._session.add_all(
++            UserWorkspaceOrder(
++                user_id=user_id,
++                workspace_id=row.id,
++                sort_position=position,
++                created_at=now,
++                updated_at=now,
++            )
++            for row, position in zip(missing, positions, strict=True)
++        )
++        await self._session.flush()
++
++    async def _resolve_page_target(
++        self,
++        *,
++        workspace_id: uuid.UUID,
++        user_id: uuid.UUID,
++        to: str,
++        page_size: int,
++        allowed_ids: list[uuid.UUID] | None,
++    ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
++        """``to`` 枚举锚点解析（D-012@v1）：默认视图分页数学 → 相邻 id 锚点。
++
++        取该用户默认视图有序 id 列表（可见 ∧ active ∧ 未软删，按显示序），定位被
++        移动卡当前 rank r、页 P=floor(r/page_size)；目标插入 rank=(P+1)×page_size
++        （next_page_head=下页页首）或 P×page_size-1（prev_page_tail=上页页尾，
++        P=0 时 422）；越界收敛到序列尾/首。此路径消除客户端「不知道相邻页边界卡」
++        的分页数学问题（Grill F-01：after_id=本页末卡的落位是本页末位而非下页开头）。
++        """
++        view = await self._load_default_view(user_id=user_id, allowed_ids=allowed_ids)
++        ordered_ids = [item[0] for item in view]
++        try:
++            current_rank = ordered_ids.index(workspace_id)
++        except ValueError:
++            raise AppError(
++                "被移动的工作区不在默认视图中，无法按分页目标移动。",
++                code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
++                http_status=422,
++                details={"workspace_id": str(workspace_id)},
++            ) from None
++        page = current_rank // page_size
++        if to == "next_page_head":
++            target_rank = (page + 1) * page_size
++        else:
++            if page == 0:
++                # 第 0 页没有上一页页尾（design 接口定义锚点校验第三分支）
++                raise AppError(
++                    "被移动的工作区已位于第一页，无法移动到上一页页尾。",
++                    code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
++                    http_status=422,
++                    details={"workspace_id": str(workspace_id)},
++                )
++            target_rank = page * page_size - 1
++        # 越界收敛：target_rank 是「移除被移动卡后」新序列里的插入位，合法域 [0, len-1]
++        target_rank = max(0, min(target_rank, len(ordered_ids) - 1))
++        others = [wid for wid in ordered_ids if wid != workspace_id]
++        if not others:
++            return None, None  # 默认视图只有被移动卡自身——无相邻锚点，纯 no-op
++        if target_rank >= 1:
++            # 插到 others[target_rank] 之前 ⇒ after 锚点取其前一张
++            return others[target_rank - 1], None
++        return None, others[0]
++
++    async def _validate_move_anchor(
++        self,
++        anchor_id: uuid.UUID,
++        *,
++        workspace_id: uuid.UUID,
++        allowed_ids: list[uuid.UUID] | None,
++    ) -> None:
++        """id 锚点判据（D-013@v1）：存在 ∧ 可见 ∧ 未软删 ∧ status ∈ {active, archived}。
++
++        与 backfill 物化范围对齐（Grill F-08）——锚点卡因此永远有排序行。违反 →
++        422 ``HTTP_422_MOVE_ANCHOR_NOT_VISIBLE``；自锚（锚点=被移动卡自身）→ 422
++        ``HTTP_422_MOVE_ANCHOR_SELF``（前端正常流程不会发，契约兜底，Grill F-09）。
++        """
++        if anchor_id == workspace_id:
++            raise AppError(
++                "锚点不能是被移动的工作区自身。",
++                code="HTTP_422_MOVE_ANCHOR_SELF",
++                http_status=422,
++                details={"workspace_id": str(workspace_id)},
++            )
++        anchor = await self._session.get(Workspace, anchor_id)
++        if (
++            anchor is None
++            or anchor.deleted_at is not None
++            or anchor.status not in ("active", "archived")
++            or (allowed_ids is not None and anchor_id not in allowed_ids)
++        ):
++            raise AppError(
++                "锚点工作区不存在、不可见或状态不允许，无法作为移动锚点。",
++                code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
++                http_status=422,
++                details={"anchor_id": str(anchor_id)},
++            )
++
++    async def _compute_anchor_position(
++        self,
++        *,
++        user_id: uuid.UUID,
++        anchor_after: uuid.UUID | None,
++        anchor_before: uuid.UUID | None,
++    ) -> tuple[float, bool]:
++        """锚点邻居浮点中点 / ±1024 落位，精度耗尽时同一事务内整集重排（D-011@v1，R-01）。
++
++        after=A → 新位置=(pos(A)+pos(A 的后继))/2，无后继=pos(A)+1024；before=B
++        对称（无前驱=pos(B)-1024）。中点结果与任一邻居相等（浮点精度耗尽）→ 按
++        当前顺序重赋 1024 间隔后重算本次位置，返回 rebalanced=True。
++        """
++        rows = await self._load_order_rows(user_id=user_id)
++        index_of = {row.workspace_id: i for i, row in enumerate(rows)}
++        if anchor_after is not None:
++            anchor_idx = self._anchor_row_index(index_of, anchor_after)
++            anchor_pos = rows[anchor_idx].sort_position
++            successor = rows[anchor_idx + 1] if anchor_idx + 1 < len(rows) else None
++            if successor is None:
++                return anchor_pos + _MOVE_POSITION_GAP, False
++            neighbor_pos = successor.sort_position
++        else:
++            # 三选一校验保证 anchor_after / anchor_before 恰有一个
++            if anchor_before is None:
++                raise AppError(
++                    "移动锚点 after_id / before_id / to 必须恰好提供一个。",
++                    code="HTTP_422_MOVE_ANCHOR_CONFLICT",
++                    http_status=422,
++                )
++            anchor_idx = self._anchor_row_index(index_of, anchor_before)
++            anchor_pos = rows[anchor_idx].sort_position
++            predecessor = rows[anchor_idx - 1] if anchor_idx > 0 else None
++            if predecessor is None:
++                return anchor_pos - _MOVE_POSITION_GAP, False
++            neighbor_pos = predecessor.sort_position
++        new_pos = (anchor_pos + neighbor_pos) / 2.0
++        if new_pos != anchor_pos and new_pos != neighbor_pos:
++            return new_pos, False
++        # 精度耗尽（两卡位置贴死）→ 同一事务内整集重排：按当前顺序重赋
++        # 1024×row_number 后重算。rows 为同一批 ORM 对象，重排已就地更新
++        # 位置且不改变相邻关系，无需重查。
++        await self._rebalance_order_rows(rows)
++        anchor_pos = rows[anchor_idx].sort_position
++        neighbor_idx = anchor_idx + 1 if anchor_after is not None else anchor_idx - 1
++        return (anchor_pos + rows[neighbor_idx].sort_position) / 2.0, True
++
++    @staticmethod
++    def _anchor_row_index(index_of: dict[uuid.UUID, int], anchor_id: uuid.UUID) -> int:
++        """锚点卡在按位置 ASC 排序行列表中的下标；无行时防御性 422。
++
++        backfill 后锚点（可见 ∧ active/archived）必有排序行（D-006@v2），
++        此分支正常不可达。
++        """
++        try:
++            return index_of[anchor_id]
++        except KeyError:
++            raise AppError(
++                "锚点工作区不存在、不可见或状态不允许，无法作为移动锚点。",
++                code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
++                http_status=422,
++                details={"anchor_id": str(anchor_id)},
++            ) from None
++
++    async def _load_order_rows(self, *, user_id: uuid.UUID) -> list[UserWorkspaceOrder]:
++        """该用户全部排序行，按 sort_position ASC（含归档/软删 workspace 的保留行）。
++
++        软删卡的排序行参与中点数学无害——它不可见但占位，中点结果仍落在锚点与
++        其后继之间，默认视图相对顺序不受影响（D-006@v2：软删行保留、复活回原位）。
++        """
++        stmt = (
++            select(UserWorkspaceOrder)
++            .where(col(UserWorkspaceOrder.user_id) == user_id)
++            .order_by(col(UserWorkspaceOrder.sort_position).asc())
++        )
++        return list((await self._session.execute(stmt)).scalars().all())
++
++    async def _rebalance_order_rows(self, rows: list[UserWorkspaceOrder]) -> None:
++        """整集重排：按当前顺序（入参 ASC 序）重赋 1024×row_number 递增序列（R-01）。"""
++        now = datetime.now(UTC)
++        for i, row in enumerate(rows):
++            row.sort_position = _MOVE_POSITION_GAP * (i + 1)
++            row.updated_at = now
++        await self._session.flush()
++
++    async def _upsert_order_row(
++        self,
++        *,
++        user_id: uuid.UUID,
++        workspace_id: uuid.UUID,
++        position: float,
++    ) -> None:
++        """单行 upsert 被移动卡的排序位置（(user_id, workspace_id) 唯一索引依据）。
++
++        move 是纯重排：只写本表单行，不增删 workspaces 行（D-014@v1 分页数量
++        不变量）。SQLite/PG 双方言——不用 ON CONFLICT 方言语法，select 后按
++        有无行走 UPDATE / INSERT。
++        """
++        row = (
++            (
++                await self._session.execute(
++                    select(UserWorkspaceOrder)
++                    .where(col(UserWorkspaceOrder.user_id) == user_id)
++                    .where(col(UserWorkspaceOrder.workspace_id) == workspace_id)
++                )
++            )
++            .scalars()
++            .first()
++        )
++        now = datetime.now(UTC)
++        if row is None:
++            self._session.add(
++                UserWorkspaceOrder(
++                    user_id=user_id,
++                    workspace_id=workspace_id,
++                    sort_position=position,
++                    created_at=now,
++                    updated_at=now,
++                )
++            )
++        else:
++            row.sort_position = position
++            row.updated_at = now
++        await self._session.flush()
++
++    async def _load_default_view(
++        self,
++        *,
++        user_id: uuid.UUID,
++        allowed_ids: list[uuid.UUID] | None,
++    ) -> list[tuple[uuid.UUID, float | None, datetime]]:
++        """该用户默认视图（可见 ∧ active ∧ 未软删）按显示序的 (id, 排序位, created_at)。
++
++        显示序与列表 SQL（task-04 的 LEFT JOIN 排序）一致：无行卡在前（组内
++        created_at DESC，D-004@v1 新建落最前）、有行卡按 sort_position ASC。
++        量级一两百（D-002@v1），整取后在 Python 排序。
++        """
++        stmt = (
++            select(Workspace.id, Workspace.created_at, UserWorkspaceOrder.sort_position)
++            .outerjoin(
++                UserWorkspaceOrder,
++                and_(
++                    col(UserWorkspaceOrder.workspace_id) == col(Workspace.id),
++                    col(UserWorkspaceOrder.user_id) == user_id,
++                ),
++            )
++            .where(col(Workspace.deleted_at).is_(None))
++            .where(col(Workspace.status) == "active")
++        )
++        if allowed_ids is not None:
++            stmt = stmt.where(col(Workspace.id).in_(allowed_ids))
++        rows = (await self._session.execute(stmt)).all()
++        no_row = sorted(
++            (r for r in rows if r.sort_position is None),
++            key=lambda r: (r.created_at, r.id),
++            reverse=True,
++        )
++        with_row = sorted(
++            (r for r in rows if r.sort_position is not None),
++            key=lambda r: (r.sort_position, r.id),
++        )
++        return [(r.id, r.sort_position, r.created_at) for r in [*no_row, *with_row]]
++
++    async def _default_view_rank(
++        self,
++        *,
++        workspace_id: uuid.UUID,
++        user_id: uuid.UUID,
++        allowed_ids: list[uuid.UUID] | None,
++        fallback_created_at: datetime,
++    ) -> int:
++        """移动后该卡在默认视图序列中的 0 基序号（R-07：前端 floor(rank/page_size) 换算页码）。
++
++        防御分支：被移动卡不在默认视图（归档/待激活——正常拖拽输入域之外，前端
++        仅默认视图可拖）时，按同一显示序键定位其「落点序号」——有行卡与其余有行
++        卡比 pos，无行卡与无行组比 created_at DESC。
++        """
++        view = await self._load_default_view(user_id=user_id, allowed_ids=allowed_ids)
++        ordered_ids = [item[0] for item in view]
++        if workspace_id in ordered_ids:
++            return ordered_ids.index(workspace_id)
++        moved_pos = await self._session.scalar(
++            select(UserWorkspaceOrder.sort_position).where(
++                col(UserWorkspaceOrder.user_id) == user_id,
++                col(UserWorkspaceOrder.workspace_id) == workspace_id,
++            )
++        )
++        if moved_pos is None:
++            return sum(
++                1 for _, pos, created_at in view if pos is None and created_at > fallback_created_at
++            )
++        return sum(1 for _, pos, _ in view if pos is None or pos < moved_pos)
++
+     # -- Generate projects from module-map ---
+ 
+     async def generate_projects(
+diff --git a/backend/app/modules/workspace/tests/test_move_order.py b/backend/app/modules/workspace/tests/test_move_order.py
+new file mode 100644
+index 000000000..c370260ef
+--- /dev/null
++++ b/backend/app/modules/workspace/tests/test_move_order.py
+@@ -0,0 +1,690 @@
++"""拖拽排序 move 端点与列表排序 HTTP 级测试（change 2026-09-14-workspace-drag-sort task-05）。
++
++覆盖 FR-01/FR-02/FR-03/FR-08 全部分支，作为 task-02（端点契约）/task-03（move
++服务）/task-04（列表排序接入）三个实现任务的验收闸门：
++
++- 契约 422（D-013@v1）：三选一违反四形态（全缺 / after_id+before_id 同传 /
++  after_id==before_id 同值 / id+to 同传）→ HTTP_422_MOVE_ANCHOR_CONFLICT；
++  锚点不可见（不存在 / 他人 workspace / 软删 / status ∉ {active, archived}）→
++  HTTP_422_MOVE_ANCHOR_NOT_VISIBLE；自锚 → HTTP_422_MOVE_ANCHOR_SELF；
++  to="prev_page_tail" 且被移动卡在第 0 页 → 422。均断言中文文案。
++- 幂等 backfill（D-006@v2）：重复 move 不重复插入排序行。
++- to 分页数学（D-012@v1）：下带=下页页首 / 上带=上页页尾 / 越界收敛 /
++  page_size 显式传参与默认 12。
++- 中点 + 精度耗尽整集重排（R-01）：两行位置贴死 → rebalanced=true 且落位正确。
++- D-004 回归：无行用户列表 = created_at DESC；backfill 后新建 workspace 落最前。
++- FR-01 两用户顺序隔离：用户 A move 后 B 的列表与此前完全一致。
++- D-014 分页数量不变量：move 前后 total 不变、各页恒 PAGE_SIZE、无重复 id。
++- 列表排序 LEFT JOIN 回归（FR-03）：混合有行/无行 + 四路筛选与 limit/offset。
++- 鉴权 403（D-007@v1）：非管理员对不可见 workspace move → 403。
++
++种子数据用 db_session 直插模型行（test_permission_scope.py 同款模式，勿新建
++workspace/tests/conftest.py）；断言只基于 design「接口定义」公开契约
++（错误码 / rank / total / 顺序），sort_position 不出现在任何 DTO。
++"""
++
++from __future__ import annotations
++
++import math
++import uuid
++from datetime import UTC, datetime, timedelta
++from typing import Any
++
++from httpx import AsyncClient, Response
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.config import get_settings
++from app.core.security import create_access_token, password_hasher
++from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
++from app.modules.workspace.model import UserWorkspaceOrder, Workspace
++
++# created_at 严格区分（秒级递减），保证默认视图 created_at DESC 全序无并列。
++_BASE_TS = datetime(2026, 9, 14, 8, 0, 0, tzinfo=UTC)
++
++# D-002@v1 / R-08：PAGE_SIZE=12 与前端常量同源（design 接口定义 page_size 默认 12）。
++_PAGE_SIZE = 12
++
++
++# ── 种子与请求 helper（直插模型，test_permission_scope.py 同款模式）──────────
++
++
++async def _make_ws(
++    db_session: AsyncSession,
++    *,
++    name: str,
++    created_at: datetime,
++    status: str = "active",
++    wtype: str | None = None,
++    deleted_at: datetime | None = None,
++) -> Workspace:
++    """直插一行 Workspace（root_path/slug 加随机后缀避开唯一索引）。"""
++    ws = Workspace(
++        name=name,
++        slug=f"{name}-{uuid.uuid4().hex[:8]}",
++        root_path=f"/tmp/mv-{name}-{uuid.uuid4().hex[:8]}",
++        status=status,
++        type=wtype,
++        deleted_at=deleted_at,
++        created_at=created_at,
++        updated_at=created_at,
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++async def _seed_workspaces(
++    db_session: AsyncSession,
++    n: int,
++    *,
++    prefix: str = "mv",
++    wtype: str | None = None,
++) -> list[Workspace]:
++    """批量直插 N 个 active workspace。
++
++    created_at 严格递减（w0 最新）→ 未物化用户的默认视图 created_at DESC 序
++    恰为 [w0, w1, ..., w{n-1}]，后续断言直接按下标引用。
++    """
++    return [
++        await _make_ws(
++            db_session,
++            name=f"{prefix}-{i}",
++            created_at=_BASE_TS - timedelta(seconds=i),
++            wtype=wtype,
++        )
++        for i in range(n)
++    ]
++
++
++async def _make_user(db_session: AsyncSession, *, prefix: str = "mv-user") -> tuple[User, str]:
++    """普通（非管理员）用户 + 访问令牌（test_permission_scope.py 同款）。"""
++    user = User(
++        id=uuid.uuid4(),
++        email=f"{prefix}-{uuid.uuid4().hex[:6]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        status="active",
++        is_platform_admin=False,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    await db_session.refresh(user)
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email,
++        is_admin=user.is_platform_admin,
++        settings=get_settings(),
++    )
++    return user, token
++
++
++async def _grant_read(db_session: AsyncSession, *, user: User, ws: Workspace) -> None:
++    """给用户授予单个 workspace 的 workspace:read（行级可见集合来源）。"""
++    role = Role(
++        id=uuid.uuid4(),
++        key=f"ws_reader_{uuid.uuid4().hex[:8]}",
++        name="Workspace Reader",
++        description="test role with workspace:read",
++    )
++    db_session.add(role)
++    db_session.add(RolePermission(role_id=role.id, permission="workspace:read"))
++    db_session.add(
++        UserWorkspaceRole(
++            user_id=user.id,
++            workspace_id=ws.id,
++            role_id=role.id,
++            granted_by=None,
++            granted_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++
++async def _admin_user(db_session: AsyncSession) -> User:
++    """conftest auth_admin_token 落库的平台管理员（固定邮箱复用）。"""
++    stmt = select(User).where(User.email == "admin@example.com").limit(1)
++    return (await db_session.execute(stmt)).scalars().one()
++
++
++async def _order_row_count(db_session: AsyncSession, user: User) -> int:
++    stmt = select(UserWorkspaceOrder.id).where(UserWorkspaceOrder.user_id == user.id)
++    return len((await db_session.execute(stmt)).all())
++
++
++async def _order_positions(db_session: AsyncSession, user: User) -> list[float]:
++    stmt = (
++        select(UserWorkspaceOrder.sort_position)
++        .where(UserWorkspaceOrder.user_id == user.id)
++        .order_by(UserWorkspaceOrder.sort_position.asc())
++    )
++    return [float(v) for v in (await db_session.execute(stmt)).scalars().all()]
++
++
++async def _list_ids(
++    client: AsyncClient,
++    headers: dict[str, str],
++    **params: Any,
++) -> tuple[list[str], int]:
++    """GET /api/workspaces → (当前用户视角的有序 id 列表, total)。"""
++    resp = await client.get("/api/workspaces", headers=headers, params=params)
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    return [item["id"] for item in body["items"]], body["total"]
++
++
++async def _move(
++    client: AsyncClient,
++    headers: dict[str, str],
++    ws: Workspace,
++    **payload: Any,
++) -> Response:
++    # httpx 的 json= 走标准库序列化，UUID 需先转字符串。
++    body = {
++        key: str(value) if isinstance(value, uuid.UUID) else value for key, value in payload.items()
++    }
++    return await client.post(f"/api/workspaces/{ws.id}/move", json=body, headers=headers)
++
++
++# ── 契约 422：三选一违反四形态 → HTTP_422_MOVE_ANCHOR_CONFLICT（D-013）──────
++
++
++async def test_move_anchor_conflict_all_missing(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """锚点全缺 → 422 CONFLICT + 中文文案。"""
++    ws = (await _seed_workspaces(db_session, 1))[0]
++    resp = await _move(client, auth_headers, ws)
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_CONFLICT"
++    assert "必须恰好提供一个" in body["message"]
++
++
++async def test_move_anchor_conflict_after_and_before(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """after_id + before_id 同传（不同值）→ 422 CONFLICT。"""
++    w0, w1 = await _seed_workspaces(db_session, 2)
++    resp = await _move(client, auth_headers, w0, after_id=w1.id, before_id=w0.id)
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_CONFLICT"
++    assert "必须恰好提供一个" in body["message"]
++
++
++async def test_move_anchor_conflict_after_equals_before(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """after_id == before_id 同值（计数=2）→ 422 CONFLICT。"""
++    w0, w1 = await _seed_workspaces(db_session, 2)
++    resp = await _move(client, auth_headers, w0, after_id=w1.id, before_id=w1.id)
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_CONFLICT"
++    assert "必须恰好提供一个" in body["message"]
++
++
++async def test_move_anchor_conflict_id_with_to(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """after_id + to 同传 → 422 CONFLICT。"""
++    w0, w1 = await _seed_workspaces(db_session, 2)
++    resp = await _move(client, auth_headers, w0, after_id=w1.id, to="next_page_head")
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_CONFLICT"
++    assert "必须恰好提供一个" in body["message"]
++
++
++# ── 契约 422：锚点有效性 → NOT_VISIBLE / SELF / 第 0 页（D-013/D-012）────────
++
++
++async def test_move_anchor_not_found(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """锚点 id 不存在 → 422 NOT_VISIBLE + 中文文案。"""
++    w0, _ = await _seed_workspaces(db_session, 2)
++    resp = await _move(client, auth_headers, w0, after_id=uuid.uuid4())
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_NOT_VISIBLE"
++    assert "锚点工作区不存在" in body["message"]
++
++
++async def test_move_anchor_soft_deleted(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """锚点 workspace 软删（deleted_at 非空）→ 422 NOT_VISIBLE。"""
++    w0, _ = await _seed_workspaces(db_session, 2)
++    dead = await _make_ws(
++        db_session,
++        name="mv-soft-deleted",
++        created_at=_BASE_TS + timedelta(seconds=5),
++        deleted_at=datetime.now(UTC),
++    )
++    resp = await _move(client, auth_headers, w0, before_id=dead.id)
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_NOT_VISIBLE"
++    assert "锚点工作区不存在" in body["message"]
++
++
++async def test_move_anchor_status_out_of_range(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """锚点 status ∉ {active, archived}（pending）→ 422 NOT_VISIBLE。"""
++    w0, _ = await _seed_workspaces(db_session, 2)
++    pending = await _make_ws(
++        db_session,
++        name="mv-pending",
++        created_at=_BASE_TS + timedelta(seconds=5),
++        status="pending",
++    )
++    resp = await _move(client, auth_headers, w0, after_id=pending.id)
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_NOT_VISIBLE"
++    assert "状态不允许" in body["message"]
++
++
++async def test_move_anchor_invisible_to_non_admin(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    """锚点=他人 workspace（不在调用者可见集合）→ 422 NOT_VISIBLE（D-013 判据）。"""
++    target, _ = await _seed_workspaces(db_session, 2, prefix="tgt")
++    other = await _make_ws(
++        db_session,
++        name="mv-other-user-ws",
++        created_at=_BASE_TS + timedelta(seconds=1),
++    )
++    user, token = await _make_user(db_session)
++    # 用户只对 target 持 workspace:read——other 存在且 active 但对其不可见。
++    await _grant_read(db_session, user=user, ws=target)
++    headers = {"Authorization": f"Bearer {token}"}
++
++    resp = await _move(client, headers, target, after_id=other.id)
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_NOT_VISIBLE"
++    assert "锚点工作区不存在" in body["message"]
++
++
++async def test_move_anchor_self(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """自锚（锚点=被移动卡自身）→ 422 HTTP_422_MOVE_ANCHOR_SELF。"""
++    w0, w1, _ = await _seed_workspaces(db_session, 3)
++    resp = await _move(client, auth_headers, w0, after_id=w0.id)
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_SELF"
++    assert "自身" in body["message"]
++
++    resp2 = await _move(client, auth_headers, w1, before_id=w1.id)
++    assert resp2.status_code == 422, resp2.text
++    assert resp2.json()["code"] == "HTTP_422_MOVE_ANCHOR_SELF"
++
++
++async def test_move_prev_page_tail_on_first_page(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """to=prev_page_tail 且被移动卡在第 0 页 → 422（FR-02 末分支）。"""
++    w0, w1, _ = await _seed_workspaces(db_session, 3)
++    # w0 是 created_at DESC 序第一张（rank 0，第 0 页）。
++    resp = await _move(client, auth_headers, w0, to="prev_page_tail")
++    assert resp.status_code == 422, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_422_MOVE_ANCHOR_NOT_VISIBLE"
++    assert "第一页" in body["message"]
++    # 判据只看页号：同页其它卡（w1，rank 1 仍在第 0 页）同样 422。
++    resp2 = await _move(client, auth_headers, w1, to="prev_page_tail")
++    assert resp2.status_code == 422, resp2.text
++
++
++# ── 成功路径 + 幂等 backfill（D-006@v2 / FR-01）──────────────────────────────
++
++
++async def test_move_after_success_and_idempotent_backfill(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """after_id 落位成功 + backfill 幂等：重复 move 排序行数不增长。"""
++    cards = await _seed_workspaces(db_session, 6)
++    w0, w1, _, w3, _, _ = cards
++    admin = await _admin_user(db_session)
++
++    resp = await _move(client, auth_headers, w3, after_id=w0.id)
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    # 响应契约：{workspace, rebalanced, rank}（task-02 expects_from）。
++    assert body["workspace"]["id"] == str(w3.id)
++    assert body["rebalanced"] is False
++    assert body["rank"] == 1
++
++    # 首次 move 触发 backfill：可见 ∧ active/archived 全集 6 行一次物化。
++    assert await _order_row_count(db_session, admin) == 6
++    ids, total = await _list_ids(client, auth_headers)
++    assert total == 6
++    assert ids == [str(w.id) for w in [cards[0], w3, cards[1], cards[2], cards[4], cards[5]]]
++
++    # 第二次 move：幂等 backfill 不重复插入（唯一索引行数不变）。
++    resp2 = await _move(client, auth_headers, cards[4], after_id=w1.id)
++    assert resp2.status_code == 200, resp2.text
++    assert await _order_row_count(db_session, admin) == 6
++
++
++# ── to 分页数学（D-012@v1 / FR-02）───────────────────────────────────────────
++
++
++async def test_move_to_next_page_head(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """下带 to=next_page_head（page_size=12 显式）→ rank=(P+1)×page_size=下页页首。"""
++    cards = await _seed_workspaces(db_session, 30)  # 3 页：12/12/6
++    w0 = cards[0]  # rank 0（第 0 页）
++    resp = await _move(client, auth_headers, w0, to="next_page_head", page_size=_PAGE_SIZE)
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["rank"] == 12  # (0+1)×12
++    ids, total = await _list_ids(client, auth_headers)
++    assert total == 30
++    assert ids[12] == str(w0.id)
++    assert ids[11] == str(cards[12].id)
++    assert ids[13] == str(cards[13].id)
++
++
++async def test_move_to_prev_page_tail_default_page_size(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """上带 to=prev_page_tail（page_size 缺省=12）→ rank=P×page_size-1=上页页尾。"""
++    cards = await _seed_workspaces(db_session, 30)
++    w13 = cards[13]  # rank 13（第 1 页）
++    resp = await _move(client, auth_headers, w13, to="prev_page_tail")
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["rank"] == 11  # 1×12-1
++    ids, _ = await _list_ids(client, auth_headers)
++    assert ids[11] == str(w13.id)
++    assert ids[10] == str(cards[10].id)
++    assert ids[12] == str(cards[11].id)
++
++
++async def test_move_to_explicit_page_size(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """page_size 显式传参与默认值分轨：page_size=5 时按 5 宽度做分页数学。"""
++    cards = await _seed_workspaces(db_session, 10)
++    w7 = cards[7]  # rank 7 → page 1（page_size=5）
++    resp = await _move(client, auth_headers, w7, to="prev_page_tail", page_size=5)
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["rank"] == 4  # 1×5-1
++
++    # 同一张卡在默认 page_size=12 下页号不同：w8（重排后 rank 8）在第 0 页 → 422。
++    w8 = cards[8]
++    resp2 = await _move(client, auth_headers, w8, to="prev_page_tail")
++    assert resp2.status_code == 422, resp2.text
++    assert resp2.json()["code"] == "HTTP_422_MOVE_ANCHOR_NOT_VISIBLE"
++
++
++async def test_move_to_next_page_head_converges_to_tail(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """越界收敛：末卡 to=next_page_head → 收敛到序列尾，rank 与顺序不变。"""
++    cards = await _seed_workspaces(db_session, 30)
++    w29 = cards[29]  # rank 29（末页末卡）
++    before_ids, _ = await _list_ids(client, auth_headers)
++    resp = await _move(client, auth_headers, w29, to="next_page_head")
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["rank"] == 29
++    after_ids, _ = await _list_ids(client, auth_headers)
++    assert after_ids == before_ids
++
++
++# ── 中点 + 精度耗尽整集重排（D-011 / R-01）──────────────────────────────────
++
++
++async def test_move_precision_exhaustion_triggers_rebalance(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """相邻两行位置贴死（相邻浮点值）→ 中点坍缩触发整集重排 rebalanced=true。"""
++    cards = await _seed_workspaces(db_session, 3)
++    a, b, c = cards  # 显示序 [a, b, c]
++    admin = await _admin_user(db_session)
++    glued = math.nextafter(1024.0, math.inf)  # 与 1024.0 相邻的浮点值
++    db_session.add_all(
++        [
++            UserWorkspaceOrder(user_id=admin.id, workspace_id=a.id, sort_position=1024.0),
++            UserWorkspaceOrder(user_id=admin.id, workspace_id=b.id, sort_position=glued),
++            UserWorkspaceOrder(user_id=admin.id, workspace_id=c.id, sort_position=3072.0),
++        ]
++    )
++    await db_session.commit()
++
++    resp = await _move(client, auth_headers, c, after_id=a.id)
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["rebalanced"] is True
++    assert body["rank"] == 1
++    ids, _ = await _list_ids(client, auth_headers)
++    # 整集重排后 a=1024 / b=2048，c 落中点 1536 → 最终顺序 [a, c, b]。
++    assert ids == [str(a.id), str(c.id), str(b.id)]
++    # 重排后间隔恢复：三行位置呈 1024 间隔递增序列（c 在 1024 与 2048 之间）。
++    positions = await _order_positions(db_session, admin)
++    assert positions[0] < positions[1] < positions[2]
++    assert positions[1] == 1536.0
++
++
++# ── D-004 回归：无行用户现状 + backfill 后新建落最前（FR-03）────────────────
++
++
++async def test_list_without_order_rows_matches_created_at_desc(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """从未拖拽的用户：列表 = created_at DESC，与现状完全一致（D-004 回归）。"""
++    cards = await _seed_workspaces(db_session, 5)
++    ids, total = await _list_ids(client, auth_headers)
++    assert total == 5
++    assert ids == [str(w.id) for w in cards]  # 种子序即 created_at DESC 序
++    admin = await _admin_user(db_session)
++    assert await _order_row_count(db_session, admin) == 0
++
++
++async def test_new_workspace_after_backfill_lands_first(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """backfill 后新建 workspace：无行落最前；下次 move 物化到 min(pos) 之下区段。"""
++    cards = await _seed_workspaces(db_session, 4)
++    w0, w1, _, w3 = cards
++    resp = await _move(client, auth_headers, w3, after_id=w0.id)
++    assert resp.status_code == 200, resp.text
++    ids, _ = await _list_ids(client, auth_headers)
++    assert ids == [str(w.id) for w in [w0, w3, cards[1], cards[2]]]
++
++    # 新建 workspace（无排序行）→ 列表落最前（D-004@v1）。
++    newest = await _make_ws(
++        db_session,
++        name="mv-after-backfill-new",
++        created_at=_BASE_TS + timedelta(seconds=10),
++    )
++    ids2, total = await _list_ids(client, auth_headers)
++    assert total == 5
++    assert ids2[0] == str(newest.id)
++    assert ids2[1:] == ids
++
++    # 再次 move：backfill 把 newest 物化到现有最小位置之下，显示序零变化。
++    admin = await _admin_user(db_session)
++    min_pos_before = min(await _order_positions(db_session, admin))
++    resp2 = await _move(client, auth_headers, w1, after_id=w3.id)
++    assert resp2.status_code == 200, resp2.text
++    assert await _order_row_count(db_session, admin) == 5
++    positions = await _order_positions(db_session, admin)
++    assert positions[0] < min_pos_before  # min(pos)-1024×n 区段
++    ids3, _ = await _list_ids(client, auth_headers)
++    assert ids3 == ids2
++
++
++# ── 列表排序 LEFT JOIN 回归：混合行 + 四路筛选 + limit/offset（FR-03）───────
++
++
++async def test_mixed_order_rows_left_join_and_filters(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """混合有行/无行排序 =（无行最前, created_at DESC）+（sort_position ASC）；筛选行为不变。"""
++    cards = await _seed_workspaces(db_session, 4, prefix="mix", wtype=None)
++    w0, _, w2, w3 = cards
++    # w2/w3 给受控类型，供 type 筛选分支用（w0/w1 type 为 NULL 走 unclassified）。
++    w2.type = "other"
++    w3.type = "other"
++    db_session.add_all([w2, w3])
++    await db_session.commit()
++
++    resp = await _move(client, auth_headers, w3, after_id=w0.id)
++    assert resp.status_code == 200, resp.text
++    # 全行视图：[w0, w3, w1, w2]（w3 移到 w0 之后）。
++    base_ids, _ = await _list_ids(client, auth_headers)
++    assert base_ids == [str(w.id) for w in [w0, w3, cards[1], w2]]
++
++    # 新建两张无行卡：typed 新于 untyped → 无行组 created_at DESC = [typed, untyped]。
++    typed_new = await _make_ws(
++        db_session,
++        name="mix-new-typed",
++        created_at=_BASE_TS + timedelta(seconds=20),
++        wtype="other",
++    )
++    untyped_new = await _make_ws(
++        db_session,
++        name="mix-new-untyped",
++        created_at=_BASE_TS + timedelta(seconds=10),
++        wtype=None,
++    )
++    ids, total = await _list_ids(client, auth_headers)
++    assert total == 6
++    assert ids == [
++        str(typed_new.id),
++        str(untyped_new.id),
++        str(w0.id),
++        str(w3.id),
++        str(cards[1].id),
++        str(w2.id),
++    ]
++
++    # 四路筛选：结果集过滤但相对顺序保持（默认排序下筛选不改显示序）。
++    type_ids, type_total = await _list_ids(client, auth_headers, type="other")
++    assert type_total == 3
++    assert type_ids == [str(typed_new.id), str(w3.id), str(w2.id)]
++
++    unclass_ids, unclass_total = await _list_ids(client, auth_headers, unclassified=True)
++    assert unclass_total == 3
++    assert unclass_ids == [str(untyped_new.id), str(w0.id), str(cards[1].id)]
++
++    q_ids, q_total = await _list_ids(client, auth_headers, q="mix-3")
++    assert q_total == 1
++    assert q_ids == [str(w3.id)]
++
++    status_ids, status_total = await _list_ids(client, auth_headers, status="active")
++    assert status_total == 6
++    assert status_ids == ids
++
++    # limit/offset 切片仍按当前显示序（含无行最前组）。
++    page_ids, page_total = await _list_ids(client, auth_headers, limit=2, offset=1)
++    assert page_total == 6
++    assert page_ids == ids[1:3]
++
++
++# ── FR-01 两用户顺序隔离 ─────────────────────────────────────────────────────
++
++
++async def test_move_isolated_per_user(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """用户 A move 后 A 列表变化，用户 B 列表与此前完全一致（D-001@v1）。"""
++    cards = await _seed_workspaces(db_session, 6)
++    w0, _, _, _, _, w5 = cards
++    user_b, token_b = await _make_user(db_session, prefix="mv-user-b")
++    for ws in cards:
++        await _grant_read(db_session, user=user_b, ws=ws)
++    headers_b = {"Authorization": f"Bearer {token_b}"}
++
++    b_before, b_total_before = await _list_ids(client, headers_b)
++    assert b_total_before == 6
++    assert b_before == [str(w.id) for w in cards]  # B 未拖过 = created_at DESC
++
++    resp = await _move(client, auth_headers, w5, after_id=w0.id)
++    assert resp.status_code == 200, resp.text
++
++    a_ids, a_total = await _list_ids(client, auth_headers)
++    assert a_total == 6
++    assert a_ids == [str(w.id) for w in [w0, w5, cards[1], cards[2], cards[3], cards[4]]]
++
++    b_after, b_total_after = await _list_ids(client, headers_b)
++    assert b_total_after == 6
++    assert b_after == b_before  # B 的顺序与此前完全一致（隔离）
++
++
++# ── D-014 分页数量不变量 ─────────────────────────────────────────────────────
++
++
++async def test_pagination_invariant_across_move(
++    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
++) -> None:
++    """move 是纯重排：total 不变、各页恒 PAGE_SIZE（末页允许不满）、无重复/丢卡。"""
++    cards = await _seed_workspaces(db_session, 30)
++    w0 = cards[0]
++
++    async def _pages() -> tuple[list[list[str]], int]:
++        pages: list[list[str]] = []
++        total = 0
++        offset = 0
++        while True:
++            ids, t = await _list_ids(client, auth_headers, limit=_PAGE_SIZE, offset=offset)
++            total = t
++            if not ids:
++                break
++            pages.append(ids)
++            offset += _PAGE_SIZE
++            if offset >= t:
++                break
++        return pages, total
++
++    before_pages, before_total = await _pages()
++    assert before_total == 30
++    assert [len(p) for p in before_pages] == [12, 12, 6]
++
++    resp = await _move(client, auth_headers, w0, to="next_page_head", page_size=_PAGE_SIZE)
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["rank"] == 12
++
++    after_pages, after_total = await _pages()
++    assert after_total == before_total  # total 不变
++    assert [len(p) for p in after_pages] == [12, 12, 6]  # 各页恒 PAGE_SIZE（末页不满）
++
++    flat = [i for page in after_pages for i in page]
++    assert len(flat) == len(set(flat))  # 无重复 id
++    assert set(flat) == {str(w.id) for w in cards}  # 无丢卡/空页
++    # 纯重排：w0 从第 0 页移到第 1 页页首，其余相对顺序不变。
++    assert flat[12] == str(w0.id)
++    assert flat[:12] == [str(cards[i].id) for i in range(1, 13)]
++
++
++# ── 鉴权 403（D-007@v1）──────────────────────────────────────────────────────
++
++
++async def test_move_403_for_invisible_workspace(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    """非管理员对不可见 workspace move → 403 HTTP_403_PERMISSION_DENIED。"""
++    w_mine, _ = await _seed_workspaces(db_session, 2, prefix="mine")
++    w_secret = await _make_ws(
++        db_session,
++        name="mv-secret",
++        created_at=_BASE_TS + timedelta(seconds=1),
++    )
++    user, token = await _make_user(db_session)
++    await _grant_read(db_session, user=user, ws=w_mine)  # 持 WORKSPACE_READ 但仅限 w_mine
++    headers = {"Authorization": f"Bearer {token}"}
++
++    resp = await _move(client, headers, w_secret, after_id=w_mine.id)
++    assert resp.status_code == 403, resp.text
++    body = resp.json()
++    assert body["code"] == "HTTP_403_PERMISSION_DENIED"
++    assert "无权访问该工作区" in body["message"]
+diff --git a/backend/migrations/versions/20260914100000_create_user_workspace_orders.py b/backend/migrations/versions/20260914100000_create_user_workspace_orders.py
+new file mode 100644
+index 000000000..11b704a34
+--- /dev/null
++++ b/backend/migrations/versions/20260914100000_create_user_workspace_orders.py
+@@ -0,0 +1,73 @@
++"""create user_workspace_orders table
++
++每人一套（user-scoped）的工作区拖拽顺序存储（change
++``2026-09-14-workspace-drag-sort`` task-01，D-001@v1/D-011@v1 方案 A 数据层
++落地第一步）。表结构照 design「数据模型」DDL，与
++``app/modules/workspace/model.py`` 的 ``UserWorkspaceOrder`` 一一对应：
++
++- ``id`` UUID PK / ``user_id`` FK users.id / ``workspace_id`` FK workspaces.id
++  （FK 不带 ondelete：软删 workspace 的排序行保留，复活回原位，不做级联清理）
++- ``sort_position`` DOUBLE PRECISION NOT NULL（浮点中点键，``sa.Float`` 跨
++  PG/SQLite 双方言）
++- ``created_at``/``updated_at`` TIMESTAMPTZ NOT NULL（应用层 default_factory
++  赋值，无 server_default）
++- ``ux_uwo_user_workspace`` 唯一索引 (user_id, workspace_id)：一人一工作区
++  至多一行（move upsert 依据）
++- ``ix_uwo_user_position`` 普通索引 (user_id, sort_position)：列表 LEFT JOIN
++  排序热路径
++
++零存量数据回填——排序行惰性物化归 task-03 move 服务首拖 backfill（D-006@v2），
++本迁移纯 DDL、无数据变更。
++
++Revision ID: 20260914100000
++Revises: c97f3be457e6
++"""
++
++from __future__ import annotations
++
++import sqlalchemy as sa
++from alembic import op
++
++revision = "20260914100000"
++down_revision = "c97f3be457e6"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "user_workspace_orders",
++        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True, nullable=False),
++        sa.Column(
++            "user_id",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("users.id"),
++            nullable=False,
++        ),
++        sa.Column(
++            "workspace_id",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("workspaces.id"),
++            nullable=False,
++        ),
++        sa.Column("sort_position", sa.Float(), nullable=False),
++        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
++        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
++    )
++    op.create_index(
++        "ux_uwo_user_workspace",
++        "user_workspace_orders",
++        ["user_id", "workspace_id"],
++        unique=True,
++    )
++    op.create_index(
++        "ix_uwo_user_position",
++        "user_workspace_orders",
++        ["user_id", "sort_position"],
++    )
++
++
++def downgrade() -> None:
++    op.drop_index("ix_uwo_user_position", table_name="user_workspace_orders")
++    op.drop_index("ux_uwo_user_workspace", table_name="user_workspace_orders")
++    op.drop_table("user_workspace_orders")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 2e4e9aad3..ccaacc4ec 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -588,7 +588,7 @@
+           "workspace"
+         ],
+         "summary": "List Workspaces",
+-        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。",
++        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。\n\nchange 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传\n``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序\n（每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。",
+         "operationId": "list_workspaces_api_workspaces_get",
+         "parameters": [
+           {
+@@ -879,6 +879,60 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/move": {
++      "post": {
++        "tags": [
++          "workspace"
++        ],
++        "summary": "Move Workspace",
++        "description": "拖拽排序移动工作区（task-02 / FR-02，change 2026-09-14-workspace-drag-sort）。\n\n顺序按 user_id 持久化（每人一套，D-001@v1）；锚点三选一校验在\n``WorkspaceMoveRequest``（422 HTTP_422_MOVE_ANCHOR_CONFLICT，中文文案）。\n鉴权对齐 list 端点现状（require_permission_any(WORKSPACE_READ)）；非平台\n管理员行级可见校验 workspace_id ∈ allowed_workspace_ids（复用 list 端点既有\n模式），不可见 403 HTTP_403_PERMISSION_DENIED；管理员 allowed_ids=None 全量。\n排序/backfill/锚点解析全在 service.move_workspace（task-03，签名钉死不自增\n参数），本层只做契约接线；响应 ``rank`` 供前端 floor(rank/page_size) 换算\n目标页（R-07）。",
++        "operationId": "move_workspace_api_workspaces__workspace_id__move_post",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          }
++        ],
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/WorkspaceMoveRequest"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/WorkspaceMoveResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}": {
+       "get": {
+         "tags": [
+@@ -70369,6 +70423,80 @@
+         ],
+         "title": "WorkspaceMemberView"
+       },
++      "WorkspaceMoveRequest": {
++        "properties": {
++          "after_id": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "uuid"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "After Id"
++          },
++          "before_id": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "uuid"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Before Id"
++          },
++          "to": {
++            "anyOf": [
++              {
++                "type": "string",
++                "enum": [
++                  "next_page_head",
++                  "prev_page_tail"
++                ]
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "To"
++          },
++          "page_size": {
++            "type": "integer",
++            "title": "Page Size",
++            "default": 12
++          }
++        },
++        "type": "object",
++        "title": "WorkspaceMoveRequest",
++        "description": "Request body for ``POST /api/workspaces/{workspace_id}/move``。\n\n锚点三选一（D-013@v1）：``after_id`` / ``before_id`` / ``to`` 恰好携带一个\n——同缺、同传多个或 ``after_id == before_id`` 同值均 422\n``HTTP_422_MOVE_ANCHOR_CONFLICT``。无 null 置顶语义（Grill F-03：pydantic\n无法区分缺省与 null，置顶场景由「移动到…」弹窗的页首锚点表达）。"
++      },
++      "WorkspaceMoveResponse": {
++        "properties": {
++          "workspace": {
++            "$ref": "#/components/schemas/WorkspaceRead"
++          },
++          "rebalanced": {
++            "type": "boolean",
++            "title": "Rebalanced"
++          },
++          "rank": {
++            "type": "integer",
++            "title": "Rank"
++          }
++        },
++        "type": "object",
++        "required": [
++          "workspace",
++          "rebalanced",
++          "rank"
++        ],
++        "title": "WorkspaceMoveResponse",
++        "description": "Response body for ``POST /api/workspaces/{workspace_id}/move``（*Response 后缀惯例，Grill F-10）。"
++      },
+       "WorkspaceProbeItem": {
+         "properties": {
+           "workspace_id": {
+diff --git a/frontend/package.json b/frontend/package.json
+index d4ea1e667..636a93b3b 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -17,6 +17,8 @@
+   "dependencies": {
+     "@ant-design/icons": "^6.2.5",
+     "@ant-design/nextjs-registry": "^1.3.0",
++    "@dnd-kit/core": "^6.3.1",
++    "@dnd-kit/sortable": "^10.0.0",
+     "@fontsource/inter": "^5.2.8",
+     "@radix-ui/react-avatar": "^1.1.0",
+     "@radix-ui/react-dialog": "^1.1.2",
+diff --git a/frontend/pnpm-lock.yaml b/frontend/pnpm-lock.yaml
+index 08a63e7d2..04905187b 100644
+--- a/frontend/pnpm-lock.yaml
++++ b/frontend/pnpm-lock.yaml
+@@ -14,6 +14,12 @@ importers:
+       '@ant-design/nextjs-registry':
+         specifier: ^1.3.0
+         version: 1.3.0(@ant-design/cssinjs@2.1.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(antd@6.4.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(next@14.2.5(@babel/core@7.29.0)(@playwright/test@1.60.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
++      '@dnd-kit/core':
++        specifier: ^6.3.1
++        version: 6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
++      '@dnd-kit/sortable':
++        specifier: ^10.0.0
++        version: 10.0.0(@dnd-kit/core@6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react@18.3.1)
+       '@fontsource/inter':
+         specifier: ^5.2.8
+         version: 5.2.8
+@@ -325,6 +331,28 @@ packages:
+     resolution: {integrity: sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==}
+     engines: {node: '>=18'}
+ 
++  '@dnd-kit/accessibility@3.1.1':
++    resolution: {integrity: sha512-2P+YgaXF+gRsIihwwY1gCsQSYnu9Zyj2py8kY5fFvUM1qm2WA2u639R6YNVfU4GWr+ZM5mqEsfHZZLoRONbemw==}
++    peerDependencies:
++      react: '>=16.8.0'
++
++  '@dnd-kit/core@6.3.1':
++    resolution: {integrity: sha512-xkGBRQQab4RLwgXxoqETICr6S5JlogafbhNsidmrkVv2YRs5MLwpjoF2qpiGjQt8S9AoxtIV603s0GIUpY5eYQ==}
++    peerDependencies:
++      react: '>=16.8.0'
++      react-dom: '>=16.8.0'
++
++  '@dnd-kit/sortable@10.0.0':
++    resolution: {integrity: sha512-+xqhmIIzvAYMGfBYYnbKuNicfSsk4RksY2XdmJhT+HAC01nix6fHCztU68jooFiMUB01Ky3F0FyOvhG/BZrWkg==}
++    peerDependencies:
++      '@dnd-kit/core': ^6.3.0
++      react: '>=16.8.0'
++
++  '@dnd-kit/utilities@3.2.2':
++    resolution: {integrity: sha512-+MKAJEOfaBe5SmV6t34p80MMKhjvUz0vRrvVJbPT0WElzaOJ/1xs+D+KDv+tD/NE5ujfrChEcshd4fLn0wpiqg==}
++    peerDependencies:
++      react: '>=16.8.0'
++
+   '@emnapi/core@1.10.0':
+     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
+ 
+@@ -4480,6 +4508,31 @@ snapshots:
+ 
+   '@csstools/css-tokenizer@3.0.4': {}
+ 
++  '@dnd-kit/accessibility@3.1.1(react@18.3.1)':
++    dependencies:
++      react: 18.3.1
++      tslib: 2.8.1
++
++  '@dnd-kit/core@6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
++    dependencies:
++      '@dnd-kit/accessibility': 3.1.1(react@18.3.1)
++      '@dnd-kit/utilities': 3.2.2(react@18.3.1)
++      react: 18.3.1
++      react-dom: 18.3.1(react@18.3.1)
++      tslib: 2.8.1
++
++  '@dnd-kit/sortable@10.0.0(@dnd-kit/core@6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react@18.3.1)':
++    dependencies:
++      '@dnd-kit/core': 6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
++      '@dnd-kit/utilities': 3.2.2(react@18.3.1)
++      react: 18.3.1
++      tslib: 2.8.1
++
++  '@dnd-kit/utilities@3.2.2(react@18.3.1)':
++    dependencies:
++      react: 18.3.1
++      tslib: 2.8.1
++
+   '@emnapi/core@1.10.0':
+     dependencies:
+       '@emnapi/wasi-threads': 1.2.1
+@@ -6506,7 +6559,7 @@ snapshots:
+       eslint: 8.57.0
+       eslint-import-resolver-node: 0.3.10
+       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(eslint@8.57.0))(eslint@8.57.0)
+-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@7.2.0(eslint@8.57.0)(typescript@5.5.4))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.0)
++      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@7.2.0(eslint@8.57.0)(typescript@5.5.4))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@8.57.0))(eslint@8.57.0))(eslint@8.57.0)
+       eslint-plugin-jsx-a11y: 6.10.2(eslint@8.57.0)
+       eslint-plugin-react: 7.37.5(eslint@8.57.0)
+       eslint-plugin-react-hooks: 5.0.0-canary-7118f5dd7-20230705(eslint@8.57.0)
+@@ -6536,7 +6589,7 @@ snapshots:
+       tinyglobby: 0.2.16
+       unrs-resolver: 1.12.2
+     optionalDependencies:
+-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@7.2.0(eslint@8.57.0)(typescript@5.5.4))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.0)
++      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@7.2.0(eslint@8.57.0)(typescript@5.5.4))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@8.57.0))(eslint@8.57.0))(eslint@8.57.0)
+     transitivePeerDependencies:
+       - supports-color
+ 
+@@ -6551,7 +6604,7 @@ snapshots:
+     transitivePeerDependencies:
+       - supports-color
+ 
+-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@7.2.0(eslint@8.57.0)(typescript@5.5.4))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.0):
++  eslint-plugin-import@2.32.0(@typescript-eslint/parser@7.2.0(eslint@8.57.0)(typescript@5.5.4))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@8.57.0))(eslint@8.57.0))(eslint@8.57.0):
+     dependencies:
+       '@rtsao/scc': 1.1.0
+       array-includes: 3.1.9
+diff --git a/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx
+index 114dbef34..a31a09a61 100644
+--- a/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx
+@@ -10,7 +10,7 @@
+  * WorkspaceCard / WorkspaceBindingDialog / WorkspaceScanDialog 内部行为由各自单测覆盖，
+  * 这里 mock 为 stub（透传关键 props）以隔离 page 层分流逻辑。
+  */
+-import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
++import { act, cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ 
+@@ -93,6 +93,7 @@ vi.mock("@/lib/workspace-daemon-status", () => ({
+ const workspacesApi = vi.hoisted(() => ({
+   listWorkspaces: vi.fn(),
+   updateWorkspace: vi.fn(),
++  moveWorkspace: vi.fn(),
+ }));
+ vi.mock("@/lib/workspaces", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/workspaces")>("@/lib/workspaces");
+@@ -100,6 +101,7 @@ vi.mock("@/lib/workspaces", async () => {
+     ...actual,
+     listWorkspaces: workspacesApi.listWorkspaces,
+     updateWorkspace: workspacesApi.updateWorkspace,
++    moveWorkspace: workspacesApi.moveWorkspace,
+   };
+ });
+ 
+@@ -134,8 +136,70 @@ vi.mock("@/stores/session", () => ({
+     sel({ user: { is_platform_admin: false } }),
+ }));
+ 
++// ── @/lib/errors mock（task-09：handleRequestMove 用 notify.warning 拦截筛选态、
++//    move 流程用 notify.success/error——hoisted 暴露给断言）──────────────────────
++const notifyMock = vi.hoisted(() => ({
++  success: vi.fn(),
++  error: vi.fn(),
++  warning: vi.fn(),
++  info: vi.fn(),
++}));
+ vi.mock("@/lib/errors", () => ({
+-  useNotify: () => ({ success: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() }),
++  useNotify: () => notifyMock,
++}));
++
++// ── WorkspaceDragGrid stub（task-10 增补）：透传 items/page/total/dragDisabled/
++//    onRequestMove/onMoved 暴露给断言；卡片经既有 WorkspaceCard stub 逐张渲染
++//    （cardProps 由 page 组装），保持旧用例 ws-card-*/card-activate 断言不变。──
++const gridMock = vi.hoisted(() => ({
++  lastProps: null as null | Record<string, unknown>,
++  /** 模拟「移动到…」入口点击的卡片下标（items[moveIndex]） */
++  moveIndex: 0,
++}));
++vi.mock("@/components/workspace-drag-grid", async () => {
++  const card = await import("@/components/workspace-card");
++  return {
++    WorkspaceDragGrid: (props: any) => {
++      gridMock.lastProps = props;
++      return (
++        <div data-testid="drag-grid">
++          {props.items.map((w: any) => (
++            <card.WorkspaceCard key={w.id} workspace={w} {...props.cardProps(w)} />
++          ))}
++          <button
++            data-testid="grid-move-entry"
++            onClick={() => props.onRequestMove?.(props.items[gridMock.moveIndex ?? 0])}
++          >
++            模拟移动到入口
++          </button>
++        </div>
++      );
++    },
++  };
++});
++
++// ── WorkspaceMoveDialog stub（task-10 增补）：受控弹窗透传 open/workspace/
++//    currentPage/totalPages/disabled；确认按钮按 confirmTarget 触发 onConfirm
++//    （四象限/自锚提交流程逻辑在 page.tsx handleMoveConfirm，此处只做透传）。──
++const moveDialogMock = vi.hoisted(() => ({
++  lastProps: null as null | Record<string, unknown>,
++  confirmTarget: { page: 0, position: "first" as "first" | "last" },
++}));
++vi.mock("@/components/workspace-move-dialog", () => ({
++  WorkspaceMoveDialog: (props: any) => {
++    moveDialogMock.lastProps = props;
++    if (!props.open) return null;
++    return (
++      <div data-testid="move-dialog">
++        <button
++          data-testid="move-dialog-confirm"
++          onClick={() => props.onConfirm(moveDialogMock.confirmTarget)}
++        >
++          确认移动
++        </button>
++      </div>
++    );
++  },
+ }));
+ 
+ // ── fixtures ────────────────────────────────────────────────────────────────
+@@ -181,10 +245,21 @@ beforeEach(() => {
+   statusApi.statusMap = {};
+   workspacesApi.listWorkspaces.mockResolvedValue({ items: [], total: 0 });
+   workspacesApi.updateWorkspace.mockResolvedValue(mkWorkspace("x"));
++  // task-10：moveWorkspace 默认成功（rank 可按用例 mockResolvedValueOnce 覆盖）。
++  workspacesApi.moveWorkspace.mockResolvedValue({
++    workspace: mkWorkspace("x"),
++    rebalanced: false,
++    rank: 0,
++  });
+   daemonApi.listDaemonRuntimes.mockResolvedValue([]);
+   daemonApi.listDaemonInstances.mockResolvedValue([]);
+   bindingApi.fetchMyBindings.mockResolvedValue([]);
+   adminApi.listUsers.mockResolvedValue({ items: [], total: 0 });
++  // task-10：grid/dialog stub 状态复位（clearMocks 只清 vi.fn 调用计数）。
++  gridMock.lastProps = null;
++  gridMock.moveIndex = 0;
++  moveDialogMock.lastProps = null;
++  moveDialogMock.confirmTarget = { page: 0, position: "first" };
+ });
+ 
+ afterEach(() => {
+@@ -301,3 +376,226 @@ describe("WorkspacesPage 选择器改造 (task-07)", () => {
+     );
+   });
+ });
++
++// task-10（2026-09-14-workspace-drag-sort）：拖拽排序 page 层接线与不变量。
++//
++// page 层职责（本组覆盖，对照 requirements FR-06/07/08 与任务卡 task-10 ⑤⑦⑧）：
++//   - filtersActive 透传 WorkspaceDragGrid.dragDisabled（默认视图 false / 任一筛选激活 true）
++//     + 筛选条禁拖提示 + 「移动到…」入口拦截（警告、不弹窗、零 move 调用）
++//   - 「移动到…」弹窗提交流程（handleMoveConfirm）：先拉目标页默认视图 → 方向锚点
++//     四象限（页首：向上 before/向下 after=目标页第一张；页尾对偶；同页页首 before/
++//     页尾 after）→ moveWorkspace 携 page_size=12；锚点=被移动卡自身时跳过请求
++//   - 分页数量不变量前端侧（D-014@v1）：move 成功 reload 后 limit 恒 12、total
++//     不变、满页恒 12 张（末页允许不满）、无重复 id
++// WorkspaceDragGrid / WorkspaceMoveDialog 内部交互由 workspace-drag-grid.test.tsx
++// 覆盖，这里 mock 为 stub 断言接线（任务卡 task-10 ⑧ 指定做法）。
++describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
++  /** 26 条 fixture → 3 页（12/12/2），mock 返回可控 total 支撑分页不变量断言。 */
++  function mockPagedList(count: number) {
++    const fixture = Array.from(
++      { length: count },
++      (_, i) => mkWorkspace(`w-${String(i).padStart(2, "0")}`),
++    );
++    workspacesApi.listWorkspaces.mockImplementation(
++      async (params?: { offset?: number; limit?: number }) => {
++        const offset = params?.offset ?? 0;
++        const limit = params?.limit ?? 12;
++        return { items: fixture.slice(offset, offset + limit), total: fixture.length };
++      },
++    );
++    return fixture;
++  }
++
++  /** 当前页翻到第 2 页（0 基 page=1）——四象限/同页/自锚都以当前页 1 为基准。 */
++  async function gotoPage1() {
++    fireEvent.click(screen.getByLabelText("下一页"));
++    await waitFor(() =>
++      expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
++        expect.objectContaining({ offset: 12 }),
++      ),
++    );
++  }
++
++  it("FR-07/D-005@v2：默认视图 dragDisabled=false 透传，无禁拖提示；「移动到…」入口打开弹窗", async () => {
++    mockPagedList(3);
++    renderPage(<WorkspacesPage />);
++    await waitFor(() => expect(screen.getByTestId("drag-grid")).toBeInTheDocument());
++    expect((gridMock.lastProps as { dragDisabled?: boolean }).dragDisabled).toBe(false);
++    expect(screen.queryByText(/筛选状态下不可拖拽排序/)).not.toBeInTheDocument();
++
++    // 「移动到…」入口 → 打开弹窗（workspace=被移动卡，当前页/总页数/禁用态透传）。
++    gridMock.moveIndex = 0;
++    fireEvent.click(screen.getByTestId("grid-move-entry"));
++    await waitFor(() => expect(screen.getByTestId("move-dialog")).toBeInTheDocument());
++    expect((moveDialogMock.lastProps as { workspace?: { id: string } }).workspace?.id).toBe(
++      "w-00",
++    );
++    expect((moveDialogMock.lastProps as { currentPage?: number }).currentPage).toBe(0);
++    expect((moveDialogMock.lastProps as { totalPages?: number }).totalPages).toBe(1);
++    expect((moveDialogMock.lastProps as { disabled?: boolean }).disabled).toBe(false);
++  });
++
++  it("FR-07/D-005@v2：任一筛选激活 → dragDisabled=true + 禁拖提示；入口仅警告不弹窗、零 move 调用", async () => {
++    mockPagedList(3);
++    renderPage(<WorkspacesPage />);
++    await waitFor(() => expect(screen.getByTestId("drag-grid")).toBeInTheDocument());
++
++    // 激活类型筛选（antd Select：mouseDown 展开下拉 + 点选选项）。
++    fireEvent.mouseDown(screen.getByLabelText("筛选类型"));
++    fireEvent.click(await screen.findByText("前端代码"));
++    await waitFor(() =>
++      expect((gridMock.lastProps as { dragDisabled?: boolean }).dragDisabled).toBe(true),
++    );
++    // 筛选条出现禁拖提示（FR-07 中文文案）。
++    expect(screen.getByText(/筛选状态下不可拖拽排序/)).toBeInTheDocument();
++
++    // 「移动到…」入口拦截：警告提示 + 不弹窗 + 不发任何 move 请求。
++    fireEvent.click(screen.getByTestId("grid-move-entry"));
++    expect(notifyMock.warning).toHaveBeenCalledWith(
++      expect.stringContaining("筛选状态下不可拖拽排序"),
++    );
++    expect(screen.queryByTestId("move-dialog")).not.toBeInTheDocument();
++    expect(workspacesApi.moveWorkspace).not.toHaveBeenCalled();
++    // 弹窗确认按钮禁用兜底（disabled 随 filtersActive 透传，D-005@v2）。
++    expect((moveDialogMock.lastProps as { disabled?: boolean }).disabled).toBe(true);
++  });
++
++  // 四象限 + 同页方向锚点用例表（目标页 / 页内位置 / 期望 move 锚点）。
++  const quadrantCases: ReadonlyArray<
++    [string, number, "first" | "last", { before_id?: string; after_id?: string }]
++  > = [
++    ["向上页首：before_id=目标页第一张", 0, "first", { before_id: "w-00" }],
++    ["向上页尾：before_id=目标页最后一张", 0, "last", { before_id: "w-11" }],
++    ["向下页首：after_id=目标页第一张", 2, "first", { after_id: "w-24" }],
++    ["向下页尾：after_id=目标页最后一张", 2, "last", { after_id: "w-25" }],
++    ["同页页首：before_id=当前页第一张", 1, "first", { before_id: "w-12" }],
++    ["同页页尾：after_id=当前页最后一张", 1, "last", { after_id: "w-23" }],
++  ];
++  it.each(quadrantCases)(
++    "FR-06/D-009@v2 弹窗方向锚点 %s（提交前先拉目标页，move 携 page_size=12）",
++    async (_name, targetPage, position, expectedAnchor) => {
++      const fixture = mockPagedList(26);
++      renderPage(<WorkspacesPage />);
++      await waitFor(() =>
++        expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12),
++      );
++      await gotoPage1();
++
++      // 被移动卡 = 当前页第 2 张（w-13，与各象限锚点均不同，避开自锚分支）。
++      gridMock.moveIndex = 1;
++      fireEvent.click(screen.getByTestId("grid-move-entry"));
++      await waitFor(() => expect(screen.getByTestId("move-dialog")).toBeInTheDocument());
++      expect((moveDialogMock.lastProps as { workspace?: { id: string } }).workspace?.id).toBe(
++        "w-13",
++      );
++
++      moveDialogMock.confirmTarget = { page: targetPage, position };
++      workspacesApi.moveWorkspace.mockResolvedValueOnce({
++        workspace: fixture[13],
++        rebalanced: false,
++        rank: 5,
++      });
++      fireEvent.click(screen.getByTestId("move-dialog-confirm"));
++      await waitFor(() =>
++        expect(workspacesApi.moveWorkspace).toHaveBeenCalledTimes(1),
++      );
++      // 锚点方向规则 + page_size 携带（FR-06 / D-009@v2）逐字段断言。
++      expect(workspacesApi.moveWorkspace).toHaveBeenCalledWith("w-13", {
++        ...expectedAnchor,
++        page_size: 12,
++      });
++      // 提交前先拉目标页默认视图（offset=目标页*12 的 active 拉取发生在 move 之前）。
++      const moveOrder = workspacesApi.moveWorkspace.mock.invocationCallOrder[0]!;
++      const fetchedTargetPageBeforeMove = workspacesApi.listWorkspaces.mock.calls.some(
++        (call, i) =>
++          workspacesApi.listWorkspaces.mock.invocationCallOrder[i]! < moveOrder &&
++          call[0]?.offset === targetPage * 12 &&
++          call[0]?.limit === 12 &&
++          call[0]?.status === "active",
++      );
++      expect(fetchedTargetPageBeforeMove).toBe(true);
++      // move 成功后 reload 收敛服务端真序（D-014：重取列表而非本地增删卡）。
++      await waitFor(() =>
++        expect(workspacesApi.listWorkspaces.mock.calls.length).toBeGreaterThan(3),
++      );
++      expect(notifyMock.success).toHaveBeenCalledWith("已移动到目标页");
++    },
++  );
++
++  it("FR-06 自锚跳过：锚点=被移动卡自身 → moveWorkspace 零调用 + 提示已在位 + 弹窗关闭", async () => {
++    mockPagedList(26);
++    renderPage(<WorkspacesPage />);
++    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
++    await gotoPage1();
++
++    // 被移动卡 = 当前页最后一张 w-23；目标=同页页尾 → 锚点即自身。
++    gridMock.moveIndex = 11;
++    fireEvent.click(screen.getByTestId("grid-move-entry"));
++    await waitFor(() => expect(screen.getByTestId("move-dialog")).toBeInTheDocument());
++    moveDialogMock.confirmTarget = { page: 1, position: "last" };
++    fireEvent.click(screen.getByTestId("move-dialog-confirm"));
++    await waitFor(() =>
++      expect((moveDialogMock.lastProps as { open?: boolean }).open).toBe(false),
++    );
++    expect(workspacesApi.moveWorkspace).not.toHaveBeenCalled();
++    expect(notifyMock.success).toHaveBeenCalledWith("工作区已在该位置");
++  });
++
++  it("FR-08/D-014@v1 分页数量不变量：move 后 reload 每页恒 12（末页允许不满）、total 不变、无重复 id", async () => {
++    mockPagedList(26);
++    renderPage(<WorkspacesPage />);
++    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
++    expect(screen.getByText("共 26 条 · 第 1 页")).toBeInTheDocument();
++    expect((screen.getByLabelText("上一页") as HTMLButtonElement).disabled).toBe(true);
++    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(false);
++
++    // 第 2 页：满页 12 张、无重复 id。
++    await gotoPage1();
++    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
++    const page1Ids = (
++      (gridMock.lastProps as { items: { id: string }[] }).items ?? []
++    ).map((w) => w.id);
++    expect(page1Ids).toHaveLength(12);
++    expect(new Set(page1Ids).size).toBe(12);
++    expect((gridMock.lastProps as { total?: number }).total).toBe(26);
++
++    // 第 3 页（末页）：允许不满（26-24=2），total 不变，下一页禁用。
++    fireEvent.click(screen.getByLabelText("下一页"));
++    await waitFor(() =>
++      expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
++        expect.objectContaining({ offset: 24 }),
++      ),
++    );
++    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(2));
++    expect((gridMock.lastProps as { total?: number }).total).toBe(26);
++    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(true);
++
++    // 模拟 move 成功（onMoved 上抛 rank→page=1）→ 翻页 reload：limit 仍恒 12。
++    fireEvent.click(screen.getByLabelText("上一页")); // 便于区分 onMoved 触发的 reload
++    await waitFor(() =>
++      expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
++        expect.objectContaining({ offset: 12 }),
++      ),
++    );
++    const callsBefore = workspacesApi.listWorkspaces.mock.calls.length;
++    act(() => {
++      (
++        (gridMock.lastProps as { onMoved?: (e: unknown) => void }).onMoved as (
++          e: unknown,
++        ) => void
++      )?.({ id: "w-00", rank: 15, page: 1 });
++    });
++    await waitFor(() =>
++      expect(workspacesApi.listWorkspaces.mock.calls.length).toBeGreaterThan(callsBefore),
++    );
++    expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
++      expect.objectContaining({ limit: 12, offset: 12 }),
++    );
++    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
++
++    // 不变量收口：全流程每一次列表请求 limit 恒 WORKSPACE_PAGE_SIZE(12)。
++    for (const call of workspacesApi.listWorkspaces.mock.calls) {
++      expect(call[0]).toMatchObject({ limit: 12 });
++    }
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/page.tsx b/frontend/src/app/(dashboard)/workspaces/page.tsx
+index b59781977..ed3c747b2 100644
+--- a/frontend/src/app/(dashboard)/workspaces/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/page.tsx
+@@ -11,7 +11,9 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+ import { ErrorBanner } from "@/components/ui/error-banner";
+ import { EmptyState } from "@/components/ui/empty-state";
+ import { FolderGit2 } from "lucide-react";
+-import { WorkspaceCard, type DaemonBadgeStatus } from "@/components/workspace-card";
++// task-09：WorkspaceCard 本体已由 WorkspaceDragGrid 内部渲染（cardPropsOf
++// 仅组装 props），此处只留徽标状态类型（daemonStatusOf 返回值）。
++import type { DaemonBadgeStatus } from "@/components/workspace-card";
+ import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
+ import { ApiError } from "@/lib/api";
+ import {
+@@ -23,9 +25,17 @@ import {
+ import { listUsers, type UserRead } from "@/lib/admin";
+ import {
+   listWorkspaces,
++  moveWorkspace,
+   updateWorkspace,
++  WORKSPACE_PAGE_SIZE,
+   type Workspace,
+ } from "@/lib/workspaces";
++// task-09 / FR-04 / FR-06：拖拽排序网格（task-08 产物）+「移动到…」弹窗。
++import { WorkspaceDragGrid, type WorkspaceCardSlotProps } from "@/components/workspace-drag-grid";
++import {
++  WorkspaceMoveDialog,
++  type WorkspaceMoveTarget,
++} from "@/components/workspace-move-dialog";
+ // task-06 / 2026-08-18-workspace-role-type / FR-04 / D-005@v1：
+ // 筛选下拉接 8 值受控词表 + 「未分类」项（null → ?unclassified=true 谓词）。
+ import {
+@@ -40,9 +50,6 @@ import { useNotify } from "@/lib/errors";
+ import { useSession } from "@/stores/session";
+ import { cn } from "@/lib/utils";
+ 
+-// task-08 / FR-04：服务端分页页大小。
+-const PAGE_SIZE = 12;
+-
+ export default function WorkspacesPage() {
+   const router = useRouter();
+   const [items, setItems] = useState<Workspace[] | null>(null);
+@@ -108,8 +115,10 @@ export default function WorkspacesPage() {
+           unclassified: typeFilter === "unclassified" ? true : undefined,
+           status: statusFilter || undefined,
+           user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
+-          limit: PAGE_SIZE,
+-          offset: page * PAGE_SIZE,
++          // task-09 / R-08：分页大小换 task-07 单一源常量（与后端 move
++          // page_size 默认值同源），本地 PAGE_SIZE 已删。
++          limit: WORKSPACE_PAGE_SIZE,
++          offset: page * WORKSPACE_PAGE_SIZE,
+         }),
+         listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
+         listDaemonInstances().catch(() => [] as DaemonInstanceRead[]),
+@@ -219,6 +228,126 @@ export default function WorkspacesPage() {
+     [router],
+   );
+ 
++  // task-09 / D-005@v2 / FR-07：筛选禁拖判定——与 reload 同源的筛选状态派生
++  // （debouncedQuery 非空 / 类型筛选含「未分类」/ 状态非 active / 平台管理员
++  // 人员筛选）。管理员 include_deleted=true（含删除视图）同属非默认视图：
++  // 当前页未单独暴露该参量（删除行走 status="deleted" 已被下方 status 判断
++  // 覆盖），未来单独暴露时在此同一表达式补判。
++  const filtersActive =
++    debouncedQuery.trim() !== "" ||
++    typeFilter !== null ||
++    statusFilter !== "active" ||
++    (isPlatformAdmin && ownerUserId !== null);
++
++  // task-09 / FR-06：「移动到…」弹窗状态（被移动工作区 + 提交中标记）。
++  const [moveTargetWs, setMoveTargetWs] = useState<Workspace | null>(null);
++  const [moveSubmitting, setMoveSubmitting] = useState(false);
++
++  // task-09 / FR-04：网格卡片 props 组装器——原 items.map 内的 WorkspaceCard
++  // 接线整体下沉（workspace 与拖拽手柄挂点由 WorkspaceDragGrid 注入）。
++  // 遗留 1：优先按 daemon 实体展示（runtime 绑定下沉到 member binding）。
++  const cardPropsOf = useCallback(
++    (w: Workspace): WorkspaceCardSlotProps => {
++      const bindingDaemonId = bindingsByWs.get(w.id)?.daemon_id;
++      const boundDaemon = bindingDaemonId
++        ? instancesById.get(bindingDaemonId) ?? null
++        : null;
++      return {
++        linkedProjects: projectsByWs.get(w.id) ?? [],
++        // task-11 / 2026-07-10-remove-server-local-workspace-mode：runtime 维度
++        // 已下沉到 per-member binding，透 null 安全。
++        boundRuntime: null,
++        boundDaemon,
++        daemonStatus: daemonStatusOf(w.id),
++        onChanged: reload,
++        onEditAlias: handleOpenAlias,
++        onActivate: () => handleActivate(w),
++      };
++    },
++    [
++      bindingsByWs,
++      instancesById,
++      projectsByWs,
++      daemonStatusOf,
++      reload,
++      handleOpenAlias,
++      handleActivate,
++    ],
++  );
++
++  // task-09 / FR-04 / FR-06：拖拽/弹窗移动成功闭环——按响应 rank 换算目标页
++  // 自动翻页（reload 依赖 page，setPage 触发 effect 重拉）；同页时 setPage
++  // 同值不触发 effect，手动 reload 收敛服务端真序。
++  const handleMoved = useCallback(
++    ({ page: targetPage }: { page: number }) => {
++      if (targetPage !== page) setPage(targetPage);
++      else void reload();
++    },
++    [page, reload],
++  );
++
++  // task-09 / FR-07 / D-005@v2：「移动到…」入口——筛选态拦截（不弹窗不发出
++  // move 请求，中文提示），默认视图直接打开弹窗。
++  const handleRequestMove = useCallback(
++    (w: Workspace) => {
++      if (filtersActive) {
++        notify.warning("筛选状态下不可拖拽排序，请先清除筛选");
++        return;
++      }
++      setMoveTargetWs(w);
++    },
++    [filtersActive, notify],
++  );
++
++  // task-09 / FR-06 / D-009@v2：弹窗提交流程——先拉目标页默认视图（不带任何
++  // 筛选参数）算边界锚点，再按方向规则四象限发 move：
++  //   页首——向上 before_id=目标页第一张 / 向下 after_id=目标页第一张；
++  //   页尾对偶（最后一张）；目标页=当前页时页首走 before、页尾走 after
++  //   （统一为「向上（含同页页首）before / 向下（含同页页尾）after」）；
++  //   锚点=被移动卡自身时跳过请求（自锚服务端 422 的前置兜底）。
++  const handleMoveConfirm = useCallback(
++    async (target: WorkspaceMoveTarget) => {
++      if (!moveTargetWs) return;
++      setMoveSubmitting(true);
++      try {
++        const { items: targetItems } = await listWorkspaces({
++          status: "active",
++          limit: WORKSPACE_PAGE_SIZE,
++          offset: target.page * WORKSPACE_PAGE_SIZE,
++        });
++        const anchor =
++          target.position === "first"
++            ? targetItems[0]
++            : targetItems[targetItems.length - 1];
++        if (!anchor) {
++          // 防御：目标页为空（分页总数失配等）——不给锚点就不发 move。
++          notify.error(new Error("目标页不存在工作区"), "移动工作区失败");
++          return;
++        }
++        if (anchor.id === moveTargetWs.id) {
++          // 自锚：工作区已在目标位置，跳过请求直接提示成功。
++          notify.success("工作区已在该位置");
++          setMoveTargetWs(null);
++          return;
++        }
++        const useBefore =
++          target.page === page ? target.position === "first" : target.page < page;
++        const resp = await moveWorkspace(moveTargetWs.id, {
++          ...(useBefore ? { before_id: anchor.id } : { after_id: anchor.id }),
++          page_size: WORKSPACE_PAGE_SIZE,
++        });
++        setMoveTargetWs(null);
++        notify.success("已移动到目标页");
++        handleMoved({ page: Math.floor(resp.rank / WORKSPACE_PAGE_SIZE) });
++      } catch (err) {
++        notify.error(err, "移动工作区失败");
++      } finally {
++        setMoveSubmitting(false);
++      }
++    },
++    [moveTargetWs, notify, page, handleMoved],
++  );
++
+   return (
+     <PageContainer size="full">
+       <PageHeader
+@@ -307,6 +436,13 @@ export default function WorkspacesPage() {
+               ]}
+             />
+           ) : null}
++          {/* task-09 / D-005@v2 / FR-07：筛选禁拖提示（对照原型 .drag-disabled-tip，
++              warning 语义阶不硬编码 hex）——任一筛选激活即显示。 */}
++          {filtersActive ? (
++            <div className="w-full pt-0.5 text-xs text-warning" role="note">
++              ⚠ 筛选状态下不可拖拽排序——清除筛选后恢复拖拽手柄
++            </div>
++          ) : null}
+         </div>
+       )}
+ 
+@@ -339,32 +475,19 @@ export default function WorkspacesPage() {
+         </SectionCard>
+       ) : (
+         <>
+-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+-            {items.map((w) => {
+-              // 遗留 1：优先按 daemon 实体展示（runtime 绑定下沉到 member binding）。
+-              const bindingDaemonId = bindingsByWs.get(w.id)?.daemon_id;
+-              const boundDaemon = bindingDaemonId
+-                ? instancesById.get(bindingDaemonId) ?? null
+-                : null;
+-              return (
+-                <WorkspaceCard
+-                  key={w.id}
+-                  linkedProjects={projectsByWs.get(w.id) ?? []}
+-                  workspace={w}
+-                  /* task-11 / 2026-07-10-remove-server-local-workspace-mode：
+-                   * 平台统一 daemon-client 语义后，WorkspaceCard 的 runtime 维度
+-                   * 已下沉到 per-member binding，此处透 null 安全（prop 是否由
+-                   * task-10 组件群移除待协调）。 */
+-                  boundRuntime={null}
+-                  boundDaemon={boundDaemon}
+-                  daemonStatus={daemonStatusOf(w.id)}
+-                  onChanged={reload}
+-                  onEditAlias={handleOpenAlias}
+-                  onActivate={() => handleActivate(w)}
+-                />
+-              );
+-            })}
+-          </div>
++          {/* task-09 / FR-04 / FR-06：items.map 卡片网格换 WorkspaceDragGrid
++              （task-08 产物）——卡片 props 经 cardPropsOf 透传，筛选态禁拖
++              （D-005@v2），移动成功翻页重拉、失败刷新收敛服务端真序。 */}
++          <WorkspaceDragGrid
++            items={items}
++            page={page}
++            total={total}
++            cardProps={cardPropsOf}
++            dragDisabled={filtersActive}
++            onRequestMove={handleRequestMove}
++            onMoved={handleMoved}
++            onMoveFailed={() => void reload()}
++          />
+           {/* task-08 / FR-04：服务端分页器 */}
+           <div className="flex items-center justify-between gap-2 pt-1">
+             <span className="text-[11px] text-muted-foreground">
+@@ -383,7 +506,7 @@ export default function WorkspacesPage() {
+               <Button
+                 size="sm"
+                 variant="outline"
+-                disabled={(page + 1) * PAGE_SIZE >= total}
++                disabled={(page + 1) * WORKSPACE_PAGE_SIZE >= total}
+                 onClick={() => setPage((p) => p + 1)}
+                 aria-label="下一页"
+               >
+@@ -419,6 +542,19 @@ export default function WorkspacesPage() {
+         ) : null}
+       </Modal>
+ 
++      {/* task-09 / FR-06 / D-009@v2：「移动到…」弹窗（目标页按默认视图分页
++          N=ceil(total/WORKSPACE_PAGE_SIZE)；筛选态确认禁用兜底）。 */}
++      <WorkspaceMoveDialog
++        open={moveTargetWs !== null}
++        workspace={moveTargetWs}
++        currentPage={page}
++        totalPages={Math.max(1, Math.ceil(total / WORKSPACE_PAGE_SIZE))}
++        disabled={filtersActive}
++        confirmLoading={moveSubmitting}
++        onConfirm={handleMoveConfirm}
++        onCancel={() => setMoveTargetWs(null)}
++      />
++
+     </PageContainer>
+   );
+ }
+diff --git a/frontend/src/components/__tests__/workspace-card.test.tsx b/frontend/src/components/__tests__/workspace-card.test.tsx
+index 52c2b106d..cd729d527 100644
+--- a/frontend/src/components/__tests__/workspace-card.test.tsx
++++ b/frontend/src/components/__tests__/workspace-card.test.tsx
+@@ -289,3 +289,78 @@ describe("WorkspaceCard 工作区类型徽标 (task-06)", () => {
+     expect(badge.className).toContain("text-zinc-500");
+   });
+ });
++
++// task-08/task-09（2026-09-14-workspace-drag-sort / FR-04 / R-06）：拖拽手柄挂点。
++// 「挂点默认不渲染」是兼容契约——WorkspacesPage（经 WorkspaceDragGrid 注入）以外的
++// 其它调用方零改动；注入 dragHandleProps（父级 useSortable attributes/listeners + ref）
++// 时卡片左缘渲染 ⠿ 手柄，dragHandleNode（「移动到…」入口，task-09 接线）渲染于
++// 同一挂点手柄下方；挂点内点击不冒泡成整卡 onActivate。
++describe("WorkspaceCard 拖拽手柄挂点 (task-08 / task-10 回归)", () => {
++  it("不传 dragHandleProps/dragHandleNode：挂点整体不渲染（⠿ 手柄不存在）", () => {
++    render(
++      <WorkspaceCard
++        workspace={mkWorkspace({ id: "ws-nohandle" })}
++        onChanged={() => {}}
++        onEditAlias={() => {}}
++      />,
++    );
++    expect(screen.queryByTitle("拖拽排序")).not.toBeInTheDocument();
++    expect(screen.queryByText("⠿")).not.toBeInTheDocument();
++    // 卡片不携带挂点 group/card 定位类——其余调用方渲染结果与现状完全一致。
++    expect(screen.getByRole("article").className).not.toContain("group/card");
++  });
++
++  it("只传 dragHandleNode（无 dragHandleProps）：挂点渲染子节点但无 ⠿ 手柄", () => {
++    render(
++      <WorkspaceCard
++        workspace={mkWorkspace({ id: "ws-node-only" })}
++        onChanged={() => {}}
++        onEditAlias={() => {}}
++        dragHandleNode={<span data-testid="move-entry">移动到…</span>}
++      />,
++    );
++    expect(screen.getByTestId("move-entry")).toBeInTheDocument();
++    expect(screen.queryByTitle("拖拽排序")).not.toBeInTheDocument();
++  });
++
++  it("注入 dragHandleProps：渲染 ⠿ 手柄，注入类与默认手柄观感合并（禁用态灰显可见）", () => {
++    render(
++      <WorkspaceCard
++        workspace={mkWorkspace({ id: "ws-handle" })}
++        onChanged={() => {}}
++        onEditAlias={() => {}}
++        dragHandleProps={{
++          className: "cursor-not-allowed !opacity-40",
++          "aria-disabled": true,
++        }}
++      />,
++    );
++    const handle = screen.getByTitle("拖拽排序");
++    expect(handle.textContent).toBe("⠿");
++    // 注入的禁用态类生效（D-005@v2 可见灰显）；cn=twMerge 同组冲突后者覆盖——
++    // cursor-grab 被 cursor-not-allowed 覆盖、opacity-0 被 !opacity-40 覆盖。
++    expect(handle.className).toContain("cursor-not-allowed");
++    expect(handle.className).toContain("!opacity-40");
++    expect(handle.className).not.toMatch(/(^|\s)cursor-grab(\s|$)/);
++    expect(handle.getAttribute("aria-disabled")).toBe("true");
++  });
++
++  it("挂点内点击不冒泡触发整卡 onActivate（卡体点击与挂点操作互不冲突）", () => {
++    const onActivate = vi.fn();
++    render(
++      <WorkspaceCard
++        workspace={mkWorkspace({ id: "ws-stop-handle" })}
++        onChanged={() => {}}
++        onEditAlias={() => {}}
++        onActivate={onActivate}
++        dragHandleNode={
++          <button type="button" title="移动到指定页…" onClick={() => {}}>
++            移动
++          </button>
++        }
++      />,
++    );
++    fireEvent.click(screen.getByTitle("移动到指定页…"));
++    expect(onActivate).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/__tests__/workspace-drag-grid.test.tsx b/frontend/src/components/__tests__/workspace-drag-grid.test.tsx
+new file mode 100644
+index 000000000..cf821321d
+--- /dev/null
++++ b/frontend/src/components/__tests__/workspace-drag-grid.test.tsx
+@@ -0,0 +1,395 @@
++/**
++ * task-10 / 2026-09-14-workspace-drag-sort / FR-04 / FR-05 / FR-07：
++ * WorkspaceDragGrid（task-08 产物）拖拽排序网格组件测试。
++ *
++ * 覆盖（对照任务卡 task-10 ①~⑦ 与 requirements.md FR-04/05/07）：
++ *   ① 投放带显隐边界：第 1 页无上带 / 末页无下带 / 中间页两条都有 / dragDisabled 都不出现
++ *   ② 落带提交参数：下带 to="next_page_head"、上带 to="prev_page_tail"（均含 page_size=12）
++ *   ③ 页内拖放：drop 后 moveWorkspace(id, {after_id: 落位前邻卡})；落位页首无前邻时
++ *      before_id=新序第二张；本地乐观重排 + 失败回滚（FR-04，恰发一次 move）
++ *   ④ rank 换算与高亮：onMoved 上抛 {page: floor(rank / WORKSPACE_PAGE_SIZE)}；
++ *      被移动卡 wdg-just-moved 高亮 1.6s 出现与消退（fake timers 推进）
++ *   ⑤ 筛选禁拖（dragDisabled，D-005@v2 网格侧）：手柄禁用灰显 + 键盘拖拽零响应
++ *      + moveWorkspace 零调用（提示文案/入口禁用归 page.test 断言）
++ *   ⑥ onRequestMove 缺省时「移动到…」挂点不渲染（挂点默认不渲染契约的网格侧）
++ *
++ * dnd-kit 交互走 KeyboardSensor 官方键盘路径（Space 起拖 + 方向键移动 + Space 落放，
++ * @dnd-kit 无官方 testing 库，键盘路径是 jsdom 下受支持的稳定通道）：
++ *   - jsdom 无布局——patch getBoundingClientRect 给每张卡（data-ws-id 按 DOM 序，
++ *     单列网格 120px 行距）与上下投放带确定性矩形，使 sortableKeyboardCoordinates +
++ *     closestCorners 的碰撞计算可复现；
++ *   - KeyboardSensor 起拖后经 setTimeout(0) 才挂 document keydown 监听——每步交互后
++ *     advanceTimersByTime(0) 推进；全文件 fake timers，兼管 1.6s 高亮断言不引入真实等待。
++ */
++
++import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
++import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { WorkspaceDragGrid } from "@/components/workspace-drag-grid";
++import { WORKSPACE_PAGE_SIZE, type Workspace } from "@/lib/workspaces";
++
++// ── lib/workspaces mock（importActual 保留 WORKSPACE_PAGE_SIZE 常量；moveWorkspace 全 mock）──
++const wsApi = vi.hoisted(() => ({ moveWorkspace: vi.fn() }));
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>("@/lib/workspaces");
++  return { ...actual, moveWorkspace: wsApi.moveWorkspace };
++});
++
++// ── @/lib/errors mock（网格失败分支用 notify.error——成功/警示调用留给 page.test）──
++const notifyMock = vi.hoisted(() => ({
++  error: vi.fn(),
++  success: vi.fn(),
++  warning: vi.fn(),
++}));
++vi.mock("@/lib/errors", () => ({
++  useNotify: () => notifyMock,
++}));
++
++// ── WorkspaceCard stub（拖拽测试聚焦网格层）：手柄 span 透传 dragHandleProps
++//    （ref/className 单列拆解，对齐真实卡片注入方式），挂点节点按需渲染。──
++vi.mock("@/components/workspace-card", () => ({
++  WorkspaceCard: (props: any) => {
++    const { ref, className, ...handleRest } = props.dragHandleProps ?? {};
++    return (
++      <div data-testid={`ws-card-${props.workspace.id}`}>
++        <span
++          title="拖拽排序"
++          data-testid={`ws-handle-${props.workspace.id}`}
++          ref={ref}
++          className={className}
++          {...handleRest}
++        >
++          ⠿
++        </span>
++        {props.dragHandleNode ?? null}
++      </div>
++    );
++  },
++}));
++
++// ── fixtures ────────────────────────────────────────────────────────────────
++function mkWorkspace(id: string): Workspace {
++  return {
++    id,
++    name: id,
++    display_alias: null,
++    slug: id,
++    root_path: `/srv/${id}`,
++    status: "active",
++    component_key: null,
++    type: null,
++    role: null,
++    repo_url: null,
++    default_branch: null,
++    default_agent: null,
++    default_model: null,
++    tech_stack: [],
++    build_command: null,
++    test_command: null,
++    source_yaml_path: null,
++    created_by: null,
++    created_at: "2026-09-14T00:00:00Z",
++    updated_at: "2026-09-14T00:00:00Z",
++    last_scanned_at: null,
++    deleted_at: null,
++    owner: null,
++  };
++}
++
++const items3 = () => [mkWorkspace("ws-a"), mkWorkspace("ws-b"), mkWorkspace("ws-c")];
++
++const TOP_ZONE_LABEL = "▲ 拖到此处 → 移到上一页末尾";
++const BOTTOM_ZONE_LABEL = "▼ 拖到此处 → 移到下一页开头";
++
++/** moveWorkspace 默认成功响应（rank 可按用例覆盖 mockResolvedValueOnce）。 */
++const okMove = (rank: number) => ({
++  workspace: mkWorkspace("ws-a"),
++  rebalanced: false,
++  rank,
++});
++
++type GridProps = React.ComponentProps<typeof WorkspaceDragGrid>;
++
++function renderGrid(overrides: Partial<GridProps> = {}) {
++  const onMoved = vi.fn();
++  const onMoveFailed = vi.fn();
++  const onRequestMove = vi.fn();
++  const view = render(
++    <WorkspaceDragGrid
++      items={items3()}
++      page={0}
++      total={30}
++      cardProps={() => ({ onChanged: () => {}, onEditAlias: () => {} })}
++      onMoved={onMoved}
++      onMoveFailed={onMoveFailed}
++      onRequestMove={onRequestMove}
++      {...overrides}
++    />,
++  );
++  return { ...view, onMoved, onMoveFailed, onRequestMove };
++}
++
++/** 当前渲染顺序（乐观更新断言）：data-ws-id 即卡片包装层 id。 */
++function renderedOrder(container: HTMLElement): string[] {
++  return Array.from(container.querySelectorAll("[data-ws-id]")).map((el) =>
++    el.getAttribute("data-ws-id")!,
++  );
++}
++
++function movedWrapper(container: HTMLElement, id: string): HTMLElement {
++  return container.querySelector<HTMLElement>(`[data-ws-id="${id}"]`)!;
++}
++
++// ── jsdom 布局与滚动补丁 ─────────────────────────────────────────────────────
++// 单列确定性布局：第 i 张卡 top=i*120（高 100）；上带 top=-60、下带紧随末卡下方。
++const makeRect = (top: number, width: number, height: number) => {
++  const rect = {
++    x: 0,
++    y: top,
++    top,
++    left: 0,
++    right: width,
++    bottom: top + height,
++    width,
++    height,
++    toJSON() {
++      return rect;
++    },
++  };
++  return rect as unknown as DOMRect;
++};
++
++const origScrollIntoView = Element.prototype.scrollIntoView;
++
++beforeAll(() => {
++  // jsdom 未实现 scrollIntoView（高亮滚动入视野 / sensor 起拖兜底都可能触达）。
++  Element.prototype.scrollIntoView = () => {};
++  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
++    this: HTMLElement,
++  ) {
++    const wsId = this.getAttribute("data-ws-id");
++    if (wsId != null) {
++      const parent = this.parentElement;
++      const idx = parent ? Array.from(parent.children).indexOf(this) : 0;
++      return makeRect(idx * 120, 100, 100);
++    }
++    const text = this.textContent ?? "";
++    if (text.includes("移到上一页末尾")) {
++      return makeRect(-60, 100, 40);
++    }
++    if (text.includes("移到下一页开头")) {
++      const count = document.querySelectorAll("[data-ws-id]").length;
++      return makeRect(count * 120 + 20, 100, 40);
++    }
++    return makeRect(0, 0, 0);
++  });
++});
++
++afterAll(() => {
++  vi.restoreAllMocks();
++  if (origScrollIntoView) {
++    Element.prototype.scrollIntoView = origScrollIntoView;
++  } else {
++    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
++  }
++});
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  wsApi.moveWorkspace.mockReset();
++  wsApi.moveWorkspace.mockImplementation(() => okMove(2));
++  notifyMock.error.mockClear();
++});
++
++afterEach(() => {
++  cleanup();
++  vi.useRealTimers();
++});
++
++// ── 键盘拖拽驱动（KeyboardSensor 官方测试路径）──────────────────────────────
++/** 推进一个交互节拍：跑完到期的 setTimeout(0)（sensor 挂监听/React 副作用）+ 微任务。 */
++async function flush() {
++  await act(async () => {
++    vi.advanceTimersByTime(0);
++    await Promise.resolve();
++  });
++}
++
++/** Space 起拖（在手柄上触发 onKeyDown 激活 KeyboardSensor）。 */
++async function startKeyboardDrag(handleTestId: string) {
++  await act(async () => {
++    fireEvent.keyDown(screen.getByTestId(handleTestId), { code: "Space" });
++  });
++  await flush();
++}
++
++/** 方向键 / 结束键（document 级 keydown，KeyboardSensor 拖拽期监听）。 */
++async function press(code: string) {
++  await act(async () => {
++    fireEvent.keyDown(document.body, { code });
++  });
++  await flush();
++}
++
++/** 键盘拖拽全流程：Space 起拖 → 逐个方向键 → Space 落放。 */
++async function keyboardDrag(handleTestId: string, arrows: string[]) {
++  await startKeyboardDrag(handleTestId);
++  for (const code of arrows) {
++    await press(code);
++  }
++  await press("Space");
++  await flush();
++}
++
++describe("WorkspaceDragGrid 投放带显隐边界 (FR-05 / 任务卡①)", () => {
++  it("第 1 页（page=0）拖起：出现下带、不出现上带", async () => {
++    renderGrid({ page: 0, total: 30 });
++    await startKeyboardDrag("ws-handle-ws-a");
++    expect(screen.getByText(BOTTOM_ZONE_LABEL)).toBeInTheDocument();
++    expect(screen.queryByText(TOP_ZONE_LABEL)).not.toBeInTheDocument();
++    await press("Escape"); // 收起投放带结束拖拽
++    expect(screen.queryByText(BOTTOM_ZONE_LABEL)).not.toBeInTheDocument();
++  });
++
++  it("末页（(page+1)*12>=total）拖起：出现上带、不出现下带", async () => {
++    renderGrid({ page: 2, total: 26, items: [mkWorkspace("ws-a"), mkWorkspace("ws-b")] });
++    await startKeyboardDrag("ws-handle-ws-a");
++    expect(screen.getByText(TOP_ZONE_LABEL)).toBeInTheDocument();
++    expect(screen.queryByText(BOTTOM_ZONE_LABEL)).not.toBeInTheDocument();
++  });
++
++  it("中间页拖起：上带与下带都出现", async () => {
++    renderGrid({ page: 1, total: 30 });
++    await startKeyboardDrag("ws-handle-ws-a");
++    expect(screen.getByText(TOP_ZONE_LABEL)).toBeInTheDocument();
++    expect(screen.getByText(BOTTOM_ZONE_LABEL)).toBeInTheDocument();
++  });
++
++  it("dragDisabled（筛选态）：手柄禁用灰显 + 键盘拖拽零响应（无任何投放带、零 move 调用）", async () => {
++    renderGrid({ dragDisabled: true });
++    const handle = screen.getByTestId("ws-handle-ws-a");
++    // 手柄禁用态可见不隐藏（D-005@v2）：cursor-not-allowed + 半透明灰显。
++    expect(handle.className).toContain("cursor-not-allowed");
++    expect(handle.className).toContain("!opacity-40");
++    // 完整键盘拖拽序列（Space 起拖 + 方向键 + Space 落放）均零响应。
++    await keyboardDrag("ws-handle-ws-a", ["ArrowDown", "ArrowDown"]);
++    expect(screen.queryByText(TOP_ZONE_LABEL)).not.toBeInTheDocument();
++    expect(screen.queryByText(BOTTOM_ZONE_LABEL)).not.toBeInTheDocument();
++    expect(wsApi.moveWorkspace).not.toHaveBeenCalled();
++  });
++
++  it("未拖拽时投放带不渲染（静默态无带）", () => {
++    renderGrid({ page: 1, total: 30 });
++    expect(screen.queryByText(TOP_ZONE_LABEL)).not.toBeInTheDocument();
++    expect(screen.queryByText(BOTTOM_ZONE_LABEL)).not.toBeInTheDocument();
++  });
++});
++
++describe("WorkspaceDragGrid 落带提交参数 (FR-05 / D-012 / 任务卡②)", () => {
++  it("下带落放：moveWorkspace(id, {to:'next_page_head', page_size:12}) + rank 换算页码上抛", async () => {
++    wsApi.moveWorkspace.mockImplementationOnce(() => okMove(13)); // rank 13 → 第 2 页(0 基 1)
++    const { onMoved } = renderGrid({ page: 0, total: 30 });
++    // ws-a（首行）向下 3 步：ws-b → ws-c → 下带。
++    await keyboardDrag("ws-handle-ws-a", ["ArrowDown", "ArrowDown", "ArrowDown"]);
++    expect(wsApi.moveWorkspace).toHaveBeenCalledTimes(1);
++    expect(wsApi.moveWorkspace).toHaveBeenCalledWith("ws-a", {
++      to: "next_page_head",
++      page_size: WORKSPACE_PAGE_SIZE,
++    });
++    expect(onMoved).toHaveBeenCalledWith({
++      id: "ws-a",
++      rank: 13,
++      page: Math.floor(13 / WORKSPACE_PAGE_SIZE),
++    });
++  });
++
++  it("上带落放：moveWorkspace(id, {to:'prev_page_tail', page_size:12})", async () => {
++    wsApi.moveWorkspace.mockImplementationOnce(() => okMove(11)); // rank 11 → 第 1 页(0 基 0)
++    const { onMoved } = renderGrid({ page: 1, total: 30 });
++    // ws-c（末行）向上 3 步：ws-b → ws-a → 上带。
++    await keyboardDrag("ws-handle-ws-c", ["ArrowUp", "ArrowUp", "ArrowUp"]);
++    expect(wsApi.moveWorkspace).toHaveBeenCalledTimes(1);
++    expect(wsApi.moveWorkspace).toHaveBeenCalledWith("ws-c", {
++      to: "prev_page_tail",
++      page_size: WORKSPACE_PAGE_SIZE,
++    });
++    expect(onMoved).toHaveBeenCalledWith({ id: "ws-c", rank: 11, page: 0 });
++  });
++});
++
++describe("WorkspaceDragGrid 页内拖放 (FR-04 / 任务卡③④)", () => {
++  it("拖到第三张之后：恰一次 moveWorkspace(id,{after_id:前邻卡}) + 乐观重排", async () => {
++    const { container, onMoved } = renderGrid({ page: 0, total: 30 });
++    await keyboardDrag("ws-handle-ws-a", ["ArrowDown", "ArrowDown"]); // 落在 ws-c 上
++    expect(wsApi.moveWorkspace).toHaveBeenCalledTimes(1);
++    expect(wsApi.moveWorkspace).toHaveBeenCalledWith("ws-a", { after_id: "ws-c" });
++    // 乐观更新：本地序即时变为 [ws-b, ws-c, ws-a]（D-008 后写覆盖）。
++    expect(renderedOrder(container)).toEqual(["ws-b", "ws-c", "ws-a"]);
++    expect(onMoved).toHaveBeenCalledWith({ id: "ws-a", rank: 2, page: 0 });
++  });
++
++  it("拖到本页页首（无前邻卡）：改携 before_id=新序第二张（原页首）", async () => {
++    const { container } = renderGrid({ page: 0, total: 30 });
++    await keyboardDrag("ws-handle-ws-c", ["ArrowUp", "ArrowUp"]); // 落在 ws-a 上（页首）
++    expect(wsApi.moveWorkspace).toHaveBeenCalledTimes(1);
++    expect(wsApi.moveWorkspace).toHaveBeenCalledWith("ws-c", { before_id: "ws-a" });
++    expect(renderedOrder(container)).toEqual(["ws-c", "ws-a", "ws-b"]);
++  });
++
++  it("move 失败：乐观序回滚 + onMoveFailed 上抛 + notify.error，无高亮残留", async () => {
++    wsApi.moveWorkspace.mockRejectedValueOnce(new Error("boom"));
++    const { container, onMoveFailed, onMoved } = renderGrid({ page: 0, total: 30 });
++    await keyboardDrag("ws-handle-ws-a", ["ArrowDown", "ArrowDown"]);
++    expect(wsApi.moveWorkspace).toHaveBeenCalledTimes(1);
++    // 回滚：恢复 props 原序（FR-04 失败回滚）。
++    expect(renderedOrder(container)).toEqual(["ws-a", "ws-b", "ws-c"]);
++    expect(onMoveFailed).toHaveBeenCalledTimes(1);
++    expect(onMoved).not.toHaveBeenCalled();
++    expect(notifyMock.error).toHaveBeenCalledTimes(1);
++    expect(
++      container.querySelector(".wdg-just-moved"),
++    ).not.toBeInTheDocument();
++  });
++});
++
++describe("WorkspaceDragGrid rank 换算与 1.6s 高亮 (FR-05 / R-07 / 任务卡④)", () => {
++  it("move 成功：onMoved.page=floor(rank/12) + 目标卡高亮 1.6s 出现与消退", async () => {
++    wsApi.moveWorkspace.mockImplementationOnce(() => okMove(14)); // 14/12 → page 1
++    const { container, onMoved } = renderGrid({ page: 0, total: 30 });
++    await keyboardDrag("ws-handle-ws-a", ["ArrowDown", "ArrowDown"]);
++    expect(onMoved).toHaveBeenCalledWith({ id: "ws-a", rank: 14, page: 1 });
++    // 高亮出现（wdg-just-moved 主题 token 动画类，FR-05）。
++    expect(movedWrapper(container, "ws-a").className).toContain("wdg-just-moved");
++    // 推进 1.6s 高亮自动消退。
++    act(() => {
++      vi.advanceTimersByTime(1600);
++    });
++    expect(movedWrapper(container, "ws-a").className).not.toContain("wdg-just-moved");
++  });
++
++  it("落带跨页 move 成功：高亮同样落在被拖卡上（onMoved 页码=目标页）", async () => {
++    wsApi.moveWorkspace.mockImplementationOnce(() => okMove(24)); // 24/12 → page 2
++    const { container, onMoved } = renderGrid({ page: 1, total: 30 });
++    await keyboardDrag("ws-handle-ws-a", ["ArrowDown", "ArrowDown", "ArrowDown"]); // 下带
++    expect(onMoved).toHaveBeenCalledWith({ id: "ws-a", rank: 24, page: 2 });
++    expect(movedWrapper(container, "ws-a").className).toContain("wdg-just-moved");
++  });
++});
++
++describe("WorkspaceDragGrid 挂点契约 (任务卡⑥)", () => {
++  it("不传 onRequestMove：「移动到…」入口不渲染，拖拽手柄仍在", () => {
++    renderGrid({ onRequestMove: undefined });
++    expect(screen.queryByTitle("移动到指定页…")).not.toBeInTheDocument();
++    // 拖拽手柄不受影响（每卡一个）。
++    expect(screen.getAllByTitle("拖拽排序")).toHaveLength(3);
++  });
++
++  it("传 onRequestMove：每张卡渲染「移动到…」入口且点击上抛对应工作区", () => {
++    const { onRequestMove } = renderGrid();
++    // 入口随挂点渲染在卡片内（每卡一个，取 ws-b 卡内入口精确断言）。
++    const entry = within(screen.getByTestId("ws-card-ws-b")).getByTitle("移动到指定页…");
++    fireEvent.click(entry);
++    expect(onRequestMove).toHaveBeenCalledTimes(1);
++    expect(onRequestMove).toHaveBeenCalledWith(expect.objectContaining({ id: "ws-b" }));
++  });
++});
+diff --git a/frontend/src/components/workspace-card.tsx b/frontend/src/components/workspace-card.tsx
+index 7c68c41ae..cbcf7dcb2 100644
+--- a/frontend/src/components/workspace-card.tsx
++++ b/frontend/src/components/workspace-card.tsx
+@@ -39,6 +39,16 @@ import { cn } from "@/lib/utils";
+  */
+ export type DaemonBadgeStatus = "online" | "offline" | "unbound";
+ 
++/**
++ * task-08 / 2026-09-14-workspace-drag-sort / FR-04：拖拽手柄注入属性——
++ * 父级 useSortable 的 attributes/listeners（+ ref 指向 setActivatorNodeRef，
++ * HTMLAttributes 不含 ref，显式放宽）。className 由本组件与注入方 cn 合并
++ * （禁用态注入 cursor-not-allowed / !opacity-40 覆盖默认手柄观感）。
++ */
++export type WorkspaceCardDragHandleProps = React.HTMLAttributes<HTMLElement> & {
++  ref?: React.Ref<HTMLElement>;
++};
++
+ interface Props {
+   workspace: Workspace;
+   boundRuntime?: DaemonRuntimeRead | null;
+@@ -64,6 +74,16 @@ interface Props {
+    * 不传时卡片不可点击（兼容旧调用方）。
+    */
+   onActivate?: () => void;
++  /**
++   * task-08 / 2026-09-14-workspace-drag-sort / FR-04 / R-06：可选拖拽手柄挂点。
++   * dragHandleProps 携带父级 useSortable 的 attributes/listeners（ref→
++   * setActivatorNodeRef）时，卡片左缘悬浮位渲染默认 ⠿ 手柄（仅手柄承载拖拽，
++   * 卡体点击行为零改动）；dragHandleNode 提供时渲染于同一挂点手柄下方
++   * （如「移动到…」入口，task-09 接线）。两者缺省时挂点整体不渲染，
++   * 其它调用方零改动。
++   */
++  dragHandleProps?: WorkspaceCardDragHandleProps;
++  dragHandleNode?: React.ReactNode;
+ }
+ 
+ export function WorkspaceCard({
+@@ -75,6 +95,8 @@ export function WorkspaceCard({
+   onChanged,
+   onEditAlias,
+   onActivate,
++  dragHandleProps,
++  dragHandleNode,
+ }: Props) {
+   const [busy, setBusy] = useState<"rescan" | "delete" | null>(null);
+   const [error, setError] = useState<string | null>(null);
+@@ -144,16 +166,49 @@ export function WorkspaceCard({
+   };
+   const stopFooter = (e: React.MouseEvent) => e.stopPropagation();
+ 
++  // task-08 / FR-04：手柄注入 props 拆解（ref/className 单列以便与默认手柄样式合并）。
++  const { ref: handleRef, className: handleClassName, ...handleRest } =
++    dragHandleProps ?? {};
++
+   return (
+     <article
+       onClick={onActivate ? handleCardClick : undefined}
+       className={cn(
+         // ql-20260820-010 对照原型 .ws-card:hover 三件套:
+         // 抬升 -4px + 紫调大阴影(shadow-lg 主题 token) + 边框加深(brand-300)
++        // task-08: 手柄挂点注入时补 group/card + relative（悬浮定位 + hover 显隐），
++        // 缺省不加——其余调用方渲染结果与现状完全一致。
+         "flex flex-col rounded-lg border bg-card shadow-sm transition-[box-shadow,transform,border-color] duration-200 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg",
+         onActivate && "cursor-pointer",
++        (dragHandleProps || dragHandleNode) && "group/card relative",
+       )}
+     >
++      {/* task-08 / FR-04 / R-06：拖拽手柄挂点（对照原型 ⠿ 手柄）——仅 dragHandleProps
++          /dragHandleNode 注入时渲染；挂点内 click 不冒泡成整卡 onActivate（dnd 的
++          指针/键盘监听在元素自身，此处只截 click）。缺省时零 DOM 差异。 */}
++      {(dragHandleProps || dragHandleNode) && (
++        <div
++          className="absolute -left-3 top-2 z-10 flex flex-col items-stretch"
++          onClick={(e) => e.stopPropagation()}
++        >
++          {dragHandleProps && (
++            <span
++              ref={handleRef}
++              {...handleRest}
++              title="拖拽排序"
++              className={cn(
++                // 对照原型 .handle：半出卡片左缘的 ⠿ 手柄，默认半隐、
++                // 卡 hover/手柄 hover/键盘聚焦全显；色走语义类（brand/border）。
++                "flex h-10 w-5 cursor-grab select-none items-center justify-center rounded-l-md border border-r-0 border-border bg-card text-sm text-muted-foreground opacity-0 transition-opacity duration-100 group-hover/card:opacity-60 hover:!opacity-100 hover:text-brand-600 focus-visible:opacity-100 active:cursor-grabbing",
++                handleClassName,
++              )}
++            >
++              ⠿
++            </span>
++          )}
++          {dragHandleNode}
++        </div>
++      )}
+       <header className="flex items-start justify-between gap-2 px-4 pt-3.5">
+         <div className="min-w-0">
+           <div className="flex items-baseline gap-2">
+diff --git a/frontend/src/components/workspace-drag-grid.tsx b/frontend/src/components/workspace-drag-grid.tsx
+new file mode 100644
+index 000000000..7c9e26b8d
+--- /dev/null
++++ b/frontend/src/components/workspace-drag-grid.tsx
+@@ -0,0 +1,386 @@
++"use client";
++
++import { useCallback, useEffect, useRef, useState } from "react";
++import {
++  DndContext,
++  KeyboardSensor,
++  MeasuringStrategy,
++  PointerSensor,
++  closestCorners,
++  useDroppable,
++  useSensor,
++  useSensors,
++  type DragEndEvent,
++  type DragStartEvent,
++} from "@dnd-kit/core";
++import {
++  SortableContext,
++  arrayMove,
++  rectSortingStrategy,
++  sortableKeyboardCoordinates,
++  useSortable,
++} from "@dnd-kit/sortable";
++import { ArrowLeftRight } from "lucide-react";
++
++import {
++  WorkspaceCard,
++  type WorkspaceCardDragHandleProps,
++} from "@/components/workspace-card";
++import { useNotify } from "@/lib/errors";
++import {
++  moveWorkspace,
++  WORKSPACE_PAGE_SIZE,
++  type Workspace,
++} from "@/lib/workspaces";
++import { cn } from "@/lib/utils";
++
++/**
++ * task-08 / 2026-09-14-workspace-drag-sort / FR-04 / FR-05：
++ * 工作区列表拖拽排序网格（@dnd-kit DndContext + SortableContext，
++ * rectSortingStrategy 适配 1/2/3 列响应式网格，D-002 分页网格不变）。
++ *
++ * 纯组件边界（D-014）：不持路由不拉数据——items/page/total 与翻页/刷新回调
++ * 全部经 props，由 task-09 在 page.tsx 接线；move 后不在本地造卡/删卡，
++ * 跨页移动经回调重取列表表现为「源页少一张、目标页多一张」。
++ *
++ * 交互（对照 prototype-workspace-drag-sort.html）：
++ * - 页内拖放：dragEnd 按落位取前邻卡，一次 moveWorkspace 携 after_id=前邻卡 id
++ *   （落位本页页首无前邻时改携 before_id=本页第一张），本地乐观重排、失败回滚
++ *   并回调刷新（D-008 后写覆盖语义，不加乐观锁）。
++ * - 边缘投放带（D-003@v2）：拖起时网格上下滑入两条虚线投放带（外置 droppable），
++ *   drop/取消即收起；下带携 to=next_page_head、上带携 to=prev_page_tail，均带
++ *   page_size=WORKSPACE_PAGE_SIZE——跨页锚点由服务端解析，客户端不算边界卡
++ *   （D-012 / R-07）；第 1 页无上带、末页无下带（页信息经 props 传入）。
++ * - 成功闭环：按响应 rank 换算目标页 floor(rank / WORKSPACE_PAGE_SIZE) 经
++ *   onMoved 上抛（被拖卡 id + rank + 目标页）；被移动卡高亮 1.6s 自动消失
++ *   （accent 主题 token 动画，见底部 wdg- <style>，禁硬编码 hex）。
++ */
++
++/** 透传给每张 WorkspaceCard 的额外 props（workspace 与手柄挂点由本网格注入）。 */
++export type WorkspaceCardSlotProps = Omit<
++  React.ComponentProps<typeof WorkspaceCard>,
++  "workspace" | "dragHandleProps" | "dragHandleNode"
++>;
++
++/** 移动成功闭环事件（onMoved 上抛）：rank 为服务端返回的移动后全局序号。 */
++export interface WorkspaceMovedEvent {
++  /** 被移动工作区 id */
++  id: string;
++  /** 服务端响应 rank（默认视图全局序号） */
++  rank: number;
++  /** 目标页（0 基）= floor(rank / WORKSPACE_PAGE_SIZE)，父级据此翻页 + reload */
++  page: number;
++}
++
++interface Props {
++  /** 当前页工作区（顺序即页内排序；乐观更新期间本地顺序可短暂偏离） */
++  items: Workspace[];
++  /** 当前页码（0 基）——第 0 页不渲染上投放带 */
++  page: number;
++  /** 总条数（当前列表视图）——末页不渲染下投放带 */
++  total: number;
++  /**
++   * 每张卡片的额外 props 组装器（page.tsx 透传 linkedProjects/boundDaemon/
++   * daemonStatus/onChanged/onEditAlias/onActivate 等既有 props——必填，
++   * WorkspaceCard 的 onChanged/onEditAlias 为必传项经由此供给）。
++   */
++  cardProps: (workspace: Workspace) => WorkspaceCardSlotProps;
++  /**
++   * 「移动到…」入口回调（task-09 接线弹窗）：传入时手柄下方渲染入口按钮；
++   * 缺省不渲染。弹窗本体不属本组件。
++   */
++  onRequestMove?: (workspace: Workspace) => void;
++  /**
++   * 移动成功回调：页内/投放带 move 成功后上抛，父级据 page 翻页并重取列表。
++   */
++  onMoved?: (event: WorkspaceMovedEvent) => void;
++  /** 移动失败回调（乐观已回滚）：父级可据此刷新收敛服务端真序。 */
++  onMoveFailed?: (err: unknown) => void;
++  /**
++   * 禁用拖拽（筛选态，D-005@v2，task-09 接线）：手柄灰显禁拖（可见不隐藏）、
++   * 投放带不出现。缺省可拖。
++   */
++  dragDisabled?: boolean;
++  /** 根容器附加类名（透传布局间距等，网格本体类固定） */
++  className?: string;
++}
++
++/** 投放带 droppable id（工作区 id 为 UUID，命名前缀防碰撞）。 */
++const TOP_ZONE_ID = "wdg-zone-prev-page";
++const BOTTOM_ZONE_ID = "wdg-zone-next-page";
++
++/* ── 边缘投放带（外置 droppable）：仅拖拽期间按页边界条件渲染，drop/取消即卸载 ── */
++function EdgeDropZone({
++  id,
++  label,
++  visible,
++}: {
++  id: string;
++  label: string;
++  visible: boolean;
++}) {
++  const { setNodeRef, isOver } = useDroppable({ id });
++  if (!visible) return null;
++  return (
++    <div
++      ref={setNodeRef}
++      className={cn(
++        "my-2.5 flex h-11 animate-sh-fade-in items-center justify-center rounded-lg border-2 border-dashed text-[13px] font-medium tracking-wide",
++        isOver
++          ? "border-brand-600 bg-brand-100 text-brand-700 ring-4 ring-brand-100"
++          : "border-brand-300 bg-brand-50 text-brand-700",
++      )}
++    >
++      {label}
++    </div>
++  );
++}
++
++/* ── 可排序卡片：包装层承载 setNodeRef/transform，WorkspaceCard 透传既有 props ── */
++function SortableWorkspaceCard({
++  workspace,
++  slotProps,
++  disabled,
++  isMoved,
++  onRequestMove,
++}: {
++  workspace: Workspace;
++  slotProps: WorkspaceCardSlotProps;
++  disabled: boolean;
++  isMoved: boolean;
++  onRequestMove?: (workspace: Workspace) => void;
++}) {
++  const {
++    attributes,
++    listeners,
++    setNodeRef,
++    setActivatorNodeRef,
++    transform,
++    transition,
++    isDragging,
++  } = useSortable({ id: workspace.id, disabled });
++
++  // @dnd-kit/utilities 未直装（pnpm 严格 node_modules），手拼 translate3d
++  // 等价 CSS.Transform.toString（sortable 变换无 scale 分量）。
++  const dragStyle: React.CSSProperties = {
++    transform: transform
++      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
++      : undefined,
++    transition: transition ?? undefined,
++  };
++
++  // R-06：仅手柄承载 drag listeners（PPM ppm-sub-table 最左拖拽手柄列同款先例），
++  // 卡体整卡点击进详情（onActivate）不受拖拽影响；禁用态灰显不隐藏（D-005@v2）。
++  const handleProps: WorkspaceCardDragHandleProps = disabled
++    ? { className: "cursor-not-allowed !opacity-40" }
++    : { ref: setActivatorNodeRef, ...attributes, ...listeners };
++
++  return (
++    <div
++      ref={setNodeRef}
++      style={dragStyle}
++      data-ws-id={workspace.id}
++      className={cn(
++        "relative",
++        isDragging && "z-10 opacity-40",
++        isMoved && "wdg-just-moved rounded-lg",
++      )}
++    >
++      <WorkspaceCard
++        workspace={workspace}
++        {...slotProps}
++        dragHandleProps={handleProps}
++        dragHandleNode={
++          onRequestMove ? (
++            <button
++              type="button"
++              title="移动到指定页…"
++              className="mt-0.5 flex h-6 w-5 cursor-pointer items-center justify-center rounded-l-md border border-r-0 border-border bg-card text-muted-foreground opacity-0 transition-opacity duration-100 group-hover/card:opacity-60 hover:!opacity-100 hover:text-brand-600 focus-visible:opacity-100"
++              onClick={(e) => {
++                e.stopPropagation();
++                onRequestMove(workspace);
++              }}
++            >
++              <ArrowLeftRight className="h-3 w-3" aria-hidden />
++            </button>
++          ) : undefined
++        }
++      />
++    </div>
++  );
++}
++
++export function WorkspaceDragGrid({
++  items,
++  page,
++  total,
++  cardProps,
++  onRequestMove,
++  onMoved,
++  onMoveFailed,
++  dragDisabled = false,
++  className,
++}: Props) {
++  const notify = useNotify();
++  const gridRef = useRef<HTMLDivElement>(null);
++  const [activeId, setActiveId] = useState<string | null>(null);
++  const [movedId, setMovedId] = useState<string | null>(null);
++  // 乐观覆盖（render 期派生）：source 记录覆盖所基于的 items 引用，props 变化
++  // （翻页 / 父级 reload）即自动失效回退 props 序，避免 effect 同步闪一帧旧序。
++  const [override, setOverride] = useState<{
++    source: Workspace[];
++    items: Workspace[];
++  } | null>(null);
++  const order = override && override.source === items ? override.items : items;
++
++  // 键盘无障碍走 dnd-kit 内置 KeyboardSensor（sortable 键盘坐标）；
++  // 指针 4px 位移阈值避免手柄误触点击即起拖。
++  const sensors = useSensors(
++    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
++    useSensor(KeyboardSensor, {
++      coordinateGetter: sortableKeyboardCoordinates,
++    }),
++  );
++
++  const dragging = activeId !== null;
++  // 页边界：第 1 页无上带 / 末页无下带（页信息经 props 传入）。
++  const hasPrevPage = page > 0;
++  const hasNextPage = (page + 1) * WORKSPACE_PAGE_SIZE < total;
++
++  // 移动成功闭环：记录高亮 id + 按 rank 换算目标页上抛（D-003 / R-08）。
++  const finishMove = useCallback(
++    (id: string, rank: number) => {
++      setMovedId(id);
++      onMoved?.({
++        id,
++        rank,
++        page: Math.floor(rank / WORKSPACE_PAGE_SIZE),
++      });
++    },
++    [onMoved],
++  );
++
++  const handleDragStart = useCallback((event: DragStartEvent) => {
++    setActiveId(String(event.active.id));
++  }, []);
++
++  const handleDragCancel = useCallback(() => setActiveId(null), []);
++
++  const handleDragEnd = useCallback(
++    async (event: DragEndEvent) => {
++      // drop/取消即收起投放带（先复位，再走提交分支）。
++      setActiveId(null);
++      const { active, over } = event;
++      if (!over || active.id === over.id) return;
++      const activeWsId = String(active.id);
++      const overId = String(over.id);
++
++      // 边缘投放带：to 枚举由服务端解析跨页锚点（D-012），客户端不本地增删卡（D-014）。
++      if (overId === TOP_ZONE_ID || overId === BOTTOM_ZONE_ID) {
++        try {
++          const resp = await moveWorkspace(activeWsId, {
++            to: overId === TOP_ZONE_ID ? "prev_page_tail" : "next_page_head",
++            page_size: WORKSPACE_PAGE_SIZE,
++          });
++          finishMove(activeWsId, resp.rank);
++        } catch (err) {
++          notify.error(err, "移动工作区失败");
++          onMoveFailed?.(err);
++        }
++        return;
++      }
++
++      // 页内拖放：落位前邻卡 after_id；落位本页页首无前邻时改 before_id=本页第一张
++      // （新序第二张 = 原页首卡）。恰发一次 moveWorkspace（FR-04）。
++      const oldIndex = order.findIndex((w) => w.id === activeWsId);
++      const newIndex = order.findIndex((w) => w.id === overId);
++      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
++      const next = arrayMove(order, oldIndex, newIndex);
++      const prevNeighbor = next[newIndex - 1];
++      const headAnchor = next[1];
++      const anchorBody = prevNeighbor
++        ? { after_id: prevNeighbor.id }
++        : headAnchor
++          ? { before_id: headAnchor.id }
++          : null;
++      if (!anchorBody) return;
++      setOverride({ source: order, items: next });
++      try {
++        const resp = await moveWorkspace(activeWsId, anchorBody);
++        finishMove(activeWsId, resp.rank);
++      } catch (err) {
++        // 失败回滚乐观序（FR-04）+ 回调刷新收敛。
++        setOverride(null);
++        notify.error(err, "移动工作区失败");
++        onMoveFailed?.(err);
++      }
++    },
++    [finishMove, notify, onMoveFailed, order],
++  );
++
++  // 落位高亮（FR-05）：目标卡到位（跨页移动需等父级翻页刷新换页）后滚动入视野
++  // 并闪 1.6s（wdg-flash，accent 主题 token 动画），到时自动清除。
++  useEffect(() => {
++    if (!movedId) return;
++    if (!order.some((w) => w.id === movedId)) return;
++    gridRef.current
++      ?.querySelector<HTMLElement>(`[data-ws-id="${movedId}"]`)
++      ?.scrollIntoView({ behavior: "smooth", block: "center" });
++    const timer = window.setTimeout(() => setMovedId(null), 1600);
++    return () => window.clearTimeout(timer);
++  }, [movedId, order]);
++
++  return (
++    <div className={className}>
++      {/* 落位高亮 keyframes（wdg- 命名空间，色取 --color-accent 主题 token，
++          禁硬编码 hex——floating-mascot 局部 <style> 同款先例）。 */}
++      <style>{`
++@keyframes wdg-flash{
++  0%,60%{box-shadow:0 0 0 3px var(--color-accent),0 4px 14px color-mix(in srgb,var(--color-accent) 25%,transparent)}
++  100%{box-shadow:0 0 0 0 transparent}
++}
++.wdg-just-moved{animation:wdg-flash 1.6s ease}
++`}</style>
++      <DndContext
++        sensors={sensors}
++        collisionDetection={closestCorners}
++        // 投放带随拖起滑入会改变网格布局，拖拽期间持续重测 droppable 矩形。
++        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
++        onDragStart={handleDragStart}
++        onDragEnd={handleDragEnd}
++        onDragCancel={handleDragCancel}
++      >
++        <EdgeDropZone
++          id={TOP_ZONE_ID}
++          label="▲ 拖到此处 → 移到上一页末尾"
++          visible={dragging && hasPrevPage}
++        />
++        <SortableContext
++          items={order.map((w) => w.id)}
++          strategy={rectSortingStrategy}
++        >
++          <div
++            ref={gridRef}
++            className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
++          >
++            {order.map((w) => (
++              <SortableWorkspaceCard
++                key={w.id}
++                workspace={w}
++                slotProps={cardProps(w)}
++                disabled={dragDisabled}
++                isMoved={movedId === w.id}
++                onRequestMove={onRequestMove}
++              />
++            ))}
++          </div>
++        </SortableContext>
++        <EdgeDropZone
++          id={BOTTOM_ZONE_ID}
++          label="▼ 拖到此处 → 移到下一页开头"
++          visible={dragging && hasNextPage}
++        />
++      </DndContext>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/workspace-move-dialog.tsx b/frontend/src/components/workspace-move-dialog.tsx
+new file mode 100644
+index 000000000..7018aa866
+--- /dev/null
++++ b/frontend/src/components/workspace-move-dialog.tsx
+@@ -0,0 +1,122 @@
++"use client";
++
++import { useEffect, useState } from "react";
++import { Modal, Select } from "antd";
++
++import type { Workspace } from "@/lib/workspaces";
++
++/**
++ * task-09 / 2026-09-14-workspace-drag-sort / FR-06 / D-009@v2：
++ * 「移动到…」弹窗（antd Modal + Select 受控，对照原型 §移动到…弹窗——
++ * 目标页 + 页首/页尾两下拉）。「某卡前后」的精确落位由页内拖拽覆盖，
++ * 弹窗不重复提供。
++ *
++ * 纯受控组件边界：不拉数据不发请求——目标页数据获取与锚点方向规则
++ * （页首向上 before/向下 after=目标页第一张；页尾对偶；同页页首 before、
++ * 页尾 after；自锚跳过）全由父级 page.tsx 的 onConfirm 提交流程实现。
++ */
++
++/** 页内位置（「页首」=目标页第一张前，「页尾」=目标页最后一张后）。 */
++export type WorkspaceMovePosition = "first" | "last";
++
++/** 弹窗提交意图（onConfirm 上抛）：page 为 0 基目标页。 */
++export interface WorkspaceMoveTarget {
++  /** 目标页（0 基） */
++  page: number;
++  /** 页内位置（页首/页尾） */
++  position: WorkspaceMovePosition;
++}
++
++interface Props {
++  open: boolean;
++  /** 被移动工作区（null 时弹窗内容空挂，open 由父级联动控制） */
++  workspace: Workspace | null;
++  /** 当前页（0 基）——打开时默认选中的目标页 */
++  currentPage: number;
++  /** 目标页总数（按默认视图分页 N=ceil(total/WORKSPACE_PAGE_SIZE)） */
++  totalPages: number;
++  /** 筛选禁拖态（D-005@v2）：确认按钮禁用兜底，杜绝非默认视图发出 move */
++  disabled?: boolean;
++  /** 提交中（父级拉目标页 + moveWorkspace 期间） */
++  confirmLoading?: boolean;
++  onConfirm: (_target: WorkspaceMoveTarget) => void;
++  onCancel: () => void;
++}
++
++const POSITION_OPTIONS: { value: WorkspaceMovePosition; label: string }[] = [
++  { value: "first", label: "页首" },
++  { value: "last", label: "页尾" },
++];
++
++export function WorkspaceMoveDialog({
++  open,
++  workspace,
++  currentPage,
++  totalPages,
++  disabled = false,
++  confirmLoading = false,
++  onConfirm,
++  onCancel,
++}: Props) {
++  // 内部受控选择：每次打开重置为「当前页 + 页首」（原型 openModal 同款默认）。
++  const [targetPage, setTargetPage] = useState(currentPage);
++  const [position, setPosition] = useState<WorkspaceMovePosition>("first");
++
++  useEffect(() => {
++    if (open) {
++      setTargetPage(currentPage);
++      setPosition("first");
++    }
++  }, [open, currentPage]);
++
++  const pageOptions = Array.from({ length: Math.max(1, totalPages) }, (_, i) => ({
++    value: i,
++    label: `第 ${i + 1} 页`,
++  }));
++
++  const title = workspace
++    ? `移动工作区「${workspace.display_alias ?? workspace.name}」`
++    : "移动工作区";
++
++  return (
++    <Modal
++      title={title}
++      open={open}
++      onOk={() => onConfirm({ page: targetPage, position })}
++      onCancel={onCancel}
++      okText="移动"
++      cancelText="取消"
++      confirmLoading={confirmLoading}
++      okButtonProps={{ disabled: disabled && !confirmLoading }}
++      destroyOnClose
++    >
++      <div className="space-y-3 pt-1">
++        <div>
++          <p className="mb-1 text-xs text-muted-foreground">目标页</p>
++          <Select
++            aria-label="目标页"
++            value={targetPage}
++            onChange={setTargetPage}
++            className="w-full"
++            options={pageOptions}
++            disabled={disabled}
++          />
++        </div>
++        <div>
++          <p className="mb-1 text-xs text-muted-foreground">页内位置</p>
++          <Select
++            aria-label="页内位置"
++            value={position}
++            onChange={setPosition}
++            className="w-full"
++            options={POSITION_OPTIONS}
++            disabled={disabled}
++          />
++        </div>
++        <p className="text-xs text-muted-foreground">
++          精确到某张卡的前后，请直接在列表中拖拽；此处仅支持整页页首/页尾移动。
++        </p>
++      </div>
++    </Modal>
++  );
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index bd503f2e5..8245ffc30 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -368,6 +368,10 @@ export interface paths {
+          *     change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
+          *     ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
+          *     ``?type=`` 等值匹配表达不了 NULL，语义互斥。
++         *
++         *     change 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传
++         *     ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
++         *     （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
+          */
+         get: operations["list_workspaces_api_workspaces_get"];
+         put?: never;
+@@ -474,6 +478,35 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/move": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Move Workspace
++         * @description 拖拽排序移动工作区（task-02 / FR-02，change 2026-09-14-workspace-drag-sort）。
++         *
++         *     顺序按 user_id 持久化（每人一套，D-001@v1）；锚点三选一校验在
++         *     ``WorkspaceMoveRequest``（422 HTTP_422_MOVE_ANCHOR_CONFLICT，中文文案）。
++         *     鉴权对齐 list 端点现状（require_permission_any(WORKSPACE_READ)）；非平台
++         *     管理员行级可见校验 workspace_id ∈ allowed_workspace_ids（复用 list 端点既有
++         *     模式），不可见 403 HTTP_403_PERMISSION_DENIED；管理员 allowed_ids=None 全量。
++         *     排序/backfill/锚点解析全在 service.move_workspace（task-03，签名钉死不自增
++         *     参数），本层只做契约接线；响应 ``rank`` 供前端 floor(rank/page_size) 换算
++         *     目标页（R-07）。
++         */
++        post: operations["move_workspace_api_workspaces__workspace_id__move_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}": {
+         parameters: {
+             query?: never;
+@@ -25484,6 +25517,39 @@ export interface components {
+             /** Is Current User */
+             is_current_user: boolean;
+         };
++        /**
++         * WorkspaceMoveRequest
++         * @description Request body for ``POST /api/workspaces/{workspace_id}/move``。
++         *
++         *     锚点三选一（D-013@v1）：``after_id`` / ``before_id`` / ``to`` 恰好携带一个
++         *     ——同缺、同传多个或 ``after_id == before_id`` 同值均 422
++         *     ``HTTP_422_MOVE_ANCHOR_CONFLICT``。无 null 置顶语义（Grill F-03：pydantic
++         *     无法区分缺省与 null，置顶场景由「移动到…」弹窗的页首锚点表达）。
++         */
++        WorkspaceMoveRequest: {
++            /** After Id */
++            after_id?: string | null;
++            /** Before Id */
++            before_id?: string | null;
++            /** To */
++            to?: ("next_page_head" | "prev_page_tail") | null;
++            /**
++             * Page Size
++             * @default 12
++             */
++            page_size: number;
++        };
++        /**
++         * WorkspaceMoveResponse
++         * @description Response body for ``POST /api/workspaces/{workspace_id}/move``（*Response 后缀惯例，Grill F-10）。
++         */
++        WorkspaceMoveResponse: {
++            workspace: components["schemas"]["WorkspaceRead"];
++            /** Rebalanced */
++            rebalanced: boolean;
++            /** Rank */
++            rank: number;
++        };
+         /**
+          * WorkspaceProbeItem
+          * @description 单工作区探测结果项（``POST /api/workspaces/probe`` 响应元素）。
+@@ -26650,6 +26716,41 @@ export interface operations {
+             };
+         };
+     };
++    move_workspace_api_workspaces__workspace_id__move_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["WorkspaceMoveRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["WorkspaceMoveResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_workspace_api_workspaces__workspace_id__get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/workspaces.ts b/frontend/src/lib/workspaces.ts
+index 8d5190bbb..035095cca 100644
+--- a/frontend/src/lib/workspaces.ts
++++ b/frontend/src/lib/workspaces.ts
+@@ -9,6 +9,10 @@
+  * （omit=不改 / null=清空，D-005@v1）；列表参数补 unclassified（type IS NULL
+  * 谓词筛选，D-005@v1——与 type 互斥，同传后端 422）。type 联合从
+  * lib/workspace-types.ts 派生（其源头是 gen:types 的 WorkspaceCreate.type）。
++ *
++ * task-07 / 2026-09-14-workspace-drag-sort：新增 moveWorkspace 封装（FR-04 /
++ * D-010@v1，POST /api/workspaces/{id}/move）与 WORKSPACE_PAGE_SIZE 单一源
++ * 分页常量（R-08，与后端 move 请求 page_size 默认值同源）。
+  */
+ import { apiFetch } from "@/lib/api";
+ import type { SpecStrategy } from "@/lib/spec-workspaces";
+@@ -28,6 +32,13 @@ export type Workspace = Schemas["WorkspaceRead"];
+ 
+ export type WorkspaceListResponse = Schemas["WorkspaceListResponse"];
+ 
++// task-07 / 2026-09-14-workspace-drag-sort：move 端点生成类型（task-06
++// gen:types 产物派生，禁手写）。moveWorkspace 入参用窄约束行内类型
++// （见下方——对齐本文件「响应类型生成派生、请求输入窄约束」惯例）。
++export type WorkspaceMoveRequest = Schemas["WorkspaceMoveRequest"];
++
++export type WorkspaceMoveResponse = Schemas["WorkspaceMoveResponse"];
++
+ // ── Topology types ──
+ 
+ export type TopologyNode = Schemas["TopologyNode"];
+@@ -87,6 +98,43 @@ export async function listWorkspaces(
+   });
+ }
+ 
++// ── Move（拖拽排序，2026-09-14-workspace-drag-sort task-07 / FR-04、D-010@v1）──
++
++/**
++ * 工作区列表分页大小单一源常量（R-08 防漂移）——与后端 move 端点请求
++ * WorkspaceMoveRequest.page_size 的默认值（12）同源。page.tsx 本地
++ * PAGE_SIZE 的替换接线归 task-09，本常量为其目标单一源。
++ */
++export const WORKSPACE_PAGE_SIZE = 12;
++
++/**
++ * 移动工作区排序锚点（POST /api/workspaces/{id}/move）。
++ *
++ * 锚点三选一：after_id / before_id / to 恰好携带一个——同缺、同传多个或
++ * after_id == before_id 后端均 422（见 api-types WorkspaceMoveRequest
++ * 描述，D-013@v1）。可选字段缺省不进请求体（对齐 scanGenerate 条件展开
++ * 惯例）；page_size 缺省时后端以默认值 12 兜底。
++ */
++export async function moveWorkspace(
++  id: string,
++  body: {
++    after_id?: string;
++    before_id?: string;
++    to?: "next_page_head" | "prev_page_tail";
++    page_size?: number;
++  },
++): Promise<WorkspaceMoveResponse> {
++  return apiFetch<WorkspaceMoveResponse>(`/api/workspaces/${id}/move`, {
++    method: "POST",
++    json: {
++      ...(body.after_id ? { after_id: body.after_id } : {}),
++      ...(body.before_id ? { before_id: body.before_id } : {}),
++      ...(body.to ? { to: body.to } : {}),
++      ...(body.page_size != null ? { page_size: body.page_size } : {}),
++    },
++  });
++}
++
+ // Schemas 派生区 ────────────────────────────────────────────────
+ 
+ /**

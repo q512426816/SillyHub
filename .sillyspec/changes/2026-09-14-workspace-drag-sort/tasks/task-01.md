@@ -12,10 +12,10 @@ requirement_ids: [FR-01]
 decision_ids: [D-001@v1, D-011@v1]
 allowed_paths:
   - backend/app/modules/workspace/model.py
-  - NEW:backend/migrations/versions/<rev>_create_user_workspace_orders.py
+  - NEW:backend/migrations/versions/20260914100000_create_user_workspace_orders.py
 target_files:
   - backend/app/modules/workspace/model.py
-  - NEW:backend/migrations/versions/<rev>_create_user_workspace_orders.py
+  - NEW:backend/migrations/versions/20260914100000_create_user_workspace_orders.py
 goal: >
   建立每人一套（user-scoped）拖拽顺序的数据底座：新增 user_workspace_orders 表
   （UserWorkspaceOrder 模型 + 手写 Alembic 迁移 + 唯一/排序双索引），为 task-03
@@ -23,7 +23,7 @@ goal: >
   D-001@v1/D-011@v1 方案 A 落地第一步）。
 implementation:
   - model.py 仿 Workspace 显式 sa_column 风格新增 UserWorkspaceOrder(BaseModel, table=True)——id（Uuid 主键 default_factory=uuid.uuid4）、user_id（Uuid NOT NULL FK users.id）、workspace_id（Uuid NOT NULL FK workspaces.id）、sort_position（Float NOT NULL，对应 DDL DOUBLE PRECISION）、created_at/updated_at（DateTime(timezone=True) NOT NULL，写法照抄 Workspace 同名字段）；表名 user_workspace_orders，__table_args__ 声明 ux_uwo_user_workspace 唯一索引 (user_id, workspace_id) 与 ix_uwo_user_position 普通索引 (user_id, sort_position)
-  - 手写迁移 backend/migrations/versions/<rev>_create_user_workspace_orders.py（仿 p0la1ud1t006_create_policy_audit_log.py 的手写结构；revision id 执行时确定且避开已占用值，down_revision 指向当时 head 保持单链）——upgrade 用 op.create_table 按 design「数据模型」DDL 落 6 列（id/user_id/workspace_id/sort_position=sa.Float/created_at/updated_at=sa.DateTime(timezone=True)）+ op.create_index ux_uwo_user_workspace（unique=True）与 ix_uwo_user_position；downgrade 按逆序 drop_index 再 drop_table
+  - 手写迁移 backend/migrations/versions/20260914100000_create_user_workspace_orders.py（仿 p0la1ud1t006_create_policy_audit_log.py 的手写结构；revision id 执行时确定且避开已占用值，down_revision 指向当时 head 保持单链）——upgrade 用 op.create_table 按 design「数据模型」DDL 落 6 列（id/user_id/workspace_id/sort_position=sa.Float/created_at/updated_at=sa.DateTime(timezone=True)）+ op.create_index ux_uwo_user_workspace（unique=True）与 ix_uwo_user_position；downgrade 按逆序 drop_index 再 drop_table
   - 模型与迁移的列名/索引名严格一致（注释与实现一致）；不写任何存量数据回填（首拖惰性物化归 task-03，D-006@v2）
 acceptance:
   - 表结构与 design「数据模型」DDL 一致——6 列齐全、sort_position 为双精度浮点非空、ux_uwo_user_workspace 唯一索引 (user_id, workspace_id)、ix_uwo_user_position 索引 (user_id, sort_position)

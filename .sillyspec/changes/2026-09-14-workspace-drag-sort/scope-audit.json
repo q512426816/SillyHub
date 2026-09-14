@@ -1,0 +1,172 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9890a20acc566c8af6d82e8999f657e513f5daca",
+  "totals": {
+    "files": 19,
+    "additions": 3271,
+    "deletions": 49
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/workspace/model.py",
+      "additions": 65,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/router.py",
+      "additions": 58,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/schema.py",
+      "additions": 54,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/service.py",
+      "additions": 493,
+      "deletions": 8,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/workspace/tests/test_move_order.py",
+      "additions": 690,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/migrations/versions/20260914100000_create_user_workspace_orders.py",
+      "additions": 73,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 129,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/package.json",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/pnpm-lock.yaml",
+      "additions": 56,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx",
+      "additions": 300,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/page.tsx",
+      "additions": 169,
+      "deletions": 33,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/__tests__/workspace-card.test.tsx",
+      "additions": 75,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/__tests__/workspace-drag-grid.test.tsx",
+      "additions": 395,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/workspace-card.tsx",
+      "additions": 55,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/workspace-drag-grid.tsx",
+      "additions": 386,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/workspace-move-dialog.tsx",
+      "additions": 122,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 101,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/workspaces.ts",
+      "additions": 48,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "NEW:backend/migrations/versions/<rev>_create_user_workspace_orders.py",
+      "planned": "新增",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "08ecd0919d44731dc2efbffcf522a8e00aa39eeaee579cbe211b287fb6b77e0c",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-14T17:11:14.471Z"
+}
