@@ -9,6 +9,10 @@
  * （omit=不改 / null=清空，D-005@v1）；列表参数补 unclassified（type IS NULL
  * 谓词筛选，D-005@v1——与 type 互斥，同传后端 422）。type 联合从
  * lib/workspace-types.ts 派生（其源头是 gen:types 的 WorkspaceCreate.type）。
+ *
+ * task-07 / 2026-09-14-workspace-drag-sort：新增 moveWorkspace 封装（FR-04 /
+ * D-010@v1，POST /api/workspaces/{id}/move）与 WORKSPACE_PAGE_SIZE 单一源
+ * 分页常量（R-08，与后端 move 请求 page_size 默认值同源）。
  */
 import { apiFetch } from "@/lib/api";
 import type { SpecStrategy } from "@/lib/spec-workspaces";
@@ -27,6 +31,13 @@ export type OwnerRead = Schemas["app__modules__workspace__schema__OwnerRead"];
 export type Workspace = Schemas["WorkspaceRead"];
 
 export type WorkspaceListResponse = Schemas["WorkspaceListResponse"];
+
+// task-07 / 2026-09-14-workspace-drag-sort：move 端点生成类型（task-06
+// gen:types 产物派生，禁手写）。moveWorkspace 入参用窄约束行内类型
+// （见下方——对齐本文件「响应类型生成派生、请求输入窄约束」惯例）。
+export type WorkspaceMoveRequest = Schemas["WorkspaceMoveRequest"];
+
+export type WorkspaceMoveResponse = Schemas["WorkspaceMoveResponse"];
 
 // ── Topology types ──
 
@@ -84,6 +95,43 @@ export async function listWorkspaces(
 ): Promise<WorkspaceListResponse> {
   return apiFetch<WorkspaceListResponse>("/api/workspaces", {
     query: params as Record<string, string | number | boolean | undefined>,
+  });
+}
+
+// ── Move（拖拽排序，2026-09-14-workspace-drag-sort task-07 / FR-04、D-010@v1）──
+
+/**
+ * 工作区列表分页大小单一源常量（R-08 防漂移）——与后端 move 端点请求
+ * WorkspaceMoveRequest.page_size 的默认值（12）同源。page.tsx 本地
+ * PAGE_SIZE 的替换接线归 task-09，本常量为其目标单一源。
+ */
+export const WORKSPACE_PAGE_SIZE = 12;
+
+/**
+ * 移动工作区排序锚点（POST /api/workspaces/{id}/move）。
+ *
+ * 锚点三选一：after_id / before_id / to 恰好携带一个——同缺、同传多个或
+ * after_id == before_id 后端均 422（见 api-types WorkspaceMoveRequest
+ * 描述，D-013@v1）。可选字段缺省不进请求体（对齐 scanGenerate 条件展开
+ * 惯例）；page_size 缺省时后端以默认值 12 兜底。
+ */
+export async function moveWorkspace(
+  id: string,
+  body: {
+    after_id?: string;
+    before_id?: string;
+    to?: "next_page_head" | "prev_page_tail";
+    page_size?: number;
+  },
+): Promise<WorkspaceMoveResponse> {
+  return apiFetch<WorkspaceMoveResponse>(`/api/workspaces/${id}/move`, {
+    method: "POST",
+    json: {
+      ...(body.after_id ? { after_id: body.after_id } : {}),
+      ...(body.before_id ? { before_id: body.before_id } : {}),
+      ...(body.to ? { to: body.to } : {}),
+      ...(body.page_size != null ? { page_size: body.page_size } : {}),
+    },
   });
 }
 

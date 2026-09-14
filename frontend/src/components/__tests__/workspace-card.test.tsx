@@ -289,3 +289,78 @@ describe("WorkspaceCard 工作区类型徽标 (task-06)", () => {
     expect(badge.className).toContain("text-zinc-500");
   });
 });
+
+// task-08/task-09（2026-09-14-workspace-drag-sort / FR-04 / R-06）：拖拽手柄挂点。
+// 「挂点默认不渲染」是兼容契约——WorkspacesPage（经 WorkspaceDragGrid 注入）以外的
+// 其它调用方零改动；注入 dragHandleProps（父级 useSortable attributes/listeners + ref）
+// 时卡片左缘渲染 ⠿ 手柄，dragHandleNode（「移动到…」入口，task-09 接线）渲染于
+// 同一挂点手柄下方；挂点内点击不冒泡成整卡 onActivate。
+describe("WorkspaceCard 拖拽手柄挂点 (task-08 / task-10 回归)", () => {
+  it("不传 dragHandleProps/dragHandleNode：挂点整体不渲染（⠿ 手柄不存在）", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-nohandle" })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    expect(screen.queryByTitle("拖拽排序")).not.toBeInTheDocument();
+    expect(screen.queryByText("⠿")).not.toBeInTheDocument();
+    // 卡片不携带挂点 group/card 定位类——其余调用方渲染结果与现状完全一致。
+    expect(screen.getByRole("article").className).not.toContain("group/card");
+  });
+
+  it("只传 dragHandleNode（无 dragHandleProps）：挂点渲染子节点但无 ⠿ 手柄", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-node-only" })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+        dragHandleNode={<span data-testid="move-entry">移动到…</span>}
+      />,
+    );
+    expect(screen.getByTestId("move-entry")).toBeInTheDocument();
+    expect(screen.queryByTitle("拖拽排序")).not.toBeInTheDocument();
+  });
+
+  it("注入 dragHandleProps：渲染 ⠿ 手柄，注入类与默认手柄观感合并（禁用态灰显可见）", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-handle" })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+        dragHandleProps={{
+          className: "cursor-not-allowed !opacity-40",
+          "aria-disabled": true,
+        }}
+      />,
+    );
+    const handle = screen.getByTitle("拖拽排序");
+    expect(handle.textContent).toBe("⠿");
+    // 注入的禁用态类生效（D-005@v2 可见灰显）；cn=twMerge 同组冲突后者覆盖——
+    // cursor-grab 被 cursor-not-allowed 覆盖、opacity-0 被 !opacity-40 覆盖。
+    expect(handle.className).toContain("cursor-not-allowed");
+    expect(handle.className).toContain("!opacity-40");
+    expect(handle.className).not.toMatch(/(^|\s)cursor-grab(\s|$)/);
+    expect(handle.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("挂点内点击不冒泡触发整卡 onActivate（卡体点击与挂点操作互不冲突）", () => {
+    const onActivate = vi.fn();
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-stop-handle" })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+        onActivate={onActivate}
+        dragHandleNode={
+          <button type="button" title="移动到指定页…" onClick={() => {}}>
+            移动
+          </button>
+        }
+      />,
+    );
+    fireEvent.click(screen.getByTitle("移动到指定页…"));
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+});

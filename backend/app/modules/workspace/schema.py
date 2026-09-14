@@ -7,8 +7,9 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.errors import AppError
 from app.modules.workspace.constants import WorkspaceTypeLiteral
 
 WorkspaceStatusLiteral = Literal["pending", "active", "archived", "deleted"]
@@ -20,6 +21,11 @@ WorkspacePatchStatusLiteral = Literal["active", "archived"]
 # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
 # daemon-client workspace 创建时用户可选；决定源项目已有 .sillyspec 如何进入平台。
 SpecStrategyLiteral = Literal["platform-managed", "repo-mirrored", "repo-native"]
+# 拖拽排序移动目标（change 2026-09-14-workspace-drag-sort / D-012@v1）：边缘投放带
+# 专用枚举——跨页落位由持有全量顺序的服务端在默认视图序列上解析成 id 锚点，
+# 客户端算不出相邻页边界卡（Grill F-01 修订）。Literal 校验让非法值在 Pydantic
+# 层 422 并进 OpenAPI enum（前端 gen:types 消费，task-06 前置）。
+WorkspaceMoveTargetLiteral = Literal["next_page_head", "prev_page_tail"]
 
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$")
 
@@ -243,6 +249,53 @@ class WorkspaceRead(BaseModel):
 class WorkspaceListResponse(BaseModel):
     items: list[WorkspaceRead]
     total: int
+
+
+# ── 拖拽排序 move DTO（change 2026-09-14-workspace-drag-sort task-02 / FR-02）──
+
+
+class WorkspaceMoveRequest(BaseModel):
+    """Request body for ``POST /api/workspaces/{workspace_id}/move``。
+
+    锚点三选一（D-013@v1）：``after_id`` / ``before_id`` / ``to`` 恰好携带一个
+    ——同缺、同传多个或 ``after_id == before_id`` 同值均 422
+    ``HTTP_422_MOVE_ANCHOR_CONFLICT``。无 null 置顶语义（Grill F-03：pydantic
+    无法区分缺省与 null，置顶场景由「移动到…」弹窗的页首锚点表达）。
+    """
+
+    # 放到锚点卡之后（页内拖拽落位 / 弹窗向下·页尾）
+    after_id: uuid.UUID | None = None
+    # 放到锚点卡之前（弹窗向上·页首/页尾）
+    before_id: uuid.UUID | None = None
+    # 边缘投放带专用：服务端默认视图序列解析（D-012@v1）
+    to: WorkspaceMoveTargetLiteral | None = None
+    # ``to`` 路径专用分页宽度，与前端 PAGE_SIZE 常量同源（R-08 接口写明耦合）
+    page_size: int = 12
+
+    @model_validator(mode="after")
+    def _require_exactly_one_anchor(self) -> WorkspaceMoveRequest:
+        # 恰一非空：``after_id == before_id`` 同值属"同传"（计数=2），被同一条件
+        # 覆盖。抛 AppError 而非 ValueError——pydantic 不包装非 ValueError 异常，
+        # 直接冒泡到全局 handler 出 422 + 业务 code + 中文文案（对齐 router.py
+        # 既有 AppError 422 惯例；错误文案中文守护 test_error_message_l10n）。
+        if sum(anchor is not None for anchor in (self.after_id, self.before_id, self.to)) != 1:
+            raise AppError(
+                "移动锚点 after_id / before_id / to 必须恰好提供一个，不能缺省或同时携带多个。",
+                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
+                http_status=422,
+            )
+        return self
+
+
+class WorkspaceMoveResponse(BaseModel):
+    """Response body for ``POST /api/workspaces/{workspace_id}/move``（*Response 后缀惯例，Grill F-10）。"""
+
+    workspace: WorkspaceRead
+    # 本次是否触发整集重排（浮点精度耗尽诊断，R-01）
+    rebalanced: bool
+    # 移动后该卡在默认视图序列中的 0 基序号（前端 floor(rank/page_size) 换算
+    # 目标页驱动落带自动翻页，R-07）；sort_position 不出现在任何 DTO。
+    rank: int
 
 
 def slugify(name: str) -> str:

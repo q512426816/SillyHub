@@ -37,6 +37,8 @@ from app.modules.workspace.schema import (
     ScanResponse,
     WorkspaceCreate,
     WorkspaceListResponse,
+    WorkspaceMoveRequest,
+    WorkspaceMoveResponse,
     WorkspaceProbeItem,
     WorkspaceProbeRequest,
     WorkspaceRead,
@@ -289,6 +291,10 @@ async def list_workspaces(
     change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
     ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
     ``?type=`` 等值匹配表达不了 NULL，语义互斥。
+
+    change 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传
+    ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
+    （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
     """
     if unclassified and workspace_type is not None:
         raise AppError(
@@ -308,6 +314,7 @@ async def list_workspaces(
             status=status_filter,
             user_id=user_id,
             allowed_workspace_ids=None,
+            order_user_id=user.id,
         )
     else:
         allowed = await allowed_workspace_ids(
@@ -323,11 +330,62 @@ async def list_workspaces(
             status=status_filter,
             user_id=None,
             allowed_workspace_ids=allowed,
+            order_user_id=user.id,
         )
 
     return WorkspaceListResponse(
         items=[_workspace_read_with_owner(ws, owner) for ws, owner in rows],
         total=total,
+    )
+
+
+@router.post(
+    "/{workspace_id}/move",
+    response_model=WorkspaceMoveResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def move_workspace(
+    workspace_id: uuid.UUID,
+    payload: WorkspaceMoveRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
+) -> WorkspaceMoveResponse:
+    """拖拽排序移动工作区（task-02 / FR-02，change 2026-09-14-workspace-drag-sort）。
+
+    顺序按 user_id 持久化（每人一套，D-001@v1）；锚点三选一校验在
+    ``WorkspaceMoveRequest``（422 HTTP_422_MOVE_ANCHOR_CONFLICT，中文文案）。
+    鉴权对齐 list 端点现状（require_permission_any(WORKSPACE_READ)）；非平台
+    管理员行级可见校验 workspace_id ∈ allowed_workspace_ids（复用 list 端点既有
+    模式），不可见 403 HTTP_403_PERMISSION_DENIED；管理员 allowed_ids=None 全量。
+    排序/backfill/锚点解析全在 service.move_workspace（task-03，签名钉死不自增
+    参数），本层只做契约接线；响应 ``rank`` 供前端 floor(rank/page_size) 换算
+    目标页（R-07）。
+    """
+    allowed: list[uuid.UUID] | None = None
+    if not user.is_platform_admin:
+        allowed = await allowed_workspace_ids(
+            session, user_id=user.id, permission=Permission.WORKSPACE_READ
+        )
+        if workspace_id not in allowed:
+            raise AppError(
+                "无权访问该工作区，无法移动排序。",
+                code="HTTP_403_PERMISSION_DENIED",
+                http_status=403,
+            )
+    service = WorkspaceService(session)
+    workspace, rebalanced, rank = await service.move_workspace(
+        workspace_id=workspace_id,
+        user_id=user.id,
+        after_id=payload.after_id,
+        before_id=payload.before_id,
+        to=payload.to,
+        page_size=payload.page_size,
+        allowed_ids=allowed,
+    )
+    return WorkspaceMoveResponse(
+        workspace=WorkspaceRead.model_validate(workspace),
+        rebalanced=rebalanced,
+        rank=rank,
     )
 
 

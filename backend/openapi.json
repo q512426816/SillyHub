@@ -588,7 +588,7 @@
           "workspace"
         ],
         "summary": "List Workspaces",
-        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。",
+        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。\n\nchange 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传\n``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序\n（每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。",
         "operationId": "list_workspaces_api_workspaces_get",
         "parameters": [
           {
@@ -872,6 +872,60 @@
                   },
                   "type": "array",
                   "title": "Response List My Bindings Endpoint Api Workspaces My Bindings Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/move": {
+      "post": {
+        "tags": [
+          "workspace"
+        ],
+        "summary": "Move Workspace",
+        "description": "拖拽排序移动工作区（task-02 / FR-02，change 2026-09-14-workspace-drag-sort）。\n\n顺序按 user_id 持久化（每人一套，D-001@v1）；锚点三选一校验在\n``WorkspaceMoveRequest``（422 HTTP_422_MOVE_ANCHOR_CONFLICT，中文文案）。\n鉴权对齐 list 端点现状（require_permission_any(WORKSPACE_READ)）；非平台\n管理员行级可见校验 workspace_id ∈ allowed_workspace_ids（复用 list 端点既有\n模式），不可见 403 HTTP_403_PERMISSION_DENIED；管理员 allowed_ids=None 全量。\n排序/backfill/锚点解析全在 service.move_workspace（task-03，签名钉死不自增\n参数），本层只做契约接线；响应 ``rank`` 供前端 floor(rank/page_size) 换算\n目标页（R-07）。",
+        "operationId": "move_workspace_api_workspaces__workspace_id__move_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMoveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -70584,6 +70638,80 @@
           "is_current_user"
         ],
         "title": "WorkspaceMemberView"
+      },
+      "WorkspaceMoveRequest": {
+        "properties": {
+          "after_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Id"
+          },
+          "before_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Id"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "next_page_head",
+                  "prev_page_tail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 12
+          }
+        },
+        "type": "object",
+        "title": "WorkspaceMoveRequest",
+        "description": "Request body for ``POST /api/workspaces/{workspace_id}/move``。\n\n锚点三选一（D-013@v1）：``after_id`` / ``before_id`` / ``to`` 恰好携带一个\n——同缺、同传多个或 ``after_id == before_id`` 同值均 422\n``HTTP_422_MOVE_ANCHOR_CONFLICT``。无 null 置顶语义（Grill F-03：pydantic\n无法区分缺省与 null，置顶场景由「移动到…」弹窗的页首锚点表达）。"
+      },
+      "WorkspaceMoveResponse": {
+        "properties": {
+          "workspace": {
+            "$ref": "#/components/schemas/WorkspaceRead"
+          },
+          "rebalanced": {
+            "type": "boolean",
+            "title": "Rebalanced"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace",
+          "rebalanced",
+          "rank"
+        ],
+        "title": "WorkspaceMoveResponse",
+        "description": "Response body for ``POST /api/workspaces/{workspace_id}/move``（*Response 后缀惯例，Grill F-10）。"
       },
       "WorkspaceProbeItem": {
         "properties": {

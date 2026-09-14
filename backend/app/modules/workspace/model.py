@@ -11,7 +11,18 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Text, Uuid, text
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+    text,
+)
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -209,6 +220,59 @@ class PpmProjectWorkspace(BaseModel, table=True):
             primary_key=True,
             nullable=False,
         ),
+    )
+
+
+class UserWorkspaceOrder(BaseModel, table=True):
+    """Per-user drag-sort position of one workspace (user-scoped).
+
+    每人一套的工作区拖拽顺序存储（change ``2026-09-14-workspace-drag-sort``，
+    D-001@v1/D-011@v1 方案 A）：一行 = 某用户对某工作区的排序位置。
+    ``sort_position`` 为浮点中点键（``Float`` → PG ``DOUBLE PRECISION``），
+    列表按 ``ASC`` 消费；无行 = 未物化（新建工作区/未拖拽用户），由列表 SQL
+    的 NULLS 分支兜底回 ``created_at DESC`` 现状（D-004@v1）。排序行惰性
+    物化归 move 服务首拖 backfill（D-006@v2），本表零存量回填；软删
+    workspace 的行保留（复活回原位），不做级联清理——FK 不带 ondelete。
+
+    - ``ux_uwo_user_workspace`` 唯一索引：一人一工作区至多一行（upsert 依据）
+    - ``ix_uwo_user_position`` 普通索引：列表 LEFT JOIN 的
+      (user_id, sort_position) 排序热路径
+    """
+
+    __tablename__ = "user_workspace_orders"
+    __table_args__ = (
+        Index("ux_uwo_user_workspace", "user_id", "workspace_id", unique=True),
+        Index("ix_uwo_user_position", "user_id", "sort_position"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id"),
+            nullable=False,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id"),
+            nullable=False,
+        ),
+    )
+    sort_position: float = Field(
+        sa_column=Column(Float, nullable=False),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
 

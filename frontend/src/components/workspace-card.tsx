@@ -39,6 +39,16 @@ import { cn } from "@/lib/utils";
  */
 export type DaemonBadgeStatus = "online" | "offline" | "unbound";
 
+/**
+ * task-08 / 2026-09-14-workspace-drag-sort / FR-04：拖拽手柄注入属性——
+ * 父级 useSortable 的 attributes/listeners（+ ref 指向 setActivatorNodeRef，
+ * HTMLAttributes 不含 ref，显式放宽）。className 由本组件与注入方 cn 合并
+ * （禁用态注入 cursor-not-allowed / !opacity-40 覆盖默认手柄观感）。
+ */
+export type WorkspaceCardDragHandleProps = React.HTMLAttributes<HTMLElement> & {
+  ref?: React.Ref<HTMLElement>;
+};
+
 interface Props {
   workspace: Workspace;
   boundRuntime?: DaemonRuntimeRead | null;
@@ -64,6 +74,16 @@ interface Props {
    * 不传时卡片不可点击（兼容旧调用方）。
    */
   onActivate?: () => void;
+  /**
+   * task-08 / 2026-09-14-workspace-drag-sort / FR-04 / R-06：可选拖拽手柄挂点。
+   * dragHandleProps 携带父级 useSortable 的 attributes/listeners（ref→
+   * setActivatorNodeRef）时，卡片左缘悬浮位渲染默认 ⠿ 手柄（仅手柄承载拖拽，
+   * 卡体点击行为零改动）；dragHandleNode 提供时渲染于同一挂点手柄下方
+   * （如「移动到…」入口，task-09 接线）。两者缺省时挂点整体不渲染，
+   * 其它调用方零改动。
+   */
+  dragHandleProps?: WorkspaceCardDragHandleProps;
+  dragHandleNode?: React.ReactNode;
 }
 
 export function WorkspaceCard({
@@ -75,6 +95,8 @@ export function WorkspaceCard({
   onChanged,
   onEditAlias,
   onActivate,
+  dragHandleProps,
+  dragHandleNode,
 }: Props) {
   const [busy, setBusy] = useState<"rescan" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,16 +166,49 @@ export function WorkspaceCard({
   };
   const stopFooter = (e: React.MouseEvent) => e.stopPropagation();
 
+  // task-08 / FR-04：手柄注入 props 拆解（ref/className 单列以便与默认手柄样式合并）。
+  const { ref: handleRef, className: handleClassName, ...handleRest } =
+    dragHandleProps ?? {};
+
   return (
     <article
       onClick={onActivate ? handleCardClick : undefined}
       className={cn(
         // ql-20260820-010 对照原型 .ws-card:hover 三件套:
         // 抬升 -4px + 紫调大阴影(shadow-lg 主题 token) + 边框加深(brand-300)
+        // task-08: 手柄挂点注入时补 group/card + relative（悬浮定位 + hover 显隐），
+        // 缺省不加——其余调用方渲染结果与现状完全一致。
         "flex flex-col rounded-lg border bg-card shadow-sm transition-[box-shadow,transform,border-color] duration-200 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg",
         onActivate && "cursor-pointer",
+        (dragHandleProps || dragHandleNode) && "group/card relative",
       )}
     >
+      {/* task-08 / FR-04 / R-06：拖拽手柄挂点（对照原型 ⠿ 手柄）——仅 dragHandleProps
+          /dragHandleNode 注入时渲染；挂点内 click 不冒泡成整卡 onActivate（dnd 的
+          指针/键盘监听在元素自身，此处只截 click）。缺省时零 DOM 差异。 */}
+      {(dragHandleProps || dragHandleNode) && (
+        <div
+          className="absolute -left-3 top-2 z-10 flex flex-col items-stretch"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {dragHandleProps && (
+            <span
+              ref={handleRef}
+              {...handleRest}
+              title="拖拽排序"
+              className={cn(
+                // 对照原型 .handle：半出卡片左缘的 ⠿ 手柄，默认半隐、
+                // 卡 hover/手柄 hover/键盘聚焦全显；色走语义类（brand/border）。
+                "flex h-10 w-5 cursor-grab select-none items-center justify-center rounded-l-md border border-r-0 border-border bg-card text-sm text-muted-foreground opacity-0 transition-opacity duration-100 group-hover/card:opacity-60 hover:!opacity-100 hover:text-brand-600 focus-visible:opacity-100 active:cursor-grabbing",
+                handleClassName,
+              )}
+            >
+              ⠿
+            </span>
+          )}
+          {dragHandleNode}
+        </div>
+      )}
       <header className="flex items-start justify-between gap-2 px-4 pt-3.5">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2">

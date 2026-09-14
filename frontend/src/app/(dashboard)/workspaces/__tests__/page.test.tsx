@@ -10,7 +10,7 @@
  * WorkspaceCard / WorkspaceBindingDialog / WorkspaceScanDialog 内部行为由各自单测覆盖，
  * 这里 mock 为 stub（透传关键 props）以隔离 page 层分流逻辑。
  */
-import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -93,6 +93,7 @@ vi.mock("@/lib/workspace-daemon-status", () => ({
 const workspacesApi = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
   updateWorkspace: vi.fn(),
+  moveWorkspace: vi.fn(),
 }));
 vi.mock("@/lib/workspaces", async () => {
   const actual = await vi.importActual<typeof import("@/lib/workspaces")>("@/lib/workspaces");
@@ -100,6 +101,7 @@ vi.mock("@/lib/workspaces", async () => {
     ...actual,
     listWorkspaces: workspacesApi.listWorkspaces,
     updateWorkspace: workspacesApi.updateWorkspace,
+    moveWorkspace: workspacesApi.moveWorkspace,
   };
 });
 
@@ -134,8 +136,70 @@ vi.mock("@/stores/session", () => ({
     sel({ user: { is_platform_admin: false } }),
 }));
 
+// ── @/lib/errors mock（task-09：handleRequestMove 用 notify.warning 拦截筛选态、
+//    move 流程用 notify.success/error——hoisted 暴露给断言）──────────────────────
+const notifyMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+}));
 vi.mock("@/lib/errors", () => ({
-  useNotify: () => ({ success: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() }),
+  useNotify: () => notifyMock,
+}));
+
+// ── WorkspaceDragGrid stub（task-10 增补）：透传 items/page/total/dragDisabled/
+//    onRequestMove/onMoved 暴露给断言；卡片经既有 WorkspaceCard stub 逐张渲染
+//    （cardProps 由 page 组装），保持旧用例 ws-card-*/card-activate 断言不变。──
+const gridMock = vi.hoisted(() => ({
+  lastProps: null as null | Record<string, unknown>,
+  /** 模拟「移动到…」入口点击的卡片下标（items[moveIndex]） */
+  moveIndex: 0,
+}));
+vi.mock("@/components/workspace-drag-grid", async () => {
+  const card = await import("@/components/workspace-card");
+  return {
+    WorkspaceDragGrid: (props: any) => {
+      gridMock.lastProps = props;
+      return (
+        <div data-testid="drag-grid">
+          {props.items.map((w: any) => (
+            <card.WorkspaceCard key={w.id} workspace={w} {...props.cardProps(w)} />
+          ))}
+          <button
+            data-testid="grid-move-entry"
+            onClick={() => props.onRequestMove?.(props.items[gridMock.moveIndex ?? 0])}
+          >
+            模拟移动到入口
+          </button>
+        </div>
+      );
+    },
+  };
+});
+
+// ── WorkspaceMoveDialog stub（task-10 增补）：受控弹窗透传 open/workspace/
+//    currentPage/totalPages/disabled；确认按钮按 confirmTarget 触发 onConfirm
+//    （四象限/自锚提交流程逻辑在 page.tsx handleMoveConfirm，此处只做透传）。──
+const moveDialogMock = vi.hoisted(() => ({
+  lastProps: null as null | Record<string, unknown>,
+  confirmTarget: { page: 0, position: "first" as "first" | "last" },
+}));
+vi.mock("@/components/workspace-move-dialog", () => ({
+  WorkspaceMoveDialog: (props: any) => {
+    moveDialogMock.lastProps = props;
+    if (!props.open) return null;
+    return (
+      <div data-testid="move-dialog">
+        <button
+          data-testid="move-dialog-confirm"
+          onClick={() => props.onConfirm(moveDialogMock.confirmTarget)}
+        >
+          确认移动
+        </button>
+      </div>
+    );
+  },
 }));
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -181,10 +245,21 @@ beforeEach(() => {
   statusApi.statusMap = {};
   workspacesApi.listWorkspaces.mockResolvedValue({ items: [], total: 0 });
   workspacesApi.updateWorkspace.mockResolvedValue(mkWorkspace("x"));
+  // task-10：moveWorkspace 默认成功（rank 可按用例 mockResolvedValueOnce 覆盖）。
+  workspacesApi.moveWorkspace.mockResolvedValue({
+    workspace: mkWorkspace("x"),
+    rebalanced: false,
+    rank: 0,
+  });
   daemonApi.listDaemonRuntimes.mockResolvedValue([]);
   daemonApi.listDaemonInstances.mockResolvedValue([]);
   bindingApi.fetchMyBindings.mockResolvedValue([]);
   adminApi.listUsers.mockResolvedValue({ items: [], total: 0 });
+  // task-10：grid/dialog stub 状态复位（clearMocks 只清 vi.fn 调用计数）。
+  gridMock.lastProps = null;
+  gridMock.moveIndex = 0;
+  moveDialogMock.lastProps = null;
+  moveDialogMock.confirmTarget = { page: 0, position: "first" };
 });
 
 afterEach(() => {
@@ -299,5 +374,228 @@ describe("WorkspacesPage 选择器改造 (task-07)", () => {
         expect.objectContaining({ status: undefined }),
       ),
     );
+  });
+});
+
+// task-10（2026-09-14-workspace-drag-sort）：拖拽排序 page 层接线与不变量。
+//
+// page 层职责（本组覆盖，对照 requirements FR-06/07/08 与任务卡 task-10 ⑤⑦⑧）：
+//   - filtersActive 透传 WorkspaceDragGrid.dragDisabled（默认视图 false / 任一筛选激活 true）
+//     + 筛选条禁拖提示 + 「移动到…」入口拦截（警告、不弹窗、零 move 调用）
+//   - 「移动到…」弹窗提交流程（handleMoveConfirm）：先拉目标页默认视图 → 方向锚点
+//     四象限（页首：向上 before/向下 after=目标页第一张；页尾对偶；同页页首 before/
+//     页尾 after）→ moveWorkspace 携 page_size=12；锚点=被移动卡自身时跳过请求
+//   - 分页数量不变量前端侧（D-014@v1）：move 成功 reload 后 limit 恒 12、total
+//     不变、满页恒 12 张（末页允许不满）、无重复 id
+// WorkspaceDragGrid / WorkspaceMoveDialog 内部交互由 workspace-drag-grid.test.tsx
+// 覆盖，这里 mock 为 stub 断言接线（任务卡 task-10 ⑧ 指定做法）。
+describe("WorkspacesPage 拖拽排序接线 (task-09/task-10)", () => {
+  /** 26 条 fixture → 3 页（12/12/2），mock 返回可控 total 支撑分页不变量断言。 */
+  function mockPagedList(count: number) {
+    const fixture = Array.from(
+      { length: count },
+      (_, i) => mkWorkspace(`w-${String(i).padStart(2, "0")}`),
+    );
+    workspacesApi.listWorkspaces.mockImplementation(
+      async (params?: { offset?: number; limit?: number }) => {
+        const offset = params?.offset ?? 0;
+        const limit = params?.limit ?? 12;
+        return { items: fixture.slice(offset, offset + limit), total: fixture.length };
+      },
+    );
+    return fixture;
+  }
+
+  /** 当前页翻到第 2 页（0 基 page=1）——四象限/同页/自锚都以当前页 1 为基准。 */
+  async function gotoPage1() {
+    fireEvent.click(screen.getByLabelText("下一页"));
+    await waitFor(() =>
+      expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 12 }),
+      ),
+    );
+  }
+
+  it("FR-07/D-005@v2：默认视图 dragDisabled=false 透传，无禁拖提示；「移动到…」入口打开弹窗", async () => {
+    mockPagedList(3);
+    renderPage(<WorkspacesPage />);
+    await waitFor(() => expect(screen.getByTestId("drag-grid")).toBeInTheDocument());
+    expect((gridMock.lastProps as { dragDisabled?: boolean }).dragDisabled).toBe(false);
+    expect(screen.queryByText(/筛选状态下不可拖拽排序/)).not.toBeInTheDocument();
+
+    // 「移动到…」入口 → 打开弹窗（workspace=被移动卡，当前页/总页数/禁用态透传）。
+    gridMock.moveIndex = 0;
+    fireEvent.click(screen.getByTestId("grid-move-entry"));
+    await waitFor(() => expect(screen.getByTestId("move-dialog")).toBeInTheDocument());
+    expect((moveDialogMock.lastProps as { workspace?: { id: string } }).workspace?.id).toBe(
+      "w-00",
+    );
+    expect((moveDialogMock.lastProps as { currentPage?: number }).currentPage).toBe(0);
+    expect((moveDialogMock.lastProps as { totalPages?: number }).totalPages).toBe(1);
+    expect((moveDialogMock.lastProps as { disabled?: boolean }).disabled).toBe(false);
+  });
+
+  it("FR-07/D-005@v2：任一筛选激活 → dragDisabled=true + 禁拖提示；入口仅警告不弹窗、零 move 调用", async () => {
+    mockPagedList(3);
+    renderPage(<WorkspacesPage />);
+    await waitFor(() => expect(screen.getByTestId("drag-grid")).toBeInTheDocument());
+
+    // 激活类型筛选（antd Select：mouseDown 展开下拉 + 点选选项）。
+    fireEvent.mouseDown(screen.getByLabelText("筛选类型"));
+    fireEvent.click(await screen.findByText("前端代码"));
+    await waitFor(() =>
+      expect((gridMock.lastProps as { dragDisabled?: boolean }).dragDisabled).toBe(true),
+    );
+    // 筛选条出现禁拖提示（FR-07 中文文案）。
+    expect(screen.getByText(/筛选状态下不可拖拽排序/)).toBeInTheDocument();
+
+    // 「移动到…」入口拦截：警告提示 + 不弹窗 + 不发任何 move 请求。
+    fireEvent.click(screen.getByTestId("grid-move-entry"));
+    expect(notifyMock.warning).toHaveBeenCalledWith(
+      expect.stringContaining("筛选状态下不可拖拽排序"),
+    );
+    expect(screen.queryByTestId("move-dialog")).not.toBeInTheDocument();
+    expect(workspacesApi.moveWorkspace).not.toHaveBeenCalled();
+    // 弹窗确认按钮禁用兜底（disabled 随 filtersActive 透传，D-005@v2）。
+    expect((moveDialogMock.lastProps as { disabled?: boolean }).disabled).toBe(true);
+  });
+
+  // 四象限 + 同页方向锚点用例表（目标页 / 页内位置 / 期望 move 锚点）。
+  const quadrantCases: ReadonlyArray<
+    [string, number, "first" | "last", { before_id?: string; after_id?: string }]
+  > = [
+    ["向上页首：before_id=目标页第一张", 0, "first", { before_id: "w-00" }],
+    ["向上页尾：before_id=目标页最后一张", 0, "last", { before_id: "w-11" }],
+    ["向下页首：after_id=目标页第一张", 2, "first", { after_id: "w-24" }],
+    ["向下页尾：after_id=目标页最后一张", 2, "last", { after_id: "w-25" }],
+    ["同页页首：before_id=当前页第一张", 1, "first", { before_id: "w-12" }],
+    ["同页页尾：after_id=当前页最后一张", 1, "last", { after_id: "w-23" }],
+  ];
+  it.each(quadrantCases)(
+    "FR-06/D-009@v2 弹窗方向锚点 %s（提交前先拉目标页，move 携 page_size=12）",
+    async (_name, targetPage, position, expectedAnchor) => {
+      const fixture = mockPagedList(26);
+      renderPage(<WorkspacesPage />);
+      await waitFor(() =>
+        expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12),
+      );
+      await gotoPage1();
+
+      // 被移动卡 = 当前页第 2 张（w-13，与各象限锚点均不同，避开自锚分支）。
+      gridMock.moveIndex = 1;
+      fireEvent.click(screen.getByTestId("grid-move-entry"));
+      await waitFor(() => expect(screen.getByTestId("move-dialog")).toBeInTheDocument());
+      expect((moveDialogMock.lastProps as { workspace?: { id: string } }).workspace?.id).toBe(
+        "w-13",
+      );
+
+      moveDialogMock.confirmTarget = { page: targetPage, position };
+      workspacesApi.moveWorkspace.mockResolvedValueOnce({
+        workspace: fixture[13],
+        rebalanced: false,
+        rank: 5,
+      });
+      fireEvent.click(screen.getByTestId("move-dialog-confirm"));
+      await waitFor(() =>
+        expect(workspacesApi.moveWorkspace).toHaveBeenCalledTimes(1),
+      );
+      // 锚点方向规则 + page_size 携带（FR-06 / D-009@v2）逐字段断言。
+      expect(workspacesApi.moveWorkspace).toHaveBeenCalledWith("w-13", {
+        ...expectedAnchor,
+        page_size: 12,
+      });
+      // 提交前先拉目标页默认视图（offset=目标页*12 的 active 拉取发生在 move 之前）。
+      const moveOrder = workspacesApi.moveWorkspace.mock.invocationCallOrder[0]!;
+      const fetchedTargetPageBeforeMove = workspacesApi.listWorkspaces.mock.calls.some(
+        (call, i) =>
+          workspacesApi.listWorkspaces.mock.invocationCallOrder[i]! < moveOrder &&
+          call[0]?.offset === targetPage * 12 &&
+          call[0]?.limit === 12 &&
+          call[0]?.status === "active",
+      );
+      expect(fetchedTargetPageBeforeMove).toBe(true);
+      // move 成功后 reload 收敛服务端真序（D-014：重取列表而非本地增删卡）。
+      await waitFor(() =>
+        expect(workspacesApi.listWorkspaces.mock.calls.length).toBeGreaterThan(3),
+      );
+      expect(notifyMock.success).toHaveBeenCalledWith("已移动到目标页");
+    },
+  );
+
+  it("FR-06 自锚跳过：锚点=被移动卡自身 → moveWorkspace 零调用 + 提示已在位 + 弹窗关闭", async () => {
+    mockPagedList(26);
+    renderPage(<WorkspacesPage />);
+    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
+    await gotoPage1();
+
+    // 被移动卡 = 当前页最后一张 w-23；目标=同页页尾 → 锚点即自身。
+    gridMock.moveIndex = 11;
+    fireEvent.click(screen.getByTestId("grid-move-entry"));
+    await waitFor(() => expect(screen.getByTestId("move-dialog")).toBeInTheDocument());
+    moveDialogMock.confirmTarget = { page: 1, position: "last" };
+    fireEvent.click(screen.getByTestId("move-dialog-confirm"));
+    await waitFor(() =>
+      expect((moveDialogMock.lastProps as { open?: boolean }).open).toBe(false),
+    );
+    expect(workspacesApi.moveWorkspace).not.toHaveBeenCalled();
+    expect(notifyMock.success).toHaveBeenCalledWith("工作区已在该位置");
+  });
+
+  it("FR-08/D-014@v1 分页数量不变量：move 后 reload 每页恒 12（末页允许不满）、total 不变、无重复 id", async () => {
+    mockPagedList(26);
+    renderPage(<WorkspacesPage />);
+    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
+    expect(screen.getByText("共 26 条 · 第 1 页")).toBeInTheDocument();
+    expect((screen.getByLabelText("上一页") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(false);
+
+    // 第 2 页：满页 12 张、无重复 id。
+    await gotoPage1();
+    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
+    const page1Ids = (
+      (gridMock.lastProps as { items: { id: string }[] }).items ?? []
+    ).map((w) => w.id);
+    expect(page1Ids).toHaveLength(12);
+    expect(new Set(page1Ids).size).toBe(12);
+    expect((gridMock.lastProps as { total?: number }).total).toBe(26);
+
+    // 第 3 页（末页）：允许不满（26-24=2），total 不变，下一页禁用。
+    fireEvent.click(screen.getByLabelText("下一页"));
+    await waitFor(() =>
+      expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 24 }),
+      ),
+    );
+    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(2));
+    expect((gridMock.lastProps as { total?: number }).total).toBe(26);
+    expect((screen.getByLabelText("下一页") as HTMLButtonElement).disabled).toBe(true);
+
+    // 模拟 move 成功（onMoved 上抛 rank→page=1）→ 翻页 reload：limit 仍恒 12。
+    fireEvent.click(screen.getByLabelText("上一页")); // 便于区分 onMoved 触发的 reload
+    await waitFor(() =>
+      expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 12 }),
+      ),
+    );
+    const callsBefore = workspacesApi.listWorkspaces.mock.calls.length;
+    act(() => {
+      (
+        (gridMock.lastProps as { onMoved?: (e: unknown) => void }).onMoved as (
+          e: unknown,
+        ) => void
+      )?.({ id: "w-00", rank: 15, page: 1 });
+    });
+    await waitFor(() =>
+      expect(workspacesApi.listWorkspaces.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+    expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 12, offset: 12 }),
+    );
+    await waitFor(() => expect(screen.getAllByTestId(/ws-card-/)).toHaveLength(12));
+
+    // 不变量收口：全流程每一次列表请求 limit 恒 WORKSPACE_PAGE_SIZE(12)。
+    for (const call of workspacesApi.listWorkspaces.mock.calls) {
+      expect(call[0]).toMatchObject({ limit: 12 });
+    }
   });
 });

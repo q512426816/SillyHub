@@ -11,7 +11,9 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FolderGit2 } from "lucide-react";
-import { WorkspaceCard, type DaemonBadgeStatus } from "@/components/workspace-card";
+// task-09：WorkspaceCard 本体已由 WorkspaceDragGrid 内部渲染（cardPropsOf
+// 仅组装 props），此处只留徽标状态类型（daemonStatusOf 返回值）。
+import type { DaemonBadgeStatus } from "@/components/workspace-card";
 import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
 import { ApiError } from "@/lib/api";
 import {
@@ -23,9 +25,17 @@ import {
 import { listUsers, type UserRead } from "@/lib/admin";
 import {
   listWorkspaces,
+  moveWorkspace,
   updateWorkspace,
+  WORKSPACE_PAGE_SIZE,
   type Workspace,
 } from "@/lib/workspaces";
+// task-09 / FR-04 / FR-06：拖拽排序网格（task-08 产物）+「移动到…」弹窗。
+import { WorkspaceDragGrid, type WorkspaceCardSlotProps } from "@/components/workspace-drag-grid";
+import {
+  WorkspaceMoveDialog,
+  type WorkspaceMoveTarget,
+} from "@/components/workspace-move-dialog";
 // task-06 / 2026-08-18-workspace-role-type / FR-04 / D-005@v1：
 // 筛选下拉接 8 值受控词表 + 「未分类」项（null → ?unclassified=true 谓词）。
 import {
@@ -39,9 +49,6 @@ import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
 import { useNotify } from "@/lib/errors";
 import { useSession } from "@/stores/session";
 import { cn } from "@/lib/utils";
-
-// task-08 / FR-04：服务端分页页大小。
-const PAGE_SIZE = 12;
 
 export default function WorkspacesPage() {
   const router = useRouter();
@@ -108,8 +115,10 @@ export default function WorkspacesPage() {
           unclassified: typeFilter === "unclassified" ? true : undefined,
           status: statusFilter || undefined,
           user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
-          limit: PAGE_SIZE,
-          offset: page * PAGE_SIZE,
+          // task-09 / R-08：分页大小换 task-07 单一源常量（与后端 move
+          // page_size 默认值同源），本地 PAGE_SIZE 已删。
+          limit: WORKSPACE_PAGE_SIZE,
+          offset: page * WORKSPACE_PAGE_SIZE,
         }),
         listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
         listDaemonInstances().catch(() => [] as DaemonInstanceRead[]),
@@ -219,6 +228,126 @@ export default function WorkspacesPage() {
     [router],
   );
 
+  // task-09 / D-005@v2 / FR-07：筛选禁拖判定——与 reload 同源的筛选状态派生
+  // （debouncedQuery 非空 / 类型筛选含「未分类」/ 状态非 active / 平台管理员
+  // 人员筛选）。管理员 include_deleted=true（含删除视图）同属非默认视图：
+  // 当前页未单独暴露该参量（删除行走 status="deleted" 已被下方 status 判断
+  // 覆盖），未来单独暴露时在此同一表达式补判。
+  const filtersActive =
+    debouncedQuery.trim() !== "" ||
+    typeFilter !== null ||
+    statusFilter !== "active" ||
+    (isPlatformAdmin && ownerUserId !== null);
+
+  // task-09 / FR-06：「移动到…」弹窗状态（被移动工作区 + 提交中标记）。
+  const [moveTargetWs, setMoveTargetWs] = useState<Workspace | null>(null);
+  const [moveSubmitting, setMoveSubmitting] = useState(false);
+
+  // task-09 / FR-04：网格卡片 props 组装器——原 items.map 内的 WorkspaceCard
+  // 接线整体下沉（workspace 与拖拽手柄挂点由 WorkspaceDragGrid 注入）。
+  // 遗留 1：优先按 daemon 实体展示（runtime 绑定下沉到 member binding）。
+  const cardPropsOf = useCallback(
+    (w: Workspace): WorkspaceCardSlotProps => {
+      const bindingDaemonId = bindingsByWs.get(w.id)?.daemon_id;
+      const boundDaemon = bindingDaemonId
+        ? instancesById.get(bindingDaemonId) ?? null
+        : null;
+      return {
+        linkedProjects: projectsByWs.get(w.id) ?? [],
+        // task-11 / 2026-07-10-remove-server-local-workspace-mode：runtime 维度
+        // 已下沉到 per-member binding，透 null 安全。
+        boundRuntime: null,
+        boundDaemon,
+        daemonStatus: daemonStatusOf(w.id),
+        onChanged: reload,
+        onEditAlias: handleOpenAlias,
+        onActivate: () => handleActivate(w),
+      };
+    },
+    [
+      bindingsByWs,
+      instancesById,
+      projectsByWs,
+      daemonStatusOf,
+      reload,
+      handleOpenAlias,
+      handleActivate,
+    ],
+  );
+
+  // task-09 / FR-04 / FR-06：拖拽/弹窗移动成功闭环——按响应 rank 换算目标页
+  // 自动翻页（reload 依赖 page，setPage 触发 effect 重拉）；同页时 setPage
+  // 同值不触发 effect，手动 reload 收敛服务端真序。
+  const handleMoved = useCallback(
+    ({ page: targetPage }: { page: number }) => {
+      if (targetPage !== page) setPage(targetPage);
+      else void reload();
+    },
+    [page, reload],
+  );
+
+  // task-09 / FR-07 / D-005@v2：「移动到…」入口——筛选态拦截（不弹窗不发出
+  // move 请求，中文提示），默认视图直接打开弹窗。
+  const handleRequestMove = useCallback(
+    (w: Workspace) => {
+      if (filtersActive) {
+        notify.warning("筛选状态下不可拖拽排序，请先清除筛选");
+        return;
+      }
+      setMoveTargetWs(w);
+    },
+    [filtersActive, notify],
+  );
+
+  // task-09 / FR-06 / D-009@v2：弹窗提交流程——先拉目标页默认视图（不带任何
+  // 筛选参数）算边界锚点，再按方向规则四象限发 move：
+  //   页首——向上 before_id=目标页第一张 / 向下 after_id=目标页第一张；
+  //   页尾对偶（最后一张）；目标页=当前页时页首走 before、页尾走 after
+  //   （统一为「向上（含同页页首）before / 向下（含同页页尾）after」）；
+  //   锚点=被移动卡自身时跳过请求（自锚服务端 422 的前置兜底）。
+  const handleMoveConfirm = useCallback(
+    async (target: WorkspaceMoveTarget) => {
+      if (!moveTargetWs) return;
+      setMoveSubmitting(true);
+      try {
+        const { items: targetItems } = await listWorkspaces({
+          status: "active",
+          limit: WORKSPACE_PAGE_SIZE,
+          offset: target.page * WORKSPACE_PAGE_SIZE,
+        });
+        const anchor =
+          target.position === "first"
+            ? targetItems[0]
+            : targetItems[targetItems.length - 1];
+        if (!anchor) {
+          // 防御：目标页为空（分页总数失配等）——不给锚点就不发 move。
+          notify.error(new Error("目标页不存在工作区"), "移动工作区失败");
+          return;
+        }
+        if (anchor.id === moveTargetWs.id) {
+          // 自锚：工作区已在目标位置，跳过请求直接提示成功。
+          notify.success("工作区已在该位置");
+          setMoveTargetWs(null);
+          return;
+        }
+        const useBefore =
+          target.page === page ? target.position === "first" : target.page < page;
+        const resp = await moveWorkspace(moveTargetWs.id, {
+          ...(useBefore ? { before_id: anchor.id } : { after_id: anchor.id }),
+          page_size: WORKSPACE_PAGE_SIZE,
+        });
+        setMoveTargetWs(null);
+        notify.success("已移动到目标页");
+        handleMoved({ page: Math.floor(resp.rank / WORKSPACE_PAGE_SIZE) });
+      } catch (err) {
+        notify.error(err, "移动工作区失败");
+      } finally {
+        setMoveSubmitting(false);
+      }
+    },
+    [moveTargetWs, notify, page, handleMoved],
+  );
+
   return (
     <PageContainer size="full">
       <PageHeader
@@ -307,6 +436,13 @@ export default function WorkspacesPage() {
               ]}
             />
           ) : null}
+          {/* task-09 / D-005@v2 / FR-07：筛选禁拖提示（对照原型 .drag-disabled-tip，
+              warning 语义阶不硬编码 hex）——任一筛选激活即显示。 */}
+          {filtersActive ? (
+            <div className="w-full pt-0.5 text-xs text-warning" role="note">
+              ⚠ 筛选状态下不可拖拽排序——清除筛选后恢复拖拽手柄
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -339,32 +475,19 @@ export default function WorkspacesPage() {
         </SectionCard>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {items.map((w) => {
-              // 遗留 1：优先按 daemon 实体展示（runtime 绑定下沉到 member binding）。
-              const bindingDaemonId = bindingsByWs.get(w.id)?.daemon_id;
-              const boundDaemon = bindingDaemonId
-                ? instancesById.get(bindingDaemonId) ?? null
-                : null;
-              return (
-                <WorkspaceCard
-                  key={w.id}
-                  linkedProjects={projectsByWs.get(w.id) ?? []}
-                  workspace={w}
-                  /* task-11 / 2026-07-10-remove-server-local-workspace-mode：
-                   * 平台统一 daemon-client 语义后，WorkspaceCard 的 runtime 维度
-                   * 已下沉到 per-member binding，此处透 null 安全（prop 是否由
-                   * task-10 组件群移除待协调）。 */
-                  boundRuntime={null}
-                  boundDaemon={boundDaemon}
-                  daemonStatus={daemonStatusOf(w.id)}
-                  onChanged={reload}
-                  onEditAlias={handleOpenAlias}
-                  onActivate={() => handleActivate(w)}
-                />
-              );
-            })}
-          </div>
+          {/* task-09 / FR-04 / FR-06：items.map 卡片网格换 WorkspaceDragGrid
+              （task-08 产物）——卡片 props 经 cardPropsOf 透传，筛选态禁拖
+              （D-005@v2），移动成功翻页重拉、失败刷新收敛服务端真序。 */}
+          <WorkspaceDragGrid
+            items={items}
+            page={page}
+            total={total}
+            cardProps={cardPropsOf}
+            dragDisabled={filtersActive}
+            onRequestMove={handleRequestMove}
+            onMoved={handleMoved}
+            onMoveFailed={() => void reload()}
+          />
           {/* task-08 / FR-04：服务端分页器 */}
           <div className="flex items-center justify-between gap-2 pt-1">
             <span className="text-[11px] text-muted-foreground">
@@ -383,7 +506,7 @@ export default function WorkspacesPage() {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={(page + 1) * PAGE_SIZE >= total}
+                disabled={(page + 1) * WORKSPACE_PAGE_SIZE >= total}
                 onClick={() => setPage((p) => p + 1)}
                 aria-label="下一页"
               >
@@ -418,6 +541,19 @@ export default function WorkspacesPage() {
           <p className="mt-2 text-xs text-muted-foreground">原始名称：{aliasEditing.name}</p>
         ) : null}
       </Modal>
+
+      {/* task-09 / FR-06 / D-009@v2：「移动到…」弹窗（目标页按默认视图分页
+          N=ceil(total/WORKSPACE_PAGE_SIZE)；筛选态确认禁用兜底）。 */}
+      <WorkspaceMoveDialog
+        open={moveTargetWs !== null}
+        workspace={moveTargetWs}
+        currentPage={page}
+        totalPages={Math.max(1, Math.ceil(total / WORKSPACE_PAGE_SIZE))}
+        disabled={filtersActive}
+        confirmLoading={moveSubmitting}
+        onConfirm={handleMoveConfirm}
+        onCancel={() => setMoveTargetWs(null)}
+      />
 
     </PageContainer>
   );

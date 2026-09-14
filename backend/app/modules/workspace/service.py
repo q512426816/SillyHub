@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.modules.agent.service import AgentService
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -42,12 +42,17 @@ from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.workspace.constants import WorkspaceTypeLiteral
 from app.modules.workspace.model import (
     AgentRunWorkspace,
+    UserWorkspaceOrder,
     Workspace,
 )
 from app.modules.workspace.scanner import ScanResult, WorkspaceScanner
 from app.modules.workspace.schema import WorkspaceCreate, WorkspaceUpdate, slugify
 
 log = get_logger(__name__)
+
+# 拖拽排序浮点中点键的相邻间隔基数（D-011@v1 方案 A；backfill 首次物化 /
+# 边界 ±1024 / 精度耗尽整集重排共用同一基数，change 2026-09-14-workspace-drag-sort）。
+_MOVE_POSITION_GAP: float = 1024.0
 
 
 def _rewrite_path(root_path: str) -> str:
@@ -366,6 +371,7 @@ class WorkspaceService:
         status: str | None = None,
         user_id: uuid.UUID | None = None,
         allowed_workspace_ids: list[uuid.UUID] | None = None,
+        order_user_id: uuid.UUID | None = None,
     ) -> tuple[list[tuple[Workspace, User | None]], int]:
         """Filtered + paginated workspace list with owner JOIN (task-05 / FR-01/02/04).
 
@@ -378,6 +384,14 @@ class WorkspaceService:
         - ``unclassified``: type IS NULL 谓词（D-005@v1，"未分类"筛选；与
           workspace_type 互斥由 router 层 422 保证）。
         - ``status``: 精确匹配 status。
+        - ``order_user_id``: 排序视角用户（task-04 / FR-03，change
+          2026-09-14-workspace-drag-sort），与 ``user_id``（created_by 精确筛选）
+          语义独立。非 None 时 rows 语句 LEFT JOIN 该用户的 UserWorkspaceOrder
+          排序行，默认排序改三元组「无行在前（组内 created_at DESC，D-004@v1
+          新建落最前）→ sort_position ASC → created_at DESC」；None=不加 JOIN，
+          保持 created_at DESC 现状（router 透传 user.id 归 task-02，接线前
+          既有调用全走 None 分支零变化）。total 计数与 limit/offset 分页不受
+          排序影响（D-002@v1）。
         """
         if allowed_workspace_ids is not None and len(allowed_workspace_ids) == 0:
             return [], 0
@@ -414,13 +428,32 @@ class WorkspaceService:
             total_stmt = total_stmt.where(*filters)
         total = int((await self._session.scalar(total_stmt)) or 0)
 
-        rows_stmt = (
-            select(Workspace, User)
-            .outerjoin(User, Workspace.created_by == User.id)
-            .order_by(col(Workspace.created_at).desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        # task-04 / FR-03：order_user_id 非 None 时 LEFT JOIN 该用户排序行，默认排序改
+        # 三元组「无行在前 → sort_position ASC → created_at DESC」（D-004@v1 无行的新建
+        # 工作区落最前；与 _load_default_view / move 服务的显示序语义一致）。首键跨方言
+        # 等价 NULLS FIRST——两方言均 false<true，DESC 把 IS NULL=true 的无行卡排最前，
+        # 禁用 PG 专有 NULLS FIRST/LAST 语法；次键在无行组内恒为 NULL 不参与比较，组内
+        # 顺序由末键决定（SQLite/PG 的 ASC NULL 排位差异因此不干扰）。无行用户
+        # （order_user_id 传入但零排序行）三键全退化，结果与现状 created_at DESC 完全
+        # 一致（D-004 回归验收）。None=不加 JOIN 保持现状（兼容策略：ORDER BY 分支由
+        # order_user_id 有无决定）。唯一索引 (user_id, workspace_id) 保证 JOIN 不放大
+        # 行数；total_stmt 不 JOIN 排序表，计数不受影响。
+        rows_stmt = select(Workspace, User).outerjoin(User, Workspace.created_by == User.id)
+        if order_user_id is not None:
+            rows_stmt = rows_stmt.outerjoin(
+                UserWorkspaceOrder,
+                and_(
+                    col(UserWorkspaceOrder.workspace_id) == col(Workspace.id),
+                    col(UserWorkspaceOrder.user_id) == order_user_id,
+                ),
+            ).order_by(
+                col(UserWorkspaceOrder.sort_position).is_(None).desc(),
+                col(UserWorkspaceOrder.sort_position).asc(),
+                col(Workspace.created_at).desc(),
+            )
+        else:
+            rows_stmt = rows_stmt.order_by(col(Workspace.created_at).desc())
+        rows_stmt = rows_stmt.limit(limit).offset(offset)
         if filters:
             rows_stmt = rows_stmt.where(*filters)
         rows = list((await self._session.execute(rows_stmt)).all())
@@ -599,6 +632,458 @@ class WorkspaceService:
                 updated_fields=list(changes.keys()),
             )
         return ws
+
+    # -- Drag-sort move (change 2026-09-14-workspace-drag-sort, task-03) ---
+
+    async def move_workspace(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        after_id: uuid.UUID | None,
+        before_id: uuid.UUID | None,
+        to: str | None,
+        page_size: int,
+        allowed_ids: list[uuid.UUID] | None,
+    ) -> tuple[Workspace, bool, int]:
+        """拖拽移动工作区（FR-01 顺序持久化 / FR-02 跨页移动，design 总体方案 Wave 1）。
+
+        事务四步：①幂等 backfill 物化排序行（D-006@v2）→ ②锚点解析（id 锚点直取
+        邻居；``to`` 枚举在默认视图序列上做分页数学解析成 id 锚点，D-012@v1）→
+        ③锚点邻居浮点中点 / ±1024，精度耗尽时同一事务内整集重排（D-011@v1 /
+        R-01）→ ④单行 upsert + 默认视图 0 基 rank（前端 floor(rank/page_size)
+        换算页码，R-07）。
+
+        - ``allowed_ids=None`` 表示平台管理员（与 ``list_with_owner`` 可见性语义
+          一致）；行级可见校验归 task-02 router 层，此处防御性复验。
+        - 锚点三选一互斥校验归 task-02 pydantic 层，service 按已校验输入处理并
+          防御性复验。
+        - 返回 ``(移动后的 Workspace, 是否触发整集重排, 0 基 rank)``。
+
+        move 是纯重排——只写 user_workspace_orders 排序行，不增删 workspaces 行
+        （D-014@v1 分页数量不变量的前提）；同用户并发后写覆盖按 D-008@v1 接受，
+        不加乐观锁。
+        """
+        # 防御性三选一校验（正常由 task-02 schema 层 422 HTTP_422_MOVE_ANCHOR_CONFLICT 拦截）
+        if sum(anchor is not None for anchor in (after_id, before_id, to)) != 1:
+            raise AppError(
+                "移动锚点 after_id / before_id / to 必须恰好提供一个。",
+                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
+                http_status=422,
+            )
+        if to is not None and (to not in ("next_page_head", "prev_page_tail") or page_size < 1):
+            raise AppError(
+                "to 仅支持 next_page_head / prev_page_tail，且 page_size 必须为正整数。",
+                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
+                http_status=422,
+            )
+
+        workspace = await self.get(workspace_id)  # 不存在/软删 → 404
+        # 行级可见性防御复验（None=平台管理员全量）
+        if allowed_ids is not None and workspace_id not in allowed_ids:
+            raise WorkspacePermissionDenied("无权访问该工作区，无法移动排序。")
+
+        # ① 幂等 backfill：可见 ∧ active/archived ∧ 未软删 ∧ 尚无排序行的全集一次性物化
+        await self._backfill_order_rows(user_id=user_id, allowed_ids=allowed_ids)
+
+        # ② 锚点解析：统一收敛为 (anchor_after, anchor_before) 相邻 id 锚点
+        anchor_after: uuid.UUID | None = None
+        anchor_before: uuid.UUID | None = None
+        if to is not None:
+            anchor_after, anchor_before = await self._resolve_page_target(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                to=to,
+                page_size=page_size,
+                allowed_ids=allowed_ids,
+            )
+        elif after_id is not None:
+            await self._validate_move_anchor(
+                after_id, workspace_id=workspace_id, allowed_ids=allowed_ids
+            )
+            anchor_after = after_id
+        elif before_id is not None:
+            await self._validate_move_anchor(
+                before_id, workspace_id=workspace_id, allowed_ids=allowed_ids
+            )
+            anchor_before = before_id
+        else:  # 不可达：三选一防御校验已保证恰好一个
+            raise AppError(
+                "移动锚点 after_id / before_id / to 必须恰好提供一个。",
+                code="HTTP_422_MOVE_ANCHOR_CONFLICT",
+                http_status=422,
+            )
+
+        # ③+④ 中点落位并单行 upsert；默认视图只有被移动卡自身时（to 收敛后无邻居）
+        # 为纯 no-op——位置不动，只返回 rank。
+        rebalanced = False
+        if anchor_after is not None or anchor_before is not None:
+            position, rebalanced = await self._compute_anchor_position(
+                user_id=user_id, anchor_after=anchor_after, anchor_before=anchor_before
+            )
+            await self._upsert_order_row(
+                user_id=user_id, workspace_id=workspace_id, position=position
+            )
+
+        # rank 在提交前按同事务内已 flush 的落位计算（失败可整体回滚）
+        rank = await self._default_view_rank(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            allowed_ids=allowed_ids,
+            fallback_created_at=workspace.created_at,
+        )
+        # 单事务提交：backfill / 整集重排 / upsert 全部写路径在此一次落库
+        await self._session.commit()
+        log.info(
+            "workspace.moved",
+            workspace_id=str(workspace_id),
+            user_id=str(user_id),
+            to=to,
+            rebalanced=rebalanced,
+            rank=rank,
+        )
+        return workspace, rebalanced, rank
+
+    async def _backfill_order_rows(
+        self,
+        *,
+        user_id: uuid.UUID,
+        allowed_ids: list[uuid.UUID] | None,
+    ) -> None:
+        """幂等物化排序行（D-006@v2）：每次 move 事务首步执行。
+
+        INSERT..SELECT WHERE NOT EXISTS 的 Python 等价实现——位置公式需按「首用户
+        row_number×1024 / 已有行 min(pos)-1024×n」分派，纯 SQL 双方言表达繁琐；
+        量级一两百直接整取（D-002@v1）。一次性物化「该用户可见 ∧ status IN
+        (active, archived) ∧ 未软删 ∧ 尚无排序行」的全部 workspace——锚点卡因此
+        永远有行，无「锚点无行」输入域（Grill F-04）。
+
+        - 首用户（零存量行）：全集按显示序（created_at DESC）赋 row_number×1024
+          递增序列（D-006@v2 勘误——ASC 消费下沿显示序递增，v1「递减」为笔误）。
+        - 已有行：新增无行组整体物化在现有最小位置之下（min(pos)-1024×n 区段），
+          组内 created_at DESC——物化前后默认视图显示序零变化（D-004@v1 回归约束）。
+        - 软删（deleted_at 非空）行不物化；重复执行零新增行。
+        """
+        conds = [
+            col(Workspace.deleted_at).is_(None),
+            col(Workspace.status).in_(("active", "archived")),
+        ]
+        if allowed_ids is not None:
+            conds.append(col(Workspace.id).in_(allowed_ids))
+        candidates = (
+            await self._session.execute(select(Workspace.id, Workspace.created_at).where(*conds))
+        ).all()
+        if not candidates:
+            return
+        existing = (
+            await self._session.execute(
+                select(
+                    UserWorkspaceOrder.workspace_id,
+                    UserWorkspaceOrder.sort_position,
+                ).where(col(UserWorkspaceOrder.user_id) == user_id)
+            )
+        ).all()
+        existing_ids = {row.workspace_id for row in existing}
+        missing = [row for row in candidates if row.id not in existing_ids]
+        if not missing:
+            return  # 幂等：重复执行零新增行
+        # 组内显示序：created_at DESC（新建优先；id 仅作稳定并列次序）
+        missing.sort(key=lambda row: (row.created_at, row.id), reverse=True)
+        if existing:
+            base = min(row.sort_position for row in existing)
+            positions = [base - _MOVE_POSITION_GAP * (i + 1) for i in range(len(missing))]
+        else:
+            positions = [_MOVE_POSITION_GAP * (i + 1) for i in range(len(missing))]
+        now = datetime.now(UTC)
+        self._session.add_all(
+            UserWorkspaceOrder(
+                user_id=user_id,
+                workspace_id=row.id,
+                sort_position=position,
+                created_at=now,
+                updated_at=now,
+            )
+            for row, position in zip(missing, positions, strict=True)
+        )
+        await self._session.flush()
+
+    async def _resolve_page_target(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        to: str,
+        page_size: int,
+        allowed_ids: list[uuid.UUID] | None,
+    ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+        """``to`` 枚举锚点解析（D-012@v1）：默认视图分页数学 → 相邻 id 锚点。
+
+        取该用户默认视图有序 id 列表（可见 ∧ active ∧ 未软删，按显示序），定位被
+        移动卡当前 rank r、页 P=floor(r/page_size)；目标插入 rank=(P+1)×page_size
+        （next_page_head=下页页首）或 P×page_size-1（prev_page_tail=上页页尾，
+        P=0 时 422）；越界收敛到序列尾/首。此路径消除客户端「不知道相邻页边界卡」
+        的分页数学问题（Grill F-01：after_id=本页末卡的落位是本页末位而非下页开头）。
+        """
+        view = await self._load_default_view(user_id=user_id, allowed_ids=allowed_ids)
+        ordered_ids = [item[0] for item in view]
+        try:
+            current_rank = ordered_ids.index(workspace_id)
+        except ValueError:
+            raise AppError(
+                "被移动的工作区不在默认视图中，无法按分页目标移动。",
+                code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
+                http_status=422,
+                details={"workspace_id": str(workspace_id)},
+            ) from None
+        page = current_rank // page_size
+        if to == "next_page_head":
+            target_rank = (page + 1) * page_size
+        else:
+            if page == 0:
+                # 第 0 页没有上一页页尾（design 接口定义锚点校验第三分支）
+                raise AppError(
+                    "被移动的工作区已位于第一页，无法移动到上一页页尾。",
+                    code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
+                    http_status=422,
+                    details={"workspace_id": str(workspace_id)},
+                )
+            target_rank = page * page_size - 1
+        # 越界收敛：target_rank 是「移除被移动卡后」新序列里的插入位，合法域 [0, len-1]
+        target_rank = max(0, min(target_rank, len(ordered_ids) - 1))
+        others = [wid for wid in ordered_ids if wid != workspace_id]
+        if not others:
+            return None, None  # 默认视图只有被移动卡自身——无相邻锚点，纯 no-op
+        if target_rank >= 1:
+            # 插到 others[target_rank] 之前 ⇒ after 锚点取其前一张
+            return others[target_rank - 1], None
+        return None, others[0]
+
+    async def _validate_move_anchor(
+        self,
+        anchor_id: uuid.UUID,
+        *,
+        workspace_id: uuid.UUID,
+        allowed_ids: list[uuid.UUID] | None,
+    ) -> None:
+        """id 锚点判据（D-013@v1）：存在 ∧ 可见 ∧ 未软删 ∧ status ∈ {active, archived}。
+
+        与 backfill 物化范围对齐（Grill F-08）——锚点卡因此永远有排序行。违反 →
+        422 ``HTTP_422_MOVE_ANCHOR_NOT_VISIBLE``；自锚（锚点=被移动卡自身）→ 422
+        ``HTTP_422_MOVE_ANCHOR_SELF``（前端正常流程不会发，契约兜底，Grill F-09）。
+        """
+        if anchor_id == workspace_id:
+            raise AppError(
+                "锚点不能是被移动的工作区自身。",
+                code="HTTP_422_MOVE_ANCHOR_SELF",
+                http_status=422,
+                details={"workspace_id": str(workspace_id)},
+            )
+        anchor = await self._session.get(Workspace, anchor_id)
+        if (
+            anchor is None
+            or anchor.deleted_at is not None
+            or anchor.status not in ("active", "archived")
+            or (allowed_ids is not None and anchor_id not in allowed_ids)
+        ):
+            raise AppError(
+                "锚点工作区不存在、不可见或状态不允许，无法作为移动锚点。",
+                code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
+                http_status=422,
+                details={"anchor_id": str(anchor_id)},
+            )
+
+    async def _compute_anchor_position(
+        self,
+        *,
+        user_id: uuid.UUID,
+        anchor_after: uuid.UUID | None,
+        anchor_before: uuid.UUID | None,
+    ) -> tuple[float, bool]:
+        """锚点邻居浮点中点 / ±1024 落位，精度耗尽时同一事务内整集重排（D-011@v1，R-01）。
+
+        after=A → 新位置=(pos(A)+pos(A 的后继))/2，无后继=pos(A)+1024；before=B
+        对称（无前驱=pos(B)-1024）。中点结果与任一邻居相等（浮点精度耗尽）→ 按
+        当前顺序重赋 1024 间隔后重算本次位置，返回 rebalanced=True。
+        """
+        rows = await self._load_order_rows(user_id=user_id)
+        index_of = {row.workspace_id: i for i, row in enumerate(rows)}
+        if anchor_after is not None:
+            anchor_idx = self._anchor_row_index(index_of, anchor_after)
+            anchor_pos = rows[anchor_idx].sort_position
+            successor = rows[anchor_idx + 1] if anchor_idx + 1 < len(rows) else None
+            if successor is None:
+                return anchor_pos + _MOVE_POSITION_GAP, False
+            neighbor_pos = successor.sort_position
+        else:
+            # 三选一校验保证 anchor_after / anchor_before 恰有一个
+            if anchor_before is None:
+                raise AppError(
+                    "移动锚点 after_id / before_id / to 必须恰好提供一个。",
+                    code="HTTP_422_MOVE_ANCHOR_CONFLICT",
+                    http_status=422,
+                )
+            anchor_idx = self._anchor_row_index(index_of, anchor_before)
+            anchor_pos = rows[anchor_idx].sort_position
+            predecessor = rows[anchor_idx - 1] if anchor_idx > 0 else None
+            if predecessor is None:
+                return anchor_pos - _MOVE_POSITION_GAP, False
+            neighbor_pos = predecessor.sort_position
+        new_pos = (anchor_pos + neighbor_pos) / 2.0
+        if new_pos != anchor_pos and new_pos != neighbor_pos:
+            return new_pos, False
+        # 精度耗尽（两卡位置贴死）→ 同一事务内整集重排：按当前顺序重赋
+        # 1024×row_number 后重算。rows 为同一批 ORM 对象，重排已就地更新
+        # 位置且不改变相邻关系，无需重查。
+        await self._rebalance_order_rows(rows)
+        anchor_pos = rows[anchor_idx].sort_position
+        neighbor_idx = anchor_idx + 1 if anchor_after is not None else anchor_idx - 1
+        return (anchor_pos + rows[neighbor_idx].sort_position) / 2.0, True
+
+    @staticmethod
+    def _anchor_row_index(index_of: dict[uuid.UUID, int], anchor_id: uuid.UUID) -> int:
+        """锚点卡在按位置 ASC 排序行列表中的下标；无行时防御性 422。
+
+        backfill 后锚点（可见 ∧ active/archived）必有排序行（D-006@v2），
+        此分支正常不可达。
+        """
+        try:
+            return index_of[anchor_id]
+        except KeyError:
+            raise AppError(
+                "锚点工作区不存在、不可见或状态不允许，无法作为移动锚点。",
+                code="HTTP_422_MOVE_ANCHOR_NOT_VISIBLE",
+                http_status=422,
+                details={"anchor_id": str(anchor_id)},
+            ) from None
+
+    async def _load_order_rows(self, *, user_id: uuid.UUID) -> list[UserWorkspaceOrder]:
+        """该用户全部排序行，按 sort_position ASC（含归档/软删 workspace 的保留行）。
+
+        软删卡的排序行参与中点数学无害——它不可见但占位，中点结果仍落在锚点与
+        其后继之间，默认视图相对顺序不受影响（D-006@v2：软删行保留、复活回原位）。
+        """
+        stmt = (
+            select(UserWorkspaceOrder)
+            .where(col(UserWorkspaceOrder.user_id) == user_id)
+            .order_by(col(UserWorkspaceOrder.sort_position).asc())
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def _rebalance_order_rows(self, rows: list[UserWorkspaceOrder]) -> None:
+        """整集重排：按当前顺序（入参 ASC 序）重赋 1024×row_number 递增序列（R-01）。"""
+        now = datetime.now(UTC)
+        for i, row in enumerate(rows):
+            row.sort_position = _MOVE_POSITION_GAP * (i + 1)
+            row.updated_at = now
+        await self._session.flush()
+
+    async def _upsert_order_row(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        position: float,
+    ) -> None:
+        """单行 upsert 被移动卡的排序位置（(user_id, workspace_id) 唯一索引依据）。
+
+        move 是纯重排：只写本表单行，不增删 workspaces 行（D-014@v1 分页数量
+        不变量）。SQLite/PG 双方言——不用 ON CONFLICT 方言语法，select 后按
+        有无行走 UPDATE / INSERT。
+        """
+        row = (
+            (
+                await self._session.execute(
+                    select(UserWorkspaceOrder)
+                    .where(col(UserWorkspaceOrder.user_id) == user_id)
+                    .where(col(UserWorkspaceOrder.workspace_id) == workspace_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        now = datetime.now(UTC)
+        if row is None:
+            self._session.add(
+                UserWorkspaceOrder(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    sort_position=position,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            row.sort_position = position
+            row.updated_at = now
+        await self._session.flush()
+
+    async def _load_default_view(
+        self,
+        *,
+        user_id: uuid.UUID,
+        allowed_ids: list[uuid.UUID] | None,
+    ) -> list[tuple[uuid.UUID, float | None, datetime]]:
+        """该用户默认视图（可见 ∧ active ∧ 未软删）按显示序的 (id, 排序位, created_at)。
+
+        显示序与列表 SQL（task-04 的 LEFT JOIN 排序）一致：无行卡在前（组内
+        created_at DESC，D-004@v1 新建落最前）、有行卡按 sort_position ASC。
+        量级一两百（D-002@v1），整取后在 Python 排序。
+        """
+        stmt = (
+            select(Workspace.id, Workspace.created_at, UserWorkspaceOrder.sort_position)
+            .outerjoin(
+                UserWorkspaceOrder,
+                and_(
+                    col(UserWorkspaceOrder.workspace_id) == col(Workspace.id),
+                    col(UserWorkspaceOrder.user_id) == user_id,
+                ),
+            )
+            .where(col(Workspace.deleted_at).is_(None))
+            .where(col(Workspace.status) == "active")
+        )
+        if allowed_ids is not None:
+            stmt = stmt.where(col(Workspace.id).in_(allowed_ids))
+        rows = (await self._session.execute(stmt)).all()
+        no_row = sorted(
+            (r for r in rows if r.sort_position is None),
+            key=lambda r: (r.created_at, r.id),
+            reverse=True,
+        )
+        with_row = sorted(
+            (r for r in rows if r.sort_position is not None),
+            key=lambda r: (r.sort_position, r.id),
+        )
+        return [(r.id, r.sort_position, r.created_at) for r in [*no_row, *with_row]]
+
+    async def _default_view_rank(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        allowed_ids: list[uuid.UUID] | None,
+        fallback_created_at: datetime,
+    ) -> int:
+        """移动后该卡在默认视图序列中的 0 基序号（R-07：前端 floor(rank/page_size) 换算页码）。
+
+        防御分支：被移动卡不在默认视图（归档/待激活——正常拖拽输入域之外，前端
+        仅默认视图可拖）时，按同一显示序键定位其「落点序号」——有行卡与其余有行
+        卡比 pos，无行卡与无行组比 created_at DESC。
+        """
+        view = await self._load_default_view(user_id=user_id, allowed_ids=allowed_ids)
+        ordered_ids = [item[0] for item in view]
+        if workspace_id in ordered_ids:
+            return ordered_ids.index(workspace_id)
+        moved_pos = await self._session.scalar(
+            select(UserWorkspaceOrder.sort_position).where(
+                col(UserWorkspaceOrder.user_id) == user_id,
+                col(UserWorkspaceOrder.workspace_id) == workspace_id,
+            )
+        )
+        if moved_pos is None:
+            return sum(
+                1 for _, pos, created_at in view if pos is None and created_at > fallback_created_at
+            )
+        return sum(1 for _, pos, _ in view if pos is None or pos < moved_pos)
 
     # -- Generate projects from module-map ---
 

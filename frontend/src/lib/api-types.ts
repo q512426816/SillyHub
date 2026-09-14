@@ -368,6 +368,10 @@ export interface paths {
          *     change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
          *     ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
          *     ``?type=`` 等值匹配表达不了 NULL，语义互斥。
+         *
+         *     change 2026-09-14-workspace-drag-sort（task-02 / FR-03）：两分支均透传
+         *     ``order_user_id=user.id``——列表按当前用户私有排序行 LEFT JOIN 排序
+         *     （每人一套顺序，D-001@v1；无行用户退化为 created_at DESC 现状，task-04）。
          */
         get: operations["list_workspaces_api_workspaces_get"];
         put?: never;
@@ -468,6 +472,35 @@ export interface paths {
         get: operations["list_my_bindings_endpoint_api_workspaces_my_bindings_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move Workspace
+         * @description 拖拽排序移动工作区（task-02 / FR-02，change 2026-09-14-workspace-drag-sort）。
+         *
+         *     顺序按 user_id 持久化（每人一套，D-001@v1）；锚点三选一校验在
+         *     ``WorkspaceMoveRequest``（422 HTTP_422_MOVE_ANCHOR_CONFLICT，中文文案）。
+         *     鉴权对齐 list 端点现状（require_permission_any(WORKSPACE_READ)）；非平台
+         *     管理员行级可见校验 workspace_id ∈ allowed_workspace_ids（复用 list 端点既有
+         *     模式），不可见 403 HTTP_403_PERMISSION_DENIED；管理员 allowed_ids=None 全量。
+         *     排序/backfill/锚点解析全在 service.move_workspace（task-03，签名钉死不自增
+         *     参数），本层只做契约接线；响应 ``rank`` 供前端 floor(rank/page_size) 换算
+         *     目标页（R-07）。
+         */
+        post: operations["move_workspace_api_workspaces__workspace_id__move_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -25606,6 +25639,39 @@ export interface components {
             is_current_user: boolean;
         };
         /**
+         * WorkspaceMoveRequest
+         * @description Request body for ``POST /api/workspaces/{workspace_id}/move``。
+         *
+         *     锚点三选一（D-013@v1）：``after_id`` / ``before_id`` / ``to`` 恰好携带一个
+         *     ——同缺、同传多个或 ``after_id == before_id`` 同值均 422
+         *     ``HTTP_422_MOVE_ANCHOR_CONFLICT``。无 null 置顶语义（Grill F-03：pydantic
+         *     无法区分缺省与 null，置顶场景由「移动到…」弹窗的页首锚点表达）。
+         */
+        WorkspaceMoveRequest: {
+            /** After Id */
+            after_id?: string | null;
+            /** Before Id */
+            before_id?: string | null;
+            /** To */
+            to?: ("next_page_head" | "prev_page_tail") | null;
+            /**
+             * Page Size
+             * @default 12
+             */
+            page_size: number;
+        };
+        /**
+         * WorkspaceMoveResponse
+         * @description Response body for ``POST /api/workspaces/{workspace_id}/move``（*Response 后缀惯例，Grill F-10）。
+         */
+        WorkspaceMoveResponse: {
+            workspace: components["schemas"]["WorkspaceRead"];
+            /** Rebalanced */
+            rebalanced: boolean;
+            /** Rank */
+            rank: number;
+        };
+        /**
          * WorkspaceProbeItem
          * @description 单工作区探测结果项（``POST /api/workspaces/probe`` 响应元素）。
          *
@@ -26767,6 +26833,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberBindingView"][];
+                };
+            };
+        };
+    };
+    move_workspace_api_workspaces__workspace_id__move_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMoveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMoveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
