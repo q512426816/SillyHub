@@ -132,6 +132,16 @@ def rmtree_force(path: Path) -> None:
         try:
             os.chmod(target, stat.S_IWRITE)
             func(target)
+            return
+        except OSError:
+            pass
+        # POSIX：unlink/rmdir 的权限看父目录写位（无写位即无权增删目录项），
+        # chmod 失败目标自身救不了只读父目录下的 EACCES——保留父目录原 mode
+        # 补写位后重试。Windows 只读属性挂在目标自身，走不到这分支。
+        try:
+            parent = Path(target).parent
+            os.chmod(parent, stat.S_IMODE(os.stat(parent).st_mode) | stat.S_IWRITE)
+            func(target)
         except OSError:
             pass
 

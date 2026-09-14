@@ -1,0 +1,35 @@
+diff --git a/backend/app/modules/agent/tests/test_group_chat_models.py b/backend/app/modules/agent/tests/test_group_chat_models.py
+index d2911d2b1..37048043f 100644
+--- a/backend/app/modules/agent/tests/test_group_chat_models.py
++++ b/backend/app/modules/agent/tests/test_group_chat_models.py
+@@ -451,6 +451,9 @@ def test_agent_group_chat_table_contract() -> None:
+         "deleted_at",
+         # 2026-09-03-group-chat-archive-delete：归档时间戳。
+         "archived_at",
++        # 2026-09-13-consensus-timeout-activity-aware：群共识模式与超时（存量行默认）。
++        "consensus_mode",
++        "consensus_timeout_seconds",
+     }
+     actual = set(AgentGroupChat.model_fields.keys())
+     assert actual == expected, (
+diff --git a/backend/app/modules/skill_source/git_fetcher.py b/backend/app/modules/skill_source/git_fetcher.py
+index 274797cd1..337991d46 100644
+--- a/backend/app/modules/skill_source/git_fetcher.py
++++ b/backend/app/modules/skill_source/git_fetcher.py
+@@ -132,6 +132,16 @@ def rmtree_force(path: Path) -> None:
+         try:
+             os.chmod(target, stat.S_IWRITE)
+             func(target)
++            return
++        except OSError:
++            pass
++        # POSIX：unlink/rmdir 的权限看父目录写位（无写位即无权增删目录项），
++        # chmod 失败目标自身救不了只读父目录下的 EACCES——保留父目录原 mode
++        # 补写位后重试。Windows 只读属性挂在目标自身，走不到这分支。
++        try:
++            parent = Path(target).parent
++            os.chmod(parent, stat.S_IMODE(os.stat(parent).st_mode) | stat.S_IWRITE)
++            func(target)
+         except OSError:
+             pass
+ 

@@ -1,0 +1,55 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-6eb2067e",
+  "totals": {
+    "files": 2,
+    "additions": 13,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/tests/test_group_chat_models.py",
+      "declared": true,
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/skill_source/git_fetcher.py",
+      "declared": true,
+      "additions": 10,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 3,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260914-008-f2c3",
+  "sessionId": "quick-6eb2067e",
+  "savedAt": "2026-09-14T11:19:51.375Z",
+  "patchSha256": "0ade685b59370b6042d897f92054a3c255187160fa2b7cde36a33b069047a1ea",
+  "patchStatus": "ok"
+}

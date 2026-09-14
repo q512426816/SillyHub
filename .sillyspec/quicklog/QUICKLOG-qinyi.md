@@ -276,3 +276,14 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 方案：①三处 uuid.uuid4() 改固定字面量；②固件改本地时区固化构造 new Date(y,m,d,10,3,59).toString()（对齐 turn-catalog 测试既有惯例）；③按 quicklog sidecar 方案恢复组件——button 改 h-[18px] 全宽透明命中区+子 span 视觉线（group-* 触发状态色/hover/空心）+nav 去 gap；④usage 断言补 ctx_tokens 13 并注明两口径设计；⑤@/lib/daemon mock 补 listScheduledMessages 空列表
 结果：backend skill_source -n 2 xdist 16 passed+ruff/format 绿；frontend turn-catalog 17+sessions 页/variant 44+auto-recover 7（TZ=UTC 亦绿）+platform-shared 4，tsc 0，eslint 1 存量 warning 不变；daemon cursor-driver 23 passed+tsc 0；未部署（待 push 触发 CI）
 审计：[gate] L1（跨 0 模块 · 7 文件：1 代码/4 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量不适用（≤1 代码文件）
+
+## ql-20260914-008-f2c3 | 2026-09-14 19:15:49 | backend-ci 解锁后两连修：group 表契约测试补共识双字段 + rmtree_force POSIX 父目录只读重试
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/tests/test_group_chat_models.py（表契约补共识双字段）
+- backend/app/modules/skill_source/git_fetcher.py（rmtree_force POSIX 父目录重试）
+需求：backend-ci 解锁后两连修：group 表契约测试补共识双字段 + rmtree_force POSIX 父目录只读重试
+根因：①模型已随 2026-09-13-consensus-timeout-activity-aware 提交而测试期望集漏同步（known_failures K 组预登记，此前被 xdist 收集错误掩盖从未在 CI 暴露）；②rmtree_force onexc 只 chmod 失败目标自身，POSIX unlink/rmdir 权限看父目录写位，只读父目录下该重试无效（Windows 只读属性挂目标自身故本地恒绿 Linux CI 红，同为收集错误掩盖的存量失败）
+方案：①期望集补 consensus_mode/consensus_timeout_seconds；②onexc 二段重试——首段维持 chmod 目标自身，二段 chmod 父目录（stat.S_IMODE 保原 mode 补 S_IWRITE）后重试，Windows 语义走首段不动
+结果：两套件 46 passed + 2 Windows skip；Linux Docker python:3.12 容器实测只读父目录场景 removed=True；ruff/format/mypy 全绿；local.yaml K/I/L-1 组豁免随根因清偿移除；未部署（待 push 触发 CI）

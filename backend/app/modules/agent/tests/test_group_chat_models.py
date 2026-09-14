@@ -451,6 +451,9 @@ def test_agent_group_chat_table_contract() -> None:
         "deleted_at",
         # 2026-09-03-group-chat-archive-delete：归档时间戳。
         "archived_at",
+        # 2026-09-13-consensus-timeout-activity-aware：群共识模式与超时（存量行默认）。
+        "consensus_mode",
+        "consensus_timeout_seconds",
     }
     actual = set(AgentGroupChat.model_fields.keys())
     assert actual == expected, (
