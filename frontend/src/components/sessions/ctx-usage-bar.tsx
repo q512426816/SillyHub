@@ -18,6 +18,11 @@
 // ql-20260831-002：分母解析链加第 0 级「会话级覆盖」（AgentSession.ctx_window_
 // tokens，环浮层可编辑，onWindowOverrideChange 存在即渲染编辑器）+ 末级兜底
 // 1M（原 null「无分母」态废除——本地模型/本机默认读不到窗口大小，不为空）。
+//
+// 2026-09-14-session-ctx-compact task-06（FR-06 / FR-07 / D-002@v1 / D-004@v1）：
+// 环浮层加「压缩上下文」按钮行（编辑器行后）——onCompact 提供且 provider 具备
+// compact 能力（caps 门控同源下方 ctxSupported）才渲染；通知分型/请求发送归
+// 父层（session-panel-page handleSessionCompact），本组件只上抛回调。
 
 import { Popover, InputNumber, Button } from "antd";
 import { useEffect, useState } from "react";
@@ -118,6 +123,26 @@ export interface CtxUsageRingProps {
    * 入参 null = 清除覆盖回自动链（「恢复默认」）。
    */
   onWindowOverrideChange?: (tokens: number | null) => void;
+  /**
+   * 会话引擎名（INTERACTIVE_PROVIDERS 键）。两级消费（caps 同源
+   * getProviderCaps，task-01 产物）：
+   *   - CtxUsageBar 组装层：ctx_usage=false 不渲染环（2026-09-13-ctx-usage-
+   *     all-providers task-07 / FR-06，null/未传旁路门控照常渲染）；
+   *   - 环浮层压缩按钮：provider 明确且 compact=false（cursor / 未知引擎回退
+   *     全 false）不渲染按钮——与 ctx_usage 门控不同，压缩按钮无降级态可兜底，
+   *     一律默认拒绝（D-002@v1），null/未传也不渲染（本机默认供应商引擎未知）。
+   */
+  provider?: string | null;
+  /**
+   * 压缩回调（2026-09-14-session-ctx-compact task-06 / FR-06）：提供且 provider
+   * 具备 compact 能力才在浮层渲染「压缩上下文」按钮；预会话态（无 sessionId）
+   * 父层不传即不渲染。请求发送与三分型通知归父层，本组件只上抛。
+   */
+  onCompact?: () => void;
+  /** true = 轮运行中禁用压缩（父层 running 派生，避免与进行中轮并发）。 */
+  compactDisabled?: boolean;
+  /** 禁用态悬浮说明文案；缺省「轮运行中，暂不能压缩」。 */
+  compactTooltip?: string;
 }
 
 /**
@@ -183,6 +208,10 @@ export function CtxUsageRing({
   fallbackModel,
   windowOverride,
   onWindowOverrideChange,
+  provider,
+  onCompact,
+  compactDisabled,
+  compactTooltip,
 }: CtxUsageRingProps) {
   const windowTokens = resolveCtxWindowTokens(
     windowOverride,
@@ -196,6 +225,13 @@ export function CtxUsageRing({
       ? Math.min(100, (usedTokens / windowTokens) * 100)
       : null;
   const tone = pct == null ? "text-muted-foreground" : ctxToneClass(pct);
+
+  // task-06（FR-06 / D-002@v1）：压缩按钮门控——onCompact 提供且 provider 明确
+  // 具备 compact 能力（claude/pi/codex）才渲染；cursor / 未知引擎 / null（本机
+  // 默认，引擎未知）默认拒绝（与下方 ctxSupported 的 null 旁路不同——压缩无
+  // 降级态可兜底，点了必失败不如不渲染）。
+  const compactSupported =
+    onCompact != null && provider != null && getProviderCaps(provider).compact;
 
   const R = 10;
   const C = 2 * Math.PI * R;
@@ -227,6 +263,24 @@ export function CtxUsageRing({
               derived={windowTokens}
               onChange={onWindowOverrideChange}
             />
+          </div>
+        ) : null}
+        {compactSupported && onCompact ? (
+          <div className="flex items-center justify-between gap-2">
+            <span className="shrink-0">上下文压缩</span>
+            <Button
+              size="small"
+              data-testid="ctx-compact-btn"
+              disabled={compactDisabled}
+              title={
+                compactDisabled
+                  ? (compactTooltip ?? "轮运行中，暂不能压缩")
+                  : undefined
+              }
+              onClick={onCompact}
+            >
+              压缩上下文
+            </Button>
           </div>
         ) : null}
         <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
@@ -419,24 +473,20 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
 export interface CtxUsageBarProps extends CtxUsageRingProps {
   /** 传给 QuotaPill 的当前供应商 id（null=本机默认，胶囊不渲染）。 */
   providerId?: string | null;
-  /**
-   * 会话引擎名（INTERACTIVE_PROVIDERS 键）；caps.ctx_usage=false 不渲染环
-   * （2026-09-13-ctx-usage-all-providers task-07 / FR-06：防未来不支持引擎
-   * 永远「—」误导）。null/未传照常渲染（本机默认供应商等场景旁路门控）。
-   */
-  provider?: string | null;
 }
 
 export function CtxUsageBar({
   providerId,
-  provider,
   ...ringProps
 }: CtxUsageBarProps) {
   // FR-06 caps 门控：provider 明确且 getProviderCaps(provider).ctx_usage=false
   // （未知引擎名命中回退 false）→ 只渲染 QuotaPill 不渲染 CtxUsageRing；
   // null/未传旁路门控照常渲染环（不因门控丢现有功能，环仍有未知态「—」兜底）。
   // providerId 语义与 QuotaPill 行为不动（额度查询照旧）。
-  const ctxSupported = provider == null || getProviderCaps(provider).ctx_usage;
+  // 2026-09-14-session-ctx-compact task-06：provider 经 ...ringProps 透传给环
+  // （压缩按钮 caps 门控消费，见 CtxUsageRingProps.provider 注释）。
+  const ctxSupported =
+    ringProps.provider == null || getProviderCaps(ringProps.provider).ctx_usage;
   return (
     <div className="flex items-center gap-2.5">
       {ctxSupported ? <CtxUsageRing {...ringProps} /> : null}

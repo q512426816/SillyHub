@@ -62,6 +62,7 @@ import { daemonStateDir } from '../config.js';
 import type { AgentEvent, AgentEventUsage } from '../types.js';
 import type { CanUseToolDecision } from './types.js';
 import type {
+  CompactResult,
   InteractiveDriver,
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
@@ -95,6 +96,13 @@ const DEFAULT_THREAD_ID_WAIT_TIMEOUT_MS = 30_000;
 
 /** ql-20260909-026：threadId 等待轮询间隔（check-first，已就绪零延迟）。 */
 const THREAD_ID_WAIT_POLL_MS = 50;
+
+/**
+ * task-05（2026-09-14-session-ctx-compact / FR-05）：thread/compact/start 等
+ * response 的超时（任务卡「10s 超时降级 error 不上抛」）。测试可经构造函数注入
+ * 极小值加速超时分支（对齐 threadIdWaitTimeoutMs 惯例）。
+ */
+const DEFAULT_COMPACT_TIMEOUT_MS = 10_000;
 
 /**
  * codex 交互 stdout 日志目录：`<daemonStateDir()>/runs/codex-interactive`。
@@ -422,6 +430,16 @@ export interface CodexStartOptions extends InteractiveDriverStartOptions {
 }
 
 /**
+ * task-05（2026-09-14-session-ctx-compact / FR-05）：等待 response 的 JSON-RPC
+ * 请求条目（按 id 关联；照 pi-rpc-driver PiPendingRequest 先例移植）。
+ */
+export interface CodexJsonRpcPending {
+  resolve: (result: unknown) => void;
+  reject: (err: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
+/**
  * Codex app-server driver 句柄。extends provider-neutral `InteractiveDriverHandle`，
  * 携带底层 child + adapter + threadId/turnId（consume/interrupt/close 用）。
  *
@@ -439,6 +457,19 @@ export interface CodexHandle extends InteractiveDriverHandle {
   currentTurnId: string | null;
   /** turn/start / turn/interrupt 递增 id（≥3，避免与握手 1/2 碰撞）。 */
   nextRpcId: number;
+  /**
+   * task-05（2026-09-14-session-ctx-compact / FR-05）：已发出未应答的「等
+   * response」JSON-RPC 请求（按 id 关联；close / 进程退出时全量 reject，照 pi
+   * h.pending 先例）。既有握手 1/2、turn/start·interrupt（nextRpcId）全部
+   * fire-and-forget **不经本表**——response 消费分支只旁路新增，未注册 id 的
+   * response 照旧走 adapter.parse，既有路径零行为变化（R-06）。
+   */
+  jsonRpcPending: Map<number, CodexJsonRpcPending>;
+  /**
+   * task-05：jsonRpcPending 请求 id 递增序号（seed 100，照 pi nextRequestId
+   * 形态——从 100 起避开握手固定 id 1/2 与 nextRpcId(≥3) 空间，防碰撞）。
+   */
+  nextJsonRpcId: number;
   /** close 后置 true，拒绝新 turn/start 写入。 */
   closing: boolean;
   /** task-05 消费的待审批 server request 队列；task-04 仅登记 + fail-closed 应答。 */
@@ -702,13 +733,21 @@ export class CodexAppServerDriver implements InteractiveDriver {
   /** ql-20260909-026：turn/start 前等 threadId 上限（默认 30s；测试注入极小值加速）。 */
   private readonly threadIdWaitTimeoutMs: number;
 
+  /** task-05：compact 等 response 超时（默认 10s；测试注入极小值加速超时分支）。 */
+  private readonly compactTimeoutMs: number;
+
   constructor(
-    opts: { handshakeIntervalMs?: number; threadIdWaitTimeoutMs?: number } = {},
+    opts: {
+      handshakeIntervalMs?: number;
+      threadIdWaitTimeoutMs?: number;
+      compactTimeoutMs?: number;
+    } = {},
   ) {
     this.handshakeIntervalMs =
       opts.handshakeIntervalMs ?? DEFAULT_HANDSHAKE_INTERVAL_MS;
     this.threadIdWaitTimeoutMs =
       opts.threadIdWaitTimeoutMs ?? DEFAULT_THREAD_ID_WAIT_TIMEOUT_MS;
+    this.compactTimeoutMs = opts.compactTimeoutMs ?? DEFAULT_COMPACT_TIMEOUT_MS;
   }
 
   /**
@@ -792,6 +831,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
       threadId: null,
       currentTurnId: null,
       nextRpcId: 3,
+      // task-05（2026-09-14-session-ctx-compact）：id→pending response 等待机制
+      //（见 CodexHandle 字段注释；seed 100 避开握手 1/2 与 nextRpcId 空间）。
+      jsonRpcPending: new Map<number, CodexJsonRpcPending>(),
+      nextJsonRpcId: 100,
       closing: false,
       pendingServerRequests: [],
       // ql-20260909-027：用量差值记账双基线（见 CodexHandle 字段注释）。
@@ -918,6 +961,17 @@ export class CodexAppServerDriver implements InteractiveDriver {
       finalized = true;
       turnReported = true;
       h.currentTurnId = null;
+      // task-05（2026-09-14-session-ctx-compact）：终态兜底——未决 JSON-RPC pending
+      // 全量 reject（进程退出后不会再有 response 帧；照 pi finalizeWithError 内
+      // _rejectAllPending 先例，child error/exit/consume catch 三锚点全经此汇点）。
+      this._rejectAllJsonRpcPending(
+        h,
+        new Error(
+          typeof r.result === 'string'
+            ? r.result
+            : 'codex app-server consume finalized',
+        ),
+      );
       // ql-20260825-f3#6：同 reportResult，补 .catch 防 unhandled rejection。
       Promise.resolve(onResult(r)).catch((err: unknown) => {
         // eslint-disable-next-line no-console
@@ -1018,6 +1072,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
           // 静默：日志失败绝不影响主流程
         }
       }
+
+      // task-05（2026-09-14-session-ctx-compact / FR-05）：response 帧（有 id 无
+      // method）→ jsonRpcPending 按 id 唤醒。命中与否都不 return 不吞行——行继续
+      // 走下方原流程（server request / tokenUsage / adapter.parse），既有
+      // fire-and-forget 路径零行为变化（R-06）。
+      this._maybeResolveJsonRpcResponse(h, line);
 
       // 先处理 server request（task-05 异步分发到 handler + 登记），再 parse。
       // 注意：parse 也会登记到 adapter.pendingMap，我们用 handle 自己的队列。
@@ -1593,6 +1653,106 @@ export class CodexAppServerDriver implements InteractiveDriver {
   }
 
   /**
+   * task-05（2026-09-14-session-ctx-compact / FR-05）：response 帧（有 id 无
+   * method）→ jsonRpcPending 按 id 唤醒。
+   *
+   * 判定口径与 adapter.parse 同源（json-rpc.ts:318-322：response=has id && !has
+   * method）。命中：result → resolve(result)（空对象=受理）；error → reject(
+   * Error(message))；清理 timer + 摘条目。未命中（既有 fire-and-forget 的响应——
+   * 握手 1/2、turn/start·interrupt 的 nextRpcId、迟到/陌生 id）：原样放行，本方法
+   * 零副作用，行照旧走 adapter.parse（R-06 零行为变化）。map 空时早退，热路径
+   *（每行必经）零 JSON.parse 开销。
+   */
+  private _maybeResolveJsonRpcResponse(h: CodexHandle, line: string): void {
+    if (h.jsonRpcPending.size === 0) return;
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const hasId = Object.prototype.hasOwnProperty.call(msg, 'id');
+    const hasMethod = Object.prototype.hasOwnProperty.call(msg, 'method');
+    if (!hasId || hasMethod) return; // 只认 response 帧
+    const id = msg.id;
+    // 本表只收 number id（nextJsonRpcId 分配）；string id（server request 应答等）不归本机制
+    if (typeof id !== 'number') return;
+    const pending = h.jsonRpcPending.get(id);
+    if (!pending) return; // 未注册 id（fire-and-forget 响应）——照旧忽略
+    h.jsonRpcPending.delete(id);
+    clearTimeout(pending.timer);
+    if (Object.prototype.hasOwnProperty.call(msg, 'error')) {
+      const errObj = msg.error as { message?: unknown } | undefined;
+      const message =
+        errObj && typeof errObj.message === 'string' && errObj.message
+          ? errObj.message
+          : JSON.stringify(msg.error ?? null);
+      pending.reject(new Error(message));
+    } else {
+      pending.resolve(msg.result);
+    }
+  }
+
+  /**
+   * task-05：发一条 JSON-RPC request 并等 response（id 关联；pi _sendCommand
+   * 移植形态，供 compact 等新「等回执」路径用）。
+   *
+   * @param timeoutMs 本条响应超时（超时 reject + 清理条目，timer unref）
+   * @returns response.result
+   * @throws Error（stdin 不可用 / response error / 超时）
+   *
+   * 写失败不在此 reject：codex 既有 `_writeLine` 是 resolve-only（边界 8——写入
+   * 失败不抛，由超时 / exit 检测收敛），与 pi 的 boolean 版不同；故写挂走超时
+   * 兜底，语义与既有 turn 路径一致。
+   */
+  private _sendJsonRpcRequest(
+    h: CodexHandle,
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<unknown> {
+    const stdin = h.child.stdin;
+    if (h.closing || !stdin || stdin.destroyed) {
+      return Promise.reject(
+        new Error(`codex rpc "${method}" stdin unavailable (process closing)`),
+      );
+    }
+    const id = h.nextJsonRpcId++;
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        h.jsonRpcPending.delete(id);
+        reject(new Error(`codex rpc "${method}" response timeout (${timeoutMs}ms)`));
+      }, timeoutMs);
+      timer.unref?.();
+      h.jsonRpcPending.set(id, {
+        timer,
+        resolve: (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
+      void this._writeLine(h, JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    });
+  }
+
+  /**
+   * task-05：全量 reject 未决 JSON-RPC pending（close / 终态收敛；pi
+   * _rejectAllPending 同款）。清理 timer 防泄漏，reject 让等待方可见失败而非
+   * 悬挂 Promise。
+   */
+  private _rejectAllJsonRpcPending(h: CodexHandle, err: Error): void {
+    for (const [, pending] of h.jsonRpcPending) {
+      clearTimeout(pending.timer);
+      pending.reject(err);
+    }
+    h.jsonRpcPending.clear();
+  }
+
+  /**
    * task-05：server request 解析 + 异步分发（替换 task-04 fail-closed 占位）。
    *
    * 解析出行是 server request（has id + method）时：登记 pendingServerRequests，
@@ -2088,6 +2248,44 @@ export class CodexAppServerDriver implements InteractiveDriver {
   }
 
   /**
+   * task-05（2026-09-14-session-ctx-compact / FR-05）：会话级上下文压缩。
+   *
+   * 发 JSON-RPC `thread/compact/start {threadId}`（id 由 nextJsonRpcId 分配）等
+   * 同 id response（默认 10s 超时）：
+   *   - 空对象 result = 受理 → `{ ok: true }`（无数字回执——codex 只回受理不回
+   *     token 数，CompactResult 的 tokensBefore/estimatedTokensAfter 不携带，
+   *     D-004 codex「已触发」文案依据）；受理即回，不等 thread/compacted 完成
+   *     通知（任务卡约束）。
+   *   - response error / 超时 / stdin 不可用 → `{ ok: false, error }` 不上抛。
+   *   - threadId 未就绪（握手未完成 / resume 失败）→ `{ ok: false }` 快速失败。
+   *
+   * ⚠️ spike-02 校正点：params 键名按 driver 现用 camelCase `threadId`（R-03——
+   * 本文件 thread/start·resume、turn/start·interrupt 全 camelCase 同源）。
+   * spike-02 真机实证归 task-07，若实机不符**只改本方法 params 组装处**，不动
+   * pending 机制。
+   */
+  async compact(handle: InteractiveDriverHandle): Promise<CompactResult> {
+    const h = handle as CodexHandle;
+    if (!h.threadId) {
+      return { ok: false, error: 'codex thread not started' };
+    }
+    try {
+      await this._sendJsonRpcRequest(
+        h,
+        'thread/compact/start',
+        { threadId: h.threadId },
+        this.compactTimeoutMs,
+      );
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
    * close（FR-05 / 边界 6 idempotent）：
    *   1. closing=true 拒绝后续写入。
    *   2. stdin.end() 让 codex 优雅退出。
@@ -2102,6 +2300,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
     // 在 await currentTurnPromise。cancelled outcome 由主循环新增 closing 守卫
     // 拦下不上报（终态归 _terminateSession）。
     (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose?.();
+
+    // task-05（2026-09-14-session-ctx-compact）：close 兜底——未决 JSON-RPC
+    // pending 全量 reject。exit handler 对 closing 早退不会再触发 finalize 汇点，
+    // 此处不 reject 则 compact 等回执方挂到自身超时（悬挂 Promise，照 pi _close
+    // 内 _rejectAllPending 先例）。
+    this._rejectAllJsonRpcPending(h, new Error('codex app-server handle closed'));
 
     try {
       const stdin = h.child.stdin;

@@ -9,7 +9,10 @@
 //   - usedTokens={null} 未知态（task-09 / FR-01 / D-003：中心「—」不算百分比，
 //     历史会话 / 旧 daemon 不上报 ctx 的渲染分支）；
 //   - quota=null 不渲染胶囊（灰字提示）、正常窗口渲染、低剩余变色、
-//     reset 时间格式化、供应商切换重新拉取、失败静默降级。
+//     reset 时间格式化、供应商切换重新拉取、失败静默降级；
+//   - 2026-09-14-session-ctx-compact task-06（FR-06 / FR-07）：环浮层「压缩
+//     上下文」按钮三分支——caps.compact=false（cursor）/未提供 onCompact 不
+//     渲染；claude/pi/codex 渲染 + 点击上抛；compactDisabled 禁用态 + tooltip。
 //
 // mock：额度接口 mock @/lib/api/llm-providers 的 getProviderQuota（不真调后端）。
 // jsdom 已知坑：antd Popover 内容经 portal 挂 body，断言用 await screen.findByText；
@@ -408,5 +411,111 @@ describe("CtxUsageBar（caps 门控）", () => {
     render(<CtxUsageBar usedTokens={12_345} />);
     // 12,345 / 兜底 1M → 中心取整 1%（与上方既有用例同形态，显式锚定旁路语义）
     expect(screen.getByTestId("ctx-ring").textContent).toContain("1%");
+  });
+});
+
+// ── CtxUsageBar：环浮层「压缩上下文」按钮（2026-09-14-session-ctx-compact
+//    task-06 / FR-06 / FR-07 / D-002@v1：caps.compact 门控 / 禁用态 / 点击上抛）──
+
+describe("CtxUsageBar（compact 压缩按钮）", () => {
+  it("caps.compact=false（cursor）→ 即便提供 onCompact 也不渲染按钮行", async () => {
+    // provider-caps.ts 为 @generated 纯常量表（cursor compact=false），真实模块
+    // 直查，无需 mock（对齐上方 caps 门控用例约束）。
+    render(
+      <CtxUsageBar
+        usedTokens={100_000}
+        provider="cursor"
+        onCompact={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("ctx-ring"));
+    expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
+    expect(screen.queryByTestId("ctx-compact-btn")).not.toBeInTheDocument();
+    expect(screen.queryByText("压缩上下文")).not.toBeInTheDocument();
+  });
+
+  it("未提供 onCompact（预会话 :2722 挂载形态）→ 不渲染按钮（引擎有能力也不渲染）", async () => {
+    render(<CtxUsageBar usedTokens={100_000} provider="claude" />);
+    fireEvent.click(screen.getByTestId("ctx-ring"));
+    expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
+    expect(screen.queryByTestId("ctx-compact-btn")).not.toBeInTheDocument();
+  });
+
+  it("provider=null（本机默认，引擎未知）→ 默认拒绝不渲染按钮（与环 null 旁路相反）", async () => {
+    render(<CtxUsageBar usedTokens={12_345} onCompact={() => {}} />);
+    // 环本体照常渲染（ctx_usage 门控 null 旁路），但浮层压缩按钮不渲染。
+    expect(screen.getByTestId("ctx-ring").textContent).toContain("1%");
+    fireEvent.click(screen.getByTestId("ctx-ring"));
+    expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
+    expect(screen.queryByTestId("ctx-compact-btn")).not.toBeInTheDocument();
+  });
+
+  it.each(["claude", "pi", "codex"])(
+    "caps.compact=true（%s）+ onCompact → 渲染按钮，点击上抛 onCompact",
+    async (engine) => {
+      const onCompact = vi.fn();
+      render(
+        <CtxUsageBar
+          usedTokens={100_000}
+          provider={engine}
+          onCompact={onCompact}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("ctx-ring"));
+      const btn = await screen.findByTestId("ctx-compact-btn");
+      expect(btn).toHaveTextContent("压缩上下文");
+      expect(btn).toBeEnabled();
+      fireEvent.click(btn);
+      expect(onCompact).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("compactDisabled=true → 按钮禁用 + 缺省禁用文案；compactTooltip 覆盖；禁用点击不上抛", async () => {
+    const onCompact = vi.fn();
+    const { rerender } = render(
+      <CtxUsageBar
+        usedTokens={100_000}
+        provider="claude"
+        onCompact={onCompact}
+        compactDisabled
+      />,
+    );
+    fireEvent.click(screen.getByTestId("ctx-ring"));
+    const btn = await screen.findByTestId("ctx-compact-btn");
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "轮运行中，暂不能压缩");
+    // 禁用态点击不触发回调（父层 compactDisabled=running 防与进行中轮并发）
+    fireEvent.click(btn);
+    expect(onCompact).not.toHaveBeenCalled();
+
+    // 自定义 compactTooltip 覆盖缺省文案
+    rerender(
+      <CtxUsageBar
+        usedTokens={100_000}
+        provider="claude"
+        onCompact={onCompact}
+        compactDisabled
+        compactTooltip="压缩轮已在运行"
+      />,
+    );
+    expect(await screen.findByTestId("ctx-compact-btn")).toHaveAttribute(
+      "title",
+      "压缩轮已在运行",
+    );
+  });
+
+  it("compactDisabled=false → 按钮可用且不带禁用 title（tooltip 仅禁用态呈现）", async () => {
+    render(
+      <CtxUsageBar
+        usedTokens={100_000}
+        provider="pi"
+        onCompact={() => {}}
+        compactDisabled={false}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("ctx-ring"));
+    const btn = await screen.findByTestId("ctx-compact-btn");
+    expect(btn).toBeEnabled();
+    expect(btn).not.toHaveAttribute("title");
   });
 });

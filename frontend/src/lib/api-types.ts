@@ -5729,6 +5729,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compact Session
+         * @description Context compaction for a session, dual-dispatched by engine (FR-02).
+         *
+         *     2026-09-14-session-ctx-compact task-02：三校验（归属/活跃 + caps compact
+         *     键 + turn 空闲）归 compact 服务；claude → 复用 inject 服务发 "/compact"
+         *     轮（D-003@v3），pi/codex → ws RPC "session_compact" 结构化回执
+         *     （D-003@v3）。``custom_instructions`` 为 NG-06 v1 预留字段，本版本接收
+         *     不透传（design §接口定义），空体 ``{}`` 合法。
+         */
+        post: operations["compact_session_api_daemon_sessions__session_id__compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/queue": {
         parameters: {
             query?: never;
@@ -21825,6 +21851,50 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /**
+         * SessionCompactRequest
+         * @description POST /api/daemon/sessions/{id}/compact 请求体（FR-02 / D-003@v3）。
+         *
+         *     2026-09-14-session-ctx-compact task-02：``custom_instructions`` 为 NG-06 v1
+         *     预留字段——本版本**接收但不透传**（claude 分路 slash 通道不携参，pi/codex
+         *     分路 RPC params 仅 session_id），预留可避免后续版本启用时 API 契约 break。
+         *     全字段可选，空体 ``{}`` 合法。
+         */
+        SessionCompactRequest: {
+            /** Custom Instructions */
+            custom_instructions?: string | null;
+        };
+        /**
+         * SessionCompactResponse
+         * @description POST /api/daemon/sessions/{id}/compact 响应体（FR-02 / D-004@v1 三分型）。
+         *
+         *     三路字段并集，除 ``accepted`` / ``provider`` 外全部可选（哪路携带哪路字段）：
+         *
+         *     - claude 分路（inject 复用，D-003@v3）：``run_id`` / ``queued``——压缩轮即
+         *       普通 inject 轮（prompt="/compact"，原生建 run 入会话流，daemon 零改动）；
+         *     - pi/codex 分路（ws RPC 结构化回执）：``tokens_before`` /
+         *       ``estimated_tokens_after``（daemon CompactResult 的 camelCase 键映射）；
+         *     - 失败/竞态映射：``error``——claude 锁内竞态（DaemonSessionTurnConflict，
+         *       复审 P1-1）与 pi/codex RPC 三异常（Offline/Timeout/RemoteError）均映射
+         *       结构化 error 文案返回 200，不抛 5xx（DaemonRpcConflict 除外，走既有
+         *       AppError 兜底）。
+         */
+        SessionCompactResponse: {
+            /** Accepted */
+            accepted: boolean;
+            /** Provider */
+            provider: string;
+            /** Run Id */
+            run_id?: string | null;
+            /** Queued */
+            queued?: boolean | null;
+            /** Tokens Before */
+            tokens_before?: number | null;
+            /** Estimated Tokens After */
+            estimated_tokens_after?: number | null;
+            /** Error */
+            error?: string | null;
+        };
         /** SessionControlResponse */
         SessionControlResponse: {
             /**
@@ -35315,6 +35385,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionInjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_session_api_daemon_sessions__session_id__compact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionCompactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCompactResponse"];
                 };
             };
             /** @description Validation Error */

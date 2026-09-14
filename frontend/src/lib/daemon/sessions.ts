@@ -452,6 +452,40 @@ export async function endSession(
   );
 }
 
+/* ---------- Session context compact (2026-09-14-session-ctx-compact task-06 / FR-06) ----------
+ *
+ * 类型经 gen:types 从 openapi.json 生成（components["schemas"] 引用，禁手写，
+ * CLAUDE.md 规则 21；schema 产出归 task-02）。错误不在本 client 本地处理，统一
+ * 由 apiFetch 抛 ApiError——但注意失败/竞态多数以 200 + 结构化 error 字段返回
+ * （见 SessionCompactResponse docblock），调用方需按 accepted/error 分型。
+ */
+
+/** POST /api/daemon/sessions/{id}/compact 请求体（api-types 生成版，禁手写）。 */
+export type SessionCompactRequest = components["schemas"]["SessionCompactRequest"];
+/**
+ * POST /api/daemon/sessions/{id}/compact 响应体（api-types 生成版，禁手写）。
+ * 三分型并集（D-004@v1）：accepted/provider 恒有；claude 路带 run_id/queued、
+ * pi/codex 路带 tokens_before/estimated_tokens_after、失败映射带 error——哪路
+ * 携带哪路字段，消费方按字段存在性分型通知。
+ */
+export type SessionCompactResponse =
+  components["schemas"]["SessionCompactResponse"];
+
+/**
+ * POST /api/daemon/sessions/{id}/compact — 把当前上下文压缩为摘要续接
+ * （FR-06 / FR-07）。claude 分路 = inject 复用（prompt="/compact" 建压缩轮），
+ * pi/codex 分路 = ws RPC 结构化回执；v1 请求体为空（custom_instructions 为
+ * NG-06 预留字段，接收但不透传），显式送 {} 保证 Content-Type 就位。
+ */
+export async function compactSession(
+  sessionId: string,
+): Promise<SessionCompactResponse> {
+  return apiFetch<SessionCompactResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/compact`,
+    { method: "POST", json: {} },
+  );
+}
+
 /* ---------- Session reopen + detail (task-09 / FR-2 / D-002@v1) ---------- */
 
 /**

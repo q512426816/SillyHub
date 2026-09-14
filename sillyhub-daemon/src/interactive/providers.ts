@@ -22,15 +22,17 @@
  * 从聚合表派生，本 task 落契约基座（派生前既有字面量与聚合表并存，值等价）。
  *
  * 取值约定：caps 描述 provider 当前真实能力（以本仓现状硬编码门控为准，
- * 不臆断），10 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
+ * 不臆断），11 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
  * 为 string 枚举键（'native' / 'marker' / 'none'，2026-09-09-askuser-pi-cursor
  * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；provider_switch 为
  * 第 10 键（2026-09-11-provider-adapter-registry task-01 加入，与
  * adapter.switchable 单源一致）；ctx_usage 为第 11 键
  * （2026-09-13-ctx-usage-all-providers task-06 / FR-04 加入——interactive
- * 会话是否上报 ctx_tokens，四引擎全 true）；未知 provider
- * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
- * 改取值先改本文件，再同步两端镜像。
+ * 会话是否上报 ctx_tokens，四引擎全 true）；compact 为第 12 键
+ * （2026-09-14-session-ctx-compact task-01 / FR-01 加入——会话级上下文
+ * 压缩通道，claude/pi/codex 三引擎原生通道实证 true、cursor 无通道 false）；
+ * 未知 provider 查询返回默认拒绝对象（boolean 键全 false、dialog 取
+ * 'none'），不抛错。改取值先改本文件，再同步两端镜像。
  */
 
 import type { ProtocolType } from '../adapters/index.js';
@@ -57,7 +59,7 @@ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
 // 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
 // ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
 
-/** provider 能力矩阵（11 键：10 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（12 键：11 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -99,6 +101,14 @@ export interface ProviderCaps {
    * （usage-ctx.ts 共享 helper）——四引擎全 true；未知 provider 回退 false。
    */
   ctx_usage: boolean;
+  /**
+   * 会话级上下文压缩通道（第 12 键，2026-09-14-session-ctx-compact
+   * task-01 / FR-01）：interactive 会话是否支持把当前上下文压缩为摘要续接。
+   * 取值依据（三引擎原生压缩通道实证）：claude 走 SDK slash 命令（/compact）、
+   * pi 走 rpc compact、codex 走 thread/compact/start——三引擎 true；cursor CLI
+   * 无对应压缩通道 → false；未知 provider 回退 false。
+   */
+  compact: boolean;
 }
 
 /**
@@ -215,6 +225,12 @@ export interface ProviderCaps {
  * pi / cursor / codex 由本变更 Wave A task-02/03/04 派生回填（usage-ctx.ts
  * 共享 helper：净值三和 / codex 毛值直取）——四引擎全 true；未知 provider
  * 回退 false（默认拒绝）。
+ *
+ * compact（第 12 键，2026-09-14-session-ctx-compact task-01 / FR-01）：
+ * 会话级上下文压缩通道（把当前上下文压缩为摘要后续接同一会话）。取值依据
+ * （三引擎原生压缩通道实证）：claude SDK slash 命令（/compact）、pi rpc
+ * compact、codex thread/compact/start——三引擎 true；cursor CLI 无对应
+ * 压缩通道 → false；未知 provider 回退 false（默认拒绝）。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -229,6 +245,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: true,
     ctx_usage: true,
+    compact: true,
   },
   codex: {
     resume: true,
@@ -242,6 +259,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: true,
     ctx_usage: true,
+    compact: true,
   },
   // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
@@ -258,6 +276,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: true,
     ctx_usage: true,
+    compact: true,
   },
   // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
   // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
@@ -275,6 +294,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: false,
     ctx_usage: true,
+    compact: false,
   },
 };
 
@@ -302,6 +322,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     model_select: false,
     provider_switch: false,
     ctx_usage: false,
+    compact: false,
   };
 }
 

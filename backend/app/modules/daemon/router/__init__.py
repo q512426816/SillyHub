@@ -211,6 +211,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "get_session_detail",
     "create_session",
     "inject_session",
+    # 2026-09-14-session-ctx-compact task-02 / FR-02：统一压缩端点（紧跟 inject，
+    # 同为 session_crud 的 {session_id} 控制类端点）。
+    "compact_session",
     # session_queue（reorder 先于 {entry_id}，同形状保序对）
     "list_session_queue",
     "reorder_session_queue",

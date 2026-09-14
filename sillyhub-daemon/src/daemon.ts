@@ -6419,6 +6419,13 @@ export class Daemon {
     // 独立命名空间，不污染 host_fs 九方法契约）；RpcError code 经 _dispatchRpc
     // 原样回填，由 backend _map_runtime_remote_error 消费（§6.3 映射表）。
     this._registerRuntimeRpcHandler(ws);
+    // task-03（2026-09-14-session-ctx-compact / D-003@v3 单点接线）：注册
+    // session_compact RPC——backend 经 ws_rpc 请求 daemon 压缩指定会话的上下文
+    //（design FR-02）。守卫与分派全在 SessionManager.compact（六守卫为 RPC 到达
+    // 后的最终防线，R-04 窗口收窄）；守卫/驱动错误如实 throw → ws-client
+    // _dispatchRpc 映射 RpcError 回传，backend task-02 收 DaemonRpcRemoteError
+    // 映射结构化 error（本 handler 不吞异常）。
+    this._registerSessionCompactRpcHandler(ws);
 
     try {
       ws.connect();
@@ -6445,6 +6452,39 @@ export class Daemon {
     // 2026-07-09-remote-folder-picker task-02：list_roots RPC 供前端文件夹选择器拿磁盘根（FR-1），
     // 浏览自由同 list_dir（ql-20260706-006），不受 allowed_roots 限制。
     ws.registerRpcHandler('list_roots', async () => listRoots());
+  }
+
+  /**
+   * task-03（2026-09-14-session-ctx-compact / FR-02 / D-003@v3 单点接线）：
+   * 注册 `session_compact` RPC handler——backend 经 ws_rpc 请求 daemon 把指定
+   * interactive 会话的上下文压缩为摘要后续接同一会话。
+   *
+   * 形态照 _registerListDirRpcHandler / sillyspec / runtime 系注册器先例（平名
+   * 注册，protocol.ts 无新消息类型——RPC 帧格式复用，control-dispatcher 零改动）：
+   * - params.session_id 非字符串/缺省 → throw（不静默空串——空串必命中
+   *   SessionNotFoundError，错误信息会误导成「会话不存在」）；
+   * - `_sessionManager` 为 null（:1569 类型可空；AC-14 先例是 lease 记 error 不
+   *   崩，但此处是 RPC 场景）→ throw 'session manager not ready'，backend 收
+   *   DaemonRpcRemoteError 而非被静默成功误导（card AC：null 时 handler throw）；
+   * - 其余全委托 SessionManager.compact（六守卫 + driver 分派），CompactResult
+   *   对象即 RPC result；守卫/驱动错误如实上抛不吞（映射责任在 backend task-02）。
+   */
+  private _registerSessionCompactRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('session_compact', async (params) => {
+      const sessionId =
+        typeof params.session_id === 'string' ? params.session_id : '';
+      if (!sessionId) {
+        throw new Error('session_id required for session_compact');
+      }
+      if (!this._sessionManager) {
+        throw new Error('session manager not ready');
+      }
+      return this._sessionManager.compact(sessionId);
+    });
   }
 
   /**

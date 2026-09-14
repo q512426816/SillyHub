@@ -331,6 +331,45 @@ class SessionInjectRequest(BaseModel):
         return self
 
 
+class SessionCompactRequest(BaseModel):
+    """POST /api/daemon/sessions/{id}/compact 请求体（FR-02 / D-003@v3）。
+
+    2026-09-14-session-ctx-compact task-02：``custom_instructions`` 为 NG-06 v1
+    预留字段——本版本**接收但不透传**（claude 分路 slash 通道不携参，pi/codex
+    分路 RPC params 仅 session_id），预留可避免后续版本启用时 API 契约 break。
+    全字段可选，空体 ``{}`` 合法。
+    """
+
+    custom_instructions: str | None = Field(default=None, max_length=2000)
+
+
+class SessionCompactResponse(BaseModel):
+    """POST /api/daemon/sessions/{id}/compact 响应体（FR-02 / D-004@v1 三分型）。
+
+    三路字段并集，除 ``accepted`` / ``provider`` 外全部可选（哪路携带哪路字段）：
+
+    - claude 分路（inject 复用，D-003@v3）：``run_id`` / ``queued``——压缩轮即
+      普通 inject 轮（prompt="/compact"，原生建 run 入会话流，daemon 零改动）；
+    - pi/codex 分路（ws RPC 结构化回执）：``tokens_before`` /
+      ``estimated_tokens_after``（daemon CompactResult 的 camelCase 键映射）；
+    - 失败/竞态映射：``error``——claude 锁内竞态（DaemonSessionTurnConflict，
+      复审 P1-1）与 pi/codex RPC 三异常（Offline/Timeout/RemoteError）均映射
+      结构化 error 文案返回 200，不抛 5xx（DaemonRpcConflict 除外，走既有
+      AppError 兜底）。
+    """
+
+    accepted: bool
+    provider: str
+    # claude 分路（inject 形态；str 化 uuid）。
+    run_id: str | None = None
+    queued: bool | None = None
+    # pi/codex 分路（RPC 回执）。
+    tokens_before: int | None = None
+    estimated_tokens_after: int | None = None
+    # 分路失败/竞态映射的结构化错误文案。
+    error: str | None = None
+
+
 class SessionAutoResumeUpdateRequest(BaseModel):
     """PATCH /api/daemon/sessions/{id}/auto-resume 请求体（2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2）。
 

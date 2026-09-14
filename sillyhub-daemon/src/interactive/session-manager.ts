@@ -43,6 +43,7 @@ export * from './session-manager/index.js';
 // 消息形状。Claude SDK 专属回调类型改经 ClaudeStartOptions 结构性推导（落位
 // ./session-manager/types.js），不直接 import SDK 包。
 import type {
+  CompactResult,
   InteractiveDriver,
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
@@ -192,6 +193,8 @@ import {
   resolvePlanResponse,
   writeAttachmentFile,
 } from './session-manager/turn-control.js';
+// task-03（2026-09-14-session-ctx-compact / FR-02）：compact 守卫 + 分派子模块。
+import { compact } from './session-manager/compact.js';
 import {
   abortPermissionResolver,
   cancelTerminalCleanup,
@@ -1203,6 +1206,21 @@ export class SessionManager {
 
   async interrupt(sessionId: string): Promise<boolean> {
     return interrupt(this._core(), sessionId);
+  }
+
+  /**
+   * task-03（2026-09-14-session-ctx-compact / FR-02 / D-002@v3 单点接线）：
+   * 会话级上下文压缩入口——六守卫（不存在 / running / reconnecting / ended /
+   * failed / driver 未实现 / caps false）+ driver.compact(handle) 分派，
+   * CompactResult 原样透传（daemon session_compact RPC result）。
+   *
+   * @throws {SessionNotFoundError} store 无该 session
+   * @throws {SessionBusyError} status=running（turn 进行中，稍后重试）
+   * @throws {SessionNotActiveError} status ∈ {reconnecting, ended, failed}
+   * @throws {Error} driver 未实现 compact / caps.compact=false / handle 缺失
+   */
+  async compact(sessionId: string): Promise<CompactResult> {
+    return compact(this._core(), sessionId);
   }
 
   private async _interruptInternal(state: SessionState): Promise<boolean> {

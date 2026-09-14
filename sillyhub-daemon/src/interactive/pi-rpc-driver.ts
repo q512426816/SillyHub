@@ -40,6 +40,12 @@
  *   8. interrupt（task-03）：rpc abort 并等 response——成功 true / 失败或超时
  *      false；abort 后 pi 在 run 收尾发 agent_settled（agent-session.js:744-756
  *      _emitAgentSettled 在 finally 必发）→ waiter 自然释放、turn 正常收敛。
+ *   9. compact（2026-09-14-session-ctx-compact task-04 / FR-04）：发 rpc
+ *      `{"type":"compact"}` 并等 response（10s 超时，idle 态 consume 停在
+ *      inputIt.next() 时 response 照常 resolve，interrupt 同款先例）；回执
+ *      tokensBefore/estimatedTokensAfter 映射 CompactResult，失败/超时 →
+ *      { ok:false, error } 不上抛（空闲态守卫由 session-manager 承担；只等
+ *      response 不等 compaction_end 事件，R-02 时序降级）。
  *
  * 官方参照：pi 包 docs/rpc.md（分帧:30-37 / prompt:43-78 / steer:80-100 /
  * follow_up:102-122 / abort:124-135 / get_state:162-190 / extension UI 子协议
@@ -65,6 +71,7 @@ import type { AgentEvent, AgentEventUsage } from '../types.js';
 import { PiEventNormalizer } from './pi-events.js';
 import { ctxTokensFromNetInput } from './usage-ctx.js';
 import type {
+  CompactResult,
   InteractiveDriver,
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
@@ -93,6 +100,15 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
  * 小值加速）。超时走 error 事件 + 继续（不挂死，见 _handshake）。
  */
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 30_000;
+
+/**
+ * compact 命令响应超时（2026-09-14-session-ctx-compact task-04 / FR-04）：
+ * 压缩是引擎侧重活（重写上下文），但 driver 只等命令 response、不等
+ * compaction_end 事件（R-02 时序降级）→ 取 10s：长于 idle 态命令往返体感
+ * 上限、短于常规 requestTimeoutMs（30s）；超时降级为 { ok:false, error }
+ * 不上抛（RPC handler 拿到 error 结果而非异常）。
+ */
+const COMPACT_REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * extension_ui_request 的 dialog 类方法（rpc.md:1130-1133 / 1152-1217）：
@@ -1587,6 +1603,61 @@ export class PiRpcDriver implements InteractiveDriver {
       // abort 应答失败/超时：不重试不打断调用方——turn 收敛由 settled 事件 /
       // exit handler 兜底（若 abort 实际生效，settled 仍会到达）。
       return false;
+    }
+  }
+
+  /**
+   * compact（2026-09-14-session-ctx-compact task-04 / FR-04）：会话级上下文压缩
+   * ——实现 InteractiveDriver 可选契约 compact()，复用 _sendCommand 命令-响应
+   * 通道发 `{"type":"compact"}` 并等 response（10s 超时）。idle 态 consume 停在
+   * inputIt.next() 上，命令 response 照常经 pending 关联 resolve——interrupt()
+   * turn 中发 abort 即同款先例。
+   *
+   * 回执映射：response.data 取 tokensBefore / estimatedTokensAfter（**仅有限
+   * number 才挂键**，缺失/非 number/非有限 → 不设键，CompactResult 契约宽松）；
+   * 引擎拒绝（success:false → PiCommandError）/ 超时 / 写失败 → 捕获映射
+   * { ok:false, error } **不上抛**（RPC handler 拿到 error 结果而非异常，
+   * 「Nothing to compact」等引擎原文原样透传给前端通知）。
+   *
+   * **空闲态守卫由 session-manager 承担**（running 中拒绝压缩在上层，本方法
+   * 不做 isStreaming 检查）；compaction_* 事件维持 pi-events 现状吸收不透传
+   * （NG-04），customInstructions 通道预留不传（NG-06）。
+   *
+   * ⚠ spike-01 校正点：回执字段名按 pi docs/rpc.md:374-411 结构化回执书写，
+   * 真机实证归 task-07（spike-01）——不符时只改下方 data 字段读取处，机制不变。
+   */
+  async compact(handle: InteractiveDriverHandle): Promise<CompactResult> {
+    const h = handle as PiRpcHandle;
+    try {
+      const data = await this._sendCommand(
+        h,
+        { type: 'compact' },
+        COMPACT_REQUEST_TIMEOUT_MS,
+      );
+      // spike-01 校正点：tokensBefore/estimatedTokensAfter 字段名以真机实证
+      //（task-07）为准，不符则只改本段读取处。
+      const rec = isRecord(data) ? data : {};
+      const tokensBefore =
+        typeof rec.tokensBefore === 'number' && Number.isFinite(rec.tokensBefore)
+          ? rec.tokensBefore
+          : undefined;
+      const estimatedTokensAfter =
+        typeof rec.estimatedTokensAfter === 'number' &&
+        Number.isFinite(rec.estimatedTokensAfter)
+          ? rec.estimatedTokensAfter
+          : undefined;
+      return {
+        ok: true,
+        ...(tokensBefore !== undefined ? { tokensBefore } : {}),
+        ...(estimatedTokensAfter !== undefined ? { estimatedTokensAfter } : {}),
+      };
+    } catch (err) {
+      // PiCommandError（success:false，error 含引擎原文）/ 超时 / stdin 不可写
+      // ——统一降级为 error 结果，不上抛（R-02：只等 response 不等 compaction_end）。
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 

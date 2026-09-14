@@ -61,7 +61,7 @@ import { listWorkspaces } from "@/lib/workspaces";
 import { getProject } from "@/lib/ppm/project";
 import { getChange } from "@/lib/changes";
 import { getQuicklogDetail } from "@/lib/quicklog";
-import { ScheduledMessageRead, cancelTeamMission, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow } from "@/lib/daemon";
+import { ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow } from "@/lib/daemon";
 import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
 
@@ -1667,6 +1667,46 @@ export function SessionPanelPage({
     },
     [sessionId, qc, notify],
   );
+
+  // 2026-09-14-session-ctx-compact task-06（FR-06 / FR-07 / D-004@v1 三分型）：
+  // 环浮层「压缩上下文」按钮回调——POST compact 后按响应分型通知：
+  //   - tokens_before 有值（pi/codex ws RPC 数字型回执）→「已压缩：X → 约 Y tokens」
+  //     （NG-05：环回落靠下一轮 usage 自然到达，此处不手动改环分子）；
+  //   - codex 受理但无数字 →「已触发上下文压缩」；
+  //   - run_id 有值（claude inject 复用，压缩轮即普通轮）→「已发送 /compact」。
+  // 失败两路：accepted=false / error 字段（200 结构化回执，如 pi「无可压缩内容」
+  // 竞态）与 ApiError（4xx/5xx）均 notify error 带原文。
+  const handleSessionCompact = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const resp = await compactSession(sessionId);
+      if (resp.accepted === false || resp.error) {
+        // 响应原文优先（后端/daemon 已中文化）；无 error 的纯拒收给兜底文案。
+        notify.error(new Error(resp.error ?? "压缩请求未被受理"), "压缩失败");
+        return;
+      }
+      if (resp.tokens_before != null) {
+        notify.success(
+          `已压缩：${resp.tokens_before} → 约 ${
+            resp.estimated_tokens_after ?? "—"
+          } tokens`,
+        );
+        return;
+      }
+      if (resp.provider === "codex") {
+        notify.success("已触发上下文压缩");
+        return;
+      }
+      if (resp.run_id) {
+        notify.success("已发送 /compact（压缩轮运行中）");
+        return;
+      }
+      // 受理但无三路特征字段（未来新增分路）：不编造细节，通用成功文案。
+      notify.success("已发送压缩请求");
+    } catch (err) {
+      notify.error(err, "压缩请求失败");
+    }
+  }, [sessionId, notify]);
 
   // ── 消息发送 + 服务端排队（ql-20260825-011 后端真实排队重写）──────────────
   // 空闲（无 currentRun）→ 占位轮直发（sendFromQueue）；忙轮 → 直接 POST
@@ -3512,6 +3552,10 @@ export function SessionPanelPage({
             // ql-20260909-006：ctx 用量圆环+额度胶囊收进配置条行尾插槽（原输入框
             // 上方独占行——孤零零一整行很突兀）。2026-09-13-ctx-usage-all-providers
             // task-07（FR-06）：传引擎名走 caps 门控（与上方 engine prop 同式）。
+            // 2026-09-14-session-ctx-compact task-06（FR-06/FR-07）：压缩按钮挂
+            // 会话态（caps.compact 门控在环浮层内；running 禁用防与进行中轮并发，
+            // :1451 现成派生）——预会话渲染点（上方）不传 onCompact 即不渲染按钮
+            //（无 sessionId 无可压缩对象，page-only，dialog 版面板无 ctx 环不改造）。
             trailing={
               <CtxUsageBar
                 usedTokens={usedTokens}
@@ -3521,6 +3565,9 @@ export function SessionPanelPage({
                 onWindowOverrideChange={handleCtxWindowOverrideChange}
                 providerId={session.llm_provider_id ?? null}
                 provider={session.provider ?? null}
+                onCompact={handleSessionCompact}
+                compactDisabled={running}
+                compactTooltip="轮运行中，暂不能压缩"
               />
             }
             onSwitched={() => {

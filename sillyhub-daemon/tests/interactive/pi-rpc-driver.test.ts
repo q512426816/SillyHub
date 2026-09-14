@@ -54,6 +54,11 @@
 //       未知 method / 归一化失败 / 未注入 hook → 零桥接红线，自动取消）+ 两个
 //       导出纯函数（normalizePiExtensionDialog / denormalizePiDialogReply）的
 //       映射细节与反例直测。
+//   16. 2026-09-14-session-ctx-compact task-04 compact：命令形态（stdin 写入
+//       { type:"compact", id:"pi_N" } 自增 id 关联 response）/ 回执数字映射
+//       CompactResult（有限 number 挂键、缺失/非 number 不挂键）/ success:false
+//       → error 原文不上抛 / 10s 响应超时 → { ok:false, error } 非 reject
+//       （vi.useFakeTimers 推进）。
 
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -2846,6 +2851,135 @@ describe('退出收敛与容错', () => {
     expect(texts[0]!.content).toBe('前\u2028后');
     expect(safeParseAgentEvent(texts[0]!).success).toBe(true);
 
+    closeQueue();
+    await consumeP;
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 16. compact（2026-09-14-session-ctx-compact task-04 / FR-04）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PiRpcDriver.compact（2026-09-14-session-ctx-compact task-04）', () => {
+  it('命令形态：stdin 写入 { type:"compact", id:"pi_N" }（自增 id，get_state 后顺延）；回执数字映射 CompactResult', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child); // get_state 拿走 pi_1 → compact 自增顺延 pi_2
+    await tick();
+
+    const compactP = driver.compact(handle);
+    await tick();
+    const cmd = readStdinJson(child).find((l) => l.type === 'compact');
+    expect(cmd).toBeDefined();
+    expect(cmd!.id).toBe('pi_2'); // pi_N 自增形态（_sendCommand id 关联）
+    expect(Object.keys(cmd!).sort()).toEqual(['id', 'type']); // 命令体仅 type+id
+
+    // 回执数字透传（spike-01 校正点：字段名 task-07 真机实证，不符只改读取处）
+    respond(child, 'compact', {
+      data: { tokensBefore: 45200, estimatedTokensAfter: 8300 },
+    });
+    await expect(compactP).resolves.toEqual({
+      ok: true,
+      tokensBefore: 45200,
+      estimatedTokensAfter: 8300,
+    });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('无数字回执不挂键：字段缺失/非 number（string/null）与 data 非 object → CompactResult 仅 ok', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    // 第一笔：字段形状不对（string / null / 布尔）→ 不挂键
+    const p1 = driver.compact(handle);
+    await tick();
+    respond(child, 'compact', {
+      data: { tokensBefore: '45200', estimatedTokensAfter: null, done: true },
+    });
+    await expect(p1).resolves.toEqual({ ok: true });
+
+    // 第二笔：data 非 object → 同样仅 ok（宽松契约，不猜形状）
+    const p2 = driver.compact(handle);
+    await tick();
+    respond(child, 'compact', { data: 123 });
+    await expect(p2).resolves.toEqual({ ok: true });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('失败回执（success:false）→ { ok:false, error 含命令名与引擎原文 }，不上抛不挂键', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    const compactP = driver.compact(handle);
+    await tick();
+    // 引擎拒绝原文（如 Nothing to compact）原样透传给前端通知
+    respond(child, 'compact', { success: false, error: 'Nothing to compact' });
+    const r = await compactP;
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('compact'); // PiCommandError 前缀含命令名
+    expect(r.error).toContain('Nothing to compact'); // 引擎原文
+    expect(r.tokensBefore).toBeUndefined();
+    expect(r.estimatedTokensAfter).toBeUndefined();
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('10s 响应超时 → { ok:false, error 含 timeout } 非 reject（fake timers 推进 10s）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    vi.useFakeTimers();
+    try {
+      const compactP = driver.compact(handle);
+      // advanceTimersByTimeAsync 先冲刷微任务（命令写入 stdin + pending 登记）
+      // 再推进时钟——10s 整点触发 _sendCommand 的 response 超时。
+      await vi.advanceTimersByTimeAsync(10_000);
+      const r = await compactP; // 必须 resolve（不 reject）
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('timeout');
+      expect(r.error).toContain('compact');
+      // 命令确已写出（超时是等不到 response，不是没发出去）
+      expect(readStdinJson(child).some((l) => l.type === 'compact')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // 超时后通道不受污染：closeQueue 让 consume 自然收尾
     closeQueue();
     await consumeP;
   });

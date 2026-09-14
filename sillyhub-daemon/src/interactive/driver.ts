@@ -222,6 +222,23 @@ export interface InteractiveDriverHandle {
 }
 
 /**
+ * task-03（2026-09-14-session-ctx-compact / FR-04/05 契约层）：会话级上下文压缩
+ * 回执。driver.compact 的返回形态，daemon 侧原样透传为 session_compact RPC result。
+ *
+ * - `ok`：压缩是否成功（受理 + 执行完成）。
+ * - `tokensBefore` / `estimatedTokensAfter`：回执数字**可选**——pi rpc compact
+ *   返回压缩前后 token 数；codex thread/compact/start 只回受理（受理即 ok，
+ *   无数字）；claude 走 SDK slash 命令（task-04 定形态）。
+ * - `error`：ok=false 时的驱动侧失败原因（如 rpc timeout / 引擎拒绝）。
+ */
+export interface CompactResult {
+  ok: boolean;
+  tokensBefore?: number;
+  estimatedTokensAfter?: number;
+  error?: string;
+}
+
+/**
  * driver 启动选项（design §5.1）。provider-neutral 公共字段；provider 专属字段
  *（如 pathToClaudeCodeExecutable / canUseTool）通过 provider 专属 StartOptions
  * 由各 driver 自行定义并 extends 本接口的扩展类型（task-03/04）。
@@ -353,4 +370,19 @@ export interface InteractiveDriver {
    * @returns true=已发出打断信号；false=无 active turn / handle 无效 / 打断抛错（no-op 不冒泡，E3）。
    */
   interrupt(handle: InteractiveDriverHandle | null): Promise<boolean>;
+
+  /**
+   * task-03（2026-09-14-session-ctx-compact / FR-04/05）：会话级上下文压缩——
+   * 把当前会话上下文压缩为摘要后续接同一会话（不换 session id）。
+   *
+   * **可选方法**（可选先例：上方 handle.close?()）：未实现 = 该 provider 暂不
+   * 支持压缩。SessionManager 守卫（session-manager/compact.ts）对「caps.compact
+   * =true 但 driver 未实现」与「caps=false」两类都拒绝（D-002 防御性双保险），
+   * 故既有 driver（claude/codex/pi/cursor）零改动零回归，task-04/05 逐引擎落地
+   * 本体时补实现即可。
+   *
+   * 仅在无进行中 turn 时可调（running 守卫在上层）；driver 侧失败返回
+   * `{ ok:false, error }`，不靠 throw 表达业务失败。
+   */
+  compact?(handle: InteractiveDriverHandle): Promise<CompactResult>;
 }

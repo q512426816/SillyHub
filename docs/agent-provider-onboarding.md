@@ -357,6 +357,14 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
        不再加分量（`ctxTokensFromGrossInput`，重复加 cache 会双计）。
      - 三分量（或毛值）全缺 → **不携带该键**（不伪造 0，消费侧缺键即
        未知态）；caps 声明见 `ProviderCaps.ctx_usage`（§6）。
+   - **上下文压缩**（`ProviderCaps.compact`，2026-09-14-session-ctx-compact）：
+     平台压缩按钮不走 usage 通道，走**分路触发**——claude=backend 直接复用
+     inject 通道发 `/compact` 文本（SDK 分发 slash，建 run）；pi/codex=backend
+     经 ws RPC `session_compact` → daemon `registerRpcHandler` → driver 实现
+     `InteractiveDriver.compact?()`（pi=`{"type":"compact"}` 命令带
+     tokensBefore/estimatedTokensAfter 回执；codex=`thread/compact/start`
+     受理无数字）。新引擎有原生压缩命令时实现可选 `compact?()` 并翻 caps
+     true；无通道保持 false（按钮不渲染 + backend 拒绝）。
 
 3. [ ] **driver**：新建 `sillyhub-daemon/src/interactive/<name>-driver.ts`，
    `implements InteractiveDriver`（契约全集见
@@ -580,9 +588,9 @@ caps.subagent 维持 false。扩展的 ExtensionAPI 面与 pi 版本强耦合，
 
 ### 6.1 改值流程（单源 → 两镜像 → EXPECTED_PROVIDERS → 守护测试）
 
-`ProviderCaps` 11 键：`resume / mcp / multimodal / thinking / subagent /
+`ProviderCaps` 12 键：`resume / mcp / multimodal / thinking / subagent /
 permission_dialog / dialog / edit_patch / model_select / provider_switch /
-ctx_usage`（10 boolean + dialog string 枚举）。
+ctx_usage / compact`（11 boolean + dialog string 枚举）。
 
 1. [ ] 改 **daemon 单源** `sillyhub-daemon/src/interactive/providers.ts`
    `PROVIDER_CAPS.<provider>.<key>` 取值，**同 commit 更新该条目上方

@@ -1991,3 +1991,400 @@ describe('task-04：flat message → AgentEvent v2 映射', () => {
     expect(safeParseAgentEvent(ev).success).toBe(true);
   });
 });
+
+// ── task-05（2026-09-14-session-ctx-compact）：id→pending response 等待机制 ────
+//
+// FR-05 / R-06：driver 现全 fire-and-forget（握手 1/2、turn/start·interrupt 的
+// nextRpcId 都不等 response），本组为新机制的独立单测——按 id resolve / error
+// reject / 超时清理 / 未知 id 忽略零影响 / close·exit 兜底 reject。机制照
+// pi-rpc-driver h.pending 先例移植；既有 fire-and-forget 路径零改动的回归兜底
+// 由本文件既有全套件（R-06）承载。
+
+describe('task-05（2026-09-14-session-ctx-compact）：id→pending response 等待机制', () => {
+  /** 直访私有 _sendJsonRpcRequest（仓内 as unknown as 内部槽访问惯例）。 */
+  function sendJsonRpc(
+    driver: CodexAppServerDriver,
+    h: CodexHandle,
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<unknown> {
+    return (
+      driver as unknown as {
+        _sendJsonRpcRequest: (
+          h: CodexHandle,
+          method: string,
+          params: Record<string, unknown>,
+          timeoutMs: number,
+        ) => Promise<unknown>;
+      }
+    )._sendJsonRpcRequest(h, method, params, timeoutMs);
+  }
+
+  /** 等一拍让 stdin 写入 / readline 行处理跑完（对齐既有用例节奏）。 */
+  async function tick(ms = 50): Promise<void> {
+    await new Promise<void>((r) => setTimeout(r, ms));
+  }
+
+  it('请求注册 pending（id 从 100 起）→ 回同 id response → resolve(result 值透传) + 条目清理', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_rpc')]);
+    await tick();
+
+    const p = sendJsonRpc(driver, handle, 'test/ping', { k: 1 }, 5_000);
+    await tick(30);
+
+    // 请求形态：jsonrpc 2.0 + 自增 id（seed 100，避开握手 1/2 与 nextRpcId≥3）
+    const req = readStdinJson(child).find((m) => m.method === 'test/ping')!;
+    expect(req).toMatchObject({
+      jsonrpc: '2.0',
+      id: 100,
+      method: 'test/ping',
+      params: { k: 1 },
+    });
+    // 已注册未应答
+    expect(handle.jsonRpcPending.size).toBe(1);
+    expect(handle.jsonRpcPending.has(100)).toBe(true);
+
+    // 回同 id response → resolve(result 原值) + map 清空 + id 序号自增
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 100, result: { foo: 'bar' } })]);
+    await expect(p).resolves.toEqual({ foo: 'bar' });
+    expect(handle.jsonRpcPending.size).toBe(0);
+    expect(handle.nextJsonRpcId).toBe(101);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('error response → reject(Error(message 原文)) + 条目清理', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_rpc')]);
+    await tick();
+
+    const p = sendJsonRpc(driver, handle, 'test/fail', {}, 5_000);
+    await tick(30);
+    emitLines(child, [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 100,
+        error: { code: -32000, message: 'compact boom' },
+      }),
+    ]);
+    await expect(p).rejects.toThrow('compact boom');
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('超时 → reject(timeout 文案) + 条目清理不泄漏；迟到的同 id response 照未知 id 静默忽略', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, errors } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_rpc')]);
+    await tick();
+
+    const p = sendJsonRpc(driver, handle, 'test/slow', {}, 80);
+    await expect(p).rejects.toThrow(/test\/slow.*timeout.*80ms/);
+    // 超时即摘条目（不泄漏 timer 挂着 resolve 死回调）
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    // 迟到的同 id response（超时后才到）：未注册 → 静默忽略，不崩不二次 settle
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 100, result: {} })]);
+    await tick(50);
+    expect(errors).toHaveLength(0);
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('未知 id response 不干扰既有路径：fire-and-forget 响应照旧进 adapter.parse，pending 不被误 settle', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_rpc')]);
+    await tick();
+
+    const p = sendJsonRpc(driver, handle, 'test/held', {}, 5_000);
+    await tick(30);
+
+    // 未注册 id=999 的 error response：既有 adapter.parse 照旧产出 error 事件
+    //（对照 task-04「rpc error response」既有断言路径），pending(id=100) 不受影响
+    emitLines(child, [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 999,
+        error: { code: -32000, message: 'legacy boom' },
+      }),
+    ]);
+    await tick(50);
+
+    const legacyErr = messages.find((m) => m.content === 'legacy boom');
+    expect(legacyErr).toBeDefined();
+    expect(legacyErr!.type).toBe('error');
+    expect((legacyErr!.metadata as { rpc_id?: number }).rpc_id).toBe(999);
+
+    // pending 仍挂起（未被未知 id response 误 resolve/reject）
+    const state = await Promise.race([
+      p.then(
+        () => 'settled',
+        () => 'settled',
+      ),
+      new Promise<string>((r) => setTimeout(() => r('pending'), 80)),
+    ]);
+    expect(state).toBe('pending');
+
+    // 正主 response 到达后才 resolve
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 100, result: { ok: 1 } })]);
+    await expect(p).resolves.toEqual({ ok: 1 });
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('close() → 全量 reject 未决 pending（防悬挂 Promise），不挂到超时才失败', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_rpc')]);
+    await tick();
+
+    const p = sendJsonRpc(driver, handle, 'test/closing', {}, 5_000);
+    await tick(30);
+    expect(handle.jsonRpcPending.size).toBe(1);
+
+    await handle.close();
+    await expect(p).rejects.toThrow('codex app-server handle closed');
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('进程异常退出（非 close）→ finalizeWithError 汇点 reject 未决 pending', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_rpc')]);
+    await tick();
+
+    const p = sendJsonRpc(driver, handle, 'test/crash', {}, 5_000);
+    await tick(30);
+
+    child._emitExit(1);
+    await expect(p).rejects.toThrow('codex exited code=1');
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    await consumeP;
+  });
+});
+
+// ── task-05（2026-09-14-session-ctx-compact）：compact()（FR-05）────────────────
+//
+// 契约：driver.ts CompactResult（task-03）。JSON-RPC thread/compact/start
+// {threadId} → 空 result 对象=受理 → {ok:true}（无数字回执）；error/超时/写失败
+// → {ok:false,error} 不上抛。参数键名 camelCase threadId（R-03；spike-02 真机
+// 实证归 task-07，不符只改 driver compact() params 组装处）。
+
+describe('task-05（2026-09-14-session-ctx-compact）：compact()', () => {
+  /** 等一拍让 stdin 写入 / readline 行处理跑完（对齐既有用例节奏）。 */
+  async function tick(ms = 50): Promise<void> {
+    await new Promise<void>((r) => setTimeout(r, ms));
+  }
+
+  it('threadId 未就绪 → {ok:false,error:"codex thread not started"}，不发 RPC', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick(); // 握手写完但不喂 thread/start response → threadId=null
+
+    const r = await driver.compact(handle);
+    expect(r).toEqual({ ok: false, error: 'codex thread not started' });
+    // 未发任何 thread/compact/start 请求
+    expect(
+      readStdinJson(child).some((m) => m.method === 'thread/compact/start'),
+    ).toBe(false);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('threadId 就绪：发 thread/compact/start {threadId}（id≥100 自增）→ 空 result response → {ok:true} 无数字键', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_compact')]);
+    await tick();
+
+    const compactP = driver.compact(handle);
+    await tick(30);
+
+    // 命令形态：method / params.threadId（camelCase，R-03）/ jsonrpc 2.0 / id≥100
+    const req = readStdinJson(child).find(
+      (m) => m.method === 'thread/compact/start',
+    )!;
+    expect(req).toMatchObject({
+      jsonrpc: '2.0',
+      method: 'thread/compact/start',
+      params: { threadId: 'thr_compact' },
+    });
+    expect(typeof req.id).toBe('number');
+    expect(req.id as number).toBeGreaterThanOrEqual(100);
+
+    // 空 result 对象 = 受理 → {ok:true}；CompactResult 不挂数字键（codex 无回执）
+    emitLines(child, [
+      JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} }),
+    ]);
+    const r = await compactP;
+    expect(r).toEqual({ ok: true });
+    expect(r).not.toHaveProperty('tokensBefore');
+    expect(r).not.toHaveProperty('estimatedTokensAfter');
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    // 第二次 compact：id 自增（100→101），不与首次碰撞
+    const compactP2 = driver.compact(handle);
+    await tick(30);
+    const req2 = readStdinJson(child).filter(
+      (m) => m.method === 'thread/compact/start',
+    )[1]!;
+    expect(req2.id as number).toBe((req.id as number) + 1);
+    emitLines(child, [
+      JSON.stringify({ jsonrpc: '2.0', id: req2.id, result: {} }),
+    ]);
+    await expect(compactP2).resolves.toEqual({ ok: true });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('response error → {ok:false,error:message 原文}，不上抛', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_compact')]);
+    await tick();
+
+    const compactP = driver.compact(handle);
+    await tick(30);
+    const req = readStdinJson(child).find(
+      (m) => m.method === 'thread/compact/start',
+    )!;
+    emitLines(child, [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req.id,
+        error: { code: -32000, message: 'compact rejected by server' },
+      }),
+    ]);
+
+    const r = await compactP;
+    expect(r).toEqual({ ok: false, error: 'compact rejected by server' });
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('超时（compactTimeoutMs 注入 80ms）→ {ok:false,error 含 timeout} 不上抛，条目清理', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({
+      handshakeIntervalMs: 0,
+      compactTimeoutMs: 80,
+    });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_compact')]);
+    await tick();
+
+    const r = await driver.compact(handle); // 不喂 response → 80ms 超时
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toMatch(/thread\/compact\/start.*timeout.*80ms/);
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+});

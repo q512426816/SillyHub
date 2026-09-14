@@ -40,6 +40,8 @@ from app.modules.daemon.schema import (
     AgentSessionRead,
     PpmItemKindLiteral,
     SessionAutoResumeUpdateRequest,
+    SessionCompactRequest,
+    SessionCompactResponse,
     SessionCreateRequest,
     SessionCtxWindowUpdateRequest,
     SessionInjectRequest,
@@ -47,6 +49,7 @@ from app.modules.daemon.schema import (
     SessionTitleUpdateRequest,
 )
 from app.modules.daemon.service import DaemonService
+from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
 from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
 
 log = get_logger("app.modules.daemon.router")
@@ -583,6 +586,28 @@ async def inject_session(
         queued=result.queued,
         queue_entry_id=result.queue_entry_id,
     )
+
+
+@router.post(
+    "/sessions/{session_id}/compact",
+    response_model=SessionCompactResponse,
+)
+async def compact_session(
+    session_id: uuid.UUID,
+    data: SessionCompactRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionCompactResponse:
+    """Context compaction for a session, dual-dispatched by engine (FR-02).
+
+    2026-09-14-session-ctx-compact task-02：三校验（归属/活跃 + caps compact
+    键 + turn 空闲）归 compact 服务；claude → 复用 inject 服务发 "/compact"
+    轮（D-003@v3），pi/codex → ws RPC "session_compact" 结构化回执
+    （D-003@v3）。``custom_instructions`` 为 NG-06 v1 预留字段，本版本接收
+    不透传（design §接口定义），空体 ``{}`` 合法。
+    """
+    svc = DaemonService(session)
+    return await _compact_session_svc(svc, session_id, user.id)
 
 
 @router.post(

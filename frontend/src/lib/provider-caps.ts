@@ -8,18 +8,18 @@
  *
  * 镜像约定（三端同步，单源 = daemon 侧，2026-09-11-provider-adapter-registry
  * task-04 起手抄镜像退役）：daemon 单源改取值后重跑生成脚本，本文件与 backend
- * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（11 键：
- * 10 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
+ * app/modules/agent/provider_caps.py 随脚本一并刷新；三端键集合（12 键：
+ * 11 个 boolean + dialog string 枚举）与每个 provider 每键取值一致性由
  * backend/app/modules/agent/tests/test_provider_caps_alignment.py 以源文件
  * 读取方式守护（任一端漂移即测试失败）。
  *
- * 取值语义：caps 描述 provider 当前真实能力，10 个 boolean 键缺省 false 默认
+ * 取值语义：caps 描述 provider 当前真实能力，11 个 boolean 键缺省 false 默认
  * 拒绝（FR-06 / D-002@v1）；dialog 为 string 枚举键（'native' = 走平台
  * dialog 管道 / 'marker' = 纯前端标记协议 / 'none' = 无通道）；未知 provider
  * 查询返回默认拒绝对象（boolean 键全 false、dialog 取 'none'），不抛错。
  */
 
-/** provider 能力矩阵（11 键：10 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（12 键：11 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -54,6 +54,13 @@ export interface ProviderCaps {
    * PROVIDER_CAPS docblock（四引擎全 true，未知 provider 回退 false）。
    */
   ctx_usage: boolean;
+  /**
+   * 会话级上下文压缩通道（第 12 键，2026-09-14-session-ctx-compact task-01 /
+   * FR-01）：interactive 会话是否支持把当前上下文压缩为摘要续接；取值依据
+   * 锚点见 daemon 单源 PROVIDER_CAPS docblock（claude/pi/codex 原生压缩通道
+   * 实证 true，cursor 无通道 false，未知 provider 回退 false）。
+   */
+  compact: boolean;
 }
 
 /**
@@ -73,6 +80,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: true,
     ctx_usage: true,
+    compact: true,
   },
   codex: {
     resume: true,
@@ -86,6 +94,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: true,
     ctx_usage: true,
+    compact: true,
   },
   pi: {
     resume: true,
@@ -99,6 +108,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: true,
     ctx_usage: true,
+    compact: true,
   },
   cursor: {
     resume: true,
@@ -112,6 +122,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: false,
     ctx_usage: true,
+    compact: false,
   },
 };
 
@@ -139,6 +150,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     model_select: false,
     provider_switch: false,
     ctx_usage: false,
+    compact: false,
   };
 }
 
