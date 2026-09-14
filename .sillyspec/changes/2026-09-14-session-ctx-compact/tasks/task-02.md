@@ -12,6 +12,7 @@ requirement_ids: [FR-02, FR-03]
 decision_ids: [D-002@v1, D-003@v3, D-004@v1]
 allowed_paths:
   - backend/app/modules/daemon/router/session_crud.py
+  - backend/app/modules/daemon/router/__init__.py
   - backend/app/modules/daemon/schema.py
   - backend/app/modules/daemon/session/service/compact.py
   - backend/app/modules/daemon/tests/test_session_compact_endpoint.py
@@ -19,6 +20,7 @@ allowed_paths:
   - frontend/src/lib/api-types.ts
 target_files:
   - backend/app/modules/daemon/router/session_crud.py
+  - backend/app/modules/daemon/router/__init__.py
   - backend/app/modules/daemon/schema.py
   - NEW:backend/app/modules/daemon/session/service/compact.py
   - NEW:backend/app/modules/daemon/tests/test_session_compact_endpoint.py

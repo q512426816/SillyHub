@@ -287,3 +287,12 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：①模型已随 2026-09-13-consensus-timeout-activity-aware 提交而测试期望集漏同步（known_failures K 组预登记，此前被 xdist 收集错误掩盖从未在 CI 暴露）；②rmtree_force onexc 只 chmod 失败目标自身，POSIX unlink/rmdir 权限看父目录写位，只读父目录下该重试无效（Windows 只读属性挂目标自身故本地恒绿 Linux CI 红，同为收集错误掩盖的存量失败）
 方案：①期望集补 consensus_mode/consensus_timeout_seconds；②onexc 二段重试——首段维持 chmod 目标自身，二段 chmod 父目录（stat.S_IMODE 保原 mode 补 S_IWRITE）后重试，Windows 语义走首段不动
 结果：两套件 46 passed + 2 Windows skip；Linux Docker python:3.12 容器实测只读父目录场景 removed=True；ruff/format/mypy 全绿；local.yaml K/I/L-1 组豁免随根因清偿移除；未部署（待 push 触发 CI）
+
+## ql-20260914-008-7c2e | 2026-09-14 17:55:00 | spike-01/02/R-01 压缩通道真机实证（2026-09-14-session-ctx-compact task-07）
+状态：已完成
+关联变更：2026-09-14-session-ctx-compact（task-07 / FR-08 / R-01·R-02·R-03）
+方法：临时脚本真机驱动（$TEMP/spike-compact-pi.mjs / spike-compact-codex.mjs，不进仓）
+结论：
+1. spike-02 codex **全实证**：真机 codex app-server 0.147 建线程跑一轮后发 `thread/compact/start {threadId}`（camelCase）→ response `{"id":100,"result":{}}` 空对象受理，与设计/实现完全一致；thread/compacted 通知未见（v1 不消费，NG-04 无影响）
+2. spike-01 pi **机制实证**：真机 pi 0.81.1 rpc 模式 get_state→prompt→turn_end 后发 `{"type":"compact"}` 命令，返回真实 response 信封与文档错误语义（"Nothing to compact (session too small)"，三轮放大上下文仍低于压缩阈值 ~36k tokens 未取得数字回执）——命令通道/响应信封/error 语义实证；回执字段名 tokensBefore/estimatedTokensAfter 以官方 rpc.md:374-411 为准，代码留有 spike 校正点（不符只改 data 读取处）
+3. R-01 claude **未取得真机实证**：本机裸 claude CLI 认证失效（401 authentication_failed 重试环），stream-json 仅见 init/api_retry 帧；按设计降级姿态收口——官方 Agent SDK 文档背书 slash 经 prompt 分发 + 代码就位 + 生产实证不生效则 caps claude compact 翻 false 重生成（按钮消失，其余三键不受影响）

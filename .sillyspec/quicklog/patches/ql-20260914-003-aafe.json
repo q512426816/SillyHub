@@ -1,0 +1,51 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-dc2b3195",
+  "totals": {
+    "files": 2,
+    "additions": 81,
+    "deletions": 0
+  },
+  "rows": [
+    {
+      "path": "sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts",
+      "declared": true,
+      "additions": 72,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts",
+      "declared": true,
+      "additions": 9,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": [
+      {
+        "file": ".sillyspec/quicklog/QUICKLOG-qinyi.md",
+        "sessions": [
+          "quick-9183ddfb"
+        ]
+      },
+      {
+        "file": "docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md",
+        "sessions": [
+          "quick-9183ddfb"
+        ]
+      }
+    ]
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260914-003-aafe",
+  "sessionId": "quick-dc2b3195",
+  "savedAt": "2026-09-14T01:15:54.001Z",
+  "patchSha256": "717cfc1fe331ce23478919bde3c3906e7402fab82e4085482a024316956cb82e",
+  "patchStatus": "ok"
+}

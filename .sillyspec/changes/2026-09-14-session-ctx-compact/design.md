@@ -99,6 +99,7 @@ caps 键 → backend 端点（双分路）→ daemon 控制链（pi/codex）→ 
 | 修改 | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | 两处 toEqual 补 compact（FR-01） |
 | 修改 | sillyhub-daemon/tests/provider-adapter-registry.test.ts | 键数注释（FR-01） |
 | 修改 | backend/app/modules/daemon/router/session_crud.py | POST /sessions/{id}/compact 双分路（claude=inject 复用+冲突映射 / pi·codex=ws RPC，FR-02） |
+| 修改 | backend/app/modules/daemon/router/__init__.py | _ENDPOINT_ORDER 表加 compact_session（执行期机械必改：import 期硬校验不变量，不加则 daemon 全测试崩——task-02 review 留痕） |
 | 修改 | backend/app/modules/daemon/schema.py | CompactRequest/Response DTO（FR-02） |
 | 新增 | NEW:backend/app/modules/daemon/session/service/compact.py | compact 服务：三校验 + claude 复用 inject_session + pi/codex ws RPC 派发与结果映射（FR-02/03，照 inject.py 先例落点） |
 | 修改 | backend/openapi.json + frontend/src/lib/api-types.ts | gen:types 产物（新端点） |
