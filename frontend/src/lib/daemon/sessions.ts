@@ -305,6 +305,9 @@ export async function createSession(
   if (input.llm_provider_id !== undefined) {
     body.llm_provider_id = input.llm_provider_id;
   }
+  // quick-e09c48e1：预会话模型选择随首句上送（thinking-level task-06 审查发现的
+  // 既有缺陷——page :2119 传了 model 但 body 组装漏转发，preModelId 到不了后端）。
+  if (input.model !== undefined) body.model = input.model;
   // 2026-09-14-session-thinking-level task-06（FR-06）：预会话档位下拉暂存值随
   // 首句上送（有值才带；off=平台默认档——daemon 按引擎映射：claude/codex 不设
   // effort=引擎默认、pi 直传 'off' 真关思考，语义差异见档位下拉 tooltip）。

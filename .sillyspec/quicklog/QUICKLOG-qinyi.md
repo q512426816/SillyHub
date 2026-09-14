@@ -317,3 +317,13 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：24h 审查发现双计数器缺陷：nextRpcId（turn/start·interrupt，≥3 无上界）与 nextJsonRpcId（compact，seed 100）共享 id 空间，长会话约 97 轮后交叉撞号，同 id 并发时 _maybeResolveJsonRpcResponse 按先到回执错配唤醒 pending（压缩结果误报）
 方案：删 nextJsonRpcId 字段（含句柄初始化与注释三处），_sendJsonRpcRequest 改复用 nextRpcId++ 单源分配——在途请求 id 全局唯一；既有 8 处 seed-100 断言同步统一计数器语义（未发 turn 首取 3）；新增防碰撞回归用例（nextRpcId 推到交叉点 100 后 compact/turn/start 分号不同、turn 回执先到不误唤醒、正主 id 才 resolve）
 结果：codex-app-server-driver.test.ts 61/61 两轮全绿（含并行 thinking-level 同文件新增 8 例）+ tsc --noEmit 0 错；代码改动已被并行会话以 e771bcec4 裹入提交（标注 ql-20260915-001 并行会话产物），经受 7c0ef8a4c 同文件叠加后复验仍绿
+
+## ql-20260915-002-f826 | 2026-09-15 07:41:34 | 修 createSession 客户端漏 model 字段转发
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/daemon/sessions.ts（body 组装加 model 转发一行（有值才带先例））
+需求：修 createSession 客户端漏 model 字段转发
+根因：预会话模型下拉 preModelId 在 page 传了 model 但 body 组装漏写 body.model，模型选择到不了后端（thinking-level task-06 审查发现的既有缺陷）
+方案：body 组装 llm_provider_id 块后加 if (input.model !== undefined) body.model = input.model（有值才带先例+quick ID 注释锚定）
+结果：tsc exit 0 + 相邻 session 测试 73 passed（picker 27+config-bar 46）；一行改动零行为面扩展
