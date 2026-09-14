@@ -1,0 +1,3057 @@
+diff --git a/backend/app/modules/daemon/router/__init__.py b/backend/app/modules/daemon/router/__init__.py
+index d8ec8e5f3..5d04ba316 100644
+--- a/backend/app/modules/daemon/router/__init__.py
++++ b/backend/app/modules/daemon/router/__init__.py
+@@ -128,6 +128,7 @@ from . import (  # noqa: E402, F401, I001
+     notify,  # 首现 #31-40（恢复/挂起 + notify_*×6，#45-48 权限/dialog）
+     daemon_rpc,  # 首现 #43-44（fs list-dir/roots，#77-83 pending/controls/skills/mcp）
+     session_crud,  # 首现 #49-53（sessions 域，#60-66 reopen..ctx-window）+ D-010 二回合 pin/unpin/rename
++    session_export,  # 2026-09-14-session-export task-03：POST /sessions/export（字面量前置 {session_id}）
+     session_queue,  # 首现 #54-59（queue ×6）+ D-010 二回合 scheduled ×3
+     session_insights,  # 首现 #67-71（stream/runs/tasks/logs/usage）
+     session_team,  # 首现 #72-73（team-mission trigger/list）
+@@ -205,9 +206,12 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
+     "submit_session_permission_request",
+     "list_pending_dialogs",
+     "list_dialog_history",
+-    # session_crud（/sessions/events 先于 /sessions/{session_id}，同形状保序对）
++    # session_crud（/sessions/events 与 POST /sessions/export 两字面量先于
++    # /sessions/{session_id} 参数路由，同形状保序对——2026-09-14-session-export
++    # R-01：export 不前置会被 {session_id} 抢匹配，ppm 同类坑）
+     "list_sessions",
+     "stream_sessions_events",
++    "export_sessions",
+     "get_session_detail",
+     "create_session",
+     "inject_session",
+diff --git a/backend/app/modules/daemon/router/session_export.py b/backend/app/modules/daemon/router/session_export.py
+new file mode 100644
+index 000000000..890cbe8c4
+--- /dev/null
++++ b/backend/app/modules/daemon/router/session_export.py
+@@ -0,0 +1,75 @@
++"""session 导出端点（2026-09-14-session-export task-03 / FR-01 / FR-03 / D-001@v1）。
++
++POST /sessions/export：body ``SessionExportRequest``（session_ids 1~50 + tier 双档
++Literal），鉴权闸门 ``TaskRunAgentUser``（task:run_agent，与 detail / runs / logs /
++usage 同一道闸门，对齐 session_insights.get_session_usage 的权限闸门注释惯例）；
++附件存储经 ``_make_storage`` 依赖注入（照 session_attachment/router.py 同名
++provider 形态在本模块自建，full 档取附件本体用）。
++
++端点职责严格收窄：ids 去重保序（design 注明归端点层）→ facade 一行转发 →
++按 ``SessionExportResult`` 组 Response（media_type + RFC5987 Content-Disposition）。
++渲染 / 权限 / 截断 / 413 全在 task-02 服务层（session/service/export.py）——
++本端点零导出业务逻辑。错误映射走既有体系：``DaemonSessionNotFound``(404) 与
++``SessionExportTooLarge``(413) 均为 AppError 子类，经 main.py
++``register_exception_handlers`` 的全局 handler 按 ``http_status`` 自动映射，
++无需手写。
++
++挂载顺序（R-01）：固定路径 ``/sessions/export`` 必须注册在参数路由
++``/sessions/{session_id}``（get_session_detail）之前——否则 "export" 会被当作
++{session_id} 匹配（ppm export-excel 同类坑已登记知识库）。本模块只声明路由，
++实际前置由包 ``__init__`` 的 ``_ENDPOINT_ORDER`` 有序表保证（fail-fast 断言）。
++"""
++
++from __future__ import annotations
++
++from typing import Annotated
++
++from fastapi import Depends
++from fastapi.responses import Response
++
++from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
++from app.modules.daemon.schema import SessionExportRequest
++from app.modules.daemon.service import DaemonService
++from app.modules.daemon.session.service.export import _rfc5987_filename
++from app.modules.session_attachment.storage import SessionAttachmentStorage
++from app.modules.storage.factory import get_storage_backend
++
++
++def _make_storage() -> SessionAttachmentStorage:
++    """附件存储 provider（照 session_attachment/router.py 依赖形态自建）。"""
++    return SessionAttachmentStorage(get_storage_backend())
++
++
++@router.post("/sessions/export")
++async def export_sessions(
++    payload: SessionExportRequest,
++    session: SessionDep,
++    user: TaskRunAgentUser,
++    storage: Annotated[SessionAttachmentStorage, Depends(_make_storage)],
++) -> Response:
++    """导出选中的会话（chat=Markdown 对话 / full=JSON+附件 zip；FR-01 / FR-02）。
++
++    响应矩阵由服务层决定（``SessionExportResult``）：chat×单会话 =
++    ``text/markdown`` 单 .md；chat×多会话 与 full×任一 = ``application/zip``。
++    下载文件名走 RFC 5987（``_rfc5987_filename`` 返回完整头值，含
++    ``attachment;`` 前缀与 ASCII 回退，中文文件名浏览器优先解码 filename*）。
++
++    权限逐会话对齐详情端点口径（owner + 软删 404 → 群参与者探测，任一不可
++    访问整包 404 不做部分成功）；跨用户 / 已软删 / 群非成员均 404 不泄露
++    存在性，full 档附件总量超 512MB 返回 413 提示分批导出——两者均经全局
++    AppError handler 自动映射，端点不捕获。
++    """
++    svc = DaemonService(session)
++    # ids 去重保序（design：归端点层；服务层收原生参数不做二次去重）。
++    session_ids = list(dict.fromkeys(payload.session_ids))
++    result = await svc.export_sessions(
++        user.id,
++        session_ids=session_ids,
++        tier=payload.tier,
++        storage=storage,
++    )
++    return Response(
++        content=result.payload,
++        media_type=result.media_type,
++        headers={"Content-Disposition": _rfc5987_filename(result.filename)},
++    )
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 1b2ed9e87..d0d977d59 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -512,6 +512,22 @@ class SessionReopenResponse(BaseModel):
+     status: str
+ 
+ 
++class SessionExportRequest(BaseModel):
++    """POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。
++
++    会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+
++    ``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=
++    本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=
++    ``api-types.ts``（具名产源，字段名/形状不得增删改）。
++
++    去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收
++    原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。
++    """
++
++    session_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
++    tier: Literal["chat", "full"]
++
++
+ # ── Register ────────────────────────────────────────────────────────────────
+ 
+ 
+diff --git a/backend/app/modules/daemon/service.py b/backend/app/modules/daemon/service.py
+index ebddc795e..00e2d083e 100644
+--- a/backend/app/modules/daemon/service.py
++++ b/backend/app/modules/daemon/service.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+ 
+ import uuid
+ from datetime import datetime
+-from typing import TYPE_CHECKING
++from typing import TYPE_CHECKING, Literal
+ from uuid import UUID
+ 
+ from sqlalchemy.ext.asyncio import AsyncSession
+@@ -26,6 +26,7 @@ from app.modules.daemon.schema import (
+     SessionReopenResponse,
+     TeamMissionCreateBlock,
+ )
++from app.modules.session_attachment.storage import SessionAttachmentStorage
+ 
+ log = get_logger(__name__)
+ 
+@@ -80,6 +81,13 @@ from app.modules.daemon.session.service import (  # noqa: E402, F401
+     SessionRecoveryResult,
+ )
+ 
++# 2026-09-14-session-export task-02/03：导出产物 DTO + 413 异常类（AppError 子类，
++# 全局 handler 自动映射），照「异常类定义在子包、facade re-export 路径不变」惯例。
++from app.modules.daemon.session.service.export import (  # noqa: E402, F401
++    SessionExportResult,
++    SessionExportTooLarge,
++)
++
+ if TYPE_CHECKING:
+     from app.modules.daemon.host_fs import HostFsDelegate
+     from app.modules.daemon.run_sync.service import SubmittedMessages
+@@ -1095,6 +1103,24 @@ class DaemonService:
+             **({"limit": limit} if limit is not None else {}),
+         )
+ 
++    # 2026-09-14-session-export task-03：会话导出一行透传（照 get_agent_session_logs
++    # 先例）。服务收原生参数不 import schema 模型；storage 由 router 层 Depends
++    # 注入一并透传（ids 去重保序在端点层完成后才到达这里）。
++    async def export_sessions(
++        self,
++        user_id: uuid.UUID,
++        *,
++        session_ids: list[uuid.UUID],
++        tier: Literal["chat", "full"],
++        storage: SessionAttachmentStorage,
++    ) -> SessionExportResult:
++        return await self._sess.export_sessions(
++            user_id,
++            session_ids=session_ids,
++            tier=tier,
++            storage=storage,
++        )
++
+     # ── Helpers ───────────────────────────────────────────────────────────
+ 
+     async def _publish_run_event(
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index 03c7c59f1..7ed261010 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -80,6 +80,10 @@ from app.modules.ppm.common.session_binding import PpmItemKind
+ from app.modules.ppm.problem.model import PpmProblemList
+ from app.modules.ppm.task.model import PlanTask
+ 
++# 2026-09-14-session-export task-02：导出委托签名注解用（storage 透传，
++# 不跨模块 import ppm）。
++from app.modules.session_attachment.storage import SessionAttachmentStorage
++
+ log = get_logger(__name__)
+ 
+ # task-05（2026-08-14-sessions-portal / D-012@v1 / FR-05）：会话内配置热切换 WS
+@@ -245,6 +249,7 @@ __all__ = [
+ from . import attachments as _attachments  # noqa: E402
+ from . import control as _control  # noqa: E402
+ from . import create as _create  # noqa: E402
++from . import export as _export  # noqa: E402
+ from . import helpers as _helpers  # noqa: E402
+ from . import inject as _inject  # noqa: E402
+ from . import inject_gates as _inject_gates  # noqa: E402
+@@ -1140,3 +1145,22 @@ class SessionService(BackgroundTaskMixin):
+             session_id=session_id,
+             actor_user_id=actor_user_id,
+         )
++
++    # ── 2026-09-14-session-export task-02：会话导出一行委托（服务收原生
++    #    参数不 import schema 模型；facade/router 接线归 task-03）──────────
++
++    async def export_sessions(
++        self,
++        user_id: uuid.UUID,
++        *,
++        session_ids: list[uuid.UUID],
++        tier: Literal["chat", "full"],
++        storage: SessionAttachmentStorage,
++    ) -> _export.SessionExportResult:
++        return await _export.export_sessions(
++            self,
++            user_id,
++            session_ids=session_ids,
++            tier=tier,
++            storage=storage,
++        )
+diff --git a/backend/app/modules/daemon/session/service/export.py b/backend/app/modules/daemon/session/service/export.py
+new file mode 100644
+index 000000000..12f10f537
+--- /dev/null
++++ b/backend/app/modules/daemon/session/service/export.py
+@@ -0,0 +1,737 @@
++"""会话导出服务（2026-09-14-session-export task-02 / FR-02 / FR-04 / FR-05）。
++
++模块函数风格照 ``read_model.py`` 先例（第一参数 svc，复用 ``svc._session``
++请求级 DB 会话），经 ``SessionService`` 类壳一行委托暴露（``__init__.py``；
++facade/router 接线归 task-03）。两档产物（design §总体方案·后端设计）：
++
++- **chat 档**：``user_input`` 行 + 经噪声排除的幸存 ``stdout`` 行 → Markdown
++  （单会话直接 .md 响应，多会话 zip 内每会话一个 .md）；
++- **full 档**：全量日志原字段 + runs 元数据 + 任务卡 + 附件清单与本体 →
++  zip（每会话一目录 ``{标题}_{id前8}/full.json`` + ``attachments/``）。
++
++关键口径（design 定死）：
++
++- 权限逐会话对齐**详情端点**口径（owner + 软删 404 → ``get_group_accessible_session``
++  群探测，任一不可访问整包 404，不做部分成功）；
++- 每会话独立 **20000 行**上限**保最早**——自建 ``timestamp ASC + limit`` 变体，
++  **绝不**复用 ``get_agent_session_logs`` 的「newest-N 再反转」语义（回放保最新、
++  导出保最早，方向相反）；跨 run 聚合键只用 ``AgentRun.agent_session_id``
++  （resume 语义的 ``AgentRun.session_id`` 是 read_model 明确标注的坑）；
++- CPU 密集段（zip/json/md 序列化）经 ``anyio.to_thread.run_sync`` 包裹
++  （照 ppm/common/export.py X-002 先例，daemon 域自建 helper 不 import ppm）；
++- full 档附件元数据 ``bytes`` 预聚合 >512MB 抛 413（取流前预检，不产生半包
++  浪费，R-09）；单附件读取失败降级清单 ``missing=true`` 继续，不整体 500（R-03）。
++"""
++
++from __future__ import annotations
++
++import json
++import re
++import uuid
++import zipfile
++from collections.abc import Mapping, Sequence
++from dataclasses import dataclass
++from datetime import datetime
++from io import BytesIO
++from typing import Literal
++from urllib.parse import quote
++
++import anyio
++from sqlalchemy import func, select
++from sqlmodel import col
++
++from app.core.errors import AppError
++from app.core.logging import get_logger
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++from app.modules.daemon.model import AgentSessionTask
++from app.modules.session_attachment.model import SessionAttachment
++from app.modules.session_attachment.storage import SessionAttachmentStorage
++
++from .errors import DaemonSessionNotFound
++
++log = get_logger(__name__)
++
++# 每会话独立的导出行上限（design §行数上限：log 行 / 每会话独立 / 保最早，
++# 不沿用回放 5000）。超限 truncated=true + dropped_rows，丢弃的是较晚行。
++EXPORT_LOG_ROW_LIMIT = 20000
++
++# full 档整包附件总量上限（R-09：50 会话 × 多附件可达 GB 级响应）。
++EXPORT_ATTACHMENTS_TOTAL_BYTES_LIMIT = 512 * 1024 * 1024
++
++# 任务卡快照上限（对齐 GET /sessions/{id}/tasks 的 _SESSION_TASKS_MAX=200 口径）。
++_EXPORT_TASKS_MAX_ROWS = 200
++
++# full JSON 产物版本号（design「版本化，便于未来演进」）。
++_EXPORT_VERSION = 1
++
++_TIER_LABELS: dict[str, str] = {"chat": "对话", "full": "完整信息"}
++
++# zip 条目名/展示标题的空回退（design §zip 条目名）。
++_UNTITLED_FALLBACK = "未命名会话"
++
++
++class SessionExportTooLarge(AppError):
++    """full 档整包附件总量超 512MB（R-09）——413 + 提示分批导出。"""
++
++    code = "HTTP_413_SESSION_EXPORT_TOO_LARGE"
++    http_status = 413
++
++
++@dataclass(slots=True)
++class SessionExportResult:
++    """导出产物（task-03 router 据此回 Response：media_type + RFC5987 文件名 + 字节）。
++
++    Attributes:
++        media_type: ``text/markdown``（chat×单会话）或 ``application/zip``。
++        filename: 原始 UTF-8 显示文件名——chat×单会话 = ``{sanitize(标题)}_{id前8}.md``
++            （design §响应矩阵,与 zip 内条目基名同款）；其余（zip） =
++            ``会话导出_{档位中文}_{时间戳}.zip``。Content-Disposition 头组装用
++            ``_rfc5987_filename``。
++        payload: 产物字节（md UTF-8 文本 / zip 归档）。
++    """
++
++    media_type: str
++    filename: str
++    payload: bytes
++
++
++@dataclass(slots=True)
++class _SessionExportBundle:
++    """单会话导出数据包（权限/行数截断/任务/附件装配完成后的中间形态）。"""
++
++    session: AgentSession
++    runs: list[AgentRun]
++    logs: list[AgentRunLog]
++    tasks: list[AgentSessionTask]
++    attachments: list[SessionAttachment]
++    truncated: bool
++    dropped_rows: int
++
++
++# ── stdout 噪声排除（R-08：与前端 session-log-assembler.ts classifySessionLog
++#    同源对齐的纯函数；判定用例锚 __tests__/session-log-assembler.test.ts，
++#    两边改动时相互提示，防止语义漂移）────────────────────────────────────────
++
++# 含 AskUserQuestion 的卡片协议行（前端 contains 判定，非前缀锚定）。
++_ASK_USER_QUESTION_MARK = "AskUserQuestion"
++# [TOOL_RESULT] User answered 形态（AskUserQuestion 的用户答复回显行）。
++_TOOL_RESULT_USER_ANSWERED_RE = re.compile(r"^\[TOOL_RESULT\]\s*User answered")
++# [(SYSTEM|RESULT)…] 前缀技术标记行（如 [SYSTEM:thinking_tokens] 48）。
++_SYSTEM_RESULT_PREFIX_RE = re.compile(r"^\[(SYSTEM|RESULT)[^\]]*\]")
++# override 撤回令箭行（必须在 [THINKING] 判定之前——见前端同类注释，
++# [THINKING_OVERRIDE] 会被 [THINKING] 前缀正则误吞丢 _OVERRIDE 语义）。
++_OVERRIDE_RE = re.compile(r"^\[(ASSISTANT_OVERRIDE|THINKING_OVERRIDE)\]\s+(\S+)")
++# [TOOL_USE] stdout 文本行：与 channel=tool_call JSON 是同一工具的双发重复，
++# tool_call JSON 为权威源，文本行丢弃（ql-20260730-003）。
++_TOOL_USE_TEXT_RE = re.compile(r"^\[TOOL_USE\]\s?")
++# [TOOL_RESULT] 通用文本行：归 tool_result 段不进正文（design：通用形态与
++# User answered 形态全部排除）。
++_TOOL_RESULT_TEXT_RE = re.compile(r"^\[TOOL_RESULT\]\s?")
++# [TASK_*] 后台任务生命周期行（前缀 + 单行 JSON，task-11 契约）。
++_TASK_LINE_RE = re.compile(r"^\[(TASK_STARTED|TASK_PROGRESS|TASK_NOTIFICATION)\]\s?")
++# [THINKING] 前缀行：chat 档排除（属 full 档过程信息）。
++_THINKING_PREFIX_RE = re.compile(r"^\[THINKING\]\s?")
++# 技能装载注入行（ql-20260824-017：SKILL.md 全文以 assistant 文本块注入，
++# 属技能协议载荷非用户答复）；仅 [ASSISTANT] 前缀形态，裸文本不误吞。
++_SKILL_LOAD_RE = re.compile(
++    r"^\[ASSISTANT\]\s*Base directory for this skill:",
++    re.IGNORECASE,
++)
++_ASSISTANT_PREFIX_RE = re.compile(r"^\[ASSISTANT\]\s?")
++# CLI 合成鉴权/网关错误行（ql-20260904-013 + ql-20260906-001 行首锚定收紧；
++# 与前端 normalize.ts isAssistantApiErrorText 同口径）。
++_CLI_SYNTHETIC_ERROR_RES: tuple[re.Pattern[str], ...] = (
++    re.compile(r"^API\s*Error", re.IGNORECASE),
++    re.compile(r"^Request\s+rejected", re.IGNORECASE),
++    re.compile(r"^Not\s+logged\s+in", re.IGNORECASE),
++    re.compile(r"^Please\s+run\s+/login", re.IGNORECASE),
++)
++# 幸存行剥 [ASSISTANT]/[THINKING]/[LOG:\w+] 发言方前缀（前端 reply 分支同款）。
++_SPEAKER_PREFIX_RE = re.compile(r"^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?")
++
++
++def _is_task_lifecycle_line(trimmed: str) -> bool:
++    """[TASK_*] 行是否为合法生命周期行（坏 JSON/非法 status 降级文本不排除）。
++
++    照前端 parseTaskLine 容错语义（R-07）：前缀命中后载荷须可解析为 JSON 对象；
++    TASK_NOTIFICATION 还须携带合法终态 status，否则整行降级普通文本行
++    （宁进正文不丢内容）。
++    """
++    match = _TASK_LINE_RE.match(trimmed)
++    if match is None:
++        return False
++    try:
++        payload = json.loads(trimmed[match.end() :])
++    except ValueError:
++        return False
++    if not isinstance(payload, dict):
++        return False
++    if match.group(1) in ("TASK_STARTED", "TASK_PROGRESS"):
++        return True
++    return payload.get("status") in ("completed", "failed", "stopped")
++
++
++def _is_cli_synthetic_error_line(trimmed: str) -> bool:
++    """CLI 合成鉴权/网关错误行判定（仅 [ASSISTANT] 前缀形态，codex 裸流不误吞）。"""
++    match = _ASSISTANT_PREFIX_RE.match(trimmed)
++    if match is None:
++        return False
++    body = trimmed[match.end() :].lstrip()
++    return any(pattern.match(body) for pattern in _CLI_SYNTHETIC_ERROR_RES)
++
++
++def _assistant_text_from_stdout(content: str) -> str | None:
++    """stdout 行 → 助手正文（噪声排除纯函数，chat 档正文派生规则）。
++
++    与前端 ``classifySessionLog``（session-log-assembler.ts:288-366）逐条同源：
++    命中任一噪声形态返回 ``None``；幸存行剥 ``[ASSISTANT]``/``[LOG:\\w+]``
++    前缀后作为助手正文返回（剥后为空同样返回 ``None``——不产空正文段）。
++
++    排除清单（design §chat Markdown 组装）：空行 / 含 AskUserQuestion /
++    [TOOL_RESULT]（通用 + User answered 形态）/ [(SYSTEM|RESULT)…] 前缀 /
++    [TOOL_USE] 文本行（双发去重）/ 合法 [TASK_*] 生命周期行 / 技能装载载荷行 /
++    CLI 合成鉴权与网关错误行 / [ASSISTANT_OVERRIDE]/[THINKING_OVERRIDE] 撤回
++    标记行 / [THINKING] 前缀行（chat 档排除，属 full 档）。
++    """
++    trimmed = (content or "").strip()
++    if not trimmed:
++        return None
++    if _ASK_USER_QUESTION_MARK in trimmed:
++        return None
++    if _TOOL_RESULT_USER_ANSWERED_RE.match(trimmed):
++        return None
++    if _SYSTEM_RESULT_PREFIX_RE.match(trimmed):
++        return None
++    if _OVERRIDE_RE.match(trimmed):
++        return None
++    if _TOOL_USE_TEXT_RE.match(trimmed):
++        return None
++    if _TOOL_RESULT_TEXT_RE.match(trimmed):
++        return None
++    if _is_task_lifecycle_line(trimmed):
++        return None
++    if _THINKING_PREFIX_RE.match(trimmed):
++        return None
++    if _SKILL_LOAD_RE.match(trimmed):
++        return None
++    if _is_cli_synthetic_error_line(trimmed):
++        return None
++    text = _SPEAKER_PREFIX_RE.sub("", trimmed, count=1)
++    return text or None
++
++
++# ── 文件名 helper（daemon 域自建，不 import ppm——design §响应矩阵）──────────
++
++# zip 条目名非法字符：路径分隔/通配/引号/控制符等（Windows 与 POSIX 并集）。
++_ILLEGAL_NAME_CHARS_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
++# Windows 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9；含带扩展名形态 CON.txt）。
++_WINDOWS_RESERVED_NAMES = frozenset(
++    {"CON", "PRN", "AUX", "NUL"}
++    | {f"COM{i}" for i in range(1, 10)}
++    | {f"LPT{i}" for i in range(1, 10)}
++)
++
++
++def _sanitize_zip_name(name: str) -> str:
++    """zip 条目名/展示标题 sanitize（R-05）。
++
++    去非法字符与控制符 → 修剪结尾点/空格（Windows 资源管理器会剥离结尾点/空格
++    造成半截名）→ Windows 保留设备名（按首个点前的 stem 判定，大小写不敏感）
++    前缀下划线破坏保留语义 → 空/全非法回退「未命名会话」。
++    """
++    cleaned = _ILLEGAL_NAME_CHARS_RE.sub("", (name or "").strip()).rstrip(" .")
++    stem = cleaned.split(".", 1)[0].strip().upper()
++    if stem in _WINDOWS_RESERVED_NAMES:
++        cleaned = f"_{cleaned}"
++    return cleaned or _UNTITLED_FALLBACK
++
++
++def _rfc5987_filename(filename: str) -> str:
++    """组装 Content-Disposition 头值（RFC 5987 中文文件名，照 ppm 先例形态）。
++
++    ``filename`` 为 latin-1 超集外的中文时不能直接内联——用
++    ``filename*=UTF-8''<percent-encoded>`` 承载原文（主流浏览器优先解码），
++    ``filename`` 作 ASCII 回退（旧浏览器/curl 可读但乱码）。task-03 router
++    直接把返回值放进响应头。
++    """
++    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "download"
++    encoded = quote(filename, safe="")
++    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
++
++
++def _timestamped_filename(label: str, ext: str) -> str:
++    """「中文标签_YYYYMMDD_HHMMSS.ext」下载文件名（照 ppm timestamped_filename
++    风格自建，本地时间；统一导出产物外层文件名）。"""
++    return f"{label}_{datetime.now():%Y%m%d_%H%M%S}.{ext}"
++
++
++# ── 渲染（CPU 密集，调用方经 anyio.to_thread 包裹）──────────────────────────
++
++
++def _iso(value: datetime | None) -> str | None:
++    return value.isoformat() if value is not None else None
++
++
++def _display_title(session: AgentSession) -> str:
++    """展示标题：title 列为空（旧 chat 会话）回退「未命名会话」。"""
++    title = (session.title or "").strip()
++    return title or _UNTITLED_FALLBACK
++
++
++def _member_name_of(row: AgentRunLog) -> str | None:
++    """群聊行发言者前缀：从投影行 metadata_ 取 member_name（单聊行 NULL）。"""
++    meta = row.metadata_
++    if isinstance(meta, Mapping):
++        name = meta.get("member_name")
++        if isinstance(name, str) and name.strip():
++            return name.strip()
++    return None
++
++
++def _render_chat_markdown(
++    session: AgentSession,
++    runs: Sequence[AgentRun],
++    logs: Sequence[AgentRunLog],
++    *,
++    truncated: bool = False,
++    dropped_rows: int = 0,
++) -> str:
++    """chat 档 Markdown 渲染（会话头 + 按 run 分轮的用户/助手文本）。
++
++    正文派生规则（design §chat Markdown 组装）：``user_input`` 行=用户消息
++    （附件标记行 ``[附件:名|类型]`` 原样保留；群聊行以 metadata_ 的
++    member_name 作发言者前缀）；``stdout`` 行经 ``_assistant_text_from_stdout``
++    噪声排除后为助手正文。``stderr``/``tool_call``/``pending_input``/``system``
++    行不进 chat 档（full 档全保留）。logs 须为跨 run 稳定升序（导出查询
++    保证），按 ``run_id`` 连续切段即「轮」。截断时文件尾标注 truncated 与
++    丢弃行数（design §行数上限）。
++    """
++    lines: list[str] = [f"# {_display_title(session)}", ""]
++    lines.append(f"- 供应商：{session.provider}")
++    if session.runtime_id is not None:
++        lines.append(f"- 运行时：{session.runtime_id}")
++    lines.append(f"- 状态：{session.status}")
++    lines.append(f"- 创建时间：{_iso(session.created_at) or '—'}")
++    if session.last_active_at is not None:
++        lines.append(f"- 最近活跃：{_iso(session.last_active_at)}")
++    lines.append(f"- 轮数：{len(runs)}")
++
++    current_run_id: uuid.UUID | None = None
++    turn_index = 0
++    for row in logs:
++        if row.channel not in ("user_input", "stdout"):
++            continue
++        content = row.content_redacted or ""
++        if row.channel == "user_input":
++            text = content.strip()
++        else:
++            text = _assistant_text_from_stdout(content)
++        if not text:
++            continue
++        if row.run_id != current_run_id:
++            current_run_id = row.run_id
++            turn_index += 1
++            lines.extend(["", f"## 第 {turn_index} 轮", ""])
++        speaker = _member_name_of(row) or ("用户" if row.channel == "user_input" else "助手")
++        lines.extend([f"**{speaker}**：{text}", ""])
++
++    if truncated:
++        lines.extend(
++            [
++                "---",
++                "",
++                (
++                    f"> 注：日志超过导出上限，已保留最早的 {EXPORT_LOG_ROW_LIMIT} 行，"
++                    f"丢弃 {dropped_rows} 行（truncated: true）。"
++                ),
++                "",
++            ]
++        )
++    return "\n".join(lines)
++
++
++def _render_full_json(
++    session: AgentSession,
++    runs: Sequence[AgentRun],
++    logs: Sequence[AgentRunLog],
++    tasks: Sequence[AgentSessionTask],
++    attachments_meta: Sequence[Mapping[str, object]],
++    *,
++    truncated: bool = False,
++    dropped_rows: int = 0,
++) -> dict:
++    """full 档 JSON 渲染（design §接口定义 full JSON 顶层结构，export_version=1）。
++
++    ``logs`` 为全字段原样导出（含 thinking/tool_call/edit_patch/metadata_）；
++    ``tasks`` 为 agent_session_task 快照；``attachments_meta`` 为附件清单
++    （含 zip_path 与 missing 标记，由附件取流降级结果装配）。
++    """
++    return {
++        "export_version": _EXPORT_VERSION,
++        "session": {
++            "id": str(session.id),
++            "title": _display_title(session),
++            "runtime_id": str(session.runtime_id) if session.runtime_id is not None else None,
++            "provider": session.provider,
++            "status": session.status,
++            "created_at": _iso(session.created_at),
++            "last_active_at": _iso(session.last_active_at),
++            "turn_count": session.turn_count,
++            "config_snapshot": session.config_snapshot,
++        },
++        "runs": [
++            {
++                "id": str(run.id),
++                "status": run.status,
++                "model": run.model,
++                "started_at": _iso(run.started_at),
++                "finished_at": _iso(run.finished_at),
++                "input_tokens": run.input_tokens,
++                "output_tokens": run.output_tokens,
++                "diff_summary": run.diff_summary,
++                "error_code": run.error_code,
++            }
++            for run in runs
++        ],
++        "logs": [
++            {
++                "id": str(row.id),
++                "run_id": str(row.run_id),
++                "timestamp": _iso(row.timestamp),
++                "channel": row.channel,
++                "content_redacted": row.content_redacted,
++                "tool_kind": row.tool_kind,
++                "parent_tool_use_id": row.parent_tool_use_id,
++                "subagent_type": row.subagent_type,
++                "depth": row.depth,
++                "edit_patch": row.edit_patch,
++                "metadata": row.metadata_,
++            }
++            for row in logs
++        ],
++        "tasks": [
++            {"task_name": task.task_name, "status": task.status, "summary": task.summary}
++            for task in tasks
++        ],
++        "attachments": [dict(item) for item in attachments_meta],
++        "truncated": truncated,
++        "dropped_rows": dropped_rows,
++    }
++
++
++def _zip_entry_base(session: AgentSession) -> str:
++    """zip 内会话目录/文件基名：sanitize 标题 + id 前 8 位防重名（Grill P2）。"""
++    return f"{_sanitize_zip_name(_display_title(session))}_{str(session.id)[:8]}"
++
++
++def _build_zip_entries(
++    bundles: Sequence[_SessionExportBundle],
++    tier: Literal["chat", "full"],
++    attachment_blobs: Mapping[uuid.UUID, bytes],
++) -> list[tuple[str, bytes]]:
++    """zip 条目装配（同步 CPU 密集）：chat=每会话一个 .md；full=每会话一目录。
++
++    full 档附件清单里的 ``zip_path`` 与实际写入条目一一对应
++    （``{base}/attachments/{附件id}_{sanitize(原名)}``）；取流失败的附件
++    不写条目、清单标 ``missing=true``（R-03 降级，整包继续）。
++    """
++    entries: list[tuple[str, bytes]] = []
++    for bundle in bundles:
++        base = _zip_entry_base(bundle.session)
++        if tier == "chat":
++            markdown = _render_chat_markdown(
++                bundle.session,
++                bundle.runs,
++                bundle.logs,
++                truncated=bundle.truncated,
++                dropped_rows=bundle.dropped_rows,
++            )
++            entries.append((f"{base}.md", markdown.encode("utf-8")))
++            continue
++        attachments_meta: list[dict[str, object]] = []
++        attachment_entries: list[tuple[str, bytes]] = []
++        for att in bundle.attachments:
++            blob = attachment_blobs.get(att.id)
++            zip_path = f"{base}/attachments/{att.id}_{_sanitize_zip_name(att.name)}"
++            if blob is not None:
++                attachment_entries.append((zip_path, blob))
++                missing = False
++            else:
++                missing = True
++            attachments_meta.append(
++                {
++                    "id": str(att.id),
++                    "name": att.name,
++                    "kind": att.kind,
++                    "media_type": att.media_type,
++                    "bytes": att.bytes,
++                    "zip_path": zip_path,
++                    "missing": missing,
++                }
++            )
++        full = _render_full_json(
++            bundle.session,
++            bundle.runs,
++            bundle.logs,
++            bundle.tasks,
++            attachments_meta,
++            truncated=bundle.truncated,
++            dropped_rows=bundle.dropped_rows,
++        )
++        entries.append((f"{base}/full.json", json.dumps(full, ensure_ascii=False).encode("utf-8")))
++        entries.extend(attachment_entries)
++    return entries
++
++
++def _zip_entries(entries: Sequence[tuple[str, bytes]]) -> bytes:
++    """zip 归档序列化（同步 CPU 密集，DEFLATED 压缩）。"""
++    buf = BytesIO()
++    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
++        for name, data in entries:
++            archive.writestr(name, data)
++    return buf.getvalue()
++
++
++# ── 查询与权限（async；聚合键只用 AgentRun.agent_session_id）────────────────
++
++
++async def _resolve_exportable_session(
++    svc,
++    session_id: uuid.UUID,
++    user_id: uuid.UUID,
++) -> AgentSession:
++    """权限逐会话对齐详情端点口径（``get_agent_session``）。
++
++    owner（``user_id`` 相等且软删 ``deleted_at IS NULL``——logs 端点的 owner
++    探测不过滤软删，导出**选详情口径**软删 404）未命中再走
++    ``get_group_accessible_session(allow_shadow_member_read=True)``（参与者/
++    workspace admin/影子成员读，同 ``get_agent_session_logs`` 探测顺序）；
++    仍不可访问抛 :class:`DaemonSessionNotFound`（404 不泄露存在性）。
++    """
++    owned = (
++        await svc._session.execute(
++            select(AgentSession).where(
++                AgentSession.id == session_id,
++                AgentSession.user_id == user_id,
++                AgentSession.deleted_at.is_(None),
++            )
++        )
++    ).scalar_one_or_none()
++    if owned is not None:
++        return owned
++    from app.modules.daemon.group.service import get_group_accessible_session
++
++    group_session = await get_group_accessible_session(
++        svc._session,
++        session_id=session_id,
++        user_id=user_id,
++        allow_shadow_member_read=True,
++    )
++    if group_session is not None and group_session.deleted_at is None:
++        return group_session
++    raise DaemonSessionNotFound(
++        f"AgentSession '{session_id}' not found.",
++        details={"session_id": str(session_id)},
++    )
++
++
++async def _fetch_export_runs_logs(
++    svc,
++    session_id: uuid.UUID,
++) -> tuple[list[AgentRun], list[AgentRunLog], bool, int]:
++    """会话级 runs + 导出日志（timestamp ASC + limit，**保最早** 20000 行）。
++
++    join/权限骨架照 ``read_model.get_agent_session_logs``（跨 run 排序锚=每 run
++    最早日志时间 coalesce started_at；run 内 timestamp/id 升序），但排序方向
++    反转（asc + limit）——回放取最新 N 再反转，导出从对话头开始保最早
++    （design 给 plan 的实现提示：不得复用 newest-N 语义）。返回
++    (runs, logs, truncated, dropped_rows)；dropped_rows = 总行数 - 上限。
++    """
++    session_run_ids = select(AgentRun.id).where(AgentRun.agent_session_id == session_id)
++    total_rows = int(
++        (
++            await svc._session.execute(
++                select(func.count())
++                .select_from(AgentRunLog)
++                .where(AgentRunLog.run_id.in_(session_run_ids))
++            )
++        ).scalar()
++        or 0
++    )
++
++    runs_stmt = (
++        select(AgentRun)
++        .where(AgentRun.agent_session_id == session_id)
++        # nulls_last 消除 PG/SQLite 方言分叉（started_at nullable）。
++        .order_by(col(AgentRun.started_at).asc().nulls_last(), AgentRun.id.asc())
++    )
++    runs = list((await svc._session.execute(runs_stmt)).scalars().all())
++
++    min_ts_subq = (
++        select(
++            AgentRunLog.run_id.label("run_id"),
++            func.min(AgentRunLog.timestamp).label("min_ts"),
++        )
++        .where(AgentRunLog.run_id.in_(session_run_ids))
++        .group_by(AgentRunLog.run_id)
++        .subquery()
++    )
++    run_anchor = (
++        select(
++            AgentRun.id.label("run_id"),
++            func.coalesce(min_ts_subq.c.min_ts, AgentRun.started_at).label("anchor_ts"),
++        )
++        .select_from(AgentRun)
++        .outerjoin(min_ts_subq, min_ts_subq.c.run_id == AgentRun.id)
++        .where(AgentRun.agent_session_id == session_id)
++        .subquery()
++    )
++    logs_stmt = (
++        select(AgentRunLog)
++        .select_from(AgentRunLog)
++        .join(run_anchor, run_anchor.c.run_id == AgentRunLog.run_id)
++        .order_by(
++            run_anchor.c.anchor_ts.asc(),
++            AgentRunLog.timestamp.asc(),
++            AgentRunLog.id.asc(),
++        )
++        .limit(EXPORT_LOG_ROW_LIMIT)
++    )
++    logs = list((await svc._session.execute(logs_stmt)).scalars().all())
++
++    truncated = total_rows > EXPORT_LOG_ROW_LIMIT
++    dropped_rows = max(0, total_rows - EXPORT_LOG_ROW_LIMIT)
++    return runs, logs, truncated, dropped_rows
++
++
++async def _fetch_export_tasks(svc, session_id: uuid.UUID) -> list[AgentSessionTask]:
++    """任务卡快照（照 GET /sessions/{id}/tasks：updated_at desc 最近 200 条）。"""
++    stmt = (
++        select(AgentSessionTask)
++        .where(AgentSessionTask.session_id == session_id)
++        .order_by(AgentSessionTask.updated_at.desc())
++        .limit(_EXPORT_TASKS_MAX_ROWS)
++    )
++    return list((await svc._session.execute(stmt)).scalars().all())
++
++
++async def _fetch_export_attachments(
++    svc,
++    session_id: uuid.UUID,
++) -> list[SessionAttachment]:
++    """full 档附件元数据（session 维度已绑定行，创建时间升序稳定序）。"""
++    stmt = (
++        select(SessionAttachment)
++        .where(SessionAttachment.session_id == session_id)
++        .order_by(SessionAttachment.created_at.asc())
++    )
++    return list((await svc._session.execute(stmt)).scalars().all())
++
++
++# ── 导出主入口（SessionService.export_sessions 类壳一行委托）────────────────
++
++
++async def export_sessions(
++    svc,
++    user_id: uuid.UUID,
++    *,
++    session_ids: list[uuid.UUID],
++    tier: Literal["chat", "full"],
++    storage: SessionAttachmentStorage,
++) -> SessionExportResult:
++    """会话导出主入口（design §接口定义签名；收原生参数，不 import schema 模型）。
++
++    流程：权限逐会话（任一不可访问整包 404，不做部分成功）→ 每会话装配
++    runs/logs（20000 行保最早截断）+ full 档 tasks/attachments → 附件总量
++    512MB 预检（取流前，超限 413）→ full 档逐附件取流（单件失败降级
++    missing 继续）→ 渲染 + 打包（``anyio.to_thread`` 防 CPU 阻塞事件循环）。
++
++    响应矩阵（design §响应矩阵）：chat×单会话 = ``text/markdown`` 单 .md；
++    chat×多会话 与 full×任一 = ``application/zip``。下载文件名：chat×单会话 =
++    ``{sanitize(标题)}_{id前8}.md``（design §响应矩阵）；zip（多会话/full） =
++    ``会话导出_{档位中文}_{YYYYMMDD_HHMMSS}.zip``；zip 内条目名同为
++    ``{sanitize(标题)}_{id前8}``（R-05 防非法字符/保留名/重名）。
++    """
++    # 1. 权限：逐会话详情口径探测（404 不泄露存在性）。
++    sessions = [
++        await _resolve_exportable_session(svc, session_id, user_id) for session_id in session_ids
++    ]
++
++    # 2. 数据装配（runs/logs 每会话独立 20000 行上限保最早）。
++    bundles: list[_SessionExportBundle] = []
++    total_attachment_bytes = 0
++    for session in sessions:
++        runs, logs, truncated, dropped_rows = await _fetch_export_runs_logs(svc, session.id)
++        tasks: list[AgentSessionTask] = []
++        attachments: list[SessionAttachment] = []
++        if tier == "full":
++            tasks = await _fetch_export_tasks(svc, session.id)
++            attachments = await _fetch_export_attachments(svc, session.id)
++            total_attachment_bytes += sum(att.bytes for att in attachments)
++        bundles.append(
++            _SessionExportBundle(
++                session=session,
++                runs=runs,
++                logs=logs,
++                tasks=tasks,
++                attachments=attachments,
++                truncated=truncated,
++                dropped_rows=dropped_rows,
++            )
++        )
++
++    # 3. 413 预检（元数据 bytes 预聚合，取流之前——不产生半包浪费，R-09）。
++    if tier == "full" and total_attachment_bytes > EXPORT_ATTACHMENTS_TOTAL_BYTES_LIMIT:
++        raise SessionExportTooLarge(
++            "导出附件总量超过 512MB 上限，请减少单次导出的会话数量分批导出。",
++            details={
++                "total_bytes": total_attachment_bytes,
++                "limit_bytes": EXPORT_ATTACHMENTS_TOTAL_BYTES_LIMIT,
++            },
++        )
++
++    # 4. full 档附件取流：单件失败（对象丢失/存储异常）降级清单 missing=true
++    #    继续，不整体 500（R-03）；async 读取留在事件循环，仅序列化进线程。
++    attachment_blobs: dict[uuid.UUID, bytes] = {}
++    if tier == "full":
++        for bundle in bundles:
++            for att in bundle.attachments:
++                try:
++                    attachment_blobs[att.id] = await storage.read_bytes(att.object_key)
++                except Exception:
++                    log.warning(
++                        "session_export.attachment_read_failed",
++                        attachment_id=str(att.id),
++                        object_key=att.object_key,
++                    )
++
++    # 5. 渲染 + 打包（zip/json/md 序列化均为 CPU 密集，to_thread 包裹）。
++    tier_label = _TIER_LABELS[tier]
++    if tier == "chat" and len(bundles) == 1:
++        bundle = bundles[0]
++
++        def _render_single() -> str:
++            return _render_chat_markdown(
++                bundle.session,
++                bundle.runs,
++                bundle.logs,
++                truncated=bundle.truncated,
++                dropped_rows=bundle.dropped_rows,
++            )
++
++        markdown = await anyio.to_thread.run_sync(_render_single)
++        return SessionExportResult(
++            media_type="text/markdown",
++            # design §响应矩阵：单会话 .md 用会话名（sanitize 标题 + id 前 8），
++            # 与 zip 内条目基名同款；时间戳模式只用于 zip 外层文件名。
++            filename=f"{_zip_entry_base(bundle.session)}.md",
++            payload=markdown.encode("utf-8"),
++        )
++
++    entries = await anyio.to_thread.run_sync(_build_zip_entries, bundles, tier, attachment_blobs)
++    payload = await anyio.to_thread.run_sync(_zip_entries, entries)
++    return SessionExportResult(
++        media_type="application/zip",
++        filename=_timestamped_filename(f"会话导出_{tier_label}", "zip"),
++        payload=payload,
++    )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 2e4e9aad3..5d7b7f2ee 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -15121,6 +15121,46 @@
+         }
+       }
+     },
++    "/api/daemon/sessions/export": {
++      "post": {
++        "tags": [
++          "daemon"
++        ],
++        "summary": "Export Sessions",
++        "description": "导出选中的会话（chat=Markdown 对话 / full=JSON+附件 zip；FR-01 / FR-02）。\n\n响应矩阵由服务层决定（``SessionExportResult``）：chat×单会话 =\n``text/markdown`` 单 .md；chat×多会话 与 full×任一 = ``application/zip``。\n下载文件名走 RFC 5987（``_rfc5987_filename`` 返回完整头值，含\n``attachment;`` 前缀与 ASCII 回退，中文文件名浏览器优先解码 filename*）。\n\n权限逐会话对齐详情端点口径（owner + 软删 404 → 群参与者探测，任一不可\n访问整包 404 不做部分成功）；跨用户 / 已软删 / 群非成员均 404 不泄露\n存在性，full 档附件总量超 512MB 返回 413 提示分批导出——两者均经全局\nAppError handler 自动映射，端点不捕获。",
++        "operationId": "export_sessions_api_daemon_sessions_export_post",
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/SessionExportRequest"
++              }
++            }
++          },
++          "required": true
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {}
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/daemon/sessions/{session_id}": {
+       "get": {
+         "tags": [
+@@ -62316,6 +62356,35 @@
+         "title": "SessionEndRequest",
+         "description": "gap-4 (design §5): daemon uplink body for POST /sessions/{id}/end.\n\nOptional body carried by the daemon ``notifySessionEnd`` call. ``status``\nis informational (the backend reconciles to ``ended`` regardless — failed\nsessions are still driven through end_session by the daemon after fail()).\n``reason`` is recorded into the ``session_ended`` SSE event for UI context."
+       },
++      "SessionExportRequest": {
++        "properties": {
++          "session_ids": {
++            "items": {
++              "type": "string",
++              "format": "uuid"
++            },
++            "type": "array",
++            "maxItems": 50,
++            "minItems": 1,
++            "title": "Session Ids"
++          },
++          "tier": {
++            "type": "string",
++            "enum": [
++              "chat",
++              "full"
++            ],
++            "title": "Tier"
++          }
++        },
++        "type": "object",
++        "required": [
++          "session_ids",
++          "tier"
++        ],
++        "title": "SessionExportRequest",
++        "description": "POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。\n\n会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+\n``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=\n本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=\n``api-types.ts``（具名产源，字段名/形状不得增删改）。\n\n去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收\n原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。"
++      },
+       "SessionInjectRequest": {
+         "properties": {
+           "prompt": {
+diff --git a/backend/tests/modules/daemon/test_session_export.py b/backend/tests/modules/daemon/test_session_export.py
+new file mode 100644
+index 000000000..9664d9098
+--- /dev/null
++++ b/backend/tests/modules/daemon/test_session_export.py
+@@ -0,0 +1,1219 @@
++"""Tests for POST /api/daemon/sessions/export（2026-09-14-session-export task-04）.
++
++覆盖（蓝图卡 implementation 逐项）：
++
++- chat 单会话 md 内容断言（会话头 / 用户消息 / 助手正文前缀剥离 / 群聊
++  member_name 前缀 / 附件标记行保留 / 非 chat 渠道行不出现）；
++- stdout 噪声排除表驱动——样例逐条搬前端判定用例（R-08 防漂移）：
++  ``session-log-assembler.test.ts``（classifySessionLog 直测段）+
++  ``session-log-sanitize.test.ts`` / ``task-line-assembler.test.ts``
++  （classifySessionLog 的 [TOOL_*]/[SYSTEM]/[TASK_*] 判定段），幸存正文
++  反例 ≥2；
++- 多会话 chat zip / full 单/多 zip 结构（zipfile 解包 + RFC5987 文件名）；
++- 权限 404 三场景（跨用户 / 已软删 / 群非成员）不 mock 权限检查走真实
++  HTTP，群参与者正例 + 混合批次整包 404；
++- 附件正常打包 bytes 一致 / 对象读取失败 missing=true 降级整包继续；
++- 413 附件元数据 bytes 预聚合超限；截断 monkeypatch EXPORT_LOG_ROW_LIMIT
++  保最早 + truncated/dropped_rows + 文件尾标注；
++- 路由顺序双证（路由表字面量前置 + 真实 POST 不被 {session_id} 吞）；
++- 422（0 个 / 51 个 ids、非法 tier）。
++
++权限 404 用例不 mock 权限检查；zip 断言一律走标准库 zipfile 解包。
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++import zipfile
++from datetime import UTC, datetime, timedelta
++from io import BytesIO
++from urllib.parse import unquote
++
++import httpx
++import pytest
++from httpx import AsyncClient
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.config import get_settings
++from app.core.security import create_access_token, password_hasher
++from app.modules.agent.model import (
++    AgentGroupChat,
++    AgentGroupMember,
++    AgentRun,
++    AgentRunLog,
++    AgentSession,
++)
++from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
++from app.modules.auth.permissions import Permission
++from app.modules.daemon.model import AgentSessionTask, DaemonInstance, DaemonRuntime
++from app.modules.daemon.session.service import export as export_service
++from app.modules.daemon.session.service.export import _assistant_text_from_stdout
++from app.modules.session_attachment.model import SessionAttachment
++from app.modules.session_attachment.storage import SessionAttachmentStorage
++from app.modules.workspace.model import Workspace
++
++EXPORT_URL = "/api/daemon/sessions/export"
++
++# 前端 session-log-assembler.test.ts:1032 的 SKILL_BODY 原样搬（R-08 防漂移）。
++SKILL_BODY = (
++    "Base directory for this skill: C:\\repo\\.claude\\skills\\sillyspec-execute\n\n"
++    '## 何时使用\n\n- 用户说"开始写代码、执行任务、跑 execute、开干"'
++)
++
++
++# ── 造数据 helpers（Bearer / 造法照 test_runtimes_usage_endpoint.py 的
++#    _seed_admin + create_access_token 先例；ORM 直插照 test_group_logs_
++#    pagination.py 的 _seed_chat_session_with_logs）────────────────────────
++
++
++async def _create_user(
++    db_session: AsyncSession, *, name: str, admin: bool = False
++) -> tuple[User, str]:
++    """建用户行 + 手签 Bearer（platform admin 自动短路端点 TASK_RUN_AGENT 闸门）。"""
++    user = User(
++        id=uuid.uuid4(),
++        email=f"sexp-{name}-{uuid.uuid4().hex[:8]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        display_name=name,
++        status="active",
++        is_platform_admin=admin,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    await db_session.refresh(user)
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email or "",
++        is_admin=user.is_platform_admin,
++        settings=get_settings(),
++    )
++    return user, token
++
++
++async def _grant_task_run_agent(
++    db_session: AsyncSession, *, workspace_id: uuid.UUID, user_id: uuid.UUID
++) -> None:
++    """给普通用户发 task:run_agent（端点闸门），照 test_group_attachments 的
++    _grant_workspace_role 形态。"""
++    role = Role(
++        id=uuid.uuid4(),
++        key=f"sexp-{uuid.uuid4().hex[:8]}",
++        name="sexp-test-role",
++        description="session export seed",
++        is_system=False,
++    )
++    db_session.add(role)
++    await db_session.flush()
++    db_session.add(RolePermission(role_id=role.id, permission=Permission.TASK_RUN_AGENT))
++    db_session.add(
++        UserWorkspaceRole(
++            user_id=user_id,
++            workspace_id=workspace_id,
++            role_id=role.id,
++            granted_by=None,
++            granted_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++
++async def _seed_runtime(db_session: AsyncSession, owner_id: uuid.UUID) -> DaemonRuntime:
++    """在线机器行（会话头「运行时」行 + runtime_id FK 用）。"""
++    instance = DaemonInstance(
++        id=uuid.uuid4(),
++        user_id=owner_id,
++        hostname="sexp-host",
++        server_url="http://test.local",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db_session.add(instance)
++    runtime = DaemonRuntime(
++        id=uuid.uuid4(),
++        daemon_instance_id=instance.id,
++        user_id=owner_id,
++        name="sexp-host",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db_session.add(runtime)
++    await db_session.commit()
++    return runtime
++
++
++async def _seed_session(
++    db_session: AsyncSession,
++    *,
++    user_id: uuid.UUID,
++    title: str | None,
++    runtime_id: uuid.UUID | None = None,
++    session_kind: str = "chat",
++    workspace_id: uuid.UUID | None = None,
++    deleted_at: datetime | None = None,
++    turn_count: int = 0,
++    config_snapshot: dict | None = None,
++) -> AgentSession:
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=runtime_id,
++        provider="claude",
++        status="ended",
++        title=title,
++        session_kind=session_kind,
++        workspace_id=workspace_id,
++        deleted_at=deleted_at,
++        turn_count=turn_count,
++        config_snapshot=config_snapshot,
++        created_at=datetime(2026, 9, 1, 8, 0, 0, tzinfo=UTC),
++        last_active_at=datetime(2026, 9, 1, 8, 5, 0, tzinfo=UTC),
++        ended_at=datetime(2026, 9, 1, 8, 5, 0, tzinfo=UTC),
++    )
++    db_session.add(sess)
++    await db_session.commit()
++    return sess
++
++
++async def _seed_run(
++    db_session: AsyncSession,
++    session_id: uuid.UUID,
++    *,
++    started_at: datetime,
++    model: str | None = "claude-sonnet-4",
++    status: str = "completed",
++) -> AgentRun:
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        model=model,
++        status=status,
++        agent_session_id=session_id,
++        started_at=started_at,
++        finished_at=started_at + timedelta(minutes=1),
++        input_tokens=100,
++        output_tokens=200,
++        diff_summary="M 1 file",
++    )
++    db_session.add(run)
++    await db_session.commit()
++    return run
++
++
++async def _seed_log(
++    db_session: AsyncSession,
++    run_id: uuid.UUID,
++    *,
++    channel: str,
++    content: str,
++    ts: datetime,
++    metadata: dict | None = None,
++    tool_kind: str | None = None,
++    parent_tool_use_id: str | None = None,
++    subagent_type: str | None = None,
++    depth: int | None = None,
++    edit_patch: str | None = None,
++) -> AgentRunLog:
++    row = AgentRunLog(
++        id=uuid.uuid4(),
++        run_id=run_id,
++        timestamp=ts,
++        channel=channel,
++        content_redacted=content,
++        metadata_=metadata,
++        tool_kind=tool_kind,
++        parent_tool_use_id=parent_tool_use_id,
++        subagent_type=subagent_type,
++        depth=depth,
++        edit_patch=edit_patch,
++    )
++    db_session.add(row)
++    await db_session.commit()
++    return row
++
++
++async def _seed_task(
++    db_session: AsyncSession,
++    *,
++    session_id: uuid.UUID,
++    run_id: uuid.UUID,
++    task_name: str,
++    status: str = "completed",
++    summary: str | None = "全部通过",
++) -> AgentSessionTask:
++    task = AgentSessionTask(
++        id=uuid.uuid4(),
++        session_id=session_id,
++        run_id=run_id,
++        task_id=f"bg-{uuid.uuid4().hex[:6]}",
++        task_name=task_name,
++        status=status,
++        summary=summary,
++        started_at=datetime(2026, 9, 1, 8, 1, 0, tzinfo=UTC),
++        updated_at=datetime(2026, 9, 1, 8, 2, 0, tzinfo=UTC),
++    )
++    db_session.add(task)
++    await db_session.commit()
++    return task
++
++
++async def _seed_attachment(
++    db_session: AsyncSession,
++    *,
++    user_id: uuid.UUID,
++    session_id: uuid.UUID,
++    name: str,
++    kind: str = "image",
++    media_type: str = "image/png",
++    size_bytes: int = 8,
++    object_key: str | None = None,
++) -> SessionAttachment:
++    att = SessionAttachment(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        session_id=session_id,
++        kind=kind,
++        media_type=media_type,
++        bytes=size_bytes,
++        name=name,
++        object_key=object_key or f"attachments/{user_id}/{uuid.uuid4().hex}.bin",
++        sha256=uuid.uuid4().hex,
++    )
++    db_session.add(att)
++    await db_session.commit()
++    return att
++
++
++async def _post_export(
++    client: AsyncClient,
++    token: str,
++    session_ids: list[uuid.UUID],
++    tier: str = "chat",
++) -> httpx.Response:
++    return await client.post(
++        EXPORT_URL,
++        json={"session_ids": [str(sid) for sid in session_ids], "tier": tier},
++        headers={"Authorization": f"Bearer {token}"},
++    )
++
++
++def _zip_names(resp) -> list[str]:
++    with zipfile.ZipFile(BytesIO(resp.content)) as archive:
++        return archive.namelist()
++
++
++def _zip_read(resp, name: str) -> bytes:
++    with zipfile.ZipFile(BytesIO(resp.content)) as archive:
++        return archive.read(name)
++
++
++def _filename_star(resp) -> str:
++    """解析 Content-Disposition 的 RFC5987 filename* 段（中文原名回读）。"""
++    header = resp.headers["content-disposition"]
++    assert "filename*=UTF-8''" in header, header
++    encoded = header.split("filename*=UTF-8''", 1)[1]
++    return unquote(encoded)
++
++
++# ── 1. stdout 噪声排除表驱动（纯函数，R-08：样例搬前端判定用例）─────────────
++
++
++class TestAssistantTextNoiseExclusion:
++    """``_assistant_text_from_stdout`` 与前端 classifySessionLog 逐条同源。
++
++    排除样例（期望 None）取自前端既有判定用例：AskUserQuestion /
++    [TOOL_RESULT]（通用 + User answered 形态）/ [(SYSTEM|RESULT)…] 前缀 /
++    [TOOL_USE] 文本行 / 合法 [TASK_*] 生命周期行 / 技能装载载荷行 /
++    CLI 合成鉴权与网关错误行 / OVERRIDE 撤回令箭 / [THINKING] 前缀 / 空行；
++    幸存样例（期望剥前缀后的正文）含裸文本与 [ASSISTANT] 正常答复反例。
++    """
++
++    # (输入行, 期望输出 None=排除 / str=剥前缀幸存正文, 样例来源)
++    EXCLUDED_CASES = [
++        # session-log-sanitize.test.ts:139（AskUserQuestion 卡片协议行，contains 判定）
++        pytest.param('{"tool": "AskUserQuestion", "question": "..."}', id="ask-user-question"),
++        # session-log-sanitize.test.ts:140（User answered 答复回显形态）
++        pytest.param("[TOOL_RESULT] User answered: yes", id="tool-result-user-answered"),
++        # session-log-sanitize.test.ts:137-138（[(SYSTEM|RESULT)…] 前缀技术标记）
++        pytest.param("[SYSTEM:thinking_tokens] 48", id="system-prefix"),
++        pytest.param("[RESULT:done] something", id="result-prefix"),
++        # session-log-sanitize.test.ts:114/125（[TOOL_USE] 文本行，与 tool_call JSON 双发去重）
++        pytest.param('[TOOL_USE] Read: {"file_path": "a.ts"}', id="tool-use-text"),
++        pytest.param("[TOOL_USE] Glob: x", id="tool-use-text-null-channel"),
++        # session-log-sanitize.test.ts:118/126（[TOOL_RESULT] 通用行归 tool_result 段不进正文）
++        pytest.param("[TOOL_RESULT] 文件内容如下", id="tool-result-general"),
++        pytest.param("[TOOL_RESULT] done", id="tool-result-done"),
++        # task-line-assembler.test.ts:107/135/123（合法 [TASK_*] 生命周期行）
++        pytest.param('[TASK_STARTED] {"task_id":"bg-1","async":true}', id="task-started"),
++        pytest.param('[TASK_PROGRESS] {"elapsed_ms":42}', id="task-progress"),
++        pytest.param(
++            '[TASK_NOTIFICATION] {"status":"completed","elapsed_ms":45000,"summary":"全部通过"}',
++            id="task-notification-completed",
++        ),
++        # session-log-sanitize.test.ts:98（[THINKING] 前缀：chat 档排除，属 full 档）
++        pytest.param("[THINKING] 正在思考", id="thinking-prefix"),
++        # session-log-assembler.test.ts:1054（技能装载载荷行，仅 [ASSISTANT] 前缀形态）
++        pytest.param(f"[ASSISTANT] {SKILL_BODY}", id="skill-load-payload"),
++        # session-log-assembler.test.ts:1161/1167（CLI 合成鉴权 / 模型网关错误行）
++        pytest.param("[ASSISTANT] Not logged in · Please run /login", id="cli-auth-error"),
++        pytest.param(
++            "[ASSISTANT] API Error: Request rejected (429) · [1310][已达上限]",
++            id="gateway-error",
++        ),
++        # session-log-assembler.test.ts:250/284（OVERRIDE 撤回令箭行）
++        pytest.param("[ASSISTANT_OVERRIDE] main:msg_1:1", id="assistant-override"),
++        pytest.param("[THINKING_OVERRIDE] main:msg_9:2", id="thinking-override"),
++        # session-log-sanitize.test.ts:141-142（空行 / 纯空白）
++        pytest.param("", id="empty"),
++        pytest.param("   ", id="whitespace-only"),
++    ]
++
++    SURVIVOR_CASES = [
++        # session-log-sanitize.test.ts:83/90/94（干净正文 / [ASSISTANT] / [LOG:xxx] 剥前缀）
++        pytest.param("你好，现在几点了？", "你好，现在几点了？", id="clean-text"),
++        pytest.param("[ASSISTANT] 你好", "你好", id="assistant-prefix-stripped"),
++        pytest.param("[LOG:info] 消息", "消息", id="log-prefix-stripped"),
++        # session-log-assembler.test.ts:1060/1204（[ASSISTANT] 正常答复反例）
++        pytest.param("[ASSISTANT] 正常答复", "正常答复", id="normal-reply"),
++        pytest.param(
++            "[ASSISTANT] 已完成修改，共 3 个文件", "已完成修改，共 3 个文件", id="done-reply"
++        ),
++        # session-log-assembler.test.ts:1178（正文提及错误词的成功回复：行首锚定不误吞）
++        pytest.param(
++            "[ASSISTANT] 日志里出现了 API Error: 429，原因是限流，我加了重试",
++            "日志里出现了 API Error: 429，原因是限流，我加了重试",
++            id="mid-text-error-mention",
++        ),
++        # session-log-assembler.test.ts:1195/1198（裸文本错误词：前缀门控不误吞）
++        pytest.param(
++            "Not logged in · Please run /login",
++            "Not logged in · Please run /login",
++            id="bare-auth-error-survives",
++        ),
++        pytest.param(
++            "我遇到了 API Error，建议排查", "我遇到了 API Error，建议排查", id="bare-gateway-word"
++        ),
++        # session-log-assembler.test.ts:1059（技能装载 SKILL_BODY 裸文本：无前缀不吞）
++        pytest.param(SKILL_BODY, SKILL_BODY, id="bare-skill-body-survives"),
++        # task-line-assembler.test.ts:281/298/302/308（坏 [TASK_*] 行降级普通文本保留）
++        pytest.param(
++            "[TASK_PROGRESS] not-json", "[TASK_PROGRESS] not-json", id="bad-task-progress"
++        ),
++        pytest.param(
++            '[TASK_NOTIFICATION] {"status":"weird","elapsed_ms":1}',
++            '[TASK_NOTIFICATION] {"status":"weird","elapsed_ms":1}',
++            id="bad-task-notification-status",
++        ),
++        pytest.param("[TASK_STARTED] 启动了", "[TASK_STARTED] 启动了", id="task-started-non-json"),
++        pytest.param("[TASK_STARTED] 42", "[TASK_STARTED] 42", id="task-started-scalar-json"),
++    ]
++
++    @pytest.mark.parametrize(("content",), EXCLUDED_CASES)
++    def test_noise_line_excluded(self, content: str) -> None:
++        assert _assistant_text_from_stdout(content) is None
++
++    @pytest.mark.parametrize(("content", "expected"), SURVIVOR_CASES)
++    def test_survivor_text_returned(self, content: str, expected: str) -> None:
++        assert _assistant_text_from_stdout(content) == expected
++
++
++# ── 2. chat 档 Markdown 内容断言 ─────────────────────────────────────────────
++
++
++class TestChatMarkdown:
++    async def _seed_two_turn_session(
++        self, db_session: AsyncSession
++    ) -> tuple[User, str, AgentSession, DaemonRuntime]:
++        owner, token = await _create_user(db_session, name="owner", admin=True)
++        runtime = await _seed_runtime(db_session, owner.id)
++        sess = await _seed_session(
++            db_session,
++            user_id=owner.id,
++            title="导出测试会话",
++            runtime_id=runtime.id,
++            turn_count=2,
++        )
++        base = datetime(2026, 9, 1, 8, 1, 0, tzinfo=UTC)
++        # 第 1 轮：用户消息 + 幸存助手正文 + 各类不进 chat 档的渠道/噪声行。
++        run1 = await _seed_run(db_session, sess.id, started_at=base)
++        await _seed_log(
++            db_session, run1.id, channel="user_input", content="你好，帮我看看报错", ts=base
++        )
++        await _seed_log(
++            db_session,
++            run1.id,
++            channel="stdout",
++            content="[ASSISTANT] 已完成修改，共 3 个文件",
++            ts=base + timedelta(seconds=10),
++        )
++        await _seed_log(
++            db_session,
++            run1.id,
++            channel="stderr",
++            content="STDERR-NOISE",
++            ts=base + timedelta(seconds=20),
++        )
++        await _seed_log(
++            db_session,
++            run1.id,
++            channel="tool_call",
++            content='{"tool":"Read","args":{"file_path":"a.ts"},"tool_use_id":"tu_1"}',
++            ts=base + timedelta(seconds=30),
++            tool_kind="Read",
++        )
++        await _seed_log(
++            db_session,
++            run1.id,
++            channel="pending_input",
++            content="PENDING-NOISE",
++            ts=base + timedelta(seconds=40),
++        )
++        await _seed_log(
++            db_session,
++            run1.id,
++            channel="system",
++            content="SYSTEM-NOISE",
++            ts=base + timedelta(seconds=50),
++        )
++        await _seed_log(
++            db_session,
++            run1.id,
++            channel="stdout",
++            content='[TOOL_USE] Read: {"file_path": "a.ts"}',
++            ts=base + timedelta(seconds=60),
++        )
++        # 第 2 轮：群聊投影行（metadata_.member_name 发言者前缀）+ 附件标记行。
++        run2 = await _seed_run(db_session, sess.id, started_at=base + timedelta(minutes=2))
++        await _seed_log(
++            db_session,
++            run2.id,
++            channel="user_input",
++            content="[附件:截图.png|image] 这是报错截图",
++            ts=base + timedelta(minutes=2),
++            metadata={"member_name": "阿明"},
++        )
++        await _seed_log(
++            db_session,
++            run2.id,
++            channel="stdout",
++            content="[LOG:info] 已定位问题",
++            ts=base + timedelta(minutes=2, seconds=10),
++            metadata={"member_name": "小码"},
++        )
++        return owner, token, sess, runtime
++
++    @pytest.mark.asyncio
++    async def test_chat_single_session_md_content(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """单会话 chat 档：会话头 + 分轮正文 + 前缀剥离 + 群昵称 + 附件标记行。"""
++        _, token, sess, runtime = await self._seed_two_turn_session(db_session)
++
++        resp = await _post_export(client, token, [sess.id], tier="chat")
++
++        assert resp.status_code == 200, resp.text
++        assert resp.headers["content-type"].startswith("text/markdown")
++        # RFC5987 中文下载文件名（FR-04）：单会话 .md 用会话名（sanitize 标题 +
++        # id 前 8，design §响应矩阵；QA 验收发现的实现偏差已修正）。
++        filename = _filename_star(resp)
++        assert filename == f"导出测试会话_{str(sess.id)[:8]}.md"
++
++        md = resp.content.decode("utf-8")
++        # 会话头（标题 / 供应商 / 运行时 / 状态 / 创建时间 / 轮数）。
++        lines = md.splitlines()
++        assert lines[0] == "# 导出测试会话"
++        assert "- 供应商：claude" in lines
++        assert f"- 运行时：{runtime.id}" in lines
++        assert "- 状态：ended" in lines
++        assert any(line.startswith("- 创建时间：") for line in lines)
++        assert "- 轮数：2" in lines
++        # 分轮 + 用户消息 / 助手正文（[ASSISTANT] 前缀剥离）。
++        assert "## 第 1 轮" in md
++        assert "**用户**：你好，帮我看看报错" in md
++        assert "**助手**：已完成修改，共 3 个文件" in md
++        # 第 2 轮：群聊 member_name 发言者前缀 + 附件标记行原样保留。
++        assert "## 第 2 轮" in md
++        assert "**阿明**：[附件:截图.png|image] 这是报错截图" in md
++        assert "**小码**：已定位问题" in md  # [LOG:info] 前缀剥离
++        # 非 chat 渠道行与 stdout 噪声行不出现。
++        assert "STDERR-NOISE" not in md
++        assert "PENDING-NOISE" not in md
++        assert "SYSTEM-NOISE" not in md
++        assert '"tool": "Read"' not in md
++        assert "[TOOL_USE]" not in md
++
++    @pytest.mark.asyncio
++    async def test_chat_multi_session_returns_zip(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """多会话 chat 档：application/zip，每会话一个 {标题}_{id前8}.md。"""
++        owner, token = await _create_user(db_session, name="multi", admin=True)
++        sess1 = await _seed_session(db_session, user_id=owner.id, title="会话甲")
++        sess2 = await _seed_session(db_session, user_id=owner.id, title="会话乙")
++        run1 = await _seed_run(
++            db_session, sess1.id, started_at=datetime(2026, 9, 1, 8, 0, tzinfo=UTC)
++        )
++        await _seed_log(
++            db_session,
++            run1.id,
++            channel="user_input",
++            content="甲的问题",
++            ts=datetime(2026, 9, 1, 8, 0, tzinfo=UTC),
++        )
++        run2 = await _seed_run(
++            db_session, sess2.id, started_at=datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
++        )
++        await _seed_log(
++            db_session,
++            run2.id,
++            channel="user_input",
++            content="乙的问题",
++            ts=datetime(2026, 9, 1, 9, 0, tzinfo=UTC),
++        )
++
++        resp = await _post_export(client, token, [sess1.id, sess2.id], tier="chat")
++
++        assert resp.status_code == 200, resp.text
++        assert resp.headers["content-type"] == "application/zip"
++        filename = _filename_star(resp)
++        assert filename.startswith("会话导出_对话_") and filename.endswith(".zip")
++        expected = {
++            f"会话甲_{str(sess1.id)[:8]}.md",
++            f"会话乙_{str(sess2.id)[:8]}.md",
++        }
++        assert set(_zip_names(resp)) == expected
++        assert "甲的问题" in _zip_read(resp, f"会话甲_{str(sess1.id)[:8]}.md").decode("utf-8")
++        assert "乙的问题" in _zip_read(resp, f"会话乙_{str(sess2.id)[:8]}.md").decode("utf-8")
++
++
++# ── 3. full 档 zip 结构 ─────────────────────────────────────────────────────
++
++
++class TestFullZip:
++    async def _seed_full_session(
++        self, db_session: AsyncSession, *, title: str, owner_id: uuid.UUID
++    ) -> AgentSession:
++        sess = await _seed_session(
++            db_session,
++            user_id=owner_id,
++            title=title,
++            turn_count=1,
++            config_snapshot={"provider_name": "Anthropic"},
++        )
++        base = datetime(2026, 9, 1, 8, 1, 0, tzinfo=UTC)
++        run = await _seed_run(db_session, sess.id, started_at=base)
++        await _seed_log(
++            db_session,
++            run.id,
++            channel="user_input",
++            content="看下这个报错",
++            ts=base,
++        )
++        await _seed_log(
++            db_session,
++            run.id,
++            channel="stdout",
++            content="[ASSISTANT] 已修复",
++            ts=base + timedelta(seconds=5),
++        )
++        await _seed_log(
++            db_session,
++            run.id,
++            channel="tool_call",
++            content='{"tool":"Edit","tool_use_id":"tu_e"}',
++            ts=base + timedelta(seconds=6),
++            tool_kind="Edit",
++            parent_tool_use_id="tu_sub",
++            subagent_type="general-purpose",
++            depth=2,
++            edit_patch="@@ -1 +1 @@\n-a\n+b\n",
++        )
++        await _seed_task(db_session, session_id=sess.id, run_id=run.id, task_name="跑测试")
++        return sess
++
++    @pytest.mark.asyncio
++    async def test_full_single_session_zip_structure(
++        self,
++        client: AsyncClient,
++        db_session: AsyncSession,
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        """full 单会话：{标题}_{id前8}/full.json 顶层字段全 + logs 全字段。"""
++        owner, token = await _create_user(db_session, name="fulladmin", admin=True)
++        sess = await self._seed_full_session(db_session, title="完整导出", owner_id=owner.id)
++        att = await _seed_attachment(
++            db_session,
++            user_id=sess.user_id,
++            session_id=sess.id,
++            name="截图.png",
++        )
++
++        # 对象读取失败（确定性降级）：不依赖真实 MinIO 可达性。
++        async def _boom(self: SessionAttachmentStorage, object_key: str) -> bytes:
++            raise RuntimeError("object lost in storage")
++
++        monkeypatch.setattr(SessionAttachmentStorage, "read_bytes", _boom)
++
++        resp = await _post_export(client, token, [sess.id], tier="full")
++
++        assert resp.status_code == 200, resp.text
++        assert resp.headers["content-type"] == "application/zip"
++        filename = _filename_star(resp)
++        assert filename.startswith("会话导出_完整信息_") and filename.endswith(".zip")
++        base_dir = f"完整导出_{str(sess.id)[:8]}"
++        names = _zip_names(resp)
++        assert f"{base_dir}/full.json" in names
++        # 读取失败 → missing 降级：不写附件本体条目（R-03 整包继续）。
++        assert [n for n in names if "/attachments/" in n] == []
++
++        full = json.loads(_zip_read(resp, f"{base_dir}/full.json"))
++        # 顶层字段全（design §接口定义 full JSON 结构）。
++        assert set(full) == {
++            "export_version",
++            "session",
++            "runs",
++            "logs",
++            "tasks",
++            "attachments",
++            "truncated",
++            "dropped_rows",
++        }
++        assert full["export_version"] == 1
++        assert full["session"]["id"] == str(sess.id)
++        assert full["session"]["title"] == "完整导出"
++        assert full["session"]["config_snapshot"] == {"provider_name": "Anthropic"}
++        assert full["truncated"] is False
++        assert full["dropped_rows"] == 0
++        # runs 元数据字段。
++        assert full["runs"][0]["model"] == "claude-sonnet-4"
++        assert full["runs"][0]["status"] == "completed"
++        assert full["runs"][0]["input_tokens"] == 100
++        assert full["runs"][0]["output_tokens"] == 200
++        assert full["runs"][0]["diff_summary"] == "M 1 file"
++        # logs 全字段（channel/content_redacted/tool_kind/parent_tool_use_id/
++        # subagent_type/depth/edit_patch/metadata）。
++        tool_log = next(row for row in full["logs"] if row["channel"] == "tool_call")
++        assert set(tool_log) == {
++            "id",
++            "run_id",
++            "timestamp",
++            "channel",
++            "content_redacted",
++            "tool_kind",
++            "parent_tool_use_id",
++            "subagent_type",
++            "depth",
++            "edit_patch",
++            "metadata",
++        }
++        assert tool_log["tool_kind"] == "Edit"
++        assert tool_log["parent_tool_use_id"] == "tu_sub"
++        assert tool_log["subagent_type"] == "general-purpose"
++        assert tool_log["depth"] == 2
++        assert tool_log["edit_patch"].startswith("@@ -1 +1 @@")
++        # 任务卡快照。
++        assert full["tasks"] == [
++            {"task_name": "跑测试", "status": "completed", "summary": "全部通过"}
++        ]
++        # 附件清单字段与 missing 降级标记；zip_path 指向条目名约定。
++        att_meta = full["attachments"][0]
++        assert set(att_meta) == {
++            "id",
++            "name",
++            "kind",
++            "media_type",
++            "bytes",
++            "zip_path",
++            "missing",
++        }
++        assert att_meta["id"] == str(att.id)
++        assert att_meta["name"] == "截图.png"
++        assert att_meta["missing"] is True
++        assert att_meta["zip_path"] == f"{base_dir}/attachments/{att.id}_截图.png"
++
++    @pytest.mark.asyncio
++    async def test_full_multi_session_distinct_dirs(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """full 多会话：每会话一目录，同名标题靠 id 前 8 位防重名（R-05）。"""
++        owner, token = await _create_user(db_session, name="multifull", admin=True)
++        sess1 = await self._seed_full_session(db_session, title="同名会话", owner_id=owner.id)
++        sess2 = await self._seed_full_session(db_session, title="同名会话", owner_id=owner.id)
++
++        resp = await _post_export(client, token, [sess1.id, sess2.id], tier="full")
++
++        assert resp.status_code == 200, resp.text
++        names = set(_zip_names(resp))
++        dir1 = f"同名会话_{str(sess1.id)[:8]}"
++        dir2 = f"同名会话_{str(sess2.id)[:8]}"
++        assert dir1 != dir2
++        assert {f"{dir1}/full.json", f"{dir2}/full.json"} <= names
++        payload1 = json.loads(_zip_read(resp, f"{dir1}/full.json"))
++        payload2 = json.loads(_zip_read(resp, f"{dir2}/full.json"))
++        assert payload1["session"]["id"] == str(sess1.id)
++        assert payload2["session"]["id"] == str(sess2.id)
++
++
++# ── 4. 权限 404（不 mock 权限检查，走真实端点）──────────────────────────────
++
++
++class TestPermission404:
++    async def _make_group_env(
++        self, db_session: AsyncSession
++    ) -> tuple[AgentSession, User, str, User, str]:
++        """群环境：workspace + 群会话 + 群主 + 成员（member）+ 门外人（outsider）。
++
++        成员与门外人都显式持有 task:run_agent（过端点闸门但非 workspace
++        admin），404 只能来自服务层群判定——非成员 404、成员 200。
++        """
++        ws = Workspace(
++            id=uuid.uuid4(),
++            name="sexp-ws",
++            slug=f"sexp-ws-{uuid.uuid4().hex[:8]}",
++            root_path=f"C:/tmp/sexp-{uuid.uuid4().hex[:8]}",
++            status="active",
++        )
++        db_session.add(ws)
++        owner, _ = await _create_user(db_session, name="群主")
++        group_sess = await _seed_session(
++            db_session,
++            user_id=owner.id,
++            title="群时间线",
++            session_kind="group",
++            workspace_id=ws.id,
++        )
++        group = AgentGroupChat(
++            id=group_sess.id,
++            session_id=group_sess.id,
++            workspace_id=ws.id,
++            title="导出测试群",
++            created_by=owner.id,
++        )
++        db_session.add(group)
++        member, member_token = await _create_user(db_session, name="成员甲")
++        outsider, outsider_token = await _create_user(db_session, name="门外人")
++        db_session.add(
++            AgentGroupMember(
++                id=uuid.uuid4(),
++                group_id=group.id,
++                member_type="user",
++                display_name="成员甲",
++                user_id=member.id,
++            )
++        )
++        await db_session.commit()
++        # 闸门权限挂在独立 workspace 上：两端点访问权齐平，区分只在群成员判定。
++        gate_ws = Workspace(
++            id=uuid.uuid4(),
++            name="sexp-gate-ws",
++            slug=f"sexp-gate-{uuid.uuid4().hex[:8]}",
++            root_path=f"C:/tmp/sexp-gate-{uuid.uuid4().hex[:8]}",
++            status="active",
++        )
++        db_session.add(gate_ws)
++        await db_session.commit()
++        await _grant_task_run_agent(db_session, workspace_id=gate_ws.id, user_id=member.id)
++        await _grant_task_run_agent(db_session, workspace_id=gate_ws.id, user_id=outsider.id)
++        return group_sess, member, member_token, outsider, outsider_token
++
++    @pytest.mark.asyncio
++    async def test_cross_user_session_404_not_leaking(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """跨用户访问他人会话 404，且响应与不存在的 id 完全同构（不泄露存在性）。"""
++        gate_ws = Workspace(
++            id=uuid.uuid4(),
++            name="sexp-xuser-ws",
++            slug=f"sexp-xuser-{uuid.uuid4().hex[:8]}",
++            root_path=f"C:/tmp/xuser-{uuid.uuid4().hex[:8]}",
++            status="active",
++        )
++        db_session.add(gate_ws)
++        other, _ = await _create_user(db_session, name="他人")
++        sess = await _seed_session(db_session, user_id=other.id, title="他人的会话")
++        requester, token = await _create_user(db_session, name="请求者")
++        await _grant_task_run_agent(db_session, workspace_id=gate_ws.id, user_id=requester.id)
++        await db_session.commit()
++
++        resp = await _post_export(client, token, [sess.id])
++        missing = await _post_export(client, token, [uuid.uuid4()])
++
++        assert resp.status_code == 404
++        assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
++        # 存在的他人会话与不存在的 id 响应同构：仅凭响应无法区分两者。
++        assert resp.json()["code"] == missing.json()["code"]
++
++    @pytest.mark.asyncio
++    async def test_soft_deleted_session_404_even_for_owner(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """已软删会话：属主本人导出也 404（对齐详情端点软删口径）。"""
++        gate_ws = Workspace(
++            id=uuid.uuid4(),
++            name="sexp-del-ws",
++            slug=f"sexp-del-{uuid.uuid4().hex[:8]}",
++            root_path=f"C:/tmp/del-{uuid.uuid4().hex[:8]}",
++            status="active",
++        )
++        db_session.add(gate_ws)
++        owner, token = await _create_user(db_session, name="属主")
++        await _grant_task_run_agent(db_session, workspace_id=gate_ws.id, user_id=owner.id)
++        sess = await _seed_session(
++            db_session,
++            user_id=owner.id,
++            title="已删会话",
++            deleted_at=datetime.now(UTC),
++        )
++
++        resp = await _post_export(client, token, [sess.id])
++
++        assert resp.status_code == 404
++        assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
++
++    @pytest.mark.asyncio
++    async def test_group_non_member_404_member_200(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """群会话：非成员非 admin 404；群参与者 200（同一判定函数正反例）。"""
++        group_sess, _, member_token, _, outsider_token = await self._make_group_env(db_session)
++
++        denied = await _post_export(client, outsider_token, [group_sess.id])
++        allowed = await _post_export(client, member_token, [group_sess.id])
++
++        assert denied.status_code == 404
++        assert denied.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
++        assert allowed.status_code == 200, allowed.text
++        assert allowed.headers["content-type"].startswith("text/markdown")
++
++    @pytest.mark.asyncio
++    async def test_mixed_batch_all_or_nothing_404(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """可访问 + 不可访问混合批次：整包 404，不做部分成功（FR-03）。"""
++        gate_ws = Workspace(
++            id=uuid.uuid4(),
++            name="sexp-mix-ws",
++            slug=f"sexp-mix-{uuid.uuid4().hex[:8]}",
++            root_path=f"C:/tmp/mix-{uuid.uuid4().hex[:8]}",
++            status="active",
++        )
++        db_session.add(gate_ws)
++        other, _ = await _create_user(db_session, name="他人乙")
++        owner, token = await _create_user(db_session, name="属主乙")
++        await _grant_task_run_agent(db_session, workspace_id=gate_ws.id, user_id=owner.id)
++        mine = await _seed_session(db_session, user_id=owner.id, title="我的会话")
++        foreign = await _seed_session(db_session, user_id=other.id, title="别人的会话")
++
++        resp = await _post_export(client, token, [mine.id, foreign.id])
++
++        assert resp.status_code == 404
++        assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
++
++
++# ── 5. 附件打包与降级 ───────────────────────────────────────────────────────
++
++
++class TestAttachmentPackaging:
++    @pytest.mark.asyncio
++    async def test_attachment_bytes_packaged_verbatim(
++        self, client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """附件本体正常取流：zip 内 attachments/{id}_{名} 条目 bytes 逐字节一致。"""
++        owner, token = await _create_user(db_session, name="attowner", admin=True)
++        sess = await _seed_session(db_session, user_id=owner.id, title="附件会话")
++        blob = f"PNGDATA-{uuid.uuid4().hex}".encode()
++        att = await _seed_attachment(
++            db_session,
++            user_id=owner.id,
++            session_id=sess.id,
++            name="截图 v2.png",
++            size_bytes=len(blob),
++        )
++
++        async def _fake_read(self: SessionAttachmentStorage, object_key: str) -> bytes:
++            assert object_key == att.object_key
++            return blob
++
++        monkeypatch.setattr(SessionAttachmentStorage, "read_bytes", _fake_read)
++
++        resp = await _post_export(client, token, [sess.id], tier="full")
++
++        assert resp.status_code == 200, resp.text
++        base_dir = f"附件会话_{str(sess.id)[:8]}"
++        entry = f"{base_dir}/attachments/{att.id}_截图 v2.png"
++        assert entry in _zip_names(resp)
++        assert _zip_read(resp, entry) == blob
++        full = json.loads(_zip_read(resp, f"{base_dir}/full.json"))
++        assert full["attachments"] == [
++            {
++                "id": str(att.id),
++                "name": "截图 v2.png",
++                "kind": "image",
++                "media_type": "image/png",
++                "bytes": len(blob),
++                "zip_path": entry,
++                "missing": False,
++            }
++        ]
++
++    @pytest.mark.asyncio
++    async def test_attachment_read_failure_degrades_missing(
++        self, client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """对象读取失败（丢失/存储异常）：missing=true + 不写条目，整包继续 200。"""
++        owner, token = await _create_user(db_session, name="missowner", admin=True)
++        sess = await _seed_session(db_session, user_id=owner.id, title="丢附件会话")
++        run = await _seed_run(
++            db_session, sess.id, started_at=datetime(2026, 9, 1, 8, 0, tzinfo=UTC)
++        )
++        await _seed_log(
++            db_session,
++            run.id,
++            channel="user_input",
++            content="正文仍在",
++            ts=datetime(2026, 9, 1, 8, 0, tzinfo=UTC),
++        )
++        att = await _seed_attachment(
++            db_session,
++            user_id=owner.id,
++            session_id=sess.id,
++            name="丢失.bin",
++            kind="file",
++            media_type="application/octet-stream",
++        )
++
++        async def _boom(self: SessionAttachmentStorage, object_key: str) -> bytes:
++            raise RuntimeError("object lost in storage")
++
++        monkeypatch.setattr(SessionAttachmentStorage, "read_bytes", _boom)
++
++        resp = await _post_export(client, token, [sess.id], tier="full")
++
++        assert resp.status_code == 200, resp.text
++        base_dir = f"丢附件会话_{str(sess.id)[:8]}"
++        names = _zip_names(resp)
++        assert f"{base_dir}/full.json" in names
++        assert [n for n in names if "/attachments/" in n] == []
++        full = json.loads(_zip_read(resp, f"{base_dir}/full.json"))
++        assert full["attachments"][0]["id"] == str(att.id)
++        assert full["attachments"][0]["missing"] is True
++        # 整包继续：其余内容完整（不 500）。
++        assert full["logs"][0]["content_redacted"] == "正文仍在"
++
++
++# ── 6. 413 体量防护 ─────────────────────────────────────────────────────────
++
++
++class TestAttachmentTotalTooLarge413:
++    @pytest.mark.asyncio
++    async def test_full_tier_attachment_bytes_precheck_413(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """full 档附件元数据 bytes 预聚合超 512MB → 413 + 分批导出提示（R-09）。
++
++        只造元数据不造真实对象；预检查发生在附件取流之前，未 monkeypatch
++        read_bytes 也不会触达存储（若顺序回退会因 MinIO 不可达降级 200，
++        本用例即红）。
++        """
++        owner, token = await _create_user(db_session, name="bigowner", admin=True)
++        sess = await _seed_session(db_session, user_id=owner.id, title="大附件会话")
++        # 2 × 300MB = 600MB > 512MB（EXPORT_ATTACHMENTS_TOTAL_BYTES_LIMIT）。
++        await _seed_attachment(
++            db_session,
++            user_id=owner.id,
++            session_id=sess.id,
++            name="a.bin",
++            kind="file",
++            media_type="application/octet-stream",
++            size_bytes=300 * 1024 * 1024,
++        )
++        await _seed_attachment(
++            db_session,
++            user_id=owner.id,
++            session_id=sess.id,
++            name="b.bin",
++            kind="file",
++            media_type="application/octet-stream",
++            size_bytes=300 * 1024 * 1024,
++        )
++
++        resp = await _post_export(client, token, [sess.id], tier="full")
++
++        assert resp.status_code == 413
++        body = resp.json()
++        assert body["code"] == "HTTP_413_SESSION_EXPORT_TOO_LARGE"
++        assert "分批导出" in body["message"]
++        assert body["details"]["limit_bytes"] == 512 * 1024 * 1024
++        assert body["details"]["total_bytes"] == 600 * 1024 * 1024
++
++    @pytest.mark.asyncio
++    async def test_chat_tier_skips_attachment_precheck(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """chat 档不打包附件：同样元数据超限也 200（413 仅 full 档口径）。"""
++        owner, token = await _create_user(db_session, name="bigchat", admin=True)
++        sess = await _seed_session(db_session, user_id=owner.id, title="chat 大附件")
++        await _seed_attachment(
++            db_session,
++            user_id=owner.id,
++            session_id=sess.id,
++            name="a.bin",
++            kind="file",
++            media_type="application/octet-stream",
++            size_bytes=600 * 1024 * 1024,
++        )
++
++        resp = await _post_export(client, token, [sess.id], tier="chat")
++
++        assert resp.status_code == 200, resp.text
++        assert resp.headers["content-type"].startswith("text/markdown")
++
++
++# ── 7. 截断（保最早 + truncated/dropped_rows + 尾标注）──────────────────────
++
++
++class TestTruncation:
++    async def _seed_six_rows(
++        self, db_session: AsyncSession, *, owner_id: uuid.UUID
++    ) -> AgentSession:
++        sess = await _seed_session(db_session, user_id=owner_id, title="截断会话")
++        base = datetime(2026, 9, 1, 8, 0, 0, tzinfo=UTC)
++        run = await _seed_run(db_session, sess.id, started_at=base)
++        await _seed_log(db_session, run.id, channel="user_input", content="原始问题", ts=base)
++        for i in range(1, 6):
++            await _seed_log(
++                db_session,
++                run.id,
++                channel="stdout",
++                content=f"[ASSISTANT] 助手第{i}段答复",
++                ts=base + timedelta(seconds=i),
++            )
++        return sess
++
++    @pytest.mark.asyncio
++    async def test_truncated_chat_md_keeps_earliest_rows(
++        self, client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """行数上限 monkeypatch 到 3：保最早 3 行 + 尾标注 truncated/dropped。"""
++        monkeypatch.setattr(export_service, "EXPORT_LOG_ROW_LIMIT", 3)
++        owner, token = await _create_user(db_session, name="truncmd", admin=True)
++        sess = await self._seed_six_rows(db_session, owner_id=owner.id)
++
++        resp = await _post_export(client, token, [sess.id], tier="chat")
++
++        assert resp.status_code == 200, resp.text
++        md = resp.content.decode("utf-8")
++        # 保最早：前 3 行（原始问题 + 第1/2段）在，第3~5段（较晚 3 行）被丢。
++        assert "**用户**：原始问题" in md
++        assert "**助手**：助手第1段答复" in md
++        assert "**助手**：助手第2段答复" in md
++        assert "助手第3段答复" not in md
++        assert "助手第4段答复" not in md
++        assert "助手第5段答复" not in md
++        # 文件尾标注（truncated + 丢弃行数）。
++        assert "truncated: true" in md
++        assert "丢弃 3 行" in md
++        assert "已保留最早的 3 行" in md
++
++    @pytest.mark.asyncio
++    async def test_truncated_full_json_flags(
++        self, client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """full 档同口径：truncated=true、dropped_rows=3、logs 只剩最早 3 行。"""
++        monkeypatch.setattr(export_service, "EXPORT_LOG_ROW_LIMIT", 3)
++        owner, token = await _create_user(db_session, name="truncfull", admin=True)
++        sess = await self._seed_six_rows(db_session, owner_id=owner.id)
++
++        resp = await _post_export(client, token, [sess.id], tier="full")
++
++        assert resp.status_code == 200, resp.text
++        base_dir = f"截断会话_{str(sess.id)[:8]}"
++        full = json.loads(_zip_read(resp, f"{base_dir}/full.json"))
++        assert full["truncated"] is True
++        assert full["dropped_rows"] == 3
++        assert len(full["logs"]) == 3
++        assert full["logs"][0]["content_redacted"] == "原始问题"
++        assert full["logs"][-1]["content_redacted"] == "[ASSISTANT] 助手第2段答复"
++        # runs 不受日志行数截断影响。
++        assert len(full["runs"]) == 1
++
++    @pytest.mark.asyncio
++    async def test_under_limit_not_truncated(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """未超限会话：truncated=False、dropped_rows=0、无尾标注（零回归）。"""
++        owner, token = await _create_user(db_session, name="notrunc", admin=True)
++        sess = await self._seed_six_rows(db_session, owner_id=owner.id)
++
++        resp = await _post_export(client, token, [sess.id], tier="chat")
++
++        assert resp.status_code == 200, resp.text
++        md = resp.content.decode("utf-8")
++        assert "助手第5段答复" in md
++        assert "truncated" not in md
++
++
++# ── 8. 路由顺序（R-01 双证：路由表 + 真实请求）──────────────────────────────
++
++
++class TestRouteOrder:
++    def test_export_literal_route_registered_before_session_id_param(self) -> None:
++        """路由表证据：/sessions/export 字面量前置于 /sessions/{session_id}。"""
++        from app.main import app
++
++        export_idx = param_idx = None
++        for idx, route in enumerate(app.routes):
++            name = getattr(getattr(route, "endpoint", None), "__name__", None)
++            if name == "export_sessions":
++                export_idx = idx
++            elif name in ("get_session_detail", "delete_session") and (
++                param_idx is None or idx < param_idx
++            ):
++                param_idx = idx
++        assert export_idx is not None, "export_sessions 路由未注册"
++        assert param_idx is not None, "/sessions/{session_id} 参数路由未注册"
++        assert export_idx < param_idx
++
++    @pytest.mark.asyncio
++    async def test_real_post_not_swallowed_by_param_route(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """真实请求证据：POST /sessions/export 命中字面量路由（200），不被
++        {session_id} 参数路由吞成 422/405（照 test_runtimes_usage_endpoint.py
++        :148 先例）。"""
++        owner, token = await _create_user(db_session, name="route", admin=True)
++        sess = await _seed_session(db_session, user_id=owner.id, title="路由顺序")
++
++        resp = await _post_export(client, token, [sess.id], tier="chat")
++
++        assert resp.status_code == 200, resp.text
++        assert resp.headers["content-type"].startswith("text/markdown")
++
++
++# ── 9. 请求校验 422 ─────────────────────────────────────────────────────────
++
++
++class TestRequestValidation422:
++    @pytest.mark.asyncio
++    async def test_empty_session_ids_422(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """0 个 ids：SessionExportRequest min_length=1 拒绝（FR-01）。"""
++        _, token = await _create_user(db_session, name="vempty", admin=True)
++        resp = await _post_export(client, token, [])
++        assert resp.status_code == 422
++
++    @pytest.mark.asyncio
++    async def test_51_session_ids_422(self, client: AsyncClient, db_session: AsyncSession) -> None:
++        _, token = await _create_user(db_session, name="v51", admin=True)
++        ids = [uuid.uuid4() for _ in range(51)]
++        resp = await _post_export(client, token, ids)
++        assert resp.status_code == 422
++
++    @pytest.mark.asyncio
++    async def test_invalid_tier_422(self, client: AsyncClient, db_session: AsyncSession) -> None:
++        _, token = await _create_user(db_session, name="vtier", admin=True)
++        resp = await _post_export(client, token, [uuid.uuid4()], tier="both")
++        assert resp.status_code == 422
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 5aaba8ec0..6c4110a3e 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -3500,3 +3500,153 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
+     expect(titleSlot?.className).toContain("flex-1");
+   });
+ });
++
++// ── 15. 导出入口（2026-09-14-session-export task-07 / FR-01 / FR-06） ──────
++// task-06 双入口 UI 契约回归锁：批量栏「导出选中（N）」Dropdown + 行 hover
++// 下载图标（aria-label「导出 {title}」）两入口共享两档菜单（items 单一源
++// SESSION_EXPORT_MENU_ITEMS：导出对话（Markdown）/ 导出完整信息（JSON+附件））；
++// onExportSessions 可选 prop——未传则两入口零渲染（照 onDeleteSessions 可选
++// 模式先例）。回调 mock 不真发请求（lib 层 exportSessions 由 sessions-portal
++// dynamic import 隔离，本测只锁面板契约：ids 数组 + tier 精确断言；成功 toast
++// 口径按 handleExportSessions 实现，经 notifyMocks spy 断言）。
++// 依据：session-list-panel.tsx task-06 段——批量栏 Dropdown（「导出选中（N）」
++// 按钮）/ 行级「导出 {title}」图标按钮（!batchMode 才渲染）/ 两处
++// SESSION_EXPORT_MENU_ITEMS + onExportSessions(ids, tier) 回调。
++// antd Dropdown 弹层 portal 挂 body：经 screen 全局 menuitem 查询（不加 testid）。
++// 多选入口沿用「批量与单条删除」块流程（多选按钮渲染门控 batchEnabled=
++// Boolean(onDeleteSessions)——批量导出用例需同时传 onDeleteSessions）。
++describe("SessionListPanel 导出入口（2026-09-14-session-export task-07）", () => {
++  beforeEach(() => {
++    // notifyMocks 为文件级共享 spy：本 describe 局部清零，锁 toast 断言口径。
++    notifyMocks.success.mockClear();
++    notifyMocks.warning.mockClear();
++    notifyMocks.error.mockClear();
++  });
++
++  /** 标准导出固件（ws-1 组内 s-1 会话A / s-2 会话B）。 */
++  function exportFixture() {
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
++        makeSession({ id: "s-2", workspace_id: "ws-1", title: "会话B" }),
++      ]),
++    );
++  }
++
++  it("批量 chat 档：多选勾 2 条 → 「导出选中（2）」→「导出对话（Markdown）」→ onExportSessions 带 ids=[s-1,s-2] tier=chat", async () => {
++    exportFixture();
++    const onExportSessions = vi.fn().mockResolvedValue(undefined);
++    renderPanel(
++      <SessionListPanel
++        onDeleteSessions={vi.fn().mockResolvedValue(0)}
++        onExportSessions={onExportSessions}
++      />,
++    );
++    await openGroup("SillyHub");
++
++    await screen.findByRole("button", { name: "会话 会话A" });
++    fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
++    // 多选态：点行 = 勾选（照既有批量删除用例流程，勾 2 条）
++    fireEvent.click(screen.getByRole("button", { name: "会话 会话A" }));
++    fireEvent.click(screen.getByRole("button", { name: "会话 会话B" }));
++    const exportBtn = await screen.findByRole("button", {
++      name: /导出选中（2）/,
++    });
++
++    // antd Dropdown trigger=click：弹层 portal 挂 body，经 screen 查 menuitem
++    fireEvent.click(exportBtn);
++    fireEvent.click(
++      await screen.findByRole("menuitem", { name: "导出对话（Markdown）" }),
++    );
++    await waitFor(() =>
++      expect(onExportSessions).toHaveBeenCalledWith(["s-1", "s-2"], "chat"),
++    );
++  });
++
++  it("批量 full 档：同菜单点「导出完整信息（JSON+附件）」→ tier=full（两档全锁）+ 成功 toast full 文案", async () => {
++    exportFixture();
++    const onExportSessions = vi.fn().mockResolvedValue(undefined);
++    renderPanel(
++      <SessionListPanel
++        onDeleteSessions={vi.fn().mockResolvedValue(0)}
++        onExportSessions={onExportSessions}
++      />,
++    );
++    await openGroup("SillyHub");
++
++    await screen.findByRole("button", { name: "会话 会话A" });
++    fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
++    fireEvent.click(screen.getByRole("button", { name: "会话 会话A" }));
++    fireEvent.click(screen.getByRole("button", { name: "会话 会话B" }));
++    fireEvent.click(
++      await screen.findByRole("button", { name: /导出选中（2）/ }),
++    );
++    fireEvent.click(
++      await screen.findByRole("menuitem", { name: "导出完整信息（JSON+附件）" }),
++    );
++    await waitFor(() =>
++      expect(onExportSessions).toHaveBeenCalledWith(["s-1", "s-2"], "full"),
++    );
++    // 面板成功路径 toast（handleExportSessions，full 文案分支）
++    await waitFor(() =>
++      expect(notifyMocks.success).toHaveBeenCalledWith(
++        "已开始下载完整信息导出（2 个会话）",
++      ),
++    );
++  });
++
++  it("行级入口：未进批量态点行 hover 下载图标（aria-label「导出 会话A」）→ chat 档 → 单会话 id + 成功 toast", async () => {
++    exportFixture();
++    const onExportSessions = vi.fn().mockResolvedValue(undefined);
++    renderPanel(<SessionListPanel onExportSessions={onExportSessions} />);
++    await openGroup("SillyHub");
++
++    // hover 按钮经 CSS 显隐（jsdom 不裁剪 DOM，照「hover 删除按钮」用例直查）
++    await screen.findByRole("button", { name: "会话 会话A" });
++    fireEvent.click(screen.getByRole("button", { name: "导出 会话A" }));
++    fireEvent.click(
++      await screen.findByRole("menuitem", { name: "导出对话（Markdown）" }),
++    );
++    await waitFor(() =>
++      expect(onExportSessions).toHaveBeenCalledWith(["s-1"], "chat"),
++    );
++    // 面板成功路径 toast（handleExportSessions，chat 文案分支）
++    await waitFor(() =>
++      expect(notifyMocks.success).toHaveBeenCalledWith(
++        "已开始下载对话导出（1 个会话）",
++      ),
++    );
++  });
++
++  it("未传 onExportSessions：批量栏无「导出选中」、行无「导出 {title}」图标（可选模式零渲染）", async () => {
++    exportFixture();
++    // onDeleteSessions 仍传（多选按钮 batchEnabled 门控依赖它——验证导出口
++    // 缺省时批量栏其余操作照常、仅导出入口零渲染）
++    renderPanel(
++      <SessionListPanel onDeleteSessions={vi.fn().mockResolvedValue(0)} />,
++    );
++    await openGroup("SillyHub");
++
++    // 行级：两行均无导出图标
++    await screen.findByRole("button", { name: "会话 会话A" });
++    expect(
++      screen.queryByRole("button", { name: "导出 会话A" }),
++    ).not.toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: "导出 会话B" }),
++    ).not.toBeInTheDocument();
++
++    // 批量栏：进多选态勾 1 条，「删除选中（1）」在而「导出选中」零渲染
++    fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
++    fireEvent.click(screen.getByRole("button", { name: "会话 会话A" }));
++    await waitFor(() =>
++      expect(
++        screen.getByRole("button", { name: /删除选中（1）/ }),
++      ).toBeInTheDocument(),
++    );
++    expect(
++      screen.queryByRole("button", { name: /导出选中/ }),
++    ).not.toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 72cf9526d..efb802bc9 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -48,6 +48,15 @@
+  *   前置键，D-002），前端 byWs 桶保序插入不做本地重排；群行（GroupChatRow）
+  *   不加（群列表无 pinned 字段）。
+  *
++ * task-06（2026-09-14-session-export / FR-01/FR-06）：会话导出双入口——批量
++ *   操作条「导出选中（N）」+ 行 hover 操作列 Download 图标（归档之后、删除之前，
++ *   原型 .ops 顺序），均为 antd Dropdown 两档菜单（chat Markdown / full JSON+
++ *   附件，items 单一源 SESSION_EXPORT_MENU_ITEMS 防两入口文案漂移）；onExport
++ *   Sessions 可选（未传两入口零渲染——悬浮助手 runtime 抽屉等既有调用方零破坏）；
++ *   exporting 独立 state（不共享 deleting/archiving，导出失败不影响其余操作）；
++ *   失败 toast 由本层 catch（lib 层 task-05 契约抛错不弹），门户接线见
++ *   sessions-portal.tsx。多选仍限组内（batchGroupId 语义不动）。
++ *
+  * 工作区树（全局/workspace 形态）结构：
+  *   筛选区：
+  *     - 标题搜索（回车应用，X-11 保留；树形态为纯视图过滤不进数据层）
+@@ -99,17 +108,29 @@
+  */
+ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+ import { useQuery } from "@tanstack/react-query";
+-import { Button, Input, Modal, Popover, Select, Spin, Tag } from "antd";
++import {
++  Button,
++  Dropdown,
++  Input,
++  Modal,
++  Popover,
++  Select,
++  Spin,
++  Tag,
++  type MenuProps,
++} from "antd";
+ import { SearchOutlined } from "@ant-design/icons";
+ import {
+   Archive,
+   ArchiveRestore,
+   BookUser,
+   Cloud,
++  Download,
+   FileText,
+   Folder,
+   FolderOpen,
+   ListChecks,
++  Loader2,
+   Monitor,
+   Pencil,
+   Pin,
+@@ -124,6 +145,8 @@ import { listChanges } from "@/lib/changes";
+ import { useNotify } from "@/lib/errors";
+ // 2026-09-09-sessions-visual-refresh task-08：引擎色点单一源（PROVIDER_META）
+ import { PROVIDER_META } from "@/lib/daemon/runtimes";
++// task-06（2026-09-14-session-export）：导出档位类型单一源（task-05 lib 层导出）
++import type { SessionExportTier } from "@/lib/daemon/session-export";
+ import { listQuicklogEntries } from "@/lib/quicklog";
+ import { useDaemonMachines } from "@/lib/use-daemon-machines";
+ import { listWorkspaces } from "@/lib/workspaces";
+@@ -208,6 +231,18 @@ const STATUS_OPTIONS = [
+  */
+ const AGENT_TABS = SESSION_ENGINE_OPTIONS.map((o) => ({ ...o }));
+ 
++/**
++ * task-06（2026-09-14-session-export / FR-01）：导出档位 Dropdown 菜单项——
++ * 批量栏「导出选中」与行 hover 下载图标两入口共享的单一源（防文案漂移），
++ * 文案与 prototype-session-export.html 逐字一致；key = SessionExportTier
++ * （chat=对话 Markdown 档 / full=完整 JSON+附件 zip 档，design 响应矩阵）。
++ * 本组件树 antd Dropdown 首例：色板经 ConfigProvider token，不手写 hex。
++ */
++const SESSION_EXPORT_MENU_ITEMS: MenuProps["items"] = [
++  { key: "chat", label: "导出对话（Markdown）" },
++  { key: "full", label: "导出完整信息（JSON+附件）" },
++];
++
+ /**
+  * ql-20260831-016：Modal.confirm 功能图标（删除/归档/取消归档共用）。
+  * antd v6 confirm icon 槽的尺寸/间距样式期望 .anticon 包裹结构，裸 lucide
+@@ -418,6 +453,17 @@ export interface SessionListPanelProps {
+    * invalidate 列表，不动选中态与 ?session=。
+    */
+   onRenameSession?: (_id: string, _title: string) => Promise<number>;
++  /**
++   * task-06（2026-09-14-session-export / FR-01/FR-06）：导出会话回调（可选，
++   * 照 onDeleteSessions 可选模式——未传则批量栏「导出选中」与行 hover 下载
++   * 图标两入口零渲染，既有调用方零破坏）。tier 两档与后端
++   * SessionExportRequest 同形（SessionExportTier 单一源自 task-05 lib 层）；
++   * 失败 throw 由本面板 catch 出 toast（lib 层契约不弹）。
++   */
++  onExportSessions?: (
++    _ids: string[],
++    _tier: SessionExportTier,
++  ) => Promise<void>;
+   /**
+    * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
+    * 到工作区/变更级。D-003@v2：scope 仅给全局端点多传 workspace_id/change_id
+@@ -688,6 +734,7 @@ function WorkspaceTreeList({
+   onPinSessions,
+   onUnpinSessions,
+   onRenameSession,
++  onExportSessions,
+   scope,
+   onNewInGroup,
+   defaultExpandedWorkspaceId,
+@@ -1422,6 +1469,28 @@ function WorkspaceTreeList({
+     });
+   };
+ 
++  // ── task-06（2026-09-14-session-export / FR-01/FR-06）：导出处理 ─────────
++  // exporting 独立 state（不共享 deleting/archiving——design 兼容策略：导出
++  // 进行中/失败不影响删除/归档等其余操作，反之亦然）；防重入 = handler 门控
++  // exporting + 两入口按钮 disabled/loading。lib 层 exportSessions 抛错不弹
++  // toast（task-05 契约），本层 catch 出 message.error（errMessage 自动取
++  // err.message）；成功时浏览器已触发保存，出「已开始下载」success toast。
++  const [exporting, setExporting] = useState(false);
++  const handleExportSessions = async (ids: string[], tier: SessionExportTier) => {
++    if (!onExportSessions || exporting || ids.length === 0) return;
++    setExporting(true);
++    try {
++      await onExportSessions(ids, tier);
++      notify.success(
++        `已开始下载${tier === "chat" ? "对话导出" : "完整信息导出"}（${ids.length} 个会话）`,
++      );
++    } catch (err) {
++      notify.error(err, "导出失败：未知错误");
++    } finally {
++      setExporting(false);
++    }
++  };
++
+   // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：
+   // 置顶/重命名三处理——照 handleSingleArchive 模式（回调门控 + pinning/
+   // renaming 状态防重入 + useNotify toast 照 notifyArchiveResult 口径）。
+@@ -1816,6 +1885,23 @@ function WorkspaceTreeList({
+                         handleSingleRename(id, oldTitle, newTitle)
+                     : undefined
+                 }
++                /* task-06（2026-09-14-session-export / FR-01/FR-06）：导出双
++                   入口透传——批量条 onBatchExport（组内勾选 ids，多选仍限组内
++                   batchGroupId 语义不动）+ 行级 onExport（单条 [id]）；
++                   exporting 照 deleting/archiving 通道下发（loading/disabled）。 */
++                onBatchExport={
++                  onExportSessions
++                    ? (tier: SessionExportTier) =>
++                        handleExportSessions([...checkedIds], tier)
++                    : undefined
++                }
++                onExport={
++                  onExportSessions
++                    ? (id: string, tier: SessionExportTier) =>
++                        handleExportSessions([id], tier)
++                    : undefined
++                }
++                exporting={exporting}
+                 showAll={showAllGroupIds.has(group.id)}
+                 onToggleShowAll={() =>
+                   setShowAllGroupIds((prev) => {
+@@ -2207,8 +2293,10 @@ function WorkspaceGroupNode({
+   onBatchDelete,
+   onBatchArchive,
+   onBatchUnarchive,
++  onBatchExport,
+   deleting,
+   archiving,
++  exporting,
+   checkedIds,
+   onToggleChecked,
+   selectedSessionId,
+@@ -2219,6 +2307,7 @@ function WorkspaceGroupNode({
+   onPin,
+   onUnpin,
+   onRename,
++  onExport,
+   showAll,
+   onToggleShowAll,
+   hideMachineTitles,
+@@ -2247,8 +2336,12 @@ function WorkspaceGroupNode({
+   onBatchDelete: () => void;
+   onBatchArchive: () => void;
+   onBatchUnarchive: () => void;
++  /** task-06（2026-09-14-session-export）：批量导出（未传零按钮——悬浮助手等消费点）。 */
++  onBatchExport?: (_tier: SessionExportTier) => void;
+   deleting: boolean;
+   archiving: boolean;
++  /** task-06：导出进行中（独立于 deleting/archiving，照两通道下发驱动 loading）。 */
++  exporting: boolean;
+   checkedIds: ReadonlySet<string>;
+   onToggleChecked: (_id: string) => void;
+   selectedSessionId?: string | null;
+@@ -2262,6 +2355,8 @@ function WorkspaceGroupNode({
+   onUnpin?: (_id: string, _title: string) => void;
+   /** task-07：重命名提交（newTitle 已 strip 非空 ≤255）。 */
+   onRename?: (_id: string, _oldTitle: string, _newTitle: string) => void;
++  /** task-06（2026-09-14-session-export）：行级导出（未传零按钮，照 onArchive 透传）。 */
++  onExport?: (_id: string, _tier: SessionExportTier) => void;
+   showAll: boolean;
+   onToggleShowAll: () => void;
+   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
+@@ -2572,6 +2667,29 @@ function WorkspaceGroupNode({
+                   取消归档（{checkedCount}）
+                 </Button>
+               )}
++              {/* task-06（2026-09-14-session-export / FR-01）：批量导出——
++                  「导出选中（N）」+ antd Dropdown 两档菜单（items 单一源
++                  SESSION_EXPORT_MENU_ITEMS，文案与原型逐字一致）；与相邻删除/
++                  归档按钮同款 size="small"，disabled/loading 口径同删除按钮
++                  （checkedCount===0 置灰、导出中 loading 防重入）。 */}
++              {onBatchExport && (
++                <Dropdown
++                  menu={{
++                    items: SESSION_EXPORT_MENU_ITEMS,
++                    onClick: ({ key }) =>
++                      onBatchExport(key as SessionExportTier),
++                  }}
++                  trigger={["click"]}
++                >
++                  <Button
++                    size="small"
++                    disabled={checkedCount === 0 || exporting}
++                    loading={exporting}
++                  >
++                    导出选中（{checkedCount}）
++                  </Button>
++                </Dropdown>
++              )}
+             </div>
+           )}
+           {sections.length === 0 ? (
+@@ -2703,6 +2821,15 @@ function WorkspaceGroupNode({
+                               ? (next: string) => onRename(s.id, title, next)
+                               : undefined
+                           }
++                          /* task-06（2026-09-14-session-export）：行级导出照
++                             onRename 透传模式（未传零按钮）。 */
++                          onExport={
++                            onExport
++                              ? (tier: SessionExportTier) =>
++                                  onExport(s.id, tier)
++                              : undefined
++                          }
++                          exporting={exporting}
+                         />
+                         {/* 2026-08-26-subsession-portal-grouping：父行附属分身
+                             折叠组（组级 violet 徽标 + 子行缩进，design §4.B） */}
+@@ -2765,6 +2892,14 @@ function WorkspaceGroupNode({
+                                           onRename(c.id, c.title ?? "分身", next)
+                                       : undefined
+                                   }
++                                  /* task-06：分身行照主行透传导出入口。 */
++                                  onExport={
++                                    onExport
++                                      ? (tier: SessionExportTier) =>
++                                          onExport(c.id, tier)
++                                      : undefined
++                                  }
++                                  exporting={exporting}
+                                 />
+                               ))}
+                           </div>
+@@ -2821,6 +2956,14 @@ interface SessionRowProps {
+   onPin?: () => void;
+   onUnpin?: () => void;
+   onRename?: (_newTitle: string) => void;
++  /**
++   * task-06（2026-09-14-session-export / FR-01/FR-06）：行级导出回调（可选，
++   * 未传零按钮——悬浮助手 runtime 抽屉等消费点）；档位菜单由单一源
++   * SESSION_EXPORT_MENU_ITEMS 渲染（aria-label「导出 {title}」）。
++   */
++  onExport?: (_tier: SessionExportTier) => void;
++  /** 导出进行中（共享防重入口径：导出中入口图标转 Loader2 旋转并禁点）。 */
++  exporting?: boolean;
+   /** ql-20260823-003：树形态筛选智能体后隐藏引擎 chip（全组同引擎冗余）。 */
+   hideEngineChip?: boolean;
+   /**
+@@ -2900,6 +3043,8 @@ function SessionRow({
+   onPin,
+   onUnpin,
+   onRename,
++  onExport,
++  exporting,
+   hideEngineChip,
+   liveness,
+   livenessUnread,
+@@ -3207,6 +3352,35 @@ function SessionRow({
+                 <ArchiveRestore className="h-3 w-3" />
+               </button>
+             )}
++            {/* task-06（2026-09-14-session-export / FR-01/FR-06）：行级导出——
++                归档之后、删除之前（原型 .ops 顺序），Download 图标 + 同款两档
++                Dropdown（menu items 单一源 SESSION_EXPORT_MENU_ITEMS，与批量栏
++                文案零漂移）；h-5 w-5 icon button 同款 hover 走 brand 语义阶
++                （同置顶/重命名款，不硬编码 hex）；导出中 Loader2 旋转 + 禁点
++                防重入；点击 stopPropagation 防行选中（菜单 portal 渲染不冒泡）。 */}
++            {onExport && (
++              <Dropdown
++                menu={{
++                  items: SESSION_EXPORT_MENU_ITEMS,
++                  onClick: ({ key }) => onExport(key as SessionExportTier),
++                }}
++                trigger={["click"]}
++              >
++                <button
++                  type="button"
++                  aria-label={`导出 ${title}`}
++                  disabled={exporting}
++                  onClick={(e) => e.stopPropagation()}
++                  className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
++                >
++                  {exporting ? (
++                    <Loader2 aria-hidden className="h-3 w-3 animate-spin" />
++                  ) : (
++                    <Download aria-hidden className="h-3 w-3" />
++                  )}
++                </button>
++              </Dropdown>
++            )}
+             {onDelete && (
+               <button
+                 type="button"
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index 8c9d2de97..f46418f15 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -45,6 +45,12 @@
+  *   preContext { workspaceId, quickId, runtimeId }（X-13 双传语义 quicklog
+  *   版，quickId 首句经 task-11 上送 quicklog_id 落自动绑定）。
+  *
++ * task-06（2026-09-14-session-export / FR-01/FR-06）：会话导出接线——列表
++ *   双入口（批量栏「导出选中」+ 行 hover 下载图标，UI 归 session-list-panel）
++ *   经 onExportSessions → dynamic import lib/daemon/session-export（task-05
++ *   认证下载通道 exportSessions：401 单飞刷新重试 + blob 触发浏览器保存）；
++ *   导出是只读操作，不动选中态/invalidate；lib 抛错由面板 catch 出 toast。
++ *
+  * 群聊分区（task-07 / 2026-09-01-session-group-chat / FR-01 / FR-04）：列表
+  *   顶部「群聊」分区（SessionListPanel 内独立 useQuery 供数）+ 分区头「＋」
+  *   开三步建群向导（CreateGroupWizard：群信息 → 邀请用户 → Agent 成员六要素）；
+@@ -794,6 +800,17 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+             return results.filter((r) => r.status === "rejected").length;
+           }}
++          /* task-06（2026-09-14-session-export / FR-01/FR-06）：导出会话——照
++             onDeleteSessions 回调模式（dynamic import lib，tier 类型经面板
++             props 上下文推得）。调 task-05 落地的 exportSessions 认证下载通道
++             （blob 触发浏览器保存）；导出只读，不动选中态/invalidate；lib 层
++             抛错不弹 toast（task-05 契约），throw 由面板 catch 出 message。 */
++          onExportSessions={async (ids, tier) => {
++            const { exportSessions } = await import(
++              "@/lib/daemon/session-export"
++            );
++            await exportSessions(ids, tier);
++          }}
+           /* task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群
+              收纳三回调（照会话回调模式：dynamic import lib → invalidate
+              ["groupChats"] 前缀（视图维度键全在此外）→ 操作的是 selectedGroupId
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index bd503f2e5..094313d57 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -5681,6 +5681,36 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/export": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Export Sessions
++         * @description 导出选中的会话（chat=Markdown 对话 / full=JSON+附件 zip；FR-01 / FR-02）。
++         *
++         *     响应矩阵由服务层决定（``SessionExportResult``）：chat×单会话 =
++         *     ``text/markdown`` 单 .md；chat×多会话 与 full×任一 = ``application/zip``。
++         *     下载文件名走 RFC 5987（``_rfc5987_filename`` 返回完整头值，含
++         *     ``attachment;`` 前缀与 ASCII 回退，中文文件名浏览器优先解码 filename*）。
++         *
++         *     权限逐会话对齐详情端点口径（owner + 软删 404 → 群参与者探测，任一不可
++         *     访问整包 404 不做部分成功）；跨用户 / 已软删 / 群非成员均 404 不泄露
++         *     存在性，full 档附件总量超 512MB 返回 413 提示分批导出——两者均经全局
++         *     AppError handler 自动映射，端点不捕获。
++         */
++        post: operations["export_sessions_api_daemon_sessions_export_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}": {
+         parameters: {
+             query?: never;
+@@ -21990,6 +22020,27 @@ export interface components {
+             /** Reason */
+             reason?: string | null;
+         };
++        /**
++         * SessionExportRequest
++         * @description POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。
++         *
++         *     会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+
++         *     ``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=
++         *     本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=
++         *     ``api-types.ts``（具名产源，字段名/形状不得增删改）。
++         *
++         *     去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收
++         *     原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。
++         */
++        SessionExportRequest: {
++            /** Session Ids */
++            session_ids: string[];
++            /**
++             * Tier
++             * @enum {string}
++             */
++            tier: "chat" | "full";
++        };
+         /**
+          * SessionInjectRequest
+          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
+@@ -35233,6 +35284,39 @@ export interface operations {
+             };
+         };
+     };
++    export_sessions_api_daemon_sessions_export_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["SessionExportRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": unknown;
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_session_detail_api_daemon_sessions__session_id__get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/daemon/session-export.ts b/frontend/src/lib/daemon/session-export.ts
+new file mode 100644
+index 000000000..1970d7779
+--- /dev/null
++++ b/frontend/src/lib/daemon/session-export.ts
+@@ -0,0 +1,134 @@
++/**
++ * 会话导出认证下载通道(2026-09-14-session-export task-05 / FR-01 / D-001@v1)。
++ *
++ * `apiFetch` 会强制把响应体当 JSON 解析,不适合导出端点的 .md 文本 / .zip 二进制
++ * 流响应,故走裸 fetch POST + 浏览器触发保存。骨架照 `lib/ppm/export.ts`
++ * downloadExcel(401 单飞刷新重试一次 + RFC5987 文件名解析 + blob 下载)同款新写,
++ * 不 import / 不改动 ppm 文件(防 ppm 域回归,design 约束)。
++ *
++ * 刻意不接入 ./index 再导出(门户接线归 task-06,届时直接 import 本文件)。
++ */
++import type { components } from "@/lib/api-types";
++import { getApiBaseUrl, safeUUID } from "@/lib/api";
++import { ensureFreshAccessToken } from "@/lib/token-refresh";
++import { useSession } from "@/stores/session";
++
++/**
++ * 导出档位(task-08 起自 api-types 生成类型取值,单一源后端 schema,禁止手写):
++ * - "chat": Markdown 对话档(单会话 .md / 多会话 zip 内每会话一个 .md)
++ * - "full": JSON+附件 zip 档(每会话一目录:full.json + attachments/)
++ */
++export type SessionExportTier = components["schemas"]["SessionExportRequest"]["tier"];
++
++/** 导出端点(POST,body JSON { session_ids, tier })。 */
++const EXPORT_PATH = "/api/daemon/sessions/export";
++
++/**
++ * 从 Content-Disposition 头解析服务端返回的文件名。
++ *
++ * 后端用 RFC 5987 格式 `filename="ascii_fallback"; filename*=UTF-8''<percent-encoded>`
++ * 传中文文件名(直接放中文会触发 latin-1 编码报错)。
++ *
++ * @returns 解析失败返回 null,调用方应回退到传入的 fallback filename
++ */
++function parseFilenameFromContentDisposition(header: string | null): string | null {
++  if (!header) return null;
++  // 优先 filename*=UTF-8''<encoded>(支持中文/特殊字符)
++  const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
++  if (star?.[1]) {
++    try {
++      return decodeURIComponent(star[1].trim());
++    } catch {
++      // fallthrough
++    }
++  }
++  // 回退 filename="..."(ASCII)
++  const plain = /filename="([^"]+)"/i.exec(header);
++  return plain?.[1] ?? null;
++}
++
++/**
++ * 导出选中会话并触发浏览器下载。
++ *
++ * POST /api/daemon/sessions/export,body 与后端 SessionExportRequest 同形
++ * ({ session_ids, tier },snake_case);响应矩阵:chat 单会话 text/markdown、
++ * 其余 application/zip,Content-Disposition 全 RFC5987 中文文件名(design 响应矩阵)。
++ *
++ * 401 时复刻 apiFetch 的 refresh+retry 一次逻辑(裸 fetch 不会自动刷新,
++ * 与 downloadExcel 行为逐段对齐);二次 401 清 session 跳 /login 并抛错。
++ * 其余非成功状态码抛含 HTTP status 的 Error——本 lib 层不弹 toast,失败反馈
++ * (message.error)归组件层(design FR-04)。
++ *
++ * @param sessionIds 要导出的会话 id 列表(1~50 个,数量/权限校验归后端 422/404)
++ * @param tier 导出档位:chat=Markdown 对话档,full=JSON+附件 zip 档
++ */
++export async function exportSessions(
++  sessionIds: string[],
++  tier: SessionExportTier,
++): Promise<void> {
++  const url = new URL(EXPORT_PATH, getApiBaseUrl());
++
++  // accept 按 tier + 会话数声明预期产物(design 响应矩阵):
++  // full 档恒 zip;chat 档单会话 .md、多会话 zip。
++  const accept =
++    tier === "full" || sessionIds.length > 1
++      ? "application/zip"
++      : "text/markdown";
++
++  const doFetch = async (token: string | null): Promise<Response> => {
++    const headers: Record<string, string> = {
++      accept,
++      "content-type": "application/json",
++      // x-request-id 对齐 apiFetch / uploadExcelWithAuth 惯例(服务端日志按请求关联)
++      "x-request-id": safeUUID(),
++    };
++    if (token) headers.Authorization = `Bearer ${token}`;
++    return fetch(url.toString(), {
++      method: "POST",
++      headers,
++      body: JSON.stringify({ session_ids: sessionIds, tier }),
++    });
++  };
++
++  let { accessToken } = useSession.getState();
++  let resp = await doFetch(accessToken);
++
++  // 401 → refresh + retry once(apiFetch 行为对齐)
++  if (resp.status === 401) {
++    // 单飞刷新:与 apiFetch 共享同一 inflight,并发导出 + 普通 API 401 只发 1 次 refresh。
++    // 单飞成功后已写回 store,这里直接用返回的新 access token 重试。
++    const newToken = await ensureFreshAccessToken();
++    if (newToken) {
++      resp = await doFetch(newToken);
++    }
++
++    // 仍然 401(单飞失败 / 二次 401)→ 清 session 跳 /login,与 apiFetch 行为对齐
++    if (resp.status === 401) {
++      useSession.getState().clear();
++      if (typeof window !== "undefined") {
++        window.location.href = "/login";
++      }
++      throw new Error("导出失败:登录已过期,请重新登录");
++    }
++  }
++
++  if (!resp.ok) {
++    throw new Error(`导出失败:HTTP ${resp.status}`);
++  }
++
++  // 优先用服务端 Content-Disposition 里的文件名(RFC5987 中文+时间戳),
++  // 解析失败才回退到按档位拼的 fallback 文件名。
++  const fallback = tier === "chat" ? "会话导出_对话.zip" : "会话导出_完整.zip";
++  const finalName =
++    parseFilenameFromContentDisposition(resp.headers.get("Content-Disposition")) ||
++    fallback;
++  const blob = await resp.blob();
++  const objUrl = URL.createObjectURL(blob);
++  const a = document.createElement("a");
++  a.href = objUrl;
++  a.download = finalName;
++  document.body.appendChild(a);
++  a.click();
++  document.body.removeChild(a);
++  URL.revokeObjectURL(objUrl);
++}

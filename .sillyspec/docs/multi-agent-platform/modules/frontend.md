@@ -171,6 +171,8 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 <!-- MANUAL_NOTES_END -->
 
+- change 2026-09-14-session-export（frontend 侧） | 会话列表导出双入口：session-list-panel.tsx 批量操作条「导出选中（N）」+ 行 hover Download 图标，均 antd Dropdown 两档菜单（导出对话（Markdown）/导出完整信息（JSON+附件），items 单一源防漂移）；onExportSessions 可选 prop 未传零渲染；exporting 独立 state；lib/daemon/session-export.ts 认证下载通道（POST+Bearer+401 单飞刷新重试+RFC5987 解析+blob 下载，SessionExportTier 切生成类型）；sessions-portal.tsx dynamic import 接线。__tests__ 追加 4 用例（105 passed 零回归）。
+
 ### 2026-09-07-agent-liveness-states（agent 会话活性状态推导）
 
 - `components/agent-log/liveness-badge.tsx` 五态视觉单源（语义色阶+呼吸动画，badge/dot/悬浮详情）；`agent-liveness-overview-card.tsx` 工作台「Agent 状态总览」卡（D-004 第二层：分组计数+在等人组跳转，30s 轮询）；日志面板行尾徽章；通知铃 agent_blocked 类型。api-types 经 gen:types 同步。已知缺口：会话列表小灯/idle 小红点待 SessionsPortal 联表管道（见 verify-result NOTES）。

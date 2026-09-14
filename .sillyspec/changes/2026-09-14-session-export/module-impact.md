@@ -38,7 +38,7 @@ created_at: 2026-09-14 14:12:30
 | 目标 | 操作 | 状态 |
 |------|------|------|
 | `_module-map.yaml` | 不增改(skipped):无新模块/新路径形态,daemon 会话子域粒度沿用既有索引粒度;多并行活跃变更共享索引,rebuild 留待统一操作 | skipped |
-| `modules/backend.md` | execute/verify 后按归档流程同步(新增导出端点一句话) | pending |
-| `modules/frontend.md` | execute/verify 后按归档流程同步(会话列表导出入口一句话) | pending |
+| `modules/backend.md` | 变更索引追加 session-export（backend 侧）条目（导出端点/权限口径/截断/噪声排除/zip+附件/52 用例/gen:types） | done |
+| `modules/frontend.md` | 变更索引追加 session-export（frontend 侧）条目（双入口/单一源 items/可选 prop/下载通道/4 用例零回归） | done |
 
 规则:execute/verify 完成文档同步后把对应行回填 done;确定不同步的行改 skipped 并在操作列写明原因。

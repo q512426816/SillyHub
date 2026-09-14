@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-14-session-export",
+  "generatedAt": "2026-09-14T16:44:30.729Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-export",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 4,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-export",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-export",
+      "metrics": {
+        "backendEndpoints": 3387,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-export",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "后端导出端点集成测试(真实 httpx AsyncClient 全链路:鉴权→权限→组装→响应矩阵→zip 解包→RFC5987 文件名)",
+      "command": "cd backend && uv run pytest -q --no-cov tests/modules/daemon/test_session_export.py",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-14-session-export/verify-logs/backend-pytest.log"
+    },
+    {
+      "claim": "路由挂载顺序冒烟(/sessions/export 字面量前置于 /sessions/{session_id} 参数路由,R-01)",
+      "command": "ENVIRONMENT=test DATABASE_URL=sqlite+aiosqlite:///:memory: SECRET_KEY=<16+chars> uv run python -c \"from app.main import app; ...\"",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-14-session-export/verify-logs/route-smoke.log"
+    },
+    {
+      "claim": "前端导出入口组件测试(批量/行级双入口回调参数精确断言,既有 101 用例零回归)",
+      "command": "cd frontend && pnpm test -- session-list-panel",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-14-session-export/verify-logs/frontend-vitest.log"
+    },
+    {
+      "claim": "前端类型检查",
+      "command": "cd frontend && pnpm exec tsc --noEmit",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-14-session-export/verify-logs/frontend-tsc.log"
+    }
+  ],
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,daemon,agent]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-14T16:48:40.827Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-14-session-export",
+  "appliedAt": "2026-09-14T16:50:29.867Z",
+  "baseHash": "8e00866672",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "sha256": "b553acd7a9c0cd148549c6d03644bc57efffea0cfa9df894ad7a615e1401d1d1"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_export.py",
+      "sha256": "70136968b4d9815b7c700112d5d04b5f5865cfdee5b126a1c27b66196c5bdc9c"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "sha256": "ba2b2728ca44a2403b936b4ed1b0646a15d31895a03fcd27d4dd049a8386d931"
+    },
+    {
+      "path": "backend/app/modules/daemon/service.py",
+      "sha256": "390ff2f3dac9f3784fe9c781170711ef8320a1af2755a7554dba01b9d04c32cf"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "sha256": "c187a53e8cb4518525fd6191d6142649bfb0bc9e18e5a9ae90031a1faf836ed0"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/export.py",
+      "sha256": "f4673ef6f16bf112197a3c2fe75c61fbed8d89e9d29a757f4251b28541f4c467"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "8e70dec69d30257a031f6062f95cf77c371df263440321f26c22b2b31af2cd22"
+    },
+    {
+      "path": "backend/tests/modules/daemon/test_session_export.py",
+      "sha256": "f4e8a7faba7c662cbaf1e322fd9d970066714b80e6aac81b692087496e6d5323"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+      "sha256": "75b70a2846ce12d7e066ebf82f2d38d584730e864fabfcbf0959936af9bd32fb"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-list-panel.tsx",
+      "sha256": "78c6ff253ede130ffaf9a66e7a927c83cc7d205be9a276f1af3adea63ab65bd4"
+    },
+    {
+      "path": "frontend/src/components/sessions/sessions-portal.tsx",
+      "sha256": "a9967d659399c7585e74f13c36550eb5eddacce75a3772da42ed38808efc64ae"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "2c754518ba8045870af9d1559f58fc72c16d79f283637ceebc59f95d774addeb"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-export.ts",
+      "sha256": "7e2e8d6aed822f07353814e52659bfdcbdfeeff7bef3824d2893e9f8abab027e"
+    }
+  ]
+}
