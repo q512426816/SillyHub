@@ -1,0 +1,264 @@
+diff --git a/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx b/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx
+index dc711f893..5002b06b6 100644
+--- a/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx
++++ b/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx
+@@ -14,6 +14,11 @@
+  * 纯受控组件：不 mock 任何模块；jsdom 缺口按惯例补——scrollIntoView 未实现
+  * （beforeEach 挂 stub）、matchMedia 由 src/test/setup.ts polyfill（matches:false
+  * = 有 hover），触屏用例用 vi.stubGlobal 覆盖。
++ *
++ * ql-20260913-007-1351：刻度命中区修复随动——视觉线从 button 本体移入内部
++ * span（data-testid="tick-line"），状态类断言改取线元素；新增命中区尺寸用例
++ * （button h-[18px] 全宽透明 + 轨无 gap）；飞出卡定位量测补 offsetHeight mock
++ * （调用方现传刻度中心 offsetTop + offsetHeight/2）。
+  */
+ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+ import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
+@@ -99,6 +104,13 @@ function getTicks(container: HTMLElement): HTMLElement[] {
+   return within(getNav(container)).getAllByRole("button");
+ }
+ 
++/** ql-20260913-007-1351：刻度视觉线（button 内部 span；状态类挂这里）。 */
++function getTickLines(container: HTMLElement): HTMLElement[] {
++  return getTicks(container).map(
++    (t) => t.querySelector<HTMLElement>('[data-testid="tick-line"]')!,
++  );
++}
++
+ // ── 0. 短会话隐藏（ql-20260909-005） ──────────────────────────────────────
+ 
+ describe("TurnCatalog 短会话隐藏（ql-20260909-005）", () => {
+@@ -137,7 +149,8 @@ describe("TurnCatalog 刻度渲染", () => {
+ 
+   it("completed 默认态：muted 低透明度细杠，无 failed/running/空心类", () => {
+     const { container } = renderCatalog(FIXTURES);
+-    const cls = getTicks(container)[0]!.className;
++    // ql-20260913-007-1351：状态类挂 button 内部视觉线 span（button 本体是命中区）
++    const cls = getTickLines(container)[0]!.className;
+     expect(cls).toContain("w-[14px]");
+     expect(cls).toContain("bg-muted-foreground");
+     expect(cls).toContain("opacity-45");
+@@ -154,7 +167,7 @@ describe("TurnCatalog 刻度渲染", () => {
+       { ...ENTRY_COMPLETED, key: "run-r", turnNo: 2, status: "running" },
+       { ...ENTRY_COMPLETED, key: "run-c", turnNo: 3 },
+     ]);
+-    const [failedCls, runningCls] = getTicks(container).map((t) => t.className);
++    const [failedCls, runningCls] = getTickLines(container).map((t) => t.className);
+     expect(failedCls).toContain("bg-destructive");
+     expect(failedCls).toContain("opacity-75");
+     expect(failedCls).not.toContain("animate-pulse");
+@@ -180,7 +193,8 @@ describe("TurnCatalog 未加载刻度", () => {
+   it("!loaded → 空心描边（bg-transparent + inset shadow），aria-label 含「未加载」", () => {
+     const { container } = renderCatalog(FIXTURES);
+     const unloaded = getTicks(container)[2]!;
+-    const cls = unloaded.className;
++    // ql-20260913-007-1351：空心类挂视觉线 span；aria 属性仍在 button 上
++    const cls = unloaded.querySelector<HTMLElement>('[data-testid="tick-line"]')!.className;
+     expect(cls).toContain("bg-transparent");
+     expect(cls).toContain("shadow-[inset_0_0_0_1px_hsl(var(--muted-foreground)/0.6)]");
+     expect(cls).not.toContain("bg-muted-foreground");
+@@ -189,6 +203,28 @@ describe("TurnCatalog 未加载刻度", () => {
+   });
+ });
+ 
++// ── 1.5 命中区扩大（ql-20260913-007-1351） ────────────────────────────────
++
++describe("TurnCatalog 命中区（ql-20260913-007-1351）", () => {
++  it("刻度按钮本体为扩大命中区（h-[18px] 全宽），视觉线为内部 span（2px 居中）", () => {
++    const { container } = renderCatalog(FIXTURES);
++    const btn = getTicks(container)[0]!;
++    // 命中区：上下各 8px 缓冲（原 2px 高——鼠标须精确压线）
++    expect(btn.className).toContain("h-[18px]");
++    expect(btn.className).toContain("w-full");
++    // 视觉线：button 内唯一子元素，2px 细横杠（视觉不变）
++    const line = btn.querySelector<HTMLElement>('[data-testid="tick-line"]');
++    expect(line).not.toBeNull();
++    expect(line!.className).toContain("h-[2px]");
++    expect(line!.className).toContain("w-[14px]");
++  });
++
++  it("轨无 gap（相邻命中区紧贴连续，垂直扫过不闪断）", () => {
++    const { container } = renderCatalog(FIXTURES);
++    expect(getNav(container).className).not.toContain("gap-");
++  });
++});
++
+ // ── 3. 飞出卡（hover / focus / 定位钳制 / 触屏） ──────────────────────────
+ 
+ describe("TurnCatalog 飞出卡", () => {
+@@ -225,24 +261,28 @@ describe("TurnCatalog 飞出卡", () => {
+     const nav = getNav(container);
+     const ticks = getTicks(container);
+     const flyout = screen.getByTestId("tick-flyout");
+-    // 量测前提 mock：轨高 300、卡高 200（半高 100）
++    // 量测前提 mock：轨高 300、卡高 200（半高 100）；刻度高 18（命中区，
++    // ql-20260913-007-1351 起调用方传刻度中心 offsetTop + offsetHeight/2）
+     Object.defineProperty(nav, "clientHeight", { value: 300, configurable: true });
+     Object.defineProperty(flyout, "offsetHeight", { value: 200, configurable: true });
++    for (const t of ticks) {
++      Object.defineProperty(t, "offsetHeight", { value: 18, configurable: true });
++    }
+ 
+-    // 底部刻度（offsetTop 1000）：未钳制 top=900 → 钳到轨高-卡高-8=92
++    // 底部刻度（offsetTop 1000 → 中心 1009）：未钳制 top=909 → 钳到轨高-卡高-8=92
+     Object.defineProperty(ticks[2]!, "offsetTop", { value: 1000, configurable: true });
+     fireEvent.mouseOver(ticks[2]!);
+     expect(flyout.style.top).toBe("92px");
+ 
+-    // 顶部刻度（offsetTop 0）：居中 top=-100 → 钳到下限 8
++    // 顶部刻度（offsetTop 0 → 中心 9）：居中 top=-91 → 钳到下限 8
+     Object.defineProperty(ticks[0]!, "offsetTop", { value: 0, configurable: true });
+     fireEvent.mouseOver(ticks[0]!);
+     expect(flyout.style.top).toBe("8px");
+ 
+-    // 定位纯函数边界直测（居中不触界 / 上限 / 下限）
++    // 定位纯函数边界直测（首参=刻度中心；居中不触界 / 上限 / 下限）
+     expect(computeFlyoutTop(150, 300, 200)).toBe(50);
+-    expect(computeFlyoutTop(1000, 300, 200)).toBe(92);
+-    expect(computeFlyoutTop(0, 300, 200)).toBe(8);
++    expect(computeFlyoutTop(1009, 300, 200)).toBe(92);
++    expect(computeFlyoutTop(9, 300, 200)).toBe(8);
+   });
+ 
+   it("hover:none（触屏）不挂飞出卡，点击刻度直接 onJump", () => {
+diff --git a/frontend/src/components/sessions/turn-catalog.tsx b/frontend/src/components/sessions/turn-catalog.tsx
+index 1daf781be..d3ff7e1c9 100644
+--- a/frontend/src/components/sessions/turn-catalog.tsx
++++ b/frontend/src/components/sessions/turn-catalog.tsx
+@@ -19,6 +19,13 @@
+  * muted-foreground、foreground、background，随 html data-theme 换肤），不硬编码色值；
+  * 未加载空心描边用主题变量 hsl(var(--muted-foreground)/.6)（等价 muted-foreground/60）。
+  * antd 不用，轻量自绘 tailwind（与 sessions 组件现有风格一致）。
++ *
++ * ql-20260913-007-1351：刻度命中区修复——原按钮本体即 2px 视觉线（h-[2px] w-[14px]），
++ * hover 摘要卡/点击都要求鼠标精确压线、刻度间 gap-[7px] 无响应，极难操作。改为：
++ * 按钮本体 = 透明命中区（h-[18px] × 轨全宽，视觉线居中于内部 span），去 gap 相邻
++ * 命中区紧贴连续；状态色/hover 放宽/空心描边平移至内部 span（group-* 触发），视觉
++ * 基本不变（刻度垂直周期 9px → 18px，密度略降换可用性）；飞出卡垂直定位改用刻度
++ * 中心（computeFlyoutTop 首参语义见其 JSDoc）。
+  */
+ 
+ import {
+@@ -115,17 +122,20 @@ function flyoutMeta(entry: TurnCatalogEntry): string {
+ 
+ /**
+  * 飞出卡垂直定位（原型 showFlyout 公式抽纯函数便于单测钳制边界）：
+- * 随刻度 offsetTop 垂直居中，钳制在轨可视范围内上下各 8px。
++ * 随刻度中心（tickCenter）垂直居中，钳制在轨可视范围内上下各 8px。
++ * ql-20260913-007-1351：首参语义从「刻度 offsetTop」改为「刻度中心 y」——
++ * 命中区扩为 h-[18px] 后 offsetTop 是按钮顶而非视觉线位置，调用方传
++ * offsetTop + offsetHeight / 2。
+  */
+ export function computeFlyoutTop(
+-  tickTop: number,
++  tickCenter: number,
+   railHeight: number,
+   cardHeight: number,
+ ): number {
+   const half = cardHeight / 2;
+   return Math.max(
+     FLYOUT_EDGE_GAP,
+-    Math.min(tickTop - half, railHeight - cardHeight - FLYOUT_EDGE_GAP),
++    Math.min(tickCenter - half, railHeight - cardHeight - FLYOUT_EDGE_GAP),
+   );
+ }
+ 
+@@ -153,14 +163,22 @@ export default function TurnCatalog({
+   const railRef = useRef<HTMLElement | null>(null);
+   const flyoutRef = useRef<HTMLDivElement | null>(null);
+ 
+-  /** 飞出卡定位：内容渲染后量测（刻度 offsetTop 居中 + 上下 8px 钳制，R-09）。 */
++  /** 飞出卡定位：内容渲染后量测（刻度中心垂直居中 + 上下 8px 钳制，R-09）。
++   *  ql-20260913-007-1351：刻度 button 命中区扩为 h-[18px] 后 offsetTop 不再
++   *  ≈视觉中心（原 2px 高时误差可忽略），改传中心点 offsetTop + offsetHeight/2。 */
+   useLayoutEffect(() => {
+     const rail = railRef.current;
+     const card = flyoutRef.current;
+     if (!flyout || !rail || !card) return;
+     const tick = rail.querySelector<HTMLElement>(`[data-tick-index="${flyout.index}"]`);
+     if (!tick) return;
+-    setFlyoutTop(computeFlyoutTop(tick.offsetTop, rail.clientHeight, card.offsetHeight));
++    setFlyoutTop(
++      computeFlyoutTop(
++        tick.offsetTop + tick.offsetHeight / 2,
++        rail.clientHeight,
++        card.offsetHeight,
++      ),
++    );
+   }, [flyout]);
+ 
+   // active 刻度变化时滚入轨内可视区（R-10/FR-05）；ref 守卫首次渲染不滚（design §5）。
+@@ -207,13 +225,19 @@ export default function TurnCatalog({
+         aria-busy={loadingEarlier || undefined}
+         onMouseOver={handleRailOver}
+         onMouseLeave={() => setFlyout(null)}
+-        className="w-[30px] flex flex-col items-center gap-[7px] py-2 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
++        // ql-20260913-007-1351：去掉原 gap-[7px]——刻度命中区已上下扩展（h-[18px]
++        // 紧贴排列），相邻按钮无缝隙，鼠标垂直扫过轨道时连续命中不闪断。
++        className="w-[30px] flex flex-col items-center py-2 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+       >
+         {/* 上下伪弹性撑块：刻度组垂直居中；刻度超高溢出时收缩到 0 回落顶对齐可滚动 */}
+         <span aria-hidden className="flex-1 min-h-0" />
+         {entries.map((entry, i) => {
+           const isActive = entry.key === activeTurnKey;
+           return (
++            /* ql-20260913-007-1351：按钮本体从 2px 视觉线扩为透明命中区
++               （h-[18px] × 轨全宽，上下各 8px 缓冲）——原 2px 高命中区要求鼠标
++               精确压线才能 hover/点击，可用性极差；视觉横杠移入内部 span（居中），
++               状态色 / hover 放宽 / 空心描边全部平移到子元素，视觉不变。 */
+             <button
+               key={entry.key}
+               type="button"
+@@ -223,26 +247,32 @@ export default function TurnCatalog({
+               aria-current={isActive ? "true" : undefined}
+               onClick={() => onJump(entry)}
+               onFocus={() => setFlyout({ entry, index: i })}
+-              className={cn(
+-                // 基础：14×2px 细横杠（原型 .tick）
+-                "h-[2px] w-[14px] shrink-0 rounded-full transition-all outline-none",
+-                // hover / 键盘 focus-visible：放宽 + 品牌色常亮（原型 .tick:hover/:focus-visible）
+-                "hover:w-[20px] hover:bg-brand-600 hover:opacity-100",
+-                "focus-visible:w-[20px] focus-visible:bg-brand-600 focus-visible:opacity-100",
+-                // 状态底色：active > running > failed > 默认（对齐原型 CSS 级联顺序）
+-                isActive
+-                  ? "w-[20px] bg-brand-600 opacity-100"
+-                  : entry.status === "running"
+-                    ? "bg-warning opacity-100 animate-pulse"
+-                    : entry.status === "failed"
+-                      ? "bg-destructive opacity-75"
+-                      : "bg-muted-foreground opacity-45",
+-                // 未加载空心（原型 .tick.unloaded：inset 1px 描边无底色，hover 描边转品牌色）
+-                !entry.loaded &&
+-                  !isActive &&
+-                  "bg-transparent shadow-[inset_0_0_0_1px_hsl(var(--muted-foreground)/0.6)] hover:bg-transparent hover:shadow-[inset_0_0_0_1px_var(--color-brand-600)]",
+-              )}
+-            />
++              className="group flex h-[18px] w-full shrink-0 items-center justify-center outline-none"
++            >
++              <span
++                data-testid="tick-line"
++                className={cn(
++                  // 基础：14×2px 细横杠（原型 .tick）
++                  "h-[2px] w-[14px] rounded-full transition-all",
++                  // hover / 键盘 focus-visible：放宽 + 品牌色常亮（原型 .tick:hover/
++                  // :focus-visible；命中区在 button 上，视觉反馈经 group-* 落到线）
++                  "group-hover:w-[20px] group-hover:bg-brand-600 group-hover:opacity-100",
++                  "group-focus-visible:w-[20px] group-focus-visible:bg-brand-600 group-focus-visible:opacity-100",
++                  // 状态底色：active > running > failed > 默认（对齐原型 CSS 级联顺序）
++                  isActive
++                    ? "w-[20px] bg-brand-600 opacity-100"
++                    : entry.status === "running"
++                      ? "bg-warning opacity-100 animate-pulse"
++                      : entry.status === "failed"
++                        ? "bg-destructive opacity-75"
++                        : "bg-muted-foreground opacity-45",
++                  // 未加载空心（原型 .tick.unloaded：inset 1px 描边无底色，hover 描边转品牌色）
++                  !entry.loaded &&
++                    !isActive &&
++                    "bg-transparent shadow-[inset_0_0_0_1px_hsl(var(--muted-foreground)/0.6)] group-hover:bg-transparent group-hover:shadow-[inset_0_0_0_1px_var(--color-brand-600)]",
++                )}
++              />
++            </button>
+           );
+         })}
+         <span aria-hidden className="flex-1 min-h-0" />

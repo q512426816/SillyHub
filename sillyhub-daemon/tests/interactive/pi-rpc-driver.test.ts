@@ -829,6 +829,9 @@ describe('turn 生命周期', () => {
       output_tokens: 7,
       cache_read_tokens: 3,
       cache_creation_tokens: 2,
+      // quick-dc2b3195：无 message_end usage 的轮走回退分支，归一化器
+      // turn_end 派生 ctx 随事件原值保留（11+3+2）
+      ctx_tokens: 16,
     });
 
     // turn 收敛：success + session_id + usage
@@ -843,6 +846,7 @@ describe('turn 生命周期', () => {
       output_tokens: 7,
       cache_read_tokens: 3,
       cache_creation_tokens: 2,
+      ctx_tokens: 16,
     });
 
     closeQueue();
@@ -907,6 +911,9 @@ describe('turn 生命周期', () => {
       output_tokens: 30,
       cache_read_tokens: 3000,
       cache_creation_tokens: 30,
+      // quick-dc2b3195：轮累计覆盖时从末次 message_end 补派（50+2000+30；
+      // 修复前该分支无 ctx_tokens——归一化器派生值被 turnUsageSum 覆盖抹掉）
+      ctx_tokens: 2080,
     });
     // ql-20260910-003：modelUsage 会话累计快照（daemon 差分拆 model_usage 明细行）
     expect(results[0]!.modelUsage).toEqual({
@@ -926,6 +933,7 @@ describe('turn 生命周期', () => {
       output_tokens: 30,
       cache_read_tokens: 3000,
       cache_creation_tokens: 30,
+      ctx_tokens: 2080,
     });
     expect(safeParseAgentEvent(usageEv!).success).toBe(true);
 
@@ -970,6 +978,7 @@ describe('turn 生命周期', () => {
       output_tokens: 7,
       cache_read_tokens: 3,
       cache_creation_tokens: 2,
+      ctx_tokens: 16,
     });
 
     closeQueue();

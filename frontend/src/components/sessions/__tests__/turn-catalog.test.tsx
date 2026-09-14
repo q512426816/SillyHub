@@ -14,6 +14,11 @@
  * 纯受控组件：不 mock 任何模块；jsdom 缺口按惯例补——scrollIntoView 未实现
  * （beforeEach 挂 stub）、matchMedia 由 src/test/setup.ts polyfill（matches:false
  * = 有 hover），触屏用例用 vi.stubGlobal 覆盖。
+ *
+ * ql-20260913-007-1351：刻度命中区修复随动——视觉线从 button 本体移入内部
+ * span（data-testid="tick-line"），状态类断言改取线元素；新增命中区尺寸用例
+ * （button h-[18px] 全宽透明 + 轨无 gap）；飞出卡定位量测补 offsetHeight mock
+ * （调用方现传刻度中心 offsetTop + offsetHeight/2）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
@@ -99,6 +104,13 @@ function getTicks(container: HTMLElement): HTMLElement[] {
   return within(getNav(container)).getAllByRole("button");
 }
 
+/** ql-20260913-007-1351：刻度视觉线（button 内部 span；状态类挂这里）。 */
+function getTickLines(container: HTMLElement): HTMLElement[] {
+  return getTicks(container).map(
+    (t) => t.querySelector<HTMLElement>('[data-testid="tick-line"]')!,
+  );
+}
+
 // ── 0. 短会话隐藏（ql-20260909-005） ──────────────────────────────────────
 
 describe("TurnCatalog 短会话隐藏（ql-20260909-005）", () => {
@@ -137,7 +149,8 @@ describe("TurnCatalog 刻度渲染", () => {
 
   it("completed 默认态：muted 低透明度细杠，无 failed/running/空心类", () => {
     const { container } = renderCatalog(FIXTURES);
-    const cls = getTicks(container)[0]!.className;
+    // ql-20260913-007-1351：状态类挂 button 内部视觉线 span（button 本体是命中区）
+    const cls = getTickLines(container)[0]!.className;
     expect(cls).toContain("w-[14px]");
     expect(cls).toContain("bg-muted-foreground");
     expect(cls).toContain("opacity-45");
@@ -154,7 +167,7 @@ describe("TurnCatalog 刻度渲染", () => {
       { ...ENTRY_COMPLETED, key: "run-r", turnNo: 2, status: "running" },
       { ...ENTRY_COMPLETED, key: "run-c", turnNo: 3 },
     ]);
-    const [failedCls, runningCls] = getTicks(container).map((t) => t.className);
+    const [failedCls, runningCls] = getTickLines(container).map((t) => t.className);
     expect(failedCls).toContain("bg-destructive");
     expect(failedCls).toContain("opacity-75");
     expect(failedCls).not.toContain("animate-pulse");
@@ -180,12 +193,35 @@ describe("TurnCatalog 未加载刻度", () => {
   it("!loaded → 空心描边（bg-transparent + inset shadow），aria-label 含「未加载」", () => {
     const { container } = renderCatalog(FIXTURES);
     const unloaded = getTicks(container)[2]!;
-    const cls = unloaded.className;
+    // ql-20260913-007-1351：空心类挂视觉线 span；aria 属性仍在 button 上
+    const cls = unloaded.querySelector<HTMLElement>('[data-testid="tick-line"]')!.className;
     expect(cls).toContain("bg-transparent");
     expect(cls).toContain("shadow-[inset_0_0_0_1px_hsl(var(--muted-foreground)/0.6)]");
     expect(cls).not.toContain("bg-muted-foreground");
     // 状态文案后缀「未加载」；未加载无提问摘要 → aria-label 到此为止
     expect(unloaded).toHaveAttribute("aria-label", "第3轮 · 已停止 · 未加载");
+  });
+});
+
+// ── 1.5 命中区扩大（ql-20260913-007-1351） ────────────────────────────────
+
+describe("TurnCatalog 命中区（ql-20260913-007-1351）", () => {
+  it("刻度按钮本体为扩大命中区（h-[18px] 全宽），视觉线为内部 span（2px 居中）", () => {
+    const { container } = renderCatalog(FIXTURES);
+    const btn = getTicks(container)[0]!;
+    // 命中区：上下各 8px 缓冲（原 2px 高——鼠标须精确压线）
+    expect(btn.className).toContain("h-[18px]");
+    expect(btn.className).toContain("w-full");
+    // 视觉线：button 内唯一子元素，2px 细横杠（视觉不变）
+    const line = btn.querySelector<HTMLElement>('[data-testid="tick-line"]');
+    expect(line).not.toBeNull();
+    expect(line!.className).toContain("h-[2px]");
+    expect(line!.className).toContain("w-[14px]");
+  });
+
+  it("轨无 gap（相邻命中区紧贴连续，垂直扫过不闪断）", () => {
+    const { container } = renderCatalog(FIXTURES);
+    expect(getNav(container).className).not.toContain("gap-");
   });
 });
 
@@ -225,24 +261,28 @@ describe("TurnCatalog 飞出卡", () => {
     const nav = getNav(container);
     const ticks = getTicks(container);
     const flyout = screen.getByTestId("tick-flyout");
-    // 量测前提 mock：轨高 300、卡高 200（半高 100）
+    // 量测前提 mock：轨高 300、卡高 200（半高 100）；刻度高 18（命中区，
+    // ql-20260913-007-1351 起调用方传刻度中心 offsetTop + offsetHeight/2）
     Object.defineProperty(nav, "clientHeight", { value: 300, configurable: true });
     Object.defineProperty(flyout, "offsetHeight", { value: 200, configurable: true });
+    for (const t of ticks) {
+      Object.defineProperty(t, "offsetHeight", { value: 18, configurable: true });
+    }
 
-    // 底部刻度（offsetTop 1000）：未钳制 top=900 → 钳到轨高-卡高-8=92
+    // 底部刻度（offsetTop 1000 → 中心 1009）：未钳制 top=909 → 钳到轨高-卡高-8=92
     Object.defineProperty(ticks[2]!, "offsetTop", { value: 1000, configurable: true });
     fireEvent.mouseOver(ticks[2]!);
     expect(flyout.style.top).toBe("92px");
 
-    // 顶部刻度（offsetTop 0）：居中 top=-100 → 钳到下限 8
+    // 顶部刻度（offsetTop 0 → 中心 9）：居中 top=-91 → 钳到下限 8
     Object.defineProperty(ticks[0]!, "offsetTop", { value: 0, configurable: true });
     fireEvent.mouseOver(ticks[0]!);
     expect(flyout.style.top).toBe("8px");
 
-    // 定位纯函数边界直测（居中不触界 / 上限 / 下限）
+    // 定位纯函数边界直测（首参=刻度中心；居中不触界 / 上限 / 下限）
     expect(computeFlyoutTop(150, 300, 200)).toBe(50);
-    expect(computeFlyoutTop(1000, 300, 200)).toBe(92);
-    expect(computeFlyoutTop(0, 300, 200)).toBe(8);
+    expect(computeFlyoutTop(1009, 300, 200)).toBe(92);
+    expect(computeFlyoutTop(9, 300, 200)).toBe(8);
   });
 
   it("hover:none（触屏）不挂飞出卡，点击刻度直接 onJump", () => {

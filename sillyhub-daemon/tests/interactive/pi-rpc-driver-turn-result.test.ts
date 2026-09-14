@@ -575,3 +575,75 @@ describe('PI driver 静默中断检测（2026-09-12-chat-turn-auto-recovery FR-2
     await s.consumeP;
   });
 });
+
+// ── quick-dc2b3195（2026-09-13-ctx-usage-all-providers 生产实证缺陷回归）────────
+// 生产形态：现行 pi 版本 message_end 逐调用携带 usage、turn_end 定格为零值——
+// driver 轮累计覆盖块曾整体替换事件 usage 抹掉 ctx_tokens（阿里云会话 aa3e2d4e
+// 实证：两轮四维 usage 在库而 ctx 恒空）。回归锚点：覆盖分支从末次 message_end
+// 快照补派 ctx（净值三和），事件与 result 双路携带。
+describe('PI driver ctx_tokens 轮累计覆盖保留（quick-dc2b3195）', () => {
+  it('turn_end 定格零值 + 轮内两次调用：usage 事件与 result 携带末次调用 ctx（50+2000+30）', async () => {
+    const s = await makeSession();
+    await driveTurn(s.child, s.push, {
+      input: '两段工具循环',
+      messageEnds: [
+        { texts: ['先查一下'], usage: { input: 100, output: 20, cacheRead: 1000, cacheWrite: 0 } },
+        { texts: ['最终答案'], usage: { input: 50, output: 10, cacheRead: 2000, cacheWrite: 30 } },
+      ],
+      // 生产实证形态：turn_end 定格零值（归一化器派生 ctx=0 不可采信）
+      turnEndUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+
+    expect(s.results).toHaveLength(1);
+    // result.usage = 轮累计四维 + 末次调用 ctx（修复前 ctx_tokens 键缺失）
+    expect(s.results[0]!.usage).toEqual({
+      input_tokens: 150,
+      output_tokens: 30,
+      cache_read_tokens: 3000,
+      cache_creation_tokens: 30,
+      ctx_tokens: 2080,
+    });
+    // 上报 usage 事件同源携带（backend submit 链路的实时来源）
+    const usageEv = [...s.events]
+      .reverse()
+      .find((e) => e.type === 'text' && e.usage !== undefined);
+    expect(usageEv?.usage).toMatchObject({
+      input_tokens: 150,
+      ctx_tokens: 2080,
+    });
+
+    s.closeQueue();
+    await s.consumeP;
+  });
+
+  it('跨轮不粘滞：第二轮无 message_end usage → 回退 turn_end 定格值派生 ctx', async () => {
+    const s = await makeSession();
+    // 第一轮：两调用（末次 ctx=2080）
+    await driveTurn(s.child, s.push, {
+      input: '第一轮',
+      messageEnds: [
+        { texts: ['查'], usage: { input: 100, output: 20, cacheRead: 1000, cacheWrite: 0 } },
+        { texts: ['答'], usage: { input: 50, output: 10, cacheRead: 2000, cacheWrite: 30 } },
+      ],
+      turnEndUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    // 第二轮：无 message_end usage（回退分支）——上轮末次快照不得泄漏
+    await driveTurn(s.child, s.push, {
+      input: '第二轮',
+      messageEnds: [{ texts: ['直接答'] }],
+      turnEndUsage: { input: 7, output: 2, cacheRead: 5, cacheWrite: 1 },
+    });
+
+    expect(s.results).toHaveLength(2);
+    expect(s.results[0]!.usage).toMatchObject({ ctx_tokens: 2080 });
+    // 回退分支走归一化器 turn_end 派生：7+5+1=13（非上轮粘滞的 2080）
+    expect(s.results[1]!.usage).toMatchObject({
+      input_tokens: 7,
+      output_tokens: 2,
+      ctx_tokens: 13,
+    });
+
+    s.closeQueue();
+    await s.consumeP;
+  });
+});

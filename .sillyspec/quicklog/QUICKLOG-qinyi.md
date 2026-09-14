@@ -202,7 +202,7 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 - frontend/src/components/group-chat/group-chat-panel.tsx（无卡 system 事件渲染 kind:system 提示行）
 - frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx（同用例改新语义+空白 ignore 分支）
 - .sillyspec/docs/sillyhub-daemon/modules/interactive.md（白名单派生段+changelog 两修）
-- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260913-007-1351 条目）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260914-001-b14c 条目；2026-09-14 善后修正——原预留期旧 ID ql-20260913-007-1351 系他者条目，见 docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md 坑 4）
 需求：24h 审查 P2 清单三项收尾：目录 fsync+reload 白名单派生化+群聊系统提示行放行
 根因：①rename 后目录项未 fsync，POSIX 掉电窗口丢 rename；②手写白名单与注册表脱节，新引擎 switchable:true 后前端解锁而 daemon 抛错；③无卡 system 事件被整类 ignore，四类后端既定实时流提示（含收口失败）用户不可见
 方案：①open(dirname)+sync 补目录持久（Windows best-effort 吞）；②照前端同款手法从 INTERACTIVE_PROVIDERS.switchable 派生并加守护⑥对账；③渲染既有 kind:system 条目类型（渲染器预留零产出），合成 id 去重
@@ -212,3 +212,27 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 状态：进行中
 关联变更：（无）
 文件：sillyhub-daemon/src/interactive/pi-rpc-driver.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts
+
+## ql-20260914-003-aafe | 2026-09-14 09:11:37 | 修复 pi 交互会话 ctx_tokens 被 driver 轮累计覆盖丢失
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（lastEndUsage 快照+覆盖分支补派 ctx+轮重置）
+- sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（既有 5 处 usage 断言补 ctx 键（16/2080））
+- sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts（新增 2 回归用例（生产形态/跨轮粘滞））
+需求：修复 pi 交互会话 ctx_tokens 被 driver 轮累计覆盖丢失
+根因：pi-rpc-driver 轮累计覆盖块（ql-20260909-028）用 turnUsageSum 整体替换 turn_end usage 事件的 ev.usage，抹掉归一化器派生的 ctx_tokens；且现行 pi 版本 turn_end 定格常为零值，正确数据源是末次 message_end 原始帧（2026-09-13-ctx-usage-all-providers 设计漏审计 driver 层注入点，归一化器单测不经覆盖块故全绿；生产实证=阿里云会话 aa3e2d4e 今早两轮四维 usage 在库而 ctx 恒空）
+方案：driver 累计处定格末次 assistant message_end usage 快照（lastEndUsage），覆盖分支经 ctxTokensFromNetInput 净值三和补派 ctx_tokens 注入轮累计对象（与 codex last 毛值同为末次调用口径）；无快照回退分支沿用事件原值；轮边界重置防跨轮粘滞
+结果：pi-rpc-driver 3 套件 119 用例全绿（含 2 新回归：生产形态零值定格+双调用 ctx=2080 事件/result 双路断言、跨轮不粘滞回退 ctx=13）+ 既有 5 处 usage 全对象断言补 ctx 键 + typecheck exit 0；待重打包部署阿里云 + 本机 daemon 重启生效
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档
+
+## ql-20260914-004-0be7 | 2026-09-14 09:14:32 | 登记 sillyspec CLI 第四坑（ql-ID 预留/分配竞态）+ 修 QUICKLOG 旧 ID 引用
+状态：已完成
+关联变更：（无）
+文件：
+- docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md（补第四坑 ql-ID 预留分配竞态+标题引言四坑化+处置进展）
+- .sillyspec/quicklog/QUICKLOG-qinyi.md（b14c 条目文件行旧 ID 引用修正并注善后原因）
+需求：登记 sillyspec CLI 第四坑（ql-ID 预留/分配竞态）+ 修 QUICKLOG 旧 ID 引用
+根因：quick 会话启动预留 ql-ID 无查重，同一 ID 可双发放（实证 007-1351）；file-notes/模块文档在最终 ID 分配前引用预留值会指向他者条目
+方案：坑文档补第四坑（现象/影响/绕过/建议修复，工具修复归 sillyspec 仓用户另行安排）+QUICKLOG b14c 条目文件行旧 ID 修正并注善后原因
+结果：纯文档与日志数据修正零代码零测试面；登记会话自身 guard.json 复现同一 stale ID（坑 4 第二现场）

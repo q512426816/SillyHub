@@ -63,6 +63,7 @@ import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { daemonStateDir } from '../config.js';
 import type { AgentEvent, AgentEventUsage } from '../types.js';
 import { PiEventNormalizer } from './pi-events.js';
+import { ctxTokensFromNetInput } from './usage-ctx.js';
 import type {
   InteractiveDriver,
   InteractiveDriverCallbacks,
@@ -974,6 +975,15 @@ export class PiRpcDriver implements InteractiveDriver {
     // 调用，不得再计入）；累加值为空（pi 版本不带 message_end usage）退回定格
     // 值，零回归兜底。
     let turnUsageSum: AgentEventUsage | null = null;
+    // quick-ffb92f60（2026-09-13-ctx-usage-all-providers 生产实证缺陷修复）：
+    // 末次 assistant message_end 的原始 usage（input/cacheRead/cacheWrite 净值
+    // 三口径）——ctx_tokens（上下文环分子，末次调用提示词大小）数据源。既有
+    // 覆盖块用 turnUsageSum 整体替换事件 usage 时会把归一化器 turn_end 派生的
+    // ctx_tokens 抹掉（生产实证：阿里云 pi 会话 aa3e2d4e 两轮四维 usage 在库
+    // 而 ctx 恒空），修法 = 覆盖时从本快照补派 ctx_tokens（与 codex last 毛值
+    // 同为「末次调用」口径；pi 为净值三和，ctxTokensFromNetInput 单源）。
+    let lastEndUsage: { input: number; cacheRead: number; cacheWrite: number } | null =
+      null;
     // ql-20260910-003：当前模型名（model_change 帧 modelId——pi 会话启动即发
     // 一条带活跃模型）+ 按模型**会话累计**用量快照（result 带 modelUsage →
     // daemon _deltaModelUsage 差分拆 model_usage 明细行 + api_requests）。
@@ -1295,6 +1305,16 @@ export class PiRpcDriver implements InteractiveDriver {
         if (endMsg.role === 'assistant' && isRecord(endMsg.usage)) {
           turnUsageSum = accumulatePiUsage(turnUsageSum, endMsg.usage);
           turnApiCallCount += 1;
+          // quick-ffb92f60：定格末次调用 usage 快照（ctx_tokens 数据源，见声明注释）。
+          {
+            const num = (v: unknown): number =>
+              typeof v === 'number' && Number.isFinite(v) ? v : 0;
+            lastEndUsage = {
+              input: num(endMsg.usage.input),
+              cacheRead: num(endMsg.usage.cacheRead),
+              cacheWrite: num(endMsg.usage.cacheWrite),
+            };
+          }
           // ql-20260910-003：同步累计按模型快照（pi 的 input/cacheRead/cacheWrite
           // 本就是 Anthropic 分桶语义的净输入，直接累加）。
           if (currentModel) {
@@ -1356,8 +1376,24 @@ export class PiRpcDriver implements InteractiveDriver {
           // message_end 累加项重复，不得双计）。轮内有累加和以和为准；累加为空
           // （pi 版本 message_end 不带 usage / 异常流）退回定格值。并把轮累计
           // 注入事件本体——ledger（replace 语义消费轮级累计）与 live 显示一致。
+          // quick-ffb92f60：以和覆盖时**保留 ctx_tokens**——从末次 message_end
+          // 快照补派（turnUsageSum 是轮累计四维不含 ctx；归一化器 turn_end 的
+          // ctx 在现行 pi 版本常为零值定格不可采信）；无快照（本轮无带 usage 的
+          // assistant message_end）沿用事件原值（含归一化器派生或无键）。
+          const ctxFromLast = lastEndUsage
+            ? ctxTokensFromNetInput(
+                lastEndUsage.input,
+                lastEndUsage.cacheRead,
+                lastEndUsage.cacheWrite,
+              )
+            : undefined;
           turnUsage = hasPositiveUsage(turnUsageSum)
-            ? { ...turnUsageSum! }
+            ? {
+                ...turnUsageSum!,
+                ...(ctxFromLast !== undefined
+                  ? { ctx_tokens: ctxFromLast }
+                  : {}),
+              }
             : ev.usage;
           ev.usage = turnUsage;
           if (isRecord(ev.metadata)) {
@@ -1422,6 +1458,7 @@ export class PiRpcDriver implements InteractiveDriver {
         turnFinalText = null;
         turnUsage = undefined;
         turnUsageSum = null;
+        lastEndUsage = null;
         turnApiCallCount = 0;
         turnReported = false;
         turnSawRun = false;

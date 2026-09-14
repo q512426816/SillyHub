@@ -1,0 +1,38 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-e269ecd0",
+  "totals": {
+    "files": 2,
+    "additions": 105,
+    "deletions": 35
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/sessions/__tests__/turn-catalog.test.tsx",
+      "declared": true,
+      "additions": 49,
+      "deletions": 9,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/turn-catalog.tsx",
+      "declared": true,
+      "additions": 56,
+      "deletions": 26,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260913-007-1351",
+  "sessionId": "quick-e269ecd0",
+  "savedAt": "2026-09-13T14:02:26.248Z",
+  "patchSha256": "77cf6e9f0c6222675b6e67cd28ffc638b090eafa5726dd395df8e3fa1a578b4f",
+  "patchStatus": "ok"
+}
