@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 会话一键导出 · 2026-09-14-session-export</title>
+<style>
+  :root, [data-theme="ai-native"] {
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-300:#c4b5fd; --brand-600:#7c3aed; --brand-700:#6d28d9;
+    --accent:#0891b2; --bg:#fafafa; --card:#ffffff; --muted:#f4f4f5; --muted-fg:#71717a;
+    --fg:#18181b; --border:#e4e4e7; --destructive:#dc2626;
+  }
+  [data-theme="blue"] {
+    --brand-50:#eff6ff; --brand-100:#dbeafe; --brand-300:#93c5fd; --brand-600:#2563eb; --brand-700:#1d4ed8;
+    --accent:#06b6d4; --bg:#f8fafc; --card:#ffffff; --muted:#f1f5f9; --muted-fg:#64748b;
+    --fg:#0f172a; --border:#e2e8f0; --destructive:#dc2626;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--fg); font-size:13px; padding:24px; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .topbar h1 { font-size:16px; }
+  .topbar .meta { color:var(--muted-fg); font-size:12px; margin-top:2px; }
+  .theme-toggle { border:1px solid var(--border); background:var(--card); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:12px; }
+  .stage { display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; }
+  /* ── 左:会话列表面板(贴 session-list-panel 现状) ── */
+  .panel { width:390px; background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:visible; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  .panel-head { padding:10px 12px; font-size:12px; color:var(--muted-fg); border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center; }
+  .group-head { display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:pointer; }
+  .group-head:hover { background:var(--brand-50); }
+  .chevron { color:var(--muted-fg); font-size:10px; transition:.15s; }
+  .group-title { font-weight:600; font-size:13px; flex:1; }
+  .icon-btn-sq { width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid var(--border); background:var(--muted); color:var(--muted-fg); font-size:12px; }
+  .icon-btn-sq.active { border-color:var(--brand-600); background:var(--brand-100); color:var(--brand-600); }
+  /* 批量操作条:现状 + 新增「导出选中」 */
+  .batch-bar { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--muted); border-top:1px solid var(--border); border-bottom:1px solid var(--border); position:relative; }
+  .btn { border:1px solid var(--border); background:var(--card); border-radius:6px; padding:3px 10px; font-size:12px; cursor:pointer; }
+  .btn:hover { border-color:var(--brand-300); color:var(--brand-700); }
+  .btn.export { position:relative; border-color:var(--brand-600); color:var(--brand-700); background:var(--brand-50); }
+  .btn .caret { font-size:10px; margin-left:4px; }
+  /* 档位 Dropdown(新增交互) */
+  .dropdown { position:absolute; top:calc(100% + 6px); left:130px; width:230px; background:var(--card); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.12); z-index:30; overflow:hidden; }
+  .dropdown .item { padding:9px 12px; cursor:pointer; display:flex; gap:9px; align-items:flex-start; }
+  .dropdown .item:hover { background:var(--brand-50); }
+  .dropdown .item + .item { border-top:1px solid var(--border); }
+  .dropdown .t { font-weight:600; font-size:12.5px; }
+  .dropdown .d { color:var(--muted-fg); font-size:11px; margin-top:2px; }
+  .dropdown .tag { font-size:10px; color:var(--accent); border:1px solid var(--accent); border-radius:4px; padding:0 4px; margin-left:6px; }
+  /* 会话行 */
+  .row { display:flex; align-items:center; gap:8px; padding:8px 10px 8px 26px; cursor:pointer; position:relative; }
+  .row:hover { background:var(--brand-50); }
+  .row.selected { background:var(--brand-100); }
+  .row .cb { width:14px; height:14px; accent-color:var(--brand-600); }
+  .row-main { flex:1; min-width:0; }
+  .row-title { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row-sub { font-size:11px; color:var(--muted-fg); margin-top:2px; display:flex; gap:6px; align-items:center; }
+  .agent-tag { background:var(--brand-50); color:var(--brand-700); border-radius:4px; padding:0 5px; font-size:10.5px; }
+  .pin { color:var(--brand-600); font-size:11px; }
+  /* 行 hover 操作列:现状(置顶/重命名/归档/删除)+ 新增下载图标 */
+  .row-actions { display:none; gap:2px; }
+  .row:hover .row-actions { display:inline-flex; }
+  .row:hover .row-time { display:none; }
+  .icon-btn { width:20px; height:20px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; color:var(--muted-fg); font-size:11px; cursor:pointer; text-decoration:none; }
+  .icon-btn:hover { background:var(--brand-100); color:var(--brand-700); }
+  .icon-btn.new { background:var(--brand-100); color:var(--brand-700); outline:1.5px dashed var(--brand-600); outline-offset:-1.5px; }
+  .row-time { font-size:11px; color:var(--muted-fg); }
+  .status-dot { width:6px; height:6px; border-radius:50%; background:#22c55e; display:inline-block; }
+  /* ── 右:导出产物预览 ── */
+  .preview { flex:1; min-width:420px; max-width:560px; display:flex; flex-direction:column; gap:14px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  .card h3 { font-size:13px; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .chip { font-size:10px; border-radius:99px; padding:1px 8px; }
+  .chip.md { background:var(--brand-50); color:var(--brand-700); border:1px solid var(--brand-300); }
+  .chip.zip { background:#fff7ed; color:#c2410c; border:1px solid #fdba74; }
+  .filebox { font-family:Consolas,monospace; font-size:11.5px; background:var(--muted); border:1px solid var(--border); border-radius:8px; padding:10px 12px; line-height:1.7; white-space:pre; overflow-x:auto; }
+  .filebox .c { color:var(--muted-fg); }
+  .filebox .k { color:var(--brand-600); }
+  .flow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:12px; }
+  .flow .step { background:var(--muted); border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
+  .flow .step.hot { background:var(--brand-50); border-color:var(--brand-600); color:var(--brand-700); font-weight:600; }
+  .arrow { color:var(--muted-fg); }
+  .note { font-size:11.5px; color:var(--muted-fg); line-height:1.7; }
+  .legend { display:flex; gap:14px; font-size:11px; color:var(--muted-fg); margin-top:4px; }
+  .legend .new-dot { color:var(--brand-600); font-weight:700; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <h1>会话一键导出 — 交互原型</h1>
+      <div class="meta">2026-09-14-session-export · 入口=批量栏「导出选中」+ 行 hover 下载图标 · 两档:对话(Markdown)/完整(JSON+附件 zip)</div>
+    </div>
+    <button class="theme-toggle" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='ai-native'?'blue':'ai-native';this.textContent=h.dataset.theme==='ai-native'?'主题:AI-Native(切换到 Blue)':'主题:Blue(切换到 AI-Native)'">主题:AI-Native(切换到 Blue)</button>
+  </div>
+
+  <div class="stage">
+    <!-- 左:会话列表(带批量态) -->
+    <div class="panel">
+      <div class="panel-head">会话 · 2 个工作区 · <span style="margin-left:auto">🔍 筛选</span></div>
+
+      <div class="group-head">
+        <span class="chevron">▼</span>
+        <span class="group-title">multi-agent-platform</span>
+        <span class="icon-btn-sq" title="新建会话">＋</span>
+        <span class="icon-btn-sq active" title="多选">☑</span>
+      </div>
+
+      <!-- 批量操作条(现状按钮 + 新增导出);紫色虚线圈=新增 -->
+      <div class="batch-bar">
+        <button class="btn">全选本组</button>
+        <button class="btn">删除选中(2)</button>
+        <button class="btn">归档选中(2)</button>
+        <button class="btn export" id="exportBtn" onclick="toggleDd(event)">⬇ 导出选中(2)<span class="caret">▾</span></button>
+
+        <!-- 档位下拉(点按钮展开/收起;下面默认展示展开态) -->
+        <div class="dropdown" id="dd">
+          <div class="item">
+            <span>📝</span>
+            <div><div class="t">导出对话<span class="tag">.md</span></div><div class="d">用户/助手消息文本,可直接阅读、贴给别的 AI</div></div>
+          </div>
+          <div class="item">
+            <span>🗂️</span>
+            <div><div class="t">导出完整信息<span class="tag">.zip</span></div><div class="d">JSON 全量(思考/工具调用/用量)+ 附件原文件</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row selected">
+        <input type="checkbox" class="cb" checked>
+        <div class="row-main">
+          <div class="row-title"><span class="pin">📌</span> 修复登录页报错</div>
+          <div class="row-sub"><span class="status-dot"></span> 运行中 · <span class="agent-tag">claude</span> 12 轮</div>
+        </div>
+        <span class="row-time">10:23</span>
+        <span class="row-actions">
+          <span class="icon-btn" title="置顶">📌</span>
+          <span class="icon-btn" title="重命名">✏️</span>
+          <span class="icon-btn" title="归档">🗄️</span>
+          <span class="icon-btn new" title="导出本会话(同款两档下拉)">⬇</span>
+          <span class="icon-btn" title="删除">🗑️</span>
+        </span>
+      </div>
+
+      <div class="row selected">
+        <input type="checkbox" class="cb" checked>
+        <div class="row-main">
+          <div class="row-title">会话导出功能方案讨论</div>
+          <div class="row-sub"><span class="status-dot" style="background:var(--muted-fg)"></span> 已结束 · <span class="agent-tag">glm</span> 5 轮</div>
+        </div>
+        <span class="row-time">09-13</span>
+        <span class="row-actions">
+          <span class="icon-btn" title="置顶">📌</span>
+          <span class="icon-btn" title="重命名">✏️</span>
+          <span class="icon-btn" title="归档">🗄️</span>
+          <span class="icon-btn new" title="导出本会话(同款两档下拉)">⬇</span>
+          <span class="icon-btn" title="删除">🗑️</span>
+        </span>
+      </div>
+
+      <div class="group-head">
+        <span class="chevron">▶</span>
+        <span class="group-title">sillyhub-docs</span>
+        <span class="icon-btn-sq">＋</span>
+        <span class="icon-btn-sq">☑</span>
+      </div>
+    </div>
+
+    <!-- 右:交互流程 + 产物预览 -->
+    <div class="preview">
+      <div class="card">
+        <h3>交互流程</h3>
+        <div class="flow">
+          <span class="step">列表勾选会话</span><span class="arrow">→</span>
+          <span class="step hot">导出选中(N)</span><span class="arrow">→</span>
+          <span class="step">选档位(对话/完整)</span><span class="arrow">→</span>
+          <span class="step">按钮 loading</span><span class="arrow">→</span>
+          <span class="step hot">浏览器直接下载</span>
+        </div>
+        <div class="legend"><span><span class="new-dot">●</span> 紫色虚线 = 本次新增 UI</span><span>其余为列表现状</span></div>
+      </div>
+
+      <div class="card">
+        <h3>档位一 · 对话导出 <span class="chip md">Markdown · 单会话=1 个 .md / 多会话=zip</span></h3>
+        <div class="filebox"><span class="c"># 会话:修复登录页报错</span>
+<span class="c">> runtime: claude · 12 轮 · 2026-09-12 14:02 ~ 09-14 10:23</span>
+
+## 第 1 轮 · 09-12 14:02
+<span class="k">👤 用户:</span>
+帮我修复登录页的报错
+<span class="c">[附件:报错截图.png|image]</span>
+
+<span class="k">🤖 助手:</span>
+已定位到问题,在 login.ts:42 …</div>
+      </div>
+
+      <div class="card">
+        <h3>档位二 · 完整导出 <span class="chip zip">zip = full.json + attachments/</span></h3>
+        <div class="filebox">会话导出_完整_20260914_1530.zip
+├── 修复登录页报错_a1b2/
+│   ├── full.json      <span class="c">← 会话元信息+轮次(模型/token/状态)+全部日志</span>
+│   │                     <span class="c">(思考/工具调用/edit_patch/群聊发言人)+任务卡</span>
+│   └── attachments/
+│       ├── 101_报错截图.png   <span class="c">← MinIO 取流的附件本体</span>
+│       └── 102_环境信息.txt
+└── 会话导出功能方案讨论_c3d4/
+    └── full.json          <span class="c">← 无附件会话:无 attachments/ 目录</span></div>
+      </div>
+
+      <div class="card">
+        <h3>口径备注</h3>
+        <div class="note">
+          · 权限与列表一致:自己的会话 + 有权访问的群聊;已删除会话不可导<br>
+          · 对话档附件只保留标记行,完整档才打包本体<br>
+          · 导出行数独立上限 2 万行,超出在文件内标注截断,不沿用回放 5000 行<br>
+          · 附件缺失(对象存储无此文件)降级标注「附件缺失」,不影响整包导出
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  function toggleDd(e) { e.stopPropagation(); document.getElementById('dd').style.display = document.getElementById('dd').style.display === 'none' ? '' : 'none'; }
+  document.addEventListener('click', () => { document.getElementById('dd').style.display = ''; });
+</script>
+</body>
+</html>

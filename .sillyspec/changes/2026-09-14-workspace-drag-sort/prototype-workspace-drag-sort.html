@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作区拖拽排序 · 交互原型（每人一套顺序 + 边缘投放带跨页）</title>
+<style>
+  /* ── 主题 token（取值对齐 frontend/src/styles/themes.ts ai-native）── */
+  :root{
+    --primary:#7C3AED; --primary-hover:#6D28D9; --accent:#0891B2;
+    --bg:#FAF5FF; --card:#FFFFFF; --border:#DDD6FE;
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-200:#DDD6FE;
+    --brand-600:#7C3AED; --brand-700:#6D28D9;
+    --muted-fg:#64748b; --fg:#1e293b;
+    --success:#16a34a; --warning:#d97706; --error:#dc2626;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:24px 28px 60px}
+  h1{font-size:20px;font-weight:600}
+  .subtitle{color:var(--muted-fg);font-size:13px;margin:2px 0 14px}
+  .legend{background:var(--brand-50);border:1px solid var(--brand-200);border-radius:var(--radius);padding:10px 14px;font-size:12.5px;color:#4c1d95;margin-bottom:14px}
+  .legend b{color:var(--brand-700)}
+
+  /* ── 筛选条（模拟现有页面）── */
+  .filterbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:8px;margin-bottom:14px;box-shadow:0 1px 2px rgba(124,58,237,.06)}
+  .filterbar input,.filterbar select{border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px;background:#fff;color:var(--fg);outline:none}
+  .filterbar input{flex:1;min-width:200px}
+  .drag-disabled-tip{display:none;width:100%;color:var(--warning);font-size:12px;padding-top:2px}
+  body.filter-active .drag-disabled-tip{display:block}
+
+  /* ── 边缘投放带：默认收起，body.dragging 时展开 ── */
+  .edge-zone{border:2px dashed var(--brand-300,#c4b5fd);border-radius:var(--radius);background:var(--brand-50);
+    color:var(--brand-700);text-align:center;font-size:13px;font-weight:500;letter-spacing:.5px;
+    max-height:0;opacity:0;overflow:hidden;margin:0;transition:max-height .18s ease,opacity .18s ease,margin .18s ease;
+    display:flex;align-items:center;justify-content:center}
+  body.dragging .edge-zone{max-height:44px;opacity:1;margin:10px 0}
+  .edge-zone.over{background:var(--brand-100);border-color:var(--primary);color:var(--primary-hover);box-shadow:0 0 0 3px var(--brand-100)}
+  .edge-zone.hidden-zone{display:none}
+
+  /* ── 卡片网格 ── */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}}
+  .card{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:0 1px 2px rgba(124,58,237,.06);transition:box-shadow .15s,border-color .15s,transform .15s,opacity .15s;display:flex;flex-direction:column}
+  .card:hover{box-shadow:0 4px 12px rgba(124,58,237,.12)}
+  .card.dragging{opacity:.35;transform:scale(.98)}
+  .card.drop-before{box-shadow:0 -3px 0 0 var(--primary)}
+  .card.drop-after{box-shadow:0 3px 0 0 var(--primary)}
+  .card.just-moved{animation:flash 1.6s ease}
+  @keyframes flash{0%,60%{box-shadow:0 0 0 3px var(--accent),0 4px 14px rgba(8,145,178,.25)}100%{box-shadow:0 1px 2px rgba(124,58,237,.06)}}
+
+  /* 拖拽手柄：默认半隐，hover/拖拽期全显；筛选态禁用 */
+  .handle{position:absolute;top:6px;left:-13px;width:22px;height:44px;border-radius:6px 0 0 6px;
+    background:var(--card);border:1px solid var(--border);border-right:none;cursor:grab;
+    display:flex;align-items:center;justify-content:center;color:var(--muted-fg);opacity:0;transition:opacity .12s;z-index:2;font-size:14px;user-select:none}
+  .card:hover .handle{opacity:.55}
+  .handle:hover{opacity:1!important;color:var(--primary)}
+  body.dragging .handle{opacity:.9}
+  body.filter-active .handle{opacity:.25;cursor:not-allowed}
+
+  .card-head{display:flex;gap:6px;align-items:center;padding:10px 12px 8px;border-bottom:1px solid var(--brand-50)}
+  .badge{font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid}
+  .b-type{background:var(--brand-50);border-color:var(--brand-200);color:var(--brand-700)}
+  .b-on{background:#f0fdf4;border-color:#bbf7d0;color:var(--success)}
+  .b-off{background:#fef2f2;border-color:#fecaca;color:var(--error)}
+  .b-un{background:#fffbeb;border-color:#fde68a;color:var(--warning)}
+  .b-info{background:#ecfeff;border-color:#a5f3fc;color:var(--accent)}
+  .card-name{font-weight:600;font-size:14.5px;padding:8px 12px 0}
+  .card-path{color:var(--muted-fg);font-size:12px;padding:0 12px;font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+  .tags{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px 0}
+  .tag{font-size:11px;background:var(--brand-50);color:var(--brand-700);border-radius:4px;padding:1px 6px}
+  .card-foot{display:flex;gap:6px;margin-top:auto;padding:10px 12px}
+  .btn{border:1px solid var(--border);background:#fff;color:var(--fg);border-radius:6px;padding:2px 10px;font-size:12px;cursor:pointer}
+  .btn:hover{border-color:var(--primary);color:var(--primary)}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  .btn.primary:hover{background:var(--primary-hover)}
+
+  /* ── 分页器 ── */
+  .pager{display:flex;justify-content:space-between;align-items:center;padding-top:10px}
+  .pager .info{font-size:11px;color:var(--muted-fg)}
+  .api-line{margin-top:10px;font-size:12px;color:var(--accent);font-family:ui-monospace,Consolas,monospace;min-height:18px}
+
+  /* ── 移动到…弹窗 ── */
+  .modal-mask{position:fixed;inset:0;background:rgba(30,27,43,.35);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal-mask.open{display:flex}
+  .modal{background:var(--card);border-radius:12px;width:380px;max-width:92vw;padding:18px;box-shadow:0 12px 40px rgba(76,29,149,.25)}
+  .modal h3{font-size:15px;margin-bottom:12px}
+  .modal label{display:block;font-size:12px;color:var(--muted-fg);margin:10px 0 4px}
+  .modal select{width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px}
+  .modal .row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+</style>
+</head>
+<body>
+  <h1>选择工作区</h1>
+  <div class="subtitle">选择一个工作区开始，或在右上角进入平台后台 —— 拖拽排序交互原型</div>
+
+  <div class="legend">
+    试用指引：<b>① 页内排序</b>——按住卡片左侧<b> ⠿ 手柄</b>拖到另一张卡上/下方；<b>② 跨页</b>——拖动时页面上下浮现<b>投放带</b>，
+    投入下带=移到下一页开头（自动翻页+高亮），上带=移到上一页末尾；<b>③ 兜底</b>——卡片底部「移动到…」菜单；
+    <b>④ 筛选保护</b>——在搜索框输入任意文字（激活筛选），拖拽即被禁用。
+  </div>
+
+  <div class="filterbar">
+    <input id="q" placeholder="搜索别名/名称/slug/路径（输入即激活筛选态，拖拽禁用）">
+    <select id="type"><option value="">全部类型</option><option>单仓库</option><option>Monorepo</option><option>未分类</option></select>
+    <select id="status"><option value="active">活跃</option><option value="">全部状态</option></select>
+    <div class="drag-disabled-tip">⚠ 筛选/搜索状态下不可拖拽排序（子序列锚点语义不明确）——清除筛选后恢复手柄</div>
+  </div>
+
+  <div id="zone-top" class="edge-zone">▼ 拖到此处 → 移到上一页末尾（to = "prev_page_tail"，服务端解析锚点）</div>
+  <div id="grid" class="grid"></div>
+  <div id="zone-bottom" class="edge-zone">▼ 拖到此处 → 移到下一页开头（to = "next_page_head"，服务端解析锚点）</div>
+
+  <div class="pager">
+    <span class="info" id="page-info"></span>
+    <span>
+      <button class="btn" id="prev">上一页</button>
+      <button class="btn" id="next">下一页</button>
+    </span>
+  </div>
+  <div class="api-line" id="api-line">（move 请求将显示在这里）</div>
+
+  <div class="modal-mask" id="modal-mask">
+    <div class="modal">
+      <h3 id="modal-title">移动工作区</h3>
+      <label>目标页</label>
+      <select id="m-page"></select>
+      <label>页内位置</label>
+      <select id="m-pos">
+        <option value="first">页首（向上 before_id / 向下 after_id = 目标页第一张）</option>
+        <option value="last">页尾（向上 before_id / 向下 after_id = 目标页最后一张）</option>
+      </select>
+      <div class="row">
+        <button class="btn" id="m-cancel">取消</button>
+        <button class="btn primary" id="m-ok">移动</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ── 模拟数据：28 个工作区，12/页 ── */
+const PAGE_SIZE = 12;
+const NAMES = ["multi-agent-platform","sillyhub-daemon","PPM 管理模块","知识库索引","会话编排","工作流引擎","监控面板","发布流水线","文档中心","权限中台","通知服务","任务调度","规格同步","代码扫描","冲突解决","runtime 适配","provider 注册表","会话分组","daemon 网关","文件浏览","审计日志","平台同步","事件总线","技能仓库","工单集成","报表导出","沙盒环境","归档中心"];
+const TYPES = ["单仓库","Monorepo",null];
+const STATUSES = ["online","offline","unbound"];
+let order = NAMES.map((n,i)=>({id:"ws-"+(100+i),name:n,type:TYPES[i%3],daemon:STATUSES[i%3],projects:i%4===0?["关联项目 A"]:[]}));
+let page = 0;
+let draggingId = null;
+const $ = s=>document.querySelector(s);
+
+function filterActive(){ return $("#q").value.trim()!=="" || $("#type").value!=="" || $("#status").value!=="active"; }
+function visible(){ if(!filterActive()) return order.slice();
+  const q=$("#q").value.trim(); const t=$("#type").value;
+  return order.filter(w=>(!q||w.name.includes(q))&&(!t||(t==="未分类"?!w.type:w.type===t))); }
+
+function daemonBadge(s){ return s==="online"?'<span class="badge b-on">守护在线</span>':s==="offline"?'<span class="badge b-off">守护离线</span>':'<span class="badge b-un">未绑定</span>'; }
+
+function render(){
+  const list = visible();
+  const total = list.length;
+  const maxPage = Math.max(0,Math.ceil(total/PAGE_SIZE)-1);
+  if(page>maxPage) page=maxPage;
+  const slice = list.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
+  const grid=$("#grid"); grid.innerHTML="";
+  slice.forEach(w=>{
+    const el=document.createElement("div");
+    el.className="card"; el.dataset.id=w.id;
+    el.innerHTML=`<div class="handle" title="拖拽排序">⠿</div>
+      <div class="card-head">
+        ${w.type?`<span class="badge b-type">${w.type}</span>`:'<span class="badge b-type">未分类</span>'}
+        <span class="badge b-info">活跃</span>${daemonBadge(w.daemon)}
+      </div>
+      <div class="card-name">${w.name}</div>
+      <div class="card-path">D:\\work\\${w.name}</div>
+      ${w.projects.length?'<div class="tags">'+w.projects.map(p=>`<span class="tag">${p}</span>`).join("")+"</div>":""}
+      <div class="card-foot"><button class="btn">别名</button><button class="btn">重新扫描</button><button class="btn">删除</button><button class="btn act-move" style="margin-left:auto">移动到…</button></div>`;
+    grid.appendChild(el);
+  });
+  $("#page-info").textContent=`共 ${total} 条 · 第 ${page+1} 页${filterActive()?" · 筛选态（排序禁用）":" · 默认视图（可拖拽）"}`;
+  $("#prev").disabled = page===0;
+  $("#next").disabled = (page+1)*PAGE_SIZE>=total;
+  /* 投放带显隐：首页无上带 / 末页无下带；筛选态不出现 */
+  $("#zone-top").classList.toggle("hidden-zone", page===0 || filterActive());
+  $("#zone-bottom").classList.toggle("hidden-zone", (page+1)*PAGE_SIZE>=total || filterActive());
+  wireCards();
+}
+
+function apiLog(moveId, req){
+  const name=order.find(w=>w.id===moveId)?.name??moveId;
+  $("#api-line").textContent=`POST /workspaces/${moveId}/move  ${req}  ← 「${name}」`;
+}
+
+/* 移动语义 A（id 锚点）：把 moveId 移到锚点卡之后/之前（order 全量数组模拟后端重排） */
+function applyMove(moveId, anchorId, before){
+  const idx=order.findIndex(w=>w.id===moveId); if(idx<0)return;
+  const [item]=order.splice(idx,1);
+  if(anchorId==null){ order.unshift(item); return; }
+  const a=order.findIndex(w=>w.id===anchorId);
+  order.splice(before?a:a+1,0,item);
+}
+
+/* 移动语义 B（页相对/to 枚举）：服务端在默认视图序列上算最终 rank，前端只接收结果。
+   模拟：移除后按最终下标插入（= design「锚点解析」分页数学，含越界收敛）。 */
+function applyMoveToRank(moveId, finalIndex){
+  const idx=order.findIndex(w=>w.id===moveId); if(idx<0)return;
+  const [item]=order.splice(idx,1);
+  const t=Math.max(0,Math.min(finalIndex,order.length));
+  order.splice(t,0,item);
+}
+
+function gotoPageOf(id){
+  const list=visible();
+  const i=list.findIndex(w=>w.id===id);
+  if(i<0){render();return;}
+  page=Math.floor(i/PAGE_SIZE);
+  render();
+  requestAnimationFrame(()=>{
+    const el=document.querySelector(`.card[data-id="${id}"]`);
+    if(el){el.classList.add("just-moved");el.scrollIntoView({behavior:"smooth",block:"center"});}
+  });
+}
+
+function wireCards(){
+  document.querySelectorAll(".card").forEach(card=>{
+    const id=card.dataset.id;
+    const handle=card.querySelector(".handle");
+    handle.addEventListener("dragstart",e=>{
+      if(filterActive()){e.preventDefault();return;}
+      draggingId=id; document.body.classList.add("dragging");
+      card.classList.add("dragging"); e.dataTransfer.effectAllowed="move";
+      try{e.dataTransfer.setData("text/plain",id);}catch(_){}
+    });
+    handle.addEventListener("dragend",()=>{
+      draggingId=null; document.body.classList.remove("dragging");
+      document.querySelectorAll(".card").forEach(c=>c.classList.remove("dragging","drop-before","drop-after"));
+    });
+    card.addEventListener("dragover",e=>{
+      if(!draggingId||draggingId===id)return; e.preventDefault();
+      const r=card.getBoundingClientRect();
+      const before = (e.clientX-r.left)/r.width + (e.clientY-r.top)/r.height < 1;
+      card.classList.toggle("drop-before",before); card.classList.toggle("drop-after",!before);
+    });
+    card.addEventListener("dragleave",()=>card.classList.remove("drop-before","drop-after"));
+    card.addEventListener("drop",e=>{
+      e.preventDefault(); if(!draggingId||draggingId===id)return;
+      const r=card.getBoundingClientRect();
+      const before = (e.clientX-r.left)/r.width + (e.clientY-r.top)/r.height < 1;
+      card.classList.remove("drop-before","drop-after");
+      applyMove(draggingId,id,before);
+      apiLog(draggingId,`${before?"(before_id":"(after_id"} = ${id})`);
+      gotoPageOf(draggingId);
+    });
+    card.querySelector(".act-move").addEventListener("click",e=>{e.stopPropagation();openModal(id);});
+  });
+}
+
+/* 边缘投放带：发 to 枚举，服务端按分页数学解析（模拟=移除后按目标 rank 插入） */
+[["#zone-top","prev_page_tail"],["#zone-bottom","next_page_head"]].forEach(([sel,to])=>{
+  const zone=$(sel);
+  zone.addEventListener("dragover",e=>{e.preventDefault();zone.classList.add("over");});
+  zone.addEventListener("dragleave",()=>zone.classList.remove("over"));
+  zone.addEventListener("drop",e=>{
+    e.preventDefault(); zone.classList.remove("over");
+    if(!draggingId)return;
+    /* 目标最终 rank：下带=(当前页+1)*PAGE_SIZE（下页页首）；上带=当前页*PAGE_SIZE-1（上页页尾） */
+    const t = to==="next_page_head" ? (page+1)*PAGE_SIZE : page*PAGE_SIZE-1;
+    applyMoveToRank(draggingId,t);
+    apiLog(draggingId,`(to = "${to}", page_size = ${PAGE_SIZE})`);
+    gotoPageOf(draggingId);
+  });
+});
+
+/* 移动到…弹窗 */
+let modalId=null;
+function openModal(id){
+  modalId=id;
+  const list=visible(); const total=list.length;
+  const maxPage=Math.max(0,Math.ceil(total/PAGE_SIZE)-1);
+  const cur=list.findIndex(w=>w.id===id); const curPage=Math.floor(cur/PAGE_SIZE);
+  $("#modal-title").textContent=`移动工作区「${order.find(w=>w.id===id).name}」`;
+  const sel=$("#m-page"); sel.innerHTML="";
+  for(let p=0;p<=maxPage;p++){
+    const o=document.createElement("option"); o.value=p;
+    o.textContent=`第 ${p+1} 页（${list.slice(p*PAGE_SIZE,(p+1)*PAGE_SIZE).map(w=>w.name.slice(0,6)).join("、").slice(0,40)}…）`;
+    if(p===curPage)o.selected=true;
+    sel.appendChild(o);
+  }
+  $("#modal-mask").classList.add("open");
+}
+$("#m-cancel").onclick=()=>$("#modal-mask").classList.remove("open");
+$("#m-ok").onclick=()=>{
+  const p=+$("#m-page").value, pos=$("#m-pos").value;
+  const list=visible();
+  const r=list.findIndex(w=>w.id===modalId);          /* 被拖卡当前 rank */
+  const t0 = pos==="first" ? p*PAGE_SIZE : Math.min((p+1)*PAGE_SIZE-1, list.length-2);
+  const t=Math.max(0,Math.min(t0,list.length-1));      /* 目标最终 rank（越界收敛） */
+  /* 锚点方向规则（design Wave 2-4）：向上=before 目标边界卡 / 向下=after 目标边界卡 */
+  const up = t < r;
+  const anchorId = pos==="first"
+    ? list[p*PAGE_SIZE]?.id
+    : list[Math.min((p+1)*PAGE_SIZE,list.length)-1]?.id;
+  if(anchorId===modalId){ $("#modal-mask").classList.remove("open"); return; }  /* 自锚跳过 */
+  applyMoveToRank(modalId,t);
+  apiLog(modalId,`${up?"(before_id":"(after_id"} = ${anchorId})  [rank→${t}]`);
+  $("#modal-mask").classList.remove("open");
+  page=p; render();
+  requestAnimationFrame(()=>{
+    const el=document.querySelector(`.card[data-id="${modalId}"]`);
+    if(el){el.classList.add("just-moved");el.scrollIntoView({behavior:"smooth",block:"center"});}
+  });
+};
+
+/* 分页 / 筛选联动 */
+$("#prev").onclick=()=>{if(page>0){page--;render();}};
+$("#next").onclick=()=>{page++;render();};
+["#q","#type","#status"].forEach(s=>$(s).addEventListener("input",()=>{page=0;render();}));
+
+render();
+</script>
+</body>
+</html>
