@@ -1,0 +1,38 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-9183ddfb",
+  "totals": {
+    "files": 2,
+    "additions": 36,
+    "deletions": 4
+  },
+  "rows": [
+    {
+      "path": "docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md",
+      "declared": true,
+      "additions": 11,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/quicklog/QUICKLOG-qinyi.md",
+      "declared": true,
+      "additions": 25,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260914-004-0be7",
+  "sessionId": "quick-9183ddfb",
+  "savedAt": "2026-09-14T01:16:03.866Z",
+  "patchSha256": "f2b74dfec81566b8bffab465875ca428f2e11870bded44a7a44aa30aae7dec63",
+  "patchStatus": "ok"
+}

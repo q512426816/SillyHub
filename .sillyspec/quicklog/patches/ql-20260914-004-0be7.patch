@@ -1,0 +1,71 @@
+diff --git a/.sillyspec/quicklog/QUICKLOG-qinyi.md b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+index 798952bd2..04d1663be 100644
+--- a/.sillyspec/quicklog/QUICKLOG-qinyi.md
++++ b/.sillyspec/quicklog/QUICKLOG-qinyi.md
+@@ -202,7 +202,7 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
+ - frontend/src/components/group-chat/group-chat-panel.tsx（无卡 system 事件渲染 kind:system 提示行）
+ - frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx（同用例改新语义+空白 ignore 分支）
+ - .sillyspec/docs/sillyhub-daemon/modules/interactive.md（白名单派生段+changelog 两修）
+-- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260913-007-1351 条目）
++- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260914-001-b14c 条目；2026-09-14 善后修正——原预留期旧 ID ql-20260913-007-1351 系他者条目，见 docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md 坑 4）
+ 需求：24h 审查 P2 清单三项收尾：目录 fsync+reload 白名单派生化+群聊系统提示行放行
+ 根因：①rename 后目录项未 fsync，POSIX 掉电窗口丢 rename；②手写白名单与注册表脱节，新引擎 switchable:true 后前端解锁而 daemon 抛错；③无卡 system 事件被整类 ignore，四类后端既定实时流提示（含收口失败）用户不可见
+ 方案：①open(dirname)+sync 补目录持久（Windows best-effort 吞）；②照前端同款手法从 INTERACTIVE_PROVIDERS.switchable 派生并加守护⑥对账；③渲染既有 kind:system 条目类型（渲染器预留零产出），合成 id 去重
+@@ -212,3 +212,27 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
+ 状态：进行中
+ 关联变更：（无）
+ 文件：sillyhub-daemon/src/interactive/pi-rpc-driver.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts
++
++## ql-20260914-003-aafe | 2026-09-14 09:11:37 | 修复 pi 交互会话 ctx_tokens 被 driver 轮累计覆盖丢失
++状态：已完成
++关联变更：（无）
++文件：
++- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（lastEndUsage 快照+覆盖分支补派 ctx+轮重置）
++- sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts（既有 5 处 usage 断言补 ctx 键（16/2080））
++- sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts（新增 2 回归用例（生产形态/跨轮粘滞））
++需求：修复 pi 交互会话 ctx_tokens 被 driver 轮累计覆盖丢失
++根因：pi-rpc-driver 轮累计覆盖块（ql-20260909-028）用 turnUsageSum 整体替换 turn_end usage 事件的 ev.usage，抹掉归一化器派生的 ctx_tokens；且现行 pi 版本 turn_end 定格常为零值，正确数据源是末次 message_end 原始帧（2026-09-13-ctx-usage-all-providers 设计漏审计 driver 层注入点，归一化器单测不经覆盖块故全绿；生产实证=阿里云会话 aa3e2d4e 今早两轮四维 usage 在库而 ctx 恒空）
++方案：driver 累计处定格末次 assistant message_end usage 快照（lastEndUsage），覆盖分支经 ctxTokensFromNetInput 净值三和补派 ctx_tokens 注入轮累计对象（与 codex last 毛值同为末次调用口径）；无快照回退分支沿用事件原值；轮边界重置防跨轮粘滞
++结果：pi-rpc-driver 3 套件 119 用例全绿（含 2 新回归：生产形态零值定格+双调用 ctx=2080 事件/result 双路断言、跨轮不粘滞回退 ctx=13）+ 既有 5 处 usage 全对象断言补 ctx 键 + typecheck exit 0；待重打包部署阿里云 + 本机 daemon 重启生效
++审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档
++
++## ql-20260914-004-0be7 | 2026-09-14 09:14:32 | 登记 sillyspec CLI 第四坑（ql-ID 预留/分配竞态）+ 修 QUICKLOG 旧 ID 引用
++状态：已完成
++关联变更：（无）
++文件：
++- docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md（补第四坑 ql-ID 预留分配竞态+标题引言四坑化+处置进展）
++- .sillyspec/quicklog/QUICKLOG-qinyi.md（b14c 条目文件行旧 ID 引用修正并注善后原因）
++需求：登记 sillyspec CLI 第四坑（ql-ID 预留/分配竞态）+ 修 QUICKLOG 旧 ID 引用
++根因：quick 会话启动预留 ql-ID 无查重，同一 ID 可双发放（实证 007-1351）；file-notes/模块文档在最终 ID 分配前引用预留值会指向他者条目
++方案：坑文档补第四坑（现象/影响/绕过/建议修复，工具修复归 sillyspec 仓用户另行安排）+QUICKLOG b14c 条目文件行旧 ID 修正并注善后原因
++结果：纯文档与日志数据修正零代码零测试面；登记会话自身 guard.json 复现同一 stale ID（坑 4 第二现场）
+diff --git a/docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md b/docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md
+index 6d0cb23bf..c2f9e0caf 100644
+--- a/docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md
++++ b/docs/sillyspec/quick-sync-block-filenotes-and-quicklog-mixed-commit.md
+@@ -1,7 +1,7 @@
+-# quick 启动被平台同步阻塞 + --file-notes 后置生效预告缺失 + QUICKLOG 共享文件提交夹带（活跃坑）
++# quick 启动被平台同步阻塞 + --file-notes 后置生效预告缺失 + QUICKLOG 共享文件提交夹带 + ql-ID 预留/分配竞态（活跃坑）
+ 
+-> 实证会话：2026-09-13，24h 审查风险修复批第三轮（ql-20260913-003-4ee3，quick 会话 quick-72fca0c3 全程 + 本登记会话 quick-86da7207 启动再次实证坑 1）。
+-> 三个问题同场爆发，分开记录便于工具侧逐个修。
++> 实证会话：2026-09-13~14，24h 审查风险修复批第三轮（ql-20260913-003-4ee3，quick 会话 quick-72fca0c3 全程 + 登记会话 quick-86da7207 启动再次实证坑 1）；坑 4 实证会话 quick-89596588（ql-20260914-001-b14c）。
++> 四个问题多会同场爆发，分开记录便于工具侧逐个修。
+ 
+ ## 坑 1：quick 启动命令被平台同步网络阻塞，exec 超时但会话实际已建立
+ 
+@@ -25,6 +25,14 @@
+ - 绕过：接受夹带（历史惯例，QUICKLOG 是 append 日志，按 ql-ID 可追溯）；或提交前 `git diff -- .sillyspec/quicklog/QUICKLOG-<user>.md` 人工确认夹带面并在 commit message 声明。
+ - 建议工具修复：①QUICKLOG 条目分片存储（如 `QUICKLOG.d/<ql-ID>.md` 独立文件、主文件聚合生成），提交天然按条目隔离；或 ②--done 输出本条目在 QUICKLOG 中的精确行号范围，供 `git diff | filter` / `git apply --cached` 定向暂存；或 ③skill 文档补 QUICKLOG 场景的分离指引（至少声明「夹带为既定惯例，无需分离」终结歧义）。
+ 
++## 坑 4（2026-09-14 补登）：quick 会话启动预留 ql-ID 与最终分配竞态（同 ID 双发放）
++
++- 现象：会话 quick-89596588（2026-09-13 启动）的 `.runtime/quick-sessions/<id>/guard.json` 预留 ql-ID `ql-20260913-007-1351`；但 QUICKLOG 里该 ID 被并行会话的条目「轮次刻度轨命中区修复」（2026-09-13 21:24:01 落盘）占用——同一 ID 发放给了两个会话；本会话 `--done` 时 CLI 最终分配 `ql-20260914-001-b14c`（跨零点新号）。guard.json 里的预留 ID 从此是 stale 值，无人回写。
++- 影响：①按 skill 文档「ql-ID 可用于 design/模块文档引用」的指引，会话中途拿预留 ID 写进模块文档/QUICKLOG file-notes 会引用到**别人的条目**（本例实证：frontend.md 变更索引与 file-notes 先写了 007-1351，收尾时才发现要改成 b14c——若没核对就提交，检索会串条目）；②预留与最终不一致本身说明分配无查重，极端情况下两个 `--done` 可能争写同一 QUICKLOG 标题段。
++- 绕过（本轮实证）：模块文档/QUICKLOG 引用 ql-ID 一律等 step3 `--done` 落盘后再写（CLI 打印的最终 ID 为准），会话中途只引用 quick-<hash> 会话号；收尾前 `grep` 一遍产出物里的 ql-ID 与 QUICKLOG 标题对账。
++- 建议工具修复（sillyspec 仓，用户另行安排）：①分配 ql-ID 时对 QUICKLOG 已有 `## ql-...` 标题查重（占用即顺延取新号）；②`--done` 落最终 ID 时回写 guard.json 并校验预留 ID 未被他者占用，不一致打醒目警告。
++
+ ## 处置进展
+ 
+ - 2026-09-13 登记（本文件）。三坑均为工具侧待修，无本地阻断（坑 1 有 status/guard.json 核对绕过、坑 2 有重传绕过、坑 3 有夹带惯例），不阻塞日常 quick 流程。
++- 2026-09-14 补登坑 4（ql-ID 预留/分配竞态），同轮修正本仓数据善后：QUICKLOG ql-20260914-001-b14c 条目文件行引用的预留期旧 ID 007-1351 改回本条目 ID（时序根源与坑 2 同族——file-notes 传参时最终 ID 尚未分配）。坑 4 的工具代码修复由用户在 sillyspec 仓另行安排。

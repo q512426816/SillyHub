@@ -1,7 +1,7 @@
-# quick 启动被平台同步阻塞 + --file-notes 后置生效预告缺失 + QUICKLOG 共享文件提交夹带（活跃坑）
+# quick 启动被平台同步阻塞 + --file-notes 后置生效预告缺失 + QUICKLOG 共享文件提交夹带 + ql-ID 预留/分配竞态（活跃坑）
 
-> 实证会话：2026-09-13，24h 审查风险修复批第三轮（ql-20260913-003-4ee3，quick 会话 quick-72fca0c3 全程 + 本登记会话 quick-86da7207 启动再次实证坑 1）。
-> 三个问题同场爆发，分开记录便于工具侧逐个修。
+> 实证会话：2026-09-13~14，24h 审查风险修复批第三轮（ql-20260913-003-4ee3，quick 会话 quick-72fca0c3 全程 + 登记会话 quick-86da7207 启动再次实证坑 1）；坑 4 实证会话 quick-89596588（ql-20260914-001-b14c）。
+> 四个问题多会同场爆发，分开记录便于工具侧逐个修。
 
 ## 坑 1：quick 启动命令被平台同步网络阻塞，exec 超时但会话实际已建立
 
@@ -25,6 +25,14 @@
 - 绕过：接受夹带（历史惯例，QUICKLOG 是 append 日志，按 ql-ID 可追溯）；或提交前 `git diff -- .sillyspec/quicklog/QUICKLOG-<user>.md` 人工确认夹带面并在 commit message 声明。
 - 建议工具修复：①QUICKLOG 条目分片存储（如 `QUICKLOG.d/<ql-ID>.md` 独立文件、主文件聚合生成），提交天然按条目隔离；或 ②--done 输出本条目在 QUICKLOG 中的精确行号范围，供 `git diff | filter` / `git apply --cached` 定向暂存；或 ③skill 文档补 QUICKLOG 场景的分离指引（至少声明「夹带为既定惯例，无需分离」终结歧义）。
 
+## 坑 4（2026-09-14 补登）：quick 会话启动预留 ql-ID 与最终分配竞态（同 ID 双发放）
+
+- 现象：会话 quick-89596588（2026-09-13 启动）的 `.runtime/quick-sessions/<id>/guard.json` 预留 ql-ID `ql-20260913-007-1351`；但 QUICKLOG 里该 ID 被并行会话的条目「轮次刻度轨命中区修复」（2026-09-13 21:24:01 落盘）占用——同一 ID 发放给了两个会话；本会话 `--done` 时 CLI 最终分配 `ql-20260914-001-b14c`（跨零点新号）。guard.json 里的预留 ID 从此是 stale 值，无人回写。
+- 影响：①按 skill 文档「ql-ID 可用于 design/模块文档引用」的指引，会话中途拿预留 ID 写进模块文档/QUICKLOG file-notes 会引用到**别人的条目**（本例实证：frontend.md 变更索引与 file-notes 先写了 007-1351，收尾时才发现要改成 b14c——若没核对就提交，检索会串条目）；②预留与最终不一致本身说明分配无查重，极端情况下两个 `--done` 可能争写同一 QUICKLOG 标题段。
+- 绕过（本轮实证）：模块文档/QUICKLOG 引用 ql-ID 一律等 step3 `--done` 落盘后再写（CLI 打印的最终 ID 为准），会话中途只引用 quick-<hash> 会话号；收尾前 `grep` 一遍产出物里的 ql-ID 与 QUICKLOG 标题对账。
+- 建议工具修复（sillyspec 仓，用户另行安排）：①分配 ql-ID 时对 QUICKLOG 已有 `## ql-...` 标题查重（占用即顺延取新号）；②`--done` 落最终 ID 时回写 guard.json 并校验预留 ID 未被他者占用，不一致打醒目警告。
+
 ## 处置进展
 
 - 2026-09-13 登记（本文件）。三坑均为工具侧待修，无本地阻断（坑 1 有 status/guard.json 核对绕过、坑 2 有重传绕过、坑 3 有夹带惯例），不阻塞日常 quick 流程。
+- 2026-09-14 补登坑 4（ql-ID 预留/分配竞态），同轮修正本仓数据善后：QUICKLOG ql-20260914-001-b14c 条目文件行引用的预留期旧 ID 007-1351 改回本条目 ID（时序根源与坑 2 同族——file-notes 传参时最终 ID 尚未分配）。坑 4 的工具代码修复由用户在 sillyspec 仓另行安排。
