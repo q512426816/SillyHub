@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-14-session-thinking-level",
+  "generatedAt": "2026-09-14T21:16:16.253Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-thinking-level",
+      "metrics": {
+        "matches": 4,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-thinking-level",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-thinking-level",
+      "metrics": {
+        "backendEndpoints": 2201,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-14-session-thinking-level",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "真机 codex turn/start reasoningEffort 受理+thread/settings/update capability 门禁已解",
+      "command": "node $TEMP/spike-tl-codex*.mjs",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/quicklog-sidecar/ql-20260915-001-0de2.json"
+    }
+  ],
+  "tests": {
+    "command": "module[frontend,sillyhub-daemon,daemon,agent]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-14T21:49:53.889Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

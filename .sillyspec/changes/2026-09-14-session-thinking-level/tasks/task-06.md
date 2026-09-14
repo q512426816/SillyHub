@@ -15,13 +15,11 @@ allowed_paths:
   - frontend/src/components/sessions/session-config-bar.tsx
   - frontend/src/components/daemon/session-panel/session-panel-page.tsx
   - frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
-  - frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
 target_files:
   - frontend/src/lib/daemon/sessions.ts
   - frontend/src/components/sessions/session-config-bar.tsx
   - frontend/src/components/daemon/session-panel/session-panel-page.tsx
   - frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
-  - frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
 provides:
   - contract: 前端双控件
     fields: [创建下拉+会话切换控件]
