@@ -2528,7 +2528,7 @@ describe('task-04（2026-09-14-session-thinking-level）：思考档位', () => 
     await consumeP;
   });
 
-  it('setThinkingLevel 命令形态：thread/settings/update {threadId, reasoningEffort}（id≥100 经 pending 通道）→ 空 result {ok:true}，id 自增', async () => {
+  it('setThinkingLevel 命令形态：thread/settings/update {threadId, reasoningEffort}（经 pending 通道统一 id）→ 空 result {ok:true}，id 自增', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
 
@@ -2552,7 +2552,7 @@ describe('task-04（2026-09-14-session-thinking-level）：思考档位', () => 
       params: { threadId: 'thr_tl', reasoningEffort: 'high' },
     });
     expect(typeof req.id).toBe('number');
-    expect(req.id as number).toBeGreaterThanOrEqual(100); // nextJsonRpcId 空间
+    expect(req.id as number).toBeGreaterThanOrEqual(3); // 统一单计数器（≥3 避开握手 1/2；并行修复 ql-20260915-001 后 nextJsonRpcId 空间已并）
 
     emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })]);
     await expect(p1).resolves.toEqual({ ok: true });

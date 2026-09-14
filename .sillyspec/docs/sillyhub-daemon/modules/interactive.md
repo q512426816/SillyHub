@@ -146,3 +146,9 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快�
 
 - atomic-write 目录 fsync：writeFileAtomic rename 后补 `open(dirname, 'r') + sync()`（POSIX 掉电窗口目录项持久；Windows 不支持开目录 best-effort 吞掉）——tests/atomic-write.test 加 open('r') 探针断言（跨平台记录调用意图，Windows 真实 open 拒由实现吞）。
 - PROVIDER_RELOAD_ENGINES 派生化：手写 `['claude','codex','pi']` 改从 INTERACTIVE_PROVIDERS.switchable 派生（照前端 provider-caps.ts 同款手法）并导出——provider-adapter-registry.test 新增守护⑥锁「消费侧=注册表」+ claude/codex/pi 语义锚；新引擎声明 switchable:true 后前后端同解锁，消除前端放行而 daemon 抛错的漏网点。
+
+## 2026-09-14 24h 审查修复：codex driver JSON-RPC id 单计数器（ql-20260915-001-8312）
+
+- 撞号缺陷：CodexHandle 曾有双 id 计数器——`nextRpcId`（turn/start·turn/interrupt，≥3 无上界）与 `nextJsonRpcId`（compact 等「等 response」请求，seed 100）。seed 100 只在会话前 ~97 次轮级 RPC 内避开 nextRpcId 空间；长会话越过交叉点后两计数器分到同号，同 id 并发在途时 `_maybeResolveJsonRpcResponse` 按先到回执错配唤醒 compact pending（误报成功/失败，压缩命令本体仍会发出执行）。
+- 修法：删 `nextJsonRpcId` 字段，`_sendJsonRpcRequest` 改复用 `nextRpcId++` 单源分配——任意时刻在途请求 id 全局唯一，撞号结构性消除；turn 路径零改动（fire-and-forget 不经 jsonRpcPending 表的语义不变）。
+- 回归锚：tests/interactive/codex-app-server-driver.test.ts 新增防碰撞用例（把 nextRpcId 推到旧交叉点 100 → compact 取 100、并发 turn/start 取 101 分号不同、turn 回执先到不误唤醒 compact、正主 id 回执才 resolve）；既有 pending 机制/compact 组 8 处 seed-100 断言同步改为统一计数器语义（未发 turn 时首取 3）。
