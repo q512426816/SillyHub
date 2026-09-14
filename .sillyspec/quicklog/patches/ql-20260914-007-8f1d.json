@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-1b09700a",
+  "totals": {
+    "files": 5,
+    "additions": 61,
+    "deletions": 36
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/skill_source/tests/test_library_enable.py",
+      "declared": true,
+      "additions": 6,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx",
+      "declared": true,
+      "additions": 7,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-auto-recover.test.ts",
+      "declared": true,
+      "additions": 6,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/turn-catalog.tsx",
+      "declared": true,
+      "additions": 37,
+      "deletions": 30,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/cursor-driver.test.ts",
+      "declared": true,
+      "additions": 5,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 7,
+    "codeFileCount": 1,
+    "testFileCount": 4,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260914-007-8f1d",
+  "sessionId": "quick-1b09700a",
+  "savedAt": "2026-09-14T10:37:02.000Z",
+  "patchSha256": "ae0732bb78a5a753cdb2d29af0d4ed9ae5b76743ba4d642a62fd18441c9e2e66",
+  "patchStatus": "ok"
+}

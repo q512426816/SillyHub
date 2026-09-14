@@ -22,8 +22,12 @@ function err(partial: Partial<ErrorLogItem>): ErrorLogItem {
 }
 
 const RUN_ID = "11111111-1111-1111-1111-111111111111";
+// 本地时区固化的墙钟 10:03:59（toString 可往返解析，formatScheduledTime 按本地
+// 时区取 getHours/getMinutes → 断言 "10:03" 在任何时区一致；对齐 turn-catalog.test.tsx
+// AT_1042 手法。旧固件写死 +08:00 偏移串，UTC CI 上渲染成 02:03 连续 4 次 fail）。
+const AT_1003 = new Date(2026, 8, 12, 10, 3, 59).toString();
 const SCHED: AutoResumeEntry[] = [
-  { origin: `auto_resume:${RUN_ID}`, kind: "scheduled", dispatchAt: "2026-09-12T10:03:59+08:00" },
+  { origin: `auto_resume:${RUN_ID}`, kind: "scheduled", dispatchAt: AT_1003 },
 ];
 const QUEUED: AutoResumeEntry[] = [
   { origin: `auto_resume:${RUN_ID}`, kind: "queued", dispatchAt: null },
@@ -32,7 +36,7 @@ const QUEUED: AutoResumeEntry[] = [
 describe("autoRecoverHintForTurn（2026-09-12 FR-5.1 双信号推导）", () => {
   it("quota + reset_at + 定时条目 → 额度提示含本地时间与取消入口", () => {
     const hint = autoRecoverHintForTurn(
-      { runId: RUN_ID, errorDetail: err({ type: "quota_exceeded", reset_at: "2026-09-12T10:03:59+08:00" }) },
+      { runId: RUN_ID, errorDetail: err({ type: "quota_exceeded", reset_at: AT_1003 }) },
       SCHED,
     );
     expect(hint).toContain("额度耗尽");

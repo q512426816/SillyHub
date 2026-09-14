@@ -370,15 +370,19 @@ describe('② 多轮 + chatId：第二轮 --resume；result+exit0 携 usage/sess
         subtype: 'success',
         is_error: false,
         session_id: SESSION_ID,
+        // ctx_tokens = input + cache_read + cache_creation 净值三和（10+2+1=13），
+        // cursor-events mapUsage 经 ctxTokensFromNetInput 共享 helper 派生
+        // （2026-09-13-ctx-usage-all-providers 两口径设计：cursor 任一有效分量
+        // 存在即派生；旧负向断言 not ctx_tokens 系该变更漏改的过时契约）。
         usage: {
           input_tokens: 10,
           output_tokens: 4,
           cache_read_tokens: 2,
           cache_creation_tokens: 1,
+          ctx_tokens: 13,
         },
       }),
     );
-    expect(results[0]!.usage).not.toHaveProperty('ctx_tokens');
     expect(handle.processId).toBeUndefined();
 
     push('what is the code?');

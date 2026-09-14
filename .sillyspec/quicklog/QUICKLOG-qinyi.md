@@ -261,3 +261,18 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：CLI 侧自回声血统归属判定基于客户端时间戳，他机慢钟可把外来更新伪装进 [base, local_modified] 血统窗口被误判自回声覆盖（sillyspec 仓审查结论）；且乐观锁 stored > base_ts 与『平台更新』判定全建立在客户端时钟字典序上，跨机偏差本身污染冲突检测。根修=判定基准统一到服务器钟 + 推送者身份回传
 方案：service.py 新增 server_now_iso()（UTC ISO 毫秒 Z）；upsert_progress 接受分支存服务器钟并经返回值/200 ack 回传（CLI 回填 base_ts 与库中值同钟，否则必假 409）；冲突分支与 get_progress 回传行内 last_pusher（PlatformSyncResult/ConflictResponse/ProgressSyncOk 补字段）；_apply 保持哑写者（stamped_at 由调用方生成）；router 409 body 组装 last_pusher。契约文档在 sillyspec 仓同步（另一 quick）
 结果：platform_sync 模块聚焦 pytest 234 passed（新增 2 用例 + 改写 8 处旧契约断言 + 相邻 2 文件同因修）；ruff check/format/mypy 模块级全绿；pnpm gen:types 已跑——端点在 OpenAPI 无 schema 面，api-types/openapi 零内容差（EOL 噪音已还原）；未部署（crrcdt.ppdmq.top 需发版重部才生效）
+
+## ql-20260914-007-8f1d | 2026-09-14 18:27:03 | CI 修复批：backend 随机 UUID 参数化 xdist 收集不一致 / frontend 时区固件 / turn-catalog 命中区丢失实现 /…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/skill_source/tests/test_library_enable.py（parametrize 三处随机 UUID 固定字面化）
+- frontend/src/components/daemon/__tests__/turn-timeline-auto-recover.test.ts（reset_at/dispatchAt 本地时区固化）
+- frontend/src/components/sessions/turn-catalog.tsx（补 ql-20260913-007-1351 命中区实现）
+- sillyhub-daemon/tests/interactive/cursor-driver.test.ts（usage 断言补 ctx_tokens）
+- frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx（补 listScheduledMessages mock）
+需求：CI 修复批：backend 随机 UUID 参数化 xdist 收集不一致 / frontend 时区固件 / turn-catalog 命中区丢失实现 / cursor-driver 断言补 ctx_tokens / platform-shared 定时消息 mock
+根因：①parametrize 值收集期求值，随机 UUID 使 xdist 各 worker 收集到不同用例 ID 必炸（backend-ci 4 连败）；②固件写死 +08:00 偏移串但断言本地墙钟 10:03，UTC CI 渲染 02:03（frontend-ci 4 连败）；③ql-20260913-007-1351 的组件实现未落 git 仅测试随 d114568f3 入库，测试契约与 ba8b088ce 旧实现脱节（最新 5 败）；④ctx-usage-all-providers 给 cursor 派生 ctx_tokens 时漏改该用例的负向断言（daemon-ci 2 连败）；⑤全局 apiFetch mock 返回共享智能体数组被真 listScheduledMessages 吞掉，summarizeScheduledPrompt 读 undefined.length 异步崩（known_failures I 组 flaky）
+方案：①三处 uuid.uuid4() 改固定字面量；②固件改本地时区固化构造 new Date(y,m,d,10,3,59).toString()（对齐 turn-catalog 测试既有惯例）；③按 quicklog sidecar 方案恢复组件——button 改 h-[18px] 全宽透明命中区+子 span 视觉线（group-* 触发状态色/hover/空心）+nav 去 gap；④usage 断言补 ctx_tokens 13 并注明两口径设计；⑤@/lib/daemon mock 补 listScheduledMessages 空列表
+结果：backend skill_source -n 2 xdist 16 passed+ruff/format 绿；frontend turn-catalog 17+sessions 页/variant 44+auto-recover 7（TZ=UTC 亦绿）+platform-shared 4，tsc 0，eslint 1 存量 warning 不变；daemon cursor-driver 23 passed+tsc 0；未部署（待 push 触发 CI）
+审计：[gate] L1（跨 0 模块 · 7 文件：1 代码/4 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量不适用（≤1 代码文件）

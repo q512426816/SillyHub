@@ -50,6 +50,11 @@ const sessionApi = vi.hoisted(() => ({
   fetchSessionQueue: vi.fn(),
   deleteSessionQueueEntry: vi.fn(),
   retrySessionQueueEntry: vi.fn(),
+  // 定时消息列表（known_failures I 组 flaky 根因）：本测试全局 mock 的 apiFetch 对
+  // 所有请求返回 makeActiveShared() 数组——真 listScheduledMessages 拿到无 prompt
+  // 字段的共享智能体条目，ScheduledMessagesBar 渲染时 summarizeScheduledPrompt
+  // 读 undefined.length 异步崩溃拖 exit 1（时序性）。mock 成空列表切断污染。
+  listScheduledMessages: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -75,6 +80,8 @@ vi.mock("@/lib/daemon", async () => {
     fetchSessionQueue: sessionApi.fetchSessionQueue,
     deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
     retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
+    // ScheduledMessagesBar 挂载即取数（I 组 flaky 根因，见 sessionApi 块注释）。
+    listScheduledMessages: sessionApi.listScheduledMessages,
   };
 });
 

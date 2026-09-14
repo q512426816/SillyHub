@@ -358,9 +358,12 @@ async def test_enable_disable_roundtrip_idempotent(
     [
         "no-colon-key",  # 无冒号
         "not-a-uuid:dir",  # source_id 段非 UUID
-        f"{uuid.uuid4()}",  # 只有 UUID 无目录段
-        f"{uuid.uuid4()}:",  # 空目录段
-        f"{uuid.uuid4()}:dir\\slash",  # Windows 分隔符
+        # 以下三条用固定字面量而非 uuid.uuid4()：parametrize 值在收集期求值，
+        # 随机 UUID 会让 pytest-xdist 各 worker 收集到不同用例 ID →
+        # "Different tests were collected between gwN" 收集错误（CI 4 连败根因）。
+        "1f8878bb-96d4-4bdb-b30b-ee82f3abfe9c",  # 只有 UUID 无目录段
+        "b16a4f61-14aa-4579-a590-ffaa5e91e1e2:",  # 空目录段
+        "04d71881-2876-48ef-882c-09a3203fcfbd:dir\\slash",  # Windows 分隔符
         "x" * 201,  # 超列宽
     ],
 )
