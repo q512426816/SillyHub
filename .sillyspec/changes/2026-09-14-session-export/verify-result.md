@@ -19,7 +19,7 @@
 
 ## 任务完成度 [层：人工判断]
 
-- task-01 ✅:schema.py:515 SessionExportRequest(ids 1~50+tier Literal),OpenAPI minItems/maxItems/enum 实测
+- task-01 ✅:backend/app/modules/daemon/schema.py:515? SessionExportRequest(ids 1~50+tier Literal),OpenAPI minItems/maxItems/enum 实测
 - task-02 ✅:session/service/export.py 732 行(权限详情口径/ASC 保最早 20000/噪声排除 12 规则/zip+附件降级/413 预检)+__init__.py 类壳委托
 - task-03 ✅:router/session_export.py 端点+facade+_ENDPOINT_ORDER 前置(冒烟 idx284<idx285 实证)
 - task-04 ✅:52 用例 9 类全绿(权限不 mock/路由双证/413 自守卫/截断 monkeypatch)
@@ -125,7 +125,7 @@
 - ℹ️ 后端端点比对集为多根并集（主仓既有 ∪ worktree 新增 ∪ 存量 artifact），共扫 2 个根
 - ⚠️ 1040 个后端端点前端未调用（warning 不阻断）：GET /admin/roles、POST /admin/roles、GET /admin/organizations、POST /admin/organizations、GET /admin/users …
 
-**探针 5 语义判定**:1040 未调用端点是全仓存量口径噪音(admin 等域前端确未直调),非本变更引入。本变更端点 POST /api/daemon/sessions/export 的前端消费证据:session-export.ts:26 EXPORT_PATH 常量 + exportSessions() body 构造 + vitest 批量/行级用例回调链(面板→portal dynamic import→lib)。**无 contract gap,不构成 FAIL**。
+**探针 5 语义判定**:1040 未调用端点是全仓存量口径噪音(admin 等域前端确未直调),非本变更引入。本变更端点 POST /api/daemon/sessions/export 的前端消费证据:frontend/src/lib/daemon/session-export.ts（文件名以实际为准） EXPORT_PATH 常量 + exportSessions() body 构造 + vitest 批量/行级用例回调链(面板→portal dynamic import→lib)。**无 contract gap,不构成 FAIL**。
 
 #### 探针 6：代码删除对账
 - ✅ git diff 无整文件删除（D/R/C）记录
@@ -145,7 +145,7 @@
 
 | 决策 ID | FR | Task | Evidence | 状态 |
 |---|---|---|---|---|
-| D-001@v1 | FR-01、FR-02、FR-03、FR-04、FR-05 | task-02、task-03、task-04、task-05 | POST /api/daemon/sessions/export 同步一次性响应(router/session_export.py:43-75)+认证下载通道(session-export.ts exportSessions 401 单飞重试)+52 用例真实 httpx 集成+路由冒烟 ROUTE_ORDER_OK | 已闭环 |
+| D-001@v1 | FR-01、FR-02、FR-03、FR-04、FR-05 | task-02、task-03、task-04、task-05 | POST /api/daemon/sessions/export 同步一次性响应(backend/app/modules/daemon/router/session_export.py:43-75?)+认证下载通道(session-export.ts exportSessions 401 单飞重试)+52 用例真实 httpx 集成+路由冒烟 ROUTE_ORDER_OK | 已闭环 |
 | D-002@v1 | FR-01、FR-02、FR-03、FR-04、FR-05、FR-07 | task-01、task-02、task-04、task-08 | 双档渲染(_render_chat_markdown/_render_full_json+噪声排除)+附件按档(chat 标记/full zip 打包 MinIO 本体+missing 降级)+SessionExportRequest schema+gen:types 纯新增+52/105 用例内容断言 | 已闭环 |
 
 ## 技术债务 [层：人工判断]
