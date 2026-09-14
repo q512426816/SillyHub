@@ -159,12 +159,29 @@ class PlatformSyncResult:
     ``change_deleted``（2026-08-29-change-delete-closure-and-spec-pull task-04 /
     FR-04 复活通道 4）：已删 key 拒收标记——上行 key 命中双层已删判据时置 True，
     router 据此返回 409 + ``code='change_deleted'``（与 base_ts 冲突 409 区分）。
+
+    ``last_pusher``（ql-20260914：服务器权威时钟 + 推送者回传）：冲突分支携带
+    平台行既有 ``last_pusher``，router 组装进 409 body——CLI 据此做身份归属
+    （pusher≠本人 ⇒ 一律真冲突，堵跨机时钟偏差把外来更新误判自回声的盲区）。
     """
 
     conflict: bool
     platform_progress: dict[str, Any] | None
     last_pushed_at: str | None
     change_deleted: bool = False
+    last_pusher: str | None = None
+
+
+def server_now_iso() -> str:
+    """服务器权威时钟：UTC ISO 8601 毫秒 Z（与契约 §7 字典序同构，CLI 同格式）。
+
+    ql-20260914：``last_pushed_at`` 从「客户端 X-SillySpec-Pushed-At 原值」改存本
+    服务器钟——乐观锁（stored > base_ts）与 CLI 的「平台更新」判定由此统一到单一
+    时钟，他机慢钟不再能穿透判定。200 ack 必须回传本值（CLI 回填 base_ts 与库中
+    值必须同钟，否则后续推送必假 409）；客户端 header 保留读取（老语义兼容），但
+    不再入库。
+    """
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 class PlatformSyncService:
@@ -223,6 +240,11 @@ class PlatformSyncService:
     ) -> PlatformSyncResult:
         """契约 §4.2 base_ts 乐观锁冲突检测 + 接受 upsert（workspace 隔离）。
 
+        ql-20260914：接受分支 ``last_pushed_at`` 存服务器权威时钟
+        （``server_now_iso``），``pushed_at``（客户端 header）保留入参但不再入库
+        ——返回值 ``last_pushed_at`` 即服务器钟，router 组装进 200 ack 供 CLI
+        回填 base_ts 同钟。
+
         ``user_id``（2026-08-16-change-owner-from-token task-02 / D-001@v1）：token
         签发人真实 User id（router 从鉴权 tuple 派生透传）。接受分支在进度 + 占位行
         落定后用其对齐 ``ux_changes.owner_id``（best-effort，失败不阻断）；冲突分支
@@ -246,9 +268,14 @@ class PlatformSyncService:
 
         row = await self._find_row(workspace_id, name)
 
+        # ql-20260914：接受分支统一存服务器权威时钟（server_now_iso），不再存客户端
+        # X-SillySpec-Pushed-At 原值——乐观锁与 CLI「平台更新」判定统一到单一时钟，
+        # 跨机客户端时钟偏差不再污染冲突检测（见 server_now_iso docstring）。
+        stamped_at = server_now_iso()
+
         # 分支 1：base_ts 空/缺失（None 或空串）→ 首次同步/无基准，无条件接受
         if not base_ts:
-            await self._apply(workspace_id, row, name, body, pushed_at, user)
+            await self._apply(workspace_id, row, name, body, stamped_at, user)
             await self._ensure_change_row(workspace_id, name, body)
             await self._sync_change_owner(workspace_id, name, user_id)
             await self._apply_cli_tombstone(workspace_id, name, body)
@@ -258,7 +285,9 @@ class PlatformSyncService:
             await self._broadcast_pending_approval(workspace_id, name, body)
             # ql-20260909-016：pending 集缓存失效（同分支 3）。
             await bump_pending_epoch(workspace_id)
-            return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
+            return PlatformSyncResult(
+                conflict=False, platform_progress=None, last_pushed_at=stamped_at
+            )
 
         # 分支 2：stored 存在 AND stored > base_ts（字符串字典序 §7）→ 冲突
         stored = row.last_pushed_at if row is not None else None
@@ -267,10 +296,11 @@ class PlatformSyncService:
                 conflict=True,
                 platform_progress=row.latest_progress if row is not None else None,
                 last_pushed_at=stored,
+                last_pusher=row.last_pusher if row is not None else None,
             )
 
         # 分支 3：base_ts 有效（stored None 或 stored ≤ base_ts）→ 接受
-        await self._apply(workspace_id, row, name, body, pushed_at, user)
+        await self._apply(workspace_id, row, name, body, stamped_at, user)
         await self._ensure_change_row(workspace_id, name, body)
         await self._sync_change_owner(workspace_id, name, user_id)
         await self._apply_cli_tombstone(workspace_id, name, body)
@@ -279,7 +309,7 @@ class PlatformSyncService:
         # ql-20260909-016：pending 集缓存失效（latest_progress 落库 + 占位行建出都
         # 改变 pending 集/键集；commit 后 bump，None workspace 跳过）。
         await bump_pending_epoch(workspace_id)
-        return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
+        return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=stamped_at)
 
     # ── Change 2026-08-29-approval-notify-push task-04（design §7.3① 触发点①）──
 
@@ -428,10 +458,14 @@ class PlatformSyncService:
         row: PlatformChangeProgressORM | None,
         name: str,
         body: dict[str, Any],
-        pushed_at: str | None,
+        stamped_at: str | None,
         user: str | None,
     ) -> None:
         """接受分支：upsert latest_progress + 元字段（last_pushed_at/last_pusher）。
+
+        ``stamped_at``（ql-20260914）：由调用方 ``upsert_progress`` 生成的服务器
+        权威时钟（server_now_iso）——本函数保持哑写者语义（给什么存什么），service
+        直调测试可传任意值。老语义（客户端 X-SillySpec-Pushed-At 原值）已废。
 
         并发自愈：sillyspec 客户端新建 change 首推会并发双发，两请求的
         ``_find_row`` 都可能在对方 commit 前返回 None，于是双双走 INSERT，
@@ -440,7 +474,7 @@ class PlatformSyncService:
         PG 生产都抛 IntegrityError，无需 ON CONFLICT 方言分支）。详见 ql-20260811-005-6881。
         """
         if row is not None:
-            self._assign(row, body, pushed_at, user)
+            self._assign(row, body, stamped_at, user)
             await self._session.commit()
             return
 
@@ -453,7 +487,7 @@ class PlatformSyncService:
                     workspace_id=workspace_id,
                     change_name=name,
                     latest_progress=body,
-                    last_pushed_at=pushed_at,
+                    last_pushed_at=stamped_at,
                     last_pusher=user,
                     # D-003@v1 单写者：不传 documents/approval（ORM default None）。
                 )
@@ -469,7 +503,7 @@ class PlatformSyncService:
             if existing is None:
                 # platform_sync 无删除路径，理论不发生；重抛让上层感知而非静默丢数据。
                 raise
-            self._assign(existing, body, pushed_at, user)
+            self._assign(existing, body, stamped_at, user)
             await self._session.commit()
 
     async def _change_key_deleted(self, workspace_id: uuid.UUID | None, name: str) -> bool:
@@ -786,16 +820,17 @@ class PlatformSyncService:
     def _assign(
         row: PlatformChangeProgressORM,
         body: dict[str, Any],
-        pushed_at: str | None,
+        stamped_at: str | None,
         user: str | None,
     ) -> None:
         """UPDATE 共用：定向列覆盖 latest_progress + 元字段 + 刷新 updated_at。
 
         D-003@v1 单写者（2026-08-14-platform-sync-docs-approval）：绝不触碰
         documents/approval 列（POST documents / POST approval 各自写）。
+        ``stamped_at`` 语义见 ``_apply``（服务器权威时钟，ql-20260914）。
         """
         row.latest_progress = body
-        row.last_pushed_at = pushed_at
+        row.last_pushed_at = stamped_at
         row.last_pusher = user
         row.updated_at = datetime.now(UTC)
 
@@ -861,6 +896,9 @@ class PlatformSyncService:
             return None
         progress: dict[str, Any] = dict(row.latest_progress or {})
         progress["last_pushed_at"] = row.last_pushed_at
+        # ql-20260914：顶层回传 last_pusher——CLI pull 侧身份归属用（pusher≠本人 ⇒
+        # 真冲突；==本人且血统不新于本地 ⇒ 自回声自愈），与 409 body / §5 列表同源。
+        progress["last_pusher"] = row.last_pusher
         return progress
 
     # ── Change 2026-08-14-platform-sync-docs-approval task-03（D-002@v1 / D-003@v1 单写者）──

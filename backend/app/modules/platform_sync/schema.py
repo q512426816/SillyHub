@@ -25,11 +25,15 @@ class ConflictResponse(BaseModel):
 
     ``platform_progress`` 必须是平台当前完整 ``latest_progress`` 六表 JSON，
     客户端 ``resolve --take-platform`` 据此 import（契约硬要求）。
+
+    ``last_pusher``（ql-20260914）：平台行既有推送者——CLI 身份归属用
+    （pusher≠本人 ⇒ 一律真冲突，堵跨机时钟偏差误判自回声的盲区）。
     """
 
     conflict: bool = True
     platform_progress: dict[str, Any]
     last_pushed_at: str | None = None
+    last_pusher: str | None = None
 
 
 class ChangeListItem(BaseModel):
@@ -42,9 +46,15 @@ class ChangeListItem(BaseModel):
 
 
 class ProgressSyncOk(BaseModel):
-    """POST progress 200 成功响应（契约 §4.3，客户端不读 body，任意 2xx 即可）。"""
+    """POST progress 200 成功响应（契约 §4.3）。
+
+    ql-20260914：``last_pushed_at`` = 本次接受落库的**服务器权威时钟**——CLI
+    回填 base_ts 必须与库中存储值同钟（读不到才回退客户端 header），否则后续
+    推送必假 409。老客户端不读 body 亦兼容（任意 2xx 即可，契约 §4.3 原语义）。
+    """
 
     ok: bool = True
+    last_pushed_at: str | None = None
 
 
 class ChangeApprovalResponse(BaseModel):

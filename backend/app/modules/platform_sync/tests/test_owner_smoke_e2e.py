@@ -25,6 +25,7 @@ steps 的 completed_at 用固定过去时点（2026/08/01，CLI 本地时区格�
 
 from __future__ import annotations
 
+import re
 import uuid as _uuid
 
 from sqlalchemy import select
@@ -286,6 +287,10 @@ async def test_dual_user_push_smoke_e2e(client, db_session, auth_headers):
     assert progress_row.last_pusher == HEADER_USER_B, (
         "last_pusher 应取 X-SillySpec-User header 字符串（而非 token 用户名/owner）"
     )
-    assert progress_row.last_pushed_at == "2026-08-16T11:00:00.000Z"
+    # ql-20260914：last_pushed_at 改存服务器权威时钟——不再等于客户端 header 原值，
+    # 断言其为 ISO-Z-毫秒格式即可（与 CLI new Date().toISOString() 同构）。
+    assert isinstance(progress_row.last_pushed_at, str) and re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", progress_row.last_pushed_at
+    ), f"last_pushed_at 应为服务器钟 ISO-Z-毫秒（实际 {progress_row.last_pushed_at}）"
     # owner 与 last_pusher 并存互不覆盖：owner=B（token 身份），last_pusher=header 自报
     assert change.owner_id == user_b.id and progress_row.last_pusher == HEADER_USER_B

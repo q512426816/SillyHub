@@ -121,9 +121,12 @@ async def test_duplicate_push_still_calls_service(
     ws = await _make_workspace(db_session)
     svc = PlatformSyncService(db_session)
     body = _progress("demo", "verify", completed=("verify",))
-    for _ in range(2):
-        res = await svc.upsert_progress(ws.id, "demo", body, T2, T2, "alice")
-        assert res.conflict is False
+    # ql-20260914：stored 是服务器钟——重复推的 base 链前一次 ack 回传值
+    # （老写法两轮都传 T2 夹具：第二轮 base < 服务器钟 stored 必 409，语义已变）。
+    res1 = await svc.upsert_progress(ws.id, "demo", body, T2, T2, "alice")
+    assert res1.conflict is False
+    res2 = await svc.upsert_progress(ws.id, "demo", body, res1.last_pushed_at, T2, "alice")
+    assert res2.conflict is False
     assert recorder.await_count == 2
     # 两次调用同门 dedupe_key（审计键稳定）。
     change = await _find_change(db_session, ws.id, "demo")

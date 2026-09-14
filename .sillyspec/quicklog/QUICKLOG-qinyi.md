@@ -246,3 +246,18 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：工具侧已修（sillyspec 仓 132d01d 三层护栏），活跃坑文档需补处置进展；坑 1-3 未修不能整体迁 finished
 方案：处置进展节补登：修复证据链（三层护栏+25 断言+463 绿）+本机 CLI 旧装不含修复实证与重装激活确认；坑 4 关闭标注，文件保持活跃位
 结果：纯文档补登零代码零测试面；本 quick 会话由修复版 CLI 承载（分配正常间接自证）
+
+## ql-20260914-006-e395 | 2026-09-14 10:03:54 | 平台进度同步防跨机时钟偏差：last_pushed_at 改存服务器权威时钟 + 409/GET 回传 last_pusher 供 CLI 身份归属
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/service.py（server_now_iso 服务器钟 + upsert 接受分支存服务器钟回传 stamp + 冲突分支回传 last_pusher + get_progress 顶层 last_pusher）
+- backend/app/modules/platform_sync/router.py（409 body 组装 last_pusher + 200 ack 回传服务器钟）
+- backend/app/modules/platform_sync/schema.py（ConflictResponse/ProgressSyncOk 补字段）
+- backend/app/modules/platform_sync/tests/test_router.py（新增服务器钟落库 + 409 回传 pusher 两用例；8 处旧契约断言改从 ack 链服务器钟）
+- backend/app/modules/platform_sync/tests/test_owner_smoke_e2e.py（last_pushed_at 断言改 ISO-Z 正则）
+- backend/app/modules/platform_sync/tests/test_pending_approval_broadcast.py（重复推 base 链前次 ack）
+需求：平台进度同步防跨机时钟偏差：last_pushed_at 改存服务器权威时钟 + 409/GET 回传 last_pusher 供 CLI 身份归属
+根因：CLI 侧自回声血统归属判定基于客户端时间戳，他机慢钟可把外来更新伪装进 [base, local_modified] 血统窗口被误判自回声覆盖（sillyspec 仓审查结论）；且乐观锁 stored > base_ts 与『平台更新』判定全建立在客户端时钟字典序上，跨机偏差本身污染冲突检测。根修=判定基准统一到服务器钟 + 推送者身份回传
+方案：service.py 新增 server_now_iso()（UTC ISO 毫秒 Z）；upsert_progress 接受分支存服务器钟并经返回值/200 ack 回传（CLI 回填 base_ts 与库中值同钟，否则必假 409）；冲突分支与 get_progress 回传行内 last_pusher（PlatformSyncResult/ConflictResponse/ProgressSyncOk 补字段）；_apply 保持哑写者（stamped_at 由调用方生成）；router 409 body 组装 last_pusher。契约文档在 sillyspec 仓同步（另一 quick）
+结果：platform_sync 模块聚焦 pytest 234 passed（新增 2 用例 + 改写 8 处旧契约断言 + 相邻 2 文件同因修）；ruff check/format/mypy 模块级全绿；pnpm gen:types 已跑——端点在 OpenAPI 无 schema 面，api-types/openapi 零内容差（EOL 噪音已还原）；未部署（crrcdt.ppdmq.top 需发版重部才生效）

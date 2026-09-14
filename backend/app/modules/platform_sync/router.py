@@ -161,15 +161,19 @@ async def push_progress(
     if result.conflict:
         # 409 必须返回正确状态码 + 契约 §4.4 body（客户端 fetchJsonWithStatus 读
         # res.status==409 + res.body.platform_progress，sync.js:314-318）。
+        # ql-20260914：body 补 last_pusher（平台行既有推送者）——CLI 身份归属用。
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content=ConflictResponse(
                 conflict=True,
                 platform_progress=result.platform_progress or {},
                 last_pushed_at=result.last_pushed_at,
+                last_pusher=result.last_pusher,
             ).model_dump(),
         )
-    return ProgressSyncOk()
+    # ql-20260914：200 ack 回传服务器权威时钟——CLI 回填 base_ts 与库中值必须同钟
+    # （老客户端不读 body 亦兼容，契约 §4.3 任意 2xx 语义不变）。
+    return ProgressSyncOk(last_pushed_at=result.last_pushed_at)
 
 
 @router.get("/changes")
