@@ -508,6 +508,12 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # 与 daemon normalizeProvider 双保险，避免 daemon _agentPaths.get 失败静默卡死。
         payload["provider"] = _normalize_lease_provider(lease_meta.get("provider"))
         payload["model"] = lease_meta.get("model")
+        # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别
+        # 白名单透传（:510 model 同款——缺键 None 下发，daemon 侧 undefined
+        # 穿透不伪造默认值；旧 daemon 忽略未知键，协议向后兼容）。经 daemon
+        # execPayload 归一化 thinkingLevel → CreateSessionInput → driver 启动
+        # 设置（daemon 侧消费归 task-03）。
+        payload["thinking_level"] = lease_meta.get("thinking_level")
         payload["root_path"] = lease_meta.get("cwd") or lease_meta.get("root_path")
         # task-06 / D-005@v1：interactive 路注入 provider_config（含解密 api_key）。
         # agent_kind_raw 用 lease_meta.provider（adapter id，如 claude_code）经归一化命中。

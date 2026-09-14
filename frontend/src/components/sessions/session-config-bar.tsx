@@ -40,9 +40,14 @@
  * model（切供应商级联重置模型）；provisional 模型暂存走专用回调
  * onProvisionalModelSwitch（session-panel 已接 preModelId 暂存随首句携带）；Codex 锁定/「不指定」
  * 两态隐藏子下拉。候选不做上游 /v1/models 实时拉取（D-002）。
+ * 2026-09-14-session-thinking-level task-06（FR-06 / Grill P0-2 / P2-11）：模型
+ * 下拉邻位加思考档位下拉——预会话态静态七档镜像（onProvisionalThinkingLevelSwitch
+ * 暂存，模型变级联重置清空）；会话态经 thinkingLevel 可选 prop 挂动态档位切换控件
+ * （GET 动态列表+current 现值+切换 POST+成功 invalidate 刷新，R-04）。两态均
+ * caps.thinking_level 门控（cursor/未知引擎不渲染）。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch, Tag } from "antd";
 import { ChevronDown, Cloud, Lock, User } from "lucide-react";
 
@@ -51,13 +56,18 @@ import type { components } from "@/lib/api-types";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
-import { fetchSharedAgentsActive, injectSession } from "@/lib/daemon";
+import {
+  fetchSharedAgentsActive,
+  getSessionThinkingLevels,
+  injectSession,
+  setSessionThinkingLevel,
+} from "@/lib/daemon";
 import type {
   AgentSessionConfigSnapshot,
   SessionInjectOptions,
   SessionInjectResponse,
 } from "@/lib/daemon";
-import { PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
+import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
 
 /** 供应商下拉「不指定（本机默认）」项的值（→ injectSession llm_provider_id: ""）。 */
@@ -69,6 +79,47 @@ export const SWITCH_NO_PROVIDER_VALUE = "";
  * undefined=不切换）。
  */
 export const SWITCH_MODEL_DEFAULT_VALUE = "";
+
+/* ────────── 2026-09-14-session-thinking-level task-06：思考档位（FR-06 / Grill P0-2 / P2-11）────────── */
+
+/**
+ * 预会话静态七档镜像（THINKING_LEVELS 前端 mirror，Grill P0-2 定案：无会话 id
+ * 可查动态档，非 per-model；引擎不支持的档由 daemon mapPlatformLevelToEngine
+ * 降级规则兜底）。
+ *
+ * ⚠️ 单源互指：唯一维护源 = ``sillyhub-daemon/src/interactive/thinking-levels.ts``
+ * 的 ``THINKING_LEVELS``（backend 校验词表 VALID_THINKING_LEVELS 为同源镜像）；
+ * 本常量为手工镜像——三端档位集合与顺序（off→max）必须逐项一致，改档位两侧
+ * 同步（daemon 单源改后此处与 backend 镜像一并刷新）。
+ */
+export const THINKING_LEVEL_OPTIONS: readonly { value: string; label: string }[] =
+  [
+    { value: "off", label: "默认" },
+    { value: "minimal", label: "极低" },
+    { value: "low", label: "低" },
+    { value: "medium", label: "中" },
+    { value: "high", label: "高" },
+    { value: "xhigh", label: "超高" },
+    { value: "max", label: "最高" },
+  ];
+
+/** 平台默认档（off）——预会话级联重置/未选择态的归位值。 */
+export const THINKING_LEVEL_OFF_VALUE = "off";
+
+/**
+ * off 档（显示「默认」）跨引擎语义差异 tooltip（P2-11，口径同 daemon
+ * thinking-levels.ts 文件头「off 语义差异」注释，改文案两侧同步）：claude/codex
+ * 的 off=不设档位=引擎默认（思考通常开，**并非关闭**）；pi 的 off=真关思考。
+ */
+export const THINKING_LEVEL_OFF_TOOLTIP =
+  "默认档跨引擎语义不同：claude/codex=不设置档位，使用引擎默认（思考通常开启）；pi=真正关闭思考";
+
+/** 档位值 → 中文名（七档镜像内查表；动态档/未知值兜底显原值，不编造）。 */
+export function thinkingLevelLabel(level: string): string {
+  return (
+    THINKING_LEVEL_OPTIONS.find((o) => o.value === level)?.label ?? level
+  );
+}
 
 /* ────────────────────── task-10：平台共享智能体 active 数据 ────────────────────── */
 
@@ -175,6 +226,27 @@ export interface SessionConfigBarProps {
    */
   onProvisionalModelSwitch?: (model: string) => void;
   /**
+   * 2026-09-14-session-thinking-level task-06（FR-06）：provisional 模式思考档位
+   * 暂存专用回调（照 onProvisionalModelSwitch 形态——值不经 onProvisionalSwitch
+   * 发）。上抛值语义：七档词表值=已选档（含显式选「默认」=off，随首句上送）；
+   * 空串 ""=级联重置清空选择（首句 create 不带 thinking_level，跟随引擎默认）。
+   * 父层接线（preThinkingLevel 暂存并入首句 createSession）归 session-panel。
+   */
+  onProvisionalThinkingLevelSwitch?: (level: string) => void;
+  /**
+   * 2026-09-14-session-thinking-level task-06（FR-06 / R-04）：会话态档位切换
+   * 控件（不传不渲染，预会话渲染点零回归）。传入后本组件渲染档位下拉：GET
+   * 动态档位列表 + current 现值直显，点选即 POST setSessionThinkingLevel——
+   * 成功通知 + invalidate 档位查询刷新现值（pi thinking_level_change 事件不
+   * 透传不消费，现值靠查询刷新，design 生命周期契约）；失败 notify error 带
+   * 响应 error 原文（如「daemon 未支持思考级别，请升级 daemon」）。引擎门控
+   * caps.thinking_level（cursor/未知引擎不渲染）。
+   */
+  thinkingLevel?: {
+    /** turn running → 禁用（档位切换仅空闲，D-002；父层 running 派生）。 */
+    disabled?: boolean;
+  };
+  /**
    * ql-20260904-010：外部请求打开供应商下拉的信号（每次递增触发一次）。运行失败
    * 卡「切换供应商」定位到会话底部配置条时由父级递增；锁定/不可切
    * （running/ended/引擎在白名单外）时不响应。0/不传 = 无动作（零回归）。
@@ -226,6 +298,8 @@ export function SessionConfigBar({
   provisional,
   onProvisionalSwitch,
   onProvisionalModelSwitch,
+  onProvisionalThinkingLevelSwitch,
+  thinkingLevel,
   trailing,
   autoResume,
   providerOpenSignal = 0,
@@ -238,6 +312,7 @@ export function SessionConfigBar({
   );
   const { profiles } = useMineAgentProfiles();
   const notify = useNotify();
+  const qc = useQueryClient();
   const providersQ = useQuery({
     queryKey: ["llmProviders", "sessions-config-bar"],
     queryFn: listProviders,
@@ -360,6 +435,89 @@ export function SessionConfigBar({
     [modelCandidates, currentModel],
   );
 
+  // ── 2026-09-14-session-thinking-level task-06（FR-06）：思考档位下拉（两态）──────
+
+  /** caps 门控（thinking_level 键）：cursor/未知引擎 false → 两态档位下拉均不渲染。 */
+  const thinkingLevelEnabled = getProviderCaps(
+    effectiveEngine ?? "",
+  ).thinking_level;
+
+  /**
+   * provisional 档位暂存（组件内显示用）。值语义照 preModelId：""=未选择/级联
+   * 重置清空 → 首句 create 不带 thinking_level（零回归）；七档词表值=已选档
+   * （含显式选「默认」off——随首句上送，pi 侧=真关思考，P2-11 tooltip 已示）。
+   * 显示层 "" 归位 off（默认档）——选项集合恒七项不另设空串项，「未选择」与
+   * 「显式选默认」显示同形，差别只在是否随首句上送。
+   */
+  const [provisionalThinkingLevel, setProvisionalThinkingLevel] = useState("");
+  const provisionalThinkingDisplay =
+    provisionalThinkingLevel === ""
+      ? THINKING_LEVEL_OFF_VALUE
+      : provisionalThinkingLevel;
+
+  /** 会话态动态档位（GET thinking-levels；仅 thinkingLevel prop 挂载的会话态拉取）。 */
+  const thinkingLevelsQ = useQuery({
+    queryKey: ["sessionThinkingLevels", sessionId],
+    queryFn: () => getSessionThinkingLevels(sessionId),
+    enabled:
+      !provisional &&
+      thinkingLevel != null &&
+      thinkingLevelEnabled &&
+      sessionId !== "",
+    staleTime: 30_000,
+  });
+  const currentThinkingLevel = thinkingLevelsQ.data?.current ?? "";
+  const sessionLevelOptions = useMemo(() => {
+    const levels = thinkingLevelsQ.data?.levels ?? [];
+    // 现值不在动态列表（引擎返回了列表外的现值）→ 追加兜底（照 modelOptions
+    // 先例），保证 select 有对应 option 可显示、不丢现值。
+    return currentThinkingLevel && !levels.includes(currentThinkingLevel)
+      ? [...levels, currentThinkingLevel]
+      : levels;
+  }, [thinkingLevelsQ.data, currentThinkingLevel]);
+  /**
+   * 现值缺失时的头部队占位项（value=""，disabled 不可选）：claude SDK 不暴露
+   * 现值（current 恒 null）→「现值未知」如实显示不编造；查询中/失败同占位。
+   */
+  const thinkingStatusLabel = currentThinkingLevel
+    ? null
+    : thinkingLevelsQ.isError
+      ? "档位读取失败"
+      : thinkingLevelsQ.isPending
+        ? "读取档位中…"
+        : "现值未知（引擎未上报）";
+
+  const [thinkingSwitching, setThinkingSwitching] = useState(false);
+  /**
+   * 会话态点选即切换（照模型子下拉点选形态）：POST setThinkingLevel → 成功
+   * 通知 + invalidate 档位查询（R-04：pi thinking_level_change 事件不透传，
+   * 现值靠查询刷新）；失败两路（200 结构化 ok=false/error 与 ApiError）均
+   * notify error 带 error 原文（照 compact 先例）。
+   */
+  const handleThinkingLevelSwitch = async (level: string) => {
+    if (!sessionId || thinkingSwitching) return;
+    setThinkingSwitching(true);
+    try {
+      const resp = await setSessionThinkingLevel(sessionId, level);
+      if (resp.ok === false || resp.error) {
+        // error 原文已是中文（如「daemon 未支持思考级别，请升级 daemon」），直接透出。
+        notify.error(
+          new Error(resp.error ?? "思考级别切换未被受理"),
+          "思考级别切换失败",
+        );
+        return;
+      }
+      notify.success(`已切换思考级别：${thinkingLevelLabel(level)}`);
+      void qc.invalidateQueries({
+        queryKey: ["sessionThinkingLevels", sessionId],
+      });
+    } catch (err) {
+      notify.error(err, "思考级别切换失败");
+    } finally {
+      setThinkingSwitching(false);
+    }
+  };
+
   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
   const profileLabel = agentProfileId
     ? profiles.find((p) => p.id === agentProfileId)?.name ??
@@ -391,6 +549,12 @@ export function SessionConfigBar({
       if (p.field === "model") {
         setProvisionalModel(p.value);
         onProvisionalModelSwitch?.(p.value);
+        // 2026-09-14-session-thinking-level task-06（FR-06）：模型变档位重置
+        // （照「切供应商重置模型」模式——动态档位按当前模型（claude
+        // supportedEffortLevels per-model），模型既变旧档对新模型无意义；仅清
+        // 自身选择发 ""（首句不带 thinking_level），不动模型/provider 既有级联链）。
+        setProvisionalThinkingLevel("");
+        onProvisionalThinkingLevelSwitch?.("");
         return;
       }
       // task-10：切供应商级联重置模型暂存（候选随供应商变，旧模型对新供应商
@@ -574,6 +738,74 @@ export function SessionConfigBar({
             </select>
           )}
         </span>
+        {/* 2026-09-14-session-thinking-level task-06（FR-06）：思考档位下拉（模型
+            下拉邻位）。预会话态=静态七档镜像（provisional 暂存）；会话态=thinkingLevel
+            prop 挂载的动态档位（GET 列表+current 现值，点选即 POST 切换）。两态均
+            caps.thinking_level 门控（cursor/未知引擎不渲染）；running/ended 照模型
+            子下拉同禁（会话态另叠 thinkingLevel.disabled）。 */}
+        {thinkingLevelEnabled && (provisional || thinkingLevel != null) && (
+          <select
+            aria-label="配置-思考级别"
+            data-testid="config-thinking-select"
+            value={
+              provisional
+                ? provisionalThinkingDisplay
+                : (currentThinkingLevel || "")
+            }
+            disabled={
+              !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
+            }
+            // ql-20260909-005 同款：禁用态 title 按原因说明。
+            title={
+              !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false))
+                ? ended
+                  ? "会话已结束或机器离线，不可切换思考级别"
+                  : "会话运行中，本轮结束后可切换思考级别（档位切换仅空闲）"
+                : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+            }
+            onChange={(e) => {
+              const v = e.target.value;
+              if (provisional) {
+                setProvisionalThinkingLevel(v);
+                onProvisionalThinkingLevelSwitch?.(v);
+              } else {
+                void handleThinkingLevelSwitch(v);
+              }
+            }}
+            className={cn(
+              "h-6 max-w-[120px] cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
+              (!canSwitch ||
+                (!provisional && (thinkingLevel?.disabled ?? false))) &&
+                "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
+            )}
+          >
+            {/* 占位项仅会话态渲染（provisional 走静态七档镜像，查询 disabled
+                恒 pending 不占位——disable 查询 isPending 恒真勿混入静态列表）。 */}
+            {!provisional && thinkingStatusLabel != null && (
+              <option value="" disabled>
+                {thinkingStatusLabel}
+              </option>
+            )}
+            {(provisional
+              ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
+              : sessionLevelOptions
+            ).map((v) => (
+              <option
+                key={v}
+                value={v}
+                // P2-11：off（显示「默认」）跨引擎语义差异 tooltip（口径同 daemon
+                // thinking-levels.ts 文件头注释）。
+                title={
+                  v === THINKING_LEVEL_OFF_VALUE
+                    ? THINKING_LEVEL_OFF_TOOLTIP
+                    : undefined
+                }
+              >
+                {thinkingLevelLabel(v)}
+              </option>
+            ))}
+          </select>
+        )}
         {ctrlButton(
           "profile",
           <User aria-hidden className="h-3.5 w-3.5" />,

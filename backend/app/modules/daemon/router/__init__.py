@@ -218,6 +218,12 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     # 2026-09-14-session-ctx-compact task-02 / FR-02：统一压缩端点（紧跟 inject，
     # 同为 session_crud 的 {session_id} 控制类端点）。
     "compact_session",
+    # 2026-09-14-session-thinking-level task-05 / FR-04/05：思考级别查询/切换
+    # 两端点（紧跟 compact，同为 session_crud 的 {session_id} 控制类端点；
+    # GET thinking-levels 与 POST thinking-level 是两条不同 method+path 路由，
+    # 顺序无匹配冲突，按 GET 先 POST 后钉定）。
+    "get_session_thinking_levels",
+    "set_session_thinking_level",
     # session_queue（reorder 先于 {entry_id}，同形状保序对）
     "list_session_queue",
     "reorder_session_queue",

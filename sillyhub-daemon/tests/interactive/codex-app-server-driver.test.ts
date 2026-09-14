@@ -2455,3 +2455,296 @@ describe('task-05（2026-09-14-session-ctx-compact）：compact()', () => {
     await consumeP;
   });
 });
+
+// ── 2026-09-14-session-thinking-level task-04：思考档位两方法 + 启动 params ─────
+//
+// SPIKE 真机实证（codex 0.147.0，plan-review P1-6 / R-01 / R-02 定案）：
+//   A. turn/start params 顶层 reasoningEffort 受理（turn 正常收敛）→ 启动设置
+//      保留走 turn/start params（不触发降级摘参分支）；
+//   B. thread/settings/update 需 initialize 声明 capabilities.experimentalApi
+//      （未声明恒 -32600；声明后受理空 result）→ _handshake 已注入，下方形态断言；
+//   C. thread/read 回执无 reasoningEffort 字段 → getThinkingLevels current=undefined。
+
+describe('task-04（2026-09-14-session-thinking-level）：思考档位', () => {
+  /** 等一拍让 stdin 写入 / readline 行处理跑完（对齐 compact 用例节奏）。 */
+  async function tick(ms = 50): Promise<void> {
+    await new Promise<void>((r) => setTimeout(r, ms));
+  }
+
+  it('握手 initialize params 带 capabilities.experimentalApi=true（SPIKE B：thread/settings/update 门禁）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+
+    const init = readStdinJson(child).find((m) => m.method === 'initialize')!;
+    expect(
+      (init.params as { clientInfo: { name: string } }).clientInfo.name,
+    ).toBe('sillyhub-daemon'); // 既有 clientInfo 不丢
+    expect((init.params as { capabilities?: unknown }).capabilities).toEqual({
+      experimentalApi: true,
+    });
+    // 握手序列长度不变（三条，capability 只增补 params 不加帧）
+    expect(readStdinJson(child).map((m) => m.method)).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'thread/start',
+    ]);
+
+    emitLines(child, [threadStartResponse('thr_tl')]);
+    await tick();
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('getThinkingLevels：静态五档（0.147 枚举），current 不挂键（SPIKE C：thread/read 无现值）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    emitLines(child, [threadStartResponse('thr_tl')]);
+    await tick();
+
+    // 静态返回：零 RPC 往返（stdin 无新增请求帧）
+    const before = readStdinJson(child).length;
+    const r = await driver.getThinkingLevels(handle, 'glm-5.3');
+    expect(r).toEqual({ levels: ['minimal', 'low', 'medium', 'high', 'xhigh'] });
+    expect(r).not.toHaveProperty('current');
+    expect(readStdinJson(child).length).toBe(before); // model 参数不参与
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('setThinkingLevel 命令形态：thread/settings/update {threadId, reasoningEffort}（id≥100 经 pending 通道）→ 空 result {ok:true}，id 自增', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    emitLines(child, [threadStartResponse('thr_tl')]);
+    await tick();
+
+    const p1 = driver.setThinkingLevel(handle, 'high');
+    await tick(30);
+    const req = readStdinJson(child).find(
+      (m) => m.method === 'thread/settings/update',
+    )!;
+    expect(req).toMatchObject({
+      jsonrpc: '2.0',
+      method: 'thread/settings/update',
+      params: { threadId: 'thr_tl', reasoningEffort: 'high' },
+    });
+    expect(typeof req.id).toBe('number');
+    expect(req.id as number).toBeGreaterThanOrEqual(100); // nextJsonRpcId 空间
+
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })]);
+    await expect(p1).resolves.toEqual({ ok: true });
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    // 第二次：id 自增不碰撞 + max→xhigh 降级（矩阵 0.147 枚举无 max 档）
+    const p2 = driver.setThinkingLevel(handle, 'max');
+    await tick(30);
+    const req2 = readStdinJson(child).filter(
+      (m) => m.method === 'thread/settings/update',
+    )[1]!;
+    expect(req2.id as number).toBe((req.id as number) + 1);
+    expect(
+      (req2.params as { reasoningEffort: string }).reasoningEffort,
+    ).toBe('xhigh');
+    emitLines(child, [
+      JSON.stringify({ jsonrpc: '2.0', id: req2.id, result: {} }),
+    ]);
+    await expect(p2).resolves.toEqual({ ok: true });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('off（映射 undefined，codex 无关闭推理档）→ {ok:false,error 报不支持}，不发 RPC；threadId 未就绪同报失败', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick(); // 握手写完但不喂 thread/start response → threadId=null
+
+    const rOff = await driver.setThinkingLevel(handle, 'off');
+    expect(rOff.ok).toBe(false);
+    expect(String(rOff.error)).toContain('off');
+    // threadId 未就绪 + 合法档 → 快速失败（compact 同款）
+    const rNoThread = await driver.setThinkingLevel(handle, 'high');
+    expect(rNoThread).toEqual({ ok: false, error: 'codex thread not started' });
+    expect(
+      readStdinJson(child).some((m) => m.method === 'thread/settings/update'),
+    ).toBe(false);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('response error（-32600 未声明 capability 形态）→ {ok:false,error:message 原文} 不上抛', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    emitLines(child, [threadStartResponse('thr_tl')]);
+    await tick();
+
+    const p = driver.setThinkingLevel(handle, 'high');
+    await tick(30);
+    const req = readStdinJson(child).find(
+      (m) => m.method === 'thread/settings/update',
+    )!;
+    // 真机 0.147.0 未声明 capability 时的拒绝原文（SPIKE B 首跑实证）
+    emitLines(child, [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req.id,
+        error: {
+          code: -32600,
+          message: 'thread/settings/update requires experimentalApi capability',
+        },
+      }),
+    ]);
+    const r = await p;
+    expect(r).toEqual({
+      ok: false,
+      error: 'thread/settings/update requires experimentalApi capability',
+    });
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('超时（thinkingLevelTimeoutMs 注入 80ms）→ {ok:false,error 含 timeout}，pending 清理', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({
+      handshakeIntervalMs: 0,
+      thinkingLevelTimeoutMs: 80,
+    });
+    const { queue, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    emitLines(child, [threadStartResponse('thr_tl')]);
+    await tick();
+
+    const r = await driver.setThinkingLevel(handle, 'high'); // 不喂 response → 80ms 超时
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toMatch(/thread\/settings\/update.*timeout.*80ms/);
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('启动设置（SPIKE A 成立保留）：opts.thinkingLevel=low → turn/start params 顶层 reasoningEffort 与 model 同位；轮正常收敛', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ thinkingLevel: 'low' }),
+    )) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    emitLines(child, [threadStartResponse('thr_tl', 'glm-5.3')]);
+    await tick();
+
+    push('hi');
+    await tick();
+    const turnStart = readStdinJson(child).find(
+      (m) => m.method === 'turn/start',
+    )!;
+    expect(turnStart.params).toMatchObject({
+      threadId: 'thr_tl',
+      input: [{ type: 'text', text: 'hi' }],
+      reasoningEffort: 'low', // params 顶层（SPIKE 实证位置）
+    });
+
+    // 轮正常收敛（受理后 turn 生命周期不受影响）
+    emitLines(child, [turnStartedNotif('thr_tl', 'turn_tl_1')]);
+    await tick();
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('启动设置降级形状：off / 未传 → turn/start 不带 reasoningEffort 键（不携带=引擎默认）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ thinkingLevel: 'off' }),
+    )) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    emitLines(child, [threadStartResponse('thr_tl')]);
+    await tick();
+
+    push('hi');
+    await tick();
+    const turnStart = readStdinJson(child).find(
+      (m) => m.method === 'turn/start',
+    )!;
+    expect(turnStart.params).not.toHaveProperty('reasoningEffort');
+    expect(turnStart.params).toMatchObject({
+      threadId: 'thr_tl',
+      input: [{ type: 'text', text: 'hi' }],
+    });
+
+    // 摘参不阻断轮生命周期（started→completed 照常收敛）
+    emitLines(child, [turnStartedNotif('thr_tl', 'turn_tl_2')]);
+    await tick();
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await tick();
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+});

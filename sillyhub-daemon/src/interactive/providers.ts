@@ -22,7 +22,7 @@
  * 从聚合表派生，本 task 落契约基座（派生前既有字面量与聚合表并存，值等价）。
  *
  * 取值约定：caps 描述 provider 当前真实能力（以本仓现状硬编码门控为准，
- * 不臆断），11 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
+ * 不臆断），12 个 boolean 键缺省 false 默认拒绝（FR-06 / D-002@v1）；dialog
  * 为 string 枚举键（'native' / 'marker' / 'none'，2026-09-09-askuser-pi-cursor
  * task-12 / FR-06 加入——打破「8 键全 boolean」旧约定）；provider_switch 为
  * 第 10 键（2026-09-11-provider-adapter-registry task-01 加入，与
@@ -31,8 +31,10 @@
  * 会话是否上报 ctx_tokens，四引擎全 true）；compact 为第 12 键
  * （2026-09-14-session-ctx-compact task-01 / FR-01 加入——会话级上下文
  * 压缩通道，claude/pi/codex 三引擎原生通道实证 true、cursor 无通道 false）；
- * 未知 provider 查询返回默认拒绝对象（boolean 键全 false、dialog 取
- * 'none'），不抛错。改取值先改本文件，再同步两端镜像。
+ * thinking_level 为第 13 键（2026-09-14-session-thinking-level task-01 /
+ * FR-01 加入——会话级思考强度档位通道，claude/pi/codex 三引擎通道实证
+ * true、cursor 无通道 false）；未知 provider 查询返回默认拒绝对象（boolean
+ * 键全 false、dialog 取 'none'），不抛错。改取值先改本文件，再同步两端镜像。
  */
 
 import type { ProtocolType } from '../adapters/index.js';
@@ -59,7 +61,7 @@ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
 // 本文件，当前无环；task-02 派生化后其函数声明提升亦环安全。CredentialInjector /
 // ProviderConfig 为 type-only import（verbatimModuleSyntax），零运行时依赖。
 
-/** provider 能力矩阵（12 键：11 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
+/** provider 能力矩阵（13 键：12 个 boolean + dialog string 枚举，缺省默认拒绝）。 */
 export interface ProviderCaps {
   /** 会话恢复（Claude SDK session_id / Codex threadId）。 */
   resume: boolean;
@@ -109,6 +111,18 @@ export interface ProviderCaps {
    * 无对应压缩通道 → false；未知 provider 回退 false。
    */
   compact: boolean;
+  /**
+   * 会话级思考强度档位（第 13 键，2026-09-14-session-thinking-level
+   * task-01 / FR-01）：interactive 会话是否支持会话级思考强度档位设置与切换。
+   * 取值依据（三引擎通道实证，design §2 能力三线）：claude SDK
+   * Options.effort 五档（sdk.d.ts:1735）+ 会话中 Query.applyFlagSettings
+   * ({effortLevel})（:2505-2507，session-scoped）；pi rpc set_thinking_level
+   * 七档（rpc.md:281-295）+ get_available_thinking_levels 档位查询；codex
+   * turn/start params reasoningEffort + 会话中 thread/settings/update
+   * （0.147 二进制 strings 实证）——三引擎 true；cursor CLI 无对应通道 →
+   * false；未知 provider 回退 false（默认拒绝）。
+   */
+  thinking_level: boolean;
 }
 
 /**
@@ -139,9 +153,16 @@ export interface ProviderCaps {
  *   provider-neutral；src/interactive/claude-sdk-driver.ts:383-384
  *   `options.model = opts.model`。
  *
- * codex（3 项 true + dialog='native'）：
+ * codex（4 项 true + dialog='native'）：
  * - resume：backend service.py:6335 白名单 `{"claude", "codex"}` 含 codex
  *   （driver.ts:120-121 Codex threadId resume）；
+ * - thinking=true（2026-09-14-session-thinking-level task-01 翻值，Grill P0-3
+ *   纯声明对齐——无行为变化）：codex-app-server-driver.ts:671-682 已把
+ *   reasoning item（text + metadata.thinking=true）映射成 thinking 事件；
+ *   json-rpc.ts:626-651 注释明说 codex reasoning 与 claude thinking 同契约
+ *   （FR-02）；前端渲染由事件流无条件驱动、零 caps 消费方——翻值非解锁
+ *   渲染而是纠正声明（旧 false 源自过时「codex flat 契约无 thinking」判断，
+ *   2026-09-03 基座期快照，早已与 driver 实现不符）；
  * - permission_dialog：src/interactive/session-manager.ts:1776-1790 codex 分支
  *   注入 sessionPermission{requestPermission, requestUserDialog}（同 approvalReady
  *   块，Claude 用 canUseTool/onUserDialog、codex 用 hooks——两桥等价支持）；
@@ -151,13 +172,11 @@ export interface ProviderCaps {
  *   `if (ctx.model) params.model = ctx.model`（frontend session-panel.tsx:5913-5921
  *   模型输入框不按 provider 门控）。
  *
- * codex 其余 5 项 false：
+ * codex 其余 4 项 false：
  * - mcp：driver.ts:135-136 codex driver 对 mcpServers 仅暂存不消费
  *   （「codex app-server MCP 注入留后续任务」）；
  * - multimodal：session-panel.tsx:5695 codex 附件禁用；backend service.py:1361 /
  *   2845 codex 直接 raise；
- * - thinking：src/interactive/codex-app-server-driver.ts:34-36 flat message 契约
- *   仅 'text' | 'tool_use' | 'tool_result' | 'error'，无 thinking；
  * - subagent：session-panel.tsx:3237 / 3563 / 5707 团队派工仅 claude；
  * - edit_patch：run_sync/service.py:3679 structuredPatch 仅 Claude SDK 形状，
  *   codex flat message 契约无此字段。
@@ -231,6 +250,16 @@ export interface ProviderCaps {
  * （三引擎原生压缩通道实证）：claude SDK slash 命令（/compact）、pi rpc
  * compact、codex thread/compact/start——三引擎 true；cursor CLI 无对应
  * 压缩通道 → false；未知 provider 回退 false（默认拒绝）。
+ *
+ * thinking_level（第 13 键，2026-09-14-session-thinking-level task-01 / FR-01）：
+ * 会话级思考强度档位通道（创建时选档 + 会话中查询/切换）。取值依据（三引擎
+ * 通道实证，design §2）：claude SDK Options.effort 五档 + Query.applyFlagSettings
+ * ({effortLevel})；pi rpc set_thinking_level 七档 + get_available_thinking_levels；
+ * codex turn/start params reasoningEffort + thread/settings/update——三引擎
+ * true；cursor CLI 无对应通道 → false；未知 provider 回退 false（默认拒绝）。
+ * 同任务顺手翻值：codex.thinking false→true（Grill P0-3 纯声明对齐，依据见
+ * 上方 codex 段 thinking 条目——driver :671-682 早已映射 reasoning→thinking
+ * 事件，渲染由事件流无条件驱动，翻值无行为变化）。
  */
 export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   claude: {
@@ -246,12 +275,16 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     provider_switch: true,
     ctx_usage: true,
     compact: true,
+    thinking_level: true,
   },
   codex: {
     resume: true,
     mcp: false,
     multimodal: false,
-    thinking: false,
+    // 2026-09-14-session-thinking-level task-01 翻值（Grill P0-3 纯声明对齐，
+    // 无行为变化）：driver :671-682 已映射 reasoning→thinking 事件，渲染由
+    // 事件流无条件驱动、零 caps 消费方——依据详见上方 docblock codex 段。
+    thinking: true,
     subagent: false,
     permission_dialog: true,
     dialog: 'native',
@@ -260,6 +293,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     provider_switch: true,
     ctx_usage: true,
     compact: true,
+    thinking_level: true,
   },
   // 取值依据见上方 docblock pi 段（design §5.3 能力矩阵；subagent 终值 false
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
@@ -277,6 +311,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     provider_switch: true,
     ctx_usage: true,
     compact: true,
+    thinking_level: true,
   },
   // 取值依据见上方 docblock cursor 段（design「注册（providers.ts）」节；
   // thinking=true 为 task-01 实测修正：顶层 thinking 帧稳定存在且有 fixture，
@@ -295,6 +330,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     provider_switch: false,
     ctx_usage: true,
     compact: false,
+    thinking_level: false,
   },
 };
 
@@ -323,6 +359,7 @@ export function getProviderCaps(provider: string): ProviderCaps {
     provider_switch: false,
     ctx_usage: false,
     compact: false,
+    thinking_level: false,
   };
 }
 

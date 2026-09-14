@@ -76,9 +76,14 @@ import type {
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
   InteractiveDriverStartOptions,
+  ThinkingLevelResult,
+  ThinkingLevels,
   UserTurnInput,
 } from './driver.js';
 import { addToModelUsage, type DriverModelUsage } from './driver.js';
+// task-04（2026-09-14-session-thinking-level / FR-02 单源约束）：平台档位→引擎
+// 档位映射矩阵（pi 七档直传也走同函数保单源，不自写映射表）。
+import { mapPlatformLevelToEngine } from './thinking-levels.js';
 // task-02（2026-09-09-askuser-pi-cursor / Wave A）：PiSessionPermissionHooks 的
 // requestPermission 返回值类型（与 codex driver 同源，见该接口注释）。
 import type { CanUseToolDecision } from './types.js';
@@ -822,11 +827,14 @@ export class PiRpcDriver implements InteractiveDriver {
     // 闭包存 start options 供 consume 读（codex 同款，不污染公共契约）。
     // task-02（Wave A / D-002@v1）暂存 sessionPermission 引用，task-01 起 consume
     // 侧消费（extension_ui_request 提问类四方法桥接）。
+    // task-04（2026-09-14-session-thinking-level / FR-03）：暂存 thinkingLevel，
+    // consume 侧握手返回后轮询前消费（P1-9 时序，见插入点注释）。
     const ctx = {
       input,
       model: opts.model,
       resume: opts.resume,
       sessionPermission: opts.sessionPermission,
+      thinkingLevel: opts.thinkingLevel,
     };
 
     const handle: PiRpcHandle = {
@@ -862,6 +870,7 @@ export class PiRpcDriver implements InteractiveDriver {
         model?: string;
         resume?: string;
         sessionPermission?: PiSessionPermissionHooks;
+        thinkingLevel?: string;
       };
     })._ctx;
     const child = h.child;
@@ -1453,6 +1462,33 @@ export class PiRpcDriver implements InteractiveDriver {
         currentModel = hs.model;
       }
 
+      // ── A2. 启动思考档位设置（task-04 2026-09-14-session-thinking-level /
+      // FR-03，Grill P1-9 时序修正：握手（get_state）返回后、inputIt 轮询前——
+      // set_thinking_level 需 rpc 命令通道就绪，且必须在首轮 prompt 前生效）。
+      // opts.thinkingLevel（平台七档）经 mapPlatformLevelToEngine('pi', ...) 映射
+      //（单源矩阵：pi 七档全直传含 off=真关思考）；映射 undefined（词表外）或
+      // opts 未传 → 不发命令（引擎默认，零回归）。失败仅 console.warn 不阻断
+      // 会话启动（任务卡约束：记日志继续轮询）。 ────────────────────────────
+      const startupEngineLevel =
+        ctx.thinkingLevel !== undefined
+          ? mapPlatformLevelToEngine('pi', ctx.thinkingLevel)
+          : undefined;
+      if (startupEngineLevel !== undefined) {
+        try {
+          await this._sendCommand(
+            h,
+            { type: 'set_thinking_level', level: startupEngineLevel },
+            this.requestTimeoutMs,
+          );
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[pi-rpc-driver] startup set_thinking_level failed（继续启动，档位回落引擎默认）:',
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+
       // ── B. 多轮串行（InputQueue 单订阅：迭代器循环外建一次） ─────────────
       const inputIt = ctx.input[Symbol.asyncIterator]();
 
@@ -1654,6 +1690,97 @@ export class PiRpcDriver implements InteractiveDriver {
     } catch (err) {
       // PiCommandError（success:false，error 含引擎原文）/ 超时 / stdin 不可写
       // ——统一降级为 error 结果，不上抛（R-02：只等 response 不等 compaction_end）。
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
+   * getThinkingLevels（task-04 2026-09-14-session-thinking-level / FR-04）：
+   * 实现可选契约——双命令组装 {@link ThinkingLevels}：
+   *   ① `{"type":"get_available_thinking_levels"}` → response.data.levels
+   *      （rpc.md:316-335，按当前模型动态——xhigh/max 按模型条件、无推理模型
+   *      返回 ["off"]，故此处不缓存不复用静态词表）；
+   *   ② `{"type":"get_state"}` → data.thinkingLevel 现值作 current。
+   *
+   * `model` 参数不参与（pi 档位由服务端按当前模型自判；该参数仅供 claude
+   * supportedModels 过滤，Grill P1-5）。
+   *
+   * 失败语义（对照 session-manager/thinking-level.ts 轻守卫②注释「handle 失效
+   * 时驱动错误原样上抛」）：命令被拒/超时 → 直接上抛（RPC 层收敛为错误回执），
+   * **不**伪造空 levels 成功。idle 态 consume 停在 inputIt.next() 上，命令
+   * response 照常经 pending 关联 resolve（interrupt()/compact() 同款先例）。
+   *
+   * ⚠ spike-01 校正点：data.levels / data.thinkingLevel 字段名按 rpc.md 书写，
+   * 真机双命令实证归 task-07（spike-01）——不符时只改下方 data 字段读取处。
+   */
+  async getThinkingLevels(
+    handle: InteractiveDriverHandle,
+    model?: string,
+  ): Promise<ThinkingLevels> {
+    void model; // pi：档位按服务端当前模型动态，客户端 model 不参与（见方法注释）
+    const h = handle as PiRpcHandle;
+    const levelsData = await this._sendCommand(
+      h,
+      { type: 'get_available_thinking_levels' },
+      this.requestTimeoutMs,
+    );
+    // spike-01 校正点：levels 数组字段名以真机实证为准（rpc.md:316-335）。
+    // 防御性双形态：data.levels 数组（文档形态）或 data 本身即数组（漂移容错）。
+    const rawLevels = isRecord(levelsData)
+      ? levelsData.levels
+      : levelsData;
+    const levels = Array.isArray(rawLevels)
+      ? rawLevels.filter((v): v is string => typeof v === 'string')
+      : [];
+
+    const stateData = await this._sendCommand(
+      h,
+      { type: 'get_state' },
+      this.requestTimeoutMs,
+    );
+    // spike-01 校正点：thinkingLevel 现值字段名以真机实证为准（get_state 回执）。
+    const current =
+      isRecord(stateData) &&
+      typeof stateData.thinkingLevel === 'string' &&
+      stateData.thinkingLevel !== ''
+        ? stateData.thinkingLevel
+        : undefined;
+
+    return { levels, ...(current !== undefined ? { current } : {}) };
+  }
+
+  /**
+   * setThinkingLevel（task-04 2026-09-14-session-thinking-level / FR-05）：
+   * 实现可选契约——平台档位经 mapPlatformLevelToEngine('pi', ...) 映射（七档
+   * 直传含 off=真关思考，单源矩阵不自写映射表）后发
+   * `{"type":"set_thinking_level","level":<引擎档>}`（rpc.md:281-295）。
+   *
+   * 失败映射照 compact() 先例：PiCommandError（success:false 引擎原文）/ 超时 /
+   * stdin 不可写 → 捕获降级 `{ok:false, error}` **不上抛**（RPC handler 拿到
+   * error 结果而非异常）。映射 undefined（词表外串——pi 七档全直传，矩阵无
+   * undefined 格，词表外必落空）→ `{ok:false}`（session-manager 守卫⓪已拦，
+   * 此处防御性双保险）。
+   */
+  async setThinkingLevel(
+    handle: InteractiveDriverHandle,
+    level: string,
+  ): Promise<ThinkingLevelResult> {
+    const h = handle as PiRpcHandle;
+    const engineLevel = mapPlatformLevelToEngine('pi', level);
+    if (engineLevel === undefined) {
+      return { ok: false, error: `invalid thinking level for pi: ${level}` };
+    }
+    try {
+      await this._sendCommand(
+        h,
+        { type: 'set_thinking_level', level: engineLevel },
+        this.requestTimeoutMs,
+      );
+      return { ok: true };
+    } catch (err) {
       return {
         ok: false,
         error: err instanceof Error ? err.message : String(err),

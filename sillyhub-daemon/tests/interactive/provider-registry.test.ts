@@ -8,6 +8,10 @@
 // 2026-09-14-session-ctx-compact task-01：caps 第 12 键 compact 联动
 //（elevenKeys→twelveKeys，FR-01 会话级上下文压缩通道，claude/pi/codex 三引擎
 // 原生通道实证 true、cursor 无通道 false）。
+// 2026-09-14-session-thinking-level task-01：caps 第 13 键 thinking_level 联动
+//（twelveKeys→thirteenKeys，FR-01 会话级思考强度档位通道，claude/pi/codex
+// 三引擎通道实证 true、cursor 无通道 false；同任务顺手翻 codex.thinking
+// false→true，Grill P0-3 纯声明对齐——本套件逐值断言随 @generated 语义同步）。
 //
 // 覆盖（task-05 验收）：
 //   1. 注册表键集合 = InteractiveProvider 联合（编译层 canary + 运行时键集断言）
@@ -128,7 +132,7 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
   });
 
-  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、12 契约键齐全', () => {
+  it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、13 契约键齐全', () => {
     // ql-20260911-017：99a228add（askuser-pi-cursor）给 caps 增第 9 键 dialog
     // （值 'native' 字符串非 boolean），守护测试未同步——主仓预存债务顺手修
     // （skills-central-library verify 门实测暴露，与本变更无关）。
@@ -141,7 +145,12 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
     //（boolean，会话级上下文压缩通道——claude SDK slash /compact、pi rpc
     // compact、codex thread/compact/start 三引擎原生通道实证 true，cursor CLI
     // 无对应通道 false，未知 provider 回退 false）。
-    const twelveKeys = [
+    // 2026-09-14-session-thinking-level task-01（FR-01）：第 13 键
+    // thinking_level（boolean，会话级思考强度档位通道——claude SDK
+    // Options.effort/applyFlagSettings、pi set_thinking_level、codex turn/start
+    // params+thread/settings/update 三引擎通道实证 true，cursor CLI 无对应通道
+    // false，未知 provider 回退 false）。
+    const thirteenKeys = [
       'compact',
       'ctx_usage',
       'dialog',
@@ -154,11 +163,12 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       'resume',
       'subagent',
       'thinking',
+      'thinking_level',
     ];
     for (const [key, d] of Object.entries(INTERACTIVE_PROVIDERS)) {
       // 单源引用（非复制值）：descriptor.caps 必须就是 PROVIDER_CAPS 的表项对象。
       expect(d.caps).toBe(PROVIDER_CAPS[key]);
-      expect(Object.keys(d.caps).slice().sort()).toEqual(twelveKeys);
+      expect(Object.keys(d.caps).slice().sort()).toEqual(thirteenKeys);
       for (const [capKey, capValue] of Object.entries(d.caps)) {
         expect(capValue).toBe(PROVIDER_CAPS[key]?.[capKey as keyof typeof d.caps]);
         // dialog 为三态标记（'native' | false | …字符串/布尔），其余十一键恒 boolean

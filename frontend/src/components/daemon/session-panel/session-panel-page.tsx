@@ -500,6 +500,10 @@ export function SessionPanelPage({
   // 回调（不能复用 onProvisionalSwitch 二分收值），首句 createSession 携带
   // （""=跟随供应商配置不传）。
   const [preModelId, setPreModelId] = useState("");
+  // 2026-09-14-session-thinking-level task-06（FR-06）：预会话思考档位暂存——
+  // preModelId 同款模式（专用回调收值，首句 createSession 携带；""=未选择/级联
+  // 重置清空不传——引擎默认零回归；显式选「默认」off=上送，daemon 按引擎映射）。
+  const [preThinkingLevel, setPreThinkingLevel] = useState("");
   const [preError, setPreError] = useState<string | null>(null);
   // task-13（FR-05/D-009@v2）：预会话团队 payload 暂存——弹层确认后暂存（含
   // task-12 主 agent 选择器落定的 orchestrator_workspace_id），首句 createSession
@@ -2115,6 +2119,10 @@ export function SessionPanelPage({
           ...(preProfileId ? { agent_profile_id: preProfileId } : {}),
           // D-002@v1：预会话级联模型随首句携带（""=跟随供应商配置不传）。
           ...(preModelId ? { model: preModelId } : {}),
+          // 2026-09-14-session-thinking-level task-06（FR-06）：预会话档位下拉
+          // 暂存随首句携带（""=未选择/级联重置清空不传——引擎默认；off/档位值=
+          // 已选档，daemon 按引擎映射，口径见 session-config-bar 档位下拉注释）。
+          ...(preThinkingLevel ? { thinking_level: preThinkingLevel } : {}),
           // task-13（FR-05/D-009@v2）：弹层确认暂存的团队 payload 随首句上送
           //（有值才带；后端 create 路径预建 mission，objective 空时以首句回填）。
           ...(preTeamMission ? { team_mission: preTeamMission } : {}),
@@ -2151,6 +2159,7 @@ export function SessionPanelPage({
       preProviderId,
       preProfileId,
       preModelId,
+      preThinkingLevel,
       preTeamMission,
     ],
   );
@@ -2755,6 +2764,10 @@ export function SessionPanelPage({
               }}
               // D-002@v1：模型暂存专用回调（onProvisionalSwitch 二分收值会误写档案）。
               onProvisionalModelSwitch={setPreModelId}
+              // 2026-09-14-session-thinking-level task-06（FR-06）：预会话档位
+              // 暂存（preModelId 同款专用回调；组件内 caps.thinking_level 门控
+              // 渲染静态七档镜像，模型变级联重置发 "" 清空）。
+              onProvisionalThinkingLevelSwitch={setPreThinkingLevel}
               // ql-20260909-006：ctx 用量（未知态圆环+额度胶囊）同样收进行尾插槽。
               // 2026-09-13-ctx-usage-all-providers task-07（FR-06）：传引擎名走
               // caps 门控（与 :2700 engine prop 同源 preEngine）。
@@ -3549,6 +3562,12 @@ export function SessionPanelPage({
             }}
             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
             providerOpenSignal={configProviderSignal}
+            // 2026-09-14-session-thinking-level task-06（FR-06 / R-04）：会话态
+            // 档位切换控件（GET 动态档位+current 现值+切换 POST+成功 invalidate
+            // 刷新——组件内完成；caps.thinking_level 门控渲染，cursor/未知引擎
+            // 不渲染；running 禁用防与进行中轮并发——档位切换仅空闲，D-002）。
+            // 预会话渲染点（上方）不传即不渲染该控件（走静态七档镜像）。
+            thinkingLevel={{ disabled: running }}
             // ql-20260909-006：ctx 用量圆环+额度胶囊收进配置条行尾插槽（原输入框
             // 上方独占行——孤零零一整行很突兀）。2026-09-13-ctx-usage-all-providers
             // task-07（FR-06）：传引擎名走 caps 门控（与上方 engine prop 同式）。

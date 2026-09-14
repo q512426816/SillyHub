@@ -651,6 +651,15 @@ class RunPlacementService:
         provider: str,
         prompt: str,
         model: str | None,
+        # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别七档
+        # 词表（off/minimal/low/medium/high/xhigh/max）。非空时写 lease
+        # metadata 的 thinking_level 键（写法对齐 :835 model 先例——真值才写键），
+        # 经 build_claim_payload interactive 分支白名单（context.py :510 model
+        # 同款）→ daemon execPayload 归一化 → CreateSessionInput.thinkingLevel →
+        # _buildDriverOptions → 三 driver 启动设置（daemon 侧消费归 task-03）。
+        # 缺省 None 不写键——存量创建链全链无键（undefined 穿透不伪造默认值，
+        # 零回归）。
+        thinking_level: str | None = None,
         manual_approval: bool = False,
         ask_user_only: bool = False,
         workspace_id: uuid.UUID | None = None,
@@ -834,6 +843,12 @@ class RunPlacementService:
         }
         if model:
             metadata["model"] = model
+        # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别。
+        # 真值才写键（对齐上方 model 先例），空串=引擎默认不写；缺键经 claim
+        # payload（context.py interactive 分支白名单）→ daemon execPayload
+        # thinkingLevel 归一化（旧 daemon 忽略未知键，协议向后兼容）。
+        if thinking_level:
+            metadata["thinking_level"] = thinking_level
         # 2026-07-08 D-001：所有 stage 统一 scan 模式（manual_approval=True +
         # ask_user_only=True）。AskUserQuestion 走 dialog 人审（入口保留），其余工具
         # allow-through，消除 5min 超时（根因 1）。入参 manual_approval/ask_user_only

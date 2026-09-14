@@ -67,10 +67,16 @@ import type {
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
   InteractiveDriverStartOptions,
+  ThinkingLevelResult,
+  ThinkingLevels,
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
 import { setModelUsageSnapshot, type DriverModelUsage } from './driver.js';
+// task-04（2026-09-14-session-thinking-level / FR-02 单源约束）：平台档位→
+// 引擎档位映射矩阵（off→undefined=不设 reasoningEffort=引擎默认；max→xhigh
+// 降级——0.147 二进制枚举五档无 max）。
+import { mapPlatformLevelToEngine } from './thinking-levels.js';
 import { ctxTokensFromGrossInput } from './usage-ctx.js';
 
 /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 task-runner.ts KILL_GRACE_MS=2000）。 */
@@ -103,6 +109,13 @@ const THREAD_ID_WAIT_POLL_MS = 50;
  * 极小值加速超时分支（对齐 threadIdWaitTimeoutMs 惯例）。
  */
 const DEFAULT_COMPACT_TIMEOUT_MS = 10_000;
+
+/**
+ * task-04（2026-09-14-session-thinking-level / FR-05）：thread/settings/update
+ * 等 response 的超时（任务卡定值 10s，同 compact 量级——档位切换是服务端轻写）。
+ * 测试可经构造函数注入极小值加速超时分支（对齐 compactTimeoutMs 惯例）。
+ */
+const DEFAULT_THINKING_LEVEL_TIMEOUT_MS = 10_000;
 
 /**
  * codex 交互 stdout 日志目录：`<daemonStateDir()>/runs/codex-interactive`。
@@ -737,11 +750,15 @@ export class CodexAppServerDriver implements InteractiveDriver {
   /** task-05：compact 等 response 超时（默认 10s；测试注入极小值加速超时分支）。 */
   private readonly compactTimeoutMs: number;
 
+  /** task-04：thread/settings/update 等 response 超时（默认 10s；测试注入极小值加速）。 */
+  private readonly thinkingLevelTimeoutMs: number;
+
   constructor(
     opts: {
       handshakeIntervalMs?: number;
       threadIdWaitTimeoutMs?: number;
       compactTimeoutMs?: number;
+      thinkingLevelTimeoutMs?: number;
     } = {},
   ) {
     this.handshakeIntervalMs =
@@ -749,6 +766,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
     this.threadIdWaitTimeoutMs =
       opts.threadIdWaitTimeoutMs ?? DEFAULT_THREAD_ID_WAIT_TIMEOUT_MS;
     this.compactTimeoutMs = opts.compactTimeoutMs ?? DEFAULT_COMPACT_TIMEOUT_MS;
+    this.thinkingLevelTimeoutMs =
+      opts.thinkingLevelTimeoutMs ?? DEFAULT_THINKING_LEVEL_TIMEOUT_MS;
   }
 
   /**
@@ -822,6 +841,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
       sessionPermission: opts.sessionPermission,
       // ql-20260624-007：透传 sessionId 供 consume 落盘 stdout 诊断日志。
       sessionId: opts.sessionId,
+      // task-04（2026-09-14-session-thinking-level / FR-03）：平台思考档位
+      //（_writeTurnStart 组 params 时经矩阵映射挂 reasoningEffort，spike 实证
+      // 见 _writeTurnStart 注释）。
+      thinkingLevel: opts.thinkingLevel,
     };
 
     const handle: CodexHandle = {
@@ -872,6 +895,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         askUserOnly: boolean;
         sessionPermission?: CodexSessionPermissionHooks;
         sessionId?: string;
+        thinkingLevel?: string;
       };
     })._ctx;
     const child = h.child;
@@ -1401,13 +1425,39 @@ export class CodexAppServerDriver implements InteractiveDriver {
   /**
    * 握手：initialize(1) → notifications/initialized → thread/start(2) | thread/resume(2)。
    * 每条间隔 300ms。
+   *
+   * task-04（2026-09-14-session-thinking-level / FR-05，SPIKE 实证）：initialize
+   * params 增补 `capabilities: { experimentalApi: true }`——真机 codex 0.147.0
+   * 实测 `thread/settings/update`（思考档位切换）未声明该 capability 时恒 -32600
+   * 拒绝（"requires experimentalApi capability"），声明后受理（空 result 回执）。
+   * capability 只放开**可调用方法面**；服务端行为（通知流 / 既有握手响应形状）
+   * 实测无变化，未知通知 method 本就经 adapter 忽略（json-rpc.ts 解析容错）。
+   * 在 driver 侧补写而非改 adapter.buildHandshake（批处理 TaskRunner 共用该
+   * 构造器，capability 语义属 interactive driver 的会话中切换需求）。
    */
   private async _handshake(
     h: CodexHandle,
     ctx: { cwd: string; resume?: string },
   ): Promise<void> {
     const baseHandshake = h.adapter.buildHandshake({ cwd: ctx.cwd, prompt: '' });
-    const lines: string[] = [baseHandshake[0]!, baseHandshake[1]!];
+    // SPIKE（真机 0.147.0）：initialize params 增补 experimentalApi capability
+    //（解析首行注入后重组，adapter 构造器保持零改动；解析失败回退原行不阻断）。
+    let initLine = baseHandshake[0]!;
+    try {
+      const initMsg = JSON.parse(initLine) as {
+        params?: Record<string, unknown>;
+      };
+      initLine = JSON.stringify({
+        ...initMsg,
+        params: {
+          ...(initMsg.params ?? {}),
+          capabilities: { experimentalApi: true },
+        },
+      });
+    } catch {
+      // 防御性：adapter 产出的首行必是合法 JSON，异常时按原行发出（零回归）。
+    }
+    const lines: string[] = [initLine, baseHandshake[1]!];
     if (ctx.resume) {
       lines.push(
         JSON.stringify({
@@ -1635,10 +1685,20 @@ export class CodexAppServerDriver implements InteractiveDriver {
     }
   }
 
-  /** 写 turn/start request（递增 id）。 */
+  /**
+   * 写 turn/start request（递增 id）。
+   *
+   * task-04（2026-09-14-session-thinking-level / FR-03）：ctx.thinkingLevel
+   *（平台档位）经 mapPlatformLevelToEngine('codex', ...) 映射后挂 **params 顶层
+   * reasoningEffort**（与 params.model 同位）。SPIKE 实证（真机 codex 0.147.0，
+   * plan-review P1-6 / R-02）：`turn/start {threadId, input, reasoningEffort:'low'}`
+   * 受理且 turn 正常收敛——**成立保留**（无需降级摘参）。映射 undefined（off=引擎
+   * 默认 / 词表外）→ 不携带该字段（零回归）。仅首轮携带即会话生效（codex 档位为
+   * thread 级状态，thread/start 回执含 reasoningEffort 现值佐证）。
+   */
   private async _writeTurnStart(
     h: CodexHandle,
-    ctx: { model?: string },
+    ctx: { model?: string; thinkingLevel?: string },
     text: string,
   ): Promise<void> {
     if (h.closing || !h.threadId) return;
@@ -1648,6 +1708,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
       input: [{ type: 'text', text }],
     };
     if (ctx.model) params.model = ctx.model;
+    if (ctx.thinkingLevel !== undefined) {
+      const engineLevel = mapPlatformLevelToEngine('codex', ctx.thinkingLevel);
+      if (engineLevel !== undefined) {
+        params.reasoningEffort = engineLevel;
+      }
+    }
     const line = JSON.stringify({ jsonrpc: '2.0', id, method: 'turn/start', params });
     await this._writeLine(h, line);
   }
@@ -2278,6 +2344,74 @@ export class CodexAppServerDriver implements InteractiveDriver {
         'thread/compact/start',
         { threadId: h.threadId },
         this.compactTimeoutMs,
+      );
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
+   * getThinkingLevels（task-04 2026-09-14-session-thinking-level / FR-04）：
+   * 实现可选契约——返回**静态五档**（0.147 二进制枚举实证 minimal/low/medium/
+   * high/xhigh，与 thinking-levels.ts codex 矩阵行同源）。
+   *
+   * `current` 恒 undefined（SPIKE 实证，真机 0.147.0）：`thread/read` 回执的
+   * thread 对象**不含** reasoningEffort 字段（仅 thread/start 响应在 result
+   * 顶层携带现值——那是一次性握手回执，查询时已不可重读；thread/settings/updated
+   * 通知亦不回读现值）。契约 current 可缺省（driver.ts ThinkingLevels），
+   * 不伪造。
+   *
+   * `model` / handle 参数不参与（静态档表；签名对齐可选契约）。
+   */
+  async getThinkingLevels(
+    _handle: InteractiveDriverHandle,
+    _model?: string,
+  ): Promise<ThinkingLevels> {
+    return { levels: ['minimal', 'low', 'medium', 'high', 'xhigh'] };
+  }
+
+  /**
+   * setThinkingLevel（task-04 2026-09-14-session-thinking-level / FR-05）：
+   * 实现可选契约——平台档位经 mapPlatformLevelToEngine('codex', ...) 映射后经
+   * pending 通道（task-05 已建）发
+   * `thread/settings/update {threadId, reasoningEffort}`（10s 超时）。
+   *
+   * SPIKE 实证（真机 0.147.0，R-01/R-02 定案）：
+   *   - 未声明 experimentalApi capability → -32600 拒绝；initialize 增补
+   *     `capabilities:{experimentalApi:true}`（_handshake 已加）后**受理**（空
+   *     result 回执）→ 走 thread/settings/update 切换，**不触发**降级分支
+   *     （config.toml 机器级降级被否决——同 daemon 所有 codex 会话互相污染，
+   *     Grill P1-7 爆炸半径）；
+   *   - 映射 undefined（**off 档**：codex 无关闭推理档，off=引擎默认；词表外串
+   *     同形，session-manager 守卫⓪已拦）→ `{ok:false, error}` 报不支持；
+   *   - threadId 未就绪（握手未完成/resume 失败）→ `{ok:false}` 快速失败
+   *     （compact 同款）；
+   *   - response error / 超时 / stdin 不可用 → 捕获降级 `{ok:false, error}`
+   *     不上抛（照 compact 先例）。
+   */
+  async setThinkingLevel(
+    handle: InteractiveDriverHandle,
+    level: string,
+  ): Promise<ThinkingLevelResult> {
+    const h = handle as CodexHandle;
+    const engineLevel = mapPlatformLevelToEngine('codex', level);
+    if (engineLevel === undefined) {
+      // off（引擎默认≠关闭推理）/ 词表外防御——报不支持而非静默成功（任务卡口径）。
+      return { ok: false, error: `codex 不支持该思考档位: ${level}` };
+    }
+    if (!h.threadId) {
+      return { ok: false, error: 'codex thread not started' };
+    }
+    try {
+      await this._sendJsonRpcRequest(
+        h,
+        'thread/settings/update',
+        { threadId: h.threadId, reasoningEffort: engineLevel },
+        this.thinkingLevelTimeoutMs,
       );
       return { ok: true };
     } catch (err) {

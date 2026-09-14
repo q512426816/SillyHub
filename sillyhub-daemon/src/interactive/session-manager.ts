@@ -50,6 +50,8 @@ import type {
   InteractiveDriverResult,
   InteractiveProvider,
   McpServerConfigForDriver,
+  ThinkingLevelResult,
+  ThinkingLevels,
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
@@ -195,6 +197,12 @@ import {
 } from './session-manager/turn-control.js';
 // task-03（2026-09-14-session-ctx-compact / FR-02）：compact 守卫 + 分派子模块。
 import { compact } from './session-manager/compact.js';
+// task-03（2026-09-14-session-thinking-level / FR-02）：思考档位查询/切换守卫 +
+// 分派子模块（get 轻守卫 / set 六守卫+词表，照 compact.ts 骨架）。
+import {
+  getThinkingLevels,
+  setThinkingLevel,
+} from './session-manager/thinking-level.js';
 import {
   abortPermissionResolver,
   cancelTerminalCleanup,
@@ -953,6 +961,10 @@ export class SessionManager {
       provider: input.provider,
       pathToClaudeCodeExecutable: input.pathToClaudeCodeExecutable,
       pathToAgentExecutable: exePath,
+      // task-03（2026-09-14-session-thinking-level / FR-04）：会话当前模型承载
+      //（lease 下发值）。getThinkingLevels 分派传参给 driver（claude
+      // supportedModels 按当前模型过滤，Grill P1-5）。undefined → 不写键。
+      ...(input.model !== undefined ? { model: input.model } : {}),
       env: input.env,
       manualApproval: enableApproval,
       askUserOnly: effectiveAskUserOnly,
@@ -1043,6 +1055,17 @@ export class SessionManager {
         mcpServers: mainAgentMcp,
         systemPrompt: input.systemPrompt,
       });
+      // task-03（2026-09-14-session-thinking-level / FR-03 创建链 / plan-review
+      // P1-4）：思考档位透传——input.thinkingLevel → driverOpts.thinkingLevel
+      //（InteractiveDriverStartOptions.thinkingLevel 契约字段，driver 侧
+      // `!== undefined` 判定，task-04 三引擎落地本体）。DriverOptionsSpec 与
+      // buildDriverOptions 函数体（session-manager/types.ts / driver-factory.ts）
+      // 不在本卡 allowed_paths——调用点直挂 driverOpts（Record<string, unknown>，
+      // 下方 driver.start 既有 `as unknown as` 类型桥进入 StartOptions），与
+      // spec.model 邻位直传语义等价。undefined → 不写键（引擎默认，零回归）。
+      if (input.thinkingLevel !== undefined) {
+        driverOpts.thinkingLevel = input.thinkingLevel;
+      }
       // task-02（D-001）：用 session 归属 driver（不再全局 this.deps.driver）。
       // 过渡期 ClaudeSdkDriver.start 同步返回 Query、InteractiveDriver.start 返回
       // Promise<Handle>；统一 await（同步返回值经 await 等价直传）。按 provider 写句柄：
@@ -1221,6 +1244,45 @@ export class SessionManager {
    */
   async compact(sessionId: string): Promise<CompactResult> {
     return compact(this._core(), sessionId);
+  }
+
+  /**
+   * task-03（2026-09-14-session-thinking-level / FR-02 / D-002@v1 单点接线）：
+   * 查询会话当前可用思考档位——轻守卫（不存在 / ended / failed / driver 未实现 /
+   * caps false；running 期间可查，R-04 切换后查询刷新依赖）+
+   * driver.getThinkingLevels(handle, state.model) 分派（model 传参供 claude
+   * supportedModels 按当前模型过滤，Grill P1-5），ThinkingLevels 原样透传
+   * （daemon session_get_thinking_levels RPC result）。
+   *
+   * @throws {SessionNotFoundError} store 无该 session
+   * @throws {SessionNotActiveError} status ∈ {ended, failed}（终态）
+   * @throws {Error} driver 未实现 getThinkingLevels / caps.thinking_level=false /
+   *   handle 缺失
+   */
+  async getThinkingLevels(sessionId: string): Promise<ThinkingLevels> {
+    return getThinkingLevels(this._core(), sessionId);
+  }
+
+  /**
+   * task-03（2026-09-14-session-thinking-level / FR-02 / D-002@v1 仅空闲切换）：
+   * 切换会话思考档位——词表校验（isValidPlatformLevel 七档单源，防御性双保险）
+   * + 六守卫（不存在 / running / reconnecting / ended / failed / driver 未实现 /
+   * caps false，照 compact）+ driver.setThinkingLevel(handle, level) 分派（平台
+   * 档位串原样，引擎映射归 driver task-04），ThinkingLevelResult 原样透传
+   * （daemon session_set_thinking_level RPC result）。
+   *
+   * @throws {Error} level 词表外
+   * @throws {SessionNotFoundError} store 无该 session
+   * @throws {SessionBusyError} status=running（turn 进行中，稍后重试）
+   * @throws {SessionNotActiveError} status ∈ {reconnecting, ended, failed}
+   * @throws {Error} driver 未实现 setThinkingLevel / caps.thinking_level=false /
+   *   handle 缺失
+   */
+  async setThinkingLevel(
+    sessionId: string,
+    level: string,
+  ): Promise<ThinkingLevelResult> {
+    return setThinkingLevel(this._core(), sessionId, level);
   }
 
   private async _interruptInternal(state: SessionState): Promise<boolean> {

@@ -305,6 +305,12 @@ export async function createSession(
   if (input.llm_provider_id !== undefined) {
     body.llm_provider_id = input.llm_provider_id;
   }
+  // 2026-09-14-session-thinking-level task-06（FR-06）：预会话档位下拉暂存值随
+  // 首句上送（有值才带；off=平台默认档——daemon 按引擎映射：claude/codex 不设
+  // effort=引擎默认、pi 直传 'off' 真关思考，语义差异见档位下拉 tooltip）。
+  if (input.thinking_level !== undefined) {
+    body.thinking_level = input.thinking_level;
+  }
   if (input.manual_approval !== undefined) {
     body.manual_approval = input.manual_approval;
   }
@@ -483,6 +489,54 @@ export async function compactSession(
   return apiFetch<SessionCompactResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/compact`,
     { method: "POST", json: {} },
+  );
+}
+
+/* ---------- Session thinking level (2026-09-14-session-thinking-level task-06 / FR-04 / FR-05) ----------
+ *
+ * 会话级思考强度档位两 API（端点/DTO 归 task-02/05，api-types gen:types 产物，
+ * components["schemas"] 引用禁手写——CLAUDE.md 规则 21）。错误不在本 client 本地
+ * 处理，统一由 apiFetch 抛 ApiError；但注意 POST 失败多以 200 + {ok:false,error}
+ * 结构化回执返回（旧 daemon method_not_found →「daemon 未支持思考级别，请升级
+ * daemon」等中文文案），调用方需按 ok/error 分型通知（照 compact 口径）。
+ */
+
+/** GET /thinking-levels 响应体（api-types 生成版，禁手写）。 */
+export type SessionThinkingLevelsResponse =
+  components["schemas"]["SessionThinkingLevelsResponse"];
+/** POST /thinking-level 请求体（api-types 生成版，禁手写）。 */
+export type SessionThinkingLevelRequest =
+  components["schemas"]["SessionThinkingLevelRequest"];
+/** POST /thinking-level 响应体（api-types 生成版，禁手写）。 */
+export type SessionThinkingLevelResponse =
+  components["schemas"]["SessionThinkingLevelResponse"];
+
+/**
+ * GET /api/daemon/sessions/{id}/thinking-levels — 会话思考档位动态列表与现值
+ * （FR-04）。levels 按当前模型动态（pi get_available_thinking_levels / claude
+ * supportedModels 过滤 / codex 静态档）；current 为引擎侧现值，SDK 不暴露现值的
+ * 引擎（claude）为 null——消费方如实显示「现值未知」，不编造。
+ */
+export async function getSessionThinkingLevels(
+  sessionId: string,
+): Promise<SessionThinkingLevelsResponse> {
+  return apiFetch<SessionThinkingLevelsResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/thinking-levels`,
+  );
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/thinking-level — 会话中切换思考档位（FR-05，
+ * 仅空闲：running 守卫归后端 daemon RPC 六守卫）。level 取七档词表（daemon
+ * THINKING_LEVELS 镜像），非法档 400；HTTP 恒 200，失败看 ok=false + error 原文。
+ */
+export async function setSessionThinkingLevel(
+  sessionId: string,
+  level: string,
+): Promise<SessionThinkingLevelResponse> {
+  return apiFetch<SessionThinkingLevelResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/thinking-level`,
+    { method: "POST", json: { level } satisfies SessionThinkingLevelRequest },
   );
 }
 

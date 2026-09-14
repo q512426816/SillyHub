@@ -202,6 +202,14 @@ class SessionCreateRequest(BaseModel):
     llm_provider_id: str | None = None
     # D-002@v1：预会话级联首句模型（None/空串=跟随供应商配置）。
     model: str | None = Field(default=None, max_length=128)
+    # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别——
+    # 七档词表 off/minimal/low/medium/high/xhigh/max（backend 镜像常量
+    # VALID_THINKING_LEVELS，与 daemon THINKING_LEVELS 注释同源互指）；
+    # None/空串=引擎默认档。档位**不写 AgentSession.config 不落库**（NG-04/
+    # P1-8 定案）：仅经 create 形参 → placement lease metadata → claim payload
+    # 白名单 → daemon CreateSessionInput.thinkingLevel 单向透传，切换后档位由
+    # 引擎 session 状态维持。max_length=16 覆盖最长档位字面（"minimal"=7）。
+    thinking_level: str | None = Field(default=None, max_length=16)
     # 新页面默认更安全的对话模式（design §5）；现有前端弹窗均显式传 true，不受影响。
     manual_approval: bool = True
     ask_user_only: bool = True
@@ -367,6 +375,44 @@ class SessionCompactResponse(BaseModel):
     tokens_before: int | None = None
     estimated_tokens_after: int | None = None
     # 分路失败/竞态映射的结构化错误文案。
+    error: str | None = None
+
+
+class SessionThinkingLevelsResponse(BaseModel):
+    """GET /api/daemon/sessions/{id}/thinking-levels 响应体（FR-04 / design §接口定义）。
+
+    2026-09-14-session-thinking-level task-05：daemon RPC
+    ``session_get_thinking_levels`` 回执映射——``levels`` 按当前模型动态
+    （pi get_available_thinking_levels；claude supportedModels 过滤；codex
+    静态档），``current`` 为引擎侧现值（SDK 不暴露现值的引擎回 None，
+    可空）。无 ``error`` 字段：RPC 失败（离线/超时/旧 daemon RemoteError）
+    走 AppError 上抛（服务层 thinking_level.py 三异常映射），不 200 假数据。
+    """
+
+    levels: list[str]
+    current: str | None = None
+
+
+class SessionThinkingLevelRequest(BaseModel):
+    """POST /api/daemon/sessions/{id}/thinking-level 请求体（FR-05 / design §接口定义）。
+
+    ``level`` 取七档词表（backend VALID_THINKING_LEVELS 镜像常量）；非法档
+    400（服务层校验，错误文案带合法档位清单）。
+    """
+
+    level: str
+
+
+class SessionThinkingLevelResponse(BaseModel):
+    """POST /api/daemon/sessions/{id}/thinking-level 响应体（FR-05 / design §接口定义）。
+
+    daemon RPC ``session_set_thinking_level`` 回执映射：``ok=False`` 时
+    ``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持
+    思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200
+    （照 compact 口径：调用方可修复的失败不抛 5xx）。
+    """
+
+    ok: bool
     error: str | None = None
 
 

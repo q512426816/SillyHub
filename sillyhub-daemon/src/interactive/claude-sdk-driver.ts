@@ -43,6 +43,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import type {
   CanUseTool,
+  EffortLevel,
   OnUserDialog,
   Query,
   SDKMessage,
@@ -56,11 +57,30 @@ import type {
   InteractiveDriverHandle,
   InteractiveDriverResult,
   InteractiveDriverStartOptions,
+  ThinkingLevelResult,
+  ThinkingLevels,
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
 import { ClaudeEventNormalizer } from './claude-events.js';
 import type { AgentEvent, AgentEventUsage } from '../types.js';
+// task-04（2026-09-14-session-thinking-level / FR-02 单源约束）：平台档位→
+// 引擎档位映射矩阵（off→undefined=不携带 effort 字段=引擎默认，非真关——
+// thinking-levels.ts 文件头「off 语义差异」）。
+import { mapPlatformLevelToEngine } from './thinking-levels.js';
+
+/**
+ * task-04（2026-09-14-session-thinking-level / FR-04，R-03 兜底）：model 未传 /
+ * supportedModels 查不到当前模型时的默认 effort 五档（SDK EffortLevel 全集，
+ * sdk.d.ts:576）。静态兜底而非报错——查询是轻操作，档表缺失不应打断前端下拉。
+ */
+const DEFAULT_CLAUDE_EFFORT_LEVELS: readonly string[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
 
 /** executable 缺失/解析失败抛出。code 字段供 daemon / 测试识别。 */
 export class ClaudeExecutableNotFoundError extends Error {
@@ -409,6 +429,17 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     if (opts.model !== undefined) {
       options.model = opts.model;
     }
+    // task-04（2026-09-14-session-thinking-level / FR-03）：创建时选定的平台思考
+    // 档位 → mapPlatformLevelToEngine('claude', ...) 映射（minimal→low 降级；
+    // off→undefined **不携带** effort 字段=引擎默认思考通常开，非真关——矩阵
+    // P2-11 口径）→ SDK StartOptions.effort（sdk.d.ts:1735 EffortLevel 五档）。
+    // 映射 undefined（off / 词表外）→ 不写 options.effort，SDK 走默认（零回归）。
+    if (opts.thinkingLevel !== undefined) {
+      const engineLevel = mapPlatformLevelToEngine('claude', opts.thinkingLevel);
+      if (engineLevel !== undefined) {
+        options.effort = engineLevel as EffortLevel;
+      }
+    }
     if (opts.allowedTools !== undefined) {
       options.allowedTools = opts.allowedTools;
     }
@@ -518,6 +549,76 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     } catch {
       // q 已结束 / 不支持 interrupt → no-op。
       return false;
+    }
+  }
+
+  /**
+   * getThinkingLevels（task-04 2026-09-14-session-thinking-level / FR-04）：
+   * 实现可选契约——`query.supportedModels()`（sdk.d.ts:2552）按当前模型过滤
+   * 取 `supportedEffortLevels`（Grill P1-5：ModelInfo 无 id 字段，匹配键用
+   * **m.value**，sdk.d.ts:1247-1286）。
+   *
+   * - `model` 未传 / 列表查不到 → 回退默认五档 DEFAULT_CLAUDE_EFFORT_LEVELS
+   *   （R-03 兜底：SDK EffortLevel 全集，档表缺失不打断查询链路）。
+   * - `current` 不返回（undefined）：SDK 不暴露 per-query effort 现值
+   *   （ThinkingLevels 契约 current 可缺省）。
+   * - supportedModels() 失败 → 原样上抛（session-manager 轻守卫②注释口径：
+   *   handle 失效时驱动错误原样上抛，不伪造成功）。
+   *
+   * ⚠ spike-02 校正点：applyFlagSettings / supportedModels 直调实证归 task-07。
+   */
+  async getThinkingLevels(
+    handle: InteractiveDriverHandle,
+    model?: string,
+  ): Promise<ThinkingLevels> {
+    const h = handle as ClaudeDriverHandle;
+    const models = await h.query.supportedModels();
+    // Grill P1-5：匹配键 m.value（ModelInfo 唯一模型标识；无 id 字段）。
+    const hit =
+      model !== undefined
+        ? models.find((m) => m.value === model)
+        : undefined;
+    // R-03 兜底：model 未传（undefined find 不命中）或 supportedModels 未含该
+    // 模型行 / 该行无 supportedEffortLevels 字段 → 默认五档。
+    const levels =
+      hit?.supportedEffortLevels ?? [...DEFAULT_CLAUDE_EFFORT_LEVELS];
+    return { levels };
+  }
+
+  /**
+   * setThinkingLevel（task-04 2026-09-14-session-thinking-level / FR-05）：
+   * 实现可选契约——平台档位经 mapPlatformLevelToEngine('claude', ...) 映射：
+   *   - 映射 undefined（**off 档**=不携带 effort 字段=引擎默认思考通常开，
+   *     P2-11；词表外串同形，session-manager 守卫⓪已拦）→ **无操作**直返
+   *     {ok:true}（语义=不设，SDK 无「清除已设 effort」的 per-query 回退需求
+   *     ——会话级现值本就不由本平台持久化）；
+   *   - 其余五档 → `query.applyFlagSettings({effortLevel})`（sdk.d.ts:2505-2507，
+   *     session-scoped flag 层，'max' 仅会话态不落 settings 文件）→ {ok:true}；
+   *   - SDK 异常 → 捕获降级 {ok:false, error} 不上抛（照 pi/codex driver 先例，
+   *     RPC handler 拿到 error 结果而非异常）。
+   *
+   * ⚠ spike-02 校正点：applyFlagSettings({effortLevel}) 直调实证归 task-07。
+   */
+  async setThinkingLevel(
+    handle: InteractiveDriverHandle,
+    level: string,
+  ): Promise<ThinkingLevelResult> {
+    const h = handle as ClaudeDriverHandle;
+    const engineLevel = mapPlatformLevelToEngine('claude', level);
+    if (engineLevel === undefined) {
+      // off（/词表外防御）→ 无操作成功：不携带 effort 字段即引擎默认，无 SDK 调用。
+      return { ok: true };
+    }
+    try {
+      await h.query.applyFlagSettings({
+        effortLevel: engineLevel as EffortLevel,
+      });
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 

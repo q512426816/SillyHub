@@ -239,6 +239,36 @@ export interface CompactResult {
 }
 
 /**
+ * task-03（2026-09-14-session-thinking-level / FR-02 契约层）：会话思考强度档位
+ * 查询回执。driver.getThinkingLevels 的返回形态，daemon 侧原样透传为
+ * `session_get_thinking_levels` RPC result（design §接口定义原文）。
+ *
+ * - `levels`：当前引擎可用档位串列表（claude=supportedModels 按当前模型过滤后的
+ *   effort 五档 / pi=rpc get_available_thinking_levels 七档 / codex=静态五档，
+ *   task-04 各 driver 定形态）。
+ * - `current`：当前生效档位（pi get_state 可给；claude SDK 不暴露 per-query 现值
+ *   → undefined）。缺省合法。
+ */
+export interface ThinkingLevels {
+  levels: string[];
+  current?: string;
+}
+
+/**
+ * task-03（2026-09-14-session-thinking-level / FR-02 契约层）：会话思考档位切换
+ * 回执。driver.setThinkingLevel 的返回形态，daemon 侧原样透传为
+ * `session_set_thinking_level` RPC result（design §接口定义原文）。
+ *
+ * - `ok`：切换是否成功。
+ * - `error`：ok=false 时的驱动侧失败原因（引擎拒绝/超时/引擎无该档）。
+ *   driver 侧业务失败不靠 throw 表达（照 CompactResult 先例）。
+ */
+export interface ThinkingLevelResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
  * driver 启动选项（design §5.1）。provider-neutral 公共字段；provider 专属字段
  *（如 pathToClaudeCodeExecutable / canUseTool）通过 provider 专属 StartOptions
  * 由各 driver 自行定义并 extends 本接口的扩展类型（task-03/04）。
@@ -252,6 +282,15 @@ export interface InteractiveDriverStartOptions {
   resume?: string;
   /** 模型覆盖（可空）。 */
   model?: string;
+  /**
+   * task-03（2026-09-14-session-thinking-level / FR-03 创建链）：创建时选定的
+   * 平台统一思考档位（七档词表单源见 thinking-levels.ts THINKING_LEVELS）。
+   * driver 启动时经 mapPlatformLevelToEngine 映射为引擎档位设置（claude
+   * options.effort / codex reasoningEffort / pi 握手后 set_thinking_level 命令，
+   * task-04 落地；off→undefined 语义差异见矩阵注释）。driver 侧 `!== undefined`
+   * 判定；undefined → 不携带档位字段，引擎默认（零回归）。
+   */
+  thinkingLevel?: string;
   /** 是否启用远程人工审批（D-006@v1 策略入口；driver 读取并据此决定审批行为）。 */
   manualApproval?: boolean;
   /** AskUserQuestion-only 策略（D-006@v1；true 时只阻塞用户提问类请求）。 */
@@ -385,4 +424,34 @@ export interface InteractiveDriver {
    * `{ ok:false, error }`，不靠 throw 表达业务失败。
    */
   compact?(handle: InteractiveDriverHandle): Promise<CompactResult>;
+
+  /**
+   * task-03（2026-09-14-session-thinking-level / FR-04）：查询会话当前可用思考
+   * 档位列表（含现值 current，可缺省）。
+   *
+   * **可选方法**（可选先例：上方 compact?()）：未实现 = 该 provider 暂不支持
+   * 思考档位（cursor CLI 无通道）。`model` 参数供 claude supportedModels 按当前
+   * 模型过滤（Grill P1-5；session-manager 分派时传 state.model，缺省 undefined
+   * 由 driver 回退默认档表，R-03）。running 期间可查（session-manager 轻守卫，
+   * 不打断在跑轮，R-04 切换后查询刷新依赖）。
+   */
+  getThinkingLevels?(
+    handle: InteractiveDriverHandle,
+    model?: string,
+  ): Promise<ThinkingLevels>;
+
+  /**
+   * task-03（2026-09-14-session-thinking-level / FR-05）：切换会话思考档位。
+   *
+   * **可选方法**（同上先例）。入参为**平台统一档位串**（七档词表单源），driver
+   * 内部经 mapPlatformLevelToEngine 映射为引擎档位（off→不携带等降级语义见
+   * thinking-levels.ts 矩阵注释，task-04 落地）。仅空闲会话可调（running/
+   * reconnecting 守卫在 session-manager/thinking-level.ts，D-002 仅空闲切换）；
+   * driver 侧失败返回 `{ok:false, error}`，不靠 throw 表达业务失败（照 compact
+   * 先例）。
+   */
+  setThinkingLevel?(
+    handle: InteractiveDriverHandle,
+    level: string,
+  ): Promise<ThinkingLevelResult>;
 }

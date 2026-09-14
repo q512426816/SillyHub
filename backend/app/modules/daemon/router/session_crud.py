@@ -46,10 +46,19 @@ from app.modules.daemon.schema import (
     SessionCtxWindowUpdateRequest,
     SessionInjectRequest,
     SessionReopenResponse,
+    SessionThinkingLevelRequest,
+    SessionThinkingLevelResponse,
+    SessionThinkingLevelsResponse,
     SessionTitleUpdateRequest,
 )
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
+from app.modules.daemon.session.service.thinking_level import (
+    get_session_thinking_levels as _get_thinking_levels_svc,
+)
+from app.modules.daemon.session.service.thinking_level import (
+    set_session_thinking_level as _set_thinking_level_svc,
+)
 from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
 
 log = get_logger("app.modules.daemon.router")
@@ -501,7 +510,19 @@ async def create_session(
     # task-02（2026-08-28-session-ppm-task-binding / FR-01）：PPM 条目成对绑定
     # 字段透传（DTO 成对校验 422 已在 schema 层；item 校验/工作区解析/落 link
     # 归 service；漏透传会 500，三层同步加参）。
-    result = await svc.create_session(
+    #
+    # task-05（2026-09-14-session-thinking-level / FR-03）：thinking_level 直传
+    # SessionService 的 create 实现函数（free function）——facade（daemon/
+    # service.py）与 SessionService 方法壳（session/service/__init__.py）均不在
+    # 本任务 allowed_paths，签名暂未同步该参数；经 facade 已持有的 _sess 子服务
+    # 穿透调用（照上方 list_sessions 的 session_kind 先例 + compact 端点直调
+    # 自由函数先例）。facade/方法壳是纯参数转发器，行为逐字节等价。
+    from app.modules.daemon.session.service.create import (
+        create_session as _create_session_svc,
+    )
+
+    result = await _create_session_svc(
+        svc._sess,
         user.id,
         provider=data.provider,
         prompt=data.prompt,
@@ -526,6 +547,10 @@ async def create_session(
         stage="orchestrator" if data.team_mission is not None else None,
         page_context=data.page_context,
         attachment_ids=data.attachment_ids,
+        # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别
+        # 透传（None/空串=引擎默认；不写 config 列，P1-8/NG-04——仅透传
+        # placement 写 lease metadata）。
+        thinking_level=data.thinking_level,
     )
     s = result.agent_session
     return SessionCreateResponse(
@@ -608,6 +633,49 @@ async def compact_session(
     """
     svc = DaemonService(session)
     return await _compact_session_svc(svc, session_id, user.id)
+
+
+@router.get(
+    "/sessions/{session_id}/thinking-levels",
+    response_model=SessionThinkingLevelsResponse,
+)
+async def get_session_thinking_levels(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionThinkingLevelsResponse:
+    """List the engine's available thinking levels for a session (FR-04).
+
+    2026-09-14-session-thinking-level task-05：三校验（归属/活跃 + caps
+    thinking_level 键）归 thinking_level 服务；ws RPC ``session_get_thinking_
+    levels``（task-03 daemon 契约按名对接）回执映射 ``{levels, current}``——
+    levels 按当前模型动态，current 为引擎侧现值（可空）。RPC 失败走 AppError
+    上抛（离线/超时 504、RemoteError 502 升级提示），不 200 假数据。
+    """
+    svc = DaemonService(session)
+    return await _get_thinking_levels_svc(svc, session_id, user.id)
+
+
+@router.post(
+    "/sessions/{session_id}/thinking-level",
+    response_model=SessionThinkingLevelResponse,
+)
+async def set_session_thinking_level(
+    session_id: uuid.UUID,
+    data: SessionThinkingLevelRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionThinkingLevelResponse:
+    """Switch the session's thinking level (FR-05).
+
+    2026-09-14-session-thinking-level task-05：三校验 + 七档词表校验（400）+
+    忙轮守卫（D-002「仅空闲」）归 thinking_level 服务；ws RPC
+    ``session_set_thinking_level`` 回执映射 ``{ok, error}``——RPC 失败/旧
+    daemon method_not_found 映射结构化 error（HTTP 200），调用方可修复的
+    失败不抛 5xx。
+    """
+    svc = DaemonService(session)
+    return await _set_thinking_level_svc(svc, session_id, user.id, level=data.level)
 
 
 @router.post(

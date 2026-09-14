@@ -15402,6 +15402,104 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/thinking-levels": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Session Thinking Levels",
+        "description": "List the engine's available thinking levels for a session (FR-04).\n\n2026-09-14-session-thinking-level task-05：三校验（归属/活跃 + caps\nthinking_level 键）归 thinking_level 服务；ws RPC ``session_get_thinking_\nlevels``（task-03 daemon 契约按名对接）回执映射 ``{levels, current}``——\nlevels 按当前模型动态，current 为引擎侧现值（可空）。RPC 失败走 AppError\n上抛（离线/超时 504、RemoteError 502 升级提示），不 200 假数据。",
+        "operationId": "get_session_thinking_levels_api_daemon_sessions__session_id__thinking_levels_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionThinkingLevelsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/thinking-level": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Set Session Thinking Level",
+        "description": "Switch the session's thinking level (FR-05).\n\n2026-09-14-session-thinking-level task-05：三校验 + 七档词表校验（400）+\n忙轮守卫（D-002「仅空闲」）归 thinking_level 服务；ws RPC\n``session_set_thinking_level`` 回执映射 ``{ok, error}``——RPC 失败/旧\ndaemon method_not_found 映射结构化 error（HTTP 200），调用方可修复的\n失败不抛 5xx。",
+        "operationId": "set_session_thinking_level_api_daemon_sessions__session_id__thinking_level_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionThinkingLevelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionThinkingLevelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/queue": {
       "get": {
         "tags": [
@@ -62246,6 +62344,18 @@
             ],
             "title": "Model"
           },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level"
+          },
           "manual_approval": {
             "type": "boolean",
             "title": "Manual Approval",
@@ -63256,6 +63366,73 @@
         ],
         "title": "SessionSuspendBatchRequest",
         "description": "Body for POST /sessions/suspend-batch（task-05）.\n\ndaemon ``stop()`` 在 markOffline 前上报自身标识；backend 按\n``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime\n名下的 active 会话做三步挂起收敛（daemon 侧调用方属 task-08）。"
+      },
+      "SessionThinkingLevelRequest": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "title": "Level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level"
+        ],
+        "title": "SessionThinkingLevelRequest",
+        "description": "POST /api/daemon/sessions/{id}/thinking-level 请求体（FR-05 / design §接口定义）。\n\n``level`` 取七档词表（backend VALID_THINKING_LEVELS 镜像常量）；非法档\n400（服务层校验，错误文案带合法档位清单）。"
+      },
+      "SessionThinkingLevelResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "SessionThinkingLevelResponse",
+        "description": "POST /api/daemon/sessions/{id}/thinking-level 响应体（FR-05 / design §接口定义）。\n\ndaemon RPC ``session_set_thinking_level`` 回执映射：``ok=False`` 时\n``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持\n思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200\n（照 compact 口径：调用方可修复的失败不抛 5xx）。"
+      },
+      "SessionThinkingLevelsResponse": {
+        "properties": {
+          "levels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Levels"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          }
+        },
+        "type": "object",
+        "required": [
+          "levels"
+        ],
+        "title": "SessionThinkingLevelsResponse",
+        "description": "GET /api/daemon/sessions/{id}/thinking-levels 响应体（FR-04 / design §接口定义）。\n\n2026-09-14-session-thinking-level task-05：daemon RPC\n``session_get_thinking_levels`` 回执映射——``levels`` 按当前模型动态\n（pi get_available_thinking_levels；claude supportedModels 过滤；codex\n静态档），``current`` 为引擎侧现值（SDK 不暴露现值的引擎回 None，\n可空）。无 ``error`` 字段：RPC 失败（离线/超时/旧 daemon RemoteError）\n走 AppError 上抛（服务层 thinking_level.py 三异常映射），不 200 假数据。"
       },
       "SessionTitleUpdateRequest": {
         "properties": {

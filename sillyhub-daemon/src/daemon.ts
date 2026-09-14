@@ -191,6 +191,9 @@ import {
   hasUnsyncedLocalChanges,
 } from './spec-sync.js';
 import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
+// task-03（2026-09-14-session-thinking-level / FR-02）：平台七档词表校验单源
+//（session_set_thinking_level handler 层入参校验，照 backend 校验同词表镜像）。
+import { isValidPlatformLevel } from './interactive/thinking-levels.js';
 // ql-20260831-001-6dde：恢复链/重开与本地在途 turn 竞态守卫（SessionBusyError
 // instanceof 分支用，value import）。
 import { SessionBusyError } from './interactive/types.js';
@@ -6426,6 +6429,13 @@ export class Daemon {
     // _dispatchRpc 映射 RpcError 回传，backend task-02 收 DaemonRpcRemoteError
     // 映射结构化 error（本 handler 不吞异常）。
     this._registerSessionCompactRpcHandler(ws);
+    // task-03（2026-09-14-session-thinking-level / FR-02 / D-002@v1 单点接线）：
+    // 注册 session_get_thinking_levels / session_set_thinking_level 两 RPC——
+    // backend 经 ws_rpc 查询/切换指定会话的思考强度档位。守卫与分派全在
+    // SessionManager 两 facade 方法（守卫为 RPC 到达后的最终防线）；错误如实
+    // throw → backend task-05 映射（旧 daemon 未注册 → ws method-not-found →
+    // backend「请升级 daemon」文案，兼容策略表）。
+    this._registerSessionThinkingLevelRpcHandler(ws);
 
     try {
       ws.connect();
@@ -6484,6 +6494,59 @@ export class Daemon {
         throw new Error('session manager not ready');
       }
       return this._sessionManager.compact(sessionId);
+    });
+  }
+
+  /**
+   * task-03（2026-09-14-session-thinking-level / FR-02 / D-002@v1 单点接线）：
+   * 注册 `session_get_thinking_levels` / `session_set_thinking_level` 两 RPC
+   * handler——backend 经 ws_rpc 查询/切换指定 interactive 会话的思考强度档位。
+   *
+   * 形态照 _registerSessionCompactRpcHandler 先例（平名注册，protocol.ts 无新
+   * 消息类型——RPC 帧格式复用，control-dispatcher 零改动）：
+   * - params.session_id 非字符串/缺省 → throw（不静默空串——空串必命中
+   *   SessionNotFoundError，错误信息会误导成「会话不存在」）；
+   * - set 的 params.level 非字符串/词表外 → throw（平台七档词表单源
+   *   isValidPlatformLevel，大小写敏感精确匹配；session-manager 子模块守卫⓪
+   *   为 RPC 到达后的最终防线双保险）；
+   * - `_sessionManager` 为 null（:1572 类型可空）→ throw 'session manager not
+   *   ready'（backend 收 DaemonRpcRemoteError 而非被静默成功误导）；
+   * - 其余全委托 SessionManager 两方法（守卫 + driver 分派），ThinkingLevels /
+   *   ThinkingLevelResult 对象即 RPC result；守卫/驱动错误如实上抛不吞
+   *   （RemoteError→「请升级 daemon」等文案映射责任在 backend task-05）。
+   */
+  private _registerSessionThinkingLevelRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('session_get_thinking_levels', async (params) => {
+      const sessionId =
+        typeof params.session_id === 'string' ? params.session_id : '';
+      if (!sessionId) {
+        throw new Error('session_id required for session_get_thinking_levels');
+      }
+      if (!this._sessionManager) {
+        throw new Error('session manager not ready');
+      }
+      return this._sessionManager.getThinkingLevels(sessionId);
+    });
+    ws.registerRpcHandler('session_set_thinking_level', async (params) => {
+      const sessionId =
+        typeof params.session_id === 'string' ? params.session_id : '';
+      if (!sessionId) {
+        throw new Error('session_id required for session_set_thinking_level');
+      }
+      const level = typeof params.level === 'string' ? params.level : '';
+      if (!level || !isValidPlatformLevel(level)) {
+        throw new Error(
+          `invalid thinking level for session_set_thinking_level: ${String(params.level)}`,
+        );
+      }
+      if (!this._sessionManager) {
+        throw new Error('session manager not ready');
+      }
+      return this._sessionManager.setThinkingLevel(sessionId, level);
     });
   }
 
@@ -8163,8 +8226,14 @@ export class Daemon {
     // task-04：交叉类型承载 worker_depth（execPayload 归一化产物；LeaseCtx 未
     // 声明该字段，见 _runLeaseStateMachine 注释）。task-06（2026-09-10-mcp-
     // central-registry / D-008@v2）：同款追加 userId（lease 归属用户，MCP 预取
-    // 消费——见 _runLeaseStateMachine 归一化注释）。
-    execPayload: LeasePayload & { worker_depth?: number; userId?: string },
+    // 消费——见 _runLeaseStateMachine 归一化注释）。task-03（2026-09-14-
+    // session-thinking-level / FR-03）：同款追加 thinkingLevel（创建时思考档位，
+    // 下方 create 透传 CreateSessionInput.thinkingLevel）。
+    execPayload: LeasePayload & {
+      worker_depth?: number;
+      userId?: string;
+      thinkingLevel?: string;
+    },
   ): Promise<void> {
     // AC-09：重复 task_available（WS 重连/重放）→ 跳过，driver 只启动一次。
     if (this._interactiveSessionsByLease.has(leaseId)) {
@@ -8805,6 +8874,12 @@ export class Daemon {
         provider,
         pathToClaudeCodeExecutable,
         model: execPayload.model,
+        // task-03（2026-09-14-session-thinking-level / FR-03 创建链 daemon 段）：
+        // 创建时思考档位透传 SessionManager.create（CreateSessionInput
+        // .thinkingLevel，model 同款邻位）→ driverOpts.thinkingLevel → 三 driver
+        // 启动设置（task-04 本体）。undefined（旧 backend 无该键）→ 不携带
+        //（引擎默认，零回归）。
+        thinkingLevel: execPayload.thinkingLevel,
         // scan 真阻塞：透传给 SessionManager.create 决定是否注入 canUseTool + 分流策略。
         manualApproval: execPayload.manualApproval,
         askUserOnly: execPayload.askUserOnly,
@@ -9118,8 +9193,14 @@ export class Daemon {
     // task-04：交叉类型承载 worker_depth（LeaseCtx 未声明本字段——src/types.ts 不在
     // 本卡 allowed_paths；读取 + 透传见下方归一化注释）。task-06（2026-09-10-
     // mcp-central-registry / D-008@v2）同款交叉类型追加 userId（lease 归属用户 id
-    // 透传，MCP 预取消费）。
-    const execPayload: LeasePayload & { worker_depth?: number; userId?: string } = {
+    // 透传，MCP 预取消费）。task-03（2026-09-14-session-thinking-level / FR-03）同款
+    // 追加 thinkingLevel（创建时思考档位，_startInteractiveSession → CreateSessionInput
+    // 透传消费；worker_depth 先例——LeaseCtx 声明归后续卡）。
+    const execPayload: LeasePayload & {
+      worker_depth?: number;
+      userId?: string;
+      thinkingLevel?: string;
+    } = {
       ...payload,
       leaseId: (rawExec.leaseId as string | undefined) ?? (rawExec.lease_id as string | undefined) ?? payload.leaseId,
       runtimeId: (rawExec.runtimeId as string | undefined) ?? (rawExec.runtime_id as string | undefined) ?? runtimeId,
@@ -9173,6 +9254,16 @@ export class Daemon {
       cmd: (rawExec.cmd as string | undefined) ?? payload.cmd,
       prompt: (rawExec.prompt as string | undefined) ?? payload.prompt,
       model: (rawExec.model as string | undefined) ?? payload.model,
+      // task-03（2026-09-14-session-thinking-level / FR-03 / Grill P0-1 补）：创建时
+      // 思考档位三源归一化（上方 model 同款：rawExec camelCase/snake_case + 初始
+      // payload 防御兜底）。来源链：前端 preThinkingLevel → lease metadata
+      // .thinking_level → claim payload（backend context.py 白名单）。undefined
+      //（旧 backend 无该键）→ 键不携带，引擎默认（零回归）；不写 config 列不落库
+      //（P1-8 定案）。
+      thinkingLevel:
+        (rawExec.thinkingLevel as string | undefined) ??
+        (rawExec.thinking_level as string | undefined) ??
+        (payload as { thinkingLevel?: string }).thinkingLevel,
       timeout: (rawExec.timeout as number | undefined) ?? payload.timeout,
       timeoutSeconds:
         (rawExec.timeoutSeconds as number | undefined) ??

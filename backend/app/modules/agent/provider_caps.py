@@ -11,7 +11,7 @@ task-04 起手抄镜像退役）：
   ``PROVIDER_CAPS``（含取值依据的文件:行号锚点注释，改值先改那里）；
 - 本文件与 ``frontend/src/lib/provider-caps.ts`` 均为脚本生成产物，daemon
   单源改值后重跑 ``sillyhub-daemon/scripts/gen-provider-caps.mjs`` 三端一并
-  刷新，三端键集合（12 键：11 个 boolean + dialog string 枚举）与每个
+  刷新，三端键集合（13 键：12 个 boolean + dialog string 枚举）与每个
   provider 每键取值必须一致；
 - 一致性由 ``app/modules/agent/tests/test_provider_caps_alignment.py`` 以
   源文件读取方式守护（直接读 daemon / frontend 表源比对，不复制值断言），
@@ -38,12 +38,13 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
         "provider_switch": True,
         "ctx_usage": True,
         "compact": True,
+        "thinking_level": True,
     },
     "codex": {
         "resume": True,
         "mcp": False,
         "multimodal": False,
-        "thinking": False,
+        "thinking": True,
         "subagent": False,
         "permission_dialog": True,
         "dialog": "native",
@@ -52,6 +53,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
         "provider_switch": True,
         "ctx_usage": True,
         "compact": True,
+        "thinking_level": True,
     },
     "pi": {
         "resume": True,
@@ -66,6 +68,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
         "provider_switch": True,
         "ctx_usage": True,
         "compact": True,
+        "thinking_level": True,
     },
     "cursor": {
         "resume": True,
@@ -80,10 +83,11 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
         "provider_switch": False,
         "ctx_usage": True,
         "compact": False,
+        "thinking_level": False,
     },
 }
 
-# 键序取自镜像表首条目（claude）；12 键齐全与三端一致性由守护测试保证。
+# 键序取自镜像表首条目（claude）；13 键齐全与三端一致性由守护测试保证。
 _CAPS_KEYS: tuple[str, ...] = tuple(next(iter(PROVIDER_CAPS.values())))
 
 
@@ -96,7 +100,7 @@ def get_provider_caps(provider: str) -> dict[str, bool | str]:
     Returns:
         dict[str, bool | str]: 已知 provider 返回表内条目的**副本**（调用方可安全
         修改，不污染模块级共享表）；未知 provider 返回默认拒绝新 dict（boolean
-        键全 False、dialog string 枚举取 ``"none"``，12 键齐全，FR-06），不抛错。
+        键全 False、dialog string 枚举取 ``"none"``，13 键齐全，FR-06），不抛错。
     """
     caps = PROVIDER_CAPS.get(provider)
     if caps is not None:

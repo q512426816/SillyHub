@@ -20,6 +20,11 @@
  *     补供应商下拉 agent_kind 按引擎过滤用例（engine null 全量，「不指定（本机
  *     默认）」全引擎保留）；fixture 补 agent_kind（LlmProviderRead 恒有值，
  *     缺省会被 claude 会话的 kind 过滤滤掉——task-05 实测 :276/:334 红的根因）。
+ *   2026-09-14-session-thinking-level task-06（FR-06 / Grill P0-2 / P2-11 / R-04）：
+ *     思考档位下拉两态——预会话静态七档镜像（off 显示「默认」+语义差异 tooltip/
+ *     选档 onProvisionalThinkingLevelSwitch 上抛/模型变级联重置发 ""）与会话态
+ *     thinkingLevel prop 动态档位控件（GET 列表+current 现值/running 禁用/切换
+ *     POST+成功通知+invalidate 重拉/失败 notify error 带 error 原文）。
  *
  * mock 策略（对齐 new-session-form.test.tsx）：直接 mock 组件消费的 hook/函数模块
  * （useMineAgentProfiles / listProviders / injectSession），
@@ -45,6 +50,10 @@ const mocks = vi.hoisted(() => ({
   profilesHook: vi.fn(),
   listProviders: vi.fn(),
   injectSession: vi.fn(),
+  // 2026-09-14-session-thinking-level task-06：会话态档位两 API（GET 动态列表 /
+  // POST 切换）——照 injectSession 局部 mock 形态。
+  getSessionThinkingLevels: vi.fn(),
+  setSessionThinkingLevel: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
   // task-10：useActiveSharedAgents 直取 /api/daemon/shared-agents/active（apiFetch）。
@@ -71,11 +80,17 @@ vi.mock("@/lib/api/llm-providers", () => ({
 }));
 
 // 组件运行时只消费 injectSession（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
+// task-06（thinking-level）：组件新增消费 getSessionThinkingLevels /
+// setSessionThinkingLevel，同文件局部 mock（类型导入编译期擦除不受影响）。
 vi.mock("@/lib/daemon", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/daemon")>();
   return {
     ...actual,
     injectSession: (...args: unknown[]) => mocks.injectSession(...args),
+    getSessionThinkingLevels: (...args: unknown[]) =>
+      mocks.getSessionThinkingLevels(...args),
+    setSessionThinkingLevel: (...args: unknown[]) =>
+      mocks.setSessionThinkingLevel(...args),
   };
 });
 
@@ -165,6 +180,13 @@ beforeEach(() => {
     { id: "prov-glm", name: "GLM 平台", model: "glm-4.7", agent_kind: "claude" },
   ]);
   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
+  // task-06（thinking-level）：GET 默认五档+现值 medium（会话态用例按需覆盖）；
+  // POST 默认受理 ok（未挂 thinkingLevel prop 的既有用例查询 disabled 不会触达）。
+  mocks.getSessionThinkingLevels.mockReset().mockResolvedValue({
+    levels: ["off", "low", "medium", "high", "max"],
+    current: "medium",
+  });
+  mocks.setSessionThinkingLevel.mockReset().mockResolvedValue({ ok: true });
   // task-10：active 共享智能体默认空列表（用例内按需覆盖）。
   mocks.apiFetch.mockReset().mockResolvedValue([]);
   mocks.messageSuccess.mockReset();
@@ -945,5 +967,229 @@ describe("SessionConfigBar 中断自动续跑开关（autoResume 可选控件）
     expect(disabledSw.classList.contains("ant-switch-disabled")).toBe(true);
     fireEvent.click(disabledSw);
     expect(onToggle2).not.toHaveBeenCalled();
+  });
+});
+
+// ── 7. 2026-09-14-session-thinking-level task-06：思考档位下拉（FR-06 /
+//        Grill P0-2 静态七档镜像 / P2-11 off 语义差异 tooltip） ────────────────
+
+describe("SessionConfigBar 思考档位下拉（task-06 / FR-06）", () => {
+  it("caps.thinking_level=false（cursor/未知引擎）→ 预会话与会话态均不渲染档位下拉", () => {
+    // 预会话态：静态镜像下拉不渲染（caps 门控在组件内，未知引擎默认拒绝）。
+    for (const engine of ["cursor", "future-engine"] as const) {
+      cleanup();
+      renderBar({
+        provisional: true,
+        engine,
+        configSnapshot: null,
+      });
+      expect(
+        screen.queryByTestId("config-thinking-select"),
+      ).not.toBeInTheDocument();
+    }
+    // 会话态：thinkingLevel prop 挂载（甚至显式传入）同样被 caps 门控拦下。
+    cleanup();
+    renderBar({
+      engine: "cursor",
+      configSnapshot: {
+        machine_name: "machine-1",
+        agent_name: "Cursor",
+        engine: "cursor",
+      },
+      thinkingLevel: {},
+    });
+    expect(
+      screen.queryByTestId("config-thinking-select"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("预会话：静态七档镜像渲染（off→max 逐项一致），off 显示「默认」带跨引擎语义差异 tooltip（P2-11）", () => {
+    renderBar({ provisional: true, configSnapshot: null });
+    const select = screen.getByTestId(
+      "config-thinking-select",
+    ) as HTMLSelectElement;
+    // 七档镜像：与 daemon THINKING_LEVELS 单源逐项一致（含顺序，约束注释互指）。
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    // off 显示「默认」；tooltip 说明跨引擎语义差异（claude/codex=引擎默认思考
+    // 通常开 ≠ pi=真关思考）。
+    const offOption = select.options.item(0);
+    expect(offOption?.textContent).toBe("默认");
+    expect(offOption?.title).toContain("claude/codex=不设置档位");
+    expect(offOption?.title).toContain("pi=真正关闭思考");
+    // 未选择态显示归位「默认」（""=清空不随首句上送，与显式选 off 显示同形）。
+    expect(select.value).toBe("off");
+    // 其余档位中文标签可读（未知值兜底显原值不编造）。
+    expect(select.options.item(6)?.textContent).toBe("最高");
+  });
+
+  it("预会话选档 → onProvisionalThinkingLevelSwitch 上抛档位值（不 inject，显式选「默认」=off 也上抛）", () => {
+    const onLevel = vi.fn();
+    renderBar({
+      provisional: true,
+      configSnapshot: null,
+      onProvisionalThinkingLevelSwitch: onLevel,
+    });
+    const select = screen.getByTestId(
+      "config-thinking-select",
+    ) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "high" } });
+    expect(onLevel).toHaveBeenCalledWith("high");
+    expect(select.value).toBe("high");
+    // 暂存不走 inject（无会话——preModelId 同款专用回调收值）。
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    // 显式选「默认」= off 也上抛（首句携带 off，daemon 按引擎映射）。
+    fireEvent.change(select, { target: { value: "off" } });
+    expect(onLevel).toHaveBeenLastCalledWith("off");
+  });
+
+  it("模型变更 → 档位级联重置（照「切供应商重置模型」模式）：清空选择发 \"\"，显示归位「默认」", async () => {
+    const onLevel = vi.fn();
+    const onModel = vi.fn();
+    renderBar({
+      provisional: true,
+      configSnapshot: null,
+      llmProviderId: "prov-kimi",
+      onProvisionalModelSwitch: onModel,
+      onProvisionalThinkingLevelSwitch: onLevel,
+    });
+    const level = screen.getByTestId(
+      "config-thinking-select",
+    ) as HTMLSelectElement;
+    fireEvent.change(level, { target: { value: "max" } });
+    expect(onLevel).toHaveBeenLastCalledWith("max");
+    // 模型子下拉（供应商已选 prov-kimi → 候选 kimi-k2）变更触发级联重置。
+    const model = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    fireEvent.change(model, { target: { value: "kimi-k2" } });
+    expect(onModel).toHaveBeenCalledWith("kimi-k2");
+    // 档位仅清自身选择（不动模型/provider 既有级联链）：回调收 ""，显示归位「默认」。
+    expect(onLevel).toHaveBeenLastCalledWith("");
+    expect(level.value).toBe("off");
+    expect(level.options.item(0)?.textContent).toBe("默认");
+  });
+});
+
+// ── 8. 2026-09-14-session-thinking-level task-06：会话态档位切换控件
+//        （thinkingLevel prop / FR-06 / R-04 查询刷新） ────────────────────────
+
+describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04）", () => {
+  it("不传 thinkingLevel prop（存量/预会话渲染点）→ 会话态控件不渲染（引擎有能力也不渲染）", () => {
+    renderBar();
+    expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
+    // 预会话态走静态七档镜像（上一 describe），与本控件互斥。
+    cleanup();
+    renderBar({ provisional: true, configSnapshot: null });
+    expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
+  });
+
+  it("GET 动态档位渲染 + current 现值选中显示", async () => {
+    renderBar({ thinkingLevel: {} });
+    expect(mocks.getSessionThinkingLevels).toHaveBeenCalledWith("sess-1");
+    const select = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(Array.from(select.options).map((o) => o.value)).toEqual([
+        "off",
+        "low",
+        "medium",
+        "high",
+        "max",
+      ]);
+    });
+    // current=medium → 现值直显为选中项。
+    expect(select.value).toBe("medium");
+    expect(select.options.item(2)?.textContent).toBe("中");
+  });
+
+  it("current=null（claude SDK 不暴露现值）→「现值未知」占位项如实显示，不编造", async () => {
+    mocks.getSessionThinkingLevels.mockResolvedValue({
+      levels: ["off", "low", "high"],
+      current: null,
+    });
+    renderBar({ thinkingLevel: {} });
+    const select = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLSelectElement;
+    await waitFor(() =>
+      expect(screen.getByText("现值未知（引擎未上报）")).toBeInTheDocument(),
+    );
+    expect(select.value).toBe("");
+  });
+
+  it("turn running（thinkingLevel.disabled）→ 下拉禁用（档位切换仅空闲，D-002）", () => {
+    renderBar({ thinkingLevel: { disabled: true } });
+    expect(
+      (screen.getByTestId("config-thinking-select") as HTMLSelectElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("点选即切换：setSessionThinkingLevel 调用 + 成功通知「已切换思考级别：X」+ invalidate 重拉档位（R-04）", async () => {
+    renderBar({ thinkingLevel: {} });
+    const select = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("medium"));
+    fireEvent.change(select, { target: { value: "high" } });
+    await waitFor(() =>
+      expect(mocks.setSessionThinkingLevel).toHaveBeenCalledWith("sess-1", "high"),
+    );
+    await waitFor(() =>
+      expect(mocks.messageSuccess).toHaveBeenCalledWith("已切换思考级别：高"),
+    );
+    // R-04：pi thinking_level_change 事件不透传——成功后 invalidate 档位查询重拉
+    //（首拉 1 次 + 刷新 1 次）。
+    await waitFor(() =>
+      expect(mocks.getSessionThinkingLevels).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {
+    mocks.setSessionThinkingLevel.mockResolvedValue({
+      ok: false,
+      error: "daemon 未支持思考级别，请升级 daemon",
+    });
+    renderBar({ thinkingLevel: {} });
+    const select = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("medium"));
+    fireEvent.change(select, { target: { value: "low" } });
+    // notify.error(err, fallback) → message.error(errMessage(err)) → error 原文直出。
+    await waitFor(() =>
+      expect(mocks.messageError).toHaveBeenCalledWith(
+        "daemon 未支持思考级别，请升级 daemon",
+      ),
+    );
+    expect(mocks.messageSuccess).not.toHaveBeenCalled();
+    // 失败不 invalidate（现值未变，无需刷新）。
+    expect(mocks.getSessionThinkingLevels).toHaveBeenCalledTimes(1);
+  });
+
+  it("ApiError 抛出（4xx/5xx）→ notify error 带异常文案", async () => {
+    mocks.setSessionThinkingLevel.mockRejectedValue(
+      new Error("会话运行中，本轮结束后可切换"),
+    );
+    renderBar({ thinkingLevel: {} });
+    const select = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("medium"));
+    fireEvent.change(select, { target: { value: "low" } });
+    await waitFor(() =>
+      expect(mocks.messageError).toHaveBeenCalledWith(
+        "会话运行中，本轮结束后可切换",
+      ),
+    );
   });
 });

@@ -2984,3 +2984,268 @@ describe('PiRpcDriver.compact（2026-09-14-session-ctx-compact task-04）', () =
     await consumeP;
   });
 });
+
+// ── 2026-09-14-session-thinking-level task-04：思考档位两方法 + 启动时序 ───────
+
+describe('PiRpcDriver 思考档位（2026-09-14-session-thinking-level task-04）', () => {
+  it('setThinkingLevel 命令形态：{ type:"set_thinking_level", level, id:"pi_N" }（七档直传含 off）→ 成功回执 {ok:true}', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child); // get_state 拿走 pi_1
+    await tick();
+
+    // high 直传（矩阵 pi 行全直传）
+    const p1 = driver.setThinkingLevel(handle, 'high');
+    await tick();
+    const cmd = readStdinJson(child).find((l) => l.type === 'set_thinking_level')!;
+    expect(cmd).toBeDefined();
+    expect(cmd.id).toBe('pi_2'); // _sendCommand 自增 id（get_state 后顺延）
+    expect(cmd.level).toBe('high'); // 平台档位==引擎档位（直传不自写映射）
+    respond(child, 'set_thinking_level');
+    await expect(p1).resolves.toEqual({ ok: true });
+
+    // off 直传（pi off=真关思考，非「不携带」——与 claude/codex 语义差异）
+    const p2 = driver.setThinkingLevel(handle, 'off');
+    await tick();
+    const cmds = readStdinJson(child).filter((l) => l.type === 'set_thinking_level');
+    expect(cmds[1]!.level).toBe('off');
+    expect(cmds[1]!.id).toBe('pi_3'); // id 继续自增不碰撞
+    respond(child, 'set_thinking_level');
+    await expect(p2).resolves.toEqual({ ok: true });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('词表外 level（映射 undefined）→ {ok:false,error}，不写命令（守卫⓪双保险）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    const r = await driver.setThinkingLevel(handle, 'ultra');
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toContain('ultra');
+    expect(
+      readStdinJson(child).some((l) => l.type === 'set_thinking_level'),
+    ).toBe(false);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('失败回执（success:false）→ {ok:false,error 含命令名与引擎原文} 不上抛', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    const p = driver.setThinkingLevel(handle, 'high');
+    await tick();
+    respond(child, 'set_thinking_level', {
+      success: false,
+      error: 'level not available for model',
+    });
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toContain('set_thinking_level');
+    expect(String(r.error)).toContain('level not available for model');
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('响应超时（requestTimeoutMs 注入 60ms）→ {ok:false,error 含 timeout} 非 reject', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver({ requestTimeoutMs: 60 });
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    const r = await driver.setThinkingLevel(handle, 'high'); // 不喂回执 → 超时
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toMatch(/set_thinking_level.*timeout.*60ms/);
+    // 命令确已写出（超时是等不到 response，不是没发）
+    expect(
+      readStdinJson(child).some((l) => l.type === 'set_thinking_level'),
+    ).toBe(true);
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('getThinkingLevels 双命令组装：get_available_thinking_levels(data.levels) + get_state(data.thinkingLevel) → {levels,current}', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child); // pi_1
+    await tick();
+
+    const p = driver.getThinkingLevels(handle);
+    await tick();
+    // 命令①：get_available_thinking_levels（紧随握手 pi_2；命令体仅 type+id）
+    const cmd1 = readStdinJson(child).find(
+      (l) => l.type === 'get_available_thinking_levels',
+    )!;
+    expect(cmd1.id).toBe('pi_2');
+    expect(Object.keys(cmd1).sort()).toEqual(['id', 'type']);
+    // spike-01 校正点：levels 字段名以真机实证为准（rpc.md:316-335）
+    respond(child, 'get_available_thinking_levels', {
+      data: { levels: ['off', 'low', 'medium', 'high', 42, null] },
+    });
+    await tick();
+
+    // 命令②：get_state 取现值（pi_3）
+    const cmd2 = readStdinJson(child).filter((l) => l.type === 'get_state')[1]!;
+    expect(cmd2.id).toBe('pi_3');
+    respond(child, 'get_state', {
+      data: { sessionId: 'sess_pi_1', thinkingLevel: 'high' },
+    });
+
+    // 组装：levels 字符串过滤（防御非 string 元素）+ current 现值
+    await expect(p).resolves.toEqual({
+      levels: ['off', 'low', 'medium', 'high'],
+      current: 'high',
+    });
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('getThinkingLevels：get_state 回执无 thinkingLevel → current 缺省不挂键', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    const p = driver.getThinkingLevels(handle);
+    await tick();
+    respond(child, 'get_available_thinking_levels', {
+      data: { levels: ['off', 'low'] },
+    });
+    await tick();
+    respond(child, 'get_state', { data: { sessionId: 'sess_pi_1' } });
+
+    const r = await p;
+    expect(r).toEqual({ levels: ['off', 'low'] });
+    expect(r).not.toHaveProperty('current');
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('启动设置时序（Grill P1-9）：opts.thinkingLevel=high → 握手返回后、inputIt 轮询前发 set_thinking_level；失败不阻断首轮', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(
+      queue,
+      makeOpts({ thinkingLevel: 'high' }),
+    )) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+
+    // 失败不阻断：set_thinking_level 被 engine 拒（success:false）→ 仅 warn 继续
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      handshakeOk(child); // pi_1
+      await tick();
+      // 时序断言：set_thinking_level 在任何 prompt 之前写出（此刻用户尚未输入）
+      const cmds = readStdinJson(child);
+      const stlIdx = cmds.findIndex((l) => l.type === 'set_thinking_level');
+      expect(stlIdx).toBe(1); // 紧随握手 get_state（索引 0）
+      expect(cmds[stlIdx]!.level).toBe('high');
+      respond(child, 'set_thinking_level', {
+        success: false,
+        error: 'model has no thinking',
+      });
+      await tick();
+      expect(warnSpy).toHaveBeenCalled();
+
+      // 首轮照常：push → prompt（pi_2，id 顺延不受被拒命令影响）
+      push('你好 pi');
+      await tick();
+      const promptIdx = cmds
+        .concat(readStdinJson(child))
+        .findIndex((l) => l.type === 'prompt');
+      expect(promptIdx).toBeGreaterThan(stlIdx);
+      respond(child, 'prompt');
+      emitEvent(child, { type: 'agent_start' });
+      emitFinalTextEnd(child, '收尾正文');
+      emitEvent(child, { type: 'agent_settled' });
+      await tick();
+      expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    closeQueue();
+    await consumeP;
+  });
+
+  it('启动设置：opts.thinkingLevel 未传 → 不发 set_thinking_level（零回归）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+    push('hi');
+    await tick();
+
+    expect(
+      readStdinJson(child).some((l) => l.type === 'set_thinking_level'),
+    ).toBe(false);
+    expect(readStdinJson(child).some((l) => l.type === 'prompt')).toBe(true);
+
+    // 收尾轮（consume 不挂 settled）
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    emitFinalTextEnd(child, 'ok');
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    closeQueue();
+    await consumeP;
+  });
+});

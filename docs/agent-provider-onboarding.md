@@ -365,6 +365,20 @@ InteractiveDriver + 归一化器并完成全部注册点。参照实现二选一
      tokensBefore/estimatedTokensAfter 回执；codex=`thread/compact/start`
      受理无数字）。新引擎有原生压缩命令时实现可选 `compact?()` 并翻 caps
      true；无通道保持 false（按钮不渲染 + backend 拒绝）。
+   - **思考级别选择**（`ProviderCaps.thinking_level`，2026-09-14-session-thinking-level）：
+     统一七档词表 off/minimal/low/medium/high/xhigh/max（daemon
+     `interactive/thinking-levels.ts` 单源矩阵+降级规则——claude off→不设/
+     minimal→low；codex off→不设/max→xhigh；pi 全直传）。**三面**：①创建时
+     `CreateSessionInput.thinkingLevel`→driver StartOptions（claude
+     Options.effort/codex turn/start params reasoningEffort/pi 握手后
+     set_thinking_level）；②查询 `getThinkingLevels?(handle, model?)` 可选
+     方法（pi get_available_thinking_levels 按模型动态+get_state.thinkingLevel
+     现值/claude supportedModels().find(m.value)?.supportedEffortLevels ?? 默认
+     五档/codex 静态五档 current=undefined）；③切换 `setThinkingLevel?(
+     handle, level)`（pi set_thinking_level/claude applyFlagSettings/codex
+     thread/settings/update——**需 initialize capabilities.experimentalApi:
+     true**，driver 侧注入）。新引擎实现两可选方法+翻 caps true。注意 off 语义
+     跨引擎差异（pi=真关/claude·codex=不设=引擎默认思考通常开）。
 
 3. [ ] **driver**：新建 `sillyhub-daemon/src/interactive/<name>-driver.ts`，
    `implements InteractiveDriver`（契约全集见
@@ -588,9 +602,9 @@ caps.subagent 维持 false。扩展的 ExtensionAPI 面与 pi 版本强耦合，
 
 ### 6.1 改值流程（单源 → 两镜像 → EXPECTED_PROVIDERS → 守护测试）
 
-`ProviderCaps` 12 键：`resume / mcp / multimodal / thinking / subagent /
+`ProviderCaps` 13 键：`resume / mcp / multimodal / thinking / subagent /
 permission_dialog / dialog / edit_patch / model_select / provider_switch /
-ctx_usage / compact`（11 boolean + dialog string 枚举）。
+ctx_usage / compact / thinking_level`（12 boolean + dialog string 枚举）。
 
 1. [ ] 改 **daemon 单源** `sillyhub-daemon/src/interactive/providers.ts`
    `PROVIDER_CAPS.<provider>.<key>` 取值，**同 commit 更新该条目上方

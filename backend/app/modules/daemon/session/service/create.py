@@ -46,6 +46,12 @@ async def create_session(
     provider: str | None,
     prompt: str,
     model: str | None = None,
+    # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别七档
+    # （off/minimal/low/medium/high/xhigh/max）。**不写 AgentSession.config 不
+    # 落库**（NG-04/P1-8 定案：档位由引擎 session 状态维持，平台不镜像）——
+    # 仅在下方调 placement 处透传写 lease metadata；缺省 None 零分支进入
+    # （无档位请求行为逐字节不变）。
+    thinking_level: str | None = None,
     manual_approval: bool = False,
     ask_user_only: bool = False,
     change_id: uuid.UUID | None = None,
@@ -476,6 +482,10 @@ async def create_session(
                 provider=provider,
                 prompt=dispatch_prompt,
                 model=model,
+                # task-05（FR-03）：思考级别透传——写 lease metadata.thinking_level
+                # （空串=引擎默认不写键，placement 真值守护）；刻意不模仿
+                # :170-171 config["model"] 先例写 config 列（P1-8/NG-04）。
+                thinking_level=thinking_level,
                 manual_approval=manual_approval,
                 ask_user_only=ask_user_only,
                 workspace_id=workspace_id,

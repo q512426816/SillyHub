@@ -5818,6 +5818,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/thinking-levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Thinking Levels
+         * @description List the engine's available thinking levels for a session (FR-04).
+         *
+         *     2026-09-14-session-thinking-level task-05：三校验（归属/活跃 + caps
+         *     thinking_level 键）归 thinking_level 服务；ws RPC ``session_get_thinking_
+         *     levels``（task-03 daemon 契约按名对接）回执映射 ``{levels, current}``——
+         *     levels 按当前模型动态，current 为引擎侧现值（可空）。RPC 失败走 AppError
+         *     上抛（离线/超时 504、RemoteError 502 升级提示），不 200 假数据。
+         */
+        get: operations["get_session_thinking_levels_api_daemon_sessions__session_id__thinking_levels_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/thinking-level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Session Thinking Level
+         * @description Switch the session's thinking level (FR-05).
+         *
+         *     2026-09-14-session-thinking-level task-05：三校验 + 七档词表校验（400）+
+         *     忙轮守卫（D-002「仅空闲」）归 thinking_level 服务；ws RPC
+         *     ``session_set_thinking_level`` 回执映射 ``{ok, error}``——RPC 失败/旧
+         *     daemon method_not_found 映射结构化 error（HTTP 200），调用方可修复的
+         *     失败不抛 5xx。
+         */
+        post: operations["set_session_thinking_level_api_daemon_sessions__session_id__thinking_level_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/queue": {
         parameters: {
             query?: never;
@@ -22001,6 +22053,8 @@ export interface components {
             llm_provider_id?: string | null;
             /** Model */
             model?: string | null;
+            /** Thinking Level */
+            thinking_level?: string | null;
             /**
              * Manual Approval
              * @default true
@@ -22438,6 +22492,49 @@ export interface components {
              * @description daemon 本地 uuid（daemon_instances.id）
              */
             daemon_local_id: string;
+        };
+        /**
+         * SessionThinkingLevelRequest
+         * @description POST /api/daemon/sessions/{id}/thinking-level 请求体（FR-05 / design §接口定义）。
+         *
+         *     ``level`` 取七档词表（backend VALID_THINKING_LEVELS 镜像常量）；非法档
+         *     400（服务层校验，错误文案带合法档位清单）。
+         */
+        SessionThinkingLevelRequest: {
+            /** Level */
+            level: string;
+        };
+        /**
+         * SessionThinkingLevelResponse
+         * @description POST /api/daemon/sessions/{id}/thinking-level 响应体（FR-05 / design §接口定义）。
+         *
+         *     daemon RPC ``session_set_thinking_level`` 回执映射：``ok=False`` 时
+         *     ``error`` 携带结构化文案（旧 daemon method_not_found →「daemon 未支持
+         *     思考级别，请升级 daemon」；离线/超时/业务错误各有中文文案），HTTP 恒 200
+         *     （照 compact 口径：调用方可修复的失败不抛 5xx）。
+         */
+        SessionThinkingLevelResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * SessionThinkingLevelsResponse
+         * @description GET /api/daemon/sessions/{id}/thinking-levels 响应体（FR-04 / design §接口定义）。
+         *
+         *     2026-09-14-session-thinking-level task-05：daemon RPC
+         *     ``session_get_thinking_levels`` 回执映射——``levels`` 按当前模型动态
+         *     （pi get_available_thinking_levels；claude supportedModels 过滤；codex
+         *     静态档），``current`` 为引擎侧现值（SDK 不暴露现值的引擎回 None，
+         *     可空）。无 ``error`` 字段：RPC 失败（离线/超时/旧 daemon RemoteError）
+         *     走 AppError 上抛（服务层 thinking_level.py 三异常映射），不 200 假数据。
+         */
+        SessionThinkingLevelsResponse: {
+            /** Levels */
+            levels: string[];
+            /** Current */
+            current?: string | null;
         };
         /**
          * SessionTitleUpdateRequest
@@ -35605,6 +35702,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionCompactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_thinking_levels_api_daemon_sessions__session_id__thinking_levels_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionThinkingLevelsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_session_thinking_level_api_daemon_sessions__session_id__thinking_level_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionThinkingLevelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionThinkingLevelResponse"];
                 };
             };
             /** @description Validation Error */

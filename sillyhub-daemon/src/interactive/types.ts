@@ -252,6 +252,15 @@ export interface SessionState {
    */
   pathToAgentExecutable?: string;
   /**
+   * task-03（2026-09-14-session-thinking-level / FR-04）：会话当前模型
+   * （create 时从 CreateSessionInput.model 写入，即 lease 下发值）。消费方：
+   * session-manager/thinking-level.ts getThinkingLevels 分派传参给 driver
+   * （claude supportedModels 按当前模型过滤，Grill P1-5）。undefined（lease 未
+   * 下发）→ driver 回退默认档表（R-03）。仅内存态（snapshotPersistable 白名单
+   * 未含，不落盘）。
+   */
+  model?: string;
+  /**
    * task-06（D-007@v2）：lease stage 标记（来自 CreateSessionInput.stage）。
    * snapshotPersistable 输出到 PersistedSessionRecord.stage；restoreAndReconnect
    * 从 record.stage 恢复。主 agent（stage='orchestrator'）据此重新注入 MCP tool；
@@ -375,6 +384,15 @@ export interface CreateSessionInput {
   /** pathToClaudeCodeExecutable（来自 daemon._agentPaths.get('claude')）。 */
   pathToClaudeCodeExecutable: string;
   model?: string;
+  /**
+   * task-03（2026-09-14-session-thinking-level / FR-03 创建链 daemon 入口）：
+   * 创建时选定的平台统一思考档位（七档词表单源 thinking-levels.ts；:377 model
+   * 同款邻位）。链路：前端 preThinkingLevel → lease metadata.thinking_level →
+   * daemon execPayload 归一化 → 此处 → SessionManager._buildDriverOptions →
+   * driverOpts.thinkingLevel（三 driver 启动设置，task-04）。undefined → 不携带，
+   * 引擎默认（零回归）；不落库不写 config 列（P1-8 定案，仅透传）。
+   */
+  thinkingLevel?: string;
   allowedTools?: string[];
   /**
    * scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/B）：
