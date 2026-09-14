@@ -2026,7 +2026,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：id→pending response �
     await new Promise<void>((r) => setTimeout(r, ms));
   }
 
-  it('请求注册 pending（id 从 100 起）→ 回同 id response → resolve(result 值透传) + 条目清理', async () => {
+  it('请求注册 pending（id 经 nextRpcId 统一分配）→ 回同 id response → resolve(result 值透传) + 条目清理', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
 
@@ -2043,23 +2043,24 @@ describe('task-05（2026-09-14-session-ctx-compact）：id→pending response �
     const p = sendJsonRpc(driver, handle, 'test/ping', { k: 1 }, 5_000);
     await tick(30);
 
-    // 请求形态：jsonrpc 2.0 + 自增 id（seed 100，避开握手 1/2 与 nextRpcId≥3）
+    // 请求形态：jsonrpc 2.0 + 自增 id（nextRpcId 统一分配；本用例未发过 turn，
+    // 故首取 3——与 turn/start 同计数器，避开握手固定 id 1/2）
     const req = readStdinJson(child).find((m) => m.method === 'test/ping')!;
     expect(req).toMatchObject({
       jsonrpc: '2.0',
-      id: 100,
+      id: 3,
       method: 'test/ping',
       params: { k: 1 },
     });
     // 已注册未应答
     expect(handle.jsonRpcPending.size).toBe(1);
-    expect(handle.jsonRpcPending.has(100)).toBe(true);
+    expect(handle.jsonRpcPending.has(3)).toBe(true);
 
     // 回同 id response → resolve(result 原值) + map 清空 + id 序号自增
-    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 100, result: { foo: 'bar' } })]);
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 3, result: { foo: 'bar' } })]);
     await expect(p).resolves.toEqual({ foo: 'bar' });
     expect(handle.jsonRpcPending.size).toBe(0);
-    expect(handle.nextJsonRpcId).toBe(101);
+    expect(handle.nextRpcId).toBe(4);
 
     close();
     child._emitExit(0);
@@ -2085,7 +2086,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：id→pending response �
     emitLines(child, [
       JSON.stringify({
         jsonrpc: '2.0',
-        id: 100,
+        id: 3,
         error: { code: -32000, message: 'compact boom' },
       }),
     ]);
@@ -2117,7 +2118,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：id→pending response �
     expect(handle.jsonRpcPending.size).toBe(0);
 
     // 迟到的同 id response（超时后才到）：未注册 → 静默忽略，不崩不二次 settle
-    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 100, result: {} })]);
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 3, result: {} })]);
     await tick(50);
     expect(errors).toHaveLength(0);
     expect(handle.jsonRpcPending.size).toBe(0);
@@ -2145,7 +2146,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：id→pending response �
     await tick(30);
 
     // 未注册 id=999 的 error response：既有 adapter.parse 照旧产出 error 事件
-    //（对照 task-04「rpc error response」既有断言路径），pending(id=100) 不受影响
+    //（对照 task-04「rpc error response」既有断言路径），pending(id=3) 不受影响
     emitLines(child, [
       JSON.stringify({
         jsonrpc: '2.0',
@@ -2171,7 +2172,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：id→pending response �
     expect(state).toBe('pending');
 
     // 正主 response 到达后才 resolve
-    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 100, result: { ok: 1 } })]);
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 3, result: { ok: 1 } })]);
     await expect(p).resolves.toEqual({ ok: 1 });
     expect(handle.jsonRpcPending.size).toBe(0);
 
@@ -2269,7 +2270,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：compact()', () => {
     await consumeP;
   });
 
-  it('threadId 就绪：发 thread/compact/start {threadId}（id≥100 自增）→ 空 result response → {ok:true} 无数字键', async () => {
+  it('threadId 就绪：发 thread/compact/start {threadId}（id 经 nextRpcId 统一分配）→ 空 result response → {ok:true} 无数字键', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
 
@@ -2286,7 +2287,8 @@ describe('task-05（2026-09-14-session-ctx-compact）：compact()', () => {
     const compactP = driver.compact(handle);
     await tick(30);
 
-    // 命令形态：method / params.threadId（camelCase，R-03）/ jsonrpc 2.0 / id≥100
+    // 命令形态：method / params.threadId（camelCase，R-03）/ jsonrpc 2.0 /
+    // id 经 nextRpcId 统一分配（本用例未发过 turn，故首取 3——避开握手 1/2）
     const req = readStdinJson(child).find(
       (m) => m.method === 'thread/compact/start',
     )!;
@@ -2296,7 +2298,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：compact()', () => {
       params: { threadId: 'thr_compact' },
     });
     expect(typeof req.id).toBe('number');
-    expect(req.id as number).toBeGreaterThanOrEqual(100);
+    expect(req.id as number).toBeGreaterThanOrEqual(3);
 
     // 空 result 对象 = 受理 → {ok:true}；CompactResult 不挂数字键（codex 无回执）
     emitLines(child, [
@@ -2308,7 +2310,7 @@ describe('task-05（2026-09-14-session-ctx-compact）：compact()', () => {
     expect(r).not.toHaveProperty('estimatedTokensAfter');
     expect(handle.jsonRpcPending.size).toBe(0);
 
-    // 第二次 compact：id 自增（100→101），不与首次碰撞
+    // 第二次 compact：id 自增（同计数器 +1），不与首次碰撞
     const compactP2 = driver.compact(handle);
     await tick(30);
     const req2 = readStdinJson(child).filter(
@@ -2382,6 +2384,71 @@ describe('task-05（2026-09-14-session-ctx-compact）：compact()', () => {
     expect(r.ok).toBe(false);
     expect(String(r.error)).toMatch(/thread\/compact\/start.*timeout.*80ms/);
     expect(handle.jsonRpcPending.size).toBe(0);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('ql-20260915-001 防碰撞回归：越过旧 seed 100 交叉点后 compact 与 turn/start 同计数器分号不重号，turn 回执不误唤醒 compact', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await tick();
+    emitLines(child, [threadStartResponse('thr_collide')]);
+    await tick();
+
+    // 模拟长会话：把 nextRpcId 推到旧双计数器设计的交叉点（seed 100）——旧实现
+    // 的 compact 独立计数器也从 100 起步，两请求会分到同号并发（回执按 id 错配）。
+    handle.nextRpcId = 100;
+
+    // compact 挂起等待（单计数器取 100，注册 pending）
+    const compactP = driver.compact(handle);
+    await tick(30);
+    const compactReq = readStdinJson(child).find(
+      (m) => m.method === 'thread/compact/start',
+    )!;
+    expect(compactReq.id).toBe(100);
+
+    // pending 窗口内并发发起新轮：单计数器分配 101，与 compact 的 100 不同号
+    //（旧实现此处 turn/start 也取 100——本断言即撞号回归锚）
+    push('hi');
+    await tick(50);
+    const turnStart = readStdinJson(child).find(
+      (m) => m.method === 'turn/start',
+    )!;
+    expect(turnStart.id).toBe(101);
+
+    // turn/start 的回执（id=101）先到：不得误唤醒 compact 的 pending
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 101, result: {} })]);
+    const state = await Promise.race([
+      compactP.then(
+        () => 'settled',
+        () => 'settled',
+      ),
+      new Promise<string>((r) => setTimeout(() => r('pending'), 80)),
+    ]);
+    expect(state).toBe('pending');
+    expect(handle.jsonRpcPending.size).toBe(1);
+
+    // 正主回执（id=100）到达才 resolve
+    emitLines(child, [JSON.stringify({ jsonrpc: '2.0', id: 100, result: {} })]);
+    await expect(compactP).resolves.toEqual({ ok: true });
+    expect(handle.jsonRpcPending.size).toBe(0);
+
+    // 收敛在途轮后收尾
+    emitLines(child, [
+      turnStartedNotif('thr_collide', 'turn_1'),
+      turnCompletedNotif('completed'),
+    ]);
+    await tick();
+    expect(results).toHaveLength(1);
 
     close();
     child._emitExit(0);

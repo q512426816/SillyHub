@@ -455,21 +455,22 @@ export interface CodexHandle extends InteractiveDriverHandle {
   threadId: string | null;
   /** turn/started 后填充，interrupt 用；turn/completed 后清空。 */
   currentTurnId: string | null;
-  /** turn/start / turn/interrupt 递增 id（≥3，避免与握手 1/2 碰撞）。 */
+  /**
+   * 客户端请求统一递增 id（≥3，避免与握手 1/2 碰撞）。turn/start·turn/interrupt
+   * 与「等 response」请求（compact 等，_sendJsonRpcRequest）共用本计数器——
+   * 单源分配保证任意时刻在途请求 id 全局唯一（ql-20260915-001：旧双计数器
+   * nextJsonRpcId seed 100 与本计数器在 ~97 轮后交叉撞号，同 id 并发时
+   * _maybeResolveJsonRpcResponse 按先到回执错配唤醒 pending）。
+   */
   nextRpcId: number;
   /**
    * task-05（2026-09-14-session-ctx-compact / FR-05）：已发出未应答的「等
    * response」JSON-RPC 请求（按 id 关联；close / 进程退出时全量 reject，照 pi
-   * h.pending 先例）。既有握手 1/2、turn/start·interrupt（nextRpcId）全部
-   * fire-and-forget **不经本表**——response 消费分支只旁路新增，未注册 id 的
-   * response 照旧走 adapter.parse，既有路径零行为变化（R-06）。
+   * h.pending 先例）。既有握手 1/2、turn/start·interrupt 全部 fire-and-forget
+   * **不经本表**——response 消费分支只旁路新增，未注册 id 的 response 照旧走
+   * adapter.parse，既有路径零行为变化（R-06）。id 由上方 nextRpcId 统一分配。
    */
   jsonRpcPending: Map<number, CodexJsonRpcPending>;
-  /**
-   * task-05：jsonRpcPending 请求 id 递增序号（seed 100，照 pi nextRequestId
-   * 形态——从 100 起避开握手固定 id 1/2 与 nextRpcId(≥3) 空间，防碰撞）。
-   */
-  nextJsonRpcId: number;
   /** close 后置 true，拒绝新 turn/start 写入。 */
   closing: boolean;
   /** task-05 消费的待审批 server request 队列；task-04 仅登记 + fail-closed 应答。 */
@@ -832,9 +833,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
       currentTurnId: null,
       nextRpcId: 3,
       // task-05（2026-09-14-session-ctx-compact）：id→pending response 等待机制
-      //（见 CodexHandle 字段注释；seed 100 避开握手 1/2 与 nextRpcId 空间）。
+      //（见 CodexHandle 字段注释；请求 id 经 nextRpcId 统一分配，单源防撞号）。
       jsonRpcPending: new Map<number, CodexJsonRpcPending>(),
-      nextJsonRpcId: 100,
       closing: false,
       pendingServerRequests: [],
       // ql-20260909-027：用量差值记账双基线（见 CodexHandle 字段注释）。
@@ -1675,7 +1675,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     const hasMethod = Object.prototype.hasOwnProperty.call(msg, 'method');
     if (!hasId || hasMethod) return; // 只认 response 帧
     const id = msg.id;
-    // 本表只收 number id（nextJsonRpcId 分配）；string id（server request 应答等）不归本机制
+    // 本表只收 number id（nextRpcId 统一分配）；string id（server request 应答等）不归本机制
     if (typeof id !== 'number') return;
     const pending = h.jsonRpcPending.get(id);
     if (!pending) return; // 未注册 id（fire-and-forget 响应）——照旧忽略
@@ -1717,7 +1717,10 @@ export class CodexAppServerDriver implements InteractiveDriver {
         new Error(`codex rpc "${method}" stdin unavailable (process closing)`),
       );
     }
-    const id = h.nextJsonRpcId++;
+    // ql-20260915-001：id 复用 nextRpcId 单计数器（与 turn/start·interrupt 同源
+    // 递增）——单源保证在途请求 id 全局唯一。旧实现独立 seed 100 计数器与本计数
+    // 器在 ~97 轮后交叉，同 id 并发时先到回执错配唤醒 pending。
+    const id = h.nextRpcId++;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         h.jsonRpcPending.delete(id);
@@ -2250,7 +2253,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
   /**
    * task-05（2026-09-14-session-ctx-compact / FR-05）：会话级上下文压缩。
    *
-   * 发 JSON-RPC `thread/compact/start {threadId}`（id 由 nextJsonRpcId 分配）等
+   * 发 JSON-RPC `thread/compact/start {threadId}`（id 由 nextRpcId 统一分配）等
    * 同 id response（默认 10s 超时）：
    *   - 空对象 result = 受理 → `{ ok: true }`（无数字回执——codex 只回受理不回
    *     token 数，CompactResult 的 tokensBefore/estimatedTokensAfter 不携带，
