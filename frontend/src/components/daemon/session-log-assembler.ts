@@ -533,6 +533,15 @@ export type TurnSegment =
       description: string;
       ts: number | null;
       segId?: string | null;
+    }
+  // 2026-08-25-unified-floating-session task-11（ql-20260825-003 补类型定义）：
+  // 上下文前导段（变更/页面/团队任务简报等，「全部」视图可见，对话视图不渲染）。
+  | {
+      kind: "preamble";
+      id: string;
+      text: string;
+      ts: number | null;
+      segId?: string | null;
     };
 
 export type ToolTurnSegment = Extract<TurnSegment, { kind: "tool" }>;
