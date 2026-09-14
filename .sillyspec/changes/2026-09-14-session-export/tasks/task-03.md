@@ -44,7 +44,7 @@ verify:
   - cd backend && uv run ruff check app/modules/daemon
   - cd backend && uv run mypy app
 constraints:
-  - 遵循 design.md「接口定义」端点签名（TaskRunAgentUser 闸门对齐 session_insights.py:464 注释惯例）
+  - 遵循 design.md「接口定义」端点签名（TaskRunAgentUser 闸门对齐 backend/app/modules/daemon/router/session_insights.py:464 注释惯例）
   - /sessions/export 字面量必须前置 /sessions/{session_id}（ppm 同类坑 R-01）；新增端点必须同步 _ENDPOINT_ORDER（漂移断言 fail-fast）
   - 端点不写导出业务逻辑（渲染/权限归 task-02）；本 task 不写新测试（task-04）
   - OpenAPI 只增不改（gen:types 对既有类型零破坏）

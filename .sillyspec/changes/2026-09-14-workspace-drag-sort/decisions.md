@@ -122,7 +122,7 @@ change: 2026-09-14-workspace-drag-sort
 - answer: 引入 @dnd-kit/core + @dnd-kit/sortable（两者皆新依赖）。理由：1/2/3 列响应式网格的落点判定与位移动画，原生 HTML5 需手写碰撞检测且体验糙；dnd-kit 轻量、支持网格 sortable、键盘无障碍内置。
 - normalized_requirement: 前端新增 dependencies @dnd-kit/core 与 @dnd-kit/sortable；不引入 dnd-kit 之外的 DnD 库。
 - impacts: [task-前端]
-- evidence: PPM `ppm-sub-table.tsx:350` 原生方案仅适用单列内存表格；`frontend/package.json` 现无 DnD 库
+- evidence: PPM `frontend/src/components/ppm-sub-table.tsx:350` 原生方案仅适用单列内存表格；`frontend/package.json` 现无 DnD 库
 - 模块域: frontend
 
 ## D-011@v1: 数据层实现——方案 A（排序表 + 浮点中点锚点）

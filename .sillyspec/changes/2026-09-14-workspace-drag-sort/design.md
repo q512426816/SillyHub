@@ -85,7 +85,7 @@ risk_level: unit-sufficient
 
 ```
 POST /api/workspaces/{workspace_id}/move
-鉴权：require_permission_any(Permission.WORKSPACE_READ)（措辞对齐列表端点现状 router.py:269；行级可见=非平台管理员需 workspace_id ∈ allowed_workspace_ids(user)，403）
+鉴权：require_permission_any(Permission.WORKSPACE_READ)（措辞对齐列表端点现状 backend/app/modules/workspace/router.py:269；行级可见=非平台管理员需 workspace_id ∈ allowed_workspace_ids(user)，403）
 Request WorkspaceMoveRequest（锚点三选一，恰好一个出现，否则 422 HTTP_422_MOVE_ANCHOR_CONFLICT）：
   after_id:  uuid | 不出现   # 放到锚点卡之后（页内拖拽 / 弹窗向下·页尾）
   before_id: uuid | 不出现   # 放到锚点卡之前（弹窗向上·页首/页尾）
@@ -156,7 +156,7 @@ CREATE INDEX ix_uwo_user_position ON user_workspace_orders(user_id, sort_positio
 | R-03 | LEFT JOIN + ORDER BY 在数据增长后的列表性能 | P2 | (user_id, sort_position) 索引；一两百量级实测无压力；超过千级再评估（超本期量级假设） |
 | R-04 | 同用户多标签页并发拖拽互相覆盖 | P2 | D-008 后写覆盖，接受；move 成功即 reload 收敛 |
 | R-05 | 管理员按 user_id 筛选看到的仍是自己的顺序，语义易误解 | P1 | D-005 定案；UI 在筛选激活时本就禁拖 + 文档明示 |
-| R-06 | 拖拽手柄与整卡点击进详情的手势冲突 | P2 | 仅手柄承载 drag listeners（PPM 同款先例 ppm-sub-table.tsx:350）；卡体点击不受影响 |
+| R-06 | 拖拽手柄与整卡点击进详情的手势冲突 | P2 | 仅手柄承载 drag listeners（PPM 同款先例 frontend/src/components/ppm-sub-table.tsx:350）；卡体点击不受影响 |
 | R-07 | 边缘投放带落带后目标页计算错误（页边界漂移） | P1 | move 响应携带服务端计算的默认视图 `rank`，前端 `floor(rank/page_size)` 换算页码，不本地推算（Grill F-01/F-02 修订后主路径） |
 | R-08 | `to` 路径 page_size 与前端 PAGE_SIZE 常量漂移（改一处漏一处） | P2 | 请求显式携带 page_size（默认 12）+ 接口文档写明同源耦合；前端单一常量导出供两处引用 |
 

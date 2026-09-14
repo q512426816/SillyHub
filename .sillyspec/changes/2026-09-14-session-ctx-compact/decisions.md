@@ -56,7 +56,7 @@ created_at: 2026-09-14 10:52:03
 - answer: ①claude 定案走 backend inject 服务复用（prompt="/compact"，原生建 run、/compact 轮在会话流天然可见，daemon 零改动）；②pi/codex 走 SESSION_COMPACT 控制命令 + 控制结果回传（backend 轮询 15s），pi 回执数字进端点响应；③呈现改为前端通知三分型（pi 带数字/codex 受理/claude 已发送），放弃会话流系统提示行（task_notification 通道 daemon 侧三重拦截+唤醒注入副作用、前端侧瞬时事件不渲染，双层不可行）；④引擎内部 compaction 通知维持现状不透传。
 - normalized_requirement: FR-02 双分路 / FR-03 inject 复用 / FR-04-05 控制命令 / FR-07 响应通知；NG-04/NG-07。
 - impacts: 同 design v2 文件清单（含 Grill X-d 补的 protocol.py/control_commands.py；移除 control-dispatcher.ts）。
-- evidence: Grill review X-a/X-b/X-c/X-d/X-f 实核锚点（background-tasks.ts:201-261/session-stream.ts:318/session-log-assembler.ts:297/turn-control.ts:157/events.ts:53-68 等）。
+- evidence: Grill review X-a/X-b/X-c/X-d/X-f 实核锚点（sillyhub-daemon/src/interactive/session-manager/background-tasks.ts:201-261frontend/src/lib/daemon/session-stream.ts:318/frontend/src/components/daemon/session-log-assembler.ts:297/sillyhub-daemon/src/interactive/session-manager/turn-control.ts:157sillyhub-daemon/src/interactive/session-manager/events.ts:53-68 等）。
 - priority: high
 - 否决理由: v1 task_notification 呈现链双层断裂；claude driver 内入队与不建 run 矛盾。
 - 复潮条件: 前端引入会话流系统事件渲染能力后可重评流内呈现。
@@ -71,7 +71,7 @@ created_at: 2026-09-14 10:52:03
 - answer: 端点响应承载回执，前端按 provider 分型通知：pi「已压缩：X → 约 Y tokens」（数字来自 RPC response）/ codex「已触发上下文压缩」（受理无数字）/ claude「已发送 /compact（压缩轮运行中）」（流程可见性由会话流中的 /compact 轮本身承载）；失败通知带 error 原文（如 pi "Nothing to compact"）。
 - normalized_requirement: FR-06/07；CompactResult→控制结果→SessionCompactResponse 字段链。
 - impacts: backend DTO + frontend mutation 通知 + 无会话流改动。
-- evidence: Grill X-f（现呈现链不可行）+ sdk.d.ts:3191-3213（claude 边界帶数字但 v1 不透传）。
+- evidence: Grill X-f（现呈现链不可行）+ sdk.d.ts L3191-3213（claude 边界帶数字但 v1 不透传）。
 - priority: high
 - 模块域: frontend, backend
 
@@ -82,7 +82,7 @@ created_at: 2026-09-14 10:52:03
 - supersedes: D-003@v2（仅回传机制部分，其余维持）
 - source: design-grill-recheck
 - question: v2 的「控制命令结果经 ack 回传 + backend 轮询」被复审证伪（ack 全链 ids-only/表无 result 列/handlers 无返回值通道），回执链如何承载？
-- answer: 复用既有 ws RPC 请求-结果通道：backend 端点 ws_hub.send_rpc(daemon_id, 'session_compact', {session_id}, timeout=15)（ws_hub.py:502-560，DaemonRpcTimeout/Offline/RemoteError 异常齐备）；daemon 侧 registerRpcHandler('session_compact')（daemon.ts:6438-6456 既有四先例）→ sessionManager.compact → CompactResult 即 RPC result。SESSION_COMPACT 控制机器三件套（backend protocol.py/control_commands.py + daemon protocol.ts/daemon.ts 三点接线）全部弃用；「无 schema 迁移 / control-dispatcher 零改动」在 v3 下为真。
+- answer: 复用既有 ws RPC 请求-结果通道：backend 端点 ws_hub.send_rpc(daemon_id, 'session_compact', {session_id}, timeout=15)（backend/app/modules/daemon/ws_hub.py:502-560，DaemonRpcTimeout/Offline/RemoteError 异常齐备）；daemon 侧 registerRpcHandler('session_compact')（sillyhub-daemon/src/daemon.ts:6438-6456 既有四先例）→ sessionManager.compact → CompactResult 即 RPC result。SESSION_COMPACT 控制机器三件套（backend protocol.py/control_commands.py + daemon protocol.ts/daemon.ts 三点接线）全部弃用；「无 schema 迁移 / control-dispatcher 零改动」在 v3 下为真。
 - normalized_requirement: FR-02 pi/codex 路 = ws RPC；Wave B/C 与文件清单按 v3 收敛。
 - impacts: 较 v2 净减 4 文件改动（protocol.py/control_commands.py/protocol.ts + daemon.ts 三点变单点）。
 - evidence: 复审 RC-4（P0-3 证伪锚点）+ 本轮主代理实读 send_rpc/registerRpcHandler 先例。
