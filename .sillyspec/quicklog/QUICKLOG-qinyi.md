@@ -179,3 +179,36 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：python scripts/x.py 时 sys.path[0]=scripts 目录，from app.core.config import 不可达；单测被 pytest 路径注入掩盖，docker exec 生产执行路径同样会炸
 方案：照 cleanup_daemon_instances.py:30 先例补 sys.path.insert 引导仓库根
 结果：脚本 help 参数直跑成功（imports 与 CLI 解析独立可跑）；单测 2 用例复跑绿；ruff check/format 0
+
+## ql-20260913-007-1351 | 2026-09-13 21:24:01 | 轮次刻度轨命中区修复——刻度按钮从2px细线扩为透明命中区
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/turn-catalog.tsx（刻度按钮扩透明命中区+视觉线内移span+去gap+飞出卡定位取刻度中心）
+- frontend/src/components/sessions/__tests__/turn-catalog.test.tsx（状态类断言迁内部span+新增命中区2用例+定位mock补offsetHeight）
+需求：轮次刻度轨命中区修复——刻度按钮从2px细线扩为透明命中区
+根因：用户反馈会话左侧轮次展示鼠标指向需精确到极小范围才能显示摘要卡和点击，刻度按钮本体仅 h-[2px] w-[14px]，2px 高命中区远低于任何可用性基线，刻度间 gap-[7px] 还是无响应缝隙
+方案：turn-catalog.tsx 按钮本体改为透明命中区（h-[18px] × 轨全宽，上下各 8px 缓冲），视觉横杠移入内部 span 居中渲染，状态色/hover 放宽/空心描边平移至子元素 group-* 触发（视觉基本不变，刻度周期 9px→18px 密度略降）；nav 去 gap 相邻命中区紧贴连续；飞出卡垂直定位改用刻度中心（computeFlyoutTop 首参 offsetTop→tickCenter）；测试状态类断言迁移至内部视觉线 span 并新增 2 个命中区用例
+结果：turn-catalog 17/17 通过（含新增用例）、sessions page 37/37 通过（轮次导航集成 8 用例全绿）、session-panel-variant 通过；eslint 0 error（1 warning 为 2026-09-08 存量非本次引入）
+
+## ql-20260914-001-b14c | 2026-09-14 09:01:11 | 24h 审查 P2 清单三项收尾：目录 fsync+reload 白名单派生化+群聊系统提示行放行
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/atomic-write.ts（rename 后父目录 fsync（Windows best-effort 吞））
+- sillyhub-daemon/src/interactive/session-manager.ts（PROVIDER_RELOAD_ENGINES 派生化并导出）
+- sillyhub-daemon/tests/atomic-write.test.ts（open(r) 探针断言目录 fsync 意图）
+- sillyhub-daemon/tests/provider-adapter-registry.test.ts（守护⑥ 派生对账+三元语义锚）
+- frontend/src/components/group-chat/group-chat-panel.tsx（无卡 system 事件渲染 kind:system 提示行）
+- frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx（同用例改新语义+空白 ignore 分支）
+- .sillyspec/docs/sillyhub-daemon/modules/interactive.md（白名单派生段+changelog 两修）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260913-007-1351 条目）
+需求：24h 审查 P2 清单三项收尾：目录 fsync+reload 白名单派生化+群聊系统提示行放行
+根因：①rename 后目录项未 fsync，POSIX 掉电窗口丢 rename；②手写白名单与注册表脱节，新引擎 switchable:true 后前端解锁而 daemon 抛错；③无卡 system 事件被整类 ignore，四类后端既定实时流提示（含收口失败）用户不可见
+方案：①open(dirname)+sync 补目录持久（Windows best-effort 吞）；②照前端同款手法从 INTERACTIVE_PROVIDERS.switchable 派生并加守护⑥对账；③渲染既有 kind:system 条目类型（渲染器预留零产出），合成 id 去重
+结果：daemon 13+69、frontend 64 用例全绿；daemon/前端 tsc 0；eslint 0 新增
+
+## ql-20260914-002-5f98 | 2026-09-14 09:07:58 | 修复 pi 交互会话 ctx_tokens 被 driver 轮累计覆盖丢失
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/pi-rpc-driver.ts, sillyhub-daemon/tests/interactive/pi-rpc-driver-turn-result.test.ts

@@ -268,3 +268,22 @@ describe('task-06 守护⑤ 生成脚本幂等（gen-provider-caps.mjs 两连跑
     }
   });
 });
+
+describe('2026-09-13 守护⑥ reload 白名单派生（switchable 单源消费侧对账）', () => {
+  it('PROVIDER_RELOAD_ENGINES === INTERACTIVE_PROVIDERS.switchable 引擎集', async () => {
+    // 手写白名单时代的漏网点：新引擎声明 switchable:true 后前端（生成的
+    // PROVIDER_SWITCH_ENGINES）解锁而 daemon reload 门仍抛错——派生化后本
+    // 断言锁死"消费侧=注册表"，漂移即红。
+    const { PROVIDER_RELOAD_ENGINES } = await import('../src/interactive/session-manager.js');
+    const derived = new Set(
+      Object.entries(INTERACTIVE_PROVIDERS)
+        .filter(([, adapter]) => adapter.switchable)
+        .map(([provider]) => provider),
+    );
+    expect(PROVIDER_RELOAD_ENGINES).toEqual(derived);
+    // 语义锚：当前三家可切换引擎必须在集内（防注册表误改 switchable 静默缩门）。
+    for (const engine of ['claude', 'codex', 'pi']) {
+      expect(PROVIDER_RELOAD_ENGINES.has(engine), `${engine} 应在 reload 白名单`).toBe(true);
+    }
+  });
+});

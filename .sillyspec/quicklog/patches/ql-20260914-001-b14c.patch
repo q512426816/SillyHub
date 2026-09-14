@@ -1,0 +1,270 @@
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+index 0b2cb3f0e..c3b8a4de8 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+@@ -52,6 +52,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
+ - **2026-08-19-cross-workspace-team-mission**（跨工作区团队执行 + 项目维度会话）：新增项目维度会话入口 `app/(dashboard)/projects/[id]/missions/page.tsx`；扩展 `components/mission-console.tsx` 支持 `projectMode`（scope 多选、anchor 单选、目标工作区徽标列、调用 `createProjectMission`/`listProjectMissions`）；`lib/agent.ts` 新增 `createProjectMission` / `listProjectMissions`（类型从 `api-types.ts` MissionResponse/MissionCreateRequest 导入）；`lib/api-types.ts` 随 backend OpenAPI 重新生成。 vitest 全量 1684 passed，tsc exit 0。
+ 
+ ## 变更索引
++- ql-20260913-007-1351 | 群聊系统提示行放行（24h 审查 P2，防用户可感沉默）：group-chat-panel parseGroupLiveLog 对 channel=system 无 consensus_card 事件由整类 ignore 改渲染既有 kind:system 条目（union 与渲染器 group-system-event 本就预留、此前零产出）——限频/成员打断/成员触发失败/汇总收口失败四类后端既定「实时流提示」（ephemeral 不落库，打字指示走独立 typing 频道不受影响）此前全被吞，收口轮失败时用户无任何群内提示；无 log_id 合成 id（timestamp+内容前缀）供去重定序，空白内容仍 ignore。测试：group-chat-panel.test 同用例改新语义（无卡→system 条目+合成 id / 空白→ignore）64 passed；tsc 0；eslint 0 新增（7 条预存 warning 不在改动区）。同批 daemon 侧两修见 sillyhub-daemon 模块（atomic-write 目录 fsync、reload 白名单派生化）。
+ - ql-20260912-001-081d | 头像保存误删自愈（H-3，24h 审查修复批第二轮）：lib/auth.ts updateMyAvatar 原形态 PATCH 成功后 `await fetchMe()` 与 PATCH 同抛——桌面/移动账号页的 catch 会把「刷新失败」误判成「保存失败」并对**已绑定成功的新头像文件**执行 tryReclaimOrphanAvatarFile 软删（连 MinIO 对象一起删，头像永久死链）；修复为 fetchMe 失败 best-effort（console.warn 不上抛，store 短暂滞后由下次 fetchMe 收敛），PATCH 失败仍原样上抛保住孤儿回收路径。测试：lib/__tests__/auth.test.ts 新建 4 用例（刷新失败不抛/成功路径/PATCH 失败仍抛/null→空串三态契约）+ 桌面 10/移动 5 账号页回归全绿；tsc 0。
+ - ql-20260911-024-9098 | 平台同步区命令回显提速第二级（用户反馈「执行很慢，基本都要十秒以上」——实测命令本体 0.2-0.7s，大头是结果回显两级 15s 定时器）：platform-sync-section.tsx 下发后开 15s 加速窗（ECHO_FAST_WINDOW_MS）内 machines 查询 refetchInterval 从 15s 切 5s（ECHO_FAST_POLL_MS，≈5s×3 次），窗口到期 setTimeout 清 pollBoostUntil 触发重渲染回退常规节拍（react-query 随 refetchInterval 选项值变化重排轮询定时器）；裁决下发（handleCompareDispatched）与 ghost 清理 onOk 两下发点均开窗。第一级（daemon 结果落槽即补发心跳）见 sillyhub-daemon.md 同 ql 条目——两级合力把平均 ~15s/最差 ~30s 的回显延迟压到 ~5-10s。测试：platform-sync-section.test.tsx +1（fake timers 钉窗内 5s 间隔/窗外回退 15s 节拍）共 15 passed；tsc 0。
+ - ql-20260911-001-c0be | scope-audit 命令卡升级为结果卡（用户反馈「你就在页面展示这个玩意？？」——命令不是目的，对账结果要直接看）：scope-audit-command-card.tsx 重构——挂载即经 GET /sillyspec/scope-audit 跑对账（identifier：change=change_key / quick=useQuickSessionName 反查会话名），卡面出锚点+文件·行数合计（+N 绿/−M 红）+三态计数 chips（full-flow：✓计划内/⚠️计划外/⚠️计划未动；quick：✓已声明/🔍软归属/⚠️未声明，语义 token 色阶），「查看明细」开宽弹窗渲染三态全表（行=徽章+path+kind+行数），行点击联动 scope-file-diff-modal 看单文件 diff；两条本地命令（sillyspec 前缀）折叠为卡尾 details 次要区保留——链路不可用/降级（ok=false、quick 反查失败）兜底。target.change 增 workspaceId（详情页挂载点同步）。测试：卡 7 用例（三态计数锚点合计/降级/quick 反查取数/反查失败不发对账/明细弹窗+行联动 diff）重写 + 抽屉 mock 增 getScopeAudit 默认降级载荷，变更中心 21 相关套件 237 passed；tsc 0；eslint 0。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+index 80ef66d8e..dccfd9f25 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+@@ -59,6 +59,12 @@ turn 收尾: classifyModelError → result.modelError → daemon 桥接 notifyRu
+ 主 agent MCP: isMainAgentSession(ctx.stage==='orchestrator') → mainAgentMcpConfigProvider
+   经 mergeMcpConfigs 注入 daemon 内置 MCP server；恢复时按 record.stage 重注入
+ reloadWithProvider: buildSpawnEnv 构造新 env；null=停止供应商回退本机凭证。
++  provider 维度门 PROVIDER_RELOAD_ENGINES（D-005@v2；2026-09-13 由手写
++  ['claude','codex','pi'] 改 INTERACTIVE_PROVIDERS.switchable 派生，照前端
++  provider-caps.ts PROVIDER_SWITCH_ENGINES 同款手法，provider-adapter-registry
++  守护⑥ 锁"消费侧=注册表"）——新引擎声明 switchable:true 后前后端同解锁，
++  不再出现前端放行而 daemon 侧抛错的漏网点；config-only 路径（人格/配置切换）
++  不受限。
+   CLAUDE_CONFIG_DIR（resume/reload 两路径）按 transcript 实际位置判定
+   （claude-transcript-dir：隔离目录命中→隔离，保 ql-20260807-002 停供应商语义；
+   仅宿主机 ~/.claude 命中→不隔离；探测不到→维持隔离默认，ql-20260822-009）；
+@@ -135,3 +141,8 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快
+ - 静默中断检测（FR-2）：轮收敛（agent_settled 后无 pendingTurnError）时判定 `!lastWasFinalText` → 合成 error result（`[silent stream truncation] 上一轮输出流中断…`），session-manager 既有 classifyModelError 按断流关键词归 provider_error/retryable=true，后端三分支自动恢复得以触发。
+ - `lastWasFinalText` 标记翻转两入口（message_end 边粒度）：①raw message_end 拦截处（与 usage 累计钩同位）按 content parts 是否含非空 text part 收口——[text,thinking] 同消息排列终值正确为 true；②归一化事件循环内仅 tool_result 翻 false（thinking/override/partial 不动标记）。每 inject 重置。
+ - 判定仅一条：settle 后仍无收尾正文即报 error（零活动轮 / usage-only 轮 / thinking 尾 / tool_result 尾全覆盖）；误报容忍=紧链上限 2 封顶（D-003），nudge 文案含「若已完成请说明」。
++
++## 2026-09-13 24h 审查 P2 两修（ql-20260913-007-1351）
++
++- atomic-write 目录 fsync：writeFileAtomic rename 后补 `open(dirname, 'r') + sync()`（POSIX 掉电窗口目录项持久；Windows 不支持开目录 best-effort 吞掉）——tests/atomic-write.test 加 open('r') 探针断言（跨平台记录调用意图，Windows 真实 open 拒由实现吞）。
++- PROVIDER_RELOAD_ENGINES 派生化：手写 `['claude','codex','pi']` 改从 INTERACTIVE_PROVIDERS.switchable 派生（照前端 provider-caps.ts 同款手法）并导出——provider-adapter-registry.test 新增守护⑥锁「消费侧=注册表」+ claude/codex/pi 语义锚；新引擎声明 switchable:true 后前后端同解锁，消除前端放行而 daemon 抛错的漏网点。
+diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+index 01a3f2268..b7b33e7f4 100644
+--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+@@ -2783,7 +2783,7 @@ describe("汇总收口状态卡（task-10）", () => {
+     expect(plain).toBeNull();
+   });
+ 
+-  it("parseGroupLiveLog：实时 system 事件带 metadata.consensus_card → entry；不带 → ignore", () => {
++  it("parseGroupLiveLog：实时 system 事件带卡 → 卡条目；无卡 → 系统提示行条目（2026-09-13 放行，合成 id）；空白内容 → ignore", () => {
+     const env = {
+       channel: "system",
+       content: "汇总收口状态：converging",
+@@ -2801,11 +2801,25 @@ describe("汇总收口状态卡（task-10）", () => {
+     } as Parameters<typeof parseGroupLiveLog>[0];
+     const hit = parseGroupLiveLog(env, "u-me");
+     expect(hit.type).toBe("entry");
+-    const miss = parseGroupLiveLog(
+-      { ...env, metadata: null } as Parameters<typeof parseGroupLiveLog>[0],
++    // 无卡 system 事件 = 群内系统提示行（限频/成员打断/触发失败/收口失败
++    // 四类 ephemeral 实时提示）——2026-09-13 前被 ignore 分支整类吞掉。
++    const notice = parseGroupLiveLog(
++      { ...env, metadata: null, log_id: null } as Parameters<typeof parseGroupLiveLog>[0],
+       "u-me",
+     );
+-    expect(miss.type).toBe("ignore");
++    expect(notice.type).toBe("entry");
++    if (notice.type === "entry" && notice.entry.kind === "system") {
++      expect(notice.entry.content).toBe("汇总收口状态：converging");
++      expect(notice.entry.id.startsWith("sys-")).toBe(true);
++    } else {
++      throw new Error("无卡 system 事件应产出 kind=system 条目");
++    }
++    // 空白内容防御：仍 ignore（不产空行）。
++    const blank = parseGroupLiveLog(
++      { ...env, metadata: null, content: "   " } as Parameters<typeof parseGroupLiveLog>[0],
++      "u-me",
++    );
++    expect(blank.type).toBe("ignore");
+   });
+ 
+   it("applyGroupTimelineEvent：consensus 同 log_id 原位替换（D-006 卡面 UPDATE 镜像），不双条", () => {
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 937a94f8f..75b154f73 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -664,7 +664,20 @@ export function parseGroupLiveLog(
+         },
+       };
+     }
+-    return { type: "ignore" };
++    // 群内系统提示行（channel=system 无状态卡）：限频/成员打断/成员触发失败/
++    // 汇总收口失败四类 ephemeral 实时提示——后端不落库（刷新即隐，持久面走
++    // 响应 DTO/状态卡），2026-09-13 前由 ignore 分支整类吞掉（用户可感沉默）。
++    // 无 log_id：合成 id（timestamp+内容前缀）供时间轴去重与同拍定序稳定。
++    if (!content.trim()) return { type: "ignore" };
++    return {
++      type: "entry",
++      entry: {
++        kind: "system",
++        id: `sys-${env.timestamp ?? ""}-${content.slice(0, 32)}`,
++        timestamp: env.timestamp ?? "",
++        content,
++      },
++    };
+   }
+   if (env.channel !== "stdout") return { type: "ignore" };
+   // 撤回令箭（stale=true 且 [ASSISTANT_OVERRIDE] 前缀；分类器 override kind 的
+diff --git a/sillyhub-daemon/src/atomic-write.ts b/sillyhub-daemon/src/atomic-write.ts
+index ad22377da..7617806fc 100644
+--- a/sillyhub-daemon/src/atomic-write.ts
++++ b/sillyhub-daemon/src/atomic-write.ts
+@@ -1,11 +1,12 @@
+ /**
+  * 原子写原语——per-session 供应商配置写盘的事务性基座（D-003@v1）。
+  *
+- * 语义：写 `<path>.tmp-<pid>-<rand>` → fsync → rename 顶替。任一观察时刻
+- * 目标文件要么旧全文要么新全文；进程崩溃最坏残留 tmp（本函数失败路径
+- * best-effort 清理，且 tmp 名带随机段、残留不挡后续写入）。rename 在 POSIX
+- * 原子；Windows 走 MoveFileEx(REPLACE_EXISTING)，对已存在目标同样顶替
+- * （win32 顶替语义由 tests/atomic-write.test.ts 本机锁定）。
++ * 语义：写 `<path>.tmp-<pid>-<rand>` → fsync → rename 顶替 → fsync 父目录
++ * （目录项持久，POSIX 掉电窗口补齐；Windows 不支持目录 fsync，best-effort
++ * 吞掉）。任一观察时刻目标文件要么旧全文要么新全文；进程崩溃最坏残留 tmp
++ * （本函数失败路径 best-effort 清理，且 tmp 名带随机段、残留不挡后续写入）。
++ * rename 在 POSIX 原子；Windows 走 MoveFileEx(REPLACE_EXISTING)，对已存在
++ * 目标同样顶替（win32 顶替语义由 tests/atomic-write.test.ts 本机锁定）。
+  *
+  * 适用边界（design 划界）：配置文件写入（auth.json/config.toml/models.json/
+  * settings.json/宿主镜像拷贝）；数据搬运（如 rollout thread 拷贝）不适用——
+@@ -14,6 +15,7 @@
+ 
+ import { randomUUID } from 'node:crypto';
+ import { open, rename, unlink } from 'node:fs/promises';
++import { dirname } from 'node:path';
+ 
+ export async function writeFileAtomic(
+   path: string,
+@@ -30,6 +32,21 @@ export async function writeFileAtomic(
+       await handle.close();
+     }
+     await rename(tmpPath, path);
++    // 目录 fsync（2026-09-13 24h 审查 P2）：rename 只改目录项，文件级 fsync
++    // 不保证目录项落盘——POSIX 掉电窗口内 rename 可能整体丢失（回退旧文或
++    // 目标消失）。fsync 父目录补上；Windows 不支持 open 目录（EISDIR/EPERM）
++    // 与部分文件系统不支持目录 fsync，best-effort 吞掉（win32 顶替语义由
++    // 既有测试锁定，此处只补 POSIX 持久性短板）。
++    try {
++      const dirHandle = await open(dirname(path), 'r');
++      try {
++        await dirHandle.sync();
++      } finally {
++        await dirHandle.close();
++      }
++    } catch {
++      /* Windows / 不支持目录 fsync 的文件系统：尽力而为，不失败主链路 */
++    }
+   } catch (e) {
+     try {
+       await unlink(tmpPath);
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 5ae058c14..b68392d36 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -91,10 +91,18 @@ import { daemonStateDir } from '../config.js';
+ /**
+  * 2026-09-12-provider-file-tx D-005@v2：reload 引擎白名单（provider 维度门）。
+  * 仅 provider 切换载荷（opts.providerConfig !== undefined）判门；config-only 路径
+- * （人格/配置切换）不受限——cursor 的 reloadWithConfig 行为保持。口径与前端
+- * frontend/src/lib/provider-caps.ts PROVIDER_SWITCH_ENGINES 对齐（改任一侧须同步）。
++ * （人格/配置切换）不受限——cursor 的 reloadWithConfig 行为保持。
++ * 2026-09-13 24h 审查 P2：由手写 ['claude','codex','pi'] 改从 INTERACTIVE_PROVIDERS
++ * 的 switchable 派生（照前端 frontend/src/lib/provider-caps.ts PROVIDER_SWITCH_
++ * ENGINES 同款手法）——新引擎接入声明 switchable:true 后前端解锁而 daemon 此门
++ * 抛错的漏网点消除；与 caps.provider_switch 的单源一致由 provider-adapter-
++ * registry.test 既有断言 + 本常量派生化双重锁定。
+  */
+-const PROVIDER_RELOAD_ENGINES: ReadonlySet<string> = new Set(['claude', 'codex', 'pi']);
++export const PROVIDER_RELOAD_ENGINES: ReadonlySet<string> = new Set(
++  Object.entries(INTERACTIVE_PROVIDERS)
++    .filter(([, adapter]) => adapter.switchable)
++    .map(([provider]) => provider),
++);
+ import { migrateCodexThreadFromHost } from '../codex-settings.js';
+ import {
+   applyProviderFileSettingsForReload,
+diff --git a/sillyhub-daemon/tests/atomic-write.test.ts b/sillyhub-daemon/tests/atomic-write.test.ts
+index fb9311656..a1de0789d 100644
+--- a/sillyhub-daemon/tests/atomic-write.test.ts
++++ b/sillyhub-daemon/tests/atomic-write.test.ts
+@@ -1,10 +1,12 @@
+ import { afterEach, describe, expect, it, vi } from 'vitest';
+ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { dirname, join } from 'node:path';
+ 
+-// rename 可注入失败（失败保留旧全文用例）；默认透传真实实现。
++// rename 可注入失败（失败保留旧全文用例）；open 记录 'r' 旗标调用（目录
++// fsync 探针——Windows 真实 open(dir) 会拒，但调用意图被记录）。
+ const renameHook = vi.hoisted(() => ({ failNext: false }));
++const openReads = vi.hoisted(() => ({ paths: [] as string[] }));
+ vi.mock('node:fs/promises', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('node:fs/promises')>();
+   return {
+@@ -16,6 +18,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
+       }
+       return actual.rename(...args);
+     },
++    open: (...args: Parameters<typeof actual.open>) => {
++      if (args[1] === 'r') openReads.paths.push(String(args[0]));
++      return actual.open(...args);
++    },
+   };
+ });
+ 
+@@ -25,6 +31,7 @@ let dir: string;
+ 
+ async function freshDir(): Promise<string> {
+   dir = await mkdtemp(join(tmpdir(), 'atomic-write-'));
++  openReads.paths.length = 0;
+   return dir;
+ }
+ 
+@@ -48,6 +55,20 @@ describe('writeFileAtomic（D-003@v1 原子写基座）', () => {
+     expect(tmpLeftover(await readdir(d))).toEqual([]);
+   });
+ 
++  it('rename 后对父目录发起 fsync（open(dirname, "r")；2026-09-13 P2）', async () => {
++    const d = await freshDir();
++    const target = join(d, 'config.toml');
++
++    await writeFileAtomic(target, 'x');
++
++    // 目录 fsync 意图必须发生（POSIX 掉电窗口目录项持久）；Windows 真实
++    // open(dir,'r') 拒绝由实现 best-effort 吞——探针记录的是调用意图，
++    // 跨平台断言恒成立。
++    expect(openReads.paths).toContain(dirname(target));
++    // 主链路不受目录 fsync 结果影响：目标仍是新全文。
++    expect(await readFile(target, 'utf-8')).toBe('x');
++  });
++
+   it('顶替已存在目标（win32=MoveFileEx REPLACE_EXISTING 语义锁定）：旧全文原子换新全文', async () => {
+     const d = await freshDir();
+     const target = join(d, 'config.toml');
+diff --git a/sillyhub-daemon/tests/provider-adapter-registry.test.ts b/sillyhub-daemon/tests/provider-adapter-registry.test.ts
+index 1b4f703f2..a54fda724 100644
+--- a/sillyhub-daemon/tests/provider-adapter-registry.test.ts
++++ b/sillyhub-daemon/tests/provider-adapter-registry.test.ts
+@@ -268,3 +268,22 @@ describe('task-06 守护⑤ 生成脚本幂等（gen-provider-caps.mjs 两连跑
+     }
+   });
+ });
++
++describe('2026-09-13 守护⑥ reload 白名单派生（switchable 单源消费侧对账）', () => {
++  it('PROVIDER_RELOAD_ENGINES === INTERACTIVE_PROVIDERS.switchable 引擎集', async () => {
++    // 手写白名单时代的漏网点：新引擎声明 switchable:true 后前端（生成的
++    // PROVIDER_SWITCH_ENGINES）解锁而 daemon reload 门仍抛错——派生化后本
++    // 断言锁死"消费侧=注册表"，漂移即红。
++    const { PROVIDER_RELOAD_ENGINES } = await import('../src/interactive/session-manager.js');
++    const derived = new Set(
++      Object.entries(INTERACTIVE_PROVIDERS)
++        .filter(([, adapter]) => adapter.switchable)
++        .map(([provider]) => provider),
++    );
++    expect(PROVIDER_RELOAD_ENGINES).toEqual(derived);
++    // 语义锚：当前三家可切换引擎必须在集内（防注册表误改 switchable 静默缩门）。
++    for (const engine of ['claude', 'codex', 'pi']) {
++      expect(PROVIDER_RELOAD_ENGINES.has(engine), `${engine} 应在 reload 白名单`).toBe(true);
++    }
++  });
++});

@@ -91,10 +91,18 @@ import { daemonStateDir } from '../config.js';
 /**
  * 2026-09-12-provider-file-tx D-005@v2：reload 引擎白名单（provider 维度门）。
  * 仅 provider 切换载荷（opts.providerConfig !== undefined）判门；config-only 路径
- * （人格/配置切换）不受限——cursor 的 reloadWithConfig 行为保持。口径与前端
- * frontend/src/lib/provider-caps.ts PROVIDER_SWITCH_ENGINES 对齐（改任一侧须同步）。
+ * （人格/配置切换）不受限——cursor 的 reloadWithConfig 行为保持。
+ * 2026-09-13 24h 审查 P2：由手写 ['claude','codex','pi'] 改从 INTERACTIVE_PROVIDERS
+ * 的 switchable 派生（照前端 frontend/src/lib/provider-caps.ts PROVIDER_SWITCH_
+ * ENGINES 同款手法）——新引擎接入声明 switchable:true 后前端解锁而 daemon 此门
+ * 抛错的漏网点消除；与 caps.provider_switch 的单源一致由 provider-adapter-
+ * registry.test 既有断言 + 本常量派生化双重锁定。
  */
-const PROVIDER_RELOAD_ENGINES: ReadonlySet<string> = new Set(['claude', 'codex', 'pi']);
+export const PROVIDER_RELOAD_ENGINES: ReadonlySet<string> = new Set(
+  Object.entries(INTERACTIVE_PROVIDERS)
+    .filter(([, adapter]) => adapter.switchable)
+    .map(([provider]) => provider),
+);
 import { migrateCodexThreadFromHost } from '../codex-settings.js';
 import {
   applyProviderFileSettingsForReload,

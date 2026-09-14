@@ -664,7 +664,20 @@ export function parseGroupLiveLog(
         },
       };
     }
-    return { type: "ignore" };
+    // 群内系统提示行（channel=system 无状态卡）：限频/成员打断/成员触发失败/
+    // 汇总收口失败四类 ephemeral 实时提示——后端不落库（刷新即隐，持久面走
+    // 响应 DTO/状态卡），2026-09-13 前由 ignore 分支整类吞掉（用户可感沉默）。
+    // 无 log_id：合成 id（timestamp+内容前缀）供时间轴去重与同拍定序稳定。
+    if (!content.trim()) return { type: "ignore" };
+    return {
+      type: "entry",
+      entry: {
+        kind: "system",
+        id: `sys-${env.timestamp ?? ""}-${content.slice(0, 32)}`,
+        timestamp: env.timestamp ?? "",
+        content,
+      },
+    };
   }
   if (env.channel !== "stdout") return { type: "ignore" };
   // 撤回令箭（stale=true 且 [ASSISTANT_OVERRIDE] 前缀；分类器 override kind 的

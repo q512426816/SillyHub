@@ -59,6 +59,12 @@ turn 收尾: classifyModelError → result.modelError → daemon 桥接 notifyRu
 主 agent MCP: isMainAgentSession(ctx.stage==='orchestrator') → mainAgentMcpConfigProvider
   经 mergeMcpConfigs 注入 daemon 内置 MCP server；恢复时按 record.stage 重注入
 reloadWithProvider: buildSpawnEnv 构造新 env；null=停止供应商回退本机凭证。
+  provider 维度门 PROVIDER_RELOAD_ENGINES（D-005@v2；2026-09-13 由手写
+  ['claude','codex','pi'] 改 INTERACTIVE_PROVIDERS.switchable 派生，照前端
+  provider-caps.ts PROVIDER_SWITCH_ENGINES 同款手法，provider-adapter-registry
+  守护⑥ 锁"消费侧=注册表"）——新引擎声明 switchable:true 后前后端同解锁，
+  不再出现前端放行而 daemon 侧抛错的漏网点；config-only 路径（人格/配置切换）
+  不受限。
   CLAUDE_CONFIG_DIR（resume/reload 两路径）按 transcript 实际位置判定
   （claude-transcript-dir：隔离目录命中→隔离，保 ql-20260807-002 停供应商语义；
   仅宿主机 ~/.claude 命中→不隔离；探测不到→维持隔离默认，ql-20260822-009）；
@@ -135,3 +141,8 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快�
 - 静默中断检测（FR-2）：轮收敛（agent_settled 后无 pendingTurnError）时判定 `!lastWasFinalText` → 合成 error result（`[silent stream truncation] 上一轮输出流中断…`），session-manager 既有 classifyModelError 按断流关键词归 provider_error/retryable=true，后端三分支自动恢复得以触发。
 - `lastWasFinalText` 标记翻转两入口（message_end 边粒度）：①raw message_end 拦截处（与 usage 累计钩同位）按 content parts 是否含非空 text part 收口——[text,thinking] 同消息排列终值正确为 true；②归一化事件循环内仅 tool_result 翻 false（thinking/override/partial 不动标记）。每 inject 重置。
 - 判定仅一条：settle 后仍无收尾正文即报 error（零活动轮 / usage-only 轮 / thinking 尾 / tool_result 尾全覆盖）；误报容忍=紧链上限 2 封顶（D-003），nudge 文案含「若已完成请说明」。
+
+## 2026-09-13 24h 审查 P2 两修（ql-20260914-001-b14c）
+
+- atomic-write 目录 fsync：writeFileAtomic rename 后补 `open(dirname, 'r') + sync()`（POSIX 掉电窗口目录项持久；Windows 不支持开目录 best-effort 吞掉）——tests/atomic-write.test 加 open('r') 探针断言（跨平台记录调用意图，Windows 真实 open 拒由实现吞）。
+- PROVIDER_RELOAD_ENGINES 派生化：手写 `['claude','codex','pi']` 改从 INTERACTIVE_PROVIDERS.switchable 派生（照前端 provider-caps.ts 同款手法）并导出——provider-adapter-registry.test 新增守护⑥锁「消费侧=注册表」+ claude/codex/pi 语义锚；新引擎声明 switchable:true 后前后端同解锁，消除前端放行而 daemon 抛错的漏网点。

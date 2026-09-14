@@ -2783,7 +2783,7 @@ describe("汇总收口状态卡（task-10）", () => {
     expect(plain).toBeNull();
   });
 
-  it("parseGroupLiveLog：实时 system 事件带 metadata.consensus_card → entry；不带 → ignore", () => {
+  it("parseGroupLiveLog：实时 system 事件带卡 → 卡条目；无卡 → 系统提示行条目（2026-09-13 放行，合成 id）；空白内容 → ignore", () => {
     const env = {
       channel: "system",
       content: "汇总收口状态：converging",
@@ -2801,11 +2801,25 @@ describe("汇总收口状态卡（task-10）", () => {
     } as Parameters<typeof parseGroupLiveLog>[0];
     const hit = parseGroupLiveLog(env, "u-me");
     expect(hit.type).toBe("entry");
-    const miss = parseGroupLiveLog(
-      { ...env, metadata: null } as Parameters<typeof parseGroupLiveLog>[0],
+    // 无卡 system 事件 = 群内系统提示行（限频/成员打断/触发失败/收口失败
+    // 四类 ephemeral 实时提示）——2026-09-13 前被 ignore 分支整类吞掉。
+    const notice = parseGroupLiveLog(
+      { ...env, metadata: null, log_id: null } as Parameters<typeof parseGroupLiveLog>[0],
       "u-me",
     );
-    expect(miss.type).toBe("ignore");
+    expect(notice.type).toBe("entry");
+    if (notice.type === "entry" && notice.entry.kind === "system") {
+      expect(notice.entry.content).toBe("汇总收口状态：converging");
+      expect(notice.entry.id.startsWith("sys-")).toBe(true);
+    } else {
+      throw new Error("无卡 system 事件应产出 kind=system 条目");
+    }
+    // 空白内容防御：仍 ignore（不产空行）。
+    const blank = parseGroupLiveLog(
+      { ...env, metadata: null, content: "   " } as Parameters<typeof parseGroupLiveLog>[0],
+      "u-me",
+    );
+    expect(blank.type).toBe("ignore");
   });
 
   it("applyGroupTimelineEvent：consensus 同 log_id 原位替换（D-006 卡面 UPDATE 镜像），不双条", () => {

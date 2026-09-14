@@ -1,0 +1,93 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-89596588",
+  "totals": {
+    "files": 8,
+    "additions": 119,
+    "deletions": 15
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
+      "declared": true,
+      "additions": 11,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+      "declared": true,
+      "additions": 18,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "declared": true,
+      "additions": 14,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/atomic-write.ts",
+      "declared": true,
+      "additions": 22,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+      "declared": true,
+      "additions": 11,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/atomic-write.test.ts",
+      "declared": true,
+      "additions": 23,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/provider-adapter-registry.test.ts",
+      "declared": true,
+      "additions": 19,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": [
+      {
+        "file": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+        "sessions": [
+          "quick-ffb92f60"
+        ]
+      }
+    ]
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260914-001-b14c",
+  "sessionId": "quick-89596588",
+  "savedAt": "2026-09-14T01:08:35.803Z",
+  "patchSha256": "ba115fffd2c87ee5f2a62808c2c5b592fb736962ce34aea400cf10041f1e76fa",
+  "patchStatus": "ok"
+}
