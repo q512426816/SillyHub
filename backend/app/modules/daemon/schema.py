@@ -551,6 +551,22 @@ class SessionReopenResponse(BaseModel):
     status: str
 
 
+class SessionExportRequest(BaseModel):
+    """POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。
+
+    会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+
+    ``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=
+    本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=
+    ``api-types.ts``（具名产源，字段名/形状不得增删改）。
+
+    去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收
+    原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。
+    """
+
+    session_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+    tier: Literal["chat", "full"]
+
+
 # ── Register ────────────────────────────────────────────────────────────────
 
 

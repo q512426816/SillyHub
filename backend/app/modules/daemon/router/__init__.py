@@ -128,6 +128,7 @@ from . import (  # noqa: E402, F401, I001
     notify,  # 首现 #31-40（恢复/挂起 + notify_*×6，#45-48 权限/dialog）
     daemon_rpc,  # 首现 #43-44（fs list-dir/roots，#77-83 pending/controls/skills/mcp）
     session_crud,  # 首现 #49-53（sessions 域，#60-66 reopen..ctx-window）+ D-010 二回合 pin/unpin/rename
+    session_export,  # 2026-09-14-session-export task-03：POST /sessions/export（字面量前置 {session_id}）
     session_queue,  # 首现 #54-59（queue ×6）+ D-010 二回合 scheduled ×3
     session_insights,  # 首现 #67-71（stream/runs/tasks/logs/usage）
     session_team,  # 首现 #72-73（team-mission trigger/list）
@@ -205,9 +206,12 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "submit_session_permission_request",
     "list_pending_dialogs",
     "list_dialog_history",
-    # session_crud（/sessions/events 先于 /sessions/{session_id}，同形状保序对）
+    # session_crud（/sessions/events 与 POST /sessions/export 两字面量先于
+    # /sessions/{session_id} 参数路由，同形状保序对——2026-09-14-session-export
+    # R-01：export 不前置会被 {session_id} 抢匹配，ppm 同类坑）
     "list_sessions",
     "stream_sessions_events",
+    "export_sessions",
     "get_session_detail",
     "create_session",
     "inject_session",

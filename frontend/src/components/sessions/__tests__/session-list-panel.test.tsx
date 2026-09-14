@@ -3500,3 +3500,153 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
     expect(titleSlot?.className).toContain("flex-1");
   });
 });
+
+// ── 15. 导出入口（2026-09-14-session-export task-07 / FR-01 / FR-06） ──────
+// task-06 双入口 UI 契约回归锁：批量栏「导出选中（N）」Dropdown + 行 hover
+// 下载图标（aria-label「导出 {title}」）两入口共享两档菜单（items 单一源
+// SESSION_EXPORT_MENU_ITEMS：导出对话（Markdown）/ 导出完整信息（JSON+附件））；
+// onExportSessions 可选 prop——未传则两入口零渲染（照 onDeleteSessions 可选
+// 模式先例）。回调 mock 不真发请求（lib 层 exportSessions 由 sessions-portal
+// dynamic import 隔离，本测只锁面板契约：ids 数组 + tier 精确断言；成功 toast
+// 口径按 handleExportSessions 实现，经 notifyMocks spy 断言）。
+// 依据：session-list-panel.tsx task-06 段——批量栏 Dropdown（「导出选中（N）」
+// 按钮）/ 行级「导出 {title}」图标按钮（!batchMode 才渲染）/ 两处
+// SESSION_EXPORT_MENU_ITEMS + onExportSessions(ids, tier) 回调。
+// antd Dropdown 弹层 portal 挂 body：经 screen 全局 menuitem 查询（不加 testid）。
+// 多选入口沿用「批量与单条删除」块流程（多选按钮渲染门控 batchEnabled=
+// Boolean(onDeleteSessions)——批量导出用例需同时传 onDeleteSessions）。
+describe("SessionListPanel 导出入口（2026-09-14-session-export task-07）", () => {
+  beforeEach(() => {
+    // notifyMocks 为文件级共享 spy：本 describe 局部清零，锁 toast 断言口径。
+    notifyMocks.success.mockClear();
+    notifyMocks.warning.mockClear();
+    notifyMocks.error.mockClear();
+  });
+
+  /** 标准导出固件（ws-1 组内 s-1 会话A / s-2 会话B）。 */
+  function exportFixture() {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-1", title: "会话B" }),
+      ]),
+    );
+  }
+
+  it("批量 chat 档：多选勾 2 条 → 「导出选中（2）」→「导出对话（Markdown）」→ onExportSessions 带 ids=[s-1,s-2] tier=chat", async () => {
+    exportFixture();
+    const onExportSessions = vi.fn().mockResolvedValue(undefined);
+    renderPanel(
+      <SessionListPanel
+        onDeleteSessions={vi.fn().mockResolvedValue(0)}
+        onExportSessions={onExportSessions}
+      />,
+    );
+    await openGroup("SillyHub");
+
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
+    // 多选态：点行 = 勾选（照既有批量删除用例流程，勾 2 条）
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话A" }));
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话B" }));
+    const exportBtn = await screen.findByRole("button", {
+      name: /导出选中（2）/,
+    });
+
+    // antd Dropdown trigger=click：弹层 portal 挂 body，经 screen 查 menuitem
+    fireEvent.click(exportBtn);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "导出对话（Markdown）" }),
+    );
+    await waitFor(() =>
+      expect(onExportSessions).toHaveBeenCalledWith(["s-1", "s-2"], "chat"),
+    );
+  });
+
+  it("批量 full 档：同菜单点「导出完整信息（JSON+附件）」→ tier=full（两档全锁）+ 成功 toast full 文案", async () => {
+    exportFixture();
+    const onExportSessions = vi.fn().mockResolvedValue(undefined);
+    renderPanel(
+      <SessionListPanel
+        onDeleteSessions={vi.fn().mockResolvedValue(0)}
+        onExportSessions={onExportSessions}
+      />,
+    );
+    await openGroup("SillyHub");
+
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话A" }));
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话B" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /导出选中（2）/ }),
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "导出完整信息（JSON+附件）" }),
+    );
+    await waitFor(() =>
+      expect(onExportSessions).toHaveBeenCalledWith(["s-1", "s-2"], "full"),
+    );
+    // 面板成功路径 toast（handleExportSessions，full 文案分支）
+    await waitFor(() =>
+      expect(notifyMocks.success).toHaveBeenCalledWith(
+        "已开始下载完整信息导出（2 个会话）",
+      ),
+    );
+  });
+
+  it("行级入口：未进批量态点行 hover 下载图标（aria-label「导出 会话A」）→ chat 档 → 单会话 id + 成功 toast", async () => {
+    exportFixture();
+    const onExportSessions = vi.fn().mockResolvedValue(undefined);
+    renderPanel(<SessionListPanel onExportSessions={onExportSessions} />);
+    await openGroup("SillyHub");
+
+    // hover 按钮经 CSS 显隐（jsdom 不裁剪 DOM，照「hover 删除按钮」用例直查）
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "导出 会话A" }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "导出对话（Markdown）" }),
+    );
+    await waitFor(() =>
+      expect(onExportSessions).toHaveBeenCalledWith(["s-1"], "chat"),
+    );
+    // 面板成功路径 toast（handleExportSessions，chat 文案分支）
+    await waitFor(() =>
+      expect(notifyMocks.success).toHaveBeenCalledWith(
+        "已开始下载对话导出（1 个会话）",
+      ),
+    );
+  });
+
+  it("未传 onExportSessions：批量栏无「导出选中」、行无「导出 {title}」图标（可选模式零渲染）", async () => {
+    exportFixture();
+    // onDeleteSessions 仍传（多选按钮 batchEnabled 门控依赖它——验证导出口
+    // 缺省时批量栏其余操作照常、仅导出入口零渲染）
+    renderPanel(
+      <SessionListPanel onDeleteSessions={vi.fn().mockResolvedValue(0)} />,
+    );
+    await openGroup("SillyHub");
+
+    // 行级：两行均无导出图标
+    await screen.findByRole("button", { name: "会话 会话A" });
+    expect(
+      screen.queryByRole("button", { name: "导出 会话A" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "导出 会话B" }),
+    ).not.toBeInTheDocument();
+
+    // 批量栏：进多选态勾 1 条，「删除选中（1）」在而「导出选中」零渲染
+    fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话A" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /删除选中（1）/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: /导出选中/ }),
+    ).not.toBeInTheDocument();
+  });
+});

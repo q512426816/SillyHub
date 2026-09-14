@@ -80,6 +80,10 @@ from app.modules.ppm.common.session_binding import PpmItemKind
 from app.modules.ppm.problem.model import PpmProblemList
 from app.modules.ppm.task.model import PlanTask
 
+# 2026-09-14-session-export task-02：导出委托签名注解用（storage 透传，
+# 不跨模块 import ppm）。
+from app.modules.session_attachment.storage import SessionAttachmentStorage
+
 log = get_logger(__name__)
 
 # task-05（2026-08-14-sessions-portal / D-012@v1 / FR-05）：会话内配置热切换 WS
@@ -245,6 +249,7 @@ __all__ = [
 from . import attachments as _attachments  # noqa: E402
 from . import control as _control  # noqa: E402
 from . import create as _create  # noqa: E402
+from . import export as _export  # noqa: E402
 from . import helpers as _helpers  # noqa: E402
 from . import inject as _inject  # noqa: E402
 from . import inject_gates as _inject_gates  # noqa: E402
@@ -1139,4 +1144,23 @@ class SessionService(BackgroundTaskMixin):
             self,
             session_id=session_id,
             actor_user_id=actor_user_id,
+        )
+
+    # ── 2026-09-14-session-export task-02：会话导出一行委托（服务收原生
+    #    参数不 import schema 模型；facade/router 接线归 task-03）──────────
+
+    async def export_sessions(
+        self,
+        user_id: uuid.UUID,
+        *,
+        session_ids: list[uuid.UUID],
+        tier: Literal["chat", "full"],
+        storage: SessionAttachmentStorage,
+    ) -> _export.SessionExportResult:
+        return await _export.export_sessions(
+            self,
+            user_id,
+            session_ids=session_ids,
+            tier=tier,
+            storage=storage,
         )

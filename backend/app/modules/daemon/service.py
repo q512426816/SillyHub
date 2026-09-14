@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from app.modules.daemon.schema import (
     SessionReopenResponse,
     TeamMissionCreateBlock,
 )
+from app.modules.session_attachment.storage import SessionAttachmentStorage
 
 log = get_logger(__name__)
 
@@ -78,6 +79,13 @@ from app.modules.daemon.session.service import (  # noqa: E402, F401
     SessionControlResult,
     SessionDispatchResult,
     SessionRecoveryResult,
+)
+
+# 2026-09-14-session-export task-02/03：导出产物 DTO + 413 异常类（AppError 子类，
+# 全局 handler 自动映射），照「异常类定义在子包、facade re-export 路径不变」惯例。
+from app.modules.daemon.session.service.export import (  # noqa: E402, F401
+    SessionExportResult,
+    SessionExportTooLarge,
 )
 
 if TYPE_CHECKING:
@@ -1093,6 +1101,24 @@ class DaemonService:
             before=before,
             q=q,
             **({"limit": limit} if limit is not None else {}),
+        )
+
+    # 2026-09-14-session-export task-03：会话导出一行透传（照 get_agent_session_logs
+    # 先例）。服务收原生参数不 import schema 模型；storage 由 router 层 Depends
+    # 注入一并透传（ids 去重保序在端点层完成后才到达这里）。
+    async def export_sessions(
+        self,
+        user_id: uuid.UUID,
+        *,
+        session_ids: list[uuid.UUID],
+        tier: Literal["chat", "full"],
+        storage: SessionAttachmentStorage,
+    ) -> SessionExportResult:
+        return await self._sess.export_sessions(
+            user_id,
+            session_ids=session_ids,
+            tier=tier,
+            storage=storage,
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────

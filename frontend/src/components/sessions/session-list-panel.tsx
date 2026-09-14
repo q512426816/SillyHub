@@ -48,6 +48,15 @@
  *   前置键，D-002），前端 byWs 桶保序插入不做本地重排；群行（GroupChatRow）
  *   不加（群列表无 pinned 字段）。
  *
+ * task-06（2026-09-14-session-export / FR-01/FR-06）：会话导出双入口——批量
+ *   操作条「导出选中（N）」+ 行 hover 操作列 Download 图标（归档之后、删除之前，
+ *   原型 .ops 顺序），均为 antd Dropdown 两档菜单（chat Markdown / full JSON+
+ *   附件，items 单一源 SESSION_EXPORT_MENU_ITEMS 防两入口文案漂移）；onExport
+ *   Sessions 可选（未传两入口零渲染——悬浮助手 runtime 抽屉等既有调用方零破坏）；
+ *   exporting 独立 state（不共享 deleting/archiving，导出失败不影响其余操作）；
+ *   失败 toast 由本层 catch（lib 层 task-05 契约抛错不弹），门户接线见
+ *   sessions-portal.tsx。多选仍限组内（batchGroupId 语义不动）。
+ *
  * 工作区树（全局/workspace 形态）结构：
  *   筛选区：
  *     - 标题搜索（回车应用，X-11 保留；树形态为纯视图过滤不进数据层）
@@ -99,17 +108,29 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Input, Modal, Popover, Select, Spin, Tag } from "antd";
+import {
+  Button,
+  Dropdown,
+  Input,
+  Modal,
+  Popover,
+  Select,
+  Spin,
+  Tag,
+  type MenuProps,
+} from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import {
   Archive,
   ArchiveRestore,
   BookUser,
   Cloud,
+  Download,
   FileText,
   Folder,
   FolderOpen,
   ListChecks,
+  Loader2,
   Monitor,
   Pencil,
   Pin,
@@ -124,6 +145,8 @@ import { listChanges } from "@/lib/changes";
 import { useNotify } from "@/lib/errors";
 // 2026-09-09-sessions-visual-refresh task-08：引擎色点单一源（PROVIDER_META）
 import { PROVIDER_META } from "@/lib/daemon/runtimes";
+// task-06（2026-09-14-session-export）：导出档位类型单一源（task-05 lib 层导出）
+import type { SessionExportTier } from "@/lib/daemon/session-export";
 import { listQuicklogEntries } from "@/lib/quicklog";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
@@ -207,6 +230,18 @@ const STATUS_OPTIONS = [
  * label 取 PROVIDER_META）——原硬编码两档漏 pi/cursor，与实际可选引擎不符。
  */
 const AGENT_TABS = SESSION_ENGINE_OPTIONS.map((o) => ({ ...o }));
+
+/**
+ * task-06（2026-09-14-session-export / FR-01）：导出档位 Dropdown 菜单项——
+ * 批量栏「导出选中」与行 hover 下载图标两入口共享的单一源（防文案漂移），
+ * 文案与 prototype-session-export.html 逐字一致；key = SessionExportTier
+ * （chat=对话 Markdown 档 / full=完整 JSON+附件 zip 档，design 响应矩阵）。
+ * 本组件树 antd Dropdown 首例：色板经 ConfigProvider token，不手写 hex。
+ */
+const SESSION_EXPORT_MENU_ITEMS: MenuProps["items"] = [
+  { key: "chat", label: "导出对话（Markdown）" },
+  { key: "full", label: "导出完整信息（JSON+附件）" },
+];
 
 /**
  * ql-20260831-016：Modal.confirm 功能图标（删除/归档/取消归档共用）。
@@ -418,6 +453,17 @@ export interface SessionListPanelProps {
    * invalidate 列表，不动选中态与 ?session=。
    */
   onRenameSession?: (_id: string, _title: string) => Promise<number>;
+  /**
+   * task-06（2026-09-14-session-export / FR-01/FR-06）：导出会话回调（可选，
+   * 照 onDeleteSessions 可选模式——未传则批量栏「导出选中」与行 hover 下载
+   * 图标两入口零渲染，既有调用方零破坏）。tier 两档与后端
+   * SessionExportRequest 同形（SessionExportTier 单一源自 task-05 lib 层）；
+   * 失败 throw 由本面板 catch 出 toast（lib 层契约不弹）。
+   */
+  onExportSessions?: (
+    _ids: string[],
+    _tier: SessionExportTier,
+  ) => Promise<void>;
   /**
    * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
    * 到工作区/变更级。D-003@v2：scope 仅给全局端点多传 workspace_id/change_id
@@ -688,6 +734,7 @@ function WorkspaceTreeList({
   onPinSessions,
   onUnpinSessions,
   onRenameSession,
+  onExportSessions,
   scope,
   onNewInGroup,
   defaultExpandedWorkspaceId,
@@ -1422,6 +1469,28 @@ function WorkspaceTreeList({
     });
   };
 
+  // ── task-06（2026-09-14-session-export / FR-01/FR-06）：导出处理 ─────────
+  // exporting 独立 state（不共享 deleting/archiving——design 兼容策略：导出
+  // 进行中/失败不影响删除/归档等其余操作，反之亦然）；防重入 = handler 门控
+  // exporting + 两入口按钮 disabled/loading。lib 层 exportSessions 抛错不弹
+  // toast（task-05 契约），本层 catch 出 message.error（errMessage 自动取
+  // err.message）；成功时浏览器已触发保存，出「已开始下载」success toast。
+  const [exporting, setExporting] = useState(false);
+  const handleExportSessions = async (ids: string[], tier: SessionExportTier) => {
+    if (!onExportSessions || exporting || ids.length === 0) return;
+    setExporting(true);
+    try {
+      await onExportSessions(ids, tier);
+      notify.success(
+        `已开始下载${tier === "chat" ? "对话导出" : "完整信息导出"}（${ids.length} 个会话）`,
+      );
+    } catch (err) {
+      notify.error(err, "导出失败：未知错误");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-01~03）：
   // 置顶/重命名三处理——照 handleSingleArchive 模式（回调门控 + pinning/
   // renaming 状态防重入 + useNotify toast 照 notifyArchiveResult 口径）。
@@ -1816,6 +1885,23 @@ function WorkspaceTreeList({
                         handleSingleRename(id, oldTitle, newTitle)
                     : undefined
                 }
+                /* task-06（2026-09-14-session-export / FR-01/FR-06）：导出双
+                   入口透传——批量条 onBatchExport（组内勾选 ids，多选仍限组内
+                   batchGroupId 语义不动）+ 行级 onExport（单条 [id]）；
+                   exporting 照 deleting/archiving 通道下发（loading/disabled）。 */
+                onBatchExport={
+                  onExportSessions
+                    ? (tier: SessionExportTier) =>
+                        handleExportSessions([...checkedIds], tier)
+                    : undefined
+                }
+                onExport={
+                  onExportSessions
+                    ? (id: string, tier: SessionExportTier) =>
+                        handleExportSessions([id], tier)
+                    : undefined
+                }
+                exporting={exporting}
                 showAll={showAllGroupIds.has(group.id)}
                 onToggleShowAll={() =>
                   setShowAllGroupIds((prev) => {
@@ -2207,8 +2293,10 @@ function WorkspaceGroupNode({
   onBatchDelete,
   onBatchArchive,
   onBatchUnarchive,
+  onBatchExport,
   deleting,
   archiving,
+  exporting,
   checkedIds,
   onToggleChecked,
   selectedSessionId,
@@ -2219,6 +2307,7 @@ function WorkspaceGroupNode({
   onPin,
   onUnpin,
   onRename,
+  onExport,
   showAll,
   onToggleShowAll,
   hideMachineTitles,
@@ -2247,8 +2336,12 @@ function WorkspaceGroupNode({
   onBatchDelete: () => void;
   onBatchArchive: () => void;
   onBatchUnarchive: () => void;
+  /** task-06（2026-09-14-session-export）：批量导出（未传零按钮——悬浮助手等消费点）。 */
+  onBatchExport?: (_tier: SessionExportTier) => void;
   deleting: boolean;
   archiving: boolean;
+  /** task-06：导出进行中（独立于 deleting/archiving，照两通道下发驱动 loading）。 */
+  exporting: boolean;
   checkedIds: ReadonlySet<string>;
   onToggleChecked: (_id: string) => void;
   selectedSessionId?: string | null;
@@ -2262,6 +2355,8 @@ function WorkspaceGroupNode({
   onUnpin?: (_id: string, _title: string) => void;
   /** task-07：重命名提交（newTitle 已 strip 非空 ≤255）。 */
   onRename?: (_id: string, _oldTitle: string, _newTitle: string) => void;
+  /** task-06（2026-09-14-session-export）：行级导出（未传零按钮，照 onArchive 透传）。 */
+  onExport?: (_id: string, _tier: SessionExportTier) => void;
   showAll: boolean;
   onToggleShowAll: () => void;
   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
@@ -2572,6 +2667,29 @@ function WorkspaceGroupNode({
                   取消归档（{checkedCount}）
                 </Button>
               )}
+              {/* task-06（2026-09-14-session-export / FR-01）：批量导出——
+                  「导出选中（N）」+ antd Dropdown 两档菜单（items 单一源
+                  SESSION_EXPORT_MENU_ITEMS，文案与原型逐字一致）；与相邻删除/
+                  归档按钮同款 size="small"，disabled/loading 口径同删除按钮
+                  （checkedCount===0 置灰、导出中 loading 防重入）。 */}
+              {onBatchExport && (
+                <Dropdown
+                  menu={{
+                    items: SESSION_EXPORT_MENU_ITEMS,
+                    onClick: ({ key }) =>
+                      onBatchExport(key as SessionExportTier),
+                  }}
+                  trigger={["click"]}
+                >
+                  <Button
+                    size="small"
+                    disabled={checkedCount === 0 || exporting}
+                    loading={exporting}
+                  >
+                    导出选中（{checkedCount}）
+                  </Button>
+                </Dropdown>
+              )}
             </div>
           )}
           {sections.length === 0 ? (
@@ -2703,6 +2821,15 @@ function WorkspaceGroupNode({
                               ? (next: string) => onRename(s.id, title, next)
                               : undefined
                           }
+                          /* task-06（2026-09-14-session-export）：行级导出照
+                             onRename 透传模式（未传零按钮）。 */
+                          onExport={
+                            onExport
+                              ? (tier: SessionExportTier) =>
+                                  onExport(s.id, tier)
+                              : undefined
+                          }
+                          exporting={exporting}
                         />
                         {/* 2026-08-26-subsession-portal-grouping：父行附属分身
                             折叠组（组级 violet 徽标 + 子行缩进，design §4.B） */}
@@ -2765,6 +2892,14 @@ function WorkspaceGroupNode({
                                           onRename(c.id, c.title ?? "分身", next)
                                       : undefined
                                   }
+                                  /* task-06：分身行照主行透传导出入口。 */
+                                  onExport={
+                                    onExport
+                                      ? (tier: SessionExportTier) =>
+                                          onExport(c.id, tier)
+                                      : undefined
+                                  }
+                                  exporting={exporting}
                                 />
                               ))}
                           </div>
@@ -2821,6 +2956,14 @@ interface SessionRowProps {
   onPin?: () => void;
   onUnpin?: () => void;
   onRename?: (_newTitle: string) => void;
+  /**
+   * task-06（2026-09-14-session-export / FR-01/FR-06）：行级导出回调（可选，
+   * 未传零按钮——悬浮助手 runtime 抽屉等消费点）；档位菜单由单一源
+   * SESSION_EXPORT_MENU_ITEMS 渲染（aria-label「导出 {title}」）。
+   */
+  onExport?: (_tier: SessionExportTier) => void;
+  /** 导出进行中（共享防重入口径：导出中入口图标转 Loader2 旋转并禁点）。 */
+  exporting?: boolean;
   /** ql-20260823-003：树形态筛选智能体后隐藏引擎 chip（全组同引擎冗余）。 */
   hideEngineChip?: boolean;
   /**
@@ -2900,6 +3043,8 @@ function SessionRow({
   onPin,
   onUnpin,
   onRename,
+  onExport,
+  exporting,
   hideEngineChip,
   liveness,
   livenessUnread,
@@ -3206,6 +3351,35 @@ function SessionRow({
               >
                 <ArchiveRestore className="h-3 w-3" />
               </button>
+            )}
+            {/* task-06（2026-09-14-session-export / FR-01/FR-06）：行级导出——
+                归档之后、删除之前（原型 .ops 顺序），Download 图标 + 同款两档
+                Dropdown（menu items 单一源 SESSION_EXPORT_MENU_ITEMS，与批量栏
+                文案零漂移）；h-5 w-5 icon button 同款 hover 走 brand 语义阶
+                （同置顶/重命名款，不硬编码 hex）；导出中 Loader2 旋转 + 禁点
+                防重入；点击 stopPropagation 防行选中（菜单 portal 渲染不冒泡）。 */}
+            {onExport && (
+              <Dropdown
+                menu={{
+                  items: SESSION_EXPORT_MENU_ITEMS,
+                  onClick: ({ key }) => onExport(key as SessionExportTier),
+                }}
+                trigger={["click"]}
+              >
+                <button
+                  type="button"
+                  aria-label={`导出 ${title}`}
+                  disabled={exporting}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-brand-100 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {exporting ? (
+                    <Loader2 aria-hidden className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download aria-hidden className="h-3 w-3" />
+                  )}
+                </button>
+              </Dropdown>
             )}
             {onDelete && (
               <button

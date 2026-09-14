@@ -15121,6 +15121,46 @@
         }
       }
     },
+    "/api/daemon/sessions/export": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Export Sessions",
+        "description": "导出选中的会话（chat=Markdown 对话 / full=JSON+附件 zip；FR-01 / FR-02）。\n\n响应矩阵由服务层决定（``SessionExportResult``）：chat×单会话 =\n``text/markdown`` 单 .md；chat×多会话 与 full×任一 = ``application/zip``。\n下载文件名走 RFC 5987（``_rfc5987_filename`` 返回完整头值，含\n``attachment;`` 前缀与 ASCII 回退，中文文件名浏览器优先解码 filename*）。\n\n权限逐会话对齐详情端点口径（owner + 软删 404 → 群参与者探测，任一不可\n访问整包 404 不做部分成功）；跨用户 / 已软删 / 群非成员均 404 不泄露\n存在性，full 档附件总量超 512MB 返回 413 提示分批导出——两者均经全局\nAppError handler 自动映射，端点不捕获。",
+        "operationId": "export_sessions_api_daemon_sessions_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}": {
       "get": {
         "tags": [
@@ -62462,6 +62502,35 @@
         "type": "object",
         "title": "SessionEndRequest",
         "description": "gap-4 (design §5): daemon uplink body for POST /sessions/{id}/end.\n\nOptional body carried by the daemon ``notifySessionEnd`` call. ``status``\nis informational (the backend reconciles to ``ended`` regardless — failed\nsessions are still driven through end_session by the daemon after fail()).\n``reason`` is recorded into the ``session_ended`` SSE event for UI context."
+      },
+      "SessionExportRequest": {
+        "properties": {
+          "session_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Session Ids"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "full"
+            ],
+            "title": "Tier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_ids",
+          "tier"
+        ],
+        "title": "SessionExportRequest",
+        "description": "POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。\n\n会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+\n``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=\n本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=\n``api-types.ts``（具名产源，字段名/形状不得增删改）。\n\n去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收\n原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。"
       },
       "SessionInjectRequest": {
         "properties": {

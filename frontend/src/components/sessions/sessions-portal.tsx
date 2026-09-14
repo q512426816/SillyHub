@@ -45,6 +45,12 @@
  *   preContext { workspaceId, quickId, runtimeId }（X-13 双传语义 quicklog
  *   版，quickId 首句经 task-11 上送 quicklog_id 落自动绑定）。
  *
+ * task-06（2026-09-14-session-export / FR-01/FR-06）：会话导出接线——列表
+ *   双入口（批量栏「导出选中」+ 行 hover 下载图标，UI 归 session-list-panel）
+ *   经 onExportSessions → dynamic import lib/daemon/session-export（task-05
+ *   认证下载通道 exportSessions：401 单飞刷新重试 + blob 触发浏览器保存）；
+ *   导出是只读操作，不动选中态/invalidate；lib 抛错由面板 catch 出 toast。
+ *
  * 群聊分区（task-07 / 2026-09-01-session-group-chat / FR-01 / FR-04）：列表
  *   顶部「群聊」分区（SessionListPanel 内独立 useQuery 供数）+ 分区头「＋」
  *   开三步建群向导（CreateGroupWizard：群信息 → 邀请用户 → Agent 成员六要素）；
@@ -793,6 +799,17 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             ]);
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             return results.filter((r) => r.status === "rejected").length;
+          }}
+          /* task-06（2026-09-14-session-export / FR-01/FR-06）：导出会话——照
+             onDeleteSessions 回调模式（dynamic import lib，tier 类型经面板
+             props 上下文推得）。调 task-05 落地的 exportSessions 认证下载通道
+             （blob 触发浏览器保存）；导出只读，不动选中态/invalidate；lib 层
+             抛错不弹 toast（task-05 契约），throw 由面板 catch 出 message。 */
+          onExportSessions={async (ids, tier) => {
+            const { exportSessions } = await import(
+              "@/lib/daemon/session-export"
+            );
+            await exportSessions(ids, tier);
           }}
           /* task-06（2026-09-03-group-chat-archive-delete / FR-02/FR-03）：群
              收纳三回调（照会话回调模式：dynamic import lib → invalidate

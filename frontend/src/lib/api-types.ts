@@ -5681,6 +5681,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Sessions
+         * @description 导出选中的会话（chat=Markdown 对话 / full=JSON+附件 zip；FR-01 / FR-02）。
+         *
+         *     响应矩阵由服务层决定（``SessionExportResult``）：chat×单会话 =
+         *     ``text/markdown`` 单 .md；chat×多会话 与 full×任一 = ``application/zip``。
+         *     下载文件名走 RFC 5987（``_rfc5987_filename`` 返回完整头值，含
+         *     ``attachment;`` 前缀与 ASCII 回退，中文文件名浏览器优先解码 filename*）。
+         *
+         *     权限逐会话对齐详情端点口径（owner + 软删 404 → 群参与者探测，任一不可
+         *     访问整包 404 不做部分成功）；跨用户 / 已软删 / 群非成员均 404 不泄露
+         *     存在性，full 档附件总量超 512MB 返回 413 提示分批导出——两者均经全局
+         *     AppError handler 自动映射，端点不捕获。
+         */
+        post: operations["export_sessions_api_daemon_sessions_export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -22061,6 +22091,27 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * SessionExportRequest
+         * @description POST /api/daemon/sessions/export 请求体（2026-09-14-session-export task-01 / FR-01 / D-002@v1）。
+         *
+         *     会话导出请求 DTO：``session_ids`` 1~50 个 UUID（0 个 / 51 个 → 422）+
+         *     ``tier`` 双档 Literal（chat=Markdown 对话、full=JSON+附件 zip）。producer=
+         *     本 schema → FastAPI OpenAPI → 前端 ``pnpm gen:types`` → consumer=
+         *     ``api-types.ts``（具名产源，字段名/形状不得增删改）。
+         *
+         *     去重与档位语义不在本层做：ids 去重保序归端点层（task-03），服务层收
+         *     原生参数不 import 本模型（task-02）——本层只做 min/max 与 Literal 约束。
+         */
+        SessionExportRequest: {
+            /** Session Ids */
+            session_ids: string[];
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "chat" | "full";
+        };
+        /**
          * SessionInjectRequest
          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
          *
@@ -35299,6 +35350,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    export_sessions_api_daemon_sessions_export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
