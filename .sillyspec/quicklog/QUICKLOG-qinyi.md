@@ -327,3 +327,14 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：预会话模型下拉 preModelId 在 page 传了 model 但 body 组装漏写 body.model，模型选择到不了后端（thinking-level task-06 审查发现的既有缺陷）
 方案：body 组装 llm_provider_id 块后加 if (input.model !== undefined) body.model = input.model（有值才带先例+quick ID 注释锚定）
 结果：tsc exit 0 + 相邻 session 测试 73 passed（picker 27+config-bar 46）；一行改动零行为面扩展
+
+## ql-20260915-003-7b5f | 2026-09-15 16:06:56 | 会话导出 chat 档 Markdown 每条消息补北京时间毫秒时间点
+状态：已完成
+关联变更：2026-09-14-session-export
+文件：
+- backend/app/modules/daemon/session/service/export.py（渲染改动+两个时间格式化 helper）
+- backend/tests/modules/daemon/test_session_export.py（造数毫秒尾数+断言）
+需求：会话导出 chat 档 Markdown 每条消息补北京时间毫秒时间点
+根因：数据源 AgentRunLog.timestamp 本就是微秒精度(timezone=True+now(UTC)),full 档 JSON isoformat 亦全精度——唯一缺口是 _render_chat_markdown 未展示时间(轮头与消息行均无)
+方案：export.py 新增 _EXPORT_TZ(UTC+8 固定偏移不受容器时区影响)+_as_export_tz(naive 按 UTC 兜底)+_fmt_local_ms/_fmt_hms_ms;会话头创建/最近活跃换北京时间并加时区说明行,轮头带本轮首条消息时间到分钟,每条消息行前缀 [HH:MM:SS.mmm];docstring 同步;测试造数三处加毫秒尾数(250/120/780)与断言,daemon.md 细卡补增量条目
+结果：52 passed 零回归;ruff check/format+mypy(949 files)绿;full 档 JSON 保持 UTC isoformat 不变;容器待重建生效

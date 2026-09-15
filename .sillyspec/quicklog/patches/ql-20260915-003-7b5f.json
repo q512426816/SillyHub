@@ -1,0 +1,62 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-0256a200",
+  "totals": {
+    "files": 2,
+    "additions": 49,
+    "deletions": 12
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/session/service/export.py",
+      "declared": true,
+      "additions": 38,
+      "deletions": 7,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/tests/modules/daemon/test_session_export.py",
+      "declared": true,
+      "additions": 11,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": [
+      {
+        "file": ".sillyspec/docs/backend/modules/daemon.md",
+        "sessions": [
+          "quick-09d653fb"
+        ]
+      }
+    ]
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 2,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-003-7b5f",
+  "sessionId": "quick-0256a200",
+  "savedAt": "2026-09-15T08:12:35.976Z",
+  "patchSha256": "ad3de571229497bb182c6616b600f400c81fd4ff76d6e00d3f0911acc9dce679",
+  "patchStatus": "ok"
+}
