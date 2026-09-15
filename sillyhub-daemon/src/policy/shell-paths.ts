@@ -35,6 +35,18 @@ function stripQuotes(s: string): string {
 }
 
 /**
+ * quick-f2c10985（2026-09-15）：剥掉提取目标尾部的命令分隔符（`;` / `&&` / `||`
+ * 及混合形态）。线上审计抖动根因：重定向目标用 `\S+` 捕获会贪婪吞掉后续命令的
+ * 分隔符——`> /dev/null; sleep 1` 提取出 `/dev/null;`，匹配不上临时路径白名单
+ * 的 `C:/dev/null` → 同一目录一会放行一会拒绝（runtime 2f0467a6 policy_audit_log
+ * 实证）。已知启发式边界：带引号且文件名真以 `;` 结尾的路径会被误剥——引号目标
+ * 整体捕获时分隔符在引号外才受影响，实际工程命令中该形态可忽略。
+ */
+function trimShellSeparators(p: string): string {
+  return p.replace(/[;|&]+$/, '');
+}
+
+/**
  * 简易 Bash 分词：考虑单/双引号；返回 token 数组（保留引号，
  * 由调用方按需 strip）。开关 token（`-x`）会被吞掉且不进入位置参数列表。
  */
@@ -69,16 +81,19 @@ function lastBashPositional(rest: string): string | undefined {
  */
 function normalizeBashWritePath(raw: string): string {
   const p = stripQuotes(raw);
+  // quick-f2c10985：剥尾部命令分隔符（`;`/`&&`/`||`）——bash 全部提取路径的
+  // 单一收口点（重定向/cp-mv/tee/mkdir/touch 都经此归一化）。
+  const trimmed = trimShellSeparators(p);
   // Windows：git bash /x/... → X:/...（修正盘符映射）
   if (sep === '\\') {
-    const m = /^\/([a-zA-Z])\//.exec(p);
+    const m = /^\/([a-zA-Z])\//.exec(trimmed);
     const slash = m?.[0];
     const drive = m?.[1];
     if (slash && drive) {
-      return `${drive.toUpperCase()}:/${p.slice(slash.length)}`;
+      return `${drive.toUpperCase()}:/${trimmed.slice(slash.length)}`;
     }
   }
-  return p;
+  return trimmed;
 }
 
 /**
@@ -189,7 +204,9 @@ export function extractPowerShellWritePaths(command: string): string[] {
     if (picked) paths.push(picked);
   }
 
-  return dedupe(paths);
+  // quick-f2c10985：剥尾部命令分隔符（`;` 分隔下一语句 / `&&` 链——cmdlet 段
+  // 正则 [^|;]* 挡了 | 和 ; 但挡不住紧贴目标的 &）。
+  return dedupe(paths.map(trimShellSeparators));
 }
 
 /**
@@ -288,7 +305,8 @@ export function extractCmdWritePaths(command: string): string[] {
     if (target) paths.push(stripQuotes(target));
   }
 
-  return dedupe(paths);
+  // quick-f2c10985：剥尾部命令分隔符（cmd 的 & 链接符紧贴目标时 \S+ 吞入）。
+  return dedupe(paths.map(trimShellSeparators));
 }
 
 /** 保序去重。 */

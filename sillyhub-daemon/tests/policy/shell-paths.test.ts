@@ -61,6 +61,23 @@ describe('extractBashWritePaths', () => {
     expect(extractBashWritePaths('echo x > "E:\\my file.txt"')).toEqual(['E:\\my file.txt']);
   });
 
+  // 2026-09-15 quick-f2c10985：重定向目标吞命令分隔符尾巴（线上审计抖动根因——
+  // `> /dev/null; sleep 1` 提取出 `/dev/null;` 匹配不上 C:/dev/null 白名单，
+  // 同一目录一会放行一会拒绝；runtime 2f0467a6 policy_audit_log 实证）。
+  it('重定向目标剥尾部命令分隔符（; / && / || 混合形态）', () => {
+    expect(extractBashWritePaths('echo x > /dev/null; sleep 1')).toEqual(['/dev/null']);
+    expect(extractBashWritePaths('echo x >/dev/null&& do_thing')).toEqual(['/dev/null']);
+    expect(extractBashWritePaths('foo 2>/dev/null || bar')).toEqual(['/dev/null']);
+    expect(extractBashWritePaths('echo x > E:\a.txt;; ls')).toEqual(['E:\a.txt']);
+    // 引号目标不吞引号内的合法字符（外层引号整体捕获，尾分隔符在引号外才剥）。
+    expect(extractBashWritePaths('echo x > "E:\a; b.txt"')).toEqual(['E:\a; b.txt']);
+  });
+
+  it('tee/mkdir/touch 目标也剥尾部命令分隔符', () => {
+    expect(extractBashWritePaths('echo hi | tee out.txt; grep x')).toEqual(['out.txt']);
+    expect(extractBashWritePaths('mkdir /tmp/d; cd /tmp/d')).toEqual(['/tmp/d']);
+  });
+
   it('纯读命令返回空', () => {
     expect(extractBashWritePaths('ls -la')).toEqual([]);
     expect(extractBashWritePaths('cat a.txt')).toEqual([]);
@@ -70,6 +87,12 @@ describe('extractBashWritePaths', () => {
 
 // ── PowerShell ──────────────────────────────────────────────────────────────
 describe('extractPowerShellWritePaths', () => {
+  // quick-f2c10985：PowerShell/cmd 提取目标同样剥尾部命令分隔符。
+  it('PowerShell 重定向/cmdlet 目标剥尾部 ; 与 & 链', () => {
+    expect(extractPowerShellWritePaths('echo x > C:\z.log; Get-Date')).toEqual(['C:\z.log']);
+    expect(extractPowerShellWritePaths('Set-Content C:\a.txt hi&& whoami')).toEqual(['C:\a.txt']);
+  });
+
   it('Set-Content -Path 提取目标', () => {
     expect(extractPowerShellWritePaths('Set-Content -Path E:\\a.txt -Value hi')).toEqual([
       'E:\\a.txt',
@@ -124,6 +147,10 @@ describe('extractPowerShellWritePaths', () => {
 
 // ── CMD ─────────────────────────────────────────────────────────────────────
 describe('extractCmdWritePaths', () => {
+  it('cmd 重定向目标剥尾部 & 链', () => {
+    expect(extractCmdWritePaths('echo x > D:\b.txt&& dir')).toEqual(['D:\b.txt']);
+  });
+
   it('copy src dst 提取 dst', () => {
     expect(extractCmdWritePaths('copy a.txt b.txt')).toEqual(['b.txt']);
   });

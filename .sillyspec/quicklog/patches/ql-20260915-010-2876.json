@@ -1,0 +1,87 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-f2c10985",
+  "totals": {
+    "files": 6,
+    "additions": 991,
+    "deletions": 5
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+      "declared": true,
+      "additions": 39,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "declared": true,
+      "additions": 44,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/policy/shell-paths.ts",
+      "declared": true,
+      "additions": 23,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/tests/policy/shell-paths.test.ts",
+      "declared": true,
+      "additions": 27,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/quicklog/patches/ql-20260915-009-dc08.json",
+      "declared": true,
+      "additions": 95,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/quicklog/patches/ql-20260915-009-dc08.patch",
+      "declared": true,
+      "additions": 763,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 4,
+    "codeFileCount": 1,
+    "testFileCount": 3,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-010-2876",
+  "sessionId": "quick-f2c10985",
+  "savedAt": "2026-09-15T12:51:34.949Z",
+  "patchSha256": "9f020eaec2b4a9b0e70b1be4b315b2b864533cbe32d533412303fad1b3eb321f",
+  "patchStatus": "ok"
+}
