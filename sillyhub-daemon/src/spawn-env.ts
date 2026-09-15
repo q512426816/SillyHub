@@ -20,53 +20,136 @@
  * design §5（第 0 层注入最高优先级）/ §9（未配兜底零回归 D-007）；requirements FR-04 / FR-05。
  */
 
-import { StringDecoder } from 'node:string_decoder';
 import { getInjector, setDaemonApiKey } from './credential-injector.js';
 import { CLAUDE_CONFIG_DIR } from './config.js';
 import type { ProviderConfig } from './types.js';
 
 /**
- * 有状态的码页探测解码器（ql-20260915-005）：流式 StringDecoder 保跨 chunk 多字节
- * UTF-8 序列不烂（首个 chunk 可能只含半个中文字符）；严格 utf-8 解码抛错时切到
- * GBK 流式解码并冲刷已缓冲字节（防 GBK 子进程输出被 utf-8 硬解成乱码替换字符）。
+ * 有状态的码页探测解码器（ql-20260915-005，ql-20260916-003 重写）：自管字节
+ * 缓冲 + 增量 UTF-8 严格校验——扫描每个 chunk 的最长完整合法 UTF-8 前缀，
+ * 未决尾字节（跨 chunk 的半个多字节字符）留存续接不误判；遇到非法字节才
+ * 切 GBK 流式解码（未决尾字节一并交 GBK 重新解释，不丢字节）。
+ *
+ * 原实现（0b05fc0f5）依赖 StringDecoder.write 抛错触发切换，但 Node 的
+ * StringDecoder 从不抛错——非法/GBK 字节直接替换为 U+FFFD 返回，catch 是
+ * 死代码，GBK 流式回退从未生效（task-runner stdout / pi·cursor LfLineFramer
+ * 的中文 Windows GBK 输出仍乱码落库；Node v24 实测 D6D0CEC4 → "���"）。
  * 与 decodeProcessOutputMaybe 的立即版互补：流式边界用本类，单块缓冲用函数。
+ *
+ * 已知启发式边界（与立即版一致）：恰构成合法 UTF-8 的 GBK 双字节序列会被
+ * 当 UTF-8 解出（GBK trail 落 ASCII 区时两编码有交集），字节级探测无法区分。
  */
 export class CodepageDetectorDecoder {
-  private utf8: StringDecoder;
+  /** 已切 GBK 后的流式解码器；null = 仍在 UTF-8 探测态。 */
   private gbk: InstanceType<typeof TextDecoder> | null = null;
-  private gbkFailed = false;
-
-  constructor() {
-    this.utf8 = new StringDecoder('utf8');
-  }
+  /** UTF-8 探测态的未决尾字节（≤3 字节的不完整多字节前缀，跨 chunk 续接）。 */
+  private pending: Buffer = Buffer.alloc(0);
+  /** 严格 UTF-8 解码器；输入恒为已校验完整前缀（无 stream 态，可复用）。 */
+  private readonly utf8 = new TextDecoder('utf-8', { fatal: true });
 
   write(chunk: Buffer): string {
     if (this.gbk) {
       return this.gbk.decode(chunk, { stream: true });
     }
-    try {
-      // StringDecoder 严格模式：不完整序列或非法字节即抛（跨 chunk 正常，
-      // 合法序列在 stream 模式下不抛）。
-      const out = this.utf8.write(chunk);
-      return out;
-    } catch {
-      // utf-8 解码失败 → 切 GBK：冲刷已缓冲的 utf-8 尾字节再按 GBK 流式。
-      this.gbk = new TextDecoder('gbk');
-      this.utf8.end();
-      return this.gbk.decode(chunk, { stream: true });
+    const buf = this.pending.length
+      ? Buffer.concat([this.pending, chunk])
+      : chunk;
+    const completeLen = utf8CompletePrefixLen(buf);
+    if (completeLen < 0) {
+      // 存在非法 UTF-8 字节 → 切 GBK：未决尾字节 + 本 chunk 全部按 GBK 流式
+      // 重解（原实现的「冲刷缓冲」只调了 utf8.end() 丢弃返回值，字节实际丢失）。
+      this.pending = Buffer.alloc(0);
+      this.gbk = makeGbkStreamDecoder();
+      return this.gbk.decode(buf, { stream: true });
     }
+    // 拷贝留存未决尾字节（subarray 会钉住整个父 chunk 的底层内存不释放）。
+    this.pending = Buffer.from(buf.subarray(completeLen));
+    return completeLen > 0
+      ? this.utf8.decode(buf.subarray(0, completeLen))
+      : '';
   }
 
   end(): string {
     if (this.gbk) {
       return this.gbk.decode();
     }
-    try {
-      return this.utf8.end();
-    } catch {
-      return '';
-    }
+    if (this.pending.length === 0) return '';
+    // 流结束时仍悬空的 UTF-8 尾字节 = 截断序列，产出替换字符（对齐旧
+    // StringDecoder.end 语义，字节不再回流）。
+    const tail = this.pending;
+    this.pending = Buffer.alloc(0);
+    return new TextDecoder('utf-8').decode(tail);
   }
+}
+
+/**
+ * GBK 流式解码器构造（UTF-8 判定失败后调用）。small-icu 构建
+ * TextDecoder('gbk') 构造抛 RangeError 时退非致命 utf-8（输出替换字符，
+ * 与立即版 decodeProcessOutputMaybe 的末级兜底一致）。
+ */
+function makeGbkStreamDecoder(): InstanceType<typeof TextDecoder> {
+  try {
+    return new TextDecoder('gbk');
+  } catch {
+    return new TextDecoder('utf-8');
+  }
+}
+
+/**
+ * 扫描 buffer 的最长**完整**合法 UTF-8 前缀长度：返回 -1 = 存在非法字节
+ * （裸延续/过短起始 0xC0·0xC1、越界起始 ≥0xF5、连续字节缺失或越出收紧区间）；
+ * 否则返回完整序列总字节数——末尾悬空的不完整多字节前缀不计入（调用方留存
+ * 跨 chunk 续接）。区间收紧规则对齐 WHATWG UTF-8 解码器（E0 后 ≥0xA0 防过
+ * 短、ED 后 ≤0x9F 防代理区、F0 后 ≥0x90 / F4 后 ≤0x8F 防 U+10FFFF 越界）。
+ */
+function utf8CompletePrefixLen(buf: Buffer): number {
+  const n = buf.length;
+  let i = 0;
+  while (i < n) {
+    const b = buf[i]!;
+    if (b < 0x80) {
+      i += 1;
+      continue;
+    }
+    let need = 0;
+    let lo = 0x80;
+    let hi = 0xbf;
+    if (b >= 0xc2 && b <= 0xdf) {
+      need = 1;
+    } else if (b === 0xe0) {
+      need = 2;
+      lo = 0xa0;
+    } else if ((b >= 0xe1 && b <= 0xec) || b === 0xee || b === 0xef) {
+      need = 2;
+    } else if (b === 0xed) {
+      need = 2;
+      hi = 0x9f;
+    } else if (b === 0xf0) {
+      need = 3;
+      lo = 0x90;
+    } else if (b >= 0xf1 && b <= 0xf3) {
+      need = 3;
+    } else if (b === 0xf4) {
+      need = 3;
+      hi = 0x8f;
+    } else {
+      return -1;
+    }
+    // 连续 need 个字节：首字节用收紧区间 [lo,hi]，其余 [0x80,0xbf]。
+    let j = i + 1;
+    let first = true;
+    while (j <= i + need) {
+      if (j >= n) return i; // 尾部悬空 = 不完整前缀，[0,i) 之前均完整
+      const c = buf[j]!;
+      const low = first ? lo : 0x80;
+      const high = first ? hi : 0xbf;
+      if (c < low || c > high) return -1;
+      first = false;
+      j += 1;
+    }
+    i = j;
+  }
+  return i;
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   buildSpawnEnv,
   redactEnv,
   redactProviderConfig,
+  CodepageDetectorDecoder,
   ANTHROPIC_API_KEY_FIELD,
   CLAUDE_OAUTH_TOKEN_FIELD,
   SILLYHUB_SESSION_ID_FIELD,
@@ -571,5 +572,80 @@ describe('spawn-env SILLYSPEC_SYNC_TIMEOUT_MS (ql-20260907-007: 熔断预算缺�
       { credential: cred },
     );
     expect(env.PYTHONIOENCODING).toBe('latin-1');
+  });
+});
+
+// ── ql-20260916-003：CodepageDetectorDecoder GBK 流式回退（重写回归）──
+// 背景：原实现（0b05fc0f5）依赖 StringDecoder.write 抛错切 GBK，但 Node
+// StringDecoder 从不抛错（非法字节直接替换 U+FFFD 返回），回退分支是死代码，
+// GBK 输出经流式捕获链仍乱码落库——本组用例锁住切换语义防回归。
+
+describe('CodepageDetectorDecoder (ql-20260916-003: GBK 流式回退)', () => {
+  it('GBK 单 chunk：中文按 GBK 解出（不再 U+FFFD 乱码）', () => {
+    const d = new CodepageDetectorDecoder();
+    // GBK「中文」= D6 D0 CE C4（原死代码路径会输出替换字符）
+    expect(d.write(Buffer.from([0xd6, 0xd0, 0xce, 0xc4]))).toBe('中文');
+    expect(d.end()).toBe('');
+  });
+
+  it('GBK 双字节跨 chunk（未决尾字节在 UTF-8 态缓冲后随切换重解）', () => {
+    const d = new CodepageDetectorDecoder();
+    // 0xD6 是合法 UTF-8 双字节起始、但 0xD0 不是其连续字节 → 首块悬空缓冲，
+    // 次块拼出后判定非法 → 整体按 GBK 解
+    expect(d.write(Buffer.from([0xd6]))).toBe('');
+    expect(d.write(Buffer.from([0xd0, 0xce, 0xc4]))).toBe('中文');
+    expect(d.end()).toBe('');
+  });
+
+  it('GBK 模式下双字节跨 chunk（切换后由 GBK 流式缓冲续接）', () => {
+    const d = new CodepageDetectorDecoder();
+    // D6 D0 =「中」立即解出；A1 悬空由 GBK stream 缓冲，次块拼出「。」
+    expect(d.write(Buffer.from([0xd6, 0xd0, 0xa1]))).toBe('中');
+    expect(d.write(Buffer.from([0xa3]))).toBe('。');
+    expect(d.end()).toBe('');
+  });
+
+  it('合法 UTF-8 跨 chunk 不误切（半个中文字符分属两个 chunk）', () => {
+    const d = new CodepageDetectorDecoder();
+    const bytes = Buffer.from('中'); // E4 B8 AD
+    expect(d.write(bytes.subarray(0, 1))).toBe('');
+    expect(d.write(bytes.subarray(1))).toBe('中');
+    expect(d.end()).toBe('');
+  });
+
+  it('纯 ASCII / UTF-8 流永不切 GBK', () => {
+    const d = new CodepageDetectorDecoder();
+    expect(d.write(Buffer.from('hello 世界'))).toBe('hello 世界');
+    expect(d.write(Buffer.from('继续 ok'))).toBe('继续 ok');
+    expect(d.end()).toBe('');
+  });
+
+  it('UTF-8 前缀已产出后遇 GBK 字节：前缀不重复、后续按 GBK', () => {
+    const d = new CodepageDetectorDecoder();
+    expect(d.write(Buffer.from('abc'))).toBe('abc');
+    expect(d.write(Buffer.from([0xd6, 0xd0]))).toBe('中');
+    expect(d.end()).toBe('');
+  });
+
+  it('收紧规则命中（0xE0 后非 [A0,BF] 连续字节）切 GBK 而非误容', () => {
+    // GBK「郂」= E0 40：trail 落 ASCII 区，UTF-8 视角 E0 缺合法连续字节
+    const gbkPair = Buffer.from([0xe0, 0x40]);
+    const d = new CodepageDetectorDecoder();
+    const out = d.write(gbkPair);
+    expect(out).toBe('郂');
+    expect(out).not.toContain('\ufffd');
+  });
+
+  it('流结束时悬空 UTF-8 尾字节产出替换字符（对齐旧 StringDecoder.end）', () => {
+    const d = new CodepageDetectorDecoder();
+    expect(d.write(Buffer.from('ab'))).toBe('ab');
+    d.write(Buffer.from([0xe4, 0xb8])); // 半个「中」
+    expect(d.end()).toBe('\ufffd');
+  });
+
+  it('空 chunk 与直接 end 均为空串', () => {
+    const d = new CodepageDetectorDecoder();
+    expect(d.write(Buffer.alloc(0))).toBe('');
+    expect(d.end()).toBe('');
   });
 });

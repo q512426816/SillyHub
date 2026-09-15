@@ -135,4 +135,8 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
   救不回**——治本已落地：buildSpawnEnv 出口缺省注入 `PYTHONIOENCODING=utf-8`+
   `PYTHONUTF8=1`（仅键缺失/空串填入，显式配置优先），claude→Bash→工具孙进程全链
   继承，新会话起生效（存量乱码行仍不可还原）。
+- **勘误**（ql-20260916-003）：上段「有状态流式版」原实现（StringDecoder 失败切 GBK）
+  是死代码——Node `StringDecoder.write()` 从不抛错，流式捕获链的 GBK 输出实际仍乱码；
+  已重写为增量 UTF-8 严格校验 + 非法字节切 GBK 流式（未决尾字节一并重解），非 SDK
+  链根治至此真正闭合。
 - **登记于**：ql-20260915-004（2026-09-14-session-export 用户验收反馈 P2-2）。

@@ -35,8 +35,11 @@ import {
 
 /**
  * 把子进程 stdout 字节流包成码页探测解码后的 string 流（ql-20260915-005）。
- * 逐 chunk 调 decodeProcessOutputMaybe（utf-8 fatal → GBK 回退），readline
- * 消费 string 流时不再用内部 StringDecoder('utf8') 硬解码（否则 GBK 输出乱码）。
+ * 逐 chunk 经 CodepageDetectorDecoder 有状态探测（增量 UTF-8 严格校验 →
+ * 失败切 GBK 流式；ql-20260916-003 重写，原 StringDecoder 版回退是死代码），
+ * readline 消费 string 流时不再用内部 StringDecoder('utf8') 硬解码（否则
+ * GBK 输出乱码）。stderr 单块缓冲走 spawn-env 的 decodeProcessOutputMaybe
+ * 立即版（见 :259 附近接线），与 stdout 流式版互补。
  */
 function decodeStream(): Transform {
   // 每个子进程一个探测器实例：保跨 chunk 多字节 UTF-8 不烂（首个 chunk 可能只

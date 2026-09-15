@@ -60,7 +60,7 @@ generator: sillyspec-scan
 
 ### 2.2 llm-proxy 透传（hub 代理形态）
 - `sillyhub-daemon/src/credential-injector.ts:122-133`：provider_config `litellm_proxy` 形态下，`ANTHROPIC_BASE_URL` 指向 `<hub>/api/daemon/llm-proxy`、`ANTHROPIC_AUTH_TOKEN` 注 daemon apiKey（master key 不下发到 daemon，子进程 Bearer 打 hub 代理）；openai 形态经 LiteLLM 网关（`litellm_base_url`）。
-- 配套：sillyhub-daemon/src/types.ts（ProviderConfig.litellm_base_url / litellm_proxy）、`sillyhub-daemon/src/cli.ts:521-522`、`sillyhub-daemon/src/spawn-env.ts:152`（进程级 _daemonApiKey 覆盖点）。
+- 配套：sillyhub-daemon/src/types.ts（ProviderConfig.litellm_base_url / litellm_proxy）、`sillyhub-daemon/src/cli.ts:521-522`、`sillyhub-daemon/src/spawn-env.ts:371`（进程级 _daemonApiKey 覆盖点）。
 
 ### 2.3 Codex（并列 provider）
 - sillyhub-daemon/src/interactive/codex-app-server-driver.ts（CodexAppServerDriver），`InteractiveProvider = 'claude' | 'codex'`；approval 桥接有专项测试。

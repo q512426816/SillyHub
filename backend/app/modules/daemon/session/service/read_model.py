@@ -308,8 +308,10 @@ async def get_agent_session_logs(
     群聊体验 quick（2026-09-02）分页/搜索扩展——三参可与 ``after`` 任意
     组合：
 
-    - ``before``：向上加载游标——只返回 ``timestamp < before`` 的行（配合
-      ``limit`` 取「游标之前的最新 N 条」实现向上翻页）；
+    - ``before``：向上加载游标——只返回 ``timestamp <= before`` 的行（c318553a6
+      由 ``<`` 放宽为 ``<=``：同批日志共用同一 timestamp，严格小于会永久跳过与
+      游标同 ts 的批次；配合 ``limit`` 取「游标之前（含边界行）的最新 N 条」实现
+      向上翻页，首行可能与已加载重叠）；
     - ``q``：``content_redacted`` ILIKE %q% 内容过滤（会话内搜索，模式
       拼接口径同 change/service 搜索先例）；
     - ``limit``：**最新 N 条**语义——排序先 desc 取 N 再反转回升序返回
