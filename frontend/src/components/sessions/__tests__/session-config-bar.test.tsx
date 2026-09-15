@@ -1111,7 +1111,7 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     expect(select.options.item(2)?.textContent).toBe("中");
   });
 
-  it("current=null（claude SDK 不暴露现值）→「现值未知」占位项如实显示，不编造", async () => {
+  it("current=null（claude SDK 不暴露现值）→ 回退「默认」选项（不显示「现值未知」占位）", async () => {
     mocks.getSessionThinkingLevels.mockResolvedValue({
       levels: ["off", "low", "high"],
       current: null,
@@ -1120,10 +1120,9 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     const select = (await screen.findByTestId(
       "config-thinking-select",
     )) as HTMLSelectElement;
-    await waitFor(() =>
-      expect(screen.getByText("现值未知（引擎未上报）")).toBeInTheDocument(),
-    );
-    expect(select.value).toBe("");
+    await waitFor(() => expect(select.value).toBe("off"));
+    // 不再渲染「现值未知」占位（UX 优化：引擎默认档=事实上的当前档）
+    expect(screen.queryByText("现值未知（引擎未上报）")).not.toBeInTheDocument();
   });
 
   it("turn running（thinkingLevel.disabled）→ 下拉禁用（档位切换仅空闲，D-002）", () => {

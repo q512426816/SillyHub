@@ -141,6 +141,8 @@ export interface CtxUsageRingProps {
   onCompact?: () => void;
   /** true = 轮运行中禁用压缩（父层 running 派生，避免与进行中轮并发）。 */
   compactDisabled?: boolean;
+  /** true = 压缩请求在途（父层 async 态），按钮显示「压缩中…」+禁用+loading 图标。 */
+  compactLoading?: boolean;
   /** 禁用态悬浮说明文案；缺省「轮运行中，暂不能压缩」。 */
   compactTooltip?: string;
 }
@@ -211,6 +213,7 @@ export function CtxUsageRing({
   provider,
   onCompact,
   compactDisabled,
+  compactLoading,
   compactTooltip,
 }: CtxUsageRingProps) {
   const windowTokens = resolveCtxWindowTokens(
@@ -271,15 +274,18 @@ export function CtxUsageRing({
             <Button
               size="small"
               data-testid="ctx-compact-btn"
-              disabled={compactDisabled}
+              disabled={compactDisabled || compactLoading === true}
+              loading={compactLoading === true}
               title={
-                compactDisabled
-                  ? (compactTooltip ?? "轮运行中，暂不能压缩")
-                  : undefined
+                compactLoading === true
+                  ? "压缩请求已发送，等待引擎完成（最长约 15 秒）"
+                  : compactDisabled
+                    ? (compactTooltip ?? "轮运行中，暂不能压缩")
+                    : undefined
               }
               onClick={onCompact}
             >
-              压缩上下文
+              {compactLoading === true ? "压缩中…" : "压缩上下文"}
             </Button>
           </div>
         ) : null}

@@ -1680,8 +1680,10 @@ export function SessionPanelPage({
   //   - run_id 有值（claude inject 复用，压缩轮即普通轮）→「已发送 /compact」。
   // 失败两路：accepted=false / error 字段（200 结构化回执，如 pi「无可压缩内容」
   // 竞态）与 ApiError（4xx/5xx）均 notify error 带原文。
+  const [compacting, setCompacting] = useState(false);
   const handleSessionCompact = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || compacting) return;
+    setCompacting(true);
     try {
       const resp = await compactSession(sessionId);
       if (resp.accepted === false || resp.error) {
@@ -1709,8 +1711,10 @@ export function SessionPanelPage({
       notify.success("已发送压缩请求");
     } catch (err) {
       notify.error(err, "压缩请求失败");
+    } finally {
+      setCompacting(false);
     }
-  }, [sessionId, notify]);
+  }, [sessionId, notify, compacting]);
 
   // ── 消息发送 + 服务端排队（ql-20260825-011 后端真实排队重写）──────────────
   // 空闲（无 currentRun）→ 占位轮直发（sendFromQueue）；忙轮 → 直接 POST
@@ -3585,6 +3589,7 @@ export function SessionPanelPage({
                 providerId={session.llm_provider_id ?? null}
                 provider={session.provider ?? null}
                 onCompact={handleSessionCompact}
+                compactLoading={compacting}
                 compactDisabled={running}
                 compactTooltip="轮运行中，暂不能压缩"
               />

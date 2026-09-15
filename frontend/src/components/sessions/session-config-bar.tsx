@@ -466,7 +466,10 @@ export function SessionConfigBar({
       sessionId !== "",
     staleTime: 30_000,
   });
-  const currentThinkingLevel = thinkingLevelsQ.data?.current ?? "";
+  // 现值回退链：引擎上报 current → null 时选「默认」（off）——引擎默认档
+  // 就是事实上的当前档，不再显示「现值未知」占位（UX 反馈：占位项长且灰
+  // 显得像 bug；claude/codex SDK 不暴露现值恒 null 属常态非异常）。
+  const currentThinkingLevel = thinkingLevelsQ.data?.current ?? "off";
   const sessionLevelOptions = useMemo(() => {
     const levels = thinkingLevelsQ.data?.levels ?? [];
     // 现值不在动态列表（引擎返回了列表外的现值）→ 追加兜底（照 modelOptions
@@ -475,18 +478,6 @@ export function SessionConfigBar({
       ? [...levels, currentThinkingLevel]
       : levels;
   }, [thinkingLevelsQ.data, currentThinkingLevel]);
-  /**
-   * 现值缺失时的头部队占位项（value=""，disabled 不可选）：claude SDK 不暴露
-   * 现值（current 恒 null）→「现值未知」如实显示不编造；查询中/失败同占位。
-   */
-  const thinkingStatusLabel = currentThinkingLevel
-    ? null
-    : thinkingLevelsQ.isError
-      ? "档位读取失败"
-      : thinkingLevelsQ.isPending
-        ? "读取档位中…"
-        : "现值未知（引擎未上报）";
-
   const [thinkingSwitching, setThinkingSwitching] = useState(false);
   /**
    * 会话态点选即切换（照模型子下拉点选形态）：POST setThinkingLevel → 成功
@@ -507,6 +498,12 @@ export function SessionConfigBar({
         );
         return;
       }
+      // 乐观缓存：成功即写入 current（claude/codex 引擎不回读现值，不写会
+      // invalidate 后回到默认档显示——用户以为设置丢了；pi 引擎下次查询
+      // 上报真值自然覆盖）。
+      qc.setQueryData(["sessionThinkingLevels", sessionId], (old: { levels: string[]; current: string | null } | undefined) =>
+        old ? { ...old, current: level } : { levels: [level], current: level },
+      );
       notify.success(`已切换思考级别：${thinkingLevelLabel(level)}`);
       void qc.invalidateQueries({
         queryKey: ["sessionThinkingLevels", sessionId],
@@ -779,13 +776,6 @@ export function SessionConfigBar({
                 "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
             )}
           >
-            {/* 占位项仅会话态渲染（provisional 走静态七档镜像，查询 disabled
-                恒 pending 不占位——disable 查询 isPending 恒真勿混入静态列表）。 */}
-            {!provisional && thinkingStatusLabel != null && (
-              <option value="" disabled>
-                {thinkingStatusLabel}
-              </option>
-            )}
             {(provisional
               ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
               : sessionLevelOptions
