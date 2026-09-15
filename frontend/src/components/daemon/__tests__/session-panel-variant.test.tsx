@@ -413,6 +413,65 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
       expect.anything(),
     );
   });
+
+  // ql-20260915-009 手机端降噪：用量条（六项统计）mobile 整条不渲染——纯辅助
+  // 信息不占会话主体；desktop 照旧（回归锚）。
+  const usagePayload = {
+    totals: {
+      model: "totals",
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      api_requests: 2,
+    },
+    by_model: [],
+  };
+
+  it("mobile：会话累计用量条整条不渲染（getSessionUsage 不触达）", async () => {
+    sessionApi.getSessionUsage.mockResolvedValue(usagePayload);
+    try {
+      setupPage("mobile");
+      await screen.findByLabelText("会话面板");
+      // 组件未挂载：取数不触达、摘要行指标均不存在。
+      expect(sessionApi.getSessionUsage).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText("输入")).toBeNull();
+      expect(screen.queryByLabelText("缓存命中率")).toBeNull();
+    } finally {
+      sessionApi.getSessionUsage.mockResolvedValue(null);
+    }
+  });
+
+  it("mobile：用量条收进 ⋯ 菜单「会话用量」区（开菜单才取数渲染，ql-20260915-011 收入口不砍功能）", async () => {
+    sessionApi.getSessionUsage.mockResolvedValue(usagePayload);
+    try {
+      setupPage("mobile");
+      await screen.findByLabelText("会话面板");
+      // 菜单未开：不常驻、不取数。
+      expect(sessionApi.getSessionUsage).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+      const menu = await screen.findByTestId("session-mobile-more-menu");
+      expect(
+        within(menu).getByTestId("session-mobile-usage-section"),
+      ).toBeInTheDocument();
+      // 开菜单挂载即取数，摘要行指标在菜单内可见。
+      expect(await within(menu).findByLabelText("输入")).toBeInTheDocument();
+      expect(sessionApi.getSessionUsage).toHaveBeenCalled();
+    } finally {
+      sessionApi.getSessionUsage.mockResolvedValue(null);
+    }
+  });
+
+  it("desktop：用量条照常渲染（有数据即显示，零回归锚）", async () => {
+    sessionApi.getSessionUsage.mockResolvedValue(usagePayload);
+    try {
+      setupPage();
+      expect(await screen.findByLabelText("输入")).toBeInTheDocument();
+      expect(screen.getByLabelText("缓存命中率")).toBeInTheDocument();
+    } finally {
+      sessionApi.getSessionUsage.mockResolvedValue(null);
+    }
+  });
 });
 
 /* ───────── 3. 预会话空态（sessionId=null）mobile 根容器类 ───────── */

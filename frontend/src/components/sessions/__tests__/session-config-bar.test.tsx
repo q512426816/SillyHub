@@ -1193,3 +1193,84 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     );
   });
 });
+
+// ── 9. ql-20260915-009 手机端降噪：variant="mobile" 收低频控件 ────────────────
+
+describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）", () => {
+  it("mobile：思考档位/档案/中断自动续跑不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
+    renderBar({
+      variant: "mobile",
+      llmProviderId: "prov-kimi",
+      agentProfileId: "prof-1",
+      thinkingLevel: {},
+      autoResume: { enabled: true, onToggle: vi.fn() },
+    });
+    // 低频设置项收走。
+    expect(
+      screen.queryByTestId("config-thinking-select"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "配置-档案 知识经理" }),
+    ).not.toBeInTheDocument();
+    // 核心控件保留（供应商列表异步到达后解析名）。
+    expect(
+      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("config-model-select")).toBeInTheDocument();
+  });
+
+  it("desktop（默认不传 variant）：上述控件照旧渲染（零回归锚）", async () => {
+    renderBar({
+      llmProviderId: "prov-kimi",
+      agentProfileId: "prof-1",
+      thinkingLevel: {},
+      autoResume: { enabled: true, onToggle: vi.fn() },
+    });
+    expect(
+      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "配置-档案 知识经理" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
+    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
+    // 「设置」展开钮仅 mobile 渲染。
+    expect(screen.queryByTestId("config-mobile-more")).toBeNull();
+  });
+
+  it("mobile：点「设置」展开思考档位/档案/自动续跑，再点收起隐藏（ql-20260915-011 收入口不砍功能）", async () => {
+    renderBar({
+      variant: "mobile",
+      llmProviderId: "prov-kimi",
+      agentProfileId: "prof-1",
+      thinkingLevel: {},
+      autoResume: { enabled: true, onToggle: vi.fn() },
+    });
+    // 默认收起：三控件不可见，展开钮存在。
+    expect(screen.getByTestId("config-mobile-more")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(
+      screen.queryByRole("button", { name: "配置-档案 知识经理" }),
+    ).not.toBeInTheDocument();
+    // 展开：三控件全部可达。
+    fireEvent.click(screen.getByTestId("config-mobile-more"));
+    expect(screen.getByTestId("config-mobile-more")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: "配置-档案 知识经理" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
+    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
+    // 收起：回到紧凑态。
+    fireEvent.click(screen.getByTestId("config-mobile-more"));
+    expect(
+      screen.queryByRole("button", { name: "配置-档案 知识经理" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
+  });
+});

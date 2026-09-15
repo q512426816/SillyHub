@@ -2538,6 +2538,7 @@ export function SessionPanelPage({
         preMachineOnline,
         sessionWorkspaceArchived,
         preEngine,
+        mobile,
       });
     // task-07 Phase 5（FR-06 / D-004@v2）：ppm_project 页面上下文 → 弹层项目
     // 预选 id（「发起团队」入口自动开弹层时项目/工作区随上下文预选）。
@@ -2762,6 +2763,7 @@ export function SessionPanelPage({
               llmProviderId={preProviderId || null}
               configSnapshot={null}
               engine={preEngine}
+              variant={variant}
               onProvisionalSwitch={(field, value) => {
                 if (field === "llm_provider_id") setPreProviderId(value);
                 else setPreProfileId(value);
@@ -2848,6 +2850,7 @@ export function SessionPanelPage({
     isQueueFull,
     restoring,
     running,
+    mobile,
   });
 
   const interruptDisabled =
@@ -3229,6 +3232,24 @@ export function SessionPanelPage({
                       onJumpTo={handleJumpToSubagent}
                     />
                   </div>
+                  {/* ql-20260915-011：mobile 用量条收纳进 ⋯ 菜单「会话用量」区——
+                      页面不常驻（ql-009 降噪）但功能保留（用户约束：收入口不砍
+                      功能）；开菜单才挂载即取数，数据恒新鲜。desktop inline 照旧。
+                      明细表超宽经 overflow-x-auto 横向滚动不撑破 240px 菜单。 */}
+                  <div
+                    className="w-full border-t border-border pt-2"
+                    data-testid="session-mobile-usage-section"
+                  >
+                    <p className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">
+                      会话用量
+                    </p>
+                    <div className="overflow-x-auto">
+                      <SessionUsageBar
+                        sessionId={session.id}
+                        refreshSignal={usageRefresh}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -3241,7 +3262,18 @@ export function SessionPanelPage({
           narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
           sessionId 才渲染」）。refreshSignal 挂 onTurnCompleted 轮终态递增
           （usageRefresh，R-04：组件自取数，不引入 react-query）。 */}
-      <SessionUsageBar sessionId={session.id} refreshSignal={usageRefresh} />
+      {/* 2026-08-29-session-usage-stats task-04（FR-02 / 原型场景一 / D-001@v1）：
+          会话累计用量条——page 模式挂会话头部下方（分隔信息条）；session 已
+          narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
+          sessionId 才渲染」）。refreshSignal 挂 onTurnCompleted 轮终态递增
+          （usageRefresh，R-04：组件自取数，不引入 react-query）。
+          ql-20260915-009：mobile 页面不常驻——六项统计在窄视口换行占两行，纯辅助
+          信息不该占手机会话主体（对齐竞品聊天页「内容为王、统计收走」形态；
+          ql-20260915-011 起 mobile 收进 ⋯ 菜单「会话用量」区，收入口不砍功能；
+          desktop 照旧）。 */}
+      {!mobile && (
+        <SessionUsageBar sessionId={session.id} refreshSignal={usageRefresh} />
+      )}
 
       {/* task-10 / design A5+A6（原型⑤）：suspended 挂起横幅（info 色，双主题
           token 阶）。挂起时后台状态权威（backend 已判定 daemon 离线超时/优雅
@@ -3556,6 +3588,7 @@ export function SessionPanelPage({
             llmProviderId={session.llm_provider_id ?? null}
             configSnapshot={session.config_snapshot ?? null}
             engine={session.provider ?? null}
+            variant={variant}
             // 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关
             //（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
             autoResume={{

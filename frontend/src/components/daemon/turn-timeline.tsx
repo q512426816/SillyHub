@@ -438,8 +438,9 @@ const TurnRow = memo(function TurnRow({
                   )}
                   {/* task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出。
                       ql-20260909-009：shadow-sm→shadow-primary 品牌投影（与发送按钮同
-                      token），用户气泡从纯色块浮出时间线底。 */}
-                  <div className="group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
+                      token），用户气泡从纯色块浮出时间线底。ql-20260915-009：turn-bubble
+                      标记类供 mobile 放大规则定位（globals.css data-variant 块）。 */}
+                  <div className="turn-bubble group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
                     {(() => {
                       const parsed = parseAttachmentMarkersCached(turn.prompt);
@@ -584,7 +585,8 @@ const TurnRow = memo(function TurnRow({
                       <div className="flex items-start gap-2.5">
                         <ChatMessageAvatar kind="agent" title="智能体" />
                         <div className="flex items-end gap-1.5">
-                          <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+                          {/* ql-20260915-009：turn-bubble 标记类供 mobile 放大规则定位。 */}
+                          <div className="turn-bubble max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
                             <MarkdownText
                               content={outputMarker ? outputMarker.textBefore : turn.output}
                             />

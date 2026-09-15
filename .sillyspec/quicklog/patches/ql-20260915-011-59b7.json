@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-cc378d06",
+  "totals": {
+    "files": 5,
+    "additions": 409,
+    "deletions": 26
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "declared": true,
+      "additions": 196,
+      "deletions": 8,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-config-bar.tsx",
+      "declared": true,
+      "additions": 70,
+      "deletions": 18,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+      "declared": true,
+      "additions": 59,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "declared": true,
+      "additions": 81,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+      "declared": true,
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 0,
+    "codeFileCount": 0,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": true,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-011-59b7",
+  "sessionId": "quick-cc378d06",
+  "savedAt": "2026-09-15T12:57:33.013Z",
+  "patchSha256": "4f03a4edfc2fa3dd988fa7e3541a7c37bb490d227eb5b8ceb577c33e60a1ec18",
+  "patchStatus": "ok"
+}

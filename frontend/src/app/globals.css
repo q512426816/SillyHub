@@ -793,6 +793,44 @@
   background-image: linear-gradient(to bottom right, #0e7490, #155e75, #020617);
 }
 
+/* ---- 手机端会话正文放大(ql-20260915-009,仅 /m 会话页面板根 data-variant="mobile" 生效) ----
+   用户反馈手机会话页重点内容太小:气泡正文实际字号由 MarkdownText compact 的
+   !text-xs(12px)决定,气泡本身 text-sm(14px)且限宽 80%。桌面保持紧凑(信息密
+   度优先);手机端经面板根 data-variant 元素级规则放大——MarkdownText 侧带
+   !important,靠特异度 (0,3,0) 压其 (0,2,0)(双 important 下特异度高者胜);
+   气泡/滚动容器侧无 important,特异度 (0,2,0) 自然压过单类工具类。desktop /
+   悬浮窗(dialog 无 data-variant="mobile")不进规则,零变化。 */
+[data-variant="mobile"] .markdown-text .wmde-markdown {
+  font-size: 16px !important;
+  line-height: 1.75 !important;
+}
+[data-variant="mobile"] .markdown-text .wmde-markdown h1,
+[data-variant="mobile"] .markdown-text .wmde-markdown h2 {
+  font-size: 18px !important;
+}
+[data-variant="mobile"] .markdown-text .wmde-markdown h3,
+[data-variant="mobile"] .markdown-text .wmde-markdown h4 {
+  font-size: 16px !important;
+}
+[data-variant="mobile"] .markdown-text .wmde-markdown code {
+  font-size: 14px !important;
+}
+/* 气泡本体(用户气泡纯文本路径/流式光标继承字号)+限宽放宽(80/82%→94%,窄屏少折行)。
+   .turn-bubble=用户气泡+旧路径答复气泡(turn-timeline),.seg-text-bubble=段模型
+   文本气泡(turn-segment-views)。 */
+[data-variant="mobile"] .turn-bubble,
+[data-variant="mobile"] .seg-text-bubble {
+  font-size: 16px;
+  line-height: 27px;
+  max-width: 94%;
+}
+/* 时间线左右留白收敛(px-5→px-3),窄屏给正文让宽度 */
+[data-variant="mobile"] [data-testid="turn-timeline-scroll"] {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+
 /* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----
    - 实心 bg-*-500 及更深实色状态/品牌块:bg-red-500/600(hover:bg-red-700 同)、
      bg-amber-500、bg-yellow-500、bg-green-500、bg-orange-500、

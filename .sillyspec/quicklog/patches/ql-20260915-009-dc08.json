@@ -1,0 +1,95 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-d7500b17",
+  "totals": {
+    "files": 7,
+    "additions": 394,
+    "deletions": 39
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/globals.css",
+      "declared": true,
+      "additions": 38,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+      "declared": true,
+      "additions": 39,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "declared": true,
+      "additions": 15,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "declared": true,
+      "additions": 44,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-config-bar.tsx",
+      "declared": true,
+      "additions": 43,
+      "deletions": 17,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "declared": true,
+      "additions": 178,
+      "deletions": 8,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "declared": true,
+      "additions": 37,
+      "deletions": 10,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 6,
+    "codeFileCount": 3,
+    "testFileCount": 3,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-009-dc08",
+  "sessionId": "quick-d7500b17",
+  "savedAt": "2026-09-15T12:45:30.660Z",
+  "patchSha256": "cb398a1ebd574f715c90c8d03a624aa2796c3f038c50c31bd31e1d866a4aa91d",
+  "patchStatus": "ok"
+}

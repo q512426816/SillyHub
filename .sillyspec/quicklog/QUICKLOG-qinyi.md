@@ -407,3 +407,47 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：用户二次反馈：上轮引入的固定 30 秒轮询过于高频，上游每家供应商每次轮询都是实时直查；希望默认低频、用户主动查看时再拿新数据
 方案：QUOTA_REFRESH_INTERVAL_MS 30s→5min；新增 QUOTA_HOVER_REFRESH_DELAY_MS=2s，胶囊 onMouseEnter 起 setTimeout 延时器满 2 秒立刻 refresh 一次（in-flight 防重入、悬浮再久不重复），onMouseLeave 取消、卸载兜底清理；浮层文案同步「每 5 分钟自动刷新；胶囊上悬浮 2 秒立即刷新」
 结果：ctx-usage-bar 44/44 passed（新增常量锚定 5min/2s + 悬浮三段用例：不足 2s 离开取消/满 2s 立即刷新不等轮询/持续悬浮仍只多一次）；tsc --noEmit 干净；eslint 0 error（2 warning 存量）；模块 changelog 已同步 ql-20260915-008-c086
+
+## ql-20260915-009-dc08 | 2026-09-15 20:28:47 | 手机端会话页降噪与正文放大（mobile 专属，desktop 零变化）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-config-bar.tsx（variant prop 门控 mobile 收低频控件）
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（用量条 mobile 门控+配置条/占位接线）
+- frontend/src/components/daemon/session-panel/page-helpers.tsx（占位派生函数加 mobile 参数）
+- frontend/src/components/daemon/turn-timeline.tsx（用户/答复气泡加 turn-bubble 标记类）
+- frontend/src/app/globals.css（mobile 会话排版块（16px/94%/px-3））
+- frontend/src/components/sessions/__tests__/session-config-bar.test.tsx（加2 mobile 降噪用例）
+- frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx（加2 用量条门控用例）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引追加 ql-20260915-009 条目）
+需求：手机端会话页降噪与正文放大（mobile 专属，desktop 零变化）
+根因：m 端会话页复用 desktop 渲染树仅外框收敛——用量条六项统计窄视口换行占两行、配置条 flex-wrap 挤成三行、MarkdownText 强制气泡正文 12px 且限宽 80%，用户对照竞品反馈乱且字小
+方案：仅 mobile 变体生效：用量条整条不渲染（页面级门控）；SessionConfigBar 加 variant prop 只留供应商+模型+额度（思考档位/档案/自动续跑/弹性占位不渲染，值宽 160→110px）；输入占位去键盘提示（派生函数加 mobile 参数）；globals.css 新增 data-variant=mobile 排版块——markdown 正文 16px/行高1.75、气泡 16px/限宽94%（turn-bubble 新标记类+seg-text-bubble）、时间线 px-5→px-3
+结果：相关 9 测试文件 249 用例全绿（session-panel-variant 加2、session-config-bar 加2 新用例），tsc 0 错误、eslint 0 新增告警；模块文档 frontend.md 已同步；遗留：手机端隐藏的思考档位/档案/自动续跑暂无替代入口，任务执行折叠条保留一行作进度入口
+审计：[gate] L1（跨 0 模块 · 6 文件：3 代码/3 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/policy/shell-paths.test.ts
+
+## ql-20260915-010-2876 | 2026-09-15 20:35:16 | fix(policy): shell 写路径提取器剥尾部命令分隔符——修 c:/dev/null 审计一会放行一会拒绝
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx（+39/-0）, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx（+44/-0）, sillyhub-daemon/src/policy/shell-paths.ts（+23/-5）, sillyhub-daemon/tests/policy/shell-paths.test.ts（+27/-0）
+需求：fix(policy): shell 写路径提取器剥尾部命令分隔符——修 c:/dev/null 审计一会放行一会拒绝
+根因：重定向目标正则 (?:>>|>)\s*(\S+) 的 \S+ 贪婪吞掉后续命令分隔符（;/&&/||）： 提取出 /dev/null; 匹配不上 SILLYSPEC_TEMP_ROOTS 白名单 → 策略审计同目录抖动（线上 runtime 2f0467a6 policy_audit_log 实证 + node 复现）
+方案：shell-paths.ts 新增 trimShellSeparators（剥尾部 [;|&]+）；bash 收口在 normalizeBashWritePath（重定向/cp-mv/tee/mkdir/touch 全路径单点），PowerShell/CMD 在 return dedupe(paths.map(trim))；引号目标整体捕获时分隔符在引号外才剥（已知边界：引号内文件名真以 ; 结尾会被误剥，注释载明）
+结果：shell-paths.test 32→35 用例（bash 剥尾 2 组+ps/cmd 各 1）+policy 全目录+write-guard+allowed-roots 共 9 文件 179 用例全绿；tsc 0 错。附带：并行会话 install 弄坏 node_modules，按 CLAUDEMD 修法 pnpm install --force 恢复（BUILD_ID c9c32b52）
+审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档
+审计：[gate] L1（跨 0 模块 · 4 文件：1 代码/3 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量不适用（≤1 代码文件）
+
+## ql-20260915-011-59b7 | 2026-09-15 20:53:53 | 手机端会话功能入口收纳（用户约束：不砍功能，收进按钮/弹层）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（⋯ 菜单新增会话用量区（session-mobile-usage-section））
+- frontend/src/components/sessions/session-config-bar.tsx（mobile 设置展开钮+mobileReveal 门控）
+- frontend/src/components/sessions/__tests__/session-config-bar.test.tsx（加1 展开往返用例+desktop 设置钮断言）
+- frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx（加1 菜单用量区用例）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（追加 ql-011 条目）
+需求：手机端会话功能入口收纳（用户约束：不砍功能，收进按钮/弹层）
+根因：ql-009 初版把用量条与思考档位/档案/自动续跑在 mobile 一刀切隐藏，与用户「该有的功能手机端也要有」约束冲突
+方案：用量条收进头部 ⋯ 菜单「会话用量」区（开菜单才挂载即取数，明细表横向滚动）；SessionConfigBar mobile 行尾增设「设置」展开钮（aria-expanded），点开露出思考档位/档案/自动续跑，再点收起回紧凑态；mobileReveal 单一开关 desktop 恒展开零变化
+结果：session-config-bar 49 用例（加1 展开往返）+ session-panel-variant 10 用例（加1 菜单用量区）全绿，tsc 0 错误、eslint 0 新增告警；frontend.md 已追加 ql-011 条目并修正 ql-009 遗留描述

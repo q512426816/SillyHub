@@ -551,13 +551,15 @@ export function derivePreSessionChrome(opts: {
   preMachineOnline: boolean;
   sessionWorkspaceArchived: boolean;
   preEngine: string | null;
+  /** ql-20260915-009：mobile 占位去键盘操作提示（触屏无 Enter/Shift+Enter）。 */
+  mobile?: boolean;
 }): {
   preSendingDisabled: boolean;
   prePlaceholder: string;
   preTeamButtonDisabled: boolean;
   preTeamButtonTitle: string;
 } {
-  const { preContext, preMachineOnline, sessionWorkspaceArchived, preEngine } = opts;
+  const { preContext, preMachineOnline, sessionWorkspaceArchived, preEngine, mobile } = opts;
   const preSendingDisabled =
     !preContext || !preMachineOnline || sessionWorkspaceArchived;
   const prePlaceholder = sessionWorkspaceArchived
@@ -566,7 +568,9 @@ export function derivePreSessionChrome(opts: {
       ? "请先选择机器与智能体…"
       : !preMachineOnline
         ? "机器离线，输入不可用…"
-        : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
+        : mobile
+          ? "发送第一句话开始对话…"
+          : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
   // task-13（FR-05）：预会话团队门控——引擎门控（provider-abstraction 收敛查
   // ProviderCaps subagent 键）+ 所选机器在线；tooltip 按未满足原因更新。
   const preTeamEngineOk = getProviderCaps(preEngine ?? "").subagent;
@@ -590,7 +594,10 @@ export function resolvePageProjectId(
     : undefined;
 }
 
-/** 真会话输入框占位文案链（原组件内 16 行三元链外提，逻辑原样）。 */
+/** 真会话输入框占位文案链（原组件内 16 行三元链外提，逻辑原样）。
+ *  ql-20260915-009：mobile 空闲默认占位去键盘操作提示（触屏无 Enter/Shift+Enter，
+ *  / 唤起技能提示对手机输入法也不友好）；运行/排队/离线等状态性文案保持不动
+ *  （它们是必要信息，不是操作提示噪音）。 */
 export function deriveSessionPlaceholder(o: {
   sessionWorkspaceArchived: boolean;
   ended: boolean;
@@ -600,6 +607,7 @@ export function deriveSessionPlaceholder(o: {
   isQueueFull: boolean;
   restoring: boolean;
   running: boolean;
+  mobile?: boolean;
 }): string {
   const {
     sessionWorkspaceArchived,
@@ -610,6 +618,7 @@ export function deriveSessionPlaceholder(o: {
     isQueueFull,
     restoring,
     running,
+    mobile,
   } = o;
   return sessionWorkspaceArchived
     ? "工作区已归档，会话只读。恢复请到工作区详情把状态改回「活跃」"
@@ -627,7 +636,9 @@ export function deriveSessionPlaceholder(o: {
               ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
               : running
                 ? "消息将排队，等待本轮完成后自动发送…"
-                : `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
+                : mobile
+                  ? "继续追问…"
+                  : `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
 }
 
 /** 团队入口派生（task-11：引擎门控 + 终态/离线禁用 + tooltip 按未满足原因更新）。 */

@@ -1,0 +1,763 @@
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 16c040d79..a62aefd5b 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -793,6 +793,44 @@
+   background-image: linear-gradient(to bottom right, #0e7490, #155e75, #020617);
+ }
+ 
++/* ---- 手机端会话正文放大(ql-20260915-009,仅 /m 会话页面板根 data-variant="mobile" 生效) ----
++   用户反馈手机会话页重点内容太小:气泡正文实际字号由 MarkdownText compact 的
++   !text-xs(12px)决定,气泡本身 text-sm(14px)且限宽 80%。桌面保持紧凑(信息密
++   度优先);手机端经面板根 data-variant 元素级规则放大——MarkdownText 侧带
++   !important,靠特异度 (0,3,0) 压其 (0,2,0)(双 important 下特异度高者胜);
++   气泡/滚动容器侧无 important,特异度 (0,2,0) 自然压过单类工具类。desktop /
++   悬浮窗(dialog 无 data-variant="mobile")不进规则,零变化。 */
++[data-variant="mobile"] .markdown-text .wmde-markdown {
++  font-size: 16px !important;
++  line-height: 1.75 !important;
++}
++[data-variant="mobile"] .markdown-text .wmde-markdown h1,
++[data-variant="mobile"] .markdown-text .wmde-markdown h2 {
++  font-size: 18px !important;
++}
++[data-variant="mobile"] .markdown-text .wmde-markdown h3,
++[data-variant="mobile"] .markdown-text .wmde-markdown h4 {
++  font-size: 16px !important;
++}
++[data-variant="mobile"] .markdown-text .wmde-markdown code {
++  font-size: 14px !important;
++}
++/* 气泡本体(用户气泡纯文本路径/流式光标继承字号)+限宽放宽(80/82%→94%,窄屏少折行)。
++   .turn-bubble=用户气泡+旧路径答复气泡(turn-timeline),.seg-text-bubble=段模型
++   文本气泡(turn-segment-views)。 */
++[data-variant="mobile"] .turn-bubble,
++[data-variant="mobile"] .seg-text-bubble {
++  font-size: 16px;
++  line-height: 27px;
++  max-width: 94%;
++}
++/* 时间线左右留白收敛(px-5→px-3),窄屏给正文让宽度 */
++[data-variant="mobile"] [data-testid="turn-timeline-scroll"] {
++  padding-left: 12px;
++  padding-right: 12px;
++}
++
++
+ /* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----
+    - 实心 bg-*-500 及更深实色状态/品牌块:bg-red-500/600(hover:bg-red-700 同)、
+      bg-amber-500、bg-yellow-500、bg-green-500、bg-orange-500、
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+index 0d7828d3c..8efdbc80e 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+@@ -413,6 +413,45 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
+       expect.anything(),
+     );
+   });
++
++  // ql-20260915-009 手机端降噪：用量条（六项统计）mobile 整条不渲染——纯辅助
++  // 信息不占会话主体；desktop 照旧（回归锚）。
++  const usagePayload = {
++    totals: {
++      model: "totals",
++      input_tokens: 100,
++      output_tokens: 50,
++      cache_read_tokens: 0,
++      cache_creation_tokens: 0,
++      api_requests: 2,
++    },
++    by_model: [],
++  };
++
++  it("mobile：会话累计用量条整条不渲染（getSessionUsage 不触达）", async () => {
++    sessionApi.getSessionUsage.mockResolvedValue(usagePayload);
++    try {
++      setupPage("mobile");
++      await screen.findByLabelText("会话面板");
++      // 组件未挂载：取数不触达、摘要行指标均不存在。
++      expect(sessionApi.getSessionUsage).not.toHaveBeenCalled();
++      expect(screen.queryByLabelText("输入")).toBeNull();
++      expect(screen.queryByLabelText("缓存命中率")).toBeNull();
++    } finally {
++      sessionApi.getSessionUsage.mockResolvedValue(null);
++    }
++  });
++
++  it("desktop：用量条照常渲染（有数据即显示，零回归锚）", async () => {
++    sessionApi.getSessionUsage.mockResolvedValue(usagePayload);
++    try {
++      setupPage();
++      expect(await screen.findByLabelText("输入")).toBeInTheDocument();
++      expect(screen.getByLabelText("缓存命中率")).toBeInTheDocument();
++    } finally {
++      sessionApi.getSessionUsage.mockResolvedValue(null);
++    }
++  });
+ });
+ 
+ /* ───────── 3. 预会话空态（sessionId=null）mobile 根容器类 ───────── */
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 3670402b0..d94ed5805 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -551,13 +551,15 @@ export function derivePreSessionChrome(opts: {
+   preMachineOnline: boolean;
+   sessionWorkspaceArchived: boolean;
+   preEngine: string | null;
++  /** ql-20260915-009：mobile 占位去键盘操作提示（触屏无 Enter/Shift+Enter）。 */
++  mobile?: boolean;
+ }): {
+   preSendingDisabled: boolean;
+   prePlaceholder: string;
+   preTeamButtonDisabled: boolean;
+   preTeamButtonTitle: string;
+ } {
+-  const { preContext, preMachineOnline, sessionWorkspaceArchived, preEngine } = opts;
++  const { preContext, preMachineOnline, sessionWorkspaceArchived, preEngine, mobile } = opts;
+   const preSendingDisabled =
+     !preContext || !preMachineOnline || sessionWorkspaceArchived;
+   const prePlaceholder = sessionWorkspaceArchived
+@@ -566,7 +568,9 @@ export function derivePreSessionChrome(opts: {
+       ? "请先选择机器与智能体…"
+       : !preMachineOnline
+         ? "机器离线，输入不可用…"
+-        : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
++        : mobile
++          ? "发送第一句话开始对话…"
++          : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
+   // task-13（FR-05）：预会话团队门控——引擎门控（provider-abstraction 收敛查
+   // ProviderCaps subagent 键）+ 所选机器在线；tooltip 按未满足原因更新。
+   const preTeamEngineOk = getProviderCaps(preEngine ?? "").subagent;
+@@ -590,7 +594,10 @@ export function resolvePageProjectId(
+     : undefined;
+ }
+ 
+-/** 真会话输入框占位文案链（原组件内 16 行三元链外提，逻辑原样）。 */
++/** 真会话输入框占位文案链（原组件内 16 行三元链外提，逻辑原样）。
++ *  ql-20260915-009：mobile 空闲默认占位去键盘操作提示（触屏无 Enter/Shift+Enter，
++ *  / 唤起技能提示对手机输入法也不友好）；运行/排队/离线等状态性文案保持不动
++ *  （它们是必要信息，不是操作提示噪音）。 */
+ export function deriveSessionPlaceholder(o: {
+   sessionWorkspaceArchived: boolean;
+   ended: boolean;
+@@ -600,6 +607,7 @@ export function deriveSessionPlaceholder(o: {
+   isQueueFull: boolean;
+   restoring: boolean;
+   running: boolean;
++  mobile?: boolean;
+ }): string {
+   const {
+     sessionWorkspaceArchived,
+@@ -610,6 +618,7 @@ export function deriveSessionPlaceholder(o: {
+     isQueueFull,
+     restoring,
+     running,
++    mobile,
+   } = o;
+   return sessionWorkspaceArchived
+     ? "工作区已归档，会话只读。恢复请到工作区详情把状态改回「活跃」"
+@@ -627,7 +636,9 @@ export function deriveSessionPlaceholder(o: {
+               ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
+               : running
+                 ? "消息将排队，等待本轮完成后自动发送…"
+-                : `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
++                : mobile
++                  ? "继续追问…"
++                  : `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
+ }
+ 
+ /** 团队入口派生（task-11：引擎门控 + 终态/离线禁用 + tooltip 按未满足原因更新）。 */
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 2576d3916..ceb93da25 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -37,6 +37,19 @@ import {
+   SessionConfigBar, useActiveSharedAgents,
+ } from "@/components/sessions/session-config-bar";
+ import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
++// task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design §5.B §5.E）：
++// 子代理右栏三件——context Provider（中栏紧凑卡片消费）、详情面板壳、拖宽把手
++// 与宽度记忆（与文件预览共用同一 localStorage 键，单槽位语义，design §5.B）。
++import { SubagentPanelContext } from "@/components/daemon/subagent-panel-context";
++import type { SubagentPanelContextValue } from "@/components/daemon/subagent-panel-context";
++import { SubagentDetailPanel } from "@/components/daemon/subagent-detail-panel";
++import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
++import {
++  SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT,
++  SESSIONS_FILE_PREVIEW_WIDTH_LS_KEY,
++  SESSIONS_FILE_PREVIEW_WIDTH_MAX,
++  SESSIONS_FILE_PREVIEW_WIDTH_MIN,
++} from "@/components/sessions/portal-file-panels";
+ // task-03/05（2026-09-08-session-turn-nav / FR-01 FR-03 / D-002@v1 D-007@v1）：
+ // 目录条目类型 + TurnCatalog 刻度轨组件（task-02 产出契约）——类型供下方
+ // catalogEntries 派生；组件在 desktop page 分支常驻挂载（task-05 布局接线，
+@@ -203,6 +216,23 @@ function truncateForSummary(
+ 
+ /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
+ 
++/**
++ * task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design §5.B）：
++ * page 模式子代理右栏三可选 props——仅门户 page 装配（sessions-portal task-04）
++ * 传入；未传（悬浮宿主等 page 旧消费方）内部视为 null 且不挂
++ * SubagentPanelContext Provider，SubagentBlockView 回退原内联展开，零回归。
++ * dialog 模式不经本组件（SessionPanel 分发到 session-panel-dialog），天然无右栏。
++ */
++export interface SessionPanelSubagentProps {
++  /** 右栏应展示的子代理段 id（null / 未传 = 未打开）。 */
++  openSubagentId?: string | null;
++  /** 中栏紧凑卡片 / 目录点击打开右栏上抛（宿主落单槽位）。 */
++  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
++  onOpenSubagent?: (segmentId: string) => void;
++  /** 右栏 ✕ / 段失效自动关闭上抛（宿主清槽位）。 */
++  onSubagentPanelClose?: () => void;
++}
++
+ export function SessionPanelPage({
+   sessionId,
+   machines,
+@@ -213,7 +243,10 @@ export function SessionPanelPage({
+   onPreSessionCreated,
+   pageContextOverride,
+   variant,
+-}: SessionPanelPageProps) {
++  openSubagentId,
++  onOpenSubagent,
++  onSubagentPanelClose,
++}: SessionPanelPageProps & SessionPanelSubagentProps) {
+   const qc = useQueryClient();
+   const notify = useNotify();
+ 
+@@ -1520,6 +1553,59 @@ export function SessionPanelPage({
+     [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
+   );
+ 
++  // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
++  //    §5.B §5.E）：子代理右栏——段实时解析 + 失效自动关闭 + context 提供 ────
++  // 未传 props（悬浮宿主等 page 旧消费方）内部归一 null；dialog 模式不经本组件。
++  const activeSubagentId = openSubagentId ?? null;
++  // 段解析：displayTurns DFS findSegmentById 定位（活引用——SSE 更新即重渲面板，
++  // 非快照）；命中但非容器段（tool / subagent_stub，理论不可达——目录与卡片只
++  // 会给容器段 id）视为未命中，走自动关闭兜底。
++  const openSubagentSegment = useMemo(() => {
++    if (activeSubagentId == null) return null;
++    for (const t of displayTurns) {
++      const seg = findSegmentById(t.segments, activeSubagentId);
++      if (seg && (seg.kind === "tool" || seg.kind === "subagent_stub")) return seg;
++    }
++    return null;
++  }, [displayTurns, activeSubagentId]);
++  // 段失效（会话重装配后 id 不存在 / 切到空 turns 的会话态）→ 自动上抛关闭
++  // （design §5.E）；会话切换清零由宿主（sessions-portal task-04）负责，本
++  // effect 只兜段失效。依赖不变不重跑，宿主忽略回调也不会死循环。
++  useEffect(() => {
++    if (activeSubagentId != null && openSubagentSegment == null) {
++      onSubagentPanelClose?.();
++    }
++  }, [activeSubagentId, openSubagentSegment, onSubagentPanelClose]);
++  // 右栏宽度：本组件自有 usePanelWidth，与文件预览共用同一 localStorage 键
++  // （单槽位语义，两实例互不重叠生命周期内各自记忆，design §5.B / X-002 修正）；
++  // 默认 / 最小 / 最大用 portal-file-panels 同处常量（480 / 320 / 860）。
++  const [subagentPanelWidth, setSubagentPanelWidth] = usePanelWidth({
++    storageKey: SESSIONS_FILE_PREVIEW_WIDTH_LS_KEY,
++    defaultWidth: SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT,
++    minWidth: SESSIONS_FILE_PREVIEW_WIDTH_MIN,
++    maxWidth: SESSIONS_FILE_PREVIEW_WIDTH_MAX,
++  });
++  // Provider 挂载条件（最终方案）：宿主声明右栏能力（传入 onOpenSubagent）且非
++  // mobile（design §3 非目标：移动端窄屏不做右栏）才挂 SubagentPanelContext——
++  // 消费到 context 的 SubagentBlockView 走紧凑卡片分支；不满足则不挂 Provider，
++  // useSubagentPanel() 返回 null 回退原内联展开（FR-05 零回归）。不能无条件挂
++  // 空值 Provider：紧凑卡片点击 openSubagent=noop 会「点了没反应」，比内联回退更差。
++  const hasSubagentPanelHost = !mobile && onOpenSubagent != null;
++  const subagentPanelContextValue = useMemo<SubagentPanelContextValue>(
++    () => ({
++      openSubagent: onOpenSubagent ?? (() => {}),
++      closeSubagent: onSubagentPanelClose ?? (() => {}),
++      activeId: activeSubagentId,
++    }),
++    [onOpenSubagent, onSubagentPanelClose, activeSubagentId],
++  );
++  // 右栏渲染条件：openSubagentId 命中段（段失效时不渲染右列，等上方 effect 关闭）。
++  const subagentPanelOpen = activeSubagentId != null && openSubagentSegment != null;
++  const handleSubagentPanelClose = useCallback(() => {
++    onSubagentPanelClose?.();
++  }, [onSubagentPanelClose]);
++
++
+   // ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
+   //    轮次目录数据 catalogEntries（TurnCatalogEntry[]；挂载见 task-05 布局接线）。
+   //    零新增后端调用（R-08）：runs 骨架复用既有 runsMeta（attach 期 + 每轮
+@@ -2404,7 +2490,8 @@ export function SessionPanelPage({
+         setErrorMsg(errMessage(apiErr, "重新发送失败"));
+       }
+     },
+-    [session, machineOnline, turnState.currentRunId, sessionId],
++    // qc 为 useQueryClient 稳定实例，补入 deps 消除 exhaustive-deps 告警（行为不变）。
++    [session, machineOnline, turnState.currentRunId, sessionId, qc],
+   );
+ 
+   // ql-20260903-026：行级 memo props 稳定化——内联箭头每次渲染新引用会击穿
+@@ -2472,6 +2559,14 @@ export function SessionPanelPage({
+   // 容忍）。命中：折叠块模拟点击头部展开 + 滚动居中；未命中只完成视图切换不报错。
+   const handleJumpToSubagent = useCallback(
+     (segmentId: string) => {
++      // task-03（FR-05 / design §5.F）：宿主传入 onOpenSubagent（有右栏能力）→
++      // 直接开右栏展示该子代理完整时间线，不切视图不滚动（中栏已无内联细节
++      // 可定位）；下方 setViewMode("all") + 双 rAF DOM 定位保留为无右栏能力
++      // 宿主（悬浮宿主等未传新 props 的 page 消费方）的回退路径。
++      if (onOpenSubagent != null) {
++        onOpenSubagent(segmentId);
++        return;
++      }
+       setViewMode("all");
+       requestAnimationFrame(() => {
+         requestAnimationFrame(() => {
+@@ -2517,7 +2612,7 @@ export function SessionPanelPage({
+         });
+       });
+     },
+-    [displayTurns],
++    [displayTurns, onOpenSubagent],
+   );
+ 
+   // ── 渲染 ───────────────────────────────────────────────────────────────
+@@ -2538,6 +2633,7 @@ export function SessionPanelPage({
+         preMachineOnline,
+         sessionWorkspaceArchived,
+         preEngine,
++        mobile,
+       });
+     // task-07 Phase 5（FR-06 / D-004@v2）：ppm_project 页面上下文 → 弹层项目
+     // 预选 id（「发起团队」入口自动开弹层时项目/工作区随上下文预选）。
+@@ -2573,7 +2669,11 @@ export function SessionPanelPage({
+           </div>
+           <div className="flex shrink-0 items-center gap-2">
+             {/* task-09：子代理目录（空 turns 返回 null，同构占位）。 */}
+-            <SubagentCatalog turns={[]} onJumpTo={handleJumpToSubagent} />
++            <SubagentCatalog
++              turns={[]}
++              onJumpTo={handleJumpToSubagent}
++              activeId={activeSubagentId}
++            />
+             <Button
+               size="small"
+               icon={<Ban className="h-3 w-3" />}
+@@ -2762,6 +2862,7 @@ export function SessionPanelPage({
+               llmProviderId={preProviderId || null}
+               configSnapshot={null}
+               engine={preEngine}
++              variant={variant}
+               onProvisionalSwitch={(field, value) => {
+                 if (field === "llm_provider_id") setPreProviderId(value);
+                 else setPreProfileId(value);
+@@ -2848,6 +2949,7 @@ export function SessionPanelPage({
+     isQueueFull,
+     restoring,
+     running,
++    mobile,
+   });
+ 
+   const interruptDisabled =
+@@ -2925,10 +3027,18 @@ export function SessionPanelPage({
+     </>
+   );
+ 
+-  return (
++  // task-03（design §5.B）：面板根 JSX 先构造成变量——右栏打开时外包 flex 行
++  //（[本节点 flex-1 min-w-0] + 把手 + 右列），未打开 / 无右栏能力宿主原样返回
++  //（className 与 DOM 结构零变化，session-panel-variant 断言不回归）。
++  const panelRoot = (
+     <section
+       ref={panelRef}
+-      className={mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP}
++      className={cn(
++        mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP,
++        // task-03：右栏打开时面板根作为 flex 行左单元格（flex-1 min-w-0）；
++        // 高度链不破坏——外层 flex 行 h-full + 默认 stretch 拉满，h-full 原类保留。
++        subagentPanelOpen && "min-w-0 flex-1",
++      )}
+       // task-06（2026-09-08-session-turn-nav / R-05）：mobile 轮次导航 Drawer
+       // （getContainer=false 内联渲染）的定位上下文——仅 mobile 补
+       // position:relative，不进 className（mobile 根类字面量回归锚逐字不变，
+@@ -3021,10 +3131,12 @@ export function SessionPanelPage({
+                 }}
+               />
+               {/* task-09（FR-04 / Grill X-09）：子代理目录——仅 page 模式头部挂载
+-                  （dialog 模式不挂）；无子代理段时组件返回 null 不占位。 */}
++                  （dialog 模式不挂）；无子代理段时组件返回 null 不占位。
++                  task-03：activeId 命中行高亮（design §5.F）。 */}
+               <SubagentCatalog
+                 turns={displayTurns}
+                 onJumpTo={handleJumpToSubagent}
++                activeId={activeSubagentId}
+               />
+             </>
+           )}
+@@ -3227,6 +3339,7 @@ export function SessionPanelPage({
+                     <SubagentCatalog
+                       turns={displayTurns}
+                       onJumpTo={handleJumpToSubagent}
++                      activeId={activeSubagentId}
+                     />
+                   </div>
+                 </div>
+@@ -3241,7 +3354,17 @@ export function SessionPanelPage({
+           narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
+           sessionId 才渲染」）。refreshSignal 挂 onTurnCompleted 轮终态递增
+           （usageRefresh，R-04：组件自取数，不引入 react-query）。 */}
+-      <SessionUsageBar sessionId={session.id} refreshSignal={usageRefresh} />
++      {/* 2026-08-29-session-usage-stats task-04（FR-02 / 原型场景一 / D-001@v1）：
++          会话累计用量条——page 模式挂会话头部下方（分隔信息条）；session 已
++          narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
++          sessionId 才渲染」）。refreshSignal 挂 onTurnCompleted 轮终态递增
++          （usageRefresh，R-04：组件自取数，不引入 react-query）。
++          ql-20260915-009：mobile 不渲染——六项统计在窄视口换行占两行，纯辅助
++          信息不该占手机会话主体（对齐竞品聊天页「内容为王、统计收走」形态；
++          desktop 照旧）。 */}
++      {!mobile && (
++        <SessionUsageBar sessionId={session.id} refreshSignal={usageRefresh} />
++      )}
+ 
+       {/* task-10 / design A5+A6（原型⑤）：suspended 挂起横幅（info 色，双主题
+           token 阶）。挂起时后台状态权威（backend 已判定 daemon 离线超时/优雅
+@@ -3556,6 +3679,7 @@ export function SessionPanelPage({
+             llmProviderId={session.llm_provider_id ?? null}
+             configSnapshot={session.config_snapshot ?? null}
+             engine={session.provider ?? null}
++            variant={variant}
+             // 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关
+             //（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
+             autoResume={{
+@@ -3719,4 +3843,50 @@ export function SessionPanelPage({
+       />
+     </section>
+   );
++
++  // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
++  //    §5.B §5.E）：子代理右栏装配 ──────────────────────────────────────────
++  // 无右栏能力宿主（未传 onOpenSubagent / mobile）：原样返回，不挂 Provider——
++  // SubagentBlockView 走原内联展开，行为零回归（FR-05；挂载条件见
++  // hasSubagentPanelHost 注释）。预会话 / 加载 / 错误三个提前 return 分支无
++  // turns 渲染，天然不需要 Provider。
++  if (!hasSubagentPanelHost) {
++    return panelRoot;
++  }
++  // 右栏打开（openSubagentId 命中段）：面板根外包 flex 行
++  // [panelRoot flex-1 min-w-0] + PanelResizer（side=right，把手在右列左缘，
++  // 拖左增宽——对齐 sessions-portal 文件预览列）+ 右列（宽度 usePanelWidth 记忆，
++  // 与文件预览同键单槽位）内挂 SubagentDetailPanel（段活引用，SSE 实时刷新）。
++  // 段失效间隙（openSubagentSegment null）不渲染右列，等 effect 自动关闭。
++  return (
++    <SubagentPanelContext.Provider value={subagentPanelContextValue}>
++      {subagentPanelOpen ? (
++        <div className="flex h-full min-h-0 w-full overflow-hidden">
++          {panelRoot}
++          <PanelResizer
++            width={subagentPanelWidth}
++            onWidthChange={setSubagentPanelWidth}
++            defaultWidth={SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT}
++            minWidth={SESSIONS_FILE_PREVIEW_WIDTH_MIN}
++            maxWidth={SESSIONS_FILE_PREVIEW_WIDTH_MAX}
++            ariaLabel="调整子代理面板宽度"
++            testId="subagent-panel-resizer"
++            side="right"
++          />
++          <div
++            className="min-w-0 shrink-0"
++            style={{ width: `${subagentPanelWidth}px` }}
++            data-testid="subagent-panel-column"
++          >
++            <SubagentDetailPanel
++              segment={openSubagentSegment}
++              onClose={handleSubagentPanelClose}
++            />
++          </div>
++        </div>
++      ) : (
++        panelRoot
++      )}
++    </SubagentPanelContext.Provider>
++  );
+ }
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 397f5fdc2..d557d70b7 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -320,9 +320,9 @@ export interface TurnTimelineProps {
+   /** AskUser 提问历史（ql-20260801-003，按 run_id 穿插到对应 turn）。 */
+   dialogHistory: SessionDialogRead[];
+   /** 待答卡提交/被 resolved 后移除（父级双保险过滤）。 */
+-  onDialogResolved: (requestId: string) => void;
++  onDialogResolved: (_requestId: string) => void;
+   /** 失败轮次「重新发送」（RunErrorItem onResend，父级守卫 turn 级串行）。 */
+-  onResend: (prompt: string) => void;
++  onResend: (_prompt: string) => void;
+   /** RunErrorItem 主操作「切换供应商」。 */
+   onSwitchProvider: () => void;
+   /** 空态文案两态：在线显示 provider 已就绪；离线显示无守护进程。 */
+@@ -377,7 +377,7 @@ const TurnRow = memo(function TurnRow({
+   /** task-07：该轮之后是否已存在用户消息（marker 提问卡已答态 best-effort 判定）。 */
+   hasLaterUserMessage: boolean;
+   dialogHistory: SessionDialogRead[];
+-  onResend: (prompt: string) => void;
++  onResend: (_prompt: string) => void;
+   onSwitchProvider: () => void;
+   /** 2026-09-10-auto-resume-interrupted-turn：daemon_restarted 场景化兜底建议。 */
+   daemonRestartedHint?: string | null;
+@@ -438,8 +438,9 @@ const TurnRow = memo(function TurnRow({
+                   )}
+                   {/* task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出。
+                       ql-20260909-009：shadow-sm→shadow-primary 品牌投影（与发送按钮同
+-                      token），用户气泡从纯色块浮出时间线底。 */}
+-                  <div className="group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
++                      token），用户气泡从纯色块浮出时间线底。ql-20260915-009：turn-bubble
++                      标记类供 mobile 放大规则定位（globals.css data-variant 块）。 */}
++                  <div className="turn-bubble group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
+                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
+                     {(() => {
+                       const parsed = parseAttachmentMarkersCached(turn.prompt);
+@@ -584,7 +585,8 @@ const TurnRow = memo(function TurnRow({
+                       <div className="flex items-start gap-2.5">
+                         <ChatMessageAvatar kind="agent" title="智能体" />
+                         <div className="flex items-end gap-1.5">
+-                          <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
++                          {/* ql-20260915-009：turn-bubble 标记类供 mobile 放大规则定位。 */}
++                          <div className="turn-bubble max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+                             <MarkdownText
+                               content={outputMarker ? outputMarker.textBefore : turn.output}
+                             />
+@@ -1130,13 +1132,37 @@ type SegmentTimelineItem =
+   | { kind: "segment"; segment: TurnSegment; ts: number | null }
+   | { kind: "askUser"; dialog: SessionDialogRead; ts: number | null };
+ 
++/**
++ * task-02（2026-09-15-subagent-three-pane-display / FR-04 / D-002@v1 ①）：对话
++ * 视图段过滤谓词——在 text/file 基础上放宽纳入子代理容器段（tool 段带 children
++ * 的子代理归属，或 subagent_stub 兜底段），容器段经 SegmentView 分发到
++ * SubagentBlockView 渲染（渲染侧零改动），修复默认视图下子代理整体不可见。
++ *
++ * 排除项保持不变：thinking / 普通 tool（无 children）/ stderr / preamble 段仍被
++ * 过滤（渲染经济 FR-06 不回归）；dispatch_worker 团队分身段也不进对话视图
++ * （团队卡仍仅「全部（进度）」视图，避免混入对话流）——判定语义同
++ * turn-segment-views.tsx 的 isTeamDispatchTool（该函数模块私有未导出，此处本地
++ * 等价实现：取 `__` 末段短名比对，兼容 mcp__<server>__ 前缀与 daemon 裸名两形态）。
++ */
++function isConversationSegment(seg: TurnSegment): boolean {
++  if (seg.kind === "text" || seg.kind === "file") return true;
++  if (seg.kind === "subagent_stub") return true;
++  return (
++    seg.kind === "tool" &&
++    seg.children.length > 0 &&
++    (seg.toolName ?? "").split("__").pop() !== "dispatch_worker"
++  );
++}
++
+ /**
+  * task-06（FR-01 / FR-02 / FR-06）：v2 段模型轮渲染主体（segments 非 undefined 的
+  * turn 专用，双视图分支 + 内置轮级状态条）：
+  *
+  *   - 「对话」视图（viewMode=conversation）：渲染 text 段与 file 段（每段独立气泡，
+  *     贴原型 .seg-text——file 段是面向用户的交付物，agent-file-upload-mcp FR-01 聊天流
+- *     呈现；思考/工具/子代理/stderr 段不挂载——渲染经济，FR-06），轻量 ❓
++ *     呈现）+ 子代理容器段（tool 带 children / subagent_stub，task-02 放宽过滤后经
++ *     SegmentView 渲染为子代理卡片，见 isConversationSegment）；思考/普通工具/stderr/
++ *     团队分身段不挂载——渲染经济，FR-06），轻量 ❓
+  *     AskUser 记录由外层共享逻辑渲染（答复之前）；
+  *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
+  *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
+@@ -1174,7 +1200,7 @@ function SegmentedTurnBody({
+   /** task-07：marker 提问卡已答态 best-effort（该轮之后已存在用户消息）。 */
+   markerAnswered: boolean;
+   /** task-07：marker 提问卡提交回调（答案作下一条用户消息，父级传 onResend）。 */
+-  onMarkerSubmit: (prompt: string) => void;
++  onMarkerSubmit: (_prompt: string) => void;
+ }) {
+   const turnDialogs = useMemo(
+     () => dialogHistory.filter((d) => d.run_id === runKey),
+@@ -1184,7 +1210,7 @@ function SegmentedTurnBody({
+     () =>
+       viewMode === "all"
+         ? null
+-        : segments.filter((s) => s.kind === "text" || s.kind === "file"),
++        : segments.filter(isConversationSegment),
+     [viewMode, segments],
+   );
+   const timeline = useMemo(() => {
+@@ -1227,7 +1253,8 @@ function SegmentedTurnBody({
+       )}
+       {/* 「对话」视图（2026-09-09-sessions-visual-refresh task-05 / D-003@v1）：
+           agent 侧挂共享渐变光环头像（ChatMessageAvatar），text/file 段气泡行与
+-          头像横排；「全部」视图不挂头像（Grill G-03——进度时间线保持 ml-9 竖线
++          头像横排（task-02 后子代理容器段卡片也在此列，随 SegmentView 分发）；
++          「全部」视图不挂头像（Grill G-03——进度时间线保持 ml-9 竖线
+           容器原样式）。 */}
+       {textSegments != null && textSegments.length > 0 && (
+         <div className="flex items-start gap-2.5">
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index c6ad7dc35..d2ea92d91 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -1193,3 +1193,47 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+     );
+   });
+ });
++
++// ── 9. ql-20260915-009 手机端降噪：variant="mobile" 收低频控件 ────────────────
++
++describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）", () => {
++  it("mobile：思考档位/档案/中断自动续跑不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
++    renderBar({
++      variant: "mobile",
++      llmProviderId: "prov-kimi",
++      agentProfileId: "prof-1",
++      thinkingLevel: {},
++      autoResume: { enabled: true, onToggle: vi.fn() },
++    });
++    // 低频设置项收走。
++    expect(
++      screen.queryByTestId("config-thinking-select"),
++    ).not.toBeInTheDocument();
++    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
++    expect(
++      screen.queryByRole("button", { name: "配置-档案 知识经理" }),
++    ).not.toBeInTheDocument();
++    // 核心控件保留（供应商列表异步到达后解析名）。
++    expect(
++      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
++    ).toBeInTheDocument();
++    expect(screen.getByTestId("config-model-select")).toBeInTheDocument();
++  });
++
++  it("desktop（默认不传 variant）：上述控件照旧渲染（零回归锚）", async () => {
++    renderBar({
++      llmProviderId: "prov-kimi",
++      agentProfileId: "prof-1",
++      thinkingLevel: {},
++      autoResume: { enabled: true, onToggle: vi.fn() },
++    });
++    expect(
++      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
++    ).toBeInTheDocument();
++    expect(
++      screen.getByRole("button", { name: "配置-档案 知识经理" }),
++    ).toBeInTheDocument();
++    expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
++    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index b41ef1522..aad9bbb31 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -258,6 +258,13 @@ export interface SessionConfigBarProps {
+    * 与 running 解锁提示同行，running 提示优先占位时插槽仍在其右）。
+    */
+   trailing?: React.ReactNode;
++  /**
++   * ql-20260915-009 手机端降噪：mobile 只保留 供应商+模型+额度插槽——思考档位
++   * 下拉、档案控件、「中断自动续跑」开关不渲染（均为低频设置项，桌面端仍可改；
++   * 手机端配置行 3 行收敛为 1 行），控件值截断宽度同步收窄；desktop 默认不传
++   * 零变化。
++   */
++  variant?: "desktop" | "mobile";
+ }
+ 
+ /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
+@@ -303,7 +310,9 @@ export function SessionConfigBar({
+   trailing,
+   autoResume,
+   providerOpenSignal = 0,
++  variant = "desktop",
+ }: SessionConfigBarProps) {
++  const mobile = variant === "mobile";
+   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
+   const { activeSharedAgents } = useActiveSharedAgents();
+   const sharedProfileIds = useMemo(
+@@ -626,7 +635,14 @@ export function SessionConfigBar({
+         <span aria-hidden className="shrink-0 text-brand-600">
+           {icon}
+         </span>
+-        <span className="max-w-[160px] truncate">{value}</span>
++        <span
++          className={cn(
++            "max-w-[160px] truncate",
++            mobile && "max-w-[110px]",
++          )}
++        >
++          {value}
++        </span>
+         <ChevronDown
+           aria-hidden
+           className="h-3 w-3 shrink-0 text-muted-foreground/60"
+@@ -718,7 +734,8 @@ export function SessionConfigBar({
+                 executeSwitch({ field: "model", value: v, label: v || "默认" });
+               }}
+               className={cn(
+-                "h-6 max-w-[150px] cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
++                "h-6 cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
++                mobile ? "max-w-[110px]" : "max-w-[150px]",
+                 !canSwitch &&
+                   "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
+               )}
+@@ -738,8 +755,11 @@ export function SessionConfigBar({
+             下拉邻位）。预会话态=静态七档镜像（provisional 暂存）；会话态=thinkingLevel
+             prop 挂载的动态档位（GET 列表+current 现值，点选即 POST 切换）。两态均
+             caps.thinking_level 门控（cursor/未知引擎不渲染）；running/ended 照模型
+-            子下拉同禁（会话态另叠 thinkingLevel.disabled）。 */}
+-        {thinkingLevelEnabled && (provisional || thinkingLevel != null) && (
++            下拉同禁（会话态另叠 thinkingLevel.disabled）；ql-20260915-009 mobile
++            再收（次要低频控件，窄视口不占行）。 */}
++        {thinkingLevelEnabled &&
++          !mobile &&
++          (provisional || thinkingLevel != null) && (
+           <select
+             aria-label="配置-思考级别"
+             data-testid="config-thinking-select"
+@@ -795,16 +815,19 @@ export function SessionConfigBar({
+             ))}
+           </select>
+         )}
+-        {ctrlButton(
+-          "profile",
+-          <User aria-hidden className="h-3.5 w-3.5" />,
+-          profileLabel,
+-          // ql-20260909-005：同供应商按钮——禁用态 title 说明原因。
+-          ended
+-            ? "会话已结束或机器离线，不可切换档案"
+-            : running
+-              ? "会话运行中，本轮结束后可切换档案"
+-              : "智能体档案",
++        {/* ql-20260915-009：mobile 不渲染档案控件（与思考档位/自动续跑同口径——
++            低频设置项收离手机会话页，桌面端照旧；手机端保留 供应商+模型+额度）。 */}
++        {!mobile &&
++          ctrlButton(
++            "profile",
++            <User aria-hidden className="h-3.5 w-3.5" />,
++            profileLabel,
++            // ql-20260909-005：同供应商按钮——禁用态 title 说明原因。
++            ended
++              ? "会话已结束或机器离线，不可切换档案"
++              : running
++                ? "会话运行中，本轮结束后可切换档案"
++                : "智能体档案",
+           <ConfigDropdown
+             testId="config-dd-profile"
+             title="切换档案 · 只影响本会话"
+@@ -855,10 +878,13 @@ export function SessionConfigBar({
+             )}
+           </ConfigDropdown>,
+         )}
+-        <span className="flex-1" />
++        {/* ql-20260915-009：mobile 不渲染弹性占位（次要开关同收，flex-wrap 行内
++            留它只会把行尾插槽顶到下一行）。 */}
++        {!mobile && <span className="flex-1" />}
+         {/* 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关——
+-            daemon 重启恢复后被中断轮自动续跑（默认开）。 */}
+-        {autoResume != null && (
++            daemon 重启恢复后被中断轮自动续跑（默认开）；ql-20260915-009 mobile 收
++            （设置一次即 forget 的低频项，桌面端仍可改）。 */}
++        {autoResume != null && !mobile && (
+           <label
+             className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+             title={

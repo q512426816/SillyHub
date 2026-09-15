@@ -49,7 +49,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch, Tag } from "antd";
-import { ChevronDown, Cloud, Lock, User } from "lucide-react";
+import { ChevronDown, Cloud, Lock, Settings2, User } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -258,6 +258,13 @@ export interface SessionConfigBarProps {
    * 与 running 解锁提示同行，running 提示优先占位时插槽仍在其右）。
    */
   trailing?: React.ReactNode;
+  /**
+   * ql-20260915-009 手机端降噪：mobile 默认只显示 供应商+模型+额度——思考档位
+   * 下拉、档案控件、「中断自动续跑」开关默认收起，经行尾「设置」钮展开可达
+   * （ql-20260915-011 用户约束：收入口不砍功能）；控件值截断宽度同步收窄，
+   * 防 flex-wrap 在窄视口挤成三行；desktop 默认不传零变化。
+   */
+  variant?: "desktop" | "mobile";
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -303,7 +310,9 @@ export function SessionConfigBar({
   trailing,
   autoResume,
   providerOpenSignal = 0,
+  variant = "desktop",
 }: SessionConfigBarProps) {
+  const mobile = variant === "mobile";
   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
   const { activeSharedAgents } = useActiveSharedAgents();
   const sharedProfileIds = useMemo(
@@ -324,6 +333,11 @@ export function SessionConfigBar({
   const [submitting, setSubmitting] = useState(false);
 
   const barRef = useRef<HTMLDivElement>(null);
+
+  // ql-20260915-011：mobile 展开态——收走的思考档位/档案/自动续跑经「设置」钮
+  // 二次展开可达（用户约束：收入口不砍功能）；desktop 恒展开（mobileReveal=true）。
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const mobileReveal = !mobile || mobileMoreOpen;
 
   // 点击控件条外 / Esc 关闭下拉（原型 closeDD 的 document click 语义）。
   useEffect(() => {
@@ -626,7 +640,14 @@ export function SessionConfigBar({
         <span aria-hidden className="shrink-0 text-brand-600">
           {icon}
         </span>
-        <span className="max-w-[160px] truncate">{value}</span>
+        <span
+          className={cn(
+            "max-w-[160px] truncate",
+            mobile && "max-w-[110px]",
+          )}
+        >
+          {value}
+        </span>
         <ChevronDown
           aria-hidden
           className="h-3 w-3 shrink-0 text-muted-foreground/60"
@@ -718,7 +739,8 @@ export function SessionConfigBar({
                 executeSwitch({ field: "model", value: v, label: v || "默认" });
               }}
               className={cn(
-                "h-6 max-w-[150px] cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
+                "h-6 cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
+                mobile ? "max-w-[110px]" : "max-w-[150px]",
                 !canSwitch &&
                   "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
               )}
@@ -738,8 +760,11 @@ export function SessionConfigBar({
             下拉邻位）。预会话态=静态七档镜像（provisional 暂存）；会话态=thinkingLevel
             prop 挂载的动态档位（GET 列表+current 现值，点选即 POST 切换）。两态均
             caps.thinking_level 门控（cursor/未知引擎不渲染）；running/ended 照模型
-            子下拉同禁（会话态另叠 thinkingLevel.disabled）。 */}
-        {thinkingLevelEnabled && (provisional || thinkingLevel != null) && (
+            下拉同禁（会话态另叠 thinkingLevel.disabled）；ql-20260915-009 mobile
+            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。 */}
+        {thinkingLevelEnabled &&
+          mobileReveal &&
+          (provisional || thinkingLevel != null) && (
           <select
             aria-label="配置-思考级别"
             data-testid="config-thinking-select"
@@ -795,16 +820,19 @@ export function SessionConfigBar({
             ))}
           </select>
         )}
-        {ctrlButton(
-          "profile",
-          <User aria-hidden className="h-3.5 w-3.5" />,
-          profileLabel,
-          // ql-20260909-005：同供应商按钮——禁用态 title 说明原因。
-          ended
-            ? "会话已结束或机器离线，不可切换档案"
-            : running
-              ? "会话运行中，本轮结束后可切换档案"
-              : "智能体档案",
+        {/* ql-20260915-009：mobile 默认不渲染档案控件，收进「设置」展开态
+            （ql-20260915-011：收入口不砍功能）；桌面端照旧。 */}
+        {mobileReveal &&
+          ctrlButton(
+            "profile",
+            <User aria-hidden className="h-3.5 w-3.5" />,
+            profileLabel,
+            // ql-20260909-005：同供应商按钮——禁用态 title 说明原因。
+            ended
+              ? "会话已结束或机器离线，不可切换档案"
+              : running
+                ? "会话运行中，本轮结束后可切换档案"
+                : "智能体档案",
           <ConfigDropdown
             testId="config-dd-profile"
             title="切换档案 · 只影响本会话"
@@ -855,10 +883,13 @@ export function SessionConfigBar({
             )}
           </ConfigDropdown>,
         )}
-        <span className="flex-1" />
+        {/* ql-20260915-009：mobile 不渲染弹性占位（次要开关同收，flex-wrap 行内
+            留它只会把行尾插槽顶到下一行）。 */}
+        {!mobile && <span className="flex-1" />}
         {/* 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关——
-            daemon 重启恢复后被中断轮自动续跑（默认开）。 */}
-        {autoResume != null && (
+            daemon 重启恢复后被中断轮自动续跑（默认开）；ql-20260915-009 mobile
+            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。 */}
+        {autoResume != null && mobileReveal && (
           <label
             className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
             title={
@@ -883,6 +914,27 @@ export function SessionConfigBar({
             <Lock aria-hidden className="h-3 w-3" />
             本轮完成后解锁切换
           </span>
+        )}
+        {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案/
+            自动续跑经此可达（收入口不砍功能）；仅 mobile 渲染，desktop 零变化。 */}
+        {mobile && (
+          <button
+            type="button"
+            aria-expanded={mobileMoreOpen}
+            aria-label={mobileMoreOpen ? "收起会话设置" : "更多会话设置"}
+            title={mobileMoreOpen ? "收起会话设置" : "思考档位 / 智能体档案 / 中断自动续跑"}
+            data-testid="config-mobile-more"
+            onClick={() => setMobileMoreOpen((v) => !v)}
+            className={cn(
+              "inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-muted",
+              mobileMoreOpen
+                ? "bg-muted text-primary"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Settings2 aria-hidden className="h-3.5 w-3.5" />
+            设置
+          </button>
         )}
         {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。 */}
         {trailing != null ? (
