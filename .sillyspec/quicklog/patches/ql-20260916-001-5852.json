@@ -1,0 +1,55 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-38fe95f5",
+  "totals": {
+    "files": 2,
+    "additions": 506,
+    "deletions": 497
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/quicklog/QUICKLOG-qinyi.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 497,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/quicklog/QUICKLOG-qinyi-2026-09-15.md",
+      "declared": true,
+      "additions": 500,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 0,
+    "codeFileCount": 0,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": true,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260916-001-5852",
+  "sessionId": "quick-38fe95f5",
+  "savedAt": "2026-09-15T16:20:08.500Z",
+  "patchSha256": "9b9052d1f1761e0c554d89056d0358057e295f3185b557165018c723be0934e7",
+  "patchStatus": "ok"
+}
