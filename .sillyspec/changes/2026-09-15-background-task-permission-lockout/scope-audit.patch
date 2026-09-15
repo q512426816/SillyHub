@@ -1,0 +1,1573 @@
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index 36545471e..d2a859857 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -2429,6 +2429,15 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+             run.finished_at = now
+             run.exit_code = -1
+             run.output_redacted = "Run interrupted: service restarted while agent was running."
++            # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
++            # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
++            # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
++            # 已正常完成，重启只是丢 commit，非错误）。
++            run.error_code = "SERVICE_RESTART_INTERRUPTED"
++            run.error_detail = {
++                "reason": "backend service restarted while run was active",
++                "finished_by": "startup_cleanup",
++            }
+             log.warning("stale_run_cleaned", run_id=str(run.id))
+         session.add(run)
+ 
+diff --git a/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+new file mode 100644
+index 000000000..834867d82
+--- /dev/null
++++ b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+@@ -0,0 +1,89 @@
++"""2026-09-15-background-task-permission-lockout task-09/task-11（FR-04）：
++_cleanup_stale_runs_impl 重启终态化补结构化错误码。
++
++- failed 分支（无可恢复元数据）→ status=failed + error_code=
++  SERVICE_RESTART_INTERRUPTED + error_detail（reason/finished_by）。
++- completed 恢复分支（num_turns>0 + exit_code>=0）→ 不写 error_code（run 实际
++  已正常完成，重启只是丢 commit，非错误）。
++
++线上实证（会话 6e213eb3 / run d9426bc3）：重启终态化的 run 无错误码，排障无从
++分辨「无声失败」与模型故障。
++"""
++
++import uuid
++from datetime import UTC, datetime
++
++import pytest
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.agent.service import _cleanup_stale_runs_impl
++from app.modules.auth.model import User
++
++
++async def _make_stale_session_and_run(db_session, *, num_turns: int, exit_code):
++    uid = uuid.uuid4()
++    db_session.add(
++        User(
++            id=uid,
++            email=f"stale-{uid}@example.com",
++            password_hash="x",
++            display_name="T",
++            status="active",
++        )
++    )
++    await db_session.commit()
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=uid,
++        provider="claude",
++        status="active",
++        turn_count=1,
++        created_at=datetime.now(UTC),
++    )
++    db_session.add(sess)
++    await db_session.flush()
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        status="running",
++        spec_strategy="interactive",
++        agent_session_id=sess.id,
++        num_turns=num_turns,
++        exit_code=exit_code,
++    )
++    db_session.add(run)
++    await db_session.commit()
++    await db_session.refresh(run)
++    return run
++
++
++@pytest.mark.asyncio
++async def test_stale_run_failed_branch_writes_error_code(db_session) -> None:
++    """无可恢复元数据（num_turns=0 / exit_code=None）→ failed + 结构化错误码。"""
++    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    assert cleaned >= 1
++    await db_session.refresh(run)
++    assert run.status == "failed"
++    assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
++    assert run.error_detail == {
++        "reason": "backend service restarted while run was active",
++        "finished_by": "startup_cleanup",
++    }
++    assert run.exit_code == -1
++
++
++@pytest.mark.asyncio
++async def test_stale_run_restored_completed_branch_no_error_code(db_session) -> None:
++    """completed 恢复分支（num_turns>0 + exit_code=0）→ 不写 error_code。"""
++    run = await _make_stale_session_and_run(db_session, num_turns=5, exit_code=0)
++
++    await _cleanup_stale_runs_impl(db_session)
++
++    await db_session.refresh(run)
++    assert run.status == "completed"
++    assert run.error_code is None
++    assert run.error_detail is None
+diff --git a/backend/app/modules/daemon/permission_service.py b/backend/app/modules/daemon/permission_service.py
+index d24aa2adf..c17e91776 100644
+--- a/backend/app/modules/daemon/permission_service.py
++++ b/backend/app/modules/daemon/permission_service.py
+@@ -335,7 +335,6 @@ class DaemonPermissionService:
+ 
+         ``daemon_id`` is the daemon entity id the request arrived on (= the WS
+         connection key since task-06).
+-
+         task-07（2026-08-29-daemon-platform-resilience / design A3）：返回
+         ``bool``——True=已受理（SSE 已广播，dialog 落行 / plain 挂 timer），False=
+         校验不通过被丢弃（fail-soft）。WS 调用方忽略返回值；HTTP 上行端点
+@@ -349,8 +348,17 @@ class DaemonPermissionService:
+              check then expects ``daemon_id == session.runtime_id``)
+           3. session.status ∈ ACTIVE_SESSION_STATUSES
+           4. session.config.get("manual_approval") is True (FR-07 gate)
+-          5. current run exists, status ∈ ACTIVE_TURN_STATUSES,
+-             and run.id == payload.run_id
++          5. background_task=true（2026-09-15-background-task-permission-lockout / FR-02）：
++             按 ``payload.run_id`` 直查 AgentRun + ``run.agent_session_id==session_id``
++             归属校验（后台任务派发轮次已 completed，active-turn 校验不成立）；
++             非 background_task 请求维持原校验：current run exists, status ∈
++             ACTIVE_TURN_STATUSES, and run.id == payload.run_id
++
++        2026-09-15-background-task-permission-lockout（FR-02 / FR-03）：**任一校验
++        失败在 return False 前经 ``_deny_respond`` 即时推 PERMISSION_RESPONSE deny**
++        （带 ``PLATFORM_PERMISSION_DROPPED:`` 稳定故障码前缀 + runtime_id ack 键，
++        best-effort）——不再静默吞掉：线上实证重启后 run_mismatch 静默丢弃致问答卡
++        用户永不可见、daemon 侧无界挂起；agent 据此可区分平台故障与用户拒绝。
+ 
+         On success:
+           - **dialog** (``payload.dialog_kind`` set): persist a
+@@ -365,6 +373,10 @@ class DaemonPermissionService:
+         run_id = payload.run_id
+         request_id = payload.request_id
+         is_dialog = payload.dialog_kind is not None
++        # 2026-09-15-background-task-permission-lockout（FR-02 / D-001@v1）：后台锚点态
++        # 标记——daemon 主轮已收尾但后台 Task 子代理存活的权限请求；校验走 run 直查 +
++        # 归属放宽分支（见下方 current_run 校验块）。
++        is_background_task = payload.background_task is True
+ 
+         # Reuse DaemonService's read-only current-run lookup; session fetch is
+         # also read-only here — write-side locking is the REST response path's job.
+@@ -381,6 +393,7 @@ class DaemonPermissionService:
+                 session_id=str(session_id),
+                 request_id=request_id,
+             )
++            await self._deny_respond(daemon_id, payload, "session not found")
+             return False
+         if session_obj.runtime_id is None:
+             log.warning(
+@@ -389,6 +402,7 @@ class DaemonPermissionService:
+                 request_id=request_id,
+                 daemon_id=str(daemon_id),
+             )
++            await self._deny_respond(daemon_id, payload, "session has no runtime")
+             return False
+         expected_daemon_id = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
+         if expected_daemon_id != daemon_id:
+@@ -400,6 +414,7 @@ class DaemonPermissionService:
+                 expected_daemon_id=str(expected_daemon_id),
+                 received_daemon_id=str(daemon_id),
+             )
++            await self._deny_respond(daemon_id, payload, "daemon mismatch")
+             return False
+         if (session_obj.status or "") not in ACTIVE_SESSION_STATUSES:
+             log.warning(
+@@ -408,6 +423,9 @@ class DaemonPermissionService:
+                 request_id=request_id,
+                 status=session_obj.status,
+             )
++            await self._deny_respond(
++                daemon_id, payload, f"session not active (status={session_obj.status})"
++            )
+             return False
+         config = session_obj.config or {}
+         if config.get("manual_approval") is not True:
+@@ -417,26 +435,63 @@ class DaemonPermissionService:
+                 session_id=str(session_id),
+                 request_id=request_id,
+             )
++            await self._deny_respond(daemon_id, payload, "manual approval disabled")
+             return False
+ 
+-        current_run = await self._svc._get_current_run(session_id)
+-        if current_run is None or current_run.id != run_id:
+-            log.warning(
+-                "permission_request_run_mismatch",
+-                session_id=str(session_id),
+-                request_id=request_id,
+-                payload_run_id=str(run_id),
+-                current_run_id=str(current_run.id) if current_run else None,
+-            )
+-            return False
+-        if (current_run.status or "") not in ACTIVE_TURN_STATUSES:
+-            log.warning(
+-                "permission_request_run_not_active_turn",
+-                session_id=str(session_id),
+-                request_id=request_id,
+-                run_status=current_run.status,
+-            )
+-            return False
++        if is_background_task:
++            # 2026-09-15-background-task-permission-lockout（FR-02 / D-001@v1）：后台
++            # 任务的派发轮次已 completed（主轮收尾），active-turn 校验天然不成立。
++            # 放宽为「按 run_id 直查 + 会话归属校验」——run 必须属于本会话（派发轮
++            # 次完整性），其余校验（session 存在/runtime 归属/session active/
++            # manual_approval）上方已通过。非 background_task 请求维持原
++            # current_run（active-turn）校验不变。
++            from app.modules.agent.model import AgentRun
++
++            bg_run = (
++                await self._svc._session.execute(select(AgentRun).where(AgentRun.id == run_id))
++            ).scalar_one_or_none()
++            if bg_run is None:
++                log.warning(
++                    "permission_request_background_run_not_found",
++                    session_id=str(session_id),
++                    request_id=request_id,
++                    payload_run_id=str(run_id),
++                )
++                await self._deny_respond(daemon_id, payload, "background run not found")
++                return False
++            if bg_run.agent_session_id != session_id:
++                log.warning(
++                    "permission_request_background_run_ownership_mismatch",
++                    session_id=str(session_id),
++                    request_id=request_id,
++                    payload_run_id=str(run_id),
++                    run_session_id=str(bg_run.agent_session_id),
++                )
++                await self._deny_respond(daemon_id, payload, "run does not belong to this session")
++                return False
++        else:
++            current_run = await self._svc._get_current_run(session_id)
++            if current_run is None or current_run.id != run_id:
++                log.warning(
++                    "permission_request_run_mismatch",
++                    session_id=str(session_id),
++                    request_id=request_id,
++                    payload_run_id=str(run_id),
++                    current_run_id=str(current_run.id) if current_run else None,
++                )
++                await self._deny_respond(daemon_id, payload, "run mismatch or no active turn")
++                return False
++            if (current_run.status or "") not in ACTIVE_TURN_STATUSES:
++                log.warning(
++                    "permission_request_run_not_active_turn",
++                    session_id=str(session_id),
++                    request_id=request_id,
++                    run_status=current_run.status,
++                )
++                await self._deny_respond(
++                    daemon_id, payload, f"run not in active turn (status={current_run.status})"
++                )
++                return False
+ 
+         # Publish permission_request SSE for the frontend approval card. For
+         # dialogs the event carries dialog_kind + dialog_payload so the card
+@@ -625,6 +680,51 @@ class DaemonPermissionService:
+ 
+     # ── daemon_id resolution (task-06 ws routes by daemon_instance_id) ───────
+ 
++    async def _deny_respond(
++        self,
++        daemon_id: uuid.UUID,
++        payload: PermissionRequestPayload,
++        reason: str,
++    ) -> None:
++        """校验失败即时 deny 下行（2026-09-15-background-task-permission-lockout /
++        FR-02 / FR-03）。
++
++        handle_permission_request 任一校验失败在 return False 前调本方法——不再静默
++        吞掉（线上实证 run_mismatch 静默丢弃致问答卡用户永不可见 + daemon 无界挂起）。
++        message 带 ``PLATFORM_PERMISSION_DROPPED:`` 稳定平台故障码前缀——agent 可程序化
++        区分平台故障与用户权限拒绝（守卫侧对应 PLATFORM_NO_RUNNING_TURN:）。
++        payload 对齐 :1503-1510 超时 deny 先例：runtime_id ack 键（ql-20260904-023，
++        daemon immediateAck 消费，旧 daemon 忽略未知键；session-not-found 等取不到
++        runtime_id 的分支条件省略该键）+ session_id / request_id / decision='deny'。
++        best-effort：发送失败仅 log.warning 不抛——校验路径语义仍是 fail-soft，
++        daemon 侧另有 5min 兜底（dialog 后台锚点态也已启用，见 permission-resolver）。
++        """
++        # late import 防 agent ↔ daemon 循环依赖（对齐 handle_permission_request）。
++        from app.modules.agent.model import AgentSession
++
++        session_obj = (
++            await self._svc._session.execute(
++                select(AgentSession).where(AgentSession.id == payload.session_id)
++            )
++        ).scalar_one_or_none()
++        runtime_id = session_obj.runtime_id if session_obj is not None else None
++        ws_payload: dict[str, object] = {
++            "session_id": str(payload.session_id),
++            "request_id": payload.request_id,
++            "decision": "deny",
++            "message": f"PLATFORM_PERMISSION_DROPPED: {reason} — retry in a new turn",
++            **({"runtime_id": str(runtime_id)} if runtime_id is not None else {}),
++        }
++        try:
++            await self._hub.send_permission_response(daemon_id, ws_payload)
++        except Exception as exc:  # best-effort 语义，不阻断 fail-soft 路径
++            log.warning(
++                "permission_deny_respond_failed",
++                daemon_id=str(daemon_id),
++                request_id=payload.request_id,
++                error=str(exc),
++            )
++
+     async def _resolve_daemon_id_for_runtime(
+         self,
+         runtime_id: uuid.UUID,
+diff --git a/backend/app/modules/daemon/protocol.py b/backend/app/modules/daemon/protocol.py
+index d0890f5cd..79a80a219 100644
+--- a/backend/app/modules/daemon/protocol.py
++++ b/backend/app/modules/daemon/protocol.py
+@@ -249,6 +249,12 @@ class PermissionRequestPayload(BaseModel):
+     # persisted in session_dialog_requests so it survives frontend refresh.
+     dialog_kind: str | None = None
+     dialog_payload: dict | None = None
++    # 2026-09-15-background-task-permission-lockout（FR-02 / D-001@v1）：daemon
++    # 后台锚点态（主轮已收尾但后台 Task 子代理存活）发出的权限请求标记。True 时
++    # backend 放宽 active-turn 校验为「按 run_id 直查 + 会话归属校验」（后台任务
++    # 的派发轮次已 completed 但任务仍存活）。缺省 None 按普通前台请求处理——
++    # 兼容不发该字段的旧 daemon（行为与现状逐字节一致）。
++    background_task: bool | None = None
+ 
+ 
+ class PermissionResponsePayload(BaseModel):
+diff --git a/backend/app/modules/daemon/tests/test_session_permissions.py b/backend/app/modules/daemon/tests/test_session_permissions.py
+index 900b89d2d..edc9b32d7 100644
+--- a/backend/app/modules/daemon/tests/test_session_permissions.py
++++ b/backend/app/modules/daemon/tests/test_session_permissions.py
+@@ -1686,3 +1686,105 @@ class TestShadowDialogAnswerAuthorization:
+         row = next(d for d in history if d.request_id == "sd-by-1")
+         assert row.status == "answered"
+         assert row.answered_by == seed.member_uid
++
++
++class TestBackgroundTaskRequestAcceptance:
++    """2026-09-15-background-task-permission-lockout（FR-02 / task-11）：
++    background_task=True 的权限请求受理放宽——后台任务派发轮次已 completed
++    （active-turn 校验天然不成立），改为 run 直查 + 会话归属校验。"""
++
++    @staticmethod
++    def _make_perm(db_session: AsyncSession) -> tuple[DaemonPermissionService, MagicMock]:
++        svc = DaemonService(db_session)
++        hub = MagicMock()
++        hub.send_permission_response = AsyncMock(return_value=True)
++        return DaemonPermissionService(svc, hub, timeout_sec=30.0), hub
++
++    @pytest.mark.asyncio
++    async def test_background_task_with_completed_run_accepted(
++        self, db_session, mocked_redis
++    ) -> None:
++        """run 已 completed + background_task=True → 受理（SSE 发布 + timer 挂起）。"""
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        sess, run = await _create_session(db_session, uid, rt.id)
++        # 主轮已收尾：run 翻 completed（后台任务派发轮次的真实形态）。
++        run.status = "completed"
++        await db_session.commit()
++        await db_session.refresh(run)
++
++        perm, _hub = self._make_perm(db_session)
++        payload = _make_request_payload(sess, run)
++        payload = payload.model_copy(update={"background_task": True})
++
++        accepted = await perm.handle_permission_request(rt.id, payload)
++
++        assert accepted is True
++        assert any(
++            c.args[0] == f"agent_session:{sess.id}" and "permission_request" in c.args[1]
++            for c in mocked_redis.publish.await_args_list
++        )
++        assert "req-1" in perm._timers
++        _task = perm._timers["req-1"]
++        _task.cancel()
++        try:
++            await _task
++        except asyncio.CancelledError:
++            pass
++
++    @pytest.mark.asyncio
++    async def test_background_task_run_ownership_mismatch_dropped_with_deny(
++        self, db_session, mocked_redis
++    ) -> None:
++        """run 不属于本会话（归属校验失败）→ 拒收 + 即时 deny（故障码 + runtime_id）。"""
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        sess, _run = await _create_session(db_session, uid, rt.id)
++        # 另一会话的 run（归属不匹配）。
++        _sess2, run2 = await _create_session(db_session, uid, rt.id)
++
++        perm, hub = self._make_perm(db_session)
++        payload = PermissionRequestPayload(
++            session_id=sess.id,
++            run_id=run2.id,
++            request_id="bg-own",
++            tool_name="Bash",
++            input={"command": "ls"},
++            background_task=True,
++        )
++
++        accepted = await perm.handle_permission_request(rt.id, payload)
++
++        assert accepted is False
++        assert not any(
++            "permission_request" in c.args[1]
++            for c in mocked_redis.publish.await_args_list
++            if c.args[0] == f"agent_session:{sess.id}"
++        )
++        hub.send_permission_response.assert_awaited_once()
++        deny_payload = hub.send_permission_response.await_args.args[1]
++        assert deny_payload["decision"] == "deny"
++        assert deny_payload["request_id"] == "bg-own"
++        assert deny_payload["runtime_id"] == str(rt.id)
++        assert deny_payload["message"].startswith("PLATFORM_PERMISSION_DROPPED:")
++
++    @pytest.mark.asyncio
++    async def test_non_background_completed_run_still_dropped(
++        self, db_session, mocked_redis
++    ) -> None:
++        """普通请求（background_task 缺省 None）+ run completed → 维持原 active-turn
++        拒收（旧 daemon 行为零变化），但拒收现在推即时 deny。"""
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        sess, run = await _create_session(db_session, uid, rt.id)
++        run.status = "completed"
++        await db_session.commit()
++
++        perm, hub = self._make_perm(db_session)
++
++        accepted = await perm.handle_permission_request(rt.id, _make_request_payload(sess, run))
++
++        assert accepted is False
++        hub.send_permission_response.assert_awaited_once()
++        deny_payload = hub.send_permission_response.await_args.args[1]
++        assert deny_payload["message"].startswith("PLATFORM_PERMISSION_DROPPED:")
+diff --git a/backend/app/modules/daemon/tests/test_ws_hub_permission.py b/backend/app/modules/daemon/tests/test_ws_hub_permission.py
+index 526ea4fd3..b7095e40b 100644
+--- a/backend/app/modules/daemon/tests/test_ws_hub_permission.py
++++ b/backend/app/modules/daemon/tests/test_ws_hub_permission.py
+@@ -354,7 +354,17 @@ class TestHandlePermissionDaemonIdOwnership:
+             )
+         # No timer armed ⇒ request dropped by ownership check.
+         assert not perm.has_pending("req-rej")
+-        hub.send_permission_response.assert_not_awaited()
++        # 2026-09-15-background-task-permission-lockout（FR-02/FR-03）：拒收不再静默——
++        # 即时推 PERMISSION_RESPONSE deny（带 PLATFORM_PERMISSION_DROPPED: 故障码 +
++        # runtime_id ack 键），daemon 侧立即有界失败而非挂 5min 兜底。
++        hub.send_permission_response.assert_awaited_once()
++        deny_payload = hub.send_permission_response.await_args.args[1]
++        assert deny_payload["decision"] == "deny"
++        assert deny_payload["request_id"] == "req-rej"
++        assert deny_payload["session_id"] == str(sess.id)
++        assert deny_payload["runtime_id"] == str(rt.id)
++        assert deny_payload["message"].startswith("PLATFORM_PERMISSION_DROPPED:")
++        assert "daemon mismatch" in deny_payload["message"]
+ 
+     @pytest.mark.asyncio
+     async def test_migration_window_fallback_accepts_runtime_id_as_daemon_id(
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 906a1eeb9..9ba2de4e8 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -3803,6 +3803,31 @@ export class Daemon {
+     // ql-20260909-011：run 终态上报前冲掉该 lease 微批积压（不等微批窗），
+     // 保证 turn 内事件先于终态到达 backend（逐事件直发时代由 await 串行保证）。
+     await this.flushInteractiveBatches(state.leaseId);
++    // 2026-09-15-background-task-permission-lockout（FR-04）：本 run 收口时若会话
++    // 仍有存活后台任务，追加 [USAGE_NOTE] 标注行——SDK modelUsage/total_cost_usd 是
++    // 会话级累计快照差分，两次收口之间的后台任务消耗会计给本 run（总量正确、归属
++    // 误导，线上实证 19 秒小轮被记 $24.10）。仅日志标注，不改用量数值本身；
++    // 复用 [TASK_*] legacy flat 行协议（channel=stdout、type=task_output 同族），
++    // 经下方既有 onTurnMessage 通道随终态前到达 backend。压行失败仅 warn 不阻断
++    // 终态上报（标注是尽力而为的排障提示）。`?.` 防御：旧测试替身 / 部分注入的
++    // sessionManager 可能缺新方法——undefined → falsy → 不追加标注，安全降级。
++    if (this._sessionManager.hasLiveBackgroundTasks?.(sessionId)) {
++      try {
++        await this.onTurnMessage(sessionId, runId, {
++          type: 'task_output',
++          channel: 'stdout',
++          content:
++            '[USAGE_NOTE] 本轮上报用量含仍在运行的后台任务消耗（SDK 为会话级累计快照，无法按任务拆分）',
++          timestamp: new Date().toISOString(),
++        });
++      } catch (err) {
++        this._logger.warn('usage_note_line_failed', {
++          session_id: sessionId,
++          run_id: runId,
++          error: err instanceof Error ? err.message : String(err),
++        });
++      }
++    }
+     // payload 字段映射（snake_case 对齐 backend InteractiveRunResultRequest）。
+     // SDKResultSuccess 含 total_cost_usd / num_turns / duration_ms / duration_api_ms /
+     // usage.{input_tokens,output_tokens}（见 sdk.d.ts SDKResultSuccess 类型）；
+diff --git a/sillyhub-daemon/src/interactive/permission-resolver.ts b/sillyhub-daemon/src/interactive/permission-resolver.ts
+index f796ac906..5180c61de 100644
+--- a/sillyhub-daemon/src/interactive/permission-resolver.ts
++++ b/sillyhub-daemon/src/interactive/permission-resolver.ts
+@@ -80,6 +80,14 @@ export interface PermissionRegisterInput {
+    * 的 questions 数组等）。原样转发到 PERMISSION_REQUEST.dialog_payload。
+    */
+   dialogPayload?: Record<string, unknown>;
++  /**
++   * 2026-09-15-background-task-permission-lockout（FR-02）：后台锚点态标记
++   * （permission.ts backgroundTaskFlag 置位——主轮已收尾但后台任务存活的
++   * canUseTool 请求）。写入 payload 的 background_task（snake_case），backend
++   * 据此放宽 active-turn 校验；true 时 dialog 类请求也启用 5min fallback
++   * （后台锚点态已是降级路径，无界挂起比超时 deny 更糟）。
++   */
++  backgroundTask?: boolean;
+ }
+ 
+ /** register 返回。 */
+@@ -165,6 +173,8 @@ export class PermissionResolver {
+         ...(input.dialogPayload !== undefined
+           ? { dialog_payload: input.dialogPayload }
+           : {}),
++        // 后台锚点态标记（向后兼容：不传则 payload 无此字段，旧 backend 忽略）。
++        ...(input.backgroundTask ? { background_task: true } : {}),
+       } as Record<string, unknown>,
+     });
+     if (!sent) {
+@@ -196,9 +206,12 @@ export class PermissionResolver {
+     // 与 backend permission_service.py / protocol.py「dialog 不 arm 超时、indefinitely」
+     // 语义对齐。超时自动 deny 会让 agent 拿到 "Proceed with recommended option" 自行猜测，
+     // 违背 scan 多子项目须用户决策的设计。signal abort listener + abortAll 收尾两者都保留
+-    //（用户主动 cancel/interrupt/session 结束仍 deny 收尾，不死锁）。
++    // （用户主动 cancel/interrupt/session 结束仍 deny 收尾，不死锁）。
++    // 2026-09-15-background-task-permission-lockout（FR-02 修正）：background_task=true
++    // 的请求（后台锚点态——主轮已收尾、backend 受理面外/旧 backend 可能拒收）即使
++    // 是 dialog 也启用 5min 兜底：该态已是降级路径，无界挂起比超时 deny 更糟。
+     const isDialog = input.dialogKind !== undefined;
+-    if (!isDialog) {
++    if (!isDialog || input.backgroundTask === true) {
+       entry.fallbackTimer = setTimeout(() => {
+         this._settle(entry, {
+           behavior: 'deny',
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 3779413c4..d2e5cc263 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -1384,6 +1384,15 @@ export class SessionManager {
+     return hasRunningTurn(this._core());
+   }
+ 
++  /**
++   * 2026-09-15-background-task-permission-lockout（FR-01）：会话是否有存活
++   * 后台任务（只读，不建 map）。_backgroundTasks 私有，外部消费者
++   * （daemon.ts 用量标注 / permission.ts 标记注入）经门面查询，不暴露 map 引用。
++   */
++  hasLiveBackgroundTasks(sessionId: string): boolean {
++    return (this._backgroundTasks.get(sessionId)?.size ?? 0) > 0;
++  }
++
+   // ── task-10：持久化 + 崩溃恢复（方法体已下沉 persistence.ts）─────────────────
+ 
+   snapshotPersistable(): PersistedSessionRecord[] {
+diff --git a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+index 89d60fd81..cee9fc0fa 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+@@ -208,6 +208,14 @@ export async function handleTaskNotificationEvent(
+   // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同
+   // task_id 的迟到 progress 会走懒注册兜底而非挂死条目）。
+   tasks.delete(taskId);
++  // 2026-09-15-background-task-permission-lockout（FR-01）：末任务终态注销后若
++  // 注册表清空，清掉后台锚点（onResult 因注册表非空保留的 currentRunId）——守卫
++  // 放行条件 hasBackgroundTaskGrace 随注册表空自动失效，恢复 fail-closed。仅
++  // status==='active' 时清：新一轮在跑（status=running）时 currentRunId 是活轮
++  // 绑定，绝不可误清。非法终态分支同清（已注销即不再存活）。
++  if (tasks.size === 0 && state.status === 'active') {
++    state.currentRunId = undefined;
++  }
+   if (
+     rawStatus !== 'completed' &&
+     rawStatus !== 'failed' &&
+@@ -426,12 +434,21 @@ export function getOrCreateTaskMap(
+  * task-03：清理指定 session 的后台任务表 + Task/Agent tool_use 元数据。
+  * 会话终态（end/fail）调用——SDK 进程已 kill，后台任务随进程消亡，后续
+  * task_* 不会再到达；防 Map 泄漏（对齐 _clearRunningBashCommands 语义）。
++ *
++ * 2026-09-15-background-task-permission-lockout（FR-01）：同步清后台锚点
++ * （state.currentRunId）——注册表被本函数清空后，守卫放行条件
++ * hasBackgroundTaskGrace 若仍见 currentRunId 在会延长放行窗；兜底收敛
++ * （对齐 R-01 注册表泄漏缓解路径，清在删表后，终态会话无在跑轮）。
+  */
+ export function clearBackgroundTasks(
+   mgr: SessionManagerCore,
+   sessionId: string,
+ ): void {
+   mgr._backgroundTasks.delete(sessionId);
++  const state = mgr._store.get(sessionId);
++  if (state && state.status === 'active') {
++    state.currentRunId = undefined;
++  }
+   for (const [toolUseId, meta] of mgr._agentToolUseMeta) {
+     if (meta.sessionId === sessionId) {
+       mgr._agentToolUseMeta.delete(toolUseId);
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 977ba2269..6da1236ad 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -52,7 +52,16 @@ export async function onResult(
+   // status 残留 running（虽然 onTurnResult 应不抛，但先收敛更鲁棒）。
+   const runId = state.currentRunId;
+   state.status = 'active';
+-  state.currentRunId = undefined;
++  // 2026-09-15-background-task-permission-lockout（FR-01 / 坑 subagent-write-channel）：
++  // 主轮收尾时若该会话后台任务注册表非空，保留 currentRunId 作「后台锚点」——后台
++  // Task 子代理在主轮结束后仍在运行，其工具调用仍进会话级 canUseTool，锚点让
++  // writeChannelGuardDeny 的 hasBackgroundTaskGrace 放行条件可判定「后台工作确定
++  // 存活」。锚点语义仅代表「后台任务群的派发轮次仍需通道」，是「仅通道存在性」——
++  // 写策略（allowed_roots/policyEngine）与人审链路全程生效，不代表轮次仍在跑。
++  // 注册表为空（无后台任务）行为与现状完全一致：清 currentRunId。
++  if (!mgr._backgroundTasks.get(state.sessionId)?.size) {
++    state.currentRunId = undefined;
++  }
+   state.lastActiveAt = Date.now();
+   // task-07（R-conv 边界 8）：每收一个 result 表示消费了一条 turn（含排队 inject）。
+   // pendingInjectCount 递减（min 0，不下溢）；表示一条排队 turn 被消费。
+diff --git a/sillyhub-daemon/src/interactive/session-manager/permission.ts b/sillyhub-daemon/src/interactive/session-manager/permission.ts
+index 15f123827..bcca14ec9 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/permission.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/permission.ts
+@@ -142,6 +142,39 @@ export function withinStaleFlipGrace(
+   );
+ }
+ 
++/**
++ * 2026-09-15-background-task-permission-lockout（FR-01 / D-001@v1）：
++ * 后台任务宽限判定——「active + currentRunId 在 + 后台任务注册表非空」：主轮已
++ * 正常收尾（status=active）但后台 Task 子代理仍在运行（onResult 保留的后台锚点），
++ * 其工具调用仍进会话级 canUseTool。注册表（task_notification 终态注销兜底）是
++ * 「后台工作确定存活」的权威信号——比时间窗猜测强，与 withinStaleFlipGrace 并列为
++ * 第二宽限源。仅放行「通道存在性」：写策略（allowed_roots/policyEngine）与人审
++ * 链路在放行后全程生效。
++ */
++export function hasBackgroundTaskGrace(
++  mgr: SessionManagerCore,
++  state: SessionState,
++): boolean {
++  return (
++    state.status === 'active' &&
++    !!state.currentRunId &&
++    (mgr._backgroundTasks.get(state.sessionId)?.size ?? 0) > 0
++  );
++}
++
++/**
++ * background_task 协议标记置位（2026-09-15-background-task-permission-lockout / FR-02）：
++ * 仅「主轮已收尾（status!=='running'）+ 后台任务存活」的后台锚点态为 true——backend
++ * 据此把 active-turn 校验放宽为「run 直查 + 会话归属校验」。主轮进行中恒 false；
++ * 守卫已保证走到 register 时 state/currentRunId 非空（锚点态两者皆在）。
++ */
++export function backgroundTaskFlag(
++  state: SessionState,
++  mgr: SessionManagerCore,
++): boolean {
++  return state.status !== 'running' && hasBackgroundTaskGrace(mgr, state);
++}
++
+ export function writeChannelGuardDeny(
+   mgr: SessionManagerCore,
+   state: SessionState | undefined,
+@@ -155,6 +188,8 @@ export function writeChannelGuardDeny(
+   }
+   if (state.status === 'running' && state.currentRunId) return null;
+   if (withinStaleFlipGrace(mgr, state)) return null;
++  // 后台锚点态（主轮收尾 + 注册表非空）：后台 Task 子代理存活，通道放行。
++  if (hasBackgroundTaskGrace(mgr, state)) return null;
+   const parts = [
+     `status=${state.status}`,
+     `currentRunId=${state.currentRunId ? 'set' : 'unset'}`,
+@@ -165,8 +200,10 @@ export function writeChannelGuardDeny(
+   ].filter(Boolean);
+   return {
+     behavior: 'deny',
++    // PLATFORM_NO_RUNNING_TURN: 稳定平台故障码前缀（FR-03 扩展）——agent 可程序化
++    // 区分「平台状态故障」与「用户权限拒绝」（后者无此前缀）。存量诊断信息保留。
+     message:
+-      `session not in running turn (${parts.join(', ')}) — tool "${toolName}" denied. ` +
++      `PLATFORM_NO_RUNNING_TURN: session not in running turn (${parts.join(', ')}) — tool "${toolName}" denied. ` +
+       'If this turn is actually still running (long quiet tool), the >60s-silent auto-reset may have misfired; wait or continue in a new turn.',
+   };
+ }
+@@ -187,8 +224,9 @@ async function requestPermissionImpl(
+   const guardDeny = writeChannelGuardDeny(mgr, state, input.toolName);
+   if (guardDeny) return guardDeny;
+   if (!state || !state.currentRunId) {
+-    // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空
+-    return { behavior: 'deny', message: `session not in running turn — tool "${input.toolName}" denied` };
++    // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空。带平台故障码前缀
++    // （FR-03）：agent 可区分平台状态故障与用户权限拒绝。
++    return { behavior: 'deny', message: `PLATFORM_NO_RUNNING_TURN: session not in running turn — tool "${input.toolName}" denied` };
+   }
+   const runId = state.currentRunId;
+   // D-006：askUserOnly=true 且非用户输入类 → allow-through（scan 场景普通工具自动推进）。
+@@ -206,6 +244,9 @@ async function requestPermissionImpl(
+   }
+   const defaultDenyMessage = `Tool "${input.toolName}" denied by reviewer (session=${input.sessionId}, run=${runId})`;
+   try {
++    // background_task 标记：仅后台锚点态（主轮已收尾 + 后台任务存活）置 true，
++    // backend 据此放宽 active-turn 校验（2026-09-15-background-task-permission-lockout）。
++    const backgroundTask = backgroundTaskFlag(state, mgr);
+     const { promise } = resolver.register({
+       sessionId: input.sessionId,
+       runId,
+@@ -214,6 +255,7 @@ async function requestPermissionImpl(
+       ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
+       signal: input.signal,
+       send: (msg) => wsClient.send(msg),
++      ...(backgroundTask ? { backgroundTask } : {}),
+       // 用户输入类（Codex request_user_input / Claude AskUserQuestion）标记 dialog，
+       // backend 据此走对话路径（不 arm 5min 超时 + SSE 携带 dialog 渲染问答卡）。
+       ...(input.isUserInputKind
+@@ -323,8 +365,9 @@ export function buildCanUseToolCallback(
+     const guardDeny = writeChannelGuardDeny(mgr, state, toolName);
+     if (guardDeny) return guardDeny;
+     if (!state || !state.currentRunId) {
+-      // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空
+-      return { behavior: 'deny', message: `session not in running turn — tool "${toolName}" denied` };
++      // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空。带平台故障码前缀
++      // （FR-03）：agent 可区分平台状态故障与用户权限拒绝。
++      return { behavior: 'deny', message: `PLATFORM_NO_RUNNING_TURN: session not in running turn — tool "${toolName}" denied` };
+     }
+     const runId = state.currentRunId;
+     // Claude CLI 经 --permission-prompt-tool stdio 对 allow 分支做 Zod 运行时校验，
+@@ -366,6 +409,9 @@ export function buildCanUseToolCallback(
+           toolInput: updatedInput,
+           signal: options?.signal,
+           send: (msg) => askWsClient.send(msg),
++          // background_task 标记（后台锚点态置位，见 backgroundTaskFlag）——设计
++          // 背景 P0-2 原始事故路径：主轮收尾后的后台子代理问答卡必须可达后端。
++          ...(backgroundTaskFlag(state, mgr) ? { backgroundTask: true } : {}),
+           // 标记为 dialog（AskUserQuestion 不是普通审批，是对话）：
+           // backend handle_permission_request 见 dialog_kind 走 dialog 路径
+           //（持久化 session_dialog_requests + 不 arm 5min 超时 + SSE 携带
+@@ -445,6 +491,10 @@ export function buildCanUseToolCallback(
+           toolInput: updatedInput,
+           signal: options?.signal,
+           send: (msg) => planWsClient.send(msg),
++          // background_task 标记（后台锚点态置位，见 backgroundTaskFlag）。
++          ...(backgroundTaskFlag(state, mgr)
++            ? { backgroundTask: true }
++            : {}),
+           dialogKind: 'plan_approval',
+           dialogPayload: {
+             questions: [
+@@ -521,6 +571,7 @@ export function buildCanUseToolCallback(
+     }
+     try {
+       // resolver.register 内部 send 失败 / signal aborted 时立即 deny（fail-closed）。
++      // background_task 标记（后台锚点态置位，见 backgroundTaskFlag）。
+       const { promise } = resolver.register({
+         sessionId,
+         runId,
+@@ -528,6 +579,7 @@ export function buildCanUseToolCallback(
+         toolInput: updatedInput,
+         signal: options?.signal,
+         send: (msg) => wsClient.send(msg),
++        ...(backgroundTaskFlag(state, mgr) ? { backgroundTask: true } : {}),
+       });
+       // SDK PermissionResult.deny.message 必填；resolver CanUseToolDecision 的
+       // deny.message 可选——此处补默认 message 兜底（task-09：含上下文字段）。
+@@ -614,6 +666,9 @@ export function buildOnUserDialogCallback(
+         runId,
+         // toolName 标记 AskUserQuestion 便于 backend/前端按工具名分发；
+         // 实际对话内容由 dialog_kind/dialog_payload 携带。
++        // 注：不注入 backgroundTask——上方前置硬检查 status!=='running' →
++        // cancelled（design「2 处不可达路径」之一），后台锚点态（active）到不了
++        // 这里，注入是死代码（Design Grill 复核 + execute QA 裁决移除）。
+         toolName: 'AskUserQuestion',
+         // toolInput 用 dialog payload（兼容既有的 input 字段，backend 侧若
+         // 不读 dialog_payload 仍可从 input 渲染）。
+diff --git a/sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts b/sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts
+index 42b839da7..e7e56f6b7 100644
+--- a/sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts
++++ b/sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts
+@@ -491,6 +491,10 @@ describe('写通道守卫（stale-flip 宽限 + 诊断化拒绝）', () => {
+       message?: string;
+     };
+     expect(decision.behavior).toBe('deny');
++    // 2026-09-15-background-task-permission-lockout（FR-03）：守卫 deny 带
++    // PLATFORM_NO_RUNNING_TURN: 稳定平台故障码前缀——agent 可程序化区分平台故障
++    // 与用户权限拒绝。存量诊断信息（session not in running turn 等）保留。
++    expect(decision.message).toContain('PLATFORM_NO_RUNNING_TURN:');
+     expect(decision.message).toContain('session not in running turn');
+     expect(decision.message).toContain('currentRunId=unset');
+     expect(decision.message).toContain('lastActive=');
+diff --git a/sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts b/sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts
+new file mode 100644
+index 000000000..274323884
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts
+@@ -0,0 +1,150 @@
++// tests/interactive/daemon-usage-note.test.ts
++// 2026-09-15-background-task-permission-lockout（task-10 / FR-04）：daemon.onTurnResult
++// 的 [USAGE_NOTE] 标注行两态——本 run 收口时会话仍有存活后台任务 → 追加一行
++// stdout 标注（后台任务消耗会按快照差分记给本 run）；注册表空 → 不追加。
++//
++// harness 模板沿用 tests/daemon-interactive-bridge.test.ts（mock client/SessionManager
++// + Daemon 构造，仅断言桥接行为）。
++
++import { describe, it, expect, vi } from 'vitest';
++import { Daemon } from '../../src/daemon.js';
++import type { DaemonConfig } from '../../src/config.js';
++import type { SessionManager } from '../src/interactive/session-manager.js';
++import type { SessionState } from '../src/interactive/types.js';
++import type { DetectedAgent } from '../../src/agent-detector.js';
++
++const mockConfig: DaemonConfig = {
++  server_url: 'http://127.0.0.1:8000',
++  token: 'test-token',
++  runtime_id: 'runtime-uuid-123',
++  profile: 'default',
++  workspace_dir: '/tmp/ws',
++  poll_interval: 0.02,
++  heartbeat_interval: 0.02,
++  max_concurrent_tasks: 5,
++  log_level: 'debug',
++};
++
++function createMockClient() {
++  return {
++    register: vi.fn(async () => ({ id: 'srv-rid-1' })),
++    heartbeat: vi.fn(async () => ({})),
++    markOffline: vi.fn(async () => ({})),
++    claimLease: vi.fn(async () => ({ claim_token: 't', payload: {} })),
++    startLease: vi.fn(async () => ({})),
++    completeLease: vi.fn(async () => ({})),
++    getPendingLeases: vi.fn(async () => []),
++    getExecutionContext: vi.fn(async () => ({ agent_run_id: 'r' })),
++    close: vi.fn(),
++    notifyRunResult: vi.fn(async () => ({})),
++    submitMessages: vi.fn(async () => ({})),
++    notifySessionEnd: vi.fn(async () => ({})),
++  };
++}
++
++function createMockSessionManager(
++  state: Partial<SessionState>,
++  hasLive: boolean,
++): SessionManager {
++  const fullState = {
++    sessionId: 'sess-1',
++    leaseId: 'lease-1',
++    claimToken: 'claim-token-1',
++    currentRunId: 'run-1',
++    status: 'active',
++    lastActiveAt: Date.now(),
++    cwd: '/tmp',
++    provider: 'claude',
++    pathToClaudeCodeExecutable: '/bin/claude',
++    inputQueue: { push() {}, close() {} } as never,
++    ...state,
++  } as SessionState;
++  return {
++    create: vi.fn(async () => {}),
++    inject: vi.fn(async () => ({ runId: '' })),
++    interrupt: vi.fn(async () => false),
++    end: vi.fn(async () => {}),
++    fail: vi.fn(async () => {}),
++    get: vi.fn((() => fullState) as never),
++    hasLiveBackgroundTasks: vi.fn((() => hasLive) as never),
++    start: vi.fn(() => {}),
++    stop: vi.fn(() => {}),
++    manualApproval: false,
++    getPermissionResolver: vi.fn(() => undefined),
++    getPendingInjectCount: vi.fn(() => 0),
++    getIdleTimeoutSec: vi.fn(() => 1800),
++    restoreAndReconnect: vi.fn(async () => {}),
++    markReconnected: vi.fn(async () => {}),
++    flush: vi.fn(async () => {}),
++    snapshotPersistable: vi.fn(() => []),
++    scanOnce: vi.fn(async () => {}),
++  } as unknown as SessionManager;
++}
++
++function buildDaemon(sm: SessionManager): { daemon: Daemon; client: ReturnType<typeof createMockClient> } {
++  const client = createMockClient();
++  const daemon = new Daemon(mockConfig, client as never, { runLease: vi.fn() } as never, {
++    sessionManager: sm,
++    detector: { detectAgents: vi.fn(async () => [] as DetectedAgent[]) },
++  });
++  return { daemon, client };
++}
++
++function resultSuccess(): Record<string, unknown> {
++  return {
++    type: 'result',
++    subtype: 'success',
++    is_error: false,
++    result: 'ok',
++    num_turns: 1,
++    duration_ms: 1,
++    duration_api_ms: 1,
++    total_cost_usd: 0,
++    usage: {
++      input_tokens: 1,
++      output_tokens: 1,
++      cache_creation_input_tokens: 0,
++      cache_read_input_tokens: 0,
++    },
++    session_id: 'sdk-sess',
++  };
++}
++
++describe('onTurnResult [USAGE_NOTE] 标注行（FR-04）', () => {
++  it('hasLiveBackgroundTasks=true → submitMessages 追加一条 [USAGE_NOTE] stdout 行（挂收口 runId）', async () => {
++    const sm = createMockSessionManager({}, true);
++    const { daemon, client } = buildDaemon(sm);
++    await daemon.onTurnResult('sess-1', 'run-1', resultSuccess() as never);
++    // submitMessages(leaseId, claimToken, runId, [msg])——USAGE_NOTE 行挂收口 runId。
++    const noteCalls = client.submitMessages.mock.calls.filter(([, , , msgs]) =>
++      (msgs as Record<string, unknown>[]).some(
++        (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
++      ),
++    );
++    expect(noteCalls.length).toBeGreaterThanOrEqual(1);
++    const [, , rid, msgs] = noteCalls[0]! as unknown as [
++      string,
++      string,
++      string,
++      Record<string, unknown>[],
++    ];
++    expect(rid).toBe('run-1'); // 挂正在收口的 run
++    const line = msgs.find(
++      (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
++    )!;
++    expect(line['channel']).toBe('stdout');
++    expect(line['content']).toContain('后台任务消耗');
++  });
++
++  it('hasLiveBackgroundTasks=false → 无 [USAGE_NOTE] 行（行为与现状一致）', async () => {
++    const sm = createMockSessionManager({}, false);
++    const { daemon, client } = buildDaemon(sm);
++    await daemon.onTurnResult('sess-1', 'run-1', resultSuccess() as never);
++    const hasNote = client.submitMessages.mock.calls.some(([, , , msgs]) =>
++      (msgs as Record<string, unknown>[]).some(
++        (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
++      ),
++    );
++    expect(hasNote).toBe(false);
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/permission-resolver.test.ts b/sillyhub-daemon/tests/interactive/permission-resolver.test.ts
+index ee5770e0d..6ee3f2abf 100644
+--- a/sillyhub-daemon/tests/interactive/permission-resolver.test.ts
++++ b/sillyhub-daemon/tests/interactive/permission-resolver.test.ts
+@@ -609,3 +609,79 @@ describe('PermissionResolver dialog 请求不启兜底定时器（永久等待
+     expect(resolver.pendingCount).toBe(0);
+   });
+ });
++
++// ── 2026-09-15-background-task-permission-lockout：background_task 标记 ──────
++
++describe('PermissionResolver backgroundTask 扩展（FR-02）', () => {
++  beforeEach(() => vi.useFakeTimers());
++  afterEach(() => vi.useRealTimers());
++
++  it('register 传 backgroundTask: true → send payload 带 background_task: true', () => {
++    const resolver = new PermissionResolver();
++    const send = makeSend(true);
++    resolver.register({
++      sessionId: SESSION_ID,
++      runId: RUN_ID,
++      toolName: 'Bash',
++      toolInput: { command: 'ls' },
++      send,
++      backgroundTask: true,
++    });
++    const payload = send.mock.calls[0]![0]!.payload as Record<string, unknown>;
++    expect(payload.background_task).toBe(true);
++  });
++
++  it('register 不传 backgroundTask → payload 无 background_task 键（旧 backend 兼容）', () => {
++    const resolver = new PermissionResolver();
++    const send = makeSend(true);
++    resolver.register({
++      sessionId: SESSION_ID,
++      runId: RUN_ID,
++      toolName: 'Bash',
++      toolInput: { command: 'ls' },
++      send,
++    });
++    const payload = send.mock.calls[0]![0]!.payload as Record<string, unknown>;
++    expect('background_task' in payload).toBe(false);
++  });
++
++  it('backgroundTask=true 的 dialog 请求也启 5min 兜底（有界挂起）', async () => {
++    const resolver = new PermissionResolver();
++    const send = makeSend(true);
++    const { promise } = resolver.register({
++      sessionId: SESSION_ID,
++      runId: RUN_ID,
++      toolName: 'AskUserQuestion',
++      toolInput: { questions: [{ question: 'q' }] },
++      send,
++      dialogKind: 'AskUserQuestion',
++      dialogPayload: { questions: [{ question: 'q' }] },
++      backgroundTask: true,
++    });
++    // 未到超时：pending。
++    vi.advanceTimersByTime(1000);
++    expect(resolver.pendingCount).toBe(1);
++    // 推进 5min 兜底 → deny（后台锚点态 dialog 有界，不再无界挂起）。
++    vi.advanceTimersByTime(PERMISSION_FALLBACK_TIMEOUT_MS);
++    const decision = await promise;
++    expect(decision.behavior).toBe('deny');
++    expect(resolver.pendingCount).toBe(0);
++  });
++
++  it('主轮 dialog（不传 backgroundTask）维持现状不设超时', () => {
++    const resolver = new PermissionResolver();
++    const send = makeSend(true);
++    resolver.register({
++      sessionId: SESSION_ID,
++      runId: RUN_ID,
++      toolName: 'AskUserQuestion',
++      toolInput: { questions: [{ question: 'q' }] },
++      send,
++      dialogKind: 'AskUserQuestion',
++      dialogPayload: { questions: [{ question: 'q' }] },
++    });
++    vi.advanceTimersByTime(PERMISSION_FALLBACK_TIMEOUT_MS + 60_000);
++    // 用户决策必须等待：超时后仍 pending。
++    expect(resolver.pendingCount).toBe(1);
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts b/sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts
+new file mode 100644
+index 000000000..266e85776
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts
+@@ -0,0 +1,520 @@
++// tests/interactive/session-manager-bg-anchor.test.ts
++// 2026-09-15-background-task-permission-lockout（task-10 / FR-01）：
++// 后台锚点生命周期——onResult 注册表非空保留 currentRunId；task_notification
++// 注销清空后清锚点；clearBackgroundTasks 同步清；hasBackgroundTaskGrace 守卫三态。
++//
++// 模板沿用 tests/interactive/task-lifecycle.test.ts 的 fake driver harness
++//（create 捕获 onTurnMessage/onTurnResult 适配回调直接驱动 _onMessage/_onResult）。
++
++import { describe, it, expect, vi, afterEach } from 'vitest';
++import { SessionManager } from '../../src/interactive/session-manager.js';
++import {
++  hasBackgroundTaskGrace,
++  writeChannelGuardDeny,
++} from '../../src/interactive/session-manager/permission.js';
++import { clearBackgroundTasks } from '../../src/interactive/session-manager/background-tasks.js';
++import type {
++  InteractiveDriver,
++  InteractiveDriverCallbacks,
++  InteractiveDriverHandle,
++} from '../../src/interactive/driver.js';
++import type { SessionManagerDeps } from '../../src/interactive/types.js';
++
++interface Harness {
++  sm: SessionManager;
++  deps: {
++    onTurnResult: ReturnType<typeof vi.fn>;
++    onTurnMessage: ReturnType<typeof vi.fn>;
++    onSessionEnd: ReturnType<typeof vi.fn>;
++    onSessionEvent: ReturnType<typeof vi.fn>;
++  };
++  emitMessage: (msg: Record<string, unknown>) => Promise<void>;
++  emitResult: (r: Record<string, unknown>) => Promise<void>;
++}
++
++async function createHarness(
++  sessionId = 'sess-1',
++  runId = 'run-1',
++): Promise<Harness> {
++  let capturedMessage:
++    | ((msg: Record<string, unknown>) => Promise<void>)
++    | null = null;
++  let capturedResult:
++    | ((r: Record<string, unknown>) => Promise<void>)
++    | null = null;
++  const fakeDriver: InteractiveDriver = {
++    async start() {
++      return { provider: 'claude' } as unknown as InteractiveDriverHandle;
++    },
++    async consume(
++      _handle: InteractiveDriverHandle,
++      callbacks: InteractiveDriverCallbacks,
++    ) {
++      capturedMessage = callbacks.onTurnMessage as unknown as (
++        msg: Record<string, unknown>,
++      ) => Promise<void>;
++      capturedResult = callbacks.onTurnResult as unknown as (
++        r: Record<string, unknown>,
++      ) => Promise<void>;
++      return new Promise<void>(() => {});
++    },
++    async interrupt() {
++      return false;
++    },
++  };
++  const deps = {
++    driver: fakeDriver as unknown as SessionManagerDeps['driver'],
++    drivers: { claude: fakeDriver },
++    onTurnResult: vi.fn(),
++    onTurnMessage: vi.fn(),
++    onSessionEnd: vi.fn(),
++    onSessionEvent: vi.fn(),
++  };
++  const sm = new SessionManager(deps as unknown as SessionManagerDeps);
++  await sm.create({
++    sessionId,
++    leaseId: `lease-${sessionId}`,
++    claimToken: 'ct-1',
++    firstPrompt: 'hi',
++    firstRunId: runId,
++    cwd: '/tmp/bg-anchor-test',
++    provider: 'claude',
++    pathToClaudeCodeExecutable: '/usr/bin/claude',
++  });
++  await Promise.resolve();
++  return {
++    sm,
++    deps,
++    emitMessage: (msg) => {
++      if (!capturedMessage) throw new Error('consume 回调未捕获');
++      return capturedMessage(msg);
++    },
++    emitResult: (r) => {
++      if (!capturedResult) throw new Error('consume 回调未捕获');
++      return capturedResult(r);
++    },
++  };
++}
++
++function msgTaskStarted(o: {
++  taskId: string;
++  toolUseId?: string;
++  description?: string;
++}): Record<string, unknown> {
++  return {
++    events: [
++      {
++        type: 'status',
++        subtype: 'agent_task_status',
++        content: o.description ?? '',
++        metadata: {
++          task_id: o.taskId,
++          task_name: o.description || '后台任务',
++          status: 'running',
++          ...(o.toolUseId ? { tool_use_id: o.toolUseId } : {}),
++        },
++      },
++    ],
++  };
++}
++
++function msgTaskNotification(o: {
++  taskId: string;
++  status: 'completed' | 'failed' | 'stopped';
++  summary?: string;
++}): Record<string, unknown> {
++  return {
++    events: [
++      {
++        type: 'status',
++        subtype: 'task_notification',
++        content: o.summary ?? '',
++        metadata: {
++          task_id: o.taskId,
++          status: o.status,
++          ...(o.summary !== undefined ? { summary: o.summary } : {}),
++        },
++      },
++    ],
++  };
++}
++
++function msgResultSuccess(): Record<string, unknown> {
++  return {
++    type: 'result',
++    subtype: 'success',
++    is_error: false,
++    result: 'ok',
++    num_turns: 1,
++    duration_ms: 1,
++    duration_api_ms: 1,
++    stop_reason: 'end_turn',
++    total_cost_usd: 0,
++    usage: {
++      input_tokens: 1,
++      output_tokens: 1,
++      cache_creation_input_tokens: 0,
++      cache_read_input_tokens: 0,
++    },
++    modelUsage: {},
++    permission_denials: [],
++    session_id: 'sdk-sess',
++    uuid: 'r1',
++  };
++}
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++describe('后台锚点生命周期（FR-01）', () => {
++  it('注册表非空：onResult 保留 currentRunId（status 翻 active，锚点生效）', async () => {
++    const h = await createHarness();
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-a1', toolUseId: 'toolu_a1', description: '后台任务A' }),
++    );
++    expect(h.sm.hasLiveBackgroundTasks('sess-1')).toBe(true);
++    expect(h.sm.get('sess-1')!.currentRunId).toBe('run-1'); // 主轮在跑
++
++    await h.emitResult(msgResultSuccess());
++
++    const st = h.sm.get('sess-1')!;
++    expect(st.status).toBe('active');
++    expect(st.currentRunId).toBe('run-1'); // 锚点保留（注册表非空）
++  });
++
++  it('注册表为空：onResult 清 currentRunId，行为与现状一致', async () => {
++    const h = await createHarness();
++    // 不起后台任务，直接收尾。
++    await h.emitResult(msgResultSuccess());
++    const st = h.sm.get('sess-1')!;
++    expect(st.status).toBe('active');
++    expect(st.currentRunId).toBeUndefined();
++    expect(h.sm.hasLiveBackgroundTasks('sess-1')).toBe(false);
++  });
++
++  it('末任务终态注销后注册表清空 → 清锚点；status=running 时不误清', async () => {
++    const h = await createHarness();
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-b1', toolUseId: 'toolu_b1', description: '后台任务B' }),
++    );
++    await h.emitResult(msgResultSuccess());
++    expect(h.sm.get('sess-1')!.currentRunId).toBe('run-1'); // 锚点在
++
++    // 注销清空 → 锚点清。
++    await h.emitMessage(
++      msgTaskNotification({ taskId: 'task-b1', status: 'completed', summary: '完成' }),
++    );
++    expect(h.sm.hasLiveBackgroundTasks('sess-1')).toBe(false);
++    expect(h.sm.get('sess-1')!.currentRunId).toBeUndefined();
++
++    // 再起一轮（inject 会走 SDK——fake driver 不模拟新 turn；直接验证
++    // status=running 时 notification 不误清：另起任务后手动置 running 态验证。
++    const h2 = await createHarness('sess-2', 'run-2');
++    await h2.emitMessage(
++      msgTaskStarted({ taskId: 'task-b2', toolUseId: 'toolu_b2', description: '任务B2' }),
++    );
++    // 模拟新一轮在跑：status=running + 新 currentRunId。
++    const st2 = h2.sm.get('sess-2')!;
++    st2.status = 'running';
++    st2.currentRunId = 'run-2b';
++    await h2.emitMessage(
++      msgTaskNotification({ taskId: 'task-b2', status: 'completed', summary: '完成' }),
++    );
++    // running 态不清锚点/活轮绑定。
++    expect(st2.currentRunId).toBe('run-2b');
++    expect(st2.status).toBe('running');
++  });
++
++  it('clearBackgroundTasks 同步清锚点（终态兜底，active 态防注册表泄漏 R-01）', async () => {
++    const h = await createHarness();
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-c1', toolUseId: 'toolu_c1', description: '任务C' }),
++    );
++    await h.emitResult(msgResultSuccess());
++    expect(h.sm.get('sess-1')!.currentRunId).toBe('run-1');
++
++    // 直接调模块导出的终态清理（end() 会先翻 status=ended——ended 态守卫本就
++    // deny，锚点清理分支面向 active 态的注册表泄漏兜底）：active 态清注册表
++    // 应连带清锚点。
++    const core = (h.sm as unknown as { _core: () => Parameters<typeof clearBackgroundTasks>[0] })._core();
++    clearBackgroundTasks(core, 'sess-1');
++
++    expect(h.sm.hasLiveBackgroundTasks('sess-1')).toBe(false);
++    expect(h.sm.get('sess-1')!.currentRunId).toBeUndefined();
++  });
++
++  it('hasLiveBackgroundTasks 不建 map（无副作用，仅 boolean）', async () => {
++    const h = await createHarness();
++    expect(h.sm.hasLiveBackgroundTasks('never-existed')).toBe(false);
++    expect(h.sm.get('never-existed')).toBeUndefined(); // 未创建 state
++  });
++});
++
++describe('hasBackgroundTaskGrace 守卫三态（FR-01）', () => {
++  it('注册表空（active+currentRunId）→ deny；非空 → 放行；currentRunId 无 → deny', async () => {
++    const h = await createHarness();
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-g1', toolUseId: 'toolu_g1', description: '任务G' }),
++    );
++    await h.emitResult(msgResultSuccess());
++    const st = h.sm.get('sess-1')!;
++    const core = (h.sm as unknown as { _core: () => Parameters<typeof hasBackgroundTaskGrace>[0] })._core();
++
++    // 锚点态 + 注册表非空 → 放行。
++    expect(hasBackgroundTaskGrace(core, st)).toBe(true);
++    expect(writeChannelGuardDeny(core, st, 'Write')).toBeNull();
++
++    // 注销清空 → 守卫恢复 deny（注册表空）。
++    await h.emitMessage(
++      msgTaskNotification({ taskId: 'task-g1', status: 'completed', summary: '完成' }),
++    );
++    const st2 = h.sm.get('sess-1')!;
++    expect(hasBackgroundTaskGrace(core, st2)).toBe(false);
++    const deny = writeChannelGuardDeny(core, st2, 'Write');
++    expect(deny).not.toBeNull();
++    expect(deny!.message).toContain('PLATFORM_NO_RUNNING_TURN:');
++
++    // currentRunId 无（锚点已清）+ 注册表非空（构造态）→ deny。
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-g2', toolUseId: 'toolu_g2', description: '任务G2' }),
++    );
++    const st3 = h.sm.get('sess-1')!;
++    st3.currentRunId = undefined; // 强制无锚点（异常态）
++    expect(hasBackgroundTaskGrace(core, st3)).toBe(false);
++    expect(writeChannelGuardDeny(core, st3, 'Write')).not.toBeNull();
++  });
++});
++
++// ── 2026-09-15-background-task-permission-lockout（task-10 / FR-02）：
++// 4 处可达 register 注入点逐一断言 background_task 透传 + 2 处不可达路径锚点态
++// cancelled（execute QA 复审补齐——正是缺这张网漏过 AskUserQuestion 拦截点）。
++
++describe('background_task 注入点（FR-02，manualApproval 会话）', () => {
++  it('锚点态：默认普通审批 register（canUseTool Bash）payload 带 background_task: true', async () => {
++    const harness = await makeApprovalHarness();
++    // 构造锚点态：status=active + currentRunId 在 + 注册表非空。
++    await harness.seedAnchorState();
++    const pending = harness.canUseTool!('Bash', { command: 'ls' });
++    const payload = harness.lastRequestPayload();
++    expect(payload.background_task).toBe(true);
++    harness.resolveLast('deny');
++    const decision = (await pending) as { behavior: string };
++    expect(decision.behavior).toBe('deny');
++  });
++
++  it('锚点态：AskUserQuestion 拦截 register payload 带 background_task: true（P0 事故路径）', async () => {
++    const harness = await makeApprovalHarness();
++    await harness.seedAnchorState();
++    const pending = harness.canUseTool!('AskUserQuestion', {
++      questions: [{ question: 'q', header: 'H', options: [], multiSelect: false }],
++    });
++    const payload = harness.lastRequestPayload();
++    expect(payload.background_task).toBe(true);
++    expect(payload.dialog_kind).toBe('AskUserQuestion');
++    harness.resolveLast('deny');
++    await pending;
++  });
++
++  it('锚点态：ExitPlanMode（plan_approval dialog）payload 带 background_task: true', async () => {
++    const harness = await makeApprovalHarness();
++    await harness.seedAnchorState();
++    const pending = harness.canUseTool!('ExitPlanMode', { plan: '步骤1' });
++    const payload = harness.lastRequestPayload();
++    expect(payload.background_task).toBe(true);
++    expect(payload.dialog_kind).toBe('plan_approval');
++    harness.resolveLast('deny');
++    await pending;
++  });
++
++  it('锚点态：requestPermission（codex/pi sessionPermission 路径）payload 带 background_task: true', async () => {
++    const harness = await makeApprovalHarness();
++    await harness.seedAnchorState();
++    const pending = harness.sm.requestPermission('sess-1', {
++      toolName: 'Bash',
++      toolInput: { command: 'ls' },
++    });
++    const payload = harness.lastRequestPayload();
++    expect(payload.background_task).toBe(true);
++    harness.resolveLast('deny');
++    const decision = (await pending) as { behavior: string };
++    expect(decision.behavior).toBe('deny');
++  });
++
++  it('主轮进行中（status=running）：默认审批 payload 无 background_task 键', async () => {
++    const harness = await makeApprovalHarness();
++    // 不构造锚点态——create 后主轮在跑（status=running），注册表为空。
++    const pending = harness.canUseTool!('Bash', { command: 'ls' });
++    const payload = harness.lastRequestPayload();
++    expect('background_task' in payload).toBe(false);
++    harness.resolveLast('deny');
++    await pending;
++  });
++
++  it('不可达路径①：requestUserDialog 锚点态 → cancelled（不发请求）', async () => {
++    const harness = await makeApprovalHarness();
++    await harness.seedAnchorState();
++    const result = await harness.sm.requestUserDialog('sess-1', {
++      dialogKind: 'AskUserQuestion',
++      dialogPayload: { questions: [] },
++    });
++    expect(result).toEqual({ behavior: 'cancelled' });
++    expect(harness.sendCount()).toBe(0);
++  });
++
++  it('不可达路径②：onUserDialog 回调锚点态 → cancelled（不发请求）', async () => {
++    const harness = await makeApprovalHarness();
++    await harness.seedAnchorState();
++    const onUserDialog = harness.capturedOnUserDialog!;
++    const result = await onUserDialog({
++      dialogKind: 'AskUserQuestion',
++      payload: { questions: [] },
++    });
++    expect(result).toEqual({ behavior: 'cancelled' });
++    expect(harness.sendCount()).toBe(0);
++  });
++});
++
++// ── 注入点断言 harness：manualApproval 会话捕获 canUseTool / onUserDialog ────
++// 模板沿用 tests/interactive/claude-sdk-driver-permission.test.ts 的
++// makeManualSession（捕获 driver options 里的回调）。
++
++interface ApprovalHarness {
++  sm: SessionManager;
++  canUseTool:
++    | ((
++        toolName: string,
++        toolInput: Record<string, unknown>,
++      ) => Promise<Record<string, unknown>>)
++    | undefined;
++  capturedOnUserDialog:
++    | ((req: { dialogKind: string; payload: Record<string, unknown> }) => Promise<
++        Record<string, unknown>
++      >)
++    | undefined;
++  seedAnchorState: () => Promise<void>;
++  lastRequestPayload: () => Record<string, unknown>;
++  resolveLast: (decision: 'allow' | 'deny') => void;
++  sendCount: () => number;
++}
++
++async function makeApprovalHarness(): Promise<ApprovalHarness> {
++  let capturedOptions: Record<string, unknown> | null = null;
++  const fakeDriver = {
++    async start() {
++      return {} as unknown as ReturnType<Parameters<typeof Object>[0]>;
++    },
++    async consume(_h: unknown, callbacks: unknown) {
++      void callbacks;
++      return new Promise<void>(() => {});
++    },
++    async interrupt() {
++      return false;
++    },
++  };
++  const sendCalls: { payload: Record<string, unknown> }[] = [];
++  const wsClient = {
++    send: (msg: { payload: Record<string, unknown> }) => {
++      sendCalls.push({ payload: msg.payload });
++      return true;
++    },
++  };
++  const resolvers: {
++    register: (input: {
++      send: (msg: { payload: Record<string, unknown> }) => boolean;
++    }) => { promise: Promise<Record<string, unknown>> };
++    resolve: (
++      payload: Record<string, unknown>,
++      sessionId: string,
++    ) => string;
++  }[] = [];
++  // 轻量 resolver：复用真实 PermissionResolver 的 wire 形态最稳——直接 new。
++  const { PermissionResolver } = await import(
++    '../../src/interactive/permission-resolver.js'
++  );
++  const resolver = new PermissionResolver();
++  resolvers.push(resolver as never);
++
++  const deps = {
++    driver: fakeDriver as never,
++    drivers: { claude: fakeDriver },
++    onTurnResult: vi.fn(async () => {}),
++    onTurnMessage: vi.fn(async () => {}),
++    onSessionEnd: vi.fn(async () => {}),
++    onSessionEvent: vi.fn(),
++  };
++  const sm = new SessionManager(deps as never, {
++    manualApproval: true,
++    permissionResolver: resolver,
++    permissionWsClient: wsClient as never,
++  });
++  // 捕获注入 driver 的 options：包一层 start。
++  const origCreate = sm.create.bind(sm);
++  void origCreate;
++  // SessionManager 创建时经 driver-factory 注入 options 到 driver.start——
++  // 用 monkey-patch 捕获（fakeDriver.start 收到的是 SessionManager 组装产物）。
++  const driverAny = fakeDriver as { start: (i: unknown, o: Record<string, unknown>) => unknown };
++  const realStart = driverAny.start.bind(driverAny);
++  (fakeDriver as { start: unknown }).start = (
++    input: unknown,
++    opts: Record<string, unknown>,
++  ) => {
++    capturedOptions = opts;
++    return realStart(input, opts);
++  };
++
++  await sm.create({
++    sessionId: 'sess-1',
++    leaseId: 'lease-1',
++    claimToken: 'ct-1',
++    firstPrompt: 'hi',
++    firstRunId: 'run-1',
++    cwd: '/tmp/bg-inject-test',
++    provider: 'claude',
++    pathToClaudeCodeExecutable: '/usr/bin/claude',
++  });
++  await Promise.resolve();
++
++  let messageId = 0;
++  return {
++    sm,
++    canUseTool: capturedOptions?.['canUseTool'] as ApprovalHarness['canUseTool'],
++    capturedOnUserDialog: capturedOptions?.['onUserDialog'] as ApprovalHarness['capturedOnUserDialog'],
++    seedAnchorState: async () => {
++      // 经真实事件链注册后台任务 + 主轮收尾（锚点态：active + currentRunId + 注册表非空）。
++      const st = sm.get('sess-1')!;
++      (
++        sm as unknown as {
++          _getOrCreateTaskMap: (sid: string) => Map<string, unknown>;
++        }
++      )._getOrCreateTaskMap('sess-1').set('task-i1', {
++        taskName: '注入点测试任务',
++        async: true,
++        startedAt: Date.now(),
++        runId: 'run-1',
++      } as never);
++      st.status = 'active';
++      st.currentRunId = 'run-1';
++      messageId++;
++      void messageId;
++    },
++    lastRequestPayload: () => {
++      const last = sendCalls[sendCalls.length - 1];
++      if (!last) throw new Error('无 PERMISSION_REQUEST send 调用');
++      return last.payload;
++    },
++    resolveLast: (decision: 'allow' | 'deny') => {
++      const last = sendCalls[sendCalls.length - 1];
++      if (!last) throw new Error('无 PERMISSION_REQUEST send 调用');
++      resolver.resolve(
++        {
++          session_id: 'sess-1',
++          request_id: last.payload['request_id'] as string,
++          decision,
++        } as never,
++        'sess-1',
++      );
++    },
++    sendCount: () => sendCalls.length,
++  };
++}

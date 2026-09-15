@@ -83,6 +83,8 @@ scale: large
 | 修改 | sillyhub-daemon/src/daemon.ts | run 结果上报时 `hasLiveBackgroundTasks` 为真追加 `[USAGE_NOTE]` 日志行（挂正在收口的 runId） |
 | 修改 | backend/app/modules/daemon/protocol.py | `PermissionRequestPayload.background_task: bool \| None = None`（缺省 None 兼容旧 daemon） |
 | 修改 | backend/app/modules/daemon/permission_service.py | 受理放宽（background_task=True 时整个 current_run 校验块替换为 run 直查+归属校验）；全部校验失败分支推即时 deny（payload 对齐 :1503-1510 先例带 runtime_id；数据流：permission_service → `ws_hub.send_permission_response` → daemon WS → resolver.resolve 按 request_id settle deny） |
+| 新增 | sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts | 锚点生命周期 + 守卫三态 + 4 处注入点 + 2 处不可达 cancelled（task-10） |
+| 新增 | sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts | [USAGE_NOTE] 两态（task-10） |
 | 修改 | backend/app/modules/agent/service.py | `_cleanup_stale_runs_impl` failed 分支补 error_code/error_detail |
 
 ## 接口定义

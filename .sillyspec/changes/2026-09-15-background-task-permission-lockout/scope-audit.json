@@ -1,0 +1,148 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "9d1dc031f2d268bc5ffc70b295e4532b24eb9e19",
+  "totals": {
+    "files": 16,
+    "additions": 1224,
+    "deletions": 30
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/agent/service.py",
+      "additions": 9,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+      "additions": 89,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/permission_service.py",
+      "additions": 121,
+      "deletions": 21,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/protocol.py",
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_permissions.py",
+      "additions": 102,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_ws_hub_permission.py",
+      "additions": 11,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "additions": 25,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/permission-resolver.ts",
+      "additions": 15,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+      "additions": 9,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+      "additions": 17,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+      "additions": 10,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/permission.ts",
+      "additions": 60,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts",
+      "additions": 4,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts",
+      "additions": 150,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/permission-resolver.test.ts",
+      "additions": 76,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts",
+      "additions": 520,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "a9ca377cef7b80dd8573e7e3f473f2b15c59107f5ba84504049f2a0f06cc3ac0",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-15T10:59:47.009Z"
+}

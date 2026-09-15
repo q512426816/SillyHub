@@ -1,0 +1,1121 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon[39m
+
+ [32m✓[39m tests/interactive/pi-events.test.ts [2m([22m[2m28 tests[22m[2m)[22m[90m 14[2mms[22m[39m
+ [32m✓[39m tests/interactive/claude-sdk-driver.test.ts [2m([22m[2m34 tests[22m[2m)[22m[90m 48[2mms[22m[39m
+[90mstderr[2m | tests/interactive/pi-rpc-driver.test.ts[2m > [22m[2mget_state 握手 → session_started 合成[2m > [22m[2m握手超时 → error 事件上报，通道不挂死（后续 prompt 正常走）
+[22m[39m[pi-rpc-driver] get_state handshake failed: pi rpc "get_state" response timeout (60ms)
+
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-08 / reload 内核抽取回归（reloadWithProvider 零语义漂移）[2m > [22m[2mREG-3: driver.start 抛错 → 回滚旧 query/env + session 不破坏 + 错误重抛
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: simulated spawn EINVAL
+    at Object.<anonymous> [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39mtests\interactive\session-manager-config-switch.test.ts:402:15[90m)[39m
+    at Object.mockCall [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/@vitest+spy@2.1.9/node_modules/[4m@vitest/spy[24m/dist/index.js:61:17[90m)[39m
+    at Object.spy [as start] [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/tinyspy@3.0.2/node_modules/[4mtinyspy[24m/dist/index.js:45:80[90m)[39m
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:2081:43[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-reload-provider.test.ts[2m > [22m[2mtask-08 / reloadWithProvider 成功路径（FR-05 / D-002@v1）[2m > [22m[2mAC-4: driver.start reload 时抛错 → 回滚 state.query=oldQuery + session 不破坏 + 错误重新抛
+[22m[39m[session-manager] _reloadSession failed (session=sess-reload), 保留旧句柄降级 Error: simulated spawn EINVAL
+    at Object.<anonymous> [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39mtests\interactive\session-manager-reload-provider.test.ts:443:15[90m)[39m
+    at Object.mockCall [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/@vitest+spy@2.1.9/node_modules/[4m@vitest/spy[24m/dist/index.js:61:17[90m)[39m
+    at Object.spy [as start] [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/tinyspy@3.0.2/node_modules/[4mtinyspy[24m/dist/index.js:45:80[90m)[39m
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:2081:43[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-reload-provider.test.ts[2m > [22m[2mtask-08 / reloadWithProvider 边界场景[2m > [22m[2m边界-3: agentSessionId 缺失（首 turn system/init 未到达）→ 抛错不破坏会话
+[22m[39m[session-manager] _reloadSession failed (session=sess-reload), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-reload 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+
+ [32m✓[39m tests/interactive/session-manager-reload-provider.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 185[2mms[22m[39m
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-08 / reloadWithConfig（FR-05 / D-012@v1，claude）[2m > [22m[2mCFG-4: driver.start 抛错 → 回滚 query/env/systemPrompt/providerConfig + 不喂 prompt
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: simulated jsonl missing
+    at Object.<anonymous> [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39mtests\interactive\session-manager-config-switch.test.ts:679:15[90m)[39m
+    at Object.mockCall [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/@vitest+spy@2.1.9/node_modules/[4m@vitest/spy[24m/dist/index.js:61:17[90m)[39m
+    at Object.spy [as start] [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/tinyspy@3.0.2/node_modules/[4mtinyspy[24m/dist/index.js:45:80[90m)[39m
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:2081:43[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-08 / reloadWithConfig（FR-05 / D-012@v1，claude）[2m > [22m[2mCFG-5: agentSessionId 缺失 → 抛错不破坏会话（内核守卫透传）
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-cfg 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mtask-03 / codex 迁移钩子三联触发条件 + pi 文件层 reload（FR-01 / FR-05）[2m > [22m[2mHOOK-4: agentSessionId 缺失（首 turn 未完成）→ 不迁移 + reload 抛 missing agentSessionId
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-cfg 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+
+ [32m✓[39m tests/interactive/cursor-driver.test.ts [2m([22m[2m23 tests[22m[2m)[22m[90m 196[2mms[22m[39m
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mprovider-file-tx：D-001@v1 守卫前移（缺 key 零文件写入）[2m > [22m[2mHOIST-1: codex 缺 agentSessionId → 写盘前抛 + per-session 目录零创建
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-cfg 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+
+[90mstdout[2m | tests/interactive/session-recovery.test.ts[2m > [22m[2mtask-04 / restore 自愈：codex·pi 恢复注文件层 env（FR-01 / FR-02）[2m > [22m[2mRESTORE-4: codex null + legacy 目录（无标记有 auth.json）→ 补落标记 + 幂等重镜像 + 注 CODEX_HOME（D-004@v2 legacy 态）
+[22m[39mcodex_restore_legacy_marker_missing {
+  codexHome: [32m'C:\\Users\\qinyi\\AppData\\Local\\Temp\\sm-restore-Wo9RRO\\codex\\sess-rn'[39m
+}
+
+ [32m✓[39m tests/interactive/session-recovery.test.ts [2m([22m[2m29 tests[22m[2m)[22m[90m 255[2mms[22m[39m
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mprovider-file-tx：D-002@v2 catch 文件层回滚（A→B 失败回 A）[2m > [22m[2mROLL-1: driver.start 失败 → 目录被旧供应商形态重写（config.toml=old base_url）+ 标记保留 + R-01 降级
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: simulated spawn EINVAL
+    at Object.<anonymous> [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39mtests\interactive\session-manager-config-switch.test.ts:1528:15[90m)[39m
+    at Object.mockCall [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/@vitest+spy@2.1.9/node_modules/[4m@vitest/spy[24m/dist/index.js:61:17[90m)[39m
+    at Object.spy [as start] [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/tinyspy@3.0.2/node_modules/[4mtinyspy[24m/dist/index.js:45:80[90m)[39m
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:2081:43[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-config-switch.test.ts[2m > [22m[2mprovider-file-tx：D-002@v2 catch 文件层回滚（A→B 失败回 A）[2m > [22m[2mROLL-2: 旧形态 undefined（从未配置）→ 回滚 ForReload 返 {} + best-effort 删标记（防 restore 误判 managed）
+[22m[39m[session-manager] _reloadSession failed (session=sess-cfg), 保留旧句柄降级 Error: simulated spawn EINVAL
+    at Object.<anonymous> [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39mtests\interactive\session-manager-config-switch.test.ts:1578:15[90m)[39m
+    at Object.mockCall [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/@vitest+spy@2.1.9/node_modules/[4m@vitest/spy[24m/dist/index.js:61:17[90m)[39m
+    at Object.spy [as start] [90m(file:///C:/Users/qinyi/IdeaProjects/multi-agent-platform/sillyhub-daemon/[39mnode_modules/[4m.pnpm[24m/tinyspy@3.0.2/node_modules/[4mtinyspy[24m/dist/index.js:45:80[90m)[39m
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:2081:43[90m)[39m
+
+ [32m✓[39m tests/interactive/session-manager-config-switch.test.ts [2m([22m[2m38 tests[22m[2m)[22m[33m 442[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:34.934] [daemon.sillyspec_status_roots_restored] count=2
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:34.936] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:34.936] [daemon.starting] runtime_id=runtime-uuid-tl
+
+ [32m✓[39m tests/interactive/claude-events.test.ts [2m([22m[2m13 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m tests/interactive/task-lifecycle.test.ts [2m([22m[2m11 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m tests/interactive/cursor-events.test.ts [2m([22m[2m37 tests[22m[2m)[22m[90m 10[2mms[22m[39m
+ [32m✓[39m tests/interactive/permission-resolver.test.ts [2m([22m[2m27 tests[22m[2m)[22m[90m 14[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-worker-restricted-mcp.test.ts [2m([22m[2m21 tests[22m[2m)[22m[90m 68[2mms[22m[39m
+[90mstderr[2m | tests/interactive/codex-app-server-driver.test.ts[2m > [22m[2mql-20260909-026：早到 inject 竞态——turn/start 前等 threadId 就绪[2m > [22m[2mthreadId 等待超时：turn 按 failed 收敛（含超时摘要），consume 不挂死
+[22m[39m[codex-app-server-driver] thread_id_wait_timeout { sessionId: [90mundefined[39m, waitedMs: [33m80[39m }
+
+ [32m✓[39m tests/interactive/golden/claude-events-golden.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-permission.test.ts [2m([22m[2m21 tests[22m[2m)[22m[90m 254[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 [] → 跳过恢复，直接启动 loops（无 recover 调用）
+[22m[39m[2026-09-15 19:03:35.974] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:35.976] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:35.976] [daemon.starting] runtime_id=rt-1
+
+ [32m✓[39m tests/interactive/session-store-persistence.test.ts [2m([22m[2m31 tests[22m[2m)[22m[90m 57[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-manager.test.ts[2m > [22m[2mcursor 换轨跟随 vs 其它 provider write-once（ql-20260909-004）[2m > [22m[2mcursor：主流 init 携带不同 sid → agentSessionId 跟随覆盖（换轨不丢 resume key）
+[22m[39m[session-manager] cursor chat switched; resume key follows {
+  session_id: [32m'sess-1'[39m,
+  old_agent_session_id: [32m'chat-old'[39m,
+  new_agent_session_id: [32m'chat-new'[39m
+}
+
+ [32m✓[39m tests/interactive/session-manager.test.ts [2m([22m[2m29 tests[22m[2m)[22m[90m 33[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:36.330] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:36.337] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:36.338] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:36.338] [daemon.agents_detected] agents=["claude"]
+
+ [32m✓[39m tests/interactive/claude-sdk-driver-mcp-kill-cleanup.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m tests/interactive/claude-sdk-driver-permission.test.ts [2m([22m[2m14 tests[22m[2m)[22m[90m 10[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:36.974] [daemon.sillyspec_status_roots_restored] count=2
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:36.975] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:36.975] [daemon.starting] runtime_id=runtime-uuid-123
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 [] → 跳过恢复，直接启动 loops（无 recover 调用）
+[22m[39m[2026-09-15 19:03:37.159] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 [] → 跳过恢复，直接启动 loops（无 recover 调用）
+[22m[39m[2026-09-15 19:03:37.159] [daemon.agents_detected] agents=[]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 [] → 跳过恢复，直接启动 loops（无 recover 调用）
+[22m[39m[2026-09-15 19:03:37.159] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 [] → 跳过恢复，直接启动 loops（无 recover 调用）
+[22m[39m[2026-09-15 19:03:37.162] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 [] → 跳过恢复，直接启动 loops（无 recover 调用）
+[22m[39m[2026-09-15 19:03:37.163] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:37.165] [daemon.stopping]
+[2026-09-15 19:03:37.166] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 2 条均 reconnecting → 每条调 recover+restore+markReconnected+confirm
+[22m[39m[2026-09-15 19:03:37.171] [daemon.sillyspec_status_roots_restored] count=2
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 2 条均 reconnecting → 每条调 recover+restore+markReconnected+confirm
+[22m[39m[2026-09-15 19:03:37.172] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:37.172] [daemon.starting] runtime_id=rt-1
+
+ [32m✓[39m tests/interactive/worker-tiered-toolset.test.ts [2m([22m[2m20 tests[22m[2m)[22m[90m 45[2mms[22m[39m
+ [32m✓[39m tests/interactive/pi-rpc-driver-turn-result.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 1982[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.625] [daemon.daemon_registered] daemon_local_id=runtime-uuid-tl providers=["claude"]
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.628] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.630] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:37.630] [daemon.ws_client_created] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:37.630] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:37.630] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:37.631] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:37.631] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:37.631] [daemon.started] runtime_id=runtime-uuid-tl
+[2026-09-15 19:03:37.633] [daemon.task_available] lease_id=lease-tl
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.637] [daemon.interactive_create_step] session_id=sess-tl step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:37.637] [daemon.interactive_create_step] session_id=sess-tl step=mcp_prefetch_ms elapsed_ms=0
+[2026-09-15 19:03:37.638] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:37.638] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-tl
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.638] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.649] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+
+ [32m✓[39m tests/interactive/session-manager-bg-anchor.test.ts [2m([22m[2m13 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.667] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=20
+[2026-09-15 19:03:37.667] [daemon.interactive_create_step] session_id=sess-tl step=skills_ms elapsed_ms=30
+[2026-09-15 19:03:37.667] [daemon.interactive_create_step] session_id=sess-tl step=create_ms elapsed_ms=0
+[2026-09-15 19:03:37.667] [daemon.interactive_session_started] lease_id=lease-tl session_id=sess-tl run_id=run-tl borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":30,"create_ms":0} total_ms=33
+[2026-09-15 19:03:37.671] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.668] [daemon.interactive_session_create_failed] lease_id=lease-tl session_id=sess-tl code=TypeError error=this._client.notifySessionReady is not a function timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":30,"create_ms":0} total_ms=34
+[2026-09-15 19:03:37.668] [daemon.interactive_create_failed_report_failed] lease_id=lease-tl run_id=run-tl error=TypeError: this._client.notifyRunResult is not a function
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel
+[22m[39m[2026-09-15 19:03:37.686] [daemon.stopping]
+[2026-09-15 19:03:37.687] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:37.687] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:37.688] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:37.688] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:37.688] [daemon.starting] runtime_id=runtime-uuid-tl
+
+ [32m✓[39m tests/interactive/session-manager-main-agent-mcp.test.ts [2m([22m[2m16 tests[22m[2m)[22m[90m 27[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:38.089] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:38.097] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:38.098] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:38.098] [daemon.agents_detected] agents=["claude"]
+
+ [32m✓[39m tests/interactive/session-manager-worker-depth.test.ts [2m([22m[2m16 tests[22m[2m)[22m[90m 150[2mms[22m[39m
+[90mstderr[2m | tests/interactive/pi-rpc-driver.test.ts[2m > [22m[2mextension_ui_request 自动取消（rpc.md:1126-1335）[2m > [22m[2mdialog（select）→ 自动回 extension_ui_response cancelled:true，事件流不被阻塞
+[22m[39mpi_driver: extension_ui_request dialog "select" auto-cancelled (permission_dialog=false)
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 2 条均 reconnecting → 每条调 recover+restore+markReconnected+confirm
+[22m[39m[2026-09-15 19:03:38.307] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:38.308] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:38.308] [daemon.session_recover_no_runtime] session_id=s1 provider=claude
+[2026-09-15 19:03:38.308] [daemon.session_recover_no_runtime] session_id=s2 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 2 条均 reconnecting → 每条调 recover+restore+markReconnected+confirm
+[22m[39m[2026-09-15 19:03:38.308] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:38.308] [daemon.session_recover_start] count=2 trigger=boot
+[2026-09-15 19:03:38.308] [daemon.session_recovered] session_id=s1
+[2026-09-15 19:03:38.308] [daemon.session_recovered] session_id=s2
+[2026-09-15 19:03:38.308] [daemon.session_recover_done] total=2 recovered=2 failed=0 expired=0 trigger=boot
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 2 条均 reconnecting → 每条调 recover+restore+markReconnected+confirm
+[22m[39m[2026-09-15 19:03:38.310] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mload 返回 2 条均 reconnecting → 每条调 recover+restore+markReconnected+confirm
+[22m[39m[2026-09-15 19:03:38.311] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:38.312] [daemon.stopping]
+[2026-09-15 19:03:38.312] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=ended → 不调 restoreAndReconnect；记录从 persistence 移除
+[22m[39m[2026-09-15 19:03:38.314] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:38.314] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:38.314] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/pi-rpc-driver.test.ts[2m > [22m[2mextension_ui_request 自动取消（rpc.md:1126-1335）[2m > [22m[2mfire-and-forget（notify）→ 不回应答（协议无应答期望），事件流不受影响
+[22m[39mpi_driver: extension_ui_request(notify) degraded (fire-and-forget UI) {"type":"extension_ui_request","id":"ui-notify-1","method":"notify","message":"Command blocked by user","notifyType":"wa
+
+ [32m✓[39m tests/interactive/session-manager-allowed-roots.test.ts [2m([22m[2m20 tests[22m[2m)[22m[90m 25[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-profile.test.ts [2m([22m[2m16 tests[22m[2m)[22m[90m 20[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-pending-cleanup.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:38.969] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:38.971] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:38.971] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:38.971] [daemon.agents_detected] agents=["claude"]
+
+ [32m✓[39m tests/interactive/session-manager-inject-attachment.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 31[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.393] [daemon.daemon_registered] daemon_local_id=runtime-uuid-123 providers=["claude"]
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.396] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.397] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:39.398] [daemon.ws_client_created] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:39.398] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:39.398] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:39.398] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:39.398] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:39.398] [daemon.started] runtime_id=runtime-uuid-123
+[2026-09-15 19:03:39.400] [daemon.task_available] lease_id=lease-fresh-1
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.402] [daemon.interactive_create_step] session_id=sess-fresh-1 step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:39.403] [daemon.interactive_create_step] session_id=sess-fresh-1 step=mcp_prefetch_ms elapsed_ms=0
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.407] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:39.407] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-123
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.407] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.417] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 成功 → notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:39.436] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=20
+[2026-09-15 19:03:39.436] [daemon.interactive_create_step] session_id=sess-fresh-1 step=skills_ms elapsed_ms=34
+[2026-09-15 19:03:39.436] [daemon.interactive_create_step] session_id=sess-fresh-1 step=create_ms elapsed_ms=0
+[2026-09-15 19:03:39.436] [daemon.interactive_session_started] lease_id=lease-fresh-1 session_id=sess-fresh-1 run_id=run-1 borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":34,"create_ms":0} total_ms=36
+[2026-09-15 19:03:39.445] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:39.447] [daemon.stopping]
+[2026-09-15 19:03:39.447] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:39.447] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:39.449] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:39.449] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:39.449] [daemon.starting] runtime_id=runtime-uuid-123
+
+ [32m✓[39m tests/interactive/session-manager-terminate-close.test.ts [2m([22m[2m13 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=ended → 不调 restoreAndReconnect；记录从 persistence 移除
+[22m[39m[2026-09-15 19:03:39.597] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=ended → 不调 restoreAndReconnect；记录从 persistence 移除
+[22m[39m[2026-09-15 19:03:39.597] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:39.597] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:39.597] [daemon.session_recover_skipped] session_id=sess-1 backend_status=ended
+[2026-09-15 19:03:39.598] [daemon.session_recover_done] total=1 recovered=0 failed=1 expired=0 trigger=boot
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=ended → 不调 restoreAndReconnect；记录从 persistence 移除
+[22m[39m[2026-09-15 19:03:39.597] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:39.597] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=ended → 不调 restoreAndReconnect；记录从 persistence 移除
+[22m[39m[2026-09-15 19:03:39.599] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:39.600] [daemon.stopping]
+[2026-09-15 19:03:39.600] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=ended → 不调 restoreAndReconnect；记录从 persistence 移除
+[22m[39m[2026-09-15 19:03:39.599] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=rejected（runtime/lease 不匹配）→ 不建本地 session；删记录
+[22m[39m[2026-09-15 19:03:39.601] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:39.601] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:39.601] [daemon.starting] runtime_id=rt-1
+
+ [32m✓[39m tests/interactive/session-manager-write-guard.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 17[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-idle-scanner.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 853[2mms[22m[39m
+   [33m[2m✓[22m[39m task-07 AC-12 start/stop 生命周期（真实定时器）[2m > [22mstop→start 重建定时器恢复扫描 [33m314[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.188] [daemon.daemon_registered] daemon_local_id=runtime-uuid-tl providers=["claude"]
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.189] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.190] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:40.190] [daemon.ws_client_created] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:40.190] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:40.190] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:40.190] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:40.190] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:40.190] [daemon.started] runtime_id=runtime-uuid-tl
+[2026-09-15 19:03:40.190] [daemon.task_available] lease_id=lease-tl
+[2026-09-15 19:03:40.191] [daemon.interactive_create_step] session_id=sess-tl step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:40.191] [daemon.interactive_create_step] session_id=sess-tl step=mcp_prefetch_ms elapsed_ms=0
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.192] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:40.192] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-tl
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.192] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.195] [daemon.link_skills_version_fresh_skip] workdir=C:\Users\qinyi\AppData\Local\Temp version=c9fb50541ba6 skills_skipped=20 skills_copied=0
+[2026-09-15 19:03:40.195] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=0
+[2026-09-15 19:03:40.195] [daemon.interactive_create_step] session_id=sess-tl step=skills_ms elapsed_ms=4
+[2026-09-15 19:03:40.195] [daemon.interactive_create_step] session_id=sess-tl step=create_ms elapsed_ms=0
+[2026-09-15 19:03:40.195] [daemon.interactive_session_started] lease_id=lease-tl session_id=sess-tl run_id=run-tl borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":4,"create_ms":0} total_ms=5
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.196] [daemon.interactive_session_create_failed] lease_id=lease-tl session_id=sess-tl code=TypeError error=this._client.notifySessionReady is not a function timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":4,"create_ms":0} total_ms=6
+[2026-09-15 19:03:40.196] [daemon.interactive_create_failed_report_failed] lease_id=lease-tl run_id=run-tl error=TypeError: this._client.notifyRunResult is not a function
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底）
+[22m[39m[2026-09-15 19:03:40.214] [daemon.stopping]
+[2026-09-15 19:03:40.215] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:40.215] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:40.216] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:40.216] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:40.216] [daemon.starting] runtime_id=runtime-uuid-tl
+
+ [32m✓[39m tests/interactive/claude-transcript-dir.test.ts [2m([22m[2m22 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+[90mstderr[2m | tests/interactive/pi-rpc-driver.test.ts[2m > [22m[2mpi 桥接态4：权限类/未知/归一化失败/未注入 → 零桥接红线（自动取消）[2m > [22m[2mhook 已注入：权限类 method / 未知 method / 归一化失败 → 自动 cancelled:true 且 stub 零调用
+[22m[39mpi_driver: unknown extension_ui_request method "request_permission" treated as dialog (auto-cancelled)
+pi_driver: unknown extension_ui_request method "mystery_dialog" treated as dialog (auto-cancelled)
+pi_driver: extension_ui_request dialog "select" normalize failed (select has no valid string options) auto-cancelled
+
+[90mstderr[2m | tests/interactive/pi-rpc-driver.test.ts[2m > [22m[2mpi 桥接态4：权限类/未知/归一化失败/未注入 → 零桥接红线（自动取消）[2m > [22m[2m未注入 sessionPermission → 提问四方法维持既有自动取消（fail-closed 不回归）
+[22m[39mpi_driver: extension_ui_request dialog "select" auto-cancelled (permission_dialog=false)
+
+[90mstderr[2m | tests/interactive/session-manager-pending-switch.test.ts[2m > [22m[2mtask-07 / interactive provider 热切换 pendingSwitch 状态机（D-002@v1）[2m > [22m[2mcase(4)-续: pendingSwitch 已设 → 后续空闲路径 markPendingSwitch 立即 reload（覆盖语义）
+[22m[39m[session-manager] _reloadSession failed (session=sess-ps), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-ps 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+[session-manager] turn-boundary provider switch reload failed sess-ps Error: _reloadSession: missing agentSessionId (session sess-ps 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+
+[90mstderr[2m | tests/interactive/session-manager-pending-switch.test.ts[2m > [22m[2mtask-07 / interactive provider 热切换 pendingSwitch 状态机（D-002@v1）[2m > [22m[2mcase(5): reloadWithProvider 真实实现 agentSessionId 守卫 —— 缺失时抛错不破坏会话
+[22m[39m[session-manager] _reloadSession failed (session=sess-ps), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-ps 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+
+ [32m✓[39m tests/interactive/session-manager-pending-switch.test.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-compact.test.ts [2m([22m[2m15 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:40.657] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:40.659] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:40.659] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:40.659] [daemon.agents_detected] agents=["claude"]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=rejected（runtime/lease 不匹配）→ 不建本地 session；删记录
+[22m[39m[2026-09-15 19:03:40.829] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:40.830] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:40.830] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=rejected（runtime/lease 不匹配）→ 不建本地 session；删记录
+[22m[39m[2026-09-15 19:03:40.830] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:40.830] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:40.830] [daemon.session_recover_skipped] session_id=sess-1 backend_status=rejected
+[2026-09-15 19:03:40.830] [daemon.session_recover_done] total=1 recovered=0 failed=1 expired=0 trigger=boot
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=rejected（runtime/lease 不匹配）→ 不建本地 session；删记录
+[22m[39m[2026-09-15 19:03:40.832] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:40.833] [daemon.stopping]
+[2026-09-15 19:03:40.833] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbackend status=rejected（runtime/lease 不匹配）→ 不建本地 session；删记录
+[22m[39m[2026-09-15 19:03:40.832] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛错（driver.start 同步失败）→ markRecoveryFailed + fail；继续下一条
+[22m[39m[2026-09-15 19:03:40.834] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:40.834] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:40.834] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/pi-rpc-driver.test.ts[2m > [22m[2m退出收敛与容错[2m > [22m[2m坏 JSON 行 / 无主 response / 未知事件 → 不崩不丢（降级桶/警告路径）
+[22m[39mpi_driver: parse_error not-a-json-line
+pi_driver: unmatched response dropped {"id":"pi_999","type":"response","command":"get_state","success":true}
+
+ [32m✓[39m tests/interactive/mcp-server-worker-done.test.ts [2m([22m[2m15 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m tests/interactive/task-ack-fallback.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 7[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:41.449] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:41.450] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:41.450] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:41.450] [daemon.agents_detected] agents=["claude"]
+
+ [32m✓[39m tests/interactive/pi-task-dispatch.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-budget.test.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 9[2mms[22m[39m
+ [32m✓[39m tests/interactive/claude-sdk-driver-glm-passthrough.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32m✓[39m tests/interactive/codex-app-server-driver-approval.test.ts [2m([22m[2m37 tests[22m[2m)[22m[33m 7588[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2 commandExecution/requestApproval[2m > [22mmanualApproval=false（无 sessionPermission 注入）→ allow-through accept，发 0 次 hook [33m357[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2 commandExecution/requestApproval[2m > [22mask_user_only=true（注入 hook）→ 普通 approval allow-through accept，不调 hook [33m343[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2 commandExecution/requestApproval[2m > [22mfull-review + 用户 allow → accept，发 1 次 hook（无 dialog_kind） [33m343[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2 commandExecution/requestApproval[2m > [22mfull-review + 用户 deny → decline [33m625[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2 commandExecution/requestApproval[2m > [22mfull-review + send 失败（hook 返回 deny）→ decline（fail-closed） [33m346[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2 commandExecution/requestApproval[2m > [22mfull-review + hook 抛错 → fail-closed decline response（外层 catch 兜底） [33m374[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-3 item/fileChange/requestApproval[2m > [22mfull-review allow → accept [33m348[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-3 item/fileChange/requestApproval[2m > [22mfull-review deny → decline [33m349[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-4 item/permissions/requestApproval（扩权，空 profile 不回授）[2m > [22mask_user_only=true → 空 profile，不扩权，不调 hook [33m347[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-4 item/permissions/requestApproval（扩权，空 profile 不回授）[2m > [22mfull-review + allow → 回授 requested profile（scope=turn） [33m361[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-4 item/permissions/requestApproval（扩权，空 profile 不回授）[2m > [22mfull-review + deny → 空 profile [33m344[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-5 item/tool/requestUserInput（D-010 双向归一化）[2m > [22m归一化 → PERMISSION_REQUEST 带 dialog_kind + dialog_payload；用户答案还原 answers schema [33m346[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-5 item/tool/requestUserInput（D-010 双向归一化）[2m > [22mdeny / cancelled → 空 answers [33m346[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-5 item/tool/requestUserInput（D-010 双向归一化）[2m > [22mask_user_only=true 仍阻塞（发 dialog，不 allow-through） [33m346[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-6 mcpServer/elicitation/request（D-010 fail-closed）[2m > [22murl 模式 → dialog_kind=mcp_elicitation，用户 accept → action=accept [33m347[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-6 mcpServer/elicitation/request（D-010 fail-closed）[2m > [22m复杂 form schema → 立即 decline + flat error 日志（不静默 accept） [33m344[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-6 mcpServer/elicitation/request（D-010 fail-closed）[2m > [22m超时 / cancel → action=cancel [33m346[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-7 interrupt 时 signal abort → fail-closed[2m > [22mcommandExecution 进行中 interrupt → decline [33m340[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-8 无 sessionPermission 注入（task-04 占位兼容）[2m > [22mfull-review 语义但未注入 hook → fail-closed decline（不崩、不 accept） [33m344[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-8 无 sessionPermission 注入（task-04 占位兼容）[2m > [22mpermissions request 未注入 hook → 空 profile（不扩权） [33m344[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-9 未知 server request method → JSON-RPC error + flat error log[2m > [22mitem/foo/bar → 写 -32601 error response + flat error 日志 [33m343[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.916] [daemon.daemon_registered] daemon_local_id=runtime-uuid-123 providers=["claude"]
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.917] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.918] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:41.918] [daemon.ws_client_created] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:41.918] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:41.918] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:41.918] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:41.918] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:41.918] [daemon.started] runtime_id=runtime-uuid-123
+[2026-09-15 19:03:41.919] [daemon.task_available] lease_id=lease-be-fresh-1
+[2026-09-15 19:03:41.920] [daemon.interactive_create_step] session_id=sess-be-fresh-1 step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:41.920] [daemon.interactive_create_step] session_id=sess-be-fresh-1 step=mcp_prefetch_ms elapsed_ms=0
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.920] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.921] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:41.921] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-123
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.922] [daemon.link_skills_version_fresh_skip] workdir=C:\Users\qinyi\AppData\Local\Temp version=c9fb50541ba6 skills_skipped=20 skills_copied=0
+[2026-09-15 19:03:41.922] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=0
+[2026-09-15 19:03:41.922] [daemon.interactive_create_step] session_id=sess-be-fresh-1 step=skills_ms elapsed_ms=2
+[2026-09-15 19:03:41.922] [daemon.interactive_create_step] session_id=sess-be-fresh-1 step=create_ms elapsed_ms=0
+[2026-09-15 19:03:41.922] [daemon.interactive_session_started] lease_id=lease-be-fresh-1 session_id=sess-be-fresh-1 run_id=run-be-1 borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":2,"create_ms":0} total_ms=3
+
+ [32m✓[39m tests/interactive/session-manager-borrow-sandbox.test.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.946] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:41.978] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛）
+[22m[39m[2026-09-15 19:03:42.010] [daemon.stopping]
+[2026-09-15 19:03:42.010] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:42.010] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:42.011] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:42.011] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:42.011] [daemon.starting] runtime_id=runtime-uuid-123
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛错（driver.start 同步失败）→ markRecoveryFailed + fail；继续下一条
+[22m[39m[2026-09-15 19:03:42.097] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛错（driver.start 同步失败）→ markRecoveryFailed + fail；继续下一条
+[22m[39m[2026-09-15 19:03:42.097] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:42.097] [daemon.session_recover_start] count=2 trigger=boot
+[2026-09-15 19:03:42.097] [daemon.session_recovered] session_id=so
+[2026-09-15 19:03:42.097] [daemon.session_recover_done] total=2 recovered=1 failed=1 expired=0 trigger=boot
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛错（driver.start 同步失败）→ markRecoveryFailed + fail；继续下一条
+[22m[39m[2026-09-15 19:03:42.097] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:42.097] [daemon.session_recover_no_runtime] session_id=sf provider=claude
+[2026-09-15 19:03:42.097] [daemon.session_recover_no_runtime] session_id=so provider=claude
+[2026-09-15 19:03:42.097] [daemon.session_restore_failed] session_id=sf error=driver.start sync failed (cwd mismatch)
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛错（driver.start 同步失败）→ markRecoveryFailed + fail；继续下一条
+[22m[39m[2026-09-15 19:03:42.099] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:42.101] [daemon.stopping]
+[2026-09-15 19:03:42.101] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛错（driver.start 同步失败）→ markRecoveryFailed + fail；继续下一条
+[22m[39m[2026-09-15 19:03:42.099] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛 SessionBusyError（本地在途 turn）→ 不置 failed、不删记录、入重试队列
+[22m[39m[2026-09-15 19:03:42.102] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:42.102] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:42.102] [daemon.starting] runtime_id=rt-1
+
+ [32m✓[39m tests/interactive/claude-sdk-driver-canuse.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-askuser-dialog.test.ts [2m([22m[2m7 tests[22m[2m)[22m[90m 53[2mms[22m[39m
+ [32m✓[39m tests/interactive/provider-registry.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m tests/interactive/input-queue.test.ts [2m([22m[2m20 tests[22m[2m)[22m[90m 107[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:42.728] [daemon.daemon_registered] daemon_local_id=runtime-uuid-tl providers=["claude"]
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:42.731] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+[2026-09-15 19:03:42.736] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:42.732] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:42.732] [daemon.ws_client_created] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:42.732] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:42.732] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:42.732] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:42.732] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:42.732] [daemon.started] runtime_id=runtime-uuid-tl
+[2026-09-15 19:03:42.734] [daemon.task_available] lease_id=lease-tl
+[2026-09-15 19:03:42.735] [daemon.interactive_create_step] session_id=sess-tl step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:42.735] [daemon.interactive_create_step] session_id=sess-tl step=mcp_prefetch_ms elapsed_ms=0
+[2026-09-15 19:03:42.736] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:42.736] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-tl
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:42.737] [daemon.link_skills_version_fresh_skip] workdir=C:\Users\qinyi\AppData\Local\Temp version=c9fb50541ba6 skills_skipped=20 skills_copied=0
+[2026-09-15 19:03:42.737] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=0
+[2026-09-15 19:03:42.737] [daemon.interactive_create_step] session_id=sess-tl step=skills_ms elapsed_ms=2
+[2026-09-15 19:03:42.737] [daemon.interactive_create_step] session_id=sess-tl step=create_ms elapsed_ms=0
+[2026-09-15 19:03:42.737] [daemon.interactive_session_started] lease_id=lease-tl session_id=sess-tl run_id=run-tl borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":2,"create_ms":0} total_ms=3
+
+ [32m✓[39m tests/interactive/session-interrupt.test.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 33[2mms[22m[39m
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:42.738] [daemon.interactive_session_create_failed] lease_id=lease-tl session_id=sess-tl code=TypeError error=this._client.notifySessionReady is not a function timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":2,"create_ms":0} total_ms=4
+[2026-09-15 19:03:42.739] [daemon.interactive_create_failed_report_failed] lease_id=lease-tl run_id=run-tl error=TypeError: this._client.notifyRunResult is not a function
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底
+[22m[39m[2026-09-15 19:03:42.762] [daemon.stopping]
+[2026-09-15 19:03:42.762] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:42.762] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:42.764] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:42.764] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:42.764] [daemon.starting] runtime_id=runtime-uuid-tl
+
+ [32m✓[39m tests/interactive/pi-rpc-driver.test.ts [2m([22m[2m90 tests[22m[2m)[22m[33m 8558[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-resume-fallback.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 9[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-resume-config-dir.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32m✓[39m tests/interactive/claude-driver-close-contract.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m tests/interactive/driver.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+[90mstderr[2m | tests/interactive/session-manager-reload-serial.test.ts[2m > [22m[2m_reloadSession per-session 串行化（ql-20260825-f3#2）[2m > [22m[2m上一轮 reload 失败不阻塞下一轮（错误不沿链传播）
+[22m[39m[session-manager] _reloadSession failed (session=sess-serial), 保留旧句柄降级 Error: _reloadSession: missing agentSessionId (session sess-serial 首 turn system/init 未完成,无 jsonl 可 resume)
+    at SessionManager._reloadSessionNow [90m(C:\Users\qinyi\IdeaProjects\multi-agent-platform\sillyhub-daemon\[39msrc\interactive\session-manager.ts:1984:15[90m)[39m
+
+ [32m✓[39m tests/interactive/session-manager-reload-serial.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 70[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:43.275] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:43.277] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:43.277] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:43.277] [daemon.agents_detected] agents=["claude"]
+
+ [32m✓[39m tests/interactive/session-manager-terminal-notify-order.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 7[2mms[22m[39m
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛 SessionBusyError（本地在途 turn）→ 不置 failed、不删记录、入重试队列
+[22m[39m[2026-09-15 19:03:43.378] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:43.379] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:43.379] [daemon.session_recover_no_runtime] session_id=busy-1 provider=claude
+[2026-09-15 19:03:43.379] [daemon.session_restore_busy_retry] session_id=busy-1 status=active
+[2026-09-15 19:03:43.379] [daemon.session_recover_retry_scheduled] session_id=busy-1 attempt=1 retry_in_ms=30000
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛 SessionBusyError（本地在途 turn）→ 不置 failed、不删记录、入重试队列
+[22m[39m[2026-09-15 19:03:43.379] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:43.379] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:43.379] [daemon.session_recover_done] total=1 recovered=0 failed=1 expired=0 trigger=boot
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛 SessionBusyError（本地在途 turn）→ 不置 failed、不删记录、入重试队列
+[22m[39m[2026-09-15 19:03:43.381] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mrestoreAndReconnect 抛 SessionBusyError（本地在途 turn）→ 不置 failed、不删记录、入重试队列
+[22m[39m[2026-09-15 19:03:43.382] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:43.383] [daemon.stopping]
+[2026-09-15 19:03:43.383] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed
+[22m[39m[2026-09-15 19:03:43.384] [daemon.sillyspec_status_roots_restored] count=2
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed
+[22m[39m[2026-09-15 19:03:43.385] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:43.385] [daemon.starting] runtime_id=rt-1
+
+ [32m✓[39m tests/interactive/session-manager-terminal-cleanup.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 52[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-concurrent-inject.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m tests/interactive/session-manager-provider-routing.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:44.071] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:44.073] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:44.074] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:44.074] [daemon.agents_detected] agents=["claude"]
+
+ [32m✓[39m tests/interactive/session-manager-driver-registry.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m tests/interactive/thinking-levels.test.ts [2m([22m[2m38 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed
+[22m[39m[2026-09-15 19:03:44.572] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed
+[22m[39m[2026-09-15 19:03:44.573] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:44.573] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:44.573] [daemon.session_recovered] session_id=sx
+[2026-09-15 19:03:44.574] [daemon.session_recover_done] total=1 recovered=1 failed=0 expired=0 trigger=boot
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed
+[22m[39m[2026-09-15 19:03:44.573] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:44.573] [daemon.session_recover_no_runtime] session_id=sx provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed
+[22m[39m[2026-09-15 19:03:44.575] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:44.576] [daemon.stopping]
+[2026-09-15 19:03:44.576] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed
+[22m[39m[2026-09-15 19:03:44.575] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 markRecoveredSessionFailed 对非 recovered session 是 no-op
+[22m[39m[2026-09-15 19:03:44.577] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:44.577] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:44.577] [daemon.starting] runtime_id=rt-1
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:44.594] [daemon.daemon_registered] daemon_local_id=runtime-uuid-123 providers=["claude"]
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:44.596] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:44.596] [daemon.ws_client_created] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:44.596] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:44.596] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:44.596] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:44.596] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:44.596] [daemon.started] runtime_id=runtime-uuid-123
+[2026-09-15 19:03:44.597] [daemon.task_available] lease_id=lease-fail-fresh-1
+[2026-09-15 19:03:44.598] [daemon.interactive_create_step] session_id=sess-fail-fresh-1 step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:44.598] [daemon.interactive_create_step] session_id=sess-fail-fresh-1 step=mcp_prefetch_ms elapsed_ms=0
+[2026-09-15 19:03:44.598] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:44.598] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-123
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:44.596] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+[2026-09-15 19:03:44.598] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:44.599] [daemon.link_skills_version_fresh_skip] workdir=C:\Users\qinyi\AppData\Local\Temp version=c9fb50541ba6 skills_skipped=20 skills_copied=0
+[2026-09-15 19:03:44.599] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=0
+[2026-09-15 19:03:44.599] [daemon.interactive_create_step] session_id=sess-fail-fresh-1 step=skills_ms elapsed_ms=1
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:44.620] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:44.650] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifySessionReady 不调（失败不上报）
+[22m[39m[2026-09-15 19:03:44.681] [daemon.stopping]
+[2026-09-15 19:03:44.681] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:44.681] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:44.682] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:44.683] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:44.683] [daemon.starting] runtime_id=runtime-uuid-123
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.160] [daemon.daemon_registered] daemon_local_id=runtime-uuid-tl providers=["claude"]
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.162] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.163] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:45.163] [daemon.ws_client_created] daemon_local_id=runtime-uuid-tl
+[2026-09-15 19:03:45.163] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:45.163] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:45.163] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:45.163] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:45.163] [daemon.started] runtime_id=runtime-uuid-tl
+[2026-09-15 19:03:45.164] [daemon.task_available] lease_id=lease-tl
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.165] [daemon.interactive_create_step] session_id=sess-tl step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:45.165] [daemon.interactive_create_step] session_id=sess-tl step=mcp_prefetch_ms elapsed_ms=0
+[2026-09-15 19:03:45.166] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:45.166] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-tl
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.166] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.168] [daemon.link_skills_version_fresh_skip] workdir=C:\Users\qinyi\AppData\Local\Temp version=c9fb50541ba6 skills_skipped=20 skills_copied=0
+[2026-09-15 19:03:45.168] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=0
+[2026-09-15 19:03:45.168] [daemon.interactive_create_step] session_id=sess-tl step=skills_ms elapsed_ms=3
+[2026-09-15 19:03:45.168] [daemon.interactive_create_step] session_id=sess-tl step=create_ms elapsed_ms=0
+[2026-09-15 19:03:45.168] [daemon.interactive_session_started] lease_id=lease-tl session_id=sess-tl run_id=run-tl borrow_sandbox=null timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":3,"create_ms":0} total_ms=4
+
+[90mstderr[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.169] [daemon.interactive_session_create_failed] lease_id=lease-tl session_id=sess-tl code=TypeError error=this._client.notifySessionReady is not a function timings={"spec_pull_ms":0,"mcp_prefetch_ms":0,"skills_ms":3,"create_ms":0} total_ms=5
+[2026-09-15 19:03:45.170] [daemon.interactive_create_failed_report_failed] lease_id=lease-tl run_id=run-tl error=TypeError: this._client.notifyRunResult is not a function
+
+[90mstdout[2m | tests/interactive/session-thinking-level.test.ts[2m > [22m[2mtask-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m[2m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化
+[22m[39m[2026-09-15 19:03:45.182] [daemon.stopping]
+[2026-09-15 19:03:45.183] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:45.183] [daemon.stopped]
+
+ [32m✓[39m tests/interactive/session-thinking-level.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 10277[2mms[22m[39m
+   [33m[2m✓[22m[39m task-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22mclaim payload snake_case thinking_level → CreateSessionInput.thinkingLevel [33m2759[2mms[22m[39m
+   [33m[2m✓[22m[39m task-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22mclaim payload camelCase thinkingLevel → CreateSessionInput.thinkingLevel（camel 兜底） [33m2528[2mms[22m[39m
+   [33m[2m✓[22m[39m task-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22mclaim 无键 → TASK_AVAILABLE payload.thinkingLevel 第三源兜底 [33m2547[2mms[22m[39m
+   [33m[2m✓[22m[39m task-03 execPayload 归一化：thinkingLevel 三源回退（Grill P0-1）[2m > [22m旧 backend 无键（claim 与 payload 均无）→ thinkingLevel undefined 零行为变化 [33m2420[2mms[22m[39m
+ [32m✓[39m tests/interactive/daemon-usage-note.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 markRecoveredSessionFailed 对非 recovered session 是 no-op
+[22m[39m[2026-09-15 19:03:45.719] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:45.719] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 markRecoveredSessionFailed 对非 recovered session 是 no-op
+[22m[39m[2026-09-15 19:03:45.719] [daemon.agents_detected] agents=[]
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 markRecoveredSessionFailed 对非 recovered session 是 no-op
+[22m[39m[2026-09-15 19:03:45.721] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:45.722] [daemon.stopping]
+[2026-09-15 19:03:45.722] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mP1-1 markRecoveredSessionFailed 对非 recovered session 是 no-op
+[22m[39m[2026-09-15 19:03:45.721] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:45.723] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:45.723] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:45.723] [daemon.starting] runtime_id=rt-1
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:45.848] [daemon.sillyspec_up_to_date] version=3.28.9
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:45.849] [daemon.daemon_latest_fetch_failed] url=http://127.0.0.1:8000/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:45.850] [daemon.pending_update_stale_removed] target_version=null
+[2026-09-15 19:03:45.850] [daemon.agents_detected] agents=["claude"]
+
+ [32m✓[39m tests/interactive/codex-app-server-driver.test.ts [2m([22m[2m61 tests[22m[2m)[22m[33m 12094[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-3：首轮 turn 生命周期[2m > [22mturn/start(id=3) 带 threadId+input，turn/started 存 turnId，turn/completed success [33m308[2mms[22m[39m
+   [33m[2m✓[22m[39m ql-20260909-026：早到 inject 竞态——turn/start 前等 threadId 就绪[2m > [22minject 早到于 thread/start 响应：等 threadId 就绪后 turn/start 照常发出（不丢不挂） [33m454[2mms[22m[39m
+   [33m[2m✓[22m[39m ql-20260909-026：早到 inject 竞态——turn/start 前等 threadId 就绪[2m > [22mthreadId 等待超时：turn 按 failed 收敛（含超时摘要），consume 不挂死 [33m468[2mms[22m[39m
+   [33m[2m✓[22m[39m ql-20260909-027：用量差值记账（thread/tokenUsage/updated）[2m > [22m轮内多次调用：result.usage = 全轮差值（毛值拆桶），轮中发 usage_update 递增事件 [33m314[2mms[22m[39m
+   [33m[2m✓[22m[39m ql-20260909-027：用量差值记账（thread/tokenUsage/updated）[2m > [22m跨轮基线：第二轮 result.usage 只记本轮增量 [33m437[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2b：turn/completed usage cache 字段尽力而为（task-02 / D-001@v1）[2m > [22musage 带 cache_read_tokens/cache_creation_tokens → onTurnResult.usage 透传两数字 [33m311[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2b：turn/completed usage cache 字段尽力而为（task-02 / D-001@v1）[2m > [22musage 无 cache 字段 → onTurnResult.usage.cache_* 为 undefined（非 0，D-001@v1） [33m314[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-2b：turn/completed usage cache 字段尽力而为（task-02 / D-001@v1）[2m > [22musage cache 字段类型异常（字符串）→ undefined，不 NaN、不抛 [33m316[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-4：多轮串行（无并发 turn）[2m > [22m第二条 turn/start 仅在第一条 turn/completed 之后发出 [33m314[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-4：多轮串行（无并发 turn）[2m > [22m多轮只订阅输入队列一次（2026-08-24 会话审查 P2a：第二轮输入不再抛双订阅错） [33m377[2mms[22m[39m
+   [33m[2m✓[22m[39m TDD-5/6：interrupt[2m > [22m有 turnId 时发 turn/interrupt 返回 true [33m315[2mms[22m[39m
+   [33m[2m✓[22m[39m task-05（2026-09-14-session-ctx-compact）：id→pending response 等待机制[2m > [22m未知 id response 不干扰既有路径：fire-and-forget 响应照旧进 adapter.parse，pending 不被误 settle [33m314[2mms[22m[39m
+   [33m[2m✓[22m[39m task-05（2026-09-14-session-ctx-compact）：compact()[2m > [22mql-20260915-001 防碰撞回归：越过旧 seed 100 交叉点后 compact 与 turn/start 同计数器分号不重号，turn 回执不误唤醒 compact [33m379[2mms[22m[39m
+   [33m[2m✓[22m[39m task-04（2026-09-14-session-thinking-level）：思考档位[2m > [22m启动设置（SPIKE A 成立保留）：opts.thinkingLevel=low → turn/start params 顶层 reasoningEffort 与 model 同位；轮正常收敛 [33m316[2mms[22m[39m
+   [33m[2m✓[22m[39m task-04（2026-09-14-session-thinking-level）：思考档位[2m > [22m启动设置降级形状：off / 未传 → turn/start 不带 reasoningEffort 键（不携带=引擎默认） [33m315[2mms[22m[39m
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:46.969] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:46.970] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:46.970] [daemon.session_recover_no_runtime] session_id=s0 provider=claude
+[2026-09-15 19:03:46.970] [daemon.session_recover_no_runtime] session_id=s1 provider=claude
+[2026-09-15 19:03:46.970] [daemon.session_recover_no_runtime] session_id=s2 provider=claude
+[2026-09-15 19:03:46.970] [daemon.session_recover_no_runtime] session_id=s3 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:46.970] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:46.970] [daemon.session_recover_start] count=5 trigger=boot
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:46.994] [daemon.session_recovered] session_id=s0
+[2026-09-15 19:03:46.994] [daemon.session_recovered] session_id=s1
+[2026-09-15 19:03:46.994] [daemon.session_recovered] session_id=s2
+[2026-09-15 19:03:46.994] [daemon.session_recovered] session_id=s3
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:46.994] [daemon.session_recover_no_runtime] session_id=s4 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:47.009] [daemon.session_recovered] session_id=s4
+[2026-09-15 19:03:47.009] [daemon.session_recover_done] total=5 recovered=5 failed=0 expired=0 trigger=boot
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:47.011] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:47.012] [daemon.stopping]
+[2026-09-15 19:03:47.012] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行
+[22m[39m[2026-09-15 19:03:47.011] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m三循环在恢复完成后启动（start() 返回时恢复已完成）
+[22m[39m[2026-09-15 19:03:47.014] [daemon.sillyspec_status_roots_restored] count=2
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m三循环在恢复完成后启动（start() 返回时恢复已完成）
+[22m[39m[2026-09-15 19:03:47.014] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:47.014] [daemon.starting] runtime_id=rt-1
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.080] [daemon.daemon_registered] daemon_local_id=runtime-uuid-123 providers=["claude"]
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.082] [daemon.reconcile_after_reconnect_started] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:47.082] [daemon.ws_client_created] daemon_local_id=runtime-uuid-123
+[2026-09-15 19:03:47.082] [daemon.sillyspec_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:47.082] [daemon.sillyspec_status_loop_disabled] interval_sec=undefined
+[2026-09-15 19:03:47.082] [daemon.disk_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:47.082] [daemon.server_version_probe_disabled] interval_sec=undefined
+[2026-09-15 19:03:47.082] [daemon.started] runtime_id=runtime-uuid-123
+[2026-09-15 19:03:47.083] [daemon.task_available] lease_id=lease-fail-report-1
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.082] [daemon.skill_manifest_unreachable] url=http://127.0.0.1:8000/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.084] [daemon.interactive_create_step] session_id=sess-fail-report-1 step=spec_pull_ms elapsed_ms=0
+[2026-09-15 19:03:47.084] [daemon.interactive_create_step] session_id=sess-fail-report-1 step=mcp_prefetch_ms elapsed_ms=0
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.085] [daemon.poll_change_writes_failed] rid=srv-rid-1 error=this._client.getPendingChangeWrites is not a function
+[2026-09-15 19:03:47.085] [daemon.reconcile_after_reconnect_done] daemon_local_id=runtime-uuid-123
+
+[90mstderr[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.085] [daemon.spec_cache_non_uuid_dir_skipped] dir=b97f8231.pre-junction-backup-20260909
+
+ [32m✓[39m tests/interactive/session-manager-idle-disabled.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 426[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.087] [daemon.link_skills_version_fresh_skip] workdir=C:\Users\qinyi\AppData\Local\Temp version=c9fb50541ba6 skills_skipped=20 skills_copied=0
+[2026-09-15 19:03:47.087] [daemon.link_skills_to_workdir_done] workdir=C:\Users\qinyi\AppData\Local\Temp files=0
+[2026-09-15 19:03:47.087] [daemon.interactive_create_step] session_id=sess-fail-report-1 step=skills_ms elapsed_ms=3
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22m[2mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）
+[22m[39m[2026-09-15 19:03:47.104] [daemon.stopping]
+[2026-09-15 19:03:47.104] [daemon.runtime_marked_offline] runtime_id=srv-rid-1
+[2026-09-15 19:03:47.104] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mrecover 路径（_routeSessionResume markReconnected 后上报）[2m > [22m[2mSESSION_RESUME 成功（markReconnected 后）→ notifySessionReady 调一次 + sessionId 正确
+[22m[39m[2026-09-15 19:03:47.106] [daemon.session_resume_ok] session_id=sess-recover-1 lease_id=lease-recover-1
+
+[90mstdout[2m | tests/interactive/daemon-notify-session-ready.test.ts[2m > [22m[2mdaemon notifySessionReady 上报（task-11 / FR-05）[2m > [22m[2mrecover 路径（_routeSessionResume markReconnected 后上报）[2m > [22m[2mbest-effort: notifySessionReady reject → daemon 不崩（WS dispatch void .catch 收敛）
+[22m[39m[2026-09-15 19:03:47.152] [daemon.session_resume_ok] session_id=sess-be-rec-1 lease_id=lease-be-rec-1
+
+ [32m✓[39m tests/interactive/daemon-notify-session-ready.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 10276[2mms[22m[39m
+   [33m[2m✓[22m[39m daemon notifySessionReady 上报（task-11 / FR-05）[2m > [22mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22mcreate 成功 → notifySessionReady 调一次 + sessionId 正确 [33m2476[2mms[22m[39m
+   [33m[2m✓[22m[39m daemon notifySessionReady 上报（task-11 / FR-05）[2m > [22mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22mbest-effort: notifySessionReady reject → daemon 主流程不崩（create try/catch 收敛） [33m2562[2mms[22m[39m
+   [33m[2m✓[22m[39m daemon notifySessionReady 上报（task-11 / FR-05）[2m > [22mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22mcreate 抛错 → notifySessionReady 不调（失败不上报） [33m2671[2mms[22m[39m
+   [33m[2m✓[22m[39m daemon notifySessionReady 上报（task-11 / FR-05）[2m > [22mfresh create 路径（_startInteractiveSession create 成功后上报）[2m > [22mcreate 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending） [33m2423[2mms[22m[39m
+ [32m✓[39m tests/interactive/usage-ctx.test.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 2[2mms[22m[39m
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m三循环在恢复完成后启动（start() 返回时恢复已完成）
+[22m[39m[2026-09-15 19:03:48.246] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:48.247] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:48.247] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m三循环在恢复完成后启动（start() 返回时恢复已完成）
+[22m[39m[2026-09-15 19:03:48.247] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:48.247] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:48.247] [daemon.session_recovered] session_id=sess-1
+[2026-09-15 19:03:48.247] [daemon.session_recover_done] total=1 recovered=1 failed=0 expired=0 trigger=boot
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m三循环在恢复完成后启动（start() 返回时恢复已完成）
+[22m[39m[2026-09-15 19:03:48.248] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:48.249] [daemon.stopping]
+[2026-09-15 19:03:48.249] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m三循环在恢复完成后启动（start() 返回时恢复已完成）
+[22m[39m[2026-09-15 19:03:48.248] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m未注入 persistence / recoveryClient → 跳过恢复（向后兼容，不崩）
+[22m[39m[2026-09-15 19:03:48.251] [daemon.sillyspec_status_roots_restored] count=2
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m未注入 persistence / recoveryClient → 跳过恢复（向后兼容，不崩）
+[22m[39m[2026-09-15 19:03:48.251] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:48.251] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m未注入 persistence / recoveryClient → 跳过恢复（向后兼容，不崩）
+[22m[39m[2026-09-15 19:03:49.579] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:49.580] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m未注入 persistence / recoveryClient → 跳过恢复（向后兼容，不崩）
+[22m[39m[2026-09-15 19:03:49.580] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:49.580] [daemon.provider_file_dir_sweep_skipped_no_manager]
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m未注入 persistence / recoveryClient → 跳过恢复（向后兼容，不崩）
+[22m[39m[2026-09-15 19:03:49.583] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:49.584] [daemon.stopping]
+[2026-09-15 19:03:49.584] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2m未注入 persistence / recoveryClient → 跳过恢复（向后兼容，不崩）
+[22m[39m[2026-09-15 19:03:49.583] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbatch lease 零影响：sessions.json 只含 interactive provider；恢复不触 batch 路径
+[22m[39m[2026-09-15 19:03:49.587] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:49.587] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:49.587] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbatch lease 零影响：sessions.json 只含 interactive provider；恢复不触 batch 路径
+[22m[39m[2026-09-15 19:03:50.682] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:50.683] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:50.683] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbatch lease 零影响：sessions.json 只含 interactive provider；恢复不触 batch 路径
+[22m[39m[2026-09-15 19:03:50.683] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:50.683] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:50.683] [daemon.session_recovered] session_id=sess-1
+[2026-09-15 19:03:50.683] [daemon.session_recover_done] total=1 recovered=1 failed=0 expired=0 trigger=boot
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbatch lease 零影响：sessions.json 只含 interactive provider；恢复不触 batch 路径
+[22m[39m[2026-09-15 19:03:50.684] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:50.685] [daemon.stopping]
+[2026-09-15 19:03:50.685] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mDaemon 启动恢复编排[2m > [22m[2mbatch lease 零影响：sessions.json 只含 interactive provider；恢复不触 batch 路径
+[22m[39m[2026-09-15 19:03:50.684] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:03:50.685] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:50.685] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:50.685] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:03:50.685] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:03:50.685] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:50.685] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:50.685] [daemon.session_recover_done] total=1 recovered=0 failed=1 expired=0 trigger=boot
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:03:50.685] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:50.685] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+[2026-09-15 19:03:50.685] [daemon.session_recover_call_failed] session_id=sess-1 error=fetch failed
+[2026-09-15 19:03:50.685] [daemon.session_recover_retry_scheduled] session_id=sess-1 attempt=1 retry_in_ms=30000
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:03:50.685] [daemon.started] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:03:50.685] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:04:20.685] [daemon.session_recover_retry_round] count=1
+[2026-09-15 19:04:20.685] [daemon.session_recovered] session_id=sess-1
+[2026-09-15 19:04:20.685] [daemon.stopping]
+[2026-09-15 19:04:20.685] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链
+[22m[39m[2026-09-15 19:04:20.685] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:03:51.915] [daemon.sillyspec_status_roots_restored] count=2
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:03:51.915] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:51.915] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:03:51.915] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:03:51.915] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:51.915] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:51.915] [daemon.session_recover_done] total=1 recovered=0 failed=1 expired=0 trigger=boot
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:03:51.915] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:51.915] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+[2026-09-15 19:03:51.915] [daemon.session_recover_call_failed] session_id=sess-1 error=HTTP 503 POST .../recover: upstream down
+[2026-09-15 19:03:51.915] [daemon.session_recover_retry_scheduled] session_id=sess-1 attempt=1 retry_in_ms=30000
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:03:51.915] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:04:21.915] [daemon.session_recover_retry_round] count=1
+[2026-09-15 19:04:21.915] [daemon.session_recovered] session_id=sess-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:03:51.915] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+[2026-09-15 19:04:21.915] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）
+[22m[39m[2026-09-15 19:14:21.915] [daemon.stopping]
+[2026-09-15 19:14:21.915] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:03:53.152] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:53.152] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:53.152] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:03:53.152] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:53.152] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:53.152] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+[2026-09-15 19:03:53.152] [daemon.session_recover_call_failed] session_id=sess-1 error=fetch failed
+[2026-09-15 19:03:53.152] [daemon.session_recover_retry_scheduled] session_id=sess-1 attempt=1 retry_in_ms=30000
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:03:53.152] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:53.152] [daemon.session_recover_start] count=1 trigger=boot
+[2026-09-15 19:03:53.152] [daemon.session_recover_done] total=1 recovered=0 failed=1 expired=0 trigger=boot
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:03:53.152] [daemon.started] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:03:53.152] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:04:23.152] [daemon.session_recover_retry_round] count=1
+[2026-09-15 19:04:23.152] [daemon.session_recover_skipped] session_id=sess-1 backend_status=ended
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:04:23.152] [daemon.session_recover_no_runtime] session_id=sess-1 provider=claude
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）
+[22m[39m[2026-09-15 19:14:23.152] [daemon.stopping]
+[2026-09-15 19:14:23.152] [daemon.stopped]
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m记录超龄 7 天（R6）→ boot 清理：recover 不发、落盘移除
+[22m[39m[2026-09-15 19:03:54.418] [daemon.sillyspec_status_roots_restored] count=2
+[2026-09-15 19:03:54.418] [daemon.sillyspec_status_root_restored] root_path=C:\Users\qinyi\IdeaProjects\multi-agent-platform
+[2026-09-15 19:03:54.418] [daemon.starting] runtime_id=rt-1
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m记录超龄 7 天（R6）→ boot 清理：recover 不发、落盘移除
+[22m[39m[2026-09-15 19:03:55.660] [daemon.daemon_latest_fetch_failed] url=http://localhost/daemon/latest.json error=fetch failed
+[2026-09-15 19:03:55.660] [daemon.no_agents_detected] hint=未检测到任何 AI CLI（claude/codex/pi/openclaw 等），daemon 将不注册、不会出现在平台机器列表。常见原因：开机自启环境 PATH 精简，不含 CLI 安装目录（macOS Homebrew 默认 /opt/homebrew/bin）。修复：在终端确认 CLI 可运行后重跑 sillyhub-daemon autostart enable（新版会把当前 PATH 写入自启配置），或将 CLI 安装到系统默认 PATH 目录。
+[2026-09-15 19:03:55.660] [daemon.session_recover_record_expired] session_id=sess-stale last_active_at=1788779034417
+
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m记录超龄 7 天（R6）→ boot 清理：recover 不发、落盘移除
+[22m[39m[2026-09-15 19:03:55.660] [daemon.agents_detected] agents=[]
+[2026-09-15 19:03:55.660] [daemon.session_recover_done] total=1 recovered=0 failed=0 expired=1 trigger=boot
+
+ [32m✓[39m tests/interactive/daemon-recovery-boot.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 19692[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mload 返回 [] → 跳过恢复，直接启动 loops（无 recover 调用） [33m1195[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mload 返回 2 条均 reconnecting → 每条调 recover+restore+markReconnected+confirm [33m1146[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mbackend status=ended → 不调 restoreAndReconnect；记录从 persistence 移除 [33m1288[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mbackend status=rejected（runtime/lease 不匹配）→ 不建本地 session；删记录 [33m1233[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mrestoreAndReconnect 抛错（driver.start 同步失败）→ markRecoveryFailed + fail；继续下一条 [33m1268[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mrestoreAndReconnect 抛 SessionBusyError（本地在途 turn）→ 不置 failed、不删记录、入重试队列 [33m1282[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mP1-1 恢复成功后异步 fail → markRecoveredSessionFailed 通知 backend markRecoveryFailed [33m1193[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mP1-1 markRecoveredSessionFailed 对非 recovered session 是 no-op [33m1146[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22m5 条记录 + 限流 4 并发：第 5 条等到有 slot 才执行 [33m1290[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22m三循环在恢复完成后启动（start() 返回时恢复已完成） [33m1237[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22m未注入 persistence / recoveryClient → 跳过恢复（向后兼容，不崩） [33m1335[2mms[22m[39m
+   [33m[2m✓[22m[39m Daemon 启动恢复编排[2m > [22mbatch lease 零影响：sessions.json 只含 interactive provider；恢复不触 batch 路径 [33m1100[2mms[22m[39m
+   [33m[2m✓[22m[39m task-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22mrecover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链 [33m1230[2mms[22m[39m
+   [33m[2m✓[22m[39m task-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22mrecover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删） [33m1237[2mms[22m[39m
+   [33m[2m✓[22m[39m task-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败） [33m1265[2mms[22m[39m
+   [33m[2m✓[22m[39m task-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m记录超龄 7 天（R6）→ boot 清理：recover 不发、落盘移除 [33m1246[2mms[22m[39m
+[90mstdout[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m记录超龄 7 天（R6）→ boot 清理：recover 不发、落盘移除
+[22m[39m[2026-09-15 19:03:55.662] [daemon.started] runtime_id=rt-1
+[2026-09-15 19:03:55.663] [daemon.stopping]
+[2026-09-15 19:03:55.663] [daemon.stopped]
+
+[90mstderr[2m | tests/interactive/daemon-recovery-boot.test.ts[2m > [22m[2mtask-08：恢复健壮性（网络失败保留重试 + 超龄清理）[2m > [22m[2m记录超龄 7 天（R6）→ boot 清理：recover 不发、落盘移除
+[22m[39m[2026-09-15 19:03:55.662] [daemon.skill_manifest_unreachable] url=http://localhost/api/daemon/skills/latest/manifest error=TypeError: fetch failed
+
+ [32m✓[39m tests/interactive/claude-sdk-driver-content-blocks.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m64 passed[39m[22m[90m (64)[39m
+[2m      Tests [22m [1m[32m1066 passed[39m[22m[90m (1066)[39m
+[2m   Start at [22m 19:03:33
+[2m   Duration [22m 22.74s[2m (transform 2.82s, setup 0ms, collect 17.23s, tests 74.28s, environment 10ms, prepare 4.95s)[22m
+

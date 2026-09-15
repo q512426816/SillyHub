@@ -1,0 +1,196 @@
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [ 10%]
+........................................................................ [ 13%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 23%]
+........................................................................ [ 26%]
+........................................................................ [ 30%]
+........................................................................ [ 33%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+........................................................................ [ 43%]
+........................................................................ [ 46%]
+........................................................................ [ 50%]
+........................................................................ [ 53%]
+........................................................................ [ 56%]
+........................................................................ [ 60%]
+........................................................................ [ 63%]
+........................................................................ [ 66%]
+........................................................................ [ 70%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 83%]
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 93%]
+........................................................................ [ 96%]
+....................................................................     [100%]
+============================== warnings summary ===============================
+app\core\errors.py:223
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\core\errors.py:223: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class AuthAvatarInvalid(AppError):
+
+app\core\errors.py:240
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\core\errors.py:240: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class InvalidTransition(AppError):
+
+app\modules\workspace\skills_view_service.py:107
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\workspace\skills_view_service.py:107: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpConfigTypeNotStdio(AppError):
+
+app\modules\workspace\skills_view_service.py:120
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\workspace\skills_view_service.py:120: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpConfigSecretUnresolvable(AppError):
+
+app\modules\workspace\skills_view_service.py:139
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\workspace\skills_view_service.py:139: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpRegistryEnvUndecryptable(AppError):
+
+app\modules\workspace\skills_view_service.py:157
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\workspace\skills_view_service.py:157: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class McpRegistryEntryInvalid(AppError):
+
+app\modules\workspace\skills_view_service.py:266
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\workspace\skills_view_service.py:266: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class SkillNameInvalid(AppError):
+
+app\modules\workspace\skills_view_service.py:279
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\workspace\skills_view_service.py:279: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    class SkillPathInvalid(AppError):
+
+app\modules\workspace\skills_view_service.py:322
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\workspace\skills_view_service.py:322: DeprecationWarning: 'HTTP_413_REQUEST_ENTITY_TOO_LARGE' is deprecated. Use 'HTTP_413_CONTENT_TOO_LARGE' instead.
+    class SkillFileTooLarge(AppError):
+
+app/modules/daemon/tests/test_auth_transient_autoretry.py: 12 warnings
+app/modules/daemon/tests/test_auto_recover_failed_turn.py: 32 warnings
+app/modules/daemon/tests/test_auto_recover_integration.py: 12 warnings
+app/modules/daemon/tests/test_auto_resume_chain_limit_hint.py: 4 warnings
+app/modules/daemon/tests/test_change_session.py: 10 warnings
+app/modules/daemon/tests/test_close_interactive_run_model_error.py: 10 warnings
+app/modules/daemon/tests/test_close_interactive_run_session_status.py: 12 warnings
+app/modules/daemon/tests/test_e2e_model_usage_flow.py: 2 warnings
+app/modules/daemon/tests/test_group_attachments.py: 2 warnings
+app/modules/daemon/tests/test_group_direct.py: 2 warnings
+app/modules/daemon/tests/test_group_mention_pipeline.py: 13 warnings
+app/modules/daemon/tests/test_group_p1.py: 8 warnings
+app/modules/daemon/tests/test_group_p2.py: 4 warnings
+app/modules/daemon/tests/test_group_realtime.py: 2 warnings
+app/modules/daemon/tests/test_group_team.py: 10 warnings
+app/modules/daemon/tests/test_inject_empty_prompt.py: 16 warnings
+app/modules/daemon/tests/test_inject_first_turn_briefing.py: 30 warnings
+app/modules/daemon/tests/test_inject_orchestrator_tagging.py: 24 warnings
+app/modules/daemon/tests/test_inject_session_model.py: 14 warnings
+app/modules/daemon/tests/test_inject_silent_switch.py: 6 warnings
+app/modules/daemon/tests/test_interactive_lifecycle_patch.py: 48 warnings
+app/modules/daemon/tests/test_page_context_preamble.py: 6 warnings
+app/modules/daemon/tests/test_ppm_session.py: 14 warnings
+app/modules/daemon/tests/test_run_sync_agent_session_id_backfill.py: 14 warnings
+app/modules/daemon/tests/test_run_sync_cache_parse.py: 8 warnings
+app/modules/daemon/tests/test_run_sync_ctx_tokens.py: 6 warnings
+app/modules/daemon/tests/test_run_sync_gate_enqueue.py: 12 warnings
+app/modules/daemon/tests/test_run_sync_model_usage.py: 8 warnings
+app/modules/daemon/tests/test_run_sync_session_gate_failover.py: 18 warnings
+app/modules/daemon/tests/test_scheduled_send_sweeper.py: 34 warnings
+app/modules/daemon/tests/test_session_compact_endpoint.py: 30 warnings
+app/modules/daemon/tests/test_session_create_attachments.py: 6 warnings
+app/modules/daemon/tests/test_session_create_config.py: 41 warnings
+app/modules/daemon/tests/test_session_events.py: 2 warnings
+app/modules/daemon/tests/test_session_events_cross.py: 7 warnings
+app/modules/daemon/tests/test_session_optimize_round2.py: 6 warnings
+app/modules/daemon/tests/test_session_queue.py: 38 warnings
+app/modules/daemon/tests/test_session_queue_actions.py: 52 warnings
+app/modules/daemon/tests/test_session_readiness.py: 4 warnings
+app/modules/daemon/tests/test_session_router.py: 16 warnings
+app/modules/daemon/tests/test_session_service.py: 64 warnings
+app/modules/daemon/tests/test_session_switch_config.py: 30 warnings
+app/modules/daemon/tests/test_session_team_mission.py: 12 warnings
+app/modules/daemon/tests/test_session_thinking_level_endpoint.py: 44 warnings
+app/modules/daemon/tests/test_session_user_log.py: 12 warnings
+app/modules/daemon/tests/test_session_user_preamble.py: 6 warnings
+app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py: 4 warnings
+app/modules/daemon/tests/test_tool_report_activation.py: 6 warnings
+app/modules/daemon/tests/test_worker_redispatch.py: 12 warnings
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\.venv\Lib\site-packages\aiosqlite\core.py:63: DeprecationWarning: The default datetime adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    result = function()
+
+app/modules/daemon/tests/test_change_session.py: 2 warnings
+app/modules/daemon/tests/test_e2e_model_usage_flow.py: 2 warnings
+app/modules/daemon/tests/test_group_cross_mention.py: 4 warnings
+app/modules/daemon/tests/test_group_p1.py: 4 warnings
+app/modules/daemon/tests/test_inject_first_turn_briefing.py: 2 warnings
+app/modules/daemon/tests/test_inject_orchestrator_tagging.py: 2 warnings
+app/modules/daemon/tests/test_inject_session_model.py: 16 warnings
+app/modules/daemon/tests/test_lease_context_provider_priority.py: 26 warnings
+app/modules/daemon/tests/test_lease_model_usage.py: 6 warnings
+app/modules/daemon/tests/test_provider_switch_integration.py: 12 warnings
+app/modules/daemon/tests/test_resolve_bound_provider_config.py: 10 warnings
+app/modules/daemon/tests/test_resolve_default_provider_config.py: 32 warnings
+app/modules/daemon/tests/test_runtime_usage_by_provider.py: 10 warnings
+app/modules/daemon/tests/test_session_create_config.py: 14 warnings
+app/modules/daemon/tests/test_session_optimize_round2.py: 2 warnings
+app/modules/daemon/tests/test_session_reopen.py: 2 warnings
+app/modules/daemon/tests/test_session_runs_endpoint.py: 2 warnings
+app/modules/daemon/tests/test_session_switch_config.py: 22 warnings
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\.venv\Lib\site-packages\pydantic\_internal\_fields.py:727: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return fac()
+
+app/modules/daemon/tests/test_change_session.py: 2 warnings
+app/modules/daemon/tests/test_group_chat_management.py: 2 warnings
+app/modules/daemon/tests/test_group_logs_pagination.py: 1 warning
+app/modules/daemon/tests/test_group_realtime.py: 1 warning
+app/modules/daemon/tests/test_mcp_config_endpoint.py: 1 warning
+app/modules/daemon/tests/test_ppm_session.py: 6 warnings
+app/modules/daemon/tests/test_session_history.py: 4 warnings
+app/modules/daemon/tests/test_session_plan_bash_events.py: 1 warning
+app/modules/daemon/tests/test_session_router.py: 5 warnings
+app/modules/daemon/tests/test_sessions_list_filters.py: 5 warnings
+app/modules/daemon/tests/test_sessions_list_owner_name.py: 1 warning
+app/modules/daemon/tests/test_sillyspec_compare.py: 3 warnings
+app/modules/daemon/tests/test_sillyspec_platform_commands.py: 13 warnings
+app/modules/daemon/tests/test_ws_hub_permission.py: 2 warnings
+app/modules/daemon/tests/test_ws_rpc.py: 1 warning
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:59: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    response = await handler(conn, exc)
+
+app/modules/daemon/tests/test_provider_switch_integration.py: 5 warnings
+app/modules/daemon/tests/test_resolve_default_provider_config.py: 11 warnings
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\.venv\Lib\site-packages\sqlalchemy\sql\schema.py:3623: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+app/modules/daemon/tests/test_runtime_admin_management.py::test_legacy_runtimes_endpoint_keeps_array_shape
+  C:\Users\qinyi\AppData\Local\Programs\Python\Python312\Lib\weakref.py:415: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return self.data[ref(key)]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+app/modules/daemon/tests/test_session_plan_bash_events.py::TestPlanResponseEndpoint::test_plan_response_422_path_body_session_id_mismatch
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\.venv\Lib\site-packages\fastapi\routing.py:328: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    return await dependant.call(**values)
+
+app/modules/daemon/tests/test_session_team_mission.py::TestTriggerSessionTeamMission::test_missing_scope_and_workspace_422
+app/modules/daemon/tests/test_session_team_mission.py::TestTriggerSessionTeamMission::test_project_scope_out_of_bounds_422
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\daemon\router\session_team.py:543: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    scope_ids, anchor_id = await validate_team_mission_block(
+
+app/modules/daemon/tests/test_sillyspec_compare.py::test_compare_rejects_bad_change_without_touching_rpc[dotdot]
+app/modules/daemon/tests/test_sillyspec_compare.py::test_compare_rejects_bad_change_without_touching_rpc[bad-first-char]
+app/modules/daemon/tests/test_sillyspec_compare.py::test_compare_rejects_bad_change_without_touching_rpc[dot-first]
+app/modules/daemon/tests/test_sillyspec_compare.py::test_compare_rejects_bad_change_without_touching_rpc[space]
+app/modules/daemon/tests/test_sillyspec_compare.py::test_compare_rejects_bad_change_without_touching_rpc[too-long-129]
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\daemon\router\machines.py:525: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    _validate_sillyspec_change_segment(change)
+
+app/modules/daemon/tests/test_team_mission_create_block.py::TestValidateTeamMissionBlock::test_missing_scope_and_workspace_422
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\daemon\tests\test_team_mission_create_block.py:266: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    await validate_team_mission_block(
+
+app/modules/daemon/tests/test_team_mission_create_block.py::TestValidateTeamMissionBlock::test_manager_scope_out_of_bounds_422
+  C:\Users\qinyi\IdeaProjects\multi-agent-platform\backend\app\modules\daemon\tests\test_team_mission_create_block.py:304: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    await validate_team_mission_block(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2156 passed, 1039 warnings in 445.45s (0:07:25)

@@ -25,7 +25,7 @@ JsonSessionPersistence（元数据持久化）、types.ts（局部类型，独�
   `markReconnected` / `refreshClaimToken` / `setBudgetTokens` / `isOverBudget` /
   `markPendingSwitch` / `reloadWithProvider`（会话内切供应商，热重启 env）/
   `markPendingConfigSwitch` / `reloadWithConfig`（会话内切档案，承载切换轮
-  prompt）/ `requestPermission` / `requestUserDialog` / `registerBorrowSandbox` /
+  prompt）/ `requestPermission` / `requestUserDialog` / `hasLiveBackgroundTasks`（后台任务存活只读查询，2026-09-15-background-task-permission-lockout FR-01）/ `registerBorrowSandbox` /
   `snapshotPersistable` / `flush` / `start|stop|scanOnce`（空闲扫描）。
 - **driver.ts 契约**：`UserTurnInput`（provider-neutral 输入单元）/
   `InteractiveDriverMessage|Result`（宽松字段，daemon 按 provider 归一化）/
@@ -53,6 +53,7 @@ create: 建 InputQueue + push 首消息 → 按 provider 选 driver（未注册�
         UnsupportedProviderError）→ driver.start → fire consume 协程 → notifySessionReady
 inject: status=running 时 pendingInjectCount++ + onTurnQueued（排队检测非拒绝）
 turn 收尾: classifyModelError → result.modelError → daemon 桥接 notifyRunResult
+后台锚点(2026-09-15-background-task-permission-lockout FR-01): onResult 收尾时后台任务注册表非空→保留 currentRunId 作锚点(status 照常翻 active)，末任务 task_notification 注销/会话终态清锚点；写通道守卫第三放行源 hasBackgroundTaskGrace(active+currentRunId+注册表非空)与 withinStaleFlipGrace 并列(注册表=权威存活信号)；4 处可达 resolver.register 经 backgroundTaskFlag 统一注入 background_task 标记(主轮进行中恒 false；requestUserDialogImpl/buildOnUserDialogCallback 前置硬检查不可达不注入)；PermissionRegisterInput.backgroundTask=true 时 dialog 也启 5min fallback(后台锚点态有界，主轮 dialog 维持无限期)；守卫 deny 带 PLATFORM_NO_RUNNING_TURN: 稳定平台故障码前缀(agent 可区分平台故障/用户拒绝)
 写守卫: policyEngine.canWrite(runtimeId, path, provider, tool) 覆盖 Write/Edit/
   MultiEdit + Bash 经 extractShellWritePaths 提取写目标；读工具不拦；
   policyEngine 未注入时退化 allowedRootsProvider fallback（空数组放行防全 deny）

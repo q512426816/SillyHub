@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-15-background-task-permission-lockout",
+  "generatedAt": "2026-09-15T11:03:13.021Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-15-background-task-permission-lockout",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-15-background-task-permission-lockout",
+      "metrics": {
+        "tasks": 11,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-15-background-task-permission-lockout",
+      "metrics": {
+        "backendEndpoints": 2807,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-15-background-task-permission-lockout",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    }
+  }
+}

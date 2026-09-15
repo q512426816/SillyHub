@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-15-background-task-permission-lockout",
+  "appliedAt": "2026-09-15T10:56:19.223Z",
+  "baseHash": "72a72f50421193572c0d140a2f8342ce0d52013f",
+  "files": [
+    {
+      "path": "backend/app/modules/agent/service.py",
+      "sha256": "af70e9f6fa1a340f3cbcc0842ac5a032748e3ec0753729ff513eafee36f4d908"
+    },
+    {
+      "path": "backend/app/modules/daemon/permission_service.py",
+      "sha256": "b9c40be956a4ef8440849130437f46755d1032e012ed371e6ed2aa923372feb8"
+    },
+    {
+      "path": "backend/app/modules/daemon/protocol.py",
+      "sha256": "d37eb028640937c0cb6ede14ae6a27a0ca0d00e6428bfb4e14877988b963c554"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_permissions.py",
+      "sha256": "4a1b69685e8e8df4c8cbb88926073050d91752b7ef440b55fdb0638f44389692"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_ws_hub_permission.py",
+      "sha256": "ae3e2f05c9738d8376d4ca1761ca49075dbcf128cb41f6866e1744ed1f96b21d"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "f50d8012ec3e857a56482f20727d497d23fac0bdc121adb4d94917aab5f21e56"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/permission-resolver.ts",
+      "sha256": "1339a9739ee0b168f8fb5c5ec9dcfb7a2d2aa6d4e4ad59048d97eb97cc59db90"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+      "sha256": "a3d79d3adb8a5297eb283bcbe2bc4b16e3f03cd774988911d29cb09785d6e25a"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+      "sha256": "a95deff158781bf1d7a37a413e2924eaaabc1fc7e344ce31f10bc5b09284039a"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+      "sha256": "6f79e78486c42984e77e54ed11420969c0a86cd9634d531640dbd468dcf2dddf"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/permission.ts",
+      "sha256": "69ce3d6ce3a5f791e3646173a45eb77947804280f36442187a52ce9324a45eca"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts",
+      "sha256": "38ea328378981704c5b4307c13e6017de531bc37ed4918d84f6702059ac5c242"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/permission-resolver.test.ts",
+      "sha256": "647895341fa0bd01b17a0e1c02e2d404793908081f64edcbcc18abe6657f8847"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+      "sha256": "a1ccf2619d9a123e7e4c492612b2529f500ea9a7c31df5692b96d565fa34fdda"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts",
+      "sha256": "5a42a3e686921918468a06aece3223d1b6916bb3eda8ed5759156e4bd30fd401"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts",
+      "sha256": "14241a20b5da391b0cce47f748ef9ad0e0a35c6b4922158ebf65c45106884234"
+    }
+  ]
+}
