@@ -31,7 +31,7 @@ import uuid
 import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from io import BytesIO
 from typing import Literal
 from urllib.parse import quote
@@ -272,6 +272,32 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+# 导出展示时区：北京时间（UTC+8）——md 面向人读，统一换算到用户时区，不受
+# 服务器/容器本地时区影响（容器为 UTC，直接 astimezone() 会原样输出 UTC）。
+_EXPORT_TZ = timezone(timedelta(hours=8))
+
+
+def _as_export_tz(value: datetime) -> datetime:
+    # SQLite 测试路径可能读回 naive datetime（无 tzinfo），按 UTC 兜底归一，
+    # 避免 astimezone() 拿宿主机时区误加偏移。
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return aware.astimezone(_EXPORT_TZ)
+
+
+def _fmt_local_ms(value: datetime | None) -> str | None:
+    """北京时间毫秒格式：``2026-09-01 16:01:00.250``（会话头/无日期需求处用）。"""
+    if value is None:
+        return None
+    local = _as_export_tz(value)
+    return f"{local:%Y-%m-%d %H:%M:%S}.{local.microsecond // 1000:03d}"
+
+
+def _fmt_hms_ms(value: datetime) -> str:
+    """北京时间时分秒毫秒格式：``16:01:00.250``（每条消息行前缀；日期在轮头）。"""
+    local = _as_export_tz(value)
+    return f"{local:%H:%M:%S}.{local.microsecond // 1000:03d}"
+
+
 def _display_title(session: AgentSession) -> str:
     """展示标题：title 列为空（旧 chat 会话）回退「未命名会话」。"""
     title = (session.title or "").strip()
@@ -303,18 +329,21 @@ def _render_chat_markdown(
     member_name 作发言者前缀）；``stdout`` 行经 ``_assistant_text_from_stdout``
     噪声排除后为助手正文。``stderr``/``tool_call``/``pending_input``/``system``
     行不进 chat 档（full 档全保留）。logs 须为跨 run 稳定升序（导出查询
-    保证），按 ``run_id`` 连续切段即「轮」。截断时文件尾标注 truncated 与
-    丢弃行数（design §行数上限）。
+    保证），按 ``run_id`` 连续切段即「轮」。时间展示（ql-20260915-003）：
+    北京时间（UTC+8），轮头带本轮首条消息时间（到分钟），每条消息行前缀
+    ``[HH:MM:SS.mmm]`` 毫秒时间点（timestamp 列原生微秒精度，无需补数）。
+    截断时文件尾标注 truncated 与丢弃行数（design §行数上限）。
     """
     lines: list[str] = [f"# {_display_title(session)}", ""]
     lines.append(f"- 供应商：{session.provider}")
     if session.runtime_id is not None:
         lines.append(f"- 运行时：{session.runtime_id}")
     lines.append(f"- 状态：{session.status}")
-    lines.append(f"- 创建时间：{_iso(session.created_at) or '—'}")
+    lines.append(f"- 创建时间：{_fmt_local_ms(session.created_at) or '—'}")
     if session.last_active_at is not None:
-        lines.append(f"- 最近活跃：{_iso(session.last_active_at)}")
+        lines.append(f"- 最近活跃：{_fmt_local_ms(session.last_active_at)}")
     lines.append(f"- 轮数：{len(runs)}")
+    lines.append("- 时区：北京时间（UTC+8，消息时间精确到毫秒）")
 
     current_run_id: uuid.UUID | None = None
     turn_index = 0
@@ -331,9 +360,11 @@ def _render_chat_markdown(
         if row.run_id != current_run_id:
             current_run_id = row.run_id
             turn_index += 1
-            lines.extend(["", f"## 第 {turn_index} 轮", ""])
+            # 轮头带本轮首条消息时间（到分钟；毫秒在每条消息行前缀）。
+            turn_ts = (_fmt_local_ms(row.timestamp) or "")[:16]
+            lines.extend(["", f"## 第 {turn_index} 轮 · {turn_ts}", ""])
         speaker = _member_name_of(row) or ("用户" if row.channel == "user_input" else "助手")
-        lines.extend([f"**{speaker}**：{text}", ""])
+        lines.extend([f"[{_fmt_hms_ms(row.timestamp)}] **{speaker}**：{text}", ""])
 
     if truncated:
         lines.extend(

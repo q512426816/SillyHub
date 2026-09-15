@@ -446,7 +446,7 @@ class TestChatMarkdown:
             run1.id,
             channel="stdout",
             content="[ASSISTANT] 已完成修改，共 3 个文件",
-            ts=base + timedelta(seconds=10),
+            ts=base + timedelta(seconds=10, milliseconds=250),
         )
         await _seed_log(
             db_session,
@@ -491,7 +491,7 @@ class TestChatMarkdown:
             run2.id,
             channel="user_input",
             content="[附件:截图.png|image] 这是报错截图",
-            ts=base + timedelta(minutes=2),
+            ts=base + timedelta(minutes=2, milliseconds=120),
             metadata={"member_name": "阿明"},
         )
         await _seed_log(
@@ -499,7 +499,7 @@ class TestChatMarkdown:
             run2.id,
             channel="stdout",
             content="[LOG:info] 已定位问题",
-            ts=base + timedelta(minutes=2, seconds=10),
+            ts=base + timedelta(minutes=2, seconds=10, milliseconds=780),
             metadata={"member_name": "小码"},
         )
         return owner, token, sess, runtime
@@ -530,11 +530,17 @@ class TestChatMarkdown:
         assert any(line.startswith("- 创建时间：") for line in lines)
         assert "- 轮数：2" in lines
         # 分轮 + 用户消息 / 助手正文（[ASSISTANT] 前缀剥离）。
-        assert "## 第 1 轮" in md
+        assert "## 第 1 轮 · 2026-09-01 16:01" in md
         assert "**用户**：你好，帮我看看报错" in md
         assert "**助手**：已完成修改，共 3 个文件" in md
+        # ql-20260915-003：每条消息北京时间毫秒时间点（UTC+8；造数带毫秒尾数）。
+        assert "- 时区：北京时间（UTC+8，消息时间精确到毫秒）" in md
+        assert "[16:01:00.000] **用户**：你好，帮我看看报错" in md
+        assert "[16:01:10.250] **助手**：已完成修改，共 3 个文件" in md
         # 第 2 轮：群聊 member_name 发言者前缀 + 附件标记行原样保留。
-        assert "## 第 2 轮" in md
+        assert "## 第 2 轮 · 2026-09-01 16:03" in md
+        assert "[16:03:00.120] **阿明**：[附件:截图.png|image] 这是报错截图" in md
+        assert "[16:03:10.780] **小码**：已定位问题" in md
         assert "**阿明**：[附件:截图.png|image] 这是报错截图" in md
         assert "**小码**：已定位问题" in md  # [LOG:info] 前缀剥离
         # 非 chat 渠道行与 stdout 噪声行不出现。
