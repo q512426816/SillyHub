@@ -372,6 +372,14 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 审计：[gate] L1（跨 0 模块 · 7 文件：5 代码/0 测试）advisory；每文件注记已全覆盖；测试增量缺失（5 个代码文件无测试改动）
 
 ## ql-20260915-006-54b4 | 2026-09-15 17:11:04 | 会话页额度胶囊30秒定时刷新并展示全部可查用量供应商
-状态：进行中
+状态：已完成
 关联变更：（无）
-文件：frontend/src/components/sessions/ctx-usage-bar.tsx, frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+文件：
+- frontend/src/components/sessions/ctx-usage-bar.tsx（QuotaPill 重写：全供应商聚合+30s 轮询+keep-last-good）
+- frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx（42 用例全绿（新增轮询/聚合/鉴权清除用例，renderPill 补 QueryClientProvider 包裹））
+- frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx（存量 noUncheckedIndexedAccess 类型债修复（length===3 已断言，加非空断言））
+需求：会话页额度胶囊30秒定时刷新并展示全部可查用量供应商
+根因：原 QuotaPill 只查当前会话供应商的 quota 端点，后端仅智谱返回窗口数据、其余一律 quota=null（用户看到只显示 GLM 的根因），且挂载查一次后不再刷新
+方案：QuotaPill 重写为自治聚合：拉全量供应商列表后按 detectUsageProvider 分流（智谱走 quota 端点、Kimi/MiniMax/DeepSeek/硅基/OpenRouter 走 usage 端点，新增 mapUsageTiersToViews 纯函数归一视图+balance 金额格式化）；30s setInterval 轮询+keep-last-good（瞬时失败保留上次数据、is_valid=false 鉴权失效清除、供应商删除丢陈旧条目）；胶囊面会话供应商优先+等N家、浮层按供应商分节展示+每30秒自动刷新文案；providerId 语义弱化为排序提示（本机默认会话照常展示）
+结果：ctx-usage-bar 42/42 passed（含 fake timers 轮询/keep-last-good/鉴权清除/多端点分流/不可查不请求/providerId=null 照常聚合/余额金额浮层新用例）+ session-history-scroll 3/3 passed；tsc --noEmit 干净；eslint 0 error（2 warning 存量类型参数位未动）；模块 changelog 已同步 ql-20260915-006-54b4
+审计：[gate] L1（跨 0 模块 · 4 文件：1 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量不适用（≤1 代码文件）

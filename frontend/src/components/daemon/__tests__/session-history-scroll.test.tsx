@@ -115,8 +115,9 @@ describe("scroll-up history integration", () => {
       await waitFor(() => expect(beforeCursors.length).toBe(i + 1), { timeout: 5000 });
     }
     expect(beforeCursors.length).toBe(3);
-    expect(new Date(beforeCursors[1]).getTime()).toBeLessThan(new Date(beforeCursors[0]).getTime());
-    expect(new Date(beforeCursors[2]).getTime()).toBeLessThan(new Date(beforeCursors[1]).getTime());
+    // 上一行已断言 length===3，noUncheckedIndexedAccess 下索引访问为 string|undefined，非空断言仅过类型不逻辑。
+    expect(new Date(beforeCursors[1]!).getTime()).toBeLessThan(new Date(beforeCursors[0]!).getTime());
+    expect(new Date(beforeCursors[2]!).getTime()).toBeLessThan(new Date(beforeCursors[1]!).getTime());
   });
 
   it("scroll container has overflowAnchor=none (double-anchoring fix)", async () => {
