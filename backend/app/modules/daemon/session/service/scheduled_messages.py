@@ -28,7 +28,6 @@ from app.modules.daemon.schema import ScheduledMessageCreateRequest
 from .errors import (
     DaemonScheduledMessageDispatchTooSoon,
     DaemonScheduledMessageNotFound,
-    DaemonScheduledMessageNotPending,
     DaemonScheduledMessageSessionInactive,
     DaemonSessionNotFound,
     SessionEmptyPrompt,
@@ -163,22 +162,25 @@ async def create_scheduled_message(
     return row
 
 
-async def cancel_scheduled_message(
+async def delete_scheduled_message(
     svc,
     session_id: uuid.UUID,
     message_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> None:
-    """Cancel a pending scheduled message (task-03 / FR-04).
+    """Delete a scheduled message entry（quick-f96d4e81：pending 取消留档，终态物理删行）.
 
     会话归属复核（404 不泄露存在性）→ 行锁取条目（条目不存在 / 非该会话
-    条目 → 404 :class:`DaemonScheduledMessageNotFound`）→ 非 pending → 409
-    :class:`DaemonScheduledMessageNotPending`（终态不回退）→ 置
-    ``cancelled`` 并写 ``cancelled_at = now(UTC)``。
+    条目 → 404 :class:`DaemonScheduledMessageNotFound`）→ 按状态分流：
 
-    条目行锁 + 锁内状态复核与 task-04 sweeper 到点派发互为串行化（R-01）：
-    取消与派发谁先拿到锁谁生效，后到者见非 pending 幂等退出（派发侧）/
-    409（取消侧）。
+    - ``pending`` → 置 ``cancelled`` 并写 ``cancelled_at = now(UTC)``（取消
+      语义留档）。条目行锁 + 锁内状态复核与 task-04 sweeper 到点派发互为
+      串行化（R-01）：取消与派发谁先拿到锁谁生效，后到者见非 pending 幂等
+      退出（派发侧）。
+    - 终态（dispatched / cancelled / failed）→ 物理删行。原设计终态行永久
+      留档且列表全状态返回、无任何清除手段，线上（会话 6e213eb3）终态条目
+      永久残留只能删库；放开用户侧清除。sweeper 只捞 ``status='pending'``，
+      auto_resume origin 幂等在 run 收口时判定，终态行删除不影响两链。
     """
     owned = (
         await svc._session.execute(
@@ -208,17 +210,9 @@ async def cancel_scheduled_message(
             f"ScheduledMessage '{message_id}' not found in session '{session_id}'.",
             details={"session_id": str(session_id), "message_id": str(message_id)},
         )
-    if entry.status != "pending":
-        status = entry.status
-        await svc._session.rollback()  # 释放 FOR UPDATE 行锁（终态不可取消）
-        raise DaemonScheduledMessageNotPending(
-            f"定时消息已处于 {status} 状态，仅待发送条目可取消。",
-            details={
-                "session_id": str(session_id),
-                "message_id": str(message_id),
-                "status": status,
-            },
-        )
-    entry.status = "cancelled"
-    entry.cancelled_at = datetime.now(UTC)
+    if entry.status == "pending":
+        entry.status = "cancelled"
+        entry.cancelled_at = datetime.now(UTC)
+    else:
+        await svc._session.delete(entry)
     await svc._session.commit()

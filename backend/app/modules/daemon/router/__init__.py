@@ -251,7 +251,7 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "rename_session",
     "create_scheduled_message",
     "list_scheduled_messages",
-    "cancel_scheduled_message",
+    "delete_scheduled_message",
     # session_insights（拆前 #67-71：stream/runs/tasks/logs/usage）
     "stream_session_logs",
     "list_session_runs",
@@ -306,8 +306,8 @@ from .session_crud import (  # noqa: E402
     unpin_session,
 )
 from .session_queue import (  # noqa: E402
-    cancel_scheduled_message,
     create_scheduled_message,
+    delete_scheduled_message,
     list_scheduled_messages,
 )
 from .session_team import (  # noqa: E402
@@ -338,9 +338,9 @@ __all__ = [
     "_session_has_active_turn",
     "_stream_sessions_events",
     "_team_mission_summary",
-    "cancel_scheduled_message",
     "close_llm_proxy_client",
     "create_scheduled_message",
+    "delete_scheduled_message",
     "get_daemon_latest_version",
     "get_redis",
     "get_session_readiness",

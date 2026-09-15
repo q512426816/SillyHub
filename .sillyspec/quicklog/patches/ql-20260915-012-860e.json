@@ -1,0 +1,151 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-f96d4e81",
+  "totals": {
+    "files": 14,
+    "additions": 197,
+    "deletions": 86
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/daemon.md",
+      "declared": true,
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
+      "declared": true,
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "declared": true,
+      "additions": 3,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_queue.py",
+      "declared": true,
+      "additions": 7,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/scheduled_send.py",
+      "declared": true,
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/service.py",
+      "declared": true,
+      "additions": 2,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "declared": true,
+      "additions": 3,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/errors.py",
+      "declared": true,
+      "additions": 0,
+      "deletions": 12,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/scheduled_messages.py",
+      "declared": true,
+      "additions": 17,
+      "deletions": 23,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_scheduled_messages_crud.py",
+      "declared": true,
+      "additions": 21,
+      "deletions": 14,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/openapi.json",
+      "declared": true,
+      "additions": 3,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx",
+      "declared": true,
+      "additions": 69,
+      "deletions": 9,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/scheduled-messages-bar.tsx",
+      "declared": true,
+      "additions": 61,
+      "deletions": 7,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/daemon/sessions.ts",
+      "declared": true,
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 27,
+    "codeFileCount": 18,
+    "testFileCount": 7,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-012-860e",
+  "sessionId": "quick-f96d4e81",
+  "savedAt": "2026-09-15T15:38:18.136Z",
+  "patchSha256": "e6206fe9edc83041e6976b58b91944e27f17b2a75d3a42b06dec933e43f3be2a",
+  "patchStatus": "ok"
+}

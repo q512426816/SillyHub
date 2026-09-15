@@ -199,9 +199,12 @@ async def dispatch_now_session_queue_entry(
 
 
 # task-03（2026-09-07-session-pin-rename-scheduled-send / FR-04 / D-001@v1）：
-# 定时消息三端点——创建（201）/列表/取消（204），TaskRunAgentUser 鉴权。三重
+# 定时消息三端点——创建（201）/列表/删除（204），TaskRunAgentUser 鉴权。三重
 # 校验（空 prompt 422 / dispatch_at 过近 422 / 终态或软删会话 409）与归属
 # 404 均归 SessionService；到点派发归 task-04 sweeper，端点不触发 inject。
+# quick-f96d4e81：DELETE 语义扩展——pending 仍取消留档（原行为不变），终态
+# （dispatched/cancelled/failed）物理删行（用户清空历史入口，原 409 拒绝
+# 改为放行删除）。
 
 
 @router.post(
@@ -234,11 +237,11 @@ async def list_scheduled_messages(
     "/sessions/{session_id}/scheduled/{message_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def cancel_scheduled_message(
+async def delete_scheduled_message(
     session_id: uuid.UUID,
     message_id: uuid.UUID,
     session: SessionDep,
     user: TaskRunAgentUser,
 ) -> None:
-    """Cancel a pending scheduled message (non-pending → 409, terminal no-revert)."""
-    await DaemonService(session).cancel_scheduled_message(session_id, message_id, user.id)
+    """Delete a scheduled message (pending → cancel kept on record, terminal → row removed)."""
+    await DaemonService(session).delete_scheduled_message(session_id, message_id, user.id)

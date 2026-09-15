@@ -131,7 +131,6 @@ from .errors import (  # noqa: E402
     DaemonOffline,
     DaemonScheduledMessageDispatchTooSoon,
     DaemonScheduledMessageNotFound,
-    DaemonScheduledMessageNotPending,
     DaemonScheduledMessageSessionInactive,
     DaemonSessionAttachmentInvalid,
     DaemonSessionAttachmentsUnsupported,
@@ -191,12 +190,11 @@ __all__ = [
     "SCHEDULED_DISPATCH_MIN_LEAD_SEC",
     "TASK_WAKEUP_PROMPT_PREFIX",
     "TERMINAL_TURN_STATUSES",
-    # 异常族（29；D-010 二回合 +定时消息 4 + rename 1）
+    # 异常族（28；D-010 二回合 +定时消息 3 + rename 1）
     "DaemonOffline",
     "DaemonRuntimeOffline",
     "DaemonScheduledMessageDispatchTooSoon",
     "DaemonScheduledMessageNotFound",
-    "DaemonScheduledMessageNotPending",
     "DaemonScheduledMessageSessionInactive",
     "DaemonSessionAttachmentInvalid",
     "DaemonSessionAttachmentsUnsupported",
@@ -1065,13 +1063,13 @@ class SessionService(BackgroundTaskMixin):
             data=data,
         )
 
-    async def cancel_scheduled_message(
+    async def delete_scheduled_message(
         self,
         session_id: uuid.UUID,
         message_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
-        return await _scheduled_messages.cancel_scheduled_message(
+        return await _scheduled_messages.delete_scheduled_message(
             self,
             session_id=session_id,
             message_id=message_id,

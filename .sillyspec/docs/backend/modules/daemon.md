@@ -293,3 +293,6 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 - **口径对齐（P2-3）**：full.json 增顶层 `exported_at`、md 头增「导出时刻」；`turn_count` 改实时 `len(runs)`（列值滞后）；`last_active_at` 双档统一取导出内容最新日志时间兜底列值；`_fetch_export_runs_logs` 剔除全 null 僵尸 run（不进 runs/轮数口径）；failed run `error_code` 落库缺失时兜底 `"unknown"`。
 - **chat 档子代理归因（P2-3）**：`subagent_type`+`depth>0` 消息行 speaker 标「子代理·{type}」并在段边界插 `> ── 子代理回合 ──` 分隔行。
 - **P2-2 乱码不在导出层**：TOOL_RESULT 中文乱码系 Windows 控制台码页捕获链路落库即坏（知识库 known-issues 已登记，规避 `PYTHONIOENCODING=utf-8`，根治归 daemon/上游捕获层）。
+## quick-f96d4e81 增量（定时消息终态条目删除）
+
+- **DELETE /sessions/{id}/scheduled/{mid} 语义扩展**（`session/service/scheduled_messages.py`）：pending 仍取消留档（置 cancelled + cancelled_at，与 sweeper 行锁串行化不变）；终态（dispatched/cancelled/failed）物理删行——原设计终态行永久留档、列表全状态返回且无任何清除手段，线上终态条目永久残留只能删库（会话 6e213eb3 实证）。`cancel_scheduled_message` 全链改名 `delete_scheduled_message`（router/facade/域方法），`DaemonScheduledMessageNotPending`（409）成死代码删除；sweeper / auto_resume origin 幂等只读 pending，不受终态删行影响。

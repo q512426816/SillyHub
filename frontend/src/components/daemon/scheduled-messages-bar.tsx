@@ -9,7 +9,9 @@
  * Grill B-05），水平 chips 列出该会话全部定时条目（dispatch_at 本地时间 + prompt
  * 摘要 + 四态 tag：pending 黄 warning / dispatched 绿 success / cancelled 灰 muted /
  * failed 红 destructive，failed 悬停显 error_message）+ pending 条目 ✕ 取消
- * （Modal.confirm 防误触）。空列表返回 null 不占位（零布局变化验收项）。
+ * （Modal.confirm 防误触）。行尾「清空已结束」入口批量物理删除终态条目
+ * （quick-f96d4e81：终态记录原永久残留、无任何清除手段）。空列表返回 null
+ * 不占位（零布局变化验收项）。
  *
  * 数据架构（任务卡 constraints 定案，session-panel 文件头 R4 不变式）：bar 自建
  * **局部 QueryClientProvider** 包数据子树——不依赖外层 Provider（dialog 弹窗渲染
@@ -29,7 +31,7 @@ import { Button, Modal, Tag, Tooltip } from "antd";
 
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
-import { cancelScheduledMessage, type ScheduledMessageRead } from "@/lib/daemon";
+import { deleteScheduledMessage, type ScheduledMessageRead } from "@/lib/daemon";
 import { useNotify } from "@/lib/errors";
 import {
   scheduledMessagesQueryKey,
@@ -93,8 +95,8 @@ const STATUS_META: Record<
   },
 };
 
-/** 取消竞态状态码：非 pending 409 / 条目已删 404 → 静默 + 失效以服务端为准收敛（use-message-queue 同口径）。 */
-const CANCEL_SILENT_STATUSES = new Set([404, 409, 422]);
+/** 删除竞态状态码：条目已删 404 / 竞态翻转 409/422 → 静默 + 失效以服务端为准收敛（use-message-queue 同口径）。 */
+const DELETE_SILENT_STATUSES = new Set([404, 409, 422]);
 
 export interface ScheduledMessagesBarProps {
   /** 会话 id（空串 = 预会话 idle 态 → 整条不渲染）。 */
@@ -169,12 +171,12 @@ function ScheduledMessagesList({
       cancelText: "保留",
       onOk: async () => {
         try {
-          await cancelScheduledMessage(sessionId, msg.id);
+          await deleteScheduledMessage(sessionId, msg.id);
           notify.success("已取消定时消息");
         } catch (err) {
           // 404/409/422 已知竞态（恰好到点派发/已被取消）静默，失效后以服务端为准；
           // 网络 / 5xx 真实失败 toast（use-message-queue ql-20260903-014 同口径）。
-          if (!(err instanceof ApiError && CANCEL_SILENT_STATUSES.has(err.status))) {
+          if (!(err instanceof ApiError && DELETE_SILENT_STATUSES.has(err.status))) {
             notify.error(err, "取消定时消息失败");
           }
         }
@@ -183,8 +185,45 @@ function ScheduledMessagesList({
     });
   };
 
+  /**
+   * 清空已结束条目（quick-f96d4e81）：终态（dispatched/cancelled/failed）批量
+   * 物理删除，pending 不受影响。逐条 DELETE（条目量小），404/409/422 竞态静默
+   * 跳过；全部成功才给成功 toast（真实失败已逐条 toast）。
+   */
+  const handleClearTerminal = (entries: ScheduledMessageRead[]) => {
+    Modal.confirm({
+      title: "清空已结束的定时消息",
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定清除 {entries.length} 条已结束（已发送/已取消/失败）的记录吗？
+          待发送条目不受影响。
+        </p>
+      ),
+      okText: "清空",
+      okButtonProps: { danger: true },
+      cancelText: "保留",
+      onOk: async () => {
+        let failed = 0;
+        for (const msg of entries) {
+          try {
+            await deleteScheduledMessage(sessionId, msg.id);
+          } catch (err) {
+            if (!(err instanceof ApiError && DELETE_SILENT_STATUSES.has(err.status))) {
+              failed += 1;
+              notify.error(err, "清空定时消息失败");
+            }
+          }
+        }
+        if (failed === 0) notify.success(`已清空 ${entries.length} 条已结束记录`);
+        await qc.invalidateQueries({ queryKey: scheduledMessagesQueryKey(sessionId) });
+      },
+    });
+  };
+
   // 空列表不渲染（验收项：零布局变化）。hooks 先于早返回。
   if (scheduled.length === 0) return null;
+  // 终态条目（非 pending）驱动行尾「清空已结束」入口；未知状态按终态口径归入。
+  const terminalEntries = scheduled.filter((m) => m.status !== "pending");
 
   return (
     <div className="shrink-0 border-t bg-card px-5 py-2">
@@ -243,7 +282,7 @@ function ScheduledMessagesList({
                     {tag.label}
                   </Tag>
                 )}
-                {/* 仅 pending 可取消（后端非 pending 409 双保险）。 */}
+                {/* 仅 pending 可取消（后端 pending→cancelled 留档）。 */}
                 {status === "pending" && (
                   <Tooltip title="取消定时消息">
                     <Button
@@ -260,6 +299,21 @@ function ScheduledMessagesList({
             </div>
           );
         })}
+
+        {/* 行尾「清空已结束」入口：终态条目批量物理删除（quick-f96d4e81）。 */}
+        {terminalEntries.length > 0 && (
+          <Tooltip title="清除已发送/已取消/失败的记录（待发送不受影响）">
+            <Button
+              type="text"
+              size="small"
+              onClick={() => handleClearTerminal(terminalEntries)}
+              aria-label="清空已结束的定时消息"
+              className="shrink-0 !h-5 !min-w-0 !px-1.5 !text-[11px] text-muted-foreground"
+            >
+              清空已结束
+            </Button>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

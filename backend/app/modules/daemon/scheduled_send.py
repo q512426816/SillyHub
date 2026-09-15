@@ -21,7 +21,7 @@ at-least-once 权衡（design R-02）：条目状态翻转与 inject 分两个�
 换取的是「先落 dispatched 再 inject」崩溃路径的静默丢消息不发生。
 
 取消竞态（R-01 + ql-20260908-006 R3 修正）：派发前在条目行 ``with_for_update``
-复核 pending，与 ``cancel_scheduled_message`` 的行锁串行化——取消先落则本轮
+复核 pending，与 ``delete_scheduled_message`` 的行锁串行化——取消先落则本轮
 回跳过。行锁只保到 inject 的内部 commit 为止：此后条目仍 pending 的窗口内
 到达的取消会成功落库并向用户返回 204，终态写回因此用带谓词的条件 UPDATE
 （仅 ``status='pending'`` 可翻转）——被取消即 0 行命中，尊重用户取消语义

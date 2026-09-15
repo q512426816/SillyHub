@@ -1057,13 +1057,13 @@ class DaemonService:
     ) -> AgentSessionScheduledMessage:
         return await self._sess.create_scheduled_message(session_id, user_id, data)
 
-    async def cancel_scheduled_message(
+    async def delete_scheduled_message(
         self,
         session_id: uuid.UUID,
         message_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
-        await self._sess.cancel_scheduled_message(session_id, message_id, user_id)
+        await self._sess.delete_scheduled_message(session_id, message_id, user_id)
 
     # ql-20260831-002：会话级上下文窗口覆盖（一行委托，照 archive 模式）。
     async def update_auto_resume_pref(

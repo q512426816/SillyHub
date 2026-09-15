@@ -12,7 +12,7 @@
  *     （Vitest jsdom + @testing-library/react，测试标题中文）。
  *
  * mock 策略（照 session-list-panel.test.tsx / use-message-queue.test.ts 先例）：
- *   - @/lib/daemon：listScheduledMessages / cancelScheduledMessage 两 client 桩；
+ *   - @/lib/daemon：listScheduledMessages / deleteScheduledMessage 两 client 桩；
  *   - @/lib/errors：useNotify → spy（测试环境无 <AntApp> 包裹，不起 message DOM）；
  *   - @/lib/api 保留真实（ApiError instanceof 用）。
  *
@@ -33,14 +33,14 @@ import type { ScheduledMessageRead } from "@/lib/daemon";
 
 const mocks = vi.hoisted(() => ({
   listScheduledMessages: vi.fn(),
-  cancelScheduledMessage: vi.fn(),
+  deleteScheduledMessage: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", () => ({
   listScheduledMessages: (...args: unknown[]) =>
     mocks.listScheduledMessages(...args),
-  cancelScheduledMessage: (...args: unknown[]) =>
-    mocks.cancelScheduledMessage(...args),
+  deleteScheduledMessage: (...args: unknown[]) =>
+    mocks.deleteScheduledMessage(...args),
 }));
 
 // useNotify spy（成功/失败 toast 可断言；errMessage 保真用真实现）。
@@ -99,7 +99,7 @@ function findConfirmOk() {
 
 beforeEach(() => {
   mocks.listScheduledMessages.mockReset().mockResolvedValue([]);
-  mocks.cancelScheduledMessage.mockReset().mockResolvedValue(undefined);
+  mocks.deleteScheduledMessage.mockReset().mockResolvedValue(undefined);
   notifyMocks.success.mockClear();
   notifyMocks.error.mockClear();
 });
@@ -183,7 +183,7 @@ describe("ScheduledMessagesBar 条目渲染与四态 tag", () => {
     expect(screen.getByText("已发送")).toBeInTheDocument();
     expect(screen.getByText("已取消")).toBeInTheDocument();
     expect(screen.getByText("失败")).toBeInTheDocument();
-    // 仅 pending 可取消（后端非 pending 409 双保险）。
+    // 仅 pending 可取消（终态走行尾「清空已结束」批量入口）。
     expect(screen.getAllByLabelText("取消该定时消息")).toHaveLength(1);
   });
 
@@ -210,7 +210,7 @@ describe("ScheduledMessagesBar 条目渲染与四态 tag", () => {
 // ── 取消流（Modal.confirm 防误触 → DELETE → 失效重拉） ────────────────────
 
 describe("ScheduledMessagesBar 取消流", () => {
-  it("点取消 → Modal.confirm；确认 → cancelScheduledMessage(sessionId, id) + 成功 toast + 失效重拉", async () => {
+  it("点取消 → Modal.confirm；确认 → deleteScheduledMessage(sessionId, id) + 成功 toast + 失效重拉", async () => {
     mocks.listScheduledMessages.mockResolvedValue([
       makeScheduled({ id: "sm-1", prompt: "第一条提醒" }),
       // 第二条 dispatched：终态无取消按钮，取消入口唯一可锚定。
@@ -232,7 +232,7 @@ describe("ScheduledMessagesBar 取消流", () => {
 
     fireEvent.click(await findConfirmOk());
     await waitFor(() =>
-      expect(mocks.cancelScheduledMessage).toHaveBeenCalledWith("sess-1", "sm-1"),
+      expect(mocks.deleteScheduledMessage).toHaveBeenCalledWith("sess-1", "sm-1"),
     );
     await waitFor(() =>
       expect(notifyMocks.success).toHaveBeenCalledWith("已取消定时消息"),
@@ -268,7 +268,67 @@ describe("ScheduledMessagesBar 取消流", () => {
     await waitFor(() =>
       expect(document.querySelector(".ant-modal-confirm")).toBeNull(),
     );
-    expect(mocks.cancelScheduledMessage).not.toHaveBeenCalled();
+    expect(mocks.deleteScheduledMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ── 清空已结束流（quick-f96d4e81：终态条目批量物理删除） ───────────────────
+
+describe("ScheduledMessagesBar 清空已结束流", () => {
+  it("终态条目存在渲染「清空已结束」入口；仅 pending 列表不渲染", async () => {
+    mocks.listScheduledMessages.mockResolvedValue([
+      makeScheduled({ id: "sm-p", status: "pending" }),
+      makeScheduled({ id: "sm-d", status: "dispatched" }),
+    ]);
+    const { unmount } = render(<ScheduledMessagesBar sessionId="sess-1" />);
+    expect(
+      await screen.findByLabelText("清空已结束的定时消息"),
+    ).toBeInTheDocument();
+    unmount();
+
+    mocks.listScheduledMessages.mockResolvedValue([
+      makeScheduled({ id: "sm-only", status: "pending" }),
+    ]);
+    render(<ScheduledMessagesBar sessionId="sess-1" />);
+    await screen.findByText(/定时消息（1）/);
+    expect(screen.queryByLabelText("清空已结束的定时消息")).toBeNull();
+  });
+
+  it("确认清空 → 终态逐条 DELETE + 成功 toast + 失效重拉；pending 不被删", async () => {
+    mocks.listScheduledMessages.mockResolvedValue([
+      makeScheduled({ id: "sm-p", status: "pending" }),
+      makeScheduled({ id: "sm-d", status: "dispatched" }),
+      makeScheduled({ id: "sm-c", status: "cancelled" }),
+    ]);
+    render(<ScheduledMessagesBar sessionId="sess-1" />);
+    expect(await screen.findByText(/定时消息（3）/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("清空已结束的定时消息"));
+    const confirmRoot = await waitFor(() => {
+      const roots = document.querySelectorAll(".ant-modal-confirm");
+      const el = roots[roots.length - 1] as HTMLElement | undefined;
+      if (!el) throw new Error("confirm not open");
+      return el;
+    });
+    expect(confirmRoot.textContent).toContain("2 条");
+
+    fireEvent.click(await findConfirmOk());
+    await waitFor(() =>
+      expect(mocks.deleteScheduledMessage).toHaveBeenCalledWith("sess-1", "sm-d"),
+    );
+    await waitFor(() =>
+      expect(mocks.deleteScheduledMessage).toHaveBeenCalledWith("sess-1", "sm-c"),
+    );
+    expect(mocks.deleteScheduledMessage).not.toHaveBeenCalledWith("sess-1", "sm-p");
+    await waitFor(() =>
+      expect(notifyMocks.success).toHaveBeenCalledWith("已清空 2 条已结束记录"),
+    );
+    // 无论成败失效重拉（清空后以服务端为准收敛，不等 30s 轮询）。
+    await waitFor(() =>
+      expect(mocks.listScheduledMessages.mock.calls.filter(
+        (c) => c[0] === "sess-1",
+      ).length).toBeGreaterThanOrEqual(2),
+    );
   });
 });
 

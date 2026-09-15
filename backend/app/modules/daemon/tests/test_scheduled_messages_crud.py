@@ -8,8 +8,9 @@
   同形不泄露；
 - 列表：返回该会话**全部状态**条目（dispatched/cancelled/failed 审计留档），
   按 ``dispatch_at`` 升序；
-- 取消：pending → 204 置 cancelled + cancelled_at；非 pending（dispatched/
-  cancelled/failed）→ 409；跨会话条目 / 非归属 → 404。
+- 删除（quick-f96d4e81 语义扩展）：pending → 204 置 cancelled + cancelled_at
+  （取消留档，原行为不变）；终态（dispatched/cancelled/failed）→ 204 物理删行；
+  跨会话条目 / 非归属 → 404。
 
 HTTP 层范式镜像 test_sessions_list_filters.py（in-memory SQLite + httpx client）；
 造数时间一律 UTC tz-aware，落库读回 naive（SQLite 惯例，比较侧归一）。
@@ -400,17 +401,17 @@ class TestListScheduled:
         assert resp_missing.status_code == 404, resp_missing.text
 
 
-# ── 取消（DELETE /sessions/{id}/scheduled/{mid}）───────────────────────────
+# ── 删除（DELETE /sessions/{id}/scheduled/{mid}）───────────────────────────
 
 
-class TestCancelScheduled:
-    async def test_cancel_pending_204_sets_cancelled_at(
+class TestDeleteScheduled:
+    async def test_delete_pending_204_sets_cancelled_at(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
-        """pending 条目取消 → 204；行置 cancelled + cancelled_at 留档。"""
+        """pending 条目删除 → 204；行置 cancelled + cancelled_at 留档（取消语义不变）。"""
         admin = await _get_admin(db_session)
         rt = await _make_runtime(db_session, admin.id)
         sess = await _make_session(db_session, admin.id, rt.id)
@@ -431,13 +432,13 @@ class TestCancelScheduled:
         assert status == "cancelled"
         assert cancelled_at is not None
 
-    async def test_cancel_non_pending_409(
+    async def test_delete_terminal_204_row_removed(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
-        """dispatched / cancelled / failed 均终态不回退 → 409，状态原样。"""
+        """quick-f96d4e81：dispatched / cancelled / failed 终态 → 204 物理删行（清空历史）。"""
         admin = await _get_admin(db_session)
         rt = await _make_runtime(db_session, admin.id)
         sess = await _make_session(db_session, admin.id, rt.id)
@@ -453,17 +454,23 @@ class TestCancelScheduled:
             resp = await client.delete(
                 f"/api/daemon/sessions/{sess.id}/scheduled/{row.id}", headers=auth_headers
             )
-            assert resp.status_code == 409, f"status={status}: {resp.text}"
-            after, _err, _cat, _dat = await _row(db_session, row.id)
-            assert after == status  # 终态不被取消改写
+            assert resp.status_code == 204, f"status={status}: {resp.text}"
+            gone = (
+                await db_session.execute(
+                    select(AgentSessionScheduledMessage.id).where(
+                        AgentSessionScheduledMessage.id == row.id
+                    )
+                )
+            ).one_or_none()
+            assert gone is None, f"status={status}: row should be physically removed"
 
-    async def test_cancel_cross_session_entry_404(
+    async def test_delete_cross_session_entry_404(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
-        """条目挂在同属主另一会话上 → 经本会话路径取消 404（条目仍 pending）。"""
+        """条目挂在同属主另一会话上 → 经本会话路径删除 404（条目仍 pending）。"""
         admin = await _get_admin(db_session)
         rt = await _make_runtime(db_session, admin.id)
         sess_a = await _make_session(db_session, admin.id, rt.id)
@@ -480,7 +487,7 @@ class TestCancelScheduled:
         assert status == "pending"
         assert cancelled_at is None
 
-    async def test_cancel_not_owner_404(
+    async def test_delete_not_owner_404(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],

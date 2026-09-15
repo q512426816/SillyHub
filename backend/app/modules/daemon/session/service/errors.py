@@ -219,18 +219,6 @@ class DaemonScheduledMessageNotFound(AppError):
     http_status = 404
 
 
-class DaemonScheduledMessageNotPending(AppError):
-    """非 pending 定时条目不可取消（task-03 / FR-04）。
-
-    dispatched / cancelled / failed 均为终态不回退（状态机单向往，对齐
-    ``AgentSessionScheduledMessage.status`` 契约）——取消已派发条目语义上
-    是「撤回已发消息」，超出本变更范围（非目标：不做编辑/撤回）。
-    """
-
-    code = "HTTP_409_DAEMON_SCHEDULED_MESSAGE_NOT_PENDING"
-    http_status = 409
-
-
 class DaemonSessionWorkspaceNotFound(AppError):
     """workspace_id 指向的工作区不存在 / 调用者无 WORKSPACE_READ 权限（404，不泄露存在性）。"""
 

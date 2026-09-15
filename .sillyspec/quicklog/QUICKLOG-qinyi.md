@@ -451,3 +451,50 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：ql-009 初版把用量条与思考档位/档案/自动续跑在 mobile 一刀切隐藏，与用户「该有的功能手机端也要有」约束冲突
 方案：用量条收进头部 ⋯ 菜单「会话用量」区（开菜单才挂载即取数，明细表横向滚动）；SessionConfigBar mobile 行尾增设「设置」展开钮（aria-expanded），点开露出思考档位/档案/自动续跑，再点收起回紧凑态；mobileReveal 单一开关 desktop 恒展开零变化
 结果：session-config-bar 49 用例（加1 展开往返）+ session-panel-variant 10 用例（加1 菜单用量区）全绿，tsc 0 错误、eslint 0 新增告警；frontend.md 已追加 ql-011 条目并修正 ql-009 遗留描述
+
+## ql-20260915-012-860e | 2026-09-15 22:42:31 | 定时消息终态条目支持删除清空（DELETE 放开终态+前端清空已结束入口）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service/scheduled_messages.py（cancel改delete：pending仍取消留档/终态物理删行）
+- backend/app/modules/daemon/session/service/errors.py（DaemonScheduledMessageNotPending(409)死代码删除）
+- backend/app/modules/daemon/router/session_queue.py（DELETE路由与docstring语义扩展）
+- backend/app/modules/daemon/service.py（门面方法改名）
+- backend/app/modules/daemon/session/service/__init__.py（聚合导入/__all__/门面改名）
+- backend/app/modules/daemon/router/__init__.py（重导出清单3处改名）
+- backend/app/modules/daemon/scheduled_send.py（docstring引用改名）
+- backend/app/modules/daemon/tests/test_scheduled_messages_crud.py（409用例改物理删行用例）
+- backend/openapi.json（operationId更名随gen:types）
+- frontend/src/lib/daemon/sessions.ts（cancelScheduledMessage→deleteScheduledMessage）
+- frontend/src/components/daemon/scheduled-messages-bar.tsx（行尾清空已结束入口+静默集改名）
+- frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx（mock改名+清空流2新用例）
+- .sillyspec/docs/backend/modules/daemon.md（追加quick增量节）
+- .sillyspec/docs/frontend/modules/components-daemon.md（追加quick增量节）
+需求：定时消息终态条目支持删除清空（DELETE 放开终态+前端清空已结束入口）
+根因：终态行永久留档、列表全状态返回且前端全展示、无删除/清空历史 API——已结束条目在会话页永久残留无法去除（线上会话 6e213eb3 实证，只能删库清理）
+方案：DELETE 语义扩展：pending 仍取消留档（行为不变），终态（dispatched/cancelled/failed）物理删行（sweeper/auto_resume 只读 pending 不受影响）；cancel_scheduled_message 全链改名 delete_scheduled_message、409 错误类死代码删除；前端 bar 行尾「清空已结束」入口（Modal.confirm 逐条 DELETE，404/409/422 竞态静默），client 改名 deleteScheduledMessage；gen:types 已同步 openapi operationId 更名
+结果：后端 CRUD+sweeper 30 passed、ruff check/format+mypy 0；前端 bar 13+hook 6 共 19 passed，tsc 仅并行会话 WIP 文件 runtime-session-helpers.test.tsx 2 处预存语法错（非本改动文件）；daemon.md/components-daemon.md 模块文档已同步
+审计：[gate] L1（跨 0 模块 · 27 文件：18 代码/7 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：13 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/globals.css, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/daemon/task-execution-panel.tsx, frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/ctx-usage-bar.tsx, frontend/src/components/sessions/session-config-bar.tsx, frontend/src/lib/api-types.ts, frontend/src/components/daemon/__tests__/turn-state-subagent-routing.test.ts
+
+## ql-20260915-013-0433 | 2026-09-15 23:25:24 | 手机端会话页二轮收敛（字体回调+底区一行化+点击弹层交互）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/globals.css（mobile 排版块 16→14px）
+- frontend/src/components/sessions/ctx-usage-bar.tsx（QuotaPill/CtxUsageBar mobile prop 胶囊只显百分比）
+- frontend/src/components/sessions/session-config-bar.tsx（mobile 去锁提示）
+- frontend/src/components/daemon/task-execution-panel.tsx（mobile prop 摘要去成败括注）
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（打断钮图标化+mobile 接线）
+- frontend/src/components/daemon/session-panel/page-helpers.tsx（占位长状态句 mobile 短句化）
+- frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx（加2 compact 用例）
+- frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx（加2 精简用例）
+- frontend/src/components/sessions/__tests__/session-config-bar.test.tsx（加2 锁提示用例）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（追加 ql-013 条目）
+需求：手机端会话页二轮收敛（字体回调+底区一行化+点击弹层交互）
+根因：ql-009 16px 正文用户实机反馈过大；配置区仍三行文字噪音（锁提示/verbose 胶囊/成败括注）
+方案：globals.css mobile 块 16→14px；mobile 去锁提示；QuotaPill/CtxUsageBar 加 mobile prop 胶囊 compact 只显百分比（明细走既有点击浮层）；TaskExecutionPanel 加 mobile prop 摘要去成败括注；打断钮 mobile 图标化（aria-label 保语义）；占位长状态句短句化
+结果：ctx-usage-bar+2、task-execution-panel+2、session-config-bar+2、共 5 套件 126 用例全绿；tsc 0 新增错误（并行会话在途测试文件 3 错误非本改动不代修）、eslint 0 新增；frontend.md 已追加 ql-013 条目
+审计：📝 文档欠账（D-8）：15 个源码文件改动未同步任何模块文档（涉及模块：backend · frontend）
+审计：[gate] L1（跨 0 模块 · 15 文件：9 代码/6 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：7 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/openapi.json, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/lib/api-types.ts, frontend/src/components/daemon/__tests__/__debug-regroup.test.tsx, frontend/src/components/daemon/__tests__/turn-state-subagent-routing.test.ts

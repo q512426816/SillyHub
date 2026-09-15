@@ -6235,10 +6235,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Cancel Scheduled Message
-         * @description Cancel a pending scheduled message (non-pending → 409, terminal no-revert).
+         * Delete Scheduled Message
+         * @description Delete a scheduled message (pending → cancel kept on record, terminal → row removed).
          */
-        delete: operations["cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete"];
+        delete: operations["delete_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -36355,7 +36355,7 @@ export interface operations {
             };
         };
     };
-    cancel_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete: {
+    delete_scheduled_message_api_daemon_sessions__session_id__scheduled__message_id__delete: {
         parameters: {
             query?: never;
             header?: never;

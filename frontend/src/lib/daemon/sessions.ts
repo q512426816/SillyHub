@@ -865,10 +865,11 @@ export async function listScheduledMessages(
 }
 
 /**
- * DELETE /api/daemon/sessions/{id}/scheduled/{message_id} — 取消一条 pending
- * 定时消息（204；非 pending 409，终态不可回退）。
+ * DELETE /api/daemon/sessions/{id}/scheduled/{message_id} — 删除一条定时消息
+ * （204）。pending 条目走取消留档（后端置 cancelled，不会发送）；终态条目
+ * （dispatched/cancelled/failed）物理删除记录（清空历史入口，quick-f96d4e81）。
  */
-export async function cancelScheduledMessage(
+export async function deleteScheduledMessage(
   sessionId: string,
   messageId: string,
 ): Promise<void> {
