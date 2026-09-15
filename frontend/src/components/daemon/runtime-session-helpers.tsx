@@ -271,6 +271,56 @@ export function runTerminalTurnStatus(
  * 平铺投影，tool.startedAt→ts、thinking/stderr.ts→ts，AskUser 穿插排序依赖），与改前
  * 手写路径产出等价；segments / turnStartedAt 为本卡新增字段。
  */
+/**
+ * 父归属优先跨组重挂（2026-09-15-subagent-three-pane-display 用户验收返工）：
+ * 后台子代理的终态信号（[TASK_NOTIFICATION]）与内容行常经后续 run 落库（daemon
+ * 任务注册表丢失时 writeTaskLine 回退 currentRunId；DB 实证通知行 run_id ≠ 派发
+ * run_id）。按 run_id 分组装配会让这些行落到后续轮——装配器在轮内找不到派发段
+ * → 信号丢弃 → 派发段永久「运行中」+ 后续轮冒出永久 running 的幽灵 stub。
+ *
+ * 规则：带 parent_tool_use_id 的行改挂到其父派发 tool_use 行**最终所在组**；父
+ * 未登记（更早历史页未加载 / 孤儿）保持原组不动（stub 兜底语义不变）。逐行按
+ * 原始顺序处理并登记每条 tool_call 行的 tool_use_id → 最终组，天然覆盖嵌套
+ * 子代理（嵌套派发行自身被重挂后，其子行跟随）。
+ */
+function regroupSubagentLogsByParent(map: Map<string, AgentRunLogEntry[]>): void {
+  const ownerOf = new Map<string, string>();
+  const moved = new Map<string, AgentRunLogEntry[]>();
+  let anyMoved = false;
+  for (const [runId, entries] of map) {
+    for (const entry of entries) {
+      const parent = entry.parent_tool_use_id?.trim();
+      const owner = parent ? ownerOf.get(parent) : undefined;
+      const target = owner && owner !== runId ? owner : runId;
+      if (target !== runId) {
+        anyMoved = true;
+        (moved.get(target) ?? moved.set(target, []).get(target)!).push(entry);
+      } else {
+        (moved.get(runId) ?? moved.set(runId, []).get(runId)!).push(entry);
+      }
+      if (entry.channel === "tool_call") {
+        const toolUseId = toolUseIdOfContent(entry.content_redacted);
+        if (toolUseId) ownerOf.set(toolUseId, target);
+      }
+    }
+  }
+  if (!anyMoved) return;
+  // 原组逐键重置（被移走的行不得残留原组——moved 未覆盖的键 = 该组全部移空）。
+  for (const runId of map.keys()) map.set(runId, moved.get(runId) ?? []);
+}
+
+/** tool_call 行 content JSON 的 tool_use_id（解析失败 null）——重挂登记用。 */
+function toolUseIdOfContent(content: string | null | undefined): string | null {
+  try {
+    const obj = JSON.parse((content ?? "").trim()) as { tool_use_id?: unknown } | null;
+    return obj && typeof obj === "object" && typeof obj.tool_use_id === "string"
+      ? obj.tool_use_id
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   const map = new Map<string, AgentRunLogEntry[]>();
   for (const log of logs) {
@@ -278,6 +328,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     list.push(log);
     map.set(log.run_id, list);
   }
+  regroupSubagentLogsByParent(map);
   const turns: HistoryAttachTurnView[] = [];
   let turnIndex = 0;
   for (const [runId, entries] of Array.from(map.entries())) {

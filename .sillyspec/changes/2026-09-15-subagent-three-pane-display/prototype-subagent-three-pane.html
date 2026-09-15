@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 会话子代理三分栏</title>
+<style>
+  /* 对齐 frontend/src/styles/themes.ts 语义阶（展示用近似色） */
+  :root{
+    --brand-50:#eef4ff; --brand-100:#dfe9ff; --brand-300:#a8bff5; --brand-600:#3b62d8; --brand-700:#2f4fb8;
+    --bg:#f6f7f9; --card:#ffffff; --border:#e5e7eb; --text:#1f2329; --muted:#8a919e;
+    --ind-50:#eef2ff; --ind-200:#c7d2fe; --green:#059669; --red:#dc2626;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  body{background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  header{height:52px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:8px}
+  header h1{font-size:14px;font-weight:600}
+  header span.sub{font-size:12px;color:var(--muted)}
+  main{flex:1;display:flex;gap:12px;padding:12px;min-height:0}
+  .col{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+  .col-h{padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+  .col-b{flex:1;overflow-y:auto;padding:10px 12px;font-size:12.5px;line-height:1.7}
+  /* 左栏 */
+  #left{width:300px;flex-shrink:0}
+  .sess{padding:8px 10px;border-radius:8px;cursor:pointer;margin-bottom:2px}
+  .sess:hover{background:var(--brand-50)}
+  .sess.on{background:var(--brand-100)}
+  .sess b{font-size:12.5px;display:block}
+  .sess i{font-style:normal;font-size:11px;color:var(--muted)}
+  .file-item{padding:6px 10px;border-radius:6px;cursor:pointer;font-family:Consolas,monospace;font-size:12px}
+  .file-item:hover{background:var(--brand-50);color:var(--brand-700)}
+  /* 中栏 */
+  #mid{flex:1;min-width:0}
+  .msg-u{align-self:flex-end;background:var(--brand-600);color:#fff;border-radius:12px 12px 4px 12px;padding:8px 12px;max-width:70%;margin:6px 0 6px auto;font-size:12.5px}
+  .msg-a{margin:8px 0;display:flex;gap:8px}
+  .avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--brand-600),#7c9bff);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+  .bubble{background:var(--card);border:1px solid var(--border);border-radius:4px 12px 12px 12px;padding:8px 12px;max-width:78%}
+  /* 子代理紧凑卡片（中栏） */
+  .sub-card{display:flex;align-items:center;gap:8px;border:1px solid var(--ind-200);background:var(--ind-50);border-radius:10px;padding:7px 14px;margin:6px 0;cursor:pointer;font-size:12px}
+  .sub-card:hover{border-color:var(--brand-300)}
+  .sub-card.active{outline:2px solid var(--brand-300)}
+  .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .dot.run{background:var(--brand-600);animation:pulse 1.2s infinite}
+  .dot.ok{background:var(--green)} .dot.fail{background:var(--red)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .sub-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tag{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:0 6px;font-size:10px;color:var(--muted);flex-shrink:0}
+  .badge{border-radius:5px;padding:1px 8px;font-size:10.5px;font-weight:600;flex-shrink:0}
+  .b-run{background:var(--brand-100);color:var(--brand-700)} .b-ok{background:#d1fae5;color:var(--green)}
+  .dur{margin-left:auto;font-family:Consolas,monospace;font-size:11px;color:var(--muted);flex-shrink:0}
+  /* 把手 + 右栏 */
+  #resizer{width:6px;cursor:col-resize;flex-shrink:0;border-radius:3px;background:transparent}
+  #resizer:hover{background:var(--brand-300)}
+  #right{width:480px;flex-shrink:0}
+  #right .col-b{display:flex;flex-direction:column;gap:6px}
+  .x{margin-left:auto;border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px}
+  .x:hover{color:var(--text)}
+  /* 右栏子代理面板内的"完整时间线" */
+  .tl-think{color:var(--muted);font-size:11.5px;border-left:2px solid var(--border);padding-left:8px}
+  .tl-tool{border:1px solid var(--border);border-radius:8px;font-size:12px}
+  .tl-tool-h{padding:6px 10px;cursor:pointer;display:flex;gap:6px;align-items:center}
+  .tl-tool-b{padding:6px 10px;border-top:1px solid var(--border);background:#fafafa;font-family:Consolas,monospace;font-size:11.5px;white-space:pre-wrap}
+  .tl-text{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12.5px}
+  .tl-file{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px}
+  .hint{font-size:11px;color:var(--muted);padding:6px 12px;border-top:1px dashed var(--border);background:#fafafa}
+  .viewtabs{display:flex;gap:4px;margin:8px 0}
+  .viewtabs button{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:2px 10px;font-size:11px;cursor:pointer}
+  .viewtabs button.on{background:var(--brand-600);color:#fff;border-color:var(--brand-600)}
+</style>
+</head>
+<body>
+<header>
+  <h1>会话</h1><span class="sub">跨机器、跨智能体的统一会话入口</span>
+</header>
+<main>
+  <!-- 左栏：会话列表 -->
+  <div class="col" id="left">
+    <div class="col-h">会话列表</div>
+    <div class="col-b">
+      <div class="sess on"><b>修复导出乱码问题</b><i>2 分钟前 · Claude</i></div>
+      <div class="sess"><b>背景任务通知投递</b><i>1 小时前</i></div>
+      <div class="sess"><b>工作区拖拽排序</b><i>昨天</i></div>
+      <div style="margin:10px 0 4px;font-size:11px;color:var(--muted)">📁 工作区文件（点我覆盖右栏）</div>
+      <div class="file-item" onclick="openFile()">📄 src/exporter.ts</div>
+      <div class="file-item" onclick="openFile()">📄 src/pipeline.py</div>
+      <div class="file-item" onclick="openFile()">📄 README.md</div>
+    </div>
+  </div>
+
+  <!-- 中栏：会话 -->
+  <div class="col" id="mid">
+    <div class="col-h">修复导出乱码问题
+      <span style="margin-left:auto;font-weight:400;font-size:11px;color:var(--muted)">🤖 子代理目录 ▾</span>
+    </div>
+    <div class="col-b" id="midBody">
+      <div class="msg-u">帮我查一下导出功能为什么中文乱码，顺带把测试补上</div>
+
+      <div class="msg-a"><div class="avatar">🤖</div><div class="bubble">我先让子代理排查编码链路，稍等。</div></div>
+
+      <!-- 子代理紧凑卡片：仅 状态 + 名称 + 类型 + 时长，点击开右栏 -->
+      <div class="sub-card" id="card1" onclick="openSubagent('card1')">
+        <span class="dot run"></span><span>🤖</span>
+        <span class="sub-name">排查导出编码链路</span>
+        <span class="tag">Explore</span>
+        <span class="badge b-run">运行中</span>
+        <span class="dur" id="dur1">00:12</span>
+      </div>
+
+      <div class="msg-a"><div class="avatar">🤖</div><div class="bubble">同时派一个去补测试：</div></div>
+
+      <div class="sub-card" id="card2" onclick="openSubagent('card2')">
+        <span class="dot ok"></span><span>🤖</span>
+        <span class="sub-name">补充导出回归测试</span>
+        <span class="tag">general-purpose</span>
+        <span class="badge b-ok">已完成</span>
+        <span class="dur">01:47</span>
+      </div>
+
+      <div class="msg-a"><div class="avatar">🤖</div><div class="bubble">排查有了初步结论，等它跑完我汇总。</div></div>
+
+      <div class="viewtabs">
+        <button class="on">对话</button><button>进度</button>
+        <span style="font-size:10.5px;color:var(--muted);align-self:center;margin-left:6px">两视图中子代理均为上方紧凑卡片</span>
+      </div>
+    </div>
+    <div class="hint">中栏子代理只显示运行状态与时长 · 点击卡片在右栏查看完整内容 · 子代理不支持继续对话</div>
+  </div>
+
+  <div id="resizer"></div>
+
+  <!-- 右栏：单槽位（子代理详情 ⇄ 文件预览，最后触发覆盖） -->
+  <div class="col" id="right">
+    <div class="col-h" id="rightTitle">🤖 排查导出编码链路 <span class="tag">Explore</span>
+      <span class="badge b-run">运行中</span><span class="dur" style="margin-left:8px">00:12</span>
+      <button class="x" onclick="closeRight()">✕</button>
+    </div>
+    <div class="col-b" id="rightBody">
+      <!-- 与主会话同格式的完整时间线 -->
+      <div class="tl-think">嗯，用户说导出中文乱码……先看捕获层用了什么编码，Windows 码页可能是元凶。</div>
+      <div class="tl-tool">
+        <div class="tl-tool-h">🔧 Bash <b>grep -rn "decode" src/</b></div>
+        <div class="tl-tool-b">src/capture.ts:88:  text.decode("utf-8")
+src/capture.ts:112: os.device_encoding()</div>
+      </div>
+      <div class="tl-text">捕获层在 Windows 上按系统码页解码，落库时已损坏——这就是乱码根源。</div>
+      <div class="tl-tool">
+        <div class="tl-tool-h">📖 Read <b>src/capture.ts</b></div>
+        <div class="tl-tool-b">（文件内容预览，与主会话工具展开区一致）</div>
+      </div>
+      <div class="tl-file">📄 exporter-report.md <span style="color:var(--muted)">2.1 KB</span></div>
+      <div class="tl-think" style="animation:pulse 2s infinite">▍正在继续分析修复方案……（SSE 实时刷新）</div>
+    </div>
+    <div class="hint" id="rightHint">内容与主会话格式一致 · 只读，不能继续对话 · 打开文件预览会覆盖本栏</div>
+  </div>
+</main>
+<script>
+  let mode = 'subagent';
+  const dur1 = document.getElementById('dur1');
+  let sec = 12;
+  setInterval(() => { sec++; dur1.textContent = '00:' + String(sec).padStart(2,'0'); }, 1000);
+
+  function openSubagent(cardId) {
+    // 最后触发覆盖：子代理胜 → 右栏切子代理
+    mode = 'subagent';
+    document.querySelectorAll('.sub-card').forEach(c => c.classList.toggle('active', c.id === cardId));
+    document.getElementById('rightTitle').innerHTML = '🤖 排查导出编码链路 <span class="tag">Explore</span> <span class="badge b-run">运行中</span><span class="dur" style="margin-left:8px">00:12</span><button class="x" onclick="closeRight()">✕</button>';
+    document.getElementById('rightBody').style.display = '';
+    document.getElementById('rightHint').textContent = '内容与主会话格式一致 · 只读，不能继续对话 · 打开文件预览会覆盖本栏';
+  }
+  function openFile() {
+    // 最后触发覆盖：文件胜 → 右栏切文件预览
+    mode = 'file';
+    document.querySelectorAll('.sub-card').forEach(c => c.classList.remove('active'));
+    document.getElementById('rightTitle').innerHTML = '📄 src/exporter.ts <button class="x" onclick="closeRight()">✕</button>';
+    document.getElementById('rightBody').innerHTML =
+      '<div class="tl-tool-b" style="border:none;background:none">' +
+      '<span style="color:#2f4fb8">export</span> <span style="color:#7c3aed">function</span> buildExport(rows) {\n' +
+      '  <span style="color:#8a919e">// 与文件预览同款：语法高亮/图片/Markdown/下载</span>\n' +
+      '  <span style="color:#2f4fb8">return</span> rows.map(r =&gt; escapeCsv(r)); }</div>';
+    document.getElementById('rightHint').textContent = '文件预览（工作区文件同链路）· 点子代理卡片会覆盖本栏';
+  }
+  function closeRight() {
+    mode = null;
+    document.querySelectorAll('.sub-card').forEach(c => c.classList.remove('active'));
+    document.getElementById('right').style.display = 'none';
+    document.getElementById('resizer').style.display = 'none';
+  }
+  // 演示：右栏默认展示子代理面板
+</script>
+</body>
+</html>

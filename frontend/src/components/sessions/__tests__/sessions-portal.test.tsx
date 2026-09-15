@@ -41,6 +41,11 @@
  *      选中会话与群（onSelect/onSelectGroup/handleGroupCreated/
  *      enterPreSession 写入点快照 + 清选中回置灰）/ 深链恢复翻转（会话+群，
  *      R-05）/ 预览列开关 / 切回会话预览保留与不串档（D-004）
+ *  10. 子代理右栏槽位互斥（2026-09-15-subagent-three-pane-display task-04 /
+ *      FR-01 / D-003@v1 / design §5.A，SessionPanel props 捕获断言 + 真实
+ *      装配链日志固件喂段）：初始槽位空 / 点子代理清文件预览并落 segmentId /
+ *      点文件清子代理并挂预览列（最后触发覆盖双向）/ ✕ 上抛清槽位 / 会话切换
+ *      与切群回切清零 / 预会话分支不传三 props（§5.B 零回归契约）
  *
  * mock 策略（对齐 sessions 页 page.test.tsx 既有结构——同一渲染树）：
  *   - @/lib/daemon 整模块 mock（列表 API + 面板/表单/控件条消费函数，
@@ -74,6 +79,7 @@ import {
   resolveDefaultMachineId,
 } from "@/components/sessions/sessions-portal";
 import type { SessionListScope } from "@/components/sessions/session-list-panel";
+import type { AgentRunLogEntry } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
 import type {
   AgentSessionRead,
@@ -2516,3 +2522,208 @@ describe("SessionsPortal 切回会话预览保留（task-03 D-004）", () => {
     });
   });
 });
+
+// ── 10. 子代理右栏槽位互斥（2026-09-15-subagent-three-pane-display task-04 / FR-01 / D-003@v1） ──
+
+/**
+ * task-04：真会话历史日志固件——run-1 内含子代理容器段（tool_call JSON 的
+ * tool_use_id="tu-sub-1" 即装配段 id，session-log-assembler：tool 段 id =
+ * 解析出的 tool_use_id）+ 子代理归属子段（stdout 文本行按 parent_tool_use_id
+ * 路由进容器 children）。喂真实装配链（getAgentSessionLogs → logsToTurns →
+ * displayTurns）而非伪造 props——SessionPanel 内段失效自动关 effect（task-03
+ * design §5.E）只在段缺失时触发，段命中后互斥断言不被其回调干扰。
+ */
+function makeSubagentSessionLogs(): AgentRunLogEntry[] {
+  return [
+    {
+      id: "log-1",
+      run_id: "run-1",
+      timestamp: "2026-09-15T10:00:00Z",
+      channel: "user_input",
+      content_redacted: "帮我调研缓存方案",
+    },
+    {
+      id: "log-2",
+      run_id: "run-1",
+      timestamp: "2026-09-15T10:00:01Z",
+      channel: "tool_call",
+      content_redacted:
+        '{"tool":"Task","args":{"description":"调研缓存方案"},"tool_use_id":"tu-sub-1","success":true}',
+    },
+    {
+      id: "log-3",
+      run_id: "run-1",
+      timestamp: "2026-09-15T10:00:02Z",
+      channel: "stdout",
+      content_redacted: "子代理调研完成，结论如下。",
+      parent_tool_use_id: "tu-sub-1",
+      subagent_type: "general-purpose",
+      depth: 1,
+    },
+  ];
+}
+
+/** task-04：真会话互斥用例共用固件装配 + 选中会话并等历史轮回灌（用户消息
+ *  气泡出现 = displayTurns 已含子代理容器段 tu-sub-1）。 */
+async function selectSessionAwaitTurns() {
+  mocks.listAgentSessions.mockResolvedValue({
+    items: [
+      makeSession({ id: "s-a", title: "会话甲", workspace_id: "ws-a" }),
+      makeSession({ id: "s-b", title: "会话乙", workspace_id: "ws-b" }),
+    ],
+    total: 2,
+    limit: 50,
+    offset: 0,
+  });
+  mocks.getAgentSession.mockResolvedValue(
+    makeSession({ id: "s-a", title: "会话甲", workspace_id: "ws-a" }),
+  );
+  mocks.getAgentSessionLogs.mockResolvedValue(makeSubagentSessionLogs());
+  renderPortal();
+  await openWorkspaceGroup("未知工作区");
+  fireEvent.click(screen.getByRole("button", { name: "会话 会话甲" }));
+  await screen.findByText("帮我调研缓存方案");
+}
+
+/**
+ * task-04：直驱 SessionPanel 捕获的 onOpenSubagent——中栏紧凑卡片/目录点击
+ * 的上抛链归 turn-segment-views / subagent-catalog 各自的测试；本文件只测
+ * portal 槽位状态接线（props 捕获惯例同 task-10 quicklog 用例）。
+ */
+function driveOpenSubagent(segmentId: string) {
+  const fn = mocks.lastSessionPanelProps?.onOpenSubagent as
+    | ((_id: string) => void)
+    | undefined;
+  if (typeof fn !== "function") {
+    throw new Error("onOpenSubagent prop not captured");
+  }
+  act(() => {
+    fn(segmentId);
+  });
+}
+
+describe("SessionsPortal 子代理右栏槽位互斥（task-04 subagent-three-pane）", () => {
+  it("初始：真会话分支 SessionPanel 收 openSubagentId=null，onOpenSubagent/onSubagentPanelClose 已装配（槽位空）", async () => {
+    await selectSessionAwaitTurns();
+
+    expect(mocks.lastSessionPanelProps?.sessionId).toBe("s-a");
+    expect(mocks.lastSessionPanelProps?.openSubagentId).toBe(null);
+    expect(typeof mocks.lastSessionPanelProps?.onOpenSubagent).toBe("function");
+    expect(
+      typeof mocks.lastSessionPanelProps?.onSubagentPanelClose,
+    ).toBe("function");
+    // 两槽位皆空：SessionPanel 右栏子代理面板与 portal 文件预览列都不渲染。
+    expect(screen.queryByTestId("subagent-panel-close")).toBeNull();
+    expect(screen.queryByTestId("sessions-file-preview-column")).toBeNull();
+  });
+
+  it("点子代理（onOpenSubagent 上抛）→ 子代理右栏面板渲染 + 文件预览列卸载（子代理覆盖文件，含右把手）", async () => {
+    await selectSessionAwaitTurns();
+
+    // 先占文件槽位（📁 进文件模式 + stub 点文件）再点子代理——验证最后触发覆盖。
+    clickFilesToggle();
+    await stubPickFile();
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-file-preview-column")).toBeInTheDocument(),
+    );
+
+    driveOpenSubagent("tu-sub-1");
+    // 段命中 → SessionPanel 内子代理右栏挂载（✕ 锚出现，design §5.B）。
+    await screen.findByTestId("subagent-panel-close");
+    // 互斥另一半：点子代理清文件预览（portal 右列含把手整体卸载）。
+    await waitFor(() =>
+      expect(screen.queryByTestId("sessions-file-preview-column")).toBeNull(),
+    );
+    expect(screen.queryByTestId("sessions-file-preview-resizer")).toBeNull();
+  });
+
+  it("点子代理后点文件（文件树 onSelectFile）→ 子代理面板卸载且预览列挂载（文件覆盖子代理）", async () => {
+    await selectSessionAwaitTurns();
+
+    driveOpenSubagent("tu-sub-1");
+    await screen.findByTestId("subagent-panel-close");
+
+    clickFilesToggle();
+    await stubPickFile();
+    await waitFor(() =>
+      expect(screen.getByTestId("sessions-file-preview-column")).toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-panel-close")).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(mocks.lastFilePreviewProps).toEqual({
+        workspaceId: "ws-a",
+        filePath: "README.md",
+      }),
+    );
+  });
+
+  it("右栏 ✕（面板内 subagent-panel-close 点击 → onSubagentPanelClose 上抛）→ 面板卸载，不反向打开文件预览", async () => {
+    await selectSessionAwaitTurns();
+
+    driveOpenSubagent("tu-sub-1");
+    await screen.findByTestId("subagent-panel-close");
+    fireEvent.click(screen.getByTestId("subagent-panel-close"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-panel-close")).toBeNull(),
+    );
+    // ✕ 只清槽位：不落文件预览（互斥仅发生在两个写入点）。
+    expect(screen.queryByTestId("sessions-file-preview-column")).toBeNull();
+  });
+
+  it("会话切换（重选另一会话）→ 子代理面板卸载（段 id 属旧会话不残留，FR-01）", async () => {
+    await selectSessionAwaitTurns();
+
+    driveOpenSubagent("tu-sub-1");
+    await screen.findByTestId("subagent-panel-close");
+
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话乙" }));
+    // key 重挂载：新会话面板接管（sessionId=s-b）且旧会话子代理面板不残留
+    //（固件同段 id 在乙会话也存在——面板消失只能来自 portal 槽位清零）。
+    await waitFor(() =>
+      expect(mocks.lastSessionPanelProps?.sessionId).toBe("s-b"),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-panel-close")).toBeNull(),
+    );
+  });
+
+  it("切群再切回会话 → 子代理面板不复活（统一 effect 清零，残值切回不误开）", async () => {
+    mocks.listGroupChats.mockResolvedValue([makeGroupListItem()]);
+    await selectSessionAwaitTurns();
+
+    driveOpenSubagent("tu-sub-1");
+    await screen.findByTestId("subagent-panel-close");
+
+    // 切群：SessionPanel 卸载（挂载点断言归既有群分区用例），selectedSessionId
+    // 清 null → 槽位经同一 effect 清零。
+    fireEvent.click(
+      screen.getByRole("button", { name: "群聊 前端攻坚小分队" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("group-chat-panel-mount")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("subagent-panel-close")).toBeNull();
+
+    // 切回会话甲：面板重挂载后子代理右栏不出现（旧段 id 不残值误开）。
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话甲" }));
+    await waitFor(() =>
+      expect(mocks.lastSessionPanelProps?.sessionId).toBe("s-a"),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-panel-close")).toBeNull(),
+    );
+  });
+
+  it("预会话分支不传三 props（无历史子代理；未传时面板内部视为 null，§5.B 零回归契约）", async () => {
+    renderPortal();
+    await enterPreSession("在 非工作区 新建会话");
+    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+
+    expect(mocks.lastSessionPanelProps?.openSubagentId).toBeUndefined();
+    expect(mocks.lastSessionPanelProps?.onOpenSubagent).toBeUndefined();
+    expect(mocks.lastSessionPanelProps?.onSubagentPanelClose).toBeUndefined();
+  });
+});
+

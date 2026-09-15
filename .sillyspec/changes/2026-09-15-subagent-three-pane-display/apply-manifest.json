@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-15-subagent-three-pane-display",
+  "appliedAt": "2026-09-15T12:16:47.646Z",
+  "baseHash": "daf0e2a0cf2548b4b4fc55426046cfa5a73cea96",
+  "files": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/subagent-async-derive.test.tsx",
+      "sha256": "fc61dbee7d7fa9886c68ca278b9a9baa30688f14064e88798335cbb0288bb292"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/subagent-detail-panel.test.tsx",
+      "sha256": "ead1aa1cf4f6012572d8b06c3bd7abdc6f1b8ac6575aba8e60e17d11ed6bff28"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+      "sha256": "14170086a0be4b9f410045c087d7fea3afa2435758fe8f1977916e092255907f"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+      "sha256": "40d426e054f5edc1f5cee374e6baaf5a021c7a4112e5132ce587c49361074bb5"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/index.tsx",
+      "sha256": "0b13ca3c790bd5f0ff0103868f942b75e8fedba6856f697f5df2f9092a3f48a7"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "560e14c205c5f58f4c2c1c4bbd1c833bf5ec59bc45808b3605474ec96828fce6"
+    },
+    {
+      "path": "frontend/src/components/daemon/subagent-detail-panel.tsx",
+      "sha256": "797bb7e083c62172de09269e0ec374f2fa32b36bbd4f3fb12e19716401be032c"
+    },
+    {
+      "path": "frontend/src/components/daemon/subagent-panel-context.ts",
+      "sha256": "562fe32fe634c3c45a33de43c25516889fc041ab9b6c9a9d6654951aff5b681e"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+      "sha256": "ed2704c1da53d65a04a0d81a581cdeec8efc96a9063b57bf38217be32f3b176f"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "sha256": "6e38befad95be924dc4b831c878274f1693605f9422ff45959b5499eacf22409"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+      "sha256": "581543624d9cd199b8222a37301acce78221480853c0933af3e2542b3c6273db"
+    },
+    {
+      "path": "frontend/src/components/sessions/sessions-portal.tsx",
+      "sha256": "3785816b579eed52093cab73b5c3aae7649a6fc57d5fbe013336bba41dbb9519"
+    },
+    {
+      "path": "frontend/src/components/sessions/subagent-catalog.tsx",
+      "sha256": "18ed2f8b9062a0bcad52cef0fe1588e17fadbcbf1b8a2f23d724038cb0e3d7c3"
+    }
+  ]
+}

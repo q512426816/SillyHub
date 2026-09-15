@@ -1067,6 +1067,26 @@ function parseToolUseRaw(raw: string): ParsedToolUse {
   }
 }
 
+/**
+ * 子代理派发初始化提示词（2026-09-15-subagent-three-pane-display 用户验收返工）：
+ * 从派发 tool_call JSON 提取 args.prompt 全文——右栏详情面板「任务指令」块的数据源。
+ * 只认 prompt（Agent/Task 派发工具的指令字段权威）；description 归头部名称摘要，
+ * 不在此重复。解析失败 / 无 prompt 返回 null（面板不渲染该块）。
+ */
+export function dispatchPromptOfRaw(raw: string): string | null {
+  try {
+    const obj = JSON.parse((raw ?? "").trim()) as { args?: unknown } | null;
+    if (!obj || typeof obj !== "object") return null;
+    const args = (obj.args && typeof obj.args === "object" ? obj.args : {}) as Record<
+      string,
+      unknown
+    >;
+    return stringArg(args.prompt);
+  } catch {
+    return null;
+  }
+}
+
 /* ───────────────────── 导出 API ───────────────────── */
 
 /** 空装配产物构造（实时路径 turn 初始值；turnStartedAt 由调用方传发送占位时刻）。 */

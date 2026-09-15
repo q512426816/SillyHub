@@ -37,3 +37,11 @@
 - 2026-09-13 登记（本文件）。三坑均为工具侧待修，无本地阻断（坑 1 有 status/guard.json 核对绕过、坑 2 有重传绕过、坑 3 有夹带惯例），不阻塞日常 quick 流程。
 - 2026-09-14 补登坑 4（ql-ID 预留/分配竞态），同轮修正本仓数据善后：QUICKLOG ql-20260914-001-b14c 条目文件行引用的预留期旧 ID 007-1351 改回本条目 ID（时序根源与坑 2 同族——file-notes 传参时最终 ID 尚未分配）。坑 4 的工具代码修复由用户在 sillyspec 仓另行安排。
 - **2026-09-14 坑 4 已修复（sillyspec 仓 commit `132d01d`，ql-20260914-003-4d6c）**：三层护栏——①分配查重：`collectGuardReservedQuicklogIds` 新导出，ql-ID 分配的 maxSeq 并入**他者活跃会话的 guard 预留**（7 天僵尸预留不钉号、盘上畸形头容错扫描、候选全 ID 末检 200 次兜底）；②`--done` 占用校验：盘上同 ID 条目 ≥2 fail-closed 硬拦，他者活跃 guard 仍预留同 ID 时本会话换新号完成（原 ID 让位、双方记录不混写）；③最终 ID 回写 guard.json，QUICKLOG 条目丢失场景由「硬拦请检查」降为原 ID 补建自愈。回归 `test/quicklog-ql-id-race.test.mjs` 25 断言 + 全量 463/463 绿。本机激活：全局 CLI 原安装（2026-09-13 22:02）早于修复提交不含修复（grep 新导出函数未命中实证），已从修复后本地源码重装并 grep 确认 Fix Active。坑 4 关闭；**坑 1/2/3 仍活跃**，本文件保持活跃位。
+
+## 处置进展（2026-09-15 定时收口：坑2/坑1③/坑3 落地，坑1①② 留专项）
+
+- **坑 2（--file-notes 先收后丢）已修复**：非末步 quick --done 带 --file-notes 由前置 warn 升级为**硬拒绝 exit 2**（拒绝文案含指引；被拒后去掉参数重跑不丢进度）——`src/run/command.js`；契约测试 `test/quick-filenotes-audit-hints.test.mjs` 更新（11/11 绿）。
+- **坑 1③（sessionId 首行打印）已修复**：新会话 ID 生成即打印首行「📌 quick 会话已建立: <id>（后续若超时/中断，用 --change <id> 续用）」——排在 agent-log push / spec-sync 等网络动作之前，exec 超时也能从输出头拿到 ID。
+- **坑 3（QUICKLOG 提交夹带）按建议③落地**：两仓 sillyspec-quick SKILL.md 声明既定惯例（夹带无害、ql-ID 归属对账、勿拆 hunk）+ 顺带声明坑 2 的硬拒绝行为。分片存储（建议①）与行号范围输出（建议②）留 backlog。
+- **坑 1①②（网络动作移出关键路径 / 预算压秒级）留专项**：CLI 短进程内"后台化"需 detached 通道设计（浮动 promise 会因事件循环不空阻塞退出同理），总预算 threading 涉及全命令链路——属同步架构决策，非巡检级小修；坑 1③ 已消除主要操作性危害（超时可恢复）。
+- 坑 4 已于 132d01d 修复（本文件 09-14 段已记）。**文件保持活跃（坑 1①② 余项）。**

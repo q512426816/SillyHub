@@ -16,6 +16,10 @@
 //   7. task-11（2026-08-31-session-queue-ux FR-07）CopyButton 挂载——text 段气泡
 //      常驻复制钮（点击写 segment.text）/ 空文本不渲染；thinking 段折叠无、展开有
 //      并复制全文（jsdom 无 :hover，hover 浮出是纯 CSS 不在断言范围，只断 DOM 存在）。
+//   8. task-01（2026-09-15-subagent-three-pane-display FR-02 / FR-05）紧凑卡片
+//      双模式——无 Provider 回归原内联展开；有 Provider 仅头部行（children 不内联、
+//      无折叠语义），点击 / Enter toggle 右栏（openSubagent / closeSubagent 语义，
+//      activeId 命中 ring-brand-300 高亮 + data-segment-id 锚点），stub 段同走紧凑。
 //
 // 测试纪律：FIRST / AAA / 每用例独立 fixture / 断言真实渲染输出 / 零 mock 被测组件；
 // 仅按既有惯例 mock MarkdownText（next/dynamic ssr:false 在 jsdom 同步渲染为 null，
@@ -39,7 +43,10 @@ import type {
   ThinkingTurnSegment,
   StderrTurnSegment,
   FileTurnSegment,
+  SubagentContainerSegment,
 } from "../turn-segment-views";
+import { SubagentPanelContext } from "../subagent-panel-context";
+import type { SubagentPanelContextValue } from "../subagent-panel-context";
 import {
   TurnStatusBar,
   deriveTurnActivity,
@@ -875,6 +882,133 @@ describe("SubagentBlockView 子代理块", () => {
     const finished: ToolTurnSegment = { ...running, status: "ok", result: "产出", endedAt: 9_000 };
     rerender(<SubagentBlockView segment={finished} />);
     expect(screen.queryByText("运行中的内部文本")).not.toBeInTheDocument(); // 过渡即收敛折叠
+  });
+});
+
+/* ───────── 8. SubagentBlockView 紧凑卡片模式（task-01 / subagent-three-pane / design §5.C） ───────── */
+
+describe("SubagentBlockView 紧凑卡片模式（subagent-three-pane）", () => {
+  /**
+   * 挂 SubagentPanelContext.Provider 渲染（模拟 page 模式面板 context 注入）；
+   * 回调默认 vi.fn()，activeId 默认 null——按用例覆盖，返回值供断言调用参数。
+   */
+  function renderWithPanel(
+    segment: SubagentContainerSegment,
+    overrides: Partial<SubagentPanelContextValue> = {},
+  ) {
+    const value: SubagentPanelContextValue = {
+      openSubagent: vi.fn(),
+      closeSubagent: vi.fn(),
+      activeId: null,
+      ...overrides,
+    };
+    const utils = render(
+      <SubagentPanelContext.Provider value={value}>
+        <SubagentBlockView segment={segment} />
+      </SubagentPanelContext.Provider>,
+    );
+    return { ...utils, value };
+  }
+
+  it("无 Provider（现状回归）：完成态默认折叠、点击头部仍可展开 children（aria-expanded 语义保留）", () => {
+    const seg = makeToolSeg({
+      id: "call_agent",
+      toolName: "Agent",
+      primary: "调研员",
+      subagentType: "research",
+      startedAt: 60_000,
+      endedAt: 144_000,
+      children: [makeTextSeg({ id: "text:c9", text: "无 Provider 的正文产出" })],
+    });
+    render(<SubagentBlockView segment={seg} />);
+    const header = rowOf("调研员");
+    expect(header).toHaveAttribute("aria-expanded", "false"); // 内联折叠器语义仍在
+    expect(screen.queryByText("无 Provider 的正文产出")).not.toBeInTheDocument();
+    fireEvent.click(header);
+    expect(screen.getByText("无 Provider 的正文产出")).toBeInTheDocument();
+  });
+
+  it("有 Provider（activeId:null）：紧凑卡片仅头部行——children 不渲染、无折叠语义，头部名称/类型/时长齐全", () => {
+    const seg = makeToolSeg({
+      id: "call_compact",
+      toolName: "Agent",
+      primary: "紧凑调研员",
+      subagentType: "research",
+      startedAt: 60_000,
+      endedAt: 144_000, // 84s → 01:24
+      children: [makeTextSeg({ id: "text:cx", text: "紧凑模式内部文本" })],
+    });
+    const { container } = renderWithPanel(seg);
+    expect(screen.getByText("紧凑调研员")).toBeInTheDocument(); // 名称
+    expect(screen.getByText("research")).toBeInTheDocument(); // 类型标签
+    expect(screen.getByText("01:24")).toBeInTheDocument(); // 时长
+    expect(screen.queryByText("紧凑模式内部文本")).not.toBeInTheDocument(); // children 移右栏
+    expect(container.querySelector(".seg-subagent-body")).toBeNull(); // 无展开 body
+    expect(rowOf("紧凑调研员")).not.toHaveAttribute("aria-expanded"); // 折叠语义移除
+    expect(container.firstChild).toHaveAttribute("data-segment-id", "call_compact"); // 联动锚点
+  });
+
+  it("点击头部上抛 openSubagent(segment.id)，Enter 键盘触发同语义", () => {
+    const seg = makeToolSeg({
+      id: "call_open",
+      toolName: "Agent",
+      primary: "待打开代理",
+      subagentType: "research",
+      children: [makeTextSeg({ id: "text:op" })],
+    });
+    const { value } = renderWithPanel(seg);
+    fireEvent.click(rowOf("待打开代理"));
+    expect(value.openSubagent).toHaveBeenCalledTimes(1);
+    expect(value.openSubagent).toHaveBeenCalledWith("call_open");
+    expect(value.closeSubagent).not.toHaveBeenCalled(); // 未激活 → 不走关闭
+    fireEvent.keyDown(rowOf("待打开代理"), { key: "Enter" }); // 键盘可达（tabIndex=0）
+    expect(value.openSubagent).toHaveBeenCalledTimes(2);
+  });
+
+  it("activeId 命中：根容器 ring-brand-300 高亮 + 再点 → closeSubagent（toggle）", () => {
+    const seg = makeToolSeg({
+      id: "call_hit",
+      toolName: "Agent",
+      primary: "已激活代理",
+      subagentType: "research",
+      children: [makeTextSeg({ id: "text:hit" })],
+    });
+    const { value } = renderWithPanel(seg, { activeId: "call_hit" });
+    const header = rowOf("已激活代理");
+    const root = header.parentElement;
+    expect(root).not.toBeNull();
+    expect(root!.className).toContain("ring-brand-300"); // 高亮描边
+    fireEvent.click(header);
+    expect(value.closeSubagent).toHaveBeenCalledTimes(1); // 已激活 → 关闭
+    expect(value.openSubagent).not.toHaveBeenCalled();
+  });
+
+  it("activeId 指向其它段：无高亮，点击仍上抛自己的 segment.id", () => {
+    const seg = makeToolSeg({
+      id: "call_other",
+      toolName: "Agent",
+      primary: "旁路代理",
+      subagentType: "research",
+      children: [makeTextSeg({ id: "text:other" })],
+    });
+    const { value } = renderWithPanel(seg, { activeId: "call_someone_else" });
+    const root = rowOf("旁路代理").parentElement;
+    expect(root).not.toBeNull();
+    expect(root!.className).not.toContain("ring-brand-300"); // 未命中不高亮
+    fireEvent.click(rowOf("旁路代理"));
+    expect(value.openSubagent).toHaveBeenCalledWith("call_other");
+  });
+
+  it("subagent_stub 段同走紧凑分支：children 不渲染，名称回退 subagentType", () => {
+    const seg = makeStubSeg({
+      children: [makeTextSeg({ id: "text:stub2", text: "stub 紧凑内部文本" })],
+    });
+    const { container } = renderWithPanel(seg);
+    // 名称与类型标签均回退 subagentType（stub 无 primary/toolName 可回退）
+    expect(screen.getAllByText("Explore").length).toBe(2);
+    expect(screen.queryByText("stub 紧凑内部文本")).not.toBeInTheDocument();
+    expect(container.querySelector(".seg-subagent-body")).toBeNull();
+    expect(container.firstChild).toHaveAttribute("data-segment-id", "call_stub");
   });
 });
 

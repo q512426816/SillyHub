@@ -32,6 +32,10 @@
  * 00:00」），终态显示服务端真实时长 taskElapsedMs（不用 endedAt-startedAt 回执差值），
  * stopped 灰点；无元数据段走原推导（前台阻塞式子代理零回归）。目录头部计数徽标
  * 口径同步（运行中数）。
+ *
+ * task-03（2026-09-15-subagent-three-pane-display / FR-05 / design §5.F）：可选
+ * activeId——右栏当前展示的子代理段 id，命中行 ring-brand-300 描边高亮（与
+ * task-01 中栏紧凑卡片同款）+ aria-current；未传 / null 零回归。
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -53,7 +57,14 @@ export interface SubagentCatalogProps {
    * scrollIntoView 滚动居中，原型 jumpTo 三动作）。可选：未提供时行仍可
    * 点击（只收起下拉）。
    */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
   onJumpTo?: (segmentId: string) => void;
+  /**
+   * task-03（2026-09-15-subagent-three-pane-display / FR-05 / design §5.F）：
+   * 右栏当前展示的子代理段 id；命中行描边高亮（ring-brand-300，与 task-01
+   * 中栏紧凑卡片高亮同款）+ aria-current。null / 未传 = 无高亮（既有行为零回归）。
+   */
+  activeId?: string | null;
 }
 
 /**
@@ -110,7 +121,7 @@ function subagentDuration(sa: SubagentActivity, now: number): string {
  * 下拉清单（状态点/名称/类型/时长 mono）+ 点击行 onJumpTo 定位。
  * 无任何子代理段时返回 null（不占位）。
  */
-export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
+export function SubagentCatalog({ turns, onJumpTo, activeId }: SubagentCatalogProps) {
   const [open, setOpen] = useState(false);
 
   // 每秒 tick（FR-06 局部 state）：仅存在 running 子代理时启动，卸载/转终态清理。
@@ -201,40 +212,49 @@ export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
             )}
           </div>
           <ul role="list" className="max-h-80 overflow-y-auto">
-            {subagents.map((sa) => (
-              <li key={sa.segmentId} className="border-b border-border last:border-b-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    onJumpTo?.(sa.segmentId);
-                  }}
-                  /* task-13：悬停摘要优先 [TASK_*] 元数据 taskSummary（async 后台
-                      任务的最新进度/终态摘要），无元数据回退内部活动摘要。 */
-                  title={`${sa.name}${sa.subagentType ? ` · ${sa.subagentType}` : ""}${
-                    (sa.taskSummary ?? sa.latestActivity)
-                      ? `\n${sa.taskSummary ?? sa.latestActivity}`
-                      : ""
-                  }`}
-                  className="flex w-full items-center gap-2 px-3 py-[7px] text-left text-xs hover:bg-brand-50 focus-visible:bg-brand-50 focus-visible:outline-none"
-                >
-                  <span
-                    aria-hidden
-                    className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT_CLS[sa.status])}
-                  />
-                  <span className="min-w-0 flex-1 truncate font-medium text-foreground">{sa.name}</span>
-                  {sa.subagentType && (
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {sa.subagentType}
+            {subagents.map((sa) => {
+              /* task-03（design §5.F）：activeId 命中行描边高亮——ring-brand-300
+                 与 task-01 中栏紧凑卡片高亮同款；aria-current 标注当前项。 */
+              const rowActive = activeId != null && activeId === sa.segmentId;
+              return (
+                <li key={sa.segmentId} className="border-b border-border last:border-b-0">
+                  <button
+                    type="button"
+                    aria-current={rowActive ? "true" : undefined}
+                    onClick={() => {
+                      setOpen(false);
+                      onJumpTo?.(sa.segmentId);
+                    }}
+                    /* task-13：悬停摘要优先 [TASK_*] 元数据 taskSummary（async 后台
+                        任务的最新进度/终态摘要），无元数据回退内部活动摘要。 */
+                    title={`${sa.name}${sa.subagentType ? ` · ${sa.subagentType}` : ""}${
+                      (sa.taskSummary ?? sa.latestActivity)
+                        ? `\n${sa.taskSummary ?? sa.latestActivity}`
+                        : ""
+                    }`}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-[7px] text-left text-xs hover:bg-brand-50 focus-visible:bg-brand-50 focus-visible:outline-none",
+                      rowActive && "ring-1 ring-brand-300",
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT_CLS[sa.status])}
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium text-foreground">{sa.name}</span>
+                    {sa.subagentType && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {sa.subagentType}
+                      </span>
+                    )}
+                    {/* 时长 mono（运行中每秒跳动；token 无数据不显示）。 */}
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                      {subagentDuration(sa, now)}
                     </span>
-                  )}
-                  {/* 时长 mono（运行中每秒跳动；token 无数据不显示）。 */}
-                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                    {subagentDuration(sa, now)}
-                  </span>
-                </button>
-              </li>
-            ))}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

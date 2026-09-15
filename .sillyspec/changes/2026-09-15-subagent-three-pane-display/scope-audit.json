@@ -1,0 +1,124 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "daf0e2a0cf2548b4b4fc55426046cfa5a73cea96",
+  "totals": {
+    "files": 13,
+    "additions": 1529,
+    "deletions": 118
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/subagent-async-derive.test.tsx",
+      "additions": 71,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/subagent-detail-panel.test.tsx",
+      "additions": 293,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+      "additions": 134,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+      "additions": 155,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/index.tsx",
+      "additions": 22,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "additions": 163,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/subagent-detail-panel.tsx",
+      "additions": 117,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/subagent-panel-context.ts",
+      "additions": 34,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+      "additions": 194,
+      "deletions": 64,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "additions": 32,
+      "deletions": 7,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+      "additions": 211,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/sessions-portal.tsx",
+      "additions": 49,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/sessions/subagent-catalog.tsx",
+      "additions": 54,
+      "deletions": 34,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "3923f1e42bd63ce7b7b4c25a112012e9d736a518dfb9fd9436c564406a98a161",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-15T11:53:08.139Z"
+}

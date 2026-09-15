@@ -320,9 +320,9 @@ export interface TurnTimelineProps {
   /** AskUser 提问历史（ql-20260801-003，按 run_id 穿插到对应 turn）。 */
   dialogHistory: SessionDialogRead[];
   /** 待答卡提交/被 resolved 后移除（父级双保险过滤）。 */
-  onDialogResolved: (requestId: string) => void;
+  onDialogResolved: (_requestId: string) => void;
   /** 失败轮次「重新发送」（RunErrorItem onResend，父级守卫 turn 级串行）。 */
-  onResend: (prompt: string) => void;
+  onResend: (_prompt: string) => void;
   /** RunErrorItem 主操作「切换供应商」。 */
   onSwitchProvider: () => void;
   /** 空态文案两态：在线显示 provider 已就绪；离线显示无守护进程。 */
@@ -377,7 +377,7 @@ const TurnRow = memo(function TurnRow({
   /** task-07：该轮之后是否已存在用户消息（marker 提问卡已答态 best-effort 判定）。 */
   hasLaterUserMessage: boolean;
   dialogHistory: SessionDialogRead[];
-  onResend: (prompt: string) => void;
+  onResend: (_prompt: string) => void;
   onSwitchProvider: () => void;
   /** 2026-09-10-auto-resume-interrupted-turn：daemon_restarted 场景化兜底建议。 */
   daemonRestartedHint?: string | null;
@@ -1133,12 +1133,36 @@ type SegmentTimelineItem =
   | { kind: "askUser"; dialog: SessionDialogRead; ts: number | null };
 
 /**
+ * task-02（2026-09-15-subagent-three-pane-display / FR-04 / D-002@v1 ①）：对话
+ * 视图段过滤谓词——在 text/file 基础上放宽纳入子代理容器段（tool 段带 children
+ * 的子代理归属，或 subagent_stub 兜底段），容器段经 SegmentView 分发到
+ * SubagentBlockView 渲染（渲染侧零改动），修复默认视图下子代理整体不可见。
+ *
+ * 排除项保持不变：thinking / 普通 tool（无 children）/ stderr / preamble 段仍被
+ * 过滤（渲染经济 FR-06 不回归）；dispatch_worker 团队分身段也不进对话视图
+ * （团队卡仍仅「全部（进度）」视图，避免混入对话流）——判定语义同
+ * turn-segment-views.tsx 的 isTeamDispatchTool（该函数模块私有未导出，此处本地
+ * 等价实现：取 `__` 末段短名比对，兼容 mcp__<server>__ 前缀与 daemon 裸名两形态）。
+ */
+function isConversationSegment(seg: TurnSegment): boolean {
+  if (seg.kind === "text" || seg.kind === "file") return true;
+  if (seg.kind === "subagent_stub") return true;
+  return (
+    seg.kind === "tool" &&
+    seg.children.length > 0 &&
+    (seg.toolName ?? "").split("__").pop() !== "dispatch_worker"
+  );
+}
+
+/**
  * task-06（FR-01 / FR-02 / FR-06）：v2 段模型轮渲染主体（segments 非 undefined 的
  * turn 专用，双视图分支 + 内置轮级状态条）：
  *
  *   - 「对话」视图（viewMode=conversation）：渲染 text 段与 file 段（每段独立气泡，
  *     贴原型 .seg-text——file 段是面向用户的交付物，agent-file-upload-mcp FR-01 聊天流
- *     呈现；思考/工具/子代理/stderr 段不挂载——渲染经济，FR-06），轻量 ❓
+ *     呈现）+ 子代理容器段（tool 带 children / subagent_stub，task-02 放宽过滤后经
+ *     SegmentView 渲染为子代理卡片，见 isConversationSegment）；思考/普通工具/stderr/
+ *     团队分身段不挂载——渲染经济，FR-06），轻量 ❓
  *     AskUser 记录由外层共享逻辑渲染（答复之前）；
  *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
  *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
@@ -1176,7 +1200,7 @@ function SegmentedTurnBody({
   /** task-07：marker 提问卡已答态 best-effort（该轮之后已存在用户消息）。 */
   markerAnswered: boolean;
   /** task-07：marker 提问卡提交回调（答案作下一条用户消息，父级传 onResend）。 */
-  onMarkerSubmit: (prompt: string) => void;
+  onMarkerSubmit: (_prompt: string) => void;
 }) {
   const turnDialogs = useMemo(
     () => dialogHistory.filter((d) => d.run_id === runKey),
@@ -1186,7 +1210,7 @@ function SegmentedTurnBody({
     () =>
       viewMode === "all"
         ? null
-        : segments.filter((s) => s.kind === "text" || s.kind === "file"),
+        : segments.filter(isConversationSegment),
     [viewMode, segments],
   );
   const timeline = useMemo(() => {
@@ -1229,7 +1253,8 @@ function SegmentedTurnBody({
       )}
       {/* 「对话」视图（2026-09-09-sessions-visual-refresh task-05 / D-003@v1）：
           agent 侧挂共享渐变光环头像（ChatMessageAvatar），text/file 段气泡行与
-          头像横排；「全部」视图不挂头像（Grill G-03——进度时间线保持 ml-9 竖线
+          头像横排（task-02 后子代理容器段卡片也在此列，随 SegmentView 分发）；
+          「全部」视图不挂头像（Grill G-03——进度时间线保持 ml-9 竖线
           容器原样式）。 */}
       {textSegments != null && textSegments.length > 0 && (
         <div className="flex items-start gap-2.5">

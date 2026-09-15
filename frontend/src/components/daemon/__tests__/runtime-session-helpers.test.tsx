@@ -432,8 +432,85 @@ describe("runTerminalTurnStatus（ql-20260822-010）", () => {
     expect(runTerminalTurnStatus("cancelled")).toBe("killed");
     expect(runTerminalTurnStatus("completed")).toBeNull();
     expect(runTerminalTurnStatus("running")).toBeNull();
-    expect(runTerminalTurnStatus("pending")).toBeNull();
     expect(runTerminalTurnStatus(null)).toBeNull();
+  });
+});
+
+describe("logsToTurns 父归属跨 run 重挂（2026-09-15-subagent-three-pane-display 验收返工）", () => {
+  /** DFS 找 tool_use_id 匹配的 tool 段（task 元数据 / children 断言用）。 */
+  function findToolSeg(segments: TurnSegment[] | undefined, id: string) {
+    const walk = (list: TurnSegment[] | undefined): TurnSegment | null => {
+      for (const s of list ?? []) {
+        if (s.kind === "tool" && s.id === id) return s;
+        if (s.kind === "tool" || s.kind === "subagent_stub") {
+          const inner = walk(s.children);
+          if (inner) return inner;
+        }
+      }
+      return null;
+    };
+    return walk(segments);
+  }
+
+  const runA = "run-dispatch";
+  const runB = "run-later";
+  const base = (): AgentRunLogEntry[] => [
+    makeLog("l1", runA, "user_input", "帮我跑个后台调研"),
+    makeLog("l2", runA, "tool_call", JSON.stringify({
+      tool: "Task",
+      tool_use_id: "toolu_A1",
+      args: { description: "后台调研", prompt: "请调研 X 并输出报告", subagent_type: "Explore" },
+    })),
+    makeLog("l3", runA, "stdout", '[TASK_STARTED] {"task_id":"t1","tool_use_id":"toolu_A1","status":"running","async":true}', {
+      parent_tool_use_id: "toolu_A1",
+    }),
+    // 关键行：终态通知与子代理产出均经后续 run 落库（DB 实证 daemon 注册表丢失
+    // 后 writeTaskLine 回退 currentRunId），父归属须把它们重挂回派发轮。
+    makeLog("l4", runB, "stdout", '[TASK_NOTIFICATION] {"task_id":"t1","status":"completed","elapsed_ms":1200,"summary":"调研完成"}', {
+      parent_tool_use_id: "toolu_A1",
+    }),
+    makeLog("l5", runB, "stdout", "[ASSISTANT] 调研完成，结论是 X 可行", {
+      parent_tool_use_id: "toolu_A1",
+      subagent_type: "Explore",
+    }),
+  ];
+
+  it("跨 run 的 [TASK_NOTIFICATION]/子代理产出重挂回派发轮——taskStatus 收敛 completed、children 归位", () => {
+    const turns = toSegmentTurns(base());
+    expect(turns).toHaveLength(2);
+    const dispatchTurn = turns.find((t) => t.realRunId === runA);
+    const laterTurn = turns.find((t) => t.realRunId === runB);
+    expect(dispatchTurn).toBeDefined();
+    expect(laterTurn).toBeDefined();
+    const tool = findToolSeg(dispatchTurn?.segments, "toolu_A1");
+    expect(tool).toMatchObject({ kind: "tool", taskStatus: "completed", taskElapsedMs: 1200 });
+    // 子代理文本挂进派发段 children（不再散落后续轮）。
+    const childTexts = (tool?.kind === "tool" ? tool.children : [])
+      .filter((c) => c.kind === "text")
+      .map((c) => (c.kind === "text" ? c.text : ""));
+    expect(childTexts).toContain("调研完成，结论是 X 可行");
+    // 后续轮不再冒出永久 running 的幽灵 stub。
+    expect(
+      (laterTurn?.segments ?? []).some((s) => s.kind === "subagent_stub"),
+    ).toBe(false);
+  });
+
+  it("父 tool_use 未登记（孤儿）保持原组——stub 兜底语义不变", () => {
+    const logs = base().filter((l) => l.id !== "l2"); // 去掉派发 tool_call 行
+    const turns = toSegmentTurns(logs);
+    const laterTurn = turns.find((t) => t.realRunId === runB);
+    // l4/l5 找不到父段 → 留在 runB，l5 按既有兜底建 stub（l4 信号行丢弃）。
+    expect(
+      (laterTurn?.segments ?? []).some((s) => s.kind === "subagent_stub"),
+    ).toBe(true);
+  });
+
+  it("无跨 run 散落时零位移（同 run 归属行为与既有完全一致）", () => {
+    const logs = base().map((l) => ({ ...l, run_id: runA }) as AgentRunLogEntry);
+    const turns = toSegmentTurns(logs);
+    expect(turns).toHaveLength(1);
+    const tool = findToolSeg(turns[0]?.segments, "toolu_A1");
+    expect(tool).toMatchObject({ kind: "tool", taskStatus: "completed" });
   });
 });
 

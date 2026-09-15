@@ -226,6 +226,7 @@ export interface SessionPanelProps {
   /** dialog 必需：模型覆盖，受控于父级。〔prop〕父级 useState 持有。 */
   model?: string | null;
   /** dialog 必需：模型覆盖变更回调。〔prop〕同上受控对。 */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
   onModelChange?: (next: string | null) => void;
   /** dialog 必需：是否有在线 provider（输入/选择器禁用 + 徽标）。〔prop〕消费方派生。 */
   hasOnlineProvider?: boolean;
@@ -233,6 +234,7 @@ export interface SessionPanelProps {
    *  〔prop〕一次性初始值，仅 mount 时读取。 */
   initialTurns?: SessionTurnView[];
   /** dialog 可选：createSession 成功上报（父级写 URL ?session= / 刷新列表）。〔prop〕。 */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
   onSessionCreated?: (sessionId: string) => void;
   /** dialog 可选：面板重置回 idle / end 成功上报（父级清 URL / 清选中 / 刷新）。〔prop〕。 */
   onSessionReset?: () => void;
@@ -243,6 +245,7 @@ export interface SessionPanelProps {
   /** dialog 可选：团队任务上报。〔prop〕task-11 起语义 = 触发弹层确认后
    *  triggerSessionTeamMission 预建成功的 mission_id 上报（父级可挂 TeamProgress）；
    *  当前无消费方传，保留透传位（design D-005 明确要求 team 可选透传）。 */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
   onTeamMissionCreated?: (missionId: string) => void;
   /** dialog 可选：离线只读（禁 4 操作 + 不建 SSE + 横幅）。〔prop〕仅 runtime-session-dialog 传。 */
   offlineReadOnly?: boolean;
@@ -252,7 +255,21 @@ export interface SessionPanelProps {
    *  受控-可选模式：传入 onViewModeChange 即受控。 */
   viewMode?: "conversation" | "all";
   /** 配套变更回调（与 viewMode 成对传或成对不传）。〔prop〕 */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
   onViewModeChange?: (mode: "conversation" | "all") => void;
+
+  // ── page 模式子代理右栏（task-03 / 2026-09-15-subagent-three-pane-display /
+  //    design §5.B——仅门户 page 装配传入）──────────────────────────────
+  /** page 可选：右栏应展示的子代理段 id（null = 未打开）。段 id 是会话内稳定
+   *  key；未传（dialog 等旧消费方 / 悬浮宿主）内部视为 null，行为零回归。〔prop〕 */
+  openSubagentId?: string | null;
+  /** page 可选：中栏紧凑卡片 / 目录点击打开右栏上抛（门户落单槽位并清文件
+   *  预览，design §5.A）。未传则 SessionPanelPage 不挂 SubagentPanelContext
+   *  Provider，SubagentBlockView 回退原内联展开（FR-05）。〔prop〕 */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
+  onOpenSubagent?: (segmentId: string) => void;
+  /** page 可选：右栏 ✕ / 段失效自动关闭上抛（门户清槽位）。〔prop〕 */
+  onSubagentPanelClose?: () => void;
 }
 
 /**
@@ -277,6 +294,11 @@ export function SessionPanel(props: SessionPanelProps) {
         onPreSessionCreated={props.onPreSessionCreated}
         pageContextOverride={props.pageContextOverride}
         variant={props.variant ?? "desktop"}
+        // task-03（2026-09-15-subagent-three-pane-display / design §5.B）：
+        // 子代理右栏三 props 透传（仅门户 page 装配传入；未传内部视为 null 零回归）。
+        openSubagentId={props.openSubagentId}
+        onOpenSubagent={props.onOpenSubagent}
+        onSubagentPanelClose={props.onSubagentPanelClose}
       />
     );
   }

@@ -39,3 +39,8 @@ execute 启动时 CLI 把主仓**当时未提交的并行会话在途文件**（
    补跑各子项目 postinstall 生成脚本；
 2. 或 baseline overlay 只收**本变更 allowed_paths 命中的文件**，不收并行会话在途文件；
 3. 模块子集失败时自动输出「主仓单跑对照」提示（当前只有失败疑点排查顺序文案，需手动执行）。
+
+## 巡检注记（2026-09-15 定时扫描）
+
+- 定性：verify 沙箱构建的**设计级改动**——三建议（overlay import 闭合冒烟 / overlay 只收 allowed_paths 命中文件 / 失败自动主仓对照）分别涉及快照构建管线加验证步骤、baseline checkpoint 语义变更（overlay 存在的意义就是把并行在途态带进 worktree，收窄会改变 execute 期隔离语义）、自动双跑成本翻倍。属 verify 沙箱专项，非巡检级小修。
+- 现有逃生通道完备（SNAPSHOT_OFF 对照回退 + known_failures 分组豁免 + 主仓单跑定归属），无阻断。保持活跃待专项认领。

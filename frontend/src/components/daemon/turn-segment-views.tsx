@@ -22,7 +22,11 @@
  *                       渲染；运行中默认展开+头部扫动，完成默认折叠；subagent_stub
  *                       兜底段复用同组件；task-13：段带 [TASK_*] 元数据（async 后台
  *                       派发）时块头改状态徽标「后台运行中+走秒 / 已完成(真实时长) /
- *                       失败 / 已停止」+ 正文尾行进度摘要——元数据驱动，终态即终）
+ *                       失败 / 已停止」+ 正文尾行进度摘要——元数据驱动，终态即终；
+ *                       2026-09-15-subagent-three-pane-display task-01：消费
+ *                       SubagentPanelContext（page 模式 Provider）时改紧凑卡片——
+ *                       只显头部行、children 移右栏、点击 toggle 面板；无 context
+ *                       （dialog 等旧宿主）保持原内联展开零回归）
  *   - StderrRowView     stderr 警示行（⚠ 前缀，平移现有 amber 样式）
  *   - TeamWorkerBlockView 分身段块（task-12 / 2026-08-22-team-session-unify FR-07：
  *                       brand 折叠卡——角色/目标工作区徽标/状态/耗时 + children
@@ -60,6 +64,7 @@ import type { ReactNode } from "react";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { CopyButton } from "@/components/daemon/copy-button";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
+import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
 import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
 import type {
   StubTurnSegment,
@@ -288,6 +293,98 @@ function taskMetaStatusOf(segment: SubagentContainerSegment): SubagentTaskStatus
   if (segment.kind !== "tool") return null;
   if (segment.taskStatus === undefined && segment.taskAsync === undefined) return null;
   return segment.taskStatus ?? "running";
+}
+
+/* ───────────── task-03（2026-09-15-subagent-three-pane-display / FR-02 / design §5.E）───────── */
+
+/**
+ * 子代理块头部派生结果（subagentHeaderOf 产出）——SubagentBlockView 两种模式
+ * （紧凑卡片 / 内联展开）与右栏 SubagentDetailPanel 头部共用同一份派生，
+ * 防两处复制漂移。
+ */
+export interface SubagentHeaderInfo {
+  /** 综合状态（[TASK_*] 元数据优先，否则段三态；stub 恒 running）。 */
+  status: SubagentTaskStatus | "ok" | "deny";
+  /** task-13 元数据状态（无元数据 null——消费方据此不渲染状态徽标）。 */
+  metaStatus: SubagentTaskStatus | null;
+  /** 是否运行中（status === "running"，seg-sweep / 展开默认等消费）。 */
+  running: boolean;
+  /** 状态点样式（running=brand 阶 pulse / deny·failed=红 / stopped=灰 / 其余绿）。 */
+  dotCls: string;
+  /** 头部名称（tool 段 primary 优先，回退 subagentType / 「子代理」；stub 无 primary）。 */
+  name: string;
+  /** subagentType 标签（null 不渲染标签）。 */
+  subagentType: string | null;
+  /** task-13 状态徽标（后台运行中/已完成/失败/已停止；无元数据 null）。 */
+  badge: { label: string; cls: string } | null;
+  /** 时长文本（mm:ss / 「运行中」/ null 不渲染——推导规则见 subagentHeaderOf）。 */
+  durationText: string | null;
+}
+
+/**
+ * 子代理块头部公共纯函数（task-03 / design §5.E「复用 SubagentBlockView 头部
+ * 派生逻辑，抽公共纯函数 subagentHeaderOf(segment)」）——名称/状态点/徽标/时长
+ * 一处派生，SubagentBlockView（两模式）与右栏 SubagentDetailPanel 共用。
+ *
+ * 时长推导（task-13 元数据双路径原样收敛）：
+ *   - 元数据终态 → 服务端权威 taskElapsedMs（缺失 null）；
+ *   - 元数据运行中 → 本地走秒 now - startedAt（now 由消费方 tick state 传入，
+ *     纯函数不读时钟）；缺 startedAt 锚点回退最近一次 taskElapsedMs 校准值；
+ *   - 无元数据运行中 → 「运行中」（不读时钟，与原实现一致）；
+ *   - 无元数据终态 → endedAt - startedAt（起止均有才显示）。
+ */
+export function subagentHeaderOf(
+  segment: SubagentContainerSegment,
+  now: number,
+): SubagentHeaderInfo {
+  const taskSeg = segment.kind === "tool" ? segment : null;
+  const metaStatus = taskMetaStatusOf(segment);
+  const status = metaStatus ?? subagentStatus(segment);
+  const running = status === "running";
+  const dotCls =
+    status === "running"
+      ? "bg-brand-600 animate-pulse"
+      : status === "deny" || status === "failed"
+        ? "bg-destructive"
+        : status === "stopped"
+          ? "bg-muted-foreground"
+          : "bg-emerald-600";
+  const name =
+    segment.kind === "tool"
+      ? (segment.primary?.trim() || segment.subagentType || "子代理")
+      : (segment.subagentType || "子代理");
+  let durationText: string | null = null;
+  if (metaStatus != null && taskSeg != null) {
+    if (metaStatus === "running") {
+      durationText =
+        taskSeg.startedAt != null
+          ? formatClockDuration(now - taskSeg.startedAt)
+          : taskSeg.taskElapsedMs != null
+            ? formatClockDuration(taskSeg.taskElapsedMs)
+            : null;
+    } else {
+      durationText =
+        taskSeg.taskElapsedMs != null ? formatClockDuration(taskSeg.taskElapsedMs) : null;
+    }
+  } else if (running) {
+    durationText = "运行中";
+  } else if (
+    segment.kind === "tool" &&
+    segment.startedAt != null &&
+    segment.endedAt != null
+  ) {
+    durationText = formatClockDuration(segment.endedAt - segment.startedAt);
+  }
+  return {
+    status,
+    metaStatus,
+    running,
+    dotCls,
+    name,
+    subagentType: segment.subagentType ?? null,
+    badge: metaStatus != null ? TASK_STATUS_BADGE[metaStatus] : null,
+    durationText,
+  };
 }
 
 /* ─────────────── 团队 MCP 工具识别与摘要（task-12 / FR-07） ─────────────── */
@@ -586,11 +683,24 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
  *（仅 async 运行中启动）——task-05「纯组件不读本地时钟」约束在此让位：运行中
  * 不显示秒数会重新制造「00:00 假完成」盲区。无元数据段走原推导（前台阻塞式
  * 子代理零回归）。
+ *
+ * task-01（2026-09-15-subagent-three-pane-display / FR-02 / FR-05 / D-001@v1 /
+ * D-002@v1，design §5.C）：双模式——useSubagentPanel() 消费到右栏面板 context
+ * （page 模式 Provider）时渲染中栏紧凑卡片：仅头部行（状态点/🤖/名称/类型标签/
+ * 徽标/时长全复用，running 时 seg-sweep 保留），不内联 children、无折叠语义
+ * （aria-expanded 移除）；点击头部 toggle 右栏（未激活 → openSubagent(segment.id)，
+ * 已激活 → closeSubagent()），根容器带 data-segment-id 锚点 + activeId 命中
+ * ring-brand-300 描边高亮。无 context（dialog 弹窗/悬浮宿主等旧消费方）走原
+ * 内联展开分支，行为零回归（FR-05）。
  */
 export const SubagentBlockView = memo(function SubagentBlockView({
   segment,
 }: SubagentBlockViewProps) {
   useSegmentAnimations();
+  // task-01：右栏面板 context——null（dialog 等旧宿主无 Provider）走下方原内联
+  // 展开分支；有值（page 模式）提前 return 紧凑卡片。两分支共享全部头部派生
+  //（metaStatus/taskSeg/durationText/dotCls/name），零复制粘贴。
+  const panel = useSubagentPanel();
   // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）。
   const taskSeg = segment.kind === "tool" ? segment : null;
   const metaStatus = taskMetaStatusOf(segment);
@@ -615,42 +725,11 @@ export const SubagentBlockView = memo(function SubagentBlockView({
     return () => window.clearInterval(id);
   }, [asyncRunning]);
 
-  const dotCls =
-    status === "running"
-      ? "bg-brand-600 animate-pulse"
-      : status === "deny" || status === "failed"
-        ? "bg-destructive"
-        : status === "stopped"
-          ? "bg-muted-foreground"
-          : "bg-emerald-600";
-  const name =
-    segment.kind === "tool"
-      ? (segment.primary?.trim() || segment.subagentType || "子代理")
-      : (segment.subagentType || "子代理");
-  let durationText: string | null = null;
-  if (metaStatus != null && taskSeg != null) {
-    // task-13：元数据驱动时长——终态 = 服务端权威 taskElapsedMs（真实用时）；
-    // 运行中 = 本地走秒（缺锚点回退最近一次 taskElapsedMs 校准值，再缺不显示）。
-    if (metaStatus === "running") {
-      durationText =
-        taskSeg.startedAt != null
-          ? formatClockDuration(now - taskSeg.startedAt)
-          : taskSeg.taskElapsedMs != null
-            ? formatClockDuration(taskSeg.taskElapsedMs)
-            : null;
-    } else {
-      durationText =
-        taskSeg.taskElapsedMs != null ? formatClockDuration(taskSeg.taskElapsedMs) : null;
-    }
-  } else if (running) {
-    durationText = "运行中";
-  } else if (
-    segment.kind === "tool" &&
-    segment.startedAt != null &&
-    segment.endedAt != null
-  ) {
-    durationText = formatClockDuration(segment.endedAt - segment.startedAt);
-  }
+  // task-03（design §5.E）：头部派生收敛到共享纯函数 subagentHeaderOf（状态点/
+  // 名称/徽标/时长一处派生）——右栏 SubagentDetailPanel 头部复用同一份逻辑，
+  // 防两处复制漂移；now 走上方 tick state（async 运行中走秒）。
+  const header = subagentHeaderOf(segment, now);
+  const { dotCls, name, durationText } = header;
   // task-13：正文尾行 = 最近一条 [TASK_*] 消费后的进度摘要（段元数据，原型
   // blk-body 的 └ 行）——运行中 = 最近工具名（brand 阶）+ 进行中摘要（PROGRESS
   // 行）；终态 = 终态文案 + 摘要（NOTIFICATION 行，taskToolName 已陈旧不展示）。
@@ -667,6 +746,83 @@ export const SubagentBlockView = memo(function SubagentBlockView({
         ? { label: TASK_STATUS_BADGE[metaStatus].label, tool: null, summary }
         : null;
     })();
+  // 头部行内容子结构（task-01 抽出，两分支共享）：状态点 / 🤖 / 名称 / 类型
+  // 标签 / task-13 徽标 / 时长——紧凑卡片与内联展开同源派生，避免大段 JSX
+  // 复制漂移。
+  const headerContent = (
+    <>
+      <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dotCls)} />
+      <span aria-hidden className="shrink-0">
+        🤖
+      </span>
+      <span className="min-w-0 truncate font-semibold">{name}</span>
+      {segment.subagentType && (
+        <span className="shrink-0 rounded-lg border border-border bg-card px-1.5 text-[10px] text-muted-foreground">
+          {segment.subagentType}
+        </span>
+      )}
+      {/* task-13：元数据驱动的块头状态徽标（后台运行中/已完成/失败/已停止，
+          原型 .st 药丸）；前台路径不渲染（保持原形态零回归）。 */}
+      {metaStatus != null && (
+        <span
+          className={cn(
+            "shrink-0 rounded-[5px] px-2 py-px text-[10.5px] font-semibold",
+            TASK_STATUS_BADGE[metaStatus].cls,
+          )}
+        >
+          {TASK_STATUS_BADGE[metaStatus].label}
+        </span>
+      )}
+      {durationText && (
+        <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+          {durationText}
+        </span>
+      )}
+    </>
+  );
+
+  // task-01：紧凑卡片分支（page 模式有 context）——中栏只显头部行，无展开
+  // body、不内联 children（详情移右栏）；头部仍是可点击 button（含 Enter/Space
+  // 键盘触发），但无折叠语义（不渲染 aria-expanded）；点击 toggle 右栏
+  //（未激活 → openSubagent(segment.id)，已激活 → closeSubagent()，D-002@v1 ④）；
+  // 根容器 data-segment-id 供右栏/目录联动定位，activeId 命中加 brand 阶
+  // ring 描边高亮。
+  if (panel) {
+    const active = panel.activeId === segment.id;
+    const togglePanel = () => {
+      if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发
+      if (active) panel.closeSubagent();
+      else panel.openSubagent(segment.id);
+    };
+    return (
+      <div
+        data-segment-id={segment.id}
+        className={cn(
+          "w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
+          active && "ring-1 ring-brand-300",
+        )}
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={togglePanel}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              togglePanel();
+            }
+          }}
+          className={cn(
+            "relative flex cursor-pointer select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
+            running && "seg-sweep",
+          )}
+        >
+          {headerContent}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
       <div
@@ -688,33 +844,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
           running && "seg-sweep",
         )}
       >
-        <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dotCls)} />
-        <span aria-hidden className="shrink-0">
-          🤖
-        </span>
-        <span className="min-w-0 truncate font-semibold">{name}</span>
-        {segment.subagentType && (
-          <span className="shrink-0 rounded-lg border border-border bg-card px-1.5 text-[10px] text-muted-foreground">
-            {segment.subagentType}
-          </span>
-        )}
-        {/* task-13：元数据驱动的块头状态徽标（后台运行中/已完成/失败/已停止，
-            原型 .st 药丸）；前台路径不渲染（保持原形态零回归）。 */}
-        {metaStatus != null && (
-          <span
-            className={cn(
-              "shrink-0 rounded-[5px] px-2 py-px text-[10.5px] font-semibold",
-              TASK_STATUS_BADGE[metaStatus].cls,
-            )}
-          >
-            {TASK_STATUS_BADGE[metaStatus].label}
-          </span>
-        )}
-        {durationText && (
-          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
-            {durationText}
-          </span>
-        )}
+        {headerContent}
       </div>
       {open && (
         <div className="seg-subagent-body flex flex-col gap-[5px] border-t border-indigo-200 px-3.5 pb-2.5 pl-5 pt-2">

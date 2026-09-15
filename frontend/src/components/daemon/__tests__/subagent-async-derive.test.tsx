@@ -12,6 +12,9 @@
  *   2. SubagentCatalog 行渲染口径——运行中显示走秒（now 补秒，fake timers）；
  *        终态显示服务端真实时长 taskElapsedMs（不用 endedAt-startedAt 回执差值）；
  *        无 startedAt 的运行中回退最近 taskElapsedMs 校准值（不走秒）。
+ *   3. task-03（2026-09-15-subagent-three-pane-display / FR-05 / design §5.F）：
+ *      SubagentCatalog activeId——命中行 ring-brand-300 描边 + aria-current，
+ *      未传 activeId 零回归。
  *
  * 测试纪律对齐 turn-segment-views.test.tsx（deriveTurnActivity 纯函数区 +
  * fake timers try/finally）；SubagentCatalog 自绘 tailwind 组件不依赖 antd，
@@ -313,5 +316,73 @@ describe("SubagentCatalog 行时长口径（task-13 / FR-07）", () => {
     expect(
       screen.getByTitle("后台调研 · researcher 正在写报告"),
     ).toBeInTheDocument();
+  });
+});
+
+/* ───────── 3. SubagentCatalog activeId 高亮（task-03 / FR-05 / design §5.F） ───────── */
+
+describe("SubagentCatalog activeId 行高亮（subagent-three-pane task-03）", () => {
+  /** 构造最小 SessionTurnView（SubagentCatalog 只读 status + segments）。 */
+  function makeTurnView(segments: TurnSegment[]): SessionTurnView {
+    return {
+      runId: "run-1",
+      turn: 1,
+      prompt: "调研一下",
+      output: "",
+      status: "running",
+      seenLogIds: new Set<string>(),
+      inputTokens: null,
+      outputTokens: null,
+      segments,
+    };
+  }
+
+  /** 两行终态目录（不同 taskElapsedMs 便于按时长文本定位行）。 */
+  function makeTwoRowTurns(): SessionTurnView[] {
+    return [
+      makeTurnView([
+        makeToolSeg({
+          id: "sa_hit",
+          primary: "命中调研员",
+          taskStatus: "completed",
+          taskElapsedMs: 30_000, // → 00:30
+        }),
+        makeToolSeg({
+          id: "sa_miss",
+          primary: "旁路调研员",
+          taskStatus: "completed",
+          taskElapsedMs: 45_000, // → 00:45
+        }),
+      ]),
+    ];
+  }
+
+  /** 打开下拉并按行时长文本（mono span）向上定位行按钮。 */
+  function rowButtonByDuration(duration: string): HTMLElement {
+    const span = screen.getByText(duration);
+    const btn = span.closest("button");
+    if (!(btn instanceof HTMLElement)) throw new Error(`row button not found: ${duration}`);
+    return btn;
+  }
+
+  it("activeId 命中行 ring-brand-300 描边 + aria-current；未命中行无高亮", () => {
+    render(<SubagentCatalog turns={makeTwoRowTurns()} activeId="sa_hit" />);
+    fireEvent.click(screen.getByRole("button", { name: "子代理目录，共 2 个" }));
+    const hit = rowButtonByDuration("00:30");
+    expect(hit.className).toContain("ring-brand-300"); // 与 task-01 卡片高亮同款
+    expect(hit).toHaveAttribute("aria-current", "true");
+    const miss = rowButtonByDuration("00:45");
+    expect(miss.className).not.toContain("ring-brand-300");
+    expect(miss).not.toHaveAttribute("aria-current");
+  });
+
+  it("未传 activeId：无行高亮 / 无 aria-current（既有行为零回归）", () => {
+    render(<SubagentCatalog turns={makeTwoRowTurns()} />);
+    fireEvent.click(screen.getByRole("button", { name: "子代理目录，共 2 个" }));
+    for (const dur of ["00:30", "00:45"]) {
+      const row = rowButtonByDuration(dur);
+      expect(row.className).not.toContain("ring-brand-300");
+      expect(row).not.toHaveAttribute("aria-current");
+    }
   });
 });

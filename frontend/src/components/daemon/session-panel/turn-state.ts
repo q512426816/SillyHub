@@ -107,6 +107,27 @@ export function upsertTurn(
 ): TurnState {
   const runId = env.run_id;
   if (!runId) return prev;
+  // 父归属优先跨轮路由（2026-09-15-subagent-three-pane-display 用户验收返工）：
+  // 后台子代理的终态信号（[TASK_NOTIFICATION]）与内容行常经**后续 run** 上报
+  // （daemon 任务注册表丢失时 writeTaskLine 回退 currentRunId，DB 实证：通知行
+  // run_id ≠ 派发 run_id）。按 run_id 分轮会让这些行落到后续轮——装配器内
+  // findToolById 找不到派发段 → 信号丢弃 → 派发段永久「运行中」+ 后续轮冒出
+  // 永久 running 的幽灵 stub。带 parent_tool_use_id 的 log 先全轮 DFS 找父段，
+  // 命中即路由到父段所在轮（终态信号更新段元数据，不重开轮）；未命中回退
+  // run_id 分轮原路径（stub 兜底不变）。
+  const parentToolUseId = env.parent_tool_use_id?.trim() || null;
+  if (parentToolUseId && env.event === "log") {
+    for (let i = prev.turns.length - 1; i >= 0; i -= 1) {
+      const owner = prev.turns[i];
+      if (owner && findSegmentById(owner.segments, parentToolUseId)) {
+        // 只更新父段所在轮：apply（段元数据/children 追加），不 healToRunning
+        // （后台通知到达时派发轮可能已完成——不把终态轮翻回 running），也不
+        // 新建/合并 run_id 轮。倒序找最末命中（同 id 多轮仅极端重放场景）。
+        const turns = prev.turns.map((t, idx) => (idx === i ? apply(t) : t));
+        return { ...prev, turns };
+      }
+    }
+  }
   // ql-20260817-007：attach 历史 turn 的 key 是伪 id（__attach_history_N__），
   // 真实 id 在 realRunId——SSE 事件按两者匹配，命中即合并到既有 turn，
   // 否则同一 run 会渲染出第二个「正在思考…」空块（新建会话输入后复现）。

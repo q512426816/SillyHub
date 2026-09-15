@@ -14,3 +14,5 @@ created_at: 2026-09-14 13:58:17
 - [x] task-06: 前端入口——session-list-panel.tsx 批量栏「导出选中」Dropdown + 行 hover 下载图标 + exporting state；sessions-portal.tsx 接线 (depends_on: task-05)
 - [x] task-07: 前端测试——__tests__/session-list-panel.test.tsx 追加导出入口用例 (depends_on: task-06)
 - [x] task-08: 类型同步——pnpm gen:types + api-types.ts/openapi.json 提交 + ruff/mypy/eslint 聚焦收口 (depends_on: task-03,task-04,task-06,task-07)
+- [x] ql-20260915-003-7b5f 会话一键导出
+- [x] ql-20260915-004-c091 会话一键导出

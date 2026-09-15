@@ -85,6 +85,16 @@
  *   （边聊边看），预览按其 workspaceId 取数不跨工作区串档。grid 换 flex 三栏 +
  *   两把 PanelResizer（宽度 localStorage 记忆，D-005 左栏默认 320 与现状一致）。
  *
+ * 右栏单槽位互斥（task-04 / 2026-09-15-subagent-three-pane-display / FR-01 /
+ *   D-003@v1 / design §5.A）：filePreview 与 subagentView { segmentId } 两态
+ *   并列、写入点双向清零（最后触发覆盖）——点文件树文件 → 清 subagentView 再
+ *   落 filePreview（SessionPanel 收 openSubagentId=null 自动卸载子代理列）；
+ *   点子代理（onOpenSubagent 上抛）→ 清 filePreview 再落 subagentView（portal
+ *   文件预览列卸载）。portal 不渲染子代理面板本体（归 SessionPanel 右栏，段活
+ *   数据在 displayTurns，design §5.B）；会话切换（selectedSessionId 变化含清
+ *   null）统一 effect 清 subagentView——段 id 属旧会话，切群/预会话后切回不
+ *   误开残值面板。
+ *
  * 深链恢复（D-004@v1）语义保留：?session= 有效直达选中态；无效/无参静默落
  * 空门户态（原落新建表单态，design §9 兼容策略）。
  *
@@ -196,12 +206,36 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     workspaceId: string;
     path: string;
   } | null>(null);
+  // ── task-04（2026-09-15-subagent-three-pane-display / FR-01 / D-003@v1 / design
+  //    §5.A）：右栏单槽位——子代理段视图（段 id 是会话内稳定 key），与
+  //    filePreview 并列互斥，写入点双向清零（最后触发覆盖）；portal 只管槽位
+  //    状态，面板本体在 SessionPanel 右栏渲染（design §5.B）。 ──
+  const [subagentView, setSubagentView] = useState<{
+    segmentId: string;
+  } | null>(null);
   // 全局入口当前选中归属工作区（六写入点显式快照，D-006——原派生链有群深链不
   // 回填 selectedGroup、旁路列表外 find 不命中两处缺口；scope 入口不经此值）。
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     null,
   );
   const qc = useQueryClient();
+
+  // task-04（design §5.A 互斥写入点②）：中栏子代理卡片 / 目录点击经 SessionPanel
+  // onOpenSubagent 上抛——清文件预览（portal 右列卸载）再落子代理段，最后触发
+  // 覆盖（子代理胜）。setter-only 无 deps。
+  const handleOpenSubagent = useCallback((segmentId: string) => {
+    setFilePreview(null);
+    setSubagentView({ segmentId });
+  }, []);
+
+  // task-04（design §5.A 会话切换清零 / FR-01）：selectedSessionId 变化（含清
+  // null——切群 onSelectGroup / 进预会话 enterPreSession 同走 setSelectedSessionId
+  // (null)）即清 subagentView——段 id 属旧会话，跨会话无意义；切群/预会话时
+  // SessionPanel 卸载面板随 key 重挂载自然消失，本 effect 统一兜住残值（切回
+  // 会话不误开旧会话面板）。
+  useEffect(() => {
+    setSubagentView(null);
+  }, [selectedSessionId]);
 
   // task-01（D-004@v1）：?session= 深链——挂载时解析一次（urlRestoreDoneRef
   // 守卫，先例 /runtimes/page.tsx:440）。getAgentSession 验证通过才设初始
@@ -656,11 +690,15 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                 setFilesModeWorkspaceId(null);
                 setLeftMode("sessions");
               }}
-              onSelectFile={(path) =>
+              onSelectFile={(path) => {
                 // 点文件以当时树的工作区（快照）落值；同文件重复点幂等（同值
-                // 重设零行为差异）。
-                setFilePreview({ workspaceId: filesModeWorkspaceId, path })
-              }
+                // 重设零行为差异）。task-04（design §5.A 互斥写入点①）：先清
+                // 子代理槽位再落预览——最后触发覆盖（文件胜，SessionPanel 收
+                // openSubagentId=null 自动卸载子代理列）；✕ 关预览（下方渲染
+                // 处）语义不变、不清子代理（互斥仅发生在两写入点）。
+                setSubagentView(null);
+                setFilePreview({ workspaceId: filesModeWorkspaceId, path });
+              }}
             />
           ) : (
             <SessionListPanel
@@ -892,6 +930,13 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             machines={pickerMachines}
             llmProviders={providers}
             onSessionListRefresh={refreshSessionLists}
+            // task-04（FR-01 / FR-05 / D-003@v1 / design §5.B）：子代理右栏三
+            // props 装配——槽位状态归 portal（互斥清零见 handleOpenSubagent /
+            // onSelectFile / 会话切换 effect），面板本体与段活数据在
+            // SessionPanel（displayTurns）内渲染；key 重挂载契约不变。
+            openSubagentId={subagentView?.segmentId ?? null}
+            onOpenSubagent={handleOpenSubagent}
+            onSubagentPanelClose={() => setSubagentView(null)}
           />
         ) : preContext ? (
           <SessionPanel

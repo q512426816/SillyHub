@@ -37,6 +37,19 @@ import {
   SessionConfigBar, useActiveSharedAgents,
 } from "@/components/sessions/session-config-bar";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
+// task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design §5.B §5.E）：
+// 子代理右栏三件——context Provider（中栏紧凑卡片消费）、详情面板壳、拖宽把手
+// 与宽度记忆（与文件预览共用同一 localStorage 键，单槽位语义，design §5.B）。
+import { SubagentPanelContext } from "@/components/daemon/subagent-panel-context";
+import type { SubagentPanelContextValue } from "@/components/daemon/subagent-panel-context";
+import { SubagentDetailPanel } from "@/components/daemon/subagent-detail-panel";
+import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
+import {
+  SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT,
+  SESSIONS_FILE_PREVIEW_WIDTH_LS_KEY,
+  SESSIONS_FILE_PREVIEW_WIDTH_MAX,
+  SESSIONS_FILE_PREVIEW_WIDTH_MIN,
+} from "@/components/sessions/portal-file-panels";
 // task-03/05（2026-09-08-session-turn-nav / FR-01 FR-03 / D-002@v1 D-007@v1）：
 // 目录条目类型 + TurnCatalog 刻度轨组件（task-02 产出契约）——类型供下方
 // catalogEntries 派生；组件在 desktop page 分支常驻挂载（task-05 布局接线，
@@ -203,6 +216,23 @@ function truncateForSummary(
 
 /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
 
+/**
+ * task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design §5.B）：
+ * page 模式子代理右栏三可选 props——仅门户 page 装配（sessions-portal task-04）
+ * 传入；未传（悬浮宿主等 page 旧消费方）内部视为 null 且不挂
+ * SubagentPanelContext Provider，SubagentBlockView 回退原内联展开，零回归。
+ * dialog 模式不经本组件（SessionPanel 分发到 session-panel-dialog），天然无右栏。
+ */
+export interface SessionPanelSubagentProps {
+  /** 右栏应展示的子代理段 id（null / 未传 = 未打开）。 */
+  openSubagentId?: string | null;
+  /** 中栏紧凑卡片 / 目录点击打开右栏上抛（宿主落单槽位）。 */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
+  onOpenSubagent?: (segmentId: string) => void;
+  /** 右栏 ✕ / 段失效自动关闭上抛（宿主清槽位）。 */
+  onSubagentPanelClose?: () => void;
+}
+
 export function SessionPanelPage({
   sessionId,
   machines,
@@ -213,7 +243,10 @@ export function SessionPanelPage({
   onPreSessionCreated,
   pageContextOverride,
   variant,
-}: SessionPanelPageProps) {
+  openSubagentId,
+  onOpenSubagent,
+  onSubagentPanelClose,
+}: SessionPanelPageProps & SessionPanelSubagentProps) {
   const qc = useQueryClient();
   const notify = useNotify();
 
@@ -1520,6 +1553,59 @@ export function SessionPanelPage({
     [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
   );
 
+  // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
+  //    §5.B §5.E）：子代理右栏——段实时解析 + 失效自动关闭 + context 提供 ────
+  // 未传 props（悬浮宿主等 page 旧消费方）内部归一 null；dialog 模式不经本组件。
+  const activeSubagentId = openSubagentId ?? null;
+  // 段解析：displayTurns DFS findSegmentById 定位（活引用——SSE 更新即重渲面板，
+  // 非快照）；命中但非容器段（tool / subagent_stub，理论不可达——目录与卡片只
+  // 会给容器段 id）视为未命中，走自动关闭兜底。
+  const openSubagentSegment = useMemo(() => {
+    if (activeSubagentId == null) return null;
+    for (const t of displayTurns) {
+      const seg = findSegmentById(t.segments, activeSubagentId);
+      if (seg && (seg.kind === "tool" || seg.kind === "subagent_stub")) return seg;
+    }
+    return null;
+  }, [displayTurns, activeSubagentId]);
+  // 段失效（会话重装配后 id 不存在 / 切到空 turns 的会话态）→ 自动上抛关闭
+  // （design §5.E）；会话切换清零由宿主（sessions-portal task-04）负责，本
+  // effect 只兜段失效。依赖不变不重跑，宿主忽略回调也不会死循环。
+  useEffect(() => {
+    if (activeSubagentId != null && openSubagentSegment == null) {
+      onSubagentPanelClose?.();
+    }
+  }, [activeSubagentId, openSubagentSegment, onSubagentPanelClose]);
+  // 右栏宽度：本组件自有 usePanelWidth，与文件预览共用同一 localStorage 键
+  // （单槽位语义，两实例互不重叠生命周期内各自记忆，design §5.B / X-002 修正）；
+  // 默认 / 最小 / 最大用 portal-file-panels 同处常量（480 / 320 / 860）。
+  const [subagentPanelWidth, setSubagentPanelWidth] = usePanelWidth({
+    storageKey: SESSIONS_FILE_PREVIEW_WIDTH_LS_KEY,
+    defaultWidth: SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT,
+    minWidth: SESSIONS_FILE_PREVIEW_WIDTH_MIN,
+    maxWidth: SESSIONS_FILE_PREVIEW_WIDTH_MAX,
+  });
+  // Provider 挂载条件（最终方案）：宿主声明右栏能力（传入 onOpenSubagent）且非
+  // mobile（design §3 非目标：移动端窄屏不做右栏）才挂 SubagentPanelContext——
+  // 消费到 context 的 SubagentBlockView 走紧凑卡片分支；不满足则不挂 Provider，
+  // useSubagentPanel() 返回 null 回退原内联展开（FR-05 零回归）。不能无条件挂
+  // 空值 Provider：紧凑卡片点击 openSubagent=noop 会「点了没反应」，比内联回退更差。
+  const hasSubagentPanelHost = !mobile && onOpenSubagent != null;
+  const subagentPanelContextValue = useMemo<SubagentPanelContextValue>(
+    () => ({
+      openSubagent: onOpenSubagent ?? (() => {}),
+      closeSubagent: onSubagentPanelClose ?? (() => {}),
+      activeId: activeSubagentId,
+    }),
+    [onOpenSubagent, onSubagentPanelClose, activeSubagentId],
+  );
+  // 右栏渲染条件：openSubagentId 命中段（段失效时不渲染右列，等上方 effect 关闭）。
+  const subagentPanelOpen = activeSubagentId != null && openSubagentSegment != null;
+  const handleSubagentPanelClose = useCallback(() => {
+    onSubagentPanelClose?.();
+  }, [onSubagentPanelClose]);
+
+
   // ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
   //    轮次目录数据 catalogEntries（TurnCatalogEntry[]；挂载见 task-05 布局接线）。
   //    零新增后端调用（R-08）：runs 骨架复用既有 runsMeta（attach 期 + 每轮
@@ -2404,7 +2490,8 @@ export function SessionPanelPage({
         setErrorMsg(errMessage(apiErr, "重新发送失败"));
       }
     },
-    [session, machineOnline, turnState.currentRunId, sessionId],
+    // qc 为 useQueryClient 稳定实例，补入 deps 消除 exhaustive-deps 告警（行为不变）。
+    [session, machineOnline, turnState.currentRunId, sessionId, qc],
   );
 
   // ql-20260903-026：行级 memo props 稳定化——内联箭头每次渲染新引用会击穿
@@ -2472,6 +2559,14 @@ export function SessionPanelPage({
   // 容忍）。命中：折叠块模拟点击头部展开 + 滚动居中；未命中只完成视图切换不报错。
   const handleJumpToSubagent = useCallback(
     (segmentId: string) => {
+      // task-03（FR-05 / design §5.F）：宿主传入 onOpenSubagent（有右栏能力）→
+      // 直接开右栏展示该子代理完整时间线，不切视图不滚动（中栏已无内联细节
+      // 可定位）；下方 setViewMode("all") + 双 rAF DOM 定位保留为无右栏能力
+      // 宿主（悬浮宿主等未传新 props 的 page 消费方）的回退路径。
+      if (onOpenSubagent != null) {
+        onOpenSubagent(segmentId);
+        return;
+      }
       setViewMode("all");
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -2517,7 +2612,7 @@ export function SessionPanelPage({
         });
       });
     },
-    [displayTurns],
+    [displayTurns, onOpenSubagent],
   );
 
   // ── 渲染 ───────────────────────────────────────────────────────────────
@@ -2574,7 +2669,11 @@ export function SessionPanelPage({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {/* task-09：子代理目录（空 turns 返回 null，同构占位）。 */}
-            <SubagentCatalog turns={[]} onJumpTo={handleJumpToSubagent} />
+            <SubagentCatalog
+              turns={[]}
+              onJumpTo={handleJumpToSubagent}
+              activeId={activeSubagentId}
+            />
             <Button
               size="small"
               icon={<Ban className="h-3 w-3" />}
@@ -2778,16 +2877,16 @@ export function SessionPanelPage({
               // ql-20260909-006：ctx 用量（未知态圆环+额度胶囊）同样收进行尾插槽。
               // 2026-09-13-ctx-usage-all-providers task-07（FR-06）：传引擎名走
               // caps 门控（与 :2700 engine prop 同源 preEngine）。
-              trailing={
-                <CtxUsageBar
-                  usedTokens={null}
-                  roleMapping={null}
-                  fallbackModel={null}
-                  providerId={preProviderId || null}
-                  provider={preEngine}
-                  mobile={mobile}
-                />
-              }
+            trailing={
+              <CtxUsageBar
+                usedTokens={null}
+                roleMapping={null}
+                fallbackModel={null}
+                providerId={preProviderId || null}
+                provider={preEngine}
+                mobile={mobile}
+              />
+            }
             />
           </div>
           {/* R-02：创建失败内联错误（输入保留在上框，点发送即重试）。 */}
@@ -2930,10 +3029,18 @@ export function SessionPanelPage({
     </>
   );
 
-  return (
+  // task-03（design §5.B）：面板根 JSX 先构造成变量——右栏打开时外包 flex 行
+  //（[本节点 flex-1 min-w-0] + 把手 + 右列），未打开 / 无右栏能力宿主原样返回
+  //（className 与 DOM 结构零变化，session-panel-variant 断言不回归）。
+  const panelRoot = (
     <section
       ref={panelRef}
-      className={mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP}
+      className={cn(
+        mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP,
+        // task-03：右栏打开时面板根作为 flex 行左单元格（flex-1 min-w-0）；
+        // 高度链不破坏——外层 flex 行 h-full + 默认 stretch 拉满，h-full 原类保留。
+        subagentPanelOpen && "min-w-0 flex-1",
+      )}
       // task-06（2026-09-08-session-turn-nav / R-05）：mobile 轮次导航 Drawer
       // （getContainer=false 内联渲染）的定位上下文——仅 mobile 补
       // position:relative，不进 className（mobile 根类字面量回归锚逐字不变，
@@ -3026,10 +3133,12 @@ export function SessionPanelPage({
                 }}
               />
               {/* task-09（FR-04 / Grill X-09）：子代理目录——仅 page 模式头部挂载
-                  （dialog 模式不挂）；无子代理段时组件返回 null 不占位。 */}
+                  （dialog 模式不挂）；无子代理段时组件返回 null 不占位。
+                  task-03：activeId 命中行高亮（design §5.F）。 */}
               <SubagentCatalog
                 turns={displayTurns}
                 onJumpTo={handleJumpToSubagent}
+                activeId={activeSubagentId}
               />
             </>
           )}
@@ -3234,6 +3343,7 @@ export function SessionPanelPage({
                     <SubagentCatalog
                       turns={displayTurns}
                       onJumpTo={handleJumpToSubagent}
+                      activeId={activeSubagentId}
                     />
                   </div>
                   {/* ql-20260915-011：mobile 用量条收纳进 ⋯ 菜单「会话用量」区——
@@ -3261,11 +3371,6 @@ export function SessionPanelPage({
         </div>
       </header>
 
-      {/* 2026-08-29-session-usage-stats task-04（FR-02 / 原型场景一 / D-001@v1）：
-          会话累计用量条——page 模式挂会话头部下方（分隔信息条）；session 已
-          narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
-          sessionId 才渲染」）。refreshSignal 挂 onTurnCompleted 轮终态递增
-          （usageRefresh，R-04：组件自取数，不引入 react-query）。 */}
       {/* 2026-08-29-session-usage-stats task-04（FR-02 / 原型场景一 / D-001@v1）：
           会话累计用量条——page 模式挂会话头部下方（分隔信息条）；session 已
           narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
@@ -3757,5 +3862,51 @@ export function SessionPanelPage({
         }}
       />
     </section>
+  );
+
+  // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
+  //    §5.B §5.E）：子代理右栏装配 ──────────────────────────────────────────
+  // 无右栏能力宿主（未传 onOpenSubagent / mobile）：原样返回，不挂 Provider——
+  // SubagentBlockView 走原内联展开，行为零回归（FR-05；挂载条件见
+  // hasSubagentPanelHost 注释）。预会话 / 加载 / 错误三个提前 return 分支无
+  // turns 渲染，天然不需要 Provider。
+  if (!hasSubagentPanelHost) {
+    return panelRoot;
+  }
+  // 右栏打开（openSubagentId 命中段）：面板根外包 flex 行
+  // [panelRoot flex-1 min-w-0] + PanelResizer（side=right，把手在右列左缘，
+  // 拖左增宽——对齐 sessions-portal 文件预览列）+ 右列（宽度 usePanelWidth 记忆，
+  // 与文件预览同键单槽位）内挂 SubagentDetailPanel（段活引用，SSE 实时刷新）。
+  // 段失效间隙（openSubagentSegment null）不渲染右列，等 effect 自动关闭。
+  return (
+    <SubagentPanelContext.Provider value={subagentPanelContextValue}>
+      {subagentPanelOpen ? (
+        <div className="flex h-full min-h-0 w-full overflow-hidden">
+          {panelRoot}
+          <PanelResizer
+            width={subagentPanelWidth}
+            onWidthChange={setSubagentPanelWidth}
+            defaultWidth={SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT}
+            minWidth={SESSIONS_FILE_PREVIEW_WIDTH_MIN}
+            maxWidth={SESSIONS_FILE_PREVIEW_WIDTH_MAX}
+            ariaLabel="调整子代理面板宽度"
+            testId="subagent-panel-resizer"
+            side="right"
+          />
+          <div
+            className="min-w-0 shrink-0"
+            style={{ width: `${subagentPanelWidth}px` }}
+            data-testid="subagent-panel-column"
+          >
+            <SubagentDetailPanel
+              segment={openSubagentSegment}
+              onClose={handleSubagentPanelClose}
+            />
+          </div>
+        </div>
+      ) : (
+        panelRoot
+      )}
+    </SubagentPanelContext.Provider>
   );
 }

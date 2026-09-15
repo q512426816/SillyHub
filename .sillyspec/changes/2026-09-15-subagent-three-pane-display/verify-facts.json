@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-15-subagent-three-pane-display",
+  "generatedAt": "2026-09-15T11:54:39.107Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-15-subagent-three-pane-display",
+      "metrics": {
+        "matches": 2,
+        "skippedFiles": 0,
+        "worktreeHits": 3,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-15-subagent-three-pane-display",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-15-subagent-three-pane-display",
+      "metrics": {
+        "backendEndpoints": 599,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-15-subagent-three-pane-display",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "tests": {
+    "command": "module[frontend]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-15T12:16:01.312Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

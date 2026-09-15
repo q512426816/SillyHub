@@ -32,3 +32,9 @@ verify `--done` 的 cannot_verify 证据账核验：代码类 verifiedFiles 走�
 - gate 阻断原文：`frontend/.../session-log-assembler.ts [code] 不在本变更 git diff 内（filesExist=true mtimeOk=true diffHit=false）`（7 task × 逐文件）
 - 本仓 `.sillyspec/changes/2026-09-12-session-live-display-fixes/verify-result.md` 证据账节的豁免登记
 - 同会话 scope-audit 冻结窗口 23 文件（含全部被拦文件）
+
+## 处置记录（2026-09-15 定时收口，已修复归档）
+
+- **修复**（sillyspec 仓 `src/verify-postcheck.js resolveMainChangedFiles`，工作区未提交）：worktree 侧 `diffBase..HEAD` 与**主仓同区间** diff 求并集——wt-commit 把本变更提交落在主仓 HEAD、worktree 分支不前移，仅查 worktree 侧必然 miss（本坑 7 task 连环假红根因）；主仓区间含并行会话提交，过 `splitOwnVsForeignDiffFiles` 他者声明过滤（best-effort，已提交且声明沉寂的他者文件可能共存窗口——可接受：证据账 verifiedFiles 由 agent 按 task 边界声明，存在性+mtime 门仍在）。主仓查询失败不损原 worktree 结果（fail-soft）。
+- **测试**：新增 `test/verify-evidence-committed-diff.test.mjs`（真实 git 主仓+worktree：wt-commit 形态提交落主仓 → diff 集命中；并集不丢自己文件且集合有界）2/2 绿；verify 全家回归 69 用例零失败。
+- 官方豁免通道（`- task-NN: missing（豁免：…）`）保留为真不匹配场景的出口；本坑形态（正常 wt-commit 后被误拦）不再需要豁免。归档。
