@@ -189,6 +189,16 @@ const SYSTEM_ENV_KEYS = new Set([
 ]);
 
 /**
+ * 子进程源端 UTF-8 缺省 env（ql-20260915-005 / P2-2）：buildSpawnEnv 出口
+ * 仅在键**缺失/空串**时填入——用户显式值与 tool_config.env/provider_config
+ * 下发值优先级更高（见函数尾注）。
+ */
+const UTF8_DEFAULT_ENV: Readonly<Record<string, string>> = {
+  PYTHONIOENCODING: 'utf-8',
+  PYTHONUTF8: '1',
+};
+
+/**
  * redactEnv 匹配的疑似密钥 key 名（大小写不敏感）。
  *
  * 每个词加词边界 ``\b``：``PAT\b`` 不匹配 ``PATH``（PAT 后跟 H 非边界），
@@ -295,6 +305,20 @@ export function buildSpawnEnv(
     // process.env 可能继承残留 CLAUDE_CONFIG_DIR（如 daemon 自身被设过），未隔离场景清掉，
     // 确保 claude CLI 读默认 ~/.claude 而非旧隔离目录。
     delete env.CLAUDE_CONFIG_DIR
+  }
+
+  // ql-20260915-005 后续项（P2-2 Claude SDK 链治本）：子进程源端 UTF-8 缺省注入。
+  // Claude SDK 链的 Bash 工具输出字节在上游 SDK setEncoding('utf8') 已固化，daemon
+  // 侧探测救不回——唯一治本路径是让工具子进程（python 等）从源端吐 UTF-8：
+  //   - PYTHONIOENCODING=utf-8：python stdio 编码（用户实证有效，known-issues 条目）；
+  //   - PYTHONUTF8=1：python 3.7+ UTF-8 模式（连 fs 编码一并覆盖，比前者更彻底）。
+  // 语义 = 填补缺省（键已存在则不动）：用户/宿主显式设置或 tool_config.env/
+  // provider_config 显式下发的同名键优先，绝不覆盖（三层合并已写完，这里只补洞）。
+  // claude 子进程 → Bash → 工具孙进程全链继承，Windows/Linux/macOS 皆安全无副作用。
+  for (const [key, value] of Object.entries(UTF8_DEFAULT_ENV)) {
+    if (env[key] === undefined || env[key] === '') {
+      env[key] = value;
+    }
   }
 
   return env;

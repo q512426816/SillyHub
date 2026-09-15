@@ -546,4 +546,30 @@ describe('spawn-env SILLYSPEC_SYNC_TIMEOUT_MS (ql-20260907-007: 熔断预算缺�
       SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS,
     );
   });
+
+  // ── ql-20260915-005（P2-2 Claude SDK 链治本）：源端 UTF-8 缺省注入 ──
+
+  it('UTF-8 缺省注入：PYTHONIOENCODING/PYTHONUTF8 缺失时填默认', () => {
+    delete process.env.PYTHONIOENCODING;
+    delete process.env.PYTHONUTF8;
+    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+    expect(env.PYTHONIOENCODING).toBe('utf-8');
+    expect(env.PYTHONUTF8).toBe('1');
+  });
+
+  it('UTF-8 缺省注入：宿主已显式设置则尊重不覆盖', () => {
+    process.env.PYTHONIOENCODING = 'gbk';
+    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+    expect(env.PYTHONIOENCODING).toBe('gbk');
+    delete process.env.PYTHONIOENCODING;
+  });
+
+  it('UTF-8 缺省注入：tool_config.env 显式下发优先于缺省', () => {
+    delete process.env.PYTHONIOENCODING;
+    const env = buildSpawnEnv(
+      { toolConfig: { pythonioencoding: 'latin-1' } },
+      { credential: cred },
+    );
+    expect(env.PYTHONIOENCODING).toBe('latin-1');
+  });
 });

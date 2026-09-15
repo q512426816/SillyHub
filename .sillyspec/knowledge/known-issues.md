@@ -132,6 +132,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
   已加码页探测解码（spawn-env.ts `decodeProcessOutputMaybe` 立即版 + `CodepageDetectorDecoder`
   有状态流式版，覆盖全部捕获点）；**Claude SDK 链（claude CLI stdout 由上游
   @anthropic-ai/claude-agent-sdk setEncoding('utf8')）字节在 SDK 边界已固化，daemon 侧探测
-  救不回**——治本需子进程侧注入 UTF-8 环境（`PYTHONIOENCODING=utf-8`/`LC_ALL=C.UTF-8`，
-  buildSpawnEnv 接入）让子进程从源端吐 UTF-8，作为后续项。
+  救不回**——治本已落地：buildSpawnEnv 出口缺省注入 `PYTHONIOENCODING=utf-8`+
+  `PYTHONUTF8=1`（仅键缺失/空串填入，显式配置优先），claude→Bash→工具孙进程全链
+  继承，新会话起生效（存量乱码行仍不可还原）。
 - **登记于**：ql-20260915-004（2026-09-14-session-export 用户验收反馈 P2-2）。
