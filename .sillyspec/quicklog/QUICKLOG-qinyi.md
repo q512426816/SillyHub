@@ -353,3 +353,25 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 方案：_full_log_dedup_drop 去双发文本行与空壳行(tool_call JSON 权威源);exported_at 双档注明导出时刻,turn_count 改实时 len(runs),last_active 统一最新日志时间兜底列值;僵尸 run 剔除,failed error_code 兜底 unknown;chat 档子代理前缀+段分隔;P2-2 乱码登记 known-issues(根治归 daemon 捕获层,force-baseline 放行知识库保护路径)
 结果：52 passed 零回归,ruff+mypy(949 files)绿;顺手修 known-issues 两处存量引用(路径补全+cli.ts 行号漂移 412-449→773-776/1214);容器待重建生效
 审计：[gate] L1（跨 0 模块 · 5 文件：1 代码/1 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）
+
+## ql-20260915-005-3268 | 2026-09-15 16:49:46 | 子进程输出码页探测解码修 TOOL_RESULT 乱码
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spawn-env.ts（两版探测解码器）
+- sillyhub-daemon/src/task-runner/spawn-stream.ts（stderr+decodeStream）
+- sillyhub-daemon/src/interactive/pi-rpc-driver.ts（LfLineFramer）
+- sillyhub-daemon/src/interactive/cursor-driver.ts（LfLineFramer+stderr）
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（stderr）
+- .sillyspec/knowledge/known-issues.md（根治进展）
+- .sillyspec/docs/SillyHub/modules/daemon.md（ql-20260915-005）
+需求：子进程输出码页探测解码修 TOOL_RESULT 乱码
+根因：GBK 输出被 UTF-8 硬解落库
+方案：spawn-env 两版探测器+全部捕获点接入
+结果：typecheck 过,151 专项 passed,4 failed 系并行半成品
+审计：[gate] L1（跨 0 模块 · 7 文件：5 代码/0 测试）advisory；每文件注记已全覆盖；测试增量缺失（5 个代码文件无测试改动）
+
+## ql-20260915-006-54b4 | 2026-09-15 17:11:04 | 会话页额度胶囊30秒定时刷新并展示全部可查用量供应商
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/sessions/ctx-usage-bar.tsx, frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx

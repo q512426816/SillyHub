@@ -115,3 +115,8 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 ## worker_done 代报链（2026-09-10-review-dispatch-platform-fixes 系）
 - 立即代报（task-03/ql-20260910-003）：onTurnResult 对 stage=mission_worker 且 caps.mcp===false 的成功轮，在 notifyRunResult 之后 fire-and-forget 代报 worker_done（summary=轮终全文，X-Session-Id 承载分身身份）；409/422 仅 warn。
 - ql-20260911-028 延迟兜底：一切 mission_worker 成功轮 +90s 探测 getMissionStatus（session-scoped，opts.sessionId 一次性覆盖）——本 run artifacts 仍空且 mission 活跃 → 用 result/会话级最后全文（_lastAssistantTextBySession，onTurnMessage 完整 text 事件 + result 双写源，FIFO 500 上限）兜底代报；覆盖 mcp=true 分身不自报（活体 mission c4731a06：claude worker 未调工具）与 override 晚到空白 result 两形态；已自报/不活跃/无文本/探测失败均跳过仅日志。
+## 2026-09-14-session-export 增量（ql-20260915-005-3268，P2-2 乱码根治）
+
+- **子进程输出码页探测解码**：`spawn-env.ts` 新增 `decodeProcessOutputMaybe`（单块立即版：utf-8 fatal → GBK → Node 默认，同 autostart/windows.ts 既有先例）与 `CodepageDetectorDecoder`（有状态流式版：StringDecoder utf-8 保跨 chunk 多字节不烂，失败切 GBK 并冲刷缓冲——修 utf-8 子进程跨 chunk 半个中文字符被误判 GBK 的回归）。
+- **接入全部捕获点**：spawn-stream.ts（stderr 立即版 + stdout 经 `decodeStream()` Transform 有状态版包给 readline，替代内部 StringDecoder('utf8')）；pi-rpc-driver.ts / cursor-driver.ts 的 LfLineFramer（换 CodepageDetectorDecoder）；cursor-driver.ts / codex-app-server-driver.ts stderr 立即版兜底。非 SDK 链（pi/cursor/codex/task-runner 捕获）字节级可控，故可探测解码；Claude SDK 链（claude CLI stdout 由上游 @anthropic-ai/claude-agent-sdk setEncoding('utf8')）字节在 SDK 边界已固化，治本需子进程侧注入 UTF-8 环境（PYTHONIOENCODING/LC_ALL，buildSpawnEnv 接入，后续项）。
+- **验证**：daemon typecheck 过；专项测试 151 passed（pi/cursor/task-runner/spawn-env，含跨 chunk 多字节 UTF-8 用例）；全量 4266 passed + 4 failed 均为并行在途 provider_config 热切换半成品（非本改动，基线同挂）。

@@ -1,0 +1,102 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-4e79a047",
+  "totals": {
+    "files": 7,
+    "additions": 139,
+    "deletions": 11
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+      "declared": true,
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/knowledge/known-issues.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/cursor-driver.ts",
+      "declared": true,
+      "additions": 11,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+      "declared": true,
+      "additions": 6,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/spawn-env.ts",
+      "declared": true,
+      "additions": 72,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "sillyhub-daemon/src/task-runner/spawn-stream.ts",
+      "declared": true,
+      "additions": 36,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": [
+      {
+        "file": "frontend/src/components/sessions/ctx-usage-bar.tsx",
+        "sessions": [
+          "quick-e4d0551f"
+        ]
+      }
+    ]
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 7,
+    "codeFileCount": 5,
+    "testFileCount": 0,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "missing",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-005-3268",
+  "sessionId": "quick-4e79a047",
+  "savedAt": "2026-09-15T09:19:41.425Z",
+  "patchSha256": "79955990f8fbe2f5464f016aaf38c23d02703a63d5d22e3648b8f1d38b4b2e88",
+  "patchStatus": "ok"
+}

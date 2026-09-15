@@ -20,9 +20,81 @@
  * design §5（第 0 层注入最高优先级）/ §9（未配兜底零回归 D-007）；requirements FR-04 / FR-05。
  */
 
+import { StringDecoder } from 'node:string_decoder';
 import { getInjector, setDaemonApiKey } from './credential-injector.js';
 import { CLAUDE_CONFIG_DIR } from './config.js';
 import type { ProviderConfig } from './types.js';
+
+/**
+ * 有状态的码页探测解码器（ql-20260915-005）：流式 StringDecoder 保跨 chunk 多字节
+ * UTF-8 序列不烂（首个 chunk 可能只含半个中文字符）；严格 utf-8 解码抛错时切到
+ * GBK 流式解码并冲刷已缓冲字节（防 GBK 子进程输出被 utf-8 硬解成乱码替换字符）。
+ * 与 decodeProcessOutputMaybe 的立即版互补：流式边界用本类，单块缓冲用函数。
+ */
+export class CodepageDetectorDecoder {
+  private utf8: StringDecoder;
+  private gbk: InstanceType<typeof TextDecoder> | null = null;
+  private gbkFailed = false;
+
+  constructor() {
+    this.utf8 = new StringDecoder('utf8');
+  }
+
+  write(chunk: Buffer): string {
+    if (this.gbk) {
+      return this.gbk.decode(chunk, { stream: true });
+    }
+    try {
+      // StringDecoder 严格模式：不完整序列或非法字节即抛（跨 chunk 正常，
+      // 合法序列在 stream 模式下不抛）。
+      const out = this.utf8.write(chunk);
+      return out;
+    } catch {
+      // utf-8 解码失败 → 切 GBK：冲刷已缓冲的 utf-8 尾字节再按 GBK 流式。
+      this.gbk = new TextDecoder('gbk');
+      this.utf8.end();
+      return this.gbk.decode(chunk, { stream: true });
+    }
+  }
+
+  end(): string {
+    if (this.gbk) {
+      return this.gbk.decode();
+    }
+    try {
+      return this.utf8.end();
+    } catch {
+      return '';
+    }
+  }
+}
+
+/**
+ * 子进程输出按系统码页探测解码（ql-20260915-005 / P2-2 乱码根治的兜底层）。
+ *
+ * 同 autostart/windows.ts `decodeProcessOutput` 的同构策略（唯一既有先例，记录
+ * 同一 bug：中文 Windows 工具子进程按 OEM 码页 GBK 输出、Node 默认 utf-8 解码成
+ * 替换字符）：严格 utf-8 fatal 解码优先（英文系统原样通过）→ 失败回退 GBK
+ * （TextDecoder 全量 ICU 内建，零 npm 依赖）→ 再兜底 Node 默认（替换字符）。
+ *
+ * 与既有 helper 的差异：这里返回**可选**——调用点自己决定 byte→string 边界
+ * （stderr 累积 / stdout 行分帧 / LfLineFramer），故函数签名保持纯（不吞 string
+ * 输入：已解码 chunk 原样回传，仅 Buffer 走探测）。
+ */
+export function decodeProcessOutputMaybe(chunk: Buffer | string): string {
+  if (typeof chunk === 'string') return chunk;
+  const buf = chunk;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    // 非 utf-8 字节序列 → 回退 GBK（中文 Windows OEM 码页 cp936）
+  }
+  try {
+    return new TextDecoder('gbk').decode(buf);
+  } catch {
+    return buf.toString('utf-8');
+  }
+}
 
 /**
  * buildSpawnEnv 需要的凭据管理器接口子集（对齐 src/credential.ts 的

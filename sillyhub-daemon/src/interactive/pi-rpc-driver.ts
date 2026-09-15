@@ -88,6 +88,8 @@ import { mapPlatformLevelToEngine } from './thinking-levels.js';
 // requestPermission 返回值类型（与 codex driver 同源，见该接口注释）。
 import type { CanUseToolDecision } from './types.js';
 
+import { CodepageDetectorDecoder } from '../spawn-env.js';
+
 /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 codex driver KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
 
@@ -310,14 +312,16 @@ export class PiCommandError extends Error {
  *   - end() 冲刷 decoder 尾字节 + 无换行的残行（对齐官方 onEnd 行为）。
  */
 export class LfLineFramer {
-  private readonly decoder = new StringDecoder('utf8');
+  // ql-20260915-005：有状态码页探测解码（跨 chunk 多字节 UTF-8 不烂 + GBK 回退）。
+  private readonly decoder = new CodepageDetectorDecoder();
   private buffer = '';
 
   constructor(private readonly onLine: (line: string) => void) {}
 
   /** 喂入一个 chunk（Buffer 或 string）；完整行同步回调 onLine。 */
   push(chunk: Buffer | string): void {
-    this.buffer += typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
+    this.buffer +=
+      typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
     this.drain();
   }
 

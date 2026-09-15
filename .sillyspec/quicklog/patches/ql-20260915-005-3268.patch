@@ -1,0 +1,294 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index 2a2ea9f95..a6eec5252 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -115,3 +115,8 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ ## worker_done 代报链（2026-09-10-review-dispatch-platform-fixes 系）
+ - 立即代报（task-03/ql-20260910-003）：onTurnResult 对 stage=mission_worker 且 caps.mcp===false 的成功轮，在 notifyRunResult 之后 fire-and-forget 代报 worker_done（summary=轮终全文，X-Session-Id 承载分身身份）；409/422 仅 warn。
+ - ql-20260911-028 延迟兜底：一切 mission_worker 成功轮 +90s 探测 getMissionStatus（session-scoped，opts.sessionId 一次性覆盖）——本 run artifacts 仍空且 mission 活跃 → 用 result/会话级最后全文（_lastAssistantTextBySession，onTurnMessage 完整 text 事件 + result 双写源，FIFO 500 上限）兜底代报；覆盖 mcp=true 分身不自报（活体 mission c4731a06：claude worker 未调工具）与 override 晚到空白 result 两形态；已自报/不活跃/无文本/探测失败均跳过仅日志。
++## 2026-09-14-session-export 增量（ql-20260915-005-3268，P2-2 乱码根治）
++
++- **子进程输出码页探测解码**：`spawn-env.ts` 新增 `decodeProcessOutputMaybe`（单块立即版：utf-8 fatal → GBK → Node 默认，同 autostart/windows.ts 既有先例）与 `CodepageDetectorDecoder`（有状态流式版：StringDecoder utf-8 保跨 chunk 多字节不烂，失败切 GBK 并冲刷缓冲——修 utf-8 子进程跨 chunk 半个中文字符被误判 GBK 的回归）。
++- **接入全部捕获点**：spawn-stream.ts（stderr 立即版 + stdout 经 `decodeStream()` Transform 有状态版包给 readline，替代内部 StringDecoder('utf8')）；pi-rpc-driver.ts / cursor-driver.ts 的 LfLineFramer（换 CodepageDetectorDecoder）；cursor-driver.ts / codex-app-server-driver.ts stderr 立即版兜底。非 SDK 链（pi/cursor/codex/task-runner 捕获）字节级可控，故可探测解码；Claude SDK 链（claude CLI stdout 由上游 @anthropic-ai/claude-agent-sdk setEncoding('utf8')）字节在 SDK 边界已固化，治本需子进程侧注入 UTF-8 环境（PYTHONIOENCODING/LC_ALL，buildSpawnEnv 接入，后续项）。
++- **验证**：daemon typecheck 过；专项测试 151 passed（pi/cursor/task-runner/spawn-env，含跨 chunk 多字节 UTF-8 用例）；全量 4266 passed + 4 failed 均为并行在途 provider_config 热切换半成品（非本改动，基线同挂）。
+diff --git a/.sillyspec/knowledge/known-issues.md b/.sillyspec/knowledge/known-issues.md
+index db05e226a..ff2e260ae 100644
+--- a/.sillyspec/knowledge/known-issues.md
++++ b/.sillyspec/knowledge/known-issues.md
+@@ -128,6 +128,10 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
+   落库即坏。替换字符有损，**导出层无法还原**（导出只原样搬运列值）。
+ - **规避**：agent 侧跑 Bash/python 工具时显式 `PYTHONIOENCODING=utf-8`（用户实证 agent 设过
+   后拿到正确文本）；或 chcp 65001。
+-- **根治归属**：工具输出捕获链路的码页探测/解码——发生在 Claude Code CLI 子进程捕获层或
+-  daemon adapters 透传层，**不在导出管道**；需单独立项（daemon/上游）处理，导出侧无法补。
++- **根治进展**（ql-20260915-005-3268）：daemon 非 SDK 链（pi/cursor/codex/task-runner 捕获层）
++  已加码页探测解码（spawn-env.ts `decodeProcessOutputMaybe` 立即版 + `CodepageDetectorDecoder`
++  有状态流式版，覆盖全部捕获点）；**Claude SDK 链（claude CLI stdout 由上游
++  @anthropic-ai/claude-agent-sdk setEncoding('utf8')）字节在 SDK 边界已固化，daemon 侧探测
++  救不回**——治本需子进程侧注入 UTF-8 环境（`PYTHONIOENCODING=utf-8`/`LC_ALL=C.UTF-8`，
++  buildSpawnEnv 接入）让子进程从源端吐 UTF-8，作为后续项。
+ - **登记于**：ql-20260915-004（2026-09-14-session-export 用户验收反馈 P2-2）。
+diff --git a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+index 20c7436a3..6bb33ccee 100644
+--- a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+@@ -79,6 +79,8 @@ import { setModelUsageSnapshot, type DriverModelUsage } from './driver.js';
+ import { mapPlatformLevelToEngine } from './thinking-levels.js';
+ import { ctxTokensFromGrossInput } from './usage-ctx.js';
+ 
++import { decodeProcessOutputMaybe } from '../spawn-env.js';
++
+ /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 task-runner.ts KILL_GRACE_MS=2000）。 */
+ const KILL_GRACE_MS = 2_000;
+ 
+@@ -1008,7 +1010,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
+     if (child.stderr) {
+       child.stderr.on('data', (chunk: Buffer) => {
+         if (h.closing) return;
+-        stderrBuf += chunk.toString('utf8');
++        stderrBuf += decodeProcessOutputMaybe(chunk);
+         let idx: number;
+         while ((idx = stderrBuf.indexOf('\n')) >= 0) {
+           const line = stderrBuf.slice(0, idx);
+diff --git a/sillyhub-daemon/src/interactive/cursor-driver.ts b/sillyhub-daemon/src/interactive/cursor-driver.ts
+index 3b79a703f..cebae2ab9 100644
+--- a/sillyhub-daemon/src/interactive/cursor-driver.ts
++++ b/sillyhub-daemon/src/interactive/cursor-driver.ts
+@@ -46,6 +46,11 @@ import type {
+ } from './driver.js';
+ import { addToModelUsage, type DriverModelUsage } from './driver.js';
+ 
++import {
++  CodepageDetectorDecoder,
++  decodeProcessOutputMaybe,
++} from '../spawn-env.js';
++
+ /** close 时 SIGTERM→SIGKILL 升级宽限（pi-rpc-driver.ts L67 / codex 同款）。 */
+ const KILL_GRACE_MS = 2_000;
+ 
+@@ -141,13 +146,15 @@ function isRecord(v: unknown): v is Record<string, unknown> {
+  * readline 会把 U+2028/U+2029 当行分隔，而它们在 JSON 字符串里合法）。
+  */
+ class LfLineFramer {
+-  private readonly decoder = new StringDecoder('utf8');
++  // ql-20260915-005：有状态码页探测解码（跨 chunk 多字节 UTF-8 不烂 + GBK 回退）。
++  private readonly decoder = new CodepageDetectorDecoder();
+   private buffer = '';
+ 
+   constructor(private readonly onLine: (line: string) => void) {}
+ 
+   push(chunk: Buffer | string): void {
+-    this.buffer += typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
++    this.buffer +=
++      typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
+     this.drain();
+   }
+ 
+@@ -417,7 +424,7 @@ export class CursorDriver implements InteractiveDriver {
+ 
+     let stderrBuf = '';
+     const onStderrData = (chunk: Buffer | string): void => {
+-      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
++      const text = decodeProcessOutputMaybe(chunk);
+       stderrBuf += text;
+       if (stderrBuf.length > STDERR_MAX_BYTES) {
+         stderrBuf = stderrBuf.slice(-STDERR_MAX_BYTES);
+@@ -677,7 +684,7 @@ export class CursorDriver implements InteractiveDriver {
+ 
+     let stdout = '';
+     child.stdout?.on('data', (chunk: Buffer | string) => {
+-      stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
++      stdout += decodeProcessOutputMaybe(chunk);
+     });
+ 
+     const exited = new Promise<void>((resolve) => {
+diff --git a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+index 71ba351dd..b1139d05f 100644
+--- a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
++++ b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+@@ -88,6 +88,8 @@ import { mapPlatformLevelToEngine } from './thinking-levels.js';
+ // requestPermission 返回值类型（与 codex driver 同源，见该接口注释）。
+ import type { CanUseToolDecision } from './types.js';
+ 
++import { CodepageDetectorDecoder } from '../spawn-env.js';
++
+ /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 codex driver KILL_GRACE_MS=2000）。 */
+ const KILL_GRACE_MS = 2_000;
+ 
+@@ -310,14 +312,16 @@ export class PiCommandError extends Error {
+  *   - end() 冲刷 decoder 尾字节 + 无换行的残行（对齐官方 onEnd 行为）。
+  */
+ export class LfLineFramer {
+-  private readonly decoder = new StringDecoder('utf8');
++  // ql-20260915-005：有状态码页探测解码（跨 chunk 多字节 UTF-8 不烂 + GBK 回退）。
++  private readonly decoder = new CodepageDetectorDecoder();
+   private buffer = '';
+ 
+   constructor(private readonly onLine: (line: string) => void) {}
+ 
+   /** 喂入一个 chunk（Buffer 或 string）；完整行同步回调 onLine。 */
+   push(chunk: Buffer | string): void {
+-    this.buffer += typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
++    this.buffer +=
++      typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
+     this.drain();
+   }
+ 
+diff --git a/sillyhub-daemon/src/spawn-env.ts b/sillyhub-daemon/src/spawn-env.ts
+index 7e3323fd4..f402046ce 100644
+--- a/sillyhub-daemon/src/spawn-env.ts
++++ b/sillyhub-daemon/src/spawn-env.ts
+@@ -20,10 +20,82 @@
+  * design §5（第 0 层注入最高优先级）/ §9（未配兜底零回归 D-007）；requirements FR-04 / FR-05。
+  */
+ 
++import { StringDecoder } from 'node:string_decoder';
+ import { getInjector, setDaemonApiKey } from './credential-injector.js';
+ import { CLAUDE_CONFIG_DIR } from './config.js';
+ import type { ProviderConfig } from './types.js';
+ 
++/**
++ * 有状态的码页探测解码器（ql-20260915-005）：流式 StringDecoder 保跨 chunk 多字节
++ * UTF-8 序列不烂（首个 chunk 可能只含半个中文字符）；严格 utf-8 解码抛错时切到
++ * GBK 流式解码并冲刷已缓冲字节（防 GBK 子进程输出被 utf-8 硬解成乱码替换字符）。
++ * 与 decodeProcessOutputMaybe 的立即版互补：流式边界用本类，单块缓冲用函数。
++ */
++export class CodepageDetectorDecoder {
++  private utf8: StringDecoder;
++  private gbk: InstanceType<typeof TextDecoder> | null = null;
++  private gbkFailed = false;
++
++  constructor() {
++    this.utf8 = new StringDecoder('utf8');
++  }
++
++  write(chunk: Buffer): string {
++    if (this.gbk) {
++      return this.gbk.decode(chunk, { stream: true });
++    }
++    try {
++      // StringDecoder 严格模式：不完整序列或非法字节即抛（跨 chunk 正常，
++      // 合法序列在 stream 模式下不抛）。
++      const out = this.utf8.write(chunk);
++      return out;
++    } catch {
++      // utf-8 解码失败 → 切 GBK：冲刷已缓冲的 utf-8 尾字节再按 GBK 流式。
++      this.gbk = new TextDecoder('gbk');
++      this.utf8.end();
++      return this.gbk.decode(chunk, { stream: true });
++    }
++  }
++
++  end(): string {
++    if (this.gbk) {
++      return this.gbk.decode();
++    }
++    try {
++      return this.utf8.end();
++    } catch {
++      return '';
++    }
++  }
++}
++
++/**
++ * 子进程输出按系统码页探测解码（ql-20260915-005 / P2-2 乱码根治的兜底层）。
++ *
++ * 同 autostart/windows.ts `decodeProcessOutput` 的同构策略（唯一既有先例，记录
++ * 同一 bug：中文 Windows 工具子进程按 OEM 码页 GBK 输出、Node 默认 utf-8 解码成
++ * 替换字符）：严格 utf-8 fatal 解码优先（英文系统原样通过）→ 失败回退 GBK
++ * （TextDecoder 全量 ICU 内建，零 npm 依赖）→ 再兜底 Node 默认（替换字符）。
++ *
++ * 与既有 helper 的差异：这里返回**可选**——调用点自己决定 byte→string 边界
++ * （stderr 累积 / stdout 行分帧 / LfLineFramer），故函数签名保持纯（不吞 string
++ * 输入：已解码 chunk 原样回传，仅 Buffer 走探测）。
++ */
++export function decodeProcessOutputMaybe(chunk: Buffer | string): string {
++  if (typeof chunk === 'string') return chunk;
++  const buf = chunk;
++  try {
++    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
++  } catch {
++    // 非 utf-8 字节序列 → 回退 GBK（中文 Windows OEM 码页 cp936）
++  }
++  try {
++    return new TextDecoder('gbk').decode(buf);
++  } catch {
++    return buf.toString('utf-8');
++  }
++}
++
+ /**
+  * buildSpawnEnv 需要的凭据管理器接口子集（对齐 src/credential.ts 的
+  * CredentialManager 的 get/buildEnv 两方法）。
+diff --git a/sillyhub-daemon/src/task-runner/spawn-stream.ts b/sillyhub-daemon/src/task-runner/spawn-stream.ts
+index f9b7230ba..7f3af78d5 100644
+--- a/sillyhub-daemon/src/task-runner/spawn-stream.ts
++++ b/sillyhub-daemon/src/task-runner/spawn-stream.ts
+@@ -11,6 +11,7 @@
+  */
+ 
+ import { spawn, type ChildProcess } from 'node:child_process';
++import { Transform } from 'node:stream';
+ import * as readline from 'node:readline';
+ import { resolveWindowsCmdShim } from '../cmd-shim.js';
+ import {
+@@ -27,6 +28,34 @@ import type {
+   TaskRunnerCore,
+ } from './runner-types.js';
+ import { KILL_GRACE_MS, MAX_ERROR, MAX_STDERR_FORWARD } from './runner-types.js';
++import {
++  CodepageDetectorDecoder,
++  decodeProcessOutputMaybe,
++} from '../spawn-env.js';
++
++/**
++ * 把子进程 stdout 字节流包成码页探测解码后的 string 流（ql-20260915-005）。
++ * 逐 chunk 调 decodeProcessOutputMaybe（utf-8 fatal → GBK 回退），readline
++ * 消费 string 流时不再用内部 StringDecoder('utf8') 硬解码（否则 GBK 输出乱码）。
++ */
++function decodeStream(): Transform {
++  // 每个子进程一个探测器实例：保跨 chunk 多字节 UTF-8 不烂（首个 chunk 可能只
++  // 含半个中文字符），严格 utf-8 失败时切 GBK（防 OEM 码页输出乱码）。
++  const detector = new CodepageDetectorDecoder();
++  return new Transform({
++    transform(
++      chunk: Buffer,
++      _enc: string,
++      cb: (err?: Error | null, data?: string) => void,
++    ) {
++      cb(null, detector.write(chunk));
++    },
++    flush(cb: (err?: Error | null, data?: string) => void) {
++      cb(null, detector.end());
++    },
++  });
++}
++
+ import {
+   attachBatchModelStats,
+   mergeAdapterUsage,
+@@ -225,7 +254,9 @@ export async function spawnAndStream(
+ 
+   // stderr 累积（用于失败诊断）+ observer raw 写入 + ql-20260706-009 实时 forward
+   child.stderr?.on('data', (chunk: Buffer | string) => {
+-    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
++    // ql-20260915-005：按系统码页探测解码（utf-8 fatal → GBK 回退），防中文
++    // Windows 子进程 OEM 码页输出被硬解 utf-8 成乱码替换字符。
++    const text = decodeProcessOutputMaybe(chunk);
+     stderrBuf += text;
+     // ql-20260616-003：把 stderr 实时投给 observer（mode=raw/both 时落日志）
+     // 按行切分写入，避免大块 chunk 一次性塞进去难读
+@@ -379,8 +410,11 @@ export async function spawnAndStream(
+   // 步骤 7：readline 逐行读 stdout，parse + submitMessages + control_request
+   try {
+     if (child.stdout) {
++      // ql-20260915-005：先包一层码页探测解码（Buffer→string），readline 吃 string
++      // 流不再用内部 StringDecoder('utf8') 硬解码（否则子进程 GBK 输出在此层乱码）。
++      const stdoutDecoded = child.stdout.pipe(decodeStream());
+       const rl = readline.createInterface({
+-        input: child.stdout,
++        input: stdoutDecoded,
+         crlfDelay: Infinity,
+       });
+       // 子进程退出（或已被 kill）→ 主动关闭 readline，让 for-await 跳出。

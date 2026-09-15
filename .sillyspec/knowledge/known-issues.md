@@ -128,6 +128,10 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
   落库即坏。替换字符有损，**导出层无法还原**（导出只原样搬运列值）。
 - **规避**：agent 侧跑 Bash/python 工具时显式 `PYTHONIOENCODING=utf-8`（用户实证 agent 设过
   后拿到正确文本）；或 chcp 65001。
-- **根治归属**：工具输出捕获链路的码页探测/解码——发生在 Claude Code CLI 子进程捕获层或
-  daemon adapters 透传层，**不在导出管道**；需单独立项（daemon/上游）处理，导出侧无法补。
+- **根治进展**（ql-20260915-005-3268）：daemon 非 SDK 链（pi/cursor/codex/task-runner 捕获层）
+  已加码页探测解码（spawn-env.ts `decodeProcessOutputMaybe` 立即版 + `CodepageDetectorDecoder`
+  有状态流式版，覆盖全部捕获点）；**Claude SDK 链（claude CLI stdout 由上游
+  @anthropic-ai/claude-agent-sdk setEncoding('utf8')）字节在 SDK 边界已固化，daemon 侧探测
+  救不回**——治本需子进程侧注入 UTF-8 环境（`PYTHONIOENCODING=utf-8`/`LC_ALL=C.UTF-8`，
+  buildSpawnEnv 接入）让子进程从源端吐 UTF-8，作为后续项。
 - **登记于**：ql-20260915-004（2026-09-14-session-export 用户验收反馈 P2-2）。

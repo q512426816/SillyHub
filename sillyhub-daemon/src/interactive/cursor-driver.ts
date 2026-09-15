@@ -46,6 +46,11 @@ import type {
 } from './driver.js';
 import { addToModelUsage, type DriverModelUsage } from './driver.js';
 
+import {
+  CodepageDetectorDecoder,
+  decodeProcessOutputMaybe,
+} from '../spawn-env.js';
+
 /** close 时 SIGTERM→SIGKILL 升级宽限（pi-rpc-driver.ts L67 / codex 同款）。 */
 const KILL_GRACE_MS = 2_000;
 
@@ -141,13 +146,15 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * readline 会把 U+2028/U+2029 当行分隔，而它们在 JSON 字符串里合法）。
  */
 class LfLineFramer {
-  private readonly decoder = new StringDecoder('utf8');
+  // ql-20260915-005：有状态码页探测解码（跨 chunk 多字节 UTF-8 不烂 + GBK 回退）。
+  private readonly decoder = new CodepageDetectorDecoder();
   private buffer = '';
 
   constructor(private readonly onLine: (line: string) => void) {}
 
   push(chunk: Buffer | string): void {
-    this.buffer += typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
+    this.buffer +=
+      typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
     this.drain();
   }
 
@@ -417,7 +424,7 @@ export class CursorDriver implements InteractiveDriver {
 
     let stderrBuf = '';
     const onStderrData = (chunk: Buffer | string): void => {
-      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+      const text = decodeProcessOutputMaybe(chunk);
       stderrBuf += text;
       if (stderrBuf.length > STDERR_MAX_BYTES) {
         stderrBuf = stderrBuf.slice(-STDERR_MAX_BYTES);
@@ -677,7 +684,7 @@ export class CursorDriver implements InteractiveDriver {
 
     let stdout = '';
     child.stdout?.on('data', (chunk: Buffer | string) => {
-      stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+      stdout += decodeProcessOutputMaybe(chunk);
     });
 
     const exited = new Promise<void>((resolve) => {

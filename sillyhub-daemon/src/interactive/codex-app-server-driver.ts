@@ -79,6 +79,8 @@ import { setModelUsageSnapshot, type DriverModelUsage } from './driver.js';
 import { mapPlatformLevelToEngine } from './thinking-levels.js';
 import { ctxTokensFromGrossInput } from './usage-ctx.js';
 
+import { decodeProcessOutputMaybe } from '../spawn-env.js';
+
 /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 task-runner.ts KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
 
@@ -1008,7 +1010,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     if (child.stderr) {
       child.stderr.on('data', (chunk: Buffer) => {
         if (h.closing) return;
-        stderrBuf += chunk.toString('utf8');
+        stderrBuf += decodeProcessOutputMaybe(chunk);
         let idx: number;
         while ((idx = stderrBuf.indexOf('\n')) >= 0) {
           const line = stderrBuf.slice(0, idx);

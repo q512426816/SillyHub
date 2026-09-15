@@ -11,6 +11,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { Transform } from 'node:stream';
 import * as readline from 'node:readline';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import {
@@ -27,6 +28,34 @@ import type {
   TaskRunnerCore,
 } from './runner-types.js';
 import { KILL_GRACE_MS, MAX_ERROR, MAX_STDERR_FORWARD } from './runner-types.js';
+import {
+  CodepageDetectorDecoder,
+  decodeProcessOutputMaybe,
+} from '../spawn-env.js';
+
+/**
+ * 把子进程 stdout 字节流包成码页探测解码后的 string 流（ql-20260915-005）。
+ * 逐 chunk 调 decodeProcessOutputMaybe（utf-8 fatal → GBK 回退），readline
+ * 消费 string 流时不再用内部 StringDecoder('utf8') 硬解码（否则 GBK 输出乱码）。
+ */
+function decodeStream(): Transform {
+  // 每个子进程一个探测器实例：保跨 chunk 多字节 UTF-8 不烂（首个 chunk 可能只
+  // 含半个中文字符），严格 utf-8 失败时切 GBK（防 OEM 码页输出乱码）。
+  const detector = new CodepageDetectorDecoder();
+  return new Transform({
+    transform(
+      chunk: Buffer,
+      _enc: string,
+      cb: (err?: Error | null, data?: string) => void,
+    ) {
+      cb(null, detector.write(chunk));
+    },
+    flush(cb: (err?: Error | null, data?: string) => void) {
+      cb(null, detector.end());
+    },
+  });
+}
+
 import {
   attachBatchModelStats,
   mergeAdapterUsage,
@@ -225,7 +254,9 @@ export async function spawnAndStream(
 
   // stderr 累积（用于失败诊断）+ observer raw 写入 + ql-20260706-009 实时 forward
   child.stderr?.on('data', (chunk: Buffer | string) => {
-    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+    // ql-20260915-005：按系统码页探测解码（utf-8 fatal → GBK 回退），防中文
+    // Windows 子进程 OEM 码页输出被硬解 utf-8 成乱码替换字符。
+    const text = decodeProcessOutputMaybe(chunk);
     stderrBuf += text;
     // ql-20260616-003：把 stderr 实时投给 observer（mode=raw/both 时落日志）
     // 按行切分写入，避免大块 chunk 一次性塞进去难读
@@ -379,8 +410,11 @@ export async function spawnAndStream(
   // 步骤 7：readline 逐行读 stdout，parse + submitMessages + control_request
   try {
     if (child.stdout) {
+      // ql-20260915-005：先包一层码页探测解码（Buffer→string），readline 吃 string
+      // 流不再用内部 StringDecoder('utf8') 硬解码（否则子进程 GBK 输出在此层乱码）。
+      const stdoutDecoded = child.stdout.pipe(decodeStream());
       const rl = readline.createInterface({
-        input: child.stdout,
+        input: stdoutDecoded,
         crlfDelay: Infinity,
       });
       // 子进程退出（或已被 kill）→ 主动关闭 readline，让 for-await 跳出。
