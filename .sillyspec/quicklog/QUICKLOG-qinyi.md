@@ -37,3 +37,13 @@
 方案：重写为自管字节缓冲+utf8CompletePrefixLen 增量严格 UTF-8 校验（未决尾字节≤3 字节跨 chunk 续接不误切，E0/ED/F0/F4 首连续字节收紧对齐 WHATWG），非法字节切 TextDecoder('gbk') 流式并把未决尾字节一并重解，small-icu 构造兜底非致命 utf-8；spawn-env.test.ts 新增 GBK 流式 9 用例；顺修 spawn-stream.ts decodeStream 与 read_model.py before 游标两处注释漂移，INTEGRATIONS.md 行号校准，daemon.md/known-issues 增量勘误
 结果：spawn-env 50/50 绿（新增 9 例）+pi-rpc-driver 90+task-runner 72 回归绿；daemon tsc 0；backend ruff check/format 过
 审计：[gate] L1（跨 0 模块 · 7 文件：3 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260916-004-c365 | 2026-09-16 07:49:25 | known-issues 登记 hasBackgroundTaskGrace 无界宽限观察项（R-01 复审存档）
+状态：已完成
+关联变更：2026-09-16-background-task-grace-timeout
+文件：
+- .sillyspec/knowledge/known-issues.md（新增 hasBackgroundTaskGrace 无界宽限观察项（四要素+R-01 溯源））
+需求：known-issues 登记 hasBackgroundTaskGrace 无界宽限观察项（R-01 复审存档）
+根因：2026-09-16 风险审查发现 bg-task 写通道宽限无界 vs stale-flip 60min 有界的暴露差，前作 R-01 已接受但未文档化，用户裁决不改代码（D-001@v1）仅登记观察项备未来重议
+方案：known-issues.md 末尾新增观察条目：四要素（暴露差含代码锚 types.ts:452/缓解链四条/重估触发两条件/未来修复首选双窗兜底 60min+4h）+登记溯源
+结果：纯文档动作零源码改动（git status 核对仅 .sillyspec 文件）；四要素 grep 可检索（hasBackgroundTaskGrace/STALE_RUN_WRITE_GRACE_MS）

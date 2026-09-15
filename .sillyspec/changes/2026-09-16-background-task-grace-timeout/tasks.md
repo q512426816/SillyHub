@@ -1,0 +1,1 @@
+- [x] ql-20260916-004-c365 登记 hasBackgroundTaskGrace 无界宽限观察项（2026-09-16-background-task-grace-timeout 方案A 文档动作）

@@ -140,3 +140,23 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
   已重写为增量 UTF-8 严格校验 + 非法字节切 GBK 流式（未决尾字节一并重解），非 SDK
   链根治至此真正闭合。
 - **登记于**：ql-20260915-004（2026-09-14-session-export 用户验收反馈 P2-2）。
+
+## 🟡 后台任务写通道宽限无界（hasBackgroundTaskGrace 无 TTL，R-01 已接受观察项）
+
+- **暴露差**（2026-09-16 风险审查发现）：同类第一放行源 `withinStaleFlipGrace` 有界 60min
+  （`STALE_RUN_WRITE_GRACE_MS = 60 * 60_000`，sillyhub-daemon/src/interactive/session-manager/types.ts:452，
+  permission.ts `withinStaleFlipGrace` 消费），而 bg-task 第三放行源 `hasBackgroundTaskGrace`
+  （permission.ts）无时间上限——注册表条目（`mgr._backgroundTasks`）仅 task_notification 终态
+  注销与会话终态 `clearBackgroundTasks` 两路注销，条目有 `startedAt`/`lastProgressAt` 但无 TTL；
+  若 SDK 丢失终态通知，条目永驻 → 后台锚点 `currentRunId` 永不清 → 写通道放行直至会话终态。
+- **缓解链**（维持有效）：仅放行「通道存在性」（allowed_roots/policyEngine 写策略 + 人审链路
+  全程生效）；下次 inject 正常切新 run 即收敛；会话终态兜底清锚点；daemon 重启内存注册表丢失
+  自然 fail-closed。前作 R-01
+  （2026-09-15-background-task-permission-lockout/design.md 风险登记表）已按此接受为 P1。
+- **重估触发条件**：线上再现注册表泄漏实证（守卫放行但无对应存活后台任务），或
+  policy_audit_log 出现锚点态误放行线索。
+- **未来修复首选**：双窗兜底——条目存活 = 静默 <60min（对齐 stale-flip 先例，`lastProgressAt`
+  已有信号）且总时长 <4h 绝对上限；原事故任务存活 94.5min（1030 次重试/~$46），双窗防误杀，
+  静默阈值小于先例会重演权限锁死。
+- **登记于**：2026-09-16-background-task-grace-timeout（D-001@v1 用户裁决「不改代码」，
+  文档载体方案 A）。
