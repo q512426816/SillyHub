@@ -87,7 +87,7 @@
 | acceptance 条目 | 归属测试文件 | 关键词命中（提示，命中≠判定） | 判定 | 证据 |
 |---|---|---|---|---|
 | 守卫三态（空 deny/非空放行/currentRunId 无 deny） | sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts | 命中 | covered | `session-manager-bg-anchor.test.ts` 「hasBackgroundTaskGrace 守卫三态」用例 |
-| deny message 以 PLATFORM_NO_RUNNING_TURN: 开头 | sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts + sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts | 命中 | covered | claude-sdk-driver-permission.test.ts:497 toContain 断言（本变更修订）+ bg-anchor deny 断言 |
+| deny message 以 PLATFORM_NO_RUNNING_TURN: 开头 | sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts + sillyhub-daemon/tests/interactive/session-manager-bg-anchor.test.ts | 命中 | covered | sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts:497 toContain 断言（本变更修订）+ bg-anchor deny 断言 |
 | 主轮普通人审 deny 文案不变 | sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts | 命中 | covered | `session-manager-bg-anchor.test.ts` 同文件 deny 收敛既有用例（远程 deny 透传/默认模板）全绿未改 |
 
 **task-04**
@@ -144,7 +144,7 @@
 | 既有 fail-soft 断言（accepted=False / return False）保持不变且通过。 | `backend/app/modules/daemon/tests/test_session_permissions.py`<br>`backend/app/modules/daemon/tests/test_ws_hub_permission.py`<br>`backend/app/modules/daemon/tests/test_permission_http_uplink.py`<br>`backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py` | 既有、fail、soft、断言、accepted（`backend/app/modules/daemon/tests/test_session_permissions.py`、`backend/app/modules/daemon/tests/test_permission_http_uplink.py`、`backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py`、`backend/app/modules/daemon/tests/test_ws_hub_permission.py`） | covered | `backend/app/modules/daemon/tests/test_session_permissions.py:1225`（既有）、`backend/app/modules/daemon/tests/test_session_permissions.py:595`（fail）、`backend/app/modules/daemon/tests/test_session_permissions.py:1510`（soft） |
 
 #### 探针 4：决策追踪覆盖
-D-001@v1（锚点+协议标记，方案 A）闭环验证：FR-01（锚点/访问器/守卫）→ task-01/02/03 实现锚定 events.ts:55-67 + permission.ts hasBackgroundTaskGrace（探针 2 ✅）+ bg-anchor 套件 13 用例；FR-02（标记/受理/兜底）→ task-04/05/07/08 实现锚定 4 处注入 + protocol.py background_task + is_background_task 分支 + resolver 5min（探针 2 ✅ + 注入点/受理用例）；FR-03（故障码）→ task-03/08 双侧前缀（grep 命中 + 断言）；FR-04 → task-06/09（USAGE_NOTE 两态 + error_code 两用例）。全部决策-需求-任务-证据四层闭环，无未闭环行。
+D-001@v1（锚点+协议标记，方案 A）闭环验证：FR-01（锚点/访问器/守卫）→ task-01/02/03 实现锚定 sillyhub-daemon/src/interactive/session-manager/events.ts:55-67 + permission.ts hasBackgroundTaskGrace（探针 2 ✅）+ bg-anchor 套件 13 用例；FR-02（标记/受理/兜底）→ task-04/05/07/08 实现锚定 4 处注入 + protocol.py background_task + is_background_task 分支 + resolver 5min（探针 2 ✅ + 注入点/受理用例）；FR-03（故障码）→ task-03/08 双侧前缀（grep 命中 + 断言）；FR-04 → task-06/09（USAGE_NOTE 两态 + error_code 两用例）。全部决策-需求-任务-证据四层闭环，无未闭环行。
 
 #### 探针 5：API Contract Parity
 - ✅ API parity check passed: 2807 backend endpoints (live [scan-root 603] + artifact 2412), 0 frontend calls [scope: change-diff (22 files @ scan-root)] | 832 backend endpoints unused by frontend

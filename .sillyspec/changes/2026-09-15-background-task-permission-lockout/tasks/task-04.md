@@ -24,7 +24,7 @@ goal: >
   标记由单一辅助 backgroundTaskFlag 统一产生，4 处可达 register 调用点共用，防注入漂移（R-03）。
 implementation:
   - permission.ts 新增 backgroundTaskFlag(state, hasLive) = state.status!=='running' && hasLive（hasLive 来自门面 hasLiveBackgroundTasks）
-  - 4 处可达 register 调用点统一注入 backgroundTask 入参：默认普通审批 register（permission.ts:524，Claude 后台子代理 Write/Bash 的实际主路径）/ AskUserQuestion 拦截 register（:362）/ ExitPlanMode register（:441）/ requestPermissionImpl register（:209，codex/pi sessionPermission 路径）
+  - 4 处可达 register 调用点统一注入 backgroundTask 入参：默认普通审批 register（sillyhub-daemon/src/interactive/session-manager/permission.ts:524，Claude 后台子代理 Write/Bash 的实际主路径）/ AskUserQuestion 拦截 register（:362）/ ExitPlanMode register（:441）/ requestPermissionImpl register（:209，codex/pi sessionPermission 路径）
   - permission-resolver.ts PermissionRegisterInput 加 backgroundTask?: boolean（缺省 undefined，向后兼容）
   - 'resolver register payload 组装写 ...(input.backgroundTask ? { background_task: true } : {})（snake_case 协议字段）'
 acceptance:

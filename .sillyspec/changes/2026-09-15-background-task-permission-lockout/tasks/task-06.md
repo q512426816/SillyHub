@@ -20,7 +20,7 @@ goal: >
   daemon 按相邻快照差分记账维持现状（SDK 无 per-task 数据源，明确不按任务拆分），
   改为在「本 run 收口时后台任务仍在跑」场景向正在收口的 runId 追加 [USAGE_NOTE] 日志行，如实告知该数字含后台任务消耗。
 implementation:
-  - daemon.ts run 结果上报路径（notifyRunResult payload 组装处，与 _deltaModelUsage 差分同一路径，daemon.ts:3912 附近）在 hasLiveBackgroundTasks(sessionId) 为真时，向正在收口的 runId 追加一条 stdout 日志行
+  - daemon.ts run 结果上报路径（notifyRunResult payload 组装处，与 _deltaModelUsage 差分同一路径，sillyhub-daemon/src/daemon.ts:3912 附近）在 hasLiveBackgroundTasks(sessionId) 为真时，向正在收口的 runId 追加一条 stdout 日志行
   - 日志行内容：`[USAGE_NOTE] 本轮上报用量含仍在运行的后台任务消耗（SDK 为会话级累计快照，无法按任务拆分）`
   - 复用该处既有 [TASK_*] 行写入通道/格式（SessionManager _writeTaskLine legacy flat 通道，已有向终态 run 写行先例）
   - 挂到正在收口的 runId（而非后台任务自身 runId）

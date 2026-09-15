@@ -35,7 +35,7 @@
 | R8 | `backend/app/modules/ppm/project/service.py:189` create | 并发建同 project_code，commit 撞唯一约束→500（预检注释承诺 409）| `try/except IntegrityError`→rollback→重跑预检转 409 |
 | R9 | `backend/app/modules/admin/users_service.py:195` create_user | 并发建同 username→500 | 同 R8 模式 |
 | R10 | `backend/app/modules/spec_workspace/service.py:143` ensure_spec_workspace | 并发 init-dispatch get-or-create 都 NotFound→都 create→第二个 500 | catch IntegrityError→rollback→重查 |
-| R14 | `backend/app/modules/workspace/service.py:589` update | 并发改同 slug→500 | `try/except IntegrityError`→`_translate_integrity_error` 转 409（对齐 create 路径）|
+| R14 | `backend/app/modules/workspace/service.py:622` update | 并发改同 slug→500 | `try/except IntegrityError`→`_translate_integrity_error` 转 409（对齐 create 路径）|
 | P8 | `backend/app/modules/daemon/ws_hub.py:219` broadcast | 顺序扇出，单个慢 daemon 拖到 N×10s | 锁内快照 targets + `asyncio.gather` 并发 |
 | P10 | `backend/app/modules/daemon/lease/service.py:735` handle_lease_expiry | 批处理已持 lease 对象却按 agent_run_id 重查（每 GC tick N 次冗余 SELECT）| 加 `lease` 参数直传 |
 | P14 | `backend/app/modules/daemon/lease/service.py:720` expire_leases | 无界 SELECT，后端宕机积压一次性入内存 | `.limit(200)` 分批 |
@@ -113,7 +113,7 @@
 
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
-| B-idx | `backend/app/modules/workspace/model.py:157` / `backend/app/modules/ppm/task/model.py:47` / `backend/app/modules/daemon/model.py:380` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
+| B-idx | `backend/app/modules/workspace/model.py:168` / `backend/app/modules/ppm/task/model.py:47` / `backend/app/modules/daemon/model.py:380` + migration `202607250100` | 3 个高频查询缺索引（agent_run_workspaces.agent_run_id 10+ 调用点、PlanTask.ps_plan_node_detail_id 7+ 调用点、daemon_task_leases 复合 (runtime_id,status,created_at) 覆盖 get_pending_leases 轮询）| 模型 `__table_args__` 加 Index + 1 个 alembic migration（接 head `202607231200`，单头核验 `202607250100`，零数据改动）|
 | B2 | `backend/app/modules/daemon/router/__init__.py` list_daemon_instances | N+1：循环每实例单独查 runtimes + 循环内重 import | RuntimeService 加 `_get_runtimes_by_instances` 批量 IN 查询 + 按 daemon_instance_id 分组（对齐 list_machines）|
 | A1 | `backend/app/modules/daemon/permission_service.py:388` _resolve_daemon_id_for_runtime | 与 `backend/app/modules/daemon/session/service/__init__.py` 完全重复（docstring 自承 mirrors），演进漂移风险 | 委托 session.service 单一真相源（lazy import 避循环）|
 
@@ -163,10 +163,10 @@ token 轮换（~20min + 401 刷新）不再重渲染这些页（含 3000 行的 
 | C8 | `backend/app/modules/change/dispatch.py:962` read_verify_result | read_text | 抽 `_read_verify_result_sync` + to_thread |
 | C9 | `backend/app/modules/workspace/skills_view_service.py` list_skills/get_mcp_config | iterdir / read_text+json | 抽 `_list_skills_sync`/`_read_mcp_config_sync` + to_thread |
 | C10 | `backend/app/modules/agent/skills_bundle_service.py` _gather_all_files/build_skills_bundle | 经同步 helper（glob/rglob/read_bytes）/ tarfile 构建 | `_collect_skill_files` 调用点 to_thread + 抽 `_build_tar_gz` + to_thread |
-| C11 | `backend/app/modules/workspace/router.py:104` + `backend/app/modules/workspace/service.py:476` | scanner.scan（iterdir+parse）被 async 调用点同步调用 | 调用点 `asyncio.to_thread(service.scan, ...)` |
+| C11 | `backend/app/modules/workspace/router.py:111` + `backend/app/modules/workspace/service.py:509` | scanner.scan（iterdir+parse）被 async 调用点同步调用 | 调用点 `asyncio.to_thread(service.scan, ...)` |
 | C12 | `backend/app/modules/spec_workspace/service.py:1065` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
 | C13 | `backend/app/modules/change/projection.py:45` compute_pending_review | sqlite3 直读 sillyspec.db（mode=ro）在 async 内 | 抽 `_read_stage_progress_sync` + to_thread（对齐 `backend/app/modules/runtime/service.py` 范式） |
-| D9 | `sillyhub-daemon/src/skill-manager.ts:171` extractSkillsBundle | gunzipSync（bundle 解压在 async 内） | `promisify(gunzip)` → `gunzipAsync` |
+| D9 | `sillyhub-daemon/src/skill-manager.ts:237` extractSkillsBundle | gunzipSync（bundle 解压在 async 内） | `promisify(gunzip)` → `gunzipAsync` |
 
 DEFER（带原因，非遗漏）：
 
@@ -251,7 +251,7 @@ DEFER（带原因）：
 |---|---|
 | 后端新增索引 | **无需**：性能 agent 逐一核实候选（AgentRunLog.channel/subagent_type、DaemonTaskLease.kind、ChangeDocument.last_modified_at 等），leading filter 已被既有索引覆盖或仅写入无查询；剩余 LOW 遵循 Wave1 YAGNI |
 | daemon D3/D5/D6/D7 | 维持不做：D3 回调实际安全（fire-and-forget 不 reject）；D5 重连 5s 对齐 Python parity；D6 30s 超时够；D7 背压 parity |
-| **daemon D8 `_fire` 一次性任务重用** | **确认是前批误判**：sillyhub-daemon/src/daemon.ts:1800 每次 crash 后 .catch 内递归调 _fire 新建 AbortController + promise（_controllers finally 删旧），非重用 one-shot controller。代码实际正确 |
+| **daemon D8 `_fire` 一次性任务重用** | **确认是前批误判**：sillyhub-daemon/src/daemon.ts:1857 每次 crash 后 .catch 内递归调 _fire 新建 AbortController + promise（_controllers finally 删旧），非重用 one-shot controller。代码实际正确 |
 | daemon ND-2 codex _close 不等 exit | 维持 DEFER：仅 daemon 异常 shutdown 时 codex 子进程可能孤儿，待 shutdown 链路专项 |
 | daemon god 文件拆分 | 维持不做：高耦合 lease payload 鸭子类型几十处，无低风险切片 |
 | import_commit N+1（_build_module_maps/两段循环） | 维持 DEFER：手动 Excel 导入低频，N 小；批量化需重写 kanban per-user 计数器 |
@@ -288,7 +288,7 @@ DEFER（带原因）：
 | ID | 文件:行 | 问题 | 修法 |
 |---|---|---|---|
 | G1 | `backend/app/modules/file/service.py:150,122` | upload_file MinIO put 先于 DB commit 无补偿 → commit 失败留孤儿对象；soft_delete 仅置 deleted_at 不删存储本体（注释称"后续清理流程"但全仓不存在）→ MinIO 孤儿单调增长（账单泄漏） | upload commit 失败 best-effort 补偿 `delete_object`；soft_delete 同步删对象本体（先 commit DB 后删 MinIO，宁可孤儿不可损坏） |
-| G2 | `backend/app/modules/workspace/service.py:527` | soft_delete 仅置 deleted_at/status，**不取消该 workspace 下在跑 AgentRun** → daemon 继续 burn token / 向已删实体回写 | 复用 P0-2 链路：查 active runs（经 AgentRunWorkspace JOIN）逐个 `cancel_lease`（含 pending 兜底），best-effort 单 run 失败不中断 |
+| G2 | `backend/app/modules/workspace/service.py:560` | soft_delete 仅置 deleted_at/status，**不取消该 workspace 下在跑 AgentRun** → daemon 继续 burn token / 向已删实体回写 | 复用 P0-2 链路：查 active runs（经 AgentRunWorkspace JOIN）逐个 `cancel_lease`（含 pending 兜底），best-effort 单 run 失败不中断 |
 | G3 | `frontend/src/lib/daemon/index.ts` | 第四批删 streamQuickChat 后注释仍提及（纯注释瑕疵） | 清理注释 |
 
 ### DEFER 复评（修正 a4f18dab 判断 + 大工程留专项）

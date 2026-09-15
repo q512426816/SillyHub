@@ -63,7 +63,7 @@ generator: sillyspec-scan
 
 ### 6. 日志：`structlog` + 模块级 `get_logger(__name__)`，事件名点分蛇形
 
-不在业务代码用 `print` 或裸 `logging`。配置见 `backend/app/core/logging.py:13-46`（`merge_contextvars`、ISO UTC 时间戳、`format_exc_info`、JSONRenderer、`configure_logging` 在 `backend/app/main.py:96` 启动时调用）。各 service/router 顶部 `log = get_logger(__name__)`（如 `backend/app/core/errors.py:443`）。异常统一 `log.exception("<event>", ...)`，事件名点分蛇形（`app.start` 类风格）。
+不在业务代码用 `print` 或裸 `logging`。配置见 `backend/app/core/logging.py:13-46`（`merge_contextvars`、ISO UTC 时间戳、`format_exc_info`、JSONRenderer、`configure_logging` 在 `backend/app/main.py:104` 启动时调用）。各 service/router 顶部 `log = get_logger(__name__)`（如 `backend/app/core/errors.py:443`）。异常统一 `log.exception("<event>", ...)`，事件名点分蛇形（`app.start` 类风格）。
 
 ### 7. 权限/归属校验放 service 层（PPM 范式）
 

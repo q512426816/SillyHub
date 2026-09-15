@@ -19,9 +19,9 @@ prototype: prototype-subagent-three-pane.html
 3. 中间会话栏里子代理不需要展示细节，只展示**是否运行中 + 运行时间**。
 
 现状三个结构性成因（调研结论）：
-- 默认「对话」视图把子代理容器段整体过滤（`turn-timeline.tsx:1183-1188` 只留 text/file），子代理产出完全不可见——"内容不完整"主因。
-- 「进度」视图中 `SubagentBlockView`（`turn-segment-views.tsx:590-760`）是内嵌窄卡，完成即折叠，无独立展示空间。
-- 2026-09-09-sessions-file-browser-three-pane 已落地三分栏（左列表/中会话/右文件预览，`sessions-portal.tsx:646-1006`），右栏机制（条件挂载 + `usePanelWidth`/`PanelResizer` + localStorage 记忆）可直接复用。
+- 默认「对话」视图把子代理容器段整体过滤（`frontend/src/components/daemon/turn-timeline.tsx:1183-1188` 只留 text/file），子代理产出完全不可见——"内容不完整"主因。
+- 「进度」视图中 `SubagentBlockView`（`frontend/src/components/daemon/turn-segment-views.tsx:590-760`）是内嵌窄卡，完成即折叠，无独立展示空间。
+- 2026-09-09-sessions-file-browser-three-pane 已落地三分栏（左列表/中会话/右文件预览，`frontend/src/components/sessions/sessions-portal.tsx:646-1006`），右栏机制（条件挂载 + `usePanelWidth`/`PanelResizer` + localStorage 记忆）可直接复用。
 
 ## 2. 设计目标
 
@@ -49,10 +49,10 @@ prototype: prototype-subagent-three-pane.html
 
 - 保留 `filePreview {workspaceId, path}` 状态不动；**新增** `subagentView { segmentId } | null`（段 id 是会话内稳定 key）。
 - 互斥写入点仅两处，天然"最后触发覆盖"：
-  - 文件树 `onSelectFile`（sessions-portal.tsx:659-663）：落 `filePreview` 前/同时 `setSubagentView(null)`。
+  - 文件树 `onSelectFile`（frontend/src/components/sessions/sessions-portal.tsx:677）：落 `filePreview` 前/同时 `setSubagentView(null)`。
   - 新回调 `handleOpenSubagent(segmentId)`：`setFilePreview(null); setSubagentView({ segmentId })`。
 - 会话切换清零：`selectedSessionId` 变化（含清空）时 `setSubagentView(null)`（段 id 属旧会话，无跨会话语义）。
-- 右栏渲染分工（**以 §5.B 为准**，此处修正初稿表述）：portal 右列（sessions-portal.tsx:980-1006）**仍只渲染文件预览**；子代理面板渲染在 SessionPanel 内部（§5.B）——因为它需要 `displayTurns` 活数据。单槽位互斥不靠"同一列二选一渲染"，而靠 portal 双向清零：点文件 → `setSubagentView(null)`（SessionPanel 收 openSubagentId=null 自动卸载面板）；点子代理 → `setFilePreview(null)`（portal 文件预览列卸载）。效果上等价于同一槽位，实现上两处各管各的渲染。
+- 右栏渲染分工（**以 §5.B 为准**，此处修正初稿表述）：portal 右列（frontend/src/components/sessions/sessions-portal.tsx:939）**仍只渲染文件预览**；子代理面板渲染在 SessionPanel 内部（§5.B）——因为它需要 `displayTurns` 活数据。单槽位互斥不靠"同一列二选一渲染"，而靠 portal 双向清零：点文件 → `setSubagentView(null)`（SessionPanel 收 openSubagentId=null 自动卸载面板）；点子代理 → `setFilePreview(null)`（portal 文件预览列卸载）。效果上等价于同一槽位，实现上两处各管各的渲染。
 
 ### 5.B SessionPanel 新契约（session-panel-page / index）
 
@@ -72,7 +72,7 @@ prototype: prototype-subagent-three-pane.html
 - `SegmentView` 签名不变（context 穿透零改动，递归 children 也自动生效）。
 - 时长/状态推导复用现有 task-13 逻辑（taskElapsedMs 服务端权威 + 本地走秒），零新造。
 
-### 5.D 对话视图过滤放宽（turn-timeline.tsx:1183-1188）
+### 5.D 对话视图过滤放宽（frontend/src/components/daemon/turn-timeline.tsx:1183-1188）
 
 - `textSegments` 过滤条件由 `text || file` 放宽为 `text || file || 子代理容器段`（tool 且 children.length>0，或 subagent_stub）。子代理容器段在对话视图渲染为 5.C 紧凑卡片。
 - 「进度」视图时间线不变（容器段本就走 SegmentView → 紧凑卡片）。

@@ -22,7 +22,7 @@ goal: >
 implementation:
   - permission.ts 新增导出函数 hasBackgroundTaskGrace(mgr, state)：state.status==='active' && !!state.currentRunId && 注册表非空（经门面 hasLiveBackgroundTasks 判定）
   - writeChannelGuardDeny 在现有两放行（status=running / withinStaleFlipGrace）之后追加 hasBackgroundTaskGrace 放行，命中即 return null
-  - '两处守卫 deny message（permission.ts:169 带状态 parts 处与 :191/:327 "session not in running turn" 文案处）加前缀 "PLATFORM_NO_RUNNING_TURN: "，存量文案信息保留'
+  - '两处守卫 deny message（sillyhub-daemon/src/interactive/session-manager/permission.ts:169 带状态 parts 处与 :191/:327 "session not in running turn" 文案处）加前缀 "PLATFORM_NO_RUNNING_TURN: "，存量文案信息保留'
   - 主轮进行中的普通人审 deny 文案不动（那是用户决策、非平台故障）
 acceptance:
   - 三态单测：注册表空（active+currentRunId）→ deny；注册表非空（active+currentRunId）→ 放行；currentRunId 缺失（active+注册表非空但锚点已清）→ deny

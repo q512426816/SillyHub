@@ -406,13 +406,13 @@ frontend/src/lib/agent-profile.ts（新建）
    - 影响：`backend/app/modules/agent/placement.py:486-503`（AgentSession INSERT）、`backend/app/modules/agent/service.py:1413-1426`、daemon session 模块
 
 3. **借用（borrow）路径的 provider 解析**
-   - `backend/app/modules/agent/placement.py:799`：无 binding 时 borrow，provider 走 `_resolve_borrowed_or_own_runtime` → 这个 helper 内部也需要支持 agent_profile
+   - `backend/app/modules/agent/placement.py:808`：无 binding 时 borrow，provider 走 `_resolve_borrowed_or_own_runtime` → 这个 helper 内部也需要支持 agent_profile
    - 风险：borrow 场景 provider 匹配失败会静默降级，引入 agent_profile 后更复杂
 
 ### 7.2 中风险点
 
 4. **Mission worker_preset 和 AgentProfile 的关系**
-   - `backend/app/modules/agent/model.py:1754`：`worker_preset` 是 `list[dict]` JSON，每条含 `{agent_type, model, objective, role}`
+   - `backend/app/modules/agent/model.py:1861`：`worker_preset` 是 `list[dict]` JSON，每条含 `{agent_type, model, objective, role}`
    - 如果 agent_type 改为 agent_profile_id，前端必须保证 profile 存在
    - 建议：worker_preset 新增 `agent_profile_id` 可选字段，fallback 到 inline agent_type
 

@@ -13,7 +13,7 @@
 - task-05: permission-resolver.ts `register` 内部 fallback timer 判定逻辑改动——不改签名。无签名级变更。
 - task-06: daemon.ts run 结果上报内部加 USAGE_NOTE 日志行分支——不改签名。无签名级变更。
 - task-07: protocol.py `PermissionRequestPayload` 加**可选字段** `background_task: bool | None = None`（pydantic 字段新增，序列化缺省兼容）。消费点=permission_service.handle_permission_request（task-08 allowed_paths 内）；该 payload 由 WS 反序列化消费，无其他构造点受影响。范围内。
-- task-08: permission_service.py 新增私有方法 `_deny_respond(daemon_id, payload, reason)`（纯新增）；`handle_permission_request` 校验逻辑内部改动——不改签名。`send_permission_response`（ws_hub.py:377）为既有方法被调用、不改。无既有签名级变更。
+- task-08: permission_service.py 新增私有方法 `_deny_respond(daemon_id, payload, reason)`（纯新增）；`handle_permission_request` 校验逻辑内部改动——不改签名。`send_permission_response`（backend/app/modules/daemon/ws_hub.py:366）为既有方法被调用、不改。无既有签名级变更。
 - task-09: agent/service.py `_cleanup_stale_runs_impl` 内部补字段写入（error_code/error_detail 为既有列）——不改签名。无签名级变更。
 - task-10: 新建测试文件 + 修订既有测试断言（不改被测代码签名）。无签名级变更。
 - task-11: 新建/修订测试断言（不改被测代码签名）。无签名级变更。

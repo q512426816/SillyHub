@@ -26,7 +26,7 @@
 ## 设计一致性 [层：人工判断]
 
 与 design.md 一致，两处已审查记录的最小实现偏差（均不违 FR/决策）：
-1. Provider 挂载条件 = `!mobile && onOpenSubagent != null`（session-panel-page.tsx:1593）——design §5.B 只说「page 模式挂」；实现补充了「悬浮宿主等 page 消费方不传 props 也不能挂空值 Provider（否则紧凑卡片点击 noop）」，比设计更严格，QA acceptance 已核。
+1. Provider 挂载条件 = `!mobile && onOpenSubagent != null`（frontend/src/components/daemon/session-panel/session-panel-page.tsx:1593）——design §5.B 只说「page 模式挂」；实现补充了「悬浮宿主等 page 消费方不传 props 也不能挂空值 Provider（否则紧凑卡片点击 noop）」，比设计更严格，QA acceptance 已核。
 2. 根布局采用「原 section 作左单元格外包 flex 行」（task-03）而非把 section 自身改 flex-row——保住 flex-col 高度链与 session-panel-variant 回归锚，效果与 §5.B 等价。
 QA 另提示一处措辞张力：FR-04 过滤放宽对 dialog 对话视图同样生效（回退为内联展开卡，非紧凑卡），design §3 非目标「dialog 零变化」指 props/行为契约层面（session-panel-dialog 58 用例零回归证实），建议 archive 时 §3 补一句说明。
 
@@ -79,13 +79,13 @@ QA 另提示一处措辞张力：FR-04 过滤放宽对 dialog 对话视图同样
 | acceptance 条目 | 归属测试文件 | 关键词命中（提示，命中≠判定） | 判定 | 证据 |
 |---|---|---|---|---|
 | 点子代理 → 文件预览关闭、SessionPanel openSubagentId 收到 segmentId；点文件 → 子代理面板关闭、预览列挂载；严格最后触发覆盖（FR-01） | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx` | SessionPanel、收到（`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx`） | covered | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:25`（SessionPanel）、`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:1774`（收到） |
-| 会话切换后 openSubagentId 清零，不残留旧会话子代理面板（FR-01） | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx` | — | covered | 人工核验：`sessions-portal.test.tsx:2675`「会话切换（重选另一会话）→ 子代理面板卸载」+ `:2692`「切群再切回不复活」（机械零命中系关键词口径，用例实际存在且过） |
+| 会话切换后 openSubagentId 清零，不残留旧会话子代理面板（FR-01） | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx` | — | covered | 人工核验：`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:2675`「会话切换（重选另一会话）→ 子代理面板卸载」+ `:2692`「切群再切回不复活」（机械零命中系关键词口径，用例实际存在且过） |
 | 右栏视觉一次只出现一种（文件预览列在 portal 渲染 / 子代理列在 SessionPanel 内渲染，互斥由状态清零保证——两列不同时存在） | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx` | portal、渲染（`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx`） | covered | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:2`（portal）、`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:10`（渲染） |
 | 新增 describe ≥5 用例 + sessions-portal 既有用例全绿 | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx` | describe、用例、sessions、portal（`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx`） | covered | `frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:58`（describe）、`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:10`（用例）、`frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:2`（sessions） |
 
 #### 探针 4：决策追踪覆盖 [agent 已执行]
-- D-001@v1（三分栏交互模型）→ requirements FR-01/02/03/05 引用 → plan 决策追踪段 + task-01/03/04 frontmatter decision_ids → 证据回指：sessions-portal.tsx:226-229/699-701（互斥）、turn-segment-views.tsx 紧凑分支、subagent-detail-panel.tsx 全文件——**闭环**。
-- D-002@v1（默认视图行为补全）→ FR-02/03/04/05 → task-01/02/03 → 证据回指：turn-timeline.tsx isConversationSegment、SubagentBlockView toggle、handleJumpToSubagent 双路径（session-panel-page.tsx:2566）——**闭环**。
+- D-001@v1（三分栏交互模型）→ requirements FR-01/02/03/05 引用 → plan 决策追踪段 + task-01/03/04 frontmatter decision_ids → 证据回指：frontend/src/components/sessions/sessions-portal.tsx:226-229/699-701（互斥）、turn-segment-views.tsx 紧凑分支、subagent-detail-panel.tsx 全文件——**闭环**。
+- D-002@v1（默认视图行为补全）→ FR-02/03/04/05 → task-01/02/03 → 证据回指：turn-timeline.tsx isConversationSegment、SubagentBlockView toggle、handleJumpToSubagent 双路径（frontend/src/components/daemon/session-panel/session-panel-page.tsx:2566）——**闭环**。
 - D-003@v1（方案 A 右栏单槽位）→ FR-01/03/05 → task-03/04 → 证据回指：面板归属 session-panel-page 根 flex 行 + portal 双向清零（非同列二选一渲染，与 Grill X-001 修正后口径一致）——**闭环**。
 - requirements.md 决策追踪行显式声明「无剩余风险」——与实际相符，无未引用决策版本。
 
@@ -109,13 +109,13 @@ QA 另提示一处措辞张力：FR-04 过滤放宽对 dialog 对话视图同样
      Evidence / 状态两列是人工判断——逐格复核，未闭环行必须在报告标注风险 -->
 | 决策 ID | FR | Task | Evidence | 状态 |
 |---|---|---|---|---|
-| D-001@v1 | FR-01、FR-02、FR-03、FR-05 | task-01、task-03、task-04 | 互斥双写入点 sessions-portal.tsx:226-229/699-701 + 会话切换清零 :235-238（QA 复核锚点）；紧凑卡片 turn-segment-views.tsx 紧凑分支；面板无输入框 subagent-detail-panel.tsx | 已闭环（confirmed） |
-| D-002@v1 | FR-02、FR-03、FR-04、FR-05 | task-01、task-02、task-03 | turn-timeline.tsx isConversationSegment（对话视图卡片化）；toggle 语义（turn-segment-views 测试用例④）；目录跳转双路径 session-panel-page.tsx:2566 | 已闭环（confirmed） |
+| D-001@v1 | FR-01、FR-02、FR-03、FR-05 | task-01、task-03、task-04 | 互斥双写入点 frontend/src/components/sessions/sessions-portal.tsx:226-229/699-701 + 会话切换清零 :235-238（QA 复核锚点）；紧凑卡片 turn-segment-views.tsx 紧凑分支；面板无输入框 subagent-detail-panel.tsx | 已闭环（confirmed） |
+| D-002@v1 | FR-02、FR-03、FR-04、FR-05 | task-01、task-02、task-03 | turn-timeline.tsx isConversationSegment（对话视图卡片化）；toggle 语义（turn-segment-views 测试用例④）；目录跳转双路径 frontend/src/components/daemon/session-panel/session-panel-page.tsx:2566 | 已闭环（confirmed） |
 | D-003@v1 | FR-01、FR-03、FR-05 | task-03、task-04 | 面板渲染归属 session-panel-page（根外包 flex 行 + PanelResizer + 同 LS 键 usePanelWidth）；portal 只管槽位清零不渲染面板本体——与 Grill X-001/X-002 修正口径一致 | 已闭环（confirmed） |
 
 ## 技术债务 [层：人工判断]
 
-- 探针 1 的 2 处「TODO」命中（turn-segment-views.test.tsx:555/560）经人工核验为 **Grep 工具测试固件字符串**（`args: { pattern: "TODO" }`），非未实现标记——零真实 TODO/FIXME 新增。
+- 探针 1 的 2 处「TODO」命中（frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx:555/560）经人工核验为 **Grep 工具测试固件字符串**（`args: { pattern: "TODO" }`），非未实现标记——零真实 TODO/FIXME 新增。
 - 既有测试债 1 项（非本变更）：page.test.tsx「历史轮 whoLine」llm-providers mock 缺 detectUsageProvider 导出（见测试结果节 known_failures）。
 - 顺手修复项：task-02 清理 turn-timeline.tsx 4 处、task-03 清理 6 处 HEAD 既有 eslint warning（均为存量，行为零变化）。
 - 探针 6 未声明删除 `docs/sillyspec/verify-evidence-account-diff-misses-committed-changes.md`：git 事实为 D，但该文件属**他者并行会话**（2026-09-14-session-export 域，其 finished/ 归档副本已在；本会话初始 git status 即为 D）——非本变更产出，不判 FAIL，留其所属变更处理。

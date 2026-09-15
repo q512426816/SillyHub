@@ -20,7 +20,7 @@ goal: >
   新 daemon+旧 backend 组合下被拒收时会无界挂起。backgroundTask===true 的 dialog 也启用 5 分钟兜底，
   保证任何组合下最坏 5 分钟有界 deny；主轮进行中的 dialog 维持现状不设超时（用户决策必须等待的语义不破坏）。
 implementation:
-  - permission-resolver.ts register（permission-resolver.ts:200-210）中 fallback timer 判定从 `!isDialog` 改为 `!isDialog || input.backgroundTask === true`
+  - permission-resolver.ts register（sillyhub-daemon/src/interactive/permission-resolver.ts:200-210）中 fallback timer 判定从 `!isDialog` 改为 `!isDialog || input.backgroundTask === true`
   - 兜底超时 message 沿用既有 'permission request timeout (5min fallback)'，settle 行为与既有非 dialog 兜底一致
   - entry.fallbackTimer.unref?.() 等对 timer 的清理/清除路径不动
 acceptance:

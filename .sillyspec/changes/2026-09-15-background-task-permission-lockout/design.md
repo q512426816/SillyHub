@@ -11,12 +11,12 @@ scale: large
 
 线上会话 6e213eb3-781e-414a-89c8-905c79c79d89（2026-09-15，奖惩功能开发）排查实锤四项缺陷，全部围绕「后台 Task 子代理存活期与轮次生命周期错位」：
 
-1. **写通道守卫锁死后台任务（P0，真金白银损失）**。`onResult`（events.ts:55）在轮次正常收尾时清空 `currentRunId` 并翻 `status='active'`；而 Task 子代理在 SDK 侧继续运行、其工具调用仍进入会话级 `canUseTool` 回调。`writeChannelGuardDeny`（permission.ts:151）对 `status≠running` 一律 fail-closed deny（stale-flip 宽限窗要求 `currentRunId` 仍在，正常收尾不满足）。实证：后台任务 abe100c921a0a2c80 被拒后重试 **94.5 分钟 / 1030 次工具调用**，烧掉 ~87M cache-read token（~$46 按快照差分错记到两个无辜小 run：19 秒的「还在跑？」run 被记 $24.10）。
+1. **写通道守卫锁死后台任务（P0，真金白银损失）**。`onResult`（sillyhub-daemon/src/interactive/session-manager/events.ts:55）在轮次正常收尾时清空 `currentRunId` 并翻 `status='active'`；而 Task 子代理在 SDK 侧继续运行、其工具调用仍进入会话级 `canUseTool` 回调。`writeChannelGuardDeny`（sillyhub-daemon/src/interactive/session-manager/permission.ts:151）对 `status≠running` 一律 fail-closed deny（stale-flip 宽限窗要求 `currentRunId` 仍在，正常收尾不满足）。实证：后台任务 abe100c921a0a2c80 被拒后重试 **94.5 分钟 / 1030 次工具调用**，烧掉 ~87M cache-read token（~$46 按快照差分错记到两个无辜小 run：19 秒的「还在跑？」run 被记 $24.10）。
 
    会话侧 agent 故障报告（P0-1）补充的完整打击面——**本会话至少发生 5 次**：① brainstorm 复审子代理重试 10 次/约 4 分钟未自愈，核验完成但无法写结果文件；② TaskCard 子代理（a03293aee92466915）35 分钟全程被拒，三张卡内容只能整段文本回传；③ task-03 子代理（a8844f5450a92e9af）整轮 22 分钟写类全拒，441 行代码只能由主流程代为落盘；④ task-04 子代理（aa0f27b3a1a9ad47c）44 分钟运行，末段靠「结束本轮进入空闲」自愈；⑤ 主会话也被击中一次（Bash/Grep/Glob 全拒，只能挂 4 分钟 idle 定时器等新 turn）。特征：只读工具正常、仅 sleep 放行（读类不经 canUseTool）；同 run 内重试不可自愈、开新 turn 恢复——与「锚点脱落而非会话结束」的根因一致。故障报告的期望映射：期望1（根因修复绑定脱落）= 本变更 FR-01；期望2（自动重绑/透明重试）**被 FR-01 取代**（通道保持可用，根本无需重试，优于重试）；期望3（可区分「权限拒绝」vs「平台故障」的故障码）= FR-02 扩展（拒收 deny 与守卫 deny 的 message 均带稳定平台故障码前缀）。
-2. **后端权限受理端 fail-soft 静默丢弃（含 dialog 无界挂起）**。`handle_permission_request`（permission_service.py:329）任一校验失败仅 warn + return False。backend 重启清理终态化在跑 run 后（02:12:50 failed），SDK 侧仍在执行的轮次于 02:18:13 发出的 AskUserQuestion 问答卡被 `permission_request_run_mismatch`（current_run_id=null）静默丢弃——用户永远看不到该卡；且 dialog 类请求 daemon 侧**不启 5 分钟兜底**（permission-resolver.ts:200-210，对齐 backend「dialog 无限期等待」语义）、backend 侧也未落行未 arm timer——SDK 侧该 canUseTool **无限期挂起**。
-3. **重启终态化无错误码**。`_cleanup_stale_runs_impl`（agent/service.py:2396）标 failed 只写 `output_redacted` + `exit_code=-1`，`error_code`/`error_detail` 均空——线上出现无错误码的「无声失败」run，排障时无从分辨。
-4. **用量差分记账归属误导（P2）**。SDK `modelUsage`/`total_cost_usd` 是会话级跨轮累计快照（含 Task 子代理全部调用），daemon 按相邻快照差分记到「下一个收口的 run」（daemon.ts:3912 `_deltaModelUsage`）。两次 run 收口之间的后台任务消耗全部错记给无辜 run。总量正确、归属误导。
+2. **后端权限受理端 fail-soft 静默丢弃（含 dialog 无界挂起）**。`handle_permission_request`（backend/app/modules/daemon/permission_service.py:329）任一校验失败仅 warn + return False。backend 重启清理终态化在跑 run 后（02:12:50 failed），SDK 侧仍在执行的轮次于 02:18:13 发出的 AskUserQuestion 问答卡被 `permission_request_run_mismatch`（current_run_id=null）静默丢弃——用户永远看不到该卡；且 dialog 类请求 daemon 侧**不启 5 分钟兜底**（sillyhub-daemon/src/interactive/permission-resolver.ts:200-210?，对齐 backend「dialog 无限期等待」语义）、backend 侧也未落行未 arm timer——SDK 侧该 canUseTool **无限期挂起**。
+3. **重启终态化无错误码**。`_cleanup_stale_runs_impl`（backend/app/modules/agent/service.py:2396）标 failed 只写 `output_redacted` + `exit_code=-1`，`error_code`/`error_detail` 均空——线上出现无错误码的「无声失败」run，排障时无从分辨。
+4. **用量差分记账归属误导（P2）**。SDK `modelUsage`/`total_cost_usd` 是会话级跨轮累计快照（含 Task 子代理全部调用），daemon 按相邻快照差分记到「下一个收口的 run」（sillyhub-daemon/src/daemon.ts:3905 `_deltaModelUsage`）。两次 run 收口之间的后台任务消耗全部错记给无辜 run。总量正确、归属误导。
 
 ## 设计目标
 
@@ -42,27 +42,27 @@ scale: large
 
 **Wave 1（daemon 侧，FR-01/02/04）**
 
-- `onResult`（events.ts）：收尾时若该会话后台任务注册表（`mgr._backgroundTasks`）非空，**保留 `currentRunId` 作后台锚点**（status 仍翻 active）。锚点语义：仅代表「后台任务群的派发轮次仍需通道」。已知行为变化：provider/config switch 的空闲判定（session-manager.ts:1553/1671 读 currentRunId）会推迟到下一轮边界才认为空闲——方向保守（切配置等待更久），可接受，不改。
+- `onResult`（events.ts）：收尾时若该会话后台任务注册表（`mgr._backgroundTasks`）非空，**保留 `currentRunId` 作后台锚点**（status 仍翻 active）。锚点语义：仅代表「后台任务群的派发轮次仍需通道」。已知行为变化：provider/config switch 的空闲判定（sillyhub-daemon/src/interactive/session-manager.ts:1562/1671 读 currentRunId）会推迟到下一轮边界才认为空闲——方向保守（切配置等待更久），可接受，不改。
 - 任务终态注销点（background-tasks.ts `handleTaskNotificationEvent` 的 `tasks.delete(taskId)` 之后）：若注册表清空且 `state.status==='active' && state.currentRunId`，清掉锚点（新一轮在跑时 status=running，不误清）。会话终态清理 `clearBackgroundTasks` 同步清锚点。
 - SessionManager 门面新增只读公共访问器 `hasLiveBackgroundTasks(sessionId): boolean`（session-manager.ts；注册表 `_backgroundTasks` 为私有，daemon.ts 等外部消费者不可直达；同族 permission.ts 经 core 直接读注册表）。
 - `writeChannelGuardDeny`（permission.ts）：新增放行条件 `hasBackgroundTaskGrace`——`status==='active' && currentRunId 仍在 && 注册表非空`。与 `withinStaleFlipGrace` 并列为第二宽限源（设计哲学同源：注册表是「后台工作确定存活」的权威信号，比时间窗猜测强）。
 - **`backgroundTask` 标记统一注入（Grill 阻断项①修正）**：新增辅助函数 `backgroundTaskFlag(state, hasLive): boolean`（= `state.status!=='running' && hasLive`），注入点按 guard 可达性枚举（Grill 复核修正：**4 处可达** + 2 处不可达说明）：
-  1. `buildCanUseToolCallback` 默认普通审批 register（permission.ts:524，Claude 后台子代理 Write/Bash 的**实际主路径**——P0 场景）；
-  2. AskUserQuestion 拦截 register（permission.ts:362）；
-  3. ExitPlanMode register（permission.ts:441）；
-  4. `requestPermissionImpl` register（permission.ts:209，codex/pi sessionPermission 路径）。
+  1. `buildCanUseToolCallback` 默认普通审批 register（sillyhub-daemon/src/interactive/session-manager/permission.ts:615，Claude 后台子代理 Write/Bash 的**实际主路径**——P0 场景）；
+  2. AskUserQuestion 拦截 register（sillyhub-daemon/src/interactive/session-manager/permission.ts:362）；
+  3. ExitPlanMode register（sillyhub-daemon/src/interactive/session-manager/permission.ts:441）；
+  4. `requestPermissionImpl` register（sillyhub-daemon/src/interactive/session-manager/permission.ts:209，codex/pi sessionPermission 路径）。
 
-  不可达说明：`requestUserDialogImpl`（permission.ts:261）与 `buildOnUserDialogCallback`（permission.ts:612）有前置硬检查 `status!=='running' → cancelled`（permission.ts:251/:597-603），后台锚点态（status=active）根本到不了 register——注入为死代码，**不注入**；该语义在 Wave 3 测试中标注断言（锚点态 onUserDialog 路径维持 cancelled，与现状一致、无挂起）。
+  不可达说明：`requestUserDialogImpl`（sillyhub-daemon/src/interactive/session-manager/permission.ts:282）与 `buildOnUserDialogCallback`（sillyhub-daemon/src/interactive/session-manager/permission.ts:635）有前置硬检查 `status!=='running' → cancelled`（sillyhub-daemon/src/interactive/session-manager/permission.ts:282/:597-603），后台锚点态（status=active）根本到不了 register——注入为死代码，**不注入**；该语义在 Wave 3 测试中标注断言（锚点态 onUserDialog 路径维持 cancelled，与现状一致、无挂起）。
   主轮进行中（status=running）恒 false——标记只在「轮次已收尾但后台任务存活」的后台锚点态置位。
-- **后台 dialog 请求有界兜底（Grill 阻断项②修正）**：`permission-resolver.ts` register 中，`backgroundTask===true` 的请求**即使带 dialogKind 也启用** 5 分钟 fallback timer（现状 dialog 一律不启，permission-resolver.ts:200-210）。理由：后台锚点态的 dialog 已是降级路径，无界挂起（新 daemon+旧 backend 组合下被拒收）比 5 分钟后 deny + agent 走推荐项更糟；主轮进行中的 dialog 维持现状不设超时（用户决策必须等待的语义不破坏）。
+- **后台 dialog 请求有界兜底（Grill 阻断项②修正）**：`permission-resolver.ts` register 中，`backgroundTask===true` 的请求**即使带 dialogKind 也启用** 5 分钟 fallback timer（现状 dialog 一律不启，sillyhub-daemon/src/interactive/permission-resolver.ts:200-210）。理由：后台锚点态的 dialog 已是降级路径，无界挂起（新 daemon+旧 backend 组合下被拒收）比 5 分钟后 deny + agent 走推荐项更糟；主轮进行中的 dialog 维持现状不设超时（用户决策必须等待的语义不破坏）。
 - `daemon.ts` run 结果上报处（`_modelUsageBaselineBySession` 差分同一路径）：若 `hasLiveBackgroundTasks(sessionId)`，向**正在收口的 runId** 追加一条 stdout 日志行 `[USAGE_NOTE] 本轮上报用量含仍在运行的后台任务消耗（SDK 为会话级累计快照，无法按任务拆分）`（复用既有 `[TASK_*]` 行写入通道——已有向终态 run 写行先例）。
 
 **Wave 2（backend 侧，FR-01/02/03）**
 
 - `PermissionRequestPayload`（protocol.py）加 `background_task: bool | None = None`。
-- `handle_permission_request`（permission_service.py）：`payload.background_task is True` 时，**整个 current_run 校验块**（run 匹配 permission_service.py:423 + active-turn :432 两分支）替换为「按 `payload.run_id` 直查 AgentRun + 校验 `run.agent_session_id == session_id`」（派发轮次归属完整性）；其余校验（session 存在/runtime 归属/session active/manual_approval）不变、顺序不变。
-- 同函数**所有**校验失败分支：return False 前经 `self._hub.send_permission_response(daemon_id, {...})` 推即时 deny（best-effort，发送失败仅 warn 不抛——daemon 侧仍有第 1 项的 5 分钟兜底覆盖所有请求形态）。deny payload 对齐既有下行先例**必带 `runtime_id` ack 键**（permission_service.py:1503-1510）+ `session_id`/`request_id`/`decision='deny'`/`message`；message 格式 `PLATFORM_PERMISSION_DROPPED: <具体拒收原因> — retry in a new turn`（稳定故障码前缀，P0-1 期望3）。daemon resolver `resolve()` 对 unknown/迟到响应已安全忽略（返回 `'unknown_request'` 不抛）。
-- daemon 守卫残留 deny 路径（`writeChannelGuardDeny` 两处 message，permission.ts:169/191/327）同步加 `PLATFORM_NO_RUNNING_TURN:` 码前缀（存量文案信息保留），主轮进行中的普通人审 deny 文案**不改**（那是用户决策、非平台故障）。
+- `handle_permission_request`（permission_service.py）：`payload.background_task is True` 时，**整个 current_run 校验块**（run 匹配 backend/app/modules/daemon/permission_service.py:451 + active-turn :432 两分支）替换为「按 `payload.run_id` 直查 AgentRun + 校验 `run.agent_session_id == session_id`」（派发轮次归属完整性）；其余校验（session 存在/runtime 归属/session active/manual_approval）不变、顺序不变。
+- 同函数**所有**校验失败分支：return False 前经 `self._hub.send_permission_response(daemon_id, {...})` 推即时 deny（best-effort，发送失败仅 warn 不抛——daemon 侧仍有第 1 项的 5 分钟兜底覆盖所有请求形态）。deny payload 对齐既有下行先例**必带 `runtime_id` ack 键**（backend/app/modules/daemon/permission_service.py:1503-1510）+ `session_id`/`request_id`/`decision='deny'`/`message`；message 格式 `PLATFORM_PERMISSION_DROPPED: <具体拒收原因> — retry in a new turn`（稳定故障码前缀，P0-1 期望3）。daemon resolver `resolve()` 对 unknown/迟到响应已安全忽略（返回 `'unknown_request'` 不抛）。
+- daemon 守卫残留 deny 路径（`writeChannelGuardDeny` 两处 message，sillyhub-daemon/src/interactive/session-manager/permission.ts:178/191/327）同步加 `PLATFORM_NO_RUNNING_TURN:` 码前缀（存量文案信息保留），主轮进行中的普通人审 deny 文案**不改**（那是用户决策、非平台故障）。
 - `_cleanup_stale_runs_impl`（agent/service.py）：failed 分支补 `error_code='SERVICE_RESTART_INTERRUPTED'` + `error_detail={"reason": "backend service restarted while run was active", "finished_by": "startup_cleanup"}`；completed 恢复分支不写 error_code。
 
 **Wave 3（测试）**
@@ -157,8 +157,8 @@ async def _deny_respond(
 | R-03 | `background_task` 标记被滥用（daemon 侧误标）扩大受理面 | P2 | 受理放宽仅绕过「active-turn + run 匹配」一项，run 归属校验仍在；标记只在 `status≠running && 注册表非空` 时置位，主轮进行中恒 false；4 处注入点共用单一 `backgroundTaskFlag` 辅助防漂移 |
 | R-04 | USAGE_NOTE 日志行混入日志流干扰前端渲染/解析 | P2 | 复用既有 `[TASK_PROGRESS]`/`[TASK_NOTIFICATION]` 同款 stdout 行协议，前端按既有文本行渲染，无需适配 |
 | R-05 | 既有 permission fail-soft 测试语义变化 | P1 | Wave 3 同步改断言（拒收时断言 hub 收到 deny payload），行为变化是设计目标本身 |
-| R-06 | daemon 自更新在后台任务存活期照常放行重启（`hasRunningTurn` 忙屏障不查注册表，lifecycle.ts:375-381）→ 重启杀后台任务 | P2 | 现状既有行为、非本变更回归；锚点态 `status=active` 本就不算「running turn」，忙屏障语义未变。留待后续变更评估「注册表非空时推迟自更新」 |
-| R-07 | 锚点使 provider/config switch 空闲判定（session-manager.ts:1553/1671）推迟到下轮边界 | P2 | 方向保守（切换等待更久不误切）；turn 边界可达（下轮 inject/收尾即消；注册表泄漏时由 R-01 兜底路径收敛） |
+| R-06 | daemon 自更新在后台任务存活期照常放行重启（`hasRunningTurn` 忙屏障不查注册表，sillyhub-daemon/src/interactive/session-manager/lifecycle.ts:375-381）→ 重启杀后台任务 | P2 | 现状既有行为、非本变更回归；锚点态 `status=active` 本就不算「running turn」，忙屏障语义未变。留待后续变更评估「注册表非空时推迟自更新」 |
+| R-07 | 锚点使 provider/config switch 空闲判定（sillyhub-daemon/src/interactive/session-manager.ts:1553/1671）推迟到下轮边界 | P2 | 方向保守（切换等待更久不误切）；turn 边界可达（下轮 inject/收尾即消；注册表泄漏时由 R-01 兜底路径收敛） |
 | R-08 | 后台 dialog 受理后（落 pending 行且 backend 不 arm timer）daemon 5min fallback 单方 settle 不通知 backend → 用户 5min 后作答被 `unknown_request` 静默丢 + 问答卡成僵尸（dialog 无 permission_resolved 撤卡链路） | P2 | Grill 复核提出、非阻断：该竞态需「后台 dialog 受理 + 用户恰好 5min 后作答」双条件，窗口窄且本变更前同类 dialog 根本到不了用户；修法（daemon fallback settle 时同步上行 cancel/timeout 事件）留后续变更，先在 backend dialog 应答路径对已 unknown 的作答返回明确 409 文案（复用既有先到先得 409） |
 
 ## 决策追踪
