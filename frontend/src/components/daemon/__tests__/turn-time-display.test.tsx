@@ -1,0 +1,134 @@
+/**
+ * quick-3c85b05e（2026-09-15 轮次时间三段显示）：会话轮次「开始 · 结束 · 历时」
+ * 与运行中状态条「开始时刻」单测。悬浮对话（floating-session-host）与门户会话
+ * 共用 SessionPanel → TurnTimeline/TurnStatusBar 内核，本文件即两宿主的共享契约。
+ *
+ * 锁定：
+ *   1. 完成轮（turnStartedAt + replyAt 双锚点）：时间行三段——开始 HH:MM:SS ·
+ *      结束 HH:MM:SS · 历时 mm:ss（期望值按本地时区派生，测试环境无关）；
+ *   2. 仅 replyAt（旧数据无开始锚点）：回退单显结束时间（既有行为保持，无开始/
+ *      历时字样）；
+ *   3. 运行中（TurnStatusBar）：锚点存在即显「开始 HH:MM:SS」（与走秒 ≥15s
+ *      门槛解耦——刚开跑也显示开始时刻）。
+ *
+ * 测试纪律同 turn-timeline-conversation-file-card.test.tsx：mock MarkdownText
+ * （next/dynamic ssr:false 在 jsdom 同步渲染为 null）。
+ */
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+
+import { TurnTimeline } from "../turn-timeline";
+import { TurnStatusBar } from "../turn-status-bar";
+import type { SessionTurnView, SessionViewMode } from "../turn-timeline";
+import type { TextTurnSegment } from "../turn-segment-views";
+
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
+/** 本地时区 HH:MM:SS 派生（期望值与实现同源算法，环境时区无关）。 */
+function localHms(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// 锚定「今天 10:00 本地」——与实现 formatTurnTimeSec 的 sameDay 判定同日，
+// 输出恒为 HH:MM:SS（无 MM-DD 前缀），期望值确定。
+const startAnchor = new Date();
+startAnchor.setHours(10, 0, 0, 0);
+const START_MS = startAnchor.getTime();
+const END_ISO = new Date(START_MS + 96_000).toISOString(); // 历时 01:36
+
+const TEXT_SEG: TextTurnSegment = {
+  kind: "text",
+  id: "seg-text-1",
+  text: "已完成",
+  streaming: false,
+  startedAt: START_MS,
+};
+
+function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
+  return {
+    runId: "run-1",
+    turn: 1,
+    prompt: "帮我查一下",
+    output: "已完成",
+    status: "completed",
+    seenLogIds: new Set<string>(),
+    inputTokens: null,
+    outputTokens: null,
+    segments: [TEXT_SEG],
+    turnStartedAt: START_MS,
+    replyAt: END_ISO,
+    ...overrides,
+  };
+}
+
+function renderProps(turns: SessionTurnView[], viewMode: SessionViewMode = "conversation") {
+  return {
+    turns,
+    viewMode,
+    errorMsg: null,
+    sessionStatus: "active" as const,
+    pendingRequests: [],
+    dialogHistory: [],
+    onDialogResolved: () => {},
+    onResend: () => {},
+    onSwitchProvider: () => {},
+    hasOnlineProvider: true,
+    emptyProviderLabel: "Claude Code",
+  };
+}
+
+describe("轮次时间三段显示（quick-3c85b05e）", () => {
+  it("完成轮双锚点：开始 · 结束 · 历时 三段齐（对话视图；悬浮对话共用内核）", () => {
+    render(<TurnTimeline {...renderProps([makeTurn()])} />);
+    expect(screen.getByText(`开始 ${localHms(START_MS)}`, { exact: false })).toBeInTheDocument();
+    expect(
+      screen.getByText(`结束 ${localHms(Date.parse(END_ISO))}`, { exact: false }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("历时 01:36", { exact: false })).toBeInTheDocument();
+  });
+
+  it("进度视图（all）同样渲染三段（两视图同规则）", () => {
+    render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
+    expect(screen.getByText(/历时 01:36/)).toBeInTheDocument();
+  });
+
+  it("仅 replyAt（旧数据无开始锚点）：回退单显结束时间，无开始/历时字样", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([makeTurn({ turnStartedAt: null, replyAt: END_ISO })])}
+      />,
+    );
+    expect(
+      screen.getByText(`结束 ${localHms(Date.parse(END_ISO))}`, { exact: false }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/开始 /)).toBeNull();
+    expect(screen.queryByText(/历时/)).toBeNull();
+  });
+
+  it("运行中状态条：锚点存在即显「开始 HH:MM:SS」（与走秒 ≥15s 门槛解耦）", () => {
+    // 锚点 5s 前（<15s 走秒不显示），开始时刻仍应显示。
+    render(
+      <TurnStatusBar
+        turnStartedAt={Date.now() - 5_000}
+        segments={[TEXT_SEG]}
+        turnStatus="running"
+      />,
+    );
+    expect(screen.getByText(/开始 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument();
+    // <15s：不显走秒 mm:ss（既有门槛保持）。
+    expect(screen.queryByText(/^\d{2}:\d{2}$/)).toBeNull();
+  });
+
+  it("运行中状态条无锚点：不显开始时刻（容错不显示，既有语义）", () => {
+    render(
+      <TurnStatusBar turnStartedAt={null} segments={[TEXT_SEG]} turnStatus="running" />,
+    );
+    expect(screen.queryByText(/开始 /)).toBeNull();
+  });
+});

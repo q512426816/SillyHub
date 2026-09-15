@@ -346,6 +346,16 @@ export const TurnStatusBar = memo(function TurnStatusBar({
   const elapsedMs = turnStartedAt != null ? Math.max(0, now - turnStartedAt) : null;
   // 前 15 秒不显具体秒数（deepseek TurnStatus 对齐），≥15s 才显示 mm:ss。
   const showElapsed = elapsedMs != null && elapsedMs >= TURN_STATUS_ELAPSED_MIN_MS;
+  // quick-3c85b05e（2026-09-15 轮次时间三段显示）：运行中补开始时刻（HH:MM:SS，
+  // 锚点存在即显示——与走秒的 ≥15s 门槛解耦，开始时间一秒内也有信息量）。
+  const startClock =
+    turnStartedAt != null
+      ? (() => {
+          const d = new Date(turnStartedAt);
+          const p = (n: number) => String(n).padStart(2, "0");
+          return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        })()
+      : null;
 
   return (
     <div className="flex items-center gap-2.5 rounded-md border border-primary/[0.18] bg-primary/[0.06] px-3 py-1.5 text-xs">
@@ -354,6 +364,11 @@ export const TurnStatusBar = memo(function TurnStatusBar({
         className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary/25 border-t-primary"
       />
       <span className="shrink-0 text-muted-foreground">{STATUS_LABEL[turnStatus]}</span>
+      {startClock && (
+        <span className="shrink-0 text-muted-foreground" title="本轮开始时间">
+          开始 {startClock}
+        </span>
+      )}
       {showElapsed && elapsedMs != null && (
         <span className="shrink-0 font-mono font-medium text-brand-600">
           {formatElapsedMmss(elapsedMs)}

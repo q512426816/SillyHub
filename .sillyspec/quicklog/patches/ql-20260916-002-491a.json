@@ -1,0 +1,63 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-3c85b05e",
+  "totals": {
+    "files": 3,
+    "additions": 192,
+    "deletions": 2
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/daemon/turn-status-bar.tsx",
+      "declared": true,
+      "additions": 15,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "declared": true,
+      "additions": 43,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx",
+      "declared": true,
+      "additions": 134,
+      "deletions": 0,
+      "kind": "new",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 4,
+    "codeFileCount": 2,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260916-002-491a",
+  "sessionId": "quick-3c85b05e",
+  "savedAt": "2026-09-15T16:26:02.368Z",
+  "patchSha256": "d34fb63b96ade5fff35a17c1347a349726f7e328c8146806c3f0dea8f29d6698",
+  "patchStatus": "ok"
+}

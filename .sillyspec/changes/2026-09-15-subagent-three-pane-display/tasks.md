@@ -13,3 +13,4 @@ created_at: 2026-09-15 17:22:00
 - [x] task-04: sessions-portal.tsx 槽位互斥接线（subagentView 状态/点文件清子代理/点子代理清文件/会话切换清零/SessionPanel props 装配）+ sessions-portal.test.tsx 新用例 (depends_on: task-03)
 - [x] 验收返工 #1（design §13.1）: SubagentDetailPanel 任务指令块——装配器导出 dispatchPromptOfRaw（args.prompt 全文）+ 面板正文首块「📋 任务指令」+ detail-panel 2 用例
 - [x] 验收返工 #2（design §13.2）: 父归属优先跨轮路由修「结束后仍显示运行中」——upsertTurn（实时）父段 DFS 路由 + logsToTurns（历史）regroupSubagentLogsByParent 重挂 + turn-state-subagent-routing 4 用例/runtime-session-helpers 3 用例
+- [x] ql-20260916-002-491a 会话子代理三分栏展示

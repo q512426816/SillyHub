@@ -127,6 +127,31 @@ function formatTurnTime(iso: string): string {
     d.getDate() === now.getDate();
   return sameDay ? hm : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
 }
+
+/**
+ * quick-3c85b05e（2026-09-15 轮次时间三段显示）：带秒时刻格式化——今天
+ * HH:MM:SS，跨天 MM-DD HH:MM:SS（开始/结束时间精度到秒，与 formatTurnTime 的
+ * 分钟粒度区分用途）。
+ */
+function formatTurnTimeSec(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  const hms = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return sameDay ? hms : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hms}`;
+}
+
+/** quick-3c85b05e：轮次持续时间 mm:ss（分钟可 >59，格式同子代理块时长）。 */
+function formatTurnDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(Math.floor(total / 60))}:${p(total % 60)}`;
+}
 import { ErrorBoundary } from "@/components/error-boundary";
 import { MarkdownText } from "@/components/ui/markdown-text";
 // ql-20260825-006：会话页提问卡最小化——右下角浮动胶囊 + 标题推导（与 approvals
@@ -1290,9 +1315,25 @@ function SegmentedTurnBody({
       {isLiveTurn(turnStatus) && !segments.some((s) => s.kind === "text") && (
         <ThinkingPlaceholder viewMode={viewMode} />
       )}
-      {/* 答复完成时间（run.finished_at，缺省不渲染；特性保持，段序列后小字）。 */}
+      {/* quick-3c85b05e：轮次时间三段——开始 · 结束 · 历时（悬浮对话/两视图共用本
+          组件同享）。锚点缺失回退单显结束时间（原 formatTurnTime 行为保持）。 */}
       {replyAt && (
-        <div className="ml-9 text-[10.5px] text-muted-foreground">{formatTurnTime(replyAt)}</div>
+        <div className="ml-9 flex flex-wrap items-center gap-x-1.5 text-[10.5px] text-muted-foreground">
+          {turnStartedAt != null && (
+            <span>开始 {formatTurnTimeSec(new Date(turnStartedAt).toISOString())}</span>
+          )}
+          {turnStartedAt != null && <span aria-hidden>·</span>}
+          <span>结束 {formatTurnTimeSec(replyAt)}</span>
+          {turnStartedAt != null && (
+            <>
+              <span aria-hidden>·</span>
+              <span>
+                历时{" "}
+                {formatTurnDuration(Math.max(0, Date.parse(replyAt) - turnStartedAt))}
+              </span>
+            </>
+          )}
+        </div>
       )}
     </>
   );
