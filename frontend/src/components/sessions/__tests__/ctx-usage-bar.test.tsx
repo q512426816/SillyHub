@@ -838,3 +838,45 @@ describe("CtxUsageBar（compact 压缩按钮）", () => {
     expect(btn).not.toHaveAttribute("title");
   });
 });
+
+/* ───────── ql-20260915-013 手机端 compact：胶囊只显百分比，明细点击浮层 ───────── */
+
+describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+  it("mobile：胶囊只显百分比（模型名/窗标签/重置时间不渲染），点击浮层明细照旧", async () => {
+    mockListProviders.mockResolvedValue([provider()]);
+    mockGetProviderQuota.mockResolvedValue(
+      quotaResp({
+        model: "glm-4.7",
+        windows: [
+          { label: "5小时窗", left: 80, reset: "2026-08-15T18:00:00" },
+          { label: "周限额", left: 40, reset: "2026-08-17T00:00:00" },
+        ],
+      }),
+    );
+    renderPill(<QuotaPill providerId="p-zhipu" mobile />);
+    const pill = await screen.findByTestId("quota-pill");
+    expect(pill).toHaveTextContent("80%");
+    expect(pill).toHaveTextContent("40%");
+    expect(pill.textContent).not.toContain("glm-4.7");
+    expect(pill.textContent).not.toContain("5小时窗剩");
+    expect(pill.textContent).not.toMatch(/重置/);
+    // 明细浮层照旧（点击弹层交互——收入口不砍功能）。
+    fireEvent.click(pill);
+    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+  });
+
+  it("desktop（缺省 mobile=false）：完整胶囊照旧（零回归锚）", async () => {
+    mockListProviders.mockResolvedValue([provider()]);
+    mockGetProviderQuota.mockResolvedValue(
+      quotaResp({
+        model: "glm-4.7",
+        windows: [{ label: "5小时窗", left: 80, reset: "2026-08-15T18:00:00" }],
+      }),
+    );
+    renderPill(<QuotaPill providerId="p-zhipu" />);
+    const pill = await screen.findByTestId("quota-pill");
+    expect(pill).toHaveTextContent("glm-4.7");
+    expect(pill).toHaveTextContent("5小时窗剩");
+    expect(pill.textContent).toMatch(/重置/);
+  });
+});

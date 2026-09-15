@@ -633,9 +633,13 @@ export function deriveSessionPlaceholder(o: {
           : isQueueFull
             ? "队列已满，请等待投递或删除排队消息…"
             : restoring
-              ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
+              ? mobile
+                ? "恢复中，消息将排队自动发送…"
+                : "恢复会话中，消息将排队等待恢复完成后自动发送…"
               : running
-                ? "消息将排队，等待本轮完成后自动发送…"
+                ? mobile
+                  ? "排队中，本轮结束后自动发送…"
+                  : "消息将排队，等待本轮完成后自动发送…"
                 : mobile
                   ? "继续追问…"
                   : `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;

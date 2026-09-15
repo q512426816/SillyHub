@@ -1,0 +1,193 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-7c187514",
+  "totals": {
+    "files": 10,
+    "additions": 348,
+    "deletions": 70
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/globals.css",
+      "declared": true,
+      "additions": 13,
+      "deletions": 13,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/task-execution-panel.test.tsx",
+      "declared": true,
+      "additions": 30,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "declared": true,
+      "additions": 6,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/task-execution-panel.tsx",
+      "declared": true,
+      "additions": 20,
+      "deletions": 10,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+      "declared": true,
+      "additions": 42,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "declared": true,
+      "additions": 10,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/ctx-usage-bar.tsx",
+      "declared": true,
+      "additions": 42,
+      "deletions": 21,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-config-bar.tsx",
+      "declared": true,
+      "additions": 3,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "declared": true,
+      "additions": 180,
+      "deletions": 23,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+      "declared": true,
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": [
+      {
+        "file": ".sillyspec/docs/backend/modules/daemon.md",
+        "sessions": [
+          "quick-09d653fb",
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": ".sillyspec/docs/frontend/modules/components-daemon.md",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/router/__init__.py",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/router/session_queue.py",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/scheduled_send.py",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/service.py",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/session/service/__init__.py",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/session/service/errors.py",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "backend/app/modules/daemon/tests/test_scheduled_messages_crud.py",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "frontend/src/components/daemon/__tests__/scheduled-messages-bar.test.tsx",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "frontend/src/components/daemon/scheduled-messages-bar.tsx",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      },
+      {
+        "file": "frontend/src/lib/daemon/sessions.ts",
+        "sessions": [
+          "quick-f96d4e81"
+        ]
+      }
+    ]
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 15,
+    "codeFileCount": 9,
+    "testFileCount": 6,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-013-0433",
+  "sessionId": "quick-7c187514",
+  "savedAt": "2026-09-15T15:37:39.720Z",
+  "patchSha256": "97ef8361c39fbb3fa14e3948ecc1cdf1321ce2bc2a91d47f32727fb37fdfbf8c",
+  "patchStatus": "ok"
+}

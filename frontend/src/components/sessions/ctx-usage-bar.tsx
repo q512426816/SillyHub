@@ -498,9 +498,15 @@ export interface QuotaPillProps {
    * null/undefined=本机默认 → 胶囊照常聚合展示全部可查供应商额度）。
    */
   providerId: string | null | undefined;
+  /**
+   * ql-20260915-013 手机端一行化：compact 只显剩余百分比数字（模型名/「X 剩」
+   * 标签/重置时间/「等 N 家」全收进点击浮层——浮层本来就是权威明细入口），
+   * 防 verbose 胶囊占满手机配置行；desktop 缺省零变化。
+   */
+  mobile?: boolean;
 }
 
-export function QuotaPill({ providerId }: QuotaPillProps) {
+export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
   // 全量供应商列表：聚合展示的基础（列表查询轻，5 分钟慢刷新兜新增供应商）。
   const providersQ = useQuery({
     queryKey: ["llmProviders", "quota-pill"],
@@ -672,27 +678,39 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
         onMouseEnter={handlePillMouseEnter}
         onMouseLeave={clearHoverTimer}
       >
-        {face.model ? (
-          <b className="font-semibold text-foreground">{face.model}</b>
+        {mobile ? (
+          // compact：仅百分比（多窗斜杠分隔），明细点击浮层看。
+          facePctTiers.map((t, i) => (
+            <span key={i} className={quotaLeftToneClass(t.leftPct!)}>
+              {i > 0 ? "/" : ""}
+              {t.leftPct}%
+            </span>
+          ))
         ) : (
-          <b className="font-semibold text-foreground">{face.providerName}</b>
+          <>
+            {face.model ? (
+              <b className="font-semibold text-foreground">{face.model}</b>
+            ) : (
+              <b className="font-semibold text-foreground">{face.providerName}</b>
+            )}
+            {facePctTiers.map((t, i) => (
+              <span key={i}>
+                · {t.label}剩{" "}
+                <span className={quotaLeftToneClass(t.leftPct!)}>{t.leftPct}%</span>
+              </span>
+            ))}
+            {faceReset ? (
+              <span className="text-[10px] text-muted-foreground">
+                ⏱ {formatQuotaResetTime(faceReset)} 重置
+              </span>
+            ) : null}
+            {restCount > 0 ? (
+              <span className="text-[10px] text-muted-foreground">
+                等{restCount}家
+              </span>
+            ) : null}
+          </>
         )}
-        {facePctTiers.map((t, i) => (
-          <span key={i}>
-            · {t.label}剩{" "}
-            <span className={quotaLeftToneClass(t.leftPct!)}>{t.leftPct}%</span>
-          </span>
-        ))}
-        {faceReset ? (
-          <span className="text-[10px] text-muted-foreground">
-            ⏱ {formatQuotaResetTime(faceReset)} 重置
-          </span>
-        ) : null}
-        {restCount > 0 ? (
-          <span className="text-[10px] text-muted-foreground">
-            等{restCount}家
-          </span>
-        ) : null}
       </span>
     </Popover>
   );
@@ -707,10 +725,13 @@ export interface CtxUsageBarProps extends CtxUsageRingProps {
    * 胶囊照常聚合展示全部可查供应商额度——quick-e4d0551f 语义变更）。
    */
   providerId?: string | null;
+  /** ql-20260915-013：mobile 紧凑形态——额度胶囊只显百分比（明细点击浮层）。 */
+  mobile?: boolean;
 }
 
 export function CtxUsageBar({
   providerId,
+  mobile = false,
   ...ringProps
 }: CtxUsageBarProps) {
   // FR-06 caps 门控：provider 明确且 getProviderCaps(provider).ctx_usage=false
@@ -724,7 +745,7 @@ export function CtxUsageBar({
   return (
     <div className="flex items-center gap-2.5">
       {ctxSupported ? <CtxUsageRing {...ringProps} /> : null}
-      <QuotaPill providerId={providerId} />
+      <QuotaPill providerId={providerId} mobile={mobile} />
     </div>
   );
 }

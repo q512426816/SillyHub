@@ -909,7 +909,9 @@ export function SessionConfigBar({
             中断自动续跑
           </label>
         )}
-        {running && (
+        {/* running 锁提示：desktop 文字说明；mobile 收（ql-20260915-013 一行化
+            ——禁用态本身可见，控件 title 已带原因，不占行）。 */}
+        {running && !mobile && (
           <span className="inline-flex items-center gap-1 text-[10.5px] text-warning">
             <Lock aria-hidden className="h-3 w-3" />
             本轮完成后解锁切换

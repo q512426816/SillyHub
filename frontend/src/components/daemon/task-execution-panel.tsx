@@ -131,6 +131,11 @@ export interface TaskExecutionPanelProps {
    * （task-08）：SSE 会话流重连恢复后递增。缺省仅 mount / sessionId 变化拉取。
    */
   tasksRefreshSignal?: number;
+  /**
+   * ql-20260915-013 手机端精简：折叠条摘要去「（成功 X / 失败 X）」括注（成败
+   * 分布展开页签内仍可见），一行只留 运行中/任务/轮次 计数；desktop 缺省零变化。
+   */
+  mobile?: boolean;
 }
 
 /**
@@ -423,6 +428,7 @@ export const TaskExecutionPanel = forwardRef<
     planTasks,
     runsRefreshSignal,
     tasksRefreshSignal,
+    mobile = false,
   },
   ref,
 ) {
@@ -560,17 +566,21 @@ export const TaskExecutionPanel = forwardRef<
           ) : (
             <span>运行中 0</span>
           )}
-          <span>
-            任务 {tasks.length}（
-            <span className={okCount > 0 ? "text-success" : undefined}>
-              成功 {okCount}
+          {mobile ? (
+            <span>任务 {tasks.length}</span>
+          ) : (
+            <span>
+              任务 {tasks.length}（
+              <span className={okCount > 0 ? "text-success" : undefined}>
+                成功 {okCount}
+              </span>
+              {" / "}
+              <span className={failCount > 0 ? "text-error" : undefined}>
+                失败 {failCount}
+              </span>
+              ）
             </span>
-            {" / "}
-            <span className={failCount > 0 ? "text-error" : undefined}>
-              失败 {failCount}
-            </span>
-            ）
-          </span>
+          )}
           <span>轮次 {runsCount}</span>
         </span>
         <ChevronRight

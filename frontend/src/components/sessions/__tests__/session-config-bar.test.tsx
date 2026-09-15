@@ -1273,4 +1273,14 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
   });
+
+  it("mobile：running 不渲染「本轮完成后解锁切换」文字提示（ql-20260915-013 一行化，禁用态+title 已表意）", () => {
+    renderBar({ variant: "mobile", running: true });
+    expect(screen.queryByText("本轮完成后解锁切换")).not.toBeInTheDocument();
+  });
+
+  it("desktop：running 锁提示照旧（零回归锚）", () => {
+    renderBar({ running: true });
+    expect(screen.getByText("本轮完成后解锁切换")).toBeInTheDocument();
+  });
 });

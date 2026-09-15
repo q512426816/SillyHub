@@ -452,3 +452,33 @@ describe("TaskExecutionPanel 轮次历史页签（task-07 / FR-04）", () => {
     await waitFor(() => expect(daemonMock.listSessionTasks).toHaveBeenCalledTimes(2));
   });
 });
+
+/* ───────── ql-20260915-013 手机端精简：折叠条摘要去成败括注 ───────── */
+
+describe("TaskExecutionPanel 手机端精简（ql-20260915-013）", () => {
+  it("mobile：折叠条摘要去（成功 X / 失败 X）括注，一行只留 运行中/任务/轮次 计数", async () => {
+    daemonMock.listSessionTasks.mockResolvedValue([
+      taskRow({ task_id: "bg-1", status: "completed" }),
+      taskRow({ task_id: "bg-2", status: "failed" }),
+    ]);
+    render(<TaskExecutionPanel sessionId="sess-1" mobile />);
+    await flush();
+    const summary = screen.getByTestId("task-execution-summary");
+    expect(summary.textContent).toContain("任务 2");
+    expect(summary.textContent).toContain("轮次");
+    expect(summary.textContent).not.toContain("成功");
+    expect(summary.textContent).not.toContain("失败");
+  });
+
+  it("desktop（缺省 mobile=false）：成败括注照旧（零回归锚）", async () => {
+    daemonMock.listSessionTasks.mockResolvedValue([
+      taskRow({ task_id: "bg-1", status: "completed" }),
+      taskRow({ task_id: "bg-2", status: "failed" }),
+    ]);
+    render(<TaskExecutionPanel sessionId="sess-1" />);
+    await flush();
+    const summary = screen.getByTestId("task-execution-summary");
+    expect(summary.textContent).toContain("成功 1");
+    expect(summary.textContent).toContain("失败 1");
+  });
+});

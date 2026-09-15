@@ -2580,8 +2580,9 @@ export function SessionPanelPage({
               icon={<Ban className="h-3 w-3" />}
               disabled
               title="发送第一句话创建会话后可用"
+              aria-label="打断本轮"
             >
-              打断本轮
+              {mobile ? null : "打断本轮"}
             </Button>
           </div>
         </header>
@@ -2784,6 +2785,7 @@ export function SessionPanelPage({
                   fallbackModel={null}
                   providerId={preProviderId || null}
                   provider={preEngine}
+                  mobile={mobile}
                 />
               }
             />
@@ -3140,14 +3142,16 @@ export function SessionPanelPage({
               </div>
             )}
           </div>
+          {/* ql-20260915-013：mobile 图标化（aria-label 保语义，桌面文字照旧）。 */}
           <Button
             size="small"
             icon={<Ban className="h-3 w-3" />}
             disabled={interruptDisabled}
             onClick={() => void handleInterrupt()}
             title="打断本轮（session 保持 active）"
+            aria-label="打断本轮"
           >
-            打断本轮
+            {mobile ? null : "打断本轮"}
           </Button>
           {/* task-14（design §5.4）：mobile ⋯ 菜单——次要 chrome 收纳（#id 复制/
               机器/工作区徽标/后台目录/子代理目录），组件与回调逻辑与 desktop
@@ -3374,6 +3378,7 @@ export function SessionPanelPage({
           由上方 onAgentTaskStatus 分发注入。 */}
       <TaskExecutionPanel
         ref={taskPanelRef}
+        mobile={mobile}
         sessionId={session.id}
         runningTasks={agentTasks.filter((t) => t.status === "running")}
         bashProgress={bashProgress}
@@ -3625,6 +3630,7 @@ export function SessionPanelPage({
                 compactLoading={compacting}
                 compactDisabled={running}
                 compactTooltip="轮运行中，暂不能压缩"
+                mobile={mobile}
               />
             }
             onSwitched={() => {
