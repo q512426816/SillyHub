@@ -1,0 +1,77 @@
+diff --git a/sillyhub-daemon/src/spawn-env.ts b/sillyhub-daemon/src/spawn-env.ts
+index f402046ce..eb37be2e1 100644
+--- a/sillyhub-daemon/src/spawn-env.ts
++++ b/sillyhub-daemon/src/spawn-env.ts
+@@ -188,6 +188,16 @@ const SYSTEM_ENV_KEYS = new Set([
+   'PWD',
+ ]);
+ 
++/**
++ * 子进程源端 UTF-8 缺省 env（ql-20260915-005 / P2-2）：buildSpawnEnv 出口
++ * 仅在键**缺失/空串**时填入——用户显式值与 tool_config.env/provider_config
++ * 下发值优先级更高（见函数尾注）。
++ */
++const UTF8_DEFAULT_ENV: Readonly<Record<string, string>> = {
++  PYTHONIOENCODING: 'utf-8',
++  PYTHONUTF8: '1',
++};
++
+ /**
+  * redactEnv 匹配的疑似密钥 key 名（大小写不敏感）。
+  *
+@@ -297,6 +307,20 @@ export function buildSpawnEnv(
+     delete env.CLAUDE_CONFIG_DIR
+   }
+ 
++  // ql-20260915-005 后续项（P2-2 Claude SDK 链治本）：子进程源端 UTF-8 缺省注入。
++  // Claude SDK 链的 Bash 工具输出字节在上游 SDK setEncoding('utf8') 已固化，daemon
++  // 侧探测救不回——唯一治本路径是让工具子进程（python 等）从源端吐 UTF-8：
++  //   - PYTHONIOENCODING=utf-8：python stdio 编码（用户实证有效，known-issues 条目）；
++  //   - PYTHONUTF8=1：python 3.7+ UTF-8 模式（连 fs 编码一并覆盖，比前者更彻底）。
++  // 语义 = 填补缺省（键已存在则不动）：用户/宿主显式设置或 tool_config.env/
++  // provider_config 显式下发的同名键优先，绝不覆盖（三层合并已写完，这里只补洞）。
++  // claude 子进程 → Bash → 工具孙进程全链继承，Windows/Linux/macOS 皆安全无副作用。
++  for (const [key, value] of Object.entries(UTF8_DEFAULT_ENV)) {
++    if (env[key] === undefined || env[key] === '') {
++      env[key] = value;
++    }
++  }
++
+   return env;
+ }
+ 
+diff --git a/sillyhub-daemon/tests/spawn-env.test.ts b/sillyhub-daemon/tests/spawn-env.test.ts
+index ee10109b8..c8aa48cab 100644
+--- a/sillyhub-daemon/tests/spawn-env.test.ts
++++ b/sillyhub-daemon/tests/spawn-env.test.ts
+@@ -546,4 +546,30 @@ describe('spawn-env SILLYSPEC_SYNC_TIMEOUT_MS (ql-20260907-007: 熔断预算缺
+       SILLYSPEC_SYNC_TIMEOUT_DEFAULT_MS,
+     );
+   });
++
++  // ── ql-20260915-005（P2-2 Claude SDK 链治本）：源端 UTF-8 缺省注入 ──
++
++  it('UTF-8 缺省注入：PYTHONIOENCODING/PYTHONUTF8 缺失时填默认', () => {
++    delete process.env.PYTHONIOENCODING;
++    delete process.env.PYTHONUTF8;
++    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
++    expect(env.PYTHONIOENCODING).toBe('utf-8');
++    expect(env.PYTHONUTF8).toBe('1');
++  });
++
++  it('UTF-8 缺省注入：宿主已显式设置则尊重不覆盖', () => {
++    process.env.PYTHONIOENCODING = 'gbk';
++    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
++    expect(env.PYTHONIOENCODING).toBe('gbk');
++    delete process.env.PYTHONIOENCODING;
++  });
++
++  it('UTF-8 缺省注入：tool_config.env 显式下发优先于缺省', () => {
++    delete process.env.PYTHONIOENCODING;
++    const env = buildSpawnEnv(
++      { toolConfig: { pythonioencoding: 'latin-1' } },
++      { credential: cred },
++    );
++    expect(env.PYTHONIOENCODING).toBe('latin-1');
++  });
+ });
