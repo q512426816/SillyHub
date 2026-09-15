@@ -208,6 +208,14 @@ export async function handleTaskNotificationEvent(
   // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同
   // task_id 的迟到 progress 会走懒注册兜底而非挂死条目）。
   tasks.delete(taskId);
+  // 2026-09-15-background-task-permission-lockout（FR-01）：末任务终态注销后若
+  // 注册表清空，清掉后台锚点（onResult 因注册表非空保留的 currentRunId）——守卫
+  // 放行条件 hasBackgroundTaskGrace 随注册表空自动失效，恢复 fail-closed。仅
+  // status==='active' 时清：新一轮在跑（status=running）时 currentRunId 是活轮
+  // 绑定，绝不可误清。非法终态分支同清（已注销即不再存活）。
+  if (tasks.size === 0 && state.status === 'active') {
+    state.currentRunId = undefined;
+  }
   if (
     rawStatus !== 'completed' &&
     rawStatus !== 'failed' &&
@@ -426,12 +434,21 @@ export function getOrCreateTaskMap(
  * task-03：清理指定 session 的后台任务表 + Task/Agent tool_use 元数据。
  * 会话终态（end/fail）调用——SDK 进程已 kill，后台任务随进程消亡，后续
  * task_* 不会再到达；防 Map 泄漏（对齐 _clearRunningBashCommands 语义）。
+ *
+ * 2026-09-15-background-task-permission-lockout（FR-01）：同步清后台锚点
+ * （state.currentRunId）——注册表被本函数清空后，守卫放行条件
+ * hasBackgroundTaskGrace 若仍见 currentRunId 在会延长放行窗；兜底收敛
+ * （对齐 R-01 注册表泄漏缓解路径，清在删表后，终态会话无在跑轮）。
  */
 export function clearBackgroundTasks(
   mgr: SessionManagerCore,
   sessionId: string,
 ): void {
   mgr._backgroundTasks.delete(sessionId);
+  const state = mgr._store.get(sessionId);
+  if (state && state.status === 'active') {
+    state.currentRunId = undefined;
+  }
   for (const [toolUseId, meta] of mgr._agentToolUseMeta) {
     if (meta.sessionId === sessionId) {
       mgr._agentToolUseMeta.delete(toolUseId);

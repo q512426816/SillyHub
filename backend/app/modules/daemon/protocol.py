@@ -249,6 +249,12 @@ class PermissionRequestPayload(BaseModel):
     # persisted in session_dialog_requests so it survives frontend refresh.
     dialog_kind: str | None = None
     dialog_payload: dict | None = None
+    # 2026-09-15-background-task-permission-lockout（FR-02 / D-001@v1）：daemon
+    # 后台锚点态（主轮已收尾但后台 Task 子代理存活）发出的权限请求标记。True 时
+    # backend 放宽 active-turn 校验为「按 run_id 直查 + 会话归属校验」（后台任务
+    # 的派发轮次已 completed 但任务仍存活）。缺省 None 按普通前台请求处理——
+    # 兼容不发该字段的旧 daemon（行为与现状逐字节一致）。
+    background_task: bool | None = None
 
 
 class PermissionResponsePayload(BaseModel):

@@ -2429,6 +2429,15 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
             run.finished_at = now
             run.exit_code = -1
             run.output_redacted = "Run interrupted: service restarted while agent was running."
+            # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
+            # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
+            # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
+            # 已正常完成，重启只是丢 commit，非错误）。
+            run.error_code = "SERVICE_RESTART_INTERRUPTED"
+            run.error_detail = {
+                "reason": "backend service restarted while run was active",
+                "finished_by": "startup_cleanup",
+            }
             log.warning("stale_run_cleaned", run_id=str(run.id))
         session.add(run)
 

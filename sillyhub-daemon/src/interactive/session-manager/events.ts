@@ -52,7 +52,16 @@ export async function onResult(
   // status 残留 running（虽然 onTurnResult 应不抛，但先收敛更鲁棒）。
   const runId = state.currentRunId;
   state.status = 'active';
-  state.currentRunId = undefined;
+  // 2026-09-15-background-task-permission-lockout（FR-01 / 坑 subagent-write-channel）：
+  // 主轮收尾时若该会话后台任务注册表非空，保留 currentRunId 作「后台锚点」——后台
+  // Task 子代理在主轮结束后仍在运行，其工具调用仍进会话级 canUseTool，锚点让
+  // writeChannelGuardDeny 的 hasBackgroundTaskGrace 放行条件可判定「后台工作确定
+  // 存活」。锚点语义仅代表「后台任务群的派发轮次仍需通道」，是「仅通道存在性」——
+  // 写策略（allowed_roots/policyEngine）与人审链路全程生效，不代表轮次仍在跑。
+  // 注册表为空（无后台任务）行为与现状完全一致：清 currentRunId。
+  if (!mgr._backgroundTasks.get(state.sessionId)?.size) {
+    state.currentRunId = undefined;
+  }
   state.lastActiveAt = Date.now();
   // task-07（R-conv 边界 8）：每收一个 result 表示消费了一条 turn（含排队 inject）。
   // pendingInjectCount 递减（min 0，不下溢）；表示一条排队 turn 被消费。

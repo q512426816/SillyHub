@@ -1384,6 +1384,15 @@ export class SessionManager {
     return hasRunningTurn(this._core());
   }
 
+  /**
+   * 2026-09-15-background-task-permission-lockout（FR-01）：会话是否有存活
+   * 后台任务（只读，不建 map）。_backgroundTasks 私有，外部消费者
+   * （daemon.ts 用量标注 / permission.ts 标记注入）经门面查询，不暴露 map 引用。
+   */
+  hasLiveBackgroundTasks(sessionId: string): boolean {
+    return (this._backgroundTasks.get(sessionId)?.size ?? 0) > 0;
+  }
+
   // ── task-10：持久化 + 崩溃恢复（方法体已下沉 persistence.ts）─────────────────
 
   snapshotPersistable(): PersistedSessionRecord[] {

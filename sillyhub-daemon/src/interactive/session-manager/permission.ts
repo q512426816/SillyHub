@@ -142,6 +142,39 @@ export function withinStaleFlipGrace(
   );
 }
 
+/**
+ * 2026-09-15-background-task-permission-lockout（FR-01 / D-001@v1）：
+ * 后台任务宽限判定——「active + currentRunId 在 + 后台任务注册表非空」：主轮已
+ * 正常收尾（status=active）但后台 Task 子代理仍在运行（onResult 保留的后台锚点），
+ * 其工具调用仍进会话级 canUseTool。注册表（task_notification 终态注销兜底）是
+ * 「后台工作确定存活」的权威信号——比时间窗猜测强，与 withinStaleFlipGrace 并列为
+ * 第二宽限源。仅放行「通道存在性」：写策略（allowed_roots/policyEngine）与人审
+ * 链路在放行后全程生效。
+ */
+export function hasBackgroundTaskGrace(
+  mgr: SessionManagerCore,
+  state: SessionState,
+): boolean {
+  return (
+    state.status === 'active' &&
+    !!state.currentRunId &&
+    (mgr._backgroundTasks.get(state.sessionId)?.size ?? 0) > 0
+  );
+}
+
+/**
+ * background_task 协议标记置位（2026-09-15-background-task-permission-lockout / FR-02）：
+ * 仅「主轮已收尾（status!=='running'）+ 后台任务存活」的后台锚点态为 true——backend
+ * 据此把 active-turn 校验放宽为「run 直查 + 会话归属校验」。主轮进行中恒 false；
+ * 守卫已保证走到 register 时 state/currentRunId 非空（锚点态两者皆在）。
+ */
+export function backgroundTaskFlag(
+  state: SessionState,
+  mgr: SessionManagerCore,
+): boolean {
+  return state.status !== 'running' && hasBackgroundTaskGrace(mgr, state);
+}
+
 export function writeChannelGuardDeny(
   mgr: SessionManagerCore,
   state: SessionState | undefined,
@@ -155,6 +188,8 @@ export function writeChannelGuardDeny(
   }
   if (state.status === 'running' && state.currentRunId) return null;
   if (withinStaleFlipGrace(mgr, state)) return null;
+  // 后台锚点态（主轮收尾 + 注册表非空）：后台 Task 子代理存活，通道放行。
+  if (hasBackgroundTaskGrace(mgr, state)) return null;
   const parts = [
     `status=${state.status}`,
     `currentRunId=${state.currentRunId ? 'set' : 'unset'}`,
@@ -165,8 +200,10 @@ export function writeChannelGuardDeny(
   ].filter(Boolean);
   return {
     behavior: 'deny',
+    // PLATFORM_NO_RUNNING_TURN: 稳定平台故障码前缀（FR-03 扩展）——agent 可程序化
+    // 区分「平台状态故障」与「用户权限拒绝」（后者无此前缀）。存量诊断信息保留。
     message:
-      `session not in running turn (${parts.join(', ')}) — tool "${toolName}" denied. ` +
+      `PLATFORM_NO_RUNNING_TURN: session not in running turn (${parts.join(', ')}) — tool "${toolName}" denied. ` +
       'If this turn is actually still running (long quiet tool), the >60s-silent auto-reset may have misfired; wait or continue in a new turn.',
   };
 }
@@ -187,8 +224,9 @@ async function requestPermissionImpl(
   const guardDeny = writeChannelGuardDeny(mgr, state, input.toolName);
   if (guardDeny) return guardDeny;
   if (!state || !state.currentRunId) {
-    // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空
-    return { behavior: 'deny', message: `session not in running turn — tool "${input.toolName}" denied` };
+    // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空。带平台故障码前缀
+    // （FR-03）：agent 可区分平台状态故障与用户权限拒绝。
+    return { behavior: 'deny', message: `PLATFORM_NO_RUNNING_TURN: session not in running turn — tool "${input.toolName}" denied` };
   }
   const runId = state.currentRunId;
   // D-006：askUserOnly=true 且非用户输入类 → allow-through（scan 场景普通工具自动推进）。
@@ -206,6 +244,9 @@ async function requestPermissionImpl(
   }
   const defaultDenyMessage = `Tool "${input.toolName}" denied by reviewer (session=${input.sessionId}, run=${runId})`;
   try {
+    // background_task 标记：仅后台锚点态（主轮已收尾 + 后台任务存活）置 true，
+    // backend 据此放宽 active-turn 校验（2026-09-15-background-task-permission-lockout）。
+    const backgroundTask = backgroundTaskFlag(state, mgr);
     const { promise } = resolver.register({
       sessionId: input.sessionId,
       runId,
@@ -214,6 +255,7 @@ async function requestPermissionImpl(
       ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
       signal: input.signal,
       send: (msg) => wsClient.send(msg),
+      ...(backgroundTask ? { backgroundTask } : {}),
       // 用户输入类（Codex request_user_input / Claude AskUserQuestion）标记 dialog，
       // backend 据此走对话路径（不 arm 5min 超时 + SSE 携带 dialog 渲染问答卡）。
       ...(input.isUserInputKind
@@ -323,8 +365,9 @@ export function buildCanUseToolCallback(
     const guardDeny = writeChannelGuardDeny(mgr, state, toolName);
     if (guardDeny) return guardDeny;
     if (!state || !state.currentRunId) {
-      // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空
-      return { behavior: 'deny', message: `session not in running turn — tool "${toolName}" denied` };
+      // 防御性缩窄：守卫三态已保证走到这里 currentRunId 非空。带平台故障码前缀
+      // （FR-03）：agent 可区分平台状态故障与用户权限拒绝。
+      return { behavior: 'deny', message: `PLATFORM_NO_RUNNING_TURN: session not in running turn — tool "${toolName}" denied` };
     }
     const runId = state.currentRunId;
     // Claude CLI 经 --permission-prompt-tool stdio 对 allow 分支做 Zod 运行时校验，
@@ -366,6 +409,9 @@ export function buildCanUseToolCallback(
           toolInput: updatedInput,
           signal: options?.signal,
           send: (msg) => askWsClient.send(msg),
+          // background_task 标记（后台锚点态置位，见 backgroundTaskFlag）——设计
+          // 背景 P0-2 原始事故路径：主轮收尾后的后台子代理问答卡必须可达后端。
+          ...(backgroundTaskFlag(state, mgr) ? { backgroundTask: true } : {}),
           // 标记为 dialog（AskUserQuestion 不是普通审批，是对话）：
           // backend handle_permission_request 见 dialog_kind 走 dialog 路径
           //（持久化 session_dialog_requests + 不 arm 5min 超时 + SSE 携带
@@ -445,6 +491,10 @@ export function buildCanUseToolCallback(
           toolInput: updatedInput,
           signal: options?.signal,
           send: (msg) => planWsClient.send(msg),
+          // background_task 标记（后台锚点态置位，见 backgroundTaskFlag）。
+          ...(backgroundTaskFlag(state, mgr)
+            ? { backgroundTask: true }
+            : {}),
           dialogKind: 'plan_approval',
           dialogPayload: {
             questions: [
@@ -521,6 +571,7 @@ export function buildCanUseToolCallback(
     }
     try {
       // resolver.register 内部 send 失败 / signal aborted 时立即 deny（fail-closed）。
+      // background_task 标记（后台锚点态置位，见 backgroundTaskFlag）。
       const { promise } = resolver.register({
         sessionId,
         runId,
@@ -528,6 +579,7 @@ export function buildCanUseToolCallback(
         toolInput: updatedInput,
         signal: options?.signal,
         send: (msg) => wsClient.send(msg),
+        ...(backgroundTaskFlag(state, mgr) ? { backgroundTask: true } : {}),
       });
       // SDK PermissionResult.deny.message 必填；resolver CanUseToolDecision 的
       // deny.message 可选——此处补默认 message 兜底（task-09：含上下文字段）。
@@ -614,6 +666,9 @@ export function buildOnUserDialogCallback(
         runId,
         // toolName 标记 AskUserQuestion 便于 backend/前端按工具名分发；
         // 实际对话内容由 dialog_kind/dialog_payload 携带。
+        // 注：不注入 backgroundTask——上方前置硬检查 status!=='running' →
+        // cancelled（design「2 处不可达路径」之一），后台锚点态（active）到不了
+        // 这里，注入是死代码（Design Grill 复核 + execute QA 裁决移除）。
         toolName: 'AskUserQuestion',
         // toolInput 用 dialog payload（兼容既有的 input 字段，backend 侧若
         // 不读 dialog_payload 仍可从 input 渲染）。

@@ -80,6 +80,14 @@ export interface PermissionRegisterInput {
    * 的 questions 数组等）。原样转发到 PERMISSION_REQUEST.dialog_payload。
    */
   dialogPayload?: Record<string, unknown>;
+  /**
+   * 2026-09-15-background-task-permission-lockout（FR-02）：后台锚点态标记
+   * （permission.ts backgroundTaskFlag 置位——主轮已收尾但后台任务存活的
+   * canUseTool 请求）。写入 payload 的 background_task（snake_case），backend
+   * 据此放宽 active-turn 校验；true 时 dialog 类请求也启用 5min fallback
+   * （后台锚点态已是降级路径，无界挂起比超时 deny 更糟）。
+   */
+  backgroundTask?: boolean;
 }
 
 /** register 返回。 */
@@ -165,6 +173,8 @@ export class PermissionResolver {
         ...(input.dialogPayload !== undefined
           ? { dialog_payload: input.dialogPayload }
           : {}),
+        // 后台锚点态标记（向后兼容：不传则 payload 无此字段，旧 backend 忽略）。
+        ...(input.backgroundTask ? { background_task: true } : {}),
       } as Record<string, unknown>,
     });
     if (!sent) {
@@ -196,9 +206,12 @@ export class PermissionResolver {
     // 与 backend permission_service.py / protocol.py「dialog 不 arm 超时、indefinitely」
     // 语义对齐。超时自动 deny 会让 agent 拿到 "Proceed with recommended option" 自行猜测，
     // 违背 scan 多子项目须用户决策的设计。signal abort listener + abortAll 收尾两者都保留
-    //（用户主动 cancel/interrupt/session 结束仍 deny 收尾，不死锁）。
+    // （用户主动 cancel/interrupt/session 结束仍 deny 收尾，不死锁）。
+    // 2026-09-15-background-task-permission-lockout（FR-02 修正）：background_task=true
+    // 的请求（后台锚点态——主轮已收尾、backend 受理面外/旧 backend 可能拒收）即使
+    // 是 dialog 也启用 5min 兜底：该态已是降级路径，无界挂起比超时 deny 更糟。
     const isDialog = input.dialogKind !== undefined;
-    if (!isDialog) {
+    if (!isDialog || input.backgroundTask === true) {
       entry.fallbackTimer = setTimeout(() => {
         this._settle(entry, {
           behavior: 'deny',

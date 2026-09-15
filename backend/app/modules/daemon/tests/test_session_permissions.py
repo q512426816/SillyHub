@@ -1686,3 +1686,105 @@ class TestShadowDialogAnswerAuthorization:
         row = next(d for d in history if d.request_id == "sd-by-1")
         assert row.status == "answered"
         assert row.answered_by == seed.member_uid
+
+
+class TestBackgroundTaskRequestAcceptance:
+    """2026-09-15-background-task-permission-lockout（FR-02 / task-11）：
+    background_task=True 的权限请求受理放宽——后台任务派发轮次已 completed
+    （active-turn 校验天然不成立），改为 run 直查 + 会话归属校验。"""
+
+    @staticmethod
+    def _make_perm(db_session: AsyncSession) -> tuple[DaemonPermissionService, MagicMock]:
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        return DaemonPermissionService(svc, hub, timeout_sec=30.0), hub
+
+    @pytest.mark.asyncio
+    async def test_background_task_with_completed_run_accepted(
+        self, db_session, mocked_redis
+    ) -> None:
+        """run 已 completed + background_task=True → 受理（SSE 发布 + timer 挂起）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        # 主轮已收尾：run 翻 completed（后台任务派发轮次的真实形态）。
+        run.status = "completed"
+        await db_session.commit()
+        await db_session.refresh(run)
+
+        perm, _hub = self._make_perm(db_session)
+        payload = _make_request_payload(sess, run)
+        payload = payload.model_copy(update={"background_task": True})
+
+        accepted = await perm.handle_permission_request(rt.id, payload)
+
+        assert accepted is True
+        assert any(
+            c.args[0] == f"agent_session:{sess.id}" and "permission_request" in c.args[1]
+            for c in mocked_redis.publish.await_args_list
+        )
+        assert "req-1" in perm._timers
+        _task = perm._timers["req-1"]
+        _task.cancel()
+        try:
+            await _task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_background_task_run_ownership_mismatch_dropped_with_deny(
+        self, db_session, mocked_redis
+    ) -> None:
+        """run 不属于本会话（归属校验失败）→ 拒收 + 即时 deny（故障码 + runtime_id）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _run = await _create_session(db_session, uid, rt.id)
+        # 另一会话的 run（归属不匹配）。
+        _sess2, run2 = await _create_session(db_session, uid, rt.id)
+
+        perm, hub = self._make_perm(db_session)
+        payload = PermissionRequestPayload(
+            session_id=sess.id,
+            run_id=run2.id,
+            request_id="bg-own",
+            tool_name="Bash",
+            input={"command": "ls"},
+            background_task=True,
+        )
+
+        accepted = await perm.handle_permission_request(rt.id, payload)
+
+        assert accepted is False
+        assert not any(
+            "permission_request" in c.args[1]
+            for c in mocked_redis.publish.await_args_list
+            if c.args[0] == f"agent_session:{sess.id}"
+        )
+        hub.send_permission_response.assert_awaited_once()
+        deny_payload = hub.send_permission_response.await_args.args[1]
+        assert deny_payload["decision"] == "deny"
+        assert deny_payload["request_id"] == "bg-own"
+        assert deny_payload["runtime_id"] == str(rt.id)
+        assert deny_payload["message"].startswith("PLATFORM_PERMISSION_DROPPED:")
+
+    @pytest.mark.asyncio
+    async def test_non_background_completed_run_still_dropped(
+        self, db_session, mocked_redis
+    ) -> None:
+        """普通请求（background_task 缺省 None）+ run completed → 维持原 active-turn
+        拒收（旧 daemon 行为零变化），但拒收现在推即时 deny。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        run.status = "completed"
+        await db_session.commit()
+
+        perm, hub = self._make_perm(db_session)
+
+        accepted = await perm.handle_permission_request(rt.id, _make_request_payload(sess, run))
+
+        assert accepted is False
+        hub.send_permission_response.assert_awaited_once()
+        deny_payload = hub.send_permission_response.await_args.args[1]
+        assert deny_payload["message"].startswith("PLATFORM_PERMISSION_DROPPED:")

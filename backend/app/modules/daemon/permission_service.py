@@ -335,7 +335,6 @@ class DaemonPermissionService:
 
         ``daemon_id`` is the daemon entity id the request arrived on (= the WS
         connection key since task-06).
-
         task-07（2026-08-29-daemon-platform-resilience / design A3）：返回
         ``bool``——True=已受理（SSE 已广播，dialog 落行 / plain 挂 timer），False=
         校验不通过被丢弃（fail-soft）。WS 调用方忽略返回值；HTTP 上行端点
@@ -349,8 +348,17 @@ class DaemonPermissionService:
              check then expects ``daemon_id == session.runtime_id``)
           3. session.status ∈ ACTIVE_SESSION_STATUSES
           4. session.config.get("manual_approval") is True (FR-07 gate)
-          5. current run exists, status ∈ ACTIVE_TURN_STATUSES,
-             and run.id == payload.run_id
+          5. background_task=true（2026-09-15-background-task-permission-lockout / FR-02）：
+             按 ``payload.run_id`` 直查 AgentRun + ``run.agent_session_id==session_id``
+             归属校验（后台任务派发轮次已 completed，active-turn 校验不成立）；
+             非 background_task 请求维持原校验：current run exists, status ∈
+             ACTIVE_TURN_STATUSES, and run.id == payload.run_id
+
+        2026-09-15-background-task-permission-lockout（FR-02 / FR-03）：**任一校验
+        失败在 return False 前经 ``_deny_respond`` 即时推 PERMISSION_RESPONSE deny**
+        （带 ``PLATFORM_PERMISSION_DROPPED:`` 稳定故障码前缀 + runtime_id ack 键，
+        best-effort）——不再静默吞掉：线上实证重启后 run_mismatch 静默丢弃致问答卡
+        用户永不可见、daemon 侧无界挂起；agent 据此可区分平台故障与用户拒绝。
 
         On success:
           - **dialog** (``payload.dialog_kind`` set): persist a
@@ -365,6 +373,10 @@ class DaemonPermissionService:
         run_id = payload.run_id
         request_id = payload.request_id
         is_dialog = payload.dialog_kind is not None
+        # 2026-09-15-background-task-permission-lockout（FR-02 / D-001@v1）：后台锚点态
+        # 标记——daemon 主轮已收尾但后台 Task 子代理存活的权限请求；校验走 run 直查 +
+        # 归属放宽分支（见下方 current_run 校验块）。
+        is_background_task = payload.background_task is True
 
         # Reuse DaemonService's read-only current-run lookup; session fetch is
         # also read-only here — write-side locking is the REST response path's job.
@@ -381,6 +393,7 @@ class DaemonPermissionService:
                 session_id=str(session_id),
                 request_id=request_id,
             )
+            await self._deny_respond(daemon_id, payload, "session not found")
             return False
         if session_obj.runtime_id is None:
             log.warning(
@@ -389,6 +402,7 @@ class DaemonPermissionService:
                 request_id=request_id,
                 daemon_id=str(daemon_id),
             )
+            await self._deny_respond(daemon_id, payload, "session has no runtime")
             return False
         expected_daemon_id = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
         if expected_daemon_id != daemon_id:
@@ -400,6 +414,7 @@ class DaemonPermissionService:
                 expected_daemon_id=str(expected_daemon_id),
                 received_daemon_id=str(daemon_id),
             )
+            await self._deny_respond(daemon_id, payload, "daemon mismatch")
             return False
         if (session_obj.status or "") not in ACTIVE_SESSION_STATUSES:
             log.warning(
@@ -407,6 +422,9 @@ class DaemonPermissionService:
                 session_id=str(session_id),
                 request_id=request_id,
                 status=session_obj.status,
+            )
+            await self._deny_respond(
+                daemon_id, payload, f"session not active (status={session_obj.status})"
             )
             return False
         config = session_obj.config or {}
@@ -417,26 +435,63 @@ class DaemonPermissionService:
                 session_id=str(session_id),
                 request_id=request_id,
             )
+            await self._deny_respond(daemon_id, payload, "manual approval disabled")
             return False
 
-        current_run = await self._svc._get_current_run(session_id)
-        if current_run is None or current_run.id != run_id:
-            log.warning(
-                "permission_request_run_mismatch",
-                session_id=str(session_id),
-                request_id=request_id,
-                payload_run_id=str(run_id),
-                current_run_id=str(current_run.id) if current_run else None,
-            )
-            return False
-        if (current_run.status or "") not in ACTIVE_TURN_STATUSES:
-            log.warning(
-                "permission_request_run_not_active_turn",
-                session_id=str(session_id),
-                request_id=request_id,
-                run_status=current_run.status,
-            )
-            return False
+        if is_background_task:
+            # 2026-09-15-background-task-permission-lockout（FR-02 / D-001@v1）：后台
+            # 任务的派发轮次已 completed（主轮收尾），active-turn 校验天然不成立。
+            # 放宽为「按 run_id 直查 + 会话归属校验」——run 必须属于本会话（派发轮
+            # 次完整性），其余校验（session 存在/runtime 归属/session active/
+            # manual_approval）上方已通过。非 background_task 请求维持原
+            # current_run（active-turn）校验不变。
+            from app.modules.agent.model import AgentRun
+
+            bg_run = (
+                await self._svc._session.execute(select(AgentRun).where(AgentRun.id == run_id))
+            ).scalar_one_or_none()
+            if bg_run is None:
+                log.warning(
+                    "permission_request_background_run_not_found",
+                    session_id=str(session_id),
+                    request_id=request_id,
+                    payload_run_id=str(run_id),
+                )
+                await self._deny_respond(daemon_id, payload, "background run not found")
+                return False
+            if bg_run.agent_session_id != session_id:
+                log.warning(
+                    "permission_request_background_run_ownership_mismatch",
+                    session_id=str(session_id),
+                    request_id=request_id,
+                    payload_run_id=str(run_id),
+                    run_session_id=str(bg_run.agent_session_id),
+                )
+                await self._deny_respond(daemon_id, payload, "run does not belong to this session")
+                return False
+        else:
+            current_run = await self._svc._get_current_run(session_id)
+            if current_run is None or current_run.id != run_id:
+                log.warning(
+                    "permission_request_run_mismatch",
+                    session_id=str(session_id),
+                    request_id=request_id,
+                    payload_run_id=str(run_id),
+                    current_run_id=str(current_run.id) if current_run else None,
+                )
+                await self._deny_respond(daemon_id, payload, "run mismatch or no active turn")
+                return False
+            if (current_run.status or "") not in ACTIVE_TURN_STATUSES:
+                log.warning(
+                    "permission_request_run_not_active_turn",
+                    session_id=str(session_id),
+                    request_id=request_id,
+                    run_status=current_run.status,
+                )
+                await self._deny_respond(
+                    daemon_id, payload, f"run not in active turn (status={current_run.status})"
+                )
+                return False
 
         # Publish permission_request SSE for the frontend approval card. For
         # dialogs the event carries dialog_kind + dialog_payload so the card
@@ -624,6 +679,51 @@ class DaemonPermissionService:
         return accepted
 
     # ── daemon_id resolution (task-06 ws routes by daemon_instance_id) ───────
+
+    async def _deny_respond(
+        self,
+        daemon_id: uuid.UUID,
+        payload: PermissionRequestPayload,
+        reason: str,
+    ) -> None:
+        """校验失败即时 deny 下行（2026-09-15-background-task-permission-lockout /
+        FR-02 / FR-03）。
+
+        handle_permission_request 任一校验失败在 return False 前调本方法——不再静默
+        吞掉（线上实证 run_mismatch 静默丢弃致问答卡用户永不可见 + daemon 无界挂起）。
+        message 带 ``PLATFORM_PERMISSION_DROPPED:`` 稳定平台故障码前缀——agent 可程序化
+        区分平台故障与用户权限拒绝（守卫侧对应 PLATFORM_NO_RUNNING_TURN:）。
+        payload 对齐 :1503-1510 超时 deny 先例：runtime_id ack 键（ql-20260904-023，
+        daemon immediateAck 消费，旧 daemon 忽略未知键；session-not-found 等取不到
+        runtime_id 的分支条件省略该键）+ session_id / request_id / decision='deny'。
+        best-effort：发送失败仅 log.warning 不抛——校验路径语义仍是 fail-soft，
+        daemon 侧另有 5min 兜底（dialog 后台锚点态也已启用，见 permission-resolver）。
+        """
+        # late import 防 agent ↔ daemon 循环依赖（对齐 handle_permission_request）。
+        from app.modules.agent.model import AgentSession
+
+        session_obj = (
+            await self._svc._session.execute(
+                select(AgentSession).where(AgentSession.id == payload.session_id)
+            )
+        ).scalar_one_or_none()
+        runtime_id = session_obj.runtime_id if session_obj is not None else None
+        ws_payload: dict[str, object] = {
+            "session_id": str(payload.session_id),
+            "request_id": payload.request_id,
+            "decision": "deny",
+            "message": f"PLATFORM_PERMISSION_DROPPED: {reason} — retry in a new turn",
+            **({"runtime_id": str(runtime_id)} if runtime_id is not None else {}),
+        }
+        try:
+            await self._hub.send_permission_response(daemon_id, ws_payload)
+        except Exception as exc:  # best-effort 语义，不阻断 fail-soft 路径
+            log.warning(
+                "permission_deny_respond_failed",
+                daemon_id=str(daemon_id),
+                request_id=payload.request_id,
+                error=str(exc),
+            )
 
     async def _resolve_daemon_id_for_runtime(
         self,

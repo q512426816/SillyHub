@@ -491,6 +491,10 @@ describe('写通道守卫（stale-flip 宽限 + 诊断化拒绝）', () => {
       message?: string;
     };
     expect(decision.behavior).toBe('deny');
+    // 2026-09-15-background-task-permission-lockout（FR-03）：守卫 deny 带
+    // PLATFORM_NO_RUNNING_TURN: 稳定平台故障码前缀——agent 可程序化区分平台故障
+    // 与用户权限拒绝。存量诊断信息（session not in running turn 等）保留。
+    expect(decision.message).toContain('PLATFORM_NO_RUNNING_TURN:');
     expect(decision.message).toContain('session not in running turn');
     expect(decision.message).toContain('currentRunId=unset');
     expect(decision.message).toContain('lastActive=');

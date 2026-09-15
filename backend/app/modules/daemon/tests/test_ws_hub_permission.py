@@ -354,7 +354,17 @@ class TestHandlePermissionDaemonIdOwnership:
             )
         # No timer armed ⇒ request dropped by ownership check.
         assert not perm.has_pending("req-rej")
-        hub.send_permission_response.assert_not_awaited()
+        # 2026-09-15-background-task-permission-lockout（FR-02/FR-03）：拒收不再静默——
+        # 即时推 PERMISSION_RESPONSE deny（带 PLATFORM_PERMISSION_DROPPED: 故障码 +
+        # runtime_id ack 键），daemon 侧立即有界失败而非挂 5min 兜底。
+        hub.send_permission_response.assert_awaited_once()
+        deny_payload = hub.send_permission_response.await_args.args[1]
+        assert deny_payload["decision"] == "deny"
+        assert deny_payload["request_id"] == "req-rej"
+        assert deny_payload["session_id"] == str(sess.id)
+        assert deny_payload["runtime_id"] == str(rt.id)
+        assert deny_payload["message"].startswith("PLATFORM_PERMISSION_DROPPED:")
+        assert "daemon mismatch" in deny_payload["message"]
 
     @pytest.mark.asyncio
     async def test_migration_window_fallback_accepts_runtime_id_as_daemon_id(

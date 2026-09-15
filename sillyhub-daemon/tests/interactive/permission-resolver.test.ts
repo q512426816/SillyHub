@@ -609,3 +609,79 @@ describe('PermissionResolver dialog 请求不启兜底定时器（永久等待�
     expect(resolver.pendingCount).toBe(0);
   });
 });
+
+// ── 2026-09-15-background-task-permission-lockout：background_task 标记 ──────
+
+describe('PermissionResolver backgroundTask 扩展（FR-02）', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('register 传 backgroundTask: true → send payload 带 background_task: true', () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+      send,
+      backgroundTask: true,
+    });
+    const payload = send.mock.calls[0]![0]!.payload as Record<string, unknown>;
+    expect(payload.background_task).toBe(true);
+  });
+
+  it('register 不传 backgroundTask → payload 无 background_task 键（旧 backend 兼容）', () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+      send,
+    });
+    const payload = send.mock.calls[0]![0]!.payload as Record<string, unknown>;
+    expect('background_task' in payload).toBe(false);
+  });
+
+  it('backgroundTask=true 的 dialog 请求也启 5min 兜底（有界挂起）', async () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    const { promise } = resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: { questions: [{ question: 'q' }] },
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: { questions: [{ question: 'q' }] },
+      backgroundTask: true,
+    });
+    // 未到超时：pending。
+    vi.advanceTimersByTime(1000);
+    expect(resolver.pendingCount).toBe(1);
+    // 推进 5min 兜底 → deny（后台锚点态 dialog 有界，不再无界挂起）。
+    vi.advanceTimersByTime(PERMISSION_FALLBACK_TIMEOUT_MS);
+    const decision = await promise;
+    expect(decision.behavior).toBe('deny');
+    expect(resolver.pendingCount).toBe(0);
+  });
+
+  it('主轮 dialog（不传 backgroundTask）维持现状不设超时', () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: { questions: [{ question: 'q' }] },
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: { questions: [{ question: 'q' }] },
+    });
+    vi.advanceTimersByTime(PERMISSION_FALLBACK_TIMEOUT_MS + 60_000);
+    // 用户决策必须等待：超时后仍 pending。
+    expect(resolver.pendingCount).toBe(1);
+  });
+});
