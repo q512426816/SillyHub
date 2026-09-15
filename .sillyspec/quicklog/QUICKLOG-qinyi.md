@@ -396,3 +396,14 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：上游 SDK 解码固化字节
 方案：buildSpawnEnv 出口 UTF8_DEFAULT_ENV 缺省注入
 结果：41 passed,typecheck 过
+
+## ql-20260915-008-c086 | 2026-09-15 20:22:38 | 额度胶囊默认轮询改5分钟+悬浮满2秒立即刷新
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/ctx-usage-bar.tsx（轮询间隔 5min + 悬浮 2s 立即刷新延时器）
+- frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx（44 用例全绿（常量锚定 + 悬浮三段用例））
+需求：额度胶囊默认轮询改5分钟+悬浮满2秒立即刷新
+根因：用户二次反馈：上轮引入的固定 30 秒轮询过于高频，上游每家供应商每次轮询都是实时直查；希望默认低频、用户主动查看时再拿新数据
+方案：QUOTA_REFRESH_INTERVAL_MS 30s→5min；新增 QUOTA_HOVER_REFRESH_DELAY_MS=2s，胶囊 onMouseEnter 起 setTimeout 延时器满 2 秒立刻 refresh 一次（in-flight 防重入、悬浮再久不重复），onMouseLeave 取消、卸载兜底清理；浮层文案同步「每 5 分钟自动刷新；胶囊上悬浮 2 秒立即刷新」
+结果：ctx-usage-bar 44/44 passed（新增常量锚定 5min/2s + 悬浮三段用例：不足 2s 离开取消/满 2s 立即刷新不等轮询/持续悬浮仍只多一次）；tsc --noEmit 干净；eslint 0 error（2 warning 存量）；模块 changelog 已同步 ql-20260915-008-c086

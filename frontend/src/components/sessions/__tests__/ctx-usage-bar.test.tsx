@@ -37,6 +37,7 @@ import {
   formatQuotaResetTime,
   mapUsageTiersToViews,
   QUOTA_REFRESH_INTERVAL_MS,
+  QUOTA_HOVER_REFRESH_DELAY_MS,
   ONE_M_CTX_WINDOW_TOKENS,
   DEFAULT_CTX_WINDOW_TOKENS,
   FALLBACK_CTX_WINDOW_TOKENS,
@@ -377,6 +378,15 @@ describe("mapUsageTiersToViews", () => {
   });
 });
 
+// ── 刷新策略常量（quick-7fd9ce7f 用户要求锚定：默认 5 分钟 + 悬浮 2 秒）────
+
+describe("QuotaPill 刷新策略常量", () => {
+  it("默认轮询间隔 5 分钟、悬浮立即刷新延时 2 秒", () => {
+    expect(QUOTA_REFRESH_INTERVAL_MS).toBe(5 * 60_000);
+    expect(QUOTA_HOVER_REFRESH_DELAY_MS).toBe(2_000);
+  });
+});
+
 // ── QuotaPill：全供应商聚合 + 30s 轮询（quick-e4d0551f）──────────────────
 
 describe("QuotaPill", () => {
@@ -512,14 +522,15 @@ describe("QuotaPill", () => {
     expect(mockQueryUsage).toHaveBeenCalledTimes(1);
     expect(mockQueryUsage).toHaveBeenCalledWith("p-kimi");
 
-    // 浮层：按供应商分节展示两家 + 30s 刷新说明。
+    // 浮层：按供应商分节展示两家 + 刷新说明。
     fireEvent.click(pill);
     expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
     const detail = screen.getByText("模型剩余额度").parentElement!;
     expect(detail.textContent).toContain("智谱GLM · glm-4.7");
     expect(detail.textContent).toContain("Kimi · kimi-k2");
     expect(screen.getByText("5小时窗 剩余")).toBeInTheDocument();
-    expect(detail.textContent).toContain("每 30 秒自动刷新");
+    expect(detail.textContent).toContain("每 5 分钟自动刷新");
+    expect(detail.textContent).toContain("悬浮 2 秒立即刷新");
   });
 
   it("余额类供应商（DeepSeek）：浮层显示金额（¥/$）而非百分比", async () => {
@@ -565,7 +576,7 @@ describe("QuotaPill", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it("30 秒轮询：到点自动重查；瞬时失败（quota=null 弱依赖降级）保留上次数据", async () => {
+  it("定时轮询（默认 5 分钟）：到点自动重查；瞬时失败（quota=null 弱依赖降级）保留上次数据", async () => {
     // 只 fake timer API，不 fake Date/performance（对齐 workspace-config-card 惯例）。
     vi.useFakeTimers({
       toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
@@ -586,17 +597,54 @@ describe("QuotaPill", () => {
     expect(screen.getByTestId("quota-pill")).toHaveTextContent("80%");
     expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
 
-    // 快进 30s → 第二次轮询（quota=null 弱依赖降级）。
+    // 快进轮询间隔（常量驱动，默认 5 分钟）→ 第二次轮询（quota=null 弱依赖降级）。
     await vi.advanceTimersByTimeAsync(QUOTA_REFRESH_INTERVAL_MS);
     await vi.advanceTimersByTimeAsync(0);
     expect(mockGetProviderQuota).toHaveBeenCalledTimes(2);
     // keep-last-good：仍显示上次成功数据，不清空面板。
     expect(screen.getByTestId("quota-pill")).toHaveTextContent("80%");
 
-    // 再快进 30s → 第三次轮询照常发生。
+    // 再快进一个间隔 → 第三次轮询照常发生。
     await vi.advanceTimersByTimeAsync(QUOTA_REFRESH_INTERVAL_MS);
     await vi.advanceTimersByTimeAsync(0);
     expect(mockGetProviderQuota).toHaveBeenCalledTimes(3);
+  });
+
+  it("悬浮满 2 秒 → 立即刷新一次；不足 2 秒离开 → 取消不刷新；悬浮再久不重复触发", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
+    });
+    mockListProviders.mockResolvedValue([provider()]);
+    mockGetProviderQuota.mockResolvedValue(
+      quotaResp({
+        model: "glm-4.7",
+        windows: [{ label: "5小时窗", left: 80, reset: null }],
+      }),
+    );
+    renderPill(<QuotaPill providerId="p-zhipu" />);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockGetProviderQuota).toHaveBeenCalledTimes(1); // 挂载首查
+    const pill = screen.getByTestId("quota-pill");
+
+    // 悬浮 1.5s 后离开 → 未满 2s，取消，不触发额外查询。
+    fireEvent.mouseEnter(pill);
+    await vi.advanceTimersByTimeAsync(1_500);
+    fireEvent.mouseLeave(pill);
+    await vi.advanceTimersByTimeAsync(QUOTA_HOVER_REFRESH_DELAY_MS);
+    expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
+
+    // 再悬浮：满 2s → 立即刷新一次（不等 5 分钟轮询）。
+    fireEvent.mouseEnter(pill);
+    await vi.advanceTimersByTimeAsync(QUOTA_HOVER_REFRESH_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockGetProviderQuota).toHaveBeenCalledTimes(2);
+
+    // 继续悬浮（推进远超 2s）→ 单次悬浮最多触发一次，不重复。
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockGetProviderQuota).toHaveBeenCalledTimes(2);
+    fireEvent.mouseLeave(pill);
   });
 
   it("usage 鉴权失效（is_valid=false）为确定性失败 → 清除该家条目", async () => {

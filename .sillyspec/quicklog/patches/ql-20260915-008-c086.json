@@ -1,0 +1,55 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-7fd9ce7f",
+  "totals": {
+    "files": 2,
+    "additions": 86,
+    "deletions": 11
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+      "declared": true,
+      "additions": 53,
+      "deletions": 5,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/sessions/ctx-usage-bar.tsx",
+      "declared": true,
+      "additions": 33,
+      "deletions": 6,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 3,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L0",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-008-c086",
+  "sessionId": "quick-7fd9ce7f",
+  "savedAt": "2026-09-15T12:24:47.554Z",
+  "patchSha256": "6e3bec1ba07a141f3bedd028d196d4c419966537f50f74069781a6d32af009f2",
+  "patchStatus": "ok"
+}

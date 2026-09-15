@@ -1,0 +1,199 @@
+diff --git a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+index 6bb3f1a93..010ba79d0 100644
+--- a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+@@ -37,6 +37,7 @@ import {
+   formatQuotaResetTime,
+   mapUsageTiersToViews,
+   QUOTA_REFRESH_INTERVAL_MS,
++  QUOTA_HOVER_REFRESH_DELAY_MS,
+   ONE_M_CTX_WINDOW_TOKENS,
+   DEFAULT_CTX_WINDOW_TOKENS,
+   FALLBACK_CTX_WINDOW_TOKENS,
+@@ -377,6 +378,15 @@ describe("mapUsageTiersToViews", () => {
+   });
+ });
+ 
++// ── 刷新策略常量（quick-7fd9ce7f 用户要求锚定：默认 5 分钟 + 悬浮 2 秒）────
++
++describe("QuotaPill 刷新策略常量", () => {
++  it("默认轮询间隔 5 分钟、悬浮立即刷新延时 2 秒", () => {
++    expect(QUOTA_REFRESH_INTERVAL_MS).toBe(5 * 60_000);
++    expect(QUOTA_HOVER_REFRESH_DELAY_MS).toBe(2_000);
++  });
++});
++
+ // ── QuotaPill：全供应商聚合 + 30s 轮询（quick-e4d0551f）──────────────────
+ 
+ describe("QuotaPill", () => {
+@@ -512,14 +522,15 @@ describe("QuotaPill", () => {
+     expect(mockQueryUsage).toHaveBeenCalledTimes(1);
+     expect(mockQueryUsage).toHaveBeenCalledWith("p-kimi");
+ 
+-    // 浮层：按供应商分节展示两家 + 30s 刷新说明。
++    // 浮层：按供应商分节展示两家 + 刷新说明。
+     fireEvent.click(pill);
+     expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+     const detail = screen.getByText("模型剩余额度").parentElement!;
+     expect(detail.textContent).toContain("智谱GLM · glm-4.7");
+     expect(detail.textContent).toContain("Kimi · kimi-k2");
+     expect(screen.getByText("5小时窗 剩余")).toBeInTheDocument();
+-    expect(detail.textContent).toContain("每 30 秒自动刷新");
++    expect(detail.textContent).toContain("每 5 分钟自动刷新");
++    expect(detail.textContent).toContain("悬浮 2 秒立即刷新");
+   });
+ 
+   it("余额类供应商（DeepSeek）：浮层显示金额（¥/$）而非百分比", async () => {
+@@ -565,7 +576,7 @@ describe("QuotaPill", () => {
+     ).toBeGreaterThanOrEqual(1);
+   });
+ 
+-  it("30 秒轮询：到点自动重查；瞬时失败（quota=null 弱依赖降级）保留上次数据", async () => {
++  it("定时轮询（默认 5 分钟）：到点自动重查；瞬时失败（quota=null 弱依赖降级）保留上次数据", async () => {
+     // 只 fake timer API，不 fake Date/performance（对齐 workspace-config-card 惯例）。
+     vi.useFakeTimers({
+       toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
+@@ -586,19 +597,56 @@ describe("QuotaPill", () => {
+     expect(screen.getByTestId("quota-pill")).toHaveTextContent("80%");
+     expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
+ 
+-    // 快进 30s → 第二次轮询（quota=null 弱依赖降级）。
++    // 快进轮询间隔（常量驱动，默认 5 分钟）→ 第二次轮询（quota=null 弱依赖降级）。
+     await vi.advanceTimersByTimeAsync(QUOTA_REFRESH_INTERVAL_MS);
+     await vi.advanceTimersByTimeAsync(0);
+     expect(mockGetProviderQuota).toHaveBeenCalledTimes(2);
+     // keep-last-good：仍显示上次成功数据，不清空面板。
+     expect(screen.getByTestId("quota-pill")).toHaveTextContent("80%");
+ 
+-    // 再快进 30s → 第三次轮询照常发生。
++    // 再快进一个间隔 → 第三次轮询照常发生。
+     await vi.advanceTimersByTimeAsync(QUOTA_REFRESH_INTERVAL_MS);
+     await vi.advanceTimersByTimeAsync(0);
+     expect(mockGetProviderQuota).toHaveBeenCalledTimes(3);
+   });
+ 
++  it("悬浮满 2 秒 → 立即刷新一次；不足 2 秒离开 → 取消不刷新；悬浮再久不重复触发", async () => {
++    vi.useFakeTimers({
++      toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
++    });
++    mockListProviders.mockResolvedValue([provider()]);
++    mockGetProviderQuota.mockResolvedValue(
++      quotaResp({
++        model: "glm-4.7",
++        windows: [{ label: "5小时窗", left: 80, reset: null }],
++      }),
++    );
++    renderPill(<QuotaPill providerId="p-zhipu" />);
++    await vi.advanceTimersByTimeAsync(0);
++    await vi.advanceTimersByTimeAsync(0);
++    expect(mockGetProviderQuota).toHaveBeenCalledTimes(1); // 挂载首查
++    const pill = screen.getByTestId("quota-pill");
++
++    // 悬浮 1.5s 后离开 → 未满 2s，取消，不触发额外查询。
++    fireEvent.mouseEnter(pill);
++    await vi.advanceTimersByTimeAsync(1_500);
++    fireEvent.mouseLeave(pill);
++    await vi.advanceTimersByTimeAsync(QUOTA_HOVER_REFRESH_DELAY_MS);
++    expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
++
++    // 再悬浮：满 2s → 立即刷新一次（不等 5 分钟轮询）。
++    fireEvent.mouseEnter(pill);
++    await vi.advanceTimersByTimeAsync(QUOTA_HOVER_REFRESH_DELAY_MS);
++    await vi.advanceTimersByTimeAsync(0);
++    expect(mockGetProviderQuota).toHaveBeenCalledTimes(2);
++
++    // 继续悬浮（推进远超 2s）→ 单次悬浮最多触发一次，不重复。
++    await vi.advanceTimersByTimeAsync(60_000);
++    await vi.advanceTimersByTimeAsync(0);
++    expect(mockGetProviderQuota).toHaveBeenCalledTimes(2);
++    fireEvent.mouseLeave(pill);
++  });
++
+   it("usage 鉴权失效（is_valid=false）为确定性失败 → 清除该家条目", async () => {
+     vi.useFakeTimers({
+       toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
+diff --git a/frontend/src/components/sessions/ctx-usage-bar.tsx b/frontend/src/components/sessions/ctx-usage-bar.tsx
+index 235697381..c487a40ae 100644
+--- a/frontend/src/components/sessions/ctx-usage-bar.tsx
++++ b/frontend/src/components/sessions/ctx-usage-bar.tsx
+@@ -364,8 +364,10 @@ export function CtxUsageRing({
+ //     弱依赖永不 5xx）；其余可查供应商走 usage 端点（两态错误模型，瞬时失败
+ //     抛 ApiError → keep-last-good 保留上次数据，鉴权失效 is_valid=false 为
+ //     确定性失败 → 清除该家条目，不留陈旧假数据）。
+-//   - 刷新：挂载 / 供应商列表变化立即查一次 + setInterval 30s 轮询（替换
+-//     design §5 Wave3 的低频单次口径——用户明确要求定时刷新）。
++//   - 刷新：挂载 / 供应商列表变化立即查一次 + setInterval 轮询 + 悬浮立即刷新
++//     （quick-e4d0551f 首版 30s 固定轮询；quick-7fd9ce7f 用户二次反馈改默认
++//     5 分钟，胶囊上悬浮满 2 秒再立刻刷一次——低频轮询下主动查看拿新数据，
++//     mouseLeave 即取消，单次悬浮最多触发一次，refresh 自带 in-flight 防重入）。
+ //   - providerId 语义变更：从「门控渲染（null 不渲染）」弱化为「展示排序优先
+ //     提示」，本机默认会话也照常聚合展示全部可查供应商额度。
+ 
+@@ -385,8 +387,11 @@ function quotaLeftToneClass(left: number): string {
+   return "";
+ }
+ 
+-/** 额度自动刷新间隔（用户要求 30 秒；导出供单测驱动 fake timers）。 */
+-export const QUOTA_REFRESH_INTERVAL_MS = 30_000;
++/** 额度自动刷新间隔（quick-7fd9ce7f 用户二次反馈：默认 5 分钟；导出供单测）。 */
++export const QUOTA_REFRESH_INTERVAL_MS = 5 * 60_000;
++
++/** 悬浮立即刷新延时（悬浮满 2 秒触发一次；导出供单测驱动 fake timers）。 */
++export const QUOTA_HOVER_REFRESH_DELAY_MS = 2_000;
+ 
+ /** 统一额度窗口视图（quota 窗口 / usage tier 归一后的渲染形态）。 */
+ export interface QuotaTierView {
+@@ -550,7 +555,8 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
+     }
+   }, [detectable]);
+ 
+-  // 挂载 / 可查列表变化立即查一次 + 30s 轮询；卸载清理（cancelled 防异步回写）。
++  // 挂载 / 可查列表变化立即查一次 + 定时轮询（默认 5 分钟）；卸载清理
++  // （cancelled 防异步回写）。
+   useEffect(() => {
+     cancelledRef.current = false;
+     void refresh();
+@@ -561,6 +567,25 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
+     };
+   }, [refresh]);
+ 
++  // 悬浮满 2 秒立即刷新（quick-7fd9ce7f）：onMouseEnter 起延时器，2 秒仍在
++  // 胶囊上 → 立刻 refresh 一次（in-flight 防重入，悬浮再久也不重复触发）；
++  // mouseLeave 即取消；卸载兜底清理。
++  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const clearHoverTimer = useCallback(() => {
++    if (hoverTimerRef.current != null) {
++      clearTimeout(hoverTimerRef.current);
++      hoverTimerRef.current = null;
++    }
++  }, []);
++  const handlePillMouseEnter = useCallback(() => {
++    clearHoverTimer();
++    hoverTimerRef.current = setTimeout(() => {
++      hoverTimerRef.current = null;
++      void refresh();
++    }, QUOTA_HOVER_REFRESH_DELAY_MS);
++  }, [clearHoverTimer, refresh]);
++  useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
++
+   // 展示排序：当前会话供应商优先，其余按名称稳定序。
+   const sortedEntries = useMemo(() => {
+     const list = [...entries.values()];
+@@ -633,7 +658,7 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
+           </div>
+         ))}
+         <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+-          数据来自各供应商额度接口，每 30 秒自动刷新。
++          数据来自各供应商额度接口，每 5 分钟自动刷新；胶囊上悬浮 2 秒立即刷新。
+         </div>
+       </div>
+     </div>
+@@ -644,6 +669,8 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
+       <span
+         data-testid="quota-pill"
+         className="inline-flex shrink-0 cursor-pointer select-none items-center gap-[5px] whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] text-muted-foreground hover:text-foreground"
++        onMouseEnter={handlePillMouseEnter}
++        onMouseLeave={clearHoverTimer}
+       >
+         {face.model ? (
+           <b className="font-semibold text-foreground">{face.model}</b>

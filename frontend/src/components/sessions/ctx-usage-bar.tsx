@@ -364,8 +364,10 @@ export function CtxUsageRing({
 //     弱依赖永不 5xx）；其余可查供应商走 usage 端点（两态错误模型，瞬时失败
 //     抛 ApiError → keep-last-good 保留上次数据，鉴权失效 is_valid=false 为
 //     确定性失败 → 清除该家条目，不留陈旧假数据）。
-//   - 刷新：挂载 / 供应商列表变化立即查一次 + setInterval 30s 轮询（替换
-//     design §5 Wave3 的低频单次口径——用户明确要求定时刷新）。
+//   - 刷新：挂载 / 供应商列表变化立即查一次 + setInterval 轮询 + 悬浮立即刷新
+//     （quick-e4d0551f 首版 30s 固定轮询；quick-7fd9ce7f 用户二次反馈改默认
+//     5 分钟，胶囊上悬浮满 2 秒再立刻刷一次——低频轮询下主动查看拿新数据，
+//     mouseLeave 即取消，单次悬浮最多触发一次，refresh 自带 in-flight 防重入）。
 //   - providerId 语义变更：从「门控渲染（null 不渲染）」弱化为「展示排序优先
 //     提示」，本机默认会话也照常聚合展示全部可查供应商额度。
 
@@ -385,8 +387,11 @@ function quotaLeftToneClass(left: number): string {
   return "";
 }
 
-/** 额度自动刷新间隔（用户要求 30 秒；导出供单测驱动 fake timers）。 */
-export const QUOTA_REFRESH_INTERVAL_MS = 30_000;
+/** 额度自动刷新间隔（quick-7fd9ce7f 用户二次反馈：默认 5 分钟；导出供单测）。 */
+export const QUOTA_REFRESH_INTERVAL_MS = 5 * 60_000;
+
+/** 悬浮立即刷新延时（悬浮满 2 秒触发一次；导出供单测驱动 fake timers）。 */
+export const QUOTA_HOVER_REFRESH_DELAY_MS = 2_000;
 
 /** 统一额度窗口视图（quota 窗口 / usage tier 归一后的渲染形态）。 */
 export interface QuotaTierView {
@@ -550,7 +555,8 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
     }
   }, [detectable]);
 
-  // 挂载 / 可查列表变化立即查一次 + 30s 轮询；卸载清理（cancelled 防异步回写）。
+  // 挂载 / 可查列表变化立即查一次 + 定时轮询（默认 5 分钟）；卸载清理
+  // （cancelled 防异步回写）。
   useEffect(() => {
     cancelledRef.current = false;
     void refresh();
@@ -560,6 +566,25 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
       clearInterval(timer);
     };
   }, [refresh]);
+
+  // 悬浮满 2 秒立即刷新（quick-7fd9ce7f）：onMouseEnter 起延时器，2 秒仍在
+  // 胶囊上 → 立刻 refresh 一次（in-flight 防重入，悬浮再久也不重复触发）；
+  // mouseLeave 即取消；卸载兜底清理。
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearHoverTimer = useCallback(() => {
+    if (hoverTimerRef.current != null) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }, []);
+  const handlePillMouseEnter = useCallback(() => {
+    clearHoverTimer();
+    hoverTimerRef.current = setTimeout(() => {
+      hoverTimerRef.current = null;
+      void refresh();
+    }, QUOTA_HOVER_REFRESH_DELAY_MS);
+  }, [clearHoverTimer, refresh]);
+  useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
 
   // 展示排序：当前会话供应商优先，其余按名称稳定序。
   const sortedEntries = useMemo(() => {
@@ -633,7 +658,7 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
           </div>
         ))}
         <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
-          数据来自各供应商额度接口，每 30 秒自动刷新。
+          数据来自各供应商额度接口，每 5 分钟自动刷新；胶囊上悬浮 2 秒立即刷新。
         </div>
       </div>
     </div>
@@ -644,6 +669,8 @@ export function QuotaPill({ providerId }: QuotaPillProps) {
       <span
         data-testid="quota-pill"
         className="inline-flex shrink-0 cursor-pointer select-none items-center gap-[5px] whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] text-muted-foreground hover:text-foreground"
+        onMouseEnter={handlePillMouseEnter}
+        onMouseLeave={clearHoverTimer}
       >
         {face.model ? (
           <b className="font-semibold text-foreground">{face.model}</b>
