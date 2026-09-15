@@ -499,15 +499,14 @@ export function SessionConfigBar({
         return;
       }
       // 乐观缓存：成功即写入 current（claude/codex 引擎不回读现值，不写会
-      // invalidate 后回到默认档显示——用户以为设置丢了；pi 引擎下次查询
-      // 上报真值自然覆盖）。
+      // 回到默认档显示——用户以为设置丢了；pi 引擎下次查询上报真值自然覆盖）。
+      // 注意：此处**不 invalidate**——invalidate 立即触发重拉，claude/codex 回
+      // current=null 覆盖乐观值（用户反馈：切档后闪回默认）。乐观值保持到组件
+      // 生命周期结束或下次自然过期（staleTime 30s 后窗口聚焦才重拉）。
       qc.setQueryData(["sessionThinkingLevels", sessionId], (old: { levels: string[]; current: string | null } | undefined) =>
         old ? { ...old, current: level } : { levels: [level], current: level },
       );
       notify.success(`已切换思考级别：${thinkingLevelLabel(level)}`);
-      void qc.invalidateQueries({
-        queryKey: ["sessionThinkingLevels", sessionId],
-      });
     } catch (err) {
       notify.error(err, "思考级别切换失败");
     } finally {

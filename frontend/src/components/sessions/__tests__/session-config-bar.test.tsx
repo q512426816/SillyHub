@@ -1133,7 +1133,7 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     ).toBe(true);
   });
 
-  it("点选即切换：setSessionThinkingLevel 调用 + 成功通知「已切换思考级别：X」+ invalidate 重拉档位（R-04）", async () => {
+  it("点选即切换：setSessionThinkingLevel 调用 + 成功通知「已切换思考级别：X」+ 乐观缓存 current（不 invalidate）", async () => {
     renderBar({ thinkingLevel: {} });
     const select = (await screen.findByTestId(
       "config-thinking-select",
@@ -1146,11 +1146,12 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     await waitFor(() =>
       expect(mocks.messageSuccess).toHaveBeenCalledWith("已切换思考级别：高"),
     );
-    // R-04：pi thinking_level_change 事件不透传——成功后 invalidate 档位查询重拉
-    //（首拉 1 次 + 刷新 1 次）。
-    await waitFor(() =>
-      expect(mocks.getSessionThinkingLevels).toHaveBeenCalledTimes(2),
-    );
+    // 乐观缓存：成功后 current 立即变为用户选的档（select.value=high），且**不
+    // invalidate 重拉**（claude/codex 回 current=null 会覆盖乐观值闪回默认——
+    // 用户反馈：切档后提示成功但立马恢复默认）。
+    await waitFor(() => expect(select.value).toBe("high"));
+    // 只拉了 1 次（初始），没有第二次 invalidate 重拉。
+    expect(mocks.getSessionThinkingLevels).toHaveBeenCalledTimes(1);
   });
 
   it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {
