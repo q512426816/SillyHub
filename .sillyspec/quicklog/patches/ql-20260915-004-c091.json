@@ -1,0 +1,79 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-8af34228",
+  "totals": {
+    "files": 5,
+    "additions": 179,
+    "deletions": 18
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/daemon.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/knowledge/INDEX.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/knowledge/known-issues.md",
+      "declared": true,
+      "additions": 17,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/export.py",
+      "declared": true,
+      "additions": 74,
+      "deletions": 10,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/tests/modules/daemon/test_session_export.py",
+      "declared": true,
+      "additions": 81,
+      "deletions": 6,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 5,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260915-004-c091",
+  "sessionId": "quick-8af34228",
+  "savedAt": "2026-09-15T08:28:59.815Z",
+  "patchSha256": "79356c5277d73ae1f7bffbc1c28dfd09b926c5feeea3b50849017c15e416f22a",
+  "patchStatus": "ok"
+}

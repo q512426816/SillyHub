@@ -287,3 +287,9 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 ## 2026-09-14-session-export 增量（ql-20260915-003-7b5f）
 
 - **chat 档 md 时间戳**（`session/service/export.py`）：会话头/轮头换北京时间（UTC+8，`_EXPORT_TZ` 固定偏移不受容器时区影响，naive 读回按 UTC 兜底）；轮头 `## 第 N 轮 · YYYY-MM-DD HH:MM`（本轮首条消息时间到分钟）；每条消息行前缀 `[HH:MM:SS.mmm]` 毫秒时间点（timestamp 列原生微秒精度，ms 三位补零）；会话头加时区说明行。full 档 JSON 保持 UTC isoformat（机器可读）不变。
+## 2026-09-14-session-export 增量（ql-20260915-004）
+
+- **full 档单源化（P2-1）**：`_full_log_dedup_drop` 去除 daemon 双发 stdout 文本行（`[TOOL_USE]`，tool_call JSON 行为权威源）与 `[ASSISTANT|THINKING]_OVERRIDE` 空壳行（流式对账残留），与 chat 档同源正则；`[TOOL_RESULT]`/`[THINKING]`/`[TASK_*]` 文本行保留（各为唯一源）。
+- **口径对齐（P2-3）**：full.json 增顶层 `exported_at`、md 头增「导出时刻」；`turn_count` 改实时 `len(runs)`（列值滞后）；`last_active_at` 双档统一取导出内容最新日志时间兜底列值；`_fetch_export_runs_logs` 剔除全 null 僵尸 run（不进 runs/轮数口径）；failed run `error_code` 落库缺失时兜底 `"unknown"`。
+- **chat 档子代理归因（P2-3）**：`subagent_type`+`depth>0` 消息行 speaker 标「子代理·{type}」并在段边界插 `> ── 子代理回合 ──` 分隔行。
+- **P2-2 乱码不在导出层**：TOOL_RESULT 中文乱码系 Windows 控制台码页捕获链路落库即坏（知识库 known-issues 已登记，规避 `PYTHONIOENCODING=utf-8`，根治归 daemon/上游捕获层）。

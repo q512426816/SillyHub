@@ -15,7 +15,7 @@ created_at: 2026-06-23 02:00:00
 
 ## 🟢 daemon 重启 session 恢复已修复（gap-8.3 / commit 40e21d3）
 
-daemon 重启后 interactive session 丢失致 turn 卡死的根因（`cli.ts` 漏传 persistence/recoveryClient）**已修复**（2026-06-20，commit 40e21d3，变更 `2026-06-19-fix-interactive-daemon-lifecycle` gap-8.3）：`cli.ts:412-449` 已装配 `JsonSessionPersistence` + `recoveryClient`（client 即 HubClient，实现 RecoveryCoordinator），backend 加 recovery 端点。有 `cli-session-manager-injection.test.ts` 守护。改 daemon session 逻辑可基于此已恢复前提。
+daemon 重启后 interactive session 丢失致 turn 卡死的根因（`sillyhub-daemon/src/cli.ts` 漏传 persistence/recoveryClient）**已修复**（2026-06-20，commit 40e21d3，变更 `2026-06-19-fix-interactive-daemon-lifecycle` gap-8.3）：`sillyhub-daemon/src/cli.ts:773-776` 与 `:1214` 已装配 `JsonSessionPersistence` + `recoveryClient`（client 即 HubClient，实现 RecoveryCoordinator），backend 加 recovery 端点。有 `cli-session-manager-injection.test.ts` 守护。改 daemon session 逻辑可基于此已恢复前提。
 
 ## 🟡 AgentRunLog 无 metadata 列 / 三层日志 metadata 丢失
 
@@ -42,7 +42,7 @@ frontend 容器**已移除 healthcheck 块**（`deploy/docker-compose.yml` 的 f
 
 ## 🟢 frontend react-query 已正式启用（2026-07 OpenAPI 类型迁移，commit fecaa155 / 29b3c86b）
 
-frontend 已在 `src/lib/providers.tsx:10` 挂载 `QueryClientProvider`，`use-daemon-runtimes.ts` / `use-agent-runs.ts` / `daemon-audit.ts` / `runtimes/page.tsx` 等多处用 `useQuery`。**新数据请求应优先用 react-query**（与 OpenAPI 生成类型 `api-types.ts` 配套）。旧 `apiFetch` + zustand 仍存在于已写页面，改动既有页面时沿用既有模式避免割裂。
+frontend 已在 `frontend/src/lib/providers.tsx:10` 挂载 `QueryClientProvider`，`use-daemon-runtimes.ts` / `use-agent-runs.ts` / `daemon-audit.ts` / `runtimes/page.tsx` 等多处用 `useQuery`。**新数据请求应优先用 react-query**（与 OpenAPI 生成类型 `api-types.ts` 配套）。旧 `apiFetch` + zustand 仍存在于已写页面，改动既有页面时沿用既有模式避免割裂。
 - 注：`@tanstack/react-query` 在 2026-06-23 前确实仅声明未启用，本条由原"未启用"修订（见变更 `2026-07-01-react-query-migration` / `2026-07-04-frontend-openapi-types`）。
 
 ## 🟡 frontend 与 daemon 各自独立 lockfile + 双 UI 库并存
@@ -116,3 +116,18 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 2026-08-18 wc -l 实测：`src/daemon.ts` 4047、`src/interactive/session-manager.ts` 3897、`src/task-runner.ts` 3156。高耦合、跨文件契约靠约定、lease payload 鸭子类型几十处，**无低风险切片路径**。
 
 - 改任一文件都需大范围定向回归（tests/ 顶层 81 + interactive/ 36 个测试文件）；涉及这三个文件的变更在 plan 阶段就应把回归面算进工作量。拆分是长期债，按触碰时机渐进处理。
+
+
+## 会话日志 TOOL_RESULT 中文乱码（Windows 控制台码页，落库即坏不可导出还原）
+
+- **现象**（2026-09-15 用户实测会话导出）：full.json 里 `[TOOL_RESULT]` 中文全乱码（如
+  "EHSϵ bcm-……"），同会话 MD 摘要里 agent 正文正常——正文走 SDK message 通道，TOOL_RESULT
+  文本行走子进程 stdout 捕获通道。
+- **根因链**：Windows 上工具子进程（如 python 无 `PYTHONIOENCODING`）按控制台码页 GBK 编码
+  输出 → 捕获方按 UTF-8 解码（lossy，产生 U+FFFD 替换字符）→ `agent_run_logs.content_redacted`
+  落库即坏。替换字符有损，**导出层无法还原**（导出只原样搬运列值）。
+- **规避**：agent 侧跑 Bash/python 工具时显式 `PYTHONIOENCODING=utf-8`（用户实证 agent 设过
+  后拿到正确文本）；或 chcp 65001。
+- **根治归属**：工具输出捕获链路的码页探测/解码——发生在 Claude Code CLI 子进程捕获层或
+  daemon adapters 透传层，**不在导出管道**；需单独立项（daemon/上游）处理，导出侧无法补。
+- **登记于**：ql-20260915-004（2026-09-14-session-export 用户验收反馈 P2-2）。

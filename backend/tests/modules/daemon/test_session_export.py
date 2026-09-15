@@ -180,9 +180,10 @@ async def _seed_run(
     db_session: AsyncSession,
     session_id: uuid.UUID,
     *,
-    started_at: datetime,
+    started_at: datetime | None,
     model: str | None = "claude-sonnet-4",
     status: str = "completed",
+    error_code: str | None = None,
 ) -> AgentRun:
     run = AgentRun(
         id=uuid.uuid4(),
@@ -192,10 +193,11 @@ async def _seed_run(
         status=status,
         agent_session_id=session_id,
         started_at=started_at,
-        finished_at=started_at + timedelta(minutes=1),
+        finished_at=(started_at + timedelta(minutes=1) if started_at is not None else None),
         input_tokens=100,
         output_tokens=200,
         diff_summary="M 1 file",
+        error_code=error_code,
     )
     db_session.add(run)
     await db_session.commit()
@@ -502,6 +504,18 @@ class TestChatMarkdown:
             ts=base + timedelta(minutes=2, seconds=10, milliseconds=780),
             metadata={"member_name": "小码"},
         )
+        # ql-20260915-004（P2-3）：子代理回合发言——md 应标「子代理·审查」
+        # 前缀 + 段分隔行，不再误归因为「助手」。
+        await _seed_log(
+            db_session,
+            run2.id,
+            channel="stdout",
+            content="[ASSISTANT] 子代理审查意见：边界覆盖不足",
+            ts=base + timedelta(minutes=2, seconds=20),
+            subagent_type="审查",
+            depth=1,
+            parent_tool_use_id="tu_sub1",
+        )
         return owner, token, sess, runtime
 
     @pytest.mark.asyncio
@@ -541,6 +555,12 @@ class TestChatMarkdown:
         assert "## 第 2 轮 · 2026-09-01 16:03" in md
         assert "[16:03:00.120] **阿明**：[附件:截图.png|image] 这是报错截图" in md
         assert "[16:03:10.780] **小码**：已定位问题" in md
+        # P2-3：子代理归因（段分隔 + 前缀，不冒充「助手」）。
+        assert "> ── 子代理回合：审查（depth=1）──" in md
+        assert "[16:03:20.000] **子代理·审查**：子代理审查意见：边界覆盖不足" in md
+        assert "**助手**：子代理审查意见" not in md
+        # P2-3：导出时刻注明（两次导出口径对齐锚点）。
+        assert any(line.startswith("- 导出时刻：") for line in lines)
         assert "**阿明**：[附件:截图.png|image] 这是报错截图" in md
         assert "**小码**：已定位问题" in md  # [LOG:info] 前缀剥离
         # 非 chat 渠道行与 stdout 噪声行不出现。
@@ -636,8 +656,40 @@ class TestFullZip:
             depth=2,
             edit_patch="@@ -1 +1 @@\n-a\n+b\n",
         )
+        # ql-20260915-004（P2-1）：daemon 双发 [TOOL_USE] 文本行 + OVERRIDE
+        # 空壳行——full 档应单源化去除（tool_call JSON 行是权威源）。
+        await _seed_log(
+            db_session,
+            run.id,
+            channel="stdout",
+            content='[TOOL_USE] Edit: {"file_path":"a.py"}',
+            ts=base + timedelta(seconds=7),
+        )
+        await _seed_log(
+            db_session,
+            run.id,
+            channel="stdout",
+            content="[THINKING_OVERRIDE] main:msg_9:2",
+            ts=base + timedelta(seconds=8),
+        )
+        # P2-3：failed run 落库缺 error_code（导出侧兜底 unknown）+ 全 null 僵尸
+        # run（导出侧剔除，不进 runs 面板与轮数口径）。
+        failed_run = await _seed_run(
+            db_session,
+            sess.id,
+            started_at=base + timedelta(minutes=3),
+            status="failed",
+        )
+        zombie_run = await _seed_run(
+            db_session,
+            sess.id,
+            started_at=None,
+            model=None,
+            status="running",
+        )
+        assert zombie_run.id  # 仅需行存在
         await _seed_task(db_session, session_id=sess.id, run_id=run.id, task_name="跑测试")
-        return sess
+        return sess, failed_run.id, zombie_run.id
 
     @pytest.mark.asyncio
     async def test_full_single_session_zip_structure(
@@ -648,7 +700,9 @@ class TestFullZip:
     ) -> None:
         """full 单会话：{标题}_{id前8}/full.json 顶层字段全 + logs 全字段。"""
         owner, token = await _create_user(db_session, name="fulladmin", admin=True)
-        sess = await self._seed_full_session(db_session, title="完整导出", owner_id=owner.id)
+        sess, failed_run_id, zombie_run_id = await self._seed_full_session(
+            db_session, title="完整导出", owner_id=owner.id
+        )
         att = await _seed_attachment(
             db_session,
             user_id=sess.user_id,
@@ -678,6 +732,7 @@ class TestFullZip:
         # 顶层字段全（design §接口定义 full JSON 结构）。
         assert set(full) == {
             "export_version",
+            "exported_at",
             "session",
             "runs",
             "logs",
@@ -687,6 +742,8 @@ class TestFullZip:
             "dropped_rows",
         }
         assert full["export_version"] == 1
+        # P2-3：注明导出时刻（两次导出口径对齐锚点）。
+        assert full["exported_at"]
         assert full["session"]["id"] == str(sess.id)
         assert full["session"]["title"] == "完整导出"
         assert full["session"]["config_snapshot"] == {"provider_name": "Anthropic"}
@@ -698,6 +755,24 @@ class TestFullZip:
         assert full["runs"][0]["input_tokens"] == 100
         assert full["runs"][0]["output_tokens"] == 200
         assert full["runs"][0]["diff_summary"] == "M 1 file"
+        # P2-3：僵尸 run 剔除（不进 runs/轮数）；failed 无 error_code 兜底 unknown；
+        # turn_count 用导出时点实时 len(runs)（列值滞后 26 vs 24 的坑）。
+        run_ids = [r["id"] for r in full["runs"]]
+        assert zombie_run_id not in run_ids
+        assert len(run_ids) == 2
+        failed_row = next(r for r in full["runs"] if r["id"] == str(failed_run_id))
+        assert failed_row["status"] == "failed"
+        assert failed_row["error_code"] == "unknown"
+        assert full["session"]["turn_count"] == 2
+        # P2-1：双发 [TOOL_USE] 文本行与 OVERRIDE 空壳行已单源化去除
+        # （tool_call JSON 行保留为权威源）。
+        stdout_contents = [
+            row["content_redacted"] for row in full["logs"] if row["channel"] == "stdout"
+        ]
+        assert not any(
+            c and (c.startswith("[TOOL_USE]") or "_OVERRIDE]" in c) for c in stdout_contents
+        )
+        assert any(row["channel"] == "tool_call" for row in full["logs"])
         # logs 全字段（channel/content_redacted/tool_kind/parent_tool_use_id/
         # subagent_type/depth/edit_patch/metadata）。
         tool_log = next(row for row in full["logs"] if row["channel"] == "tool_call")
@@ -745,8 +820,8 @@ class TestFullZip:
     ) -> None:
         """full 多会话：每会话一目录，同名标题靠 id 前 8 位防重名（R-05）。"""
         owner, token = await _create_user(db_session, name="multifull", admin=True)
-        sess1 = await self._seed_full_session(db_session, title="同名会话", owner_id=owner.id)
-        sess2 = await self._seed_full_session(db_session, title="同名会话", owner_id=owner.id)
+        sess1, _, _ = await self._seed_full_session(db_session, title="同名会话", owner_id=owner.id)
+        sess2, _, _ = await self._seed_full_session(db_session, title="同名会话", owner_id=owner.id)
 
         resp = await _post_export(client, token, [sess1.id, sess2.id], tier="full")
 

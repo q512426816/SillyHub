@@ -35,6 +35,7 @@
 - change_write|代写|占坑|claim|daemon_change_writes|回灌|sync-manual → [Daemon 代写队列：占坑 commit + lease-polling claim + GC 回灌](patterns.md#daemon-代写队列占坑-commit--lease-polling-claim--gc-回灌)
 
 ## Known Issues
+- 导出|乱码|GBK|控制台码页|PYTHONIOENCODING|TOOL_RESULT|替换字符 → [会话日志 TOOL_RESULT 中文乱码（Windows 控制台码页，落库即坏不可导出还原）](known-issues.md#会话日志-tool_result-中文乱码windows-控制台码页落库即坏不可导出还原)
 
 - daemon|python|node|重写|typescript → [sillyhub-daemon 从 Python 重写为 Node.js](known-issues.md#sillyhub-daemon-于-2026-06-14-从-python-重写为-nodejs)
 - ci|hook|git-add|绕过|pretooluse → [CI hook 复合命令可绕过 claude PreToolUse 层](known-issues.md#ci-hook-复合命令可绕过-claude-pretooluse-层)

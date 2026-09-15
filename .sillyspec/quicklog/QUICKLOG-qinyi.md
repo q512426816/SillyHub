@@ -338,3 +338,18 @@ pi 侧证据（R-02）：fixtures/pi-rpc-events/manual-success-turn.jsonl 系 20
 根因：数据源 AgentRunLog.timestamp 本就是微秒精度(timezone=True+now(UTC)),full 档 JSON isoformat 亦全精度——唯一缺口是 _render_chat_markdown 未展示时间(轮头与消息行均无)
 方案：export.py 新增 _EXPORT_TZ(UTC+8 固定偏移不受容器时区影响)+_as_export_tz(naive 按 UTC 兜底)+_fmt_local_ms/_fmt_hms_ms;会话头创建/最近活跃换北京时间并加时区说明行,轮头带本轮首条消息时间到分钟,每条消息行前缀 [HH:MM:SS.mmm];docstring 同步;测试造数三处加毫秒尾数(250/120/780)与断言,daemon.md 细卡补增量条目
 结果：52 passed 零回归;ruff check/format+mypy(949 files)绿;full 档 JSON 保持 UTC isoformat 不变;容器待重建生效
+
+## ql-20260915-004-c091 | 2026-09-15 16:18:25 | 会话导出用户验收三连修——full 档事件单源化/双档口径对齐/MD 子代理归因
+状态：已完成
+关联变更：2026-09-14-session-export
+文件：
+- backend/app/modules/daemon/session/service/export.py（单源化+口径对齐+子代理归因）
+- backend/tests/modules/daemon/test_session_export.py（造数扩展+断言）
+- .sillyspec/docs/backend/modules/daemon.md（ql-20260915-004 增量条目）
+- .sillyspec/knowledge/known-issues.md（P2-2 登记+存量引用修复）
+- .sillyspec/knowledge/INDEX.md（P2-2 路由行）
+需求：会话导出用户验收三连修——full 档事件单源化/双档口径对齐/MD 子代理归因
+根因：用户实测 P2 反馈——full.json 同一 tool_use 双份+OVERRIDE 空壳行致体积翻倍;md 26 轮 vs json turn_count=24 列滞后;子代理发言冒充「助手」;runs 面板 failed 无 error_code 与全 null 僵尸 run
+方案：_full_log_dedup_drop 去双发文本行与空壳行(tool_call JSON 权威源);exported_at 双档注明导出时刻,turn_count 改实时 len(runs),last_active 统一最新日志时间兜底列值;僵尸 run 剔除,failed error_code 兜底 unknown;chat 档子代理前缀+段分隔;P2-2 乱码登记 known-issues(根治归 daemon 捕获层,force-baseline 放行知识库保护路径)
+结果：52 passed 零回归,ruff+mypy(949 files)绿;顺手修 known-issues 两处存量引用(路径补全+cli.ts 行号漂移 412-449→773-776/1214);容器待重建生效
+审计：[gate] L1（跨 0 模块 · 5 文件：1 代码/1 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）

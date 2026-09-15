@@ -332,6 +332,9 @@ def _render_chat_markdown(
     保证），按 ``run_id`` 连续切段即「轮」。时间展示（ql-20260915-003）：
     北京时间（UTC+8），轮头带本轮首条消息时间（到分钟），每条消息行前缀
     ``[HH:MM:SS.mmm]`` 毫秒时间点（timestamp 列原生微秒精度，无需补数）。
+    子代理归因（ql-20260915-004/P2-3）：``subagent_type``+``depth>0`` 的消息
+    行 speaker 为「子代理·{type}」，段边界插 ``> ── 子代理回合 ──`` 分隔行；
+    会话头注明导出时刻（两次导出口径对齐的锚点）。
     截断时文件尾标注 truncated 与丢弃行数（design §行数上限）。
     """
     lines: list[str] = [f"# {_display_title(session)}", ""]
@@ -340,13 +343,21 @@ def _render_chat_markdown(
         lines.append(f"- 运行时：{session.runtime_id}")
     lines.append(f"- 状态：{session.status}")
     lines.append(f"- 创建时间：{_fmt_local_ms(session.created_at) or '—'}")
-    if session.last_active_at is not None:
-        lines.append(f"- 最近活跃：{_fmt_local_ms(session.last_active_at)}")
+    # ql-20260915-004：最近活跃取导出内容里最新日志时间（列值滞后，双档对齐）。
+    _last_log_ts = max((row.timestamp for row in logs), default=None)
+    last_active = _last_log_ts or session.last_active_at
+    if last_active is not None:
+        lines.append(f"- 最近活跃：{_fmt_local_ms(last_active)}")
     lines.append(f"- 轮数：{len(runs)}")
+    lines.append(f"- 导出时刻：{_fmt_local_ms(datetime.now(UTC))}")
     lines.append("- 时区：北京时间（UTC+8，消息时间精确到毫秒）")
 
     current_run_id: uuid.UUID | None = None
     turn_index = 0
+    # ql-20260915-004：子代理归因——depth>0 的消息行加「子代理·{type}」前缀，
+    # 段边界（parent_tool_use_id+subagent_type 变化）插分隔行，避免子代理回合
+    # 被误读为主代理「助手」发言。
+    current_subagent_key: tuple[str | None, str | None] | None = None
     for row in logs:
         if row.channel not in ("user_input", "stdout"):
             continue
@@ -360,10 +371,25 @@ def _render_chat_markdown(
         if row.run_id != current_run_id:
             current_run_id = row.run_id
             turn_index += 1
+            current_subagent_key = None
             # 轮头带本轮首条消息时间（到分钟；毫秒在每条消息行前缀）。
             turn_ts = (_fmt_local_ms(row.timestamp) or "")[:16]
             lines.extend(["", f"## 第 {turn_index} 轮 · {turn_ts}", ""])
-        speaker = _member_name_of(row) or ("用户" if row.channel == "user_input" else "助手")
+        is_subagent = bool(row.subagent_type) and (row.depth or 0) > 0
+        if is_subagent:
+            sub_key = (row.parent_tool_use_id, row.subagent_type)
+            if sub_key != current_subagent_key:
+                current_subagent_key = sub_key
+                lines.extend(
+                    [
+                        f"> ── 子代理回合：{row.subagent_type}（depth={row.depth}）──",
+                        "",
+                    ]
+                )
+            speaker = f"子代理·{row.subagent_type}"
+        else:
+            current_subagent_key = None
+            speaker = _member_name_of(row) or ("用户" if row.channel == "user_input" else "助手")
         lines.extend([f"[{_fmt_hms_ms(row.timestamp)}] **{speaker}**：{text}", ""])
 
     if truncated:
@@ -381,6 +407,26 @@ def _render_chat_markdown(
     return "\n".join(lines)
 
 
+def _full_log_dedup_drop(row: AgentRunLog) -> bool:
+    """full 档日志单源化：识别应去除的 daemon 双发/空壳 stdout 行。
+
+    ql-20260915-004（用户实测 full.json 冗余 2~3 份）：同一 tool_use 既落
+    ``channel=tool_call`` JSON 行（权威源，含结构化 tool_kind/metadata）又落
+    ``channel=stdout`` 的 ``[TOOL_USE]`` 文本行——两行各带一份完整
+    ``metadata_.agent_event``，体积翻倍；``[ASSISTANT_OVERRIDE]``/
+    ``[THINKING_OVERRIDE]`` 撤回令箭行是流式对账空壳（无正文），历史导出
+    无对账需求。判定与 chat 档 ``_assistant_text_from_stdout`` 同源同正则
+    （前端 classifySessionLog 先例），保 [TOOL_RESULT]/[THINKING]/[TASK_*]
+    文本行（各是唯一源，不去）。
+    """
+    if row.channel != "stdout":
+        return False
+    trimmed = (row.content_redacted or "").strip()
+    if not trimmed:
+        return False
+    return bool(_TOOL_USE_TEXT_RE.match(trimmed) or _OVERRIDE_RE.match(trimmed))
+
+
 def _render_full_json(
     session: AgentSession,
     runs: Sequence[AgentRun],
@@ -393,12 +439,21 @@ def _render_full_json(
 ) -> dict:
     """full 档 JSON 渲染（design §接口定义 full JSON 顶层结构，export_version=1）。
 
-    ``logs`` 为全字段原样导出（含 thinking/tool_call/edit_patch/metadata_）；
-    ``tasks`` 为 agent_session_task 快照；``attachments_meta`` 为附件清单
-    （含 zip_path 与 missing 标记，由附件取流降级结果装配）。
+    ``logs`` 为全字段原样导出（含 thinking/tool_call/edit_patch/metadata_），
+    但按 ``_full_log_dedup_drop`` 去除 daemon 双发文本行与 OVERRIDE 空壳行
+    （单源化，ql-20260915-004）；``tasks`` 为 agent_session_task 快照；
+    ``attachments_meta`` 为附件清单（含 zip_path 与 missing 标记）。
+
+    计数对齐（ql-20260915-004，用户实测 md 26 轮 vs json turn_count=24）：
+    ``turn_count`` 用导出时点实时 ``len(runs)``（``agent_sessions.turn_count``
+    列更新滞后）；``last_active_at`` 用导出内容里最新日志时间兜底列值，
+    md/json 双档同源。
     """
+    exported_logs = [row for row in logs if not _full_log_dedup_drop(row)]
+    last_log_ts = max((row.timestamp for row in logs), default=None)
     return {
         "export_version": _EXPORT_VERSION,
+        "exported_at": _iso(datetime.now(UTC)),
         "session": {
             "id": str(session.id),
             "title": _display_title(session),
@@ -406,8 +461,8 @@ def _render_full_json(
             "provider": session.provider,
             "status": session.status,
             "created_at": _iso(session.created_at),
-            "last_active_at": _iso(session.last_active_at),
-            "turn_count": session.turn_count,
+            "last_active_at": _iso(last_log_ts or session.last_active_at),
+            "turn_count": len(runs),
             "config_snapshot": session.config_snapshot,
         },
         "runs": [
@@ -420,7 +475,10 @@ def _render_full_json(
                 "input_tokens": run.input_tokens,
                 "output_tokens": run.output_tokens,
                 "diff_summary": run.diff_summary,
-                "error_code": run.error_code,
+                # ql-20260915-004（P2-3）：failed run 的 error_code 落库缺失时
+                # 以 "unknown" 兜底（用户期望 run 失败必填 error_code；真实
+                # 关闭路径补齐归 run 结束链路，导出侧只保证不空）。
+                "error_code": run.error_code or ("unknown" if run.status == "failed" else None),
             }
             for run in runs
         ],
@@ -438,7 +496,7 @@ def _render_full_json(
                 "edit_patch": row.edit_patch,
                 "metadata": row.metadata_,
             }
-            for row in logs
+            for row in exported_logs
         ],
         "tasks": [
             {"task_name": task.task_name, "status": task.status, "summary": task.summary}
@@ -597,6 +655,12 @@ async def _fetch_export_runs_logs(
         .order_by(col(AgentRun.started_at).asc().nulls_last(), AgentRun.id.asc())
     )
     runs = list((await svc._session.execute(runs_stmt)).scalars().all())
+    # ql-20260915-004（P2-3）：剔除从未实质启动的僵尸 run 行（model 与起止时间
+    # 全 null，用户实测出现于 runs 面板）——无任何日志归属，属建行未跑的残留；
+    # 过滤后 runs 计数即 md「轮数」与 json turn_count 的共同口径。
+    runs = [
+        r for r in runs if not (r.model is None and r.started_at is None and r.finished_at is None)
+    ]
 
     min_ts_subq = (
         select(
