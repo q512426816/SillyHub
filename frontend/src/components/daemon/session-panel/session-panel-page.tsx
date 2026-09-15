@@ -113,8 +113,8 @@ const CATALOG_ANSWER_SUMMARY_MAX = 120;
 
 /* ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
  *    跳转链路 handleJumpToTurn + activeTurnKey 滚动联动的常量。 ────────────── */
-/** 跳转翻页单次上限（design §7：8 页 ≈ 800 条日志防死循环；到上限不报错，可再次点击续跳）。 */
-const JUMP_LOAD_EARLIER_MAX_PAGES = 8;
+/** 跳转翻页单次上限（用户反馈：旧会话 8 页≈800 条跳不到目标——提高到 50 页≈5000 条覆盖全量日志端点上限；到上限不报错，可再次点击续跳）。 */
+const JUMP_LOAD_EARLIER_MAX_PAGES = 50;
 /** 跳转命中高亮自清时长（design §9：ring+浅底 2.2s 后复原）。 */
 const HIGHLIGHT_TURN_CLEAR_MS = 2200;
 /** activeTurnKey 联动判定线：视口顶部往下 120px 内最靠近顶部的轮为当前轮（任务卡 §5）。 */

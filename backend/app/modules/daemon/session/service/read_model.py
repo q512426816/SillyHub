@@ -395,10 +395,13 @@ async def get_agent_session_logs(
     )
     if after is not None:
         stmt = stmt.where(AgentRunLog.timestamp > after)
-    # 群聊体验 quick（2026-09-02）：向上加载游标（timestamp < before）与
+    # 群聊体验 quick（2026-09-02）：向上加载游标（timestamp <= before）与
     # 内容搜索（ILIKE %q%）。三过滤条件独立叠加，与 after 任意组合。
+    # 用户反馈修复：同批日志共用同一 timestamp（事务批量写入），严格 < 会
+    # 永久跳过与游标同 ts 的批次——改 <= 让边界行可到达（首行可能与已加载
+    # 重叠，前端 logsToTurns 按 run_id 分组可容忍）。
     if before is not None:
-        stmt = stmt.where(AgentRunLog.timestamp < before)
+        stmt = stmt.where(AgentRunLog.timestamp <= before)
     if q:
         stmt = stmt.where(AgentRunLog.content_redacted.ilike(f"%{q}%"))
     stmt = (

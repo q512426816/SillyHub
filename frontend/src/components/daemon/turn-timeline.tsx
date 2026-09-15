@@ -946,6 +946,7 @@ export function TurnTimeline({
       onScroll={handleScroll}
       data-testid="turn-timeline-scroll"
       className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
+      style={{ overflowAnchor: "none" }}
     >
       {errorMsg && (
         <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">

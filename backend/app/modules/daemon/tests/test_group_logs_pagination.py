@@ -187,7 +187,12 @@ class TestSessionLogsPagination:
         before = full[2]["timestamp"]  # 第 3 行 ts → 返回前 2 条
         code, body = await _get_logs(client, env.owner_token, sess.id, before=before)
         assert code == 200
-        assert [e["content_redacted"] for e in body] == ["hello world 0", "hello world 1"]
+        # 用户反馈修复：before 改 <=（同 ts 行不跳过）——游标 ts 行本身也返回
+        assert [e["content_redacted"] for e in body] == [
+            "hello world 0",
+            "hello world 1",
+            "hello world 2",
+        ]
 
     async def test_before_with_limit(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """before+limit 组合：游标之前的最新 N 条（向上翻页一页 N 行）。"""
@@ -202,7 +207,8 @@ class TestSessionLogsPagination:
         before = full[2]["timestamp"]
         code, body = await _get_logs(client, env.owner_token, sess.id, before=before, limit=1)
         assert code == 200
-        assert [e["content_redacted"] for e in body] == ["hello world 1"]
+        # <= 修复：before=ts 包含同 ts 行（desc 取最新 limit=1 → row 2 自身）
+        assert [e["content_redacted"] for e in body] == ["hello world 2"]
 
     async def test_q_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
         """q 内容搜索：命中 / 大小写不敏感 / 不命中为空。"""
@@ -247,7 +253,8 @@ class TestSessionLogsPagination:
         # after+before 窗口。
         code, body = await _get_logs(client, env.owner_token, sess.id, after=ts1, before=ts4)
         assert code == 200
-        assert [e["content_redacted"] for e in body] == ["hello world 2", "hello world 3"]
+        # <= 修复：before=ts4 含 ts4 行（3 与 4 同 ts 批）
+        assert [e["content_redacted"] for e in body] == ["hello world 2", "hello world 3", "hello world 4"]
 
         # after+q 组合。
         code, body = await _get_logs(client, env.owner_token, sess.id, after=ts1, q="hello world 4")

@@ -2045,7 +2045,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     expect(mocks.notifyError).not.toHaveBeenCalled();
   });
 
-  it("desktop 页数上限兜底：连续 8 页满页均未命中 → warning「已连续加载 8 页仍未到达，可再次点击继续加载」", async () => {
+  it("desktop 页数上限兜底：连续 50 页满页均未命中 → warning「已连续加载 50 页仍未到达，可再次点击继续加载」", async () => {
     mockThreeRuns();
     let fillerSeq = 0;
     mocks.getAgentSessionLogs
@@ -2072,11 +2072,11 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     await waitFor(
       () =>
         expect(mocks.notifyWarning).toHaveBeenCalledWith(
-          "已连续加载 8 页仍未到达，可再次点击继续加载",
+          "已连续加载 50 页仍未到达，可再次点击继续加载",
         ),
       { timeout: 8000 },
     );
-    expect(beforeCallCount()).toBe(8);
+    expect(beforeCallCount()).toBe(50);
   }, 20000);
 
   it("desktop 跳转翻页期 suppress 触顶：循环进行中 scroll 不触发自动加载，跳完恢复", async () => {

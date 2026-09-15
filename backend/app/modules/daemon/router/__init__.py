@@ -52,7 +52,8 @@ SESSIONS_EVENTS_KEEPALIVE_INTERVAL_SEC = 25.0
 
 # run 列表固定取最新 N 条（原 :3717-3719）：test_session_runs_endpoint setattr
 # 本命名空间调小上限，session_insights 读取点经 _router 延迟解析。
-_SESSION_RUNS_MAX = 200
+# 用户反馈：旧会话 >200 轮时最旧轮次不在目录刻度轨——提高到 500 覆盖超长会话。
+_SESSION_RUNS_MAX = 500
 
 # llm-proxy 进程级共享转发客户端单例（原 :4529-4535）：状态挂本命名空间，
 # test_llm_proxy.py 的 reset fixture 直接对包属性赋 None 复位（D-007）。

@@ -737,6 +737,7 @@ export function renderHistoryAndLocalReport(o: {
           {localReportTurns.map((t) => (
             <div
               key={t.runId}
+              data-turn-key={t.realRunId ?? t.runId}
               className="border-b border-border-weak py-1.5 text-[12px] last:border-none"
             >
               <span className="mr-1.5 text-[11px] text-muted-foreground">CLI 上报</span>
