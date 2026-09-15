@@ -254,7 +254,11 @@ class TestSessionLogsPagination:
         code, body = await _get_logs(client, env.owner_token, sess.id, after=ts1, before=ts4)
         assert code == 200
         # <= 修复：before=ts4 含 ts4 行（3 与 4 同 ts 批）
-        assert [e["content_redacted"] for e in body] == ["hello world 2", "hello world 3", "hello world 4"]
+        assert [e["content_redacted"] for e in body] == [
+            "hello world 2",
+            "hello world 3",
+            "hello world 4",
+        ]
 
         # after+q 组合。
         code, body = await _get_logs(client, env.owner_token, sess.id, after=ts1, q="hello world 4")
