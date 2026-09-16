@@ -1101,7 +1101,14 @@ export function SessionPanelPage({
   }, []);
   const scrollElQueryRef = useRef<() => HTMLElement | null>(() => null);
   /** prepend 滚动锚：加载前 scrollHeight，加载后按增量补回视口位置。 */
-  const pendingAnchorRef = useRef<number | null>(null);
+  // quick（ql-20260916-019，deepseek-harness PagingAnchor 同款）：元素锚——
+  // 记住加载前视口顶部的 [data-turn-key] 行与其视口内偏移，prepend 后按元素
+  // offsetTop 钉回（与 content-visibility 估算高度完全解耦，高度撑开/塌缩都
+  // 以真实布局为准）。until 为锚定期（连页 prepend 各自延期，过期自清）。
+  const pendingAnchorRef = useRef<
+    | { key: string; offset: number; until: number; el: HTMLElement | null }
+    | null
+  >(null);
   /** 同步加载锁（滚动事件高频，state 锁同 tick 内不生效）。 */
   const historyLoadingRef = useRef(false);
   /** 视口补拉连拉计数（上限防极端空渲染批量请求；换会话重置）。 */
@@ -1120,6 +1127,12 @@ export function SessionPanelPage({
    *  直接刷新（await 间隙 passive effect 不保证已提交，仅靠 effect 循环内会读到
    *  过期 true，空页后多空转甚至误判 toast 档位）。 */
   const hasEarlierRef = useRef(false);
+  // quick（ql-20260916-018）：用户最后一次真实滚动（isTrusted）时间——锚点重申式
+  // 补偿的让位判据（用户已接管视口时不强拉）。
+  const lastUserScrollTsRef = useRef(0);
+  // quick（ql-20260916-019）：元素锚钉回函数镜像——锚定期内任何程序性滚动
+  // （含未知写入者触底的 scroll 事件）立即重申钉回；用户真实滚动弃锚（见 onScroll）。
+  const anchorPinRef = useRef<(() => void) | null>(null);
   // quick（ql-20260916-017）：跳转抑制贴底跟随（TurnTimeline props）——跳转
   // 翻页/定位期间 true，定位 settle 后 1s 解除（smooth 滚动余量）。
   const [jumpFollowSuppress, setJumpFollowSuppress] = useState(false);
@@ -1148,8 +1161,26 @@ export function SessionPanelPage({
       if (epochAtStart !== sessionEpochRef.current) return;
       // 滚动锚：记录 prepend 前 scrollHeight，加载后按增量补回（正在读的
       // 内容不被新段顶走，向上滚动自然续读更早）。
+      // quick（ql-20260916-018/019）：锚定期内不重复捕获（连页后续加载在污染
+      // 中间态重捕会把阅读位置记错）；捕获改元素锚（见 ref 声明注释）。
       const scrollEl = scrollElQueryRef.current();
-      if (scrollEl) pendingAnchorRef.current = scrollEl.scrollHeight;
+      const cur = pendingAnchorRef.current;
+      if (scrollEl && (cur == null || Date.now() > cur.until)) {
+        const containerTop = scrollEl.getBoundingClientRect().top;
+        let anchorRow: HTMLElement | null = null;
+        for (const row of scrollEl.querySelectorAll<HTMLElement>("[data-turn-key]")) {
+          const r = row.getBoundingClientRect();
+          if (r.bottom > containerTop + 4) { anchorRow = row; break; } // 视口内首行
+        }
+        if (anchorRow) {
+          pendingAnchorRef.current = {
+            key: anchorRow.getAttribute("data-turn-key") ?? "",
+            offset: anchorRow.getBoundingClientRect().top - containerTop,
+            until: Date.now() + 2500,
+            el: anchorRow,
+          };
+        }
+      }
       // quick（ql-20260916-014）：游标取本页**时间最旧**行——后端返回序是 run 块序
       // （anchor→ts→id，read_model.py:434-448），块序首行（older[0]）的 ts 不保证是
       // 本页最小（大 run 块序靠前、尾部日志时间靠后），以其为 before 会把"块序靠后
@@ -1347,6 +1378,14 @@ export function SessionPanelPage({
     const wrap = bodyWrapRef.current;
     if (!wrap) return;
     const onScroll = (e: Event) => {
+      if (e.isTrusted) {
+        lastUserScrollTsRef.current = Date.now();
+        pendingAnchorRef.current = null; // 用户接管：立即弃锚（新加载自会重捕）
+        anchorPinRef.current = null;
+      } else {
+        // 程序性滚动（含未知写入者触底）：锚定期内立即钉回。
+        anchorPinRef.current?.();
+      }
       const el = e.target as HTMLElement | null;
       if (!el || el.getAttribute("data-testid") !== "turn-timeline-scroll") return;
       if (el.scrollTop <= LOAD_EARLIER_TRIGGER_PX) {
@@ -1383,14 +1422,45 @@ export function SessionPanelPage({
     if (anchor == null) return;
     const el = timelineScrollEl();
     if (!el) return;
-    // quick（ql-20260916-013）：高度未增 = prepend 未落地（锚点捕获与 prepend
-    // 提交之间被 SSE/队列等中间 turnState 提交抢先触发本 effect）——此时消费
-    // 锚点只会补 0，真正 prepend 落地时无锚可补 → 视口被顶到后面的轮次
-    // （用户实测“滚到顶有时弹回下面”）。锚点保留待下一轮提交，prepend 落地
-    // （高度实际增长）才消费。
-    if (el.scrollHeight <= anchor) return;
-    pendingAnchorRef.current = null;
-    el.scrollTop += el.scrollHeight - anchor;
+    if (Date.now() > anchor.until) {
+      pendingAnchorRef.current = null;
+      return;
+    }
+    anchor.until = Date.now() + 2500; // 新提交到达：锚定期延期
+    // quick（ql-20260916-019）：元素钉回——按锚行当前 offsetTop 还原（每次现测，
+    // 高度塌缩/撑开后 offsetTop 即真实值）。锚行优先用捕获时的元素引用（仍在
+    // DOM），丢失（React 重挂）按 data-turn-key 重查。
+    const apply = () => {
+      if (Date.now() - lastUserScrollTsRef.current < 120) return false;
+      const cur = pendingAnchorRef.current;
+      if (cur !== anchor) return false;
+      let row = anchor.el?.isConnected ? anchor.el : null;
+      if (!row) {
+        row =
+          el.querySelector<HTMLElement>(
+            `[data-turn-key="${CSS.escape(anchor.key)}"]`,
+          ) ?? null;
+        anchor.el = row;
+      }
+      if (!row) return false;
+      const target = row.offsetTop - anchor.offset;
+      if (Math.abs(el.scrollTop - target) > 2) el.scrollTop = target;
+      return true;
+    };
+    apply();
+    requestAnimationFrame(() => requestAnimationFrame(apply));
+    anchorPinRef.current = apply; // 滚动事件重申钩子（onScroll 消费）
+    const watch = setInterval(() => {
+      const alive = Date.now() <= anchor.until && apply();
+      if (!alive) {
+        clearInterval(watch);
+        if (anchorPinRef.current === apply) anchorPinRef.current = null;
+      }
+    }, 300);
+    setTimeout(() => {
+      clearInterval(watch);
+      if (anchorPinRef.current === apply) anchorPinRef.current = null;
+    }, 30_000); // 硬上限兜底
   }, [turnState, timelineScrollEl]);
 
   // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：

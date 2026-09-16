@@ -492,7 +492,7 @@ const TurnRow = memo(function TurnRow({
                     // 字符 markdown）一次性全量渲染是翻页/跳转卡死根因——content-visibility
                     // 让滚动容器外的轮次只占位不解析布局；estimate 8 万 px 上限防
                     // 屏外占位塌陷导致滚动条跳变（大轮真实高度可达数万 px）。
-                    "[content-visibility:auto] [contain-intrinsic-size:auto_80000px]",
+                    "[content-visibility:auto] [contain-intrinsic-size:auto_800px]",
                     // task-01：受控高亮（isHighlighted 命中行）——ring+浅底主题语义
                     // 类随主题换肤；容器原本无圆角，高亮时补 rounded-md。
                     isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
@@ -876,6 +876,13 @@ export function TurnTimeline({
   // 消息的占位 turn）例外强制回底——用户应立即看到自己发出的消息。
   const isNearBottomRef = useRef(true);
   const lastTurnKeyRef = useRef<string | null>(null);
+  // quick（ql-20260916-018）：首轮身份镜像——prepend 判定（见 [turns] effect）。
+  const firstTurnKeyRef = useRef<string | null>(null);
+  // quick（ql-20260916-018）：prepend 后贴底跟随静默截止时间（见 [turns] effect）。
+  const prependFollowMuteUntilRef = useRef(0);
+  // quick（ql-20260916-019）：最后一轮签名镜像（runId+输出长度+状态）——贴底
+  // 跟随的「末轮变化」判据（见 [turns] effect 注释）。
+  const lastSigRef = useRef<string | null>(null);
 
   // ── 回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊 group-chat-panel
   //    同款移植）：离开底部后按钮出现；离开期间新增轮数显示「N 条新消息」。
@@ -944,6 +951,22 @@ export function TurnTimeline({
     if (!el || typeof el.scrollTo !== "function") return;
     const last = turns[turns.length - 1] ?? null;
     const turnKey = last ? `${last.runId}:${last.turn ?? "-"}` : null;
+    // quick（ql-20260916-018）：prepend 判定——首轮身份变化 = 「加载更早」向上
+    // 插入了旧内容（流式/新消息只改末轮，首轮不动）。用户上拉阅读历史时距底
+    // 可能瞬时 <80px（isNearBottom 误真），prepend 触发本 effect 会把视口拉回
+    // 最新轮（用户实测「往上拉弹到最新轮次」）。首轮变化（非首挂载）跳过贴底。
+    const first = turns[0] ?? null;
+    const firstKey = first ? `${first.runId}:${first.turn ?? "-"}` : null;
+    const isPrepend =
+      firstTurnKeyRef.current !== null && firstKey !== firstTurnKeyRef.current;
+    firstTurnKeyRef.current = firstKey;
+    // quick（ql-20260916-018）：prepend 落地后 3s 内贴底跟随休眠——content-visibility
+    // 高度撑开/塌缩期间浏览器可能瞬间把视口钳到新底（near 误真），随后任何 turns
+    // 提交（流式/队列 tick）都会触发贴底 scrollTo(h) 把用户拉到最新轮（实测步骤
+    // 7 弹回精确 = h-视口）。窗口期过后（高度稳定）恢复常态贴底。
+    if (isPrepend) prependFollowMuteUntilRef.current = Date.now() + 3000;
+    if (isPrepend) return;
+    if (Date.now() < prependFollowMuteUntilRef.current) return;
     // 占位 turn（status=pending）首次出现视为「用户刚发送」→ 无条件回底；
     // 同一 turn 后续状态更新（running/completed）不再触发强制回底。
     const isNewPendingTurn =
@@ -960,7 +983,16 @@ export function TurnTimeline({
     if (selecting) return;
     // quick（ql-20260916-017）：跳转进行中不贴底（见 props 注释）。
     if (suppressFollowBottom) return;
-    if (isNewPendingTurn || isNearBottomRef.current) {
+    // quick（ql-20260916-019）：贴底跟随仅在「最后一轮发生变化」（新消息/流式
+    // 输出增长/占位轮出现）时触发——prepend 只在头部加旧内容、最后一轮不变，
+    // 天然永不触发（此前依赖 isNearBottomRef（初始 true、各种时序下陈旧为真）
+    // + prepend 静默窗组合守卫，实测仍被穿透：触顶加载突发落地瞬间视口被钳到
+    // 新底 → near 误真 → 后续任意 turns 提交拉底。本不变量与滚动位置无关，
+    // 彻底消除「上拉读历史被弹回最新轮」）。
+    const lastSig = last ? `${last.runId}:${(last.output ?? "").length}:${last.status}` : null;
+    const lastChanged = lastSigRef.current !== lastSig;
+    lastSigRef.current = lastSig;
+    if (isNewPendingTurn || (isNearBottomRef.current && lastChanged)) {
       el.scrollTo(0, el.scrollHeight);
     }
   }, [turns, suppressFollowBottom]);
