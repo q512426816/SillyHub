@@ -1,0 +1,153 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+index eea03311c..ac12e5293 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+@@ -8,3 +8,4 @@ created_at: 2026-09-04 13:58:00
+ - ql-20260904-019-b4f4 | machine-card sillyspec_update 横幅四态扩五态——新增 up_to_date（success 色阶 CheckCircle2「已是最新版（X），无需升级」+ 副行说明点击时检查过版本、10min 自动消失），daemon 手动升级已最新的明确反馈终态；补横幅用例（45/45 绿，tsc 0）
+ - ql-20260916-005-0fc5 | 会话页进入 /runs 请求扇出收敛——onTurnCompleted 刷新类副作用（runsMeta 快照/用量信号/队列/列表）改「同 run 首条 turn_completed」门控（历史回灌终态轮播种 completedSideEffectRunIdsRef，首连对账/5s 复核的重放合成不再逐条扇出，修进入瞬间 ~2T 条并发）；失败轮错误详情拉取 in-flight 共享（同批 F 个失败重放收敛 1 条）；runsPromise 经 runsSnapshot 注入 streamSession（缺口同步复用不自拉）。新增回归 session-panel-runs-request-dedup（4 用例：重放不扇出/新完成照常/失败共享/注入透传），相关面 230+39 用例绿，tsc 0
+ - ql-20260916-009-ac60 | 历史翻页空壳修复——「加载更早」装配块 runId 改真实 runId（#e 伪 id 致快照双 miss、同 run 被孤儿补建成无内容配置行占位块，用户实证 6e213eb3 会话）；enrichDisplayTurns knownPendingRunIds 参数（已知未加载轮不补建占位）；displayTurns 稳定排序（同时间保持数组序）；HISTORY_PAGE_SIZE 100→50。新增回归用例（翻页同 run 内容渲染），session-panel 全套 249 用例绿，tsc 0，eslint 0 错误
++- ql-20260916-010-560c | 未加载历史轮占位骨架——enrichDisplayTurns 对 knownPendingRunIds 轮补建轻量占位 turn（whoLine+sender 时间，复用静默切换轮紧凑标记渲染），翻页前未加载历史轮显示配置骨架不再是隐形（ql-20260916-009 的迭代）。新增回归用例，session-panel 211 用例绿，tsc 0，eslint 0
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 5f809765e..98f2f306b 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -4,7 +4,7 @@ doc_type: module-card
+ module_id: components-daemon
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+-updated_at: 2026-09-16 10:20:00
++updated_at: 2026-09-16 10:30:00
+ ---
+ 
+ # Daemon 运行时交互组件（components-daemon）
+@@ -235,6 +235,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+ - **session-panel-dialog**：失败轮错误详情拉取同款 in-flight 共享（dialog 无 runsMeta 刷新链路，仅此项）。
+ - 回归：`__tests__/session-panel-runs-request-dedup.test.tsx`（4 用例）。
+ 
++## quick-9ac4ecde 增量（未加载历史轮占位骨架，ql-20260916-010-560c）
++
++- **page-helpers enrichDisplayTurns**：knownPendingRunIds 中的轮改补建轻量占位 turn（whoLine 配置行 + sender 时间，复用「静默切换轮紧凑标记」渲染形态）——翻页前未加载的历史轮显示带时间与档案/供应商信息的骨架（ql-20260916-009 修复后曾隐形），翻页到达后装配块携带内容自然替换。
++- 回归：session-panel-runs-request-dedup 新增用例（快照含未加载 run → 紧凑行渲染配置）。
++
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx
+index 502328666..bdba28f5d 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx
+@@ -213,6 +213,63 @@ async function renderAndSettle() {
+   await act(async () => {});
+ }
+ 
++// ── quick（ql-20260916-010）：未加载历史轮占位骨架回归 ─────────────────────
++// 会话快照含未加载轮（log 窗口外的历史 run）时，翻页前显示带配置行/时间的
++// 轻量占位 turn（复用「静默切换轮紧凑标记」渲染），翻页到达后装配块替换。
++describe("未加载历史轮占位骨架（ql-20260916-010）", () => {
++  it("快照含未加载历史轮 → 渲染配置行骨架（时间+档案+供应商）", async () => {
++    // makeHistory 只含 run-h1..h3 的日志；HISTORY_RUNS 快照同集——无未加载轮。
++    // 追加一个不在日志里的 run-h4 快照行（历史窗口外），其占位骨架应渲染。
++    sessionApi.listSessionRuns.mockImplementation(async () => {
++      const rows = HISTORY_RUNS.map((id) => ({
++        id,
++        created_at: "2026-09-16T10:00:00Z",
++        spec_strategy: null,
++        status: failedRunIds.has(id) ? "failed" : "completed",
++        error_code: null,
++        failure_summary: null,
++        error_detail: null,
++        started_at: "2026-09-16T10:00:01Z",
++        finished_at: "2026-09-16T10:00:02Z",
++        exit_code: 0,
++        agent_profile_snapshot: null,
++        llm_provider_id: null,
++        input_tokens: null,
++        output_tokens: null,
++        user_id: null,
++        sender_name: null,
++      }));
++      rows.push({
++        id: "run-h4-unloaded",
++        created_at: "2026-09-15T09:00:00Z",
++        spec_strategy: null,
++        status: "completed",
++        error_code: null,
++        failure_summary: null,
++        error_detail: null,
++        started_at: "2026-09-15T09:00:01Z",
++        finished_at: "2026-09-15T09:00:02Z",
++        exit_code: 0,
++        agent_profile_snapshot: { name: "测试档案" },
++        llm_provider_id: null,
++        input_tokens: null,
++        output_tokens: null,
++        user_id: null,
++        sender_name: "测试者",
++      });
++      return rows;
++    });
++    await renderAndSettle();
++    // 占位骨架渲染配置行（档案名 chip）——文本被 <span>· <svg/> 档案名</span>
++    // 拆成「· 」「测试档案」两段（紧凑行 render 结构），用函数匹配跨段取含档案名的段。
++    await waitFor(() =>
++      expect(
++        screen.getAllByText((_, el) => el?.textContent === "·  测试档案").length,
++      ).toBeGreaterThan(0),
++    );
++  });
++});
++
+ describe("会话页 /runs 请求扇出收敛（ql-20260916-005）", () => {
+   it("历史轮重放终态事件不扇出刷新：首屏仅 runsMeta + 任务面板 2 条（修复前 2+T 条）", async () => {
+     await renderAndSettle();
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 6e9c842b7..40d0ec0da 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -261,9 +261,43 @@ export function enrichDisplayTurns(
+     const orphanTurns: SessionTurnView[] = [];
+     for (const [runId, meta] of runsMeta) {
+       if (knownRunIds.has(runId)) continue;
+-      // quick（ql-20260916-009）：已知未加载轮不补建占位块——内容随翻页到达后
+-      // 装配块出现（真实 runId 命中上方 enriched），此处跳过避免“配置行空壳”。
+-      if (knownPendingRunIds?.has(runId)) continue;
++      // quick（ql-20260916-010）：已知未加载轮补建轻量占位 turn（whoLine 配置行 +
++      // sender 时间，复用「静默切换轮紧凑标记」渲染形态）——向上翻页时未加载的
++      // 历史轮显示带时间与档案/供应商信息的骨架，内容随翻页到达后装配块携带
++      // 正文自然替换（ql-20260916-009 之前渲染无内容空壳、修复后隐形，现为骨架）。
++      if (knownPendingRunIds?.has(runId)) {
++        if (meta.status !== 'completed') continue;
++        orphanTurns.push({
++          runId,
++          turn: null,
++          prompt: '',
++          output: '',
++          status: 'completed',
++          seenLogIds: new Set(),
++          inputTokens: null,
++          outputTokens: null,
++          ctxTokens: null,
++          errorDetail: null,
++          processItems: [],
++          realRunId: runId,
++          whoLine: {
++            profileName: meta.agent_profile_snapshot?.name ?? null,
++            agentName: agentDisplayName,
++            providerName: meta.llm_provider_id
++              ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
++              : null,
++          },
++          sender: meta.user_id && meta.sender_name
++            ? {
++                name: meta.sender_name,
++                me: meta.user_id === sessionUserId,
++                at: meta.started_at ?? null,
++              }
++            : undefined,
++          replyAt: meta.finished_at ?? meta.started_at ?? null,
++        });
++        continue;
++      }
+       if (meta.status !== 'completed') continue;
+       orphanTurns.push({
+         runId,

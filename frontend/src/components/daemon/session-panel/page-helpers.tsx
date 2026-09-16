@@ -261,9 +261,43 @@ export function enrichDisplayTurns(
     const orphanTurns: SessionTurnView[] = [];
     for (const [runId, meta] of runsMeta) {
       if (knownRunIds.has(runId)) continue;
-      // quick（ql-20260916-009）：已知未加载轮不补建占位块——内容随翻页到达后
-      // 装配块出现（真实 runId 命中上方 enriched），此处跳过避免“配置行空壳”。
-      if (knownPendingRunIds?.has(runId)) continue;
+      // quick（ql-20260916-010）：已知未加载轮补建轻量占位 turn（whoLine 配置行 +
+      // sender 时间，复用「静默切换轮紧凑标记」渲染形态）——向上翻页时未加载的
+      // 历史轮显示带时间与档案/供应商信息的骨架，内容随翻页到达后装配块携带
+      // 正文自然替换（ql-20260916-009 之前渲染无内容空壳、修复后隐形，现为骨架）。
+      if (knownPendingRunIds?.has(runId)) {
+        if (meta.status !== 'completed') continue;
+        orphanTurns.push({
+          runId,
+          turn: null,
+          prompt: '',
+          output: '',
+          status: 'completed',
+          seenLogIds: new Set(),
+          inputTokens: null,
+          outputTokens: null,
+          ctxTokens: null,
+          errorDetail: null,
+          processItems: [],
+          realRunId: runId,
+          whoLine: {
+            profileName: meta.agent_profile_snapshot?.name ?? null,
+            agentName: agentDisplayName,
+            providerName: meta.llm_provider_id
+              ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
+              : null,
+          },
+          sender: meta.user_id && meta.sender_name
+            ? {
+                name: meta.sender_name,
+                me: meta.user_id === sessionUserId,
+                at: meta.started_at ?? null,
+              }
+            : undefined,
+          replyAt: meta.finished_at ?? meta.started_at ?? null,
+        });
+        continue;
+      }
       if (meta.status !== 'completed') continue;
       orphanTurns.push({
         runId,

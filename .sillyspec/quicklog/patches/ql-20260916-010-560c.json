@@ -1,0 +1,71 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-9ac4ecde",
+  "totals": {
+    "files": 4,
+    "additions": 101,
+    "deletions": 4
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-daemon.changelog.md",
+      "declared": true,
+      "additions": 1,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx",
+      "declared": true,
+      "additions": 57,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "declared": true,
+      "additions": 37,
+      "deletions": 3,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 4,
+    "codeFileCount": 1,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "na",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260916-010-560c",
+  "sessionId": "quick-9ac4ecde",
+  "savedAt": "2026-09-16T02:31:15.600Z",
+  "patchSha256": "5924630ae62fc62841763ec4bb1f1108beb55821cd80ad8104b95f5a0891053b",
+  "patchStatus": "ok"
+}

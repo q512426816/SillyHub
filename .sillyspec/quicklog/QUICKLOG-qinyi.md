@@ -136,3 +136,17 @@
 方案：①enrichDisplayTurns 新增 knownPendingRunIds 参数（翻页路径按装配块 realRunId 播种 Set 传入），孤儿补建跳过已知未加载轮——翻页到达后装配块自然携带内容出现，未加载期间不渲染空壳；②翻页装配块 runId 改真实 runId#e 页码后缀（快照正常认领合并 whoLine/失败状态，#e 仅作 React key，realRunId 保持原值不影响 SSE 匹配）；③displayTurns 排序稳定兜底（同快照时间保持数组序，prepend 自然位置优先，运行中无时间戳维持末尾语义）；④HISTORY_PAGE_SIZE 100→50 减半单 run 大窗口跨页丢弃概率（触顶/自动补拉链不受限）
 结果：新增回归用例（翻页同 run 内容渲染）通过；session-panel 全套 + history-scroll + runtime-session-helpers 249 用例绿；tsc 0 错；eslint 0 错误（2 警告为测试 fixture 既有）；翻页后历史轮次正常显示问答内容，未加载轮次不再渲染配置行空壳
 审计：[gate] L1（跨 0 模块 · 6 文件：3 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260916-010-560c | 2026-09-16 10:26:17 | 未加载历史轮占位骨架（翻页前显示配置行骨架，不再是隐形）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/page-helpers.tsx（knownPendingRunIds 轮补建轻量占位 turn）
+- frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx（新增骨架回归用例）
+- .sillyspec/docs/frontend/modules/components-daemon.md（增量节）
+- .sillyspec/docs/frontend/modules/components-daemon.changelog.md（变更索引）
+需求：未加载历史轮占位骨架（翻页前显示配置行骨架，不再是隐形）
+根因：ql-20260916-009 修复历史翻页空壳后，未加载历史轮完全不显示（隐形）——时间线出现空洞，用户不知道那里还有轮次，向上滚动时内容突然冒出体验突兀
+方案：enrichDisplayTurns 对 knownPendingRunIds 中的轮改补建轻量占位 turn（whoLine 配置行 + sender 时间，复用「静默切换轮紧凑标记」渲染形态——turn-timeline 对无 prompt/output 的 completed 轮已渲染紧凑配置行，无需改渲染层），翻页到达后装配块携带内容自然替换
+结果：新增回归用例（快照含未加载 run-h4-unloaded → 紧凑行渲染测试档案，跨段文本函数匹配）；session-panel 全套 211 用例绿，tsc 0，eslint 0；模块文档增量节+changelog
+审计：[gate] L1（跨 0 模块 · 4 文件：1 代码/1 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）
