@@ -10,3 +10,4 @@ created_at: 2026-09-04 13:58:00
 - ql-20260916-009-ac60 | 历史翻页空壳修复——「加载更早」装配块 runId 改真实 runId（#e 伪 id 致快照双 miss、同 run 被孤儿补建成无内容配置行占位块，用户实证 6e213eb3 会话）；enrichDisplayTurns knownPendingRunIds 参数（已知未加载轮不补建占位）；displayTurns 稳定排序（同时间保持数组序）；HISTORY_PAGE_SIZE 100→50。新增回归用例（翻页同 run 内容渲染），session-panel 全套 249 用例绿，tsc 0，eslint 0 错误
 - ql-20260916-010-560c | 未加载历史轮占位骨架——enrichDisplayTurns 对 knownPendingRunIds 轮补建轻量占位 turn（whoLine+sender 时间，复用静默切换轮紧凑标记渲染），翻页前未加载历史轮显示配置骨架不再是隐形（ql-20260916-009 的迭代）。新增回归用例，session-panel 211 用例绿，tsc 0，eslint 0
 - ql-20260916-013-c032 | /runs 扇出线上根治（快照播种替代日志窗口播种）+ 翻页覆盖（HISTORY_PAGE_SIZE 50→400）+ prepend 锚点竞态（高度未增不消费+空页清锚）——浏览器实测定位三问题（20ms 36+ 条并发/1.1 万条日志滚 220 页/滚顶弹回）。dedup 6/6 + session-panel 全套 212 + scroll/race 9/9 绿，tsc 0
+- ql-20260916-014-c032 | 翻页游标块序错位根治（初始+翻页游标取时间最旧行，修重复拉取/留洞致孤儿空壳）+ 跳转 hit 要求内容行（空壳命中不翻页）+ 跳转循环 rAF→setTimeout（后台标签页卡死 suppress）。浏览器实测：6400 请求 3217 深度→12 页 12 次无重复，32 轮附近四轮内容全出。session-panel 218 用例绿，tsc 0

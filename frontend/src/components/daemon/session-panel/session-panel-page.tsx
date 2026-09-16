@@ -698,11 +698,16 @@ export function SessionPanelPage({
         });
         if (cancelled) return;
         streamCursor = maxLogTimestamp(logs);
-        // 翻页游标 = 窗口内最早行 ts；满页即可能还有更早（按钮可见）。
+        // 翻页游标 = 窗口内**时间最早**行（quick ql-20260916-014：logs[0] 是 run
+        // 块序首行非时间最旧——大 run 块序靠前而尾部 ts 靠后，以其为 before 翻页
+        // 会重复拉取/留洞，见 handleLoadEarlier 同款注释）；满页即可能还有更早。
         // id 分量必须同点写（task-06）——漏设则首次翻页 beforeId=undefined
         // 走后端旧 <= 分支，同 ts 满 100 行批首页整页重复。
-        historyCursorRef.current = logs[0]?.timestamp ?? null;
-        historyCursorIdRef.current = logs[0]?.id ?? null;
+        const oldestInit = logs.length
+          ? logs.reduce((m, l) => (l.timestamp < m.timestamp ? l : m), logs[0]!)
+          : null;
+        historyCursorRef.current = oldestInit?.timestamp ?? null;
+        historyCursorIdRef.current = oldestInit?.id ?? null;
         setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
         // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
         // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。
@@ -1142,8 +1147,18 @@ export function SessionPanelPage({
       // 内容不被新段顶走，向上滚动自然续读更早）。
       const scrollEl = scrollElQueryRef.current();
       if (scrollEl) pendingAnchorRef.current = scrollEl.scrollHeight;
-      historyCursorRef.current = older[0]?.timestamp ?? null;
-      historyCursorIdRef.current = older[0]?.id ?? null;
+      // quick（ql-20260916-014）：游标取本页**时间最旧**行——后端返回序是 run 块序
+      // （anchor→ts→id，read_model.py:434-448），块序首行（older[0]）的 ts 不保证是
+      // 本页最小（大 run 块序靠前、尾部日志时间靠后），以其为 before 会把"块序靠后
+      // 但 ts < 游标"的行反复拉回（线上实测 6400 请求只推进 3217 深度、约半数重复），
+      // 部分 run 日志永远凑不齐 → 孤儿空壳。时间维全序推进零重复零遗漏；块序错位的
+      // 行分到不同页由 #e 游标变体多块机制承接（时间序正确，设计已支持）。
+      const oldest = older.reduce(
+        (m, l) => (l.timestamp < m.timestamp ? l : m),
+        older[0]!,
+      );
+      historyCursorRef.current = oldest.timestamp;
+      historyCursorIdRef.current = oldest.id;
       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
       // task-04：hasEarlierRef 同步刷新（跳转循环 await 间隙读它判档位；
       // passive effect 提交晚于循环续延，仅靠 effect 镜像会读到过期值）。
@@ -1157,7 +1172,7 @@ export function SessionPanelPage({
         // pageKey 在 updater 外派生（task-06）：updater 须保持纯函数，内读 ref
         // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
         // 与上方刚写入的 historyCursorIdRef 一致。
-        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${(older[0]?.id ?? "").slice(0, 8)}`;
+        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${oldest.id.slice(0, 8)}`;
         // quick（ql-20260916-009）：runId 改真实 runId——原样保留 #e 伪 id 时
         // 装配块不被 enrichDisplayTurns 快照认领（realRunId ?? runId 双 miss），
         // 同 run 快照被当孤儿补建成「只有配置行的空壳占位块」（历史翻页只显示
@@ -1383,10 +1398,17 @@ export function SessionPanelPage({
   const handleJumpToTurn = useCallback(
     async (entry: TurnCatalogEntry) => {
       const container = timelineScrollEl();
-      const hit = () =>
-        container?.querySelector<HTMLElement>(
+      // quick（ql-20260916-014）：命中行须**有内容**——孤儿/骨架配置行（快照补建的
+      // 空壳，文本极短）从首屏就存在于 DOM，旧 hit() 命中空壳即认为已加载直接滚
+      // 过去不再翻页（用户点第 32 轮跳到空壳行，实测日志请求 0 次翻页）。空壳行
+      // 视同未命中继续翻页，内容装配后由真实内容块命中。
+      const hit = () => {
+        const row = container?.querySelector<HTMLElement>(
           `[data-turn-key="${CSS.escape(entry.key)}"]`,
-        ) ?? null;
+        );
+        if (!row) return null;
+        return (row.textContent ?? "").trim().length > 60 ? row : null;
+      };
       if (!hit()) {
         // 未加载：循环翻页（≤ JUMP_LOAD_EARLIER_MAX_PAGES 页防死循环；到上限
         // 不报错可再次点击续跳）。suppress 全程置位，finally 恢复——任何异常
@@ -1406,11 +1428,15 @@ export function SessionPanelPage({
           ) {
             // 页未真实加载（到头空页 / 翻页失败 / 在途锁）即停，不空转。
             if (!(await loadEarlierOnce())) break;
-            // 等一帧再进下一轮判定：并发模式下 setTurnState 的 DOM 提交走
+            // 等一次宏任务再进下一轮判定：并发模式下 setTurnState 的 DOM 提交走
             // 调度器宏任务，而本循环的 await 续延是 microtask——即时响应
-            // （mock / 缓存命中）下不 yield 一帧的话，下一轮 hit() 与循环后
+            // （mock / 缓存命中）下不 yield 的话，下一轮 hit() 与循环后
             // 的兜底判定都会读到旧 DOM（目标已加载却继续翻页甚至误报兜底）。
-            await new Promise((resolve) => requestAnimationFrame(resolve));
+            // quick（ql-20260916-014）：rAF → setTimeout——后台标签页 rAF 冻结会
+            // 把循环连同 suppress 标志卡死在 await（实测：跳转点击后切走标签页，
+            // 回来后触顶翻页被永久抑制）；宏任务定时器后台照跑，且同样排在 React
+            // 提交之后（同为宏任务队列，先进先出）。
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
         } finally {
           jumpSuppressLoadEarlierRef.current = false;

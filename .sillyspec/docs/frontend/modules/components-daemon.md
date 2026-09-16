@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-16 12:50:00
+updated_at: 2026-09-16 13:50:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）
@@ -241,6 +241,9 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - 回归：session-panel-runs-request-dedup 新增用例（快照含未加载 run → 紧凑行渲染配置）。
 
 - **/runs 扇出线上根治 + 翻页覆盖 + 锚点竞态（ql-20260916-013-c032）**：①establish 播种改以 runs 快照为准（非活跃即终态预标记 completedSideEffectRunIdsRef，ACTIVE_RUN_STATUSES 导出；勿用 runTerminalTurnStatus——completed 返回 null 漏播成功轮）——日志窗口播种只覆盖窗口内轮次而缺口同步对快照全部终态轮合成事件，长会话（6e213eb3：44 轮 1.1 万条日志）线上 20ms 内 36+ 条并发（浏览器 fetch 堆栈定位 onTurnCompleted）；②HISTORY_PAGE_SIZE 50→400（后端 le=1000）——翻页单位是日志行而显示单位是轮，50 条/页滚 220 次才能看全致"一堆空白"；③prepend 滚动锚点竞态修复——高度未增不消费锚点（中间 turnState 提交抢跑空消费后真 prepend 无锚可补 → 视口弹回后面轮次）+ 空页清锚防滞留误补偿。回归：窗口外轮扇出用例（修复前 23 次修复后 3 次）；两测试文件页距常量对齐 400。
+
+- **翻页游标块序错位根治 + 跳转空壳命中 + rAF 后台卡死（ql-20260916-014-c032）**：①翻页/初始游标改取本页**时间最旧行**——后端返回序是 run 块序（anchor→ts→id，read_model.py:434-448）而过滤是裸 ts，块序首行（older[0]）非时间最旧（大 run 块序靠前尾部 ts 靠后），以其为 before 会重复拉取/留洞（浏览器实测 6400 请求只推进 3217 深度、部分 run 日志永远凑不齐 → 孤儿空壳，如 32 轮附近 18:55/19:56/22:06/22:09 四轮，DB 实证各有 10~920 条日志）；②跳转 hit() 要求行有内容——孤儿空壳行从首屏就在 DOM，旧命中检查找到空壳直接滚过去不翻页（点第 32 轮 0 次翻页请求）；③跳转循环 rAF → setTimeout——后台标签页 rAF 冻结把循环连同 suppress 标志卡死（实测跳转后触顶翻页被永久抑制）。
+- 浏览器终验：12 次连续滚动 12 页无重复（每页 400），32 轮附近四轮全部出内容（系统续跑/进度总览/sillyspec 工具回顾等正文）。
 
 ## 人工备注
 

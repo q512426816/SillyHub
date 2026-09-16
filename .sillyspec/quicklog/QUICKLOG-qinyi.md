@@ -177,7 +177,7 @@
 方案：根布局 export const dynamic = force-dynamic 一次覆盖全部路由（workbench 逐页先例的全站化）：壳 HTML 每次 SSR + no-store，/_next/static 内容哈希 immutable 不受影响；附带修 Quick E 测试 mock 类型（SessionRunRead 标注）
 结果：tsc 0；dedup 测试 5 用例绿；page.test 7 失败 stash 对照证并行既有债非本次引入；已部署验证：公网 /sessions 响应头从 s-maxage=31536000 变为 private,no-cache,no-store,must-revalidate，onHeartbeat chunk 公网可下载
 
-## ql-20260916-013-c032 | 2026-09-16 12:36:56 | C:/Program Files/Git/runs 扇出线上根治 + 翻页覆盖 400/页 + prepend 锚点竞态修复（浏览器实测三连）
+## ql-20260916-013-c032 | 2026-09-16 12:36:56 | 翻页游标块序错位根治 + 跳转空壳命中 + rAF 后台卡死（32 轮空壳三连修）
 状态：已完成
 关联变更：（无）
 文件：
@@ -194,3 +194,18 @@
 方案：①establish 播种改以 runs 快照为准（非活跃即终态预标记，ACTIVE_RUN_STATUSES 导出；首版误用 runTerminalTurnStatus——completed 返回 null 漏播成功轮，被新增窗口外轮用例当场抓住）；②HISTORY_PAGE_SIZE 50→400（后端 le=1000，撤销 009 的 100→50）；③锚点 effect 高度未增不消费（保留待真 prepend 落地）+ 空页清锚防滞留误补偿
 结果：浏览器终验通过：/runs 进入 39→3 条；滚动加载 400 条/页（scrollHeight 14.6k→44k，内容轮 11→24 持续变出）；连续 5 次滚顶视口稳定无弹回。测试：新增窗口外轮扇出回归用例（修复前 23 次修复后 3 次），dedup 6/6 + session-panel 全套 212 + scroll/race 9/9 绿（两测试页距常量对齐 400），tsc 0
 审计：[gate] L1（跨 0 模块 · 5 文件：1 代码/2 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）
+
+## ql-20260916-014-53f9 | 2026-09-16 13:30:10 | 修复最近 CI 前端 22 红 + daemon hot-switch 偶发红
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（importActual 透传 detectUsageProvider + 补 workspace-binding mock + 翻页夹具/断言引用 HISTORY_PAGE_SIZE 常量 + 裸时间计数适配三段显示）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（补 workspace-binding mock（queryFn 并拉 my-bindings 后数据源齐））
+- frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx（第二轮终态换新 run_id（同 run 首条门控适配））
+- frontend/src/lib/__tests__/daemon-session.test.ts（5s 复核用例改写为快照含 running 且窗口内完成的真实门控语义）
+- sillyhub-daemon/tests/daemon-provider-config-changed-handler.test.ts（waitForCond 改等 hot_switch_rewrite 完成日志（全部文件写盘后发出，代替只轮询首文件））
+需求：修复最近 CI 前端 22 红 + daemon hot-switch 偶发红
+根因：五类根因叠加——①ctx-usage-bar QuotaPill 渲染期调用 detectUsageProvider 而 page.test 的 llm-providers mock 只暴露两个数据函数（渲染即崩）；②ql-20260916-006 工作区查询统一 switcher 键后 queryFn 并拉 fetchMyBindings，page.test/session-list-panel.test 未 mock，真实 fetch 失败路径的异步延迟在 CI 慢机上晚于组头名称断言（兜底当前工作区误显）；③ql-20260916-013 把 HISTORY_PAGE_SIZE 50→400 而翻页夹具/断言仍硬编码 100（满页判定不成立翻页链路全断）；④ql-20260916-005 用量刷新改同 run 首条完成门控，usage-mount 第二轮终态同 run_id 被去重不再递增；⑤同提交给 streamSession 5s 复核加 sawRunningRunAtSync 门控，旧断言（全终态也等第二次合成）失效；⑥daemon hot-switch 测试只轮询首个文件就断言后续文件+日志，观察窗口落在 mkdir→auth→config 多段 await 写盘的中间态（CI 慢机必现）
+方案：测试单源对齐现状——mock 补 export/数据源、夹具引用常量、断言按新语义改写；生产代码零改动
+结果：page.test 37绿、session-list-panel 105绿、usage-mount+daemon-session+list 合并 137绿、daemon hot-switch 16绿（修复前每次1-2红）、typecheck 双侧0错、lint 仅既有警告（与CI基线一致）
+审计：[gate] L1（跨 0 模块 · 5 文件：0 代码/5 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）
