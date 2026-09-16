@@ -79,12 +79,16 @@ ORDER BY（:409-414）与 limit/reverse 语义零改动；docstring 游标段同
 |---|---|---|
 | 修改 | backend/app/modules/daemon/router/session_insights.py | 新增 before_id Query 参数（单独传无 before → 422），:379/:424 接线透传 |
 | 修改 | backend/app/modules/daemon/session/service/read_model.py | get_agent_session_logs 新参 before_id + 复合过滤分支（:405-406 处），docstring 同步 |
+| 修改 | backend/app/modules/daemon/service.py | DaemonService.get_agent_session_logs 门面透传 before_id（execute 发现的两层显式签名缺口，缺透传 TypeError 500） |
+| 修改 | backend/app/modules/daemon/session/service/__init__.py | SessionService.get_agent_session_logs 门面透传 before_id（同上） |
 | 修改 | backend/openapi.json | 重导出（新查询参数入 OpenAPI） |
 | 修改 | frontend/src/lib/api-types.ts | `pnpm gen:types` 生成（新 before_id 参数类型） |
 | 修改 | frontend/src/lib/daemon/sessions.ts | getAgentSessionLogs opts+params 加 beforeId（:647/:655） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 游标二元组（新 ref；翻页 :1074 与初始加载 :689 两写点均设 id、换会话重置 :662 同步清）、请求透传 :1053、pageKey 后缀 :1093、loadEarlierOnce 二元组进度判定 :1129-1131 |
 | 修改 | backend/app/modules/daemon/tests/test_group_logs_pagination.py | 新增复合游标用例：同 ts 150 行批两页可达/缺省 before_id 行为回归/单独 before_id 422 |
 | 修改 | frontend session-panel 相关测试文件 | 游标二元组前进/before_id 透传用例 |
+| 修改 | .sillyspec/docs/backend/modules/daemon.md | task-08 模块文档增量（before_id 参数语义/透传链/422/测试面） |
+| 修改 | .sillyspec/docs/multi-agent-platform/modules/frontend.md | task-08 模块文档增量（游标二元组化改造点与测试面） |
 
 **字段数据流标注**（新增对外字段 before_id）：producer=前端游标 id（初始加载 `logs[0].id`（:689）与翻页 `older[0].id`（:1074）两写点）→ getAgentSessionLogs params 序列化为 query `before_id`（uuid 字符串）→ backend FastAPI Query 反序列化 uuid.UUID → service 复合过滤消费（AgentRunLog.id 同为 uuid，PG 全序比较）→ 响应体无新字段（消费在过滤层终止）。
 

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-16-logs-cursor-tiebreaker",
+  "appliedAt": "2026-09-16T01:03:57.472Z",
+  "baseHash": "548cd7f9b4f7f4f8f94b3e5b2bbd8dae3e6e432f",
+  "files": [
+    {
+      "path": ".sillyspec/docs/backend/modules/daemon.md",
+      "sha256": "25eeac1350852170c921ee5b70d8e796fe180fe367ff9b9022a9a22b1cfdac2d"
+    },
+    {
+      "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+      "sha256": "93cf4f8ee4c8aacf1e721eeb4fb49f44f747a53dc10caceca150f3127df74e25"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_insights.py",
+      "sha256": "c819be53e9c5d4470b08c48048c6677faef94d456a86988566278d30885f25f8"
+    },
+    {
+      "path": "backend/app/modules/daemon/service.py",
+      "sha256": "7a6c2171cc74c16863f29e29b46858c17160b8fbf78f4eeb0dc1968322d02ec7"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "sha256": "a50023df90e0e15ff8634121ddcb11511693526e01362740f52e30283fae0d3a"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/read_model.py",
+      "sha256": "52406bf797d9afda24580ba4028687f13748aba21992ada5958b169c42610ed9"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_logs_pagination.py",
+      "sha256": "4dd97b52036518314f606d9409586a83f24866800c5d011efb285ceb292b3733"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "4a712c789ca8797774f5c7bb9213822aad57742973b6d96ed0cd68961b72a8dd"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "sha256": "c9f48b7bd68a90410a654f46777293b0510e7d1a90e202946c4f6a0681ec8c79"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+      "sha256": "d9e2e3e8cd9445266db418fc585ff820c085ae209b94301d6356ec92a81e551f"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "5477345221853760959fbe320cabca496d31eb5ee2aae5430680d5d6db30a26d"
+    },
+    {
+      "path": "frontend/src/lib/daemon/sessions.ts",
+      "sha256": "101db3d8481c09f37459bcdbe16dfc39bc9e7922b559dd9ca17c21864f905ded"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "d09390a22677f244d16d136bd1b3b125589f30e66d9197dd51c78787021c715b"
+    }
+  ]
+}

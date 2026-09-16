@@ -15,7 +15,6 @@ allowed_paths:
   - frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
 target_files:
   - frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
-depends_on: [task-06]
 related_tests:
   - frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx（既有三场景：触顶 loadEarlier+prepend/连续 3 页 cursor 递减/overflowAnchor——mock 若精确断言请求参数需补 before_id）
 goal: >

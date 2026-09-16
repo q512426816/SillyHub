@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-16-logs-cursor-tiebreaker",
+  "generatedAt": "2026-09-16T01:10:18.972Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-16-logs-cursor-tiebreaker",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-16-logs-cursor-tiebreaker",
+      "metrics": {
+        "tasks": 9,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-16-logs-cursor-tiebreaker",
+      "metrics": {
+        "backendEndpoints": 4616,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-16-logs-cursor-tiebreaker",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 复合游标端到端（httpx 级 integration test：router→422 校验→双层门面→read_model 复合过滤）17 passed exit 0",
+      "command": "cd backend && uv run pytest -q --no-cov app/modules/daemon/tests/test_group_logs_pagination.py",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-16-logs-cursor-tiebreaker/verify-int-backend.log"
+    },
+    {
+      "claim": "frontend 翻页行为真实集成（首翻复合游标/同 ts 双页 id 推进无 key 告警/换会话重置）6/6 exit 0 + 契约测试 gen:types:check exit 0",
+      "command": "cd frontend && pnpm exec vitest run src/components/daemon/__tests__/session-history-scroll.test.tsx && pnpm gen:types:check",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-09-16-logs-cursor-tiebreaker/verify-int-frontend.log"
+    }
+  ],
+  "tests": {
+    "command": "module[frontend]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-16T02:20:40.375Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

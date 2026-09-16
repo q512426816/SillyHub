@@ -1,0 +1,729 @@
+diff --git a/.sillyspec/docs/backend/modules/daemon.md b/.sillyspec/docs/backend/modules/daemon.md
+index db18996ab..eb8d6dcfc 100644
+--- a/.sillyspec/docs/backend/modules/daemon.md
++++ b/.sillyspec/docs/backend/modules/daemon.md
+@@ -296,3 +296,8 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
+ ## quick-f96d4e81 增量（定时消息终态条目删除）
+ 
+ - **DELETE /sessions/{id}/scheduled/{mid} 语义扩展**（`session/service/scheduled_messages.py`）：pending 仍取消留档（置 cancelled + cancelled_at，与 sweeper 行锁串行化不变）；终态（dispatched/cancelled/failed）物理删行——原设计终态行永久留档、列表全状态返回且无任何清除手段，线上终态条目永久残留只能删库（会话 6e213eb3 实证）。`cancel_scheduled_message` 全链改名 `delete_scheduled_message`（router/facade/域方法），`DaemonScheduledMessageNotPending`（409）成死代码删除；sweeper / auto_resume origin 幂等只读 pending，不受终态删行影响。
++
++## 2026-09-16-logs-cursor-tiebreaker 增量（日志翻页 before_id 复合游标）
++
++- **GET /sessions/{id}/logs 新增可选 `before_id`（uuid）查询参数**：与 `before` 组合实现 (ts,id) 复合游标——过滤 `(timestamp < before) OR (timestamp == before AND id < before_id)`（read_model.get_agent_session_logs，经 DaemonService/SessionService 两层门面透传）；缺省不传保持现行 `timestamp <= before` 逐字一致（旧客户端零回归）；单独传 before_id 无 before → 422（参数组合校验，先例 session_team/machines）。修 c318553a6 遗留：单事务 ≥页大小（100）同 timestamp 批次游标停摆（重复拉页+批内前段行不可达）。
++- **ORDER BY（run 块序 anchor_ts→timestamp→id）与 logsToTurns 轮序派生零改动**；排序键与裸 ts 过滤键不对齐的既有局限不变（复合过滤仅在 run 块内收紧）。测试：test_group_logs_pagination 17 passed（150 行同 ts 批两页取尽零交集/缺省 <= 回归/单独 422 三新用例）。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+index 8dc748536..28948b73a 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+@@ -181,3 +181,4 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
+ ### 2026-09-07-agent-liveness-states（agent 会话活性状态推导）
+ 
+ - `components/agent-log/liveness-badge.tsx` 五态视觉单源（语义色阶+呼吸动画，badge/dot/悬浮详情）；`agent-liveness-overview-card.tsx` 工作台「Agent 状态总览」卡（D-004 第二层：分组计数+在等人组跳转，30s 轮询）；日志面板行尾徽章；通知铃 agent_blocked 类型。api-types 经 gen:types 同步。已知缺口：会话列表小灯/idle 小红点待 SessionsPortal 联表管道（见 verify-result NOTES）。
++- 2026-09-16-logs-cursor-tiebreaker | 会话日志向上翻页复合游标：getAgentSessionLogs 增 opts.beforeId（仅与 before 同传）；session-panel-page 游标二元组化（historyCursorIdRef 与 ts 游标三写点同步——初始加载/翻页/换会话重置，请求透传 before_id，pageKey 加游标 id 前 8 位后缀并外提 setTurnState updater 消 ref 竞态，loadEarlierOnce 进度判定二元组——同 ts 不同 id=有进度跳转循环不误 break）。修单事务 ≥100 行同 timestamp 批次：重复拉页+React key 撞号+批内前段行不可达。测试：session-history-scroll 6/6（首翻复合游标/同 ts 双页 id 推进无 key 告警/换会话重置）+page.test 三处断言校准；api-types 经 gen:types 再生成（before_id 参数）。
+diff --git a/backend/app/modules/daemon/router/session_insights.py b/backend/app/modules/daemon/router/session_insights.py
+index 739d2183c..62c41e2b4 100644
+--- a/backend/app/modules/daemon/router/session_insights.py
++++ b/backend/app/modules/daemon/router/session_insights.py
+@@ -17,7 +17,7 @@ import uuid
+ from collections.abc import AsyncGenerator
+ from datetime import datetime
+ 
+-from fastapi import Query, Request
++from fastapi import HTTPException, Query, Request, status
+ from fastapi.responses import Response, StreamingResponse
+ from pydantic import BaseModel, Field
+ from sqlalchemy import select
+@@ -383,6 +383,14 @@ async def get_session_logs(
+             "严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回"
+         ),
+     ),
++    before_id: uuid.UUID | None = Query(
++        None,
++        description=(
++            "与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-"
++            "tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，"
++            "单独传 before_id 而无 before 将 422"
++        ),
++    ),
+     q: str | None = Query(
+         None,
+         max_length=200,
+@@ -415,13 +423,30 @@ async def get_session_logs(
+     （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
+     （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
+     放行普通群成员读 logs，见 get_group_accessible_session）。
++
++    2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与
++    ``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==
++    before AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页
++    可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零
++    回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点
++    timestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，
++    不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /
++    machines.py:488-494 先例）。
+     """
++    # 单独传 before_id（无 before）→ 422：fail-explicit 优于静默忽略
++    # （新参数无既有单独消费方；写法对齐 session_team.py:435 / machines.py:493）。
++    if before_id is not None and before is None:
++        raise HTTPException(
++            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
++            detail="before_id 是与 before 组合的复合游标 id tiebreaker，不支持单独传 before_id，请同时传 before（ISO timestamp）。",
++        )
+     svc = DaemonService(session)
+     logs = await svc.get_agent_session_logs(
+         session_id,
+         user.id,
+         after=after,
+         before=before,
++        before_id=before_id,
+         q=(q.strip() or None) if q else None,
+         limit=limit,
+     )
+diff --git a/backend/app/modules/daemon/service.py b/backend/app/modules/daemon/service.py
+index ca3053dc6..41085fa74 100644
+--- a/backend/app/modules/daemon/service.py
++++ b/backend/app/modules/daemon/service.py
+@@ -1089,16 +1089,19 @@ class DaemonService:
+         *,
+         after: datetime | None = None,
+         before: datetime | None = None,
++        before_id: uuid.UUID | None = None,
+         q: str | None = None,
+         limit: int | None = None,
+     ) -> list[AgentRunLog]:
+         # 群聊体验 quick（2026-09-02）：before/q/limit 透传（limit None=维持
+         # 服务层默认 5000 全量行为，见 SessionService.get_agent_session_logs）。
++        # 2026-09-16-logs-cursor-tiebreaker：before_id 透传（before 的 id tiebreaker）。
+         return await self._sess.get_agent_session_logs(
+             session_id,
+             user_id,
+             after=after,
+             before=before,
++            before_id=before_id,
+             q=q,
+             **({"limit": limit} if limit is not None else {}),
+         )
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index 71f7dcd04..6b21db85e 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -1110,6 +1110,7 @@ class SessionService(BackgroundTaskMixin):
+         limit: int = 5000,
+         after: datetime | None = None,
+         before: datetime | None = None,
++        before_id: uuid.UUID | None = None,
+         q: str | None = None,
+     ) -> list[AgentRunLog]:
+         return await _read_model.get_agent_session_logs(
+@@ -1119,6 +1120,7 @@ class SessionService(BackgroundTaskMixin):
+             limit=limit,
+             after=after,
+             before=before,
++            before_id=before_id,
+             q=q,
+         )
+ 
+diff --git a/backend/app/modules/daemon/session/service/read_model.py b/backend/app/modules/daemon/session/service/read_model.py
+index f83358871..b5be78a3c 100644
+--- a/backend/app/modules/daemon/session/service/read_model.py
++++ b/backend/app/modules/daemon/session/service/read_model.py
+@@ -8,7 +8,7 @@ from __future__ import annotations
+ import uuid
+ from datetime import datetime
+ 
+-from sqlalchemy import select
++from sqlalchemy import and_, or_, select
+ from sqlmodel import col
+ 
+ from app.modules.agent.model import (
+@@ -295,6 +295,10 @@ async def get_agent_session_logs(
+     limit: int = 5000,
+     after: datetime | None = None,
+     before: datetime | None = None,
++    # 2026-09-16-logs-cursor-tiebreaker / D-001@v1：与 before 组合的复合游标
++    # id tiebreaker——同 timestamp 批次逐页可达；仅与 before 同时消费，单独
++    # 传（无 before）由 router 层 422 fail-explicit，service 层不单独解释。
++    before_id: uuid.UUID | None = None,
+     q: str | None = None,
+ ) -> list[AgentRunLog]:
+     """Return all AgentRunLog rows for an owned session, cross-run aggregate.
+@@ -312,6 +316,15 @@ async def get_agent_session_logs(
+       由 ``<`` 放宽为 ``<=``：同批日志共用同一 timestamp，严格小于会永久跳过与
+       游标同 ts 的批次；配合 ``limit`` 取「游标之前（含边界行）的最新 N 条」实现
+       向上翻页，首行可能与已加载重叠）；
++    - ``before_id``（2026-09-16-logs-cursor-tiebreaker / D-001@v1）：与
++      ``before`` 组合的复合游标 id tiebreaker——同时传入时过滤收紧为
++      ``(timestamp < before) OR (timestamp == before AND id < before_id)``，
++      同 timestamp 批次（单 run 事务批量写入共用 ts）在批内逐页可达且翻页
++      边界零重叠（id 为 PG uuid 全序比较，直接 ``<``）；缺省（仅 ``before``）
++      保持上行 ``<=`` 语义逐字不动，旧客户端零回归。排序前提：ORDER BY 是
++      run 块序（anchor_ts → timestamp → id，:409-414），与裸 ts 过滤键不对齐
++      为既有已接受局限；本复合过滤仅在 run 块内收紧，不扩大该局限。单独传
++      ``before_id`` 而无 ``before`` 由 router 层 422（本层不单独消费）；
+     - ``q``：``content_redacted`` ILIKE %q% 内容过滤（会话内搜索，模式
+       拼接口径同 change/service 搜索先例）；
+     - ``limit``：**最新 N 条**语义——排序先 desc 取 N 再反转回升序返回
+@@ -403,7 +416,19 @@ async def get_agent_session_logs(
+     # 永久跳过与游标同 ts 的批次——改 <= 让边界行可到达（首行可能与已加载
+     # 重叠，前端 logsToTurns 按 run_id 分组可容忍）。
+     if before is not None:
+-        stmt = stmt.where(AgentRunLog.timestamp <= before)
++        if before_id is not None:
++            # 2026-09-16-logs-cursor-tiebreaker / D-001@v1：复合游标——
++            # (ts < before) OR (ts == before AND id < before_id)。同 ts 批次
++            # 在批内按 id 逐页推进且边界零重叠（PG uuid 全序比较直接 <）；
++            # 仅与 before 组合有效（单独传由 router 层 422）。
++            stmt = stmt.where(
++                or_(
++                    AgentRunLog.timestamp < before,
++                    and_(AgentRunLog.timestamp == before, AgentRunLog.id < before_id),
++                )
++            )
++        else:
++            stmt = stmt.where(AgentRunLog.timestamp <= before)
+     if q:
+         stmt = stmt.where(AgentRunLog.content_redacted.ilike(f"%{q}%"))
+     stmt = (
+diff --git a/backend/app/modules/daemon/tests/test_group_logs_pagination.py b/backend/app/modules/daemon/tests/test_group_logs_pagination.py
+index d35186545..21e6f9239 100644
+--- a/backend/app/modules/daemon/tests/test_group_logs_pagination.py
++++ b/backend/app/modules/daemon/tests/test_group_logs_pagination.py
+@@ -4,7 +4,9 @@
+ 
+ - ``GET /sessions/{id}/logs`` 分页与搜索：``before`` 向上游标 / ``q`` 内容
+   ILIKE 过滤 / ``limit`` 最新 N 语义（desc 取 N 反转升序）；三参与 ``after``
+-  任意组合；缺省不传 = 原全量行为（after 兼容零回归）；
++  任意组合；缺省不传 = 原全量行为（after 兼容零回归）；2026-09-16-logs-
++  cursor-tiebreaker 增补：``before_id`` 复合游标 id tiebreaker（同 ts 批次
++  逐页可达 + 边界零重叠 / 缺省 ``<=`` 回归 / 单独传 422）；
+ - 影子会话（kind='group_member'）只读放行：群用户成员（非属主）读影子
+   logs 200、非群成员 404、会话详情仍 404（放行仅 logs 读路径）、写路径
+   inject 不放行（404 资源隐藏）；
+@@ -89,6 +91,65 @@ async def _seed_chat_session_with_logs(
+     return sess, stamps
+ 
+ 
++async def _seed_chat_session_same_ts_logs(
++    db_session: AsyncSession,
++    *,
++    owner_user_id: uuid.UUID,
++    runtime_id: uuid.UUID,
++    contents: list[str],
++) -> tuple[AgentSession, datetime, list[uuid.UUID]]:
++    """单 run 落一批 timestamp **完全相同**的日志（事务批量写入共用 ts 的替身）。
++
++    2026-09-16-logs-cursor-tiebreaker：``before_id`` 复合游标用例的数据源——
++    同 ts 批次在纯 ``<=`` 游标下要么整批重复要么整批跳过，必须靠 id
++    tiebreaker 才能批内逐页推进。返回 (会话, 批 ts, 逐行 id) 供取尽断言。
++    """
++    now = datetime.now(UTC)
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=owner_user_id,
++        runtime_id=runtime_id,
++        lease_id=None,
++        provider="claude",
++        status="ended",
++        agent_session_id=None,
++        config=None,
++        turn_count=1,
++        created_at=now,
++        last_active_at=now,
++        ended_at=now,
++    )
++    db_session.add(sess)
++    await db_session.flush()
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        status="completed",
++        agent_session_id=sess.id,
++        session_id=None,
++        started_at=now,
++    )
++    db_session.add(run)
++    await db_session.flush()
++    batch_ts = now - timedelta(minutes=5)
++    log_ids: list[uuid.UUID] = []
++    for content in contents:
++        log_id = uuid.uuid4()
++        log_ids.append(log_id)
++        db_session.add(
++            AgentRunLog(
++                id=log_id,
++                run_id=run.id,
++                timestamp=batch_ts,  # 整批共用同一 timestamp（同 ts 批次替身）
++                channel="stdout",
++                content_redacted=content,
++            )
++        )
++    await db_session.commit()
++    return sess, batch_ts, log_ids
++
++
+ async def _seed_timeline_row(
+     db_session: AsyncSession,
+     *,
+@@ -210,6 +271,82 @@ class TestSessionLogsPagination:
+         # <= 修复：before=ts 包含同 ts 行（desc 取最新 limit=1 → row 2 自身）
+         assert [e["content_redacted"] for e in body] == ["hello world 2"]
+ 
++    async def test_before_id_same_ts_batch_reachable(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """2026-09-16-logs-cursor-tiebreaker：同 ts 批次逐页可达。
++
++        150 行共用同一 timestamp（单 run 事务批量写入替身），limit=100 两页
++        取尽且边界零重叠——纯 ``<=`` 游标下页 2 会把边界批整批重复（150 行
++        只能翻到 50 行新内容都做不到），``before_id`` tiebreaker 让批内按
++        id 逐页推进。
++        """
++        env = await _make_env(db_session, owner_name="pg-owner")
++        sess, _batch_ts, log_ids = await _seed_chat_session_same_ts_logs(
++            db_session,
++            owner_user_id=env.owner.id,
++            runtime_id=env.runtime.id,
++            contents=[f"batch {i}" for i in range(150)],
++        )
++
++        # 页1：无游标取最新 100（同 ts 批内 id 最大的 100 行；升序返回，
++        # 列表首行 = 页1最旧行 = 页内 id 最小者）。
++        code, page1 = await _get_logs(client, env.owner_token, sess.id, limit=100)
++        assert code == 200
++        assert len(page1) == 100
++        assert {e["timestamp"] for e in page1} == {page1[0]["timestamp"]}  # 整批同 ts
++        oldest = page1[0]
++
++        # 页2：复合游标 before=批 ts + before_id=页1最旧行 id → 批内 id
++        # 更小的剩余 50 行。
++        code, page2 = await _get_logs(
++            client,
++            env.owner_token,
++            sess.id,
++            before=oldest["timestamp"],
++            before_id=oldest["id"],
++            limit=100,
++        )
++        assert code == 200
++        assert len(page2) == 50
++
++        page1_ids = {e["id"] for e in page1}
++        page2_ids = {e["id"] for e in page2}
++        assert page1_ids & page2_ids == set()  # 翻页边界零重叠
++        assert page1_ids | page2_ids == {str(i) for i in log_ids}  # 批内 150 行两页取尽
++
++    async def test_before_without_before_id_keeps_le_boundary(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """缺省回归：只带 before 不带 before_id → 边界 ts 批整批包含（<= 语义不动）。"""
++        env = await _make_env(db_session, owner_name="pg-owner")
++        sess, _batch_ts, log_ids = await _seed_chat_session_same_ts_logs(
++            db_session,
++            owner_user_id=env.owner.id,
++            runtime_id=env.runtime.id,
++            contents=[f"batch {i}" for i in range(5)],
++        )
++        _code, full = await _get_logs(client, env.owner_token, sess.id)
++        batch_ts = full[0]["timestamp"]  # 响应回读的批 ts（JSON 往返精确）
++        code, body = await _get_logs(client, env.owner_token, sess.id, before=batch_ts)
++        assert code == 200
++        # <= 缺省语义：与游标同 ts 的边界批整批返回（旧客户端零回归）。
++        assert {e["id"] for e in body} == {str(i) for i in log_ids}
++
++    async def test_before_id_without_before_rejected_422(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        """只传 before_id 不传 before → 422（无锚点 timestamp 无消费语义，fail-explicit）。"""
++        env = await _make_env(db_session, owner_name="pg-owner")
++        sess, _batch_ts, _log_ids = await _seed_chat_session_same_ts_logs(
++            db_session,
++            owner_user_id=env.owner.id,
++            runtime_id=env.runtime.id,
++            contents=["x"],
++        )
++        code, _body = await _get_logs(client, env.owner_token, sess.id, before_id=str(uuid.uuid4()))
++        assert code == 422
++
+     async def test_q_filter(self, client: AsyncClient, db_session: AsyncSession) -> None:
+         """q 内容搜索：命中 / 大小写不敏感 / 不命中为空。"""
+         env = await _make_env(db_session, owner_name="pg-owner")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 6aa95d278..3d71469e9 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -16547,7 +16547,7 @@
+           "daemon"
+         ],
+         "summary": "Get Session Logs",
+-        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。\n\n群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数\n（语义见各 Query description）；缺省时调用形态与原端点逐字节等价\n（after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读\n放行普通群成员读 logs，见 get_group_accessible_session）。",
++        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。\n\n群聊体验 quick（2026-09-02）：``before``/``q``/``limit`` 分页与搜索参数\n（语义见各 Query description）；缺省时调用形态与原端点逐字节等价\n（after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读\n放行普通群成员读 logs，见 get_group_accessible_session）。\n\n2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与\n``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==\nbefore AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页\n可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零\n回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点\ntimestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，\n不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /\nmachines.py:488-494 先例）。",
+         "operationId": "get_session_logs_api_daemon_sessions__session_id__logs_get",
+         "parameters": [
+           {
+@@ -16598,6 +16598,25 @@
+             },
+             "description": "向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回"
+           },
++          {
++            "name": "before_id",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "anyOf": [
++                {
++                  "type": "string",
++                  "format": "uuid"
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "description": "与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422",
++              "title": "Before Id"
++            },
++            "description": "与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422"
++          },
+           {
+             "name": "q",
+             "in": "query",
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index d749c6adf..5bc22bc8d 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -1429,6 +1429,9 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     await waitFor(() => {
+       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
+         before: "2026-08-15T08:00:00Z",
++        // 2026-09-16-logs-cursor-tiebreaker task-07 校准：翻页请求带复合游标
++        // id 分量（= 初始窗口最旧行 q-inj 的 id，与 before 同传）。
++        beforeId: "q-inj",
+         limit: 100,
+         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
+         signal: expect.any(AbortSignal),
+@@ -1617,6 +1620,9 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
+     await waitFor(() => {
+       expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
+         before: "2026-08-15T08:00:00Z",
++        // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
++        //（初始窗口最旧行 w-inj）。
++        beforeId: "w-inj",
+         limit: 100,
+         // ql-20260903-018 加载更早请求自带 AbortController（换会话 abort 在途）。
+         signal: expect.any(AbortSignal),
+@@ -2035,6 +2041,9 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+     await waitFor(() => expect(beforeCallCount()).toBe(2));
+     expect(mocks.getAgentSessionLogs).toHaveBeenLastCalledWith("s-1", {
+       before: "2026-08-15T07:30:00Z",
++      // 2026-09-16-logs-cursor-tiebreaker task-07 校准：复合游标 id 分量
++      //（第二次翻页游标 = 中间轮页首行 r-mid-in）。
++      beforeId: "r-mid-in",
+       limit: 100,
+       // ql-20260903-018：加载更早请求自带 AbortController。
+       signal: expect.any(AbortSignal),
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index fbfd60aae..8a1ccf326 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -120,6 +120,129 @@ describe("scroll-up history integration", () => {
+     expect(new Date(beforeCursors[2]!).getTime()).toBeLessThan(new Date(beforeCursors[1]!).getTime());
+   });
+ 
++  // ── task-07（2026-09-16-logs-cursor-tiebreaker）：(ts,id) 复合游标翻页行为 ──
++  // 依据 session-panel-page.tsx：初始加载写点（logs[0] 双分量同点写）、翻页
++  // 请求 beforeId 透传、游标前进取 older[0]、pageKey 含 older[0].id 前 8 位、
++  // 换会话 effect 双清；sessions.ts before_id 仅与 before 同传。
++
++  it("first loadEarlier sends composite cursor: before=oldest ts and beforeId=oldest row id of initial window (task-07)", async () => {
++    const initPage = makePage("init", PAGE_SIZE, 13 * 3600);
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; beforeId?: string }) => {
++        if (opts?.before) return makePage("older", PAGE_SIZE, 0);
++        return initPage;
++      },
++    );
++    render(<Host sessionId="s4" />);
++    await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
++    await scrollTimelineToTop();
++    await waitFor(() => {
++      const beforeCall = sessionApi.getAgentSessionLogs.mock.calls.find(
++        (c) => (c[1] as { before?: string } | undefined)?.before,
++      );
++      expect(beforeCall).toBeTruthy();
++      const opts = (beforeCall?.[1] ?? {}) as { before?: string; beforeId?: string };
++      // ts 分量 = 初始窗口最旧行（logs[0]）timestamp；id 分量 = 同一行 id——
++      // 复合游标同点派生（漏设 id 写点则 beforeId=undefined 走后端旧 <= 分支）。
++      expect(opts.before).toBe(initPage[0]!.timestamp);
++      expect(opts.beforeId).toBe(initPage[0]!.id);
++    });
++    await waitFor(() => expect(screen.getAllByText(/older-msg/).length).toBeGreaterThan(0));
++  });
++
++  it("same-ts full pages progress via beforeId: two loadEarlier requests prepend both pages, pageKey id suffix avoids key collision (task-07)", async () => {
++    // 同 ts 满 100 行批跨页（修复场景）：ts 游标无法推进，靠 id 分量逐页递进。
++    // uuid 递减模拟——同格式定长字符串字典序即 id 序（对齐后端 id<before_id）。
++    const SAME_TS = "2026-08-26T12:00:00.000Z";
++    const uuidAt = (seq: number) =>
++      `${String(seq).padStart(8, "0")}-0000-4000-8000-000000000000`;
++    const sameTsPage = (marker: string, seq: number) =>
++      Array.from({ length: PAGE_SIZE }, (_, i) => ({
++        id: `${uuidAt(seq)}-${i}`,
++        run_id: `run-${marker}-${Math.floor(i / 5)}`,
++        timestamp: SAME_TS,
++        channel: i % 5 === 0 ? "user_input" : "stdout",
++        content_redacted: `${marker}-msg${i}`,
++      }));
++    const initPage = sameTsPage("init", 5000);
++    const older1 = sameTsPage("o1", 4900);
++    const older2 = sameTsPage("o2", 4800);
++    const beforeIds: string[] = [];
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; beforeId?: string }) => {
++        if (!opts?.before) return initPage;
++        beforeIds.push(opts.beforeId ?? "");
++        return beforeIds.length === 1 ? older1 : older2;
++      },
++    );
++    // React 重复 key 告警 spy（pageKey 撞 key 的可达观测面——ts 数字串同值时
++    // 仅 id 前 8 位后缀能区分两页，对齐 page.test.tsx m- 用例手法）。
++    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
++    try {
++      render(<Host sessionId="s5" />);
++      await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
++      for (let i = 0; i < 2; i++) {
++        await scrollTimelineToTop();
++        await waitFor(() => expect(beforeIds.length).toBe(i + 1), { timeout: 5000 });
++      }
++      // beforeId 递进：首翻 = 初始窗口最旧行 id；第二翻 = 第一更早页首行 id
++      //（同 ts 下 ts 分量不动、仅 id 前进；uuid 递减模拟 → 字典序更小）。
++      expect(beforeIds[0]).toBe(initPage[0]!.id);
++      expect(beforeIds[1]).toBe(older1[0]!.id);
++      expect(beforeIds[1]! < beforeIds[0]!).toBe(true);
++      // 两页均正常 prepend（loadEarlier 路径不因 ts 停滞丢页）。
++      expect(screen.getAllByText(/o1-msg/).length).toBeGreaterThan(0);
++      expect(screen.getAllByText(/o2-msg/).length).toBeGreaterThan(0);
++      const dupKeyErrors = errSpy.mock.calls.filter(
++        (args) => typeof args[0] === "string" && args[0].includes("same key"),
++      );
++      expect(dupKeyErrors).toHaveLength(0);
++    } finally {
++      errSpy.mockRestore();
++    }
++  });
++
++  it("session switch resets composite cursor: first loadEarlier on new session uses its own oldest id, not stale residue (task-07)", async () => {
++    const s5Init = makePage("old-s", PAGE_SIZE, 13 * 3600);
++    const s5Older = makePage("old-so", PAGE_SIZE, 11 * 3600);
++    const s6Init = makePage("new-s", PAGE_SIZE, 10 * 3600);
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (sid: string, opts?: { before?: string }) => {
++        if (!opts?.before) return sid === "s5" ? s5Init : s6Init;
++        // s5 翻页返回更早页（让游标前进产生残留源）；s6 翻页返回空（断言只看
++        // 请求参数，不依赖响应内容）。
++        return sid === "s5" ? s5Older : [];
++      },
++    );
++    // 同一 QueryClient + 同组件实例换 sessionId prop（index.tsx 无 key 重挂，
++    // 走换会话重置 effect 而非 remount）。
++    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++    const hostOf = (sid: string) => (
++      <QueryClientProvider client={client}>
++        <SessionPanel mode="page" sessionId={sid} machines={[]} llmProviders={[]} />
++      </QueryClientProvider>
++    );
++    const view = render(hostOf("s5"));
++    await waitFor(() => expect(screen.getAllByText(/old-s-msg/).length).toBeGreaterThan(0));
++    // 旧会话先翻一页：游标二元组前进到 older 页首行（潜在残留）。
++    await scrollTimelineToTop();
++    await waitFor(() => expect(screen.getAllByText(/old-so-msg/).length).toBeGreaterThan(0));
++    // 切会话：双清生效 → 新会话首翻取新会话初始窗口 logs[0] 二元组。
++    view.rerender(hostOf("s6"));
++    await waitFor(() => expect(screen.getAllByText(/new-s-msg/).length).toBeGreaterThan(0));
++    await scrollTimelineToTop();
++    await waitFor(() => {
++      const beforeCall = sessionApi.getAgentSessionLogs.mock.calls.find(
++        (c) => c[0] === "s6" && (c[1] as { before?: string } | undefined)?.before,
++      );
++      expect(beforeCall).toBeTruthy();
++      const opts = (beforeCall?.[1] ?? {}) as { before?: string; beforeId?: string };
++      expect(opts.before).toBe(s6Init[0]!.timestamp);
++      expect(opts.beforeId).toBe(s6Init[0]!.id);
++      expect(opts.beforeId).not.toBe(s5Older[0]!.id);
++    });
++  });
++
+   it("scroll container has overflowAnchor=none (double-anchoring fix)", async () => {
+     sessionApi.getAgentSessionLogs.mockResolvedValue(makePage("anc", 20, 0));
+     render(<Host sessionId="s3" />);
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index ecfb02f43..d0cc4a313 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -367,6 +367,10 @@ export function SessionPanelPage({
+   const [historyLoading, setHistoryLoading] = useState(false);
+   const [hasEarlier, setHasEarlier] = useState(false);
+   const historyCursorRef = useRef<string | null>(null);
++  // task-06（2026-09-16-logs-cursor-tiebreaker）：复合游标 id 分量，与 ts 分量
++  // （historyCursorRef）同步写/清——同 ts 满 100 行批翻页靠 id 推进（后端
++  // (ts,id) 复合过滤），漏写则 before_id 缺省走旧 <= 分支整页重复。
++  const historyCursorIdRef = useRef<string | null>(null);
+   // 会话内搜索（头部搜索 icon → 输入回车 q 查询 → 结果浮层；点击条目即关闭，
+   // 不做跳转定位——最小可用）。
+   const [searchOpen, setSearchOpen] = useState(false);
+@@ -660,6 +664,7 @@ export function SessionPanelPage({
+     attachmentMetaRef.current.clear();
+     // quick 历史窗口化：换会话重置「加载更早」游标/翻页态 + 清搜索浮层状态。
+     historyCursorRef.current = null;
++    historyCursorIdRef.current = null;
+     setHasEarlier(false);
+     setHistoryLoading(false);
+     historyLoadingRef.current = false;
+@@ -686,7 +691,10 @@ export function SessionPanelPage({
+         if (cancelled) return;
+         streamCursor = maxLogTimestamp(logs);
+         // 翻页游标 = 窗口内最早行 ts；满页即可能还有更早（按钮可见）。
++        // id 分量必须同点写（task-06）——漏设则首次翻页 beforeId=undefined
++        // 走后端旧 <= 分支，同 ts 满 100 行批首页整页重复。
+         historyCursorRef.current = logs[0]?.timestamp ?? null;
++        historyCursorIdRef.current = logs[0]?.id ?? null;
+         setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
+         // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
+         // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。
+@@ -1061,6 +1069,9 @@ export function SessionPanelPage({
+     try {
+       const older = await getAgentSessionLogs(sessionId, {
+         before: cursor,
++        // task-06：复合游标 id 分量透传——sessions.ts 仅与 before 同传才发
++        // before_id（后端 (ts<before) OR (ts=before AND id<before_id)）。
++        beforeId: historyCursorIdRef.current ?? undefined,
+         limit: HISTORY_PAGE_SIZE,
+         signal: abort.signal,
+       });
+@@ -1072,6 +1083,7 @@ export function SessionPanelPage({
+       const scrollEl = scrollElQueryRef.current();
+       if (scrollEl) pendingAnchorRef.current = scrollEl.scrollHeight;
+       historyCursorRef.current = older[0]?.timestamp ?? null;
++      historyCursorIdRef.current = older[0]?.id ?? null;
+       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
+       // task-04：hasEarlierRef 同步刷新（跳转循环 await 间隙读它判档位；
+       // passive effect 提交晚于循环续延，仅靠 effect 镜像会读到过期值）。
+@@ -1079,22 +1091,26 @@ export function SessionPanelPage({
+       chainedMore = older.length >= HISTORY_PAGE_SIZE;
+       const olderTurns = logsToTurns(older);
+       if (olderTurns.length > 0) {
++        // pageKey 在 updater 外派生（task-06）：updater 须保持纯函数，内读 ref
++        // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
++        // 与上方刚写入的 historyCursorIdRef 一致。
++        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${(older[0]?.id ?? "").slice(0, 8)}`;
++        const decorated = olderTurns.map((t) => ({
++          ...t,
++          runId: `${t.runId}#e${pageKey}`,
++        }));
+         setTurnState((prev) => {
+           // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
+           // 的 __attach_history_N__ 都从 1 重新编号——此前只给「realRunId 已在
+           // 当前窗口」的轮（同 run 跨游标）加后缀，多 run 会话更早页的**不同
+           // run** 保留原伪 id，与当前窗口 1..N 同名撞 React key（列表行为未
+-          // 定义，触顶自动加载 + 连拉放大到多页）。后缀取全量数字游标（页首
+-          // 日志时间戳，微秒精度）：before 链单调递减 → 跨页唯一（秒级短码在
+-          // 同秒高吞吐日志下仍可能撞）。realRunId 保持原值——SSE 增量与孤儿
+-          // run 补建按 realRunId 匹配不受影响（upsertTurn 实时增量取最末块）。
+-          // 同一 run 跨页展示为多个轮块（时间序正确）；原整 turn 丢弃对单 run
+-          // 会话 = 永远丢弃，按钮点了没反应（ee24ba15 用户实证）。
+-          const pageKey = cursor.replace(/[^0-9]/g, "");
+-          const decorated = olderTurns.map((t) => ({
+-            ...t,
+-            runId: `${t.runId}#e${pageKey}`,
+-          }));
++          // 定义，触顶自动加载 + 连拉放大到多页）。后缀取复合游标（请求边界
++          // ts 全量数字串 + 本页首行 id 前 8 位，task-06）——纯 ts 数字串在
++          // 「同 ts 满 100 行批跨页」时两页撞 key。realRunId 保持原值——SSE
++          // 增量与孤儿 run 补建按 realRunId 匹配不受影响（upsertTurn 实时
++          // 增量取最末块）。同一 run 跨页展示为多个轮块（时间序正确）；原整
++          // turn 丢弃对单 run 会话 = 永远丢弃，按钮点了没反应（ee24ba15
++          // 用户实证）。
+           return { ...prev, turns: [...decorated, ...prev.turns] };
+         });
+       }
+@@ -1122,13 +1138,18 @@ export function SessionPanelPage({
+ 
+   /** task-04：单页「加载更早」Promise 化复用（跳转循环每页 await 一次）。
+    *  返回本次是否真实加载了一页——handleLoadEarlier 本体返回 void 且多路
+-   *  早退（到头 / 失败静默 / 在途锁 / 无游标），以翻页游标是否前进为准：
+-   *  成功路径必写 historyCursorRef（含空页 → null 的到头写法），早退/异常
+-   *  路径不动游标。 */
++   *  早退（到头 / 失败静默 / 在途锁 / 无游标），以翻页游标（ts,id 复合二元
++   *  组，task-06）任一分量是否前进为准：成功路径必写 historyCursorRef /
++   *  historyCursorIdRef（含空页 → null 的到头写法），早退/异常路径不动游标。 */
+   const loadEarlierOnce = useCallback(async (): Promise<boolean> => {
+     const cursorBefore = historyCursorRef.current;
++    const idBefore = historyCursorIdRef.current;
+     await handleLoadEarlierRef.current();
+-    return historyCursorRef.current !== cursorBefore;
++    // 同 ts 不同 id = 有进度（同 ts 满页批次逐页推进时仅 id 前进）。
++    return (
++      historyCursorRef.current !== cursorBefore ||
++      historyCursorIdRef.current !== idBefore
++    );
+   }, []);
+ 
+   /** 视口补拉（触顶补口）：内容不满视口且可能还有更早 → 自动续拉一页。
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 1e329c6d3..12dd96018 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -6357,6 +6357,15 @@ export interface paths {
+          *     （语义见各 Query description）；缺省时调用形态与原端点逐字节等价
+          *     （after 兼容零回归）。群/影子会话参与者经服务层同一道闸门（影子只读
+          *     放行普通群成员读 logs，见 get_group_accessible_session）。
++         *
++         *     2026-09-16-logs-cursor-tiebreaker / D-001@v1：``before_id``——与
++         *     ``before`` 组合的复合游标 id tiebreaker（``(ts < before) OR (ts ==
++         *     before AND id < before_id)``），同 timestamp 批次向上翻页在批内逐页
++         *     可达且边界零重叠；缺省时行为与原 ``<=`` 游标逐字节等价（旧客户端零
++         *     回归）。``before_id`` 仅作为 ``before`` 的 tiebreaker 存在，无锚点
++         *     timestamp 无消费语义——单独传（无 ``before``）422 fail-explicit，
++         *     不静默忽略（参数组合 422 写法对齐 session_team.py:420-436 /
++         *     machines.py:488-494 先例）。
+          */
+         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
+         put?: never;
+@@ -36485,6 +36494,8 @@ export interface operations {
+                 after?: string | null;
+                 /** @description 向上加载游标（ISO timestamp，群聊体验 quick）：只返回 timestamp 严格更早的日志；与 limit 组合取「游标之前的最新 N 条」升序返回 */
+                 before?: string | null;
++                /** @description 与 before 组合的复合游标 id tiebreaker（2026-09-16-logs-cursor-tiebreaker）：同 timestamp 批次逐页可达；仅与 before 同时传，单独传 before_id 而无 before 将 422 */
++                before_id?: string | null;
+                 /** @description 内容搜索（群聊体验 quick）：content ILIKE %q% 过滤，可与 after/before 组合 */
+                 q?: string | null;
+                 /** @description 最新 N 条语义（群聊体验 quick）：按 timestamp desc 取 N 再反转升序返回；无 before=全量最新 N，有 before=游标之前最新 N。缺省=全量（服务层上限 5000，维持既有行为） */
+diff --git a/frontend/src/lib/daemon/sessions.ts b/frontend/src/lib/daemon/sessions.ts
+index 40fdbe051..62ba6ded8 100644
+--- a/frontend/src/lib/daemon/sessions.ts
++++ b/frontend/src/lib/daemon/sessions.ts
+@@ -635,7 +635,8 @@ export async function getSessionUsage(
+  * 群聊体验 quick（2026-09-02）新增可选查询参数（后端已就绪，语义见
+  * openapi get_session_logs 注释）：
+  *   - before：向上加载游标（只返回 timestamp 严格更早的日志，与 limit 组合取
+- *     「游标之前的最新 N 条」升序返回）；
++ *     「游标之前的最新 N 条」升序返回）；beforeId 与 before 组合实现 (ts,id)
++ *     复合游标，同 timestamp 批次逐页可达；
+  *   - q：内容搜索（content ILIKE %q%，可与 after/before 组合）；
+  *   - limit：最新 N 条语义（按 timestamp desc 取 N 再反转升序；缺省=旧全量行为，
+  *     不传参数的既有调用方零影响）。
+@@ -645,6 +646,7 @@ export async function getAgentSessionLogs(
+   opts?: {
+     after?: string;
+     before?: string;
++    beforeId?: string;
+     q?: string;
+     limit?: number;
+     signal?: AbortSignal;
+@@ -653,6 +655,7 @@ export async function getAgentSessionLogs(
+   const params = new URLSearchParams();
+   if (opts?.after) params.set("after", opts.after);
+   if (opts?.before) params.set("before", opts.before);
++  if (opts?.before && opts?.beforeId) params.set("before_id", opts.beforeId);
+   if (opts?.q) params.set("q", opts.q);
+   if (opts?.limit != null) params.set("limit", String(opts.limit));
+   const paramStr = params.toString();

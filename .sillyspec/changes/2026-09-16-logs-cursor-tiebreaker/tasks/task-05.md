@@ -17,7 +17,6 @@ target_files:
 expects_from:
   - field: before_id (query param)
     from: task-04 api-types 生成的端点参数
-depends_on: [task-04]
 goal: >
   前端 API client 支持可选 beforeId 查询参数（仅与 before 同时传）。
 implementation:

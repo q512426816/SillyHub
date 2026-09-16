@@ -29,6 +29,6 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `_module-map.yaml` | <!--TODO: 有未匹配文件，判定模块索引是否需增改（modules rebuild）--> | pending |
+| `_module-map.yaml` | skipped——7 个未匹配文件均属已存在模块（backend daemon 域 session 读模型 4 文件 + 测试 1 / frontend 伞模块 api-types+sessions+session-panel-page 3），系索引粒度未覆盖子路径的索引过期，非游离文件；本变更模块文档增量已同步（task-08 daemon.md/frontend.md 增量），scan 级索引重建归独立变更（不夹带） | skipped |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

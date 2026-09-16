@@ -13,9 +13,8 @@ decision_ids: [D-001@v1]
 allowed_paths:
   - .sillyspec/changes/2026-09-16-logs-cursor-tiebreaker/verify-result.md
   - .sillyspec/docs/backend/modules/daemon.md
-  - .sillyspec/docs/frontend/changelog.md
+  - .sillyspec/docs/multi-agent-platform/modules/frontend.md
 target_files: []
-depends_on: [task-03, task-07]
 goal: >
   验收对账：proposal 成功标准逐条核验（AC-01~06）+ R-02 执行计划观察 + 模块文档增量同步。
 implementation:

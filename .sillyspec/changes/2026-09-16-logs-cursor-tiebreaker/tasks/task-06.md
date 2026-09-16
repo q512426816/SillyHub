@@ -17,7 +17,6 @@ target_files:
 expects_from:
   - field: beforeId (opts field)
     from: task-05 getAgentSessionLogs
-depends_on: [task-04, task-05]
 goal: >
   翻页游标二元组化——(ts, id) 双 ref，翻页与初始加载双写点均设 id，进度判定二元组比较，
   pageKey 加 id 后缀；同 ts 批次逐页可达、key 撞号根除。

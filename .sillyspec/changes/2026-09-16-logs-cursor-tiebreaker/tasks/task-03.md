@@ -17,7 +17,6 @@ target_files:
 expects_from:
   - field: before_id (query, uuid, optional)
     from: task-02 router 透传 / task-01 service 复合过滤
-depends_on: [task-01, task-02]
 goal: >
   后端复合游标行为验证：同 ts 150 行批两页可达零重叠 / 缺省 before_id 回归 / 单独
   before_id 422。

@@ -19,7 +19,6 @@ target_files:
 expects_from:
   - field: before_id (query param in OpenAPI)
     from: task-02 端点定义
-depends_on: [task-02]
 goal: >
   OpenAPI 重导出 + 前端类型再生成（rule 21：schema 变更同一变更内同步，不欠类型债）。
 implementation:

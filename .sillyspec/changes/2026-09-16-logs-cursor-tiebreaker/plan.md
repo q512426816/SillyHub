@@ -9,6 +9,7 @@ brainstorm 定案（D-001@v1 方案 A，独立设计审查 review-2026-09-16-080
 
 ## 范围
 - backend/app/modules/daemon/session/service/read_model.py（task-01：复合过滤分支+docstring）
+- backend/app/modules/daemon/service.py + backend/app/modules/daemon/session/service/__init__.py（task-09：门面 before_id 透传——execute 发现的缺口）
 - backend/app/modules/daemon/router/session_insights.py（task-02：before_id Query+422）
 - backend/app/modules/daemon/tests/test_group_logs_pagination.py（task-03：150 行批两页/缺省回归/422）
 - backend/openapi.json + frontend/src/lib/api-types.ts（task-04：重导出+gen:types）
@@ -28,4 +29,4 @@ brainstorm 定案（D-001@v1 方案 A，独立设计审查 review-2026-09-16-080
 ## 覆盖矩阵（如存在 decisions.md）
 | ID | 覆盖任务 | 验收证据 |
 |---|---|---|
-| D-001@v1 | task-01, task-02, task-03, task-04, task-05, task-06, task-07, task-08 | AC-01~AC-06 |
+| D-001@v1 | task-01, task-02, task-03, task-04, task-05, task-06, task-07, task-08, task-09 | AC-01~AC-06 |
