@@ -79,3 +79,11 @@
 `sillyspec scope-audit --change 2026-09-15-ehs-reward-punishment --json`，
 rows 按 verdict 分组、unplanned 按上表前缀分桶；note 中「退栈 14 个」对应文件用
 `git status` + 自由会话声明核实。
+
+## 处置记录（2026-09-16 定时收口，并行会话已修主体，验证归档）
+
+- **改进点 1（脚手架分桶）已落地**（sillyspec 仓 e97251d + 42cef77 批次）：`worktree-apply.js classifyToolScaffold` 双档分类——硬排（.worktrees/、.sillyspec-platform 系、.sillyspec/knowledge/、local.yaml，apply 语义绝无交付）+ 软桶（.claude/skills/、CLAUDE.md、attachments/ 打「工具/平台设施」标不占「计划外」——可能被 design 清单正当声明，滤除会让 apply 静默丢失）；scope-audit 已消费（scope-audit.js:1043）。本例 52 计划外中 33 行（sillyspec skills 20 + 平台标记 13）进设施桶/滤除。
+- **改进点 3（退栈标注）/点 6（目录行）随批落地**（e97251d「③类脚手架聚合 + 探针5 跨仓注记」）。
+- **改进点 4（overlay 坏文件）由 42cef77 治主体**：baseline overlay 三道经 own/foreign oracle 剔除并行会话显式声明文件（worktree 取基线 HEAD 版）+ `worktree.supplyFiles` 供给 gitignore 生成物（build-id.ts 类）+ `detectNoOpFiles`（worktree blob=主仓 HEAD blob 的 no-op 不再计入 changedFiles——execute-baseline-overlay 坑期望 3 同款）。未声明的坏文件语法冒烟（期望 1 的完整版）留后续增强。
+- **改进点 2（跨仓计划侧）部分**：e97251d 探针跨仓注记落地；完整分仓对账（scope-audit 按 local.yaml repos 分仓跑）留 backlog——使用侧规避（主仓表只认主仓段）继续有效。
+- **验证**：test/scope-audit 40/40 + test/worktree-dual-truth-gates 12/12 复跑绿。归档（点 2 完整版与 overlay 语法冒烟如再痛可开新坑）。

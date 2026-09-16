@@ -34,3 +34,19 @@ created_at: 2026-09-08 15:54:00
 **遗留（完整版修复）**：CLI 短进程无法读心「会话 A 以为的 Wave」——事故主形态（B 先 --done 后 A 的 --done 落到 Wave N+1 且邻步完成超 60s）只有**意图断言**能硬拦（如 `--done --step <name|N>` 显式目标校验 + execute Wave prompt 的完成命令模板带该 flag），涉及 prompt 契约变更，留专项变更实现。本文件绕过指引（--done 前核对 stepName / 摘要带 Wave 编号 / 不双开 --done）继续有效。
 
 测试：`test/execute-concurrent-done-guard.test.mjs` 5/5（竞态拒绝 + 旧摘要不落盘 + 正常路径零影响）；completeStep 消费面回归 31/31。保持活跃待意图断言补齐。
+
+## 处置记录（2026-09-16 用户拍板收口，意图断言落地，归档）
+
+- **意图断言已实现（终解）**：`--done --step <名|序号>` 显式声明本次要完成的步骤——
+  `completeStep` 在 wait-answer 解析后校验声明与当前待完成步一致（名称精确/前缀匹配或
+  1-based 序号），不一致 fail-closed exit 1（报错点名当前真实步骤 + progress show 核对
+  指引 + 三条出路）；一致放行并打印「🛡️ 意图断言通过」。
+- **提示词模板接线**：`outputStep` 的 execute 完成命令模板自动带 `--step "<本步名>"`
+  （agent 照抄命令即得并发防护；仅 execute 注入——quick/静态阶段存量测试断言兼容且无漂移风险）。
+- **事故主形态闭环**：会话 B 先推进 Wave N 后，会话 A 携 `--step "Wave N"` 的 --done
+  被硬拦（当前步是 Wave N+1），未实现的 Wave 不再被旧摘要静默完成。
+- **测试**：新增 `test/step-assert-flag.test.mjs` 13 断言（精确名/前缀放行、事故主形态硬拦
+  +步骤不推进、序号 1-based、无 --step 兼容、execute 模板注入、非 execute 不注入）；
+  completeStep 全消费面回归 50/50 绿。
+- 前两层防护（写前重读硬拦 + execute 邻步警告）保留，三层叠加。绕过指引（--done 前核对
+  stepName）保留但不再是唯一防线。归档。

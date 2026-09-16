@@ -44,3 +44,21 @@ execute 启动时 CLI 把主仓**当时未提交的并行会话在途文件**（
 
 - 定性：verify 沙箱构建的**设计级改动**——三建议（overlay import 闭合冒烟 / overlay 只收 allowed_paths 命中文件 / 失败自动主仓对照）分别涉及快照构建管线加验证步骤、baseline checkpoint 语义变更（overlay 存在的意义就是把并行在途态带进 worktree，收窄会改变 execute 期隔离语义）、自动双跑成本翻倍。属 verify 沙箱专项，非巡检级小修。
 - 现有逃生通道完备（SNAPSHOT_OFF 对照回退 + known_failures 分组豁免 + 主仓单跑定归属），无阻断。保持活跃待专项认领。
+
+## 处置记录（2026-09-16 用户拍板收口，import 闭合冒烟落地，归档）
+
+- **已实现（建议①的最小可行版）**：`src/run/gate-snapshot.js createGateSnapshot` overlay 后
+  对 `.py` 文件逐个 `python -c import` 冒烟（快照内 junction 的 venv 解释器，包根从深到浅
+  推导，10s 超时）——**多轮收敛 + 依赖归因**：报错点名的模块映射到另一 overlay .py 文件时
+  回退**那个依赖文件**的 HEAD 健版（事故形态：crud.py 半成品缺名、importer 报错点名 crud
+  → 回退 crud），点名不中则回退报错文件自身（语法坏/自身缺依赖）；新增文件 HEAD 无版
+  → 醒目 warn 保留；最多 3 轮至无新失败。全链 fail-open：无解释器/基建异常只 warn 不作废快照。
+- **效果**：in-place 变更的 overlay 集含主仓未提交并行 WIP 时，「改引用方没改被引用方」
+  部分态不再进沙箱——197 ERROR 假红形态消除；真实跑 venv 的 fixture 测试实证坏依赖被
+  回退后快照内 import 闭合。
+- **范围**：Python 项目（事故实证类）；JS/TS 的 vitest load 冒烟成本高留后续（建议②
+  「只收 allowed_paths」与建议③「自动主仓对照」仍留 backlog——①已消主形态）。
+- **测试**：新增 `test/gate-snapshot-import-smoke.test.mjs` 3 用例（坏依赖回退 HEAD 健版 +
+  回退后真跑 import 闭合 / 健康新旧文件保留 / 无解释器 fail-open）3/3 绿；gate-snapshot
+  全家回归 27/27。
+- 逃生通道（SNAPSHOT_OFF / known_failures 分组）保留。归档。
