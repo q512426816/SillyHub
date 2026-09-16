@@ -1,0 +1,721 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index d4eee5c26..1a2ad129c 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -4,7 +4,7 @@ doc_type: module-card
+ module_id: components-daemon
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+-updated_at: 2026-08-26 19:45:00
++updated_at: 2026-09-16 09:00:00
+ ---
+ 
+ # Daemon 运行时交互组件（components-daemon）
+@@ -227,6 +227,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+   sessions/pre-session-picker（NewSessionForm 删除后接棒，2026-08-23-sessions-
+   workspace-hub）两处内联，扩展 provider 两处同步。
+ 
++## quick-ab951f4e 增量（会话页 /runs 请求扇出收敛，ql-20260916-005-0fc5）
++
++- **session-panel-page**：轮终态「新完成」判定——`completedSideEffectRunIdsRef` 集合（同 `fetchedErrorRunIdsRef` 先例），`onTurnCompleted` 仅对集合外首条完成事件触发刷新类副作用（runsMeta 快照 / `setUsageRefresh` 用量信号 / 队列 invalidate / 左栏列表刷新）；历史回灌的终态轮在 establish 内按 `realRunId` 播种（logsToTurns 产物），首连缺口同步与 5s 复核对全量终态 run 合成的重放事件由此不再逐条扇出 `listSessionRuns`（进入会话页瞬间 ~2T 条并发 /runs 的根因）；轮状态更新不经此门（upsertTurn 终态幂等），断线缺口补合成的轮副作用照常。失败轮错误详情拉取改 `fetchRunsForErrorDetail` in-flight 共享（同批多个失败重放收敛 1 请求，settle 即置空保新鲜度）。`runsPromise` 与历史预取并行发起，establish 内 await 后以 `runsSnapshot` 注入 streamSession。
++- **session-panel-dialog**：失败轮错误详情拉取同款 in-flight 共享（dialog 无 runsMeta 刷新链路，仅此项）。
++- 回归：`__tests__/session-panel-runs-request-dedup.test.tsx`（4 用例）。
++
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+diff --git a/.sillyspec/docs/frontend/modules/lib-daemon.md b/.sillyspec/docs/frontend/modules/lib-daemon.md
+index d814a18fb..d29ba19e6 100644
+--- a/.sillyspec/docs/frontend/modules/lib-daemon.md
++++ b/.sillyspec/docs/frontend/modules/lib-daemon.md
+@@ -2,6 +2,7 @@
+ schema_version: 1
+ doc_type: module-card
+ module_id: lib-daemon
++updated_at: 2026-09-16 09:00:00
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+ ---
+@@ -74,7 +75,7 @@ conn.onmessage = (raw) => {
+ 
+ ## 注意事项
+ - **token 走 Authorization header**（fetch-sse），不再拼 URL query——旧卡「SSE 无法带 header 故 token 进 query」已过时。
+-- **无自动重连**：fetch-sse 有意取舍，onerror 只通知组件；断流由调用方重建连接 / 查询兜底（fetchPendingDialogs / getAgentSessionLogs 等即兜底面）。
++- **fetch-sse 本身无自动重连**（有意取舍）：重连由 streamSession 内建——onerror 指数退避 + resync 对账（runs/logs 全量回放 + 终态合成）后重建连接（ql-20260820-009）；组件侧查询兜底（fetchPendingDialogs / getAgentSessionLogs 等）另计。
+ - **永久性 HTTP 错误停连（ql-20260903-021，R7）**：streamSession / streamGroupChat 的 onerror 命中 `PERMANENT_SSE_ERROR_STATUSES`（401/403/404）即 close 置 closed 停止重连循环——无权限/已删除会话不再每 30s 重打必败请求（resync runs/logs + stream 三连）；无 status（网络断/关流）保持退避重连（同审批流先例）。**R7 补口（ql-20260904-H2）**：onerror 停连只在建连后可达——断连重连时 resync 快照（runs/logs REST）先跑，会话中途被删/权限收回后 resync 抛 ApiError(401/403/404) 会与网络错误无差别退避重试（每 30s 一轮永久循环）。三订阅（streamSession/streamGroupChat/streamShadowSession）的 resyncAndReconnect catch 经 `isPermanentRestError`（ApiError.status ∈ PERMANENT_SSE_ERROR_STATUSES）分流：命中即置 closed + 清三定时器停订阅终态；超时 AbortError/网络错误保持退避重连。
+ - backend 的 turn/log/permission_* 事件发**默认 data 帧**（无 `event:` 行），必须走 onmessage 单通道按 payload.event 分发；addEventListener 命名事件只收得到 done/error。
+ - **一次性 quickChat 已不存在**：`quickChat` / `getQuickChatResult` / `streamQuickChat` 已删除（索引残留符号），多轮交互会话是唯一入口。
+@@ -86,6 +87,12 @@ conn.onmessage = (raw) => {
+ 
+ - 会话绑定客户端三入口（2026-08-25-session-spec-binding）：listAgentSessions options 加 ql_id；createSession input 加 quicklog_id；新增 listQuicklogSessions(workspaceId, qlId)（类型经 gen:types 从后端生成，禁止手写）。
+ 
++## quick-ab951f4e 增量（/runs 请求扇出收敛，ql-20260916-005-0fc5）
++
++- **streamSession options.runsSnapshot**：宿主同刻已拉的本会话 runs 快照——首连缺口同步 `syncGapFromDb(signal, runsSnapshot)` 直接复用不自拉（page 模式 runsPromise 并行发起后 await 注入）；缺省 / resync / 看门狗路径始终自拉（时刻更晚，须新鲜）。
++- **5s 复核拉取门控**：`sawRunningRunAtSync`（最近一次缺口同步快照是否存在非终态 run）——全终态快照时 `reconcileTerminalRuns` 直接跳过（「快照 → 订阅」亚秒窗口内能完成的 run 必然快照时在跑）；窗口内新建且瞬完的 run 无轮可挂，日志重放/下次重连自愈（可接受降级）。
++- 回归：`daemon.test.ts` 新增 3 用例（快照注入 0 拉取 / 含 running 5s 复核恰一次 / 缺省自拉一次）。
++
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx
+new file mode 100644
+index 000000000..502328666
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx
+@@ -0,0 +1,246 @@
++// quick（ql-20260916-005）：会话页进入 /sessions/{id}/runs 请求扇出回归——
++// 首连缺口同步 / 5s 复核会对 run 快照里每个终态 run 合成 turn_completed 重放，
++// 页面 onTurnCompleted 历史上对每条事件无条件刷 runsMeta/用量信号（历史 T 轮
++// → 2T 条并发 /runs）+ 失败轮逐 run 各拉一次全量列表（F 条）。修复后：
++//   1. 重放终态事件不再触发刷新类副作用（首屏收敛为 runsMeta + 任务面板 2 条）；
++//   2. 真实新完成轮照常触发刷新（快照 + 面板各 1 条）；
++//   3. 失败详情拉取并发共享（同批 F 个失败重放 → 1 条）；
++//   4. runsMeta 快照经 runsSnapshot 注入 streamSession（缺口同步复用，不再自拉）。
++// mock 网络层模板同 session-panel-history-race.test.tsx。
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, waitFor, act } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactNode } from "react";
++
++import { SessionPanel } from "../session-panel";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(),
++  listSessionTasks: vi.fn().mockResolvedValue([]), // 任务执行面板快照（防真实 fetch）
++  listSessionTeamMissions: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++  };
++});
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return { ...actual, listWorkspaces: vi.fn().mockResolvedValue({ items: [] }) };
++});
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++/* ----- fixture ----- */
++
++/** 3 个历史 run（run-h1..h3），可选标记失败轮。 */
++const HISTORY_RUNS = ["run-h1", "run-h2", "run-h3"];
++let failedRunIds: Set<string>;
++
++function makeDetail(id: string) {
++  return {
++    id,
++    runtime_id: null,
++    lease_id: null,
++    provider: "claude",
++    status: "active",
++    agent_session_id: `ag-${id}`,
++    config: null,
++    turn_count: 3,
++    created_at: "t",
++    last_active_at: null,
++    ended_at: null,
++    current_run_id: null,
++    workspace_id: "ws-1",
++    llm_provider_id: null,
++    agent_profile_id: null,
++    title: `会话${id}`,
++    config_snapshot: null,
++  };
++}
++
++function makeHistory() {
++  return HISTORY_RUNS.flatMap((runId, i) => [
++    {
++      id: `log-${runId}-u`,
++      run_id: runId,
++      timestamp: `2026-09-16T10:00:0${i}.000Z`,
++      channel: "user_input",
++      content_redacted: `问题${i}`,
++    },
++    {
++      id: `log-${runId}-o`,
++      run_id: runId,
++      timestamp: `2026-09-16T10:00:0${i}.500Z`,
++      channel: "stdout",
++      content_redacted: `回答${i}`,
++    },
++  ]);
++}
++
++/** 模拟 dispatchRunSynth 产出的合成 turn_completed envelope。 */
++function makeCompletedEnv(runId: string, status: string) {
++  return {
++    event: "turn_completed" as const,
++    session_id: "sess-A",
++    run_id: runId,
++    turn: null,
++    log_id: null,
++    timestamp: "2026-09-16T10:00:09.000Z",
++    channel: null,
++    content: null,
++    status,
++    exit_code: status === "failed" ? 1 : null,
++    reason: null,
++    input_tokens: null,
++    output_tokens: null,
++  };
++}
++
++/** streamSession 捕获的 handlers（connGuard 包装后仍透传 onTurnCompleted）。 */
++type CapturedStreamHandlers = {
++  onTurnCompleted: (_env: ReturnType<typeof makeCompletedEnv>) => void;
++};
++let capturedHandlers: CapturedStreamHandlers | null = null;
++
++function Host({ sessionId }: { sessionId: string; children?: ReactNode }) {
++  return (
++    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
++      <SessionPanel mode="page" sessionId={sessionId} machines={[]} llmProviders={[]} />
++    </QueryClientProvider>
++  );
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  failedRunIds = new Set();
++  capturedHandlers = null;
++  sessionApi.getAgentSession.mockImplementation(async (sid: string) => makeDetail(sid));
++  sessionApi.getAgentSessionLogs.mockImplementation(async () => makeHistory());
++  sessionApi.listSessionRuns.mockImplementation(async () =>
++    HISTORY_RUNS.map((id) => ({
++      id,
++      created_at: "2026-09-16T10:00:00Z",
++      spec_strategy: null,
++      status: failedRunIds.has(id) ? "failed" : "completed",
++      error_code: null,
++      failure_summary: null,
++      error_detail: failedRunIds.has(id)
++        ? { type: "api_error", code: "rate_limited", message: "boom", retryable: false, hint: null }
++        : null,
++      started_at: "2026-09-16T10:00:01Z",
++      finished_at: "2026-09-16T10:00:02Z",
++      exit_code: 0,
++      agent_profile_snapshot: null,
++      llm_provider_id: null,
++      input_tokens: null,
++      output_tokens: null,
++      user_id: null,
++      sender_name: null,
++    })),
++  );
++  sessionApi.streamSession.mockImplementation(
++    (_sid: string, handlers: CapturedStreamHandlers, _opts?: unknown) => {
++      capturedHandlers = handlers;
++      // 模拟首连缺口同步：对每个历史 run 合成 turn_completed（真实 streamSession
++      // syncGapFromDb 对全量终态 run 的批量重放行为），建流瞬间同步扇出。
++      for (const runId of HISTORY_RUNS) {
++        handlers.onTurnCompleted?.(
++          makeCompletedEnv(runId, failedRunIds.has(runId) ? "failed" : "completed"),
++        );
++      }
++      return { close: vi.fn(), getLastEventId: () => null };
++    },
++  );
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++});
++
++async function renderAndSettle() {
++  render(<Host sessionId="sess-A" />);
++  await waitFor(() => {
++    expect(screen.getAllByText(/回答\d/).length).toBe(HISTORY_RUNS.length);
++  });
++  await act(async () => {});
++}
++
++describe("会话页 /runs 请求扇出收敛（ql-20260916-005）", () => {
++  it("历史轮重放终态事件不扇出刷新：首屏仅 runsMeta + 任务面板 2 条（修复前 2+T 条）", async () => {
++    await renderAndSettle();
++    expect(sessionApi.listSessionRuns).toHaveBeenCalledTimes(2);
++  });
++
++  it("runsMeta 快照经 runsSnapshot 注入 streamSession（缺口同步复用宿主快照）", async () => {
++    await renderAndSettle();
++    const opts = sessionApi.streamSession.mock.calls[0]?.[2] as
++      | { runsSnapshot?: { id: string }[] }
++      | undefined;
++    expect(opts?.runsSnapshot?.map((r) => r.id)).toEqual(HISTORY_RUNS);
++  });
++
++  it("真实新完成轮照常触发刷新（快照 + 用量信号→面板各 1 条）", async () => {
++    await renderAndSettle();
++    if (!capturedHandlers) throw new Error("streamSession 未建流（handlers 未捕获）");
++    sessionApi.listSessionRuns.mockClear();
++    capturedHandlers.onTurnCompleted(makeCompletedEnv("run-new", "completed"));
++    await act(async () => {});
++    expect(sessionApi.listSessionRuns).toHaveBeenCalledTimes(2);
++  });
++
++  it("失败轮错误详情并发共享：同批 2 个失败重放只拉 1 次（修复前 F 条）", async () => {
++    failedRunIds = new Set(["run-h1", "run-h2"]);
++    await renderAndSettle();
++    // 基线 2（runsMeta + 面板）+ 错误详情共享 1 = 3（修复前 2 + 2 = 4，且不含
++    // 修复前重放扇出的 refreshRunsMeta）。
++    expect(sessionApi.listSessionRuns).toHaveBeenCalledTimes(3);
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 4076ee4ba..bdc740d5f 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -48,7 +48,7 @@ import {
+   cancelTeamMission, createScheduledMessage, createSession, endSession, fetchPendingDialogs, fetchSessionDialogHistory,
+   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
+   triggerSessionTeamMission, maxLogTimestamp, streamSession, type InteractiveProvider,
+-  type SessionDialogRead, type SessionPermissionRequest, type SessionStreamConnection,
++  type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection,
+   type TeamMissionTriggerRequest,
+ } from "@/lib/daemon";
+ import { getProviderCaps } from "@/lib/provider-caps";
+@@ -377,6 +377,16 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     // 新建流：重置卸载标志（remount 后可重建）+ 推进代际（旧 in-flight 自查退出）。
+     disposedRef.current = false;
+     const epoch = ++streamEpochRef.current;
++    // quick（ql-20260916-005，同 page 模式）：失败轮错误详情的 runs 拉取并发共享
++    // ——首连对账对历史失败轮的批量重放（各 run 逐条触发）同一时刻收敛为 1 个请求
++    //（响应本就是全量列表）；settle 即置空，后续真实新失败轮照常新拉保新鲜度。
++    let errorDetailRunsInflight: Promise<SessionRunRead[]> | null = null;
++    const fetchRunsForErrorDetail = (): Promise<SessionRunRead[]> => {
++      errorDetailRunsInflight ??= listSessionRuns(sessionId).finally(() => {
++        errorDetailRunsInflight = null;
++      });
++      return errorDetailRunsInflight;
++    };
+     const promise: Promise<void> = (async () => {
+       // prefetch 先回灌历史（防 SSE 订阅前 daemon publish 丢事件）。必须 await 先
+       // 于 SSE 建连：否则 SSE 收到 turn_started 建空 turn 后 prev.turns 非空，
+@@ -498,7 +508,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                 fetchedErrorRunIdsRef.current.add(failedRunId);
+                 void (async () => {
+                   try {
+-                    const runs = await listSessionRuns(sessionId);
++                    const runs = await fetchRunsForErrorDetail();
+                     const matched = runs.find((r) => r.id === failedRunId);
+                     // ql-20260831-004：同上——系统级失败兜 failure_summary 映射。
+                     const item =
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index ecfb02f43..7a2ffe496 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -579,6 +579,13 @@ export function SessionPanelPage({
+   const panelRef = useRef<HTMLElement | null>(null);
+   // 已拉取过 error_detail 的 failed run_id 集合（防 SSE 重连重复拉取）。
+   const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
++  // quick（ql-20260916-005）：轮终态「新完成」判定集合——同 run 首条 turn_completed
++  // 才触发刷新类副作用（runsMeta 快照 / 用量信号 / 队列 / 列表）。历史回灌的终态
++  // 轮在 establish 内播种（SSE 只推新事件，回灌轮不会再有真实完成事件），首连对账
++  // 与 5s 复核对全量 run 合成的 turn_completed 重放由此不再逐条扇出 listSessionRuns
++  // （进入会话页瞬间 ~2T 条并发 /runs 根因）。断线缺口补合成的轮不在集合中，副作用
++  // 照常（快照刷新语义保留）。轮状态更新不经此门（upsertTurn 终态幂等）。
++  const completedSideEffectRunIdsRef = useRef<Set<string>>(new Set());
+   // attach 竞态修复（ql-20260820-007）：镜像最新 detail.current_run_id。历史 logs
+   // 回灌可能晚于 detail 到达——彼时下方 attach 修正 effect 已对空 turns 扫过且其
+   // currentRunId 守卫不再重放，回灌时据本 ref 重放同一修正，使两种到达顺序结果一致。
+@@ -655,6 +662,7 @@ export function SessionPanelPage({
+     setAgentTasks([]);
+     setRunsMeta(new Map());
+     fetchedErrorRunIdsRef.current.clear();
++    completedSideEffectRunIdsRef.current.clear();
+     currentRunIdRef.current = null;
+     // task-03：随队列清空（hook 同按 sessionId 切换清队）一并丢弃附件元数据镜像。
+     attachmentMetaRef.current.clear();
+@@ -696,6 +704,16 @@ export function SessionPanelPage({
+           scheduleAutoFillRef.current();
+         }
+         const restored = logsToTurns(logs);
++        // quick（ql-20260916-005）：播种「已完成副作用」集合——历史终态轮视为刷新类
++        // 副作用已发生过（首连对账 / 5s 复核的重放合成不再扇出）。下方 currentRunId
++        // 重放修正翻回 running 的轮不播种，其真实完成事件到达时副作用照常触发。
++        for (const t of restored) {
++          if (TERMINAL_TURN_STATUSES.has(t.status)) {
++            const rid =
++              t.realRunId ?? (t.runId.startsWith("__") ? null : t.runId);
++            if (rid) completedSideEffectRunIdsRef.current.add(rid);
++          }
++        }
+         setTurnState((prev) => {
+           // 预取窗口内用户抢先发送的占位轮（__pending_inject_*）不覆盖——
+           // 该轮由 inject 响应回填真实 run_id 后走 SSE 增量，正常路径。
+@@ -720,6 +738,9 @@ export function SessionPanelPage({
+         initialSync = true;
+       }
+       if (cancelled) return;
++      // quick（ql-20260916-005）：缺口同步复用宿主快照——await 已并行的 runsPromise
++      //（与历史日志预取同时发起，此处通常已 settle；失败 → undefined 自拉兜底）。
++      const runsSnapshot = (await runsPromise) ?? undefined;
+       // task-09：handlers 经 connGuard.tapStreamHandlers 包装——注入 onStatusChange
+       //（连接横幅）+ 看门狗活动时间推进，原事件语义逐字保留。
+       streamRef.current = streamSession(
+@@ -813,6 +834,16 @@ export function SessionPanelPage({
+           },
+           onTurnCompleted: (env) => {
+             const terminal = deriveTurnTerminalStatus(env);
++            // quick（ql-20260916-005）：新完成判定——同 run 首条 turn_completed 才触发
++            // 下方刷新类副作用；首连对账 / 5s 复核 / 断线 resync 对历史轮批量合成的
++            // 重放事件只走上面的幂等状态更新（曾致进入页面瞬间 2T 条并发 /runs）。
++            const completedRunId = env.run_id ?? null;
++            const isNewCompletion =
++              completedRunId !== null &&
++              !completedSideEffectRunIdsRef.current.has(completedRunId);
++            if (completedRunId !== null) {
++              completedSideEffectRunIdsRef.current.add(completedRunId);
++            }
+             setTurnState((prev) =>
+               upsertTurn(
+                 prev,
+@@ -840,21 +871,23 @@ export function SessionPanelPage({
+               ),
+             );
+ 
+-            // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
+-            // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
+-            refreshRunsMeta(sessionId);
++            if (isNewCompletion) {
++              // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
++              // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
++              refreshRunsMeta(sessionId);
+ 
+-            // 2026-08-29-session-usage-stats task-04（R-04）：轮终态递增用量条
+-            // 重取信号（会话累计用量随轮终态落库，SessionUsageBar 自取数重拉）。
+-            setUsageRefresh((n) => n + 1);
++              // 2026-08-29-session-usage-stats task-04（R-04）：轮终态递增用量条
++              // 重取信号（会话累计用量随轮终态落库，SessionUsageBar 自取数重拉）。
++              setUsageRefresh((n) => n + 1);
+ 
+-            // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
+-            // （新派发轮的 turn_started 事件也会再刷一次，双保险）。
+-            void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
++              // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
++              //（新派发轮的 turn_started 事件也会再刷一次，双保险）。
++              void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+ 
+-            // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
+-            // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
+-            onSessionListRefresh?.();
++              // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
++              // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
++              onSessionListRefresh?.();
++            }
+ 
+             // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
+             if (
+@@ -866,7 +899,7 @@ export function SessionPanelPage({
+               fetchedErrorRunIdsRef.current.add(failedRunId);
+               void (async () => {
+                 try {
+-                  const runs = await listSessionRuns(sessionId);
++                  const runs = await fetchRunsForErrorDetail();
+                   const matched = runs.find((r) => r.id === failedRunId);
+                   // ql-20260831-004：error_detail（模型层）为空的系统级失败（撞闸/
+                   // inject 过期）兜 failure_summary + error_code 映射（normalize）。
+@@ -974,19 +1007,19 @@ export function SessionPanelPage({
+             taskPanelRef.current?.applyEvent(event);
+           },
+         }),
+-        { cursor: streamCursor, initialSync },
++        { cursor: streamCursor, initialSync, runsSnapshot },
+       );
+     };
+ 
+     // gap-fix：attach 并发拉 run 级轮次快照（whoLine + 历史 usage 数据源）。
+-    void listSessionRuns(sessionId)
+-      .then((runs) => {
+-        if (cancelled) return;
+-        setRunsMeta(new Map(runs.map((r) => [r.id, r])));
+-      })
+-      .catch(() => {
+-        /* 快照拉取失败不阻断 SSE */
+-      });
++    // quick（ql-20260916-005）：同一 promise 经 establish await 后以 runsSnapshot
++    // 注入 streamSession 首连缺口同步复用——缺口同步不再自拉，首屏 /runs 2 条并
++    // 1 条（失败 → null，streamSession 回退自拉，F7 超时信号语义不变）。
++    const runsPromise = listSessionRuns(sessionId).catch(() => null);
++    void runsPromise.then((runs) => {
++      if (cancelled || !runs) return;
++      setRunsMeta(new Map(runs.map((r) => [r.id, r])));
++    });
+ 
+     // F7：runs 快照刷新（onTurnCompleted 调用）——共用本 effect 的 cancelled
+     // 标志（语义同上：迟到快照丢弃，不写新会话 / 不卸载后 setState）。
+@@ -1001,6 +1034,18 @@ export function SessionPanelPage({
+         });
+     };
+ 
++    // quick（ql-20260916-005）：失败轮错误详情的 runs 拉取并发共享——首连对账对
++    // 历史失败轮的批量重放（各 run 逐条触发）同一时刻收敛为 1 个请求（响应本就是
++    // 全量列表，按 run_id 匹配各自取用）；settle 即置空，共享窗口仅限并发批次，
++    // 后续真实新失败轮照常新拉（保证 error_detail 新鲜度）。
++    let errorDetailRunsInflight: Promise<SessionRunRead[]> | null = null;
++    const fetchRunsForErrorDetail = (): Promise<SessionRunRead[]> => {
++      errorDetailRunsInflight ??= listSessionRuns(sessionId).finally(() => {
++        errorDetailRunsInflight = null;
++      });
++      return errorDetailRunsInflight;
++    };
++
+     void establish();
+ 
+     return () => {
+diff --git a/frontend/src/lib/daemon.test.ts b/frontend/src/lib/daemon.test.ts
+index 4b18f5732..30837b65e 100644
+--- a/frontend/src/lib/daemon.test.ts
++++ b/frontend/src/lib/daemon.test.ts
+@@ -25,6 +25,8 @@ import {
+   streamSession,
+   subscribeAgentSessionsEvents,
+   type AgentSessionStatus,
++  type SessionRunRead,
++  type SessionStreamHandlers,
+ } from "@/lib/daemon";
+ import { fetchSse, type FetchSseConnection } from "@/lib/fetch-sse";
+ 
+@@ -794,3 +796,113 @@ describe("injectSession 发送超时兜底（ql-20260831-006-6d67）", () => {
+     }
+   });
+ });
++
++// ── quick（ql-20260916-005）：streamSession runs 快照注入与 5s 复核门控 ────────
++
++/** 按 URL 路由的多响应 fetch 桩（/runs 与 /logs 各自返回，未命中回空数组）。 */
++function routeFetch(routes: Array<{ test: (_url: string) => boolean; body: unknown }>) {
++  const fetchMock = vi.fn(async (url: string | URL | Request) => {
++    const u = String(url);
++    const hit = routes.find((r) => r.test(u));
++    const bodyStr = JSON.stringify(hit?.body ?? []);
++    return {
++      ok: true,
++      status: 200,
++      statusText: "OK",
++      headers: new Headers({ "content-type": "application/json" }),
++      text: async () => bodyStr,
++      json: async () => JSON.parse(bodyStr),
++    } as unknown as Response;
++  });
++  vi.stubGlobal("fetch", fetchMock);
++  return fetchMock;
++}
++
++/** SessionRunRead 形状的轻量构造（仅缺口同步消费的字段）。 */
++function runsBody(statuses: string[]): SessionRunRead[] {
++  return statuses.map((status, i) => ({
++    id: `r${i + 1}`,
++    created_at: "2026-09-16T10:00:00Z",
++    spec_strategy: null,
++    status,
++    error_code: null,
++    failure_summary: null,
++    error_detail: null,
++    started_at: "2026-09-16T10:00:01Z",
++    finished_at: "2026-09-16T10:00:02Z",
++    exit_code: 0,
++    agent_profile_snapshot: null,
++    llm_provider_id: null,
++    input_tokens: null,
++    output_tokens: null,
++    user_id: null,
++    sender_name: null,
++  }));
++}
++
++function runsCallCount(m: ReturnType<typeof vi.fn>): number {
++  return m.mock.calls.filter((c) => String(c[0]).includes("/runs")).length;
++}
++
++/** 缺口同步 / 复核的最小 handlers（本组用例不消费事件内容）。 */
++const quietHandlers: SessionStreamHandlers = {
++  onTurnStarted: vi.fn(),
++  onLog: vi.fn(),
++  onTurnCompleted: vi.fn(),
++  onSessionEnded: vi.fn(),
++  onError: vi.fn(),
++};
++
++describe("streamSession runs 快照注入与 5s 复核门控 (ql-20260916-005)", () => {
++  beforeEach(() => {
++    installFetchSseMock();
++  });
++
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it("runsSnapshot 注入：首连缺口同步复用宿主快照不自拉；全终态 → 5s 复核门控跳过（0 次 /runs）", async () => {
++    vi.useFakeTimers();
++    const fetchMock = routeFetch([
++      { test: (u) => u.includes("/runs"), body: runsBody(["completed", "failed"]) },
++      { test: (u) => u.includes("/logs"), body: [] },
++    ]);
++    const conn = streamSession("sess-1", quietHandlers, {
++      cursor: "2026-09-16T10:00:02.000Z",
++      runsSnapshot: runsBody(["completed", "failed"]),
++    });
++    await vi.advanceTimersByTimeAsync(6_000);
++    expect(runsCallCount(fetchMock)).toBe(0);
++    conn.close();
++  });
++
++  it("快照含 running run → 5s 复核照常拉一次（缺口窗口保护不回退）", async () => {
++    vi.useFakeTimers();
++    const fetchMock = routeFetch([
++      { test: (u) => u.includes("/runs"), body: runsBody(["running"]) },
++      { test: (u) => u.includes("/logs"), body: [] },
++    ]);
++    const conn = streamSession("sess-1", quietHandlers, {
++      cursor: "2026-09-16T10:00:02.000Z",
++      runsSnapshot: runsBody(["running"]),
++    });
++    await vi.advanceTimersByTimeAsync(4_999);
++    expect(runsCallCount(fetchMock)).toBe(0); // 5s 前不拉
++    await vi.advanceTimersByTimeAsync(2);
++    expect(runsCallCount(fetchMock)).toBe(1); // 5s 复核恰一次
++    conn.close();
++  });
++
++  it("缺省 runsSnapshot → 首连缺口同步自拉一次（全终态响应 → 复核门控跳过）", async () => {
++    vi.useFakeTimers();
++    const fetchMock = routeFetch([
++      { test: (u) => u.includes("/runs"), body: runsBody(["completed"]) },
++      { test: (u) => u.includes("/logs"), body: [] },
++    ]);
++    const conn = streamSession("sess-1", quietHandlers, { cursor: "2026-09-16T10:00:02.000Z" });
++    await vi.advanceTimersByTimeAsync(6_000);
++    expect(runsCallCount(fetchMock)).toBe(1);
++    conn.close();
++  });
++});
+diff --git a/frontend/src/lib/daemon/session-stream.ts b/frontend/src/lib/daemon/session-stream.ts
+index c7e539086..082c38b1b 100644
+--- a/frontend/src/lib/daemon/session-stream.ts
++++ b/frontend/src/lib/daemon/session-stream.ts
+@@ -182,11 +182,18 @@ export function streamSession(
+     cursor?: string;
+     resyncTimeoutMs?: number;
+     /**
+-     * ql-20260827-018：建连前先跑一次 DB 缺口同步（runs 快照合成 + 全量 logs
++     * ql-20260927-018：建连前先跑一次 DB 缺口同步（runs 快照合成 + 全量 logs
+      * 回放）。历史预取失败（无 cursor 可用）时的兜底路径；成功路径用 cursor
+      * 增量同步即可，两者都置位时 cursor 优先（lastLogTs 已初始化）。
+      */
+     initialSync?: boolean;
++    /**
++     * quick（ql-20260916-005）：宿主已拉取的本会话 runs 快照——首连缺口同步
++     * 直接复用，不再自拉 listSessionRuns（首屏 /runs 2 条并 1 条）。缺省 /
++     * 过期语义不存在：宿主保证与建流同时刻发起（page 模式 runsPromise 并行
++     * 拉取后 await 注入）；断线 resync / 看门狗路径始终自拉（时刻更晚，须新鲜）。
++     */
++    runsSnapshot?: SessionRunRead[];
+   },
+ ): SessionStreamConnection {
+   const base = getApiBaseUrl();
+@@ -216,6 +223,9 @@ export function streamSession(
+   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+   let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+   let postTurnTimer: ReturnType<typeof setTimeout> | null = null;
++  // quick（ql-20260916-005）：最近一次缺口同步快照里是否存在非终态 run——5s 复核
++  // 的拉取门控（「快照 → 订阅」窗口内能完成的前提是快照时它在跑）。
++  let sawRunningRunAtSync = false;
+   // task-09 / design A6：连接状态外露（onStatusChange）。初值 live——首连（未断
+   // 过线）不上报，调用方初始态即视为 live（不显示横幅）。
+   let connStatus: SessionStreamStatus = "live";
+@@ -524,10 +534,19 @@ export function streamSession(
+    * turn_completed（补错过的完成事件；页面终态幂等，重复合成 no-op）。
+    * 不含建连——调用方决定时序（resync：同步后 wireConnection；首连：wireConnection
+    * 前同步，回放期间无实时事件竞争、段内时序干净，与 resync 同序）。
++   * quick（ql-20260916-005）：runsSnapshot——宿主同刻已拉的本会话 runs 快照直接
++   * 复用不自拉（首屏 /runs 收敛）；缺省自拉（resync / 看门狗时刻更晚须新鲜）。
+    */
+-  const syncGapFromDb = async (signal?: AbortSignal) => {
+-    const runs = await listSessionRuns(sessionId, { signal });
++  const syncGapFromDb = async (
++    signal?: AbortSignal,
++    runsSnapshot?: SessionRunRead[],
++  ) => {
++    const runs = runsSnapshot ?? (await listSessionRuns(sessionId, { signal }));
+     if (closed) return;
++    // quick（ql-20260916-005）：记录本次快照是否存在非终态 run——「快照 → 订阅」
++    // 窗口内可能完成的只有这类 run；全终态时 5s 复核无从补起（见 reconcileTerminalRuns
++    // 门控），空闲会话进入不再多发一次 /runs。
++    sawRunningRunAtSync = runs.some((run) => !TERMINAL_RUN_STATUSES.has(run.status));
+     for (const run of runs) {
+       if (!TERMINAL_RUN_STATUSES.has(run.status)) {
+         dispatchRunSynth(run, "turn_started");
+@@ -580,9 +599,14 @@ export function streamSession(
+     }
+   };
+ 
+-  /** 订阅后延迟复核：补「快照与订阅之间」完成的 run（幂等，已终态 no-op）。 */
++  /** 订阅后延迟复核：补「快照与订阅之间」完成的 run（幂等，已终态 no-op）。
++   * quick（ql-20260916-005）拉取门控：最近一次缺口同步快照无任何非终态 run 时
++   * 直接跳过——「快照 → 订阅」亚秒窗口内能完成的 run 必然在快照里是 running，
++   * 全终态快照无可补（省空闲会话进入 +5s 的一次 /runs）。窗口内新建且瞬完的
++   * run 本就无轮可挂（turn_started 同窗口丢失），日志重放/下次重连自愈，可接受。 */
+   const reconcileTerminalRuns = async () => {
+     if (closed) return;
++    if (!sawRunningRunAtSync) return;
+     try {
+       const runs = await listSessionRuns(sessionId);
+       if (closed) return;
+@@ -604,6 +628,7 @@ export function streamSession(
+   if (options?.cursor || options?.initialSync) {
+     void syncGapFromDb(
+       timeoutSignal(options?.resyncTimeoutMs ?? RESYNC_REST_TIMEOUT_MS),
++      options?.runsSnapshot,
+     )
+       .catch(() => {
+         /* 静默：轮后对账 / 断线 resync 再兜 */

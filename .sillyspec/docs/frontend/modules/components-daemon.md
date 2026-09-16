@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-08-26 19:45:00
+updated_at: 2026-09-16 09:00:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）
@@ -226,6 +226,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - SUPPORTED_SESSION_PROVIDERS = ["claude","codex"] 在 dialog 分支与
   sessions/pre-session-picker（NewSessionForm 删除后接棒，2026-08-23-sessions-
   workspace-hub）两处内联，扩展 provider 两处同步。
+
+## quick-ab951f4e 增量（会话页 /runs 请求扇出收敛，ql-20260916-005-0fc5）
+
+- **session-panel-page**：轮终态「新完成」判定——`completedSideEffectRunIdsRef` 集合（同 `fetchedErrorRunIdsRef` 先例），`onTurnCompleted` 仅对集合外首条完成事件触发刷新类副作用（runsMeta 快照 / `setUsageRefresh` 用量信号 / 队列 invalidate / 左栏列表刷新）；历史回灌的终态轮在 establish 内按 `realRunId` 播种（logsToTurns 产物），首连缺口同步与 5s 复核对全量终态 run 合成的重放事件由此不再逐条扇出 `listSessionRuns`（进入会话页瞬间 ~2T 条并发 /runs 的根因）；轮状态更新不经此门（upsertTurn 终态幂等），断线缺口补合成的轮副作用照常。失败轮错误详情拉取改 `fetchRunsForErrorDetail` in-flight 共享（同批多个失败重放收敛 1 请求，settle 即置空保新鲜度）。`runsPromise` 与历史预取并行发起，establish 内 await 后以 `runsSnapshot` 注入 streamSession。
+- **session-panel-dialog**：失败轮错误详情拉取同款 in-flight 共享（dialog 无 runsMeta 刷新链路，仅此项）。
+- 回归：`__tests__/session-panel-runs-request-dedup.test.tsx`（4 用例）。
 
 ## 人工备注
 

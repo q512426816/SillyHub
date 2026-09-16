@@ -48,7 +48,7 @@ import {
   cancelTeamMission, createScheduledMessage, createSession, endSession, fetchPendingDialogs, fetchSessionDialogHistory,
   getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listSessionRuns,
   triggerSessionTeamMission, maxLogTimestamp, streamSession, type InteractiveProvider,
-  type SessionDialogRead, type SessionPermissionRequest, type SessionStreamConnection,
+  type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection,
   type TeamMissionTriggerRequest,
 } from "@/lib/daemon";
 import { getProviderCaps } from "@/lib/provider-caps";
@@ -377,6 +377,16 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     // 新建流：重置卸载标志（remount 后可重建）+ 推进代际（旧 in-flight 自查退出）。
     disposedRef.current = false;
     const epoch = ++streamEpochRef.current;
+    // quick（ql-20260916-005，同 page 模式）：失败轮错误详情的 runs 拉取并发共享
+    // ——首连对账对历史失败轮的批量重放（各 run 逐条触发）同一时刻收敛为 1 个请求
+    //（响应本就是全量列表）；settle 即置空，后续真实新失败轮照常新拉保新鲜度。
+    let errorDetailRunsInflight: Promise<SessionRunRead[]> | null = null;
+    const fetchRunsForErrorDetail = (): Promise<SessionRunRead[]> => {
+      errorDetailRunsInflight ??= listSessionRuns(sessionId).finally(() => {
+        errorDetailRunsInflight = null;
+      });
+      return errorDetailRunsInflight;
+    };
     const promise: Promise<void> = (async () => {
       // prefetch 先回灌历史（防 SSE 订阅前 daemon publish 丢事件）。必须 await 先
       // 于 SSE 建连：否则 SSE 收到 turn_started 建空 turn 后 prev.turns 非空，
@@ -498,7 +508,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                 fetchedErrorRunIdsRef.current.add(failedRunId);
                 void (async () => {
                   try {
-                    const runs = await listSessionRuns(sessionId);
+                    const runs = await fetchRunsForErrorDetail();
                     const matched = runs.find((r) => r.id === failedRunId);
                     // ql-20260831-004：同上——系统级失败兜 failure_summary 映射。
                     const item =

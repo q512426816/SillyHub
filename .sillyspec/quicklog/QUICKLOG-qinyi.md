@@ -47,3 +47,24 @@
 根因：2026-09-16 风险审查发现 bg-task 写通道宽限无界 vs stale-flip 60min 有界的暴露差，前作 R-01 已接受但未文档化，用户裁决不改代码（D-001@v1）仅登记观察项备未来重议
 方案：known-issues.md 末尾新增观察条目：四要素（暴露差含代码锚 types.ts:452/缓解链四条/重估触发两条件/未来修复首选双窗兜底 60min+4h）+登记溯源
 结果：纯文档动作零源码改动（git status 核对仅 .sillyspec 文件）；四要素 grep 可检索（hasBackgroundTaskGrace/STALE_RUN_WRITE_GRACE_MS）
+
+## ql-20260916-005-0fc5 | 2026-09-16 08:39:52 | 会话页进入 /runs 请求扇出收敛（重放终态不扇出 + 快照注入 + 复核门控）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（轮终态新完成判定门控+错误详情共享+runsPromise 注入）
+- frontend/src/lib/daemon/session-stream.ts（runsSnapshot 注入缺口同步+5s 复核门控）
+- frontend/src/components/daemon/session-panel/session-panel-dialog.tsx（错误详情 in-flight 共享）
+- frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx（回归 4 用例（新增））
+- frontend/src/lib/daemon.test.ts（lib 回归 3 用例）
+- .sillyspec/docs/frontend/modules/components-daemon.md（增量节+变更索引）
+- .sillyspec/docs/frontend/modules/lib-daemon.md（增量节+变更索引+过时「无自动重连」bullet 修正）
+需求：会话页进入 /runs 请求扇出收敛（重放终态不扇出 + 快照注入 + 复核门控）
+根因：首连缺口同步与 5s 复核对每个历史终态 run 合成 turn_completed 重放，页面每条事件无条件拉一次 listSessionRuns（T 轮历史即 2T 条并发），失败轮再逐 run 各拉一次全量列表（F 条），首屏基线 4 条又各自独立拉取——用户实测进入瞬间约 20 条
+方案：三层收敛——①page/dialog 增加 completedSideEffectRunIdsRef（历史回灌终态轮按 realRunId 播种），onTurnCompleted 刷新类副作用改同 run 首条门控，状态更新保持幂等、断线缺口补合成的轮照常触发；②失败轮错误详情改 in-flight 共享（同批收敛 1 条，settle 置空保新鲜）；③streamSession 新增 runsSnapshot 选项（宿主 runsPromise 注入首连缺口同步复用）+ 5s 复核按 sawRunningRunAtSync 门控（全终态快照跳过）
+结果：新增回归 7 用例全绿（page 4 + lib 3），相关面 230 用例绿，tsc 0 错，eslint 0 警告（dialog connGuard 为既有）；空闲会话进入 /runs 由 4+2T+F 收敛为 2 条、活跃 3-4 条；已知可接受降级——快照→订阅亚秒窗口内新建且瞬完的 run 不再被 5s 复核兜底（无轮可挂，日志重放/重连自愈）
+审计：📎 文档引用失效：2/0 处 file:line 失效（sillyspec docs check 可复现）
+审计：   ❌ [docs/sillyspec/execute-concurrent-done-skips-next-wave.md:0]  → 文档不存在
+审计：   ❌ [docs/sillyspec/verify-sandbox-overlay-partial-state-importerror.md:0]  → 文档不存在
+审计：[gate] L1（跨 0 模块 · 13 文件：3 代码/2 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/execute-concurrent-done-skips-next-wave.md, docs/sillyspec/verify-sandbox-overlay-partial-state-importerror.md, docs/sillyspec/finished/execute-concurrent-done-skips-next-wave.md, docs/sillyspec/finished/verify-sandbox-overlay-partial-state-importerror.md

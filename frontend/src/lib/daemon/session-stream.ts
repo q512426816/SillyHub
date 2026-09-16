@@ -182,11 +182,18 @@ export function streamSession(
     cursor?: string;
     resyncTimeoutMs?: number;
     /**
-     * ql-20260827-018：建连前先跑一次 DB 缺口同步（runs 快照合成 + 全量 logs
+     * ql-20260927-018：建连前先跑一次 DB 缺口同步（runs 快照合成 + 全量 logs
      * 回放）。历史预取失败（无 cursor 可用）时的兜底路径；成功路径用 cursor
      * 增量同步即可，两者都置位时 cursor 优先（lastLogTs 已初始化）。
      */
     initialSync?: boolean;
+    /**
+     * quick（ql-20260916-005）：宿主已拉取的本会话 runs 快照——首连缺口同步
+     * 直接复用，不再自拉 listSessionRuns（首屏 /runs 2 条并 1 条）。缺省 /
+     * 过期语义不存在：宿主保证与建流同时刻发起（page 模式 runsPromise 并行
+     * 拉取后 await 注入）；断线 resync / 看门狗路径始终自拉（时刻更晚，须新鲜）。
+     */
+    runsSnapshot?: SessionRunRead[];
   },
 ): SessionStreamConnection {
   const base = getApiBaseUrl();
@@ -216,6 +223,9 @@ export function streamSession(
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
   let postTurnTimer: ReturnType<typeof setTimeout> | null = null;
+  // quick（ql-20260916-005）：最近一次缺口同步快照里是否存在非终态 run——5s 复核
+  // 的拉取门控（「快照 → 订阅」窗口内能完成的前提是快照时它在跑）。
+  let sawRunningRunAtSync = false;
   // task-09 / design A6：连接状态外露（onStatusChange）。初值 live——首连（未断
   // 过线）不上报，调用方初始态即视为 live（不显示横幅）。
   let connStatus: SessionStreamStatus = "live";
@@ -524,10 +534,19 @@ export function streamSession(
    * turn_completed（补错过的完成事件；页面终态幂等，重复合成 no-op）。
    * 不含建连——调用方决定时序（resync：同步后 wireConnection；首连：wireConnection
    * 前同步，回放期间无实时事件竞争、段内时序干净，与 resync 同序）。
+   * quick（ql-20260916-005）：runsSnapshot——宿主同刻已拉的本会话 runs 快照直接
+   * 复用不自拉（首屏 /runs 收敛）；缺省自拉（resync / 看门狗时刻更晚须新鲜）。
    */
-  const syncGapFromDb = async (signal?: AbortSignal) => {
-    const runs = await listSessionRuns(sessionId, { signal });
+  const syncGapFromDb = async (
+    signal?: AbortSignal,
+    runsSnapshot?: SessionRunRead[],
+  ) => {
+    const runs = runsSnapshot ?? (await listSessionRuns(sessionId, { signal }));
     if (closed) return;
+    // quick（ql-20260916-005）：记录本次快照是否存在非终态 run——「快照 → 订阅」
+    // 窗口内可能完成的只有这类 run；全终态时 5s 复核无从补起（见 reconcileTerminalRuns
+    // 门控），空闲会话进入不再多发一次 /runs。
+    sawRunningRunAtSync = runs.some((run) => !TERMINAL_RUN_STATUSES.has(run.status));
     for (const run of runs) {
       if (!TERMINAL_RUN_STATUSES.has(run.status)) {
         dispatchRunSynth(run, "turn_started");
@@ -580,9 +599,14 @@ export function streamSession(
     }
   };
 
-  /** 订阅后延迟复核：补「快照与订阅之间」完成的 run（幂等，已终态 no-op）。 */
+  /** 订阅后延迟复核：补「快照与订阅之间」完成的 run（幂等，已终态 no-op）。
+   * quick（ql-20260916-005）拉取门控：最近一次缺口同步快照无任何非终态 run 时
+   * 直接跳过——「快照 → 订阅」亚秒窗口内能完成的 run 必然在快照里是 running，
+   * 全终态快照无可补（省空闲会话进入 +5s 的一次 /runs）。窗口内新建且瞬完的
+   * run 本就无轮可挂（turn_started 同窗口丢失），日志重放/下次重连自愈，可接受。 */
   const reconcileTerminalRuns = async () => {
     if (closed) return;
+    if (!sawRunningRunAtSync) return;
     try {
       const runs = await listSessionRuns(sessionId);
       if (closed) return;
@@ -604,6 +628,7 @@ export function streamSession(
   if (options?.cursor || options?.initialSync) {
     void syncGapFromDb(
       timeoutSignal(options?.resyncTimeoutMs ?? RESYNC_REST_TIMEOUT_MS),
+      options?.runsSnapshot,
     )
       .catch(() => {
         /* 静默：轮后对账 / 断线 resync 再兜 */

@@ -25,6 +25,8 @@ import {
   streamSession,
   subscribeAgentSessionsEvents,
   type AgentSessionStatus,
+  type SessionRunRead,
+  type SessionStreamHandlers,
 } from "@/lib/daemon";
 import { fetchSse, type FetchSseConnection } from "@/lib/fetch-sse";
 
@@ -792,5 +794,115 @@ describe("injectSession 发送超时兜底（ql-20260831-006-6d67）", () => {
       vi.useRealTimers();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// ── quick（ql-20260916-005）：streamSession runs 快照注入与 5s 复核门控 ────────
+
+/** 按 URL 路由的多响应 fetch 桩（/runs 与 /logs 各自返回，未命中回空数组）。 */
+function routeFetch(routes: Array<{ test: (_url: string) => boolean; body: unknown }>) {
+  const fetchMock = vi.fn(async (url: string | URL | Request) => {
+    const u = String(url);
+    const hit = routes.find((r) => r.test(u));
+    const bodyStr = JSON.stringify(hit?.body ?? []);
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "content-type": "application/json" }),
+      text: async () => bodyStr,
+      json: async () => JSON.parse(bodyStr),
+    } as unknown as Response;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/** SessionRunRead 形状的轻量构造（仅缺口同步消费的字段）。 */
+function runsBody(statuses: string[]): SessionRunRead[] {
+  return statuses.map((status, i) => ({
+    id: `r${i + 1}`,
+    created_at: "2026-09-16T10:00:00Z",
+    spec_strategy: null,
+    status,
+    error_code: null,
+    failure_summary: null,
+    error_detail: null,
+    started_at: "2026-09-16T10:00:01Z",
+    finished_at: "2026-09-16T10:00:02Z",
+    exit_code: 0,
+    agent_profile_snapshot: null,
+    llm_provider_id: null,
+    input_tokens: null,
+    output_tokens: null,
+    user_id: null,
+    sender_name: null,
+  }));
+}
+
+function runsCallCount(m: ReturnType<typeof vi.fn>): number {
+  return m.mock.calls.filter((c) => String(c[0]).includes("/runs")).length;
+}
+
+/** 缺口同步 / 复核的最小 handlers（本组用例不消费事件内容）。 */
+const quietHandlers: SessionStreamHandlers = {
+  onTurnStarted: vi.fn(),
+  onLog: vi.fn(),
+  onTurnCompleted: vi.fn(),
+  onSessionEnded: vi.fn(),
+  onError: vi.fn(),
+};
+
+describe("streamSession runs 快照注入与 5s 复核门控 (ql-20260916-005)", () => {
+  beforeEach(() => {
+    installFetchSseMock();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("runsSnapshot 注入：首连缺口同步复用宿主快照不自拉；全终态 → 5s 复核门控跳过（0 次 /runs）", async () => {
+    vi.useFakeTimers();
+    const fetchMock = routeFetch([
+      { test: (u) => u.includes("/runs"), body: runsBody(["completed", "failed"]) },
+      { test: (u) => u.includes("/logs"), body: [] },
+    ]);
+    const conn = streamSession("sess-1", quietHandlers, {
+      cursor: "2026-09-16T10:00:02.000Z",
+      runsSnapshot: runsBody(["completed", "failed"]),
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(runsCallCount(fetchMock)).toBe(0);
+    conn.close();
+  });
+
+  it("快照含 running run → 5s 复核照常拉一次（缺口窗口保护不回退）", async () => {
+    vi.useFakeTimers();
+    const fetchMock = routeFetch([
+      { test: (u) => u.includes("/runs"), body: runsBody(["running"]) },
+      { test: (u) => u.includes("/logs"), body: [] },
+    ]);
+    const conn = streamSession("sess-1", quietHandlers, {
+      cursor: "2026-09-16T10:00:02.000Z",
+      runsSnapshot: runsBody(["running"]),
+    });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(runsCallCount(fetchMock)).toBe(0); // 5s 前不拉
+    await vi.advanceTimersByTimeAsync(2);
+    expect(runsCallCount(fetchMock)).toBe(1); // 5s 复核恰一次
+    conn.close();
+  });
+
+  it("缺省 runsSnapshot → 首连缺口同步自拉一次（全终态响应 → 复核门控跳过）", async () => {
+    vi.useFakeTimers();
+    const fetchMock = routeFetch([
+      { test: (u) => u.includes("/runs"), body: runsBody(["completed"]) },
+      { test: (u) => u.includes("/logs"), body: [] },
+    ]);
+    const conn = streamSession("sess-1", quietHandlers, { cursor: "2026-09-16T10:00:02.000Z" });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(runsCallCount(fetchMock)).toBe(1);
+    conn.close();
   });
 });

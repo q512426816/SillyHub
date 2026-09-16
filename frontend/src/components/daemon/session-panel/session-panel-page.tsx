@@ -579,6 +579,13 @@ export function SessionPanelPage({
   const panelRef = useRef<HTMLElement | null>(null);
   // 已拉取过 error_detail 的 failed run_id 集合（防 SSE 重连重复拉取）。
   const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
+  // quick（ql-20260916-005）：轮终态「新完成」判定集合——同 run 首条 turn_completed
+  // 才触发刷新类副作用（runsMeta 快照 / 用量信号 / 队列 / 列表）。历史回灌的终态
+  // 轮在 establish 内播种（SSE 只推新事件，回灌轮不会再有真实完成事件），首连对账
+  // 与 5s 复核对全量 run 合成的 turn_completed 重放由此不再逐条扇出 listSessionRuns
+  // （进入会话页瞬间 ~2T 条并发 /runs 根因）。断线缺口补合成的轮不在集合中，副作用
+  // 照常（快照刷新语义保留）。轮状态更新不经此门（upsertTurn 终态幂等）。
+  const completedSideEffectRunIdsRef = useRef<Set<string>>(new Set());
   // attach 竞态修复（ql-20260820-007）：镜像最新 detail.current_run_id。历史 logs
   // 回灌可能晚于 detail 到达——彼时下方 attach 修正 effect 已对空 turns 扫过且其
   // currentRunId 守卫不再重放，回灌时据本 ref 重放同一修正，使两种到达顺序结果一致。
@@ -655,6 +662,7 @@ export function SessionPanelPage({
     setAgentTasks([]);
     setRunsMeta(new Map());
     fetchedErrorRunIdsRef.current.clear();
+    completedSideEffectRunIdsRef.current.clear();
     currentRunIdRef.current = null;
     // task-03：随队列清空（hook 同按 sessionId 切换清队）一并丢弃附件元数据镜像。
     attachmentMetaRef.current.clear();
@@ -696,6 +704,16 @@ export function SessionPanelPage({
           scheduleAutoFillRef.current();
         }
         const restored = logsToTurns(logs);
+        // quick（ql-20260916-005）：播种「已完成副作用」集合——历史终态轮视为刷新类
+        // 副作用已发生过（首连对账 / 5s 复核的重放合成不再扇出）。下方 currentRunId
+        // 重放修正翻回 running 的轮不播种，其真实完成事件到达时副作用照常触发。
+        for (const t of restored) {
+          if (TERMINAL_TURN_STATUSES.has(t.status)) {
+            const rid =
+              t.realRunId ?? (t.runId.startsWith("__") ? null : t.runId);
+            if (rid) completedSideEffectRunIdsRef.current.add(rid);
+          }
+        }
         setTurnState((prev) => {
           // 预取窗口内用户抢先发送的占位轮（__pending_inject_*）不覆盖——
           // 该轮由 inject 响应回填真实 run_id 后走 SSE 增量，正常路径。
@@ -720,6 +738,9 @@ export function SessionPanelPage({
         initialSync = true;
       }
       if (cancelled) return;
+      // quick（ql-20260916-005）：缺口同步复用宿主快照——await 已并行的 runsPromise
+      //（与历史日志预取同时发起，此处通常已 settle；失败 → undefined 自拉兜底）。
+      const runsSnapshot = (await runsPromise) ?? undefined;
       // task-09：handlers 经 connGuard.tapStreamHandlers 包装——注入 onStatusChange
       //（连接横幅）+ 看门狗活动时间推进，原事件语义逐字保留。
       streamRef.current = streamSession(
@@ -813,6 +834,16 @@ export function SessionPanelPage({
           },
           onTurnCompleted: (env) => {
             const terminal = deriveTurnTerminalStatus(env);
+            // quick（ql-20260916-005）：新完成判定——同 run 首条 turn_completed 才触发
+            // 下方刷新类副作用；首连对账 / 5s 复核 / 断线 resync 对历史轮批量合成的
+            // 重放事件只走上面的幂等状态更新（曾致进入页面瞬间 2T 条并发 /runs）。
+            const completedRunId = env.run_id ?? null;
+            const isNewCompletion =
+              completedRunId !== null &&
+              !completedSideEffectRunIdsRef.current.has(completedRunId);
+            if (completedRunId !== null) {
+              completedSideEffectRunIdsRef.current.add(completedRunId);
+            }
             setTurnState((prev) =>
               upsertTurn(
                 prev,
@@ -840,21 +871,23 @@ export function SessionPanelPage({
               ),
             );
 
-            // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
-            // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
-            refreshRunsMeta(sessionId);
+            if (isNewCompletion) {
+              // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
+              // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
+              refreshRunsMeta(sessionId);
 
-            // 2026-08-29-session-usage-stats task-04（R-04）：轮终态递增用量条
-            // 重取信号（会话累计用量随轮终态落库，SessionUsageBar 自取数重拉）。
-            setUsageRefresh((n) => n + 1);
+              // 2026-08-29-session-usage-stats task-04（R-04）：轮终态递增用量条
+              // 重取信号（会话累计用量随轮终态落库，SessionUsageBar 自取数重拉）。
+              setUsageRefresh((n) => n + 1);
 
-            // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
-            // （新派发轮的 turn_started 事件也会再刷一次，双保险）。
-            void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+              // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
+              //（新派发轮的 turn_started 事件也会再刷一次，双保险）。
+              void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
 
-            // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
-            // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
-            onSessionListRefresh?.();
+              // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
+              // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
+              onSessionListRefresh?.();
+            }
 
             // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
             if (
@@ -866,7 +899,7 @@ export function SessionPanelPage({
               fetchedErrorRunIdsRef.current.add(failedRunId);
               void (async () => {
                 try {
-                  const runs = await listSessionRuns(sessionId);
+                  const runs = await fetchRunsForErrorDetail();
                   const matched = runs.find((r) => r.id === failedRunId);
                   // ql-20260831-004：error_detail（模型层）为空的系统级失败（撞闸/
                   // inject 过期）兜 failure_summary + error_code 映射（normalize）。
@@ -974,19 +1007,19 @@ export function SessionPanelPage({
             taskPanelRef.current?.applyEvent(event);
           },
         }),
-        { cursor: streamCursor, initialSync },
+        { cursor: streamCursor, initialSync, runsSnapshot },
       );
     };
 
     // gap-fix：attach 并发拉 run 级轮次快照（whoLine + 历史 usage 数据源）。
-    void listSessionRuns(sessionId)
-      .then((runs) => {
-        if (cancelled) return;
-        setRunsMeta(new Map(runs.map((r) => [r.id, r])));
-      })
-      .catch(() => {
-        /* 快照拉取失败不阻断 SSE */
-      });
+    // quick（ql-20260916-005）：同一 promise 经 establish await 后以 runsSnapshot
+    // 注入 streamSession 首连缺口同步复用——缺口同步不再自拉，首屏 /runs 2 条并
+    // 1 条（失败 → null，streamSession 回退自拉，F7 超时信号语义不变）。
+    const runsPromise = listSessionRuns(sessionId).catch(() => null);
+    void runsPromise.then((runs) => {
+      if (cancelled || !runs) return;
+      setRunsMeta(new Map(runs.map((r) => [r.id, r])));
+    });
 
     // F7：runs 快照刷新（onTurnCompleted 调用）——共用本 effect 的 cancelled
     // 标志（语义同上：迟到快照丢弃，不写新会话 / 不卸载后 setState）。
@@ -999,6 +1032,18 @@ export function SessionPanelPage({
         .catch(() => {
           /* 快照拉取失败不阻断主流程 */
         });
+    };
+
+    // quick（ql-20260916-005）：失败轮错误详情的 runs 拉取并发共享——首连对账对
+    // 历史失败轮的批量重放（各 run 逐条触发）同一时刻收敛为 1 个请求（响应本就是
+    // 全量列表，按 run_id 匹配各自取用）；settle 即置空，共享窗口仅限并发批次，
+    // 后续真实新失败轮照常新拉（保证 error_detail 新鲜度）。
+    let errorDetailRunsInflight: Promise<SessionRunRead[]> | null = null;
+    const fetchRunsForErrorDetail = (): Promise<SessionRunRead[]> => {
+      errorDetailRunsInflight ??= listSessionRuns(sessionId).finally(() => {
+        errorDetailRunsInflight = null;
+      });
+      return errorDetailRunsInflight;
     };
 
     void establish();

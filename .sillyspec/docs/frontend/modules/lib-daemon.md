@@ -2,6 +2,7 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-daemon
+updated_at: 2026-09-16 09:00:00
 author: qinyi
 created_at: 2026-08-18 01:45:00
 ---
@@ -74,7 +75,7 @@ conn.onmessage = (raw) => {
 
 ## 注意事项
 - **token 走 Authorization header**（fetch-sse），不再拼 URL query——旧卡「SSE 无法带 header 故 token 进 query」已过时。
-- **无自动重连**：fetch-sse 有意取舍，onerror 只通知组件；断流由调用方重建连接 / 查询兜底（fetchPendingDialogs / getAgentSessionLogs 等即兜底面）。
+- **fetch-sse 本身无自动重连**（有意取舍）：重连由 streamSession 内建——onerror 指数退避 + resync 对账（runs/logs 全量回放 + 终态合成）后重建连接（ql-20260820-009）；组件侧查询兜底（fetchPendingDialogs / getAgentSessionLogs 等）另计。
 - **永久性 HTTP 错误停连（ql-20260903-021，R7）**：streamSession / streamGroupChat 的 onerror 命中 `PERMANENT_SSE_ERROR_STATUSES`（401/403/404）即 close 置 closed 停止重连循环——无权限/已删除会话不再每 30s 重打必败请求（resync runs/logs + stream 三连）；无 status（网络断/关流）保持退避重连（同审批流先例）。**R7 补口（ql-20260904-H2）**：onerror 停连只在建连后可达——断连重连时 resync 快照（runs/logs REST）先跑，会话中途被删/权限收回后 resync 抛 ApiError(401/403/404) 会与网络错误无差别退避重试（每 30s 一轮永久循环）。三订阅（streamSession/streamGroupChat/streamShadowSession）的 resyncAndReconnect catch 经 `isPermanentRestError`（ApiError.status ∈ PERMANENT_SSE_ERROR_STATUSES）分流：命中即置 closed + 清三定时器停订阅终态；超时 AbortError/网络错误保持退避重连。
 - backend 的 turn/log/permission_* 事件发**默认 data 帧**（无 `event:` 行），必须走 onmessage 单通道按 payload.event 分发；addEventListener 命名事件只收得到 done/error。
 - **一次性 quickChat 已不存在**：`quickChat` / `getQuickChatResult` / `streamQuickChat` 已删除（索引残留符号），多轮交互会话是唯一入口。
@@ -85,6 +86,12 @@ conn.onmessage = (raw) => {
 - 测试分布：`frontend/src/lib/daemon.test.ts` + `frontend/src/lib/__tests__/daemon-session.test.ts`（会话/SSE）、`frontend/src/lib/__tests__/daemon-permission.test.ts`（权限事件解析）、`frontend/src/lib/__tests__/daemon-usage.test.ts`（用量聚合）。
 
 - 会话绑定客户端三入口（2026-08-25-session-spec-binding）：listAgentSessions options 加 ql_id；createSession input 加 quicklog_id；新增 listQuicklogSessions(workspaceId, qlId)（类型经 gen:types 从后端生成，禁止手写）。
+
+## quick-ab951f4e 增量（/runs 请求扇出收敛，ql-20260916-005-0fc5）
+
+- **streamSession options.runsSnapshot**：宿主同刻已拉的本会话 runs 快照——首连缺口同步 `syncGapFromDb(signal, runsSnapshot)` 直接复用不自拉（page 模式 runsPromise 并行发起后 await 注入）；缺省 / resync / 看门狗路径始终自拉（时刻更晚，须新鲜）。
+- **5s 复核拉取门控**：`sawRunningRunAtSync`（最近一次缺口同步快照是否存在非终态 run）——全终态快照时 `reconcileTerminalRuns` 直接跳过（「快照 → 订阅」亚秒窗口内能完成的 run 必然快照时在跑）；窗口内新建且瞬完的 run 无轮可挂，日志重放/下次重连自愈（可接受降级）。
+- 回归：`daemon.test.ts` 新增 3 用例（快照注入 0 拉取 / 含 running 5s 复核恰一次 / 缺省自拉一次）。
 
 ## 人工备注
 
