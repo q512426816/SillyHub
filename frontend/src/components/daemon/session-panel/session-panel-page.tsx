@@ -16,8 +16,7 @@ import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-tim
 import type { AutoResumeEntry } from "@/components/daemon/turn-timeline";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import {
-  joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers,
-} from "@/components/daemon/runtime-session-helpers";
+  joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
@@ -108,6 +107,7 @@ import {
   resolveAgentDisplayName, resolveCtxRoleMapping, resolvePageProjectId,
   resolvePreChangeName, resolvePreQuicklogName, resolvePreWorkspaceName,
   resolveWorkspaceName, splitToolReportTurns, type SessionPanelPageProps,
+  ACTIVE_RUN_STATUSES,
 } from "./page-helpers";
 
 /* ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
@@ -749,6 +749,21 @@ export function SessionPanelPage({
       // quick（ql-20260916-005）：缺口同步复用宿主快照——await 已并行的 runsPromise
       //（与历史日志预取同时发起，此处通常已 settle；失败 → undefined 自拉兜底）。
       const runsSnapshot = (await runsPromise) ?? undefined;
+      // quick（ql-20260916-013）：播种改以 runs 快照为准——进入时刻已终态的轮全部
+      // 预标记「副作用已发生」。此前的日志窗口播种只覆盖窗口内轮次（HISTORY_PAGE_SIZE
+      // 50 条日志仅覆盖几个轮），而缺口同步对快照里**全部**终态轮合成 turn_completed，
+      // 未播种的历史轮全部通过「同 run 首条」门控 → 进入瞬间按快照轮数扇出
+      // listSessionRuns（线上实测 6e213eb3 会话 42 轮 20ms 内 36+ 条并发；测试夹具
+      // 3 轮全在窗口内未暴露）。快照播种后只有「快照之后真实完成」的轮触发刷新
+      // （断线缺口补合成的轮快照时仍在跑、不在集合 → 照常触发，语义保留）。
+      for (const run of runsSnapshot ?? []) {
+        // 非活跃即终态（含旧数据 status=null——历史轮不该触发刷新）；勿用
+        // runTerminalTurnStatus：它对 completed 返回 null（只映射失败族），会把
+        // 成功轮全部漏播（本 quick 首版实证：23 轮会话仍扇出 21 条）。
+        if (run.status == null || !ACTIVE_RUN_STATUSES.has(run.status)) {
+          completedSideEffectRunIdsRef.current.add(run.id);
+        }
+      }
       // task-09：handlers 经 connGuard.tapStreamHandlers 包装——注入 onStatusChange
       //（连接横幅）+ 看门狗活动时间推进，原事件语义逐字保留。
       streamRef.current = streamSession(
@@ -1135,6 +1150,9 @@ export function SessionPanelPage({
       hasEarlierRef.current = older.length >= HISTORY_PAGE_SIZE;
       chainedMore = older.length >= HISTORY_PAGE_SIZE;
       const olderTurns = logsToTurns(older);
+      // quick（ql-20260916-013）：空页（到头/全部被过滤）无 prepend——锚点作废
+      // 清掉，防其滞留到后续无关的高度增长（异步内容撑高）时误补偿跳视口。
+      if (olderTurns.length === 0) pendingAnchorRef.current = null;
       if (olderTurns.length > 0) {
         // pageKey 在 updater 外派生（task-06）：updater 须保持纯函数，内读 ref
         // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
@@ -1346,8 +1364,14 @@ export function SessionPanelPage({
     const anchor = pendingAnchorRef.current;
     if (anchor == null) return;
     const el = timelineScrollEl();
-    pendingAnchorRef.current = null;
     if (!el) return;
+    // quick（ql-20260916-013）：高度未增 = prepend 未落地（锚点捕获与 prepend
+    // 提交之间被 SSE/队列等中间 turnState 提交抢先触发本 effect）——此时消费
+    // 锚点只会补 0，真正 prepend 落地时无锚可补 → 视口被顶到后面的轮次
+    // （用户实测“滚到顶有时弹回下面”）。锚点保留待下一轮提交，prepend 落地
+    // （高度实际增长）才消费。
+    if (el.scrollHeight <= anchor) return;
+    pendingAnchorRef.current = null;
     el.scrollTop += el.scrollHeight - anchor;
   }, [turnState, timelineScrollEl]);
 

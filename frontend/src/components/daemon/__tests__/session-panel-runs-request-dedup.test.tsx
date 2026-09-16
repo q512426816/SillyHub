@@ -294,6 +294,42 @@ describe("会话页 /runs 请求扇出收敛（ql-20260916-005）", () => {
     expect(sessionApi.listSessionRuns).toHaveBeenCalledTimes(2);
   });
 
+  it("快照轮数远超日志窗口（ql-20260916-013）：窗口外的历史终态轮不扇出（修复前按快照轮数并发）", async () => {
+    // 日志窗口只含 run-h1..h3（6 条），快照含 20 个额外终态轮（模拟长会话：
+    // HISTORY_PAGE_SIZE=50 只覆盖几个轮，快照全量 23 轮）——修复前缺口同步对全部
+    // 终态轮合成 turn_completed，窗口外 20 轮未被播种 → 各发一次 listSessionRuns。
+    sessionApi.listSessionRuns.mockImplementation(async () => {
+      const rows = HISTORY_RUNS.map((id) => ({
+        id, created_at: "2026-09-16T10:00:00Z", spec_strategy: null,
+        status: "completed", error_code: null, failure_summary: null, error_detail: null,
+        started_at: "2026-09-16T10:00:01Z", finished_at: "2026-09-16T10:00:02Z",
+        exit_code: 0, agent_profile_snapshot: null, llm_provider_id: null,
+        input_tokens: null, output_tokens: null, user_id: null, sender_name: null,
+      }));
+      for (let i = 0; i < 20; i++) {
+        rows.push({ ...rows[0]!, id: `run-extra-${i}` });
+      }
+      return rows;
+    });
+    // streamSession mock 对快照全部终态轮合成 turn_completed（真实 syncGapFromDb 行为）
+    sessionApi.streamSession.mockImplementation(
+      (_sid: string, handlers: CapturedStreamHandlers, _opts?: unknown) => {
+        capturedHandlers = handlers;
+        void sessionApi.listSessionRuns().then((rows: SessionRunRead[]) => {
+          for (const r of rows) {
+            handlers.onTurnCompleted?.(makeCompletedEnv(r.id, "completed"));
+          }
+        });
+        return { close: vi.fn(), getLastEventId: () => null };
+      },
+    );
+    await renderAndSettle();
+    await act(async () => {});
+    // 修复前 = 2 基线 + 20 窗口外轮扇出（实测 23）；修复后 = 2 基线 + 本 mock
+    // 自调 1 次（取轮列表合成事件）= 3，扇出为 0。
+    expect(sessionApi.listSessionRuns).toHaveBeenCalledTimes(3);
+  });
+
   it("失败轮错误详情并发共享：同批 2 个失败重放只拉 1 次（修复前 F 条）", async () => {
     failedRunIds = new Set(["run-h1", "run-h2"]);
     await renderAndSettle();

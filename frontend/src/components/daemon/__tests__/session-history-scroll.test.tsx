@@ -37,7 +37,7 @@ vi.mock("@/lib/api/llm-providers", async () => {
   return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
 });
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 400; // quick（ql-20260916-013）：页距 50→400 后对齐源常量
 function makeDetail(id: string) {
   return { id, runtime_id: null, lease_id: null, provider: "claude", status: "active",
     agent_session_id: `ag-${id}`, config: null, turn_count: 3, created_at: "t",

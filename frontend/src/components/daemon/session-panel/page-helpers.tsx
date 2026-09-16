@@ -139,7 +139,7 @@ export interface SessionPanelPageProps {
  * 状态的轮次正在计时，turnStartedAt 强制取快照 started_at（后端权威起点）。
  * 词表口径对齐 backend agent/model.py run 状态（pending_approval 为 team 审批轮）。
  */
-const ACTIVE_RUN_STATUSES = new Set(["running", "pending", "pending_approval"]);
+export const ACTIVE_RUN_STATUSES = new Set(["running", "pending", "pending_approval"]);
 
 /**
  * 按 run 快照补 whoLine / 历史 usage（原 SessionPanelPage displayTurns useMemo 体外提）：

@@ -1,0 +1,79 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+index ac12e5293..60d15b717 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+@@ -9,3 +9,4 @@ created_at: 2026-09-04 13:58:00
+ - ql-20260916-005-0fc5 | 会话页进入 /runs 请求扇出收敛——onTurnCompleted 刷新类副作用（runsMeta 快照/用量信号/队列/列表）改「同 run 首条 turn_completed」门控（历史回灌终态轮播种 completedSideEffectRunIdsRef，首连对账/5s 复核的重放合成不再逐条扇出，修进入瞬间 ~2T 条并发）；失败轮错误详情拉取 in-flight 共享（同批 F 个失败重放收敛 1 条）；runsPromise 经 runsSnapshot 注入 streamSession（缺口同步复用不自拉）。新增回归 session-panel-runs-request-dedup（4 用例：重放不扇出/新完成照常/失败共享/注入透传），相关面 230+39 用例绿，tsc 0
+ - ql-20260916-009-ac60 | 历史翻页空壳修复——「加载更早」装配块 runId 改真实 runId（#e 伪 id 致快照双 miss、同 run 被孤儿补建成无内容配置行占位块，用户实证 6e213eb3 会话）；enrichDisplayTurns knownPendingRunIds 参数（已知未加载轮不补建占位）；displayTurns 稳定排序（同时间保持数组序）；HISTORY_PAGE_SIZE 100→50。新增回归用例（翻页同 run 内容渲染），session-panel 全套 249 用例绿，tsc 0，eslint 0 错误
+ - ql-20260916-010-560c | 未加载历史轮占位骨架——enrichDisplayTurns 对 knownPendingRunIds 轮补建轻量占位 turn（whoLine+sender 时间，复用静默切换轮紧凑标记渲染），翻页前未加载历史轮显示配置骨架不再是隐形（ql-20260916-009 的迭代）。新增回归用例，session-panel 211 用例绿，tsc 0，eslint 0
++- ql-20260916-013-c032 | /runs 扇出线上根治（快照播种替代日志窗口播种）+ 翻页覆盖（HISTORY_PAGE_SIZE 50→400）+ prepend 锚点竞态（高度未增不消费+空页清锚）——浏览器实测定位三问题（20ms 36+ 条并发/1.1 万条日志滚 220 页/滚顶弹回）。dedup 6/6 + session-panel 全套 212 + scroll/race 9/9 绿，tsc 0
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 98f2f306b..ad2001e6c 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -4,7 +4,7 @@ doc_type: module-card
+ module_id: components-daemon
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+-updated_at: 2026-09-16 10:30:00
++updated_at: 2026-09-16 12:50:00
+ ---
+ 
+ # Daemon 运行时交互组件（components-daemon）
+@@ -240,6 +240,8 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+ - **page-helpers enrichDisplayTurns**：knownPendingRunIds 中的轮改补建轻量占位 turn（whoLine 配置行 + sender 时间，复用「静默切换轮紧凑标记」渲染形态）——翻页前未加载的历史轮显示带时间与档案/供应商信息的骨架（ql-20260916-009 修复后曾隐形），翻页到达后装配块携带内容自然替换。
+ - 回归：session-panel-runs-request-dedup 新增用例（快照含未加载 run → 紧凑行渲染配置）。
+ 
++- **/runs 扇出线上根治 + 翻页覆盖 + 锚点竞态（ql-20260916-013-c032）**：①establish 播种改以 runs 快照为准（非活跃即终态预标记 completedSideEffectRunIdsRef，ACTIVE_RUN_STATUSES 导出；勿用 runTerminalTurnStatus——completed 返回 null 漏播成功轮）——日志窗口播种只覆盖窗口内轮次而缺口同步对快照全部终态轮合成事件，长会话（6e213eb3：44 轮 1.1 万条日志）线上 20ms 内 36+ 条并发（浏览器 fetch 堆栈定位 onTurnCompleted）；②HISTORY_PAGE_SIZE 50→400（后端 le=1000）——翻页单位是日志行而显示单位是轮，50 条/页滚 220 次才能看全致"一堆空白"；③prepend 滚动锚点竞态修复——高度未增不消费锚点（中间 turnState 提交抢跑空消费后真 prepend 无锚可补 → 视口弹回后面轮次）+ 空页清锚防滞留误补偿。回归：窗口外轮扇出用例（修复前 23 次修复后 3 次）；两测试文件页距常量对齐 400。
++
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index 8a1ccf326..68238e4ae 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -37,7 +37,7 @@ vi.mock("@/lib/api/llm-providers", async () => {
+   return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
+ });
+ 
+-const PAGE_SIZE = 100;
++const PAGE_SIZE = 400; // quick（ql-20260916-013）：页距 50→400 后对齐源常量
+ function makeDetail(id: string) {
+   return { id, runtime_id: null, lease_id: null, provider: "claude", status: "active",
+     agent_session_id: `ag-${id}`, config: null, turn_count: 3, created_at: "t",
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx
+index 243d2cdac..2b7c92a59 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx
+@@ -80,7 +80,7 @@ vi.mock("@/lib/api/llm-providers", async () => {
+ 
+ /* ----- fixture ----- */
+ 
+-const HISTORY_PAGE_SIZE = 100;
++const HISTORY_PAGE_SIZE = 400; // quick（ql-20260916-013）：页距 50→400 后对齐源常量
+ 
+ function makeDetail(id: string) {
+   return {
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index fc47427d7..8dd9a24b8 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -80,11 +80,13 @@ export const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
+  * 更早（< 页距 = 已到头，按钮隐藏）。
+  */
+ /** 历史日志单页条数（初始窗口 + 翻页步长）。
+- * quick（ql-20260916-009）：100 → 50——单 run 大窗口（自由滚动触顶连拉同 run）
+- * 时“真实 runId 已在当前窗口的轮跳过”会整轮丢弃（run 首见块可能在窗口外），
+- * 50 减半丢弃概率；触顶/自动补拉链不受限（AUTO_FILL_MAX=10 页上限仍在），
+- * 首屏拉取量减半。 */
+-export const HISTORY_PAGE_SIZE = 50;
++ * quick（ql-20260916-013）：50 → 400——线上实证 6e213eb3 会话 44 轮共 1.1 万条
++ * 日志（单轮最多 1324 条），50 条/页要滚 220 次才能看全，用户滚几页只见未加载
++ * 轮的配置行（“一堆空白”）。翻页单位是日志行而显示单位是轮——400 条/页（后端
++ * 上限 le=1000）每次滚动覆盖数个完整轮；初始窗口 400 条覆盖最近几轮完整内容。
++ * ql-20260916-009 的 100→50 撤销（丢弃概率考量让位于覆盖效率——丢弃仅影响
++ * 单 run 跨页边界的更早段，属既有可接受降级）。 */
++export const HISTORY_PAGE_SIZE = 400;
+ 
+ /* ────────────────────── SSE turn 状态机辅助（task-09：只留组装胶水，日志内容处理走装配器；两模式共用，diff-analysis §4.3 归属〔内部〕模块级函数） ────────────────────── */

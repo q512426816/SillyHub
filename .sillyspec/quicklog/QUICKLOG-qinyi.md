@@ -176,3 +176,21 @@
 根因：Next 默认把客户端页面 static 预渲染打 s-maxage=31536000（实测全站含 /login），重新部署后浏览器/代理继续用旧壳引用旧 chunk，新代码永不生效——用户实证 /sessions 部署后无变化、后端日志 11:58 仍见旧版 200ms 内 6 条 /runs 扇出；公网 chunk 验证新代码可下载但浏览器拿旧 HTML
 方案：根布局 export const dynamic = force-dynamic 一次覆盖全部路由（workbench 逐页先例的全站化）：壳 HTML 每次 SSR + no-store，/_next/static 内容哈希 immutable 不受影响；附带修 Quick E 测试 mock 类型（SessionRunRead 标注）
 结果：tsc 0；dedup 测试 5 用例绿；page.test 7 失败 stash 对照证并行既有债非本次引入；已部署验证：公网 /sessions 响应头从 s-maxage=31536000 变为 private,no-cache,no-store,must-revalidate，onHeartbeat chunk 公网可下载
+
+## ql-20260916-013-c032 | 2026-09-16 12:36:56 | C:/Program Files/Git/runs 扇出线上根治 + 翻页覆盖 400/页 + prepend 锚点竞态修复（浏览器实测三连）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（快照播种+锚点竞态修复）
+- frontend/src/components/daemon/session-panel/page-helpers.tsx（ACTIVE_RUN_STATUSES 导出）
+- frontend/src/components/daemon/session-panel/turn-state.ts（页大小 400）
+- frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx（窗口外轮用例）
+- frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx（页距对齐）
+- frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx（页距对齐）
+- .sillyspec/docs/frontend/modules/components-daemon.md（增量）
+- .sillyspec/docs/frontend/modules/components-daemon.changelog.md（索引）
+需求：C:/Program Files/Git/runs 扇出线上根治 + 翻页覆盖 400/页 + prepend 锚点竞态修复（浏览器实测三连）
+根因：线上浏览器实测复现三问题：①进入会话 20ms 内 36+ 条 /runs 并发（fetch 堆栈定位 onTurnCompleted——日志窗口播种只覆盖窗口内轮次，缺口同步对快照全部终态轮合成事件，6e213eb3 会话 44 轮 1.1 万条日志 37 轮未播种全通过门控；测试夹具 3 轮全在窗口内未暴露）；②滚几页只见配置行（翻页单位是日志行而显示单位是轮，50 条/页滚 220 次才能看全）；③滚到顶有时弹回下面轮次（锚点捕获与 prepend 提交间被中间 turnState 提交抢跑空消费，真 prepend 无锚可补）
+方案：①establish 播种改以 runs 快照为准（非活跃即终态预标记，ACTIVE_RUN_STATUSES 导出；首版误用 runTerminalTurnStatus——completed 返回 null 漏播成功轮，被新增窗口外轮用例当场抓住）；②HISTORY_PAGE_SIZE 50→400（后端 le=1000，撤销 009 的 100→50）；③锚点 effect 高度未增不消费（保留待真 prepend 落地）+ 空页清锚防滞留误补偿
+结果：浏览器终验通过：/runs 进入 39→3 条；滚动加载 400 条/页（scrollHeight 14.6k→44k，内容轮 11→24 持续变出）；连续 5 次滚顶视口稳定无弹回。测试：新增窗口外轮扇出回归用例（修复前 23 次修复后 3 次），dedup 6/6 + session-panel 全套 212 + scroll/race 9/9 绿（两测试页距常量对齐 400），tsc 0
+审计：[gate] L1（跨 0 模块 · 5 文件：1 代码/2 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）

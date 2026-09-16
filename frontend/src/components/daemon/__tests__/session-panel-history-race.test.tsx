@@ -80,7 +80,7 @@ vi.mock("@/lib/api/llm-providers", async () => {
 
 /* ----- fixture ----- */
 
-const HISTORY_PAGE_SIZE = 100;
+const HISTORY_PAGE_SIZE = 400; // quick（ql-20260916-013）：页距 50→400 后对齐源常量
 
 function makeDetail(id: string) {
   return {

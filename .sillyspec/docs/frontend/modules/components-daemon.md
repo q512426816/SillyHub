@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-16 10:30:00
+updated_at: 2026-09-16 12:50:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）
@@ -239,6 +239,8 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 
 - **page-helpers enrichDisplayTurns**：knownPendingRunIds 中的轮改补建轻量占位 turn（whoLine 配置行 + sender 时间，复用「静默切换轮紧凑标记」渲染形态）——翻页前未加载的历史轮显示带时间与档案/供应商信息的骨架（ql-20260916-009 修复后曾隐形），翻页到达后装配块携带内容自然替换。
 - 回归：session-panel-runs-request-dedup 新增用例（快照含未加载 run → 紧凑行渲染配置）。
+
+- **/runs 扇出线上根治 + 翻页覆盖 + 锚点竞态（ql-20260916-013-c032）**：①establish 播种改以 runs 快照为准（非活跃即终态预标记 completedSideEffectRunIdsRef，ACTIVE_RUN_STATUSES 导出；勿用 runTerminalTurnStatus——completed 返回 null 漏播成功轮）——日志窗口播种只覆盖窗口内轮次而缺口同步对快照全部终态轮合成事件，长会话（6e213eb3：44 轮 1.1 万条日志）线上 20ms 内 36+ 条并发（浏览器 fetch 堆栈定位 onTurnCompleted）；②HISTORY_PAGE_SIZE 50→400（后端 le=1000）——翻页单位是日志行而显示单位是轮，50 条/页滚 220 次才能看全致"一堆空白"；③prepend 滚动锚点竞态修复——高度未增不消费锚点（中间 turnState 提交抢跑空消费后真 prepend 无锚可补 → 视口弹回后面轮次）+ 空页清锚防滞留误补偿。回归：窗口外轮扇出用例（修复前 23 次修复后 3 次）；两测试文件页距常量对齐 400。
 
 ## 人工备注
 
