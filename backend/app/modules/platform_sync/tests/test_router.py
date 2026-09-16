@@ -828,7 +828,10 @@ async def test_first_push_creates_placeholder_change_row(client, db_session):
     )
     assert row is not None, "首推后应建 ux_changes 占位行"
     assert row.location == "active"
-    assert row.status == "draft"
+    # 2026-09-16-platform-progress-ingest-persist FR-01/D-002@v1：接受分支
+    # _sync_change_stage_status 把 CLI status 权威落库——payload status='active'
+    # 映射 in_progress（此前占位行硬编码 draft 永不更新）。
+    assert row.status == "in_progress"
     assert row.current_stage == "brainstorm"
     assert row.title == "新变更测试"
     assert row.path == "changes/2026-08-15-new-change"

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-09-16-platform-progress-ingest-persist",
+  "generatedAt": "2026-09-16T01:09:59.404Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-09-16-platform-progress-ingest-persist",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-09-16-platform-progress-ingest-persist",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-09-16-platform-progress-ingest-persist",
+      "metrics": {
+        "backendEndpoints": 4616,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-09-16-platform-progress-ingest-persist",
+      "metrics": {
+        "deletions": 5,
+        "unavailable": false
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "requiredEvidence": [
+    {
+      "task": "task-01",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/change/title_norm.py",
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ]
+    },
+    {
+      "task": "task-02",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/platform_sync/service.py",
+        "backend/app/modules/platform_sync/tests/test_stage_status_ingest.py"
+      ]
+    },
+    {
+      "task": "task-03",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/platform_sync/service.py",
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ]
+    },
+    {
+      "task": "task-04",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/change/parser.py",
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ]
+    },
+    {
+      "task": "task-05",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/change/parser.py",
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ]
+    },
+    {
+      "task": "task-06",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/platform_sync/tests/test_stage_status_ingest.py"
+      ]
+    },
+    {
+      "task": "task-07",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/change/tests/test_title_normalization.py"
+      ]
+    },
+    {
+      "task": "task-08",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "backend/app/modules/platform_sync/tests/test_router.py"
+      ]
+    }
+  ],
+  "runtimeEvidence": [
+    {
+      "claim": "真实运行时集成重放（任务验收标准 1 原样场景）：独立 PG 库 verify_ingest + 真实 uvicorn 进程（port 8010，alembic 全量迁移），curl 真实 HTTP 请求 POST /api/changes/2026-09-15-ehs-reward-punishment/progress（三 header：Authorization/X-SillySpec-User/X-SillySpec-Pushed-At，payload current_stage=verify/status=active）→ 200；DB 断言 changes 行 title=ehs-reward-punishment（原缺陷值 提案书（Proposal））/ status=in_progress（原 draft）/ current_stage=verify（原 NULL）",
+      "command": "bash 重放脚本（tee 落盘）",
+      "exitCode": 0,
+      "logPath": "verify-integration-replay.log"
+    },
+    {
+      "claim": "幂等重放（base_ts=服务器 ack 钟走分支 3）→ 200 无状态漂移；伪造陈旧 base_ts → 409 Conflict（契约 §4.4 body 含 conflict/platform_progress/last_pusher）且行值不被覆盖",
+      "command": "同上重放脚本第 2/3 段",
+      "exitCode": 0,
+      "logPath": "verify-integration-replay.log"
+    },
+    {
+      "claim": "documents 推送（四件套模板 H1）→ title 重派生为 ehs-reward-punishment（P2a）",
+      "command": "同上重放脚本第 4 段 + psql 终态断言",
+      "exitCode": 0,
+      "logPath": "verify-integration-replay.log"
+    },
+    {
+      "claim": "backend 进程运行日志（uvicorn access log 三条 POST 状态码 200/200/409/200 与上述一致）",
+      "command": "uvicorn app.main:app --port 8010",
+      "exitCode": 0,
+      "logPath": "verify-integration-backend.log"
+    }
+  ],
+  "tests": {
+    "command": "module[change,platform_sync]",
+    "exitCode": 0,
+    "strategy": "module-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-09-16T02:15:36.235Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

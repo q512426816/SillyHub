@@ -1,0 +1,27 @@
+=== [01T%:14:54Z] 1) 首推（无 base_ts，分支 1）payload=current_stage:verify/status:active ===
+{"ok":true,"last_pushed_at":"2026-09-16T01:14:54.476Z"}
+HTTP_STATUS=200 TIME=0.114422s
+
+=== 2) 二次重放（base_ts=服务器 ack 钟，分支 3）幂等 ===
+{"ok":true,"last_pushed_at":"2026-09-16T01:15:05.049Z"}
+HTTP_STATUS=200
+
+=== 3) 伪造陈旧 base_ts（stored > base_ts）→ 应 409 且不写库 ===
+{"conflict":true,"platform_progress":{"project":{"name":"pollute","schema_version":3},"changes":[{"name":"2026-09-15-ehs-reward-punishment","current_stage":"verify","status":"active","last_active":"2026-09-15T11:46:21.000Z","last_synced_platform_ts":"2026-09-15T15:39:05.765Z","last_local_modified_ts":"2026-09-15T11:46:21.000Z","owner_session":"sess-verify-replay"}],"stages":[],"steps":[],"batch_progress":[],"approvals":[]},"last_pushed_at":"2026-09-16T01:15:05.049Z","last_pusher":"wp"}
+HTTP_STATUS=409
+
+=== 4) documents 推送（四件套模板 H1）→ title 重派生 ===
+{"synced":4,"change_name":"2026-09-15-ehs-reward-punishment"}
+HTTP_STATUS=200
+
+=== 5) DB 终态断言（changes 表行 + 收件箱行）===
+            change_key            |         title         |   status    | current_stage | location | has_owner 
+----------------------------------+-----------------------+-------------+---------------+----------+-----------
+ 2026-09-15-ehs-reward-punishment | ehs-reward-punishment | in_progress | verify        | active   | t
+(1 row)
+
+           change_name            |      last_pushed_at      | last_pusher | lp_stage | lp_status | has_docs 
+----------------------------------+--------------------------+-------------+----------+-----------+----------
+ 2026-09-15-ehs-reward-punishment | 2026-09-16T01:15:05.049Z | wp          | verify   | active    | t
+(1 row)
+

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-09-16-platform-progress-ingest-persist",
+  "appliedAt": "2026-09-16T00:45:42.422Z",
+  "baseHash": "5e7242bb2907abf1c935683d9223578bbaae78d4",
+  "files": [
+    {
+      "path": "backend/app/modules/change/title_norm.py",
+      "sha256": "96c58cacf1786631279b4f00035882622d33eeda37f9af1a5d7ed3bd2e276dda"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "sha256": "7a4b9f5244c2112a640df867173921bd7b49eb73f075afe69a57abe93a37f992"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_stage_status_ingest.py",
+      "sha256": "7044e84db830f78de368f4632faa68d1d8f08a30b31201716f47d4fd7c1f9826"
+    }
+  ]
+}

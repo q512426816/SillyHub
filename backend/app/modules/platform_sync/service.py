@@ -26,7 +26,6 @@ documents 单写者与本变更不冲突）。
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -47,6 +46,7 @@ from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionL
 
 # ql-20260909-016：pending 集缓存失效挂点（change.pending_cache 只依赖 redis，无环）。
 from app.modules.change.pending_cache import bump_pending_epoch
+from app.modules.change.title_norm import DISPLAY_KEY_PREFIX_RE
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.platform_sync.model import (
     AgentSessionLogORM,
@@ -277,6 +277,9 @@ class PlatformSyncService:
         if not base_ts:
             await self._apply(workspace_id, row, name, body, stamped_at, user)
             await self._ensure_change_row(workspace_id, name, body)
+            # P1（2026-09-16-platform-progress-ingest-persist）：CLI 权威 stage/status
+            # 落表（占位行建行后的既有行同样覆盖——见 _sync_change_stage_status）。
+            await self._sync_change_stage_status(workspace_id, name, body)
             await self._sync_change_owner(workspace_id, name, user_id)
             await self._apply_cli_tombstone(workspace_id, name, body)
             # task-04（2026-08-29-approval-notify-push design §7.3①）：待办产生旁路
@@ -302,6 +305,8 @@ class PlatformSyncService:
         # 分支 3：base_ts 有效（stored None 或 stored ≤ base_ts）→ 接受
         await self._apply(workspace_id, row, name, body, stamped_at, user)
         await self._ensure_change_row(workspace_id, name, body)
+        # P1：同分支 1——CLI 权威 stage/status 落表。
+        await self._sync_change_stage_status(workspace_id, name, body)
         await self._sync_change_owner(workspace_id, name, user_id)
         await self._apply_cli_tombstone(workspace_id, name, body)
         # task-04（design §7.3①）：接受分支同款待办产生钩子（分支 1 / 3 尾部各一处）。
@@ -314,8 +319,22 @@ class PlatformSyncService:
     # ── Change 2026-08-29-approval-notify-push task-04（design §7.3① 触发点①）──
 
     # 变更 key 的日期前缀（YYYY-MM-DD-）：变更无 title 时通知标题用它去掉前缀
-    # 只留语义短名（ql-20260830-008 样式优化）。
-    _DISPLAY_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+    # 只留语义短名（ql-20260830-008 样式优化）。2026-09-16-platform-progress-
+    # ingest-persist 起复用 title_norm 的 DISPLAY_KEY_PREFIX_RE（代码审查 P3-4：
+    # 双份正则漂移风险，收敛一处；title_norm 是无依赖叶子模块）。
+    _DISPLAY_KEY_RE = DISPLAY_KEY_PREFIX_RE
+
+    #: CLI 上行 ``changes[0].status`` → 平台 ``ux_changes.status`` 显式映射表
+    #: （2026-09-16-platform-progress-ingest-persist D-002@v1）。``in_progress`` 是
+    #: 平台自写先例值（``_upsert_projection_progress`` 构造同值），区分「从未开始
+    #: draft」与「CLI 已注册推进中」；``archived`` 对齐读侧终态投影同形。``deleted``
+    #: 不在表内——走 ``_apply_cli_tombstone`` 独立通道（location 列），status 不参与。
+    #: 未知值：``_sync_change_stage_status`` 告警不写列（列无 CHECK，脏值直透 UI）。
+    CLI_STATUS_TO_PLATFORM: dict[str, str] = {
+        "active": "in_progress",
+        "in_progress": "in_progress",
+        "archived": "archived",
+    }
 
     _GATE_TITLE_ZH: dict[str, str] = {
         # PendingReview 四门值 → 门中文名（title 拼接用）。
@@ -816,6 +835,98 @@ class PlatformSyncService:
             return
         await self._session.commit()
 
+    async def _sync_change_stage_status(
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        body: dict[str, Any],
+    ) -> None:
+        """接受分支把 CLI 权威 ``current_stage``/``status`` 落进 ux_changes 行。
+
+        2026-09-16-platform-progress-ingest-persist P1 / D-001@v1：生产实证进度
+        POST 已到达且 latest_progress 落库正确，但 changes 表行永不更新——
+        ``_ensure_change_row`` 行存在即返回（占位行 status 硬编码 draft、
+        current_stage 建行一刻取值），预期接管的 reparse 因 owner_id 守卫（进度
+        推送链 ``_sync_change_owner`` 必设 owner）对 CLI 工作流失效、dispatch 读
+        sillyspec.db 仅 agent 派发触发。本方法把每次接受的上行权威值直接落表
+        （契约 §14.5：权威 current_stage 覆盖表值）。
+
+        - ``current_stage``：payload ``changes[]`` 同名条目非空 str → 覆盖行值
+          （CLI 权威，覆盖 reparse 文件猜值）；缺失/非 str 不动。
+        - ``status``：按 ``CLI_STATUS_TO_PLATFORM`` 显式映射落库（D-002@v1）；
+          ``archived`` 分支补 ``current_stage='archived'`` + ``archived_at`` 仅首填
+          （现值 None 才写），**不动 location**——归档文件移动由 CLI run archive +
+          镜像同步 + reparse 收敛（``_apply_parsed`` 设 parsed.location），ingest
+          抢先置位会被 reparse 回翻产生抖动；未知值 ``log.warning`` 不写列
+          （FR-02：告警不静默丢，也不写脏值）。
+        - savepoint + 独立 commit，best-effort：失败仅 warning 不阻断上行主流程
+          （``_ensure_change_row``/``_sync_change_owner`` 同范式）；重查行不依赖
+          上游传行（同款防御），行缺失直接 return（占位已兜底）。
+        - 幂等：同值覆盖无漂移；``archived_at`` 首填判据防时间戳漂移。
+        - ``workspace_id=None``（service 直调防御）跳过。
+        """
+        if workspace_id is None:
+            return
+        from app.modules.change.model import Change
+
+        info = next(
+            (
+                c
+                for c in (body.get("changes") or [])
+                if isinstance(c, dict) and c.get("name") == name
+            ),
+            {},
+        )
+        raw_stage = info.get("current_stage")
+        raw_status = info.get("status")
+        stage = raw_stage if isinstance(raw_stage, str) and raw_stage else None
+        status_value = raw_status if isinstance(raw_status, str) and raw_status else None
+
+        mapped_status = self.CLI_STATUS_TO_PLATFORM.get(status_value) if status_value else None
+        # FR-02：deleted 不在映射表也不是未知值——走 _apply_cli_tombstone 独立通道
+        # （location 列），此处不告警（代码审查 P2-1：合法墓碑首推勿打「脏值」信号）。
+        if status_value is not None and mapped_status is None and status_value != "deleted":
+            log.warning(
+                "platform_sync.change_status_unknown",
+                workspace_id=str(workspace_id),
+                change_key=name,
+                cli_status=status_value,
+            )
+
+        if stage is None and mapped_status is None:
+            return
+        try:
+            async with self._session.begin_nested():
+                row = (
+                    await self._session.execute(
+                        select(Change).where(
+                            col(Change.workspace_id) == workspace_id,
+                            col(Change.change_key) == name,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if row is None:
+                    return
+                if stage is not None:
+                    row.current_stage = stage
+                if mapped_status is not None:
+                    row.status = mapped_status
+                    if mapped_status == "archived":
+                        row.current_stage = "archived"
+                        if row.archived_at is None:
+                            row.archived_at = datetime.now(UTC)
+                await self._session.flush()
+        except Exception as exc:
+            await self._session.rollback()
+            log.warning(
+                "platform_sync.change_stage_status_sync_failed",
+                workspace_id=str(workspace_id),
+                change_key=name,
+                error=str(exc),
+            )
+            return
+        await self._session.commit()
+
     @staticmethod
     def _assign(
         row: PlatformChangeProgressORM,
@@ -911,12 +1022,18 @@ class PlatformSyncService:
         行有 → UPDATE 只动 documents + updated_at；行无 → INSERT 占位
         （latest_progress NULL，下行端点由占位行守卫视为「无进度」）。
         IntegrityError 并发自愈与 ``_apply`` 同模式。
+
+        P2a（2026-09-16-platform-progress-ingest-persist D-003@v1）：收尾按推送
+        文档重派生 ux_changes.title（``_sync_change_title_from_documents``，
+        best-effort）——title 不在进度契约内，平台从文档派生且原先只在 reparse
+        时从 proposal.md 模板 H1 取值、永不刷新。
         """
         row = await self._find_row(workspace_id, name)
         if row is not None:
             row.documents = dict(documents)
             row.updated_at = datetime.now(UTC)
             await self._session.commit()
+            await self._sync_change_title_from_documents(workspace_id, name, documents)
             return len(documents)
         try:
             self._session.add(
@@ -936,7 +1053,103 @@ class PlatformSyncService:
             existing.documents = dict(documents)
             existing.updated_at = datetime.now(UTC)
             await self._session.commit()
+        await self._sync_change_title_from_documents(workspace_id, name, documents)
         return len(documents)
+
+    #: P2a：四件套文档的阶段深度序（浅→深），重派生 title 时取推送 map 中
+    #: 最深阶段文档的 H1（verify-result/module-impact 不在推送白名单，不列）。
+    _TITLE_STAGE_ORDER: tuple[str, ...] = (
+        "proposal.md",
+        "requirements.md",
+        "design.md",
+        "tasks.md",
+    )
+
+    async def _sync_change_title_from_documents(
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        documents: dict[str, str],
+    ) -> None:
+        """P2a：按推送文档重派生 ux_changes.title（best-effort，D-003@v1）。
+
+        - 取 ``_TITLE_STAGE_ORDER`` 中推送 map 里最深阶段文档的首个 ``# `` H1，
+          过 ``normalize_display_title``（模板 H1 → change_key 去日期前缀；自定义
+          H1 原样）写 ``changes.title``——与 parser ``_extract_title`` 同源归一化，
+          reparse 不回翻。
+        - 行不存在时建占位行（documents 通道无 body.changes[]，defaults 对齐
+          ``binding.py``：status='draft' / location='active' / path=f"changes/{名}"）。
+          **建行前必须过 ``_change_key_deleted`` 防复活守卫**（GAP-1/R-06：
+          documents 端点无 change_deleted 拒收前置，迟到推送已删 key 不得重建行
+          ——命中守卫时行不存在则整体跳过）。
+        - INSERT 撞 ``ux_changes_workspace_key`` 唯一约束 → 回滚静默（对端已建行，
+          ``_ensure_change_row`` race-lost 范式）。
+        - 任一步失败仅 log.warning 不抛——documents 落库已完成，title 派生不阻断。
+        - ``workspace_id=None``（service 直调防御）跳过。
+        """
+        if workspace_id is None:
+            return
+        from app.modules.change.model import Change
+        from app.modules.change.title_norm import extract_h1, normalize_display_title
+
+        try:
+            async with self._session.begin_nested():
+                row = (
+                    await self._session.execute(
+                        select(Change).where(
+                            col(Change.workspace_id) == workspace_id,
+                            col(Change.change_key) == name,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if row is not None and row.location == "deleted":
+                    # GAP-1 防复活（既有行形态）：已删行不被迟到推送重派生 title
+                    # （读侧防复活口径同款——deleted 行不被残留 progress/docs 回显）。
+                    return
+                if row is None:
+                    # GAP-1 防复活（行缺失形态）：已删 key 不重建行（documents
+                    # 端点无 change_deleted 拒收前置）。
+                    if await self._change_key_deleted(workspace_id, name):
+                        return
+                    row = Change(
+                        id=uuid.uuid4(),
+                        workspace_id=workspace_id,
+                        change_key=name,
+                        status="draft",
+                        location="active",
+                        # platform-managed 镜像扁平布局，与 parser rel_prefix 一致
+                        # （_ensure_change_row / binding.py 同款注释）。
+                        path=f"changes/{name}",
+                        updated_at=datetime.now(UTC),
+                    )
+                    self._session.add(row)
+                h1: str | None = None
+                for filename in reversed(self._TITLE_STAGE_ORDER):
+                    content = documents.get(filename)
+                    if content:
+                        h1 = extract_h1(content)
+                        if h1 is not None:
+                            break
+                row.title = normalize_display_title(h1, name)
+                await self._session.flush()
+        except IntegrityError:
+            await self._session.rollback()
+            log.info(
+                "platform_sync.title_sync_race_lost",
+                workspace_id=str(workspace_id),
+                change_key=name,
+            )
+            return
+        except Exception as exc:
+            await self._session.rollback()
+            log.warning(
+                "platform_sync.change_title_sync_failed",
+                workspace_id=str(workspace_id),
+                change_key=name,
+                error=str(exc),
+            )
+            return
+        await self._session.commit()
 
     async def set_approval(
         self,

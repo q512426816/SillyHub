@@ -1,0 +1,779 @@
+diff --git a/backend/app/modules/change/title_norm.py b/backend/app/modules/change/title_norm.py
+new file mode 100644
+index 000000000..08b391b99
+--- /dev/null
++++ b/backend/app/modules/change/title_norm.py
+@@ -0,0 +1,85 @@
++"""change 模块共享 title 归一化 helper（2026-09-16-platform-progress-ingest-persist task-01）。
++
++CLI 模板文档的首个 ``# `` H1 是无语义固定文案（``提案书（Proposal）`` 等，
++含 ``— <change_key>`` 后缀变体）——语义名只在 change_key（去日期前缀）。本模块把
++「H1 → 展示 title」的归一化规则收敛一处，供两条写路径同源消费，防互相回翻：
++
++- platform_sync ``upsert_documents``（文档推送时按最深阶段文档重派生 ux_changes.title）；
++- change parser ``_extract_title``（reparse 扫描 proposal.md，归一化后落 parsed.title）。
++
++模板清单按本仓 ``.sillyspec/changes/**`` 实测 H1 家族校准（proposal/requirements/
++design/plan/tasks 各自的中文类型词 + 可选括号英文/说明 + 可选 ``—`` 后缀）。注意
++**不得**把裸英文标题（``Proposal`` 等）当模板：parser 既有测试 fixture 用英文 H1
++表达自定义标题，收录会连坐断言（plan 审查备忘）。冒号形式（``提案：xxx``）视为
++作者自定义语义标题，原样保留。
++"""
++
++from __future__ import annotations
++
++import re
++
++#: 变更 key 的日期前缀（YYYY-MM-DD-）：key 无语义时展示名用它去掉前缀只留短名
++#: （`_broadcast_pending_approval` 的 `_DISPLAY_KEY_RE` 同款口径，收敛一处）。
++DISPLAY_KEY_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
++
++#: 模板 H1 正则：`<中文类型词>` + 可选 `（...）` 括号段 + 可选 `—/-` 后缀段。
++#: 类型词按长前缀优先排列（`提案书` 在 `提案` 前），防短词先匹配截断。
++#: 后缀分隔接受 em dash / 双 em dash / 连字符（CLI 模板历史用 `—`）。
++_TEMPLATE_TYPE_WORDS = (
++    "提案书",
++    "提案",
++    "需求规格",
++    "需求文档",
++    "需求",
++    "设计文档",
++    "设计",
++    "实现计划",
++    "轻量计划",
++    "详细计划",
++    "计划",
++    "任务清单",
++    "任务注册",
++    "任务分解",
++    "任务",
++    "验证报告",
++    "模块影响分析",
++    "模块影响",
++)
++TEMPLATE_H1_RE: re.Pattern[str] = re.compile(
++    r"^(?:" + "|".join(_TEMPLATE_TYPE_WORDS) + r")"
++    r"(?:（[^）]*）)?"
++    r"\s*(?:[-—–]\s*.*)?$"
++)
++
++_H1_RE = re.compile(r"^#\s+(.+)$")
++
++
++def extract_h1(text: str) -> str | None:
++    """取 markdown 全文首个 ``# `` 一级标题文本（strip 后），无则 None。
++
++    与 parser ``_extract_title`` 的逐行扫描语义一致，收敛供 documents 推送路径
++    复用（文档全文在内存，无需落盘）。
++    """
++    for line in text.splitlines():
++        stripped = line.strip()
++        matched = _H1_RE.match(stripped)
++        if matched:
++            return matched.group(1).strip() or None
++    return None
++
++
++def normalize_display_title(h1: str | None, change_key: str) -> str:
++    """H1 → 展示 title 归一化（纯函数）。
++
++    - H1 缺失或命中模板（类型词 + 可选括号 + 可选 ``—`` 后缀）→ 回退 change_key
++      去日期前缀（``2026-09-15-ehs-reward-punishment`` → ``ehs-reward-punishment``）；
++      key 本身无日期前缀或去后为空则原样用 key。
++    - 其余（作者自定义文案，含冒号形式 ``提案：xxx``）→ 原样返回（strip 后）。
++    """
++    semantic = DISPLAY_KEY_PREFIX_RE.sub("", change_key).strip() or change_key
++    if not h1:
++        return semantic
++    stripped = h1.strip()
++    if not stripped or TEMPLATE_H1_RE.match(stripped):
++        return semantic
++    return stripped
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index 9c472c38b..b56de5c99 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -26,7 +26,6 @@ documents 单写者与本变更不冲突）。
+ 
+ from __future__ import annotations
+ 
+-import re
+ import uuid
+ from dataclasses import dataclass
+ from datetime import UTC, datetime
+@@ -47,6 +46,7 @@ from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionL
+ 
+ # ql-20260909-016：pending 集缓存失效挂点（change.pending_cache 只依赖 redis，无环）。
+ from app.modules.change.pending_cache import bump_pending_epoch
++from app.modules.change.title_norm import DISPLAY_KEY_PREFIX_RE
+ from app.modules.daemon.session_events import publish_sessions_changed
+ from app.modules.platform_sync.model import (
+     AgentSessionLogORM,
+@@ -277,6 +277,9 @@ class PlatformSyncService:
+         if not base_ts:
+             await self._apply(workspace_id, row, name, body, stamped_at, user)
+             await self._ensure_change_row(workspace_id, name, body)
++            # P1（2026-09-16-platform-progress-ingest-persist）：CLI 权威 stage/status
++            # 落表（占位行建行后的既有行同样覆盖——见 _sync_change_stage_status）。
++            await self._sync_change_stage_status(workspace_id, name, body)
+             await self._sync_change_owner(workspace_id, name, user_id)
+             await self._apply_cli_tombstone(workspace_id, name, body)
+             # task-04（2026-08-29-approval-notify-push design §7.3①）：待办产生旁路
+@@ -302,6 +305,8 @@ class PlatformSyncService:
+         # 分支 3：base_ts 有效（stored None 或 stored ≤ base_ts）→ 接受
+         await self._apply(workspace_id, row, name, body, stamped_at, user)
+         await self._ensure_change_row(workspace_id, name, body)
++        # P1：同分支 1——CLI 权威 stage/status 落表。
++        await self._sync_change_stage_status(workspace_id, name, body)
+         await self._sync_change_owner(workspace_id, name, user_id)
+         await self._apply_cli_tombstone(workspace_id, name, body)
+         # task-04（design §7.3①）：接受分支同款待办产生钩子（分支 1 / 3 尾部各一处）。
+@@ -314,8 +319,22 @@ class PlatformSyncService:
+     # ── Change 2026-08-29-approval-notify-push task-04（design §7.3① 触发点①）──
+ 
+     # 变更 key 的日期前缀（YYYY-MM-DD-）：变更无 title 时通知标题用它去掉前缀
+-    # 只留语义短名（ql-20260830-008 样式优化）。
+-    _DISPLAY_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
++    # 只留语义短名（ql-20260830-008 样式优化）。2026-09-16-platform-progress-
++    # ingest-persist 起复用 title_norm 的 DISPLAY_KEY_PREFIX_RE（代码审查 P3-4：
++    # 双份正则漂移风险，收敛一处；title_norm 是无依赖叶子模块）。
++    _DISPLAY_KEY_RE = DISPLAY_KEY_PREFIX_RE
++
++    #: CLI 上行 ``changes[0].status`` → 平台 ``ux_changes.status`` 显式映射表
++    #: （2026-09-16-platform-progress-ingest-persist D-002@v1）。``in_progress`` 是
++    #: 平台自写先例值（``_upsert_projection_progress`` 构造同值），区分「从未开始
++    #: draft」与「CLI 已注册推进中」；``archived`` 对齐读侧终态投影同形。``deleted``
++    #: 不在表内——走 ``_apply_cli_tombstone`` 独立通道（location 列），status 不参与。
++    #: 未知值：``_sync_change_stage_status`` 告警不写列（列无 CHECK，脏值直透 UI）。
++    CLI_STATUS_TO_PLATFORM: dict[str, str] = {
++        "active": "in_progress",
++        "in_progress": "in_progress",
++        "archived": "archived",
++    }
+ 
+     _GATE_TITLE_ZH: dict[str, str] = {
+         # PendingReview 四门值 → 门中文名（title 拼接用）。
+@@ -816,6 +835,98 @@ class PlatformSyncService:
+             return
+         await self._session.commit()
+ 
++    async def _sync_change_stage_status(
++        self,
++        workspace_id: uuid.UUID | None,
++        name: str,
++        body: dict[str, Any],
++    ) -> None:
++        """接受分支把 CLI 权威 ``current_stage``/``status`` 落进 ux_changes 行。
++
++        2026-09-16-platform-progress-ingest-persist P1 / D-001@v1：生产实证进度
++        POST 已到达且 latest_progress 落库正确，但 changes 表行永不更新——
++        ``_ensure_change_row`` 行存在即返回（占位行 status 硬编码 draft、
++        current_stage 建行一刻取值），预期接管的 reparse 因 owner_id 守卫（进度
++        推送链 ``_sync_change_owner`` 必设 owner）对 CLI 工作流失效、dispatch 读
++        sillyspec.db 仅 agent 派发触发。本方法把每次接受的上行权威值直接落表
++        （契约 §14.5：权威 current_stage 覆盖表值）。
++
++        - ``current_stage``：payload ``changes[]`` 同名条目非空 str → 覆盖行值
++          （CLI 权威，覆盖 reparse 文件猜值）；缺失/非 str 不动。
++        - ``status``：按 ``CLI_STATUS_TO_PLATFORM`` 显式映射落库（D-002@v1）；
++          ``archived`` 分支补 ``current_stage='archived'`` + ``archived_at`` 仅首填
++          （现值 None 才写），**不动 location**——归档文件移动由 CLI run archive +
++          镜像同步 + reparse 收敛（``_apply_parsed`` 设 parsed.location），ingest
++          抢先置位会被 reparse 回翻产生抖动；未知值 ``log.warning`` 不写列
++          （FR-02：告警不静默丢，也不写脏值）。
++        - savepoint + 独立 commit，best-effort：失败仅 warning 不阻断上行主流程
++          （``_ensure_change_row``/``_sync_change_owner`` 同范式）；重查行不依赖
++          上游传行（同款防御），行缺失直接 return（占位已兜底）。
++        - 幂等：同值覆盖无漂移；``archived_at`` 首填判据防时间戳漂移。
++        - ``workspace_id=None``（service 直调防御）跳过。
++        """
++        if workspace_id is None:
++            return
++        from app.modules.change.model import Change
++
++        info = next(
++            (
++                c
++                for c in (body.get("changes") or [])
++                if isinstance(c, dict) and c.get("name") == name
++            ),
++            {},
++        )
++        raw_stage = info.get("current_stage")
++        raw_status = info.get("status")
++        stage = raw_stage if isinstance(raw_stage, str) and raw_stage else None
++        status_value = raw_status if isinstance(raw_status, str) and raw_status else None
++
++        mapped_status = self.CLI_STATUS_TO_PLATFORM.get(status_value) if status_value else None
++        # FR-02：deleted 不在映射表也不是未知值——走 _apply_cli_tombstone 独立通道
++        # （location 列），此处不告警（代码审查 P2-1：合法墓碑首推勿打「脏值」信号）。
++        if status_value is not None and mapped_status is None and status_value != "deleted":
++            log.warning(
++                "platform_sync.change_status_unknown",
++                workspace_id=str(workspace_id),
++                change_key=name,
++                cli_status=status_value,
++            )
++
++        if stage is None and mapped_status is None:
++            return
++        try:
++            async with self._session.begin_nested():
++                row = (
++                    await self._session.execute(
++                        select(Change).where(
++                            col(Change.workspace_id) == workspace_id,
++                            col(Change.change_key) == name,
++                        )
++                    )
++                ).scalar_one_or_none()
++                if row is None:
++                    return
++                if stage is not None:
++                    row.current_stage = stage
++                if mapped_status is not None:
++                    row.status = mapped_status
++                    if mapped_status == "archived":
++                        row.current_stage = "archived"
++                        if row.archived_at is None:
++                            row.archived_at = datetime.now(UTC)
++                await self._session.flush()
++        except Exception as exc:
++            await self._session.rollback()
++            log.warning(
++                "platform_sync.change_stage_status_sync_failed",
++                workspace_id=str(workspace_id),
++                change_key=name,
++                error=str(exc),
++            )
++            return
++        await self._session.commit()
++
+     @staticmethod
+     def _assign(
+         row: PlatformChangeProgressORM,
+@@ -911,12 +1022,18 @@ class PlatformSyncService:
+         行有 → UPDATE 只动 documents + updated_at；行无 → INSERT 占位
+         （latest_progress NULL，下行端点由占位行守卫视为「无进度」）。
+         IntegrityError 并发自愈与 ``_apply`` 同模式。
++
++        P2a（2026-09-16-platform-progress-ingest-persist D-003@v1）：收尾按推送
++        文档重派生 ux_changes.title（``_sync_change_title_from_documents``，
++        best-effort）——title 不在进度契约内，平台从文档派生且原先只在 reparse
++        时从 proposal.md 模板 H1 取值、永不刷新。
+         """
+         row = await self._find_row(workspace_id, name)
+         if row is not None:
+             row.documents = dict(documents)
+             row.updated_at = datetime.now(UTC)
+             await self._session.commit()
++            await self._sync_change_title_from_documents(workspace_id, name, documents)
+             return len(documents)
+         try:
+             self._session.add(
+@@ -936,8 +1053,104 @@ class PlatformSyncService:
+             existing.documents = dict(documents)
+             existing.updated_at = datetime.now(UTC)
+             await self._session.commit()
++        await self._sync_change_title_from_documents(workspace_id, name, documents)
+         return len(documents)
+ 
++    #: P2a：四件套文档的阶段深度序（浅→深），重派生 title 时取推送 map 中
++    #: 最深阶段文档的 H1（verify-result/module-impact 不在推送白名单，不列）。
++    _TITLE_STAGE_ORDER: tuple[str, ...] = (
++        "proposal.md",
++        "requirements.md",
++        "design.md",
++        "tasks.md",
++    )
++
++    async def _sync_change_title_from_documents(
++        self,
++        workspace_id: uuid.UUID | None,
++        name: str,
++        documents: dict[str, str],
++    ) -> None:
++        """P2a：按推送文档重派生 ux_changes.title（best-effort，D-003@v1）。
++
++        - 取 ``_TITLE_STAGE_ORDER`` 中推送 map 里最深阶段文档的首个 ``# `` H1，
++          过 ``normalize_display_title``（模板 H1 → change_key 去日期前缀；自定义
++          H1 原样）写 ``changes.title``——与 parser ``_extract_title`` 同源归一化，
++          reparse 不回翻。
++        - 行不存在时建占位行（documents 通道无 body.changes[]，defaults 对齐
++          ``binding.py``：status='draft' / location='active' / path=f"changes/{名}"）。
++          **建行前必须过 ``_change_key_deleted`` 防复活守卫**（GAP-1/R-06：
++          documents 端点无 change_deleted 拒收前置，迟到推送已删 key 不得重建行
++          ——命中守卫时行不存在则整体跳过）。
++        - INSERT 撞 ``ux_changes_workspace_key`` 唯一约束 → 回滚静默（对端已建行，
++          ``_ensure_change_row`` race-lost 范式）。
++        - 任一步失败仅 log.warning 不抛——documents 落库已完成，title 派生不阻断。
++        - ``workspace_id=None``（service 直调防御）跳过。
++        """
++        if workspace_id is None:
++            return
++        from app.modules.change.model import Change
++        from app.modules.change.title_norm import extract_h1, normalize_display_title
++
++        try:
++            async with self._session.begin_nested():
++                row = (
++                    await self._session.execute(
++                        select(Change).where(
++                            col(Change.workspace_id) == workspace_id,
++                            col(Change.change_key) == name,
++                        )
++                    )
++                ).scalar_one_or_none()
++                if row is not None and row.location == "deleted":
++                    # GAP-1 防复活（既有行形态）：已删行不被迟到推送重派生 title
++                    # （读侧防复活口径同款——deleted 行不被残留 progress/docs 回显）。
++                    return
++                if row is None:
++                    # GAP-1 防复活（行缺失形态）：已删 key 不重建行（documents
++                    # 端点无 change_deleted 拒收前置）。
++                    if await self._change_key_deleted(workspace_id, name):
++                        return
++                    row = Change(
++                        id=uuid.uuid4(),
++                        workspace_id=workspace_id,
++                        change_key=name,
++                        status="draft",
++                        location="active",
++                        # platform-managed 镜像扁平布局，与 parser rel_prefix 一致
++                        # （_ensure_change_row / binding.py 同款注释）。
++                        path=f"changes/{name}",
++                        updated_at=datetime.now(UTC),
++                    )
++                    self._session.add(row)
++                h1: str | None = None
++                for filename in reversed(self._TITLE_STAGE_ORDER):
++                    content = documents.get(filename)
++                    if content:
++                        h1 = extract_h1(content)
++                        if h1 is not None:
++                            break
++                row.title = normalize_display_title(h1, name)
++                await self._session.flush()
++        except IntegrityError:
++            await self._session.rollback()
++            log.info(
++                "platform_sync.title_sync_race_lost",
++                workspace_id=str(workspace_id),
++                change_key=name,
++            )
++            return
++        except Exception as exc:
++            await self._session.rollback()
++            log.warning(
++                "platform_sync.change_title_sync_failed",
++                workspace_id=str(workspace_id),
++                change_key=name,
++                error=str(exc),
++            )
++            return
++        await self._session.commit()
++
+     async def set_approval(
+         self,
+         workspace_id: uuid.UUID | None,
+diff --git a/backend/app/modules/platform_sync/tests/test_stage_status_ingest.py b/backend/app/modules/platform_sync/tests/test_stage_status_ingest.py
+new file mode 100644
+index 000000000..3b95ac363
+--- /dev/null
++++ b/backend/app/modules/platform_sync/tests/test_stage_status_ingest.py
+@@ -0,0 +1,395 @@
++"""P1 ingest 权威落库回归（2026-09-16-platform-progress-ingest-persist task-06）。
++
++生产实证根因：progress POST 到达且 latest_progress 落库正确，但 ux_changes 行
++current_stage/status 永不更新（``_ensure_change_row`` 行存在即返回 + reparse 的
++owner_id 守卫）。本文件锚定 ``_sync_change_stage_status`` 的落库行为面：
++
++- 落库断言（current_stage 覆盖 / status 映射 / archived 终态 + archived_at 首填）
++- 幂等重放无漂移
++- 未知枚举告警不写列（log spy 断言，structlog 不进 caplog——同
++  ``test_worker_subsession_dispatch._mcp_tools_log_spy`` 既有范式）
++- 旧 CLI 无 header（分支 1）/ 缺 current_stage 字段（FR-06）
++- 409 冲突 / change_deleted 拒收分支不落库（FR-03）
++- ingest 落库后 reparse 不回翻（R-01：owner 守卫 + ``_apply_parsed`` 直测）
++"""
++
++from __future__ import annotations
++
++import uuid
++from typing import Any
++
++from sqlalchemy import select
++
++
++async def _get_change_row(db_session: Any, ws_id: Any, name: str):
++    from app.modules.change.model import Change
++
++    return (
++        (
++            await db_session.execute(
++                select(Change).where(
++                    Change.workspace_id == ws_id,
++                    Change.change_key == name,
++                )
++            )
++        )
++        .scalars()
++        .one_or_none()
++    )
++
++
++def _progress_body(name: str, stage: str | None, status: str | None) -> dict:
++    entry: dict[str, Any] = {"name": name}
++    if stage is not None:
++        entry["current_stage"] = stage
++    if status is not None:
++        entry["status"] = status
++    return {
++        "project": {"name": "demo"},
++        "changes": [entry],
++        "stages": [],
++        "steps": [],
++        "batch_progress": [],
++        "approvals": [],
++    }
++
++
++# ── FR-01 落库断言 ────────────────────────────────────────────────────────────
++
++
++async def test_progress_push_persists_stage_and_status(client, db_session, shpsync_headers):
++    """首推（无 base_ts，分支 1）→ changes 行 current_stage 覆盖、status 映射落库。
++
++    生产缺陷形态：payload status='active'/current_stage='verify'，表行停留
++    status='draft'/current_stage=NULL。修复后 active→in_progress（D-002@v1）。
++    """
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-ehs-reward-punishment"
++    resp = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="verify", status="active"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T15:00:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row is not None, "首推应建 ux_changes 占位行"
++    assert row.current_stage == "verify"
++    assert row.status == "in_progress"
++    assert row.archived_at is None
++
++
++async def test_progress_push_existing_row_overwritten(client, db_session, shpsync_headers):
++    """行已存在（占位行/扫描行）→ 后续接受推送同样覆盖（核心缺陷场景）。
++
++    生产里行由 reparse 先建（current_stage 猜值为空），此后全流程推进永不更新。
++    """
++    from datetime import UTC, datetime
++
++    from app.modules.change.model import Change
++
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-existing-row"
++    # 模拟 reparse 先建的扫描行：current_stage 猜值 None、status 默认 draft。
++    db_session.add(
++        Change(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=name,
++            title=name,
++            status="draft",
++            location="active",
++            path=f"changes/{name}",
++            updated_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    resp = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="design", status="in_progress"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T16:00:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.current_stage == "design"
++    assert row.status == "in_progress"
++
++
++async def test_progress_push_idempotent_replay(client, db_session, shpsync_headers):
++    """同载荷二次推送（base_ts 取 ack 服务器钟走分支 3）→ 无状态漂移。"""
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-idempotent"
++    first = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="plan", status="active"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T17:00:00.000Z"},
++    )
++    assert first.status_code == 200
++    stamp = first.json()["last_pushed_at"]
++    second = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="plan", status="active"),
++        headers={
++            **headers,
++            "X-SillySpec-Base-Ts": stamp,
++            "X-SillySpec-Pushed-At": "2026-09-15T17:05:00.000Z",
++        },
++    )
++    assert second.status_code == 200
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.current_stage == "plan"
++    assert row.status == "in_progress"
++    assert row.archived_at is None
++
++
++async def test_archived_terminal_persists(client, db_session, shpsync_headers):
++    """status='archived' → status/current_stage='archived' + archived_at 首填；location 不动。"""
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-archived"
++    first = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="archive", status="archived"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T18:00:00.000Z"},
++    )
++    assert first.status_code == 200
++    stamp = first.json()["last_pushed_at"]
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.status == "archived"
++    assert row.current_stage == "archived"
++    assert row.archived_at is not None
++    assert row.location == "active", "location 由文件移动 + reparse 收敛，ingest 不动"
++    archived_at_first = row.archived_at
++
++    # 重放 archived：archived_at 不漂移（首填判据）。
++    second = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="archive", status="archived"),
++        headers={
++            **headers,
++            "X-SillySpec-Base-Ts": stamp,
++            "X-SillySpec-Pushed-At": "2026-09-15T18:05:00.000Z",
++        },
++    )
++    assert second.status_code == 200
++    await db_session.refresh(row)
++    assert row.archived_at == archived_at_first
++
++
++# ── FR-02 未知枚举 / FR-06 旧 CLI 兼容 ────────────────────────────────────────
++
++
++async def test_unknown_status_warns_and_not_written(
++    client, db_session, shpsync_headers, monkeypatch
++):
++    """status 未知值 → 告警（platform_sync.change_status_unknown）+ status 列不写、
++    current_stage 照写（不静默丢也不写脏值）。"""
++    from unittest.mock import MagicMock
++
++    import app.modules.platform_sync.service as ps_service_mod
++
++    spy = MagicMock()
++    monkeypatch.setattr(ps_service_mod, "log", spy)
++
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-weird-status"
++    resp = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="verify", status="mysterious"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T19:00:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.status == "draft", "未知枚举不写 status 列（保持占位默认）"
++    assert row.current_stage == "verify", "current_stage 不受未知枚举影响照写"
++    unknown_calls = [
++        c
++        for c in spy.warning.call_args_list
++        if c.args and c.args[0] == "platform_sync.change_status_unknown"
++    ]
++    assert unknown_calls, "未知枚举必须有告警（FR-02 不静默丢）"
++
++
++async def test_deleted_tombstone_no_unknown_warning(
++    client, db_session, shpsync_headers, monkeypatch
++):
++    """代码审查 P2-1：status='deleted' 是合法墓碑载荷（_apply_cli_tombstone 通道），
++    不得触发 change_status_unknown 告警；墓碑照常落 location='deleted'。"""
++    from unittest.mock import MagicMock
++
++    import app.modules.platform_sync.service as ps_service_mod
++
++    spy = MagicMock()
++    monkeypatch.setattr(ps_service_mod, "log", spy)
++
++    from datetime import UTC, datetime
++
++    from app.modules.change.model import Change
++
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-tombstone-push"
++    db_session.add(
++        Change(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=name,
++            title=name,
++            status="draft",
++            location="active",
++            path=f"changes/{name}",
++            current_stage="verify",
++            updated_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    resp = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="verify", status="deleted"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T19:30:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.location == "deleted", "墓碑照常落 _apply_cli_tombstone 通道"
++    assert row.status == "draft", "deleted 不写 status 列"
++    unknown_calls = [
++        c
++        for c in spy.warning.call_args_list
++        if c.args and c.args[0] == "platform_sync.change_status_unknown"
++    ]
++    assert not unknown_calls, "deleted 是合法通道载荷，不得打未知枚举告警（FR-02）"
++
++
++async def test_missing_stage_and_status_fields_no_overwrite(client, db_session, shpsync_headers):
++    """旧 CLI 载荷缺 current_stage/status 字段 → 对应列不动（FR-06 缺省不覆盖）。"""
++    from datetime import UTC, datetime
++
++    from app.modules.change.model import Change
++
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-sparse-payload"
++    db_session.add(
++        Change(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=name,
++            title=name,
++            status="draft",
++            location="active",
++            path=f"changes/{name}",
++            current_stage="design",
++            updated_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    resp = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage=None, status=None),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T20:00:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.current_stage == "design", "缺 current_stage 不覆盖现值"
++    assert row.status == "draft", "缺 status 不覆盖现值"
++
++
++# ── FR-03 冲突/拒收分支不落库 ─────────────────────────────────────────────────
++
++
++async def test_conflict_409_does_not_write(client, db_session, shpsync_headers):
++    """base_ts 落后（stored > base_ts）→ 409，行值不被旧载荷覆盖。"""
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-conflict"
++    first = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="verify", status="active"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T21:00:00.000Z"},
++    )
++    assert first.status_code == 200
++    # base_ts 用远旧固定值：服务器钟（now）> 2026-08-10 → 冲突分支。
++    stale = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="proposal", status="active"),
++        headers={
++            **headers,
++            "X-SillySpec-Base-Ts": "2026-08-10T13:00:00.000Z",
++            "X-SillySpec-Pushed-At": "2026-09-15T21:05:00.000Z",
++        },
++    )
++    assert stale.status_code == 409
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.current_stage == "verify", "409 冲突不落库"
++    assert row.status == "in_progress"
++
++
++async def test_change_deleted_rejected_not_written(client, db_session, shpsync_headers):
++    """已删 key（location='deleted'）→ 409 change_deleted，不建行不落库。"""
++    from datetime import UTC, datetime
++
++    from app.modules.change.model import Change
++
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-deleted-key"
++    db_session.add(
++        Change(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=name,
++            title=name,
++            status="draft",
++            location="deleted",
++            path=f"changes/{name}",
++            current_stage="verify",
++            updated_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    resp = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="verify", status="active"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T22:00:00.000Z"},
++    )
++    assert resp.status_code == 409
++    assert resp.json().get("code") == "change_deleted"
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.status == "draft", "拒收分支不写 status"
++    assert row.current_stage == "verify", "拒收分支不覆盖 current_stage"
++
++
++# ── R-01 ingest 落库后 reparse 不回翻 ────────────────────────────────────────
++
++
++async def test_reparse_does_not_overwrite_cli_stage(client, db_session, shpsync_headers):
++    """R-01 锚定：ingest 落库 + owner 设置后，reparse（``_apply_parsed``）不回翻。
++
++    回翻防线 = ``_apply_parsed`` 的 owner_id 守卫（文件猜值仅对扫描历史行生效）；
++    进度推送链 ``_sync_change_owner`` 必设 owner → CLI 权威值保持。本用例直测
++    守卫机制（构造 parsed 文件猜值 current_stage='proposal'），无需文件系统脚手架。
++    """
++    from app.modules.change.parser import ParsedChange
++    from app.modules.change.service import ChangeService
++
++    ws_id, headers = shpsync_headers
++    name = "2026-09-15-reparse-guard"
++    resp = await client.post(
++        f"/api/changes/{name}/progress",
++        json=_progress_body(name, stage="verify", status="active"),
++        headers={**headers, "X-SillySpec-Pushed-At": "2026-09-15T23:00:00.000Z"},
++    )
++    assert resp.status_code == 200
++    row = await _get_change_row(db_session, ws_id, name)
++    assert row.current_stage == "verify"
++    assert row.owner_id is not None, "进度推送链应已设置 owner（回翻防线前提）"
++
++    # 模拟 reparse 拿到文件猜值（owner 守卫应拦下）。
++    parsed = ParsedChange(
++        change_key=name,
++        location="active",
++        path=f"changes/{name}",
++        current_stage="proposal",
++        last_modified_at=None,
++    )
++    ChangeService._apply_parsed(row, parsed, workspace_id=ws_id)
++    await db_session.refresh(row)
++    assert row.current_stage == "verify", "reparse 文件猜值不得回翻 CLI 权威 stage"

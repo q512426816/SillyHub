@@ -1,0 +1,68 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "da3b4ba1f12448e61d207f5e348f83fe10dd4b29",
+  "totals": {
+    "files": 6,
+    "additions": 696,
+    "deletions": 3
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/title_norm.py",
+      "additions": 85,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/service.py",
+      "additions": 216,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_stage_status_ingest.py",
+      "additions": 395,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/parser.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "NEW:backend/app/modules/change/tests/test_title_normalization.py",
+      "planned": "新增",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/tests/test_router.py",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "patchSha256": "a6309b1567411fa4e17db9655de72ba40ee795a2b5d5e10637118a57cfee92b8",
+  "patchStatus": "ok",
+  "savedAt": "2026-09-16T00:49:05.820Z"
+}

@@ -1,0 +1,28 @@
+Uninstalled 1 package in 1ms
+Installed 1 package in 7ms
+INFO:     Started server process [41300]
+INFO:     Waiting for application startup.
+{"version": "0.1.0", "environment": "dev", "commit": "91a049bf48b8", "event": "app.start", "level": "info", "timestamp": "2026-09-16T01:13:12.797393Z"}
+{"event": "monitoring.watchdog_started", "level": "info", "timestamp": "2026-09-16T01:13:12.797393Z"}
+Audit hooks registered for 100 tables: ['users', 'sessions', 'roles', 'role_permissions', 'api_keys', 'user_workspace_roles', 'organizations', 'user_organizations', 'user_roles', 'change_reviews', 'workspace_member_runtimes', 'daemon_runtime_grants', 'daemon_instances', 'daemon_runtimes', 'session_dialog_requests', 'daemon_task_leases', 'daemon_change_writes', 'daemon_control_commands', 'agent_session_task', 'workspaces', 'task_workspaces', 'ppm_project_workspace', 'user_workspace_orders', 'agent_run_workspaces', 'agent_runs', 'agent_run_model_usage', 'agent_run_logs', 'agent_sessions', 'agent_session_queued_messages', 'agent_session_scheduled_messages', 'agent_group_chats', 'agent_group_members', 'agent_group_consensus_tasks', 'agent_missions', 'agent_run_dependencies', 'agent_artifacts', 'daemon_borrow_audit', 'custom_skills', 'mcp_servers', 'mcp_server_bindings', 'mcp_templates', 'platform_settings', 'tool_policies', 'skill_sources', 'user_skill_enables', 'spec_workspaces', 'spec_file_manifest', 'agent_profiles', 'changes', 'change_documents', 'change_session_links', 'quicklog_session_links', 'change_events', 'platform_change_progress', 'quicklog_entries', 'platform_agent_logs', 'tasks', 'worktree_leases', 'git_identities', 'git_operation_logs', 'file', 'ppm_problem_list', 'ppm_problem_change', 'ppm_problem_list_process_task', 'ppm_problem_change_process_task', 'ppm_problem_list_process_log', 'ppm_problem_change_process_log', 'ppm_plan_task', 'ppm_task_execute', 'ppm_work_hour', 'ppm_item_session_links', 'session_attachments', 'policy_audit_log', 'incidents', 'postmortems', 'llm_providers', 'mcp_tokens', 'mcp_webhooks', 'notifications', 'platform_sync_tokens', 'ppm_project_maintenance', 'ppm_customer_maintenance', 'ppm_project_member', 'ppm_project_stakeholder', 'ppm_kanban_comment', 'ppm_kanban_subtask', 'ppm_plan_node', 'ppm_plan_node_detail', 'ppm_plan_node_module', 'ppm_ps_project_plan', 'ppm_ps_plan_node', 'ppm_ps_plan_node_detail', 'ppm_ps_plan_node_detail_process', 'releases', 'release_approvals', 'scan_doc_conflict_history', 'scan_documents', 'spec_profile_manifests', 'spec_conflicts', 'tool_operation_logs']
+{"email": "admin@example.com", "user_id": "584270e2-dee1-477a-b84e-c1d2e0725ba5", "created": true, "event": "auth.bootstrap.admin_created", "level": "info", "timestamp": "2026-09-16T01:13:15.144023Z"}
+{"workspace_owner_role_id": "eec34bb5-329e-4b36-ae94-84e7f62be7c4", "workspace_roles_seeded": 0, "event": "auth.bootstrap.rbac.roles_seeded", "level": "info", "timestamp": "2026-09-16T01:13:15.159261Z"}
+{"role_id": "6e527cf1-a40b-4b30-b889-fe8828f4c6a1", "added": 47, "total": 66, "event": "auth.seed.platform_admin_permissions_synced", "level": "info", "timestamp": "2026-09-16T01:13:15.172993Z"}
+{"interval_seconds": 60, "event": "mission_patrol_started", "level": "info", "timestamp": "2026-09-16T01:13:15.260524Z"}
+{"event": "session_reconnect_sweeper_started", "level": "info", "timestamp": "2026-09-16T01:13:15.260524Z"}
+{"event": "lease_expiry_sweeper_started", "level": "info", "timestamp": "2026-09-16T01:13:15.260524Z"}
+{"event": "control_command_gc_sweeper_started", "level": "info", "timestamp": "2026-09-16T01:13:15.260524Z"}
+{"event": "scheduled_send_sweeper_started", "level": "info", "timestamp": "2026-09-16T01:13:15.261572Z"}
+{"event": "consensus_sweeper_started", "level": "info", "timestamp": "2026-09-16T01:13:15.261572Z"}
+StreamableHTTP session manager started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8010 (Press CTRL+C to quit)
+{"duration_ms": 64.18, "checked": 0, "converged": 0, "redispatched": 0, "zombie_marked": 0, "zombie_revived": 0, "worker_recovered": 0, "orphan_sessions_ended": 0, "budget_force_ended": 0, "worker_force_ended": 0, "event": "mission_patrol_round_done", "level": "info", "timestamp": "2026-09-16T01:13:15.330924Z"}
+INFO:     127.0.0.1:54730 - "GET /api/health HTTP/1.1" 200 OK
+{"duration_ms": 34.28, "checked": 0, "converged": 0, "redispatched": 0, "zombie_marked": 0, "zombie_revived": 0, "worker_recovered": 0, "orphan_sessions_ended": 0, "budget_force_ended": 0, "worker_force_ended": 0, "event": "mission_patrol_round_done", "level": "info", "timestamp": "2026-09-16T01:14:15.378385Z"}
+{"workspace_id": "f85a6650-9a12-48a6-a039-32a92934a28c", "change_key": "2026-09-15-ehs-reward-punishment", "event": "platform_sync.placeholder_change_created", "level": "info", "timestamp": "2026-09-16T01:14:54.510421Z"}
+INFO:     127.0.0.1:54890 - "POST /api/changes/2026-09-15-ehs-reward-punishment/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54905 - "POST /api/changes/2026-09-15-ehs-reward-punishment/progress HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54907 - "POST /api/changes/2026-09-15-ehs-reward-punishment/progress HTTP/1.1" 409 Conflict
+{"duration_ms": 22.54, "checked": 0, "converged": 0, "redispatched": 0, "zombie_marked": 0, "zombie_revived": 0, "worker_recovered": 0, "orphan_sessions_ended": 0, "budget_force_ended": 0, "worker_force_ended": 0, "event": "mission_patrol_round_done", "level": "info", "timestamp": "2026-09-16T01:15:15.419774Z"}
+INFO:     127.0.0.1:54934 - "POST /api/changes/2026-09-15-ehs-reward-punishment/documents HTTP/1.1" 200 OK

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from app.core.logging import get_logger
 from app.core.spec_paths import SpecPathResolver
+from app.modules.change.title_norm import normalize_display_title
 
 log = get_logger(__name__)
 
@@ -230,7 +231,13 @@ class ChangeParser:
 
     @staticmethod
     def _extract_title(change_dir: Path) -> str | None:
-        """Return the first ``# `` heading in proposal.md, or None."""
+        """Return the first ``# `` heading in proposal.md, or None.
+
+        P2a（2026-09-16-platform-progress-ingest-persist）：H1 归一化在
+        ``_parse_change`` 消费处统一做（``normalize_display_title(h1, change_key)``
+        ——模板 H1 回退 key 派生名），本函数保持裸 H1 提取语义；两写路径
+        （reparse / documents 推送重派生）共用同一归一化，防互相回翻。
+        """
         proposal = change_dir / SpecPathResolver.PROPOSAL
         if not proposal.is_file():
             return None
@@ -606,11 +613,14 @@ class ChangeParser:
             )
 
         # Title resolution (no frontmatter parsing):
-        #   1. First ``# `` heading in proposal.md
+        #   1. First ``# `` heading in proposal.md, normalized via
+        #      ``normalize_display_title`` (template H1 → key-derived name)
         #   2. Fallback to change_key (directory name)
         # Metadata fields (change_type / owner / affected_components / status)
         # are owned by the platform DB, not by files — see file-lifecycle.md.
-        parsed.title = self._extract_title(change_dir) or change_key
+        # P2a：归一化让 reparse 与 platform_sync 的 documents 推送重派生同源
+        # （模板 H1 无语义 → key 去日期前缀），两写路径不互相回翻。
+        parsed.title = normalize_display_title(self._extract_title(change_dir), change_key)
 
         # Scan standard documents using SpecPathResolver constants
         for doc_type, filename in STANDARD_FILENAMES.items():
@@ -626,6 +636,14 @@ class ChangeParser:
                         last_modified_at=mtime,
                     )
                 )
+            elif doc_type == "MASTER":
+                # P3（2026-09-16-platform-progress-ingest-persist D-004@v1）：
+                # MASTER.md 是 brainstorm 拆分场景产物（仅拆分交付才存在，本仓
+                # 291 变更仅 6 个），缺席不构成「缺失」信号——不发 exists=False
+                # 占位行（其余标准文档保持补缺席行：四件套缺席是归档门禁
+                # documents_complete 的可见性来源）。存量脏行由 _sync_docs 的
+                # seen_keys 删除环在下次 reparse 自然清理。
+                continue
             else:
                 # Check legacy alias (e.g. verification.md → verify-result.md)
                 legacy_found = False
