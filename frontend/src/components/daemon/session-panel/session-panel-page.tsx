@@ -132,6 +132,12 @@ const JUMP_LOAD_EARLIER_MAX_PAGES = 50;
 const HIGHLIGHT_TURN_CLEAR_MS = 2200;
 /** activeTurnKey 联动判定线：视口顶部往下 120px 内最靠近顶部的轮为当前轮（任务卡 §5）。 */
 const ACTIVE_TURN_TRIGGER_PX = 120;
+/** ql-20260916-004：贴底钳制线——滚动容器距底 ≤ 该值视为「读到末尾」，当前轮
+ *  直接取最后一个 data-turn-key 行（判定线规则在贴底/一页多短轮时压中的是中间轮）。 */
+const ACTIVE_TURN_BOTTOM_PX = 120;
+/** ql-20260916-004：跳转定位期 active 联动抑制窗口——scrollIntoView({smooth})
+ *  途中 scroll 事件不重算覆盖点击置位的当前轮；窗口过期恢复有机滚动联动。 */
+const JUMP_ACTIVE_SYNC_SUPPRESS_MS = 700;
 
 /**
  * 轮次正文摘要取值（design §6）：首个 text 段；无 segments（旧回退路径 / 孤儿
@@ -1348,23 +1354,38 @@ export function SessionPanelPage({
   );
 
   /** 视口顶部最近轮派生（任务卡 §5）：最后一个 top ≤ 容器顶 + 120px 的
-   *  data-turn-key 行即当前轮；值不变跳过 set（防高频 scroll 空渲染）。 */
+   *  data-turn-key 行即当前轮；值不变跳过 set（防高频 scroll 空渲染）。
+   *  ql-20260916-004：贴底钳制——容器距底 ≤ ACTIVE_TURN_BOTTOM_PX（含整页
+   *  放下不可滚的 scrollTop=0=maxScroll）时当前轮直接取末行（读到末尾语义），
+   *  短末轮 top 在判定线下方压不中的缺口一并覆盖。 */
   const syncActiveTurnKey = useCallback((el: HTMLElement) => {
-    const line = el.getBoundingClientRect().top + ACTIVE_TURN_TRIGGER_PX;
+    const atBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight <= ACTIVE_TURN_BOTTOM_PX;
     let next: string | null = null;
-    for (const row of el.querySelectorAll<HTMLElement>("[data-turn-key]")) {
-      if (row.getBoundingClientRect().top <= line) {
-        next = row.getAttribute("data-turn-key");
+    if (atBottom) {
+      const rows = el.querySelectorAll<HTMLElement>("[data-turn-key]");
+      next = rows[rows.length - 1]?.getAttribute("data-turn-key") ?? null;
+    } else {
+      const line = el.getBoundingClientRect().top + ACTIVE_TURN_TRIGGER_PX;
+      for (const row of el.querySelectorAll<HTMLElement>("[data-turn-key]")) {
+        if (row.getBoundingClientRect().top <= line) {
+          next = row.getAttribute("data-turn-key");
+        }
       }
     }
     setActiveTurnKey((prev) => (prev === next ? prev : next));
   }, []);
-  /** 联动调度：rAF 节流（一帧至多一次；重复 scroll 事件合并）。 */
+  /** ql-20260916-004：跳转定位期 active 联动抑制截止时刻（performance.now 时间戳，
+   *  0=无抑制）。scrollIntoView({smooth}) 途中 scroll 重算会覆盖点击置位的当前轮
+   *  （一页多短轮时终点压中的是中间轮），窗口期内跳过重算让点击置位存活。 */
+  const jumpActiveSyncSuppressUntilRef = useRef(0);
+  /** 联动调度：rAF 节流（一帧至多一次；重复 scroll 事件合并；抑制窗口内跳过）。 */
   const scheduleActiveTurnSync = useCallback(
     (el: HTMLElement) => {
       if (activeTurnRafRef.current !== null) return;
       activeTurnRafRef.current = requestAnimationFrame(() => {
         activeTurnRafRef.current = null;
+        if (performance.now() < jumpActiveSyncSuppressUntilRef.current) return;
         syncActiveTurnKey(el);
       });
     },
@@ -1551,10 +1572,17 @@ export function SessionPanelPage({
         timer = setInterval(tick, 40);
         return;
       }
-      // 命中：先即时置当前轮（design §9 刻度即时 active；smooth 滚动途中
-      // scroll 事件会经联动重算，终点仍落目标轮），双 rAF 等（循环路径的）
+      // 命中：先即时置当前轮（design §9 刻度即时 active），双 rAF 等（循环路径的）
       // prepend DOM 提交后定位 + 受控高亮 2.2s 自清（连点先清旧定时器防堆积）。
+      // ql-20260916-004：定位期置 active 联动抑制窗口——smooth 滚动途中的 scroll
+      // 重算不再覆盖点击置位（一页多短轮时原注释「终点仍落目标轮」不成立：终点
+      // 压中判定线的是中间轮，正是点击末刻度选中不到末轮的根因）；窗口过期后恢复
+      // 有机滚动联动，用户随后滚动仍正常重算。
       setActiveTurnKey(entry.key);
+      // 抑制窗口从置位时刻起算（覆盖双 rAF 等待期——翻页路径的 prepend 锚定
+      // 滚动也可能在该间隙触发 scroll 重算覆盖置位）。
+      jumpActiveSyncSuppressUntilRef.current =
+        performance.now() + JUMP_ACTIVE_SYNC_SUPPRESS_MS;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           hit()?.scrollIntoView({ behavior: "smooth", block: "start" });

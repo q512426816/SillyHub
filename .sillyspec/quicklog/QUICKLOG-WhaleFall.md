@@ -445,3 +445,15 @@
 根因：刻度 button 的视觉本体 14x2px 细杠即命中区，7px 间隙与轨道非刻度位置均不可命中，hover/点击必须精确压中细杠（原型 .tick 规格忠实还原连命中难点一起继承）
 方案：button 本体改整格刻度带（9px 高=原视觉 pitch x 轨道全宽 30px，轨 gap 归零刻度带无缝铺满），视觉细杠改 ::before 伪元素绘制（状态色类全加 before: 前缀，观感与 twMerge 冲突语义不变）+ cursor-pointer，飞出卡垂直锚点改刻度带中心
 结果：浏览器实机验证全通（命中带 30x9 无缝、细杠外悬停触发正确轮次飞出卡+杠放宽、杠外点击跳转高亮生效）；turn-catalog 15 + sessions 页 44 测试全绿，tsc 0 错，eslint 1 warning 预存（HEAD 同款非本次引入）
+
+## ql-20260916-004-8b06 | 2026-09-16 14:19:20 | 短轮次一页多轮点末刻度选不中末轮——active 选中双修
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（贴底钳制+跳转抑制窗口+常量）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（2 新用例+llm-providers mock 修存量债）
+- .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md（变更索引补条目）
+需求：短轮次一页多轮点末刻度选不中末轮——active 选中双修
+根因：跳转即时置位被 smooth 滚动途中的判定线重算覆盖，且贴底短末轮判定线本就压不中末轮
+方案：贴底钳制（距底<=120px 取末行）+ 跳转定位期 700ms active 联动抑制窗口；补 2 用例 + 修 llm-providers mock 存量债
+结果：新增 2 用例全绿；相关套件 48/49（余 1 为并行会话在途债 stash 实证无关）；tsc 0 错；eslint 4 warning 全存量；实机三场景全通

@@ -187,10 +187,20 @@ vi.mock("@/lib/agent-profiles", async () => {
   };
 });
 
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
-  getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
-}));
+vi.mock("@/lib/api/llm-providers", async () => {
+  // ql-20260916-004 顺手修存量债：并行会话 7b80bf54 起 ctx-usage-bar 渲染链
+  // import detectUsageProvider，工厂只暴露两个 fetch 导出会让 whoLine 等用例
+  // 抛「No export defined on mock」——importActual 展开后纯函数走真实实现
+  // （同文件下方 @/lib/errors mock 先例），fetch 类仍经 mocks 捕获。
+  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
+    "@/lib/api/llm-providers",
+  );
+  return {
+    ...actual,
+    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+    getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
+  };
+});
 
 // task-08（2026-08-21-session-reopen-resume / FR-09）：useNotify 改 mock 捕获——
 // jsdom 无 antd <App> 上下文时 message.* 是 no-op 桩，409 中文文案断言只能看调用
@@ -1906,6 +1916,28 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     ]);
   }
 
+  /** ql-20260916-004：三轮全已加载夹具（时间线渲染 3 个 data-turn-key 行、刻度全
+   *  实心，active 联动/贴底钳制/跳转抑制用例共用）。 */
+  function mockThreeLoadedRuns() {
+    mocks.listSessionRuns.mockResolvedValue([
+      makeRun({ id: "r-1", started_at: "2026-08-15T07:00:00Z" }),
+      makeRun({ id: "r-2", started_at: "2026-08-15T07:30:00Z" }),
+      makeRun({ id: "r-3", started_at: "2026-08-15T08:00:00Z" }),
+    ]);
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      navLog("a-1", "r-1", "user_input", "第一轮提问", "2026-08-15T07:00:00Z"),
+      navLog("a-2", "r-1", "stdout", "第一轮答复", "2026-08-15T07:00:05Z"),
+      navLog("b-1", "r-2", "user_input", "第二轮提问", "2026-08-15T07:30:00Z"),
+      navLog("b-2", "r-2", "stdout", "第二轮答复", "2026-08-15T07:30:05Z"),
+      navLog("c-1", "r-3", "user_input", "第三轮提问", "2026-08-15T08:00:00Z"),
+      navLog("c-2", "r-3", "stdout", "第三轮答复", "2026-08-15T08:00:05Z"),
+    ]);
+  }
+
+  /** 等一帧（scroll 联动 rAF 落定后断言；在组件调度的 rAF 之后入队，执行时其回调已完成）。 */
+  const flushRaf = () =>
+    new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
   /** task-06：mobile variant 面板直挂（⋯ 菜单/Drawer 仅 mobile 渲染分支；
    *  复用本文件模块级 mocks，QueryClient 形态对齐 renderPage）。 */
   function renderMobilePanel() {
@@ -1962,6 +1994,87 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     expect(beforeCallCount()).toBe(0);
     expect(mocks.notifyWarning).not.toHaveBeenCalled();
     expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
+
+  it("desktop ql-20260916-004 贴底钳制：距底 ≤120px 当前轮取末行；离底回落判定线规则", async () => {
+    // 一页多短轮场景（用户反馈根因）：末轮 top 在判定线下方压不中，贴底时
+    // 应直接选末行——「读到末尾」语义。
+    mockThreeLoadedRuns();
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("第三轮提问")).toBeTruthy();
+
+    const scroller = await screen.findByTestId("turn-timeline-scroll");
+    // 量测前提 mock：容器顶 0、三行 top 0/50/300（判定线 = 顶 + 120px，
+    // 判定线规则压中第 2 轮，末轮 300 压不中）。
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+    } as DOMRect);
+    const rows = [...scroller.querySelectorAll<HTMLElement>("[data-turn-key]")];
+    expect(rows.map((r) => r.dataset.turnKey)).toEqual(["r-1", "r-2", "r-3"]);
+    [0, 50, 300].forEach((top, i) => {
+      vi.spyOn(rows[i]!, "getBoundingClientRect").mockReturnValue({
+        top,
+      } as DOMRect);
+    });
+    // 贴底：scrollHeight 1000 - scrollTop 600 - clientHeight 400 = 0 ≤ 120。
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(scroller, "scrollTop", { value: 600, configurable: true });
+
+    fireEvent.scroll(scroller);
+    const tick3 = screen.getByRole("button", { name: /^第3轮 · 完成/ });
+    await waitFor(() => expect(tick3).toHaveAttribute("aria-current", "true"));
+    // 修复前：判定线规则选中的是压线的第 2 轮。
+    expect(
+      screen.getByRole("button", { name: /^第2轮 · 完成/ }),
+    ).not.toHaveAttribute("aria-current");
+
+    // 离底（scrollTop 100 → 距底 500 > 120）：回落判定线规则 → 压中第 2 轮。
+    Object.defineProperty(scroller, "scrollTop", { value: 100, configurable: true });
+    fireEvent.scroll(scroller);
+    const tick2 = screen.getByRole("button", { name: /^第2轮 · 完成/ });
+    await waitFor(() => expect(tick2).toHaveAttribute("aria-current", "true"));
+    expect(tick3).not.toHaveAttribute("aria-current");
+  });
+
+  it("desktop ql-20260916-004 跳转抑制窗口：点击置位在 smooth 滚动重算下存活，窗口过期恢复联动", async () => {
+    mockThreeLoadedRuns();
+    renderPage();
+    await selectDefaultSession();
+    expect(await screen.findByText("第三轮提问")).toBeTruthy();
+
+    const tick1 = await screen.findByRole("button", { name: /^第1轮 · 完成/ });
+    scrollIntoViewSpy.mockClear();
+    fireEvent.click(tick1);
+    await waitFor(expectJumpScrolled);
+    await waitFor(() => expect(tick1).toHaveAttribute("aria-current", "true"));
+
+    // 抑制窗口内（点击后 <700ms）：smooth 滚动途中的 scroll 重算被跳过，
+    // 点击置位存活——jsdom 零盒模型 + 贴底钳制下联动重算会选末轮（修复前
+    // 此刻第 1 轮已被覆盖为第 3 轮，正是「点了末刻度选不中末刻度」同源根因）。
+    const scroller = screen.getByTestId("turn-timeline-scroll");
+    fireEvent.scroll(scroller);
+    await flushRaf();
+    expect(tick1).toHaveAttribute("aria-current", "true");
+    expect(
+      screen.getByRole("button", { name: /^第3轮 · 完成/ }),
+    ).not.toHaveAttribute("aria-current");
+
+    // 窗口过期（performance.now 推到抑制截止之后）：scroll 重算恢复 → 末轮选中。
+    const realNow = performance.now();
+    const nowSpy = vi.spyOn(performance, "now").mockReturnValue(realNow + 1000);
+    try {
+      fireEvent.scroll(scroller);
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: /^第3轮 · 完成/ }),
+        ).toHaveAttribute("aria-current", "true"),
+      );
+      expect(tick1).not.toHaveAttribute("aria-current");
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("desktop 派发失败轮 started_at 空不落队尾：按 created_at 回真实轮位（ql-20260910-011）", async () => {
