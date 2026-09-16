@@ -46,6 +46,14 @@ interface ParsedFrame {
   id: string | null;
 }
 
+/** 解析一段 chunk 的结果：完整帧列表 + 尾部半帧 + 本段是否见过注释行（心跳）。 */
+interface ParsedChunkResult {
+  frames: ParsedFrame[];
+  rest: string;
+  /** 本 chunk 含 ``:`` 开头的注释行（backend ``: connected`` / `: keepalive` 心跳）。 */
+  commentSeen: boolean;
+}
+
 /**
  * 解析一段以空行分帧的 text/event-stream 文本（可含多个完整帧 + 1 个尾部半帧）。
  *
@@ -59,11 +67,12 @@ interface ParsedFrame {
  * @returns frames 完整帧列表；rest 未闭合的尾部半帧文本（拼接进下次 chunk，
  *          不丢跨 chunk 断行的帧）。
  */
-export function parseSseChunk(chunk: string): { frames: ParsedFrame[]; rest: string } {
+export function parseSseChunk(chunk: string): ParsedChunkResult {
   const frames: ParsedFrame[] = [];
   let event = "";
   let dataLines: string[] = [];
   let id: string | null = null;
+  let commentSeen = false;
 
   const dispatch = (): void => {
     // 无 data 行的帧（纯注释 / 纯 event 行 + 空行）不派发（对齐规范）。
@@ -84,7 +93,10 @@ export function parseSseChunk(chunk: string): { frames: ParsedFrame[]; rest: str
       dispatch();
       continue;
     }
-    if (line.startsWith(":")) continue; // 注释行 / 心跳
+    if (line.startsWith(":")) {
+      commentSeen = true; // 注释行 / 心跳（`: keepalive` 等）
+      continue;
+    }
     const colon = line.indexOf(":");
     let field: string;
     let value: string;
@@ -101,7 +113,7 @@ export function parseSseChunk(chunk: string): { frames: ParsedFrame[]; rest: str
     else if (field === "id") id = value;
     // retry / 未知字段：忽略（无自动重连，见文件头注释）。
   }
-  return { frames, rest };
+  return { frames, rest, commentSeen };
 }
 
 /** fetch-SSE 连接句柄：形状贴近 EventSource（close/readyState/on* 回调）。 */
@@ -120,6 +132,14 @@ export interface FetchSseConnection {
    * 不自动重连（见文件头「有意差异」）。
    */
   onerror: ((ev: { status?: number }) => void) | null;
+  /**
+   * quick（ql-20260916-008）：注释帧（backend ``: keepalive`` 心跳）到达回调——
+   * parseSseChunk 把 ``:`` 开头的行识别为 commentSeen 并触发本回调（与
+   * onmessage 互斥：注释帧无 data 行本就不派发）。消费方（streamSession 经
+   * connGuard.tap 包装的 onHeartbeat）据此把心跳视为连接存活证据；SSE 断连时
+   * 不再触发，死连接仍走 onerror 重连路径。
+   */
+  onHeartbeat: (() => void) | null;
   /** 0=CONNECTING 1=OPEN 2=CLOSED（对齐 EventSource readyState 语义）。 */
   readonly readyState: 0 | 1 | 2;
   /** 注册命名事件监听（如 ``event: done`` 帧）。返回解绑函数。 */
@@ -176,6 +196,7 @@ export function fetchSse(
     onmessage: null,
     onopen: null,
     onerror: null,
+    onHeartbeat: null,
     get readyState(): 0 | 1 | 2 {
       return state;
     },
@@ -254,7 +275,11 @@ export function fetchSse(
           continue;
         }
         buffer = buffer.slice(complete.length);
-        const { frames } = parseSseChunk(complete);
+        // quick（ql-20260916-008）：注释帧（`: keepalive` 心跳）先回调——与
+        // frames 派发互斥（注释帧无 data 行不进 frames），连接存活信号上抛给
+        // streamSession → connGuard 看门狗（重置活动时间，健康空闲连接不再误对账）。
+        const { frames, commentSeen } = parseSseChunk(complete);
+        if (commentSeen && !isClosed()) conn.onHeartbeat?.();
         for (const frame of frames) {
           if (isClosed()) return;
           dispatchFrame(frame);

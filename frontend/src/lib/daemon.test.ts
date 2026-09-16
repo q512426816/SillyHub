@@ -507,6 +507,8 @@ interface CapturedSseConnection {
   onmessage: ((_e: { data: string; lastEventId: string }) => void) | null;
   onopen: (() => void) | null;
   onerror: ((_ev: { status?: number }) => void) | null;
+  /** quick（ql-20260916-008）：心跳注释帧回调（fetch-sse 连接类型新增字段）。 */
+  onHeartbeat: (() => void) | null;
   /** streamSession 建连时会挂 `done` 命名事件监听（终态收口），桩补空实现。 */
   addEventListener: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
@@ -525,6 +527,7 @@ function installFetchSseMock(): void {
       onmessage: null,
       onopen: null,
       onerror: null,
+      onHeartbeat: null,
       addEventListener: vi.fn(),
       close: vi.fn(),
     };

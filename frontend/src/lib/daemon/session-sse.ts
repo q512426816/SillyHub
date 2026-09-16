@@ -328,6 +328,15 @@ export interface SessionStreamHandlers {
    * 变更种类，透传不解析。可选回调——不传的既有调用方零影响。
    */
   onQueueChanged?(event: SessionStreamEnvelope): void;
+  /**
+   * quick（ql-20260916-008）：SSE 心跳存活信号——backend 每 25-30s 发
+   * `: keepalive` 注释帧，fetch-sse 不解析注释、handler onmessage 永不触发，
+   * 运行轮看门狗（use-stream-connection-guard）原实现下健康空闲连接 90s 后必
+   * 触发对账。streamSession 在注释帧到达时经 tap 包装层显式调用本回调（重置
+   * 活动时间 + 连续轮次，视为连接存活证据）；SSE 断连时不再被调用，死连接仍
+   * 走对账兜底。可选回调——不传的既有调用方零影响。
+   */
+  onHeartbeat?(): void;
 }
 
 export interface SessionStreamConnection {

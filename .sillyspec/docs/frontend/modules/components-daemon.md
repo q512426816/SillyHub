@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-16 09:00:00
+updated_at: 2026-09-16 10:00:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）
@@ -226,6 +226,8 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - SUPPORTED_SESSION_PROVIDERS = ["claude","codex"] 在 dialog 分支与
   sessions/pre-session-picker（NewSessionForm 删除后接棒，2026-08-23-sessions-
   workspace-hub）两处内联，扩展 provider 两处同步。
+
+- **use-stream-connection-guard（ql-20260916-008-407e）**：心跳帧经 `tapStreamHandlers` 包装视为连接存活（`wrapped.onHeartbeat` 重置活动时间/连续轮次/清提示）——原实现仅 handler 事件推进活动时间，backend 25-30s 心跳注释帧不被 fetch-sse 解析，健康空闲连接 90s 后必触发对账；对账加 `TURN_WATCHDOG_MAX_ROUNDS=12` 上限，stale running 轮不再无限 30s 轮询（停表留 stalledHint，新事件/心跳/换轮自然重启）。
 
 ## quick-ab951f4e 增量（会话页 /runs 请求扇出收敛，ql-20260916-005-0fc5）
 

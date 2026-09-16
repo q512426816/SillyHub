@@ -20,6 +20,13 @@ const TURN_WATCHDOG_FIRST_MS = 90_000;
 const TURN_WATCHDOG_INTERVAL_MS = 30_000;
 /** 连续 N 轮对账仍 running 且 SSE 断开 → 显示「本轮长时间无响应」提示。 */
 const TURN_WATCHDOG_HINT_ROUNDS = 3;
+/**
+ * quick（ql-20260916-008）：对同一轮的对账轮次上限——达到即停表（清计时器，只留
+ * stalledHint 提示）。stale run 永不终态时（daemon 崩溃/锁死遗留 running）对账
+ * 永远查不出终态，无上限会每 30s 拉 getAgentSession+listSessionRuns 永不停止
+ * （约 12 轮 ≈ 6min：3 轮提示门槛 ×4，给用户足够观察窗又不无限轮询）。
+ */
+const TURN_WATCHDOG_MAX_ROUNDS = 12;
 /** 「连接已恢复」横幅自动消失时长（design A6：约 2 秒）。 */
 const RECONNECTED_BANNER_MS = 2_000;
 
@@ -175,6 +182,10 @@ export function useStreamConnectionGuard(opts: {
         if (roundsRef.current >= TURN_WATCHDOG_HINT_ROUNDS && sseDownRef.current) {
           setStalledHint(true);
         }
+        // quick（ql-20260916-008）：对账轮次上限——stale run 永不终态时（对账永远
+        // 查不出终态）不再无限 30s 一轮，停表只留 stalledHint；新事件/心跳/换轮
+        // 经包装层重置 roundsRef 后由下方常驻 setTimeout 自然重启。
+        if (roundsRef.current >= TURN_WATCHDOG_MAX_ROUNDS) return;
       }
       watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_INTERVAL_MS);
     };
@@ -202,6 +213,17 @@ export function useStreamConnectionGuard(opts: {
           (fn as (...a: unknown[]) => void)(...args);
         };
       }
+      // quick（ql-20260916-008）：心跳注释帧计存活——backend 每 25-30s 发
+      // `: keepalive`，fetch-sse 不解析注释帧、handler onmessage 永不触发，原实现
+      // 下健康空闲连接 90s 后必触发对账。无 event 字段的 envelope 即心跳帧（dispatch
+      // 对非 session 事件提前 return，见 session-stream.ts）：重置活动时间 + 连续
+      // 轮次（较对账重置更轻），SSE 断连时本包装层不再被调用、死连接仍走对账兜底。
+      // onHeartbeat 由 streamSession 在注释帧到达时显式调用（经 tap 包装注入）。
+      wrapped.onHeartbeat = () => {
+        lastActivityRef.current = Date.now();
+        roundsRef.current = 0;
+        setStalledHint(false);
+      };
       wrapped.onStatusChange = (status: SessionStreamStatus, attempt?: number) => {
         if (status === "reconnecting") {
           sseDownRef.current = true;

@@ -2,7 +2,7 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-daemon
-updated_at: 2026-09-16 09:00:00
+updated_at: 2026-09-16 10:00:00
 author: qinyi
 created_at: 2026-08-18 01:45:00
 ---
@@ -92,6 +92,14 @@ conn.onmessage = (raw) => {
 - **streamSession options.runsSnapshot**：宿主同刻已拉的本会话 runs 快照——首连缺口同步 `syncGapFromDb(signal, runsSnapshot)` 直接复用不自拉（page 模式 runsPromise 并行发起后 await 注入）；缺省 / resync / 看门狗路径始终自拉（时刻更晚，须新鲜）。
 - **5s 复核拉取门控**：`sawRunningRunAtSync`（最近一次缺口同步快照是否存在非终态 run）——全终态快照时 `reconcileTerminalRuns` 直接跳过（「快照 → 订阅」亚秒窗口内能完成的 run 必然快照时在跑）；窗口内新建且瞬完的 run 无轮可挂，日志重放/下次重连自愈（可接受降级）。
 - 回归：`daemon.test.ts` 新增 3 用例（快照注入 0 拉取 / 含 running 5s 复核恰一次 / 缺省自拉一次）。
+
+## quick-e29a2e3f 增量（看门狗心跳存活 + 对账上限，ql-20260916-008-407e）
+
+- **fetch-sse `onHeartbeat`**：连接类型新增注释帧回调——`parseSseChunk` 识别 `:` 开头行置 `commentSeen`，消费循环在派发 frames 前先调 `conn.onHeartbeat`（与 onmessage 互斥：注释帧无 data 行不进 frames）。
+- **streamSession 透传**：`wireConnection` 赋值 `es.onHeartbeat = () => handlers.onHeartbeat?.()`；`dispatch` 对 parse 成功但无 event 字段的 JSON 帧（防御路径）同步调 `handlers.onHeartbeat`。
+- **`SessionStreamHandlers.onHeartbeat?`**：可选回调，不传的既有调用方零影响。
+- **connGuard 包装**：`tapStreamHandlers` 注入 `wrapped.onHeartbeat`（重置 `lastActivityRef` + `roundsRef` + 清 stalledHint）——backend 每 25-30s 的 `: keepalive` 现视为连接存活证据，健康空闲连接不再 90s 后误触发对账；SSE 断连时不再被调用，死连接仍走 onerror 重连 + 对账兜底。
+- **对账轮次上限**：`TURN_WATCHDOG_MAX_ROUNDS = 12`（约 6min）——同一 running 轮连续 12 轮对账仍无终态即停表（清计时器，只留 stalledHint 文案），stale run（daemon 崩溃遗留 running）不再每 30s 无限拉 getAgentSession+listSessionRuns；新事件/心跳/换轮重置 roundsRef 后经常驻 setTimeout 自然重启。
 
 ## 人工备注
 

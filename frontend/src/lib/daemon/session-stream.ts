@@ -266,6 +266,12 @@ export function streamSession(
     const kind = env.event;
     if (!kind) {
       // 无 event 字段：非 session channel 事件（如 backend summary 帧），忽略。
+      // quick（ql-20260916-008）：同时作为心跳存活信号上报——backend 每 25-30s
+      // 发的 `: keepalive` 注释帧正是无 event 载荷（fetch-sse 不解析注释行，真实
+      // 注释到达走下方 wireConnection 的显式 onHeartbeat 路径；此处防御 parse 成功
+      // 的无 event JSON 帧，语义一致）。运行轮看门狗据此把心跳视为连接存活，
+      // 健康空闲连接不再 90s 后误触发对账。
+      handlers.onHeartbeat?.();
       return;
     }
     // 校验 session_id（permission_* 等同样携带 session_id，统一校验）
@@ -420,6 +426,11 @@ export function streamSession(
       setStatus("live"); // task-09：重建后首条实时事件 → live（横幅收起）
       dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
     };
+    // quick（ql-20260916-008）：心跳注释帧显式存活信号——backend 每 25-30s 发
+    // `: keepalive`，fetch-sse 不解析注释、onmessage 不触发；连接层识别注释帧后
+    // 调本回调 → handler.onHeartbeat（经 connGuard.tap 包装重置看门狗活动时间，
+    // 健康空闲连接不再 90s 误对账）。注释帧无 JSON 载荷，不经 dispatch。
+    es.onHeartbeat = () => handlers.onHeartbeat?.();
     // 终态收口（ql-20260829-007）：backend stream_session_logs 对终态（ended/failed）
     // 会话连上即发命名事件 `event: done` 并关闭连接（连接时终态 race guard 与流中
     // session_ended 两场景同款）。done 是命名事件不进 onmessage/dispatch，此前无人

@@ -1,0 +1,257 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 1a2ad129c..eab92b9b8 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -4,7 +4,7 @@ doc_type: module-card
+ module_id: components-daemon
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+-updated_at: 2026-09-16 09:00:00
++updated_at: 2026-09-16 10:00:00
+ ---
+ 
+ # Daemon 运行时交互组件（components-daemon）
+@@ -227,6 +227,8 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+   sessions/pre-session-picker（NewSessionForm 删除后接棒，2026-08-23-sessions-
+   workspace-hub）两处内联，扩展 provider 两处同步。
+ 
++- **use-stream-connection-guard（ql-20260916-008-407e）**：心跳帧经 `tapStreamHandlers` 包装视为连接存活（`wrapped.onHeartbeat` 重置活动时间/连续轮次/清提示）——原实现仅 handler 事件推进活动时间，backend 25-30s 心跳注释帧不被 fetch-sse 解析，健康空闲连接 90s 后必触发对账；对账加 `TURN_WATCHDOG_MAX_ROUNDS=12` 上限，stale running 轮不再无限 30s 轮询（停表留 stalledHint，新事件/心跳/换轮自然重启）。
++
+ ## quick-ab951f4e 增量（会话页 /runs 请求扇出收敛，ql-20260916-005-0fc5）
+ 
+ - **session-panel-page**：轮终态「新完成」判定——`completedSideEffectRunIdsRef` 集合（同 `fetchedErrorRunIdsRef` 先例），`onTurnCompleted` 仅对集合外首条完成事件触发刷新类副作用（runsMeta 快照 / `setUsageRefresh` 用量信号 / 队列 invalidate / 左栏列表刷新）；历史回灌的终态轮在 establish 内按 `realRunId` 播种（logsToTurns 产物），首连缺口同步与 5s 复核对全量终态 run 合成的重放事件由此不再逐条扇出 `listSessionRuns`（进入会话页瞬间 ~2T 条并发 /runs 的根因）；轮状态更新不经此门（upsertTurn 终态幂等），断线缺口补合成的轮副作用照常。失败轮错误详情拉取改 `fetchRunsForErrorDetail` in-flight 共享（同批多个失败重放收敛 1 请求，settle 即置空保新鲜度）。`runsPromise` 与历史预取并行发起，establish 内 await 后以 `runsSnapshot` 注入 streamSession。
+diff --git a/.sillyspec/docs/frontend/modules/lib-daemon.md b/.sillyspec/docs/frontend/modules/lib-daemon.md
+index d29ba19e6..0d080b1fb 100644
+--- a/.sillyspec/docs/frontend/modules/lib-daemon.md
++++ b/.sillyspec/docs/frontend/modules/lib-daemon.md
+@@ -2,7 +2,7 @@
+ schema_version: 1
+ doc_type: module-card
+ module_id: lib-daemon
+-updated_at: 2026-09-16 09:00:00
++updated_at: 2026-09-16 10:00:00
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+ ---
+@@ -93,6 +93,14 @@ conn.onmessage = (raw) => {
+ - **5s 复核拉取门控**：`sawRunningRunAtSync`（最近一次缺口同步快照是否存在非终态 run）——全终态快照时 `reconcileTerminalRuns` 直接跳过（「快照 → 订阅」亚秒窗口内能完成的 run 必然快照时在跑）；窗口内新建且瞬完的 run 无轮可挂，日志重放/下次重连自愈（可接受降级）。
+ - 回归：`daemon.test.ts` 新增 3 用例（快照注入 0 拉取 / 含 running 5s 复核恰一次 / 缺省自拉一次）。
+ 
++## quick-e29a2e3f 增量（看门狗心跳存活 + 对账上限，ql-20260916-008-407e）
++
++- **fetch-sse `onHeartbeat`**：连接类型新增注释帧回调——`parseSseChunk` 识别 `:` 开头行置 `commentSeen`，消费循环在派发 frames 前先调 `conn.onHeartbeat`（与 onmessage 互斥：注释帧无 data 行不进 frames）。
++- **streamSession 透传**：`wireConnection` 赋值 `es.onHeartbeat = () => handlers.onHeartbeat?.()`；`dispatch` 对 parse 成功但无 event 字段的 JSON 帧（防御路径）同步调 `handlers.onHeartbeat`。
++- **`SessionStreamHandlers.onHeartbeat?`**：可选回调，不传的既有调用方零影响。
++- **connGuard 包装**：`tapStreamHandlers` 注入 `wrapped.onHeartbeat`（重置 `lastActivityRef` + `roundsRef` + 清 stalledHint）——backend 每 25-30s 的 `: keepalive` 现视为连接存活证据，健康空闲连接不再 90s 后误触发对账；SSE 断连时不再被调用，死连接仍走 onerror 重连 + 对账兜底。
++- **对账轮次上限**：`TURN_WATCHDOG_MAX_ROUNDS = 12`（约 6min）——同一 running 轮连续 12 轮对账仍无终态即停表（清计时器，只留 stalledHint 文案），stale run（daemon 崩溃遗留 running）不再每 30s 无限拉 getAgentSession+listSessionRuns；新事件/心跳/换轮重置 roundsRef 后经常驻 setTimeout 自然重启。
++
+ ## 人工备注
+ 
+ <!-- MANUAL_NOTES_START -->
+diff --git a/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts b/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts
+index 5a6e07ebb..194fe1419 100644
+--- a/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts
++++ b/frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts
+@@ -20,6 +20,13 @@ const TURN_WATCHDOG_FIRST_MS = 90_000;
+ const TURN_WATCHDOG_INTERVAL_MS = 30_000;
+ /** 连续 N 轮对账仍 running 且 SSE 断开 → 显示「本轮长时间无响应」提示。 */
+ const TURN_WATCHDOG_HINT_ROUNDS = 3;
++/**
++ * quick（ql-20260916-008）：对同一轮的对账轮次上限——达到即停表（清计时器，只留
++ * stalledHint 提示）。stale run 永不终态时（daemon 崩溃/锁死遗留 running）对账
++ * 永远查不出终态，无上限会每 30s 拉 getAgentSession+listSessionRuns 永不停止
++ * （约 12 轮 ≈ 6min：3 轮提示门槛 ×4，给用户足够观察窗又不无限轮询）。
++ */
++const TURN_WATCHDOG_MAX_ROUNDS = 12;
+ /** 「连接已恢复」横幅自动消失时长（design A6：约 2 秒）。 */
+ const RECONNECTED_BANNER_MS = 2_000;
+ 
+@@ -175,6 +182,10 @@ export function useStreamConnectionGuard(opts: {
+         if (roundsRef.current >= TURN_WATCHDOG_HINT_ROUNDS && sseDownRef.current) {
+           setStalledHint(true);
+         }
++        // quick（ql-20260916-008）：对账轮次上限——stale run 永不终态时（对账永远
++        // 查不出终态）不再无限 30s 一轮，停表只留 stalledHint；新事件/心跳/换轮
++        // 经包装层重置 roundsRef 后由下方常驻 setTimeout 自然重启。
++        if (roundsRef.current >= TURN_WATCHDOG_MAX_ROUNDS) return;
+       }
+       watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_INTERVAL_MS);
+     };
+@@ -202,6 +213,17 @@ export function useStreamConnectionGuard(opts: {
+           (fn as (...a: unknown[]) => void)(...args);
+         };
+       }
++      // quick（ql-20260916-008）：心跳注释帧计存活——backend 每 25-30s 发
++      // `: keepalive`，fetch-sse 不解析注释帧、handler onmessage 永不触发，原实现
++      // 下健康空闲连接 90s 后必触发对账。无 event 字段的 envelope 即心跳帧（dispatch
++      // 对非 session 事件提前 return，见 session-stream.ts）：重置活动时间 + 连续
++      // 轮次（较对账重置更轻），SSE 断连时本包装层不再被调用、死连接仍走对账兜底。
++      // onHeartbeat 由 streamSession 在注释帧到达时显式调用（经 tap 包装注入）。
++      wrapped.onHeartbeat = () => {
++        lastActivityRef.current = Date.now();
++        roundsRef.current = 0;
++        setStalledHint(false);
++      };
+       wrapped.onStatusChange = (status: SessionStreamStatus, attempt?: number) => {
+         if (status === "reconnecting") {
+           sseDownRef.current = true;
+diff --git a/frontend/src/lib/daemon.test.ts b/frontend/src/lib/daemon.test.ts
+index 30837b65e..4bd5943e9 100644
+--- a/frontend/src/lib/daemon.test.ts
++++ b/frontend/src/lib/daemon.test.ts
+@@ -507,6 +507,8 @@ interface CapturedSseConnection {
+   onmessage: ((_e: { data: string; lastEventId: string }) => void) | null;
+   onopen: (() => void) | null;
+   onerror: ((_ev: { status?: number }) => void) | null;
++  /** quick（ql-20260916-008）：心跳注释帧回调（fetch-sse 连接类型新增字段）。 */
++  onHeartbeat: (() => void) | null;
+   /** streamSession 建连时会挂 `done` 命名事件监听（终态收口），桩补空实现。 */
+   addEventListener: ReturnType<typeof vi.fn>;
+   close: ReturnType<typeof vi.fn>;
+@@ -525,6 +527,7 @@ function installFetchSseMock(): void {
+       onmessage: null,
+       onopen: null,
+       onerror: null,
++      onHeartbeat: null,
+       addEventListener: vi.fn(),
+       close: vi.fn(),
+     };
+diff --git a/frontend/src/lib/daemon/session-sse.ts b/frontend/src/lib/daemon/session-sse.ts
+index 68473fdf6..eeecd289a 100644
+--- a/frontend/src/lib/daemon/session-sse.ts
++++ b/frontend/src/lib/daemon/session-sse.ts
+@@ -328,6 +328,15 @@ export interface SessionStreamHandlers {
+    * 变更种类，透传不解析。可选回调——不传的既有调用方零影响。
+    */
+   onQueueChanged?(event: SessionStreamEnvelope): void;
++  /**
++   * quick（ql-20260916-008）：SSE 心跳存活信号——backend 每 25-30s 发
++   * `: keepalive` 注释帧，fetch-sse 不解析注释、handler onmessage 永不触发，
++   * 运行轮看门狗（use-stream-connection-guard）原实现下健康空闲连接 90s 后必
++   * 触发对账。streamSession 在注释帧到达时经 tap 包装层显式调用本回调（重置
++   * 活动时间 + 连续轮次，视为连接存活证据）；SSE 断连时不再被调用，死连接仍
++   * 走对账兜底。可选回调——不传的既有调用方零影响。
++   */
++  onHeartbeat?(): void;
+ }
+ 
+ export interface SessionStreamConnection {
+diff --git a/frontend/src/lib/daemon/session-stream.ts b/frontend/src/lib/daemon/session-stream.ts
+index 082c38b1b..bf7004160 100644
+--- a/frontend/src/lib/daemon/session-stream.ts
++++ b/frontend/src/lib/daemon/session-stream.ts
+@@ -266,6 +266,12 @@ export function streamSession(
+     const kind = env.event;
+     if (!kind) {
+       // 无 event 字段：非 session channel 事件（如 backend summary 帧），忽略。
++      // quick（ql-20260916-008）：同时作为心跳存活信号上报——backend 每 25-30s
++      // 发的 `: keepalive` 注释帧正是无 event 载荷（fetch-sse 不解析注释行，真实
++      // 注释到达走下方 wireConnection 的显式 onHeartbeat 路径；此处防御 parse 成功
++      // 的无 event JSON 帧，语义一致）。运行轮看门狗据此把心跳视为连接存活，
++      // 健康空闲连接不再 90s 后误触发对账。
++      handlers.onHeartbeat?.();
+       return;
+     }
+     // 校验 session_id（permission_* 等同样携带 session_id，统一校验）
+@@ -420,6 +426,11 @@ export function streamSession(
+       setStatus("live"); // task-09：重建后首条实时事件 → live（横幅收起）
+       dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
+     };
++    // quick（ql-20260916-008）：心跳注释帧显式存活信号——backend 每 25-30s 发
++    // `: keepalive`，fetch-sse 不解析注释、onmessage 不触发；连接层识别注释帧后
++    // 调本回调 → handler.onHeartbeat（经 connGuard.tap 包装重置看门狗活动时间，
++    // 健康空闲连接不再 90s 误对账）。注释帧无 JSON 载荷，不经 dispatch。
++    es.onHeartbeat = () => handlers.onHeartbeat?.();
+     // 终态收口（ql-20260829-007）：backend stream_session_logs 对终态（ended/failed）
+     // 会话连上即发命名事件 `event: done` 并关闭连接（连接时终态 race guard 与流中
+     // session_ended 两场景同款）。done 是命名事件不进 onmessage/dispatch，此前无人
+diff --git a/frontend/src/lib/fetch-sse.ts b/frontend/src/lib/fetch-sse.ts
+index ee65bcee4..c1bafcb26 100644
+--- a/frontend/src/lib/fetch-sse.ts
++++ b/frontend/src/lib/fetch-sse.ts
+@@ -46,6 +46,14 @@ interface ParsedFrame {
+   id: string | null;
+ }
+ 
++/** 解析一段 chunk 的结果：完整帧列表 + 尾部半帧 + 本段是否见过注释行（心跳）。 */
++interface ParsedChunkResult {
++  frames: ParsedFrame[];
++  rest: string;
++  /** 本 chunk 含 ``:`` 开头的注释行（backend ``: connected`` / `: keepalive` 心跳）。 */
++  commentSeen: boolean;
++}
++
+ /**
+  * 解析一段以空行分帧的 text/event-stream 文本（可含多个完整帧 + 1 个尾部半帧）。
+  *
+@@ -59,11 +67,12 @@ interface ParsedFrame {
+  * @returns frames 完整帧列表；rest 未闭合的尾部半帧文本（拼接进下次 chunk，
+  *          不丢跨 chunk 断行的帧）。
+  */
+-export function parseSseChunk(chunk: string): { frames: ParsedFrame[]; rest: string } {
++export function parseSseChunk(chunk: string): ParsedChunkResult {
+   const frames: ParsedFrame[] = [];
+   let event = "";
+   let dataLines: string[] = [];
+   let id: string | null = null;
++  let commentSeen = false;
+ 
+   const dispatch = (): void => {
+     // 无 data 行的帧（纯注释 / 纯 event 行 + 空行）不派发（对齐规范）。
+@@ -84,7 +93,10 @@ export function parseSseChunk(chunk: string): { frames: ParsedFrame[]; rest: str
+       dispatch();
+       continue;
+     }
+-    if (line.startsWith(":")) continue; // 注释行 / 心跳
++    if (line.startsWith(":")) {
++      commentSeen = true; // 注释行 / 心跳（`: keepalive` 等）
++      continue;
++    }
+     const colon = line.indexOf(":");
+     let field: string;
+     let value: string;
+@@ -101,7 +113,7 @@ export function parseSseChunk(chunk: string): { frames: ParsedFrame[]; rest: str
+     else if (field === "id") id = value;
+     // retry / 未知字段：忽略（无自动重连，见文件头注释）。
+   }
+-  return { frames, rest };
++  return { frames, rest, commentSeen };
+ }
+ 
+ /** fetch-SSE 连接句柄：形状贴近 EventSource（close/readyState/on* 回调）。 */
+@@ -120,6 +132,14 @@ export interface FetchSseConnection {
+    * 不自动重连（见文件头「有意差异」）。
+    */
+   onerror: ((ev: { status?: number }) => void) | null;
++  /**
++   * quick（ql-20260916-008）：注释帧（backend ``: keepalive`` 心跳）到达回调——
++   * parseSseChunk 把 ``:`` 开头的行识别为 commentSeen 并触发本回调（与
++   * onmessage 互斥：注释帧无 data 行本就不派发）。消费方（streamSession 经
++   * connGuard.tap 包装的 onHeartbeat）据此把心跳视为连接存活证据；SSE 断连时
++   * 不再触发，死连接仍走 onerror 重连路径。
++   */
++  onHeartbeat: (() => void) | null;
+   /** 0=CONNECTING 1=OPEN 2=CLOSED（对齐 EventSource readyState 语义）。 */
+   readonly readyState: 0 | 1 | 2;
+   /** 注册命名事件监听（如 ``event: done`` 帧）。返回解绑函数。 */
+@@ -176,6 +196,7 @@ export function fetchSse(
+     onmessage: null,
+     onopen: null,
+     onerror: null,
++    onHeartbeat: null,
+     get readyState(): 0 | 1 | 2 {
+       return state;
+     },
+@@ -254,7 +275,11 @@ export function fetchSse(
+           continue;
+         }
+         buffer = buffer.slice(complete.length);
+-        const { frames } = parseSseChunk(complete);
++        // quick（ql-20260916-008）：注释帧（`: keepalive` 心跳）先回调——与
++        // frames 派发互斥（注释帧无 data 行不进 frames），连接存活信号上抛给
++        // streamSession → connGuard 看门狗（重置活动时间，健康空闲连接不再误对账）。
++        const { frames, commentSeen } = parseSseChunk(complete);
++        if (commentSeen && !isClosed()) conn.onHeartbeat?.();
+         for (const frame of frames) {
+           if (isClosed()) return;
+           dispatchFrame(frame);

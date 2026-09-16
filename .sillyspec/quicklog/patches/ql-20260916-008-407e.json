@@ -1,0 +1,80 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-e29a2e3f",
+  "totals": {
+    "files": 5,
+    "additions": 74,
+    "deletions": 4
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts",
+      "declared": true,
+      "additions": 22,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/daemon.test.ts",
+      "declared": true,
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-sse.ts",
+      "declared": true,
+      "additions": 9,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-stream.ts",
+      "declared": true,
+      "additions": 11,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/lib/fetch-sse.ts",
+      "declared": true,
+      "additions": 29,
+      "deletions": 4,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "frozenPatchPath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\quicklog\\patches\\ql-20260916-008-407e.patch",
+  "patchSha256": "2661dfd65e4f4ffb4e15b79c2c4ccd0df114f7ff99d9d6b0f321e51177e28691",
+  "patchStatus": "ok",
+  "gateProfile": {
+    "fileCount": 10,
+    "codeFileCount": 5,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L2",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "qlId": "ql-20260916-008-407e",
+  "sessionId": "quick-e29a2e3f",
+  "savedAt": "2026-09-16T02:03:15.202Z"
+}

@@ -94,3 +94,29 @@
 方案：①use-message-queue POLL_INTERVAL_MS 5s→30s（SSE 事件驱动为主链、重连 resync 自带对账，30s 兜底足够；非 active 不轮询/后台跳 tick 语义保留）；②useSessionLiveness 新增 opts.enabled（缺省 true 零回归），session-list-panel 按列表数据派生 hasActiveSessions 传入——全空闲停 30s 轮询。测试按 30s 口径重写两用例（29s 零轮询/满 30s 恰一次/后台 61s 零轮询）
 结果：hooks+session-list-panel+message-queue-bar 相关 164 用例绿，tsc 0 错，eslint 0 错误（use-message-queue 6 个 unused-args 警告为既有接口定义行）；空闲会话队列请求频率 5s→30s（降 83%）、全空闲列表省 30s 一次的 agent-logs 轮询
 审计：[gate] L1（跨 0 模块 · 6 文件：3 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含
+
+## ql-20260916-008-407e | 2026-09-16 09:50:10 | 看门狗心跳存活 + 对账轮次上限（僵尸 running 轮不再无限轮询）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/fetch-sse.ts（commentSeen 解析+onHeartbeat 连接字段）
+- frontend/src/lib/daemon/session-stream.ts（wireConnection 透传+dispatch 防御路径）
+- frontend/src/lib/daemon/session-sse.ts（SessionStreamHandlers.onHeartbeat 可选回调）
+- frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts（wrapped.onHeartbeat 注入+MAX_ROUNDS 上限）
+- frontend/src/lib/daemon.test.ts（捕获桩补 onHeartbeat 字段）
+- .sillyspec/docs/frontend/modules/lib-daemon.md（增量节+变更索引）
+- .sillyspec/docs/frontend/modules/components-daemon.md（connGuard 条目）
+- docs/sillyspec/finished/sillyspec-quick-concurrent-change-audit.md（并行会话文件（审计放行，非本 quick 产物））
+- frontend/src/lib/fetch-sse.ts（commentSeen 解析+onHeartbeat 连接字段）
+- frontend/src/lib/daemon/session-stream.ts（wireConnection 透传+dispatch 防御路径）
+- frontend/src/lib/daemon/session-sse.ts（SessionStreamHandlers.onHeartbeat 可选回调）
+- frontend/src/components/daemon/session-panel/use-stream-connection-guard.ts（wrapped.onHeartbeat 注入+MAX_ROUNDS 上限）
+- frontend/src/lib/daemon.test.ts（捕获桩补 onHeartbeat 字段）
+- .sillyspec/docs/frontend/modules/lib-daemon.md（增量节+变更索引）
+- .sillyspec/docs/frontend/modules/components-daemon.md（connGuard 条目）
+需求：看门狗心跳存活 + 对账轮次上限（僵尸 running 轮不再无限轮询）
+根因：①backend 每 25-30s 发 :keepalive 注释帧，fetch-sse 不解析注释、handler onmessage 永不触发，看门狗仅 handler 事件推进活动时间——健康空闲连接 90s 后必触发对账，每 30s 白拉 getAgentSession+listSessionRuns；②对账无轮次上限，stale run（daemon 崩溃/锁死遗留 running）对账永远查不出终态，每 30s 无限轮询永不停止
+方案：①fetch-sse parseSseChunk 新增 commentSeen（识别 : 注释行）+ FetchSseConnection.onHeartbeat 字段 + 消费循环注释帧先回调（与 frames 派发互斥）；streamSession wireConnection 透传 handler.onHeartbeat，dispatch 对 parse 成功无 event 帧防御路径同步回调；SessionStreamHandlers.onHeartbeat 可选回调零回归；connGuard tapStreamHandlers 注入 wrapped.onHeartbeat（重置活动时间+连续轮次+清 stalledHint，较对账重置更轻）——心跳视为连接存活证据，死连接仍走 onerror 重连+对账兜底。②TURN_WATCHDOG_MAX_ROUNDS=12（约 6min）——同一 running 轮连续 12 轮对账无终态即停表只留 stalledHint，新事件/心跳/换轮重置 roundsRef 后经常驻 setTimeout 自然重启
+结果：tsc 0 错，eslint 0 错误（25 警告与基线 stash 对照一致全既有）；连接相关 52 用例 + stream 依赖面板 16 用例绿；daemon.test 捕获桩补 onHeartbeat 字段（FetchSseConnection 类型扩展）
+审计：[gate] L1（跨 0 模块 · 10 文件：5 代码/1 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/finished/sillyspec-quick-concurrent-change-audit.md, frontend/src/app/(dashboard)/ppm/_components/record-attachments.tsx
