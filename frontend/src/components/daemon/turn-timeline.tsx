@@ -384,6 +384,38 @@ export interface TurnTimelineProps {
  *  task-07（2026-09-09-askuser-pi-cursor / FR-03）：新增 hasLaterUserMessage
  *  布尔（父级逆序扫描派生，同 isHighlighted 的 per-row 布尔法）——marker 提问卡
  *  已答态 best-effort 判定数据源（该轮之后已存在用户消息，displayTurns 本地判定）。 */
+/**
+ * quick（ql-20260916-015）：超长轮输出折叠阈值——单轮 markdown 超过此长度时首屏
+ * 只渲染前 N 字符 + 「展开全文」按钮（运行中轮不折叠，流式增量照常）。线上实证
+ * 单轮最长 13.7 万字符（1.2MB 级 markdown），react-markdown 全量 parse 单块即
+ * 数秒主线程阻塞（content-visibility 只救屏外，屏内大块仍需 parse）。折叠让
+ * 首屏渲染量恒定，展开是用户显式动作（此时可承受一次 parse）。
+ */
+const HUGE_OUTPUT_THRESHOLD = 30_000;
+
+/** 折叠态超长输出渲染：前 N 字符 + 截断提示 + 展开按钮。 */
+function HugeOutputBlock({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (expanded || text.length <= HUGE_OUTPUT_THRESHOLD) {
+    return <MarkdownText content={text} />;
+  }
+  return (
+    <div className="space-y-1.5">
+      <MarkdownText content={text.slice(0, HUGE_OUTPUT_THRESHOLD)} />
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <span>（输出超长，已截断显示前 3 万字符——共 {text.length.toLocaleString()} 字符）</span>
+        <button
+          type="button"
+          className="rounded border border-border px-1.5 py-0.5 hover:bg-muted"
+          onClick={() => setExpanded(true)}
+        >
+          展开全文
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const TurnRow = memo(function TurnRow({
   turn,
   viewMode,
@@ -430,6 +462,8 @@ const TurnRow = memo(function TurnRow({
                 data-turn-key={turn.realRunId ?? turn.runId}
                 className={cn(
                   "flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-70",
+                  // quick（ql-20260916-015）：同完整轮块——屏外跳过渲染。
+                  "[content-visibility:auto] [contain-intrinsic-size:auto_24px]",
                   // task-01：受控高亮（isHighlighted 命中行）——ring+浅底主题语义类
                   // 随主题换肤；compact 行原本无圆角，高亮时补 rounded-md。
                   isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
@@ -446,6 +480,12 @@ const TurnRow = memo(function TurnRow({
                   data-turn-key={turn.realRunId ?? turn.runId}
                   className={cn(
                     "space-y-2.5",
+                    // quick（ql-20260916-015）：屏外轮次跳过布局/绘制（浏览器原生
+                    // 虚拟化，先例 deepseek-harness ChatView）。超长 run（单轮 13.7 万
+                    // 字符 markdown）一次性全量渲染是翻页/跳转卡死根因——content-visibility
+                    // 让滚动容器外的轮次只占位不解析布局；estimate 8 万 px 上限防
+                    // 屏外占位塌陷导致滚动条跳变（大轮真实高度可达数万 px）。
+                    "[content-visibility:auto] [contain-intrinsic-size:auto_80000px]",
                     // task-01：受控高亮（isHighlighted 命中行）——ring+浅底主题语义
                     // 类随主题换肤；容器原本无圆角，高亮时补 rounded-md。
                     isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
@@ -612,9 +652,7 @@ const TurnRow = memo(function TurnRow({
                         <div className="flex items-end gap-1.5">
                           {/* ql-20260915-009：turn-bubble 标记类供 mobile 放大规则定位。 */}
                           <div className="turn-bubble max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
-                            <MarkdownText
-                              content={outputMarker ? outputMarker.textBefore : turn.output}
-                            />
+                            <HugeOutputBlock text={outputMarker ? outputMarker.textBefore : turn.output} />
                             {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
                                 气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转
                                 false 移除；与 v2 路径 TextSegmentView 的 .seg-caret 同

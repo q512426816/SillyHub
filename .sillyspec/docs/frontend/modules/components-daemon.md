@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-16 13:50:00
+updated_at: 2026-09-16 14:55:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）
@@ -244,6 +244,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 
 - **翻页游标块序错位根治 + 跳转空壳命中 + rAF 后台卡死（ql-20260916-014-c032）**：①翻页/初始游标改取本页**时间最旧行**——后端返回序是 run 块序（anchor→ts→id，read_model.py:434-448）而过滤是裸 ts，块序首行（older[0]）非时间最旧（大 run 块序靠前尾部 ts 靠后），以其为 before 会重复拉取/留洞（浏览器实测 6400 请求只推进 3217 深度、部分 run 日志永远凑不齐 → 孤儿空壳，如 32 轮附近 18:55/19:56/22:06/22:09 四轮，DB 实证各有 10~920 条日志）；②跳转 hit() 要求行有内容——孤儿空壳行从首屏就在 DOM，旧命中检查找到空壳直接滚过去不翻页（点第 32 轮 0 次翻页请求）；③跳转循环 rAF → setTimeout——后台标签页 rAF 冻结把循环连同 suppress 标志卡死（实测跳转后触顶翻页被永久抑制）。
 - 浏览器终验：12 次连续滚动 12 页无重复（每页 400），32 轮附近四轮全部出内容（系统续跑/进度总览/sillyspec 工具回顾等正文）。
+
+## quick 增量（超长 run 渲染根治——参考 deepseek-harness，ql-20260916-015）
+
+- **turn-timeline content-visibility**：完整轮块/紧凑配置行加 `[content-visibility:auto] [contain-intrinsic-size:auto_80000px]`——浏览器原生虚拟化，屏外轮次跳过布局与绘制（先例 deepseek-harness ChatView）。线上实证单轮最长 13.7 万字符（1.2MB markdown），全量渲染是翻页/跳转卡死根因（async/MessageChannel/setInterval 三种等待机制全部在大 run 装配页冻结——主线程持续长阻塞）。
+- **HugeOutputBlock 折叠**：单轮 markdown 超 3 万字符首屏只渲染前 3 万 + 截断提示 + 「展开全文」按钮（用户显式展开时才全量 parse）。与 content-visibility 互补：后者救屏外，前者救屏内大块。
+- headless 终验（此前 100% 卡死的最严苛场景）：点第 32 轮跳转 **4 秒完成**（翻 6 页、4 目标轮全部有内容、视口落位 scrollTop 138 万 px）。
 
 ## 人工备注
 
