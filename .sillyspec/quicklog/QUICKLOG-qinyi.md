@@ -150,3 +150,17 @@
 方案：enrichDisplayTurns 对 knownPendingRunIds 中的轮改补建轻量占位 turn（whoLine 配置行 + sender 时间，复用「静默切换轮紧凑标记」渲染形态——turn-timeline 对无 prompt/output 的 completed 轮已渲染紧凑配置行，无需改渲染层），翻页到达后装配块携带内容自然替换
 结果：新增回归用例（快照含未加载 run-h4-unloaded → 紧凑行渲染测试档案，跨段文本函数匹配）；session-panel 全套 211 用例绿，tsc 0，eslint 0；模块文档增量节+changelog
 审计：[gate] L1（跨 0 模块 · 4 文件：1 代码/1 测试）advisory；每文件注记已全覆盖；测试增量不适用（≤1 代码文件）
+
+## ql-20260916-011-06b3 | 2026-09-16 10:31:56 | 失败卡 unknown 根治（失败轮补可读 failure_summary）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/run_sync/service/close_run_steps.py（失败轮补可读 failure_summary）
+- backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py（新增 3 用例）
+- frontend/src/components/agent-log/normalize.ts（映射表补 daemon_interrupted/SERVICE_RESTART_INTERRUPTED）
+- .sillyspec/docs/backend/modules/daemon.md（增量节）
+需求：失败卡 unknown 根治（失败轮补可读 failure_summary）
+根因：交互轮失败（agent 执行报错）时 daemon 未回传执行摘要（result_summary 空），后端不落任何可读原因，前端 buildSystemFailureItem 无 summary 无映射 → 错误卡只剩「运行失败 · unknown」光秃展示（用户实证 6e213eb3 会话 09-15 11:00 失败轮）
+方案：①后端 close_run_steps._close_apply_terminal：failed 且 result_summary 空时按 error_code 补写可读中文原因到 output_redacted（经 SessionRunRead.failure_summary 透出，写前非空不覆盖防冲掉执行摘要）；映射 interactive_failed/interactive_unknown_status/interactive_interrupted/interactive_inject_send_failed；②前端 buildSystemFailureItem 映射表补 daemon_interrupted（执行端离线）/SERVICE_RESTART_INTERRUPTED（服务重启）可读文案
+结果：后端新增 3 用例（无摘要补写/有摘要保留/成功轮不补）+ 既有 7 用例共 10 passed，相邻 interactive_lifecycle/apply_session_terminal 40 用例绿，ruff/mypy 过；前端 agent-log 相关 164 用例绿，tsc 0；模块文档 daemon.md 增量节
+审计：[gate] L1（跨 0 模块 · 4 文件：2 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含

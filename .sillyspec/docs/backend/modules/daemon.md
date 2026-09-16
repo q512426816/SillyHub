@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-04 09:00:00
+updated_at: 2026-09-16 10:35:00
 ---
 
 # 守护进程中枢（daemon）
@@ -266,6 +266,11 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
   不收紧 Literal，宁宽勿断保心跳通道）；机器视图 `_build_machine_read` 显式逐字段组装
   三字段 + `MachineSillySpecUpdateRead` 嵌套（就近 MachinePendingUpdateRead，
   DaemonMachineReadWithPending 透出，仅 GET /machines）。
+## quick-8900b530 增量（失败轮可读 failure_summary 兜底，ql-20260916-011-06b3）
+
+- **close_run_steps._close_apply_terminal**：交互轮 failed 且 daemon 未回传执行摘要（result_summary 空）时，按 error_code 补写可读中文原因到 output_redacted（经 SessionRunRead.failure_summary 透出前端错误卡 buildSystemFailureItem）——消除「运行失败 · unknown」光秃展示（用户实证 6e213eb3 会话 09-15 失败轮）。写前非空不覆盖（成功轮执行摘要不受影响）；映射码：interactive_failed/interactive_unknown_status/interactive_interrupted/interactive_inject_send_failed。
+- 前端 buildSystemFailureItem 映射表补 daemon_interrupted（执行端离线）/SERVICE_RESTART_INTERRUPTED（服务重启）可读文案。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

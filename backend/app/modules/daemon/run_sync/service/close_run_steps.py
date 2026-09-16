@@ -353,6 +353,21 @@ async def _close_apply_terminal(
             agent_run.output_redacted = redact_output(result_summary)
         except Exception:
             agent_run.output_redacted = result_summary[:50000]
+    elif agent_run.status == "failed":
+        # quick（ql-20260916-011）：交互轮失败且 daemon 未回传执行摘要时补可读
+        # 原因——经 output_redacted → SessionRunRead.failure_summary 透出前端
+        # 错误卡（buildSystemFailureItem），消除「运行失败 · unknown」光秃展示
+        # （用户实证 6e213eb3 会话 09-15 失败轮无摘要）。写前非空不覆盖：成功轮
+        # 的执行摘要（含历史已落值）不受影响。
+        _failure_summary_by_code: dict[str, str] = {
+            "interactive_failed": "本轮执行失败（执行端未回传详细原因）",
+            "interactive_unknown_status": "本轮执行异常终止（执行端状态未知）",
+            "interactive_interrupted": "本轮对话被中断",
+            "interactive_inject_send_failed": "消息未能送达执行端执行，本轮自动失败",
+        }
+        summary = _failure_summary_by_code.get(agent_run.error_code or "")
+        if summary and not (agent_run.output_redacted or "").strip():
+            agent_run.output_redacted = summary
 
     svc._session.add(agent_run)
 

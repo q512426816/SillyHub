@@ -302,3 +302,71 @@ def test_request_model_error_field_parsed() -> None:
     assert isinstance(req.error, ModelErrorDTO)
     assert req.error.type is ModelErrorType.QUOTA_EXCEEDED
     assert req.error.retryable is False
+
+
+# ── quick（ql-20260916-011）：失败且 result_summary 空 → 补可读 failure_summary ──
+
+
+@pytest.mark.asyncio
+async def test_close_failed_without_summary_writes_readable_failure_summary(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """交互轮 failed 且 daemon 未回传执行摘要（result_summary=None）→ output_redacted
+    补可读中文原因（经 SessionRunRead.failure_summary 透出前端错误卡），消除
+    「运行失败 · unknown」光秃展示。"""
+    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="error_max_turns",
+        is_error=True,
+        result_summary=None,
+    )
+    assert run.status == "failed"
+    assert run.error_code == "interactive_failed"
+    assert (run.output_redacted or "").strip() != ""
+    assert "未回传" in (run.output_redacted or "")
+
+    refreshed = await db_session.get(AgentRun, run_id, populate_existing=True)
+    assert refreshed is not None
+    assert "未回传" in (refreshed.output_redacted or "")
+
+
+@pytest.mark.asyncio
+async def test_close_failed_with_summary_keeps_original_summary(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """失败但 daemon 回传了执行摘要 → 原摘要保留（redact 后落库），不被兜底覆盖。"""
+    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="error_max_turns",
+        is_error=True,
+        result_summary="agent 执行过程摘要",
+    )
+    assert run.status == "failed"
+    assert run.output_redacted == "agent 执行过程摘要"
+
+
+@pytest.mark.asyncio
+async def test_close_success_without_summary_no_failure_summary(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """成功轮无摘要 → 不补 failure_summary（兜底只作用于 failed 分支）。"""
+    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        result_summary=None,
+    )
+    assert run.status == "completed"
+    assert not (run.output_redacted or "").strip()

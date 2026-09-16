@@ -1,0 +1,71 @@
+{
+  "mode": "quick",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "quick-window:quick-8900b530",
+  "totals": {
+    "files": 4,
+    "additions": 95,
+    "deletions": 3
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/backend/modules/daemon.md",
+      "declared": true,
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+      "declared": true,
+      "additions": 15,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py",
+      "declared": true,
+      "additions": 68,
+      "deletions": 0,
+      "kind": "modified",
+      "attribution": "declared"
+    },
+    {
+      "path": "frontend/src/components/agent-log/normalize.ts",
+      "declared": true,
+      "additions": 6,
+      "deletions": 2,
+      "kind": "modified",
+      "attribution": "declared"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "quick --done 时点冻结（本文件落盘时采集）",
+  "gateProfile": {
+    "fileCount": 4,
+    "codeFileCount": 2,
+    "testFileCount": 1,
+    "moduleSpan": null,
+    "modules": [],
+    "unmappedFiles": [],
+    "riskHits": [],
+    "level": "L1",
+    "degraded": true,
+    "checks": {
+      "perFileNotes": false,
+      "testDelta": "ok",
+      "docClaim": "claimed",
+      "runtimeEvidence": "na"
+    }
+  },
+  "qlId": "ql-20260916-011-06b3",
+  "sessionId": "quick-8900b530",
+  "savedAt": "2026-09-16T02:35:12.294Z",
+  "patchSha256": "47f9fe2b8f1a588046a230a12c6e446b112e392a8ce83d351f801af9a98b2fbe",
+  "patchStatus": "ok"
+}

@@ -482,8 +482,12 @@ export function buildSystemFailureItem(
     const codeText: Record<string, string> = {
       interactive_inject_send_failed: "消息未能送达执行端执行，本轮自动失败",
       interactive_interrupted: "本轮对话被中断",
-      interactive_failed: "本轮执行失败",
-      interactive_unknown_status: "本轮执行异常终止",
+      interactive_failed: "本轮执行失败（执行端未回传详细原因）",
+      interactive_unknown_status: "本轮执行异常终止（执行端状态未知）",
+      // quick（ql-20260916-011）：daemon 离线杀掉 / 服务重启终态化的可读兜底
+      // （后端 sweep.py / startup cleanup 落码，历史上无 summary 时前端只剩 unknown）。
+      daemon_interrupted: "执行端离线，本轮被终止",
+      SERVICE_RESTART_INTERRUPTED: "服务重启导致本轮中断",
     };
     const text = errorCode ? codeText[errorCode] : null;
     if (!text) return null;
