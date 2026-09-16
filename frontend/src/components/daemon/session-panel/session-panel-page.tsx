@@ -1438,7 +1438,7 @@ export function SessionPanelPage({
           if (historyLoadingRef.current) return;
           pages += 1;
           void loadEarlierOnce();
-        }, 250);
+        }, 300);
         return;
       }
       // 命中：先即时置当前轮（design §9 刻度即时 active；smooth 滚动途中
