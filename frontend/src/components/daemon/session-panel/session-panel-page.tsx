@@ -1140,9 +1140,15 @@ export function SessionPanelPage({
         // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
         // 与上方刚写入的 historyCursorIdRef 一致。
         const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${(older[0]?.id ?? "").slice(0, 8)}`;
+        // quick（ql-20260916-009）：runId 改真实 runId——原样保留 #e 伪 id 时
+        // 装配块不被 enrichDisplayTurns 快照认领（realRunId ?? runId 双 miss），
+        // 同 run 快照被当孤儿补建成「只有配置行的空壳占位块」（历史翻页只显示
+        // 配置行根因）。现 runId=realRunId（快照正常认领合并 whoLine/失败状态），
+        // #e 后缀仅作 React key（runId 纯 key 用途，realRunId 保持原值——SSE
+        // 增量与孤儿匹配按 realRunId 不受影响）。
         const decorated = olderTurns.map((t) => ({
           ...t,
-          runId: `${t.runId}#e${pageKey}`,
+          runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
         }));
         setTurnState((prev) => {
           // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
@@ -1607,6 +1613,18 @@ export function SessionPanelPage({
   // 按 run 快照补 whoLine / 历史 usage（派生体外提 page-helpers.enrichDisplayTurns，
   // 依赖数组逐项保留）：只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 /
   // 占位 turn）原样返回——whoLine 不渲染（零回归）。
+  // quick（ql-20260916-009）：已知未加载轮集合——「加载更早」装配块携带真实
+  // realRunId，其 run 在快照里存在但内容未全量到达（大 run 跨页/首见块在窗口外）。
+  // 传 enrichDisplayTurns 孤儿补建跳过这些 id：翻页到达前不渲染无内容占位块。
+  const knownPendingRunIds = useMemo(
+    () =>
+      new Set(
+        turnState.turns
+          .map((t) => t.realRunId)
+          .filter((id): id is string => !!id && runsMeta.has(id)),
+      ),
+    [turnState.turns, runsMeta],
+  );
   const displayTurns = useMemo(
     () =>
       enrichDisplayTurns(
@@ -1615,8 +1633,9 @@ export function SessionPanelPage({
         llmProviders,
         agentDisplayName,
         session?.user_id,
+        knownPendingRunIds,
       ),
-    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
+    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id, knownPendingRunIds],
   );
 
   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design

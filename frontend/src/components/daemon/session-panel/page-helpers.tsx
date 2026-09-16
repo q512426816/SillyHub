@@ -152,6 +152,11 @@ export function enrichDisplayTurns(
   llmProviders: LlmProviderRead[],
   agentDisplayName: string,
   sessionUserId: string | null | undefined,
+  /** quick（ql-20260916-009）：已知未加载轮集合——快照里有、但内容窗口还没拉到
+   * 的真实 run id（「加载更早」翻页路径用装配块的 realRunId 播种）。孤儿轮补建
+   * 跳过这些 id：翻页到达后装配块自然携带内容出现，未加载期间不渲染无内容占位块
+   * （修复历史翻页只显示配置行的问题）。缺省 undefined = 无已知未加载轮（零回归）。 */
+  knownPendingRunIds?: ReadonlySet<string>,
 ): SessionTurnView[] {
     if (runsMeta.size === 0) return turns;
     /** 单轮快照补齐（?? 链：turn 已有值优先，run 快照只补缺）。 */
@@ -256,6 +261,9 @@ export function enrichDisplayTurns(
     const orphanTurns: SessionTurnView[] = [];
     for (const [runId, meta] of runsMeta) {
       if (knownRunIds.has(runId)) continue;
+      // quick（ql-20260916-009）：已知未加载轮不补建占位块——内容随翻页到达后
+      // 装配块出现（真实 runId 命中上方 enriched），此处跳过避免“配置行空壳”。
+      if (knownPendingRunIds?.has(runId)) continue;
       if (meta.status !== 'completed') continue;
       orphanTurns.push({
         runId,
@@ -299,7 +307,13 @@ export function enrichDisplayTurns(
       // 无时间戳：completed 孤儿 turn 排前面（0），运行中/待答排最后（Infinity）。
       return t.status === "completed" ? 0 : Infinity;
     };
-    return [...enriched, ...orphanTurns].sort((a, b) => ts(a) - ts(b));
+    // quick（ql-20260916-009）：稳定兜底——时间戳同值（含同 run 多块同一
+    // finished_at / 快照与日志时间同源到秒）时保持数组序（「加载更早」prepend
+    // 的自然位置优先于排序），运行中无时间戳轮维持「最新 = 末尾」语义。
+    return [...enriched, ...orphanTurns]
+      .map((t, i) => [t, i] as const)
+      .sort(([a, ai], [b, bi]) => ts(a) - ts(b) || ai - bi)
+      .map(([t]) => t);
 }
 
 /**

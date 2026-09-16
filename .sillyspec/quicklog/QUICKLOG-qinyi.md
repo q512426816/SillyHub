@@ -120,3 +120,19 @@
 结果：tsc 0 错，eslint 0 错误（25 警告与基线 stash 对照一致全既有）；连接相关 52 用例 + stream 依赖面板 16 用例绿；daemon.test 捕获桩补 onHeartbeat 字段（FetchSseConnection 类型扩展）
 审计：[gate] L1（跨 0 模块 · 10 文件：5 代码/1 测试）advisory；每文件注记缺失（--file-notes 覆盖变更文件全集）；测试增量已含
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/finished/sillyspec-quick-concurrent-change-audit.md, frontend/src/app/(dashboard)/ppm/_components/record-attachments.tsx
+
+## ql-20260916-009-ac60 | 2026-09-16 10:15:15 | 历史翻页空壳修复（翻「加载更早」不再只显示配置行）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel/page-helpers.tsx（knownPendingRunIds 参数+稳定排序）
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（装配块真实 runId+knownPendingRunIds 派生）
+- frontend/src/components/daemon/session-panel/turn-state.ts（HISTORY_PAGE_SIZE 100→50）
+- frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx（新增回归用例）
+- .sillyspec/docs/frontend/modules/components-daemon.md（增量节）
+- .sillyspec/docs/frontend/modules/components-daemon.changelog.md（变更索引）
+需求：历史翻页空壳修复（翻「加载更早」不再只显示配置行）
+根因：「加载更早」装配块 runId 保留 #e 伪 id → enrichDisplayTurns 按 realRunId ?? runId 查快照双 miss → 同 run 被孤儿轮补建成只有 whoLine 配置行的空壳占位块（runsMeta 全量快照 vs 日志 100 条窗口，未加载轮次内容缺失）；叠加 displayTurns 按快照 finished_at 重排丢失 prepend 位置——用户实证 6e213eb3 会话翻历史只见一堆配置行
+方案：①enrichDisplayTurns 新增 knownPendingRunIds 参数（翻页路径按装配块 realRunId 播种 Set 传入），孤儿补建跳过已知未加载轮——翻页到达后装配块自然携带内容出现，未加载期间不渲染空壳；②翻页装配块 runId 改真实 runId#e 页码后缀（快照正常认领合并 whoLine/失败状态，#e 仅作 React key，realRunId 保持原值不影响 SSE 匹配）；③displayTurns 排序稳定兜底（同快照时间保持数组序，prepend 自然位置优先，运行中无时间戳维持末尾语义）；④HISTORY_PAGE_SIZE 100→50 减半单 run 大窗口跨页丢弃概率（触顶/自动补拉链不受限）
+结果：新增回归用例（翻页同 run 内容渲染）通过；session-panel 全套 + history-scroll + runtime-session-helpers 249 用例绿；tsc 0 错；eslint 0 错误（2 警告为测试 fixture 既有）；翻页后历史轮次正常显示问答内容，未加载轮次不再渲染配置行空壳
+审计：[gate] L1（跨 0 模块 · 6 文件：3 代码/1 测试）advisory；每文件注记已全覆盖；测试增量已含

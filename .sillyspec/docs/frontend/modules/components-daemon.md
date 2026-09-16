@@ -4,7 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-09-16 10:00:00
+updated_at: 2026-09-16 10:20:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）

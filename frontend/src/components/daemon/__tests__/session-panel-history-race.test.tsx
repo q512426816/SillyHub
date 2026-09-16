@@ -183,6 +183,38 @@ async function scrollTimelineToTop() {
   el.dispatchEvent(new Event("scroll"));
 }
 
+// ── quick（ql-20260916-009）：历史翻页空壳修复回归 ─────────────────────────
+// 修复前：翻页装配块 runId 保留 #e 伪 id → enrichDisplayTurns 快照双 miss →
+// 同 run 被孤儿补建成「只有配置行无内容」的占位块（用户实证 6e213eb3 会话）。
+// 修复后：装配块 runId=realRunId（快照认领合并），同 run 不再补建空壳，
+// 翻页加载的内容正常渲染。
+describe("「加载更早」装配块内容渲染（ql-20260916-009）", () => {
+  it("翻页加载的同 run 历史渲染问答内容，不产生无内容空壳占位块", async () => {
+    // 初始窗口：当前 100 条（50 条 × 2 通道）；更早页含同 run-old 的更早段
+    //（修复前该 run 因 realRunId 已在当前窗口被跳过，只剩孤儿占位块）。
+    pendingOlder = deferred<unknown[]>();
+    render(<Host sessionId="sess-A" />);
+    await scrollTimelineToTop();
+
+    await waitFor(() =>
+      expect(
+        sessionApi.getAgentSessionLogs.mock.calls.some((c) => c[1]?.before),
+      ).toBe(true),
+    );
+    pendingOlder!.resolve([
+      {
+        id: "log-old-A-0",
+        run_id: "run-old-A",
+        timestamp: "2026-08-26T09:00:00.000000Z",
+        channel: "stdout",
+        content_redacted: "A-更早回答",
+      },
+    ]);
+    // 翻页内容渲染（修复前同 run 被跳过 → 该文本不出现）。
+    await waitFor(() => expect(screen.getByText("A-更早回答")).toBeTruthy());
+  });
+});
+
 describe("「加载更早」换会话竞态（ql-20260903-018）", () => {
   it("正向控制：翻页在途未切换会话 → 旧页正常 prepend", async () => {
     pendingOlder = deferred<unknown[]>();

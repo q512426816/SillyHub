@@ -79,7 +79,12 @@ export const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
  * 升序）。「加载更早消息」按钮同页距翻页（before 游标）。满页即视为可能还有
  * 更早（< 页距 = 已到头，按钮隐藏）。
  */
-export const HISTORY_PAGE_SIZE = 100;
+/** 历史日志单页条数（初始窗口 + 翻页步长）。
+ * quick（ql-20260916-009）：100 → 50——单 run 大窗口（自由滚动触顶连拉同 run）
+ * 时“真实 runId 已在当前窗口的轮跳过”会整轮丢弃（run 首见块可能在窗口外），
+ * 50 减半丢弃概率；触顶/自动补拉链不受限（AUTO_FILL_MAX=10 页上限仍在），
+ * 首屏拉取量减半。 */
+export const HISTORY_PAGE_SIZE = 50;
 
 /* ────────────────────── SSE turn 状态机辅助（task-09：只留组装胶水，日志内容处理走装配器；两模式共用，diff-analysis §4.3 归属〔内部〕模块级函数） ────────────────────── */
 

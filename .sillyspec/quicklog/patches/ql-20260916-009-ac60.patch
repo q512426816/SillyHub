@@ -1,0 +1,174 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+index 513d83a36..eea03311c 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+@@ -7,3 +7,4 @@ created_at: 2026-09-04 13:58:00
+ 
+ - ql-20260904-019-b4f4 | machine-card sillyspec_update 横幅四态扩五态——新增 up_to_date（success 色阶 CheckCircle2「已是最新版（X），无需升级」+ 副行说明点击时检查过版本、10min 自动消失），daemon 手动升级已最新的明确反馈终态；补横幅用例（45/45 绿，tsc 0）
+ - ql-20260916-005-0fc5 | 会话页进入 /runs 请求扇出收敛——onTurnCompleted 刷新类副作用（runsMeta 快照/用量信号/队列/列表）改「同 run 首条 turn_completed」门控（历史回灌终态轮播种 completedSideEffectRunIdsRef，首连对账/5s 复核的重放合成不再逐条扇出，修进入瞬间 ~2T 条并发）；失败轮错误详情拉取 in-flight 共享（同批 F 个失败重放收敛 1 条）；runsPromise 经 runsSnapshot 注入 streamSession（缺口同步复用不自拉）。新增回归 session-panel-runs-request-dedup（4 用例：重放不扇出/新完成照常/失败共享/注入透传），相关面 230+39 用例绿，tsc 0
++- ql-20260916-009-ac60 | 历史翻页空壳修复——「加载更早」装配块 runId 改真实 runId（#e 伪 id 致快照双 miss、同 run 被孤儿补建成无内容配置行占位块，用户实证 6e213eb3 会话）；enrichDisplayTurns knownPendingRunIds 参数（已知未加载轮不补建占位）；displayTurns 稳定排序（同时间保持数组序）；HISTORY_PAGE_SIZE 100→50。新增回归用例（翻页同 run 内容渲染），session-panel 全套 249 用例绿，tsc 0，eslint 0 错误
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index eab92b9b8..5f809765e 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -4,7 +4,7 @@ doc_type: module-card
+ module_id: components-daemon
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+-updated_at: 2026-09-16 10:00:00
++updated_at: 2026-09-16 10:20:00
+ ---
+ 
+ # Daemon 运行时交互组件（components-daemon）
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx
+index 2e85949b4..243d2cdac 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx
+@@ -183,6 +183,38 @@ async function scrollTimelineToTop() {
+   el.dispatchEvent(new Event("scroll"));
+ }
+ 
++// ── quick（ql-20260916-009）：历史翻页空壳修复回归 ─────────────────────────
++// 修复前：翻页装配块 runId 保留 #e 伪 id → enrichDisplayTurns 快照双 miss →
++// 同 run 被孤儿补建成「只有配置行无内容」的占位块（用户实证 6e213eb3 会话）。
++// 修复后：装配块 runId=realRunId（快照认领合并），同 run 不再补建空壳，
++// 翻页加载的内容正常渲染。
++describe("「加载更早」装配块内容渲染（ql-20260916-009）", () => {
++  it("翻页加载的同 run 历史渲染问答内容，不产生无内容空壳占位块", async () => {
++    // 初始窗口：当前 100 条（50 条 × 2 通道）；更早页含同 run-old 的更早段
++    //（修复前该 run 因 realRunId 已在当前窗口被跳过，只剩孤儿占位块）。
++    pendingOlder = deferred<unknown[]>();
++    render(<Host sessionId="sess-A" />);
++    await scrollTimelineToTop();
++
++    await waitFor(() =>
++      expect(
++        sessionApi.getAgentSessionLogs.mock.calls.some((c) => c[1]?.before),
++      ).toBe(true),
++    );
++    pendingOlder!.resolve([
++      {
++        id: "log-old-A-0",
++        run_id: "run-old-A",
++        timestamp: "2026-08-26T09:00:00.000000Z",
++        channel: "stdout",
++        content_redacted: "A-更早回答",
++      },
++    ]);
++    // 翻页内容渲染（修复前同 run 被跳过 → 该文本不出现）。
++    await waitFor(() => expect(screen.getByText("A-更早回答")).toBeTruthy());
++  });
++});
++
+ describe("「加载更早」换会话竞态（ql-20260903-018）", () => {
+   it("正向控制：翻页在途未切换会话 → 旧页正常 prepend", async () => {
+     pendingOlder = deferred<unknown[]>();
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 22bb0b68b..6e9c842b7 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -152,6 +152,11 @@ export function enrichDisplayTurns(
+   llmProviders: LlmProviderRead[],
+   agentDisplayName: string,
+   sessionUserId: string | null | undefined,
++  /** quick（ql-20260916-009）：已知未加载轮集合——快照里有、但内容窗口还没拉到
++   * 的真实 run id（「加载更早」翻页路径用装配块的 realRunId 播种）。孤儿轮补建
++   * 跳过这些 id：翻页到达后装配块自然携带内容出现，未加载期间不渲染无内容占位块
++   * （修复历史翻页只显示配置行的问题）。缺省 undefined = 无已知未加载轮（零回归）。 */
++  knownPendingRunIds?: ReadonlySet<string>,
+ ): SessionTurnView[] {
+     if (runsMeta.size === 0) return turns;
+     /** 单轮快照补齐（?? 链：turn 已有值优先，run 快照只补缺）。 */
+@@ -256,6 +261,9 @@ export function enrichDisplayTurns(
+     const orphanTurns: SessionTurnView[] = [];
+     for (const [runId, meta] of runsMeta) {
+       if (knownRunIds.has(runId)) continue;
++      // quick（ql-20260916-009）：已知未加载轮不补建占位块——内容随翻页到达后
++      // 装配块出现（真实 runId 命中上方 enriched），此处跳过避免“配置行空壳”。
++      if (knownPendingRunIds?.has(runId)) continue;
+       if (meta.status !== 'completed') continue;
+       orphanTurns.push({
+         runId,
+@@ -299,7 +307,13 @@ export function enrichDisplayTurns(
+       // 无时间戳：completed 孤儿 turn 排前面（0），运行中/待答排最后（Infinity）。
+       return t.status === "completed" ? 0 : Infinity;
+     };
+-    return [...enriched, ...orphanTurns].sort((a, b) => ts(a) - ts(b));
++    // quick（ql-20260916-009）：稳定兜底——时间戳同值（含同 run 多块同一
++    // finished_at / 快照与日志时间同源到秒）时保持数组序（「加载更早」prepend
++    // 的自然位置优先于排序），运行中无时间戳轮维持「最新 = 末尾」语义。
++    return [...enriched, ...orphanTurns]
++      .map((t, i) => [t, i] as const)
++      .sort(([a, ai], [b, bi]) => ts(a) - ts(b) || ai - bi)
++      .map(([t]) => t);
+ }
+ 
+ /**
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index a769f118d..ef77773dd 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -1140,9 +1140,15 @@ export function SessionPanelPage({
+         // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
+         // 与上方刚写入的 historyCursorIdRef 一致。
+         const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${(older[0]?.id ?? "").slice(0, 8)}`;
++        // quick（ql-20260916-009）：runId 改真实 runId——原样保留 #e 伪 id 时
++        // 装配块不被 enrichDisplayTurns 快照认领（realRunId ?? runId 双 miss），
++        // 同 run 快照被当孤儿补建成「只有配置行的空壳占位块」（历史翻页只显示
++        // 配置行根因）。现 runId=realRunId（快照正常认领合并 whoLine/失败状态），
++        // #e 后缀仅作 React key（runId 纯 key 用途，realRunId 保持原值——SSE
++        // 增量与孤儿匹配按 realRunId 不受影响）。
+         const decorated = olderTurns.map((t) => ({
+           ...t,
+-          runId: `${t.runId}#e${pageKey}`,
++          runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
+         }));
+         setTurnState((prev) => {
+           // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
+@@ -1607,6 +1613,18 @@ export function SessionPanelPage({
+   // 按 run 快照补 whoLine / 历史 usage（派生体外提 page-helpers.enrichDisplayTurns，
+   // 依赖数组逐项保留）：只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 /
+   // 占位 turn）原样返回——whoLine 不渲染（零回归）。
++  // quick（ql-20260916-009）：已知未加载轮集合——「加载更早」装配块携带真实
++  // realRunId，其 run 在快照里存在但内容未全量到达（大 run 跨页/首见块在窗口外）。
++  // 传 enrichDisplayTurns 孤儿补建跳过这些 id：翻页到达前不渲染无内容占位块。
++  const knownPendingRunIds = useMemo(
++    () =>
++      new Set(
++        turnState.turns
++          .map((t) => t.realRunId)
++          .filter((id): id is string => !!id && runsMeta.has(id)),
++      ),
++    [turnState.turns, runsMeta],
++  );
+   const displayTurns = useMemo(
+     () =>
+       enrichDisplayTurns(
+@@ -1615,8 +1633,9 @@ export function SessionPanelPage({
+         llmProviders,
+         agentDisplayName,
+         session?.user_id,
++        knownPendingRunIds,
+       ),
+-    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
++    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id, knownPendingRunIds],
+   );
+ 
+   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index 7eb191bfc..fc47427d7 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -79,7 +79,12 @@ export const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
+  * 升序）。「加载更早消息」按钮同页距翻页（before 游标）。满页即视为可能还有
+  * 更早（< 页距 = 已到头，按钮隐藏）。
+  */
+-export const HISTORY_PAGE_SIZE = 100;
++/** 历史日志单页条数（初始窗口 + 翻页步长）。
++ * quick（ql-20260916-009）：100 → 50——单 run 大窗口（自由滚动触顶连拉同 run）
++ * 时“真实 runId 已在当前窗口的轮跳过”会整轮丢弃（run 首见块可能在窗口外），
++ * 50 减半丢弃概率；触顶/自动补拉链不受限（AUTO_FILL_MAX=10 页上限仍在），
++ * 首屏拉取量减半。 */
++export const HISTORY_PAGE_SIZE = 50;
+ 
+ /* ────────────────────── SSE turn 状态机辅助（task-09：只留组装胶水，日志内容处理走装配器；两模式共用，diff-analysis §4.3 归属〔内部〕模块级函数） ────────────────────── */
